@@ -4,6 +4,10 @@
 
 关联需求文档：[openclaw-manager-design.md](./openclaw-manager-design.md)
 
+## 修订记录
+
+- 2026-04-29：apps 表新增 `workspace_path` 字段，加部分唯一索引 `unique(owner_user_id) where deleted_at is null`（账号即客户端）；移除 `apps.published_at` 和 `ready` 状态；`wechat_bindings` 重构为 `channel_bindings`（通用渠道抽象，第一版仅微信）；`POST /apps` 路由废弃，应用创建改由 `POST /members` 在事务里隐式触发；新增工作目录浏览/下载 API（`/apps/{appId}/workspace`）；OpenClawAdapter 拆分出独立的 `ChannelAdapter`；新增 `openclaw.system_prompt_template` 与 `openclaw.workspace.*` 配置项；新增 `runtime.channel_plugins` / `runtime.archive_retention_days` 配置项；部分 `wechat_*` job 类型重命名为 `channel_*`；新增 `workspace_archive_cleanup` job。
+
 ## 1. 技术目标
 
 OpenClaw Manager 第一版采用单体后端、前后端分离、单机一体化部署的技术路线。
@@ -322,11 +326,15 @@ container_name text null
 newapi_key_id text null
 newapi_key_ciphertext text null
 api_key_status text not null
-published_at timestamptz null
+workspace_path text not null
 created_at timestamptz not null
 updated_at timestamptz not null
 deleted_at timestamptz null
 ```
+
+唯一约束：
+
+- `create unique index apps_owner_active on apps(owner_user_id) where deleted_at is null`：每个未删除成员账号最多对应一个未删除应用（账号即客户端的 schema 兜底）。
 
 应用状态：
 
@@ -334,7 +342,6 @@ deleted_at timestamptz null
 - `initializing`
 - `binding_waiting`
 - `binding_failed`
-- `ready`
 - `running`
 - `stopped`
 - `error`
@@ -368,16 +375,16 @@ updated_at timestamptz not null
 
 第一版默认只有一个 `local` 节点。
 
-### 5.7 wechat_bindings
+### 5.7 channel_bindings
 
 ```text
 id uuid primary key
-app_id uuid not null unique references apps(id)
+app_id uuid not null references apps(id)
+channel_type text not null
 status text not null
-wechat_identity text null
+bound_identity text null
 channel_name text null
-qr_payload text null
-qr_expires_at timestamptz null
+metadata_json jsonb null
 bound_at timestamptz null
 last_online_at timestamptz null
 last_error text null
@@ -385,16 +392,25 @@ created_at timestamptz not null
 updated_at timestamptz not null
 ```
 
-微信状态：
+通用渠道状态机（语义不绑定具体渠道）：
 
 - `unbound`
-- `waiting_scan`
+- `pending_auth`
 - `bound`
 - `failed`
+- `expired`
 - `unbound_by_user`
-- `credential_expired`
 
-每个应用最多一个微信绑定。
+字段说明：
+
+- `channel_type`：渠道类型枚举，第一版仅 `wechat`，未来扩展 `telegram` / `wecom` / `feishu` 等。
+- `bound_identity`：该渠道下的账号唯一标识（如微信 wxid）。
+- `metadata_json`：渠道特有数据（如微信的 `qr_payload`、`qr_expires_at`），由 ChannelAdapter 写入。
+
+唯一约束：
+
+- `create unique index channel_bindings_app_active on channel_bindings(app_id) where status <> 'deleted'`：第一版每应用 1 个 binding。
+- 未来要解锁多渠道时，约束改为 `unique(app_id, channel_type)`，无需迁移数据。
 
 ### 5.8 knowledge_files
 
@@ -494,8 +510,8 @@ job 类型：
 - `app_stop_container`
 - `app_restart_container`
 - `app_delete`
-- `wechat_start_login`
-- `wechat_check_binding`
+- `channel_start_login`
+- `channel_check_binding`
 - `knowledge_import`
 - `knowledge_delete`
 - `budget_check_member`
@@ -503,6 +519,7 @@ job 类型：
 - `app_health_check`
 - `newapi_disable_key`
 - `newapi_restore_key`
+- `workspace_archive_cleanup`
 
 ### 5.12 audit_logs
 
@@ -541,7 +558,7 @@ users(org_id, role, status)
 organizations(status, name)
 apps(org_id, owner_user_id, status)
 apps(newapi_key_id)
-wechat_bindings(app_id, status)
+channel_bindings(app_id, channel_type, status)
 knowledge_files(app_id, status)
 jobs(status, run_after, priority)
 audit_logs(org_id, created_at)
@@ -580,13 +597,41 @@ GET    /organizations/{orgId}/recharges
 
 ```text
 GET    /members
-POST   /members
+POST   /members          # 创建成员账号同步创建关联应用并入队 app_initialize
+DELETE /members/{memberId}  # 删除账号联动应用软删
 GET    /members/{memberId}
 PATCH  /members/{memberId}
 POST   /members/{memberId}/disable
 POST   /members/{memberId}/enable
 POST   /members/{memberId}/reset-password
 ```
+
+`POST /members` 入参（部分）：
+
+```json
+{
+  "username": "...",
+  "display_name": "...",
+  "password": "...",
+  "role": "org_member",
+  "app": {
+    "name": "默认与 display_name 同名",
+    "description": null,
+    "persona_mode": "org_inherited",
+    "app_prompt": null,
+    "channel_type": "wechat"
+  }
+}
+```
+
+后端流程：
+
+1. 同一事务里创建 `users` + `apps`（`status=draft`）+ `channel_bindings`（`status=unbound`）行。
+2. 写复合审计日志（`actor=admin`，target 同时含 `member_id` 和 `app_id`）。
+3. 事务提交后入队 `app_initialize` job。
+4. 返回 `{ member, app, job_id }`。
+
+事务里任一行写入失败 → 整事务回滚；不会出现"账号建好但应用没有"的中间状态。
 
 ### 6.4 AI 人设与预算
 
@@ -603,28 +648,41 @@ POST /budgets/members/{memberId}/restore-keys
 
 ```text
 GET    /apps
-POST   /apps
 GET    /apps/{appId}
 PATCH  /apps/{appId}
-POST   /apps/{appId}/initialize
-POST   /apps/{appId}/publish
+POST   /apps/{appId}/initialize       # 失败后重试初始化
 POST   /apps/{appId}/start
 POST   /apps/{appId}/stop
 POST   /apps/{appId}/restart
-DELETE /apps/{appId}
+DELETE /apps/{appId}                   # 仅平台/组织管理员，软删除
 GET    /apps/{appId}/logs
 GET    /apps/{appId}/runtime
 GET    /apps/{appId}/jobs
 ```
 
-### 6.6 微信绑定
+应用创建由 `POST /members` 隐式触发，无独立 `POST /apps`。无 `POST /apps/{appId}/publish`——渠道绑定成功后自动进入 `running`。
+
+### 6.6 渠道绑定
 
 ```text
-POST /apps/{appId}/wechat/login
-GET  /apps/{appId}/wechat
-POST /apps/{appId}/wechat/retry
-POST /apps/{appId}/wechat/unbind
+GET  /apps/{appId}/channels                              # 列出可用渠道（v1 仅 wechat）
+POST /apps/{appId}/channels/{channelType}/login
+GET  /apps/{appId}/channels/{channelType}
+POST /apps/{appId}/channels/{channelType}/retry
+POST /apps/{appId}/channels/{channelType}/unbind
 ```
+
+`POST /channels/{channelType}/login` 返回 `AuthChallenge`：
+
+```json
+{
+  "type": "qr_code",
+  "payload": { "qr_image_base64": "...", "raw_qr": "..." },
+  "expires_at": "2026-04-29T12:34:56Z"
+}
+```
+
+第一版 `type` 仅有 `qr_code`。前端按 `type` 选择渲染组件（QR 渲染器、未来 OAuth 跳转、未来 Token 输入框等）。
 
 ### 6.7 知识库
 
@@ -633,6 +691,38 @@ GET    /apps/{appId}/knowledge-files
 POST   /apps/{appId}/knowledge-files
 DELETE /apps/{appId}/knowledge-files/{fileId}
 ```
+
+### 6.7.1 工作目录
+
+```text
+GET /apps/{appId}/workspace?path=/sub/dir
+GET /apps/{appId}/workspace/download?path=/sub/dir/file.pdf
+GET /apps/{appId}/workspace/archive?path=/sub/dir
+```
+
+`GET /workspace` 返回：
+
+```json
+{
+  "path": "/sub/dir",
+  "entries": [
+    { "name": "report.pdf", "type": "file", "size": 12345, "modified_at": "2026-04-29T..." },
+    { "name": "images",     "type": "dir",                   "modified_at": "2026-04-29T..." }
+  ]
+}
+```
+
+- `download` 返回单文件流式下载，附带 `Content-Disposition: attachment; filename=...`。
+- `archive` 流式生成 zip，仅打包 `path` 指定的目录。
+- 后端不提供创建目录、上传、删除、重命名接口。
+
+后端 path 校验：
+
+- 拼接 `{data_root}/apps/{app_id}/workspace` + 入参 path。
+- `filepath.Clean` 后必须仍以工作目录前缀开头（`strings.HasPrefix` 校验）。
+- `os.Lstat` 检查目标，非常规文件（symlink/socket/device）直接 reject。
+- 单文件下载和 archive 大小、archive 条目数有 config 上限。
+- 所有访问写审计日志（actor、app_id、relPath、action、result）。
 
 ### 6.8 统计与审计
 
@@ -754,41 +844,43 @@ reconciler 将这些 job ID 补入 Redis ready queue，保证 Redis 重启后任
 2. 设置应用状态为 `initializing`。
 3. 调用 `new-api` 创建 api_key。
 4. 保存 `newapi_key_id` 和加密后的 api_key。
-5. 创建应用目录。
-6. 渲染 OpenClaw 配置文件和环境变量。
-7. 用 Docker SDK 创建容器。
-8. 启动容器。
-9. 执行健康检查。
-10. 设置应用状态为 `binding_waiting`。
-11. 根据用户操作创建 `wechat_start_login` job。
+5. 创建应用目录（`config/`、`state/`、`knowledge/`、`workspace/`、`logs/`），写 `apps.workspace_path`。
+6. 渲染拼接系统 prompt：平台默认模板（注入 `workspace_dir`、`knowledge_dir`、`app_id`、`org_id` 等变量）→ 组织 persona 当前生效版本 → 应用 persona（仅当 `persona_mode = app_override`）。
+7. 渲染 OpenClaw 配置文件，写入 `config/`，连同环境变量（`OPENCLAW_WORKSPACE_DIR=/workspace`、`OPENCLAW_KNOWLEDGE_DIR=/knowledge`、应用 ID、组织 ID、api_key、`new-api` base URL、启用渠道插件名）准备就绪。
+8. 用 Docker SDK 创建容器（bind mount `config/` `state/` `knowledge/` `workspace/` `logs/` 到容器内对应路径）。
+9. 启动容器。
+10. 执行健康检查。
+11. 设置应用状态为 `binding_waiting`。
+12. 不在初始化里自动触发渠道登录；用户在前端点"开始绑定"时由 service 入队 `channel_start_login` job。
 
-### 7.4 微信登录
+### 7.4 渠道登录
 
-`wechat_start_login` 流程：
+`channel_start_login` 流程（payload 含 `app_id` 和 `channel_type`）：
 
 1. 校验容器运行中。
-2. Docker exec 执行 `openclaw channels login --channel openclaw-weixin`。
-3. 捕获 stdout/stderr。
-4. 解析二维码 payload。
-5. 更新 `wechat_bindings.status = waiting_scan`。
-6. 保存 `qr_payload` 和 `qr_expires_at`。
-7. 创建后续 `wechat_check_binding` job，或由前端轮询状态接口。
+2. 通过 ChannelAdapter registry 取出对应 adapter（v1 = `WeChatAdapter`）。
+3. adapter 调用 Docker exec 执行 `openclaw channels login --channel <plugin_name>`（v1 plugin 取自 `runtime.channel_plugins.wechat` = `openclaw-weixin`）。
+4. 捕获 stdout/stderr。
+5. 解析为 `AuthChallenge`（`type=qr_code`、`payload={qr_image_base64,...}`、`expires_at`）。
+6. 更新 `channel_bindings.status = pending_auth`，将 challenge 写入 `metadata_json`。
+7. 创建后续 `channel_check_binding` job，或由前端轮询状态接口。
 
 第一版通过解析 CLI 输出获取二维码和绑定信息。如果 OpenClaw CLI 输出不稳定，OpenClaw runtime 镜像应提供 wrapper 脚本输出 JSON，作为兼容增强。
 
 ### 7.5 应用删除
 
-`app_delete` 流程：
+`app_delete` 流程（在删除成员账号或管理员主动删除应用时触发）：
 
 1. 标记应用软删除流程开始。
 2. 停止容器，已停止则跳过。
 3. 删除容器，不存在则视为成功。
 4. 禁用 `new-api api_key`。
-5. 删除或归档应用运行目录。
-6. 设置应用状态为 `deleted`。
-7. 写审计日志。
+5. 工作目录归档：`mv {data_root}/apps/{app_id}/workspace {data_root}/archived/{app_id}-{timestamp}/workspace`。
+6. 应用 `config/` `state/` `knowledge/` `logs/` 默认删除（释放空间），可由 config 改为归档。
+7. 设置应用状态为 `deleted`。
+8. 写审计日志。
 
-业务记录不物理删除。
+业务记录不物理删除。归档目录由 `workspace_archive_cleanup` job 在 `runtime.archive_retention_days` 期满后物理删除。
 
 ### 7.6 预算检查
 
@@ -869,27 +961,83 @@ ocm-{app_id}
 
 ### 8.3 OpenClaw adapter
 
-接口：
+OpenClawAdapter 不再持有渠道特定方法。渠道相关操作拆到独立的 ChannelAdapter（见 8.3.1）。
 
 ```go
 type OpenClawAdapter interface {
     RenderConfig(ctx context.Context, cfg AppRuntimeConfig) (RenderedConfig, error)
     HealthCheck(ctx context.Context, appID uuid.UUID) (HealthResult, error)
-    StartWeChatLogin(ctx context.Context, appID uuid.UUID) (QRCodeResult, error)
-    CheckWeChatBinding(ctx context.Context, appID uuid.UUID) (BindingResult, error)
     ImportKnowledgeFile(ctx context.Context, appID uuid.UUID, filePath string) (KnowledgeImportResult, error)
     DeleteKnowledgeFile(ctx context.Context, appID uuid.UUID, openclawFileID string) error
+}
+
+type AppRuntimeConfig struct {
+    AppID         uuid.UUID
+    OrgID         uuid.UUID
+    APIKey        string
+    NewAPIBaseURL string
+    PersonaPrompt string  // 平台默认 + 组织 + 应用，已拼接渲染
+    WorkspaceDir  string  // 容器内路径，默认 /workspace
+    KnowledgeDir  string  // 容器内路径，默认 /knowledge
+    ChannelType   string  // 'wechat' 等
+    ChannelPlugin string  // OpenClaw 插件标识，如 'openclaw-weixin'
 }
 ```
 
 实现要求：
 
-- `RenderConfig` 根据 OpenClaw 实际读取方式生成配置文件和环境变量。
-- OpenClaw 读配置文件的内容写入应用 `config/` 并挂载进容器。
-- OpenClaw 读环境变量的内容在创建容器时传入。
-- 微信登录通过 Docker exec 执行 CLI 并解析输出。
-- 知识库文件先写入宿主机挂载目录，再 exec OpenClaw 导入命令。
+- `RenderConfig` 拼接平台默认模板 + 组织 persona + 应用 persona，注入 `workspace_dir`、`knowledge_dir` 等变量，输出最终 prompt 和配置文件。
+- 配置文件写入应用 `config/` 并挂载进容器。
+- 环境变量在创建容器时传入。
 - 健康检查优先使用 OpenClaw 提供的命令或 HTTP endpoint；如果没有，至少检查容器运行状态。
+- 知识库文件先写入宿主机挂载目录，再 exec OpenClaw 导入命令。
+
+### 8.3.1 ChannelAdapter
+
+渠道适配器抽象登录、状态查询、解绑等渠道操作。第一版只注册微信实现。
+
+```go
+type ChannelAdapter interface {
+    Type() string
+    StartLogin(ctx context.Context, app App) (AuthChallenge, error)
+    CheckBinding(ctx context.Context, binding ChannelBinding) (BindingStatus, error)
+    Unbind(ctx context.Context, binding ChannelBinding) error
+}
+
+type AuthChallenge struct {
+    Type      string                 // 'qr_code' | 'oauth_url' | 'bot_token'（v1 仅 qr_code）
+    Payload   map[string]any         // type-specific
+    ExpiresAt *time.Time
+}
+
+type BindingStatus struct {
+    Status        string             // pending_auth | bound | failed | expired
+    BoundIdentity string
+    LastOnlineAt  *time.Time
+    LastError     string
+}
+```
+
+adapter registry：
+
+```go
+type Registry struct{ adapters map[string]ChannelAdapter }
+func (r *Registry) Get(channelType string) (ChannelAdapter, error)
+```
+
+启动时注册：
+
+```go
+registry.Register("wechat", NewWeChatAdapter(dockerRuntime, plugin))
+```
+
+未来要加 Telegram，只需实现新 adapter 并注册到 registry。
+
+WeChatAdapter 实现要点：
+
+- `StartLogin` 通过 Docker exec 执行 `openclaw channels login --channel openclaw-weixin`，解析 stdout 得到二维码 payload，构造 `AuthChallenge{Type:"qr_code", Payload:{qr_image_base64,...}, ExpiresAt}`。
+- `CheckBinding` 通过 OpenClaw 状态查询命令获取当前绑定状态。
+- `Unbind` 调用 OpenClaw 解绑命令并清空 `metadata_json`。
 
 ### 8.4 应用目录管理
 
@@ -897,20 +1045,50 @@ type OpenClawAdapter interface {
 
 ```text
 {data_root}/apps/{app_id}/
-  config/
-  state/
-  knowledge/
-  logs/
+  config/      # 容器内 /config，OpenClaw 配置文件（含拼接 prompt）
+  state/       # 容器内 /state，OpenClaw 运行时状态、渠道凭证
+  knowledge/   # 容器内 /knowledge，知识库上传文件
+  workspace/   # 容器内 /workspace，OpenClaw 输出的生成文件（PDF/Word 等）
+  logs/        # 容器内 /logs，可选日志目录
 ```
 
-容器挂载：
+bind mount 同步：所有目录均使用宿主机 bind mount，manager 进程可直接读宿主机文件系统（这是工作目录浏览/下载能直接走文件 I/O 而非 OpenClaw 接口的前提）。
 
-- `config/`：OpenClaw 配置文件。
-- `state/`：OpenClaw 状态、微信凭证。
-- `knowledge/`：知识库上传文件。
-- `logs/`：可选日志目录。
+删除应用时：
 
-删除应用时，业务记录软删除；容器删除；api_key 禁用；应用运行目录按配置删除或归档。第一版默认删除目录以释放资源。
+- 业务记录软删除。
+- 容器删除。
+- api_key 禁用。
+- workspace 移到 `{data_root}/archived/{app_id}-{timestamp}/workspace`，保留 N 天后由 `workspace_archive_cleanup` job 物理删除。
+- 其他目录默认删除以释放资源（可由配置改为归档）。
+- 归档保留期由 `runtime.archive_retention_days` 配置项控制。
+
+### 8.5 工作目录访问层
+
+manager 提供工作目录浏览/下载服务（独立 service，不通过 OpenClawAdapter）：
+
+```go
+type WorkspaceService interface {
+    List(ctx context.Context, appID uuid.UUID, relPath string) ([]Entry, error)
+    OpenFile(ctx context.Context, appID uuid.UUID, relPath string) (io.ReadCloser, FileInfo, error)
+    StreamArchive(ctx context.Context, appID uuid.UUID, relPath string, w io.Writer) error
+}
+
+type Entry struct {
+    Name       string
+    Type       string  // 'file' | 'dir'
+    Size       int64
+    ModifiedAt time.Time
+}
+```
+
+安全边界：
+
+- 入参 `relPath` 必须经过 `filepath.Clean` 后位于 `{data_root}/apps/{app_id}/workspace/` 前缀内（用 `filepath.Rel` + 检查无 `..` 前缀）。
+- 拒绝跟随符号链接：`os.Lstat`，非常规文件（symlink/socket/device）直接 reject。
+- 单文件下载和 archive 有大小上限：`openclaw.workspace.max_download_size`、`openclaw.workspace.max_archive_size`、`openclaw.workspace.max_archive_entries`。
+- 所有访问写审计日志（actor、app_id、relPath、action、result）。
+- 写入接口不存在；写入只能由 OpenClaw 容器进程通过 bind mount 完成。
 
 ## 9. 文件上传与知识库导入
 
@@ -990,6 +1168,9 @@ CanAccessOrg(ctx, orgID)
 CanAccessMember(ctx, memberID)
 CanAccessApp(ctx, appID)
 CanOperateAppRuntime(ctx, appID)
+CanAccessWorkspace(ctx, appID)
+CanCreateMemberWithApp(ctx, orgID)   // 仅组织/平台管理员
+CanDeleteApp(ctx, appID)              // 仅组织/平台管理员（成员不可删）
 CanManageBudget(ctx, orgID)
 ```
 
@@ -1068,15 +1249,19 @@ API 使用方式：
 ```text
 useOrganizationsQuery
 useCreateOrganizationMutation
+useCreateMemberWithAppMutation       # 创建账号 + 应用
 useAppDetailQuery
-useInitializeAppMutation
+useInitializeAppMutation             # 失败重试
 useAppJobsQuery
-useWechatBindingQuery
-useStartWechatLoginMutation
+useChannelBindingQuery
+useStartChannelLoginMutation
 useAppRuntimeQuery
 useAppLogsQuery
+useWorkspaceListQuery
 useUsageQuery
 ```
+
+工作目录下载触发不走 mutation（不是 JSON 响应），通过 `<a href>` 或 `window.open` 直接打开 `/apps/{appId}/workspace/download?path=...`、`/apps/{appId}/workspace/archive?path=...`，由浏览器接管下载流。
 
 TanStack Query 策略：
 
@@ -1110,7 +1295,8 @@ Pinia 不保存远程列表、详情和统计数据。
 /platform/runtime-nodes
 
 /org
-/org/members
+/org/members             # 列表 + 创建账号入口（包含应用配置字段）
+/org/members/new         # 创建账号 + 应用页面
 /org/budgets
 /org/apps
 /org/persona
@@ -1118,12 +1304,14 @@ Pinia 不保存远程列表、详情和统计数据。
 /org/audit
 
 /apps
-/apps/new
 /apps/:appId
-/apps/:appId/wechat
+/apps/:appId/channels    # 渠道绑定（v1 仅 wechat）
 /apps/:appId/knowledge
+/apps/:appId/workspace   # 工作目录浏览
 /apps/:appId/runtime
 ```
+
+`/apps/new` 路由废弃（应用创建只能通过 `/org/members/new`）。
 
 ## 13. 配置与部署
 
@@ -1161,10 +1349,26 @@ newapi:
   base_url: "http://localhost:3000"
   admin_token: "${NEWAPI_ADMIN_TOKEN}"
 
+openclaw:
+  # 平台默认 AI 指令模板，作为所有应用 prompt 不可覆盖前缀。
+  # 渲染时注入 {{app_id}} {{org_id}} {{workspace_dir}} {{knowledge_dir}}。
+  system_prompt_template: |
+    你是 OpenClaw 智能助手。
+    当需要生成文件（PDF / Word / Excel / 图片等）时，必须将文件输出到目录 {{workspace_dir}}，
+    按主题或日期建子目录组织，使用清晰可读的文件名。
+    用户上传的知识库挂载在 {{knowledge_dir}}，仅供检索引用。
+  workspace:
+    max_download_size: 524288000     # 单文件 500 MB
+    max_archive_size: 2147483648     # archive 总大小 2 GB
+    max_archive_entries: 10000       # archive 最多条目
+
 runtime:
   docker_host: "unix:///var/run/docker.sock"
   openclaw_image: "openclaw-runtime:dev"
   default_command: []
+  archive_retention_days: 30
+  channel_plugins:
+    wechat: "openclaw-weixin"
 
 worker:
   enabled: true
@@ -1215,7 +1419,11 @@ runtime.openclaw_image: openclaw-runtime:dev
       config/
       state/
       knowledge/
+      workspace/
       logs/
+  archived/
+    {app_id}-{timestamp}/
+      workspace/
   tmp/
 ```
 
@@ -1392,10 +1600,14 @@ docker build -t openclaw-runtime:dev ./runtime/openclaw
 必须覆盖：
 
 - domain 状态机。
-- 权限判断。
+- 权限判断（含工作目录访问校验、应用创建/删除限制）。
 - 预算计算。
 - job 重试和幂等逻辑。
 - OpenClaw CLI 输出解析。
+- ChannelAdapter 接口和 WeChat 实现的二维码解析。
+- 平台 prompt 模板渲染、变量注入、三层拼接顺序。
+- 工作目录路径安全校验（拒绝 `..` 逃逸、符号链接）。
+- 创建成员账号 + 应用复合事务（成功路径 + 任一步骤失败的回滚）。
 - `new-api` adapter 错误映射。
 - Docker runtime adapter 参数构造。
 - service 层关键业务分支。
@@ -1472,6 +1684,9 @@ docker build -t openclaw-runtime:dev ./runtime/openclaw
 - 预算阈值和超额策略。
 - job backoff、max attempts、幂等。
 - OpenClaw 二维码输出解析。
+- 平台 prompt 模板渲染、变量注入、三层拼接顺序。
+- 工作目录路径安全校验和大小上限。
+- 创建账号 + 应用复合事务（成功 + 回滚）。
 - `new-api` 错误响应映射。
 - 配置加载和环境变量展开。
 - api_key 加密和脱敏。
@@ -1494,7 +1709,8 @@ docker build -t openclaw-runtime:dev ./runtime/openclaw
 - Docker SDK 使用本地 Docker integration test 或 test container。
 - `new-api` adapter 使用 fake HTTP server。
 - OpenClaw adapter 使用 fake runtime exec 输出。
-- 微信扫码不进入自动化测试；测试二维码解析、失败状态和重试流程。
+- ChannelAdapter 注册和分发使用 fake adapter 验证 routing。
+- 真实渠道认证（如微信扫码）不进入自动化测试；只测试二维码解析、失败状态和重试流程。
 
 ### 15.4 前端测试
 
@@ -1502,19 +1718,21 @@ docker build -t openclaw-runtime:dev ./runtime/openclaw
 
 - Query hooks 的 loading、error、success。
 - 权限菜单和路由守卫。
-- 应用创建向导。
-- 状态标签和操作按钮可见性。
+- 创建成员 + 应用表单（管理员视角）。
+- 渠道绑定登录组件按 `AuthChallenge.type` 渲染分支。
+- 工作目录文件浏览器（面包屑、目录跳转、下载触发）。
+- 状态标签和操作按钮可见性（成员看不到删除/创建入口）。
 - 文件上传错误展示。
 
 关键 E2E 场景：
 
 - 登录。
 - 创建组织。
-- 创建成员。
-- 创建应用向导。
-- 触发微信绑定。
+- 组织管理员创建成员账号同步创建应用，跳转到应用详情等待初始化完成。
+- 触发渠道绑定（v1 微信）。
 - 查看容器状态。
-- 删除应用。
+- 浏览和下载工作目录文件。
+- 删除成员账号联动应用软删。
 
 ### 15.5 契约测试
 
@@ -1543,7 +1761,7 @@ docker build -t openclaw-runtime:dev ./runtime/openclaw
 
 风险：
 
-- 微信二维码和绑定状态依赖 stdout/stderr 解析。
+- 渠道认证（如微信二维码）和绑定状态依赖 stdout/stderr 解析。
 
 应对：
 
@@ -1556,7 +1774,7 @@ docker build -t openclaw-runtime:dev ./runtime/openclaw
 
 - api_key 创建成功但容器失败。
 - 容器删除成功但 api_key 禁用失败。
-- 微信绑定流程中断。
+- 渠道绑定流程中断。
 
 应对：
 
@@ -1618,6 +1836,32 @@ docker build -t openclaw-runtime:dev ./runtime/openclaw
 - 指数退避。
 - 后台任务列表和失败原因展示。
 - 管理员可重试失败任务。
+
+### 16.8 工作目录路径越权
+
+风险：
+
+- 用户构造恶意 path 参数（`../../`、URL encoded `%2e%2e`、符号链接）越权读取宿主机文件。
+
+应对：
+
+- 后端 `filepath.Clean` 后用 `strings.HasPrefix` 校验仍在工作目录前缀内。
+- `os.Lstat` 检查目标，非常规文件（symlink/socket/device）直接 reject。
+- 不依赖前端入参语义，所有访问从应用 ID 反推根目录。
+- 单元测试覆盖各种逃逸尝试（绝对路径、相对回退、符号链接、URL 编码）。
+
+### 16.9 平台默认 prompt 注入失效
+
+风险：
+
+- 平台默认指令模板渲染失败、变量名拼写错误或拼接顺序错误，导致 OpenClaw 不知道工作目录路径，文件输出到容器内任意位置。
+
+应对：
+
+- 模板渲染走专用函数，单元测试覆盖变量注入和占位符未替换检测。
+- 拼接顺序由 OpenClawAdapter 写死，不暴露顺序参数。
+- 启动时校验 `openclaw.system_prompt_template` 至少包含 `{{workspace_dir}}`。
+- 容器创建时把渲染后的 prompt 写入 `config/`，可在出问题时直接 cat 排查。
 
 ## 17. 后续演进
 
