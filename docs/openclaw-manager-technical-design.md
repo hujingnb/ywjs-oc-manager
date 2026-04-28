@@ -7,6 +7,7 @@
 ## 修订记录
 
 - 2026-04-29：apps 表新增 `workspace_path` 字段，加部分唯一索引 `unique(owner_user_id) where deleted_at is null`（账号即客户端）；移除 `apps.published_at` 和 `ready` 状态；`wechat_bindings` 重构为 `channel_bindings`（通用渠道抽象，第一版仅微信）；`POST /apps` 路由废弃，应用创建改由 `POST /members` 在事务里隐式触发；新增工作目录浏览/下载 API（`/apps/{appId}/workspace`）；OpenClawAdapter 拆分出独立的 `ChannelAdapter`；新增 `openclaw.system_prompt_template` 与 `openclaw.workspace.*` 配置项；新增 `runtime.channel_plugins` / `runtime.archive_retention_days` 配置项；部分 `wechat_*` job 类型重命名为 `channel_*`；新增 `workspace_archive_cleanup` job。
+- 2026-04-29（第二轮）：删除 `member_budgets`、`knowledge_files`、`usage_snapshots` 三张表；删除 `apps.workspace_path` 与 `apps.status=budget_limited`；删除 `organizations.budget_policy`；`runtime_nodes` 重写为完整 agent 注册模型（bootstrap_token / agent_token / agent_docker_endpoint / agent_file_endpoint / heartbeat 等）；`RuntimeAdapter` 仅保留 agent-backed 实现，删除本地直连 Docker socket 实现；`OpenClawAdapter` 调用全部经由 agent；新增 agent 文件 API 客户端接口；删除 `knowledge_import` / `knowledge_delete` / `budget_check_member` job 类型，新增 `knowledge_sync_node` / `runtime_node_health_reconcile`；删除 `/budgets/*` 与 `/apps/{appId}/knowledge-files` API，新增 `/orgs/{orgId}/knowledge`、`/apps/{appId}/knowledge`、`/runtime-nodes/*`、`/agent/runtime-nodes/{id}/{register,heartbeat}` 路由；YAML 配置加 `security.master_key`、`agent.*`、删除 budget/runtime.docker_host 配置；数据目录上 manager 端只剩组织/应用知识库主副本，所有节点级目录由 agent 维护。
 
 ## 1. 技术目标
 
@@ -16,7 +17,7 @@ OpenClaw Manager 第一版采用单体后端、前后端分离、单机一体化
 
 - 用 Go 后端稳定编排 `new-api`、Docker、OpenClaw CLI 三类外部系统。
 - 用 PostgreSQL 作为唯一业务状态源，用 Redis 承载运行队列、短期状态和分布式锁。
-- 用 Vue 3 管理后台承载组织、成员、应用、预算、微信绑定、运维和统计页面。
+- 用 Vue 3 管理后台承载组织、成员、应用、渠道绑定、知识库、Runtime Node 管理、运维和统计页面。
 - 所有跨系统长流程通过 PostgreSQL job 记录、Redis 队列和 worker 执行，避免 HTTP 请求同步阻塞。
 - 通过状态机、幂等 job、补偿流程和审计日志保证故障可恢复、可追踪。
 - 技术设计预留 Runtime Node，多节点能力后续扩展，第一版不做调度系统。
@@ -123,7 +124,7 @@ Redis 用途：
 - job ready queue。
 - job 延迟队列或短期调度状态。
 - 微信二维码、容器状态等短期运行状态缓存。
-- 预算检查、容器操作等互斥锁。
+- 容器操作、节点同步、知识库节点推送等互斥锁。
 - 与 `new-api` 本地开发环境共用 Redis 服务。
 
 异步任务采用 PostgreSQL + Redis 混合模型：
@@ -176,10 +177,11 @@ internal/service/
   organization_service.go
   member_service.go
   app_service.go
-  budget_service.go
-  wechat_service.go
-  knowledge_service.go
-  usage_service.go
+  channel_service.go
+  knowledge_service.go      # 主副本写入 + 节点同步触发
+  workspace_service.go      # 通过 agent 文件 API 代理
+  runtime_node_service.go   # 节点 CRUD、注册、心跳
+  usage_service.go          # 直查 new-api
   audit_service.go
 
 internal/store/
@@ -199,16 +201,27 @@ internal/integrations/newapi/
   types.go
 
 internal/integrations/runtime/
-  runtime.go
-  docker/
+  adapter.go            # RuntimeAdapter 接口
+  agent_backed.go       # 基于 agent endpoint 的 Docker SDK client 实现
+
+internal/integrations/agent/
+  file_client.go        # AgentFileClient 接口与 HTTP 实现
+  docker_proxy.go       # Docker SDK 用 agent endpoint 的 transport
+  endpoints.go          # 注册 / 心跳处理（manager 接收 agent 调用）
+
+internal/integrations/channel/
+  adapter.go            # ChannelAdapter 接口
+  registry.go
+  wechat.go             # 微信渠道实现
 
 internal/integrations/openclaw/
-  adapter.go
-  parser.go
+  adapter.go            # 配置渲染、健康检查、知识库导入命令
+  prompt.go             # 三层 prompt 拼接逻辑
+  parser.go             # CLI 输出解析
 
 internal/files/
-  app_dirs.go
-  uploads.go
+  knowledge_master.go    # manager 本地知识库主副本管理
+  uploads.go             # 上传校验
 
 migrations/
   000001_init.up.sql
@@ -220,7 +233,7 @@ migrations/
 - handler 只处理 HTTP、DTO、认证上下文和响应，不直接调用 Docker、OpenClaw 或 `new-api`。
 - service 负责权限、事务、状态机和业务决策。
 - worker 执行外部副作用，并把结果回写数据库。
-- adapter 层封装外部系统细节，不写组织、成员、预算等业务判断。
+- adapter 层封装外部系统细节，不写组织、成员、知识库等业务判断。
 - store 层由 sqlc 生成查询，复杂事务由 service 或 store transaction helper 组织。
 
 ## 5. 数据库设计
@@ -263,17 +276,13 @@ contact_name text null
 contact_phone text null
 remark text null
 newapi_user_id text null
-budget_policy text not null
 credit_warning_threshold integer null
 created_at timestamptz not null
 updated_at timestamptz not null
 deleted_at timestamptz null
 ```
 
-预算策略：
-
-- `warn_only`
-- `auto_disable_keys`
+`credit_warning_threshold`：组织余额预警阈值（百分比），可选；不再有成员级预算字段或策略。
 
 ### 5.3 organization_personas
 
@@ -292,45 +301,29 @@ created_at timestamptz not null
 
 人设采用版本表。当前生效版本取同组织最大 `version`。
 
-### 5.4 member_budgets
-
-```text
-id uuid primary key
-org_id uuid not null references organizations(id)
-user_id uuid not null references users(id)
-budget_credit bigint not null
-warning_threshold integer not null
-used_credit_snapshot bigint not null default 0
-limited_at timestamptz null
-created_at timestamptz not null
-updated_at timestamptz not null
-unique(org_id, user_id)
-```
-
-`used_credit_snapshot` 不是计费事实来源，只是最近一次预算检查结果。
-
 ### 5.5 apps
 
 ```text
 id uuid primary key
 org_id uuid not null references organizations(id)
 owner_user_id uuid not null references users(id)
+runtime_node_id uuid not null references runtime_nodes(id)
 name text not null
 description text null
 status text not null
 persona_mode text not null
 app_prompt text null
-runtime_node_id uuid null references runtime_nodes(id)
 container_id text null
 container_name text null
 newapi_key_id text null
 newapi_key_ciphertext text null
 api_key_status text not null
-workspace_path text not null
 created_at timestamptz not null
 updated_at timestamptz not null
 deleted_at timestamptz null
 ```
+
+`runtime_node_id` 改为 not null：第一版必须先注册节点才能创建应用。`workspace_path` 字段已移除——manager 不需要保存路径，节点上的工作目录由 agent 按 `apps/{app_id}/workspace` 自行推算；manager 通过 agent 文件 API 访问。
 
 唯一约束：
 
@@ -345,8 +338,9 @@ deleted_at timestamptz null
 - `running`
 - `stopped`
 - `error`
-- `budget_limited`
 - `deleted`
+
+api_key 是否可用由 `api_key_status` 单独反映（`active` / `disabled` / `error`），不进入主状态机。前端若发现"应用 running 但 api_key disabled"则展示"已禁用"提示。
 
 人设模式：
 
@@ -362,18 +356,52 @@ api_key 状态：
 
 ### 5.6 runtime_nodes
 
+每个节点上常驻一个 agent 容器，agent 提供 Docker 代理（HTTP 转发到本机 Docker socket）和文件 API；manager 通过 agent 进行所有节点级操作，没有 `local` 节点直连模式。
+
 ```text
 id uuid primary key
 name text not null unique
-kind text not null
-docker_endpoint text not null
 status text not null
+agent_docker_endpoint text null
+agent_file_endpoint text null
+agent_tls_ca_cert text null
+agent_token_hash text null
+bootstrap_token_hash text null
+bootstrap_token_expires_at timestamptz null
+agent_version text null
+heartbeat_interval_seconds integer not null default 30
+last_heartbeat_at timestamptz null
 resource_snapshot_json jsonb null
+metadata_json jsonb null
+node_data_root text null
+registered_at timestamptz null
 created_at timestamptz not null
 updated_at timestamptz not null
 ```
 
-第一版默认只有一个 `local` 节点。
+字段说明：
+
+- `name`：节点名（如 `node-shanghai-1`），全局唯一。
+- `status`：`pending` / `active` / `unreachable` / `disabled`。
+- `agent_docker_endpoint`：agent 暴露的 Docker 代理 URL（如 `https://10.0.0.5:7001`），manager 用 Docker SDK 直连此地址；agent 内部转发到本机 Docker socket。
+- `agent_file_endpoint`：agent 暴露的文件 API URL（如 `https://10.0.0.5:7002`）。
+- `agent_tls_ca_cert`：agent 自签 CA 证书 PEM；manager 用它验证 agent TLS。
+- `agent_token_hash`：长期通信令牌 hash，明文 agent 持有；manager 用 `Authorization: Bearer {agent_token}` 认证。
+- `bootstrap_token_hash`：一次性注册令牌 hash；agent 注册成功后清空。
+- `bootstrap_token_expires_at`：注册窗口（默认 24h）。
+- `agent_version`：agent 上报的版本号。
+- `heartbeat_interval_seconds`：心跳间隔，约定值。
+- `last_heartbeat_at`：最近一次心跳时间；reconciler 据此判定 unreachable。
+- `resource_snapshot_json`：agent 上报 CPU/内存/磁盘/容器数。
+- `metadata_json`：OS / 内核 / Docker 版本等。
+- `node_data_root`：agent 在节点上的数据根目录（如 `/var/lib/oc-agent`），便于排障。
+- `registered_at`：首次注册时间。
+
+唯一约束：
+
+- `unique(name)`。
+
+加密说明：`agent_tls_ca_cert` 与 `agent_docker_endpoint` 等明文字段无需加密；`agent_token_hash` 与 `bootstrap_token_hash` 已是 hash；任何额外的 agent 私密配置使用 manager 配置文件中的 `security.master_key` 加密。
 
 ### 5.7 channel_bindings
 
@@ -412,31 +440,14 @@ updated_at timestamptz not null
 - `create unique index channel_bindings_app_active on channel_bindings(app_id) where status <> 'deleted'`：第一版每应用 1 个 binding。
 - 未来要解锁多渠道时，约束改为 `unique(app_id, channel_type)`，无需迁移数据。
 
-### 5.8 knowledge_files
+### 5.8 知识库（不再使用 DB 表）
 
-```text
-id uuid primary key
-app_id uuid not null references apps(id)
-uploaded_by uuid not null references users(id)
-original_name text not null
-stored_path text not null
-mime_type text not null
-size_bytes bigint not null
-openclaw_file_id text null
-status text not null
-last_error text null
-created_at timestamptz not null
-updated_at timestamptz not null
-deleted_at timestamptz null
-```
+知识库改为目录即事实来源：
 
-文件状态：
+- 组织级：`{data_root}/orgs/{org_id}/knowledge/`（manager 主副本）→ 同步到该组织所有应用所在节点的 `{node_data_root}/orgs/{org_id}/knowledge/`，bind mount 到容器 `/knowledge/org`。
+- 应用级：`{data_root}/apps/{app_id}/knowledge/`（manager 主副本）→ 同步到该应用所在节点的 `{node_data_root}/apps/{app_id}/knowledge/`，bind mount 到容器 `/knowledge/app`。
 
-- `uploaded`
-- `importing`
-- `ready`
-- `failed`
-- `deleted`
+文件元信息（上传者、原始文件名、上传时间、大小）通过 audit_logs 落库，target_type = `org_knowledge` / `app_knowledge`，target_id 编码为 `org:{org_id}:filename` / `app:{app_id}:filename`，metadata_json 携带 `{size, mime, uploader}`。
 
 ### 5.9 recharge_records
 
@@ -457,24 +468,9 @@ created_at timestamptz not null
 - `succeeded`
 - `failed`
 
-### 5.10 usage_snapshots
+### 5.10 用量统计（不再使用 DB 表）
 
-```text
-id uuid primary key
-scope_type text not null
-scope_id uuid not null
-period_start timestamptz not null
-period_end timestamptz not null
-prompt_tokens bigint not null default 0
-completion_tokens bigint not null default 0
-total_tokens bigint not null default 0
-request_count bigint not null default 0
-used_credit bigint not null default 0
-source text not null
-created_at timestamptz not null
-```
-
-这张表是报表缓存，不是计费事实来源。计费事实来源始终是 `new-api`。
+manager 不缓存用量数据。所有统计查询（应用 / 成员 / 组织 / 平台 维度）每次直查 new-api 对应账号或 api_key 的用量接口。短时间内重复查询可由 manager 进程内做轻量内存缓存（如 5 秒 TTL），属于实现细节，不入 schema。计费事实来源始终是 `new-api`。
 
 ### 5.11 jobs
 
@@ -505,21 +501,16 @@ job 状态：
 
 job 类型：
 
-- `app_initialize`
-- `app_start_container`
-- `app_stop_container`
-- `app_restart_container`
-- `app_delete`
-- `channel_start_login`
-- `channel_check_binding`
-- `knowledge_import`
-- `knowledge_delete`
-- `budget_check_member`
-- `runtime_refresh_status`
-- `app_health_check`
-- `newapi_disable_key`
-- `newapi_restore_key`
-- `workspace_archive_cleanup`
+- `app_initialize`：包含节点目录准备、知识库同步、容器创建启动、健康检查全过程，分步骤幂等
+- `app_start_container` / `app_stop_container` / `app_restart_container`：通过 agent Docker 代理操作
+- `app_delete`：通过 agent 停止 + 删除容器、归档节点目录、删除 manager 主副本
+- `channel_start_login` / `channel_check_binding`
+- `knowledge_sync_node`：组织级知识库异步推送到节点，重试到一致
+- `runtime_node_health_reconcile`：扫描心跳超时节点，置 `unreachable` 并联动应用状态
+- `runtime_refresh_status`：定时刷新应用容器状态（agent 拉取）
+- `app_health_check`：定时 OpenClaw 健康检查
+- `newapi_disable_key` / `newapi_restore_key`：手动风控触发
+- `workspace_archive_cleanup`：定时清理过期归档（agent 自身亦可周期清理）
 
 ### 5.12 audit_logs
 
@@ -557,14 +548,16 @@ created_at timestamptz not null
 users(org_id, role, status)
 organizations(status, name)
 apps(org_id, owner_user_id, status)
+apps(runtime_node_id, status)
 apps(newapi_key_id)
 channel_bindings(app_id, channel_type, status)
-knowledge_files(app_id, status)
+runtime_nodes(status, last_heartbeat_at)
 jobs(status, run_after, priority)
 audit_logs(org_id, created_at)
+audit_logs(target_type, target_id, created_at)
 recharge_records(org_id, created_at)
 refresh_tokens(user_id, expires_at)
-usage_snapshots(scope_type, scope_id, period_start, period_end)
+organization_personas(org_id, version DESC)
 ```
 
 ## 6. API 设计
@@ -633,15 +626,11 @@ POST   /members/{memberId}/reset-password
 
 事务里任一行写入失败 → 整事务回滚；不会出现"账号建好但应用没有"的中间状态。
 
-### 6.4 AI 人设与预算
+### 6.4 AI 人设
 
 ```text
 GET  /org/persona
 PUT  /org/persona
-
-GET  /budgets/members
-PUT  /budgets/members/{memberId}
-POST /budgets/members/{memberId}/restore-keys
 ```
 
 ### 6.5 应用
@@ -686,11 +675,28 @@ POST /apps/{appId}/channels/{channelType}/unbind
 
 ### 6.7 知识库
 
+无 DB 表，filesystem 即事实来源。manager 持有主副本，路径 `{data_root}/orgs/{org_id}/knowledge/` 与 `{data_root}/apps/{app_id}/knowledge/`；目录变更同步到对应 runtime node。
+
 ```text
-GET    /apps/{appId}/knowledge-files
-POST   /apps/{appId}/knowledge-files
-DELETE /apps/{appId}/knowledge-files/{fileId}
+# 组织级知识库
+GET    /orgs/{orgId}/knowledge?path=…              # 列目录或返回单文件元信息
+POST   /orgs/{orgId}/knowledge                     # multipart 上传单文件
+DELETE /orgs/{orgId}/knowledge?path=…              # 删除单文件或子目录
+GET    /orgs/{orgId}/knowledge/sync-status         # 各节点同步状态（异步推送场景）
+
+# 应用级知识库
+GET    /apps/{appId}/knowledge?path=…
+POST   /apps/{appId}/knowledge
+DELETE /apps/{appId}/knowledge?path=…
 ```
+
+实现：
+
+- 上传/删除先写 manager 主副本 → 调对应 runtime node 的 agent 文件 API 同步副本：
+  - 应用级：节点单一，**同步**调用，全部成功才返回。
+  - 组织级：受影响节点可能多个，主副本写完即返回；为每个受影响节点入队 `knowledge_sync_node` job 异步推送，前端通过 `/sync-status` 查节点状态。
+- 上传文件元信息（uploader、original_name、size、mime）写 audit_logs，无独立 DB 表。
+- 路径校验：`filepath.Clean` 后必须仍以 `{data_root}/orgs/{org_id}/knowledge/` 或 `{data_root}/apps/{app_id}/knowledge/` 为前缀；agent 端再做一层校验。
 
 ### 6.7.1 工作目录
 
@@ -716,13 +722,24 @@ GET /apps/{appId}/workspace/archive?path=/sub/dir
 - `archive` 流式生成 zip，仅打包 `path` 指定的目录。
 - 后端不提供创建目录、上传、删除、重命名接口。
 
-后端 path 校验：
+实现：manager **不读取本地文件系统**。manager 收到请求后：
 
-- 拼接 `{data_root}/apps/{app_id}/workspace` + 入参 path。
-- `filepath.Clean` 后必须仍以工作目录前缀开头（`strings.HasPrefix` 校验）。
-- `os.Lstat` 检查目标，非常规文件（symlink/socket/device）直接 reject。
-- 单文件下载和 archive 大小、archive 条目数有 config 上限。
-- 所有访问写审计日志（actor、app_id、relPath、action、result）。
+1. 校验权限（应用 owner / 组织管理员 / 平台管理员）。
+2. 查 `apps.runtime_node_id` → 取该节点的 `agent_file_endpoint` 与 `agent_token`。
+3. 用 Bearer token 调 agent 文件 API：
+   ```
+   GET  {agent_file_endpoint}/v1/scopes/apps/{app_id}/workspace?path=…
+   GET  {agent_file_endpoint}/v1/scopes/apps/{app_id}/workspace/download?path=…
+   GET  {agent_file_endpoint}/v1/scopes/apps/{app_id}/workspace/archive?path=…
+   ```
+4. 流式 proxy 响应给前端。
+
+校验双层：
+
+- manager 侧：`filepath.Clean(path)` 必须不含 `..`，仅允许相对路径，长度合理。
+- agent 侧：拼接 scope 根目录后再 `filepath.Clean`，必须仍以 scope 前缀开头；`os.Lstat` 拒绝非常规文件（symlink/socket/device）。
+- 单文件下载、archive 大小、archive 条目数上限（manager 配置 + agent 配置双重校验）。
+- 所有访问写审计日志（actor、app_id、relPath、action、result，metadata_json 含目标节点）。
 
 ### 6.8 统计与审计
 
@@ -736,10 +753,48 @@ GET /audit-logs
 
 ### 6.9 运行节点
 
+平台管理员侧：
+
 ```text
-GET /runtime-nodes
-GET /runtime-nodes/{nodeId}
+GET    /runtime-nodes
+POST   /runtime-nodes                                   # 创建节点，返回 bootstrap_token（仅此次可见）
+GET    /runtime-nodes/{nodeId}
+PATCH  /runtime-nodes/{nodeId}                          # 修改节点元信息
+POST   /runtime-nodes/{nodeId}/disable
+POST   /runtime-nodes/{nodeId}/enable
+POST   /runtime-nodes/{nodeId}/rotate-bootstrap-token   # bootstrap 失败后重生成
+DELETE /runtime-nodes/{nodeId}                          # 仅当节点上无未删除应用时允许
 ```
+
+agent 侧（路径前缀 `/agent`，认证方式特殊）：
+
+```text
+POST /agent/runtime-nodes/{nodeId}/register
+  Authorization: Bearer {bootstrap_token}
+  Body: {
+    agent_docker_endpoint, agent_file_endpoint, agent_tls_ca_cert,
+    agent_version, os, kernel, docker_version, node_data_root
+  }
+  → 返回 { agent_token, heartbeat_interval_seconds }
+
+POST /agent/runtime-nodes/{nodeId}/heartbeat
+  Authorization: Bearer {agent_token}
+  Body: { resource_snapshot, agent_version }
+  → 返回 { ack: true }
+```
+
+注册成功后 manager：
+
+- 校验 bootstrap_token 未过期且未使用过。
+- 验证上报的 agent_tls_ca_cert 格式有效。
+- 生成 agent_token，存 hash 入库，明文返回（仅本次响应可见）。
+- 清空 bootstrap_token_hash，置 `status=active`，`registered_at=now()`。
+
+心跳：
+
+- agent 每 `heartbeat_interval_seconds` 秒发一次。
+- manager 更新 `last_heartbeat_at` 与 `resource_snapshot_json`。
+- `runtime_node_health_reconcile` job 周期性扫描，超过 `3 × heartbeat_interval_seconds` 未收到心跳 → `status=unreachable`，并把该节点上 `running` 应用置 `error`。
 
 ### 6.10 异步接口返回格式
 
@@ -840,26 +895,35 @@ reconciler 将这些 job ID 补入 Redis ready queue，保证 Redis 重启后任
 
 `app_initialize` 流程：
 
-1. 校验应用处于 `draft` 或可重试的 `error` 状态。
+1. 校验应用处于 `draft` 或可重试的 `error` 状态；查 `apps.runtime_node_id` 对应节点必须为 `active`。
 2. 设置应用状态为 `initializing`。
-3. 调用 `new-api` 创建 api_key。
-4. 保存 `newapi_key_id` 和加密后的 api_key。
-5. 创建应用目录（`config/`、`state/`、`knowledge/`、`workspace/`、`logs/`），写 `apps.workspace_path`。
-6. 渲染拼接系统 prompt：平台默认模板（注入 `workspace_dir`、`knowledge_dir`、`app_id`、`org_id` 等变量）→ 组织 persona 当前生效版本 → 应用 persona（仅当 `persona_mode = app_override`）。
-7. 渲染 OpenClaw 配置文件，写入 `config/`，连同环境变量（`OPENCLAW_WORKSPACE_DIR=/workspace`、`OPENCLAW_KNOWLEDGE_DIR=/knowledge`、应用 ID、组织 ID、api_key、`new-api` base URL、启用渠道插件名）准备就绪。
-8. 用 Docker SDK 创建容器（bind mount `config/` `state/` `knowledge/` `workspace/` `logs/` 到容器内对应路径）。
-9. 启动容器。
-10. 执行健康检查。
-11. 设置应用状态为 `binding_waiting`。
-12. 不在初始化里自动触发渠道登录；用户在前端点"开始绑定"时由 service 入队 `channel_start_login` job。
+3. 调用 `new-api` 创建 api_key，保存 `newapi_key_id` 和用 `master_key` 加密的 api_key 密文。
+4. 通过 agent 文件 API 在节点上准备目录：
+   - `POST {agent_file_endpoint}/v1/scopes/apps/{app_id}/init` → 节点 agent 创建 `apps/{app_id}/{knowledge,workspace,state,logs}/`
+5. 通过 agent 文件 API 推送知识库主副本：
+   - 把 `{data_root}/orgs/{org_id}/knowledge/` 打 tar 流推送到 `POST {agent_file_endpoint}/v1/scopes/orgs/{org_id}/knowledge/sync`
+   - 把 `{data_root}/apps/{app_id}/knowledge/` 打 tar 流推送到 `POST {agent_file_endpoint}/v1/scopes/apps/{app_id}/knowledge/sync`
+6. 渲染拼接系统 prompt：平台默认模板（注入 `workspace_dir=/workspace`、`knowledge_org_dir=/knowledge/org`、`knowledge_app_dir=/knowledge/app`、`app_id`、`org_id`）→ 组织 persona 当前生效版本 → 应用 persona（仅当 `persona_mode = app_override`）。
+7. 通过 agent Docker 代理创建容器：用 Docker SDK 连 `agent_docker_endpoint`，注入环境变量（含拼接 prompt、api_key、new-api base URL、渠道插件名、各路径变量），并 bind mount：
+   - 节点 `apps/{app_id}/workspace/` → 容器 `/workspace`
+   - 节点 `orgs/{org_id}/knowledge/` → 容器 `/knowledge/org`
+   - 节点 `apps/{app_id}/knowledge/` → 容器 `/knowledge/app`
+   - 节点 `apps/{app_id}/state/` → 容器 `/state`
+   - 节点 `apps/{app_id}/logs/` → 容器 `/logs`
+8. 通过 agent Docker 代理启动容器。
+9. 执行健康检查（exec 命令或 HTTP 探针，经 agent Docker 代理）。
+10. 设置应用状态为 `binding_waiting`。
+11. 不在初始化里自动触发渠道登录；用户在前端点"开始绑定"时由 service 入队 `channel_start_login` job。
+
+各步骤幂等：节点目录已存在 → skip 创建；api_key 已创建 → skip；容器已存在 → 校验配置一致后 skip。
 
 ### 7.4 渠道登录
 
 `channel_start_login` 流程（payload 含 `app_id` 和 `channel_type`）：
 
-1. 校验容器运行中。
+1. 校验容器运行中（通过 agent Docker 代理 `inspect`）。
 2. 通过 ChannelAdapter registry 取出对应 adapter（v1 = `WeChatAdapter`）。
-3. adapter 调用 Docker exec 执行 `openclaw channels login --channel <plugin_name>`（v1 plugin 取自 `runtime.channel_plugins.wechat` = `openclaw-weixin`）。
+3. adapter 通过 agent Docker 代理在容器内 exec：`openclaw channels login --channel <plugin_name>`（v1 plugin 取自 `runtime.channel_plugins.wechat` = `openclaw-weixin`）。
 4. 捕获 stdout/stderr。
 5. 解析为 `AuthChallenge`（`type=qr_code`、`payload={qr_image_base64,...}`、`expires_at`）。
 6. 更新 `channel_bindings.status = pending_auth`，将 challenge 写入 `metadata_json`。
@@ -872,31 +936,41 @@ reconciler 将这些 job ID 补入 Redis ready queue，保证 Redis 重启后任
 `app_delete` 流程（在删除成员账号或管理员主动删除应用时触发）：
 
 1. 标记应用软删除流程开始。
-2. 停止容器，已停止则跳过。
-3. 删除容器，不存在则视为成功。
+2. 通过 agent Docker 代理停止容器，已停止则跳过。
+3. 通过 agent Docker 代理删除容器，不存在则视为成功。
 4. 禁用 `new-api api_key`。
-5. 工作目录归档：`mv {data_root}/apps/{app_id}/workspace {data_root}/archived/{app_id}-{timestamp}/workspace`。
-6. 应用 `config/` `state/` `knowledge/` `logs/` 默认删除（释放空间），可由 config 改为归档。
+5. 通过 agent 文件 API 调用 `POST {agent_file_endpoint}/v1/scopes/apps/{app_id}/archive` → agent 把节点上 `apps/{app_id}/` 整体 mv 到 `archived/{app_id}-{timestamp}/`（含 workspace/state/knowledge/logs）。
+6. 删除 manager 本地主副本 `{data_root}/apps/{app_id}/knowledge/`。
 7. 设置应用状态为 `deleted`。
 8. 写审计日志。
 
-业务记录不物理删除。归档目录由 `workspace_archive_cleanup` job 在 `runtime.archive_retention_days` 期满后物理删除。
+业务记录不物理删除。节点上的归档目录由 agent 周期性清理（`workspace.archive_retention_days` 配置）或由 manager 的 `workspace_archive_cleanup` job 触发清理。
 
-### 7.6 预算检查
+### 7.6 知识库节点同步
 
-scheduler 定期创建 `budget_check_member` job。
+`knowledge_sync_node` job（payload 含 `org_id` 或 `app_id`、`node_id`、`change_type`）：
 
-流程：
+1. 查 manager 主副本目录的当前状态。
+2. 调对应 runtime node 的 agent 文件 API：
+   - 全量同步：tar 流推送整个目录到 agent，agent 替换本地副本。
+   - 增量：只推送变化文件 / 删除单文件（payload 指定）。
+3. 更新 manager 内部"该 (org/app, node) 对应的最近同步时间"，可以用 audit_logs 或专门的内存/Redis 状态。
+4. 失败按 `max_attempts` 退避重试。
 
-1. 查询成员预算和组织策略。
-2. 查询该成员名下应用 api_key 用量。
-3. 聚合 used credit。
-4. 更新 `member_budgets.used_credit_snapshot`。
-5. 如果达到阈值，记录预算风险。
-6. 如果超额且策略为 `auto_disable_keys`，创建 `newapi_disable_key` job。
-7. 将相关应用状态置为 `budget_limited`。
+应用级知识库使用同步调用（API 直接调用 agent，不经过 job），节点单一、失败立即返回 5xx；组织级知识库使用此 job 异步推送到全部受影响节点。
 
-### 7.7 容器操作
+### 7.7 节点健康检查
+
+`runtime_node_health_reconcile` job（每 30s 由 scheduler 触发）：
+
+1. 查询 `runtime_nodes` 中 `status=active` 且 `last_heartbeat_at < now() - 3 × heartbeat_interval_seconds` 的行。
+2. 置 `status=unreachable`。
+3. 把该节点上 `status=running` 的应用置为 `error`，记录"节点不可达"。
+4. 写审计 `runtime_node.heartbeat_timeout`。
+
+agent 心跳恢复时通过 `POST /heartbeat` 自动把节点置回 `active`，应用状态不会自动恢复（管理员手动重试 `app_start_container`）。
+
+### 7.8 容器操作
 
 启动、停止、重启都创建 job：
 
@@ -904,7 +978,7 @@ scheduler 定期创建 `budget_check_member` job。
 - `app_stop_container`
 - `app_restart_container`
 
-worker 通过 runtime adapter 操作容器，完成后刷新 app runtime 状态并写审计。
+worker 通过 RuntimeAdapter（agent-backed）操作容器，完成后刷新 app runtime 状态并写审计。
 
 ## 8. 外部集成 Adapter
 
@@ -935,29 +1009,68 @@ type NewAPIClient interface {
 
 ### 8.2 runtime adapter
 
-通用接口：
+`RuntimeAdapter` 抽象 Docker 操作，第一版**仅有 agent-backed 实现**——manager 不直接连本地 Docker socket。
 
 ```go
-type Runtime interface {
-    CreateContainer(ctx context.Context, spec ContainerSpec) (ContainerRef, error)
-    StartContainer(ctx context.Context, containerID string) error
-    StopContainer(ctx context.Context, containerID string) error
-    RestartContainer(ctx context.Context, containerID string) error
-    RemoveContainer(ctx context.Context, containerID string) error
-    InspectContainer(ctx context.Context, containerID string) (ContainerStatus, error)
-    Logs(ctx context.Context, containerID string, opts LogOptions) (LogResult, error)
-    Stats(ctx context.Context, containerID string) (ResourceStats, error)
-    Exec(ctx context.Context, containerID string, cmd []string, opts ExecOptions) (ExecResult, error)
+type RuntimeAdapter interface {
+    CreateContainer(ctx context.Context, nodeID uuid.UUID, spec ContainerSpec) (ContainerRef, error)
+    StartContainer(ctx context.Context, nodeID uuid.UUID, containerID string) error
+    StopContainer(ctx context.Context, nodeID uuid.UUID, containerID string) error
+    RestartContainer(ctx context.Context, nodeID uuid.UUID, containerID string) error
+    RemoveContainer(ctx context.Context, nodeID uuid.UUID, containerID string) error
+    InspectContainer(ctx context.Context, nodeID uuid.UUID, containerID string) (ContainerStatus, error)
+    Logs(ctx context.Context, nodeID uuid.UUID, containerID string, opts LogOptions) (LogResult, error)
+    Stats(ctx context.Context, nodeID uuid.UUID, containerID string) (ResourceStats, error)
+    Exec(ctx context.Context, nodeID uuid.UUID, containerID string, cmd []string, opts ExecOptions) (ExecResult, error)
 }
 ```
 
-第一版实现为 Docker SDK。
+实现要点：
+
+- 所有方法的第一个参数 `nodeID` 决定走哪个节点。
+- adapter 内部缓存 `nodeID → DockerClient` 映射（按 `runtime_nodes.agent_docker_endpoint` 创建 Docker SDK client，附带 Bearer Token transport）。
+- 节点信息变更时（IP 变化 / 重新 rotate token）失效缓存。
+- adapter 不感知"local 还是 remote"——只有"哪个 agent endpoint"。
 
 容器命名规则：
 
 ```text
 ocm-{app_id}
 ```
+
+### 8.2.1 Agent 文件 API 客户端
+
+```go
+type AgentFileClient interface {
+    InitAppDirs(ctx context.Context, nodeID uuid.UUID, appID uuid.UUID) error
+    SyncOrgKnowledge(ctx context.Context, nodeID uuid.UUID, orgID uuid.UUID, tarStream io.Reader) error
+    SyncAppKnowledge(ctx context.Context, nodeID uuid.UUID, appID uuid.UUID, tarStream io.Reader) error
+    UploadOrgKnowledgeFile(ctx context.Context, nodeID uuid.UUID, orgID uuid.UUID, relPath string, content io.Reader) error
+    UploadAppKnowledgeFile(ctx context.Context, nodeID uuid.UUID, appID uuid.UUID, relPath string, content io.Reader) error
+    DeleteOrgKnowledge(ctx context.Context, nodeID uuid.UUID, orgID uuid.UUID, relPath string) error
+    DeleteAppKnowledge(ctx context.Context, nodeID uuid.UUID, appID uuid.UUID, relPath string) error
+    ListWorkspace(ctx context.Context, nodeID uuid.UUID, appID uuid.UUID, relPath string) ([]Entry, error)
+    DownloadWorkspaceFile(ctx context.Context, nodeID uuid.UUID, appID uuid.UUID, relPath string) (io.ReadCloser, FileInfo, error)
+    StreamWorkspaceArchive(ctx context.Context, nodeID uuid.UUID, appID uuid.UUID, relPath string, w io.Writer) error
+    ArchiveApp(ctx context.Context, nodeID uuid.UUID, appID uuid.UUID) error
+    CleanupArchive(ctx context.Context, nodeID uuid.UUID, retentionDays int) error
+}
+```
+
+实现要点：
+
+- 与 RuntimeAdapter 同源的 client 缓存（按 `nodeID → agent_file_endpoint`）。
+- 强制 TLS（用 `agent_tls_ca_cert` 校验）+ Bearer agent_token。
+- 流式 IO（避免在 manager 进程缓冲大文件）。
+- 同步类操作传入 tar 流；agent 端解压时清空旧目录确保一致。
+
+### 8.2.2 Agent 注册与心跳
+
+manager 提供两个 HTTP 端点（已在 §6.9 列出），实现要点：
+
+- `POST /agent/runtime-nodes/{id}/register`：原子操作，事务内校验并消费 bootstrap_token，返回 agent_token；并发或重放注册视为失败。
+- `POST /agent/runtime-nodes/{id}/heartbeat`：仅更新 `last_heartbeat_at`、`resource_snapshot_json`、`agent_version`；如节点 `status=unreachable` 自动改回 `active`，写审计。
+- agent_token 生成用 `crypto/rand` 32 字节 base64，hash 用 SHA-256（性能优先，不需 Argon2 因 token 已是高熵）。
 
 ### 8.3 OpenClaw adapter
 
@@ -1039,33 +1152,56 @@ WeChatAdapter 实现要点：
 - `CheckBinding` 通过 OpenClaw 状态查询命令获取当前绑定状态。
 - `Unbind` 调用 OpenClaw 解绑命令并清空 `metadata_json`。
 
-### 8.4 应用目录管理
+### 8.4 目录管理
 
-目录结构：
+manager 本地目录（仅知识库主副本）：
 
 ```text
-{data_root}/apps/{app_id}/
-  config/      # 容器内 /config，OpenClaw 配置文件（含拼接 prompt）
-  state/       # 容器内 /state，OpenClaw 运行时状态、渠道凭证
-  knowledge/   # 容器内 /knowledge，知识库上传文件
-  workspace/   # 容器内 /workspace，OpenClaw 输出的生成文件（PDF/Word 等）
-  logs/        # 容器内 /logs，可选日志目录
+{data_root}/
+  orgs/{org_id}/knowledge/    # 组织级知识库主副本
+  apps/{app_id}/knowledge/    # 应用级知识库主副本
+  tmp/                         # 临时文件
 ```
 
-bind mount 同步：所有目录均使用宿主机 bind mount，manager 进程可直接读宿主机文件系统（这是工作目录浏览/下载能直接走文件 I/O 而非 OpenClaw 接口的前提）。
+manager 不持有任何应用容器配置、状态、工作目录或日志。
+
+节点上目录（agent 维护）：
+
+```text
+{node_data_root}/
+  orgs/{org_id}/knowledge/         # 同步自 manager
+  apps/{app_id}/
+    knowledge/                     # 同步自 manager
+    workspace/                     # OpenClaw 输出
+    state/                         # OpenClaw 运行时状态、渠道凭证
+    logs/                          # 可选日志
+  archived/{app_id}-{timestamp}/   # 应用软删后的归档目录
+```
+
+容器 bind mount（在 agent 节点上）：
+
+| 节点路径 | 容器路径 | 说明 |
+|---|---|---|
+| `{node_data_root}/orgs/{org_id}/knowledge/` | `/knowledge/org` | 组织级知识库 |
+| `{node_data_root}/apps/{app_id}/knowledge/` | `/knowledge/app` | 应用级知识库 |
+| `{node_data_root}/apps/{app_id}/workspace/` | `/workspace` | 输出 |
+| `{node_data_root}/apps/{app_id}/state/` | `/state` | OpenClaw 状态 |
+| `{node_data_root}/apps/{app_id}/logs/` | `/logs` | 日志（可选） |
+
+OpenClaw 配置不挂目录，全部通过环境变量注入（含拼接 prompt）。
 
 删除应用时：
 
 - 业务记录软删除。
-- 容器删除。
+- 通过 agent Docker 代理删除容器。
 - api_key 禁用。
-- workspace 移到 `{data_root}/archived/{app_id}-{timestamp}/workspace`，保留 N 天后由 `workspace_archive_cleanup` job 物理删除。
-- 其他目录默认删除以释放资源（可由配置改为归档）。
-- 归档保留期由 `runtime.archive_retention_days` 配置项控制。
+- 通过 agent 文件 API 把节点上 `apps/{app_id}/` 整体 mv 到 `archived/{app_id}-{timestamp}/`。
+- manager 本地 `apps/{app_id}/knowledge/` 目录删除。
+- 节点归档目录由 agent 周期清理或 manager `workspace_archive_cleanup` job 触发，期满 `agent.archive_retention_days` 配置后物理删除。
 
 ### 8.5 工作目录访问层
 
-manager 提供工作目录浏览/下载服务（独立 service，不通过 OpenClawAdapter）：
+manager 提供工作目录浏览/下载服务，所有调用都路由到对应 agent：
 
 ```go
 type WorkspaceService interface {
@@ -1082,28 +1218,46 @@ type Entry struct {
 }
 ```
 
-安全边界：
+实现：
 
-- 入参 `relPath` 必须经过 `filepath.Clean` 后位于 `{data_root}/apps/{app_id}/workspace/` 前缀内（用 `filepath.Rel` + 检查无 `..` 前缀）。
-- 拒绝跟随符号链接：`os.Lstat`，非常规文件（symlink/socket/device）直接 reject。
-- 单文件下载和 archive 有大小上限：`openclaw.workspace.max_download_size`、`openclaw.workspace.max_archive_size`、`openclaw.workspace.max_archive_entries`。
-- 所有访问写审计日志（actor、app_id、relPath、action、result）。
+- service 查 `apps.runtime_node_id` → 找节点 agent → 调 `AgentFileClient.ListWorkspace` / `DownloadWorkspaceFile` / `StreamWorkspaceArchive`。
+- agent 端做 path 沙箱；manager 端再做一层入参校验（`filepath.Clean`、拒绝 `..`、长度限制）。
+- 单文件下载和 archive 大小上限：manager 配置 `openclaw.workspace.*` + agent 配置一致校验。
+- 所有访问写审计日志（actor、app_id、relPath、action、result，metadata_json 含 node_id）。
 - 写入接口不存在；写入只能由 OpenClaw 容器进程通过 bind mount 完成。
 
-## 9. 文件上传与知识库导入
+## 9. 知识库上传与节点同步
 
-上传流程：
+manager 不调用 OpenClaw 的导入接口；OpenClaw 通过容器内 bind mount 直接读取目录。流程仅涉及 manager 主副本写入和节点 agent 副本同步。
 
-1. API 校验用户权限和应用归属。
+### 9.1 应用级上传（同步推送）
+
+1. API 校验用户权限（应用 owner 或组织管理员）和应用归属。
 2. 校验文件类型和大小。
-3. 文件写入 `{data_root}/apps/{app_id}/knowledge/`。
-4. 创建 `knowledge_files` 记录，状态为 `uploaded`。
-5. 创建 `knowledge_import` job。
-6. worker exec OpenClaw 导入命令。
-7. 成功后保存 `openclaw_file_id`，状态为 `ready`。
-8. 失败后状态为 `failed`，记录错误。
+3. 文件写入 manager 主副本 `{data_root}/apps/{app_id}/knowledge/{rel_path}`。
+4. 查 `apps.runtime_node_id` → 调 `AgentFileClient.UploadAppKnowledgeFile(node, app_id, rel_path, content)`。
+5. agent 失败：回滚主副本（删除该文件）→ 返回 5xx。
+6. 写审计 `app_knowledge.upload`，metadata 携带 `{size, mime, uploader, node_id, rel_path}`。
 
-manager 不做 OCR、切分、embedding 或向量库写入。
+删除：对称流程（先删主副本 → 调 agent 删除）。
+
+### 9.2 组织级上传（主副本同步 + 节点异步推送）
+
+1. API 校验用户权限（组织管理员）。
+2. 校验文件类型和大小。
+3. 文件写入 manager 主副本 `{data_root}/orgs/{org_id}/knowledge/{rel_path}`。
+4. 查"该组织未删除应用所在的全部 runtime node"（去重）。
+5. 为每个节点入队 `knowledge_sync_node` job（payload: `{org_id, node_id, change_type=upload_file, rel_path}`）。
+6. 写审计 `org_knowledge.upload`，metadata 含 `{size, mime, uploader, target_nodes:[...]}`。
+7. API 立即返回；前端通过 `/orgs/{orgId}/knowledge/sync-status` 轮询每节点同步状态。
+
+删除：对称流程（删主副本 → 入队 `knowledge_sync_node` 异步推送删除指令）。
+
+### 9.3 容器初始化时的批量同步
+
+`app_initialize` job 推进到 §7.3 步骤 5 时，把 manager 主副本里的 org + app 知识库各打成 tar 流，分别调 `AgentFileClient.SyncOrgKnowledge` 和 `SyncAppKnowledge`，agent 收到后清空本地副本目录并解压（确保完整一致）。
+
+manager 不做 OCR、切分、embedding 或向量库写入；OpenClaw 自行决定如何使用挂载目录中的文件。
 
 ## 10. 日志与运行监控
 
@@ -1169,9 +1323,13 @@ CanAccessMember(ctx, memberID)
 CanAccessApp(ctx, appID)
 CanOperateAppRuntime(ctx, appID)
 CanAccessWorkspace(ctx, appID)
-CanCreateMemberWithApp(ctx, orgID)   // 仅组织/平台管理员
-CanDeleteApp(ctx, appID)              // 仅组织/平台管理员（成员不可删）
-CanManageBudget(ctx, orgID)
+CanReadOrgKnowledge(ctx, orgID)
+CanWriteOrgKnowledge(ctx, orgID)             // 仅组织/平台管理员
+CanReadAppKnowledge(ctx, appID)
+CanWriteAppKnowledge(ctx, appID)
+CanCreateMemberWithApp(ctx, orgID)           // 仅组织/平台管理员
+CanDeleteApp(ctx, appID)                      // 仅组织/平台管理员（成员不可删）
+CanManageRuntimeNode(ctx, nodeID)            // 仅平台管理员
 ```
 
 所有组织级查询必须带 `org_id` 约束，不能依赖前端传参实现隔离。
@@ -1181,18 +1339,27 @@ CanManageBudget(ctx, orgID)
 敏感项：
 
 - 用户密码 hash。
-- JWT signing key。
+- JWT signing key（access + refresh）。
+- CSRF secret。
 - `new-api` admin token。
-- 应用 api_key。
-- Docker endpoint 配置。
-- OpenClaw runtime 环境变量。
+- 应用 api_key（明文密文同时存在时密文必须加密）。
+- Runtime node bootstrap_token（一次性，使用前明文，使用后清空 hash 入库）。
+- Runtime node agent_token（明文 agent 持有，hash 入库）。
+- agent_tls_ca_cert（PEM 明文，公钥侧不敏感）。
 
-要求：
+主密钥要求：
+
+- 使用 `security.master_key`（写在 manager 配置文件 yaml）作为对称密钥（AES-256-GCM）。
+- 密钥加载：从配置文件读取 → 校验长度 → 启动时 fail-fast 若缺失或不合法。
+- 密钥用途：加密 `apps.newapi_key_ciphertext` 与任何未来需要持久化的敏感字段。
+- 密钥轮换：第一版不实现，文档保留扩展方式（双密钥并存、再加密迁移）。
+
+实施要求：
 
 - api_key 页面不展示明文。
 - 数据库存储 api_key 时必须加密。
-- 主密钥通过环境变量或部署密钥注入，不写入数据库。
-- 日志、错误、审计中不得记录 api_key 明文。
+- 日志、错误、审计中不得记录 api_key、bootstrap_token、agent_token 明文（统一通过脱敏函数）。
+- 配置文件中的 `master_key` 通过环境变量展开 `${MASTER_KEY}`，不直接写入版本控制；生产部署时必须设置。
 
 ## 12. 前端架构
 
@@ -1221,7 +1388,8 @@ web/
       org/
       apps/
       members/
-      budgets/
+      runtime-nodes/
+      knowledge/
       usage/
       audit/
     components/
@@ -1296,9 +1464,9 @@ Pinia 不保存远程列表、详情和统计数据。
 
 /org
 /org/members             # 列表 + 创建账号入口（包含应用配置字段）
-/org/members/new         # 创建账号 + 应用页面
-/org/budgets
+/org/members/new         # 创建账号 + 应用页面（含选择 runtime node）
 /org/apps
+/org/knowledge           # 组织级知识库管理
 /org/persona
 /org/usage
 /org/audit
@@ -1345,30 +1513,44 @@ auth:
   jwt_refresh_secret: "${JWT_REFRESH_SECRET}"
   csrf_secret: "${CSRF_SECRET}"
 
+security:
+  # 对称密钥（AES-256-GCM，长度 32 字节，base64 编码后写入），加密 api_key 等敏感字段。
+  # 必须由部署环境通过 ${MASTER_KEY} 注入，不允许在 yaml 中明文。
+  master_key: "${MASTER_KEY}"
+
 newapi:
   base_url: "http://localhost:3000"
   admin_token: "${NEWAPI_ADMIN_TOKEN}"
 
 openclaw:
   # 平台默认 AI 指令模板，作为所有应用 prompt 不可覆盖前缀。
-  # 渲染时注入 {{app_id}} {{org_id}} {{workspace_dir}} {{knowledge_dir}}。
+  # 渲染时注入 {{app_id}} {{org_id}} {{workspace_dir}} {{knowledge_org_dir}} {{knowledge_app_dir}}。
   system_prompt_template: |
     你是 OpenClaw 智能助手。
     当需要生成文件（PDF / Word / Excel / 图片等）时，必须将文件输出到目录 {{workspace_dir}}，
     按主题或日期建子目录组织，使用清晰可读的文件名。
-    用户上传的知识库挂载在 {{knowledge_dir}}，仅供检索引用。
+    组织级知识库挂载在 {{knowledge_org_dir}}（同组织所有应用共享，仅读），
+    应用级知识库挂载在 {{knowledge_app_dir}}（仅本应用，仅读）。
+    检索时优先应用级，未找到再查组织级，仅作为信息来源使用。
   workspace:
     max_download_size: 524288000     # 单文件 500 MB
     max_archive_size: 2147483648     # archive 总大小 2 GB
     max_archive_entries: 10000       # archive 最多条目
 
 runtime:
-  docker_host: "unix:///var/run/docker.sock"
   openclaw_image: "openclaw-runtime:dev"
   default_command: []
-  archive_retention_days: 30
   channel_plugins:
     wechat: "openclaw-weixin"
+
+agent:
+  # 节点 agent 通信相关参数，manager 侧默认值
+  default_heartbeat_interval_seconds: 30
+  heartbeat_timeout_multiplier: 3
+  bootstrap_token_ttl: "24h"
+  archive_retention_days: 30
+  http_timeout: "30s"
+  large_upload_timeout: "10m"
 
 worker:
   enabled: true
@@ -1378,7 +1560,7 @@ worker:
 
 scheduler:
   enabled: true
-  budget_check_interval: "10m"
+  knowledge_sync_interval: "30s"
   runtime_refresh_interval: "30s"
   job_reconcile_interval: "30s"
 ```
@@ -1410,21 +1592,29 @@ runtime.openclaw_image: openclaw-runtime:dev
 
 ### 13.3 数据目录
 
-默认：
+manager 默认：
 
 ```text
 /var/lib/oc-manager/
-  apps/
-    {app_id}/
-      config/
-      state/
-      knowledge/
-      workspace/
-      logs/
-  archived/
-    {app_id}-{timestamp}/
-      workspace/
-  tmp/
+  orgs/{org_id}/knowledge/    # 组织级知识库主副本
+  apps/{app_id}/knowledge/    # 应用级知识库主副本
+  tmp/                         # 临时文件
+```
+
+manager 不再保存任何应用容器配置、状态、工作目录或归档目录——所有节点级目录由 agent 在节点上维护。
+
+agent 默认（每个节点）：
+
+```text
+/var/lib/oc-agent/
+  orgs/{org_id}/knowledge/         # 同步副本
+  apps/{app_id}/
+    knowledge/                     # 同步副本
+    workspace/                     # OpenClaw 输出
+    state/                         # OpenClaw 状态
+    logs/
+  archived/{app_id}-{timestamp}/   # 归档目录
+  agent.token                      # agent 持久化 agent_token 明文（仅 agent 容器可读）
 ```
 
 manager 负责创建目录并设置权限。
@@ -1436,7 +1626,8 @@ manager 负责创建目录并设置权限。
 ```text
 data/
   manager/
-    apps/
+    orgs/                         # 组织级知识库主副本
+    apps/                         # 应用级知识库主副本
     tmp/
   manager-postgres/
   redis/
@@ -1445,16 +1636,22 @@ data/
     logs/
     postgres/
   ollama/
+  agent/                          # 本地开发的 agent 数据（如果在同机器跑 agent）
+    orgs/
+    apps/
+    archived/
 ```
 
 要求：
 
-- manager 应用目录挂载到 OpenClaw 容器。
+- manager 知识库主副本目录挂载到 manager 容器。
+- agent 数据目录挂载到 agent 容器和宿主机 Docker socket。
 - PostgreSQL 数据目录挂载到 `./data/...`。
 - Redis 如启用 AOF/RDB，数据目录挂载到 `./data/redis`。
 - new-api 的 `/data`、`/app/logs`、PostgreSQL 数据目录使用 `./data/new-api/...`。
 - Ollama 的 `/root/.ollama` 使用 `./data/ollama`。
 - compose 文件中不得定义 named volumes。
+- 本地开发 agent 需要把宿主机 Docker socket bind mount 进 agent 容器（生产部署也是同样模式）。
 
 ### 13.4 数据库迁移
 
@@ -1576,6 +1773,27 @@ services:
     networks:
       - oc-manager-network
 
+  oc-runtime-agent:
+    image: oc-runtime-agent:dev
+    container_name: oc-runtime-agent
+    restart: always
+    ports:
+      - "7001:7001"   # Docker 代理
+      - "7002:7002"   # 文件 API
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock
+      - ./data/agent:/var/lib/oc-agent
+    environment:
+      MANAGER_URL: http://manager-api:8080
+      NODE_ID: "${AGENT_NODE_ID}"
+      BOOTSTRAP_TOKEN: "${AGENT_BOOTSTRAP_TOKEN}"
+      AGENT_DOCKER_PORT: "7001"
+      AGENT_FILE_PORT: "7002"
+      DATA_ROOT: /var/lib/oc-agent
+      TZ: Asia/Shanghai
+    networks:
+      - oc-manager-network
+
 networks:
   oc-manager-network:
     driver: bridge
@@ -1583,13 +1801,22 @@ networks:
 
 如果开发机没有 GPU，Ollama compose 不配置 GPU reservation；只拉小模型验证链路。
 
-OpenClaw runtime 镜像需提前构建：
+OpenClaw runtime 镜像与 agent 镜像都需提前构建：
 
 ```text
 docker build -t openclaw-runtime:dev ./runtime/openclaw
+docker build -t oc-runtime-agent:dev ./runtime/agent
 ```
 
-如果仓库不包含 runtime Dockerfile，部署流程必须提前准备该镜像。
+本地开发流程：
+
+1. `docker compose up -d` 启动 manager-postgres、redis、new-api、new-api-postgres、ollama、agent。
+2. `oc-manager migrate up` 跑数据库迁移。
+3. 启动 manager（IDE 或 `go run ./cmd/server`）。
+4. 平台管理员后台创建节点 → 复制 bootstrap_token → 设到 `AGENT_BOOTSTRAP_TOKEN` 环境变量 → `docker compose restart oc-runtime-agent` → 注册完成。
+5. 后续即可创建组织、成员、应用走完整流程。
+
+如果仓库不包含 runtime / agent Dockerfile，部署流程必须提前准备这两个镜像。
 
 ## 14. 工程规范
 
@@ -1600,16 +1827,18 @@ docker build -t openclaw-runtime:dev ./runtime/openclaw
 必须覆盖：
 
 - domain 状态机。
-- 权限判断（含工作目录访问校验、应用创建/删除限制）。
-- 预算计算。
+- 权限判断（含工作目录访问校验、应用创建/删除限制、组织/应用知识库读写权限）。
 - job 重试和幂等逻辑。
 - OpenClaw CLI 输出解析。
 - ChannelAdapter 接口和 WeChat 实现的二维码解析。
 - 平台 prompt 模板渲染、变量注入、三层拼接顺序。
-- 工作目录路径安全校验（拒绝 `..` 逃逸、符号链接）。
+- 工作目录与知识库路径安全校验（拒绝 `..` 逃逸、符号链接、scope 越权）。
 - 创建成员账号 + 应用复合事务（成功路径 + 任一步骤失败的回滚）。
 - `new-api` adapter 错误映射。
-- Docker runtime adapter 参数构造。
+- AgentFileClient 错误映射、TLS 校验、Bearer 认证。
+- RuntimeAdapter（agent-backed）参数构造与多节点路由。
+- 节点注册流程（bootstrap_token 单次消费、并发注册防御）。
+- 心跳超时 reconciler。
 - service 层关键业务分支。
 
 要求：
@@ -1681,14 +1910,16 @@ docker build -t openclaw-runtime:dev ./runtime/openclaw
 
 - 状态机转换。
 - 权限边界。
-- 预算阈值和超额策略。
 - job backoff、max attempts、幂等。
 - OpenClaw 二维码输出解析。
 - 平台 prompt 模板渲染、变量注入、三层拼接顺序。
-- 工作目录路径安全校验和大小上限。
+- 工作目录与知识库路径安全校验和大小上限。
 - 创建账号 + 应用复合事务（成功 + 回滚）。
+- 节点注册和心跳：bootstrap_token 单次消费、超时 reconciler。
+- 知识库同步：应用级同步路径、组织级 `knowledge_sync_node` job 重试。
 - `new-api` 错误响应映射。
-- 配置加载和环境变量展开。
+- AgentFileClient / RuntimeAdapter 与 fake agent 的契约测试。
+- 配置加载和环境变量展开（含 `master_key`）。
 - api_key 加密和脱敏。
 
 ### 15.2 后端集成测试
@@ -1784,17 +2015,20 @@ docker build -t openclaw-runtime:dev ./runtime/openclaw
 - 失败状态可见。
 - 审计日志可追踪。
 
-### 16.4 Docker socket 权限过高
+### 16.4 Docker socket 权限过高（节点 agent 持有）
 
 风险：
 
-- manager 访问 Docker socket 等同拥有较高主机权限。
+- agent 容器挂载宿主机 Docker socket，等同拥有较高主机权限；agent 一旦被攻陷整台节点失守。
+- manager → agent 的通信若被中间人，攻击者可以对 Docker 发任意指令。
 
 应对：
 
-- 第一版限定私有化单机部署。
-- 限制 manager 主机访问面。
-- 后续多节点时改为受控 runtime agent，不直接暴露 Docker socket。
+- agent 容器以非特权用户运行，仅挂载 Docker socket，不挂其它系统目录。
+- agent 暴露的 Docker 代理端口绑定内网，必要时用 firewall / 安全组限制 manager 来源 IP。
+- agent 强制 TLS（自签 CA），manager 校验 server 证书；Bearer agent_token 鉴权。
+- agent_token 存于 agent 容器挂载卷内，权限 0600，仅 agent 进程可读。
+- agent 端 audit 日志记录所有 Docker 调用，便于审计。
 
 ### 16.5 api_key 泄露
 
@@ -1860,8 +2094,48 @@ docker build -t openclaw-runtime:dev ./runtime/openclaw
 
 - 模板渲染走专用函数，单元测试覆盖变量注入和占位符未替换检测。
 - 拼接顺序由 OpenClawAdapter 写死，不暴露顺序参数。
-- 启动时校验 `openclaw.system_prompt_template` 至少包含 `{{workspace_dir}}`。
-- 容器创建时把渲染后的 prompt 写入 `config/`，可在出问题时直接 cat 排查。
+- 启动时校验 `openclaw.system_prompt_template` 至少包含 `{{workspace_dir}}`、`{{knowledge_org_dir}}`、`{{knowledge_app_dir}}`。
+- 容器创建时把渲染后的 prompt 作为环境变量注入；agent 端可通过容器 inspect 查看进行排查。
+
+### 16.10 节点心跳超时误判
+
+风险：
+
+- 网络抖动导致心跳暂时超时，应用被误标记为 `error`。
+
+应对：
+
+- 心跳超时阈值用 `3 × heartbeat_interval_seconds`（默认 90s）。
+- agent 心跳 POST 失败时本地重试。
+- 节点恢复后 manager 自动把 `unreachable → active`，但应用状态需管理员手动恢复，避免抖动期间反复变换。
+- 心跳超时事件写审计，便于排查。
+
+### 16.11 知识库节点同步不一致
+
+风险：
+
+- 组织级知识库异步推送，部分节点同步失败导致内容不一致。
+
+应对：
+
+- `knowledge_sync_node` job 重试 + 退避。
+- `/orgs/{orgId}/knowledge/sync-status` API 暴露每节点状态，前端展示并提供"重试同步"按钮。
+- 容器初始化时 tar 流批量同步，确保新建容器看到的是当前主副本完整快照。
+- 主副本即源数据，必要时可触发"全量重新同步到所有节点"管理员操作。
+
+### 16.12 bootstrap_token 泄露
+
+风险：
+
+- 一次性令牌在传输或部署日志中泄露。
+
+应对：
+
+- 仅在创建节点时返回一次（前端要求管理员立即复制使用）。
+- DB 仅存 hash。
+- 设置 24h 过期窗口（配置项 `agent.bootstrap_token_ttl`）。
+- 注册成功后立即清空 hash，绝不可二次使用。
+- 如管理员遗漏使用，提供 `rotate-bootstrap-token` 接口重新生成。
 
 ## 17. 后续演进
 
