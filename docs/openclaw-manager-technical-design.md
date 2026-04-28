@@ -11,9 +11,9 @@ OpenClaw Manager 第一版采用单体后端、前后端分离、单机一体化
 核心目标：
 
 - 用 Go 后端稳定编排 `new-api`、Docker、OpenClaw CLI 三类外部系统。
-- 用 PostgreSQL 作为唯一业务状态源，同时承载异步任务队列。
+- 用 PostgreSQL 作为唯一业务状态源，用 Redis 承载运行队列、短期状态和分布式锁。
 - 用 Vue 3 管理后台承载组织、成员、应用、预算、微信绑定、运维和统计页面。
-- 所有跨系统长流程通过数据库 job 和 worker 执行，避免 HTTP 请求同步阻塞。
+- 所有跨系统长流程通过 PostgreSQL job 记录、Redis 队列和 worker 执行，避免 HTTP 请求同步阻塞。
 - 通过状态机、幂等 job、补偿流程和审计日志保证故障可恢复、可追踪。
 - 技术设计预留 Runtime Node，多节点能力后续扩展，第一版不做调度系统。
 
@@ -31,11 +31,13 @@ Go Manager API
   |-- Worker
   |-- Scheduler
   |-- PostgreSQL store
+  |-- Redis runtime queue/cache
   |-- new-api adapter
   |-- Docker runtime adapter
   |-- OpenClaw CLI adapter
   |
   +--> PostgreSQL
+  +--> Redis
   +--> new-api
   +--> Docker Engine
           |
@@ -46,7 +48,8 @@ Go Manager API
 
 - `manager-api + worker + scheduler`：一个 Go 进程。
 - `manager-web`：Vue 3 静态资源，可由 Nginx 或 Go 静态文件服务承载。
-- `PostgreSQL`：业务库、任务队列、审计、可选统计快照。
+- `PostgreSQL`：业务库、job 持久记录、审计、可选统计快照。
+- `Redis`：manager 运行队列、短期状态、分布式锁；同时供 `new-api` 使用。
 - `new-api`：模型网关、账号余额、api_key、token 计费和用量统计。
 - `ollama`：本地模型运行，由 `new-api` 或运维侧管理。
 - `OpenClaw runtime containers`：每个应用一个容器。
@@ -64,6 +67,7 @@ manager 不启动、不管理 `new-api` 和 `ollama`。manager 只调用 `new-ap
 - pgx
 - sqlc
 - golang-migrate
+- go-redis
 - Docker Go SDK
 - JWT access token + refresh token
 - YAML 配置文件
@@ -74,6 +78,7 @@ manager 不启动、不管理 `new-api` 和 `ollama`。manager 只调用 `new-ap
 - Gin 足够轻量，适合清晰组织 REST API。
 - sqlc + pgx 保持 SQL 显式可控，适合状态机、任务领取锁、审计查询和统计聚合。
 - golang-migrate 管理数据库迁移，避免隐式 schema 变更。
+- go-redis 管理 job 分发、短期状态和互斥锁。
 - Docker SDK 比调用 CLI 更适合结构化错误处理、日志、stats 和 exec。
 
 ### 3.2 前端
@@ -98,7 +103,7 @@ manager 不启动、不管理 `new-api` 和 `ollama`。manager 只调用 `new-ap
 
 ### 3.3 数据库与任务队列
 
-第一版只引入 PostgreSQL，不引入 Redis。
+第一版引入 PostgreSQL 和 Redis。
 
 PostgreSQL 用途：
 
@@ -106,10 +111,23 @@ PostgreSQL 用途：
 - 状态机。
 - 审计日志。
 - refresh token。
-- job 任务队列。
+- job 持久记录。
 - 可选 usage snapshot 缓存。
 
-异步任务通过 `jobs` 表实现。worker 使用 `FOR UPDATE SKIP LOCKED` 领取任务。
+Redis 用途：
+
+- job ready queue。
+- job 延迟队列或短期调度状态。
+- 微信二维码、容器状态等短期运行状态缓存。
+- 预算检查、容器操作等互斥锁。
+- 与 `new-api` 本地开发环境共用 Redis 服务。
+
+异步任务采用 PostgreSQL + Redis 混合模型：
+
+- PostgreSQL `jobs` 表是任务事实记录，保存任务状态、payload、尝试次数和错误。
+- Redis queue 保存可执行 job ID，提升 worker 领取效率。
+- worker 从 Redis 取 job ID 后，仍然在 PostgreSQL 中锁定并校验 job 状态。
+- 如果 Redis 丢失队列，scheduler/reconciler 根据 PostgreSQL 中的 `pending` job 重新入队。
 
 ## 4. 后端模块边界
 
@@ -137,6 +155,11 @@ internal/auth/
 internal/config/
   config.go
   loader.go
+
+internal/redis/
+  client.go
+  queue.go
+  lock.go
 
 internal/domain/
   enums.go
@@ -657,23 +680,26 @@ GET /runtime-nodes/{nodeId}
 
 ## 7. 异步 Job 与状态机
 
-所有跨系统副作用都通过 `jobs` 表执行。API 只校验权限和状态，创建 job 后返回。
+所有跨系统副作用都通过 `jobs` 表和 Redis queue 执行。API 只校验权限和状态，创建 job 后返回。
 
 ### 7.1 Job 领取
 
-worker 使用如下模式领取任务：
+创建 job 时，service 在同一业务事务中写入 PostgreSQL `jobs` 表。事务提交后，将 job ID 推入 Redis ready queue。worker 从 Redis 领取 job ID，再回到 PostgreSQL 锁定任务行：
 
 ```sql
 SELECT *
 FROM jobs
-WHERE status = 'pending'
-  AND run_after <= now()
-ORDER BY priority DESC, created_at ASC
-FOR UPDATE SKIP LOCKED
-LIMIT $1;
+WHERE id = $1
+FOR UPDATE;
 ```
 
-领取后：
+领取后必须校验：
+
+- `status = pending`
+- `run_after <= now()`
+- `attempts < max_attempts`
+
+校验通过后更新：
 
 ```text
 status = running
@@ -692,8 +718,22 @@ finished_at = now()
 执行失败：
 
 - 可重试错误：状态回到 `pending`，`run_after` 设置为指数退避后的时间。
+- 对可重试错误，worker 将 job ID 写入 Redis 延迟队列，或由 scheduler 到期后重新入 ready queue。
 - 不可重试错误：状态为 `failed`，写入 `last_error`，推进资源到错误状态。
 - 达到 `max_attempts`：状态为 `failed`，写审计。
+
+Redis 只负责运行时分发，不是任务事实来源。服务启动时必须运行 reconciler：
+
+```sql
+SELECT id
+FROM jobs
+WHERE status = 'pending'
+  AND run_after <= now()
+ORDER BY priority DESC, created_at ASC
+LIMIT $1;
+```
+
+reconciler 将这些 job ID 补入 Redis ready queue，保证 Redis 重启后任务可恢复。
 
 ### 7.2 Job 幂等要求
 
@@ -1103,6 +1143,12 @@ app:
 database:
   url: "postgres://ocm:ocm@localhost:5432/ocm?sslmode=disable"
 
+redis:
+  addr: "localhost:6379"
+  password: "123456"
+  db: 0
+  key_prefix: "ocm:"
+
 auth:
   cookie_domain: "localhost"
   access_token_ttl: "15m"
@@ -1123,11 +1169,14 @@ runtime:
 worker:
   enabled: true
   concurrency: 4
+  redis_queue: "jobs:ready"
+  redis_delayed_queue: "jobs:delayed"
 
 scheduler:
   enabled: true
   budget_check_interval: "10m"
   runtime_refresh_interval: "30s"
+  job_reconcile_interval: "30s"
 ```
 
 配置规则：
@@ -1172,6 +1221,33 @@ runtime.openclaw_image: openclaw-runtime:dev
 
 manager 负责创建目录并设置权限。
 
+所有容器持久化目录必须使用宿主机本地目录 bind mount，不使用 Docker named volume。
+
+本地开发推荐目录：
+
+```text
+data/
+  manager/
+    apps/
+    tmp/
+  manager-postgres/
+  redis/
+  new-api/
+    data/
+    logs/
+    postgres/
+  ollama/
+```
+
+要求：
+
+- manager 应用目录挂载到 OpenClaw 容器。
+- PostgreSQL 数据目录挂载到 `./data/...`。
+- Redis 如启用 AOF/RDB，数据目录挂载到 `./data/redis`。
+- new-api 的 `/data`、`/app/logs`、PostgreSQL 数据目录使用 `./data/new-api/...`。
+- Ollama 的 `/root/.ollama` 使用 `./data/ollama`。
+- compose 文件中不得定义 named volumes。
+
 ### 13.4 数据库迁移
 
 使用 `golang-migrate`：
@@ -1185,13 +1261,119 @@ oc-manager migrate down
 
 ### 13.5 本地开发
 
-建议使用 docker compose 启动：
+本地开发必须使用 docker compose 统一管理：
 
 - PostgreSQL
+- Redis
 - new-api
-- ollama，可选
+- ollama
 - manager-api
 - manager-web
+
+Ollama 需要拉取一个小模型用于验证链路，例如：
+
+```text
+docker exec ollama ollama pull qwen2.5:0.5b
+```
+
+小模型只用于验证 `ollama -> new-api -> OpenClaw/manager` 链路，不作为生产模型建议。
+
+docker compose 持久化约束：
+
+- 只能使用宿主机目录 bind mount。
+- 不使用 Docker named volume。
+- compose 示例中的 service-level `volumes` 字段只能写 `./data/...:/container/path` 形式的 bind mount。
+- 示例中的 `./data/...` 目录应加入 `.gitignore`。
+
+本地开发 compose 服务建议：
+
+```yaml
+services:
+  manager-postgres:
+    image: postgres:15
+    container_name: manager-postgres
+    environment:
+      POSTGRES_USER: ocm
+      POSTGRES_PASSWORD: ocm
+      POSTGRES_DB: ocm
+      TZ: Asia/Shanghai
+    volumes:
+      - ./data/manager-postgres:/var/lib/postgresql/data
+    networks:
+      - oc-manager-network
+
+  redis:
+    image: redis:latest
+    container_name: redis
+    command: ["redis-server", "--requirepass", "123456", "--appendonly", "yes"]
+    volumes:
+      - ./data/redis:/data
+    networks:
+      - oc-manager-network
+
+  new-api-postgres:
+    image: postgres:15
+    container_name: new-api-postgres
+    environment:
+      POSTGRES_USER: root
+      POSTGRES_PASSWORD: 123456
+      POSTGRES_DB: new-api
+      TZ: Asia/Shanghai
+    volumes:
+      - ./data/new-api/postgres:/var/lib/postgresql/data
+    networks:
+      - oc-manager-network
+
+  new-api:
+    image: calciumion/new-api:latest
+    container_name: new-api
+    restart: always
+    command: --log-dir /app/logs
+    ports:
+      - "3000:3000"
+    volumes:
+      - ./data/new-api/data:/data
+      - ./data/new-api/logs:/app/logs
+    environment:
+      SQL_DSN: postgresql://root:123456@new-api-postgres:5432/new-api
+      REDIS_CONN_STRING: redis://:123456@redis:6379
+      TZ: Asia/Shanghai
+      ERROR_LOG_ENABLED: "true"
+      BATCH_UPDATE_ENABLED: "true"
+      NODE_NAME: new-api-node-1
+      STREAMING_TIMEOUT: "600"
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+    depends_on:
+      - redis
+      - new-api-postgres
+    networks:
+      - oc-manager-network
+
+  ollama:
+    image: ollama/ollama:latest
+    container_name: ollama
+    restart: always
+    ports:
+      - "11434:11434"
+    volumes:
+      - ./data/ollama:/root/.ollama
+    environment:
+      OLLAMA_HOST: 0.0.0.0:11434
+      OLLAMA_ORIGINS: "*"
+      OLLAMA_NUM_PARALLEL: "4"
+      OLLAMA_MAX_LOADED_MODELS: "2"
+      OLLAMA_KEEP_ALIVE: 24h
+      TZ: Asia/Shanghai
+    networks:
+      - oc-manager-network
+
+networks:
+  oc-manager-network:
+    driver: bridge
+```
+
+如果开发机没有 GPU，Ollama compose 不配置 GPU reservation；只拉小模型验证链路。
 
 OpenClaw runtime 镜像需提前构建：
 
@@ -1258,6 +1440,27 @@ docker build -t openclaw-runtime:dev ./runtime/openclaw
 - 生成代码不手动修改。
 - 错误码必须稳定，不能随意改名。
 
+### 14.4 分步验证要求
+
+每个实施步骤完成后必须验证，不能只依赖代码检查或主观判断。
+
+通用要求：
+
+- 后端改动至少运行相关单元测试。
+- 数据库改动必须验证 migration up/down 或至少验证 up 可执行。
+- API 改动必须验证 OpenAPI schema 生成和关键接口请求。
+- worker/job 改动必须验证 job 入队、执行、失败重试和状态回写。
+- Docker/OpenClaw 改动必须验证容器创建、启动、exec、日志和目录挂载。
+- new-api/ollama 链路改动必须用小模型验证一次最小调用链路。
+- 前端页面改动必须运行类型检查和构建。
+- 涉及页面、交互、布局或浏览器行为的改动，必须通过 `chrome-devtools` MCP 调用浏览器验证，不只看代码。
+
+页面验证要求：
+
+- 登录页、组织/成员列表、应用向导、微信绑定、运行状态、知识库上传、审计列表等关键页面必须用浏览器打开验证。
+- 验证内容包括页面是否能加载、关键按钮是否可点击、表单校验是否生效、异步状态是否刷新、错误提示是否可见。
+- 如果页面设计发生变化，需要用浏览器截图或 DOM 快照确认文本不重叠、状态标签清晰、主要流程可操作。
+
 ## 15. 测试策略
 
 ### 15.1 后端单元测试
@@ -1279,7 +1482,8 @@ docker build -t openclaw-runtime:dev ./runtime/openclaw
 
 - PostgreSQL migration。
 - sqlc query。
-- `FOR UPDATE SKIP LOCKED` job 领取。
+- PostgreSQL job 记录与 Redis queue 协同。
+- Redis queue 入队、出队、延迟重试和 reconciler 补偿。
 - 应用初始化事务和补偿。
 - refresh token 生命周期。
 - 审计日志写入。
@@ -1387,17 +1591,19 @@ docker build -t openclaw-runtime:dev ./runtime/openclaw
 - 日志和审计脱敏。
 - 容器配置文件权限收紧。
 
-### 16.6 PostgreSQL 同时作为队列
+### 16.6 Redis 队列与 PostgreSQL 状态不一致
 
 风险：
 
-- 高频任务下数据库压力上升。
+- Redis 中存在 job ID，但 PostgreSQL job 已取消、失败或不存在。
+- Redis 重启后 ready queue 丢失，pending job 未被 worker 执行。
 
 应对：
 
-- 第一版任务量可控，使用 PostgreSQL 简化架构。
-- job 表加必要索引。
-- 后续如果需要高频实时任务，再引入 Redis 或 NATS。
+- PostgreSQL `jobs` 表是任务事实来源。
+- worker 取到 Redis job ID 后必须回查并锁定 PostgreSQL job。
+- 启动和周期性 reconciler 根据 PostgreSQL pending job 补队列。
+- Redis 只保存运行分发状态，不作为最终状态来源。
 
 ### 16.7 任务堆积
 
@@ -1419,9 +1625,9 @@ docker build -t openclaw-runtime:dev ./runtime/openclaw
 
 - 单 Go 进程。
 - 单 PostgreSQL。
+- 单 Redis。
 - 单 Docker host。
 - 单 OpenClaw runtime 镜像配置。
-- 无 Redis。
 - 无 WebSocket/SSE。
 - 无多节点调度。
 
@@ -1429,7 +1635,7 @@ docker build -t openclaw-runtime:dev ./runtime/openclaw
 
 - API 与 worker 分进程部署。
 - Runtime Node 远程 agent。
-- Redis/NATS 承载高频任务和事件。
+- NATS 承载更复杂的跨节点事件。
 - SSE/WebSocket 推送 job 和容器状态。
 - OpenAPI client 生成 Query hooks。
 - 组织公共知识库。
