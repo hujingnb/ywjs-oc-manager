@@ -107,7 +107,163 @@ paths:
             application/json:
               schema:
                 $ref: "#/components/schemas/ErrorResponse"
+  /api/v1/organizations:
+    get:
+      summary: 查询组织列表
+      operationId: listOrganizations
+      security:
+        - bearerAuth: []
+      parameters:
+        - name: limit
+          in: query
+          schema:
+            type: integer
+            default: 50
+        - name: offset
+          in: query
+          schema:
+            type: integer
+            default: 0
+      responses:
+        "200":
+          description: 组织列表。
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/OrganizationListResponse"
+        "403":
+          description: 无权访问组织列表。
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+    post:
+      summary: 创建组织
+      operationId: createOrganization
+      security:
+        - bearerAuth: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/OrganizationRequest"
+      responses:
+        "201":
+          description: 组织创建成功。
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/OrganizationResponse"
+        "400":
+          description: 请求参数不完整。
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "403":
+          description: 无权创建组织。
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+  /api/v1/organizations/{orgId}:
+    get:
+      summary: 获取组织详情
+      operationId: getOrganization
+      security:
+        - bearerAuth: []
+      parameters:
+        - $ref: "#/components/parameters/OrgId"
+      responses:
+        "200":
+          description: 组织详情。
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/OrganizationResponse"
+        "403":
+          description: 无权访问该组织。
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "404":
+          description: 组织不存在。
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+    patch:
+      summary: 更新组织资料
+      operationId: updateOrganization
+      security:
+        - bearerAuth: []
+      parameters:
+        - $ref: "#/components/parameters/OrgId"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/OrganizationRequest"
+      responses:
+        "200":
+          description: 组织资料已更新。
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/OrganizationResponse"
+        "403":
+          description: 无权更新组织。
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "404":
+          description: 组织不存在。
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+  /api/v1/organizations/{orgId}/disable:
+    post:
+      summary: 禁用组织
+      operationId: disableOrganization
+      security:
+        - bearerAuth: []
+      parameters:
+        - $ref: "#/components/parameters/OrgId"
+      responses:
+        "200":
+          description: 组织已禁用。
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/OrganizationResponse"
+  /api/v1/organizations/{orgId}/enable:
+    post:
+      summary: 启用组织
+      operationId: enableOrganization
+      security:
+        - bearerAuth: []
+      parameters:
+        - $ref: "#/components/parameters/OrgId"
+      responses:
+        "200":
+          description: 组织已启用。
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/OrganizationResponse"
 components:
+  parameters:
+    OrgId:
+      name: orgId
+      in: path
+      required: true
+      schema:
+        type: string
   securitySchemes:
     bearerAuth:
       type: http
@@ -200,6 +356,70 @@ components:
           type: string
         refresh_token:
           type: string
+    OrganizationRequest:
+      type: object
+      required:
+        - name
+      properties:
+        name:
+          type: string
+        contact_name:
+          type: string
+        contact_phone:
+          type: string
+        remark:
+          type: string
+        newapi_user_id:
+          type: string
+        credit_warning_threshold:
+          type: integer
+          minimum: 0
+          maximum: 100
+          nullable: true
+    OrganizationResponse:
+      type: object
+      required:
+        - organization
+      properties:
+        organization:
+          $ref: "#/components/schemas/Organization"
+    OrganizationListResponse:
+      type: object
+      required:
+        - organizations
+      properties:
+        organizations:
+          type: array
+          items:
+            $ref: "#/components/schemas/Organization"
+    Organization:
+      type: object
+      required:
+        - id
+        - name
+        - status
+      properties:
+        id:
+          type: string
+        name:
+          type: string
+        status:
+          type: string
+          enum:
+            - active
+            - disabled
+            - deleted
+        contact_name:
+          type: string
+        contact_phone:
+          type: string
+        remark:
+          type: string
+        newapi_user_id:
+          type: string
+        credit_warning_threshold:
+          type: integer
+          nullable: true
     ErrorResponse:
       type: object
       required:

@@ -43,10 +43,11 @@ func main() {
 		log.Fatalf("初始化认证令牌管理器失败: %v", err)
 	}
 	authService := service.NewAuthService(dbStore.Queries, tokenManager)
+	organizationService := service.NewOrganizationService(dbStore.Queries)
 
 	server := &http.Server{
 		Addr:              cfg.App.HTTPAddr,
-		Handler:           api.NewRouter(api.Dependencies{AuthService: authService, TokenManager: tokenManager}),
+		Handler:           api.NewRouter(api.Dependencies{AuthService: authService, OrganizationService: organizationService, TokenManager: tokenManager}),
 		ReadHeaderTimeout: 5 * time.Second,
 	}
 
