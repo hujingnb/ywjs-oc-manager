@@ -34,6 +34,7 @@
 - 容器启停、重启、日志、资源监控和健康检查。
 - 平台管理员、组织管理员、组织成员三类后台页面。
 - 本地 docker compose 开发环境和完整测试链路；本地调试环境统一由 Docker 管理，容器目录持久化统一使用本地目录 bind mount，不使用 Docker named volume。
+- OpenClaw runtime 镜像由本项目自行构建，镜像内必须包含 OpenClaw 安装、微信插件安装和运行所需依赖，方便本地加载、调试和版本固定。
 
 不在第一版范围内的内容沿用原设计文档边界：真实支付、发票、复杂 RBAC、多节点调度、统一反向代理、告警平台、工作目录写入入口、OpenClaw 知识库 OCR/embedding 处理等。
 
@@ -50,9 +51,13 @@
 - manager-api 本地调试必须在容器中运行，使用 `air` 热重载 Go 代码。
 - manager-web 本地调试必须在容器中运行，使用 Vite dev server 承载前端页面。
 - compose 中所有持久化目录必须挂载到仓库 `./data/...` 或明确的本地路径，不定义 Docker named volume。
+- 创建 OpenClaw runtime 镜像构建目录和 Dockerfile，构建内容包括 OpenClaw 安装、微信插件安装、插件依赖、健康检查或 CLI 探测脚本。
+- `Makefile` 提供 OpenClaw runtime 镜像构建目标，便于本地执行和 compose 引用。
 - 创建 `Makefile`，统一封装本地开发、测试、构建、migration、OpenAPI 生成和浏览器验证前的启动命令。
 - 本地配置模板、环境变量示例、数据目录和 `.gitignore`。
 - 基础 OpenAPI 输出位置或占位生成命令。
+- Ollama 调试脚本或 make target：确认服务启动正常、API 可访问，并能拉取或检测一个小模型用于链路验证。
+- new-api 调试脚本或 make target：确认服务启动正常、数据库连接正常、管理端基础访问或健康接口正常。
 
 验收：
 
@@ -61,6 +66,10 @@
 - 前端类型检查和构建通过。
 - docker compose 基础服务、manager-api air 容器、manager-web dev 容器可启动。
 - `Makefile` 中的第一阶段目标命令可执行，至少覆盖 `make dev-up`、`make dev-down`、`make test`、`make build`、`make migrate-up`、`make migrate-down`。
+- `Makefile` 中必须包含 OpenClaw runtime 镜像构建目标，例如 `make build-openclaw-runtime`。
+- OpenClaw runtime 镜像可构建成功，并能在容器中验证 OpenClaw 和微信插件安装结果。
+- Ollama 容器可启动并通过调试命令确认 API 正常；至少验证版本/模型列表接口，条件允许时拉取小模型。
+- new-api 容器和 new-api 数据库可启动并通过调试命令确认服务正常；至少验证 HTTP 可访问和数据库连接正常。
 - 检查 compose 文件不包含顶层 named volumes，service-level 挂载使用本地 bind mount。
 - 浏览器通过 chrome-devtools MCP 打开前端页面，确认页面加载、布局无明显重叠、健康状态可见。
 
@@ -202,6 +211,9 @@
 - 跑完整后端单元测试、集成测试、前端类型检查、构建。
 - 生成并验证 OpenAPI schema，前端 client 可生成。
 - 本地 docker compose 文档和启动流程验证；验证 compose 只使用本地目录 bind mount，不使用 Docker named volume。
+- OpenClaw runtime 镜像从 Dockerfile 重新构建并验证 OpenClaw 与微信插件安装正常。
+- Ollama 安装调试通过：服务可访问、模型列表正常，至少完成一次小模型拉取或已安装模型检测。
+- new-api 安装调试通过：服务可访问、数据库连接正常，管理 API 或健康检查可用。
 - new-api/ollama 小模型最小调用链路验证。
 - 关键 E2E 场景验证：登录、创建组织、创建节点、agent 注册、创建成员联动应用、初始化、渠道绑定、知识库、工作目录、容器运维、删除。
 - 修复所有发现的问题并重测。
@@ -227,6 +239,7 @@
 - 本地调试环境统一使用 Docker Compose 管理。Go 后端通过 manager-api 容器内的 `air` 运行，前端通过 manager-web 容器内的 Vite dev server 运行；宿主机不作为默认运行环境，只执行 docker、git 和测试/维护命令。
 - 所有容器目录挂载必须使用本地目录 bind mount，例如 `./data/...:/container/path`；禁止使用 Docker named volume，避免状态落到不可见的 Docker volume 中。
 - 项目根目录必须提供 `Makefile` 作为统一入口，开发者优先通过 make targets 执行 compose、测试、构建、migration 和生成任务。
+- OpenClaw runtime 镜像属于项目交付物，必须从仓库内 Dockerfile 自行构建；不能只依赖外部预制镜像。镜像构建应固定 OpenClaw、微信插件和依赖安装流程，提供可重复验证的安装检查命令。
 
 ## 5. 测试与质量闸门
 
@@ -248,6 +261,8 @@
 - Job：入队、领取、失败重试、状态回写和 reconciler。
 - 页面：chrome-devtools MCP 验证加载、交互、错误状态和布局。
 - 本地环境：通过 `Makefile` 目标启动和停止 compose；检查 compose 挂载策略为本地 bind mount。
+- 外部基础服务：通过 `Makefile` 目标调试 Ollama 和 new-api，确认容器安装和服务启动正常。
+- OpenClaw runtime：通过 `Makefile` 目标构建镜像，并在容器中执行 OpenClaw 与微信插件安装检查。
 
 ## 6. 风险控制
 
