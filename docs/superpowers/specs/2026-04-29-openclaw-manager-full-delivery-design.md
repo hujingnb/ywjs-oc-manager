@@ -35,6 +35,7 @@
 - 平台管理员、组织管理员、组织成员三类后台页面。
 - 本地 docker compose 开发环境和完整测试链路；本地调试环境统一由 Docker 管理，容器目录持久化统一使用本地目录 bind mount，不使用 Docker named volume。
 - OpenClaw runtime 镜像由本项目自行构建，镜像内必须包含 OpenClaw 安装、微信插件安装和运行所需依赖，方便本地加载、调试和版本固定。
+- manager 启动 OpenClaw 客户端前必须确认目标 runtime node 已加载当前构建的 OpenClaw runtime 镜像；若节点缺失镜像或镜像 hash 不一致，manager 通过 agent 文件传输镜像 tar，并由 agent 在节点上执行 `docker load`。
 
 不在第一版范围内的内容沿用原设计文档边界：真实支付、发票、复杂 RBAC、多节点调度、统一反向代理、告警平台、工作目录写入入口、OpenClaw 知识库 OCR/embedding 处理等。
 
@@ -58,6 +59,7 @@
 - 基础 OpenAPI 输出位置或占位生成命令。
 - Ollama 调试脚本或 make target：确认服务启动正常、API 可访问，并能拉取或检测一个小模型用于链路验证。
 - new-api 调试脚本或 make target：确认服务启动正常、数据库连接正常、管理端基础访问或健康接口正常。
+- new-api 管理页面必须可通过浏览器访问验证，并在本地调试环境中配置 Ollama 渠道，确认 new-api 能连接到 Ollama。
 
 验收：
 
@@ -70,6 +72,7 @@
 - OpenClaw runtime 镜像可构建成功，并能在容器中验证 OpenClaw 和微信插件安装结果。
 - Ollama 容器可启动并通过调试命令确认 API 正常；至少验证版本/模型列表接口，条件允许时拉取小模型。
 - new-api 容器和 new-api 数据库可启动并通过调试命令确认服务正常；至少验证 HTTP 可访问和数据库连接正常。
+- 通过 chrome-devtools MCP 打开 new-api 管理页面，完成或确认 Ollama 渠道配置，并验证渠道可用。
 - 检查 compose 文件不包含顶层 named volumes，service-level 挂载使用本地 bind mount。
 - 浏览器通过 chrome-devtools MCP 打开前端页面，确认页面加载、布局无明显重叠、健康状态可见。
 
@@ -102,6 +105,8 @@
 - agent 注册端点，注册成功后一次性返回 agent_token。
 - agent 心跳端点，更新资源摘要、版本和状态。
 - AgentFileClient 和 RuntimeAdapter 接口及 fake 实现。
+- agent 文件 API 支持接收 OpenClaw runtime 镜像 tar；agent 能在节点执行 `docker load` 并返回镜像 ID/digest。
+- RuntimeAdapter 或独立 ImageDistributionService 支持查询节点镜像是否存在、读取镜像 digest/hash、判断是否需要下发。
 - TLS、Bearer token、节点 client 缓存的边界设计。
 
 验收：
@@ -109,6 +114,7 @@
 - bootstrap token 单次消费、过期、并发注册防御测试通过。
 - 心跳超时和恢复测试通过。
 - fake agent contract 测试覆盖认证、错误映射和路径。
+- fake agent contract 测试覆盖镜像存在检查、hash 不一致、镜像 tar 上传、`docker load` 成功和失败。
 - 前端 Runtime Node 页面用浏览器验证创建、查看、rotate、状态展示。
 
 ### 阶段 4：异步 Job 与状态机
@@ -138,6 +144,7 @@
 - 事务提交后入队 `app_initialize`。
 - new-api adapter 创建组织账号、充值、创建/禁用/恢复 api_key、查询余额和用量的接口与 fake server 测试。
 - prompt 模板渲染和三层拼接。
+- `app_initialize` 在创建容器前执行 OpenClaw runtime 镜像分发检查：查询目标 runtime node 的镜像 digest/hash；缺失或不一致时，把 manager 构建出的镜像保存为 tar，经 agent 文件 API 传输到节点，再由 agent `docker load` 导入。
 - agent 文件 API 初始化目录、同步 org/app 知识库主副本。
 - agent-backed Docker runtime adapter 创建、启动、inspect、logs、stats、exec。
 - 初始化失败补偿和重试。
@@ -147,6 +154,7 @@
 - 创建成员 + 应用复合事务成功和回滚测试通过。
 - prompt 变量注入、占位符未替换检测、拼接顺序测试通过。
 - new-api 和 agent fake 测试覆盖错误映射。
+- 镜像下发测试覆盖：节点已有相同 hash 时跳过；节点缺失时上传并 load；hash 不一致时重新上传并 load；上传或 load 失败时 app 初始化进入可重试错误状态。
 - Docker adapter 参数构造和多节点路由测试通过。
 - 前端创建成员页面、应用详情初始化状态用 chrome-devtools MCP 验证。
 
@@ -213,7 +221,8 @@
 - 本地 docker compose 文档和启动流程验证；验证 compose 只使用本地目录 bind mount，不使用 Docker named volume。
 - OpenClaw runtime 镜像从 Dockerfile 重新构建并验证 OpenClaw 与微信插件安装正常。
 - Ollama 安装调试通过：服务可访问、模型列表正常，至少完成一次小模型拉取或已安装模型检测。
-- new-api 安装调试通过：服务可访问、数据库连接正常，管理 API 或健康检查可用。
+- new-api 安装调试通过：服务可访问、数据库连接正常，管理 API 或健康检查可用；通过浏览器验证管理页面，并配置 Ollama 渠道。
+- OpenClaw runtime 镜像分发验收通过：runtime node 缺失镜像或 hash 不一致时，manager 能通过 agent 文件传输和 `docker load` 下发当前构建镜像；节点已有相同 hash 时跳过下发。
 - new-api/ollama 小模型最小调用链路验证。
 - 关键 E2E 场景验证：登录、创建组织、创建节点、agent 注册、创建成员联动应用、初始化、渠道绑定、知识库、工作目录、容器运维、删除。
 - 修复所有发现的问题并重测。
@@ -240,6 +249,7 @@
 - 所有容器目录挂载必须使用本地目录 bind mount，例如 `./data/...:/container/path`；禁止使用 Docker named volume，避免状态落到不可见的 Docker volume 中。
 - 项目根目录必须提供 `Makefile` 作为统一入口，开发者优先通过 make targets 执行 compose、测试、构建、migration 和生成任务。
 - OpenClaw runtime 镜像属于项目交付物，必须从仓库内 Dockerfile 自行构建；不能只依赖外部预制镜像。镜像构建应固定 OpenClaw、微信插件和依赖安装流程，提供可重复验证的安装检查命令。
+- OpenClaw runtime 镜像分发以镜像 digest/hash 为准。manager 保存当前构建镜像的标识，启动应用容器前向 runtime node 查询；不一致时通过 agent 安全上传镜像 tar 并触发 `docker load`，导入成功后再创建容器。
 
 ## 5. 测试与质量闸门
 
@@ -261,8 +271,9 @@
 - Job：入队、领取、失败重试、状态回写和 reconciler。
 - 页面：chrome-devtools MCP 验证加载、交互、错误状态和布局。
 - 本地环境：通过 `Makefile` 目标启动和停止 compose；检查 compose 挂载策略为本地 bind mount。
-- 外部基础服务：通过 `Makefile` 目标调试 Ollama 和 new-api，确认容器安装和服务启动正常。
+- 外部基础服务：通过 `Makefile` 目标调试 Ollama 和 new-api，确认容器安装和服务启动正常；new-api 还必须通过浏览器验证管理页面并配置 Ollama 渠道。
 - OpenClaw runtime：通过 `Makefile` 目标构建镜像，并在容器中执行 OpenClaw 与微信插件安装检查。
+- 镜像分发：通过 fake agent 和本地 agent 验证镜像 hash 检查、tar 传输、`docker load` 和跳过重复下发。
 
 ## 6. 风险控制
 
