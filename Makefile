@@ -1,4 +1,4 @@
-.PHONY: dev-up dev-down test vet build migrate-up migrate-down check-compose logs web-test web-typecheck web-build build-openclaw-runtime verify-openclaw-runtime sync-openclaw-runtime-image debug-ollama debug-newapi
+.PHONY: dev-up dev-down test vet build sqlc-generate migrate-up migrate-down check-compose logs web-test web-typecheck web-build build-openclaw-runtime verify-openclaw-runtime sync-openclaw-runtime-image debug-ollama debug-newapi
 
 dev-up:
 	docker compose up -d
@@ -16,6 +16,9 @@ build:
 	docker compose run --rm --no-deps manager-api go build -o ./tmp/build/server ./cmd/server
 	docker compose run --rm --no-deps manager-api go build -o ./tmp/build/migrate ./cmd/migrate
 	docker compose run --rm --no-deps manager-api go build -o ./tmp/build/oc-runtime-agent ./runtime/agent
+
+sqlc-generate:
+	docker compose run --rm --no-deps manager-api go run github.com/sqlc-dev/sqlc/cmd/sqlc@v1.31.1 generate
 
 web-test:
 	docker compose run --rm --no-deps manager-web sh -c "npm install && npm test -- --run"
