@@ -10,6 +10,9 @@ import (
 func TestLoadFileExpandsEnvironmentVariables(t *testing.T) {
 	t.Setenv("DATABASE_URL", "postgres://ocm:ocm@manager-postgres:5432/ocm?sslmode=disable")
 	t.Setenv("REDIS_ADDR", "redis:6379")
+	t.Setenv("JWT_ACCESS_SECRET", "access-secret")
+	t.Setenv("JWT_REFRESH_SECRET", "refresh-secret")
+	t.Setenv("CSRF_SECRET", "csrf-secret")
 
 	path := writeTempConfig(t, `
 app:
@@ -24,6 +27,13 @@ redis:
   password: ""
   db: 0
   key_prefix: "ocm:"
+auth:
+  cookie_domain: "localhost"
+  access_token_ttl: "15m"
+  refresh_token_ttl: "720h"
+  jwt_access_secret: "${JWT_ACCESS_SECRET}"
+  jwt_refresh_secret: "${JWT_REFRESH_SECRET}"
+  csrf_secret: "${CSRF_SECRET}"
 `)
 
 	cfg, err := LoadFile(path)
@@ -36,6 +46,9 @@ redis:
 	if cfg.Redis.Addr != os.Getenv("REDIS_ADDR") {
 		t.Fatalf("redis addr = %q, want expanded env", cfg.Redis.Addr)
 	}
+	if cfg.Auth.AccessTokenTTL.Duration.String() != "15m0s" {
+		t.Fatalf("access token ttl = %s, want 15m", cfg.Auth.AccessTokenTTL.Duration)
+	}
 }
 
 func TestLoadFileFailsWhenEnvironmentVariableMissing(t *testing.T) {
@@ -47,6 +60,12 @@ database:
   url: "${DATABASE_URL_MISSING}"
 redis:
   addr: "redis:6379"
+auth:
+  access_token_ttl: "15m"
+  refresh_token_ttl: "720h"
+  jwt_access_secret: "access-secret"
+  jwt_refresh_secret: "refresh-secret"
+  csrf_secret: "csrf-secret"
 `)
 
 	_, err := LoadFile(path)
@@ -63,10 +82,33 @@ func TestValidateReportsRequiredFields(t *testing.T) {
 	if err == nil {
 		t.Fatal("Validate() error = nil, want required fields error")
 	}
-	for _, field := range []string{"app.http_addr", "app.data_root", "database.url", "redis.addr"} {
+	for _, field := range []string{"app.http_addr", "app.data_root", "database.url", "redis.addr", "auth.access_token_ttl", "auth.refresh_token_ttl", "auth.jwt_access_secret", "auth.jwt_refresh_secret", "auth.csrf_secret"} {
 		if !strings.Contains(err.Error(), field) {
 			t.Fatalf("error = %q, want field %s", err.Error(), field)
 		}
+	}
+}
+
+func TestLoadFileFailsWhenDurationInvalid(t *testing.T) {
+	path := writeTempConfig(t, `
+app:
+  http_addr: ":8080"
+  data_root: "./data/manager"
+database:
+  url: "postgres://ocm:ocm@manager-postgres:5432/ocm?sslmode=disable"
+redis:
+  addr: "redis:6379"
+auth:
+  access_token_ttl: "not-a-duration"
+  refresh_token_ttl: "720h"
+  jwt_access_secret: "access-secret"
+  jwt_refresh_secret: "refresh-secret"
+  csrf_secret: "csrf-secret"
+`)
+
+	_, err := LoadFile(path)
+	if err == nil {
+		t.Fatal("LoadFile() error = nil, want duration parse error")
 	}
 }
 

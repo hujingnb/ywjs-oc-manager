@@ -12,3 +12,11 @@ redis:
   password: "${REDIS_PASSWORD}"
   db: 0
   key_prefix: "ocm:"
+
+auth:
+  cookie_domain: "localhost"
+  access_token_ttl: "15m"
+  refresh_token_ttl: "720h"
+  jwt_access_secret: "${JWT_ACCESS_SECRET}"
+  jwt_refresh_secret: "${JWT_REFRESH_SECRET}"
+  csrf_secret: "${CSRF_SECRET}"

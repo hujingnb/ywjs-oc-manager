@@ -51,6 +51,21 @@ func (c Config) Validate() error {
 	if strings.TrimSpace(c.Redis.Addr) == "" {
 		missing = append(missing, "redis.addr")
 	}
+	if c.Auth.AccessTokenTTL.Duration <= 0 {
+		missing = append(missing, "auth.access_token_ttl")
+	}
+	if c.Auth.RefreshTokenTTL.Duration <= 0 {
+		missing = append(missing, "auth.refresh_token_ttl")
+	}
+	if strings.TrimSpace(c.Auth.JWTAccessSecret) == "" {
+		missing = append(missing, "auth.jwt_access_secret")
+	}
+	if strings.TrimSpace(c.Auth.JWTRefreshSecret) == "" {
+		missing = append(missing, "auth.jwt_refresh_secret")
+	}
+	if strings.TrimSpace(c.Auth.CSRFSecret) == "" {
+		missing = append(missing, "auth.csrf_secret")
+	}
 	if len(missing) > 0 {
 		return fmt.Errorf("缺少必需配置: %s", strings.Join(missing, ", "))
 	}

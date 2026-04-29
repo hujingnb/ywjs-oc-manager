@@ -94,6 +94,9 @@ services:
       DATABASE_URL: postgres://ocm:ocm@manager-postgres:5432/ocm?sslmode=disable
       REDIS_ADDR: redis:6379
       REDIS_PASSWORD: "123456"
+      JWT_ACCESS_SECRET: "dev-access-secret-change-me"
+      JWT_REFRESH_SECRET: "dev-refresh-secret-change-me"
+      CSRF_SECRET: "dev-csrf-secret-change-me"
       PATH: /go/bin:/usr/local/go/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin
       GOPATH: /go
       GOMODCACHE: /go/pkg/mod
