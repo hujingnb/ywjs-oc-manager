@@ -256,10 +256,244 @@ paths:
             application/json:
               schema:
                 $ref: "#/components/schemas/OrganizationResponse"
+  /api/v1/organizations/{orgId}/members:
+    get:
+      summary: 列出组织成员
+      operationId: listMembers
+      security:
+        - bearerAuth: []
+      parameters:
+        - $ref: "#/components/parameters/OrgId"
+        - name: limit
+          in: query
+          schema:
+            type: integer
+            default: 50
+        - name: offset
+          in: query
+          schema:
+            type: integer
+            default: 0
+      responses:
+        "200":
+          description: 成员列表。
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/MemberListResponse"
+        "403":
+          description: 无权访问该组织。
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+    post:
+      summary: 创建组织成员
+      operationId: createMember
+      security:
+        - bearerAuth: []
+      parameters:
+        - $ref: "#/components/parameters/OrgId"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/MemberCreateRequest"
+      responses:
+        "201":
+          description: 成员创建成功。
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/MemberResponse"
+        "400":
+          description: 请求参数不合法。
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "403":
+          description: 无权创建成员。
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+  /api/v1/members/{userId}:
+    get:
+      summary: 获取成员详情
+      operationId: getMember
+      security:
+        - bearerAuth: []
+      parameters:
+        - $ref: "#/components/parameters/UserId"
+      responses:
+        "200":
+          description: 成员详情。
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/MemberResponse"
+        "403":
+          description: 无权访问该成员。
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "404":
+          description: 成员不存在。
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+    patch:
+      summary: 更新成员资料
+      operationId: updateMember
+      security:
+        - bearerAuth: []
+      parameters:
+        - $ref: "#/components/parameters/UserId"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/MemberUpdateRequest"
+      responses:
+        "200":
+          description: 成员资料已更新。
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/MemberResponse"
+  /api/v1/members/{userId}/disable:
+    post:
+      summary: 禁用成员
+      operationId: disableMember
+      security:
+        - bearerAuth: []
+      parameters:
+        - $ref: "#/components/parameters/UserId"
+      responses:
+        "200":
+          description: 成员已禁用。
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/MemberResponse"
+  /api/v1/members/{userId}/enable:
+    post:
+      summary: 启用成员
+      operationId: enableMember
+      security:
+        - bearerAuth: []
+      parameters:
+        - $ref: "#/components/parameters/UserId"
+      responses:
+        "200":
+          description: 成员已启用。
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/MemberResponse"
+  /api/v1/members/{userId}/password:
+    post:
+      summary: 由管理员重置成员密码
+      operationId: resetMemberPassword
+      security:
+        - bearerAuth: []
+      parameters:
+        - $ref: "#/components/parameters/UserId"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/PasswordResetRequest"
+      responses:
+        "204":
+          description: 密码已重置。
+        "400":
+          description: 请求参数不完整。
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "403":
+          description: 无权重置该成员密码。
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+  /api/v1/organizations/{orgId}/audit-logs:
+    get:
+      summary: 列出组织审计日志
+      operationId: listOrgAuditLogs
+      security:
+        - bearerAuth: []
+      parameters:
+        - $ref: "#/components/parameters/OrgId"
+        - name: limit
+          in: query
+          schema:
+            type: integer
+            default: 50
+        - name: offset
+          in: query
+          schema:
+            type: integer
+            default: 0
+      responses:
+        "200":
+          description: 审计日志列表。
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/AuditLogListResponse"
+  /api/v1/audit-logs:
+    get:
+      summary: 按目标资源列出审计日志
+      operationId: listTargetAuditLogs
+      security:
+        - bearerAuth: []
+      parameters:
+        - name: target_type
+          in: query
+          required: true
+          schema:
+            type: string
+        - name: target_id
+          in: query
+          required: true
+          schema:
+            type: string
+        - name: limit
+          in: query
+          schema:
+            type: integer
+            default: 50
+        - name: offset
+          in: query
+          schema:
+            type: integer
+            default: 0
+      responses:
+        "200":
+          description: 审计日志列表。
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/AuditLogListResponse"
 components:
   parameters:
     OrgId:
       name: orgId
+      in: path
+      required: true
+      schema:
+        type: string
+    UserId:
+      name: userId
       in: path
       required: true
       schema:
@@ -420,6 +654,135 @@ components:
         credit_warning_threshold:
           type: integer
           nullable: true
+    Member:
+      type: object
+      required:
+        - id
+        - username
+        - display_name
+        - role
+        - status
+      properties:
+        id:
+          type: string
+        org_id:
+          type: string
+        username:
+          type: string
+        display_name:
+          type: string
+        role:
+          type: string
+          enum:
+            - platform_admin
+            - org_admin
+            - org_member
+        status:
+          type: string
+          enum:
+            - active
+            - disabled
+    MemberCreateRequest:
+      type: object
+      required:
+        - username
+        - display_name
+        - password
+      properties:
+        username:
+          type: string
+        display_name:
+          type: string
+        password:
+          type: string
+          format: password
+        role:
+          type: string
+          enum:
+            - org_admin
+            - org_member
+    MemberUpdateRequest:
+      type: object
+      required:
+        - display_name
+      properties:
+        display_name:
+          type: string
+        role:
+          type: string
+          enum:
+            - org_admin
+            - org_member
+    PasswordResetRequest:
+      type: object
+      required:
+        - password
+      properties:
+        password:
+          type: string
+          format: password
+    MemberResponse:
+      type: object
+      required:
+        - member
+      properties:
+        member:
+          $ref: "#/components/schemas/Member"
+    MemberListResponse:
+      type: object
+      required:
+        - members
+      properties:
+        members:
+          type: array
+          items:
+            $ref: "#/components/schemas/Member"
+    AuditLog:
+      type: object
+      required:
+        - id
+        - actor_role
+        - target_type
+        - target_id
+        - action
+        - result
+        - created_at
+      properties:
+        id:
+          type: string
+        actor_id:
+          type: string
+        actor_role:
+          type: string
+        org_id:
+          type: string
+        target_type:
+          type: string
+        target_id:
+          type: string
+        action:
+          type: string
+        result:
+          type: string
+        error_message:
+          type: string
+        ip_address:
+          type: string
+        metadata:
+          type: object
+          additionalProperties: true
+        created_at:
+          type: string
+          format: date-time
+    AuditLogListResponse:
+      type: object
+      required:
+        - audit_logs
+      properties:
+        audit_logs:
+          type: array
+          items:
+            $ref: "#/components/schemas/AuditLog"
     ErrorResponse:
       type: object
       required:

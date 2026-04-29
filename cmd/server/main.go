@@ -44,10 +44,18 @@ func main() {
 	}
 	authService := service.NewAuthService(dbStore.Queries, tokenManager)
 	organizationService := service.NewOrganizationService(dbStore.Queries)
+	memberService := service.NewMemberService(dbStore.Queries, hashPasswordWithDefault)
+	auditService := service.NewAuditService(dbStore.Queries)
 
 	server := &http.Server{
-		Addr:              cfg.App.HTTPAddr,
-		Handler:           api.NewRouter(api.Dependencies{AuthService: authService, OrganizationService: organizationService, TokenManager: tokenManager}),
+		Addr: cfg.App.HTTPAddr,
+		Handler: api.NewRouter(api.Dependencies{
+			AuthService:         authService,
+			OrganizationService: organizationService,
+			MemberService:       memberService,
+			AuditService:        auditService,
+			TokenManager:        tokenManager,
+		}),
 		ReadHeaderTimeout: 5 * time.Second,
 	}
 
@@ -55,4 +63,9 @@ func main() {
 	if err := server.ListenAndServe(); err != nil && !errors.Is(err, http.ErrServerClosed) {
 		log.Fatalf("启动 HTTP 服务失败: %v", err)
 	}
+}
+
+// hashPasswordWithDefault 使用默认 Argon2id 参数封装 auth.HashPassword，便于在 service 层注入。
+func hashPasswordWithDefault(password string) (string, error) {
+	return auth.HashPassword(password, auth.DefaultPasswordParams)
 }

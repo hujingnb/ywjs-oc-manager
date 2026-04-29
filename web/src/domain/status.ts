@@ -19,3 +19,35 @@ const appStatusViews: Record<string, StatusView> = {
 export function formatAppStatus(status: string): StatusView {
   return appStatusViews[status] ?? { label: `未知状态：${status}`, tone: 'warning' }
 }
+
+const orgStatusViews: Record<string, StatusView> = {
+  active: { label: '启用', tone: 'success' },
+  disabled: { label: '禁用', tone: 'warning' },
+  deleted: { label: '已删除', tone: 'neutral' },
+}
+
+const memberStatusViews: Record<string, StatusView> = {
+  active: { label: '启用', tone: 'success' },
+  disabled: { label: '禁用', tone: 'warning' },
+}
+
+const memberRoleLabels: Record<string, string> = {
+  platform_admin: '平台管理员',
+  org_admin: '组织管理员',
+  org_member: '组织成员',
+}
+
+// formatOrgStatus 将组织状态映射为标签和视觉语义。
+export function formatOrgStatus(status: string): StatusView {
+  return orgStatusViews[status] ?? { label: `未知状态：${status}`, tone: 'warning' }
+}
+
+// formatMemberStatus 将成员状态映射为标签和视觉语义。
+export function formatMemberStatus(status: string): StatusView {
+  return memberStatusViews[status] ?? { label: `未知状态：${status}`, tone: 'warning' }
+}
+
+// formatMemberRole 将成员角色映射为中文文案。
+export function formatMemberRole(role: string): string {
+  return memberRoleLabels[role] ?? role
+}

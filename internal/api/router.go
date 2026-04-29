@@ -13,6 +13,8 @@ import (
 type Dependencies struct {
 	AuthService         *service.AuthService
 	OrganizationService *service.OrganizationService
+	MemberService       *service.MemberService
+	AuditService        *service.AuditService
 	TokenManager        *auth.TokenManager
 }
 
@@ -23,11 +25,24 @@ func NewRouter(deps ...Dependencies) http.Handler {
 	router := gin.New()
 	router.Use(gin.Recovery())
 	handlers.RegisterHealthRoutes(router)
-	if len(deps) > 0 && deps[0].AuthService != nil && deps[0].TokenManager != nil {
-		handlers.RegisterAuthRoutes(router, handlers.NewAuthHandler(deps[0].AuthService, deps[0].TokenManager))
+	if len(deps) == 0 {
+		return router
 	}
-	if len(deps) > 0 && deps[0].OrganizationService != nil && deps[0].TokenManager != nil {
-		handlers.RegisterOrganizationRoutes(router, handlers.NewOrganizationsHandler(deps[0].OrganizationService, deps[0].TokenManager))
+	dep := deps[0]
+	if dep.TokenManager == nil {
+		return router
+	}
+	if dep.AuthService != nil {
+		handlers.RegisterAuthRoutes(router, handlers.NewAuthHandler(dep.AuthService, dep.TokenManager))
+	}
+	if dep.OrganizationService != nil {
+		handlers.RegisterOrganizationRoutes(router, handlers.NewOrganizationsHandler(dep.OrganizationService, dep.TokenManager))
+	}
+	if dep.MemberService != nil {
+		handlers.RegisterMemberRoutes(router, handlers.NewMembersHandler(dep.MemberService, dep.TokenManager))
+	}
+	if dep.AuditService != nil {
+		handlers.RegisterAuditRoutes(router, handlers.NewAuditHandler(dep.AuditService, dep.TokenManager))
 	}
 	return router
 }
