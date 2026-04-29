@@ -1,4 +1,4 @@
-.PHONY: dev-up dev-down test vet build migrate-up migrate-down check-compose logs web-test web-typecheck web-build build-openclaw-runtime verify-openclaw-runtime debug-ollama debug-newapi
+.PHONY: dev-up dev-down test vet build migrate-up migrate-down check-compose logs web-test web-typecheck web-build build-openclaw-runtime verify-openclaw-runtime sync-openclaw-runtime-image debug-ollama debug-newapi
 
 dev-up:
 	docker compose up -d
@@ -31,6 +31,9 @@ build-openclaw-runtime:
 
 verify-openclaw-runtime:
 	./scripts/verify-openclaw-runtime.sh
+
+sync-openclaw-runtime-image:
+	./scripts/sync-openclaw-runtime-image.sh
 
 debug-ollama:
 	./scripts/debug-ollama.sh

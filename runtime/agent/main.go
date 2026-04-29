@@ -3,6 +3,7 @@ package main
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"log"
 	"net/http"
 	"os"
@@ -18,6 +19,10 @@ type HealthResponse struct {
 	Role      string `json:"role"`
 	DataRoot  string `json:"dataRoot"`
 	Timestamp string `json:"timestamp"`
+}
+
+type ErrorResponse struct {
+	Error string `json:"error"`
 }
 
 func main() {
@@ -49,6 +54,10 @@ func main() {
 }
 
 func newHandler(dataRoot string) http.Handler {
+	return newHandlerWithDocker(dataRoot, newDockerSocketClient("/var/run/docker.sock"), getenv("AGENT_TOKEN", ""))
+}
+
+func newHandlerWithDocker(dataRoot string, docker DockerClient, agentToken string) http.Handler {
 	mux := http.NewServeMux()
 	mux.HandleFunc("/healthz", func(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, HealthResponse{
@@ -61,6 +70,48 @@ func newHandler(dataRoot string) http.Handler {
 	mux.HandleFunc("/v1/files/ping", func(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, map[string]string{"status": "ok"})
 	})
+	mux.HandleFunc("/v1/images/inspect", withAgentAuth(agentToken, func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != http.MethodGet {
+			writeError(w, http.StatusMethodNotAllowed, "method not allowed")
+			return
+		}
+		image := r.URL.Query().Get("image")
+		if image == "" {
+			writeError(w, http.StatusBadRequest, "missing image query")
+			return
+		}
+		info, err := docker.InspectImage(r.Context(), image)
+		if errors.Is(err, ErrImageNotFound) {
+			writeJSON(w, map[string]any{"exists": false, "image": image})
+			return
+		}
+		if err != nil {
+			writeError(w, http.StatusBadGateway, err.Error())
+			return
+		}
+		writeJSON(w, map[string]any{"exists": true, "image": image, "info": info})
+	}))
+	mux.HandleFunc("/v1/images/load", withAgentAuth(agentToken, func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != http.MethodPost {
+			writeError(w, http.StatusMethodNotAllowed, "method not allowed")
+			return
+		}
+		image := r.URL.Query().Get("image")
+		if image == "" {
+			writeError(w, http.StatusBadRequest, "missing image query")
+			return
+		}
+		if err := docker.LoadImage(r.Context(), r.Body); err != nil {
+			writeError(w, http.StatusBadGateway, err.Error())
+			return
+		}
+		info, err := docker.InspectImage(r.Context(), image)
+		if err != nil {
+			writeError(w, http.StatusBadGateway, err.Error())
+			return
+		}
+		writeJSON(w, map[string]any{"loaded": true, "image": image, "info": info})
+	}))
 	return mux
 }
 
@@ -75,6 +126,22 @@ func writeJSON(w http.ResponseWriter, value any) {
 	w.Header().Set("Content-Type", "application/json")
 	if err := json.NewEncoder(w).Encode(value); err != nil {
 		log.Printf("写入 JSON 响应失败: %v", err)
+	}
+}
+
+func writeError(w http.ResponseWriter, code int, message string) {
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(code)
+	_ = json.NewEncoder(w).Encode(ErrorResponse{Error: message})
+}
+
+func withAgentAuth(agentToken string, next http.HandlerFunc) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		if agentToken != "" && r.Header.Get("Authorization") != "Bearer "+agentToken {
+			writeError(w, http.StatusUnauthorized, "invalid agent token")
+			return
+		}
+		next(w, r)
 	}
 }
 
