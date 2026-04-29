@@ -327,6 +327,7 @@
 - 项目根目录必须提供 `Makefile` 作为统一入口，开发者优先通过 make targets 执行 compose、测试、构建、migration 和生成任务。
 - OpenClaw runtime 镜像属于项目交付物，必须从仓库内 Dockerfile 自行构建；不能只依赖外部预制镜像。镜像构建应固定 OpenClaw、微信插件和依赖安装流程，提供可重复验证的安装检查命令。
 - OpenClaw runtime 镜像分发以镜像 digest/hash 为准。manager 保存当前构建镜像的标识，启动应用容器前向 runtime node 查询；不一致时通过 agent 安全上传镜像 tar 并触发 `docker load`，导入成功后再创建容器。
+- 项目文档默认使用中文输出，包括实施计划、开发说明、验证报告、运维说明和阶段总结；命令、代码标识、API 路径和专有英文名称保持原文。
 
 ## 6. 测试与质量闸门
 
