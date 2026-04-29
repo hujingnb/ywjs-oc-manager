@@ -8,18 +8,28 @@ services:
       POSTGRES_DB: ocm
       TZ: Asia/Shanghai
     ports:
-      - "5432:5432"
+      - "${MANAGER_POSTGRES_PORT:-15432}:5432"
     volumes:
-      - ./data/manager-postgres:/var/lib/postgresql/data
+      - ./.local/data/manager-postgres:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ocm -d ocm"]
+      interval: 5s
+      timeout: 3s
+      retries: 20
 
   redis:
     image: redis:7
     container_name: redis
     command: ["redis-server", "--requirepass", "123456", "--appendonly", "yes"]
     ports:
-      - "6379:6379"
+      - "${REDIS_PORT:-6379}:6379"
     volumes:
-      - ./data/redis:/data
+      - ./.local/data/redis:/data
+    healthcheck:
+      test: ["CMD-SHELL", "redis-cli -a 123456 ping | grep PONG"]
+      interval: 5s
+      timeout: 3s
+      retries: 20
 
   new-api-postgres:
     image: postgres:17-alpine
@@ -30,14 +40,19 @@ services:
       POSTGRES_DB: new-api
       TZ: Asia/Shanghai
     volumes:
-      - ./data/new-api/postgres:/var/lib/postgresql/data
+      - ./.local/data/new-api/postgres:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U root -d new-api"]
+      interval: 5s
+      timeout: 3s
+      retries: 20
 
   new-api:
     image: calciumion/new-api:latest
     container_name: new-api
     command: --log-dir /app/logs
     ports:
-      - "3000:3000"
+      - "${NEWAPI_PORT:-3000}:3000"
     environment:
       SQL_DSN: postgresql://root:123456@new-api-postgres:5432/new-api
       REDIS_CONN_STRING: redis://:123456@redis:6379
@@ -49,49 +64,54 @@ services:
     extra_hosts:
       - "host.docker.internal:host-gateway"
     depends_on:
-      - new-api-postgres
-      - redis
+      new-api-postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
     volumes:
-      - ./data/new-api/data:/data
-      - ./data/new-api/logs:/app/logs
+      - ./.local/data/new-api/data:/data
+      - ./.local/data/new-api/logs:/app/logs
 
   ollama:
     image: ollama/ollama:latest
     container_name: ollama
     ports:
-      - "11434:11434"
+      - "${OLLAMA_PORT:-11434}:11434"
     environment:
       OLLAMA_HOST: 0.0.0.0:11434
       OLLAMA_ORIGINS: "*"
       TZ: Asia/Shanghai
     volumes:
-      - ./data/ollama:/root/.ollama
+      - ./.local/data/ollama:/root/.ollama
 
   manager-api:
     image: debian:12
     container_name: manager-api
     working_dir: /app
-    command: sh -c "go install github.com/air-verse/air@latest && air -c .air.toml"
+    command: sh -c "go install github.com/air-verse/air@latest && /go/bin/air -c .air.toml"
     environment:
       OCM_CONFIG: /app/config/config.yaml.example
       DATABASE_URL: postgres://ocm:ocm@manager-postgres:5432/ocm?sslmode=disable
       REDIS_ADDR: redis:6379
       REDIS_PASSWORD: "123456"
-      PATH: /usr/local/go/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin
+      PATH: /go/bin:/usr/local/go/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin
+      GOPATH: /go
       GOMODCACHE: /go/pkg/mod
       GOCACHE: /root/.cache/go-build
       TZ: Asia/Shanghai
     ports:
-      - "8080:8080"
+      - "${MANAGER_API_PORT:-8080}:8080"
     depends_on:
-      - manager-postgres
-      - redis
+      manager-postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
     volumes:
       - ./:/app
       - /home/hujing/.gvm/gos/go1.25:/usr/local/go:ro
       - /etc/ssl/certs:/etc/ssl/certs:ro
-      - ./data/go/pkg/mod:/go/pkg/mod
-      - ./data/go/cache:/root/.cache/go-build
+      - ./.local/data/go/pkg/mod:/go/pkg/mod
+      - ./.local/data/go/cache:/root/.cache/go-build
 
   manager-web:
     image: node:22-alpine
@@ -99,10 +119,10 @@ services:
     working_dir: /app/web
     command: sh -c "if [ -f package.json ]; then npm install && npm run dev -- --host 0.0.0.0; else sleep infinity; fi"
     ports:
-      - "5173:5173"
+      - "${MANAGER_WEB_PORT:-5173}:5173"
     volumes:
       - ./:/app
-      - ./data/node/npm:/root/.npm
+      - ./.local/data/node/npm:/root/.npm
 
   oc-runtime-agent:
     image: debian:12
@@ -112,17 +132,18 @@ services:
     environment:
       TZ: Asia/Shanghai
       DATA_ROOT: /var/lib/oc-agent
-      PATH: /usr/local/go/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin
+      PATH: /go/bin:/usr/local/go/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin
+      GOPATH: /go
       GOMODCACHE: /go/pkg/mod
       GOCACHE: /root/.cache/go-build
     ports:
-      - "7001:7001"
-      - "7002:7002"
+      - "${RUNTIME_AGENT_GRPC_PORT:-7001}:7001"
+      - "${RUNTIME_AGENT_HTTP_PORT:-7002}:7002"
     volumes:
       - ./:/app
       - /home/hujing/.gvm/gos/go1.25:/usr/local/go:ro
       - /etc/ssl/certs:/etc/ssl/certs:ro
       - /var/run/docker.sock:/var/run/docker.sock
-      - ./data/agent:/var/lib/oc-agent
-      - ./data/go/pkg/mod:/go/pkg/mod
-      - ./data/go/cache:/root/.cache/go-build
+      - ./.local/data/agent:/var/lib/oc-agent
+      - ./.local/data/go/pkg/mod:/go/pkg/mod
+      - ./.local/data/go/cache:/root/.cache/go-build
