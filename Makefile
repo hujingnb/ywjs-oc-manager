@@ -1,4 +1,4 @@
-.PHONY: dev-up dev-down test vet build migrate-up migrate-down check-compose logs
+.PHONY: dev-up dev-down test vet build migrate-up migrate-down check-compose logs web-test web-typecheck web-build
 
 dev-up:
 	docker compose up -d
@@ -15,6 +15,15 @@ vet:
 build:
 	docker compose run --rm --no-deps manager-api go build -o ./tmp/build/server ./cmd/server
 	docker compose run --rm --no-deps manager-api go build -o ./tmp/build/migrate ./cmd/migrate
+
+web-test:
+	docker compose run --rm --no-deps manager-web sh -c "npm install && npm test -- --run"
+
+web-typecheck:
+	docker compose run --rm --no-deps manager-web sh -c "npm install && npm run typecheck"
+
+web-build:
+	docker compose run --rm --no-deps manager-web sh -c "npm install && npm run build"
 
 migrate-up:
 	docker compose run --rm manager-api go run ./cmd/migrate up
