@@ -46,6 +46,8 @@ func main() {
 	organizationService := service.NewOrganizationService(dbStore.Queries)
 	memberService := service.NewMemberService(dbStore.Queries, hashPasswordWithDefault)
 	auditService := service.NewAuditService(dbStore.Queries)
+	runtimeNodeStore := store.NewRuntimeNodeStore(dbStore)
+	runtimeNodeService := service.NewRuntimeNodeService(runtimeNodeStore, hashTokenSHA256)
 
 	server := &http.Server{
 		Addr: cfg.App.HTTPAddr,
@@ -54,6 +56,7 @@ func main() {
 			OrganizationService: organizationService,
 			MemberService:       memberService,
 			AuditService:        auditService,
+			RuntimeNodeService:  runtimeNodeService,
 			TokenManager:        tokenManager,
 		}),
 		ReadHeaderTimeout: 5 * time.Second,
@@ -69,3 +72,7 @@ func main() {
 func hashPasswordWithDefault(password string) (string, error) {
 	return auth.HashPassword(password, auth.DefaultPasswordParams)
 }
+
+// hashTokenSHA256 用 SHA-256 对 bootstrap/agent token 做不可逆 hash 后存库。
+// runtime node 的 token 不需要密码级强度，但必须保证泄露后也无法直接调用 manager API。
+func hashTokenSHA256(token string) string { return auth.HashOpaqueToken(token) }

@@ -450,6 +450,160 @@ paths:
             application/json:
               schema:
                 $ref: "#/components/schemas/AuditLogListResponse"
+  /api/v1/runtime-nodes:
+    get:
+      summary: 列出 runtime 节点
+      operationId: listRuntimeNodes
+      security:
+        - bearerAuth: []
+      parameters:
+        - name: limit
+          in: query
+          schema:
+            type: integer
+            default: 50
+        - name: offset
+          in: query
+          schema:
+            type: integer
+            default: 0
+      responses:
+        "200":
+          description: runtime 节点列表。
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/RuntimeNodeListResponse"
+    post:
+      summary: 注册 runtime 节点并发放 bootstrap token
+      operationId: createRuntimeNode
+      security:
+        - bearerAuth: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/RuntimeNodeCreateRequest"
+      responses:
+        "201":
+          description: 节点已创建。
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/RuntimeNodeResponse"
+  /api/v1/runtime-nodes/{nodeId}:
+    get:
+      summary: 获取节点详情
+      operationId: getRuntimeNode
+      security:
+        - bearerAuth: []
+      parameters:
+        - $ref: "#/components/parameters/NodeId"
+      responses:
+        "200":
+          description: 节点详情。
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/RuntimeNodeResponse"
+  /api/v1/runtime-nodes/{nodeId}/rotate-bootstrap:
+    post:
+      summary: 轮换 bootstrap token
+      operationId: rotateRuntimeNodeBootstrap
+      security:
+        - bearerAuth: []
+      parameters:
+        - $ref: "#/components/parameters/NodeId"
+      responses:
+        "200":
+          description: bootstrap token 已重新发放。
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/RuntimeNodeResponse"
+        "409":
+          description: 节点处于 active 状态，需先禁用再轮换。
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+  /api/v1/runtime-nodes/{nodeId}/disable:
+    post:
+      summary: 禁用 runtime 节点
+      operationId: disableRuntimeNode
+      security:
+        - bearerAuth: []
+      parameters:
+        - $ref: "#/components/parameters/NodeId"
+      responses:
+        "200":
+          description: 节点已禁用。
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/RuntimeNodeResponse"
+  /api/v1/runtime-nodes/{nodeId}/enable:
+    post:
+      summary: 启用 runtime 节点
+      operationId: enableRuntimeNode
+      security:
+        - bearerAuth: []
+      parameters:
+        - $ref: "#/components/parameters/NodeId"
+      responses:
+        "200":
+          description: 节点已启用。
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/RuntimeNodeResponse"
+  /api/v1/agent/register:
+    post:
+      summary: agent 用 bootstrap token 注册
+      operationId: agentRegister
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/AgentRegisterRequest"
+      responses:
+        "200":
+          description: 注册成功，返回 agent token。
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/AgentRegisterResponse"
+        "401":
+          description: bootstrap token 无效或已过期。
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+  /api/v1/agent/heartbeat:
+    post:
+      summary: agent 心跳
+      operationId: agentHeartbeat
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/AgentHeartbeatRequest"
+      responses:
+        "200":
+          description: 心跳已记录。
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/RuntimeNodeResponse"
+        "401":
+          description: agent token 无效或节点已禁用。
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
   /api/v1/audit-logs:
     get:
       summary: 按目标资源列出审计日志
@@ -494,6 +648,12 @@ components:
         type: string
     UserId:
       name: userId
+      in: path
+      required: true
+      schema:
+        type: string
+    NodeId:
+      name: nodeId
       in: path
       required: true
       schema:
@@ -783,6 +943,123 @@ components:
           type: array
           items:
             $ref: "#/components/schemas/AuditLog"
+    RuntimeNode:
+      type: object
+      required:
+        - id
+        - name
+        - status
+        - heartbeat_interval_seconds
+        - has_agent_token
+      properties:
+        id:
+          type: string
+        name:
+          type: string
+        status:
+          type: string
+          enum:
+            - pending
+            - active
+            - unreachable
+            - disabled
+        agent_docker_endpoint:
+          type: string
+        agent_file_endpoint:
+          type: string
+        agent_version:
+          type: string
+        heartbeat_interval_seconds:
+          type: integer
+        node_data_root:
+          type: string
+        bootstrap_token:
+          type: string
+          description: 仅在创建/旋转时返回一次。
+        bootstrap_token_expires_at:
+          type: string
+          format: date-time
+        has_agent_token:
+          type: boolean
+    RuntimeNodeCreateRequest:
+      type: object
+      required:
+        - name
+      properties:
+        name:
+          type: string
+        heartbeat_interval_seconds:
+          type: integer
+          minimum: 0
+        node_data_root:
+          type: string
+    RuntimeNodeResponse:
+      type: object
+      required:
+        - runtime_node
+      properties:
+        runtime_node:
+          $ref: "#/components/schemas/RuntimeNode"
+    RuntimeNodeListResponse:
+      type: object
+      required:
+        - runtime_nodes
+      properties:
+        runtime_nodes:
+          type: array
+          items:
+            $ref: "#/components/schemas/RuntimeNode"
+    AgentRegisterRequest:
+      type: object
+      required:
+        - bootstrap_token
+      properties:
+        bootstrap_token:
+          type: string
+        agent_docker_endpoint:
+          type: string
+        agent_file_endpoint:
+          type: string
+        agent_tls_ca_cert:
+          type: string
+        agent_version:
+          type: string
+        node_data_root:
+          type: string
+        resource_snapshot:
+          type: object
+          additionalProperties: true
+        metadata:
+          type: object
+          additionalProperties: true
+    AgentRegisterResponse:
+      type: object
+      required:
+        - node_id
+        - agent_token
+        - heartbeat_interval_seconds
+      properties:
+        node_id:
+          type: string
+        agent_token:
+          type: string
+        heartbeat_interval_seconds:
+          type: integer
+    AgentHeartbeatRequest:
+      type: object
+      required:
+        - agent_token
+      properties:
+        agent_token:
+          type: string
+        agent_version:
+          type: string
+        resource_snapshot:
+          type: object
+          additionalProperties: true
+        metadata:
+          type: object
+          additionalProperties: true
     ErrorResponse:
       type: object
       required:

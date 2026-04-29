@@ -7,6 +7,7 @@ import (
 
 	"oc-manager/internal/api/handlers"
 	"oc-manager/internal/auth"
+	"oc-manager/internal/integrations/agent"
 	"oc-manager/internal/service"
 )
 
@@ -15,6 +16,7 @@ type Dependencies struct {
 	OrganizationService *service.OrganizationService
 	MemberService       *service.MemberService
 	AuditService        *service.AuditService
+	RuntimeNodeService  *service.RuntimeNodeService
 	TokenManager        *auth.TokenManager
 }
 
@@ -43,6 +45,10 @@ func NewRouter(deps ...Dependencies) http.Handler {
 	}
 	if dep.AuditService != nil {
 		handlers.RegisterAuditRoutes(router, handlers.NewAuditHandler(dep.AuditService, dep.TokenManager))
+	}
+	if dep.RuntimeNodeService != nil {
+		handlers.RegisterRuntimeNodeRoutes(router, handlers.NewRuntimeNodesHandler(dep.RuntimeNodeService, dep.TokenManager))
+		agent.RegisterRoutes(router, agent.NewEndpointsHandler(dep.RuntimeNodeService))
 	}
 	return router
 }
