@@ -1,0 +1,10 @@
+DROP TABLE refresh_tokens;
+DROP TABLE audit_logs;
+DROP TABLE jobs;
+DROP TABLE recharge_records;
+DROP TABLE channel_bindings;
+DROP TABLE apps;
+DROP TABLE runtime_nodes;
+DROP TABLE organization_personas;
+DROP TABLE users;
+DROP TABLE organizations;
