@@ -4,6 +4,7 @@ import (
 	"crypto/hmac"
 	"crypto/sha256"
 	"encoding/base64"
+	"encoding/hex"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -78,6 +79,11 @@ func (m *TokenManager) VerifyRefreshToken(token string) (Principal, error) {
 	return m.verify(token, TokenTypeRefresh, m.refreshSecret)
 }
 
+// RefreshTTL 返回 refresh token 有效期，供 service 持久化过期时间。
+func (m *TokenManager) RefreshTTL() time.Duration {
+	return m.refreshTTL
+}
+
 func (m *TokenManager) sign(principal Principal, tokenType string, ttl time.Duration, secret []byte) (string, error) {
 	if principal.UserID == "" || principal.Role == "" {
 		return "", errors.New("token principal 不完整")
@@ -140,4 +146,11 @@ func signHMAC(unsigned string, secret []byte) string {
 	mac := hmac.New(sha256.New, secret)
 	mac.Write([]byte(unsigned))
 	return base64.RawURLEncoding.EncodeToString(mac.Sum(nil))
+}
+
+// HashOpaqueToken 对 refresh token 做不可逆 hash 后再入库。
+// 即使数据库泄露，攻击者也不能直接拿库里的值调用刷新接口。
+func HashOpaqueToken(token string) string {
+	sum := sha256.Sum256([]byte(token))
+	return hex.EncodeToString(sum[:])
 }
