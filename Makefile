@@ -1,4 +1,4 @@
-.PHONY: dev-up dev-down test vet build migrate-up migrate-down check-compose logs web-test web-typecheck web-build
+.PHONY: dev-up dev-down test vet build migrate-up migrate-down check-compose logs web-test web-typecheck web-build build-openclaw-runtime verify-openclaw-runtime debug-ollama debug-newapi
 
 dev-up:
 	docker compose up -d
@@ -15,6 +15,7 @@ vet:
 build:
 	docker compose run --rm --no-deps manager-api go build -o ./tmp/build/server ./cmd/server
 	docker compose run --rm --no-deps manager-api go build -o ./tmp/build/migrate ./cmd/migrate
+	docker compose run --rm --no-deps manager-api go build -o ./tmp/build/oc-runtime-agent ./runtime/agent
 
 web-test:
 	docker compose run --rm --no-deps manager-web sh -c "npm install && npm test -- --run"
@@ -24,6 +25,18 @@ web-typecheck:
 
 web-build:
 	docker compose run --rm --no-deps manager-web sh -c "npm install && npm run build"
+
+build-openclaw-runtime:
+	docker build -t openclaw-runtime:dev ./runtime/openclaw
+
+verify-openclaw-runtime:
+	./scripts/verify-openclaw-runtime.sh
+
+debug-ollama:
+	./scripts/debug-ollama.sh
+
+debug-newapi:
+	./scripts/debug-newapi.sh
 
 migrate-up:
 	docker compose run --rm manager-api go run ./cmd/migrate up

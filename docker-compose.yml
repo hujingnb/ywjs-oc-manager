@@ -128,7 +128,7 @@ services:
     image: debian:12
     container_name: oc-runtime-agent
     working_dir: /app/runtime/agent
-    command: sh -c "if [ -f go.mod ]; then go run .; else sleep infinity; fi"
+    command: sh -c "if [ -f main.go ]; then go run .; else sleep infinity; fi"
     environment:
       TZ: Asia/Shanghai
       DATA_ROOT: /var/lib/oc-agent
@@ -139,6 +139,11 @@ services:
     ports:
       - "${RUNTIME_AGENT_GRPC_PORT:-7001}:7001"
       - "${RUNTIME_AGENT_HTTP_PORT:-7002}:7002"
+    healthcheck:
+      test: ["CMD-SHELL", "test -S /var/run/docker.sock && true"]
+      interval: 10s
+      timeout: 3s
+      retries: 10
     volumes:
       - ./:/app
       - /home/hujing/.gvm/gos/go1.25:/usr/local/go:ro
