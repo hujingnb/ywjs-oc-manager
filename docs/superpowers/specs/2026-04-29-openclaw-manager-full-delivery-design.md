@@ -33,7 +33,7 @@
 - 应用工作目录浏览、单文件下载、目录打包下载。
 - 容器启停、重启、日志、资源监控和健康检查。
 - 平台管理员、组织管理员、组织成员三类后台页面。
-- 本地 docker compose 开发环境和完整测试链路。
+- 本地 docker compose 开发环境和完整测试链路；本地调试环境统一由 Docker 管理。
 
 不在第一版范围内的内容沿用原设计文档边界：真实支付、发票、复杂 RBAC、多节点调度、统一反向代理、告警平台、工作目录写入入口、OpenClaw 知识库 OCR/embedding 处理等。
 
@@ -46,7 +46,9 @@
 - Go 后端目录、Gin router、配置加载、结构化错误、健康检查。
 - Vue 3 + Vite + TypeScript + Naive UI 前端目录、路由、布局壳、登录占位页。
 - PostgreSQL migration 框架、Redis client、测试框架。
-- docker compose 基础服务：manager-postgres、redis、new-api、new-api-postgres、ollama，预留 manager-api、manager-web、agent 服务。
+- docker compose 基础服务：manager-postgres、redis、new-api、new-api-postgres、ollama、manager-api、manager-web，预留 agent 服务。
+- manager-api 本地调试必须在容器中运行，使用 `air` 热重载 Go 代码。
+- manager-web 本地调试必须在容器中运行，使用 Vite dev server 承载前端页面。
 - 本地配置模板、环境变量示例、数据目录和 `.gitignore`。
 - 基础 OpenAPI 输出位置或占位生成命令。
 
@@ -55,7 +57,7 @@
 - 后端单元测试通过。
 - migration up/down 或至少初始 up 可执行。
 - 前端类型检查和构建通过。
-- docker compose 基础服务可启动。
+- docker compose 基础服务、manager-api air 容器、manager-web dev 容器可启动。
 - 浏览器通过 chrome-devtools MCP 打开前端页面，确认页面加载、布局无明显重叠、健康状态可见。
 
 ### 阶段 2：账号、组织、权限与审计基础
@@ -218,6 +220,7 @@
 - 工作目录只存在 runtime node，manager 只代理读取和下载。
 - 所有敏感数据必须 hash、加密或脱敏，不进入日志和审计明文。
 - 前端远程数据由 TanStack Query 管理，Pinia 只保存登录态、权限菜单和 UI 状态。
+- 本地调试环境统一使用 Docker Compose 管理。Go 后端通过 manager-api 容器内的 `air` 运行，前端通过 manager-web 容器内的 Vite dev server 运行；宿主机不作为默认运行环境，只执行 docker、git 和测试/维护命令。
 
 ## 5. 测试与质量闸门
 
