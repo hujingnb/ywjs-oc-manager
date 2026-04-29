@@ -1,0 +1,13 @@
+root = "."
+tmp_dir = "tmp/air"
+
+[build]
+cmd = "go build -o ./tmp/air/server ./cmd/server"
+bin = "./tmp/air/server"
+include_ext = ["go", "yaml"]
+exclude_dir = ["data", "tmp", "web/node_modules"]
+delay = 1000
+stop_on_error = true
+
+[log]
+time = true

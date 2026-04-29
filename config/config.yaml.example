@@ -1,0 +1,14 @@
+app:
+  env: dev
+  http_addr: ":8080"
+  public_base_url: "http://localhost:8080"
+  data_root: "./data/manager"
+
+database:
+  url: "${DATABASE_URL}"
+
+redis:
+  addr: "${REDIS_ADDR}"
+  password: "${REDIS_PASSWORD}"
+  db: 0
+  key_prefix: "ocm:"

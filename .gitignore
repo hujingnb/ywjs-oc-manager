@@ -7,3 +7,5 @@ docs/superpowers
 skills-lock.json
 .mcp.json
 data/
+tmp/
+.env
