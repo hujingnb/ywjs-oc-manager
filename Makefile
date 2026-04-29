@@ -14,6 +14,7 @@ vet:
 
 build:
 	docker compose run --rm --no-deps manager-api go build -o ./tmp/build/server ./cmd/server
+	docker compose run --rm --no-deps manager-api go build -o ./tmp/build/migrate ./cmd/migrate
 
 migrate-up:
 	docker compose run --rm manager-api go run ./cmd/migrate up

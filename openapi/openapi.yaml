@@ -1,0 +1,88 @@
+openapi: 3.0.3
+info:
+  title: OpenClaw Manager API
+  version: 0.1.0
+  description: OpenClaw Manager 后端 API 契约基线。
+servers:
+  - url: http://localhost:8080
+paths:
+  /healthz:
+    get:
+      summary: 健康检查
+      operationId: getHealthz
+      responses:
+        "200":
+          description: 服务运行正常。
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/HealthResponse"
+  /api/v1/auth/me:
+    get:
+      summary: 获取当前登录用户
+      operationId: getCurrentUser
+      security:
+        - bearerAuth: []
+      responses:
+        "200":
+          description: 当前登录用户信息。
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/CurrentUserResponse"
+        "401":
+          description: 未登录或访问令牌无效。
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+components:
+  securitySchemes:
+    bearerAuth:
+      type: http
+      scheme: bearer
+      bearerFormat: JWT
+  schemas:
+    HealthResponse:
+      type: object
+      required:
+        - status
+        - time
+      properties:
+        status:
+          type: string
+          example: ok
+        time:
+          type: string
+          format: date-time
+    CurrentUserResponse:
+      type: object
+      required:
+        - id
+        - username
+        - role
+      properties:
+        id:
+          type: string
+          format: uuid
+        orgId:
+          type: string
+          format: uuid
+          nullable: true
+        username:
+          type: string
+        displayName:
+          type: string
+        role:
+          type: string
+          enum:
+            - platform_admin
+            - org_admin
+            - org_member
+    ErrorResponse:
+      type: object
+      required:
+        - error
+      properties:
+        error:
+          type: string
