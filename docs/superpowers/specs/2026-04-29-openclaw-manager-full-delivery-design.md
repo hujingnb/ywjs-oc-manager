@@ -48,7 +48,7 @@
 - Go 后端目录、Gin router、配置加载、结构化错误、健康检查。
 - Vue 3 + Vite + TypeScript + Naive UI 前端目录、路由、布局壳、登录占位页。
 - PostgreSQL migration 框架、Redis client、测试框架。
-- docker compose 基础服务：manager-postgres、redis、new-api、new-api-postgres、ollama、manager-api、manager-web，预留 agent 服务。
+- docker compose 基础服务：manager-postgres、redis、new-api、new-api-postgres、ollama、manager-api、manager-web、oc-runtime-agent；agent 可先以健康检查和 fake 文件/Docker 接口启动，后续阶段补齐完整能力。
 - manager-api 本地调试必须在容器中运行，使用 `air` 热重载 Go 代码。
 - manager-web 本地调试必须在容器中运行，使用 Vite dev server 承载前端页面。
 - compose 中所有持久化目录必须挂载到仓库 `./data/...` 或明确的本地路径，不定义 Docker named volume。
@@ -56,9 +56,9 @@
 - `Makefile` 提供 OpenClaw runtime 镜像构建目标，便于本地执行和 compose 引用。
 - 创建 `Makefile`，统一封装本地开发、测试、构建、migration、OpenAPI 生成和浏览器验证前的启动命令。
 - 本地配置模板、环境变量示例、数据目录和 `.gitignore`。
-- 基础 OpenAPI 输出位置或占位生成命令。
-- Ollama 调试脚本或 make target：确认服务启动正常、API 可访问，并能拉取或检测一个小模型用于链路验证。
-- new-api 调试脚本或 make target：确认服务启动正常、数据库连接正常、管理端基础访问或健康接口正常。
+- OpenAPI schema 生成命令和初始 schema 文件。
+- Ollama 调试脚本和 make target：确认服务启动正常、API 可访问，并拉取一个小模型用于链路验证。
+- new-api 调试脚本和 make target：确认服务启动正常、数据库连接正常、管理端基础访问和健康接口正常。
 - new-api 管理页面必须可通过浏览器访问验证，并在本地调试环境中配置 Ollama 渠道，确认 new-api 能连接到 Ollama。
 - 建立单元测试规范和目录约定，后续新增业务逻辑必须同步提交完整单元测试。
 - 建立中文注释规范，公开类型、公开方法、核心 service、状态机、job handler、adapter 接口、复杂事务、权限边界和外部系统假设必须写完整且详细的中文注释。
@@ -68,14 +68,14 @@
 - 后端单元测试通过。
 - 后端测试基线必须完整覆盖阶段 1 已有逻辑，包括配置加载、健康检查、错误响应、Redis/PostgreSQL client 初始化边界和 Makefile 目标可执行性。
 - 抽查新增 Go 公开类型、公开方法和核心逻辑均有中文注释；注释必须解释用途、边界、失败处理或外部约束，不能只是重复代码表面含义。
-- migration up/down 或至少初始 up 可执行。
+- migration up/down 均可执行；阶段 1 即使只有初始 schema，也必须验证 up 后可 down 回滚。
 - 前端类型检查和构建通过。
 - docker compose 基础服务、manager-api air 容器、manager-web dev 容器可启动。
 - `Makefile` 中的第一阶段目标命令可执行，至少覆盖 `make dev-up`、`make dev-down`、`make test`、`make build`、`make migrate-up`、`make migrate-down`。
 - `Makefile` 中必须包含 OpenClaw runtime 镜像构建目标，例如 `make build-openclaw-runtime`。
 - OpenClaw runtime 镜像可构建成功，并能在容器中验证 OpenClaw 和微信插件安装结果。
-- Ollama 容器可启动并通过调试命令确认 API 正常；至少验证版本/模型列表接口，条件允许时拉取小模型。
-- new-api 容器和 new-api 数据库可启动并通过调试命令确认服务正常；至少验证 HTTP 可访问和数据库连接正常。
+- Ollama 容器可启动并通过调试命令确认 API 正常；必须验证版本/模型列表接口，并拉取一个小模型。
+- new-api 容器和 new-api 数据库可启动并通过调试命令确认服务正常；必须验证 HTTP 可访问、健康接口正常、数据库连接正常。
 - 通过 chrome-devtools MCP 打开 new-api 管理页面，完成或确认 Ollama 渠道配置，并验证渠道可用。
 - 检查 compose 文件不包含顶层 named volumes，service-level 挂载使用本地 bind mount。
 - 浏览器通过 chrome-devtools MCP 打开前端页面，确认页面加载、布局无明显重叠、健康状态可见。
@@ -224,8 +224,8 @@
 - 生成并验证 OpenAPI schema，前端 client 可生成。
 - 本地 docker compose 文档和启动流程验证；验证 compose 只使用本地目录 bind mount，不使用 Docker named volume。
 - OpenClaw runtime 镜像从 Dockerfile 重新构建并验证 OpenClaw 与微信插件安装正常。
-- Ollama 安装调试通过：服务可访问、模型列表正常，至少完成一次小模型拉取或已安装模型检测。
-- new-api 安装调试通过：服务可访问、数据库连接正常，管理 API 或健康检查可用；通过浏览器验证管理页面，并配置 Ollama 渠道。
+- Ollama 安装调试通过：服务可访问、模型列表正常，完成一次小模型拉取，并用该模型完成最小调用验证。
+- new-api 安装调试通过：服务可访问、数据库连接正常，管理 API 和健康检查均可用；通过浏览器验证管理页面，并配置 Ollama 渠道。
 - OpenClaw runtime 镜像分发验收通过：runtime node 缺失镜像或 hash 不一致时，manager 能通过 agent 文件传输和 `docker load` 下发当前构建镜像；节点已有相同 hash 时跳过下发。
 - new-api/ollama 小模型最小调用链路验证。
 - 关键 E2E 场景验证：登录、创建组织、创建节点、agent 注册、创建成员联动应用、初始化、渠道绑定、知识库、工作目录、容器运维、删除。
@@ -271,7 +271,7 @@
 
 通用测试基线：
 
-- Go：`go test ./...`，必要时补充 `go vet ./...`。
+- Go：`go test ./...` 和 `go vet ./...` 均必须通过。
 - Go 单元测试：每阶段新增 Go 逻辑必须有对应 `_test.go`，核心 domain 和 service 目标覆盖率不低于 80%，低于阈值必须说明原因并补测。
 - 数据库：migration up/down 或可执行 up 验证。
 - 前端：typecheck、build、必要的组件或 hook 测试；新增业务页面的关键交互必须有组件测试或 E2E 验证。
@@ -287,8 +287,8 @@
 
 主要风险和处理策略：
 
-- new-api 管理 API 能力不完整：在相关阶段先做 adapter spike 和 fake 测试，必要时保留人工绑定外部 ID 的替代路径。
-- OpenClaw CLI 输出不稳定：解析器独立测试；必要时在 runtime 镜像加入 JSON wrapper。
+- new-api 管理 API 能力不完整：在相关阶段先做 adapter spike 和 fake 测试；若能力缺失，必须在实现计划中明确人工绑定外部 ID 的替代路径和验收方式。
+- OpenClaw CLI 输出不稳定：解析器独立测试；若输出不能稳定解析，runtime 镜像必须加入 JSON wrapper。
 - Docker socket 权限高：agent 端限制网络来源、TLS、Bearer token、最小挂载和审计。
 - 跨系统状态不一致：所有长流程 job 化，外部动作幂等，失败可见且可重试。
 - 路径越权：manager 和 agent 双层路径沙箱，单元测试覆盖逃逸案例。
