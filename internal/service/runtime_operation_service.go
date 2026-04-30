@@ -17,11 +17,15 @@ import (
 // 与运行操作相关的错误。
 var (
 	ErrRuntimeOperationDenied = errors.New("无权执行运行操作")
+	ErrAppNotReinitializable  = errors.New("应用当前状态不允许重新初始化")
 )
 
 // RuntimeOperationStore 抽象 service 需要的查询能力。
 type RuntimeOperationStore interface {
 	GetApp(ctx context.Context, id pgtype.UUID) (sqlc.App, error)
+	SetAppStatus(ctx context.Context, arg sqlc.SetAppStatusParams) (sqlc.App, error)
+	SetAppNewAPIKey(ctx context.Context, arg sqlc.SetAppNewAPIKeyParams) (sqlc.App, error)
+	SetAppContainer(ctx context.Context, arg sqlc.SetAppContainerParams) (sqlc.App, error)
 	CreateJob(ctx context.Context, arg sqlc.CreateJobParams) (sqlc.Job, error)
 	CreateAuditLog(ctx context.Context, arg sqlc.CreateAuditLogParams) (sqlc.AuditLog, error)
 }
@@ -130,6 +134,89 @@ func (s *RuntimeOperationService) Trigger(ctx context.Context, principal auth.Pr
 		_ = s.notifier.Enqueue(ctx, uuidToString(job.ID))
 	}
 	return RuntimeOperationResult{JobID: uuidToString(job.ID), Operation: op}, nil
+}
+
+// RequestInitialize 触发应用初始化重试。
+//
+// 仅当应用 status ∈ {error, draft} 时允许；其它状态返回 ErrAppNotReinitializable。
+// 重置三个字段保证 worker handler 重新走完整流程：
+//   - status = draft：worker 看到 draft 后会执行 prompt 渲染、镜像分发、容器创建；
+//   - api_key_status = pending：worker 重新调用 new-api 创建 token；
+//   - container_id = NULL：worker 重新创建容器，避免旧容器残留。
+//
+// 重置不在事务中——worker 自身有状态机校验和幂等处理；即便重置过程中崩溃，
+// 下次调用仍能完成或者由人工介入。审计日志记录触发人，便于追溯。
+func (s *RuntimeOperationService) RequestInitialize(ctx context.Context, principal auth.Principal, appID string) (RuntimeOperationResult, error) {
+	id, err := parseUUID(appID)
+	if err != nil {
+		return RuntimeOperationResult{}, ErrNotFound
+	}
+	app, err := s.store.GetApp(ctx, id)
+	if errors.Is(err, pgx.ErrNoRows) {
+		return RuntimeOperationResult{}, ErrNotFound
+	}
+	if err != nil {
+		return RuntimeOperationResult{}, fmt.Errorf("查询应用失败: %w", err)
+	}
+	if !canTriggerRuntimeOperation(principal, app) {
+		return RuntimeOperationResult{}, ErrRuntimeOperationDenied
+	}
+	if app.Status != domain.AppStatusError && app.Status != domain.AppStatusDraft {
+		return RuntimeOperationResult{}, ErrAppNotReinitializable
+	}
+	if _, err := s.store.SetAppStatus(ctx, sqlc.SetAppStatusParams{ID: app.ID, Status: domain.AppStatusDraft}); err != nil {
+		return RuntimeOperationResult{}, fmt.Errorf("重置应用状态失败: %w", err)
+	}
+	if _, err := s.store.SetAppNewAPIKey(ctx, sqlc.SetAppNewAPIKeyParams{
+		ID:                  app.ID,
+		NewapiKeyID:         pgtype.Text{},
+		NewapiKeyCiphertext: pgtype.Text{},
+		ApiKeyStatus:        domain.APIKeyStatusPending,
+	}); err != nil {
+		return RuntimeOperationResult{}, fmt.Errorf("重置 api_key 状态失败: %w", err)
+	}
+	if _, err := s.store.SetAppContainer(ctx, sqlc.SetAppContainerParams{
+		ID:            app.ID,
+		ContainerID:   pgtype.Text{},
+		ContainerName: pgtype.Text{},
+	}); err != nil {
+		return RuntimeOperationResult{}, fmt.Errorf("清空 container_id 失败: %w", err)
+	}
+
+	payload, err := json.Marshal(map[string]any{
+		"app_id":       uuidToString(app.ID),
+		"runtime_node": uuidToOptionalString(app.RuntimeNodeID),
+		"requested_by": principal.UserID,
+	})
+	if err != nil {
+		return RuntimeOperationResult{}, fmt.Errorf("序列化 payload 失败: %w", err)
+	}
+	job, err := s.store.CreateJob(ctx, sqlc.CreateJobParams{
+		Type:        domain.JobTypeAppInitialize,
+		Priority:    100,
+		RunAfter:    pgtype.Timestamptz{Valid: false},
+		MaxAttempts: 3,
+		PayloadJson: payload,
+	})
+	if err != nil {
+		return RuntimeOperationResult{}, fmt.Errorf("创建初始化任务失败: %w", err)
+	}
+	actorUUID, _ := optionalUUID(principal.UserID)
+	if _, err := s.store.CreateAuditLog(ctx, sqlc.CreateAuditLogParams{
+		ActorID:    actorUUID,
+		ActorRole:  principal.Role,
+		OrgID:      app.OrgID,
+		TargetType: "app",
+		TargetID:   uuidToString(app.ID),
+		Action:     "initialize",
+		Result:     "submitted",
+	}); err != nil {
+		return RuntimeOperationResult{}, fmt.Errorf("写入审计日志失败: %w", err)
+	}
+	if s.notifier != nil {
+		_ = s.notifier.Enqueue(ctx, uuidToString(job.ID))
+	}
+	return RuntimeOperationResult{JobID: uuidToString(job.ID), Operation: "initialize"}, nil
 }
 
 func isSupportedOperation(op RuntimeOperation) bool {

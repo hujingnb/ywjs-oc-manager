@@ -19,6 +19,7 @@ type AppRuntimeHandler struct {
 
 type runtimeOperationService interface {
 	Trigger(ctx context.Context, principal auth.Principal, appID string, op service.RuntimeOperation) (service.RuntimeOperationResult, error)
+	RequestInitialize(ctx context.Context, principal auth.Principal, appID string) (service.RuntimeOperationResult, error)
 }
 
 // NewAppRuntimeHandler 创建 handler。
@@ -34,6 +35,7 @@ func RegisterAppRuntimeRoutes(router gin.IRouter, handler *AppRuntimeHandler) {
 	group.POST("/stop", handler.Stop)
 	group.POST("/restart", handler.Restart)
 	group.POST("/delete", handler.Delete)
+	router.POST("/api/v1/apps/:appId/initialize", handler.Initialize)
 }
 
 // Start 触发启动。
@@ -44,6 +46,27 @@ func (h *AppRuntimeHandler) Stop(c *gin.Context)    { h.trigger(c, service.Runti
 func (h *AppRuntimeHandler) Restart(c *gin.Context) { h.trigger(c, service.RuntimeOperationRestart) }
 // Delete 触发删除。
 func (h *AppRuntimeHandler) Delete(c *gin.Context)  { h.trigger(c, service.RuntimeOperationDelete) }
+
+// Initialize 触发应用初始化重试。
+// 仅当 status ∈ {error, draft} 允许；其它状态返回 409。
+func (h *AppRuntimeHandler) Initialize(c *gin.Context) {
+	token, ok := bearerToken(c.GetHeader("Authorization"))
+	if !ok {
+		c.JSON(http.StatusUnauthorized, gin.H{"error": "缺少访问令牌"})
+		return
+	}
+	principal, err := h.tokens.VerifyAccessToken(token)
+	if err != nil {
+		c.JSON(http.StatusUnauthorized, gin.H{"error": "访问令牌无效"})
+		return
+	}
+	result, err := h.service.RequestInitialize(c.Request.Context(), principal, c.Param("appId"))
+	if err != nil {
+		writeAppRuntimeError(c, err)
+		return
+	}
+	c.JSON(http.StatusAccepted, gin.H{"runtime_operation": result})
+}
 
 func (h *AppRuntimeHandler) trigger(c *gin.Context, op service.RuntimeOperation) {
 	token, ok := bearerToken(c.GetHeader("Authorization"))
@@ -70,6 +93,8 @@ func writeAppRuntimeError(c *gin.Context, err error) {
 		c.JSON(http.StatusForbidden, gin.H{"error": "无权执行该运行操作"})
 	case errors.Is(err, service.ErrNotFound):
 		c.JSON(http.StatusNotFound, gin.H{"error": "应用不存在"})
+	case errors.Is(err, service.ErrAppNotReinitializable):
+		c.JSON(http.StatusConflict, gin.H{"error": "应用当前状态不允许重新初始化"})
 	default:
 		c.JSON(http.StatusInternalServerError, gin.H{"error": "运行操作暂不可用"})
 	}

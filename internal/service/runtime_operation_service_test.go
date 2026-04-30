@@ -77,6 +77,61 @@ func TestRuntimeOperationSurvivesNotifierError(t *testing.T) {
 	}
 }
 
+func TestRequestInitialize_HappyPathFromError(t *testing.T) {
+	store := newRuntimeOperationStub(t)
+	store.app.Status = domain.AppStatusError
+	store.app.ApiKeyStatus = domain.APIKeyStatusError
+	store.app.ContainerID = pgtype.Text{String: "old", Valid: true}
+	notifier := &fakeNotifier{}
+	svc := NewRuntimeOperationService(store, notifier)
+
+	result, err := svc.RequestInitialize(context.Background(), platformAdmin(), testRuntimeOpAppID)
+	if err != nil {
+		t.Fatalf("RequestInitialize err = %v", err)
+	}
+	if result.JobID == "" || result.Operation != "initialize" {
+		t.Fatalf("result = %+v", result)
+	}
+	if store.app.Status != domain.AppStatusDraft {
+		t.Fatalf("status 未重置: %q", store.app.Status)
+	}
+	if store.app.ApiKeyStatus != domain.APIKeyStatusPending {
+		t.Fatalf("api_key_status 未重置: %q", store.app.ApiKeyStatus)
+	}
+	if store.app.ContainerID.Valid {
+		t.Fatalf("container_id 应该被清空，实际 = %+v", store.app.ContainerID)
+	}
+	if store.lastJobType != domain.JobTypeAppInitialize {
+		t.Fatalf("入队 job 类型 = %q, want app_initialize", store.lastJobType)
+	}
+	if !store.auditWritten {
+		t.Fatal("应当写审计日志")
+	}
+	if notifier.lastJobID != result.JobID {
+		t.Fatalf("notifier.lastJobID = %q, want %q", notifier.lastJobID, result.JobID)
+	}
+}
+
+func TestRequestInitialize_RejectsRunningStatus(t *testing.T) {
+	store := newRuntimeOperationStub(t)
+	store.app.Status = domain.AppStatusRunning
+	svc := NewRuntimeOperationService(store)
+	_, err := svc.RequestInitialize(context.Background(), platformAdmin(), testRuntimeOpAppID)
+	if !errors.Is(err, ErrAppNotReinitializable) {
+		t.Fatalf("err = %v, want ErrAppNotReinitializable", err)
+	}
+}
+
+func TestRequestInitialize_DeniesOtherOrg(t *testing.T) {
+	store := newRuntimeOperationStub(t)
+	store.app.Status = domain.AppStatusError
+	svc := NewRuntimeOperationService(store)
+	_, err := svc.RequestInitialize(context.Background(), auth.Principal{Role: domain.UserRoleOrgAdmin, OrgID: "other"}, testRuntimeOpAppID)
+	if !errors.Is(err, ErrRuntimeOperationDenied) {
+		t.Fatalf("err = %v, want ErrRuntimeOperationDenied", err)
+	}
+}
+
 func TestRuntimeOperationMembersCanOnlyTriggerOwnApp(t *testing.T) {
 	store := newRuntimeOperationStub(t)
 	svc := NewRuntimeOperationService(store)
@@ -124,6 +179,24 @@ func (s *runtimeOperationStub) CreateJob(_ context.Context, arg sqlc.CreateJobPa
 func (s *runtimeOperationStub) CreateAuditLog(_ context.Context, _ sqlc.CreateAuditLogParams) (sqlc.AuditLog, error) {
 	s.auditWritten = true
 	return sqlc.AuditLog{}, nil
+}
+
+func (s *runtimeOperationStub) SetAppStatus(_ context.Context, arg sqlc.SetAppStatusParams) (sqlc.App, error) {
+	s.app.Status = arg.Status
+	return s.app, nil
+}
+
+func (s *runtimeOperationStub) SetAppNewAPIKey(_ context.Context, arg sqlc.SetAppNewAPIKeyParams) (sqlc.App, error) {
+	s.app.ApiKeyStatus = arg.ApiKeyStatus
+	s.app.NewapiKeyID = arg.NewapiKeyID
+	s.app.NewapiKeyCiphertext = arg.NewapiKeyCiphertext
+	return s.app, nil
+}
+
+func (s *runtimeOperationStub) SetAppContainer(_ context.Context, arg sqlc.SetAppContainerParams) (sqlc.App, error) {
+	s.app.ContainerID = arg.ContainerID
+	s.app.ContainerName = arg.ContainerName
+	return s.app, nil
 }
 
 var fakeNotFound = errors.New("not found")
