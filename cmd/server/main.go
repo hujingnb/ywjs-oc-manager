@@ -205,6 +205,12 @@ func runManager(ctx context.Context, cfg config.Config, logOut io.Writer) error 
 	loop := scheduler.NewLoop(jobScheduler, 5*time.Second)
 	loop.SetLogger(logger)
 
+	nodeHealth := service.NewNodeHealthReconciler(dbStore.Queries, 90*time.Second)
+	nodeHealthTask := service.NewPeriodicReconciler("runtime_node_health_reconcile", 30*time.Second, func(ctx context.Context) error {
+		_, err := nodeHealth.Reconcile(ctx)
+		return err
+	})
+
 	eg, gctx := errgroup.WithContext(rootCtx)
 
 	eg.Go(func() error {
@@ -216,6 +222,11 @@ func runManager(ctx context.Context, cfg config.Config, logOut io.Writer) error 
 	})
 	eg.Go(func() error { return pool.Run(gctx) })
 	eg.Go(func() error { return loop.Run(gctx) })
+	eg.Go(func() error {
+		return nodeHealthTask.Run(gctx, func(format string, args ...any) {
+			logger.Printf(format, args...)
+		})
+	})
 	eg.Go(func() error {
 		<-gctx.Done()
 		shutdownCtx, shutdownCancel := context.WithTimeout(context.Background(), 30*time.Second)
