@@ -3,12 +3,15 @@ package handlers
 import (
 	"context"
 	"errors"
+	"strings"
 	"testing"
 
 	"github.com/jackc/pgx/v5/pgtype"
 
+	"oc-manager/internal/auth"
 	"oc-manager/internal/domain"
 	"oc-manager/internal/integrations/newapi"
+	runtimepkg "oc-manager/internal/integrations/runtime"
 	"oc-manager/internal/store/sqlc"
 )
 
@@ -21,17 +24,66 @@ const (
 func TestAppInitializeHandlesHappyPath(t *testing.T) {
 	store := newAppInitStub(t)
 	images := &fakeImages{}
+	containers := &fakeContainers{result: runtimepkg.ContainerInfo{ID: "ctr-1", Name: "ocm-" + testAppID, Status: "created"}}
 	client := &fakeNewAPI{result: newapi.APIKey{ID: 99, Key: "sk-test"}}
 
-	handler := NewAppInitializeHandler(store, images, client, AppInitializeConfig{RuntimeImage: "openclaw:dev"})
-	if err := handler.Handle(context.Background(), buildJob(t, testAppID, "node-1")); err != nil {
-		t.Fatalf("Handle() error = %v", err)
+	cipher, err := auth.NewCipher(make([]byte, 32))
+	if err != nil {
+		t.Fatalf("NewCipher: %v", err)
 	}
-	if !store.apiKeySet || !store.statusSet {
-		t.Fatalf("expected api key and status to be persisted: %+v", store)
+	cfg := AppInitializeConfig{
+		RuntimeImage:         "openclaw:dev",
+		SystemPromptTemplate: "工作目录:{{workspace_dir}} 组织:{{knowledge_org_dir}} 应用:{{knowledge_app_dir}}",
+		Cipher:               cipher,
+	}
+	handler := NewAppInitializeHandler(store, images, containers, client, cfg)
+
+	if err := handler.Handle(context.Background(), buildJob(t, testAppID, "node-1")); err != nil {
+		t.Fatalf("Handle err = %v", err)
+	}
+	if !store.apiKeySet || !store.statusSet || !store.containerSet {
+		t.Fatalf("api_key/status/container 应当都被持久化: %+v", store)
 	}
 	if images.lastImage != "openclaw:dev" || images.lastNode != "node-1" {
-		t.Fatalf("image dispatch = %s/%s", images.lastNode, images.lastImage)
+		t.Fatalf("镜像分发 = %s/%s", images.lastNode, images.lastImage)
+	}
+
+	// container_id 写库为 docker mock 返回的 ID。
+	if store.app.ContainerID.String != "ctr-1" {
+		t.Fatalf("container_id = %q, want ctr-1", store.app.ContainerID.String)
+	}
+
+	// ciphertext 必须可被同一 cipher 解回 sk-test，证明真的走了加密路径。
+	plain, err := cipher.Decrypt(store.app.NewapiKeyCiphertext.String)
+	if err != nil {
+		t.Fatalf("Decrypt: %v", err)
+	}
+	if string(plain) != "sk-test" {
+		t.Fatalf("decrypted = %q, want sk-test", plain)
+	}
+	if store.app.NewapiKeyCiphertext.String == "sk-test" {
+		t.Fatal("ciphertext 等于明文，加密未生效")
+	}
+
+	// 容器规格断言：5 个挂载、关键 env 项、镜像、容器名。
+	if len(containers.lastSpec.Volumes) != 5 {
+		t.Fatalf("Volumes 数量 = %d, want 5", len(containers.lastSpec.Volumes))
+	}
+	if containers.lastSpec.Image != "openclaw:dev" {
+		t.Fatalf("Image = %q", containers.lastSpec.Image)
+	}
+	if containers.lastSpec.Name != "ocm-"+testAppID {
+		t.Fatalf("Name = %q", containers.lastSpec.Name)
+	}
+	if containers.lastSpec.Env["OPENCLAW_API_KEY"] != "sk-test" {
+		t.Fatalf("OPENCLAW_API_KEY env = %q, want sk-test（容器内必须是明文）", containers.lastSpec.Env["OPENCLAW_API_KEY"])
+	}
+	if containers.lastSpec.Env["OPENCLAW_WORKSPACE_DIR"] != "/workspace" {
+		t.Fatalf("OPENCLAW_WORKSPACE_DIR env = %q", containers.lastSpec.Env["OPENCLAW_WORKSPACE_DIR"])
+	}
+	prompt := containers.lastSpec.Env["OPENCLAW_SYSTEM_PROMPT"]
+	if !strings.Contains(prompt, "/workspace") || !strings.Contains(prompt, "/knowledge/org") || !strings.Contains(prompt, "/knowledge/app") {
+		t.Fatalf("system prompt 未展开占位符: %q", prompt)
 	}
 }
 
@@ -40,37 +92,43 @@ func TestAppInitializeIsIdempotentForBindingWaiting(t *testing.T) {
 	store.app.Status = domain.AppStatusBindingWaiting
 	store.app.ApiKeyStatus = domain.APIKeyStatusActive
 	images := &fakeImages{}
+	containers := &fakeContainers{}
 	client := &fakeNewAPI{}
 
-	handler := NewAppInitializeHandler(store, images, client, AppInitializeConfig{})
+	handler := NewAppInitializeHandler(store, images, containers, client, AppInitializeConfig{})
 	if err := handler.Handle(context.Background(), buildJob(t, testAppID, "node-1")); err != nil {
-		t.Fatalf("Handle() error = %v", err)
+		t.Fatalf("Handle err = %v", err)
 	}
 	if client.calls != 0 {
-		t.Fatalf("new-api should be skipped, calls = %d", client.calls)
+		t.Fatalf("已 binding_waiting 时 new-api 不应被调用，calls = %d", client.calls)
 	}
 	if images.lastImage != "" {
-		t.Fatalf("image distribution should be skipped, got %s", images.lastImage)
+		t.Fatalf("镜像分发应当跳过，got %s", images.lastImage)
+	}
+	if containers.calls != 0 {
+		t.Fatal("CreateContainer 不应被调用")
 	}
 	if store.statusSet {
-		t.Fatalf("status update should be skipped")
+		t.Fatal("status 不应再次写入")
 	}
 }
 
 func TestAppInitializeSkipsAPIKeyWhenAlreadyActive(t *testing.T) {
 	store := newAppInitStub(t)
 	store.app.ApiKeyStatus = domain.APIKeyStatusActive
+	store.app.NewapiKeyCiphertext = pgtype.Text{String: "old-key", Valid: true}
 	client := &fakeNewAPI{}
+	containers := &fakeContainers{result: runtimepkg.ContainerInfo{ID: "c", Name: "n"}}
 
-	handler := NewAppInitializeHandler(store, &fakeImages{}, client, AppInitializeConfig{})
+	handler := NewAppInitializeHandler(store, &fakeImages{}, containers, client, AppInitializeConfig{})
 	if err := handler.Handle(context.Background(), buildJob(t, testAppID, "")); err != nil {
-		t.Fatalf("Handle() error = %v", err)
+		t.Fatalf("Handle err = %v", err)
 	}
 	if client.calls != 0 {
-		t.Fatalf("new-api should not be called when key already active")
+		t.Fatal("api_key 已 active 时 new-api 不应被调用")
 	}
 	if !store.statusSet {
-		t.Fatalf("status should still be promoted to binding_waiting")
+		t.Fatal("status 仍应推到 binding_waiting")
 	}
 }
 
@@ -78,23 +136,55 @@ func TestAppInitializePropagatesNewAPIError(t *testing.T) {
 	store := newAppInitStub(t)
 	client := &fakeNewAPI{err: newapi.ErrUpstream}
 
-	handler := NewAppInitializeHandler(store, &fakeImages{}, client, AppInitializeConfig{})
+	handler := NewAppInitializeHandler(store, &fakeImages{}, &fakeContainers{}, client, AppInitializeConfig{})
 	err := handler.Handle(context.Background(), buildJob(t, testAppID, ""))
 	if !errors.Is(err, newapi.ErrUpstream) {
 		t.Fatalf("error = %v, want ErrUpstream", err)
 	}
 	if store.statusSet {
-		t.Fatalf("status should not be updated on failure")
+		t.Fatal("失败时不应推 status")
+	}
+}
+
+func TestAppInitializePropagatesContainerError(t *testing.T) {
+	store := newAppInitStub(t)
+	containers := &fakeContainers{err: errors.New("boom")}
+	client := &fakeNewAPI{result: newapi.APIKey{ID: 1, Key: "k"}}
+	handler := NewAppInitializeHandler(store, &fakeImages{}, containers, client, AppInitializeConfig{})
+	err := handler.Handle(context.Background(), buildJob(t, testAppID, "node-1"))
+	if err == nil || !strings.Contains(err.Error(), "创建容器失败") {
+		t.Fatalf("error = %v, want 创建容器失败", err)
+	}
+	if store.statusSet {
+		t.Fatal("失败时不应推 status")
 	}
 }
 
 func TestAppInitializeRejectsInvalidPayload(t *testing.T) {
 	store := newAppInitStub(t)
-	handler := NewAppInitializeHandler(store, &fakeImages{}, &fakeNewAPI{}, AppInitializeConfig{})
+	handler := NewAppInitializeHandler(store, &fakeImages{}, &fakeContainers{}, &fakeNewAPI{}, AppInitializeConfig{})
 
 	job := sqlc.Job{Type: domain.JobTypeAppInitialize, PayloadJson: []byte(`{"runtime_node":"node-1"}`)}
 	if err := handler.Handle(context.Background(), job); err == nil {
-		t.Fatalf("expected error for missing app_id")
+		t.Fatalf("缺 app_id 应当报错")
+	}
+}
+
+func TestAppInitializeContainerStepSkippedWhenContainerExists(t *testing.T) {
+	store := newAppInitStub(t)
+	store.app.ContainerID = pgtype.Text{String: "already-there", Valid: true}
+	containers := &fakeContainers{}
+	client := &fakeNewAPI{result: newapi.APIKey{ID: 1, Key: "k"}}
+
+	handler := NewAppInitializeHandler(store, &fakeImages{}, containers, client, AppInitializeConfig{})
+	if err := handler.Handle(context.Background(), buildJob(t, testAppID, "node-1")); err != nil {
+		t.Fatalf("Handle err = %v", err)
+	}
+	if containers.calls != 0 {
+		t.Fatal("已有 container_id 时不应再次创建容器")
+	}
+	if store.containerSet {
+		t.Fatal("container_id 不应被重写")
 	}
 }
 
@@ -105,12 +195,14 @@ func buildJob(t *testing.T, appID, nodeID string) sqlc.Job {
 }
 
 type appInitStub struct {
-	t          *testing.T
-	app        sqlc.App
-	org        sqlc.Organization
-	user       sqlc.User
-	apiKeySet  bool
-	statusSet  bool
+	t            *testing.T
+	app          sqlc.App
+	org          sqlc.Organization
+	user         sqlc.User
+	node         sqlc.RuntimeNode
+	apiKeySet    bool
+	statusSet    bool
+	containerSet bool
 }
 
 func newAppInitStub(t *testing.T) *appInitStub {
@@ -128,6 +220,7 @@ func newAppInitStub(t *testing.T) *appInitStub {
 		},
 		org:  sqlc.Organization{Name: "测试组织", Status: domain.StatusActive},
 		user: sqlc.User{DisplayName: "Alice"},
+		node: sqlc.RuntimeNode{NodeDataRoot: pgtype.Text{String: "/var/lib/oc-agent", Valid: true}},
 	}
 }
 
@@ -137,11 +230,22 @@ func (s *appInitStub) GetOrganization(_ context.Context, _ pgtype.UUID) (sqlc.Or
 }
 func (s *appInitStub) GetUser(_ context.Context, _ pgtype.UUID) (sqlc.User, error) { return s.user, nil }
 
+func (s *appInitStub) GetRuntimeNode(_ context.Context, _ pgtype.UUID) (sqlc.RuntimeNode, error) {
+	return s.node, nil
+}
+
 func (s *appInitStub) SetAppNewAPIKey(_ context.Context, arg sqlc.SetAppNewAPIKeyParams) (sqlc.App, error) {
 	s.apiKeySet = true
 	s.app.ApiKeyStatus = arg.ApiKeyStatus
 	s.app.NewapiKeyID = arg.NewapiKeyID
 	s.app.NewapiKeyCiphertext = arg.NewapiKeyCiphertext
+	return s.app, nil
+}
+
+func (s *appInitStub) SetAppContainer(_ context.Context, arg sqlc.SetAppContainerParams) (sqlc.App, error) {
+	s.containerSet = true
+	s.app.ContainerID = arg.ContainerID
+	s.app.ContainerName = arg.ContainerName
 	return s.app, nil
 }
 
@@ -160,6 +264,24 @@ func (f *fakeImages) EnsureRuntimeImage(_ context.Context, nodeID, image string)
 	f.lastNode = nodeID
 	f.lastImage = image
 	return nil, nil
+}
+
+type fakeContainers struct {
+	result   runtimepkg.ContainerInfo
+	err      error
+	calls    int
+	lastNode string
+	lastSpec runtimepkg.ContainerSpec
+}
+
+func (f *fakeContainers) CreateContainer(_ context.Context, nodeID string, spec runtimepkg.ContainerSpec) (runtimepkg.ContainerInfo, error) {
+	f.calls++
+	f.lastNode = nodeID
+	f.lastSpec = spec
+	if f.err != nil {
+		return runtimepkg.ContainerInfo{}, f.err
+	}
+	return f.result, nil
 }
 
 type fakeNewAPI struct {
