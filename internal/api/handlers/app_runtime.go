@@ -20,6 +20,7 @@ type AppRuntimeHandler struct {
 type runtimeOperationService interface {
 	Trigger(ctx context.Context, principal auth.Principal, appID string, op service.RuntimeOperation) (service.RuntimeOperationResult, error)
 	RequestInitialize(ctx context.Context, principal auth.Principal, appID string) (service.RuntimeOperationResult, error)
+	InspectApp(ctx context.Context, principal auth.Principal, appID string) (service.RuntimeView, error)
 }
 
 // NewAppRuntimeHandler 创建 handler。
@@ -36,6 +37,7 @@ func RegisterAppRuntimeRoutes(router gin.IRouter, handler *AppRuntimeHandler) {
 	group.POST("/restart", handler.Restart)
 	group.POST("/delete", handler.Delete)
 	router.POST("/api/v1/apps/:appId/initialize", handler.Initialize)
+	router.GET("/api/v1/apps/:appId/runtime", handler.GetRuntime)
 }
 
 // Start 触发启动。
@@ -46,6 +48,27 @@ func (h *AppRuntimeHandler) Stop(c *gin.Context)    { h.trigger(c, service.Runti
 func (h *AppRuntimeHandler) Restart(c *gin.Context) { h.trigger(c, service.RuntimeOperationRestart) }
 // Delete 触发删除。
 func (h *AppRuntimeHandler) Delete(c *gin.Context)  { h.trigger(c, service.RuntimeOperationDelete) }
+
+// GetRuntime 返回应用容器的 inspect 视图。
+// container_id 为空时直接返回 status="no_container"，避免无谓的 docker 调用。
+func (h *AppRuntimeHandler) GetRuntime(c *gin.Context) {
+	token, ok := bearerToken(c.GetHeader("Authorization"))
+	if !ok {
+		c.JSON(http.StatusUnauthorized, gin.H{"error": "缺少访问令牌"})
+		return
+	}
+	principal, err := h.tokens.VerifyAccessToken(token)
+	if err != nil {
+		c.JSON(http.StatusUnauthorized, gin.H{"error": "访问令牌无效"})
+		return
+	}
+	view, err := h.service.InspectApp(c.Request.Context(), principal, c.Param("appId"))
+	if err != nil {
+		writeAppRuntimeError(c, err)
+		return
+	}
+	c.JSON(http.StatusOK, gin.H{"runtime": view})
+}
 
 // Initialize 触发应用初始化重试。
 // 仅当 status ∈ {error, draft} 允许；其它状态返回 409。

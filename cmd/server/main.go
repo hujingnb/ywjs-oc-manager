@@ -111,12 +111,14 @@ func runManager(ctx context.Context, cfg config.Config, logOut io.Writer) error 
 	knowledgeService := service.NewKnowledgeService(files.NewKnowledgeMaster(safeRoot))
 	appService := service.NewAppService(dbStore.Queries)
 	runtimeOpService := service.NewRuntimeOperationService(dbStore.Queries, redisQueue)
+	// runtime inspector 在 runtimeAdapter 构造之后注入；这里先声明字段，后面赋值。
 
 	agentTokenResolver := agent.NewTokenResolver()
 	nodeResolver := newNodeClientResolver(dbStore.Queries, agentTokenResolver)
 
 	imageSync := imagesync.New(imagesync.LocalDockerCLIProvider{}, nodeResolver)
 	runtimeAdapter := runtime.NewAgentBackedAdapter(nodeResolver, nodeResolver, imageSync)
+	runtimeOpService.SetInspector(newRuntimeInspectorWrapper(runtimeAdapter))
 
 	channelRegistry := channel.NewRegistry()
 	channelService := service.NewChannelService(dbStore.Queries, channelRegistry)

@@ -122,6 +122,76 @@ func TestRequestInitialize_RejectsRunningStatus(t *testing.T) {
 	}
 }
 
+func TestInspectApp_NoContainerReturnsSentinel(t *testing.T) {
+	store := newRuntimeOperationStub(t)
+	store.app.ContainerID = pgtype.Text{}
+	svc := NewRuntimeOperationService(store)
+	view, err := svc.InspectApp(context.Background(), platformAdmin(), testRuntimeOpAppID)
+	if err != nil {
+		t.Fatalf("InspectApp err = %v", err)
+	}
+	if view.Status != "no_container" {
+		t.Fatalf("status = %q, want no_container", view.Status)
+	}
+	if view.Container != nil {
+		t.Fatal("container 应当为 nil")
+	}
+}
+
+func TestInspectApp_DelegatesToInspectorWhenAvailable(t *testing.T) {
+	store := newRuntimeOperationStub(t)
+	store.app.ContainerID = pgtype.Text{String: "ctr-x", Valid: true}
+	svc := NewRuntimeOperationService(store)
+	svc.SetInspector(stubInspector{info: RuntimeContainerInfo{ID: "ctr-x", Status: "running"}})
+	view, err := svc.InspectApp(context.Background(), platformAdmin(), testRuntimeOpAppID)
+	if err != nil {
+		t.Fatalf("InspectApp err = %v", err)
+	}
+	if view.Status != "running" || view.Container == nil || view.Container.ID != "ctr-x" {
+		t.Fatalf("view = %+v", view)
+	}
+}
+
+func TestInspectApp_FallsBackToDBStatusWithoutInspector(t *testing.T) {
+	store := newRuntimeOperationStub(t)
+	store.app.ContainerID = pgtype.Text{String: "ctr-x", Valid: true}
+	store.app.Status = domain.AppStatusRunning
+	svc := NewRuntimeOperationService(store)
+	view, err := svc.InspectApp(context.Background(), platformAdmin(), testRuntimeOpAppID)
+	if err != nil {
+		t.Fatalf("err = %v", err)
+	}
+	if view.Status != domain.AppStatusRunning {
+		t.Fatalf("status = %q, want running", view.Status)
+	}
+}
+
+func TestInspectApp_InspectorErrorMapsToErrorStatus(t *testing.T) {
+	store := newRuntimeOperationStub(t)
+	store.app.ContainerID = pgtype.Text{String: "ctr-x", Valid: true}
+	svc := NewRuntimeOperationService(store)
+	svc.SetInspector(stubInspector{err: errors.New("connection refused")})
+	view, err := svc.InspectApp(context.Background(), platformAdmin(), testRuntimeOpAppID)
+	if err != nil {
+		t.Fatalf("err = %v", err)
+	}
+	if view.Status != "error" {
+		t.Fatalf("status = %q, want error", view.Status)
+	}
+}
+
+type stubInspector struct {
+	info RuntimeContainerInfo
+	err  error
+}
+
+func (s stubInspector) InspectContainer(_ context.Context, _, _ string) (RuntimeContainerInfo, error) {
+	if s.err != nil {
+		return RuntimeContainerInfo{}, s.err
+	}
+	return s.info, nil
+}
+
 func TestRequestInitialize_DeniesOtherOrg(t *testing.T) {
 	store := newRuntimeOperationStub(t)
 	store.app.Status = domain.AppStatusError

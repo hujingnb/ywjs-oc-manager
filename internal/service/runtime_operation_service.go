@@ -37,6 +37,28 @@ type JobNotifier interface {
 	Enqueue(ctx context.Context, jobID string) error
 }
 
+// RuntimeInspector 抽象 manager 通过 agent docker 代理 inspect 节点容器的能力。
+// 与 runtime.Adapter.InspectContainer 兼容；service 层只关心结构化结果。
+type RuntimeInspector interface {
+	InspectContainer(ctx context.Context, nodeID, containerID string) (RuntimeContainerInfo, error)
+}
+
+// RuntimeContainerInfo 是面向 service/handler 的最小容器视图。
+// 与 runtime.ContainerInfo 字段一致，单独定义是为了让上层不依赖 runtime 包。
+type RuntimeContainerInfo struct {
+	ID     string `json:"id"`
+	Name   string `json:"name"`
+	Image  string `json:"image"`
+	Status string `json:"status"`
+}
+
+// RuntimeView 是 GET /apps/:appId/runtime 接口的响应视图。
+// container_id 为空时只返回 status="no_container"，前端据此切换"未创建容器"提示。
+type RuntimeView struct {
+	Status    string                `json:"status"`
+	Container *RuntimeContainerInfo `json:"container,omitempty"`
+}
+
 // RuntimeOperationService 把启动/停止/重启/删除应用容器等高风险操作转化为 worker 任务。
 //
 // 高风险操作的含义：
@@ -46,8 +68,9 @@ type JobNotifier interface {
 //
 // JobNotifier 可不传：未注入时只写库，由 scheduler 兜底入队（吞吐降级，延迟最长一个 scheduler 周期）。
 type RuntimeOperationService struct {
-	store    RuntimeOperationStore
-	notifier JobNotifier
+	store     RuntimeOperationStore
+	notifier  JobNotifier
+	inspector RuntimeInspector
 }
 
 // NewRuntimeOperationService 创建运行操作服务。
@@ -58,6 +81,50 @@ func NewRuntimeOperationService(store RuntimeOperationStore, notifier ...JobNoti
 		n = notifier[0]
 	}
 	return &RuntimeOperationService{store: store, notifier: n}
+}
+
+// SetInspector 注入 runtime inspector（cmd/server 装配时可选）。
+// inspector 为 nil 时 InspectApp 仅返回库内 status，不调 docker。
+func (s *RuntimeOperationService) SetInspector(inspector RuntimeInspector) {
+	s.inspector = inspector
+}
+
+// InspectApp 透传应用容器的 docker inspect 状态。
+//
+// 行为：
+//   - 校验权限、加载 app；
+//   - container_id 为空 → 返回 RuntimeView{Status:"no_container"}；
+//   - inspector 未配置 → 返回 RuntimeView{Status: app.Status}（库内状态兜底）；
+//   - inspector 错误 → 返回 RuntimeView{Status:"error", Container:nil}，让前端展示"无法连接节点"。
+func (s *RuntimeOperationService) InspectApp(ctx context.Context, principal auth.Principal, appID string) (RuntimeView, error) {
+	id, err := parseUUID(appID)
+	if err != nil {
+		return RuntimeView{}, ErrNotFound
+	}
+	app, err := s.store.GetApp(ctx, id)
+	if errors.Is(err, pgx.ErrNoRows) {
+		return RuntimeView{}, ErrNotFound
+	}
+	if err != nil {
+		return RuntimeView{}, fmt.Errorf("查询应用失败: %w", err)
+	}
+	if !canViewApp(principal, app) {
+		return RuntimeView{}, ErrForbidden
+	}
+	if !app.ContainerID.Valid || app.ContainerID.String == "" {
+		return RuntimeView{Status: "no_container"}, nil
+	}
+	if s.inspector == nil {
+		return RuntimeView{Status: app.Status}, nil
+	}
+	info, err := s.inspector.InspectContainer(ctx, uuidToString(app.RuntimeNodeID), app.ContainerID.String)
+	if err != nil {
+		return RuntimeView{Status: "error"}, nil
+	}
+	return RuntimeView{
+		Status:    info.Status,
+		Container: &info,
+	}, nil
 }
 
 // RuntimeOperation 定义本服务支持的操作枚举。

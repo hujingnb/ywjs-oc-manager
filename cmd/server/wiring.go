@@ -14,6 +14,7 @@ import (
 	"github.com/jackc/pgx/v5/pgtype"
 
 	"oc-manager/internal/integrations/agent"
+	"oc-manager/internal/integrations/runtime"
 	"oc-manager/internal/runtime/imagesync"
 	"oc-manager/internal/service"
 	"oc-manager/internal/store/sqlc"
@@ -165,6 +166,36 @@ func parseUUIDForWiring(value string) (pgtype.UUID, error) {
 		return pgtype.UUID{}, err
 	}
 	return id, nil
+}
+
+// runtimeInspectorWrapper 把 runtime.Adapter.InspectContainer 适配成 service.RuntimeInspector。
+// service 层只声明最小接口形态，wrapper 在 cmd/server 把 runtime 包的具体类型翻译过去。
+type runtimeInspectorWrapper struct {
+	adapter inspectingAdapter
+}
+
+// inspectingAdapter 描述 runtime.Adapter 中我们用到的 InspectContainer 子集。
+type inspectingAdapter interface {
+	InspectContainer(ctx context.Context, nodeID, containerID string) (runtime.ContainerInfo, error)
+}
+
+func newRuntimeInspectorWrapper(adapter inspectingAdapter) *runtimeInspectorWrapper {
+	return &runtimeInspectorWrapper{adapter: adapter}
+}
+
+// InspectContainer 实现 service.RuntimeInspector，把 runtime.ContainerInfo 转换为
+// service 层的视图字段。
+func (w *runtimeInspectorWrapper) InspectContainer(ctx context.Context, nodeID, containerID string) (service.RuntimeContainerInfo, error) {
+	info, err := w.adapter.InspectContainer(ctx, nodeID, containerID)
+	if err != nil {
+		return service.RuntimeContainerInfo{}, err
+	}
+	return service.RuntimeContainerInfo{
+		ID:     info.ID,
+		Name:   info.Name,
+		Image:  info.Image,
+		Status: info.Status,
+	}, nil
 }
 
 // imageDistributorWrapper 把 service.ImageDistributionService 适配成 handlers.ImageDistributor 的
