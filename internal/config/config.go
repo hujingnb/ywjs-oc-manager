@@ -13,6 +13,9 @@ type Config struct {
 	Database DatabaseConfig `yaml:"database"`
 	Redis    RedisConfig    `yaml:"redis"`
 	Auth     AuthConfig     `yaml:"auth"`
+	Security SecurityConfig `yaml:"security"`
+	OpenClaw OpenClawConfig `yaml:"openclaw"`
+	Agent    AgentConfig    `yaml:"agent"`
 }
 
 // AppConfig 描述 manager API 进程自身的运行参数。
@@ -49,6 +52,34 @@ type AuthConfig struct {
 	JWTAccessSecret  string   `yaml:"jwt_access_secret"`
 	JWTRefreshSecret string   `yaml:"jwt_refresh_secret"`
 	CSRFSecret       string   `yaml:"csrf_secret"`
+}
+
+// SecurityConfig 描述敏感字段加解密所需的根密钥。
+// MasterKey 必须是 base64 编码的 32 字节随机数，缺失或长度不符时启动 fail-fast；
+// 不在配置文件落明文，由部署侧通过 ${MASTER_KEY} 环境变量注入。
+type SecurityConfig struct {
+	MasterKey string `yaml:"master_key"`
+}
+
+// OpenClawConfig 描述 OpenClaw runtime 容器及人设模板相关配置。
+// SystemPromptTemplate 必须包含 {{workspace_dir}} / {{knowledge_org_dir}} / {{knowledge_app_dir}}
+// 三个占位符，避免第二/三层人设拼接时丢失目录上下文。
+type OpenClawConfig struct {
+	RuntimeImage         string          `yaml:"runtime_image"`
+	SystemPromptTemplate string          `yaml:"system_prompt_template"`
+	Workspace            WorkspaceConfig `yaml:"workspace"`
+}
+
+// WorkspaceConfig 描述应用工作目录归档相关参数。
+// ArchiveRetentionDays 控制 agent 端归档目录保留天数，0 表示不清理（仅本地调试场景使用）。
+type WorkspaceConfig struct {
+	ArchiveRetentionDays int `yaml:"archive_retention_days"`
+}
+
+// AgentConfig 描述 manager 与 runtime agent 的协议参数。
+// HeartbeatIntervalSeconds 是约定值，agent 注册成功后回写并按此频率上报心跳。
+type AgentConfig struct {
+	HeartbeatIntervalSeconds int `yaml:"heartbeat_interval_seconds"`
 }
 
 // Duration 让 YAML 中的 "15m"、"720h" 这类字符串显式解析为 time.Duration。

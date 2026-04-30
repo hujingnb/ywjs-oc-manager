@@ -1,6 +1,7 @@
 package config
 
 import (
+	"encoding/base64"
 	"errors"
 	"fmt"
 	"os"
@@ -66,8 +67,44 @@ func (c Config) Validate() error {
 	if strings.TrimSpace(c.Auth.CSRFSecret) == "" {
 		missing = append(missing, "auth.csrf_secret")
 	}
+	if strings.TrimSpace(c.Security.MasterKey) == "" {
+		missing = append(missing, "security.master_key")
+	}
+	if strings.TrimSpace(c.OpenClaw.SystemPromptTemplate) == "" {
+		missing = append(missing, "openclaw.system_prompt_template")
+	}
 	if len(missing) > 0 {
 		return fmt.Errorf("缺少必需配置: %s", strings.Join(missing, ", "))
+	}
+	if err := validateMasterKey(c.Security.MasterKey); err != nil {
+		return err
+	}
+	if err := validatePromptTemplate(c.OpenClaw.SystemPromptTemplate); err != nil {
+		return err
+	}
+	return nil
+}
+
+// validateMasterKey 校验 base64 解码后的根密钥长度是否为 32 字节。
+// 32 字节对应 AES-256-GCM 的 key 长度；任何偏差都意味着部署侧密钥生成方式不正确，必须 fail-fast。
+func validateMasterKey(value string) error {
+	raw, err := base64.StdEncoding.DecodeString(value)
+	if err != nil {
+		return fmt.Errorf("security.master_key 必须是合法 base64: %w", err)
+	}
+	if len(raw) != 32 {
+		return fmt.Errorf("security.master_key 解码后必须是 32 字节，实际 %d", len(raw))
+	}
+	return nil
+}
+
+// validatePromptTemplate 强制 system prompt 模板包含三类目录占位符。
+// 否则 prompt 拼接时会丢失对工作目录与知识库目录的引用，OpenClaw 容器无法正确读写文件。
+func validatePromptTemplate(template string) error {
+	for _, placeholder := range []string{"{{workspace_dir}}", "{{knowledge_org_dir}}", "{{knowledge_app_dir}}"} {
+		if !strings.Contains(template, placeholder) {
+			return fmt.Errorf("openclaw.system_prompt_template 必须包含占位符 %s", placeholder)
+		}
 	}
 	return nil
 }

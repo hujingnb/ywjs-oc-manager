@@ -20,3 +20,23 @@ auth:
   jwt_access_secret: "${JWT_ACCESS_SECRET}"
   jwt_refresh_secret: "${JWT_REFRESH_SECRET}"
   csrf_secret: "${CSRF_SECRET}"
+
+# 敏感字段加密根密钥；必须是 base64 编码的 32 字节随机数。
+# 生成示例：openssl rand -base64 32
+security:
+  master_key: "${MASTER_KEY}"
+
+# OpenClaw runtime 容器及人设模板配置。
+# system_prompt_template 必须包含 {{workspace_dir}} / {{knowledge_org_dir}} / {{knowledge_app_dir}}。
+openclaw:
+  runtime_image: "openclaw-runtime:dev"
+  system_prompt_template: |
+    你是 OpenClaw 智能助手。
+    生成文件请输出到 {{workspace_dir}}。
+    组织级知识库（只读）：{{knowledge_org_dir}}
+    应用级知识库（只读）：{{knowledge_app_dir}}
+  workspace:
+    archive_retention_days: 14
+
+agent:
+  heartbeat_interval_seconds: 30
