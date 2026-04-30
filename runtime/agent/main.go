@@ -2,12 +2,16 @@ package main
 
 import (
 	"context"
+	"encoding/base64"
 	"encoding/json"
 	"errors"
+	"fmt"
+	"io"
 	"log"
 	"net/http"
 	"os"
 	"os/signal"
+	"path/filepath"
 	"syscall"
 	"time"
 )
@@ -25,32 +29,155 @@ type ErrorResponse struct {
 	Error string `json:"error"`
 }
 
+// agentOptions 集中描述 agent 进程启动期的全部可调参数。
+// 单独抽出便于测试用临时目录、随机端口和短超时值进行覆盖。
+type agentOptions struct {
+	dataRoot      string
+	stateDir      string
+	dockerSocket  string
+	agentToken    string
+	trustedCIDR   string
+	hostname      string
+	dockerAddr    string // ":7001"
+	fileAddr      string // ":7002"
+	dockerProxy   bool   // 是否启用 docker proxy（测试可关闭，避免随机端口冲突）
+	enableSignals bool   // 生产场景监听 SIGINT/SIGTERM；测试中由 ctx 控制退出
+}
+
+func defaultOptions() agentOptions {
+	return agentOptions{
+		dataRoot:      getenv("DATA_ROOT", "/var/lib/oc-agent"),
+		stateDir:      getenv("AGENT_STATE_DIR", "/var/lib/oc-agent/state"),
+		dockerSocket:  getenv("DOCKER_SOCKET", "/var/run/docker.sock"),
+		agentToken:    getenv("AGENT_TOKEN", ""),
+		trustedCIDR:   getenv("AGENT_TRUSTED_CIDR", ""),
+		hostname:      hostnameOrEmpty(),
+		dockerAddr:    ":7001",
+		fileAddr:      ":7002",
+		dockerProxy:   true,
+		enableSignals: true,
+	}
+}
+
 func main() {
-	dataRoot := getenv("DATA_ROOT", "/var/lib/oc-agent")
-	handler := newHandler(dataRoot)
+	if err := runAgent(context.Background(), defaultOptions(), os.Stdout); err != nil {
+		log.Fatalf("agent 退出: %v", err)
+	}
+}
 
+// runAgent 启动 agent 的两个 HTTP 服务并阻塞直到 ctx 取消或收到信号。
+//
+// 启动顺序：
+//  1. 加载或生成自签 TLS 证书；
+//  2. 把 CA PEM 以 base64 单行格式写到 stdout，便于运维或自动化 bootstrap 抓取；
+//  3. 用 ListenAndServeTLS 起 docker proxy 端口（bearer + CIDR 中间件已包好）；
+//  4. 用 ListenAndServe 起文件 API 端口（B 阶段会再加 TLS）；
+//  5. 阻塞，收到 SIGINT/SIGTERM 或 ctx 取消时优雅关闭。
+//
+// stdout 在生产是 os.Stdout，测试场景由调用方传 *bytes.Buffer，便于断言 CA PEM 输出。
+func runAgent(ctx context.Context, opts agentOptions, stdout io.Writer) error {
+	if err := os.MkdirAll(opts.stateDir, 0o700); err != nil {
+		return fmt.Errorf("创建 state 目录失败: %w", err)
+	}
+	bundle, err := EnsureSelfSignedCert(opts.stateDir, opts.hostname)
+	if err != nil {
+		return fmt.Errorf("初始化 TLS 证书失败: %w", err)
+	}
+	caBase64 := base64.StdEncoding.EncodeToString(bundle.CACertPEM)
+	if _, err := fmt.Fprintf(stdout, "agent-ca-pem-base64: %s\n", caBase64); err != nil {
+		return fmt.Errorf("输出 CA PEM 失败: %w", err)
+	}
+
+	dataHandler := newHandler(opts.dataRoot)
 	fileServer := &http.Server{
-		Addr:              ":7002",
-		Handler:           handler,
-		ReadHeaderTimeout: 5 * time.Second,
-	}
-	dockerProxyServer := &http.Server{
-		Addr:              ":7001",
-		Handler:           handler,
+		Addr:              opts.fileAddr,
+		Handler:           dataHandler,
 		ReadHeaderTimeout: 5 * time.Second,
 	}
 
-	go serve("file-api", fileServer)
-	go serve("docker-proxy", dockerProxyServer)
+	var dockerServer *http.Server
+	if opts.dockerProxy {
+		dockerHandler := newDockerEntryHandler(opts, dataHandler)
+		dockerServer = &http.Server{
+			Addr:              opts.dockerAddr,
+			Handler:           dockerHandler,
+			ReadHeaderTimeout: 5 * time.Second,
+		}
+	}
+
+	certPath := filepath.Join(opts.stateDir, certFileName)
+	keyPath := filepath.Join(opts.stateDir, keyFileName)
+
+	errCh := make(chan error, 2)
+	go func() {
+		log.Printf("file-api listening on %s", fileServer.Addr)
+		if err := fileServer.ListenAndServe(); err != nil && !errors.Is(err, http.ErrServerClosed) {
+			errCh <- fmt.Errorf("file-api: %w", err)
+			return
+		}
+		errCh <- nil
+	}()
+	if dockerServer != nil {
+		go func() {
+			log.Printf("docker-proxy listening on %s (TLS)", dockerServer.Addr)
+			if err := dockerServer.ListenAndServeTLS(certPath, keyPath); err != nil && !errors.Is(err, http.ErrServerClosed) {
+				errCh <- fmt.Errorf("docker-proxy: %w", err)
+				return
+			}
+			errCh <- nil
+		}()
+	}
 
 	stop := make(chan os.Signal, 1)
-	signal.Notify(stop, syscall.SIGINT, syscall.SIGTERM)
-	<-stop
+	if opts.enableSignals {
+		signal.Notify(stop, syscall.SIGINT, syscall.SIGTERM)
+	}
+	select {
+	case <-ctx.Done():
+	case <-stop:
+	case err := <-errCh:
+		// 任一 server 提前退出立刻关闭另一个并冒泡错误。
+		shutdownServers(fileServer, dockerServer)
+		return err
+	}
+	return shutdownServers(fileServer, dockerServer)
+}
 
+func shutdownServers(servers ...*http.Server) error {
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
-	_ = fileServer.Shutdown(ctx)
-	_ = dockerProxyServer.Shutdown(ctx)
+	var firstErr error
+	for _, s := range servers {
+		if s == nil {
+			continue
+		}
+		if err := s.Shutdown(ctx); err != nil && firstErr == nil {
+			firstErr = err
+		}
+	}
+	return firstErr
+}
+
+func hostnameOrEmpty() string {
+	name, err := os.Hostname()
+	if err != nil {
+		return ""
+	}
+	return name
+}
+
+// newDockerEntryHandler 组装 docker proxy 与未来共用 mux 的入口。
+// /v1/docker/* 走 docker socket 反向代理；其它 path 透传到 fallback handler，
+// 让 healthz / file API ping 等路由可以共用同一进程。
+func newDockerEntryHandler(opts agentOptions, fallback http.Handler) http.Handler {
+	proxy := NewDockerProxyHandler(opts.dockerSocket, opts.agentToken, opts.trustedCIDR)
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if len(r.URL.Path) >= len(dockerProxyPathPrefix) && r.URL.Path[:len(dockerProxyPathPrefix)] == dockerProxyPathPrefix {
+			proxy.ServeHTTP(w, r)
+			return
+		}
+		fallback.ServeHTTP(w, r)
+	})
 }
 
 func newHandler(dataRoot string) http.Handler {
@@ -113,13 +240,6 @@ func newHandlerWithDocker(dataRoot string, docker DockerClient, agentToken strin
 		writeJSON(w, map[string]any{"loaded": true, "image": image, "info": info})
 	}))
 	return mux
-}
-
-func serve(name string, server *http.Server) {
-	log.Printf("%s listening on %s", name, server.Addr)
-	if err := server.ListenAndServe(); err != nil && err != http.ErrServerClosed {
-		log.Fatalf("%s stopped unexpectedly: %v", name, err)
-	}
 }
 
 func writeJSON(w http.ResponseWriter, value any) {
