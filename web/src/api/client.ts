@@ -10,7 +10,7 @@ export interface ApiError extends Error {
 }
 
 export interface RequestOptions {
-  method?: 'GET' | 'POST' | 'PATCH' | 'DELETE'
+  method?: 'GET' | 'POST' | 'PUT' | 'PATCH' | 'DELETE'
   body?: unknown
   query?: Record<string, string | number | undefined>
   /** 关闭时不附加 Authorization，例如登录接口 */

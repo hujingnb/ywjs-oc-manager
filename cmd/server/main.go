@@ -111,6 +111,7 @@ func runManager(ctx context.Context, cfg config.Config, logOut io.Writer) error 
 	knowledgeService := service.NewKnowledgeService(files.NewKnowledgeMaster(safeRoot))
 	appService := service.NewAppService(dbStore.Queries)
 	runtimeOpService := service.NewRuntimeOperationService(dbStore.Queries, redisQueue)
+	personaService := service.NewPersonaService(store.NewPersonaStore(dbStore))
 	var rechargeService *service.RechargeService
 	// runtime inspector 在 runtimeAdapter 构造之后注入；这里先声明字段，后面赋值。
 
@@ -181,6 +182,7 @@ func runManager(ctx context.Context, cfg config.Config, logOut io.Writer) error 
 			RuntimeOpService:    runtimeOpService,
 			AppService:          appService,
 			RechargeService:     rechargeService,
+			PersonaService:      personaService,
 			JobsStore:           dbStore.Queries,
 			TokenManager:        tokenManager,
 			AgentTokenSink:      agentTokenResolver.Set,
