@@ -81,6 +81,50 @@ func TestAgentHeartbeatPropagatesAgentTokenError(t *testing.T) {
 	}
 }
 
+func TestAgentRegisterPushesTokenToSink(t *testing.T) {
+	stub := &agentEndpointsStub{registerResult: service.AgentRegisterResult{NodeID: "node-99", AgentToken: "agent-x", HeartbeatIntervalSeconds: 30}}
+	var seenNode, seenToken string
+	gin.SetMode(gin.ReleaseMode)
+	router := gin.New()
+	handler := NewAgentEndpointsHandler(stub, func(nodeID, token string) {
+		seenNode = nodeID
+		seenToken = token
+	})
+	RegisterAgentRoutes(router, handler)
+
+	body := bytes.NewBufferString(`{"bootstrap_token":"boot"}`)
+	recorder := httptest.NewRecorder()
+	request := httptest.NewRequest(http.MethodPost, "/api/v1/agent/register", body)
+	request.Header.Set("Content-Type", "application/json")
+	router.ServeHTTP(recorder, request)
+
+	if recorder.Code != http.StatusOK {
+		t.Fatalf("status = %d, body=%s", recorder.Code, recorder.Body.String())
+	}
+	if seenNode != "node-99" || seenToken != "agent-x" {
+		t.Fatalf("sink 收到 = (%q,%q), want (node-99, agent-x)", seenNode, seenToken)
+	}
+}
+
+func TestAgentRegisterSinkSkippedWhenTokenEmpty(t *testing.T) {
+	// service 不返回 token（异常路径）也不应触发 sink，避免缓存空字符串误导后续 docker client。
+	stub := &agentEndpointsStub{registerResult: service.AgentRegisterResult{NodeID: "n", AgentToken: ""}}
+	called := false
+	gin.SetMode(gin.ReleaseMode)
+	router := gin.New()
+	handler := NewAgentEndpointsHandler(stub, func(_, _ string) { called = true })
+	RegisterAgentRoutes(router, handler)
+
+	body := bytes.NewBufferString(`{"bootstrap_token":"boot"}`)
+	recorder := httptest.NewRecorder()
+	request := httptest.NewRequest(http.MethodPost, "/api/v1/agent/register", body)
+	request.Header.Set("Content-Type", "application/json")
+	router.ServeHTTP(recorder, request)
+	if called {
+		t.Fatal("token 为空时不应触发 sink")
+	}
+}
+
 func newAgentRouter(svc *agentEndpointsStub) *gin.Engine {
 	gin.SetMode(gin.ReleaseMode)
 	router := gin.New()

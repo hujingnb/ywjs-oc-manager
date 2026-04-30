@@ -25,6 +25,9 @@ type Dependencies struct {
 	AppService          *service.AppService
 	JobsStore           handlers.JobsStore
 	TokenManager        *auth.TokenManager
+	// AgentTokenSink 在 agent register 成功时由 manager 进程缓存 (nodeID, agentToken)。
+	// nil 时跳过缓存（仅供测试或未启用 docker proxy 的最小装配使用）。
+	AgentTokenSink func(nodeID, agentToken string)
 }
 
 // NewRouter 创建 Manager API 的 HTTP 路由。
@@ -59,7 +62,13 @@ func NewRouter(deps ...Dependencies) http.Handler {
 	}
 	if dep.RuntimeNodeService != nil {
 		handlers.RegisterRuntimeNodeRoutes(router, handlers.NewRuntimeNodesHandler(dep.RuntimeNodeService, dep.TokenManager))
-		handlers.RegisterAgentRoutes(router, handlers.NewAgentEndpointsHandler(dep.RuntimeNodeService))
+		var agentHandler *handlers.AgentEndpointsHandler
+		if dep.AgentTokenSink != nil {
+			agentHandler = handlers.NewAgentEndpointsHandler(dep.RuntimeNodeService, dep.AgentTokenSink)
+		} else {
+			agentHandler = handlers.NewAgentEndpointsHandler(dep.RuntimeNodeService)
+		}
+		handlers.RegisterAgentRoutes(router, agentHandler)
 	}
 	if dep.JobsStore != nil {
 		handlers.RegisterJobsRoutes(router, handlers.NewJobsHandler(dep.JobsStore, dep.TokenManager))

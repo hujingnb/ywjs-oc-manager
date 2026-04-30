@@ -20,13 +20,23 @@ type AgentEndpointsService interface {
 // AgentEndpointsHandler 暴露给 runtime agent 的 HTTP 端点。
 // 这里没有 manager 用户的 Authorization，因此不复用其它 handler 的 token 校验，
 // 鉴权完全靠 bootstrap_token / agent_token 自身。
+//
+// tokenSink 可选：注册成功后把 (nodeID, agentToken) 推给调用方，
+// 用于在 manager 进程内缓存 agent token，便于后续 docker proxy / 文件 API 直连。
+// 没有 sink 时跳过推送，便于现有测试与不依赖 token resolver 的最小装配。
 type AgentEndpointsHandler struct {
-	service AgentEndpointsService
+	service   AgentEndpointsService
+	tokenSink func(nodeID, agentToken string)
 }
 
 // NewAgentEndpointsHandler 创建 agent 端点 handler。
-func NewAgentEndpointsHandler(svc AgentEndpointsService) *AgentEndpointsHandler {
-	return &AgentEndpointsHandler{service: svc}
+// sink 可不传；若传入则在 register 成功响应前以 (nodeID, agentToken) 调用。
+func NewAgentEndpointsHandler(svc AgentEndpointsService, sink ...func(nodeID, agentToken string)) *AgentEndpointsHandler {
+	var s func(string, string)
+	if len(sink) > 0 {
+		s = sink[0]
+	}
+	return &AgentEndpointsHandler{service: svc, tokenSink: s}
 }
 
 // RegisterAgentRoutes 注册 agent 路由前缀 /api/v1/agent。
@@ -84,6 +94,11 @@ func (h *AgentEndpointsHandler) Register(c *gin.Context) {
 	if err != nil {
 		writeAgentEndpointError(c, err)
 		return
+	}
+	// 在响应前把 token 推到 sink；推送失败不应阻塞注册响应，因此 sink 为同步函数且
+	// 调用方只允许做内存写入，重的副作用应当通过 sink 内部异步排队。
+	if h.tokenSink != nil && result.AgentToken != "" {
+		h.tokenSink(result.NodeID, result.AgentToken)
 	}
 	c.JSON(http.StatusOK, gin.H{
 		"node_id":                    result.NodeID,

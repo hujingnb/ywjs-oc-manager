@@ -12,6 +12,7 @@ import (
 	"oc-manager/internal/auth"
 	"oc-manager/internal/config"
 	"oc-manager/internal/files"
+	"oc-manager/internal/integrations/agent"
 	"oc-manager/internal/integrations/channel"
 	"oc-manager/internal/service"
 	"oc-manager/internal/store"
@@ -64,6 +65,7 @@ func main() {
 	knowledgeService := service.NewKnowledgeService(files.NewKnowledgeMaster(safeRoot))
 	runtimeOpService := service.NewRuntimeOperationService(dbStore.Queries)
 	appService := service.NewAppService(dbStore.Queries)
+	agentTokenResolver := agent.NewTokenResolver()
 
 	server := &http.Server{
 		Addr: cfg.App.HTTPAddr,
@@ -80,6 +82,7 @@ func main() {
 			AppService:          appService,
 			JobsStore:           dbStore.Queries,
 			TokenManager:        tokenManager,
+			AgentTokenSink:      agentTokenResolver.Set,
 		}),
 		ReadHeaderTimeout: 5 * time.Second,
 	}
