@@ -108,7 +108,9 @@ func runManager(ctx context.Context, cfg config.Config, logOut io.Writer) error 
 	if err != nil {
 		return fmt.Errorf("初始化知识库主副本失败: %w", err)
 	}
-	knowledgeService := service.NewKnowledgeService(files.NewKnowledgeMaster(safeRoot))
+	knowledgeMaster := files.NewKnowledgeMaster(safeRoot)
+	knowledgeService := service.NewKnowledgeService(knowledgeMaster)
+	knowledgeService.SetSyncDispatcher(newKnowledgeSyncDispatcher(dbStore.Queries, redisQueue))
 	appService := service.NewAppService(dbStore.Queries)
 	runtimeOpService := service.NewRuntimeOperationService(dbStore.Queries, redisQueue)
 	personaService := service.NewPersonaService(store.NewPersonaStore(dbStore))
@@ -163,6 +165,10 @@ func runManager(ctx context.Context, cfg config.Config, logOut io.Writer) error 
 	}
 	if err := registry.Register("app_delete", handlers.NewAppDeleteHandler(dbStore.Queries, runtimeAdapter, newapiClient, nil).Handle); err != nil {
 		return fmt.Errorf("注册 app_delete handler 失败: %w", err)
+	}
+	knowledgeSyncHandler := handlers.NewKnowledgeSyncHandler(knowledgeMaster, runtimeAdapter)
+	if err := registry.Register("knowledge_sync_node", knowledgeSyncHandler.Handle); err != nil {
+		return fmt.Errorf("注册 knowledge_sync_node handler 失败: %w", err)
 	}
 
 	jobWorker := worker.New(dbStore.Queries, redisQueue, registry, worker.Config{WorkerID: cfg.App.HTTPAddr})

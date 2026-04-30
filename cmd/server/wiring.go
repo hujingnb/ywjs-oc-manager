@@ -4,6 +4,7 @@ package main
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"io"
 	"net/http"
@@ -197,6 +198,138 @@ func (w *runtimeInspectorWrapper) InspectContainer(ctx context.Context, nodeID, 
 		Status: info.Status,
 	}, nil
 }
+
+// knowledgeSyncDispatcher 实现 service.KnowledgeSyncDispatcher：
+// 把 manager 主副本写入事件按节点拆成 knowledge_sync_node job，并即时通知 Redis。
+//
+// 路由策略：
+//   - org 维度：枚举 active 节点，全部同步（Phase A1 已知妥协，B 阶段后续可换 tar 全量）；
+//   - app 维度：仅同步该应用所在节点。
+//
+// 任意节点查询失败/job 写入失败立即冒泡，由 service 决定是否中断主流程；
+// 当前实现把 dispatcher 错误吞在 service 层（参见 KnowledgeService 的 _ =），
+// 因为主副本已经写入，不应因为同步失败回滚。
+type knowledgeSyncDispatcher struct {
+	queries  knowledgeJobsQueries
+	notifier service.JobNotifier
+}
+
+type knowledgeJobsQueries interface {
+	ListRuntimeNodes(ctx context.Context, arg sqlc.ListRuntimeNodesParams) ([]sqlc.RuntimeNode, error)
+	GetApp(ctx context.Context, id pgtype.UUID) (sqlc.App, error)
+	CreateJob(ctx context.Context, arg sqlc.CreateJobParams) (sqlc.Job, error)
+}
+
+func newKnowledgeSyncDispatcher(queries knowledgeJobsQueries, notifier service.JobNotifier) *knowledgeSyncDispatcher {
+	return &knowledgeSyncDispatcher{queries: queries, notifier: notifier}
+}
+
+// DispatchOrgChange 给所有 active 节点入队一个 sync 任务。
+func (d *knowledgeSyncDispatcher) DispatchOrgChange(ctx context.Context, orgID, relPath, changeType, masterPath string) error {
+	nodes, err := d.queries.ListRuntimeNodes(ctx, sqlc.ListRuntimeNodesParams{Limit: 200, Offset: 0})
+	if err != nil {
+		return fmt.Errorf("查询节点失败: %w", err)
+	}
+	for _, node := range nodes {
+		if node.Status != "active" {
+			continue
+		}
+		if err := d.enqueue(ctx, knowledgeSyncJobInput{
+			Scope:      "org",
+			OrgID:      orgID,
+			NodeID:     uuidToStringWiring(node.ID),
+			ChangeType: changeType,
+			RelPath:    relPath,
+			MasterPath: masterPath,
+		}); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+// DispatchAppChange 给应用所在节点入队 sync 任务。
+func (d *knowledgeSyncDispatcher) DispatchAppChange(ctx context.Context, orgID, appID, relPath, changeType, masterPath string) error {
+	id, err := parseUUIDForWiring(appID)
+	if err != nil {
+		return err
+	}
+	app, err := d.queries.GetApp(ctx, id)
+	if err != nil {
+		return fmt.Errorf("查询应用失败: %w", err)
+	}
+	if !app.RuntimeNodeID.Valid {
+		return nil // 应用未绑定节点，跳过
+	}
+	return d.enqueue(ctx, knowledgeSyncJobInput{
+		Scope:      "app",
+		OrgID:      orgID,
+		AppID:      appID,
+		NodeID:     uuidToStringWiring(app.RuntimeNodeID),
+		ChangeType: changeType,
+		RelPath:    relPath,
+		MasterPath: masterPath,
+	})
+}
+
+type knowledgeSyncJobInput struct {
+	Scope      string
+	OrgID      string
+	AppID      string
+	NodeID     string
+	ChangeType string
+	RelPath    string
+	MasterPath string
+}
+
+func (d *knowledgeSyncDispatcher) enqueue(ctx context.Context, input knowledgeSyncJobInput) error {
+	payload := map[string]any{
+		"scope":       input.Scope,
+		"org_id":      input.OrgID,
+		"app_id":      input.AppID,
+		"node_id":     input.NodeID,
+		"change_type": input.ChangeType,
+		"rel_path":    input.RelPath,
+		"master_path": input.MasterPath,
+	}
+	body, err := jsonMarshal(payload)
+	if err != nil {
+		return err
+	}
+	job, err := d.queries.CreateJob(ctx, sqlc.CreateJobParams{
+		Type:        "knowledge_sync_node",
+		Priority:    50,
+		MaxAttempts: 5,
+		PayloadJson: body,
+	})
+	if err != nil {
+		return fmt.Errorf("创建 sync job 失败: %w", err)
+	}
+	if d.notifier != nil {
+		_ = d.notifier.Enqueue(ctx, uuidToStringWiring(job.ID))
+	}
+	return nil
+}
+
+// uuidToStringWiring 把 pgtype.UUID 转 16 位标准字符串；与 service 层的 uuidToString 等价，
+// 这里复制是为了避免 wiring → service 的反向引用。
+func uuidToStringWiring(id pgtype.UUID) string {
+	if !id.Valid {
+		return ""
+	}
+	const digits = "0123456789abcdef"
+	out := make([]byte, 0, 36)
+	for i, b := range id.Bytes {
+		out = append(out, digits[b>>4], digits[b&0x0f])
+		if i == 3 || i == 5 || i == 7 || i == 9 {
+			out = append(out, '-')
+		}
+	}
+	return string(out)
+}
+
+// jsonMarshal 是 cmd/server 内部 json.Marshal 的简短封装，便于 dispatcher 复用。
+var jsonMarshal = json.Marshal
 
 // imageDistributorWrapper 把 service.ImageDistributionService 适配成 handlers.ImageDistributor 的
 // (any, error) 自由签名。Go 接口要求 exact 返回类型匹配，所以转一层。

@@ -11,6 +11,13 @@ import (
 	"oc-manager/internal/files"
 )
 
+// KnowledgeSyncDispatcher 抽象向 worker 入队 knowledge_sync_node 任务的能力。
+// 实现负责按写入对象（org / app）找到目标节点并去重生成 job。
+type KnowledgeSyncDispatcher interface {
+	DispatchOrgChange(ctx context.Context, orgID, relPath, changeType, masterPath string) error
+	DispatchAppChange(ctx context.Context, orgID, appID, relPath, changeType, masterPath string) error
+}
+
 // KnowledgeService 维护组织和应用维度的知识库主副本。
 //
 // 设计要点：
@@ -20,12 +27,19 @@ import (
 //   - 应用级同步在主副本写入失败时回滚（这里是文件操作，整体最多一次写入，不需要 SQL 事务）；
 //   - 组织级同步走异步任务，不阻塞主流程。
 type KnowledgeService struct {
-	master *files.KnowledgeMaster
+	master     *files.KnowledgeMaster
+	dispatcher KnowledgeSyncDispatcher
 }
 
 // NewKnowledgeService 创建知识库服务。
 func NewKnowledgeService(master *files.KnowledgeMaster) *KnowledgeService {
 	return &KnowledgeService{master: master}
+}
+
+// SetSyncDispatcher 注入同步分发器（可选）。
+// 不注入时主副本仍正常写入，但不会触发节点同步——cmd/server 装配阶段必须传入。
+func (s *KnowledgeService) SetSyncDispatcher(d KnowledgeSyncDispatcher) {
+	s.dispatcher = d
 }
 
 // KnowledgeListResult 是列表接口的返回。
@@ -49,7 +63,7 @@ var (
 )
 
 // SaveOrgFile 将文件写入指定组织的主副本。
-func (s *KnowledgeService) SaveOrgFile(_ context.Context, principal auth.Principal, orgID, relative string, content io.Reader, size int64) error {
+func (s *KnowledgeService) SaveOrgFile(ctx context.Context, principal auth.Principal, orgID, relative string, content io.Reader, size int64) error {
 	if s.master == nil {
 		return ErrKnowledgeMissing
 	}
@@ -57,12 +71,18 @@ func (s *KnowledgeService) SaveOrgFile(_ context.Context, principal auth.Princip
 		return ErrKnowledgeForbidden
 	}
 	target := path.Join("org", orgID, "knowledge", relative)
-	return s.master.Save(target, content, size)
+	if err := s.master.Save(target, content, size); err != nil {
+		return err
+	}
+	if s.dispatcher != nil {
+		_ = s.dispatcher.DispatchOrgChange(ctx, orgID, relative, "upload_file", target)
+	}
+	return nil
 }
 
 // SaveAppFile 写入应用维度的知识库。
 // 仅 owner、组织管理员、平台管理员可写。
-func (s *KnowledgeService) SaveAppFile(_ context.Context, principal auth.Principal, orgID, appID, ownerUserID, relative string, content io.Reader, size int64) error {
+func (s *KnowledgeService) SaveAppFile(ctx context.Context, principal auth.Principal, orgID, appID, ownerUserID, relative string, content io.Reader, size int64) error {
 	if s.master == nil {
 		return ErrKnowledgeMissing
 	}
@@ -70,29 +90,49 @@ func (s *KnowledgeService) SaveAppFile(_ context.Context, principal auth.Princip
 		return ErrKnowledgeForbidden
 	}
 	target := path.Join("org", orgID, "app", appID, "knowledge", relative)
-	return s.master.Save(target, content, size)
+	if err := s.master.Save(target, content, size); err != nil {
+		return err
+	}
+	if s.dispatcher != nil {
+		_ = s.dispatcher.DispatchAppChange(ctx, orgID, appID, relative, "upload_file", target)
+	}
+	return nil
 }
 
 // DeleteOrgFile 删除组织级文件。
-func (s *KnowledgeService) DeleteOrgFile(_ context.Context, principal auth.Principal, orgID, relative string) error {
+func (s *KnowledgeService) DeleteOrgFile(ctx context.Context, principal auth.Principal, orgID, relative string) error {
 	if s.master == nil {
 		return ErrKnowledgeMissing
 	}
 	if !canManageOrg(principal, orgID) {
 		return ErrKnowledgeForbidden
 	}
-	return s.master.Delete(path.Join("org", orgID, "knowledge", relative))
+	target := path.Join("org", orgID, "knowledge", relative)
+	if err := s.master.Delete(target); err != nil {
+		return err
+	}
+	if s.dispatcher != nil {
+		_ = s.dispatcher.DispatchOrgChange(ctx, orgID, relative, "delete_file", target)
+	}
+	return nil
 }
 
 // DeleteAppFile 删除应用级文件。
-func (s *KnowledgeService) DeleteAppFile(_ context.Context, principal auth.Principal, orgID, appID, ownerUserID, relative string) error {
+func (s *KnowledgeService) DeleteAppFile(ctx context.Context, principal auth.Principal, orgID, appID, ownerUserID, relative string) error {
 	if s.master == nil {
 		return ErrKnowledgeMissing
 	}
 	if !canWriteApp(principal, orgID, ownerUserID) {
 		return ErrKnowledgeForbidden
 	}
-	return s.master.Delete(path.Join("org", orgID, "app", appID, "knowledge", relative))
+	target := path.Join("org", orgID, "app", appID, "knowledge", relative)
+	if err := s.master.Delete(target); err != nil {
+		return err
+	}
+	if s.dispatcher != nil {
+		_ = s.dispatcher.DispatchAppChange(ctx, orgID, appID, relative, "delete_file", target)
+	}
+	return nil
 }
 
 // ListOrg 列出组织级知识库；组织成员只读。

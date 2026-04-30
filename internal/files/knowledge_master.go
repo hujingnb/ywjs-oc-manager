@@ -75,6 +75,28 @@ func (m *KnowledgeMaster) Save(relative string, content io.Reader, size int64) e
 	return nil
 }
 
+// Open 打开主副本中的指定文件供读取。
+// 关闭返回的 ReadCloser 由调用方负责。
+func (m *KnowledgeMaster) Open(relative string) (io.ReadCloser, int64, error) {
+	if relative == "" {
+		return nil, 0, ErrKnowledgePathRequired
+	}
+	resolved, err := m.root.Resolve(relative)
+	if err != nil {
+		return nil, 0, err
+	}
+	f, err := os.Open(resolved)
+	if err != nil {
+		return nil, 0, fmt.Errorf("打开知识库文件失败: %w", err)
+	}
+	info, err := f.Stat()
+	if err != nil {
+		f.Close()
+		return nil, 0, fmt.Errorf("查询知识库文件大小失败: %w", err)
+	}
+	return f, info.Size(), nil
+}
+
 // Delete 删除知识库主副本中的文件或目录。
 // 如果目标不存在直接返回 nil（幂等）。
 func (m *KnowledgeMaster) Delete(relative string) error {
