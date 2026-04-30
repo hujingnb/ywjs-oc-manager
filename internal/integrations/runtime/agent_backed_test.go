@@ -39,25 +39,26 @@ func TestAgentBackedAdapterEnsureImageReturnsUnimplementedWithoutSyncer(t *testi
 	}
 }
 
-func TestAgentBackedAdapterContainerOpsReturnUnimplemented(t *testing.T) {
+func TestAgentBackedAdapterContainerOpsRequireDockerResolver(t *testing.T) {
+	// 没有 docker resolver 时所有容器接口都退化为 ErrUnimplemented，让上层快速识别装配缺失。
 	adapter := NewAgentBackedAdapter(nil, nil, nil)
 	if _, err := adapter.CreateContainer(context.Background(), "n1", ContainerSpec{}); !errors.Is(err, ErrUnimplemented) {
-		t.Fatalf("CreateContainer() error = %v", err)
+		t.Fatalf("CreateContainer err = %v", err)
 	}
 	if err := adapter.StartContainer(context.Background(), "n1", "c1"); !errors.Is(err, ErrUnimplemented) {
-		t.Fatalf("StartContainer() error = %v", err)
+		t.Fatalf("StartContainer err = %v", err)
 	}
 	if err := adapter.StopContainer(context.Background(), "n1", "c1"); !errors.Is(err, ErrUnimplemented) {
-		t.Fatalf("StopContainer() error = %v", err)
+		t.Fatalf("StopContainer err = %v", err)
 	}
 	if err := adapter.RestartContainer(context.Background(), "n1", "c1"); !errors.Is(err, ErrUnimplemented) {
-		t.Fatalf("RestartContainer() error = %v", err)
+		t.Fatalf("RestartContainer err = %v", err)
 	}
 	if err := adapter.RemoveContainer(context.Background(), "n1", "c1"); !errors.Is(err, ErrUnimplemented) {
-		t.Fatalf("RemoveContainer() error = %v", err)
+		t.Fatalf("RemoveContainer err = %v", err)
 	}
 	if _, err := adapter.InspectContainer(context.Background(), "n1", "c1"); !errors.Is(err, ErrUnimplemented) {
-		t.Fatalf("InspectContainer() error = %v", err)
+		t.Fatalf("InspectContainer err = %v", err)
 	}
 }
 
@@ -134,6 +135,120 @@ type dockerCallLog struct {
 	body   []byte
 }
 
+// startMockDockerLifecycle 在 startMockDocker 基础上额外处理 start/stop/restart/remove 端点。
+// 用法上保持兼容：传入 calls 收集请求，可选 errOn 让指定 op 返回 5xx 模拟 docker 故障。
+func startMockDockerLifecycle(t *testing.T, calls *[]dockerCallLog, errOn map[string]int) (*httptest.Server, *client.Client) {
+	t.Helper()
+	mux := http.NewServeMux()
+	mux.HandleFunc("/", func(w http.ResponseWriter, r *http.Request) {
+		body, _ := io.ReadAll(r.Body)
+		*calls = append(*calls, dockerCallLog{method: r.Method, path: r.URL.RequestURI(), body: body})
+		w.Header().Set("Api-Version", "1.41")
+		path := r.URL.Path
+		switch {
+		case strings.HasSuffix(path, "/start"):
+			if c := errOn["start"]; c != 0 {
+				w.WriteHeader(c)
+				return
+			}
+			w.WriteHeader(http.StatusNoContent)
+		case strings.HasSuffix(path, "/stop"):
+			if c := errOn["stop"]; c != 0 {
+				w.WriteHeader(c)
+				return
+			}
+			w.WriteHeader(http.StatusNoContent)
+		case strings.HasSuffix(path, "/restart"):
+			if c := errOn["restart"]; c != 0 {
+				w.WriteHeader(c)
+				return
+			}
+			w.WriteHeader(http.StatusNoContent)
+		case r.Method == http.MethodDelete:
+			if c := errOn["remove"]; c != 0 {
+				w.WriteHeader(c)
+				return
+			}
+			w.WriteHeader(http.StatusNoContent)
+		case strings.HasSuffix(path, "/_ping"):
+			w.WriteHeader(http.StatusOK)
+		default:
+			t.Errorf("意外请求 path = %s", path)
+			w.WriteHeader(http.StatusNotFound)
+		}
+	})
+	server := httptest.NewServer(mux)
+	t.Cleanup(server.Close)
+	cli, err := client.NewClientWithOpts(client.WithHost(server.URL), client.WithHTTPClient(server.Client()), client.WithVersion("1.41"))
+	if err != nil {
+		t.Fatalf("构造 mock docker client: %v", err)
+	}
+	return server, cli
+}
+
+func TestAgentBackedAdapterStartStopRestartRemove_HappyPath(t *testing.T) {
+	var calls []dockerCallLog
+	_, cli := startMockDockerLifecycle(t, &calls, nil)
+	adapter := NewAgentBackedAdapter(nil, &staticDockerResolver{cli: cli}, nil)
+
+	if err := adapter.StartContainer(context.Background(), "n", "ctr-1"); err != nil {
+		t.Fatalf("StartContainer err = %v", err)
+	}
+	if err := adapter.StopContainer(context.Background(), "n", "ctr-1"); err != nil {
+		t.Fatalf("StopContainer err = %v", err)
+	}
+	if err := adapter.RestartContainer(context.Background(), "n", "ctr-1"); err != nil {
+		t.Fatalf("RestartContainer err = %v", err)
+	}
+	if err := adapter.RemoveContainer(context.Background(), "n", "ctr-1"); err != nil {
+		t.Fatalf("RemoveContainer err = %v", err)
+	}
+
+	for _, suffix := range []string{"/start", "/stop", "/restart"} {
+		findCall(t, calls, http.MethodPost, suffix)
+	}
+	findCall(t, calls, http.MethodDelete, "/containers/ctr-1")
+}
+
+func TestAgentBackedAdapterStartContainerPropagatesDockerError(t *testing.T) {
+	var calls []dockerCallLog
+	_, cli := startMockDockerLifecycle(t, &calls, map[string]int{"start": http.StatusInternalServerError})
+	adapter := NewAgentBackedAdapter(nil, &staticDockerResolver{cli: cli}, nil)
+	err := adapter.StartContainer(context.Background(), "n", "ctr-x")
+	if err == nil {
+		t.Fatal("docker 5xx 时应冒泡错误")
+	}
+	if !strings.Contains(err.Error(), "启动容器失败") {
+		t.Fatalf("错误信息缺中文上下文: %v", err)
+	}
+}
+
+func TestAgentBackedAdapterStopContainerSetsTimeout(t *testing.T) {
+	var calls []dockerCallLog
+	_, cli := startMockDockerLifecycle(t, &calls, nil)
+	adapter := NewAgentBackedAdapter(nil, &staticDockerResolver{cli: cli}, nil)
+	if err := adapter.StopContainer(context.Background(), "n", "ctr-1"); err != nil {
+		t.Fatalf("StopContainer err = %v", err)
+	}
+	stop := findCall(t, calls, http.MethodPost, "/stop")
+	if !strings.Contains(stop.path, "t=30") {
+		t.Fatalf("stop 调用未携带 t=30 timeout: path=%s", stop.path)
+	}
+}
+
+func TestAgentBackedAdapterRemoveContainerForcesDeletion(t *testing.T) {
+	var calls []dockerCallLog
+	_, cli := startMockDockerLifecycle(t, &calls, nil)
+	adapter := NewAgentBackedAdapter(nil, &staticDockerResolver{cli: cli}, nil)
+	if err := adapter.RemoveContainer(context.Background(), "n", "ctr-1"); err != nil {
+		t.Fatalf("RemoveContainer err = %v", err)
+	}
+	remove := findCall(t, calls, http.MethodDelete, "/containers/ctr-1")
+	if !strings.Contains(remove.path, "force=1") {
+		t.Fatalf("remove 调用未带 force=1: %s", remove.path)
+	}
+}
+
 // startMockDocker 模拟 docker daemon 处理 ContainerCreate / ContainerInspect 两个端点。
 // fixedID 用于 create 响应；inspectStatus 用于 inspect 时返回的 State.Status。
 func startMockDocker(t *testing.T, fixedID, inspectStatus string, calls *[]dockerCallLog) (*httptest.Server, *client.Client) {
@@ -141,7 +256,7 @@ func startMockDocker(t *testing.T, fixedID, inspectStatus string, calls *[]docke
 	mux := http.NewServeMux()
 	mux.HandleFunc("/", func(w http.ResponseWriter, r *http.Request) {
 		body, _ := io.ReadAll(r.Body)
-		*calls = append(*calls, dockerCallLog{method: r.Method, path: r.URL.Path, body: body})
+		*calls = append(*calls, dockerCallLog{method: r.Method, path: r.URL.RequestURI(), body: body})
 		w.Header().Set("Api-Version", "1.41")
 		switch {
 		case strings.HasSuffix(r.URL.Path, "/containers/create"):
@@ -258,14 +373,16 @@ func TestAgentBackedAdapterInspectContainer(t *testing.T) {
 	}
 }
 
-func findCall(t *testing.T, calls []dockerCallLog, method, suffix string) dockerCallLog {
+// findCall 在 calls 列表里查找 method 一致且 path 包含给定子串的调用。
+// path 字段记录的是 RequestURI（含 query），这里用 Contains 兼容 /start?t=30 之类 query。
+func findCall(t *testing.T, calls []dockerCallLog, method, fragment string) dockerCallLog {
 	t.Helper()
 	for _, c := range calls {
-		if c.method == method && strings.HasSuffix(c.path, suffix) {
+		if c.method == method && strings.Contains(c.path, fragment) {
 			return c
 		}
 	}
-	t.Fatalf("没找到 %s %s 调用，全部=%+v", method, suffix, calls)
+	t.Fatalf("没找到 %s %s 调用，全部=%+v", method, fragment, calls)
 	return dockerCallLog{}
 }
 

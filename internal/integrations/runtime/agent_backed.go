@@ -89,24 +89,63 @@ func (a *AgentBackedAdapter) CreateContainer(ctx context.Context, nodeID string,
 	return inspectToContainerInfo(inspect), nil
 }
 
-// StartContainer 暂未实现（task 10 接入）。
+// containerStopTimeout 是 stop 调用给容器的优雅退出窗口。
+// 30s 是 docker CLI 默认值；超过后 docker 会发 SIGKILL 强行终止。
+const containerStopTimeout = 30
+
+// StartContainer 通过 agent docker 代理启动容器。
+// docker SDK 对已经 running 的容器 ContainerStart 会返回 304/已运行错误，
+// 这里不吞错——由 worker handler 在调用前 inspect 状态后做幂等判断。
 func (a *AgentBackedAdapter) StartContainer(ctx context.Context, nodeID, containerID string) error {
-	return ErrUnimplemented
+	cli, err := a.dockerClient(ctx, nodeID)
+	if err != nil {
+		return err
+	}
+	if err := cli.ContainerStart(ctx, containerID, container.StartOptions{}); err != nil {
+		return fmt.Errorf("启动容器失败: %w", err)
+	}
+	return nil
 }
 
-// StopContainer 暂未实现（task 10 接入）。
+// StopContainer 通过 agent docker 代理停止容器，给 30s 优雅退出窗口。
 func (a *AgentBackedAdapter) StopContainer(ctx context.Context, nodeID, containerID string) error {
-	return ErrUnimplemented
+	cli, err := a.dockerClient(ctx, nodeID)
+	if err != nil {
+		return err
+	}
+	timeout := containerStopTimeout
+	if err := cli.ContainerStop(ctx, containerID, container.StopOptions{Timeout: &timeout}); err != nil {
+		return fmt.Errorf("停止容器失败: %w", err)
+	}
+	return nil
 }
 
-// RestartContainer 暂未实现（task 10 接入）。
+// RestartContainer 通过 agent docker 代理重启容器。
+// docker 的 restart 等价于 stop + start，但调用更省一次往返。
 func (a *AgentBackedAdapter) RestartContainer(ctx context.Context, nodeID, containerID string) error {
-	return ErrUnimplemented
+	cli, err := a.dockerClient(ctx, nodeID)
+	if err != nil {
+		return err
+	}
+	timeout := containerStopTimeout
+	if err := cli.ContainerRestart(ctx, containerID, container.StopOptions{Timeout: &timeout}); err != nil {
+		return fmt.Errorf("重启容器失败: %w", err)
+	}
+	return nil
 }
 
-// RemoveContainer 暂未实现（task 10 接入）。
+// RemoveContainer 通过 agent docker 代理删除容器。
+// 默认带 Force=true，确保 running 状态的容器也能被清理；调用方需要先调 StopContainer 才会
+// 触发优雅退出，本方法本身只保证最终删除。
 func (a *AgentBackedAdapter) RemoveContainer(ctx context.Context, nodeID, containerID string) error {
-	return ErrUnimplemented
+	cli, err := a.dockerClient(ctx, nodeID)
+	if err != nil {
+		return err
+	}
+	if err := cli.ContainerRemove(ctx, containerID, container.RemoveOptions{Force: true}); err != nil {
+		return fmt.Errorf("删除容器失败: %w", err)
+	}
+	return nil
 }
 
 // InspectContainer 通过 agent docker 代理 inspect 容器并返回状态视图。
