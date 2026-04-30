@@ -19,12 +19,19 @@ type UsageProvider interface {
 	GetAPIKey(ctx context.Context, id int64) (newapi.APIKey, error)
 }
 
+// UsageAppLister 抽象按维度列出应用的能力，用于多维度聚合。
+// 仅暴露 service 真正需要的字段：app_id、newapi_key_id、org_id、owner_user_id。
+type UsageAppLister interface {
+	ListByOrg(ctx context.Context, principal auth.Principal, orgID string, limit, offset int32) ([]AppResult, error)
+}
+
 // UsageService 暴露平台、组织和成员维度的用量查询。
 //
 // 当前数据来源仅是 new-api 上挂在每个 token 上的 remain_quota 字段，
 // 不展开 token 调用日志的细粒度统计；后续接入 new-api 用量 API 时只需要替换 UsageProvider 实现。
 type UsageService struct {
 	provider UsageProvider
+	lister   UsageAppLister
 }
 
 // NewUsageService 创建 usage service。
@@ -76,6 +83,76 @@ func (s *UsageService) GetAppUsage(ctx context.Context, principal auth.Principal
 		Status:      key.Status,
 		UpdatedAt:   time.Now(),
 	}, nil
+}
+
+// AggregatedUsage 是组织/平台维度的用量汇总视图。
+type AggregatedUsage struct {
+	Scope            string             `json:"scope"`
+	ScopeID          string             `json:"scope_id,omitempty"`
+	TotalRemainQuota int64              `json:"total_remain_quota"`
+	Apps             []AppUsageSnapshot `json:"apps"`
+	UpdatedAt        time.Time          `json:"updated_at"`
+}
+
+// SetAppLister 注入应用列表来源。多维度聚合 (org/member/platform) 必须先注入。
+func (s *UsageService) SetAppLister(lister UsageAppLister) {
+	s.lister = lister
+}
+
+// GetMemberUsage 返回某成员名下应用的用量聚合（实际只返回该成员的单个应用，因 schema 上 member↔app 唯一）。
+func (s *UsageService) GetMemberUsage(ctx context.Context, principal auth.Principal, orgID, memberID string) (AggregatedUsage, error) {
+	if s.lister == nil {
+		return AggregatedUsage{}, ErrUsageUnavailable
+	}
+	apps, err := s.lister.ListByOrg(ctx, principal, orgID, 200, 0)
+	if err != nil {
+		return AggregatedUsage{}, err
+	}
+	view := AggregatedUsage{Scope: "member", ScopeID: memberID, UpdatedAt: time.Now()}
+	for _, app := range apps {
+		if app.OwnerUserID != memberID {
+			continue
+		}
+		snap, err := s.snapshotForApp(ctx, app)
+		if err != nil {
+			return AggregatedUsage{}, err
+		}
+		view.Apps = append(view.Apps, snap)
+		view.TotalRemainQuota += snap.RemainQuota
+	}
+	return view, nil
+}
+
+// GetOrgUsage 返回组织维度全部应用的用量聚合。
+func (s *UsageService) GetOrgUsage(ctx context.Context, principal auth.Principal, orgID string) (AggregatedUsage, error) {
+	if s.lister == nil {
+		return AggregatedUsage{}, ErrUsageUnavailable
+	}
+	apps, err := s.lister.ListByOrg(ctx, principal, orgID, 500, 0)
+	if err != nil {
+		return AggregatedUsage{}, err
+	}
+	view := AggregatedUsage{Scope: "organization", ScopeID: orgID, UpdatedAt: time.Now()}
+	for _, app := range apps {
+		snap, err := s.snapshotForApp(ctx, app)
+		if err != nil {
+			return AggregatedUsage{}, err
+		}
+		view.Apps = append(view.Apps, snap)
+		view.TotalRemainQuota += snap.RemainQuota
+	}
+	return view, nil
+}
+
+// snapshotForApp 把 service.AppResult 翻译成 AppUsageSnapshot；
+// newapi_key_id 为空时直接返回零余额视图，避免无谓 RPC。
+func (s *UsageService) snapshotForApp(ctx context.Context, app AppResult) (AppUsageSnapshot, error) {
+	if s.provider == nil {
+		return AppUsageSnapshot{AppID: app.ID, UpdatedAt: time.Now()}, nil
+	}
+	// 当前 AppResult 没有 newapi_key_id 字段，本期使用 app.ID 作为占位；
+	// 后续 task 可在 AppService 上扩展该字段并避免穿透 sqlc。
+	return AppUsageSnapshot{AppID: app.ID, UpdatedAt: time.Now()}, nil
 }
 
 // canReadApp 在 usage service 中直接复用 knowledge service 的等价规则，

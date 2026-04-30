@@ -12,6 +12,7 @@ import AppWorkspaceTab from '@/pages/apps/AppWorkspaceTab.vue'
 import AppsPage from '@/pages/apps/AppsPage.vue'
 import AuditLogsPage from '@/pages/audit/AuditLogsPage.vue'
 import DashboardHome from '@/pages/dashboard/DashboardHome.vue'
+import RoleAwareHome from '@/pages/dashboard/RoleAwareHome.vue'
 import LoginPage from '@/pages/login/LoginPage.vue'
 import CreateMemberPage from '@/pages/org/CreateMemberPage.vue'
 import MembersPage from '@/pages/org/MembersPage.vue'
@@ -36,7 +37,8 @@ export const router = createRouter({
       path: '/',
       component: DashboardLayout,
       children: [
-        { path: '', component: DashboardHome },
+        { path: '', component: RoleAwareHome },
+        { path: 'dashboard', component: DashboardHome },
         { path: 'organizations', component: OrganizationsPage },
         { path: 'platform/organizations/:orgId/recharge', component: RechargePage },
         { path: 'members', component: MembersPage },

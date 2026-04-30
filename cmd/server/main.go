@@ -114,6 +114,8 @@ func runManager(ctx context.Context, cfg config.Config, logOut io.Writer) error 
 	appService := service.NewAppService(dbStore.Queries)
 	runtimeOpService := service.NewRuntimeOperationService(dbStore.Queries, redisQueue)
 	personaService := service.NewPersonaService(store.NewPersonaStore(dbStore))
+	usageService := service.NewUsageService(nil)
+	usageService.SetAppLister(appService)
 	var rechargeService *service.RechargeService
 	// runtime inspector 在 runtimeAdapter 构造之后注入；这里先声明字段，后面赋值。
 
@@ -145,6 +147,8 @@ func runManager(ctx context.Context, cfg config.Config, logOut io.Writer) error 
 	if cfg.NewAPI.BaseURL != "" {
 		newapiClient = newapi.NewClient(cfg.NewAPI.BaseURL, cfg.NewAPI.AdminToken)
 		rechargeService = service.NewRechargeService(dbStore.Queries, newapiClient)
+		usageService = service.NewUsageService(newapiClient)
+		usageService.SetAppLister(appService)
 	}
 
 	registry := handlers.NewRegistry()
@@ -196,6 +200,7 @@ func runManager(ctx context.Context, cfg config.Config, logOut io.Writer) error 
 			KnowledgeService:    knowledgeService,
 			RuntimeOpService:    runtimeOpService,
 			AppService:          appService,
+			UsageService:        usageService,
 			RechargeService:     rechargeService,
 			PersonaService:      personaService,
 			JobsStore:           dbStore.Queries,
