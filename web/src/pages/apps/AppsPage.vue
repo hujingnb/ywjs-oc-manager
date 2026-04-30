@@ -27,7 +27,9 @@
         <tbody>
           <tr v-for="app in apps ?? []" :key="app.id">
             <td>
-              <strong>{{ app.name }}</strong>
+              <RouterLink :to="{ path: `/apps/${app.id}/overview` }">
+                <strong>{{ app.name }}</strong>
+              </RouterLink>
               <small v-if="app.description">{{ app.description }}</small>
             </td>
             <td><AppStatusTag :status="app.status" /></td>

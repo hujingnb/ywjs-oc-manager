@@ -3,6 +3,12 @@ import { createRouter, createWebHistory } from 'vue-router'
 import { getStoredAccessToken } from '@/api/client'
 import AuthLayout from '@/layouts/AuthLayout.vue'
 import DashboardLayout from '@/layouts/DashboardLayout.vue'
+import AppChannelsTab from '@/pages/apps/AppChannelsTab.vue'
+import AppDetailPage from '@/pages/apps/AppDetailPage.vue'
+import AppKnowledgeTab from '@/pages/apps/AppKnowledgeTab.vue'
+import AppOverviewTab from '@/pages/apps/AppOverviewTab.vue'
+import AppRuntimeTab from '@/pages/apps/AppRuntimeTab.vue'
+import AppWorkspaceTab from '@/pages/apps/AppWorkspaceTab.vue'
 import AppsPage from '@/pages/apps/AppsPage.vue'
 import AuditLogsPage from '@/pages/audit/AuditLogsPage.vue'
 import DashboardHome from '@/pages/dashboard/DashboardHome.vue'
@@ -37,6 +43,18 @@ export const router = createRouter({
         { path: 'runtime-nodes/:nodeId', component: RuntimeNodeDetailPage },
         { path: 'knowledge', component: OrgKnowledgePage },
         { path: 'apps', component: AppsPage },
+        {
+          path: 'apps/:appId',
+          component: AppDetailPage,
+          children: [
+            { path: '', redirect: (to) => ({ path: `/apps/${to.params.appId}/overview` }) },
+            { path: 'overview', component: AppOverviewTab, props: true },
+            { path: 'runtime', component: AppRuntimeTab, props: true },
+            { path: 'channels', component: AppChannelsTab, props: true },
+            { path: 'knowledge', component: AppKnowledgeTab, props: true },
+            { path: 'workspace', component: AppWorkspaceTab, props: true },
+          ],
+        },
       ],
     },
   ],
