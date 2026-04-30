@@ -186,6 +186,7 @@ func runManager(ctx context.Context, cfg config.Config, logOut io.Writer) error 
 			JobsStore:           dbStore.Queries,
 			TokenManager:        tokenManager,
 			AgentTokenSink:      agentTokenResolver.Set,
+			JobNotifier:         redisQueue,
 		}),
 		ReadHeaderTimeout: 5 * time.Second,
 	}

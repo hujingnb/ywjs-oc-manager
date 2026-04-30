@@ -241,6 +241,95 @@ func TestMemberServiceResetPasswordSucceeds(t *testing.T) {
 // fakeHash 在测试中用前缀代替真实 Argon2id，避免单测耗时。
 func fakeHash(password string) (string, error) { return "hashed:" + password, nil }
 
+func TestDeleteMember_SoftDeletesAndEnqueuesAppDelete(t *testing.T) {
+	stub := newMemberStoreStub(t)
+	target := sqlc.User{
+		ID:     mustUUID(t, "00000000-0000-0000-0000-0000000000aa"),
+		OrgID:  stub.org.ID,
+		Status: domain.StatusActive,
+		Role:   domain.UserRoleOrgMember,
+	}
+	stub.users[uuidToString(target.ID)] = target
+	app := sqlc.App{
+		ID:          mustUUID(t, "00000000-0000-0000-0000-0000000000bb"),
+		OrgID:       stub.org.ID,
+		OwnerUserID: target.ID,
+		Status:      domain.AppStatusRunning,
+	}
+	stub.apps[uuidToString(app.ID)] = app
+
+	notifier := &fakeNotifier{}
+	svc := NewMemberService(stub, fakeHash)
+	if err := svc.DeleteMember(context.Background(), platformAdmin(), uuidToString(target.ID), notifier); err != nil {
+		t.Fatalf("DeleteMember err = %v", err)
+	}
+	if stub.users[uuidToString(target.ID)].Status != domain.StatusDisabled {
+		t.Fatalf("user status 未禁用: %+v", stub.users[uuidToString(target.ID)])
+	}
+	if len(stub.softDeleted) != 1 {
+		t.Fatalf("应当软删 1 个 app, 实际 %d", len(stub.softDeleted))
+	}
+	if len(stub.jobs) != 1 || stub.jobs[0].Type != domain.JobTypeAppDelete {
+		t.Fatalf("jobs = %+v", stub.jobs)
+	}
+	if !stub.auditWritten {
+		t.Fatal("未写审计日志")
+	}
+	if notifier.lastJobID == "" {
+		t.Fatal("notifier 未触发")
+	}
+}
+
+func TestDeleteMember_NoAppStillSoftDeletesUser(t *testing.T) {
+	stub := newMemberStoreStub(t)
+	target := sqlc.User{
+		ID:     mustUUID(t, "00000000-0000-0000-0000-0000000000ab"),
+		OrgID:  stub.org.ID,
+		Status: domain.StatusActive,
+		Role:   domain.UserRoleOrgMember,
+	}
+	stub.users[uuidToString(target.ID)] = target
+	svc := NewMemberService(stub, fakeHash)
+	if err := svc.DeleteMember(context.Background(), platformAdmin(), uuidToString(target.ID), nil); err != nil {
+		t.Fatalf("err = %v", err)
+	}
+	if len(stub.jobs) != 0 {
+		t.Fatal("没有应用时不应入队 app_delete")
+	}
+}
+
+func TestDeleteMember_RejectsSelfDeletion(t *testing.T) {
+	stub := newMemberStoreStub(t)
+	target := sqlc.User{
+		ID:     mustUUID(t, "00000000-0000-0000-0000-000000000001"), // 与 platformAdmin 同 ID
+		OrgID:  stub.org.ID,
+		Status: domain.StatusActive,
+	}
+	stub.users[uuidToString(target.ID)] = target
+	svc := NewMemberService(stub, fakeHash)
+	err := svc.DeleteMember(context.Background(), platformAdmin(), uuidToString(target.ID), nil)
+	if err == nil {
+		t.Fatal("不能删除自己应当报错")
+	}
+}
+
+func TestDeleteMember_OrgMemberCannotDeleteOthers(t *testing.T) {
+	stub := newMemberStoreStub(t)
+	target := sqlc.User{
+		ID:     mustUUID(t, "00000000-0000-0000-0000-0000000000ad"),
+		OrgID:  stub.org.ID,
+		Status: domain.StatusActive,
+	}
+	stub.users[uuidToString(target.ID)] = target
+	svc := NewMemberService(stub, fakeHash)
+	err := svc.DeleteMember(context.Background(),
+		auth.Principal{Role: domain.UserRoleOrgMember, OrgID: uuidToString(stub.org.ID), UserID: "other"},
+		uuidToString(target.ID), nil)
+	if !errors.Is(err, ErrForbidden) {
+		t.Fatalf("err = %v, want ErrForbidden", err)
+	}
+}
+
 func platformAdmin() auth.Principal {
 	return auth.Principal{Role: domain.UserRolePlatformAdmin, UserID: "00000000-0000-0000-0000-000000000001"}
 }
@@ -249,6 +338,10 @@ type memberStoreStub struct {
 	t             *testing.T
 	org           sqlc.Organization
 	users         map[string]sqlc.User
+	apps          map[string]sqlc.App
+	jobs          []sqlc.CreateJobParams
+	auditWritten  bool
+	softDeleted   []string
 	lastCreate    sqlc.CreateUserParams
 	lastList      sqlc.ListUsersByOrgParams
 	lastPwdUpdate sqlc.UpdateUserPasswordParams
@@ -260,6 +353,7 @@ func newMemberStoreStub(t *testing.T) *memberStoreStub {
 		t:     t,
 		org:   sqlc.Organization{ID: mustUUID(t, testOrgID), Status: domain.StatusActive, Name: "测试组织"},
 		users: map[string]sqlc.User{},
+		apps:  map[string]sqlc.App{},
 	}
 }
 
@@ -343,4 +437,34 @@ func (s *memberStoreStub) UpdateUserPassword(_ context.Context, arg sqlc.UpdateU
 	user.PasswordHash = arg.PasswordHash
 	s.users[uuidToString(arg.ID)] = user
 	return user, nil
+}
+
+func (s *memberStoreStub) GetActiveAppByOwner(_ context.Context, ownerUserID pgtype.UUID) (sqlc.App, error) {
+	for _, app := range s.apps {
+		if app.OwnerUserID == ownerUserID && !app.DeletedAt.Valid {
+			return app, nil
+		}
+	}
+	return sqlc.App{}, pgx.ErrNoRows
+}
+
+func (s *memberStoreStub) SoftDeleteApp(_ context.Context, id pgtype.UUID) (sqlc.App, error) {
+	app, ok := s.apps[uuidToString(id)]
+	if !ok {
+		return sqlc.App{}, pgx.ErrNoRows
+	}
+	app.DeletedAt = pgtype.Timestamptz{Valid: true}
+	s.apps[uuidToString(id)] = app
+	s.softDeleted = append(s.softDeleted, uuidToString(id))
+	return app, nil
+}
+
+func (s *memberStoreStub) CreateJob(_ context.Context, arg sqlc.CreateJobParams) (sqlc.Job, error) {
+	s.jobs = append(s.jobs, arg)
+	return sqlc.Job{ID: mustUUID(s.t, "00000000-0000-0000-0000-000000004001"), Type: arg.Type}, nil
+}
+
+func (s *memberStoreStub) CreateAuditLog(_ context.Context, _ sqlc.CreateAuditLogParams) (sqlc.AuditLog, error) {
+	s.auditWritten = true
+	return sqlc.AuditLog{}, nil
 }

@@ -18,6 +18,9 @@ type MembersHandler struct {
 	service    memberService
 	onboarding onboardingService
 	tokens     *auth.TokenManager
+	// jobNotifier 用于在 DeleteMember 联动 app_delete 时即时入队 Redis；
+	// 缺失时 service 的删除依然会写库，仅入队步骤被跳过。
+	jobNotifier service.JobNotifier
 }
 
 type memberService interface {
@@ -27,6 +30,7 @@ type memberService interface {
 	UpdateMemberProfile(ctx context.Context, principal auth.Principal, userID string, input service.MemberInput) (service.MemberResult, error)
 	SetMemberStatus(ctx context.Context, principal auth.Principal, userID, status string) (service.MemberResult, error)
 	ResetMemberPassword(ctx context.Context, principal auth.Principal, userID, newPassword string) error
+	DeleteMember(ctx context.Context, principal auth.Principal, userID string, notifier service.JobNotifier) error
 }
 
 type onboardingService interface {
@@ -42,6 +46,11 @@ func NewMembersHandler(service memberService, tokens *auth.TokenManager) *Member
 // 如果调用方没有调用此方法，POST /onboard 路由会返回 503，避免暴露未实现的能力。
 func (h *MembersHandler) SetOnboardingService(svc onboardingService) {
 	h.onboarding = svc
+}
+
+// SetJobNotifier 注入 Redis job notifier，使 DeleteMember 联动 app_delete 时立即入队。
+func (h *MembersHandler) SetJobNotifier(notifier service.JobNotifier) {
+	h.jobNotifier = notifier
 }
 
 // RegisterMemberRoutes 注册成员路由。
@@ -60,6 +69,7 @@ func RegisterMemberRoutes(router gin.IRouter, handler *MembersHandler) {
 	memberGroup.POST("/:userId/disable", handler.Disable)
 	memberGroup.POST("/:userId/enable", handler.Enable)
 	memberGroup.POST("/:userId/password", handler.ResetPassword)
+	memberGroup.DELETE("/:userId", handler.Delete)
 }
 
 type createMemberRequest struct {
@@ -236,6 +246,19 @@ func (h *MembersHandler) ResetPassword(c *gin.Context) {
 		return
 	}
 	if err := h.service.ResetMemberPassword(c.Request.Context(), principal, c.Param("userId"), req.Password); err != nil {
+		writeMemberError(c, err)
+		return
+	}
+	c.Status(http.StatusNoContent)
+}
+
+// Delete 软删成员并联动应用回收。
+func (h *MembersHandler) Delete(c *gin.Context) {
+	principal, ok := h.principal(c)
+	if !ok {
+		return
+	}
+	if err := h.service.DeleteMember(c.Request.Context(), principal, c.Param("userId"), h.jobNotifier); err != nil {
 		writeMemberError(c, err)
 		return
 	}

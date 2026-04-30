@@ -49,6 +49,9 @@
                 <button v-else class="secondary-button" type="button" @click="onToggle(member, 'enable')">
                   启用
                 </button>
+                <button class="secondary-button danger" type="button" @click="confirmDelete(member)">
+                  删除
+                </button>
               </td>
             </tr>
             <tr v-if="!members?.length">
@@ -98,6 +101,16 @@
         <p v-if="submitError" class="state-text danger form-grid-full">{{ submitError }}</p>
       </form>
     </section>
+
+    <ConfirmActionModal
+      :visible="!!memberToDelete"
+      title="确认删除成员"
+      :message="memberToDelete ? `将禁用账号 ${memberToDelete.username} 并提交其名下应用的删除任务，操作不可撤销。` : ''"
+      confirm-label="确认删除"
+      :busy="deleteMutation.isPending.value"
+      @confirm="onConfirmDelete"
+      @cancel="memberToDelete = null"
+    />
   </main>
 </template>
 
@@ -108,10 +121,12 @@ import { Plus, X } from 'lucide-vue-next'
 import { formatMemberRole, formatMemberStatus } from '@/domain/status'
 import {
   useCreateMember,
+  useDeleteMember,
   useMembersQuery,
   useSetMemberStatus,
   type MemberFormPayload,
 } from '@/api/hooks/useMembers'
+import ConfirmActionModal from '@/components/ConfirmActionModal.vue'
 import type { Member } from '@/api/types'
 import { useAuthStore } from '@/stores/auth'
 
@@ -125,6 +140,8 @@ const orgEyebrow = computed(() => (auth.user?.role === 'platform_admin' ? 'Platf
 const { data: members, isLoading, error } = useMembersQuery(effectiveOrgId)
 const createMutation = useCreateMember(effectiveOrgId)
 const statusMutation = useSetMemberStatus(effectiveOrgId)
+const deleteMutation = useDeleteMember(effectiveOrgId)
+const memberToDelete = ref<Member | null>(null)
 
 const formVisible = ref(false)
 const submitError = ref<string | null>(null)
@@ -165,5 +182,20 @@ async function onSubmit() {
 
 function onToggle(member: Member, action: 'enable' | 'disable') {
   statusMutation.mutate({ userId: member.id, action })
+}
+
+function confirmDelete(member: Member) {
+  memberToDelete.value = member
+}
+
+async function onConfirmDelete() {
+  if (!memberToDelete.value) return
+  try {
+    await deleteMutation.mutateAsync(memberToDelete.value.id)
+  } catch (err: unknown) {
+    submitError.value = err instanceof Error ? err.message : '删除成员失败'
+  } finally {
+    memberToDelete.value = null
+  }
 }
 </script>

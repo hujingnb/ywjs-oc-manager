@@ -28,6 +28,12 @@ type MemberStore interface {
 	UpdateUserProfile(ctx context.Context, arg sqlc.UpdateUserProfileParams) (sqlc.User, error)
 	SetUserStatus(ctx context.Context, arg sqlc.SetUserStatusParams) (sqlc.User, error)
 	UpdateUserPassword(ctx context.Context, arg sqlc.UpdateUserPasswordParams) (sqlc.User, error)
+
+	// 以下方法用于成员删除联动应用软删；store 实现已经具备这些查询。
+	GetActiveAppByOwner(ctx context.Context, ownerUserID pgtype.UUID) (sqlc.App, error)
+	SoftDeleteApp(ctx context.Context, id pgtype.UUID) (sqlc.App, error)
+	CreateJob(ctx context.Context, arg sqlc.CreateJobParams) (sqlc.Job, error)
+	CreateAuditLog(ctx context.Context, arg sqlc.CreateAuditLogParams) (sqlc.AuditLog, error)
 }
 
 // PasswordHasher 抽象密码 hash 函数，便于测试中替换为快路径。
@@ -248,6 +254,78 @@ func (s *MemberService) SetMemberStatus(ctx context.Context, principal auth.Prin
 		return MemberResult{}, fmt.Errorf("更新成员状态失败: %w", err)
 	}
 	return toMemberResult(updated), nil
+}
+
+// DeleteMember 软删成员并联动其名下应用。
+//
+// 流程：
+//  1. 把 user.status = 'disabled'（保留行用于审计追溯，不真正删除 users 行）；
+//  2. 若该成员有未删除的应用（GetActiveAppByOwner 命中）则 SoftDeleteApp + 入队 app_delete job；
+//  3. 写一条 audit log。
+//
+// 操作限制：管理员不能删除自己，避免误锁定；普通成员无权删除。
+func (s *MemberService) DeleteMember(ctx context.Context, principal auth.Principal, userID string, notifier JobNotifier) error {
+	id, err := parseUUID(userID)
+	if err != nil {
+		return ErrNotFound
+	}
+	user, err := s.store.GetUser(ctx, id)
+	if errors.Is(err, pgx.ErrNoRows) {
+		return ErrNotFound
+	}
+	if err != nil {
+		return fmt.Errorf("查询成员失败: %w", err)
+	}
+	if !canManageMember(principal, user) {
+		return ErrForbidden
+	}
+	if principal.UserID == uuidToString(user.ID) {
+		return fmt.Errorf("%w: 不能删除自己", ErrMemberCreateInvalid)
+	}
+	if _, err := s.store.SetUserStatus(ctx, sqlc.SetUserStatusParams{ID: user.ID, Status: domain.StatusDisabled}); err != nil {
+		return fmt.Errorf("禁用成员失败: %w", err)
+	}
+
+	// 查找该成员名下未删除的应用；找不到时跳过应用删除。
+	app, err := s.store.GetActiveAppByOwner(ctx, user.ID)
+	hasApp := err == nil
+	if err != nil && !errors.Is(err, pgx.ErrNoRows) {
+		return fmt.Errorf("查询成员应用失败: %w", err)
+	}
+	if hasApp {
+		if _, err := s.store.SoftDeleteApp(ctx, app.ID); err != nil {
+			return fmt.Errorf("软删应用失败: %w", err)
+		}
+		// 入队 app_delete worker job 处理容器/api_key 回收。
+		payload := []byte(`{"app_id":"` + uuidToString(app.ID) + `"}`)
+		job, err := s.store.CreateJob(ctx, sqlc.CreateJobParams{
+			Type:        domain.JobTypeAppDelete,
+			Priority:    100,
+			RunAfter:    pgtype.Timestamptz{Valid: false},
+			MaxAttempts: 3,
+			PayloadJson: payload,
+		})
+		if err != nil {
+			return fmt.Errorf("创建 app_delete job 失败: %w", err)
+		}
+		if notifier != nil {
+			_ = notifier.Enqueue(ctx, uuidToString(job.ID))
+		}
+	}
+
+	actorUUID, _ := optionalUUID(principal.UserID)
+	if _, err := s.store.CreateAuditLog(ctx, sqlc.CreateAuditLogParams{
+		ActorID:    actorUUID,
+		ActorRole:  principal.Role,
+		OrgID:      user.OrgID,
+		TargetType: "user",
+		TargetID:   uuidToString(user.ID),
+		Action:     "delete_member",
+		Result:     "succeeded",
+	}); err != nil {
+		return fmt.Errorf("写入审计日志失败: %w", err)
+	}
+	return nil
 }
 
 // ResetMemberPassword 由管理员强制重置成员密码。

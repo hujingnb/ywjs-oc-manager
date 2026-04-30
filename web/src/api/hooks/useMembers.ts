@@ -74,6 +74,20 @@ export function useCreateMember(orgId: Ref<string | undefined>) {
   })
 }
 
+// useDeleteMember 删除成员并联动其名下应用。
+// 后端会软删 user.status=disabled、入队 app_delete 任务，前端只需 invalidate 列表。
+export function useDeleteMember(orgId: Ref<string | undefined>) {
+  const client = useQueryClient()
+  return useMutation({
+    mutationFn: async (userId: string) => {
+      await apiRequest<void>(`/api/v1/members/${userId}`, { method: 'DELETE' })
+    },
+    onSuccess: () => {
+      void client.invalidateQueries({ queryKey: memberListKey(orgId.value) })
+    },
+  })
+}
+
 // useSetMemberStatus 启用或禁用成员。
 export function useSetMemberStatus(orgId: Ref<string | undefined>) {
   const client = useQueryClient()
