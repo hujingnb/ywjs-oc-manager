@@ -2,17 +2,32 @@ package runtime
 
 import (
 	"context"
+	"fmt"
 	"io"
+	"sort"
+	"strings"
+
+	dockertypes "github.com/docker/docker/api/types"
+	"github.com/docker/docker/api/types/container"
+	"github.com/docker/docker/api/types/network"
+	"github.com/docker/docker/client"
 
 	"oc-manager/internal/integrations/agent"
 	"oc-manager/internal/runtime/imagesync"
 )
 
-// AgentResolver 根据 nodeID 取出 manager 需要的 agent 客户端。
+// AgentResolver 根据 nodeID 取出 manager 需要的 agent 文件 client。
 // 注册流程会把 agent 的 file/docker endpoint 与 token 写入 runtime_nodes，
 // 调用方需在请求时按 nodeID 取出对应客户端，否则不同节点会被错误路由。
 type AgentResolver interface {
 	FileClient(ctx context.Context, nodeID string) (*agent.AgentFileClient, error)
+}
+
+// DockerClientResolver 根据 nodeID 取出对应节点的 docker SDK client。
+// 实现负责处理 agent token 缓存、TLS CA 与 endpoint 解析；adapter 只调用接口，
+// 不感知 manager 进程内的具体连接生命周期管理。
+type DockerClientResolver interface {
+	DockerClient(ctx context.Context, nodeID string) (*client.Client, error)
 }
 
 // ImageSyncer 是 imagesync.Service 的最小接口形态，便于在测试中替换为内存桩。
@@ -21,16 +36,23 @@ type ImageSyncer interface {
 }
 
 // AgentBackedAdapter 通过 agent HTTP API 完成 runtime adapter 协议。
-// 容器相关接口暂未实现 docker proxy，调用 Container* 方法会返回 ErrUnimplemented；
-// 这是为了让上层 worker handler 在 task 5.3 之前能基于稳定的接口先写测试。
+//
+// 三个 resolver 可独立提供：
+//   - files：缺失时文件接口返回 ErrUnimplemented，便于做"只跑容器、不跑文件"的精简部署；
+//   - docker：缺失时容器接口返回 ErrUnimplemented，避免在未装配 docker proxy 时静默 panic；
+//   - imageSync：缺失时 EnsureImage 返回 ErrUnimplemented。
+//
+// 这些缺失语义统一指向"adapter 装配不完整"，由上层启动期或 worker handler 决定如何降级。
 type AgentBackedAdapter struct {
-	resolver AgentResolver
+	files     AgentResolver
+	docker    DockerClientResolver
 	imageSync ImageSyncer
 }
 
 // NewAgentBackedAdapter 构造 adapter。
-func NewAgentBackedAdapter(resolver AgentResolver, imageSync ImageSyncer) *AgentBackedAdapter {
-	return &AgentBackedAdapter{resolver: resolver, imageSync: imageSync}
+// 三个参数任意一个为 nil 时，对应能力降级为 ErrUnimplemented。
+func NewAgentBackedAdapter(files AgentResolver, docker DockerClientResolver, imageSync ImageSyncer) *AgentBackedAdapter {
+	return &AgentBackedAdapter{files: files, docker: docker, imageSync: imageSync}
 }
 
 // EnsureImage 将本地 OpenClaw 镜像分发到目标节点。
@@ -41,34 +63,63 @@ func (a *AgentBackedAdapter) EnsureImage(ctx context.Context, nodeID, image stri
 	return a.imageSync.SyncOpenClawImage(ctx, nodeID, image)
 }
 
-// CreateContainer 当前依赖 agent docker proxy；尚未实现。
+// CreateContainer 通过 agent docker 代理在指定节点上创建容器。
+//
+// 流程：
+//  1. resolver 取 docker SDK client（每次调用都重新取，便于 token 轮换后立即生效）；
+//  2. 把 ContainerSpec 翻译成 container.Config / container.HostConfig / network.NetworkingConfig；
+//  3. ContainerCreate 后立即 ContainerInspect 以拿到完整状态信息；
+//  4. 不在此处调 ContainerStart——由 worker handler 在状态机推进时单独触发。
+//
+// 任何 docker 端错误都直接冒泡，避免 adapter 层吞错；调用方负责审计与状态机回写。
 func (a *AgentBackedAdapter) CreateContainer(ctx context.Context, nodeID string, spec ContainerSpec) (ContainerInfo, error) {
-	return ContainerInfo{}, ErrUnimplemented
+	cli, err := a.dockerClient(ctx, nodeID)
+	if err != nil {
+		return ContainerInfo{}, err
+	}
+	containerCfg, hostCfg, networkCfg := translateSpec(spec)
+	resp, err := cli.ContainerCreate(ctx, containerCfg, hostCfg, networkCfg, nil, spec.Name)
+	if err != nil {
+		return ContainerInfo{}, fmt.Errorf("创建容器失败: %w", err)
+	}
+	inspect, err := cli.ContainerInspect(ctx, resp.ID)
+	if err != nil {
+		return ContainerInfo{}, fmt.Errorf("inspect 容器失败: %w", err)
+	}
+	return inspectToContainerInfo(inspect), nil
 }
 
-// StartContainer 暂未实现。
+// StartContainer 暂未实现（task 10 接入）。
 func (a *AgentBackedAdapter) StartContainer(ctx context.Context, nodeID, containerID string) error {
 	return ErrUnimplemented
 }
 
-// StopContainer 暂未实现。
+// StopContainer 暂未实现（task 10 接入）。
 func (a *AgentBackedAdapter) StopContainer(ctx context.Context, nodeID, containerID string) error {
 	return ErrUnimplemented
 }
 
-// RestartContainer 暂未实现。
+// RestartContainer 暂未实现（task 10 接入）。
 func (a *AgentBackedAdapter) RestartContainer(ctx context.Context, nodeID, containerID string) error {
 	return ErrUnimplemented
 }
 
-// RemoveContainer 暂未实现。
+// RemoveContainer 暂未实现（task 10 接入）。
 func (a *AgentBackedAdapter) RemoveContainer(ctx context.Context, nodeID, containerID string) error {
 	return ErrUnimplemented
 }
 
-// InspectContainer 暂未实现。
+// InspectContainer 通过 agent docker 代理 inspect 容器并返回状态视图。
 func (a *AgentBackedAdapter) InspectContainer(ctx context.Context, nodeID, containerID string) (ContainerInfo, error) {
-	return ContainerInfo{}, ErrUnimplemented
+	cli, err := a.dockerClient(ctx, nodeID)
+	if err != nil {
+		return ContainerInfo{}, err
+	}
+	inspect, err := cli.ContainerInspect(ctx, containerID)
+	if err != nil {
+		return ContainerInfo{}, fmt.Errorf("inspect 容器失败: %w", err)
+	}
+	return inspectToContainerInfo(inspect), nil
 }
 
 // ListFiles 通过 agent file API 列出目录。
@@ -117,8 +168,101 @@ func (a *AgentBackedAdapter) DeletePath(ctx context.Context, nodeID, remotePath 
 }
 
 func (a *AgentBackedAdapter) resolveFile(ctx context.Context, nodeID string) (*agent.AgentFileClient, error) {
-	if a.resolver == nil {
+	if a.files == nil {
 		return nil, ErrUnimplemented
 	}
-	return a.resolver.FileClient(ctx, nodeID)
+	return a.files.FileClient(ctx, nodeID)
 }
+
+func (a *AgentBackedAdapter) dockerClient(ctx context.Context, nodeID string) (*client.Client, error) {
+	if a.docker == nil {
+		return nil, ErrUnimplemented
+	}
+	return a.docker.DockerClient(ctx, nodeID)
+}
+
+// translateSpec 把 ContainerSpec 翻译成 docker SDK 创建容器所需的三组配置。
+//
+// 翻译要点：
+//   - Env 输出按 key 排序，方便审计与单元测试稳定比较；
+//   - VolumeMount 以 bind mount 字符串表达（"host:container[:ro]"），与项目"禁止 named volume"约束一致；
+//   - Resources.CPULimit 单位是千分之一 CPU，转换成 docker NanoCPUs（1 CPU = 1e9 NanoCPUs）；
+//   - Networks 数量 ≤1 时直接挂在 HostConfig.NetworkMode；多个网络写入 NetworkingConfig 让 docker 在创建时全部连接。
+func translateSpec(spec ContainerSpec) (*container.Config, *container.HostConfig, *network.NetworkingConfig) {
+	containerCfg := &container.Config{
+		Image: spec.Image,
+		Env:   envSlice(spec.Env),
+		Cmd:   append([]string(nil), spec.Command...),
+	}
+	hostCfg := &container.HostConfig{
+		Binds: bindStrings(spec.Volumes),
+		Resources: container.Resources{
+			NanoCPUs: spec.Resources.CPULimit * 1_000_000,
+			Memory:   spec.Resources.MemoryBytes,
+		},
+	}
+	if len(spec.Networks) == 1 {
+		hostCfg.NetworkMode = container.NetworkMode(spec.Networks[0])
+	}
+	var networkCfg *network.NetworkingConfig
+	if len(spec.Networks) > 1 {
+		endpoints := make(map[string]*network.EndpointSettings, len(spec.Networks))
+		for _, n := range spec.Networks {
+			endpoints[n] = &network.EndpointSettings{}
+		}
+		networkCfg = &network.NetworkingConfig{EndpointsConfig: endpoints}
+	}
+	return containerCfg, hostCfg, networkCfg
+}
+
+// envSlice 把 map 顺序化为 docker 需要的 KEY=VALUE 列表。
+func envSlice(env map[string]string) []string {
+	if len(env) == 0 {
+		return nil
+	}
+	keys := make([]string, 0, len(env))
+	for k := range env {
+		keys = append(keys, k)
+	}
+	sort.Strings(keys)
+	out := make([]string, 0, len(keys))
+	for _, k := range keys {
+		out = append(out, k+"="+env[k])
+	}
+	return out
+}
+
+// bindStrings 把 VolumeMount 翻译为 docker bind mount 表达式。
+func bindStrings(volumes []VolumeMount) []string {
+	if len(volumes) == 0 {
+		return nil
+	}
+	out := make([]string, 0, len(volumes))
+	for _, v := range volumes {
+		entry := v.HostPath + ":" + v.ContainerPath
+		if v.ReadOnly {
+			entry += ":ro"
+		}
+		out = append(out, entry)
+	}
+	return out
+}
+
+// inspectToContainerInfo 把 docker SDK 的 inspect 结果裁成对外暴露的最小视图。
+func inspectToContainerInfo(inspect dockerInspectResponse) ContainerInfo {
+	name := strings.TrimPrefix(inspect.Name, "/")
+	status := ""
+	if inspect.State != nil {
+		status = inspect.State.Status
+	}
+	return ContainerInfo{
+		ID:     inspect.ID,
+		Name:   name,
+		Image:  inspect.Image,
+		Status: status,
+	}
+}
+
+// dockerInspectResponse 是 docker SDK ContainerInspect 返回类型的别名。
+// 抽出别名是为了让 inspectToContainerInfo 在不同 docker SDK 版本里保持稳定签名。
+type dockerInspectResponse = dockertypes.ContainerJSON
