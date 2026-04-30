@@ -63,6 +63,7 @@ func main() {
 	}
 	knowledgeService := service.NewKnowledgeService(files.NewKnowledgeMaster(safeRoot))
 	runtimeOpService := service.NewRuntimeOperationService(dbStore.Queries)
+	appService := service.NewAppService(dbStore.Queries)
 
 	server := &http.Server{
 		Addr: cfg.App.HTTPAddr,
@@ -76,6 +77,7 @@ func main() {
 			ChannelService:      channelService,
 			KnowledgeService:    knowledgeService,
 			RuntimeOpService:    runtimeOpService,
+			AppService:          appService,
 			JobsStore:           dbStore.Queries,
 			TokenManager:        tokenManager,
 		}),

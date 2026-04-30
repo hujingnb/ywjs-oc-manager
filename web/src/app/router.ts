@@ -3,6 +3,7 @@ import { createRouter, createWebHistory } from 'vue-router'
 import { getStoredAccessToken } from '@/api/client'
 import AuthLayout from '@/layouts/AuthLayout.vue'
 import DashboardLayout from '@/layouts/DashboardLayout.vue'
+import AppsPage from '@/pages/apps/AppsPage.vue'
 import AuditLogsPage from '@/pages/audit/AuditLogsPage.vue'
 import DashboardHome from '@/pages/dashboard/DashboardHome.vue'
 import LoginPage from '@/pages/login/LoginPage.vue'
@@ -35,6 +36,7 @@ export const router = createRouter({
         { path: 'runtime-nodes', component: RuntimeNodesPage },
         { path: 'runtime-nodes/:nodeId', component: RuntimeNodeDetailPage },
         { path: 'knowledge', component: OrgKnowledgePage },
+        { path: 'apps', component: AppsPage },
       ],
     },
   ],
