@@ -9,6 +9,12 @@ dev-down:
 test:
 	docker compose run --rm --no-deps manager-api go test ./...
 
+integration-test:
+	docker compose run --rm \
+		-e INTEGRATION_DATABASE_URL=$${INTEGRATION_DATABASE_URL:-postgres://ocm:ocm@manager-postgres:5432/ocm?sslmode=disable} \
+		-e INTEGRATION_REDIS_ADDR=$${INTEGRATION_REDIS_ADDR:-manager-redis:6379} \
+		manager-api go test -tags=integration ./...
+
 vet:
 	docker compose run --rm --no-deps manager-api go vet ./...
 
