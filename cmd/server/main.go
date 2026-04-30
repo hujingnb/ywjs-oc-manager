@@ -207,6 +207,7 @@ func runManager(ctx context.Context, cfg config.Config, logOut io.Writer) error 
 			TokenManager:        tokenManager,
 			AgentTokenSink:      agentTokenSink,
 			JobNotifier:         redisQueue,
+			AllowedOrigins:      allowedOriginsFromConfig(cfg),
 		}),
 		ReadHeaderTimeout: 5 * time.Second,
 	}
@@ -253,6 +254,15 @@ func runManager(ctx context.Context, cfg config.Config, logOut io.Writer) error 
 		return err
 	}
 	return nil
+}
+
+// allowedOriginsFromConfig 从配置抽出 CORS 白名单。
+// 当前只把 app.public_base_url 作为唯一允许 origin；空字符串视为不开启 CORS。
+func allowedOriginsFromConfig(cfg config.Config) []string {
+	if cfg.App.PublicBaseURL == "" {
+		return nil
+	}
+	return []string{cfg.App.PublicBaseURL}
 }
 
 // hashPasswordWithDefault 使用默认 Argon2id 参数封装 auth.HashPassword，便于在 service 层注入。

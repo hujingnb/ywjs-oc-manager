@@ -6,6 +6,7 @@ import (
 	"github.com/gin-gonic/gin"
 
 	"oc-manager/internal/api/handlers"
+	"oc-manager/internal/api/middleware"
 	"oc-manager/internal/auth"
 	"oc-manager/internal/service"
 )
@@ -32,6 +33,8 @@ type Dependencies struct {
 	AgentTokenSink func(nodeID, agentToken string)
 	// JobNotifier 让 DeleteMember / 其它入队操作即时通知 Redis；nil 时退化到 scheduler 兜底。
 	JobNotifier service.JobNotifier
+	// AllowedOrigins 是 CORS 白名单。空切片代表同源部署不开 CORS。
+	AllowedOrigins []string
 }
 
 // NewRouter 创建 Manager API 的 HTTP 路由。
@@ -40,6 +43,9 @@ func NewRouter(deps ...Dependencies) http.Handler {
 	gin.SetMode(gin.ReleaseMode)
 	router := gin.New()
 	router.Use(gin.Recovery())
+	if len(deps) > 0 && len(deps[0].AllowedOrigins) > 0 {
+		router.Use(middleware.CORSAllowOrigin(deps[0].AllowedOrigins))
+	}
 	handlers.RegisterHealthRoutes(router)
 	if len(deps) == 0 {
 		return router
