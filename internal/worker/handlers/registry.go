@@ -1,0 +1,56 @@
+// Package handlers 维护 worker 调度时根据 job_type 查找处理函数的注册表。
+// 拆出独立包是为了让具体 handler（app_initialize、channel_start_login 等）按业务模块分文件，
+// worker 包只依赖通用的注册和派发能力。
+package handlers
+
+import (
+	"context"
+	"errors"
+	"fmt"
+
+	"oc-manager/internal/store/sqlc"
+)
+
+// HandlerFunc 是 worker 调度时统一签名。
+// payload 直接来自 jobs.payload_json；handler 自行反序列化为业务结构体。
+type HandlerFunc func(ctx context.Context, job sqlc.Job) error
+
+// Registry 是 job_type 到 HandlerFunc 的映射。
+type Registry struct {
+	handlers map[string]HandlerFunc
+}
+
+// NewRegistry 创建空的注册表。
+func NewRegistry() *Registry {
+	return &Registry{handlers: map[string]HandlerFunc{}}
+}
+
+// Register 注册一个 job_type 的处理函数。
+// 重复注册同一类型会返回错误，避免 worker 启动时静默覆盖。
+func (r *Registry) Register(jobType string, fn HandlerFunc) error {
+	if _, exists := r.handlers[jobType]; exists {
+		return fmt.Errorf("job 类型 %q 已注册", jobType)
+	}
+	r.handlers[jobType] = fn
+	return nil
+}
+
+// MustRegister 在重复注册时直接 panic，仅用于程序启动期一次性初始化。
+func (r *Registry) MustRegister(jobType string, fn HandlerFunc) {
+	if err := r.Register(jobType, fn); err != nil {
+		panic(err)
+	}
+}
+
+// Lookup 根据 job_type 取出 handler，未找到返回 ErrHandlerNotFound。
+func (r *Registry) Lookup(jobType string) (HandlerFunc, error) {
+	fn, ok := r.handlers[jobType]
+	if !ok {
+		return nil, fmt.Errorf("%w: %s", ErrHandlerNotFound, jobType)
+	}
+	return fn, nil
+}
+
+// ErrHandlerNotFound 表示当前 worker 未注册该 job_type 的 handler。
+// worker 在 dispatch 时遇到该错误会标记 job 失败但不重试。
+var ErrHandlerNotFound = errors.New("未注册的 job 类型")

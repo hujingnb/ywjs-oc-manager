@@ -57,6 +57,7 @@ func main() {
 			MemberService:       memberService,
 			AuditService:        auditService,
 			RuntimeNodeService:  runtimeNodeService,
+			JobsStore:           dbStore.Queries,
 			TokenManager:        tokenManager,
 		}),
 		ReadHeaderTimeout: 5 * time.Second,
