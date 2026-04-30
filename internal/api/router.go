@@ -7,7 +7,6 @@ import (
 
 	"oc-manager/internal/api/handlers"
 	"oc-manager/internal/auth"
-	"oc-manager/internal/integrations/agent"
 	"oc-manager/internal/service"
 )
 
@@ -20,6 +19,7 @@ type Dependencies struct {
 	RuntimeNodeService  *service.RuntimeNodeService
 	ChannelService      *service.ChannelService
 	KnowledgeService    *service.KnowledgeService
+	WorkspaceService    *service.WorkspaceService
 	JobsStore           handlers.JobsStore
 	TokenManager        *auth.TokenManager
 }
@@ -56,7 +56,7 @@ func NewRouter(deps ...Dependencies) http.Handler {
 	}
 	if dep.RuntimeNodeService != nil {
 		handlers.RegisterRuntimeNodeRoutes(router, handlers.NewRuntimeNodesHandler(dep.RuntimeNodeService, dep.TokenManager))
-		agent.RegisterRoutes(router, agent.NewEndpointsHandler(dep.RuntimeNodeService))
+		handlers.RegisterAgentRoutes(router, handlers.NewAgentEndpointsHandler(dep.RuntimeNodeService))
 	}
 	if dep.JobsStore != nil {
 		handlers.RegisterJobsRoutes(router, handlers.NewJobsHandler(dep.JobsStore, dep.TokenManager))
@@ -66,6 +66,9 @@ func NewRouter(deps ...Dependencies) http.Handler {
 	}
 	if dep.KnowledgeService != nil {
 		handlers.RegisterKnowledgeRoutes(router, handlers.NewKnowledgeHandler(dep.KnowledgeService, dep.TokenManager))
+	}
+	if dep.WorkspaceService != nil {
+		handlers.RegisterWorkspaceRoutes(router, handlers.NewWorkspaceHandler(dep.WorkspaceService, dep.TokenManager))
 	}
 	return router
 }

@@ -9,6 +9,7 @@ import LoginPage from '@/pages/login/LoginPage.vue'
 import CreateMemberPage from '@/pages/org/CreateMemberPage.vue'
 import MembersPage from '@/pages/org/MembersPage.vue'
 import OrganizationsPage from '@/pages/platform/OrganizationsPage.vue'
+import OrgKnowledgePage from '@/pages/knowledge/OrgKnowledgePage.vue'
 import RuntimeNodeDetailPage from '@/pages/runtime-nodes/RuntimeNodeDetailPage.vue'
 import RuntimeNodesPage from '@/pages/runtime-nodes/RuntimeNodesPage.vue'
 import { useAuthStore } from '@/stores/auth'
@@ -33,6 +34,7 @@ export const router = createRouter({
         { path: 'audit-logs', component: AuditLogsPage },
         { path: 'runtime-nodes', component: RuntimeNodesPage },
         { path: 'runtime-nodes/:nodeId', component: RuntimeNodeDetailPage },
+        { path: 'knowledge', component: OrgKnowledgePage },
       ],
     },
   ],

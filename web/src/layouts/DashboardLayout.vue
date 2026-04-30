@@ -27,6 +27,10 @@
           <Users :size="18" />
           <span>成员</span>
         </RouterLink>
+        <RouterLink class="nav-item" active-class="active" to="/knowledge">
+          <BookOpen :size="18" />
+          <span>知识库</span>
+        </RouterLink>
         <RouterLink class="nav-item" active-class="active" to="/audit-logs">
           <FileSearch :size="18" />
           <span>审计</span>
@@ -78,6 +82,7 @@
 import { computed } from 'vue'
 import { useRouter } from 'vue-router'
 import {
+  BookOpen,
   Building2,
   FileSearch,
   LayoutDashboard,

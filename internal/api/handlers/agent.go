@@ -1,9 +1,8 @@
-// Package agent 提供 OpenClaw runtime agent 与 manager API 之间的契约。
-// 当前文件实现 manager 侧暴露给 agent 的 register 与 heartbeat HTTP 端点。
-package agent
+package handlers
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"net/http"
 
@@ -12,41 +11,43 @@ import (
 	"oc-manager/internal/service"
 )
 
-// AgentService 抽象 manager 处理 agent 注册与心跳所需的业务能力。
-type AgentService interface {
+// AgentEndpointsService 抽象 manager 处理 agent 注册与心跳所需的业务能力。
+type AgentEndpointsService interface {
 	RegisterAgent(ctx context.Context, input service.AgentRegisterInput) (service.AgentRegisterResult, error)
 	HandleHeartbeat(ctx context.Context, input service.AgentHeartbeatInput) (service.RuntimeNodeResult, error)
 }
 
-// EndpointsHandler 暴露给 runtime agent 的 HTTP 端点。
-type EndpointsHandler struct {
-	service AgentService
+// AgentEndpointsHandler 暴露给 runtime agent 的 HTTP 端点。
+// 这里没有 manager 用户的 Authorization，因此不复用其它 handler 的 token 校验，
+// 鉴权完全靠 bootstrap_token / agent_token 自身。
+type AgentEndpointsHandler struct {
+	service AgentEndpointsService
 }
 
-// NewEndpointsHandler 创建 agent 端点 handler。
-func NewEndpointsHandler(svc AgentService) *EndpointsHandler {
-	return &EndpointsHandler{service: svc}
+// NewAgentEndpointsHandler 创建 agent 端点 handler。
+func NewAgentEndpointsHandler(svc AgentEndpointsService) *AgentEndpointsHandler {
+	return &AgentEndpointsHandler{service: svc}
 }
 
-// RegisterRoutes 注册 agent 路由前缀 /api/v1/agent。
-func RegisterRoutes(router gin.IRouter, handler *EndpointsHandler) {
+// RegisterAgentRoutes 注册 agent 路由前缀 /api/v1/agent。
+func RegisterAgentRoutes(router gin.IRouter, handler *AgentEndpointsHandler) {
 	group := router.Group("/api/v1/agent")
 	group.POST("/register", handler.Register)
 	group.POST("/heartbeat", handler.Heartbeat)
 }
 
-type registerRequest struct {
-	BootstrapToken      string `json:"bootstrap_token" binding:"required"`
-	AgentDockerEndpoint string `json:"agent_docker_endpoint"`
-	AgentFileEndpoint   string `json:"agent_file_endpoint"`
-	AgentTLSCACert      string `json:"agent_tls_ca_cert"`
-	AgentVersion        string `json:"agent_version"`
-	NodeDataRoot        string `json:"node_data_root"`
+type agentRegisterRequest struct {
+	BootstrapToken      string         `json:"bootstrap_token" binding:"required"`
+	AgentDockerEndpoint string         `json:"agent_docker_endpoint"`
+	AgentFileEndpoint   string         `json:"agent_file_endpoint"`
+	AgentTLSCACert      string         `json:"agent_tls_ca_cert"`
+	AgentVersion        string         `json:"agent_version"`
+	NodeDataRoot        string         `json:"node_data_root"`
 	ResourceSnapshot    map[string]any `json:"resource_snapshot"`
 	Metadata            map[string]any `json:"metadata"`
 }
 
-type heartbeatRequest struct {
+type agentHeartbeatRequest struct {
 	AgentToken       string         `json:"agent_token" binding:"required"`
 	AgentVersion     string         `json:"agent_version"`
 	ResourceSnapshot map[string]any `json:"resource_snapshot"`
@@ -54,18 +55,18 @@ type heartbeatRequest struct {
 }
 
 // Register 处理 agent 用 bootstrap token 注册并换取 agent token。
-func (h *EndpointsHandler) Register(c *gin.Context) {
-	var req registerRequest
+func (h *AgentEndpointsHandler) Register(c *gin.Context) {
+	var req agentRegisterRequest
 	if err := c.ShouldBindJSON(&req); err != nil {
 		c.JSON(http.StatusBadRequest, gin.H{"error": "请求参数不完整"})
 		return
 	}
-	resourceJSON, err := jsonOrEmpty(req.ResourceSnapshot)
+	resourceJSON, err := agentJSONOrEmpty(req.ResourceSnapshot)
 	if err != nil {
 		c.JSON(http.StatusBadRequest, gin.H{"error": "resource_snapshot 序列化失败"})
 		return
 	}
-	metadataJSON, err := jsonOrEmpty(req.Metadata)
+	metadataJSON, err := agentJSONOrEmpty(req.Metadata)
 	if err != nil {
 		c.JSON(http.StatusBadRequest, gin.H{"error": "metadata 序列化失败"})
 		return
@@ -81,7 +82,7 @@ func (h *EndpointsHandler) Register(c *gin.Context) {
 		Metadata:            metadataJSON,
 	})
 	if err != nil {
-		writeAgentError(c, err)
+		writeAgentEndpointError(c, err)
 		return
 	}
 	c.JSON(http.StatusOK, gin.H{
@@ -92,18 +93,18 @@ func (h *EndpointsHandler) Register(c *gin.Context) {
 }
 
 // Heartbeat 处理 agent 上报心跳。
-func (h *EndpointsHandler) Heartbeat(c *gin.Context) {
-	var req heartbeatRequest
+func (h *AgentEndpointsHandler) Heartbeat(c *gin.Context) {
+	var req agentHeartbeatRequest
 	if err := c.ShouldBindJSON(&req); err != nil {
 		c.JSON(http.StatusBadRequest, gin.H{"error": "请求参数不完整"})
 		return
 	}
-	resourceJSON, err := jsonOrEmpty(req.ResourceSnapshot)
+	resourceJSON, err := agentJSONOrEmpty(req.ResourceSnapshot)
 	if err != nil {
 		c.JSON(http.StatusBadRequest, gin.H{"error": "resource_snapshot 序列化失败"})
 		return
 	}
-	metadataJSON, err := jsonOrEmpty(req.Metadata)
+	metadataJSON, err := agentJSONOrEmpty(req.Metadata)
 	if err != nil {
 		c.JSON(http.StatusBadRequest, gin.H{"error": "metadata 序列化失败"})
 		return
@@ -115,20 +116,20 @@ func (h *EndpointsHandler) Heartbeat(c *gin.Context) {
 		Metadata:         metadataJSON,
 	})
 	if err != nil {
-		writeAgentError(c, err)
+		writeAgentEndpointError(c, err)
 		return
 	}
 	c.JSON(http.StatusOK, gin.H{"runtime_node": result})
 }
 
-func jsonOrEmpty(value map[string]any) ([]byte, error) {
+func agentJSONOrEmpty(value map[string]any) ([]byte, error) {
 	if len(value) == 0 {
 		return nil, nil
 	}
-	return marshal(value)
+	return json.Marshal(value)
 }
 
-func writeAgentError(c *gin.Context, err error) {
+func writeAgentEndpointError(c *gin.Context, err error) {
 	switch {
 	case errors.Is(err, service.ErrBootstrapTokenInvalid),
 		errors.Is(err, service.ErrAgentTokenInvalid):

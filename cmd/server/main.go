@@ -11,6 +11,7 @@ import (
 	"oc-manager/internal/api"
 	"oc-manager/internal/auth"
 	"oc-manager/internal/config"
+	"oc-manager/internal/files"
 	"oc-manager/internal/integrations/channel"
 	"oc-manager/internal/service"
 	"oc-manager/internal/store"
@@ -52,6 +53,15 @@ func main() {
 	runtimeNodeService := service.NewRuntimeNodeService(runtimeNodeStore, hashTokenSHA256)
 	channelRegistry := channel.NewRegistry()
 	channelService := service.NewChannelService(dbStore.Queries, channelRegistry)
+	knowledgeRoot := os.Getenv("OCM_KNOWLEDGE_ROOT")
+	if knowledgeRoot == "" {
+		knowledgeRoot = "/var/lib/oc-manager/knowledge"
+	}
+	safeRoot, err := files.NewSafeRoot(knowledgeRoot, 0)
+	if err != nil {
+		log.Fatalf("初始化知识库主副本失败: %v", err)
+	}
+	knowledgeService := service.NewKnowledgeService(files.NewKnowledgeMaster(safeRoot))
 
 	server := &http.Server{
 		Addr: cfg.App.HTTPAddr,
@@ -63,6 +73,7 @@ func main() {
 			AuditService:        auditService,
 			RuntimeNodeService:  runtimeNodeService,
 			ChannelService:      channelService,
+			KnowledgeService:    knowledgeService,
 			JobsStore:           dbStore.Queries,
 			TokenManager:        tokenManager,
 		}),
