@@ -164,3 +164,9 @@ func (s *memberServiceStub) ResetMemberPassword(_ context.Context, principal aut
 	s.lastUserID = userID
 	return s.resetErr
 }
+
+func (s *memberServiceStub) DeleteMember(_ context.Context, principal auth.Principal, userID string, _ service.JobNotifier) error {
+	s.lastPrincipal = principal
+	s.lastUserID = userID
+	return nil
+}
