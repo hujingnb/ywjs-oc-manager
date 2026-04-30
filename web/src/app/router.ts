@@ -6,6 +6,7 @@ import DashboardLayout from '@/layouts/DashboardLayout.vue'
 import AuditLogsPage from '@/pages/audit/AuditLogsPage.vue'
 import DashboardHome from '@/pages/dashboard/DashboardHome.vue'
 import LoginPage from '@/pages/login/LoginPage.vue'
+import CreateMemberPage from '@/pages/org/CreateMemberPage.vue'
 import MembersPage from '@/pages/org/MembersPage.vue'
 import OrganizationsPage from '@/pages/platform/OrganizationsPage.vue'
 import RuntimeNodeDetailPage from '@/pages/runtime-nodes/RuntimeNodeDetailPage.vue'
@@ -28,6 +29,7 @@ export const router = createRouter({
         { path: '', component: DashboardHome },
         { path: 'organizations', component: OrganizationsPage },
         { path: 'members', component: MembersPage },
+        { path: 'members/new', component: CreateMemberPage },
         { path: 'audit-logs', component: AuditLogsPage },
         { path: 'runtime-nodes', component: RuntimeNodesPage },
         { path: 'runtime-nodes/:nodeId', component: RuntimeNodeDetailPage },

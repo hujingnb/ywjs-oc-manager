@@ -15,8 +15,9 @@ import (
 // MembersHandler 处理组织成员相关 HTTP 路由。
 // handler 只做请求绑定与状态码映射，业务规则统一在 service 层。
 type MembersHandler struct {
-	service memberService
-	tokens  *auth.TokenManager
+	service    memberService
+	onboarding onboardingService
+	tokens     *auth.TokenManager
 }
 
 type memberService interface {
@@ -28,18 +29,30 @@ type memberService interface {
 	ResetMemberPassword(ctx context.Context, principal auth.Principal, userID, newPassword string) error
 }
 
+type onboardingService interface {
+	OnboardMember(ctx context.Context, principal auth.Principal, orgID string, input service.OnboardMemberInput) (service.OnboardMemberResult, error)
+}
+
 // NewMembersHandler 创建成员 handler。
 func NewMembersHandler(service memberService, tokens *auth.TokenManager) *MembersHandler {
 	return &MembersHandler{service: service, tokens: tokens}
 }
 
+// SetOnboardingService 给已存在的 handler 注入 onboarding 能力，便于按需启用。
+// 如果调用方没有调用此方法，POST /onboard 路由会返回 503，避免暴露未实现的能力。
+func (h *MembersHandler) SetOnboardingService(svc onboardingService) {
+	h.onboarding = svc
+}
+
 // RegisterMemberRoutes 注册成员路由。
 // 组织维度的列表/创建挂在 /organizations/:orgId/members；
 // 单条成员的查询、更新、状态切换、密码重置挂在 /members/:userId。
+// 创建成员并联动初始化应用的事务路由挂在 /organizations/:orgId/members/onboard。
 func RegisterMemberRoutes(router gin.IRouter, handler *MembersHandler) {
 	orgGroup := router.Group("/api/v1/organizations/:orgId/members")
 	orgGroup.GET("", handler.List)
 	orgGroup.POST("", handler.Create)
+	orgGroup.POST("/onboard", handler.Onboard)
 
 	memberGroup := router.Group("/api/v1/members")
 	memberGroup.GET("/:userId", handler.Get)
@@ -162,6 +175,53 @@ func (h *MembersHandler) setStatus(c *gin.Context, status string) {
 		return
 	}
 	c.JSON(http.StatusOK, gin.H{"member": result})
+}
+
+// onboardMemberRequest 是创建成员并联动应用的请求体。
+type onboardMemberRequest struct {
+	Username    string `json:"username" binding:"required"`
+	DisplayName string `json:"display_name" binding:"required"`
+	Password    string `json:"password" binding:"required"`
+	Role        string `json:"role"`
+	AppName     string `json:"app_name" binding:"required"`
+	AppPrompt   string `json:"app_prompt"`
+	PersonaMode string `json:"persona_mode"`
+	ChannelType string `json:"channel_type"`
+	NodeID      string `json:"runtime_node_id"`
+}
+
+// Onboard 在事务中创建成员、应用、渠道绑定、审计与初始化任务。
+// 调用方未配置 onboarding service 时返回 503，避免暴露未实现的行为。
+func (h *MembersHandler) Onboard(c *gin.Context) {
+	if h.onboarding == nil {
+		c.JSON(http.StatusServiceUnavailable, gin.H{"error": "成员联动应用流程暂未启用"})
+		return
+	}
+	principal, ok := h.principal(c)
+	if !ok {
+		return
+	}
+	var req onboardMemberRequest
+	if err := c.ShouldBindJSON(&req); err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "请求参数不完整"})
+		return
+	}
+	result, err := h.onboarding.OnboardMember(c.Request.Context(), principal, c.Param("orgId"), service.OnboardMemberInput{
+		Username:    req.Username,
+		DisplayName: req.DisplayName,
+		Password:    req.Password,
+		Role:        req.Role,
+		AppName:     req.AppName,
+		AppPrompt:   req.AppPrompt,
+		PersonaMode: req.PersonaMode,
+		ChannelType: req.ChannelType,
+		NodeID:      req.NodeID,
+	})
+	if err != nil {
+		writeMemberError(c, err)
+		return
+	}
+	c.JSON(http.StatusCreated, gin.H{"onboarding": result})
 }
 
 // ResetPassword 由管理员重置成员密码。

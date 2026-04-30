@@ -6,10 +6,16 @@
           <p class="eyebrow">{{ orgEyebrow }}</p>
           <h2>成员列表</h2>
         </div>
-        <button class="primary-button" type="button" @click="openForm" :disabled="!effectiveOrgId">
-          <Plus :size="16" />
-          <span>新增成员</span>
-        </button>
+        <div class="topbar-actions">
+          <RouterLink v-if="effectiveOrgId" class="secondary-button" to="/members/new">
+            <Plus :size="16" />
+            <span>创建并初始化</span>
+          </RouterLink>
+          <button class="primary-button" type="button" @click="openForm" :disabled="!effectiveOrgId">
+            <Plus :size="16" />
+            <span>新增成员</span>
+          </button>
+        </div>
       </div>
 
       <div v-if="!effectiveOrgId" class="state-text">当前账号未关联组织，无法查看成员。</div>

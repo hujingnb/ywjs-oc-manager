@@ -45,6 +45,7 @@ func main() {
 	authService := service.NewAuthService(dbStore.Queries, tokenManager)
 	organizationService := service.NewOrganizationService(dbStore.Queries)
 	memberService := service.NewMemberService(dbStore.Queries, hashPasswordWithDefault)
+	onboardingService := service.NewMemberOnboardingService(store.NewOnboardingRunner(dbStore), hashPasswordWithDefault)
 	auditService := service.NewAuditService(dbStore.Queries)
 	runtimeNodeStore := store.NewRuntimeNodeStore(dbStore)
 	runtimeNodeService := service.NewRuntimeNodeService(runtimeNodeStore, hashTokenSHA256)
@@ -55,6 +56,7 @@ func main() {
 			AuthService:         authService,
 			OrganizationService: organizationService,
 			MemberService:       memberService,
+			OnboardingService:   onboardingService,
 			AuditService:        auditService,
 			RuntimeNodeService:  runtimeNodeService,
 			JobsStore:           dbStore.Queries,

@@ -15,6 +15,7 @@ type Dependencies struct {
 	AuthService         *service.AuthService
 	OrganizationService *service.OrganizationService
 	MemberService       *service.MemberService
+	OnboardingService   *service.MemberOnboardingService
 	AuditService        *service.AuditService
 	RuntimeNodeService  *service.RuntimeNodeService
 	JobsStore           handlers.JobsStore
@@ -42,7 +43,11 @@ func NewRouter(deps ...Dependencies) http.Handler {
 		handlers.RegisterOrganizationRoutes(router, handlers.NewOrganizationsHandler(dep.OrganizationService, dep.TokenManager))
 	}
 	if dep.MemberService != nil {
-		handlers.RegisterMemberRoutes(router, handlers.NewMembersHandler(dep.MemberService, dep.TokenManager))
+		memberHandler := handlers.NewMembersHandler(dep.MemberService, dep.TokenManager)
+		if dep.OnboardingService != nil {
+			memberHandler.SetOnboardingService(dep.OnboardingService)
+		}
+		handlers.RegisterMemberRoutes(router, memberHandler)
 	}
 	if dep.AuditService != nil {
 		handlers.RegisterAuditRoutes(router, handlers.NewAuditHandler(dep.AuditService, dep.TokenManager))
