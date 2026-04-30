@@ -34,6 +34,16 @@
       :subtitle="trackingJobId"
       :job="trackedJob ?? undefined"
     />
+
+    <ConfirmActionModal
+      :visible="confirmDelete"
+      title="确认删除应用"
+      message="将提交删除任务，应用容器、API key 和工作目录都会被回收。该操作不可撤销。"
+      confirm-label="确认删除"
+      :busy="mutation.isPending.value"
+      @confirm="onConfirmDelete"
+      @cancel="confirmDelete = false"
+    />
   </section>
 </template>
 
@@ -46,6 +56,7 @@ import {
   useTriggerRuntimeOperation,
   type AppDTO,
 } from '@/api/hooks/useApps'
+import ConfirmActionModal from '@/components/ConfirmActionModal.vue'
 import JobProgressPanel from '@/components/JobProgressPanel.vue'
 
 const props = defineProps<{ appId: string }>()
@@ -64,6 +75,7 @@ const trackedJob = computed(() => jobQuery.data.value ?? null)
 
 const actionFeedback = ref('')
 const actionError = ref(false)
+const confirmDelete = ref(false)
 
 const runtimeStatusLabel = computed(() => {
   const status = runtime.value?.status
@@ -83,6 +95,20 @@ const canDelete = computed(() => {
 })
 
 async function onAction(op: 'start' | 'stop' | 'restart' | 'delete') {
+  if (op === 'delete') {
+    // 删除走二次确认；ConfirmActionModal 的 confirm 事件触发实际请求。
+    confirmDelete.value = true
+    return
+  }
+  await runMutation(op)
+}
+
+async function onConfirmDelete() {
+  confirmDelete.value = false
+  await runMutation('delete')
+}
+
+async function runMutation(op: 'start' | 'stop' | 'restart' | 'delete') {
   actionFeedback.value = ''
   actionError.value = false
   try {
