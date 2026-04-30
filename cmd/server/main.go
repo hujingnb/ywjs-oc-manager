@@ -118,6 +118,15 @@ func runManager(ctx context.Context, cfg config.Config, logOut io.Writer) error 
 	// runtime inspector 在 runtimeAdapter 构造之后注入；这里先声明字段，后面赋值。
 
 	agentTokenResolver := agent.NewTokenResolver()
+	agentTokenStore := store.NewAgentTokenStore(dbStore)
+	agentTokenResolver.SetPersistentLoader(newPersistentTokenLoader(agentTokenStore, cipher))
+	agentTokenSink := func(nodeID, token string) {
+		agentTokenResolver.Set(nodeID, token)
+		// 加密入库；任何错误只走日志，不阻断 register 响应。
+		if err := persistAgentToken(context.Background(), agentTokenStore, cipher, nodeID, token); err != nil {
+			logger.Printf("持久化 agent token 失败 node=%s: %v", nodeID, err)
+		}
+	}
 	nodeResolver := newNodeClientResolver(dbStore.Queries, agentTokenResolver)
 
 	imageSync := imagesync.New(imagesync.LocalDockerCLIProvider{}, nodeResolver)
@@ -191,7 +200,7 @@ func runManager(ctx context.Context, cfg config.Config, logOut io.Writer) error 
 			PersonaService:      personaService,
 			JobsStore:           dbStore.Queries,
 			TokenManager:        tokenManager,
-			AgentTokenSink:      agentTokenResolver.Set,
+			AgentTokenSink:      agentTokenSink,
 			JobNotifier:         redisQueue,
 		}),
 		ReadHeaderTimeout: 5 * time.Second,

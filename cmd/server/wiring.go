@@ -14,10 +14,12 @@ import (
 	dockercli "github.com/docker/docker/client"
 	"github.com/jackc/pgx/v5/pgtype"
 
+	"oc-manager/internal/auth"
 	"oc-manager/internal/integrations/agent"
 	"oc-manager/internal/integrations/runtime"
 	"oc-manager/internal/runtime/imagesync"
 	"oc-manager/internal/service"
+	"oc-manager/internal/store"
 	"oc-manager/internal/store/sqlc"
 )
 
@@ -330,6 +332,58 @@ func uuidToStringWiring(id pgtype.UUID) string {
 
 // jsonMarshal 是 cmd/server 内部 json.Marshal 的简短封装，便于 dispatcher 复用。
 var jsonMarshal = json.Marshal
+
+// persistentTokenLoader 适配 store.AgentTokenStore 实现 agent.PersistentTokenLoader。
+// cache miss 时从数据库读密文 → cipher.Decrypt 还原明文 → 由 TokenResolver 回填 cache。
+type persistentTokenLoader struct {
+	store  *store.AgentTokenStore
+	cipher *auth.Cipher
+}
+
+func newPersistentTokenLoader(s *store.AgentTokenStore, c *auth.Cipher) *persistentTokenLoader {
+	return &persistentTokenLoader{store: s, cipher: c}
+}
+
+// LoadAgentToken 实现 agent.PersistentTokenLoader。
+// 任何失败（节点不存在、密文损坏、解密失败）都返回错误；调用方据此返回 401 让 agent 重新注册。
+func (l *persistentTokenLoader) LoadAgentToken(ctx context.Context, nodeID string) (string, error) {
+	if l.store == nil || l.cipher == nil {
+		return "", nil
+	}
+	id, err := parseUUIDForWiring(nodeID)
+	if err != nil {
+		return "", err
+	}
+	ciphertext, err := l.store.Get(ctx, id)
+	if err != nil {
+		return "", fmt.Errorf("查询 agent token 密文失败: %w", err)
+	}
+	if ciphertext == "" {
+		return "", nil
+	}
+	plain, err := l.cipher.Decrypt(ciphertext)
+	if err != nil {
+		return "", fmt.Errorf("解密 agent token 失败: %w", err)
+	}
+	return string(plain), nil
+}
+
+// persistAgentToken 把 agent token 加密后写入数据库。
+// 加密失败不冒泡：成功的 register 响应已经返回给 agent，持久化失败只走日志。
+func persistAgentToken(ctx context.Context, s *store.AgentTokenStore, c *auth.Cipher, nodeID, token string) error {
+	if s == nil || c == nil {
+		return nil
+	}
+	id, err := parseUUIDForWiring(nodeID)
+	if err != nil {
+		return err
+	}
+	ciphertext, err := c.Encrypt([]byte(token))
+	if err != nil {
+		return fmt.Errorf("加密 agent token 失败: %w", err)
+	}
+	return s.Set(ctx, id, ciphertext)
+}
 
 // imageDistributorWrapper 把 service.ImageDistributionService 适配成 handlers.ImageDistributor 的
 // (any, error) 自由签名。Go 接口要求 exact 返回类型匹配，所以转一层。

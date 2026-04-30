@@ -1,6 +1,7 @@
 package agent
 
 import (
+	"context"
 	"errors"
 	"sync"
 	"testing"
@@ -42,6 +43,51 @@ func TestTokenResolver_Forget(t *testing.T) {
 	r.Forget("n")
 	if _, err := r.Get("n"); !errors.Is(err, ErrTokenNotCached) {
 		t.Fatalf("Forget 后 Get err = %v, want ErrTokenNotCached", err)
+	}
+}
+
+// stubLoader 验证 PersistentTokenLoader 路径。
+type stubLoader struct {
+	tokens map[string]string
+	calls  int
+	err    error
+}
+
+func (s *stubLoader) LoadAgentToken(_ context.Context, nodeID string) (string, error) {
+	s.calls++
+	if s.err != nil {
+		return "", s.err
+	}
+	return s.tokens[nodeID], nil
+}
+
+func TestTokenResolver_FallsBackToPersistentLoader(t *testing.T) {
+	r := NewTokenResolver()
+	r.SetPersistentLoader(&stubLoader{tokens: map[string]string{"n1": "loaded"}})
+	got, err := r.Get("n1")
+	if err != nil {
+		t.Fatalf("Get err = %v", err)
+	}
+	if got != "loaded" {
+		t.Fatalf("Get = %q", got)
+	}
+	// 第二次应当命中 cache，不再触发 loader。
+	loader := &stubLoader{tokens: map[string]string{"n1": "different"}}
+	r.SetPersistentLoader(loader)
+	got, _ = r.Get("n1")
+	if got != "loaded" {
+		t.Fatalf("第二次应命中 cache，got %q", got)
+	}
+	if loader.calls != 0 {
+		t.Fatalf("loader 被多次调用 %d", loader.calls)
+	}
+}
+
+func TestTokenResolver_LoaderEmptyReturnsErrTokenNotCached(t *testing.T) {
+	r := NewTokenResolver()
+	r.SetPersistentLoader(&stubLoader{tokens: map[string]string{}})
+	if _, err := r.Get("missing"); !errors.Is(err, ErrTokenNotCached) {
+		t.Fatalf("err = %v, want ErrTokenNotCached", err)
 	}
 }
 
