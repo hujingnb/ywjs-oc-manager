@@ -112,6 +112,79 @@ func (c *Client) GetAPIKey(ctx context.Context, id int64) (APIKey, error) {
 	return response.Data, nil
 }
 
+// RechargeInput 是组织充值的入参。
+// CreditAmount 必须为正数；Remark 由调用方按业务策略组装（操作员 + 业务说明）。
+type RechargeInput struct {
+	NewAPIUserID int64
+	CreditAmount int64
+	Remark       string
+}
+
+// RechargeResult 描述 new-api 返回的充值结果。
+// RefID 用于 manager 端写入 recharge_records.newapi_ref_id，便于跨系统对账。
+type RechargeResult struct {
+	RefID       string
+	RemainQuota int64
+}
+
+// BalanceResult 描述某个 new-api 用户的当前余额视图。
+type BalanceResult struct {
+	NewAPIUserID int64
+	RemainQuota  int64
+	UsedQuota    int64
+}
+
+// RechargeUser 给指定 new-api 用户增加点数。
+// 失败时通过 sentinel error 区分；上层负责把成功/失败都写入 recharge_records 审计。
+func (c *Client) RechargeUser(ctx context.Context, input RechargeInput) (RechargeResult, error) {
+	if input.CreditAmount <= 0 {
+		return RechargeResult{}, fmt.Errorf("credit_amount 必须为正")
+	}
+	body := map[string]any{
+		"user_id": input.NewAPIUserID,
+		"quota":   input.CreditAmount,
+		"remark":  input.Remark,
+	}
+	var response struct {
+		Success bool   `json:"success"`
+		Message string `json:"message"`
+		Data    struct {
+			RefID       string `json:"ref_id"`
+			RemainQuota int64  `json:"remain_quota"`
+		} `json:"data"`
+	}
+	if err := c.do(ctx, http.MethodPost, "/api/user/recharge", body, &response); err != nil {
+		return RechargeResult{}, err
+	}
+	if !response.Success {
+		return RechargeResult{}, fmt.Errorf("%w: %s", ErrUpstream, response.Message)
+	}
+	return RechargeResult{RefID: response.Data.RefID, RemainQuota: response.Data.RemainQuota}, nil
+}
+
+// GetUserBalance 查询单个 new-api 用户的余额。
+func (c *Client) GetUserBalance(ctx context.Context, newapiUserID int64) (BalanceResult, error) {
+	var response struct {
+		Success bool   `json:"success"`
+		Message string `json:"message"`
+		Data    struct {
+			RemainQuota int64 `json:"remain_quota"`
+			UsedQuota   int64 `json:"used_quota"`
+		} `json:"data"`
+	}
+	if err := c.do(ctx, http.MethodGet, fmt.Sprintf("/api/user/%d", newapiUserID), nil, &response); err != nil {
+		return BalanceResult{}, err
+	}
+	if !response.Success {
+		return BalanceResult{}, fmt.Errorf("%w: %s", ErrUpstream, response.Message)
+	}
+	return BalanceResult{
+		NewAPIUserID: newapiUserID,
+		RemainQuota:  response.Data.RemainQuota,
+		UsedQuota:    response.Data.UsedQuota,
+	}, nil
+}
+
 // SetAPIKeyStatus 启用或禁用 token。
 // status: 1 启用、2 禁用。
 func (c *Client) SetAPIKeyStatus(ctx context.Context, id int64, status int) error {

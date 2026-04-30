@@ -16,6 +16,7 @@ import LoginPage from '@/pages/login/LoginPage.vue'
 import CreateMemberPage from '@/pages/org/CreateMemberPage.vue'
 import MembersPage from '@/pages/org/MembersPage.vue'
 import OrganizationsPage from '@/pages/platform/OrganizationsPage.vue'
+import RechargePage from '@/pages/platform/RechargePage.vue'
 import OrgKnowledgePage from '@/pages/knowledge/OrgKnowledgePage.vue'
 import RuntimeNodeDetailPage from '@/pages/runtime-nodes/RuntimeNodeDetailPage.vue'
 import RuntimeNodesPage from '@/pages/runtime-nodes/RuntimeNodesPage.vue'
@@ -36,6 +37,7 @@ export const router = createRouter({
       children: [
         { path: '', component: DashboardHome },
         { path: 'organizations', component: OrganizationsPage },
+        { path: 'platform/organizations/:orgId/recharge', component: RechargePage },
         { path: 'members', component: MembersPage },
         { path: 'members/new', component: CreateMemberPage },
         { path: 'audit-logs', component: AuditLogsPage },

@@ -23,6 +23,7 @@ type Dependencies struct {
 	UsageService        *service.UsageService
 	RuntimeOpService    *service.RuntimeOperationService
 	AppService          *service.AppService
+	RechargeService     *service.RechargeService
 	JobsStore           handlers.JobsStore
 	TokenManager        *auth.TokenManager
 	// AgentTokenSink 在 agent register 成功时由 manager 进程缓存 (nodeID, agentToken)。
@@ -90,6 +91,9 @@ func NewRouter(deps ...Dependencies) http.Handler {
 	}
 	if dep.AppService != nil {
 		handlers.RegisterAppRoutes(router, handlers.NewAppsHandler(dep.AppService, dep.TokenManager))
+	}
+	if dep.RechargeService != nil {
+		handlers.RegisterRechargeRoutes(router, handlers.NewRechargeHandler(dep.RechargeService, dep.TokenManager))
 	}
 	return router
 }
