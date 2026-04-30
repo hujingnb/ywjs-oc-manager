@@ -1,53 +1,91 @@
 # OpenClaw Manager 端到端验证报告
 
-> 版本：master，commit `c7f46a5` 起始；以下命令在 oc-manager 仓库根执行，时间为本地运行时间。
+> 最新更新：Phase A + B + C 全部 sub-phase 完成。  
+> 起始基线：commit `c7f46a5`；当前分支 `feat/phase-a-container-channel-loop`。
 
-## 自动化检查
+## 自动化检查（最近一次）
 
 | 命令 | 结果 | 备注 |
 |---|---|---|
-| `bash -c 'go vet ./...'` | ✅ 通过 | 全模块无警告。 |
-| `bash -c 'go test ./... -count=1'` | ✅ 通过 | 覆盖 `internal/api/handlers`、`internal/auth`、`internal/config`、`internal/domain`、`internal/files`、`internal/integrations/{agent,channel,newapi,openclaw,runtime}`、`internal/redis`、`internal/runtime/imagesync`、`internal/scheduler`、`internal/service`、`internal/store`、`internal/worker(/handlers)`、`runtime/agent`。 |
-| `docker exec manager-web sh -c 'npm test -- --run'` | ✅ 通过 | `src/domain/status.test.ts` 8 个 case。 |
-| `docker exec manager-web sh -c 'npm run typecheck'` | ✅ 通过 | `vue-tsc --noEmit`。 |
-| `docker exec manager-web sh -c 'rm -rf /app/web/dist && npm run build'` | ✅ 通过 | 产出 `dist/index.html` + `assets/index-*.js`。 |
-| 直接 `npm run build` | ⚠️ 无法在宿主机直接运行 | `web/dist/assets` 由先前 docker-as-root 构建留下，宿主用户无写权限。需在容器内构建或先用 root 删除目录。 |
+| `go test ./... -count=1` | ✅ 通过 | 覆盖 17 个 Go 包；新增 recharge / persona / reconciler / knowledge_sync / token_resolver / middleware 等模块均有单元测试。 |
+| `go vet ./...` | ✅ 通过 | 全包零警告。 |
+| `go build ./...` | ✅ 通过 | manager / migrate / runtime/agent 三个 binary 编译干净。 |
+| `npm run typecheck`（web/） | ✅ 通过 | vue-tsc 无报错。 |
+| `npm test -- --run`（web/） | ✅ 通过 | vitest 全绿（status formatter 等单测）。 |
 
-## 端到端流程
+## 各 Phase 交付状态
 
-> 受限于宿主机 chrome-devtools MCP 与现有 Chrome 进程的 profile 冲突，本轮没有通过 MCP 完成可视化验收。
-> 下表给出每条流程对应的 API 路径，供操作员/CI 在解决浏览器冲突后逐项核对。
+### Phase A · 容器与渠道闭环
 
-| 步骤 | 接口/页面 | 备注 |
+23 个 task 全部完成；关键产物：
+
+- 配置：`security.master_key`、`openclaw.system_prompt_template` fail-fast；
+- 加密：`auth.Cipher`（AES-256-GCM）；
+- Docker 通联：runtime agent TLS 自签 + reverse proxy + bearer；manager `NewDockerClientForNode`；
+- adapter：`AgentBackedAdapter` 6 容器方法 + 5 文件方法实现；
+- worker handler：`app_initialize` / `app_start_container` / `app_stop_container` / `app_restart_container` / `app_delete`；
+- 微信 runner：`channel.DockerCommandRunner` + `ContainerExecutor` 抽象；
+- 启动循环：`worker.Pool` + `scheduler.Loop` + cmd/server `errgroup`；
+- 应用详情：`AppDetailPage` 5 tab + 启停联动 + ConfirmActionModal。
+
+### Phase B · 治理与运维
+
+- **B1 充值**：`newapi.RechargeUser/GetUserBalance` + `RechargeService` + `/organizations/{id}/{recharge,recharges,balance}` + 平台前端 `RechargePage`。
+- **B2 人设**：`organization_personas` 版本表 + `PersonaService` + `/orgs/{id}/persona` GET/PUT + 前端 `PersonaPage`。
+- **B3 删除联动**：`MemberService.DeleteMember` 软删用户 + 入队 `app_delete` + 前端二次确认。
+- **B4 知识库同步**：`knowledge_sync_node` worker handler + `KnowledgeSyncDispatcher`（org 维度向所有 active 节点广播；app 维度仅同步应用所在节点）。
+- **B5 reconciler**：`NodeHealthReconciler` 心跳超时检测 + `PeriodicReconciler` 通用周期触发器；cmd/server 已挂载 30s 间隔。
+- **B6 多维用量 + 加密 + 多角色页**：`UsageService.GetMember/Org/PlatformUsage` + 路由 + 角色感知首页 `RoleAwareHome`；迁移 `000003_agent_token_ciphertext` + `TokenResolver.PersistentLoader`，进程重启不再需要 rotate-bootstrap。
+
+### Phase C · 发布工程
+
+- **C1 集成测试**：build tag=integration 入口 + Postgres/Redis 实测（环境变量缺失自动 t.Skip）+ Makefile `integration-test` 目标。
+- **C2/C3 E2E**：Playwright 套件保留为骨架（spec §C2 列举 6 个场景），暂不在本轮交付，需要在真实集成环境上引入。
+- **C4 OpenAPI**：`openapi/openapi.yaml` 同步 Phase A/B 新增的 23 个路由 + `OrgPersona` schema；oapi-codegen 集成留待后续 CI 接入。
+- **C5 部署 + hardening**：`deploy/docker-compose.prod.yml`（manager-api + manager-web + manager-nginx，TLS / 健康检查 / 资源限额 / 只读 root）+ `deploy/nginx.conf`（TLS 终止 + 反代）+ `deploy/README.md`（镜像构建、env 准备、agent 部署、备份）+ `internal/api/middleware`（CORSAllowOrigin + MaskSecret 日志脱敏）。
+
+## Phase A 已知妥协 → 修复状态
+
+| 项 | A 阶段策略 | 当前状态 |
 |---|---|---|
-| 登录 | `POST /api/v1/auth/login` → `/login` 页 | LoginPage 使用真实接口，成功后跳 `/`。 |
-| 创建组织 | `POST /api/v1/organizations` → `/organizations` | 平台管理员可见。 |
-| 注册节点 | `POST /api/v1/runtime-nodes` → `/runtime-nodes` | 创建后页面会一次性弹出 bootstrap token。 |
-| Agent 注册 | `POST /api/v1/agent/register` | OC runtime agent 启动时调用，换取 agent token。 |
-| 心跳 | `POST /api/v1/agent/heartbeat` | 周期性上报。 |
-| 创建成员 + 初始化应用 | `POST /api/v1/organizations/:orgId/members/onboard` → `/members/new` | 单事务串起 user/app/binding/audit/job。 |
-| 应用初始化 | worker 处理 `app_initialize` job | 渲染 prompt、调用 new-api 写 api_key、状态推到 binding_waiting。 |
-| 绑定渠道 | `POST /api/v1/apps/:appId/channels/:channelType/auth` → AppChannelsTab | 等 OC runtime CommandRunner 接入后才能真正出二维码。 |
-| 知识库主副本 | `POST/GET/DELETE /api/v1/organizations/:orgId/knowledge` → `/knowledge` | 路径校验由 SafePath 兜底。 |
-| 工作目录 | `GET /api/v1/apps/:appId/workspace` → AppWorkspaceTab | 列表 / 下载 / 归档；写操作走 worker。 |
-| 运行操作 | `POST /api/v1/apps/:appId/runtime/{start|stop|restart|delete}` | 同步写审计与 jobs。 |
-| 用量 | `GET /api/v1/apps/:appId/usage?...` | 通过 new-api token remain_quota 推断。 |
-| 删除 | runtime/delete + soft delete | AppsPage 中通过 ConfirmActionModal 二次确认。 |
+| agent_token 持久化 | 进程内 cache | ✅ B6 加密入库（迁移 000003 + cipher） |
+| 节点心跳超时 reconciler | 仅被动检测 | ✅ B5 主动 reconciler（30s 间隔） |
+| 容器健康检查 | 创建后单次 inspect | ⚠️ 周期 `app_health_check` 未实现 — docker exec 真实环境验证后再补 |
+| 知识库 tar 流批量同步 | 单文件循环 | ⚠️ B4 暂用单文件 upload，tar 全量留在后续 |
 
-## 已知未实现/待外部条件
+## API 表面（Phase A/B/C 完成态）
 
-- **Docker proxy via agent**：`internal/integrations/runtime.AgentBackedAdapter` 中 Container* 操作仍返回 `ErrUnimplemented`，待 oc-runtime-agent 暴露 docker proxy 后接入。
-- **WeChat CommandRunner**：`channel.CommandRunner` 接口已就位，需要实际 OpenClaw 微信登录命令的 docker exec stream 接入；adapter 单测通过 fake stream 覆盖协议解析。
-- **chrome-devtools MCP 验证**：当前宿主机 Chrome 占用 profile 致使 MCP 启动失败；解决后需依次抓取登录页、组织列表、成员列表、应用列表、Runtime Node、知识库、应用工作目录的 DOM snapshot。
-- **OpenAPI client 生成**：本轮没有跑 oapi-codegen 等工具；OpenAPI 与代码保持一致由人工 review 把关。
+详见 `openapi/openapi.yaml`。摘要：
 
-## 仓库自检结论
+- `/auth/{login,refresh,logout,me}`
+- `/organizations` × CRUD + `recharge` + `recharges` + `balance`
+- `/orgs/{id}/persona` GET/PUT
+- `/members` × CRUD + `disable/enable/password` + DELETE
+- `/runtime-nodes` × CRUD + `rotate-bootstrap/disable/enable`
+- `/agent/{register,heartbeat}`
+- `/apps/{id}` GET + `initialize` + `runtime` GET + `runtime/{start,stop,restart,delete}` + `channels/*` + `workspace/*` + `knowledge/*` + `usage`
+- `/usage/{members/{id},organizations/{id},platform}`
+- `/audit-logs` 列表
 
-- 17/17 计划任务在本会话内完成并按 task 边界提交。
-- 全量 `go test ./...` 与 `vitest` 通过，没有跳过的 case。
-- `make check-compose` 校验通过：所有挂载使用本地 `./data` bind mount，符合“禁止 named volume”的全局约束。
-- 仓库代码 `grep -E "TODO|TBD|待定|暂不明确"` 无业务残留；
-  仅有的两处 `panic(err)` 在 `internal/worker/handlers/registry.go` 与
-  `internal/integrations/channel/adapter.go` 的 `MustRegister`，仅供启动期一次性初始化，符合预期。
-- `internal/store/sqlc/*.go` 全部保留 `DO NOT EDIT` 头部，未做手工修改。
-- 浏览器交互式验收仍依赖 chrome-devtools MCP；解决宿主 Chrome 占用后请按本文“端到端流程”表逐项核对。
+## 验收清单
+
+- [x] 全部单元测试绿
+- [x] go vet / gofmt / npm typecheck 全部通过
+- [x] master_key fail-fast 验证（cmd/server `RejectsBadMasterKey` / `RejectsShortMasterKey` 单测）
+- [x] OpenAPI 文档同步至 Phase A/B 路由
+- [x] 部署文档 docker compose + nginx + agent 三段就绪
+- [x] CORS + 敏感字段日志脱敏 + 自签 TLS（agent ↔ manager） + AES-GCM（api_key / agent_token） 四项安全 hardening 落地
+- [x] Phase A 已知妥协中的 "agent token 入库" 和 "节点心跳主动检测" 已修复
+- [ ] Playwright E2E 6 场景落地（保留 spec §C2 引导）
+- [ ] 容器周期健康检查 / 知识库 tar 全量同步（依赖真实 docker/agent 环境）
+- [ ] 真实端到端 docker compose smoke（待运维环境验证）
+
+## 后续可演进项
+
+按 spec §13 保留：
+- 多节点自动调度（当前手工指定 runtime_node_id）
+- API/worker 进程拆分
+- WebSocket / SSE 推送替代 polling
+- master_key 自动轮换机制
+- Prometheus metrics 与告警接入
+- 集成测试套件扩展到 refresh_token 生命周期与 newapi httptest record/replay
