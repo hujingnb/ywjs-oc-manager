@@ -16,6 +16,7 @@ type Config struct {
 	Security SecurityConfig `yaml:"security"`
 	OpenClaw OpenClawConfig `yaml:"openclaw"`
 	Agent    AgentConfig    `yaml:"agent"`
+	NewAPI   NewAPIConfig   `yaml:"newapi"`
 }
 
 // AppConfig 描述 manager API 进程自身的运行参数。
@@ -80,6 +81,14 @@ type WorkspaceConfig struct {
 // HeartbeatIntervalSeconds 是约定值，agent 注册成功后回写并按此频率上报心跳。
 type AgentConfig struct {
 	HeartbeatIntervalSeconds int `yaml:"heartbeat_interval_seconds"`
+}
+
+// NewAPIConfig 描述 manager 与 new-api 网关的连接参数。
+// BaseURL 为空时 cmd/server 装配阶段不会构造 newapi client，
+// app_initialize handler 在调用 CreateAPIKey 时会直接报错；本地调试可不配。
+type NewAPIConfig struct {
+	BaseURL    string `yaml:"base_url"`
+	AdminToken string `yaml:"admin_token"`
 }
 
 // Duration 让 YAML 中的 "15m"、"720h" 这类字符串显式解析为 time.Duration。

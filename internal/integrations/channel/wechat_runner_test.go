@@ -23,7 +23,7 @@ type memoryExecutor struct {
 	mu          sync.Mutex
 }
 
-func (m *memoryExecutor) Exec(_ context.Context, _ string, cmd []string) (io.Reader, func(), error) {
+func (m *memoryExecutor) Exec(_ context.Context, _ string, _ string, cmd []string) (io.Reader, func(), error) {
 	m.mu.Lock()
 	m.cmdSeen = append([]string(nil), cmd...)
 	m.mu.Unlock()

@@ -26,15 +26,16 @@ type AppContainerLookup interface {
 	LookupContainer(ctx context.Context, appID string) (string, error)
 }
 
-// ContainerExecutor 抽象 "在指定容器内 exec 一段命令并返回 multiplexed stdout/stderr 流" 的能力。
+// ContainerExecutor 抽象 "在指定节点 + 容器内 exec 一段命令并返回 multiplexed stdout/stderr 流" 的能力。
 //
 // 这一层抽象把 docker SDK 的 hijack 协议隔离到生产实现里：
 //   - 测试用内存版直接产出帧，不依赖真实 docker；
 //   - 生产实现 dockerExecutor 包 ContainerExecCreate + ContainerExecAttach；
 //   - reader 必须遵循 docker stdcopy 协议（stream_type + size + payload）；
-//   - close 用于在 ctx 取消或 reader 走完时释放底层连接。
+//   - close 用于在 ctx 取消或 reader 走完时释放底层连接；
+//   - nodeID 让 executor 在多节点部署时按节点取对应 docker client。
 type ContainerExecutor interface {
-	Exec(ctx context.Context, containerID string, cmd []string) (reader io.Reader, close func(), err error)
+	Exec(ctx context.Context, nodeID, containerID string, cmd []string) (reader io.Reader, close func(), err error)
 }
 
 // DockerCommandRunner 通过 ContainerExecutor 在 OpenClaw 容器内执行 channels login 命令，
@@ -73,7 +74,7 @@ func (r *DockerCommandRunner) StreamWeChatLogin(ctx context.Context, input AuthI
 	if containerID == "" {
 		return nil, fmt.Errorf("应用 %s 没有可用容器", input.AppID)
 	}
-	reader, closer, err := r.executor.Exec(ctx, containerID, []string{"openclaw", "channels", "login", "--channel", "openclaw-weixin", "--json"})
+	reader, closer, err := r.executor.Exec(ctx, input.NodeID, containerID, []string{"openclaw", "channels", "login", "--channel", "openclaw-weixin", "--json"})
 	if err != nil {
 		return nil, err
 	}
@@ -134,22 +135,17 @@ func pumpExecStream(ctx context.Context, reader io.Reader, closer func(), out ch
 }
 
 // NewDockerExecutor 包装一个 DockerClientResolver 提供生产可用的 ContainerExecutor。
-// nodeID 在调用时通过 ctx-bound 的 closure 注入：channel.AuthInput 携带 nodeID，
-// runner 不直接使用 nodeID，所以这里 executor 的 Exec 签名不需要 nodeID 字段。
-//
-// 用法：cmd/server 装配阶段对每个微信调用构造一个 nodeID-绑定 executor，
-// 简化办法是用 nodeBoundExecutor 把 (resolver, nodeID) 一起塞进 closure。
-func NewDockerExecutor(resolver DockerClientResolver, nodeID string) ContainerExecutor {
-	return &dockerExecutor{resolver: resolver, nodeID: nodeID}
+// 实现按 nodeID 实时取 docker client，让同一个 executor 实例可被多个节点共享。
+func NewDockerExecutor(resolver DockerClientResolver) ContainerExecutor {
+	return &dockerExecutor{resolver: resolver}
 }
 
 type dockerExecutor struct {
 	resolver DockerClientResolver
-	nodeID   string
 }
 
-func (d *dockerExecutor) Exec(ctx context.Context, containerID string, cmd []string) (io.Reader, func(), error) {
-	cli, err := d.resolver.DockerClient(ctx, d.nodeID)
+func (d *dockerExecutor) Exec(ctx context.Context, nodeID, containerID string, cmd []string) (io.Reader, func(), error) {
+	cli, err := d.resolver.DockerClient(ctx, nodeID)
 	if err != nil {
 		return nil, nil, fmt.Errorf("取 docker client 失败: %w", err)
 	}
