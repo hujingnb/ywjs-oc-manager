@@ -51,3 +51,15 @@ export function formatMemberStatus(status: string): StatusView {
 export function formatMemberRole(role: string): string {
   return memberRoleLabels[role] ?? role
 }
+
+const runtimeNodeStatusViews: Record<string, StatusView> = {
+  pending: { label: '待注册', tone: 'warning' },
+  active: { label: '在线', tone: 'success' },
+  unreachable: { label: '失联', tone: 'danger' },
+  disabled: { label: '禁用', tone: 'neutral' },
+}
+
+// formatRuntimeNodeStatus 将节点状态映射为中文文案与视觉语义。
+export function formatRuntimeNodeStatus(status: string): StatusView {
+  return runtimeNodeStatusViews[status] ?? { label: `未知状态：${status}`, tone: 'warning' }
+}

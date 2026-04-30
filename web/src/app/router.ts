@@ -8,6 +8,8 @@ import DashboardHome from '@/pages/dashboard/DashboardHome.vue'
 import LoginPage from '@/pages/login/LoginPage.vue'
 import MembersPage from '@/pages/org/MembersPage.vue'
 import OrganizationsPage from '@/pages/platform/OrganizationsPage.vue'
+import RuntimeNodeDetailPage from '@/pages/runtime-nodes/RuntimeNodeDetailPage.vue'
+import RuntimeNodesPage from '@/pages/runtime-nodes/RuntimeNodesPage.vue'
 import { useAuthStore } from '@/stores/auth'
 
 export const router = createRouter({
@@ -27,6 +29,8 @@ export const router = createRouter({
         { path: 'organizations', component: OrganizationsPage },
         { path: 'members', component: MembersPage },
         { path: 'audit-logs', component: AuditLogsPage },
+        { path: 'runtime-nodes', component: RuntimeNodesPage },
+        { path: 'runtime-nodes/:nodeId', component: RuntimeNodeDetailPage },
       ],
     },
   ],

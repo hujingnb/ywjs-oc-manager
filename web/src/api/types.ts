@@ -40,6 +40,20 @@ export interface Member {
   status: 'active' | 'disabled'
 }
 
+export interface RuntimeNode {
+  id: string
+  name: string
+  status: 'pending' | 'active' | 'unreachable' | 'disabled'
+  agent_docker_endpoint?: string
+  agent_file_endpoint?: string
+  agent_version?: string
+  heartbeat_interval_seconds: number
+  node_data_root?: string
+  bootstrap_token?: string
+  bootstrap_token_expires_at?: string
+  has_agent_token: boolean
+}
+
 export interface AuditLog {
   id: string
   actor_id?: string

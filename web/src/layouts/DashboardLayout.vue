@@ -31,6 +31,15 @@
           <FileSearch :size="18" />
           <span>审计</span>
         </RouterLink>
+        <RouterLink
+          v-if="auth.user?.role === 'platform_admin'"
+          class="nav-item"
+          active-class="active"
+          to="/runtime-nodes"
+        >
+          <Server :size="18" />
+          <span>运行节点</span>
+        </RouterLink>
       </nav>
 
       <div class="sidebar-footer">
@@ -74,6 +83,7 @@ import {
   LayoutDashboard,
   LogOut,
   RefreshCw,
+  Server,
   Users,
 } from 'lucide-vue-next'
 
