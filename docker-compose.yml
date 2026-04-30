@@ -85,7 +85,7 @@ services:
       - ./.local/data/ollama:/root/.ollama
 
   manager-api:
-    image: debian:12
+    image: golang:1.25-bookworm
     container_name: manager-api
     working_dir: /app
     command: sh -c "go install github.com/air-verse/air@latest && /go/bin/air -c .air.toml"
@@ -111,8 +111,6 @@ services:
         condition: service_healthy
     volumes:
       - ./:/app
-      - /home/hujing/.gvm/gos/go1.25:/usr/local/go:ro
-      - /etc/ssl/certs:/etc/ssl/certs:ro
       - ./.local/data/go/pkg/mod:/go/pkg/mod
       - ./.local/data/go/cache:/root/.cache/go-build
 
@@ -128,7 +126,7 @@ services:
       - ./.local/data/node/npm:/root/.npm
 
   oc-runtime-agent:
-    image: debian:12
+    image: golang:1.25-bookworm
     container_name: oc-runtime-agent
     working_dir: /app/runtime/agent
     command: sh -c "if [ -f main.go ]; then go run .; else sleep infinity; fi"
@@ -149,8 +147,6 @@ services:
       retries: 10
     volumes:
       - ./:/app
-      - /home/hujing/.gvm/gos/go1.25:/usr/local/go:ro
-      - /etc/ssl/certs:/etc/ssl/certs:ro
       - /var/run/docker.sock:/var/run/docker.sock
       - ./.local/data/agent:/var/lib/oc-agent
       - ./.local/data/go/pkg/mod:/go/pkg/mod
