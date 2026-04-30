@@ -638,6 +638,280 @@ paths:
             application/json:
               schema:
                 $ref: "#/components/schemas/AuditLogListResponse"
+
+  /api/v1/members/{userId}:
+    delete:
+      summary: 删除成员（联动其名下应用软删 + app_delete 入队）
+      operationId: deleteMember
+      security:
+        - bearerAuth: []
+      parameters:
+        - name: userId
+          in: path
+          required: true
+          schema: { type: string }
+      responses:
+        "204":
+          description: 成员已禁用，应用删除任务已入队。
+
+  /api/v1/orgs/{orgId}/persona:
+    get:
+      summary: 查询组织当前生效的 AI 人设
+      operationId: getOrgPersona
+      security:
+        - bearerAuth: []
+      parameters:
+        - name: orgId
+          in: path
+          required: true
+          schema: { type: string }
+      responses:
+        "200":
+          description: 当前生效人设。
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  persona:
+                    $ref: "#/components/schemas/OrgPersona"
+        "404":
+          description: 尚未配置。
+    put:
+      summary: 写入新版本人设（旧版本保留）
+      operationId: putOrgPersona
+      security:
+        - bearerAuth: []
+      parameters:
+        - name: orgId
+          in: path
+          required: true
+          schema: { type: string }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/OrgPersonaInput"
+      responses:
+        "200":
+          description: 已写入新版本。
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  persona:
+                    $ref: "#/components/schemas/OrgPersona"
+
+  /api/v1/organizations/{orgId}/recharge:
+    post:
+      summary: 给组织充值
+      operationId: rechargeOrg
+      security:
+        - bearerAuth: []
+      parameters:
+        - name: orgId
+          in: path
+          required: true
+          schema: { type: string }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [credit_amount]
+              properties:
+                credit_amount: { type: integer }
+                remark: { type: string }
+      responses:
+        "200":
+          description: 充值成功记录。
+        "502":
+          description: new-api 上游错误（仍写 failed 记录）。
+
+  /api/v1/organizations/{orgId}/recharges:
+    get:
+      summary: 列出组织充值历史
+      operationId: listRecharges
+      security:
+        - bearerAuth: []
+      parameters:
+        - name: orgId
+          in: path
+          required: true
+          schema: { type: string }
+      responses:
+        "200":
+          description: 充值记录列表。
+
+  /api/v1/organizations/{orgId}/balance:
+    get:
+      summary: 查询组织当前余额（透传 new-api）
+      operationId: getOrgBalance
+      security:
+        - bearerAuth: []
+      parameters:
+        - name: orgId
+          in: path
+          required: true
+          schema: { type: string }
+      responses:
+        "200":
+          description: 当前余额。
+
+  /api/v1/apps/{appId}:
+    get:
+      summary: 应用详情
+      operationId: getApp
+      security:
+        - bearerAuth: []
+      parameters:
+        - name: appId
+          in: path
+          required: true
+          schema: { type: string }
+      responses:
+        "200":
+          description: 应用详情。
+
+  /api/v1/apps/{appId}/initialize:
+    post:
+      summary: 重新触发初始化（仅 status ∈ {error, draft}）
+      operationId: initializeApp
+      security:
+        - bearerAuth: []
+      parameters:
+        - name: appId
+          in: path
+          required: true
+          schema: { type: string }
+      responses:
+        "202":
+          description: 初始化任务已入队。
+        "409":
+          description: 当前状态不允许重新初始化。
+
+  /api/v1/apps/{appId}/runtime:
+    get:
+      summary: 透传容器 inspect
+      operationId: getAppRuntime
+      security:
+        - bearerAuth: []
+      parameters:
+        - name: appId
+          in: path
+          required: true
+          schema: { type: string }
+      responses:
+        "200":
+          description: 运行时视图。
+
+  /api/v1/apps/{appId}/runtime/start:
+    post:
+      summary: 启动应用容器
+      operationId: startApp
+      security:
+        - bearerAuth: []
+      parameters:
+        - name: appId
+          in: path
+          required: true
+          schema: { type: string }
+      responses:
+        "202":
+          description: 启动任务已入队。
+
+  /api/v1/apps/{appId}/runtime/stop:
+    post:
+      summary: 停止应用容器
+      operationId: stopApp
+      security:
+        - bearerAuth: []
+      parameters:
+        - name: appId
+          in: path
+          required: true
+          schema: { type: string }
+      responses:
+        "202":
+          description: 停止任务已入队。
+
+  /api/v1/apps/{appId}/runtime/restart:
+    post:
+      summary: 重启应用容器
+      operationId: restartApp
+      security:
+        - bearerAuth: []
+      parameters:
+        - name: appId
+          in: path
+          required: true
+          schema: { type: string }
+      responses:
+        "202":
+          description: 重启任务已入队。
+
+  /api/v1/apps/{appId}/runtime/delete:
+    post:
+      summary: 删除应用（容器 + api_key + 工作目录回收）
+      operationId: deleteApp
+      security:
+        - bearerAuth: []
+      parameters:
+        - name: appId
+          in: path
+          required: true
+          schema: { type: string }
+      responses:
+        "202":
+          description: 删除任务已入队。
+
+  /api/v1/usage/members/{userId}:
+    get:
+      summary: 单个成员名下应用的用量聚合
+      operationId: getMemberUsage
+      security:
+        - bearerAuth: []
+      parameters:
+        - name: userId
+          in: path
+          required: true
+          schema: { type: string }
+        - name: org_id
+          in: query
+          required: true
+          schema: { type: string }
+      responses:
+        "200":
+          description: 聚合用量。
+
+  /api/v1/usage/organizations/{orgId}:
+    get:
+      summary: 组织维度的用量聚合
+      operationId: getOrgUsage
+      security:
+        - bearerAuth: []
+      parameters:
+        - name: orgId
+          in: path
+          required: true
+          schema: { type: string }
+      responses:
+        "200":
+          description: 聚合用量。
+
+  /api/v1/usage/platform:
+    get:
+      summary: 平台维度的用量聚合（仅 platform_admin）
+      operationId: getPlatformUsage
+      security:
+        - bearerAuth: []
+      responses:
+        "200":
+          description: 聚合用量。
+
 components:
   parameters:
     OrgId:
@@ -664,6 +938,30 @@ components:
       scheme: bearer
       bearerFormat: JWT
   schemas:
+    OrgPersona:
+      type: object
+      required:
+        - org_id
+        - system_prompt
+        - allow_member_override
+        - version
+      properties:
+        org_id: { type: string }
+        system_prompt: { type: string }
+        conversation_rules: { type: string }
+        forbidden_rules: { type: string }
+        reply_style: { type: string }
+        allow_member_override: { type: boolean }
+        version: { type: integer }
+    OrgPersonaInput:
+      type: object
+      required: [system_prompt]
+      properties:
+        system_prompt: { type: string }
+        conversation_rules: { type: string }
+        forbidden_rules: { type: string }
+        reply_style: { type: string }
+        allow_member_override: { type: boolean }
     HealthResponse:
       type: object
       required:
