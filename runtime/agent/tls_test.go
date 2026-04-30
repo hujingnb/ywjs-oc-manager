@@ -185,15 +185,15 @@ func writeExpiredCertBundle(stateDir string) error {
 		return err
 	}
 	tmpl := &x509.Certificate{
-		SerialNumber: big.NewInt(time.Now().UnixNano()),
-		Subject:      pkix.Name{CommonName: "expired"},
-		NotBefore:    time.Now().Add(-2 * 24 * time.Hour),
-		NotAfter:     time.Now().Add(-1 * 24 * time.Hour),
-		KeyUsage:     x509.KeyUsageDigitalSignature | x509.KeyUsageCertSign,
-		ExtKeyUsage:  []x509.ExtKeyUsage{x509.ExtKeyUsageServerAuth, x509.ExtKeyUsageClientAuth},
-		IPAddresses:  []net.IP{net.IPv4(127, 0, 0, 1)},
-		DNSNames:     []string{"host"},
-		IsCA:         true,
+		SerialNumber:          big.NewInt(time.Now().UnixNano()),
+		Subject:               pkix.Name{CommonName: "expired"},
+		NotBefore:             time.Now().Add(-2 * 24 * time.Hour),
+		NotAfter:              time.Now().Add(-1 * 24 * time.Hour),
+		KeyUsage:              x509.KeyUsageDigitalSignature | x509.KeyUsageCertSign,
+		ExtKeyUsage:           []x509.ExtKeyUsage{x509.ExtKeyUsageServerAuth, x509.ExtKeyUsageClientAuth},
+		IPAddresses:           []net.IP{net.IPv4(127, 0, 0, 1)},
+		DNSNames:              []string{"host"},
+		IsCA:                  true,
 		BasicConstraintsValid: true,
 	}
 	der, err := x509.CreateCertificate(rand.Reader, tmpl, tmpl, &priv.PublicKey, priv)
