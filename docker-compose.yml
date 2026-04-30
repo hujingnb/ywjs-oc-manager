@@ -115,13 +115,17 @@ services:
       DATABASE_URL: postgres://ocm:ocm@manager-postgres:5432/ocm?sslmode=disable
       REDIS_ADDR: manager-redis:6379
       REDIS_PASSWORD: "123456"
-      JWT_ACCESS_SECRET: "dev-access-secret-change-me"
-      JWT_REFRESH_SECRET: "dev-refresh-secret-change-me"
-      CSRF_SECRET: "dev-csrf-secret-change-me"
+      JWT_ACCESS_SECRET: "${JWT_ACCESS_SECRET:-dev-access-secret-change-me}"
+      JWT_REFRESH_SECRET: "${JWT_REFRESH_SECRET:-dev-refresh-secret-change-me}"
+      CSRF_SECRET: "${CSRF_SECRET:-dev-csrf-secret-change-me}"
+      MASTER_KEY: "${MASTER_KEY}"
+      NEWAPI_BASE_URL: "${NEWAPI_BASE_URL:-http://new-api:3000}"
       PATH: /go/bin:/usr/local/go/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin
       GOPATH: /go
       GOMODCACHE: /go/pkg/mod
       GOCACHE: /root/.cache/go-build
+      GOPROXY: "https://goproxy.cn,direct"
+      GOSUMDB: "off"
       TZ: Asia/Shanghai
     ports:
       - "${MANAGER_API_PORT:-8080}:8080"
@@ -158,6 +162,8 @@ services:
       GOPATH: /go
       GOMODCACHE: /go/pkg/mod
       GOCACHE: /root/.cache/go-build
+      GOPROXY: "https://goproxy.cn,direct"
+      GOSUMDB: "off"
     ports:
       - "${RUNTIME_AGENT_GRPC_PORT:-7001}:7001"
       - "${RUNTIME_AGENT_HTTP_PORT:-7002}:7002"

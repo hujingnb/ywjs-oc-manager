@@ -2,7 +2,7 @@ root = "."
 tmp_dir = "tmp/air"
 
 [build]
-cmd = "go build -o ./tmp/air/server ./cmd/server"
+cmd = "go build -buildvcs=false -o ./tmp/air/server ./cmd/server"
 bin = "./tmp/air/server"
 include_ext = ["go", "yaml"]
 exclude_dir = ["data", "tmp", "web/node_modules"]
