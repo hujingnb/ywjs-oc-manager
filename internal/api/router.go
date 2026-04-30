@@ -20,6 +20,8 @@ type Dependencies struct {
 	ChannelService      *service.ChannelService
 	KnowledgeService    *service.KnowledgeService
 	WorkspaceService    *service.WorkspaceService
+	UsageService        *service.UsageService
+	RuntimeOpService    *service.RuntimeOperationService
 	JobsStore           handlers.JobsStore
 	TokenManager        *auth.TokenManager
 }
@@ -69,6 +71,12 @@ func NewRouter(deps ...Dependencies) http.Handler {
 	}
 	if dep.WorkspaceService != nil {
 		handlers.RegisterWorkspaceRoutes(router, handlers.NewWorkspaceHandler(dep.WorkspaceService, dep.TokenManager))
+	}
+	if dep.UsageService != nil {
+		handlers.RegisterUsageRoutes(router, handlers.NewUsageHandler(dep.UsageService, dep.TokenManager))
+	}
+	if dep.RuntimeOpService != nil {
+		handlers.RegisterAppRuntimeRoutes(router, handlers.NewAppRuntimeHandler(dep.RuntimeOpService, dep.TokenManager))
 	}
 	return router
 }

@@ -62,6 +62,7 @@ func main() {
 		log.Fatalf("初始化知识库主副本失败: %v", err)
 	}
 	knowledgeService := service.NewKnowledgeService(files.NewKnowledgeMaster(safeRoot))
+	runtimeOpService := service.NewRuntimeOperationService(dbStore.Queries)
 
 	server := &http.Server{
 		Addr: cfg.App.HTTPAddr,
@@ -74,6 +75,7 @@ func main() {
 			RuntimeNodeService:  runtimeNodeService,
 			ChannelService:      channelService,
 			KnowledgeService:    knowledgeService,
+			RuntimeOpService:    runtimeOpService,
 			JobsStore:           dbStore.Queries,
 			TokenManager:        tokenManager,
 		}),
