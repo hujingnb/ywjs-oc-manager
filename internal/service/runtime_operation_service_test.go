@@ -53,6 +53,30 @@ func TestRuntimeOperationRejectsUnknown(t *testing.T) {
 	}
 }
 
+func TestRuntimeOperationEnqueuesNotifierWhenProvided(t *testing.T) {
+	store := newRuntimeOperationStub(t)
+	notifier := &fakeNotifier{}
+	svc := NewRuntimeOperationService(store, notifier)
+
+	result, err := svc.Trigger(context.Background(), platformAdmin(), testRuntimeOpAppID, RuntimeOperationStop)
+	if err != nil {
+		t.Fatalf("Trigger err = %v", err)
+	}
+	if notifier.lastJobID != result.JobID {
+		t.Fatalf("notifier 收到的 jobID = %q, want %q", notifier.lastJobID, result.JobID)
+	}
+}
+
+func TestRuntimeOperationSurvivesNotifierError(t *testing.T) {
+	store := newRuntimeOperationStub(t)
+	notifier := &fakeNotifier{err: errors.New("redis down")}
+	svc := NewRuntimeOperationService(store, notifier)
+
+	if _, err := svc.Trigger(context.Background(), platformAdmin(), testRuntimeOpAppID, RuntimeOperationStop); err != nil {
+		t.Fatalf("notifier 失败时 service 不应冒泡: %v", err)
+	}
+}
+
 func TestRuntimeOperationMembersCanOnlyTriggerOwnApp(t *testing.T) {
 	store := newRuntimeOperationStub(t)
 	svc := NewRuntimeOperationService(store)
@@ -103,3 +127,13 @@ func (s *runtimeOperationStub) CreateAuditLog(_ context.Context, _ sqlc.CreateAu
 }
 
 var fakeNotFound = errors.New("not found")
+
+type fakeNotifier struct {
+	lastJobID string
+	err       error
+}
+
+func (f *fakeNotifier) Enqueue(_ context.Context, jobID string) error {
+	f.lastJobID = jobID
+	return f.err
+}

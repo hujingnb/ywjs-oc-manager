@@ -26,19 +26,34 @@ type RuntimeOperationStore interface {
 	CreateAuditLog(ctx context.Context, arg sqlc.CreateAuditLogParams) (sqlc.AuditLog, error)
 }
 
+// JobNotifier 抽象向 Redis 队列推送 jobID 的能力。
+// scheduler 周期性扫库兜底，但即时入队让 worker 可以毫秒级拿到任务，
+// 否则启停操作可能要等一个 scheduler 周期才被处理。
+type JobNotifier interface {
+	Enqueue(ctx context.Context, jobID string) error
+}
+
 // RuntimeOperationService 把启动/停止/重启/删除应用容器等高风险操作转化为 worker 任务。
 //
 // 高风险操作的含义：
 //   - 这些操作真正修改 runtime node 上的容器状态，失败可能导致服务中断；
 //   - 因此每次调用都会写一条审计日志，便于追溯触发人；
 //   - 调度策略：worker 处理时按 app 状态机推进，不在 service 层直接修改 app.status。
+//
+// JobNotifier 可不传：未注入时只写库，由 scheduler 兜底入队（吞吐降级，延迟最长一个 scheduler 周期）。
 type RuntimeOperationService struct {
-	store RuntimeOperationStore
+	store    RuntimeOperationStore
+	notifier JobNotifier
 }
 
 // NewRuntimeOperationService 创建运行操作服务。
-func NewRuntimeOperationService(store RuntimeOperationStore) *RuntimeOperationService {
-	return &RuntimeOperationService{store: store}
+// notifier 传 nil 表示不做即时入队，仅依赖 scheduler 扫库兜底。
+func NewRuntimeOperationService(store RuntimeOperationStore, notifier ...JobNotifier) *RuntimeOperationService {
+	var n JobNotifier
+	if len(notifier) > 0 {
+		n = notifier[0]
+	}
+	return &RuntimeOperationService{store: store, notifier: n}
 }
 
 // RuntimeOperation 定义本服务支持的操作枚举。
@@ -108,6 +123,11 @@ func (s *RuntimeOperationService) Trigger(ctx context.Context, principal auth.Pr
 		Result:     "submitted",
 	}); err != nil {
 		return RuntimeOperationResult{}, fmt.Errorf("写入审计日志失败: %w", err)
+	}
+	if s.notifier != nil {
+		// notifier 失败不阻塞响应：scheduler 最终会扫到 pending job 重新入队，
+		// 但仍把错误冒泡到日志，便于运维识别 Redis 抖动。
+		_ = s.notifier.Enqueue(ctx, uuidToString(job.ID))
 	}
 	return RuntimeOperationResult{JobID: uuidToString(job.ID), Operation: op}, nil
 }
