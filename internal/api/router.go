@@ -18,6 +18,7 @@ type Dependencies struct {
 	OnboardingService   *service.MemberOnboardingService
 	AuditService        *service.AuditService
 	RuntimeNodeService  *service.RuntimeNodeService
+	ChannelService      *service.ChannelService
 	JobsStore           handlers.JobsStore
 	TokenManager        *auth.TokenManager
 }
@@ -58,6 +59,9 @@ func NewRouter(deps ...Dependencies) http.Handler {
 	}
 	if dep.JobsStore != nil {
 		handlers.RegisterJobsRoutes(router, handlers.NewJobsHandler(dep.JobsStore, dep.TokenManager))
+	}
+	if dep.ChannelService != nil {
+		handlers.RegisterChannelRoutes(router, handlers.NewChannelsHandler(dep.ChannelService, dep.TokenManager))
 	}
 	return router
 }

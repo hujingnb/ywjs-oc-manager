@@ -11,6 +11,7 @@ import (
 	"oc-manager/internal/api"
 	"oc-manager/internal/auth"
 	"oc-manager/internal/config"
+	"oc-manager/internal/integrations/channel"
 	"oc-manager/internal/service"
 	"oc-manager/internal/store"
 )
@@ -49,6 +50,8 @@ func main() {
 	auditService := service.NewAuditService(dbStore.Queries)
 	runtimeNodeStore := store.NewRuntimeNodeStore(dbStore)
 	runtimeNodeService := service.NewRuntimeNodeService(runtimeNodeStore, hashTokenSHA256)
+	channelRegistry := channel.NewRegistry()
+	channelService := service.NewChannelService(dbStore.Queries, channelRegistry)
 
 	server := &http.Server{
 		Addr: cfg.App.HTTPAddr,
@@ -59,6 +62,7 @@ func main() {
 			OnboardingService:   onboardingService,
 			AuditService:        auditService,
 			RuntimeNodeService:  runtimeNodeService,
+			ChannelService:      channelService,
 			JobsStore:           dbStore.Queries,
 			TokenManager:        tokenManager,
 		}),
