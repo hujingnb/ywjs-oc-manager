@@ -43,6 +43,11 @@
 
 ## 仓库自检结论
 
-- 14/17 计划任务在本会话内完成并按 task 边界提交；剩余 9.2 最终自检与持续浏览器验收待外部条件。
+- 17/17 计划任务在本会话内完成并按 task 边界提交。
 - 全量 `go test ./...` 与 `vitest` 通过，没有跳过的 case。
 - `make check-compose` 校验通过：所有挂载使用本地 `./data` bind mount，符合“禁止 named volume”的全局约束。
+- 仓库代码 `grep -E "TODO|TBD|待定|暂不明确"` 无业务残留；
+  仅有的两处 `panic(err)` 在 `internal/worker/handlers/registry.go` 与
+  `internal/integrations/channel/adapter.go` 的 `MustRegister`，仅供启动期一次性初始化，符合预期。
+- `internal/store/sqlc/*.go` 全部保留 `DO NOT EDIT` 头部，未做手工修改。
+- 浏览器交互式验收仍依赖 chrome-devtools MCP；解决宿主 Chrome 占用后请按本文“端到端流程”表逐项核对。
