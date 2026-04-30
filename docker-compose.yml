@@ -97,6 +97,13 @@ services:
       TZ: Asia/Shanghai
     volumes:
       - ./.local/data/ollama:/root/.ollama
+    deploy:
+      resources:
+        reservations:
+          devices:
+            - driver: nvidia
+              count: all
+              capabilities: [gpu]
 
   manager-api:
     image: golang:1.25-bookworm
