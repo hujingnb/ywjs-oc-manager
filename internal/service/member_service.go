@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"strings"
+	"time"
 
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgtype"
@@ -301,7 +302,7 @@ func (s *MemberService) DeleteMember(ctx context.Context, principal auth.Princip
 		job, err := s.store.CreateJob(ctx, sqlc.CreateJobParams{
 			Type:        domain.JobTypeAppDelete,
 			Priority:    100,
-			RunAfter:    pgtype.Timestamptz{Valid: false},
+			RunAfter:    pgtype.Timestamptz{Time: time.Now(), Valid: true},
 			MaxAttempts: 3,
 			PayloadJson: payload,
 		})

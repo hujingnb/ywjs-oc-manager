@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"time"
 
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgtype"
@@ -176,7 +177,7 @@ func (s *RuntimeOperationService) Trigger(ctx context.Context, principal auth.Pr
 	job, err := s.store.CreateJob(ctx, sqlc.CreateJobParams{
 		Type:        jobType,
 		Priority:    100,
-		RunAfter:    pgtype.Timestamptz{Valid: false},
+		RunAfter:    pgtype.Timestamptz{Time: time.Now(), Valid: true},
 		MaxAttempts: 3,
 		PayloadJson: payload,
 	})
@@ -261,7 +262,7 @@ func (s *RuntimeOperationService) RequestInitialize(ctx context.Context, princip
 	job, err := s.store.CreateJob(ctx, sqlc.CreateJobParams{
 		Type:        domain.JobTypeAppInitialize,
 		Priority:    100,
-		RunAfter:    pgtype.Timestamptz{Valid: false},
+		RunAfter:    pgtype.Timestamptz{Time: time.Now(), Valid: true},
 		MaxAttempts: 3,
 		PayloadJson: payload,
 	})

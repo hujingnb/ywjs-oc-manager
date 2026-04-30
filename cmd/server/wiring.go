@@ -302,6 +302,7 @@ func (d *knowledgeSyncDispatcher) enqueue(ctx context.Context, input knowledgeSy
 		Type:        "knowledge_sync_node",
 		Priority:    50,
 		MaxAttempts: 5,
+		RunAfter:    pgtype.Timestamptz{Time: time.Now(), Valid: true},
 		PayloadJson: body,
 	})
 	if err != nil {

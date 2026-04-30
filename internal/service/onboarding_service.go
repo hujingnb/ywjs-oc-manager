@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"time"
 
 	"github.com/jackc/pgx/v5/pgtype"
 
@@ -149,7 +150,7 @@ func (s *MemberOnboardingService) OnboardMember(ctx context.Context, principal a
 			TargetType: "member",
 			TargetID:   uuidToString(user.ID),
 			Action:     "create_with_app",
-			Result:     "success",
+			Result:     "succeeded",
 		}); err != nil {
 			return fmt.Errorf("写入审计日志失败: %w", err)
 		}
@@ -163,7 +164,7 @@ func (s *MemberOnboardingService) OnboardMember(ctx context.Context, principal a
 		job, err := store.CreateJob(ctx, sqlc.CreateJobParams{
 			Type:        domain.JobTypeAppInitialize,
 			Priority:    100,
-			RunAfter:    pgtype.Timestamptz{Valid: false},
+			RunAfter:    pgtype.Timestamptz{Time: time.Now(), Valid: true},
 			MaxAttempts: 5,
 			PayloadJson: payload,
 		})

@@ -31,7 +31,7 @@ func TestAuditServiceRecordPersistsMetadata(t *testing.T) {
 		TargetType: "organization",
 		TargetID:   "00000000-0000-0000-0000-000000000101",
 		Action:     "create",
-		Result:     "success",
+		Result:     "succeeded",
 		Metadata:   map[string]any{"name": "测试组织"},
 	})
 	if err != nil {

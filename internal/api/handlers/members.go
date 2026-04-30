@@ -3,6 +3,7 @@ package handlers
 import (
 	"context"
 	"errors"
+	"log"
 	"net/http"
 
 	"github.com/gin-gonic/gin"
@@ -288,6 +289,8 @@ func writeMemberError(c *gin.Context, err error) {
 	case errors.Is(err, service.ErrMemberCreateInvalid):
 		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
 	default:
+		// 未知错误冒泡到日志，便于运维定位；响应仍保持脱敏。
+		log.Printf("member handler 未识别错误: %v", err)
 		c.JSON(http.StatusInternalServerError, gin.H{"error": "服务暂时不可用"})
 	}
 }
