@@ -17,14 +17,28 @@ services:
       timeout: 3s
       retries: 20
 
-  redis:
+  manager-redis:
     image: redis:7
-    container_name: redis
+    container_name: manager-redis
     command: ["redis-server", "--requirepass", "123456", "--appendonly", "yes"]
     ports:
-      - "${REDIS_PORT:-6379}:6379"
+      - "${MANAGER_REDIS_PORT:-6379}:6379"
     volumes:
-      - ./.local/data/redis:/data
+      - ./.local/data/manager-redis:/data
+    healthcheck:
+      test: ["CMD-SHELL", "redis-cli -a 123456 ping | grep PONG"]
+      interval: 5s
+      timeout: 3s
+      retries: 20
+
+  new-api-redis:
+    image: redis:7
+    container_name: new-api-redis
+    command: ["redis-server", "--requirepass", "123456", "--appendonly", "yes"]
+    ports:
+      - "${NEWAPI_REDIS_PORT:-6380}:6379"
+    volumes:
+      - ./.local/data/new-api/redis:/data
     healthcheck:
       test: ["CMD-SHELL", "redis-cli -a 123456 ping | grep PONG"]
       interval: 5s
@@ -55,7 +69,7 @@ services:
       - "${NEWAPI_PORT:-3000}:3000"
     environment:
       SQL_DSN: postgresql://root:123456@new-api-postgres:5432/new-api
-      REDIS_CONN_STRING: redis://:123456@redis:6379
+      REDIS_CONN_STRING: redis://:123456@new-api-redis:6379
       TZ: Asia/Shanghai
       ERROR_LOG_ENABLED: "true"
       BATCH_UPDATE_ENABLED: "true"
@@ -66,7 +80,7 @@ services:
     depends_on:
       new-api-postgres:
         condition: service_healthy
-      redis:
+      new-api-redis:
         condition: service_healthy
     volumes:
       - ./.local/data/new-api/data:/data
@@ -92,7 +106,7 @@ services:
     environment:
       OCM_CONFIG: /app/config/config.yaml.example
       DATABASE_URL: postgres://ocm:ocm@manager-postgres:5432/ocm?sslmode=disable
-      REDIS_ADDR: redis:6379
+      REDIS_ADDR: manager-redis:6379
       REDIS_PASSWORD: "123456"
       JWT_ACCESS_SECRET: "dev-access-secret-change-me"
       JWT_REFRESH_SECRET: "dev-refresh-secret-change-me"
@@ -107,7 +121,7 @@ services:
     depends_on:
       manager-postgres:
         condition: service_healthy
-      redis:
+      manager-redis:
         condition: service_healthy
     volumes:
       - ./:/app

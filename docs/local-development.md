@@ -15,7 +15,7 @@
 | 目标 | 作用 |
 |---|---|
 | `make check-compose` | 校验 `docker-compose.yml` 没有顶层 named volume，所有挂载都是 bind mount。 |
-| `make dev-up` | 启动全部服务（manager-api / manager-web / manager-postgres / new-api / new-api-postgres / ollama / oc-runtime-agent / redis）。 |
+| `make dev-up` | 启动全部服务（manager-api / manager-web / manager-postgres / manager-redis / new-api / new-api-postgres / new-api-redis / ollama / oc-runtime-agent）。 |
 | `make dev-down` | 停止并清理容器，本地 bind mount 数据保留在 `./data`。 |
 | `make migrate-up` / `make migrate-down` | 在容器内执行迁移。 |
 | `make build-openclaw-runtime` | 构建 OpenClaw runtime 镜像。 |
@@ -31,12 +31,15 @@
 `./data` 下按服务划分子目录，全部为 bind mount，避免 Docker named volume：
 
 ```
-./data/postgres        manager-postgres
-./data/new-api-postgres
-./data/redis
-./data/ollama
-./data/oc-runtime-agent
-./data/manager-knowledge  KnowledgeMaster 主副本
+./.local/data/manager-postgres
+./.local/data/manager-redis
+./.local/data/new-api/postgres
+./.local/data/new-api/redis
+./.local/data/new-api/data
+./.local/data/new-api/logs
+./.local/data/ollama
+./.local/data/agent
+./.local/data/manager-knowledge  KnowledgeMaster 主副本
 ```
 
 清理本地状态时直接删除对应子目录即可，但请先确认没有未导出的工作内容。
