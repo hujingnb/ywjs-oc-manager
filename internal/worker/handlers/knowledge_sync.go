@@ -6,7 +6,6 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
-	"path"
 
 	"oc-manager/internal/domain"
 	"oc-manager/internal/store/sqlc"
@@ -19,9 +18,15 @@ type KnowledgeFileSource interface {
 }
 
 // KnowledgeFileSink 抽象 agent 文件 API 上传 / 删除能力。
+//
+// Sprint 1 改用 scope-aware 接口：handler 不再拼 remotePath（避免 sink 实现去猜
+// "apps/<id>/knowledge/<rel>" 这种业务级路径），由 sink 内部按 (scope, scopeID, relPath)
+// 直接调 agent /v1/scopes/* 端点。
 type KnowledgeFileSink interface {
-	UploadFile(ctx context.Context, nodeID, remotePath string, content io.Reader) error
-	DeletePath(ctx context.Context, nodeID, remotePath string) error
+	UploadOrgFile(ctx context.Context, nodeID, orgID, relPath string, content io.Reader) error
+	UploadAppFile(ctx context.Context, nodeID, appID, relPath string, content io.Reader) error
+	DeleteOrgFile(ctx context.Context, nodeID, orgID, relPath string) error
+	DeleteAppFile(ctx context.Context, nodeID, appID, relPath string) error
 }
 
 // knowledgeSyncPayload 是 knowledge_sync_node job 的 payload schema。
@@ -67,8 +72,7 @@ func (h *KnowledgeSyncHandler) Handle(ctx context.Context, job sqlc.Job) error {
 	if payload.NodeID == "" {
 		return fmt.Errorf("缺少 node_id")
 	}
-	remotePath, err := payload.targetRemotePath()
-	if err != nil {
+	if err := payload.validate(); err != nil {
 		return err
 	}
 	switch payload.ChangeType {
@@ -81,12 +85,26 @@ func (h *KnowledgeSyncHandler) Handle(ctx context.Context, job sqlc.Job) error {
 			return fmt.Errorf("读取主副本失败: %w", err)
 		}
 		defer reader.Close()
-		if err := h.sink.UploadFile(ctx, payload.NodeID, remotePath, reader); err != nil {
-			return fmt.Errorf("上传到节点失败: %w", err)
+		switch payload.Scope {
+		case "org":
+			if err := h.sink.UploadOrgFile(ctx, payload.NodeID, payload.OrgID, payload.RelPath, reader); err != nil {
+				return fmt.Errorf("上传到节点失败: %w", err)
+			}
+		case "app":
+			if err := h.sink.UploadAppFile(ctx, payload.NodeID, payload.AppID, payload.RelPath, reader); err != nil {
+				return fmt.Errorf("上传到节点失败: %w", err)
+			}
 		}
 	case "delete_file":
-		if err := h.sink.DeletePath(ctx, payload.NodeID, remotePath); err != nil {
-			return fmt.Errorf("删除节点文件失败: %w", err)
+		switch payload.Scope {
+		case "org":
+			if err := h.sink.DeleteOrgFile(ctx, payload.NodeID, payload.OrgID, payload.RelPath); err != nil {
+				return fmt.Errorf("删除节点文件失败: %w", err)
+			}
+		case "app":
+			if err := h.sink.DeleteAppFile(ctx, payload.NodeID, payload.AppID, payload.RelPath); err != nil {
+				return fmt.Errorf("删除节点文件失败: %w", err)
+			}
 		}
 	default:
 		return fmt.Errorf("未知 change_type: %s", payload.ChangeType)
@@ -94,22 +112,24 @@ func (h *KnowledgeSyncHandler) Handle(ctx context.Context, job sqlc.Job) error {
 	return nil
 }
 
-// targetRemotePath 根据 scope 拼出 agent 端目标路径。
-func (p knowledgeSyncPayload) targetRemotePath() (string, error) {
+// validate 校验 payload 的 scope 与对应 ID 字段。
+func (p knowledgeSyncPayload) validate() error {
 	switch p.Scope {
 	case "org":
 		if p.OrgID == "" {
-			return "", fmt.Errorf("org scope 缺少 org_id")
+			return fmt.Errorf("org scope 缺少 org_id")
 		}
-		return path.Join("orgs", p.OrgID, "knowledge", p.RelPath), nil
 	case "app":
 		if p.AppID == "" {
-			return "", fmt.Errorf("app scope 缺少 app_id")
+			return fmt.Errorf("app scope 缺少 app_id")
 		}
-		return path.Join("apps", p.AppID, "knowledge", p.RelPath), nil
 	default:
-		return "", fmt.Errorf("未知 scope: %s", p.Scope)
+		return fmt.Errorf("未知 scope: %s", p.Scope)
 	}
+	if p.RelPath == "" {
+		return fmt.Errorf("缺少 rel_path")
+	}
+	return nil
 }
 
 // 占位 import 避免 bytes 包未使用提示（用于将来 tar 全量同步）。

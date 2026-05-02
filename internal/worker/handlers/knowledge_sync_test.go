@@ -24,37 +24,50 @@ func (m *memoryKnowledgeSource) Open(p string) (io.ReadCloser, int64, error) {
 	return io.NopCloser(bytes.NewReader(data)), int64(len(data)), nil
 }
 
+// memoryKnowledgeSink 是 KnowledgeFileSink 的内存实现，用于断言 worker 调对了哪个 scope
+// 的方法 + 哪个 scopeID + relPath。
 type memoryKnowledgeSink struct {
-	uploads []struct {
-		node, path string
-		body       string
-	}
-	deletes []struct {
-		node, path string
-	}
+	uploads []sinkCall
+	deletes []sinkCall
 	uploadErr error
 	deleteErr error
 }
 
-func (s *memoryKnowledgeSink) UploadFile(_ context.Context, nodeID, remotePath string, content io.Reader) error {
+type sinkCall struct {
+	scope, node, scopeID, relPath, body string
+}
+
+func (s *memoryKnowledgeSink) UploadOrgFile(_ context.Context, nodeID, orgID, relPath string, content io.Reader) error {
 	if s.uploadErr != nil {
 		return s.uploadErr
 	}
 	body, _ := io.ReadAll(content)
-	s.uploads = append(s.uploads, struct {
-		node, path string
-		body       string
-	}{nodeID, remotePath, string(body)})
+	s.uploads = append(s.uploads, sinkCall{scope: "org", node: nodeID, scopeID: orgID, relPath: relPath, body: string(body)})
 	return nil
 }
 
-func (s *memoryKnowledgeSink) DeletePath(_ context.Context, nodeID, remotePath string) error {
+func (s *memoryKnowledgeSink) UploadAppFile(_ context.Context, nodeID, appID, relPath string, content io.Reader) error {
+	if s.uploadErr != nil {
+		return s.uploadErr
+	}
+	body, _ := io.ReadAll(content)
+	s.uploads = append(s.uploads, sinkCall{scope: "app", node: nodeID, scopeID: appID, relPath: relPath, body: string(body)})
+	return nil
+}
+
+func (s *memoryKnowledgeSink) DeleteOrgFile(_ context.Context, nodeID, orgID, relPath string) error {
 	if s.deleteErr != nil {
 		return s.deleteErr
 	}
-	s.deletes = append(s.deletes, struct {
-		node, path string
-	}{nodeID, remotePath})
+	s.deletes = append(s.deletes, sinkCall{scope: "org", node: nodeID, scopeID: orgID, relPath: relPath})
+	return nil
+}
+
+func (s *memoryKnowledgeSink) DeleteAppFile(_ context.Context, nodeID, appID, relPath string) error {
+	if s.deleteErr != nil {
+		return s.deleteErr
+	}
+	s.deletes = append(s.deletes, sinkCall{scope: "app", node: nodeID, scopeID: appID, relPath: relPath})
 	return nil
 }
 
@@ -77,7 +90,7 @@ func TestKnowledgeSyncHandler_UploadOrgFile(t *testing.T) {
 		t.Fatalf("uploads = %d", len(sink.uploads))
 	}
 	got := sink.uploads[0]
-	if got.node != "n1" || got.path != "orgs/o1/knowledge/notes/a.md" || got.body != "# hello" {
+	if got.scope != "org" || got.node != "n1" || got.scopeID != "o1" || got.relPath != "notes/a.md" || got.body != "# hello" {
 		t.Fatalf("upload = %+v", got)
 	}
 }
@@ -93,16 +106,25 @@ func TestKnowledgeSyncHandler_DeleteAppFile(t *testing.T) {
 		t.Fatalf("deletes = %+v", sink.deletes)
 	}
 	got := sink.deletes[0]
-	if got.node != "n2" || got.path != "apps/a1/knowledge/docs/x.md" {
+	if got.scope != "app" || got.node != "n2" || got.scopeID != "a1" || got.relPath != "docs/x.md" {
 		t.Fatalf("delete = %+v", got)
 	}
 }
 
 func TestKnowledgeSyncHandler_RejectsUnknownChangeType(t *testing.T) {
 	handler := NewKnowledgeSyncHandler(nil, &memoryKnowledgeSink{})
-	payload := []byte(`{"scope":"org","org_id":"o","node_id":"n","change_type":"boom","rel_path":""}`)
+	payload := []byte(`{"scope":"org","org_id":"o","node_id":"n","change_type":"boom","rel_path":"x"}`)
 	err := handler.Handle(context.Background(), buildKnowledgeJob(t, payload))
 	if err == nil || !strings.Contains(err.Error(), "未知 change_type") {
+		t.Fatalf("err = %v", err)
+	}
+}
+
+func TestKnowledgeSyncHandler_RejectsMissingRelPath(t *testing.T) {
+	handler := NewKnowledgeSyncHandler(nil, &memoryKnowledgeSink{})
+	payload := []byte(`{"scope":"org","org_id":"o","node_id":"n","change_type":"upload_file","rel_path":""}`)
+	err := handler.Handle(context.Background(), buildKnowledgeJob(t, payload))
+	if err == nil || !strings.Contains(err.Error(), "缺少 rel_path") {
 		t.Fatalf("err = %v", err)
 	}
 }
