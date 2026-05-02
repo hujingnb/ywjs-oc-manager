@@ -239,6 +239,9 @@ func newHandlerWithDocker(dataRoot string, docker DockerClient, agentToken strin
 		}
 		writeJSON(w, map[string]any{"loaded": true, "image": image, "info": info})
 	}))
+	// Sprint 1：scope 化 file API 端点（init/sync/upload/list/download/archive/cleanup 等）。
+	// 子路径与 handler 在 scopes.go 里维护，这里只挂载入口。
+	mux.Handle("/v1/scopes/", newScopesHandler(dataRoot, agentToken))
 	return mux
 }
 
