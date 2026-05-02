@@ -51,8 +51,12 @@ func NewDockerCommandRunner(executor ContainerExecutor, lookup AppContainerLooku
 	return &DockerCommandRunner{executor: executor, lookup: lookup}
 }
 
-// StreamWeChatLogin 启动 OpenClaw 容器内的 `openclaw channels login --channel openclaw-weixin --json`
+// StreamWeChatLogin 启动 OpenClaw 容器内的 `openclaw channels login --channel openclaw-weixin --verbose`
 // 命令并把 stdout 按行回 channel。返回的 channel 在命令结束时由 runner 自动关闭。
+//
+// Sprint 0 POC 验证：上游 OpenClaw `channels login` 不支持 `--json` 标志，
+// stdout 输出为中文提示 + ASCII QR + 回退 URL（详见 docs/superpowers/poc/.../06-qrcode-format.md）。
+// parser 负责从文本流抓回退 URL 作为 QRCode payload，前端用 URL 重生 QR 图。
 func (r *DockerCommandRunner) StreamWeChatLogin(ctx context.Context, input AuthInput) (<-chan string, error) {
 	if r.executor == nil {
 		return nil, errors.New("container executor 未配置")
@@ -74,7 +78,7 @@ func (r *DockerCommandRunner) StreamWeChatLogin(ctx context.Context, input AuthI
 	if containerID == "" {
 		return nil, fmt.Errorf("应用 %s 没有可用容器", input.AppID)
 	}
-	reader, closer, err := r.executor.Exec(ctx, input.NodeID, containerID, []string{"openclaw", "channels", "login", "--channel", "openclaw-weixin", "--json"})
+	reader, closer, err := r.executor.Exec(ctx, input.NodeID, containerID, []string{"openclaw", "channels", "login", "--channel", "openclaw-weixin", "--verbose"})
 	if err != nil {
 		return nil, err
 	}
@@ -84,7 +88,8 @@ func (r *DockerCommandRunner) StreamWeChatLogin(ctx context.Context, input AuthI
 }
 
 // pumpExecStream 把 multiplexed exec stream 拆成 stdout 行送进 channel。
-// 即使 stderr 有内容也只丢到 io.Discard：channels login --json 的协议约定全部走 stdout。
+// 即使 stderr 有内容也只丢到 io.Discard：channels login --verbose 把二维码 / 状态文本写到 stdout，
+// stderr 仅用于 plugin warnings 与调试日志，对 manager parser 无意义。
 //
 // closer 用于在 ctx 取消或 reader 走完时统一释放底层 net.Conn，避免文件描述符泄漏。
 // closer 内部需要幂等，因为 ctx 取消监听器与 defer 都可能触发它。

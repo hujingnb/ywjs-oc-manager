@@ -1,13 +1,17 @@
 package openclaw
 
 import (
-	"encoding/json"
 	"errors"
+	"regexp"
 	"strings"
 	"time"
 )
 
 // ChannelLoginEvent 是从 OpenClaw runtime 解析出的登录事件统一表示。
+//
+// Sprint 0 POC 实测：上游 OpenClaw `channels login --channel openclaw-weixin --verbose`
+// stdout 为中文提示 + 终端 ASCII QR + 回退 URL + "正在等待操作..."，**没有 JSON 协议**。
+// parser 不解析 ASCII QR，只抓取回退 URL 作为 QRCode payload。前端用 URL 重新生成 PNG QR。
 type ChannelLoginEvent struct {
 	Type      string            `json:"type"`
 	QRCode    string            `json:"qrcode,omitempty"`
@@ -19,58 +23,107 @@ type ChannelLoginEvent struct {
 	Metadata  map[string]string `json:"metadata,omitempty"`
 }
 
-// ParseChannelLoginEvent 解析 OpenClaw runtime 输出的 JSON 行。
-//
-// OpenClaw 默认 stdout 是非结构化中文/英文混合输出。
-// 为了保持解析稳定，本项目要求 OpenClaw 在 wechat 登录流程上额外打印形如
-//
-//	{"event":"qrcode","qrcode":"...","expires_at":"..."}
-//
-// 的 JSON 行。如果 stdout 不符合该 wrapper 协议，
-// 解析会直接返回 ErrUnparsableOutput，上层 adapter 据此把状态置为 failed。
+// 与登录事件解析相关的错误。
 var (
-	ErrUnparsableOutput = errors.New("OpenClaw 输出未遵循登录事件协议")
-	ErrEventExpired     = errors.New("OpenClaw 登录事件已过期")
+	// ErrUnparsableOutput 表示这一行不是任何已知的登录事件标识。
+	// 调用方应继续读下一行。manager wechat.go 在收到此错误时不立即 fail，
+	// 而是跳过当前行，等下一行尝试。
+	ErrUnparsableOutput = errors.New("OpenClaw 输出不是登录事件协议行")
+
+	// ErrEventExpired 表示成功解析为事件，但其 expires_at 已经过去。
+	ErrEventExpired = errors.New("OpenClaw 登录事件已过期")
 )
 
-// ParseChannelLoginEvent 解析一行 stdout 文本。
+// 微信登录回退 URL 形如：
+//
+//	https://liteapp.weixin.qq.com/q/<id>?qrcode=<token>&bot_type=3
+//
+// docs 提示行 "若二维码未能显示或无法使用，你可以访问以下链接以继续：" 后跟 URL。
+// 这里只匹配 URL 行本身，覆盖未来上游 URL host 可能轻微变化的情况。
+var qrURLPattern = regexp.MustCompile(`https?://\S*?qrcode=[A-Za-z0-9_-]+\S*`)
+
+// 二维码默认有效期。上游 stdout 没有显式 expires_at，默认 5 分钟（微信扫码常规寿命）。
+// Sprint 2 实测后如发现真实有效期不同，调整此值。
+const defaultQRTTL = 5 * time.Minute
+
+// 关键词匹配（中文）。绑定成功文本基于 Sprint 0 真手机扫码实测；
+// expired / failed / pending 关键词部分实测部分推测，留 Sprint 2 进一步验证。
+//
+// 实测样本（2026-05-02 真手机扫码）：
+//
+//	已将此 OpenClaw 连接到微信。
+//
+// 这是 wechat plugin 在登录成功时输出的**唯一**关键行，**不携带微信账号标识**。
+// manager 收到 bound 事件后必须再调 `openclaw channels list --json` 或读 plugin
+// state 文件 `/root/.openclaw/openclaw-weixin/accounts/*.json` 取真实 userId。
+// 因此 ChannelLoginEvent.Bound 在 bound 事件里默认为空，由 service 层补齐。
+var (
+	keywordsExpired = []string{"二维码已过期", "二维码过期", "已失效", "已过期"}
+	keywordsBound   = []string{"已将此 OpenClaw 连接到微信", "Connected this OpenClaw to WeChat"}
+	keywordsFailed  = []string{"认证失败", "登录失败", "失败：", "Error:"}
+	keywordsPending = []string{"正在等待操作", "等待扫描", "扫描成功，请在手机上确认"}
+)
+
+// ParseChannelLoginEvent 解析 OpenClaw stdout 单行文本。
+//
+// 解析顺序：
+//  1. 匹配回退 URL → qrcode 事件（Sprint 0 POC 已确认）
+//  2. 匹配过期关键词 → expired 事件
+//  3. 匹配绑定成功关键词 → bound 事件，bound_identity 抽取（粗实现，Sprint 2 精化）
+//  4. 匹配失败关键词 → failed 事件，error message 取整行
+//  5. 匹配等待提示 → pending 事件（不携带额外信息，仅用于状态推进）
+//  6. 其它（plugin loading log / ASCII QR 行 / 空行 / 中文提示行）→ ErrUnparsableOutput
+//
+// 调用方应在拿到 ErrUnparsableOutput 时继续读下一行。
 func ParseChannelLoginEvent(line string) (ChannelLoginEvent, error) {
 	trimmed := strings.TrimSpace(line)
-	if trimmed == "" || !strings.HasPrefix(trimmed, "{") {
+	if trimmed == "" {
 		return ChannelLoginEvent{}, ErrUnparsableOutput
 	}
-	var raw struct {
-		Event     string            `json:"event"`
-		QRCode    string            `json:"qrcode"`
-		Code      string            `json:"code"`
-		Bound     string            `json:"bound_identity"`
-		Channel   string            `json:"channel_name"`
-		Error     string            `json:"error"`
-		ExpiresAt string            `json:"expires_at"`
-		Metadata  map[string]string `json:"metadata"`
+
+	if match := qrURLPattern.FindString(trimmed); match != "" {
+		return ChannelLoginEvent{
+			Type:      "qrcode",
+			QRCode:    match,
+			ExpiresAt: time.Now().Add(defaultQRTTL),
+		}, nil
 	}
-	if err := json.Unmarshal([]byte(trimmed), &raw); err != nil {
-		return ChannelLoginEvent{}, ErrUnparsableOutput
+
+	if containsAny(trimmed, keywordsExpired) {
+		return ChannelLoginEvent{Type: "expired"}, nil
 	}
-	if raw.Event == "" {
-		return ChannelLoginEvent{}, ErrUnparsableOutput
+
+	if containsAny(trimmed, keywordsBound) {
+		// 实测 stdout 只说"已将此 OpenClaw 连接到微信。"，不携带 wxid/userId。
+		// service 层收到 bound 事件后须再调 openclaw channels list 或读 plugin state
+		// 文件取真实 userId（如 `o9cq800xszCM8jyoS9YpRKpvAN9c@im.wechat`）补到 channel_bindings.bound_identity。
+		return ChannelLoginEvent{
+			Type:    "bound",
+			Channel: "openclaw-weixin",
+		}, nil
 	}
-	event := ChannelLoginEvent{
-		Type:     raw.Event,
-		QRCode:   raw.QRCode,
-		Code:     raw.Code,
-		Bound:    raw.Bound,
-		Channel:  raw.Channel,
-		Error:    raw.Error,
-		Metadata: raw.Metadata,
+
+	if containsAny(trimmed, keywordsFailed) {
+		return ChannelLoginEvent{
+			Type:  "failed",
+			Error: trimmed,
+		}, nil
 	}
-	if raw.ExpiresAt != "" {
-		if expires, err := time.Parse(time.RFC3339, raw.ExpiresAt); err == nil {
-			event.ExpiresAt = expires
+
+	if containsAny(trimmed, keywordsPending) {
+		return ChannelLoginEvent{Type: "pending"}, nil
+	}
+
+	return ChannelLoginEvent{}, ErrUnparsableOutput
+}
+
+// containsAny 检查 line 是否包含 keywords 中任一关键词。
+func containsAny(line string, keywords []string) bool {
+	for _, kw := range keywords {
+		if strings.Contains(line, kw) {
+			return true
 		}
 	}
-	if !event.ExpiresAt.IsZero() && time.Now().After(event.ExpiresAt) {
-		return event, ErrEventExpired
-	}
-	return event, nil
+	return false
 }
+

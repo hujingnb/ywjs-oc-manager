@@ -109,7 +109,7 @@ func TestDockerCommandRunner_StreamsLines(t *testing.T) {
 	if !strings.Contains(got[0], "qrcode") || !strings.Contains(got[1], "bound") {
 		t.Fatalf("行序异常: %+v", got)
 	}
-	want := []string{"openclaw", "channels", "login", "--channel", "openclaw-weixin", "--json"}
+	want := []string{"openclaw", "channels", "login", "--channel", "openclaw-weixin", "--verbose"}
 	if !equalStrings(exec.seenCmd(), want) {
 		t.Fatalf("exec cmd = %+v, want %+v", exec.seenCmd(), want)
 	}
