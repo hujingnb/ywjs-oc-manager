@@ -57,7 +57,7 @@ manager parser 黄金用例：`internal/integrations/openclaw/parser_test.go`。
 |---|---|
 | 含 `qrcode=<token>` 的 URL 行 | `qrcode`（QRCode 字段 = 整 URL） |
 | `正在等待操作` / `等待扫描` / `扫描成功，请在手机上确认` | `pending` |
-| `已连接微信账号 <name>` / `登录成功` / `Connected as` | `bound`（Bound 字段抽取账号标识，Sprint 2 实测精化） |
+| `已将此 OpenClaw 连接到微信。` / `Connected this OpenClaw to WeChat` | `bound`（**stdout 不携带 wxid**；service 层须读 plugin state 补 bound_identity） |
 | `二维码已过期` / `已失效` | `expired` |
 | `认证失败` / `登录失败` / `Error:` | `failed`（Error 字段 = 整行） |
 | 其它（plugin loading / ASCII QR / 中文提示行） | unparsable（调用方 skip） |
@@ -78,6 +78,35 @@ manager parser 黄金用例：`internal/integrations/openclaw/parser_test.go`。
 manager 容器创建时通过环境变量或 `openclaw config set agents.defaults.workspace /workspace` 改默认目录。
 
 知识库映射方式（OpenClaw 无原生 knowledge 概念）Sprint 1 决策；候选：system prompt 注入小文件 + bind mount 大文件让 agent 自己 file read。
+
+## 微信账号标识获取（实测）
+
+`channels login` 完成后**stdout 不携带 wxid / userId**。真实账号信息持久化在：
+
+```text
+/root/.openclaw/openclaw-weixin/accounts.json   # 列表：[ "<account-name>" ]
+/root/.openclaw/openclaw-weixin/accounts/<account-name>.json
+{
+  "token": "<sensitive>",
+  "savedAt": "2026-05-02T15:00:22.500Z",
+  "baseUrl": "https://ilinkai.weixin.qq.com",
+  "userId": "<openid>@im.wechat"
+}
+```
+
+manager service 层收到 bound 事件后必须做以下之一：
+
+1. 通过 docker exec 跑 `openclaw channels list --json`（待验证是否输出 JSON）
+2. 经 agent 文件 API 读 `accounts/<account-name>.json` 取 `userId`
+3. （首选 1，2 作为 fallback）
+
+绑定后 `openclaw channels list` 输出的关键行：
+```text
+- openclaw-weixin default: configured, enabled
+```
+仅说明 enabled，不含 userId。所以方案 2（读 plugin state 文件）是更可靠的来源。
+
+`channel_bindings.bound_identity` 写入的就是 `userId`（如 `o9cq800xszCM8jyoS9YpRKpvAN9c@im.wechat`）。
 
 ## 必需环境变量（容器创建时由 manager 注入）
 
