@@ -1,11 +1,20 @@
 package main
 
 import (
+	"archive/tar"
 	"errors"
+	"fmt"
+	"io"
 	"net/http"
 	"os"
 	"path/filepath"
 	"strings"
+)
+
+// tar 同步硬上限：避免恶意 tar 撑爆磁盘。
+const (
+	maxKnowledgeTarSize    = 2 * 1024 * 1024 * 1024 // 2 GiB 总大小（与 spec §11.5 工作目录上限同源）
+	maxKnowledgeTarEntries = 10000
 )
 
 // ErrInvalidPath 表示用户输入的相对路径越出 scope 沙箱。
@@ -83,6 +92,8 @@ func scopesAppsHandler(dataRoot string) http.HandlerFunc {
 		switch {
 		case action == "init" && r.Method == http.MethodPost:
 			handleAppInit(w, r, dataRoot, appID)
+		case action == "knowledge/sync" && r.Method == http.MethodPost:
+			handleKnowledgeSync(w, r, dataRoot, filepath.Join("apps", appID, "knowledge"))
 		default:
 			writeError(w, http.StatusNotFound, "unknown action")
 		}
@@ -104,9 +115,9 @@ func scopesOrgsHandler(dataRoot string) http.HandlerFunc {
 			return
 		}
 		switch {
-		// 后续 Task 注册 knowledge/sync 等
+		case action == "knowledge/sync" && r.Method == http.MethodPost:
+			handleKnowledgeSync(w, r, dataRoot, filepath.Join("orgs", orgID, "knowledge"))
 		default:
-			_ = action
 			writeError(w, http.StatusNotFound, "unknown action")
 		}
 	}
@@ -143,4 +154,124 @@ func handleAppInit(w http.ResponseWriter, _ *http.Request, dataRoot, appID strin
 		}
 	}
 	writeJSON(w, map[string]any{"ok": true, "app_id": appID})
+}
+
+// handleKnowledgeSync 接收 tar 流并把 scopeRel（如 "apps/<id>/knowledge"）
+// 的内容整体替换为 tar 解压结果。
+//
+// 流程：解压到同级 .sync-* 临时目录 → 原子 rename 替换旧目录 → 删旧。
+// 失败时 tmp 目录 RemoveAll，不影响旧目录。
+//
+// 安全：
+//   - 总字节上限 maxKnowledgeTarSize；超限断开请求
+//   - 条目数上限 maxKnowledgeTarEntries
+//   - tar 内每个 entry 名拒绝绝对路径与含 .. 段
+//   - 跳过非常规文件（symlink / device / fifo），仅写目录与普通文件
+func handleKnowledgeSync(w http.ResponseWriter, r *http.Request, dataRoot, scopeRel string) {
+	scopeAbs, err := resolveScopePath(dataRoot, scopeRel, "")
+	if err != nil {
+		writeError(w, http.StatusBadRequest, err.Error())
+		return
+	}
+	parent := filepath.Dir(scopeAbs)
+	if err := os.MkdirAll(parent, 0o755); err != nil {
+		writeError(w, http.StatusInternalServerError, err.Error())
+		return
+	}
+	tmpDir, err := os.MkdirTemp(parent, ".sync-*")
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, err.Error())
+		return
+	}
+	cleanup := true
+	defer func() {
+		if cleanup {
+			_ = os.RemoveAll(tmpDir)
+		}
+	}()
+
+	// 限制总大小：多 1 字节用来检测溢出
+	limit := io.LimitReader(r.Body, maxKnowledgeTarSize+1)
+	tr := tar.NewReader(limit)
+	totalRead := int64(0)
+	count := 0
+	for {
+		hdr, err := tr.Next()
+		if err == io.EOF {
+			break
+		}
+		if err != nil {
+			writeError(w, http.StatusBadRequest, "tar parse: "+err.Error())
+			return
+		}
+		count++
+		if count > maxKnowledgeTarEntries {
+			writeError(w, http.StatusBadRequest, fmt.Sprintf("too many entries (max %d)", maxKnowledgeTarEntries))
+			return
+		}
+		// entry 名安全校验
+		name := filepath.ToSlash(filepath.Clean(hdr.Name))
+		if filepath.IsAbs(hdr.Name) || strings.HasPrefix(name, "../") || strings.Contains(name, "/../") || name == ".." {
+			writeError(w, http.StatusBadRequest, "invalid entry path: "+hdr.Name)
+			return
+		}
+		dest := filepath.Join(tmpDir, name)
+		// 二次防御：dest 必须仍在 tmpDir 内
+		if !strings.HasPrefix(dest+string(filepath.Separator), tmpDir+string(filepath.Separator)) && dest != tmpDir {
+			writeError(w, http.StatusBadRequest, "entry escapes scope: "+hdr.Name)
+			return
+		}
+		switch hdr.Typeflag {
+		case tar.TypeDir:
+			if err := os.MkdirAll(dest, 0o755); err != nil {
+				writeError(w, http.StatusInternalServerError, err.Error())
+				return
+			}
+		case tar.TypeReg:
+			if err := os.MkdirAll(filepath.Dir(dest), 0o755); err != nil {
+				writeError(w, http.StatusInternalServerError, err.Error())
+				return
+			}
+			f, err := os.OpenFile(dest, os.O_CREATE|os.O_WRONLY|os.O_TRUNC, 0o644)
+			if err != nil {
+				writeError(w, http.StatusInternalServerError, err.Error())
+				return
+			}
+			n, err := io.Copy(f, tr)
+			_ = f.Close()
+			if err != nil {
+				writeError(w, http.StatusInternalServerError, err.Error())
+				return
+			}
+			totalRead += n
+			if totalRead > maxKnowledgeTarSize {
+				writeError(w, http.StatusBadRequest, fmt.Sprintf("tar exceeds size limit (max %d bytes)", maxKnowledgeTarSize))
+				return
+			}
+		default:
+			// symlink/device/fifo 全部跳过
+		}
+	}
+
+	// 原子替换旧目录：先把旧目录改名挪走 → rename tmp 为目标 → 删旧
+	if _, err := os.Stat(scopeAbs); err == nil {
+		stale, err := os.MkdirTemp(parent, ".stale-*")
+		if err != nil {
+			writeError(w, http.StatusInternalServerError, err.Error())
+			return
+		}
+		// 把旧目录内容挪进 stale
+		if err := os.Rename(scopeAbs, filepath.Join(stale, "old")); err != nil {
+			_ = os.RemoveAll(stale)
+			writeError(w, http.StatusInternalServerError, err.Error())
+			return
+		}
+		go func(p string) { _ = os.RemoveAll(p) }(stale)
+	}
+	if err := os.Rename(tmpDir, scopeAbs); err != nil {
+		writeError(w, http.StatusInternalServerError, err.Error())
+		return
+	}
+	cleanup = false
+	writeJSON(w, map[string]any{"ok": true, "entries": count, "bytes": totalRead})
 }
