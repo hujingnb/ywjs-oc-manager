@@ -4,6 +4,7 @@ import (
 	"errors"
 	"net/http"
 	"net/http/httptest"
+	"os"
 	"path/filepath"
 	"strings"
 	"testing"
@@ -48,19 +49,85 @@ func TestResolveScopePath(t *testing.T) {
 	}
 }
 
-func TestScopesHandler_NotImplementedReturns501(t *testing.T) {
+func TestScopesHandler_UnknownActionReturns404(t *testing.T) {
 	srv := httptest.NewServer(newHandlerWithDocker(t.TempDir(), nil, "tok"))
 	defer srv.Close()
 
-	req, _ := http.NewRequest(http.MethodPost, srv.URL+"/v1/scopes/apps/abc/init", nil)
+	req, _ := http.NewRequest(http.MethodGet, srv.URL+"/v1/scopes/apps/abc/no-such-action", nil)
 	req.Header.Set("Authorization", "Bearer tok")
 	resp, err := http.DefaultClient.Do(req)
 	if err != nil {
 		t.Fatalf("err=%v", err)
 	}
 	defer resp.Body.Close()
-	if resp.StatusCode != http.StatusNotImplemented {
-		t.Fatalf("status=%d, want 501", resp.StatusCode)
+	if resp.StatusCode != http.StatusNotFound {
+		t.Fatalf("status=%d, want 404", resp.StatusCode)
+	}
+}
+
+func TestScopesAppInit_CreatesFourDirs(t *testing.T) {
+	dataRoot := t.TempDir()
+	srv := httptest.NewServer(newHandlerWithDocker(dataRoot, nil, "tok"))
+	defer srv.Close()
+
+	req, _ := http.NewRequest(http.MethodPost, srv.URL+"/v1/scopes/apps/app-123/init", nil)
+	req.Header.Set("Authorization", "Bearer tok")
+	resp, err := http.DefaultClient.Do(req)
+	if err != nil {
+		t.Fatalf("err=%v", err)
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("status=%d", resp.StatusCode)
+	}
+	for _, sub := range []string{"knowledge", "workspace", "state", "logs"} {
+		dir := filepath.Join(dataRoot, "apps", "app-123", sub)
+		fi, err := os.Stat(dir)
+		if err != nil {
+			t.Fatalf("dir %q not created: %v", sub, err)
+		}
+		if !fi.IsDir() {
+			t.Fatalf("%q not a directory", sub)
+		}
+	}
+}
+
+func TestScopesAppInit_Idempotent(t *testing.T) {
+	dataRoot := t.TempDir()
+	srv := httptest.NewServer(newHandlerWithDocker(dataRoot, nil, "tok"))
+	defer srv.Close()
+
+	for i := 0; i < 2; i++ {
+		req, _ := http.NewRequest(http.MethodPost, srv.URL+"/v1/scopes/apps/app-123/init", nil)
+		req.Header.Set("Authorization", "Bearer tok")
+		resp, err := http.DefaultClient.Do(req)
+		if err != nil {
+			t.Fatalf("i=%d err=%v", i, err)
+		}
+		_ = resp.Body.Close()
+		if resp.StatusCode != http.StatusOK {
+			t.Fatalf("i=%d status=%d", i, resp.StatusCode)
+		}
+	}
+}
+
+func TestScopesAppInit_RejectsInvalidAppID(t *testing.T) {
+	dataRoot := t.TempDir()
+	srv := httptest.NewServer(newHandlerWithDocker(dataRoot, nil, "tok"))
+	defer srv.Close()
+
+	for _, bad := range []string{"../sneaky", ".secret", "with/slash", "with space"} {
+		req, _ := http.NewRequest(http.MethodPost, srv.URL+"/v1/scopes/apps/"+bad+"/init", nil)
+		req.Header.Set("Authorization", "Bearer tok")
+		resp, err := http.DefaultClient.Do(req)
+		if err != nil {
+			t.Fatalf("err=%v", err)
+		}
+		_ = resp.Body.Close()
+		// 路径里含 / 时 mux 解析路径会变；只要不是 200 即可
+		if resp.StatusCode == http.StatusOK {
+			t.Fatalf("bad app id %q got 200", bad)
+		}
 	}
 }
 

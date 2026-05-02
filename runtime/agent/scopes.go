@@ -3,6 +3,7 @@ package main
 import (
 	"errors"
 	"net/http"
+	"os"
 	"path/filepath"
 	"strings"
 )
@@ -55,12 +56,91 @@ func resolveScopePath(dataRoot, scope, rel string) (string, error) {
 // newScopesHandler 为 /v1/scopes/ 下的 file API 端点提供统一入口。
 //
 // 所有端点统一走 bearer 鉴权，避免重复手工套 wrapAuth。
-// 当前为骨架，未实现的子路径返回 501；后续 Task 在 scopesAppsHandler /
-// scopesOrgsHandler 里按需补具体处理函数。
+// 子路径分两类：apps/* 与 orgs/*，由对应 handler 函数分派 action。
+// 没匹配到的子路径返回 404。
 func newScopesHandler(dataRoot, agentToken string) http.Handler {
 	mux := http.NewServeMux()
-	mux.HandleFunc("/v1/scopes/", withAgentAuth(agentToken, func(w http.ResponseWriter, r *http.Request) {
-		writeError(w, http.StatusNotImplemented, "scope endpoint not implemented yet")
-	}))
+	mux.HandleFunc("/v1/scopes/apps/", withAgentAuth(agentToken, scopesAppsHandler(dataRoot)))
+	mux.HandleFunc("/v1/scopes/orgs/", withAgentAuth(agentToken, scopesOrgsHandler(dataRoot)))
 	return mux
+}
+
+// scopesAppsHandler 处理 /v1/scopes/apps/<appID>/<action>... 路径。
+// action 由后续 Task 注册（init/knowledge/workspace/archive 等）。
+func scopesAppsHandler(dataRoot string) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		rest := strings.TrimPrefix(r.URL.Path, "/v1/scopes/apps/")
+		parts := strings.SplitN(rest, "/", 2)
+		if len(parts) < 2 || parts[0] == "" {
+			writeError(w, http.StatusBadRequest, "missing app id or action")
+			return
+		}
+		appID, action := parts[0], parts[1]
+		if !isValidScopeID(appID) {
+			writeError(w, http.StatusBadRequest, "invalid app id")
+			return
+		}
+		switch {
+		case action == "init" && r.Method == http.MethodPost:
+			handleAppInit(w, r, dataRoot, appID)
+		default:
+			writeError(w, http.StatusNotFound, "unknown action")
+		}
+	}
+}
+
+// scopesOrgsHandler 处理 /v1/scopes/orgs/<orgID>/<action>... 路径。
+func scopesOrgsHandler(dataRoot string) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		rest := strings.TrimPrefix(r.URL.Path, "/v1/scopes/orgs/")
+		parts := strings.SplitN(rest, "/", 2)
+		if len(parts) < 2 || parts[0] == "" {
+			writeError(w, http.StatusBadRequest, "missing org id or action")
+			return
+		}
+		orgID, action := parts[0], parts[1]
+		if !isValidScopeID(orgID) {
+			writeError(w, http.StatusBadRequest, "invalid org id")
+			return
+		}
+		switch {
+		// 后续 Task 注册 knowledge/sync 等
+		default:
+			_ = action
+			writeError(w, http.StatusNotFound, "unknown action")
+		}
+	}
+}
+
+// isValidScopeID 校验 app/org 标识符不含路径分隔符或父级跳转字符。
+// 只接受字母、数字、连字符、下划线，长度 1~64。manager 侧 app_id / org_id
+// 是 UUID 字符串，足够覆盖。
+func isValidScopeID(id string) bool {
+	if len(id) == 0 || len(id) > 64 {
+		return false
+	}
+	for _, r := range id {
+		switch {
+		case r >= 'a' && r <= 'z':
+		case r >= 'A' && r <= 'Z':
+		case r >= '0' && r <= '9':
+		case r == '-' || r == '_':
+		default:
+			return false
+		}
+	}
+	return true
+}
+
+// handleAppInit 创建 apps/<appID>/{knowledge,workspace,state,logs} 4 个子目录。
+// 操作幂等：MkdirAll 在目录已存在时 no-op。
+func handleAppInit(w http.ResponseWriter, _ *http.Request, dataRoot, appID string) {
+	for _, sub := range []string{"knowledge", "workspace", "state", "logs"} {
+		dir := filepath.Join(dataRoot, "apps", appID, sub)
+		if err := os.MkdirAll(dir, 0o755); err != nil {
+			writeError(w, http.StatusInternalServerError, err.Error())
+			return
+		}
+	}
+	writeJSON(w, map[string]any{"ok": true, "app_id": appID})
 }
