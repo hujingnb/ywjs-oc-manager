@@ -2,8 +2,11 @@ package main
 
 import (
 	"archive/tar"
+	"archive/zip"
 	"bytes"
+	"encoding/json"
 	"errors"
+	"io"
 	"net/http"
 	"net/http/httptest"
 	"os"
@@ -11,6 +14,10 @@ import (
 	"strings"
 	"testing"
 )
+
+// jsonDecoder 与 readAll 是测试辅助 helper（避免重复 import）。
+func jsonDecoder(r io.Reader) *json.Decoder { return json.NewDecoder(r) }
+func readAll(r io.Reader) ([]byte, error)    { return io.ReadAll(r) }
 
 // makeTar 把 (path → content) 打成一个 tar 流供测试用。
 func makeTar(t *testing.T, files map[string]string) *bytes.Buffer {
@@ -343,6 +350,134 @@ func TestScopesKnowledgeFile_OrgScope(t *testing.T) {
 	got, _ := os.ReadFile(filepath.Join(dataRoot, "orgs", "org-1", "knowledge", "intro.md"))
 	if string(got) != "# org" {
 		t.Fatalf("got=%q", got)
+	}
+}
+
+func TestScopesWorkspaceList(t *testing.T) {
+	dataRoot := t.TempDir()
+	root := filepath.Join(dataRoot, "apps", "app-1", "workspace")
+	_ = os.MkdirAll(filepath.Join(root, "sub"), 0o755)
+	_ = os.WriteFile(filepath.Join(root, "report.pdf"), []byte("pdf"), 0o644)
+	_ = os.WriteFile(filepath.Join(root, "sub", "image.png"), []byte("png-bytes"), 0o644)
+
+	srv := httptest.NewServer(newHandlerWithDocker(dataRoot, nil, "tok"))
+	defer srv.Close()
+
+	// 列根目录
+	req, _ := http.NewRequest(http.MethodGet, srv.URL+"/v1/scopes/apps/app-1/workspace", nil)
+	req.Header.Set("Authorization", "Bearer tok")
+	resp, _ := http.DefaultClient.Do(req)
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("status=%d", resp.StatusCode)
+	}
+	var got struct {
+		Path    string `json:"path"`
+		Entries []struct {
+			Name string `json:"name"`
+			Type string `json:"type"`
+			Size int64  `json:"size"`
+		} `json:"entries"`
+	}
+	dec := jsonDecoder(resp.Body)
+	if err := dec.Decode(&got); err != nil {
+		t.Fatalf("decode: %v", err)
+	}
+	if len(got.Entries) != 2 {
+		t.Fatalf("entries=%+v", got.Entries)
+	}
+	// 列子目录
+	req2, _ := http.NewRequest(http.MethodGet, srv.URL+"/v1/scopes/apps/app-1/workspace?path=sub", nil)
+	req2.Header.Set("Authorization", "Bearer tok")
+	resp2, _ := http.DefaultClient.Do(req2)
+	defer resp2.Body.Close()
+	if resp2.StatusCode != http.StatusOK {
+		t.Fatalf("sub status=%d", resp2.StatusCode)
+	}
+}
+
+func TestScopesWorkspaceList_NotExistReturnsEmpty(t *testing.T) {
+	dataRoot := t.TempDir()
+	srv := httptest.NewServer(newHandlerWithDocker(dataRoot, nil, "tok"))
+	defer srv.Close()
+	req, _ := http.NewRequest(http.MethodGet, srv.URL+"/v1/scopes/apps/no-such-app/workspace", nil)
+	req.Header.Set("Authorization", "Bearer tok")
+	resp, _ := http.DefaultClient.Do(req)
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("status=%d", resp.StatusCode)
+	}
+}
+
+func TestScopesWorkspaceDownload(t *testing.T) {
+	dataRoot := t.TempDir()
+	root := filepath.Join(dataRoot, "apps", "app-1", "workspace")
+	_ = os.MkdirAll(root, 0o755)
+	_ = os.WriteFile(filepath.Join(root, "out.txt"), []byte("hello"), 0o644)
+
+	srv := httptest.NewServer(newHandlerWithDocker(dataRoot, nil, "tok"))
+	defer srv.Close()
+	req, _ := http.NewRequest(http.MethodGet,
+		srv.URL+"/v1/scopes/apps/app-1/workspace/download?path=out.txt", nil)
+	req.Header.Set("Authorization", "Bearer tok")
+	resp, _ := http.DefaultClient.Do(req)
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("status=%d", resp.StatusCode)
+	}
+	body, _ := readAll(resp.Body)
+	if string(body) != "hello" {
+		t.Fatalf("body=%q", body)
+	}
+	if !strings.Contains(resp.Header.Get("Content-Disposition"), "out.txt") {
+		t.Fatalf("disposition=%q", resp.Header.Get("Content-Disposition"))
+	}
+}
+
+func TestScopesWorkspaceDownload_RejectsDirectory(t *testing.T) {
+	dataRoot := t.TempDir()
+	root := filepath.Join(dataRoot, "apps", "app-1", "workspace", "sub")
+	_ = os.MkdirAll(root, 0o755)
+	srv := httptest.NewServer(newHandlerWithDocker(dataRoot, nil, "tok"))
+	defer srv.Close()
+	req, _ := http.NewRequest(http.MethodGet,
+		srv.URL+"/v1/scopes/apps/app-1/workspace/download?path=sub", nil)
+	req.Header.Set("Authorization", "Bearer tok")
+	resp, _ := http.DefaultClient.Do(req)
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusBadRequest {
+		t.Fatalf("status=%d", resp.StatusCode)
+	}
+}
+
+func TestScopesWorkspaceArchive(t *testing.T) {
+	dataRoot := t.TempDir()
+	root := filepath.Join(dataRoot, "apps", "app-1", "workspace")
+	_ = os.MkdirAll(filepath.Join(root, "sub"), 0o755)
+	_ = os.WriteFile(filepath.Join(root, "a.txt"), []byte("AAA"), 0o644)
+	_ = os.WriteFile(filepath.Join(root, "sub", "b.txt"), []byte("BBB"), 0o644)
+
+	srv := httptest.NewServer(newHandlerWithDocker(dataRoot, nil, "tok"))
+	defer srv.Close()
+	req, _ := http.NewRequest(http.MethodGet,
+		srv.URL+"/v1/scopes/apps/app-1/workspace/archive", nil)
+	req.Header.Set("Authorization", "Bearer tok")
+	resp, _ := http.DefaultClient.Do(req)
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("status=%d", resp.StatusCode)
+	}
+	body, _ := readAll(resp.Body)
+	zr, err := zip.NewReader(bytes.NewReader(body), int64(len(body)))
+	if err != nil {
+		t.Fatalf("zip parse: %v", err)
+	}
+	names := map[string]bool{}
+	for _, f := range zr.File {
+		names[f.Name] = true
+	}
+	if !names["a.txt"] || !names["sub/b.txt"] {
+		t.Fatalf("zip names=%v", names)
 	}
 }
 

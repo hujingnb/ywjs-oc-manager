@@ -2,6 +2,7 @@ package main
 
 import (
 	"archive/tar"
+	"archive/zip"
 	"errors"
 	"fmt"
 	"io"
@@ -16,6 +17,14 @@ const (
 	maxKnowledgeTarSize    = 2 * 1024 * 1024 * 1024 // 2 GiB 总大小（与 spec §11.5 工作目录上限同源）
 	maxKnowledgeTarEntries = 10000
 	maxKnowledgeFileSize   = 100 * 1024 * 1024 // 单文件 100 MiB（应用级单文件 upload）
+)
+
+// 工作目录浏览/下载上限：与 spec §11.5 openclaw.workspace.* 配置一致，
+// agent 这层做强制兜底，manager 侧再做一次校验形成两层防御。
+const (
+	maxWorkspaceDownloadSize = 500 * 1024 * 1024       // 单文件 500 MiB
+	maxWorkspaceArchiveSize  = 2 * 1024 * 1024 * 1024  // archive 总 2 GiB
+	maxWorkspaceArchiveItems = 10000                   // archive 最多条目
 )
 
 // ErrInvalidPath 表示用户输入的相对路径越出 scope 沙箱。
@@ -99,6 +108,12 @@ func scopesAppsHandler(dataRoot string) http.HandlerFunc {
 			handleKnowledgeFileUpload(w, r, dataRoot, filepath.Join("apps", appID, "knowledge"))
 		case action == "knowledge/file" && r.Method == http.MethodDelete:
 			handleKnowledgeFileDelete(w, r, dataRoot, filepath.Join("apps", appID, "knowledge"))
+		case action == "workspace" && r.Method == http.MethodGet:
+			handleWorkspaceList(w, r, dataRoot, filepath.Join("apps", appID, "workspace"))
+		case action == "workspace/download" && r.Method == http.MethodGet:
+			handleWorkspaceDownload(w, r, dataRoot, filepath.Join("apps", appID, "workspace"))
+		case action == "workspace/archive" && r.Method == http.MethodGet:
+			handleWorkspaceArchive(w, r, dataRoot, filepath.Join("apps", appID, "workspace"))
 		default:
 			writeError(w, http.StatusNotFound, "unknown action")
 		}
@@ -336,6 +351,199 @@ func handleKnowledgeFileUpload(w http.ResponseWriter, r *http.Request, dataRoot,
 		return
 	}
 	writeJSON(w, map[string]any{"ok": true, "bytes": n, "path": rel})
+}
+
+// workspaceEntry 是 list 接口返回的 entry 结构。
+type workspaceEntry struct {
+	Name       string `json:"name"`
+	Type       string `json:"type"` // file | dir
+	Size       int64  `json:"size,omitempty"`
+	ModifiedAt string `json:"modified_at"`
+}
+
+// handleWorkspaceList 列举 workspace 子目录的内容。
+// path 为相对 workspace 根的子路径，缺省为根。
+func handleWorkspaceList(w http.ResponseWriter, r *http.Request, dataRoot, scopeRel string) {
+	rel := r.URL.Query().Get("path")
+	target, err := resolveScopePath(dataRoot, scopeRel, rel)
+	if err != nil {
+		writeError(w, http.StatusBadRequest, err.Error())
+		return
+	}
+	fi, err := os.Stat(target)
+	if err != nil {
+		if os.IsNotExist(err) {
+			// workspace 目录可能尚未创建，返回空列表
+			writeJSON(w, map[string]any{"path": "/" + strings.TrimLeft(rel, "/"), "entries": []workspaceEntry{}})
+			return
+		}
+		writeError(w, http.StatusInternalServerError, err.Error())
+		return
+	}
+	if !fi.IsDir() {
+		writeError(w, http.StatusBadRequest, "path is not a directory")
+		return
+	}
+	entries, err := os.ReadDir(target)
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, err.Error())
+		return
+	}
+	out := make([]workspaceEntry, 0, len(entries))
+	for _, e := range entries {
+		info, err := e.Info()
+		if err != nil {
+			continue
+		}
+		// 跳过非常规文件（symlink / device / fifo），只暴露 file 与 dir
+		if !(info.Mode().IsRegular() || info.IsDir()) {
+			continue
+		}
+		entry := workspaceEntry{
+			Name:       e.Name(),
+			ModifiedAt: info.ModTime().UTC().Format("2006-01-02T15:04:05Z"),
+		}
+		if info.IsDir() {
+			entry.Type = "dir"
+		} else {
+			entry.Type = "file"
+			entry.Size = info.Size()
+		}
+		out = append(out, entry)
+	}
+	writeJSON(w, map[string]any{"path": "/" + strings.TrimLeft(rel, "/"), "entries": out})
+}
+
+// handleWorkspaceDownload 流式下载单个普通文件。
+// 拒绝 symlink / 目录 / 非常规文件。
+func handleWorkspaceDownload(w http.ResponseWriter, r *http.Request, dataRoot, scopeRel string) {
+	rel := r.URL.Query().Get("path")
+	if rel == "" {
+		writeError(w, http.StatusBadRequest, "missing ?path=")
+		return
+	}
+	target, err := resolveScopePath(dataRoot, scopeRel, rel)
+	if err != nil {
+		writeError(w, http.StatusBadRequest, err.Error())
+		return
+	}
+	fi, err := os.Lstat(target)
+	if err != nil {
+		if os.IsNotExist(err) {
+			writeError(w, http.StatusNotFound, "file not found")
+			return
+		}
+		writeError(w, http.StatusInternalServerError, err.Error())
+		return
+	}
+	if !fi.Mode().IsRegular() {
+		writeError(w, http.StatusBadRequest, "path is not a regular file")
+		return
+	}
+	if fi.Size() > maxWorkspaceDownloadSize {
+		writeError(w, http.StatusRequestEntityTooLarge,
+			fmt.Sprintf("file exceeds download limit (max %d bytes)", maxWorkspaceDownloadSize))
+		return
+	}
+	f, err := os.Open(target)
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, err.Error())
+		return
+	}
+	defer f.Close()
+	w.Header().Set("Content-Type", "application/octet-stream")
+	w.Header().Set("Content-Length", fmt.Sprintf("%d", fi.Size()))
+	w.Header().Set("Content-Disposition",
+		fmt.Sprintf(`attachment; filename="%s"`, filepath.Base(target)))
+	_, _ = io.Copy(w, f)
+}
+
+// handleWorkspaceArchive 把指定子目录流式打成 zip 返回给客户端。
+func handleWorkspaceArchive(w http.ResponseWriter, r *http.Request, dataRoot, scopeRel string) {
+	rel := r.URL.Query().Get("path")
+	target, err := resolveScopePath(dataRoot, scopeRel, rel)
+	if err != nil {
+		writeError(w, http.StatusBadRequest, err.Error())
+		return
+	}
+	fi, err := os.Stat(target)
+	if err != nil {
+		if os.IsNotExist(err) {
+			writeError(w, http.StatusNotFound, "directory not found")
+			return
+		}
+		writeError(w, http.StatusInternalServerError, err.Error())
+		return
+	}
+	if !fi.IsDir() {
+		writeError(w, http.StatusBadRequest, "archive only supports directories")
+		return
+	}
+
+	zipName := filepath.Base(target)
+	if zipName == "" || zipName == "." {
+		zipName = "workspace"
+	}
+	w.Header().Set("Content-Type", "application/zip")
+	w.Header().Set("Content-Disposition",
+		fmt.Sprintf(`attachment; filename="%s.zip"`, zipName))
+
+	zw := zip.NewWriter(w)
+	totalBytes := int64(0)
+	totalItems := 0
+	walkErr := filepath.Walk(target, func(path string, info os.FileInfo, err error) error {
+		if err != nil {
+			return err
+		}
+		if path == target {
+			return nil
+		}
+		// 跳过非常规非目录文件
+		if !(info.Mode().IsRegular() || info.IsDir()) {
+			return nil
+		}
+		totalItems++
+		if totalItems > maxWorkspaceArchiveItems {
+			return fmt.Errorf("archive entries exceed limit (max %d)", maxWorkspaceArchiveItems)
+		}
+		entryName, err := filepath.Rel(target, path)
+		if err != nil {
+			return err
+		}
+		entryName = filepath.ToSlash(entryName)
+		hdr := &zip.FileHeader{Name: entryName, Method: zip.Deflate, Modified: info.ModTime()}
+		hdr.SetMode(info.Mode())
+		if info.IsDir() {
+			hdr.Name = entryName + "/"
+			_, err := zw.CreateHeader(hdr)
+			return err
+		}
+		writer, err := zw.CreateHeader(hdr)
+		if err != nil {
+			return err
+		}
+		f, err := os.Open(path)
+		if err != nil {
+			return err
+		}
+		defer f.Close()
+		n, err := io.Copy(writer, f)
+		if err != nil {
+			return err
+		}
+		totalBytes += n
+		if totalBytes > maxWorkspaceArchiveSize {
+			return fmt.Errorf("archive bytes exceed limit (max %d)", maxWorkspaceArchiveSize)
+		}
+		return nil
+	})
+	if walkErr != nil {
+		// 错误时关闭 zip 输出，客户端 stream 会断开。
+		_ = zw.Close()
+		// 已经发出过 200 头，无法改 status；但可以关闭连接。
+		return
+	}
+	_ = zw.Close()
 }
 
 // handleKnowledgeFileDelete 删除单文件或子目录。
