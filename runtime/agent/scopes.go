@@ -10,6 +10,7 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"time"
 )
 
 // tar 同步硬上限：避免恶意 tar 撑爆磁盘。
@@ -75,12 +76,13 @@ func resolveScopePath(dataRoot, scope, rel string) (string, error) {
 // newScopesHandler 为 /v1/scopes/ 下的 file API 端点提供统一入口。
 //
 // 所有端点统一走 bearer 鉴权，避免重复手工套 wrapAuth。
-// 子路径分两类：apps/* 与 orgs/*，由对应 handler 函数分派 action。
+// 子路径分三类：apps/*、orgs/*、cleanup-archives，由对应 handler 函数分派。
 // 没匹配到的子路径返回 404。
 func newScopesHandler(dataRoot, agentToken string) http.Handler {
 	mux := http.NewServeMux()
 	mux.HandleFunc("/v1/scopes/apps/", withAgentAuth(agentToken, scopesAppsHandler(dataRoot)))
 	mux.HandleFunc("/v1/scopes/orgs/", withAgentAuth(agentToken, scopesOrgsHandler(dataRoot)))
+	mux.HandleFunc("/v1/scopes/cleanup-archives", withAgentAuth(agentToken, handleCleanupArchives(dataRoot)))
 	return mux
 }
 
@@ -114,6 +116,8 @@ func scopesAppsHandler(dataRoot string) http.HandlerFunc {
 			handleWorkspaceDownload(w, r, dataRoot, filepath.Join("apps", appID, "workspace"))
 		case action == "workspace/archive" && r.Method == http.MethodGet:
 			handleWorkspaceArchive(w, r, dataRoot, filepath.Join("apps", appID, "workspace"))
+		case action == "archive" && r.Method == http.MethodPost:
+			handleAppArchive(w, r, dataRoot, appID)
 		default:
 			writeError(w, http.StatusNotFound, "unknown action")
 		}
@@ -544,6 +548,100 @@ func handleWorkspaceArchive(w http.ResponseWriter, r *http.Request, dataRoot, sc
 		return
 	}
 	_ = zw.Close()
+}
+
+// handleAppArchive 把 apps/{appID}/ 整目录 mv 到 archived/{appID}-{timestamp}/。
+// manager 在应用软删除流程中调此端点。
+// 应用目录不存在视为成功（幂等）。
+func handleAppArchive(w http.ResponseWriter, _ *http.Request, dataRoot, appID string) {
+	src := filepath.Join(dataRoot, "apps", appID)
+	if _, err := os.Stat(src); err != nil {
+		if os.IsNotExist(err) {
+			writeJSON(w, map[string]any{"ok": true, "skipped": true})
+			return
+		}
+		writeError(w, http.StatusInternalServerError, err.Error())
+		return
+	}
+	archivedRoot := filepath.Join(dataRoot, "archived")
+	if err := os.MkdirAll(archivedRoot, 0o755); err != nil {
+		writeError(w, http.StatusInternalServerError, err.Error())
+		return
+	}
+	ts := nowFunc().UTC().Format("20060102T150405Z")
+	dest := filepath.Join(archivedRoot, appID+"-"+ts)
+	if err := os.Rename(src, dest); err != nil {
+		writeError(w, http.StatusInternalServerError, err.Error())
+		return
+	}
+	writeJSON(w, map[string]any{"ok": true, "archived_to": dest})
+}
+
+// handleCleanupArchives 删除 archived/ 下 mtime 超过 retention_days 天的子目录。
+// retention_days 必须 > 0，缺省 30。
+func handleCleanupArchives(dataRoot string) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != http.MethodPost {
+			writeError(w, http.StatusMethodNotAllowed, "method not allowed")
+			return
+		}
+		days := 30
+		if v := r.URL.Query().Get("retention_days"); v != "" {
+			parsed, err := parsePositiveInt(v)
+			if err != nil {
+				writeError(w, http.StatusBadRequest, "invalid retention_days")
+				return
+			}
+			days = parsed
+		}
+		archivedRoot := filepath.Join(dataRoot, "archived")
+		entries, err := os.ReadDir(archivedRoot)
+		if err != nil {
+			if os.IsNotExist(err) {
+				writeJSON(w, map[string]any{"ok": true, "removed": 0})
+				return
+			}
+			writeError(w, http.StatusInternalServerError, err.Error())
+			return
+		}
+		cutoff := nowFunc().Add(-time.Duration(days) * 24 * time.Hour)
+		removed := 0
+		for _, e := range entries {
+			info, err := e.Info()
+			if err != nil {
+				continue
+			}
+			if info.ModTime().After(cutoff) {
+				continue
+			}
+			path := filepath.Join(archivedRoot, e.Name())
+			if err := os.RemoveAll(path); err != nil {
+				continue
+			}
+			removed++
+		}
+		writeJSON(w, map[string]any{"ok": true, "removed": removed})
+	}
+}
+
+// nowFunc 与 parsePositiveInt 是 archive/cleanup helper；nowFunc 在测试中被替换。
+var nowFunc = time.Now
+
+func parsePositiveInt(s string) (int, error) {
+	n := 0
+	for _, c := range s {
+		if c < '0' || c > '9' {
+			return 0, errors.New("not a number")
+		}
+		n = n*10 + int(c-'0')
+		if n > 100000 {
+			return 0, errors.New("too large")
+		}
+	}
+	if n <= 0 {
+		return 0, errors.New("must be positive")
+	}
+	return n, nil
 }
 
 // handleKnowledgeFileDelete 删除单文件或子目录。

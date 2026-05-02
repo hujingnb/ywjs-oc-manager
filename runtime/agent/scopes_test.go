@@ -13,6 +13,7 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 )
 
 // jsonDecoder 与 readAll 是测试辅助 helper（避免重复 import）。
@@ -366,7 +367,10 @@ func TestScopesWorkspaceList(t *testing.T) {
 	// 列根目录
 	req, _ := http.NewRequest(http.MethodGet, srv.URL+"/v1/scopes/apps/app-1/workspace", nil)
 	req.Header.Set("Authorization", "Bearer tok")
-	resp, _ := http.DefaultClient.Do(req)
+	resp, err := http.DefaultClient.Do(req)
+	if err != nil {
+		t.Fatalf("err=%v", err)
+	}
 	defer resp.Body.Close()
 	if resp.StatusCode != http.StatusOK {
 		t.Fatalf("status=%d", resp.StatusCode)
@@ -389,7 +393,10 @@ func TestScopesWorkspaceList(t *testing.T) {
 	// 列子目录
 	req2, _ := http.NewRequest(http.MethodGet, srv.URL+"/v1/scopes/apps/app-1/workspace?path=sub", nil)
 	req2.Header.Set("Authorization", "Bearer tok")
-	resp2, _ := http.DefaultClient.Do(req2)
+	resp2, err := http.DefaultClient.Do(req2)
+	if err != nil {
+		t.Fatalf("err=%v", err)
+	}
 	defer resp2.Body.Close()
 	if resp2.StatusCode != http.StatusOK {
 		t.Fatalf("sub status=%d", resp2.StatusCode)
@@ -402,7 +409,10 @@ func TestScopesWorkspaceList_NotExistReturnsEmpty(t *testing.T) {
 	defer srv.Close()
 	req, _ := http.NewRequest(http.MethodGet, srv.URL+"/v1/scopes/apps/no-such-app/workspace", nil)
 	req.Header.Set("Authorization", "Bearer tok")
-	resp, _ := http.DefaultClient.Do(req)
+	resp, err := http.DefaultClient.Do(req)
+	if err != nil {
+		t.Fatalf("err=%v", err)
+	}
 	defer resp.Body.Close()
 	if resp.StatusCode != http.StatusOK {
 		t.Fatalf("status=%d", resp.StatusCode)
@@ -420,7 +430,10 @@ func TestScopesWorkspaceDownload(t *testing.T) {
 	req, _ := http.NewRequest(http.MethodGet,
 		srv.URL+"/v1/scopes/apps/app-1/workspace/download?path=out.txt", nil)
 	req.Header.Set("Authorization", "Bearer tok")
-	resp, _ := http.DefaultClient.Do(req)
+	resp, err := http.DefaultClient.Do(req)
+	if err != nil {
+		t.Fatalf("err=%v", err)
+	}
 	defer resp.Body.Close()
 	if resp.StatusCode != http.StatusOK {
 		t.Fatalf("status=%d", resp.StatusCode)
@@ -443,7 +456,10 @@ func TestScopesWorkspaceDownload_RejectsDirectory(t *testing.T) {
 	req, _ := http.NewRequest(http.MethodGet,
 		srv.URL+"/v1/scopes/apps/app-1/workspace/download?path=sub", nil)
 	req.Header.Set("Authorization", "Bearer tok")
-	resp, _ := http.DefaultClient.Do(req)
+	resp, err := http.DefaultClient.Do(req)
+	if err != nil {
+		t.Fatalf("err=%v", err)
+	}
 	defer resp.Body.Close()
 	if resp.StatusCode != http.StatusBadRequest {
 		t.Fatalf("status=%d", resp.StatusCode)
@@ -462,7 +478,10 @@ func TestScopesWorkspaceArchive(t *testing.T) {
 	req, _ := http.NewRequest(http.MethodGet,
 		srv.URL+"/v1/scopes/apps/app-1/workspace/archive", nil)
 	req.Header.Set("Authorization", "Bearer tok")
-	resp, _ := http.DefaultClient.Do(req)
+	resp, err := http.DefaultClient.Do(req)
+	if err != nil {
+		t.Fatalf("err=%v", err)
+	}
 	defer resp.Body.Close()
 	if resp.StatusCode != http.StatusOK {
 		t.Fatalf("status=%d", resp.StatusCode)
@@ -478,6 +497,107 @@ func TestScopesWorkspaceArchive(t *testing.T) {
 	}
 	if !names["a.txt"] || !names["sub/b.txt"] {
 		t.Fatalf("zip names=%v", names)
+	}
+}
+
+func TestScopesAppArchive_MovesAndCleansUp(t *testing.T) {
+	dataRoot := t.TempDir()
+	root := filepath.Join(dataRoot, "apps", "app-1")
+	_ = os.MkdirAll(filepath.Join(root, "workspace"), 0o755)
+	_ = os.WriteFile(filepath.Join(root, "workspace", "out.pdf"), []byte("x"), 0o644)
+
+	srv := httptest.NewServer(newHandlerWithDocker(dataRoot, nil, "tok"))
+	defer srv.Close()
+
+	// 固定时间，便于断言归档目录名
+	origNow := nowFunc
+	t.Cleanup(func() { nowFunc = origNow })
+	nowFunc = func() time.Time {
+		return time.Date(2026, 5, 2, 12, 0, 0, 0, time.UTC)
+	}
+
+	req, _ := http.NewRequest(http.MethodPost,
+		srv.URL+"/v1/scopes/apps/app-1/archive", nil)
+	req.Header.Set("Authorization", "Bearer tok")
+	resp, err := http.DefaultClient.Do(req)
+	if err != nil {
+		t.Fatalf("err=%v", err)
+	}
+	resp.Body.Close()
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("archive status=%d", resp.StatusCode)
+	}
+
+	// 旧路径不在
+	if _, err := os.Stat(root); !os.IsNotExist(err) {
+		t.Fatalf("旧路径应消失，err=%v", err)
+	}
+	// 归档路径在
+	dest := filepath.Join(dataRoot, "archived", "app-1-20260502T120000Z")
+	if _, err := os.Stat(filepath.Join(dest, "workspace", "out.pdf")); err != nil {
+		t.Fatalf("归档后文件应在: %v", err)
+	}
+
+	// 二次 archive（应用目录已不在）应幂等成功
+	resp2, _ := http.DefaultClient.Do(req)
+	resp2.Body.Close()
+	if resp2.StatusCode != http.StatusOK {
+		t.Fatalf("二次 archive status=%d", resp2.StatusCode)
+	}
+
+	// 把归档 mtime 推回到 31 天前，调 cleanup
+	old := nowFunc().Add(-31 * 24 * time.Hour)
+	_ = os.Chtimes(dest, old, old)
+	cleanReq, _ := http.NewRequest(http.MethodPost,
+		srv.URL+"/v1/scopes/cleanup-archives?retention_days=30", nil)
+	cleanReq.Header.Set("Authorization", "Bearer tok")
+	cleanResp, err := http.DefaultClient.Do(cleanReq)
+	if err != nil {
+		t.Fatalf("cleanup err=%v", err)
+	}
+	cleanResp.Body.Close()
+	if cleanResp.StatusCode != http.StatusOK {
+		t.Fatalf("cleanup status=%d", cleanResp.StatusCode)
+	}
+	if _, err := os.Stat(dest); !os.IsNotExist(err) {
+		t.Fatalf("归档应被清理，err=%v", err)
+	}
+}
+
+func TestScopesCleanupArchives_KeepsRecent(t *testing.T) {
+	dataRoot := t.TempDir()
+	keep := filepath.Join(dataRoot, "archived", "fresh-20260502T000000Z")
+	_ = os.MkdirAll(keep, 0o755)
+	srv := httptest.NewServer(newHandlerWithDocker(dataRoot, nil, "tok"))
+	defer srv.Close()
+
+	req, _ := http.NewRequest(http.MethodPost,
+		srv.URL+"/v1/scopes/cleanup-archives?retention_days=7", nil)
+	req.Header.Set("Authorization", "Bearer tok")
+	resp, err := http.DefaultClient.Do(req)
+	if err != nil {
+		t.Fatalf("err=%v", err)
+	}
+	resp.Body.Close()
+	if _, err := os.Stat(keep); err != nil {
+		t.Fatalf("最近归档应保留: %v", err)
+	}
+}
+
+func TestScopesCleanupArchives_RejectsBadRetention(t *testing.T) {
+	dataRoot := t.TempDir()
+	srv := httptest.NewServer(newHandlerWithDocker(dataRoot, nil, "tok"))
+	defer srv.Close()
+
+	for _, v := range []string{"0", "-1", "abc", "999999999"} {
+		req, _ := http.NewRequest(http.MethodPost,
+			srv.URL+"/v1/scopes/cleanup-archives?retention_days="+v, nil)
+		req.Header.Set("Authorization", "Bearer tok")
+		resp, _ := http.DefaultClient.Do(req)
+		resp.Body.Close()
+		if resp.StatusCode != http.StatusBadRequest {
+			t.Fatalf("retention=%q got status=%d", v, resp.StatusCode)
+		}
 	}
 }
 
