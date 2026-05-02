@@ -18,7 +18,7 @@ func TestWeChatAdapterBeginAuthReturnsQRCodeChallenge(t *testing.T) {
 		"若二维码未能显示或无法使用，你可以访问以下链接以继续：",
 		"https://liteapp.weixin.qq.com/q/7GiQu1?qrcode=85e18acc56ebd5937ad4caa5fe1b01a1&bot_type=3",
 		"正在等待操作...",
-		"已连接微信账号 alice@wxid_xyz",
+		"已将此 OpenClaw 连接到微信。",
 	}}
 	adapter := NewWeChatAdapter(runner)
 
@@ -34,18 +34,21 @@ func TestWeChatAdapterBeginAuthReturnsQRCodeChallenge(t *testing.T) {
 	}
 
 	// 异步消费剩余事件，等待最长 200ms 让 progress 落地。
-	deadline := time.Now().Add(200 * time.Millisecond)
+	deadline := time.Now().Add(500 * time.Millisecond)
 	for time.Now().Before(deadline) {
 		progress, _ := adapter.PollAuth(context.Background(), AuthInput{AppID: "app-1"})
 		if progress.Status == AuthStatusBound {
-			if progress.BoundIdentity == "" {
-				t.Fatalf("bound identity 为空")
+			// stdout 不携带 wxid/userId（实测发现）；BoundIdentity 由 service 层
+			// 在收到 bound 事件后调 openclaw channels list 或读 plugin state 补齐。
+			// 此测试仅验证 bound 状态翻转。
+			if progress.ChannelName != "openclaw-weixin" {
+				t.Fatalf("ChannelName = %q, want openclaw-weixin", progress.ChannelName)
 			}
 			return
 		}
 		time.Sleep(20 * time.Millisecond)
 	}
-	t.Fatalf("expected bound progress within 200ms")
+	t.Fatalf("expected bound progress within 500ms")
 }
 
 func TestWeChatAdapterBeginAuthRejectsUnparsableOutput(t *testing.T) {

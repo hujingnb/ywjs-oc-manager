@@ -43,9 +43,10 @@ func TestParseChannelLoginEventQRCodeWithLeadingPrompt(t *testing.T) {
 	}
 }
 
-func TestParseChannelLoginEventBoundChinese(t *testing.T) {
-	// 上游真实 bound 文本待 Sprint 2 实测确认；这里用 docs 推测的"已连接微信账号 X"形态。
-	line := "已连接微信账号 alice@wxid_xyz"
+func TestParseChannelLoginEventBoundFromRealUpstream(t *testing.T) {
+	// Sprint 0 真手机扫码实测样本：上游绑定成功**唯一**关键行。
+	// 注意结尾有句号；不携带任何账号标识。
+	line := "已将此 OpenClaw 连接到微信。"
 	event, err := ParseChannelLoginEvent(line)
 	if err != nil {
 		t.Fatalf("ParseChannelLoginEvent() error = %v", err)
@@ -53,16 +54,18 @@ func TestParseChannelLoginEventBoundChinese(t *testing.T) {
 	if event.Type != "bound" {
 		t.Fatalf("event.Type = %q, want bound", event.Type)
 	}
-	if event.Bound == "" {
-		t.Fatalf("event.Bound 应抽到账号标识")
-	}
 	if event.Channel != "openclaw-weixin" {
 		t.Fatalf("event.Channel = %q, want openclaw-weixin", event.Channel)
 	}
+	// stdout 不携带 userId/wxid，service 层负责后续从 plugin state 补齐。
+	if event.Bound != "" {
+		t.Fatalf("event.Bound 应为空（stdout 不携带账号标识），got %q", event.Bound)
+	}
 }
 
-func TestParseChannelLoginEventBoundEnglish(t *testing.T) {
-	line := "Connected as alice@wxid_xyz"
+func TestParseChannelLoginEventBoundEnglishFallback(t *testing.T) {
+	// 关键词列表保留英文 fallback，应对未来上游加英文输出。
+	line := "Connected this OpenClaw to WeChat."
 	event, err := ParseChannelLoginEvent(line)
 	if err != nil {
 		t.Fatalf("ParseChannelLoginEvent() error = %v", err)

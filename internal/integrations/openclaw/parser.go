@@ -46,10 +46,20 @@ var qrURLPattern = regexp.MustCompile(`https?://\S*?qrcode=[A-Za-z0-9_-]+\S*`)
 // Sprint 2 实测后如发现真实有效期不同，调整此值。
 const defaultQRTTL = 5 * time.Minute
 
-// 关键词匹配（中文）。Sprint 2 真手机扫码后用实测文本替换或扩充。
+// 关键词匹配（中文）。绑定成功文本基于 Sprint 0 真手机扫码实测；
+// expired / failed / pending 关键词部分实测部分推测，留 Sprint 2 进一步验证。
+//
+// 实测样本（2026-05-02 真手机扫码）：
+//
+//	已将此 OpenClaw 连接到微信。
+//
+// 这是 wechat plugin 在登录成功时输出的**唯一**关键行，**不携带微信账号标识**。
+// manager 收到 bound 事件后必须再调 `openclaw channels list --json` 或读 plugin
+// state 文件 `/root/.openclaw/openclaw-weixin/accounts/*.json` 取真实 userId。
+// 因此 ChannelLoginEvent.Bound 在 bound 事件里默认为空，由 service 层补齐。
 var (
 	keywordsExpired = []string{"二维码已过期", "二维码过期", "已失效", "已过期"}
-	keywordsBound   = []string{"已连接微信账号", "登录成功", "已绑定", "Connected as"}
+	keywordsBound   = []string{"已将此 OpenClaw 连接到微信", "Connected this OpenClaw to WeChat"}
 	keywordsFailed  = []string{"认证失败", "登录失败", "失败：", "Error:"}
 	keywordsPending = []string{"正在等待操作", "等待扫描", "扫描成功，请在手机上确认"}
 )
@@ -84,9 +94,11 @@ func ParseChannelLoginEvent(line string) (ChannelLoginEvent, error) {
 	}
 
 	if containsAny(trimmed, keywordsBound) {
+		// 实测 stdout 只说"已将此 OpenClaw 连接到微信。"，不携带 wxid/userId。
+		// service 层收到 bound 事件后须再调 openclaw channels list 或读 plugin state
+		// 文件取真实 userId（如 `o9cq800xszCM8jyoS9YpRKpvAN9c@im.wechat`）补到 channel_bindings.bound_identity。
 		return ChannelLoginEvent{
 			Type:    "bound",
-			Bound:   extractBoundIdentity(trimmed),
 			Channel: "openclaw-weixin",
 		}, nil
 	}
@@ -115,15 +127,3 @@ func containsAny(line string, keywords []string) bool {
 	return false
 }
 
-// extractBoundIdentity 从 "已连接微信账号 <name>" / "Connected as <name>" 这类行中抽出账号标识。
-// 粗实现：取最后一个空格后的非空白序列；找不到则返回空。
-// Sprint 2 实测后用真实绑定成功输出加正则细化。
-func extractBoundIdentity(line string) string {
-	parts := strings.Fields(line)
-	if len(parts) == 0 {
-		return ""
-	}
-	last := parts[len(parts)-1]
-	last = strings.TrimRight(last, "。.,!?;:")
-	return last
-}
