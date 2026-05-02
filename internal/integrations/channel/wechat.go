@@ -46,31 +46,41 @@ func (a *WeChatAdapter) BeginAuth(ctx context.Context, input AuthInput) (AuthCha
 	if err != nil {
 		return AuthChallenge{}, fmt.Errorf("启动微信登录失败: %w", err)
 	}
-	first, ok := readFirstEvent(stream)
+	// Sprint 0 POC 实测：上游 stdout 前 11 秒是 plugin loading 噪声，后续才出现二维码 URL。
+	// 这里持续读 stream 直到拿到 qrcode/expired/failed 中任一事件；pending 与 unparsable 行都跳过。
+	event, ok := readFirstAuthEvent(stream)
 	if !ok {
-		return AuthChallenge{}, errors.New("OpenClaw 未输出可解析的登录事件")
-	}
-	event, err := openclaw.ParseChannelLoginEvent(first)
-	if err != nil {
 		a.recordProgress(input.AppID, AuthProgress{
 			Status:       AuthStatusFailed,
-			ErrorMessage: err.Error(),
+			ErrorMessage: "OpenClaw 未输出可解析的登录事件",
 			UpdatedAt:    time.Now(),
 		})
-		return AuthChallenge{}, err
+		return AuthChallenge{}, errors.New("OpenClaw 未输出可解析的登录事件")
 	}
-	if event.Type != "qrcode" || event.QRCode == "" {
+	switch event.Type {
+	case "qrcode":
+		if event.QRCode == "" {
+			a.recordProgress(input.AppID, AuthProgress{Status: AuthStatusFailed, ErrorMessage: "二维码事件缺少 URL", UpdatedAt: time.Now()})
+			return AuthChallenge{}, errors.New("二维码事件缺少 URL")
+		}
+		a.recordProgress(input.AppID, AuthProgress{Status: AuthStatusPending, UpdatedAt: time.Now()})
+		go a.consumeStream(input.AppID, stream)
+		return AuthChallenge{
+			Type:      "qrcode",
+			ExpiresAt: event.ExpiresAt,
+			QRCode:    event.QRCode,
+			Hints:     event.Metadata,
+		}, nil
+	case "expired":
+		a.recordProgress(input.AppID, AuthProgress{Status: AuthStatusExpired, UpdatedAt: time.Now()})
+		return AuthChallenge{}, errors.New("OpenClaw 在出二维码前已宣告过期")
+	case "failed":
+		a.recordProgress(input.AppID, AuthProgress{Status: AuthStatusFailed, ErrorMessage: event.Error, UpdatedAt: time.Now()})
+		return AuthChallenge{}, fmt.Errorf("OpenClaw 登录失败: %s", event.Error)
+	default:
 		a.recordProgress(input.AppID, AuthProgress{Status: AuthStatusFailed, ErrorMessage: "首条事件不是二维码", UpdatedAt: time.Now()})
 		return AuthChallenge{}, fmt.Errorf("首条事件不是二维码: %s", event.Type)
 	}
-	a.recordProgress(input.AppID, AuthProgress{Status: AuthStatusPending, UpdatedAt: time.Now()})
-	go a.consumeStream(input.AppID, stream)
-	return AuthChallenge{
-		Type:      "qrcode",
-		ExpiresAt: event.ExpiresAt,
-		QRCode:    event.QRCode,
-		Hints:     event.Metadata,
-	}, nil
 }
 
 // PollAuth 返回最新的登录进度。
@@ -88,7 +98,8 @@ func (a *WeChatAdapter) consumeStream(appID string, stream <-chan string) {
 	for line := range stream {
 		event, err := openclaw.ParseChannelLoginEvent(line)
 		if err != nil {
-			a.recordProgress(appID, AuthProgress{Status: AuthStatusFailed, ErrorMessage: err.Error(), UpdatedAt: time.Now()})
+			// 协议外的行（plugin loading log / ASCII QR / 中文提示行）正常跳过，
+			// 不视为登录失败。
 			continue
 		}
 		switch event.Type {
@@ -119,12 +130,22 @@ func (a *WeChatAdapter) recordProgress(appID string, progress AuthProgress) {
 	a.progress[appID] = progress
 }
 
-func readFirstEvent(stream <-chan string) (string, bool) {
+// readFirstAuthEvent 持续读 stream 直到第一个能 parse 出的、对 BeginAuth 决策性事件
+// （qrcode / expired / failed）。pending 与 ErrUnparsableOutput 行被跳过。
+// stream 关闭仍未拿到决策性事件时返回 (_, false)。
+func readFirstAuthEvent(stream <-chan string) (openclaw.ChannelLoginEvent, bool) {
 	for line := range stream {
-		if line == "" {
+		event, err := openclaw.ParseChannelLoginEvent(line)
+		if err != nil {
 			continue
 		}
-		return line, true
+		switch event.Type {
+		case "qrcode", "expired", "failed":
+			return event, true
+		default:
+			// pending 等中间状态先吞掉，等下一个决策性事件。
+			continue
+		}
 	}
-	return "", false
+	return openclaw.ChannelLoginEvent{}, false
 }
