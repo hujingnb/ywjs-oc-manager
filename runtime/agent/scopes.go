@@ -15,6 +15,7 @@ import (
 const (
 	maxKnowledgeTarSize    = 2 * 1024 * 1024 * 1024 // 2 GiB 总大小（与 spec §11.5 工作目录上限同源）
 	maxKnowledgeTarEntries = 10000
+	maxKnowledgeFileSize   = 100 * 1024 * 1024 // 单文件 100 MiB（应用级单文件 upload）
 )
 
 // ErrInvalidPath 表示用户输入的相对路径越出 scope 沙箱。
@@ -94,6 +95,10 @@ func scopesAppsHandler(dataRoot string) http.HandlerFunc {
 			handleAppInit(w, r, dataRoot, appID)
 		case action == "knowledge/sync" && r.Method == http.MethodPost:
 			handleKnowledgeSync(w, r, dataRoot, filepath.Join("apps", appID, "knowledge"))
+		case action == "knowledge/file" && r.Method == http.MethodPut:
+			handleKnowledgeFileUpload(w, r, dataRoot, filepath.Join("apps", appID, "knowledge"))
+		case action == "knowledge/file" && r.Method == http.MethodDelete:
+			handleKnowledgeFileDelete(w, r, dataRoot, filepath.Join("apps", appID, "knowledge"))
 		default:
 			writeError(w, http.StatusNotFound, "unknown action")
 		}
@@ -117,6 +122,10 @@ func scopesOrgsHandler(dataRoot string) http.HandlerFunc {
 		switch {
 		case action == "knowledge/sync" && r.Method == http.MethodPost:
 			handleKnowledgeSync(w, r, dataRoot, filepath.Join("orgs", orgID, "knowledge"))
+		case action == "knowledge/file" && r.Method == http.MethodPut:
+			handleKnowledgeFileUpload(w, r, dataRoot, filepath.Join("orgs", orgID, "knowledge"))
+		case action == "knowledge/file" && r.Method == http.MethodDelete:
+			handleKnowledgeFileDelete(w, r, dataRoot, filepath.Join("orgs", orgID, "knowledge"))
 		default:
 			writeError(w, http.StatusNotFound, "unknown action")
 		}
@@ -274,4 +283,86 @@ func handleKnowledgeSync(w http.ResponseWriter, r *http.Request, dataRoot, scope
 	}
 	cleanup = false
 	writeJSON(w, map[string]any{"ok": true, "entries": count, "bytes": totalRead})
+}
+
+// handleKnowledgeFileUpload 把单文件写入 scope 目录的 ?path= 指定子路径。
+// body 为文件原始字节，最多 100 MiB。
+func handleKnowledgeFileUpload(w http.ResponseWriter, r *http.Request, dataRoot, scopeRel string) {
+	rel := r.URL.Query().Get("path")
+	if rel == "" {
+		writeError(w, http.StatusBadRequest, "missing ?path=")
+		return
+	}
+	scopeRoot, err := resolveScopePath(dataRoot, scopeRel, "")
+	if err != nil {
+		writeError(w, http.StatusBadRequest, err.Error())
+		return
+	}
+	dest, err := resolveScopePath(dataRoot, scopeRel, rel)
+	if err != nil {
+		writeError(w, http.StatusBadRequest, err.Error())
+		return
+	}
+	if dest == scopeRoot {
+		writeError(w, http.StatusBadRequest, "?path= 不能指向 scope 根")
+		return
+	}
+	if err := os.MkdirAll(filepath.Dir(dest), 0o755); err != nil {
+		writeError(w, http.StatusInternalServerError, err.Error())
+		return
+	}
+	limit := io.LimitReader(r.Body, maxKnowledgeFileSize+1)
+	tmp := dest + ".tmp"
+	f, err := os.OpenFile(tmp, os.O_CREATE|os.O_WRONLY|os.O_TRUNC, 0o644)
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, err.Error())
+		return
+	}
+	n, err := io.Copy(f, limit)
+	_ = f.Close()
+	if err != nil {
+		_ = os.Remove(tmp)
+		writeError(w, http.StatusInternalServerError, err.Error())
+		return
+	}
+	if n > maxKnowledgeFileSize {
+		_ = os.Remove(tmp)
+		writeError(w, http.StatusBadRequest, fmt.Sprintf("file exceeds size limit (max %d bytes)", maxKnowledgeFileSize))
+		return
+	}
+	if err := os.Rename(tmp, dest); err != nil {
+		_ = os.Remove(tmp)
+		writeError(w, http.StatusInternalServerError, err.Error())
+		return
+	}
+	writeJSON(w, map[string]any{"ok": true, "bytes": n, "path": rel})
+}
+
+// handleKnowledgeFileDelete 删除单文件或子目录。
+// 不存在视为成功（幂等）。
+func handleKnowledgeFileDelete(w http.ResponseWriter, r *http.Request, dataRoot, scopeRel string) {
+	rel := r.URL.Query().Get("path")
+	if rel == "" {
+		writeError(w, http.StatusBadRequest, "missing ?path=")
+		return
+	}
+	scopeRoot, err := resolveScopePath(dataRoot, scopeRel, "")
+	if err != nil {
+		writeError(w, http.StatusBadRequest, err.Error())
+		return
+	}
+	dest, err := resolveScopePath(dataRoot, scopeRel, rel)
+	if err != nil {
+		writeError(w, http.StatusBadRequest, err.Error())
+		return
+	}
+	if dest == scopeRoot {
+		writeError(w, http.StatusBadRequest, "?path= 不能指向 scope 根")
+		return
+	}
+	if err := os.RemoveAll(dest); err != nil {
+		writeError(w, http.StatusInternalServerError, err.Error())
+		return
+	}
+	writeJSON(w, map[string]any{"ok": true, "path": rel})
 }

@@ -253,6 +253,99 @@ func TestScopesKnowledgeSync_EmptyTar(t *testing.T) {
 	}
 }
 
+func TestScopesKnowledgeFile_PutAndDelete(t *testing.T) {
+	dataRoot := t.TempDir()
+	srv := httptest.NewServer(newHandlerWithDocker(dataRoot, nil, "tok"))
+	defer srv.Close()
+
+	// 上传一个文件
+	put, _ := http.NewRequest(http.MethodPut,
+		srv.URL+"/v1/scopes/apps/app-1/knowledge/file?path=sub/dir/note.txt",
+		strings.NewReader("hello world"))
+	put.Header.Set("Authorization", "Bearer tok")
+	resp, err := http.DefaultClient.Do(put)
+	if err != nil {
+		t.Fatalf("err=%v", err)
+	}
+	resp.Body.Close()
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("PUT status=%d", resp.StatusCode)
+	}
+	dest := filepath.Join(dataRoot, "apps", "app-1", "knowledge", "sub", "dir", "note.txt")
+	got, err := os.ReadFile(dest)
+	if err != nil || string(got) != "hello world" {
+		t.Fatalf("file content = %q, %v", got, err)
+	}
+
+	// 覆盖写入（同名）
+	put2, _ := http.NewRequest(http.MethodPut,
+		srv.URL+"/v1/scopes/apps/app-1/knowledge/file?path=sub/dir/note.txt",
+		strings.NewReader("v2"))
+	put2.Header.Set("Authorization", "Bearer tok")
+	resp, _ = http.DefaultClient.Do(put2)
+	resp.Body.Close()
+	got, _ = os.ReadFile(dest)
+	if string(got) != "v2" {
+		t.Fatalf("覆盖后 = %q", got)
+	}
+
+	// 删除
+	del, _ := http.NewRequest(http.MethodDelete,
+		srv.URL+"/v1/scopes/apps/app-1/knowledge/file?path=sub/dir/note.txt", nil)
+	del.Header.Set("Authorization", "Bearer tok")
+	resp, _ = http.DefaultClient.Do(del)
+	resp.Body.Close()
+	if _, err := os.Stat(dest); !os.IsNotExist(err) {
+		t.Fatalf("文件应被删除，err=%v", err)
+	}
+
+	// 删除不存在文件视为成功（幂等）
+	resp, _ = http.DefaultClient.Do(del)
+	resp.Body.Close()
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("二次删除应 200，得 %d", resp.StatusCode)
+	}
+}
+
+func TestScopesKnowledgeFile_RejectsTraversalPath(t *testing.T) {
+	dataRoot := t.TempDir()
+	srv := httptest.NewServer(newHandlerWithDocker(dataRoot, nil, "tok"))
+	defer srv.Close()
+
+	put, _ := http.NewRequest(http.MethodPut,
+		srv.URL+"/v1/scopes/apps/app-1/knowledge/file?path=../../etc/passwd",
+		strings.NewReader("evil"))
+	put.Header.Set("Authorization", "Bearer tok")
+	resp, _ := http.DefaultClient.Do(put)
+	resp.Body.Close()
+	if resp.StatusCode != http.StatusBadRequest {
+		t.Fatalf("应返回 400，得 %d", resp.StatusCode)
+	}
+}
+
+func TestScopesKnowledgeFile_OrgScope(t *testing.T) {
+	dataRoot := t.TempDir()
+	srv := httptest.NewServer(newHandlerWithDocker(dataRoot, nil, "tok"))
+	defer srv.Close()
+
+	put, _ := http.NewRequest(http.MethodPut,
+		srv.URL+"/v1/scopes/orgs/org-1/knowledge/file?path=intro.md",
+		strings.NewReader("# org"))
+	put.Header.Set("Authorization", "Bearer tok")
+	resp, err := http.DefaultClient.Do(put)
+	if err != nil {
+		t.Fatalf("err=%v", err)
+	}
+	resp.Body.Close()
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("status=%d", resp.StatusCode)
+	}
+	got, _ := os.ReadFile(filepath.Join(dataRoot, "orgs", "org-1", "knowledge", "intro.md"))
+	if string(got) != "# org" {
+		t.Fatalf("got=%q", got)
+	}
+}
+
 func TestScopesAppInit_RejectsInvalidAppID(t *testing.T) {
 	dataRoot := t.TempDir()
 	srv := httptest.NewServer(newHandlerWithDocker(dataRoot, nil, "tok"))
