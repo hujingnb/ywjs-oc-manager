@@ -146,9 +146,18 @@ func runManager(ctx context.Context, cfg config.Config, logOut io.Writer) error 
 	}
 
 	imageDistribution := newImageDistributorWrapper(service.NewImageDistributionService(imageSync))
+	// Sprint 2 集成 smoke 发现的 Go interface nil 陷阱：var newapiClient *newapi.Client
+	// 在 cfg.NewAPI.BaseURL 为空时保持 nil，传给 handler 的 NewAPIClient interface 参数
+	// 后会变成"interface 非 nil 但底层指针 nil"，handler 里 `if h.newapi == nil` 检查
+	// 永远 false，CreateAPIKey 调用立刻 panic。
+	//
+	// 修法：用 handlers.NewAPIClient interface 类型变量保持，仅在真创建 client 时赋值，
+	// 这样 NewAPI 未配置时变量保持 typed-nil interface（即 untyped nil），handler 检查通过。
+	var newapiHandlerClient handlers.NewAPIClient
 	var newapiClient *newapi.Client
 	if cfg.NewAPI.BaseURL != "" {
 		newapiClient = newapi.NewClient(cfg.NewAPI.BaseURL, cfg.NewAPI.AdminToken)
+		newapiHandlerClient = newapiClient
 		rechargeService = service.NewRechargeService(dbStore.Queries, newapiClient)
 		usageService = service.NewUsageService(newapiClient)
 		usageService.SetAppLister(appService)
@@ -163,7 +172,7 @@ func runManager(ctx context.Context, cfg config.Config, logOut io.Writer) error 
 		appDirInitializerAdapter{adapter: runtimeAdapter},
 		runtimeAdapter,
 		runtimeAdapter,
-		newapiClient,
+		newapiHandlerClient,
 		handlers.AppInitializeConfig{
 			RuntimeImage:         cfg.OpenClaw.RuntimeImage,
 			SystemPromptTemplate: cfg.OpenClaw.SystemPromptTemplate,
@@ -183,7 +192,12 @@ func runManager(ctx context.Context, cfg config.Config, logOut io.Writer) error 
 	if err := registry.Register("app_restart_container", handlers.NewAppRestartContainerHandler(dbStore.Queries, runtimeAdapter).Handle); err != nil {
 		return fmt.Errorf("注册 app_restart_container handler 失败: %w", err)
 	}
-	if err := registry.Register("app_delete", handlers.NewAppDeleteHandler(dbStore.Queries, runtimeAdapter, newapiClient, nil).Handle); err != nil {
+	// 同 newapiHandlerClient 的 typed-nil 防御：APIKeyDisabler interface 仅在真客户端可用时赋值。
+	var apiKeyDisabler handlers.APIKeyDisabler
+	if newapiClient != nil {
+		apiKeyDisabler = newapiClient
+	}
+	if err := registry.Register("app_delete", handlers.NewAppDeleteHandler(dbStore.Queries, runtimeAdapter, apiKeyDisabler, nil).Handle); err != nil {
 		return fmt.Errorf("注册 app_delete handler 失败: %w", err)
 	}
 	knowledgeSyncHandler := handlers.NewKnowledgeSyncHandler(knowledgeMaster, runtimeAdapter)

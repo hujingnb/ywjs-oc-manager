@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"log"
+	"runtime/debug"
 	"time"
 
 	"golang.org/x/sync/errgroup"
@@ -71,10 +72,12 @@ func (p *Pool) Run(ctx context.Context) error {
 
 // safeRecoverTick 调用 worker.Tick 并拦截 panic，把 panic 转换成 error。
 // 这样单次 panic 只影响当次轮询，不会让 goroutine 退出。
+//
+// Sprint 2 集成 smoke 期间发现 panic 没栈难诊断，加上 debug.Stack() 写到 err 里。
 func safeRecoverTick(ctx context.Context, w *Worker) (err error) {
 	defer func() {
 		if r := recover(); r != nil {
-			err = fmt.Errorf("worker panic: %v", r)
+			err = fmt.Errorf("worker panic: %v\n%s", r, debug.Stack())
 		}
 	}()
 	return w.Tick(ctx)

@@ -109,7 +109,10 @@ services:
     image: golang:1.25-bookworm
     container_name: manager-api
     working_dir: /app
-    command: sh -c "go install github.com/air-verse/air@latest && /go/bin/air -c .air.toml"
+    # Sprint 1 imageDistribution 依赖 docker CLI 来 inspect/save 本地 OpenClaw runtime
+    # 镜像（不依赖 daemon，但用 docker save 输出 tar 流给 agent load）。base 镜像不含
+    # docker CLI 需要在启动时 apt install。docker.sock mount 让 CLI 命中宿主机 daemon。
+    command: sh -c "apt-get update && apt-get install -y --no-install-recommends docker.io && go install github.com/air-verse/air@latest && /go/bin/air -c .air.toml"
     environment:
       OCM_CONFIG: /app/config/config.yaml.example
       DATABASE_URL: postgres://ocm:ocm@manager-postgres:5432/ocm?sslmode=disable
@@ -138,6 +141,9 @@ services:
       - ./:/app
       - ./.local/data/go/pkg/mod:/go/pkg/mod
       - ./.local/data/go/cache:/root/.cache/go-build
+      # 让 manager-api 容器内的 docker CLI 直连宿主机 daemon，
+      # 这样 imagesync 能 inspect / save 本地 openclaw-runtime:dev 镜像。
+      - /var/run/docker.sock:/var/run/docker.sock
 
   manager-web:
     image: node:22-alpine
