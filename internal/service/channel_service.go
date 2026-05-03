@@ -25,6 +25,9 @@ type ChannelStore interface {
 	SetChannelBindingChallenge(ctx context.Context, arg sqlc.SetChannelBindingChallengeParams) (sqlc.ChannelBinding, error)
 	SetChannelBindingStatus(ctx context.Context, arg sqlc.SetChannelBindingStatusParams) (sqlc.ChannelBinding, error)
 	MarkChannelBindingBound(ctx context.Context, arg sqlc.MarkChannelBindingBoundParams) (sqlc.ChannelBinding, error)
+	// SetAppStatus 用于 bound 后把 apps.status 从 binding_waiting 推到 running。
+	// 仅在 channel_bindings.status 翻到 bound 时调一次；其它路径（启停/重启）由 worker 处理。
+	SetAppStatus(ctx context.Context, arg sqlc.SetAppStatusParams) (sqlc.App, error)
 }
 
 // ChannelService 协调 channel adapter 与 channel_bindings 表。
@@ -185,6 +188,18 @@ func (s *ChannelService) PollAuth(ctx context.Context, principal auth.Principal,
 			ChannelName:   pgtype.Text{String: progress.ChannelName, Valid: progress.ChannelName != ""},
 		}); err != nil {
 			return ProgressResult{}, fmt.Errorf("标记渠道绑定成功失败: %w", err)
+		}
+		// Sprint 2 spec §3 退出标准：渠道绑定成功后应用应自动进入 running。
+		// 仅在 binding_waiting → running 这一条边推进；其它状态（如已经 running 或人工
+		// stopped）不动，避免覆盖运维侧的状态决策。SetAppStatus 失败不阻塞 binding 已写入
+		// 成功的事实——下次 PollAuth 仍会幂等命中并补推。
+		if app.Status == domain.AppStatusBindingWaiting {
+			if _, err := s.store.SetAppStatus(ctx, sqlc.SetAppStatusParams{
+				ID:     app.ID,
+				Status: domain.AppStatusRunning,
+			}); err != nil {
+				return ProgressResult{}, fmt.Errorf("推进应用状态到 running 失败: %w", err)
+			}
 		}
 	}
 	if progress.Status == channel.AuthStatusFailed || progress.Status == channel.AuthStatusExpired {
