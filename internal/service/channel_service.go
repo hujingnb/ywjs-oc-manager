@@ -2,6 +2,7 @@ package service
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"time"
@@ -22,36 +23,24 @@ var ErrChannelAdapterMissing = errors.New("当前渠道未启用")
 type ChannelStore interface {
 	GetApp(ctx context.Context, id pgtype.UUID) (sqlc.App, error)
 	GetChannelBindingByAppAndType(ctx context.Context, arg sqlc.GetChannelBindingByAppAndTypeParams) (sqlc.ChannelBinding, error)
-	SetChannelBindingChallenge(ctx context.Context, arg sqlc.SetChannelBindingChallengeParams) (sqlc.ChannelBinding, error)
 	SetChannelBindingStatus(ctx context.Context, arg sqlc.SetChannelBindingStatusParams) (sqlc.ChannelBinding, error)
-	MarkChannelBindingBound(ctx context.Context, arg sqlc.MarkChannelBindingBoundParams) (sqlc.ChannelBinding, error)
-	// SetAppStatus 用于 bound 后把 apps.status 从 binding_waiting 推到 running。
-	// 仅在 channel_bindings.status 翻到 bound 时调一次；其它路径（启停/重启）由 worker 处理。
-	SetAppStatus(ctx context.Context, arg sqlc.SetAppStatusParams) (sqlc.App, error)
+	CreateJob(ctx context.Context, arg sqlc.CreateJobParams) (sqlc.Job, error)
 }
 
 // ChannelService 协调 channel adapter 与 channel_bindings 表。
 type ChannelService struct {
-	store          ChannelStore
-	registry       *channel.Registry
-	wechatResolver channel.BindingResolver
+	store    ChannelStore
+	registry *channel.Registry
+	notifier JobNotifier
 }
 
 // NewChannelService 创建 service。
-func NewChannelService(store ChannelStore, registry *channel.Registry) *ChannelService {
-	return &ChannelService{store: store, registry: registry}
-}
-
-// SetWeChatBindingResolver 注入微信 bound_identity 解析器。
-//
-// Sprint 0 实测：上游 wechat plugin 在 channels login stdout **不输出 wxid/userId**，
-// 真实凭证持久化在容器内 /root/.openclaw/openclaw-weixin/accounts/<name>.json。
-// 因此 PollAuth 拿到 bound 状态后必须再调本 resolver 从 plugin state 读 userId
-// 补到 channel_bindings.bound_identity，否则 manager 永远拿不到真实账号标识。
-//
-// 不注入时 PollAuth 仍能正常工作（status 翻转），只是 BoundIdentity 为空。
-func (s *ChannelService) SetWeChatBindingResolver(r channel.BindingResolver) {
-	s.wechatResolver = r
+func NewChannelService(store ChannelStore, registry *channel.Registry, notifier ...JobNotifier) *ChannelService {
+	var n JobNotifier
+	if len(notifier) > 0 {
+		n = notifier[0]
+	}
+	return &ChannelService{store: store, registry: registry, notifier: n}
 }
 
 // ChallengeResult 是 BeginAuth 对外返回的视图。
@@ -63,6 +52,7 @@ type ChallengeResult struct {
 	Code          string            `json:"code,omitempty"`
 	ExpiresAt     time.Time         `json:"expires_at,omitempty"`
 	Hints         map[string]string `json:"hints,omitempty"`
+	JobID         string            `json:"job_id,omitempty"`
 }
 
 // ProgressResult 是 PollAuth 对外返回的视图。
@@ -76,8 +66,9 @@ type ProgressResult struct {
 }
 
 // BeginAuth 启动指定应用、指定渠道的登录挑战。
-// 启动后会把挑战信息写入 channel_bindings.metadata_json 与 status='pending_auth'，
-// 即使 manager 重启，前端仍能从数据库恢复挑战状态。
+// HTTP 层不直接执行 OpenClaw CLI：真实登录由 channel_start_login worker 完成。
+// 这里只负责权限校验、渠道可用性校验、状态置为 pending_auth 并入队任务，
+// 避免微信插件加载或二维码生成阻塞请求线程。
 func (s *ChannelService) BeginAuth(ctx context.Context, principal auth.Principal, appID, channelType string) (ChallengeResult, error) {
 	app, err := s.loadAuthorizedApp(ctx, principal, appID)
 	if err != nil {
@@ -86,8 +77,7 @@ func (s *ChannelService) BeginAuth(ctx context.Context, principal auth.Principal
 	if s.registry == nil {
 		return ChallengeResult{}, ErrChannelAdapterMissing
 	}
-	adapter, err := s.registry.Lookup(channelType)
-	if err != nil {
+	if _, err := s.registry.Lookup(channelType); err != nil {
 		return ChallengeResult{}, fmt.Errorf("%w: %s", ErrChannelAdapterMissing, channelType)
 	}
 	binding, err := s.store.GetChannelBindingByAppAndType(ctx, sqlc.GetChannelBindingByAppAndTypeParams{AppID: app.ID, ChannelType: channelType})
@@ -100,30 +90,6 @@ func (s *ChannelService) BeginAuth(ctx context.Context, principal auth.Principal
 	if binding.Status == domain.ChannelStatusBound {
 		return ChallengeResult{Status: domain.ChannelStatusBound, ChannelType: channelType}, nil
 	}
-
-	challenge, err := adapter.BeginAuth(ctx, channel.AuthInput{
-		AppID:       uuidToString(app.ID),
-		OwnerUserID: uuidToString(app.OwnerUserID),
-		NodeID:      uuidToOptionalString(app.RuntimeNodeID),
-		ContainerID: textOrEmpty(app.ContainerID),
-	})
-	if err != nil {
-		_, _ = s.store.SetChannelBindingStatus(ctx, sqlc.SetChannelBindingStatusParams{
-			AppID:       binding.AppID,
-			ChannelType: binding.ChannelType,
-			Status:      domain.ChannelStatusFailed,
-			LastError:   pgtype.Text{String: err.Error(), Valid: true},
-		})
-		return ChallengeResult{}, fmt.Errorf("发起渠道登录失败: %w", err)
-	}
-
-	if _, err := s.store.SetChannelBindingChallenge(ctx, sqlc.SetChannelBindingChallengeParams{
-		AppID:        binding.AppID,
-		ChannelType:  binding.ChannelType,
-		MetadataJson: challengeToJSON(challenge),
-	}); err != nil {
-		return ChallengeResult{}, fmt.Errorf("保存渠道挑战失败: %w", err)
-	}
 	if _, err := s.store.SetChannelBindingStatus(ctx, sqlc.SetChannelBindingStatusParams{
 		AppID:       binding.AppID,
 		ChannelType: binding.ChannelType,
@@ -132,29 +98,40 @@ func (s *ChannelService) BeginAuth(ctx context.Context, principal auth.Principal
 	}); err != nil {
 		return ChallengeResult{}, fmt.Errorf("更新渠道状态失败: %w", err)
 	}
+	payload, err := json.Marshal(map[string]any{
+		"app_id":       uuidToString(app.ID),
+		"channel_type": channelType,
+		"requested_by": principal.UserID,
+	})
+	if err != nil {
+		return ChallengeResult{}, fmt.Errorf("序列化渠道登录任务失败: %w", err)
+	}
+	job, err := s.store.CreateJob(ctx, sqlc.CreateJobParams{
+		Type:        domain.JobTypeChannelStartLogin,
+		Priority:    90,
+		RunAfter:    pgtype.Timestamptz{Time: time.Now(), Valid: true},
+		MaxAttempts: 3,
+		PayloadJson: payload,
+	})
+	if err != nil {
+		return ChallengeResult{}, fmt.Errorf("创建渠道登录任务失败: %w", err)
+	}
+	if s.notifier != nil {
+		_ = s.notifier.Enqueue(ctx, uuidToString(job.ID))
+	}
 	return ChallengeResult{
-		Status:        domain.ChannelStatusPendingAuth,
-		ChannelType:   channelType,
-		ChallengeType: challenge.Type,
-		QRCode:        challenge.QRCode,
-		Code:          challenge.Code,
-		ExpiresAt:     challenge.ExpiresAt,
-		Hints:         challenge.Hints,
+		Status:      domain.ChannelStatusPendingAuth,
+		ChannelType: channelType,
+		JobID:       uuidToString(job.ID),
 	}, nil
 }
 
-// PollAuth 查询登录进度，必要时把已完成状态写回 channel_bindings。
+// PollAuth 查询登录进度。真实状态推进由 channel_check_binding worker 完成；
+// 这里只读取 DB 中的 channel_bindings，保证轮询接口轻量且可恢复。
 func (s *ChannelService) PollAuth(ctx context.Context, principal auth.Principal, appID, channelType string) (ProgressResult, error) {
 	app, err := s.loadAuthorizedApp(ctx, principal, appID)
 	if err != nil {
 		return ProgressResult{}, err
-	}
-	if s.registry == nil {
-		return ProgressResult{}, ErrChannelAdapterMissing
-	}
-	adapter, err := s.registry.Lookup(channelType)
-	if err != nil {
-		return ProgressResult{}, fmt.Errorf("%w: %s", ErrChannelAdapterMissing, channelType)
 	}
 	binding, err := s.store.GetChannelBindingByAppAndType(ctx, sqlc.GetChannelBindingByAppAndTypeParams{AppID: app.ID, ChannelType: channelType})
 	if err != nil {
@@ -163,60 +140,33 @@ func (s *ChannelService) PollAuth(ctx context.Context, principal auth.Principal,
 		}
 		return ProgressResult{}, fmt.Errorf("查询渠道绑定失败: %w", err)
 	}
-	progress, err := adapter.PollAuth(ctx, channel.AuthInput{AppID: uuidToString(app.ID), OwnerUserID: uuidToString(app.OwnerUserID)})
-	if err != nil {
-		return ProgressResult{}, fmt.Errorf("查询渠道进度失败: %w", err)
+	metadata := map[string]string{}
+	if len(binding.MetadataJson) > 0 {
+		metadata = channelBindingMetadata(binding.MetadataJson)
 	}
-	if progress.Status == channel.AuthStatusBound {
-		// Sprint 0 实测：stdout 不携带 wxid。bound 后必须从 plugin state 文件读 userId。
-		// resolver 未注入或读失败时 BoundIdentity 留空，下次 PollAuth 重试。
-		identity := progress.BoundIdentity
-		if identity == "" && s.wechatResolver != nil && channelType == domain.ChannelTypeWeChat {
-			resolved, rerr := s.wechatResolver.ResolveWeChatBoundIdentity(ctx,
-				uuidToOptionalString(app.RuntimeNodeID),
-				textOrEmpty(app.ContainerID))
-			if rerr == nil {
-				identity = resolved
-				progress.BoundIdentity = resolved
-			}
-			// 不把 resolver 错误推到失败状态：plugin 可能稍后才写文件
-		}
-		if _, err := s.store.MarkChannelBindingBound(ctx, sqlc.MarkChannelBindingBoundParams{
-			AppID:         binding.AppID,
-			ChannelType:   binding.ChannelType,
-			BoundIdentity: pgtype.Text{String: identity, Valid: identity != ""},
-			ChannelName:   pgtype.Text{String: progress.ChannelName, Valid: progress.ChannelName != ""},
-		}); err != nil {
-			return ProgressResult{}, fmt.Errorf("标记渠道绑定成功失败: %w", err)
-		}
-		// Sprint 2 spec §3 退出标准：渠道绑定成功后应用应自动进入 running。
-		// 仅在 binding_waiting → running 这一条边推进；其它状态（如已经 running 或人工
-		// stopped）不动，避免覆盖运维侧的状态决策。SetAppStatus 失败不阻塞 binding 已写入
-		// 成功的事实——下次 PollAuth 仍会幂等命中并补推。
-		if app.Status == domain.AppStatusBindingWaiting {
-			if _, err := s.store.SetAppStatus(ctx, sqlc.SetAppStatusParams{
-				ID:     app.ID,
-				Status: domain.AppStatusRunning,
-			}); err != nil {
-				return ProgressResult{}, fmt.Errorf("推进应用状态到 running 失败: %w", err)
-			}
-		}
+	updatedAt := time.Now()
+	if binding.UpdatedAt.Valid {
+		updatedAt = binding.UpdatedAt.Time
 	}
-	if progress.Status == channel.AuthStatusFailed || progress.Status == channel.AuthStatusExpired {
-		_, _ = s.store.SetChannelBindingStatus(ctx, sqlc.SetChannelBindingStatusParams{
-			AppID:       binding.AppID,
-			ChannelType: binding.ChannelType,
-			Status:      string(progress.Status),
-			LastError:   pgtype.Text{String: progress.ErrorMessage, Valid: progress.ErrorMessage != ""},
-		})
+	errorMessage := ""
+	if binding.LastError.Valid {
+		errorMessage = binding.LastError.String
+	}
+	boundIdentity := ""
+	if binding.BoundIdentity.Valid {
+		boundIdentity = binding.BoundIdentity.String
+	}
+	channelName := ""
+	if binding.ChannelName.Valid {
+		channelName = binding.ChannelName.String
 	}
 	return ProgressResult{
-		Status:        string(progress.Status),
-		BoundIdentity: progress.BoundIdentity,
-		ChannelName:   progress.ChannelName,
-		ErrorMessage:  progress.ErrorMessage,
-		UpdatedAt:     progress.UpdatedAt,
-		Metadata:      progress.Metadata,
+		Status:        binding.Status,
+		BoundIdentity: boundIdentity,
+		ChannelName:   channelName,
+		ErrorMessage:  errorMessage,
+		UpdatedAt:     updatedAt,
+		Metadata:      metadata,
 	}, nil
 }
 
@@ -280,23 +230,23 @@ func canManageApp(principal auth.Principal, app sqlc.App) bool {
 	}
 }
 
-func challengeToJSON(c channel.AuthChallenge) []byte {
-	bytes, err := jsonMarshal(map[string]any{
-		"type":       c.Type,
-		"qrcode":     c.QRCode,
-		"code":       c.Code,
-		"expires_at": c.ExpiresAt,
-		"hints":      c.Hints,
-	})
-	if err != nil {
-		return nil
+func channelBindingMetadata(raw []byte) map[string]string {
+	var data map[string]any
+	if err := json.Unmarshal(raw, &data); err != nil {
+		return map[string]string{}
 	}
-	return bytes
-}
-
-func textOrEmpty(t pgtype.Text) string {
-	if !t.Valid {
-		return ""
+	metadata := make(map[string]string, len(data))
+	for key, value := range data {
+		switch v := value.(type) {
+		case string:
+			metadata[key] = v
+		case map[string]any:
+			for hintKey, hintValue := range v {
+				if hint, ok := hintValue.(string); ok {
+					metadata[hintKey] = hint
+				}
+			}
+		}
 	}
-	return t.String
+	return metadata
 }

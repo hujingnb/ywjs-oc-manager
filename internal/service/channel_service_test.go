@@ -33,11 +33,14 @@ func TestChannelServiceBeginAuthSuccess(t *testing.T) {
 	if err != nil {
 		t.Fatalf("BeginAuth() error = %v", err)
 	}
-	if result.QRCode == "" {
-		t.Fatalf("expected qr code in result")
+	if result.JobID == "" {
+		t.Fatalf("expected job id in result")
 	}
 	if !store.statusUpdated || store.lastStatus != domain.ChannelStatusPendingAuth {
 		t.Fatalf("expected status to be pending_auth, got %s", store.lastStatus)
+	}
+	if len(store.jobs) != 1 || store.jobs[0].Type != domain.JobTypeChannelStartLogin {
+		t.Fatalf("expected channel_start_login job, got %+v", store.jobs)
 	}
 }
 
@@ -63,15 +66,12 @@ func TestChannelServiceBeginAuthForbidden(t *testing.T) {
 
 func TestChannelServicePollAuthMarksBound(t *testing.T) {
 	store := newChannelStub(t)
+	store.binding.Status = domain.ChannelStatusBound
+	store.binding.BoundIdentity = pgtype.Text{String: "alice", Valid: true}
+	store.binding.ChannelName = pgtype.Text{String: "alice@wechat", Valid: true}
+	store.binding.MetadataJson = []byte(`{"type":"qrcode","qrcode":"https://liteapp.weixin.qq.com/q/test","expires_at":"2026-05-03T12:00:00Z","hints":{"raw_qr":"https://liteapp.weixin.qq.com/q/test"}}`)
 	registry := channel.NewRegistry()
-	registry.MustRegister(&fakeAdapter{
-		progress: channel.AuthProgress{
-			Status:        channel.AuthStatusBound,
-			BoundIdentity: "alice",
-			ChannelName:   "alice@wechat",
-			UpdatedAt:     time.Now(),
-		},
-	})
+	registry.MustRegister(&fakeAdapter{})
 	svc := NewChannelService(store, registry)
 
 	progress, err := svc.PollAuth(context.Background(), platformAdmin(), testChannelAppID, domain.ChannelTypeWeChat)
@@ -81,116 +81,34 @@ func TestChannelServicePollAuthMarksBound(t *testing.T) {
 	if progress.Status != string(channel.AuthStatusBound) || progress.BoundIdentity != "alice" {
 		t.Fatalf("progress = %+v", progress)
 	}
-	if !store.boundCalled {
-		t.Fatalf("expected MarkChannelBindingBound to be called")
+	if progress.Metadata["qrcode"] == "" || progress.Metadata["raw_qr"] == "" {
+		t.Fatalf("metadata 未展开二维码字段: %+v", progress.Metadata)
 	}
-}
-
-func TestChannelServicePollAuthFillsIdentityFromResolver(t *testing.T) {
-	// Sprint 0 实测：bound 时 stdout 不携带 wxid；service 必须经 resolver 从 plugin state 补 userId。
-	store := newChannelStub(t)
-	registry := channel.NewRegistry()
-	registry.MustRegister(&fakeAdapter{
-		progress: channel.AuthProgress{
-			Status:        channel.AuthStatusBound,
-			BoundIdentity: "", // 模拟 stdout 不带账号
-			UpdatedAt:     time.Now(),
-		},
-	})
-	svc := NewChannelService(store, registry)
-	resolver := &fakeBindingResolver{identity: "o9cq800x@im.wechat"}
-	svc.SetWeChatBindingResolver(resolver)
-
-	progress, err := svc.PollAuth(context.Background(), platformAdmin(), testChannelAppID, domain.ChannelTypeWeChat)
-	if err != nil {
-		t.Fatalf("PollAuth err=%v", err)
-	}
-	if progress.BoundIdentity != "o9cq800x@im.wechat" {
-		t.Fatalf("BoundIdentity = %q，应被 resolver 覆盖", progress.BoundIdentity)
-	}
-	if !store.boundCalled || store.binding.BoundIdentity.String != "o9cq800x@im.wechat" {
-		t.Fatalf("DB 中 bound_identity = %q", store.binding.BoundIdentity.String)
-	}
-	if resolver.calls != 1 {
-		t.Fatalf("resolver 调用次数 = %d", resolver.calls)
-	}
-}
-
-func TestChannelServicePollAuthIgnoresResolverError(t *testing.T) {
-	// resolver 失败时 BoundIdentity 留空，仍 mark bound（plugin 可能稍后才写文件，等下次 poll 重试）。
-	store := newChannelStub(t)
-	registry := channel.NewRegistry()
-	registry.MustRegister(&fakeAdapter{
-		progress: channel.AuthProgress{
-			Status:    channel.AuthStatusBound,
-			UpdatedAt: time.Now(),
-		},
-	})
-	svc := NewChannelService(store, registry)
-	svc.SetWeChatBindingResolver(&fakeBindingResolver{err: channel.ErrIdentityUnavailable})
-
-	progress, err := svc.PollAuth(context.Background(), platformAdmin(), testChannelAppID, domain.ChannelTypeWeChat)
-	if err != nil {
-		t.Fatalf("err=%v", err)
-	}
-	if progress.BoundIdentity != "" {
-		t.Fatalf("resolver 失败时 BoundIdentity 应留空，got %q", progress.BoundIdentity)
-	}
-	if !store.boundCalled {
-		t.Fatalf("仍应 mark bound，等下次 poll 重试")
-	}
-}
-
-type fakeBindingResolver struct {
-	identity string
-	err      error
-	calls    int
-}
-
-func (f *fakeBindingResolver) ResolveWeChatBoundIdentity(_ context.Context, _, _ string) (string, error) {
-	f.calls++
-	if f.err != nil {
-		return "", f.err
-	}
-	return f.identity, nil
 }
 
 func TestChannelServicePollAuthPushesAppToRunningOnBound(t *testing.T) {
-	// Sprint 2 spec §3 退出标准：bound 时 binding_waiting 应自动推进到 running。
+	// 状态推进由 channel_check_binding worker 负责，PollAuth 只读 DB。
 	store := newChannelStub(t)
-	store.app.Status = domain.AppStatusBindingWaiting
+	store.binding.Status = domain.ChannelStatusBound
 	registry := channel.NewRegistry()
-	registry.MustRegister(&fakeAdapter{
-		progress: channel.AuthProgress{
-			Status:        channel.AuthStatusBound,
-			BoundIdentity: "alice@wechat",
-			UpdatedAt:     time.Now(),
-		},
-	})
+	registry.MustRegister(&fakeAdapter{})
 	svc := NewChannelService(store, registry)
 
 	if _, err := svc.PollAuth(context.Background(), platformAdmin(), testChannelAppID, domain.ChannelTypeWeChat); err != nil {
 		t.Fatalf("PollAuth err = %v", err)
 	}
-	if !store.boundCalled {
-		t.Fatalf("MarkChannelBindingBound 未被调")
-	}
-	if !store.appStatusSet {
-		t.Fatalf("SetAppStatus 应被调推 app 到 running")
-	}
-	if store.lastAppStatus != domain.AppStatusRunning {
-		t.Fatalf("lastAppStatus = %q, want running", store.lastAppStatus)
+	if store.appStatusSet || store.boundCalled {
+		t.Fatalf("PollAuth 不应写 binding/app 状态")
 	}
 }
 
 func TestChannelServicePollAuthDoesNotOverrideRunningStatus(t *testing.T) {
 	// 已经 running 的应用再次 PollAuth bound 时不应再写一次 SetAppStatus。
 	store := newChannelStub(t)
+	store.binding.Status = domain.ChannelStatusBound
 	store.app.Status = domain.AppStatusRunning
 	registry := channel.NewRegistry()
-	registry.MustRegister(&fakeAdapter{
-		progress: channel.AuthProgress{Status: channel.AuthStatusBound, UpdatedAt: time.Now()},
-	})
+	registry.MustRegister(&fakeAdapter{})
 	svc := NewChannelService(store, registry)
 
 	if _, err := svc.PollAuth(context.Background(), platformAdmin(), testChannelAppID, domain.ChannelTypeWeChat); err != nil {
@@ -204,11 +122,10 @@ func TestChannelServicePollAuthDoesNotOverrideRunningStatus(t *testing.T) {
 func TestChannelServicePollAuthDoesNotPushOnNonBindingWaiting(t *testing.T) {
 	// stopped / error 状态时 bound 也不该自动推到 running——避免覆盖运维侧停机决策。
 	store := newChannelStub(t)
+	store.binding.Status = domain.ChannelStatusBound
 	store.app.Status = domain.AppStatusStopped
 	registry := channel.NewRegistry()
-	registry.MustRegister(&fakeAdapter{
-		progress: channel.AuthProgress{Status: channel.AuthStatusBound, UpdatedAt: time.Now()},
-	})
+	registry.MustRegister(&fakeAdapter{})
 	svc := NewChannelService(store, registry)
 
 	if _, err := svc.PollAuth(context.Background(), platformAdmin(), testChannelAppID, domain.ChannelTypeWeChat); err != nil {
@@ -251,7 +168,7 @@ type channelStub struct {
 	statusUpdated bool
 	lastStatus    string
 	boundCalled   bool
-	// Sprint 2 follow-up：bound 后会调 SetAppStatus 把 binding_waiting → running。
+	jobs          []sqlc.Job
 	appStatusSet  bool
 	lastAppStatus string
 	appStatusErr  error
@@ -318,4 +235,17 @@ func (s *channelStub) MarkChannelBindingBound(_ context.Context, arg sqlc.MarkCh
 	s.binding.BoundIdentity = arg.BoundIdentity
 	s.binding.ChannelName = arg.ChannelName
 	return s.binding, nil
+}
+
+func (s *channelStub) CreateJob(_ context.Context, arg sqlc.CreateJobParams) (sqlc.Job, error) {
+	job := sqlc.Job{
+		ID:          mustUUID(s.t, "00000000-0000-0000-0000-000000000d02"),
+		Type:        arg.Type,
+		Status:      domain.JobStatusPending,
+		RunAfter:    arg.RunAfter,
+		MaxAttempts: arg.MaxAttempts,
+		PayloadJson: arg.PayloadJson,
+	}
+	s.jobs = append(s.jobs, job)
+	return job, nil
 }

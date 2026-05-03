@@ -190,3 +190,28 @@ WaitForOpenClawHealthy 配置 `startWait=8s + step=4s × 10`，命中第 3 次 p
 - Prometheus metrics 与告警接入
 - 集成测试套件扩展（refresh_token 生命周期、newapi httptest record/replay）
 - platform_admin 跨组织视图（query 参数或下拉切换）
+
+## v1.0 RC Chunk 2：渠道登录 worker 异步化
+
+执行时间：2026-05-03 23:22 CST。
+
+### 自动化验证
+
+| 命令 | 结果 | 备注 |
+|---|---|---|
+| `go test ./... -count=1` | ✅ | 覆盖新增 channel_start_login / channel_check_binding worker handler 与 ChannelService 异步入队逻辑。 |
+| `cd web && npm run typecheck` | ✅ | 渠道页从 progress metadata 渲染 challenge 的类型检查通过。 |
+| `cd web && npm test -- --run` | ✅ | 现有前端单测 8/8 通过。 |
+| `cd web && npm run build` | ✅ | Vite production build 通过。 |
+
+### 浏览器验证（chrome-devtools MCP）
+
+| 步骤 | 结果 | 备注 |
+|---|---|---|
+| 打开 `/apps/542cabf4-eec5-4333-ab64-436b9ffea3b5/channels` | ✅ | 渠道页渲染，初始状态为 `unbound`。 |
+| 点击“发起登录” | ✅ | POST 成功后页面进入 `pending_auth`，显示“正在生成登录二维码…”。 |
+| worker 处理 `channel_start_login` | ✅ failed | job 被 worker 实际消费并把 binding 写成 `failed`，说明 server registry 与队列通知链路已接通。失败原因为测试数据绑定旧 runtime endpoint：`lookup 6ffbbc520ecc on 127.0.0.11:53: server misbehaving`。 |
+| failed 状态 UI | ✅ | 页面只展示最近错误，不再继续显示等待二维码。 |
+| console 检查 | ✅ | 仅有既有 `favicon.ico` 404；未发现本次渠道页 JS error。 |
+
+真实微信扫码未执行：当前本地测试应用缺少可用 OpenClaw 运行容器 / runtime endpoint，尚未生成二维码。后续具备真实 runtime container 后，需要继续验证扫码 bound 后 worker 写入 `bound_identity` 并把 app 从 `binding_waiting` 推进到 `running`。

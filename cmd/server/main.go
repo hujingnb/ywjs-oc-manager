@@ -18,6 +18,7 @@ import (
 	"oc-manager/internal/api"
 	"oc-manager/internal/auth"
 	"oc-manager/internal/config"
+	"oc-manager/internal/domain"
 	"oc-manager/internal/files"
 	"oc-manager/internal/integrations/agent"
 	"oc-manager/internal/integrations/channel"
@@ -136,11 +137,10 @@ func runManager(ctx context.Context, cfg config.Config, logOut io.Writer) error 
 	runtimeOpService.SetInspector(newRuntimeInspectorWrapper(runtimeAdapter))
 
 	channelRegistry := channel.NewRegistry()
-	channelService := service.NewChannelService(dbStore.Queries, channelRegistry)
+	channelService := service.NewChannelService(dbStore.Queries, channelRegistry, redisQueue)
 	wechatExecutor := channel.NewDockerExecutor(nodeResolver)
 	wechatRunner := channel.NewDockerCommandRunner(wechatExecutor, newAppContainerLookup(dbStore.Queries))
-	// Sprint 2：bound 后从 plugin state 文件读真实 userId 补到 channel_bindings.bound_identity。
-	channelService.SetWeChatBindingResolver(channel.NewDockerBindingResolver(wechatExecutor))
+	wechatResolver := channel.NewDockerBindingResolver(wechatExecutor)
 	if err := channelRegistry.Register(channel.NewWeChatAdapter(wechatRunner)); err != nil {
 		return fmt.Errorf("注册微信渠道失败: %w", err)
 	}
@@ -199,6 +199,12 @@ func runManager(ctx context.Context, cfg config.Config, logOut io.Writer) error 
 	}
 	if err := registry.Register("app_delete", handlers.NewAppDeleteHandler(dbStore.Queries, runtimeAdapter, apiKeyDisabler, nil).Handle); err != nil {
 		return fmt.Errorf("注册 app_delete handler 失败: %w", err)
+	}
+	if err := registry.Register(domain.JobTypeChannelStartLogin, handlers.NewChannelStartLoginHandler(dbStore.Queries, channelRegistry).Handle); err != nil {
+		return fmt.Errorf("注册 channel_start_login handler 失败: %w", err)
+	}
+	if err := registry.Register(domain.JobTypeChannelCheckBinding, handlers.NewChannelCheckBindingHandler(dbStore.Queries, channelRegistry, wechatResolver).Handle); err != nil {
+		return fmt.Errorf("注册 channel_check_binding handler 失败: %w", err)
 	}
 	knowledgeSyncHandler := handlers.NewKnowledgeSyncHandler(knowledgeMaster, runtimeAdapter)
 	if err := registry.Register("knowledge_sync_node", knowledgeSyncHandler.Handle); err != nil {

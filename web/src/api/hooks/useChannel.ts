@@ -11,6 +11,7 @@ export interface ChannelChallenge {
   code?: string
   expires_at?: string
   hints?: Record<string, string>
+  job_id?: string
 }
 
 export interface ChannelProgress {
