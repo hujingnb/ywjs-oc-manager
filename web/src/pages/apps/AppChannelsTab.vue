@@ -36,6 +36,8 @@ import {
   useBeginChannelAuth,
   useChannelProgressQuery,
   useUnbindChannel,
+  channelChallengeFromProgress,
+  shouldShowChallengePending,
   type ChannelChallenge,
 } from '@/api/hooks/useChannel'
 
@@ -61,23 +63,11 @@ const statusLabel = computed(() => {
 const canUnbind = computed(() => progress.value?.status === 'bound')
 
 const progressChallenge = computed<ChannelChallenge | null>(() => {
-  const metadata = progress.value?.metadata
-  if (!metadata?.qrcode && !metadata?.code) return null
-  return {
-    status: progress.value?.status ?? 'pending_auth',
-    channel_type: channelType.value,
-    challenge_type: metadata.type ?? (metadata.qrcode ? 'qrcode' : 'code'),
-    qrcode: metadata.qrcode,
-    code: metadata.code,
-    expires_at: metadata.expires_at,
-  }
+  return channelChallengeFromProgress(progress.value, channelType.value)
 })
 
 const visibleChallenge = computed(() => progressChallenge.value ?? (challenge.value?.qrcode || challenge.value?.code ? challenge.value : null))
-const isWaitingForChallenge = computed(() => {
-  const status = progress.value?.status
-  return authStarted.value && !visibleChallenge.value && status !== 'bound' && status !== 'failed' && status !== 'expired'
-})
+const isWaitingForChallenge = computed(() => shouldShowChallengePending(authStarted.value, visibleChallenge.value, progress.value?.status))
 
 watch(
   () => progress.value?.status,

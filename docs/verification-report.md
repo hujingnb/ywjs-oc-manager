@@ -201,7 +201,7 @@ WaitForOpenClawHealthy 配置 `startWait=8s + step=4s × 10`，命中第 3 次 p
 |---|---|---|
 | `go test ./... -count=1` | ✅ | 覆盖新增 channel_start_login / channel_check_binding worker handler 与 ChannelService 异步入队逻辑。 |
 | `cd web && npm run typecheck` | ✅ | 渠道页从 progress metadata 渲染 challenge 的类型检查通过。 |
-| `cd web && npm test -- --run` | ✅ | 现有前端单测 8/8 通过。 |
+| `cd web && npm test -- --run` | ✅ | 前端单测 12/12 通过，含渠道 progress metadata 转 challenge 与 terminal 状态等待提示。 |
 | `cd web && npm run build` | ✅ | Vite production build 通过。 |
 
 ### 浏览器验证（chrome-devtools MCP）

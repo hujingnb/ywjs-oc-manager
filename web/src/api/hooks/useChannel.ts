@@ -23,6 +23,23 @@ export interface ChannelProgress {
   metadata?: Record<string, string>
 }
 
+export function channelChallengeFromProgress(progress: ChannelProgress | null | undefined, channelType: string): ChannelChallenge | null {
+  const metadata = progress?.metadata
+  if (!metadata?.qrcode && !metadata?.code) return null
+  return {
+    status: progress?.status ?? 'pending_auth',
+    channel_type: channelType,
+    challenge_type: metadata.type ?? (metadata.qrcode ? 'qrcode' : 'code'),
+    qrcode: metadata.qrcode,
+    code: metadata.code,
+    expires_at: metadata.expires_at,
+  }
+}
+
+export function shouldShowChallengePending(authStarted: boolean, visibleChallenge: ChannelChallenge | null, status?: string) {
+  return authStarted && !visibleChallenge && status !== 'bound' && status !== 'failed' && status !== 'expired'
+}
+
 const progressKey = (appId: string | undefined, channelType: string | undefined) =>
   ['channel-progress', appId, channelType] as const
 
