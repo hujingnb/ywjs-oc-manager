@@ -37,9 +37,18 @@ type APIKeyDisabler interface {
 }
 
 // AppDeleteFileOps 抽象 app_delete 需要的 agent 文件 API 子集。
-// 仅 Delete 一项是必需；归档由后续 task 接入 ArchiveDirectory + 写归档目录。
+//
+// Sprint 2 起优先调 ArchiveApp 把节点上 apps/<id>/ 整目录 mv 到 archived/，
+// 不再粗暴删除。manager 端调用方通过类型断言探测 ArchiveApp 是否实现，
+// 未实现的旧实现仍走 DeleteAppPath 兼容路径。
 type AppDeleteFileOps interface {
 	DeleteAppPath(ctx context.Context, nodeID, appID string) error
+}
+
+// AppArchiver 是 AppDeleteFileOps 的扩展：实现该接口的 fileOps 会优先走 ArchiveApp。
+// AgentBackedAdapter 已实现此接口（Sprint 1 加的 ArchiveApp 方法）。
+type AppArchiver interface {
+	ArchiveApp(ctx context.Context, nodeID, appID string) error
 }
 
 // payload 描述四个 handler 共享的输入。
@@ -258,7 +267,13 @@ func (h *AppDeleteHandler) Handle(ctx context.Context, job sqlc.Job) error {
 	}
 
 	if h.fileOps != nil && nodeID != "" {
-		if err := h.fileOps.DeleteAppPath(ctx, nodeID, payload.AppID); err != nil {
+		// Sprint 2：fileOps 实现了 AppArchiver 时优先归档（保留节点目录用于审计 / 误删恢复），
+		// 否则回退到原 DeleteAppPath 直接删除。归档目录由 agent 周期性 cleanup-archives 清理。
+		if archiver, ok := h.fileOps.(AppArchiver); ok {
+			if err := archiver.ArchiveApp(ctx, nodeID, payload.AppID); err != nil {
+				return fmt.Errorf("归档应用工作目录失败: %w", err)
+			}
+		} else if err := h.fileOps.DeleteAppPath(ctx, nodeID, payload.AppID); err != nil {
 			return fmt.Errorf("清理应用工作目录失败: %w", err)
 		}
 	}
