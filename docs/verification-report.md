@@ -1,7 +1,64 @@
 # OpenClaw Manager 端到端验证报告
 
-> 最新更新：Phase A + B + C 全部 sub-phase 完成 + 端到端 smoke 跑通至业务事务流。  
+> 最新更新：Sprint 1+2 全栈 smoke 跑通到 binding_waiting + healthy 容器（2026-05-03）。
+> 在此基础上 Sprint 0 OpenClaw 集成契约、Sprint 1 agent 文件 API 全套、
+> Sprint 2 plugin state userId / QR PNG / workspace scope / app_delete archive /
+> WaitForOpenClawHealthy / status running 联动均已合入主分支。
 > 起始基线：commit `c7f46a5`；当前分支 `feat/phase-a-container-channel-loop`。
+
+## Sprint 1+2 全栈 smoke（2026-05-03，approach C）
+
+承接 Sprint 0 真扫码 POC + Sprint 1+2 主线代码合入后做的真容器端到端验证。
+
+### 退出标准回归（Sprint 1 plan T16）
+
+| spec §3 Sprint 1 退出标准 | 实测结果 |
+|---|---|
+| onboard → `apps.status=binding_waiting` | ✅ 实测 ~45 秒（22:24:40 → 22:25:35） |
+| 节点上 `apps/{id}/{knowledge,workspace,state,logs}` 4 个子目录就位 | ✅（agent InitAppDirs） |
+| 节点 `docker ps -f name=ocm-` 看到容器 | ✅ `ocm-542cabf4-... Up 5 seconds (healthy)` |
+| 容器 5 个 bind mount 全挂载 | ✅ `/workspace` `/knowledge/{org,app}` `/state` `/logs` |
+| 容器 9 个环境变量正确 | ✅ `OPENAI_API_KEY` / `OPENAI_BASE_URL` / `OPENCLAW_DISABLE_BONJOUR=1` / `OPENCLAW_SYSTEM_PROMPT` 三层 prompt |
+| `WaitForOpenClawHealthy` 命中 | ✅ 容器 `(healthy)` + `curl /healthz` 返回 `{"ok":true,"status":"live"}` |
+| 跨机演练 | ⏸ 单机 docker compose 已验证；多机演练留 Sprint 5 |
+
+### Smoke 中暴露并修复的 3 类运行时错误（commit `1cde071`）
+
+1. **manager-api 容器缺 docker CLI**：imageDistribution 走 LocalDockerCLIProvider，
+   base 镜像 `golang:1.25-bookworm` 不含 docker。修法：docker-compose.yml manager-api
+   command 启动时 `apt install -y docker.io`，并 mount `/var/run/docker.sock`。
+2. **Go interface nil 陷阱导致 worker panic**：`var newapiClient *newapi.Client`
+   在 `cfg.NewAPI.BaseURL` 为空时保持 nil，把 nil 传给 `NewAPIClient` interface 参数
+   会变成"接口非 nil 但底层指针 nil"。修法：用 `handlers.NewAPIClient` /
+   `handlers.APIKeyDisabler` interface 类型变量，仅在真客户端创建时赋值。
+3. **worker panic 没栈难诊断**：`safeRecoverTick` 只 fmt.Errorf 没记 stack。
+   修法：err 加 `runtime/debug.Stack()` 输出。
+
+### Smoke 中暴露的 deployment 限制（留 Sprint 5 hardening）
+
+1. **agent 自签证书 SAN 不含 docker compose 服务名 / 容器 IP**：agent 生成的 cert 只
+   含 `localhost` + 容器 hostname + `127.0.0.1`，manager-api 容器从 `oc-runtime-agent:7001`
+   走 TLS 失败。绕过：register 时用容器 hostname。
+2. **agent state cert 持久化导致 hostname 变更后复用旧证书**：容器重建 hostname 变了
+   但证书没重生。绕过：手工删 `agent-tls*` 文件触发重生成。
+
+### 重要时序实测（Sprint 2 commit `5c9530d` `WaitForOpenClawHealthy` 验证）
+
+单容器实测：docker run → `/healthz` 200 = **15 秒**。
+WaitForOpenClawHealthy 配置 `startWait=8s + step=4s × 10`，命中第 3 次 probe（+16s），
+对实测 15s healthy 留 29s buffer。
+
+## 自动化检查（合入 Sprint 0/1/2 后回归）
+
+| 命令 | 结果 | 备注 |
+|---|---|---|
+| `go test ./... -count=1` | ✅ 通过 | 20 个 Go 包，含 Sprint 0/1/2 新增测试 |
+| `go vet ./...` | ✅ 通过 | 全包零警告 |
+| `go build ./...` | ✅ 通过 | 全部 binary 干净编译 |
+| `npm run typecheck`（web/） | ✅ 通过 | vue-tsc 无报错（含 qrcode 依赖） |
+| `npm test -- --run`（web/） | ✅ 通过 | vitest 全绿 |
+
+## 历史 Phase A+B+C smoke（2026-04-30，approach B）
 
 ## 自动化检查
 
