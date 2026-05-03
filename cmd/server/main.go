@@ -152,9 +152,13 @@ func runManager(ctx context.Context, cfg config.Config, logOut io.Writer) error 
 	}
 
 	registry := handlers.NewRegistry()
+	// runtimeAdapter 同时实现 AgentDirInitializer / ContainerCreator / ContainerLifecycle
+	// 三个接口（前者经 InitAppDirs 调用 agent file API，后两者经 docker proxy）。
 	appInitHandler := handlers.NewAppInitializeHandler(
 		dbStore.Queries,
 		imageDistribution,
+		appDirInitializerAdapter{adapter: runtimeAdapter},
+		runtimeAdapter,
 		runtimeAdapter,
 		newapiClient,
 		handlers.AppInitializeConfig{

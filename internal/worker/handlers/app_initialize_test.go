@@ -24,6 +24,7 @@ const (
 func TestAppInitializeHandlesHappyPath(t *testing.T) {
 	store := newAppInitStub(t)
 	images := &fakeImages{}
+	dirs := &fakeDirs{}
 	containers := &fakeContainers{result: runtimepkg.ContainerInfo{ID: "ctr-1", Name: "ocm-" + testAppID, Status: "created"}}
 	client := &fakeNewAPI{result: newapi.APIKey{ID: 99, Key: "sk-test"}}
 
@@ -36,7 +37,7 @@ func TestAppInitializeHandlesHappyPath(t *testing.T) {
 		SystemPromptTemplate: "工作目录:{{workspace_dir}} 组织:{{knowledge_org_dir}} 应用:{{knowledge_app_dir}}",
 		Cipher:               cipher,
 	}
-	handler := NewAppInitializeHandler(store, images, containers, client, cfg)
+	handler := NewAppInitializeHandler(store, images, dirs, containers, containers, client, cfg)
 
 	if err := handler.Handle(context.Background(), buildJob(t, testAppID, "node-1")); err != nil {
 		t.Fatalf("Handle err = %v", err)
@@ -75,15 +76,28 @@ func TestAppInitializeHandlesHappyPath(t *testing.T) {
 	if containers.lastSpec.Name != "ocm-"+testAppID {
 		t.Fatalf("Name = %q", containers.lastSpec.Name)
 	}
-	if containers.lastSpec.Env["OPENCLAW_API_KEY"] != "sk-test" {
-		t.Fatalf("OPENCLAW_API_KEY env = %q, want sk-test（容器内必须是明文）", containers.lastSpec.Env["OPENCLAW_API_KEY"])
+	// Sprint 0 契约：上游 OpenClaw 内置 openai SDK 认 OPENAI_API_KEY，不是 OPENCLAW_API_KEY
+	if containers.lastSpec.Env["OPENAI_API_KEY"] != "sk-test" {
+		t.Fatalf("OPENAI_API_KEY env = %q, want sk-test", containers.lastSpec.Env["OPENAI_API_KEY"])
 	}
 	if containers.lastSpec.Env["OPENCLAW_WORKSPACE_DIR"] != "/workspace" {
 		t.Fatalf("OPENCLAW_WORKSPACE_DIR env = %q", containers.lastSpec.Env["OPENCLAW_WORKSPACE_DIR"])
 	}
+	if containers.lastSpec.Env["OPENCLAW_DISABLE_BONJOUR"] != "1" {
+		t.Fatalf("应注入 OPENCLAW_DISABLE_BONJOUR=1，got %q", containers.lastSpec.Env["OPENCLAW_DISABLE_BONJOUR"])
+	}
 	prompt := containers.lastSpec.Env["OPENCLAW_SYSTEM_PROMPT"]
 	if !strings.Contains(prompt, "/workspace") || !strings.Contains(prompt, "/knowledge/org") || !strings.Contains(prompt, "/knowledge/app") {
 		t.Fatalf("system prompt 未展开占位符: %q", prompt)
+	}
+
+	// Sprint 1：InitAppDirs 与 StartContainer 必须被调对参数
+	if dirs.calls != 1 || dirs.lastNode != "node-1" || dirs.lastApp != testAppID {
+		t.Fatalf("InitAppDirs 调用 = %+v", dirs)
+	}
+	if containers.startCalls != 1 || containers.lastStartNode != "node-1" || containers.lastStartID != "ctr-1" {
+		t.Fatalf("StartContainer 调用 = calls=%d node=%s id=%s",
+			containers.startCalls, containers.lastStartNode, containers.lastStartID)
 	}
 }
 
@@ -95,7 +109,7 @@ func TestAppInitializeIsIdempotentForBindingWaiting(t *testing.T) {
 	containers := &fakeContainers{}
 	client := &fakeNewAPI{}
 
-	handler := NewAppInitializeHandler(store, images, containers, client, AppInitializeConfig{})
+	handler := NewAppInitializeHandler(store, images, &fakeDirs{}, containers, containers, client, AppInitializeConfig{})
 	if err := handler.Handle(context.Background(), buildJob(t, testAppID, "node-1")); err != nil {
 		t.Fatalf("Handle err = %v", err)
 	}
@@ -120,7 +134,7 @@ func TestAppInitializeSkipsAPIKeyWhenAlreadyActive(t *testing.T) {
 	client := &fakeNewAPI{}
 	containers := &fakeContainers{result: runtimepkg.ContainerInfo{ID: "c", Name: "n"}}
 
-	handler := NewAppInitializeHandler(store, &fakeImages{}, containers, client, AppInitializeConfig{})
+	handler := NewAppInitializeHandler(store, &fakeImages{}, &fakeDirs{}, containers, containers, client, AppInitializeConfig{})
 	if err := handler.Handle(context.Background(), buildJob(t, testAppID, "")); err != nil {
 		t.Fatalf("Handle err = %v", err)
 	}
@@ -136,7 +150,7 @@ func TestAppInitializePropagatesNewAPIError(t *testing.T) {
 	store := newAppInitStub(t)
 	client := &fakeNewAPI{err: newapi.ErrUpstream}
 
-	handler := NewAppInitializeHandler(store, &fakeImages{}, &fakeContainers{}, client, AppInitializeConfig{})
+	handler := NewAppInitializeHandler(store, &fakeImages{}, &fakeDirs{}, &fakeContainers{}, &fakeContainers{}, client, AppInitializeConfig{})
 	err := handler.Handle(context.Background(), buildJob(t, testAppID, ""))
 	if !errors.Is(err, newapi.ErrUpstream) {
 		t.Fatalf("error = %v, want ErrUpstream", err)
@@ -150,7 +164,7 @@ func TestAppInitializePropagatesContainerError(t *testing.T) {
 	store := newAppInitStub(t)
 	containers := &fakeContainers{err: errors.New("boom")}
 	client := &fakeNewAPI{result: newapi.APIKey{ID: 1, Key: "k"}}
-	handler := NewAppInitializeHandler(store, &fakeImages{}, containers, client, AppInitializeConfig{})
+	handler := NewAppInitializeHandler(store, &fakeImages{}, &fakeDirs{}, containers, containers, client, AppInitializeConfig{})
 	err := handler.Handle(context.Background(), buildJob(t, testAppID, "node-1"))
 	if err == nil || !strings.Contains(err.Error(), "创建容器失败") {
 		t.Fatalf("error = %v, want 创建容器失败", err)
@@ -162,7 +176,7 @@ func TestAppInitializePropagatesContainerError(t *testing.T) {
 
 func TestAppInitializeRejectsInvalidPayload(t *testing.T) {
 	store := newAppInitStub(t)
-	handler := NewAppInitializeHandler(store, &fakeImages{}, &fakeContainers{}, &fakeNewAPI{}, AppInitializeConfig{})
+	handler := NewAppInitializeHandler(store, &fakeImages{}, &fakeDirs{}, &fakeContainers{}, &fakeContainers{}, &fakeNewAPI{}, AppInitializeConfig{})
 
 	job := sqlc.Job{Type: domain.JobTypeAppInitialize, PayloadJson: []byte(`{"runtime_node":"node-1"}`)}
 	if err := handler.Handle(context.Background(), job); err == nil {
@@ -176,7 +190,7 @@ func TestAppInitializeContainerStepSkippedWhenContainerExists(t *testing.T) {
 	containers := &fakeContainers{}
 	client := &fakeNewAPI{result: newapi.APIKey{ID: 1, Key: "k"}}
 
-	handler := NewAppInitializeHandler(store, &fakeImages{}, containers, client, AppInitializeConfig{})
+	handler := NewAppInitializeHandler(store, &fakeImages{}, &fakeDirs{}, containers, containers, client, AppInitializeConfig{})
 	if err := handler.Handle(context.Background(), buildJob(t, testAppID, "node-1")); err != nil {
 		t.Fatalf("Handle err = %v", err)
 	}
@@ -266,12 +280,18 @@ func (f *fakeImages) EnsureRuntimeImage(_ context.Context, nodeID, image string)
 	return nil, nil
 }
 
+// fakeContainers 同时实现 ContainerCreator 与 ContainerLifecycle，
+// 便于测试断言 Sprint 1 新增的 InitAppDirs / StartContainer 调用次序。
 type fakeContainers struct {
-	result   runtimepkg.ContainerInfo
-	err      error
-	calls    int
-	lastNode string
-	lastSpec runtimepkg.ContainerSpec
+	result        runtimepkg.ContainerInfo
+	err           error
+	calls         int
+	lastNode      string
+	lastSpec      runtimepkg.ContainerSpec
+	startCalls    int
+	lastStartNode string
+	lastStartID   string
+	startErr      error
 }
 
 func (f *fakeContainers) CreateContainer(_ context.Context, nodeID string, spec runtimepkg.ContainerSpec) (runtimepkg.ContainerInfo, error) {
@@ -282,6 +302,33 @@ func (f *fakeContainers) CreateContainer(_ context.Context, nodeID string, spec 
 		return runtimepkg.ContainerInfo{}, f.err
 	}
 	return f.result, nil
+}
+
+// StartContainer 让 fakeContainers 同时实现 ContainerLifecycle 接口，
+// 便于测试一并断言 Sprint 1 新增的 start 步骤。
+func (f *fakeContainers) StartContainer(_ context.Context, nodeID, containerID string) error {
+	f.startCalls++
+	f.lastStartNode = nodeID
+	f.lastStartID = containerID
+	if f.startErr != nil {
+		return f.startErr
+	}
+	return nil
+}
+
+// fakeDirs 实现 AgentDirInitializer，用来断言 InitAppDirs 被正确调用。
+type fakeDirs struct {
+	calls    int
+	lastNode string
+	lastApp  string
+	err      error
+}
+
+func (f *fakeDirs) InitAppDirs(_ context.Context, nodeID, appID string) error {
+	f.calls++
+	f.lastNode = nodeID
+	f.lastApp = appID
+	return f.err
 }
 
 type fakeNewAPI struct {

@@ -400,3 +400,16 @@ func newImageDistributorWrapper(svc *service.ImageDistributionService) *imageDis
 func (w *imageDistributorWrapper) EnsureRuntimeImage(ctx context.Context, nodeID, image string) (any, error) {
 	return w.svc.EnsureRuntimeImage(ctx, nodeID, image)
 }
+
+// appDirInitializerAdapter 把 *runtime.AgentBackedAdapter 适配成
+// handlers.AgentDirInitializer，仅暴露 InitAppDirs 一个方法，避免 handler 依赖
+// 整个 adapter 类型导致测试 mock 复杂。生产装配传 runtimeAdapter 即可。
+type appDirInitializerAdapter struct {
+	adapter interface {
+		InitAppDirs(ctx context.Context, nodeID, appID string) error
+	}
+}
+
+func (a appDirInitializerAdapter) InitAppDirs(ctx context.Context, nodeID, appID string) error {
+	return a.adapter.InitAppDirs(ctx, nodeID, appID)
+}

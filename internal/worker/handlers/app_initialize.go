@@ -41,6 +41,20 @@ type ContainerCreator interface {
 	CreateContainer(ctx context.Context, nodeID string, spec runtimepkg.ContainerSpec) (runtimepkg.ContainerInfo, error)
 }
 
+// AgentDirInitializer 抽象在节点 agent 上创建应用目录的能力。
+// 容器 bind mount 前必须先在节点 agent 把 apps/<id>/{knowledge,workspace,state,logs}
+// 4 个目录建好，否则 docker bind mount 会失败或得到 root 拥有的目录。
+type AgentDirInitializer interface {
+	InitAppDirs(ctx context.Context, nodeID, appID string) error
+}
+
+// ContainerStarter 抽象创建后启动容器的能力（minimal 接口）。
+// 与 app_runtime_ops.go 的 ContainerLifecycle 不重叠：那个接口要求 Start/Stop/Restart/Remove
+// 四个方法，初始化阶段只需要 Start，因此独立小接口便于测试 mock。
+type ContainerStarter interface {
+	StartContainer(ctx context.Context, nodeID, containerID string) error
+}
+
 // NewAPIClient 是 worker 与 new-api 交互的最小集合。
 type NewAPIClient interface {
 	CreateAPIKey(ctx context.Context, input newapi.CreateAPIKeyInput) (newapi.APIKey, error)
@@ -79,27 +93,37 @@ const (
 //  1. 加载 app/org/owner/runtime_node 上下文；
 //  2. 幂等：状态 ∈ {running, binding_waiting} 直接返回成功；
 //  3. 调 ImageDistributor 把 OpenClaw runtime 镜像同步到目标节点；
-//  4. 渲染 prompt（SystemPromptTemplate 展开 + Render 三层拼接）；
-//  5. api_key 不 active 时调 new-api 创建并 cipher.Encrypt 写库；
-//  6. container_id 为空时调 ContainerCreator.CreateContainer，把 ID/Name 写库；
-//  7. 推 status=binding_waiting，由 channel 流程接管后续。
+//  4. 调 AgentDirInitializer 在节点上准备 apps/<id>/ 4 个子目录；
+//  5. 渲染 prompt（SystemPromptTemplate 展开 + Render 三层拼接）；
+//  6. api_key 不 active 时调 new-api 创建并 cipher.Encrypt 写库；
+//  7. container_id 为空时调 ContainerCreator.CreateContainer，把 ID/Name 写库；
+//  8. 调 ContainerLifecycle.StartContainer 启动容器；
+//  9. 推 status=binding_waiting，由 channel 流程接管后续。
 //
 // 任意一步失败立即冒泡，由 worker 重试或入 failed；状态机字段只在显式步骤里单独写。
+//
+// 各依赖均可为 nil 实现降级：
+//   - containers / starter / dirs nil 时该步骤被跳过，方便在最小装配下走通
+//     api_key + 状态推进路径；生产装配必须全部非 nil
 type AppInitializeHandler struct {
 	store      AppInitializeStore
 	images     ImageDistributor
+	dirs       AgentDirInitializer
 	containers ContainerCreator
+	starter    ContainerStarter
 	newapi     NewAPIClient
 	cfg        AppInitializeConfig
 }
 
-// NewAppInitializeHandler 创建 handler。containers 可传 nil，
-// 此时 handler 跳过容器创建步骤（仅初始化 api_key 与状态推进），
-// 便于在 docker proxy 装配未就绪时仍能保留旧行为兜底。
+// NewAppInitializeHandler 创建 handler。dirs / containers / starter 可传 nil，
+// 此时 handler 跳过对应步骤（仅初始化 api_key 与状态推进），
+// 便于在 docker proxy / agent 装配未就绪时仍能保留旧行为兜底。
 func NewAppInitializeHandler(
 	store AppInitializeStore,
 	images ImageDistributor,
+	dirs AgentDirInitializer,
 	containers ContainerCreator,
+	starter ContainerStarter,
 	client NewAPIClient,
 	cfg AppInitializeConfig,
 ) *AppInitializeHandler {
@@ -109,7 +133,9 @@ func NewAppInitializeHandler(
 	return &AppInitializeHandler{
 		store:      store,
 		images:     images,
+		dirs:       dirs,
 		containers: containers,
+		starter:    starter,
 		newapi:     client,
 		cfg:        cfg,
 	}
@@ -151,6 +177,14 @@ func (h *AppInitializeHandler) Handle(ctx context.Context, job sqlc.Job) error {
 	if h.images != nil && payload.RuntimeNodeID != "" {
 		if _, err := h.images.EnsureRuntimeImage(ctx, payload.RuntimeNodeID, h.cfg.RuntimeImage); err != nil {
 			return fmt.Errorf("分发 OpenClaw 镜像失败: %w", err)
+		}
+	}
+
+	// 容器创建前先让节点 agent 准备好 apps/<id>/{knowledge,workspace,state,logs} 4 个目录，
+	// 否则 docker bind mount 失败或得到 root 拥有的空目录。InitAppDirs 幂等。
+	if h.dirs != nil && payload.RuntimeNodeID != "" {
+		if err := h.dirs.InitAppDirs(ctx, payload.RuntimeNodeID, payload.AppID); err != nil {
+			return fmt.Errorf("初始化节点应用目录失败: %w", err)
 		}
 	}
 
@@ -197,6 +231,13 @@ func (h *AppInitializeHandler) Handle(ctx context.Context, job sqlc.Job) error {
 			ContainerName: pgtype.Text{String: info.Name, Valid: info.Name != ""},
 		}); err != nil {
 			return fmt.Errorf("写入 container_id 失败: %w", err)
+		}
+		// 立刻启动容器；OpenClaw gateway 启动需 ~10s 加载 plugin，状态机后续在
+		// channel 流程里通过 health 探针确认 ready，这里只发出 start 信号。
+		if h.starter != nil && info.ID != "" {
+			if err := h.starter.StartContainer(ctx, payload.RuntimeNodeID, info.ID); err != nil {
+				return fmt.Errorf("启动容器失败: %w", err)
+			}
 		}
 	}
 
@@ -294,12 +335,16 @@ func buildContainerSpec(args buildSpecArgs) runtimepkg.ContainerSpec {
 		Name:  "ocm-" + args.AppID,
 		Image: args.RuntimeImage,
 		Env: map[string]string{
-			"OPENCLAW_API_BASE":           args.NewAPIBaseURL,
-			"OPENCLAW_API_KEY":            args.APIKey,
-			"OPENCLAW_SYSTEM_PROMPT":      args.SystemPrompt,
-			"OPENCLAW_WORKSPACE_DIR":      containerWorkspaceDir,
-			"OPENCLAW_KNOWLEDGE_ORG_DIR":  containerKnowledgeOrgDir,
-			"OPENCLAW_KNOWLEDGE_APP_DIR":  containerKnowledgeAppDir,
+			// Sprint 0 实测：上游 OpenClaw 内置 openai@^6.x SDK，识别标准
+			// OPENAI_API_KEY / OPENAI_BASE_URL 环境变量；不是 OPENCLAW_*
+			"OPENAI_API_KEY":             args.APIKey,
+			"OPENAI_BASE_URL":            args.NewAPIBaseURL,
+			"OPENCLAW_SYSTEM_PROMPT":     args.SystemPrompt,
+			"OPENCLAW_WORKSPACE_DIR":     containerWorkspaceDir,
+			"OPENCLAW_KNOWLEDGE_ORG_DIR": containerKnowledgeOrgDir,
+			"OPENCLAW_KNOWLEDGE_APP_DIR": containerKnowledgeAppDir,
+			// Sprint 0 实测：上游 docs/install/docker.md 推荐容器场景禁 mDNS 广播
+			"OPENCLAW_DISABLE_BONJOUR": "1",
 		},
 		Volumes: []runtimepkg.VolumeMount{
 			{HostPath: path.Join(appDir, "workspace"), ContainerPath: containerWorkspaceDir},
