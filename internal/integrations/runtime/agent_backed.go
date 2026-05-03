@@ -221,6 +221,55 @@ func (a *AgentBackedAdapter) InitAppDirs(ctx context.Context, nodeID, appID stri
 	return cli.InitAppDirs(ctx, appID)
 }
 
+// ListWorkspace 列举应用 workspace 下的内容。
+func (a *AgentBackedAdapter) ListWorkspace(ctx context.Context, nodeID, appID, relPath string) (WorkspaceListing, error) {
+	cli, err := a.resolveFile(ctx, nodeID)
+	if err != nil {
+		return WorkspaceListing{}, err
+	}
+	raw, err := cli.ListWorkspace(ctx, appID, relPath)
+	if err != nil {
+		return WorkspaceListing{}, err
+	}
+	out := WorkspaceListing{Path: raw.Path, Entries: make([]WorkspaceEntry, 0, len(raw.Entries))}
+	for _, e := range raw.Entries {
+		out.Entries = append(out.Entries, WorkspaceEntry{
+			Name:       e.Name,
+			Type:       e.Type,
+			Size:       e.Size,
+			ModifiedAt: e.ModifiedAt,
+		})
+	}
+	return out, nil
+}
+
+// DownloadWorkspaceFile 流式下载应用 workspace 下的单文件。调用方负责 Close。
+func (a *AgentBackedAdapter) DownloadWorkspaceFile(ctx context.Context, nodeID, appID, relPath string) (io.ReadCloser, error) {
+	cli, err := a.resolveFile(ctx, nodeID)
+	if err != nil {
+		return nil, err
+	}
+	return cli.DownloadWorkspaceFile(ctx, appID, relPath)
+}
+
+// StreamWorkspaceArchive 把应用 workspace 下的指定目录流式 zip 写到 w。
+func (a *AgentBackedAdapter) StreamWorkspaceArchive(ctx context.Context, nodeID, appID, relPath string, w io.Writer) error {
+	cli, err := a.resolveFile(ctx, nodeID)
+	if err != nil {
+		return err
+	}
+	return cli.StreamWorkspaceArchive(ctx, appID, relPath, w)
+}
+
+// ArchiveApp 让 agent 把节点上 apps/<appID>/ 整目录归档到 archived/<id>-<ts>/。
+func (a *AgentBackedAdapter) ArchiveApp(ctx context.Context, nodeID, appID string) error {
+	cli, err := a.resolveFile(ctx, nodeID)
+	if err != nil {
+		return err
+	}
+	return cli.ArchiveApp(ctx, appID)
+}
+
 // UploadOrgFile 把单文件上传到指定节点的组织级知识库。
 func (a *AgentBackedAdapter) UploadOrgFile(ctx context.Context, nodeID, orgID, relPath string, content io.Reader) error {
 	cli, err := a.resolveFile(ctx, nodeID)
