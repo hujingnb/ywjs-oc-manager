@@ -29,13 +29,26 @@ type ChannelStore interface {
 
 // ChannelService 协调 channel adapter 与 channel_bindings 表。
 type ChannelService struct {
-	store    ChannelStore
-	registry *channel.Registry
+	store          ChannelStore
+	registry       *channel.Registry
+	wechatResolver channel.BindingResolver
 }
 
 // NewChannelService 创建 service。
 func NewChannelService(store ChannelStore, registry *channel.Registry) *ChannelService {
 	return &ChannelService{store: store, registry: registry}
+}
+
+// SetWeChatBindingResolver 注入微信 bound_identity 解析器。
+//
+// Sprint 0 实测：上游 wechat plugin 在 channels login stdout **不输出 wxid/userId**，
+// 真实凭证持久化在容器内 /root/.openclaw/openclaw-weixin/accounts/<name>.json。
+// 因此 PollAuth 拿到 bound 状态后必须再调本 resolver 从 plugin state 读 userId
+// 补到 channel_bindings.bound_identity，否则 manager 永远拿不到真实账号标识。
+//
+// 不注入时 PollAuth 仍能正常工作（status 翻转），只是 BoundIdentity 为空。
+func (s *ChannelService) SetWeChatBindingResolver(r channel.BindingResolver) {
+	s.wechatResolver = r
 }
 
 // ChallengeResult 是 BeginAuth 对外返回的视图。
@@ -152,10 +165,23 @@ func (s *ChannelService) PollAuth(ctx context.Context, principal auth.Principal,
 		return ProgressResult{}, fmt.Errorf("查询渠道进度失败: %w", err)
 	}
 	if progress.Status == channel.AuthStatusBound {
+		// Sprint 0 实测：stdout 不携带 wxid。bound 后必须从 plugin state 文件读 userId。
+		// resolver 未注入或读失败时 BoundIdentity 留空，下次 PollAuth 重试。
+		identity := progress.BoundIdentity
+		if identity == "" && s.wechatResolver != nil && channelType == domain.ChannelTypeWeChat {
+			resolved, rerr := s.wechatResolver.ResolveWeChatBoundIdentity(ctx,
+				uuidToOptionalString(app.RuntimeNodeID),
+				textOrEmpty(app.ContainerID))
+			if rerr == nil {
+				identity = resolved
+				progress.BoundIdentity = resolved
+			}
+			// 不把 resolver 错误推到失败状态：plugin 可能稍后才写文件
+		}
 		if _, err := s.store.MarkChannelBindingBound(ctx, sqlc.MarkChannelBindingBoundParams{
 			AppID:         binding.AppID,
 			ChannelType:   binding.ChannelType,
-			BoundIdentity: pgtype.Text{String: progress.BoundIdentity, Valid: progress.BoundIdentity != ""},
+			BoundIdentity: pgtype.Text{String: identity, Valid: identity != ""},
 			ChannelName:   pgtype.Text{String: progress.ChannelName, Valid: progress.ChannelName != ""},
 		}); err != nil {
 			return ProgressResult{}, fmt.Errorf("标记渠道绑定成功失败: %w", err)

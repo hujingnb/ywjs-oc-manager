@@ -86,6 +86,75 @@ func TestChannelServicePollAuthMarksBound(t *testing.T) {
 	}
 }
 
+func TestChannelServicePollAuthFillsIdentityFromResolver(t *testing.T) {
+	// Sprint 0 实测：bound 时 stdout 不携带 wxid；service 必须经 resolver 从 plugin state 补 userId。
+	store := newChannelStub(t)
+	registry := channel.NewRegistry()
+	registry.MustRegister(&fakeAdapter{
+		progress: channel.AuthProgress{
+			Status:        channel.AuthStatusBound,
+			BoundIdentity: "", // 模拟 stdout 不带账号
+			UpdatedAt:     time.Now(),
+		},
+	})
+	svc := NewChannelService(store, registry)
+	resolver := &fakeBindingResolver{identity: "o9cq800x@im.wechat"}
+	svc.SetWeChatBindingResolver(resolver)
+
+	progress, err := svc.PollAuth(context.Background(), platformAdmin(), testChannelAppID, domain.ChannelTypeWeChat)
+	if err != nil {
+		t.Fatalf("PollAuth err=%v", err)
+	}
+	if progress.BoundIdentity != "o9cq800x@im.wechat" {
+		t.Fatalf("BoundIdentity = %q，应被 resolver 覆盖", progress.BoundIdentity)
+	}
+	if !store.boundCalled || store.binding.BoundIdentity.String != "o9cq800x@im.wechat" {
+		t.Fatalf("DB 中 bound_identity = %q", store.binding.BoundIdentity.String)
+	}
+	if resolver.calls != 1 {
+		t.Fatalf("resolver 调用次数 = %d", resolver.calls)
+	}
+}
+
+func TestChannelServicePollAuthIgnoresResolverError(t *testing.T) {
+	// resolver 失败时 BoundIdentity 留空，仍 mark bound（plugin 可能稍后才写文件，等下次 poll 重试）。
+	store := newChannelStub(t)
+	registry := channel.NewRegistry()
+	registry.MustRegister(&fakeAdapter{
+		progress: channel.AuthProgress{
+			Status:    channel.AuthStatusBound,
+			UpdatedAt: time.Now(),
+		},
+	})
+	svc := NewChannelService(store, registry)
+	svc.SetWeChatBindingResolver(&fakeBindingResolver{err: channel.ErrIdentityUnavailable})
+
+	progress, err := svc.PollAuth(context.Background(), platformAdmin(), testChannelAppID, domain.ChannelTypeWeChat)
+	if err != nil {
+		t.Fatalf("err=%v", err)
+	}
+	if progress.BoundIdentity != "" {
+		t.Fatalf("resolver 失败时 BoundIdentity 应留空，got %q", progress.BoundIdentity)
+	}
+	if !store.boundCalled {
+		t.Fatalf("仍应 mark bound，等下次 poll 重试")
+	}
+}
+
+type fakeBindingResolver struct {
+	identity string
+	err      error
+	calls    int
+}
+
+func (f *fakeBindingResolver) ResolveWeChatBoundIdentity(_ context.Context, _, _ string) (string, error) {
+	f.calls++
+	if f.err != nil {
+		return "", f.err
+	}
+	return f.identity, nil
+}
+
 func TestChannelServiceUnbindUpdatesStatus(t *testing.T) {
 	store := newChannelStub(t)
 	svc := NewChannelService(store, channel.NewRegistry())
