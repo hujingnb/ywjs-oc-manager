@@ -6,6 +6,46 @@
 > WaitForOpenClawHealthy / status running 联动均已合入主分支。
 > 起始基线：commit `c7f46a5`；当前分支 `feat/phase-a-container-channel-loop`。
 
+## v1.0 RC Chunk 1 起始基线（2026-05-03）
+
+承接 `docs/superpowers/plans/2026-05-03-openclaw-manager-v1-rc-implementation-plan.md`
+开始执行端到端业务闭环前的基线验证。
+
+### 自动化检查
+
+| 命令 | 结果 | 备注 |
+|---|---|---|
+| `go test ./... -count=1` | ✅ 通过 | 全包单测通过。 |
+| `go vet ./...` | ✅ 通过 | 全包零警告。 |
+| `go build ./...` | ✅ 通过 | 全部 Go binary 可编译。 |
+| `npm run typecheck`（web/） | ✅ 通过 | `vue-tsc --noEmit` 无报错。 |
+| `npm test -- --run`（web/） | ✅ 通过 | vitest 1 个测试文件 / 8 个用例通过。 |
+| `npm run build`（web/） | ✅ 通过 | 首次失败原因为 `web/dist` 是 root-owned 忽略产物；用 Docker 仅修正 `web/dist` 所有权后重跑通过。 |
+
+### Compose 与迁移
+
+| 步骤 | 结果 | 备注 |
+|---|---|---|
+| `docker compose up -d manager-postgres manager-redis manager-api manager-web oc-runtime-agent` | ✅ 通过 | 服务启动，PostgreSQL / Redis healthy。 |
+| `make migrate-up` | ✅ 通过 | 迁移命令成功退出。 |
+| `curl -fsS http://localhost:8080/healthz` | ✅ 通过 | 返回 `{"status":"ok",...}`。 |
+| `go run ./cmd/seed-admin admin admin123 平台管理员`（compose run） | ✅ 通过 | `admin` 已存在，幂等跳过。 |
+
+### chrome-devtools MCP 页面验证
+
+| 路由 | 结果 | 备注 |
+|---|---|---|
+| `/login` | ✅ | 登录表单渲染，使用 `admin/admin123` 登录成功。 |
+| `/` | ✅ | 平台管理员首页渲染，快捷入口正常。 |
+| `/organizations` | ✅ | 组织列表渲染正常。 |
+| `/runtime-nodes` | ✅ | Runtime Node 列表渲染正常。 |
+| `/members` | ✅ | platform_admin 未关联组织时显示预期提示。 |
+| `/apps` | ✅ | platform_admin 未关联组织时显示预期提示。 |
+| `/knowledge` | ✅ | platform_admin 未关联组织时显示预期提示。 |
+| `/audit-logs` | ✅ | platform_admin 未关联组织时显示预期提示。 |
+
+Console 检查：主路由验证后仅保留 Vite debug 连接信息；`/favicon.ico` 404 为非关键静态资源缺失。
+
 ## Sprint 1+2 全栈 smoke（2026-05-03，approach C）
 
 承接 Sprint 0 真扫码 POC + Sprint 1+2 主线代码合入后做的真容器端到端验证。
