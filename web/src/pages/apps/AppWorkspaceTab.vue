@@ -5,7 +5,9 @@
         <p class="eyebrow">App · Workspace</p>
         <h2>工作目录</h2>
       </div>
-      <a v-if="appId" class="secondary-button" :href="archiveUrl">下载归档</a>
+      <button v-if="appId" class="secondary-button" type="button" :disabled="downloading" @click="downloadArchive">
+        下载归档
+      </button>
     </div>
 
     <p class="state-text">
@@ -32,14 +34,15 @@
           </td>
           <td>{{ entry.is_dir ? '—' : formatSize(entry.size) }}</td>
           <td class="actions-column">
-            <a
+            <button
               v-if="!entry.is_dir && appId"
               class="secondary-button"
-              :href="downloadUrl(entry)"
-              :download="entry.name"
+              type="button"
+              :disabled="downloading"
+              @click="downloadEntry(entry)"
             >
               下载
-            </a>
+            </button>
           </td>
         </tr>
         <tr v-if="!listing?.entries?.length">
@@ -65,11 +68,10 @@ const appId = toRef(props, 'appId')
 const relativePath = ref('')
 const relativeRef = computed(() => relativePath.value)
 const { data: listing, isLoading, error } = useWorkspaceQuery(appId, relativeRef)
-
-const archiveUrl = computed(() => (props.appId ? archiveWorkspace(props.appId, relativePath.value) : '#'))
+const downloading = ref(false)
 
 function enter(entry: WorkspaceEntry) {
-  if (entry.is_dir) relativePath.value = entry.path
+  if (entry.is_dir) relativePath.value = entryRelativePath(entry.path)
 }
 
 function goUp() {
@@ -78,15 +80,39 @@ function goUp() {
   relativePath.value = segments.join('/')
 }
 
-function downloadUrl(entry: WorkspaceEntry): string {
-  if (!props.appId) return '#'
-  return downloadWorkspaceFile(props.appId, entry.path)
+async function downloadEntry(entry: WorkspaceEntry) {
+  if (!props.appId) return
+  downloading.value = true
+  try {
+    await downloadWorkspaceFile(props.appId, entryRelativePath(entry.path), entry.name)
+  } finally {
+    downloading.value = false
+  }
+}
+
+async function downloadArchive() {
+  if (!props.appId) return
+  downloading.value = true
+  try {
+    await archiveWorkspace(props.appId, relativePath.value)
+  } finally {
+    downloading.value = false
+  }
 }
 
 function formatSize(value: number): string {
   if (value < 1024) return `${value} B`
   if (value < 1024 * 1024) return `${(value / 1024).toFixed(1)} KB`
   return `${(value / 1024 / 1024).toFixed(2)} MB`
+}
+
+function entryRelativePath(entryPath: string): string {
+  const root = listing.value?.path
+  if (!root || root === '/') return entryPath.replace(/^\/+/, '')
+  const normalizedRoot = root.replace(/^\/+|\/+$/g, '')
+  const normalizedEntry = entryPath.replace(/^\/+/, '')
+  const prefix = `${normalizedRoot}/`
+  return normalizedEntry.startsWith(prefix) ? normalizedEntry.slice(prefix.length) : normalizedEntry
 }
 </script>
 

@@ -135,6 +135,7 @@ func runManager(ctx context.Context, cfg config.Config, logOut io.Writer) error 
 	imageSync := imagesync.New(imagesync.LocalDockerCLIProvider{}, nodeResolver)
 	runtimeAdapter := runtime.NewAgentBackedAdapter(nodeResolver, nodeResolver, imageSync)
 	runtimeOpService.SetInspector(newRuntimeInspectorWrapper(runtimeAdapter))
+	workspaceService := service.NewWorkspaceService(dbStore.Queries, runtimeAdapter, cfg.App.DataRoot)
 
 	channelRegistry := channel.NewRegistry()
 	channelService := service.NewChannelService(dbStore.Queries, channelRegistry, redisQueue)
@@ -225,6 +226,7 @@ func runManager(ctx context.Context, cfg config.Config, logOut io.Writer) error 
 			RuntimeNodeService:  runtimeNodeService,
 			ChannelService:      channelService,
 			KnowledgeService:    knowledgeService,
+			WorkspaceService:    workspaceService,
 			RuntimeOpService:    runtimeOpService,
 			AppService:          appService,
 			UsageService:        usageService,

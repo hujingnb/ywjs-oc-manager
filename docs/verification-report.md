@@ -238,3 +238,26 @@ WaitForOpenClawHealthy 配置 `startWait=8s + step=4s × 10`，命中第 3 次 p
 | console 检查 | ✅ | 仅有既有 `favicon.ico` 404；未发现应用知识库页面 JS error。 |
 
 备注：后端应用级主副本写入后会派发 `knowledge_sync_node` 到应用所在节点；当前验证环境的 runtime endpoint 不可用，因此只验证了 manager 主副本和前端闭环，节点同步结果留真实 runtime 环境继续验证。
+
+## v1.0 RC Chunk 1：工作目录 API 装配与下载路径修复
+
+执行时间：2026-05-03 23:32 CST。
+
+### 自动化验证
+
+| 命令 | 结果 | 备注 |
+|---|---|---|
+| `go test ./... -count=1` | ✅ | 覆盖 WorkspaceService 路径清洗、下载代理、归档代理与 server wiring。 |
+| `cd web && npm run typecheck` | ✅ | 工作目录 fetch + Blob 下载实现类型检查通过。 |
+| `cd web && npm test -- --run` | ✅ | 前端单测 12/12 通过。 |
+| `cd web && npm run build` | ✅ | Vite production build 通过。 |
+
+### 浏览器验证（chrome-devtools MCP）
+
+| 步骤 | 结果 | 备注 |
+|---|---|---|
+| 打开 `/apps/542cabf4-eec5-4333-ab64-436b9ffea3b5/workspace` | ✅ | 工作目录页渲染，API 路由已从 404 修复为实际进入后端 service。 |
+| 查询 workspace | ⚠️ 500 | 当前测试应用指向旧 runtime endpoint，后端返回“工作目录暂不可用”；这是环境问题，非路由缺失。 |
+| console 检查 | ✅ | 仅有既有 `favicon.ico` 404；未发现工作目录页 JS error。 |
+
+真实文件下载未执行：需要应用容器运行在可达 runtime agent 上。后续真实微信消息生成 `hello.txt` 后继续验证列表、单文件下载和 zip 归档。

@@ -29,16 +29,34 @@ export function useWorkspaceQuery(appId: Ref<string | undefined>, relative: Ref<
   })
 }
 
-// downloadWorkspaceFile 触发浏览器下载工作目录中的文件。
-export function downloadWorkspaceFile(appId: string, targetPath: string): string {
+async function downloadBlob(url: string, fileName: string) {
+  const headers: Record<string, string> = {}
   const token = getStoredAccessToken()
-  const params = new URLSearchParams({ path: targetPath })
-  if (token) params.append('access_token', token)
-  return `/api/v1/apps/${appId}/workspace/file?${params.toString()}`
+  if (token) headers.Authorization = `Bearer ${token}`
+  const response = await fetch(url, { headers })
+  if (!response.ok) {
+    const text = await response.text().catch(() => '')
+    throw new Error(text || '下载失败')
+  }
+  const blob = await response.blob()
+  const objectUrl = URL.createObjectURL(blob)
+  const link = document.createElement('a')
+  link.href = objectUrl
+  link.download = fileName
+  document.body.appendChild(link)
+  link.click()
+  link.remove()
+  URL.revokeObjectURL(objectUrl)
 }
 
-// archiveWorkspace 返回打包下载的 URL。
-export function archiveWorkspace(appId: string, targetPath: string): string {
+// downloadWorkspaceFile 触发浏览器下载工作目录中的文件。
+export function downloadWorkspaceFile(appId: string, targetPath: string, fileName: string): Promise<void> {
   const params = new URLSearchParams({ path: targetPath })
-  return `/api/v1/apps/${appId}/workspace/archive?${params.toString()}`
+  return downloadBlob(`/api/v1/apps/${appId}/workspace/file?${params.toString()}`, fileName)
+}
+
+// archiveWorkspace 下载工作目录 zip 归档。
+export function archiveWorkspace(appId: string, targetPath: string): Promise<void> {
+  const params = new URLSearchParams({ path: targetPath })
+  return downloadBlob(`/api/v1/apps/${appId}/workspace/archive?${params.toString()}`, 'workspace.zip')
 }

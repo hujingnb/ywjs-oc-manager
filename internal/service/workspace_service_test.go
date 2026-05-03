@@ -104,6 +104,21 @@ func TestWorkspaceServiceDownloadDelegatesToAdapter(t *testing.T) {
 	}
 }
 
+func TestWorkspaceServiceRejectsUnsafePaths(t *testing.T) {
+	store := newWorkspaceStub(t)
+	svc := NewWorkspaceService(store, &fakeWorkspaceAdapter{}, "/data")
+
+	for _, target := range []string{"..", "../secret.txt", "/abs.txt", ""} {
+		if _, err := svc.Download(context.Background(), platformAdmin(), testWorkAppID, target); !errors.Is(err, ErrWorkspaceBadPath) {
+			t.Fatalf("Download(%q) error = %v, want ErrWorkspaceBadPath", target, err)
+		}
+	}
+
+	if _, err := svc.List(context.Background(), platformAdmin(), testWorkAppID, "/abs"); !errors.Is(err, ErrWorkspaceBadPath) {
+		t.Fatalf("List absolute error = %v, want ErrWorkspaceBadPath", err)
+	}
+}
+
 func TestWorkspaceServiceListMissingNodeReturnsError(t *testing.T) {
 	store := newWorkspaceStub(t)
 	store.app.RuntimeNodeID = pgtype.UUID{} // 不再设置 valid=true
@@ -157,10 +172,18 @@ func (a *fakeWorkspaceAdapter) EnsureImage(_ context.Context, _, _ string) (imag
 func (a *fakeWorkspaceAdapter) CreateContainer(_ context.Context, _ string, _ runtime.ContainerSpec) (runtime.ContainerInfo, error) {
 	return runtime.ContainerInfo{}, runtime.ErrUnimplemented
 }
-func (a *fakeWorkspaceAdapter) StartContainer(_ context.Context, _, _ string) error   { return runtime.ErrUnimplemented }
-func (a *fakeWorkspaceAdapter) StopContainer(_ context.Context, _, _ string) error    { return runtime.ErrUnimplemented }
-func (a *fakeWorkspaceAdapter) RestartContainer(_ context.Context, _, _ string) error { return runtime.ErrUnimplemented }
-func (a *fakeWorkspaceAdapter) RemoveContainer(_ context.Context, _, _ string) error  { return runtime.ErrUnimplemented }
+func (a *fakeWorkspaceAdapter) StartContainer(_ context.Context, _, _ string) error {
+	return runtime.ErrUnimplemented
+}
+func (a *fakeWorkspaceAdapter) StopContainer(_ context.Context, _, _ string) error {
+	return runtime.ErrUnimplemented
+}
+func (a *fakeWorkspaceAdapter) RestartContainer(_ context.Context, _, _ string) error {
+	return runtime.ErrUnimplemented
+}
+func (a *fakeWorkspaceAdapter) RemoveContainer(_ context.Context, _, _ string) error {
+	return runtime.ErrUnimplemented
+}
 func (a *fakeWorkspaceAdapter) InspectContainer(_ context.Context, _, _ string) (runtime.ContainerInfo, error) {
 	return runtime.ContainerInfo{}, runtime.ErrUnimplemented
 }

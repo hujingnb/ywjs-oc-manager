@@ -117,6 +117,8 @@ func writeWorkspaceError(c *gin.Context, err error) {
 		c.JSON(http.StatusNotFound, gin.H{"error": "应用不存在"})
 	case errors.Is(err, service.ErrWorkspaceMissing):
 		c.JSON(http.StatusServiceUnavailable, gin.H{"error": "应用未关联节点或 adapter 未配置"})
+	case errors.Is(err, service.ErrWorkspaceBadPath):
+		c.JSON(http.StatusBadRequest, gin.H{"error": "非法工作目录路径"})
 	default:
 		c.JSON(http.StatusInternalServerError, gin.H{"error": "工作目录暂不可用"})
 	}

@@ -5,6 +5,8 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"path"
+	"strings"
 
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgtype"
@@ -42,6 +44,7 @@ func NewWorkspaceService(store WorkspaceStore, adapter runtime.Adapter, dataRoot
 var (
 	ErrWorkspaceForbidden = errors.New("无权访问工作目录")
 	ErrWorkspaceMissing   = errors.New("应用未关联节点或 adapter 未配置")
+	ErrWorkspaceBadPath   = errors.New("非法工作目录路径")
 )
 
 // WorkspaceListing 是列表接口的返回值。
@@ -67,11 +70,15 @@ func (s *WorkspaceService) List(ctx context.Context, principal auth.Principal, a
 	if err != nil {
 		return WorkspaceListing{}, err
 	}
+	relPath, err := cleanWorkspaceRelative(relative, true)
+	if err != nil {
+		return WorkspaceListing{}, err
+	}
 	if s.adapter == nil || !app.RuntimeNodeID.Valid {
 		return WorkspaceListing{}, ErrWorkspaceMissing
 	}
 	listing, err := s.adapter.ListWorkspace(ctx,
-		uuidToString(app.RuntimeNodeID), uuidToString(app.ID), relative)
+		uuidToString(app.RuntimeNodeID), uuidToString(app.ID), relPath)
 	if err != nil {
 		return WorkspaceListing{}, fmt.Errorf("查询工作目录失败: %w", err)
 	}
@@ -93,11 +100,15 @@ func (s *WorkspaceService) Download(ctx context.Context, principal auth.Principa
 	if err != nil {
 		return nil, err
 	}
+	relPath, err := cleanWorkspaceRelative(relative, false)
+	if err != nil {
+		return nil, err
+	}
 	if s.adapter == nil || !app.RuntimeNodeID.Valid {
 		return nil, ErrWorkspaceMissing
 	}
 	return s.adapter.DownloadWorkspaceFile(ctx,
-		uuidToString(app.RuntimeNodeID), uuidToString(app.ID), relative)
+		uuidToString(app.RuntimeNodeID), uuidToString(app.ID), relPath)
 }
 
 // Archive 把工作目录打包为 zip 流写到 w。Sprint 2 改用 scope-aware 端点输出 zip
@@ -107,11 +118,15 @@ func (s *WorkspaceService) Archive(ctx context.Context, principal auth.Principal
 	if err != nil {
 		return err
 	}
+	relPath, err := cleanWorkspaceRelative(relative, true)
+	if err != nil {
+		return err
+	}
 	if s.adapter == nil || !app.RuntimeNodeID.Valid {
 		return ErrWorkspaceMissing
 	}
 	return s.adapter.StreamWorkspaceArchive(ctx,
-		uuidToString(app.RuntimeNodeID), uuidToString(app.ID), relative, w)
+		uuidToString(app.RuntimeNodeID), uuidToString(app.ID), relPath, w)
 }
 
 func (s *WorkspaceService) loadAuthorizedApp(ctx context.Context, principal auth.Principal, appID string) (sqlc.App, error) {
@@ -138,6 +153,30 @@ func (s *WorkspaceService) resolvePath(orgID, appID, relative string) string {
 		parts = append(parts, relative)
 	}
 	return joinSlash(parts...)
+}
+
+func cleanWorkspaceRelative(relative string, allowRoot bool) (string, error) {
+	value := strings.TrimSpace(relative)
+	if value == "" || value == "/" {
+		if allowRoot {
+			return "", nil
+		}
+		return "", ErrWorkspaceBadPath
+	}
+	if path.IsAbs(value) {
+		return "", ErrWorkspaceBadPath
+	}
+	cleaned := path.Clean(value)
+	if cleaned == "." {
+		if allowRoot {
+			return "", nil
+		}
+		return "", ErrWorkspaceBadPath
+	}
+	if cleaned == ".." || strings.HasPrefix(cleaned, "../") {
+		return "", ErrWorkspaceBadPath
+	}
+	return cleaned, nil
 }
 
 func joinSlash(parts ...string) string {
