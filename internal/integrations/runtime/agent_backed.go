@@ -6,6 +6,7 @@ import (
 	"io"
 	"sort"
 	"strings"
+	"time"
 
 	dockertypes "github.com/docker/docker/api/types"
 	"github.com/docker/docker/api/types/container"
@@ -14,6 +15,16 @@ import (
 
 	"oc-manager/internal/integrations/agent"
 	"oc-manager/internal/runtime/imagesync"
+)
+
+// timeAfter / contextWithTimeout 是 healthcheck 重试用的小 helper，包级变量便于测试替换。
+var (
+	timeAfter = func(seconds int) <-chan time.Time {
+		return time.After(time.Duration(seconds) * time.Second)
+	}
+	contextWithTimeout = func(parent context.Context, seconds int) (context.Context, context.CancelFunc) {
+		return context.WithTimeout(parent, time.Duration(seconds)*time.Second)
+	}
 )
 
 // AgentResolver 根据 nodeID 取出 manager 需要的 agent 文件 client。
@@ -268,6 +279,77 @@ func (a *AgentBackedAdapter) ArchiveApp(ctx context.Context, nodeID, appID strin
 		return err
 	}
 	return cli.ArchiveApp(ctx, appID)
+}
+
+// WaitForOpenClawHealthy 在 OpenClaw 容器内重试调 curl 直到 /healthz 返回 200。
+//
+// Sprint 0 实测：上游 OpenClaw 启动后约 10~12 秒才完成 plugin 加载并暴露 /healthz；
+// 之前 plugin loading 期间 curl 返回 connection refused 或非 2xx。
+//
+// 重试策略：从 startWaitSeconds 开始等候首次探测，之后按 stepSeconds 递增间隔
+// 直到 totalTimeout 或拿到 0 退出。每次 exec 单独 timeout 5s，避免单次 docker exec 阻塞。
+//
+// 返回 nil 表示 healthy；非 nil 表示在窗口内未达 healthy。该错误不视为致命，
+// 调用方（如 app_initialize handler）可自行决定 retry 或推进到 binding_waiting。
+func (a *AgentBackedAdapter) WaitForOpenClawHealthy(ctx context.Context, nodeID, containerID string) error {
+	const (
+		probeURL          = "http://127.0.0.1:18789/healthz"
+		startWaitSeconds  = 8  // plugin loading 实测 ~11s，先等 8s 再开始探测
+		probeStepSeconds  = 4
+		probeMaxAttempts  = 10 // 8 + 4*9 = 44s 总窗口，覆盖 plugin loading 上限
+		probeExecTimeoutS = 5
+	)
+	cli, err := a.dockerClient(ctx, nodeID)
+	if err != nil {
+		return err
+	}
+
+	// 等候 plugin loading 完成；ctx 取消立刻返回。
+	select {
+	case <-ctx.Done():
+		return ctx.Err()
+	case <-timeAfter(startWaitSeconds):
+	}
+
+	for attempt := 0; attempt < probeMaxAttempts; attempt++ {
+		probeCtx, cancel := contextWithTimeout(ctx, probeExecTimeoutS)
+		exitCode, perr := execCurlExitCode(probeCtx, cli, containerID, probeURL)
+		cancel()
+		if perr == nil && exitCode == 0 {
+			return nil
+		}
+		select {
+		case <-ctx.Done():
+			return ctx.Err()
+		case <-timeAfter(probeStepSeconds):
+		}
+	}
+	return fmt.Errorf("OpenClaw 在 %s 内未通过 healthz 探活", containerID)
+}
+
+// execCurlExitCode 通过 docker SDK exec 在容器内跑 curl，等待退出后返回 exit code。
+// 使用 -fsS（fail on HTTP error，silent，show errors）让非 2xx 响应直接 exit !=0。
+func execCurlExitCode(ctx context.Context, cli *client.Client, containerID, url string) (int, error) {
+	exec, err := cli.ContainerExecCreate(ctx, containerID, container.ExecOptions{
+		Cmd:          []string{"curl", "-fsS", "--max-time", "3", url},
+		AttachStdout: true,
+		AttachStderr: true,
+	})
+	if err != nil {
+		return -1, fmt.Errorf("ContainerExecCreate 失败: %w", err)
+	}
+	attach, err := cli.ContainerExecAttach(ctx, exec.ID, container.ExecStartOptions{})
+	if err != nil {
+		return -1, fmt.Errorf("ContainerExecAttach 失败: %w", err)
+	}
+	defer attach.Close()
+	// 排空 stream 确保命令执行结束。
+	_, _ = io.Copy(io.Discard, attach.Reader)
+	inspect, err := cli.ContainerExecInspect(ctx, exec.ID)
+	if err != nil {
+		return -1, fmt.Errorf("ContainerExecInspect 失败: %w", err)
+	}
+	return inspect.ExitCode, nil
 }
 
 // UploadOrgFile 把单文件上传到指定节点的组织级知识库。

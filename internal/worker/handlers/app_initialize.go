@@ -55,6 +55,14 @@ type ContainerStarter interface {
 	StartContainer(ctx context.Context, nodeID, containerID string) error
 }
 
+// OpenClawHealthChecker 是 ContainerStarter 的扩展：实现该接口的 starter 在容器启动后
+// 等 OpenClaw /healthz 通过才返回。AgentBackedAdapter 已实现此接口（Sprint 2 加的
+// WaitForOpenClawHealthy 方法）。handler 通过类型断言探测，未实现的旧实现仍能跑通——
+// 只是状态机会立即推到 binding_waiting，等 channel 流程时再失败重试。
+type OpenClawHealthChecker interface {
+	WaitForOpenClawHealthy(ctx context.Context, nodeID, containerID string) error
+}
+
 // NewAPIClient 是 worker 与 new-api 交互的最小集合。
 type NewAPIClient interface {
 	CreateAPIKey(ctx context.Context, input newapi.CreateAPIKeyInput) (newapi.APIKey, error)
@@ -232,11 +240,17 @@ func (h *AppInitializeHandler) Handle(ctx context.Context, job sqlc.Job) error {
 		}); err != nil {
 			return fmt.Errorf("写入 container_id 失败: %w", err)
 		}
-		// 立刻启动容器；OpenClaw gateway 启动需 ~10s 加载 plugin，状态机后续在
-		// channel 流程里通过 health 探针确认 ready，这里只发出 start 信号。
+		// 立刻启动容器；OpenClaw gateway 启动需 ~10s 加载 plugin。
 		if h.starter != nil && info.ID != "" {
 			if err := h.starter.StartContainer(ctx, payload.RuntimeNodeID, info.ID); err != nil {
 				return fmt.Errorf("启动容器失败: %w", err)
+			}
+			// Sprint 2：starter 实现 OpenClawHealthChecker 时等 /healthz 通过再推 binding_waiting，
+			// 避免应用过早进入待绑定状态导致后续 channel_start_login 直接撞到 plugin 未就绪。
+			if checker, ok := h.starter.(OpenClawHealthChecker); ok {
+				if err := checker.WaitForOpenClawHealthy(ctx, payload.RuntimeNodeID, info.ID); err != nil {
+					return fmt.Errorf("等待 OpenClaw 健康失败: %w", err)
+				}
 			}
 		}
 	}

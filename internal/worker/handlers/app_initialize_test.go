@@ -101,6 +101,50 @@ func TestAppInitializeHandlesHappyPath(t *testing.T) {
 	}
 }
 
+func TestAppInitializeWaitsForOpenClawHealthyWhenSupported(t *testing.T) {
+	// Sprint 2：starter 同时实现 OpenClawHealthChecker 时 handler 应等 /healthz 通过再推 binding_waiting。
+	store := newAppInitStub(t)
+	images := &fakeImages{}
+	dirs := &fakeDirs{}
+	base := &fakeContainers{result: runtimepkg.ContainerInfo{ID: "ctr-1", Name: "ocm-" + testAppID, Status: "created"}}
+	containers := &healthAwareContainers{fakeContainers: base}
+	client := &fakeNewAPI{result: newapi.APIKey{ID: 99, Key: "sk-test"}}
+
+	cipher, err := auth.NewCipher(make([]byte, 32))
+	if err != nil {
+		t.Fatalf("NewCipher: %v", err)
+	}
+	handler := NewAppInitializeHandler(store, images, dirs, base, containers, client, AppInitializeConfig{
+		RuntimeImage: "openclaw:dev",
+		Cipher:       cipher,
+	})
+	if err := handler.Handle(context.Background(), buildJob(t, testAppID, "node-1")); err != nil {
+		t.Fatalf("Handle err = %v", err)
+	}
+	if base.healthCalls != 1 {
+		t.Fatalf("WaitForOpenClawHealthy 调用 = %d", base.healthCalls)
+	}
+}
+
+func TestAppInitializePropagatesHealthCheckError(t *testing.T) {
+	store := newAppInitStub(t)
+	base := &fakeContainers{
+		result:    runtimepkg.ContainerInfo{ID: "ctr-1", Name: "ocm-" + testAppID, Status: "created"},
+		healthErr: errors.New("/healthz timeout"),
+	}
+	containers := &healthAwareContainers{fakeContainers: base}
+	client := &fakeNewAPI{result: newapi.APIKey{ID: 1, Key: "k"}}
+	handler := NewAppInitializeHandler(store, &fakeImages{}, &fakeDirs{}, base, containers, client, AppInitializeConfig{})
+
+	err := handler.Handle(context.Background(), buildJob(t, testAppID, "node-1"))
+	if err == nil || !strings.Contains(err.Error(), "等待 OpenClaw 健康失败") {
+		t.Fatalf("err=%v", err)
+	}
+	if store.statusSet {
+		t.Fatal("健康检查失败时不应推 status")
+	}
+}
+
 func TestAppInitializeIsIdempotentForBindingWaiting(t *testing.T) {
 	store := newAppInitStub(t)
 	store.app.Status = domain.AppStatusBindingWaiting
@@ -292,6 +336,23 @@ type fakeContainers struct {
 	lastStartNode string
 	lastStartID   string
 	startErr      error
+	// Sprint 2：可选实现 OpenClawHealthChecker。enableHealthCheck=true 时 fakeContainers
+	// 暴露 WaitForOpenClawHealthy 方法（通过类型断言被 handler 探测）。
+	enableHealthCheck bool
+	healthCalls       int
+	healthErr         error
+}
+
+// WaitForOpenClawHealthy 仅当 enableHealthCheck 为 true 时通过类型断言可见。
+// 由于 Go 的接口断言看的是方法集（不论 enable flag），这里的 enable 通过 wrapper 实现。
+// 所以测试用 healthAwareContainers 包装 fakeContainers 暴露此方法。
+type healthAwareContainers struct {
+	*fakeContainers
+}
+
+func (h *healthAwareContainers) WaitForOpenClawHealthy(_ context.Context, _, _ string) error {
+	h.healthCalls++
+	return h.healthErr
 }
 
 func (f *fakeContainers) CreateContainer(_ context.Context, nodeID string, spec runtimepkg.ContainerSpec) (runtimepkg.ContainerInfo, error) {
