@@ -155,6 +155,70 @@ func (f *fakeBindingResolver) ResolveWeChatBoundIdentity(_ context.Context, _, _
 	return f.identity, nil
 }
 
+func TestChannelServicePollAuthPushesAppToRunningOnBound(t *testing.T) {
+	// Sprint 2 spec §3 退出标准：bound 时 binding_waiting 应自动推进到 running。
+	store := newChannelStub(t)
+	store.app.Status = domain.AppStatusBindingWaiting
+	registry := channel.NewRegistry()
+	registry.MustRegister(&fakeAdapter{
+		progress: channel.AuthProgress{
+			Status:        channel.AuthStatusBound,
+			BoundIdentity: "alice@wechat",
+			UpdatedAt:     time.Now(),
+		},
+	})
+	svc := NewChannelService(store, registry)
+
+	if _, err := svc.PollAuth(context.Background(), platformAdmin(), testChannelAppID, domain.ChannelTypeWeChat); err != nil {
+		t.Fatalf("PollAuth err = %v", err)
+	}
+	if !store.boundCalled {
+		t.Fatalf("MarkChannelBindingBound 未被调")
+	}
+	if !store.appStatusSet {
+		t.Fatalf("SetAppStatus 应被调推 app 到 running")
+	}
+	if store.lastAppStatus != domain.AppStatusRunning {
+		t.Fatalf("lastAppStatus = %q, want running", store.lastAppStatus)
+	}
+}
+
+func TestChannelServicePollAuthDoesNotOverrideRunningStatus(t *testing.T) {
+	// 已经 running 的应用再次 PollAuth bound 时不应再写一次 SetAppStatus。
+	store := newChannelStub(t)
+	store.app.Status = domain.AppStatusRunning
+	registry := channel.NewRegistry()
+	registry.MustRegister(&fakeAdapter{
+		progress: channel.AuthProgress{Status: channel.AuthStatusBound, UpdatedAt: time.Now()},
+	})
+	svc := NewChannelService(store, registry)
+
+	if _, err := svc.PollAuth(context.Background(), platformAdmin(), testChannelAppID, domain.ChannelTypeWeChat); err != nil {
+		t.Fatalf("err=%v", err)
+	}
+	if store.appStatusSet {
+		t.Fatalf("status 已是 running 时不应再写 SetAppStatus")
+	}
+}
+
+func TestChannelServicePollAuthDoesNotPushOnNonBindingWaiting(t *testing.T) {
+	// stopped / error 状态时 bound 也不该自动推到 running——避免覆盖运维侧停机决策。
+	store := newChannelStub(t)
+	store.app.Status = domain.AppStatusStopped
+	registry := channel.NewRegistry()
+	registry.MustRegister(&fakeAdapter{
+		progress: channel.AuthProgress{Status: channel.AuthStatusBound, UpdatedAt: time.Now()},
+	})
+	svc := NewChannelService(store, registry)
+
+	if _, err := svc.PollAuth(context.Background(), platformAdmin(), testChannelAppID, domain.ChannelTypeWeChat); err != nil {
+		t.Fatalf("err=%v", err)
+	}
+	if store.appStatusSet {
+		t.Fatalf("非 binding_waiting 状态不应被自动推到 running")
+	}
+}
+
 func TestChannelServiceUnbindUpdatesStatus(t *testing.T) {
 	store := newChannelStub(t)
 	svc := NewChannelService(store, channel.NewRegistry())
@@ -187,6 +251,10 @@ type channelStub struct {
 	statusUpdated bool
 	lastStatus    string
 	boundCalled   bool
+	// Sprint 2 follow-up：bound 后会调 SetAppStatus 把 binding_waiting → running。
+	appStatusSet  bool
+	lastAppStatus string
+	appStatusErr  error
 }
 
 func newChannelStub(t *testing.T) *channelStub {
@@ -232,6 +300,16 @@ func (s *channelStub) SetChannelBindingStatus(_ context.Context, arg sqlc.SetCha
 	s.binding.Status = arg.Status
 	s.binding.LastError = arg.LastError
 	return s.binding, nil
+}
+
+func (s *channelStub) SetAppStatus(_ context.Context, arg sqlc.SetAppStatusParams) (sqlc.App, error) {
+	s.appStatusSet = true
+	s.lastAppStatus = arg.Status
+	if s.appStatusErr != nil {
+		return sqlc.App{}, s.appStatusErr
+	}
+	s.app.Status = arg.Status
+	return s.app, nil
 }
 
 func (s *channelStub) MarkChannelBindingBound(_ context.Context, arg sqlc.MarkChannelBindingBoundParams) (sqlc.ChannelBinding, error) {
