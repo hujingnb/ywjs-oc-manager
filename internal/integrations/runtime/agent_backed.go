@@ -206,6 +206,57 @@ func (a *AgentBackedAdapter) DeletePath(ctx context.Context, nodeID, remotePath 
 	return client.Delete(ctx, remotePath)
 }
 
+// ============================================================================
+// Sprint 1：scope-aware 包装方法。worker handler 用这些方法发出领域级请求，
+// 不再让 handler 拼 "apps/<id>/knowledge/<rel>" 这种业务路径。
+// ============================================================================
+
+// InitAppDirs 让节点 agent 准备 apps/<appID>/{knowledge,workspace,state,logs}
+// 4 个子目录。app_initialize handler 在 CreateContainer 之前调一次。
+func (a *AgentBackedAdapter) InitAppDirs(ctx context.Context, nodeID, appID string) error {
+	cli, err := a.resolveFile(ctx, nodeID)
+	if err != nil {
+		return err
+	}
+	return cli.InitAppDirs(ctx, appID)
+}
+
+// UploadOrgFile 把单文件上传到指定节点的组织级知识库。
+func (a *AgentBackedAdapter) UploadOrgFile(ctx context.Context, nodeID, orgID, relPath string, content io.Reader) error {
+	cli, err := a.resolveFile(ctx, nodeID)
+	if err != nil {
+		return err
+	}
+	return cli.UploadOrgKnowledgeFile(ctx, orgID, relPath, content)
+}
+
+// UploadAppFile 把单文件上传到指定节点的应用级知识库。
+func (a *AgentBackedAdapter) UploadAppFile(ctx context.Context, nodeID, appID, relPath string, content io.Reader) error {
+	cli, err := a.resolveFile(ctx, nodeID)
+	if err != nil {
+		return err
+	}
+	return cli.UploadAppKnowledgeFile(ctx, appID, relPath, content)
+}
+
+// DeleteOrgFile 删除节点上组织级知识库的指定文件 / 子目录。
+func (a *AgentBackedAdapter) DeleteOrgFile(ctx context.Context, nodeID, orgID, relPath string) error {
+	cli, err := a.resolveFile(ctx, nodeID)
+	if err != nil {
+		return err
+	}
+	return cli.DeleteOrgKnowledge(ctx, orgID, relPath)
+}
+
+// DeleteAppFile 删除节点上应用级知识库的指定文件 / 子目录。
+func (a *AgentBackedAdapter) DeleteAppFile(ctx context.Context, nodeID, appID, relPath string) error {
+	cli, err := a.resolveFile(ctx, nodeID)
+	if err != nil {
+		return err
+	}
+	return cli.DeleteAppKnowledge(ctx, appID, relPath)
+}
+
 func (a *AgentBackedAdapter) resolveFile(ctx context.Context, nodeID string) (*agent.AgentFileClient, error) {
 	if a.files == nil {
 		return nil, ErrUnimplemented
