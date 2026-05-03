@@ -97,5 +97,61 @@ export function useDeleteOrgKnowledge(orgId: Ref<string | undefined>, relative: 
   })
 }
 
-// 这里给 useAppKnowledge 留出占位，便于后续扩展应用级上传。
+// useUploadAppKnowledge 上传应用级文件。
+export function useUploadAppKnowledge(
+  appId: Ref<string | undefined>,
+  context: Ref<{ orgId: string; ownerUserId: string; path: string } | undefined>,
+) {
+  const client = useQueryClient()
+  return useMutation({
+    mutationFn: async (input: { path: string; file: File }) => {
+      if (!appId.value || !context.value) throw new Error('缺少应用知识库上下文')
+      const params = new URLSearchParams({
+        org_id: context.value.orgId,
+        owner_user_id: context.value.ownerUserId,
+        path: input.path,
+      })
+      const headers: Record<string, string> = { 'Content-Type': 'application/octet-stream' }
+      const token = getStoredAccessToken()
+      if (token) headers.Authorization = `Bearer ${token}`
+      const response = await fetch(`/api/v1/apps/${appId.value}/knowledge?${params.toString()}`, {
+        method: 'POST',
+        headers,
+        body: input.file,
+      })
+      if (!response.ok) {
+        const text = await response.text().catch(() => '')
+        throw new Error(text || '上传失败')
+      }
+    },
+    onSuccess: () => {
+      void client.invalidateQueries({ queryKey: ['knowledge', 'app'] })
+    },
+  })
+}
+
+// useDeleteAppKnowledge 删除应用级文件。
+export function useDeleteAppKnowledge(
+  appId: Ref<string | undefined>,
+  context: Ref<{ orgId: string; ownerUserId: string; path: string } | undefined>,
+) {
+  const client = useQueryClient()
+  return useMutation({
+    mutationFn: async (targetPath: string) => {
+      if (!appId.value || !context.value) throw new Error('缺少应用知识库上下文')
+      await apiRequest<void>(`/api/v1/apps/${appId.value}/knowledge`, {
+        method: 'DELETE',
+        query: {
+          org_id: context.value.orgId,
+          owner_user_id: context.value.ownerUserId,
+          path: targetPath,
+        },
+      })
+    },
+    onSuccess: () => {
+      void client.invalidateQueries({ queryKey: ['knowledge', 'app'] })
+    },
+  })
+}
+
 export const _appKnowledgeKey = appKey

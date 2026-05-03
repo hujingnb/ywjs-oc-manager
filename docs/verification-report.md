@@ -215,3 +215,26 @@ WaitForOpenClawHealthy 配置 `startWait=8s + step=4s × 10`，命中第 3 次 p
 | console 检查 | ✅ | 仅有既有 `favicon.ico` 404；未发现本次渠道页 JS error。 |
 
 真实微信扫码未执行：当前本地测试应用缺少可用 OpenClaw 运行容器 / runtime endpoint，尚未生成二维码。后续具备真实 runtime container 后，需要继续验证扫码 bound 后 worker 写入 `bound_identity` 并把 app 从 `binding_waiting` 推进到 `running`。
+
+## v1.0 RC Chunk 1：应用级知识库上传 / 删除
+
+执行时间：2026-05-03 23:27 CST。
+
+### 自动化验证
+
+| 命令 | 结果 | 备注 |
+|---|---|---|
+| `cd web && npm run typecheck` | ✅ | 应用知识库上传 / 删除 hooks 与页面类型检查通过。 |
+| `cd web && npm test -- --run` | ✅ | 前端单测 12/12 通过。 |
+| `cd web && npm run build` | ✅ | Vite production build 通过。 |
+
+### 浏览器验证（chrome-devtools MCP）
+
+| 步骤 | 结果 | 备注 |
+|---|---|---|
+| 打开 `/apps/542cabf4-eec5-4333-ab64-436b9ffea3b5/knowledge` | ✅ | 应用知识库页渲染上传按钮、列表和操作列。 |
+| 上传 `/tmp/ocm-app-knowledge-smoke.txt` | ✅ | POST `/api/v1/apps/{appId}/knowledge` 返回 204，列表刷新显示文件 `31 B`。 |
+| 删除上传文件 | ✅ | DELETE 返回 204，列表刷新为空。 |
+| console 检查 | ✅ | 仅有既有 `favicon.ico` 404；未发现应用知识库页面 JS error。 |
+
+备注：后端应用级主副本写入后会派发 `knowledge_sync_node` 到应用所在节点；当前验证环境的 runtime endpoint 不可用，因此只验证了 manager 主副本和前端闭环，节点同步结果留真实 runtime 环境继续验证。
