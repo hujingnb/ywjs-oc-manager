@@ -137,7 +137,10 @@ func runManager(ctx context.Context, cfg config.Config, logOut io.Writer) error 
 
 	channelRegistry := channel.NewRegistry()
 	channelService := service.NewChannelService(dbStore.Queries, channelRegistry)
-	wechatRunner := channel.NewDockerCommandRunner(channel.NewDockerExecutor(nodeResolver), newAppContainerLookup(dbStore.Queries))
+	wechatExecutor := channel.NewDockerExecutor(nodeResolver)
+	wechatRunner := channel.NewDockerCommandRunner(wechatExecutor, newAppContainerLookup(dbStore.Queries))
+	// Sprint 2：bound 后从 plugin state 文件读真实 userId 补到 channel_bindings.bound_identity。
+	channelService.SetWeChatBindingResolver(channel.NewDockerBindingResolver(wechatExecutor))
 	if err := channelRegistry.Register(channel.NewWeChatAdapter(wechatRunner)); err != nil {
 		return fmt.Errorf("注册微信渠道失败: %w", err)
 	}

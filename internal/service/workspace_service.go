@@ -59,6 +59,9 @@ type WorkspaceEntryResult struct {
 }
 
 // List 列出指定应用工作目录下的文件。
+//
+// Sprint 2 切换到 scope-aware 端点：直接传 appID + relPath 给 adapter，由 agent 端
+// 拼成 apps/<appID>/workspace/<rel>，避免 service 层计算业务路径与 agent 端不一致。
 func (s *WorkspaceService) List(ctx context.Context, principal auth.Principal, appID, relative string) (WorkspaceListing, error) {
 	app, err := s.loadAuthorizedApp(ctx, principal, appID)
 	if err != nil {
@@ -67,16 +70,21 @@ func (s *WorkspaceService) List(ctx context.Context, principal auth.Principal, a
 	if s.adapter == nil || !app.RuntimeNodeID.Valid {
 		return WorkspaceListing{}, ErrWorkspaceMissing
 	}
-	target := s.resolvePath(uuidToString(app.OrgID), uuidToString(app.ID), relative)
-	listing, err := s.adapter.ListFiles(ctx, uuidToString(app.RuntimeNodeID), target)
+	listing, err := s.adapter.ListWorkspace(ctx,
+		uuidToString(app.RuntimeNodeID), uuidToString(app.ID), relative)
 	if err != nil {
 		return WorkspaceListing{}, fmt.Errorf("查询工作目录失败: %w", err)
 	}
 	out := make([]WorkspaceEntryResult, 0, len(listing.Entries))
 	for _, entry := range listing.Entries {
-		out = append(out, WorkspaceEntryResult{Path: entry.Path, Name: entry.Name, Size: entry.Size, IsDir: entry.IsDir})
+		out = append(out, WorkspaceEntryResult{
+			Path:  joinSlash(listing.Path, entry.Name),
+			Name:  entry.Name,
+			Size:  entry.Size,
+			IsDir: entry.Type == "dir",
+		})
 	}
-	return WorkspaceListing{Path: target, Entries: out}, nil
+	return WorkspaceListing{Path: listing.Path, Entries: out}, nil
 }
 
 // Download 下载工作目录中的文件，调用方负责关闭返回流。
@@ -88,21 +96,22 @@ func (s *WorkspaceService) Download(ctx context.Context, principal auth.Principa
 	if s.adapter == nil || !app.RuntimeNodeID.Valid {
 		return nil, ErrWorkspaceMissing
 	}
-	target := s.resolvePath(uuidToString(app.OrgID), uuidToString(app.ID), relative)
-	return s.adapter.DownloadFile(ctx, uuidToString(app.RuntimeNodeID), target)
+	return s.adapter.DownloadWorkspaceFile(ctx,
+		uuidToString(app.RuntimeNodeID), uuidToString(app.ID), relative)
 }
 
-// Archive 把工作目录打包为 tar.gz 流。
-func (s *WorkspaceService) Archive(ctx context.Context, principal auth.Principal, appID, relative string) (io.ReadCloser, error) {
+// Archive 把工作目录打包为 zip 流写到 w。Sprint 2 改用 scope-aware 端点输出 zip
+// （Sprint 1 agent 实现的格式），不再使用 generic tar.gz。
+func (s *WorkspaceService) Archive(ctx context.Context, principal auth.Principal, appID, relative string, w io.Writer) error {
 	app, err := s.loadAuthorizedApp(ctx, principal, appID)
 	if err != nil {
-		return nil, err
+		return err
 	}
 	if s.adapter == nil || !app.RuntimeNodeID.Valid {
-		return nil, ErrWorkspaceMissing
+		return ErrWorkspaceMissing
 	}
-	target := s.resolvePath(uuidToString(app.OrgID), uuidToString(app.ID), relative)
-	return s.adapter.ArchiveDirectory(ctx, uuidToString(app.RuntimeNodeID), target)
+	return s.adapter.StreamWorkspaceArchive(ctx,
+		uuidToString(app.RuntimeNodeID), uuidToString(app.ID), relative, w)
 }
 
 func (s *WorkspaceService) loadAuthorizedApp(ctx context.Context, principal auth.Principal, appID string) (sqlc.App, error) {

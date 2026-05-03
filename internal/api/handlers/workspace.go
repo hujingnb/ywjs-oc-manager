@@ -21,7 +21,7 @@ type WorkspaceHandler struct {
 type workspaceService interface {
 	List(ctx context.Context, principal auth.Principal, appID, relative string) (service.WorkspaceListing, error)
 	Download(ctx context.Context, principal auth.Principal, appID, relative string) (io.ReadCloser, error)
-	Archive(ctx context.Context, principal auth.Principal, appID, relative string) (io.ReadCloser, error)
+	Archive(ctx context.Context, principal auth.Principal, appID, relative string, w io.Writer) error
 }
 
 // NewWorkspaceHandler 创建 handler。
@@ -76,21 +76,21 @@ func (h *WorkspaceHandler) Download(c *gin.Context) {
 	}
 }
 
-// Archive 把目录打包返回。
+// Archive 把目录流式打成 zip 返回。
+//
+// Sprint 2 改用 scope-aware agent 端点，输出 zip（Sprint 1 agent 端实现）；
+// service 直接把 zip 流写到 ResponseWriter，避免在 manager 进程缓冲。
 func (h *WorkspaceHandler) Archive(c *gin.Context) {
 	principal, ok := h.principal(c)
 	if !ok {
 		return
 	}
-	stream, err := h.service.Archive(c.Request.Context(), principal, c.Param("appId"), c.Query("path"))
-	if err != nil {
-		writeWorkspaceError(c, err)
-		return
-	}
-	defer stream.Close()
-	c.Header("Content-Type", "application/gzip")
+	c.Header("Content-Type", "application/zip")
 	c.Status(http.StatusOK)
-	if _, err := io.Copy(c.Writer, stream); err != nil {
+	if err := h.service.Archive(c.Request.Context(), principal,
+		c.Param("appId"), c.Query("path"), c.Writer); err != nil {
+		// 已发送 200 头，无法改 status；记录但 silent 关闭连接由 gin 处理。
+		_ = err
 		return
 	}
 }

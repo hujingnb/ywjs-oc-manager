@@ -3,6 +3,7 @@ package handlers
 import (
 	"context"
 	"errors"
+	"strings"
 	"testing"
 
 	"github.com/jackc/pgx/v5/pgtype"
@@ -138,6 +139,39 @@ func TestAppDeleteHandler_HappyPath(t *testing.T) {
 	}
 	if !stub.softDeleted {
 		t.Fatal("未触发 SoftDeleteApp")
+	}
+}
+
+func TestAppDeleteHandler_PrefersArchiveOverDelete(t *testing.T) {
+	// Sprint 2：fileOps 实现 AppArchiver 时应优先归档而非直接删除，保留节点目录。
+	stub := runtimeStub(t)
+	containers := &fakeLifecycle{}
+	disabler := &fakeDisabler{}
+	fileOps := &fakeArchivingFileOps{}
+	handler := NewAppDeleteHandler(stub, containers, disabler, fileOps)
+	if err := handler.Handle(context.Background(), runtimeJob(domain.JobTypeAppDelete, testAppID)); err != nil {
+		t.Fatalf("Handle err = %v", err)
+	}
+	if fileOps.archivedAppID != testAppID {
+		t.Fatalf("ArchiveApp 应被调，got archivedAppID=%q", fileOps.archivedAppID)
+	}
+	if fileOps.deletedAppID != "" {
+		t.Fatalf("有 ArchiveApp 实现时不应调 DeleteAppPath，got %q", fileOps.deletedAppID)
+	}
+}
+
+func TestAppDeleteHandler_PropagatesArchiveError(t *testing.T) {
+	stub := runtimeStub(t)
+	containers := &fakeLifecycle{}
+	disabler := &fakeDisabler{}
+	fileOps := &fakeArchivingFileOps{archiveErr: errors.New("disk full")}
+	handler := NewAppDeleteHandler(stub, containers, disabler, fileOps)
+	err := handler.Handle(context.Background(), runtimeJob(domain.JobTypeAppDelete, testAppID))
+	if err == nil || !strings.Contains(err.Error(), "归档应用工作目录失败") {
+		t.Fatalf("err=%v", err)
+	}
+	if stub.softDeleted {
+		t.Fatal("归档失败时不应软删 apps 行")
 	}
 }
 
@@ -279,4 +313,23 @@ type fakeFileOps struct {
 func (f *fakeFileOps) DeleteAppPath(_ context.Context, _, appID string) error {
 	f.deletedAppID = appID
 	return f.err
+}
+
+// fakeArchivingFileOps 同时实现 AppDeleteFileOps + AppArchiver。用于断言
+// app_delete handler 优先走 ArchiveApp（保留节点目录用于审计 / 误删恢复），
+// 不再调 DeleteAppPath。
+type fakeArchivingFileOps struct {
+	archivedAppID string
+	deletedAppID  string
+	archiveErr    error
+}
+
+func (f *fakeArchivingFileOps) DeleteAppPath(_ context.Context, _, appID string) error {
+	f.deletedAppID = appID
+	return nil
+}
+
+func (f *fakeArchivingFileOps) ArchiveApp(_ context.Context, _, appID string) error {
+	f.archivedAppID = appID
+	return f.archiveErr
 }

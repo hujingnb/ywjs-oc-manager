@@ -69,6 +69,28 @@ type Adapter interface {
 	DownloadFile(ctx context.Context, nodeID, remotePath string) (io.ReadCloser, error)
 	ArchiveDirectory(ctx context.Context, nodeID, remotePath string) (io.ReadCloser, error)
 	DeletePath(ctx context.Context, nodeID, remotePath string) error
+
+	// 以下 scope-aware 方法直接对应 agent /v1/scopes/* 端点（Sprint 1 起就位）。
+	// 与 generic 方法不同，调用方传业务标识（appID）与相对路径，由 adapter / agent 内部
+	// 拼成最终路径，避免两端业务逻辑不一致。
+	ListWorkspace(ctx context.Context, nodeID, appID, relPath string) (WorkspaceListing, error)
+	DownloadWorkspaceFile(ctx context.Context, nodeID, appID, relPath string) (io.ReadCloser, error)
+	StreamWorkspaceArchive(ctx context.Context, nodeID, appID, relPath string, w io.Writer) error
+	ArchiveApp(ctx context.Context, nodeID, appID string) error
+}
+
+// WorkspaceListing 是 ListWorkspace 的标准化响应（agent /v1/scopes/.../workspace 输出）。
+type WorkspaceListing struct {
+	Path    string           `json:"path"`
+	Entries []WorkspaceEntry `json:"entries"`
+}
+
+// WorkspaceEntry 描述 workspace 下的一个 entry（与 agent 端字段对齐）。
+type WorkspaceEntry struct {
+	Name       string `json:"name"`
+	Type       string `json:"type"` // file | dir
+	Size       int64  `json:"size,omitempty"`
+	ModifiedAt string `json:"modified_at"`
 }
 
 // ErrUnimplemented 表示当前 adapter 暂未实现该能力。
