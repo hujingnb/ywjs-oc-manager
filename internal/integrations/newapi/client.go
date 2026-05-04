@@ -48,15 +48,21 @@ type CreateAPIKeyInput struct {
 }
 
 // Client 是 new-api 的 HTTP 客户端。
+//
+// AdminToken：new-api「个人设置 → 安全设置 → 系统访问令牌」生成的 access_token。
+// AdminUserID：access_token 所属的 new-api 用户 id，admin API 要求作为 New-Api-User header 同时携带；
+// 二者缺一会被 new-api 拒绝（参考 https://www.newapi.ai/zh/docs/api/management/auth）。
 type Client struct {
-	BaseURL    string
-	AdminToken string
-	HTTPClient *http.Client
+	BaseURL     string
+	AdminToken  string
+	AdminUserID int64
+	HTTPClient  *http.Client
 }
 
 // NewClient 构造 new-api client，未提供 HTTPClient 时使用 http.DefaultClient。
-func NewClient(baseURL, adminToken string) *Client {
-	return &Client{BaseURL: baseURL, AdminToken: adminToken}
+// adminUserID 必须与 adminToken 所属用户匹配，否则 admin API 返回 "Unauthorized"。
+func NewClient(baseURL, adminToken string, adminUserID int64) *Client {
+	return &Client{BaseURL: baseURL, AdminToken: adminToken, AdminUserID: adminUserID}
 }
 
 func (c *Client) httpClient() *http.Client {
@@ -224,6 +230,12 @@ func (c *Client) do(ctx context.Context, method, path string, body any, target a
 	}
 	if c.AdminToken != "" {
 		req.Header.Set("Authorization", "Bearer "+c.AdminToken)
+	}
+	// new-api admin API 要求 New-Api-User header 标识当前调用者用户 id，
+	// 且必须与 access_token 所属用户匹配；缺失时 new-api 返回
+	// "Unauthorized, New-Api-User header not provided"。
+	if c.AdminUserID > 0 {
+		req.Header.Set("New-Api-User", fmt.Sprintf("%d", c.AdminUserID))
 	}
 	resp, err := c.httpClient().Do(req)
 	if err != nil {

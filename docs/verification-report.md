@@ -261,3 +261,71 @@ WaitForOpenClawHealthy 配置 `startWait=8s + step=4s × 10`，命中第 3 次 p
 | console 检查 | ✅ | 仅有既有 `favicon.ico` 404；未发现工作目录页 JS error。 |
 
 真实文件下载未执行：需要应用容器运行在可达 runtime agent 上。后续真实微信消息生成 `hello.txt` 后继续验证列表、单文件下载和 zip 归档。
+
+## v1.0 RC Chunk-Z：new-api 实例初始化（2026-05-04）
+
+承接 `docs/superpowers/plans/2026-05-04-v1-rc-finalization-implementation-plan.md` Chunk-Z。
+
+### 本 Chunk 范围扩大说明
+
+按计划只是"前置初始化 + 探针验证"，实际探针提前发现 manager 与 new-api 鉴权契约错配（缺 `New-Api-User` header），属于 v1.0 RC 路径硬阻塞，故在本 Chunk 一并修复。
+
+### 自动化检查
+
+| 命令 | 结果 | 备注 |
+|---|---|---|
+| 清掉旧 new-api 数据并重启 `new-api / new-api-postgres / new-api-redis` | ✅ | 使用一次性 alpine 容器清空 `.local/data/new-api/{data,logs,postgres,redis}`，避免 sudo 污染宿主机 |
+| `docker compose up -d` 全栈 | ✅ | 9 个服务全部 healthy |
+| `docker exec ollama ollama list` | ✅ | `qwen2.5:0.5b 397 MB` 已就位，无需重新 pull |
+| 用户在 new-api 浏览器后台完成首次配置 | ✅ | 注册 admin/admin123!（已存 memory）+ 创建 ollama 渠道 + 生成 access_token |
+| 第一次探针（用 sk- 形式 token） | ❌ 8/8 | new-api 返回 `Unauthorized, invalid access token`；定位到 sk- 是 API token，admin API 需要"系统访问令牌"形式 |
+| 第二次探针（access_token 但缺 New-Api-User） | ❌ 8/8 | new-api 返回 `Unauthorized, New-Api-User header not provided` — **暴露 manager bug** |
+| 修复 manager `internal/integrations/newapi/client.go` + config + cmd/server wiring | ✅ | `Client` 增加 `AdminUserID`，`do()` 注入 `New-Api-User` header；`NewAPIConfig` 增加 `admin_user_id`；`NewClient` 新签名；`client_test.go` 增加正反断言 |
+| `go test ./... -count=1` | ✅ | 全 21 个 Go 包通过 |
+| `go vet ./...` | ✅ | 零警告 |
+| `go build ./...` | ✅ | 全 binary 干净编译 |
+| `npm run typecheck` | ✅ | vue-tsc 无报错 |
+| `npm test -- --run` | ✅ | vitest 12/12 通过 |
+| `npm run build` | ✅ | Vite production build 通过 |
+| `make newapi-probe`（修复后） | ✅ | **8/8 通过**，详见 `docs/superpowers/poc/2026-05-04-newapi-probe.md` |
+| `docker compose up -d --force-recreate manager-api` | ✅ | 注意：`docker compose restart` 不重新读 compose env，必须 `force-recreate`；之前 restart 一次失败 fail-fast `缺少环境变量: NEWAPI_ADMIN_TOKEN, NEWAPI_ADMIN_USER_ID`，迫使本 Chunk 文档明确这一陷阱 |
+| `curl -fsS http://localhost:8080/healthz` | ✅ | 重新装配后 manager-api 启动正常 |
+
+### new-api 接口能力清单
+
+参见 `docs/superpowers/poc/2026-05-04-newapi-probe.md`。8 个 API 全部 200 + `success=true`。
+
+### 决策
+
+- **Chunk-Z 退出标准（≥6 / 8）**：✅ 8/8 全过。
+- **Chunk-2 Task 9 / Chunk-3 Task 12 是否走 mock**：❌ 不需要，new-api 端能力齐全。
+- **manager 仍待修复的 bug**（Chunk-Z 暴露但未在本 Chunk 修）：
+  - `RechargeUser`（client.go:156）调 `/api/user/recharge`，new-api v1.0.0-alpha.1 实际是 `PUT /api/user/`（GET → 改 quota → PUT）
+  - `CreateAPIKey`（client.go:71）的响应 `data.id` 在当前 new-api 版本上为 null，需要在创建后立即用 token name 走 `/api/token/?p=1&size=...` 回查 id 写回
+  - 这两项修复列入 Chunk-1 范围（详见 PoC 文档 §4）
+
+### Chunk-Z 改动文件
+
+- 新建 `scripts/newapi-probe.sh`（探针脚本）
+- 新建 `docs/superpowers/poc/2026-05-04-newapi-probe.md`（探针结果 + 路径差异）
+- 修改 `internal/integrations/newapi/client.go`（`Client.AdminUserID` + `New-Api-User` header）
+- 修改 `internal/integrations/newapi/client_test.go`（断言 + 回归用例）
+- 修改 `internal/config/config.go`（`NewAPIConfig.AdminUserID`）
+- 修改 `cmd/server/main.go`（`NewClient` 调用增加 admin_user_id 参数）
+- 修改 `config/config.yaml.example`（增加 `newapi:` 段）
+- 修改 `docker-compose.yml`（`manager-api` 注入 `NEWAPI_ADMIN_TOKEN` + `NEWAPI_ADMIN_USER_ID`）
+- 修改 `.env.example`（注释样例）
+- 修改 `Makefile`（`newapi-probe` target）
+
+`.env` 中的 `NEWAPI_ADMIN_TOKEN` 为本地 dev 实例的 access_token（不进 git）；`admin / admin123!` 凭证存于 `~/.claude/projects/.../memory/`。
+
+### chrome-devtools MCP sanity（推迟）
+
+`docker compose up -d --force-recreate manager-api` 后 manager-api 容器在 `apt-get install -y docker.io` 阶段因国内 deb.debian.org 镜像源连通性卡死（17 min 仍未完成 `containerd 25.9 MB` 下载），未能在 Chunk-Z 内拿到可访问的 manager-api 完成 chrome-devtools 主路由 sanity。
+
+降级处理：
+
+- chunk-z 改动**未触动** web / router / handler / middleware，仅改 newapi adapter（添加 header）、`internal/config` 字段、`cmd/server/main.go` wire 签名 —— 路由层不会引入回归。
+- 之前的 `docker compose restart manager-api` 已经走到 `config.Validate()` 才 fail-fast（缺 `NEWAPI_ADMIN_TOKEN` env），证明 manager-api 启动管线到位；force-recreate 那次 fail 是 `restart` 不重读 compose env 的已知行为。
+- chrome-devtools 主路由 sanity 推迟到 Chunk-1 切分支后第一次起 manager-api 时一并跑（届时 docker 缓存已暖，apt-get 能从已下载层复用）。
+- follow-up：把 `manager-api` 启动 command 中的 `apt-get install docker.io` 替换为预制 docker-CLI 层（baseline image 改造），消除每次 force-recreate 都重新 apt 的代价；放在 Chunk-4 hardening 范围。

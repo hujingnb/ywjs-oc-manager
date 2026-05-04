@@ -1,4 +1,4 @@
-.PHONY: dev-up dev-down test vet build sqlc-generate migrate-up migrate-down check-compose logs web-test web-typecheck web-build build-openclaw-runtime verify-openclaw-runtime sync-openclaw-runtime-image debug-ollama debug-newapi
+.PHONY: dev-up dev-down test vet build sqlc-generate migrate-up migrate-down check-compose logs web-test web-typecheck web-build build-openclaw-runtime verify-openclaw-runtime sync-openclaw-runtime-image debug-ollama debug-newapi newapi-probe
 
 dev-up:
 	docker compose up -d
@@ -49,6 +49,9 @@ debug-ollama:
 
 debug-newapi:
 	./scripts/debug-newapi.sh
+
+newapi-probe:
+	@bash scripts/newapi-probe.sh
 
 migrate-up:
 	docker compose run --rm manager-api go run ./cmd/migrate up
