@@ -319,13 +319,16 @@ WaitForOpenClawHealthy 配置 `startWait=8s + step=4s × 10`，命中第 3 次 p
 
 `.env` 中的 `NEWAPI_ADMIN_TOKEN` 为本地 dev 实例的 access_token（不进 git）；`admin / admin123!` 凭证存于 `~/.claude/projects/.../memory/`。
 
-### chrome-devtools MCP sanity（推迟）
+### chrome-devtools MCP sanity
 
-`docker compose up -d --force-recreate manager-api` 后 manager-api 容器在 `apt-get install -y docker.io` 阶段因国内 deb.debian.org 镜像源连通性卡死（17 min 仍未完成 `containerd 25.9 MB` 下载），未能在 Chunk-Z 内拿到可访问的 manager-api 完成 chrome-devtools 主路由 sanity。
+合入 master 后 manager-api 容器最终完成 `apt-get install docker.io` 与 air 编译并 ready（force-recreate 总耗时约 30 min，主要来自国内 deb.debian.org 网络），随后补做主路由 sanity：
 
-降级处理：
+| 路由 | 结果 | 备注 |
+|---|---|---|
+| `/login` | ✅ | 表单渲染正常；console 仅 1 个非关键 `favicon.ico` 404（与历史 verification-report 一致） |
+| `/`（RoleAwareHome） | ✅ | 用 `admin / admin123` 登录成功；侧边栏 7 个导航 + 顶栏 PLATFORM_ADMIN tag + "API 正常" + "Ollama 待配置模型" + 3 张快捷卡片（组织 / Runtime Node / 审计）全部渲染 |
+| 登录后 console 错误 | ✅ | 0 个 |
 
-- chunk-z 改动**未触动** web / router / handler / middleware，仅改 newapi adapter（添加 header）、`internal/config` 字段、`cmd/server/main.go` wire 签名 —— 路由层不会引入回归。
-- 之前的 `docker compose restart manager-api` 已经走到 `config.Validate()` 才 fail-fast（缺 `NEWAPI_ADMIN_TOKEN` env），证明 manager-api 启动管线到位；force-recreate 那次 fail 是 `restart` 不重读 compose env 的已知行为。
-- chrome-devtools 主路由 sanity 推迟到 Chunk-1 切分支后第一次起 manager-api 时一并跑（届时 docker 缓存已暖，apt-get 能从已下载层复用）。
-- follow-up：把 `manager-api` 启动 command 中的 `apt-get install docker.io` 替换为预制 docker-CLI 层（baseline image 改造），消除每次 force-recreate 都重新 apt 的代价；放在 Chunk-4 hardening 范围。
+manager-api healthz 校验：`{"status":"ok","time":"2026-05-04T..."}`；容器内 `NEWAPI_ADMIN_TOKEN`、`NEWAPI_ADMIN_USER_ID`、`NEWAPI_BASE_URL` 三项 env 均正确注入。
+
+会话踩坑笔记：`docker compose restart` **不**重新读 compose env，必须 `force-recreate` 让新增环境变量真正注入容器；这次踩坑迫使 manager-api 重新 apt-get install docker.io 30 min。Follow-up：把 `manager-api` 启动 command 中的 `apt-get install docker.io` 替换为预制 docker-CLI 层（baseline image 改造），消除每次 force-recreate 都重新 apt 的代价；放在 Chunk-4 hardening 范围。
