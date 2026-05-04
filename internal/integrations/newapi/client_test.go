@@ -17,12 +17,17 @@ func TestCreateAPIKeyHappyPath(t *testing.T) {
 		if got := r.Header.Get("Authorization"); got != "Bearer admin-token" {
 			t.Fatalf("auth = %q", got)
 		}
+		// new-api admin API 要求 New-Api-User header 与 access_token 所属用户匹配；
+		// client 必须把 AdminUserID 渲染成该 header，否则请求会被 new-api 拒绝。
+		if got := r.Header.Get("New-Api-User"); got != "1" {
+			t.Fatalf("new-api-user header = %q, want 1", got)
+		}
 		w.Header().Set("Content-Type", "application/json")
 		_, _ = w.Write([]byte(`{"success":true,"data":{"id":42,"user_id":7,"name":"alice","key":"sk-test","remain_quota":1000}}`))
 	}))
 	defer server.Close()
 
-	client := NewClient(server.URL, "admin-token")
+	client := NewClient(server.URL, "admin-token", 1)
 	got, err := client.CreateAPIKey(context.Background(), CreateAPIKeyInput{UserID: 7, Name: "alice", Quota: 1000})
 	if err != nil {
 		t.Fatalf("CreateAPIKey() error = %v", err)
@@ -38,7 +43,7 @@ func TestCreateAPIKeyMapsUnauthorized(t *testing.T) {
 	}))
 	defer server.Close()
 
-	client := NewClient(server.URL, "")
+	client := NewClient(server.URL, "", 0)
 	_, err := client.CreateAPIKey(context.Background(), CreateAPIKeyInput{Name: "alice"})
 	if !errors.Is(err, ErrUnauthorized) {
 		t.Fatalf("error = %v, want ErrUnauthorized", err)
@@ -51,7 +56,7 @@ func TestCreateAPIKeyMapsNotFound(t *testing.T) {
 	}))
 	defer server.Close()
 
-	client := NewClient(server.URL, "")
+	client := NewClient(server.URL, "", 0)
 	_, err := client.CreateAPIKey(context.Background(), CreateAPIKeyInput{Name: "alice"})
 	if !errors.Is(err, ErrNotFound) {
 		t.Fatalf("error = %v, want ErrNotFound", err)
@@ -64,7 +69,7 @@ func TestCreateAPIKeyMapsUpstream5xx(t *testing.T) {
 	}))
 	defer server.Close()
 
-	client := NewClient(server.URL, "")
+	client := NewClient(server.URL, "", 0)
 	_, err := client.CreateAPIKey(context.Background(), CreateAPIKeyInput{Name: "alice"})
 	if !errors.Is(err, ErrUpstream) {
 		t.Fatalf("error = %v, want ErrUpstream", err)
@@ -78,7 +83,7 @@ func TestCreateAPIKeySurfacesUpstreamSuccessFalse(t *testing.T) {
 	}))
 	defer server.Close()
 
-	client := NewClient(server.URL, "")
+	client := NewClient(server.URL, "", 0)
 	_, err := client.CreateAPIKey(context.Background(), CreateAPIKeyInput{Name: "alice"})
 	if !errors.Is(err, ErrUpstream) {
 		t.Fatalf("error = %v, want ErrUpstream", err)
@@ -94,7 +99,7 @@ func TestSetAPIKeyStatusPropagatesErrors(t *testing.T) {
 	}))
 	defer server.Close()
 
-	client := NewClient(server.URL, "")
+	client := NewClient(server.URL, "", 0)
 	if err := client.SetAPIKeyStatus(context.Background(), 1, 2); !errors.Is(err, ErrConflict) {
 		t.Fatalf("error = %v, want ErrConflict", err)
 	}
@@ -107,12 +112,30 @@ func TestGetAPIKeyDecodesPayload(t *testing.T) {
 	}))
 	defer server.Close()
 
-	client := NewClient(server.URL, "")
+	client := NewClient(server.URL, "", 0)
 	got, err := client.GetAPIKey(context.Background(), 42)
 	if err != nil {
 		t.Fatalf("GetAPIKey() error = %v", err)
 	}
 	if got.ID != 42 {
 		t.Fatalf("id = %d", got.ID)
+	}
+}
+
+// TestNewApiUserHeaderOmittedWhenAdminUserIDZero 校验 AdminUserID = 0 时不发送 New-Api-User header；
+// 部分 fake/mock 场景（旧测试构造空 client）依赖此行为，避免 strict mock 拒绝未知 header。
+func TestNewApiUserHeaderOmittedWhenAdminUserIDZero(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if got := r.Header.Get("New-Api-User"); got != "" {
+			t.Fatalf("new-api-user header = %q, want empty when AdminUserID=0", got)
+		}
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`{"success":true,"data":{"id":1}}`))
+	}))
+	defer server.Close()
+
+	client := NewClient(server.URL, "", 0)
+	if _, err := client.GetAPIKey(context.Background(), 1); err != nil {
+		t.Fatalf("GetAPIKey() error = %v", err)
 	}
 }

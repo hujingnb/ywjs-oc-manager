@@ -26,6 +26,16 @@ auth:
 security:
   master_key: "${MASTER_KEY}"
 
+# new-api 网关连接参数。
+# admin_token 是 new-api「个人设置 → 安全设置 → 系统访问令牌」生成的 access_token，
+# 不是「令牌」页的 sk- 形式 API key。
+# admin_user_id 必须与 admin_token 所属用户匹配（new-api 的 New-Api-User header 校验）。
+# 详见 https://www.newapi.ai/zh/docs/api/management/auth。
+newapi:
+  base_url: "${NEWAPI_BASE_URL}"
+  admin_token: "${NEWAPI_ADMIN_TOKEN}"
+  admin_user_id: ${NEWAPI_ADMIN_USER_ID}
+
 # OpenClaw runtime 容器及人设模板配置。
 # system_prompt_template 必须包含 {{workspace_dir}} / {{knowledge_org_dir}} / {{knowledge_app_dir}}。
 openclaw:

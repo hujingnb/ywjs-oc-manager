@@ -86,9 +86,17 @@ type AgentConfig struct {
 // NewAPIConfig 描述 manager 与 new-api 网关的连接参数。
 // BaseURL 为空时 cmd/server 装配阶段不会构造 newapi client，
 // app_initialize handler 在调用 CreateAPIKey 时会直接报错；本地调试可不配。
+//
+// AdminToken 必须是 new-api「个人设置 → 安全设置 → 系统访问令牌」生成的 access_token；
+// 不是「令牌」页的 sk- 形式 API token，那个只能调模型推理，不能调 admin API。
+//
+// AdminUserID 对应 new-api admin API 要求的 New-Api-User header（且必须与 access_token 持有者匹配）；
+// 详见 https://www.newapi.ai/zh/docs/api/management/auth。
+// 缺失时 client 调用会被 new-api 拒绝并返回 "Unauthorized, New-Api-User header not provided"。
 type NewAPIConfig struct {
-	BaseURL    string `yaml:"base_url"`
-	AdminToken string `yaml:"admin_token"`
+	BaseURL     string `yaml:"base_url"`
+	AdminToken  string `yaml:"admin_token"`
+	AdminUserID int64  `yaml:"admin_user_id"`
 }
 
 // Duration 让 YAML 中的 "15m"、"720h" 这类字符串显式解析为 time.Duration。

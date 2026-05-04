@@ -157,7 +157,7 @@ func runManager(ctx context.Context, cfg config.Config, logOut io.Writer) error 
 	var newapiHandlerClient handlers.NewAPIClient
 	var newapiClient *newapi.Client
 	if cfg.NewAPI.BaseURL != "" {
-		newapiClient = newapi.NewClient(cfg.NewAPI.BaseURL, cfg.NewAPI.AdminToken)
+		newapiClient = newapi.NewClient(cfg.NewAPI.BaseURL, cfg.NewAPI.AdminToken, cfg.NewAPI.AdminUserID)
 		newapiHandlerClient = newapiClient
 		rechargeService = service.NewRechargeService(dbStore.Queries, newapiClient)
 		usageService = service.NewUsageService(newapiClient)
