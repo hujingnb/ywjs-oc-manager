@@ -15,6 +15,8 @@ import (
 	"io"
 	"net/http"
 	"net/url"
+	"strings"
+	"time"
 )
 
 // 与 new-api 调用相关的错误。
@@ -99,7 +101,47 @@ func (c *Client) CreateAPIKey(ctx context.Context, input CreateAPIKeyInput) (API
 	if !response.Success {
 		return APIKey{}, fmt.Errorf("%w: %s", ErrUpstream, response.Message)
 	}
+	// new-api v1 的 POST /api/token/ 响应不返回新 token 的 id 与 key 字段；
+	// 后续禁用 / 恢复 / 删除都需要 id，所以这里立即按 token name 查列表回填。
+	// 同 user 下不允许重名 token，按 name 精确匹配是稳定的。
+	if response.Data.ID == 0 {
+		resolved, err := c.findTokenByName(ctx, input.Name)
+		if err != nil {
+			return APIKey{}, fmt.Errorf("%w: 创建 token 成功但无法回查 id: %v", ErrPayloadInvalid, err)
+		}
+		return resolved, nil
+	}
 	return response.Data, nil
+}
+
+// findTokenByName 按 token name 在当前 admin user 的 token 列表里精确匹配并返回。
+// 用于补 new-api v1 的 POST /api/token/ 不返回 id 的缺口。
+func (c *Client) findTokenByName(ctx context.Context, name string) (APIKey, error) {
+	var listResp struct {
+		Success bool   `json:"success"`
+		Message string `json:"message"`
+		Data    struct {
+			// new-api v1 列表分页字段名为 items；旧版可能用 records。两者都解析。
+			Items   []APIKey `json:"items"`
+			Records []APIKey `json:"records"`
+		} `json:"data"`
+	}
+	if err := c.do(ctx, http.MethodGet, "/api/token/?p=1&size=100", nil, &listResp); err != nil {
+		return APIKey{}, err
+	}
+	if !listResp.Success {
+		return APIKey{}, fmt.Errorf("%w: %s", ErrUpstream, listResp.Message)
+	}
+	candidates := listResp.Data.Items
+	if len(candidates) == 0 {
+		candidates = listResp.Data.Records
+	}
+	for _, k := range candidates {
+		if k.Name == name {
+			return k, nil
+		}
+	}
+	return APIKey{}, fmt.Errorf("token name=%q not found in list", name)
 }
 
 // GetAPIKey 查询 token 详情。
@@ -141,31 +183,77 @@ type BalanceResult struct {
 }
 
 // RechargeUser 给指定 new-api 用户增加点数。
-// 失败时通过 sentinel error 区分；上层负责把成功/失败都写入 recharge_records 审计。
+//
+// new-api v1 没有 /api/user/recharge endpoint，admin 给指定 user 加 quota 必须走：
+//  1. GET /api/user/{id} 取整个 user 对象
+//  2. quota 字段累加充值额
+//  3. PUT /api/user/ 把整个 user 对象写回
+//
+// PUT 必须携带完整 user 对象（含 username / group / role / status 等）；
+// 若仅传 quota 字段，new-api 会把其余字段当成 zero-value 覆盖。
+//
+// new-api 自身没有 ref_id 概念，本函数生成 manager 端对账 ID 写入 RechargeResult.RefID，
+// 上层把它存入 recharge_records.newapi_ref_id 用于审计。
 func (c *Client) RechargeUser(ctx context.Context, input RechargeInput) (RechargeResult, error) {
 	if input.CreditAmount <= 0 {
 		return RechargeResult{}, fmt.Errorf("credit_amount 必须为正")
 	}
-	body := map[string]any{
-		"user_id": input.NewAPIUserID,
-		"quota":   input.CreditAmount,
-		"remark":  input.Remark,
+
+	// 1. GET 拿当前 user 对象，用 map 接收避免漏字段
+	var getResp struct {
+		Success bool           `json:"success"`
+		Message string         `json:"message"`
+		Data    map[string]any `json:"data"`
 	}
-	var response struct {
-		Success bool   `json:"success"`
-		Message string `json:"message"`
-		Data    struct {
-			RefID       string `json:"ref_id"`
-			RemainQuota int64  `json:"remain_quota"`
-		} `json:"data"`
-	}
-	if err := c.do(ctx, http.MethodPost, "/api/user/recharge", body, &response); err != nil {
+	if err := c.do(ctx, http.MethodGet, fmt.Sprintf("/api/user/%d", input.NewAPIUserID), nil, &getResp); err != nil {
 		return RechargeResult{}, err
 	}
-	if !response.Success {
-		return RechargeResult{}, fmt.Errorf("%w: %s", ErrUpstream, response.Message)
+	if !getResp.Success {
+		return RechargeResult{}, fmt.Errorf("%w: %s", ErrUpstream, getResp.Message)
 	}
-	return RechargeResult{RefID: response.Data.RefID, RemainQuota: response.Data.RemainQuota}, nil
+	if getResp.Data == nil {
+		return RechargeResult{}, fmt.Errorf("%w: GET /api/user/%d 返回空 data", ErrPayloadInvalid, input.NewAPIUserID)
+	}
+
+	// 2. quota 字段累加；new-api 默认用 json.Number → 退化到 float64，转 int64
+	currentQuota := jsonNumberToInt64(getResp.Data["quota"])
+	newQuota := currentQuota + input.CreditAmount
+	getResp.Data["quota"] = newQuota
+
+	// 3. PUT 整个对象写回
+	var putResp struct {
+		Success bool   `json:"success"`
+		Message string `json:"message"`
+	}
+	if err := c.do(ctx, http.MethodPut, "/api/user/", getResp.Data, &putResp); err != nil {
+		return RechargeResult{}, err
+	}
+	if !putResp.Success {
+		return RechargeResult{}, fmt.Errorf("%w: %s", ErrUpstream, putResp.Message)
+	}
+
+	// new-api 没 ref_id；自己合成一个，便于 audit 对账
+	refID := fmt.Sprintf("manager-%d-%d", input.NewAPIUserID, time.Now().UnixNano())
+	return RechargeResult{RefID: refID, RemainQuota: newQuota}, nil
+}
+
+// jsonNumberToInt64 把 JSON 数字字段安全转成 int64。
+// encoding/json 反序列化数字到 interface{} 时默认得到 float64；
+// 手动 Unmarshal 时也可能拿到 json.Number；本函数对两种都能正确处理。
+func jsonNumberToInt64(v any) int64 {
+	switch x := v.(type) {
+	case float64:
+		return int64(x)
+	case int64:
+		return x
+	case int:
+		return int64(x)
+	case json.Number:
+		i, _ := x.Int64()
+		return i
+	default:
+		return 0
+	}
 }
 
 // GetUserBalance 查询单个 new-api 用户的余额。
@@ -209,9 +297,16 @@ func (c *Client) SetAPIKeyStatus(ctx context.Context, id int64, status int) erro
 }
 
 func (c *Client) do(ctx context.Context, method, path string, body any, target any) error {
-	endpoint, err := url.JoinPath(c.BaseURL, path)
+	// path 可能含 query string（如 "/api/token/?status_only=true"）；url.JoinPath 会把 "?" 转义为 "%3F"，
+	// 导致 new-api 收到的是带字面 "?" 的 path 而非真正 query，进而无法识别参数。
+	// 把 path 拆成 raw_path + query，分别拼接。
+	rawPath, query, _ := strings.Cut(path, "?")
+	endpoint, err := url.JoinPath(c.BaseURL, rawPath)
 	if err != nil {
 		return err
+	}
+	if query != "" {
+		endpoint += "?" + query
 	}
 	var bodyReader io.Reader
 	if body != nil {
