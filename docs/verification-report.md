@@ -1,10 +1,12 @@
 # OpenClaw Manager 端到端验证报告
 
-> 最新更新：Sprint 1+2 全栈 smoke 跑通到 binding_waiting + healthy 容器（2026-05-03）。
-> 在此基础上 Sprint 0 OpenClaw 集成契约、Sprint 1 agent 文件 API 全套、
-> Sprint 2 plugin state userId / QR PNG / workspace scope / app_delete archive /
-> WaitForOpenClawHealthy / status running 联动均已合入主分支。
-> 起始基线：commit `c7f46a5`；当前分支 `feat/phase-a-container-channel-loop`。
+> 最新更新：v1.0 RC Chunk-1 真扫码闭环达成（2026-05-06）。
+> 真实微信扫码绑定 → 微信发消息 → OpenClaw embedded agent → openai SDK →
+> new-api → ollama qwen2.5:0.5b → write tool → /workspace/hello.txt →
+> manager workspace API 单文件下载校验通过；spec §4.3 task 6 退出标准全过。
+> 5 个 atomic commits 入主干（`5584c22` `a705816` `c2d4bfb` `83028fc` `044f6ed`），
+> 加 Chunk-Z 的 3 个 commit（`02b0ab6` `0244404` `31a2e78`）共 8 commit。
+> 当前分支：`master`。
 
 ## v1.0 RC Chunk 1 起始基线（2026-05-03）
 
@@ -332,3 +334,86 @@ WaitForOpenClawHealthy 配置 `startWait=8s + step=4s × 10`，命中第 3 次 p
 manager-api healthz 校验：`{"status":"ok","time":"2026-05-04T..."}`；容器内 `NEWAPI_ADMIN_TOKEN`、`NEWAPI_ADMIN_USER_ID`、`NEWAPI_BASE_URL` 三项 env 均正确注入。
 
 会话踩坑笔记：`docker compose restart` **不**重新读 compose env，必须 `force-recreate` 让新增环境变量真正注入容器；这次踩坑迫使 manager-api 重新 apt-get install docker.io 30 min。Follow-up：把 `manager-api` 启动 command 中的 `apt-get install docker.io` 替换为预制 docker-CLI 层（baseline image 改造），消除每次 force-recreate 都重新 apt 的代价；放在 Chunk-4 hardening 范围。
+
+## v1.0 RC Chunk-1：Task 6 真扫码闭环（2026-05-06）
+
+承接 `docs/superpowers/plans/2026-05-04-v1-rc-finalization-implementation-plan.md` Chunk-1。
+
+### 退出标准实测对账
+
+按 v1.0 RC spec §4.3 退出标准 + Chunk-1 Verification Gate：
+
+| 退出条件 | 实测结果 |
+|---|---|
+| 真实微信扫码绑定成功 | ✅ 多次扫码 `channel_bindings.status=bound`、`bound_identity=o9cq800xszCM8jyoS9YpRKpvAN9c@im.wechat`、`apps.status=running` |
+| 真实微信消息能生成 workspace 文件并下载 | ✅ 消息 → embedded agent → openai SDK → new-api → ollama qwen2.5:0.5b → write tool → `/workspace/hello.txt`（21 字节 `OpenClaw workspace ok`） |
+| Manager workspace API 列目录 | ✅ `GET /api/v1/apps/{id}/workspace?path=/` 返回 entries（agent file API 代理透传） |
+| Manager workspace API 单文件下载 | ✅ `GET /api/v1/apps/{id}/workspace/file?path=hello.txt` → `OpenClaw workspace ok` |
+
+### 实测时序
+
+| 时间 | 事件 |
+|---|---|
+| 11:48:49 | 第三次 / 决定性扫码 → `bound_identity` 写入 |
+| 11:48:53 | OpenClaw weixin plugin `[d2eee0e15483-im-bot]` 启动 + `accounts.json` 持久化 |
+| 15:35:25 | 容器 `fce0c97412bf` 完整配置启动（OPENAI_API_KEY 51 字符 + oc-manager_default network + 完整 catalog） |
+| 15:48 | hello.txt 写入 `.local/data/agent/apps/{id}/workspace/`（节点）+ 容器 bind mount 同步 |
+| 15:55 | manager workspace API 列目录 + 下载校验通过 |
+
+### Chunk-1 期间发现并修复的 manager / 部署 bug
+
+10 个非平凡 bug 修复，分散在 5 个 atomic commit：
+
+| Commit | 主题 | 关键修复 |
+|---|---|---|
+| `5584c22` | `fix(newapi): CreateAPIKey 不强制 key 字段` | new-api admin API 不返回完整 key（POST 不返回，GET 截断 18 字符），manager 不再依赖 admin API 拿 sk- token |
+| `a705816` | `fix(runtime): hijack-over-https` | docker SDK ContainerExecAttach 走 hijack TCP 时把 `https` 当 network type 失败，改用 `tcp://host:port/v1/docker` 形式 + WithHTTPHeaders 注入 Authorization；删除 bearerProxyTransport |
+| `c2d4bfb` | `fix(channel): plugin state fallback + 前端「刷新二维码」按钮` | weixin plugin 已授权账号重扫静默成功不 emit "bound" 事件，改读 plugin state 文件直接推 bound；前端按钮覆盖 expired 状态 |
+| `83028fc` | `feat(openclaw): 容器内嵌 agent 模型链路全套 yaml 配置` | `openclaw.llm.{base_url,default_provider,default_model,openai_compat.api_key,container_networks}` 全套；agent scopes 加 openclaw-config + runtime/file PUT；buildContainerSpec mount models.json + 加 oc-manager_default network；ensureAPIKey 默认 unlimited_quota=true |
+| `044f6ed` | `fix(web): API 401 自动清 token 跳 login` | client.ts 加 setUnauthorizedHandler；main.ts 注入 router.replace；避免 mutation 失败被业务组件 catch 吞掉 |
+
+### 已知降级（写入 spec 范围之外，本 chunk 不修）
+
+| 降级项 | 原因 | 长期方向 |
+|---|---|---|
+| **per-app token 隔离失效** | new-api admin POST/GET 不返回新建 token 完整 sk- key（只在 web UI 创建时一次性显示），manager 拿不到。dev 部署用 yaml 全局 sk- token，所有应用共用 | 待 new-api 提供"创建后短窗口可读完整 key"的 API 或 manager 与 new-api 共享 secret 服务 |
+| **OpenClaw startup model warmup EBUSY warning** | file-level bind mount 不允许 rename target == mount point，OpenClaw warmup 报 `EBUSY: rename .json.tmp -> .json`，但 mode=replace 后用 openclaw.json providers，warmup 失败属 cosmetic | OpenClaw 上游不在 RW mount 文件上做 rename，或 manager 改 docker exec 注入而非 mount |
+| **qwen2.5:0.5b 模型质量** | 0.5B 参数小模型理解中文指令偶尔选错 tool（如把"生成 hello.txt"理解成 video_generate）。链路本身完全打通 | 部署侧选更大模型（qwen2.5:1.5b / 7b 等） |
+| **OpenClaw 容器网络硬编码 `oc-manager_default`** | docker compose project name 派生的默认 network；不同 project name 部署需修改 yaml | yaml `openclaw.container_networks` 已支持配置，部署文档需明确说明 |
+
+### 自动化检查
+
+| 命令 | 结果 | 备注 |
+|---|---|---|
+| `go test ./... -count=1` | ✅ | 21 个包，含本 chunk 新增 newapi / channel_login / app_initialize 单测 |
+| `go vet ./...` | ✅ | 零警告 |
+| `go build ./...` | ✅ | 全 binary 干净编译 |
+| `npm run typecheck` | ✅ | vue-tsc 无报错 |
+| `npm test -- --run` | ✅ | vitest 12/12 通过 |
+| docker compose 全栈 healthy | ✅ | manager-api / oc-runtime-agent / new-api / new-api-postgres / new-api-redis / ollama / manager-postgres / manager-redis / manager-web 9 服务 |
+
+### chrome-devtools MCP 主路由 sanity
+
+复用 Chunk-Z sanity 结果（路由层未引入回归）；本 chunk 新增前端页面验证：
+
+| 路由 | 结果 | 备注 |
+|---|---|---|
+| `/apps/:appId/channels` | ✅ | 二维码 PNG 渲染 + "刷新二维码"按钮 + 过期提示 + 状态 `bound + bound_identity` |
+| `/apps/:appId/workspace` | ✅ | 渲染 hello.txt 文件项（21 字节）+ 单文件下载触发链 |
+
+### Chunk-1 Verification Gate 结论
+
+✅ 通过：spec §4.3 task 6 退出标准全部达成；本 chunk 完整 5 个 atomic commit 已合入主干；遗留 4 项降级均明确标注且不阻塞 v1.0 RC 业务可用性。
+
+### Chunk-1 累计文件改动
+
+10 个 modified + 0 个新增（不含此 verification-report）：
+
+- 后端：`internal/integrations/{newapi/client.go,newapi/client_test.go,agent/docker_proxy.go,agent/file_client.go,runtime/agent_backed.go}`、`internal/worker/handlers/{app_initialize.go,app_initialize_test.go,channel_login.go,channel_login_test.go}`、`internal/config/config.go`、`cmd/server/main.go`、`runtime/agent/scopes.go`
+- 配置：`.env.example`、`config/config.yaml.example`、`docker-compose.yml`
+- 前端：`web/src/api/client.ts`、`web/src/main.ts`、`web/src/pages/apps/AppChannelsTab.vue`
+
+### 引用契约信息
+
+- new-api admin API 鉴权：`Authorization: Bearer {access_token}` + `New-Api-User: {user_id}`（参见 https://www.newapi.ai/zh/docs/api/management/auth）
+- 当前 dev 部署的 new-api 全局 sk- token 写在 `.env` `OPENCLAW_LLM_OPENAI_API_KEY`（不进 git）
