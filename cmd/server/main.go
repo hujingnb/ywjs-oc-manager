@@ -37,7 +37,7 @@ import (
 func main() {
 	configPath := os.Getenv("OCM_CONFIG")
 	if configPath == "" {
-		configPath = "config/config.yaml"
+		configPath = "config/manager.yaml"
 	}
 
 	cfg, err := config.LoadFile(configPath)
@@ -104,11 +104,7 @@ func runManager(ctx context.Context, cfg config.Config, logOut io.Writer) error 
 	runtimeNodeStore := store.NewRuntimeNodeStore(dbStore)
 	runtimeNodeService := service.NewRuntimeNodeService(runtimeNodeStore, hashTokenSHA256)
 
-	knowledgeRoot := os.Getenv("OCM_KNOWLEDGE_ROOT")
-	if knowledgeRoot == "" {
-		knowledgeRoot = "/var/lib/oc-manager/knowledge"
-	}
-	safeRoot, err := files.NewSafeRoot(knowledgeRoot, 0)
+	safeRoot, err := files.NewSafeRoot(cfg.App.KnowledgeRoot, 0)
 	if err != nil {
 		return fmt.Errorf("初始化知识库主副本失败: %w", err)
 	}
