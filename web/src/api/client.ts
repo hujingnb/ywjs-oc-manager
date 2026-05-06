@@ -26,6 +26,20 @@ export function getStoredAccessToken(): string | null {
   return readStorage(TOKEN_STORAGE_KEY)
 }
 
+// readCookie 读取 document.cookie 中指定名字的值；用于 CSRF double-submit。
+// 在 SSR / 单测环境（无 document）时返回 null，避免崩溃。
+function readCookie(name: string): string | null {
+  if (typeof document === 'undefined') return null
+  const target = `${name}=`
+  for (const part of document.cookie.split(';')) {
+    const trimmed = part.trim()
+    if (trimmed.startsWith(target)) {
+      return decodeURIComponent(trimmed.slice(target.length))
+    }
+  }
+  return null
+}
+
 export function getStoredRefreshToken(): string | null {
   return readStorage(REFRESH_STORAGE_KEY)
 }
@@ -72,6 +86,16 @@ export async function apiRequest<T>(path: string, options: RequestOptions = {}):
   if (options.body !== undefined) {
     headers['Content-Type'] = 'application/json'
     init.body = JSON.stringify(options.body)
+  }
+
+  // CSRF double-submit cookie：写操作必须把 csrf_token cookie 复制到 X-CSRF-Token header。
+  // 后端 RequireCSRF middleware 校验两者相等才放过；GET 不需要这个 header。
+  const method = (init.method ?? 'GET').toUpperCase()
+  if (method !== 'GET' && method !== 'HEAD' && method !== 'OPTIONS') {
+    const csrf = readCookie('csrf_token')
+    if (csrf) {
+      headers['X-CSRF-Token'] = csrf
+    }
   }
 
   const url = buildUrl(path, options.query)

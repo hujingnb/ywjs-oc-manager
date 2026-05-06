@@ -9,6 +9,7 @@ import (
 	"github.com/gin-gonic/gin"
 
 	"oc-manager/internal/auth"
+	"oc-manager/internal/api/middleware"
 	redactlog "oc-manager/internal/log"
 	"oc-manager/internal/service"
 )
@@ -66,6 +67,7 @@ func (h *AuthHandler) Login(c *gin.Context) {
 		writeAuthError(c, err)
 		return
 	}
+	setCSRFCookie(c, result.Tokens.AccessToken)
 	c.JSON(http.StatusOK, result)
 }
 
@@ -81,7 +83,24 @@ func (h *AuthHandler) Refresh(c *gin.Context) {
 		writeAuthError(c, err)
 		return
 	}
+	setCSRFCookie(c, result.Tokens.AccessToken)
 	c.JSON(http.StatusOK, result)
+}
+
+// setCSRFCookie 为浏览器 set 一个非 HttpOnly 的 csrf_token cookie，
+// 前端 axios 拦截器读它写到 X-CSRF-Token header 完成 double-submit 校验。
+// 值复用 access_token 末 32 位字符（已经是高熵），避免再多生成一个独立随机源。
+func setCSRFCookie(c *gin.Context, accessToken string) {
+	if accessToken == "" {
+		return
+	}
+	value := accessToken
+	if len(value) > 32 {
+		value = value[len(value)-32:]
+	}
+	// HttpOnly=false 让前端 JS 读得到；Secure=false 让本地 http://localhost 调试能用，
+	// 生产环境部署在 https 反代后建议改 Secure=true。
+	c.SetCookie(middleware.CSRFCookieName, value, 8*60*60, "/", "", false, false)
 }
 
 // Logout 撤销 refresh token。
