@@ -1,10 +1,14 @@
 // Package main 是一次性 platform_admin 种子命令。
 //
+// 配置：
+//   - 从 OCM_CONFIG 指向的 YAML 读取 database.url；未设置时默认 config/manager.yaml。
+//
 // 用法（容器内）：
-//   go run ./cmd/seed-admin <username> <password> [display_name]
+//
+//	go run ./cmd/seed-admin <username> <password> [display_name]
 //
 // 操作：
-//   - 校验 DATABASE_URL 已设置；
+//   - 加载 manager YAML 并校验 database.url 已设置；
 //   - 用 auth.HashPassword(Argon2id) 生成 password_hash；
 //   - INSERT 一条 role=platform_admin / status=active 的用户行；
 //   - 用户名冲突时退出 0 不报错（幂等），便于重复执行。
@@ -20,6 +24,7 @@ import (
 	"github.com/jackc/pgx/v5"
 
 	"oc-manager/internal/auth"
+	"oc-manager/internal/config"
 )
 
 func main() {
@@ -32,9 +37,17 @@ func main() {
 	if len(os.Args) >= 4 {
 		displayName = os.Args[3]
 	}
-	dsn := os.Getenv("DATABASE_URL")
+	configPath := os.Getenv("OCM_CONFIG")
+	if configPath == "" {
+		configPath = "config/manager.yaml"
+	}
+	cfg, err := config.LoadFile(configPath)
+	if err != nil {
+		log.Fatalf("加载配置失败: %v", err)
+	}
+	dsn := cfg.Database.URL
 	if dsn == "" {
-		log.Fatalf("缺少 DATABASE_URL")
+		log.Fatalf("配置文件 %s 缺少 database.url", configPath)
 	}
 	ctx := context.Background()
 	conn, err := pgx.Connect(ctx, dsn)
