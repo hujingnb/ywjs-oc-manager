@@ -239,6 +239,16 @@ func runManager(ctx context.Context, cfg config.Config, logOut io.Writer) error 
 	if err := registry.Register(domain.JobTypeAppHealthCheck, healthCheckHandler.Handle); err != nil {
 		return fmt.Errorf("注册 app_health_check handler 失败: %w", err)
 	}
+	if newapiClient != nil {
+		disableHandler := handlers.NewDisableAPIKeyHandler(dbStore.Queries, newapiClient)
+		if err := registry.Register(domain.JobTypeNewAPIDisableKey, disableHandler.Handle); err != nil {
+			return fmt.Errorf("注册 newapi_disable_key handler 失败: %w", err)
+		}
+		restoreHandler := handlers.NewRestoreAPIKeyHandler(dbStore.Queries, newapiClient)
+		if err := registry.Register(domain.JobTypeNewAPIRestoreKey, restoreHandler.Handle); err != nil {
+			return fmt.Errorf("注册 newapi_restore_key handler 失败: %w", err)
+		}
+	}
 
 	jobWorker := worker.New(dbStore.Queries, redisQueue, registry, worker.Config{WorkerID: cfg.App.HTTPAddr})
 	jobScheduler := scheduler.New(dbStore.Queries, redisQueue, scheduler.Config{})

@@ -130,6 +130,25 @@ export function useTriggerRuntimeOperation(appId: Ref<string | undefined>) {
   })
 }
 
+// useToggleAppAPIKey 触发禁用 / 恢复应用绑定的 new-api token。
+// 后端只允许 platform_admin / org_admin；普通成员调用会 403。
+export function useToggleAppAPIKey(appId: Ref<string | undefined>) {
+  const client = useQueryClient()
+  return useMutation({
+    mutationFn: async (action: 'disable' | 'restore') => {
+      if (!appId.value) throw new Error('缺少应用 ID')
+      const response = await apiRequest<{ runtime_operation: RuntimeOperationResult }>(
+        `/api/v1/apps/${appId.value}/api-key/${action}`,
+        { method: 'POST' },
+      )
+      return response.runtime_operation
+    },
+    onSuccess: () => {
+      void client.invalidateQueries({ queryKey: appKey(appId.value) })
+    },
+  })
+}
+
 // useInitializeAppMutation 触发应用初始化重试。
 // 后端在 status ∉ {error, draft} 时返 409，调用方应展示提示。
 export function useInitializeAppMutation(appId: Ref<string | undefined>) {

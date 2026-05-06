@@ -38,6 +38,9 @@ func RegisterAppRuntimeRoutes(router gin.IRouter, handler *AppRuntimeHandler) {
 	group.POST("/delete", handler.Delete)
 	router.POST("/api/v1/apps/:appId/initialize", handler.Initialize)
 	router.GET("/api/v1/apps/:appId/runtime", handler.GetRuntime)
+	keyGroup := router.Group("/api/v1/apps/:appId/api-key")
+	keyGroup.POST("/disable", handler.DisableAPIKey)
+	keyGroup.POST("/restore", handler.RestoreAPIKey)
 }
 
 // Start 触发启动。
@@ -48,6 +51,14 @@ func (h *AppRuntimeHandler) Stop(c *gin.Context)    { h.trigger(c, service.Runti
 func (h *AppRuntimeHandler) Restart(c *gin.Context) { h.trigger(c, service.RuntimeOperationRestart) }
 // Delete 触发删除。
 func (h *AppRuntimeHandler) Delete(c *gin.Context)  { h.trigger(c, service.RuntimeOperationDelete) }
+// DisableAPIKey 触发禁用 new-api token；仅平台 / 组织管理员。
+func (h *AppRuntimeHandler) DisableAPIKey(c *gin.Context) {
+	h.trigger(c, service.RuntimeOperationDisableAPIKey)
+}
+// RestoreAPIKey 触发启用 new-api token；仅平台 / 组织管理员。
+func (h *AppRuntimeHandler) RestoreAPIKey(c *gin.Context) {
+	h.trigger(c, service.RuntimeOperationRestoreAPIKey)
+}
 
 // GetRuntime 返回应用容器的 inspect 视图。
 // container_id 为空时直接返回 status="no_container"，避免无谓的 docker 调用。

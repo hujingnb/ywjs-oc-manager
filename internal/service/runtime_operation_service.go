@@ -177,10 +177,12 @@ func snapshotFromApp(app sqlc.App) *RuntimeSnapshotView {
 type RuntimeOperation string
 
 const (
-	RuntimeOperationStart   RuntimeOperation = "start"
-	RuntimeOperationStop    RuntimeOperation = "stop"
-	RuntimeOperationRestart RuntimeOperation = "restart"
-	RuntimeOperationDelete  RuntimeOperation = "delete"
+	RuntimeOperationStart           RuntimeOperation = "start"
+	RuntimeOperationStop            RuntimeOperation = "stop"
+	RuntimeOperationRestart         RuntimeOperation = "restart"
+	RuntimeOperationDelete          RuntimeOperation = "delete"
+	RuntimeOperationDisableAPIKey   RuntimeOperation = "disable_api_key"
+	RuntimeOperationRestoreAPIKey   RuntimeOperation = "restore_api_key"
 )
 
 // RuntimeOperationResult 是异步任务派发结果。
@@ -207,6 +209,11 @@ func (s *RuntimeOperationService) Trigger(ctx context.Context, principal auth.Pr
 		return RuntimeOperationResult{}, fmt.Errorf("查询应用失败: %w", err)
 	}
 	if !canTriggerRuntimeOperation(principal, app) {
+		return RuntimeOperationResult{}, ErrRuntimeOperationDenied
+	}
+	// disable/restore api_key 走风控路径，禁止普通成员触发。
+	if (op == RuntimeOperationDisableAPIKey || op == RuntimeOperationRestoreAPIKey) &&
+		principal.Role == domain.UserRoleOrgMember {
 		return RuntimeOperationResult{}, ErrRuntimeOperationDenied
 	}
 	jobType := jobTypeFor(op)
@@ -334,7 +341,8 @@ func (s *RuntimeOperationService) RequestInitialize(ctx context.Context, princip
 
 func isSupportedOperation(op RuntimeOperation) bool {
 	switch op {
-	case RuntimeOperationStart, RuntimeOperationStop, RuntimeOperationRestart, RuntimeOperationDelete:
+	case RuntimeOperationStart, RuntimeOperationStop, RuntimeOperationRestart, RuntimeOperationDelete,
+		RuntimeOperationDisableAPIKey, RuntimeOperationRestoreAPIKey:
 		return true
 	default:
 		return false
@@ -351,6 +359,10 @@ func jobTypeFor(op RuntimeOperation) string {
 		return domain.JobTypeAppRestartContainer
 	case RuntimeOperationDelete:
 		return domain.JobTypeAppDelete
+	case RuntimeOperationDisableAPIKey:
+		return domain.JobTypeNewAPIDisableKey
+	case RuntimeOperationRestoreAPIKey:
+		return domain.JobTypeNewAPIRestoreKey
 	default:
 		return ""
 	}
