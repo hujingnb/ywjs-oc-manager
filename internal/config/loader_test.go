@@ -76,7 +76,7 @@ func TestLoad_DoesNotExpandEnvPlaceholders(t *testing.T) {
 		t.Fatalf("access token ttl = %s, want 15m", cfg.Auth.AccessTokenTTL.Duration)
 	}
 	if cfg.Security.MasterKey != validBase64MasterKey {
-		t.Fatalf("security.master_key = %q, want expanded env", cfg.Security.MasterKey)
+		t.Fatalf("security.master_key = %q, want literal yaml value", cfg.Security.MasterKey)
 	}
 	if cfg.OpenClaw.RuntimeImage != "openclaw-runtime:dev" {
 		t.Fatalf("openclaw.runtime_image = %q, want openclaw-runtime:dev", cfg.OpenClaw.RuntimeImage)
