@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"strconv"
 
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgtype"
@@ -45,6 +46,9 @@ type AppResult struct {
 	AppPrompt     string `json:"app_prompt,omitempty"`
 	ContainerID   string `json:"container_id,omitempty"`
 	APIKeyStatus  string `json:"api_key_status"`
+	// NewapiKeyID 是 new-api 中 token 的数值 id；schema 上是 text 列存的字符串，
+	// 这里解析成 int64 方便 usage service 直接调 GetAPIKey。0 表示未绑定。
+	NewapiKeyID int64 `json:"newapi_key_id,omitempty"`
 }
 
 // Get 查询应用。
@@ -129,6 +133,13 @@ func toAppResult(app sqlc.App) AppResult {
 	}
 	if app.ContainerID.Valid {
 		result.ContainerID = app.ContainerID.String
+	}
+	if app.NewapiKeyID.Valid {
+		// schema 上 newapi_key_id 是 text，但 manager 写入的恒是 int64 字符串。
+		// 解析失败一律视为未绑定，避免污染 service 层。
+		if id, err := strconv.ParseInt(app.NewapiKeyID.String, 10, 64); err == nil {
+			result.NewapiKeyID = id
+		}
 	}
 	return result
 }

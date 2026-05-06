@@ -22,6 +22,7 @@ type usageService interface {
 	GetAppUsage(ctx context.Context, principal auth.Principal, appID, ownerOrgID, ownerUserID string, newapiKeyID int64) (service.AppUsageSnapshot, error)
 	GetMemberUsage(ctx context.Context, principal auth.Principal, orgID, memberID string) (service.AggregatedUsage, error)
 	GetOrgUsage(ctx context.Context, principal auth.Principal, orgID string) (service.AggregatedUsage, error)
+	GetPlatformUsage(ctx context.Context, principal auth.Principal) (service.AggregatedUsage, error)
 }
 
 // NewUsageHandler 创建 usage handler。
@@ -72,19 +73,18 @@ func (h *UsageHandler) GetOrg(c *gin.Context) {
 	c.JSON(http.StatusOK, gin.H{"usage": view})
 }
 
-// GetPlatform 返回平台维度的用量聚合。
-// 当前实现是把所有 active 组织的用量加起来；scope_id 为空。
+// GetPlatform 返回平台维度的用量聚合（跨所有组织所有应用）。
+// 仅平台管理员可调，service 层会做二次拦截。
 func (h *UsageHandler) GetPlatform(c *gin.Context) {
 	principal, ok := h.principal(c)
 	if !ok {
 		return
 	}
-	if principal.Role != "platform_admin" {
-		c.JSON(http.StatusForbidden, gin.H{"error": "仅平台管理员可访问"})
+	view, err := h.service.GetPlatformUsage(c.Request.Context(), principal)
+	if err != nil {
+		writeUsageError(c, err)
 		return
 	}
-	// 平台维度暂时不做完整组织遍历，返回 sentinel scope=platform。
-	view := service.AggregatedUsage{Scope: "platform"}
 	c.JSON(http.StatusOK, gin.H{"usage": view})
 }
 

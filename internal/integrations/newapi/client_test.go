@@ -123,6 +123,23 @@ func TestGetAPIKeyDecodesPayload(t *testing.T) {
 	}
 }
 
+// TestGetAPIKeyMapsRecordNotFound 校验 new-api 对不存在 token 返回 200 +
+// {success:false, message:"record not found"} 时映射成 ErrNotFound，
+// 这样 usage 聚合不会把"已被回收 token"当成 5xx 整体失败。
+func TestGetAPIKeyMapsRecordNotFound(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`{"success":false,"message":"record not found"}`))
+	}))
+	defer server.Close()
+
+	client := NewClient(server.URL, "", 0)
+	_, err := client.GetAPIKey(context.Background(), 999)
+	if !errors.Is(err, ErrNotFound) {
+		t.Fatalf("error = %v, want ErrNotFound", err)
+	}
+}
+
 // TestNewApiUserHeaderOmittedWhenAdminUserIDZero 校验 AdminUserID = 0 时不发送 New-Api-User header；
 // 部分 fake/mock 场景（旧测试构造空 client）依赖此行为，避免 strict mock 拒绝未知 header。
 func TestNewApiUserHeaderOmittedWhenAdminUserIDZero(t *testing.T) {

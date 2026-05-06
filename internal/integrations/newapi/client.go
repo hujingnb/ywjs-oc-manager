@@ -162,6 +162,8 @@ func (c *Client) findTokenByName(ctx context.Context, name string) (APIKey, erro
 }
 
 // GetAPIKey 查询 token 详情。
+// new-api 对不存在的 token id 返回 200 + {success:false, message:"record not found"}，
+// 这里把它显式映射成 ErrNotFound，避免 usage service 把"已被回收 token"当成 5xx 错误吞掉整个聚合。
 func (c *Client) GetAPIKey(ctx context.Context, id int64) (APIKey, error) {
 	var response struct {
 		Success bool   `json:"success"`
@@ -172,6 +174,9 @@ func (c *Client) GetAPIKey(ctx context.Context, id int64) (APIKey, error) {
 		return APIKey{}, err
 	}
 	if !response.Success {
+		if strings.Contains(strings.ToLower(response.Message), "not found") {
+			return APIKey{}, ErrNotFound
+		}
 		return APIKey{}, fmt.Errorf("%w: %s", ErrUpstream, response.Message)
 	}
 	return response.Data, nil

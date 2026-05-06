@@ -61,13 +61,101 @@ func TestUsageServiceMissingProvider(t *testing.T) {
 }
 
 type fakeUsageProvider struct {
-	key newapi.APIKey
-	err error
+	key   newapi.APIKey
+	keys  map[int64]newapi.APIKey
+	err   error
+	calls int
 }
 
-func (f *fakeUsageProvider) GetAPIKey(_ context.Context, _ int64) (newapi.APIKey, error) {
+func (f *fakeUsageProvider) GetAPIKey(_ context.Context, id int64) (newapi.APIKey, error) {
+	f.calls++
 	if f.err != nil {
 		return newapi.APIKey{}, f.err
 	}
+	if f.keys != nil {
+		if k, ok := f.keys[id]; ok {
+			return k, nil
+		}
+	}
 	return f.key, nil
+}
+
+type fakeAppLister struct {
+	apps map[string][]AppResult
+}
+
+func (f *fakeAppLister) ListByOrg(_ context.Context, _ auth.Principal, orgID string, _, _ int32) ([]AppResult, error) {
+	return f.apps[orgID], nil
+}
+
+type fakeOrgLister struct {
+	orgs []OrganizationResult
+}
+
+func (f *fakeOrgLister) ListOrganizations(_ context.Context, _ auth.Principal, _, _ int32) ([]OrganizationResult, error) {
+	return f.orgs, nil
+}
+
+func TestUsageServiceCachesAPIKey(t *testing.T) {
+	provider := &fakeUsageProvider{key: newapi.APIKey{ID: 7, RemainQuota: 50, Status: 1}}
+	svc := NewUsageService(provider)
+	for i := 0; i < 3; i++ {
+		if _, err := svc.GetAppUsage(context.Background(), platformAdmin(), "app-1", "owner-org", "owner-user", 7); err != nil {
+			t.Fatalf("GetAppUsage iter %d: %v", i, err)
+		}
+	}
+	if provider.calls != 1 {
+		t.Fatalf("provider.calls = %d, want 1 (5s cache)", provider.calls)
+	}
+}
+
+func TestUsageServiceGetPlatformAggregates(t *testing.T) {
+	provider := &fakeUsageProvider{keys: map[int64]newapi.APIKey{
+		11: {ID: 11, RemainQuota: 100, Status: 1},
+		22: {ID: 22, RemainQuota: 200, Status: 1},
+	}}
+	lister := &fakeAppLister{apps: map[string][]AppResult{
+		"org-a": {{ID: "app-a", OrgID: "org-a", NewapiKeyID: 11}},
+		"org-b": {{ID: "app-b", OrgID: "org-b", NewapiKeyID: 22}},
+	}}
+	orgs := &fakeOrgLister{orgs: []OrganizationResult{{ID: "org-a"}, {ID: "org-b"}}}
+	svc := NewUsageService(provider)
+	svc.SetAppLister(lister)
+	svc.SetOrgLister(orgs)
+
+	view, err := svc.GetPlatformUsage(context.Background(), platformAdmin())
+	if err != nil {
+		t.Fatalf("GetPlatformUsage: %v", err)
+	}
+	if view.Scope != "platform" || view.TotalRemainQuota != 300 || len(view.Apps) != 2 {
+		t.Fatalf("view = %+v", view)
+	}
+}
+
+func TestUsageServiceGetPlatformForbiddenForNonAdmin(t *testing.T) {
+	svc := NewUsageService(&fakeUsageProvider{})
+	svc.SetAppLister(&fakeAppLister{})
+	svc.SetOrgLister(&fakeOrgLister{})
+	_, err := svc.GetPlatformUsage(context.Background(), auth.Principal{Role: domain.UserRoleOrgAdmin})
+	if !errors.Is(err, ErrForbidden) {
+		t.Fatalf("err = %v, want ErrForbidden", err)
+	}
+}
+
+func TestUsageServiceGetOrgUsesNewapiKeyID(t *testing.T) {
+	provider := &fakeUsageProvider{keys: map[int64]newapi.APIKey{
+		33: {ID: 33, RemainQuota: 80, Status: 1},
+	}}
+	lister := &fakeAppLister{apps: map[string][]AppResult{
+		"org-x": {{ID: "app-x", OrgID: "org-x", NewapiKeyID: 33}},
+	}}
+	svc := NewUsageService(provider)
+	svc.SetAppLister(lister)
+	view, err := svc.GetOrgUsage(context.Background(), platformAdmin(), "org-x")
+	if err != nil {
+		t.Fatalf("GetOrgUsage: %v", err)
+	}
+	if view.TotalRemainQuota != 80 || len(view.Apps) != 1 || view.Apps[0].RemainQuota != 80 {
+		t.Fatalf("view = %+v", view)
+	}
 }
