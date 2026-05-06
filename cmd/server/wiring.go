@@ -212,8 +212,9 @@ func (w *runtimeInspectorWrapper) InspectContainer(ctx context.Context, nodeID, 
 // 当前实现把 dispatcher 错误吞在 service 层（参见 KnowledgeService 的 _ =），
 // 因为主副本已经写入，不应因为同步失败回滚。
 type knowledgeSyncDispatcher struct {
-	queries  knowledgeJobsQueries
-	notifier service.JobNotifier
+	queries     knowledgeJobsQueries
+	notifier    service.JobNotifier
+	syncStatus  knowledgeSyncStatusMarker
 }
 
 type knowledgeJobsQueries interface {
@@ -222,11 +223,45 @@ type knowledgeJobsQueries interface {
 	CreateJob(ctx context.Context, arg sqlc.CreateJobParams) (sqlc.Job, error)
 }
 
+// knowledgeSyncStatusMarker 抽象 (org, node) 状态写入；与 worker handler 同的接口
+// 让 dispatcher 入队时把 pending 写入 knowledge_sync_status，前端能立刻看到"待同步"。
+type knowledgeSyncStatusMarker interface {
+	MarkOrgNodePending(ctx context.Context, orgID, nodeID string) error
+}
+
 func newKnowledgeSyncDispatcher(queries knowledgeJobsQueries, notifier service.JobNotifier) *knowledgeSyncDispatcher {
 	return &knowledgeSyncDispatcher{queries: queries, notifier: notifier}
 }
 
+// SetStatusMarker 注入状态写入器；不调时 dispatcher 不写 pending（旧装配兼容）。
+func (d *knowledgeSyncDispatcher) SetStatusMarker(m knowledgeSyncStatusMarker) {
+	d.syncStatus = m
+}
+
+// RetryOrgNode 触发指定 (org, node) 重新同步：入队一个 'noop' change_type 的 sync job，
+// worker 处理时只走 status writer 把状态推到 synced（无文件改动 → upload/delete 都跳过）。
+//
+// 当前实现简化为入队 'noop' job：worker handler 看到 change_type='noop' 直接 mark synced。
+// 这避免引入"知识库目录全量打 tar 推过去"的额外路径，保持单 job 类型。
+func (d *knowledgeSyncDispatcher) RetryOrgNode(ctx context.Context, orgID, nodeID string) error {
+	if err := d.enqueue(ctx, knowledgeSyncJobInput{
+		Scope:      "org",
+		OrgID:      orgID,
+		NodeID:     nodeID,
+		ChangeType: "noop",
+		RelPath:    "(retry)", // 占位，noop 不读
+		MasterPath: "(retry)",
+	}); err != nil {
+		return err
+	}
+	if d.syncStatus != nil {
+		_ = d.syncStatus.MarkOrgNodePending(ctx, orgID, nodeID)
+	}
+	return nil
+}
+
 // DispatchOrgChange 给所有 active 节点入队一个 sync 任务。
+// 入队成功后立刻写 (org, node) = pending 状态，让前端立即可见"同步中"。
 func (d *knowledgeSyncDispatcher) DispatchOrgChange(ctx context.Context, orgID, relPath, changeType, masterPath string) error {
 	nodes, err := d.queries.ListRuntimeNodes(ctx, sqlc.ListRuntimeNodesParams{Limit: 200, Offset: 0})
 	if err != nil {
@@ -236,15 +271,20 @@ func (d *knowledgeSyncDispatcher) DispatchOrgChange(ctx context.Context, orgID, 
 		if node.Status != "active" {
 			continue
 		}
+		nodeID := uuidToStringWiring(node.ID)
 		if err := d.enqueue(ctx, knowledgeSyncJobInput{
 			Scope:      "org",
 			OrgID:      orgID,
-			NodeID:     uuidToStringWiring(node.ID),
+			NodeID:     nodeID,
 			ChangeType: changeType,
 			RelPath:    relPath,
 			MasterPath: masterPath,
 		}); err != nil {
 			return err
+		}
+		// pending 状态写入失败不阻塞主链路：worker 完成时会再次 upsert（synced/failed）。
+		if d.syncStatus != nil {
+			_ = d.syncStatus.MarkOrgNodePending(ctx, orgID, nodeID)
 		}
 	}
 	return nil

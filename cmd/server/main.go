@@ -111,7 +111,14 @@ func runManager(ctx context.Context, cfg config.Config, logOut io.Writer) error 
 	}
 	knowledgeMaster := files.NewKnowledgeMaster(safeRoot)
 	knowledgeService := service.NewKnowledgeService(knowledgeMaster)
-	knowledgeService.SetSyncDispatcher(newKnowledgeSyncDispatcher(dbStore.Queries, redisQueue))
+	// 同步状态服务：dispatcher 入队时写 pending、worker handler 完成时写 synced/failed、
+	// API 层读取按 org 列出每节点状态供前端展示「重试同步」入口。
+	knowledgeSyncStatusSvc := service.NewKnowledgeSyncStatusService(dbStore.Queries)
+	knowledgeDispatcher := newKnowledgeSyncDispatcher(dbStore.Queries, redisQueue)
+	knowledgeDispatcher.SetStatusMarker(knowledgeSyncStatusSvc)
+	knowledgeService.SetSyncDispatcher(knowledgeDispatcher)
+	knowledgeService.SetSyncStatusSource(knowledgeSyncStatusSvc)
+	knowledgeService.SetRetryDispatcher(knowledgeDispatcher)
 	appService := service.NewAppService(dbStore.Queries)
 	runtimeOpService := service.NewRuntimeOperationService(dbStore.Queries, redisQueue)
 	personaService := service.NewPersonaService(store.NewPersonaStore(dbStore))
@@ -218,6 +225,7 @@ func runManager(ctx context.Context, cfg config.Config, logOut io.Writer) error 
 		return fmt.Errorf("注册 channel_check_binding handler 失败: %w", err)
 	}
 	knowledgeSyncHandler := handlers.NewKnowledgeSyncHandler(knowledgeMaster, runtimeAdapter)
+	knowledgeSyncHandler.SetStatusWriter(knowledgeSyncStatusSvc)
 	if err := registry.Register("knowledge_sync_node", knowledgeSyncHandler.Handle); err != nil {
 		return fmt.Errorf("注册 knowledge_sync_node handler 失败: %w", err)
 	}

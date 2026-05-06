@@ -47,6 +47,53 @@
         </tbody>
       </table>
     </section>
+
+    <section v-if="canManage && effectiveOrgId" class="panel">
+      <div class="panel-heading">
+        <div>
+          <p class="eyebrow">Sync · 节点同步状态</p>
+          <h2>各节点同步状态</h2>
+        </div>
+      </div>
+      <div v-if="syncStatusLoading" class="state-text">加载中…</div>
+      <table v-else>
+        <thead>
+          <tr>
+            <th>节点 ID</th>
+            <th>状态</th>
+            <th>最近成功</th>
+            <th>最近错误</th>
+            <th class="actions-column">操作</th>
+          </tr>
+        </thead>
+        <tbody>
+          <tr v-for="entry in syncStatuses ?? []" :key="entry.node_id">
+            <td><code>{{ entry.node_id.slice(0, 12) }}</code></td>
+            <td>
+              <span :class="['sync-badge', `sync-${entry.status}`]">{{ syncStatusLabel(entry.status) }}</span>
+            </td>
+            <td>{{ formatTime(entry.last_success_at) }}</td>
+            <td>
+              <span v-if="entry.last_error" class="state-text danger">{{ entry.last_error }}</span>
+              <span v-else>—</span>
+            </td>
+            <td class="actions-column">
+              <button
+                class="secondary-button"
+                type="button"
+                :disabled="retryMutation.isPending.value"
+                @click="onRetry(entry.node_id)"
+              >
+                {{ retryMutation.isPending.value ? '入队中…' : '重试同步' }}
+              </button>
+            </td>
+          </tr>
+          <tr v-if="!syncStatuses?.length">
+            <td colspan="5" class="state-text">暂无节点同步记录（上传组织级文件后会自动出现）</td>
+          </tr>
+        </tbody>
+      </table>
+    </section>
   </main>
 </template>
 
@@ -56,6 +103,8 @@ import { computed, ref } from 'vue'
 import {
   useDeleteOrgKnowledge,
   useOrgKnowledgeQuery,
+  useOrgKnowledgeSyncStatusQuery,
+  useRetryOrgKnowledgeSync,
   useUploadOrgKnowledge,
   type KnowledgeEntry,
 } from '@/api/hooks/useKnowledge'
@@ -73,6 +122,21 @@ const canManage = computed(() => auth.user?.role === 'platform_admin' || auth.us
 const { data: listing, isLoading, error } = useOrgKnowledgeQuery(effectiveOrgId, relativeRef)
 const uploadMutation = useUploadOrgKnowledge(effectiveOrgId, relativeRef)
 const deleteMutation = useDeleteOrgKnowledge(effectiveOrgId, relativeRef)
+const { data: syncStatuses, isLoading: syncStatusLoading } = useOrgKnowledgeSyncStatusQuery(effectiveOrgId)
+const retryMutation = useRetryOrgKnowledgeSync(effectiveOrgId)
+
+function syncStatusLabel(s: string): string {
+  return s === 'synced' ? '已同步' : s === 'pending' ? '同步中' : s === 'failed' ? '失败' : s
+}
+
+function formatTime(iso?: string): string {
+  if (!iso) return '—'
+  return new Date(iso).toLocaleString('zh-CN', { hour12: false })
+}
+
+async function onRetry(nodeId: string) {
+  await retryMutation.mutateAsync(nodeId)
+}
 
 function enter(entry: KnowledgeEntry) {
   if (entry.is_dir) {
@@ -121,5 +185,28 @@ function formatSize(value: number): string {
 .primary-button.disabled {
   cursor: not-allowed;
   opacity: 0.5;
+}
+
+.sync-badge {
+  display: inline-block;
+  padding: 2px 10px;
+  border-radius: 10px;
+  font-size: 12px;
+  font-weight: 500;
+}
+
+.sync-pending {
+  background: #fff7e6;
+  color: #ad6800;
+}
+
+.sync-synced {
+  background: #e6f7e0;
+  color: #2c7a2c;
+}
+
+.sync-failed {
+  background: #ffe1e1;
+  color: #b51d1d;
 }
 </style>

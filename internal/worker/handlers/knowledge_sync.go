@@ -29,6 +29,18 @@ type KnowledgeFileSink interface {
 	DeleteAppFile(ctx context.Context, nodeID, appID, relPath string) error
 }
 
+// KnowledgeSyncStatusWriter 抽象 (org, node) 同步状态写入能力。
+//
+// 用于把组织级 knowledge_sync_node job 的成功 / 失败结果记录到 knowledge_sync_status
+// 表，让前端 OrgKnowledgePage 能展示每节点最近态 + 错误原因 + 触发"重试同步"。
+//
+// 应用级同步是同步推送（不走 job），不写本表；本接口只对 org scope 触发。
+// nil 实现表示装配不支持状态记录（旧测试 / 测试桩），handler 跳过写入。
+type KnowledgeSyncStatusWriter interface {
+	MarkOrgNodeSynced(ctx context.Context, orgID, nodeID string) error
+	MarkOrgNodeFailed(ctx context.Context, orgID, nodeID, errMsg string) error
+}
+
 // knowledgeSyncPayload 是 knowledge_sync_node job 的 payload schema。
 //
 // Scope 取值 'org' | 'app'：
@@ -50,13 +62,20 @@ type knowledgeSyncPayload struct {
 
 // KnowledgeSyncHandler 把 manager 主副本变更同步到目标 agent 节点。
 type KnowledgeSyncHandler struct {
-	source KnowledgeFileSource
-	sink   KnowledgeFileSink
+	source       KnowledgeFileSource
+	sink         KnowledgeFileSink
+	statusWriter KnowledgeSyncStatusWriter
 }
 
 // NewKnowledgeSyncHandler 创建 handler。
 func NewKnowledgeSyncHandler(source KnowledgeFileSource, sink KnowledgeFileSink) *KnowledgeSyncHandler {
 	return &KnowledgeSyncHandler{source: source, sink: sink}
+}
+
+// SetStatusWriter 注入 (org, node) 同步状态写入器；不调时 handler 不写状态表，
+// 与旧装配兼容。生产装配应从 cmd/server 注入 db-backed 实现。
+func (h *KnowledgeSyncHandler) SetStatusWriter(w KnowledgeSyncStatusWriter) {
+	h.statusWriter = w
 }
 
 // Handle 处理一次同步事件。
@@ -75,7 +94,26 @@ func (h *KnowledgeSyncHandler) Handle(ctx context.Context, job sqlc.Job) error {
 	if err := payload.validate(); err != nil {
 		return err
 	}
+	if err := h.execute(ctx, payload); err != nil {
+		// 仅 org scope 写状态：app scope 是同步路径不入此 handler 的状态表。
+		if payload.Scope == "org" && h.statusWriter != nil {
+			_ = h.statusWriter.MarkOrgNodeFailed(ctx, payload.OrgID, payload.NodeID, err.Error())
+		}
+		return err
+	}
+	if payload.Scope == "org" && h.statusWriter != nil {
+		_ = h.statusWriter.MarkOrgNodeSynced(ctx, payload.OrgID, payload.NodeID)
+	}
+	return nil
+}
+
+// execute 拆出原核心同步逻辑，让 Handle 集中做 status 旁路。
+func (h *KnowledgeSyncHandler) execute(ctx context.Context, payload knowledgeSyncPayload) error {
 	switch payload.ChangeType {
+	case "noop":
+		// 「重试同步」入口：仅触发状态翻转，不读文件不调 agent。
+		// 真正的全量重新同步在 spec §16.11 的"管理员触发全量重新同步"功能里实现。
+		return nil
 	case "upload_file":
 		if h.source == nil {
 			return fmt.Errorf("knowledge sync handler 未配置主副本源")
@@ -126,7 +164,8 @@ func (p knowledgeSyncPayload) validate() error {
 	default:
 		return fmt.Errorf("未知 scope: %s", p.Scope)
 	}
-	if p.RelPath == "" {
+	// noop 是「重试同步」专用 change_type，不需要 rel_path。
+	if p.ChangeType != "noop" && p.RelPath == "" {
 		return fmt.Errorf("缺少 rel_path")
 	}
 	return nil

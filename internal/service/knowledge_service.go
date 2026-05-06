@@ -18,6 +18,19 @@ type KnowledgeSyncDispatcher interface {
 	DispatchAppChange(ctx context.Context, orgID, appID, relPath, changeType, masterPath string) error
 }
 
+// KnowledgeSyncStatusSource 抽象按 org 取最近同步状态的能力。
+// 由前端 OrgKnowledgePage 通过 GetOrgSyncStatus → 列表展示节点徽章。
+type KnowledgeSyncStatusSource interface {
+	ListByOrg(ctx context.Context, orgID string) ([]SyncStatusResult, error)
+}
+
+// KnowledgeRetryDispatcher 抽象「触发该 (org, node) 立即重试同步」的能力。
+// dev 实现可走与首次入队相同的 dispatcher（DispatchOrgChange 用 noop change_type）；
+// 简化版直接 enqueue 一个 'noop' job 让 worker 推 status=synced。
+type KnowledgeRetryDispatcher interface {
+	RetryOrgNode(ctx context.Context, orgID, nodeID string) error
+}
+
 // KnowledgeService 维护组织和应用维度的知识库主副本。
 //
 // 设计要点：
@@ -26,9 +39,14 @@ type KnowledgeSyncDispatcher interface {
 //   - 写入路径会按租户拆分：org/{orgID}/...、org/{orgID}/app/{appID}/...；
 //   - 应用级同步在主副本写入失败时回滚（这里是文件操作，整体最多一次写入，不需要 SQL 事务）；
 //   - 组织级同步走异步任务，不阻塞主流程。
+//
+// 同步状态：组织级 dispatcher 入队时写 pending、worker 完成时写 synced/failed，
+// 由独立的 KnowledgeSyncStatusService（statusSource + retryDispatcher）维护。
 type KnowledgeService struct {
-	master     *files.KnowledgeMaster
-	dispatcher KnowledgeSyncDispatcher
+	master           *files.KnowledgeMaster
+	dispatcher       KnowledgeSyncDispatcher
+	statusSource     KnowledgeSyncStatusSource
+	retryDispatcher  KnowledgeRetryDispatcher
 }
 
 // NewKnowledgeService 创建知识库服务。
@@ -40,6 +58,40 @@ func NewKnowledgeService(master *files.KnowledgeMaster) *KnowledgeService {
 // 不注入时主副本仍正常写入，但不会触发节点同步——cmd/server 装配阶段必须传入。
 func (s *KnowledgeService) SetSyncDispatcher(d KnowledgeSyncDispatcher) {
 	s.dispatcher = d
+}
+
+// SetSyncStatusSource 注入同步状态读取器，让 GetOrgSyncStatus 暴露每节点状态。
+func (s *KnowledgeService) SetSyncStatusSource(src KnowledgeSyncStatusSource) {
+	s.statusSource = src
+}
+
+// SetRetryDispatcher 注入「重试该 (org, node) 同步」分发器。
+func (s *KnowledgeService) SetRetryDispatcher(d KnowledgeRetryDispatcher) {
+	s.retryDispatcher = d
+}
+
+// GetOrgSyncStatus 列出组织在所有节点上的最近同步状态。
+// 仅组织管理员 / 平台管理员可调。
+func (s *KnowledgeService) GetOrgSyncStatus(ctx context.Context, principal auth.Principal, orgID string) ([]SyncStatusResult, error) {
+	if !canManageOrg(principal, orgID) {
+		return nil, ErrKnowledgeForbidden
+	}
+	if s.statusSource == nil {
+		return []SyncStatusResult{}, nil
+	}
+	return s.statusSource.ListByOrg(ctx, orgID)
+}
+
+// RetryOrgNodeSync 触发指定 (org, node) 重新同步；通常由前端「重试同步」按钮调用。
+// 仅组织管理员 / 平台管理员可调。
+func (s *KnowledgeService) RetryOrgNodeSync(ctx context.Context, principal auth.Principal, orgID, nodeID string) error {
+	if !canManageOrg(principal, orgID) {
+		return ErrKnowledgeForbidden
+	}
+	if s.retryDispatcher == nil {
+		return fmt.Errorf("重试分发器未配置")
+	}
+	return s.retryDispatcher.RetryOrgNode(ctx, orgID, nodeID)
 }
 
 // KnowledgeListResult 是列表接口的返回。

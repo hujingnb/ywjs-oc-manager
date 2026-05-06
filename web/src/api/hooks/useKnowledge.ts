@@ -155,3 +155,52 @@ export function useDeleteAppKnowledge(
 }
 
 export const _appKnowledgeKey = appKey
+
+// ============================================================================
+// 组织级知识库节点同步状态（Chunk-2 Task 7+8）
+// ============================================================================
+
+export interface OrgSyncStatusEntry {
+  org_id: string
+  node_id: string
+  status: 'pending' | 'synced' | 'failed'
+  last_success_at?: string
+  last_error?: string
+  updated_at: string
+}
+
+const orgSyncStatusKey = (orgId: string | undefined) => ['knowledge', 'org', orgId, 'sync-status'] as const
+
+// useOrgKnowledgeSyncStatusQuery 拉取组织在所有节点的最近同步状态。
+// 4 秒轮询一次，让前端能看到 pending → synced/failed 状态翻转。
+export function useOrgKnowledgeSyncStatusQuery(orgId: Ref<string | undefined>) {
+  return useQuery<OrgSyncStatusEntry[]>({
+    queryKey: ['knowledge', 'org', orgId, 'sync-status'],
+    enabled: () => Boolean(orgId.value),
+    refetchInterval: 4000,
+    queryFn: async () => {
+      if (!orgId.value) return []
+      const resp = await apiRequest<{ statuses: OrgSyncStatusEntry[] }>(
+        `/api/v1/organizations/${orgId.value}/knowledge/sync-status`,
+      )
+      return resp.statuses ?? []
+    },
+  })
+}
+
+// useRetryOrgKnowledgeSync 触发指定 (org, node) 重新同步。
+export function useRetryOrgKnowledgeSync(orgId: Ref<string | undefined>) {
+  const client = useQueryClient()
+  return useMutation({
+    mutationFn: async (nodeId: string) => {
+      if (!orgId.value) throw new Error('缺少 org_id')
+      await apiRequest<void>(`/api/v1/organizations/${orgId.value}/knowledge/sync-status/retry`, {
+        method: 'POST',
+        body: { node_id: nodeId },
+      })
+    },
+    onSuccess: () => {
+      void client.invalidateQueries({ queryKey: orgSyncStatusKey(orgId.value) })
+    },
+  })
+}

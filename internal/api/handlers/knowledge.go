@@ -26,6 +26,8 @@ type knowledgeService interface {
 	DeleteAppFile(ctx context.Context, principal auth.Principal, orgID, appID, ownerUserID, relative string) error
 	ListOrg(ctx context.Context, principal auth.Principal, orgID, relative string) (service.KnowledgeListResult, error)
 	ListApp(ctx context.Context, principal auth.Principal, orgID, appID, ownerUserID, relative string) (service.KnowledgeListResult, error)
+	GetOrgSyncStatus(ctx context.Context, principal auth.Principal, orgID string) ([]service.SyncStatusResult, error)
+	RetryOrgNodeSync(ctx context.Context, principal auth.Principal, orgID, nodeID string) error
 }
 
 // NewKnowledgeHandler 创建 handler。
@@ -41,11 +43,49 @@ func RegisterKnowledgeRoutes(router gin.IRouter, handler *KnowledgeHandler) {
 	orgGroup.GET("", handler.ListOrg)
 	orgGroup.POST("", handler.SaveOrg)
 	orgGroup.DELETE("", handler.DeleteOrg)
+	orgGroup.GET("/sync-status", handler.GetOrgSyncStatus)
+	orgGroup.POST("/sync-status/retry", handler.RetryOrgSync)
 
 	appGroup := router.Group("/api/v1/apps/:appId/knowledge")
 	appGroup.GET("", handler.ListApp)
 	appGroup.POST("", handler.SaveApp)
 	appGroup.DELETE("", handler.DeleteApp)
+}
+
+// GetOrgSyncStatus 列出组织在所有节点的最近同步状态。
+// 仅组织管理员 / 平台管理员可调；返回 [{node_id, status, last_success_at, last_error, updated_at}]。
+func (h *KnowledgeHandler) GetOrgSyncStatus(c *gin.Context) {
+	principal, ok := h.principal(c)
+	if !ok {
+		return
+	}
+	statuses, err := h.service.GetOrgSyncStatus(c.Request.Context(), principal, c.Param("orgId"))
+	if err != nil {
+		writeKnowledgeError(c, err)
+		return
+	}
+	c.JSON(http.StatusOK, gin.H{"statuses": statuses})
+}
+
+// RetryOrgSync 触发指定 (org, node) 重新同步。
+// body: {"node_id": "..."}；仅组织管理员 / 平台管理员可调。
+func (h *KnowledgeHandler) RetryOrgSync(c *gin.Context) {
+	principal, ok := h.principal(c)
+	if !ok {
+		return
+	}
+	var body struct {
+		NodeID string `json:"node_id" binding:"required"`
+	}
+	if err := c.ShouldBindJSON(&body); err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "请求参数不完整"})
+		return
+	}
+	if err := h.service.RetryOrgNodeSync(c.Request.Context(), principal, c.Param("orgId"), body.NodeID); err != nil {
+		writeKnowledgeError(c, err)
+		return
+	}
+	c.JSON(http.StatusAccepted, gin.H{"status": "pending"})
 }
 
 // ListOrg 列出组织级知识库。
