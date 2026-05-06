@@ -46,6 +46,10 @@ type Querier interface {
 	ListOrganizations(ctx context.Context, arg ListOrganizationsParams) ([]Organization, error)
 	ListReadyJobs(ctx context.Context, limit int32) ([]Job, error)
 	ListRechargeRecordsByOrg(ctx context.Context, arg ListRechargeRecordsByOrgParams) ([]RechargeRecord, error)
+	// 列出当前期望持有 OpenClaw 容器的应用，供 scheduler 周期 dispatch
+	// runtime_refresh_status 与 app_health_check job。
+	// running 是常态；binding_waiting 表示容器已起但渠道还在登录中，依然要刷指标。
+	ListRunningApps(ctx context.Context) ([]ListRunningAppsRow, error)
 	ListRuntimeNodes(ctx context.Context, arg ListRuntimeNodesParams) ([]RuntimeNode, error)
 	ListUsersByOrg(ctx context.Context, arg ListUsersByOrgParams) ([]User, error)
 	LockJobForUpdate(ctx context.Context, id pgtype.UUID) (Job, error)
@@ -59,6 +63,7 @@ type Querier interface {
 	RevokeRefreshToken(ctx context.Context, id pgtype.UUID) (RefreshToken, error)
 	SetAppContainer(ctx context.Context, arg SetAppContainerParams) (App, error)
 	SetAppNewAPIKey(ctx context.Context, arg SetAppNewAPIKeyParams) (App, error)
+	SetAppRuntimeSnapshot(ctx context.Context, arg SetAppRuntimeSnapshotParams) (App, error)
 	SetAppStatus(ctx context.Context, arg SetAppStatusParams) (App, error)
 	SetChannelBindingChallenge(ctx context.Context, arg SetChannelBindingChallengeParams) (ChannelBinding, error)
 	SetChannelBindingStatus(ctx context.Context, arg SetChannelBindingStatusParams) (ChannelBinding, error)

@@ -24,6 +24,31 @@
       <p v-if="runtime?.container?.image" class="state-text">
         镜像：<code>{{ runtime.container.image }}</code>
       </p>
+
+      <div v-if="runtime?.snapshot" class="snapshot-grid">
+        <div class="snapshot-cell">
+          <p class="snapshot-label">CPU</p>
+          <p class="snapshot-value">{{ runtime.snapshot.cpu_percent.toFixed(1) }}%</p>
+        </div>
+        <div class="snapshot-cell">
+          <p class="snapshot-label">内存</p>
+          <p class="snapshot-value">{{ formatBytes(runtime.snapshot.memory_usage_bytes) }}</p>
+          <p class="snapshot-foot">limit {{ formatBytes(runtime.snapshot.memory_limit_bytes) }}</p>
+        </div>
+        <div class="snapshot-cell">
+          <p class="snapshot-label">网络 RX</p>
+          <p class="snapshot-value">{{ formatBytes(runtime.snapshot.network_rx_bytes) }}</p>
+        </div>
+        <div class="snapshot-cell">
+          <p class="snapshot-label">网络 TX</p>
+          <p class="snapshot-value">{{ formatBytes(runtime.snapshot.network_tx_bytes) }}</p>
+        </div>
+        <div class="snapshot-meta">
+          <span>采样时间：{{ formatTime(runtime.snapshot.collected_at) }}（30s 周期）</span>
+          <span v-if="runtime.snapshot.last_error" class="state-text danger">采样错误：{{ runtime.snapshot.last_error }}</span>
+        </div>
+      </div>
+      <p v-else class="state-text">资源指标尚未采集（首次采集需 30s 内完成）。</p>
     </div>
 
     <p v-if="actionFeedback" class="state-text" :class="{ danger: actionError }">{{ actionFeedback }}</p>
@@ -108,6 +133,18 @@ async function onConfirmDelete() {
   await runMutation('delete')
 }
 
+function formatBytes(value: number): string {
+  if (!value) return '0 B'
+  if (value < 1024) return `${value} B`
+  if (value < 1024 * 1024) return `${(value / 1024).toFixed(1)} KB`
+  if (value < 1024 * 1024 * 1024) return `${(value / 1024 / 1024).toFixed(1)} MB`
+  return `${(value / 1024 / 1024 / 1024).toFixed(2)} GB`
+}
+
+function formatTime(iso: string): string {
+  return new Date(iso).toLocaleString('zh-CN', { hour12: false })
+}
+
 async function runMutation(op: 'start' | 'stop' | 'restart' | 'delete') {
   actionFeedback.value = ''
   actionError.value = false
@@ -131,5 +168,46 @@ async function runMutation(op: 'start' | 'stop' | 'restart' | 'delete') {
 .danger {
   color: rgba(220, 38, 38, 1);
   border-color: rgba(220, 38, 38, 0.4);
+}
+
+.snapshot-grid {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(120px, 1fr));
+  gap: 12px;
+  margin-top: 12px;
+}
+
+.snapshot-cell {
+  padding: 12px;
+  background: #f5fbfa;
+  border: 1px solid #d6e8e3;
+  border-radius: 8px;
+}
+
+.snapshot-label {
+  font-size: 12px;
+  color: #6b7c79;
+  margin: 0 0 4px;
+}
+
+.snapshot-value {
+  font-size: 18px;
+  font-weight: 600;
+  color: #276d5c;
+  margin: 0;
+}
+
+.snapshot-foot {
+  font-size: 11px;
+  color: #99a8a4;
+  margin: 4px 0 0;
+}
+
+.snapshot-meta {
+  grid-column: 1 / -1;
+  display: flex;
+  gap: 16px;
+  font-size: 12px;
+  color: #6b7c79;
 }
 </style>

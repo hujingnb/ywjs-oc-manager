@@ -231,6 +231,10 @@ func runManager(ctx context.Context, cfg config.Config, logOut io.Writer) error 
 	if err := registry.Register("knowledge_sync_node", knowledgeSyncHandler.Handle); err != nil {
 		return fmt.Errorf("注册 knowledge_sync_node handler 失败: %w", err)
 	}
+	runtimeRefreshHandler := handlers.NewRuntimeRefreshStatusHandler(dbStore.Queries, runtimeAdapter)
+	if err := registry.Register(domain.JobTypeRuntimeRefreshStatus, runtimeRefreshHandler.Handle); err != nil {
+		return fmt.Errorf("注册 runtime_refresh_status handler 失败: %w", err)
+	}
 
 	jobWorker := worker.New(dbStore.Queries, redisQueue, registry, worker.Config{WorkerID: cfg.App.HTTPAddr})
 	jobScheduler := scheduler.New(dbStore.Queries, redisQueue, scheduler.Config{})
@@ -274,6 +278,8 @@ func runManager(ctx context.Context, cfg config.Config, logOut io.Writer) error 
 		_, err := nodeHealth.Reconcile(ctx)
 		return err
 	})
+	runtimeRefresh := newRuntimeRefreshDispatcher(dbStore.Queries, redisQueue)
+	runtimeRefreshTask := service.NewPeriodicReconciler("runtime_refresh_status_dispatch", 30*time.Second, runtimeRefresh.Tick)
 
 	eg, gctx := errgroup.WithContext(rootCtx)
 
@@ -288,6 +294,11 @@ func runManager(ctx context.Context, cfg config.Config, logOut io.Writer) error 
 	eg.Go(func() error { return loop.Run(gctx) })
 	eg.Go(func() error {
 		return nodeHealthTask.Run(gctx, func(format string, args ...any) {
+			logger.Printf(format, args...)
+		})
+	})
+	eg.Go(func() error {
+		return runtimeRefreshTask.Run(gctx, func(format string, args ...any) {
 			logger.Printf(format, args...)
 		})
 	})

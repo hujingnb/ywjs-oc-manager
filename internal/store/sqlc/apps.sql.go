@@ -25,7 +25,7 @@ INSERT INTO apps (
 ) VALUES (
     $1, $2, $3, $4, $5, $6, $7, $8, $9
 )
-RETURNING id, org_id, owner_user_id, runtime_node_id, name, description, status, persona_mode, app_prompt, container_id, container_name, newapi_key_id, newapi_key_ciphertext, api_key_status, created_at, updated_at, deleted_at
+RETURNING id, org_id, owner_user_id, runtime_node_id, name, description, status, persona_mode, app_prompt, container_id, container_name, newapi_key_id, newapi_key_ciphertext, api_key_status, created_at, updated_at, deleted_at, runtime_snapshot_json, runtime_snapshot_at
 `
 
 type CreateAppParams struct {
@@ -71,12 +71,14 @@ func (q *Queries) CreateApp(ctx context.Context, arg CreateAppParams) (App, erro
 		&i.CreatedAt,
 		&i.UpdatedAt,
 		&i.DeletedAt,
+		&i.RuntimeSnapshotJson,
+		&i.RuntimeSnapshotAt,
 	)
 	return i, err
 }
 
 const getActiveAppByOwner = `-- name: GetActiveAppByOwner :one
-SELECT id, org_id, owner_user_id, runtime_node_id, name, description, status, persona_mode, app_prompt, container_id, container_name, newapi_key_id, newapi_key_ciphertext, api_key_status, created_at, updated_at, deleted_at
+SELECT id, org_id, owner_user_id, runtime_node_id, name, description, status, persona_mode, app_prompt, container_id, container_name, newapi_key_id, newapi_key_ciphertext, api_key_status, created_at, updated_at, deleted_at, runtime_snapshot_json, runtime_snapshot_at
 FROM apps
 WHERE owner_user_id = $1 AND deleted_at IS NULL
 `
@@ -102,12 +104,14 @@ func (q *Queries) GetActiveAppByOwner(ctx context.Context, ownerUserID pgtype.UU
 		&i.CreatedAt,
 		&i.UpdatedAt,
 		&i.DeletedAt,
+		&i.RuntimeSnapshotJson,
+		&i.RuntimeSnapshotAt,
 	)
 	return i, err
 }
 
 const getApp = `-- name: GetApp :one
-SELECT id, org_id, owner_user_id, runtime_node_id, name, description, status, persona_mode, app_prompt, container_id, container_name, newapi_key_id, newapi_key_ciphertext, api_key_status, created_at, updated_at, deleted_at
+SELECT id, org_id, owner_user_id, runtime_node_id, name, description, status, persona_mode, app_prompt, container_id, container_name, newapi_key_id, newapi_key_ciphertext, api_key_status, created_at, updated_at, deleted_at, runtime_snapshot_json, runtime_snapshot_at
 FROM apps
 WHERE id = $1
 `
@@ -133,12 +137,14 @@ func (q *Queries) GetApp(ctx context.Context, id pgtype.UUID) (App, error) {
 		&i.CreatedAt,
 		&i.UpdatedAt,
 		&i.DeletedAt,
+		&i.RuntimeSnapshotJson,
+		&i.RuntimeSnapshotAt,
 	)
 	return i, err
 }
 
 const listAppsByOrg = `-- name: ListAppsByOrg :many
-SELECT id, org_id, owner_user_id, runtime_node_id, name, description, status, persona_mode, app_prompt, container_id, container_name, newapi_key_id, newapi_key_ciphertext, api_key_status, created_at, updated_at, deleted_at
+SELECT id, org_id, owner_user_id, runtime_node_id, name, description, status, persona_mode, app_prompt, container_id, container_name, newapi_key_id, newapi_key_ciphertext, api_key_status, created_at, updated_at, deleted_at, runtime_snapshot_json, runtime_snapshot_at
 FROM apps
 WHERE org_id = $1 AND deleted_at IS NULL
 ORDER BY created_at DESC, id DESC
@@ -178,6 +184,8 @@ func (q *Queries) ListAppsByOrg(ctx context.Context, arg ListAppsByOrgParams) ([
 			&i.CreatedAt,
 			&i.UpdatedAt,
 			&i.DeletedAt,
+			&i.RuntimeSnapshotJson,
+			&i.RuntimeSnapshotAt,
 		); err != nil {
 			return nil, err
 		}
@@ -190,7 +198,7 @@ func (q *Queries) ListAppsByOrg(ctx context.Context, arg ListAppsByOrgParams) ([
 }
 
 const listAppsByRuntimeNode = `-- name: ListAppsByRuntimeNode :many
-SELECT id, org_id, owner_user_id, runtime_node_id, name, description, status, persona_mode, app_prompt, container_id, container_name, newapi_key_id, newapi_key_ciphertext, api_key_status, created_at, updated_at, deleted_at
+SELECT id, org_id, owner_user_id, runtime_node_id, name, description, status, persona_mode, app_prompt, container_id, container_name, newapi_key_id, newapi_key_ciphertext, api_key_status, created_at, updated_at, deleted_at, runtime_snapshot_json, runtime_snapshot_at
 FROM apps
 WHERE runtime_node_id = $1 AND deleted_at IS NULL
 ORDER BY created_at DESC, id DESC
@@ -230,7 +238,48 @@ func (q *Queries) ListAppsByRuntimeNode(ctx context.Context, arg ListAppsByRunti
 			&i.CreatedAt,
 			&i.UpdatedAt,
 			&i.DeletedAt,
+			&i.RuntimeSnapshotJson,
+			&i.RuntimeSnapshotAt,
 		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
+const listRunningApps = `-- name: ListRunningApps :many
+SELECT id, runtime_node_id, container_id
+FROM apps
+WHERE deleted_at IS NULL
+  AND status IN ('running', 'binding_waiting')
+  AND runtime_node_id IS NOT NULL
+  AND container_id IS NOT NULL
+ORDER BY id
+`
+
+type ListRunningAppsRow struct {
+	ID            pgtype.UUID `db:"id" json:"id"`
+	RuntimeNodeID pgtype.UUID `db:"runtime_node_id" json:"runtime_node_id"`
+	ContainerID   pgtype.Text `db:"container_id" json:"container_id"`
+}
+
+// 列出当前期望持有 OpenClaw 容器的应用，供 scheduler 周期 dispatch
+// runtime_refresh_status 与 app_health_check job。
+// running 是常态；binding_waiting 表示容器已起但渠道还在登录中，依然要刷指标。
+func (q *Queries) ListRunningApps(ctx context.Context) ([]ListRunningAppsRow, error) {
+	rows, err := q.db.Query(ctx, listRunningApps)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []ListRunningAppsRow{}
+	for rows.Next() {
+		var i ListRunningAppsRow
+		if err := rows.Scan(&i.ID, &i.RuntimeNodeID, &i.ContainerID); err != nil {
 			return nil, err
 		}
 		items = append(items, i)
@@ -245,7 +294,7 @@ const setAppContainer = `-- name: SetAppContainer :one
 UPDATE apps
 SET container_id = $2, container_name = $3, updated_at = now()
 WHERE id = $1
-RETURNING id, org_id, owner_user_id, runtime_node_id, name, description, status, persona_mode, app_prompt, container_id, container_name, newapi_key_id, newapi_key_ciphertext, api_key_status, created_at, updated_at, deleted_at
+RETURNING id, org_id, owner_user_id, runtime_node_id, name, description, status, persona_mode, app_prompt, container_id, container_name, newapi_key_id, newapi_key_ciphertext, api_key_status, created_at, updated_at, deleted_at, runtime_snapshot_json, runtime_snapshot_at
 `
 
 type SetAppContainerParams struct {
@@ -275,6 +324,8 @@ func (q *Queries) SetAppContainer(ctx context.Context, arg SetAppContainerParams
 		&i.CreatedAt,
 		&i.UpdatedAt,
 		&i.DeletedAt,
+		&i.RuntimeSnapshotJson,
+		&i.RuntimeSnapshotAt,
 	)
 	return i, err
 }
@@ -287,7 +338,7 @@ SET
     api_key_status = $4,
     updated_at = now()
 WHERE id = $1
-RETURNING id, org_id, owner_user_id, runtime_node_id, name, description, status, persona_mode, app_prompt, container_id, container_name, newapi_key_id, newapi_key_ciphertext, api_key_status, created_at, updated_at, deleted_at
+RETURNING id, org_id, owner_user_id, runtime_node_id, name, description, status, persona_mode, app_prompt, container_id, container_name, newapi_key_id, newapi_key_ciphertext, api_key_status, created_at, updated_at, deleted_at, runtime_snapshot_json, runtime_snapshot_at
 `
 
 type SetAppNewAPIKeyParams struct {
@@ -323,6 +374,49 @@ func (q *Queries) SetAppNewAPIKey(ctx context.Context, arg SetAppNewAPIKeyParams
 		&i.CreatedAt,
 		&i.UpdatedAt,
 		&i.DeletedAt,
+		&i.RuntimeSnapshotJson,
+		&i.RuntimeSnapshotAt,
+	)
+	return i, err
+}
+
+const setAppRuntimeSnapshot = `-- name: SetAppRuntimeSnapshot :one
+UPDATE apps
+SET runtime_snapshot_json = $2,
+    runtime_snapshot_at = now(),
+    updated_at = now()
+WHERE id = $1
+RETURNING id, org_id, owner_user_id, runtime_node_id, name, description, status, persona_mode, app_prompt, container_id, container_name, newapi_key_id, newapi_key_ciphertext, api_key_status, created_at, updated_at, deleted_at, runtime_snapshot_json, runtime_snapshot_at
+`
+
+type SetAppRuntimeSnapshotParams struct {
+	ID                  pgtype.UUID `db:"id" json:"id"`
+	RuntimeSnapshotJson []byte      `db:"runtime_snapshot_json" json:"runtime_snapshot_json"`
+}
+
+func (q *Queries) SetAppRuntimeSnapshot(ctx context.Context, arg SetAppRuntimeSnapshotParams) (App, error) {
+	row := q.db.QueryRow(ctx, setAppRuntimeSnapshot, arg.ID, arg.RuntimeSnapshotJson)
+	var i App
+	err := row.Scan(
+		&i.ID,
+		&i.OrgID,
+		&i.OwnerUserID,
+		&i.RuntimeNodeID,
+		&i.Name,
+		&i.Description,
+		&i.Status,
+		&i.PersonaMode,
+		&i.AppPrompt,
+		&i.ContainerID,
+		&i.ContainerName,
+		&i.NewapiKeyID,
+		&i.NewapiKeyCiphertext,
+		&i.ApiKeyStatus,
+		&i.CreatedAt,
+		&i.UpdatedAt,
+		&i.DeletedAt,
+		&i.RuntimeSnapshotJson,
+		&i.RuntimeSnapshotAt,
 	)
 	return i, err
 }
@@ -331,7 +425,7 @@ const setAppStatus = `-- name: SetAppStatus :one
 UPDATE apps
 SET status = $2, updated_at = now()
 WHERE id = $1
-RETURNING id, org_id, owner_user_id, runtime_node_id, name, description, status, persona_mode, app_prompt, container_id, container_name, newapi_key_id, newapi_key_ciphertext, api_key_status, created_at, updated_at, deleted_at
+RETURNING id, org_id, owner_user_id, runtime_node_id, name, description, status, persona_mode, app_prompt, container_id, container_name, newapi_key_id, newapi_key_ciphertext, api_key_status, created_at, updated_at, deleted_at, runtime_snapshot_json, runtime_snapshot_at
 `
 
 type SetAppStatusParams struct {
@@ -360,6 +454,8 @@ func (q *Queries) SetAppStatus(ctx context.Context, arg SetAppStatusParams) (App
 		&i.CreatedAt,
 		&i.UpdatedAt,
 		&i.DeletedAt,
+		&i.RuntimeSnapshotJson,
+		&i.RuntimeSnapshotAt,
 	)
 	return i, err
 }
@@ -368,7 +464,7 @@ const softDeleteApp = `-- name: SoftDeleteApp :one
 UPDATE apps
 SET status = 'deleted', deleted_at = now(), updated_at = now()
 WHERE id = $1 AND deleted_at IS NULL
-RETURNING id, org_id, owner_user_id, runtime_node_id, name, description, status, persona_mode, app_prompt, container_id, container_name, newapi_key_id, newapi_key_ciphertext, api_key_status, created_at, updated_at, deleted_at
+RETURNING id, org_id, owner_user_id, runtime_node_id, name, description, status, persona_mode, app_prompt, container_id, container_name, newapi_key_id, newapi_key_ciphertext, api_key_status, created_at, updated_at, deleted_at, runtime_snapshot_json, runtime_snapshot_at
 `
 
 func (q *Queries) SoftDeleteApp(ctx context.Context, id pgtype.UUID) (App, error) {
@@ -392,6 +488,8 @@ func (q *Queries) SoftDeleteApp(ctx context.Context, id pgtype.UUID) (App, error
 		&i.CreatedAt,
 		&i.UpdatedAt,
 		&i.DeletedAt,
+		&i.RuntimeSnapshotJson,
+		&i.RuntimeSnapshotAt,
 	)
 	return i, err
 }

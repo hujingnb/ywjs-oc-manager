@@ -32,7 +32,9 @@ type App struct {
 	CreatedAt           pgtype.Timestamptz `db:"created_at" json:"created_at"`
 	UpdatedAt           pgtype.Timestamptz `db:"updated_at" json:"updated_at"`
 	// 软删除时间；业务记录不做物理删除。
-	DeletedAt pgtype.Timestamptz `db:"deleted_at" json:"deleted_at"`
+	DeletedAt           pgtype.Timestamptz `db:"deleted_at" json:"deleted_at"`
+	RuntimeSnapshotJson []byte             `db:"runtime_snapshot_json" json:"runtime_snapshot_json"`
+	RuntimeSnapshotAt   pgtype.Timestamptz `db:"runtime_snapshot_at" json:"runtime_snapshot_at"`
 }
 
 // 审计日志表，记录关键操作、结果和错误信息；普通业务 API 不允许修改或删除。

@@ -2,6 +2,7 @@ package runtime
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"io"
 	"sort"
@@ -170,6 +171,50 @@ func (a *AgentBackedAdapter) InspectContainer(ctx context.Context, nodeID, conta
 		return ContainerInfo{}, fmt.Errorf("inspect 容器失败: %w", err)
 	}
 	return inspectToContainerInfo(inspect), nil
+}
+
+// ContainerStats 通过 docker /containers/{id}/stats?stream=false 拿到一次性指标。
+// CPU 用 docker 推荐公式：(cpu_delta / system_delta) * online_cpus * 100；首采样无 precpu 时返回 0。
+// 网络对所有 interfaces 累加，避免遗漏 host 网络模式下的 lo。
+func (a *AgentBackedAdapter) ContainerStats(ctx context.Context, nodeID, containerID string) (ContainerStats, error) {
+	cli, err := a.dockerClient(ctx, nodeID)
+	if err != nil {
+		return ContainerStats{}, err
+	}
+	resp, err := cli.ContainerStatsOneShot(ctx, containerID)
+	if err != nil {
+		return ContainerStats{}, fmt.Errorf("拉取容器 stats 失败: %w", err)
+	}
+	defer resp.Body.Close()
+	var raw container.StatsResponse
+	if err := json.NewDecoder(resp.Body).Decode(&raw); err != nil {
+		return ContainerStats{}, fmt.Errorf("解析容器 stats 失败: %w", err)
+	}
+	return statsResponseToContainerStats(raw), nil
+}
+
+func statsResponseToContainerStats(raw container.StatsResponse) ContainerStats {
+	out := ContainerStats{
+		MemoryUsage: raw.MemoryStats.Usage,
+		MemoryLimit: raw.MemoryStats.Limit,
+	}
+	cpuDelta := float64(raw.CPUStats.CPUUsage.TotalUsage) - float64(raw.PreCPUStats.CPUUsage.TotalUsage)
+	systemDelta := float64(raw.CPUStats.SystemUsage) - float64(raw.PreCPUStats.SystemUsage)
+	if systemDelta > 0 && cpuDelta > 0 {
+		online := float64(raw.CPUStats.OnlineCPUs)
+		if online == 0 {
+			online = float64(len(raw.CPUStats.CPUUsage.PercpuUsage))
+		}
+		if online == 0 {
+			online = 1
+		}
+		out.CPUPercent = (cpuDelta / systemDelta) * online * 100
+	}
+	for _, n := range raw.Networks {
+		out.NetworkRxBytes += n.RxBytes
+		out.NetworkTxBytes += n.TxBytes
+	}
+	return out
 }
 
 // ListFiles 通过 agent file API 列出目录。

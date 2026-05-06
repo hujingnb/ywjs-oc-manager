@@ -65,3 +65,23 @@ UPDATE apps
 SET status = 'deleted', deleted_at = now(), updated_at = now()
 WHERE id = $1 AND deleted_at IS NULL
 RETURNING *;
+
+-- name: ListRunningApps :many
+-- 列出当前期望持有 OpenClaw 容器的应用，供 scheduler 周期 dispatch
+-- runtime_refresh_status 与 app_health_check job。
+-- running 是常态；binding_waiting 表示容器已起但渠道还在登录中，依然要刷指标。
+SELECT id, runtime_node_id, container_id
+FROM apps
+WHERE deleted_at IS NULL
+  AND status IN ('running', 'binding_waiting')
+  AND runtime_node_id IS NOT NULL
+  AND container_id IS NOT NULL
+ORDER BY id;
+
+-- name: SetAppRuntimeSnapshot :one
+UPDATE apps
+SET runtime_snapshot_json = $2,
+    runtime_snapshot_at = now(),
+    updated_at = now()
+WHERE id = $1
+RETURNING *;

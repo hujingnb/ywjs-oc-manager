@@ -55,9 +55,23 @@ type RuntimeContainerInfo struct {
 
 // RuntimeView 是 GET /apps/:appId/runtime 接口的响应视图。
 // container_id 为空时只返回 status="no_container"，前端据此切换"未创建容器"提示。
+// Snapshot 来自 apps.runtime_snapshot_json（scheduler 30s 周期采样）；为空表示尚未采集。
 type RuntimeView struct {
 	Status    string                `json:"status"`
 	Container *RuntimeContainerInfo `json:"container,omitempty"`
+	Snapshot  *RuntimeSnapshotView  `json:"snapshot,omitempty"`
+}
+
+// RuntimeSnapshotView 是 apps.runtime_snapshot_json 的对外视图。
+// 结构与 worker.handlers.AppRuntimeSnapshot 字段对齐；service 层不重新计算单位。
+type RuntimeSnapshotView struct {
+	CPUPercent     float64   `json:"cpu_percent"`
+	MemoryUsage    uint64    `json:"memory_usage_bytes"`
+	MemoryLimit    uint64    `json:"memory_limit_bytes"`
+	NetworkRxBytes uint64    `json:"network_rx_bytes"`
+	NetworkTxBytes uint64    `json:"network_tx_bytes"`
+	CollectedAt    time.Time `json:"collected_at"`
+	LastError      string    `json:"last_error,omitempty"`
 }
 
 // RuntimeOperationService 把启动/停止/重启/删除应用容器等高风险操作转化为 worker 任务。
@@ -120,12 +134,43 @@ func (s *RuntimeOperationService) InspectApp(ctx context.Context, principal auth
 	}
 	info, err := s.inspector.InspectContainer(ctx, uuidToString(app.RuntimeNodeID), app.ContainerID.String)
 	if err != nil {
-		return RuntimeView{Status: "error"}, nil
+		return RuntimeView{Status: "error", Snapshot: snapshotFromApp(app)}, nil
 	}
 	return RuntimeView{
 		Status:    info.Status,
 		Container: &info,
+		Snapshot:  snapshotFromApp(app),
 	}, nil
+}
+
+// snapshotFromApp 解析 apps.runtime_snapshot_json；解析失败一律返回 nil，避免暴露内部错误。
+func snapshotFromApp(app sqlc.App) *RuntimeSnapshotView {
+	if len(app.RuntimeSnapshotJson) == 0 {
+		return nil
+	}
+	var raw struct {
+		CPUPercent     float64 `json:"cpu_percent"`
+		MemoryUsage    uint64  `json:"memory_usage_bytes"`
+		MemoryLimit    uint64  `json:"memory_limit_bytes"`
+		NetworkRxBytes uint64  `json:"network_rx_bytes"`
+		NetworkTxBytes uint64  `json:"network_tx_bytes"`
+		LastError      string  `json:"last_error,omitempty"`
+	}
+	if err := json.Unmarshal(app.RuntimeSnapshotJson, &raw); err != nil {
+		return nil
+	}
+	out := &RuntimeSnapshotView{
+		CPUPercent:     raw.CPUPercent,
+		MemoryUsage:    raw.MemoryUsage,
+		MemoryLimit:    raw.MemoryLimit,
+		NetworkRxBytes: raw.NetworkRxBytes,
+		NetworkTxBytes: raw.NetworkTxBytes,
+		LastError:      raw.LastError,
+	}
+	if app.RuntimeSnapshotAt.Valid {
+		out.CollectedAt = app.RuntimeSnapshotAt.Time
+	}
+	return out
 }
 
 // RuntimeOperation 定义本服务支持的操作枚举。

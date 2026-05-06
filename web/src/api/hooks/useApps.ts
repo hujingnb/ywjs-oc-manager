@@ -32,9 +32,23 @@ export interface RuntimeContainerInfo {
 
 // RuntimeView 是 GET /apps/:appId/runtime 的响应视图。
 // container 在 status=no_container/error 时为空。
+// snapshot 由 scheduler 30s 周期 runtime_refresh_status job 写入；首次未采集时为空。
 export interface RuntimeView {
   status: string
   container?: RuntimeContainerInfo
+  snapshot?: RuntimeSnapshotView
+}
+
+// RuntimeSnapshotView 与后端 service.RuntimeSnapshotView 字段一一对应。
+// 字节单位：内存与网络都是绝对值；CPU 百分比 = 单核满载 100%，多核可超 100%。
+export interface RuntimeSnapshotView {
+  cpu_percent: number
+  memory_usage_bytes: number
+  memory_limit_bytes: number
+  network_rx_bytes: number
+  network_tx_bytes: number
+  collected_at: string
+  last_error?: string
 }
 
 // JobDTO 描述 jobs API 响应。

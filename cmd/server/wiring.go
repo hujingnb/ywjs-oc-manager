@@ -15,6 +15,7 @@ import (
 	"github.com/jackc/pgx/v5/pgtype"
 
 	"oc-manager/internal/auth"
+	"oc-manager/internal/domain"
 	"oc-manager/internal/integrations/agent"
 	"oc-manager/internal/integrations/runtime"
 	"oc-manager/internal/runtime/imagesync"
@@ -373,6 +374,56 @@ func uuidToStringWiring(id pgtype.UUID) string {
 
 // jsonMarshal 是 cmd/server 内部 json.Marshal 的简短封装，便于 dispatcher 复用。
 var jsonMarshal = json.Marshal
+
+// runtimeRefreshJobsQueries 是 runtimeRefreshDispatcher 用到的 sqlc 子集。
+type runtimeRefreshJobsQueries interface {
+	ListRunningApps(ctx context.Context) ([]sqlc.ListRunningAppsRow, error)
+	CreateJob(ctx context.Context, arg sqlc.CreateJobParams) (sqlc.Job, error)
+}
+
+// runtimeRefreshDispatcher 周期扫描 status in (running, binding_waiting) 应用，
+// 对每个入队一条 runtime_refresh_status job。worker handler 写 apps.runtime_snapshot_json，
+// 前端 AppRuntimeTab 拉这一列展示资源占用。
+//
+// 间隔由 main.go PeriodicReconciler 的 30s 控制；ListRunningApps 自身只读，
+// 重复入队相同 job 是幂等的（worker 拿到的是最新 inspect 结果）。
+type runtimeRefreshDispatcher struct {
+	queries  runtimeRefreshJobsQueries
+	notifier service.JobNotifier
+}
+
+func newRuntimeRefreshDispatcher(queries runtimeRefreshJobsQueries, notifier service.JobNotifier) *runtimeRefreshDispatcher {
+	return &runtimeRefreshDispatcher{queries: queries, notifier: notifier}
+}
+
+// Tick 列出待刷新应用并入队 runtime_refresh_status job；任一应用失败不阻断其他应用。
+func (d *runtimeRefreshDispatcher) Tick(ctx context.Context) error {
+	rows, err := d.queries.ListRunningApps(ctx)
+	if err != nil {
+		return fmt.Errorf("列出 running 应用失败: %w", err)
+	}
+	for _, row := range rows {
+		appID := uuidToStringWiring(row.ID)
+		payload, err := jsonMarshal(map[string]any{"app_id": appID})
+		if err != nil {
+			continue
+		}
+		job, err := d.queries.CreateJob(ctx, sqlc.CreateJobParams{
+			Type:        domain.JobTypeRuntimeRefreshStatus,
+			Priority:    20,
+			MaxAttempts: 1,
+			RunAfter:    pgtype.Timestamptz{Time: time.Now(), Valid: true},
+			PayloadJson: payload,
+		})
+		if err != nil {
+			continue
+		}
+		if d.notifier != nil {
+			_ = d.notifier.Enqueue(ctx, uuidToStringWiring(job.ID))
+		}
+	}
+	return nil
+}
 
 // persistentTokenLoader 适配 store.AgentTokenStore 实现 agent.PersistentTokenLoader。
 // cache miss 时从数据库读密文 → cipher.Decrypt 还原明文 → 由 TokenResolver 回填 cache。

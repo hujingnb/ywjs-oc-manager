@@ -46,6 +46,17 @@ type ContainerInfo struct {
 	Status string
 }
 
+// ContainerStats 是 RuntimeAdapter.Stats 返回的归一化指标视图。
+// 单位：CPU 百分比 (0-100*核数)；内存字节；网络字节累计（容器生命周期内）。
+// Manager 不做秒级速率计算，前端展示绝对值即可，趋势由前端按时间序列差分。
+type ContainerStats struct {
+	CPUPercent     float64 `json:"cpu_percent"`
+	MemoryUsage    uint64  `json:"memory_usage_bytes"`
+	MemoryLimit    uint64  `json:"memory_limit_bytes"`
+	NetworkRxBytes uint64  `json:"network_rx_bytes"`
+	NetworkTxBytes uint64  `json:"network_tx_bytes"`
+}
+
 // FileEntry 与 agent.FileEntry 等价，避免对调用方暴露 agent 包。
 type FileEntry = agent.FileEntry
 
@@ -63,6 +74,9 @@ type Adapter interface {
 	RestartContainer(ctx context.Context, nodeID, containerID string) error
 	RemoveContainer(ctx context.Context, nodeID, containerID string) error
 	InspectContainer(ctx context.Context, nodeID, containerID string) (ContainerInfo, error)
+	// ContainerStats 返回容器实时资源占用快照（CPU% / 内存 / 网络字节）。
+	// 实现层用 docker StatsOneShot，避免长连接占用 worker 线程。
+	ContainerStats(ctx context.Context, nodeID, containerID string) (ContainerStats, error)
 
 	ListFiles(ctx context.Context, nodeID, remotePath string) (FileListing, error)
 	UploadFile(ctx context.Context, nodeID, remotePath string, content io.Reader) error
