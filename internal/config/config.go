@@ -22,10 +22,14 @@ type Config struct {
 // AppConfig 描述 manager API 进程自身的运行参数。
 // HTTPAddr 必须显式配置，避免容器内外端口不一致时静默监听错误地址。
 type AppConfig struct {
-	Env            string        `yaml:"env"`
-	HTTPAddr       string        `yaml:"http_addr"`
-	PublicBaseURL  string        `yaml:"public_base_url"`
-	DataRoot       string        `yaml:"data_root"`
+	Env           string `yaml:"env"`
+	HTTPAddr      string `yaml:"http_addr"`
+	PublicBaseURL string `yaml:"public_base_url"`
+	DataRoot      string `yaml:"data_root"`
+	// KnowledgeRoot 是知识库主副本根目录（manager 端"主拷贝"，由 worker 同步到各 runtime node）。
+	// 此前由 OCM_KNOWLEDGE_ROOT 环境变量提供，现统一收口到 yaml；为空启动时 fail-fast。
+	// 路径下结构：orgs/<org_id>/...、apps/<app_id>/...，由 files.SafeRoot 沙箱化。
+	KnowledgeRoot  string        `yaml:"knowledge_root"`
 	ShutdownPeriod time.Duration `yaml:"-"`
 }
 
@@ -56,8 +60,7 @@ type AuthConfig struct {
 }
 
 // SecurityConfig 描述敏感字段加解密所需的根密钥。
-// MasterKey 必须是 base64 编码的 32 字节随机数，缺失或长度不符时启动 fail-fast；
-// 不在配置文件落明文，由部署侧通过 ${MASTER_KEY} 环境变量注入。
+// MasterKey 必须是 base64 编码的 32 字节随机数，缺失或长度不符时启动 fail-fast。
 type SecurityConfig struct {
 	MasterKey string `yaml:"master_key"`
 }
@@ -66,16 +69,16 @@ type SecurityConfig struct {
 // SystemPromptTemplate 必须包含 {{workspace_dir}} / {{knowledge_org_dir}} / {{knowledge_app_dir}}
 // 三个占位符，避免第二/三层人设拼接时丢失目录上下文。
 type OpenClawConfig struct {
-	RuntimeImage         string          `yaml:"runtime_image"`
-	SystemPromptTemplate string          `yaml:"system_prompt_template"`
-	Workspace            WorkspaceConfig `yaml:"workspace"`
+	RuntimeImage         string            `yaml:"runtime_image"`
+	SystemPromptTemplate string            `yaml:"system_prompt_template"`
+	Workspace            WorkspaceConfig   `yaml:"workspace"`
 	LLM                  OpenClawLLMConfig `yaml:"llm"`
 	// ContainerNetworks 控制 manager 创建 OpenClaw 容器时连接哪些 docker network。
 	// 必须包含 new-api 所在的 network（默认 docker compose project name 派生的
 	// "<project>_default"，如 oc-manager_default），否则 OpenClaw 容器无法解析
 	// "new-api" hostname → chat completions Connection error。
 	// 留空时 docker 默认 bridge network，与 compose 起的 new-api 不互通。
-	ContainerNetworks    []string        `yaml:"container_networks"`
+	ContainerNetworks []string `yaml:"container_networks"`
 }
 
 // OpenClawLLMConfig 描述 OpenClaw 容器内嵌 pi-coding-agent 调模型用的配置。
