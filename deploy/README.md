@@ -93,3 +93,48 @@ find /backups -name "ocm-*.sql.gz" -mtime +7 -delete
 ## 监控接入
 
 后续 task：开启 Prometheus `/metrics`、worker 队列深度告警、节点心跳超时告警。
+
+## 跨机部署（多 runtime node）
+
+manager 单机 + 多 runtime node 是 v1.0 的标准拓扑。每个新节点需要做：
+
+1. **节点 OS 准备**：
+   - Linux + Docker ≥ 24，内核 ≥ 5.10。
+   - 开放出口：节点 → manager 7443（TLS 反代后 HTTPS）。
+   - 开放入口：manager → 节点 7001（gRPC）/ 7002（HTTP file API）。
+   - 节点不要直接对公网暴露 7001/7002，只接受 manager 内网 IP。
+
+2. **agent TLS SAN 配置**：
+   - agent 启动时自动生成自签 CA 与 server cert。如果节点对外名是
+     `node-1.internal`，需要把它写到 `AGENT_TLS_DNS_SAN` 环境变量，
+     否则 manager 用域名连节点会因为 SAN mismatch 拒绝。
+   - 如果节点 IP 固定，也支持 `AGENT_TLS_IP_SAN=10.0.0.5`。
+   - 改 SAN 后必须删 `/var/lib/oc-agent/state/agent-tls*` 让 agent 重新生成证书。
+
+3. **防火墙规则**：
+   - 节点 ufw / iptables 只放行 manager 子网到 7001/7002。
+   - 节点出口允许到 new-api / 镜像仓库 / DNS。
+
+4. **manager 端注册**：
+   - 在 `/runtime-nodes` 页点"注册节点"，填节点名 + bootstrap_token（一次性显示）。
+   - 在节点 agent 容器环境变量加 `MANAGER_ADDR=https://manager.internal:7443`
+     与 `BOOTSTRAP_TOKEN=...`，启动 agent 后会自动完成 register + heartbeat。
+   - manager 端节点状态翻转到 `active` 后即可在该节点跑应用。
+
+5. **跨机演练（v1.0 RC 验收）**：
+   - 本机 docker compose 启第二个 agent 容器 `oc-runtime-agent-2`
+     （不同 NODE_ID + bootstrap_token），共享同一 docker socket。
+   - 跑 onboard 在两节点各创建一个应用，组织级知识库上传后两节点同步状态都到 `synced`。
+   - 关一个 agent 容器，sync-status 翻 `failed`、应用 `error`；重启 agent 后状态恢复。
+
+## 备份与升级
+
+- 数据备份与恢复：参见 [`backup.md`](./backup.md)。
+- 版本升级与回滚：参见 [`upgrade.md`](./upgrade.md)。
+
+## UAT 准备清单
+
+- 平台管理员账号 + 测试组织 + 至少 2 名测试成员。
+- 反馈表模板：`docs/uat/feedback-template.md`（按场景列「现象 / 复现步骤 / 期望 / 截图」）。
+- 问题分级规则：阻塞 > 高 > 中 > 低；阻塞与高级别问题进入 release blocker。
+- release notes 模板：`docs/uat/release-notes-template.md`。

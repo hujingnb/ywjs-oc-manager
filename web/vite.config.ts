@@ -1,3 +1,4 @@
+/// <reference types="vitest" />
 import { fileURLToPath, URL } from 'node:url'
 
 import vue from '@vitejs/plugin-vue'
@@ -16,5 +17,10 @@ export default defineConfig({
     proxy: {
       '/api': 'http://manager-api:8080',
     },
+  },
+  // vitest 与 playwright 共存：playwright 用 .spec.ts 文件名也会被 vitest 默认匹配，
+  // 这里显式排除 tests/e2e 目录，避免 vitest 误把 playwright API 当 vitest 跑。
+  test: {
+    exclude: ['node_modules/**', 'dist/**', 'tests/e2e/**'],
   },
 })

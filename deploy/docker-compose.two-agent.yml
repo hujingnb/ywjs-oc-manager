@@ -1,0 +1,44 @@
+# 跨节点演练（v1.0 RC Task 16 降级版）：本机起第二个 oc-runtime-agent 实例。
+#
+# 用法：
+#   docker compose -f docker-compose.yml -f deploy/docker-compose.two-agent.yml up -d
+#
+# 与默认 oc-runtime-agent 的差异：
+#   - 不同 container_name 与 hostname → manager 端可作为独立节点注册；
+#   - 7003/7004 端口暴露，避免与默认 agent 7001/7002 冲突；
+#   - 独立的 .local/data/agent-2 目录，避免 state / TLS 证书与默认 agent 互相覆盖；
+#   - 共享同一 docker socket（本机演练限定，跨机时是各自的）。
+#
+# 演练步骤参见 deploy/README.md「跨机部署」一节。
+services:
+  oc-runtime-agent-2:
+    image: golang:1.25-bookworm
+    container_name: oc-runtime-agent-2
+    hostname: oc-runtime-agent-2
+    working_dir: /app/runtime/agent
+    command: sh -c "if [ -f main.go ]; then go run .; else sleep infinity; fi"
+    environment:
+      TZ: Asia/Shanghai
+      DATA_ROOT: /var/lib/oc-agent
+      AGENT_LISTEN_GRPC: ":7001"
+      AGENT_LISTEN_HTTP: ":7002"
+      PATH: /go/bin:/usr/local/go/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin
+      GOPATH: /go
+      GOMODCACHE: /go/pkg/mod
+      GOCACHE: /root/.cache/go-build
+      GOPROXY: "https://goproxy.cn,direct"
+      GOSUMDB: "off"
+    ports:
+      - "7003:7001"
+      - "7004:7002"
+    healthcheck:
+      test: ["CMD-SHELL", "test -S /var/run/docker.sock && true"]
+      interval: 10s
+      timeout: 3s
+      retries: 10
+    volumes:
+      - ../:/app
+      - /var/run/docker.sock:/var/run/docker.sock
+      - ../.local/data/agent-2:/var/lib/oc-agent
+      - ../.local/data/go/pkg/mod:/go/pkg/mod
+      - ../.local/data/go/cache:/root/.cache/go-build
