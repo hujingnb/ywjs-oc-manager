@@ -11,19 +11,27 @@ func TestFS_ContainsUpAndDownPairs(t *testing.T) {
 	if err != nil {
 		t.Fatalf("读取 embed FS 失败: %v", err)
 	}
-	var ups, downs int
+	ups := make(map[string]struct{})
+	downs := make(map[string]struct{})
 	for _, e := range entries {
 		switch {
 		case strings.HasSuffix(e.Name(), ".up.sql"):
-			ups++
+			ups[strings.TrimSuffix(e.Name(), ".up.sql")] = struct{}{}
 		case strings.HasSuffix(e.Name(), ".down.sql"):
-			downs++
+			downs[strings.TrimSuffix(e.Name(), ".down.sql")] = struct{}{}
 		}
 	}
-	if ups == 0 {
+	if len(ups) == 0 {
 		t.Fatal("embed FS 不含任何 *.up.sql，疑似 embed pattern 失效")
 	}
-	if ups != downs {
-		t.Fatalf("up/down 数量不匹配: up=%d down=%d", ups, downs)
+	for version := range ups {
+		if _, ok := downs[version]; !ok {
+			t.Fatalf("迁移版本 %s 缺少 down 文件", version)
+		}
+	}
+	for version := range downs {
+		if _, ok := ups[version]; !ok {
+			t.Fatalf("迁移版本 %s 缺少 up 文件", version)
+		}
 	}
 }

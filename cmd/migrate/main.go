@@ -1,3 +1,5 @@
+// cmd/migrate 从 OCM_CONFIG 指向的 YAML 读取 database.url；未设置时默认 config/manager.yaml。
+// SQL 迁移文件通过 internal/migrations 的 go:embed 打包，并以 iofs source 交给 golang-migrate。
 package main
 
 import (
@@ -5,13 +7,13 @@ import (
 	"fmt"
 	"log"
 	"os"
-	"path/filepath"
 
 	"github.com/golang-migrate/migrate/v4"
 	_ "github.com/golang-migrate/migrate/v4/database/postgres"
-	_ "github.com/golang-migrate/migrate/v4/source/file"
+	"github.com/golang-migrate/migrate/v4/source/iofs"
 
 	"oc-manager/internal/config"
+	"oc-manager/internal/migrations"
 )
 
 func main() {
@@ -21,8 +23,8 @@ func main() {
 }
 
 func run(args []string) error {
-	if len(args) != 1 {
-		return errors.New("用法: go run ./cmd/migrate [up|down]")
+	if len(args) != 1 || (args[0] != "up" && args[0] != "down") {
+		return errors.New("用法: migrate [up|down]")
 	}
 
 	databaseURL, err := loadDatabaseURL()
@@ -30,13 +32,14 @@ func run(args []string) error {
 		return err
 	}
 
-	sourceURL, err := migrationSourceURL()
+	src, err := iofs.New(migrations.FS, ".")
 	if err != nil {
-		return err
+		return fmt.Errorf("初始化迁移 source 失败: %w", err)
 	}
 
-	m, err := migrate.New(sourceURL, databaseURL)
+	m, err := migrate.NewWithSourceInstance("iofs", src, databaseURL)
 	if err != nil {
+		src.Close()
 		return fmt.Errorf("初始化迁移器失败: %w", err)
 	}
 	defer func() {
@@ -60,37 +63,19 @@ func run(args []string) error {
 		if err := m.Steps(-1); err != nil && !errors.Is(err, migrate.ErrNoChange) {
 			return fmt.Errorf("执行 down 迁移失败: %w", err)
 		}
-	default:
-		return fmt.Errorf("未知迁移动作: %s", args[0])
 	}
 
 	return nil
 }
 
 func loadDatabaseURL() (string, error) {
-	if value := os.Getenv("DATABASE_URL"); value != "" {
-		return value, nil
-	}
-
 	configPath := os.Getenv("OCM_CONFIG")
 	if configPath == "" {
-		configPath = "config/config.yaml"
+		configPath = "config/manager.yaml"
 	}
 	cfg, err := config.LoadFile(configPath)
 	if err != nil {
 		return "", err
 	}
 	return cfg.Database.URL, nil
-}
-
-func migrationSourceURL() (string, error) {
-	dir := os.Getenv("OCM_MIGRATIONS_DIR")
-	if dir == "" {
-		dir = "migrations"
-	}
-	abs, err := filepath.Abs(dir)
-	if err != nil {
-		return "", fmt.Errorf("解析迁移目录失败: %w", err)
-	}
-	return "file://" + filepath.ToSlash(abs), nil
 }

@@ -2,12 +2,12 @@ version: "2"
 sql:
   - engine: postgresql
     schema:
-      - migrations/000001_init.up.sql
-      - migrations/000002_core_schema.up.sql
-      - migrations/000003_agent_token_ciphertext.up.sql
-      - migrations/000004_knowledge_sync_status.up.sql
-      - migrations/000005_apps_runtime_snapshot.up.sql
-      - migrations/000006_apps_restart_policy.up.sql
+      - internal/migrations/000001_init.up.sql
+      - internal/migrations/000002_core_schema.up.sql
+      - internal/migrations/000003_agent_token_ciphertext.up.sql
+      - internal/migrations/000004_knowledge_sync_status.up.sql
+      - internal/migrations/000005_apps_runtime_snapshot.up.sql
+      - internal/migrations/000006_apps_restart_policy.up.sql
     queries: internal/store/queries
     gen:
       go:
