@@ -91,6 +91,17 @@ func TestLoadImageRequiresTokenWhenConfigured(t *testing.T) {
 	}
 }
 
+func TestNewHandlerUsesConfiguredToken(t *testing.T) {
+	req := httptest.NewRequest(http.MethodGet, "/v1/images/inspect?image=openclaw-runtime:dev", nil)
+	rec := httptest.NewRecorder()
+
+	newHandler("/tmp/agent", "secret").ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusUnauthorized {
+		t.Fatalf("expected status 401, got %d", rec.Code)
+	}
+}
+
 func TestLoadImage(t *testing.T) {
 	docker := &fakeDockerClient{images: map[string]DockerImageInfo{}}
 	req := httptest.NewRequest(http.MethodPost, "/v1/images/load?image=openclaw-runtime:dev", bytes.NewBufferString("tar"))

@@ -14,6 +14,8 @@ import (
 	"path/filepath"
 	"syscall"
 	"time"
+
+	"oc-manager/runtime/agent/config"
 )
 
 // HealthResponse 是 runtime agent 健康检查响应。
@@ -44,23 +46,28 @@ type agentOptions struct {
 	enableSignals bool   // 生产场景监听 SIGINT/SIGTERM；测试中由 ctx 控制退出
 }
 
-func defaultOptions() agentOptions {
-	return agentOptions{
-		dataRoot:      getenv("DATA_ROOT", "/var/lib/oc-agent"),
-		stateDir:      getenv("AGENT_STATE_DIR", "/var/lib/oc-agent/state"),
-		dockerSocket:  getenv("DOCKER_SOCKET", "/var/run/docker.sock"),
-		agentToken:    getenv("AGENT_TOKEN", ""),
-		trustedCIDR:   getenv("AGENT_TRUSTED_CIDR", ""),
+func main() {
+	configPath := os.Getenv("OC_AGENT_CONFIG")
+	if configPath == "" {
+		configPath = "config/agent.yaml"
+	}
+	cfg, err := config.LoadFile(configPath)
+	if err != nil {
+		log.Fatalf("加载 agent 配置失败: %v", err)
+	}
+	opts := agentOptions{
+		dataRoot:      cfg.Agent.DataRoot,
+		stateDir:      cfg.Agent.StateDir,
+		dockerSocket:  cfg.Agent.DockerSocket,
+		agentToken:    cfg.Agent.Token,
+		trustedCIDR:   cfg.Agent.TrustedCIDR,
 		hostname:      hostnameOrEmpty(),
-		dockerAddr:    ":7001",
-		fileAddr:      ":7002",
+		dockerAddr:    cfg.Agent.DockerAddr,
+		fileAddr:      cfg.Agent.FileAddr,
 		dockerProxy:   true,
 		enableSignals: true,
 	}
-}
-
-func main() {
-	if err := runAgent(context.Background(), defaultOptions(), os.Stdout); err != nil {
+	if err := runAgent(context.Background(), opts, os.Stdout); err != nil {
 		log.Fatalf("agent 退出: %v", err)
 	}
 }
@@ -88,7 +95,7 @@ func runAgent(ctx context.Context, opts agentOptions, stdout io.Writer) error {
 		return fmt.Errorf("输出 CA PEM 失败: %w", err)
 	}
 
-	dataHandler := newHandler(opts.dataRoot)
+	dataHandler := newHandler(opts.dataRoot, opts.agentToken)
 	fileServer := &http.Server{
 		Addr:              opts.fileAddr,
 		Handler:           dataHandler,
@@ -180,8 +187,8 @@ func newDockerEntryHandler(opts agentOptions, fallback http.Handler) http.Handle
 	})
 }
 
-func newHandler(dataRoot string) http.Handler {
-	return newHandlerWithDocker(dataRoot, newDockerSocketClient("/var/run/docker.sock"), getenv("AGENT_TOKEN", ""))
+func newHandler(dataRoot, agentToken string) http.Handler {
+	return newHandlerWithDocker(dataRoot, newDockerSocketClient("/var/run/docker.sock"), agentToken)
 }
 
 func newHandlerWithDocker(dataRoot string, docker DockerClient, agentToken string) http.Handler {
@@ -266,12 +273,4 @@ func withAgentAuth(agentToken string, next http.HandlerFunc) http.HandlerFunc {
 		}
 		next(w, r)
 	}
-}
-
-func getenv(key, fallback string) string {
-	value := os.Getenv(key)
-	if value == "" {
-		return fallback
-	}
-	return value
 }
