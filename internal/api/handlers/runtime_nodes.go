@@ -9,6 +9,7 @@ import (
 
 	"oc-manager/internal/auth"
 	"oc-manager/internal/domain"
+	redactlog "oc-manager/internal/log"
 	"oc-manager/internal/service"
 )
 
@@ -163,7 +164,7 @@ func writeRuntimeNodeError(c *gin.Context, err error) {
 		c.JSON(http.StatusConflict, gin.H{"error": "节点已注册，需先禁用再轮换 bootstrap"})
 	case errors.Is(err, service.ErrBootstrapTokenInvalid),
 		errors.Is(err, service.ErrAgentTokenInvalid):
-		c.JSON(http.StatusUnauthorized, gin.H{"error": err.Error()})
+		c.JSON(http.StatusUnauthorized, gin.H{"error": redactlog.SafeErrorMessage(err)})
 	default:
 		c.JSON(http.StatusInternalServerError, gin.H{"error": "服务暂时不可用"})
 	}

@@ -24,6 +24,7 @@ import (
 	"oc-manager/internal/integrations/channel"
 	"oc-manager/internal/integrations/newapi"
 	"oc-manager/internal/integrations/runtime"
+	redactlog "oc-manager/internal/log"
 	"oc-manager/internal/redis"
 	"oc-manager/internal/runtime/imagesync"
 	"oc-manager/internal/scheduler"
@@ -58,7 +59,9 @@ func main() {
 //
 // 错误以 fmt.Errorf 形式冒泡到调用方，便于 main 用 log.Fatalf 输出，也便于测试用 ctx 取消触发干净退出。
 func runManager(ctx context.Context, cfg config.Config, logOut io.Writer) error {
-	logger := log.New(logOut, "", log.LstdFlags)
+	// 把所有日志输出经过 RedactingWriter，避免密码 / token / sk- key 泄漏到容器日志或宿主 stdout。
+	// 这里在 io.Writer 层包装，无需修改任何业务调用点。
+	logger := log.New(redactlog.NewRedactingWriter(logOut), "", log.LstdFlags)
 
 	masterKey, err := base64.StdEncoding.DecodeString(cfg.Security.MasterKey)
 	if err != nil {

@@ -9,6 +9,7 @@ import (
 	"github.com/gin-gonic/gin"
 
 	"oc-manager/internal/auth"
+	redactlog "oc-manager/internal/log"
 	"oc-manager/internal/service"
 )
 
@@ -129,7 +130,7 @@ func writeAuthError(c *gin.Context, err error) {
 	case errors.Is(err, service.ErrInvalidToken):
 		c.JSON(http.StatusUnauthorized, gin.H{"error": "登录凭证无效"})
 	case errors.Is(err, service.ErrUserDisabled), errors.Is(err, service.ErrOrgDisabled):
-		c.JSON(http.StatusForbidden, gin.H{"error": err.Error()})
+		c.JSON(http.StatusForbidden, gin.H{"error": redactlog.SafeErrorMessage(err)})
 	default:
 		c.JSON(http.StatusInternalServerError, gin.H{"error": "认证服务暂时不可用"})
 	}

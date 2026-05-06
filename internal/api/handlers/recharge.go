@@ -8,6 +8,7 @@ import (
 	"github.com/gin-gonic/gin"
 
 	"oc-manager/internal/auth"
+	redactlog "oc-manager/internal/log"
 	"oc-manager/internal/service"
 )
 
@@ -116,6 +117,6 @@ func writeRechargeError(c *gin.Context, err error) {
 	case errors.Is(err, service.ErrOrgMissingNewAPIUserID):
 		c.JSON(http.StatusConflict, gin.H{"error": "组织未关联 new-api 账户"})
 	default:
-		c.JSON(http.StatusBadGateway, gin.H{"error": err.Error()})
+		c.JSON(http.StatusBadGateway, gin.H{"error": redactlog.SafeErrorMessage(err)})
 	}
 }

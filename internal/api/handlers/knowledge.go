@@ -10,6 +10,7 @@ import (
 	"github.com/gin-gonic/gin"
 
 	"oc-manager/internal/auth"
+	redactlog "oc-manager/internal/log"
 	"oc-manager/internal/service"
 )
 
@@ -221,6 +222,6 @@ func writeKnowledgeError(c *gin.Context, err error) {
 	case errors.Is(err, service.ErrKnowledgeMissing):
 		c.JSON(http.StatusServiceUnavailable, gin.H{"error": "知识库主副本未启用"})
 	default:
-		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+		c.JSON(http.StatusBadRequest, gin.H{"error": redactlog.SafeErrorMessage(err)})
 	}
 }

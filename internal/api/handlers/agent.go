@@ -8,6 +8,7 @@ import (
 
 	"github.com/gin-gonic/gin"
 
+	redactlog "oc-manager/internal/log"
 	"oc-manager/internal/service"
 )
 
@@ -148,7 +149,7 @@ func writeAgentEndpointError(c *gin.Context, err error) {
 	switch {
 	case errors.Is(err, service.ErrBootstrapTokenInvalid),
 		errors.Is(err, service.ErrAgentTokenInvalid):
-		c.JSON(http.StatusUnauthorized, gin.H{"error": err.Error()})
+		c.JSON(http.StatusUnauthorized, gin.H{"error": redactlog.SafeErrorMessage(err)})
 	default:
 		c.JSON(http.StatusInternalServerError, gin.H{"error": "服务暂时不可用"})
 	}

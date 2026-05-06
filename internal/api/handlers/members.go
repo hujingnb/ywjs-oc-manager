@@ -10,6 +10,7 @@ import (
 
 	"oc-manager/internal/auth"
 	"oc-manager/internal/domain"
+	redactlog "oc-manager/internal/log"
 	"oc-manager/internal/service"
 )
 
@@ -287,7 +288,7 @@ func writeMemberError(c *gin.Context, err error) {
 	case errors.Is(err, service.ErrNotFound):
 		c.JSON(http.StatusNotFound, gin.H{"error": "资源不存在"})
 	case errors.Is(err, service.ErrMemberCreateInvalid):
-		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+		c.JSON(http.StatusBadRequest, gin.H{"error": redactlog.SafeErrorMessage(err)})
 	default:
 		// 未知错误冒泡到日志，便于运维定位；响应仍保持脱敏。
 		log.Printf("member handler 未识别错误: %v", err)
