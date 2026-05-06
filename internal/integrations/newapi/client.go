@@ -104,18 +104,28 @@ func (c *Client) CreateAPIKey(ctx context.Context, input CreateAPIKeyInput) (API
 	// new-api v1 的 POST /api/token/ 响应不返回新 token 的 id 与 key 字段；
 	// 后续禁用 / 恢复 / 删除都需要 id，所以这里立即按 token name 查列表回填。
 	// 同 user 下不允许重名 token，按 name 精确匹配是稳定的。
-	if response.Data.ID == 0 {
-		resolved, err := c.findTokenByName(ctx, input.Name)
+	//
+	// key 字段无法通过 new-api admin API 拿到（POST 不返回，GET 也只返回 truncated 18 字符）。
+	// 上层 worker 不应使用这里返回的 Key 字段做 chat completions 鉴权——而是统一用 yaml
+	// 配置的 cfg.OpenClaw.LLM.OpenAICompat.APIKey 全局 sk- token。这里仅保留 id / status
+	// 等可观测字段，便于后续 disable / restore 操作。
+	resolved := response.Data
+	if resolved.ID == 0 {
+		fallback, err := c.findTokenByName(ctx, input.Name)
 		if err != nil {
 			return APIKey{}, fmt.Errorf("%w: 创建 token 成功但无法回查 id: %v", ErrPayloadInvalid, err)
 		}
-		return resolved, nil
+		resolved = fallback
 	}
-	return response.Data, nil
+	return resolved, nil
 }
 
 // findTokenByName 按 token name 在当前 admin user 的 token 列表里精确匹配并返回。
 // 用于补 new-api v1 的 POST /api/token/ 不返回 id 的缺口。
+//
+// 注意：new-api 的 list endpoint 出于安全不返回 key 字段（明文 token 只在 GET 单条
+// 才返回），所以拿到 id 后必须再调 GetAPIKey 拉取完整记录（含 key），否则上层会把
+// 空字符串当成 api_key 注入容器，导致后续 chat completions 401 Invalid token。
 func (c *Client) findTokenByName(ctx context.Context, name string) (APIKey, error) {
 	var listResp struct {
 		Success bool   `json:"success"`
@@ -138,7 +148,14 @@ func (c *Client) findTokenByName(ctx context.Context, name string) (APIKey, erro
 	}
 	for _, k := range candidates {
 		if k.Name == name {
-			return k, nil
+			// list 返回的 k 仅 id / name 等基础字段；GetAPIKey 能补齐 user_id / status，
+			// 但 key 字段始终是 truncated（new-api 安全策略，POST/GET 都不返回完整 key）。
+			// 上层 worker 不依赖这里返回的 key 字段，而是用 yaml 全局 sk- token 注入容器。
+			full, err := c.GetAPIKey(ctx, k.ID)
+			if err != nil {
+				return k, nil
+			}
+			return full, nil
 		}
 	}
 	return APIKey{}, fmt.Errorf("token name=%q not found in list", name)

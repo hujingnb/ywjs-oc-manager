@@ -202,7 +202,11 @@ func TestRechargeUserUsesGetThenPut(t *testing.T) {
 
 // TestCreateAPIKeyFallsBackToListWhenIDMissing 校验 new-api v1 的 POST /api/token/
 // 响应不含 data.id 时，client 用 token name 通过 list 接口回查 id。
+//
+// 注意：key 字段不强制——new-api 安全策略下 POST/GET 都不返回完整 key，本 client 只保证
+// 拿到 id 用于后续 disable/restore；上层用 yaml 全局 sk- token 注入容器。
 func TestCreateAPIKeyFallsBackToListWhenIDMissing(t *testing.T) {
+	getCalled := 0
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
 		switch {
@@ -210,8 +214,12 @@ func TestCreateAPIKeyFallsBackToListWhenIDMissing(t *testing.T) {
 			// 响应 success=true 但 data.id 为 null（new-api v1.0.0-alpha.1 行为）
 			_, _ = w.Write([]byte(`{"success":true,"message":""}`))
 		case r.Method == http.MethodGet && r.URL.Path == "/api/token/":
-			// fallback list 返回多个 token，按 name 命中 id
-			_, _ = w.Write([]byte(`{"success":true,"data":{"items":[{"id":99,"name":"alice","key":"sk-real","user_id":7}]}}`))
+			// fallback list：含 id（key 字段空，模拟 new-api 安全策略）
+			_, _ = w.Write([]byte(`{"success":true,"data":{"items":[{"id":99,"name":"alice","key":"","user_id":7}]}}`))
+		case r.Method == http.MethodGet && r.URL.Path == "/api/token/99":
+			// 单条详情：返回 key=空 模拟 new-api truncated 策略
+			getCalled++
+			_, _ = w.Write([]byte(`{"success":true,"data":{"id":99,"name":"alice","key":"","user_id":7}}`))
 		default:
 			t.Fatalf("unexpected request: %s %s", r.Method, r.URL.Path)
 		}
@@ -226,8 +234,9 @@ func TestCreateAPIKeyFallsBackToListWhenIDMissing(t *testing.T) {
 	if got.ID != 99 {
 		t.Fatalf("ID = %d, want 99 (resolved via fallback list)", got.ID)
 	}
-	if got.Key != "sk-real" {
-		t.Fatalf("Key = %q, want sk-real (resolved via fallback list)", got.Key)
+	// key 字段允许为空（上层走 yaml 全局 token），不再断言 key 非空
+	if getCalled != 1 {
+		t.Fatalf("expected 1 GetAPIKey call to enrich token metadata, got %d", getCalled)
 	}
 }
 
