@@ -5,6 +5,7 @@ import (
 	"crypto/x509"
 	"fmt"
 	"net/http"
+	"net/url"
 	"strings"
 	"time"
 
@@ -24,10 +25,14 @@ const dockerClientTimeout = 30 * time.Second
 //
 // 关键点：
 //   - endpoint：agent 暴露的 docker 代理 URL（https://host:7001 或 https://ip:7001）；
-//   - agentToken：注册成功后 manager 缓存的长期通信令牌，调用时通过 Authorization 头注入；
-//   - caCertPEM：agent 自签 CA 证书 PEM，用于 manager 端 TLS 校验；
-//   - 自定义 RoundTripper 在每个请求前注入 Bearer 头并把 path 重写为 /v1/docker/<rest>，
-//     这样 docker SDK 内置的 host="docker"、path=/_ping 之类相对路径会落到代理前缀下。
+//     函数内部会把它改写成 tcp://host:7001/v1/docker 喂给 docker SDK，让 SDK 自动处理：
+//       1. basePath = /v1/docker，所有 REST 请求与 hijack 请求的 path 都自动加前缀；
+//       2. proto = "tcp"，使 hijack dialer 走 tls.Dial("tcp", addr, tlsConfig) 拨真 TLS 连接，
+//          否则 SDK 会用 net.Dial("https", ...) 失败（"unknown network https"）；
+//       3. scheme = "https"（由 SDK 根据 tlsConfig != nil 推导），保证非 hijack REST 走 TLS。
+//   - agentToken：注册成功后 manager 缓存的长期通信令牌，通过 client.WithHTTPHeaders
+//     注入为默认 Authorization 头；这样 REST 与 hijack（exec attach 等）都会自动携带。
+//   - caCertPEM：agent 自签 CA 证书 PEM，用于 manager 端 TLS 校验。
 //
 // 任何参数缺失或 PEM 不可解析都返回错误，避免运行时才暴露配置问题。
 func NewDockerClientForNode(endpoint, agentToken, caCertPEM string, opts ...client.Opt) (*client.Client, error) {
@@ -38,18 +43,34 @@ func NewDockerClientForNode(endpoint, agentToken, caCertPEM string, opts ...clie
 	if err != nil {
 		return nil, err
 	}
-	transport := &bearerProxyTransport{
-		base: &http.Transport{
-			TLSClientConfig:       &tls.Config{RootCAs: pool, MinVersion: tls.VersionTLS12},
-			TLSHandshakeTimeout:   10 * time.Second,
-			ResponseHeaderTimeout: dockerClientTimeout,
-		},
-		token: agentToken,
+	parsedURL, err := url.Parse(endpoint)
+	if err != nil {
+		return nil, fmt.Errorf("解析 agent endpoint 失败: %w", err)
+	}
+	if parsedURL.Host == "" {
+		return nil, fmt.Errorf("agent endpoint 缺少 host: %q", endpoint)
+	}
+
+	tlsConfig := &tls.Config{RootCAs: pool, MinVersion: tls.VersionTLS12}
+	// 直接使用 *http.Transport 让 docker SDK 能把它识别为 baseTransport（用于关闭空闲连接等），
+	// 同时 SDK 才能在带 https URL 的请求上走 TLS。
+	transport := &http.Transport{
+		TLSClientConfig:       tlsConfig,
+		TLSHandshakeTimeout:   10 * time.Second,
+		ResponseHeaderTimeout: dockerClientTimeout,
 	}
 	httpClient := &http.Client{Transport: transport, Timeout: dockerClientTimeout}
+
+	// 关键：把 endpoint 转换成 tcp://host:port/v1/docker 形式喂给 docker SDK。
+	// 详见函数 doc 注释。
+	sdkHost := "tcp://" + parsedURL.Host + DockerProxyPathPrefix
+
 	defaults := []client.Opt{
-		client.WithHost(endpoint),
+		client.WithHost(sdkHost),
 		client.WithHTTPClient(httpClient),
+		client.WithHTTPHeaders(map[string]string{
+			"Authorization": "Bearer " + agentToken,
+		}),
 		client.WithAPIVersionNegotiation(),
 	}
 	return client.NewClientWithOpts(append(defaults, opts...)...)
@@ -66,41 +87,4 @@ func buildCertPool(caCertPEM string) (*x509.CertPool, error) {
 		return nil, fmt.Errorf("无法解析 agent CA cert PEM，请检查 runtime_nodes.agent_tls_ca_cert")
 	}
 	return pool, nil
-}
-
-// bearerProxyTransport 在 docker SDK 请求出栈前完成两件事：
-//  1. 注入 Authorization: Bearer <agentToken>，让 agent 端的中间件放行；
-//  2. 把 docker SDK 默认生成的 /_ping、/v1.41/containers/... 之类 path
-//     统一改写为 /v1/docker/<rest>，与 agent 暴露的代理前缀对齐。
-//
-// 直接修改请求会污染调用方的副本，因此用 req.Clone 之后再写头与 path。
-type bearerProxyTransport struct {
-	base  http.RoundTripper
-	token string
-}
-
-func (t *bearerProxyTransport) RoundTrip(req *http.Request) (*http.Response, error) {
-	cloned := req.Clone(req.Context())
-	if t.token != "" {
-		cloned.Header.Set("Authorization", "Bearer "+t.token)
-	}
-	cloned.URL.Path = ensureProxyPrefix(cloned.URL.Path)
-	cloned.URL.RawPath = ""
-	// docker SDK 默认会把 URL.Scheme 设为 "http"（它假设 TLS 通过自定义 dial 完成，
-	// 传统 docker:tcp 模式如此）。我们走的是真正的 HTTPS 反向代理，
-	// 必须强制 scheme = https，否则 stdlib http.Transport 不会做 TLS 握手。
-	cloned.URL.Scheme = "https"
-	return t.base.RoundTrip(cloned)
-}
-
-// ensureProxyPrefix 在 docker SDK 生成的 path 前加上 /v1/docker。
-// 已经带前缀（例如 manager 测试代码手动构造）的请求保持原样。
-func ensureProxyPrefix(p string) string {
-	if strings.HasPrefix(p, DockerProxyPathPrefix+"/") || p == DockerProxyPathPrefix {
-		return p
-	}
-	if !strings.HasPrefix(p, "/") {
-		p = "/" + p
-	}
-	return DockerProxyPathPrefix + p
 }
