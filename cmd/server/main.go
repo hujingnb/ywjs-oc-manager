@@ -179,8 +179,18 @@ func runManager(ctx context.Context, cfg config.Config, logOut io.Writer) error 
 			SystemPromptTemplate: cfg.OpenClaw.SystemPromptTemplate,
 			PlatformPrompt:       cfg.OpenClaw.SystemPromptTemplate,
 			Cipher:               cipher,
+			ContainerNetworks:    cfg.OpenClaw.ContainerNetworks,
+			LLM: handlers.AppInitializeLLMConfig{
+				BaseURL:            cfg.OpenClaw.LLM.BaseURL,
+				DefaultProvider:    cfg.OpenClaw.LLM.DefaultProvider,
+				DefaultModel:       cfg.OpenClaw.LLM.DefaultModel,
+				OpenAICompatAPIKey: cfg.OpenClaw.LLM.OpenAICompat.APIKey,
+			},
 		},
 	)
+	// runtimeAdapter 同时实现 AppRuntimeFileWriter（UploadAppRuntimeFile），
+	// 让 handler 在 InitAppDirs 之后把 pi-coding-agent settings.json 写到节点。
+	appInitHandler.SetRuntimeFileWriter(runtimeAdapter)
 	if err := registry.Register("app_initialize", appInitHandler.Handle); err != nil {
 		return fmt.Errorf("注册 app_initialize handler 失败: %w", err)
 	}

@@ -125,6 +125,12 @@ services:
       NEWAPI_BASE_URL: "${NEWAPI_BASE_URL:-http://new-api:3000}"
       NEWAPI_ADMIN_TOKEN: "${NEWAPI_ADMIN_TOKEN}"
       NEWAPI_ADMIN_USER_ID: "${NEWAPI_ADMIN_USER_ID:-1}"
+      # OpenClaw 容器调模型用的 OpenAI 兼容网关 + 默认 provider/model；详见 config.yaml.example openclaw.llm 注释
+      OPENCLAW_LLM_BASE_URL: "${OPENCLAW_LLM_BASE_URL:-http://new-api:3000/v1}"
+      OPENCLAW_LLM_DEFAULT_PROVIDER: "${OPENCLAW_LLM_DEFAULT_PROVIDER:-openai}"
+      OPENCLAW_LLM_DEFAULT_MODEL: "${OPENCLAW_LLM_DEFAULT_MODEL:-qwen2.5:0.5b}"
+      # 注入容器 OPENAI_API_KEY 的全局 sk- token；ops 在 new-api 后台手工创建后填入 .env
+      OPENCLAW_LLM_OPENAI_API_KEY: "${OPENCLAW_LLM_OPENAI_API_KEY}"
       PATH: /go/bin:/usr/local/go/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin
       GOPATH: /go
       GOMODCACHE: /go/pkg/mod

@@ -66,9 +66,27 @@ func TestAppInitializeHandlesHappyPath(t *testing.T) {
 		t.Fatal("ciphertext 等于明文，加密未生效")
 	}
 
-	// 容器规格断言：5 个挂载、关键 env 项、镜像、容器名。
-	if len(containers.lastSpec.Volumes) != 5 {
-		t.Fatalf("Volumes 数量 = %d, want 5", len(containers.lastSpec.Volumes))
+	// 容器规格断言：6 个挂载（5 个业务目录 + 1 个 pi-coding-agent settings 目录）、
+	// 关键 env 项、镜像、容器名。
+	if len(containers.lastSpec.Volumes) != 6 {
+		t.Fatalf("Volumes 数量 = %d, want 6", len(containers.lastSpec.Volumes))
+	}
+	// 第 6 个 volume 是 OpenClaw agent models.json 单文件 mount（**可写**，
+	// 因为 OpenClaw 启动时会 rename tmp → models.json，RO 会让 catalog 加载失败）。
+	var hasModelsMount bool
+	for _, vol := range containers.lastSpec.Volumes {
+		if vol.ContainerPath == "/root/.openclaw/agents/main/agent/models.json" {
+			if vol.ReadOnly {
+				t.Fatal("models.json mount 不能 ReadOnly：OpenClaw 启动时需 rename tmp → models.json")
+			}
+			if !strings.HasSuffix(vol.HostPath, "/openclaw-config/models.json") {
+				t.Fatalf("models.json host path 末尾应为 /openclaw-config/models.json, got %q", vol.HostPath)
+			}
+			hasModelsMount = true
+		}
+	}
+	if !hasModelsMount {
+		t.Fatal("ContainerSpec 缺 OpenClaw models.json file-level bind mount")
 	}
 	if containers.lastSpec.Image != "openclaw:dev" {
 		t.Fatalf("Image = %q", containers.lastSpec.Image)
@@ -413,4 +431,59 @@ func mustUUIDForTest(t *testing.T, value string) pgtype.UUID {
 		t.Fatalf("uuid: %v", err)
 	}
 	return id
+}
+
+func TestRenderOpenClawModels(t *testing.T) {
+	full := AppInitializeLLMConfig{
+		BaseURL:         "http://new-api:3000/v1",
+		DefaultProvider: "openai",
+		DefaultModel:    "qwen2.5:0.5b",
+	}
+	t.Run("all fields set returns provider+model+baseUrl JSON", func(t *testing.T) {
+		raw := renderOpenClawModels(full)
+		if raw == nil {
+			t.Fatal("应返回非 nil")
+		}
+		got := string(raw)
+		if !strings.Contains(got, `"openai"`) {
+			t.Fatalf("缺 provider key: %s", got)
+		}
+		if !strings.Contains(got, `"qwen2.5:0.5b"`) {
+			t.Fatalf("缺 model id: %s", got)
+		}
+		if !strings.Contains(got, `"baseUrl": "http://new-api:3000/v1"`) {
+			t.Fatalf("缺 baseUrl: %s", got)
+		}
+		if !strings.Contains(got, `"apiKey": "${OPENAI_API_KEY}"`) {
+			t.Fatalf("apiKey 应为 env 占位符: %s", got)
+		}
+	})
+	t.Run("missing baseURL returns nil", func(t *testing.T) {
+		c := full
+		c.BaseURL = ""
+		if got := renderOpenClawModels(c); got != nil {
+			t.Fatalf("缺 baseURL 应返回 nil, got %s", got)
+		}
+	})
+	t.Run("missing provider returns nil", func(t *testing.T) {
+		c := full
+		c.DefaultProvider = ""
+		if got := renderOpenClawModels(c); got != nil {
+			t.Fatalf("缺 provider 应返回 nil, got %s", got)
+		}
+	})
+	t.Run("missing model returns nil", func(t *testing.T) {
+		c := full
+		c.DefaultModel = ""
+		if got := renderOpenClawModels(c); got != nil {
+			t.Fatalf("缺 model 应返回 nil, got %s", got)
+		}
+	})
+	t.Run("whitespace only treated as missing", func(t *testing.T) {
+		c := full
+		c.DefaultProvider = "  "
+		if got := renderOpenClawModels(c); got != nil {
+			t.Fatalf("空白 provider 应返回 nil, got %s", got)
+		}
+	})
 }

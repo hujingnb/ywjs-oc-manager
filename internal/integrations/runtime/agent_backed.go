@@ -370,6 +370,17 @@ func (a *AgentBackedAdapter) UploadAppFile(ctx context.Context, nodeID, appID, r
 	return cli.UploadAppKnowledgeFile(ctx, appID, relPath, content)
 }
 
+// UploadAppRuntimeFile 把 manager 渲染的 OpenClaw 运行时配置文件（如 pi-coding-agent
+// settings.json）写到指定节点的 apps/<appID>/pi-agent/，agent 端 bind mount 到容器
+// /root/.pi/agent/{relPath}。
+func (a *AgentBackedAdapter) UploadAppRuntimeFile(ctx context.Context, nodeID, appID, relPath string, content io.Reader) error {
+	cli, err := a.resolveFile(ctx, nodeID)
+	if err != nil {
+		return err
+	}
+	return cli.UploadAppRuntimeFile(ctx, appID, relPath, content)
+}
+
 // DeleteOrgFile 删除节点上组织级知识库的指定文件 / 子目录。
 func (a *AgentBackedAdapter) DeleteOrgFile(ctx context.Context, nodeID, orgID, relPath string) error {
 	cli, err := a.resolveFile(ctx, nodeID)

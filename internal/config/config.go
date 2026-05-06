@@ -69,6 +69,30 @@ type OpenClawConfig struct {
 	RuntimeImage         string          `yaml:"runtime_image"`
 	SystemPromptTemplate string          `yaml:"system_prompt_template"`
 	Workspace            WorkspaceConfig `yaml:"workspace"`
+	LLM                  OpenClawLLMConfig `yaml:"llm"`
+	// ContainerNetworks 控制 manager 创建 OpenClaw 容器时连接哪些 docker network。
+	// 必须包含 new-api 所在的 network（默认 docker compose project name 派生的
+	// "<project>_default"，如 oc-manager_default），否则 OpenClaw 容器无法解析
+	// "new-api" hostname → chat completions Connection error。
+	// 留空时 docker 默认 bridge network，与 compose 起的 new-api 不互通。
+	ContainerNetworks    []string        `yaml:"container_networks"`
+}
+
+// OpenClawLLMConfig 描述 OpenClaw 容器内嵌 pi-coding-agent 调模型用的配置。
+//
+//   - BaseURL：OpenAI 兼容 endpoint，OpenClaw 容器从 docker network 看到的 new-api 地址，
+//     必须含 /v1 路径后缀；注入为 OPENAI_BASE_URL 环境变量。
+//   - DefaultProvider / DefaultModel：写入容器内 /root/.pi/agent/settings.json，
+//     pi-coding-agent 用作默认 provider/model；缺失时 OpenClaw 默认 openai/gpt-5.5
+//     无法路由到本地 ollama。
+//
+// 当三项任一为空时，buildContainerSpec 不会写入 settings.json，OpenClaw 走默认配置；
+// 部署侧应保证三项都填上，否则模型调用会失败。
+type OpenClawLLMConfig struct {
+	BaseURL         string             `yaml:"base_url"`
+	DefaultProvider string             `yaml:"default_provider"`
+	DefaultModel    string             `yaml:"default_model"`
+	OpenAICompat    OpenAICompatConfig `yaml:"openai_compat"`
 }
 
 // WorkspaceConfig 描述应用工作目录归档相关参数。
@@ -97,6 +121,23 @@ type NewAPIConfig struct {
 	BaseURL     string `yaml:"base_url"`
 	AdminToken  string `yaml:"admin_token"`
 	AdminUserID int64  `yaml:"admin_user_id"`
+}
+
+// OpenAICompatConfig 描述 OpenClaw 容器调模型用的 OpenAI 兼容 API key。
+//
+// 设计动机：new-api v1 的 admin POST /api/token/ 不返回新建 token 的完整 key（只
+// 返回 success），GET 也只返回 truncated 18 字符前缀。manager 通过 admin API 完全
+// 拿不到真 sk- 形式 token，导致注入容器的 OPENAI_API_KEY 不可用，下游所有 chat
+// completions 401。
+//
+// dev / 单机部署的解法：ops 在 new-api 后台手工创建一个 sk- token，配进本字段；
+// 所有应用容器共用此 token 调 OpenAI 兼容 endpoint（spec §5.3 的"每应用一 api_key"
+// 隔离暂时降级，等 new-api 提供"创建后短窗口可读完整 key"的 API 再恢复）。
+//
+// 仍然每应用独立调 admin POST /api/token/ 创建 token 记录（用于未来按 token id
+// 拆分用量统计）；但容器实际用的 OPENAI_API_KEY 走本字段全局值。
+type OpenAICompatConfig struct {
+	APIKey string `yaml:"api_key"`
 }
 
 // Duration 让 YAML 中的 "15m"、"720h" 这类字符串显式解析为 time.Duration。

@@ -47,6 +47,26 @@ openclaw:
     应用级知识库（只读）：{{knowledge_app_dir}}
   workspace:
     archive_retention_days: 14
+  # OpenClaw 容器内嵌 pi-coding-agent 调模型用的配置。
+  # base_url：OpenAI 兼容 endpoint，是 OpenClaw 容器从 docker network 看到的 new-api 地址，必须含 /v1。
+  # default_provider/default_model：写入容器 /root/.pi/agent/settings.json，作为默认 provider/model。
+  # 不填则 OpenClaw 走默认 openai/gpt-5.5，本地 ollama 路由不通。
+  llm:
+    base_url: "${OPENCLAW_LLM_BASE_URL}"
+    default_provider: "${OPENCLAW_LLM_DEFAULT_PROVIDER}"
+    default_model: "${OPENCLAW_LLM_DEFAULT_MODEL}"
+    # 注入容器 OPENAI_API_KEY 的全局 sk- token。
+    # ops 在 new-api「令牌」页手工创建一个 unlimited / 永不过期的 token，复制完整 sk-
+    # 字符串配进这里；所有应用共用此 token 调 OpenAI 兼容 endpoint。
+    # 留空时 fallback 到 manager 自动调 admin POST /api/token/ 拿的 truncated key
+    # （chat completions 会 401，仅适合本地无模型调用调试）。
+    openai_compat:
+      api_key: "${OPENCLAW_LLM_OPENAI_API_KEY}"
+  # OpenClaw 容器要连接的 docker network 列表；必须包含 new-api 所在 network，
+  # 否则容器无法解析 "new-api" hostname → chat completions Connection error。
+  # 默认 docker compose project 派生 "<project>_default"，本仓库 project=oc-manager。
+  container_networks:
+    - "oc-manager_default"
 
 agent:
   heartbeat_interval_seconds: 30

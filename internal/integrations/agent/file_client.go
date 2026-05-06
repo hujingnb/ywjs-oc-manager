@@ -238,6 +238,30 @@ func (c *AgentFileClient) UploadOrgKnowledgeFile(ctx context.Context, orgID, rel
 	return c.doKnowledgeFile(ctx, http.MethodPut, "orgs", orgID, relPath, content)
 }
 
+// UploadAppRuntimeFile 把 manager 渲染的 OpenClaw 运行时配置文件（pi-coding-agent settings.json 等）
+// 上传到 apps/{appID}/pi-agent/{relPath}。容器内通过 bind mount 暴露为 /root/.pi/agent/{relPath}。
+// agent 端在 pi-agent 目录上做沙箱校验，禁 .. 与符号链接。
+func (c *AgentFileClient) UploadAppRuntimeFile(ctx context.Context, appID, relPath string, content io.Reader) error {
+	endpoint, err := c.endpoint(fmt.Sprintf("/v1/scopes/apps/%s/runtime/file", url.PathEscape(appID)))
+	if err != nil {
+		return err
+	}
+	q := url.Values{}
+	q.Set("path", relPath)
+	req, err := http.NewRequestWithContext(ctx, http.MethodPut, endpoint+"?"+q.Encode(), content)
+	if err != nil {
+		return err
+	}
+	req.Header.Set("Content-Type", "application/octet-stream")
+	c.authorize(req)
+	resp, err := c.httpClient().Do(req)
+	if err != nil {
+		return err
+	}
+	defer resp.Body.Close()
+	return expectSuccess(resp, "upload app runtime file")
+}
+
 // UploadAppKnowledgeFile 同 UploadOrgKnowledgeFile，但走应用级。
 func (c *AgentFileClient) UploadAppKnowledgeFile(ctx context.Context, appID, relPath string, content io.Reader) error {
 	return c.doKnowledgeFile(ctx, http.MethodPut, "apps", appID, relPath, content)

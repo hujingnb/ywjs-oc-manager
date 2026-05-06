@@ -104,6 +104,13 @@ func scopesAppsHandler(dataRoot string) http.HandlerFunc {
 		switch {
 		case action == "init" && r.Method == http.MethodPost:
 			handleAppInit(w, r, dataRoot, appID)
+		case action == "runtime/file" && r.Method == http.MethodPut:
+			// 写 manager 渲染的 OpenClaw 运行时配置文件（如 models.json 覆盖 agent catalog）。
+			// 沙箱根 = apps/<appID>/openclaw-config/，容器内通过 file-level bind mount 暴露为
+			// /root/.openclaw/agents/main/agent/<file>（OpenClaw 上层 embedded agent 实际读取路径）。
+			handleKnowledgeFileUpload(w, r, dataRoot, filepath.Join("apps", appID, "openclaw-config"))
+		case action == "runtime/file" && r.Method == http.MethodDelete:
+			handleKnowledgeFileDelete(w, r, dataRoot, filepath.Join("apps", appID, "openclaw-config"))
 		case action == "knowledge/sync" && r.Method == http.MethodPost:
 			handleKnowledgeSync(w, r, dataRoot, filepath.Join("apps", appID, "knowledge"))
 		case action == "knowledge/file" && r.Method == http.MethodPut:
@@ -171,10 +178,12 @@ func isValidScopeID(id string) bool {
 	return true
 }
 
-// handleAppInit 创建 apps/<appID>/{knowledge,workspace,state,logs} 4 个子目录。
+// handleAppInit 创建 apps/<appID>/{knowledge,workspace,state,logs,openclaw-config} 5 个子目录。
+// openclaw-config 用于存放 manager 渲染的 OpenClaw 上层 embedded agent 配置（如 models.json），
+// 通过 file-level bind mount 暴露到容器内 /root/.openclaw/agents/main/agent/。
 // 操作幂等：MkdirAll 在目录已存在时 no-op。
 func handleAppInit(w http.ResponseWriter, _ *http.Request, dataRoot, appID string) {
-	for _, sub := range []string{"knowledge", "workspace", "state", "logs"} {
+	for _, sub := range []string{"knowledge", "workspace", "state", "logs", "openclaw-config"} {
 		dir := filepath.Join(dataRoot, "apps", appID, sub)
 		if err := os.MkdirAll(dir, 0o755); err != nil {
 			writeError(w, http.StatusInternalServerError, err.Error())
