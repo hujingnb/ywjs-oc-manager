@@ -18,6 +18,7 @@ import CreateMemberPage from '@/pages/org/CreateMemberPage.vue'
 import MembersPage from '@/pages/org/MembersPage.vue'
 import PersonaPage from '@/pages/org/PersonaPage.vue'
 import OrganizationsPage from '@/pages/platform/OrganizationsPage.vue'
+import PlatformDashboardPage from '@/pages/platform/PlatformDashboardPage.vue'
 import RechargePage from '@/pages/platform/RechargePage.vue'
 import OrgKnowledgePage from '@/pages/knowledge/OrgKnowledgePage.vue'
 import RuntimeNodeDetailPage from '@/pages/runtime-nodes/RuntimeNodeDetailPage.vue'
@@ -41,6 +42,7 @@ export const router = createRouter({
         { path: '', component: RoleAwareHome },
         { path: 'dashboard', component: DashboardHome },
         { path: 'organizations', component: OrganizationsPage },
+        { path: 'platform/dashboard', component: PlatformDashboardPage },
         { path: 'platform/organizations/:orgId/recharge', component: RechargePage },
         { path: 'members', component: MembersPage },
         { path: 'members/new', component: CreateMemberPage },

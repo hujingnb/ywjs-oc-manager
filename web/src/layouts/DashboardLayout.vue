@@ -18,6 +18,15 @@
           v-if="auth.user?.role === 'platform_admin'"
           class="nav-item"
           active-class="active"
+          to="/platform/dashboard"
+        >
+          <Gauge :size="18" />
+          <span>平台</span>
+        </RouterLink>
+        <RouterLink
+          v-if="auth.user?.role === 'platform_admin'"
+          class="nav-item"
+          active-class="active"
           to="/organizations"
         >
           <Building2 :size="18" />
@@ -95,6 +104,7 @@ import {
   Bot,
   Building2,
   FileSearch,
+  Gauge,
   LayoutDashboard,
   LogOut,
   RefreshCw,

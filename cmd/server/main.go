@@ -122,6 +122,8 @@ func runManager(ctx context.Context, cfg config.Config, logOut io.Writer) error 
 	appService := service.NewAppService(dbStore.Queries)
 	runtimeOpService := service.NewRuntimeOperationService(dbStore.Queries, redisQueue)
 	personaService := service.NewPersonaService(store.NewPersonaStore(dbStore))
+	// platformOverviewService 在 usageService 后初始化（usage 在下方有 newapi 注入再覆盖）；
+	// 这里先用 nil 占位，真实实例在 wiring 末尾装配。
 	usageService := service.NewUsageService(nil)
 	usageService.SetAppLister(appService)
 	usageService.SetOrgLister(organizationService)
@@ -172,6 +174,7 @@ func runManager(ctx context.Context, cfg config.Config, logOut io.Writer) error 
 		usageService.SetAppLister(appService)
 		usageService.SetOrgLister(organizationService)
 	}
+	platformOverviewService := service.NewPlatformOverviewService(dbStore.Queries, usageService)
 
 	registry := handlers.NewRegistry()
 	// runtimeAdapter 同时实现 AgentDirInitializer / ContainerCreator / ContainerLifecycle
@@ -269,6 +272,7 @@ func runManager(ctx context.Context, cfg config.Config, logOut io.Writer) error 
 			AppService:          appService,
 			UsageService:        usageService,
 			RechargeService:     rechargeService,
+			PlatformOverview:    platformOverviewService,
 			PersonaService:      personaService,
 			JobsStore:           dbStore.Queries,
 			TokenManager:        tokenManager,

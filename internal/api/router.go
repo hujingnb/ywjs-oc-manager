@@ -26,6 +26,7 @@ type Dependencies struct {
 	AppService          *service.AppService
 	RechargeService     *service.RechargeService
 	PersonaService      *service.PersonaService
+	PlatformOverview    *service.PlatformOverviewService
 	JobsStore           handlers.JobsStore
 	TokenManager        *auth.TokenManager
 	// AgentTokenSink 在 agent register 成功时由 manager 进程缓存 (nodeID, agentToken)。
@@ -109,6 +110,9 @@ func NewRouter(deps ...Dependencies) http.Handler {
 	}
 	if dep.PersonaService != nil {
 		handlers.RegisterPersonaRoutes(router, handlers.NewPersonaHandler(dep.PersonaService, dep.TokenManager))
+	}
+	if dep.PlatformOverview != nil {
+		handlers.RegisterPlatformOverviewRoutes(router, handlers.NewPlatformOverviewHandler(dep.PlatformOverview, dep.TokenManager))
 	}
 	return router
 }
