@@ -132,6 +132,65 @@ func TestChannelCheckBindingHandlerRequeuesPending(t *testing.T) {
 	}
 }
 
+// TestChannelCheckBindingHandlerFallsBackToResolverWhenAdapterPending 校验：
+// 当 PollAuth 返回 pending（plugin stdout 没输出 "bound"），但 plugin state 文件里
+// 已经有真实账号 session 时（resolver 返回非空 identity），应当推到 bound 而不是
+// 等到 expired。
+//
+// 这个 fallback 修复的是 OpenClaw weixin plugin 的真实行为：第二次扫码（同一微信
+// 账号已授权过）plugin 静默成功不再 emit bound 事件，但 accounts.json 仍真实可用。
+func TestChannelCheckBindingHandlerFallsBackToResolverWhenAdapterPending(t *testing.T) {
+	store := newChannelWorkerStore(t)
+	registry := channel.NewRegistry()
+	registry.MustRegister(&workerFakeChannelAdapter{
+		progress: channel.AuthProgress{Status: channel.AuthStatusPending, UpdatedAt: time.Now()},
+	})
+	resolver := &workerFakeBindingResolver{identity: "o9cq800xszCM8jyoS9YpRKpvAN9c@im.wechat"}
+	handler := NewChannelCheckBindingHandler(store, registry, resolver)
+
+	err := handler.Handle(context.Background(), sqlc.Job{
+		Type:        domain.JobTypeChannelCheckBinding,
+		PayloadJson: []byte(`{"app_id":"` + testChannelWorkerAppID + `","channel_type":"wechat"}`),
+	})
+	if err != nil {
+		t.Fatalf("Handle() error = %v", err)
+	}
+	if store.binding.Status != domain.ChannelStatusBound {
+		t.Fatalf("binding status = %q, want bound (resolver fallback should have promoted)", store.binding.Status)
+	}
+	if store.binding.BoundIdentity.String != "o9cq800xszCM8jyoS9YpRKpvAN9c@im.wechat" {
+		t.Fatalf("bound_identity = %q", store.binding.BoundIdentity.String)
+	}
+	if !store.appStatusSet {
+		t.Fatal("app status 应被推进到 running")
+	}
+	if resolver.calls != 1 {
+		t.Fatalf("resolver calls = %d, want 1", resolver.calls)
+	}
+}
+
+// TestChannelCheckBindingHandlerSkipsResolverFallbackWithoutResolver 校验：
+// 没装 resolver（如非 wechat 渠道）时 pending 仍走原始重新入队路径，不报错。
+func TestChannelCheckBindingHandlerSkipsResolverFallbackWithoutResolver(t *testing.T) {
+	store := newChannelWorkerStore(t)
+	registry := channel.NewRegistry()
+	registry.MustRegister(&workerFakeChannelAdapter{
+		progress: channel.AuthProgress{Status: channel.AuthStatusPending, UpdatedAt: time.Now()},
+	})
+	handler := NewChannelCheckBindingHandler(store, registry, nil)
+
+	err := handler.Handle(context.Background(), sqlc.Job{
+		Type:        domain.JobTypeChannelCheckBinding,
+		PayloadJson: []byte(`{"app_id":"` + testChannelWorkerAppID + `","channel_type":"wechat"}`),
+	})
+	if err != nil {
+		t.Fatalf("Handle() error = %v", err)
+	}
+	if store.binding.Status != domain.ChannelStatusPendingAuth {
+		t.Fatalf("没有 resolver 时应保持 pending_auth, got %q", store.binding.Status)
+	}
+}
+
 type workerFakeChannelAdapter struct {
 	challenge channel.AuthChallenge
 	progress  channel.AuthProgress

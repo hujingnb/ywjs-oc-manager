@@ -195,6 +195,30 @@ func (h *ChannelCheckBindingHandler) Handle(ctx context.Context, job sqlc.Job) e
 			LastError:   pgtype.Text{String: progress.ErrorMessage, Valid: progress.ErrorMessage != ""},
 		})
 	default:
+		// Fallback：OpenClaw weixin plugin 在 cached login（同微信账号已授权过）场景下
+		// 不再 emit "bound" 事件，但 plugin state 文件 (/root/.openclaw/openclaw-weixin/accounts/*.json)
+		// 真实存在 session。这里直接调 resolver 看 plugin state 是否已有有效身份；
+		// 有就同样推到 bound，避免 5 分钟后被错误地 expire。
+		if h.resolver != nil && payload.ChannelType == domain.ChannelTypeWeChat {
+			if identity, rerr := h.resolver.ResolveWeChatBoundIdentity(ctx, uuidToString(app.RuntimeNodeID), textOrEmpty(app.ContainerID)); rerr == nil && identity != "" {
+				metadata, _ := json.Marshal(progress.Metadata)
+				if _, err := h.store.MarkChannelBindingBound(ctx, sqlc.MarkChannelBindingBoundParams{
+					AppID:         binding.AppID,
+					ChannelType:   binding.ChannelType,
+					BoundIdentity: pgtype.Text{String: identity, Valid: true},
+					ChannelName:   pgtype.Text{String: progress.ChannelName, Valid: progress.ChannelName != ""},
+					MetadataJson:  metadata,
+				}); err != nil {
+					return fmt.Errorf("基于 plugin state 标记渠道绑定成功失败: %w", err)
+				}
+				if app.Status == domain.AppStatusBindingWaiting {
+					if _, err := h.store.SetAppStatus(ctx, sqlc.SetAppStatusParams{ID: app.ID, Status: domain.AppStatusRunning}); err != nil {
+						return fmt.Errorf("推进应用状态到 running 失败: %w", err)
+					}
+				}
+				return nil
+			}
+		}
 		_, _ = h.store.SetChannelBindingStatus(ctx, sqlc.SetChannelBindingStatusParams{
 			AppID:       binding.AppID,
 			ChannelType: binding.ChannelType,
