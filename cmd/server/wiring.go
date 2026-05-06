@@ -398,7 +398,28 @@ func newRuntimeRefreshDispatcher(queries runtimeRefreshJobsQueries, notifier ser
 
 // Tick 列出待刷新应用并入队 runtime_refresh_status job；任一应用失败不阻断其他应用。
 func (d *runtimeRefreshDispatcher) Tick(ctx context.Context) error {
-	rows, err := d.queries.ListRunningApps(ctx)
+	return enqueuePerRunningApp(ctx, d.queries, d.notifier, domain.JobTypeRuntimeRefreshStatus, 20, 1)
+}
+
+// healthCheckDispatcher 周期入队 app_health_check job：复用 runtimeRefreshJobsQueries
+// 与 enqueuePerRunningApp helper，差异只在 job 类型与优先级。
+type healthCheckDispatcher struct {
+	queries  runtimeRefreshJobsQueries
+	notifier service.JobNotifier
+}
+
+func newHealthCheckDispatcher(queries runtimeRefreshJobsQueries, notifier service.JobNotifier) *healthCheckDispatcher {
+	return &healthCheckDispatcher{queries: queries, notifier: notifier}
+}
+
+func (d *healthCheckDispatcher) Tick(ctx context.Context) error {
+	return enqueuePerRunningApp(ctx, d.queries, d.notifier, domain.JobTypeAppHealthCheck, 30, 1)
+}
+
+// enqueuePerRunningApp 是 runtime_refresh_status 与 app_health_check 共用的扫描入队逻辑。
+// 任一应用 CreateJob 失败 continue 不阻断；返回错误仅在 ListRunningApps 失败时。
+func enqueuePerRunningApp(ctx context.Context, queries runtimeRefreshJobsQueries, notifier service.JobNotifier, jobType string, priority int32, maxAttempts int32) error {
+	rows, err := queries.ListRunningApps(ctx)
 	if err != nil {
 		return fmt.Errorf("列出 running 应用失败: %w", err)
 	}
@@ -408,18 +429,18 @@ func (d *runtimeRefreshDispatcher) Tick(ctx context.Context) error {
 		if err != nil {
 			continue
 		}
-		job, err := d.queries.CreateJob(ctx, sqlc.CreateJobParams{
-			Type:        domain.JobTypeRuntimeRefreshStatus,
-			Priority:    20,
-			MaxAttempts: 1,
+		job, err := queries.CreateJob(ctx, sqlc.CreateJobParams{
+			Type:        jobType,
+			Priority:    priority,
+			MaxAttempts: maxAttempts,
 			RunAfter:    pgtype.Timestamptz{Time: time.Now(), Valid: true},
 			PayloadJson: payload,
 		})
 		if err != nil {
 			continue
 		}
-		if d.notifier != nil {
-			_ = d.notifier.Enqueue(ctx, uuidToStringWiring(job.ID))
+		if notifier != nil {
+			_ = notifier.Enqueue(ctx, uuidToStringWiring(job.ID))
 		}
 	}
 	return nil

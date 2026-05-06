@@ -190,6 +190,9 @@ func (a *fakeWorkspaceAdapter) InspectContainer(_ context.Context, _, _ string) 
 func (a *fakeWorkspaceAdapter) ContainerStats(_ context.Context, _, _ string) (runtime.ContainerStats, error) {
 	return runtime.ContainerStats{}, runtime.ErrUnimplemented
 }
+func (a *fakeWorkspaceAdapter) ContainerExec(_ context.Context, _, _ string, _ []string) (runtime.ExecResult, error) {
+	return runtime.ExecResult{}, runtime.ErrUnimplemented
+}
 func (a *fakeWorkspaceAdapter) ListFiles(_ context.Context, _ string, path string) (runtime.FileListing, error) {
 	a.lastPath = path
 	return a.listing, nil

@@ -85,3 +85,19 @@ SET runtime_snapshot_json = $2,
     updated_at = now()
 WHERE id = $1
 RETURNING *;
+
+-- name: SetAppRestartPolicy :one
+-- 管理员 PATCH /apps/:appId/restart-policy 写入；mode/max_per_window/window_seconds 校验在 service 层。
+UPDATE apps
+SET restart_policy_json = $2,
+    updated_at = now()
+WHERE id = $1
+RETURNING *;
+
+-- name: SetAppHealthState :one
+-- worker app_health_check handler 写最近一次健康检查结果；用于自动重启窗口计数。
+UPDATE apps
+SET health_state_json = $2,
+    updated_at = now()
+WHERE id = $1
+RETURNING *;

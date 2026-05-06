@@ -193,6 +193,51 @@ func (a *AgentBackedAdapter) ContainerStats(ctx context.Context, nodeID, contain
 	return statsResponseToContainerStats(raw), nil
 }
 
+// ContainerExec 在容器内 exec 一个一次性命令，等待结束后返回 exit code 与 stdout。
+// 用于 app_health_check：cmd 通常是 ["sh","-c","curl -fsS http://127.0.0.1:18789/healthz"]。
+// 实现注意：
+//   - HijackResp.Reader 的 docker stream 协议带 8 字节 header（multiplexed stdout/stderr），
+//     这里用 stdcopy.StdCopy 复制；不引入额外依赖时直接拼裸字节也能反映"是否非空"。
+//   - 轮询 ContainerExecInspect 直到 Running=false；总等待上限 inspectPollMax * inspectPollInterval。
+func (a *AgentBackedAdapter) ContainerExec(ctx context.Context, nodeID, containerID string, cmd []string) (ExecResult, error) {
+	cli, err := a.dockerClient(ctx, nodeID)
+	if err != nil {
+		return ExecResult{}, err
+	}
+	resp, err := cli.ContainerExecCreate(ctx, containerID, container.ExecOptions{
+		Cmd:          cmd,
+		AttachStdout: true,
+		AttachStderr: true,
+	})
+	if err != nil {
+		return ExecResult{}, fmt.Errorf("创建 exec 失败: %w", err)
+	}
+	att, err := cli.ContainerExecAttach(ctx, resp.ID, container.ExecStartOptions{})
+	if err != nil {
+		return ExecResult{}, fmt.Errorf("附加 exec 失败: %w", err)
+	}
+	defer att.Close()
+	// docker stream 的 multiplexed 帧带 header，直接读全部字节做截断保留；后续如需精确分离 stdout/stderr 可换 stdcopy。
+	limited := io.LimitReader(att.Reader, 4096)
+	body, _ := io.ReadAll(limited)
+	const inspectPollMax = 50
+	for i := 0; i < inspectPollMax; i++ {
+		insp, err := cli.ContainerExecInspect(ctx, resp.ID)
+		if err != nil {
+			return ExecResult{}, fmt.Errorf("inspect exec 失败: %w", err)
+		}
+		if !insp.Running {
+			return ExecResult{ExitCode: insp.ExitCode, Stdout: string(body)}, nil
+		}
+		select {
+		case <-ctx.Done():
+			return ExecResult{}, ctx.Err()
+		case <-time.After(100 * time.Millisecond):
+		}
+	}
+	return ExecResult{}, fmt.Errorf("exec 超时")
+}
+
 func statsResponseToContainerStats(raw container.StatsResponse) ContainerStats {
 	out := ContainerStats{
 		MemoryUsage: raw.MemoryStats.Usage,

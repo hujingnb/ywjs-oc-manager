@@ -235,6 +235,10 @@ func runManager(ctx context.Context, cfg config.Config, logOut io.Writer) error 
 	if err := registry.Register(domain.JobTypeRuntimeRefreshStatus, runtimeRefreshHandler.Handle); err != nil {
 		return fmt.Errorf("注册 runtime_refresh_status handler 失败: %w", err)
 	}
+	healthCheckHandler := handlers.NewAppHealthCheckHandler(dbStore.Queries, runtimeAdapter, redisQueue)
+	if err := registry.Register(domain.JobTypeAppHealthCheck, healthCheckHandler.Handle); err != nil {
+		return fmt.Errorf("注册 app_health_check handler 失败: %w", err)
+	}
 
 	jobWorker := worker.New(dbStore.Queries, redisQueue, registry, worker.Config{WorkerID: cfg.App.HTTPAddr})
 	jobScheduler := scheduler.New(dbStore.Queries, redisQueue, scheduler.Config{})
@@ -280,6 +284,8 @@ func runManager(ctx context.Context, cfg config.Config, logOut io.Writer) error 
 	})
 	runtimeRefresh := newRuntimeRefreshDispatcher(dbStore.Queries, redisQueue)
 	runtimeRefreshTask := service.NewPeriodicReconciler("runtime_refresh_status_dispatch", 30*time.Second, runtimeRefresh.Tick)
+	healthCheckDisp := newHealthCheckDispatcher(dbStore.Queries, redisQueue)
+	healthCheckTask := service.NewPeriodicReconciler("app_health_check_dispatch", 60*time.Second, healthCheckDisp.Tick)
 
 	eg, gctx := errgroup.WithContext(rootCtx)
 
@@ -299,6 +305,11 @@ func runManager(ctx context.Context, cfg config.Config, logOut io.Writer) error 
 	})
 	eg.Go(func() error {
 		return runtimeRefreshTask.Run(gctx, func(format string, args ...any) {
+			logger.Printf(format, args...)
+		})
+	})
+	eg.Go(func() error {
+		return healthCheckTask.Run(gctx, func(format string, args ...any) {
 			logger.Printf(format, args...)
 		})
 	})

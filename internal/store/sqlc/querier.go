@@ -62,7 +62,11 @@ type Querier interface {
 	RetryJob(ctx context.Context, arg RetryJobParams) (Job, error)
 	RevokeRefreshToken(ctx context.Context, id pgtype.UUID) (RefreshToken, error)
 	SetAppContainer(ctx context.Context, arg SetAppContainerParams) (App, error)
+	// worker app_health_check handler 写最近一次健康检查结果；用于自动重启窗口计数。
+	SetAppHealthState(ctx context.Context, arg SetAppHealthStateParams) (App, error)
 	SetAppNewAPIKey(ctx context.Context, arg SetAppNewAPIKeyParams) (App, error)
+	// 管理员 PATCH /apps/:appId/restart-policy 写入；mode/max_per_window/window_seconds 校验在 service 层。
+	SetAppRestartPolicy(ctx context.Context, arg SetAppRestartPolicyParams) (App, error)
 	SetAppRuntimeSnapshot(ctx context.Context, arg SetAppRuntimeSnapshotParams) (App, error)
 	SetAppStatus(ctx context.Context, arg SetAppStatusParams) (App, error)
 	SetChannelBindingChallenge(ctx context.Context, arg SetChannelBindingChallengeParams) (ChannelBinding, error)

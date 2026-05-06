@@ -35,6 +35,8 @@ type App struct {
 	DeletedAt           pgtype.Timestamptz `db:"deleted_at" json:"deleted_at"`
 	RuntimeSnapshotJson []byte             `db:"runtime_snapshot_json" json:"runtime_snapshot_json"`
 	RuntimeSnapshotAt   pgtype.Timestamptz `db:"runtime_snapshot_at" json:"runtime_snapshot_at"`
+	RestartPolicyJson   []byte             `db:"restart_policy_json" json:"restart_policy_json"`
+	HealthStateJson     []byte             `db:"health_state_json" json:"health_state_json"`
 }
 
 // 审计日志表，记录关键操作、结果和错误信息；普通业务 API 不允许修改或删除。

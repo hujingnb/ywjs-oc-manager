@@ -46,6 +46,13 @@ type ContainerInfo struct {
 	Status string
 }
 
+// ExecResult 是 ContainerExec 返回的命令执行结果。
+// Stdout 截断到 4KB 避免 worker 内存爆炸；只用于排障的健康检查响应体。
+type ExecResult struct {
+	ExitCode int
+	Stdout   string
+}
+
 // ContainerStats 是 RuntimeAdapter.Stats 返回的归一化指标视图。
 // 单位：CPU 百分比 (0-100*核数)；内存字节；网络字节累计（容器生命周期内）。
 // Manager 不做秒级速率计算，前端展示绝对值即可，趋势由前端按时间序列差分。
@@ -77,6 +84,9 @@ type Adapter interface {
 	// ContainerStats 返回容器实时资源占用快照（CPU% / 内存 / 网络字节）。
 	// 实现层用 docker StatsOneShot，避免长连接占用 worker 线程。
 	ContainerStats(ctx context.Context, nodeID, containerID string) (ContainerStats, error)
+	// ContainerExec 在容器内执行 cmd，返回 exit code 与 stdout（截断到 4KB）。
+	// 用于 app_health_check handler 调容器内嵌的 OpenClaw `/healthz` 端点。
+	ContainerExec(ctx context.Context, nodeID, containerID string, cmd []string) (ExecResult, error)
 
 	ListFiles(ctx context.Context, nodeID, remotePath string) (FileListing, error)
 	UploadFile(ctx context.Context, nodeID, remotePath string, content io.Reader) error
