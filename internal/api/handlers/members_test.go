@@ -104,6 +104,53 @@ func newMembersTestRouter(t *testing.T, svc memberService) (*gin.Engine, *auth.T
 	return router, tokens
 }
 
+type onboardingServiceStub struct {
+	result service.OnboardMemberResult
+	err    error
+}
+
+func (s *onboardingServiceStub) OnboardMember(_ context.Context, _ auth.Principal, _ string, _ service.OnboardMemberInput) (service.OnboardMemberResult, error) {
+	if s.err != nil {
+		return service.OnboardMemberResult{}, s.err
+	}
+	return s.result, nil
+}
+
+// newMembersTestRouterWithOnboarding 给需要触发 onboard 路由的测试构造同时挂 onboarding service 的路由器。
+func newMembersTestRouterWithOnboarding(t *testing.T, svc memberService, onboarding onboardingService) (*gin.Engine, *auth.TokenManager) {
+	t.Helper()
+	gin.SetMode(gin.ReleaseMode)
+	tokens, err := auth.NewTokenManager("a", "b", time.Minute, time.Hour)
+	if err != nil {
+		t.Fatalf("NewTokenManager() error = %v", err)
+	}
+	router := gin.New()
+	handler := NewMembersHandler(svc, tokens)
+	handler.SetOnboardingService(onboarding)
+	RegisterMemberRoutes(router, handler)
+	return router, tokens
+}
+
+func TestMembersOnboardMapsNoNodeAvailableTo503(t *testing.T) {
+	onboarding := &onboardingServiceStub{err: service.ErrNoNodeAvailable}
+	router, tokens := newMembersTestRouterWithOnboarding(t, &memberServiceStub{}, onboarding)
+	token := mustSignAccess(t, tokens, auth.Principal{UserID: "p1", Role: domain.UserRolePlatformAdmin})
+
+	recorder := httptest.NewRecorder()
+	body := bytes.NewBufferString(`{"username":"alice","display_name":"Alice","password":"pwd","app_name":"alice-bot"}`)
+	request := httptest.NewRequest(http.MethodPost, "/api/v1/organizations/00000000-0000-0000-0000-000000000101/members/onboard", body)
+	request.Header.Set("Content-Type", "application/json")
+	request.Header.Set("Authorization", "Bearer "+token)
+	router.ServeHTTP(recorder, request)
+
+	if recorder.Code != http.StatusServiceUnavailable {
+		t.Fatalf("status = %d, want 503, body=%s", recorder.Code, recorder.Body.String())
+	}
+	if !bytes.Contains(recorder.Body.Bytes(), []byte("NO_NODE_AVAILABLE")) {
+		t.Fatalf("body 缺少 NO_NODE_AVAILABLE: %s", recorder.Body.String())
+	}
+}
+
 func mustSignAccess(t *testing.T, tokens *auth.TokenManager, principal auth.Principal) string {
 	t.Helper()
 	token, err := tokens.SignAccessToken(principal)

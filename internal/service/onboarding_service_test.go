@@ -15,7 +15,7 @@ import (
 func TestOnboardMemberCommitsOnSuccess(t *testing.T) {
 	store := newOnboardingStub(t)
 	tx := &txRunnerStub{store: store}
-	svc := NewMemberOnboardingService(tx, fakeHash)
+	svc := NewMemberOnboardingService(tx, fakeHash, defaultTestSelector())
 
 	result, err := svc.OnboardMember(context.Background(), platformAdmin(), testOrgID, OnboardMemberInput{
 		Username: "alice", DisplayName: "Alice", Password: "pwd", AppName: "alice-bot",
@@ -38,7 +38,7 @@ func TestOnboardMemberRollsBackWhenAppCreationFails(t *testing.T) {
 	store := newOnboardingStub(t)
 	store.appErr = errors.New("duplicate app for owner")
 	tx := &txRunnerStub{store: store}
-	svc := NewMemberOnboardingService(tx, fakeHash)
+	svc := NewMemberOnboardingService(tx, fakeHash, defaultTestSelector())
 
 	_, err := svc.OnboardMember(context.Background(), platformAdmin(), testOrgID, OnboardMemberInput{
 		Username: "alice", DisplayName: "Alice", Password: "pwd", AppName: "alice-bot",
@@ -55,7 +55,7 @@ func TestOnboardMemberRollsBackWhenJobCreationFails(t *testing.T) {
 	store := newOnboardingStub(t)
 	store.jobErr = errors.New("redis blocked")
 	tx := &txRunnerStub{store: store}
-	svc := NewMemberOnboardingService(tx, fakeHash)
+	svc := NewMemberOnboardingService(tx, fakeHash, defaultTestSelector())
 
 	_, err := svc.OnboardMember(context.Background(), platformAdmin(), testOrgID, OnboardMemberInput{
 		Username: "alice", DisplayName: "Alice", Password: "pwd", AppName: "alice-bot",
@@ -70,7 +70,7 @@ func TestOnboardMemberRollsBackWhenJobCreationFails(t *testing.T) {
 
 func TestOnboardMemberRequiresOrgManagement(t *testing.T) {
 	tx := &txRunnerStub{store: newOnboardingStub(t)}
-	svc := NewMemberOnboardingService(tx, fakeHash)
+	svc := NewMemberOnboardingService(tx, fakeHash, defaultTestSelector())
 
 	_, err := svc.OnboardMember(context.Background(), auth.Principal{Role: domain.UserRoleOrgAdmin, OrgID: testOrg2ID}, testOrgID, OnboardMemberInput{
 		Username: "alice", DisplayName: "Alice", Password: "pwd", AppName: "alice-bot",
@@ -84,7 +84,7 @@ func TestOnboardMemberRejectsDisabledOrg(t *testing.T) {
 	store := newOnboardingStub(t)
 	store.org.Status = domain.StatusDisabled
 	tx := &txRunnerStub{store: store}
-	svc := NewMemberOnboardingService(tx, fakeHash)
+	svc := NewMemberOnboardingService(tx, fakeHash, defaultTestSelector())
 
 	_, err := svc.OnboardMember(context.Background(), platformAdmin(), testOrgID, OnboardMemberInput{
 		Username: "alice", DisplayName: "Alice", Password: "pwd", AppName: "alice-bot",
@@ -111,16 +111,17 @@ func (r *txRunnerStub) WithTx(ctx context.Context, fn func(OnboardingStore) erro
 }
 
 type onboardingStub struct {
-	t        *testing.T
-	org      sqlc.Organization
-	users    int
-	apps     int
-	bindings int
-	audits   int
-	jobs     int
-	staged   counters
-	appErr   error
-	jobErr   error
+	t             *testing.T
+	org           sqlc.Organization
+	users         int
+	apps          int
+	bindings      int
+	audits        int
+	jobs          int
+	staged        counters
+	appErr        error
+	jobErr        error
+	lastAppNodeID string
 }
 
 type counters struct{ users, apps, bindings, audits, jobs int }
@@ -170,6 +171,7 @@ func (s *onboardingStub) CreateApp(_ context.Context, arg sqlc.CreateAppParams) 
 		return sqlc.App{}, s.appErr
 	}
 	s.staged.apps++
+	s.lastAppNodeID = uuidToString(arg.RuntimeNodeID)
 	return sqlc.App{
 		ID:           mustUUID(s.t, "00000000-0000-0000-0000-000000000b01"),
 		OrgID:        arg.OrgID,
@@ -205,4 +207,117 @@ func (s *onboardingStub) CreateJob(_ context.Context, arg sqlc.CreateJobParams) 
 		ID:   mustUUID(s.t, "00000000-0000-0000-0000-000000000d01"),
 		Type: arg.Type,
 	}, nil
+}
+
+// nodeSelectorStub 给 selectNode 路径提供可断言的内存桩。
+// 调用 ListActiveNodesWithAppCounts 时会记录调用次数与最后一次返回的节点 id。
+type nodeSelectorStub struct {
+	nodes      []NodeWithCount
+	calledN    int
+	listErr    error
+	lastChosen string
+}
+
+func (s *nodeSelectorStub) ListActiveNodesWithAppCounts(_ context.Context) ([]NodeWithCount, error) {
+	s.calledN++
+	if s.listErr != nil {
+		return nil, s.listErr
+	}
+	return s.nodes, nil
+}
+
+// defaultTestSelector 给现有 onboarding 用例提供「至少有一个空闲节点」的默认 selector，
+// 避免 NodeID 留空触发 ErrNoNodeAvailable 让既有断言被改变。
+func defaultTestSelector() *nodeSelectorStub {
+	return &nodeSelectorStub{nodes: []NodeWithCount{{NodeID: "00000000-0000-0000-0000-000000000a99", AppCount: 0}}}
+}
+
+func ptrInt32(v int32) *int32 { return &v }
+
+func TestOnboardMember_SelectNode_NoActiveNode(t *testing.T) {
+	tx := &txRunnerStub{store: newOnboardingStub(t)}
+	selector := &nodeSelectorStub{nodes: nil}
+	svc := NewMemberOnboardingService(tx, fakeHash, selector)
+
+	_, err := svc.OnboardMember(context.Background(), platformAdmin(), testOrgID, OnboardMemberInput{
+		Username: "alice", DisplayName: "Alice", Password: "pwd", AppName: "alice-bot",
+	})
+	if !errors.Is(err, ErrNoNodeAvailable) {
+		t.Fatalf("err = %v, want ErrNoNodeAvailable", err)
+	}
+}
+
+func TestOnboardMember_SelectNode_OnlyNodeAtCapacity(t *testing.T) {
+	tx := &txRunnerStub{store: newOnboardingStub(t)}
+	selector := &nodeSelectorStub{nodes: []NodeWithCount{
+		{NodeID: "00000000-0000-0000-0000-000000000a01", MaxApps: ptrInt32(1), AppCount: 1},
+	}}
+	svc := NewMemberOnboardingService(tx, fakeHash, selector)
+
+	_, err := svc.OnboardMember(context.Background(), platformAdmin(), testOrgID, OnboardMemberInput{
+		Username: "alice", DisplayName: "Alice", Password: "pwd", AppName: "alice-bot",
+	})
+	if !errors.Is(err, ErrNoNodeAvailable) {
+		t.Fatalf("err = %v, want ErrNoNodeAvailable（节点已满）", err)
+	}
+}
+
+func TestOnboardMember_SelectNode_PicksLargestRemaining(t *testing.T) {
+	store := newOnboardingStub(t)
+	tx := &txRunnerStub{store: store}
+	selector := &nodeSelectorStub{nodes: []NodeWithCount{
+		{NodeID: "00000000-0000-0000-0000-000000000a01", MaxApps: ptrInt32(5), AppCount: 4},  // 剩 1
+		{NodeID: "00000000-0000-0000-0000-000000000a02", MaxApps: ptrInt32(10), AppCount: 3}, // 剩 7
+	}}
+	svc := NewMemberOnboardingService(tx, fakeHash, selector)
+
+	_, err := svc.OnboardMember(context.Background(), platformAdmin(), testOrgID, OnboardMemberInput{
+		Username: "alice", DisplayName: "Alice", Password: "pwd", AppName: "alice-bot",
+	})
+	if err != nil {
+		t.Fatalf("OnboardMember err = %v", err)
+	}
+	// 通过 selectNode 内排序，n2 应被优先选择；input.NodeID 在 onboarding 内被覆盖后
+	// 通过 CreateApp 透传，校验 stub 看到的 RuntimeNodeID 即可。
+	if store.lastAppNodeID != "00000000-0000-0000-0000-000000000a02" {
+		t.Fatalf("CreateApp.RuntimeNodeID = %q, want 第二节点（剩余容量更大）", store.lastAppNodeID)
+	}
+}
+
+func TestOnboardMember_SelectNode_NULLMaxAppsTreatedAsInfinity(t *testing.T) {
+	store := newOnboardingStub(t)
+	tx := &txRunnerStub{store: store}
+	selector := &nodeSelectorStub{nodes: []NodeWithCount{
+		{NodeID: "00000000-0000-0000-0000-000000000a01", MaxApps: nil, AppCount: 100},        // 不限
+		{NodeID: "00000000-0000-0000-0000-000000000a02", MaxApps: ptrInt32(10), AppCount: 0}, // 剩 10
+	}}
+	svc := NewMemberOnboardingService(tx, fakeHash, selector)
+
+	_, err := svc.OnboardMember(context.Background(), platformAdmin(), testOrgID, OnboardMemberInput{
+		Username: "alice", DisplayName: "Alice", Password: "pwd", AppName: "alice-bot",
+	})
+	if err != nil {
+		t.Fatalf("OnboardMember err = %v", err)
+	}
+	if store.lastAppNodeID != "00000000-0000-0000-0000-000000000a01" {
+		t.Fatalf("CreateApp.RuntimeNodeID = %q, want NULL max_apps 节点（视为 +∞）", store.lastAppNodeID)
+	}
+}
+
+func TestOnboardMember_ExplicitNodeID_BypassesSelector(t *testing.T) {
+	store := newOnboardingStub(t)
+	tx := &txRunnerStub{store: store}
+	selector := &nodeSelectorStub{} // 故意空
+	svc := NewMemberOnboardingService(tx, fakeHash, selector)
+
+	_, err := svc.OnboardMember(context.Background(), platformAdmin(), testOrgID, OnboardMemberInput{
+		Username: "alice", DisplayName: "Alice", Password: "pwd", AppName: "alice-bot",
+		NodeID: "00000000-0000-0000-0000-000000000099",
+	})
+	if err != nil {
+		t.Fatalf("OnboardMember err = %v（显式 NodeID 不应触发 selectNode）", err)
+	}
+	if selector.calledN > 0 {
+		t.Fatalf("selectNode 被调用了 %d 次，但显式 NodeID 应直接走旧路径", selector.calledN)
+	}
 }

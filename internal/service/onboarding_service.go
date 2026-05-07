@@ -5,6 +5,8 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"math"
+	"sort"
 	"time"
 
 	"github.com/jackc/pgx/v5/pgtype"
@@ -13,6 +15,20 @@ import (
 	"oc-manager/internal/domain"
 	"oc-manager/internal/store/sqlc"
 )
+
+// NodeSelector 抽象「列出活跃节点 + 当前应用数」的能力。
+// 解耦 onboarding 与 runtime_node_service / sqlc 之间的依赖，让 service 单测可注入内存桩。
+type NodeSelector interface {
+	ListActiveNodesWithAppCounts(ctx context.Context) ([]NodeWithCount, error)
+}
+
+// NodeWithCount 描述一个活跃节点的容量上限与当前应用数。
+// MaxApps 为 nil 表示不限；剩余容量 = MaxApps - AppCount，nil 视为 +∞。
+type NodeWithCount struct {
+	NodeID   string
+	MaxApps  *int32
+	AppCount int64
+}
 
 // OnboardingStore 在单一事务里覆盖创建成员、应用、渠道绑定、审计和任务所需的所有写入。
 // service 不直接依赖 sqlc.Queries 是为了让 cmd/server 在事务函数中传入 *sqlc.Queries，
@@ -37,11 +53,52 @@ type TxRunner interface {
 type MemberOnboardingService struct {
 	tx           TxRunner
 	hashPassword PasswordHasher
+	selector     NodeSelector
 }
 
-// NewMemberOnboardingService 创建 onboarding 服务。
-func NewMemberOnboardingService(tx TxRunner, hash PasswordHasher) *MemberOnboardingService {
-	return &MemberOnboardingService{tx: tx, hashPassword: hash}
+// NewMemberOnboardingService 创建 onboarding 服务。selector 可以为 nil；
+// 此时 input.NodeID 为空会直接返 ErrNoNodeAvailable（生产部署应注入 SQLNodeSelector）。
+func NewMemberOnboardingService(tx TxRunner, hash PasswordHasher, selector NodeSelector) *MemberOnboardingService {
+	return &MemberOnboardingService{tx: tx, hashPassword: hash, selector: selector}
+}
+
+// selectNode 在显式 NodeID 为空时按剩余容量自动选。
+// 排序规则：剩余容量降序优先（NULL = +∞ 排最前）；同剩余容量按当前应用数升序，
+// 防止同一节点连续被选导致 over-commit。
+func (s *MemberOnboardingService) selectNode(ctx context.Context) (string, error) {
+	if s.selector == nil {
+		return "", ErrNoNodeAvailable
+	}
+	nodes, err := s.selector.ListActiveNodesWithAppCounts(ctx)
+	if err != nil {
+		return "", fmt.Errorf("查询节点列表失败: %w", err)
+	}
+	type cand struct {
+		id     string
+		remain int64
+		count  int64
+	}
+	cands := make([]cand, 0, len(nodes))
+	for _, n := range nodes {
+		if n.MaxApps == nil {
+			cands = append(cands, cand{id: n.NodeID, remain: math.MaxInt64, count: n.AppCount})
+			continue
+		}
+		remain := int64(*n.MaxApps) - n.AppCount
+		if remain > 0 {
+			cands = append(cands, cand{id: n.NodeID, remain: remain, count: n.AppCount})
+		}
+	}
+	if len(cands) == 0 {
+		return "", ErrNoNodeAvailable
+	}
+	sort.Slice(cands, func(i, j int) bool {
+		if cands[i].remain != cands[j].remain {
+			return cands[i].remain > cands[j].remain
+		}
+		return cands[i].count < cands[j].count
+	})
+	return cands[0].id, nil
 }
 
 // OnboardMemberInput 描述创建一个成员并联动初始化应用所需要的字段。
@@ -95,6 +152,16 @@ func (s *MemberOnboardingService) OnboardMember(ctx context.Context, principal a
 	hashedPassword, err := s.hashPassword(input.Password)
 	if err != nil {
 		return OnboardMemberResult{}, fmt.Errorf("生成密码 hash 失败: %w", err)
+	}
+
+	// 显式 NodeID 走原校验路径（ops 手工指派）；为空则自动选节点。
+	// 自动选在事务之外完成：节点列表读不需要事务隔离，且短路失败更高效。
+	if input.NodeID == "" {
+		chosen, err := s.selectNode(ctx)
+		if err != nil {
+			return OnboardMemberResult{}, err
+		}
+		input.NodeID = chosen
 	}
 
 	var result OnboardMemberResult
