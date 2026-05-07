@@ -244,7 +244,9 @@ func (s *RuntimeOperationService) Trigger(ctx context.Context, principal auth.Pr
 		TargetType: "app",
 		TargetID:   uuidToString(app.ID),
 		Action:     string(op),
-		Result:     "submitted",
+		// audit_logs.result CHECK 仅允许 succeeded/failed；
+		// 这里 audit 的语义是「操作已成功提交入队」，与其他 service 写 audit 的写法保持一致。
+		Result: "succeeded",
 	}); err != nil {
 		return RuntimeOperationResult{}, fmt.Errorf("写入审计日志失败: %w", err)
 	}
@@ -329,7 +331,9 @@ func (s *RuntimeOperationService) RequestInitialize(ctx context.Context, princip
 		TargetType: "app",
 		TargetID:   uuidToString(app.ID),
 		Action:     "initialize",
-		Result:     "submitted",
+		// audit_logs.result CHECK 仅允许 succeeded/failed；
+		// 这里 audit 的语义是「操作已成功提交入队」，与其他 service 写 audit 的写法保持一致。
+		Result: "succeeded",
 	}); err != nil {
 		return RuntimeOperationResult{}, fmt.Errorf("写入审计日志失败: %w", err)
 	}
