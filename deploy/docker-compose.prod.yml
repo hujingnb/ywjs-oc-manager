@@ -3,7 +3,7 @@
 # 与 dev 版的差异：
 #   - 应用镜像通过 OCM_MANAGER_IMAGE / OCM_WEB_IMAGE 环境变量传入预构建镜像，不挂源码；
 #   - 数据库 / Redis / new-api / ollama 假设由独立基础设施提供，本文件仅运行 manager 进程；
-#   - 全部敏感字段通过环境变量注入，禁止落入 yaml；
+#   - 敏感字段直接落入 yaml；yaml 由受控运维流程外部生成并挂载，不进 git；
 #   - manager-api 容器对外仅暴露 :8080 给 nginx，不直接对外；
 #   - 健康检查 + restart 策略 + 资源限额 + 只读 root filesystem。
 #
@@ -16,17 +16,8 @@ services:
     restart: always
     environment:
       OCM_CONFIG: /etc/manager/config.yaml
-      DATABASE_URL: ${DATABASE_URL}
-      REDIS_ADDR: ${REDIS_ADDR}
-      REDIS_PASSWORD: ${REDIS_PASSWORD:-}
-      JWT_ACCESS_SECRET: ${JWT_ACCESS_SECRET}
-      JWT_REFRESH_SECRET: ${JWT_REFRESH_SECRET}
-      CSRF_SECRET: ${CSRF_SECRET}
-      MASTER_KEY: ${MASTER_KEY}
-      NEWAPI_BASE_URL: ${NEWAPI_BASE_URL}
-      NEWAPI_ADMIN_TOKEN: ${NEWAPI_ADMIN_TOKEN}
     volumes:
-      - ./config/config.yaml:/etc/manager/config.yaml:ro
+      - ./config/manager.yaml:/etc/manager/config.yaml:ro
       - manager-knowledge:/var/lib/oc-manager/knowledge
     deploy:
       resources:

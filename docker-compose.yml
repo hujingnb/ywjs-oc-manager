@@ -114,23 +114,7 @@ services:
     # docker CLI 需要在启动时 apt install。docker.sock mount 让 CLI 命中宿主机 daemon。
     command: sh -c "apt-get update && apt-get install -y --no-install-recommends docker.io && go install github.com/air-verse/air@latest && /go/bin/air -c .air.toml"
     environment:
-      OCM_CONFIG: /app/config/config.yaml.example
-      DATABASE_URL: postgres://ocm:ocm@manager-postgres:5432/ocm?sslmode=disable
-      REDIS_ADDR: manager-redis:6379
-      REDIS_PASSWORD: "123456"
-      JWT_ACCESS_SECRET: "${JWT_ACCESS_SECRET:-dev-access-secret-change-me}"
-      JWT_REFRESH_SECRET: "${JWT_REFRESH_SECRET:-dev-refresh-secret-change-me}"
-      CSRF_SECRET: "${CSRF_SECRET:-dev-csrf-secret-change-me}"
-      MASTER_KEY: "${MASTER_KEY}"
-      NEWAPI_BASE_URL: "${NEWAPI_BASE_URL:-http://new-api:3000}"
-      NEWAPI_ADMIN_TOKEN: "${NEWAPI_ADMIN_TOKEN}"
-      NEWAPI_ADMIN_USER_ID: "${NEWAPI_ADMIN_USER_ID:-1}"
-      # OpenClaw 容器调模型用的 OpenAI 兼容网关 + 默认 provider/model；详见 config.yaml.example openclaw.llm 注释
-      OPENCLAW_LLM_BASE_URL: "${OPENCLAW_LLM_BASE_URL:-http://new-api:3000/v1}"
-      OPENCLAW_LLM_DEFAULT_PROVIDER: "${OPENCLAW_LLM_DEFAULT_PROVIDER:-openai}"
-      OPENCLAW_LLM_DEFAULT_MODEL: "${OPENCLAW_LLM_DEFAULT_MODEL:-qwen2.5:0.5b}"
-      # 注入容器 OPENAI_API_KEY 的全局 sk- token；ops 在 new-api 后台手工创建后填入 .env
-      OPENCLAW_LLM_OPENAI_API_KEY: "${OPENCLAW_LLM_OPENAI_API_KEY}"
+      OCM_CONFIG: /app/config/manager.yaml
       PATH: /go/bin:/usr/local/go/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin
       GOPATH: /go
       GOMODCACHE: /go/pkg/mod
@@ -170,14 +154,14 @@ services:
     working_dir: /app/runtime/agent
     command: sh -c "if [ -f main.go ]; then go run .; else sleep infinity; fi"
     environment:
-      TZ: Asia/Shanghai
-      DATA_ROOT: /var/lib/oc-agent
+      OC_AGENT_CONFIG: /app/config/agent.yaml
       PATH: /go/bin:/usr/local/go/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin
       GOPATH: /go
       GOMODCACHE: /go/pkg/mod
       GOCACHE: /root/.cache/go-build
       GOPROXY: "https://goproxy.cn,direct"
       GOSUMDB: "off"
+      TZ: Asia/Shanghai
     ports:
       - "${RUNTIME_AGENT_GRPC_PORT:-7001}:7001"
       - "${RUNTIME_AGENT_HTTP_PORT:-7002}:7002"
