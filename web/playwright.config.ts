@@ -17,6 +17,8 @@ export default defineConfig({
   workers: 1,
   reporter: [['list']],
   timeout: 30_000,
+  // globalSetup：跑 make seed-e2e，把 fixture JSON 注入 process.env.OCM_E2E_FIXTURE。
+  globalSetup: './tests/e2e/global-setup.ts',
   use: {
     baseURL: process.env.PLAYWRIGHT_BASE_URL ?? 'http://localhost:5173',
     trace: 'retain-on-failure',

@@ -1,16 +1,26 @@
 import { expect, test } from '@playwright/test'
 
-// Scenario 5：应用详情 5 tab 切换。覆盖 spec §5.4 Task 15 第五条。
+import { loadE2EFixture, loginAs } from './fixtures'
+
+// Scenario 5：应用详情 5 tab 全部可渲染。
 //
-// 验证点：concept / runtime / channels / knowledge / workspace 五个 tab 全部能渲染，
-// 切换不报 404 / 控制台 error。
-test.skip('应用详情 5 tab 全部可渲染', async ({ page }) => {
-  // 占位 appId；实际 CI 接入时替换为 fixture 创建的应用 id
-  const appId = process.env.E2E_APP_ID ?? '00000000-0000-0000-0000-000000000001'
-  await page.goto(`/apps/${appId}/overview`)
-  await expect(page.getByRole('heading', { name: '概览' })).toBeVisible()
-  for (const tab of ['运行时', '渠道', '应用知识库', '工作目录']) {
-    await page.getByRole('link', { name: tab }).click()
-    await expect(page.getByRole('heading', { name: tab })).toBeVisible()
+// AppDetailPage 用 <RouterLink> 实现 tab，对应 a 标签 role=link，
+// 因此用 getByRole('link', ...)；每切一次 tab 后断言无红色 error 文本。
+test('应用详情 5 tab 全部可渲染', async ({ page }) => {
+  const fx = loadE2EFixture()
+  await loginAs(page, 'org_admin', fx)
+  await page.goto(`/apps/${fx.app_id}/overview`)
+
+  // 等到顶部应用名标题加载，确保 useAppQuery 已经完成。
+  await expect(page.getByRole('heading', { name: new RegExp(fx.app_name) })).toBeVisible()
+
+  // 实际中文 tab 文案见 AppDetailPage.vue 的 tabs 数组。
+  const tabs = ['概览', '运行时', '渠道', '应用知识库', '工作目录']
+  for (const tab of tabs) {
+    await page.getByRole('link', { name: tab, exact: true }).click()
+    // 切换后确保没有 .danger 状态文本（"查询失败：..." 提示）。
+    await expect(page.locator('.state-text.danger')).toHaveCount(0)
+    // 当前 tab 的 active class 应当存在，避免 tab 实际未切换。
+    await expect(page.locator('.tab-link-active', { hasText: tab })).toBeVisible()
   }
 })

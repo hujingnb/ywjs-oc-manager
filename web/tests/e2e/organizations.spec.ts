@@ -1,17 +1,20 @@
 import { expect, test } from '@playwright/test'
 
-// Scenario 2：创建组织。覆盖 spec §5.4 Task 15 第二条。
+import { loginAs } from './fixtures'
+
+// Scenario 2：platform_admin 创建组织。覆盖 spec §5.4 Task 15 第二条。
 //
-// 实际跑前需要：
-//  1. 已用 admin2 登录（可用 storageState 预置）；
-//  2. 测试组织名要避开数据库已存在的「测试组织 A」/「smoke-org-2」。
-//
-// 当前 skip 原因：尚未准备 fixture / storageState。CI 接入时去掉 .skip 并加预置脚本。
-test.skip('platform_admin 可创建组织', async ({ page }) => {
+// 关键路径：登录 → /organizations → 点击「新增组织」打开表单 →
+// 填写唯一名称 → 点「保存」→ 列表里应能看到新组织名。
+test('platform_admin 可创建组织', async ({ page }) => {
+  await loginAs(page, 'platform_admin')
   await page.goto('/organizations')
-  await page.getByRole('button', { name: /新建/ }).click()
-  const name = `e2e-org-${Date.now()}`
-  await page.getByLabel('组织名').fill(name)
-  await page.getByRole('button', { name: '提交' }).click()
-  await expect(page.getByText(name)).toBeVisible()
+  await page.getByRole('button', { name: '新增组织' }).click()
+  // 时间戳 + nanoTime 后缀保证不同跑次唯一，避免与 fixture 已有组织重名。
+  const name = `e2e-${Date.now()}-org`
+  // 表单使用 <label><span>名称 *</span><input/></label> 结构，accessible name 为「名称 *」。
+  await page.getByLabel('名称 *').fill(name)
+  await page.getByRole('button', { name: '保存' }).click()
+  // 列表展示新组织名（strong 文本）。
+  await expect(page.getByRole('table').getByText(name)).toBeVisible()
 })

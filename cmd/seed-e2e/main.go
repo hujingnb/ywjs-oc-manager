@@ -91,12 +91,14 @@ func main() {
 // 已建好的 admin 账号，e2e 直接复用）。
 //
 // 顺序按外键依赖从下游到上游：先清掉指向 users / organizations / runtime_nodes 的子表，
-// 再 DELETE users 中的非 platform_admin 行，最后 truncate organizations / runtime_nodes。
+// 再 DELETE users 中的非 platform_admin 行，最后清空 organizations / runtime_nodes。
 //
 // 与 plan 草稿的差异：
 //   - 增加 refresh_tokens：refresh_tokens.user_id 引用 users(id)，否则 DELETE users 会被外键阻挡。
 //   - knowledge_sync_status 引用 organizations / runtime_nodes，必须先于这两张表清。
 //   - organization_personas.created_by 引用 users(id)，必须先于 DELETE users 清。
+//   - organizations 不能用 TRUNCATE … CASCADE：users.org_id 引用 organizations，CASCADE
+//     会顺带把 platform_admin 也清掉；改用 DELETE，让外键保护已经从 users 解除关联的 admin 行。
 func truncate(ctx context.Context, conn *pgx.Conn) error {
 	stmts := []string{
 		`TRUNCATE TABLE channel_bindings RESTART IDENTITY CASCADE`,
@@ -109,12 +111,36 @@ func truncate(ctx context.Context, conn *pgx.Conn) error {
 		`TRUNCATE TABLE refresh_tokens RESTART IDENTITY CASCADE`,
 		`DELETE FROM users WHERE role <> 'platform_admin'`,
 		`TRUNCATE TABLE runtime_nodes RESTART IDENTITY CASCADE`,
-		`TRUNCATE TABLE organizations RESTART IDENTITY CASCADE`,
+		`DELETE FROM organizations`,
 	}
 	for _, s := range stmts {
 		if _, err := conn.Exec(ctx, s); err != nil {
 			return fmt.Errorf("%s: %w", s, err)
 		}
+	}
+	return nil
+}
+
+// ensurePlatformAdmin 保证 fixture 声明的 platform_admin 行存在；如果 cmd/seed-admin 没跑过，
+// 或 truncate 把它带走了，就用 fixture 里的账密重新创建一份。
+//
+// ON CONFLICT 用 UPSERT 而非 DO NOTHING：环境里如果已有同名 admin 但密码不同，
+// e2e 必须能用 fixture 里写死的密码登录，因此每次都把 hash 与 status 重置回 fixture 状态。
+func ensurePlatformAdmin(ctx context.Context, conn *pgx.Conn, username, password string) error {
+	hash, err := auth.HashPassword(password, auth.DefaultPasswordParams)
+	if err != nil {
+		return fmt.Errorf("hash platform_admin password: %w", err)
+	}
+	if _, err := conn.Exec(ctx, `
+		INSERT INTO users (username, password_hash, display_name, role, status)
+		VALUES ($1, $2, $1, 'platform_admin', 'active')
+		ON CONFLICT (username) DO UPDATE
+			SET password_hash = EXCLUDED.password_hash,
+			    role = 'platform_admin',
+			    status = 'active',
+			    updated_at = now()
+	`, username, hash); err != nil {
+		return fmt.Errorf("upsert platform_admin: %w", err)
 	}
 	return nil
 }
@@ -130,6 +156,11 @@ func buildFixture(ctx context.Context, conn *pgx.Conn) (fixture, error) {
 	var fx fixture
 	fx.PlatformAdminLogin = "admin"
 	fx.PlatformAdminPassword = "admin123"
+
+	// 0) 保证 platform_admin 行存在（truncate 之后行可能空）。
+	if err := ensurePlatformAdmin(ctx, conn, fx.PlatformAdminLogin, fx.PlatformAdminPassword); err != nil {
+		return fx, err
+	}
 
 	// 1) 创建组织。
 	fx.OrgName = "e2e-org"
