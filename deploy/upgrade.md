@@ -64,9 +64,9 @@ docker rm oc-runtime-agent
 docker run -d --name oc-runtime-agent --restart=always \
   -v /var/run/docker.sock:/var/run/docker.sock \
   -v /var/lib/oc-agent:/var/lib/oc-agent \
+  -v /etc/oc-agent/agent.yaml:/etc/oc-agent/agent.yaml:ro \
   -p 7001:7001 -p 7002:7002 \
-  -e DATA_ROOT=/var/lib/oc-agent \
-  -e MANAGER_ADDR=https://manager.internal:7443 \
+  -e OC_AGENT_CONFIG=/etc/oc-agent/agent.yaml \
   oc-runtime-agent:1.1.0
 ```
 
