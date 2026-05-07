@@ -890,9 +890,54 @@ truncate 列表加 `refresh_tokens` 解外键依赖、`organizations` 改 `DELET
 
 完整自愈用时 21 秒（reconnect → active），完全靠 v1.0.1 新增 agent 主动心跳触发，无需任何 ops 干预。证明 design gap 已闭合。
 
-#### Part 3 — 双节点真容器演练（含微信扫码 1 次，待用户介入）
+#### Part 3 — 双节点真容器演练（含微信扫码 1 次）
 
-⏸ 待执行。所需步骤详见下文「T4 实测操作清单 Part 3」；执行时机由 ops 在合适窗口安排（涉及您扫码 1 次）。
+实测时间 2026-05-07 17:27–17:45。
+
+**节点准备**：
+
+| 步骤 | 操作 | 结果 |
+|---|---|---|
+| 创建 node-b | `POST /api/v1/runtime-nodes` | id=`ac4ed28d-bcfc-4378-961e-910e1959c63e` |
+| agent-2 register | `POST /api/v1/agent/register` | agent_token=`26951a91...d4b729b4` |
+| agent-2 yaml manager 段填齐 | 写 `.local/data/agent-2-config/agent.yaml` | OK |
+| force-recreate agent-2 | `docker compose -f ... -f deploy/docker-compose.two-agent.yml up -d --force-recreate oc-runtime-agent-2` | 8 秒内第一次心跳到达 manager |
+
+**T3 验证**：双 agent yaml 隔离生效——agent-1 用 `config/agent.yaml`、agent-2 用 `.local/data/agent-2-config/agent.yaml`，两份 yaml 独立存放各自的 manager.node_id / agent_token，互不覆盖。
+
+**selectNode 算法实测（4 路径）**：
+
+| 步骤 | 节点容量 | onboard 输入 | 实测结果 | 验证项 |
+|---|---|---|---|---|
+| 1 | a max=1, b NULL | onboard v101-app-a | 落 node-b（NULL=+∞）✅ | NULL 优先 |
+| 2 | a=0/1, b=1/NULL | 改 a max=0, b max=1 | 两节点都满 | 满载边界 |
+| 3 | a=0/0, b=1/1 | onboard v101-app-b | 503 + `NO_NODE_AVAILABLE` ✅ | 503 错误码 |
+| 4 | a=0/0, b max=2 | onboard v101-app-b 重试 | 落 node-b ✅ | 解禁后落地 |
+
+**真容器 + 渠道绑定（含微信扫码）**：
+
+| 时间 | 事件 |
+|---|---|
+| 17:30:30 | v101-app-b onboard，job 入队 |
+| 17:39:38 | app_initialize succeeded（修过两次依赖：agent.yaml token = manager 颁发的 agent_token；agent_tls_ca_cert 用 SQL 注入 PEM）；app status = `binding_waiting` |
+| 17:40:40 | `POST /apps/{id}/channels/wechat/auth` 触发渠道登录 |
+| 17:41:13 | 二维码 metadata_json 写入 channel_bindings（qrcode + code + expires_at）|
+| 17:43:27 | 第 1 次二维码 OpenClaw plugin 内部超时（用户未在 ~2 分钟内扫码）|
+| 17:43:55 | 重新触发 BeginAuth，新二维码就绪 |
+| 17:45:13 | 用户扫码 → `bound_identity=o9cq800xszCM8jyoS9YpRKpvAN9c@im.wechat`、apps.status 自动 promote 到 `running` |
+
+**阶段性结论**：
+
+- ✅ T3 双 agent yaml 隔离修复有效。
+- ✅ T2 服务端自动选节点完整链路通（NULL 优先 / 503 / 落 b 三路径）。
+- ✅ T1 心跳机制让 agent-2 8 秒内就 active，无需 ops 干预。
+- ✅ 跨节点真容器 + 微信扫码绑定全链路通，证明 `runtime_node_id` 服务端选择没破坏现有 onboard → init → channel 流程。
+
+**未完成项 / deployment 配置问题（v1.0.1 范围外）**：
+
+收尾时让用户发「请生成 hello.txt 写上 v1.0.1 ok」消息，OpenClaw 容器未生成文件。诊断：`config/manager.yaml` 中 `openclaw.llm` 段所有字段（`base_url` / `default_provider` / `default_model` / `openai_compat.api_key`）当前都是空字符串，OpenClaw 容器看到的 `OPENAI_BASE_URL` 为空、`agent model: openai/gpt-5.5`（OpenClaw 默认值），不指向本地 ollama。这是 v1.0 GA 之前就存在的 deployment hygiene 问题——v1.0 GA Chunk-1 期间 commit `83028fc` 写过 LLM 全套 yaml 配置，但 manager.yaml 当前部署副本没有这些值。
+
+修复路径（不在 v1.0.1 范围）：填好 `manager.yaml` 的 `openclaw.llm.{base_url, default_provider, default_model, openai_compat.api_key}` 后 force-recreate manager-api，重新创建容器即可。本次不动，留 ops 在合适窗口补做并验证 hello.txt 生成 + manager workspace API 下载链路。
 
 #### Part 4 — chrome-devtools MCP 路由 sanity
 
@@ -1001,5 +1046,5 @@ curl -fsS -H "Authorization: Bearer $ORG_ADMIN_TOKEN" \
 | 全自动化套件绿 | ✅ |
 | chrome-devtools 路由全部无关键 console error | ✅ Part 4 已实测 |
 | 心跳自愈完成 unreachable→active 翻转 | ✅ Part 2 已实测（21 秒自愈）|
-| 第 3 步 NO_NODE_AVAILABLE 503 命中 + 第 4 步落 node-b + 扫码 + workspace/hello.txt 全链路通 | ⏸ Part 3 待执行（扫码 1 次） |
+| 第 3 步 NO_NODE_AVAILABLE 503 命中 + 第 4 步落 node-b + 扫码 + workspace/hello.txt 全链路通 | ✅ 503 命中 + 落 node-b + 扫码 bound 验证；workspace/hello.txt 受 v1.0 GA 之前的 deployment 配置缺失阻塞（manager.yaml.openclaw.llm 段未填），不在 v1.0.1 范围 |
 | 期间未发现 P0/P1 backend bug | ✅ Part 1-2/4 实测过程中无 P0/P1，仅发现并修复 1 个 P1 spec 错误（heartbeat URL 与 manager 路由不一致，commit `e16f5d1`） |
