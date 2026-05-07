@@ -18,16 +18,14 @@ services:
     working_dir: /app/runtime/agent
     command: sh -c "if [ -f main.go ]; then go run .; else sleep infinity; fi"
     environment:
-      TZ: Asia/Shanghai
-      DATA_ROOT: /var/lib/oc-agent
-      AGENT_LISTEN_GRPC: ":7001"
-      AGENT_LISTEN_HTTP: ":7002"
+      OC_AGENT_CONFIG: /app/config/agent.yaml
       PATH: /go/bin:/usr/local/go/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin
       GOPATH: /go
       GOMODCACHE: /go/pkg/mod
       GOCACHE: /root/.cache/go-build
       GOPROXY: "https://goproxy.cn,direct"
       GOSUMDB: "off"
+      TZ: Asia/Shanghai
     ports:
       - "7003:7001"
       - "7004:7002"
@@ -37,8 +35,8 @@ services:
       timeout: 3s
       retries: 10
     volumes:
-      - ../:/app
+      - ./:/app
       - /var/run/docker.sock:/var/run/docker.sock
-      - ../.local/data/agent-2:/var/lib/oc-agent
-      - ../.local/data/go/pkg/mod:/go/pkg/mod
-      - ../.local/data/go/cache:/root/.cache/go-build
+      - ./.local/data/agent-2:/var/lib/oc-agent
+      - ./.local/data/go/pkg/mod:/go/pkg/mod
+      - ./.local/data/go/cache:/root/.cache/go-build

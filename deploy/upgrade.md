@@ -37,7 +37,8 @@ docker pull oc-runtime-agent:1.1.0
 
 ```sh
 docker run --rm \
-  --env-file .env \
+  -v "$PWD/config/manager.yaml:/etc/manager/config.yaml:ro" \
+  -e OCM_CONFIG=/etc/manager/config.yaml \
   ghcr.io/your-org/openclaw-manager:1.1.0 \
   ./migrate up
 ```
@@ -92,7 +93,11 @@ sed -i 's|openclaw-manager:1.1.0|openclaw-manager:1.0.0|' .env
 docker compose -f deploy/docker-compose.prod.yml up -d manager-api
 
 # 2. 如果新 MINOR 的迁移 add 了字段且新代码强依赖，需要回滚 schema
-docker run --rm --env-file .env ghcr.io/your-org/openclaw-manager:1.1.0 ./migrate down 1
+docker run --rm \
+  -v "$PWD/config/manager.yaml:/etc/manager/config.yaml:ro" \
+  -e OCM_CONFIG=/etc/manager/config.yaml \
+  ghcr.io/your-org/openclaw-manager:1.1.0 \
+  ./migrate down
 ```
 
 `migrate down 1` 只回退最近一次迁移；多次迁移要逐次回退并核对每个 down.sql。

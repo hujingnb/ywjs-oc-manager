@@ -89,6 +89,18 @@ func TestLoad_DoesNotExpandEnvPlaceholders(t *testing.T) {
 	}
 }
 
+// TestLoad_RejectsUnknownFields 校验 yaml 字段拼写错误会 fail-fast，避免可选配置因 typo 被静默忽略。
+func TestLoad_RejectsUnknownFields(t *testing.T) {
+	yaml := strings.Replace(fullValidYAML(),
+		`key_prefix: "ocm:"`,
+		`key_prefx: "ocm:"`, 1)
+	path := writeTempConfig(t, yaml)
+	_, err := LoadFile(path)
+	if err == nil {
+		t.Fatal("LoadFile() error = nil, want unknown field error")
+	}
+}
+
 func TestValidateReportsRequiredFields(t *testing.T) {
 	err := (Config{}).Validate()
 	if err == nil {

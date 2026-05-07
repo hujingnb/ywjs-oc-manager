@@ -1,6 +1,7 @@
 package config
 
 import (
+	"bytes"
 	"encoding/base64"
 	"fmt"
 	"os"
@@ -18,7 +19,9 @@ func LoadFile(path string) (Config, error) {
 	}
 
 	var cfg Config
-	if err := yaml.Unmarshal(content, &cfg); err != nil {
+	decoder := yaml.NewDecoder(bytes.NewReader(content))
+	decoder.KnownFields(true)
+	if err := decoder.Decode(&cfg); err != nil {
 		return Config{}, fmt.Errorf("解析配置文件失败: %w", err)
 	}
 	if err := cfg.Validate(); err != nil {

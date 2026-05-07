@@ -17,7 +17,7 @@ services:
     environment:
       OCM_CONFIG: /etc/manager/config.yaml
     volumes:
-      - ./config/manager.yaml:/etc/manager/config.yaml:ro
+      - ../config/manager.yaml:/etc/manager/config.yaml:ro
       - manager-knowledge:/var/lib/oc-manager/knowledge
     deploy:
       resources:
@@ -53,8 +53,8 @@ services:
       - "443:443"
       - "80:80"
     volumes:
-      - ./deploy/nginx.conf:/etc/nginx/conf.d/default.conf:ro
-      - ./deploy/tls:/etc/nginx/tls:ro
+      - ./nginx.conf:/etc/nginx/conf.d/default.conf:ro
+      - ./tls:/etc/nginx/tls:ro
     depends_on:
       manager-api:
         condition: service_healthy
