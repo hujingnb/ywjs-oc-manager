@@ -49,6 +49,9 @@
                 <button v-else class="secondary-button" type="button" @click="onToggle(member, 'enable')">
                   启用
                 </button>
+                <button class="secondary-button" type="button" @click="openResetForm(member)">
+                  重置密码
+                </button>
                 <button class="secondary-button danger" type="button" @click="confirmDelete(member)">
                   删除
                 </button>
@@ -111,6 +114,20 @@
       @confirm="onConfirmDelete"
       @cancel="memberToDelete = null"
     />
+
+    <ConfirmActionModal
+      :visible="!!resetTarget"
+      title="确认重置成员密码"
+      :message="resetTarget ? `将强制重置成员 ${resetTarget.username} 的登录密码，原密码立即失效。` : ''"
+      confirm-label="确认重置"
+      :busy="resetMutation.isPending.value"
+      :verify-value="resetTarget?.username"
+      :verify-hint='resetTarget ? `输入成员登录名 "${resetTarget.username}" 以确认重置` : ""'
+      @confirm="onConfirmReset"
+      @cancel="resetTarget = null"
+    />
+
+    <p v-if="resetFeedback" class="state-text" :class="{ danger: resetError }">{{ resetFeedback }}</p>
   </main>
 </template>
 
@@ -123,6 +140,7 @@ import {
   useCreateMember,
   useDeleteMember,
   useMembersQuery,
+  useResetMemberPassword,
   useSetMemberStatus,
   type MemberFormPayload,
 } from '@/api/hooks/useMembers'
@@ -142,6 +160,13 @@ const createMutation = useCreateMember(effectiveOrgId)
 const statusMutation = useSetMemberStatus(effectiveOrgId)
 const deleteMutation = useDeleteMember(effectiveOrgId)
 const memberToDelete = ref<Member | null>(null)
+
+// 重置密码：通过 prompt 收集新密码，再以登录名强校验确认。
+const resetTarget = ref<Member | null>(null)
+const resetNewPassword = ref('')
+const resetMutation = useResetMemberPassword()
+const resetFeedback = ref('')
+const resetError = ref(false)
 
 const formVisible = ref(false)
 const submitError = ref<string | null>(null)
@@ -196,6 +221,35 @@ async function onConfirmDelete() {
     submitError.value = err instanceof Error ? err.message : '删除成员失败'
   } finally {
     memberToDelete.value = null
+  }
+}
+
+// 用 prompt 收集新密码，至少 8 位才打开强校验 modal。
+function openResetForm(member: Member) {
+  const pwd = window.prompt(`输入成员 ${member.username} 的新密码（至少 8 位）`)
+  if (!pwd || pwd.length < 8) {
+    return
+  }
+  resetTarget.value = member
+  resetNewPassword.value = pwd
+  resetFeedback.value = ''
+  resetError.value = false
+}
+
+async function onConfirmReset() {
+  if (!resetTarget.value) return
+  resetFeedback.value = ''
+  resetError.value = false
+  try {
+    await resetMutation.mutateAsync({
+      userId: resetTarget.value.id,
+      password: resetNewPassword.value,
+    })
+    resetFeedback.value = '已重置密码'
+    resetTarget.value = null
+  } catch (err: unknown) {
+    resetError.value = true
+    resetFeedback.value = err instanceof Error ? err.message : '重置失败'
   }
 }
 </script>

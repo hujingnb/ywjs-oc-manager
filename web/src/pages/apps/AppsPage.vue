@@ -51,9 +51,11 @@
     <ConfirmActionModal
       :visible="!!toDelete"
       title="确认删除应用"
-      :message="toDelete ? '将提交删除任务，应用关联的容器和 API key 都会被回收。是否继续？' : ''"
+      :message='toDelete ? `将提交删除任务，应用 "${toDelete.name}" 关联的容器和 API key 都会被回收。是否继续？` : ""'
       confirm-label="确认删除"
       :busy="deleting"
+      :verify-value="toDelete?.name"
+      :verify-hint='toDelete ? `输入应用名 "${toDelete.name}" 以确认删除` : ""'
       @confirm="onConfirmDelete"
       @cancel="toDelete = null"
     />

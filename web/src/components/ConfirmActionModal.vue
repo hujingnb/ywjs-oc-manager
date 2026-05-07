@@ -6,9 +6,26 @@
           <h3>{{ title }}</h3>
         </header>
         <p>{{ message }}</p>
+
+        <label v-if="verifyValue" class="verify-block">
+          <span class="verify-hint">{{ verifyHint || `输入 "${verifyValue}" 以确认` }}</span>
+          <input
+            v-model="verifyInput"
+            class="verify-input"
+            type="text"
+            autocomplete="off"
+            spellcheck="false"
+          />
+        </label>
+
         <footer>
           <button class="secondary-button" type="button" @click="onCancel">{{ cancelLabel }}</button>
-          <button class="primary-button" type="button" :disabled="busy" @click="onConfirm">
+          <button
+            class="primary-button"
+            type="button"
+            :disabled="busy || !canConfirm"
+            @click="onConfirm"
+          >
             {{ busy ? '执行中…' : confirmLabel }}
           </button>
         </footer>
@@ -18,6 +35,8 @@
 </template>
 
 <script setup lang="ts">
+import { computed, ref, watch } from 'vue'
+
 const props = defineProps<{
   visible: boolean
   title: string
@@ -25,6 +44,8 @@ const props = defineProps<{
   busy?: boolean
   confirmLabel?: string
   cancelLabel?: string
+  verifyValue?: string
+  verifyHint?: string
 }>()
 
 const emit = defineEmits<{
@@ -34,6 +55,22 @@ const emit = defineEmits<{
 
 const confirmLabel = props.confirmLabel ?? '确认'
 const cancelLabel = props.cancelLabel ?? '取消'
+const verifyInput = ref('')
+
+// 每次打开 modal 都清空输入，避免二次打开复用旧输入。
+watch(
+  () => props.visible,
+  (visible) => {
+    if (visible) verifyInput.value = ''
+  },
+)
+
+// 强校验：要求用户在输入框输入与 verifyValue 一致的值（大小写不敏感、忽略首尾空白）。
+// 未传 verifyValue 时直接放行，兼容已有简单二次确认场景。
+const canConfirm = computed(() => {
+  if (!props.verifyValue) return true
+  return verifyInput.value.trim().toLowerCase() === props.verifyValue.trim().toLowerCase()
+})
 
 function onConfirm() {
   emit('confirm')
@@ -70,6 +107,25 @@ function onCancel() {
 .modal-card p {
   margin: 0 0 20px;
   color: #415065;
+}
+
+.verify-block {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  margin: 0 0 20px;
+}
+
+.verify-hint {
+  font-size: 13px;
+  color: #1f2937;
+}
+
+.verify-input {
+  padding: 8px 10px;
+  border: 1px solid rgba(0, 0, 0, 0.15);
+  border-radius: 6px;
+  font-size: 14px;
 }
 
 .modal-card footer {

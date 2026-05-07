@@ -36,6 +36,18 @@
       </div>
     </section>
 
+    <ConfirmActionModal
+      :visible="confirmRecharge"
+      title="确认组织充值"
+      :message="pendingPayload ? `将给当前组织充值 ${pendingPayload.credit_amount} Token Credit。该操作会调用 new-api 修改余额。` : ''"
+      confirm-label="确认充值"
+      :busy="mutation.isPending.value"
+      :verify-value="orgName"
+      :verify-hint='`输入组织名称 "${orgName}" 以确认充值`'
+      @confirm="onConfirmRecharge"
+      @cancel="onCancelRecharge"
+    />
+
     <section class="panel">
       <h3>充值历史</h3>
       <p v-if="recordsQuery.isLoading.value" class="state-text">加载中…</p>
@@ -72,6 +84,8 @@ import { computed, ref } from 'vue'
 import { RouterLink, useRoute } from 'vue-router'
 
 import { useOrgBalanceQuery, useRechargeMutation, useRechargesQuery } from '@/api/hooks/useRecharge'
+import { useOrganizationQuery } from '@/api/hooks/useOrganizations'
+import ConfirmActionModal from '@/components/ConfirmActionModal.vue'
 import DataTableToolbar from '@/components/DataTableToolbar.vue'
 
 const route = useRoute()
@@ -83,28 +97,51 @@ const balance = computed(() => balanceQuery.data.value ?? null)
 const recordsQuery = useRechargesQuery(orgId)
 const mutation = useRechargeMutation(orgId)
 
+// 拉取组织名用于强校验文案；缺省时降级为 “组织 {orgId}” 字符串。
+const orgQuery = useOrganizationQuery(orgId)
+const orgName = computed(() => orgQuery.data.value?.name ?? (orgId.value ? `组织 ${orgId.value}` : ''))
+
 const amount = ref<number | undefined>()
 const remark = ref('')
 const feedback = ref('')
 const feedbackError = ref(false)
 
+// 充值前的强校验状态：暂存表单 payload，待 modal 确认后再发起 mutation。
+const confirmRecharge = ref(false)
+const pendingPayload = ref<{ credit_amount: number; remark?: string } | null>(null)
+
 const canSubmit = computed(() => Boolean(orgId.value && (amount.value ?? 0) > 0))
 
-async function onSubmit() {
+function onSubmit() {
+  if (!canSubmit.value) return
+  pendingPayload.value = {
+    credit_amount: amount.value ?? 0,
+    remark: remark.value || undefined,
+  }
+  confirmRecharge.value = true
+}
+
+async function onConfirmRecharge() {
+  if (!pendingPayload.value) return
   feedback.value = ''
   feedbackError.value = false
+  confirmRecharge.value = false
   try {
-    const result = await mutation.mutateAsync({
-      credit_amount: amount.value ?? 0,
-      remark: remark.value || undefined,
-    })
+    const result = await mutation.mutateAsync(pendingPayload.value)
     feedback.value = `已充值 ${result.credit_amount} 点（${result.status}）`
     amount.value = undefined
     remark.value = ''
   } catch (err: unknown) {
     feedbackError.value = true
     feedback.value = err instanceof Error ? err.message : '充值失败'
+  } finally {
+    pendingPayload.value = null
   }
+}
+
+function onCancelRecharge() {
+  confirmRecharge.value = false
+  pendingPayload.value = null
 }
 </script>
 

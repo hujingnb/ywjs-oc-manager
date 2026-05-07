@@ -66,8 +66,22 @@
       message="将提交删除任务，应用容器、API key 和工作目录都会被回收。该操作不可撤销。"
       confirm-label="确认删除"
       :busy="mutation.isPending.value"
+      :verify-value="app?.name ?? ''"
+      :verify-hint='app ? `输入应用名 "${app.name}" 以确认删除` : ""'
       @confirm="onConfirmDelete"
       @cancel="confirmDelete = false"
+    />
+
+    <ConfirmActionModal
+      :visible="confirmStop"
+      title="确认停止容器"
+      message="停止后 OpenClaw 容器对话立即中断；可在恢复时重新启动。"
+      confirm-label="确认停止"
+      :busy="mutation.isPending.value"
+      :verify-value="app?.name ?? ''"
+      :verify-hint='app ? `输入应用名 "${app.name}" 以确认停止运行` : ""'
+      @confirm="onConfirmStop"
+      @cancel="confirmStop = false"
     />
   </section>
 </template>
@@ -101,6 +115,7 @@ const trackedJob = computed(() => jobQuery.data.value ?? null)
 const actionFeedback = ref('')
 const actionError = ref(false)
 const confirmDelete = ref(false)
+const confirmStop = ref(false)
 
 const runtimeStatusLabel = computed(() => {
   const status = runtime.value?.status
@@ -125,12 +140,22 @@ async function onAction(op: 'start' | 'stop' | 'restart' | 'delete') {
     confirmDelete.value = true
     return
   }
+  if (op === 'stop') {
+    // 停止容器同样走强校验确认，避免误操作中断对话。
+    confirmStop.value = true
+    return
+  }
   await runMutation(op)
 }
 
 async function onConfirmDelete() {
   confirmDelete.value = false
   await runMutation('delete')
+}
+
+async function onConfirmStop() {
+  confirmStop.value = false
+  await runMutation('stop')
 }
 
 function formatBytes(value: number): string {
