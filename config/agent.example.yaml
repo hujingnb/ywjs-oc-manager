@@ -1,0 +1,45 @@
+# runtime-agent 进程（runtime/agent binary）配置文件。
+# 整个文件被 .gitignore 屏蔽，禁止把真实值提交到仓库。
+# 部署时由运维基于 agent.example.yaml 复制并改写真实值。
+#
+# bootstrap：进程启动时优先读 OC_AGENT_CONFIG 环境变量指向的路径；
+# 未设置时默认 "config/agent.yaml"（相对工作目录）。
+
+agent:
+  # agent 维护的"业务数据根目录"。下面会派生出：
+  #   <data_root>/orgs/<org_id>/...   组织级文件镜像
+  #   <data_root>/apps/<app_id>/...   应用级文件 / workspace / 归档
+  # 必须显式配置；为空启动 fail-fast。
+  # 容器部署一般指向 docker volume 挂载点，本地裸跑指向项目相对路径。
+  data_root: "/var/lib/oc-agent"
+
+  # agent 自身状态目录，存放自签 TLS 证书 / 注册结果等元数据。
+  # 必须显式配置；为空启动 fail-fast。
+  # 推荐放 data_root 子目录（如 "/var/lib/oc-agent/state"），便于卷挂载持久化。
+  state_dir: "/var/lib/oc-agent/state"
+
+  # 宿主机 Docker daemon socket 路径；agent 通过它做镜像 inspect / load
+  # 以及 docker proxy 反向代理。
+  # 容器部署时通常 mount 宿主 /var/run/docker.sock 到容器内同名路径。
+  docker_socket: "/var/run/docker.sock"
+
+  # agent ↔ manager 通信使用的 Bearer token。
+  # 含敏感凭据，必须落到 gitignored 的 agent.yaml；example 保持脱敏占位。
+  # 留空时 agent 不做 Bearer 校验（仅本地无授权 dev 场景使用）。
+  # 生产部署：由 manager bootstrap 流程下发，运维写入此处。
+  token: "CHANGE_ME_AGENT_BEARER_TOKEN"
+
+  # 允许调用 agent 接口的客户端 CIDR 段，形如 "10.0.0.0/8"。
+  # 留空表示不做 IP 限制（仅本地 dev 场景），生产应明确写出 manager 出口 CIDR。
+  # 与 token 双重校验：token 校验失败直接 401，CIDR 校验失败直接 403。
+  trusted_cidr: ""
+
+  # docker proxy HTTP server 监听地址（agent 对外暴露 docker 管控入口）。
+  # 形如 ":7001"。manager 通过该端口走 TLS + Bearer 调 docker API。
+  # 必填；为空启动 fail-fast。
+  docker_addr: ":7001"
+
+  # 文件 / scope API HTTP server 监听地址（agent 对外暴露文件管理入口）。
+  # 形如 ":7002"。处理 /v1/scopes/* / /v1/files/ping / /healthz 等路由。
+  # 必填；为空启动 fail-fast。
+  file_addr: ":7002"
