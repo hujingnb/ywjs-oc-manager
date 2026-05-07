@@ -1,15 +1,20 @@
-# 跨节点演练（v1.0 RC Task 16 降级版）：本机起第二个 oc-runtime-agent 实例。
+# 跨节点演练：本机起第二个 oc-runtime-agent 实例。
 #
 # 用法：
+#   mkdir -p .local/data/agent-2-config
+#   cp config/agent.example.yaml .local/data/agent-2-config/agent.yaml
+#   # 至少修改 docker_addr/file_addr/data_root/state_dir 为 agent-2 专属值
 #   docker compose -f docker-compose.yml -f deploy/docker-compose.two-agent.yml up -d
 #
 # 与默认 oc-runtime-agent 的差异：
 #   - 不同 container_name 与 hostname → manager 端可作为独立节点注册；
 #   - 7003/7004 端口暴露，避免与默认 agent 7001/7002 冲突；
-#   - 独立的 .local/data/agent-2 目录，避免 state / TLS 证书与默认 agent 互相覆盖；
+#   - 独立的 .local/data/agent-2 目录承载 agent state / TLS 证书；
+#   - 独立的 .local/data/agent-2-config 目录覆盖 /app/config（v1.0.1 修复 T4 实测
+#     发现的双 agent 共享 ./config/agent.yaml 互相覆盖 token 问题）；
 #   - 共享同一 docker socket（本机演练限定，跨机时是各自的）。
 #
-# 演练步骤参见 deploy/README.md「跨机部署」一节。
+# 演练步骤参见 deploy/README.md「双 agent 同宿主演练」一节。
 services:
   oc-runtime-agent-2:
     image: golang:1.25-bookworm
@@ -38,5 +43,8 @@ services:
       - ./:/app
       - /var/run/docker.sock:/var/run/docker.sock
       - ./.local/data/agent-2:/var/lib/oc-agent
+      # 用独立 host 目录覆盖容器内 /app/config，让 agent-2 读到自己的 agent.yaml；
+      # 必须在 compose up 之前 mkdir -p .local/data/agent-2-config 并拷贝模板。
+      - ./.local/data/agent-2-config:/app/config
       - ./.local/data/go/pkg/mod:/go/pkg/mod
       - ./.local/data/go/cache:/root/.cache/go-build
