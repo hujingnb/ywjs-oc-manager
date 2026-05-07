@@ -44,6 +44,9 @@ type Querier interface {
 	GetRuntimeNodeByName(ctx context.Context, name string) (RuntimeNode, error)
 	GetUser(ctx context.Context, id pgtype.UUID) (User, error)
 	GetUserByUsername(ctx context.Context, username string) (User, error)
+	// 用于组织创建链路失败时回滚刚刚 INSERT 的孤儿记录。
+	// 正常生命周期不可见此查询；普通"删除"必须走 SoftDeleteOrganization。
+	HardDeleteOrganization(ctx context.Context, id pgtype.UUID) error
 	// ListActiveNodesWithAppCounts 列出所有 active 节点并附带其当前未删除应用数量。
 	// OnboardingService 自动选节点时按剩余容量过滤；剩余容量 = max_apps - app_count，
 	// max_apps NULL 表示不限。
@@ -83,6 +86,7 @@ type Querier interface {
 	SetAppStatus(ctx context.Context, arg SetAppStatusParams) (App, error)
 	SetChannelBindingChallenge(ctx context.Context, arg SetChannelBindingChallengeParams) (ChannelBinding, error)
 	SetChannelBindingStatus(ctx context.Context, arg SetChannelBindingStatusParams) (ChannelBinding, error)
+	SetOrganizationNewAPIUser(ctx context.Context, arg SetOrganizationNewAPIUserParams) (Organization, error)
 	SetOrganizationStatus(ctx context.Context, arg SetOrganizationStatusParams) (Organization, error)
 	SetRuntimeNodeStatus(ctx context.Context, arg SetRuntimeNodeStatusParams) (RuntimeNode, error)
 	SetUserStatus(ctx context.Context, arg SetUserStatusParams) (User, error)

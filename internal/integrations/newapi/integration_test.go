@@ -4,6 +4,8 @@ package newapi
 
 import (
 	"context"
+	"crypto/rand"
+	"encoding/hex"
 	"fmt"
 	"os"
 	"strconv"
@@ -11,16 +13,20 @@ import (
 	"time"
 )
 
-// TestIntegrationRechargeAndCreateToken 用真实 new-api 实例验证 RechargeUser → CreateAPIKey → SetAPIKeyStatus
-// 三步全链路。仅在 -tags=integration 时编译。
+// TestIntegrationFullProvisionAndTokenFlow 用真实 new-api 实例验证全链路：
+//  1. admin 创业务 user（CreateUser → FindUserByUsername）；
+//  2. 业务 user 凭据 login + GET /api/user/token 拿 access_token（BootstrapUserAccessToken）；
+//  3. 切到 user 身份创 token + 拉完整 sk-（CreateAPIKey + GetTokenFullKey）；
+//  4. 同 user 身份禁用并恢复 token（SetAPIKeyStatus）；
+//  5. admin 给该 user 充值（RechargeUser，走 POST /api/user/manage action=add_quota）。
 //
-// 用法：
+// 仅在 -tags=integration 时编译。运行示例：
 //
 //	NEWAPI_BASE_URL_LOCAL=http://127.0.0.1:3000 \
 //	NEWAPI_ADMIN_TOKEN=<access_token> \
 //	NEWAPI_ADMIN_USER_ID=1 \
-//	go test -tags=integration ./internal/integrations/newapi -run TestIntegrationRechargeAndCreateToken -v
-func TestIntegrationRechargeAndCreateToken(t *testing.T) {
+//	go test -tags=integration ./internal/integrations/newapi -run TestIntegrationFullProvisionAndTokenFlow -v
+func TestIntegrationFullProvisionAndTokenFlow(t *testing.T) {
 	baseURL := os.Getenv("NEWAPI_BASE_URL_LOCAL")
 	if baseURL == "" {
 		baseURL = "http://127.0.0.1:3000"
@@ -39,30 +45,42 @@ func TestIntegrationRechargeAndCreateToken(t *testing.T) {
 	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
 	defer cancel()
 
-	// 用 admin 自己 (id=1) 充值；他余额已经很大，加 100 不影响业务
-	rr, err := c.RechargeUser(ctx, RechargeInput{
-		NewAPIUserID: adminUserID,
-		CreditAmount: 100,
-		Remark:       fmt.Sprintf("integration-smoke-%d", time.Now().UnixNano()),
+	// 给 username 加随机后缀，避免重复运行同测试时 new-api username 重复冲突。
+	suffix := randSuffix(t)
+	username := "smoke-" + suffix
+	password := "Pwd-" + suffix + "-x9!"
+
+	// 1. CreateUser
+	user, err := c.CreateUser(ctx, CreateUserInput{
+		Username:    username,
+		Password:    password,
+		DisplayName: "smoke " + suffix,
 	})
 	if err != nil {
-		t.Fatalf("RechargeUser err: %v", err)
+		t.Fatalf("CreateUser err: %v", err)
 	}
-	if rr.RemainQuota <= 0 {
-		t.Fatalf("RemainQuota = %d, expect > 0", rr.RemainQuota)
+	if user.ID == 0 || user.Username != username {
+		t.Fatalf("CreateUser returned %+v", user)
 	}
-	if rr.RefID == "" {
-		t.Fatalf("RefID empty")
-	}
-	t.Logf("RechargeUser OK ref_id=%s remain_quota=%d", rr.RefID, rr.RemainQuota)
+	t.Logf("CreateUser OK id=%d username=%s", user.ID, user.Username)
 
-	// 创建一个 token 验证 id fallback 真能拿到 id
-	name := fmt.Sprintf("smoke-key-%d", time.Now().UnixNano())
-	tk, err := c.CreateAPIKey(ctx, CreateAPIKeyInput{
-		UserID:     adminUserID,
-		Name:       name,
-		Quota:      100,
-		UnlimitedQ: false,
+	// 2. login + 取 access_token
+	accessToken, err := c.BootstrapUserAccessToken(ctx, username, password)
+	if err != nil {
+		t.Fatalf("BootstrapUserAccessToken err: %v", err)
+	}
+	if accessToken == "" {
+		t.Fatalf("access token 为空")
+	}
+	t.Logf("BootstrapUserAccessToken OK access_token len=%d", len(accessToken))
+
+	// 3. user-scoped 创 token + 拉完整 sk-
+	user_scoped := c.AsUser(user.ID, accessToken)
+	tokenName := fmt.Sprintf("smoke-key-%s", suffix)
+	tk, err := user_scoped.CreateAPIKey(ctx, CreateAPIKeyInput{
+		Name:       tokenName,
+		Quota:      0,
+		UnlimitedQ: true,
 	})
 	if err != nil {
 		t.Fatalf("CreateAPIKey err: %v", err)
@@ -70,19 +88,51 @@ func TestIntegrationRechargeAndCreateToken(t *testing.T) {
 	if tk.ID == 0 {
 		t.Fatalf("CreateAPIKey returned id=0, fallback broken")
 	}
-	if tk.Name != name {
-		t.Fatalf("CreateAPIKey name = %q, want %q", tk.Name, name)
-	}
 	t.Logf("CreateAPIKey OK id=%d name=%s", tk.ID, tk.Name)
 
-	// 立即禁用刚创建的 token，验证 SetAPIKeyStatus 能用真 id 调通（同时验证 ?status_only=true query string 不被 escape）
-	if err := c.SetAPIKeyStatus(ctx, tk.ID, 2); err != nil {
+	fullKey, err := user_scoped.GetTokenFullKey(ctx, tk.ID)
+	if err != nil {
+		t.Fatalf("GetTokenFullKey err: %v", err)
+	}
+	if len(fullKey) <= 18 {
+		t.Fatalf("fullKey len=%d, want > 18 (truncated)", len(fullKey))
+	}
+	t.Logf("GetTokenFullKey OK len=%d prefix=%s", len(fullKey), fullKey[:8])
+
+	// 4. 禁用 + 恢复 token
+	if err := user_scoped.SetAPIKeyStatus(ctx, tk.ID, 2); err != nil {
 		t.Fatalf("SetAPIKeyStatus disable err: %v", err)
 	}
-	t.Logf("SetAPIKeyStatus OK disabled token id=%d", tk.ID)
-
-	// 收尾：恢复 token，留给后续 cleanup（manager 删除应用时会一并禁用）
-	if err := c.SetAPIKeyStatus(ctx, tk.ID, 1); err != nil {
+	t.Logf("SetAPIKeyStatus disable OK")
+	if err := user_scoped.SetAPIKeyStatus(ctx, tk.ID, 1); err != nil {
 		t.Fatalf("SetAPIKeyStatus restore err: %v", err)
 	}
+	t.Logf("SetAPIKeyStatus restore OK")
+
+	// 5. admin 给业务 user 充值 100，验证 manage add_quota 路径
+	rr, err := c.RechargeUser(ctx, RechargeInput{
+		NewAPIUserID: user.ID,
+		CreditAmount: 100,
+		Remark:       fmt.Sprintf("integration-smoke-%s", suffix),
+	})
+	if err != nil {
+		t.Fatalf("RechargeUser err: %v", err)
+	}
+	if rr.RefID == "" {
+		t.Fatalf("RefID empty")
+	}
+	if rr.RemainQuota < 100 {
+		t.Fatalf("RemainQuota = %d, want >= 100", rr.RemainQuota)
+	}
+	t.Logf("RechargeUser OK ref_id=%s remain_quota=%d", rr.RefID, rr.RemainQuota)
+}
+
+// randSuffix 生成 12 字符随机十六进制串，避免 username 重复冲突。
+func randSuffix(t *testing.T) string {
+	t.Helper()
+	raw := make([]byte, 6)
+	if _, err := rand.Read(raw); err != nil {
+		t.Fatalf("rand: %v", err)
+	}
+	return hex.EncodeToString(raw)
 }

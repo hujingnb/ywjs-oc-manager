@@ -73,15 +73,28 @@ type OpenClawHealthChecker interface {
 	WaitForOpenClawHealthy(ctx context.Context, nodeID, containerID string) error
 }
 
-// NewAPIClient 是 worker 与 new-api 交互的最小集合。
-type NewAPIClient interface {
+// APIKeyClient 是「以业务 user 身份调 token 相关接口」的最小能力集合。
+//
+// 由 NewAPIClientFactory 在每次 job 处理时按 app→org 上下文构造（解密 organizations
+// 的凭据密文 → 拿到 access_token + user_id）。该接口与 newapi.UserScopedClient 同形态。
+type APIKeyClient interface {
 	CreateAPIKey(ctx context.Context, input newapi.CreateAPIKeyInput) (newapi.APIKey, error)
+	GetTokenFullKey(ctx context.Context, tokenID int64) (string, error)
+	SetAPIKeyStatus(ctx context.Context, id int64, status int) error
+}
+
+// NewAPIClientFactory 在 worker 跑 job 的中间层构造 user-scoped client。
+//
+// 把"组织凭据 → user-scoped client"的胶水代码集中在 cmd/server 装配的 adapter 里，
+// handler 只看到 APIKeyClient 接口，避免每个 handler 都重复 GetOrganization / Decrypt 的样板。
+type NewAPIClientFactory interface {
+	UserScopedFor(ctx context.Context, app sqlc.App) (APIKeyClient, error)
 }
 
 // AppInitializeConfig 提供 handler 运行所需的外部配置。
 //
-// Cipher：把 new-api 返回的 api_key 明文加密后写入 newapi_key_ciphertext，
-// 容器启动时用 Decrypt 现解作为 OPENCLAW_API_KEY env，全程不入日志。
+// Cipher：把 new-api 返回的完整 sk- 加密后写入 apps.newapi_key_ciphertext，
+// 容器启动时用 Decrypt 现解作为 OPENAI_API_KEY env，全程不入日志。
 //
 // SystemPromptTemplate：用 {{workspace_dir}} / {{knowledge_org_dir}} / {{knowledge_app_dir}}
 // 三个目录占位符，handler 在拼接 prompt 之前先按容器内目录展开（不是宿主路径）；
@@ -96,7 +109,7 @@ type AppInitializeConfig struct {
 	Cipher               *auth.Cipher
 	// ContainerNetworks 决定 manager 创建容器时连接哪些 docker network；
 	// 必须包含 new-api 所在的 network，否则 OpenClaw 容器无法路由到 new-api。
-	ContainerNetworks    []string
+	ContainerNetworks []string
 	// LLM 是 OpenClaw 容器内嵌 pi-coding-agent 的模型配置；
 	// BaseURL 写入容器 OPENAI_BASE_URL；DefaultProvider/DefaultModel 写入 settings.json。
 	// 任一字段为空时跳过对应注入（settings.json 不会被生成），便于旧测试装配。
@@ -105,16 +118,10 @@ type AppInitializeConfig struct {
 
 // AppInitializeLLMConfig 是 AppInitializeConfig.LLM 的类型，与 internal/config 的
 // OpenClawLLMConfig 同语义；handler 包独立定义避免反向依赖 internal/config 包。
-//
-// OpenAICompatAPIKey 是注入容器 OPENAI_API_KEY 环境变量的全局 sk- token；
-// new-api admin API 不返回新建 token 的完整 key，dev 部署用 ops 在 new-api 后台手工
-// 创建一个 sk- token 配进 yaml，所有应用共用此 token。留空时 fallback 到 manager
-// 调 CreateAPIKey 拿到的 truncated key（仅用于本地无模型调用的场景）。
 type AppInitializeLLMConfig struct {
-	BaseURL            string
-	DefaultProvider    string
-	DefaultModel       string
-	OpenAICompatAPIKey string
+	BaseURL         string
+	DefaultProvider string
+	DefaultModel    string
 }
 
 // 容器内路径约定（runtime/openclaw/Dockerfile 与 OpenClaw runtime 共同维护）。
@@ -155,7 +162,7 @@ type AppInitializeHandler struct {
 	runtimeFiles AppRuntimeFileWriter
 	containers   ContainerCreator
 	starter      ContainerStarter
-	newapi       NewAPIClient
+	factory      NewAPIClientFactory
 	cfg          AppInitializeConfig
 }
 
@@ -168,7 +175,7 @@ func NewAppInitializeHandler(
 	dirs AgentDirInitializer,
 	containers ContainerCreator,
 	starter ContainerStarter,
-	client NewAPIClient,
+	factory NewAPIClientFactory,
 	cfg AppInitializeConfig,
 ) *AppInitializeHandler {
 	if cfg.RuntimeImage == "" {
@@ -180,7 +187,7 @@ func NewAppInitializeHandler(
 		dirs:       dirs,
 		containers: containers,
 		starter:    starter,
-		newapi:     client,
+		factory:    factory,
 		cfg:        cfg,
 	}
 }
@@ -264,19 +271,11 @@ func (h *AppInitializeHandler) Handle(ctx context.Context, job sqlc.Job) error {
 		return fmt.Errorf("渲染 prompt 失败: %w", err)
 	}
 
-	apiKeyPlaintext, err := h.ensureAPIKey(ctx, &app, org)
+	containerAPIKey, err := h.ensureAPIKey(ctx, &app)
 	if err != nil {
 		return err
 	}
-
-	// 优先使用 yaml 全局 sk- token：new-api admin API 不返回完整 key，per-app token
-	// 拿到的是 truncated 18 字符（chat completions 401）。dev 部署 ops 在 new-api 后台
-	// 手工创建一个 sk- token 配进 cfg.LLM.OpenAICompatAPIKey，所有应用共用。
-	// 留空时 fallback 到 ensureAPIKey 拿到的 plaintext（与旧行为一致）。
-	containerAPIKey := apiKeyPlaintext
-	if h.cfg.LLM.OpenAICompatAPIKey != "" {
-		containerAPIKey = h.cfg.LLM.OpenAICompatAPIKey
-	}
+	_ = org // org 已在上文用于 prompt；ensureAPIKey 现在通过 factory 自行获取组织凭据。
 
 	if app.ContainerID.String == "" && h.containers != nil {
 		node, err := h.store.GetRuntimeNode(ctx, app.RuntimeNodeID)
@@ -331,43 +330,65 @@ func (h *AppInitializeHandler) Handle(ctx context.Context, job sqlc.Job) error {
 	return nil
 }
 
-// ensureAPIKey 在必要时通过 new-api 创建 api_key 并加密落库。
-// 已经 active 的应用直接读现有 ciphertext 解密返回；缺 cipher 时回退为 ciphertext 原值。
-func (h *AppInitializeHandler) ensureAPIKey(ctx context.Context, app *sqlc.App, org sqlc.Organization) (string, error) {
+// ensureAPIKey 走「以组织业务 user 身份创 token + 拉完整 sk-」流程，加密落库后返回明文 sk-。
+//
+// 已经 active 的应用直接读 ciphertext 解密返回，避免重复创建。
+// 解密失败 / 拉 key 失败都直接报错；不再有"全局 fallback sk-"的兜底路径
+// （以前 cfg.LLM.OpenAICompatAPIKey 那条路已经下线，参见本次改造的设计文档）。
+func (h *AppInitializeHandler) ensureAPIKey(ctx context.Context, app *sqlc.App) (string, error) {
 	if app.ApiKeyStatus == domain.APIKeyStatusActive {
-		// 已经有 api_key：尝试解密供容器使用。
-		return decryptIfNeeded(app.NewapiKeyCiphertext.String, h.cfg.Cipher)
+		if !app.NewapiKeyCiphertext.Valid || app.NewapiKeyCiphertext.String == "" {
+			return "", fmt.Errorf("应用 %s 已 active 但 newapi_key_ciphertext 为空", uuidToString(app.ID))
+		}
+		return decryptCiphertext(app.NewapiKeyCiphertext.String, h.cfg.Cipher)
 	}
-	if h.newapi == nil {
-		return "", fmt.Errorf("new-api client 未配置，无法创建 api_key")
+	if h.factory == nil {
+		return "", fmt.Errorf("new-api client factory 未配置，无法创建 api_key")
 	}
+	if h.cfg.Cipher == nil {
+		return "", fmt.Errorf("cipher 未配置，无法加密 api_key")
+	}
+	client, err := h.factory.UserScopedFor(ctx, *app)
+	if err != nil {
+		return "", fmt.Errorf("构造 user-scoped client 失败: %w", err)
+	}
+
 	// 应用级 token 默认 unlimited_quota=true：manager 不在 token 层面做限额（spec §10），
 	// 计费与额度归 new-api 的 user 级管理。如果 unlimited=false 且 Quota=0，
 	// new-api 会在 chat/completions 时报"Invalid token"（实际是 quota exhausted），让 OpenClaw
 	// 上层把所有用户消息都当成 LLM 错误回复。
-	key, err := h.newapi.CreateAPIKey(ctx, newapi.CreateAPIKeyInput{
-		Name:       fmt.Sprintf("%s-%s", org.Name, app.Name),
+	key, err := client.CreateAPIKey(ctx, newapi.CreateAPIKeyInput{
+		Name:       fmt.Sprintf("app-%s", uuidToString(app.ID)),
 		Models:     []string{},
 		UnlimitedQ: true,
 	})
 	if err != nil {
 		return "", fmt.Errorf("调用 new-api 创建 api_key 失败: %w", err)
 	}
-	ciphertext, err := encryptIfNeeded(key.Key, h.cfg.Cipher)
+	if key.ID == 0 {
+		return "", fmt.Errorf("new-api CreateAPIKey 返回 token id=0")
+	}
+
+	fullKey, err := client.GetTokenFullKey(ctx, key.ID)
+	if err != nil {
+		return "", fmt.Errorf("调用 new-api 取完整 sk- 失败: %w", err)
+	}
+
+	ciphertext, err := h.cfg.Cipher.Encrypt([]byte(fullKey))
 	if err != nil {
 		return "", fmt.Errorf("加密 api_key 失败: %w", err)
 	}
 	updated, err := h.store.SetAppNewAPIKey(ctx, sqlc.SetAppNewAPIKeyParams{
 		ID:                  app.ID,
-		NewapiKeyID:         pgtype.Text{String: fmt.Sprintf("%d", key.ID), Valid: key.ID != 0},
-		NewapiKeyCiphertext: pgtype.Text{String: ciphertext, Valid: ciphertext != ""},
+		NewapiKeyID:         pgtype.Text{String: fmt.Sprintf("%d", key.ID), Valid: true},
+		NewapiKeyCiphertext: pgtype.Text{String: ciphertext, Valid: true},
 		ApiKeyStatus:        domain.APIKeyStatusActive,
 	})
 	if err != nil {
 		return "", fmt.Errorf("写入 api_key 失败: %w", err)
 	}
 	*app = updated
-	return key.Key, nil
+	return fullKey, nil
 }
 
 // renderSystemPrompt 把模板中的 {{workspace_dir}} / {{knowledge_org_dir}} / {{knowledge_app_dir}}
@@ -526,19 +547,13 @@ func renderOpenClawModels(cfg AppInitializeLLMConfig) []byte {
 	return raw
 }
 
-// encryptIfNeeded 把明文 api_key 加密；cipher 为 nil 时直接返回明文，
-// 让最早期没装配 cipher 的部署仍能跑通；生产部署强制 cipher 非 nil。
-func encryptIfNeeded(plaintext string, cipher *auth.Cipher) (string, error) {
+// decryptCiphertext 把 newapi_key_ciphertext 解为明文 sk-；cipher 必须非 nil（生产强制装配）。
+func decryptCiphertext(ciphertext string, cipher *auth.Cipher) (string, error) {
 	if cipher == nil {
-		return plaintext, nil
+		return "", fmt.Errorf("cipher 未配置，无法解密 api_key")
 	}
-	return cipher.Encrypt([]byte(plaintext))
-}
-
-// decryptIfNeeded 把 ciphertext 解密为明文；cipher 为 nil 时把 ciphertext 视作明文。
-func decryptIfNeeded(ciphertext string, cipher *auth.Cipher) (string, error) {
-	if ciphertext == "" || cipher == nil {
-		return ciphertext, nil
+	if ciphertext == "" {
+		return "", fmt.Errorf("api_key 密文为空")
 	}
 	plain, err := cipher.Decrypt(ciphertext)
 	if err != nil {

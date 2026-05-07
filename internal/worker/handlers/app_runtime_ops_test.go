@@ -9,6 +9,7 @@ import (
 	"github.com/jackc/pgx/v5/pgtype"
 
 	"oc-manager/internal/domain"
+	"oc-manager/internal/integrations/newapi"
 	"oc-manager/internal/store/sqlc"
 )
 
@@ -293,10 +294,28 @@ func (f *fakeLifecycle) RemoveContainer(_ context.Context, _, _ string) error {
 	return f.removeErr
 }
 
+// fakeDisabler 同时实现 NewAPIClientFactory + APIKeyClient：UserScopedFor 直接返回自身，
+// 把"工厂派生 user-scoped client"的两层抽象在测试里压平。CreateAPIKey / GetTokenFullKey
+// 在 app_delete 流程里不会被调到，留空实现。
 type fakeDisabler struct {
 	id     int64
 	status int
 	err    error
+}
+
+func (f *fakeDisabler) UserScopedFor(_ context.Context, _ sqlc.App) (APIKeyClient, error) {
+	if f.err != nil {
+		return nil, f.err
+	}
+	return f, nil
+}
+
+func (f *fakeDisabler) CreateAPIKey(_ context.Context, _ newapi.CreateAPIKeyInput) (newapi.APIKey, error) {
+	return newapi.APIKey{}, nil
+}
+
+func (f *fakeDisabler) GetTokenFullKey(_ context.Context, _ int64) (string, error) {
+	return "", nil
 }
 
 func (f *fakeDisabler) SetAPIKeyStatus(_ context.Context, id int64, status int) error {

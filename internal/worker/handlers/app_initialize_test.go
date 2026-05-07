@@ -3,6 +3,7 @@ package handlers
 import (
 	"context"
 	"errors"
+	"fmt"
 	"strings"
 	"testing"
 
@@ -152,7 +153,7 @@ func TestAppInitializePropagatesHealthCheckError(t *testing.T) {
 	}
 	containers := &healthAwareContainers{fakeContainers: base}
 	client := &fakeNewAPI{result: newapi.APIKey{ID: 1, Key: "k"}}
-	handler := NewAppInitializeHandler(store, &fakeImages{}, &fakeDirs{}, base, containers, client, AppInitializeConfig{})
+	handler := NewAppInitializeHandler(store, &fakeImages{}, &fakeDirs{}, base, containers, client, AppInitializeConfig{Cipher: testCipher(t)})
 
 	err := handler.Handle(context.Background(), buildJob(t, testAppID, "node-1"))
 	if err == nil || !strings.Contains(err.Error(), "等待 OpenClaw 健康失败") {
@@ -191,12 +192,17 @@ func TestAppInitializeIsIdempotentForBindingWaiting(t *testing.T) {
 
 func TestAppInitializeSkipsAPIKeyWhenAlreadyActive(t *testing.T) {
 	store := newAppInitStub(t)
+	cipher := testCipher(t)
+	encrypted, err := cipher.Encrypt([]byte("sk-old-cached"))
+	if err != nil {
+		t.Fatalf("加密 fixture 失败: %v", err)
+	}
 	store.app.ApiKeyStatus = domain.APIKeyStatusActive
-	store.app.NewapiKeyCiphertext = pgtype.Text{String: "old-key", Valid: true}
+	store.app.NewapiKeyCiphertext = pgtype.Text{String: encrypted, Valid: true}
 	client := &fakeNewAPI{}
 	containers := &fakeContainers{result: runtimepkg.ContainerInfo{ID: "c", Name: "n"}}
 
-	handler := NewAppInitializeHandler(store, &fakeImages{}, &fakeDirs{}, containers, containers, client, AppInitializeConfig{})
+	handler := NewAppInitializeHandler(store, &fakeImages{}, &fakeDirs{}, containers, containers, client, AppInitializeConfig{Cipher: cipher})
 	if err := handler.Handle(context.Background(), buildJob(t, testAppID, "")); err != nil {
 		t.Fatalf("Handle err = %v", err)
 	}
@@ -212,7 +218,7 @@ func TestAppInitializePropagatesNewAPIError(t *testing.T) {
 	store := newAppInitStub(t)
 	client := &fakeNewAPI{err: newapi.ErrUpstream}
 
-	handler := NewAppInitializeHandler(store, &fakeImages{}, &fakeDirs{}, &fakeContainers{}, &fakeContainers{}, client, AppInitializeConfig{})
+	handler := NewAppInitializeHandler(store, &fakeImages{}, &fakeDirs{}, &fakeContainers{}, &fakeContainers{}, client, AppInitializeConfig{Cipher: testCipher(t)})
 	err := handler.Handle(context.Background(), buildJob(t, testAppID, ""))
 	if !errors.Is(err, newapi.ErrUpstream) {
 		t.Fatalf("error = %v, want ErrUpstream", err)
@@ -226,7 +232,7 @@ func TestAppInitializePropagatesContainerError(t *testing.T) {
 	store := newAppInitStub(t)
 	containers := &fakeContainers{err: errors.New("boom")}
 	client := &fakeNewAPI{result: newapi.APIKey{ID: 1, Key: "k"}}
-	handler := NewAppInitializeHandler(store, &fakeImages{}, &fakeDirs{}, containers, containers, client, AppInitializeConfig{})
+	handler := NewAppInitializeHandler(store, &fakeImages{}, &fakeDirs{}, containers, containers, client, AppInitializeConfig{Cipher: testCipher(t)})
 	err := handler.Handle(context.Background(), buildJob(t, testAppID, "node-1"))
 	if err == nil || !strings.Contains(err.Error(), "创建容器失败") {
 		t.Fatalf("error = %v, want 创建容器失败", err)
@@ -252,7 +258,7 @@ func TestAppInitializeContainerStepSkippedWhenContainerExists(t *testing.T) {
 	containers := &fakeContainers{}
 	client := &fakeNewAPI{result: newapi.APIKey{ID: 1, Key: "k"}}
 
-	handler := NewAppInitializeHandler(store, &fakeImages{}, &fakeDirs{}, containers, containers, client, AppInitializeConfig{})
+	handler := NewAppInitializeHandler(store, &fakeImages{}, &fakeDirs{}, containers, containers, client, AppInitializeConfig{Cipher: testCipher(t)})
 	if err := handler.Handle(context.Background(), buildJob(t, testAppID, "node-1")); err != nil {
 		t.Fatalf("Handle err = %v", err)
 	}
@@ -410,10 +416,20 @@ func (f *fakeDirs) InitAppDirs(_ context.Context, nodeID, appID string) error {
 	return f.err
 }
 
+// fakeNewAPI 同时充当 NewAPIClientFactory 与 APIKeyClient：UserScopedFor 直接返回自身，
+// 让现有用例（构造一次 fakeNewAPI 给 handler）继续通过；result 在 CreateAPIKey 与
+// GetTokenFullKey 之间共用，模拟 new-api 创 token + 拉完整 key 这条新链路。
 type fakeNewAPI struct {
 	result newapi.APIKey
 	err    error
 	calls  int
+}
+
+func (f *fakeNewAPI) UserScopedFor(_ context.Context, _ sqlc.App) (APIKeyClient, error) {
+	if f.err != nil {
+		return nil, f.err
+	}
+	return f, nil
 }
 
 func (f *fakeNewAPI) CreateAPIKey(_ context.Context, _ newapi.CreateAPIKeyInput) (newapi.APIKey, error) {
@@ -422,6 +438,38 @@ func (f *fakeNewAPI) CreateAPIKey(_ context.Context, _ newapi.CreateAPIKeyInput)
 		return newapi.APIKey{}, f.err
 	}
 	return f.result, nil
+}
+
+// GetTokenFullKey 把 result.Key 作为完整 sk- 返回；测试里通过设置 result.Key 控制注入容器的值。
+func (f *fakeNewAPI) GetTokenFullKey(_ context.Context, _ int64) (string, error) {
+	if f.err != nil {
+		return "", f.err
+	}
+	if f.result.Key == "" {
+		return "", fmt.Errorf("fakeNewAPI: result.Key 未设置")
+	}
+	return f.result.Key, nil
+}
+
+// SetAPIKeyStatus 在 newapi_key_status / app_runtime_ops 测试中被调用；
+// 不真做事，仅通过 calls 计数让上层断言"发生了一次状态切换"。
+func (f *fakeNewAPI) SetAPIKeyStatus(_ context.Context, _ int64, _ int) error {
+	f.calls++
+	if f.err != nil {
+		return f.err
+	}
+	return nil
+}
+
+// testCipher 返回一个固定 key 的 cipher，所有 app_initialize 测试共用。
+// 32 字节填零 key 仅做单测加解密一致性，不放入生产环境。
+func testCipher(t *testing.T) *auth.Cipher {
+	t.Helper()
+	c, err := auth.NewCipher(make([]byte, 32))
+	if err != nil {
+		t.Fatalf("初始化测试 cipher 失败: %v", err)
+	}
+	return c
 }
 
 func mustUUIDForTest(t *testing.T, value string) pgtype.UUID {

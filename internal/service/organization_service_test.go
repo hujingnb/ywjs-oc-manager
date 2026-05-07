@@ -2,7 +2,9 @@ package service
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
+	"strings"
 	"testing"
 
 	"github.com/jackc/pgx/v5"
@@ -10,11 +12,12 @@ import (
 
 	"oc-manager/internal/auth"
 	"oc-manager/internal/domain"
+	"oc-manager/internal/integrations/newapi"
 	"oc-manager/internal/store/sqlc"
 )
 
 func TestOrganizationServiceCreateRequiresPlatformAdmin(t *testing.T) {
-	svc := NewOrganizationService(&organizationStoreStub{})
+	svc := NewOrganizationService(&organizationStoreStub{}, &fakeProvisioner{}, mustCipher(t))
 
 	_, err := svc.CreateOrganization(context.Background(), auth.Principal{Role: domain.UserRoleOrgAdmin}, OrganizationInput{Name: "测试组织"})
 	if !errors.Is(err, ErrForbidden) {
@@ -22,9 +25,15 @@ func TestOrganizationServiceCreateRequiresPlatformAdmin(t *testing.T) {
 	}
 }
 
-func TestOrganizationServiceCreateOrganization(t *testing.T) {
+// TestOrganizationServiceCreateProvisionsNewAPIUser 校验 CreateOrganization 串联调
+// CreateUser → BootstrapUserAccessToken → 加密落 newapi_user_credentials_ciphertext。
+func TestOrganizationServiceCreateProvisionsNewAPIUser(t *testing.T) {
 	store := &organizationStoreStub{}
-	svc := NewOrganizationService(store)
+	prov := &fakeProvisioner{
+		user:        newapi.User{ID: 42, Username: "preset"},
+		accessToken: "access-tok-xyz",
+	}
+	svc := NewOrganizationService(store, prov, mustCipher(t))
 	threshold := int32(20)
 
 	result, err := svc.CreateOrganization(context.Background(), auth.Principal{Role: domain.UserRolePlatformAdmin}, OrganizationInput{
@@ -36,16 +45,66 @@ func TestOrganizationServiceCreateOrganization(t *testing.T) {
 		t.Fatalf("CreateOrganization() error = %v", err)
 	}
 	if result.Name != "测试组织" || result.CreditWarningThreshold == nil || *result.CreditWarningThreshold != 20 {
-		t.Fatalf("organization = %+v, want created values", result)
+		t.Fatalf("organization = %+v", result)
 	}
-	if store.created.Name != "测试组织" {
-		t.Fatalf("created params = %+v, want name", store.created)
+	if prov.createCalls != 1 || prov.bootstrapCalls != 1 {
+		t.Fatalf("provisioner calls create=%d bootstrap=%d, want 1/1", prov.createCalls, prov.bootstrapCalls)
+	}
+	if !strings.HasPrefix(prov.lastCreate.Username, "org-") {
+		t.Fatalf("username 应以 org- 前缀: %q", prov.lastCreate.Username)
+	}
+	if prov.lastCreate.Password == "" {
+		t.Fatalf("password 不应为空")
+	}
+	if !store.updateCalled {
+		t.Fatalf("SetOrganizationNewAPIUser 未被调用")
+	}
+	if store.updated.NewapiUserID.String != "42" {
+		t.Fatalf("updated newapi_user_id = %q, want 42", store.updated.NewapiUserID.String)
+	}
+	if !store.updated.NewapiUserCredentialsCiphertext.Valid {
+		t.Fatalf("ciphertext 应被写入")
+	}
+	// 解密验证三件套被忠实序列化
+	cipher := mustCipher(t)
+	plain, err := cipher.Decrypt(store.updated.NewapiUserCredentialsCiphertext.String)
+	if err != nil {
+		t.Fatalf("解密失败: %v", err)
+	}
+	var creds OrganizationCredentials
+	if err := json.Unmarshal(plain, &creds); err != nil {
+		t.Fatalf("解析凭据 JSON 失败: %v", err)
+	}
+	if creds.AccessToken != "access-tok-xyz" {
+		t.Fatalf("creds.AccessToken = %q, want access-tok-xyz", creds.AccessToken)
+	}
+	if creds.Username != prov.lastCreate.Username || creds.Password != prov.lastCreate.Password {
+		t.Fatalf("creds 三件套不一致: %+v vs created %+v", creds, prov.lastCreate)
+	}
+}
+
+// TestOrganizationServiceCreateRollbackOnProvisioningFailure 校验 BootstrapUserAccessToken
+// 失败时回滚 manager 端组织行（HardDeleteOrganization 被调用）。
+func TestOrganizationServiceCreateRollbackOnProvisioningFailure(t *testing.T) {
+	store := &organizationStoreStub{}
+	prov := &fakeProvisioner{
+		user:           newapi.User{ID: 42},
+		bootstrapError: errors.New("login 失败"),
+	}
+	svc := NewOrganizationService(store, prov, mustCipher(t))
+
+	_, err := svc.CreateOrganization(context.Background(), auth.Principal{Role: domain.UserRolePlatformAdmin}, OrganizationInput{Name: "测试组织"})
+	if err == nil {
+		t.Fatalf("CreateOrganization() 应返回失败")
+	}
+	if !store.hardDeleted {
+		t.Fatalf("失败路径应触发 HardDeleteOrganization 回滚")
 	}
 }
 
 func TestOrganizationServiceGetRestrictsOrgScope(t *testing.T) {
 	store := &organizationStoreStub{org: sqlc.Organization{ID: mustUUID(t, "00000000-0000-0000-0000-000000000101"), Name: "测试组织", Status: domain.StatusActive}}
-	svc := NewOrganizationService(store)
+	svc := NewOrganizationService(store, &fakeProvisioner{}, mustCipher(t))
 
 	_, err := svc.GetOrganization(context.Background(), auth.Principal{Role: domain.UserRoleOrgMember, OrgID: "00000000-0000-0000-0000-000000000999"}, "00000000-0000-0000-0000-000000000101")
 	if !errors.Is(err, ErrForbidden) {
@@ -55,7 +114,7 @@ func TestOrganizationServiceGetRestrictsOrgScope(t *testing.T) {
 
 func TestOrganizationServiceSetStatus(t *testing.T) {
 	store := &organizationStoreStub{org: sqlc.Organization{ID: mustUUID(t, "00000000-0000-0000-0000-000000000101"), Name: "测试组织", Status: domain.StatusActive}}
-	svc := NewOrganizationService(store)
+	svc := NewOrganizationService(store, &fakeProvisioner{}, mustCipher(t))
 
 	result, err := svc.SetOrganizationStatus(context.Background(), auth.Principal{Role: domain.UserRolePlatformAdmin}, "00000000-0000-0000-0000-000000000101", domain.StatusDisabled)
 	if err != nil {
@@ -66,21 +125,87 @@ func TestOrganizationServiceSetStatus(t *testing.T) {
 	}
 }
 
+func mustCipher(t *testing.T) *auth.Cipher {
+	t.Helper()
+	key := make([]byte, 32)
+	for i := range key {
+		key[i] = byte(i)
+	}
+	c, err := auth.NewCipher(key)
+	if err != nil {
+		t.Fatalf("初始化 cipher 失败: %v", err)
+	}
+	return c
+}
+
+// fakeProvisioner 是 NewAPIUserProvisioner 的内存实现：返回预置 user 与 access_token，
+// 也支持注入失败以走回滚路径。lastCreate 记录最后一次 CreateUser 入参，断言 username 派生 / password 生成。
+type fakeProvisioner struct {
+	user           newapi.User
+	createError    error
+	accessToken    string
+	bootstrapError error
+
+	createCalls    int
+	bootstrapCalls int
+	lastCreate     newapi.CreateUserInput
+}
+
+func (p *fakeProvisioner) CreateUser(_ context.Context, input newapi.CreateUserInput) (newapi.User, error) {
+	p.createCalls++
+	p.lastCreate = input
+	if p.createError != nil {
+		return newapi.User{}, p.createError
+	}
+	user := p.user
+	if user.Username == "" {
+		user.Username = input.Username
+	}
+	return user, nil
+}
+
+func (p *fakeProvisioner) BootstrapUserAccessToken(_ context.Context, _, _ string) (string, error) {
+	p.bootstrapCalls++
+	if p.bootstrapError != nil {
+		return "", p.bootstrapError
+	}
+	return p.accessToken, nil
+}
+
 type organizationStoreStub struct {
-	org     sqlc.Organization
-	created sqlc.CreateOrganizationParams
+	org          sqlc.Organization
+	created      sqlc.CreateOrganizationParams
+	updated      sqlc.SetOrganizationNewAPIUserParams
+	updateCalled bool
+	hardDeleted  bool
 }
 
 func (s *organizationStoreStub) CreateOrganization(_ context.Context, arg sqlc.CreateOrganizationParams) (sqlc.Organization, error) {
 	s.created = arg
 	id, _ := parseUUID("00000000-0000-0000-0000-000000000101")
-	return sqlc.Organization{
+	created := sqlc.Organization{
 		ID:                     id,
 		Name:                   arg.Name,
 		Status:                 arg.Status,
 		ContactName:            arg.ContactName,
 		CreditWarningThreshold: arg.CreditWarningThreshold,
-	}, nil
+	}
+	s.org = created
+	return created, nil
+}
+
+func (s *organizationStoreStub) SetOrganizationNewAPIUser(_ context.Context, arg sqlc.SetOrganizationNewAPIUserParams) (sqlc.Organization, error) {
+	s.updated = arg
+	s.updateCalled = true
+	out := s.org
+	out.NewapiUserID = arg.NewapiUserID
+	out.NewapiUserCredentialsCiphertext = arg.NewapiUserCredentialsCiphertext
+	return out, nil
+}
+
+func (s *organizationStoreStub) HardDeleteOrganization(_ context.Context, _ pgtype.UUID) error {
+	s.hardDeleted = true
+	return nil
 }
 
 func (s *organizationStoreStub) GetOrganization(_ context.Context, id pgtype.UUID) (sqlc.Organization, error) {

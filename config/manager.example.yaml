@@ -130,12 +130,9 @@ openclaw:
     # （如 ollama 部署的 "qwen2.5:0.5b"）。
     default_model: "qwen2.5:0.5b"
 
-    openai_compat:
-      # 注入容器 OPENAI_API_KEY 的全局 sk- token。
-      # 来源：登录 new-api 后台 → 「令牌」页 → 「添加令牌」→ unlimited / 永不过期 → 复制完整 sk- 字符串。
-      # 留空时 fallback 到 manager 自动调 admin POST /api/token/ 拿到的 truncated 18 字符前缀，
-      # chat completions 会 401，仅适合本地无模型调用调试。
-      api_key: "sk-CHANGE_ME"
+    # 注入容器 OPENAI_API_KEY 的完整 sk- 由 manager 替每个应用通过 new-api
+    # `POST /api/token/:id/key` 自动拉取并加密落 apps.newapi_key_ciphertext，
+    # 不再需要在配置里手填全局 sk-。
 
   # OpenClaw 容器要连接的 docker network 列表；必须包含 new-api 所在 network，
   # 否则容器无法解析 "new-api" hostname → chat completions Connection error。

@@ -19,34 +19,30 @@ type APIKeyStatusStore interface {
 	SetAppNewAPIKey(ctx context.Context, arg sqlc.SetAppNewAPIKeyParams) (sqlc.App, error)
 }
 
-// APIKeyStatusToggler 抽象 new-api 调用层；status: 1=启用 / 2=禁用。
-type APIKeyStatusToggler interface {
-	SetAPIKeyStatus(ctx context.Context, id int64, status int) error
-}
-
 // NewAPIKeyStatusHandler 处理 newapi_disable_key / newapi_restore_key 两类 job。
 //
 // 行为：
 //   - 解 payload.app_id；
 //   - 取 app.newapi_key_id（解析 string→int64），无值时直接成功（防御）；
-//   - 调 newapi.SetAPIKeyStatus 翻转 token 状态；
+//   - 用 NewAPIClientFactory 构造该 app 所属组织的 user-scoped client；
+//   - 调 client.SetAPIKeyStatus 翻转 token 状态；
 //   - 把 apps.api_key_status 同步到 active / disabled，便于 UI 直接读 apps 表渲染状态徽章。
 type NewAPIKeyStatusHandler struct {
 	store    APIKeyStatusStore
-	newapi   APIKeyStatusToggler
+	factory  NewAPIClientFactory
 	jobType  string
 	newState int
 	tag      string
 }
 
 // NewDisableAPIKeyHandler 构造 newapi_disable_key 处理器（status=2）。
-func NewDisableAPIKeyHandler(store APIKeyStatusStore, newapi APIKeyStatusToggler) *NewAPIKeyStatusHandler {
-	return &NewAPIKeyStatusHandler{store: store, newapi: newapi, jobType: domain.JobTypeNewAPIDisableKey, newState: 2, tag: domain.APIKeyStatusDisabled}
+func NewDisableAPIKeyHandler(store APIKeyStatusStore, factory NewAPIClientFactory) *NewAPIKeyStatusHandler {
+	return &NewAPIKeyStatusHandler{store: store, factory: factory, jobType: domain.JobTypeNewAPIDisableKey, newState: 2, tag: domain.APIKeyStatusDisabled}
 }
 
 // NewRestoreAPIKeyHandler 构造 newapi_restore_key 处理器（status=1）。
-func NewRestoreAPIKeyHandler(store APIKeyStatusStore, newapi APIKeyStatusToggler) *NewAPIKeyStatusHandler {
-	return &NewAPIKeyStatusHandler{store: store, newapi: newapi, jobType: domain.JobTypeNewAPIRestoreKey, newState: 1, tag: domain.APIKeyStatusActive}
+func NewRestoreAPIKeyHandler(store APIKeyStatusStore, factory NewAPIClientFactory) *NewAPIKeyStatusHandler {
+	return &NewAPIKeyStatusHandler{store: store, factory: factory, jobType: domain.JobTypeNewAPIRestoreKey, newState: 1, tag: domain.APIKeyStatusActive}
 }
 
 // Handle 执行 disable/restore job。
@@ -76,7 +72,14 @@ func (h *NewAPIKeyStatusHandler) Handle(ctx context.Context, job sqlc.Job) error
 	if err != nil {
 		return fmt.Errorf("解析 newapi_key_id 失败: %w", err)
 	}
-	if err := h.newapi.SetAPIKeyStatus(ctx, keyID, h.newState); err != nil {
+	if h.factory == nil {
+		return fmt.Errorf("new-api client factory 未配置，无法切换 token 状态")
+	}
+	client, err := h.factory.UserScopedFor(ctx, app)
+	if err != nil {
+		return fmt.Errorf("构造 user-scoped client 失败: %w", err)
+	}
+	if err := client.SetAPIKeyStatus(ctx, keyID, h.newState); err != nil {
 		return fmt.Errorf("调 new-api 切换 token 状态失败: %w", err)
 	}
 	if _, err := h.store.SetAppNewAPIKey(ctx, sqlc.SetAppNewAPIKeyParams{

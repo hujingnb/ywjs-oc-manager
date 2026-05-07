@@ -97,7 +97,6 @@ func runManager(ctx context.Context, cfg config.Config, logOut io.Writer) error 
 	}
 
 	authService := service.NewAuthService(dbStore.Queries, tokenManager)
-	organizationService := service.NewOrganizationService(dbStore.Queries)
 	memberService := service.NewMemberService(dbStore.Queries, hashPasswordWithDefault)
 	// nodeSelector 复用 sqlc 生成的 ListActiveNodesWithAppCounts，给 OnboardingService 自动选节点用。
 	nodeSelector := service.NewSQLNodeSelector(dbStore.Queries)
@@ -123,11 +122,10 @@ func runManager(ctx context.Context, cfg config.Config, logOut io.Writer) error 
 	appService := service.NewAppService(dbStore.Queries)
 	runtimeOpService := service.NewRuntimeOperationService(dbStore.Queries, redisQueue)
 	personaService := service.NewPersonaService(store.NewPersonaStore(dbStore))
-	// platformOverviewService 在 usageService 后初始化（usage 在下方有 newapi 注入再覆盖）；
-	// 这里先用 nil 占位，真实实例在 wiring 末尾装配。
-	usageService := service.NewUsageService(nil)
-	usageService.SetAppLister(appService)
-	usageService.SetOrgLister(organizationService)
+	// usage / organization service 在装配 newapi client 之后再实例化（见下方）；
+	// 这里仅声明变量，真实赋值发生在 newapi wiring 段。
+	var usageService *service.UsageService
+	var organizationService *service.OrganizationService
 	var rechargeService *service.RechargeService
 	// runtime inspector 在 runtimeAdapter 构造之后注入；这里先声明字段，后面赋值。
 
@@ -158,24 +156,30 @@ func runManager(ctx context.Context, cfg config.Config, logOut io.Writer) error 
 	}
 
 	imageDistribution := newImageDistributorWrapper(service.NewImageDistributionService(imageSync))
-	// Sprint 2 集成 smoke 发现的 Go interface nil 陷阱：var newapiClient *newapi.Client
-	// 在 cfg.NewAPI.BaseURL 为空时保持 nil，传给 handler 的 NewAPIClient interface 参数
-	// 后会变成"interface 非 nil 但底层指针 nil"，handler 里 `if h.newapi == nil` 检查
-	// 永远 false，CreateAPIKey 调用立刻 panic。
-	//
-	// 修法：用 handlers.NewAPIClient interface 类型变量保持，仅在真创建 client 时赋值，
-	// 这样 NewAPI 未配置时变量保持 typed-nil interface（即 untyped nil），handler 检查通过。
-	var newapiHandlerClient handlers.NewAPIClient
+	// new-api wiring：
+	//   - newapiClient 是顶层 admin 视角；可调创建 user / 充值 / 查日志 / 查 quota；
+	//   - newapiFactory 在 worker handler 跑 job 时把 (app→org→credentials) 翻译成
+	//     user-scoped client，用于创 token / 拿完整 sk- / 改 token 状态；
+	//   - cfg.NewAPI.BaseURL 为空时所有以上能力降级为不可用，handler 调用直接报错。
 	var newapiClient *newapi.Client
+	var newapiFactory handlers.NewAPIClientFactory
 	if cfg.NewAPI.BaseURL != "" {
 		newapiClient = newapi.NewClient(cfg.NewAPI.BaseURL, cfg.NewAPI.AdminToken, cfg.NewAPI.AdminUserID)
-		newapiHandlerClient = newapiClient
+		newapiFactory = &orgScopedClientFactory{
+			client: newapiClient,
+			store:  dbStore.Queries,
+			cipher: cipher,
+		}
 		rechargeService = service.NewRechargeService(dbStore.Queries, newapiClient)
-		usageService = service.NewUsageService(newapiClient)
-		usageService.SetAppLister(appService)
-		usageService.SetOrgLister(organizationService)
+		usageService = service.NewUsageService(dbStore.Queries, newapiClient)
+		organizationService = service.NewOrganizationService(dbStore.Queries, newapiClient, cipher)
+	} else {
+		// 未配 newapi：仍构造一个会在调用时 fail-soft 的 service（store/client 全 nil），
+		// 保持 cmd/server 装配路径稳定，调用时返回 ErrUsageUnavailable / 创建组织报错。
+		usageService = service.NewUsageService(nil, nil)
+		organizationService = service.NewOrganizationService(dbStore.Queries, nil, nil)
 	}
-	platformOverviewService := service.NewPlatformOverviewService(dbStore.Queries, usageService)
+	platformOverviewService := service.NewPlatformOverviewService(dbStore.Queries)
 
 	registry := handlers.NewRegistry()
 	// runtimeAdapter 同时实现 AgentDirInitializer / ContainerCreator / ContainerLifecycle
@@ -186,7 +190,7 @@ func runManager(ctx context.Context, cfg config.Config, logOut io.Writer) error 
 		appDirInitializerAdapter{adapter: runtimeAdapter},
 		runtimeAdapter,
 		runtimeAdapter,
-		newapiHandlerClient,
+		newapiFactory,
 		handlers.AppInitializeConfig{
 			RuntimeImage:         cfg.OpenClaw.RuntimeImage,
 			SystemPromptTemplate: cfg.OpenClaw.SystemPromptTemplate,
@@ -194,10 +198,9 @@ func runManager(ctx context.Context, cfg config.Config, logOut io.Writer) error 
 			Cipher:               cipher,
 			ContainerNetworks:    cfg.OpenClaw.ContainerNetworks,
 			LLM: handlers.AppInitializeLLMConfig{
-				BaseURL:            cfg.OpenClaw.LLM.BaseURL,
-				DefaultProvider:    cfg.OpenClaw.LLM.DefaultProvider,
-				DefaultModel:       cfg.OpenClaw.LLM.DefaultModel,
-				OpenAICompatAPIKey: cfg.OpenClaw.LLM.OpenAICompat.APIKey,
+				BaseURL:         cfg.OpenClaw.LLM.BaseURL,
+				DefaultProvider: cfg.OpenClaw.LLM.DefaultProvider,
+				DefaultModel:    cfg.OpenClaw.LLM.DefaultModel,
 			},
 		},
 	)
@@ -216,12 +219,7 @@ func runManager(ctx context.Context, cfg config.Config, logOut io.Writer) error 
 	if err := registry.Register("app_restart_container", handlers.NewAppRestartContainerHandler(dbStore.Queries, runtimeAdapter).Handle); err != nil {
 		return fmt.Errorf("注册 app_restart_container handler 失败: %w", err)
 	}
-	// 同 newapiHandlerClient 的 typed-nil 防御：APIKeyDisabler interface 仅在真客户端可用时赋值。
-	var apiKeyDisabler handlers.APIKeyDisabler
-	if newapiClient != nil {
-		apiKeyDisabler = newapiClient
-	}
-	if err := registry.Register("app_delete", handlers.NewAppDeleteHandler(dbStore.Queries, runtimeAdapter, apiKeyDisabler, nil).Handle); err != nil {
+	if err := registry.Register("app_delete", handlers.NewAppDeleteHandler(dbStore.Queries, runtimeAdapter, newapiFactory, nil).Handle); err != nil {
 		return fmt.Errorf("注册 app_delete handler 失败: %w", err)
 	}
 	if err := registry.Register(domain.JobTypeChannelStartLogin, handlers.NewChannelStartLoginHandler(dbStore.Queries, channelRegistry).Handle); err != nil {
@@ -243,12 +241,12 @@ func runManager(ctx context.Context, cfg config.Config, logOut io.Writer) error 
 	if err := registry.Register(domain.JobTypeAppHealthCheck, healthCheckHandler.Handle); err != nil {
 		return fmt.Errorf("注册 app_health_check handler 失败: %w", err)
 	}
-	if newapiClient != nil {
-		disableHandler := handlers.NewDisableAPIKeyHandler(dbStore.Queries, newapiClient)
+	if newapiFactory != nil {
+		disableHandler := handlers.NewDisableAPIKeyHandler(dbStore.Queries, newapiFactory)
 		if err := registry.Register(domain.JobTypeNewAPIDisableKey, disableHandler.Handle); err != nil {
 			return fmt.Errorf("注册 newapi_disable_key handler 失败: %w", err)
 		}
-		restoreHandler := handlers.NewRestoreAPIKeyHandler(dbStore.Queries, newapiClient)
+		restoreHandler := handlers.NewRestoreAPIKeyHandler(dbStore.Queries, newapiFactory)
 		if err := registry.Register(domain.JobTypeNewAPIRestoreKey, restoreHandler.Handle); err != nil {
 			return fmt.Errorf("注册 newapi_restore_key handler 失败: %w", err)
 		}

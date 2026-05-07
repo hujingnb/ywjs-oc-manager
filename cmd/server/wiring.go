@@ -8,15 +8,19 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	"strconv"
 	"strings"
 	"time"
 
 	dockercli "github.com/docker/docker/client"
+	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5/pgtype"
 
 	"oc-manager/internal/auth"
+	workerhandlers "oc-manager/internal/worker/handlers"
 	"oc-manager/internal/domain"
 	"oc-manager/internal/integrations/agent"
+	"oc-manager/internal/integrations/newapi"
 	"oc-manager/internal/integrations/runtime"
 	"oc-manager/internal/runtime/imagesync"
 	"oc-manager/internal/service"
@@ -524,4 +528,60 @@ type appDirInitializerAdapter struct {
 
 func (a appDirInitializerAdapter) InitAppDirs(ctx context.Context, nodeID, appID string) error {
 	return a.adapter.InitAppDirs(ctx, nodeID, appID)
+}
+
+// orgScopedClientFactory 把 sqlc 组织行 + manager cipher + newapi.Client 组合成
+// handlers.NewAPIClientFactory：worker handler 在跑 job 时只需要把 sqlc.App 给到
+// UserScopedFor，由 factory 反查组织凭据 → 解密 → 构造 user-scoped client，避免
+// 每个 handler 都重复实现"读 organizations + 解 ciphertext"的样板。
+type orgScopedClientFactory struct {
+	client *newapi.Client
+	store  *sqlc.Queries
+	cipher *auth.Cipher
+}
+
+// UserScopedFor 解密组织凭据并返回以业务 user 身份调 token 操作的 client view。
+//
+// 调用前置条件：
+//   - app.OrgID 必须已经存在；
+//   - 该组织必须已经走过 OrganizationService.CreateOrganization 把 newapi_user_id
+//     与 newapi_user_credentials_ciphertext 写齐；缺任意一项视作"未 provision"，立即报错。
+func (f *orgScopedClientFactory) UserScopedFor(ctx context.Context, app sqlc.App) (workerhandlers.APIKeyClient, error) {
+	if f.client == nil {
+		return nil, fmt.Errorf("orgScopedClientFactory: newapi client 未配置")
+	}
+	if f.cipher == nil {
+		return nil, fmt.Errorf("orgScopedClientFactory: cipher 未配置")
+	}
+	org, err := f.store.GetOrganization(ctx, app.OrgID)
+	if err != nil {
+		return nil, fmt.Errorf("查询组织失败: %w", err)
+	}
+	creds, err := service.DecryptOrganizationCredentials(org, f.cipher)
+	if err != nil {
+		return nil, err
+	}
+	if !org.NewapiUserID.Valid || org.NewapiUserID.String == "" {
+		return nil, fmt.Errorf("组织 %s 未持有 new-api 用户 id", uuidToWiringString(org.ID))
+	}
+	userID, err := parseInt64ForWiring(org.NewapiUserID.String)
+	if err != nil {
+		return nil, fmt.Errorf("解析 newapi_user_id 失败: %w", err)
+	}
+	return f.client.AsUser(userID, creds.AccessToken), nil
+}
+
+// parseInt64ForWiring 是 cmd/server 内部的小工具：把 string 解为 int64，error 直传。
+// service 包里有同语义函数，但 wiring 层不便引入服务包内部 helper，复制一份避免循环依赖。
+func parseInt64ForWiring(s string) (int64, error) {
+	return strconv.ParseInt(s, 10, 64)
+}
+
+// uuidToWiringString 把 pgtype.UUID 渲染成可读字符串供错误信息使用。
+// service 包里有同名 helper，wiring 层独立一份避免暴露 service 内部 API。
+func uuidToWiringString(id pgtype.UUID) string {
+	if !id.Valid {
+		return ""
+	}
+	return uuid.UUID(id.Bytes).String()
 }

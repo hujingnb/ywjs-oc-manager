@@ -30,11 +30,9 @@ type ContainerLifecycle interface {
 	RemoveContainer(ctx context.Context, nodeID, containerID string) error
 }
 
-// APIKeyDisabler 抽象禁用 new-api token 的能力，用于 app_delete handler。
-// SetAPIKeyStatus 的 status: 1=启用 / 2=禁用。
-type APIKeyDisabler interface {
-	SetAPIKeyStatus(ctx context.Context, id int64, status int) error
-}
+// AppDelete 用 NewAPIClientFactory 拿 user-scoped client 调 SetAPIKeyStatus 禁用 token，
+// status=2 表示禁用。原来的 APIKeyDisabler 单方法接口已下线（admin token 拿不到别 user 的
+// token 完整 key，token 操作必须以业务 user 身份调）。
 
 // AppDeleteFileOps 抽象 app_delete 需要的 agent 文件 API 子集。
 //
@@ -214,12 +212,12 @@ func (h *AppRestartContainerHandler) Handle(ctx context.Context, job sqlc.Job) e
 type AppDeleteHandler struct {
 	store      AppRuntimeStore
 	containers ContainerLifecycle
-	newapi     APIKeyDisabler
+	factory    NewAPIClientFactory
 	fileOps    AppDeleteFileOps
 }
 
-func NewAppDeleteHandler(store AppRuntimeStore, containers ContainerLifecycle, client APIKeyDisabler, fileOps AppDeleteFileOps) *AppDeleteHandler {
-	return &AppDeleteHandler{store: store, containers: containers, newapi: client, fileOps: fileOps}
+func NewAppDeleteHandler(store AppRuntimeStore, containers ContainerLifecycle, factory NewAPIClientFactory, fileOps AppDeleteFileOps) *AppDeleteHandler {
+	return &AppDeleteHandler{store: store, containers: containers, factory: factory, fileOps: fileOps}
 }
 
 func (h *AppDeleteHandler) Handle(ctx context.Context, job sqlc.Job) error {
@@ -256,11 +254,15 @@ func (h *AppDeleteHandler) Handle(ctx context.Context, job sqlc.Job) error {
 		}
 	}
 
-	if h.newapi != nil && app.NewapiKeyID.Valid && app.NewapiKeyID.String != "" {
+	if h.factory != nil && app.NewapiKeyID.Valid && app.NewapiKeyID.String != "" {
 		keyID, parseErr := strconv.ParseInt(app.NewapiKeyID.String, 10, 64)
 		if parseErr == nil {
+			client, err := h.factory.UserScopedFor(ctx, app)
+			if err != nil {
+				return fmt.Errorf("构造 user-scoped client 失败: %w", err)
+			}
 			// status=2 表示禁用
-			if err := h.newapi.SetAPIKeyStatus(ctx, keyID, 2); err != nil {
+			if err := client.SetAPIKeyStatus(ctx, keyID, 2); err != nil {
 				return fmt.Errorf("禁用 new-api token 失败: %w", err)
 			}
 		}

@@ -45,7 +45,6 @@ type organizationRequest struct {
 	ContactName            string `json:"contact_name"`
 	ContactPhone           string `json:"contact_phone"`
 	Remark                 string `json:"remark"`
-	NewAPIUserID           string `json:"newapi_user_id"`
 	CreditWarningThreshold *int32 `json:"credit_warning_threshold"`
 }
 
@@ -154,7 +153,6 @@ func toOrganizationInput(req organizationRequest) service.OrganizationInput {
 		ContactName:            req.ContactName,
 		ContactPhone:           req.ContactPhone,
 		Remark:                 req.Remark,
-		NewAPIUserID:           req.NewAPIUserID,
 		CreditWarningThreshold: req.CreditWarningThreshold,
 	}
 }

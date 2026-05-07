@@ -5,157 +5,211 @@ import (
 	"errors"
 	"testing"
 
+	"github.com/jackc/pgx/v5"
+	"github.com/jackc/pgx/v5/pgtype"
+
 	"oc-manager/internal/auth"
 	"oc-manager/internal/domain"
 	"oc-manager/internal/integrations/newapi"
+	"oc-manager/internal/store/sqlc"
 )
 
+// TestUsageServiceForbidsCrossOrg 校验非平台管理员只能看自己 org 的用量。
 func TestUsageServiceForbidsCrossOrg(t *testing.T) {
-	svc := NewUsageService(&fakeUsageProvider{})
-	_, err := svc.GetAppUsage(context.Background(), auth.Principal{Role: domain.UserRoleOrgAdmin, OrgID: "other"}, "app-1", "owner-org", "owner-user", 1)
+	svc := NewUsageService(&fakeUsageStore{}, &fakeUsageClient{})
+	_, err := svc.GetAppUsage(context.Background(), auth.Principal{Role: domain.UserRoleOrgAdmin, OrgID: "other"}, "app-1", "owner-org", "owner-user", 1, LogsQueryOptions{})
 	if !errors.Is(err, ErrForbidden) {
 		t.Fatalf("error = %v, want ErrForbidden", err)
 	}
 }
 
-func TestUsageServiceReturnsSnapshot(t *testing.T) {
-	provider := &fakeUsageProvider{key: newapi.APIKey{ID: 42, RemainQuota: 100, Status: 1}}
-	svc := NewUsageService(provider)
-	got, err := svc.GetAppUsage(context.Background(), platformAdmin(), "app-1", "owner-org", "owner-user", 42)
-	if err != nil {
-		t.Fatalf("GetAppUsage() error = %v", err)
-	}
-	if got.RemainQuota != 100 || got.Status != 1 {
-		t.Fatalf("snapshot = %+v", got)
-	}
-}
-
-func TestUsageServiceMapsNewAPIErrors(t *testing.T) {
-	svc := NewUsageService(&fakeUsageProvider{err: newapi.ErrNotFound})
-	if _, err := svc.GetAppUsage(context.Background(), platformAdmin(), "app-1", "owner-org", "owner-user", 1); !errors.Is(err, ErrNotFound) {
-		t.Fatalf("error = %v, want ErrNotFound", err)
-	}
-
-	svc = NewUsageService(&fakeUsageProvider{err: newapi.ErrUnauthorized})
-	if _, err := svc.GetAppUsage(context.Background(), platformAdmin(), "app-1", "owner-org", "owner-user", 1); !errors.Is(err, ErrUsageUnavailable) {
-		t.Fatalf("error = %v, want ErrUsageUnavailable", err)
-	}
-}
-
-func TestUsageServiceReturnsZeroForUnboundKey(t *testing.T) {
-	svc := NewUsageService(&fakeUsageProvider{})
-	got, err := svc.GetAppUsage(context.Background(), platformAdmin(), "app-1", "owner-org", "owner-user", 0)
-	if err != nil {
-		t.Fatalf("GetAppUsage() error = %v", err)
-	}
-	if got.NewapiKeyID != 0 || got.RemainQuota != 0 {
-		t.Fatalf("snapshot = %+v", got)
-	}
-}
-
-func TestUsageServiceMissingProvider(t *testing.T) {
-	svc := NewUsageService(nil)
-	if _, err := svc.GetAppUsage(context.Background(), platformAdmin(), "app", "owner-org", "owner-user", 1); !errors.Is(err, ErrUsageUnavailable) {
-		t.Fatalf("error = %v, want ErrUsageUnavailable", err)
-	}
-}
-
-type fakeUsageProvider struct {
-	key   newapi.APIKey
-	keys  map[int64]newapi.APIKey
-	err   error
-	calls int
-}
-
-func (f *fakeUsageProvider) GetAPIKey(_ context.Context, id int64) (newapi.APIKey, error) {
-	f.calls++
-	if f.err != nil {
-		return newapi.APIKey{}, f.err
-	}
-	if f.keys != nil {
-		if k, ok := f.keys[id]; ok {
-			return k, nil
-		}
-	}
-	return f.key, nil
-}
-
-type fakeAppLister struct {
-	apps map[string][]AppResult
-}
-
-func (f *fakeAppLister) ListByOrg(_ context.Context, _ auth.Principal, orgID string, _, _ int32) ([]AppResult, error) {
-	return f.apps[orgID], nil
-}
-
-type fakeOrgLister struct {
-	orgs []OrganizationResult
-}
-
-func (f *fakeOrgLister) ListOrganizations(_ context.Context, _ auth.Principal, _, _ int32) ([]OrganizationResult, error) {
-	return f.orgs, nil
-}
-
-func TestUsageServiceCachesAPIKey(t *testing.T) {
-	provider := &fakeUsageProvider{key: newapi.APIKey{ID: 7, RemainQuota: 50, Status: 1}}
-	svc := NewUsageService(provider)
-	for i := 0; i < 3; i++ {
-		if _, err := svc.GetAppUsage(context.Background(), platformAdmin(), "app-1", "owner-org", "owner-user", 7); err != nil {
-			t.Fatalf("GetAppUsage iter %d: %v", i, err)
-		}
-	}
-	if provider.calls != 1 {
-		t.Fatalf("provider.calls = %d, want 1 (5s cache)", provider.calls)
-	}
-}
-
-func TestUsageServiceGetPlatformAggregates(t *testing.T) {
-	provider := &fakeUsageProvider{keys: map[int64]newapi.APIKey{
-		11: {ID: 11, RemainQuota: 100, Status: 1},
-		22: {ID: 22, RemainQuota: 200, Status: 1},
+// TestUsageServiceAppProxiesTokenLogs 校验 GetAppUsage 直接调 GetTokenLogs(token_id=…)
+// 并把返回 items 透传到 LogsPage.Items。
+func TestUsageServiceAppProxiesTokenLogs(t *testing.T) {
+	client := &fakeUsageClient{tokenLogs: newapi.LogsPage{
+		Items: []newapi.LogEntry{{ID: 1, ModelName: "qwen2.5", Quota: 100}},
+		Total: 1,
 	}}
-	lister := &fakeAppLister{apps: map[string][]AppResult{
-		"org-a": {{ID: "app-a", OrgID: "org-a", NewapiKeyID: 11}},
-		"org-b": {{ID: "app-b", OrgID: "org-b", NewapiKeyID: 22}},
-	}}
-	orgs := &fakeOrgLister{orgs: []OrganizationResult{{ID: "org-a"}, {ID: "org-b"}}}
-	svc := NewUsageService(provider)
-	svc.SetAppLister(lister)
-	svc.SetOrgLister(orgs)
+	svc := NewUsageService(&fakeUsageStore{}, client)
 
-	view, err := svc.GetPlatformUsage(context.Background(), platformAdmin())
+	view, err := svc.GetAppUsage(context.Background(), platformAdmin(), "app-1", "owner-org", "owner-user", 42, LogsQueryOptions{Page: 1, PageSize: 50})
 	if err != nil {
-		t.Fatalf("GetPlatformUsage: %v", err)
+		t.Fatalf("GetAppUsage: %v", err)
 	}
-	if view.Scope != "platform" || view.TotalRemainQuota != 300 || len(view.Apps) != 2 {
+	if client.lastTokenLogsQuery.TokenID != 42 || client.lastTokenLogsQuery.PageSize != 50 {
+		t.Fatalf("token logs query = %+v", client.lastTokenLogsQuery)
+	}
+	if len(view.Items) != 1 || view.Items[0].Quota != 100 {
 		t.Fatalf("view = %+v", view)
 	}
 }
 
-func TestUsageServiceGetPlatformForbiddenForNonAdmin(t *testing.T) {
-	svc := NewUsageService(&fakeUsageProvider{})
-	svc.SetAppLister(&fakeAppLister{})
-	svc.SetOrgLister(&fakeOrgLister{})
-	_, err := svc.GetPlatformUsage(context.Background(), auth.Principal{Role: domain.UserRoleOrgAdmin})
+// TestUsageServiceAppMapsErrors 校验 newapi.ErrNotFound / ErrUnauthorized 的映射。
+func TestUsageServiceAppMapsErrors(t *testing.T) {
+	svc := NewUsageService(&fakeUsageStore{}, &fakeUsageClient{tokenLogsError: newapi.ErrNotFound})
+	if _, err := svc.GetAppUsage(context.Background(), platformAdmin(), "app", "o", "u", 1, LogsQueryOptions{}); !errors.Is(err, ErrNotFound) {
+		t.Fatalf("error = %v, want ErrNotFound", err)
+	}
+
+	svc = NewUsageService(&fakeUsageStore{}, &fakeUsageClient{tokenLogsError: newapi.ErrUnauthorized})
+	if _, err := svc.GetAppUsage(context.Background(), platformAdmin(), "app", "o", "u", 1, LogsQueryOptions{}); !errors.Is(err, ErrUsageUnavailable) {
+		t.Fatalf("error = %v, want ErrUsageUnavailable", err)
+	}
+}
+
+// TestUsageServiceAppZeroKeyReturnsEmpty 校验 newapiKeyID=0（应用尚未初始化）时直接返回空 LogsPage。
+func TestUsageServiceAppZeroKeyReturnsEmpty(t *testing.T) {
+	client := &fakeUsageClient{}
+	svc := NewUsageService(&fakeUsageStore{}, client)
+	view, err := svc.GetAppUsage(context.Background(), platformAdmin(), "app", "o", "u", 0, LogsQueryOptions{})
+	if err != nil {
+		t.Fatalf("GetAppUsage: %v", err)
+	}
+	if len(view.Items) != 0 {
+		t.Fatalf("view.Items = %d, want 0", len(view.Items))
+	}
+	if client.tokenLogsCalls != 0 {
+		t.Fatalf("不应调 new-api，got calls=%d", client.tokenLogsCalls)
+	}
+}
+
+// TestUsageServiceMissingClient 校验 client=nil 时 ErrUsageUnavailable。
+func TestUsageServiceMissingClient(t *testing.T) {
+	svc := NewUsageService(&fakeUsageStore{}, nil)
+	if _, err := svc.GetAppUsage(context.Background(), platformAdmin(), "app", "o", "u", 1, LogsQueryOptions{}); !errors.Is(err, ErrUsageUnavailable) {
+		t.Fatalf("error = %v, want ErrUsageUnavailable", err)
+	}
+}
+
+// TestUsageServiceMemberUsesActiveAppByOwner 校验 member 维度通过 GetActiveAppByOwner
+// 拿到 app.newapi_key_id 再调 GetTokenLogs。
+func TestUsageServiceMemberUsesActiveAppByOwner(t *testing.T) {
+	memberID := mustUUID(t, "00000000-0000-0000-0000-000000000c01")
+	store := &fakeUsageStore{
+		activeApp: sqlc.App{
+			NewapiKeyID: pgtype.Text{String: "77", Valid: true},
+		},
+	}
+	client := &fakeUsageClient{tokenLogs: newapi.LogsPage{Items: []newapi.LogEntry{{ID: 9}}, Total: 1}}
+	svc := NewUsageService(store, client)
+	view, err := svc.GetMemberUsage(context.Background(), platformAdmin(), "00000000-0000-0000-0000-000000000b01", "00000000-0000-0000-0000-000000000c01", LogsQueryOptions{})
+	if err != nil {
+		t.Fatalf("GetMemberUsage: %v", err)
+	}
+	if !store.activeAppCalled || store.lastActiveOwner != memberID {
+		t.Fatalf("expected GetActiveAppByOwner, got=%v owner=%v", store.activeAppCalled, store.lastActiveOwner)
+	}
+	if client.lastTokenLogsQuery.TokenID != 77 || len(view.Items) != 1 {
+		t.Fatalf("view = %+v query = %+v", view, client.lastTokenLogsQuery)
+	}
+}
+
+// TestUsageServiceOrgUsesNewapiUserID 校验 org 维度查 organizations.newapi_user_id 后调
+// GetUserQuotaDates。
+func TestUsageServiceOrgUsesNewapiUserID(t *testing.T) {
+	orgUUID := mustUUID(t, "00000000-0000-0000-0000-000000000b01")
+	store := &fakeUsageStore{
+		org: sqlc.Organization{
+			ID:           orgUUID,
+			NewapiUserID: pgtype.Text{String: "55", Valid: true},
+		},
+	}
+	client := &fakeUsageClient{userQuota: []newapi.QuotaDate{{Date: "2026-05-01", Quota: 100}}}
+	svc := NewUsageService(store, client)
+	view, err := svc.GetOrgUsage(context.Background(), platformAdmin(), "00000000-0000-0000-0000-000000000b01", 0, 0)
+	if err != nil {
+		t.Fatalf("GetOrgUsage: %v", err)
+	}
+	if client.lastUserQuotaUserID != 55 {
+		t.Fatalf("client called with userID=%d, want 55", client.lastUserQuotaUserID)
+	}
+	if len(view.Items) != 1 || view.Items[0].Quota != 100 {
+		t.Fatalf("view = %+v", view)
+	}
+}
+
+// TestUsageServicePlatformOnlyAdmin 校验非 platform_admin 拿不到 platform 维度。
+func TestUsageServicePlatformOnlyAdmin(t *testing.T) {
+	svc := NewUsageService(&fakeUsageStore{}, &fakeUsageClient{})
+	_, err := svc.GetPlatformUsage(context.Background(), auth.Principal{Role: domain.UserRoleOrgAdmin}, 0, 0)
 	if !errors.Is(err, ErrForbidden) {
 		t.Fatalf("err = %v, want ErrForbidden", err)
 	}
 }
 
-func TestUsageServiceGetOrgUsesNewapiKeyID(t *testing.T) {
-	provider := &fakeUsageProvider{keys: map[int64]newapi.APIKey{
-		33: {ID: 33, RemainQuota: 80, Status: 1},
-	}}
-	lister := &fakeAppLister{apps: map[string][]AppResult{
-		"org-x": {{ID: "app-x", OrgID: "org-x", NewapiKeyID: 33}},
-	}}
-	svc := NewUsageService(provider)
-	svc.SetAppLister(lister)
-	view, err := svc.GetOrgUsage(context.Background(), platformAdmin(), "org-x")
+// TestUsageServicePlatformProxiesAllQuotaDates 校验 platform 维度直接调 GetAllQuotaDates。
+func TestUsageServicePlatformProxiesAllQuotaDates(t *testing.T) {
+	client := &fakeUsageClient{allQuota: []newapi.QuotaDate{{Date: "2026-05-01", Quota: 100}}}
+	svc := NewUsageService(&fakeUsageStore{}, client)
+	view, err := svc.GetPlatformUsage(context.Background(), platformAdmin(), 0, 0)
 	if err != nil {
-		t.Fatalf("GetOrgUsage: %v", err)
+		t.Fatalf("GetPlatformUsage: %v", err)
 	}
-	if view.TotalRemainQuota != 80 || len(view.Apps) != 1 || view.Apps[0].RemainQuota != 80 {
-		t.Fatalf("view = %+v", view)
+	if !client.allQuotaCalled || view.Scope != "platform" || len(view.Items) != 1 {
+		t.Fatalf("view = %+v called=%v", view, client.allQuotaCalled)
 	}
+}
+
+// fakeUsageClient 实现 UsageNewAPIClient，供 service 单测注入。
+type fakeUsageClient struct {
+	tokenLogs           newapi.LogsPage
+	tokenLogsError      error
+	tokenLogsCalls      int
+	lastTokenLogsQuery  newapi.LogsQuery
+	userQuota           []newapi.QuotaDate
+	userQuotaError      error
+	lastUserQuotaUserID int64
+	allQuota            []newapi.QuotaDate
+	allQuotaError       error
+	allQuotaCalled      bool
+}
+
+func (c *fakeUsageClient) GetTokenLogs(_ context.Context, q newapi.LogsQuery) (newapi.LogsPage, error) {
+	c.tokenLogsCalls++
+	c.lastTokenLogsQuery = q
+	if c.tokenLogsError != nil {
+		return newapi.LogsPage{}, c.tokenLogsError
+	}
+	return c.tokenLogs, nil
+}
+
+func (c *fakeUsageClient) GetUserQuotaDates(_ context.Context, userID, _, _ int64) ([]newapi.QuotaDate, error) {
+	c.lastUserQuotaUserID = userID
+	if c.userQuotaError != nil {
+		return nil, c.userQuotaError
+	}
+	return c.userQuota, nil
+}
+
+func (c *fakeUsageClient) GetAllQuotaDates(_ context.Context, _, _ int64) ([]newapi.QuotaDate, error) {
+	c.allQuotaCalled = true
+	if c.allQuotaError != nil {
+		return nil, c.allQuotaError
+	}
+	return c.allQuota, nil
+}
+
+// fakeUsageStore 实现 UsageStore；activeApp / org 用作 lookup 返回值。
+type fakeUsageStore struct {
+	activeApp       sqlc.App
+	activeAppCalled bool
+	lastActiveOwner pgtype.UUID
+	org             sqlc.Organization
+}
+
+func (s *fakeUsageStore) GetApp(_ context.Context, _ pgtype.UUID) (sqlc.App, error) {
+	return sqlc.App{}, pgx.ErrNoRows
+}
+
+func (s *fakeUsageStore) GetActiveAppByOwner(_ context.Context, ownerID pgtype.UUID) (sqlc.App, error) {
+	s.activeAppCalled = true
+	s.lastActiveOwner = ownerID
+	return s.activeApp, nil
+}
+
+func (s *fakeUsageStore) GetOrganization(_ context.Context, id pgtype.UUID) (sqlc.Organization, error) {
+	if s.org.ID.Valid && s.org.ID == id {
+		return s.org, nil
+	}
+	return sqlc.Organization{}, pgx.ErrNoRows
 }

@@ -13,16 +13,20 @@ import (
 )
 
 // UsageHandler 处理用量查询。
+//
+// 路由 / 响应字段已切换为「直接代理 new-api」语义：
+//   - app / member 维度：返回 LogsPage（new-api `GET /api/log/?token_id=` 的薄包装）；
+//   - organization / platform 维度：返回 QuotaSeries（new-api `GET /api/data/...` 的薄包装）。
 type UsageHandler struct {
 	service usageService
 	tokens  *auth.TokenManager
 }
 
 type usageService interface {
-	GetAppUsage(ctx context.Context, principal auth.Principal, appID, ownerOrgID, ownerUserID string, newapiKeyID int64) (service.AppUsageSnapshot, error)
-	GetMemberUsage(ctx context.Context, principal auth.Principal, orgID, memberID string) (service.AggregatedUsage, error)
-	GetOrgUsage(ctx context.Context, principal auth.Principal, orgID string) (service.AggregatedUsage, error)
-	GetPlatformUsage(ctx context.Context, principal auth.Principal) (service.AggregatedUsage, error)
+	GetAppUsage(ctx context.Context, principal auth.Principal, appID, ownerOrgID, ownerUserID string, newapiKeyID int64, opts service.LogsQueryOptions) (service.LogsPage, error)
+	GetMemberUsage(ctx context.Context, principal auth.Principal, orgID, memberID string, opts service.LogsQueryOptions) (service.LogsPage, error)
+	GetOrgUsage(ctx context.Context, principal auth.Principal, orgID string, since, until int64) (service.QuotaSeries, error)
+	GetPlatformUsage(ctx context.Context, principal auth.Principal, since, until int64) (service.QuotaSeries, error)
 }
 
 // NewUsageHandler 创建 usage handler。
@@ -40,7 +44,7 @@ func RegisterUsageRoutes(router gin.IRouter, handler *UsageHandler) {
 	router.GET("/api/v1/usage/platform", handler.GetPlatform)
 }
 
-// GetMember 返回单个成员名下应用的用量聚合。
+// GetMember 返回单个成员名下应用的调用日志。
 func (h *UsageHandler) GetMember(c *gin.Context) {
 	principal, ok := h.principal(c)
 	if !ok {
@@ -51,7 +55,7 @@ func (h *UsageHandler) GetMember(c *gin.Context) {
 		c.JSON(http.StatusBadRequest, gin.H{"error": "缺少 org_id"})
 		return
 	}
-	view, err := h.service.GetMemberUsage(c.Request.Context(), principal, orgID, c.Param("userId"))
+	view, err := h.service.GetMemberUsage(c.Request.Context(), principal, orgID, c.Param("userId"), parseLogsQueryOptions(c))
 	if err != nil {
 		writeUsageError(c, err)
 		return
@@ -59,13 +63,14 @@ func (h *UsageHandler) GetMember(c *gin.Context) {
 	c.JSON(http.StatusOK, gin.H{"usage": view})
 }
 
-// GetOrg 返回组织维度的用量聚合。
+// GetOrg 返回组织维度的按日 quota。
 func (h *UsageHandler) GetOrg(c *gin.Context) {
 	principal, ok := h.principal(c)
 	if !ok {
 		return
 	}
-	view, err := h.service.GetOrgUsage(c.Request.Context(), principal, c.Param("orgId"))
+	since, until := parseTimeWindow(c)
+	view, err := h.service.GetOrgUsage(c.Request.Context(), principal, c.Param("orgId"), since, until)
 	if err != nil {
 		writeUsageError(c, err)
 		return
@@ -73,14 +78,14 @@ func (h *UsageHandler) GetOrg(c *gin.Context) {
 	c.JSON(http.StatusOK, gin.H{"usage": view})
 }
 
-// GetPlatform 返回平台维度的用量聚合（跨所有组织所有应用）。
-// 仅平台管理员可调，service 层会做二次拦截。
+// GetPlatform 返回平台维度的按日 quota（跨所有组织）。仅平台管理员可调。
 func (h *UsageHandler) GetPlatform(c *gin.Context) {
 	principal, ok := h.principal(c)
 	if !ok {
 		return
 	}
-	view, err := h.service.GetPlatformUsage(c.Request.Context(), principal)
+	since, until := parseTimeWindow(c)
+	view, err := h.service.GetPlatformUsage(c.Request.Context(), principal, since, until)
 	if err != nil {
 		writeUsageError(c, err)
 		return
@@ -102,16 +107,10 @@ func (h *UsageHandler) principal(c *gin.Context) (auth.Principal, bool) {
 	return principal, true
 }
 
-// GetApp 拉取应用维度的 token 用量。
+// GetApp 拉取应用维度的 token 调用日志。
 func (h *UsageHandler) GetApp(c *gin.Context) {
-	token, ok := bearerToken(c.GetHeader("Authorization"))
+	principal, ok := h.principal(c)
 	if !ok {
-		c.JSON(http.StatusUnauthorized, gin.H{"error": "缺少访问令牌"})
-		return
-	}
-	principal, err := h.tokens.VerifyAccessToken(token)
-	if err != nil {
-		c.JSON(http.StatusUnauthorized, gin.H{"error": "访问令牌无效"})
 		return
 	}
 	orgID := c.Query("owner_org_id")
@@ -121,12 +120,33 @@ func (h *UsageHandler) GetApp(c *gin.Context) {
 		return
 	}
 	keyID, _ := strconv.ParseInt(c.Query("newapi_key_id"), 10, 64)
-	snapshot, err := h.service.GetAppUsage(c.Request.Context(), principal, c.Param("appId"), orgID, owner, keyID)
+	view, err := h.service.GetAppUsage(c.Request.Context(), principal, c.Param("appId"), orgID, owner, keyID, parseLogsQueryOptions(c))
 	if err != nil {
 		writeUsageError(c, err)
 		return
 	}
-	c.JSON(http.StatusOK, gin.H{"usage": snapshot})
+	c.JSON(http.StatusOK, gin.H{"usage": view})
+}
+
+// parseLogsQueryOptions 解析常用 logs 端点的 query string。
+func parseLogsQueryOptions(c *gin.Context) service.LogsQueryOptions {
+	since, until := parseTimeWindow(c)
+	page, _ := strconv.Atoi(c.Query("page"))
+	pageSize, _ := strconv.Atoi(c.Query("page_size"))
+	return service.LogsQueryOptions{
+		Since:     since,
+		Until:     until,
+		Page:      page,
+		PageSize:  pageSize,
+		ModelName: c.Query("model_name"),
+	}
+}
+
+// parseTimeWindow 解析 since / until 两个 unix 秒 query 参数；缺失返回 0（service 层不限制）。
+func parseTimeWindow(c *gin.Context) (int64, int64) {
+	since, _ := strconv.ParseInt(c.Query("since"), 10, 64)
+	until, _ := strconv.ParseInt(c.Query("until"), 10, 64)
+	return since, until
 }
 
 func writeUsageError(c *gin.Context, err error) {

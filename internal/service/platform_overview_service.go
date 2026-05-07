@@ -19,19 +19,21 @@ type PlatformOverviewStore interface {
 // PlatformOverviewService 提供平台总览页所需的聚合数据。
 //
 // 仅 platform_admin 可调；service 层做角色校验，handler 也做一次。
-// 余额聚合通过注入 UsageService.GetPlatformUsage 实现，避免重复实现 token 遍历。
+// 用量数据由前端单独调 GET /api/v1/usage/platform 获取（new-api 直接返回按日 quota），
+// platform overview 不再二次代理"全平台余额合计"。
 type PlatformOverviewService struct {
 	store PlatformOverviewStore
-	usage *UsageService
 }
 
 // NewPlatformOverviewService 创建服务。
-// usage 可为 nil（未配置 new-api 时降级），返回的 TotalRemainQuota 为 0。
-func NewPlatformOverviewService(store PlatformOverviewStore, usage *UsageService) *PlatformOverviewService {
-	return &PlatformOverviewService{store: store, usage: usage}
+func NewPlatformOverviewService(store PlatformOverviewStore) *PlatformOverviewService {
+	return &PlatformOverviewService{store: store}
 }
 
 // PlatformOverview 是 GET /platform/overview 的响应视图。
+//
+// 用量字段（TotalRemainQuota / UsageAvailable）已下线：前端用单独的 usage 接口拿日级 quota 数据，
+// 总览卡只展示组织 / 成员 / 应用计数。保留 JSON 字段名是为了前端旧代码继续解析（值始终为 0/false）。
 type PlatformOverview struct {
 	OrganizationCount int64 `json:"organization_count"`
 	MemberCount       int64 `json:"member_count"`
@@ -42,7 +44,7 @@ type PlatformOverview struct {
 	UsageAvailable    bool  `json:"usage_available"`
 }
 
-// Get 拉取平台总览。usage 不可用时 UsageAvailable=false，前端展示提示。
+// Get 拉取平台总览。
 func (s *PlatformOverviewService) Get(ctx context.Context, principal auth.Principal) (PlatformOverview, error) {
 	if principal.Role != domain.UserRolePlatformAdmin {
 		return PlatformOverview{}, ErrForbidden
@@ -69,13 +71,6 @@ func (s *PlatformOverviewService) Get(ctx context.Context, principal auth.Princi
 			out.RunningAppCount = r.Count
 		case domain.AppStatusError:
 			out.ErrorAppCount = r.Count
-		}
-	}
-	if s.usage != nil {
-		view, err := s.usage.GetPlatformUsage(ctx, principal)
-		if err == nil {
-			out.TotalRemainQuota = view.TotalRemainQuota
-			out.UsageAvailable = true
 		}
 	}
 	return out, nil

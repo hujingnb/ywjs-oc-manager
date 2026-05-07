@@ -121,6 +121,8 @@ type Organization struct {
 	CreatedAt              pgtype.Timestamptz `db:"created_at" json:"created_at"`
 	UpdatedAt              pgtype.Timestamptz `db:"updated_at" json:"updated_at"`
 	DeletedAt              pgtype.Timestamptz `db:"deleted_at" json:"deleted_at"`
+	// new-api 业务用户凭据密文，明文为 JSON {username, password, access_token}，使用 manager 的 security.master_key AES-256-GCM 加密。
+	NewapiUserCredentialsCiphertext pgtype.Text `db:"newapi_user_credentials_ciphertext" json:"newapi_user_credentials_ciphertext"`
 }
 
 // 组织级 AI 人设版本表，当前生效版本取同组织最大 version。
