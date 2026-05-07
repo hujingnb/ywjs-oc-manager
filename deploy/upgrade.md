@@ -100,7 +100,7 @@ docker run --rm \
   ./migrate down
 ```
 
-`migrate down 1` 只回退最近一次迁移；多次迁移要逐次回退并核对每个 down.sql。
+`migrate down` 只回退最近一次迁移；多次迁移要逐次执行并核对每个 down.sql。
 
 ### 数据回滚
 
