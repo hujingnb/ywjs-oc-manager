@@ -67,6 +67,32 @@ func TestLoadFile_AllowsEmptyTokenAndTrustedCIDR(t *testing.T) {
 	}
 }
 
+func TestLoadFile_RejectsUnknownFields(t *testing.T) {
+	for name, replacement := range map[string]string{
+		"token typo":        `tokne: "secret"`,
+		"trusted_cidr typo": `trusted_cidrs: "10.0.0.0/8"`,
+	} {
+		t.Run(name, func(t *testing.T) {
+			yaml := strings.Replace(validAgentYAML(), `token: "secret"`, replacement, 1)
+			path := writeTempConfig(t, yaml)
+
+			if _, err := LoadFile(path); err == nil {
+				t.Fatal("LoadFile() error = nil, want unknown field error")
+			}
+		})
+	}
+}
+
+func TestLoadFile_RejectsMalformedTrustedCIDR(t *testing.T) {
+	yaml := strings.Replace(validAgentYAML(), `trusted_cidr: "10.0.0.0/8"`, `trusted_cidr: "10.0.0.0/not-a-mask"`, 1)
+	path := writeTempConfig(t, yaml)
+
+	_, err := LoadFile(path)
+	if err == nil || !strings.Contains(err.Error(), "agent.trusted_cidr") {
+		t.Fatalf("LoadFile() error = %v, want agent.trusted_cidr", err)
+	}
+}
+
 func TestLoadFile_RejectsMissingRequiredFields(t *testing.T) {
 	for name, tc := range map[string]struct {
 		line  string

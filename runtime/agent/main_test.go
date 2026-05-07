@@ -95,10 +95,60 @@ func TestNewHandlerUsesConfiguredToken(t *testing.T) {
 	req := httptest.NewRequest(http.MethodGet, "/v1/images/inspect?image=openclaw-runtime:dev", nil)
 	rec := httptest.NewRecorder()
 
-	newHandler("/tmp/agent", "secret").ServeHTTP(rec, req)
+	newHandler("/tmp/agent", "secret", "/var/run/docker.sock").ServeHTTP(rec, req)
 
 	if rec.Code != http.StatusUnauthorized {
 		t.Fatalf("expected status 401, got %d", rec.Code)
+	}
+}
+
+func TestNewHandlerUsesConfiguredDockerSocketForImages(t *testing.T) {
+	var inspected bool
+	var loadedBytes string
+	socket := startUnixDockerStub(t, func(w http.ResponseWriter, r *http.Request) {
+		switch r.URL.Path {
+		case "/images/openclaw-runtime:dev/json":
+			inspected = true
+			writeJSON(w, map[string]any{
+				"Id":       "sha256:configured",
+				"RepoTags": []string{"openclaw-runtime:dev"},
+			})
+		case "/images/load":
+			body, err := io.ReadAll(r.Body)
+			if err != nil {
+				t.Errorf("read load body: %v", err)
+				w.WriteHeader(http.StatusInternalServerError)
+				return
+			}
+			loadedBytes = string(body)
+			w.WriteHeader(http.StatusOK)
+		default:
+			t.Errorf("unexpected docker path: %s", r.URL.Path)
+			w.WriteHeader(http.StatusNotFound)
+		}
+	})
+	handler := newHandler("/tmp/agent", "secret", socket)
+
+	inspectReq := httptest.NewRequest(http.MethodGet, "/v1/images/inspect?image=openclaw-runtime:dev", nil)
+	inspectReq.Header.Set("Authorization", "Bearer secret")
+	inspectRec := httptest.NewRecorder()
+	handler.ServeHTTP(inspectRec, inspectReq)
+	if inspectRec.Code != http.StatusOK {
+		t.Fatalf("inspect status = %d, body = %s", inspectRec.Code, inspectRec.Body.String())
+	}
+	if !inspected {
+		t.Fatal("configured docker socket did not receive inspect request")
+	}
+
+	loadReq := httptest.NewRequest(http.MethodPost, "/v1/images/load?image=openclaw-runtime:dev", bytes.NewBufferString("tar"))
+	loadReq.Header.Set("Authorization", "Bearer secret")
+	loadRec := httptest.NewRecorder()
+	handler.ServeHTTP(loadRec, loadReq)
+	if loadRec.Code != http.StatusOK {
+		t.Fatalf("load status = %d, body = %s", loadRec.Code, loadRec.Body.String())
+	}
+	if loadedBytes != "tar" {
+		t.Fatalf("load body = %q, want tar", loadedBytes)
 	}
 }
 

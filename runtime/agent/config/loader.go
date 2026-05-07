@@ -1,7 +1,9 @@
 package config
 
 import (
+	"bytes"
 	"fmt"
+	"net"
 	"os"
 	"strings"
 
@@ -17,7 +19,9 @@ func LoadFile(path string) (Config, error) {
 	}
 
 	var cfg Config
-	if err := yaml.Unmarshal(content, &cfg); err != nil {
+	decoder := yaml.NewDecoder(bytes.NewReader(content))
+	decoder.KnownFields(true)
+	if err := decoder.Decode(&cfg); err != nil {
 		return Config{}, fmt.Errorf("解析 agent 配置文件失败: %w", err)
 	}
 	if err := cfg.Validate(); err != nil {
@@ -47,6 +51,11 @@ func (c Config) Validate() error {
 	}
 	if len(missing) > 0 {
 		return fmt.Errorf("缺少 agent 必需配置: %s", strings.Join(missing, ", "))
+	}
+	if trustedCIDR := strings.TrimSpace(c.Agent.TrustedCIDR); trustedCIDR != "" {
+		if _, _, err := net.ParseCIDR(trustedCIDR); err != nil {
+			return fmt.Errorf("agent.trusted_cidr 格式无效: %w", err)
+		}
 	}
 	return nil
 }

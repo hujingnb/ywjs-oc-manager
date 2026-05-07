@@ -95,7 +95,7 @@ func runAgent(ctx context.Context, opts agentOptions, stdout io.Writer) error {
 		return fmt.Errorf("输出 CA PEM 失败: %w", err)
 	}
 
-	dataHandler := newHandler(opts.dataRoot, opts.agentToken)
+	dataHandler := newHandler(opts.dataRoot, opts.agentToken, opts.dockerSocket)
 	fileServer := &http.Server{
 		Addr:              opts.fileAddr,
 		Handler:           dataHandler,
@@ -187,8 +187,8 @@ func newDockerEntryHandler(opts agentOptions, fallback http.Handler) http.Handle
 	})
 }
 
-func newHandler(dataRoot, agentToken string) http.Handler {
-	return newHandlerWithDocker(dataRoot, newDockerSocketClient("/var/run/docker.sock"), agentToken)
+func newHandler(dataRoot, agentToken, dockerSocket string) http.Handler {
+	return newHandlerWithDocker(dataRoot, newDockerSocketClient(dockerSocket), agentToken)
 }
 
 func newHandlerWithDocker(dataRoot string, docker DockerClient, agentToken string) http.Handler {
