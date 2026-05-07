@@ -7,7 +7,7 @@ import (
 	"time"
 )
 
-// 真实 stdout 样本（Sprint 0 POC 实测，docs/superpowers/poc/.../06-qrcode-format.md）。
+// 真实 stdout 样本（Sprint 0 POC 实测）。
 const realQRURLLine = "https://liteapp.weixin.qq.com/q/7GiQu1?qrcode=85e18acc56ebd5937ad4caa5fe1b01a1&bot_type=3"
 
 func TestParseChannelLoginEventQRCodeFromRealUpstream(t *testing.T) {

@@ -1,9 +1,6 @@
-# OpenClaw 集成契约（git 内副本）
+# OpenClaw 集成契约
 
-完整契约（含 POC 原始日志样本与决策依据）：
-`docs/superpowers/specs/2026-05-02-openclaw-integration-contract.md`（gitignored）。
-
-本副本同步关键代码相关约定，便于离线审阅。
+本文件汇总 manager 与 OpenClaw 上游集成的关键约定，便于离线审阅。
 
 ## 上游版本
 

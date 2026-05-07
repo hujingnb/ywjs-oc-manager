@@ -9,7 +9,6 @@
 # 输出：
 #   - 终端：每个 API 一行 OK/FAIL（不打印 token / 不打印响应体）
 #   - 文件：/tmp/newapi-probe-*.json，每个 API 的完整响应体（含 HTTP code 行）
-#   - 用户决策：根据失败数量在 docs/superpowers/poc/2026-05-04-newapi-probe.md 决定降级
 #
 # 退出码：失败的 API 个数（0 = 全部通过）
 

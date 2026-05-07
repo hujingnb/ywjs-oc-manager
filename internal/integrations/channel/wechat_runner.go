@@ -55,7 +55,7 @@ func NewDockerCommandRunner(executor ContainerExecutor, lookup AppContainerLooku
 // 命令并把 stdout 按行回 channel。返回的 channel 在命令结束时由 runner 自动关闭。
 //
 // Sprint 0 POC 验证：上游 OpenClaw `channels login` 不支持 `--json` 标志，
-// stdout 输出为中文提示 + ASCII QR + 回退 URL（详见 docs/superpowers/poc/.../06-qrcode-format.md）。
+// stdout 输出为中文提示 + ASCII QR + 回退 URL。
 // parser 负责从文本流抓回退 URL 作为 QRCode payload，前端用 URL 重生 QR 图。
 func (r *DockerCommandRunner) StreamWeChatLogin(ctx context.Context, input AuthInput) (<-chan string, error) {
 	if r.executor == nil {

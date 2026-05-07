@@ -8,7 +8,6 @@ import (
 
 func TestWeChatAdapterBeginAuthReturnsQRCodeChallenge(t *testing.T) {
 	// Sprint 0 POC 实测样本：plugin loading 噪声 + 中文提示行 + ASCII QR + URL + 等待提示。
-	// 上游真实 stdout 形态见 docs/superpowers/poc/.../06-qrcode-format.md。
 	runner := &fakeRunner{lines: []string{
 		"[plugins] loading anthropic from /root/.openclaw/...",
 		"[plugins] loaded 118 plugin(s) (70 attempted) in 11035.8ms",
