@@ -933,11 +933,31 @@ truncate 列表加 `refresh_tokens` 解外键依赖、`organizations` 改 `DELET
 - ✅ T1 心跳机制让 agent-2 8 秒内就 active，无需 ops 干预。
 - ✅ 跨节点真容器 + 微信扫码绑定全链路通，证明 `runtime_node_id` 服务端选择没破坏现有 onboard → init → channel 流程。
 
-**未完成项 / deployment 配置问题（v1.0.1 范围外）**：
+**LLM 链路修复 + hello.txt 全链路实测（v1.0.1 范围外补做）**：
 
-收尾时让用户发「请生成 hello.txt 写上 v1.0.1 ok」消息，OpenClaw 容器未生成文件。诊断：`config/manager.yaml` 中 `openclaw.llm` 段所有字段（`base_url` / `default_provider` / `default_model` / `openai_compat.api_key`）当前都是空字符串，OpenClaw 容器看到的 `OPENAI_BASE_URL` 为空、`agent model: openai/gpt-5.5`（OpenClaw 默认值），不指向本地 ollama。这是 v1.0 GA 之前就存在的 deployment hygiene 问题——v1.0 GA Chunk-1 期间 commit `83028fc` 写过 LLM 全套 yaml 配置，但 manager.yaml 当前部署副本没有这些值。
+收尾时让用户发「请生成 hello.txt」消息触发 LLM 推理，暴露 v1.0 GA 之前部署的 LLM 配置缺失。本次会话期间一并修通。
 
-修复路径（不在 v1.0.1 范围）：填好 `manager.yaml` 的 `openclaw.llm.{base_url, default_provider, default_model, openai_compat.api_key}` 后 force-recreate manager-api，重新创建容器即可。本次不动，留 ops 在合适窗口补做并验证 hello.txt 生成 + manager workspace API 下载链路。
+诊断与修复连环踩三个坑：
+
+1. **LLM 配置缺失（根因）**：`config/manager.yaml.openclaw.llm` 4 个字段（`base_url` / `default_provider` / `default_model` / `openai_compat.api_key`）全为空字符串 → 容器 `OPENAI_BASE_URL=""`、`agent model: openai/gpt-5.5`（OpenClaw 默认值）、`OPENAI_API_KEY` 是 new-api admin GET 返回的 18 字符截断假值。修复：从 new-api UI 创建 unlimited token `v101-cleanup` 拿到完整 sk- 值（new-api admin POST 不返回完整 key 已知降级），写到 yaml 4 字段。
+2. **重建容器撞 EBUSY**：force-recreate manager-api 触发容器内 `apt-get install docker.io`，国内访问 deb.debian.org 极慢（36 MB 下不动），换阿里云镜像（`mirrors.aliyun.com`）才解锁。新容器创建后 OpenClaw 推理时报 `EBUSY: rename .tmp -> models.json` —— `models.json` 是 docker **文件级** bind mount，OpenClaw 想 atomically rewrite 不允许。修复：把 model providers 段**内联**到 `openclaw.json`（GA verification 提过的 "mode=replace" 路径），docker rm 重建容器**去掉 models.json mount** 才彻底绕开。
+3. **重建容器丢 weixin token state**：weixin plugin token 存容器 ephemeral 路径 `/root/.openclaw/openclaw-weixin/accounts/`（不在 `/state` mount）。修复：docker rm 前 `docker cp` 备份 `openclaw-weixin/`、重建后 cp 回去，plugin 自动 `[weixin] resuming from previous sync buf (104 bytes)` 不再扫码。
+4. **附带踩坑**：worker `app_health_check` 按 `restart_policy.mode=on_failure` 循环重启刚启动的 OpenClaw 进程，临时把 policy 改 `mode=none` 才稳定。
+
+#### hello.txt 全链路实测（00:05:06 完成）
+
+| 步骤 | 实测 |
+|---|---|
+| 微信发「写入文件 /workspace/hello.txt，内容为 v1.0.1 ok」 | weixin plugin recv message ✅ |
+| embedded agent → openai SDK → `http://new-api:3000/v1` | trace `[trace:embedded-run] phase=stream-ready totalMs=21958` ✅ |
+| new-api 路由到 ollama qwen2.5:0.5b | `agent model: openai/qwen2.5:0.5b` ✅ |
+| tool call: write 写入容器内 `/workspace/hello.txt` | bind mount 落到 `.local/data/agent-2/apps/.../workspace/hello.txt` ✅ |
+| `GET /apps/{id}/workspace?path=/` 列目录 | 返回 `[{name:"hello.txt", size:9, is_dir:false}]` ✅ |
+| `GET /apps/{id}/workspace/file?path=hello.txt` 下载 | 内容 `v1.0.1 ok` ✅ |
+
+> 测试期间 OpenClaw 第 1 条消息触发的推理把「请生成 hello.txt」误解成 `video_generate` tool（v1.0 GA 已知降级 #3：qwen2.5:0.5b 0.5B 模型理解中文偶尔选错 tool）。换成「写入文件 /workspace/hello.txt」更明确的措辞后正确选 write tool。链路本身完全通畅。
+
+**v1.0.1 退出标准 5/5 全过 ✅**。本次会话同时把 v1.0 GA 之前的 LLM deployment 配置一并补完。
 
 #### Part 4 — chrome-devtools MCP 路由 sanity
 
@@ -1046,5 +1066,5 @@ curl -fsS -H "Authorization: Bearer $ORG_ADMIN_TOKEN" \
 | 全自动化套件绿 | ✅ |
 | chrome-devtools 路由全部无关键 console error | ✅ Part 4 已实测 |
 | 心跳自愈完成 unreachable→active 翻转 | ✅ Part 2 已实测（21 秒自愈）|
-| 第 3 步 NO_NODE_AVAILABLE 503 命中 + 第 4 步落 node-b + 扫码 + workspace/hello.txt 全链路通 | ✅ 503 命中 + 落 node-b + 扫码 bound 验证；workspace/hello.txt 受 v1.0 GA 之前的 deployment 配置缺失阻塞（manager.yaml.openclaw.llm 段未填），不在 v1.0.1 范围 |
+| 第 3 步 NO_NODE_AVAILABLE 503 命中 + 第 4 步落 node-b + 扫码 + workspace/hello.txt 全链路通 | ✅ 503 命中 + 落 node-b + 扫码 bound + LLM 推理 → write tool → workspace/hello.txt 写入 → manager API 列目录 + 下载 `v1.0.1 ok` 全链路完整通过（同步补完 v1.0 GA 之前的 LLM deployment 配置）|
 | 期间未发现 P0/P1 backend bug | ✅ Part 1-2/4 实测过程中无 P0/P1，仅发现并修复 1 个 P1 spec 错误（heartbeat URL 与 manager 路由不一致，commit `e16f5d1`） |
