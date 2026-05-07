@@ -42,6 +42,8 @@ type RuntimeNodeStore interface {
 	RegisterRuntimeNode(ctx context.Context, arg sqlc.RegisterRuntimeNodeParams) (sqlc.RuntimeNode, error)
 	UpdateRuntimeNodeHeartbeat(ctx context.Context, arg sqlc.UpdateRuntimeNodeHeartbeatParams) (sqlc.RuntimeNode, error)
 	SetRuntimeNodeStatus(ctx context.Context, arg sqlc.SetRuntimeNodeStatusParams) (sqlc.RuntimeNode, error)
+	UpdateRuntimeNodeMaxApps(ctx context.Context, arg sqlc.UpdateRuntimeNodeMaxAppsParams) (sqlc.RuntimeNode, error)
+	CreateAuditLog(ctx context.Context, arg sqlc.CreateAuditLogParams) (sqlc.AuditLog, error)
 }
 
 // TokenHasher 将 bootstrap/agent token 单向 hash 后存库。
@@ -99,6 +101,7 @@ type RuntimeNodeResult struct {
 	BootstrapToken           string `json:"bootstrap_token,omitempty"`
 	BootstrapTokenExpiresAt  string `json:"bootstrap_token_expires_at,omitempty"`
 	HasAgentToken            bool   `json:"has_agent_token"`
+	MaxApps                  *int32 `json:"max_apps,omitempty"`
 }
 
 // AgentRegisterInput 是 agent 用 bootstrap token 注册时提交的信息。
@@ -241,6 +244,45 @@ func (s *RuntimeNodeService) RotateBootstrap(ctx context.Context, principal auth
 	result.BootstrapToken = bootstrap
 	result.BootstrapTokenExpiresAt = expiresAt.UTC().Format(time.RFC3339)
 	return result, nil
+}
+
+// UpdateMaxApps 由平台管理员设置或清空节点的应用数上限。
+// maxApps == nil 表示清空（不限）；负数返错。设值与审计在 service 层完成；
+// 同一动作只写一条 audit_logs 记录，结果固定 succeeded（节点不存在视为返错而非降级）。
+func (s *RuntimeNodeService) UpdateMaxApps(ctx context.Context, principal auth.Principal, nodeID string, maxApps *int32) (RuntimeNodeResult, error) {
+	if principal.Role != domain.UserRolePlatformAdmin {
+		return RuntimeNodeResult{}, ErrForbidden
+	}
+	id, err := parseUUID(nodeID)
+	if err != nil {
+		return RuntimeNodeResult{}, ErrNotFound
+	}
+	param := sqlc.UpdateRuntimeNodeMaxAppsParams{ID: id}
+	if maxApps != nil {
+		if *maxApps < 0 {
+			return RuntimeNodeResult{}, fmt.Errorf("max_apps 不能为负")
+		}
+		param.MaxApps = pgtype.Int4{Int32: *maxApps, Valid: true}
+	}
+	node, err := s.store.UpdateRuntimeNodeMaxApps(ctx, param)
+	if errors.Is(err, pgx.ErrNoRows) {
+		return RuntimeNodeResult{}, ErrNotFound
+	}
+	if err != nil {
+		return RuntimeNodeResult{}, fmt.Errorf("更新节点 max_apps 失败: %w", err)
+	}
+	actorUUID, _ := optionalUUID(principal.UserID)
+	if _, err := s.store.CreateAuditLog(ctx, sqlc.CreateAuditLogParams{
+		ActorID:    actorUUID,
+		ActorRole:  principal.Role,
+		TargetType: "runtime_node",
+		TargetID:   uuidToString(node.ID),
+		Action:     "update_max_apps",
+		Result:     "succeeded",
+	}); err != nil {
+		return RuntimeNodeResult{}, fmt.Errorf("写审计失败: %w", err)
+	}
+	return toRuntimeNodeResult(node), nil
 }
 
 // SetNodeStatus 启用或禁用节点。
@@ -411,6 +453,10 @@ func toRuntimeNodeResult(node sqlc.RuntimeNode) RuntimeNodeResult {
 	}
 	if node.BootstrapTokenExpiresAt.Valid {
 		result.BootstrapTokenExpiresAt = node.BootstrapTokenExpiresAt.Time.UTC().Format(time.RFC3339)
+	}
+	if node.MaxApps.Valid {
+		v := node.MaxApps.Int32
+		result.MaxApps = &v
 	}
 	return result
 }

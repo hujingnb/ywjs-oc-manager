@@ -191,6 +191,8 @@ type RuntimeNode struct {
 	UpdatedAt            pgtype.Timestamptz `db:"updated_at" json:"updated_at"`
 	// agent token 的 AES-256-GCM 密文，base64 编码；nullable 兼容 A 阶段已注册节点。
 	AgentTokenCiphertext pgtype.Text `db:"agent_token_ciphertext" json:"agent_token_ciphertext"`
+	// 节点最大未删除应用数；NULL 表示不限。OnboardingService 在自动选节点时按剩余容量过滤。
+	MaxApps pgtype.Int4 `db:"max_apps" json:"max_apps"`
 }
 
 // 平台管理员、组织管理员和组织成员账号。

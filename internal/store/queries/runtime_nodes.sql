@@ -67,3 +67,26 @@ UPDATE runtime_nodes
 SET status = $2, updated_at = now()
 WHERE id = $1
 RETURNING *;
+
+-- name: UpdateRuntimeNodeMaxApps :one
+UPDATE runtime_nodes
+SET max_apps = $2,
+    updated_at = now()
+WHERE id = $1
+RETURNING *;
+
+-- ListActiveNodesWithAppCounts 列出所有 active 节点并附带其当前未删除应用数量。
+-- OnboardingService 自动选节点时按剩余容量过滤；剩余容量 = max_apps - app_count，
+-- max_apps NULL 表示不限。
+-- name: ListActiveNodesWithAppCounts :many
+SELECT n.*,
+       COALESCE(c.app_count, 0)::bigint AS app_count
+FROM runtime_nodes n
+LEFT JOIN (
+    SELECT runtime_node_id, COUNT(*) AS app_count
+    FROM apps
+    WHERE deleted_at IS NULL
+    GROUP BY runtime_node_id
+) c ON c.runtime_node_id = n.id
+WHERE n.status = 'active'
+ORDER BY n.name ASC;

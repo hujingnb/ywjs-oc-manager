@@ -31,7 +31,7 @@ WHERE id = $1
 RETURNING id, name, status, agent_docker_endpoint, agent_file_endpoint, agent_tls_ca_cert,
     agent_token_hash, bootstrap_token_hash, bootstrap_token_expires_at, agent_version,
     heartbeat_interval_seconds, last_heartbeat_at, resource_snapshot_json, metadata_json,
-    node_data_root, registered_at, created_at, updated_at
+    node_data_root, registered_at, created_at, updated_at, max_apps
 `
 
 // RotateBootstrapToken 直接通过连接池执行 rotate；不在 sqlc 中生成是为了避免因单一查询触发重新生成全量代码。
@@ -60,6 +60,7 @@ func (s *runtimeNodeStore) RotateBootstrapToken(ctx context.Context, arg service
 		&node.RegisteredAt,
 		&node.CreatedAt,
 		&node.UpdatedAt,
+		&node.MaxApps,
 	)
 	return node, err
 }

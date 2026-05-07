@@ -241,6 +241,32 @@ type runtimeNodeStoreStub struct {
 	nodes          map[string]sqlc.RuntimeNode
 	lastCreate     sqlc.CreateRuntimeNodeParams
 	lastHeartbeat  sqlc.UpdateRuntimeNodeHeartbeatParams
+	auditLogs      []sqlc.CreateAuditLogParams
+}
+
+func (s *runtimeNodeStoreStub) UpdateRuntimeNodeMaxApps(_ context.Context, arg sqlc.UpdateRuntimeNodeMaxAppsParams) (sqlc.RuntimeNode, error) {
+	node, ok := s.nodes[uuidToString(arg.ID)]
+	if !ok {
+		return sqlc.RuntimeNode{}, pgx.ErrNoRows
+	}
+	node.MaxApps = arg.MaxApps
+	s.nodes[uuidToString(arg.ID)] = node
+	return node, nil
+}
+
+func (s *runtimeNodeStoreStub) CreateAuditLog(_ context.Context, arg sqlc.CreateAuditLogParams) (sqlc.AuditLog, error) {
+	s.auditLogs = append(s.auditLogs, arg)
+	return sqlc.AuditLog{}, nil
+}
+
+// audited 报告 stub 是否记录了某 action 的审计日志，便于断言。
+func (s *runtimeNodeStoreStub) audited(action string) bool {
+	for _, l := range s.auditLogs {
+		if l.Action == action {
+			return true
+		}
+	}
+	return false
 }
 
 func newRuntimeNodeStoreStub(t *testing.T) *runtimeNodeStoreStub {
@@ -331,6 +357,61 @@ func (s *runtimeNodeStoreStub) SetRuntimeNodeStatus(_ context.Context, arg sqlc.
 	node.Status = arg.Status
 	s.nodes[uuidToString(arg.ID)] = node
 	return node, nil
+}
+
+func TestRuntimeNodeService_UpdateMaxApps_PlatformAdminSetsValue(t *testing.T) {
+	store := newRuntimeNodeStoreStub(t)
+	svc := newRuntimeNodeServiceForTest(t, store)
+	created, err := svc.CreateNode(context.Background(), platformAdmin(), RuntimeNodeInput{Name: "node-1"})
+	if err != nil {
+		t.Fatalf("CreateNode: %v", err)
+	}
+
+	maxApps := int32(3)
+	got, err := svc.UpdateMaxApps(context.Background(), platformAdmin(), created.ID, &maxApps)
+	if err != nil {
+		t.Fatalf("UpdateMaxApps: %v", err)
+	}
+	if got.MaxApps == nil || *got.MaxApps != 3 {
+		t.Fatalf("MaxApps = %v, want 3", got.MaxApps)
+	}
+	if !store.audited("update_max_apps") {
+		t.Errorf("缺少 update_max_apps 审计日志")
+	}
+}
+
+func TestRuntimeNodeService_UpdateMaxApps_OrgAdminForbidden(t *testing.T) {
+	store := newRuntimeNodeStoreStub(t)
+	svc := newRuntimeNodeServiceForTest(t, store)
+
+	_, err := svc.UpdateMaxApps(context.Background(),
+		auth.Principal{Role: domain.UserRoleOrgAdmin},
+		"00000000-0000-0000-0000-000000000001", nil)
+	if !errors.Is(err, ErrForbidden) {
+		t.Fatalf("err = %v, want ErrForbidden", err)
+	}
+}
+
+func TestRuntimeNodeService_UpdateMaxApps_NilClearsLimit(t *testing.T) {
+	store := newRuntimeNodeStoreStub(t)
+	svc := newRuntimeNodeServiceForTest(t, store)
+	created, err := svc.CreateNode(context.Background(), platformAdmin(), RuntimeNodeInput{Name: "node-1"})
+	if err != nil {
+		t.Fatalf("CreateNode: %v", err)
+	}
+	// 先设一个非空值
+	val := int32(2)
+	if _, err := svc.UpdateMaxApps(context.Background(), platformAdmin(), created.ID, &val); err != nil {
+		t.Fatalf("UpdateMaxApps set: %v", err)
+	}
+	// 再传 nil 清空
+	got, err := svc.UpdateMaxApps(context.Background(), platformAdmin(), created.ID, nil)
+	if err != nil {
+		t.Fatalf("UpdateMaxApps clear: %v", err)
+	}
+	if got.MaxApps != nil {
+		t.Fatalf("MaxApps should be nil after clear, got %v", *got.MaxApps)
+	}
 }
 
 func (s *runtimeNodeStoreStub) RotateBootstrapToken(_ context.Context, arg RotateBootstrapTokenParams) (sqlc.RuntimeNode, error) {

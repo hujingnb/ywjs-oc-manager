@@ -25,7 +25,7 @@ INSERT INTO runtime_nodes (
 ) VALUES (
     $1, $2, $3, $4, $5, $6, $7, $8, $9
 )
-RETURNING id, name, status, agent_docker_endpoint, agent_file_endpoint, agent_tls_ca_cert, agent_token_hash, bootstrap_token_hash, bootstrap_token_expires_at, agent_version, heartbeat_interval_seconds, last_heartbeat_at, resource_snapshot_json, metadata_json, node_data_root, registered_at, created_at, updated_at, agent_token_ciphertext
+RETURNING id, name, status, agent_docker_endpoint, agent_file_endpoint, agent_tls_ca_cert, agent_token_hash, bootstrap_token_hash, bootstrap_token_expires_at, agent_version, heartbeat_interval_seconds, last_heartbeat_at, resource_snapshot_json, metadata_json, node_data_root, registered_at, created_at, updated_at, agent_token_ciphertext, max_apps
 `
 
 type CreateRuntimeNodeParams struct {
@@ -73,12 +73,13 @@ func (q *Queries) CreateRuntimeNode(ctx context.Context, arg CreateRuntimeNodePa
 		&i.CreatedAt,
 		&i.UpdatedAt,
 		&i.AgentTokenCiphertext,
+		&i.MaxApps,
 	)
 	return i, err
 }
 
 const getRuntimeNode = `-- name: GetRuntimeNode :one
-SELECT id, name, status, agent_docker_endpoint, agent_file_endpoint, agent_tls_ca_cert, agent_token_hash, bootstrap_token_hash, bootstrap_token_expires_at, agent_version, heartbeat_interval_seconds, last_heartbeat_at, resource_snapshot_json, metadata_json, node_data_root, registered_at, created_at, updated_at, agent_token_ciphertext
+SELECT id, name, status, agent_docker_endpoint, agent_file_endpoint, agent_tls_ca_cert, agent_token_hash, bootstrap_token_hash, bootstrap_token_expires_at, agent_version, heartbeat_interval_seconds, last_heartbeat_at, resource_snapshot_json, metadata_json, node_data_root, registered_at, created_at, updated_at, agent_token_ciphertext, max_apps
 FROM runtime_nodes
 WHERE id = $1
 `
@@ -106,12 +107,13 @@ func (q *Queries) GetRuntimeNode(ctx context.Context, id pgtype.UUID) (RuntimeNo
 		&i.CreatedAt,
 		&i.UpdatedAt,
 		&i.AgentTokenCiphertext,
+		&i.MaxApps,
 	)
 	return i, err
 }
 
 const getRuntimeNodeByName = `-- name: GetRuntimeNodeByName :one
-SELECT id, name, status, agent_docker_endpoint, agent_file_endpoint, agent_tls_ca_cert, agent_token_hash, bootstrap_token_hash, bootstrap_token_expires_at, agent_version, heartbeat_interval_seconds, last_heartbeat_at, resource_snapshot_json, metadata_json, node_data_root, registered_at, created_at, updated_at, agent_token_ciphertext
+SELECT id, name, status, agent_docker_endpoint, agent_file_endpoint, agent_tls_ca_cert, agent_token_hash, bootstrap_token_hash, bootstrap_token_expires_at, agent_version, heartbeat_interval_seconds, last_heartbeat_at, resource_snapshot_json, metadata_json, node_data_root, registered_at, created_at, updated_at, agent_token_ciphertext, max_apps
 FROM runtime_nodes
 WHERE name = $1
 `
@@ -139,12 +141,96 @@ func (q *Queries) GetRuntimeNodeByName(ctx context.Context, name string) (Runtim
 		&i.CreatedAt,
 		&i.UpdatedAt,
 		&i.AgentTokenCiphertext,
+		&i.MaxApps,
 	)
 	return i, err
 }
 
+const listActiveNodesWithAppCounts = `-- name: ListActiveNodesWithAppCounts :many
+SELECT n.id, n.name, n.status, n.agent_docker_endpoint, n.agent_file_endpoint, n.agent_tls_ca_cert, n.agent_token_hash, n.bootstrap_token_hash, n.bootstrap_token_expires_at, n.agent_version, n.heartbeat_interval_seconds, n.last_heartbeat_at, n.resource_snapshot_json, n.metadata_json, n.node_data_root, n.registered_at, n.created_at, n.updated_at, n.agent_token_ciphertext, n.max_apps,
+       COALESCE(c.app_count, 0)::bigint AS app_count
+FROM runtime_nodes n
+LEFT JOIN (
+    SELECT runtime_node_id, COUNT(*) AS app_count
+    FROM apps
+    WHERE deleted_at IS NULL
+    GROUP BY runtime_node_id
+) c ON c.runtime_node_id = n.id
+WHERE n.status = 'active'
+ORDER BY n.name ASC
+`
+
+type ListActiveNodesWithAppCountsRow struct {
+	ID                       pgtype.UUID        `db:"id" json:"id"`
+	Name                     string             `db:"name" json:"name"`
+	Status                   string             `db:"status" json:"status"`
+	AgentDockerEndpoint      pgtype.Text        `db:"agent_docker_endpoint" json:"agent_docker_endpoint"`
+	AgentFileEndpoint        pgtype.Text        `db:"agent_file_endpoint" json:"agent_file_endpoint"`
+	AgentTlsCaCert           pgtype.Text        `db:"agent_tls_ca_cert" json:"agent_tls_ca_cert"`
+	AgentTokenHash           pgtype.Text        `db:"agent_token_hash" json:"agent_token_hash"`
+	BootstrapTokenHash       pgtype.Text        `db:"bootstrap_token_hash" json:"bootstrap_token_hash"`
+	BootstrapTokenExpiresAt  pgtype.Timestamptz `db:"bootstrap_token_expires_at" json:"bootstrap_token_expires_at"`
+	AgentVersion             pgtype.Text        `db:"agent_version" json:"agent_version"`
+	HeartbeatIntervalSeconds int32              `db:"heartbeat_interval_seconds" json:"heartbeat_interval_seconds"`
+	LastHeartbeatAt          pgtype.Timestamptz `db:"last_heartbeat_at" json:"last_heartbeat_at"`
+	ResourceSnapshotJson     []byte             `db:"resource_snapshot_json" json:"resource_snapshot_json"`
+	MetadataJson             []byte             `db:"metadata_json" json:"metadata_json"`
+	NodeDataRoot             pgtype.Text        `db:"node_data_root" json:"node_data_root"`
+	RegisteredAt             pgtype.Timestamptz `db:"registered_at" json:"registered_at"`
+	CreatedAt                pgtype.Timestamptz `db:"created_at" json:"created_at"`
+	UpdatedAt                pgtype.Timestamptz `db:"updated_at" json:"updated_at"`
+	AgentTokenCiphertext     pgtype.Text        `db:"agent_token_ciphertext" json:"agent_token_ciphertext"`
+	MaxApps                  pgtype.Int4        `db:"max_apps" json:"max_apps"`
+	AppCount                 int64              `db:"app_count" json:"app_count"`
+}
+
+// ListActiveNodesWithAppCounts 列出所有 active 节点并附带其当前未删除应用数量。
+// OnboardingService 自动选节点时按剩余容量过滤；剩余容量 = max_apps - app_count，
+// max_apps NULL 表示不限。
+func (q *Queries) ListActiveNodesWithAppCounts(ctx context.Context) ([]ListActiveNodesWithAppCountsRow, error) {
+	rows, err := q.db.Query(ctx, listActiveNodesWithAppCounts)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []ListActiveNodesWithAppCountsRow{}
+	for rows.Next() {
+		var i ListActiveNodesWithAppCountsRow
+		if err := rows.Scan(
+			&i.ID,
+			&i.Name,
+			&i.Status,
+			&i.AgentDockerEndpoint,
+			&i.AgentFileEndpoint,
+			&i.AgentTlsCaCert,
+			&i.AgentTokenHash,
+			&i.BootstrapTokenHash,
+			&i.BootstrapTokenExpiresAt,
+			&i.AgentVersion,
+			&i.HeartbeatIntervalSeconds,
+			&i.LastHeartbeatAt,
+			&i.ResourceSnapshotJson,
+			&i.MetadataJson,
+			&i.NodeDataRoot,
+			&i.RegisteredAt,
+			&i.CreatedAt,
+			&i.UpdatedAt,
+			&i.AgentTokenCiphertext,
+			&i.MaxApps,
+			&i.AppCount,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
 const listRuntimeNodes = `-- name: ListRuntimeNodes :many
-SELECT id, name, status, agent_docker_endpoint, agent_file_endpoint, agent_tls_ca_cert, agent_token_hash, bootstrap_token_hash, bootstrap_token_expires_at, agent_version, heartbeat_interval_seconds, last_heartbeat_at, resource_snapshot_json, metadata_json, node_data_root, registered_at, created_at, updated_at, agent_token_ciphertext
+SELECT id, name, status, agent_docker_endpoint, agent_file_endpoint, agent_tls_ca_cert, agent_token_hash, bootstrap_token_hash, bootstrap_token_expires_at, agent_version, heartbeat_interval_seconds, last_heartbeat_at, resource_snapshot_json, metadata_json, node_data_root, registered_at, created_at, updated_at, agent_token_ciphertext, max_apps
 FROM runtime_nodes
 ORDER BY created_at DESC, id DESC
 LIMIT $1 OFFSET $2
@@ -184,6 +270,7 @@ func (q *Queries) ListRuntimeNodes(ctx context.Context, arg ListRuntimeNodesPara
 			&i.CreatedAt,
 			&i.UpdatedAt,
 			&i.AgentTokenCiphertext,
+			&i.MaxApps,
 		); err != nil {
 			return nil, err
 		}
@@ -213,7 +300,7 @@ SET
     metadata_json = $9,
     updated_at = now()
 WHERE id = $1
-RETURNING id, name, status, agent_docker_endpoint, agent_file_endpoint, agent_tls_ca_cert, agent_token_hash, bootstrap_token_hash, bootstrap_token_expires_at, agent_version, heartbeat_interval_seconds, last_heartbeat_at, resource_snapshot_json, metadata_json, node_data_root, registered_at, created_at, updated_at, agent_token_ciphertext
+RETURNING id, name, status, agent_docker_endpoint, agent_file_endpoint, agent_tls_ca_cert, agent_token_hash, bootstrap_token_hash, bootstrap_token_expires_at, agent_version, heartbeat_interval_seconds, last_heartbeat_at, resource_snapshot_json, metadata_json, node_data_root, registered_at, created_at, updated_at, agent_token_ciphertext, max_apps
 `
 
 type RegisterRuntimeNodeParams struct {
@@ -261,6 +348,7 @@ func (q *Queries) RegisterRuntimeNode(ctx context.Context, arg RegisterRuntimeNo
 		&i.CreatedAt,
 		&i.UpdatedAt,
 		&i.AgentTokenCiphertext,
+		&i.MaxApps,
 	)
 	return i, err
 }
@@ -269,7 +357,7 @@ const setRuntimeNodeStatus = `-- name: SetRuntimeNodeStatus :one
 UPDATE runtime_nodes
 SET status = $2, updated_at = now()
 WHERE id = $1
-RETURNING id, name, status, agent_docker_endpoint, agent_file_endpoint, agent_tls_ca_cert, agent_token_hash, bootstrap_token_hash, bootstrap_token_expires_at, agent_version, heartbeat_interval_seconds, last_heartbeat_at, resource_snapshot_json, metadata_json, node_data_root, registered_at, created_at, updated_at, agent_token_ciphertext
+RETURNING id, name, status, agent_docker_endpoint, agent_file_endpoint, agent_tls_ca_cert, agent_token_hash, bootstrap_token_hash, bootstrap_token_expires_at, agent_version, heartbeat_interval_seconds, last_heartbeat_at, resource_snapshot_json, metadata_json, node_data_root, registered_at, created_at, updated_at, agent_token_ciphertext, max_apps
 `
 
 type SetRuntimeNodeStatusParams struct {
@@ -300,6 +388,7 @@ func (q *Queries) SetRuntimeNodeStatus(ctx context.Context, arg SetRuntimeNodeSt
 		&i.CreatedAt,
 		&i.UpdatedAt,
 		&i.AgentTokenCiphertext,
+		&i.MaxApps,
 	)
 	return i, err
 }
@@ -314,7 +403,7 @@ SET
     metadata_json = $4,
     updated_at = now()
 WHERE id = $1
-RETURNING id, name, status, agent_docker_endpoint, agent_file_endpoint, agent_tls_ca_cert, agent_token_hash, bootstrap_token_hash, bootstrap_token_expires_at, agent_version, heartbeat_interval_seconds, last_heartbeat_at, resource_snapshot_json, metadata_json, node_data_root, registered_at, created_at, updated_at, agent_token_ciphertext
+RETURNING id, name, status, agent_docker_endpoint, agent_file_endpoint, agent_tls_ca_cert, agent_token_hash, bootstrap_token_hash, bootstrap_token_expires_at, agent_version, heartbeat_interval_seconds, last_heartbeat_at, resource_snapshot_json, metadata_json, node_data_root, registered_at, created_at, updated_at, agent_token_ciphertext, max_apps
 `
 
 type UpdateRuntimeNodeHeartbeatParams struct {
@@ -352,6 +441,48 @@ func (q *Queries) UpdateRuntimeNodeHeartbeat(ctx context.Context, arg UpdateRunt
 		&i.CreatedAt,
 		&i.UpdatedAt,
 		&i.AgentTokenCiphertext,
+		&i.MaxApps,
+	)
+	return i, err
+}
+
+const updateRuntimeNodeMaxApps = `-- name: UpdateRuntimeNodeMaxApps :one
+UPDATE runtime_nodes
+SET max_apps = $2,
+    updated_at = now()
+WHERE id = $1
+RETURNING id, name, status, agent_docker_endpoint, agent_file_endpoint, agent_tls_ca_cert, agent_token_hash, bootstrap_token_hash, bootstrap_token_expires_at, agent_version, heartbeat_interval_seconds, last_heartbeat_at, resource_snapshot_json, metadata_json, node_data_root, registered_at, created_at, updated_at, agent_token_ciphertext, max_apps
+`
+
+type UpdateRuntimeNodeMaxAppsParams struct {
+	ID      pgtype.UUID `db:"id" json:"id"`
+	MaxApps pgtype.Int4 `db:"max_apps" json:"max_apps"`
+}
+
+func (q *Queries) UpdateRuntimeNodeMaxApps(ctx context.Context, arg UpdateRuntimeNodeMaxAppsParams) (RuntimeNode, error) {
+	row := q.db.QueryRow(ctx, updateRuntimeNodeMaxApps, arg.ID, arg.MaxApps)
+	var i RuntimeNode
+	err := row.Scan(
+		&i.ID,
+		&i.Name,
+		&i.Status,
+		&i.AgentDockerEndpoint,
+		&i.AgentFileEndpoint,
+		&i.AgentTlsCaCert,
+		&i.AgentTokenHash,
+		&i.BootstrapTokenHash,
+		&i.BootstrapTokenExpiresAt,
+		&i.AgentVersion,
+		&i.HeartbeatIntervalSeconds,
+		&i.LastHeartbeatAt,
+		&i.ResourceSnapshotJson,
+		&i.MetadataJson,
+		&i.NodeDataRoot,
+		&i.RegisteredAt,
+		&i.CreatedAt,
+		&i.UpdatedAt,
+		&i.AgentTokenCiphertext,
+		&i.MaxApps,
 	)
 	return i, err
 }

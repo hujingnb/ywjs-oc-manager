@@ -26,6 +26,7 @@ type runtimeNodeService interface {
 	GetNode(ctx context.Context, principal auth.Principal, nodeID string) (service.RuntimeNodeResult, error)
 	RotateBootstrap(ctx context.Context, principal auth.Principal, nodeID string) (service.RuntimeNodeResult, error)
 	SetNodeStatus(ctx context.Context, principal auth.Principal, nodeID, status string) (service.RuntimeNodeResult, error)
+	UpdateMaxApps(ctx context.Context, principal auth.Principal, nodeID string, maxApps *int32) (service.RuntimeNodeResult, error)
 }
 
 // NewRuntimeNodesHandler 创建 runtime node handler。
@@ -39,9 +40,20 @@ func RegisterRuntimeNodeRoutes(router gin.IRouter, handler *RuntimeNodesHandler)
 	group.GET("", handler.List)
 	group.POST("", handler.Create)
 	group.GET("/:nodeId", handler.Get)
+	group.PATCH("/:nodeId", handler.Patch)
 	group.POST("/:nodeId/rotate-bootstrap", handler.RotateBootstrap)
 	group.POST("/:nodeId/disable", handler.Disable)
 	group.POST("/:nodeId/enable", handler.Enable)
+}
+
+// patchRuntimeNodeRequest 当前仅支持 max_apps 字段；后续如需扩展节点元信息可在此追加。
+// max_apps 显式声明为 *int32：JSON 中 omit 与 null 语义不同——
+//   - 字段缺失：不更新（当前 v1.0.1 不支持）；
+//   - 字段为 null：清空上限；
+//   - 字段为正数：设上限。
+// 实施限制：v1.0.1 把字段缺失也按 null 处理（清空），下一版本可加 patch semantic 区分。
+type patchRuntimeNodeRequest struct {
+	MaxApps *int32 `json:"max_apps"`
 }
 
 type runtimeNodeRequest struct {
@@ -110,6 +122,25 @@ func (h *RuntimeNodesHandler) RotateBootstrap(c *gin.Context) {
 		return
 	}
 	result, err := h.service.RotateBootstrap(c.Request.Context(), principal, c.Param("nodeId"))
+	if err != nil {
+		writeRuntimeNodeError(c, err)
+		return
+	}
+	c.JSON(http.StatusOK, gin.H{"runtime_node": result})
+}
+
+// Patch 更新节点的可调字段（v1.0.1 仅 max_apps）。
+func (h *RuntimeNodesHandler) Patch(c *gin.Context) {
+	principal, ok := h.principal(c)
+	if !ok {
+		return
+	}
+	var req patchRuntimeNodeRequest
+	if err := c.ShouldBindJSON(&req); err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "请求参数不完整"})
+		return
+	}
+	result, err := h.service.UpdateMaxApps(c.Request.Context(), principal, c.Param("nodeId"), req.MaxApps)
 	if err != nil {
 		writeRuntimeNodeError(c, err)
 		return

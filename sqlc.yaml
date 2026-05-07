@@ -8,6 +8,7 @@ sql:
       - internal/migrations/000004_knowledge_sync_status.up.sql
       - internal/migrations/000005_apps_runtime_snapshot.up.sql
       - internal/migrations/000006_apps_restart_policy.up.sql
+      - internal/migrations/000007_runtime_nodes_max_apps.up.sql
     queries: internal/store/queries
     gen:
       go:

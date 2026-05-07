@@ -44,6 +44,10 @@ type Querier interface {
 	GetRuntimeNodeByName(ctx context.Context, name string) (RuntimeNode, error)
 	GetUser(ctx context.Context, id pgtype.UUID) (User, error)
 	GetUserByUsername(ctx context.Context, username string) (User, error)
+	// ListActiveNodesWithAppCounts 列出所有 active 节点并附带其当前未删除应用数量。
+	// OnboardingService 自动选节点时按剩余容量过滤；剩余容量 = max_apps - app_count，
+	// max_apps NULL 表示不限。
+	ListActiveNodesWithAppCounts(ctx context.Context) ([]ListActiveNodesWithAppCountsRow, error)
 	ListAppsByOrg(ctx context.Context, arg ListAppsByOrgParams) ([]App, error)
 	ListAppsByRuntimeNode(ctx context.Context, arg ListAppsByRuntimeNodeParams) ([]App, error)
 	ListAuditLogsByOrg(ctx context.Context, arg ListAuditLogsByOrgParams) ([]AuditLog, error)
@@ -86,6 +90,7 @@ type Querier interface {
 	SoftDeleteOrganization(ctx context.Context, id pgtype.UUID) (Organization, error)
 	UpdateOrganizationProfile(ctx context.Context, arg UpdateOrganizationProfileParams) (Organization, error)
 	UpdateRuntimeNodeHeartbeat(ctx context.Context, arg UpdateRuntimeNodeHeartbeatParams) (RuntimeNode, error)
+	UpdateRuntimeNodeMaxApps(ctx context.Context, arg UpdateRuntimeNodeMaxAppsParams) (RuntimeNode, error)
 	UpdateUserPassword(ctx context.Context, arg UpdateUserPasswordParams) (User, error)
 	UpdateUserProfile(ctx context.Context, arg UpdateUserProfileParams) (User, error)
 	// 插入或更新 (org_id, node_id) 的最近同步状态。
