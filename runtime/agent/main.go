@@ -44,6 +44,9 @@ type agentOptions struct {
 	fileAddr      string // ":7002"
 	dockerProxy   bool   // 是否启用 docker proxy（测试可关闭，避免随机端口冲突）
 	enableSignals bool   // 生产场景监听 SIGINT/SIGTERM；测试中由 ctx 控制退出
+	// fullConfig 用于子组件（如 heartbeat）需要完整 yaml 配置时透传。
+	// 测试构造 opts 时不填该字段则 heartbeat 不启动，避免污染 server-only 测试。
+	fullConfig config.Config
 }
 
 func main() {
@@ -66,6 +69,7 @@ func main() {
 		fileAddr:      cfg.Agent.FileAddr,
 		dockerProxy:   true,
 		enableSignals: true,
+		fullConfig:    cfg,
 	}
 	if err := runAgent(context.Background(), opts, os.Stdout); err != nil {
 		log.Fatalf("agent 退出: %v", err)
@@ -94,6 +98,9 @@ func runAgent(ctx context.Context, opts agentOptions, stdout io.Writer) error {
 	if _, err := fmt.Fprintf(stdout, "agent-ca-pem-base64: %s\n", caBase64); err != nil {
 		return fmt.Errorf("输出 CA PEM 失败: %w", err)
 	}
+
+	// 主动心跳：仅当 yaml manager 三字段齐全时启动；ctx 取消随 runAgent 主流程一并结束。
+	go newHeartbeat(opts.fullConfig).Run(ctx)
 
 	dataHandler := newHandler(opts.dataRoot, opts.agentToken, opts.dockerSocket)
 	fileServer := &http.Server{

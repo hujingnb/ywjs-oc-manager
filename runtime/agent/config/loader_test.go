@@ -115,6 +115,83 @@ func TestLoadFile_RejectsMissingRequiredFields(t *testing.T) {
 	}
 }
 
+func TestLoadFile_HeartbeatDefaults(t *testing.T) {
+	// heartbeat 段未声明时应填默认值（30s 间隔、阈值 5）
+	path := writeTempConfig(t, validAgentYAML())
+
+	cfg, err := LoadFile(path)
+	if err != nil {
+		t.Fatalf("LoadFile() error = %v", err)
+	}
+	if cfg.Heartbeat.IntervalSeconds != 30 {
+		t.Errorf("interval default = %d, want 30", cfg.Heartbeat.IntervalSeconds)
+	}
+	if cfg.Heartbeat.FailureLogThreshold != 5 {
+		t.Errorf("failure_log_threshold default = %d, want 5", cfg.Heartbeat.FailureLogThreshold)
+	}
+}
+
+func TestLoadFile_HeartbeatBelowMinimum(t *testing.T) {
+	// 显式给一个小于 5 的间隔应被拒绝，避免运行期被反复 burst 请求
+	yaml := validAgentYAML() + `
+heartbeat:
+  interval_seconds: 1
+`
+	path := writeTempConfig(t, yaml)
+
+	_, err := LoadFile(path)
+	if err == nil || !strings.Contains(err.Error(), "heartbeat.interval_seconds") {
+		t.Fatalf("LoadFile() error = %v, want heartbeat.interval_seconds", err)
+	}
+}
+
+func TestLoadFile_ManagerOptional(t *testing.T) {
+	// manager 段完全不出现：允许通过，agent 进程后续不会启动心跳
+	path := writeTempConfig(t, validAgentYAML())
+
+	cfg, err := LoadFile(path)
+	if err != nil {
+		t.Fatalf("LoadFile() error = %v", err)
+	}
+	if cfg.Manager.Endpoint != "" || cfg.Manager.NodeID != "" || cfg.Manager.AgentToken != "" {
+		t.Fatalf("manager 段应保持全空, got %+v", cfg.Manager)
+	}
+}
+
+func TestLoadFile_ManagerPartialRejected(t *testing.T) {
+	// manager 三字段必须全填或全空，避免 ops 漏填导致悄悄不发心跳
+	yaml := validAgentYAML() + `
+manager:
+  endpoint: "https://manager.example/api/v1"
+  agent_token: "tok"
+`
+	path := writeTempConfig(t, yaml)
+
+	_, err := LoadFile(path)
+	if err == nil || !strings.Contains(err.Error(), "manager") {
+		t.Fatalf("LoadFile() error = %v, want manager 三字段一致性错误", err)
+	}
+}
+
+func TestLoadFile_ManagerComplete(t *testing.T) {
+	// manager 三字段齐全：允许通过，agent 进程会启动心跳
+	yaml := validAgentYAML() + `
+manager:
+  endpoint: "https://manager.example/api/v1"
+  node_id: "00000000-0000-0000-0000-000000000001"
+  agent_token: "tok"
+`
+	path := writeTempConfig(t, yaml)
+
+	cfg, err := LoadFile(path)
+	if err != nil {
+		t.Fatalf("LoadFile() error = %v", err)
+	}
+	if cfg.Manager.NodeID != "00000000-0000-0000-0000-000000000001" {
+		t.Errorf("node_id = %q", cfg.Manager.NodeID)
+	}
+}
+
 func writeTempConfig(t *testing.T, content string) string {
 	t.Helper()
 	path := filepath.Join(t.TempDir(), "agent.yaml")

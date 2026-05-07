@@ -43,3 +43,27 @@ agent:
   # 形如 ":7002"。处理 /v1/scopes/* / /v1/files/ping / /healthz 等路由。
   # 必填；为空启动 fail-fast。
   file_addr: ":7002"
+
+# manager 段：节点首次 register 完成后由运维把响应中的 node_id / agent_token 回填到这里。
+# 三字段（endpoint / node_id / agent_token）必须同时填齐或同时为空——同时为空时
+# agent 不发心跳；同时填齐则启动 heartbeat ticker，触发节点 unreachable→active 自愈。
+# 仅填部分会在启动期 fail-fast，避免悄悄不发心跳。
+manager:
+  # 形如 https://manager.example/api/v1
+  endpoint: ""
+  # POST /agent/register 响应中的 node_id（runtime_nodes.id 的 UUID）
+  node_id: ""
+  # POST /agent/register 响应中的 agent_token（长期通信凭证）
+  agent_token: ""
+  # 可选：manager 自签 TLS CA PEM 全文。空则信任系统根证书。
+  ca_bundle: ""
+  # 仅本地调试用；生产必须 false，否则会跳过 manager TLS 证书校验。
+  skip_verify: false
+
+# heartbeat 段：心跳节奏与失败告警阈值。
+# 默认值在 loader 自动填充：interval_seconds=30，failure_log_threshold=5。
+heartbeat:
+  # 心跳间隔秒数；最小 5（小于会启动 fail-fast）。
+  interval_seconds: 30
+  # 连续失败到该次数时打 ERROR 日志，便于 ops 抓告警。
+  failure_log_threshold: 5
