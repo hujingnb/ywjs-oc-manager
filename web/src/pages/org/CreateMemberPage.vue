@@ -54,10 +54,6 @@
               <span>应用 prompt（可选）</span>
               <textarea v-model.trim="form.app_prompt" rows="3"></textarea>
             </label>
-            <label class="form-grid-full">
-              <span>Runtime 节点 ID（可选）</span>
-              <input v-model.trim="form.runtime_node_id" placeholder="留空由系统自动选择" type="text" />
-            </label>
           </div>
         </fieldset>
 
@@ -128,7 +124,6 @@ async function onSubmit() {
     form.display_name = ''
     form.app_name = ''
     form.app_prompt = ''
-    form.runtime_node_id = ''
   } catch (err) {
     errorMessage.value = err instanceof Error ? err.message : '创建失败'
   } finally {

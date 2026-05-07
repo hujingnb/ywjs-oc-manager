@@ -73,6 +73,24 @@ export function useRotateBootstrap() {
   })
 }
 
+// useUpdateRuntimeNodeMaxApps 设置或清空节点的应用数上限（仅 platform_admin）。
+// maxApps 传 null 表示清空（不限）；传非负整数表示显式上限。
+export function useUpdateRuntimeNodeMaxApps() {
+  const client = useQueryClient()
+  return useMutation({
+    mutationFn: async ({ nodeId, maxApps }: { nodeId: string; maxApps: number | null }) => {
+      const response = await apiRequest<{ runtime_node: RuntimeNode }>(
+        `/api/v1/runtime-nodes/${nodeId}`,
+        { method: 'PATCH', body: { max_apps: maxApps } },
+      )
+      return response.runtime_node
+    },
+    onSuccess: () => {
+      void client.invalidateQueries({ queryKey: RUNTIME_NODES_KEY })
+    },
+  })
+}
+
 // useSetRuntimeNodeStatus 启用/禁用节点。
 export function useSetRuntimeNodeStatus() {
   const client = useQueryClient()

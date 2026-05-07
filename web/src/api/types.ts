@@ -52,6 +52,9 @@ export interface RuntimeNode {
   bootstrap_token?: string
   bootstrap_token_expires_at?: string
   has_agent_token: boolean
+  // 节点最大未删除应用数；undefined / null 表示不限。
+  // 由 platform_admin 通过 PATCH /runtime-nodes/:id 设置；OnboardingService 自动选节点时按剩余容量过滤。
+  max_apps?: number | null
 }
 
 export interface AuditLog {

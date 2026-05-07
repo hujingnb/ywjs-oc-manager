@@ -23,6 +23,7 @@
             <th>File</th>
             <th>Agent 版本</th>
             <th>心跳</th>
+            <th>最大应用数</th>
             <th class="actions-column">操作</th>
           </tr>
         </thead>
@@ -37,6 +38,11 @@
             <td>{{ node.agent_file_endpoint || '—' }}</td>
             <td>{{ node.agent_version || '—' }}</td>
             <td>{{ node.heartbeat_interval_seconds }}s</td>
+            <td>
+              <span v-if="node.max_apps == null">不限</span>
+              <span v-else>{{ node.max_apps }}</span>
+              <button class="link-button" type="button" @click="openMaxAppsEdit(node)">编辑</button>
+            </td>
             <td class="actions-column">
               <button class="secondary-button" type="button" :disabled="node.status === 'active'" @click="onRotate(node)">
                 轮换 bootstrap
@@ -50,7 +56,7 @@
             </td>
           </tr>
           <tr v-if="!nodes?.length">
-            <td colspan="7" class="state-text">尚未注册节点</td>
+            <td colspan="8" class="state-text">尚未注册节点</td>
           </tr>
         </tbody>
       </table>
@@ -89,6 +95,38 @@
       </form>
     </section>
 
+    <section v-if="editingNode" class="panel">
+      <div class="panel-heading">
+        <div>
+          <p class="eyebrow">Capacity</p>
+          <h2>调整最大应用数 · {{ editingNode.name }}</h2>
+        </div>
+        <button class="icon-button" type="button" aria-label="关闭" @click="cancelMaxAppsEdit">
+          <X :size="18" />
+        </button>
+      </div>
+      <form class="form-grid" @submit.prevent="saveMaxApps">
+        <label class="form-grid-full">
+          <span>最大应用数（清空表示不限；0 表示暂停接收新应用）</span>
+          <input v-model="maxAppsInput" type="number" min="0" placeholder="留空表示不限" />
+        </label>
+        <p class="state-text">
+          {{
+            maxAppsInput === ''
+              ? '保存后该节点不限制应用数量。'
+              : `保存后 OnboardingService 自动选节点时仅在剩余容量 > 0 时分配新应用到该节点。`
+          }}
+        </p>
+        <div class="form-actions">
+          <button class="secondary-button" type="button" @click="cancelMaxAppsEdit">取消</button>
+          <button class="primary-button" type="submit" :disabled="updateMaxAppsMutation.isPending.value">
+            {{ updateMaxAppsMutation.isPending.value ? '保存中…' : '保存' }}
+          </button>
+        </div>
+        <p v-if="maxAppsError" class="state-text danger form-grid-full">{{ maxAppsError }}</p>
+      </form>
+    </section>
+
     <section v-if="lastIssuedToken" class="panel">
       <div class="panel-heading">
         <div>
@@ -118,6 +156,7 @@ import {
   useRotateBootstrap,
   useRuntimeNodesQuery,
   useSetRuntimeNodeStatus,
+  useUpdateRuntimeNodeMaxApps,
   type RuntimeNodeFormPayload,
 } from '@/api/hooks/useRuntimeNodes'
 import type { RuntimeNode } from '@/api/types'
@@ -126,6 +165,7 @@ const { data: nodes, isLoading, error } = useRuntimeNodesQuery()
 const createMutation = useCreateRuntimeNode()
 const rotateMutation = useRotateBootstrap()
 const statusMutation = useSetRuntimeNodeStatus()
+const updateMaxAppsMutation = useUpdateRuntimeNodeMaxApps()
 
 const formVisible = ref(false)
 const creating = ref(false)
@@ -186,6 +226,39 @@ function dismissToken() {
   lastIssuedNodeName.value = ''
   lastIssuedExpiresAt.value = ''
 }
+
+const editingNode = ref<RuntimeNode | null>(null)
+const maxAppsInput = ref<number | ''>('')
+const maxAppsError = ref<string | null>(null)
+
+function openMaxAppsEdit(node: RuntimeNode) {
+  editingNode.value = node
+  maxAppsInput.value = node.max_apps ?? ''
+  maxAppsError.value = null
+}
+
+function cancelMaxAppsEdit() {
+  editingNode.value = null
+  maxAppsInput.value = ''
+  maxAppsError.value = null
+}
+
+async function saveMaxApps() {
+  if (!editingNode.value) return
+  maxAppsError.value = null
+  const raw = maxAppsInput.value
+  const value: number | null = raw === '' ? null : Number(raw)
+  if (value !== null && (Number.isNaN(value) || value < 0)) {
+    maxAppsError.value = '最大应用数必须是非负整数或留空'
+    return
+  }
+  try {
+    await updateMaxAppsMutation.mutateAsync({ nodeId: editingNode.value.id, maxApps: value })
+    cancelMaxAppsEdit()
+  } catch (err) {
+    maxAppsError.value = err instanceof Error ? err.message : '保存失败'
+  }
+}
 </script>
 
 <style scoped>
@@ -199,5 +272,19 @@ function dismissToken() {
   font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
   word-break: break-all;
   white-space: pre-wrap;
+}
+
+.link-button {
+  margin-left: 6px;
+  padding: 0;
+  border: 0;
+  background: transparent;
+  color: #2c5db5;
+  font-size: 12px;
+  cursor: pointer;
+}
+
+.link-button:hover {
+  text-decoration: underline;
 }
 </style>
