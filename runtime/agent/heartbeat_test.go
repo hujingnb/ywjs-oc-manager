@@ -64,11 +64,8 @@ func TestHeartbeat_PeriodicPost(t *testing.T) {
 	var lastBodyMu sync.Mutex
 	var lastBody []byte
 	srv := httptest.NewTLSServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		if r.URL.Path != "/api/v1/agent/runtime-nodes/node-x/heartbeat" {
+		if r.URL.Path != "/api/v1/agent/heartbeat" {
 			t.Errorf("unexpected path %s", r.URL.Path)
-		}
-		if got := r.Header.Get("Authorization"); got != "Bearer tok-x" {
-			t.Errorf("auth header = %q", got)
 		}
 		body, _ := io.ReadAll(r.Body)
 		lastBodyMu.Lock()
@@ -119,6 +116,9 @@ func TestHeartbeat_PeriodicPost(t *testing.T) {
 	var decoded map[string]any
 	if err := json.Unmarshal(body, &decoded); err != nil {
 		t.Fatalf("body json: %v; raw=%s", err, body)
+	}
+	if got, _ := decoded["agent_token"].(string); got != "tok-x" {
+		t.Errorf("body.agent_token = %q, want tok-x", got)
 	}
 	if _, ok := decoded["agent_version"]; !ok {
 		t.Errorf("body 缺少 agent_version 字段")

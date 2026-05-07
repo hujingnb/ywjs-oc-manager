@@ -80,7 +80,9 @@ func newHeartbeat(cfg config.Config, opts ...heartbeatOption) *heartbeat {
 	return hb
 }
 
-// shouldStart 决定 Run 是否进入主循环。三字段全空表示 ops 还未把 register 响应回填到 yaml。
+// shouldStart 决定 Run 是否进入主循环。
+// manager.endpoint 与 manager.agent_token 必填；node_id 仅作为 ops 留痕用，
+// 不进入 heartbeat body（manager 端 /agent/heartbeat 路由按 token 反查 node）。
 func (h *heartbeat) shouldStart() bool {
 	m := h.cfg.Manager
 	return m.Endpoint != "" && m.NodeID != "" && m.AgentToken != ""
@@ -106,9 +108,12 @@ func (h *heartbeat) Run(ctx context.Context) {
 }
 
 // tick 发起一次心跳；HTTP 状态非 2xx 视为失败并累加 failures。
+// manager 路由 POST /api/v1/agent/heartbeat 按 body 中的 agent_token 反查 node，
+// 不需要 path 中传 node_id。endpoint 配置示例：https://manager.example/api/v1。
 func (h *heartbeat) tick(ctx context.Context) {
-	url := strings.TrimRight(h.cfg.Manager.Endpoint, "/") + "/agent/runtime-nodes/" + h.cfg.Manager.NodeID + "/heartbeat"
+	url := strings.TrimRight(h.cfg.Manager.Endpoint, "/") + "/agent/heartbeat"
 	body := map[string]any{
+		"agent_token":       h.cfg.Manager.AgentToken,
 		"agent_version":     agentVersion,
 		"resource_snapshot": collectSnapshot(),
 	}
@@ -122,7 +127,6 @@ func (h *heartbeat) tick(ctx context.Context) {
 		h.recordFailure(fmt.Errorf("构造请求失败: %w", err))
 		return
 	}
-	req.Header.Set("Authorization", "Bearer "+h.cfg.Manager.AgentToken)
 	req.Header.Set("Content-Type", "application/json")
 	resp, err := h.client.Do(req)
 	if err != nil {

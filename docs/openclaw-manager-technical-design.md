@@ -1076,8 +1076,8 @@ manager 提供两个 HTTP 端点（已在 §6.9 列出），实现要点：
 
 agent 进程内主动心跳（v1.0.1 加入）：
 
-- 当 agent yaml 的 `manager.endpoint`、`manager.node_id`、`manager.agent_token` 三字段齐全时，进程启动一个后台 goroutine（`runtime/agent/heartbeat.go`），按 `heartbeat.interval_seconds`（默认 30s，最小 5s）周期 POST `{endpoint}/agent/runtime-nodes/{node_id}/heartbeat`。
-- 三字段在节点首次 register 之后由 ops 把响应里的 node_id / agent_token 回填到 yaml；填齐前 agent 不发心跳，仅 INFO 日志说明状态。
+- 当 agent yaml 的 `manager.endpoint`、`manager.node_id`、`manager.agent_token` 三字段齐全时，进程启动一个后台 goroutine（`runtime/agent/heartbeat.go`），按 `heartbeat.interval_seconds`（默认 30s，最小 5s）周期 POST `{endpoint}/agent/heartbeat`，body 带 `agent_token` / `agent_version` / `resource_snapshot`。
+- 三字段在节点首次 register 之后由 ops 把响应里的 node_id / agent_token 回填到 yaml；填齐前 agent 不发心跳，仅 INFO 日志说明状态。`node_id` 字段当前不进入 heartbeat body（manager 路由按 token 反查 node），仅作为 ops 留痕用，未来若改成 path 携带 node_id 不会破坏向前兼容。
 - 失败仅 WARN；连续失败到 `heartbeat.failure_log_threshold`（默认 5）打 ERROR，便于 ops 抓告警。请求成功后失败计数清零并打一条恢复 INFO。
 - 该机制让节点从 `unreachable` 自动恢复到 `active`，无需 ops 手工干预。
 
