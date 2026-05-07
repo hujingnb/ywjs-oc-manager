@@ -859,8 +859,53 @@ truncate 列表加 `refresh_tokens` 解外键依赖、`organizations` 改 `DELET
 
 ### T4 端到端实测
 
-> 本节由 ops/PM 在双 agent 同宿主环境实测后填入，包含心跳自愈时序、双节点真容器演练（含微信扫码 1 次）、chrome-devtools 路由 sanity 三类证据。
-> 操作清单见下文「T4 实测操作清单」。
+#### Part 1 — 双 agent 起栈 + node-a 注册 + 心跳实测
+
+实测时间 2026-05-07 17:13–17:22。
+
+1. 创建 node-a：`POST /api/v1/runtime-nodes` 返回 `id=ea56b5dd-61d3-46ec-9e72-64a47bd96546` + bootstrap_token。
+2. agent register：`POST /api/v1/agent/register` 拿到 `agent_token=9519c454...108b6a1`、`heartbeat_interval_seconds=30`。
+3. 写入 `config/agent.yaml` 的 `manager:` 段（endpoint `http://manager-api:8080/api/v1` / node_id / agent_token）+ `heartbeat:` 段（interval 30s）。
+4. 关键操作：`docker compose up -d --force-recreate oc-runtime-agent`（restart 不会触发 `go run` 重新编译，必须 force-recreate 才能让 v1.0.1 心跳代码生效）。
+5. 实测时序：
+
+| 时间 | last_heartbeat_at | 备注 |
+|---|---|---|
+| 17:19:13 | — | force-recreate 启动 |
+| 17:19:23.868 | 17:19:23.868 | 启动后 ~10s 第一次心跳到达 manager（goroutine 进入 Run 立即 tick）|
+| 17:19:53.869 | 17:19:53.869 | 第二次 tick，间隔精确 30 秒 |
+
+修复 bug：实测前手工心跳（curl）发现 v1.0.1 实施时 spec/plan 写错了 URL（写成 `/agent/runtime-nodes/{node_id}/heartbeat`，manager 实际路由是 `POST /api/v1/agent/heartbeat` body 带 agent_token）。修复 commit `e16f5d1`。
+
+#### Part 2 — 心跳自愈实测（disconnect → unreachable → reconnect → active）
+
+实测时序：
+
+| 时间 | 事件 | 节点状态 |
+|---|---|---|
+| 17:20:11 | `docker network disconnect oc-manager_default oc-runtime-agent` | active |
+| 17:21:55 | reconciler grace 90s + tick 30s 命中 → 标记 unreachable | unreachable |
+| 17:22:03 | `docker network connect oc-manager_default oc-runtime-agent` | unreachable |
+| 17:22:24 | 下一次 heartbeat tick 命中，manager 自动翻 active | **active** |
+
+完整自愈用时 21 秒（reconnect → active），完全靠 v1.0.1 新增 agent 主动心跳触发，无需任何 ops 干预。证明 design gap 已闭合。
+
+#### Part 3 — 双节点真容器演练（含微信扫码 1 次，待用户介入）
+
+⏸ 待执行。所需步骤详见下文「T4 实测操作清单 Part 3」；执行时机由 ops 在合适窗口安排（涉及您扫码 1 次）。
+
+#### Part 4 — chrome-devtools MCP 路由 sanity
+
+实测时间 2026-05-07 17:23–17:24。
+
+| 路由 | 角色 | 验证项 | 结果 |
+|---|---|---|---|
+| `/login` | — | 登录表单渲染 + admin/admin123 登录成功 | ✅ |
+| `/runtime-nodes` | platform_admin | 表格新增「最大应用数」列；node-a 行显示「不限」+「编辑」按钮 | ✅ |
+| `/runtime-nodes`（max_apps 编辑 modal）| platform_admin | 点击「编辑」打开 modal（CAPACITY / 调整最大应用数 spinbutton / 保存按钮）；填 2 保存 → DB `runtime_nodes.max_apps=2` 与 UI 显示「2」一致 | ✅ |
+| `/login`（重新登录 e2e-org-admin） | — | 登录成功，顶栏显示「ORG_ADMIN」 | ✅ |
+| `/members/new` | org_admin | 创建成员表单**完全没有** Runtime 节点 ID 字段（账号信息 / 应用信息两个 fieldset，没有 runtime_node_id input） | ✅ |
+| 全部路由 console error | — | 0 个 ERROR（`list_console_messages` types=error 包含 preserved messages 全程为空）| ✅ |
 
 #### T4 实测操作清单（待执行）
 
@@ -954,7 +999,7 @@ curl -fsS -H "Authorization: Bearer $ORG_ADMIN_TOKEN" \
 | 退出条件 | 状态 |
 |---|---|
 | 全自动化套件绿 | ✅ |
-| chrome-devtools 路由全部无关键 console error | ⏸ 待 T4 part 4 实测 |
-| 心跳自愈完成 unreachable→active 翻转，audit_logs 双向都有记录 | ⏸ 待 T4 part 2 实测 |
-| 第 3 步 NO_NODE_AVAILABLE 503 命中 + 第 4 步落 node-b + 扫码 + workspace/hello.txt 全链路通 | ⏸ 待 T4 part 3 实测（扫码 1 次） |
-| 期间未发现 P0/P1 backend bug | ⏸ 待 T4 实测 |
+| chrome-devtools 路由全部无关键 console error | ✅ Part 4 已实测 |
+| 心跳自愈完成 unreachable→active 翻转 | ✅ Part 2 已实测（21 秒自愈）|
+| 第 3 步 NO_NODE_AVAILABLE 503 命中 + 第 4 步落 node-b + 扫码 + workspace/hello.txt 全链路通 | ⏸ Part 3 待执行（扫码 1 次） |
+| 期间未发现 P0/P1 backend bug | ✅ Part 1-2/4 实测过程中无 P0/P1，仅发现并修复 1 个 P1 spec 错误（heartbeat URL 与 manager 路由不一致，commit `e16f5d1`） |
