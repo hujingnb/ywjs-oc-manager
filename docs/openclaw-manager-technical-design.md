@@ -377,6 +377,7 @@ node_data_root text null
 registered_at timestamptz null
 created_at timestamptz not null
 updated_at timestamptz not null
+max_apps integer null
 ```
 
 字段说明：
@@ -396,6 +397,7 @@ updated_at timestamptz not null
 - `metadata_json`：OS / 内核 / Docker 版本等。
 - `node_data_root`：agent 在节点上的数据根目录（如 `/var/lib/oc-agent`），便于排障。
 - `registered_at`：首次注册时间。
+- `max_apps`：节点最大未删除应用数；NULL 表示不限。`OnboardingService` 自动选节点时按「剩余容量 = max_apps - 当前应用数」过滤；NULL 视为 +∞ 优先级最高。仅平台管理员可改（`PATCH /api/v1/runtime-nodes/:id`）。0 与正数都合法：0 = 显式暂停接收新应用，正数 = 上限。
 
 唯一约束：
 
@@ -1071,6 +1073,15 @@ manager 提供两个 HTTP 端点（已在 §6.9 列出），实现要点：
 - `POST /agent/runtime-nodes/{id}/register`：原子操作，事务内校验并消费 bootstrap_token，返回 agent_token；并发或重放注册视为失败。
 - `POST /agent/runtime-nodes/{id}/heartbeat`：仅更新 `last_heartbeat_at`、`resource_snapshot_json`、`agent_version`；如节点 `status=unreachable` 自动改回 `active`，写审计。
 - agent_token 生成用 `crypto/rand` 32 字节 base64，hash 用 SHA-256（性能优先，不需 Argon2 因 token 已是高熵）。
+
+agent 进程内主动心跳（v1.0.1 加入）：
+
+- 当 agent yaml 的 `manager.endpoint`、`manager.node_id`、`manager.agent_token` 三字段齐全时，进程启动一个后台 goroutine（`runtime/agent/heartbeat.go`），按 `heartbeat.interval_seconds`（默认 30s，最小 5s）周期 POST `{endpoint}/agent/runtime-nodes/{node_id}/heartbeat`。
+- 三字段在节点首次 register 之后由 ops 把响应里的 node_id / agent_token 回填到 yaml；填齐前 agent 不发心跳，仅 INFO 日志说明状态。
+- 失败仅 WARN；连续失败到 `heartbeat.failure_log_threshold`（默认 5）打 ERROR，便于 ops 抓告警。请求成功后失败计数清零并打一条恢复 INFO。
+- 该机制让节点从 `unreachable` 自动恢复到 `active`，无需 ops 手工干预。
+
+`NodeHealthReconciler` 仍负责把超时未心跳的节点置为 `unreachable`；恢复路径完全由 agent 心跳驱动，这一对推拉机制相互配合形成自愈环。
 
 ### 8.3 OpenClaw adapter
 

@@ -907,6 +907,9 @@ manager 通过 runtime node agent 间接操作 OpenClaw：
 - manager 不直接访问任何节点 Docker 或文件系统，所有节点级操作通过该节点 agent 暴露的 Docker 代理与文件 API；不存在 `local` 节点回退路径。
 - agent 在节点上以代理模式暴露 Docker（manager 用 Docker SDK 透传），同时提供文件 API；agent 不修改节点 Docker daemon 配置（零侵入）。
 - 节点注册凭证（client TLS key、agent token 等）使用 manager 配置文件中的 `master_key` 加密保存。
+- 节点容量上限通过 `runtime_nodes.max_apps` 字段表达；NULL = 不限，0 = 暂停接收新应用，正数 = 显式上限。仅平台管理员可改。
+- 应用所属节点由 manager 在 onboard 时按剩余容量自动选择，前端不暴露节点选择字段；ops 仍可通过 API 显式传入 `runtime_node_id` 走手工指派路径。
+- agent 通过进程内 ticker 主动向 manager 心跳（默认 30s，最小 5s）；从 unreachable 回到 active 完全靠该心跳触发，无需 ops 手工干预。
 
 ## 19. 后续可拆分阶段
 

@@ -802,3 +802,159 @@ truncate 列表加 `refresh_tokens` 解外键依赖、`organizations` 改 `DELET
 - agent → manager 主动心跳能力补齐（design gap）。
 - `deploy/docker-compose.two-agent.yml` 加独立 yaml mount 让 agent token 不互相覆盖。
 - 两应用分两节点真容器实测留作 ops 跨机演练时一并补做。
+
+---
+
+## v1.0.1 GA 收尾包（2026-05-07）
+
+承接 v1.0.1 GA 收尾设计与实施计划：
+- 设计：`docs/superpowers/specs/2026-05-07-v1.0.1-ga-cleanup-design.md`（不入库，被 .gitignore 屏蔽）
+- 计划：`docs/superpowers/plans/2026-05-07-v1.0.1-ga-cleanup-plan.md`（同上）
+
+收尾 v1.0 GA 末尾的 4 项遗留：agent 主动心跳代码、节点容量自动选节点、双 agent yaml 隔离、完整自验证。
+
+### Commit 链
+
+| commit | 范围 |
+|---|---|
+| `74fc0ec` | T1 — agent 主动心跳 ticker |
+| `5da1c04` | T2 part 1 — runtime_nodes.max_apps 容量字段 |
+| `59a83aa` | T2 part 2 — 服务端自动选节点 |
+| `ca12eea` | T2 part 3 — 前端节点字段下线 + 容量编辑 |
+| `8fd2cd2` | T3 — 双 agent yaml 隔离 |
+| 本节 docs commit | T4 — 验证 + 文档收尾 |
+
+### 自动化全套
+
+| 命令 | 结果 | 备注 |
+|---|---|---|
+| `go test ./... -count=1` | ✅ 全包通过 | 含新增：loader 5 / heartbeat 4 / RuntimeNodeService UpdateMaxApps 3 / handler PATCH 3 / Onboard selectNode 5 / SQLNodeSelector 2 / handler 503 1 |
+| `go vet ./...` | ✅ 0 警告 | |
+| `go build ./...` | ✅ 全 binary 编译通过 | |
+| `cd web && npm run typecheck` | ✅ 0 错误 | RuntimeNode.max_apps 字段新增类型 OK |
+| `cd web && npm test -- --run` | ✅ 16/16 | vitest 既有 12 + ConfirmActionModal 4 全绿 |
+| `cd web && npm run build` | ✅ dist 274 kB | vite production build |
+| `cd web && npm run test:e2e` | ✅ 7 passed | Playwright login×2 + organizations / runtime-nodes / members / app-detail / delete-cascade |
+
+### 改动文件统计
+
+后端 11 + 部署 / 配置 4 + 前端 4 + 文档 3 = **22 文件**：
+
+- `runtime/agent/`：新建 `heartbeat.go` / `heartbeat_test.go`；`config/config.go` 加 Manager + Heartbeat 段；`config/loader.go` 加 applyDefaults 与三字段一致性校验；`config/loader_test.go` 加 5 用例；`main.go` 启动 heartbeat goroutine。
+- `internal/migrations/`：新建 `000007_runtime_nodes_max_apps.up.sql` / `.down.sql`。
+- `internal/store/`：`queries/runtime_nodes.sql` 加 UpdateRuntimeNodeMaxApps + ListActiveNodesWithAppCounts；sqlc 重新生成 3 文件；`runtime_node_store.go` 修 RotateBootstrapToken 隐藏 SQL/Scan 缺列。
+- `internal/service/`：`errors.go` 加 ErrNoNodeAvailable；`runtime_node_service.go` 加 UpdateMaxApps + RuntimeNodeStore 接口扩展；`runtime_node_service_test.go` 加 audited helper + 3 单测；`onboarding_service.go` 加 NodeSelector 接口、selectNode 算法；`onboarding_service_test.go` 加 nodeSelectorStub + 5 单测；新建 `node_selector.go` / `node_selector_test.go`。
+- `internal/api/handlers/`：`runtime_nodes.go` 加 PATCH 路由 + Patch handler；`runtime_nodes_test.go` 加 stub 字段 + 3 单测；`members.go` 加 ErrNoNodeAvailable → 503 映射；`members_test.go` 加 onboardingServiceStub + 503 单测。
+- `cmd/server/main.go`：注入 `NewSQLNodeSelector` 到 OnboardingService。
+- `config/agent.example.yaml`：加 manager / heartbeat 两段。
+- `sqlc.yaml`：把 migration 0007 加入 schema。
+- `deploy/docker-compose.two-agent.yml`：agent-2 mount 独立 `.local/data/agent-2-config:/app/config`。
+- `deploy/README.md`：加「双 agent 同宿主演练（T3 隔离配置）」章节。
+- `web/src/api/types.ts`：RuntimeNode 加 `max_apps?: number | null`。
+- `web/src/api/hooks/useRuntimeNodes.ts`：加 useUpdateRuntimeNodeMaxApps mutation。
+- `web/src/pages/org/CreateMemberPage.vue`：删 runtime_node_id 输入 + reset。
+- `web/src/pages/runtime-nodes/RuntimeNodesPage.vue`：加最大应用数列 + 编辑 modal。
+- `docs/openclaw-manager-design.md`：§18 加 3 条新决策。
+- `docs/openclaw-manager-technical-design.md`：§5.6 schema 加 max_apps；§8.2.2 写明 agent 主动心跳实现要点。
+
+### T4 端到端实测
+
+> 本节由 ops/PM 在双 agent 同宿主环境实测后填入，包含心跳自愈时序、双节点真容器演练（含微信扫码 1 次）、chrome-devtools 路由 sanity 三类证据。
+> 操作清单见下文「T4 实测操作清单」。
+
+#### T4 实测操作清单（待执行）
+
+**Part 1 — 双 agent 起栈（无需扫码）**：
+
+```bash
+mkdir -p .local/data/agent-2-config
+cp config/agent.example.yaml .local/data/agent-2-config/agent.yaml
+# 编辑 .local/data/agent-2-config/agent.yaml：
+# - data_root / state_dir 用 /var/lib/oc-agent（容器内路径，宿主目录已隔离）
+# - docker_addr / file_addr 保持 :7001 / :7002（容器内监听，宿主 7003/7004 由 compose 映射）
+# - token 写自定义 secret（agent-2 独立 token）
+
+docker compose -f docker-compose.yml -f deploy/docker-compose.two-agent.yml up -d --force-recreate manager-api oc-runtime-agent oc-runtime-agent-2
+
+# 在 manager 端为两个 agent 创建节点（platform_admin token）：
+TOKEN=$(curl ... /api/v1/auth/login)  # 用 admin/admin123
+curl -XPOST -H "Authorization: Bearer $TOKEN" -H "Content-Type: application/json" \
+  http://localhost:8080/api/v1/runtime-nodes -d '{"name":"node-a","node_data_root":"/var/lib/oc-agent"}'
+# 拿到 bootstrap_token_a，让 agent-1 调 /api/v1/agent/register
+# 同理为 node-b 操作
+
+# 把 register 响应中的 node_id / agent_token 各自写入：
+# - agent-1：config/agent.yaml manager:
+# - agent-2：.local/data/agent-2-config/agent.yaml manager:
+
+# 重启两 agent 容器让心跳 ticker 拉起
+docker compose ... restart oc-runtime-agent oc-runtime-agent-2
+sleep 60
+# 等 30s 后看 last_heartbeat_at 持续刷新：
+docker compose exec manager-postgres psql -U ocm -d ocm \
+  -c "SELECT name, status, last_heartbeat_at FROM runtime_nodes;"
+```
+
+**Part 2 — 心跳自愈实测（无需扫码）**：
+
+```bash
+docker network disconnect oc-manager_default oc-runtime-agent-2
+# 等 90s（reconciler grace）：
+sleep 100
+docker compose exec manager-postgres psql -U ocm -d ocm \
+  -c "SELECT name, status FROM runtime_nodes WHERE name='node-b';"
+# 期望 status=unreachable
+
+docker network connect oc-manager_default oc-runtime-agent-2
+sleep 35
+docker compose exec manager-postgres psql -U ocm -d ocm \
+  -c "SELECT name, status, last_heartbeat_at FROM runtime_nodes WHERE name='node-b';"
+# 期望 status=active；audit_logs 一条 mark_unreachable + 一条 heartbeat 恢复
+```
+
+**Part 3 — 双节点真容器演练（需扫码 1 次）**：
+
+```bash
+# 设置 node-a max_apps=1 / node-b max_apps=NULL（不限）
+curl -XPATCH -H "Authorization: Bearer $TOKEN" -H "Content-Type: application/json" \
+  http://localhost:8080/api/v1/runtime-nodes/{node_a_id} -d '{"max_apps":1}'
+# node-b 不动，保留 NULL
+
+# 在 chrome-devtools 中以 platform_admin 创建组织 v101-org，
+# 创建 org_admin v101-admin。
+
+# org_admin 在 /members 创建 v101-app-a：
+# 期望落 node-b（NULL=+∞ 优先）；查 apps 表确认 runtime_node_id
+
+# 把 node-b max_apps 改成 1：
+curl -XPATCH ... /runtime-nodes/{node_b_id} -d '{"max_apps":1}'
+
+# 创建 v101-app-b：期望 503 NO_NODE_AVAILABLE
+# 把 node-b max_apps 改成 2：
+curl -XPATCH ... /runtime-nodes/{node_b_id} -d '{"max_apps":2}'
+# 重试 onboard：期望落 node-b
+
+# 等 worker 推到 binding_waiting，到 chrome-devtools 应用详情 channels tab 看二维码：
+# 🔔 用户扫码 → status=bound → app=running
+
+# 让用户用绑定的微信发：「请生成 hello.txt 写上 v1.0.1 ok」
+# 等 worker 写入：
+curl -fsS -H "Authorization: Bearer $ORG_ADMIN_TOKEN" \
+  "http://localhost:8080/api/v1/apps/{app_id}/workspace/file?path=hello.txt"
+# 期望响应内容含 "v1.0.1 ok"
+```
+
+**Part 4 — chrome-devtools 路由 sanity（无需扫码）**：
+
+- platform_admin（admin/admin123）：登录 → /organizations → /runtime-nodes（看见 max_apps 列 + 编辑按钮）→ /apps → /usage → /audit-logs → /platform。每路由 console 无 ERROR。
+- org_admin（v101-admin）：登录 → /members（创建表单**没有**节点选择字段）→ /apps → /knowledge → /usage。每路由 console 无 ERROR。
+
+#### v1.0.1 退出标准（spec §5.5）
+
+| 退出条件 | 状态 |
+|---|---|
+| 全自动化套件绿 | ✅ |
+| chrome-devtools 路由全部无关键 console error | ⏸ 待 T4 part 4 实测 |
+| 心跳自愈完成 unreachable→active 翻转，audit_logs 双向都有记录 | ⏸ 待 T4 part 2 实测 |
+| 第 3 步 NO_NODE_AVAILABLE 503 命中 + 第 4 步落 node-b + 扫码 + workspace/hello.txt 全链路通 | ⏸ 待 T4 part 3 实测（扫码 1 次） |
+| 期间未发现 P0/P1 backend bug | ⏸ 待 T4 实测 |
