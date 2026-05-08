@@ -1,105 +1,53 @@
 <template>
-  <main class="dashboard-main">
-    <section class="panel">
-      <div class="panel-heading">
-        <div>
-          <p class="eyebrow">Platform · Dashboard</p>
-          <h2>平台总览</h2>
-        </div>
+  <n-card :bordered="true">
+    <template #header>
+      <div>
+        <p class="eyebrow">Platform · Dashboard</p>
+        <h2 style="margin: 0">平台总览</h2>
       </div>
+    </template>
 
-      <div v-if="!isPlatformAdmin" class="state-text">仅平台管理员可访问。</div>
-      <div v-else-if="isLoading" class="state-text">加载中…</div>
-      <div v-else-if="error" class="state-text danger">查询失败：{{ error.message }}</div>
-      <template v-else-if="overview">
-        <div class="overview-grid">
-          <div class="overview-card">
-            <p class="card-label">组织数</p>
-            <p class="card-value">{{ overview.organization_count }}</p>
-          </div>
-          <div class="overview-card">
-            <p class="card-label">成员数</p>
-            <p class="card-value">{{ overview.member_count }}</p>
-            <p class="card-foot">不含平台管理员</p>
-          </div>
-          <div class="overview-card">
-            <p class="card-label">应用数</p>
-            <p class="card-value">{{ overview.app_count }}</p>
-          </div>
-          <div class="overview-card">
-            <p class="card-label">运行中</p>
-            <p class="card-value running">{{ overview.running_app_count }}</p>
-          </div>
-          <div class="overview-card">
-            <p class="card-label">异常</p>
-            <p class="card-value error">{{ overview.error_app_count }}</p>
-          </div>
-          <div class="overview-card">
-            <p class="card-label">总余额</p>
-            <p class="card-value">{{ overview.usage_available ? formatQuota(overview.total_remain_quota) : '—' }}</p>
-            <p class="card-foot">{{ overview.usage_available ? 'new-api 实时' : '用量服务未启用' }}</p>
-          </div>
-        </div>
-      </template>
-    </section>
-  </main>
+    <div v-if="!isPlatformAdmin" class="state-text">仅平台管理员可访问。</div>
+    <div v-else-if="isLoading" class="state-text">加载中…</div>
+    <div v-else-if="error" class="state-text danger">查询失败：{{ error.message }}</div>
+    <n-grid v-else-if="overview" :cols="6" :x-gap="14" :y-gap="14" responsive="screen" :item-responsive="true">
+      <n-grid-item v-for="stat in stats" :key="stat.label" :span="1" :xs="2">
+        <n-card size="small" :bordered="true">
+          <n-statistic :label="stat.label" :value="stat.value" />
+          <div v-if="stat.note" style="font-size: 11px; color: #8A94C6; margin-top: 4px">{{ stat.note }}</div>
+        </n-card>
+      </n-grid-item>
+    </n-grid>
+  </n-card>
 </template>
 
 <script setup lang="ts">
 import { computed } from 'vue'
+import { NCard, NGrid, NGridItem, NStatistic } from 'naive-ui'
 
 import { usePlatformOverviewQuery } from '@/api/hooks/usePlatform'
 import { useAuthStore } from '@/stores/auth'
 
 const auth = useAuthStore()
 const isPlatformAdmin = computed(() => auth.user?.role === 'platform_admin')
-
 const { data: overview, isLoading, error } = usePlatformOverviewQuery(isPlatformAdmin)
 
-function formatQuota(value: number): string {
-  return value.toLocaleString('en-US')
-}
+function formatQuota(value: number) { return value.toLocaleString('en-US') }
+
+const stats = computed(() => {
+  if (!overview.value) return []
+  const o = overview.value
+  return [
+    { label: '组织数', value: String(o.organization_count), note: '' },
+    { label: '成员数', value: String(o.member_count), note: '不含平台管理员' },
+    { label: '应用数', value: String(o.app_count), note: '' },
+    { label: '运行中', value: String(o.running_app_count), note: '' },
+    { label: '异常', value: String(o.error_app_count), note: '' },
+    {
+      label: '总余额',
+      value: o.usage_available ? formatQuota(o.total_remain_quota) : '—',
+      note: o.usage_available ? 'new-api 实时' : '用量服务未启用',
+    },
+  ]
+})
 </script>
-
-<style scoped>
-.overview-grid {
-  display: grid;
-  grid-template-columns: repeat(auto-fit, minmax(160px, 1fr));
-  gap: 12px;
-  margin-top: 12px;
-}
-
-.overview-card {
-  padding: 16px;
-  background: #f5fbfa;
-  border: 1px solid #d6e8e3;
-  border-radius: 8px;
-}
-
-.card-label {
-  font-size: 12px;
-  color: #6b7c79;
-  margin: 0 0 6px;
-}
-
-.card-value {
-  font-size: 28px;
-  font-weight: 600;
-  color: #276d5c;
-  margin: 0;
-}
-
-.card-value.running {
-  color: #2c7a2c;
-}
-
-.card-value.error {
-  color: #b51d1d;
-}
-
-.card-foot {
-  font-size: 11px;
-  color: #99a8a4;
-  margin: 4px 0 0;
-}
-</style>
