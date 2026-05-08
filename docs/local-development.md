@@ -61,3 +61,7 @@
 - **chrome-devtools MCP 启动失败** ：宿主机已有其他 Chrome 实例占用 profile，请先关闭再重启 MCP；本仓库 9.1 阶段的浏览器验收依赖该 MCP。
 - **`make migrate-up` 报错** ：确认 `manager-postgres` 容器已就绪，可通过 `docker compose logs manager-postgres` 查看。
 - **新 API 渠道 Ollama 不可用** ：登录 new-api 管理后台，将 Ollama 渠道指向 `http://ollama:11434`。
+- **new-api `turnstile_check` 前置要求** ：manager 创建组织时会调 `POST /api/user/login` 拿
+  session cookie，turnstile 开启会拦截 server-to-server 登录。本地 docker compose 默认
+  `false`，可通过 `curl http://localhost:3000/api/status | jq .data.turnstile_check` 验证；
+  如发现 `true`，在 new-api 后台 系统设置 → 安全设置 关闭。

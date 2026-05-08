@@ -107,7 +107,11 @@ OpenClaw 容器构建相关：
 | `llm.base_url` | — | OpenClaw 容器从 docker network 看到的 new-api OpenAI 兼容 endpoint，必须含 `/v1` 后缀；留空时容器内 pi-coding-agent 走默认路由，无法命中本地 ollama |
 | `llm.default_provider` | — | 写入容器 `/root/.pi/agent/settings.json`，常用 `openai` |
 | `llm.default_model` | — | 必须是 new-api 渠道里实际可路由的名字，例如 `qwen2.5:0.5b` |
-| `llm.openai_compat.api_key` | 推荐 | 注入容器 `OPENAI_API_KEY` 的全局 `sk-` token；留空时 fallback 到 admin truncated 18 字符前缀，chat completions 会 401 |
+> 业务 user 凭据由 manager 自动管理：组织创建时调 new-api 创业务 user，
+> 加密落 `organizations.newapi_user_credentials_ciphertext`。应用初始化
+> 时 manager 用密文里的 access_token 调 `POST /api/token/:id/key` 拿
+> 完整 sk- 注入容器，每个应用的 token 独立隔离，不再有全局 sk- 配置项。
+> （v1.0.2 GA 收尾改造，参考前序 spec §1）
 | `container_networks` | ✅ | OpenClaw 容器要连接的 docker network 列表；必须包含 `new-api` 所在 network。docker-compose project 默认派生 `<project>_default`（本仓库 `oc-manager_default`） |
 
 ### 2.8 `agent.*`
@@ -194,7 +198,7 @@ yaml：
 | `OPENCLAW_LLM_BASE_URL` | `openclaw.llm.base_url` |
 | `OPENCLAW_LLM_DEFAULT_PROVIDER` | `openclaw.llm.default_provider` |
 | `OPENCLAW_LLM_DEFAULT_MODEL` | `openclaw.llm.default_model` |
-| `OPENCLAW_LLM_OPENAI_API_KEY` | `openclaw.llm.openai_compat.api_key` |
+| `OPENCLAW_LLM_OPENAI_API_KEY` | 已废弃，v1.0.2 起由 manager 按应用动态注入，无需配置 |
 | `OCM_KNOWLEDGE_ROOT` | `app.knowledge_root` |
 
 迁移完成后 `.env` 只剩 `*_PORT` 端口映射。
@@ -222,6 +226,6 @@ yaml：
 - agent 与 manager 之间用自签 CA + bearer token 双向校验；不要把节点 7001/7002
   暴露到公网，应仅放行 manager 出口 CIDR。
 - 任何含明文凭据的字段（`database.url` / `redis.password` / `auth.*` /
-  `security.master_key` / `newapi.admin_token` / `openclaw.llm.openai_compat.api_key`
+  `security.master_key` / `newapi.admin_token`
   / `agent.token` / `manager.agent_token`）只能写到 gitignored 的真实 yaml；
   例文件保持脱敏占位。
