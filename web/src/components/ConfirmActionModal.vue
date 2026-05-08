@@ -9,7 +9,7 @@
     >
       <p style="margin: 0 0 16px; color: #CBD6E5">{{ message }}</p>
 
-      <n-form-item v-if="verifyValue" :label="verifyHint || `输入 \"${verifyValue}\" 以确认`" :show-feedback="false">
+      <n-form-item v-if="verifyValue" :label="verifyLabel" :show-feedback="false">
         <n-input
           v-model:value="verifyInput"
           placeholder=""
@@ -57,6 +57,7 @@ const emit = defineEmits<{
 
 const confirmLabel = computed(() => props.confirmLabel ?? '确认')
 const cancelLabel = computed(() => props.cancelLabel ?? '取消')
+const verifyLabel = computed(() => props.verifyHint || `输入 "${props.verifyValue}" 以确认`)
 const verifyInput = ref('')
 
 watch(
