@@ -13,6 +13,7 @@ import (
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgtype"
 
+	"oc-manager/internal/audit"
 	"oc-manager/internal/auth"
 	"oc-manager/internal/domain"
 	"oc-manager/internal/integrations/newapi"
@@ -114,6 +115,9 @@ type AppInitializeConfig struct {
 	// BaseURL 写入容器 OPENAI_BASE_URL；DefaultProvider/DefaultModel 写入 settings.json。
 	// 任一字段为空时跳过对应注入（settings.json 不会被生成），便于旧测试装配。
 	LLM AppInitializeLLMConfig
+	// AuditHelper 在 new-api 调用失败时写 audit_logs.target_type=newapi_call。
+	// nil 时跳过审计，不影响主流程；生产装配应注入。
+	AuditHelper *audit.NewAPIAuditHelper
 }
 
 // AppInitializeLLMConfig 是 AppInitializeConfig.LLM 的类型，与 internal/config 的
@@ -363,6 +367,13 @@ func (h *AppInitializeHandler) ensureAPIKey(ctx context.Context, app *sqlc.App) 
 		UnlimitedQ: true,
 	})
 	if err != nil {
+		if h.cfg.AuditHelper != nil {
+			h.cfg.AuditHelper.RecordFailure(ctx, audit.NewAPIFailureContext{
+				OrgID:    uuidToString(app.OrgID),
+				Endpoint: "POST /api/token/",
+				Err:      err,
+			})
+		}
 		return "", fmt.Errorf("调用 new-api 创建 api_key 失败: %w", err)
 	}
 	if key.ID == 0 {
@@ -371,6 +382,13 @@ func (h *AppInitializeHandler) ensureAPIKey(ctx context.Context, app *sqlc.App) 
 
 	fullKey, err := client.GetTokenFullKey(ctx, key.ID)
 	if err != nil {
+		if h.cfg.AuditHelper != nil {
+			h.cfg.AuditHelper.RecordFailure(ctx, audit.NewAPIFailureContext{
+				OrgID:    uuidToString(app.OrgID),
+				Endpoint: fmt.Sprintf("POST /api/token/%d/key", key.ID),
+				Err:      err,
+			})
+		}
 		return "", fmt.Errorf("调用 new-api 取完整 sk- 失败: %w", err)
 	}
 

@@ -9,10 +9,12 @@ import (
 
 	"github.com/jackc/pgx/v5/pgtype"
 
+	"oc-manager/internal/audit"
 	"oc-manager/internal/auth"
 	"oc-manager/internal/domain"
 	"oc-manager/internal/integrations/newapi"
 	runtimepkg "oc-manager/internal/integrations/runtime"
+	"oc-manager/internal/service"
 	"oc-manager/internal/store/sqlc"
 )
 
@@ -420,9 +422,11 @@ func (f *fakeDirs) InitAppDirs(_ context.Context, nodeID, appID string) error {
 // 让现有用例（构造一次 fakeNewAPI 给 handler）继续通过；result 在 CreateAPIKey 与
 // GetTokenFullKey 之间共用，模拟 new-api 创 token + 拉完整 key 这条新链路。
 type fakeNewAPI struct {
-	result newapi.APIKey
-	err    error
-	calls  int
+	result       newapi.APIKey
+	err          error // UserScopedFor / CreateAPIKey / SetAPIKeyStatus 公用错误
+	createKeyErr error // 仅让 CreateAPIKey 失败，UserScopedFor 仍成功
+	getKeyErr    error // 仅让 GetTokenFullKey 失败，CreateAPIKey 仍成功
+	calls        int
 }
 
 func (f *fakeNewAPI) UserScopedFor(_ context.Context, _ sqlc.App) (APIKeyClient, error) {
@@ -434,6 +438,9 @@ func (f *fakeNewAPI) UserScopedFor(_ context.Context, _ sqlc.App) (APIKeyClient,
 
 func (f *fakeNewAPI) CreateAPIKey(_ context.Context, _ newapi.CreateAPIKeyInput) (newapi.APIKey, error) {
 	f.calls++
+	if f.createKeyErr != nil {
+		return newapi.APIKey{}, f.createKeyErr
+	}
 	if f.err != nil {
 		return newapi.APIKey{}, f.err
 	}
@@ -441,7 +448,11 @@ func (f *fakeNewAPI) CreateAPIKey(_ context.Context, _ newapi.CreateAPIKeyInput)
 }
 
 // GetTokenFullKey 把 result.Key 作为完整 sk- 返回；测试里通过设置 result.Key 控制注入容器的值。
+// getKeyErr 不为 nil 时优先返回该错误（用于独立测试 GetTokenFullKey 失败路径）。
 func (f *fakeNewAPI) GetTokenFullKey(_ context.Context, _ int64) (string, error) {
+	if f.getKeyErr != nil {
+		return "", f.getKeyErr
+	}
 	if f.err != nil {
 		return "", f.err
 	}
@@ -479,6 +490,77 @@ func mustUUIDForTest(t *testing.T, value string) pgtype.UUID {
 		t.Fatalf("uuid: %v", err)
 	}
 	return id
+}
+
+// fakeAuditRecorder 实现 audit.AuditRecorder，用于断言审计事件被写入。
+type fakeAuditRecorder struct {
+	events []service.AuditEvent
+}
+
+func (f *fakeAuditRecorder) Record(_ context.Context, event service.AuditEvent) (service.AuditResult, error) {
+	f.events = append(f.events, event)
+	return service.AuditResult{}, nil
+}
+
+func TestEnsureAPIKey_CreateAPIKeyFailureRecordsAudit(t *testing.T) {
+	store := newAppInitStub(t)
+	rec := &fakeAuditRecorder{}
+	helper := audit.NewNewAPIAuditHelper(rec)
+	// UserScopedFor 成功，CreateAPIKey 失败
+	client := &fakeNewAPI{createKeyErr: newapi.ErrUpstream}
+
+	cfg := AppInitializeConfig{
+		Cipher:      testCipher(t),
+		AuditHelper: helper,
+	}
+	handler := NewAppInitializeHandler(store, &fakeImages{}, &fakeDirs{}, &fakeContainers{}, &fakeContainers{}, client, cfg)
+
+	err := handler.Handle(context.Background(), buildJob(t, testAppID, ""))
+	if !errors.Is(err, newapi.ErrUpstream) {
+		t.Fatalf("err = %v, want ErrUpstream", err)
+	}
+	if len(rec.events) != 1 {
+		t.Fatalf("审计事件数 = %d, want 1", len(rec.events))
+	}
+	if rec.events[0].TargetType != "newapi_call" {
+		t.Fatalf("TargetType = %q, want newapi_call", rec.events[0].TargetType)
+	}
+	if rec.events[0].Result != "failed" {
+		t.Fatalf("Result = %q, want failed", rec.events[0].Result)
+	}
+}
+
+func TestEnsureAPIKey_GetTokenFullKeyFailureRecordsAudit(t *testing.T) {
+	store := newAppInitStub(t)
+	rec := &fakeAuditRecorder{}
+	helper := audit.NewNewAPIAuditHelper(rec)
+	// CreateAPIKey 成功，GetTokenFullKey 失败
+	getKeyErr := errors.New("get-key-fail")
+	client := &fakeNewAPI{
+		result:     newapi.APIKey{ID: 42, Key: ""},
+		getKeyErr:  getKeyErr,
+	}
+
+	cfg := AppInitializeConfig{
+		Cipher:      testCipher(t),
+		AuditHelper: helper,
+	}
+	handler := NewAppInitializeHandler(store, &fakeImages{}, &fakeDirs{}, &fakeContainers{}, &fakeContainers{}, client, cfg)
+
+	err := handler.Handle(context.Background(), buildJob(t, testAppID, ""))
+	if err == nil || !strings.Contains(err.Error(), "取完整 sk-") {
+		t.Fatalf("err = %v", err)
+	}
+	if len(rec.events) != 1 {
+		t.Fatalf("审计事件数 = %d, want 1", len(rec.events))
+	}
+	if rec.events[0].TargetType != "newapi_call" {
+		t.Fatalf("TargetType = %q, want newapi_call", rec.events[0].TargetType)
+	}
+	// Endpoint 应含 token ID
+	if !strings.Contains(rec.events[0].TargetID, "42") {
+		t.Fatalf("Endpoint/TargetID = %q, want 含 42", rec.events[0].TargetID)
+	}
 }
 
 func TestRenderOpenClawModels(t *testing.T) {
