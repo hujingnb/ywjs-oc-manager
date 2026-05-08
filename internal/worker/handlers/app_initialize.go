@@ -162,6 +162,12 @@ const (
 	// manager 把渲染的 models.json 写到节点 apps/{id}/openclaw-config/models.json，
 	// 通过 file-level bind mount（read-only）覆盖镜像内置文件，让 OpenClaw 用 manager 注入的 provider/model。
 	containerOpenClawAgentModelsPath = "/root/.openclaw/agents/main/agent/models.json"
+	// containerWeixinPluginDataDir 是 OpenClaw weixin 渠道插件持久化 token / accounts.json 的目录。
+	// 上游 plugin 默认写在 /root/.openclaw/openclaw-weixin/，属于容器 ephemeral 路径——
+	// docker restart 后丢失会导致 weixin sidecar 启动时不 spawn provider（gateway 日志
+	// `starting channels and sidecars` 后无 weixin starting 行），消息收不到。
+	// manager 通过 bind mount 把 host 上的 apps/{id}/weixin/ 挂进来，token 跟着 app 生命周期持久化。
+	containerWeixinPluginDataDir = "/root/.openclaw/openclaw-weixin"
 )
 
 // AppInitializeHandler 编排应用初始化全流程。
@@ -520,6 +526,11 @@ func buildContainerSpec(args buildSpecArgs) runtimepkg.ContainerSpec {
 			{HostPath: path.Join(appDir, "knowledge"), ContainerPath: containerKnowledgeAppDir, ReadOnly: true},
 			{HostPath: path.Join(appDir, "state"), ContainerPath: containerStateDir},
 			{HostPath: path.Join(appDir, "logs"), ContainerPath: containerLogsDir},
+			// weixin plugin token 持久化目录：闭合 v1.0.1 GA 验证报告里"重建容器丢 weixin
+			// token state，需要 docker cp 备份/恢复"的 deployment workaround。挂上以后
+			// docker restart / docker rm 重建都不会丢扫码 session，consumer 重新启动后
+			// plugin sidecar 看到 accounts/<account>.json 直接 resume，不需要重新扫码。
+			{HostPath: path.Join(appDir, "weixin"), ContainerPath: containerWeixinPluginDataDir},
 			// models.json 由 manager 在 InitAppDirs 之后通过 agent UploadAppRuntimeFile 写到
 			// apps/<id>/openclaw-config/models.json，再以 file-level bind mount 覆盖容器内
 			// OpenClaw 镜像自带的 models.json，让上层 embedded agent 走 manager 注入的

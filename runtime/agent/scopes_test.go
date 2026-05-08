@@ -114,7 +114,7 @@ func TestScopesAppInit_CreatesFourDirs(t *testing.T) {
 	if resp.StatusCode != http.StatusOK {
 		t.Fatalf("status=%d", resp.StatusCode)
 	}
-	for _, sub := range []string{"knowledge", "workspace", "state", "logs"} {
+	for _, sub := range []string{"knowledge", "workspace", "state", "logs", "openclaw-config", "weixin"} {
 		dir := filepath.Join(dataRoot, "apps", "app-123", sub)
 		fi, err := os.Stat(dir)
 		if err != nil {

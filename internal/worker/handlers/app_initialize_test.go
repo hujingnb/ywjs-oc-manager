@@ -69,10 +69,10 @@ func TestAppInitializeHandlesHappyPath(t *testing.T) {
 		t.Fatal("ciphertext 等于明文，加密未生效")
 	}
 
-	// 容器规格断言：6 个挂载（5 个业务目录 + 1 个 pi-coding-agent settings 目录）、
-	// 关键 env 项、镜像、容器名。
-	if len(containers.lastSpec.Volumes) != 6 {
-		t.Fatalf("Volumes 数量 = %d, want 6", len(containers.lastSpec.Volumes))
+	// 容器规格断言：7 个挂载（5 个业务目录 + 1 个 pi-coding-agent settings 目录 +
+	// 1 个 weixin plugin token 目录）、关键 env 项、镜像、容器名。
+	if len(containers.lastSpec.Volumes) != 7 {
+		t.Fatalf("Volumes 数量 = %d, want 7", len(containers.lastSpec.Volumes))
 	}
 	// 第 6 个 volume 是 OpenClaw agent models.json 单文件 mount（**可写**，
 	// 因为 OpenClaw 启动时会 rename tmp → models.json，RO 会让 catalog 加载失败）。

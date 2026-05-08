@@ -178,12 +178,14 @@ func isValidScopeID(id string) bool {
 	return true
 }
 
-// handleAppInit 创建 apps/<appID>/{knowledge,workspace,state,logs,openclaw-config} 5 个子目录。
+// handleAppInit 创建 apps/<appID>/{knowledge,workspace,state,logs,openclaw-config,weixin} 6 个子目录。
 // openclaw-config 用于存放 manager 渲染的 OpenClaw 上层 embedded agent 配置（如 models.json），
 // 通过 file-level bind mount 暴露到容器内 /root/.openclaw/agents/main/agent/。
+// weixin 用于持久化 OpenClaw weixin 渠道插件的 token / accounts.json，bind mount 到容器内
+// /root/.openclaw/openclaw-weixin/，让 docker restart 不丢扫码 session。
 // 操作幂等：MkdirAll 在目录已存在时 no-op。
 func handleAppInit(w http.ResponseWriter, _ *http.Request, dataRoot, appID string) {
-	for _, sub := range []string{"knowledge", "workspace", "state", "logs", "openclaw-config"} {
+	for _, sub := range []string{"knowledge", "workspace", "state", "logs", "openclaw-config", "weixin"} {
 		dir := filepath.Join(dataRoot, "apps", appID, sub)
 		if err := os.MkdirAll(dir, 0o755); err != nil {
 			writeError(w, http.StatusInternalServerError, err.Error())
