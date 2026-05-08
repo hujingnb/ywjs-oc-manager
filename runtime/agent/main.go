@@ -184,7 +184,18 @@ func hostnameOrEmpty() string {
 // /v1/docker/* 走 docker socket 反向代理；其它 path 透传到 fallback handler，
 // 让 healthz / file API ping 等路由可以共用同一进程。
 func newDockerEntryHandler(opts agentOptions, fallback http.Handler) http.Handler {
-	proxy := NewDockerProxyHandler(opts.dockerSocket, opts.agentToken, opts.trustedCIDR)
+	hostDataRoot, err := detectHostDataRoot(opts.dataRoot)
+	if err != nil {
+		// detect 失败仅警告，按"不重写"行为继续；docker proxy 退化为透传。
+		// 实际 OpenClaw 容器的 file-level mount 仍可能撞空目录占位的旧问题，
+		// ops 看到此日志应检查 agent 是否能读 /proc/self/mountinfo。
+		fmt.Fprintf(os.Stderr, "agent: detectHostDataRoot 失败，docker proxy 不重写 mount source: %v\n", err)
+		hostDataRoot = opts.dataRoot
+	}
+	if hostDataRoot != opts.dataRoot {
+		fmt.Fprintf(os.Stderr, "agent: docker proxy mount 重写启用：%s -> %s\n", opts.dataRoot, hostDataRoot)
+	}
+	proxy := NewDockerProxyHandler(opts.dockerSocket, opts.agentToken, opts.trustedCIDR, opts.dataRoot, hostDataRoot)
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if len(r.URL.Path) >= len(dockerProxyPathPrefix) && r.URL.Path[:len(dockerProxyPathPrefix)] == dockerProxyPathPrefix {
 			proxy.ServeHTTP(w, r)
