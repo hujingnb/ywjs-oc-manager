@@ -172,14 +172,14 @@ func runManager(ctx context.Context, cfg config.Config, logOut io.Writer) error 
 			cipher: cipher,
 		}
 		rechargeService = service.NewRechargeService(dbStore.Queries, newapiClient)
-		usageService = service.NewUsageService(dbStore.Queries, newapiClient)
-		// newapiAuditHelper 实现 service.NewAPIFailureAuditor，供 OrganizationService 写失败审计。
+		// newapiAuditHelper 实现 service.NewAPIFailureAuditor，供各 service 写失败审计。
 		newapiAuditHelper := audit.NewNewAPIAuditHelper(auditService)
+		usageService = service.NewUsageService(dbStore.Queries, newapiClient, nil)
 		organizationService = service.NewOrganizationService(dbStore.Queries, newapiClient, cipher, newapiAuditHelper)
 	} else {
 		// 未配 newapi：仍构造一个会在调用时 fail-soft 的 service（store/client 全 nil），
 		// 保持 cmd/server 装配路径稳定，调用时返回 ErrUsageUnavailable / 创建组织报错。
-		usageService = service.NewUsageService(nil, nil)
+		usageService = service.NewUsageService(nil, nil, nil)
 		organizationService = service.NewOrganizationService(dbStore.Queries, nil, nil, nil)
 	}
 	platformOverviewService := service.NewPlatformOverviewService(dbStore.Queries)

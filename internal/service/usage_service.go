@@ -43,16 +43,18 @@ type UsageStore interface {
 //   - 角色权限校验仍在 service 层做（与 knowledge / app service 一致）；
 //   - 把 manager UUID 到 new-api 数字 id 的转译集中在本文件，handler 不感知 new-api 数字 id。
 type UsageService struct {
-	store  UsageStore
-	client UsageNewAPIClient
+	store       UsageStore
+	client      UsageNewAPIClient
+	failAuditor NewAPIFailureAuditor // 与 OrganizationService 同款；nil 时跳过审计
 }
 
 // NewUsageService 创建 usage service。
 //
 // store 用于 manager UUID → new-api 数字 id 的查询；client 是 newapi.Client 满足的薄接口。
 // 任一为 nil 时所有方法返回 ErrUsageUnavailable，便于在 manager 启动时未配 new-api 的场景下 fail-soft。
-func NewUsageService(store UsageStore, client UsageNewAPIClient) *UsageService {
-	return &UsageService{store: store, client: client}
+// failAuditor 为 nil 时静默跳过 new-api 失败审计。
+func NewUsageService(store UsageStore, client UsageNewAPIClient, failAuditor NewAPIFailureAuditor) *UsageService {
+	return &UsageService{store: store, client: client, failAuditor: failAuditor}
 }
 
 // LogsPage 是 app / member 维度的响应：透传 new-api log entries + 分页 total。
@@ -102,6 +104,15 @@ func (s *UsageService) GetAppUsage(ctx context.Context, principal auth.Principal
 		ModelName: opts.ModelName,
 	})
 	if err != nil {
+		if s.failAuditor != nil {
+			s.failAuditor.RecordNewAPIFailure(ctx, NewAPIFailureContext{
+				ActorID:   principal.UserID,
+				ActorRole: principal.Role,
+				OrgID:     ownerOrgID,
+				Endpoint:  "GET /api/log/?token_id=...",
+				Err:       err,
+			})
+		}
 		return LogsPage{}, mapUsageError(err)
 	}
 	return LogsPage{Scope: "app", ScopeID: appID, Items: page.Items, Total: page.Total, UpdatedAt: time.Now()}, nil
@@ -139,6 +150,15 @@ func (s *UsageService) GetMemberUsage(ctx context.Context, principal auth.Princi
 		ModelName: opts.ModelName,
 	})
 	if err != nil {
+		if s.failAuditor != nil {
+			s.failAuditor.RecordNewAPIFailure(ctx, NewAPIFailureContext{
+				ActorID:   principal.UserID,
+				ActorRole: principal.Role,
+				OrgID:     orgID,
+				Endpoint:  "GET /api/log/?token_id=...",
+				Err:       err,
+			})
+		}
 		return LogsPage{}, mapUsageError(err)
 	}
 	return LogsPage{Scope: "member", ScopeID: memberID, Items: page.Items, Total: page.Total, UpdatedAt: time.Now()}, nil
@@ -172,6 +192,15 @@ func (s *UsageService) GetOrgUsage(ctx context.Context, principal auth.Principal
 	}
 	items, err := s.client.GetUserQuotaDates(ctx, userID, since, until)
 	if err != nil {
+		if s.failAuditor != nil {
+			s.failAuditor.RecordNewAPIFailure(ctx, NewAPIFailureContext{
+				ActorID:   principal.UserID,
+				ActorRole: principal.Role,
+				OrgID:     orgID,
+				Endpoint:  "GET /api/data/users?id=...",
+				Err:       err,
+			})
+		}
 		return QuotaSeries{}, mapUsageError(err)
 	}
 	return QuotaSeries{Scope: "organization", ScopeID: orgID, Items: items, UpdatedAt: time.Now()}, nil
@@ -187,6 +216,15 @@ func (s *UsageService) GetPlatformUsage(ctx context.Context, principal auth.Prin
 	}
 	items, err := s.client.GetAllQuotaDates(ctx, since, until)
 	if err != nil {
+		if s.failAuditor != nil {
+			s.failAuditor.RecordNewAPIFailure(ctx, NewAPIFailureContext{
+				ActorID:   principal.UserID,
+				ActorRole: principal.Role,
+				OrgID:     "",
+				Endpoint:  "GET /api/data/",
+				Err:       err,
+			})
+		}
 		return QuotaSeries{}, mapUsageError(err)
 	}
 	return QuotaSeries{Scope: "platform", Items: items, UpdatedAt: time.Now()}, nil
