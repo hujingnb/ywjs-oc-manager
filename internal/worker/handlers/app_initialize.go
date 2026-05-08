@@ -642,7 +642,8 @@ func configureOpenClawDefaultModel(ctx context.Context, execer ContainerExecer, 
 				provider: map[string]any{
 					"baseUrl": baseURL,
 					"apiKey":  "${OPENAI_API_KEY}",
-					"models":  []any{map[string]any{"id": model}},
+					// schema 要求每个 model entry 必填 id + name（minLength=1）。
+					"models": []any{map[string]any{"id": model, "name": model}},
 				},
 			},
 		},

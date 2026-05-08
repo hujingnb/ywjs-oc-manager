@@ -613,6 +613,10 @@ func TestConfigureOpenClawDefaultModel_PatchesAgentAndModels(t *testing.T) {
 	if !strings.Contains(shellLine, `"qwen2.5:0.5b"`) {
 		t.Errorf("patch 缺 model 值: %q", shellLine)
 	}
+	// schema 要求 models[].name 必填，未填会被 OpenClaw config validate 拒绝
+	if !strings.Contains(shellLine, `"name":"qwen2.5:0.5b"`) {
+		t.Errorf("patch 缺 model name 字段: %q", shellLine)
+	}
 	if !strings.Contains(shellLine, `"models"`) || !strings.Contains(shellLine, `"providers"`) {
 		t.Errorf("patch 缺 models.providers: %q", shellLine)
 	}
