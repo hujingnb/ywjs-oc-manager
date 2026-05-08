@@ -1,4 +1,4 @@
-.PHONY: dev-up dev-down test vet build sqlc-generate migrate-up migrate-down check-compose logs web-test web-typecheck web-build build-openclaw-runtime verify-openclaw-runtime sync-openclaw-runtime-image debug-ollama debug-newapi newapi-probe seed-e2e
+.PHONY: dev-up dev-down test vet build sqlc-generate migrate-up migrate-down check-compose logs web-test web-typecheck web-build build-openclaw-runtime verify-openclaw-runtime sync-openclaw-runtime-image debug-ollama debug-newapi newapi-probe seed-e2e smoke-v102
 
 dev-up:
 	docker compose up -d
@@ -69,3 +69,6 @@ logs:
 # 会 TRUNCATE e2e 业务表后重建 fixture，stdout 末行是 fixture JSON 供 Playwright 解析。
 seed-e2e:
 	docker compose run --rm -e OCM_E2E=1 manager-api go run ./cmd/seed-e2e
+
+smoke-v102:  ## 跑 v1.0.2 干净环境 smoke（前置：阶段 0 完成）
+	@bash scripts/v102-smoke.sh
