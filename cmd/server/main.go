@@ -164,6 +164,9 @@ func runManager(ctx context.Context, cfg config.Config, logOut io.Writer) error 
 	//   - cfg.NewAPI.BaseURL 为空时所有以上能力降级为不可用，handler 调用直接报错。
 	var newapiClient *newapi.Client
 	var newapiFactory handlers.NewAPIClientFactory
+	// appInitAuditHelper 在 newapi 配置完成时由内层赋值；若 newapi 未启用，AppInitializeConfig
+	// 拿到 nil 跳过审计写入，行为与 OOS-3 helper 自身的 nil 安全约定一致。
+	var appInitAuditHelper *audit.NewAPIAuditHelper
 	if cfg.NewAPI.BaseURL != "" {
 		newapiClient = newapi.NewClient(cfg.NewAPI.BaseURL, cfg.NewAPI.AdminToken, cfg.NewAPI.AdminUserID)
 		newapiFactory = &orgScopedClientFactory{
@@ -172,10 +175,12 @@ func runManager(ctx context.Context, cfg config.Config, logOut io.Writer) error 
 			cipher: cipher,
 		}
 		rechargeService = service.NewRechargeService(dbStore.Queries, newapiClient)
-		// newapiAuditHelper 实现 service.NewAPIFailureAuditor，供各 service 写失败审计。
+		// newapiAuditHelper 实现 service.NewAPIFailureAuditor，供各 service / worker 写失败审计。
 		newapiAuditHelper := audit.NewNewAPIAuditHelper(auditService)
-		usageService = service.NewUsageService(dbStore.Queries, newapiClient, nil)
+		usageService = service.NewUsageService(dbStore.Queries, newapiClient, newapiAuditHelper)
 		organizationService = service.NewOrganizationService(dbStore.Queries, newapiClient, cipher, newapiAuditHelper)
+		// 同时把 helper 暴露到 if 块外，给 AppInitializeConfig.AuditHelper 装配使用。
+		appInitAuditHelper = newapiAuditHelper
 	} else {
 		// 未配 newapi：仍构造一个会在调用时 fail-soft 的 service（store/client 全 nil），
 		// 保持 cmd/server 装配路径稳定，调用时返回 ErrUsageUnavailable / 创建组织报错。
@@ -205,6 +210,7 @@ func runManager(ctx context.Context, cfg config.Config, logOut io.Writer) error 
 				DefaultProvider: cfg.OpenClaw.LLM.DefaultProvider,
 				DefaultModel:    cfg.OpenClaw.LLM.DefaultModel,
 			},
+			AuditHelper: appInitAuditHelper,
 		},
 	)
 	// runtimeAdapter 同时实现 AppRuntimeFileWriter（UploadAppRuntimeFile），
