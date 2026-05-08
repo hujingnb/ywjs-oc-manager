@@ -1,126 +1,142 @@
 <template>
-  <div class="dashboard-shell">
-    <aside class="sidebar" aria-label="主导航">
+  <n-layout has-sider style="min-height: 100vh">
+    <n-layout-sider
+      bordered
+      :width="220"
+      :collapsed-width="64"
+      content-style="display: flex; flex-direction: column; height: 100%"
+    >
+      <!-- Logo -->
       <div class="brand-block">
         <div class="brand-mark">OC</div>
-        <div>
+        <div class="logo-text">
           <strong>OpenClaw</strong>
           <span>Manager</span>
         </div>
       </div>
 
-      <nav class="nav-list">
-        <RouterLink class="nav-item" exact-active-class="active" to="/">
-          <LayoutDashboard :size="18" />
-          <span>总览</span>
-        </RouterLink>
-        <RouterLink
-          v-if="auth.user?.role === 'platform_admin'"
-          class="nav-item"
-          active-class="active"
-          to="/platform/dashboard"
-        >
-          <Gauge :size="18" />
-          <span>平台</span>
-        </RouterLink>
-        <RouterLink
-          v-if="auth.user?.role === 'platform_admin'"
-          class="nav-item"
-          active-class="active"
-          to="/organizations"
-        >
-          <Building2 :size="18" />
-          <span>组织</span>
-        </RouterLink>
-        <RouterLink class="nav-item" active-class="active" to="/members">
-          <Users :size="18" />
-          <span>成员</span>
-        </RouterLink>
-        <RouterLink class="nav-item" active-class="active" to="/apps">
-          <Bot :size="18" />
-          <span>应用</span>
-        </RouterLink>
-        <RouterLink class="nav-item" active-class="active" to="/knowledge">
-          <BookOpen :size="18" />
-          <span>知识库</span>
-        </RouterLink>
-        <RouterLink class="nav-item" active-class="active" to="/usage">
-          <BarChart3 :size="18" />
-          <span>用量</span>
-        </RouterLink>
-        <RouterLink class="nav-item" active-class="active" to="/audit-logs">
-          <FileSearch :size="18" />
-          <span>审计</span>
-        </RouterLink>
-        <RouterLink
-          v-if="auth.user?.role === 'platform_admin'"
-          class="nav-item"
-          active-class="active"
-          to="/runtime-nodes"
-        >
-          <Server :size="18" />
-          <span>运行节点</span>
-        </RouterLink>
-      </nav>
+      <!-- Nav -->
+      <n-menu
+        :value="activeKey"
+        :options="menuOptions"
+        :collapsed-width="64"
+        :collapsed-icon-size="22"
+        :indent="16"
+        style="flex: 1"
+        @update:value="onNav"
+      />
 
+      <!-- User footer -->
       <div class="sidebar-footer">
         <p v-if="auth.user" class="me-info">
           <strong>{{ auth.user.display_name }}</strong>
           <small>{{ auth.user.username }}</small>
         </p>
-        <button v-if="auth.user" class="secondary-button" type="button" @click="onLogout">
-          <LogOut :size="16" />
-          <span>退出</span>
-        </button>
+        <n-button
+          v-if="auth.user"
+          size="small"
+          quaternary
+          style="width: 100%; justify-content: flex-start; color: #8A94C6"
+          @click="onLogout"
+        >
+          <template #icon><LogOut :size="15" /></template>
+          退出
+        </n-button>
       </div>
-    </aside>
+    </n-layout-sider>
 
-    <div class="workspace">
-      <header class="topbar">
+    <n-layout>
+      <n-layout-header
+        bordered
+        style="padding: 0 24px; display: flex; align-items: center; justify-content: space-between; min-height: 64px"
+      >
         <div>
           <p class="eyebrow">{{ environmentLabel }}</p>
-          <h1>控制台</h1>
+          <h1 style="margin: 0; font-size: 20px">控制台</h1>
         </div>
         <div class="topbar-actions">
-          <span class="status-pill ok">API 正常</span>
-          <span class="status-pill warn">Ollama 待配置模型</span>
-          <button class="icon-button" type="button" aria-label="刷新" @click="reload">
-            <RefreshCw :size="18" />
-          </button>
+          <n-tag type="success" size="small" :bordered="false">API 正常</n-tag>
+          <n-tag type="warning" size="small" :bordered="false">Ollama 待配置模型</n-tag>
+          <n-button quaternary circle @click="reload">
+            <template #icon><RefreshCw :size="17" /></template>
+          </n-button>
         </div>
-      </header>
+      </n-layout-header>
 
-      <RouterView />
-    </div>
-  </div>
+      <n-layout-content content-style="padding: 24px">
+        <RouterView />
+      </n-layout-content>
+    </n-layout>
+  </n-layout>
 </template>
 
 <script setup lang="ts">
-import { computed } from 'vue'
-import { useRouter } from 'vue-router'
+import { computed, h } from 'vue'
+import { useRoute, useRouter } from 'vue-router'
 import {
-  BarChart3,
-  BookOpen,
-  Bot,
-  Building2,
-  FileSearch,
-  Gauge,
-  LayoutDashboard,
-  LogOut,
-  RefreshCw,
-  Server,
-  Users,
+  NButton, NLayout, NLayoutContent, NLayoutHeader, NLayoutSider, NMenu, NTag,
+  type MenuOption,
+} from 'naive-ui'
+import {
+  BarChart3, BookOpen, Bot, Building2, FileSearch, Gauge,
+  LayoutDashboard, LogOut, RefreshCw, Server, Users,
 } from 'lucide-vue-next'
 
 import { useAuthStore } from '@/stores/auth'
 
 const auth = useAuthStore()
+const route = useRoute()
 const router = useRouter()
 
 const environmentLabel = computed(() => {
   if (!auth.user) return '本地调试环境'
   return `本地调试环境 · ${auth.user.role}`
 })
+
+// 根据当前路由计算激活的菜单项 key（前缀匹配）
+const activeKey = computed(() => {
+  const p = route.path
+  if (p === '/') return '/'
+  const prefixes = [
+    '/platform/dashboard',
+    '/organizations',
+    '/members',
+    '/apps',
+    '/knowledge',
+    '/usage',
+    '/audit-logs',
+    '/runtime-nodes',
+    '/persona',
+  ]
+  return prefixes.find(k => p.startsWith(k)) ?? '/'
+})
+
+const isPlatformAdmin = computed(() => auth.user?.role === 'platform_admin')
+
+const menuOptions = computed<MenuOption[]>(() => {
+  const items: MenuOption[] = [
+    { key: '/', label: '总览', icon: () => h(LayoutDashboard, { size: 18 }) },
+  ]
+  if (isPlatformAdmin.value) {
+    items.push({ key: '/platform/dashboard', label: '平台', icon: () => h(Gauge, { size: 18 }) })
+    items.push({ key: '/organizations', label: '组织', icon: () => h(Building2, { size: 18 }) })
+  }
+  items.push(
+    { key: '/members', label: '成员', icon: () => h(Users, { size: 18 }) },
+    { key: '/apps', label: '应用', icon: () => h(Bot, { size: 18 }) },
+    { key: '/knowledge', label: '知识库', icon: () => h(BookOpen, { size: 18 }) },
+    { key: '/usage', label: '用量', icon: () => h(BarChart3, { size: 18 }) },
+    { key: '/audit-logs', label: '审计', icon: () => h(FileSearch, { size: 18 }) },
+  )
+  if (isPlatformAdmin.value) {
+    items.push({ key: '/runtime-nodes', label: '运行节点', icon: () => h(Server, { size: 18 }) })
+  }
+  return items
+})
+
+function onNav(key: string) {
+  router.push(key)
+}
 
 async function onLogout() {
   await auth.logout()
@@ -131,3 +147,35 @@ function reload() {
   window.location.reload()
 }
 </script>
+
+<style scoped>
+.brand-block {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 16px;
+  border-bottom: 1px solid rgba(255, 255, 255, 0.06);
+  min-height: 64px;
+}
+
+.brand-mark {
+  width: 36px;
+  height: 36px;
+  border-radius: 10px;
+  display: grid;
+  place-items: center;
+  background: linear-gradient(135deg, #00F0FF, #7B2EDA);
+  box-shadow: 0 0 14px rgba(0, 240, 255, 0.3);
+  font-size: 13px;
+  font-weight: 800;
+  flex-shrink: 0;
+}
+
+.logo-text strong { display: block; font-size: 15px; }
+.logo-text span { display: block; font-size: 11px; color: #8A94C6; }
+
+.sidebar-footer {
+  padding: 12px 14px 16px;
+  border-top: 1px solid rgba(255, 255, 255, 0.06);
+}
+</style>
