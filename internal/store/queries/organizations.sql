@@ -65,3 +65,18 @@ RETURNING *;
 -- 用于组织创建链路失败时回滚刚刚 INSERT 的孤儿记录。
 -- 正常生命周期不可见此查询；普通"删除"必须走 SoftDeleteOrganization。
 DELETE FROM organizations WHERE id = $1;
+
+-- name: GetOrganizationForUpdate :one
+-- OOS-2 access_token 自愈用：以行锁查询组织，避免并发更新密文时出现写丢失。
+SELECT *
+FROM organizations
+WHERE id = $1
+FOR UPDATE;
+
+-- name: UpdateOrganizationCredentialsCiphertext :one
+-- OOS-2 access_token 自愈用：仅更新 newapi_user_credentials_ciphertext，不动 newapi_user_id。
+UPDATE organizations
+SET newapi_user_credentials_ciphertext = $2,
+    updated_at = now()
+WHERE id = $1
+RETURNING *;
