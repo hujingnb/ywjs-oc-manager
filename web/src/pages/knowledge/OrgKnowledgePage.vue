@@ -1,104 +1,63 @@
 <template>
-  <main class="dashboard-main">
-    <section class="panel">
-      <div class="panel-heading">
+  <div style="display: grid; gap: 18px">
+    <!-- 文件列表 -->
+    <n-card :bordered="true">
+      <template #header>
         <div>
           <p class="eyebrow">{{ eyebrow }}</p>
-          <h2>组织知识库</h2>
+          <h2 style="margin: 0">组织知识库</h2>
         </div>
+      </template>
+      <template #header-extra>
         <label class="primary-button" :class="{ disabled: !canManage }">
           <input class="hidden-input" type="file" :disabled="!canManage" @change="onUpload" />
           上传文件
         </label>
-      </div>
+      </template>
 
-      <p class="state-text">
-        当前路径：<code>{{ relativePath || '/' }}</code>
-        <button v-if="relativePath" class="secondary-button" type="button" @click="goUp">返回上级</button>
-      </p>
+      <n-space align="center" style="margin-bottom: 12px">
+        <span class="state-text" style="margin: 0">当前路径：<code>{{ relativePath || '/' }}</code></span>
+        <n-button v-if="relativePath" size="small" @click="goUp">返回上级</n-button>
+      </n-space>
 
       <div v-if="!effectiveOrgId" class="state-text">当前账号未关联组织</div>
       <div v-else-if="isLoading" class="state-text">加载中…</div>
       <div v-else-if="error" class="state-text danger">查询失败：{{ error.message }}</div>
-      <table v-else>
-        <thead>
-          <tr>
-            <th>名称</th>
-            <th>大小</th>
-            <th class="actions-column">操作</th>
-          </tr>
-        </thead>
-        <tbody>
-          <tr v-for="entry in listing?.entries ?? []" :key="entry.path">
-            <td>
-              <strong v-if="entry.is_dir" class="folder" @click="enter(entry)">{{ entry.name }}/</strong>
-              <span v-else>{{ entry.name }}</span>
-            </td>
-            <td>{{ entry.is_dir ? '—' : formatSize(entry.size) }}</td>
-            <td class="actions-column">
-              <button v-if="canManage && !entry.is_dir" class="secondary-button" type="button" @click="onDelete(entry)">
-                删除
-              </button>
-            </td>
-          </tr>
-          <tr v-if="!listing?.entries?.length">
-            <td colspan="3" class="state-text">当前目录为空</td>
-          </tr>
-        </tbody>
-      </table>
-    </section>
+      <n-data-table
+        v-else
+        :columns="fileColumns"
+        :data="listing?.entries ?? []"
+        size="small"
+        :bordered="false"
+        :row-key="(row) => row.path"
+      />
+    </n-card>
 
-    <section v-if="canManage && effectiveOrgId" class="panel">
-      <div class="panel-heading">
+    <!-- 节点同步状态 -->
+    <n-card v-if="canManage && effectiveOrgId" :bordered="true">
+      <template #header>
         <div>
           <p class="eyebrow">Sync · 节点同步状态</p>
-          <h2>各节点同步状态</h2>
+          <h2 style="margin: 0">各节点同步状态</h2>
         </div>
-      </div>
+      </template>
+
       <div v-if="syncStatusLoading" class="state-text">加载中…</div>
-      <table v-else>
-        <thead>
-          <tr>
-            <th>节点 ID</th>
-            <th>状态</th>
-            <th>最近成功</th>
-            <th>最近错误</th>
-            <th class="actions-column">操作</th>
-          </tr>
-        </thead>
-        <tbody>
-          <tr v-for="entry in syncStatuses ?? []" :key="entry.node_id">
-            <td><code>{{ entry.node_id.slice(0, 12) }}</code></td>
-            <td>
-              <span :class="['sync-badge', `sync-${entry.status}`]">{{ syncStatusLabel(entry.status) }}</span>
-            </td>
-            <td>{{ formatTime(entry.last_success_at) }}</td>
-            <td>
-              <span v-if="entry.last_error" class="state-text danger">{{ entry.last_error }}</span>
-              <span v-else>—</span>
-            </td>
-            <td class="actions-column">
-              <button
-                class="secondary-button"
-                type="button"
-                :disabled="retryMutation.isPending.value"
-                @click="onRetry(entry.node_id)"
-              >
-                {{ retryMutation.isPending.value ? '入队中…' : '重试同步' }}
-              </button>
-            </td>
-          </tr>
-          <tr v-if="!syncStatuses?.length">
-            <td colspan="5" class="state-text">暂无节点同步记录（上传组织级文件后会自动出现）</td>
-          </tr>
-        </tbody>
-      </table>
-    </section>
-  </main>
+      <n-data-table
+        v-else
+        :columns="syncColumns"
+        :data="syncStatuses ?? []"
+        size="small"
+        :bordered="false"
+        :row-key="(row) => row.node_id"
+      />
+    </n-card>
+  </div>
 </template>
 
 <script setup lang="ts">
-import { computed, ref } from 'vue'
+import { computed, h, ref } from 'vue'
+import { NButton, NCard, NDataTable, NSpace, NTag, type DataTableColumns } from 'naive-ui'
 
 import {
   useDeleteOrgKnowledge,
@@ -107,6 +66,7 @@ import {
   useRetryOrgKnowledgeSync,
   useUploadOrgKnowledge,
   type KnowledgeEntry,
+  type OrgSyncStatusEntry,
 } from '@/api/hooks/useKnowledge'
 import { useAuthStore } from '@/stores/auth'
 
@@ -125,6 +85,10 @@ const deleteMutation = useDeleteOrgKnowledge(effectiveOrgId, relativeRef)
 const { data: syncStatuses, isLoading: syncStatusLoading } = useOrgKnowledgeSyncStatusQuery(effectiveOrgId)
 const retryMutation = useRetryOrgKnowledgeSync(effectiveOrgId)
 
+function syncTagType(s: string): 'success' | 'warning' | 'error' | 'default' {
+  return s === 'synced' ? 'success' : s === 'pending' ? 'warning' : s === 'failed' ? 'error' : 'default'
+}
+
 function syncStatusLabel(s: string): string {
   return s === 'synced' ? '已同步' : s === 'pending' ? '同步中' : s === 'failed' ? '失败' : s
 }
@@ -134,14 +98,14 @@ function formatTime(iso?: string): string {
   return new Date(iso).toLocaleString('zh-CN', { hour12: false })
 }
 
-async function onRetry(nodeId: string) {
-  await retryMutation.mutateAsync(nodeId)
+function formatSize(value: number): string {
+  if (value < 1024) return `${value} B`
+  if (value < 1024 * 1024) return `${(value / 1024).toFixed(1)} KB`
+  return `${(value / 1024 / 1024).toFixed(2)} MB`
 }
 
 function enter(entry: KnowledgeEntry) {
-  if (entry.is_dir) {
-    relativePath.value = entry.path
-  }
+  if (entry.is_dir) relativePath.value = entry.path
 }
 
 function goUp() {
@@ -164,20 +128,51 @@ async function onDelete(entry: KnowledgeEntry) {
   await deleteMutation.mutateAsync(entry.path)
 }
 
-function formatSize(value: number): string {
-  if (value < 1024) return `${value} B`
-  if (value < 1024 * 1024) return `${(value / 1024).toFixed(1)} KB`
-  return `${(value / 1024 / 1024).toFixed(2)} MB`
+async function onRetry(nodeId: string) {
+  await retryMutation.mutateAsync(nodeId)
 }
+
+const fileColumns: DataTableColumns<KnowledgeEntry> = [
+  {
+    title: '名称', key: 'name',
+    render: (row) => row.is_dir
+      ? h('strong', { style: 'cursor: pointer; color: #00F0FF; text-decoration: underline dotted', onClick: () => enter(row) }, `${row.name}/`)
+      : row.name,
+  },
+  { title: '大小', key: 'size', render: (row) => row.is_dir ? '—' : formatSize(row.size) },
+  {
+    title: '操作', key: 'actions',
+    render: (row) => canManage.value && !row.is_dir
+      ? h(NButton, { size: 'small', onClick: () => onDelete(row) }, { default: () => '删除' })
+      : null,
+  },
+]
+
+const syncColumns: DataTableColumns<OrgSyncStatusEntry> = [
+  { title: '节点 ID', key: 'node_id', render: (row) => h('code', row.node_id.slice(0, 12)) },
+  {
+    title: '状态', key: 'status',
+    render: (row) => h(NTag, { type: syncTagType(row.status), size: 'small', bordered: false }, { default: () => syncStatusLabel(row.status) }),
+  },
+  { title: '最近成功', key: 'last_success_at', render: (row) => formatTime(row.last_success_at) },
+  {
+    title: '最近错误', key: 'last_error',
+    render: (row) => row.last_error
+      ? h('span', { style: 'color: #FF3B5C; font-size: 12px' }, row.last_error)
+      : '—',
+  },
+  {
+    title: '操作', key: 'actions',
+    render: (row) => h(NButton, {
+      size: 'small',
+      disabled: retryMutation.isPending.value,
+      onClick: () => onRetry(row.node_id),
+    }, { default: () => retryMutation.isPending.value ? '入队中…' : '重试同步' }),
+  },
+]
 </script>
 
 <style scoped>
-.folder {
-  cursor: pointer;
-  color: #276d5c;
-  text-decoration: underline dotted;
-}
-
 .hidden-input {
   display: none;
 }
@@ -185,28 +180,5 @@ function formatSize(value: number): string {
 .primary-button.disabled {
   cursor: not-allowed;
   opacity: 0.5;
-}
-
-.sync-badge {
-  display: inline-block;
-  padding: 2px 10px;
-  border-radius: 10px;
-  font-size: 12px;
-  font-weight: 500;
-}
-
-.sync-pending {
-  background: #fff7e6;
-  color: #ad6800;
-}
-
-.sync-synced {
-  background: #e6f7e0;
-  color: #2c7a2c;
-}
-
-.sync-failed {
-  background: #ffe1e1;
-  color: #b51d1d;
 }
 </style>
