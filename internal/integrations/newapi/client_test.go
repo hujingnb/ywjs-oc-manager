@@ -357,3 +357,101 @@ func TestClient_DeleteUser_NotFoundMappedToErrNotFound(t *testing.T) {
 		t.Errorf("err=%v，期望 ErrNotFound", err)
 	}
 }
+
+// fakeRefresher 模拟 access_token 自愈逻辑。
+type fakeRefresher struct {
+	callCount       int
+	nextAccessToken string
+	err             error
+}
+
+func (f *fakeRefresher) RefreshAccessToken(ctx context.Context) (string, error) {
+	f.callCount++
+	if f.err != nil {
+		return "", f.err
+	}
+	return f.nextAccessToken, nil
+}
+
+func TestUserScopedClient_401TriggersRefreshAndRetries(t *testing.T) {
+	var requestCount int
+	var lastAuthHeader string
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		requestCount++
+		lastAuthHeader = r.Header.Get("Authorization")
+		if requestCount == 1 {
+			w.WriteHeader(http.StatusUnauthorized)
+			return
+		}
+		w.WriteHeader(http.StatusOK)
+		w.Write([]byte(`{"success":true,"data":{"key":"sk-fresh"}}`))
+	}))
+	defer srv.Close()
+
+	base := NewClient(srv.URL, "a", 1)
+	refresher := &fakeRefresher{nextAccessToken: "fresh-token"}
+	user := base.AsUserWithRefresh(99, "stale-token", refresher)
+
+	fullKey, err := user.GetTokenFullKey(context.Background(), 13)
+	if err != nil {
+		t.Fatalf("err=%v", err)
+	}
+	if fullKey != "sk-fresh" {
+		t.Errorf("fullKey=%q", fullKey)
+	}
+	if requestCount != 2 {
+		t.Errorf("requestCount=%d，期望 2（首次 401 + 重试 1 次）", requestCount)
+	}
+	if lastAuthHeader != "Bearer fresh-token" {
+		t.Errorf("最终 Authorization=%q，期望 Bearer fresh-token", lastAuthHeader)
+	}
+	if refresher.callCount != 1 {
+		t.Errorf("refresher.callCount=%d，期望 1", refresher.callCount)
+	}
+}
+
+func TestUserScopedClient_401WithoutRefresherPropagates(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusUnauthorized)
+	}))
+	defer srv.Close()
+	base := NewClient(srv.URL, "", 0)
+	user := base.AsUser(99, "stale-token") // 旧签名，无 refresher
+	_, err := user.GetTokenFullKey(context.Background(), 13)
+	if !errors.Is(err, ErrUnauthorized) {
+		t.Errorf("err=%v，期望 ErrUnauthorized", err)
+	}
+}
+
+func TestUserScopedClient_RefresherFailurePropagatesUnauthorized(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusUnauthorized)
+	}))
+	defer srv.Close()
+	base := NewClient(srv.URL, "", 0)
+	refresher := &fakeRefresher{err: errors.New("login 5xx")}
+	user := base.AsUserWithRefresh(99, "stale-token", refresher)
+	_, err := user.GetTokenFullKey(context.Background(), 13)
+	if !errors.Is(err, ErrUnauthorized) {
+		t.Errorf("err=%v，期望 ErrUnauthorized（refresher 失败回退到 401）", err)
+	}
+}
+
+func TestUserScopedClient_SecondCall401AfterRefreshDoesNotLoop(t *testing.T) {
+	var requestCount int
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		requestCount++
+		w.WriteHeader(http.StatusUnauthorized)
+	}))
+	defer srv.Close()
+	base := NewClient(srv.URL, "", 0)
+	refresher := &fakeRefresher{nextAccessToken: "fresh"}
+	user := base.AsUserWithRefresh(99, "stale", refresher)
+	_, err := user.GetTokenFullKey(context.Background(), 13)
+	if !errors.Is(err, ErrUnauthorized) {
+		t.Errorf("err=%v", err)
+	}
+	if requestCount != 2 {
+		t.Errorf("requestCount=%d，期望 2（首次 401 + 重试 1 次仍 401，不再循环）", requestCount)
+	}
+}

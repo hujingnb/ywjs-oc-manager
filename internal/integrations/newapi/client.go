@@ -322,9 +322,19 @@ func (c *Client) BootstrapUserAccessToken(ctx context.Context, username, passwor
 	return tokenResp.Data, nil
 }
 
-// AsUser 返回一个 user-scoped client view，后续 token 操作通过它走业务 user 鉴权。
-func (c *Client) AsUser(userID int64, accessToken string) *UserScopedClient {
-	return &UserScopedClient{base: c, userID: userID, accessToken: accessToken}
+// CredentialsRefresher 抽象 access_token 失效时的自愈能力。
+//
+// OOS-2 设计：UserScopedClient.do() 收到 401 时调一次 RefreshAccessToken，
+// 拿到新 token 后更新内部 accessToken 字段并重试一次。第二次仍 401 直接 propagate。
+//
+// refresher 的实现通常需要：
+//  1. 在 SELECT ... FOR UPDATE 锁住组织行（避免并发自愈互踩）；
+//  2. 解密密文 → password；
+//  3. 调 BootstrapUserAccessToken 拿新 access_token；
+//  4. 重新加密 → UpdateOrganizationCredentialsCiphertext 写回；
+//  5. 返回新 access_token。
+type CredentialsRefresher interface {
+	RefreshAccessToken(ctx context.Context) (string, error)
 }
 
 // UserScopedClient 用业务 user access_token 调 user-scoped 接口。
@@ -339,6 +349,20 @@ type UserScopedClient struct {
 	base        *Client
 	userID      int64
 	accessToken string
+	refresher   CredentialsRefresher // 可选；nil 时不自愈，401 直接 propagate
+}
+
+// AsUser 返回一个 user-scoped client view，后续 token 操作通过它走业务 user 鉴权。
+func (c *Client) AsUser(userID int64, accessToken string) *UserScopedClient {
+	return &UserScopedClient{base: c, userID: userID, accessToken: accessToken}
+}
+
+// AsUserWithRefresh 构造带自愈能力的 user-scoped client。
+//
+// refresher 用于在 do() 收到 401 时一次性自愈。同一个 client 实例的
+// 401 → refresh → retry 至多触发 1 次，避免无限循环。
+func (c *Client) AsUserWithRefresh(userID int64, accessToken string, refresher CredentialsRefresher) *UserScopedClient {
+	return &UserScopedClient{base: c, userID: userID, accessToken: accessToken, refresher: refresher}
 }
 
 // CreateAPIKey 以 user 身份调 POST /api/token/ 创建 token。
@@ -712,7 +736,27 @@ func (c *Client) do(ctx context.Context, method, path string, body any, target a
 }
 
 // do 走业务 user 的 access_token 鉴权头执行请求。
+//
+// OOS-2 自愈：收到 ErrUnauthorized 且绑了 refresher 时，调一次 refresher 拿新 token
+// 并重试一次；第二次仍 401 直接 propagate，不再循环。
 func (u *UserScopedClient) do(ctx context.Context, method, path string, body any, target any) error {
+	err := u.doOnce(ctx, method, path, body, target)
+	if !errors.Is(err, ErrUnauthorized) || u.refresher == nil {
+		return err
+	}
+	// 401 + refresher 非 nil → 自愈一次
+	newToken, refreshErr := u.refresher.RefreshAccessToken(ctx)
+	if refreshErr != nil {
+		// refresh 失败，回退到原 401 错误
+		return ErrUnauthorized
+	}
+	u.accessToken = newToken
+	// 重试一次；第二次仍 401 直接 propagate（不再调 refresher）
+	return u.doOnce(ctx, method, path, body, target)
+}
+
+// doOnce 是无重试的单次请求，供 do() 复用。
+func (u *UserScopedClient) doOnce(ctx context.Context, method, path string, body any, target any) error {
 	req, err := u.base.newRequest(ctx, method, path, body)
 	if err != nil {
 		return err
