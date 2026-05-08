@@ -1,22 +1,24 @@
 <template>
-  <section class="panel">
-    <div class="panel-heading">
+  <n-card :bordered="true">
+    <template #header>
       <div>
         <p class="eyebrow">App · Runtime</p>
-        <h2>运行时</h2>
+        <h2 style="margin: 0">运行时</h2>
       </div>
-      <div class="topbar-actions">
-        <button class="secondary-button" type="button" :disabled="!canStart || mutation.isPending.value" @click="onAction('start')">启动</button>
-        <button class="secondary-button" type="button" :disabled="!canStop || mutation.isPending.value" @click="onAction('stop')">停止</button>
-        <button class="secondary-button" type="button" :disabled="!canStop || mutation.isPending.value" @click="onAction('restart')">重启</button>
-        <button class="secondary-button danger" type="button" :disabled="!canDelete || mutation.isPending.value" @click="onAction('delete')">删除</button>
-      </div>
-    </div>
+    </template>
+    <template #header-extra>
+      <n-space :size="8">
+        <n-button size="small" :disabled="!canStart || mutation.isPending.value" @click="onAction('start')">启动</n-button>
+        <n-button size="small" :disabled="!canStop || mutation.isPending.value" @click="onAction('stop')">停止</n-button>
+        <n-button size="small" :disabled="!canStop || mutation.isPending.value" @click="onAction('restart')">重启</n-button>
+        <n-button size="small" type="error" :disabled="!canDelete || mutation.isPending.value" @click="onAction('delete')">删除</n-button>
+      </n-space>
+    </template>
 
     <p v-if="runtimeQuery.isLoading.value" class="state-text">加载中…</p>
     <p v-else-if="runtimeQuery.error.value" class="state-text danger">查询失败：{{ runtimeQuery.error.value?.message }}</p>
     <div v-else>
-      <p class="state-text">
+      <p class="state-text" style="margin-bottom: 12px">
         当前状态：
         <strong>{{ runtimeStatusLabel }}</strong>
         <span v-if="runtime?.container">｜容器：<code>{{ runtime.container.id }}</code></span>
@@ -25,39 +27,48 @@
         镜像：<code>{{ runtime.container.image }}</code>
       </p>
 
-      <div v-if="runtime?.snapshot" class="snapshot-grid">
-        <div class="snapshot-cell">
-          <p class="snapshot-label">CPU</p>
-          <p class="snapshot-value">{{ runtime.snapshot.cpu_percent.toFixed(1) }}%</p>
-        </div>
-        <div class="snapshot-cell">
-          <p class="snapshot-label">内存</p>
-          <p class="snapshot-value">{{ formatBytes(runtime.snapshot.memory_usage_bytes) }}</p>
-          <p class="snapshot-foot">limit {{ formatBytes(runtime.snapshot.memory_limit_bytes) }}</p>
-        </div>
-        <div class="snapshot-cell">
-          <p class="snapshot-label">网络 RX</p>
-          <p class="snapshot-value">{{ formatBytes(runtime.snapshot.network_rx_bytes) }}</p>
-        </div>
-        <div class="snapshot-cell">
-          <p class="snapshot-label">网络 TX</p>
-          <p class="snapshot-value">{{ formatBytes(runtime.snapshot.network_tx_bytes) }}</p>
-        </div>
-        <div class="snapshot-meta">
-          <span>采样时间：{{ formatTime(runtime.snapshot.collected_at) }}（30s 周期）</span>
-          <span v-if="runtime.snapshot.last_error" class="state-text danger">采样错误：{{ runtime.snapshot.last_error }}</span>
-        </div>
-      </div>
+      <n-grid v-if="runtime?.snapshot" :cols="4" :x-gap="12" :y-gap="12" style="margin-top: 12px">
+        <n-grid-item>
+          <n-card size="small" :bordered="true">
+            <n-statistic label="CPU" :value="`${runtime.snapshot.cpu_percent.toFixed(1)}%`" />
+          </n-card>
+        </n-grid-item>
+        <n-grid-item>
+          <n-card size="small" :bordered="true">
+            <n-statistic label="内存" :value="formatBytes(runtime.snapshot.memory_usage_bytes)" />
+            <div style="font-size: 11px; color: #8A94C6; margin-top: 4px">
+              limit {{ formatBytes(runtime.snapshot.memory_limit_bytes) }}
+            </div>
+          </n-card>
+        </n-grid-item>
+        <n-grid-item>
+          <n-card size="small" :bordered="true">
+            <n-statistic label="网络 RX" :value="formatBytes(runtime.snapshot.network_rx_bytes)" />
+          </n-card>
+        </n-grid-item>
+        <n-grid-item>
+          <n-card size="small" :bordered="true">
+            <n-statistic label="网络 TX" :value="formatBytes(runtime.snapshot.network_tx_bytes)" />
+          </n-card>
+        </n-grid-item>
+        <n-grid-item :span="4">
+          <p class="state-text" style="margin: 0">
+            采样时间：{{ formatTime(runtime.snapshot.collected_at) }}（30s 周期）
+            <span v-if="runtime.snapshot.last_error" class="danger"> ｜ 采样错误：{{ runtime.snapshot.last_error }}</span>
+          </p>
+        </n-grid-item>
+      </n-grid>
       <p v-else class="state-text">资源指标尚未采集（首次采集需 30s 内完成）。</p>
     </div>
 
-    <p v-if="actionFeedback" class="state-text" :class="{ danger: actionError }">{{ actionFeedback }}</p>
+    <p v-if="actionFeedback" class="state-text" :class="{ danger: actionError }" style="margin-top: 8px">{{ actionFeedback }}</p>
 
     <JobProgressPanel
       v-if="trackingJobId"
       :title="'最近运行操作'"
       :subtitle="trackingJobId"
       :job="trackedJob ?? undefined"
+      style="margin-top: 12px"
     />
 
     <ConfirmActionModal
@@ -83,11 +94,12 @@
       @confirm="onConfirmStop"
       @cancel="confirmStop = false"
     />
-  </section>
+  </n-card>
 </template>
 
 <script setup lang="ts">
 import { computed, inject, ref, type Ref } from 'vue'
+import { NButton, NCard, NGrid, NGridItem, NSpace, NStatistic } from 'naive-ui'
 
 import {
   useAppRuntimeQuery,
@@ -129,34 +141,16 @@ const canStop = computed(() => {
   const status = app?.value?.status
   return status === 'running' || status === 'binding_waiting'
 })
-const canDelete = computed(() => {
-  const status = app?.value?.status
-  return status !== 'deleted'
-})
+const canDelete = computed(() => app?.value?.status !== 'deleted')
 
 async function onAction(op: 'start' | 'stop' | 'restart' | 'delete') {
-  if (op === 'delete') {
-    // 删除走二次确认；ConfirmActionModal 的 confirm 事件触发实际请求。
-    confirmDelete.value = true
-    return
-  }
-  if (op === 'stop') {
-    // 停止容器同样走强校验确认，避免误操作中断对话。
-    confirmStop.value = true
-    return
-  }
+  if (op === 'delete') { confirmDelete.value = true; return }
+  if (op === 'stop') { confirmStop.value = true; return }
   await runMutation(op)
 }
 
-async function onConfirmDelete() {
-  confirmDelete.value = false
-  await runMutation('delete')
-}
-
-async function onConfirmStop() {
-  confirmStop.value = false
-  await runMutation('stop')
-}
+async function onConfirmDelete() { confirmDelete.value = false; await runMutation('delete') }
+async function onConfirmStop() { confirmStop.value = false; await runMutation('stop') }
 
 function formatBytes(value: number): string {
   if (!value) return '0 B'
@@ -183,56 +177,3 @@ async function runMutation(op: 'start' | 'stop' | 'restart' | 'delete') {
   }
 }
 </script>
-
-<style scoped>
-.topbar-actions {
-  display: flex;
-  gap: 8px;
-}
-
-.danger {
-  color: rgba(220, 38, 38, 1);
-  border-color: rgba(220, 38, 38, 0.4);
-}
-
-.snapshot-grid {
-  display: grid;
-  grid-template-columns: repeat(4, minmax(120px, 1fr));
-  gap: 12px;
-  margin-top: 12px;
-}
-
-.snapshot-cell {
-  padding: 12px;
-  background: #f5fbfa;
-  border: 1px solid #d6e8e3;
-  border-radius: 8px;
-}
-
-.snapshot-label {
-  font-size: 12px;
-  color: #6b7c79;
-  margin: 0 0 4px;
-}
-
-.snapshot-value {
-  font-size: 18px;
-  font-weight: 600;
-  color: #276d5c;
-  margin: 0;
-}
-
-.snapshot-foot {
-  font-size: 11px;
-  color: #99a8a4;
-  margin: 4px 0 0;
-}
-
-.snapshot-meta {
-  grid-column: 1 / -1;
-  display: flex;
-  gap: 16px;
-  font-size: 12px;
-  color: #6b7c79;
-}
-</style>

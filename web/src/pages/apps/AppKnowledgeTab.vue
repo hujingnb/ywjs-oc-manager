@@ -1,66 +1,47 @@
 <template>
-  <section class="panel">
-    <div class="panel-heading">
+  <n-card :bordered="true">
+    <template #header>
       <div>
         <p class="eyebrow">App · Knowledge</p>
-        <h2>应用知识库</h2>
+        <h2 style="margin: 0">应用知识库</h2>
       </div>
-      <div class="topbar-actions">
-        <label class="secondary-button file-picker" :class="{ disabled: !knowledgeContext || uploading }">
-          上传文件
-          <input type="file" :disabled="!knowledgeContext || uploading" @change="onUploadFile" />
-        </label>
-      </div>
-    </div>
+    </template>
+    <template #header-extra>
+      <label class="secondary-button file-picker" :class="{ disabled: !knowledgeContext || uploading }">
+        上传文件
+        <input type="file" :disabled="!knowledgeContext || uploading" @change="onUploadFile" />
+      </label>
+    </template>
 
     <p v-if="!app" class="state-text">尚未加载应用信息</p>
     <p v-else-if="!knowledgeContext" class="state-text">无法构造知识库查询上下文（缺 org_id / owner_user_id）</p>
     <p v-else-if="errorMessage" class="state-text danger">{{ errorMessage }}</p>
-    <p v-else-if="listing.isLoading.value" class="state-text">加载中…</p>
+    <div v-else-if="listing.isLoading.value" class="state-text">加载中…</div>
     <p v-else-if="listing.error.value" class="state-text danger">查询失败：{{ listing.error.value?.message }}</p>
-    <table v-else>
-      <thead>
-        <tr>
-          <th>名称</th>
-          <th>大小</th>
-          <th>类型</th>
-          <th class="actions-column">操作</th>
-        </tr>
-      </thead>
-      <tbody>
-        <tr v-for="entry in listing.data.value?.entries ?? []" :key="entry.path">
-          <td>
-            <strong>{{ entry.name }}{{ entry.is_dir ? '/' : '' }}</strong>
-          </td>
-          <td>{{ entry.is_dir ? '—' : formatBytes(entry.size) }}</td>
-          <td>{{ entry.is_dir ? '目录' : '文件' }}</td>
-          <td class="actions-column">
-            <button class="secondary-button danger" type="button" :disabled="deleting" @click="deleteEntry(entryRelativePath(entry.path))">
-              删除
-            </button>
-          </td>
-        </tr>
-        <tr v-if="!listing.data.value?.entries?.length">
-          <td colspan="4" class="state-text">应用知识库暂无文件</td>
-        </tr>
-      </tbody>
-    </table>
-  </section>
+    <n-data-table
+      v-else
+      :columns="columns"
+      :data="listing.data.value?.entries ?? []"
+      size="small"
+      :bordered="false"
+      :row-key="(row) => row.path"
+    />
+  </n-card>
 </template>
 
 <script setup lang="ts">
-import { computed, inject, ref, type Ref } from 'vue'
+import { computed, h, inject, ref, type Ref } from 'vue'
+import { NButton, NCard, NDataTable, type DataTableColumns } from 'naive-ui'
 
 import type { AppDTO } from '@/api/hooks/useApps'
 import { useAppKnowledgeQuery, useDeleteAppKnowledge, useUploadAppKnowledge } from '@/api/hooks/useKnowledge'
+import type { KnowledgeEntry } from '@/api/hooks/useKnowledge'
 
 const props = defineProps<{ appId: string }>()
 const appIdRef = computed<string | undefined>(() => props.appId)
 
-// 通过 provide 注入的 app；Phase A 不强求 ownerUserId 路径，提供 sentinel 即可。
 const app = inject<Ref<AppDTO | null>>('app')
 
-// 应用级知识库 API 需要 org_id + owner_user_id；这两项来自 app DTO。
 const knowledgeContext = computed(() => {
   if (!app?.value) return undefined
   return {
@@ -112,6 +93,21 @@ async function deleteEntry(targetPath: string) {
     errorMessage.value = err instanceof Error ? err.message : '删除失败'
   }
 }
+
+const columns: DataTableColumns<KnowledgeEntry> = [
+  { title: '名称', key: 'name', render: (row) => h('strong', `${row.name}${row.is_dir ? '/' : ''}`) },
+  { title: '大小', key: 'size', render: (row) => row.is_dir ? '—' : formatBytes(row.size) },
+  { title: '类型', key: 'is_dir', render: (row) => row.is_dir ? '目录' : '文件' },
+  {
+    title: '操作', key: 'actions',
+    render: (row) => h(NButton, {
+      size: 'small',
+      type: 'error',
+      disabled: deleting.value,
+      onClick: () => deleteEntry(entryRelativePath(row.path)),
+    }, { default: () => '删除' }),
+  },
+]
 </script>
 
 <style scoped>

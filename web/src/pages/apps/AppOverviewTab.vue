@@ -1,80 +1,74 @@
 <template>
-  <section class="panel">
-    <div class="panel-heading">
+  <n-card :bordered="true">
+    <template #header>
       <div>
         <p class="eyebrow">App · Overview</p>
-        <h2>概览</h2>
+        <h2 style="margin: 0">概览</h2>
       </div>
-      <button
-        class="primary-button"
-        type="button"
+    </template>
+    <template #header-extra>
+      <n-button
+        type="primary"
         :disabled="!canRetryInit || initMutation.isPending.value"
         @click="onRetryInit"
       >
         {{ initMutation.isPending.value ? '提交中…' : '重新初始化' }}
-      </button>
-    </div>
+      </n-button>
+    </template>
 
     <p v-if="!app" class="state-text">尚未加载应用信息</p>
-    <dl v-else class="info-grid">
-      <div>
-        <dt>状态</dt>
-        <dd><AppStatusTag :status="app.status" /></dd>
-      </div>
-      <div>
-        <dt>API key</dt>
-        <dd class="apikey-cell">
-          <span :class="['key-tag', `key-${app.api_key_status}`]">{{ apiKeyLabel(app.api_key_status) }}</span>
-          <button
+    <n-descriptions v-else :column="2" bordered size="small">
+      <n-descriptions-item label="状态">
+        <AppStatusTag :status="app.status" />
+      </n-descriptions-item>
+      <n-descriptions-item label="API key">
+        <n-space align="center" :size="8">
+          <n-tag :type="keyTagType(app.api_key_status)" size="small" :bordered="false">
+            {{ apiKeyLabel(app.api_key_status) }}
+          </n-tag>
+          <n-button
             v-if="canToggleKey && app.api_key_status === 'active'"
-            class="secondary-button danger"
-            type="button"
+            size="small"
+            type="error"
             :disabled="keyMutation.isPending.value"
             @click="confirmDisableKey = true"
           >
             禁用
-          </button>
-          <button
+          </n-button>
+          <n-button
             v-if="canToggleKey && app.api_key_status === 'disabled'"
-            class="secondary-button"
-            type="button"
+            size="small"
             :disabled="keyMutation.isPending.value"
             @click="onRestoreKey"
           >
             恢复
-          </button>
-        </dd>
-      </div>
-      <div>
-        <dt>容器 ID</dt>
-        <dd><code>{{ app.container_id || '—' }}</code></dd>
-      </div>
-      <div>
-        <dt>Runtime Node</dt>
-        <dd><code>{{ app.runtime_node_id || '—' }}</code></dd>
-      </div>
-      <div>
-        <dt>人设模式</dt>
-        <dd>{{ app.persona_mode }}</dd>
-      </div>
-      <div>
-        <dt>所属组织</dt>
-        <dd><code>{{ app.org_id }}</code></dd>
-      </div>
-      <div v-if="app.description" style="grid-column: span 2">
-        <dt>描述</dt>
-        <dd>{{ app.description }}</dd>
-      </div>
-    </dl>
+          </n-button>
+        </n-space>
+      </n-descriptions-item>
+      <n-descriptions-item label="容器 ID">
+        <code>{{ app.container_id || '—' }}</code>
+      </n-descriptions-item>
+      <n-descriptions-item label="Runtime Node">
+        <code>{{ app.runtime_node_id || '—' }}</code>
+      </n-descriptions-item>
+      <n-descriptions-item label="人设模式">{{ app.persona_mode }}</n-descriptions-item>
+      <n-descriptions-item label="所属组织">
+        <code>{{ app.org_id }}</code>
+      </n-descriptions-item>
+      <n-descriptions-item v-if="app.description" label="描述" :span="2">
+        {{ app.description }}
+      </n-descriptions-item>
+    </n-descriptions>
 
-    <p v-if="initFeedback" class="state-text" :class="{ danger: initError }">{{ initFeedback }}</p>
-    <p v-if="keyFeedback" class="state-text" :class="{ danger: keyError }">{{ keyFeedback }}</p>
+    <p v-if="initFeedback" class="state-text" :class="{ danger: initError }" style="margin-top: 8px">{{ initFeedback }}</p>
+    <p v-if="keyFeedback" class="state-text" :class="{ danger: keyError }" style="margin-top: 8px">{{ keyFeedback }}</p>
 
     <JobProgressPanel
       v-if="trackingJobId"
       :title="'初始化任务'"
       :subtitle="trackingJobId"
       :job="trackedJob ?? undefined"
+      style="margin-top: 12px"
     />
 
     <ConfirmActionModal
@@ -86,11 +80,12 @@
       @confirm="onConfirmDisable"
       @cancel="confirmDisableKey = false"
     />
-  </section>
+  </n-card>
 </template>
 
 <script setup lang="ts">
 import { computed, inject, ref, type Ref } from 'vue'
+import { NButton, NCard, NDescriptions, NDescriptionsItem, NSpace, NTag } from 'naive-ui'
 
 import {
   useInitializeAppMutation,
@@ -106,7 +101,6 @@ import { useAuthStore } from '@/stores/auth'
 const props = defineProps<{ appId: string }>()
 const appId = computed<string | undefined>(() => props.appId)
 
-// AppDetailPage 通过 provide('app', ...) 注入应用 ref。
 const app = inject<Ref<AppDTO | null>>('app')
 
 const initMutation = useInitializeAppMutation(appId)
@@ -147,6 +141,10 @@ const confirmDisableKey = ref(false)
 const keyFeedback = ref('')
 const keyError = ref(false)
 
+function keyTagType(s: string): 'success' | 'warning' | 'error' | 'default' {
+  return s === 'active' ? 'success' : s === 'disabled' ? 'error' : 'warning'
+}
+
 function apiKeyLabel(s: string): string {
   return s === 'active' ? '启用' : s === 'disabled' ? '已禁用' : s
 }
@@ -173,57 +171,3 @@ async function runKeyMutation(action: 'disable' | 'restore') {
   }
 }
 </script>
-
-<style scoped>
-.info-grid {
-  display: grid;
-  grid-template-columns: 1fr 1fr;
-  gap: 12px 24px;
-  margin: 16px 0;
-}
-
-.info-grid dt {
-  font-size: 12px;
-  color: rgba(0, 0, 0, 0.55);
-  margin-bottom: 4px;
-}
-
-.info-grid dd {
-  margin: 0;
-  font-weight: 500;
-}
-
-.apikey-cell {
-  display: inline-flex;
-  align-items: center;
-  gap: 8px;
-}
-
-.key-tag {
-  display: inline-block;
-  padding: 2px 8px;
-  border-radius: 10px;
-  font-size: 12px;
-  font-weight: 500;
-}
-
-.key-active {
-  background: #e6f7e0;
-  color: #2c7a2c;
-}
-
-.key-disabled {
-  background: #ffe1e1;
-  color: #b51d1d;
-}
-
-.key-pending {
-  background: #fff7e6;
-  color: #ad6800;
-}
-
-.danger {
-  color: rgba(220, 38, 38, 1);
-  border-color: rgba(220, 38, 38, 0.4);
-}
-</style>

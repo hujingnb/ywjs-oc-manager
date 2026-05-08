@@ -1,60 +1,37 @@
 <template>
-  <section class="panel">
-    <div class="panel-heading">
+  <n-card :bordered="true">
+    <template #header>
       <div>
         <p class="eyebrow">App · Workspace</p>
-        <h2>工作目录</h2>
+        <h2 style="margin: 0">工作目录</h2>
       </div>
-      <button v-if="appId" class="secondary-button" type="button" :disabled="downloading" @click="downloadArchive">
-        下载归档
-      </button>
-    </div>
+    </template>
+    <template #header-extra>
+      <n-button v-if="appId" :disabled="downloading" @click="downloadArchive">下载归档</n-button>
+    </template>
 
-    <p class="state-text">
-      当前路径：<code>{{ relativePath || '/' }}</code>
-      <button v-if="relativePath" class="secondary-button" type="button" @click="goUp">返回上级</button>
-    </p>
+    <n-space align="center" style="margin-bottom: 12px">
+      <span class="state-text" style="margin: 0">当前路径：<code>{{ relativePath || '/' }}</code></span>
+      <n-button v-if="relativePath" size="small" @click="goUp">返回上级</n-button>
+    </n-space>
 
     <div v-if="!appId" class="state-text">请选择目标应用</div>
     <div v-else-if="isLoading" class="state-text">加载中…</div>
     <div v-else-if="error" class="state-text danger">查询失败：{{ error.message }}</div>
-    <table v-else>
-      <thead>
-        <tr>
-          <th>名称</th>
-          <th>大小</th>
-          <th class="actions-column">操作</th>
-        </tr>
-      </thead>
-      <tbody>
-        <tr v-for="entry in listing?.entries ?? []" :key="entry.path">
-          <td>
-            <strong v-if="entry.is_dir" class="folder" @click="enter(entry)">{{ entry.name }}/</strong>
-            <span v-else>{{ entry.name }}</span>
-          </td>
-          <td>{{ entry.is_dir ? '—' : formatSize(entry.size) }}</td>
-          <td class="actions-column">
-            <button
-              v-if="!entry.is_dir && appId"
-              class="secondary-button"
-              type="button"
-              :disabled="downloading"
-              @click="downloadEntry(entry)"
-            >
-              下载
-            </button>
-          </td>
-        </tr>
-        <tr v-if="!listing?.entries?.length">
-          <td colspan="3" class="state-text">当前目录为空</td>
-        </tr>
-      </tbody>
-    </table>
-  </section>
+    <n-data-table
+      v-else
+      :columns="columns"
+      :data="listing?.entries ?? []"
+      size="small"
+      :bordered="false"
+      :row-key="(row) => row.path"
+    />
+  </n-card>
 </template>
 
 <script setup lang="ts">
-import { computed, ref, toRef } from 'vue'
+import { computed, h, ref, toRef } from 'vue'
+import { NButton, NCard, NDataTable, NSpace, type DataTableColumns } from 'naive-ui'
 
 import {
   archiveWorkspace,
@@ -114,12 +91,20 @@ function entryRelativePath(entryPath: string): string {
   const prefix = `${normalizedRoot}/`
   return normalizedEntry.startsWith(prefix) ? normalizedEntry.slice(prefix.length) : normalizedEntry
 }
-</script>
 
-<style scoped>
-.folder {
-  cursor: pointer;
-  color: #276d5c;
-  text-decoration: underline dotted;
-}
-</style>
+const columns: DataTableColumns<WorkspaceEntry> = [
+  {
+    title: '名称', key: 'name',
+    render: (row) => row.is_dir
+      ? h('strong', { style: 'cursor: pointer; color: #00F0FF; text-decoration: underline dotted', onClick: () => enter(row) }, `${row.name}/`)
+      : row.name,
+  },
+  { title: '大小', key: 'size', render: (row) => row.is_dir ? '—' : formatSize(row.size) },
+  {
+    title: '操作', key: 'actions',
+    render: (row) => !row.is_dir && appId.value
+      ? h(NButton, { size: 'small', disabled: downloading.value, onClick: () => downloadEntry(row) }, { default: () => '下载' })
+      : null,
+  },
+]
+</script>
