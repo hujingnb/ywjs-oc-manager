@@ -530,6 +530,56 @@ func (a appDirInitializerAdapter) InitAppDirs(ctx context.Context, nodeID, appID
 	return a.adapter.InitAppDirs(ctx, nodeID, appID)
 }
 
+// orgCredentialsRefresher 是 newapi.CredentialsRefresher 的实现。
+//
+// 一个 refresher 实例绑定单个组织 + cipher + base client。RefreshAccessToken：
+//  1. SELECT ... FOR UPDATE 锁住该组织行；
+//  2. 解密密文取 password；
+//  3. 调 BootstrapUserAccessToken 拿新 access_token；
+//  4. 加密 {username, password, new_access_token} → UpdateOrganizationCredentialsCiphertext；
+//  5. 返回新 access_token。
+//
+// 第一版没有事务包装：FOR UPDATE 在隐式自动提交场景下退化为普通 SELECT。
+type orgCredentialsRefresher struct {
+	store    *sqlc.Queries
+	cipher   *auth.Cipher
+	client   *newapi.Client
+	orgID    pgtype.UUID
+	username string
+	password string
+}
+
+func (r *orgCredentialsRefresher) RefreshAccessToken(ctx context.Context) (string, error) {
+	org, err := r.store.GetOrganizationForUpdate(ctx, r.orgID)
+	if err != nil {
+		return "", fmt.Errorf("RefreshAccessToken 锁组织失败: %w", err)
+	}
+	newToken, err := r.client.BootstrapUserAccessToken(ctx, r.username, r.password)
+	if err != nil {
+		return "", fmt.Errorf("RefreshAccessToken 重新登录失败: %w", err)
+	}
+	payload, err := json.Marshal(service.OrganizationCredentials{
+		Username:    r.username,
+		Password:    r.password,
+		AccessToken: newToken,
+	})
+	if err != nil {
+		return "", err
+	}
+	ciphertext, err := r.cipher.Encrypt(payload)
+	if err != nil {
+		return "", err
+	}
+	_, err = r.store.UpdateOrganizationCredentialsCiphertext(ctx, sqlc.UpdateOrganizationCredentialsCiphertextParams{
+		ID:                              org.ID,
+		NewapiUserCredentialsCiphertext: pgtype.Text{String: ciphertext, Valid: true},
+	})
+	if err != nil {
+		return "", fmt.Errorf("RefreshAccessToken 写回密文失败: %w", err)
+	}
+	return newToken, nil
+}
+
 // orgScopedClientFactory 把 sqlc 组织行 + manager cipher + newapi.Client 组合成
 // handlers.NewAPIClientFactory：worker handler 在跑 job 时只需要把 sqlc.App 给到
 // UserScopedFor，由 factory 反查组织凭据 → 解密 → 构造 user-scoped client，避免
@@ -568,7 +618,15 @@ func (f *orgScopedClientFactory) UserScopedFor(ctx context.Context, app sqlc.App
 	if err != nil {
 		return nil, fmt.Errorf("解析 newapi_user_id 失败: %w", err)
 	}
-	return f.client.AsUser(userID, creds.AccessToken), nil
+	refresher := &orgCredentialsRefresher{
+		store:    f.store,
+		cipher:   f.cipher,
+		client:   f.client,
+		orgID:    org.ID,
+		username: creds.Username,
+		password: creds.Password,
+	}
+	return f.client.AsUserWithRefresh(userID, creds.AccessToken, refresher), nil
 }
 
 // parseInt64ForWiring 是 cmd/server 内部的小工具：把 string 解为 int64，error 直传。
