@@ -1,90 +1,99 @@
 <template>
-  <main class="dashboard-main">
-    <section class="panel">
-      <div class="panel-heading">
-        <div>
-          <p class="eyebrow">{{ orgEyebrow }}</p>
-          <h2>创建成员并初始化应用</h2>
+  <div style="display: grid; gap: 18px">
+    <n-card :bordered="true">
+      <template #header>
+        <div style="display: flex; align-items: center; justify-content: space-between">
+          <div>
+            <p class="eyebrow">{{ orgEyebrow }}</p>
+            <h2 style="margin: 0">创建成员并初始化应用</h2>
+          </div>
+          <RouterLink class="secondary-button" to="/members">返回列表</RouterLink>
         </div>
-        <RouterLink class="secondary-button" to="/members">返回列表</RouterLink>
-      </div>
+      </template>
 
       <div v-if="!effectiveOrgId" class="state-text">当前账号未关联组织，无法创建成员。</div>
-      <form v-else class="form-grid" @submit.prevent="onSubmit">
-        <fieldset class="form-grid-full form-section">
-          <legend>账号信息</legend>
-          <div class="form-grid">
-            <label>
-              <span>用户名 *</span>
-              <input v-model.trim="form.username" required type="text" autocomplete="username" />
-            </label>
-            <label>
-              <span>显示名 *</span>
-              <input v-model.trim="form.display_name" required type="text" />
-            </label>
-            <label>
-              <span>初始密码 *</span>
-              <input v-model="form.password" required type="password" autocomplete="new-password" />
-            </label>
-            <label>
-              <span>角色</span>
-              <select v-model="form.role">
-                <option value="org_member">组织成员</option>
-                <option value="org_admin">组织管理员</option>
-              </select>
-            </label>
+      <n-form v-else label-placement="top" @submit.prevent="onSubmit">
+        <!-- 账号信息 -->
+        <p class="form-section-label">账号信息</p>
+        <n-grid :cols="2" :x-gap="14">
+          <n-grid-item>
+            <n-form-item label="用户名 *">
+              <n-input v-model:value="form.username" placeholder="username" />
+            </n-form-item>
+          </n-grid-item>
+          <n-grid-item>
+            <n-form-item label="显示名 *">
+              <n-input v-model:value="form.display_name" placeholder="显示名称" />
+            </n-form-item>
+          </n-grid-item>
+          <n-grid-item>
+            <n-form-item label="初始密码 *">
+              <n-input v-model:value="form.password" type="password" placeholder="至少 8 位" />
+            </n-form-item>
+          </n-grid-item>
+          <n-grid-item>
+            <n-form-item label="角色">
+              <n-select v-model:value="form.role" :options="roleOptions" />
+            </n-form-item>
+          </n-grid-item>
+        </n-grid>
+
+        <!-- 应用信息 -->
+        <p class="form-section-label">应用信息</p>
+        <n-grid :cols="2" :x-gap="14">
+          <n-grid-item>
+            <n-form-item label="应用名 *">
+              <n-input v-model:value="form.app_name" placeholder="应用名称" />
+            </n-form-item>
+          </n-grid-item>
+          <n-grid-item>
+            <n-form-item label="人设模式">
+              <n-select v-model:value="form.persona_mode" :options="personaModeOptions" />
+            </n-form-item>
+          </n-grid-item>
+          <n-grid-item :span="2">
+            <n-form-item label="应用 prompt（可选）">
+              <n-input v-model:value="form.app_prompt" type="textarea" :rows="3" />
+            </n-form-item>
+          </n-grid-item>
+          <n-grid-item :span="2">
+            <n-space justify="end">
+              <RouterLink class="secondary-button" to="/members">取消</RouterLink>
+              <n-button type="primary" attr-type="submit" :loading="creating">
+                {{ creating ? '提交中…' : '创建并初始化' }}
+              </n-button>
+            </n-space>
+            <p v-if="errorMessage" class="state-text danger">{{ errorMessage }}</p>
+          </n-grid-item>
+        </n-grid>
+      </n-form>
+    </n-card>
+
+    <n-card v-if="lastResult" :bordered="true">
+      <template #header>
+        <div style="display: flex; align-items: center; justify-content: space-between">
+          <div>
+            <p class="eyebrow">已创建</p>
+            <h2 style="margin: 0">{{ lastResult.member.display_name }} · {{ lastResult.app.name }}</h2>
           </div>
-        </fieldset>
-
-        <fieldset class="form-grid-full form-section">
-          <legend>应用信息</legend>
-          <div class="form-grid">
-            <label>
-              <span>应用名 *</span>
-              <input v-model.trim="form.app_name" required type="text" />
-            </label>
-            <label>
-              <span>人设模式</span>
-              <select v-model="form.persona_mode">
-                <option value="org_inherited">沿用组织人设</option>
-                <option value="app_override">应用覆盖</option>
-              </select>
-            </label>
-            <label class="form-grid-full">
-              <span>应用 prompt（可选）</span>
-              <textarea v-model.trim="form.app_prompt" rows="3"></textarea>
-            </label>
-          </div>
-        </fieldset>
-
-        <div class="form-actions">
-          <RouterLink class="secondary-button" to="/members">取消</RouterLink>
-          <button class="primary-button" type="submit" :disabled="creating">
-            {{ creating ? '提交中…' : '创建并初始化' }}
-          </button>
+          <n-tag type="success" size="small" :bordered="false">事务提交</n-tag>
         </div>
-        <p v-if="errorMessage" class="state-text danger form-grid-full">{{ errorMessage }}</p>
-      </form>
-    </section>
-
-    <section v-if="lastResult" class="panel">
-      <div class="panel-heading">
-        <div>
-          <p class="eyebrow">已创建</p>
-          <h2>{{ lastResult.member.display_name }} · {{ lastResult.app.name }}</h2>
-        </div>
-        <span class="status-pill success">事务提交</span>
-      </div>
+      </template>
       <p class="state-text">
         Job ID：{{ lastResult.job_id }} ｜ App 状态：{{ lastResult.app.status }} ｜ API key：{{ lastResult.app.api_key_status }}。
         当前应用尚未初始化容器，worker 会按 app_initialize 任务推进。
       </p>
-    </section>
-  </main>
+    </n-card>
+  </div>
 </template>
 
 <script setup lang="ts">
 import { computed, reactive, ref } from 'vue'
+import { RouterLink } from 'vue-router'
+import {
+  NButton, NCard, NForm, NFormItem, NGrid, NGridItem,
+  NInput, NSelect, NSpace, NTag, type SelectOption,
+} from 'naive-ui'
 
 import {
   useOnboardMember,
@@ -113,6 +122,16 @@ const form = reactive<OnboardMemberPayload>({
   channel_type: 'wechat',
 })
 
+const roleOptions: SelectOption[] = [
+  { label: '组织成员', value: 'org_member' },
+  { label: '组织管理员', value: 'org_admin' },
+]
+
+const personaModeOptions: SelectOption[] = [
+  { label: '沿用组织人设', value: 'org_inherited' },
+  { label: '应用覆盖', value: 'app_override' },
+]
+
 async function onSubmit() {
   errorMessage.value = null
   creating.value = true
@@ -133,18 +152,12 @@ async function onSubmit() {
 </script>
 
 <style scoped>
-.form-section {
-  margin: 0;
-  padding: 14px;
-  border: 1px solid #dfe5ee;
-  border-radius: 8px;
-}
-
-.form-section legend {
-  padding: 0 6px;
-  color: #66758a;
-  font-size: 12px;
+.form-section-label {
+  font-size: 11px;
   font-weight: 700;
   text-transform: uppercase;
+  color: #8A94C6;
+  letter-spacing: 0.08em;
+  margin: 12px 0 4px;
 }
 </style>
