@@ -106,7 +106,7 @@ const activeKey = computed(() => {
     '/usage',
     '/audit-logs',
     '/runtime-nodes',
-    '/persona',
+    '/org/persona',
   ]
   return prefixes.find(k => p.startsWith(k)) ?? '/'
 })
