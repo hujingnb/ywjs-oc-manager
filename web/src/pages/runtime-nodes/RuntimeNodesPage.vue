@@ -1,162 +1,135 @@
 <template>
-  <main class="dashboard-main">
-    <section class="panel">
-      <div class="panel-heading">
+  <div style="display: grid; gap: 18px">
+    <!-- 节点列表 -->
+    <n-card :bordered="true">
+      <template #header>
         <div>
           <p class="eyebrow">Platform · Runtime</p>
-          <h2>运行节点</h2>
+          <h2 style="margin: 0">运行节点</h2>
         </div>
-        <button class="primary-button" type="button" @click="openForm">
-          <Plus :size="16" />
-          <span>注册节点</span>
-        </button>
-      </div>
+      </template>
+      <template #header-extra>
+        <n-button type="primary" @click="openForm">
+          <template #icon><Plus :size="16" /></template>
+          注册节点
+        </n-button>
+      </template>
 
       <div v-if="isLoading" class="state-text">加载中…</div>
       <div v-else-if="error" class="state-text danger">查询失败：{{ error.message }}</div>
-      <table v-else>
-        <thead>
-          <tr>
-            <th>名称</th>
-            <th>状态</th>
-            <th>Docker</th>
-            <th>File</th>
-            <th>Agent 版本</th>
-            <th>心跳</th>
-            <th>最大应用数</th>
-            <th class="actions-column">操作</th>
-          </tr>
-        </thead>
-        <tbody>
-          <tr v-for="node in nodes" :key="node.id">
-            <td>
-              <strong>{{ node.name }}</strong>
-              <small v-if="node.node_data_root">{{ node.node_data_root }}</small>
-            </td>
-            <td><RuntimeStatusTag :status="node.status" /></td>
-            <td>{{ node.agent_docker_endpoint || '—' }}</td>
-            <td>{{ node.agent_file_endpoint || '—' }}</td>
-            <td>{{ node.agent_version || '—' }}</td>
-            <td>{{ node.heartbeat_interval_seconds }}s</td>
-            <td>
-              <span v-if="node.max_apps == null">不限</span>
-              <span v-else>{{ node.max_apps }}</span>
-              <button class="link-button" type="button" @click="openMaxAppsEdit(node)">编辑</button>
-            </td>
-            <td class="actions-column">
-              <button class="secondary-button" type="button" :disabled="node.status === 'active'" @click="onRotate(node)">
-                轮换 bootstrap
-              </button>
-              <button v-if="node.status !== 'disabled'" class="secondary-button" type="button" @click="onToggle(node, 'disable')">
-                禁用
-              </button>
-              <button v-else class="secondary-button" type="button" @click="onToggle(node, 'enable')">
-                启用
-              </button>
-            </td>
-          </tr>
-          <tr v-if="!nodes?.length">
-            <td colspan="8" class="state-text">尚未注册节点</td>
-          </tr>
-        </tbody>
-      </table>
-    </section>
+      <n-data-table
+        v-else
+        :columns="columns"
+        :data="nodes ?? []"
+        size="small"
+        :bordered="false"
+        :row-key="(row) => row.id"
+      />
+    </n-card>
 
-    <section v-if="formVisible" class="panel">
-      <div class="panel-heading">
-        <div>
-          <p class="eyebrow">New</p>
-          <h2>注册 runtime 节点</h2>
+    <!-- 注册表单 -->
+    <n-card v-if="formVisible" :bordered="true">
+      <template #header>
+        <div style="display: flex; align-items: center; justify-content: space-between">
+          <div>
+            <p class="eyebrow">New</p>
+            <h2 style="margin: 0">注册 runtime 节点</h2>
+          </div>
+          <n-button quaternary circle @click="formVisible = false">
+            <template #icon><X :size="18" /></template>
+          </n-button>
         </div>
-        <button class="icon-button" type="button" aria-label="关闭" @click="formVisible = false">
-          <X :size="18" />
-        </button>
-      </div>
-      <form class="form-grid" @submit.prevent="onSubmit">
-        <label>
-          <span>名称 *</span>
-          <input v-model.trim="form.name" required type="text" />
-        </label>
-        <label>
-          <span>心跳间隔 (秒)</span>
-          <input v-model.number="form.heartbeat_interval_seconds" type="number" min="5" />
-        </label>
-        <label class="form-grid-full">
-          <span>节点数据根目录</span>
-          <input v-model.trim="form.node_data_root" placeholder="/var/lib/oc-agent" type="text" />
-        </label>
-        <div class="form-actions">
-          <button class="secondary-button" type="button" @click="formVisible = false">取消</button>
-          <button class="primary-button" type="submit" :disabled="creating">
-            {{ creating ? '提交中…' : '保存' }}
-          </button>
-        </div>
-        <p v-if="submitError" class="state-text danger form-grid-full">{{ submitError }}</p>
-      </form>
-    </section>
+      </template>
+      <n-form :model="form" label-placement="top" @submit.prevent="onSubmit">
+        <n-grid :cols="2" :x-gap="14">
+          <n-grid-item>
+            <n-form-item label="名称 *">
+              <n-input v-model:value="form.name" placeholder="节点名称" />
+            </n-form-item>
+          </n-grid-item>
+          <n-grid-item>
+            <n-form-item label="心跳间隔 (秒)">
+              <n-input-number v-model:value="form.heartbeat_interval_seconds" :min="5" style="width: 100%" />
+            </n-form-item>
+          </n-grid-item>
+          <n-grid-item :span="2">
+            <n-form-item label="节点数据根目录">
+              <n-input v-model:value="form.node_data_root" placeholder="/var/lib/oc-agent" />
+            </n-form-item>
+          </n-grid-item>
+          <n-grid-item :span="2">
+            <n-space justify="end">
+              <n-button @click="formVisible = false">取消</n-button>
+              <n-button type="primary" attr-type="submit" :loading="creating">保存</n-button>
+            </n-space>
+            <p v-if="submitError" class="state-text danger">{{ submitError }}</p>
+          </n-grid-item>
+        </n-grid>
+      </n-form>
+    </n-card>
 
-    <section v-if="editingNode" class="panel">
-      <div class="panel-heading">
-        <div>
-          <p class="eyebrow">Capacity</p>
-          <h2>调整最大应用数 · {{ editingNode.name }}</h2>
+    <!-- 调整最大应用数 -->
+    <n-card v-if="editingNode" :bordered="true">
+      <template #header>
+        <div style="display: flex; align-items: center; justify-content: space-between">
+          <div>
+            <p class="eyebrow">Capacity</p>
+            <h2 style="margin: 0">调整最大应用数 · {{ editingNode.name }}</h2>
+          </div>
+          <n-button quaternary circle @click="cancelMaxAppsEdit">
+            <template #icon><X :size="18" /></template>
+          </n-button>
         </div>
-        <button class="icon-button" type="button" aria-label="关闭" @click="cancelMaxAppsEdit">
-          <X :size="18" />
-        </button>
-      </div>
-      <form class="form-grid" @submit.prevent="saveMaxApps">
-        <label class="form-grid-full">
-          <span>最大应用数（清空表示不限；0 表示暂停接收新应用）</span>
-          <input v-model="maxAppsInput" type="number" min="0" placeholder="留空表示不限" />
-        </label>
+      </template>
+      <n-form label-placement="top" @submit.prevent="saveMaxApps">
+        <n-form-item label="最大应用数（清空表示不限；0 表示暂停接收新应用）">
+          <n-input-number v-model:value="maxAppsInput" :min="0" placeholder="留空表示不限" style="width: 100%" />
+        </n-form-item>
         <p class="state-text">
-          {{
-            maxAppsInput === ''
-              ? '保存后该节点不限制应用数量。'
-              : `保存后 OnboardingService 自动选节点时仅在剩余容量 > 0 时分配新应用到该节点。`
-          }}
+          {{ maxAppsInput == null ? '保存后该节点不限制应用数量。' : '保存后 OnboardingService 自动选节点时仅在剩余容量 > 0 时分配新应用到该节点。' }}
         </p>
-        <div class="form-actions">
-          <button class="secondary-button" type="button" @click="cancelMaxAppsEdit">取消</button>
-          <button class="primary-button" type="submit" :disabled="updateMaxAppsMutation.isPending.value">
-            {{ updateMaxAppsMutation.isPending.value ? '保存中…' : '保存' }}
-          </button>
-        </div>
-        <p v-if="maxAppsError" class="state-text danger form-grid-full">{{ maxAppsError }}</p>
-      </form>
-    </section>
+        <n-space justify="end">
+          <n-button @click="cancelMaxAppsEdit">取消</n-button>
+          <n-button type="primary" attr-type="submit" :loading="updateMaxAppsMutation.isPending.value">保存</n-button>
+        </n-space>
+        <p v-if="maxAppsError" class="state-text danger">{{ maxAppsError }}</p>
+      </n-form>
+    </n-card>
 
-    <section v-if="lastIssuedToken" class="panel">
-      <div class="panel-heading">
-        <div>
-          <p class="eyebrow">Bootstrap Token</p>
-          <h2>{{ lastIssuedNodeName }}</h2>
+    <!-- Bootstrap Token 展示 -->
+    <n-card v-if="lastIssuedToken" :bordered="true">
+      <template #header>
+        <div style="display: flex; align-items: center; justify-content: space-between">
+          <div>
+            <p class="eyebrow">Bootstrap Token</p>
+            <h2 style="margin: 0">{{ lastIssuedNodeName }}</h2>
+          </div>
+          <n-button quaternary circle @click="dismissToken">
+            <template #icon><X :size="18" /></template>
+          </n-button>
         </div>
-        <button class="icon-button" type="button" aria-label="关闭" @click="dismissToken">
-          <X :size="18" />
-        </button>
-      </div>
+      </template>
       <p class="state-text">
         以下 token 仅展示一次，请立即配置到 agent 容器的 BOOTSTRAP_TOKEN 环境变量。
         过期时间：{{ lastIssuedExpiresAt }}
       </p>
       <pre class="token-block">{{ lastIssuedToken }}</pre>
-    </section>
-  </main>
+    </n-card>
+  </div>
 </template>
 
 <script setup lang="ts">
-import { reactive, ref } from 'vue'
+import { h, reactive, ref } from 'vue'
 import { Plus, X } from 'lucide-vue-next'
+import {
+  NButton, NCard, NDataTable, NForm, NFormItem, NGrid, NGridItem,
+  NInput, NInputNumber, NSpace, NTag, type DataTableColumns,
+} from 'naive-ui'
 
 import RuntimeStatusTag from '@/components/RuntimeStatusTag.vue'
 import {
-  useCreateRuntimeNode,
-  useRotateBootstrap,
-  useRuntimeNodesQuery,
-  useSetRuntimeNodeStatus,
-  useUpdateRuntimeNodeMaxApps,
+  useCreateRuntimeNode, useRotateBootstrap, useRuntimeNodesQuery,
+  useSetRuntimeNodeStatus, useUpdateRuntimeNodeMaxApps,
   type RuntimeNodeFormPayload,
 } from '@/api/hooks/useRuntimeNodes'
 import type { RuntimeNode } from '@/api/types'
@@ -175,39 +148,62 @@ const lastIssuedNodeName = ref('')
 const lastIssuedExpiresAt = ref('')
 const form = reactive<RuntimeNodeFormPayload>({ name: '' })
 
+const columns: DataTableColumns<RuntimeNode> = [
+  {
+    title: '名称', key: 'name',
+    render: (row) => [
+      h('strong', row.name),
+      row.node_data_root ? h('small', { style: 'display:block;color:#8A94C6;font-size:12px' }, row.node_data_root) : null,
+    ],
+  },
+  { title: '状态', key: 'status', render: (row) => h(RuntimeStatusTag, { status: row.status }) },
+  { title: 'Docker', key: 'agent_docker_endpoint', render: (row) => row.agent_docker_endpoint || '—' },
+  { title: 'File', key: 'agent_file_endpoint', render: (row) => row.agent_file_endpoint || '—' },
+  { title: 'Agent 版本', key: 'agent_version', render: (row) => row.agent_version || '—' },
+  { title: '心跳', key: 'heartbeat_interval_seconds', render: (row) => `${row.heartbeat_interval_seconds}s` },
+  {
+    title: '最大应用数', key: 'max_apps',
+    render: (row) => h('span', [
+      row.max_apps == null ? '不限' : String(row.max_apps),
+      ' ',
+      h(NButton, { text: true, size: 'small', style: 'color:#00F0FF', onClick: () => openMaxAppsEdit(row) }, { default: () => '编辑' }),
+    ]),
+  },
+  {
+    title: '操作', key: 'actions',
+    render: (row) => h(NSpace, { size: 'small' }, {
+      default: () => [
+        h(NButton, { size: 'small', disabled: row.status === 'active', onClick: () => onRotate(row) }, { default: () => '轮换 bootstrap' }),
+        row.status !== 'disabled'
+          ? h(NButton, { size: 'small', onClick: () => onToggle(row, 'disable') }, { default: () => '禁用' })
+          : h(NButton, { size: 'small', type: 'primary', onClick: () => onToggle(row, 'enable') }, { default: () => '启用' }),
+      ]
+    }),
+  },
+]
+
 function openForm() {
-  formVisible.value = true
-  submitError.value = null
-  form.name = ''
-  form.heartbeat_interval_seconds = undefined
-  form.node_data_root = ''
+  formVisible.value = true; submitError.value = null
+  form.name = ''; form.heartbeat_interval_seconds = undefined; form.node_data_root = ''
 }
 
 async function onSubmit() {
-  creating.value = true
-  submitError.value = null
+  creating.value = true; submitError.value = null
   try {
     const created = await createMutation.mutateAsync({
       name: form.name,
       heartbeat_interval_seconds: form.heartbeat_interval_seconds || undefined,
       node_data_root: form.node_data_root || undefined,
     })
-    formVisible.value = false
-    showToken(created)
+    formVisible.value = false; showToken(created)
   } catch (err) {
     submitError.value = err instanceof Error ? err.message : '注册节点失败'
-  } finally {
-    creating.value = false
-  }
+  } finally { creating.value = false }
 }
 
 async function onRotate(node: RuntimeNode) {
-  try {
-    const updated = await rotateMutation.mutateAsync(node.id)
-    showToken(updated)
-  } catch (err) {
-    submitError.value = err instanceof Error ? err.message : '轮换 bootstrap token 失败'
-  }
+  try { showToken(await rotateMutation.mutateAsync(node.id)) }
+  catch (err) { submitError.value = err instanceof Error ? err.message : '轮换 bootstrap token 失败' }
 }
 
 function onToggle(node: RuntimeNode, action: 'enable' | 'disable') {
@@ -222,42 +218,28 @@ function showToken(node: RuntimeNode) {
 }
 
 function dismissToken() {
-  lastIssuedToken.value = null
-  lastIssuedNodeName.value = ''
-  lastIssuedExpiresAt.value = ''
+  lastIssuedToken.value = null; lastIssuedNodeName.value = ''; lastIssuedExpiresAt.value = ''
 }
 
 const editingNode = ref<RuntimeNode | null>(null)
-const maxAppsInput = ref<number | ''>('')
+const maxAppsInput = ref<number | null>(null)
 const maxAppsError = ref<string | null>(null)
 
 function openMaxAppsEdit(node: RuntimeNode) {
-  editingNode.value = node
-  maxAppsInput.value = node.max_apps ?? ''
-  maxAppsError.value = null
+  editingNode.value = node; maxAppsInput.value = node.max_apps ?? null; maxAppsError.value = null
 }
 
 function cancelMaxAppsEdit() {
-  editingNode.value = null
-  maxAppsInput.value = ''
-  maxAppsError.value = null
+  editingNode.value = null; maxAppsInput.value = null; maxAppsError.value = null
 }
 
 async function saveMaxApps() {
   if (!editingNode.value) return
   maxAppsError.value = null
-  const raw = maxAppsInput.value
-  const value: number | null = raw === '' ? null : Number(raw)
-  if (value !== null && (Number.isNaN(value) || value < 0)) {
-    maxAppsError.value = '最大应用数必须是非负整数或留空'
-    return
-  }
   try {
-    await updateMaxAppsMutation.mutateAsync({ nodeId: editingNode.value.id, maxApps: value })
+    await updateMaxAppsMutation.mutateAsync({ nodeId: editingNode.value.id, maxApps: maxAppsInput.value })
     cancelMaxAppsEdit()
-  } catch (err) {
-    maxAppsError.value = err instanceof Error ? err.message : '保存失败'
-  }
+  } catch (err) { maxAppsError.value = err instanceof Error ? err.message : '保存失败' }
 }
 </script>
 
@@ -265,26 +247,12 @@ async function saveMaxApps() {
 .token-block {
   margin: 12px 0 0;
   padding: 14px;
-  border: 1px solid #d8e0ea;
+  border: 1px solid rgba(0, 240, 255, 0.2);
   border-radius: 8px;
-  background: #f8fafc;
-  color: #172033;
+  background: rgba(15, 21, 53, 0.8);
+  color: #00F0FF;
   font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
   word-break: break-all;
   white-space: pre-wrap;
-}
-
-.link-button {
-  margin-left: 6px;
-  padding: 0;
-  border: 0;
-  background: transparent;
-  color: #2c5db5;
-  font-size: 12px;
-  cursor: pointer;
-}
-
-.link-button:hover {
-  text-decoration: underline;
 }
 </style>
