@@ -1,7 +1,6 @@
 package handlers
 
 import (
-	"bytes"
 	"context"
 	"encoding/json"
 	"errors"
@@ -158,10 +157,6 @@ const (
 	containerKnowledgeAppDir = "/knowledge/app"
 	containerStateDir        = "/state"
 	containerLogsDir         = "/logs"
-	// containerOpenClawAgentModelsPath 是 OpenClaw 上层 embedded agent 实际读取的 model catalog 文件；
-	// manager 把渲染的 models.json 写到节点 apps/{id}/openclaw-config/models.json，
-	// 通过 file-level bind mount（read-only）覆盖镜像内置文件，让 OpenClaw 用 manager 注入的 provider/model。
-	containerOpenClawAgentModelsPath = "/root/.openclaw/agents/main/agent/models.json"
 	// containerWeixinPluginDataDir 是 OpenClaw weixin 渠道插件持久化 token / accounts.json 的目录。
 	// 上游 plugin 默认写在 /root/.openclaw/openclaw-weixin/，属于容器 ephemeral 路径——
 	// docker restart 后丢失会导致 weixin sidecar 启动时不 spawn provider（gateway 日志
@@ -278,17 +273,18 @@ func (h *AppInitializeHandler) Handle(ctx context.Context, job sqlc.Job) error {
 		}
 	}
 
-	// 写 OpenClaw 上层 embedded agent 的 models.json：把 cfg.LLM 渲染成单 provider/single-model
-	// catalog，通过 file-level bind mount 覆盖镜像自带 /root/.openclaw/agents/main/agent/models.json，
-	// 让上层 agent 用 manager 指定的 provider+model（如 openai → new-api → ollama qwen2.5:0.5b）。
-	// cfg.LLM 任一关键字段为空时跳过上传，OpenClaw 沿用镜像默认（codex/gpt-5.5）。
-	if h.runtimeFiles != nil && payload.RuntimeNodeID != "" {
-		if models := renderOpenClawModels(h.cfg.LLM); models != nil {
-			if err := h.runtimeFiles.UploadAppRuntimeFile(ctx, payload.RuntimeNodeID, payload.AppID, "models.json", bytes.NewReader(models)); err != nil {
-				return fmt.Errorf("写 OpenClaw models.json 失败: %w", err)
-			}
-		}
-	}
+	// 不再写 apps/{id}/openclaw-config/models.json + file-level bind mount。
+	//
+	// 之前实现把 manager 渲染的 catalog 通过 RW 文件级 bind mount 覆盖容器内
+	// /root/.openclaw/agents/main/agent/models.json，但 OpenClaw embedded agent 在响应
+	// 用户消息时会 atomic rename .tmp -> models.json 做 catalog 自更新，撞 mount point
+	// 触发 EBUSY → "Embedded agent failed before reply"，weixin 回 "Something went wrong"。
+	// v1.0.1 GA 验证报告把这个误判为 cosmetic warning，实际上每次新建容器都重现。
+	//
+	// 修复改为：容器启动后由 worker docker exec `openclaw config patch --stdin` 写
+	// models.providers + models.mode=replace 到 openclaw.json（OpenClaw 自身 fs watcher
+	// 监听的配置文件，无 mount 冲突），由 OpenClaw hot reload 生效。详见 §「容器启动后
+	// 的 OpenClaw 配置注入」。
 
 	systemPrompt, err := h.renderSystemPrompt()
 	if err != nil {
@@ -354,7 +350,7 @@ func (h *AppInitializeHandler) Handle(ctx context.Context, job sqlc.Job) error {
 			// `openclaw config set` 写文件后 OpenClaw gateway 自身 fs watcher 自动 hot reload，
 			// 不需要 docker restart（restart 会让 weixin plugin 加载失败）。
 			if execer, ok := h.starter.(ContainerExecer); ok && h.cfg.LLM.DefaultModel != "" {
-				if err := configureOpenClawDefaultModel(ctx, execer, payload.RuntimeNodeID, info.ID, h.cfg.LLM.DefaultModel); err != nil {
+				if err := configureOpenClawDefaultModel(ctx, execer, payload.RuntimeNodeID, info.ID, h.cfg.LLM); err != nil {
 					// 模型注入失败不阻塞主流程：容器仍会用 gpt-5.5 默认值；ops 可在 new-api 端
 					// 用 model_mapping 兜底（gpt-5.5 -> qwen2.5:0.5b）。但记日志便于排查。
 					log.Printf("app_initialize: 配置 openclaw 默认 model 失败 (app_id=%s): %v", uuidToString(app.ID), err)
@@ -531,83 +527,14 @@ func buildContainerSpec(args buildSpecArgs) runtimepkg.ContainerSpec {
 			// docker restart / docker rm 重建都不会丢扫码 session，consumer 重新启动后
 			// plugin sidecar 看到 accounts/<account>.json 直接 resume，不需要重新扫码。
 			{HostPath: path.Join(appDir, "weixin"), ContainerPath: containerWeixinPluginDataDir},
-			// models.json 由 manager 在 InitAppDirs 之后通过 agent UploadAppRuntimeFile 写到
-			// apps/<id>/openclaw-config/models.json，再以 file-level bind mount 覆盖容器内
-			// OpenClaw 镜像自带的 models.json，让上层 embedded agent 走 manager 注入的
-			// provider/model（如 openai → new-api → ollama qwen2.5:0.5b）。
-			//
-			// 不能设 ReadOnly：OpenClaw 启动时会 rename tmp → models.json 做 atomic update
-			// （merge mode 合并 build-in），RO 文件 mount 会让 rename 失败 → catalog 加载
-			// 报 EBUSY → fallback 到默认 codex/gpt-5.5。允许写也无碍：OpenClaw 写回的内容
-			// 仅在容器生命周期内有效，下次 init 仍由 manager 重写。
-			//
-			// 已知 warning：file-level bind mount 不允许 rename target == mount point，
-			// OpenClaw startup 的"model warmup"会报 `EBUSY: rename .json.tmp -> .json`
-			// 但功能不受影响——通过 openclaw.json 的 models.mode=replace + providers 注入
-			// 后，embedded agent 直接用 openclaw.json 里的 catalog，warmup 失败属于 cosmetic
-			// log 噪音。彻底消除需要改 OpenClaw 上游不在 RW mount 文件上做 rename，
-			// 或 manager 改为在容器启动后通过 docker exec 写文件而不用 mount。
-			{HostPath: path.Join(appDir, "openclaw-config", "models.json"), ContainerPath: containerOpenClawAgentModelsPath},
+			// 注：models.json file-level bind mount 已删除。之前实现把 manager 渲染的
+			// catalog 通过 RW 文件级 bind mount 覆盖容器内
+			// /root/.openclaw/agents/main/agent/models.json，但 OpenClaw embedded agent
+			// 在响应用户消息时会 atomic rename .tmp -> models.json，撞 mount point 触发
+			// EBUSY，导致 weixin 回 "Something went wrong"。改为容器启动后由 worker 用
+			// `openclaw config patch` 把 models.providers 写到 openclaw.json，规避 mount 冲突。
 		},
 	}
-}
-
-// renderOpenClawModels 把 LLM 配置渲染成 OpenClaw 上层 embedded agent 的 models.json
-// 内容；通过 file-level bind mount 覆盖镜像自带文件，让 OpenClaw 走 manager 注入的
-// provider/model。
-//
-// 任一关键字段（BaseURL / DefaultProvider / DefaultModel）为空返回 nil，调用方应跳过
-// 上传，OpenClaw 沿用镜像内置 models.json（默认 codex/gpt-5.5）。
-//
-// 输出结构对齐 OpenClaw 镜像内置 models.json 的真实 schema：
-//
-//	{
-//	  "providers": {
-//	    "<provider>": {
-//	      "baseUrl": "...",
-//	      "apiKey": "${OPENAI_API_KEY}",   // 由容器 env OPENAI_API_KEY 提供
-//	      "auth": "token",
-//	      "api": "openai",
-//	      "models": [{"id": "...", "name": "...", "api": "openai", ...}]
-//	    }
-//	  }
-//	}
-//
-// apiKey 字段写明文 "${OPENAI_API_KEY}"——OpenClaw 内部会做 env 展开，让 manager 不需
-// 要在 models.json 里持久化真 token；真 token 通过 OPENAI_API_KEY env 注入容器。
-func renderOpenClawModels(cfg AppInitializeLLMConfig) []byte {
-	provider := strings.TrimSpace(cfg.DefaultProvider)
-	model := strings.TrimSpace(cfg.DefaultModel)
-	baseURL := strings.TrimSpace(cfg.BaseURL)
-	if provider == "" || model == "" || baseURL == "" {
-		return nil
-	}
-	doc := map[string]any{
-		"providers": map[string]any{
-			provider: map[string]any{
-				"baseUrl": baseURL,
-				"apiKey":  "${OPENAI_API_KEY}",
-				"auth":    "token",
-				"api":     "openai",
-				"models": []any{
-					map[string]any{
-						"id":            model,
-						"name":          model,
-						"api":           "openai",
-						"input":         []string{"text"},
-						"cost":          map[string]any{"input": 0, "output": 0, "cacheRead": 0, "cacheWrite": 0},
-						"contextWindow": 32768,
-						"maxTokens":     4096,
-					},
-				},
-			},
-		},
-	}
-	raw, err := json.MarshalIndent(doc, "", "  ")
-	if err != nil {
-		return nil
-	}
-	return raw
 }
 
 // decryptCiphertext 把 newapi_key_ciphertext 解为明文 sk-；cipher 必须非 nil（生产强制装配）。
@@ -695,19 +622,56 @@ func textOrEmpty(t pgtype.Text) string {
 //   - 不触发 docker restart：openclaw 内部约 17s 内自动检测 fs 变化并 reload，
 //     提示 "Restart the gateway to apply" 仅是 CLI 兜底建议。manager 这层 docker
 //     restart 反而会让 plugin 重新加载失败（v1.0.2 实测，weixin plugin 0 个）。
-func configureOpenClawDefaultModel(ctx context.Context, execer ContainerExecer, nodeID, containerID, model string) error {
-	cmd := []string{"openclaw", "config", "set", "agents.defaults.model", model}
+func configureOpenClawDefaultModel(ctx context.Context, execer ContainerExecer, nodeID, containerID string, llm AppInitializeLLMConfig) error {
+	provider := strings.TrimSpace(llm.DefaultProvider)
+	model := strings.TrimSpace(llm.DefaultModel)
+	baseURL := strings.TrimSpace(llm.BaseURL)
+	if provider == "" || model == "" || baseURL == "" {
+		// 配置不齐时跳过，OpenClaw 沿用镜像默认（gpt-5.5）。
+		return nil
+	}
+	patch := map[string]any{
+		"agents": map[string]any{
+			"defaults": map[string]any{"model": model},
+		},
+		"models": map[string]any{
+			// replace：embedded agent 直接用注入的 catalog，不 merge 镜像内置（默认 codex/
+			// gpt-5.5），避免 catalog 自更新时 rename 触发的 EBUSY。
+			"mode": "replace",
+			"providers": map[string]any{
+				provider: map[string]any{
+					"baseUrl": baseURL,
+					"apiKey":  "${OPENAI_API_KEY}",
+					"models":  []any{map[string]any{"id": model}},
+				},
+			},
+		},
+	}
+	body, err := json.Marshal(patch)
+	if err != nil {
+		return fmt.Errorf("序列化 openclaw patch 失败: %w", err)
+	}
+	// `openclaw config patch --stdin` 从 stdin 读 JSON5；ContainerExec 没有 stdin 通道，
+	// 用 sh -c 把 body echo 进去。body 内 ${OPENAI_API_KEY} 字面值在单引号里不会被
+	// shell 展开，直接写到 openclaw.json，OpenClaw 读取时再展开 ENV。
+	cmd := []string{"sh", "-c", fmt.Sprintf("echo %s | openclaw config patch --stdin", shellQuote(string(body)))}
 	res, err := execer.ContainerExec(ctx, nodeID, containerID, cmd)
 	if err != nil {
-		return fmt.Errorf("docker exec openclaw config set 失败: %w", err)
+		return fmt.Errorf("docker exec openclaw config patch 失败: %w", err)
 	}
 	if res.ExitCode != 0 {
-		return fmt.Errorf("openclaw config set 返回 exit=%d stdout=%q", res.ExitCode, res.Stdout)
+		return fmt.Errorf("openclaw config patch 返回 exit=%d stdout=%q", res.ExitCode, res.Stdout)
 	}
-	if !strings.Contains(res.Stdout, "Updated agents.defaults.model") {
-		// 未看到预期 ack 字符串：当前 OpenClaw CLI 始终在成功路径输出该串；
-		// 缺失意味着 CLI 行为变了，记录但不 fail（避免上游小改 break manager）。
-		log.Printf("app_initialize: openclaw config set 未输出预期 ack：%q", res.Stdout)
+	// CLI 在成功路径输出 "Patched" 或 "Updated"；缺失只 log 不 fail。
+	if !strings.Contains(res.Stdout, "Patched") && !strings.Contains(res.Stdout, "Updated") {
+		log.Printf("app_initialize: openclaw config patch 未输出预期 ack：%q", res.Stdout)
 	}
 	return nil
+}
+
+// shellQuote 用单引号包裹字符串供 sh -c 使用，并按 shell 规则转义内部单引号
+// （'\\''：闭合 + 转义单引号 + 重开）。仅用于 manager 渲染的可控 JSON，不接受
+// 用户输入。
+func shellQuote(s string) string {
+	return "'" + strings.ReplaceAll(s, "'", `'\''`) + "'"
 }

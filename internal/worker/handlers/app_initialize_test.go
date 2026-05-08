@@ -69,27 +69,21 @@ func TestAppInitializeHandlesHappyPath(t *testing.T) {
 		t.Fatal("ciphertext 等于明文，加密未生效")
 	}
 
-	// 容器规格断言：7 个挂载（5 个业务目录 + 1 个 pi-coding-agent settings 目录 +
-	// 1 个 weixin plugin token 目录）、关键 env 项、镜像、容器名。
-	if len(containers.lastSpec.Volumes) != 7 {
-		t.Fatalf("Volumes 数量 = %d, want 7", len(containers.lastSpec.Volumes))
+	// 容器规格断言：6 个挂载（5 个业务目录 + 1 个 weixin plugin token 目录）。
+	// 早期版本曾有 models.json file-level mount 但因 EBUSY 问题已移除，
+	// 改由 worker 在容器启动后通过 docker exec openclaw config patch 注入 catalog。
+	if len(containers.lastSpec.Volumes) != 6 {
+		t.Fatalf("Volumes 数量 = %d, want 6", len(containers.lastSpec.Volumes))
 	}
-	// 第 6 个 volume 是 OpenClaw agent models.json 单文件 mount（**可写**，
-	// 因为 OpenClaw 启动时会 rename tmp → models.json，RO 会让 catalog 加载失败）。
-	var hasModelsMount bool
+	// 反向断言：models.json 不能再被 file-level bind mount。早期实现把渲染好的
+	// catalog 用 RW 文件级 mount 覆盖容器内 models.json，但 OpenClaw embedded agent
+	// 在响应消息时会 atomic rename .tmp -> models.json，撞 mount point 触发 EBUSY，
+	// 导致 weixin 回 "Something went wrong"。改为容器启动后用 docker exec
+	// `openclaw config patch` 把 models.providers 写到 openclaw.json 规避 mount 冲突。
 	for _, vol := range containers.lastSpec.Volumes {
 		if vol.ContainerPath == "/root/.openclaw/agents/main/agent/models.json" {
-			if vol.ReadOnly {
-				t.Fatal("models.json mount 不能 ReadOnly：OpenClaw 启动时需 rename tmp → models.json")
-			}
-			if !strings.HasSuffix(vol.HostPath, "/openclaw-config/models.json") {
-				t.Fatalf("models.json host path 末尾应为 /openclaw-config/models.json, got %q", vol.HostPath)
-			}
-			hasModelsMount = true
+			t.Fatalf("models.json file-level mount 已废弃但仍出现在 ContainerSpec：host=%q", vol.HostPath)
 		}
-	}
-	if !hasModelsMount {
-		t.Fatal("ContainerSpec 缺 OpenClaw models.json file-level bind mount")
 	}
 	if containers.lastSpec.Image != "openclaw:dev" {
 		t.Fatalf("Image = %q", containers.lastSpec.Image)
@@ -563,57 +557,103 @@ func TestEnsureAPIKey_GetTokenFullKeyFailureRecordsAudit(t *testing.T) {
 	}
 }
 
-func TestRenderOpenClawModels(t *testing.T) {
-	full := AppInitializeLLMConfig{
+// renderOpenClawModels 已删除：早期版本通过 file-level bind mount 把渲染好的 catalog
+// 覆盖容器内 models.json，但 OpenClaw embedded agent 在响应消息时 atomic rename
+// .tmp -> models.json 撞 mount point 触发 EBUSY。改为容器启动后用
+// configureOpenClawDefaultModel 通过 docker exec openclaw config patch 注入 catalog 到
+// openclaw.json。对应单元测试在 TestConfigureOpenClawDefaultModel_PatchesAgentAndModels。
+
+// fakeContainerExec 捕获 ContainerExec 调用的命令行，用于验证 patch 内容。
+type fakeContainerExec struct {
+	calls []fakeExecCall
+	res   ExecResultStub
+}
+
+type fakeExecCall struct {
+	nodeID, containerID string
+	cmd                 []string
+}
+
+// ExecResultStub 模拟 runtime.ExecResult，与生产 runtime 包同形态便于赋值返回。
+type ExecResultStub struct {
+	ExitCode int
+	Stdout   string
+}
+
+func (f *fakeContainerExec) ContainerExec(_ context.Context, nodeID, containerID string, cmd []string) (runtimepkg.ExecResult, error) {
+	f.calls = append(f.calls, fakeExecCall{nodeID: nodeID, containerID: containerID, cmd: cmd})
+	return runtimepkg.ExecResult{ExitCode: f.res.ExitCode, Stdout: f.res.Stdout}, nil
+}
+
+func TestConfigureOpenClawDefaultModel_PatchesAgentAndModels(t *testing.T) {
+	exec := &fakeContainerExec{res: ExecResultStub{ExitCode: 0, Stdout: "Patched config\n"}}
+	llm := AppInitializeLLMConfig{
 		BaseURL:         "http://new-api:3000/v1",
 		DefaultProvider: "openai",
 		DefaultModel:    "qwen2.5:0.5b",
 	}
-	t.Run("all fields set returns provider+model+baseUrl JSON", func(t *testing.T) {
-		raw := renderOpenClawModels(full)
-		if raw == nil {
-			t.Fatal("应返回非 nil")
+	if err := configureOpenClawDefaultModel(context.Background(), exec, "node-1", "ctn-1", llm); err != nil {
+		t.Fatalf("err=%v", err)
+	}
+	if len(exec.calls) != 1 {
+		t.Fatalf("ContainerExec 调用次数=%d，期望 1", len(exec.calls))
+	}
+	call := exec.calls[0]
+	if call.cmd[0] != "sh" || call.cmd[1] != "-c" {
+		t.Fatalf("cmd 应是 sh -c form，got %v", call.cmd)
+	}
+	shellLine := call.cmd[2]
+	if !strings.Contains(shellLine, "openclaw config patch --stdin") {
+		t.Fatalf("shell line 缺 patch 命令：%q", shellLine)
+	}
+	// 验证 patch JSON 含必要字段
+	if !strings.Contains(shellLine, `"agents"`) || !strings.Contains(shellLine, `"defaults"`) {
+		t.Errorf("patch 缺 agents.defaults: %q", shellLine)
+	}
+	if !strings.Contains(shellLine, `"qwen2.5:0.5b"`) {
+		t.Errorf("patch 缺 model 值: %q", shellLine)
+	}
+	if !strings.Contains(shellLine, `"models"`) || !strings.Contains(shellLine, `"providers"`) {
+		t.Errorf("patch 缺 models.providers: %q", shellLine)
+	}
+	if !strings.Contains(shellLine, `"mode":"replace"`) {
+		t.Errorf("patch 应含 models.mode=replace 避免 EBUSY: %q", shellLine)
+	}
+	if !strings.Contains(shellLine, "${OPENAI_API_KEY}") {
+		t.Errorf("apiKey 应为 env 占位符: %q", shellLine)
+	}
+}
+
+func TestConfigureOpenClawDefaultModel_SkipsWhenLLMIncomplete(t *testing.T) {
+	exec := &fakeContainerExec{res: ExecResultStub{ExitCode: 0, Stdout: "Patched\n"}}
+	cases := []AppInitializeLLMConfig{
+		{},
+		{BaseURL: "x", DefaultProvider: "openai"},      // 缺 model
+		{BaseURL: "x", DefaultModel: "qwen2.5:0.5b"},   // 缺 provider
+		{DefaultProvider: "openai", DefaultModel: "x"}, // 缺 base
+		{BaseURL: "  ", DefaultProvider: "openai", DefaultModel: "x"},
+	}
+	for i, c := range cases {
+		exec.calls = nil
+		if err := configureOpenClawDefaultModel(context.Background(), exec, "node-1", "ctn-1", c); err != nil {
+			t.Errorf("[%d] err=%v", i, err)
 		}
-		got := string(raw)
-		if !strings.Contains(got, `"openai"`) {
-			t.Fatalf("缺 provider key: %s", got)
+		if len(exec.calls) != 0 {
+			t.Errorf("[%d] LLM 不全应跳过 exec，但调了 %d 次", i, len(exec.calls))
 		}
-		if !strings.Contains(got, `"qwen2.5:0.5b"`) {
-			t.Fatalf("缺 model id: %s", got)
-		}
-		if !strings.Contains(got, `"baseUrl": "http://new-api:3000/v1"`) {
-			t.Fatalf("缺 baseUrl: %s", got)
-		}
-		if !strings.Contains(got, `"apiKey": "${OPENAI_API_KEY}"`) {
-			t.Fatalf("apiKey 应为 env 占位符: %s", got)
-		}
-	})
-	t.Run("missing baseURL returns nil", func(t *testing.T) {
-		c := full
-		c.BaseURL = ""
-		if got := renderOpenClawModels(c); got != nil {
-			t.Fatalf("缺 baseURL 应返回 nil, got %s", got)
-		}
-	})
-	t.Run("missing provider returns nil", func(t *testing.T) {
-		c := full
-		c.DefaultProvider = ""
-		if got := renderOpenClawModels(c); got != nil {
-			t.Fatalf("缺 provider 应返回 nil, got %s", got)
-		}
-	})
-	t.Run("missing model returns nil", func(t *testing.T) {
-		c := full
-		c.DefaultModel = ""
-		if got := renderOpenClawModels(c); got != nil {
-			t.Fatalf("缺 model 应返回 nil, got %s", got)
-		}
-	})
-	t.Run("whitespace only treated as missing", func(t *testing.T) {
-		c := full
-		c.DefaultProvider = "  "
-		if got := renderOpenClawModels(c); got != nil {
-			t.Fatalf("空白 provider 应返回 nil, got %s", got)
-		}
-	})
+	}
+}
+
+func TestConfigureOpenClawDefaultModel_PropagatesPatchFailure(t *testing.T) {
+	exec := &fakeContainerExec{res: ExecResultStub{ExitCode: 2, Stdout: "schema validation failed\n"}}
+	llm := AppInitializeLLMConfig{
+		BaseURL: "http://x", DefaultProvider: "openai", DefaultModel: "m",
+	}
+	err := configureOpenClawDefaultModel(context.Background(), exec, "node-1", "ctn-1", llm)
+	if err == nil {
+		t.Fatal("非零 exit code 应返回错误")
+	}
+	if !strings.Contains(err.Error(), "exit=2") {
+		t.Errorf("错误应含 exit code: %v", err)
+	}
 }
