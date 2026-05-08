@@ -310,3 +310,50 @@ func int64Of(v any) int64 {
 		return 0
 	}
 }
+
+func TestClient_DeleteUser_AdminAuthHeaders(t *testing.T) {
+	var (
+		gotAuthHeader string
+		gotUserHeader string
+		gotMethod     string
+		gotPath       string
+	)
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		gotAuthHeader = r.Header.Get("Authorization")
+		gotUserHeader = r.Header.Get("New-Api-User")
+		gotMethod = r.Method
+		gotPath = r.URL.Path
+		w.WriteHeader(http.StatusOK)
+		w.Write([]byte(`{"success":true,"message":"deleted"}`))
+	}))
+	defer srv.Close()
+
+	c := NewClient(srv.URL, "admin-token", 1)
+	if err := c.DeleteUser(context.Background(), 99); err != nil {
+		t.Fatalf("DeleteUser err=%v", err)
+	}
+	if gotMethod != "DELETE" {
+		t.Errorf("method=%q，期望 DELETE", gotMethod)
+	}
+	if gotPath != "/api/user/99" {
+		t.Errorf("path=%q，期望 /api/user/99", gotPath)
+	}
+	if gotAuthHeader != "Bearer admin-token" {
+		t.Errorf("Authorization=%q", gotAuthHeader)
+	}
+	if gotUserHeader != "1" {
+		t.Errorf("New-Api-User=%q", gotUserHeader)
+	}
+}
+
+func TestClient_DeleteUser_NotFoundMappedToErrNotFound(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusNotFound)
+	}))
+	defer srv.Close()
+	c := NewClient(srv.URL, "t", 1)
+	err := c.DeleteUser(context.Background(), 999)
+	if !errors.Is(err, ErrNotFound) {
+		t.Errorf("err=%v，期望 ErrNotFound", err)
+	}
+}

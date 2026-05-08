@@ -503,6 +503,20 @@ func (c *Client) RechargeUser(ctx context.Context, input RechargeInput) (Recharg
 	return RechargeResult{RefID: refID, RemainQuota: remain}, nil
 }
 
+// DeleteUser 调 admin DELETE /api/user/:id 删除业务 user。
+//
+// OOS-1 孤儿清理用：CreateOrganization 任一步失败时 best-effort 调一次本方法。
+// 失败映射沿用 do() 的统一映射（404 → ErrNotFound），调用方按需吞掉错误。
+//
+// new-api v1.0.0-alpha.1 该路由要求 AdminAuth；删除自身或其他 admin 会被拒。
+// 业务 user 必须先解绑 token / 子账号关系，由 new-api 自身约束保证。
+func (c *Client) DeleteUser(ctx context.Context, userID int64) error {
+	if userID <= 0 {
+		return fmt.Errorf("DeleteUser: userID 必须 > 0")
+	}
+	return c.do(ctx, http.MethodDelete, fmt.Sprintf("/api/user/%d", userID), nil, nil)
+}
+
 // GetUserBalance 查询单个 new-api 用户的余额。
 func (c *Client) GetUserBalance(ctx context.Context, newapiUserID int64) (BalanceResult, error) {
 	var response struct {
