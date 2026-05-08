@@ -17,7 +17,7 @@ import (
 )
 
 func TestOrganizationServiceCreateRequiresPlatformAdmin(t *testing.T) {
-	svc := NewOrganizationService(&organizationStoreStub{}, &fakeProvisioner{}, mustCipher(t))
+	svc := NewOrganizationService(&organizationStoreStub{}, &fakeProvisioner{}, mustCipher(t), nil)
 
 	_, err := svc.CreateOrganization(context.Background(), auth.Principal{Role: domain.UserRoleOrgAdmin}, OrganizationInput{Name: "测试组织"})
 	if !errors.Is(err, ErrForbidden) {
@@ -33,7 +33,7 @@ func TestOrganizationServiceCreateProvisionsNewAPIUser(t *testing.T) {
 		user:        newapi.User{ID: 42, Username: "preset"},
 		accessToken: "access-tok-xyz",
 	}
-	svc := NewOrganizationService(store, prov, mustCipher(t))
+	svc := NewOrganizationService(store, prov, mustCipher(t), nil)
 	threshold := int32(20)
 
 	result, err := svc.CreateOrganization(context.Background(), auth.Principal{Role: domain.UserRolePlatformAdmin}, OrganizationInput{
@@ -91,7 +91,7 @@ func TestOrganizationServiceCreateRollbackOnProvisioningFailure(t *testing.T) {
 		user:           newapi.User{ID: 42},
 		bootstrapError: errors.New("login 失败"),
 	}
-	svc := NewOrganizationService(store, prov, mustCipher(t))
+	svc := NewOrganizationService(store, prov, mustCipher(t), nil)
 
 	_, err := svc.CreateOrganization(context.Background(), auth.Principal{Role: domain.UserRolePlatformAdmin}, OrganizationInput{Name: "测试组织"})
 	if err == nil {
@@ -104,7 +104,7 @@ func TestOrganizationServiceCreateRollbackOnProvisioningFailure(t *testing.T) {
 
 func TestOrganizationServiceGetRestrictsOrgScope(t *testing.T) {
 	store := &organizationStoreStub{org: sqlc.Organization{ID: mustUUID(t, "00000000-0000-0000-0000-000000000101"), Name: "测试组织", Status: domain.StatusActive}}
-	svc := NewOrganizationService(store, &fakeProvisioner{}, mustCipher(t))
+	svc := NewOrganizationService(store, &fakeProvisioner{}, mustCipher(t), nil)
 
 	_, err := svc.GetOrganization(context.Background(), auth.Principal{Role: domain.UserRoleOrgMember, OrgID: "00000000-0000-0000-0000-000000000999"}, "00000000-0000-0000-0000-000000000101")
 	if !errors.Is(err, ErrForbidden) {
@@ -114,7 +114,7 @@ func TestOrganizationServiceGetRestrictsOrgScope(t *testing.T) {
 
 func TestOrganizationServiceSetStatus(t *testing.T) {
 	store := &organizationStoreStub{org: sqlc.Organization{ID: mustUUID(t, "00000000-0000-0000-0000-000000000101"), Name: "测试组织", Status: domain.StatusActive}}
-	svc := NewOrganizationService(store, &fakeProvisioner{}, mustCipher(t))
+	svc := NewOrganizationService(store, &fakeProvisioner{}, mustCipher(t), nil)
 
 	result, err := svc.SetOrganizationStatus(context.Background(), auth.Principal{Role: domain.UserRolePlatformAdmin}, "00000000-0000-0000-0000-000000000101", domain.StatusDisabled)
 	if err != nil {
@@ -149,6 +149,10 @@ type fakeProvisioner struct {
 	createCalls    int
 	bootstrapCalls int
 	lastCreate     newapi.CreateUserInput
+
+	deleteUserCalled bool
+	deleteUserUserID int64
+	deleteUserErr    error
 }
 
 func (p *fakeProvisioner) CreateUser(_ context.Context, input newapi.CreateUserInput) (newapi.User, error) {
@@ -170,6 +174,12 @@ func (p *fakeProvisioner) BootstrapUserAccessToken(_ context.Context, _, _ strin
 		return "", p.bootstrapError
 	}
 	return p.accessToken, nil
+}
+
+func (p *fakeProvisioner) DeleteUser(_ context.Context, userID int64) error {
+	p.deleteUserCalled = true
+	p.deleteUserUserID = userID
+	return p.deleteUserErr
 }
 
 type organizationStoreStub struct {
@@ -228,4 +238,53 @@ func (s *organizationStoreStub) UpdateOrganizationProfile(_ context.Context, arg
 func (s *organizationStoreStub) SetOrganizationStatus(_ context.Context, arg sqlc.SetOrganizationStatusParams) (sqlc.Organization, error) {
 	s.org.Status = arg.Status
 	return s.org, nil
+}
+
+// fakeFailAuditor 实现 NewAPIFailureAuditor，仅记录失败事件，供测试断言审计是否被触发。
+type fakeFailAuditor struct {
+	events []NewAPIFailureContext
+}
+
+func (f *fakeFailAuditor) RecordNewAPIFailure(_ context.Context, fc NewAPIFailureContext) {
+	f.events = append(f.events, fc)
+}
+
+// TestCreateOrganization_BootstrapTokenFailureTriggersDeleteUserAndAudit 校验
+// BootstrapUserAccessToken 失败时调用 DeleteUser 清理孤儿，并写 audit 事件。
+func TestCreateOrganization_BootstrapTokenFailureTriggersDeleteUserAndAudit(t *testing.T) {
+	auditor := &fakeFailAuditor{}
+	prov := &fakeProvisioner{
+		user:           newapi.User{ID: 42},
+		bootstrapError: errors.New("login 5xx"),
+	}
+	svc := NewOrganizationService(&organizationStoreStub{}, prov, mustCipher(t), auditor)
+
+	_, err := svc.CreateOrganization(context.Background(), auth.Principal{Role: domain.UserRolePlatformAdmin}, OrganizationInput{Name: "v102-orphan-test"})
+	if err == nil {
+		t.Fatal("期望 CreateOrganization 失败")
+	}
+	if !prov.deleteUserCalled {
+		t.Errorf("期望调用 DeleteUser 清理孤儿")
+	}
+	if prov.deleteUserUserID != 42 {
+		t.Errorf("DeleteUser userID=%d，期望 42", prov.deleteUserUserID)
+	}
+	if len(auditor.events) == 0 {
+		t.Errorf("期望至少 1 条 audit 事件，实际 %d", len(auditor.events))
+	}
+}
+
+// TestCreateOrganization_CreateUserFailureNoDeleteUser 校验 CreateUser 失败时不调
+// DeleteUser（此时无 new-api 孤儿 user 需要清理）。
+func TestCreateOrganization_CreateUserFailureNoDeleteUser(t *testing.T) {
+	auditor := &fakeFailAuditor{}
+	prov := &fakeProvisioner{
+		createError: errors.New("create 500"),
+	}
+	svc := NewOrganizationService(&organizationStoreStub{}, prov, mustCipher(t), auditor)
+
+	_, _ = svc.CreateOrganization(context.Background(), auth.Principal{Role: domain.UserRolePlatformAdmin}, OrganizationInput{Name: "v102-create-fail"})
+	if prov.deleteUserCalled {
+		t.Errorf("CreateUser 失败时不应调 DeleteUser（无孤儿）")
+	}
 }

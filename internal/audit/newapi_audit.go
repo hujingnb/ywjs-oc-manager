@@ -41,6 +41,19 @@ func NewNewAPIAuditHelper(recorder AuditRecorder) *NewAPIAuditHelper {
 	return &NewAPIAuditHelper{recorder: recorder}
 }
 
+// RecordNewAPIFailure 实现 service.NewAPIFailureAuditor 接口，
+// 将 service.NewAPIFailureContext 转换为 audit.NewAPIFailureContext 后调 RecordFailure。
+// 通过此方法，*NewAPIAuditHelper 可直接注入 OrganizationService，无需 service 包反向依赖 audit 包。
+func (h *NewAPIAuditHelper) RecordNewAPIFailure(ctx context.Context, fc service.NewAPIFailureContext) {
+	h.RecordFailure(ctx, NewAPIFailureContext{
+		ActorID:   fc.ActorID,
+		ActorRole: fc.ActorRole,
+		OrgID:     fc.OrgID,
+		Endpoint:  fc.Endpoint,
+		Err:       fc.Err,
+	})
+}
+
 // RecordFailure 写一条 newapi_call 失败审计。
 //
 // 不返回 error：本 helper 是"附属操作"，主流程不应因审计失败而失败。

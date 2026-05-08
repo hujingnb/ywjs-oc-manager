@@ -20,6 +20,23 @@ import (
 	"oc-manager/internal/store/sqlc"
 )
 
+// NewAPIFailureContext 描述 OrganizationService 内 new-api 调用失败的上下文，
+// 供注入的 NewAPIFailureAuditor 写 audit_logs。
+type NewAPIFailureContext struct {
+	ActorID   string
+	ActorRole string
+	OrgID     string
+	Endpoint  string
+	Err       error
+}
+
+// NewAPIFailureAuditor 抽象 new-api 失败审计写入能力，避免 service 直接依赖 audit 包
+//（audit 包反向依赖 service.AuditEvent，会形成导入环）。
+// *audit.NewAPIAuditHelper 通过适配器满足此接口。
+type NewAPIFailureAuditor interface {
+	RecordNewAPIFailure(ctx context.Context, fc NewAPIFailureContext)
+}
+
 // OrganizationStore 抽象组织管理所需的数据访问能力。
 type OrganizationStore interface {
 	CreateOrganization(ctx context.Context, arg sqlc.CreateOrganizationParams) (sqlc.Organization, error)
@@ -35,6 +52,7 @@ type OrganizationStore interface {
 type NewAPIUserProvisioner interface {
 	CreateUser(ctx context.Context, input newapi.CreateUserInput) (newapi.User, error)
 	BootstrapUserAccessToken(ctx context.Context, username, password string) (string, error)
+	DeleteUser(ctx context.Context, userID int64) error // OOS-1 孤儿清理：CreateOrganization 失败时 best-effort 调用
 }
 
 // OrganizationCredentials 是 organizations.newapi_user_credentials_ciphertext 解密后的明文。
@@ -53,15 +71,14 @@ type OrganizationService struct {
 	store        OrganizationStore
 	provisioner  NewAPIUserProvisioner
 	cipher       *auth.Cipher
-	usernamePool string // 组织 user 的 username 前缀，便于改写本地与生产分布
+	failAuditor  NewAPIFailureAuditor // 新增；nil 时跳过 new-api 失败审计写入
+	usernamePool string               // 组织 user 的 username 前缀，便于改写本地与生产分布
 }
 
-// NewOrganizationService 创建 organization service。
-//
-// provisioner / cipher 在生产环境必须非 nil；任意一个 nil 会让 CreateOrganization
-// 直接报错（不再像旧版本那样静默落库 newapi_user_id 空字符串）。
-func NewOrganizationService(store OrganizationStore, provisioner NewAPIUserProvisioner, cipher *auth.Cipher) *OrganizationService {
-	return &OrganizationService{store: store, provisioner: provisioner, cipher: cipher, usernamePool: "org-"}
+// NewOrganizationService 构造组织服务。
+// provisioner / cipher 必填；failAuditor 可为 nil（生产装配应注入满足 NewAPIFailureAuditor 的实现）。
+func NewOrganizationService(store OrganizationStore, provisioner NewAPIUserProvisioner, cipher *auth.Cipher, failAuditor NewAPIFailureAuditor) *OrganizationService {
+	return &OrganizationService{store: store, provisioner: provisioner, cipher: cipher, failAuditor: failAuditor, usernamePool: "org-"}
 }
 
 type OrganizationInput struct {
@@ -85,9 +102,10 @@ type OrganizationResult struct {
 
 // CreateOrganization 创建组织：先 INSERT manager 端记录，再串联调 new-api 创业务 user 并落凭据密文。
 //
-// 失败路径：任何步骤报错（new-api 调用 / 加密 / DB 更新）都先 HardDeleteOrganization
-// 把 manager 端孤儿记录回滚，再返回原错误。new-api 端的孤儿 user 不在此处清理，
-// 留给后续后台对账（详见 spec §10）。
+// 失败路径：任何步骤报错时——
+//   - 已创建的 new-api user 调 DeleteUser best-effort 清理（OOS-1）；
+//   - 原失败原因 + 清理失败（如有）通过 auditHelper 落 audit_logs（OOS-3）；
+//   - manager 端组织行 HardDeleteOrganization 回滚。
 func (s *OrganizationService) CreateOrganization(ctx context.Context, principal auth.Principal, input OrganizationInput) (OrganizationResult, error) {
 	if principal.Role != domain.UserRolePlatformAdmin {
 		return OrganizationResult{}, ErrForbidden
@@ -109,8 +127,35 @@ func (s *OrganizationService) CreateOrganization(ctx context.Context, principal 
 	}
 
 	// 失败时回滚刚刚 INSERT 的 manager 行；rollback 自身失败只记入返回错误，不掩盖原因。
-	commit, err := s.provisionNewAPIUser(ctx, &org)
+	commit, createdUserID, err := s.provisionNewAPIUser(ctx, &org)
 	if err != nil {
+		orgIDStr := uuidToString(org.ID)
+		// OOS-1：best-effort 调 DeleteUser 清理 new-api 孤儿 user
+		if createdUserID != nil {
+			if delErr := s.provisioner.DeleteUser(ctx, *createdUserID); delErr != nil {
+				// OOS-3：DeleteUser 自身失败也写审计
+				if s.failAuditor != nil {
+					s.failAuditor.RecordNewAPIFailure(ctx, NewAPIFailureContext{
+						ActorID:   principal.UserID,
+						ActorRole: principal.Role,
+						OrgID:     orgIDStr,
+						Endpoint:  fmt.Sprintf("DELETE /api/user/%d", *createdUserID),
+						Err:       delErr,
+					})
+				}
+			}
+		}
+		// OOS-3：原失败原因写审计（区别于 DeleteUser 失败）
+		if s.failAuditor != nil {
+			s.failAuditor.RecordNewAPIFailure(ctx, NewAPIFailureContext{
+				ActorID:   principal.UserID,
+				ActorRole: principal.Role,
+				OrgID:     orgIDStr,
+				Endpoint:  "CreateOrganization",
+				Err:       err,
+			})
+		}
+		// manager 端回滚保留
 		if rollbackErr := s.store.HardDeleteOrganization(ctx, org.ID); rollbackErr != nil {
 			return OrganizationResult{}, fmt.Errorf("%w；回滚组织行失败: %v", err, rollbackErr)
 		}
@@ -122,17 +167,14 @@ func (s *OrganizationService) CreateOrganization(ctx context.Context, principal 
 
 // provisionNewAPIUser 在 new-api 创建对应业务 user，登录拿 access_token，加密落库。
 //
-// 流程：
-//  1. 生成 username（"org-" + org.id 前 8 字节）与 32 字节随机 password；
-//  2. CreateUser → 回查 user_id；
-//  3. BootstrapUserAccessToken → 拿 access_token；
-//  4. 加密 JSON {username, password, access_token}；
-//  5. SetOrganizationNewAPIUser 写回 newapi_user_id + 密文。
-func (s *OrganizationService) provisionNewAPIUser(ctx context.Context, org *sqlc.Organization) (sqlc.Organization, error) {
+// 返回值第二个 *int64 是"已创建的 new-api user_id"——
+//   - CreateUser 之前任意失败 → nil（无孤儿）
+//   - CreateUser 之后任意失败 → 非 nil（调用方负责 best-effort 调 DeleteUser 清理孤儿）
+func (s *OrganizationService) provisionNewAPIUser(ctx context.Context, org *sqlc.Organization) (sqlc.Organization, *int64, error) {
 	username := s.deriveUsername(org.ID)
 	password, err := generateUserPassword()
 	if err != nil {
-		return sqlc.Organization{}, fmt.Errorf("生成 new-api 密码失败: %w", err)
+		return sqlc.Organization{}, nil, fmt.Errorf("生成 new-api 密码失败: %w", err)
 	}
 
 	user, err := s.provisioner.CreateUser(ctx, newapi.CreateUserInput{
@@ -141,15 +183,16 @@ func (s *OrganizationService) provisionNewAPIUser(ctx context.Context, org *sqlc
 		DisplayName: org.Name,
 	})
 	if err != nil {
-		return sqlc.Organization{}, fmt.Errorf("调用 new-api 创建用户失败: %w", err)
+		return sqlc.Organization{}, nil, fmt.Errorf("调用 new-api 创建用户失败: %w", err)
 	}
 	if user.ID == 0 {
-		return sqlc.Organization{}, fmt.Errorf("new-api CreateUser 返回 user_id=0")
+		return sqlc.Organization{}, nil, fmt.Errorf("new-api CreateUser 返回 user_id=0")
 	}
+	createdUserID := user.ID
 
 	accessToken, err := s.provisioner.BootstrapUserAccessToken(ctx, username, password)
 	if err != nil {
-		return sqlc.Organization{}, fmt.Errorf("调用 new-api 登录拿 access_token 失败: %w", err)
+		return sqlc.Organization{}, &createdUserID, fmt.Errorf("调用 new-api 登录拿 access_token 失败: %w", err)
 	}
 
 	credPayload, err := json.Marshal(OrganizationCredentials{
@@ -158,11 +201,11 @@ func (s *OrganizationService) provisionNewAPIUser(ctx context.Context, org *sqlc
 		AccessToken: accessToken,
 	})
 	if err != nil {
-		return sqlc.Organization{}, fmt.Errorf("序列化 new-api 凭据失败: %w", err)
+		return sqlc.Organization{}, &createdUserID, fmt.Errorf("序列化 new-api 凭据失败: %w", err)
 	}
 	ciphertext, err := s.cipher.Encrypt(credPayload)
 	if err != nil {
-		return sqlc.Organization{}, fmt.Errorf("加密 new-api 凭据失败: %w", err)
+		return sqlc.Organization{}, &createdUserID, fmt.Errorf("加密 new-api 凭据失败: %w", err)
 	}
 
 	updated, err := s.store.SetOrganizationNewAPIUser(ctx, sqlc.SetOrganizationNewAPIUserParams{
@@ -171,9 +214,9 @@ func (s *OrganizationService) provisionNewAPIUser(ctx context.Context, org *sqlc
 		NewapiUserCredentialsCiphertext: pgtype.Text{String: ciphertext, Valid: true},
 	})
 	if err != nil {
-		return sqlc.Organization{}, fmt.Errorf("写入 new-api user 信息失败: %w", err)
+		return sqlc.Organization{}, &createdUserID, fmt.Errorf("写入 new-api user 信息失败: %w", err)
 	}
-	return updated, nil
+	return updated, &createdUserID, nil
 }
 
 // deriveUsername 基于组织 uuid 生成稳定 username（"org-" + uuid.String() 前 8 位）。
