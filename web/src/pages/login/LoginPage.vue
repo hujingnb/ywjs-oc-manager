@@ -1,43 +1,40 @@
 <template>
-  <form class="login-form" @submit.prevent="onSubmit">
-    <div>
+  <n-form class="login-form" label-placement="top" @submit.prevent="onSubmit">
+    <div style="margin-bottom: 24px">
       <p class="eyebrow">OpenClaw Manager</p>
-      <h1>登录控制台</h1>
+      <h1 style="margin: 0">登录控制台</h1>
     </div>
 
-    <label>
-      <span>账号</span>
-      <input
-        v-model.trim="username"
+    <n-form-item label="账号">
+      <n-input
+        v-model:value="username"
         autocomplete="username"
         placeholder="platform-admin"
-        type="text"
-        required
       />
-    </label>
+    </n-form-item>
 
-    <label>
-      <span>密码</span>
-      <input
-        v-model="password"
+    <n-form-item label="密码">
+      <n-input
+        v-model:value="password"
+        type="password"
         autocomplete="current-password"
         placeholder="请输入密码"
-        type="password"
-        required
+        show-password-on="click"
       />
-    </label>
+    </n-form-item>
 
     <p v-if="errorMessage" class="state-text danger">{{ errorMessage }}</p>
 
-    <button class="primary-button" type="submit" :disabled="auth.loading">
+    <n-button type="primary" attr-type="submit" :loading="auth.loading" style="width: 100%">
       {{ auth.loading ? '登录中…' : '登录' }}
-    </button>
-  </form>
+    </n-button>
+  </n-form>
 </template>
 
 <script setup lang="ts">
 import { ref } from 'vue'
 import { useRouter } from 'vue-router'
+import { NButton, NForm, NFormItem, NInput } from 'naive-ui'
 
 import { useAuthStore } from '@/stores/auth'
 
