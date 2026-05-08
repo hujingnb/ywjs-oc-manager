@@ -14,7 +14,7 @@
     <n-data-table
       v-else
       :columns="columns"
-      :data="apps ?? []"
+      :data="visibleApps"
       :loading="isLoading"
       size="small"
       :bordered="false"
@@ -54,6 +54,15 @@ const client = useQueryClient()
 
 const effectiveOrgId = computed(() => props.orgId ?? auth.user?.org_id)
 const { data: apps, isLoading } = useAppsByOrgQuery(effectiveOrgId)
+
+// org_member 只能看到自己的应用
+const visibleApps = computed(() => {
+  if (!apps.value) return []
+  if (auth.user?.role === 'org_member') {
+    return apps.value.filter(app => app.owner_user_id === auth.user?.id)
+  }
+  return apps.value
+})
 
 const toDelete = ref<AppDTO | null>(null)
 const deleting = ref(false)
