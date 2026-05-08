@@ -3,29 +3,22 @@
     <div v-if="!view" class="state-text">{{ emptyText }}</div>
     <template v-else>
       <p class="summary-line">
-        <strong>合计余额：</strong>
-        <span class="quota">{{ formatQuota(view.total_remain_quota) }}</span>
+        <strong>记录数：</strong>
+        <span class="quota">{{ itemCount }}</span>
+        <span v-if="view.total !== undefined" class="state-text">total {{ view.total }}</span>
         <span class="state-text">最近更新：{{ formatTime(view.updated_at) }}</span>
       </p>
-      <table v-if="view.apps?.length">
+      <table v-if="view.items?.length" class="usage-table">
         <thead>
           <tr>
-            <th>应用 ID</th>
-            <th>NewAPI Token</th>
-            <th>剩余额度</th>
-            <th>状态</th>
+            <th v-for="col in columns" :key="col">{{ col }}</th>
           </tr>
         </thead>
         <tbody>
-          <tr v-for="app in view.apps" :key="app.app_id">
-            <td><code>{{ app.app_id.slice(0, 12) }}</code></td>
-            <td>
-              <code v-if="app.newapi_key_id">{{ app.newapi_key_id }}</code>
-              <span v-else class="state-text">未绑定</span>
-            </td>
-            <td>{{ formatQuota(app.remain_quota) }}</td>
-            <td>
-              <span :class="['status-badge', `status-${app.status}`]">{{ statusLabel(app.status) }}</span>
+          <tr v-for="(row, idx) in view.items" :key="idx">
+            <td v-for="col in columns" :key="col">
+              <code v-if="col === 'token_id' || col === 'date'">{{ formatCell(row[col]) }}</code>
+              <span v-else>{{ formatCell(row[col]) }}</span>
             </td>
           </tr>
         </tbody>
@@ -36,21 +29,30 @@
 </template>
 
 <script setup lang="ts">
+import { computed } from 'vue'
+
 import type { AggregatedUsage } from '@/api/hooks/useUsage'
 
-defineProps<{ view?: AggregatedUsage; emptyText: string }>()
+const props = defineProps<{ view?: AggregatedUsage; emptyText: string }>()
 
-// new-api 用 1/2 表示启用/禁用；其它值（0 等）一律按未知处理。
-function statusLabel(s: number): string {
-  if (s === 1) return '启用'
-  if (s === 2) return '禁用'
-  return '未知'
-}
+const itemCount = computed(() => props.view?.items?.length ?? 0)
 
-// new-api quota 按 50 万 = 1 美元 缩放，但 manager v1.0 RC 仅展示原始值；
-// 这里附上千分位简化人眼阅读。
-function formatQuota(value: number): string {
-  return value.toLocaleString('en-US')
+// items 字段在 app / member（log entry）vs org / platform（quota date）之间结构不同，
+// 这里按首条 item 的字段动态渲染表头：
+//   - LogEntry：含 token_id / model_name / quota / created_at / ...
+//   - QuotaDate：含 date / quota / count / ...
+// 简化为列出所有 key（控制最多 6 列），避免硬编码字段集与后端漂移。
+const columns = computed<string[]>(() => {
+  const first = props.view?.items?.[0]
+  if (!first) return []
+  return Object.keys(first).slice(0, 6)
+})
+
+function formatCell(v: unknown): string {
+  if (v === null || v === undefined) return '—'
+  if (typeof v === 'number') return v.toLocaleString('en-US')
+  if (typeof v === 'string') return v
+  return JSON.stringify(v)
 }
 
 function formatTime(iso: string): string {
@@ -72,20 +74,26 @@ function formatTime(iso: string): string {
   color: #276d5c;
 }
 
-.status-badge {
-  display: inline-block;
-  padding: 2px 8px;
-  border-radius: 10px;
+.usage-table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 13px;
+}
+
+.usage-table th,
+.usage-table td {
+  border: 1px solid #e5e7eb;
+  padding: 6px 10px;
+  text-align: left;
+}
+
+.usage-table th {
+  background: #f3f4f6;
+  font-weight: 600;
+}
+
+.usage-table code {
+  font-family: ui-monospace, SFMono-Regular, monospace;
   font-size: 12px;
-}
-
-.status-1 {
-  background: #e6f7e0;
-  color: #2c7a2c;
-}
-
-.status-2 {
-  background: #ffe1e1;
-  color: #b51d1d;
 }
 </style>

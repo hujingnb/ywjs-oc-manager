@@ -3,21 +3,19 @@ import type { Ref } from 'vue'
 
 import { apiRequest } from '@/api/client'
 
-// AppUsageSnapshot 与后端 service.AppUsageSnapshot 字段一一对应。
-export interface AppUsageSnapshot {
-  app_id: string
-  newapi_key_id: number
-  remain_quota: number
-  status: number
-  updated_at: string
-}
-
-// AggregatedUsage 与后端 service.AggregatedUsage 字段一一对应。
+// AggregatedUsage 是 v1.0.2 new-api 直连改造后的薄代理响应。
+// 后端 service.LogsPage / QuotaSeries 共享同一前端类型：
+//   - app / member 维度（GetAppUsage / GetMemberUsage）：items 是 newapi.LogEntry 数组
+//   - org / platform 维度（GetOrgUsage / GetPlatformUsage）：items 是 newapi.QuotaDate 数组
+// total 仅在 LogsPage 出现（代表 newapi 分页总数）。
+//
+// 旧字段 total_remain_quota / apps 在改造后已废弃；UI 不再聚合余额，每条 item 自带
+// quota/usage 数据，由展示层按维度区分渲染。
 export interface AggregatedUsage {
-  scope: 'organization' | 'member' | 'platform'
+  scope: 'organization' | 'member' | 'platform' | 'app'
   scope_id?: string
-  total_remain_quota: number
-  apps?: AppUsageSnapshot[]
+  items: Record<string, unknown>[]
+  total?: number
   updated_at: string
 }
 
