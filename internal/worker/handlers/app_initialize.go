@@ -7,6 +7,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"log"
 	"path"
 	"strings"
 
@@ -72,6 +73,25 @@ type ContainerStarter interface {
 // 只是状态机会立即推到 binding_waiting，等 channel 流程时再失败重试。
 type OpenClawHealthChecker interface {
 	WaitForOpenClawHealthy(ctx context.Context, nodeID, containerID string) error
+}
+
+// ContainerExecRestarter 抽象「在容器内执行命令并重启容器」的能力，handler 用它在
+// OpenClaw 容器启动后注入 agents.defaults.model 配置。OpenClaw 上游 default model 是
+// `openai/gpt-5.5`（v1.0.1 GA 已知降级），manager 拿到 LLM 配置后必须显式 patch
+// `agents.defaults.model` 字段，否则 weixin 触发的 embedded agent 会调 api.openai.com
+// 被 OpenClaw 沙箱拦截。
+//
+// 实现要求：
+//   - ContainerExec 同步等命令结束并返回 exit code（AgentBackedAdapter 已是这个语义）；
+//   - RestartContainer 触发 OpenClaw gateway 重新加载新写入的 openclaw.json。
+//
+// 接口存在的目的：保持 ContainerStarter 最小（只一个方法）便于既有测试 mock，
+// 通过类型断言把扩展能力注入特定路径，未实现该接口的 starter 跳过 model 注入但仍能
+// 完成容器启动 + healthcheck 全链路（OpenClaw 沿用默认 gpt-5.5，依赖 ops 在 new-api
+// 渠道做 model alias 兜底）。
+type ContainerExecRestarter interface {
+	ContainerExec(ctx context.Context, nodeID, containerID string, cmd []string) (runtimepkg.ExecResult, error)
+	RestartContainer(ctx context.Context, nodeID, containerID string) error
 }
 
 // APIKeyClient 是「以业务 user 身份调 token 相关接口」的最小能力集合。
@@ -318,6 +338,23 @@ func (h *AppInitializeHandler) Handle(ctx context.Context, job sqlc.Job) error {
 			if checker, ok := h.starter.(OpenClawHealthChecker); ok {
 				if err := checker.WaitForOpenClawHealthy(ctx, payload.RuntimeNodeID, info.ID); err != nil {
 					return fmt.Errorf("等待 OpenClaw 健康失败: %w", err)
+				}
+			}
+			// v1.0.2：OpenClaw 默认 agents.defaults.model 是 gpt-5.5；manager 拿到 LLM 配置后
+			// 必须显式 patch 进容器内的 openclaw.json，否则 embedded agent 会调 api.openai.com。
+			// 命令完成后必须重启容器让 gateway 重新加载配置（openclaw 自身 hint：
+			//「Restart the gateway to apply」）。
+			if execer, ok := h.starter.(ContainerExecRestarter); ok && h.cfg.LLM.DefaultModel != "" {
+				if err := configureOpenClawDefaultModel(ctx, execer, payload.RuntimeNodeID, info.ID, h.cfg.LLM.DefaultModel); err != nil {
+					// 模型注入失败不阻塞主流程：容器仍会用 gpt-5.5 默认值；ops 可在 new-api 端
+					// 用 model_mapping 兜底（gpt-5.5 -> qwen2.5:0.5b）。但记日志便于排查。
+					log.Printf("app_initialize: 配置 openclaw 默认 model 失败 (app_id=%s): %v", uuidToString(app.ID), err)
+				} else if checker, ok := h.starter.(OpenClawHealthChecker); ok {
+					// model patch 后重启了容器，必须再次等 /healthz；否则 channel_start_login
+					// 会撞到 OpenClaw plugin 重新加载未就绪。
+					if err := checker.WaitForOpenClawHealthy(ctx, payload.RuntimeNodeID, info.ID); err != nil {
+						return fmt.Errorf("配置 model 后等待 OpenClaw 重新健康失败: %w", err)
+					}
 				}
 			}
 		}
@@ -637,4 +674,33 @@ func textOrEmpty(t pgtype.Text) string {
 		return ""
 	}
 	return t.String
+}
+
+// configureOpenClawDefaultModel 在容器内执行 `openclaw config set agents.defaults.model <model>`
+// 并紧接着重启容器让新配置生效。
+//
+// 实现要点：
+//   - 命令通过 docker exec 同步执行，等 exit code == 0 才认为成功；非 0 视为失败但不
+//     panic；调用方 swallow 错误并 log，主流程继续（容器仍可启动，仅默认 model 是 gpt-5.5）。
+//   - openclaw CLI 输出含 ANSI 框线和 plugin manifest warning 等 noise，不解析 stdout，
+//     仅看 exit code 与"Updated agents.defaults.model"标记串。
+//   - 重启容器是必须的：openclaw 自身在 stderr 输出 "Restart the gateway to apply"。
+func configureOpenClawDefaultModel(ctx context.Context, execer ContainerExecRestarter, nodeID, containerID, model string) error {
+	cmd := []string{"openclaw", "config", "set", "agents.defaults.model", model}
+	res, err := execer.ContainerExec(ctx, nodeID, containerID, cmd)
+	if err != nil {
+		return fmt.Errorf("docker exec openclaw config set 失败: %w", err)
+	}
+	if res.ExitCode != 0 {
+		return fmt.Errorf("openclaw config set 返回 exit=%d stdout=%q", res.ExitCode, res.Stdout)
+	}
+	if !strings.Contains(res.Stdout, "Updated agents.defaults.model") {
+		// 未看到预期 ack 字符串：当前 OpenClaw CLI 始终在成功路径输出该串；
+		// 缺失意味着 CLI 行为变了，记录但不 fail（避免上游小改 break manager）。
+		log.Printf("app_initialize: openclaw config set 未输出预期 ack：%q", res.Stdout)
+	}
+	if err := execer.RestartContainer(ctx, nodeID, containerID); err != nil {
+		return fmt.Errorf("重启容器以加载新 model 配置失败: %w", err)
+	}
+	return nil
 }
