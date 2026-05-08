@@ -1,122 +1,63 @@
 <template>
-  <article class="panel job-panel">
-    <div class="panel-heading">
-      <div>
-        <p class="eyebrow">{{ subtitle ?? 'Job' }}</p>
-        <h2>{{ title }}</h2>
+  <n-card size="small" :bordered="true" style="margin-top: 16px">
+    <template #header>
+      <div style="display: flex; align-items: center; justify-content: space-between">
+        <div>
+          <p class="eyebrow">{{ subtitle ?? 'Job' }}</p>
+          <strong>{{ title }}</strong>
+        </div>
+        <n-tag :type="tagType" size="small" :bordered="false">{{ labelFor(job?.status) }}</n-tag>
       </div>
-      <span :class="['status-pill', toneFor(job?.status)]">
-        {{ labelFor(job?.status) }}
-      </span>
-    </div>
+    </template>
 
-    <div v-if="!job" class="state-text">尚未触发任务</div>
-    <dl v-else class="job-grid">
-      <div>
-        <dt>类型</dt>
-        <dd>{{ job.type }}</dd>
-      </div>
-      <div>
-        <dt>尝试次数</dt>
-        <dd>{{ job.attempts }} / {{ job.max_attempts }}</dd>
-      </div>
-      <div>
-        <dt>下一次执行</dt>
-        <dd>{{ formatTime(job.run_after) }}</dd>
-      </div>
-      <div>
-        <dt>完成时间</dt>
-        <dd>{{ formatTime(job.finished_at) }}</dd>
-      </div>
-      <div v-if="job.last_error" class="job-error">
-        <dt>最近错误</dt>
-        <dd>{{ job.last_error }}</dd>
-      </div>
-    </dl>
-  </article>
+    <div v-if="!job" style="color: #8A94C6; font-size: 13px">尚未触发任务</div>
+    <n-descriptions v-else :column="2" size="small" label-style="color:#8A94C6" content-style="font-weight:600">
+      <n-descriptions-item label="类型">{{ job.type }}</n-descriptions-item>
+      <n-descriptions-item label="尝试次数">{{ job.attempts }} / {{ job.max_attempts }}</n-descriptions-item>
+      <n-descriptions-item label="下一次执行">{{ formatTime(job.run_after) }}</n-descriptions-item>
+      <n-descriptions-item label="完成时间">{{ formatTime(job.finished_at) }}</n-descriptions-item>
+      <n-descriptions-item v-if="job.last_error" label="最近错误" :span="2">
+        <span style="color: #FF3B5C">{{ job.last_error }}</span>
+      </n-descriptions-item>
+    </n-descriptions>
+  </n-card>
 </template>
 
 <script setup lang="ts">
+import { computed } from 'vue'
+import { NCard, NDescriptions, NDescriptionsItem, NTag } from 'naive-ui'
+
 const props = defineProps<{
   title: string
   subtitle?: string
   job?: {
-    id: string
-    type: string
-    status: string
-    attempts: number
-    max_attempts: number
-    run_after?: string | null
-    finished_at?: string | null
-    last_error?: string
+    id: string; type: string; status: string; attempts: number; max_attempts: number;
+    run_after?: string | null; finished_at?: string | null; last_error?: string
   } | null
 }>()
 
-const statusViews: Record<string, { label: string; tone: 'success' | 'warning' | 'danger' | 'neutral' }> = {
+const statusViews: Record<string, { label: string; tone: string }> = {
   pending: { label: '待执行', tone: 'warning' },
   running: { label: '执行中', tone: 'warning' },
   succeeded: { label: '已完成', tone: 'success' },
-  failed: { label: '失败', tone: 'danger' },
-  canceled: { label: '已取消', tone: 'neutral' },
+  failed: { label: '失败', tone: 'error' },
+  canceled: { label: '已取消', tone: 'default' },
 }
 
 function labelFor(status?: string) {
-  if (!status) return '未触发'
-  return statusViews[status]?.label ?? status
+  return status ? (statusViews[status]?.label ?? status) : '未触发'
 }
 
-function toneFor(status?: string) {
-  if (!status) return 'neutral'
-  return statusViews[status]?.tone ?? 'neutral'
-}
+const tagType = computed(() => {
+  const tone = statusViews[props.job?.status ?? '']?.tone ?? 'default'
+  return tone as 'success' | 'warning' | 'error' | 'default'
+})
 
 function formatTime(value?: string | null) {
   if (!value) return '—'
-  const date = new Date(value)
-  if (Number.isNaN(date.getTime())) return value
-  return date.toLocaleString('zh-CN', { hour12: false })
+  const d = new Date(value)
+  return Number.isNaN(d.getTime()) ? value : d.toLocaleString('zh-CN', { hour12: false })
 }
 
-// 维持 props 引用，避免被意外摇树。
 void props
 </script>
-
-<style scoped>
-.job-panel {
-  margin-top: 16px;
-}
-
-.job-grid {
-  display: grid;
-  grid-template-columns: repeat(2, minmax(0, 1fr));
-  gap: 12px;
-  margin-top: 14px;
-}
-
-.job-grid div {
-  border: 1px solid #e4eaf2;
-  border-radius: 8px;
-  padding: 12px;
-  background: #f8fafc;
-}
-
-.job-grid dt {
-  margin: 0 0 4px;
-  color: #66758a;
-  font-size: 12px;
-  font-weight: 700;
-  text-transform: uppercase;
-}
-
-.job-grid dd {
-  margin: 0;
-  color: #172033;
-  font-weight: 600;
-  word-break: break-all;
-}
-
-.job-error {
-  grid-column: 1 / -1;
-  background: #fff4f0;
-}
-</style>

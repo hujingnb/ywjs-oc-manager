@@ -82,15 +82,16 @@ watch(
   margin: 0 auto;
   max-width: 240px;
   border-radius: 8px;
-  background: #ffffff;
+  background: #ffffff; /* 保持白底确保 QR 可读 */
 }
 
 .challenge-code {
   margin: 0;
   padding: 16px;
-  border: 1px dashed #cfd8e5;
+  border: 1px dashed rgba(0, 240, 255, 0.3);
   border-radius: 8px;
-  background: #f8fafc;
+  background: rgba(15, 21, 53, 0.8);
+  color: #00F0FF;
   font-size: 22px;
   font-weight: 800;
   letter-spacing: 4px;
@@ -98,7 +99,7 @@ watch(
 
 .fallback-hint {
   font-size: 12px;
-  color: var(--text-muted, #5a6480);
+  color: #8A94C6;
   word-break: break-all;
 }
 </style>
