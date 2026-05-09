@@ -104,19 +104,6 @@ func (s *AppService) ListByOrg(ctx context.Context, principal auth.Principal, or
 	return results, nil
 }
 
-func canViewApp(principal auth.Principal, app sqlc.App) bool {
-	switch principal.Role {
-	case domain.UserRolePlatformAdmin:
-		return true
-	case domain.UserRoleOrgAdmin:
-		return principal.OrgID == uuidToString(app.OrgID)
-	case domain.UserRoleOrgMember:
-		return principal.UserID == uuidToString(app.OwnerUserID)
-	default:
-		return false
-	}
-}
-
 func toAppResult(app sqlc.App) AppResult {
 	result := AppResult{
 		ID:           uuidToString(app.ID),

@@ -362,61 +362,6 @@ func (s *MemberService) ResetMemberPassword(ctx context.Context, principal auth.
 	return nil
 }
 
-// canManageOrg 判断主体是否可以管理指定组织（创建/编辑成员、调整状态等写操作）。
-func canManageOrg(principal auth.Principal, orgID string) bool {
-	switch principal.Role {
-	case domain.UserRolePlatformAdmin:
-		return true
-	case domain.UserRoleOrgAdmin:
-		return principal.OrgID == orgID
-	default:
-		return false
-	}
-}
-
-// canViewOrg 判断主体是否可以查看指定组织内的资源（读路径）。
-func canViewOrg(principal auth.Principal, orgID string) bool {
-	if principal.Role == domain.UserRolePlatformAdmin {
-		return true
-	}
-	return principal.OrgID == orgID
-}
-
-// canAccessMember 判断主体是否可以读取目标成员的明细。
-// 普通成员只能查看自己；组织管理员可查看本组织成员；平台管理员可查所有人。
-func canAccessMember(principal auth.Principal, user sqlc.User) bool {
-	switch principal.Role {
-	case domain.UserRolePlatformAdmin:
-		return true
-	case domain.UserRoleOrgAdmin:
-		return principal.OrgID == uuidToOptionalString(user.OrgID)
-	case domain.UserRoleOrgMember:
-		return principal.UserID == uuidToString(user.ID)
-	default:
-		return false
-	}
-}
-
-// canManageMember 判断主体能否对目标成员执行写操作（角色调整、状态切换、密码重置）。
-func canManageMember(principal auth.Principal, user sqlc.User) bool {
-	switch principal.Role {
-	case domain.UserRolePlatformAdmin:
-		return true
-	case domain.UserRoleOrgAdmin:
-		return principal.OrgID == uuidToOptionalString(user.OrgID)
-	default:
-		return false
-	}
-}
-
-// canEditOwnProfile 判断主体是否可以编辑自身资料，对应非角色调整的更新路径。
-func canEditOwnProfile(principal auth.Principal, user sqlc.User) bool {
-	if canManageMember(principal, user) {
-		return true
-	}
-	return principal.UserID == uuidToString(user.ID)
-}
-
 func toMemberResults(users []sqlc.User) []MemberResult {
 	results := make([]MemberResult, 0, len(users))
 	for _, user := range users {

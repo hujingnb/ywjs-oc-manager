@@ -9,7 +9,6 @@ import (
 	"github.com/jackc/pgx/v5/pgtype"
 
 	"oc-manager/internal/auth"
-	"oc-manager/internal/domain"
 	"oc-manager/internal/store/sqlc"
 )
 
@@ -116,28 +115,6 @@ func (s *PersonaService) Replace(ctx context.Context, principal auth.Principal, 
 		return PersonaResult{}, fmt.Errorf("写入人设失败: %w", err)
 	}
 	return toPersonaResult(persona), nil
-}
-
-func canViewOrgPersona(principal auth.Principal, orgID string) bool {
-	switch principal.Role {
-	case domain.UserRolePlatformAdmin:
-		return true
-	case domain.UserRoleOrgAdmin, domain.UserRoleOrgMember:
-		return principal.OrgID == orgID
-	default:
-		return false
-	}
-}
-
-func canEditOrgPersona(principal auth.Principal, orgID string) bool {
-	switch principal.Role {
-	case domain.UserRolePlatformAdmin:
-		return true
-	case domain.UserRoleOrgAdmin:
-		return principal.OrgID == orgID
-	default:
-		return false
-	}
 }
 
 func toPersonaResult(p sqlc.OrganizationPersona) PersonaResult {
