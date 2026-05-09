@@ -47,6 +47,8 @@ func NewRouter(deps ...Dependencies) http.Handler {
 	if len(deps) > 0 && len(deps[0].AllowedOrigins) > 0 {
 		router.Use(middleware.CORSAllowOrigin(deps[0].AllowedOrigins))
 	}
+	// RequestID 保证每个请求都携带 trace_id，供 slog ctx-aware 日志输出 trace_id 字段。
+	router.Use(middleware.RequestID())
 	// CSRF 双 submit cookie 校验：opt-in 模式（无 cookie 时放行），
 	// 前端拿到 csrf_token cookie 后必须把它写到 X-CSRF-Token header 才能通过写操作。
 	router.Use(middleware.RequireCSRF())

@@ -17,7 +17,8 @@ import (
 	"errors"
 	"fmt"
 	"io"
-	"log"
+	stdlog "log"
+	"log/slog"
 	"net/http"
 	"os"
 	"os/signal"
@@ -27,6 +28,7 @@ import (
 	"golang.org/x/sync/errgroup"
 
 	"oc-manager/internal/api"
+	"oc-manager/internal/api/middleware"
 	"oc-manager/internal/audit"
 	"oc-manager/internal/auth"
 	"oc-manager/internal/config"
@@ -36,7 +38,7 @@ import (
 	"oc-manager/internal/integrations/channel"
 	"oc-manager/internal/integrations/newapi"
 	"oc-manager/internal/integrations/runtime"
-	redactlog "oc-manager/internal/log"
+	managerlog "oc-manager/internal/log"
 	"oc-manager/internal/redis"
 	"oc-manager/internal/runtime/imagesync"
 	"oc-manager/internal/scheduler"
@@ -54,10 +56,10 @@ func main() {
 
 	cfg, err := config.LoadFile(configPath)
 	if err != nil {
-		log.Fatalf("加载配置失败: %v", err)
+		stdlog.Fatalf("加载配置失败: %v", err)
 	}
 	if err := runManager(context.Background(), cfg, os.Stderr); err != nil {
-		log.Fatalf("manager 退出: %v", err)
+		stdlog.Fatalf("manager 退出: %v", err)
 	}
 }
 
@@ -71,9 +73,13 @@ func main() {
 //
 // 错误以 fmt.Errorf 形式冒泡到调用方，便于 main 用 log.Fatalf 输出，也便于测试用 ctx 取消触发干净退出。
 func runManager(ctx context.Context, cfg config.Config, logOut io.Writer) error {
-	// 把所有日志输出经过 RedactingWriter，避免密码 / token / sk- key 泄漏到容器日志或宿主 stdout。
-	// 这里在 io.Writer 层包装，无需修改任何业务调用点。
-	logger := log.New(redactlog.NewRedactingWriter(logOut), "", log.LstdFlags)
+	// 构造结构化 logger：RedactingWriter 已在 NewSlogLogger 内部包装，
+	// 所有日志输出自动脱敏（密码 / token / sk- key）。
+	// 顺序要求：先 NewSlogLogger，再 SetRequestIDExtractor，再 SetDefault，
+	// 确保首批日志也能从 ctx 中提取 trace_id。
+	logger := managerlog.NewSlogLogger(logOut)
+	managerlog.SetRequestIDExtractor(middleware.RequestIDFromContext)
+	slog.SetDefault(logger)
 
 	masterKey, err := base64.StdEncoding.DecodeString(cfg.Security.MasterKey)
 	if err != nil {
@@ -148,7 +154,7 @@ func runManager(ctx context.Context, cfg config.Config, logOut io.Writer) error 
 		agentTokenResolver.Set(nodeID, token)
 		// 加密入库；任何错误只走日志，不阻断 register 响应。
 		if err := persistAgentToken(context.Background(), agentTokenStore, cipher, nodeID, token); err != nil {
-			logger.Printf("持久化 agent token 失败 node=%s: %v", nodeID, err)
+			logger.Error("持久化 agent token 失败", "node_id", nodeID, "error", err)
 		}
 	}
 	nodeResolver := newNodeClientResolver(dbStore.Queries, agentTokenResolver)
@@ -323,7 +329,7 @@ func runManager(ctx context.Context, cfg config.Config, logOut io.Writer) error 
 	eg, gctx := errgroup.WithContext(rootCtx)
 
 	eg.Go(func() error {
-		logger.Printf("manager api listening on %s", cfg.App.HTTPAddr)
+		logger.Info("manager api listening", "addr", cfg.App.HTTPAddr)
 		if err := server.ListenAndServe(); err != nil && !errors.Is(err, http.ErrServerClosed) {
 			return fmt.Errorf("http server 异常退出: %w", err)
 		}
@@ -331,19 +337,20 @@ func runManager(ctx context.Context, cfg config.Config, logOut io.Writer) error 
 	})
 	eg.Go(func() error { return pool.Run(gctx) })
 	eg.Go(func() error { return loop.Run(gctx) })
+	// PeriodicReconciler.Run 接收 printf 风格的日志回调；用 slog.Info 适配。
 	eg.Go(func() error {
 		return nodeHealthTask.Run(gctx, func(format string, args ...any) {
-			logger.Printf(format, args...)
+			logger.Info(fmt.Sprintf(format, args...))
 		})
 	})
 	eg.Go(func() error {
 		return runtimeRefreshTask.Run(gctx, func(format string, args ...any) {
-			logger.Printf(format, args...)
+			logger.Info(fmt.Sprintf(format, args...))
 		})
 	})
 	eg.Go(func() error {
 		return healthCheckTask.Run(gctx, func(format string, args ...any) {
-			logger.Printf(format, args...)
+			logger.Info(fmt.Sprintf(format, args...))
 		})
 	})
 	eg.Go(func() error {

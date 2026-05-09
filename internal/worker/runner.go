@@ -3,7 +3,7 @@ package worker
 import (
 	"context"
 	"fmt"
-	"log"
+	"log/slog"
 	"runtime/debug"
 	"time"
 
@@ -20,11 +20,11 @@ type Pool struct {
 	worker      *Worker
 	concurrency int
 	interval    time.Duration
-	logger      *log.Logger
+	logger      *slog.Logger
 }
 
 // NewPool 创建 worker pool。concurrency<=0 时退化为 1，interval<=0 时退化为 200ms。
-// 默认 logger 走 stdlib log 包，调用方可通过 SetLogger 注入自定义日志。
+// 默认 logger 走 slog 默认 logger，调用方可通过 SetLogger 注入自定义日志。
 func NewPool(worker *Worker, concurrency int, interval time.Duration) *Pool {
 	if concurrency <= 0 {
 		concurrency = 1
@@ -32,11 +32,11 @@ func NewPool(worker *Worker, concurrency int, interval time.Duration) *Pool {
 	if interval <= 0 {
 		interval = 200 * time.Millisecond
 	}
-	return &Pool{worker: worker, concurrency: concurrency, interval: interval, logger: log.Default()}
+	return &Pool{worker: worker, concurrency: concurrency, interval: interval, logger: slog.Default()}
 }
 
-// SetLogger 替换 pool 的日志器，主要供测试或自定义日志格式使用。
-func (p *Pool) SetLogger(logger *log.Logger) {
+// SetLogger 替换 pool 的结构化 logger。仅供 cmd/server 启动期调用。
+func (p *Pool) SetLogger(logger *slog.Logger) {
 	if logger == nil {
 		return
 	}
@@ -61,7 +61,7 @@ func (p *Pool) Run(ctx context.Context) error {
 					return nil
 				case <-ticker.C:
 					if err := safeRecoverTick(gctx, p.worker); err != nil {
-						p.logger.Printf("worker[%d] tick 错误: %v", i, err)
+						p.logger.Error("worker tick 错误", "worker_index", i, "error", err)
 					}
 				}
 			}

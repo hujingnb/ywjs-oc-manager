@@ -4,7 +4,7 @@ import (
 	"bytes"
 	"context"
 	"errors"
-	"log"
+	"log/slog"
 	"strings"
 	"sync/atomic"
 	"testing"
@@ -85,7 +85,7 @@ func TestPool_PanicIsolatedAndLogged(t *testing.T) {
 	q.remaining.Store(3)
 	logBuf := &bytes.Buffer{}
 	pool := NewPool(newWorker(q), 2, 5*time.Millisecond)
-	pool.SetLogger(log.New(logBuf, "", 0))
+	pool.SetLogger(slog.New(slog.NewTextHandler(logBuf, nil)))
 
 	ctx, cancel := context.WithTimeout(context.Background(), 80*time.Millisecond)
 	defer cancel()

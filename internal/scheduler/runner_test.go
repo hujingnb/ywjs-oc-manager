@@ -4,7 +4,7 @@ import (
 	"bytes"
 	"context"
 	"errors"
-	"log"
+	"log/slog"
 	"strings"
 	"sync/atomic"
 	"testing"
@@ -51,7 +51,7 @@ func TestLoop_LogsTickError(t *testing.T) {
 	store := &loopStore{err: errors.New("db down")}
 	logBuf := &bytes.Buffer{}
 	loop := NewLoop(newLoopScheduler(store), 5*time.Millisecond)
-	loop.SetLogger(log.New(logBuf, "", 0))
+	loop.SetLogger(slog.New(slog.NewTextHandler(logBuf, nil)))
 	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Millisecond)
 	defer cancel()
 	if err := loop.Run(ctx); err != nil {

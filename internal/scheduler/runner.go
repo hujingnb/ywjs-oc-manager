@@ -3,7 +3,7 @@ package scheduler
 import (
 	"context"
 	"fmt"
-	"log"
+	"log/slog"
 	"time"
 )
 
@@ -16,7 +16,7 @@ import (
 type Loop struct {
 	scheduler *Scheduler
 	interval  time.Duration
-	logger    *log.Logger
+	logger    *slog.Logger
 }
 
 // NewLoop 创建 scheduler loop。interval<=0 时退化为 5 秒，与 spec §5 默认一致。
@@ -24,11 +24,11 @@ func NewLoop(scheduler *Scheduler, interval time.Duration) *Loop {
 	if interval <= 0 {
 		interval = 5 * time.Second
 	}
-	return &Loop{scheduler: scheduler, interval: interval, logger: log.Default()}
+	return &Loop{scheduler: scheduler, interval: interval, logger: slog.Default()}
 }
 
-// SetLogger 替换 logger，主要供测试或自定义日志格式使用。
-func (l *Loop) SetLogger(logger *log.Logger) {
+// SetLogger 替换结构化 logger。仅供 cmd/server 启动期调用。
+func (l *Loop) SetLogger(logger *slog.Logger) {
 	if logger == nil {
 		return
 	}
@@ -48,7 +48,7 @@ func (l *Loop) Run(ctx context.Context) error {
 			return nil
 		case <-ticker.C:
 			if err := l.scheduler.Tick(ctx); err != nil {
-				l.logger.Printf("scheduler tick 错误: %v", err)
+				l.logger.Error("scheduler tick 错误", "error", err)
 			}
 		}
 	}
