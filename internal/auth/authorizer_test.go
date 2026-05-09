@@ -1,0 +1,158 @@
+package auth
+
+import (
+	"testing"
+
+	"oc-manager/internal/domain"
+)
+
+const (
+	orgA  = "org-A"
+	orgB  = "org-B"
+	userA = "user-A"
+	userB = "user-B"
+)
+
+type orgCase struct {
+	name      string
+	role      string
+	pOrgID    string
+	targetOrg string
+	want      bool
+}
+
+func runOrgCases(t *testing.T, fn func(Principal, string) bool, cases []orgCase) {
+	t.Helper()
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			p := Principal{UserID: userA, OrgID: c.pOrgID, Role: c.role}
+			if got := fn(p, c.targetOrg); got != c.want {
+				t.Fatalf("got %v, want %v", got, c.want)
+			}
+		})
+	}
+}
+
+func TestCanManageOrg(t *testing.T) {
+	cases := []orgCase{
+		{"platform_admin 跨组织可管", domain.UserRolePlatformAdmin, orgA, orgB, true},
+		{"org_admin 同组织可管", domain.UserRoleOrgAdmin, orgA, orgA, true},
+		{"org_admin 跨组织不可管", domain.UserRoleOrgAdmin, orgA, orgB, false},
+		{"org_member 同组织也不可管", domain.UserRoleOrgMember, orgA, orgA, false},
+		{"未知角色不可管", "unknown", orgA, orgA, false},
+	}
+	runOrgCases(t, CanManageOrg, cases)
+}
+
+func TestCanViewOrg(t *testing.T) {
+	cases := []orgCase{
+		{"platform_admin 跨组织可读", domain.UserRolePlatformAdmin, orgA, orgB, true},
+		{"org_admin 同组织可读", domain.UserRoleOrgAdmin, orgA, orgA, true},
+		{"org_admin 跨组织不可读", domain.UserRoleOrgAdmin, orgA, orgB, false},
+		{"org_member 同组织可读", domain.UserRoleOrgMember, orgA, orgA, true},
+		{"org_member 跨组织不可读", domain.UserRoleOrgMember, orgA, orgB, false},
+	}
+	runOrgCases(t, CanViewOrg, cases)
+}
+
+type memberCase struct {
+	name       string
+	role       string
+	pOrgID     string
+	pUserID    string
+	targetOrg  string
+	targetUser string
+	want       bool
+}
+
+func TestCanViewMember(t *testing.T) {
+	cases := []memberCase{
+		{"platform_admin 任意成员可看", domain.UserRolePlatformAdmin, orgA, userA, orgB, userB, true},
+		{"org_admin 同组织可看", domain.UserRoleOrgAdmin, orgA, userA, orgA, userB, true},
+		{"org_admin 跨组织不可看", domain.UserRoleOrgAdmin, orgA, userA, orgB, userB, false},
+		{"org_member 仅看自己", domain.UserRoleOrgMember, orgA, userA, orgA, userA, true},
+		{"org_member 不可看他人", domain.UserRoleOrgMember, orgA, userA, orgA, userB, false},
+	}
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			p := Principal{UserID: c.pUserID, OrgID: c.pOrgID, Role: c.role}
+			if got := CanViewMember(p, c.targetOrg, c.targetUser); got != c.want {
+				t.Fatalf("got %v, want %v", got, c.want)
+			}
+		})
+	}
+}
+
+func TestCanManageMember(t *testing.T) {
+	cases := []orgCase{
+		{"platform_admin 跨组织可管成员", domain.UserRolePlatformAdmin, orgA, orgB, true},
+		{"org_admin 同组织可管成员", domain.UserRoleOrgAdmin, orgA, orgA, true},
+		{"org_admin 跨组织不可管", domain.UserRoleOrgAdmin, orgA, orgB, false},
+		{"org_member 一律不可管", domain.UserRoleOrgMember, orgA, orgA, false},
+	}
+	runOrgCases(t, CanManageMember, cases)
+}
+
+func TestCanEditMember(t *testing.T) {
+	cases := []memberCase{
+		{"platform_admin 任意可编辑", domain.UserRolePlatformAdmin, orgA, userA, orgB, userB, true},
+		{"org_admin 同组织可编辑", domain.UserRoleOrgAdmin, orgA, userA, orgA, userB, true},
+		{"org_admin 跨组织不可编辑", domain.UserRoleOrgAdmin, orgA, userA, orgB, userB, false},
+		{"org_member 仅可编辑自己", domain.UserRoleOrgMember, orgA, userA, orgA, userA, true},
+		{"org_member 不可编辑他人", domain.UserRoleOrgMember, orgA, userA, orgA, userB, false},
+	}
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			p := Principal{UserID: c.pUserID, OrgID: c.pOrgID, Role: c.role}
+			if got := CanEditMember(p, c.targetOrg, c.targetUser); got != c.want {
+				t.Fatalf("got %v, want %v", got, c.want)
+			}
+		})
+	}
+}
+
+func TestCanViewApp(t *testing.T) {
+	cases := []memberCase{
+		{"platform_admin 任意应用可看", domain.UserRolePlatformAdmin, orgA, userA, orgB, userB, true},
+		{"org_admin 同组织应用可看", domain.UserRoleOrgAdmin, orgA, userA, orgA, userB, true},
+		{"org_admin 跨组织不可看", domain.UserRoleOrgAdmin, orgA, userA, orgB, userB, false},
+		{"org_member 仅看自己拥有的", domain.UserRoleOrgMember, orgA, userA, orgA, userA, true},
+		{"org_member 不可看同组织他人", domain.UserRoleOrgMember, orgA, userA, orgA, userB, false},
+	}
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			p := Principal{UserID: c.pUserID, OrgID: c.pOrgID, Role: c.role}
+			if got := CanViewApp(p, c.targetOrg, c.targetUser); got != c.want {
+				t.Fatalf("got %v, want %v", got, c.want)
+			}
+		})
+	}
+}
+
+func TestCanViewOrgPersona_等价于CanViewOrg(t *testing.T) {
+	roles := []string{domain.UserRolePlatformAdmin, domain.UserRoleOrgAdmin, domain.UserRoleOrgMember}
+	pairs := [][2]string{{orgA, orgA}, {orgA, orgB}}
+	for _, role := range roles {
+		for _, pair := range pairs {
+			p := Principal{UserID: userA, OrgID: pair[0], Role: role}
+			if CanViewOrgPersona(p, pair[1]) != CanViewOrg(p, pair[1]) {
+				t.Fatalf("CanViewOrgPersona 与 CanViewOrg 行为不一致: role=%s pOrg=%s targetOrg=%s",
+					role, pair[0], pair[1])
+			}
+		}
+	}
+}
+
+func TestCanManageOrgPersona_等价于CanManageOrg(t *testing.T) {
+	roles := []string{domain.UserRolePlatformAdmin, domain.UserRoleOrgAdmin, domain.UserRoleOrgMember}
+	pairs := [][2]string{{orgA, orgA}, {orgA, orgB}}
+	for _, role := range roles {
+		for _, pair := range pairs {
+			p := Principal{UserID: userA, OrgID: pair[0], Role: role}
+			if CanManageOrgPersona(p, pair[1]) != CanManageOrg(p, pair[1]) {
+				t.Fatalf("CanManageOrgPersona 与 CanManageOrg 行为不一致: role=%s pOrg=%s targetOrg=%s",
+					role, pair[0], pair[1])
+			}
+		}
+	}
+}
