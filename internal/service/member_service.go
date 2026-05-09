@@ -92,7 +92,7 @@ func (s *MemberService) CreateMember(ctx context.Context, principal auth.Princip
 	if role != domain.UserRoleOrgAdmin && role != domain.UserRoleOrgMember {
 		return MemberResult{}, fmt.Errorf("%w: 不支持的角色", ErrMemberCreateInvalid)
 	}
-	if !canManageOrg(principal, orgID) {
+	if !auth.CanManageOrg(principal, orgID) {
 		return MemberResult{}, ErrForbidden
 	}
 	if input.Username == "" || input.Password == "" || input.DisplayName == "" {
@@ -138,7 +138,7 @@ func (s *MemberService) ListMembers(ctx context.Context, principal auth.Principa
 	if principal.Role == domain.UserRoleOrgMember {
 		return nil, ErrForbidden
 	}
-	if !canViewOrg(principal, orgID) {
+	if !auth.CanViewOrg(principal, orgID) {
 		return nil, ErrForbidden
 	}
 	id, err := parseUUID(orgID)
@@ -179,7 +179,7 @@ func (s *MemberService) GetMember(ctx context.Context, principal auth.Principal,
 	if err != nil {
 		return MemberResult{}, fmt.Errorf("查询成员失败: %w", err)
 	}
-	if !canAccessMember(principal, user) {
+	if !auth.CanViewMember(principal, uuidToOptionalString(user.OrgID), uuidToString(user.ID)) {
 		return MemberResult{}, ErrForbidden
 	}
 	return toMemberResult(user), nil
@@ -205,14 +205,14 @@ func (s *MemberService) UpdateMemberProfile(ctx context.Context, principal auth.
 	}
 	roleChanging := role != user.Role
 	if roleChanging {
-		if !canManageMember(principal, user) {
+		if !auth.CanManageMember(principal, uuidToOptionalString(user.OrgID)) {
 			return MemberResult{}, ErrForbidden
 		}
 		if role != domain.UserRoleOrgAdmin && role != domain.UserRoleOrgMember {
 			return MemberResult{}, fmt.Errorf("%w: 不支持的角色", ErrMemberCreateInvalid)
 		}
 	} else {
-		if !canEditOwnProfile(principal, user) {
+		if !auth.CanEditMember(principal, uuidToOptionalString(user.OrgID), uuidToString(user.ID)) {
 			return MemberResult{}, ErrForbidden
 		}
 	}
@@ -247,7 +247,7 @@ func (s *MemberService) SetMemberStatus(ctx context.Context, principal auth.Prin
 	if err != nil {
 		return MemberResult{}, fmt.Errorf("查询成员失败: %w", err)
 	}
-	if !canManageMember(principal, user) {
+	if !auth.CanManageMember(principal, uuidToOptionalString(user.OrgID)) {
 		return MemberResult{}, ErrForbidden
 	}
 	if principal.UserID == uuidToString(user.ID) && status == domain.StatusDisabled {
@@ -280,7 +280,7 @@ func (s *MemberService) DeleteMember(ctx context.Context, principal auth.Princip
 	if err != nil {
 		return fmt.Errorf("查询成员失败: %w", err)
 	}
-	if !canManageMember(principal, user) {
+	if !auth.CanManageMember(principal, uuidToOptionalString(user.OrgID)) {
 		return ErrForbidden
 	}
 	if principal.UserID == uuidToString(user.ID) {
@@ -349,7 +349,7 @@ func (s *MemberService) ResetMemberPassword(ctx context.Context, principal auth.
 	if err != nil {
 		return fmt.Errorf("查询成员失败: %w", err)
 	}
-	if !canManageMember(principal, user) {
+	if !auth.CanManageMember(principal, uuidToOptionalString(user.OrgID)) {
 		return ErrForbidden
 	}
 	hashed, err := s.hashPassword(newPassword)
