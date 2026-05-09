@@ -64,7 +64,7 @@ func (s *AppService) Get(ctx context.Context, principal auth.Principal, appID st
 	if err != nil {
 		return AppResult{}, fmt.Errorf("查询应用失败: %w", err)
 	}
-	if !canViewApp(principal, app) {
+	if !auth.CanViewApp(principal, uuidToString(app.OrgID), uuidToString(app.OwnerUserID)) {
 		return AppResult{}, ErrForbidden
 	}
 	return toAppResult(app), nil
@@ -72,7 +72,7 @@ func (s *AppService) Get(ctx context.Context, principal auth.Principal, appID st
 
 // ListByOrg 列出组织内的应用。
 func (s *AppService) ListByOrg(ctx context.Context, principal auth.Principal, orgID string, limit, offset int32) ([]AppResult, error) {
-	if !canViewOrg(principal, orgID) {
+	if !auth.CanViewOrg(principal, orgID) {
 		return nil, ErrForbidden
 	}
 	id, err := parseUUID(orgID)

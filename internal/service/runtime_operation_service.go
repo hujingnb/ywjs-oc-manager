@@ -123,7 +123,7 @@ func (s *RuntimeOperationService) InspectApp(ctx context.Context, principal auth
 	if err != nil {
 		return RuntimeView{}, fmt.Errorf("查询应用失败: %w", err)
 	}
-	if !canViewApp(principal, app) {
+	if !auth.CanViewApp(principal, uuidToString(app.OrgID), uuidToString(app.OwnerUserID)) {
 		return RuntimeView{}, ErrForbidden
 	}
 	if !app.ContainerID.Valid || app.ContainerID.String == "" {

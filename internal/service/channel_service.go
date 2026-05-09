@@ -206,7 +206,7 @@ func (s *ChannelService) loadAuthorizedApp(ctx context.Context, principal auth.P
 	if err != nil {
 		return sqlc.App{}, fmt.Errorf("查询应用失败: %w", err)
 	}
-	if !canViewApp(principal, app) {
+	if !auth.CanViewApp(principal, uuidToString(app.OrgID), uuidToString(app.OwnerUserID)) {
 		return sqlc.App{}, ErrForbidden
 	}
 	if !canManageApp(principal, app) {
