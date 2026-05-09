@@ -10,6 +10,8 @@ sql:
       - internal/migrations/000006_apps_restart_policy.up.sql
       - internal/migrations/000007_runtime_nodes_max_apps.up.sql
       - internal/migrations/000008_organizations_newapi_credentials.up.sql
+      - internal/migrations/000010_apps_index_rebuild.up.sql
+      - internal/migrations/000011_users_deleted_at.up.sql
     queries: internal/store/queries
     gen:
       go:

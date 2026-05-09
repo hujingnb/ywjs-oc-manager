@@ -29,8 +29,11 @@ ORDER BY created_at DESC, id DESC
 LIMIT $2 OFFSET $3;
 
 -- name: SetUserStatus :one
+-- disabled 时同步写 deleted_at（下线时间戳）；enabled 时清空，让重启用户能恢复。
 UPDATE users
-SET status = $2, updated_at = now()
+SET status = $2,
+    deleted_at = CASE WHEN $2 = 'disabled' THEN NOW() ELSE NULL END,
+    updated_at = NOW()
 WHERE id = $1
 RETURNING *;
 
@@ -45,6 +48,11 @@ UPDATE users
 SET password_hash = $2, updated_at = now()
 WHERE id = $1
 RETURNING *;
+
+-- name: SoftDeleteUser :exec
+-- 真软删除：仅设置 deleted_at（不动 status）；status 与 deleted_at 语义独立。
+UPDATE users SET deleted_at = NOW(), updated_at = NOW()
+WHERE id = $1 AND deleted_at IS NULL;
 
 -- name: MarkUserLoggedIn :one
 UPDATE users
