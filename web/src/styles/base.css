@@ -535,3 +535,14 @@ th {
     grid-template-columns: 1fr;
   }
 }
+
+.data-table-link {
+  cursor: pointer;
+  color: var(--color-accent, #00F0FF);
+}
+
+.data-table-subtitle {
+  display: block;
+  color: var(--color-text-secondary, #8A94C6);
+  font-size: 12px;
+}
