@@ -16,9 +16,6 @@ import (
 	"oc-manager/internal/store/sqlc"
 )
 
-// ErrUsageUnavailable 表示底层 new-api 不可用，用量数据暂时无法返回。
-var ErrUsageUnavailable = errors.New("用量服务暂不可用")
-
 // UsageNewAPIClient 是 manager 透传 new-api 用量端点所需的最小集合。
 //
 // manager 端不再对用量数据做缓存或多维聚合：每个接口直接代理对应的 new-api endpoint，

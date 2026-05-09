@@ -12,12 +12,6 @@ import (
 	"oc-manager/internal/store/sqlc"
 )
 
-// 与人设服务相关的错误。
-var (
-	ErrPersonaNotFound = errors.New("组织尚未配置人设")
-	ErrPersonaDenied   = errors.New("无权访问该组织人设")
-)
-
 // PersonaStore 抽象 service 需要的存储能力。
 type PersonaStore interface {
 	GetCurrentOrganizationPersona(ctx context.Context, orgID pgtype.UUID) (sqlc.OrganizationPersona, error)

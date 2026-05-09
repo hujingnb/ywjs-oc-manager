@@ -2,7 +2,6 @@ package service
 
 import (
 	"context"
-	"errors"
 	"fmt"
 	"io"
 	"path"
@@ -107,12 +106,6 @@ type KnowledgeEntryResult struct {
 	Size  int64  `json:"size"`
 	IsDir bool   `json:"is_dir"`
 }
-
-// 与知识库路径相关的错误。
-var (
-	ErrKnowledgeForbidden = errors.New("无权访问该知识库")
-	ErrKnowledgeMissing   = errors.New("知识库主副本未配置")
-)
 
 // SaveOrgFile 将文件写入指定组织的主副本。
 func (s *KnowledgeService) SaveOrgFile(ctx context.Context, principal auth.Principal, orgID, relative string, content io.Reader, size int64) error {

@@ -15,9 +15,6 @@ import (
 	"oc-manager/internal/store/sqlc"
 )
 
-// ErrMemberCreateInvalid 在创建成员的输入未通过业务校验时返回，handler 据此映射为 400。
-var ErrMemberCreateInvalid = errors.New("成员资料不合法")
-
 // MemberStore 抽象成员服务所需的数据访问能力。
 // 仅暴露当前实现需要的方法，便于在单元测试中使用内存桩，避免引入完整 sqlc 依赖。
 type MemberStore interface {

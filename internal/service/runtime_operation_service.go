@@ -16,12 +16,6 @@ import (
 	"oc-manager/internal/store/sqlc"
 )
 
-// 与运行操作相关的错误。
-var (
-	ErrRuntimeOperationDenied = errors.New("无权执行运行操作")
-	ErrAppNotReinitializable  = errors.New("应用当前状态不允许重新初始化")
-)
-
 // RuntimeOperationStore 抽象 service 需要的查询能力。
 type RuntimeOperationStore interface {
 	GetApp(ctx context.Context, id pgtype.UUID) (sqlc.App, error)

@@ -14,14 +14,6 @@ import (
 	"oc-manager/internal/store/sqlc"
 )
 
-var (
-	// ErrInvalidCredentials 对外统一表示登录失败，避免泄露用户名是否存在或密码是否错误。
-	ErrInvalidCredentials = errors.New("用户名或密码错误")
-	ErrUserDisabled       = errors.New("用户已被禁用")
-	ErrOrgDisabled        = errors.New("组织已被禁用")
-	ErrInvalidToken       = errors.New("登录凭证无效")
-)
-
 // AuthStore 抽象认证流程所需的数据访问能力，便于 service 单元测试使用内存桩。
 type AuthStore interface {
 	GetUserByUsername(ctx context.Context, username string) (sqlc.User, error)

@@ -40,13 +40,6 @@ func NewWorkspaceService(store WorkspaceStore, adapter runtime.Adapter, dataRoot
 	return &WorkspaceService{store: store, adapter: adapter, dataRoot: dataRoot}
 }
 
-// 与 workspace 相关的错误。
-var (
-	ErrWorkspaceForbidden = errors.New("无权访问工作目录")
-	ErrWorkspaceMissing   = errors.New("应用未关联节点或 adapter 未配置")
-	ErrWorkspaceBadPath   = errors.New("非法工作目录路径")
-)
-
 // WorkspaceListing 是列表接口的返回值。
 type WorkspaceListing struct {
 	Path    string                 `json:"path"`

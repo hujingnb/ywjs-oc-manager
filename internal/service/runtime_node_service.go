@@ -17,14 +17,6 @@ import (
 	"oc-manager/internal/store/sqlc"
 )
 
-// 与 runtime node 相关的错误。
-// 服务层使用 sentinel error 让 handler 能稳定映射状态码。
-var (
-	ErrBootstrapTokenInvalid = errors.New("bootstrap token 无效或已过期")
-	ErrAgentTokenInvalid     = errors.New("agent token 无效")
-	ErrRuntimeNodeBusy       = errors.New("runtime node 当前不可重置")
-)
-
 // 默认安全参数；测试可注入更短 TTL 加速覆盖过期路径。
 const (
 	defaultBootstrapTokenTTL    = 30 * time.Minute

@@ -14,13 +14,6 @@ import (
 	"oc-manager/internal/store/sqlc"
 )
 
-// 与充值相关的错误。
-var (
-	ErrRechargeDenied         = errors.New("无权执行充值")
-	ErrOrgMissingNewAPIUserID = errors.New("组织缺少 new-api 用户 ID")
-	ErrInvalidRechargeAmount  = errors.New("充值金额必须为正")
-)
-
 // RechargeStore 抽象 service 需要的存储能力。
 type RechargeStore interface {
 	GetOrganization(ctx context.Context, id pgtype.UUID) (sqlc.Organization, error)

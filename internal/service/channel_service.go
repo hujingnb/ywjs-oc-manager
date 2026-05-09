@@ -16,9 +16,6 @@ import (
 	"oc-manager/internal/store/sqlc"
 )
 
-// ErrChannelAdapterMissing 表示 service 调用时未注册对应渠道。
-var ErrChannelAdapterMissing = errors.New("当前渠道未启用")
-
 // ChannelStore 抽象渠道服务的数据访问能力。
 type ChannelStore interface {
 	GetApp(ctx context.Context, id pgtype.UUID) (sqlc.App, error)
