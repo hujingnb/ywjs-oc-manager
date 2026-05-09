@@ -1,31 +1,22 @@
 <template>
   <div style="display: grid; gap: 18px">
     <!-- 节点列表 -->
-    <n-card :bordered="true">
-      <template #header>
-        <div>
-          <p class="eyebrow">Platform · Runtime</p>
-          <h2 style="margin: 0">运行节点</h2>
-        </div>
-      </template>
-      <template #header-extra>
+    <DataTableList
+      title="运行节点"
+      eyebrow="Platform · Runtime"
+      :columns="columns"
+      :data="nodes ?? []"
+      :loading="isLoading"
+      :error-message="error ? `查询失败：${error.message}` : undefined"
+      :row-key="(row: RuntimeNode) => row.id"
+    >
+      <template #toolbar>
         <n-button type="primary" @click="openForm">
           <template #icon><Plus :size="16" /></template>
           注册节点
         </n-button>
       </template>
-
-      <div v-if="isLoading" class="state-text">加载中…</div>
-      <div v-else-if="error" class="state-text danger">查询失败：{{ error.message }}</div>
-      <n-data-table
-        v-else
-        :columns="columns"
-        :data="nodes ?? []"
-        size="small"
-        :bordered="false"
-        :row-key="(row) => row.id"
-      />
-    </n-card>
+    </DataTableList>
 
     <!-- 注册表单 -->
     <n-card v-if="formVisible" :bordered="true">
@@ -35,12 +26,12 @@
             <p class="eyebrow">New</p>
             <h2 style="margin: 0">注册 runtime 节点</h2>
           </div>
-          <n-button quaternary circle @click="formVisible = false">
+          <n-button quaternary circle @click="closeForm">
             <template #icon><X :size="18" /></template>
           </n-button>
         </div>
       </template>
-      <n-form :model="form" label-placement="top" @submit.prevent="onSubmit">
+      <n-form :model="form" label-placement="top" @submit.prevent="submit">
         <n-grid :cols="2" :x-gap="14">
           <n-grid-item>
             <n-form-item label="名称 *">
@@ -59,7 +50,7 @@
           </n-grid-item>
           <n-grid-item :span="2">
             <n-space justify="end">
-              <n-button @click="formVisible = false">取消</n-button>
+              <n-button @click="closeForm">取消</n-button>
               <n-button type="primary" attr-type="submit" :loading="creating">保存</n-button>
             </n-space>
             <p v-if="submitError" class="state-text danger">{{ submitError }}</p>
@@ -119,18 +110,20 @@
 </template>
 
 <script setup lang="ts">
-import { h, reactive, ref } from 'vue'
+import { h, ref } from 'vue'
 import { Plus, X } from 'lucide-vue-next'
 import {
-  NButton, NCard, NDataTable, NForm, NFormItem, NGrid, NGridItem,
-  NInput, NInputNumber, NSpace, NTag, type DataTableColumns,
+  NButton, NCard, NForm, NFormItem, NGrid, NGridItem,
+  NInput, NInputNumber, NSpace, type DataTableColumns,
 } from 'naive-ui'
 
-import RuntimeStatusTag from '@/components/RuntimeStatusTag.vue'
+import DataTableList from '@/components/DataTableList.vue'
+import { statusColumn, actionColumn } from '@/components/columns'
+import { formatRuntimeNodeStatus } from '@/domain/status'
+import { useFormModal } from '@/composables/useFormModal'
 import {
   useCreateRuntimeNode, useRotateBootstrap, useRuntimeNodesQuery,
   useSetRuntimeNodeStatus, useUpdateRuntimeNodeMaxApps,
-  type RuntimeNodeFormPayload,
 } from '@/api/hooks/useRuntimeNodes'
 import type { RuntimeNode } from '@/api/types'
 
@@ -140,76 +133,12 @@ const rotateMutation = useRotateBootstrap()
 const statusMutation = useSetRuntimeNodeStatus()
 const updateMaxAppsMutation = useUpdateRuntimeNodeMaxApps()
 
-const formVisible = ref(false)
-const creating = ref(false)
-const submitError = ref<string | null>(null)
+// bootstrap token 展示状态
 const lastIssuedToken = ref<string | null>(null)
 const lastIssuedNodeName = ref('')
 const lastIssuedExpiresAt = ref('')
-const form = reactive<RuntimeNodeFormPayload>({ name: '' })
 
-const columns: DataTableColumns<RuntimeNode> = [
-  {
-    title: '名称', key: 'name',
-    render: (row) => [
-      h('strong', row.name),
-      row.node_data_root ? h('small', { style: 'display:block;color:#8A94C6;font-size:12px' }, row.node_data_root) : null,
-    ],
-  },
-  { title: '状态', key: 'status', render: (row) => h(RuntimeStatusTag, { status: row.status }) },
-  { title: 'Docker', key: 'agent_docker_endpoint', render: (row) => row.agent_docker_endpoint || '—' },
-  { title: 'File', key: 'agent_file_endpoint', render: (row) => row.agent_file_endpoint || '—' },
-  { title: 'Agent 版本', key: 'agent_version', render: (row) => row.agent_version || '—' },
-  { title: '心跳', key: 'heartbeat_interval_seconds', render: (row) => `${row.heartbeat_interval_seconds}s` },
-  {
-    title: '最大应用数', key: 'max_apps',
-    render: (row) => h('span', [
-      row.max_apps == null ? '不限' : String(row.max_apps),
-      ' ',
-      h(NButton, { text: true, size: 'small', style: 'color:#00F0FF', onClick: () => openMaxAppsEdit(row) }, { default: () => '编辑' }),
-    ]),
-  },
-  {
-    title: '操作', key: 'actions',
-    render: (row) => h(NSpace, { size: 'small' }, {
-      default: () => [
-        h(NButton, { size: 'small', disabled: row.status === 'active', onClick: () => onRotate(row) }, { default: () => '轮换 bootstrap' }),
-        row.status !== 'disabled'
-          ? h(NButton, { size: 'small', onClick: () => onToggle(row, 'disable') }, { default: () => '禁用' })
-          : h(NButton, { size: 'small', type: 'primary', onClick: () => onToggle(row, 'enable') }, { default: () => '启用' }),
-      ]
-    }),
-  },
-]
-
-function openForm() {
-  formVisible.value = true; submitError.value = null
-  form.name = ''; form.heartbeat_interval_seconds = undefined; form.node_data_root = ''
-}
-
-async function onSubmit() {
-  creating.value = true; submitError.value = null
-  try {
-    const created = await createMutation.mutateAsync({
-      name: form.name,
-      heartbeat_interval_seconds: form.heartbeat_interval_seconds || undefined,
-      node_data_root: form.node_data_root || undefined,
-    })
-    formVisible.value = false; showToken(created)
-  } catch (err) {
-    submitError.value = err instanceof Error ? err.message : '注册节点失败'
-  } finally { creating.value = false }
-}
-
-async function onRotate(node: RuntimeNode) {
-  try { showToken(await rotateMutation.mutateAsync(node.id)) }
-  catch (err) { submitError.value = err instanceof Error ? err.message : '轮换 bootstrap token 失败' }
-}
-
-function onToggle(node: RuntimeNode, action: 'enable' | 'disable') {
-  statusMutation.mutate({ nodeId: node.id, action })
-}
-
+// showToken 仅在节点携带 bootstrap_token 时展示，只展示一次后由用户手动关闭
 function showToken(node: RuntimeNode) {
   if (!node.bootstrap_token) return
   lastIssuedToken.value = node.bootstrap_token
@@ -221,6 +150,64 @@ function dismissToken() {
   lastIssuedToken.value = null; lastIssuedNodeName.value = ''; lastIssuedExpiresAt.value = ''
 }
 
+// 注册表单状态聚合到 useFormModal；onSuccess 注入 showToken 业务后置
+const { form, formVisible, creating, submitError, openForm, closeForm, submit } = useFormModal({
+  initial: {
+    name: '',
+    heartbeat_interval_seconds: undefined as number | undefined,
+    node_data_root: '',
+  },
+  mutation: createMutation,
+  // toPayload 过滤可选字段：空值转 undefined，避免向后端传空字符串
+  toPayload: (f) => ({
+    name: f.name,
+    heartbeat_interval_seconds: f.heartbeat_interval_seconds || undefined,
+    node_data_root: f.node_data_root || undefined,
+  }),
+  onSuccess: (created) => showToken(created),
+})
+
+const columns: DataTableColumns<RuntimeNode> = [
+  // 名称列：含 node_data_root 副标题
+  {
+    title: '名称', key: 'name',
+    render: (row) => [
+      h('strong', row.name),
+      row.node_data_root ? h('small', { class: 'data-table-subtitle' }, row.node_data_root) : null,
+    ],
+  },
+  statusColumn<RuntimeNode>('状态', (r) => formatRuntimeNodeStatus(r.status)),
+  { title: 'Docker', key: 'agent_docker_endpoint', render: (row) => row.agent_docker_endpoint || '—' },
+  { title: 'File', key: 'agent_file_endpoint', render: (row) => row.agent_file_endpoint || '—' },
+  { title: 'Agent 版本', key: 'agent_version', render: (row) => row.agent_version || '—' },
+  { title: '心跳', key: 'heartbeat_interval_seconds', render: (row) => `${row.heartbeat_interval_seconds}s` },
+  // max_apps 列：含页面特有的内联编辑按钮，不归 actionColumn
+  {
+    title: '最大应用数', key: 'max_apps',
+    render: (row) => h('span', [
+      row.max_apps == null ? '不限' : String(row.max_apps),
+      ' ',
+      h(NButton, { text: true, size: 'small', class: 'data-table-link', onClick: () => openMaxAppsEdit(row) }, { default: () => '编辑' }),
+    ]),
+  },
+  // 操作列：轮换 bootstrap + 启用/禁用 hidden 互斥
+  actionColumn<RuntimeNode>([
+    { label: '轮换 bootstrap', onClick: (r) => onRotate(r), disabled: (r) => r.status === 'active' },
+    { label: '禁用', onClick: (r) => onToggle(r, 'disable'), hidden: (r) => r.status === 'disabled' },
+    { label: '启用', type: 'primary', onClick: (r) => onToggle(r, 'enable'), hidden: (r) => r.status !== 'disabled' },
+  ]),
+]
+
+async function onRotate(node: RuntimeNode) {
+  try { showToken(await rotateMutation.mutateAsync(node.id)) }
+  catch (err) { console.error('轮换 bootstrap token 失败', err) }
+}
+
+function onToggle(node: RuntimeNode, action: 'enable' | 'disable') {
+  statusMutation.mutate({ nodeId: node.id, action })
+}
+
+// max_apps 内联编辑状态（页面特有，不归 useFormModal）
 const editingNode = ref<RuntimeNode | null>(null)
 const maxAppsInput = ref<number | null>(null)
 const maxAppsError = ref<string | null>(null)
