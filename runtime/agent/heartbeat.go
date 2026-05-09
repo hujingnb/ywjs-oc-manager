@@ -26,18 +26,22 @@ type hbLogger interface {
 	Errorf(format string, args ...any)
 }
 
-// stdHBLogger 把心跳日志写到 slog 默认 logger。
+// hbLoggerAdapter 实现 hbLogger 接口；持有 *slog.Logger 字段便于注入测试 logger。
+// 接口签名 Infof/Warnf/Errorf 是 printf 风格历史包袱，无法消除 fmt.Sprintf 退化，
+// 但 logger 字段允许测试注入 io.Discard 静默 logger 或自定义 handler。
 // agent 是独立二进制，不走 manager-api 中间件，无 traceID 概念，因此不带 Context。
-type stdHBLogger struct{}
+type hbLoggerAdapter struct {
+	logger *slog.Logger
+}
 
-func (stdHBLogger) Infof(format string, args ...any) {
-	slog.Info(fmt.Sprintf("heartbeat "+format, args...))
+func (a *hbLoggerAdapter) Infof(format string, args ...any) {
+	a.logger.Info(fmt.Sprintf("heartbeat "+format, args...))
 }
-func (stdHBLogger) Warnf(format string, args ...any) {
-	slog.Warn(fmt.Sprintf("heartbeat "+format, args...))
+func (a *hbLoggerAdapter) Warnf(format string, args ...any) {
+	a.logger.Warn(fmt.Sprintf("heartbeat "+format, args...))
 }
-func (stdHBLogger) Errorf(format string, args ...any) {
-	slog.Error(fmt.Sprintf("heartbeat "+format, args...))
+func (a *hbLoggerAdapter) Errorf(format string, args ...any) {
+	a.logger.Error(fmt.Sprintf("heartbeat "+format, args...))
 }
 
 // heartbeat 在 agent 进程内周期主动 POST 到 manager，触发节点 unreachable→active 自愈。
@@ -73,7 +77,7 @@ func newHeartbeat(cfg config.Config, opts ...heartbeatOption) *heartbeat {
 	hb := &heartbeat{
 		cfg:          cfg,
 		tickInterval: time.Duration(cfg.Heartbeat.IntervalSeconds) * time.Second,
-		logger:       stdHBLogger{},
+		logger:       &hbLoggerAdapter{logger: slog.Default()},
 	}
 	for _, o := range opts {
 		o(hb)
