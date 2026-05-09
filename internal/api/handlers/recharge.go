@@ -38,18 +38,13 @@ func RegisterRechargeRoutes(router gin.IRouter, handler *RechargeHandler) {
 	router.GET("/api/v1/organizations/:orgId/balance", handler.Balance)
 }
 
-type rechargeRequest struct {
-	CreditAmount int64  `json:"credit_amount" binding:"required"`
-	Remark       string `json:"remark"`
-}
-
 // Create 处理充值。
 func (h *RechargeHandler) Create(c *gin.Context) {
 	principal, ok := h.principal(c)
 	if !ok {
 		return
 	}
-	var req rechargeRequest
+	var req RechargeRequest
 	if err := c.ShouldBindJSON(&req); err != nil {
 		c.JSON(http.StatusBadRequest, gin.H{"error": "请求参数不完整"})
 		return

@@ -40,20 +40,12 @@ func RegisterOrganizationRoutes(router gin.IRouter, handler *OrganizationsHandle
 	group.POST("/:orgId/enable", handler.Enable)
 }
 
-type organizationRequest struct {
-	Name                   string `json:"name" binding:"required"`
-	ContactName            string `json:"contact_name"`
-	ContactPhone           string `json:"contact_phone"`
-	Remark                 string `json:"remark"`
-	CreditWarningThreshold *int32 `json:"credit_warning_threshold"`
-}
-
 func (h *OrganizationsHandler) Create(c *gin.Context) {
 	principal, ok := h.principal(c)
 	if !ok {
 		return
 	}
-	var req organizationRequest
+	var req OrganizationRequest
 	if err := c.ShouldBindJSON(&req); err != nil {
 		c.JSON(http.StatusBadRequest, gin.H{"error": "请求参数不完整"})
 		return
@@ -99,7 +91,7 @@ func (h *OrganizationsHandler) Update(c *gin.Context) {
 	if !ok {
 		return
 	}
-	var req organizationRequest
+	var req OrganizationRequest
 	if err := c.ShouldBindJSON(&req); err != nil {
 		c.JSON(http.StatusBadRequest, gin.H{"error": "请求参数不完整"})
 		return
@@ -147,7 +139,7 @@ func (h *OrganizationsHandler) principal(c *gin.Context) (auth.Principal, bool) 
 	return principal, true
 }
 
-func toOrganizationInput(req organizationRequest) service.OrganizationInput {
+func toOrganizationInput(req OrganizationRequest) service.OrganizationInput {
 	return service.OrganizationInput{
 		Name:                   req.Name,
 		ContactName:            req.ContactName,

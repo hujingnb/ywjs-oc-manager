@@ -47,21 +47,13 @@ func (h *PersonaHandler) Get(c *gin.Context) {
 	c.JSON(http.StatusOK, gin.H{"persona": result})
 }
 
-type personaRequest struct {
-	SystemPrompt        string `json:"system_prompt" binding:"required"`
-	ConversationRules   string `json:"conversation_rules"`
-	ForbiddenRules      string `json:"forbidden_rules"`
-	ReplyStyle          string `json:"reply_style"`
-	AllowMemberOverride bool   `json:"allow_member_override"`
-}
-
 // Put 写入新版本人设。
 func (h *PersonaHandler) Put(c *gin.Context) {
 	principal, ok := h.principal(c)
 	if !ok {
 		return
 	}
-	var req personaRequest
+	var req PersonaRequest
 	if err := c.ShouldBindJSON(&req); err != nil {
 		c.JSON(http.StatusBadRequest, gin.H{"error": "请求参数不完整"})
 		return

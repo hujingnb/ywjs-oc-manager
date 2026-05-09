@@ -43,18 +43,9 @@ func RegisterAuthRoutes(router gin.IRouter, handler *AuthHandler) {
 	group.GET("/me", handler.Me)
 }
 
-type loginRequest struct {
-	Username string `json:"username" binding:"required"`
-	Password string `json:"password" binding:"required"`
-}
-
-type refreshRequest struct {
-	RefreshToken string `json:"refresh_token" binding:"required"`
-}
-
 // Login 处理用户名密码登录。
 func (h *AuthHandler) Login(c *gin.Context) {
-	var req loginRequest
+	var req LoginRequest
 	if err := c.ShouldBindJSON(&req); err != nil {
 		c.JSON(http.StatusBadRequest, gin.H{"error": "请求参数不完整"})
 		return
@@ -73,7 +64,7 @@ func (h *AuthHandler) Login(c *gin.Context) {
 
 // Refresh 使用 refresh token 续期，并轮换 refresh token。
 func (h *AuthHandler) Refresh(c *gin.Context) {
-	var req refreshRequest
+	var req RefreshRequest
 	if err := c.ShouldBindJSON(&req); err != nil {
 		c.JSON(http.StatusBadRequest, gin.H{"error": "请求参数不完整"})
 		return
@@ -105,7 +96,7 @@ func setCSRFCookie(c *gin.Context, accessToken string) {
 
 // Logout 撤销 refresh token。
 func (h *AuthHandler) Logout(c *gin.Context) {
-	var req refreshRequest
+	var req RefreshRequest
 	if err := c.ShouldBindJSON(&req); err != nil {
 		c.JSON(http.StatusBadRequest, gin.H{"error": "请求参数不完整"})
 		return

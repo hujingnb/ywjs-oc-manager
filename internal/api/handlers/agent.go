@@ -47,27 +47,9 @@ func RegisterAgentRoutes(router gin.IRouter, handler *AgentEndpointsHandler) {
 	group.POST("/heartbeat", handler.Heartbeat)
 }
 
-type agentRegisterRequest struct {
-	BootstrapToken      string         `json:"bootstrap_token" binding:"required"`
-	AgentDockerEndpoint string         `json:"agent_docker_endpoint"`
-	AgentFileEndpoint   string         `json:"agent_file_endpoint"`
-	AgentTLSCACert      string         `json:"agent_tls_ca_cert"`
-	AgentVersion        string         `json:"agent_version"`
-	NodeDataRoot        string         `json:"node_data_root"`
-	ResourceSnapshot    map[string]any `json:"resource_snapshot"`
-	Metadata            map[string]any `json:"metadata"`
-}
-
-type agentHeartbeatRequest struct {
-	AgentToken       string         `json:"agent_token" binding:"required"`
-	AgentVersion     string         `json:"agent_version"`
-	ResourceSnapshot map[string]any `json:"resource_snapshot"`
-	Metadata         map[string]any `json:"metadata"`
-}
-
 // Register 处理 agent 用 bootstrap token 注册并换取 agent token。
 func (h *AgentEndpointsHandler) Register(c *gin.Context) {
-	var req agentRegisterRequest
+	var req AgentRegisterRequest
 	if err := c.ShouldBindJSON(&req); err != nil {
 		c.JSON(http.StatusBadRequest, gin.H{"error": "请求参数不完整"})
 		return
@@ -110,7 +92,7 @@ func (h *AgentEndpointsHandler) Register(c *gin.Context) {
 
 // Heartbeat 处理 agent 上报心跳。
 func (h *AgentEndpointsHandler) Heartbeat(c *gin.Context) {
-	var req agentHeartbeatRequest
+	var req AgentHeartbeatRequest
 	if err := c.ShouldBindJSON(&req); err != nil {
 		c.JSON(http.StatusBadRequest, gin.H{"error": "请求参数不完整"})
 		return

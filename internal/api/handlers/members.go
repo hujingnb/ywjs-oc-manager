@@ -74,29 +74,13 @@ func RegisterMemberRoutes(router gin.IRouter, handler *MembersHandler) {
 	memberGroup.DELETE("/:userId", handler.Delete)
 }
 
-type createMemberRequest struct {
-	Username    string `json:"username" binding:"required"`
-	DisplayName string `json:"display_name" binding:"required"`
-	Password    string `json:"password" binding:"required"`
-	Role        string `json:"role"`
-}
-
-type updateMemberRequest struct {
-	DisplayName string `json:"display_name" binding:"required"`
-	Role        string `json:"role"`
-}
-
-type resetPasswordRequest struct {
-	Password string `json:"password" binding:"required"`
-}
-
 // Create 处理创建成员。
 func (h *MembersHandler) Create(c *gin.Context) {
 	principal, ok := h.principal(c)
 	if !ok {
 		return
 	}
-	var req createMemberRequest
+	var req CreateMemberRequest
 	if err := c.ShouldBindJSON(&req); err != nil {
 		c.JSON(http.StatusBadRequest, gin.H{"error": "请求参数不完整"})
 		return
@@ -150,7 +134,7 @@ func (h *MembersHandler) Update(c *gin.Context) {
 	if !ok {
 		return
 	}
-	var req updateMemberRequest
+	var req UpdateMemberRequest
 	if err := c.ShouldBindJSON(&req); err != nil {
 		c.JSON(http.StatusBadRequest, gin.H{"error": "请求参数不完整"})
 		return
@@ -189,19 +173,6 @@ func (h *MembersHandler) setStatus(c *gin.Context, status string) {
 	c.JSON(http.StatusOK, gin.H{"member": result})
 }
 
-// onboardMemberRequest 是创建成员并联动应用的请求体。
-type onboardMemberRequest struct {
-	Username    string `json:"username" binding:"required"`
-	DisplayName string `json:"display_name" binding:"required"`
-	Password    string `json:"password" binding:"required"`
-	Role        string `json:"role"`
-	AppName     string `json:"app_name" binding:"required"`
-	AppPrompt   string `json:"app_prompt"`
-	PersonaMode string `json:"persona_mode"`
-	ChannelType string `json:"channel_type"`
-	NodeID      string `json:"runtime_node_id"`
-}
-
 // Onboard 在事务中创建成员、应用、渠道绑定、审计与初始化任务。
 // 调用方未配置 onboarding service 时返回 503，避免暴露未实现的行为。
 func (h *MembersHandler) Onboard(c *gin.Context) {
@@ -213,7 +184,7 @@ func (h *MembersHandler) Onboard(c *gin.Context) {
 	if !ok {
 		return
 	}
-	var req onboardMemberRequest
+	var req OnboardMemberRequest
 	if err := c.ShouldBindJSON(&req); err != nil {
 		c.JSON(http.StatusBadRequest, gin.H{"error": "请求参数不完整"})
 		return
@@ -242,7 +213,7 @@ func (h *MembersHandler) ResetPassword(c *gin.Context) {
 	if !ok {
 		return
 	}
-	var req resetPasswordRequest
+	var req ResetPasswordRequest
 	if err := c.ShouldBindJSON(&req); err != nil {
 		c.JSON(http.StatusBadRequest, gin.H{"error": "请求参数不完整"})
 		return
