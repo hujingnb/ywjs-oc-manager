@@ -115,8 +115,11 @@ func (s *AuditService) Record(ctx context.Context, event AuditEvent) (AuditResul
 }
 
 // ListByOrg 按组织维度分页列出审计日志。
-// 平台管理员可查询任意组织；组织角色仅能查询自己的组织。
+// 平台管理员可查询任意组织；组织管理员仅能查询本组织；普通成员无审计视角。
 func (s *AuditService) ListByOrg(ctx context.Context, principal auth.Principal, orgID string, limit, offset int32) ([]AuditResult, error) {
+	if principal.Role == domain.UserRoleOrgMember {
+		return nil, ErrForbidden
+	}
 	if !canViewOrg(principal, orgID) {
 		return nil, ErrForbidden
 	}

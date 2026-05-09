@@ -18,6 +18,9 @@ export const useAuthStore = defineStore('auth', () => {
   const error = ref<string | null>(null)
 
   const isAuthenticated = computed(() => Boolean(user.value && getStoredAccessToken()))
+  const isPlatformAdmin = computed(() => user.value?.role === 'platform_admin')
+  const isOrgAdmin = computed(() => user.value?.role === 'org_admin')
+  const isOrgMember = computed(() => user.value?.role === 'org_member')
 
   async function login(username: string, password: string): Promise<LoginResult> {
     loading.value = true
@@ -80,6 +83,9 @@ export const useAuthStore = defineStore('auth', () => {
     loading,
     error,
     isAuthenticated,
+    isPlatformAdmin,
+    isOrgAdmin,
+    isOrgMember,
     login,
     logout,
     fetchCurrentUser,

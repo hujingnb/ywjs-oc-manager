@@ -94,6 +94,11 @@ func (s *AppService) ListByOrg(ctx context.Context, principal auth.Principal, or
 	}
 	results := make([]AppResult, 0, len(apps))
 	for _, app := range apps {
+		// 组织成员只能在列表中看到自己拥有的应用。
+		// schema 上每个用户最多一个活跃应用，分页含义对该角色无影响。
+		if principal.Role == domain.UserRoleOrgMember && principal.UserID != uuidToString(app.OwnerUserID) {
+			continue
+		}
 		results = append(results, toAppResult(app))
 	}
 	return results, nil

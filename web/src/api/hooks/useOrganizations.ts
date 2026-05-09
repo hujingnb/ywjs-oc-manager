@@ -17,9 +17,11 @@ export interface OrganizationFormPayload {
 
 // useOrganizationsQuery 提供平台维度的组织列表。
 // 仅平台管理员调用；后端会拒绝非平台管理员的访问。
-export function useOrganizationsQuery() {
+// enabled 让调用方可以在非平台管理员视角下显式禁用，避免无谓 403。
+export function useOrganizationsQuery(enabled?: () => boolean) {
   return useQuery<Organization[]>({
     queryKey: ORG_LIST_KEY,
+    enabled: enabled,
     queryFn: async () => {
       const response = await apiRequest<{ organizations: Organization[] }>('/api/v1/organizations', {
         query: { limit: 200 },

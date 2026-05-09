@@ -8,7 +8,7 @@
     </template>
 
     <n-tabs v-model:value="activeTab" type="line">
-      <n-tab-pane name="organization" tab="组织">
+      <n-tab-pane v-if="!isOrgMember" name="organization" tab="组织">
         <n-space v-if="isPlatformAdmin" align="center" style="margin-bottom: 12px">
           <span>组织：</span>
           <n-select
@@ -23,8 +23,8 @@
         <UsageSummary v-else :view="orgView ?? undefined" empty-text="该组织暂无应用用量记录" />
       </n-tab-pane>
 
-      <n-tab-pane name="member" tab="成员">
-        <n-space align="center" style="margin-bottom: 12px" :wrap="false">
+      <n-tab-pane name="member" :tab="isOrgMember ? '我的用量' : '成员'">
+        <n-space v-if="!isOrgMember" align="center" style="margin-bottom: 12px" :wrap="false">
           <n-space v-if="isPlatformAdmin" align="center">
             <span>组织：</span>
             <n-select
@@ -41,7 +41,7 @@
         </n-space>
         <div v-if="memberLoading" class="state-text">加载中…</div>
         <div v-else-if="memberError" class="state-text danger">查询失败：{{ memberError.message }}</div>
-        <UsageSummary v-else :view="memberView ?? undefined" empty-text="该成员暂无应用用量记录" />
+        <UsageSummary v-else :view="memberView ?? undefined" empty-text="暂无应用用量记录" />
       </n-tab-pane>
 
       <n-tab-pane name="app" tab="应用">
@@ -80,10 +80,14 @@ type TabKey = 'organization' | 'member' | 'app' | 'platform'
 
 const auth = useAuthStore()
 const isPlatformAdmin = computed(() => auth.user?.role === 'platform_admin')
+const isOrgMember = computed(() => auth.user?.role === 'org_member')
 
-const activeTab = ref<TabKey>(isPlatformAdmin.value ? 'platform' : 'organization')
+// 普通成员只允许查询自己的用量；默认落在"成员"tab。
+const activeTab = ref<TabKey>(
+  isPlatformAdmin.value ? 'platform' : isOrgMember.value ? 'member' : 'organization',
+)
 
-const { data: organizations } = useOrganizationsQuery()
+const { data: organizations } = useOrganizationsQuery(() => isPlatformAdmin.value)
 const orgOptions = computed(() =>
   (organizations.value ?? []).map((o) => ({ label: o.name, value: o.id })),
 )
@@ -98,11 +102,15 @@ const effectiveOrgId = computed(() =>
   isPlatformAdmin.value ? selectedOrgId.value : auth.user?.org_id,
 )
 
-const orgRef = computed(() => effectiveOrgId.value)
+// 组织维度用量对普通成员不开放,前端不发起查询避免无谓 403。
+const orgRef = computed(() => (isOrgMember.value ? undefined : effectiveOrgId.value))
 const { data: orgView, isLoading: orgLoading, error: orgError } = useOrgUsageQuery(orgRef)
 
-const memberIdInput = ref('')
-const memberRef = computed(() => memberIdInput.value.trim() || undefined)
+// 普通成员强制锁定为查询自身的用量，UI 上不暴露成员 ID 输入框。
+const memberIdInput = ref(isOrgMember.value ? auth.user?.id ?? '' : '')
+const memberRef = computed(() =>
+  isOrgMember.value ? auth.user?.id : memberIdInput.value.trim() || undefined,
+)
 const { data: memberView, isLoading: memberLoading, error: memberError } = useMemberUsageQuery(orgRef, memberRef)
 
 const appIdInput = ref('')

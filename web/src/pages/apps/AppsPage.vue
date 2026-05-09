@@ -7,7 +7,7 @@
       </div>
     </template>
     <template #header-extra>
-      <n-button type="primary" @click="router.push('/members/new')">创建成员并初始化</n-button>
+      <n-button v-if="!isOrgMember" type="primary" @click="router.push('/members/new')">创建成员并初始化</n-button>
     </template>
 
     <div v-if="!effectiveOrgId" class="state-text">当前账号未关联组织</div>
@@ -53,6 +53,7 @@ const router = useRouter()
 const client = useQueryClient()
 
 const effectiveOrgId = computed(() => props.orgId ?? auth.user?.org_id)
+const isOrgMember = computed(() => auth.user?.role === 'org_member')
 const { data: apps, isLoading } = useAppsByOrgQuery(effectiveOrgId)
 
 // org_member 只能看到自己的应用

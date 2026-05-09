@@ -111,7 +111,8 @@ const activeKey = computed(() => {
   return prefixes.find(k => p.startsWith(k)) ?? '/'
 })
 
-const isPlatformAdmin = computed(() => auth.user?.role === 'platform_admin')
+const isPlatformAdmin = computed(() => auth.isPlatformAdmin)
+const isOrgMember = computed(() => auth.isOrgMember)
 
 const menuOptions = computed<MenuOption[]>(() => {
   const items: MenuOption[] = [
@@ -121,13 +122,18 @@ const menuOptions = computed<MenuOption[]>(() => {
     items.push({ key: '/platform/dashboard', label: '平台', icon: () => h(Gauge, { size: 18 }) })
     items.push({ key: '/organizations', label: '组织', icon: () => h(Building2, { size: 18 }) })
   }
+  // 成员/审计 是组织管理视角，普通成员不展示。
+  if (!isOrgMember.value) {
+    items.push({ key: '/members', label: '成员', icon: () => h(Users, { size: 18 }) })
+  }
   items.push(
-    { key: '/members', label: '成员', icon: () => h(Users, { size: 18 }) },
     { key: '/apps', label: '应用', icon: () => h(Bot, { size: 18 }) },
     { key: '/knowledge', label: '知识库', icon: () => h(BookOpen, { size: 18 }) },
     { key: '/usage', label: '用量', icon: () => h(BarChart3, { size: 18 }) },
-    { key: '/audit-logs', label: '审计', icon: () => h(FileSearch, { size: 18 }) },
   )
+  if (!isOrgMember.value) {
+    items.push({ key: '/audit-logs', label: '审计', icon: () => h(FileSearch, { size: 18 }) })
+  }
   if (isPlatformAdmin.value) {
     items.push({ key: '/runtime-nodes', label: '运行节点', icon: () => h(Server, { size: 18 }) })
   }

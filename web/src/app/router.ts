@@ -26,6 +26,11 @@ import RuntimeNodesPage from '@/pages/runtime-nodes/RuntimeNodesPage.vue'
 import UsagePage from '@/pages/usage/UsagePage.vue'
 import { useAuthStore } from '@/stores/auth'
 
+// allowedRoles 表示可访问该路由的角色集合；undefined 表示对所有已登录用户开放。
+// 平台专属：仅 platform_admin；组织管理视角（成员/审计）：禁止 org_member。
+const PLATFORM_ONLY = ['platform_admin'] as const
+const ORG_ADMIN_ABOVE = ['platform_admin', 'org_admin'] as const
+
 export const router = createRouter({
   history: createWebHistory(),
   routes: [
@@ -41,15 +46,15 @@ export const router = createRouter({
       children: [
         { path: '', component: RoleAwareHome },
         { path: 'dashboard', component: DashboardHome },
-        { path: 'organizations', component: OrganizationsPage },
-        { path: 'platform/dashboard', component: PlatformDashboardPage },
-        { path: 'platform/organizations/:orgId/recharge', component: RechargePage },
-        { path: 'members', component: MembersPage },
-        { path: 'members/new', component: CreateMemberPage },
+        { path: 'organizations', component: OrganizationsPage, meta: { allowedRoles: PLATFORM_ONLY } },
+        { path: 'platform/dashboard', component: PlatformDashboardPage, meta: { allowedRoles: PLATFORM_ONLY } },
+        { path: 'platform/organizations/:orgId/recharge', component: RechargePage, meta: { allowedRoles: PLATFORM_ONLY } },
+        { path: 'members', component: MembersPage, meta: { allowedRoles: ORG_ADMIN_ABOVE } },
+        { path: 'members/new', component: CreateMemberPage, meta: { allowedRoles: ORG_ADMIN_ABOVE } },
         { path: 'org/persona', component: PersonaPage },
-        { path: 'audit-logs', component: AuditLogsPage },
-        { path: 'runtime-nodes', component: RuntimeNodesPage },
-        { path: 'runtime-nodes/:nodeId', component: RuntimeNodeDetailPage },
+        { path: 'audit-logs', component: AuditLogsPage, meta: { allowedRoles: ORG_ADMIN_ABOVE } },
+        { path: 'runtime-nodes', component: RuntimeNodesPage, meta: { allowedRoles: PLATFORM_ONLY } },
+        { path: 'runtime-nodes/:nodeId', component: RuntimeNodeDetailPage, meta: { allowedRoles: PLATFORM_ONLY } },
         { path: 'knowledge', component: OrgKnowledgePage },
         { path: 'usage', component: UsagePage },
         { path: 'apps', component: AppsPage },
@@ -87,6 +92,13 @@ router.beforeEach(async (to) => {
     } catch {
       return { path: '/login', query: { redirect: to.fullPath } }
     }
+  }
+  // 角色守卫：命中 allowedRoles 限制时把用户兜回首页 RoleAwareHome，
+  // 由 RoleAwareHome 根据角色展示对应入口，避免出现"被卡死"。
+  const allowed = to.meta.allowedRoles as readonly string[] | undefined
+  const role = auth.user?.role
+  if (allowed && role && !allowed.includes(role)) {
+    return { path: '/' }
   }
   return true
 })

@@ -126,6 +126,10 @@ func (s *UsageService) GetMemberUsage(ctx context.Context, principal auth.Princi
 	if principal.Role != domain.UserRolePlatformAdmin && principal.OrgID != orgID {
 		return LogsPage{}, ErrForbidden
 	}
+	// 普通成员只允许查询自己名下的用量；其他成员的用量属于成员视角，对其不可见。
+	if principal.Role == domain.UserRoleOrgMember && principal.UserID != memberID {
+		return LogsPage{}, ErrForbidden
+	}
 	memberUUID, err := parseUUID(memberID)
 	if err != nil {
 		return LogsPage{}, ErrNotFound
@@ -170,6 +174,10 @@ func (s *UsageService) GetOrgUsage(ctx context.Context, principal auth.Principal
 		return QuotaSeries{}, ErrUsageUnavailable
 	}
 	if principal.Role != domain.UserRolePlatformAdmin && principal.OrgID != orgID {
+		return QuotaSeries{}, ErrForbidden
+	}
+	// 组织级聚合用量不向普通成员开放，普通成员只能看自己应用维度。
+	if principal.Role == domain.UserRoleOrgMember {
 		return QuotaSeries{}, ErrForbidden
 	}
 	id, err := parseUUID(orgID)
