@@ -64,28 +64,30 @@ export type AuditLog = WithRequired<
 // 这里手工补 LogEntry / QuotaDate 接口并 intersect 回 items 字段。
 // FIXME: 等 swag v2 修复跨包扫描后移除这段，改为直接从 generated.ts 派生。
 
-// LogEntry 字段与 newapi 包的 Log 结构体对应（new-api v0.6.x logEntry 字段）。
+// LogEntry 字段按 Go 侧 internal/integrations/newapi/client.go 中定义对齐。
+// FIXME: 等 swag v2 修复跨包扫描后，从 components['schemas']['service.LogsPage'].items 派生即可移除手补。
 export interface LogEntry {
   id: number
   user_id: number
-  channel_id: number
+  username: string
+  token_id: number
+  token_name: string
   model_name: string
-  created_at: number
+  quota: number
   prompt_tokens: number
   completion_tokens: number
-  quota: number
-  token_name?: string
-  type?: number
-  is_stream?: boolean
-  metadata?: Record<string, unknown>
+  use_time: number
+  created_at: number
 }
 
-// QuotaDate 字段与 newapi 包的 StatisticsData（按日聚合）对应。
+// QuotaDate 字段按 Go 侧 internal/integrations/newapi/client.go 中定义对齐。
+// FIXME: 等 swag v2 修复跨包扫描后，从 components['schemas']['service.QuotaSeries'].items 派生即可移除手补。
 export interface QuotaDate {
   date: string
+  model_name: string
+  count: number
   quota: number
-  tokens?: number
-  count?: number
+  token_used: number
 }
 
 type RawLogsPage = Schemas['service.LogsPage']
