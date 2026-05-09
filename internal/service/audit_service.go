@@ -120,7 +120,7 @@ func (s *AuditService) ListByOrg(ctx context.Context, principal auth.Principal, 
 	if principal.Role == domain.UserRoleOrgMember {
 		return nil, ErrForbidden
 	}
-	if !canViewOrg(principal, orgID) {
+	if !auth.CanViewOrg(principal, orgID) {
 		return nil, ErrForbidden
 	}
 	id, err := parseUUID(orgID)

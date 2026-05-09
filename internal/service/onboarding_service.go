@@ -124,7 +124,7 @@ type OnboardMemberResult struct {
 // OnboardMember 在事务里创建用户、应用、渠道绑定、审计、app_initialize job。
 // 平台管理员可以为任何启用组织的成员发起；组织管理员仅能为自己组织发起。
 func (s *MemberOnboardingService) OnboardMember(ctx context.Context, principal auth.Principal, orgID string, input OnboardMemberInput) (OnboardMemberResult, error) {
-	if !canManageOrg(principal, orgID) {
+	if !auth.CanManageOrg(principal, orgID) {
 		return OnboardMemberResult{}, ErrForbidden
 	}
 	if input.Username == "" || input.Password == "" || input.DisplayName == "" || input.AppName == "" {

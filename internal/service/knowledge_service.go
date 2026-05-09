@@ -73,7 +73,7 @@ func (s *KnowledgeService) SetRetryDispatcher(d KnowledgeRetryDispatcher) {
 // GetOrgSyncStatus 列出组织在所有节点上的最近同步状态。
 // 仅组织管理员 / 平台管理员可调。
 func (s *KnowledgeService) GetOrgSyncStatus(ctx context.Context, principal auth.Principal, orgID string) ([]SyncStatusResult, error) {
-	if !canManageOrg(principal, orgID) {
+	if !auth.CanManageOrg(principal, orgID) {
 		return nil, ErrKnowledgeForbidden
 	}
 	if s.statusSource == nil {
@@ -85,7 +85,7 @@ func (s *KnowledgeService) GetOrgSyncStatus(ctx context.Context, principal auth.
 // RetryOrgNodeSync 触发指定 (org, node) 重新同步；通常由前端「重试同步」按钮调用。
 // 仅组织管理员 / 平台管理员可调。
 func (s *KnowledgeService) RetryOrgNodeSync(ctx context.Context, principal auth.Principal, orgID, nodeID string) error {
-	if !canManageOrg(principal, orgID) {
+	if !auth.CanManageOrg(principal, orgID) {
 		return ErrKnowledgeForbidden
 	}
 	if s.retryDispatcher == nil {
@@ -119,7 +119,7 @@ func (s *KnowledgeService) SaveOrgFile(ctx context.Context, principal auth.Princ
 	if s.master == nil {
 		return ErrKnowledgeMissing
 	}
-	if !canManageOrg(principal, orgID) {
+	if !auth.CanManageOrg(principal, orgID) {
 		return ErrKnowledgeForbidden
 	}
 	target := path.Join("org", orgID, "knowledge", relative)
@@ -156,7 +156,7 @@ func (s *KnowledgeService) DeleteOrgFile(ctx context.Context, principal auth.Pri
 	if s.master == nil {
 		return ErrKnowledgeMissing
 	}
-	if !canManageOrg(principal, orgID) {
+	if !auth.CanManageOrg(principal, orgID) {
 		return ErrKnowledgeForbidden
 	}
 	target := path.Join("org", orgID, "knowledge", relative)
@@ -192,7 +192,7 @@ func (s *KnowledgeService) ListOrg(_ context.Context, principal auth.Principal, 
 	if s.master == nil {
 		return KnowledgeListResult{}, ErrKnowledgeMissing
 	}
-	if !canViewOrg(principal, orgID) {
+	if !auth.CanViewOrg(principal, orgID) {
 		return KnowledgeListResult{}, ErrKnowledgeForbidden
 	}
 	target := path.Join("org", orgID, "knowledge", relative)
