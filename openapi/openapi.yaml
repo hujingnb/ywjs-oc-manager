@@ -87,6 +87,21 @@ components:
         max_apps:
           type: integer
       type: object
+    handlers.PersonaRequest:
+      properties:
+        allow_member_override:
+          type: boolean
+        conversation_rules:
+          type: string
+        forbidden_rules:
+          type: string
+        reply_style:
+          type: string
+        system_prompt:
+          type: string
+      required:
+      - system_prompt
+      type: object
     handlers.RefreshRequest:
       properties:
         refresh_token:
@@ -100,6 +115,13 @@ components:
           type: string
       required:
       - password
+      type: object
+    handlers.RetryOrgSyncRequest:
+      properties:
+        node_id:
+          type: string
+      required:
+      - node_id
       type: object
     handlers.UpdateMemberRequest:
       properties:
@@ -140,6 +162,35 @@ components:
         status:
           type: string
       type: object
+    service.AuditResult:
+      properties:
+        action:
+          type: string
+        actor_id:
+          type: string
+        actor_role:
+          type: string
+        created_at:
+          format: date-time
+          type: string
+        error_message:
+          type: string
+        id:
+          type: string
+        ip_address:
+          type: string
+        metadata:
+          additionalProperties: {}
+          type: object
+        org_id:
+          type: string
+        result:
+          type: string
+        target_id:
+          type: string
+        target_type:
+          type: string
+      type: object
     service.AuthUser:
       properties:
         display_name:
@@ -155,12 +206,65 @@ components:
         username:
           type: string
       type: object
+    service.ChallengeResult:
+      properties:
+        challenge_type:
+          type: string
+        channel_type:
+          type: string
+        code:
+          type: string
+        expires_at:
+          type: string
+        hints:
+          additionalProperties:
+            type: string
+          type: object
+        job_id:
+          type: string
+        qrcode:
+          type: string
+        status:
+          type: string
+      type: object
+    service.KnowledgeEntryResult:
+      properties:
+        is_dir:
+          type: boolean
+        name:
+          type: string
+        path:
+          type: string
+        size:
+          type: integer
+      type: object
+    service.KnowledgeListResult:
+      properties:
+        entries:
+          items:
+            $ref: '#/components/schemas/service.KnowledgeEntryResult'
+          type: array
+          uniqueItems: false
+        path:
+          type: string
+      type: object
     service.LoginResult:
       properties:
         tokens:
           $ref: '#/components/schemas/service.TokenPair'
         user:
           $ref: '#/components/schemas/service.AuthUser'
+      type: object
+    service.LogsPage:
+      properties:
+        scope:
+          type: string
+        scope_id:
+          type: string
+        total:
+          type: integer
+        updated_at:
+          type: string
       type: object
     service.MemberResult:
       properties:
@@ -205,6 +309,49 @@ components:
         status:
           type: string
       type: object
+    service.PersonaResult:
+      properties:
+        allow_member_override:
+          type: boolean
+        conversation_rules:
+          type: string
+        forbidden_rules:
+          type: string
+        org_id:
+          type: string
+        reply_style:
+          type: string
+        system_prompt:
+          type: string
+        version:
+          type: integer
+      type: object
+    service.ProgressResult:
+      properties:
+        bound_identity:
+          type: string
+        channel_name:
+          type: string
+        error_message:
+          type: string
+        metadata:
+          additionalProperties:
+            type: string
+          type: object
+        status:
+          type: string
+        updated_at:
+          type: string
+      type: object
+    service.QuotaSeries:
+      properties:
+        scope:
+          type: string
+        scope_id:
+          type: string
+        updated_at:
+          type: string
+      type: object
     service.RuntimeNodeResult:
       properties:
         agent_docker_endpoint:
@@ -230,6 +377,21 @@ components:
         node_data_root:
           type: string
         status:
+          type: string
+      type: object
+    service.SyncStatusResult:
+      properties:
+        last_error:
+          type: string
+        last_success_at:
+          type: string
+        node_id:
+          type: string
+        org_id:
+          type: string
+        status:
+          type: string
+        updated_at:
           type: string
       type: object
     service.TokenPair:
@@ -302,6 +464,540 @@ paths:
       summary: 应用详情
       tags:
       - apps
+  /apps/{appId}/channels/{channelType}/auth:
+    get:
+      description: 轮询指定应用渠道的登录授权进度，返回当前状态
+      parameters:
+      - description: 应用 ID
+        in: path
+        name: appId
+        required: true
+        schema:
+          type: string
+      - description: 渠道类型（如 wechat）
+        in: path
+        name: channelType
+        required: true
+        schema:
+          type: string
+      responses:
+        "200":
+          content:
+            application/json:
+              schema:
+                additionalProperties:
+                  $ref: '#/components/schemas/service.ProgressResult'
+                type: object
+          description: OK
+        "401":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/handlers.ErrorResponse'
+          description: Unauthorized
+        "403":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/handlers.ErrorResponse'
+          description: Forbidden
+        "404":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/handlers.ErrorResponse'
+          description: Not Found
+        "500":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/handlers.ErrorResponse'
+          description: Internal Server Error
+        "503":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/handlers.ErrorResponse'
+          description: Service Unavailable
+      security:
+      - BearerAuth: []
+      summary: 查询渠道登录进度
+      tags:
+      - channels
+    post:
+      description: 为指定应用和渠道类型发起登录授权流程，返回挑战信息（如二维码 URL）
+      parameters:
+      - description: 应用 ID
+        in: path
+        name: appId
+        required: true
+        schema:
+          type: string
+      - description: 渠道类型（如 wechat）
+        in: path
+        name: channelType
+        required: true
+        schema:
+          type: string
+      responses:
+        "200":
+          content:
+            application/json:
+              schema:
+                additionalProperties:
+                  $ref: '#/components/schemas/service.ChallengeResult'
+                type: object
+          description: OK
+        "401":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/handlers.ErrorResponse'
+          description: Unauthorized
+        "403":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/handlers.ErrorResponse'
+          description: Forbidden
+        "404":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/handlers.ErrorResponse'
+          description: Not Found
+        "500":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/handlers.ErrorResponse'
+          description: Internal Server Error
+        "503":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/handlers.ErrorResponse'
+          description: Service Unavailable
+      security:
+      - BearerAuth: []
+      summary: 触发渠道登录挑战
+      tags:
+      - channels
+  /apps/{appId}/channels/{channelType}/unbind:
+    post:
+      description: 解除指定应用与渠道类型的绑定关系
+      parameters:
+      - description: 应用 ID
+        in: path
+        name: appId
+        required: true
+        schema:
+          type: string
+      - description: 渠道类型（如 wechat）
+        in: path
+        name: channelType
+        required: true
+        schema:
+          type: string
+      responses:
+        "204":
+          description: 解绑成功，无响应体
+        "401":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/handlers.ErrorResponse'
+          description: Unauthorized
+        "403":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/handlers.ErrorResponse'
+          description: Forbidden
+        "404":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/handlers.ErrorResponse'
+          description: Not Found
+        "500":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/handlers.ErrorResponse'
+          description: Internal Server Error
+        "503":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/handlers.ErrorResponse'
+          description: Service Unavailable
+      security:
+      - BearerAuth: []
+      summary: 解绑渠道
+      tags:
+      - channels
+  /apps/{appId}/knowledge:
+    delete:
+      description: 通过 path query 参数指定目标路径，从应用知识库中删除对应文件；需同时提供 org_id/owner_user_id/path
+      parameters:
+      - description: 应用 ID
+        in: path
+        name: appId
+        required: true
+        schema:
+          type: string
+      - description: 应用所属组织 ID
+        in: query
+        name: org_id
+        required: true
+        schema:
+          type: string
+      - description: 应用所有者用户 ID
+        in: query
+        name: owner_user_id
+        required: true
+        schema:
+          type: string
+      - description: 文件相对路径
+        in: query
+        name: path
+        required: true
+        schema:
+          type: string
+      responses:
+        "204":
+          description: 删除成功，无响应体
+        "400":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/handlers.ErrorResponse'
+          description: Bad Request
+        "401":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/handlers.ErrorResponse'
+          description: Unauthorized
+        "403":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/handlers.ErrorResponse'
+          description: Forbidden
+        "503":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/handlers.ErrorResponse'
+          description: Service Unavailable
+      security:
+      - BearerAuth: []
+      summary: 删除应用级知识库文件
+      tags:
+      - knowledge
+    get:
+      description: 按 path 参数列出应用知识库指定目录的文件；需同时提供 org_id 和 owner_user_id
+      parameters:
+      - description: 应用 ID
+        in: path
+        name: appId
+        required: true
+        schema:
+          type: string
+      - description: 应用所属组织 ID
+        in: query
+        name: org_id
+        required: true
+        schema:
+          type: string
+      - description: 应用所有者用户 ID
+        in: query
+        name: owner_user_id
+        required: true
+        schema:
+          type: string
+      - description: 目录路径
+        in: query
+        name: path
+        schema:
+          type: string
+      responses:
+        "200":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/service.KnowledgeListResult'
+          description: OK
+        "400":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/handlers.ErrorResponse'
+          description: Bad Request
+        "401":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/handlers.ErrorResponse'
+          description: Unauthorized
+        "403":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/handlers.ErrorResponse'
+          description: Forbidden
+        "503":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/handlers.ErrorResponse'
+          description: Service Unavailable
+      security:
+      - BearerAuth: []
+      summary: 列出应用级知识库文件
+      tags:
+      - knowledge
+    post:
+      description: 通过 path query 参数指定目标路径，上传二进制内容写入应用知识库；需同时提供 org_id/owner_user_id/path
+      parameters:
+      - description: 应用 ID
+        in: path
+        name: appId
+        required: true
+        schema:
+          type: string
+      - description: 应用所属组织 ID
+        in: query
+        name: org_id
+        required: true
+        schema:
+          type: string
+      - description: 应用所有者用户 ID
+        in: query
+        name: owner_user_id
+        required: true
+        schema:
+          type: string
+      - description: 文件相对路径
+        in: query
+        name: path
+        required: true
+        schema:
+          type: string
+      requestBody:
+        content:
+          application/octet-stream:
+            schema:
+              format: binary
+              type: string
+      responses:
+        "204":
+          description: 上传成功，无响应体
+        "400":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/handlers.ErrorResponse'
+          description: Bad Request
+        "401":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/handlers.ErrorResponse'
+          description: Unauthorized
+        "403":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/handlers.ErrorResponse'
+          description: Forbidden
+        "503":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/handlers.ErrorResponse'
+          description: Service Unavailable
+      security:
+      - BearerAuth: []
+      summary: 上传应用级知识库文件
+      tags:
+      - knowledge
+  /apps/{appId}/usage:
+    get:
+      description: 返回指定应用的 token 调用日志（LogsPage 格式）；需同时提供 owner_org_id 和 owner_user_id
+      parameters:
+      - description: 应用 ID
+        in: path
+        name: appId
+        required: true
+        schema:
+          type: string
+      - description: 应用所属组织 ID
+        in: query
+        name: owner_org_id
+        required: true
+        schema:
+          type: string
+      - description: 应用所有者用户 ID
+        in: query
+        name: owner_user_id
+        required: true
+        schema:
+          type: string
+      - description: new-api token key ID
+        in: query
+        name: newapi_key_id
+        schema:
+          type: integer
+      - description: 起始时间（Unix 秒）
+        in: query
+        name: since
+        schema:
+          type: integer
+      - description: 结束时间（Unix 秒）
+        in: query
+        name: until
+        schema:
+          type: integer
+      - description: 页码
+        in: query
+        name: page
+        schema:
+          type: integer
+      - description: 每页条数
+        in: query
+        name: page_size
+        schema:
+          type: integer
+      - description: 按模型名过滤
+        in: query
+        name: model_name
+        schema:
+          type: string
+      responses:
+        "200":
+          content:
+            application/json:
+              schema:
+                additionalProperties:
+                  $ref: '#/components/schemas/service.LogsPage'
+                type: object
+          description: OK
+        "400":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/handlers.ErrorResponse'
+          description: Bad Request
+        "401":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/handlers.ErrorResponse'
+          description: Unauthorized
+        "403":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/handlers.ErrorResponse'
+          description: Forbidden
+        "404":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/handlers.ErrorResponse'
+          description: Not Found
+        "500":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/handlers.ErrorResponse'
+          description: Internal Server Error
+        "503":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/handlers.ErrorResponse'
+          description: Service Unavailable
+      security:
+      - BearerAuth: []
+      summary: 应用用量日志
+      tags:
+      - usage
+  /audit-logs:
+    get:
+      description: 通过 target_type 和 target_id query 参数查询指定资源的审计日志
+      parameters:
+      - description: 资源类型（如 app / member）
+        in: query
+        name: target_type
+        required: true
+        schema:
+          type: string
+      - description: 资源 ID
+        in: query
+        name: target_id
+        required: true
+        schema:
+          type: string
+      - description: 每页条数（默认不限）
+        in: query
+        name: limit
+        schema:
+          type: integer
+      - description: 分页偏移（默认 0）
+        in: query
+        name: offset
+        schema:
+          type: integer
+      responses:
+        "200":
+          content:
+            application/json:
+              schema:
+                additionalProperties:
+                  items:
+                    $ref: '#/components/schemas/service.AuditResult'
+                  type: array
+                type: object
+          description: OK
+        "400":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/handlers.ErrorResponse'
+          description: Bad Request
+        "401":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/handlers.ErrorResponse'
+          description: Unauthorized
+        "403":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/handlers.ErrorResponse'
+          description: Forbidden
+        "404":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/handlers.ErrorResponse'
+          description: Not Found
+        "500":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/handlers.ErrorResponse'
+          description: Internal Server Error
+      security:
+      - BearerAuth: []
+      summary: 资源维度审计日志列表
+      tags:
+      - audit-logs
   /auth/login:
     post:
       description: 返回 access_token + refresh_token + 用户信息快照
@@ -1008,6 +1704,66 @@ paths:
       summary: 应用列表
       tags:
       - apps
+  /organizations/{orgId}/audit-logs:
+    get:
+      description: 分页列出指定组织的审计日志；仅组织管理员或平台管理员可调
+      parameters:
+      - description: 组织 ID
+        in: path
+        name: orgId
+        required: true
+        schema:
+          type: string
+      - description: 每页条数（默认不限）
+        in: query
+        name: limit
+        schema:
+          type: integer
+      - description: 分页偏移（默认 0）
+        in: query
+        name: offset
+        schema:
+          type: integer
+      responses:
+        "200":
+          content:
+            application/json:
+              schema:
+                additionalProperties:
+                  items:
+                    $ref: '#/components/schemas/service.AuditResult'
+                  type: array
+                type: object
+          description: OK
+        "401":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/handlers.ErrorResponse'
+          description: Unauthorized
+        "403":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/handlers.ErrorResponse'
+          description: Forbidden
+        "404":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/handlers.ErrorResponse'
+          description: Not Found
+        "500":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/handlers.ErrorResponse'
+          description: Internal Server Error
+      security:
+      - BearerAuth: []
+      summary: 组织审计日志列表
+      tags:
+      - audit-logs
   /organizations/{orgId}/disable:
     post:
       description: 将组织状态设为 disabled，成员登录时将被拒绝
@@ -1104,6 +1860,254 @@ paths:
       summary: 启用组织
       tags:
       - organizations
+  /organizations/{orgId}/knowledge:
+    delete:
+      description: 通过 path query 参数指定目标路径，从组织知识库中删除对应文件
+      parameters:
+      - description: 组织 ID
+        in: path
+        name: orgId
+        required: true
+        schema:
+          type: string
+      - description: 文件相对路径
+        in: query
+        name: path
+        required: true
+        schema:
+          type: string
+      responses:
+        "204":
+          description: 删除成功，无响应体
+        "400":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/handlers.ErrorResponse'
+          description: Bad Request
+        "401":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/handlers.ErrorResponse'
+          description: Unauthorized
+        "403":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/handlers.ErrorResponse'
+          description: Forbidden
+        "503":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/handlers.ErrorResponse'
+          description: Service Unavailable
+      security:
+      - BearerAuth: []
+      summary: 删除组织级知识库文件
+      tags:
+      - knowledge
+    get:
+      description: 按 path 参数列出组织知识库指定目录的文件列表
+      parameters:
+      - description: 组织 ID
+        in: path
+        name: orgId
+        required: true
+        schema:
+          type: string
+      - description: 目录路径
+        in: query
+        name: path
+        schema:
+          type: string
+      responses:
+        "200":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/service.KnowledgeListResult'
+          description: OK
+        "401":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/handlers.ErrorResponse'
+          description: Unauthorized
+        "403":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/handlers.ErrorResponse'
+          description: Forbidden
+        "503":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/handlers.ErrorResponse'
+          description: Service Unavailable
+      security:
+      - BearerAuth: []
+      summary: 列出组织级知识库文件
+      tags:
+      - knowledge
+    post:
+      description: 通过 path query 参数指定目标路径，上传二进制内容写入组织知识库；Content-Length 必须正确设置
+      parameters:
+      - description: 组织 ID
+        in: path
+        name: orgId
+        required: true
+        schema:
+          type: string
+      - description: 文件相对路径
+        in: query
+        name: path
+        required: true
+        schema:
+          type: string
+      requestBody:
+        content:
+          application/octet-stream:
+            schema:
+              format: binary
+              type: string
+      responses:
+        "204":
+          description: 上传成功，无响应体
+        "400":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/handlers.ErrorResponse'
+          description: Bad Request
+        "401":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/handlers.ErrorResponse'
+          description: Unauthorized
+        "403":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/handlers.ErrorResponse'
+          description: Forbidden
+        "503":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/handlers.ErrorResponse'
+          description: Service Unavailable
+      security:
+      - BearerAuth: []
+      summary: 上传组织级知识库文件
+      tags:
+      - knowledge
+  /organizations/{orgId}/knowledge/sync-status:
+    get:
+      description: 列出组织知识库在所有 Runtime 节点的最近同步状态；仅组织管理员或平台管理员可调
+      parameters:
+      - description: 组织 ID
+        in: path
+        name: orgId
+        required: true
+        schema:
+          type: string
+      responses:
+        "200":
+          content:
+            application/json:
+              schema:
+                additionalProperties:
+                  items:
+                    $ref: '#/components/schemas/service.SyncStatusResult'
+                  type: array
+                type: object
+          description: OK
+        "401":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/handlers.ErrorResponse'
+          description: Unauthorized
+        "403":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/handlers.ErrorResponse'
+          description: Forbidden
+        "503":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/handlers.ErrorResponse'
+          description: Service Unavailable
+      security:
+      - BearerAuth: []
+      summary: 组织知识库同步状态
+      tags:
+      - knowledge
+  /organizations/{orgId}/knowledge/sync-status/retry:
+    post:
+      description: 触发指定组织在指定 Runtime 节点上重新同步知识库
+      parameters:
+      - description: 组织 ID
+        in: path
+        name: orgId
+        required: true
+        schema:
+          type: string
+      requestBody:
+        content:
+          application/json:
+            schema:
+              oneOf:
+              - type: object
+              - $ref: '#/components/schemas/handlers.RetryOrgSyncRequest'
+                description: 重试同步请求
+                summary: body
+        description: 重试同步请求
+        required: true
+      responses:
+        "202":
+          content:
+            application/json:
+              schema:
+                additionalProperties:
+                  type: string
+                type: object
+          description: Accepted
+        "400":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/handlers.ErrorResponse'
+          description: Bad Request
+        "401":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/handlers.ErrorResponse'
+          description: Unauthorized
+        "403":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/handlers.ErrorResponse'
+          description: Forbidden
+        "503":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/handlers.ErrorResponse'
+          description: Service Unavailable
+      security:
+      - BearerAuth: []
+      summary: 重试组织知识库节点同步
+      tags:
+      - knowledge
   /organizations/{orgId}/members:
     get:
       description: 按组织 ID 分页列出成员；org_member 只能看到自己
@@ -1299,6 +2303,118 @@ paths:
       summary: 成员 onboarding（事务创建）
       tags:
       - members
+  /orgs/{orgId}/persona:
+    get:
+      description: 返回指定组织当前生效的 AI 人设配置
+      parameters:
+      - description: 组织 ID
+        in: path
+        name: orgId
+        required: true
+        schema:
+          type: string
+      responses:
+        "200":
+          content:
+            application/json:
+              schema:
+                additionalProperties:
+                  $ref: '#/components/schemas/service.PersonaResult'
+                type: object
+          description: OK
+        "401":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/handlers.ErrorResponse'
+          description: Unauthorized
+        "403":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/handlers.ErrorResponse'
+          description: Forbidden
+        "404":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/handlers.ErrorResponse'
+          description: Not Found
+        "500":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/handlers.ErrorResponse'
+          description: Internal Server Error
+      security:
+      - BearerAuth: []
+      summary: 获取组织人设
+      tags:
+      - persona
+    put:
+      description: 替换指定组织的 AI 人设配置，写入后立即生效
+      parameters:
+      - description: 组织 ID
+        in: path
+        name: orgId
+        required: true
+        schema:
+          type: string
+      requestBody:
+        content:
+          application/json:
+            schema:
+              oneOf:
+              - type: object
+              - $ref: '#/components/schemas/handlers.PersonaRequest'
+                description: 人设请求
+                summary: body
+        description: 人设请求
+        required: true
+      responses:
+        "200":
+          content:
+            application/json:
+              schema:
+                additionalProperties:
+                  $ref: '#/components/schemas/service.PersonaResult'
+                type: object
+          description: OK
+        "400":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/handlers.ErrorResponse'
+          description: Bad Request
+        "401":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/handlers.ErrorResponse'
+          description: Unauthorized
+        "403":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/handlers.ErrorResponse'
+          description: Forbidden
+        "404":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/handlers.ErrorResponse'
+          description: Not Found
+        "500":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/handlers.ErrorResponse'
+          description: Internal Server Error
+      security:
+      - BearerAuth: []
+      summary: 写入组织人设
+      tags:
+      - persona
   /runtime-nodes:
     get:
       description: 平台管理员获取所有 runtime 节点，支持分页
@@ -1660,5 +2776,212 @@ paths:
       summary: 轮换 bootstrap token
       tags:
       - runtime-nodes
+  /usage/members/{userId}:
+    get:
+      description: 返回指定成员名下应用的 token 调用日志（LogsPage 格式）
+      parameters:
+      - description: 成员用户 ID
+        in: path
+        name: userId
+        required: true
+        schema:
+          type: string
+      - description: 成员所属组织 ID
+        in: query
+        name: org_id
+        required: true
+        schema:
+          type: string
+      - description: 起始时间（Unix 秒）
+        in: query
+        name: since
+        schema:
+          type: integer
+      - description: 结束时间（Unix 秒）
+        in: query
+        name: until
+        schema:
+          type: integer
+      - description: 页码
+        in: query
+        name: page
+        schema:
+          type: integer
+      - description: 每页条数
+        in: query
+        name: page_size
+        schema:
+          type: integer
+      - description: 按模型名过滤
+        in: query
+        name: model_name
+        schema:
+          type: string
+      responses:
+        "200":
+          content:
+            application/json:
+              schema:
+                additionalProperties:
+                  $ref: '#/components/schemas/service.LogsPage'
+                type: object
+          description: OK
+        "400":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/handlers.ErrorResponse'
+          description: Bad Request
+        "401":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/handlers.ErrorResponse'
+          description: Unauthorized
+        "403":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/handlers.ErrorResponse'
+          description: Forbidden
+        "404":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/handlers.ErrorResponse'
+          description: Not Found
+        "500":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/handlers.ErrorResponse'
+          description: Internal Server Error
+        "503":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/handlers.ErrorResponse'
+          description: Service Unavailable
+      security:
+      - BearerAuth: []
+      summary: 成员用量日志
+      tags:
+      - usage
+  /usage/organizations/{orgId}:
+    get:
+      description: 返回指定组织在时间窗口内的按日 quota 消耗（QuotaSeries 格式）
+      parameters:
+      - description: 组织 ID
+        in: path
+        name: orgId
+        required: true
+        schema:
+          type: string
+      - description: 起始时间（Unix 秒）
+        in: query
+        name: since
+        schema:
+          type: integer
+      - description: 结束时间（Unix 秒）
+        in: query
+        name: until
+        schema:
+          type: integer
+      responses:
+        "200":
+          content:
+            application/json:
+              schema:
+                additionalProperties:
+                  $ref: '#/components/schemas/service.QuotaSeries'
+                type: object
+          description: OK
+        "401":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/handlers.ErrorResponse'
+          description: Unauthorized
+        "403":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/handlers.ErrorResponse'
+          description: Forbidden
+        "404":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/handlers.ErrorResponse'
+          description: Not Found
+        "500":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/handlers.ErrorResponse'
+          description: Internal Server Error
+        "503":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/handlers.ErrorResponse'
+          description: Service Unavailable
+      security:
+      - BearerAuth: []
+      summary: 组织用量统计
+      tags:
+      - usage
+  /usage/platform:
+    get:
+      description: 返回平台维度在时间窗口内的按日 quota 消耗（跨所有组织），仅平台管理员可调
+      parameters:
+      - description: 起始时间（Unix 秒）
+        in: query
+        name: since
+        schema:
+          type: integer
+      - description: 结束时间（Unix 秒）
+        in: query
+        name: until
+        schema:
+          type: integer
+      responses:
+        "200":
+          content:
+            application/json:
+              schema:
+                additionalProperties:
+                  $ref: '#/components/schemas/service.QuotaSeries'
+                type: object
+          description: OK
+        "401":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/handlers.ErrorResponse'
+          description: Unauthorized
+        "403":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/handlers.ErrorResponse'
+          description: Forbidden
+        "500":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/handlers.ErrorResponse'
+          description: Internal Server Error
+        "503":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/handlers.ErrorResponse'
+          description: Service Unavailable
+      security:
+      - BearerAuth: []
+      summary: 平台用量统计
+      tags:
+      - usage
 servers:
 - url: /api/v1

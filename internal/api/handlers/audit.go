@@ -38,6 +38,21 @@ func RegisterAuditRoutes(router gin.IRouter, handler *AuditHandler) {
 }
 
 // ListByOrg 列出组织维度的审计日志。
+//
+// @Summary      组织审计日志列表
+// @Description  分页列出指定组织的审计日志；仅组织管理员或平台管理员可调
+// @Tags         audit-logs
+// @Produce      json
+// @Security     BearerAuth
+// @Param        orgId   path      string  true   "组织 ID"
+// @Param        limit   query     int     false  "每页条数（默认不限）"
+// @Param        offset  query     int     false  "分页偏移（默认 0）"
+// @Success      200     {object}  map[string][]service.AuditResult
+// @Failure      401     {object}  ErrorResponse
+// @Failure      403     {object}  ErrorResponse
+// @Failure      404     {object}  ErrorResponse
+// @Failure      500     {object}  ErrorResponse
+// @Router       /organizations/{orgId}/audit-logs [get]
 func (h *AuditHandler) ListByOrg(c *gin.Context) {
 	principal, ok := h.principal(c)
 	if !ok {
@@ -54,6 +69,23 @@ func (h *AuditHandler) ListByOrg(c *gin.Context) {
 }
 
 // ListByTarget 通过 query 参数 target_type/target_id 列出资源维度审计日志。
+//
+// @Summary      资源维度审计日志列表
+// @Description  通过 target_type 和 target_id query 参数查询指定资源的审计日志
+// @Tags         audit-logs
+// @Produce      json
+// @Security     BearerAuth
+// @Param        target_type  query     string  true   "资源类型（如 app / member）"
+// @Param        target_id    query     string  true   "资源 ID"
+// @Param        limit        query     int     false  "每页条数（默认不限）"
+// @Param        offset       query     int     false  "分页偏移（默认 0）"
+// @Success      200          {object}  map[string][]service.AuditResult
+// @Failure      400          {object}  ErrorResponse
+// @Failure      401          {object}  ErrorResponse
+// @Failure      403          {object}  ErrorResponse
+// @Failure      404          {object}  ErrorResponse
+// @Failure      500          {object}  ErrorResponse
+// @Router       /audit-logs [get]
 func (h *AuditHandler) ListByTarget(c *gin.Context) {
 	principal, ok := h.principal(c)
 	if !ok {

@@ -34,6 +34,19 @@ func RegisterPersonaRoutes(router gin.IRouter, handler *PersonaHandler) {
 }
 
 // Get 返回组织当前生效人设。
+//
+// @Summary      获取组织人设
+// @Description  返回指定组织当前生效的 AI 人设配置
+// @Tags         persona
+// @Produce      json
+// @Security     BearerAuth
+// @Param        orgId  path      string  true  "组织 ID"
+// @Success      200    {object}  map[string]service.PersonaResult
+// @Failure      401    {object}  ErrorResponse
+// @Failure      403    {object}  ErrorResponse
+// @Failure      404    {object}  ErrorResponse
+// @Failure      500    {object}  ErrorResponse
+// @Router       /orgs/{orgId}/persona [get]
 func (h *PersonaHandler) Get(c *gin.Context) {
 	principal, ok := h.principal(c)
 	if !ok {
@@ -48,6 +61,22 @@ func (h *PersonaHandler) Get(c *gin.Context) {
 }
 
 // Put 写入新版本人设。
+//
+// @Summary      写入组织人设
+// @Description  替换指定组织的 AI 人设配置，写入后立即生效
+// @Tags         persona
+// @Accept       json
+// @Produce      json
+// @Security     BearerAuth
+// @Param        orgId  path      string         true  "组织 ID"
+// @Param        body   body      PersonaRequest true  "人设请求"
+// @Success      200    {object}  map[string]service.PersonaResult
+// @Failure      400    {object}  ErrorResponse
+// @Failure      401    {object}  ErrorResponse
+// @Failure      403    {object}  ErrorResponse
+// @Failure      404    {object}  ErrorResponse
+// @Failure      500    {object}  ErrorResponse
+// @Router       /orgs/{orgId}/persona [put]
 func (h *PersonaHandler) Put(c *gin.Context) {
 	principal, ok := h.principal(c)
 	if !ok {

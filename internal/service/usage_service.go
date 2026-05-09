@@ -61,7 +61,8 @@ func NewUsageService(store UsageStore, client UsageNewAPIClient, failAuditor New
 type LogsPage struct {
 	Scope     string            `json:"scope"`
 	ScopeID   string            `json:"scope_id,omitempty"`
-	Items     []newapi.LogEntry `json:"items"`
+	// Items 透传 new-api LogEntry 列表。
+	Items     []newapi.LogEntry `json:"items" swaggerignore:"true"`
 	Total     int               `json:"total"`
 	UpdatedAt time.Time         `json:"updated_at"`
 }
@@ -70,7 +71,8 @@ type LogsPage struct {
 type QuotaSeries struct {
 	Scope     string             `json:"scope"`
 	ScopeID   string             `json:"scope_id,omitempty"`
-	Items     []newapi.QuotaDate `json:"items"`
+	// Items 透传 new-api QuotaDate 列表。
+	Items     []newapi.QuotaDate `json:"items" swaggerignore:"true"`
 	UpdatedAt time.Time          `json:"updated_at"`
 }
 

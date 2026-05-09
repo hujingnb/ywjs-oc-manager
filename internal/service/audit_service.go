@@ -34,7 +34,7 @@ type AuditResult struct {
 	ErrorMessage string                 `json:"error_message,omitempty"`
 	IPAddress    string                 `json:"ip_address,omitempty"`
 	Metadata     map[string]any         `json:"metadata,omitempty"`
-	CreatedAt    pgtype.Timestamptz     `json:"created_at"`
+	CreatedAt    pgtype.Timestamptz     `json:"created_at" swaggertype:"string" format:"date-time"`
 }
 
 // AuditEvent 是其他服务记录审计时的入参。

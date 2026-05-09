@@ -45,6 +45,27 @@ func RegisterUsageRoutes(router gin.IRouter, handler *UsageHandler) {
 }
 
 // GetMember 返回单个成员名下应用的调用日志。
+//
+// @Summary      成员用量日志
+// @Description  返回指定成员名下应用的 token 调用日志（LogsPage 格式）
+// @Tags         usage
+// @Produce      json
+// @Security     BearerAuth
+// @Param        userId     path      string  true   "成员用户 ID"
+// @Param        org_id     query     string  true   "成员所属组织 ID"
+// @Param        since      query     int     false  "起始时间（Unix 秒）"
+// @Param        until      query     int     false  "结束时间（Unix 秒）"
+// @Param        page       query     int     false  "页码"
+// @Param        page_size  query     int     false  "每页条数"
+// @Param        model_name query     string  false  "按模型名过滤"
+// @Success      200        {object}  map[string]service.LogsPage
+// @Failure      400        {object}  ErrorResponse
+// @Failure      401        {object}  ErrorResponse
+// @Failure      403        {object}  ErrorResponse
+// @Failure      404        {object}  ErrorResponse
+// @Failure      500        {object}  ErrorResponse
+// @Failure      503        {object}  ErrorResponse
+// @Router       /usage/members/{userId} [get]
 func (h *UsageHandler) GetMember(c *gin.Context) {
 	principal, ok := h.principal(c)
 	if !ok {
@@ -64,6 +85,22 @@ func (h *UsageHandler) GetMember(c *gin.Context) {
 }
 
 // GetOrg 返回组织维度的按日 quota。
+//
+// @Summary      组织用量统计
+// @Description  返回指定组织在时间窗口内的按日 quota 消耗（QuotaSeries 格式）
+// @Tags         usage
+// @Produce      json
+// @Security     BearerAuth
+// @Param        orgId  path      string  true   "组织 ID"
+// @Param        since  query     int     false  "起始时间（Unix 秒）"
+// @Param        until  query     int     false  "结束时间（Unix 秒）"
+// @Success      200    {object}  map[string]service.QuotaSeries
+// @Failure      401    {object}  ErrorResponse
+// @Failure      403    {object}  ErrorResponse
+// @Failure      404    {object}  ErrorResponse
+// @Failure      500    {object}  ErrorResponse
+// @Failure      503    {object}  ErrorResponse
+// @Router       /usage/organizations/{orgId} [get]
 func (h *UsageHandler) GetOrg(c *gin.Context) {
 	principal, ok := h.principal(c)
 	if !ok {
@@ -79,6 +116,20 @@ func (h *UsageHandler) GetOrg(c *gin.Context) {
 }
 
 // GetPlatform 返回平台维度的按日 quota（跨所有组织）。仅平台管理员可调。
+//
+// @Summary      平台用量统计
+// @Description  返回平台维度在时间窗口内的按日 quota 消耗（跨所有组织），仅平台管理员可调
+// @Tags         usage
+// @Produce      json
+// @Security     BearerAuth
+// @Param        since  query     int     false  "起始时间（Unix 秒）"
+// @Param        until  query     int     false  "结束时间（Unix 秒）"
+// @Success      200    {object}  map[string]service.QuotaSeries
+// @Failure      401    {object}  ErrorResponse
+// @Failure      403    {object}  ErrorResponse
+// @Failure      500    {object}  ErrorResponse
+// @Failure      503    {object}  ErrorResponse
+// @Router       /usage/platform [get]
 func (h *UsageHandler) GetPlatform(c *gin.Context) {
 	principal, ok := h.principal(c)
 	if !ok {
@@ -108,6 +159,29 @@ func (h *UsageHandler) principal(c *gin.Context) (auth.Principal, bool) {
 }
 
 // GetApp 拉取应用维度的 token 调用日志。
+//
+// @Summary      应用用量日志
+// @Description  返回指定应用的 token 调用日志（LogsPage 格式）；需同时提供 owner_org_id 和 owner_user_id
+// @Tags         usage
+// @Produce      json
+// @Security     BearerAuth
+// @Param        appId         path      string  true   "应用 ID"
+// @Param        owner_org_id  query     string  true   "应用所属组织 ID"
+// @Param        owner_user_id query     string  true   "应用所有者用户 ID"
+// @Param        newapi_key_id query     int     false  "new-api token key ID"
+// @Param        since         query     int     false  "起始时间（Unix 秒）"
+// @Param        until         query     int     false  "结束时间（Unix 秒）"
+// @Param        page          query     int     false  "页码"
+// @Param        page_size     query     int     false  "每页条数"
+// @Param        model_name    query     string  false  "按模型名过滤"
+// @Success      200           {object}  map[string]service.LogsPage
+// @Failure      400           {object}  ErrorResponse
+// @Failure      401           {object}  ErrorResponse
+// @Failure      403           {object}  ErrorResponse
+// @Failure      404           {object}  ErrorResponse
+// @Failure      500           {object}  ErrorResponse
+// @Failure      503           {object}  ErrorResponse
+// @Router       /apps/{appId}/usage [get]
 func (h *UsageHandler) GetApp(c *gin.Context) {
 	principal, ok := h.principal(c)
 	if !ok {

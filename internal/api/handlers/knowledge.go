@@ -55,6 +55,18 @@ func RegisterKnowledgeRoutes(router gin.IRouter, handler *KnowledgeHandler) {
 
 // GetOrgSyncStatus 列出组织在所有节点的最近同步状态。
 // 仅组织管理员 / 平台管理员可调；返回 [{node_id, status, last_success_at, last_error, updated_at}]。
+//
+// @Summary      组织知识库同步状态
+// @Description  列出组织知识库在所有 Runtime 节点的最近同步状态；仅组织管理员或平台管理员可调
+// @Tags         knowledge
+// @Produce      json
+// @Security     BearerAuth
+// @Param        orgId  path      string  true  "组织 ID"
+// @Success      200    {object}  map[string][]service.SyncStatusResult
+// @Failure      401    {object}  ErrorResponse
+// @Failure      403    {object}  ErrorResponse
+// @Failure      503    {object}  ErrorResponse
+// @Router       /organizations/{orgId}/knowledge/sync-status [get]
 func (h *KnowledgeHandler) GetOrgSyncStatus(c *gin.Context) {
 	principal, ok := h.principal(c)
 	if !ok {
@@ -70,6 +82,21 @@ func (h *KnowledgeHandler) GetOrgSyncStatus(c *gin.Context) {
 
 // RetryOrgSync 触发指定 (org, node) 重新同步。
 // body: {"node_id": "..."}；仅组织管理员 / 平台管理员可调。
+//
+// @Summary      重试组织知识库节点同步
+// @Description  触发指定组织在指定 Runtime 节点上重新同步知识库
+// @Tags         knowledge
+// @Accept       json
+// @Produce      json
+// @Security     BearerAuth
+// @Param        orgId  path      string                        true  "组织 ID"
+// @Param        body   body      RetryOrgSyncRequest           true  "重试同步请求"
+// @Success      202    {object}  map[string]string
+// @Failure      400    {object}  ErrorResponse
+// @Failure      401    {object}  ErrorResponse
+// @Failure      403    {object}  ErrorResponse
+// @Failure      503    {object}  ErrorResponse
+// @Router       /organizations/{orgId}/knowledge/sync-status/retry [post]
 func (h *KnowledgeHandler) RetryOrgSync(c *gin.Context) {
 	principal, ok := h.principal(c)
 	if !ok {
@@ -90,6 +117,19 @@ func (h *KnowledgeHandler) RetryOrgSync(c *gin.Context) {
 }
 
 // ListOrg 列出组织级知识库。
+//
+// @Summary      列出组织级知识库文件
+// @Description  按 path 参数列出组织知识库指定目录的文件列表
+// @Tags         knowledge
+// @Produce      json
+// @Security     BearerAuth
+// @Param        orgId  path      string  true   "组织 ID"
+// @Param        path   query     string  false  "目录路径"
+// @Success      200    {object}  service.KnowledgeListResult
+// @Failure      401    {object}  ErrorResponse
+// @Failure      403    {object}  ErrorResponse
+// @Failure      503    {object}  ErrorResponse
+// @Router       /organizations/{orgId}/knowledge [get]
 func (h *KnowledgeHandler) ListOrg(c *gin.Context) {
 	principal, ok := h.principal(c)
 	if !ok {
@@ -104,6 +144,21 @@ func (h *KnowledgeHandler) ListOrg(c *gin.Context) {
 }
 
 // SaveOrg 写入组织级文件。
+//
+// @Summary      上传组织级知识库文件
+// @Description  通过 path query 参数指定目标路径，上传二进制内容写入组织知识库；Content-Length 必须正确设置
+// @Tags         knowledge
+// @Accept       application/octet-stream
+// @Produce      json
+// @Security     BearerAuth
+// @Param        orgId  path      string  true  "组织 ID"
+// @Param        path   query     string  true  "文件相对路径"
+// @Success      204    "上传成功，无响应体"
+// @Failure      400    {object}  ErrorResponse
+// @Failure      401    {object}  ErrorResponse
+// @Failure      403    {object}  ErrorResponse
+// @Failure      503    {object}  ErrorResponse
+// @Router       /organizations/{orgId}/knowledge [post]
 func (h *KnowledgeHandler) SaveOrg(c *gin.Context) {
 	principal, ok := h.principal(c)
 	if !ok {
@@ -123,6 +178,20 @@ func (h *KnowledgeHandler) SaveOrg(c *gin.Context) {
 }
 
 // DeleteOrg 删除组织级文件。
+//
+// @Summary      删除组织级知识库文件
+// @Description  通过 path query 参数指定目标路径，从组织知识库中删除对应文件
+// @Tags         knowledge
+// @Produce      json
+// @Security     BearerAuth
+// @Param        orgId  path      string  true  "组织 ID"
+// @Param        path   query     string  true  "文件相对路径"
+// @Success      204    "删除成功，无响应体"
+// @Failure      400    {object}  ErrorResponse
+// @Failure      401    {object}  ErrorResponse
+// @Failure      403    {object}  ErrorResponse
+// @Failure      503    {object}  ErrorResponse
+// @Router       /organizations/{orgId}/knowledge [delete]
 func (h *KnowledgeHandler) DeleteOrg(c *gin.Context) {
 	principal, ok := h.principal(c)
 	if !ok {
@@ -141,6 +210,22 @@ func (h *KnowledgeHandler) DeleteOrg(c *gin.Context) {
 }
 
 // ListApp 列出应用级知识库。
+//
+// @Summary      列出应用级知识库文件
+// @Description  按 path 参数列出应用知识库指定目录的文件；需同时提供 org_id 和 owner_user_id
+// @Tags         knowledge
+// @Produce      json
+// @Security     BearerAuth
+// @Param        appId         path      string  true   "应用 ID"
+// @Param        org_id        query     string  true   "应用所属组织 ID"
+// @Param        owner_user_id query     string  true   "应用所有者用户 ID"
+// @Param        path          query     string  false  "目录路径"
+// @Success      200           {object}  service.KnowledgeListResult
+// @Failure      400           {object}  ErrorResponse
+// @Failure      401           {object}  ErrorResponse
+// @Failure      403           {object}  ErrorResponse
+// @Failure      503           {object}  ErrorResponse
+// @Router       /apps/{appId}/knowledge [get]
 func (h *KnowledgeHandler) ListApp(c *gin.Context) {
 	principal, ok := h.principal(c)
 	if !ok {
@@ -161,6 +246,23 @@ func (h *KnowledgeHandler) ListApp(c *gin.Context) {
 }
 
 // SaveApp 写入应用级文件。
+//
+// @Summary      上传应用级知识库文件
+// @Description  通过 path query 参数指定目标路径，上传二进制内容写入应用知识库；需同时提供 org_id/owner_user_id/path
+// @Tags         knowledge
+// @Accept       application/octet-stream
+// @Produce      json
+// @Security     BearerAuth
+// @Param        appId         path      string  true  "应用 ID"
+// @Param        org_id        query     string  true  "应用所属组织 ID"
+// @Param        owner_user_id query     string  true  "应用所有者用户 ID"
+// @Param        path          query     string  true  "文件相对路径"
+// @Success      204           "上传成功，无响应体"
+// @Failure      400           {object}  ErrorResponse
+// @Failure      401           {object}  ErrorResponse
+// @Failure      403           {object}  ErrorResponse
+// @Failure      503           {object}  ErrorResponse
+// @Router       /apps/{appId}/knowledge [post]
 func (h *KnowledgeHandler) SaveApp(c *gin.Context) {
 	principal, ok := h.principal(c)
 	if !ok {
@@ -182,6 +284,22 @@ func (h *KnowledgeHandler) SaveApp(c *gin.Context) {
 }
 
 // DeleteApp 删除应用级文件。
+//
+// @Summary      删除应用级知识库文件
+// @Description  通过 path query 参数指定目标路径，从应用知识库中删除对应文件；需同时提供 org_id/owner_user_id/path
+// @Tags         knowledge
+// @Produce      json
+// @Security     BearerAuth
+// @Param        appId         path      string  true  "应用 ID"
+// @Param        org_id        query     string  true  "应用所属组织 ID"
+// @Param        owner_user_id query     string  true  "应用所有者用户 ID"
+// @Param        path          query     string  true  "文件相对路径"
+// @Success      204           "删除成功，无响应体"
+// @Failure      400           {object}  ErrorResponse
+// @Failure      401           {object}  ErrorResponse
+// @Failure      403           {object}  ErrorResponse
+// @Failure      503           {object}  ErrorResponse
+// @Router       /apps/{appId}/knowledge [delete]
 func (h *KnowledgeHandler) DeleteApp(c *gin.Context) {
 	principal, ok := h.principal(c)
 	if !ok {

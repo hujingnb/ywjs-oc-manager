@@ -37,6 +37,21 @@ func RegisterChannelRoutes(router gin.IRouter, handler *ChannelsHandler) {
 }
 
 // BeginAuth 触发渠道登录挑战。
+//
+// @Summary      触发渠道登录挑战
+// @Description  为指定应用和渠道类型发起登录授权流程，返回挑战信息（如二维码 URL）
+// @Tags         channels
+// @Produce      json
+// @Security     BearerAuth
+// @Param        appId       path      string  true  "应用 ID"
+// @Param        channelType path      string  true  "渠道类型（如 wechat）"
+// @Success      200         {object}  map[string]service.ChallengeResult
+// @Failure      401         {object}  ErrorResponse
+// @Failure      403         {object}  ErrorResponse
+// @Failure      404         {object}  ErrorResponse
+// @Failure      500         {object}  ErrorResponse
+// @Failure      503         {object}  ErrorResponse
+// @Router       /apps/{appId}/channels/{channelType}/auth [post]
 func (h *ChannelsHandler) BeginAuth(c *gin.Context) {
 	principal, ok := h.principal(c)
 	if !ok {
@@ -51,6 +66,21 @@ func (h *ChannelsHandler) BeginAuth(c *gin.Context) {
 }
 
 // PollAuth 查询渠道登录进度。
+//
+// @Summary      查询渠道登录进度
+// @Description  轮询指定应用渠道的登录授权进度，返回当前状态
+// @Tags         channels
+// @Produce      json
+// @Security     BearerAuth
+// @Param        appId       path      string  true  "应用 ID"
+// @Param        channelType path      string  true  "渠道类型（如 wechat）"
+// @Success      200         {object}  map[string]service.ProgressResult
+// @Failure      401         {object}  ErrorResponse
+// @Failure      403         {object}  ErrorResponse
+// @Failure      404         {object}  ErrorResponse
+// @Failure      500         {object}  ErrorResponse
+// @Failure      503         {object}  ErrorResponse
+// @Router       /apps/{appId}/channels/{channelType}/auth [get]
 func (h *ChannelsHandler) PollAuth(c *gin.Context) {
 	principal, ok := h.principal(c)
 	if !ok {
@@ -65,6 +95,21 @@ func (h *ChannelsHandler) PollAuth(c *gin.Context) {
 }
 
 // Unbind 解绑渠道。
+//
+// @Summary      解绑渠道
+// @Description  解除指定应用与渠道类型的绑定关系
+// @Tags         channels
+// @Produce      json
+// @Security     BearerAuth
+// @Param        appId       path      string  true  "应用 ID"
+// @Param        channelType path      string  true  "渠道类型（如 wechat）"
+// @Success      204         "解绑成功，无响应体"
+// @Failure      401         {object}  ErrorResponse
+// @Failure      403         {object}  ErrorResponse
+// @Failure      404         {object}  ErrorResponse
+// @Failure      500         {object}  ErrorResponse
+// @Failure      503         {object}  ErrorResponse
+// @Router       /apps/{appId}/channels/{channelType}/unbind [post]
 func (h *ChannelsHandler) Unbind(c *gin.Context) {
 	principal, ok := h.principal(c)
 	if !ok {

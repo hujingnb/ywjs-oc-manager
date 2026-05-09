@@ -78,6 +78,13 @@ type PersonaRequest struct {
 	AllowMemberOverride bool   `json:"allow_member_override"`
 }
 
+// ===== 知识库 knowledge =====
+
+// RetryOrgSyncRequest 重试组织知识库节点同步的请求体。
+type RetryOrgSyncRequest struct {
+	NodeID string `json:"node_id" binding:"required"`
+}
+
 // ===== 充值 recharge =====
 
 // RechargeRequest 组织充值的请求体。
