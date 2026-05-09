@@ -129,30 +129,24 @@ func TestCanViewApp(t *testing.T) {
 	}
 }
 
-func TestCanViewOrgPersona_等价于CanViewOrg(t *testing.T) {
-	roles := []string{domain.UserRolePlatformAdmin, domain.UserRoleOrgAdmin, domain.UserRoleOrgMember}
-	pairs := [][2]string{{orgA, orgA}, {orgA, orgB}}
-	for _, role := range roles {
-		for _, pair := range pairs {
-			p := Principal{UserID: userA, OrgID: pair[0], Role: role}
-			if CanViewOrgPersona(p, pair[1]) != CanViewOrg(p, pair[1]) {
-				t.Fatalf("CanViewOrgPersona 与 CanViewOrg 行为不一致: role=%s pOrg=%s targetOrg=%s",
-					role, pair[0], pair[1])
-			}
-		}
+func TestCanViewOrgPersona(t *testing.T) {
+	cases := []orgCase{
+		{"platform_admin 跨组织可读 persona", domain.UserRolePlatformAdmin, orgA, orgB, true},
+		{"org_admin 同组织可读 persona", domain.UserRoleOrgAdmin, orgA, orgA, true},
+		{"org_admin 跨组织不可读 persona", domain.UserRoleOrgAdmin, orgA, orgB, false},
+		{"org_member 同组织可读 persona", domain.UserRoleOrgMember, orgA, orgA, true},
+		{"org_member 跨组织不可读 persona", domain.UserRoleOrgMember, orgA, orgB, false},
 	}
+	runOrgCases(t, CanViewOrgPersona, cases)
 }
 
-func TestCanManageOrgPersona_等价于CanManageOrg(t *testing.T) {
-	roles := []string{domain.UserRolePlatformAdmin, domain.UserRoleOrgAdmin, domain.UserRoleOrgMember}
-	pairs := [][2]string{{orgA, orgA}, {orgA, orgB}}
-	for _, role := range roles {
-		for _, pair := range pairs {
-			p := Principal{UserID: userA, OrgID: pair[0], Role: role}
-			if CanManageOrgPersona(p, pair[1]) != CanManageOrg(p, pair[1]) {
-				t.Fatalf("CanManageOrgPersona 与 CanManageOrg 行为不一致: role=%s pOrg=%s targetOrg=%s",
-					role, pair[0], pair[1])
-			}
-		}
+func TestCanManageOrgPersona(t *testing.T) {
+	cases := []orgCase{
+		{"platform_admin 跨组织可管 persona", domain.UserRolePlatformAdmin, orgA, orgB, true},
+		{"org_admin 同组织可管 persona", domain.UserRoleOrgAdmin, orgA, orgA, true},
+		{"org_admin 跨组织不可管 persona", domain.UserRoleOrgAdmin, orgA, orgB, false},
+		{"org_member 同组织也不可管 persona", domain.UserRoleOrgMember, orgA, orgA, false},
+		{"未知角色不可管 persona", "unknown", orgA, orgA, false},
 	}
+	runOrgCases(t, CanManageOrgPersona, cases)
 }
