@@ -1,3 +1,29 @@
+// Package domain 维护应用状态机与枚举。app_state_machine.go 定义应用生命周期。
+//
+// # 状态机
+//
+//	draft  ──onboarding──▶  initializing  ──worker 完成──▶  binding_waiting
+//	  │                          │                              │
+//	  │                          ▼                              ▼ 渠道扫码
+//	  │                       error ◀──────────────────────  binding_failed
+//	  │                          ▲                              │
+//	  └──────────────────────────┴──────────────────────────────┴─────▶ running
+//	                                                                    │
+//	                                                                    ▼ 停止
+//	                                                                  stopped
+//	                                                                    │
+//	                                                                    ▼ 删除
+//	                                                                  deleted
+//
+// 关键转移约束：
+//   - draft → initializing：仅 onboarding job 可触发
+//   - initializing → binding_waiting：worker 完成镜像拉取 + new-api 凭证配置
+//   - binding_waiting → binding_failed：渠道扫码超时或 token 过期
+//   - error 是吸入态：任何步骤失败都会落到 error，由用户手工 retry 才能离开
+//   - deleted 是终态：deleted_at 字段非空即认为已删
+//   - stopped → running：用户主动启动
+//
+// 维护提醒：状态机如有变化，本文档块必须同步更新；与代码不一致按代码为准。
 package domain
 
 import "fmt"
