@@ -83,7 +83,7 @@ import { formatOrgStatus } from '@/domain/status'
 import {
   useCreateOrganization, useOrganizationsQuery, useUpdateOrganizationStatus,
 } from '@/api/hooks/useOrganizations'
-import type { Organization } from '@/api/types'
+import type { Organization } from '@/api'
 import DataTableList from '@/components/DataTableList.vue'
 import { statusColumn, actionColumn } from '@/components/columns'
 import { useFormModal } from '@/composables/useFormModal'

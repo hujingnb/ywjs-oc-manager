@@ -2,7 +2,7 @@ import { useQuery } from '@tanstack/vue-query'
 import type { Ref } from 'vue'
 
 import { apiRequest } from '@/api/client'
-import type { AuditLog } from '@/api/types'
+import type { AuditLog } from '@/api'
 
 // useOrgAuditLogsQuery 按组织维度查询审计日志。
 // 平台管理员可任意查询，组织角色仅能查询自己的组织。

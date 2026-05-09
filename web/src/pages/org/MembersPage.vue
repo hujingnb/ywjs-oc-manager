@@ -103,7 +103,7 @@ import ConfirmActionModal from '@/components/ConfirmActionModal.vue'
 import DataTableList from '@/components/DataTableList.vue'
 import { statusColumn, actionColumn } from '@/components/columns'
 import { useFormModal } from '@/composables/useFormModal'
-import type { Member } from '@/api/types'
+import type { Member } from '@/api'
 import { useAuthStore } from '@/stores/auth'
 
 const props = defineProps<{ orgId?: string }>()

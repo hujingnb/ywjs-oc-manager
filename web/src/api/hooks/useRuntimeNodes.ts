@@ -2,7 +2,7 @@ import { useMutation, useQuery, useQueryClient } from '@tanstack/vue-query'
 import type { Ref } from 'vue'
 
 import { apiRequest } from '@/api/client'
-import type { RuntimeNode } from '@/api/types'
+import type { RuntimeNode } from '@/api'
 
 const RUNTIME_NODES_KEY = ['runtime-nodes'] as const
 

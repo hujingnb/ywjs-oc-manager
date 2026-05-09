@@ -2,7 +2,7 @@ import { useMutation, useQuery, useQueryClient } from '@tanstack/vue-query'
 import type { Ref } from 'vue'
 
 import { apiRequest } from '@/api/client'
-import type { Organization } from '@/api/types'
+import type { Organization } from '@/api'
 
 const ORG_LIST_KEY = ['organizations'] as const
 

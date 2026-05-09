@@ -125,7 +125,7 @@ import {
   useCreateRuntimeNode, useRotateBootstrap, useRuntimeNodesQuery,
   useSetRuntimeNodeStatus, useUpdateRuntimeNodeMaxApps,
 } from '@/api/hooks/useRuntimeNodes'
-import type { RuntimeNode } from '@/api/types'
+import type { RuntimeNode } from '@/api'
 
 const { data: nodes, isLoading, error } = useRuntimeNodesQuery()
 const createMutation = useCreateRuntimeNode()

@@ -2,7 +2,7 @@ import { useMutation, useQuery, useQueryClient } from '@tanstack/vue-query'
 import type { Ref } from 'vue'
 
 import { apiRequest } from '@/api/client'
-import type { Member } from '@/api/types'
+import type { Member } from '@/api'
 
 export interface OnboardMemberPayload {
   username: string

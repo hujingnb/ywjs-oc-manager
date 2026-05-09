@@ -8,7 +8,7 @@ import {
   getStoredRefreshToken,
   setStoredTokens,
 } from '@/api/client'
-import type { AuthUser, LoginResult } from '@/api/types'
+import type { AuthUser, LoginResult } from '@/api'
 
 // 登录与会话状态由 Pinia 集中管理。
 // access_token 和 refresh_token 的持久化在 client 层处理，store 只负责内存中的当前用户视图。
