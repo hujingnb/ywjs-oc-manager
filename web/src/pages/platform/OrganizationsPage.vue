@@ -1,31 +1,22 @@
 <template>
   <div style="display: grid; gap: 18px">
     <!-- 组织列表 -->
-    <n-card :bordered="true">
-      <template #header>
-        <div>
-          <p class="eyebrow">Platform</p>
-          <h2 style="margin: 0">组织列表</h2>
-        </div>
-      </template>
-      <template #header-extra>
+    <DataTableList
+      title="组织列表"
+      eyebrow="Platform"
+      :columns="columns"
+      :data="organizations ?? []"
+      :loading="isLoading"
+      :error-message="error?.message"
+      :row-key="(row: Organization) => row.id"
+    >
+      <template #toolbar>
         <n-button type="primary" @click="openForm">
           <template #icon><Plus :size="16" /></template>
           新增组织
         </n-button>
       </template>
-
-      <div v-if="isLoading" class="state-text">加载中…</div>
-      <div v-else-if="error" class="state-text danger">查询失败：{{ error.message }}</div>
-      <n-data-table
-        v-else
-        :columns="columns"
-        :data="organizations ?? []"
-        size="small"
-        :bordered="false"
-        :row-key="(row) => row.id"
-      />
-    </n-card>
+    </DataTableList>
 
     <!-- 创建表单 -->
     <n-card v-if="formVisible" :bordered="true">
@@ -40,7 +31,7 @@
           </n-button>
         </div>
       </template>
-      <n-form :model="form" label-placement="top" @submit.prevent="onSubmit">
+      <n-form :model="form" label-placement="top" @submit.prevent="submit">
         <n-grid :cols="2" :x-gap="14">
           <n-grid-item>
             <n-form-item label="名称 *">
@@ -81,90 +72,74 @@
 </template>
 
 <script setup lang="ts">
-import { h, reactive, ref } from 'vue'
+import { h } from 'vue'
 import { Plus, X } from 'lucide-vue-next'
 import {
-  NButton, NCard, NDataTable, NForm, NFormItem, NGrid, NGridItem,
-  NInput, NInputNumber, NSpace, NTag, type DataTableColumns,
+  NButton, NCard, NForm, NFormItem, NGrid, NGridItem,
+  NInput, NInputNumber, NSpace,
 } from 'naive-ui'
 
 import { formatOrgStatus } from '@/domain/status'
 import {
   useCreateOrganization, useOrganizationsQuery, useUpdateOrganizationStatus,
-  type OrganizationFormPayload,
 } from '@/api/hooks/useOrganizations'
 import type { Organization } from '@/api/types'
+import DataTableList from '@/components/DataTableList.vue'
+import { statusColumn, actionColumn } from '@/components/columns'
+import { useFormModal } from '@/composables/useFormModal'
 
 const { data: organizations, isLoading, error } = useOrganizationsQuery()
 const createMutation = useCreateOrganization()
 const statusMutation = useUpdateOrganizationStatus()
 
-const formVisible = ref(false)
-const submitError = ref<string | null>(null)
-const creating = ref(false)
-const form = reactive<OrganizationFormPayload>({
-  name: '', contact_name: '', contact_phone: '', remark: '',
-  credit_warning_threshold: undefined,
+// 创建组织表单状态聚合到 useFormModal；toPayload 处理可选字段的 || undefined 过滤
+const { form, formVisible, creating, submitError, openForm, submit } = useFormModal({
+  initial: {
+    name: '',
+    contact_name: '',
+    contact_phone: '',
+    remark: '',
+    credit_warning_threshold: undefined as number | undefined,
+  },
+  mutation: createMutation,
+  toPayload: (f) => ({
+    name: f.name,
+    contact_name: f.contact_name || undefined,
+    contact_phone: f.contact_phone || undefined,
+    remark: f.remark || undefined,
+    credit_warning_threshold: typeof f.credit_warning_threshold === 'number'
+      ? f.credit_warning_threshold : undefined,
+  }),
 })
 
-function toneToTagType(tone: string): 'success' | 'warning' | 'error' | 'default' {
-  const m: Record<string, 'success' | 'warning' | 'error' | 'default'> = {
-    success: 'success', warning: 'warning', danger: 'error', neutral: 'default',
-  }
-  return m[tone] ?? 'default'
-}
-
-const columns: DataTableColumns<Organization> = [
+const columns = [
+  // 名称列：含 remark 副标题，保留页面内 render
   {
-    title: '名称', key: 'name',
-    render: (row) => [
+    title: '名称',
+    key: 'name',
+    render: (row: Organization) => [
       h('strong', row.name),
-      row.remark ? h('small', { style: 'display:block;color:#8A94C6;font-size:12px' }, row.remark) : null,
+      row.remark
+        ? h('small', { class: 'data-table-subtitle' }, row.remark)
+        : null,
     ],
   },
+  statusColumn<Organization>('状态', r => formatOrgStatus(r.status)),
+  // 联系人/电话/预警阈值列：保留页面内 render
+  { title: '联系人', key: 'contact_name', render: (row: Organization) => row.contact_name || '—' },
+  { title: '电话', key: 'contact_phone', render: (row: Organization) => row.contact_phone || '—' },
   {
-    title: '状态', key: 'status',
-    render: (row) => {
-      const v = formatOrgStatus(row.status)
-      return h(NTag, { type: toneToTagType(v.tone), size: 'small', bordered: false }, { default: () => v.label })
-    },
+    title: '预警阈值',
+    key: 'credit_warning_threshold',
+    render: (row: Organization) => typeof row.credit_warning_threshold === 'number'
+      ? `${row.credit_warning_threshold}%` : '—',
   },
-  { title: '联系人', key: 'contact_name', render: (row) => row.contact_name || '—' },
-  { title: '电话', key: 'contact_phone', render: (row) => row.contact_phone || '—' },
-  {
-    title: '预警阈值', key: 'credit_warning_threshold',
-    render: (row) => typeof row.credit_warning_threshold === 'number' ? `${row.credit_warning_threshold}%` : '—',
-  },
-  {
-    title: '操作', key: 'actions',
-    render: (row) => row.status === 'active'
-      ? h(NButton, { size: 'small', onClick: () => onToggle(row, 'disable') }, { default: () => '禁用' })
-      : h(NButton, { size: 'small', type: 'primary', onClick: () => onToggle(row, 'enable') }, { default: () => '启用' }),
-  },
+  // 启用/禁用互斥：用两条 RowAction + hidden 分别渲染
+  actionColumn<Organization>([
+    { label: '禁用', onClick: r => onToggle(r, 'disable'), hidden: r => r.status !== 'active' },
+    { label: '启用', type: 'primary', onClick: r => onToggle(r, 'enable'), hidden: r => r.status === 'active' },
+  ]),
 ]
-
-function openForm() {
-  formVisible.value = true; submitError.value = null
-  form.name = ''; form.contact_name = ''; form.contact_phone = ''; form.remark = ''
-  form.credit_warning_threshold = undefined
-}
-
-async function onSubmit() {
-  submitError.value = null; creating.value = true
-  try {
-    await createMutation.mutateAsync({
-      name: form.name,
-      contact_name: form.contact_name || undefined,
-      contact_phone: form.contact_phone || undefined,
-      remark: form.remark || undefined,
-      credit_warning_threshold: typeof form.credit_warning_threshold === 'number'
-        ? form.credit_warning_threshold : undefined,
-    })
-    formVisible.value = false
-  } catch (err) {
-    submitError.value = err instanceof Error ? err.message : '创建组织失败'
-  } finally { creating.value = false }
-}
 
 function onToggle(org: Organization, action: 'enable' | 'disable') {
   statusMutation.mutate({ orgId: org.id, action })
