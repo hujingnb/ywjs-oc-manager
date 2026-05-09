@@ -16,6 +16,20 @@
 - 新增权限规则时优先扩展现有 `Can*` 函数，避免在 handler 或 service 内联写
   `if principal.Role == "..."` 判断；如确需新增，提交 PR 时请说明设计取舍。
 
+## OpenAPI 同步
+
+- API 契约由 swag 注解扫描生成 `openapi/openapi.yaml`，前端类型由
+  `make web-types-gen` 从 yaml 生成 `web/src/api/generated.ts`。两个文件都
+  入 git，提交时必须保持同步。
+- 修改 handler 函数签名 / 请求体 / 响应类型 / 路由后，必须跑 `make openapi-gen`
+  + `make web-types-gen`，把变更连同代码一起提交。
+- `make openapi-check` 用于本地校验：跑 `make openapi-gen` 后 git 工作区应保持
+  干净，否则说明 yaml 未跟随代码更新。
+- 新增 handler 时，请求体类型放 `internal/api/handlers/dto.go` 并导出大写命名；
+  响应仍用 `service.XxxResult`（swag 跨包扫描）。
+- 不要手工编辑 `openapi/openapi.yaml` 与 `web/src/api/generated.ts`——它们是
+  生成产物。
+
 ## Commit Message
 
 - 使用 Conventional Commits 格式：
