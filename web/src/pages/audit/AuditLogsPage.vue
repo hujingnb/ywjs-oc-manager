@@ -1,30 +1,23 @@
 <template>
-  <n-card :bordered="true">
-    <template #header>
-      <div>
-        <p class="eyebrow">{{ orgEyebrow }}</p>
-        <h2 style="margin: 0">审计日志</h2>
-      </div>
-    </template>
-
-    <div v-if="!effectiveOrgId" class="state-text">当前账号未关联组织，无法查看审计日志。</div>
-    <n-data-table
-      v-else
-      :columns="columns"
-      :data="logs ?? []"
-      :loading="isLoading"
-      size="small"
-      :bordered="false"
-    />
-  </n-card>
+  <DataTableList
+    :title="'审计日志'"
+    :eyebrow="orgEyebrow"
+    :columns="columns"
+    :data="logs ?? []"
+    :loading="isLoading"
+    :error-message="errorMessage"
+    :row-key="(row: AuditLog) => row.id"
+  />
 </template>
 
 <script setup lang="ts">
 import { computed, h } from 'vue'
-import { NCard, NDataTable, NTag, type DataTableColumns } from 'naive-ui'
+import { NTag, type DataTableColumns } from 'naive-ui'
 
 import { useOrgAuditLogsQuery } from '@/api/hooks/useAuditLogs'
 import { useAuthStore } from '@/stores/auth'
+import DataTableList from '@/components/DataTableList.vue'
+import { timeColumn } from '@/components/columns'
 
 const props = defineProps<{ orgId?: string }>()
 const auth = useAuthStore()
@@ -33,7 +26,12 @@ const orgEyebrow = computed(() => auth.user?.role === 'platform_admin' ? 'Platfo
 
 const { data: logs, isLoading, error } = useOrgAuditLogsQuery(effectiveOrgId)
 
-void error
+// 无关联组织时展示提示；有 API 错误时展示错误信息
+const errorMessage = computed(() => {
+  if (!effectiveOrgId.value) return '当前账号未关联组织，无法查看审计日志。'
+  if (error.value) return String(error.value)
+  return undefined
+})
 
 type AuditLog = NonNullable<typeof logs.value>[number]
 
@@ -46,14 +44,8 @@ function auditTagType(result: string): 'success' | 'warning' | 'error' | 'defaul
   }
 }
 
-function formatTime(value: string): string {
-  if (!value) return '—'
-  const date = new Date(value)
-  return Number.isNaN(date.getTime()) ? value : date.toLocaleString('zh-CN', { hour12: false })
-}
-
 const columns: DataTableColumns<AuditLog> = [
-  { title: '时间', key: 'created_at', render: (row) => formatTime(row.created_at) },
+  timeColumn('时间', r => r.created_at),
   {
     title: '操作者', key: 'actor_role',
     render: (row) => [
