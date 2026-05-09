@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"log/slog"
 	"time"
 
 	"github.com/jackc/pgx/v5"
@@ -87,16 +88,19 @@ type RuntimeOperationService struct {
 	store     RuntimeOperationStore
 	notifier  JobNotifier
 	inspector RuntimeInspector
+	// logger 仅用于错误诊断（如 ensurePrincipalActive DB 错误），不替代审计日志
+	logger *slog.Logger
 }
 
 // NewRuntimeOperationService 创建运行操作服务。
-// notifier 传 nil 表示不做即时入队，仅依赖 scheduler 扫库兜底。
-func NewRuntimeOperationService(store RuntimeOperationStore, notifier ...JobNotifier) *RuntimeOperationService {
+// logger 仅用于错误诊断（如 ensurePrincipalActive DB 错误），不替代审计日志。
+// notifier 可不传：未注入时只写库，由 scheduler 兜底入队（吞吐降级，延迟最长一个 scheduler 周期）。
+func NewRuntimeOperationService(store RuntimeOperationStore, logger *slog.Logger, notifier ...JobNotifier) *RuntimeOperationService {
 	var n JobNotifier
 	if len(notifier) > 0 {
 		n = notifier[0]
 	}
-	return &RuntimeOperationService{store: store, notifier: n}
+	return &RuntimeOperationService{store: store, logger: logger, notifier: n}
 }
 
 // SetInspector 注入 runtime inspector（cmd/server 装配时可选）。
@@ -363,6 +367,11 @@ func (s *RuntimeOperationService) ensurePrincipalActive(ctx context.Context, pri
 		return ErrRuntimeOperationDenied
 	}
 	if err != nil {
+		// DB 错误用 slog.ErrorContext，trace_id 自动通过 ctx 注入
+		s.logger.ErrorContext(ctx, "查询主体状态失败",
+			"user_id", principal.UserID,
+			"error", err,
+		)
 		return fmt.Errorf("查询主体状态失败: %w", err)
 	}
 	if user.Status == domain.StatusDisabled {

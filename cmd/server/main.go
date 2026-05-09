@@ -138,7 +138,7 @@ func runManager(ctx context.Context, cfg config.Config, logOut io.Writer) error 
 	knowledgeService.SetSyncStatusSource(knowledgeSyncStatusSvc)
 	knowledgeService.SetRetryDispatcher(knowledgeDispatcher)
 	appService := service.NewAppService(dbStore.Queries)
-	runtimeOpService := service.NewRuntimeOperationService(dbStore.Queries, redisQueue)
+	runtimeOpService := service.NewRuntimeOperationService(dbStore.Queries, logger, redisQueue)
 	personaService := service.NewPersonaService(store.NewPersonaStore(dbStore))
 	// usage / organization service 在装配 newapi client 之后再实例化（见下方）；
 	// 这里仅声明变量，真实赋值发生在 newapi wiring 段。
