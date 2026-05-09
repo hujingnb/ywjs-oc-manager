@@ -4,16 +4,15 @@ import (
 	"context"
 	"errors"
 	"testing"
+	"github.com/stretchr/testify/require"
 )
 
 func TestRegistryLookup(t *testing.T) {
 	registry := NewRegistry()
-	if err := registry.Register(&fakeAdapter{kind: "wechat"}); err != nil {
-		t.Fatalf("Register() error = %v", err)
-	}
-	if _, err := registry.Lookup("wechat"); err != nil {
-		t.Fatalf("Lookup() error = %v", err)
-	}
+	err := registry.Register(&fakeAdapter{kind: "wechat"})
+	require.NoError(t, err)
+	_, err = registry.Lookup("wechat")
+	require.NoError(t, err)
 	if _, err := registry.Lookup("missing"); !errors.Is(err, ErrAdapterNotFound) {
 		t.Fatalf("Lookup() error = %v, want ErrAdapterNotFound", err)
 	}
@@ -21,19 +20,16 @@ func TestRegistryLookup(t *testing.T) {
 
 func TestRegistryRejectsDuplicate(t *testing.T) {
 	registry := NewRegistry()
-	if err := registry.Register(&fakeAdapter{kind: "wechat"}); err != nil {
-		t.Fatalf("first Register() error = %v", err)
-	}
-	if err := registry.Register(&fakeAdapter{kind: "wechat"}); err == nil {
-		t.Fatalf("expected duplicate registration to fail")
-	}
+	err := registry.Register(&fakeAdapter{kind: "wechat"})
+	require.NoError(t, err)
+	err = registry.Register(&fakeAdapter{kind: "wechat"})
+	require.Error(t, err)
 }
 
 func TestRegistryRejectsNil(t *testing.T) {
 	registry := NewRegistry()
-	if err := registry.Register(nil); err == nil {
-		t.Fatalf("expected nil adapter to fail")
-	}
+	err := registry.Register(nil)
+	require.Error(t, err)
 }
 
 func TestRegistryListTypes(t *testing.T) {
@@ -41,9 +37,7 @@ func TestRegistryListTypes(t *testing.T) {
 	registry.MustRegister(&fakeAdapter{kind: "wechat"})
 	registry.MustRegister(&fakeAdapter{kind: "qq"})
 	types := registry.Types()
-	if len(types) != 2 {
-		t.Fatalf("types = %+v", types)
-	}
+	require.Len(t, types, 2)
 }
 
 type fakeAdapter struct {

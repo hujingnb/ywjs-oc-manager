@@ -11,6 +11,7 @@ import (
 	"github.com/gin-gonic/gin"
 
 	"oc-manager/internal/service"
+	"github.com/stretchr/testify/require"
 )
 
 func TestAgentRegisterReturnsToken(t *testing.T) {
@@ -23,18 +24,13 @@ func TestAgentRegisterReturnsToken(t *testing.T) {
 	request.Header.Set("Content-Type", "application/json")
 	router.ServeHTTP(recorder, request)
 
-	if recorder.Code != http.StatusOK {
-		t.Fatalf("status = %d, want 200, body=%s", recorder.Code, recorder.Body.String())
-	}
+	require.Equal(t, http.StatusOK, recorder.Code)
 	var resp struct {
 		AgentToken string `json:"agent_token"`
 	}
-	if err := json.Unmarshal(recorder.Body.Bytes(), &resp); err != nil {
-		t.Fatalf("decode: %v", err)
-	}
-	if resp.AgentToken != "agent-1" {
-		t.Fatalf("agent_token = %q", resp.AgentToken)
-	}
+	err := json.Unmarshal(recorder.Body.Bytes(), &resp)
+	require.NoError(t, err)
+	require.Equal(t, "agent-1", resp.AgentToken)
 }
 
 func TestAgentRegisterMapsBootstrapErrorTo401(t *testing.T) {
@@ -47,9 +43,7 @@ func TestAgentRegisterMapsBootstrapErrorTo401(t *testing.T) {
 	request.Header.Set("Content-Type", "application/json")
 	router.ServeHTTP(recorder, request)
 
-	if recorder.Code != http.StatusUnauthorized {
-		t.Fatalf("status = %d, want 401", recorder.Code)
-	}
+	require.Equal(t, http.StatusUnauthorized, recorder.Code)
 }
 
 func TestAgentHeartbeatRequiresAgentToken(t *testing.T) {
@@ -61,9 +55,7 @@ func TestAgentHeartbeatRequiresAgentToken(t *testing.T) {
 	request.Header.Set("Content-Type", "application/json")
 	router.ServeHTTP(recorder, request)
 
-	if recorder.Code != http.StatusBadRequest {
-		t.Fatalf("status = %d, want 400", recorder.Code)
-	}
+	require.Equal(t, http.StatusBadRequest, recorder.Code)
 }
 
 func TestAgentHeartbeatPropagatesAgentTokenError(t *testing.T) {
@@ -76,9 +68,7 @@ func TestAgentHeartbeatPropagatesAgentTokenError(t *testing.T) {
 	request.Header.Set("Content-Type", "application/json")
 	router.ServeHTTP(recorder, request)
 
-	if recorder.Code != http.StatusUnauthorized {
-		t.Fatalf("status = %d, want 401", recorder.Code)
-	}
+	require.Equal(t, http.StatusUnauthorized, recorder.Code)
 }
 
 func TestAgentRegisterPushesTokenToSink(t *testing.T) {
@@ -98,9 +88,7 @@ func TestAgentRegisterPushesTokenToSink(t *testing.T) {
 	request.Header.Set("Content-Type", "application/json")
 	router.ServeHTTP(recorder, request)
 
-	if recorder.Code != http.StatusOK {
-		t.Fatalf("status = %d, body=%s", recorder.Code, recorder.Body.String())
-	}
+	require.Equal(t, http.StatusOK, recorder.Code)
 	if seenNode != "node-99" || seenToken != "agent-x" {
 		t.Fatalf("sink 收到 = (%q,%q), want (node-99, agent-x)", seenNode, seenToken)
 	}
@@ -120,9 +108,7 @@ func TestAgentRegisterSinkSkippedWhenTokenEmpty(t *testing.T) {
 	request := httptest.NewRequest(http.MethodPost, "/api/v1/agent/register", body)
 	request.Header.Set("Content-Type", "application/json")
 	router.ServeHTTP(recorder, request)
-	if called {
-		t.Fatal("token 为空时不应触发 sink")
-	}
+	require.False(t, called)
 }
 
 func newAgentRouter(svc *agentEndpointsStub) *gin.Engine {

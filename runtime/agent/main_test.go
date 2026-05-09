@@ -14,6 +14,7 @@ import (
 	"strings"
 	"testing"
 	"time"
+	"github.com/stretchr/testify/require"
 )
 
 func TestHealthz(t *testing.T) {
@@ -22,13 +23,10 @@ func TestHealthz(t *testing.T) {
 
 	newHandlerWithDocker("/tmp/agent", &fakeDockerClient{}, "").ServeHTTP(rec, req)
 
-	if rec.Code != http.StatusOK {
-		t.Fatalf("expected status 200, got %d", rec.Code)
-	}
+	require.Equal(t, http.StatusOK, rec.Code)
 	var body HealthResponse
-	if err := json.NewDecoder(rec.Body).Decode(&body); err != nil {
-		t.Fatalf("decode response: %v", err)
-	}
+	err := json.NewDecoder(rec.Body).Decode(&body)
+	require.NoError(t, err)
 	if body.Status != "ok" || body.Role != "runtime-agent" || body.DataRoot != "/tmp/agent" {
 		t.Fatalf("unexpected response: %+v", body)
 	}
@@ -45,16 +43,13 @@ func TestInspectImage(t *testing.T) {
 
 	newHandlerWithDocker("/tmp/agent", docker, "").ServeHTTP(rec, req)
 
-	if rec.Code != http.StatusOK {
-		t.Fatalf("expected status 200, got %d: %s", rec.Code, rec.Body.String())
-	}
+	require.Equal(t, http.StatusOK, rec.Code)
 	var body struct {
 		Exists bool            `json:"exists"`
 		Info   DockerImageInfo `json:"info"`
 	}
-	if err := json.NewDecoder(rec.Body).Decode(&body); err != nil {
-		t.Fatalf("decode response: %v", err)
-	}
+	err := json.NewDecoder(rec.Body).Decode(&body)
+	require.NoError(t, err)
 	if !body.Exists || body.Info.ID != "sha256:local" {
 		t.Fatalf("unexpected response: %+v", body)
 	}
@@ -66,18 +61,13 @@ func TestInspectImageNotFound(t *testing.T) {
 
 	newHandlerWithDocker("/tmp/agent", &fakeDockerClient{}, "").ServeHTTP(rec, req)
 
-	if rec.Code != http.StatusOK {
-		t.Fatalf("expected status 200, got %d", rec.Code)
-	}
+	require.Equal(t, http.StatusOK, rec.Code)
 	var body struct {
 		Exists bool `json:"exists"`
 	}
-	if err := json.NewDecoder(rec.Body).Decode(&body); err != nil {
-		t.Fatalf("decode response: %v", err)
-	}
-	if body.Exists {
-		t.Fatalf("expected image to be missing")
-	}
+	err := json.NewDecoder(rec.Body).Decode(&body)
+	require.NoError(t, err)
+	require.False(t, body.Exists)
 }
 
 func TestLoadImageRequiresTokenWhenConfigured(t *testing.T) {
@@ -86,9 +76,7 @@ func TestLoadImageRequiresTokenWhenConfigured(t *testing.T) {
 
 	newHandlerWithDocker("/tmp/agent", &fakeDockerClient{}, "secret").ServeHTTP(rec, req)
 
-	if rec.Code != http.StatusUnauthorized {
-		t.Fatalf("expected status 401, got %d", rec.Code)
-	}
+	require.Equal(t, http.StatusUnauthorized, rec.Code)
 }
 
 func TestNewHandlerUsesConfiguredToken(t *testing.T) {
@@ -97,9 +85,7 @@ func TestNewHandlerUsesConfiguredToken(t *testing.T) {
 
 	newHandler("/tmp/agent", "secret", "/var/run/docker.sock").ServeHTTP(rec, req)
 
-	if rec.Code != http.StatusUnauthorized {
-		t.Fatalf("expected status 401, got %d", rec.Code)
-	}
+	require.Equal(t, http.StatusUnauthorized, rec.Code)
 }
 
 func TestNewHandlerUsesConfiguredDockerSocketForImages(t *testing.T) {
@@ -133,23 +119,15 @@ func TestNewHandlerUsesConfiguredDockerSocketForImages(t *testing.T) {
 	inspectReq.Header.Set("Authorization", "Bearer secret")
 	inspectRec := httptest.NewRecorder()
 	handler.ServeHTTP(inspectRec, inspectReq)
-	if inspectRec.Code != http.StatusOK {
-		t.Fatalf("inspect status = %d, body = %s", inspectRec.Code, inspectRec.Body.String())
-	}
-	if !inspected {
-		t.Fatal("configured docker socket did not receive inspect request")
-	}
+	require.Equal(t, http.StatusOK, inspectRec.Code)
+	require.True(t, inspected)
 
 	loadReq := httptest.NewRequest(http.MethodPost, "/v1/images/load?image=openclaw-runtime:dev", bytes.NewBufferString("tar"))
 	loadReq.Header.Set("Authorization", "Bearer secret")
 	loadRec := httptest.NewRecorder()
 	handler.ServeHTTP(loadRec, loadReq)
-	if loadRec.Code != http.StatusOK {
-		t.Fatalf("load status = %d, body = %s", loadRec.Code, loadRec.Body.String())
-	}
-	if loadedBytes != "tar" {
-		t.Fatalf("load body = %q, want tar", loadedBytes)
-	}
+	require.Equal(t, http.StatusOK, loadRec.Code)
+	require.Equal(t, "tar", loadedBytes)
 }
 
 func TestLoadImage(t *testing.T) {
@@ -160,21 +138,15 @@ func TestLoadImage(t *testing.T) {
 
 	newHandlerWithDocker("/tmp/agent", docker, "secret").ServeHTTP(rec, req)
 
-	if rec.Code != http.StatusOK {
-		t.Fatalf("expected status 200, got %d: %s", rec.Code, rec.Body.String())
-	}
-	if docker.loadedBytes != "tar" {
-		t.Fatalf("unexpected loaded bytes: %q", docker.loadedBytes)
-	}
+	require.Equal(t, http.StatusOK, rec.Code)
+	require.Equal(t, "tar", docker.loadedBytes)
 }
 
 // freePort 借助内核分配一个空闲 TCP 端口，避免测试在并发跑时端口冲突。
 func freePort(t *testing.T) string {
 	t.Helper()
 	listener, err := net.Listen("tcp", "127.0.0.1:0")
-	if err != nil {
-		t.Fatalf("listen 0: %v", err)
-	}
+	require.NoError(t, err)
 	defer listener.Close()
 	return listener.Addr().String()
 }
@@ -212,9 +184,7 @@ func TestRunAgent_PrintsCAPEMAndAcceptsTLS(t *testing.T) {
 
 	caBundle := waitForCAPEM(t, stdout, 2*time.Second)
 	caPool := x509.NewCertPool()
-	if !caPool.AppendCertsFromPEM(caBundle) {
-		t.Fatalf("无法 parse 读出的 CA PEM: %q", caBundle)
-	}
+	require.True(t, caPool.AppendCertsFromPEM(caBundle))
 
 	httpClient := &http.Client{
 		Transport: &http.Transport{
@@ -227,30 +197,20 @@ func TestRunAgent_PrintsCAPEMAndAcceptsTLS(t *testing.T) {
 	req, _ := http.NewRequest(http.MethodGet, "https://"+dockerAddr+"/v1/docker/_ping", nil)
 	req.Header.Set("Authorization", "Bearer secret")
 	resp, err := httpClient.Do(req)
-	if err != nil {
-		t.Fatalf("docker proxy 请求失败: %v", err)
-	}
+	require.NoError(t, err)
 	defer resp.Body.Close()
-	if resp.StatusCode != http.StatusOK {
-		t.Fatalf("docker proxy status = %d", resp.StatusCode)
-	}
+	require.Equal(t, http.StatusOK, resp.StatusCode)
 
 	// 文件 API 仍走 plaintext，对照验证两个端口同时正常。
 	plainResp, err := http.Get("http://" + fileAddr + "/healthz")
-	if err != nil {
-		t.Fatalf("file api healthz 失败: %v", err)
-	}
+	require.NoError(t, err)
 	defer plainResp.Body.Close()
-	if plainResp.StatusCode != http.StatusOK {
-		t.Fatalf("file api status = %d", plainResp.StatusCode)
-	}
+	require.Equal(t, http.StatusOK, plainResp.StatusCode)
 
 	cancel()
 	select {
 	case err := <-done:
-		if err != nil {
-			t.Fatalf("runAgent 返回错误: %v", err)
-		}
+		require.NoError(t, err)
 	case <-time.After(3 * time.Second):
 		t.Fatal("runAgent 未在超时内退出")
 	}
@@ -263,9 +223,7 @@ func waitForCAPEM(t *testing.T, stdout *bytes.Buffer, timeout time.Duration) []b
 	for time.Now().Before(deadline) {
 		if line := extractCAPEMLine(stdout.String()); line != "" {
 			caBytes, err := base64.StdEncoding.DecodeString(line)
-			if err != nil {
-				t.Fatalf("base64 decode CA: %v", err)
-			}
+			require.NoError(t, err)
 			return caBytes
 		}
 		time.Sleep(10 * time.Millisecond)

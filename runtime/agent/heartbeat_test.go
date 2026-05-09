@@ -13,6 +13,8 @@ import (
 	"time"
 
 	"oc-manager/runtime/agent/config"
+	"github.com/stretchr/testify/require"
+	"github.com/stretchr/testify/assert"
 )
 
 // captureHBLogger 累计三类日志调用次数，便于断言失败计数到阈值时打 ERROR。
@@ -64,9 +66,7 @@ func TestHeartbeat_PeriodicPost(t *testing.T) {
 	var lastBodyMu sync.Mutex
 	var lastBody []byte
 	srv := httptest.NewTLSServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		if r.URL.Path != "/api/v1/agent/heartbeat" {
-			t.Errorf("unexpected path %s", r.URL.Path)
-		}
+		assert.Equal(t, "/api/v1/agent/heartbeat", r.URL.Path)
 		body, _ := io.ReadAll(r.Body)
 		lastBodyMu.Lock()
 		lastBody = body
@@ -114,12 +114,10 @@ func TestHeartbeat_PeriodicPost(t *testing.T) {
 	body := append([]byte(nil), lastBody...)
 	lastBodyMu.Unlock()
 	var decoded map[string]any
-	if err := json.Unmarshal(body, &decoded); err != nil {
-		t.Fatalf("body json: %v; raw=%s", err, body)
-	}
-	if got, _ := decoded["agent_token"].(string); got != "tok-x" {
-		t.Errorf("body.agent_token = %q, want tok-x", got)
-	}
+	err := json.Unmarshal(body, &decoded)
+	require.NoError(t, err)
+	agentToken, _ := decoded["agent_token"].(string)
+	assert.Equal(t, "tok-x", agentToken)
 	if _, ok := decoded["agent_version"]; !ok {
 		t.Errorf("body 缺少 agent_version 字段")
 	}
@@ -161,9 +159,7 @@ func TestHeartbeat_FailureLogThreshold(t *testing.T) {
 	cancel()
 	<-done
 
-	if logger.errorCount() == 0 {
-		t.Fatalf("连续失败到阈值应触发 ERROR 日志（warns=%d）", logger.warnCount())
-	}
+	require.NotEqual(t, 0, logger.errorCount())
 }
 
 func TestHeartbeat_CancelStopsGoroutine(t *testing.T) {

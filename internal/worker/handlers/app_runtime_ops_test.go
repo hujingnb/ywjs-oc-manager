@@ -11,6 +11,7 @@ import (
 	"oc-manager/internal/domain"
 	"oc-manager/internal/integrations/newapi"
 	"oc-manager/internal/store/sqlc"
+	"github.com/stretchr/testify/require"
 )
 
 const testRuntimeNodeID = "00000000-0000-0000-0000-000000000d01"
@@ -40,15 +41,10 @@ func TestAppStartContainerHandler_HappyPath(t *testing.T) {
 	containers := &fakeLifecycle{}
 	handler := NewAppStartContainerHandler(stub, containers)
 
-	if err := handler.Handle(context.Background(), runtimeJob(domain.JobTypeAppStartContainer, testAppID)); err != nil {
-		t.Fatalf("Handle err = %v", err)
-	}
-	if containers.startCalls != 1 {
-		t.Fatalf("StartContainer 调用次数 = %d, want 1", containers.startCalls)
-	}
-	if stub.statusUpdates[len(stub.statusUpdates)-1] != domain.AppStatusRunning {
-		t.Fatalf("最后状态 = %q, want running", stub.statusUpdates[len(stub.statusUpdates)-1])
-	}
+	err := handler.Handle(context.Background(), runtimeJob(domain.JobTypeAppStartContainer, testAppID))
+	require.NoError(t, err)
+	require.Equal(t, 1, containers.startCalls)
+	require.Equal(t, domain.AppStatusRunning, stub.statusUpdates[len(stub.statusUpdates)-1])
 }
 
 func TestAppStartContainerHandler_RejectsWithoutContainerID(t *testing.T) {
@@ -56,9 +52,7 @@ func TestAppStartContainerHandler_RejectsWithoutContainerID(t *testing.T) {
 	stub.app.ContainerID = pgtype.Text{}
 	handler := NewAppStartContainerHandler(stub, &fakeLifecycle{})
 	err := handler.Handle(context.Background(), runtimeJob(domain.JobTypeAppStartContainer, testAppID))
-	if err == nil {
-		t.Fatal("缺 container_id 时应当报错")
-	}
+	require.Error(t, err)
 }
 
 func TestAppStartContainerHandler_PropagatesAdapterError(t *testing.T) {
@@ -66,27 +60,18 @@ func TestAppStartContainerHandler_PropagatesAdapterError(t *testing.T) {
 	containers := &fakeLifecycle{startErr: errors.New("docker boom")}
 	handler := NewAppStartContainerHandler(stub, containers)
 	err := handler.Handle(context.Background(), runtimeJob(domain.JobTypeAppStartContainer, testAppID))
-	if err == nil {
-		t.Fatal("adapter 失败时应冒泡")
-	}
-	if len(stub.statusUpdates) != 0 {
-		t.Fatal("失败时不应更新状态")
-	}
+	require.Error(t, err)
+	require.Equal(t, 0, len(stub.statusUpdates))
 }
 
 func TestAppStopContainerHandler_HappyPath(t *testing.T) {
 	stub := runtimeStub(t)
 	containers := &fakeLifecycle{}
 	handler := NewAppStopContainerHandler(stub, containers)
-	if err := handler.Handle(context.Background(), runtimeJob(domain.JobTypeAppStopContainer, testAppID)); err != nil {
-		t.Fatalf("Handle err = %v", err)
-	}
-	if containers.stopCalls != 1 {
-		t.Fatalf("StopContainer 调用次数 = %d", containers.stopCalls)
-	}
-	if stub.statusUpdates[len(stub.statusUpdates)-1] != domain.AppStatusStopped {
-		t.Fatalf("最后状态 = %q", stub.statusUpdates[len(stub.statusUpdates)-1])
-	}
+	err := handler.Handle(context.Background(), runtimeJob(domain.JobTypeAppStopContainer, testAppID))
+	require.NoError(t, err)
+	require.Equal(t, 1, containers.stopCalls)
+	require.Equal(t, domain.AppStatusStopped, stub.statusUpdates[len(stub.statusUpdates)-1])
 }
 
 func TestAppStopContainerHandler_NoContainerStillUpdatesStatus(t *testing.T) {
@@ -94,30 +79,20 @@ func TestAppStopContainerHandler_NoContainerStillUpdatesStatus(t *testing.T) {
 	stub.app.ContainerID = pgtype.Text{}
 	containers := &fakeLifecycle{}
 	handler := NewAppStopContainerHandler(stub, containers)
-	if err := handler.Handle(context.Background(), runtimeJob(domain.JobTypeAppStopContainer, testAppID)); err != nil {
-		t.Fatalf("Handle err = %v", err)
-	}
-	if containers.stopCalls != 0 {
-		t.Fatal("没 container 时不应调 docker stop")
-	}
-	if stub.statusUpdates[len(stub.statusUpdates)-1] != domain.AppStatusStopped {
-		t.Fatal("仍应推 stopped 状态")
-	}
+	err := handler.Handle(context.Background(), runtimeJob(domain.JobTypeAppStopContainer, testAppID))
+	require.NoError(t, err)
+	require.Equal(t, 0, containers.stopCalls)
+	require.Equal(t, domain.AppStatusStopped, stub.statusUpdates[len(stub.statusUpdates)-1])
 }
 
 func TestAppRestartContainerHandler_HappyPath(t *testing.T) {
 	stub := runtimeStub(t)
 	containers := &fakeLifecycle{}
 	handler := NewAppRestartContainerHandler(stub, containers)
-	if err := handler.Handle(context.Background(), runtimeJob(domain.JobTypeAppRestartContainer, testAppID)); err != nil {
-		t.Fatalf("Handle err = %v", err)
-	}
-	if containers.restartCalls != 1 {
-		t.Fatalf("RestartContainer 调用次数 = %d", containers.restartCalls)
-	}
-	if stub.statusUpdates[len(stub.statusUpdates)-1] != domain.AppStatusRunning {
-		t.Fatalf("最后状态 = %q", stub.statusUpdates[len(stub.statusUpdates)-1])
-	}
+	err := handler.Handle(context.Background(), runtimeJob(domain.JobTypeAppRestartContainer, testAppID))
+	require.NoError(t, err)
+	require.Equal(t, 1, containers.restartCalls)
+	require.Equal(t, domain.AppStatusRunning, stub.statusUpdates[len(stub.statusUpdates)-1])
 }
 
 func TestAppDeleteHandler_HappyPath(t *testing.T) {
@@ -126,21 +101,16 @@ func TestAppDeleteHandler_HappyPath(t *testing.T) {
 	disabler := &fakeDisabler{}
 	fileOps := &fakeFileOps{}
 	handler := NewAppDeleteHandler(stub, containers, disabler, fileOps)
-	if err := handler.Handle(context.Background(), runtimeJob(domain.JobTypeAppDelete, testAppID)); err != nil {
-		t.Fatalf("Handle err = %v", err)
-	}
+	err := handler.Handle(context.Background(), runtimeJob(domain.JobTypeAppDelete, testAppID))
+	require.NoError(t, err)
 	if containers.stopCalls != 1 || containers.removeCalls != 1 {
 		t.Fatalf("stop=%d remove=%d, want 1/1", containers.stopCalls, containers.removeCalls)
 	}
 	if disabler.id != 42 || disabler.status != 2 {
 		t.Fatalf("disabler 调用 = (%d,%d), want (42,2)", disabler.id, disabler.status)
 	}
-	if fileOps.deletedAppID != testAppID {
-		t.Fatalf("fileOps 收到 appID = %q", fileOps.deletedAppID)
-	}
-	if !stub.softDeleted {
-		t.Fatal("未触发 SoftDeleteApp")
-	}
+	require.Equal(t, testAppID, fileOps.deletedAppID)
+	require.True(t, stub.softDeleted)
 }
 
 func TestAppDeleteHandler_PrefersArchiveOverDelete(t *testing.T) {
@@ -150,15 +120,10 @@ func TestAppDeleteHandler_PrefersArchiveOverDelete(t *testing.T) {
 	disabler := &fakeDisabler{}
 	fileOps := &fakeArchivingFileOps{}
 	handler := NewAppDeleteHandler(stub, containers, disabler, fileOps)
-	if err := handler.Handle(context.Background(), runtimeJob(domain.JobTypeAppDelete, testAppID)); err != nil {
-		t.Fatalf("Handle err = %v", err)
-	}
-	if fileOps.archivedAppID != testAppID {
-		t.Fatalf("ArchiveApp 应被调，got archivedAppID=%q", fileOps.archivedAppID)
-	}
-	if fileOps.deletedAppID != "" {
-		t.Fatalf("有 ArchiveApp 实现时不应调 DeleteAppPath，got %q", fileOps.deletedAppID)
-	}
+	err := handler.Handle(context.Background(), runtimeJob(domain.JobTypeAppDelete, testAppID))
+	require.NoError(t, err)
+	require.Equal(t, testAppID, fileOps.archivedAppID)
+	require.Equal(t, "", fileOps.deletedAppID)
 }
 
 func TestAppDeleteHandler_PropagatesArchiveError(t *testing.T) {
@@ -171,9 +136,7 @@ func TestAppDeleteHandler_PropagatesArchiveError(t *testing.T) {
 	if err == nil || !strings.Contains(err.Error(), "归档应用工作目录失败") {
 		t.Fatalf("err=%v", err)
 	}
-	if stub.softDeleted {
-		t.Fatal("归档失败时不应软删 apps 行")
-	}
+	require.False(t, stub.softDeleted)
 }
 
 func TestAppDeleteHandler_SkipsContainerStepWithoutID(t *testing.T) {
@@ -182,15 +145,12 @@ func TestAppDeleteHandler_SkipsContainerStepWithoutID(t *testing.T) {
 	containers := &fakeLifecycle{}
 	disabler := &fakeDisabler{}
 	handler := NewAppDeleteHandler(stub, containers, disabler, nil)
-	if err := handler.Handle(context.Background(), runtimeJob(domain.JobTypeAppDelete, testAppID)); err != nil {
-		t.Fatalf("Handle err = %v", err)
-	}
+	err := handler.Handle(context.Background(), runtimeJob(domain.JobTypeAppDelete, testAppID))
+	require.NoError(t, err)
 	if containers.stopCalls != 0 || containers.removeCalls != 0 {
 		t.Fatal("没 container_id 时不应调 docker")
 	}
-	if !stub.softDeleted {
-		t.Fatal("仍应软删 app")
-	}
+	require.True(t, stub.softDeleted)
 }
 
 func TestAppDeleteHandler_SkipsNewAPIWhenNoKey(t *testing.T) {
@@ -198,12 +158,9 @@ func TestAppDeleteHandler_SkipsNewAPIWhenNoKey(t *testing.T) {
 	stub.app.NewapiKeyID = pgtype.Text{}
 	disabler := &fakeDisabler{}
 	handler := NewAppDeleteHandler(stub, &fakeLifecycle{}, disabler, nil)
-	if err := handler.Handle(context.Background(), runtimeJob(domain.JobTypeAppDelete, testAppID)); err != nil {
-		t.Fatalf("Handle err = %v", err)
-	}
-	if disabler.id != 0 {
-		t.Fatal("没 newapi_key_id 时不应禁用 token")
-	}
+	err := handler.Handle(context.Background(), runtimeJob(domain.JobTypeAppDelete, testAppID))
+	require.NoError(t, err)
+	require.Equal(t, int64(0), disabler.id)
 }
 
 func TestAppDeleteHandler_PropagatesNewAPIError(t *testing.T) {
@@ -211,24 +168,17 @@ func TestAppDeleteHandler_PropagatesNewAPIError(t *testing.T) {
 	disabler := &fakeDisabler{err: errors.New("upstream")}
 	handler := NewAppDeleteHandler(stub, &fakeLifecycle{}, disabler, nil)
 	err := handler.Handle(context.Background(), runtimeJob(domain.JobTypeAppDelete, testAppID))
-	if err == nil {
-		t.Fatal("禁用 token 失败应冒泡")
-	}
-	if stub.softDeleted {
-		t.Fatal("失败时不应软删")
-	}
+	require.Error(t, err)
+	require.False(t, stub.softDeleted)
 }
 
 func TestAppDeleteHandler_AlreadyDeletedShortCircuits(t *testing.T) {
 	stub := runtimeStub(t)
 	stub.app.DeletedAt = pgtype.Timestamptz{Valid: true}
 	handler := NewAppDeleteHandler(stub, &fakeLifecycle{}, &fakeDisabler{}, nil)
-	if err := handler.Handle(context.Background(), runtimeJob(domain.JobTypeAppDelete, testAppID)); err != nil {
-		t.Fatalf("Handle err = %v", err)
-	}
-	if stub.softDeleted {
-		t.Fatal("已删除应当幂等返回，不再写库")
-	}
+	err := handler.Handle(context.Background(), runtimeJob(domain.JobTypeAppDelete, testAppID))
+	require.NoError(t, err)
+	require.False(t, stub.softDeleted)
 }
 
 func TestAppRuntimeHandlers_RejectMismatchedJobType(t *testing.T) {
@@ -241,9 +191,8 @@ func TestAppRuntimeHandlers_RejectMismatchedJobType(t *testing.T) {
 		NewAppDeleteHandler(stub, &fakeLifecycle{}, &fakeDisabler{}, nil).Handle,
 	}
 	for _, h := range handlers {
-		if err := h(context.Background(), bad); err == nil {
-			t.Fatalf("应拒绝非匹配 job_type")
-		}
+		err := h(context.Background(), bad)
+		require.Error(t, err)
 	}
 }
 

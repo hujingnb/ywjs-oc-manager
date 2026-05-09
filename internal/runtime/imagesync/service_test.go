@@ -6,6 +6,7 @@ import (
 	"io"
 	"strings"
 	"testing"
+	"github.com/stretchr/testify/require"
 )
 
 func TestSyncOpenClawImageSkipsWhenRemoteMatches(t *testing.T) {
@@ -13,15 +14,9 @@ func TestSyncOpenClawImageSkipsWhenRemoteMatches(t *testing.T) {
 	agent := &fakeAgentImage{remote: RemoteImageInfo{Exists: true, ID: "sha256:same"}}
 
 	result, err := New(local, agent).SyncOpenClawImage(context.Background(), "node-1", "openclaw-runtime:dev")
-	if err != nil {
-		t.Fatalf("sync image: %v", err)
-	}
-	if result.Transferred {
-		t.Fatalf("expected transfer to be skipped: %+v", result)
-	}
-	if agent.loadCalls != 0 {
-		t.Fatalf("expected no load calls, got %d", agent.loadCalls)
-	}
+	require.NoError(t, err)
+	require.False(t, result.Transferred)
+	require.Equal(t, 0, agent.loadCalls)
 }
 
 func TestSyncOpenClawImageLoadsWhenRemoteMissing(t *testing.T) {
@@ -29,15 +24,9 @@ func TestSyncOpenClawImageLoadsWhenRemoteMissing(t *testing.T) {
 	agent := &fakeAgentImage{remote: RemoteImageInfo{Exists: false}, loaded: RemoteImageInfo{Exists: true, ID: "sha256:local"}}
 
 	result, err := New(local, agent).SyncOpenClawImage(context.Background(), "node-1", "openclaw-runtime:dev")
-	if err != nil {
-		t.Fatalf("sync image: %v", err)
-	}
-	if !result.Transferred {
-		t.Fatalf("expected image to be transferred: %+v", result)
-	}
-	if agent.loadedArchive != "image-tar" {
-		t.Fatalf("unexpected loaded archive: %q", agent.loadedArchive)
-	}
+	require.NoError(t, err)
+	require.True(t, result.Transferred)
+	require.Equal(t, "image-tar", agent.loadedArchive)
 }
 
 func TestSyncOpenClawImageLoadsWhenRemoteDiffers(t *testing.T) {
@@ -45,9 +34,7 @@ func TestSyncOpenClawImageLoadsWhenRemoteDiffers(t *testing.T) {
 	agent := &fakeAgentImage{remote: RemoteImageInfo{Exists: true, ID: "sha256:old"}, loaded: RemoteImageInfo{Exists: true, ID: "sha256:new"}}
 
 	result, err := New(local, agent).SyncOpenClawImage(context.Background(), "node-1", "openclaw-runtime:dev")
-	if err != nil {
-		t.Fatalf("sync image: %v", err)
-	}
+	require.NoError(t, err)
 	if !result.Transferred || result.RemoteID != "sha256:new" {
 		t.Fatalf("unexpected result: %+v", result)
 	}
@@ -58,20 +45,14 @@ func TestSyncOpenClawImageRejectsMismatchedLoadedID(t *testing.T) {
 	agent := &fakeAgentImage{remote: RemoteImageInfo{Exists: false}, loaded: RemoteImageInfo{Exists: true, ID: "sha256:other"}}
 
 	result, err := New(local, agent).SyncOpenClawImage(context.Background(), "node-1", "openclaw-runtime:dev")
-	if err == nil {
-		t.Fatalf("expected mismatch error")
-	}
-	if !result.Transferred {
-		t.Fatalf("expected attempted transfer before mismatch: %+v", result)
-	}
+	require.Error(t, err)
+	require.True(t, result.Transferred)
 }
 
 func TestSyncOpenClawImagePropagatesLocalInspectError(t *testing.T) {
 	local := &fakeLocalImage{err: errors.New("boom")}
 	_, err := New(local, &fakeAgentImage{}).SyncOpenClawImage(context.Background(), "node-1", "openclaw-runtime:dev")
-	if err == nil {
-		t.Fatalf("expected error")
-	}
+	require.Error(t, err)
 }
 
 type fakeLocalImage struct {

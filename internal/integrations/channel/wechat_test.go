@@ -4,6 +4,7 @@ import (
 	"context"
 	"testing"
 	"time"
+	"github.com/stretchr/testify/require"
 )
 
 func TestWeChatAdapterBeginAuthReturnsQRCodeChallenge(t *testing.T) {
@@ -22,9 +23,7 @@ func TestWeChatAdapterBeginAuthReturnsQRCodeChallenge(t *testing.T) {
 	adapter := NewWeChatAdapter(runner)
 
 	challenge, err := adapter.BeginAuth(context.Background(), AuthInput{AppID: "app-1"})
-	if err != nil {
-		t.Fatalf("BeginAuth() error = %v", err)
-	}
+	require.NoError(t, err)
 	if challenge.Type != "qrcode" || challenge.QRCode == "" {
 		t.Fatalf("challenge = %+v", challenge)
 	}
@@ -40,9 +39,7 @@ func TestWeChatAdapterBeginAuthReturnsQRCodeChallenge(t *testing.T) {
 			// stdout 不携带 wxid/userId（实测发现）；BoundIdentity 由 service 层
 			// 在收到 bound 事件后调 openclaw channels list 或读 plugin state 补齐。
 			// 此测试仅验证 bound 状态翻转。
-			if progress.ChannelName != "openclaw-weixin" {
-				t.Fatalf("ChannelName = %q, want openclaw-weixin", progress.ChannelName)
-			}
+			require.Equal(t, "openclaw-weixin", progress.ChannelName)
 			return
 		}
 		time.Sleep(20 * time.Millisecond)
@@ -55,13 +52,9 @@ func TestWeChatAdapterBeginAuthRejectsUnparsableOutput(t *testing.T) {
 	adapter := NewWeChatAdapter(runner)
 
 	_, err := adapter.BeginAuth(context.Background(), AuthInput{AppID: "app-1"})
-	if err == nil {
-		t.Fatalf("expected error for unparsable first line")
-	}
+	require.Error(t, err)
 	progress, _ := adapter.PollAuth(context.Background(), AuthInput{AppID: "app-1"})
-	if progress.Status != AuthStatusFailed {
-		t.Fatalf("progress status = %s, want failed", progress.Status)
-	}
+	require.Equal(t, AuthStatusFailed, progress.Status)
 }
 
 func TestWeChatAdapterBeginAuthDetectsExpiredFirst(t *testing.T) {
@@ -73,20 +66,14 @@ func TestWeChatAdapterBeginAuthDetectsExpiredFirst(t *testing.T) {
 	adapter := NewWeChatAdapter(runner)
 
 	_, err := adapter.BeginAuth(context.Background(), AuthInput{AppID: "app-1"})
-	if err == nil {
-		t.Fatalf("expected error when first decision event is expired")
-	}
+	require.Error(t, err)
 }
 
 func TestWeChatAdapterPollAuthDefaultsToPending(t *testing.T) {
 	adapter := NewWeChatAdapter(&fakeRunner{})
 	progress, err := adapter.PollAuth(context.Background(), AuthInput{AppID: "missing"})
-	if err != nil {
-		t.Fatalf("PollAuth() error = %v", err)
-	}
-	if progress.Status != AuthStatusPending {
-		t.Fatalf("progress = %+v", progress)
-	}
+	require.NoError(t, err)
+	require.Equal(t, AuthStatusPending, progress.Status)
 }
 
 type fakeRunner struct {

@@ -7,6 +7,7 @@ import (
 	"os"
 	"testing"
 	"time"
+	"github.com/stretchr/testify/require"
 )
 
 // TestRedisQueue_LiveEnqueueAndReserve 通过真实 Redis 验证 ZSET 读写。
@@ -20,13 +21,10 @@ func TestRedisQueue_LiveEnqueueAndReserve(t *testing.T) {
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
 	jobID := "00000000-0000-0000-0000-000000000fff"
-	if err := queue.Enqueue(ctx, jobID); err != nil {
-		t.Fatalf("Enqueue err = %v", err)
-	}
+	err := queue.Enqueue(ctx, jobID)
+	require.NoError(t, err)
 	got, err := queue.Reserve(ctx, 10)
-	if err != nil {
-		t.Fatalf("Reserve err = %v", err)
-	}
+	require.NoError(t, err)
 	found := false
 	for _, id := range got {
 		if id == jobID {
@@ -34,7 +32,5 @@ func TestRedisQueue_LiveEnqueueAndReserve(t *testing.T) {
 			break
 		}
 	}
-	if !found {
-		t.Fatalf("Reserve 未返回 jobID，实际 %+v", got)
-	}
+	require.True(t, found)
 }

@@ -2,7 +2,6 @@ package service
 
 import (
 	"context"
-	"errors"
 	"testing"
 
 	"github.com/jackc/pgx/v5/pgtype"
@@ -10,6 +9,7 @@ import (
 	"oc-manager/internal/auth"
 	"oc-manager/internal/domain"
 	"oc-manager/internal/store/sqlc"
+	"github.com/stretchr/testify/require"
 )
 
 func TestAuditServiceRecordRequiresMandatoryFields(t *testing.T) {
@@ -17,9 +17,7 @@ func TestAuditServiceRecordRequiresMandatoryFields(t *testing.T) {
 	svc := NewAuditService(store)
 
 	_, err := svc.Record(context.Background(), AuditEvent{ActorRole: domain.UserRolePlatformAdmin})
-	if err == nil {
-		t.Fatalf("Record() error = nil, want validation error")
-	}
+	require.Error(t, err)
 }
 
 func TestAuditServiceRecordPersistsMetadata(t *testing.T) {
@@ -34,24 +32,18 @@ func TestAuditServiceRecordPersistsMetadata(t *testing.T) {
 		Result:     "succeeded",
 		Metadata:   map[string]any{"name": "测试组织"},
 	})
-	if err != nil {
-		t.Fatalf("Record() error = %v", err)
-	}
+	require.NoError(t, err)
 	if result.TargetType != "organization" || store.created.TargetType != "organization" {
 		t.Fatalf("expected target persisted, got %+v", store.created)
 	}
-	if len(store.created.MetadataJson) == 0 {
-		t.Fatalf("metadata should be serialized")
-	}
+	require.NotEqual(t, 0, len(store.created.MetadataJson))
 }
 
 func TestAuditServiceListByOrgRequiresAccess(t *testing.T) {
 	svc := NewAuditService(&auditStoreStub{})
 
 	_, err := svc.ListByOrg(context.Background(), auth.Principal{Role: domain.UserRoleOrgMember, OrgID: "00000000-0000-0000-0000-000000000aaa"}, "00000000-0000-0000-0000-000000000bbb", 0, 0)
-	if !errors.Is(err, ErrForbidden) {
-		t.Fatalf("ListByOrg() error = %v, want ErrForbidden", err)
-	}
+	require.ErrorIs(t, err, ErrForbidden)
 }
 
 func TestAuditServiceListByOrgClampsLimit(t *testing.T) {
@@ -59,12 +51,8 @@ func TestAuditServiceListByOrgClampsLimit(t *testing.T) {
 	svc := NewAuditService(store)
 
 	_, err := svc.ListByOrg(context.Background(), platformAdmin(), testOrgID, 5000, 0)
-	if err != nil {
-		t.Fatalf("ListByOrg() error = %v", err)
-	}
-	if store.lastByOrg.Limit != 200 {
-		t.Fatalf("limit = %d, want clamped to 200", store.lastByOrg.Limit)
-	}
+	require.NoError(t, err)
+	require.Equal(t, int32(200), store.lastByOrg.Limit)
 }
 
 func TestAuditServiceListByTargetFiltersOrgScope(t *testing.T) {
@@ -77,9 +65,7 @@ func TestAuditServiceListByTargetFiltersOrgScope(t *testing.T) {
 	svc := NewAuditService(store)
 
 	results, err := svc.ListByTarget(context.Background(), auth.Principal{Role: domain.UserRoleOrgAdmin, OrgID: testOrgID}, "app", "x", 0, 0)
-	if err != nil {
-		t.Fatalf("ListByTarget() error = %v", err)
-	}
+	require.NoError(t, err)
 	if len(results) != 1 || results[0].OrgID != testOrgID {
 		t.Fatalf("results = %+v, want only own org", results)
 	}

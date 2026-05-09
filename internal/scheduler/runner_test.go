@@ -11,6 +11,7 @@ import (
 	"time"
 
 	"oc-manager/internal/store/sqlc"
+	"github.com/stretchr/testify/require"
 )
 
 type loopStore struct {
@@ -39,9 +40,8 @@ func TestLoop_TickFiresOnInterval(t *testing.T) {
 	loop := NewLoop(newLoopScheduler(store), 5*time.Millisecond)
 	ctx, cancel := context.WithTimeout(context.Background(), 60*time.Millisecond)
 	defer cancel()
-	if err := loop.Run(ctx); err != nil {
-		t.Fatalf("Run err = %v", err)
-	}
+	err := loop.Run(ctx)
+	require.NoError(t, err)
 	if store.calls.Load() < 5 {
 		t.Fatalf("Tick 调用次数 = %d, want >= 5", store.calls.Load())
 	}
@@ -54,19 +54,15 @@ func TestLoop_LogsTickError(t *testing.T) {
 	loop.SetLogger(slog.New(slog.NewTextHandler(logBuf, nil)))
 	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Millisecond)
 	defer cancel()
-	if err := loop.Run(ctx); err != nil {
-		t.Fatalf("Run err = %v", err)
-	}
-	if !strings.Contains(logBuf.String(), "scheduler tick 错误") {
-		t.Fatalf("日志缺 tick 错误: %s", logBuf.String())
-	}
+	err := loop.Run(ctx)
+	require.NoError(t, err)
+	require.True(t, strings.Contains(logBuf.String(), "scheduler tick 错误"))
 }
 
 func TestLoop_RejectsMissingScheduler(t *testing.T) {
 	loop := NewLoop(nil, 5*time.Millisecond)
-	if err := loop.Run(context.Background()); err == nil {
-		t.Fatal("缺 scheduler 应当报错")
-	}
+	err := loop.Run(context.Background())
+	require.Error(t, err)
 }
 
 func TestLoop_DefaultInterval(t *testing.T) {
@@ -76,7 +72,6 @@ func TestLoop_DefaultInterval(t *testing.T) {
 	// 因此用极短 ctx 验证 Run 仍然干净退出。
 	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Millisecond)
 	defer cancel()
-	if err := loop.Run(ctx); err != nil {
-		t.Fatalf("Run err = %v", err)
-	}
+	err := loop.Run(ctx)
+	require.NoError(t, err)
 }

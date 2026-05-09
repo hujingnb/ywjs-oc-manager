@@ -14,6 +14,7 @@ import (
 	"oc-manager/internal/auth"
 	"oc-manager/internal/domain"
 	"oc-manager/internal/service"
+	"github.com/stretchr/testify/require"
 )
 
 func TestMembersListRequiresToken(t *testing.T) {
@@ -23,9 +24,7 @@ func TestMembersListRequiresToken(t *testing.T) {
 	request := httptest.NewRequest(http.MethodGet, "/api/v1/organizations/00000000-0000-0000-0000-000000000101/members", nil)
 	router.ServeHTTP(recorder, request)
 
-	if recorder.Code != http.StatusUnauthorized {
-		t.Fatalf("status = %d, want 401", recorder.Code)
-	}
+	require.Equal(t, http.StatusUnauthorized, recorder.Code)
 }
 
 func TestMembersCreateForwardsPrincipalAndOrg(t *testing.T) {
@@ -42,15 +41,9 @@ func TestMembersCreateForwardsPrincipalAndOrg(t *testing.T) {
 	request.Header.Set("Authorization", "Bearer "+token)
 	router.ServeHTTP(recorder, request)
 
-	if recorder.Code != http.StatusCreated {
-		t.Fatalf("status = %d, want 201, body=%s", recorder.Code, recorder.Body.String())
-	}
-	if svc.lastOrgID != "00000000-0000-0000-0000-000000000101" {
-		t.Fatalf("orgID = %s, want path value", svc.lastOrgID)
-	}
-	if svc.lastPrincipal.Role != domain.UserRolePlatformAdmin {
-		t.Fatalf("principal = %+v", svc.lastPrincipal)
-	}
+	require.Equal(t, http.StatusCreated, recorder.Code)
+	require.Equal(t, "00000000-0000-0000-0000-000000000101", svc.lastOrgID)
+	require.Equal(t, domain.UserRolePlatformAdmin, svc.lastPrincipal.Role)
 }
 
 func TestMembersDisableMapsErrorToBadRequest(t *testing.T) {
@@ -63,9 +56,7 @@ func TestMembersDisableMapsErrorToBadRequest(t *testing.T) {
 	request.Header.Set("Authorization", "Bearer "+token)
 	router.ServeHTTP(recorder, request)
 
-	if recorder.Code != http.StatusBadRequest {
-		t.Fatalf("status = %d, want 400, body=%s", recorder.Code, recorder.Body.String())
-	}
+	require.Equal(t, http.StatusBadRequest, recorder.Code)
 }
 
 func TestMembersGetReturnsBody(t *testing.T) {
@@ -78,27 +69,20 @@ func TestMembersGetReturnsBody(t *testing.T) {
 	request.Header.Set("Authorization", "Bearer "+token)
 	router.ServeHTTP(recorder, request)
 
-	if recorder.Code != http.StatusOK {
-		t.Fatalf("status = %d, want 200", recorder.Code)
-	}
+	require.Equal(t, http.StatusOK, recorder.Code)
 	var resp struct {
 		Member service.MemberResult `json:"member"`
 	}
-	if err := json.Unmarshal(recorder.Body.Bytes(), &resp); err != nil {
-		t.Fatalf("decode: %v", err)
-	}
-	if resp.Member.Username != "alice" {
-		t.Fatalf("member = %+v", resp.Member)
-	}
+	err := json.Unmarshal(recorder.Body.Bytes(), &resp)
+	require.NoError(t, err)
+	require.Equal(t, "alice", resp.Member.Username)
 }
 
 func newMembersTestRouter(t *testing.T, svc memberService) (*gin.Engine, *auth.TokenManager) {
 	t.Helper()
 	gin.SetMode(gin.ReleaseMode)
 	tokens, err := auth.NewTokenManager("a", "b", time.Minute, time.Hour)
-	if err != nil {
-		t.Fatalf("NewTokenManager() error = %v", err)
-	}
+	require.NoError(t, err)
 	router := gin.New()
 	RegisterMemberRoutes(router, NewMembersHandler(svc, tokens))
 	return router, tokens
@@ -121,9 +105,7 @@ func newMembersTestRouterWithOnboarding(t *testing.T, svc memberService, onboard
 	t.Helper()
 	gin.SetMode(gin.ReleaseMode)
 	tokens, err := auth.NewTokenManager("a", "b", time.Minute, time.Hour)
-	if err != nil {
-		t.Fatalf("NewTokenManager() error = %v", err)
-	}
+	require.NoError(t, err)
 	router := gin.New()
 	handler := NewMembersHandler(svc, tokens)
 	handler.SetOnboardingService(onboarding)
@@ -143,20 +125,14 @@ func TestMembersOnboardMapsNoNodeAvailableTo503(t *testing.T) {
 	request.Header.Set("Authorization", "Bearer "+token)
 	router.ServeHTTP(recorder, request)
 
-	if recorder.Code != http.StatusServiceUnavailable {
-		t.Fatalf("status = %d, want 503, body=%s", recorder.Code, recorder.Body.String())
-	}
-	if !bytes.Contains(recorder.Body.Bytes(), []byte("NO_NODE_AVAILABLE")) {
-		t.Fatalf("body 缺少 NO_NODE_AVAILABLE: %s", recorder.Body.String())
-	}
+	require.Equal(t, http.StatusServiceUnavailable, recorder.Code)
+	require.Contains(t, recorder.Body.String(), "NO_NODE_AVAILABLE")
 }
 
 func mustSignAccess(t *testing.T, tokens *auth.TokenManager, principal auth.Principal) string {
 	t.Helper()
 	token, err := tokens.SignAccessToken(principal)
-	if err != nil {
-		t.Fatalf("SignAccessToken() error = %v", err)
-	}
+	require.NoError(t, err)
 	return token
 }
 

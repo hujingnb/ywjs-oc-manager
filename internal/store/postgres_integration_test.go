@@ -7,6 +7,7 @@ import (
 	"os"
 	"testing"
 	"time"
+	"github.com/stretchr/testify/require"
 )
 
 // TestStoreOpen_PostgreSQLLiveConnection 通过 INTEGRATION_DATABASE_URL 真实连一次数据库。
@@ -19,11 +20,8 @@ func TestStoreOpen_PostgreSQLLiveConnection(t *testing.T) {
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
 	store, err := Open(ctx, dsn)
-	if err != nil {
-		t.Fatalf("Open err = %v", err)
-	}
+	require.NoError(t, err)
 	defer store.Close()
-	if err := store.Pool().Ping(ctx); err != nil {
-		t.Fatalf("Ping err = %v", err)
-	}
+	err := store.Pool().Ping(ctx)
+	require.NoError(t, err)
 }

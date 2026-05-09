@@ -4,13 +4,12 @@ import (
 	"io/fs"
 	"strings"
 	"testing"
+	"github.com/stretchr/testify/require"
 )
 
 func TestFS_ContainsUpAndDownPairs(t *testing.T) {
 	entries, err := fs.ReadDir(FS, ".")
-	if err != nil {
-		t.Fatalf("读取 embed FS 失败: %v", err)
-	}
+	require.NoError(t, err)
 	ups := make(map[string]struct{})
 	downs := make(map[string]struct{})
 	for _, e := range entries {
@@ -21,9 +20,7 @@ func TestFS_ContainsUpAndDownPairs(t *testing.T) {
 			downs[strings.TrimSuffix(e.Name(), ".down.sql")] = struct{}{}
 		}
 	}
-	if len(ups) == 0 {
-		t.Fatal("embed FS 不含任何 *.up.sql，疑似 embed pattern 失效")
-	}
+	require.NotEqual(t, 0, len(ups))
 	for version := range ups {
 		if _, ok := downs[version]; !ok {
 			t.Fatalf("迁移版本 %s 缺少 down 文件", version)

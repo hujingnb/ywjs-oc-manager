@@ -14,6 +14,8 @@ import (
 
 	"oc-manager/internal/integrations/agent"
 	"oc-manager/internal/runtime/imagesync"
+	"github.com/stretchr/testify/require"
+	"github.com/stretchr/testify/assert"
 )
 
 func TestAgentBackedAdapterEnsureImageDelegatesToImageSyncer(t *testing.T) {
@@ -21,12 +23,8 @@ func TestAgentBackedAdapterEnsureImageDelegatesToImageSyncer(t *testing.T) {
 	adapter := NewAgentBackedAdapter(nil, nil, syncer)
 
 	got, err := adapter.EnsureImage(context.Background(), "node-1", "openclaw:dev")
-	if err != nil {
-		t.Fatalf("EnsureImage() error = %v", err)
-	}
-	if !got.Transferred {
-		t.Fatalf("expected Transferred=true, got %+v", got)
-	}
+	require.NoError(t, err)
+	require.True(t, got.Transferred)
 	if syncer.lastImage != "openclaw:dev" || syncer.lastNode != "node-1" {
 		t.Fatalf("syncer last = %s/%s", syncer.lastNode, syncer.lastImage)
 	}
@@ -71,9 +69,7 @@ func TestAgentBackedAdapterFileOpsRouteThroughAgent(t *testing.T) {
 			_, _ = w.Write([]byte("payload"))
 		case "/v1/files/put":
 			body, _ := io.ReadAll(r.Body)
-			if string(body) != "hello" {
-				t.Errorf("upload body = %q", string(body))
-			}
+			assert.Equal(t, "hello", string(body))
 			w.WriteHeader(http.StatusNoContent)
 		case "/v1/files/delete":
 			w.WriteHeader(http.StatusNoContent)
@@ -86,39 +82,27 @@ func TestAgentBackedAdapterFileOpsRouteThroughAgent(t *testing.T) {
 	defer server.Close()
 
 	resolver := fakeResolverFn(func(_ context.Context, nodeID string) (*agent.AgentFileClient, error) {
-		if nodeID != "node-1" {
-			t.Fatalf("nodeID = %q", nodeID)
-		}
+		require.Equal(t, "node-1", nodeID)
 		return agent.NewFileClient(server.URL, ""), nil
 	})
 	adapter := NewAgentBackedAdapter(resolver, nil, nil)
 
-	if _, err := adapter.ListFiles(context.Background(), "node-1", "/data"); err != nil {
-		t.Fatalf("ListFiles() error = %v", err)
-	}
-	if err := adapter.UploadFile(context.Background(), "node-1", "/data/x.txt", strings.NewReader("hello")); err != nil {
-		t.Fatalf("UploadFile() error = %v", err)
-	}
+	_, err := adapter.ListFiles(context.Background(), "node-1", "/data")
+	require.NoError(t, err)
+	err = adapter.UploadFile(context.Background(), "node-1", "/data/x.txt", strings.NewReader("hello"))
+	require.NoError(t, err)
 	stream, err := adapter.DownloadFile(context.Background(), "node-1", "/data/x.txt")
-	if err != nil {
-		t.Fatalf("DownloadFile() error = %v", err)
-	}
-	if _, err := io.Copy(io.Discard, stream); err != nil {
-		t.Fatalf("read download: %v", err)
-	}
+	require.NoError(t, err)
+	_, err = io.Copy(io.Discard, stream)
+	require.NoError(t, err)
 	stream.Close()
-	if err := adapter.DeletePath(context.Background(), "node-1", "/data/x.txt"); err != nil {
-		t.Fatalf("DeletePath() error = %v", err)
-	}
+	err = adapter.DeletePath(context.Background(), "node-1", "/data/x.txt")
+	require.NoError(t, err)
 	tar, err := adapter.ArchiveDirectory(context.Background(), "node-1", "/data")
-	if err != nil {
-		t.Fatalf("ArchiveDirectory() error = %v", err)
-	}
+	require.NoError(t, err)
 	tarBody, _ := io.ReadAll(tar)
 	tar.Close()
-	if string(tarBody) != "tar-bytes" {
-		t.Fatalf("archive body = %q", string(tarBody))
-	}
+	require.Equal(t, "tar-bytes", string(tarBody))
 }
 
 func TestAgentBackedAdapterFileOpsRequireResolver(t *testing.T) {
@@ -180,9 +164,7 @@ func startMockDockerLifecycle(t *testing.T, calls *[]dockerCallLog, errOn map[st
 	server := httptest.NewServer(mux)
 	t.Cleanup(server.Close)
 	cli, err := client.NewClientWithOpts(client.WithHost(server.URL), client.WithHTTPClient(server.Client()), client.WithVersion("1.41"))
-	if err != nil {
-		t.Fatalf("构造 mock docker client: %v", err)
-	}
+	require.NoError(t, err)
 	return server, cli
 }
 
@@ -191,18 +173,14 @@ func TestAgentBackedAdapterStartStopRestartRemove_HappyPath(t *testing.T) {
 	_, cli := startMockDockerLifecycle(t, &calls, nil)
 	adapter := NewAgentBackedAdapter(nil, &staticDockerResolver{cli: cli}, nil)
 
-	if err := adapter.StartContainer(context.Background(), "n", "ctr-1"); err != nil {
-		t.Fatalf("StartContainer err = %v", err)
-	}
-	if err := adapter.StopContainer(context.Background(), "n", "ctr-1"); err != nil {
-		t.Fatalf("StopContainer err = %v", err)
-	}
-	if err := adapter.RestartContainer(context.Background(), "n", "ctr-1"); err != nil {
-		t.Fatalf("RestartContainer err = %v", err)
-	}
-	if err := adapter.RemoveContainer(context.Background(), "n", "ctr-1"); err != nil {
-		t.Fatalf("RemoveContainer err = %v", err)
-	}
+	err := adapter.StartContainer(context.Background(), "n", "ctr-1")
+	require.NoError(t, err)
+	err = adapter.StopContainer(context.Background(), "n", "ctr-1")
+	require.NoError(t, err)
+	err = adapter.RestartContainer(context.Background(), "n", "ctr-1")
+	require.NoError(t, err)
+	err = adapter.RemoveContainer(context.Background(), "n", "ctr-1")
+	require.NoError(t, err)
 
 	for _, suffix := range []string{"/start", "/stop", "/restart"} {
 		findCall(t, calls, http.MethodPost, suffix)
@@ -215,38 +193,28 @@ func TestAgentBackedAdapterStartContainerPropagatesDockerError(t *testing.T) {
 	_, cli := startMockDockerLifecycle(t, &calls, map[string]int{"start": http.StatusInternalServerError})
 	adapter := NewAgentBackedAdapter(nil, &staticDockerResolver{cli: cli}, nil)
 	err := adapter.StartContainer(context.Background(), "n", "ctr-x")
-	if err == nil {
-		t.Fatal("docker 5xx 时应冒泡错误")
-	}
-	if !strings.Contains(err.Error(), "启动容器失败") {
-		t.Fatalf("错误信息缺中文上下文: %v", err)
-	}
+	require.Error(t, err)
+	require.True(t, strings.Contains(err.Error(), "启动容器失败"))
 }
 
 func TestAgentBackedAdapterStopContainerSetsTimeout(t *testing.T) {
 	var calls []dockerCallLog
 	_, cli := startMockDockerLifecycle(t, &calls, nil)
 	adapter := NewAgentBackedAdapter(nil, &staticDockerResolver{cli: cli}, nil)
-	if err := adapter.StopContainer(context.Background(), "n", "ctr-1"); err != nil {
-		t.Fatalf("StopContainer err = %v", err)
-	}
+	err := adapter.StopContainer(context.Background(), "n", "ctr-1")
+	require.NoError(t, err)
 	stop := findCall(t, calls, http.MethodPost, "/stop")
-	if !strings.Contains(stop.path, "t=30") {
-		t.Fatalf("stop 调用未携带 t=30 timeout: path=%s", stop.path)
-	}
+	require.True(t, strings.Contains(stop.path, "t=30"))
 }
 
 func TestAgentBackedAdapterRemoveContainerForcesDeletion(t *testing.T) {
 	var calls []dockerCallLog
 	_, cli := startMockDockerLifecycle(t, &calls, nil)
 	adapter := NewAgentBackedAdapter(nil, &staticDockerResolver{cli: cli}, nil)
-	if err := adapter.RemoveContainer(context.Background(), "n", "ctr-1"); err != nil {
-		t.Fatalf("RemoveContainer err = %v", err)
-	}
+	err := adapter.RemoveContainer(context.Background(), "n", "ctr-1")
+	require.NoError(t, err)
 	remove := findCall(t, calls, http.MethodDelete, "/containers/ctr-1")
-	if !strings.Contains(remove.path, "force=1") {
-		t.Fatalf("remove 调用未带 force=1: %s", remove.path)
-	}
+	require.True(t, strings.Contains(remove.path, "force=1"))
 }
 
 // startMockDocker 模拟 docker daemon 处理 ContainerCreate / ContainerInspect 两个端点。
@@ -282,9 +250,7 @@ func startMockDocker(t *testing.T, fixedID, inspectStatus string, calls *[]docke
 	server := httptest.NewServer(mux)
 	t.Cleanup(server.Close)
 	cli, err := client.NewClientWithOpts(client.WithHost(server.URL), client.WithHTTPClient(server.Client()), client.WithVersion("1.41"))
-	if err != nil {
-		t.Fatalf("构造 mock docker client: %v", err)
-	}
+	require.NoError(t, err)
 	return server, cli
 }
 
@@ -315,18 +281,10 @@ func TestAgentBackedAdapterCreateContainerHappyPath(t *testing.T) {
 	}
 
 	info, err := adapter.CreateContainer(context.Background(), "node-1", spec)
-	if err != nil {
-		t.Fatalf("CreateContainer err = %v", err)
-	}
-	if info.ID != "ctr-1" {
-		t.Fatalf("info.ID = %q, want ctr-1", info.ID)
-	}
-	if info.Status != "created" {
-		t.Fatalf("info.Status = %q, want created", info.Status)
-	}
-	if info.Name != "ctr-1" {
-		t.Fatalf("info.Name = %q, want ctr-1（应去掉前导 /）", info.Name)
-	}
+	require.NoError(t, err)
+	require.Equal(t, "ctr-1", info.ID)
+	require.Equal(t, "created", info.Status)
+	require.Equal(t, "ctr-1", info.Name)
 
 	createCall := findCall(t, calls, "POST", "/containers/create")
 	body := string(createCall.body)
@@ -338,16 +296,10 @@ func TestAgentBackedAdapterCreateContainerHappyPath(t *testing.T) {
 		`"/data/workspace:/workspace"`,
 		`"/data/knowledge/org:/knowledge/org:ro"`,
 	} {
-		if !strings.Contains(body, fragment) {
-			t.Errorf("create body 缺片段 %s\n实际 body=%s", fragment, body)
-		}
+		assert.Contains(t, body, fragment)
 	}
-	if !strings.Contains(body, `"NanoCpus":2000000000`) {
-		t.Errorf("CPU 限额未正确翻译: %s", body)
-	}
-	if !strings.Contains(body, `"Memory":1073741824`) {
-		t.Errorf("Memory 限额未正确翻译: %s", body)
-	}
+	assert.Contains(t, body, `"NanoCpus":2000000000`)
+	assert.Contains(t, body, `"Memory":1073741824`)
 }
 
 func TestAgentBackedAdapterCreateContainerFailsWithoutResolver(t *testing.T) {
@@ -362,15 +314,11 @@ func TestAgentBackedAdapterInspectContainer(t *testing.T) {
 	_, cli := startMockDocker(t, "ctr-2", "running", &calls)
 	adapter := NewAgentBackedAdapter(nil, &staticDockerResolver{cli: cli}, nil)
 	info, err := adapter.InspectContainer(context.Background(), "node", "ctr-2")
-	if err != nil {
-		t.Fatalf("InspectContainer err = %v", err)
-	}
+	require.NoError(t, err)
 	if info.ID != "ctr-2" || info.Status != "running" {
 		t.Fatalf("info = %+v", info)
 	}
-	if findCall(t, calls, "GET", "/containers/ctr-2/json").path == "" {
-		t.Fatal("没有触发 inspect 请求")
-	}
+	require.NotEqual(t, "", findCall(t, calls, "GET", "/containers/ctr-2/json").path)
 }
 
 // findCall 在 calls 列表里查找 method 一致且 path 包含给定子串的调用。

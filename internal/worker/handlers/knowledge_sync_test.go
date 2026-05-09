@@ -10,6 +10,7 @@ import (
 
 	"oc-manager/internal/domain"
 	"oc-manager/internal/store/sqlc"
+	"github.com/stretchr/testify/require"
 )
 
 type memoryKnowledgeSource struct {
@@ -83,12 +84,9 @@ func TestKnowledgeSyncHandler_UploadOrgFile(t *testing.T) {
 	sink := &memoryKnowledgeSink{}
 	handler := NewKnowledgeSyncHandler(source, sink)
 	payload := []byte(`{"scope":"org","org_id":"o1","node_id":"n1","change_type":"upload_file","rel_path":"notes/a.md","master_path":"org/o1/knowledge/notes/a.md"}`)
-	if err := handler.Handle(context.Background(), buildKnowledgeJob(t, payload)); err != nil {
-		t.Fatalf("Handle err = %v", err)
-	}
-	if len(sink.uploads) != 1 {
-		t.Fatalf("uploads = %d", len(sink.uploads))
-	}
+	err := handler.Handle(context.Background(), buildKnowledgeJob(t, payload))
+	require.NoError(t, err)
+	require.Equal(t, 1, len(sink.uploads))
 	got := sink.uploads[0]
 	if got.scope != "org" || got.node != "n1" || got.scopeID != "o1" || got.relPath != "notes/a.md" || got.body != "# hello" {
 		t.Fatalf("upload = %+v", got)
@@ -99,12 +97,9 @@ func TestKnowledgeSyncHandler_DeleteAppFile(t *testing.T) {
 	sink := &memoryKnowledgeSink{}
 	handler := NewKnowledgeSyncHandler(nil, sink)
 	payload := []byte(`{"scope":"app","app_id":"a1","node_id":"n2","change_type":"delete_file","rel_path":"docs/x.md"}`)
-	if err := handler.Handle(context.Background(), buildKnowledgeJob(t, payload)); err != nil {
-		t.Fatalf("Handle err = %v", err)
-	}
-	if len(sink.deletes) != 1 {
-		t.Fatalf("deletes = %+v", sink.deletes)
-	}
+	err := handler.Handle(context.Background(), buildKnowledgeJob(t, payload))
+	require.NoError(t, err)
+	require.Equal(t, 1, len(sink.deletes))
 	got := sink.deletes[0]
 	if got.scope != "app" || got.node != "n2" || got.scopeID != "a1" || got.relPath != "docs/x.md" {
 		t.Fatalf("delete = %+v", got)
@@ -143,7 +138,6 @@ func TestKnowledgeSyncHandler_PropagatesUploadError(t *testing.T) {
 func TestKnowledgeSyncHandler_RejectsMissingNodeID(t *testing.T) {
 	handler := NewKnowledgeSyncHandler(nil, &memoryKnowledgeSink{})
 	payload := []byte(`{"scope":"org","org_id":"o","change_type":"delete_file","rel_path":"x"}`)
-	if err := handler.Handle(context.Background(), buildKnowledgeJob(t, payload)); err == nil {
-		t.Fatal("缺 node_id 应当报错")
-	}
+	err := handler.Handle(context.Background(), buildKnowledgeJob(t, payload))
+	require.Error(t, err)
 }

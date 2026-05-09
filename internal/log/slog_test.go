@@ -5,8 +5,10 @@ import (
 	"context"
 	"encoding/json"
 	"log/slog"
-	"strings"
 	"testing"
+
+	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
 )
 
 // captureLogger 用 bytes.Buffer 捕获日志输出便于断言。
@@ -20,18 +22,11 @@ func TestNewSlogLogger_输出合法JSON并含核心字段(t *testing.T) {
 	logger, buf := captureLogger()
 	logger.Info("hello", "user_id", "u-1")
 	var got map[string]any
-	if err := json.Unmarshal(buf.Bytes(), &got); err != nil {
-		t.Fatalf("expected valid JSON, got error: %v\n输出: %s", err, buf.String())
-	}
-	if got["msg"] != "hello" {
-		t.Errorf("msg=%v want hello", got["msg"])
-	}
-	if got["level"] != "INFO" {
-		t.Errorf("level=%v want INFO", got["level"])
-	}
-	if got["user_id"] != "u-1" {
-		t.Errorf("user_id=%v want u-1", got["user_id"])
-	}
+	err := json.Unmarshal(buf.Bytes(), &got)
+	require.NoError(t, err)
+	assert.Equal(t, "hello", got["msg"])
+	assert.Equal(t, "INFO", got["level"])
+	assert.Equal(t, "u-1", got["user_id"])
 	if _, ok := got["time"]; !ok {
 		t.Errorf("missing time field: %v", got)
 	}
@@ -45,9 +40,7 @@ func TestNewSlogLogger_redact生效(t *testing.T) {
 	// 写入会被 redactlog 命中的字段
 	logger.Info("api call", "api_key", "sk-secret-12345abcde")
 	out := buf.String()
-	if strings.Contains(out, "sk-secret-12345abcde") {
-		t.Errorf("redact 未生效，输出含原始密钥：%s", out)
-	}
+	assert.NotContains(t, out, "sk-secret-12345abcde")
 }
 
 func TestRequestIDExtractor_默认为空串(t *testing.T) {
@@ -55,9 +48,7 @@ func TestRequestIDExtractor_默认为空串(t *testing.T) {
 	ctx := context.Background()
 	logger.InfoContext(ctx, "no trace")
 	out := buf.String()
-	if strings.Contains(out, "trace_id") {
-		t.Errorf("无 extractor 时不应有 trace_id 字段：%s", out)
-	}
+	assert.NotContains(t, out, "trace_id")
 }
 
 type ctxTestKey string
@@ -79,12 +70,9 @@ func TestSetRequestIDExtractor_注入trace_id(t *testing.T) {
 	logger.InfoContext(ctx, "with trace")
 
 	var got map[string]any
-	if err := json.Unmarshal(buf.Bytes(), &got); err != nil {
-		t.Fatalf("expected valid JSON: %v", err)
-	}
-	if got["trace_id"] != "abc123" {
-		t.Errorf("trace_id=%v want abc123", got["trace_id"])
-	}
+	err := json.Unmarshal(buf.Bytes(), &got)
+	require.NoError(t, err)
+	assert.Equal(t, "abc123", got["trace_id"])
 }
 
 func TestSetRequestIDExtractor_空串不写入字段(t *testing.T) {
@@ -97,9 +85,8 @@ func TestSetRequestIDExtractor_空串不写入字段(t *testing.T) {
 	logger.InfoContext(context.Background(), "no trace")
 
 	var got map[string]any
-	if err := json.Unmarshal(buf.Bytes(), &got); err != nil {
-		t.Fatalf("expected valid JSON: %v", err)
-	}
+	err := json.Unmarshal(buf.Bytes(), &got)
+	require.NoError(t, err)
 	if _, ok := got["trace_id"]; ok {
 		t.Errorf("不应写入空 trace_id 字段，got %v", got)
 	}

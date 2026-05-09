@@ -15,6 +15,7 @@ import (
 	"oc-manager/internal/integrations/runtime"
 	"oc-manager/internal/runtime/imagesync"
 	"oc-manager/internal/store/sqlc"
+	"github.com/stretchr/testify/require"
 )
 
 const (
@@ -37,9 +38,7 @@ func TestWorkspaceServiceListReturnsEntries(t *testing.T) {
 	svc := NewWorkspaceService(store, adapter, "/data")
 
 	listing, err := svc.List(context.Background(), platformAdmin(), testWorkAppID, "logs")
-	if err != nil {
-		t.Fatalf("List() error = %v", err)
-	}
+	require.NoError(t, err)
 	if len(listing.Entries) != 1 || listing.Entries[0].Name != "alice.log" {
 		t.Fatalf("listing = %+v", listing)
 	}
@@ -55,9 +54,7 @@ func TestWorkspaceServiceListRejectsForbidden(t *testing.T) {
 	svc := NewWorkspaceService(store, &fakeWorkspaceAdapter{}, "/data")
 
 	_, err := svc.List(context.Background(), auth.Principal{Role: domain.UserRoleOrgMember, OrgID: testWorkOrg, UserID: "stranger"}, testWorkAppID, "logs")
-	if !errors.Is(err, ErrWorkspaceForbidden) {
-		t.Fatalf("error = %v, want ErrWorkspaceForbidden", err)
-	}
+	require.ErrorIs(t, err, ErrWorkspaceForbidden)
 }
 
 func TestWorkspaceServiceArchiveFailsWithoutAdapter(t *testing.T) {
@@ -66,9 +63,7 @@ func TestWorkspaceServiceArchiveFailsWithoutAdapter(t *testing.T) {
 
 	var buf strings.Builder
 	err := svc.Archive(context.Background(), platformAdmin(), testWorkAppID, "", &buf)
-	if !errors.Is(err, ErrWorkspaceMissing) {
-		t.Fatalf("error = %v, want ErrWorkspaceMissing", err)
-	}
+	require.ErrorIs(t, err, ErrWorkspaceMissing)
 }
 
 func TestWorkspaceServiceArchiveStreamsZip(t *testing.T) {
@@ -77,12 +72,9 @@ func TestWorkspaceServiceArchiveStreamsZip(t *testing.T) {
 	svc := NewWorkspaceService(store, adapter, "/data")
 
 	var buf strings.Builder
-	if err := svc.Archive(context.Background(), platformAdmin(), testWorkAppID, "sub", &buf); err != nil {
-		t.Fatalf("Archive() error = %v", err)
-	}
-	if buf.String() != "zip-content" {
-		t.Fatalf("buf = %q", buf.String())
-	}
+	err := svc.Archive(context.Background(), platformAdmin(), testWorkAppID, "sub", &buf)
+	require.NoError(t, err)
+	require.Equal(t, "zip-content", buf.String())
 	if adapter.lastAppID != testWorkAppID || adapter.lastRelPath != "sub" {
 		t.Fatalf("adapter 收到 appID=%q relPath=%q", adapter.lastAppID, adapter.lastRelPath)
 	}
@@ -94,14 +86,10 @@ func TestWorkspaceServiceDownloadDelegatesToAdapter(t *testing.T) {
 	svc := NewWorkspaceService(store, adapter, "/data")
 
 	stream, err := svc.Download(context.Background(), platformAdmin(), testWorkAppID, "logs/x.log")
-	if err != nil {
-		t.Fatalf("Download() error = %v", err)
-	}
+	require.NoError(t, err)
 	defer stream.Close()
 	body, _ := io.ReadAll(stream)
-	if string(body) != "payload" {
-		t.Fatalf("payload = %q", string(body))
-	}
+	require.Equal(t, "payload", string(body))
 }
 
 func TestWorkspaceServiceRejectsUnsafePaths(t *testing.T) {
@@ -125,9 +113,7 @@ func TestWorkspaceServiceListMissingNodeReturnsError(t *testing.T) {
 	svc := NewWorkspaceService(store, &fakeWorkspaceAdapter{}, "/data")
 
 	_, err := svc.List(context.Background(), platformAdmin(), testWorkAppID, "")
-	if !errors.Is(err, ErrWorkspaceMissing) {
-		t.Fatalf("error = %v, want ErrWorkspaceMissing", err)
-	}
+	require.ErrorIs(t, err, ErrWorkspaceMissing)
 }
 
 func newWorkspaceStub(t *testing.T) *workspaceStub {

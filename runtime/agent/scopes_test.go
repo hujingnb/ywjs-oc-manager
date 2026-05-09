@@ -5,7 +5,6 @@ import (
 	"archive/zip"
 	"bytes"
 	"encoding/json"
-	"errors"
 	"io"
 	"net/http"
 	"net/http/httptest"
@@ -14,6 +13,7 @@ import (
 	"strings"
 	"testing"
 	"time"
+	"github.com/stretchr/testify/require"
 )
 
 // jsonDecoder 与 readAll 是测试辅助 helper（避免重复 import）。
@@ -34,13 +34,11 @@ func makeTar(t *testing.T, files map[string]string) *bytes.Buffer {
 		}); err != nil {
 			t.Fatalf("tar header: %v", err)
 		}
-		if _, err := tw.Write([]byte(content)); err != nil {
-			t.Fatalf("tar write: %v", err)
-		}
+		_, err := tw.Write([]byte(content))
+		require.NoError(t, err)
 	}
-	if err := tw.Close(); err != nil {
-		t.Fatalf("tar close: %v", err)
-	}
+	err := tw.Close()
+	require.NoError(t, err)
 	return &buf
 }
 
@@ -67,14 +65,10 @@ func TestResolveScopePath(t *testing.T) {
 		t.Run(c.name, func(t *testing.T) {
 			abs, err := resolveScopePath(dataRoot, scope, c.rel)
 			if c.wantErr {
-				if !errors.Is(err, ErrInvalidPath) {
-					t.Fatalf("want ErrInvalidPath, got abs=%s err=%v", abs, err)
-				}
+				require.ErrorIs(t, err, ErrInvalidPath)
 				return
 			}
-			if err != nil {
-				t.Fatalf("unexpected error: %v", err)
-			}
+			require.NoError(t, err)
 			scopeRoot, _ := filepath.Abs(filepath.Join(dataRoot, scope))
 			if abs != scopeRoot && !strings.HasPrefix(abs+string(filepath.Separator), scopeRoot+string(filepath.Separator)) {
 				t.Fatalf("abs=%s not under scopeRoot=%s", abs, scopeRoot)
@@ -90,13 +84,9 @@ func TestScopesHandler_UnknownActionReturns404(t *testing.T) {
 	req, _ := http.NewRequest(http.MethodGet, srv.URL+"/v1/scopes/apps/abc/no-such-action", nil)
 	req.Header.Set("Authorization", "Bearer tok")
 	resp, err := http.DefaultClient.Do(req)
-	if err != nil {
-		t.Fatalf("err=%v", err)
-	}
+	require.NoError(t, err)
 	defer resp.Body.Close()
-	if resp.StatusCode != http.StatusNotFound {
-		t.Fatalf("status=%d, want 404", resp.StatusCode)
-	}
+	require.Equal(t, http.StatusNotFound, resp.StatusCode)
 }
 
 func TestScopesAppInit_CreatesFourDirs(t *testing.T) {
@@ -107,19 +97,13 @@ func TestScopesAppInit_CreatesFourDirs(t *testing.T) {
 	req, _ := http.NewRequest(http.MethodPost, srv.URL+"/v1/scopes/apps/app-123/init", nil)
 	req.Header.Set("Authorization", "Bearer tok")
 	resp, err := http.DefaultClient.Do(req)
-	if err != nil {
-		t.Fatalf("err=%v", err)
-	}
+	require.NoError(t, err)
 	defer resp.Body.Close()
-	if resp.StatusCode != http.StatusOK {
-		t.Fatalf("status=%d", resp.StatusCode)
-	}
+	require.Equal(t, http.StatusOK, resp.StatusCode)
 	for _, sub := range []string{"knowledge", "workspace", "state", "logs", "openclaw-config", "weixin"} {
 		dir := filepath.Join(dataRoot, "apps", "app-123", sub)
 		fi, err := os.Stat(dir)
-		if err != nil {
-			t.Fatalf("dir %q not created: %v", sub, err)
-		}
+		require.NoError(t, err)
 		if !fi.IsDir() {
 			t.Fatalf("%q not a directory", sub)
 		}
@@ -135,25 +119,19 @@ func TestScopesAppInit_Idempotent(t *testing.T) {
 		req, _ := http.NewRequest(http.MethodPost, srv.URL+"/v1/scopes/apps/app-123/init", nil)
 		req.Header.Set("Authorization", "Bearer tok")
 		resp, err := http.DefaultClient.Do(req)
-		if err != nil {
-			t.Fatalf("i=%d err=%v", i, err)
-		}
+		require.NoError(t, err)
 		_ = resp.Body.Close()
-		if resp.StatusCode != http.StatusOK {
-			t.Fatalf("i=%d status=%d", i, resp.StatusCode)
-		}
+		require.Equal(t, http.StatusOK, resp.StatusCode)
 	}
 }
 
 func TestScopesKnowledgeSync_App_ReplaceContents(t *testing.T) {
 	dataRoot := t.TempDir()
 	stale := filepath.Join(dataRoot, "apps", "app-1", "knowledge", "stale.txt")
-	if err := os.MkdirAll(filepath.Dir(stale), 0o755); err != nil {
-		t.Fatal(err)
-	}
-	if err := os.WriteFile(stale, []byte("old"), 0o644); err != nil {
-		t.Fatal(err)
-	}
+	err := os.MkdirAll(filepath.Dir(stale), 0o755)
+	require.NoError(t, err)
+	err = os.WriteFile(stale, []byte("old"), 0o644)
+	require.NoError(t, err)
 
 	srv := httptest.NewServer(newHandlerWithDocker(dataRoot, nil, "tok"))
 	defer srv.Close()
@@ -167,13 +145,9 @@ func TestScopesKnowledgeSync_App_ReplaceContents(t *testing.T) {
 	req.Header.Set("Authorization", "Bearer tok")
 	req.Header.Set("Content-Type", "application/x-tar")
 	resp, err := http.DefaultClient.Do(req)
-	if err != nil {
-		t.Fatalf("err=%v", err)
-	}
+	require.NoError(t, err)
 	defer resp.Body.Close()
-	if resp.StatusCode != http.StatusOK {
-		t.Fatalf("status=%d", resp.StatusCode)
-	}
+	require.Equal(t, http.StatusOK, resp.StatusCode)
 
 	if _, err := os.Stat(stale); !os.IsNotExist(err) {
 		t.Fatalf("stale.txt 应被替换，err=%v", err)
@@ -198,13 +172,9 @@ func TestScopesKnowledgeSync_Org_CreatesPath(t *testing.T) {
 		srv.URL+"/v1/scopes/orgs/org-1/knowledge/sync", body)
 	req.Header.Set("Authorization", "Bearer tok")
 	resp, err := http.DefaultClient.Do(req)
-	if err != nil {
-		t.Fatalf("err=%v", err)
-	}
+	require.NoError(t, err)
 	defer resp.Body.Close()
-	if resp.StatusCode != http.StatusOK {
-		t.Fatalf("status=%d", resp.StatusCode)
-	}
+	require.Equal(t, http.StatusOK, resp.StatusCode)
 	got, err := os.ReadFile(filepath.Join(dataRoot, "orgs", "org-1", "knowledge", "intro.md"))
 	if err != nil || string(got) != "# org" {
 		t.Fatalf("intro.md = %q, %v", got, err)
@@ -221,16 +191,11 @@ func TestScopesKnowledgeSync_RejectsTraversalEntry(t *testing.T) {
 		srv.URL+"/v1/scopes/apps/app-1/knowledge/sync", body)
 	req.Header.Set("Authorization", "Bearer tok")
 	resp, err := http.DefaultClient.Do(req)
-	if err != nil {
-		t.Fatalf("err=%v", err)
-	}
+	require.NoError(t, err)
 	defer resp.Body.Close()
-	if resp.StatusCode != http.StatusBadRequest {
-		t.Fatalf("status=%d, want 400", resp.StatusCode)
-	}
-	if _, err := os.Stat("/etc/passwd-evil"); err == nil {
-		t.Fatalf("应当拒绝写出 scope")
-	}
+	require.Equal(t, http.StatusBadRequest, resp.StatusCode)
+	_, err = os.Stat("/etc/passwd-evil")
+	require.Error(t, err)
 }
 
 func TestScopesKnowledgeSync_EmptyTar(t *testing.T) {
@@ -244,21 +209,13 @@ func TestScopesKnowledgeSync_EmptyTar(t *testing.T) {
 		srv.URL+"/v1/scopes/apps/app-1/knowledge/sync", body)
 	req.Header.Set("Authorization", "Bearer tok")
 	resp, err := http.DefaultClient.Do(req)
-	if err != nil {
-		t.Fatalf("err=%v", err)
-	}
+	require.NoError(t, err)
 	defer resp.Body.Close()
-	if resp.StatusCode != http.StatusOK {
-		t.Fatalf("status=%d", resp.StatusCode)
-	}
+	require.Equal(t, http.StatusOK, resp.StatusCode)
 	dir := filepath.Join(dataRoot, "apps", "app-1", "knowledge")
 	entries, err := os.ReadDir(dir)
-	if err != nil {
-		t.Fatalf("knowledge dir 应存在: %v", err)
-	}
-	if len(entries) != 0 {
-		t.Fatalf("knowledge dir 应为空，含 %d 项", len(entries))
-	}
+	require.NoError(t, err)
+	require.Len(t, entries, 0)
 }
 
 func TestScopesKnowledgeFile_PutAndDelete(t *testing.T) {
@@ -272,13 +229,9 @@ func TestScopesKnowledgeFile_PutAndDelete(t *testing.T) {
 		strings.NewReader("hello world"))
 	put.Header.Set("Authorization", "Bearer tok")
 	resp, err := http.DefaultClient.Do(put)
-	if err != nil {
-		t.Fatalf("err=%v", err)
-	}
+	require.NoError(t, err)
 	resp.Body.Close()
-	if resp.StatusCode != http.StatusOK {
-		t.Fatalf("PUT status=%d", resp.StatusCode)
-	}
+	require.Equal(t, http.StatusOK, resp.StatusCode)
 	dest := filepath.Join(dataRoot, "apps", "app-1", "knowledge", "sub", "dir", "note.txt")
 	got, err := os.ReadFile(dest)
 	if err != nil || string(got) != "hello world" {
@@ -293,9 +246,7 @@ func TestScopesKnowledgeFile_PutAndDelete(t *testing.T) {
 	resp, _ = http.DefaultClient.Do(put2)
 	resp.Body.Close()
 	got, _ = os.ReadFile(dest)
-	if string(got) != "v2" {
-		t.Fatalf("覆盖后 = %q", got)
-	}
+	require.Equal(t, "v2", string(got))
 
 	// 删除
 	del, _ := http.NewRequest(http.MethodDelete,
@@ -310,9 +261,7 @@ func TestScopesKnowledgeFile_PutAndDelete(t *testing.T) {
 	// 删除不存在文件视为成功（幂等）
 	resp, _ = http.DefaultClient.Do(del)
 	resp.Body.Close()
-	if resp.StatusCode != http.StatusOK {
-		t.Fatalf("二次删除应 200，得 %d", resp.StatusCode)
-	}
+	require.Equal(t, http.StatusOK, resp.StatusCode)
 }
 
 func TestScopesKnowledgeFile_RejectsTraversalPath(t *testing.T) {
@@ -326,9 +275,7 @@ func TestScopesKnowledgeFile_RejectsTraversalPath(t *testing.T) {
 	put.Header.Set("Authorization", "Bearer tok")
 	resp, _ := http.DefaultClient.Do(put)
 	resp.Body.Close()
-	if resp.StatusCode != http.StatusBadRequest {
-		t.Fatalf("应返回 400，得 %d", resp.StatusCode)
-	}
+	require.Equal(t, http.StatusBadRequest, resp.StatusCode)
 }
 
 func TestScopesKnowledgeFile_OrgScope(t *testing.T) {
@@ -341,17 +288,11 @@ func TestScopesKnowledgeFile_OrgScope(t *testing.T) {
 		strings.NewReader("# org"))
 	put.Header.Set("Authorization", "Bearer tok")
 	resp, err := http.DefaultClient.Do(put)
-	if err != nil {
-		t.Fatalf("err=%v", err)
-	}
+	require.NoError(t, err)
 	resp.Body.Close()
-	if resp.StatusCode != http.StatusOK {
-		t.Fatalf("status=%d", resp.StatusCode)
-	}
+	require.Equal(t, http.StatusOK, resp.StatusCode)
 	got, _ := os.ReadFile(filepath.Join(dataRoot, "orgs", "org-1", "knowledge", "intro.md"))
-	if string(got) != "# org" {
-		t.Fatalf("got=%q", got)
-	}
+	require.Equal(t, "# org", string(got))
 }
 
 func TestScopesWorkspaceList(t *testing.T) {
@@ -368,13 +309,9 @@ func TestScopesWorkspaceList(t *testing.T) {
 	req, _ := http.NewRequest(http.MethodGet, srv.URL+"/v1/scopes/apps/app-1/workspace", nil)
 	req.Header.Set("Authorization", "Bearer tok")
 	resp, err := http.DefaultClient.Do(req)
-	if err != nil {
-		t.Fatalf("err=%v", err)
-	}
+	require.NoError(t, err)
 	defer resp.Body.Close()
-	if resp.StatusCode != http.StatusOK {
-		t.Fatalf("status=%d", resp.StatusCode)
-	}
+	require.Equal(t, http.StatusOK, resp.StatusCode)
 	var got struct {
 		Path    string `json:"path"`
 		Entries []struct {
@@ -384,23 +321,16 @@ func TestScopesWorkspaceList(t *testing.T) {
 		} `json:"entries"`
 	}
 	dec := jsonDecoder(resp.Body)
-	if err := dec.Decode(&got); err != nil {
-		t.Fatalf("decode: %v", err)
-	}
-	if len(got.Entries) != 2 {
-		t.Fatalf("entries=%+v", got.Entries)
-	}
+	err = dec.Decode(&got)
+	require.NoError(t, err)
+	require.Equal(t, 2, len(got.Entries))
 	// 列子目录
 	req2, _ := http.NewRequest(http.MethodGet, srv.URL+"/v1/scopes/apps/app-1/workspace?path=sub", nil)
 	req2.Header.Set("Authorization", "Bearer tok")
 	resp2, err := http.DefaultClient.Do(req2)
-	if err != nil {
-		t.Fatalf("err=%v", err)
-	}
+	require.NoError(t, err)
 	defer resp2.Body.Close()
-	if resp2.StatusCode != http.StatusOK {
-		t.Fatalf("sub status=%d", resp2.StatusCode)
-	}
+	require.Equal(t, http.StatusOK, resp2.StatusCode)
 }
 
 func TestScopesWorkspaceList_NotExistReturnsEmpty(t *testing.T) {
@@ -410,13 +340,9 @@ func TestScopesWorkspaceList_NotExistReturnsEmpty(t *testing.T) {
 	req, _ := http.NewRequest(http.MethodGet, srv.URL+"/v1/scopes/apps/no-such-app/workspace", nil)
 	req.Header.Set("Authorization", "Bearer tok")
 	resp, err := http.DefaultClient.Do(req)
-	if err != nil {
-		t.Fatalf("err=%v", err)
-	}
+	require.NoError(t, err)
 	defer resp.Body.Close()
-	if resp.StatusCode != http.StatusOK {
-		t.Fatalf("status=%d", resp.StatusCode)
-	}
+	require.Equal(t, http.StatusOK, resp.StatusCode)
 }
 
 func TestScopesWorkspaceDownload(t *testing.T) {
@@ -431,20 +357,12 @@ func TestScopesWorkspaceDownload(t *testing.T) {
 		srv.URL+"/v1/scopes/apps/app-1/workspace/download?path=out.txt", nil)
 	req.Header.Set("Authorization", "Bearer tok")
 	resp, err := http.DefaultClient.Do(req)
-	if err != nil {
-		t.Fatalf("err=%v", err)
-	}
+	require.NoError(t, err)
 	defer resp.Body.Close()
-	if resp.StatusCode != http.StatusOK {
-		t.Fatalf("status=%d", resp.StatusCode)
-	}
+	require.Equal(t, http.StatusOK, resp.StatusCode)
 	body, _ := readAll(resp.Body)
-	if string(body) != "hello" {
-		t.Fatalf("body=%q", body)
-	}
-	if !strings.Contains(resp.Header.Get("Content-Disposition"), "out.txt") {
-		t.Fatalf("disposition=%q", resp.Header.Get("Content-Disposition"))
-	}
+	require.Equal(t, "hello", string(body))
+	require.True(t, strings.Contains(resp.Header.Get("Content-Disposition"), "out.txt"))
 }
 
 func TestScopesWorkspaceDownload_RejectsDirectory(t *testing.T) {
@@ -457,13 +375,9 @@ func TestScopesWorkspaceDownload_RejectsDirectory(t *testing.T) {
 		srv.URL+"/v1/scopes/apps/app-1/workspace/download?path=sub", nil)
 	req.Header.Set("Authorization", "Bearer tok")
 	resp, err := http.DefaultClient.Do(req)
-	if err != nil {
-		t.Fatalf("err=%v", err)
-	}
+	require.NoError(t, err)
 	defer resp.Body.Close()
-	if resp.StatusCode != http.StatusBadRequest {
-		t.Fatalf("status=%d", resp.StatusCode)
-	}
+	require.Equal(t, http.StatusBadRequest, resp.StatusCode)
 }
 
 func TestScopesWorkspaceArchive(t *testing.T) {
@@ -479,18 +393,12 @@ func TestScopesWorkspaceArchive(t *testing.T) {
 		srv.URL+"/v1/scopes/apps/app-1/workspace/archive", nil)
 	req.Header.Set("Authorization", "Bearer tok")
 	resp, err := http.DefaultClient.Do(req)
-	if err != nil {
-		t.Fatalf("err=%v", err)
-	}
+	require.NoError(t, err)
 	defer resp.Body.Close()
-	if resp.StatusCode != http.StatusOK {
-		t.Fatalf("status=%d", resp.StatusCode)
-	}
+	require.Equal(t, http.StatusOK, resp.StatusCode)
 	body, _ := readAll(resp.Body)
 	zr, err := zip.NewReader(bytes.NewReader(body), int64(len(body)))
-	if err != nil {
-		t.Fatalf("zip parse: %v", err)
-	}
+	require.NoError(t, err)
 	names := map[string]bool{}
 	for _, f := range zr.File {
 		names[f.Name] = true
@@ -520,13 +428,9 @@ func TestScopesAppArchive_MovesAndCleansUp(t *testing.T) {
 		srv.URL+"/v1/scopes/apps/app-1/archive", nil)
 	req.Header.Set("Authorization", "Bearer tok")
 	resp, err := http.DefaultClient.Do(req)
-	if err != nil {
-		t.Fatalf("err=%v", err)
-	}
+	require.NoError(t, err)
 	resp.Body.Close()
-	if resp.StatusCode != http.StatusOK {
-		t.Fatalf("archive status=%d", resp.StatusCode)
-	}
+	require.Equal(t, http.StatusOK, resp.StatusCode)
 
 	// 旧路径不在
 	if _, err := os.Stat(root); !os.IsNotExist(err) {
@@ -534,16 +438,13 @@ func TestScopesAppArchive_MovesAndCleansUp(t *testing.T) {
 	}
 	// 归档路径在
 	dest := filepath.Join(dataRoot, "archived", "app-1-20260502T120000Z")
-	if _, err := os.Stat(filepath.Join(dest, "workspace", "out.pdf")); err != nil {
-		t.Fatalf("归档后文件应在: %v", err)
-	}
+	_, err = os.Stat(filepath.Join(dest, "workspace", "out.pdf"))
+	require.NoError(t, err)
 
 	// 二次 archive（应用目录已不在）应幂等成功
 	resp2, _ := http.DefaultClient.Do(req)
 	resp2.Body.Close()
-	if resp2.StatusCode != http.StatusOK {
-		t.Fatalf("二次 archive status=%d", resp2.StatusCode)
-	}
+	require.Equal(t, http.StatusOK, resp2.StatusCode)
 
 	// 把归档 mtime 推回到 31 天前，调 cleanup
 	old := nowFunc().Add(-31 * 24 * time.Hour)
@@ -552,13 +453,9 @@ func TestScopesAppArchive_MovesAndCleansUp(t *testing.T) {
 		srv.URL+"/v1/scopes/cleanup-archives?retention_days=30", nil)
 	cleanReq.Header.Set("Authorization", "Bearer tok")
 	cleanResp, err := http.DefaultClient.Do(cleanReq)
-	if err != nil {
-		t.Fatalf("cleanup err=%v", err)
-	}
+	require.NoError(t, err)
 	cleanResp.Body.Close()
-	if cleanResp.StatusCode != http.StatusOK {
-		t.Fatalf("cleanup status=%d", cleanResp.StatusCode)
-	}
+	require.Equal(t, http.StatusOK, cleanResp.StatusCode)
 	if _, err := os.Stat(dest); !os.IsNotExist(err) {
 		t.Fatalf("归档应被清理，err=%v", err)
 	}
@@ -575,13 +472,10 @@ func TestScopesCleanupArchives_KeepsRecent(t *testing.T) {
 		srv.URL+"/v1/scopes/cleanup-archives?retention_days=7", nil)
 	req.Header.Set("Authorization", "Bearer tok")
 	resp, err := http.DefaultClient.Do(req)
-	if err != nil {
-		t.Fatalf("err=%v", err)
-	}
+	require.NoError(t, err)
 	resp.Body.Close()
-	if _, err := os.Stat(keep); err != nil {
-		t.Fatalf("最近归档应保留: %v", err)
-	}
+	_, err = os.Stat(keep)
+	require.NoError(t, err)
 }
 
 func TestScopesCleanupArchives_RejectsBadRetention(t *testing.T) {
@@ -595,9 +489,7 @@ func TestScopesCleanupArchives_RejectsBadRetention(t *testing.T) {
 		req.Header.Set("Authorization", "Bearer tok")
 		resp, _ := http.DefaultClient.Do(req)
 		resp.Body.Close()
-		if resp.StatusCode != http.StatusBadRequest {
-			t.Fatalf("retention=%q got status=%d", v, resp.StatusCode)
-		}
+		require.Equal(t, http.StatusBadRequest, resp.StatusCode)
 	}
 }
 
@@ -610,14 +502,10 @@ func TestScopesAppInit_RejectsInvalidAppID(t *testing.T) {
 		req, _ := http.NewRequest(http.MethodPost, srv.URL+"/v1/scopes/apps/"+bad+"/init", nil)
 		req.Header.Set("Authorization", "Bearer tok")
 		resp, err := http.DefaultClient.Do(req)
-		if err != nil {
-			t.Fatalf("err=%v", err)
-		}
+		require.NoError(t, err)
 		_ = resp.Body.Close()
 		// 路径里含 / 时 mux 解析路径会变；只要不是 200 即可
-		if resp.StatusCode == http.StatusOK {
-			t.Fatalf("bad app id %q got 200", bad)
-		}
+		require.NotEqual(t, http.StatusOK, resp.StatusCode)
 	}
 }
 
@@ -628,11 +516,7 @@ func TestScopesHandler_RequiresAuth(t *testing.T) {
 	req, _ := http.NewRequest(http.MethodPost, srv.URL+"/v1/scopes/apps/abc/init", nil)
 	// 故意不带 Authorization
 	resp, err := http.DefaultClient.Do(req)
-	if err != nil {
-		t.Fatalf("err=%v", err)
-	}
+	require.NoError(t, err)
 	defer resp.Body.Close()
-	if resp.StatusCode != http.StatusUnauthorized {
-		t.Fatalf("status=%d, want 401", resp.StatusCode)
-	}
+	require.Equal(t, http.StatusUnauthorized, resp.StatusCode)
 }

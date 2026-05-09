@@ -8,21 +8,17 @@ import (
 	"net/http/httptest"
 	"strings"
 	"testing"
+	"github.com/stretchr/testify/require"
+	"github.com/stretchr/testify/assert"
 )
 
 // TestUserScopedCreateAPIKeyHappyPath 校验 user-scoped client 调 POST /api/token/ 时携带
 // user 鉴权两件套（Authorization Bearer + New-Api-User），并能解析 success+data.id。
 func TestUserScopedCreateAPIKeyHappyPath(t *testing.T) {
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		if r.URL.Path != "/api/token/" {
-			t.Fatalf("path = %q", r.URL.Path)
-		}
-		if got := r.Header.Get("Authorization"); got != "Bearer user-token" {
-			t.Fatalf("auth = %q, want Bearer user-token", got)
-		}
-		if got := r.Header.Get("New-Api-User"); got != "7" {
-			t.Fatalf("new-api-user header = %q, want 7", got)
-		}
+		require.Equal(t, "/api/token/", r.URL.Path)
+		require.Equal(t, "Bearer user-token", r.Header.Get("Authorization"))
+		require.Equal(t, "7", r.Header.Get("New-Api-User"))
 		w.Header().Set("Content-Type", "application/json")
 		_, _ = w.Write([]byte(`{"success":true,"data":{"id":42,"user_id":7,"name":"alice","key":"sk-truncated","remain_quota":1000}}`))
 	}))
@@ -31,12 +27,8 @@ func TestUserScopedCreateAPIKeyHappyPath(t *testing.T) {
 	client := NewClient(server.URL, "admin-token", 1)
 	user := client.AsUser(7, "user-token")
 	got, err := user.CreateAPIKey(context.Background(), CreateAPIKeyInput{Name: "alice", Quota: 1000})
-	if err != nil {
-		t.Fatalf("CreateAPIKey() error = %v", err)
-	}
-	if got.ID != 42 {
-		t.Fatalf("api key id = %d, want 42", got.ID)
-	}
+	require.NoError(t, err)
+	require.Equal(t, int64(42), got.ID)
 }
 
 // TestUserScopedCreateAPIKeyMapsUnauthorized 校验 401 → ErrUnauthorized 错误映射。
@@ -49,9 +41,7 @@ func TestUserScopedCreateAPIKeyMapsUnauthorized(t *testing.T) {
 	client := NewClient(server.URL, "", 0)
 	user := client.AsUser(0, "")
 	_, err := user.CreateAPIKey(context.Background(), CreateAPIKeyInput{Name: "alice"})
-	if !errors.Is(err, ErrUnauthorized) {
-		t.Fatalf("error = %v, want ErrUnauthorized", err)
-	}
+	require.ErrorIs(t, err, ErrUnauthorized)
 }
 
 // TestUserScopedCreateAPIKeySurfacesUpstreamSuccessFalse 校验 success=false 把 message
@@ -66,12 +56,8 @@ func TestUserScopedCreateAPIKeySurfacesUpstreamSuccessFalse(t *testing.T) {
 	client := NewClient(server.URL, "", 0)
 	user := client.AsUser(7, "tok")
 	_, err := user.CreateAPIKey(context.Background(), CreateAPIKeyInput{Name: "alice"})
-	if !errors.Is(err, ErrUpstream) {
-		t.Fatalf("error = %v, want ErrUpstream", err)
-	}
-	if !strings.Contains(err.Error(), "quota exhausted") {
-		t.Fatalf("error message lost upstream context: %v", err)
-	}
+	require.ErrorIs(t, err, ErrUpstream)
+	require.True(t, strings.Contains(err.Error(), "quota exhausted"))
 }
 
 // TestUserScopedSetAPIKeyStatusPropagatesErrors 校验 PUT /api/token/?status_only=true
@@ -93,15 +79,9 @@ func TestUserScopedSetAPIKeyStatusPropagatesErrors(t *testing.T) {
 // 与 data.key 字段解析。
 func TestUserScopedGetTokenFullKeyHappyPath(t *testing.T) {
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		if r.URL.Path != "/api/token/42/key" {
-			t.Fatalf("path = %q, want /api/token/42/key", r.URL.Path)
-		}
-		if r.Method != http.MethodPost {
-			t.Fatalf("method = %q, want POST", r.Method)
-		}
-		if got := r.Header.Get("New-Api-User"); got != "7" {
-			t.Fatalf("new-api-user = %q, want 7", got)
-		}
+		require.Equal(t, "/api/token/42/key", r.URL.Path)
+		require.Equal(t, http.MethodPost, r.Method)
+		require.Equal(t, "7", r.Header.Get("New-Api-User"))
 		w.Header().Set("Content-Type", "application/json")
 		_, _ = w.Write([]byte(`{"success":true,"data":{"key":"sk-real-1234567890abcdef"}}`))
 	}))
@@ -109,12 +89,8 @@ func TestUserScopedGetTokenFullKeyHappyPath(t *testing.T) {
 
 	client := NewClient(server.URL, "", 0)
 	got, err := client.AsUser(7, "tok").GetTokenFullKey(context.Background(), 42)
-	if err != nil {
-		t.Fatalf("GetTokenFullKey() error = %v", err)
-	}
-	if got != "sk-real-1234567890abcdef" {
-		t.Fatalf("key = %q", got)
-	}
+	require.NoError(t, err)
+	require.Equal(t, "sk-real-1234567890abcdef", got)
 }
 
 // TestUserScopedGetTokenFullKeyMapsNotFound 校验 success=false + message="not found"
@@ -128,27 +104,22 @@ func TestUserScopedGetTokenFullKeyMapsNotFound(t *testing.T) {
 
 	client := NewClient(server.URL, "", 0)
 	_, err := client.AsUser(1, "tok").GetTokenFullKey(context.Background(), 999)
-	if !errors.Is(err, ErrNotFound) {
-		t.Fatalf("error = %v, want ErrNotFound", err)
-	}
+	require.ErrorIs(t, err, ErrNotFound)
 }
 
 // TestNewApiUserHeaderOmittedWhenAdminUserIDZero 校验 AdminUserID=0 时不发送 New-Api-User
 // header；旧测试构造空 client 依赖此行为，避免 strict mock 拒绝未知 header。
 func TestNewApiUserHeaderOmittedWhenAdminUserIDZero(t *testing.T) {
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		if got := r.Header.Get("New-Api-User"); got != "" {
-			t.Fatalf("new-api-user header = %q, want empty when AdminUserID=0", got)
-		}
+		require.Empty(t, r.Header.Get("New-Api-User"))
 		w.Header().Set("Content-Type", "application/json")
 		_, _ = w.Write([]byte(`{"success":true,"data":{"remain_quota":0,"used_quota":0}}`))
 	}))
 	defer server.Close()
 
 	client := NewClient(server.URL, "", 0)
-	if _, err := client.GetUserBalance(context.Background(), 1); err != nil {
-		t.Fatalf("GetUserBalance() error = %v", err)
-	}
+	_, err := client.GetUserBalance(context.Background(), 1)
+	require.NoError(t, err)
 }
 
 // TestRechargeUserUsesManageEndpoint 校验 RechargeUser 改走 POST /api/user/manage
@@ -180,24 +151,16 @@ func TestRechargeUserUsesManageEndpoint(t *testing.T) {
 	got, err := client.RechargeUser(context.Background(), RechargeInput{
 		NewAPIUserID: 42, CreditAmount: 1000, Remark: "test-recharge",
 	})
-	if err != nil {
-		t.Fatalf("RechargeUser() error = %v", err)
-	}
+	require.NoError(t, err)
 	if !gotManage || !gotGet {
 		t.Fatalf("expected manage + GET, got manage=%v get=%v", gotManage, gotGet)
 	}
 	if manageBody["action"] != "add_quota" || manageBody["mode"] != "add" {
 		t.Fatalf("manage body action/mode wrong: %v", manageBody)
 	}
-	if int64Of(manageBody["value"]) != 1000 {
-		t.Fatalf("manage body value = %v, want 1000", manageBody["value"])
-	}
-	if got.RemainQuota != 1500 {
-		t.Fatalf("RemainQuota = %d, want 1500 (post-recharge fresh GET)", got.RemainQuota)
-	}
-	if got.RefID == "" {
-		t.Fatalf("RefID empty; need synthesized id for audit reconciliation")
-	}
+	require.Equal(t, int64(1000), int64Of(manageBody["value"]))
+	require.Equal(t, int64(1500), got.RemainQuota)
+	require.NotEqual(t, "", got.RefID)
 }
 
 // TestCreateUserCallsAdminEndpoint 校验 CreateUser 调 admin POST /api/user/ 并回查 user_id：
@@ -216,9 +179,7 @@ func TestCreateUserCallsAdminEndpoint(t *testing.T) {
 			_, _ = w.Write([]byte(`{"success":true,"message":""}`))
 		case r.Method == http.MethodGet && strings.HasPrefix(r.URL.Path, "/api/user/search"):
 			gotSearch = true
-			if r.URL.Query().Get("keyword") != "alice" {
-				t.Fatalf("search keyword = %q", r.URL.Query().Get("keyword"))
-			}
+			require.Equal(t, "alice", r.URL.Query().Get("keyword"))
 			_, _ = w.Write([]byte(`{"success":true,"data":{"items":[{"id":99,"username":"alice","display_name":"Alice"}]}}`))
 		default:
 			t.Fatalf("unexpected request: %s %s", r.Method, r.URL.Path)
@@ -230,15 +191,11 @@ func TestCreateUserCallsAdminEndpoint(t *testing.T) {
 	user, err := client.CreateUser(context.Background(), CreateUserInput{
 		Username: "alice", Password: "pwd", DisplayName: "Alice",
 	})
-	if err != nil {
-		t.Fatalf("CreateUser() error = %v", err)
-	}
+	require.NoError(t, err)
 	if !gotPost || !gotSearch {
 		t.Fatalf("expected POST + search, got post=%v search=%v", gotPost, gotSearch)
 	}
-	if user.ID != 99 {
-		t.Fatalf("user.ID = %d, want 99 (resolved via search fallback)", user.ID)
-	}
+	require.Equal(t, int64(99), user.ID)
 }
 
 // TestBootstrapUserAccessTokenLoginThenGetToken 校验登录拿 cookie + 带 cookie 调
@@ -268,9 +225,7 @@ func TestBootstrapUserAccessTokenLoginThenGetToken(t *testing.T) {
 			if err != nil || c.Value != issuedCookie {
 				t.Fatalf("get-token 缺失或不匹配的 session cookie: err=%v cookie=%v", err, c)
 			}
-			if got := r.Header.Get("New-Api-User"); got != "42" {
-				t.Fatalf("New-Api-User header = %q, want 42 (从 login data.id 派生)", got)
-			}
+			require.Equal(t, "42", r.Header.Get("New-Api-User"))
 			_, _ = w.Write([]byte(`{"success":true,"data":"access-tok-xyz"}`))
 		default:
 			t.Fatalf("unexpected request: %s %s", r.Method, r.URL.Path)
@@ -280,15 +235,11 @@ func TestBootstrapUserAccessTokenLoginThenGetToken(t *testing.T) {
 
 	client := NewClient(server.URL, "", 0)
 	got, err := client.BootstrapUserAccessToken(context.Background(), "alice", "pw")
-	if err != nil {
-		t.Fatalf("BootstrapUserAccessToken() error = %v", err)
-	}
+	require.NoError(t, err)
 	if !loginCalled || !tokenCalled {
 		t.Fatalf("expected login + get-token, got login=%v token=%v", loginCalled, tokenCalled)
 	}
-	if got != "access-tok-xyz" {
-		t.Fatalf("access_token = %q, want access-tok-xyz", got)
-	}
+	require.Equal(t, "access-tok-xyz", got)
 }
 
 // decodeJSONBody 是测试 helper：把请求 body 解到 target；忽略错误（测试中调用方自行检查 target）。
@@ -329,21 +280,12 @@ func TestClient_DeleteUser_AdminAuthHeaders(t *testing.T) {
 	defer srv.Close()
 
 	c := NewClient(srv.URL, "admin-token", 1)
-	if err := c.DeleteUser(context.Background(), 99); err != nil {
-		t.Fatalf("DeleteUser err=%v", err)
-	}
-	if gotMethod != "DELETE" {
-		t.Errorf("method=%q，期望 DELETE", gotMethod)
-	}
-	if gotPath != "/api/user/99" {
-		t.Errorf("path=%q，期望 /api/user/99", gotPath)
-	}
-	if gotAuthHeader != "Bearer admin-token" {
-		t.Errorf("Authorization=%q", gotAuthHeader)
-	}
-	if gotUserHeader != "1" {
-		t.Errorf("New-Api-User=%q", gotUserHeader)
-	}
+	err := c.DeleteUser(context.Background(), 99)
+	require.NoError(t, err)
+	assert.Equal(t, "DELETE", gotMethod)
+	assert.Equal(t, "/api/user/99", gotPath)
+	assert.Equal(t, "Bearer admin-token", gotAuthHeader)
+	assert.Equal(t, "1", gotUserHeader)
 }
 
 func TestClient_DeleteUser_NotFoundMappedToErrNotFound(t *testing.T) {
@@ -353,9 +295,7 @@ func TestClient_DeleteUser_NotFoundMappedToErrNotFound(t *testing.T) {
 	defer srv.Close()
 	c := NewClient(srv.URL, "t", 1)
 	err := c.DeleteUser(context.Background(), 999)
-	if !errors.Is(err, ErrNotFound) {
-		t.Errorf("err=%v，期望 ErrNotFound", err)
-	}
+	require.ErrorIs(t, err, ErrNotFound)
 }
 
 // fakeRefresher 模拟 access_token 自愈逻辑。
@@ -393,21 +333,11 @@ func TestUserScopedClient_401TriggersRefreshAndRetries(t *testing.T) {
 	user := base.AsUserWithRefresh(99, "stale-token", refresher)
 
 	fullKey, err := user.GetTokenFullKey(context.Background(), 13)
-	if err != nil {
-		t.Fatalf("err=%v", err)
-	}
-	if fullKey != "sk-fresh" {
-		t.Errorf("fullKey=%q", fullKey)
-	}
-	if requestCount != 2 {
-		t.Errorf("requestCount=%d，期望 2（首次 401 + 重试 1 次）", requestCount)
-	}
-	if lastAuthHeader != "Bearer fresh-token" {
-		t.Errorf("最终 Authorization=%q，期望 Bearer fresh-token", lastAuthHeader)
-	}
-	if refresher.callCount != 1 {
-		t.Errorf("refresher.callCount=%d，期望 1", refresher.callCount)
-	}
+	require.NoError(t, err)
+	assert.Equal(t, "sk-fresh", fullKey)
+	assert.Equal(t, 2, requestCount)
+	assert.Equal(t, "Bearer fresh-token", lastAuthHeader)
+	assert.Equal(t, 1, refresher.callCount)
 }
 
 func TestUserScopedClient_401WithoutRefresherPropagates(t *testing.T) {
@@ -418,9 +348,7 @@ func TestUserScopedClient_401WithoutRefresherPropagates(t *testing.T) {
 	base := NewClient(srv.URL, "", 0)
 	user := base.AsUser(99, "stale-token") // 旧签名，无 refresher
 	_, err := user.GetTokenFullKey(context.Background(), 13)
-	if !errors.Is(err, ErrUnauthorized) {
-		t.Errorf("err=%v，期望 ErrUnauthorized", err)
-	}
+	require.ErrorIs(t, err, ErrUnauthorized)
 }
 
 func TestUserScopedClient_RefresherFailurePropagatesUnauthorized(t *testing.T) {
@@ -432,9 +360,7 @@ func TestUserScopedClient_RefresherFailurePropagatesUnauthorized(t *testing.T) {
 	refresher := &fakeRefresher{err: errors.New("login 5xx")}
 	user := base.AsUserWithRefresh(99, "stale-token", refresher)
 	_, err := user.GetTokenFullKey(context.Background(), 13)
-	if !errors.Is(err, ErrUnauthorized) {
-		t.Errorf("err=%v，期望 ErrUnauthorized（refresher 失败回退到 401）", err)
-	}
+	require.ErrorIs(t, err, ErrUnauthorized)
 }
 
 func TestUserScopedClient_SecondCall401AfterRefreshDoesNotLoop(t *testing.T) {
@@ -448,10 +374,6 @@ func TestUserScopedClient_SecondCall401AfterRefreshDoesNotLoop(t *testing.T) {
 	refresher := &fakeRefresher{nextAccessToken: "fresh"}
 	user := base.AsUserWithRefresh(99, "stale", refresher)
 	_, err := user.GetTokenFullKey(context.Background(), 13)
-	if !errors.Is(err, ErrUnauthorized) {
-		t.Errorf("err=%v", err)
-	}
-	if requestCount != 2 {
-		t.Errorf("requestCount=%d，期望 2（首次 401 + 重试 1 次仍 401，不再循环）", requestCount)
-	}
+	require.ErrorIs(t, err, ErrUnauthorized)
+	assert.Equal(t, 2, requestCount)
 }

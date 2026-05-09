@@ -10,6 +10,7 @@ import (
 	"oc-manager/internal/auth"
 	"oc-manager/internal/domain"
 	"oc-manager/internal/store/sqlc"
+	"github.com/stretchr/testify/require"
 )
 
 func TestOnboardMemberCommitsOnSuccess(t *testing.T) {
@@ -20,15 +21,11 @@ func TestOnboardMemberCommitsOnSuccess(t *testing.T) {
 	result, err := svc.OnboardMember(context.Background(), platformAdmin(), testOrgID, OnboardMemberInput{
 		Username: "alice", DisplayName: "Alice", Password: "pwd", AppName: "alice-bot",
 	})
-	if err != nil {
-		t.Fatalf("OnboardMember() error = %v", err)
-	}
+	require.NoError(t, err)
 	if result.JobID == "" || result.App.Name != "alice-bot" || result.Member.Username != "alice" {
 		t.Fatalf("result = %+v", result)
 	}
-	if !tx.committed {
-		t.Fatalf("expected commit")
-	}
+	require.True(t, tx.committed)
 	if store.users == 0 || store.apps == 0 || store.bindings == 0 || store.audits == 0 || store.jobs == 0 {
 		t.Fatalf("missing writes: %+v", store.counters())
 	}
@@ -43,12 +40,8 @@ func TestOnboardMemberRollsBackWhenAppCreationFails(t *testing.T) {
 	_, err := svc.OnboardMember(context.Background(), platformAdmin(), testOrgID, OnboardMemberInput{
 		Username: "alice", DisplayName: "Alice", Password: "pwd", AppName: "alice-bot",
 	})
-	if err == nil {
-		t.Fatalf("expected error")
-	}
-	if tx.committed {
-		t.Fatalf("expected rollback")
-	}
+	require.Error(t, err)
+	require.False(t, tx.committed)
 }
 
 func TestOnboardMemberRollsBackWhenJobCreationFails(t *testing.T) {
@@ -60,12 +53,8 @@ func TestOnboardMemberRollsBackWhenJobCreationFails(t *testing.T) {
 	_, err := svc.OnboardMember(context.Background(), platformAdmin(), testOrgID, OnboardMemberInput{
 		Username: "alice", DisplayName: "Alice", Password: "pwd", AppName: "alice-bot",
 	})
-	if err == nil {
-		t.Fatalf("expected error")
-	}
-	if tx.committed {
-		t.Fatalf("expected rollback")
-	}
+	require.Error(t, err)
+	require.False(t, tx.committed)
 }
 
 func TestOnboardMemberRequiresOrgManagement(t *testing.T) {
@@ -75,9 +64,7 @@ func TestOnboardMemberRequiresOrgManagement(t *testing.T) {
 	_, err := svc.OnboardMember(context.Background(), auth.Principal{Role: domain.UserRoleOrgAdmin, OrgID: testOrg2ID}, testOrgID, OnboardMemberInput{
 		Username: "alice", DisplayName: "Alice", Password: "pwd", AppName: "alice-bot",
 	})
-	if !errors.Is(err, ErrForbidden) {
-		t.Fatalf("OnboardMember() error = %v, want ErrForbidden", err)
-	}
+	require.ErrorIs(t, err, ErrForbidden)
 }
 
 func TestOnboardMemberRejectsDisabledOrg(t *testing.T) {
@@ -89,9 +76,7 @@ func TestOnboardMemberRejectsDisabledOrg(t *testing.T) {
 	_, err := svc.OnboardMember(context.Background(), platformAdmin(), testOrgID, OnboardMemberInput{
 		Username: "alice", DisplayName: "Alice", Password: "pwd", AppName: "alice-bot",
 	})
-	if !errors.Is(err, ErrMemberCreateInvalid) {
-		t.Fatalf("OnboardMember() error = %v, want ErrMemberCreateInvalid", err)
-	}
+	require.ErrorIs(t, err, ErrMemberCreateInvalid)
 }
 
 type txRunnerStub struct {
@@ -242,9 +227,7 @@ func TestOnboardMember_SelectNode_NoActiveNode(t *testing.T) {
 	_, err := svc.OnboardMember(context.Background(), platformAdmin(), testOrgID, OnboardMemberInput{
 		Username: "alice", DisplayName: "Alice", Password: "pwd", AppName: "alice-bot",
 	})
-	if !errors.Is(err, ErrNoNodeAvailable) {
-		t.Fatalf("err = %v, want ErrNoNodeAvailable", err)
-	}
+	require.ErrorIs(t, err, ErrNoNodeAvailable)
 }
 
 func TestOnboardMember_SelectNode_OnlyNodeAtCapacity(t *testing.T) {
@@ -257,9 +240,7 @@ func TestOnboardMember_SelectNode_OnlyNodeAtCapacity(t *testing.T) {
 	_, err := svc.OnboardMember(context.Background(), platformAdmin(), testOrgID, OnboardMemberInput{
 		Username: "alice", DisplayName: "Alice", Password: "pwd", AppName: "alice-bot",
 	})
-	if !errors.Is(err, ErrNoNodeAvailable) {
-		t.Fatalf("err = %v, want ErrNoNodeAvailable（节点已满）", err)
-	}
+	require.ErrorIs(t, err, ErrNoNodeAvailable)
 }
 
 func TestOnboardMember_SelectNode_PicksLargestRemaining(t *testing.T) {
@@ -274,14 +255,10 @@ func TestOnboardMember_SelectNode_PicksLargestRemaining(t *testing.T) {
 	_, err := svc.OnboardMember(context.Background(), platformAdmin(), testOrgID, OnboardMemberInput{
 		Username: "alice", DisplayName: "Alice", Password: "pwd", AppName: "alice-bot",
 	})
-	if err != nil {
-		t.Fatalf("OnboardMember err = %v", err)
-	}
+	require.NoError(t, err)
 	// 通过 selectNode 内排序，n2 应被优先选择；input.NodeID 在 onboarding 内被覆盖后
 	// 通过 CreateApp 透传，校验 stub 看到的 RuntimeNodeID 即可。
-	if store.lastAppNodeID != "00000000-0000-0000-0000-000000000a02" {
-		t.Fatalf("CreateApp.RuntimeNodeID = %q, want 第二节点（剩余容量更大）", store.lastAppNodeID)
-	}
+	require.Equal(t, "00000000-0000-0000-0000-000000000a02", store.lastAppNodeID)
 }
 
 func TestOnboardMember_SelectNode_NULLMaxAppsTreatedAsInfinity(t *testing.T) {
@@ -296,12 +273,8 @@ func TestOnboardMember_SelectNode_NULLMaxAppsTreatedAsInfinity(t *testing.T) {
 	_, err := svc.OnboardMember(context.Background(), platformAdmin(), testOrgID, OnboardMemberInput{
 		Username: "alice", DisplayName: "Alice", Password: "pwd", AppName: "alice-bot",
 	})
-	if err != nil {
-		t.Fatalf("OnboardMember err = %v", err)
-	}
-	if store.lastAppNodeID != "00000000-0000-0000-0000-000000000a01" {
-		t.Fatalf("CreateApp.RuntimeNodeID = %q, want NULL max_apps 节点（视为 +∞）", store.lastAppNodeID)
-	}
+	require.NoError(t, err)
+	require.Equal(t, "00000000-0000-0000-0000-000000000a01", store.lastAppNodeID)
 }
 
 func TestOnboardMember_ExplicitNodeID_BypassesSelector(t *testing.T) {
@@ -314,9 +287,7 @@ func TestOnboardMember_ExplicitNodeID_BypassesSelector(t *testing.T) {
 		Username: "alice", DisplayName: "Alice", Password: "pwd", AppName: "alice-bot",
 		NodeID: "00000000-0000-0000-0000-000000000099",
 	})
-	if err != nil {
-		t.Fatalf("OnboardMember err = %v（显式 NodeID 不应触发 selectNode）", err)
-	}
+	require.NoError(t, err)
 	if selector.calledN > 0 {
 		t.Fatalf("selectNode 被调用了 %d 次，但显式 NodeID 应直接走旧路径", selector.calledN)
 	}

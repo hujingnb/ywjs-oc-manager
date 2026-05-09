@@ -1,10 +1,10 @@
 package openclaw
 
 import (
-	"errors"
 	"strings"
 	"testing"
 	"time"
+	"github.com/stretchr/testify/require"
 )
 
 // 真实 stdout 样本（Sprint 0 POC 实测）。
@@ -12,15 +12,9 @@ const realQRURLLine = "https://liteapp.weixin.qq.com/q/7GiQu1?qrcode=85e18acc56e
 
 func TestParseChannelLoginEventQRCodeFromRealUpstream(t *testing.T) {
 	event, err := ParseChannelLoginEvent(realQRURLLine)
-	if err != nil {
-		t.Fatalf("ParseChannelLoginEvent() error = %v", err)
-	}
-	if event.Type != "qrcode" {
-		t.Fatalf("event.Type = %q, want qrcode", event.Type)
-	}
-	if event.QRCode != realQRURLLine {
-		t.Fatalf("event.QRCode = %q, want %q", event.QRCode, realQRURLLine)
-	}
+	require.NoError(t, err)
+	require.Equal(t, "qrcode", event.Type)
+	require.Equal(t, realQRURLLine, event.QRCode)
 	if event.ExpiresAt.IsZero() {
 		t.Fatalf("event.ExpiresAt should default to now+5min")
 	}
@@ -35,12 +29,8 @@ func TestParseChannelLoginEventQRCodeWithLeadingPrompt(t *testing.T) {
 	// 这里只保证 URL 行本身被识别。
 	line := "    " + realQRURLLine + "    "
 	event, err := ParseChannelLoginEvent(line)
-	if err != nil {
-		t.Fatalf("ParseChannelLoginEvent() error = %v", err)
-	}
-	if !strings.HasPrefix(event.QRCode, "https://") {
-		t.Fatalf("event.QRCode = %q", event.QRCode)
-	}
+	require.NoError(t, err)
+	require.True(t, strings.HasPrefix(event.QRCode, "https://"))
 }
 
 func TestParseChannelLoginEventBoundFromRealUpstream(t *testing.T) {
@@ -48,68 +38,42 @@ func TestParseChannelLoginEventBoundFromRealUpstream(t *testing.T) {
 	// 注意结尾有句号；不携带任何账号标识。
 	line := "已将此 OpenClaw 连接到微信。"
 	event, err := ParseChannelLoginEvent(line)
-	if err != nil {
-		t.Fatalf("ParseChannelLoginEvent() error = %v", err)
-	}
-	if event.Type != "bound" {
-		t.Fatalf("event.Type = %q, want bound", event.Type)
-	}
-	if event.Channel != "openclaw-weixin" {
-		t.Fatalf("event.Channel = %q, want openclaw-weixin", event.Channel)
-	}
+	require.NoError(t, err)
+	require.Equal(t, "bound", event.Type)
+	require.Equal(t, "openclaw-weixin", event.Channel)
 	// stdout 不携带 userId/wxid，service 层负责后续从 plugin state 补齐。
-	if event.Bound != "" {
-		t.Fatalf("event.Bound 应为空（stdout 不携带账号标识），got %q", event.Bound)
-	}
+	require.Equal(t, "", event.Bound)
 }
 
 func TestParseChannelLoginEventBoundEnglishFallback(t *testing.T) {
 	// 关键词列表保留英文 fallback，应对未来上游加英文输出。
 	line := "Connected this OpenClaw to WeChat."
 	event, err := ParseChannelLoginEvent(line)
-	if err != nil {
-		t.Fatalf("ParseChannelLoginEvent() error = %v", err)
-	}
-	if event.Type != "bound" {
-		t.Fatalf("event.Type = %q, want bound", event.Type)
-	}
+	require.NoError(t, err)
+	require.Equal(t, "bound", event.Type)
 }
 
 func TestParseChannelLoginEventExpired(t *testing.T) {
 	for _, line := range []string{"二维码已过期", "二维码过期，请重新尝试", "已失效"} {
 		event, err := ParseChannelLoginEvent(line)
-		if err != nil {
-			t.Fatalf("line=%q error=%v", line, err)
-		}
-		if event.Type != "expired" {
-			t.Fatalf("line=%q event.Type=%q want expired", line, event.Type)
-		}
+		require.NoError(t, err)
+		require.Equal(t, "expired", event.Type)
 	}
 }
 
 func TestParseChannelLoginEventFailed(t *testing.T) {
 	line := "认证失败：账号被冻结"
 	event, err := ParseChannelLoginEvent(line)
-	if err != nil {
-		t.Fatalf("error=%v", err)
-	}
-	if event.Type != "failed" {
-		t.Fatalf("event.Type=%q want failed", event.Type)
-	}
-	if event.Error == "" {
-		t.Fatalf("event.Error 应携带错误描述")
-	}
+	require.NoError(t, err)
+	require.Equal(t, "failed", event.Type)
+	require.NotEqual(t, "", event.Error)
 }
 
 func TestParseChannelLoginEventPending(t *testing.T) {
 	for _, line := range []string{"正在等待操作...", "扫描成功，请在手机上确认", "等待扫描"} {
 		event, err := ParseChannelLoginEvent(line)
-		if err != nil {
-			t.Fatalf("line=%q error=%v", line, err)
-		}
-		if event.Type != "pending" {
-			t.Fatalf("line=%q event.Type=%q want pending", line, event.Type)
-		}
+		require.NoError(t, err)
+		require.Equal(t, "pending", event.Type)
 	}
 }
 
@@ -131,9 +95,7 @@ func TestParseChannelLoginEventRejectsNoise(t *testing.T) {
 	}
 	for _, line := range cases {
 		_, err := ParseChannelLoginEvent(line)
-		if !errors.Is(err, ErrUnparsableOutput) {
-			t.Fatalf("ParseChannelLoginEvent(%q) error = %v, want ErrUnparsableOutput", line, err)
-		}
+		require.ErrorIs(t, err, ErrUnparsableOutput)
 	}
 }
 
@@ -141,9 +103,7 @@ func TestParseChannelLoginEventQRCodeHostVariant(t *testing.T) {
 	// 容忍上游未来 host 变化（如换成 weixin.qq.com 直链），只要包含 ?qrcode= 都识别。
 	line := "https://example.weixin.qq.com/some/path?qrcode=abc123def456&extra=1"
 	event, err := ParseChannelLoginEvent(line)
-	if err != nil {
-		t.Fatalf("error=%v", err)
-	}
+	require.NoError(t, err)
 	if event.Type != "qrcode" || !strings.Contains(event.QRCode, "qrcode=abc123") {
 		t.Fatalf("event=%+v", event)
 	}

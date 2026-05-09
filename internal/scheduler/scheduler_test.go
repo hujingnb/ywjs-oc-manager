@@ -8,6 +8,7 @@ import (
 	"github.com/jackc/pgx/v5/pgtype"
 
 	"oc-manager/internal/store/sqlc"
+	"github.com/stretchr/testify/require"
 )
 
 func TestSchedulerTickReenqueuesReadyJobs(t *testing.T) {
@@ -15,41 +16,33 @@ func TestSchedulerTickReenqueuesReadyJobs(t *testing.T) {
 	queue := &queueStub{}
 
 	s := New(store, queue, Config{})
-	if err := s.Tick(context.Background()); err != nil {
-		t.Fatalf("Tick() error = %v", err)
-	}
-	if len(queue.enqueued) != 2 {
-		t.Fatalf("enqueued = %+v, want 2", queue.enqueued)
-	}
+	err := s.Tick(context.Background())
+	require.NoError(t, err)
+	require.Equal(t, 2, len(queue.enqueued))
 }
 
 func TestSchedulerTickPropagatesEnqueueError(t *testing.T) {
 	store := &storeStub{ready: makeJobs(t, "00000000-0000-0000-0000-0000000001a1")}
 	queue := &queueStub{err: errors.New("redis down")}
 	s := New(store, queue, Config{})
-	if err := s.Tick(context.Background()); err == nil {
-		t.Fatalf("expected error")
-	}
+	err := s.Tick(context.Background())
+	require.Error(t, err)
 }
 
 func TestSchedulerTickAppliesDefaultBatchSize(t *testing.T) {
 	store := &storeStub{}
 	s := New(store, &queueStub{}, Config{})
-	if err := s.Tick(context.Background()); err != nil {
-		t.Fatalf("Tick() error = %v", err)
-	}
-	if store.lastLimit != 100 {
-		t.Fatalf("limit = %d, want 100", store.lastLimit)
-	}
+	err := s.Tick(context.Background())
+	require.NoError(t, err)
+	require.Equal(t, int32(100), store.lastLimit)
 }
 
 func makeJobs(t *testing.T, ids ...string) []sqlc.Job {
 	jobs := make([]sqlc.Job, 0, len(ids))
 	for _, id := range ids {
 		var uuid pgtype.UUID
-		if err := uuid.Scan(id); err != nil {
-			t.Fatalf("uuid: %v", err)
-		}
+		err := uuid.Scan(id)
+		require.NoError(t, err)
 		jobs = append(jobs, sqlc.Job{ID: uuid})
 	}
 	return jobs

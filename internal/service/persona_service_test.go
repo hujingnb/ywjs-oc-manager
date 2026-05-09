@@ -2,7 +2,6 @@ package service
 
 import (
 	"context"
-	"errors"
 	"testing"
 
 	"github.com/jackc/pgx/v5"
@@ -11,6 +10,7 @@ import (
 	"oc-manager/internal/auth"
 	"oc-manager/internal/domain"
 	"oc-manager/internal/store/sqlc"
+	"github.com/stretchr/testify/require"
 )
 
 const testPersonaOrgID = "00000000-0000-0000-0000-000000003001"
@@ -26,9 +26,7 @@ func TestPersona_GetCurrentReturnsExisting(t *testing.T) {
 	}
 	svc := NewPersonaService(stub)
 	result, err := svc.GetCurrent(context.Background(), platformAdmin(), testPersonaOrgID)
-	if err != nil {
-		t.Fatalf("GetCurrent err = %v", err)
-	}
+	require.NoError(t, err)
 	if result.SystemPrompt != "你是助手" || result.Version != 3 || !result.AllowMemberOverride {
 		t.Fatalf("result = %+v", result)
 	}
@@ -38,18 +36,14 @@ func TestPersona_GetCurrentMapsNoRowsToErrPersonaNotFound(t *testing.T) {
 	stub := &personaStub{getErr: pgx.ErrNoRows}
 	svc := NewPersonaService(stub)
 	_, err := svc.GetCurrent(context.Background(), platformAdmin(), testPersonaOrgID)
-	if !errors.Is(err, ErrPersonaNotFound) {
-		t.Fatalf("err = %v, want ErrPersonaNotFound", err)
-	}
+	require.ErrorIs(t, err, ErrPersonaNotFound)
 }
 
 func TestPersona_GetCurrentDeniedForOtherOrg(t *testing.T) {
 	stub := &personaStub{}
 	svc := NewPersonaService(stub)
 	_, err := svc.GetCurrent(context.Background(), auth.Principal{Role: domain.UserRoleOrgMember, OrgID: "other"}, testPersonaOrgID)
-	if !errors.Is(err, ErrPersonaDenied) {
-		t.Fatalf("err = %v, want ErrPersonaDenied", err)
-	}
+	require.ErrorIs(t, err, ErrPersonaDenied)
 }
 
 func TestPersona_ReplaceWritesNewVersion(t *testing.T) {
@@ -65,24 +59,16 @@ func TestPersona_ReplaceWritesNewVersion(t *testing.T) {
 		SystemPrompt:        "新版本",
 		AllowMemberOverride: true,
 	})
-	if err != nil {
-		t.Fatalf("Replace err = %v", err)
-	}
-	if result.Version != 4 {
-		t.Fatalf("version = %d", result.Version)
-	}
-	if !stub.createCalled {
-		t.Fatal("应当调 CreateOrganizationPersona")
-	}
+	require.NoError(t, err)
+	require.Equal(t, int32(4), result.Version)
+	require.True(t, stub.createCalled)
 }
 
 func TestPersona_ReplaceRejectsEmptyPrompt(t *testing.T) {
 	stub := &personaStub{}
 	svc := NewPersonaService(stub)
 	_, err := svc.Replace(context.Background(), platformAdmin(), testPersonaOrgID, PersonaInput{SystemPrompt: ""})
-	if err == nil {
-		t.Fatal("空 system_prompt 应当报错")
-	}
+	require.Error(t, err)
 }
 
 func TestPersona_OrgAdminCanEditOwnOrg(t *testing.T) {
@@ -109,9 +95,7 @@ func TestPersona_OrgMemberCannotEdit(t *testing.T) {
 		testPersonaOrgID,
 		PersonaInput{SystemPrompt: "x"},
 	)
-	if !errors.Is(err, ErrPersonaDenied) {
-		t.Fatalf("err = %v, want ErrPersonaDenied", err)
-	}
+	require.ErrorIs(t, err, ErrPersonaDenied)
 }
 
 type personaStub struct {

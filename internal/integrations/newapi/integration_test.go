@@ -11,6 +11,7 @@ import (
 	"strconv"
 	"testing"
 	"time"
+	"github.com/stretchr/testify/require"
 )
 
 // TestIntegrationFullProvisionAndTokenFlow 用真实 new-api 实例验证全链路：
@@ -56,9 +57,7 @@ func TestIntegrationFullProvisionAndTokenFlow(t *testing.T) {
 		Password:    password,
 		DisplayName: "smoke " + suffix,
 	})
-	if err != nil {
-		t.Fatalf("CreateUser err: %v", err)
-	}
+	require.NoError(t, err)
 	if user.ID == 0 || user.Username != username {
 		t.Fatalf("CreateUser returned %+v", user)
 	}
@@ -66,12 +65,8 @@ func TestIntegrationFullProvisionAndTokenFlow(t *testing.T) {
 
 	// 2. login + 取 access_token
 	accessToken, err := c.BootstrapUserAccessToken(ctx, username, password)
-	if err != nil {
-		t.Fatalf("BootstrapUserAccessToken err: %v", err)
-	}
-	if accessToken == "" {
-		t.Fatalf("access token 为空")
-	}
+	require.NoError(t, err)
+	require.NotEqual(t, "", accessToken)
 	t.Logf("BootstrapUserAccessToken OK access_token len=%d", len(accessToken))
 
 	// 3. user-scoped 创 token + 拉完整 sk-
@@ -82,31 +77,23 @@ func TestIntegrationFullProvisionAndTokenFlow(t *testing.T) {
 		Quota:      0,
 		UnlimitedQ: true,
 	})
-	if err != nil {
-		t.Fatalf("CreateAPIKey err: %v", err)
-	}
-	if tk.ID == 0 {
-		t.Fatalf("CreateAPIKey returned id=0, fallback broken")
-	}
+	require.NoError(t, err)
+	require.NotEqual(t, 0, tk.ID)
 	t.Logf("CreateAPIKey OK id=%d name=%s", tk.ID, tk.Name)
 
 	fullKey, err := user_scoped.GetTokenFullKey(ctx, tk.ID)
-	if err != nil {
-		t.Fatalf("GetTokenFullKey err: %v", err)
-	}
+	require.NoError(t, err)
 	if len(fullKey) <= 18 {
 		t.Fatalf("fullKey len=%d, want > 18 (truncated)", len(fullKey))
 	}
 	t.Logf("GetTokenFullKey OK len=%d prefix=%s", len(fullKey), fullKey[:8])
 
 	// 4. 禁用 + 恢复 token
-	if err := user_scoped.SetAPIKeyStatus(ctx, tk.ID, 2); err != nil {
-		t.Fatalf("SetAPIKeyStatus disable err: %v", err)
-	}
+	err := user_scoped.SetAPIKeyStatus(ctx, tk.ID, 2)
+	require.NoError(t, err)
 	t.Logf("SetAPIKeyStatus disable OK")
-	if err := user_scoped.SetAPIKeyStatus(ctx, tk.ID, 1); err != nil {
-		t.Fatalf("SetAPIKeyStatus restore err: %v", err)
-	}
+	err := user_scoped.SetAPIKeyStatus(ctx, tk.ID, 1)
+	require.NoError(t, err)
 	t.Logf("SetAPIKeyStatus restore OK")
 
 	// 5. admin 给业务 user 充值 100，验证 manage add_quota 路径
@@ -115,12 +102,8 @@ func TestIntegrationFullProvisionAndTokenFlow(t *testing.T) {
 		CreditAmount: 100,
 		Remark:       fmt.Sprintf("integration-smoke-%s", suffix),
 	})
-	if err != nil {
-		t.Fatalf("RechargeUser err: %v", err)
-	}
-	if rr.RefID == "" {
-		t.Fatalf("RefID empty")
-	}
+	require.NoError(t, err)
+	require.NotEqual(t, "", rr.RefID)
 	if rr.RemainQuota < 100 {
 		t.Fatalf("RemainQuota = %d, want >= 100", rr.RemainQuota)
 	}
@@ -131,8 +114,7 @@ func TestIntegrationFullProvisionAndTokenFlow(t *testing.T) {
 func randSuffix(t *testing.T) string {
 	t.Helper()
 	raw := make([]byte, 6)
-	if _, err := rand.Read(raw); err != nil {
-		t.Fatalf("rand: %v", err)
-	}
+	_, err := rand.Read(raw)
+	require.NoError(t, err)
 	return hex.EncodeToString(raw)
 }

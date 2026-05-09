@@ -1,6 +1,9 @@
 package domain
 
-import "testing"
+import (
+	"testing"
+	"github.com/stretchr/testify/require"
+)
 
 func TestIsJobTransitionAllowedValid(t *testing.T) {
 	cases := []struct {
@@ -22,37 +25,26 @@ func TestIsJobTransitionAllowedValid(t *testing.T) {
 }
 
 func TestIsJobTransitionAllowedRejectsBackToPendingFromTerminal(t *testing.T) {
-	if IsJobTransitionAllowed(JobStatusSucceeded, JobStatusPending) {
-		t.Fatalf("succeeded should be terminal")
-	}
-	if IsJobTransitionAllowed(JobStatusCanceled, JobStatusRunning) {
-		t.Fatalf("canceled should be terminal")
-	}
-	if IsJobTransitionAllowed(JobStatusRunning, JobStatusRunning) {
-		t.Fatalf("self-transition should be rejected")
-	}
+	require.False(t, IsJobTransitionAllowed(JobStatusSucceeded, JobStatusPending))
+	require.False(t, IsJobTransitionAllowed(JobStatusCanceled, JobStatusRunning))
+	require.False(t, IsJobTransitionAllowed(JobStatusRunning, JobStatusRunning))
 }
 
 func TestEnsureJobTransitionReturnsError(t *testing.T) {
-	if err := EnsureJobTransition(JobStatusSucceeded, JobStatusPending); err == nil {
-		t.Fatalf("expected error")
-	}
-	if err := EnsureJobTransition(JobStatusPending, JobStatusRunning); err != nil {
-		t.Fatalf("unexpected error: %v", err)
-	}
+	err := EnsureJobTransition(JobStatusSucceeded, JobStatusPending)
+	require.Error(t, err)
+	err = EnsureJobTransition(JobStatusPending, JobStatusRunning)
+	require.NoError(t, err)
 }
 
 func TestJobIsTerminal(t *testing.T) {
-	if !JobIsTerminal(JobStatusSucceeded) || !JobIsTerminal(JobStatusFailed) || !JobIsTerminal(JobStatusCanceled) {
-		t.Fatalf("terminal statuses should be terminal")
-	}
-	if JobIsTerminal(JobStatusPending) || JobIsTerminal(JobStatusRunning) {
-		t.Fatalf("non-terminal statuses should not be terminal")
-	}
+	require.True(t, JobIsTerminal(JobStatusSucceeded))
+	require.True(t, JobIsTerminal(JobStatusFailed))
+	require.True(t, JobIsTerminal(JobStatusCanceled))
+	require.False(t, JobIsTerminal(JobStatusPending))
+	require.False(t, JobIsTerminal(JobStatusRunning))
 }
 
 func TestAllowedJobTransitionsCount(t *testing.T) {
-	if got := len(AllowedJobTransitions()); got != 6 {
-		t.Fatalf("AllowedJobTransitions count = %d, want 6", got)
-	}
+	require.Len(t, AllowedJobTransitions(), 6)
 }

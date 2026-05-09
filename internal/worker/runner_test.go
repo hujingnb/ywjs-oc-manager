@@ -14,6 +14,7 @@ import (
 
 	"oc-manager/internal/store/sqlc"
 	"oc-manager/internal/worker/handlers"
+	"github.com/stretchr/testify/require"
 )
 
 // countingStore 在 Tick 调用 Reserve 后立刻返回空，确保 Tick 快速跑完。
@@ -70,9 +71,8 @@ func TestPool_RunsConcurrently(t *testing.T) {
 	ctx, cancel := context.WithTimeout(context.Background(), 80*time.Millisecond)
 	defer cancel()
 
-	if err := pool.Run(ctx); err != nil {
-		t.Fatalf("Run err = %v", err)
-	}
+	err := pool.Run(ctx)
+	require.NoError(t, err)
 	calls := q.calls.Load()
 	if calls < 8 {
 		// 4 goroutine × ~16 tick 应至少触发几十次；过低意味着 ticker 没并发跑。
@@ -89,22 +89,18 @@ func TestPool_PanicIsolatedAndLogged(t *testing.T) {
 
 	ctx, cancel := context.WithTimeout(context.Background(), 80*time.Millisecond)
 	defer cancel()
-	if err := pool.Run(ctx); err != nil {
-		t.Fatalf("Run err = %v", err)
-	}
+	err := pool.Run(ctx)
+	require.NoError(t, err)
 	if q.panics.Load() < 3 {
 		t.Fatalf("panic 次数 = %d, want >= 3", q.panics.Load())
 	}
-	if !strings.Contains(logBuf.String(), "panic") {
-		t.Fatalf("日志未包含 panic: %s", logBuf.String())
-	}
+	require.True(t, strings.Contains(logBuf.String(), "panic"))
 }
 
 func TestPool_RejectsMissingWorker(t *testing.T) {
 	pool := NewPool(nil, 2, 5*time.Millisecond)
-	if err := pool.Run(context.Background()); err == nil {
-		t.Fatal("缺 worker 时应返回错误")
-	}
+	err := pool.Run(context.Background())
+	require.Error(t, err)
 }
 
 func TestPool_DefaultConcurrencyAndInterval(t *testing.T) {
@@ -113,10 +109,7 @@ func TestPool_DefaultConcurrencyAndInterval(t *testing.T) {
 	// 默认 interval 是 200ms，留 350ms 余量保证至少触发一次。
 	ctx, cancel := context.WithTimeout(context.Background(), 350*time.Millisecond)
 	defer cancel()
-	if err := pool.Run(ctx); err != nil {
-		t.Fatalf("Run err = %v", err)
-	}
-	if q.calls.Load() == 0 {
-		t.Fatal("默认 interval 下 ticker 至少触发一次")
-	}
+	err := pool.Run(ctx)
+	require.NoError(t, err)
+	require.NotEqual(t, 0, q.calls.Load())
 }

@@ -7,6 +7,8 @@ import (
 
 	"oc-manager/internal/audit"
 	"oc-manager/internal/service"
+	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
 )
 
 // fakeAuditRecorder 用于断言 RecordNewAPIFailure 实际写入的事件字段。
@@ -33,28 +35,14 @@ func TestRecordNewAPIFailure_WritesAuditEvent(t *testing.T) {
 		Err:       err,
 	})
 
-	if len(rec.events) != 1 {
-		t.Fatalf("期望 1 条事件，实际 %d", len(rec.events))
-	}
+	require.Equal(t, 1, len(rec.events))
 	e := rec.events[0]
-	if e.TargetType != "newapi_call" {
-		t.Errorf("TargetType=%q，期望 newapi_call", e.TargetType)
-	}
-	if e.Result != "failed" {
-		t.Errorf("Result=%q，期望 failed", e.Result)
-	}
-	if e.Action != "POST /api/user/" {
-		t.Errorf("Action=%q，期望 POST /api/user/", e.Action)
-	}
-	if e.ActorRole != "platform_admin" {
-		t.Errorf("ActorRole=%q", e.ActorRole)
-	}
-	if e.Metadata["status_code"] != 500 {
-		t.Errorf("metadata.status_code=%v", e.Metadata["status_code"])
-	}
-	if e.ErrorMessage == "" {
-		t.Errorf("ErrorMessage 不应为空")
-	}
+	assert.Equal(t, "newapi_call", e.TargetType)
+	assert.Equal(t, "failed", e.Result)
+	assert.Equal(t, "POST /api/user/", e.Action)
+	assert.Equal(t, "platform_admin", e.ActorRole)
+	assert.Equal(t, 500, e.Metadata["status_code"])
+	assert.NotEqual(t, "", e.ErrorMessage)
 }
 
 func TestRecordNewAPIFailure_NoActorContextDefaultsToSystem(t *testing.T) {
@@ -68,15 +56,9 @@ func TestRecordNewAPIFailure_NoActorContextDefaultsToSystem(t *testing.T) {
 		Err:      errors.New("connection refused"),
 	})
 
-	if len(rec.events) != 1 {
-		t.Fatalf("期望 1 条事件，实际 %d", len(rec.events))
-	}
-	if rec.events[0].ActorRole != "system" {
-		t.Errorf("ActorRole=%q，期望 system（worker 默认）", rec.events[0].ActorRole)
-	}
-	if rec.events[0].ActorID != "" {
-		t.Errorf("ActorID 应为空，实际 %q", rec.events[0].ActorID)
-	}
+	require.Equal(t, 1, len(rec.events))
+	assert.Equal(t, "system", rec.events[0].ActorRole)
+	assert.Equal(t, "", rec.events[0].ActorID)
 }
 
 func TestRecordNewAPIFailure_RecorderErrorDoesNotPanic(t *testing.T) {

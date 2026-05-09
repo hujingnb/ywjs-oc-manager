@@ -7,6 +7,7 @@ import (
 	"testing"
 
 	"oc-manager/internal/runtime/imagesync"
+	"github.com/stretchr/testify/require"
 )
 
 func TestImageDistributionServiceRequiresDistributor(t *testing.T) {
@@ -19,20 +20,16 @@ func TestImageDistributionServiceRequiresDistributor(t *testing.T) {
 
 func TestImageDistributionServiceRejectsEmptyArgs(t *testing.T) {
 	svc := NewImageDistributionService(&fakeDistributor{})
-	if _, err := svc.EnsureRuntimeImage(context.Background(), "", "img"); err == nil {
-		t.Fatalf("expected error for empty nodeID")
-	}
-	if _, err := svc.EnsureRuntimeImage(context.Background(), "node-1", ""); err == nil {
-		t.Fatalf("expected error for empty image")
-	}
+	_, err := svc.EnsureRuntimeImage(context.Background(), "", "img")
+	require.Error(t, err)
+	_, err = svc.EnsureRuntimeImage(context.Background(), "node-1", "")
+	require.Error(t, err)
 }
 
 func TestImageDistributionServicePropagatesUnderlyingError(t *testing.T) {
 	svc := NewImageDistributionService(&fakeDistributor{err: errors.New("boom")})
 	_, err := svc.EnsureRuntimeImage(context.Background(), "node-1", "openclaw:dev")
-	if err == nil {
-		t.Fatalf("expected error")
-	}
+	require.Error(t, err)
 	if !strings.Contains(err.Error(), "openclaw:dev") || !strings.Contains(err.Error(), "node-1") {
 		t.Fatalf("error missing context: %v", err)
 	}
@@ -41,9 +38,7 @@ func TestImageDistributionServicePropagatesUnderlyingError(t *testing.T) {
 func TestImageDistributionServiceReturnsTransferredTrue(t *testing.T) {
 	svc := NewImageDistributionService(&fakeDistributor{result: imagesync.SyncResult{Image: "img", NodeID: "node-1", LocalID: "L", RemoteID: "L", Transferred: true}})
 	got, err := svc.EnsureRuntimeImage(context.Background(), "node-1", "img")
-	if err != nil {
-		t.Fatalf("EnsureRuntimeImage() error = %v", err)
-	}
+	require.NoError(t, err)
 	if !got.Transferred || got.LocalID != "L" {
 		t.Fatalf("result = %+v", got)
 	}

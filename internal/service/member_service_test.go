@@ -11,6 +11,7 @@ import (
 	"oc-manager/internal/auth"
 	"oc-manager/internal/domain"
 	"oc-manager/internal/store/sqlc"
+	"github.com/stretchr/testify/require"
 )
 
 const (
@@ -27,9 +28,7 @@ func TestMemberServiceCreateRequiresOrgManagement(t *testing.T) {
 	_, err := svc.CreateMember(context.Background(), auth.Principal{Role: domain.UserRoleOrgAdmin, OrgID: testOrg2ID}, testOrgID, MemberInput{
 		Username: "alice", DisplayName: "Alice", Password: "password",
 	})
-	if !errors.Is(err, ErrForbidden) {
-		t.Fatalf("CreateMember() error = %v, want ErrForbidden", err)
-	}
+	require.ErrorIs(t, err, ErrForbidden)
 }
 
 func TestMemberServiceCreateRejectsDisabledOrg(t *testing.T) {
@@ -40,9 +39,7 @@ func TestMemberServiceCreateRejectsDisabledOrg(t *testing.T) {
 	_, err := svc.CreateMember(context.Background(), platformAdmin(), testOrgID, MemberInput{
 		Username: "alice", DisplayName: "Alice", Password: "password",
 	})
-	if !errors.Is(err, ErrMemberCreateInvalid) {
-		t.Fatalf("CreateMember() error = %v, want ErrMemberCreateInvalid", err)
-	}
+	require.ErrorIs(t, err, ErrMemberCreateInvalid)
 }
 
 func TestMemberServiceCreateRejectsInvalidRole(t *testing.T) {
@@ -52,9 +49,7 @@ func TestMemberServiceCreateRejectsInvalidRole(t *testing.T) {
 	_, err := svc.CreateMember(context.Background(), platformAdmin(), testOrgID, MemberInput{
 		Username: "alice", DisplayName: "Alice", Password: "password", Role: domain.UserRolePlatformAdmin,
 	})
-	if !errors.Is(err, ErrMemberCreateInvalid) {
-		t.Fatalf("CreateMember() error = %v, want ErrMemberCreateInvalid", err)
-	}
+	require.ErrorIs(t, err, ErrMemberCreateInvalid)
 }
 
 func TestMemberServiceCreateAssignsDefaultRoleAndHashesPassword(t *testing.T) {
@@ -64,18 +59,12 @@ func TestMemberServiceCreateAssignsDefaultRoleAndHashesPassword(t *testing.T) {
 	result, err := svc.CreateMember(context.Background(), platformAdmin(), testOrgID, MemberInput{
 		Username: "alice", DisplayName: "Alice", Password: "password",
 	})
-	if err != nil {
-		t.Fatalf("CreateMember() error = %v", err)
-	}
-	if result.Role != domain.UserRoleOrgMember {
-		t.Fatalf("role = %s, want %s", result.Role, domain.UserRoleOrgMember)
-	}
+	require.NoError(t, err)
+	require.Equal(t, domain.UserRoleOrgMember, result.Role)
 	if store.lastCreate.PasswordHash == "password" || store.lastCreate.PasswordHash == "" {
 		t.Fatalf("password should be hashed, got %q", store.lastCreate.PasswordHash)
 	}
-	if store.lastCreate.Status != domain.StatusActive {
-		t.Fatalf("status = %s, want active", store.lastCreate.Status)
-	}
+	require.Equal(t, domain.StatusActive, store.lastCreate.Status)
 }
 
 func TestMemberServiceListLimitsOrgScope(t *testing.T) {
@@ -83,9 +72,7 @@ func TestMemberServiceListLimitsOrgScope(t *testing.T) {
 	svc := NewMemberService(store, fakeHash)
 
 	_, err := svc.ListMembers(context.Background(), auth.Principal{Role: domain.UserRoleOrgAdmin, OrgID: testOrg2ID}, testOrgID, 0, 0)
-	if !errors.Is(err, ErrForbidden) {
-		t.Fatalf("ListMembers() error = %v, want ErrForbidden", err)
-	}
+	require.ErrorIs(t, err, ErrForbidden)
 }
 
 func TestMemberServiceListAppliesDefaultPageSize(t *testing.T) {
@@ -98,27 +85,18 @@ func TestMemberServiceListAppliesDefaultPageSize(t *testing.T) {
 	svc := NewMemberService(store, fakeHash)
 
 	results, err := svc.ListMembers(context.Background(), platformAdmin(), testOrgID, 0, 0)
-	if err != nil {
-		t.Fatalf("ListMembers() error = %v", err)
-	}
-	if len(results) == 0 {
-		t.Fatalf("expected at least one member, got 0")
-	}
-	if store.lastList.Limit != 50 {
-		t.Fatalf("default limit = %d, want 50", store.lastList.Limit)
-	}
+	require.NoError(t, err)
+	require.NotEqual(t, 0, len(results))
+	require.Equal(t, int32(50), store.lastList.Limit)
 }
 
 func TestMemberServiceListClampsMaxPageSize(t *testing.T) {
 	store := newMemberStoreStub(t)
 	svc := NewMemberService(store, fakeHash)
 
-	if _, err := svc.ListMembers(context.Background(), platformAdmin(), testOrgID, 5000, 0); err != nil {
-		t.Fatalf("ListMembers() error = %v", err)
-	}
-	if store.lastList.Limit != 200 {
-		t.Fatalf("limit = %d, want clamped to 200", store.lastList.Limit)
-	}
+	_, err := svc.ListMembers(context.Background(), platformAdmin(), testOrgID, 5000, 0)
+	require.NoError(t, err)
+	require.Equal(t, int32(200), store.lastList.Limit)
 }
 
 func TestMemberServiceGetSelfAccessibleByMember(t *testing.T) {
@@ -133,12 +111,8 @@ func TestMemberServiceGetSelfAccessibleByMember(t *testing.T) {
 	svc := NewMemberService(store, fakeHash)
 
 	result, err := svc.GetMember(context.Background(), auth.Principal{Role: domain.UserRoleOrgMember, OrgID: testOrgID, UserID: testMemUID}, testMemUID)
-	if err != nil {
-		t.Fatalf("GetMember() error = %v", err)
-	}
-	if result.Username != "bob" {
-		t.Fatalf("username = %s, want bob", result.Username)
-	}
+	require.NoError(t, err)
+	require.Equal(t, "bob", result.Username)
 }
 
 func TestMemberServiceGetMemberRejectsCrossUserAccess(t *testing.T) {
@@ -151,9 +125,7 @@ func TestMemberServiceGetMemberRejectsCrossUserAccess(t *testing.T) {
 	svc := NewMemberService(store, fakeHash)
 
 	_, err := svc.GetMember(context.Background(), auth.Principal{Role: domain.UserRoleOrgMember, OrgID: testOrgID, UserID: testAdminUID}, testMemUID)
-	if !errors.Is(err, ErrForbidden) {
-		t.Fatalf("GetMember() error = %v, want ErrForbidden", err)
-	}
+	require.ErrorIs(t, err, ErrForbidden)
 }
 
 func TestMemberServiceUpdateProfileSelfAllowed(t *testing.T) {
@@ -167,12 +139,8 @@ func TestMemberServiceUpdateProfileSelfAllowed(t *testing.T) {
 	svc := NewMemberService(store, fakeHash)
 
 	result, err := svc.UpdateMemberProfile(context.Background(), auth.Principal{Role: domain.UserRoleOrgMember, OrgID: testOrgID, UserID: testMemUID}, testMemUID, MemberInput{DisplayName: "Bobby"})
-	if err != nil {
-		t.Fatalf("UpdateMemberProfile() error = %v", err)
-	}
-	if result.DisplayName != "Bobby" {
-		t.Fatalf("display name = %s, want Bobby", result.DisplayName)
-	}
+	require.NoError(t, err)
+	require.Equal(t, "Bobby", result.DisplayName)
 }
 
 func TestMemberServiceUpdateRoleRequiresAdmin(t *testing.T) {
@@ -187,9 +155,7 @@ func TestMemberServiceUpdateRoleRequiresAdmin(t *testing.T) {
 	_, err := svc.UpdateMemberProfile(context.Background(), auth.Principal{Role: domain.UserRoleOrgMember, OrgID: testOrgID, UserID: testMemUID}, testMemUID, MemberInput{
 		DisplayName: "Bob", Role: domain.UserRoleOrgAdmin,
 	})
-	if !errors.Is(err, ErrForbidden) {
-		t.Fatalf("UpdateMemberProfile() error = %v, want ErrForbidden", err)
-	}
+	require.ErrorIs(t, err, ErrForbidden)
 }
 
 func TestMemberServiceSetStatusBlocksSelfDisable(t *testing.T) {
@@ -202,9 +168,7 @@ func TestMemberServiceSetStatusBlocksSelfDisable(t *testing.T) {
 	svc := NewMemberService(store, fakeHash)
 
 	_, err := svc.SetMemberStatus(context.Background(), auth.Principal{Role: domain.UserRoleOrgAdmin, OrgID: testOrgID, UserID: testAdminUID}, testAdminUID, domain.StatusDisabled)
-	if !errors.Is(err, ErrMemberCreateInvalid) {
-		t.Fatalf("SetMemberStatus() error = %v, want ErrMemberCreateInvalid", err)
-	}
+	require.ErrorIs(t, err, ErrMemberCreateInvalid)
 }
 
 func TestMemberServiceResetPasswordRequiresAdmin(t *testing.T) {
@@ -230,9 +194,8 @@ func TestMemberServiceResetPasswordSucceeds(t *testing.T) {
 	}
 	svc := NewMemberService(store, fakeHash)
 
-	if err := svc.ResetMemberPassword(context.Background(), platformAdmin(), testMemUID, "new-pass"); err != nil {
-		t.Fatalf("ResetMemberPassword() error = %v", err)
-	}
+	err := svc.ResetMemberPassword(context.Background(), platformAdmin(), testMemUID, "new-pass")
+	require.NoError(t, err)
 	if store.lastPwdUpdate.PasswordHash == "" || store.lastPwdUpdate.PasswordHash == "new-pass" {
 		t.Fatalf("password not hashed, got %q", store.lastPwdUpdate.PasswordHash)
 	}
@@ -260,24 +223,15 @@ func TestDeleteMember_SoftDeletesAndEnqueuesAppDelete(t *testing.T) {
 
 	notifier := &fakeNotifier{}
 	svc := NewMemberService(stub, fakeHash)
-	if err := svc.DeleteMember(context.Background(), platformAdmin(), uuidToString(target.ID), notifier); err != nil {
-		t.Fatalf("DeleteMember err = %v", err)
-	}
-	if stub.users[uuidToString(target.ID)].Status != domain.StatusDisabled {
-		t.Fatalf("user status 未禁用: %+v", stub.users[uuidToString(target.ID)])
-	}
-	if len(stub.softDeleted) != 1 {
-		t.Fatalf("应当软删 1 个 app, 实际 %d", len(stub.softDeleted))
-	}
+	err := svc.DeleteMember(context.Background(), platformAdmin(), uuidToString(target.ID), notifier)
+	require.NoError(t, err)
+	require.Equal(t, domain.StatusDisabled, stub.users[uuidToString(target.ID)].Status)
+	require.Equal(t, 1, len(stub.softDeleted))
 	if len(stub.jobs) != 1 || stub.jobs[0].Type != domain.JobTypeAppDelete {
 		t.Fatalf("jobs = %+v", stub.jobs)
 	}
-	if !stub.auditWritten {
-		t.Fatal("未写审计日志")
-	}
-	if notifier.lastJobID == "" {
-		t.Fatal("notifier 未触发")
-	}
+	require.True(t, stub.auditWritten)
+	require.NotEqual(t, "", notifier.lastJobID)
 }
 
 func TestDeleteMember_NoAppStillSoftDeletesUser(t *testing.T) {
@@ -290,12 +244,9 @@ func TestDeleteMember_NoAppStillSoftDeletesUser(t *testing.T) {
 	}
 	stub.users[uuidToString(target.ID)] = target
 	svc := NewMemberService(stub, fakeHash)
-	if err := svc.DeleteMember(context.Background(), platformAdmin(), uuidToString(target.ID), nil); err != nil {
-		t.Fatalf("err = %v", err)
-	}
-	if len(stub.jobs) != 0 {
-		t.Fatal("没有应用时不应入队 app_delete")
-	}
+	err := svc.DeleteMember(context.Background(), platformAdmin(), uuidToString(target.ID), nil)
+	require.NoError(t, err)
+	require.Equal(t, 0, len(stub.jobs))
 }
 
 func TestDeleteMember_RejectsSelfDeletion(t *testing.T) {
@@ -308,9 +259,7 @@ func TestDeleteMember_RejectsSelfDeletion(t *testing.T) {
 	stub.users[uuidToString(target.ID)] = target
 	svc := NewMemberService(stub, fakeHash)
 	err := svc.DeleteMember(context.Background(), platformAdmin(), uuidToString(target.ID), nil)
-	if err == nil {
-		t.Fatal("不能删除自己应当报错")
-	}
+	require.Error(t, err)
 }
 
 func TestDeleteMember_OrgMemberCannotDeleteOthers(t *testing.T) {
@@ -325,9 +274,7 @@ func TestDeleteMember_OrgMemberCannotDeleteOthers(t *testing.T) {
 	err := svc.DeleteMember(context.Background(),
 		auth.Principal{Role: domain.UserRoleOrgMember, OrgID: uuidToString(stub.org.ID), UserID: "other"},
 		uuidToString(target.ID), nil)
-	if !errors.Is(err, ErrForbidden) {
-		t.Fatalf("err = %v, want ErrForbidden", err)
-	}
+	require.ErrorIs(t, err, ErrForbidden)
 }
 
 func platformAdmin() auth.Principal {

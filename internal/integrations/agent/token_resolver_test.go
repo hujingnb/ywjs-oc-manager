@@ -5,26 +5,21 @@ import (
 	"errors"
 	"sync"
 	"testing"
+	"github.com/stretchr/testify/require"
 )
 
 func TestTokenResolver_SetAndGet(t *testing.T) {
 	r := NewTokenResolver()
 	r.Set("node-1", "token-a")
 	got, err := r.Get("node-1")
-	if err != nil {
-		t.Fatalf("Get err = %v", err)
-	}
-	if got != "token-a" {
-		t.Fatalf("Get = %q, want token-a", got)
-	}
+	require.NoError(t, err)
+	require.Equal(t, "token-a", got)
 }
 
 func TestTokenResolver_GetMissingReturnsErr(t *testing.T) {
 	r := NewTokenResolver()
 	_, err := r.Get("missing")
-	if !errors.Is(err, ErrTokenNotCached) {
-		t.Fatalf("Get err = %v, want ErrTokenNotCached", err)
-	}
+	require.ErrorIs(t, err, ErrTokenNotCached)
 }
 
 func TestTokenResolver_OverwriteUpdatesValue(t *testing.T) {
@@ -32,9 +27,7 @@ func TestTokenResolver_OverwriteUpdatesValue(t *testing.T) {
 	r.Set("n", "first")
 	r.Set("n", "second")
 	got, _ := r.Get("n")
-	if got != "second" {
-		t.Fatalf("Get = %q, want second", got)
-	}
+	require.Equal(t, "second", got)
 }
 
 func TestTokenResolver_Forget(t *testing.T) {
@@ -65,22 +58,14 @@ func TestTokenResolver_FallsBackToPersistentLoader(t *testing.T) {
 	r := NewTokenResolver()
 	r.SetPersistentLoader(&stubLoader{tokens: map[string]string{"n1": "loaded"}})
 	got, err := r.Get("n1")
-	if err != nil {
-		t.Fatalf("Get err = %v", err)
-	}
-	if got != "loaded" {
-		t.Fatalf("Get = %q", got)
-	}
+	require.NoError(t, err)
+	require.Equal(t, "loaded", got)
 	// 第二次应当命中 cache，不再触发 loader。
 	loader := &stubLoader{tokens: map[string]string{"n1": "different"}}
 	r.SetPersistentLoader(loader)
 	got, _ = r.Get("n1")
-	if got != "loaded" {
-		t.Fatalf("第二次应命中 cache，got %q", got)
-	}
-	if loader.calls != 0 {
-		t.Fatalf("loader 被多次调用 %d", loader.calls)
-	}
+	require.Equal(t, "loaded", got)
+	require.Equal(t, 0, loader.calls)
 }
 
 func TestTokenResolver_LoaderEmptyReturnsErrTokenNotCached(t *testing.T) {

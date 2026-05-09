@@ -10,6 +10,7 @@ import (
 	"sync"
 	"testing"
 	"time"
+	"github.com/stretchr/testify/require"
 )
 
 // memoryExecutor 是用于测试的 ContainerExecutor：把预设的 stdout 行按 docker stdcopy 协议
@@ -99,20 +100,14 @@ func TestDockerCommandRunner_StreamsLines(t *testing.T) {
 	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
 	defer cancel()
 	stream, err := runner.StreamWeChatLogin(ctx, AuthInput{NodeID: "node-1", AppID: "app-1"})
-	if err != nil {
-		t.Fatalf("StreamWeChatLogin err = %v", err)
-	}
+	require.NoError(t, err)
 	got := drainChannel(stream, 2)
-	if len(got) != 2 {
-		t.Fatalf("收到 %d 行, want 2: %+v", len(got), got)
-	}
+	require.Len(t, got, 2)
 	if !strings.Contains(got[0], "qrcode") || !strings.Contains(got[1], "bound") {
 		t.Fatalf("行序异常: %+v", got)
 	}
 	want := []string{"openclaw", "channels", "login", "--channel", "openclaw-weixin", "--verbose"}
-	if !equalStrings(exec.seenCmd(), want) {
-		t.Fatalf("exec cmd = %+v, want %+v", exec.seenCmd(), want)
-	}
+	require.True(t, equalStrings(exec.seenCmd(), want))
 }
 
 func TestDockerCommandRunner_DiscardsStderr(t *testing.T) {
@@ -123,55 +118,43 @@ func TestDockerCommandRunner_DiscardsStderr(t *testing.T) {
 	}
 	runner := NewDockerCommandRunner(exec, staticLookup{containerID: "ctr"})
 	stream, err := runner.StreamWeChatLogin(context.Background(), AuthInput{NodeID: "n", AppID: "a"})
-	if err != nil {
-		t.Fatalf("err = %v", err)
-	}
+	require.NoError(t, err)
 	got := drainChannel(stream, 5)
-	if len(got) != 1 {
-		t.Fatalf("应仅返回 stdout 一行，got %+v", got)
-	}
-	if strings.Contains(got[0], "error") {
-		t.Fatalf("stderr 不应混入 stdout: %s", got[0])
-	}
+	require.Len(t, got, 1)
+	require.False(t, strings.Contains(got[0], "error"))
 }
 
 func TestDockerCommandRunner_RejectsMissingExecutor(t *testing.T) {
 	runner := NewDockerCommandRunner(nil, staticLookup{containerID: "x"})
-	if _, err := runner.StreamWeChatLogin(context.Background(), AuthInput{NodeID: "n", AppID: "a"}); err == nil {
-		t.Fatal("缺 executor 应当报错")
-	}
+	_, err := runner.StreamWeChatLogin(context.Background(), AuthInput{NodeID: "n", AppID: "a"})
+	require.Error(t, err)
 }
 
 func TestDockerCommandRunner_RejectsMissingLookup(t *testing.T) {
 	runner := NewDockerCommandRunner(&memoryExecutor{}, nil)
-	if _, err := runner.StreamWeChatLogin(context.Background(), AuthInput{NodeID: "n", AppID: "a"}); err == nil {
-		t.Fatal("缺 lookup 应当报错")
-	}
+	_, err := runner.StreamWeChatLogin(context.Background(), AuthInput{NodeID: "n", AppID: "a"})
+	require.Error(t, err)
 }
 
 func TestDockerCommandRunner_RequiresNodeID(t *testing.T) {
 	runner := NewDockerCommandRunner(&memoryExecutor{}, staticLookup{containerID: "x"})
-	if _, err := runner.StreamWeChatLogin(context.Background(), AuthInput{AppID: "a"}); err == nil {
-		t.Fatal("缺 nodeID 应当报错")
-	}
+	_, err := runner.StreamWeChatLogin(context.Background(), AuthInput{AppID: "a"})
+	require.Error(t, err)
 }
 
 func TestDockerCommandRunner_PrefersExplicitContainerID(t *testing.T) {
 	exec := &memoryExecutor{stdoutLines: []string{`{"type":"bound"}`}, closeAfter: true}
 	runner := NewDockerCommandRunner(exec, staticLookup{containerID: "from-lookup"})
 	stream, err := runner.StreamWeChatLogin(context.Background(), AuthInput{NodeID: "n", AppID: "a", ContainerID: "explicit-ctr"})
-	if err != nil {
-		t.Fatalf("err = %v", err)
-	}
+	require.NoError(t, err)
 	drainChannel(stream, 1)
 	// Lookup 不应被调用，但 memoryExecutor 没记录 containerID；这里至少断言运行成功。
 }
 
 func TestDockerCommandRunner_LookupErrorPropagates(t *testing.T) {
 	runner := NewDockerCommandRunner(&memoryExecutor{}, errLookup{err: errors.New("db down")})
-	if _, err := runner.StreamWeChatLogin(context.Background(), AuthInput{NodeID: "n", AppID: "a"}); err == nil {
-		t.Fatal("lookup 失败应冒泡")
-	}
+	_, err := runner.StreamWeChatLogin(context.Background(), AuthInput{NodeID: "n", AppID: "a"})
+	require.Error(t, err)
 }
 
 func TestDockerCommandRunner_CtxCancelClosesChannel(t *testing.T) {
@@ -179,9 +162,7 @@ func TestDockerCommandRunner_CtxCancelClosesChannel(t *testing.T) {
 	runner := NewDockerCommandRunner(exec, staticLookup{containerID: "ctr"})
 	ctx, cancel := context.WithCancel(context.Background())
 	stream, err := runner.StreamWeChatLogin(ctx, AuthInput{NodeID: "n", AppID: "a"})
-	if err != nil {
-		t.Fatalf("err = %v", err)
-	}
+	require.NoError(t, err)
 	select {
 	case line, ok := <-stream:
 		if !ok || !strings.Contains(line, "first") {

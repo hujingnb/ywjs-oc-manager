@@ -2,7 +2,6 @@ package service
 
 import (
 	"context"
-	"errors"
 	"testing"
 	"time"
 
@@ -13,6 +12,7 @@ import (
 	"oc-manager/internal/domain"
 	"oc-manager/internal/integrations/channel"
 	"oc-manager/internal/store/sqlc"
+	"github.com/stretchr/testify/require"
 )
 
 const (
@@ -30,12 +30,8 @@ func TestChannelServiceBeginAuthSuccess(t *testing.T) {
 	svc := NewChannelService(store, registry)
 
 	result, err := svc.BeginAuth(context.Background(), platformAdmin(), testChannelAppID, domain.ChannelTypeWeChat)
-	if err != nil {
-		t.Fatalf("BeginAuth() error = %v", err)
-	}
-	if result.JobID == "" {
-		t.Fatalf("expected job id in result")
-	}
+	require.NoError(t, err)
+	require.NotEqual(t, "", result.JobID)
 	if !store.statusUpdated || store.lastStatus != domain.ChannelStatusPendingAuth {
 		t.Fatalf("expected status to be pending_auth, got %s", store.lastStatus)
 	}
@@ -47,9 +43,7 @@ func TestChannelServiceBeginAuthSuccess(t *testing.T) {
 func TestChannelServiceBeginAuthMissingAdapter(t *testing.T) {
 	svc := NewChannelService(newChannelStub(t), channel.NewRegistry())
 	_, err := svc.BeginAuth(context.Background(), platformAdmin(), testChannelAppID, "missing")
-	if !errors.Is(err, ErrChannelAdapterMissing) {
-		t.Fatalf("error = %v, want ErrChannelAdapterMissing", err)
-	}
+	require.ErrorIs(t, err, ErrChannelAdapterMissing)
 }
 
 func TestChannelServiceBeginAuthForbidden(t *testing.T) {
@@ -59,9 +53,7 @@ func TestChannelServiceBeginAuthForbidden(t *testing.T) {
 	svc := NewChannelService(store, registry)
 
 	_, err := svc.BeginAuth(context.Background(), auth.Principal{Role: domain.UserRoleOrgMember, OrgID: testChannelOrg, UserID: "00000000-0000-0000-0000-0000000000ff"}, testChannelAppID, domain.ChannelTypeWeChat)
-	if !errors.Is(err, ErrForbidden) {
-		t.Fatalf("error = %v, want ErrForbidden", err)
-	}
+	require.ErrorIs(t, err, ErrForbidden)
 }
 
 func TestChannelServicePollAuthMarksBound(t *testing.T) {
@@ -75,9 +67,7 @@ func TestChannelServicePollAuthMarksBound(t *testing.T) {
 	svc := NewChannelService(store, registry)
 
 	progress, err := svc.PollAuth(context.Background(), platformAdmin(), testChannelAppID, domain.ChannelTypeWeChat)
-	if err != nil {
-		t.Fatalf("PollAuth() error = %v", err)
-	}
+	require.NoError(t, err)
 	if progress.Status != string(channel.AuthStatusBound) || progress.BoundIdentity != "alice" {
 		t.Fatalf("progress = %+v", progress)
 	}
@@ -94,9 +84,8 @@ func TestChannelServicePollAuthPushesAppToRunningOnBound(t *testing.T) {
 	registry.MustRegister(&fakeAdapter{})
 	svc := NewChannelService(store, registry)
 
-	if _, err := svc.PollAuth(context.Background(), platformAdmin(), testChannelAppID, domain.ChannelTypeWeChat); err != nil {
-		t.Fatalf("PollAuth err = %v", err)
-	}
+	_, err := svc.PollAuth(context.Background(), platformAdmin(), testChannelAppID, domain.ChannelTypeWeChat)
+	require.NoError(t, err)
 	if store.appStatusSet || store.boundCalled {
 		t.Fatalf("PollAuth 不应写 binding/app 状态")
 	}
@@ -111,12 +100,9 @@ func TestChannelServicePollAuthDoesNotOverrideRunningStatus(t *testing.T) {
 	registry.MustRegister(&fakeAdapter{})
 	svc := NewChannelService(store, registry)
 
-	if _, err := svc.PollAuth(context.Background(), platformAdmin(), testChannelAppID, domain.ChannelTypeWeChat); err != nil {
-		t.Fatalf("err=%v", err)
-	}
-	if store.appStatusSet {
-		t.Fatalf("status 已是 running 时不应再写 SetAppStatus")
-	}
+	_, err := svc.PollAuth(context.Background(), platformAdmin(), testChannelAppID, domain.ChannelTypeWeChat)
+	require.NoError(t, err)
+	require.False(t, store.appStatusSet)
 }
 
 func TestChannelServicePollAuthDoesNotPushOnNonBindingWaiting(t *testing.T) {
@@ -128,24 +114,18 @@ func TestChannelServicePollAuthDoesNotPushOnNonBindingWaiting(t *testing.T) {
 	registry.MustRegister(&fakeAdapter{})
 	svc := NewChannelService(store, registry)
 
-	if _, err := svc.PollAuth(context.Background(), platformAdmin(), testChannelAppID, domain.ChannelTypeWeChat); err != nil {
-		t.Fatalf("err=%v", err)
-	}
-	if store.appStatusSet {
-		t.Fatalf("非 binding_waiting 状态不应被自动推到 running")
-	}
+	_, err := svc.PollAuth(context.Background(), platformAdmin(), testChannelAppID, domain.ChannelTypeWeChat)
+	require.NoError(t, err)
+	require.False(t, store.appStatusSet)
 }
 
 func TestChannelServiceUnbindUpdatesStatus(t *testing.T) {
 	store := newChannelStub(t)
 	svc := NewChannelService(store, channel.NewRegistry())
 
-	if err := svc.Unbind(context.Background(), platformAdmin(), testChannelAppID, domain.ChannelTypeWeChat); err != nil {
-		t.Fatalf("Unbind() error = %v", err)
-	}
-	if store.lastStatus != domain.ChannelStatusUnboundByUser {
-		t.Fatalf("status = %s, want %s", store.lastStatus, domain.ChannelStatusUnboundByUser)
-	}
+	err := svc.Unbind(context.Background(), platformAdmin(), testChannelAppID, domain.ChannelTypeWeChat)
+	require.NoError(t, err)
+	require.Equal(t, domain.ChannelStatusUnboundByUser, store.lastStatus)
 }
 
 type fakeAdapter struct {

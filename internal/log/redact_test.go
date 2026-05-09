@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"strings"
 	"testing"
+	"github.com/stretchr/testify/require"
 )
 
 func TestRedactSecrets(t *testing.T) {
@@ -28,9 +29,7 @@ func TestRedactSecrets(t *testing.T) {
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
 			got := RedactSecrets(tc.in)
-			if !strings.Contains(got, tc.want) {
-				t.Fatalf("RedactSecrets(%q) = %q, want contain %q", tc.in, got, tc.want)
-			}
+			require.Contains(t, got, tc.want)
 			if tc.bad != "" && strings.Contains(got, tc.bad) {
 				t.Fatalf("RedactSecrets(%q) = %q, 不应包含 %q", tc.in, got, tc.bad)
 			}
@@ -43,16 +42,8 @@ func TestRedactingWriter(t *testing.T) {
 	w := NewRedactingWriter(&buf)
 	original := `{"password":"secret","note":"hi"}`
 	n, err := w.Write([]byte(original))
-	if err != nil {
-		t.Fatalf("Write err = %v", err)
-	}
-	if n != len(original) {
-		t.Fatalf("Write n = %d, want %d (must report original length)", n, len(original))
-	}
-	if strings.Contains(buf.String(), "secret") {
-		t.Fatalf("buffer 仍包含明文密码: %q", buf.String())
-	}
-	if !strings.Contains(buf.String(), `"password":"***"`) {
-		t.Fatalf("buffer 缺脱敏标记: %q", buf.String())
-	}
+	require.NoError(t, err)
+	require.Equal(t, len(original), n)
+	require.False(t, strings.Contains(buf.String(), "secret"))
+	require.True(t, strings.Contains(buf.String(), `"password":"***"`))
 }

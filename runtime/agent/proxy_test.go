@@ -10,6 +10,8 @@ import (
 	"strings"
 	"testing"
 	"time"
+	"github.com/stretchr/testify/require"
+	"github.com/stretchr/testify/assert"
 )
 
 // startUnixDockerStub 在临时 unix socket 上挂一个 mock docker daemon，并返回 socket 路径。
@@ -18,9 +20,7 @@ func startUnixDockerStub(t *testing.T, handler http.HandlerFunc) string {
 	dir := t.TempDir()
 	socketPath := filepath.Join(dir, "docker.sock")
 	listener, err := net.Listen("unix", socketPath)
-	if err != nil {
-		t.Fatalf("listen unix: %v", err)
-	}
+	require.NoError(t, err)
 	server := &http.Server{Handler: handler}
 	go server.Serve(listener)
 	t.Cleanup(func() {
@@ -44,12 +44,8 @@ func TestDockerProxy_ForwardsRewrittenPath(t *testing.T) {
 	rec := httptest.NewRecorder()
 
 	handler.ServeHTTP(rec, req)
-	if rec.Code != http.StatusOK {
-		t.Fatalf("status = %d, body = %s", rec.Code, rec.Body.String())
-	}
-	if seenPath != "/_ping" {
-		t.Fatalf("docker daemon 收到的 path = %q, want /_ping（前缀必须重写）", seenPath)
-	}
+	require.Equal(t, http.StatusOK, rec.Code)
+	require.Equal(t, "/_ping", seenPath)
 }
 
 func TestDockerProxy_RejectsMissingToken(t *testing.T) {
@@ -61,9 +57,7 @@ func TestDockerProxy_RejectsMissingToken(t *testing.T) {
 	req := httptest.NewRequest(http.MethodGet, "/v1/docker/_ping", nil)
 	rec := httptest.NewRecorder()
 	handler.ServeHTTP(rec, req)
-	if rec.Code != http.StatusUnauthorized {
-		t.Fatalf("status = %d, want 401", rec.Code)
-	}
+	require.Equal(t, http.StatusUnauthorized, rec.Code)
 }
 
 func TestDockerProxy_RejectsWrongToken(t *testing.T) {
@@ -76,9 +70,7 @@ func TestDockerProxy_RejectsWrongToken(t *testing.T) {
 	req.Header.Set("Authorization", "Bearer other")
 	rec := httptest.NewRecorder()
 	handler.ServeHTTP(rec, req)
-	if rec.Code != http.StatusUnauthorized {
-		t.Fatalf("status = %d, want 401", rec.Code)
-	}
+	require.Equal(t, http.StatusUnauthorized, rec.Code)
 }
 
 func TestDockerProxy_RejectsOutsideCIDR(t *testing.T) {
@@ -92,9 +84,7 @@ func TestDockerProxy_RejectsOutsideCIDR(t *testing.T) {
 	req.RemoteAddr = "192.168.1.5:34567"
 	rec := httptest.NewRecorder()
 	handler.ServeHTTP(rec, req)
-	if rec.Code != http.StatusForbidden {
-		t.Fatalf("status = %d, want 403", rec.Code)
-	}
+	require.Equal(t, http.StatusForbidden, rec.Code)
 }
 
 func TestDockerProxy_AllowsInsideCIDR(t *testing.T) {
@@ -107,17 +97,13 @@ func TestDockerProxy_AllowsInsideCIDR(t *testing.T) {
 	req.RemoteAddr = "10.0.0.5:34567"
 	rec := httptest.NewRecorder()
 	handler.ServeHTTP(rec, req)
-	if rec.Code != http.StatusOK {
-		t.Fatalf("status = %d, want 200", rec.Code)
-	}
+	require.Equal(t, http.StatusOK, rec.Code)
 }
 
 func TestDockerProxy_PreservesBodyAndStatus(t *testing.T) {
 	socket := startUnixDockerStub(t, func(w http.ResponseWriter, r *http.Request) {
 		body, _ := io.ReadAll(r.Body)
-		if string(body) != "payload" {
-			t.Errorf("docker 收到 body = %q, want payload", body)
-		}
+		assert.Equal(t, "payload", string(body))
 		w.WriteHeader(http.StatusCreated)
 		_, _ = w.Write([]byte(`{"created":true}`))
 	})
@@ -126,12 +112,8 @@ func TestDockerProxy_PreservesBodyAndStatus(t *testing.T) {
 	req.Header.Set("Authorization", "Bearer secret")
 	rec := httptest.NewRecorder()
 	handler.ServeHTTP(rec, req)
-	if rec.Code != http.StatusCreated {
-		t.Fatalf("status = %d", rec.Code)
-	}
-	if !strings.Contains(rec.Body.String(), "created") {
-		t.Fatalf("body = %q, want 含 created", rec.Body.String())
-	}
+	require.Equal(t, http.StatusCreated, rec.Code)
+	require.True(t, strings.Contains(rec.Body.String(), "created"))
 }
 
 func TestDockerProxy_NonDockerPathReturns404(t *testing.T) {
@@ -142,9 +124,7 @@ func TestDockerProxy_NonDockerPathReturns404(t *testing.T) {
 	req := httptest.NewRequest(http.MethodGet, "/healthz", nil)
 	rec := httptest.NewRecorder()
 	handler.ServeHTTP(rec, req)
-	if rec.Code != http.StatusNotFound {
-		t.Fatalf("status = %d, want 404", rec.Code)
-	}
+	require.Equal(t, http.StatusNotFound, rec.Code)
 }
 
 func TestDockerProxy_NoTokenSkipsAuth(t *testing.T) {
@@ -156,9 +136,7 @@ func TestDockerProxy_NoTokenSkipsAuth(t *testing.T) {
 	req := httptest.NewRequest(http.MethodGet, "/v1/docker/_ping", nil)
 	rec := httptest.NewRecorder()
 	handler.ServeHTTP(rec, req)
-	if rec.Code != http.StatusOK {
-		t.Fatalf("status = %d", rec.Code)
-	}
+	require.Equal(t, http.StatusOK, rec.Code)
 }
 
 func TestDockerProxy_WithRealUnixDial(t *testing.T) {
@@ -172,17 +150,11 @@ func TestDockerProxy_WithRealUnixDial(t *testing.T) {
 	defer server.Close()
 
 	resp, err := http.Get(server.URL + "/v1/docker/version")
-	if err != nil {
-		t.Fatalf("Get err = %v", err)
-	}
+	require.NoError(t, err)
 	defer resp.Body.Close()
-	if resp.StatusCode != http.StatusOK {
-		t.Fatalf("status = %d", resp.StatusCode)
-	}
+	require.Equal(t, http.StatusOK, resp.StatusCode)
 	body, _ := io.ReadAll(resp.Body)
-	if !strings.Contains(string(body), "stub") {
-		t.Fatalf("body = %s", body)
-	}
+	require.True(t, strings.Contains(string(body), "stub"))
 	_ = time.Millisecond // 占位避免 import 被精简
 }
 
@@ -216,30 +188,18 @@ func TestDockerProxy_RewriteCreateContainerMounts(t *testing.T) {
 	rec := httptest.NewRecorder()
 	handler.ServeHTTP(rec, req)
 
-	if rec.Code != http.StatusCreated {
-		t.Fatalf("status=%d body=%s", rec.Code, rec.Body.String())
-	}
+	require.Equal(t, http.StatusCreated, rec.Code)
 	got := string(seenBody)
 	// HostConfig.Binds 第一条 src 改写
-	if !strings.Contains(got, `/host/data/agent/apps/x/workspace:/workspace:rw`) {
-		t.Errorf("Binds 第一条未重写：%s", got)
-	}
+	assert.Contains(t, got, `/host/data/agent/apps/x/workspace:/workspace:rw`)
 	// 非 oc-agent 前缀的 bind 不变
-	if !strings.Contains(got, `/etc/timezone:/etc/timezone:ro`) {
-		t.Errorf("Binds 第二条被误改：%s", got)
-	}
+	assert.Contains(t, got, `/etc/timezone:/etc/timezone:ro`)
 	// HostConfig.Mounts[0].Source 改写
-	if !strings.Contains(got, `"Source":"/host/data/agent/apps/x/openclaw-config/models.json"`) {
-		t.Errorf("Mounts[0].Source 未重写：%s", got)
-	}
+	assert.Contains(t, got, `"Source":"/host/data/agent/apps/x/openclaw-config/models.json"`)
 	// /var/lib/oc-agent-2 不应被误改（前缀严格匹配）
-	if !strings.Contains(got, `"Source":"/var/lib/oc-agent-2/skip"`) {
-		t.Errorf("oc-agent-2 被误改：%s", got)
-	}
+	assert.Contains(t, got, `"Source":"/var/lib/oc-agent-2/skip"`)
 	// /var/lib/oc-agent 整 mount 也要改写
-	if !strings.Contains(got, `"Source":"/host/data/agent"`) {
-		t.Errorf("精确 dataRoot mount 未重写：%s", got)
-	}
+	assert.Contains(t, got, `"Source":"/host/data/agent"`)
 }
 
 func TestDockerProxy_RewriteSkippedWhenSamePath(t *testing.T) {

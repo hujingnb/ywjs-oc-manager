@@ -5,6 +5,8 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+	"github.com/stretchr/testify/require"
+	"github.com/stretchr/testify/assert"
 )
 
 func validAgentYAML() string {
@@ -24,30 +26,14 @@ func TestLoadFile_AcceptsValidConfig(t *testing.T) {
 	path := writeTempConfig(t, validAgentYAML())
 
 	cfg, err := LoadFile(path)
-	if err != nil {
-		t.Fatalf("LoadFile() error = %v", err)
-	}
-	if cfg.Agent.DataRoot != "/var/lib/oc-agent" {
-		t.Fatalf("data_root = %q, want /var/lib/oc-agent", cfg.Agent.DataRoot)
-	}
-	if cfg.Agent.StateDir != "/var/lib/oc-agent/state" {
-		t.Fatalf("state_dir = %q, want /var/lib/oc-agent/state", cfg.Agent.StateDir)
-	}
-	if cfg.Agent.DockerSocket != "/var/run/docker.sock" {
-		t.Fatalf("docker_socket = %q, want /var/run/docker.sock", cfg.Agent.DockerSocket)
-	}
-	if cfg.Agent.Token != "secret" {
-		t.Fatalf("token = %q, want secret", cfg.Agent.Token)
-	}
-	if cfg.Agent.TrustedCIDR != "10.0.0.0/8" {
-		t.Fatalf("trusted_cidr = %q, want 10.0.0.0/8", cfg.Agent.TrustedCIDR)
-	}
-	if cfg.Agent.DockerAddr != ":7001" {
-		t.Fatalf("docker_addr = %q, want :7001", cfg.Agent.DockerAddr)
-	}
-	if cfg.Agent.FileAddr != ":7002" {
-		t.Fatalf("file_addr = %q, want :7002", cfg.Agent.FileAddr)
-	}
+	require.NoError(t, err)
+	require.Equal(t, "/var/lib/oc-agent", cfg.Agent.DataRoot)
+	require.Equal(t, "/var/lib/oc-agent/state", cfg.Agent.StateDir)
+	require.Equal(t, "/var/run/docker.sock", cfg.Agent.DockerSocket)
+	require.Equal(t, "secret", cfg.Agent.Token)
+	require.Equal(t, "10.0.0.0/8", cfg.Agent.TrustedCIDR)
+	require.Equal(t, ":7001", cfg.Agent.DockerAddr)
+	require.Equal(t, ":7002", cfg.Agent.FileAddr)
 }
 
 func TestLoadFile_AllowsEmptyTokenAndTrustedCIDR(t *testing.T) {
@@ -56,15 +42,9 @@ func TestLoadFile_AllowsEmptyTokenAndTrustedCIDR(t *testing.T) {
 	path := writeTempConfig(t, yaml)
 
 	cfg, err := LoadFile(path)
-	if err != nil {
-		t.Fatalf("LoadFile() error = %v", err)
-	}
-	if cfg.Agent.Token != "" {
-		t.Fatalf("token = %q, want empty", cfg.Agent.Token)
-	}
-	if cfg.Agent.TrustedCIDR != "" {
-		t.Fatalf("trusted_cidr = %q, want empty", cfg.Agent.TrustedCIDR)
-	}
+	require.NoError(t, err)
+	require.Equal(t, "", cfg.Agent.Token)
+	require.Equal(t, "", cfg.Agent.TrustedCIDR)
 }
 
 func TestLoadFile_RejectsUnknownFields(t *testing.T) {
@@ -76,9 +56,8 @@ func TestLoadFile_RejectsUnknownFields(t *testing.T) {
 			yaml := strings.Replace(validAgentYAML(), `token: "secret"`, replacement, 1)
 			path := writeTempConfig(t, yaml)
 
-			if _, err := LoadFile(path); err == nil {
-				t.Fatal("LoadFile() error = nil, want unknown field error")
-			}
+			_, err := LoadFile(path)
+			require.Error(t, err)
 		})
 	}
 }
@@ -120,15 +99,9 @@ func TestLoadFile_HeartbeatDefaults(t *testing.T) {
 	path := writeTempConfig(t, validAgentYAML())
 
 	cfg, err := LoadFile(path)
-	if err != nil {
-		t.Fatalf("LoadFile() error = %v", err)
-	}
-	if cfg.Heartbeat.IntervalSeconds != 30 {
-		t.Errorf("interval default = %d, want 30", cfg.Heartbeat.IntervalSeconds)
-	}
-	if cfg.Heartbeat.FailureLogThreshold != 5 {
-		t.Errorf("failure_log_threshold default = %d, want 5", cfg.Heartbeat.FailureLogThreshold)
-	}
+	require.NoError(t, err)
+	assert.Equal(t, 30, cfg.Heartbeat.IntervalSeconds)
+	assert.Equal(t, 5, cfg.Heartbeat.FailureLogThreshold)
 }
 
 func TestLoadFile_HeartbeatBelowMinimum(t *testing.T) {
@@ -150,9 +123,7 @@ func TestLoadFile_ManagerOptional(t *testing.T) {
 	path := writeTempConfig(t, validAgentYAML())
 
 	cfg, err := LoadFile(path)
-	if err != nil {
-		t.Fatalf("LoadFile() error = %v", err)
-	}
+	require.NoError(t, err)
 	if cfg.Manager.Endpoint != "" || cfg.Manager.NodeID != "" || cfg.Manager.AgentToken != "" {
 		t.Fatalf("manager 段应保持全空, got %+v", cfg.Manager)
 	}
@@ -184,19 +155,14 @@ manager:
 	path := writeTempConfig(t, yaml)
 
 	cfg, err := LoadFile(path)
-	if err != nil {
-		t.Fatalf("LoadFile() error = %v", err)
-	}
-	if cfg.Manager.NodeID != "00000000-0000-0000-0000-000000000001" {
-		t.Errorf("node_id = %q", cfg.Manager.NodeID)
-	}
+	require.NoError(t, err)
+	assert.Equal(t, "00000000-0000-0000-0000-000000000001", cfg.Manager.NodeID)
 }
 
 func writeTempConfig(t *testing.T, content string) string {
 	t.Helper()
 	path := filepath.Join(t.TempDir(), "agent.yaml")
-	if err := os.WriteFile(path, []byte(content), 0o600); err != nil {
-		t.Fatalf("write config: %v", err)
-	}
+	err := os.WriteFile(path, []byte(content), 0o600)
+	require.NoError(t, err)
 	return path
 }

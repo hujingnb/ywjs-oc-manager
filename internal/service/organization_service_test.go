@@ -14,15 +14,15 @@ import (
 	"oc-manager/internal/domain"
 	"oc-manager/internal/integrations/newapi"
 	"oc-manager/internal/store/sqlc"
+	"github.com/stretchr/testify/require"
+	"github.com/stretchr/testify/assert"
 )
 
 func TestOrganizationServiceCreateRequiresPlatformAdmin(t *testing.T) {
 	svc := NewOrganizationService(&organizationStoreStub{}, &fakeProvisioner{}, mustCipher(t), nil)
 
 	_, err := svc.CreateOrganization(context.Background(), auth.Principal{Role: domain.UserRoleOrgAdmin}, OrganizationInput{Name: "测试组织"})
-	if !errors.Is(err, ErrForbidden) {
-		t.Fatalf("CreateOrganization() error = %v, want ErrForbidden", err)
-	}
+	require.ErrorIs(t, err, ErrForbidden)
 }
 
 // TestOrganizationServiceCreateProvisionsNewAPIUser 校验 CreateOrganization 串联调
@@ -41,43 +41,26 @@ func TestOrganizationServiceCreateProvisionsNewAPIUser(t *testing.T) {
 		ContactName:            "张三",
 		CreditWarningThreshold: &threshold,
 	})
-	if err != nil {
-		t.Fatalf("CreateOrganization() error = %v", err)
-	}
+	require.NoError(t, err)
 	if result.Name != "测试组织" || result.CreditWarningThreshold == nil || *result.CreditWarningThreshold != 20 {
 		t.Fatalf("organization = %+v", result)
 	}
 	if prov.createCalls != 1 || prov.bootstrapCalls != 1 {
 		t.Fatalf("provisioner calls create=%d bootstrap=%d, want 1/1", prov.createCalls, prov.bootstrapCalls)
 	}
-	if !strings.HasPrefix(prov.lastCreate.Username, "org-") {
-		t.Fatalf("username 应以 org- 前缀: %q", prov.lastCreate.Username)
-	}
-	if prov.lastCreate.Password == "" {
-		t.Fatalf("password 不应为空")
-	}
-	if !store.updateCalled {
-		t.Fatalf("SetOrganizationNewAPIUser 未被调用")
-	}
-	if store.updated.NewapiUserID.String != "42" {
-		t.Fatalf("updated newapi_user_id = %q, want 42", store.updated.NewapiUserID.String)
-	}
-	if !store.updated.NewapiUserCredentialsCiphertext.Valid {
-		t.Fatalf("ciphertext 应被写入")
-	}
+	require.True(t, strings.HasPrefix(prov.lastCreate.Username, "org-"))
+	require.NotEqual(t, "", prov.lastCreate.Password)
+	require.True(t, store.updateCalled)
+	require.Equal(t, "42", store.updated.NewapiUserID.String)
+	require.True(t, store.updated.NewapiUserCredentialsCiphertext.Valid)
 	// 解密验证三件套被忠实序列化
 	cipher := mustCipher(t)
 	plain, err := cipher.Decrypt(store.updated.NewapiUserCredentialsCiphertext.String)
-	if err != nil {
-		t.Fatalf("解密失败: %v", err)
-	}
+	require.NoError(t, err)
 	var creds OrganizationCredentials
-	if err := json.Unmarshal(plain, &creds); err != nil {
-		t.Fatalf("解析凭据 JSON 失败: %v", err)
-	}
-	if creds.AccessToken != "access-tok-xyz" {
-		t.Fatalf("creds.AccessToken = %q, want access-tok-xyz", creds.AccessToken)
-	}
+	err = json.Unmarshal(plain, &creds)
+	require.NoError(t, err)
+	require.Equal(t, "access-tok-xyz", creds.AccessToken)
 	if creds.Username != prov.lastCreate.Username || creds.Password != prov.lastCreate.Password {
 		t.Fatalf("creds 三件套不一致: %+v vs created %+v", creds, prov.lastCreate)
 	}
@@ -94,12 +77,8 @@ func TestOrganizationServiceCreateRollbackOnProvisioningFailure(t *testing.T) {
 	svc := NewOrganizationService(store, prov, mustCipher(t), nil)
 
 	_, err := svc.CreateOrganization(context.Background(), auth.Principal{Role: domain.UserRolePlatformAdmin}, OrganizationInput{Name: "测试组织"})
-	if err == nil {
-		t.Fatalf("CreateOrganization() 应返回失败")
-	}
-	if !store.hardDeleted {
-		t.Fatalf("失败路径应触发 HardDeleteOrganization 回滚")
-	}
+	require.Error(t, err)
+	require.True(t, store.hardDeleted)
 }
 
 func TestOrganizationServiceGetRestrictsOrgScope(t *testing.T) {
@@ -107,9 +86,7 @@ func TestOrganizationServiceGetRestrictsOrgScope(t *testing.T) {
 	svc := NewOrganizationService(store, &fakeProvisioner{}, mustCipher(t), nil)
 
 	_, err := svc.GetOrganization(context.Background(), auth.Principal{Role: domain.UserRoleOrgMember, OrgID: "00000000-0000-0000-0000-000000000999"}, "00000000-0000-0000-0000-000000000101")
-	if !errors.Is(err, ErrForbidden) {
-		t.Fatalf("GetOrganization() error = %v, want ErrForbidden", err)
-	}
+	require.ErrorIs(t, err, ErrForbidden)
 }
 
 func TestOrganizationServiceSetStatus(t *testing.T) {
@@ -117,12 +94,8 @@ func TestOrganizationServiceSetStatus(t *testing.T) {
 	svc := NewOrganizationService(store, &fakeProvisioner{}, mustCipher(t), nil)
 
 	result, err := svc.SetOrganizationStatus(context.Background(), auth.Principal{Role: domain.UserRolePlatformAdmin}, "00000000-0000-0000-0000-000000000101", domain.StatusDisabled)
-	if err != nil {
-		t.Fatalf("SetOrganizationStatus() error = %v", err)
-	}
-	if result.Status != domain.StatusDisabled {
-		t.Fatalf("status = %q, want disabled", result.Status)
-	}
+	require.NoError(t, err)
+	require.Equal(t, domain.StatusDisabled, result.Status)
 }
 
 func mustCipher(t *testing.T) *auth.Cipher {
@@ -132,9 +105,7 @@ func mustCipher(t *testing.T) *auth.Cipher {
 		key[i] = byte(i)
 	}
 	c, err := auth.NewCipher(key)
-	if err != nil {
-		t.Fatalf("初始化 cipher 失败: %v", err)
-	}
+	require.NoError(t, err)
 	return c
 }
 
@@ -260,18 +231,12 @@ func TestCreateOrganization_BootstrapTokenFailureTriggersDeleteUserAndAudit(t *t
 	svc := NewOrganizationService(&organizationStoreStub{}, prov, mustCipher(t), auditor)
 
 	_, err := svc.CreateOrganization(context.Background(), auth.Principal{Role: domain.UserRolePlatformAdmin}, OrganizationInput{Name: "v102-orphan-test"})
-	if err == nil {
-		t.Fatal("期望 CreateOrganization 失败")
-	}
+	require.Error(t, err)
 	if !prov.deleteUserCalled {
 		t.Errorf("期望调用 DeleteUser 清理孤儿")
 	}
-	if prov.deleteUserUserID != 42 {
-		t.Errorf("DeleteUser userID=%d，期望 42", prov.deleteUserUserID)
-	}
-	if len(auditor.events) == 0 {
-		t.Errorf("期望至少 1 条 audit 事件，实际 %d", len(auditor.events))
-	}
+	assert.Equal(t, int64(42), prov.deleteUserUserID)
+	assert.NotEqual(t, 0, len(auditor.events))
 }
 
 // TestCreateOrganization_CreateUserFailureNoDeleteUser 校验 CreateUser 失败时不调

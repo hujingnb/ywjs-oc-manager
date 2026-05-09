@@ -12,6 +12,7 @@ import (
 	"oc-manager/internal/domain"
 	"oc-manager/internal/integrations/runtime"
 	"oc-manager/internal/store/sqlc"
+	"github.com/stretchr/testify/require"
 )
 
 type fakeHealthStore struct {
@@ -78,14 +79,11 @@ func TestAppHealthCheckSuccessClearsError(t *testing.T) {
 	exec := &fakeExecutor{result: runtime.ExecResult{ExitCode: 0, Stdout: `{"ok":true}`}}
 	h := NewAppHealthCheckHandler(store, exec, &capturingNotifier{})
 	job := sqlc.Job{Type: domain.JobTypeAppHealthCheck, PayloadJson: []byte(`{"app_id":"11111111-1111-1111-1111-111111111111"}`)}
-	if err := h.Handle(context.Background(), job); err != nil {
-		t.Fatalf("Handle: %v", err)
-	}
+	err := h.Handle(context.Background(), job)
+	require.NoError(t, err)
 	var state healthState
 	_ = json.Unmarshal(store.healthState, &state)
-	if state.LastError != "" {
-		t.Fatalf("last_error 应被清空; got %s", state.LastError)
-	}
+	require.Equal(t, "", state.LastError)
 	if state.LastSuccessAt.IsZero() {
 		t.Fatalf("last_success_at 未写入")
 	}
@@ -97,15 +95,12 @@ func TestAppHealthCheckFailureTriggersRestart(t *testing.T) {
 	notifier := &capturingNotifier{}
 	h := NewAppHealthCheckHandler(store, exec, notifier)
 	job := sqlc.Job{Type: domain.JobTypeAppHealthCheck, PayloadJson: []byte(`{"app_id":"11111111-1111-1111-1111-111111111111"}`)}
-	if err := h.Handle(context.Background(), job); err != nil {
-		t.Fatalf("Handle: %v", err)
-	}
+	err := h.Handle(context.Background(), job)
+	require.NoError(t, err)
 	if len(store.jobs) != 1 || store.jobs[0].Type != domain.JobTypeAppRestartContainer {
 		t.Fatalf("应入队 1 条 app_restart_container; got %v", store.jobs)
 	}
-	if notifier.count != 1 {
-		t.Fatalf("notifier 应触发一次; got %d", notifier.count)
-	}
+	require.Equal(t, 1, notifier.count)
 }
 
 func TestAppHealthCheckExhaustedBudgetSetsError(t *testing.T) {
@@ -120,15 +115,12 @@ func TestAppHealthCheckExhaustedBudgetSetsError(t *testing.T) {
 	h := NewAppHealthCheckHandler(store, exec, &capturingNotifier{})
 	h.now = func() time.Time { return now.Add(time.Second) }
 	job := sqlc.Job{Type: domain.JobTypeAppHealthCheck, PayloadJson: []byte(`{"app_id":"11111111-1111-1111-1111-111111111111"}`)}
-	if err := h.Handle(context.Background(), job); err != nil {
-		t.Fatalf("Handle: %v", err)
-	}
+	err := h.Handle(context.Background(), job)
+	require.NoError(t, err)
 	if len(store.statusUpdates) != 1 || store.statusUpdates[0] != domain.AppStatusError {
 		t.Fatalf("status 应被推到 error; updates=%v", store.statusUpdates)
 	}
-	if len(store.jobs) != 0 {
-		t.Fatalf("超额后不应入队 restart; got %v", store.jobs)
-	}
+	require.Equal(t, 0, len(store.jobs))
 }
 
 func TestAppHealthCheckExecErrorAlsoTreatedAsFailure(t *testing.T) {
@@ -136,12 +128,9 @@ func TestAppHealthCheckExecErrorAlsoTreatedAsFailure(t *testing.T) {
 	exec := &fakeExecutor{err: errors.New("docker dial")}
 	h := NewAppHealthCheckHandler(store, exec, &capturingNotifier{})
 	job := sqlc.Job{Type: domain.JobTypeAppHealthCheck, PayloadJson: []byte(`{"app_id":"11111111-1111-1111-1111-111111111111"}`)}
-	if err := h.Handle(context.Background(), job); err != nil {
-		t.Fatalf("Handle: %v", err)
-	}
-	if len(store.jobs) != 1 {
-		t.Fatalf("exec 错误也应触发 restart 入队; got %v", store.jobs)
-	}
+	err := h.Handle(context.Background(), job)
+	require.NoError(t, err)
+	require.Equal(t, 1, len(store.jobs))
 }
 
 func TestAppHealthCheckNoneModeSkipsRestart(t *testing.T) {
@@ -151,13 +140,8 @@ func TestAppHealthCheckNoneModeSkipsRestart(t *testing.T) {
 	exec := &fakeExecutor{result: runtime.ExecResult{ExitCode: 1, Stdout: "fail"}}
 	h := NewAppHealthCheckHandler(store, exec, &capturingNotifier{})
 	job := sqlc.Job{Type: domain.JobTypeAppHealthCheck, PayloadJson: []byte(`{"app_id":"11111111-1111-1111-1111-111111111111"}`)}
-	if err := h.Handle(context.Background(), job); err != nil {
-		t.Fatalf("Handle: %v", err)
-	}
-	if len(store.jobs) != 0 {
-		t.Fatalf("mode=none 不应入队 restart; got %v", store.jobs)
-	}
-	if len(store.statusUpdates) != 0 {
-		t.Fatalf("mode=none 不应推 error; got %v", store.statusUpdates)
-	}
+	err := h.Handle(context.Background(), job)
+	require.NoError(t, err)
+	require.Equal(t, 0, len(store.jobs))
+	require.Equal(t, 0, len(store.statusUpdates))
 }

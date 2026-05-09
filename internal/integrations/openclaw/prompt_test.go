@@ -1,9 +1,9 @@
 package openclaw
 
 import (
-	"errors"
 	"strings"
 	"testing"
+	"github.com/stretchr/testify/require"
 )
 
 func TestRenderConcatenatesInOrder(t *testing.T) {
@@ -13,15 +13,9 @@ func TestRenderConcatenatesInOrder(t *testing.T) {
 		AppPrompt:      "{app_name} 个人风格",
 		Variables:      map[string]string{"org_name": "测试组织", "app_name": "alice-bot"},
 	})
-	if err != nil {
-		t.Fatalf("Render() error = %v", err)
-	}
-	if !strings.HasPrefix(got.Prompt, "你是 OpenClaw 助手") {
-		t.Fatalf("prompt should start with platform layer, got %q", got.Prompt)
-	}
-	if !strings.Contains(got.Prompt, "测试组织 公司助手") {
-		t.Fatalf("org layer not substituted: %q", got.Prompt)
-	}
+	require.NoError(t, err)
+	require.True(t, strings.HasPrefix(got.Prompt, "你是 OpenClaw 助手"))
+	require.True(t, strings.Contains(got.Prompt, "测试组织 公司助手"))
 	if got.CompositionOrder[0] != "platform" || got.CompositionOrder[2] != "app" {
 		t.Fatalf("order = %+v", got.CompositionOrder)
 	}
@@ -34,12 +28,8 @@ func TestRenderSkipsEmptyLayers(t *testing.T) {
 		AppPrompt:      "",
 		Variables:      map[string]string{"org_name": "测试组织"},
 	})
-	if err != nil {
-		t.Fatalf("Render() error = %v", err)
-	}
-	if got.Prompt != "你是 测试组织 的客服" {
-		t.Fatalf("prompt = %q", got.Prompt)
-	}
+	require.NoError(t, err)
+	require.Equal(t, "你是 测试组织 的客服", got.Prompt)
 	if len(got.CompositionOrder) != 1 || got.CompositionOrder[0] != "organization" {
 		t.Fatalf("order = %+v", got.CompositionOrder)
 	}
@@ -49,19 +39,13 @@ func TestRenderRejectsUnresolvedPlaceholders(t *testing.T) {
 	_, err := Render(PromptInput{
 		AppPrompt: "你好 {missing_var}",
 	})
-	if !errors.Is(err, ErrPromptUnresolvedPlaceholder) {
-		t.Fatalf("error = %v, want ErrPromptUnresolvedPlaceholder", err)
-	}
-	if !strings.Contains(err.Error(), "{missing_var}") {
-		t.Fatalf("error should reference missing variable: %v", err)
-	}
+	require.ErrorIs(t, err, ErrPromptUnresolvedPlaceholder)
+	require.True(t, strings.Contains(err.Error(), "{missing_var}"))
 }
 
 func TestRenderRejectsEmptyInput(t *testing.T) {
 	_, err := Render(PromptInput{})
-	if !errors.Is(err, ErrPromptEmpty) {
-		t.Fatalf("error = %v, want ErrPromptEmpty", err)
-	}
+	require.ErrorIs(t, err, ErrPromptEmpty)
 }
 
 func TestVariablesFromContextHasExpectedKeys(t *testing.T) {

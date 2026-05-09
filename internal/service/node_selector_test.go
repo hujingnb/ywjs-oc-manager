@@ -8,6 +8,8 @@ import (
 	"github.com/jackc/pgx/v5/pgtype"
 
 	"oc-manager/internal/store/sqlc"
+	"github.com/stretchr/testify/require"
+	"github.com/stretchr/testify/assert"
 )
 
 type sqlNodeSelectorStub struct {
@@ -34,27 +36,17 @@ func TestSQLNodeSelector_AdaptsRows(t *testing.T) {
 		AppCount: 7,
 	}}}
 	got, err := NewSQLNodeSelector(store).ListActiveNodesWithAppCounts(context.Background())
-	if err != nil {
-		t.Fatalf("err = %v", err)
-	}
-	if len(got) != 2 {
-		t.Fatalf("len = %d, want 2", len(got))
-	}
+	require.NoError(t, err)
+	require.Len(t, got, 2)
 	if got[0].MaxApps == nil || *got[0].MaxApps != 5 || got[0].AppCount != 2 {
 		t.Errorf("row[0] = %+v", got[0])
 	}
-	if got[1].MaxApps != nil {
-		t.Errorf("row[1].MaxApps should be nil for NULL, got %v", *got[1].MaxApps)
-	}
-	if got[1].AppCount != 7 {
-		t.Errorf("row[1].AppCount = %d, want 7", got[1].AppCount)
-	}
+	assert.Nil(t, got[1].MaxApps)
+	assert.Equal(t, int64(7), got[1].AppCount)
 }
 
 func TestSQLNodeSelector_StoreError(t *testing.T) {
 	store := &sqlNodeSelectorStub{err: errors.New("db down")}
 	_, err := NewSQLNodeSelector(store).ListActiveNodesWithAppCounts(context.Background())
-	if err == nil {
-		t.Fatal("expected error")
-	}
+	require.Error(t, err)
 }

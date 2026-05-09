@@ -1,6 +1,9 @@
 package domain
 
-import "testing"
+import (
+	"testing"
+	"github.com/stretchr/testify/require"
+)
 
 func TestIsAppTransitionAllowedHappyPath(t *testing.T) {
 	cases := [][2]string{
@@ -21,43 +24,27 @@ func TestIsAppTransitionAllowedHappyPath(t *testing.T) {
 }
 
 func TestIsAppTransitionAllowedRejectsBackwards(t *testing.T) {
-	if IsAppTransitionAllowed(AppStatusRunning, AppStatusInitializing) {
-		t.Fatalf("running should not jump to initializing")
-	}
-	if IsAppTransitionAllowed(AppStatusDraft, AppStatusRunning) {
-		t.Fatalf("draft must go through initializing")
-	}
-	if IsAppTransitionAllowed(AppStatusDraft, AppStatusDraft) {
-		t.Fatalf("self transition rejected")
-	}
+	require.False(t, IsAppTransitionAllowed(AppStatusRunning, AppStatusInitializing))
+	require.False(t, IsAppTransitionAllowed(AppStatusDraft, AppStatusRunning))
+	require.False(t, IsAppTransitionAllowed(AppStatusDraft, AppStatusDraft))
 }
 
 func TestIsAppTransitionAllowedDeletedOnlyFromError(t *testing.T) {
-	if IsAppTransitionAllowed(AppStatusRunning, AppStatusDeleted) {
-		t.Fatalf("delete must go through SoftDeleteApp not state machine for running")
-	}
-	if !IsAppTransitionAllowed(AppStatusError, AppStatusDeleted) {
-		t.Fatalf("error -> deleted should be allowed")
-	}
+	require.False(t, IsAppTransitionAllowed(AppStatusRunning, AppStatusDeleted))
+	require.True(t, IsAppTransitionAllowed(AppStatusError, AppStatusDeleted))
 }
 
 func TestEnsureAppTransitionWraps(t *testing.T) {
-	if err := EnsureAppTransition(AppStatusRunning, AppStatusInitializing); err == nil {
-		t.Fatalf("expected error")
-	}
-	if err := EnsureAppTransition(AppStatusDraft, AppStatusInitializing); err != nil {
-		t.Fatalf("unexpected error: %v", err)
-	}
+	err := EnsureAppTransition(AppStatusRunning, AppStatusInitializing)
+	require.Error(t, err)
+	err = EnsureAppTransition(AppStatusDraft, AppStatusInitializing)
+	require.NoError(t, err)
 }
 
 func TestAppIsTerminalOnlyDeleted(t *testing.T) {
-	if !AppIsTerminal(AppStatusDeleted) {
-		t.Fatalf("deleted should be terminal")
-	}
+	require.True(t, AppIsTerminal(AppStatusDeleted))
 	for _, status := range []string{AppStatusError, AppStatusRunning, AppStatusStopped, AppStatusDraft} {
-		if AppIsTerminal(status) {
-			t.Fatalf("%s should not be terminal", status)
-		}
+		require.False(t, AppIsTerminal(status))
 	}
 }
 
@@ -79,22 +66,14 @@ func TestIsAPIKeyTransitionAllowedHappyPath(t *testing.T) {
 
 func TestAPIKeyAndAppStateAreIndependent(t *testing.T) {
 	// 如果 app 进入 stopped，api_key 仍可保持 active；反之亦然。
-	if !IsAppTransitionAllowed(AppStatusRunning, AppStatusStopped) {
-		t.Fatalf("running -> stopped allowed")
-	}
-	if IsAppTransitionAllowed(APIKeyStatusActive, AppStatusStopped) {
-		t.Fatalf("api_key active should not be confused with app status")
-	}
-	if !IsAPIKeyTransitionAllowed(APIKeyStatusActive, APIKeyStatusDisabled) {
-		t.Fatalf("api_key active -> disabled allowed")
-	}
+	require.True(t, IsAppTransitionAllowed(AppStatusRunning, AppStatusStopped))
+	require.False(t, IsAppTransitionAllowed(APIKeyStatusActive, AppStatusStopped))
+	require.True(t, IsAPIKeyTransitionAllowed(APIKeyStatusActive, APIKeyStatusDisabled))
 }
 
 func TestEnsureAPIKeyTransitionFailsForInvalid(t *testing.T) {
-	if err := EnsureAPIKeyTransition(APIKeyStatusDisabled, APIKeyStatusError); err == nil {
-		t.Fatalf("expected error for disabled -> error")
-	}
-	if err := EnsureAPIKeyTransition(APIKeyStatusPending, APIKeyStatusActive); err != nil {
-		t.Fatalf("unexpected error: %v", err)
-	}
+	err := EnsureAPIKeyTransition(APIKeyStatusDisabled, APIKeyStatusError)
+	require.Error(t, err)
+	err = EnsureAPIKeyTransition(APIKeyStatusPending, APIKeyStatusActive)
+	require.NoError(t, err)
 }

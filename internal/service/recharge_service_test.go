@@ -11,6 +11,7 @@ import (
 	"oc-manager/internal/domain"
 	"oc-manager/internal/integrations/newapi"
 	"oc-manager/internal/store/sqlc"
+	"github.com/stretchr/testify/require"
 )
 
 const (
@@ -24,15 +25,9 @@ func TestRecharge_HappyPath(t *testing.T) {
 	svc := NewRechargeService(store, client)
 
 	result, err := svc.Recharge(context.Background(), platformAdmin(), testRechargeOrgID, 1000, "test")
-	if err != nil {
-		t.Fatalf("Recharge err = %v", err)
-	}
-	if result.Status != "succeeded" {
-		t.Fatalf("status = %q", result.Status)
-	}
-	if result.NewAPIRefID != "ref-9" {
-		t.Fatalf("ref_id = %q", result.NewAPIRefID)
-	}
+	require.NoError(t, err)
+	require.Equal(t, "succeeded", result.Status)
+	require.Equal(t, "ref-9", result.NewAPIRefID)
 	if !store.recordWritten || !store.auditWritten {
 		t.Fatalf("record/audit 未写: %+v", store)
 	}
@@ -45,27 +40,21 @@ func TestRecharge_DeniesNonPlatformAdmin(t *testing.T) {
 	store := newRechargeStub(t, "1234")
 	svc := NewRechargeService(store, &fakeNewAPIRecharge{})
 	_, err := svc.Recharge(context.Background(), auth.Principal{Role: domain.UserRoleOrgAdmin}, testRechargeOrgID, 100, "")
-	if !errors.Is(err, ErrRechargeDenied) {
-		t.Fatalf("err = %v, want ErrRechargeDenied", err)
-	}
+	require.ErrorIs(t, err, ErrRechargeDenied)
 }
 
 func TestRecharge_RejectsZeroAmount(t *testing.T) {
 	store := newRechargeStub(t, "1234")
 	svc := NewRechargeService(store, &fakeNewAPIRecharge{})
 	_, err := svc.Recharge(context.Background(), platformAdmin(), testRechargeOrgID, 0, "")
-	if !errors.Is(err, ErrInvalidRechargeAmount) {
-		t.Fatalf("err = %v, want ErrInvalidRechargeAmount", err)
-	}
+	require.ErrorIs(t, err, ErrInvalidRechargeAmount)
 }
 
 func TestRecharge_RejectsMissingNewAPIUserID(t *testing.T) {
 	store := newRechargeStub(t, "")
 	svc := NewRechargeService(store, &fakeNewAPIRecharge{})
 	_, err := svc.Recharge(context.Background(), platformAdmin(), testRechargeOrgID, 100, "")
-	if !errors.Is(err, ErrOrgMissingNewAPIUserID) {
-		t.Fatalf("err = %v, want ErrOrgMissingNewAPIUserID", err)
-	}
+	require.ErrorIs(t, err, ErrOrgMissingNewAPIUserID)
 }
 
 func TestRecharge_NewAPIErrorStillWritesFailedRecord(t *testing.T) {
@@ -73,27 +62,17 @@ func TestRecharge_NewAPIErrorStillWritesFailedRecord(t *testing.T) {
 	client := &fakeNewAPIRecharge{rechargeErr: errors.New("upstream blow")}
 	svc := NewRechargeService(store, client)
 	_, err := svc.Recharge(context.Background(), platformAdmin(), testRechargeOrgID, 1000, "")
-	if err == nil {
-		t.Fatal("upstream 失败应当冒泡")
-	}
-	if !store.recordWritten {
-		t.Fatal("即使失败也应当写入 recharge_records")
-	}
-	if store.lastRecordStatus != "failed" {
-		t.Fatalf("record status = %q, want failed", store.lastRecordStatus)
-	}
-	if !store.auditWritten {
-		t.Fatal("失败也应当写审计日志")
-	}
+	require.Error(t, err)
+	require.True(t, store.recordWritten)
+	require.Equal(t, "failed", store.lastRecordStatus)
+	require.True(t, store.auditWritten)
 }
 
 func TestListRecharges_DeniesNonPlatformAdmin(t *testing.T) {
 	store := newRechargeStub(t, "1234")
 	svc := NewRechargeService(store, &fakeNewAPIRecharge{})
 	_, err := svc.ListRecharges(context.Background(), auth.Principal{Role: domain.UserRoleOrgAdmin}, testRechargeOrgID, 0, 0)
-	if !errors.Is(err, ErrRechargeDenied) {
-		t.Fatalf("err = %v", err)
-	}
+	require.ErrorIs(t, err, ErrRechargeDenied)
 }
 
 func TestListRecharges_HappyPath(t *testing.T) {
@@ -104,12 +83,8 @@ func TestListRecharges_HappyPath(t *testing.T) {
 	}
 	svc := NewRechargeService(store, &fakeNewAPIRecharge{})
 	results, err := svc.ListRecharges(context.Background(), platformAdmin(), testRechargeOrgID, 50, 0)
-	if err != nil {
-		t.Fatalf("err = %v", err)
-	}
-	if len(results) != 2 {
-		t.Fatalf("results 数量 = %d", len(results))
-	}
+	require.NoError(t, err)
+	require.Len(t, results, 2)
 }
 
 func TestGetBalance_PlatformAdminAllowed(t *testing.T) {
@@ -117,12 +92,8 @@ func TestGetBalance_PlatformAdminAllowed(t *testing.T) {
 	client := &fakeNewAPIRecharge{balanceResult: newapi.BalanceResult{NewAPIUserID: 1234, RemainQuota: 8000}}
 	svc := NewRechargeService(store, client)
 	view, err := svc.GetBalance(context.Background(), platformAdmin(), testRechargeOrgID)
-	if err != nil {
-		t.Fatalf("err = %v", err)
-	}
-	if view.RemainQuota != 8000 {
-		t.Fatalf("balance = %+v", view)
-	}
+	require.NoError(t, err)
+	require.Equal(t, int64(8000), view.RemainQuota)
 }
 
 func TestGetBalance_OrgAdminMustMatchOrg(t *testing.T) {
@@ -131,9 +102,7 @@ func TestGetBalance_OrgAdminMustMatchOrg(t *testing.T) {
 	svc := NewRechargeService(store, client)
 	_, err := svc.GetBalance(context.Background(),
 		auth.Principal{Role: domain.UserRoleOrgAdmin, OrgID: "another"}, testRechargeOrgID)
-	if !errors.Is(err, ErrForbidden) {
-		t.Fatalf("err = %v, want ErrForbidden", err)
-	}
+	require.ErrorIs(t, err, ErrForbidden)
 
 	if _, err := svc.GetBalance(context.Background(),
 		auth.Principal{Role: domain.UserRoleOrgAdmin, OrgID: testRechargeOrgID}, testRechargeOrgID); err != nil {

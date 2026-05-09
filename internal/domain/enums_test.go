@@ -1,6 +1,10 @@
 package domain
 
-import "testing"
+import (
+	"testing"
+
+	"github.com/stretchr/testify/require"
+)
 
 func TestEnumValidatorsAcceptKnownValues(t *testing.T) {
 	tests := []struct {
@@ -17,9 +21,7 @@ func TestEnumValidatorsAcceptKnownValues(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			if !tt.check(tt.value) {
-				t.Fatalf("期望 %q 是合法枚举值", tt.value)
-			}
+			require.True(t, tt.check(tt.value))
 		})
 	}
 }
@@ -39,9 +41,7 @@ func TestEnumValidatorsRejectUnknownValues(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			if tt.check(tt.value) {
-				t.Fatalf("期望 %q 被判定为非法枚举值", tt.value)
-			}
+			require.False(t, tt.check(tt.value))
 		})
 	}
 }

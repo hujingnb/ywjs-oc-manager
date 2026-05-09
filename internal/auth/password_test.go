@@ -1,6 +1,9 @@
 package auth
 
-import "testing"
+import (
+	"testing"
+	"github.com/stretchr/testify/require"
+)
 
 func TestHashPasswordAndVerifyPassword(t *testing.T) {
 	params := PasswordParams{
@@ -12,28 +15,18 @@ func TestHashPasswordAndVerifyPassword(t *testing.T) {
 	}
 
 	hash, err := HashPassword("correct-password", params)
-	if err != nil {
-		t.Fatalf("HashPassword() error = %v", err)
-	}
-	if !VerifyPassword("correct-password", hash) {
-		t.Fatal("期望正确密码验证通过")
-	}
-	if VerifyPassword("wrong-password", hash) {
-		t.Fatal("期望错误密码验证失败")
-	}
+	require.NoError(t, err)
+	require.True(t, VerifyPassword("correct-password", hash))
+	require.False(t, VerifyPassword("wrong-password", hash))
 }
 
 func TestVerifyPasswordRejectsMalformedHash(t *testing.T) {
-	if VerifyPassword("password", "not-a-phc-hash") {
-		t.Fatal("期望格式错误的 hash 验证失败")
-	}
+	require.False(t, VerifyPassword("password", "not-a-phc-hash"))
 }
 
 func TestHashPasswordRejectsInvalidInput(t *testing.T) {
-	if _, err := HashPassword("", DefaultPasswordParams); err == nil {
-		t.Fatal("期望空密码返回错误")
-	}
-	if _, err := HashPassword("password", PasswordParams{}); err == nil {
-		t.Fatal("期望非法 Argon2id 参数返回错误")
-	}
+	_, err := HashPassword("", DefaultPasswordParams)
+	require.Error(t, err)
+	_, err = HashPassword("password", PasswordParams{})
+	require.Error(t, err)
 }

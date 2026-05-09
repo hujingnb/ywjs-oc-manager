@@ -3,6 +3,8 @@ package main
 import (
 	"strings"
 	"testing"
+	"github.com/stretchr/testify/require"
+	"github.com/stretchr/testify/assert"
 )
 
 func TestParseHostDataRootFromMountInfo_ExactMatch(t *testing.T) {
@@ -11,13 +13,9 @@ func TestParseHostDataRootFromMountInfo_ExactMatch(t *testing.T) {
 5011 4929 259:2 /etc/timezone /etc/timezone ro,relatime - ext4 /dev/nvme0n1p2 rw
 `
 	got, err := parseHostDataRootFromMountInfo(strings.NewReader(mountinfo), "/var/lib/oc-agent")
-	if err != nil {
-		t.Fatalf("err=%v", err)
-	}
+	require.NoError(t, err)
 	want := "/home/hujing/dir/software/ywjs/oc-manager/.local/data/agent"
-	if got != want {
-		t.Errorf("got=%q want=%q", got, want)
-	}
+	assert.Equal(t, want, got)
 }
 
 func TestParseHostDataRootFromMountInfo_NotFoundReturnsEmpty(t *testing.T) {
@@ -25,12 +23,8 @@ func TestParseHostDataRootFromMountInfo_NotFoundReturnsEmpty(t *testing.T) {
 32 2 259:2 / / rw,relatime shared:1 - ext4 /dev/nvme0n1p2 rw
 `
 	got, err := parseHostDataRootFromMountInfo(strings.NewReader(mountinfo), "/var/lib/oc-agent")
-	if err != nil {
-		t.Fatalf("err=%v", err)
-	}
-	if got != "" {
-		t.Errorf("期望未匹配返回空，实际 %q", got)
-	}
+	require.NoError(t, err)
+	assert.Equal(t, "", got)
 }
 
 func TestParseHostDataRootFromMountInfo_OctalEscape(t *testing.T) {
@@ -38,13 +32,9 @@ func TestParseHostDataRootFromMountInfo_OctalEscape(t *testing.T) {
 	mountinfo := `5010 4929 259:2 /home/with\040space/data /var/lib/oc-agent rw,relatime - ext4 /dev/nvme0n1p2 rw
 `
 	got, err := parseHostDataRootFromMountInfo(strings.NewReader(mountinfo), "/var/lib/oc-agent")
-	if err != nil {
-		t.Fatalf("err=%v", err)
-	}
+	require.NoError(t, err)
 	want := "/home/with space/data"
-	if got != want {
-		t.Errorf("got=%q want=%q", got, want)
-	}
+	assert.Equal(t, want, got)
 }
 
 func TestUnescapeMountInfoField(t *testing.T) {
@@ -58,8 +48,6 @@ func TestUnescapeMountInfoField(t *testing.T) {
 		{`\077`, "?"}, // 0o077 = 63 = '?' (合法 octal 但项目内不会出现)
 	}
 	for _, c := range cases {
-		if got := unescapeMountInfoField(c.in); got != c.want {
-			t.Errorf("unescape %q got=%q want=%q", c.in, got, c.want)
-		}
+		assert.Equal(t, c.want, unescapeMountInfoField(c.in))
 	}
 }

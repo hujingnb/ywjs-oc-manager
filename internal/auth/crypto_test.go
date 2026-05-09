@@ -5,6 +5,7 @@ import (
 	"encoding/base64"
 	"strings"
 	"testing"
+	"github.com/stretchr/testify/require"
 )
 
 func newTestKey(t *testing.T) []byte {
@@ -19,27 +20,19 @@ func newTestKey(t *testing.T) []byte {
 func TestNewCipher_RejectsNon32Bytes(t *testing.T) {
 	for _, size := range []int{0, 1, 16, 24, 31, 33, 64} {
 		_, err := NewCipher(make([]byte, size))
-		if err == nil {
-			t.Fatalf("NewCipher(%d 字节) err = nil, want 错误", size)
-		}
+		require.Error(t, err)
 	}
 }
 
 func TestNewCipher_AcceptsExact32Bytes(t *testing.T) {
 	c, err := NewCipher(newTestKey(t))
-	if err != nil {
-		t.Fatalf("NewCipher err = %v, want nil", err)
-	}
-	if c == nil {
-		t.Fatal("Cipher 为 nil")
-	}
+	require.NoError(t, err)
+	require.NotNil(t, c)
 }
 
 func TestCipher_RoundTrip(t *testing.T) {
 	c, err := NewCipher(newTestKey(t))
-	if err != nil {
-		t.Fatalf("NewCipher err = %v", err)
-	}
+	require.NoError(t, err)
 	plaintexts := [][]byte{
 		[]byte("hello"),
 		[]byte(""),
@@ -48,46 +41,31 @@ func TestCipher_RoundTrip(t *testing.T) {
 	}
 	for _, pt := range plaintexts {
 		token, err := c.Encrypt(pt)
-		if err != nil {
-			t.Fatalf("Encrypt(%q) err = %v", pt, err)
-		}
+		require.NoError(t, err)
 		got, err := c.Decrypt(token)
-		if err != nil {
-			t.Fatalf("Decrypt err = %v", err)
-		}
-		if !bytes.Equal(got, pt) {
-			t.Fatalf("Decrypt = %q, want %q", got, pt)
-		}
+		require.NoError(t, err)
+		require.True(t, bytes.Equal(got, pt))
 	}
 }
 
 func TestCipher_EncryptIsRandomized(t *testing.T) {
 	c, err := NewCipher(newTestKey(t))
-	if err != nil {
-		t.Fatalf("NewCipher err = %v", err)
-	}
+	require.NoError(t, err)
 	a, _ := c.Encrypt([]byte("same"))
 	b, _ := c.Encrypt([]byte("same"))
-	if a == b {
-		t.Fatalf("两次加密结果一致，说明 nonce 未随机化: %q", a)
-	}
+	require.NotEqual(t, b, a)
 }
 
 func TestCipher_DecryptRejectsTampered(t *testing.T) {
 	c, err := NewCipher(newTestKey(t))
-	if err != nil {
-		t.Fatalf("NewCipher err = %v", err)
-	}
+	require.NoError(t, err)
 	token, _ := c.Encrypt([]byte("original"))
 	raw, err := base64.StdEncoding.DecodeString(token)
-	if err != nil {
-		t.Fatalf("解码 token: %v", err)
-	}
+	require.NoError(t, err)
 	raw[len(raw)-1] ^= 0x01
 	tampered := base64.StdEncoding.EncodeToString(raw)
-	if _, err := c.Decrypt(tampered); err == nil {
-		t.Fatal("Decrypt 篡改密文应失败但成功")
-	}
+	_, err = c.Decrypt(tampered)
+	require.Error(t, err)
 }
 
 func TestCipher_DecryptRejectsBadBase64(t *testing.T) {
@@ -100,9 +78,8 @@ func TestCipher_DecryptRejectsBadBase64(t *testing.T) {
 func TestCipher_DecryptRejectsTooShort(t *testing.T) {
 	c, _ := NewCipher(newTestKey(t))
 	short := base64.StdEncoding.EncodeToString([]byte{0x00, 0x01})
-	if _, err := c.Decrypt(short); err == nil {
-		t.Fatal("Decrypt 过短密文应失败")
-	}
+	_, err := c.Decrypt(short)
+	require.Error(t, err)
 }
 
 func TestCipher_DecryptRejectsCrossKey(t *testing.T) {
@@ -114,7 +91,6 @@ func TestCipher_DecryptRejectsCrossKey(t *testing.T) {
 	cipherA, _ := NewCipher(keyA)
 	cipherB, _ := NewCipher(keyB)
 	token, _ := cipherA.Encrypt([]byte("for-A"))
-	if _, err := cipherB.Decrypt(token); err == nil {
-		t.Fatal("用其他 key 解密应失败")
-	}
+	_, err := cipherB.Decrypt(token)
+	require.Error(t, err)
 }

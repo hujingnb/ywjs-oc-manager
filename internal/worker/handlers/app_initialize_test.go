@@ -16,6 +16,8 @@ import (
 	runtimepkg "oc-manager/internal/integrations/runtime"
 	"oc-manager/internal/service"
 	"oc-manager/internal/store/sqlc"
+	"github.com/stretchr/testify/require"
+	"github.com/stretchr/testify/assert"
 )
 
 const (
@@ -32,9 +34,7 @@ func TestAppInitializeHandlesHappyPath(t *testing.T) {
 	client := &fakeNewAPI{result: newapi.APIKey{ID: 99, Key: "sk-test"}}
 
 	cipher, err := auth.NewCipher(make([]byte, 32))
-	if err != nil {
-		t.Fatalf("NewCipher: %v", err)
-	}
+	require.NoError(t, err)
 	cfg := AppInitializeConfig{
 		RuntimeImage:         "openclaw:dev",
 		SystemPromptTemplate: "工作目录:{{workspace_dir}} 组织:{{knowledge_org_dir}} 应用:{{knowledge_app_dir}}",
@@ -42,9 +42,8 @@ func TestAppInitializeHandlesHappyPath(t *testing.T) {
 	}
 	handler := NewAppInitializeHandler(store, images, dirs, containers, containers, client, cfg)
 
-	if err := handler.Handle(context.Background(), buildJob(t, testAppID, "node-1")); err != nil {
-		t.Fatalf("Handle err = %v", err)
-	}
+	err = handler.Handle(context.Background(), buildJob(t, testAppID, "node-1"))
+	require.NoError(t, err)
 	if !store.apiKeySet || !store.statusSet || !store.containerSet {
 		t.Fatalf("api_key/status/container 应当都被持久化: %+v", store)
 	}
@@ -53,58 +52,36 @@ func TestAppInitializeHandlesHappyPath(t *testing.T) {
 	}
 
 	// container_id 写库为 docker mock 返回的 ID。
-	if store.app.ContainerID.String != "ctr-1" {
-		t.Fatalf("container_id = %q, want ctr-1", store.app.ContainerID.String)
-	}
+	require.Equal(t, "ctr-1", store.app.ContainerID.String)
 
 	// ciphertext 必须可被同一 cipher 解回 sk-test，证明真的走了加密路径。
 	plain, err := cipher.Decrypt(store.app.NewapiKeyCiphertext.String)
-	if err != nil {
-		t.Fatalf("Decrypt: %v", err)
-	}
-	if string(plain) != "sk-test" {
-		t.Fatalf("decrypted = %q, want sk-test", plain)
-	}
-	if store.app.NewapiKeyCiphertext.String == "sk-test" {
-		t.Fatal("ciphertext 等于明文，加密未生效")
-	}
+	require.NoError(t, err)
+	require.Equal(t, "sk-test", string(plain))
+	require.NotEqual(t, "sk-test", store.app.NewapiKeyCiphertext.String)
 
 	// 容器规格断言：6 个挂载（5 个业务目录 + 1 个 weixin plugin token 目录）。
 	// 早期版本曾有 models.json file-level mount 但因 EBUSY 问题已移除，
 	// 改由 worker 在容器启动后通过 docker exec openclaw config patch 注入 catalog。
-	if len(containers.lastSpec.Volumes) != 6 {
-		t.Fatalf("Volumes 数量 = %d, want 6", len(containers.lastSpec.Volumes))
-	}
+	require.Equal(t, 6, len(containers.lastSpec.Volumes))
 	// 反向断言：models.json 不能再被 file-level bind mount。早期实现把渲染好的
 	// catalog 用 RW 文件级 mount 覆盖容器内 models.json，但 OpenClaw embedded agent
 	// 在响应消息时会 atomic rename .tmp -> models.json，撞 mount point 触发 EBUSY，
 	// 导致 weixin 回 "Something went wrong"。改为容器启动后用 docker exec
 	// `openclaw config patch` 把 models.providers 写到 openclaw.json 规避 mount 冲突。
 	for _, vol := range containers.lastSpec.Volumes {
-		if vol.ContainerPath == "/root/.openclaw/agents/main/agent/models.json" {
-			t.Fatalf("models.json file-level mount 已废弃但仍出现在 ContainerSpec：host=%q", vol.HostPath)
-		}
+		require.NotEqual(t, "/root/.openclaw/agents/main/agent/models.json", vol.ContainerPath)
 	}
-	if containers.lastSpec.Image != "openclaw:dev" {
-		t.Fatalf("Image = %q", containers.lastSpec.Image)
-	}
-	if containers.lastSpec.Name != "ocm-"+testAppID {
-		t.Fatalf("Name = %q", containers.lastSpec.Name)
-	}
+	require.Equal(t, "openclaw:dev", containers.lastSpec.Image)
+	require.Equal(t, "ocm-"+testAppID, containers.lastSpec.Name)
 	// Sprint 0 契约：上游 OpenClaw 内置 openai SDK 认 OPENAI_API_KEY，不是 OPENCLAW_API_KEY
-	if containers.lastSpec.Env["OPENAI_API_KEY"] != "sk-test" {
-		t.Fatalf("OPENAI_API_KEY env = %q, want sk-test", containers.lastSpec.Env["OPENAI_API_KEY"])
-	}
-	if containers.lastSpec.Env["OPENCLAW_WORKSPACE_DIR"] != "/workspace" {
-		t.Fatalf("OPENCLAW_WORKSPACE_DIR env = %q", containers.lastSpec.Env["OPENCLAW_WORKSPACE_DIR"])
-	}
-	if containers.lastSpec.Env["OPENCLAW_DISABLE_BONJOUR"] != "1" {
-		t.Fatalf("应注入 OPENCLAW_DISABLE_BONJOUR=1，got %q", containers.lastSpec.Env["OPENCLAW_DISABLE_BONJOUR"])
-	}
+	require.Equal(t, "sk-test", containers.lastSpec.Env["OPENAI_API_KEY"])
+	require.Equal(t, "/workspace", containers.lastSpec.Env["OPENCLAW_WORKSPACE_DIR"])
+	require.Equal(t, "1", containers.lastSpec.Env["OPENCLAW_DISABLE_BONJOUR"])
 	prompt := containers.lastSpec.Env["OPENCLAW_SYSTEM_PROMPT"]
-	if !strings.Contains(prompt, "/workspace") || !strings.Contains(prompt, "/knowledge/org") || !strings.Contains(prompt, "/knowledge/app") {
-		t.Fatalf("system prompt 未展开占位符: %q", prompt)
-	}
+	require.Contains(t, prompt, "/workspace")
+	require.Contains(t, prompt, "/knowledge/org")
+	require.Contains(t, prompt, "/knowledge/app")
 
 	// Sprint 1：InitAppDirs 与 StartContainer 必须被调对参数
 	if dirs.calls != 1 || dirs.lastNode != "node-1" || dirs.lastApp != testAppID {
@@ -126,19 +103,14 @@ func TestAppInitializeWaitsForOpenClawHealthyWhenSupported(t *testing.T) {
 	client := &fakeNewAPI{result: newapi.APIKey{ID: 99, Key: "sk-test"}}
 
 	cipher, err := auth.NewCipher(make([]byte, 32))
-	if err != nil {
-		t.Fatalf("NewCipher: %v", err)
-	}
+	require.NoError(t, err)
 	handler := NewAppInitializeHandler(store, images, dirs, base, containers, client, AppInitializeConfig{
 		RuntimeImage: "openclaw:dev",
 		Cipher:       cipher,
 	})
-	if err := handler.Handle(context.Background(), buildJob(t, testAppID, "node-1")); err != nil {
-		t.Fatalf("Handle err = %v", err)
-	}
-	if base.healthCalls != 1 {
-		t.Fatalf("WaitForOpenClawHealthy 调用 = %d", base.healthCalls)
-	}
+	err = handler.Handle(context.Background(), buildJob(t, testAppID, "node-1"))
+	require.NoError(t, err)
+	require.Equal(t, 1, base.healthCalls)
 }
 
 func TestAppInitializePropagatesHealthCheckError(t *testing.T) {
@@ -155,9 +127,7 @@ func TestAppInitializePropagatesHealthCheckError(t *testing.T) {
 	if err == nil || !strings.Contains(err.Error(), "等待 OpenClaw 健康失败") {
 		t.Fatalf("err=%v", err)
 	}
-	if store.statusSet {
-		t.Fatal("健康检查失败时不应推 status")
-	}
+	require.False(t, store.statusSet)
 }
 
 func TestAppInitializeIsIdempotentForBindingWaiting(t *testing.T) {
@@ -169,45 +139,29 @@ func TestAppInitializeIsIdempotentForBindingWaiting(t *testing.T) {
 	client := &fakeNewAPI{}
 
 	handler := NewAppInitializeHandler(store, images, &fakeDirs{}, containers, containers, client, AppInitializeConfig{})
-	if err := handler.Handle(context.Background(), buildJob(t, testAppID, "node-1")); err != nil {
-		t.Fatalf("Handle err = %v", err)
-	}
-	if client.calls != 0 {
-		t.Fatalf("已 binding_waiting 时 new-api 不应被调用，calls = %d", client.calls)
-	}
-	if images.lastImage != "" {
-		t.Fatalf("镜像分发应当跳过，got %s", images.lastImage)
-	}
-	if containers.calls != 0 {
-		t.Fatal("CreateContainer 不应被调用")
-	}
-	if store.statusSet {
-		t.Fatal("status 不应再次写入")
-	}
+	err := handler.Handle(context.Background(), buildJob(t, testAppID, "node-1"))
+	require.NoError(t, err)
+	require.Equal(t, 0, client.calls)
+	require.Equal(t, "", images.lastImage)
+	require.Equal(t, 0, containers.calls)
+	require.False(t, store.statusSet)
 }
 
 func TestAppInitializeSkipsAPIKeyWhenAlreadyActive(t *testing.T) {
 	store := newAppInitStub(t)
 	cipher := testCipher(t)
 	encrypted, err := cipher.Encrypt([]byte("sk-old-cached"))
-	if err != nil {
-		t.Fatalf("加密 fixture 失败: %v", err)
-	}
+	require.NoError(t, err)
 	store.app.ApiKeyStatus = domain.APIKeyStatusActive
 	store.app.NewapiKeyCiphertext = pgtype.Text{String: encrypted, Valid: true}
 	client := &fakeNewAPI{}
 	containers := &fakeContainers{result: runtimepkg.ContainerInfo{ID: "c", Name: "n"}}
 
 	handler := NewAppInitializeHandler(store, &fakeImages{}, &fakeDirs{}, containers, containers, client, AppInitializeConfig{Cipher: cipher})
-	if err := handler.Handle(context.Background(), buildJob(t, testAppID, "")); err != nil {
-		t.Fatalf("Handle err = %v", err)
-	}
-	if client.calls != 0 {
-		t.Fatal("api_key 已 active 时 new-api 不应被调用")
-	}
-	if !store.statusSet {
-		t.Fatal("status 仍应推到 binding_waiting")
-	}
+	err = handler.Handle(context.Background(), buildJob(t, testAppID, ""))
+	require.NoError(t, err)
+	require.Equal(t, 0, client.calls)
+	require.True(t, store.statusSet)
 }
 
 func TestAppInitializePropagatesNewAPIError(t *testing.T) {
@@ -216,12 +170,8 @@ func TestAppInitializePropagatesNewAPIError(t *testing.T) {
 
 	handler := NewAppInitializeHandler(store, &fakeImages{}, &fakeDirs{}, &fakeContainers{}, &fakeContainers{}, client, AppInitializeConfig{Cipher: testCipher(t)})
 	err := handler.Handle(context.Background(), buildJob(t, testAppID, ""))
-	if !errors.Is(err, newapi.ErrUpstream) {
-		t.Fatalf("error = %v, want ErrUpstream", err)
-	}
-	if store.statusSet {
-		t.Fatal("失败时不应推 status")
-	}
+	require.ErrorIs(t, err, newapi.ErrUpstream)
+	require.False(t, store.statusSet)
 }
 
 func TestAppInitializePropagatesContainerError(t *testing.T) {
@@ -233,9 +183,7 @@ func TestAppInitializePropagatesContainerError(t *testing.T) {
 	if err == nil || !strings.Contains(err.Error(), "创建容器失败") {
 		t.Fatalf("error = %v, want 创建容器失败", err)
 	}
-	if store.statusSet {
-		t.Fatal("失败时不应推 status")
-	}
+	require.False(t, store.statusSet)
 }
 
 func TestAppInitializeRejectsInvalidPayload(t *testing.T) {
@@ -243,9 +191,8 @@ func TestAppInitializeRejectsInvalidPayload(t *testing.T) {
 	handler := NewAppInitializeHandler(store, &fakeImages{}, &fakeDirs{}, &fakeContainers{}, &fakeContainers{}, &fakeNewAPI{}, AppInitializeConfig{})
 
 	job := sqlc.Job{Type: domain.JobTypeAppInitialize, PayloadJson: []byte(`{"runtime_node":"node-1"}`)}
-	if err := handler.Handle(context.Background(), job); err == nil {
-		t.Fatalf("缺 app_id 应当报错")
-	}
+	err := handler.Handle(context.Background(), job)
+	require.Error(t, err)
 }
 
 func TestAppInitializeContainerStepSkippedWhenContainerExists(t *testing.T) {
@@ -255,15 +202,10 @@ func TestAppInitializeContainerStepSkippedWhenContainerExists(t *testing.T) {
 	client := &fakeNewAPI{result: newapi.APIKey{ID: 1, Key: "k"}}
 
 	handler := NewAppInitializeHandler(store, &fakeImages{}, &fakeDirs{}, containers, containers, client, AppInitializeConfig{Cipher: testCipher(t)})
-	if err := handler.Handle(context.Background(), buildJob(t, testAppID, "node-1")); err != nil {
-		t.Fatalf("Handle err = %v", err)
-	}
-	if containers.calls != 0 {
-		t.Fatal("已有 container_id 时不应再次创建容器")
-	}
-	if store.containerSet {
-		t.Fatal("container_id 不应被重写")
-	}
+	err := handler.Handle(context.Background(), buildJob(t, testAppID, "node-1"))
+	require.NoError(t, err)
+	require.Equal(t, 0, containers.calls)
+	require.False(t, store.containerSet)
 }
 
 func buildJob(t *testing.T, appID, nodeID string) sqlc.Job {
@@ -471,18 +413,15 @@ func (f *fakeNewAPI) SetAPIKeyStatus(_ context.Context, _ int64, _ int) error {
 func testCipher(t *testing.T) *auth.Cipher {
 	t.Helper()
 	c, err := auth.NewCipher(make([]byte, 32))
-	if err != nil {
-		t.Fatalf("初始化测试 cipher 失败: %v", err)
-	}
+	require.NoError(t, err)
 	return c
 }
 
 func mustUUIDForTest(t *testing.T, value string) pgtype.UUID {
 	t.Helper()
 	var id pgtype.UUID
-	if err := id.Scan(value); err != nil {
-		t.Fatalf("uuid: %v", err)
-	}
+	err := id.Scan(value)
+	require.NoError(t, err)
 	return id
 }
 
@@ -510,18 +449,10 @@ func TestEnsureAPIKey_CreateAPIKeyFailureRecordsAudit(t *testing.T) {
 	handler := NewAppInitializeHandler(store, &fakeImages{}, &fakeDirs{}, &fakeContainers{}, &fakeContainers{}, client, cfg)
 
 	err := handler.Handle(context.Background(), buildJob(t, testAppID, ""))
-	if !errors.Is(err, newapi.ErrUpstream) {
-		t.Fatalf("err = %v, want ErrUpstream", err)
-	}
-	if len(rec.events) != 1 {
-		t.Fatalf("审计事件数 = %d, want 1", len(rec.events))
-	}
-	if rec.events[0].TargetType != "newapi_call" {
-		t.Fatalf("TargetType = %q, want newapi_call", rec.events[0].TargetType)
-	}
-	if rec.events[0].Result != "failed" {
-		t.Fatalf("Result = %q, want failed", rec.events[0].Result)
-	}
+	require.ErrorIs(t, err, newapi.ErrUpstream)
+	require.Equal(t, 1, len(rec.events))
+	require.Equal(t, "newapi_call", rec.events[0].TargetType)
+	require.Equal(t, "failed", rec.events[0].Result)
 }
 
 func TestEnsureAPIKey_GetTokenFullKeyFailureRecordsAudit(t *testing.T) {
@@ -545,16 +476,10 @@ func TestEnsureAPIKey_GetTokenFullKeyFailureRecordsAudit(t *testing.T) {
 	if err == nil || !strings.Contains(err.Error(), "取完整 sk-") {
 		t.Fatalf("err = %v", err)
 	}
-	if len(rec.events) != 1 {
-		t.Fatalf("审计事件数 = %d, want 1", len(rec.events))
-	}
-	if rec.events[0].TargetType != "newapi_call" {
-		t.Fatalf("TargetType = %q, want newapi_call", rec.events[0].TargetType)
-	}
+	require.Equal(t, 1, len(rec.events))
+	require.Equal(t, "newapi_call", rec.events[0].TargetType)
 	// Endpoint 应含 token ID
-	if !strings.Contains(rec.events[0].TargetID, "42") {
-		t.Fatalf("Endpoint/TargetID = %q, want 含 42", rec.events[0].TargetID)
-	}
+	require.True(t, strings.Contains(rec.events[0].TargetID, "42"))
 }
 
 // renderOpenClawModels 已删除：早期版本通过 file-level bind mount 把渲染好的 catalog
@@ -592,40 +517,25 @@ func TestConfigureOpenClawDefaultModel_PatchesAgentAndModels(t *testing.T) {
 		DefaultProvider: "openai",
 		DefaultModel:    "qwen2.5:0.5b",
 	}
-	if err := configureOpenClawDefaultModel(context.Background(), exec, "node-1", "ctn-1", llm); err != nil {
-		t.Fatalf("err=%v", err)
-	}
-	if len(exec.calls) != 1 {
-		t.Fatalf("ContainerExec 调用次数=%d，期望 1", len(exec.calls))
-	}
+	err := configureOpenClawDefaultModel(context.Background(), exec, "node-1", "ctn-1", llm)
+	require.NoError(t, err)
+	require.Equal(t, 1, len(exec.calls))
 	call := exec.calls[0]
 	if call.cmd[0] != "sh" || call.cmd[1] != "-c" {
 		t.Fatalf("cmd 应是 sh -c form，got %v", call.cmd)
 	}
 	shellLine := call.cmd[2]
-	if !strings.Contains(shellLine, "openclaw config patch --stdin") {
-		t.Fatalf("shell line 缺 patch 命令：%q", shellLine)
-	}
+	require.Contains(t, shellLine, "openclaw config patch --stdin")
 	// 验证 patch JSON 含必要字段
-	if !strings.Contains(shellLine, `"agents"`) || !strings.Contains(shellLine, `"defaults"`) {
-		t.Errorf("patch 缺 agents.defaults: %q", shellLine)
-	}
-	if !strings.Contains(shellLine, `"qwen2.5:0.5b"`) {
-		t.Errorf("patch 缺 model 值: %q", shellLine)
-	}
+	assert.Contains(t, shellLine, `"agents"`)
+	assert.Contains(t, shellLine, `"defaults"`)
+	assert.Contains(t, shellLine, `"qwen2.5:0.5b"`)
 	// schema 要求 models[].name 必填，未填会被 OpenClaw config validate 拒绝
-	if !strings.Contains(shellLine, `"name":"qwen2.5:0.5b"`) {
-		t.Errorf("patch 缺 model name 字段: %q", shellLine)
-	}
-	if !strings.Contains(shellLine, `"models"`) || !strings.Contains(shellLine, `"providers"`) {
-		t.Errorf("patch 缺 models.providers: %q", shellLine)
-	}
-	if !strings.Contains(shellLine, `"mode":"replace"`) {
-		t.Errorf("patch 应含 models.mode=replace 避免 EBUSY: %q", shellLine)
-	}
-	if !strings.Contains(shellLine, "${OPENAI_API_KEY}") {
-		t.Errorf("apiKey 应为 env 占位符: %q", shellLine)
-	}
+	assert.Contains(t, shellLine, `"name":"qwen2.5:0.5b"`)
+	assert.Contains(t, shellLine, `"models"`)
+	assert.Contains(t, shellLine, `"providers"`)
+	assert.Contains(t, shellLine, `"mode":"replace"`)
+	assert.Contains(t, shellLine, "${OPENAI_API_KEY}")
 }
 
 func TestConfigureOpenClawDefaultModel_SkipsWhenLLMIncomplete(t *testing.T) {
@@ -637,14 +547,11 @@ func TestConfigureOpenClawDefaultModel_SkipsWhenLLMIncomplete(t *testing.T) {
 		{DefaultProvider: "openai", DefaultModel: "x"}, // 缺 base
 		{BaseURL: "  ", DefaultProvider: "openai", DefaultModel: "x"},
 	}
-	for i, c := range cases {
+	for _, c := range cases {
 		exec.calls = nil
-		if err := configureOpenClawDefaultModel(context.Background(), exec, "node-1", "ctn-1", c); err != nil {
-			t.Errorf("[%d] err=%v", i, err)
-		}
-		if len(exec.calls) != 0 {
-			t.Errorf("[%d] LLM 不全应跳过 exec，但调了 %d 次", i, len(exec.calls))
-		}
+		err := configureOpenClawDefaultModel(context.Background(), exec, "node-1", "ctn-1", c)
+		assert.NoError(t, err)
+		assert.Empty(t, exec.calls)
 	}
 }
 
@@ -654,9 +561,7 @@ func TestConfigureOpenClawDefaultModel_PropagatesPatchFailure(t *testing.T) {
 		BaseURL: "http://x", DefaultProvider: "openai", DefaultModel: "m",
 	}
 	err := configureOpenClawDefaultModel(context.Background(), exec, "node-1", "ctn-1", llm)
-	if err == nil {
-		t.Fatal("非零 exit code 应返回错误")
-	}
+	require.Error(t, err)
 	if !strings.Contains(err.Error(), "exit=2") {
 		t.Errorf("错误应含 exit code: %v", err)
 	}

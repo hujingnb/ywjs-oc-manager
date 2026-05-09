@@ -11,6 +11,7 @@ import (
 	"oc-manager/internal/domain"
 	"oc-manager/internal/integrations/runtime"
 	"oc-manager/internal/store/sqlc"
+	"github.com/stretchr/testify/require"
 )
 
 type fakeRuntimeSnapshotStore struct {
@@ -61,13 +62,9 @@ func (i *fakeRuntimeInspector) ContainerStats(_ context.Context, _, _ string) (r
 func makeAppForRefresh(t *testing.T) sqlc.App {
 	t.Helper()
 	id, err := pgUUIDFromString("11111111-1111-1111-1111-111111111111")
-	if err != nil {
-		t.Fatalf("uuid: %v", err)
-	}
+	require.NoError(t, err)
 	node, err := pgUUIDFromString("22222222-2222-2222-2222-222222222222")
-	if err != nil {
-		t.Fatalf("uuid: %v", err)
-	}
+	require.NoError(t, err)
 	return sqlc.App{
 		ID:            id,
 		RuntimeNodeID: node,
@@ -93,13 +90,11 @@ func TestRuntimeRefreshStatusHappyPath(t *testing.T) {
 	}
 	h := NewRuntimeRefreshStatusHandler(store, inspector)
 	job := sqlc.Job{Type: domain.JobTypeRuntimeRefreshStatus, PayloadJson: []byte(`{"app_id":"11111111-1111-1111-1111-111111111111"}`)}
-	if err := h.Handle(context.Background(), job); err != nil {
-		t.Fatalf("Handle: %v", err)
-	}
+	err := h.Handle(context.Background(), job)
+	require.NoError(t, err)
 	var got AppRuntimeSnapshot
-	if err := json.Unmarshal(store.savedPayload, &got); err != nil {
-		t.Fatalf("decode: %v", err)
-	}
+	err = json.Unmarshal(store.savedPayload, &got)
+	require.NoError(t, err)
 	if got.CPUPercent != 12.5 || got.MemoryUsage != 1024 || got.NetworkRxBytes != 100 || got.Status != "running" {
 		t.Fatalf("snapshot = %+v", got)
 	}
@@ -110,16 +105,12 @@ func TestRuntimeRefreshStatusInspectErrorRecorded(t *testing.T) {
 	inspector := &fakeRuntimeInspector{inspectErr: errors.New("dial err")}
 	h := NewRuntimeRefreshStatusHandler(store, inspector)
 	job := sqlc.Job{Type: domain.JobTypeRuntimeRefreshStatus, PayloadJson: []byte(`{"app_id":"11111111-1111-1111-1111-111111111111"}`)}
-	if err := h.Handle(context.Background(), job); err != nil {
-		t.Fatalf("Handle: %v", err)
-	}
+	err := h.Handle(context.Background(), job)
+	require.NoError(t, err)
 	var got AppRuntimeSnapshot
-	if err := json.Unmarshal(store.savedPayload, &got); err != nil {
-		t.Fatalf("decode: %v", err)
-	}
-	if got.LastError == "" {
-		t.Fatalf("expected last_error set; got %+v", got)
-	}
+	err = json.Unmarshal(store.savedPayload, &got)
+	require.NoError(t, err)
+	require.NotEqual(t, "", got.LastError)
 }
 
 func TestRuntimeRefreshStatusSkipsNoContainer(t *testing.T) {
@@ -128,10 +119,7 @@ func TestRuntimeRefreshStatusSkipsNoContainer(t *testing.T) {
 	store := &fakeRuntimeSnapshotStore{app: app}
 	h := NewRuntimeRefreshStatusHandler(store, &fakeRuntimeInspector{})
 	job := sqlc.Job{Type: domain.JobTypeRuntimeRefreshStatus, PayloadJson: []byte(`{"app_id":"11111111-1111-1111-1111-111111111111"}`)}
-	if err := h.Handle(context.Background(), job); err != nil {
-		t.Fatalf("Handle: %v", err)
-	}
-	if store.savedPayload != nil {
-		t.Fatalf("snapshot 不应在容器未创建时写入")
-	}
+	err := h.Handle(context.Background(), job)
+	require.NoError(t, err)
+	require.Nil(t, store.savedPayload)
 }

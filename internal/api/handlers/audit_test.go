@@ -13,6 +13,7 @@ import (
 	"oc-manager/internal/auth"
 	"oc-manager/internal/domain"
 	"oc-manager/internal/service"
+	"github.com/stretchr/testify/require"
 )
 
 func TestAuditListByOrgRequiresToken(t *testing.T) {
@@ -22,9 +23,7 @@ func TestAuditListByOrgRequiresToken(t *testing.T) {
 	request := httptest.NewRequest(http.MethodGet, "/api/v1/organizations/o1/audit-logs", nil)
 	router.ServeHTTP(recorder, request)
 
-	if recorder.Code != http.StatusUnauthorized {
-		t.Fatalf("status = %d, want 401", recorder.Code)
-	}
+	require.Equal(t, http.StatusUnauthorized, recorder.Code)
 }
 
 func TestAuditListByOrgPropagatesPrincipal(t *testing.T) {
@@ -37,15 +36,12 @@ func TestAuditListByOrgPropagatesPrincipal(t *testing.T) {
 	request.Header.Set("Authorization", "Bearer "+token)
 	router.ServeHTTP(recorder, request)
 
-	if recorder.Code != http.StatusOK {
-		t.Fatalf("status = %d, body=%s", recorder.Code, recorder.Body.String())
-	}
+	require.Equal(t, http.StatusOK, recorder.Code)
 	var resp struct {
 		Logs []service.AuditResult `json:"audit_logs"`
 	}
-	if err := json.Unmarshal(recorder.Body.Bytes(), &resp); err != nil {
-		t.Fatalf("decode: %v", err)
-	}
+	err := json.Unmarshal(recorder.Body.Bytes(), &resp)
+	require.NoError(t, err)
 	if len(resp.Logs) != 1 || resp.Logs[0].Action != "create" {
 		t.Fatalf("logs = %+v", resp.Logs)
 	}
@@ -63,18 +59,14 @@ func TestAuditListByTargetRequiresParams(t *testing.T) {
 	request.Header.Set("Authorization", "Bearer "+token)
 	router.ServeHTTP(recorder, request)
 
-	if recorder.Code != http.StatusBadRequest {
-		t.Fatalf("status = %d, want 400", recorder.Code)
-	}
+	require.Equal(t, http.StatusBadRequest, recorder.Code)
 }
 
 func newAuditTestRouter(t *testing.T, svc auditService) (*gin.Engine, *auth.TokenManager) {
 	t.Helper()
 	gin.SetMode(gin.ReleaseMode)
 	tokens, err := auth.NewTokenManager("a", "b", time.Minute, time.Hour)
-	if err != nil {
-		t.Fatalf("NewTokenManager() error = %v", err)
-	}
+	require.NoError(t, err)
 	router := gin.New()
 	RegisterAuditRoutes(router, NewAuditHandler(svc, tokens))
 	return router, tokens

@@ -12,6 +12,7 @@ import (
 	"oc-manager/internal/auth"
 	"oc-manager/internal/domain"
 	"oc-manager/internal/store/sqlc"
+	"github.com/stretchr/testify/require"
 )
 
 func TestAuthServiceLoginIssuesTokens(t *testing.T) {
@@ -22,21 +23,13 @@ func TestAuthServiceLoginIssuesTokens(t *testing.T) {
 		Username: "member@example.com",
 		Password: "correct-password",
 	})
-	if err != nil {
-		t.Fatalf("Login() error = %v", err)
-	}
-	if result.User.Username != "member@example.com" {
-		t.Fatalf("user = %+v, want logged in user", result.User)
-	}
+	require.NoError(t, err)
+	require.Equal(t, "member@example.com", result.User.Username)
 	if result.Tokens.AccessToken == "" || result.Tokens.RefreshToken == "" {
 		t.Fatal("期望登录后返回 access token 和 refresh token")
 	}
-	if !store.loggedIn {
-		t.Fatal("期望登录成功后记录 last_login_at")
-	}
-	if len(store.refreshTokens) != 1 {
-		t.Fatalf("refresh token count = %d, want 1", len(store.refreshTokens))
-	}
+	require.True(t, store.loggedIn)
+	require.Equal(t, 1, len(store.refreshTokens))
 }
 
 func TestAuthServiceLoginRejectsWrongPassword(t *testing.T) {
@@ -47,9 +40,7 @@ func TestAuthServiceLoginRejectsWrongPassword(t *testing.T) {
 		Username: "member@example.com",
 		Password: "wrong-password",
 	})
-	if !errors.Is(err, ErrInvalidCredentials) {
-		t.Fatalf("Login() error = %v, want ErrInvalidCredentials", err)
-	}
+	require.ErrorIs(t, err, ErrInvalidCredentials)
 }
 
 func TestAuthServiceLoginRejectsDisabledOrg(t *testing.T) {
@@ -61,9 +52,7 @@ func TestAuthServiceLoginRejectsDisabledOrg(t *testing.T) {
 		Username: "member@example.com",
 		Password: "correct-password",
 	})
-	if !errors.Is(err, ErrOrgDisabled) {
-		t.Fatalf("Login() error = %v, want ErrOrgDisabled", err)
-	}
+	require.ErrorIs(t, err, ErrOrgDisabled)
 }
 
 func TestAuthServiceRefreshRotatesRefreshToken(t *testing.T) {
@@ -74,29 +63,22 @@ func TestAuthServiceRefreshRotatesRefreshToken(t *testing.T) {
 		Username: "member@example.com",
 		Password: "correct-password",
 	})
-	if err != nil {
-		t.Fatalf("Login() error = %v", err)
-	}
+	require.NoError(t, err)
 
 	refreshed, err := svc.Refresh(context.Background(), login.Tokens.RefreshToken)
-	if err != nil {
-		t.Fatalf("Refresh() error = %v", err)
-	}
+	require.NoError(t, err)
 	if refreshed.Tokens.AccessToken == "" || refreshed.Tokens.RefreshToken == "" {
 		t.Fatal("期望刷新后返回新的 token pair")
 	}
-	if len(store.revoked) != 1 {
-		t.Fatalf("revoked count = %d, want 1", len(store.revoked))
-	}
+	require.Equal(t, 1, len(store.revoked))
 }
 
 func TestAuthServiceLogoutIsIdempotent(t *testing.T) {
 	store := newAuthStoreStub(t)
 	svc := newTestAuthService(t, store)
 
-	if err := svc.Logout(context.Background(), "unknown-token"); err != nil {
-		t.Fatalf("Logout() unknown token error = %v", err)
-	}
+	err := svc.Logout(context.Background(), "unknown-token")
+	require.NoError(t, err)
 }
 
 // TestAuthServiceRefreshRejectsExpiredToken 校验 refresh token 在 expires_at <= now 时被拒绝；
@@ -108,9 +90,7 @@ func TestAuthServiceRefreshRejectsExpiredToken(t *testing.T) {
 		Username: "member@example.com",
 		Password: "correct-password",
 	})
-	if err != nil {
-		t.Fatalf("Login() error = %v", err)
-	}
+	require.NoError(t, err)
 	store.expireAll()
 	if _, err := svc.Refresh(context.Background(), login.Tokens.RefreshToken); err == nil || !errors.Is(err, ErrInvalidToken) {
 		t.Fatalf("Refresh(expired) err = %v, want ErrInvalidToken", err)
@@ -131,13 +111,10 @@ func TestAuthServiceRefreshRejectsRotatedToken(t *testing.T) {
 		Username: "member@example.com",
 		Password: "correct-password",
 	})
-	if err != nil {
-		t.Fatalf("Login() error = %v", err)
-	}
+	require.NoError(t, err)
 	time.Sleep(1100 * time.Millisecond)
-	if _, err := svc.Refresh(context.Background(), login.Tokens.RefreshToken); err != nil {
-		t.Fatalf("第一次 Refresh err = %v", err)
-	}
+	_, err = svc.Refresh(context.Background(), login.Tokens.RefreshToken)
+	require.NoError(t, err)
 	if _, err := svc.Refresh(context.Background(), login.Tokens.RefreshToken); err == nil || !errors.Is(err, ErrInvalidToken) {
 		t.Fatalf("第二次复用旧 refresh err = %v, want ErrInvalidToken", err)
 	}
@@ -146,9 +123,7 @@ func TestAuthServiceRefreshRejectsRotatedToken(t *testing.T) {
 func newTestAuthService(t *testing.T, store *authStoreStub) *AuthService {
 	t.Helper()
 	tokens, err := auth.NewTokenManager("access-secret", "refresh-secret", time.Minute, time.Hour)
-	if err != nil {
-		t.Fatalf("NewTokenManager() error = %v", err)
-	}
+	require.NoError(t, err)
 	svc := NewAuthService(store, tokens)
 	svc.now = func() time.Time { return time.Now().UTC() }
 	return svc
@@ -166,9 +141,7 @@ func newAuthStoreStub(t *testing.T) *authStoreStub {
 		SaltLength:  8,
 		KeyLength:   16,
 	})
-	if err != nil {
-		t.Fatalf("HashPassword() error = %v", err)
-	}
+	require.NoError(t, err)
 	return &authStoreStub{
 		nextRefreshID: refreshID,
 		org: sqlc.Organization{
@@ -275,8 +248,7 @@ func (s *authStoreStub) RevokeRefreshToken(_ context.Context, id pgtype.UUID) (s
 func mustUUID(t *testing.T, value string) pgtype.UUID {
 	t.Helper()
 	var id pgtype.UUID
-	if err := id.Scan(value); err != nil {
-		t.Fatalf("parse uuid %q: %v", value, err)
-	}
+	err := id.Scan(value)
+	require.NoError(t, err)
 	return id
 }

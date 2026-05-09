@@ -7,6 +7,7 @@ import (
 	"testing"
 
 	"github.com/gin-gonic/gin"
+	"github.com/stretchr/testify/require"
 )
 
 func TestHealthRouteReturnsStablePayload(t *testing.T) {
@@ -18,18 +19,11 @@ func TestHealthRouteReturnsStablePayload(t *testing.T) {
 	request := httptest.NewRequest(http.MethodGet, "/healthz", nil)
 	router.ServeHTTP(recorder, request)
 
-	if recorder.Code != http.StatusOK {
-		t.Fatalf("status code = %d, want %d", recorder.Code, http.StatusOK)
-	}
+	require.Equal(t, http.StatusOK, recorder.Code)
 
 	var response HealthResponse
-	if err := json.Unmarshal(recorder.Body.Bytes(), &response); err != nil {
-		t.Fatalf("decode response: %v", err)
-	}
-	if response.Status != "ok" {
-		t.Fatalf("status = %q, want ok", response.Status)
-	}
-	if response.Time == "" {
-		t.Fatal("time is empty")
-	}
+	err := json.Unmarshal(recorder.Body.Bytes(), &response)
+	require.NoError(t, err)
+	require.Equal(t, "ok", response.Status)
+	require.NotEqual(t, "", response.Time)
 }

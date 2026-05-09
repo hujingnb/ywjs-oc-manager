@@ -15,6 +15,7 @@ import (
 	"oc-manager/internal/auth"
 	"oc-manager/internal/domain"
 	"oc-manager/internal/service"
+	"github.com/stretchr/testify/require"
 )
 
 func TestRuntimeNodesCreateRequiresToken(t *testing.T) {
@@ -26,9 +27,7 @@ func TestRuntimeNodesCreateRequiresToken(t *testing.T) {
 	request.Header.Set("Content-Type", "application/json")
 	router.ServeHTTP(recorder, request)
 
-	if recorder.Code != http.StatusUnauthorized {
-		t.Fatalf("status = %d, want 401", recorder.Code)
-	}
+	require.Equal(t, http.StatusUnauthorized, recorder.Code)
 }
 
 func TestRuntimeNodesCreateReturnsBootstrapToken(t *testing.T) {
@@ -43,18 +42,13 @@ func TestRuntimeNodesCreateReturnsBootstrapToken(t *testing.T) {
 	request.Header.Set("Authorization", "Bearer "+token)
 	router.ServeHTTP(recorder, request)
 
-	if recorder.Code != http.StatusCreated {
-		t.Fatalf("status = %d, body=%s", recorder.Code, recorder.Body.String())
-	}
+	require.Equal(t, http.StatusCreated, recorder.Code)
 	var resp struct {
 		Node service.RuntimeNodeResult `json:"runtime_node"`
 	}
-	if err := json.Unmarshal(recorder.Body.Bytes(), &resp); err != nil {
-		t.Fatalf("decode: %v", err)
-	}
-	if resp.Node.BootstrapToken != "boot" {
-		t.Fatalf("bootstrap_token = %q, want boot", resp.Node.BootstrapToken)
-	}
+	err := json.Unmarshal(recorder.Body.Bytes(), &resp)
+	require.NoError(t, err)
+	require.Equal(t, "boot", resp.Node.BootstrapToken)
 }
 
 func TestRuntimeNodesRotateBootstrapMapsBusyTo409(t *testing.T) {
@@ -67,9 +61,7 @@ func TestRuntimeNodesRotateBootstrapMapsBusyTo409(t *testing.T) {
 	request.Header.Set("Authorization", "Bearer "+token)
 	router.ServeHTTP(recorder, request)
 
-	if recorder.Code != http.StatusConflict {
-		t.Fatalf("status = %d, want 409", recorder.Code)
-	}
+	require.Equal(t, http.StatusConflict, recorder.Code)
 }
 
 func TestRuntimeNodesListReturnsArray(t *testing.T) {
@@ -82,15 +74,12 @@ func TestRuntimeNodesListReturnsArray(t *testing.T) {
 	request.Header.Set("Authorization", "Bearer "+token)
 	router.ServeHTTP(recorder, request)
 
-	if recorder.Code != http.StatusOK {
-		t.Fatalf("status = %d, want 200", recorder.Code)
-	}
+	require.Equal(t, http.StatusOK, recorder.Code)
 	var resp struct {
 		Nodes []service.RuntimeNodeResult `json:"runtime_nodes"`
 	}
-	if err := json.Unmarshal(recorder.Body.Bytes(), &resp); err != nil {
-		t.Fatalf("decode: %v", err)
-	}
+	err := json.Unmarshal(recorder.Body.Bytes(), &resp)
+	require.NoError(t, err)
 	if len(resp.Nodes) != 1 || resp.Nodes[0].Name != "node-1" {
 		t.Fatalf("nodes = %+v", resp.Nodes)
 	}
@@ -109,9 +98,7 @@ func TestRuntimeNodesPatchUpdateMaxApps(t *testing.T) {
 	request.Header.Set("Authorization", "Bearer "+token)
 	router.ServeHTTP(recorder, request)
 
-	if recorder.Code != http.StatusOK {
-		t.Fatalf("status = %d, body=%s", recorder.Code, recorder.Body.String())
-	}
+	require.Equal(t, http.StatusOK, recorder.Code)
 	if stub.updateMaxAppsLastVal == nil || *stub.updateMaxAppsLastVal != 3 {
 		t.Fatalf("service 收到的 maxApps = %v, want 3", stub.updateMaxAppsLastVal)
 	}
@@ -129,12 +116,8 @@ func TestRuntimeNodesPatchClearMaxApps(t *testing.T) {
 	request.Header.Set("Authorization", "Bearer "+token)
 	router.ServeHTTP(recorder, request)
 
-	if recorder.Code != http.StatusOK {
-		t.Fatalf("status = %d, body=%s", recorder.Code, recorder.Body.String())
-	}
-	if stub.updateMaxAppsLastVal != nil {
-		t.Fatalf("max_apps null 应映射为 nil, got %v", *stub.updateMaxAppsLastVal)
-	}
+	require.Equal(t, http.StatusOK, recorder.Code)
+	require.Nil(t, stub.updateMaxAppsLastVal)
 }
 
 func TestRuntimeNodesPatchOrgAdminForbidden(t *testing.T) {
@@ -149,18 +132,14 @@ func TestRuntimeNodesPatchOrgAdminForbidden(t *testing.T) {
 	request.Header.Set("Authorization", "Bearer "+token)
 	router.ServeHTTP(recorder, request)
 
-	if recorder.Code != http.StatusForbidden {
-		t.Fatalf("status = %d, want 403", recorder.Code)
-	}
+	require.Equal(t, http.StatusForbidden, recorder.Code)
 }
 
 func newRuntimeNodesTestRouter(t *testing.T, svc runtimeNodeService) (*gin.Engine, *auth.TokenManager) {
 	t.Helper()
 	gin.SetMode(gin.ReleaseMode)
 	tokens, err := auth.NewTokenManager("a", "b", time.Minute, time.Hour)
-	if err != nil {
-		t.Fatalf("NewTokenManager() error = %v", err)
-	}
+	require.NoError(t, err)
 	router := gin.New()
 	RegisterRuntimeNodeRoutes(router, NewRuntimeNodesHandler(svc, tokens))
 	return router, tokens

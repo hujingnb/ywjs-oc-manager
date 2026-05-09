@@ -6,6 +6,7 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+	"github.com/stretchr/testify/require"
 )
 
 // validBase64MasterKey 提供测试用的 32 字节 base64 master_key。
@@ -66,27 +67,13 @@ func TestLoad_DoesNotExpandEnvPlaceholders(t *testing.T) {
 	path := writeTempConfig(t, yaml)
 
 	cfg, err := LoadFile(path)
-	if err != nil {
-		t.Fatalf("LoadFile() error = %v", err)
-	}
-	if cfg.Database.URL != "${DATABASE_URL}" {
-		t.Fatalf("database url = %q, want literal placeholder", cfg.Database.URL)
-	}
-	if cfg.Auth.AccessTokenTTL.Duration.String() != "15m0s" {
-		t.Fatalf("access token ttl = %s, want 15m", cfg.Auth.AccessTokenTTL.Duration)
-	}
-	if cfg.Security.MasterKey != validBase64MasterKey {
-		t.Fatalf("security.master_key = %q, want literal yaml value", cfg.Security.MasterKey)
-	}
-	if cfg.OpenClaw.RuntimeImage != "openclaw-runtime:dev" {
-		t.Fatalf("openclaw.runtime_image = %q, want openclaw-runtime:dev", cfg.OpenClaw.RuntimeImage)
-	}
-	if cfg.OpenClaw.Workspace.ArchiveRetentionDays != 14 {
-		t.Fatalf("openclaw.workspace.archive_retention_days = %d, want 14", cfg.OpenClaw.Workspace.ArchiveRetentionDays)
-	}
-	if cfg.Agent.HeartbeatIntervalSeconds != 30 {
-		t.Fatalf("agent.heartbeat_interval_seconds = %d, want 30", cfg.Agent.HeartbeatIntervalSeconds)
-	}
+	require.NoError(t, err)
+	require.Equal(t, "${DATABASE_URL}", cfg.Database.URL)
+	require.Equal(t, "15m0s", cfg.Auth.AccessTokenTTL.Duration.String())
+	require.Equal(t, validBase64MasterKey, cfg.Security.MasterKey)
+	require.Equal(t, "openclaw-runtime:dev", cfg.OpenClaw.RuntimeImage)
+	require.Equal(t, 14, cfg.OpenClaw.Workspace.ArchiveRetentionDays)
+	require.Equal(t, 30, cfg.Agent.HeartbeatIntervalSeconds)
 }
 
 // TestLoad_RejectsUnknownFields 校验 yaml 字段拼写错误会 fail-fast，避免可选配置因 typo 被静默忽略。
@@ -96,16 +83,12 @@ func TestLoad_RejectsUnknownFields(t *testing.T) {
 		`key_prefx: "ocm:"`, 1)
 	path := writeTempConfig(t, yaml)
 	_, err := LoadFile(path)
-	if err == nil {
-		t.Fatal("LoadFile() error = nil, want unknown field error")
-	}
+	require.Error(t, err)
 }
 
 func TestValidateReportsRequiredFields(t *testing.T) {
 	err := (Config{}).Validate()
-	if err == nil {
-		t.Fatal("Validate() error = nil, want required fields error")
-	}
+	require.Error(t, err)
 	required := []string{
 		"app.http_addr", "app.data_root", "app.knowledge_root", "database.url", "redis.addr",
 		"auth.access_token_ttl", "auth.refresh_token_ttl",
@@ -113,9 +96,7 @@ func TestValidateReportsRequiredFields(t *testing.T) {
 		"security.master_key", "openclaw.system_prompt_template",
 	}
 	for _, field := range required {
-		if !strings.Contains(err.Error(), field) {
-			t.Fatalf("error = %q, want field %s", err.Error(), field)
-		}
+		require.True(t, strings.Contains(err.Error(), field))
 	}
 }
 
@@ -143,9 +124,7 @@ openclaw:
 `)
 
 	_, err := LoadFile(path)
-	if err == nil {
-		t.Fatal("LoadFile() error = nil, want duration parse error")
-	}
+	require.Error(t, err)
 }
 
 // TestLoad_RejectsMissingKnowledgeRoot 校验 app.knowledge_root 缺失或为空时启动 fail-fast。
@@ -215,22 +194,15 @@ func TestLoad_RejectsPromptMissingPlaceholder(t *testing.T) {
 func TestLoad_AcceptsValidConfig(t *testing.T) {
 	path := writeTempConfig(t, fullValidYAML())
 	cfg, err := LoadFile(path)
-	if err != nil {
-		t.Fatalf("LoadFile() err = %v, want nil", err)
-	}
-	if cfg.Security.MasterKey != validBase64MasterKey {
-		t.Fatalf("master_key 解析 = %q, want %q", cfg.Security.MasterKey, validBase64MasterKey)
-	}
-	if !strings.Contains(cfg.OpenClaw.SystemPromptTemplate, "{{workspace_dir}}") {
-		t.Fatalf("system_prompt_template 不含 {{workspace_dir}}: %q", cfg.OpenClaw.SystemPromptTemplate)
-	}
+	require.NoError(t, err)
+	require.Equal(t, validBase64MasterKey, cfg.Security.MasterKey)
+	require.True(t, strings.Contains(cfg.OpenClaw.SystemPromptTemplate, "{{workspace_dir}}"))
 }
 
 func writeTempConfig(t *testing.T, content string) string {
 	t.Helper()
 	path := filepath.Join(t.TempDir(), "config.yaml")
-	if err := os.WriteFile(path, []byte(content), 0o600); err != nil {
-		t.Fatalf("write config: %v", err)
-	}
+	err := os.WriteFile(path, []byte(content), 0o600)
+	require.NoError(t, err)
 	return path
 }

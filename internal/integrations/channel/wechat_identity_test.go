@@ -11,6 +11,7 @@ import (
 	"testing"
 
 	"github.com/docker/docker/pkg/stdcopy"
+	"github.com/stretchr/testify/require"
 )
 
 // frameStdout 把 raw 内容包成 docker stdcopy 的 multiplexed stream（stdout 流）。
@@ -68,31 +69,19 @@ func TestResolveWeChatBoundIdentity_HappyPath(t *testing.T) {
 	}
 	resolver := NewDockerBindingResolver(executor)
 	got, err := resolver.ResolveWeChatBoundIdentity(context.Background(), "node-1", "ctr-1")
-	if err != nil {
-		t.Fatalf("err=%v", err)
-	}
+	require.NoError(t, err)
 	want := "o9cq800xszCM8jyoS9YpRKpvAN9c@im.wechat"
-	if got != want {
-		t.Fatalf("identity=%q, want=%q", got, want)
-	}
-	if len(executor.calls) != 2 {
-		t.Fatalf("应调 2 次 cat，got %d", len(executor.calls))
-	}
-	if !strings.Contains(executor.calls[0].cmd[1], "accounts.json") {
-		t.Fatalf("第一次 cmd 应读 accounts.json: %v", executor.calls[0].cmd)
-	}
-	if !strings.Contains(executor.calls[1].cmd[1], "cba246d422f5-im-bot.json") {
-		t.Fatalf("第二次 cmd 应读对应 account 文件: %v", executor.calls[1].cmd)
-	}
+	require.Equal(t, want, got)
+	require.Equal(t, 2, len(executor.calls))
+	require.True(t, strings.Contains(executor.calls[0].cmd[1], "accounts.json"))
+	require.True(t, strings.Contains(executor.calls[1].cmd[1], "cba246d422f5-im-bot.json"))
 }
 
 func TestResolveWeChatBoundIdentity_EmptyAccountsList(t *testing.T) {
 	executor := &scriptedExecutor{scripts: [][]byte{[]byte(`[]`)}}
 	resolver := NewDockerBindingResolver(executor)
 	_, err := resolver.ResolveWeChatBoundIdentity(context.Background(), "n", "c")
-	if !errors.Is(err, ErrIdentityUnavailable) {
-		t.Fatalf("期望 ErrIdentityUnavailable，得 %v", err)
-	}
+	require.ErrorIs(t, err, ErrIdentityUnavailable)
 }
 
 func TestResolveWeChatBoundIdentity_AccountMissingUserID(t *testing.T) {
@@ -104,26 +93,20 @@ func TestResolveWeChatBoundIdentity_AccountMissingUserID(t *testing.T) {
 	}
 	resolver := NewDockerBindingResolver(executor)
 	_, err := resolver.ResolveWeChatBoundIdentity(context.Background(), "n", "c")
-	if !errors.Is(err, ErrIdentityUnavailable) {
-		t.Fatalf("期望 ErrIdentityUnavailable，得 %v", err)
-	}
+	require.ErrorIs(t, err, ErrIdentityUnavailable)
 }
 
 func TestResolveWeChatBoundIdentity_RejectsContainerlessCall(t *testing.T) {
 	resolver := NewDockerBindingResolver(&scriptedExecutor{})
 	_, err := resolver.ResolveWeChatBoundIdentity(context.Background(), "n", "")
-	if err == nil {
-		t.Fatalf("空 containerID 应报错")
-	}
+	require.Error(t, err)
 }
 
 func TestResolveWeChatBoundIdentity_RejectsMalformedAccountName(t *testing.T) {
 	executor := &scriptedExecutor{scripts: [][]byte{[]byte(`["bad/name"]`)}}
 	resolver := NewDockerBindingResolver(executor)
 	_, err := resolver.ResolveWeChatBoundIdentity(context.Background(), "n", "c")
-	if err == nil {
-		t.Fatalf("路径分隔符 account 名应被拒")
-	}
+	require.Error(t, err)
 }
 
 func TestResolveWeChatBoundIdentity_PropagatesExecError(t *testing.T) {

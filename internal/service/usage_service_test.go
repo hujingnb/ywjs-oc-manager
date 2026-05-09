@@ -12,15 +12,14 @@ import (
 	"oc-manager/internal/domain"
 	"oc-manager/internal/integrations/newapi"
 	"oc-manager/internal/store/sqlc"
+	"github.com/stretchr/testify/require"
 )
 
 // TestUsageServiceForbidsCrossOrg 校验非平台管理员只能看自己 org 的用量。
 func TestUsageServiceForbidsCrossOrg(t *testing.T) {
 	svc := NewUsageService(&fakeUsageStore{}, &fakeUsageClient{}, nil)
 	_, err := svc.GetAppUsage(context.Background(), auth.Principal{Role: domain.UserRoleOrgAdmin, OrgID: "other"}, "app-1", "owner-org", "owner-user", 1, LogsQueryOptions{})
-	if !errors.Is(err, ErrForbidden) {
-		t.Fatalf("error = %v, want ErrForbidden", err)
-	}
+	require.ErrorIs(t, err, ErrForbidden)
 }
 
 // TestUsageServiceAppProxiesTokenLogs 校验 GetAppUsage 直接调 GetTokenLogs(token_id=…)
@@ -33,9 +32,7 @@ func TestUsageServiceAppProxiesTokenLogs(t *testing.T) {
 	svc := NewUsageService(&fakeUsageStore{}, client, nil)
 
 	view, err := svc.GetAppUsage(context.Background(), platformAdmin(), "app-1", "owner-org", "owner-user", 42, LogsQueryOptions{Page: 1, PageSize: 50})
-	if err != nil {
-		t.Fatalf("GetAppUsage: %v", err)
-	}
+	require.NoError(t, err)
 	if client.lastTokenLogsQuery.TokenID != 42 || client.lastTokenLogsQuery.PageSize != 50 {
 		t.Fatalf("token logs query = %+v", client.lastTokenLogsQuery)
 	}
@@ -62,15 +59,9 @@ func TestUsageServiceAppZeroKeyReturnsEmpty(t *testing.T) {
 	client := &fakeUsageClient{}
 	svc := NewUsageService(&fakeUsageStore{}, client, nil)
 	view, err := svc.GetAppUsage(context.Background(), platformAdmin(), "app", "o", "u", 0, LogsQueryOptions{})
-	if err != nil {
-		t.Fatalf("GetAppUsage: %v", err)
-	}
-	if len(view.Items) != 0 {
-		t.Fatalf("view.Items = %d, want 0", len(view.Items))
-	}
-	if client.tokenLogsCalls != 0 {
-		t.Fatalf("不应调 new-api，got calls=%d", client.tokenLogsCalls)
-	}
+	require.NoError(t, err)
+	require.Equal(t, 0, len(view.Items))
+	require.Equal(t, 0, client.tokenLogsCalls)
 }
 
 // TestUsageServiceMissingClient 校验 client=nil 时 ErrUsageUnavailable。
@@ -93,9 +84,7 @@ func TestUsageServiceMemberUsesActiveAppByOwner(t *testing.T) {
 	client := &fakeUsageClient{tokenLogs: newapi.LogsPage{Items: []newapi.LogEntry{{ID: 9}}, Total: 1}}
 	svc := NewUsageService(store, client, nil)
 	view, err := svc.GetMemberUsage(context.Background(), platformAdmin(), "00000000-0000-0000-0000-000000000b01", "00000000-0000-0000-0000-000000000c01", LogsQueryOptions{})
-	if err != nil {
-		t.Fatalf("GetMemberUsage: %v", err)
-	}
+	require.NoError(t, err)
 	if !store.activeAppCalled || store.lastActiveOwner != memberID {
 		t.Fatalf("expected GetActiveAppByOwner, got=%v owner=%v", store.activeAppCalled, store.lastActiveOwner)
 	}
@@ -117,12 +106,8 @@ func TestUsageServiceOrgUsesNewapiUserID(t *testing.T) {
 	client := &fakeUsageClient{userQuota: []newapi.QuotaDate{{Date: "2026-05-01", Quota: 100}}}
 	svc := NewUsageService(store, client, nil)
 	view, err := svc.GetOrgUsage(context.Background(), platformAdmin(), "00000000-0000-0000-0000-000000000b01", 0, 0)
-	if err != nil {
-		t.Fatalf("GetOrgUsage: %v", err)
-	}
-	if client.lastUserQuotaUserID != 55 {
-		t.Fatalf("client called with userID=%d, want 55", client.lastUserQuotaUserID)
-	}
+	require.NoError(t, err)
+	require.Equal(t, int64(55), client.lastUserQuotaUserID)
 	if len(view.Items) != 1 || view.Items[0].Quota != 100 {
 		t.Fatalf("view = %+v", view)
 	}
@@ -132,9 +117,7 @@ func TestUsageServiceOrgUsesNewapiUserID(t *testing.T) {
 func TestUsageServicePlatformOnlyAdmin(t *testing.T) {
 	svc := NewUsageService(&fakeUsageStore{}, &fakeUsageClient{}, nil)
 	_, err := svc.GetPlatformUsage(context.Background(), auth.Principal{Role: domain.UserRoleOrgAdmin}, 0, 0)
-	if !errors.Is(err, ErrForbidden) {
-		t.Fatalf("err = %v, want ErrForbidden", err)
-	}
+	require.ErrorIs(t, err, ErrForbidden)
 }
 
 // TestUsageServicePlatformProxiesAllQuotaDates 校验 platform 维度直接调 GetAllQuotaDates。
@@ -142,9 +125,7 @@ func TestUsageServicePlatformProxiesAllQuotaDates(t *testing.T) {
 	client := &fakeUsageClient{allQuota: []newapi.QuotaDate{{Date: "2026-05-01", Quota: 100}}}
 	svc := NewUsageService(&fakeUsageStore{}, client, nil)
 	view, err := svc.GetPlatformUsage(context.Background(), platformAdmin(), 0, 0)
-	if err != nil {
-		t.Fatalf("GetPlatformUsage: %v", err)
-	}
+	require.NoError(t, err)
 	if !client.allQuotaCalled || view.Scope != "platform" || len(view.Items) != 1 {
 		t.Fatalf("view = %+v called=%v", view, client.allQuotaCalled)
 	}
@@ -156,19 +137,11 @@ func TestUsageService_AppUsageFailureRecordsAudit(t *testing.T) {
 	client := &fakeUsageClient{tokenLogsError: errors.New("5xx")}
 	svc := NewUsageService(&fakeUsageStore{}, client, auditor)
 	_, err := svc.GetAppUsage(context.Background(), platformAdmin(), "app-1", "owner-org", "owner-user", 42, LogsQueryOptions{})
-	if err == nil {
-		t.Fatal("期望报错，实际无错")
-	}
-	if len(auditor.events) != 1 {
-		t.Fatalf("审计事件数 = %d，want 1", len(auditor.events))
-	}
+	require.Error(t, err)
+	require.Equal(t, 1, len(auditor.events))
 	ev := auditor.events[0]
-	if ev.OrgID != "owner-org" {
-		t.Fatalf("OrgID = %q，want owner-org", ev.OrgID)
-	}
-	if ev.Endpoint != "GET /api/log/?token_id=..." {
-		t.Fatalf("Endpoint = %q，want GET /api/log/?token_id=...", ev.Endpoint)
-	}
+	require.Equal(t, "owner-org", ev.OrgID)
+	require.Equal(t, "GET /api/log/?token_id=...", ev.Endpoint)
 }
 
 // TestUsageService_MemberUsageFailureRecordsAudit 校验 GetMemberUsage new-api 调用失败时触发审计。
@@ -184,19 +157,11 @@ func TestUsageService_MemberUsageFailureRecordsAudit(t *testing.T) {
 	orgID := "00000000-0000-0000-0000-000000000b01"
 	memberID := "00000000-0000-0000-0000-000000000c01"
 	_, err := svc.GetMemberUsage(context.Background(), platformAdmin(), orgID, memberID, LogsQueryOptions{})
-	if err == nil {
-		t.Fatal("期望报错，实际无错")
-	}
-	if len(auditor.events) != 1 {
-		t.Fatalf("审计事件数 = %d，want 1", len(auditor.events))
-	}
+	require.Error(t, err)
+	require.Equal(t, 1, len(auditor.events))
 	ev := auditor.events[0]
-	if ev.OrgID != orgID {
-		t.Fatalf("OrgID = %q，want %q", ev.OrgID, orgID)
-	}
-	if ev.Endpoint != "GET /api/log/?token_id=..." {
-		t.Fatalf("Endpoint = %q，want GET /api/log/?token_id=...", ev.Endpoint)
-	}
+	require.Equal(t, orgID, ev.OrgID)
+	require.Equal(t, "GET /api/log/?token_id=...", ev.Endpoint)
 }
 
 // TestUsageService_OrgUsageFailureRecordsAudit 校验 GetOrgUsage new-api 调用失败时触发审计。
@@ -213,19 +178,11 @@ func TestUsageService_OrgUsageFailureRecordsAudit(t *testing.T) {
 	client := &fakeUsageClient{userQuotaError: errors.New("5xx")}
 	svc := NewUsageService(store, client, auditor)
 	_, err := svc.GetOrgUsage(context.Background(), platformAdmin(), orgID, 0, 0)
-	if err == nil {
-		t.Fatal("期望报错，实际无错")
-	}
-	if len(auditor.events) != 1 {
-		t.Fatalf("审计事件数 = %d，want 1", len(auditor.events))
-	}
+	require.Error(t, err)
+	require.Equal(t, 1, len(auditor.events))
 	ev := auditor.events[0]
-	if ev.OrgID != orgID {
-		t.Fatalf("OrgID = %q，want %q", ev.OrgID, orgID)
-	}
-	if ev.Endpoint != "GET /api/data/users?id=..." {
-		t.Fatalf("Endpoint = %q，want GET /api/data/users?id=...", ev.Endpoint)
-	}
+	require.Equal(t, orgID, ev.OrgID)
+	require.Equal(t, "GET /api/data/users?id=...", ev.Endpoint)
 }
 
 // TestUsageService_PlatformUsageFailureRecordsAudit 校验 GetPlatformUsage new-api 调用失败时触发审计。
@@ -234,19 +191,11 @@ func TestUsageService_PlatformUsageFailureRecordsAudit(t *testing.T) {
 	client := &fakeUsageClient{allQuotaError: errors.New("5xx")}
 	svc := NewUsageService(&fakeUsageStore{}, client, auditor)
 	_, err := svc.GetPlatformUsage(context.Background(), platformAdmin(), 0, 0)
-	if err == nil {
-		t.Fatal("期望报错，实际无错")
-	}
-	if len(auditor.events) != 1 {
-		t.Fatalf("审计事件数 = %d，want 1", len(auditor.events))
-	}
+	require.Error(t, err)
+	require.Equal(t, 1, len(auditor.events))
 	ev := auditor.events[0]
-	if ev.OrgID != "" {
-		t.Fatalf("OrgID = %q，want 空字符串", ev.OrgID)
-	}
-	if ev.Endpoint != "GET /api/data/" {
-		t.Fatalf("Endpoint = %q，want GET /api/data/", ev.Endpoint)
-	}
+	require.Equal(t, "", ev.OrgID)
+	require.Equal(t, "GET /api/data/", ev.Endpoint)
 }
 
 // fakeUsageClient 实现 UsageNewAPIClient，供 service 单测注入。

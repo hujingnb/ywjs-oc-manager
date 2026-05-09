@@ -11,6 +11,7 @@ import (
 	"oc-manager/internal/domain"
 	"oc-manager/internal/store/sqlc"
 	"oc-manager/internal/worker/handlers"
+	"github.com/stretchr/testify/require"
 )
 
 func TestWorkerTickMarksSuccess(t *testing.T) {
@@ -25,15 +26,10 @@ func TestWorkerTickMarksSuccess(t *testing.T) {
 	store.put("job-1", sqlc.Job{ID: store.uuidOf("job-1"), Type: "noop", Status: domain.JobStatusPending, MaxAttempts: 3})
 
 	w := New(store, queue, registry, Config{WorkerID: "w1"})
-	if err := w.Tick(context.Background()); err != nil {
-		t.Fatalf("Tick() error = %v", err)
-	}
-	if calls != 1 {
-		t.Fatalf("handler calls = %d, want 1", calls)
-	}
-	if got := store.snapshot("job-1").Status; got != domain.JobStatusSucceeded {
-		t.Fatalf("status = %s, want succeeded", got)
-	}
+	err := w.Tick(context.Background())
+	require.NoError(t, err)
+	require.Equal(t, 1, calls)
+	require.Equal(t, domain.JobStatusSucceeded, store.snapshot("job-1").Status)
 }
 
 func TestWorkerTickRetriesUntilMaxAttempts(t *testing.T) {
@@ -47,15 +43,10 @@ func TestWorkerTickRetriesUntilMaxAttempts(t *testing.T) {
 	w := New(store, queue, registry, Config{WorkerID: "w1", BackoffBase: time.Second, BackoffFactor: 2, BackoffMax: 10 * time.Second})
 	w.SetClock(func() time.Time { return now })
 
-	if err := w.Tick(context.Background()); err != nil {
-		t.Fatalf("Tick() #1 error = %v", err)
-	}
-	if got := store.snapshot("job-1").Status; got != domain.JobStatusPending {
-		t.Fatalf("status after attempt 1 = %s, want pending", got)
-	}
-	if delay := store.snapshot("job-1").RunAfter.Time.Sub(now); delay != time.Second {
-		t.Fatalf("retry delay = %s, want 1s", delay)
-	}
+	err := w.Tick(context.Background())
+	require.NoError(t, err)
+	require.Equal(t, domain.JobStatusPending, store.snapshot("job-1").Status)
+	require.Equal(t, time.Second, store.snapshot("job-1").RunAfter.Time.Sub(now))
 
 	queue.ids = []string{store.id("job-1")}
 	store.snapshot("job-1") // ensure visible
@@ -63,12 +54,9 @@ func TestWorkerTickRetriesUntilMaxAttempts(t *testing.T) {
 	pending.Status = domain.JobStatusPending
 	store.put("job-1", pending)
 
-	if err := w.Tick(context.Background()); err != nil {
-		t.Fatalf("Tick() #2 error = %v", err)
-	}
-	if got := store.snapshot("job-1").Status; got != domain.JobStatusFailed {
-		t.Fatalf("status after attempt 2 = %s, want failed", got)
-	}
+	err = w.Tick(context.Background())
+	require.NoError(t, err)
+	require.Equal(t, domain.JobStatusFailed, store.snapshot("job-1").Status)
 }
 
 func TestWorkerTickSkipsAlreadyClaimedJobs(t *testing.T) {
@@ -79,12 +67,9 @@ func TestWorkerTickSkipsAlreadyClaimedJobs(t *testing.T) {
 	store.put("job-1", sqlc.Job{ID: store.uuidOf("job-1"), Type: "noop", Status: domain.JobStatusRunning, MaxAttempts: 1})
 
 	w := New(store, queue, registry, Config{WorkerID: "w1"})
-	if err := w.Tick(context.Background()); err != nil {
-		t.Fatalf("Tick() error = %v", err)
-	}
-	if store.markRunningCalls != 0 {
-		t.Fatalf("MarkJobRunning calls = %d, want 0", store.markRunningCalls)
-	}
+	err := w.Tick(context.Background())
+	require.NoError(t, err)
+	require.Equal(t, 0, store.markRunningCalls)
 }
 
 func TestWorkerTickMarksFailedForUnknownType(t *testing.T) {
@@ -94,12 +79,9 @@ func TestWorkerTickMarksFailedForUnknownType(t *testing.T) {
 	store.put("job-1", sqlc.Job{ID: store.uuidOf("job-1"), Type: "missing", Status: domain.JobStatusPending, MaxAttempts: 3})
 
 	w := New(store, queue, registry, Config{WorkerID: "w1"})
-	if err := w.Tick(context.Background()); err != nil {
-		t.Fatalf("Tick() error = %v", err)
-	}
-	if got := store.snapshot("job-1").Status; got != domain.JobStatusFailed {
-		t.Fatalf("status = %s, want failed", got)
-	}
+	err := w.Tick(context.Background())
+	require.NoError(t, err)
+	require.Equal(t, domain.JobStatusFailed, store.snapshot("job-1").Status)
 }
 
 type queueStub struct {

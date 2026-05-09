@@ -8,6 +8,7 @@ import (
 	"net/http/httptest"
 	"strings"
 	"testing"
+	"github.com/stretchr/testify/require"
 )
 
 // scopeServer 把每条捕获到的请求记录下来，便于断言路径 / 方法 / body。
@@ -52,22 +53,13 @@ func TestScopeClient_InitAppDirs(t *testing.T) {
 	s := newScopeServer(nil)
 	defer s.Close()
 	c := NewFileClient(s.URL, "agent-tok")
-	if err := c.InitAppDirs(context.Background(), "app-1"); err != nil {
-		t.Fatalf("err=%v", err)
-	}
-	if len(s.captured) != 1 {
-		t.Fatalf("captured=%d", len(s.captured))
-	}
+	err := c.InitAppDirs(context.Background(), "app-1")
+	require.NoError(t, err)
+	require.Equal(t, 1, len(s.captured))
 	got := s.captured[0]
-	if got.method != http.MethodPost {
-		t.Fatalf("method=%s", got.method)
-	}
-	if got.path != "/v1/scopes/apps/app-1/init" {
-		t.Fatalf("path=%s", got.path)
-	}
-	if got.auth != "Bearer agent-tok" {
-		t.Fatalf("auth=%s", got.auth)
-	}
+	require.Equal(t, http.MethodPost, got.method)
+	require.Equal(t, "/v1/scopes/apps/app-1/init", got.path)
+	require.Equal(t, "Bearer agent-tok", got.auth)
 }
 
 func TestScopeClient_SyncOrgKnowledge(t *testing.T) {
@@ -76,32 +68,22 @@ func TestScopeClient_SyncOrgKnowledge(t *testing.T) {
 	c := NewFileClient(s.URL, "tok")
 
 	body := bytes.NewReader([]byte("fake-tar-bytes"))
-	if err := c.SyncOrgKnowledge(context.Background(), "org-7", body); err != nil {
-		t.Fatalf("err=%v", err)
-	}
+	err := c.SyncOrgKnowledge(context.Background(), "org-7", body)
+	require.NoError(t, err)
 	got := s.captured[0]
-	if got.path != "/v1/scopes/orgs/org-7/knowledge/sync" {
-		t.Fatalf("path=%s", got.path)
-	}
-	if got.contType != "application/x-tar" {
-		t.Fatalf("contentType=%s", got.contType)
-	}
-	if string(got.body) != "fake-tar-bytes" {
-		t.Fatalf("body=%q", got.body)
-	}
+	require.Equal(t, "/v1/scopes/orgs/org-7/knowledge/sync", got.path)
+	require.Equal(t, "application/x-tar", got.contType)
+	require.Equal(t, "fake-tar-bytes", string(got.body))
 }
 
 func TestScopeClient_SyncAppKnowledge(t *testing.T) {
 	s := newScopeServer(nil)
 	defer s.Close()
 	c := NewFileClient(s.URL, "tok")
-	if err := c.SyncAppKnowledge(context.Background(), "app-1", strings.NewReader("x")); err != nil {
-		t.Fatalf("err=%v", err)
-	}
+	err := c.SyncAppKnowledge(context.Background(), "app-1", strings.NewReader("x"))
+	require.NoError(t, err)
 	got := s.captured[0]
-	if got.path != "/v1/scopes/apps/app-1/knowledge/sync" {
-		t.Fatalf("path=%s", got.path)
-	}
+	require.Equal(t, "/v1/scopes/apps/app-1/knowledge/sync", got.path)
 }
 
 func TestScopeClient_KnowledgeFile_Upload_Delete(t *testing.T) {
@@ -117,16 +99,12 @@ func TestScopeClient_KnowledgeFile_Upload_Delete(t *testing.T) {
 		strings.NewReader("policy")); err != nil {
 		t.Fatalf("upload org err=%v", err)
 	}
-	if err := c.DeleteAppKnowledge(context.Background(), "app-1", "sub/note.txt"); err != nil {
-		t.Fatalf("delete app err=%v", err)
-	}
-	if err := c.DeleteOrgKnowledge(context.Background(), "org-1", "policy.md"); err != nil {
-		t.Fatalf("delete org err=%v", err)
-	}
+	err := c.DeleteAppKnowledge(context.Background(), "app-1", "sub/note.txt")
+	require.NoError(t, err)
+	err = c.DeleteOrgKnowledge(context.Background(), "org-1", "policy.md")
+	require.NoError(t, err)
 
-	if len(s.captured) != 4 {
-		t.Fatalf("captured=%d", len(s.captured))
-	}
+	require.Equal(t, 4, len(s.captured))
 	expects := []struct {
 		method, path string
 		query        string
@@ -146,12 +124,10 @@ func TestScopeClient_KnowledgeFile_Upload_Delete(t *testing.T) {
 
 func TestScopeClient_KnowledgeFile_RejectsEmptyRel(t *testing.T) {
 	c := NewFileClient("http://nowhere", "tok")
-	if err := c.UploadAppKnowledgeFile(context.Background(), "app-1", "", strings.NewReader("x")); err == nil {
-		t.Fatalf("空 rel 应报错")
-	}
-	if err := c.DeleteAppKnowledge(context.Background(), "app-1", ""); err == nil {
-		t.Fatalf("空 rel 应报错")
-	}
+	err := c.UploadAppKnowledgeFile(context.Background(), "app-1", "", strings.NewReader("x"))
+	require.Error(t, err)
+	err = c.DeleteAppKnowledge(context.Background(), "app-1", "")
+	require.Error(t, err)
 }
 
 func TestScopeClient_ListWorkspace(t *testing.T) {
@@ -164,9 +140,7 @@ func TestScopeClient_ListWorkspace(t *testing.T) {
 	defer s.Close()
 	c := NewFileClient(s.URL, "tok")
 	listing, err := c.ListWorkspace(context.Background(), "app-1", "sub")
-	if err != nil {
-		t.Fatalf("err=%v", err)
-	}
+	require.NoError(t, err)
 	if listing.Path != "/sub" || len(listing.Entries) != 2 {
 		t.Fatalf("listing=%+v", listing)
 	}
@@ -188,12 +162,9 @@ func TestScopeClient_ListWorkspace_RootNoPath(t *testing.T) {
 	})
 	defer s.Close()
 	c := NewFileClient(s.URL, "tok")
-	if _, err := c.ListWorkspace(context.Background(), "app-1", ""); err != nil {
-		t.Fatalf("err=%v", err)
-	}
-	if s.captured[0].query != "" {
-		t.Fatalf("query 应为空: %q", s.captured[0].query)
-	}
+	_, err := c.ListWorkspace(context.Background(), "app-1", "")
+	require.NoError(t, err)
+	require.Equal(t, "", s.captured[0].query)
 }
 
 func TestScopeClient_DownloadWorkspaceFile(t *testing.T) {
@@ -203,24 +174,17 @@ func TestScopeClient_DownloadWorkspaceFile(t *testing.T) {
 	defer s.Close()
 	c := NewFileClient(s.URL, "tok")
 	rc, err := c.DownloadWorkspaceFile(context.Background(), "app-1", "out.txt")
-	if err != nil {
-		t.Fatalf("err=%v", err)
-	}
+	require.NoError(t, err)
 	defer rc.Close()
 	body, _ := io.ReadAll(rc)
-	if string(body) != "file-bytes" {
-		t.Fatalf("body=%q", body)
-	}
-	if s.captured[0].path != "/v1/scopes/apps/app-1/workspace/download" {
-		t.Fatalf("path=%s", s.captured[0].path)
-	}
+	require.Equal(t, "file-bytes", string(body))
+	require.Equal(t, "/v1/scopes/apps/app-1/workspace/download", s.captured[0].path)
 }
 
 func TestScopeClient_DownloadWorkspaceFile_RejectsEmpty(t *testing.T) {
 	c := NewFileClient("http://nowhere", "tok")
-	if _, err := c.DownloadWorkspaceFile(context.Background(), "app-1", ""); err == nil {
-		t.Fatalf("空 rel 应报错")
-	}
+	_, err := c.DownloadWorkspaceFile(context.Background(), "app-1", "")
+	require.Error(t, err)
 }
 
 func TestScopeClient_StreamWorkspaceArchive(t *testing.T) {
@@ -230,12 +194,9 @@ func TestScopeClient_StreamWorkspaceArchive(t *testing.T) {
 	defer s.Close()
 	c := NewFileClient(s.URL, "tok")
 	var buf bytes.Buffer
-	if err := c.StreamWorkspaceArchive(context.Background(), "app-1", "sub", &buf); err != nil {
-		t.Fatalf("err=%v", err)
-	}
-	if buf.String() != "zip-bytes" {
-		t.Fatalf("buf=%q", buf.String())
-	}
+	err := c.StreamWorkspaceArchive(context.Background(), "app-1", "sub", &buf)
+	require.NoError(t, err)
+	require.Equal(t, "zip-bytes", buf.String())
 	got := s.captured[0]
 	if got.path != "/v1/scopes/apps/app-1/workspace/archive" || got.query != "path=sub" {
 		t.Fatalf("got=%+v", got)
@@ -246,9 +207,8 @@ func TestScopeClient_ArchiveApp(t *testing.T) {
 	s := newScopeServer(nil)
 	defer s.Close()
 	c := NewFileClient(s.URL, "tok")
-	if err := c.ArchiveApp(context.Background(), "app-1"); err != nil {
-		t.Fatalf("err=%v", err)
-	}
+	err := c.ArchiveApp(context.Background(), "app-1")
+	require.NoError(t, err)
 	got := s.captured[0]
 	if got.method != http.MethodPost || got.path != "/v1/scopes/apps/app-1/archive" {
 		t.Fatalf("got=%+v", got)
@@ -259,17 +219,15 @@ func TestScopeClient_CleanupArchive(t *testing.T) {
 	s := newScopeServer(nil)
 	defer s.Close()
 	c := NewFileClient(s.URL, "tok")
-	if err := c.CleanupArchive(context.Background(), 30); err != nil {
-		t.Fatalf("err=%v", err)
-	}
+	err := c.CleanupArchive(context.Background(), 30)
+	require.NoError(t, err)
 	got := s.captured[0]
 	if got.path != "/v1/scopes/cleanup-archives" || got.query != "retention_days=30" {
 		t.Fatalf("got=%+v", got)
 	}
 
-	if err := c.CleanupArchive(context.Background(), 0); err == nil {
-		t.Fatalf("retentionDays<=0 应报错")
-	}
+	err = c.CleanupArchive(context.Background(), 0)
+	require.Error(t, err)
 }
 
 func TestScopeClient_PropagatesErrorBody(t *testing.T) {

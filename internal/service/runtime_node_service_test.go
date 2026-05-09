@@ -12,15 +12,14 @@ import (
 	"oc-manager/internal/auth"
 	"oc-manager/internal/domain"
 	"oc-manager/internal/store/sqlc"
+	"github.com/stretchr/testify/require"
 )
 
 func TestRuntimeNodeServiceCreateRequiresPlatformAdmin(t *testing.T) {
 	svc := newRuntimeNodeServiceForTest(t, nil)
 
 	_, err := svc.CreateNode(context.Background(), auth.Principal{Role: domain.UserRoleOrgAdmin}, RuntimeNodeInput{Name: "node-1"})
-	if !errors.Is(err, ErrForbidden) {
-		t.Fatalf("CreateNode() error = %v, want ErrForbidden", err)
-	}
+	require.ErrorIs(t, err, ErrForbidden)
 }
 
 func TestRuntimeNodeServiceCreateReturnsBootstrapToken(t *testing.T) {
@@ -28,18 +27,10 @@ func TestRuntimeNodeServiceCreateReturnsBootstrapToken(t *testing.T) {
 	svc := newRuntimeNodeServiceForTest(t, store)
 
 	result, err := svc.CreateNode(context.Background(), platformAdmin(), RuntimeNodeInput{Name: "node-1"})
-	if err != nil {
-		t.Fatalf("CreateNode() error = %v", err)
-	}
-	if result.BootstrapToken == "" {
-		t.Fatalf("expected bootstrap token in result")
-	}
-	if store.lastCreate.BootstrapTokenHash.String == result.BootstrapToken {
-		t.Fatalf("bootstrap token should be hashed before persistence")
-	}
-	if !store.lastCreate.BootstrapTokenExpiresAt.Valid {
-		t.Fatalf("expected expiration to be set")
-	}
+	require.NoError(t, err)
+	require.NotEqual(t, "", result.BootstrapToken)
+	require.NotEqual(t, result.BootstrapToken, store.lastCreate.BootstrapTokenHash.String)
+	require.True(t, store.lastCreate.BootstrapTokenExpiresAt.Valid)
 }
 
 func TestRuntimeNodeServiceRegisterAgentSwapsTokens(t *testing.T) {
@@ -47,9 +38,7 @@ func TestRuntimeNodeServiceRegisterAgentSwapsTokens(t *testing.T) {
 	svc := newRuntimeNodeServiceForTest(t, store)
 
 	created, err := svc.CreateNode(context.Background(), platformAdmin(), RuntimeNodeInput{Name: "node-1"})
-	if err != nil {
-		t.Fatalf("CreateNode() error = %v", err)
-	}
+	require.NoError(t, err)
 
 	result, err := svc.RegisterAgent(context.Background(), AgentRegisterInput{
 		BootstrapToken:      created.BootstrapToken,
@@ -57,19 +46,11 @@ func TestRuntimeNodeServiceRegisterAgentSwapsTokens(t *testing.T) {
 		AgentFileEndpoint:   "https://127.0.0.1:8443",
 		AgentVersion:        "0.1.0",
 	})
-	if err != nil {
-		t.Fatalf("RegisterAgent() error = %v", err)
-	}
-	if result.AgentToken == "" {
-		t.Fatalf("expected agent token")
-	}
+	require.NoError(t, err)
+	require.NotEqual(t, "", result.AgentToken)
 	node := store.findByName(t, "node-1")
-	if node.BootstrapTokenHash.Valid {
-		t.Fatalf("bootstrap token hash should be cleared after registration")
-	}
-	if !node.AgentTokenHash.Valid {
-		t.Fatalf("agent token hash should be set after registration")
-	}
+	require.False(t, node.BootstrapTokenHash.Valid)
+	require.True(t, node.AgentTokenHash.Valid)
 }
 
 func TestRuntimeNodeServiceRegisterAgentRejectsReusedBootstrap(t *testing.T) {
@@ -77,17 +58,12 @@ func TestRuntimeNodeServiceRegisterAgentRejectsReusedBootstrap(t *testing.T) {
 	svc := newRuntimeNodeServiceForTest(t, store)
 
 	created, err := svc.CreateNode(context.Background(), platformAdmin(), RuntimeNodeInput{Name: "node-1"})
-	if err != nil {
-		t.Fatalf("CreateNode() error = %v", err)
-	}
-	if _, err := svc.RegisterAgent(context.Background(), AgentRegisterInput{BootstrapToken: created.BootstrapToken}); err != nil {
-		t.Fatalf("first RegisterAgent() error = %v", err)
-	}
+	require.NoError(t, err)
+	_, err = svc.RegisterAgent(context.Background(), AgentRegisterInput{BootstrapToken: created.BootstrapToken})
+	require.NoError(t, err)
 
 	_, err = svc.RegisterAgent(context.Background(), AgentRegisterInput{BootstrapToken: created.BootstrapToken})
-	if !errors.Is(err, ErrBootstrapTokenInvalid) {
-		t.Fatalf("second RegisterAgent() error = %v, want ErrBootstrapTokenInvalid", err)
-	}
+	require.ErrorIs(t, err, ErrBootstrapTokenInvalid)
 }
 
 func TestRuntimeNodeServiceRegisterAgentRejectsExpiredBootstrap(t *testing.T) {
@@ -96,16 +72,13 @@ func TestRuntimeNodeServiceRegisterAgentRejectsExpiredBootstrap(t *testing.T) {
 	svc := newRuntimeNodeServiceForTest(t, store)
 	svc.now = func() time.Time { return now }
 
-	if _, err := svc.CreateNode(context.Background(), platformAdmin(), RuntimeNodeInput{Name: "node-1"}); err != nil {
-		t.Fatalf("CreateNode() error = %v", err)
-	}
+	_, err := svc.CreateNode(context.Background(), platformAdmin(), RuntimeNodeInput{Name: "node-1"})
+	require.NoError(t, err)
 	// 模拟 1 小时后再来注册，bootstrap 默认 30 分钟必然过期。
 	svc.now = func() time.Time { return now.Add(time.Hour) }
 
-	_, err := svc.RegisterAgent(context.Background(), AgentRegisterInput{BootstrapToken: testBootstrapToken})
-	if !errors.Is(err, ErrBootstrapTokenInvalid) {
-		t.Fatalf("RegisterAgent() error = %v, want ErrBootstrapTokenInvalid", err)
-	}
+	_, err = svc.RegisterAgent(context.Background(), AgentRegisterInput{BootstrapToken: testBootstrapToken})
+	require.ErrorIs(t, err, ErrBootstrapTokenInvalid)
 }
 
 func TestRuntimeNodeServiceRegisterAgentRejectsInvalidToken(t *testing.T) {
@@ -113,9 +86,7 @@ func TestRuntimeNodeServiceRegisterAgentRejectsInvalidToken(t *testing.T) {
 	svc := newRuntimeNodeServiceForTest(t, store)
 
 	_, err := svc.RegisterAgent(context.Background(), AgentRegisterInput{BootstrapToken: "not-a-real-token"})
-	if !errors.Is(err, ErrBootstrapTokenInvalid) {
-		t.Fatalf("RegisterAgent() error = %v, want ErrBootstrapTokenInvalid", err)
-	}
+	require.ErrorIs(t, err, ErrBootstrapTokenInvalid)
 }
 
 func TestRuntimeNodeServiceHeartbeatRequiresValidAgentToken(t *testing.T) {
@@ -135,21 +106,13 @@ func TestRuntimeNodeServiceHeartbeatUpdatesActiveNode(t *testing.T) {
 	svc := newRuntimeNodeServiceForTest(t, store)
 
 	created, err := svc.CreateNode(context.Background(), platformAdmin(), RuntimeNodeInput{Name: "node-1"})
-	if err != nil {
-		t.Fatalf("CreateNode() error = %v", err)
-	}
+	require.NoError(t, err)
 	registered, err := svc.RegisterAgent(context.Background(), AgentRegisterInput{BootstrapToken: created.BootstrapToken})
-	if err != nil {
-		t.Fatalf("RegisterAgent() error = %v", err)
-	}
+	require.NoError(t, err)
 
 	result, err := svc.HandleHeartbeat(context.Background(), AgentHeartbeatInput{AgentToken: registered.AgentToken, AgentVersion: "0.2.0"})
-	if err != nil {
-		t.Fatalf("HandleHeartbeat() error = %v", err)
-	}
-	if result.AgentVersion != "0.2.0" {
-		t.Fatalf("agent_version = %q, want updated", result.AgentVersion)
-	}
+	require.NoError(t, err)
+	require.Equal(t, "0.2.0", result.AgentVersion)
 }
 
 func TestRuntimeNodeServiceHeartbeatRejectsDisabledNode(t *testing.T) {
@@ -157,16 +120,11 @@ func TestRuntimeNodeServiceHeartbeatRejectsDisabledNode(t *testing.T) {
 	svc := newRuntimeNodeServiceForTest(t, store)
 
 	created, err := svc.CreateNode(context.Background(), platformAdmin(), RuntimeNodeInput{Name: "node-1"})
-	if err != nil {
-		t.Fatalf("CreateNode() error = %v", err)
-	}
+	require.NoError(t, err)
 	registered, err := svc.RegisterAgent(context.Background(), AgentRegisterInput{BootstrapToken: created.BootstrapToken})
-	if err != nil {
-		t.Fatalf("RegisterAgent() error = %v", err)
-	}
-	if _, err := svc.SetNodeStatus(context.Background(), platformAdmin(), uuidToString(store.findByName(t, "node-1").ID), domain.RuntimeNodeStatusDisabled); err != nil {
-		t.Fatalf("SetNodeStatus() error = %v", err)
-	}
+	require.NoError(t, err)
+	_, err = svc.SetNodeStatus(context.Background(), platformAdmin(), uuidToString(store.findByName(t, "node-1").ID), domain.RuntimeNodeStatusDisabled)
+	require.NoError(t, err)
 
 	if _, err := svc.HandleHeartbeat(context.Background(), AgentHeartbeatInput{AgentToken: registered.AgentToken}); !errors.Is(err, ErrAgentTokenInvalid) {
 		t.Fatalf("HandleHeartbeat() error = %v, want ErrAgentTokenInvalid", err)
@@ -178,12 +136,9 @@ func TestRuntimeNodeServiceRotateBootstrapBlockedForActive(t *testing.T) {
 	svc := newRuntimeNodeServiceForTest(t, store)
 
 	created, err := svc.CreateNode(context.Background(), platformAdmin(), RuntimeNodeInput{Name: "node-1"})
-	if err != nil {
-		t.Fatalf("CreateNode() error = %v", err)
-	}
-	if _, err := svc.RegisterAgent(context.Background(), AgentRegisterInput{BootstrapToken: created.BootstrapToken}); err != nil {
-		t.Fatalf("RegisterAgent() error = %v", err)
-	}
+	require.NoError(t, err)
+	_, err = svc.RegisterAgent(context.Background(), AgentRegisterInput{BootstrapToken: created.BootstrapToken})
+	require.NoError(t, err)
 	nodeID := uuidToString(store.findByName(t, "node-1").ID)
 
 	if _, err := svc.RotateBootstrap(context.Background(), platformAdmin(), nodeID); !errors.Is(err, ErrRuntimeNodeBusy) {
@@ -196,14 +151,10 @@ func TestRuntimeNodeServiceRotateBootstrapAllowedForPending(t *testing.T) {
 	svc := newRuntimeNodeServiceForTest(t, store)
 
 	created, err := svc.CreateNode(context.Background(), platformAdmin(), RuntimeNodeInput{Name: "node-1"})
-	if err != nil {
-		t.Fatalf("CreateNode() error = %v", err)
-	}
+	require.NoError(t, err)
 	nodeID := uuidToString(store.findByName(t, "node-1").ID)
 	rotated, err := svc.RotateBootstrap(context.Background(), platformAdmin(), nodeID)
-	if err != nil {
-		t.Fatalf("RotateBootstrap() error = %v", err)
-	}
+	require.NoError(t, err)
 	if rotated.BootstrapToken == "" || rotated.BootstrapToken == created.BootstrapToken {
 		t.Fatalf("expected fresh bootstrap token, got %q", rotated.BootstrapToken)
 	}
@@ -363,15 +314,11 @@ func TestRuntimeNodeService_UpdateMaxApps_PlatformAdminSetsValue(t *testing.T) {
 	store := newRuntimeNodeStoreStub(t)
 	svc := newRuntimeNodeServiceForTest(t, store)
 	created, err := svc.CreateNode(context.Background(), platformAdmin(), RuntimeNodeInput{Name: "node-1"})
-	if err != nil {
-		t.Fatalf("CreateNode: %v", err)
-	}
+	require.NoError(t, err)
 
 	maxApps := int32(3)
 	got, err := svc.UpdateMaxApps(context.Background(), platformAdmin(), created.ID, &maxApps)
-	if err != nil {
-		t.Fatalf("UpdateMaxApps: %v", err)
-	}
+	require.NoError(t, err)
 	if got.MaxApps == nil || *got.MaxApps != 3 {
 		t.Fatalf("MaxApps = %v, want 3", got.MaxApps)
 	}
@@ -387,31 +334,22 @@ func TestRuntimeNodeService_UpdateMaxApps_OrgAdminForbidden(t *testing.T) {
 	_, err := svc.UpdateMaxApps(context.Background(),
 		auth.Principal{Role: domain.UserRoleOrgAdmin},
 		"00000000-0000-0000-0000-000000000001", nil)
-	if !errors.Is(err, ErrForbidden) {
-		t.Fatalf("err = %v, want ErrForbidden", err)
-	}
+	require.ErrorIs(t, err, ErrForbidden)
 }
 
 func TestRuntimeNodeService_UpdateMaxApps_NilClearsLimit(t *testing.T) {
 	store := newRuntimeNodeStoreStub(t)
 	svc := newRuntimeNodeServiceForTest(t, store)
 	created, err := svc.CreateNode(context.Background(), platformAdmin(), RuntimeNodeInput{Name: "node-1"})
-	if err != nil {
-		t.Fatalf("CreateNode: %v", err)
-	}
+	require.NoError(t, err)
 	// 先设一个非空值
 	val := int32(2)
-	if _, err := svc.UpdateMaxApps(context.Background(), platformAdmin(), created.ID, &val); err != nil {
-		t.Fatalf("UpdateMaxApps set: %v", err)
-	}
+	_, err = svc.UpdateMaxApps(context.Background(), platformAdmin(), created.ID, &val)
+	require.NoError(t, err)
 	// 再传 nil 清空
 	got, err := svc.UpdateMaxApps(context.Background(), platformAdmin(), created.ID, nil)
-	if err != nil {
-		t.Fatalf("UpdateMaxApps clear: %v", err)
-	}
-	if got.MaxApps != nil {
-		t.Fatalf("MaxApps should be nil after clear, got %v", *got.MaxApps)
-	}
+	require.NoError(t, err)
+	require.Nil(t, got.MaxApps)
 }
 
 func (s *runtimeNodeStoreStub) RotateBootstrapToken(_ context.Context, arg RotateBootstrapTokenParams) (sqlc.RuntimeNode, error) {

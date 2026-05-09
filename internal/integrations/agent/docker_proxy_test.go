@@ -16,6 +16,7 @@ import (
 	"sync"
 	"testing"
 	"time"
+	"github.com/stretchr/testify/require"
 )
 
 // dockerStubServer 启动一个 TLS http server 模拟 agent 的 docker 代理端点，
@@ -68,63 +69,46 @@ func TestNewDockerClientForNode_PingPropagatesBearerOverTLS(t *testing.T) {
 	server, caPEM, seen := startDockerStubServer(t)
 
 	cli, err := NewDockerClientForNode(server.URL, "agent-secret", string(caPEM))
-	if err != nil {
-		t.Fatalf("NewDockerClientForNode err = %v", err)
-	}
+	require.NoError(t, err)
 	defer cli.Close()
 
-	if _, err := cli.Ping(context.Background()); err != nil {
-		t.Fatalf("Ping err = %v", err)
-	}
+	_, err = cli.Ping(context.Background())
+	require.NoError(t, err)
 	auth, paths := seen.snapshot()
-	if auth != "Bearer agent-secret" {
-		t.Fatalf("agent 收到的 Authorization = %q, want Bearer agent-secret", auth)
-	}
-	if len(paths) == 0 {
-		t.Fatal("没有捕获到任何请求 path")
-	}
+	require.Equal(t, "Bearer agent-secret", auth)
+	require.NotEqual(t, 0, len(paths))
 }
 
 func TestNewDockerClientForNode_RejectsUntrustedTLS(t *testing.T) {
 	server, _, seen := startDockerStubServer(t)
 	otherPEM := makeUnrelatedCAPEM(t)
 	cli, err := NewDockerClientForNode(server.URL, "secret", otherPEM)
-	if err != nil {
-		t.Fatalf("NewDockerClientForNode err = %v", err)
-	}
+	require.NoError(t, err)
 	defer cli.Close()
 
-	if _, err := cli.Ping(context.Background()); err == nil {
-		t.Fatal("Ping 应失败但成功，TLS 校验未生效")
-	}
-	if auth, _ := seen.snapshot(); auth != "" {
-		t.Fatalf("不应到达 server: auth=%q", auth)
-	}
+	_, err = cli.Ping(context.Background())
+	require.Error(t, err)
+	auth, _ := seen.snapshot()
+	require.Empty(t, auth)
 }
 
 func TestNewDockerClientForNode_RejectsBadCAPEM(t *testing.T) {
-	if _, err := NewDockerClientForNode("https://1.2.3.4:7001", "secret", "not-a-pem"); err == nil {
-		t.Fatal("非法 CA PEM 应直接返回构造错误")
-	}
+	_, err := NewDockerClientForNode("https://1.2.3.4:7001", "secret", "not-a-pem")
+	require.Error(t, err)
 }
 
 func TestNewDockerClientForNode_PrefixesDockerPath(t *testing.T) {
 	server, caPEM, seen := startDockerStubServer(t)
 
 	cli, err := NewDockerClientForNode(server.URL, "secret", string(caPEM))
-	if err != nil {
-		t.Fatalf("NewDockerClientForNode err = %v", err)
-	}
+	require.NoError(t, err)
 	defer cli.Close()
 
-	if _, err := cli.Ping(context.Background()); err != nil {
-		t.Fatalf("Ping err = %v", err)
-	}
+	_, err = cli.Ping(context.Background())
+	require.NoError(t, err)
 	_, paths := seen.snapshot()
 	for _, p := range paths {
-		if !strings.HasPrefix(p, "/v1/docker/") {
-			t.Fatalf("agent 收到的 path = %q, 期望 /v1/docker/ 前缀", p)
-		}
+		require.True(t, strings.HasPrefix(p, "/v1/docker/"))
 	}
 }
 
@@ -133,9 +117,8 @@ func TestNewDockerClientForNode_AcceptsCertPool(t *testing.T) {
 	if pool := x509.NewCertPool(); !pool.AppendCertsFromPEM(caPEM) {
 		t.Fatal("AppendCertsFromPEM 失败")
 	}
-	if _, err := NewDockerClientForNode(server.URL, "x", string(caPEM)); err != nil {
-		t.Fatalf("构造失败: %v", err)
-	}
+	_, err := NewDockerClientForNode(server.URL, "x", string(caPEM))
+	require.NoError(t, err)
 }
 
 // makeUnrelatedCAPEM 生成一段全新的 self-signed CA PEM，用于反向验证 TLS 校验生效。
@@ -144,9 +127,7 @@ func TestNewDockerClientForNode_AcceptsCertPool(t *testing.T) {
 func makeUnrelatedCAPEM(t *testing.T) string {
 	t.Helper()
 	priv, err := ecdsa.GenerateKey(elliptic.P256(), rand.Reader)
-	if err != nil {
-		t.Fatalf("生成 key: %v", err)
-	}
+	require.NoError(t, err)
 	tmpl := &x509.Certificate{
 		SerialNumber:          big.NewInt(1),
 		Subject:               pkix.Name{CommonName: "unrelated"},
@@ -157,9 +138,7 @@ func makeUnrelatedCAPEM(t *testing.T) string {
 		IsCA:                  true,
 	}
 	der, err := x509.CreateCertificate(rand.Reader, tmpl, tmpl, &priv.PublicKey, priv)
-	if err != nil {
-		t.Fatalf("生成证书: %v", err)
-	}
+	require.NoError(t, err)
 	return string(encodeCertPEM(der))
 }
 

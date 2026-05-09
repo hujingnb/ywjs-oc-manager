@@ -13,6 +13,7 @@ import (
 
 	"oc-manager/internal/auth"
 	"oc-manager/internal/service"
+	"github.com/stretchr/testify/require"
 )
 
 func TestAuthLoginReturnsTokenPair(t *testing.T) {
@@ -31,16 +32,11 @@ func TestAuthLoginReturnsTokenPair(t *testing.T) {
 	request.Header.Set("Content-Type", "application/json")
 	router.ServeHTTP(recorder, request)
 
-	if recorder.Code != http.StatusOK {
-		t.Fatalf("status code = %d, want %d, body=%s", recorder.Code, http.StatusOK, recorder.Body.String())
-	}
+	require.Equal(t, http.StatusOK, recorder.Code)
 	var response service.LoginResult
-	if err := json.Unmarshal(recorder.Body.Bytes(), &response); err != nil {
-		t.Fatalf("decode response: %v", err)
-	}
-	if response.Tokens.RefreshToken != "refresh-token" {
-		t.Fatalf("refresh token = %q, want refresh-token", response.Tokens.RefreshToken)
-	}
+	err := json.Unmarshal(recorder.Body.Bytes(), &response)
+	require.NoError(t, err)
+	require.Equal(t, "refresh-token", response.Tokens.RefreshToken)
 }
 
 func TestAuthLoginRejectsInvalidBody(t *testing.T) {
@@ -51,9 +47,7 @@ func TestAuthLoginRejectsInvalidBody(t *testing.T) {
 	request.Header.Set("Content-Type", "application/json")
 	router.ServeHTTP(recorder, request)
 
-	if recorder.Code != http.StatusBadRequest {
-		t.Fatalf("status code = %d, want %d", recorder.Code, http.StatusBadRequest)
-	}
+	require.Equal(t, http.StatusBadRequest, recorder.Code)
 }
 
 func TestAuthMeRequiresBearerToken(t *testing.T) {
@@ -63,39 +57,29 @@ func TestAuthMeRequiresBearerToken(t *testing.T) {
 	request := httptest.NewRequest(http.MethodGet, "/api/v1/auth/me", nil)
 	router.ServeHTTP(recorder, request)
 
-	if recorder.Code != http.StatusUnauthorized {
-		t.Fatalf("status code = %d, want %d", recorder.Code, http.StatusUnauthorized)
-	}
+	require.Equal(t, http.StatusUnauthorized, recorder.Code)
 }
 
 func TestAuthMeReturnsCurrentUser(t *testing.T) {
 	svc := &authServiceStub{meResult: service.AuthUser{ID: "user-1", Username: "member@example.com"}}
 	router, tokens := newAuthTestRouter(t, svc)
 	accessToken, err := tokens.SignAccessToken(auth.Principal{UserID: "user-1", Role: "org_member"})
-	if err != nil {
-		t.Fatalf("SignAccessToken() error = %v", err)
-	}
+	require.NoError(t, err)
 
 	recorder := httptest.NewRecorder()
 	request := httptest.NewRequest(http.MethodGet, "/api/v1/auth/me", nil)
 	request.Header.Set("Authorization", "Bearer "+accessToken)
 	router.ServeHTTP(recorder, request)
 
-	if recorder.Code != http.StatusOK {
-		t.Fatalf("status code = %d, want %d, body=%s", recorder.Code, http.StatusOK, recorder.Body.String())
-	}
-	if svc.lastPrincipal.UserID != "user-1" {
-		t.Fatalf("principal = %+v, want user-1", svc.lastPrincipal)
-	}
+	require.Equal(t, http.StatusOK, recorder.Code)
+	require.Equal(t, "user-1", svc.lastPrincipal.UserID)
 }
 
 func newAuthTestRouter(t *testing.T, svc *authServiceStub) (*gin.Engine, *auth.TokenManager) {
 	t.Helper()
 	gin.SetMode(gin.ReleaseMode)
 	tokens, err := auth.NewTokenManager("access-secret", "refresh-secret", time.Minute, time.Hour)
-	if err != nil {
-		t.Fatalf("NewTokenManager() error = %v", err)
-	}
+	require.NoError(t, err)
 	router := gin.New()
 	RegisterAuthRoutes(router, NewAuthHandler(svc, tokens))
 	return router, tokens

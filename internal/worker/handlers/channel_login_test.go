@@ -2,7 +2,6 @@ package handlers
 
 import (
 	"context"
-	"strings"
 	"testing"
 	"time"
 
@@ -12,6 +11,7 @@ import (
 	"oc-manager/internal/domain"
 	"oc-manager/internal/integrations/channel"
 	"oc-manager/internal/store/sqlc"
+	"github.com/stretchr/testify/require"
 )
 
 const (
@@ -38,16 +38,11 @@ func TestChannelStartLoginHandlerWritesChallenge(t *testing.T) {
 		Type:        domain.JobTypeChannelStartLogin,
 		PayloadJson: []byte(`{"app_id":"` + testChannelWorkerAppID + `","channel_type":"wechat"}`),
 	})
-	if err != nil {
-		t.Fatalf("Handle() error = %v", err)
-	}
-	if store.binding.Status != domain.ChannelStatusPendingAuth {
-		t.Fatalf("binding status = %q, want pending_auth", store.binding.Status)
-	}
+	require.NoError(t, err)
+	require.Equal(t, domain.ChannelStatusPendingAuth, store.binding.Status)
 	metadata := string(store.binding.MetadataJson)
-	if !strings.Contains(metadata, "data:image/png;base64,qr") || !strings.Contains(metadata, "raw_qr") {
-		t.Fatalf("metadata_json 未包含二维码信息: %s", metadata)
-	}
+	require.Contains(t, metadata, "data:image/png;base64,qr")
+	require.Contains(t, metadata, "raw_qr")
 	if len(store.jobs) != 1 || store.jobs[0].Type != domain.JobTypeChannelCheckBinding {
 		t.Fatalf("应入队 channel_check_binding，jobs=%+v", store.jobs)
 	}
@@ -71,15 +66,9 @@ func TestChannelCheckBindingHandlerMarksBoundAndRunsApp(t *testing.T) {
 		Type:        domain.JobTypeChannelCheckBinding,
 		PayloadJson: []byte(`{"app_id":"` + testChannelWorkerAppID + `","channel_type":"wechat"}`),
 	})
-	if err != nil {
-		t.Fatalf("Handle() error = %v", err)
-	}
-	if store.binding.Status != domain.ChannelStatusBound {
-		t.Fatalf("binding status = %q, want bound", store.binding.Status)
-	}
-	if store.binding.BoundIdentity.String != "wxid_from_stdout" {
-		t.Fatalf("bound_identity = %q", store.binding.BoundIdentity.String)
-	}
+	require.NoError(t, err)
+	require.Equal(t, domain.ChannelStatusBound, store.binding.Status)
+	require.Equal(t, "wxid_from_stdout", store.binding.BoundIdentity.String)
 	if !store.appStatusSet || store.app.Status != domain.AppStatusRunning {
 		t.Fatalf("app 未推进到 running: set=%v status=%q", store.appStatusSet, store.app.Status)
 	}
@@ -98,15 +87,9 @@ func TestChannelCheckBindingHandlerUsesResolverIdentity(t *testing.T) {
 		Type:        domain.JobTypeChannelCheckBinding,
 		PayloadJson: []byte(`{"app_id":"` + testChannelWorkerAppID + `","channel_type":"wechat"}`),
 	})
-	if err != nil {
-		t.Fatalf("Handle() error = %v", err)
-	}
-	if store.binding.BoundIdentity.String != "user-from-plugin-state" {
-		t.Fatalf("bound_identity = %q", store.binding.BoundIdentity.String)
-	}
-	if resolver.calls != 1 {
-		t.Fatalf("resolver calls = %d", resolver.calls)
-	}
+	require.NoError(t, err)
+	require.Equal(t, "user-from-plugin-state", store.binding.BoundIdentity.String)
+	require.Equal(t, 1, resolver.calls)
 }
 
 func TestChannelCheckBindingHandlerRequeuesPending(t *testing.T) {
@@ -121,12 +104,8 @@ func TestChannelCheckBindingHandlerRequeuesPending(t *testing.T) {
 		Type:        domain.JobTypeChannelCheckBinding,
 		PayloadJson: []byte(`{"app_id":"` + testChannelWorkerAppID + `","channel_type":"wechat"}`),
 	})
-	if err != nil {
-		t.Fatalf("Handle() error = %v", err)
-	}
-	if store.binding.Status != domain.ChannelStatusPendingAuth {
-		t.Fatalf("binding status = %q", store.binding.Status)
-	}
+	require.NoError(t, err)
+	require.Equal(t, domain.ChannelStatusPendingAuth, store.binding.Status)
 	if len(store.jobs) != 1 || store.jobs[0].Type != domain.JobTypeChannelCheckBinding {
 		t.Fatalf("pending 状态应延迟重查，jobs=%+v", store.jobs)
 	}
@@ -152,21 +131,11 @@ func TestChannelCheckBindingHandlerFallsBackToResolverWhenAdapterPending(t *test
 		Type:        domain.JobTypeChannelCheckBinding,
 		PayloadJson: []byte(`{"app_id":"` + testChannelWorkerAppID + `","channel_type":"wechat"}`),
 	})
-	if err != nil {
-		t.Fatalf("Handle() error = %v", err)
-	}
-	if store.binding.Status != domain.ChannelStatusBound {
-		t.Fatalf("binding status = %q, want bound (resolver fallback should have promoted)", store.binding.Status)
-	}
-	if store.binding.BoundIdentity.String != "o9cq800xszCM8jyoS9YpRKpvAN9c@im.wechat" {
-		t.Fatalf("bound_identity = %q", store.binding.BoundIdentity.String)
-	}
-	if !store.appStatusSet {
-		t.Fatal("app status 应被推进到 running")
-	}
-	if resolver.calls != 1 {
-		t.Fatalf("resolver calls = %d, want 1", resolver.calls)
-	}
+	require.NoError(t, err)
+	require.Equal(t, domain.ChannelStatusBound, store.binding.Status)
+	require.Equal(t, "o9cq800xszCM8jyoS9YpRKpvAN9c@im.wechat", store.binding.BoundIdentity.String)
+	require.True(t, store.appStatusSet)
+	require.Equal(t, 1, resolver.calls)
 }
 
 // TestChannelCheckBindingHandlerSkipsResolverFallbackWithoutResolver 校验：
@@ -183,12 +152,8 @@ func TestChannelCheckBindingHandlerSkipsResolverFallbackWithoutResolver(t *testi
 		Type:        domain.JobTypeChannelCheckBinding,
 		PayloadJson: []byte(`{"app_id":"` + testChannelWorkerAppID + `","channel_type":"wechat"}`),
 	})
-	if err != nil {
-		t.Fatalf("Handle() error = %v", err)
-	}
-	if store.binding.Status != domain.ChannelStatusPendingAuth {
-		t.Fatalf("没有 resolver 时应保持 pending_auth, got %q", store.binding.Status)
-	}
+	require.NoError(t, err)
+	require.Equal(t, domain.ChannelStatusPendingAuth, store.binding.Status)
 }
 
 type workerFakeChannelAdapter struct {
@@ -300,8 +265,7 @@ func (s *channelWorkerStore) CreateJob(_ context.Context, arg sqlc.CreateJobPara
 func mustWorkerUUID(t *testing.T, value string) pgtype.UUID {
 	t.Helper()
 	var id pgtype.UUID
-	if err := id.Scan(value); err != nil {
-		t.Fatalf("scan uuid %s: %v", value, err)
-	}
+	err := id.Scan(value)
+	require.NoError(t, err)
 	return id
 }

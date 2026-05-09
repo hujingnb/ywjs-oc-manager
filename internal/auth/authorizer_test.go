@@ -4,6 +4,7 @@ import (
 	"testing"
 
 	"oc-manager/internal/domain"
+	"github.com/stretchr/testify/require"
 )
 
 const (
@@ -26,9 +27,8 @@ func runOrgCases(t *testing.T, fn func(Principal, string) bool, cases []orgCase)
 	for _, c := range cases {
 		t.Run(c.name, func(t *testing.T) {
 			p := Principal{UserID: userA, OrgID: c.pOrgID, Role: c.role}
-			if got := fn(p, c.targetOrg); got != c.want {
-				t.Fatalf("got %v, want %v", got, c.want)
-			}
+			got := fn(p, c.targetOrg)
+			require.Equal(t, c.want, got)
 		})
 	}
 }
@@ -76,9 +76,8 @@ func TestCanViewMember(t *testing.T) {
 	for _, c := range cases {
 		t.Run(c.name, func(t *testing.T) {
 			p := Principal{UserID: c.pUserID, OrgID: c.pOrgID, Role: c.role}
-			if got := CanViewMember(p, c.targetOrg, c.targetUser); got != c.want {
-				t.Fatalf("got %v, want %v", got, c.want)
-			}
+			got := CanViewMember(p, c.targetOrg, c.targetUser)
+			require.Equal(t, c.want, got)
 		})
 	}
 }
@@ -104,9 +103,8 @@ func TestCanEditMember(t *testing.T) {
 	for _, c := range cases {
 		t.Run(c.name, func(t *testing.T) {
 			p := Principal{UserID: c.pUserID, OrgID: c.pOrgID, Role: c.role}
-			if got := CanEditMember(p, c.targetOrg, c.targetUser); got != c.want {
-				t.Fatalf("got %v, want %v", got, c.want)
-			}
+			got := CanEditMember(p, c.targetOrg, c.targetUser)
+			require.Equal(t, c.want, got)
 		})
 	}
 }
@@ -122,9 +120,8 @@ func TestCanViewApp(t *testing.T) {
 	for _, c := range cases {
 		t.Run(c.name, func(t *testing.T) {
 			p := Principal{UserID: c.pUserID, OrgID: c.pOrgID, Role: c.role}
-			if got := CanViewApp(p, c.targetOrg, c.targetUser); got != c.want {
-				t.Fatalf("got %v, want %v", got, c.want)
-			}
+			got := CanViewApp(p, c.targetOrg, c.targetUser)
+			require.Equal(t, c.want, got)
 		})
 	}
 }
@@ -156,9 +153,8 @@ func runAppCases(t *testing.T, fn func(Principal, string, string) bool, cases []
 	for _, c := range cases {
 		t.Run(c.name, func(t *testing.T) {
 			p := Principal{UserID: c.pUserID, OrgID: c.pOrgID, Role: c.role}
-			if got := fn(p, c.targetOrg, c.targetUser); got != c.want {
-				t.Fatalf("got %v, want %v", got, c.want)
-			}
+			got := fn(p, c.targetOrg, c.targetUser)
+			require.Equal(t, c.want, got)
 		})
 	}
 }

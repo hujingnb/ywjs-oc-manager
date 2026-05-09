@@ -10,128 +10,88 @@ import (
 	"encoding/pem"
 	"math/big"
 	"net"
+	"io/fs"
 	"os"
 	"path/filepath"
 	"strings"
 	"testing"
 	"time"
+
+	"github.com/stretchr/testify/require"
 )
 
 // TestEnsureSelfSignedCert_GeneratesAndPersists 校验首次调用生成证书并写入 stateDir。
 func TestEnsureSelfSignedCert_GeneratesAndPersists(t *testing.T) {
 	stateDir := t.TempDir()
 	bundle, err := EnsureSelfSignedCert(stateDir, "test-host")
-	if err != nil {
-		t.Fatalf("EnsureSelfSignedCert err = %v", err)
-	}
+	require.NoError(t, err)
 	for _, name := range []string{"agent-tls.crt", "agent-tls.key", "agent-tls.ca.crt"} {
 		path := filepath.Join(stateDir, name)
 		info, err := os.Stat(path)
-		if err != nil {
-			t.Fatalf("文件 %s 不存在: %v", name, err)
-		}
-		if info.Size() == 0 {
-			t.Fatalf("文件 %s 为空", name)
-		}
-		if info.Mode().Perm()&0o077 != 0 {
-			t.Fatalf("文件 %s 权限过宽: %v", name, info.Mode().Perm())
-		}
+		require.NoError(t, err)
+		require.NotEqual(t, 0, info.Size())
+		require.Equal(t, fs.FileMode(0), info.Mode().Perm()&0o077)
 	}
-	if !strings.Contains(string(bundle.CACertPEM), "-----BEGIN CERTIFICATE-----") {
-		t.Fatalf("CA PEM 内容不是 PEM: %q", bundle.CACertPEM)
-	}
-	if !strings.Contains(string(bundle.CertPEM), "-----BEGIN CERTIFICATE-----") {
-		t.Fatalf("leaf cert 不是 PEM")
-	}
-	if !strings.Contains(string(bundle.KeyPEM), "PRIVATE KEY") {
-		t.Fatalf("key 不是 PEM 私钥")
-	}
+	require.True(t, strings.Contains(string(bundle.CACertPEM), "-----BEGIN CERTIFICATE-----"))
+	require.True(t, strings.Contains(string(bundle.CertPEM), "-----BEGIN CERTIFICATE-----"))
+	require.True(t, strings.Contains(string(bundle.KeyPEM), "PRIVATE KEY"))
 
 	leaf := mustParseLeafCert(t, bundle.CertPEM)
-	if !leaf.NotAfter.After(time.Now().AddDate(0, 11, 0)) {
-		t.Fatalf("证书有效期 < 11 个月: %v", leaf.NotAfter)
-	}
+	require.True(t, leaf.NotAfter.After(time.Now().AddDate(0, 11, 0)))
 	hasLoopback := false
 	for _, ip := range leaf.IPAddresses {
 		if ip.Equal(net.IPv4(127, 0, 0, 1)) {
 			hasLoopback = true
 		}
 	}
-	if !hasLoopback {
-		t.Fatalf("证书未包含 127.0.0.1 SAN: %+v", leaf.IPAddresses)
-	}
+	require.True(t, hasLoopback)
 	hasHostname := false
 	for _, dns := range leaf.DNSNames {
 		if dns == "test-host" {
 			hasHostname = true
 		}
 	}
-	if !hasHostname {
-		t.Fatalf("证书未包含主机名 SAN: %+v", leaf.DNSNames)
-	}
+	require.True(t, hasHostname)
 }
 
 // TestEnsureSelfSignedCert_ReusesExisting 校验已有合法证书时不重复生成。
 func TestEnsureSelfSignedCert_ReusesExisting(t *testing.T) {
 	stateDir := t.TempDir()
 	first, err := EnsureSelfSignedCert(stateDir, "host")
-	if err != nil {
-		t.Fatalf("first call err = %v", err)
-	}
+	require.NoError(t, err)
 	mtimeBefore := mustMTime(t, filepath.Join(stateDir, "agent-tls.crt"))
 	time.Sleep(10 * time.Millisecond)
 	second, err := EnsureSelfSignedCert(stateDir, "host")
-	if err != nil {
-		t.Fatalf("second call err = %v", err)
-	}
+	require.NoError(t, err)
 	mtimeAfter := mustMTime(t, filepath.Join(stateDir, "agent-tls.crt"))
-	if !mtimeBefore.Equal(mtimeAfter) {
-		t.Fatalf("证书文件被重写，首次=%v 二次=%v", mtimeBefore, mtimeAfter)
-	}
-	if string(first.CertPEM) != string(second.CertPEM) {
-		t.Fatalf("两次返回的 leaf cert 不一致")
-	}
+	require.True(t, mtimeBefore.Equal(mtimeAfter))
+	require.Equal(t, string(second.CertPEM), string(first.CertPEM))
 }
 
 // TestEnsureSelfSignedCert_RegeneratesWhenExpired 校验过期证书会被重新生成。
 func TestEnsureSelfSignedCert_RegeneratesWhenExpired(t *testing.T) {
 	stateDir := t.TempDir()
-	if err := writeExpiredCertBundle(stateDir); err != nil {
-		t.Fatalf("写入过期 bundle: %v", err)
-	}
+	err := writeExpiredCertBundle(stateDir)
+	require.NoError(t, err)
 	expiredPEM, err := os.ReadFile(filepath.Join(stateDir, "agent-tls.crt"))
-	if err != nil {
-		t.Fatalf("读取 expired pem: %v", err)
-	}
+	require.NoError(t, err)
 	bundle, err := EnsureSelfSignedCert(stateDir, "host")
-	if err != nil {
-		t.Fatalf("EnsureSelfSignedCert err = %v", err)
-	}
-	if string(bundle.CertPEM) == string(expiredPEM) {
-		t.Fatal("过期证书未被替换")
-	}
+	require.NoError(t, err)
+	require.NotEqual(t, string(expiredPEM), string(bundle.CertPEM))
 	leaf := mustParseLeafCert(t, bundle.CertPEM)
-	if !leaf.NotAfter.After(time.Now()) {
-		t.Fatalf("新证书仍处于过期状态: %v", leaf.NotAfter)
-	}
+	require.True(t, leaf.NotAfter.After(time.Now()))
 }
 
 // TestEnsureSelfSignedCert_TLSHandshake 校验生成的 cert/key 能完成 TLS 握手。
 func TestEnsureSelfSignedCert_TLSHandshake(t *testing.T) {
 	stateDir := t.TempDir()
 	bundle, err := EnsureSelfSignedCert(stateDir, "localhost")
-	if err != nil {
-		t.Fatalf("EnsureSelfSignedCert err = %v", err)
-	}
+	require.NoError(t, err)
 	cert, err := tls.X509KeyPair(bundle.CertPEM, bundle.KeyPEM)
-	if err != nil {
-		t.Fatalf("X509KeyPair err = %v", err)
-	}
+	require.NoError(t, err)
 	tlsCfg := &tls.Config{Certificates: []tls.Certificate{cert}, MinVersion: tls.VersionTLS12}
 	listener, err := tls.Listen("tcp", "127.0.0.1:0", tlsCfg)
-	if err != nil {
-		t.Fatalf("tls.Listen err = %v", err)
-	}
+	require.NoError(t, err)
 	defer listener.Close()
 	go func() {
 		conn, _ := listener.Accept()
@@ -145,14 +105,10 @@ func TestEnsureSelfSignedCert_TLSHandshake(t *testing.T) {
 		conn.Close()
 	}()
 	pool := x509.NewCertPool()
-	if !pool.AppendCertsFromPEM(bundle.CACertPEM) {
-		t.Fatal("无法把 CA PEM 加入 pool")
-	}
+	require.True(t, pool.AppendCertsFromPEM(bundle.CACertPEM))
 	dialer := &tls.Dialer{Config: &tls.Config{RootCAs: pool, ServerName: "127.0.0.1", MinVersion: tls.VersionTLS12}}
 	conn, err := dialer.Dial("tcp", listener.Addr().String())
-	if err != nil {
-		t.Fatalf("dial err = %v", err)
-	}
+	require.NoError(t, err)
 	conn.Close()
 }
 
@@ -163,18 +119,14 @@ func mustParseLeafCert(t *testing.T, pemBytes []byte) *x509.Certificate {
 		t.Fatal("找不到 CERTIFICATE PEM block")
 	}
 	leaf, err := x509.ParseCertificate(block.Bytes)
-	if err != nil {
-		t.Fatalf("ParseCertificate err = %v", err)
-	}
+	require.NoError(t, err)
 	return leaf
 }
 
 func mustMTime(t *testing.T, path string) time.Time {
 	t.Helper()
 	info, err := os.Stat(path)
-	if err != nil {
-		t.Fatalf("stat %s: %v", path, err)
-	}
+	require.NoError(t, err)
 	return info.ModTime()
 }
 

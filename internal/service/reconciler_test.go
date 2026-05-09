@@ -9,6 +9,7 @@ import (
 
 	"oc-manager/internal/domain"
 	"oc-manager/internal/store/sqlc"
+	"github.com/stretchr/testify/require"
 )
 
 const testReconcilerNodeID = "00000000-0000-0000-0000-000000005001"
@@ -76,18 +77,12 @@ func TestNodeHealthReconciler_DemotesTimedOutNodesAndApps(t *testing.T) {
 	rec := NewNodeHealthReconciler(stub, 90*time.Second)
 	rec.SetClock(func() time.Time { return now })
 	demoted, err := rec.Reconcile(context.Background())
-	if err != nil {
-		t.Fatalf("Reconcile err = %v", err)
-	}
-	if demoted != 1 {
-		t.Fatalf("demoted = %d, want 1", demoted)
-	}
+	require.NoError(t, err)
+	require.Equal(t, 1, demoted)
 	if len(stub.updatedNodes) != 1 || stub.updatedNodes[0] != testReconcilerNodeID+"="+domain.RuntimeNodeStatusUnreachable {
 		t.Fatalf("updatedNodes = %+v", stub.updatedNodes)
 	}
-	if stub.updatedApps[uuidToString(app.ID)] != domain.AppStatusError {
-		t.Fatalf("updatedApps = %+v", stub.updatedApps)
-	}
+	require.Equal(t, domain.AppStatusError, stub.updatedApps[uuidToString(app.ID)])
 }
 
 func TestNodeHealthReconciler_SkipsAlreadyDisabledNodes(t *testing.T) {
@@ -103,15 +98,9 @@ func TestNodeHealthReconciler_SkipsAlreadyDisabledNodes(t *testing.T) {
 	rec := NewNodeHealthReconciler(stub, 90*time.Second)
 	rec.SetClock(func() time.Time { return now })
 	demoted, err := rec.Reconcile(context.Background())
-	if err != nil {
-		t.Fatalf("err = %v", err)
-	}
-	if demoted != 0 {
-		t.Fatalf("demoted = %d, want 0", demoted)
-	}
-	if len(stub.updatedNodes) != 0 {
-		t.Fatal("不应更新 disabled 节点")
-	}
+	require.NoError(t, err)
+	require.Equal(t, 0, demoted)
+	require.Equal(t, 0, len(stub.updatedNodes))
 }
 
 func TestNodeHealthReconciler_NeverHeartbeatedTreatedAsTimedOut(t *testing.T) {
@@ -127,10 +116,6 @@ func TestNodeHealthReconciler_NeverHeartbeatedTreatedAsTimedOut(t *testing.T) {
 	rec := NewNodeHealthReconciler(stub, 90*time.Second)
 	rec.SetClock(func() time.Time { return now })
 	demoted, err := rec.Reconcile(context.Background())
-	if err != nil {
-		t.Fatalf("err = %v", err)
-	}
-	if demoted != 1 {
-		t.Fatalf("demoted = %d, want 1（从未心跳的 active 节点也算超时）", demoted)
-	}
+	require.NoError(t, err)
+	require.Equal(t, 1, demoted)
 }
