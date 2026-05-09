@@ -30,6 +30,25 @@
 - 不要手工编辑 `openapi/openapi.yaml` 与 `web/src/api/generated.ts`——它们是
   生成产物。
 
+## 测试断言
+
+- 新增 / 重构单元测试一律使用 `github.com/stretchr/testify` 的 `assert` /
+  `require`：错误检查用 `require.NoError` / `require.Error` /
+  `require.ErrorIs`；等值断言用 `assert.Equal`（顺序：expected 在前，与
+  原 `t.Errorf("got %v want %v")` 顺序相反）；后续依赖此值不能继续时用
+  `require.*` 让 fail 立即停止。
+- stdlib `t.Fatalf` / `t.Errorf` 仅在极个别 helper / table-driven 复合
+  格式化场景保留，不再做新增。
+
+## users.deleted_at 语义
+
+- `users.deleted_at` 字段语义为「下线时间戳」（即 `status=disabled` 时由
+  SQL 自动设置 `deleted_at = NOW()`，重新启用时清空）。**与
+  `organizations.deleted_at`「真删除时间」语义不同**。
+- 查询活跃用户：`WHERE deleted_at IS NULL`，走 `users_active_idx` 部分索引。
+- 真软删除场景（如未来要做「彻底下线、不可恢复」）用 `SoftDeleteUser`
+  query：仅设置 `deleted_at`，不动 `status`。
+
 ## Commit Message
 
 - 使用 Conventional Commits 格式：
