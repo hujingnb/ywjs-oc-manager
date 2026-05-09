@@ -2,7 +2,7 @@ package audit
 
 import (
 	"context"
-	"log"
+	"log/slog"
 
 	"oc-manager/internal/service"
 )
@@ -57,7 +57,7 @@ func (h *NewAPIAuditHelper) RecordNewAPIFailure(ctx context.Context, fc service.
 // RecordFailure 写一条 newapi_call 失败审计。
 //
 // 不返回 error：本 helper 是"附属操作"，主流程不应因审计失败而失败。
-// 底层 Record 报错时仅打 log.Printf，并继续。
+// 底层 Record 报错时仅打日志并继续，不阻断主流程。
 func (h *NewAPIAuditHelper) RecordFailure(ctx context.Context, fc NewAPIFailureContext) {
 	if h == nil || h.recorder == nil {
 		return
@@ -86,6 +86,6 @@ func (h *NewAPIAuditHelper) RecordFailure(ctx context.Context, fc NewAPIFailureC
 		Metadata:     metadata,
 	}
 	if _, err := h.recorder.Record(ctx, event); err != nil {
-		log.Printf("newapi_audit: 写 audit_logs 失败: %v", err)
+		slog.ErrorContext(ctx, "newapi_audit: 写 audit_logs 失败", "error", err)
 	}
 }

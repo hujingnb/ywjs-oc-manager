@@ -7,7 +7,7 @@ import (
 	"crypto/x509"
 	"encoding/json"
 	"fmt"
-	"log"
+	"log/slog"
 	"net/http"
 	"runtime"
 	"strings"
@@ -26,12 +26,19 @@ type hbLogger interface {
 	Errorf(format string, args ...any)
 }
 
-// stdHBLogger 把心跳日志写到默认 log 包，符合现有 agent 进程日志风格。
+// stdHBLogger 把心跳日志写到 slog 默认 logger。
+// agent 是独立二进制，不走 manager-api 中间件，无 traceID 概念，因此不带 Context。
 type stdHBLogger struct{}
 
-func (stdHBLogger) Infof(format string, args ...any)  { log.Printf("INFO heartbeat "+format, args...) }
-func (stdHBLogger) Warnf(format string, args ...any)  { log.Printf("WARN heartbeat "+format, args...) }
-func (stdHBLogger) Errorf(format string, args ...any) { log.Printf("ERROR heartbeat "+format, args...) }
+func (stdHBLogger) Infof(format string, args ...any) {
+	slog.Info(fmt.Sprintf("heartbeat "+format, args...))
+}
+func (stdHBLogger) Warnf(format string, args ...any) {
+	slog.Warn(fmt.Sprintf("heartbeat "+format, args...))
+}
+func (stdHBLogger) Errorf(format string, args ...any) {
+	slog.Error(fmt.Sprintf("heartbeat "+format, args...))
+}
 
 // heartbeat 在 agent 进程内周期主动 POST 到 manager，触发节点 unreachable→active 自愈。
 // shouldStart 不满足时（manager 三字段全空）Run 立即返回，避免空跑。

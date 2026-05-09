@@ -6,7 +6,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
-	"log"
+	"log/slog"
 	"path"
 	"strings"
 
@@ -353,7 +353,7 @@ func (h *AppInitializeHandler) Handle(ctx context.Context, job sqlc.Job) error {
 				if err := configureOpenClawDefaultModel(ctx, execer, payload.RuntimeNodeID, info.ID, h.cfg.LLM); err != nil {
 					// 模型注入失败不阻塞主流程：容器仍会用 gpt-5.5 默认值；ops 可在 new-api 端
 					// 用 model_mapping 兜底（gpt-5.5 -> qwen2.5:0.5b）。但记日志便于排查。
-					log.Printf("app_initialize: 配置 openclaw 默认 model 失败 (app_id=%s): %v", uuidToString(app.ID), err)
+					slog.WarnContext(ctx, "app_initialize: 配置 openclaw 默认 model 失败", "app_id", uuidToString(app.ID), "error", err)
 				}
 			}
 		}
@@ -663,9 +663,9 @@ func configureOpenClawDefaultModel(ctx context.Context, execer ContainerExecer, 
 	if res.ExitCode != 0 {
 		return fmt.Errorf("openclaw config patch 返回 exit=%d stdout=%q", res.ExitCode, res.Stdout)
 	}
-	// CLI 在成功路径输出 "Patched" 或 "Updated"；缺失只 log 不 fail。
+	// CLI 在成功路径输出 "Patched" 或 "Updated"；缺失只记警告不 fail。
 	if !strings.Contains(res.Stdout, "Patched") && !strings.Contains(res.Stdout, "Updated") {
-		log.Printf("app_initialize: openclaw config patch 未输出预期 ack：%q", res.Stdout)
+		slog.WarnContext(ctx, "app_initialize: openclaw config patch 未输出预期 ack", "stdout", res.Stdout)
 	}
 	return nil
 }

@@ -8,6 +8,7 @@ import (
 	"fmt"
 	"io"
 	"log"
+	"log/slog"
 	"net/http"
 	"os"
 	"os/signal"
@@ -87,6 +88,13 @@ func main() {
 //
 // stdout 在生产是 os.Stdout，测试场景由调用方传 *bytes.Buffer，便于断言 CA PEM 输出。
 func runAgent(ctx context.Context, opts agentOptions, stdout io.Writer) error {
+	// agent 是独立二进制，不走 manager-api 中间件；使用 JSON 格式让容器日志驱动可解析，
+	// 不需要 requestIDHandler（无 traceID 上下文）。
+	slog.SetDefault(slog.New(slog.NewJSONHandler(os.Stderr, &slog.HandlerOptions{
+		Level:     slog.LevelInfo,
+		AddSource: true,
+	})))
+
 	if err := os.MkdirAll(opts.stateDir, 0o700); err != nil {
 		return fmt.Errorf("创建 state 目录失败: %w", err)
 	}
@@ -124,7 +132,7 @@ func runAgent(ctx context.Context, opts agentOptions, stdout io.Writer) error {
 
 	errCh := make(chan error, 2)
 	go func() {
-		log.Printf("file-api listening on %s", fileServer.Addr)
+		slog.Info("file-api 启动监听", "addr", fileServer.Addr)
 		if err := fileServer.ListenAndServe(); err != nil && !errors.Is(err, http.ErrServerClosed) {
 			errCh <- fmt.Errorf("file-api: %w", err)
 			return
@@ -133,7 +141,7 @@ func runAgent(ctx context.Context, opts agentOptions, stdout io.Writer) error {
 	}()
 	if dockerServer != nil {
 		go func() {
-			log.Printf("docker-proxy listening on %s (TLS)", dockerServer.Addr)
+			slog.Info("docker-proxy 启动监听（TLS）", "addr", dockerServer.Addr)
 			if err := dockerServer.ListenAndServeTLS(certPath, keyPath); err != nil && !errors.Is(err, http.ErrServerClosed) {
 				errCh <- fmt.Errorf("docker-proxy: %w", err)
 				return
@@ -273,7 +281,7 @@ func newHandlerWithDocker(dataRoot string, docker DockerClient, agentToken strin
 func writeJSON(w http.ResponseWriter, value any) {
 	w.Header().Set("Content-Type", "application/json")
 	if err := json.NewEncoder(w).Encode(value); err != nil {
-		log.Printf("写入 JSON 响应失败: %v", err)
+		slog.Error("写入 JSON 响应失败", "error", err)
 	}
 }
 
