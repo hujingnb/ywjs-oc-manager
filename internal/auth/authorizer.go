@@ -92,3 +92,31 @@ func CanViewOrgPersona(p Principal, orgID string) bool {
 func CanManageOrgPersona(p Principal, orgID string) bool {
 	return CanManageOrg(p, orgID)
 }
+
+// 应用资源（业务别名） ---------------------------------------------
+// 以下函数当前与 CanViewApp 等价，按调用上下文命名以便未来差异化。
+
+// CanManageApp 判断主体是否可对应用执行管理写操作（如渠道绑定）。
+// 当前规则与 CanViewApp 等价；保留独立函数为未来差异化预留。
+func CanManageApp(p Principal, appOrgID, appOwnerUserID string) bool {
+	return CanViewApp(p, appOrgID, appOwnerUserID)
+}
+
+// CanWriteAppKnowledge 判断主体是否可写入指定应用的知识库。
+// 当前规则与 CanViewApp 等价；保留独立函数为未来差异化预留。
+func CanWriteAppKnowledge(p Principal, appOrgID, appOwnerUserID string) bool {
+	return CanViewApp(p, appOrgID, appOwnerUserID)
+}
+
+// CanReadAppKnowledge 判断主体是否可读取指定应用的知识库。
+// 当前规则与 CanViewApp 等价；保留独立函数为未来差异化预留。
+func CanReadAppKnowledge(p Principal, appOrgID, appOwnerUserID string) bool {
+	return CanViewApp(p, appOrgID, appOwnerUserID)
+}
+
+// CanTriggerRuntimeOperation 判断主体是否可对应用触发运行时操作（启停/重启等）。
+// 当前规则与 CanViewApp 等价；调用方需在此之前额外校验 user.status != disabled，
+// disabled 账号不得触发任何运行时操作。
+func CanTriggerRuntimeOperation(p Principal, appOrgID, appOwnerUserID string) bool {
+	return CanViewApp(p, appOrgID, appOwnerUserID)
+}

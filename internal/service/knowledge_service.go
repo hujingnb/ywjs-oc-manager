@@ -138,7 +138,7 @@ func (s *KnowledgeService) SaveAppFile(ctx context.Context, principal auth.Princ
 	if s.master == nil {
 		return ErrKnowledgeMissing
 	}
-	if !canWriteApp(principal, orgID, ownerUserID) {
+	if !auth.CanWriteAppKnowledge(principal, orgID, ownerUserID) {
 		return ErrKnowledgeForbidden
 	}
 	target := path.Join("org", orgID, "app", appID, "knowledge", relative)
@@ -174,7 +174,7 @@ func (s *KnowledgeService) DeleteAppFile(ctx context.Context, principal auth.Pri
 	if s.master == nil {
 		return ErrKnowledgeMissing
 	}
-	if !canWriteApp(principal, orgID, ownerUserID) {
+	if !auth.CanWriteAppKnowledge(principal, orgID, ownerUserID) {
 		return ErrKnowledgeForbidden
 	}
 	target := path.Join("org", orgID, "app", appID, "knowledge", relative)
@@ -208,7 +208,7 @@ func (s *KnowledgeService) ListApp(_ context.Context, principal auth.Principal, 
 	if s.master == nil {
 		return KnowledgeListResult{}, ErrKnowledgeMissing
 	}
-	if !canReadApp(principal, orgID, ownerUserID) {
+	if !auth.CanReadAppKnowledge(principal, orgID, ownerUserID) {
 		return KnowledgeListResult{}, ErrKnowledgeForbidden
 	}
 	target := path.Join("org", orgID, "app", appID, "knowledge", relative)
@@ -230,23 +230,4 @@ func toKnowledgeListResult(targetPath string, entries []files.KnowledgeEntry) Kn
 		})
 	}
 	return KnowledgeListResult{Path: targetPath, Entries: out}
-}
-
-// canWriteApp 判断主体能否写入指定应用的知识库。
-func canWriteApp(principal auth.Principal, orgID, ownerUserID string) bool {
-	switch principal.Role {
-	case "platform_admin":
-		return true
-	case "org_admin":
-		return principal.OrgID == orgID
-	case "org_member":
-		return principal.UserID == ownerUserID
-	default:
-		return false
-	}
-}
-
-// canReadApp 是 canWriteApp 的只读版本；当前规则一致，但保留独立函数便于后续扩展。
-func canReadApp(principal auth.Principal, orgID, ownerUserID string) bool {
-	return canWriteApp(principal, orgID, ownerUserID)
 }

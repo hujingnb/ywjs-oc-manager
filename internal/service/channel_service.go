@@ -209,25 +209,10 @@ func (s *ChannelService) loadAuthorizedApp(ctx context.Context, principal auth.P
 	if !auth.CanViewApp(principal, uuidToString(app.OrgID), uuidToString(app.OwnerUserID)) {
 		return sqlc.App{}, ErrForbidden
 	}
-	if !canManageApp(principal, app) {
+	if !auth.CanManageApp(principal, uuidToString(app.OrgID), uuidToString(app.OwnerUserID)) {
 		return sqlc.App{}, ErrForbidden
 	}
 	return app, nil
-}
-
-// canManageApp 判断主体是否可以执行渠道写操作。
-// 当前规则：平台/组织管理员可以管理本组织内任何应用，普通成员只能管理自己拥有的应用。
-func canManageApp(principal auth.Principal, app sqlc.App) bool {
-	switch principal.Role {
-	case domain.UserRolePlatformAdmin:
-		return true
-	case domain.UserRoleOrgAdmin:
-		return principal.OrgID == uuidToString(app.OrgID)
-	case domain.UserRoleOrgMember:
-		return principal.UserID == uuidToString(app.OwnerUserID)
-	default:
-		return false
-	}
 }
 
 func channelBindingMetadata(raw []byte) map[string]string {

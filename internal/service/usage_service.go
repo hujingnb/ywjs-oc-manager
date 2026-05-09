@@ -86,7 +86,7 @@ type LogsQueryOptions struct {
 
 // GetAppUsage 拉指定应用 token 的调用日志（透传 GET /api/log/?token_id=X）。
 func (s *UsageService) GetAppUsage(ctx context.Context, principal auth.Principal, appID, ownerOrgID, ownerUserID string, newapiKeyID int64, opts LogsQueryOptions) (LogsPage, error) {
-	if !canReadApp(principal, ownerOrgID, ownerUserID) {
+	if !auth.CanReadAppKnowledge(principal, ownerOrgID, ownerUserID) {
 		return LogsPage{}, ErrForbidden
 	}
 	if s.client == nil {

@@ -208,7 +208,7 @@ func (s *RuntimeOperationService) Trigger(ctx context.Context, principal auth.Pr
 	if err != nil {
 		return RuntimeOperationResult{}, fmt.Errorf("查询应用失败: %w", err)
 	}
-	if !canTriggerRuntimeOperation(principal, app) {
+	if !auth.CanTriggerRuntimeOperation(principal, uuidToString(app.OrgID), uuidToString(app.OwnerUserID)) {
 		return RuntimeOperationResult{}, ErrRuntimeOperationDenied
 	}
 	// disable/restore api_key 走风控路径，禁止普通成员触发。
@@ -280,7 +280,7 @@ func (s *RuntimeOperationService) RequestInitialize(ctx context.Context, princip
 	if err != nil {
 		return RuntimeOperationResult{}, fmt.Errorf("查询应用失败: %w", err)
 	}
-	if !canTriggerRuntimeOperation(principal, app) {
+	if !auth.CanTriggerRuntimeOperation(principal, uuidToString(app.OrgID), uuidToString(app.OwnerUserID)) {
 		return RuntimeOperationResult{}, ErrRuntimeOperationDenied
 	}
 	if app.Status != domain.AppStatusError && app.Status != domain.AppStatusDraft {
@@ -369,22 +369,5 @@ func jobTypeFor(op RuntimeOperation) string {
 		return domain.JobTypeNewAPIRestoreKey
 	default:
 		return ""
-	}
-}
-
-func canTriggerRuntimeOperation(principal auth.Principal, app sqlc.App) bool {
-	switch principal.Role {
-	case domain.UserRolePlatformAdmin:
-		return true
-	case domain.UserRoleOrgAdmin:
-		return principal.OrgID == uuidToString(app.OrgID)
-	case domain.UserRoleOrgMember:
-		if principal.UserID != uuidToString(app.OwnerUserID) {
-			return false
-		}
-		// 普通成员被禁用账号也无权触发
-		return true
-	default:
-		return false
 	}
 }
