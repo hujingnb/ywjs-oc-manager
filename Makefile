@@ -27,7 +27,7 @@ build:
 	docker compose run --rm --no-deps manager-api go build -o ./tmp/build/oc-runtime-agent ./runtime/agent
 
 sqlc-generate:
-	docker compose run --rm --no-deps manager-api go run github.com/sqlc-dev/sqlc/cmd/sqlc@v1.31.1 generate
+	docker compose run --rm --no-deps manager-api go run github.com/sqlc-dev/sqlc/cmd/sqlc@v1.30.0 generate
 
 web-test:
 	docker compose run --rm --no-deps manager-web sh -c "npm install && npm test -- --run"
