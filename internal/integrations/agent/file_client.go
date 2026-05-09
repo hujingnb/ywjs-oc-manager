@@ -3,13 +3,14 @@ package agent
 import (
 	"bytes"
 	"context"
-	"encoding/json"
 	"fmt"
 	"io"
 	"net/http"
 	"net/url"
 	"path"
 	"strings"
+
+	"oc-manager/internal/integrations/httpclient"
 )
 
 // FileEntry 表示 agent 远端目录下的一个条目。
@@ -35,11 +36,17 @@ type AgentFileClient struct {
 	BaseURL    string
 	Token      string
 	HTTPClient *http.Client
+	base       *httpclient.BaseHTTPClient
 }
 
 // NewFileClient 创建一个 agent 文件 client。
 func NewFileClient(baseURL, token string) *AgentFileClient {
-	return &AgentFileClient{BaseURL: baseURL, Token: token}
+	c := &AgentFileClient{BaseURL: baseURL, Token: token}
+	c.base = &httpclient.BaseHTTPClient{
+		BaseURL:   baseURL,
+		AuthToken: token,
+	}
+	return c
 }
 
 func (c *AgentFileClient) httpClient() *http.Client {
@@ -51,28 +58,14 @@ func (c *AgentFileClient) httpClient() *http.Client {
 
 // List 列出指定路径下的条目。
 func (c *AgentFileClient) List(ctx context.Context, remotePath string) (FileListing, error) {
-	endpoint, err := c.endpoint("/v1/files/list")
-	if err != nil {
-		return FileListing{}, err
+	if c.BaseURL == "" {
+		return FileListing{}, fmt.Errorf("agent file client 未配置 BaseURL")
 	}
 	q := url.Values{}
 	q.Set("path", remotePath)
-	req, err := http.NewRequestWithContext(ctx, http.MethodGet, endpoint+"?"+q.Encode(), nil)
-	if err != nil {
-		return FileListing{}, err
-	}
-	c.authorize(req)
-	resp, err := c.httpClient().Do(req)
-	if err != nil {
-		return FileListing{}, err
-	}
-	defer resp.Body.Close()
-	if err := expectSuccess(resp, "list files"); err != nil {
-		return FileListing{}, err
-	}
 	var listing FileListing
-	if err := json.NewDecoder(resp.Body).Decode(&listing); err != nil {
-		return FileListing{}, fmt.Errorf("解析 list 响应失败: %w", err)
+	if err := c.base.DoJSON(ctx, http.MethodGet, "/v1/files/list", q, nil, &listing); err != nil {
+		return FileListing{}, err
 	}
 	return listing, nil
 }
@@ -154,23 +147,12 @@ func (c *AgentFileClient) Archive(ctx context.Context, remotePath string) (io.Re
 
 // Delete 删除 agent 上的文件或目录（递归）。
 func (c *AgentFileClient) Delete(ctx context.Context, remotePath string) error {
-	endpoint, err := c.endpoint("/v1/files/delete")
-	if err != nil {
-		return err
+	if c.BaseURL == "" {
+		return fmt.Errorf("agent file client 未配置 BaseURL")
 	}
 	q := url.Values{}
 	q.Set("path", remotePath)
-	req, err := http.NewRequestWithContext(ctx, http.MethodPost, endpoint+"?"+q.Encode(), bytes.NewReader(nil))
-	if err != nil {
-		return err
-	}
-	c.authorize(req)
-	resp, err := c.httpClient().Do(req)
-	if err != nil {
-		return err
-	}
-	defer resp.Body.Close()
-	return expectSuccess(resp, "delete path")
+	return c.base.DoJSON(ctx, http.MethodPost, "/v1/files/delete", q, nil, nil)
 }
 
 func (c *AgentFileClient) endpoint(p string) (string, error) {
@@ -279,33 +261,18 @@ func (c *AgentFileClient) DeleteAppKnowledge(ctx context.Context, appID, relPath
 
 // ListWorkspace 列举应用 workspace 下的内容。relPath 为根目录时传空串。
 func (c *AgentFileClient) ListWorkspace(ctx context.Context, appID, relPath string) (WorkspaceListing, error) {
-	endpoint, err := c.endpoint(fmt.Sprintf("/v1/scopes/apps/%s/workspace", url.PathEscape(appID)))
-	if err != nil {
-		return WorkspaceListing{}, err
+	if c.BaseURL == "" {
+		return WorkspaceListing{}, fmt.Errorf("agent file client 未配置 BaseURL")
 	}
 	q := url.Values{}
 	if relPath != "" {
 		q.Set("path", relPath)
 	}
-	if encoded := q.Encode(); encoded != "" {
-		endpoint += "?" + encoded
-	}
-	req, err := http.NewRequestWithContext(ctx, http.MethodGet, endpoint, nil)
-	if err != nil {
-		return WorkspaceListing{}, err
-	}
-	c.authorize(req)
-	resp, err := c.httpClient().Do(req)
-	if err != nil {
-		return WorkspaceListing{}, err
-	}
-	defer resp.Body.Close()
-	if err := expectSuccess(resp, "list workspace"); err != nil {
-		return WorkspaceListing{}, err
-	}
 	var listing WorkspaceListing
-	if err := json.NewDecoder(resp.Body).Decode(&listing); err != nil {
-		return WorkspaceListing{}, fmt.Errorf("解析 workspace 列表失败: %w", err)
+	if err := c.base.DoJSON(ctx, http.MethodGet,
+		fmt.Sprintf("/v1/scopes/apps/%s/workspace", url.PathEscape(appID)),
+		q, nil, &listing); err != nil {
+		return WorkspaceListing{}, err
 	}
 	return listing, nil
 }
@@ -342,35 +309,16 @@ func (c *AgentFileClient) DownloadWorkspaceFile(ctx context.Context, appID, relP
 // StreamWorkspaceArchive 把应用 workspace 下的指定子目录流式打成 zip 写到 w。
 // relPath 为空表示打整个 workspace。
 func (c *AgentFileClient) StreamWorkspaceArchive(ctx context.Context, appID, relPath string, w io.Writer) error {
-	endpoint, err := c.endpoint(fmt.Sprintf("/v1/scopes/apps/%s/workspace/archive", url.PathEscape(appID)))
-	if err != nil {
-		return err
+	if c.BaseURL == "" {
+		return fmt.Errorf("agent file client 未配置 BaseURL")
 	}
 	q := url.Values{}
 	if relPath != "" {
 		q.Set("path", relPath)
 	}
-	if encoded := q.Encode(); encoded != "" {
-		endpoint += "?" + encoded
-	}
-	req, err := http.NewRequestWithContext(ctx, http.MethodGet, endpoint, nil)
-	if err != nil {
-		return err
-	}
-	c.authorize(req)
-	resp, err := c.httpClient().Do(req)
-	if err != nil {
-		return err
-	}
-	defer resp.Body.Close()
-	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
-		body, _ := io.ReadAll(io.LimitReader(resp.Body, 4096))
-		return fmt.Errorf("workspace archive failed: status=%d body=%s", resp.StatusCode, string(body))
-	}
-	if _, err := io.Copy(w, resp.Body); err != nil {
-		return fmt.Errorf("copy archive 流失败: %w", err)
-	}
-	return nil
+	return c.base.DoStream(ctx, http.MethodGet,
+		fmt.Sprintf("/v1/scopes/apps/%s/workspace/archive", url.PathEscape(appID)),
+		q, w)
 }
 
 // ArchiveApp 让 agent 把节点上 apps/{appID}/ 整目录归档到 archived/{appID}-{ts}/。
@@ -385,23 +333,12 @@ func (c *AgentFileClient) CleanupArchive(ctx context.Context, retentionDays int)
 	if retentionDays <= 0 {
 		return fmt.Errorf("retentionDays 必须为正整数")
 	}
-	endpoint, err := c.endpoint("/v1/scopes/cleanup-archives")
-	if err != nil {
-		return err
+	if c.BaseURL == "" {
+		return fmt.Errorf("agent file client 未配置 BaseURL")
 	}
 	q := url.Values{}
 	q.Set("retention_days", fmt.Sprintf("%d", retentionDays))
-	req, err := http.NewRequestWithContext(ctx, http.MethodPost, endpoint+"?"+q.Encode(), nil)
-	if err != nil {
-		return err
-	}
-	c.authorize(req)
-	resp, err := c.httpClient().Do(req)
-	if err != nil {
-		return err
-	}
-	defer resp.Body.Close()
-	return expectSuccess(resp, "cleanup archives")
+	return c.base.DoJSON(ctx, http.MethodPost, "/v1/scopes/cleanup-archives", q, nil, nil)
 }
 
 // WorkspaceListing 是 ListWorkspace 的标准化响应（与 agent /v1/scopes/.../workspace 输出一致）。

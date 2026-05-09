@@ -25,15 +25,18 @@ import (
 	"net/url"
 	"strconv"
 	"strings"
+
+	"oc-manager/internal/integrations/httpclient"
 )
 
 // 与 new-api 调用相关的错误。
+// alias 到 httpclient.ErrXxx，使调用方用 errors.Is 同时兼容两个包的 sentinel。
 var (
-	ErrNotFound       = errors.New("new-api 资源不存在")
-	ErrUnauthorized   = errors.New("new-api 鉴权失败")
-	ErrConflict       = errors.New("new-api 资源冲突")
-	ErrUpstream       = errors.New("new-api 网关异常")
-	ErrPayloadInvalid = errors.New("new-api 返回体无法解析")
+	ErrNotFound       = httpclient.ErrNotFound
+	ErrUnauthorized   = httpclient.ErrUnauthorized
+	ErrConflict       = httpclient.ErrConflict
+	ErrUpstream       = httpclient.ErrUpstream
+	ErrPayloadInvalid = httpclient.ErrPayloadInvalid
 )
 
 // User 描述 new-api 中的 user 实体（仅含 manager 真正用到的字段）。
@@ -158,12 +161,20 @@ type Client struct {
 	AdminToken  string
 	AdminUserID int64
 	HTTPClient  *http.Client
+	// base 持有共用 HTTP 传输，URL 拼接与 sentinel error 由 newapi 层自己映射
+	// （new-api 对 401/403 合并处理，与 httpclient.BaseHTTPClient 默认映射不同）。
+	base *httpclient.BaseHTTPClient
 }
 
 // NewClient 构造 new-api client，未提供 HTTPClient 时使用 http.DefaultClient。
 // adminUserID 必须与 adminToken 所属用户匹配，否则 admin API 返回 "Unauthorized"。
 func NewClient(baseURL, adminToken string, adminUserID int64) *Client {
-	return &Client{BaseURL: baseURL, AdminToken: adminToken, AdminUserID: adminUserID}
+	c := &Client{BaseURL: baseURL, AdminToken: adminToken, AdminUserID: adminUserID}
+	c.base = &httpclient.BaseHTTPClient{
+		BaseURL:   baseURL,
+		AuthToken: adminToken,
+	}
+	return c
 }
 
 func (c *Client) httpClient() *http.Client {
@@ -773,6 +784,9 @@ func (u *UserScopedClient) doOnce(ctx context.Context, method, path string, body
 // executeRequest 发起 HTTP 请求并按状态码做 sentinel error 映射；2xx 时反序列化 target。
 //
 // httpClient 显式传入是为了支持 BootstrapUserAccessToken 这种带 cookie jar 的临时 client。
+//
+// 注意：new-api 对 401 与 403 统一映射到 ErrUnauthorized（httpclient.ErrUnauthorized 的 alias），
+// 与 httpclient.BaseHTTPClient 仅映射 401 的行为略有差异，保持此语义兼容 new-api 的鉴权设计。
 func executeRequest(httpClient *http.Client, req *http.Request, target any) error {
 	resp, err := httpClient.Do(req)
 	if err != nil {
