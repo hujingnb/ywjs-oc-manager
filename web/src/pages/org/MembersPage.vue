@@ -1,37 +1,25 @@
 <template>
   <div style="display: grid; gap: 18px">
     <!-- 成员列表 -->
-    <n-card :bordered="true">
-      <template #header>
-        <div>
-          <p class="eyebrow">{{ orgEyebrow }}</p>
-          <h2 style="margin: 0">成员列表</h2>
-        </div>
+    <DataTableList
+      title="成员列表"
+      :eyebrow="orgEyebrow"
+      :columns="columns"
+      :data="members ?? []"
+      :loading="isLoading"
+      :row-key="(row: Member) => row.id"
+    >
+      <template #toolbar>
+        <n-button v-if="effectiveOrgId" @click="router.push('/members/new')">
+          创建并初始化
+        </n-button>
+        <n-button type="primary" :disabled="!effectiveOrgId" @click="openForm">
+          新增成员
+        </n-button>
       </template>
-      <template #header-extra>
-        <n-space>
-          <n-button v-if="effectiveOrgId" @click="router.push('/members/new')">
-            创建并初始化
-          </n-button>
-          <n-button type="primary" :disabled="!effectiveOrgId" @click="openForm">
-            新增成员
-          </n-button>
-        </n-space>
-      </template>
+    </DataTableList>
 
-      <div v-if="!effectiveOrgId" class="state-text">当前账号未关联组织，无法查看成员。</div>
-      <n-data-table
-        v-else
-        :columns="columns"
-        :data="members ?? []"
-        :loading="isLoading"
-        size="small"
-        :bordered="false"
-        :row-key="(row) => row.id"
-      />
-
-      <p v-if="resetFeedback" class="state-text" :class="{ danger: resetError }">{{ resetFeedback }}</p>
-    </n-card>
+    <p v-if="resetFeedback" class="state-text" :class="{ danger: resetError }">{{ resetFeedback }}</p>
 
     <!-- 创建表单 -->
     <n-card v-if="formVisible" :bordered="true">
@@ -41,7 +29,7 @@
           <n-button quaternary circle @click="formVisible = false">✕</n-button>
         </div>
       </template>
-      <n-form :model="form" label-placement="top" @submit.prevent="onSubmit">
+      <n-form :model="form" label-placement="top" @submit.prevent="submit">
         <n-grid :cols="2" :x-gap="14">
           <n-grid-item>
             <n-form-item label="用户名 *">
@@ -99,11 +87,11 @@
 </template>
 
 <script setup lang="ts">
-import { computed, h, reactive, ref } from 'vue'
+import { computed, ref } from 'vue'
 import { useRouter } from 'vue-router'
 import {
-  NButton, NCard, NDataTable, NForm, NFormItem, NGrid, NGridItem,
-  NInput, NSelect, NSpace, NTag, type DataTableColumns, type SelectOption,
+  NButton, NCard, NForm, NFormItem, NGrid, NGridItem,
+  NInput, NSelect, NSpace, type SelectOption,
 } from 'naive-ui'
 
 import { formatMemberRole, formatMemberStatus } from '@/domain/status'
@@ -112,6 +100,9 @@ import {
   useSetMemberStatus, type MemberFormPayload,
 } from '@/api/hooks/useMembers'
 import ConfirmActionModal from '@/components/ConfirmActionModal.vue'
+import DataTableList from '@/components/DataTableList.vue'
+import { statusColumn, actionColumn } from '@/components/columns'
+import { useFormModal } from '@/composables/useFormModal'
 import type { Member } from '@/api/types'
 import { useAuthStore } from '@/stores/auth'
 
@@ -132,11 +123,10 @@ const resetMutation = useResetMemberPassword()
 const resetFeedback = ref('')
 const resetError = ref(false)
 
-const formVisible = ref(false)
-const submitError = ref<string | null>(null)
-const creating = ref(false)
-const form = reactive<MemberFormPayload>({
-  username: '', display_name: '', password: '', role: 'org_member',
+// 创建成员表单状态聚合到 useFormModal
+const { form, formVisible, creating, submitError, openForm, submit } = useFormModal<MemberFormPayload>({
+  initial: { username: '', display_name: '', password: '', role: 'org_member' },
+  mutation: createMutation,
 })
 
 const roleOptions: SelectOption[] = [
@@ -144,52 +134,20 @@ const roleOptions: SelectOption[] = [
   { label: '组织管理员', value: 'org_admin' },
 ]
 
-function toneToTagType(tone: string): 'success' | 'warning' | 'error' | 'default' {
-  const m: Record<string, 'success' | 'warning' | 'error' | 'default'> = {
-    success: 'success', warning: 'warning', danger: 'error', neutral: 'default',
-  }
-  return m[tone] ?? 'default'
-}
-
-const columns: DataTableColumns<Member> = [
+const columns = [
   { title: '用户名', key: 'username' },
   { title: '姓名', key: 'display_name' },
-  { title: '角色', key: 'role', render: (row) => formatMemberRole(row.role) },
-  {
-    title: '状态', key: 'status',
-    render: (row) => {
-      const v = formatMemberStatus(row.status)
-      return h(NTag, { type: toneToTagType(v.tone), size: 'small', bordered: false }, { default: () => v.label })
-    },
-  },
-  {
-    title: '操作', key: 'actions',
-    render: (row) => h(NSpace, { size: 'small' }, {
-      default: () => [
-        row.status === 'active'
-          ? h(NButton, { size: 'small', onClick: () => onToggle(row, 'disable') }, { default: () => '禁用' })
-          : h(NButton, { size: 'small', type: 'primary', onClick: () => onToggle(row, 'enable') }, { default: () => '启用' }),
-        h(NButton, { size: 'small', onClick: () => openResetForm(row) }, { default: () => '重置密码' }),
-        h(NButton, { size: 'small', type: 'error', onClick: () => { memberToDelete.value = row } }, { default: () => '删除' }),
-      ]
-    }),
-  },
+  // 角色列页面内 render，不抽 factory
+  { title: '角色', key: 'role', render: (row: Member) => formatMemberRole(row.role) },
+  statusColumn<Member>('状态', r => formatMemberStatus(r.status)),
+  // 启用/禁用互斥：用两条 RowAction + hidden 分别渲染
+  actionColumn<Member>([
+    { label: '禁用', onClick: r => onToggle(r, 'disable'), hidden: r => r.status !== 'active' },
+    { label: '启用', type: 'primary', onClick: r => onToggle(r, 'enable'), hidden: r => r.status === 'active' },
+    { label: '重置密码', onClick: r => openResetForm(r) },
+    { label: '删除', type: 'error', onClick: r => { memberToDelete.value = r } },
+  ]),
 ]
-
-function openForm() {
-  formVisible.value = true; submitError.value = null
-  form.username = ''; form.display_name = ''; form.password = ''; form.role = 'org_member'
-}
-
-async function onSubmit() {
-  submitError.value = null; creating.value = true
-  try {
-    await createMutation.mutateAsync({ ...form })
-    formVisible.value = false
-  } catch (err) {
-    submitError.value = err instanceof Error ? err.message : '创建成员失败'
-  } finally { creating.value = false }
-}
 
 function onToggle(member: Member, action: 'enable' | 'disable') {
   statusMutation.mutate({ userId: member.id, action })
@@ -198,7 +156,7 @@ function onToggle(member: Member, action: 'enable' | 'disable') {
 async function onConfirmDelete() {
   if (!memberToDelete.value) return
   try { await deleteMutation.mutateAsync(memberToDelete.value.id) }
-  catch (err) { submitError.value = err instanceof Error ? err.message : '删除成员失败' }
+  catch (err) { console.error('删除成员失败', err) }
   finally { memberToDelete.value = null }
 }
 
