@@ -7,8 +7,10 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"log/slog"
 	"strconv"
 	"strings"
+	"time"
 
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5"
@@ -130,9 +132,17 @@ func (s *OrganizationService) CreateOrganization(ctx context.Context, principal 
 	commit, createdUserID, err := s.provisionNewAPIUser(ctx, &org)
 	if err != nil {
 		orgIDStr := uuidToString(org.ID)
-		// OOS-1：best-effort 调 DeleteUser 清理 new-api 孤儿 user
+		// OOS-1：best-effort 调 DeleteUser 清理 new-api 孤儿 user。
+		// 使用独立的短超时 ctx，避免原 ctx 取消导致清理也被中止。
+		// slog.WarnContext 仍传原 ctx，让 trace_id 自动注入（A-4 SetRequestIDExtractor 已配）。
 		if createdUserID != nil {
-			if delErr := s.provisioner.DeleteUser(ctx, *createdUserID); delErr != nil {
+			cleanupCtx, cleanupCancel := context.WithTimeout(context.Background(), 5*time.Second)
+			defer cleanupCancel()
+			if delErr := s.provisioner.DeleteUser(cleanupCtx, *createdUserID); delErr != nil {
+				slog.WarnContext(ctx, "best-effort 清理 newapi user 失败",
+					"newapi_user_id", *createdUserID,
+					"error", delErr,
+				)
 				// OOS-3：DeleteUser 自身失败也写审计
 				if s.failAuditor != nil {
 					s.failAuditor.RecordNewAPIFailure(ctx, NewAPIFailureContext{
