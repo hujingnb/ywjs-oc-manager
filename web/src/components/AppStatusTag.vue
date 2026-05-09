@@ -1,18 +1,10 @@
 <template>
-  <n-tag :type="nType" size="small" :bordered="false">{{ view.label }}</n-tag>
+  <StatusBadge :view="formatAppStatus(status)" />
 </template>
 
 <script setup lang="ts">
-import { computed } from 'vue'
-import { NTag } from 'naive-ui'
+import StatusBadge from './StatusBadge.vue'
 import { formatAppStatus } from '@/domain/status'
 
-const props = defineProps<{ status: string }>()
-const view = computed(() => formatAppStatus(props.status))
-const nType = computed(() => {
-  const map: Record<string, 'success' | 'warning' | 'error' | 'default'> = {
-    success: 'success', warning: 'warning', danger: 'error', neutral: 'default',
-  }
-  return map[view.value.tone] ?? 'default'
-})
+defineProps<{ status: string }>()
 </script>
