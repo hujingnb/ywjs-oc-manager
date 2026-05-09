@@ -73,7 +73,7 @@ type PersonaInput struct {
 
 // GetCurrent 返回组织当前生效的人设。
 func (s *PersonaService) GetCurrent(ctx context.Context, principal auth.Principal, orgID string) (PersonaResult, error) {
-	if !canViewOrgPersona(principal, orgID) {
+	if !auth.CanViewOrgPersona(principal, orgID) {
 		return PersonaResult{}, ErrPersonaDenied
 	}
 	id, err := parseUUID(orgID)
@@ -92,7 +92,7 @@ func (s *PersonaService) GetCurrent(ctx context.Context, principal auth.Principa
 
 // Replace 写入一条新版本的 persona（旧版本保留）。
 func (s *PersonaService) Replace(ctx context.Context, principal auth.Principal, orgID string, input PersonaInput) (PersonaResult, error) {
-	if !canEditOrgPersona(principal, orgID) {
+	if !auth.CanManageOrgPersona(principal, orgID) {
 		return PersonaResult{}, ErrPersonaDenied
 	}
 	if input.SystemPrompt == "" {
