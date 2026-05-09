@@ -337,22 +337,9 @@ func runManager(ctx context.Context, cfg config.Config, logOut io.Writer) error 
 	})
 	eg.Go(func() error { return pool.Run(gctx) })
 	eg.Go(func() error { return loop.Run(gctx) })
-	// PeriodicReconciler.Run 接收 printf 风格的日志回调；用 slog.Info 适配。
-	eg.Go(func() error {
-		return nodeHealthTask.Run(gctx, func(format string, args ...any) {
-			logger.Info(fmt.Sprintf(format, args...))
-		})
-	})
-	eg.Go(func() error {
-		return runtimeRefreshTask.Run(gctx, func(format string, args ...any) {
-			logger.Info(fmt.Sprintf(format, args...))
-		})
-	})
-	eg.Go(func() error {
-		return healthCheckTask.Run(gctx, func(format string, args ...any) {
-			logger.Info(fmt.Sprintf(format, args...))
-		})
-	})
+	eg.Go(func() error { return nodeHealthTask.Run(gctx, logger) })
+	eg.Go(func() error { return runtimeRefreshTask.Run(gctx, logger) })
+	eg.Go(func() error { return healthCheckTask.Run(gctx, logger) })
 	eg.Go(func() error {
 		<-gctx.Done()
 		shutdownCtx, shutdownCancel := context.WithTimeout(context.Background(), 30*time.Second)

@@ -3,6 +3,7 @@ package service
 import (
 	"context"
 	"fmt"
+	"log/slog"
 	"time"
 
 	"github.com/jackc/pgx/v5/pgtype"
@@ -112,8 +113,8 @@ func NewPeriodicReconciler(name string, interval time.Duration, fn func(ctx cont
 	return &PeriodicReconciler{name: name, interval: interval, fn: fn}
 }
 
-// Run 在 ctx 取消之前周期触发 fn。任何错误只输出到默认 logger，不阻断后续轮询。
-func (p *PeriodicReconciler) Run(ctx context.Context, logger func(format string, args ...any)) error {
+// Run 在 ctx 取消之前周期触发 fn。任何错误只输出到 logger，不阻断后续轮询。
+func (p *PeriodicReconciler) Run(ctx context.Context, logger *slog.Logger) error {
 	if p.fn == nil {
 		return fmt.Errorf("reconciler %s 未配置 fn", p.name)
 	}
@@ -124,8 +125,11 @@ func (p *PeriodicReconciler) Run(ctx context.Context, logger func(format string,
 		case <-ctx.Done():
 			return nil
 		case <-ticker.C:
-			if err := p.fn(ctx); err != nil && logger != nil {
-				logger("%s 失败: %v", p.name, err)
+			if err := p.fn(ctx); err != nil {
+				logger.ErrorContext(ctx, "reconciler tick 失败",
+					"name", p.name,
+					"error", err,
+				)
 			}
 		}
 	}
