@@ -218,6 +218,8 @@ func TestRuntimeOperationMembersCanOnlyTriggerOwnApp(t *testing.T) {
 type runtimeOperationStub struct {
 	t            *testing.T
 	app          sqlc.App
+	// userStatus 控制 GetUser 返回的用户状态；默认为 active。
+	userStatus   string
 	lastJobType  string
 	auditWritten bool
 }
@@ -231,7 +233,7 @@ func newRuntimeOperationStub(t *testing.T) *runtimeOperationStub {
 		PersonaMode:  domain.PersonaModeOrgInherited,
 		ApiKeyStatus: domain.APIKeyStatusActive,
 	}
-	return &runtimeOperationStub{t: t, app: app}
+	return &runtimeOperationStub{t: t, app: app, userStatus: domain.StatusActive}
 }
 
 func (s *runtimeOperationStub) GetApp(_ context.Context, id pgtype.UUID) (sqlc.App, error) {
@@ -239,6 +241,10 @@ func (s *runtimeOperationStub) GetApp(_ context.Context, id pgtype.UUID) (sqlc.A
 		return sqlc.App{}, fakeNotFound
 	}
 	return s.app, nil
+}
+
+func (s *runtimeOperationStub) GetUser(_ context.Context, _ pgtype.UUID) (sqlc.User, error) {
+	return sqlc.User{Status: s.userStatus}, nil
 }
 
 func (s *runtimeOperationStub) CreateJob(_ context.Context, arg sqlc.CreateJobParams) (sqlc.Job, error) {
@@ -279,4 +285,29 @@ type fakeNotifier struct {
 func (f *fakeNotifier) Enqueue(_ context.Context, jobID string) error {
 	f.lastJobID = jobID
 	return f.err
+}
+
+func TestTrigger_DisabledPrincipal_Denied(t *testing.T) {
+	store := newRuntimeOperationStub(t)
+	// 将主体状态设为 disabled，模拟账号被封禁后 token 仍未过期的场景。
+	store.userStatus = domain.StatusDisabled
+	svc := NewRuntimeOperationService(store)
+
+	_, err := svc.Trigger(context.Background(), platformAdmin(), testRuntimeOpAppID, RuntimeOperationStart)
+	if !errors.Is(err, ErrRuntimeOperationDenied) {
+		t.Fatalf("disabled 账号应被拒绝，got err = %v", err)
+	}
+}
+
+func TestRequestInitialize_DisabledPrincipal_Denied(t *testing.T) {
+	store := newRuntimeOperationStub(t)
+	store.app.Status = domain.AppStatusError
+	// 将主体状态设为 disabled，验证 RequestInitialize 同样拒绝被禁用账号。
+	store.userStatus = domain.StatusDisabled
+	svc := NewRuntimeOperationService(store)
+
+	_, err := svc.RequestInitialize(context.Background(), platformAdmin(), testRuntimeOpAppID)
+	if !errors.Is(err, ErrRuntimeOperationDenied) {
+		t.Fatalf("disabled 账号应被拒绝，got err = %v", err)
+	}
 }

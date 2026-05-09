@@ -24,6 +24,7 @@ var (
 // RuntimeOperationStore 抽象 service 需要的查询能力。
 type RuntimeOperationStore interface {
 	GetApp(ctx context.Context, id pgtype.UUID) (sqlc.App, error)
+	GetUser(ctx context.Context, id pgtype.UUID) (sqlc.User, error)
 	SetAppStatus(ctx context.Context, arg sqlc.SetAppStatusParams) (sqlc.App, error)
 	SetAppNewAPIKey(ctx context.Context, arg sqlc.SetAppNewAPIKeyParams) (sqlc.App, error)
 	SetAppContainer(ctx context.Context, arg sqlc.SetAppContainerParams) (sqlc.App, error)
@@ -208,6 +209,9 @@ func (s *RuntimeOperationService) Trigger(ctx context.Context, principal auth.Pr
 	if err != nil {
 		return RuntimeOperationResult{}, fmt.Errorf("查询应用失败: %w", err)
 	}
+	if err := s.ensurePrincipalActive(ctx, principal); err != nil {
+		return RuntimeOperationResult{}, err
+	}
 	if !auth.CanTriggerRuntimeOperation(principal, uuidToString(app.OrgID), uuidToString(app.OwnerUserID)) {
 		return RuntimeOperationResult{}, ErrRuntimeOperationDenied
 	}
@@ -280,6 +284,9 @@ func (s *RuntimeOperationService) RequestInitialize(ctx context.Context, princip
 	if err != nil {
 		return RuntimeOperationResult{}, fmt.Errorf("查询应用失败: %w", err)
 	}
+	if err := s.ensurePrincipalActive(ctx, principal); err != nil {
+		return RuntimeOperationResult{}, err
+	}
 	if !auth.CanTriggerRuntimeOperation(principal, uuidToString(app.OrgID), uuidToString(app.OwnerUserID)) {
 		return RuntimeOperationResult{}, ErrRuntimeOperationDenied
 	}
@@ -341,6 +348,27 @@ func (s *RuntimeOperationService) RequestInitialize(ctx context.Context, princip
 		_ = s.notifier.Enqueue(ctx, uuidToString(job.ID))
 	}
 	return RuntimeOperationResult{JobID: uuidToString(job.ID), Operation: "initialize"}, nil
+}
+
+// ensurePrincipalActive 校验主体当前未被禁用。
+// runtime 操作风险高，被禁用账号即使 token 未过期也不得触发；
+// disabled 检查与角色/归属判断分离，便于未来对其他高风险操作复用。
+func (s *RuntimeOperationService) ensurePrincipalActive(ctx context.Context, principal auth.Principal) error {
+	id, err := parseUUID(principal.UserID)
+	if err != nil {
+		return ErrRuntimeOperationDenied
+	}
+	user, err := s.store.GetUser(ctx, id)
+	if errors.Is(err, pgx.ErrNoRows) {
+		return ErrRuntimeOperationDenied
+	}
+	if err != nil {
+		return fmt.Errorf("查询主体状态失败: %w", err)
+	}
+	if user.Status == domain.StatusDisabled {
+		return ErrRuntimeOperationDenied
+	}
+	return nil
 }
 
 func isSupportedOperation(op RuntimeOperation) bool {
