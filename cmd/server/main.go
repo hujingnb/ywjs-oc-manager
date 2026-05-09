@@ -1,3 +1,14 @@
+// Package main 是 manager-api HTTP 服务入口。
+//
+// @title           OpenClaw Manager API
+// @version         1.0
+// @description     OpenClaw 多组织管理后台 API。
+// @BasePath        /api/v1
+//
+// @securityDefinitions.apikey BearerAuth
+// @in              header
+// @name            Authorization
+// @description     登录后获得的 JWT access token，前缀 "Bearer "。
 package main
 
 import (

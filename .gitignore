@@ -19,3 +19,10 @@ web/test-results/
 
 config/manager.yaml
 config/agent.yaml
+
+# swag 中间产物（仅 openapi/openapi.yaml 是契约源；docs.go 与 swagger.json 不入仓）
+docs.go
+docs/swagger.json
+docs/swagger.yaml
+docs/docs.go
+openapi/swagger.yaml

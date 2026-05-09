@@ -1,4 +1,7 @@
-.PHONY: dev-up dev-down test vet build sqlc-generate migrate-up migrate-down check-compose logs web-test web-typecheck web-build build-openclaw-runtime verify-openclaw-runtime sync-openclaw-runtime-image debug-ollama debug-newapi newapi-probe seed-e2e smoke-v102
+.PHONY: dev-up dev-down test vet build sqlc-generate migrate-up migrate-down check-compose logs web-test web-typecheck web-build build-openclaw-runtime verify-openclaw-runtime sync-openclaw-runtime-image debug-ollama debug-newapi newapi-probe seed-e2e smoke-v102 openapi-gen web-types-gen openapi-check
+
+SWAG_VERSION := v2.0.0-rc5
+OPENAPI_TS_VERSION := 7.13.0
 
 dev-up:
 	docker compose up -d
@@ -72,3 +75,23 @@ seed-e2e:
 
 smoke-v102:  ## 跑 v1.0.2 干净环境 smoke（前置：阶段 0 完成）
 	@bash scripts/v102-smoke.sh
+
+.PHONY: openapi-gen
+openapi-gen: ## 后端注解扫描，覆盖 openapi/openapi.yaml
+	go run github.com/swaggo/swag/v2/cmd/swag@$(SWAG_VERSION) init \
+		--generalInfo main.go \
+		--dir cmd/server,internal/api/handlers,internal/service,internal/domain \
+		--output openapi \
+		--outputTypes yaml \
+		--v3.1
+	@mv openapi/swagger.yaml openapi/openapi.yaml
+
+.PHONY: web-types-gen
+web-types-gen: ## 前端从 yaml 生成 TypeScript 类型
+	cd web && npx openapi-typescript@$(OPENAPI_TS_VERSION) ../openapi/openapi.yaml -o src/api/generated.ts
+
+.PHONY: openapi-check
+openapi-check: openapi-gen ## 校验 yaml 是否与代码同步（git 工作区干净才过）
+	@git diff --exit-code openapi/openapi.yaml \
+		|| (echo "❌ openapi/openapi.yaml 与代码不同步，请跑 make openapi-gen 并 commit"; exit 1)
+	@echo "✅ openapi.yaml 与代码同步"

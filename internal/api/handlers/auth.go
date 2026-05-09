@@ -44,6 +44,17 @@ func RegisterAuthRoutes(router gin.IRouter, handler *AuthHandler) {
 }
 
 // Login 处理用户名密码登录。
+//
+// @Summary      登录
+// @Description  返回 access_token + refresh_token + 用户信息快照
+// @Tags         auth
+// @Accept       json
+// @Produce      json
+// @Param        body  body      LoginRequest           true  "登录请求"
+// @Success      200   {object}  service.LoginResult
+// @Failure      400   {object}  ErrorResponse
+// @Failure      401   {object}  ErrorResponse
+// @Router       /auth/login [post]
 func (h *AuthHandler) Login(c *gin.Context) {
 	var req LoginRequest
 	if err := c.ShouldBindJSON(&req); err != nil {
@@ -63,6 +74,17 @@ func (h *AuthHandler) Login(c *gin.Context) {
 }
 
 // Refresh 使用 refresh token 续期，并轮换 refresh token。
+//
+// @Summary      刷新令牌
+// @Description  使用 refresh_token 换取新的 access_token + refresh_token
+// @Tags         auth
+// @Accept       json
+// @Produce      json
+// @Param        body  body      RefreshRequest         true  "刷新请求"
+// @Success      200   {object}  service.LoginResult
+// @Failure      400   {object}  ErrorResponse
+// @Failure      401   {object}  ErrorResponse
+// @Router       /auth/refresh [post]
 func (h *AuthHandler) Refresh(c *gin.Context) {
 	var req RefreshRequest
 	if err := c.ShouldBindJSON(&req); err != nil {
@@ -95,6 +117,17 @@ func setCSRFCookie(c *gin.Context, accessToken string) {
 }
 
 // Logout 撤销 refresh token。
+//
+// @Summary      登出
+// @Description  撤销 refresh_token，使其不可再续期
+// @Tags         auth
+// @Accept       json
+// @Produce      json
+// @Param        body  body  RefreshRequest  true  "包含 refresh_token 的请求体"
+// @Success      204
+// @Failure      400  {object}  ErrorResponse
+// @Failure      401  {object}  ErrorResponse
+// @Router       /auth/logout [post]
 func (h *AuthHandler) Logout(c *gin.Context) {
 	var req RefreshRequest
 	if err := c.ShouldBindJSON(&req); err != nil {
@@ -109,6 +142,15 @@ func (h *AuthHandler) Logout(c *gin.Context) {
 }
 
 // Me 返回当前 access token 对应的用户信息。
+//
+// @Summary      当前用户信息
+// @Description  返回当前 access token 对应的用户档案
+// @Tags         auth
+// @Produce      json
+// @Security     BearerAuth
+// @Success      200  {object}  map[string]service.AuthUser
+// @Failure      401  {object}  ErrorResponse
+// @Router       /auth/me [get]
 func (h *AuthHandler) Me(c *gin.Context) {
 	token, ok := bearerToken(c.GetHeader("Authorization"))
 	if !ok {

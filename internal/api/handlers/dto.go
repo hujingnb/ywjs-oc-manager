@@ -3,6 +3,11 @@
 // 字段定义、json tag、binding tag 与原非导出版本保持 1:1，业务逻辑不变。
 package handlers
 
+// ErrorResponse 统一错误返回体，所有 handler 错误响应均使用此结构。
+type ErrorResponse struct {
+	Error string `json:"error"`
+}
+
 // ===== 认证 auth =====
 
 // LoginRequest 用户名密码登录的请求体。

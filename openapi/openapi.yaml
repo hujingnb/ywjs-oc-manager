@@ -1,1367 +1,538 @@
-openapi: 3.0.3
-info:
-  title: OpenClaw Manager API
-  version: 0.1.0
-  description: OpenClaw Manager 后端 API 契约基线。
-servers:
-  - url: http://localhost:8080
-paths:
-  /healthz:
-    get:
-      summary: 健康检查
-      operationId: getHealthz
-      responses:
-        "200":
-          description: 服务运行正常。
-          content:
-            application/json:
-              schema:
-                $ref: "#/components/schemas/HealthResponse"
-  /api/v1/auth/login:
-    post:
-      summary: 用户登录
-      operationId: login
-      requestBody:
-        required: true
-        content:
-          application/json:
-            schema:
-              $ref: "#/components/schemas/LoginRequest"
-      responses:
-        "200":
-          description: 登录成功，返回用户信息和 token pair。
-          content:
-            application/json:
-              schema:
-                $ref: "#/components/schemas/LoginResponse"
-        "400":
-          description: 请求参数不完整。
-          content:
-            application/json:
-              schema:
-                $ref: "#/components/schemas/ErrorResponse"
-        "401":
-          description: 用户名或密码错误。
-          content:
-            application/json:
-              schema:
-                $ref: "#/components/schemas/ErrorResponse"
-  /api/v1/auth/refresh:
-    post:
-      summary: 刷新登录凭证
-      operationId: refreshToken
-      requestBody:
-        required: true
-        content:
-          application/json:
-            schema:
-              $ref: "#/components/schemas/RefreshRequest"
-      responses:
-        "200":
-          description: 刷新成功，返回新的 token pair。
-          content:
-            application/json:
-              schema:
-                $ref: "#/components/schemas/LoginResponse"
-        "401":
-          description: refresh token 无效、已撤销或已过期。
-          content:
-            application/json:
-              schema:
-                $ref: "#/components/schemas/ErrorResponse"
-  /api/v1/auth/logout:
-    post:
-      summary: 退出登录
-      operationId: logout
-      requestBody:
-        required: true
-        content:
-          application/json:
-            schema:
-              $ref: "#/components/schemas/RefreshRequest"
-      responses:
-        "204":
-          description: refresh token 已撤销或原本不存在。
-        "400":
-          description: 请求参数不完整。
-          content:
-            application/json:
-              schema:
-                $ref: "#/components/schemas/ErrorResponse"
-  /api/v1/auth/me:
-    get:
-      summary: 获取当前登录用户
-      operationId: getCurrentUser
-      security:
-        - bearerAuth: []
-      responses:
-        "200":
-          description: 当前登录用户信息。
-          content:
-            application/json:
-              schema:
-                $ref: "#/components/schemas/CurrentUserResponse"
-        "401":
-          description: 未登录或访问令牌无效。
-          content:
-            application/json:
-              schema:
-                $ref: "#/components/schemas/ErrorResponse"
-  /api/v1/organizations:
-    get:
-      summary: 查询组织列表
-      operationId: listOrganizations
-      security:
-        - bearerAuth: []
-      parameters:
-        - name: limit
-          in: query
-          schema:
-            type: integer
-            default: 50
-        - name: offset
-          in: query
-          schema:
-            type: integer
-            default: 0
-      responses:
-        "200":
-          description: 组织列表。
-          content:
-            application/json:
-              schema:
-                $ref: "#/components/schemas/OrganizationListResponse"
-        "403":
-          description: 无权访问组织列表。
-          content:
-            application/json:
-              schema:
-                $ref: "#/components/schemas/ErrorResponse"
-    post:
-      summary: 创建组织
-      operationId: createOrganization
-      security:
-        - bearerAuth: []
-      requestBody:
-        required: true
-        content:
-          application/json:
-            schema:
-              $ref: "#/components/schemas/OrganizationRequest"
-      responses:
-        "201":
-          description: 组织创建成功。
-          content:
-            application/json:
-              schema:
-                $ref: "#/components/schemas/OrganizationResponse"
-        "400":
-          description: 请求参数不完整。
-          content:
-            application/json:
-              schema:
-                $ref: "#/components/schemas/ErrorResponse"
-        "403":
-          description: 无权创建组织。
-          content:
-            application/json:
-              schema:
-                $ref: "#/components/schemas/ErrorResponse"
-  /api/v1/organizations/{orgId}:
-    get:
-      summary: 获取组织详情
-      operationId: getOrganization
-      security:
-        - bearerAuth: []
-      parameters:
-        - $ref: "#/components/parameters/OrgId"
-      responses:
-        "200":
-          description: 组织详情。
-          content:
-            application/json:
-              schema:
-                $ref: "#/components/schemas/OrganizationResponse"
-        "403":
-          description: 无权访问该组织。
-          content:
-            application/json:
-              schema:
-                $ref: "#/components/schemas/ErrorResponse"
-        "404":
-          description: 组织不存在。
-          content:
-            application/json:
-              schema:
-                $ref: "#/components/schemas/ErrorResponse"
-    patch:
-      summary: 更新组织资料
-      operationId: updateOrganization
-      security:
-        - bearerAuth: []
-      parameters:
-        - $ref: "#/components/parameters/OrgId"
-      requestBody:
-        required: true
-        content:
-          application/json:
-            schema:
-              $ref: "#/components/schemas/OrganizationRequest"
-      responses:
-        "200":
-          description: 组织资料已更新。
-          content:
-            application/json:
-              schema:
-                $ref: "#/components/schemas/OrganizationResponse"
-        "403":
-          description: 无权更新组织。
-          content:
-            application/json:
-              schema:
-                $ref: "#/components/schemas/ErrorResponse"
-        "404":
-          description: 组织不存在。
-          content:
-            application/json:
-              schema:
-                $ref: "#/components/schemas/ErrorResponse"
-  /api/v1/organizations/{orgId}/disable:
-    post:
-      summary: 禁用组织
-      operationId: disableOrganization
-      security:
-        - bearerAuth: []
-      parameters:
-        - $ref: "#/components/parameters/OrgId"
-      responses:
-        "200":
-          description: 组织已禁用。
-          content:
-            application/json:
-              schema:
-                $ref: "#/components/schemas/OrganizationResponse"
-  /api/v1/organizations/{orgId}/enable:
-    post:
-      summary: 启用组织
-      operationId: enableOrganization
-      security:
-        - bearerAuth: []
-      parameters:
-        - $ref: "#/components/parameters/OrgId"
-      responses:
-        "200":
-          description: 组织已启用。
-          content:
-            application/json:
-              schema:
-                $ref: "#/components/schemas/OrganizationResponse"
-  /api/v1/organizations/{orgId}/members:
-    get:
-      summary: 列出组织成员
-      operationId: listMembers
-      security:
-        - bearerAuth: []
-      parameters:
-        - $ref: "#/components/parameters/OrgId"
-        - name: limit
-          in: query
-          schema:
-            type: integer
-            default: 50
-        - name: offset
-          in: query
-          schema:
-            type: integer
-            default: 0
-      responses:
-        "200":
-          description: 成员列表。
-          content:
-            application/json:
-              schema:
-                $ref: "#/components/schemas/MemberListResponse"
-        "403":
-          description: 无权访问该组织。
-          content:
-            application/json:
-              schema:
-                $ref: "#/components/schemas/ErrorResponse"
-    post:
-      summary: 创建组织成员
-      operationId: createMember
-      security:
-        - bearerAuth: []
-      parameters:
-        - $ref: "#/components/parameters/OrgId"
-      requestBody:
-        required: true
-        content:
-          application/json:
-            schema:
-              $ref: "#/components/schemas/MemberCreateRequest"
-      responses:
-        "201":
-          description: 成员创建成功。
-          content:
-            application/json:
-              schema:
-                $ref: "#/components/schemas/MemberResponse"
-        "400":
-          description: 请求参数不合法。
-          content:
-            application/json:
-              schema:
-                $ref: "#/components/schemas/ErrorResponse"
-        "403":
-          description: 无权创建成员。
-          content:
-            application/json:
-              schema:
-                $ref: "#/components/schemas/ErrorResponse"
-  /api/v1/members/{userId}:
-    get:
-      summary: 获取成员详情
-      operationId: getMember
-      security:
-        - bearerAuth: []
-      parameters:
-        - $ref: "#/components/parameters/UserId"
-      responses:
-        "200":
-          description: 成员详情。
-          content:
-            application/json:
-              schema:
-                $ref: "#/components/schemas/MemberResponse"
-        "403":
-          description: 无权访问该成员。
-          content:
-            application/json:
-              schema:
-                $ref: "#/components/schemas/ErrorResponse"
-        "404":
-          description: 成员不存在。
-          content:
-            application/json:
-              schema:
-                $ref: "#/components/schemas/ErrorResponse"
-    patch:
-      summary: 更新成员资料
-      operationId: updateMember
-      security:
-        - bearerAuth: []
-      parameters:
-        - $ref: "#/components/parameters/UserId"
-      requestBody:
-        required: true
-        content:
-          application/json:
-            schema:
-              $ref: "#/components/schemas/MemberUpdateRequest"
-      responses:
-        "200":
-          description: 成员资料已更新。
-          content:
-            application/json:
-              schema:
-                $ref: "#/components/schemas/MemberResponse"
-  /api/v1/members/{userId}/disable:
-    post:
-      summary: 禁用成员
-      operationId: disableMember
-      security:
-        - bearerAuth: []
-      parameters:
-        - $ref: "#/components/parameters/UserId"
-      responses:
-        "200":
-          description: 成员已禁用。
-          content:
-            application/json:
-              schema:
-                $ref: "#/components/schemas/MemberResponse"
-  /api/v1/members/{userId}/enable:
-    post:
-      summary: 启用成员
-      operationId: enableMember
-      security:
-        - bearerAuth: []
-      parameters:
-        - $ref: "#/components/parameters/UserId"
-      responses:
-        "200":
-          description: 成员已启用。
-          content:
-            application/json:
-              schema:
-                $ref: "#/components/schemas/MemberResponse"
-  /api/v1/members/{userId}/password:
-    post:
-      summary: 由管理员重置成员密码
-      operationId: resetMemberPassword
-      security:
-        - bearerAuth: []
-      parameters:
-        - $ref: "#/components/parameters/UserId"
-      requestBody:
-        required: true
-        content:
-          application/json:
-            schema:
-              $ref: "#/components/schemas/PasswordResetRequest"
-      responses:
-        "204":
-          description: 密码已重置。
-        "400":
-          description: 请求参数不完整。
-          content:
-            application/json:
-              schema:
-                $ref: "#/components/schemas/ErrorResponse"
-        "403":
-          description: 无权重置该成员密码。
-          content:
-            application/json:
-              schema:
-                $ref: "#/components/schemas/ErrorResponse"
-  /api/v1/organizations/{orgId}/audit-logs:
-    get:
-      summary: 列出组织审计日志
-      operationId: listOrgAuditLogs
-      security:
-        - bearerAuth: []
-      parameters:
-        - $ref: "#/components/parameters/OrgId"
-        - name: limit
-          in: query
-          schema:
-            type: integer
-            default: 50
-        - name: offset
-          in: query
-          schema:
-            type: integer
-            default: 0
-      responses:
-        "200":
-          description: 审计日志列表。
-          content:
-            application/json:
-              schema:
-                $ref: "#/components/schemas/AuditLogListResponse"
-  /api/v1/runtime-nodes:
-    get:
-      summary: 列出 runtime 节点
-      operationId: listRuntimeNodes
-      security:
-        - bearerAuth: []
-      parameters:
-        - name: limit
-          in: query
-          schema:
-            type: integer
-            default: 50
-        - name: offset
-          in: query
-          schema:
-            type: integer
-            default: 0
-      responses:
-        "200":
-          description: runtime 节点列表。
-          content:
-            application/json:
-              schema:
-                $ref: "#/components/schemas/RuntimeNodeListResponse"
-    post:
-      summary: 注册 runtime 节点并发放 bootstrap token
-      operationId: createRuntimeNode
-      security:
-        - bearerAuth: []
-      requestBody:
-        required: true
-        content:
-          application/json:
-            schema:
-              $ref: "#/components/schemas/RuntimeNodeCreateRequest"
-      responses:
-        "201":
-          description: 节点已创建。
-          content:
-            application/json:
-              schema:
-                $ref: "#/components/schemas/RuntimeNodeResponse"
-  /api/v1/runtime-nodes/{nodeId}:
-    get:
-      summary: 获取节点详情
-      operationId: getRuntimeNode
-      security:
-        - bearerAuth: []
-      parameters:
-        - $ref: "#/components/parameters/NodeId"
-      responses:
-        "200":
-          description: 节点详情。
-          content:
-            application/json:
-              schema:
-                $ref: "#/components/schemas/RuntimeNodeResponse"
-  /api/v1/runtime-nodes/{nodeId}/rotate-bootstrap:
-    post:
-      summary: 轮换 bootstrap token
-      operationId: rotateRuntimeNodeBootstrap
-      security:
-        - bearerAuth: []
-      parameters:
-        - $ref: "#/components/parameters/NodeId"
-      responses:
-        "200":
-          description: bootstrap token 已重新发放。
-          content:
-            application/json:
-              schema:
-                $ref: "#/components/schemas/RuntimeNodeResponse"
-        "409":
-          description: 节点处于 active 状态，需先禁用再轮换。
-          content:
-            application/json:
-              schema:
-                $ref: "#/components/schemas/ErrorResponse"
-  /api/v1/runtime-nodes/{nodeId}/disable:
-    post:
-      summary: 禁用 runtime 节点
-      operationId: disableRuntimeNode
-      security:
-        - bearerAuth: []
-      parameters:
-        - $ref: "#/components/parameters/NodeId"
-      responses:
-        "200":
-          description: 节点已禁用。
-          content:
-            application/json:
-              schema:
-                $ref: "#/components/schemas/RuntimeNodeResponse"
-  /api/v1/runtime-nodes/{nodeId}/enable:
-    post:
-      summary: 启用 runtime 节点
-      operationId: enableRuntimeNode
-      security:
-        - bearerAuth: []
-      parameters:
-        - $ref: "#/components/parameters/NodeId"
-      responses:
-        "200":
-          description: 节点已启用。
-          content:
-            application/json:
-              schema:
-                $ref: "#/components/schemas/RuntimeNodeResponse"
-  /api/v1/agent/register:
-    post:
-      summary: agent 用 bootstrap token 注册
-      operationId: agentRegister
-      requestBody:
-        required: true
-        content:
-          application/json:
-            schema:
-              $ref: "#/components/schemas/AgentRegisterRequest"
-      responses:
-        "200":
-          description: 注册成功，返回 agent token。
-          content:
-            application/json:
-              schema:
-                $ref: "#/components/schemas/AgentRegisterResponse"
-        "401":
-          description: bootstrap token 无效或已过期。
-          content:
-            application/json:
-              schema:
-                $ref: "#/components/schemas/ErrorResponse"
-  /api/v1/agent/heartbeat:
-    post:
-      summary: agent 心跳
-      operationId: agentHeartbeat
-      requestBody:
-        required: true
-        content:
-          application/json:
-            schema:
-              $ref: "#/components/schemas/AgentHeartbeatRequest"
-      responses:
-        "200":
-          description: 心跳已记录。
-          content:
-            application/json:
-              schema:
-                $ref: "#/components/schemas/RuntimeNodeResponse"
-        "401":
-          description: agent token 无效或节点已禁用。
-          content:
-            application/json:
-              schema:
-                $ref: "#/components/schemas/ErrorResponse"
-  /api/v1/audit-logs:
-    get:
-      summary: 按目标资源列出审计日志
-      operationId: listTargetAuditLogs
-      security:
-        - bearerAuth: []
-      parameters:
-        - name: target_type
-          in: query
-          required: true
-          schema:
-            type: string
-        - name: target_id
-          in: query
-          required: true
-          schema:
-            type: string
-        - name: limit
-          in: query
-          schema:
-            type: integer
-            default: 50
-        - name: offset
-          in: query
-          schema:
-            type: integer
-            default: 0
-      responses:
-        "200":
-          description: 审计日志列表。
-          content:
-            application/json:
-              schema:
-                $ref: "#/components/schemas/AuditLogListResponse"
-
-  /api/v1/members/{userId}:
-    delete:
-      summary: 删除成员（联动其名下应用软删 + app_delete 入队）
-      operationId: deleteMember
-      security:
-        - bearerAuth: []
-      parameters:
-        - name: userId
-          in: path
-          required: true
-          schema: { type: string }
-      responses:
-        "204":
-          description: 成员已禁用，应用删除任务已入队。
-
-  /api/v1/orgs/{orgId}/persona:
-    get:
-      summary: 查询组织当前生效的 AI 人设
-      operationId: getOrgPersona
-      security:
-        - bearerAuth: []
-      parameters:
-        - name: orgId
-          in: path
-          required: true
-          schema: { type: string }
-      responses:
-        "200":
-          description: 当前生效人设。
-          content:
-            application/json:
-              schema:
-                type: object
-                properties:
-                  persona:
-                    $ref: "#/components/schemas/OrgPersona"
-        "404":
-          description: 尚未配置。
-    put:
-      summary: 写入新版本人设（旧版本保留）
-      operationId: putOrgPersona
-      security:
-        - bearerAuth: []
-      parameters:
-        - name: orgId
-          in: path
-          required: true
-          schema: { type: string }
-      requestBody:
-        required: true
-        content:
-          application/json:
-            schema:
-              $ref: "#/components/schemas/OrgPersonaInput"
-      responses:
-        "200":
-          description: 已写入新版本。
-          content:
-            application/json:
-              schema:
-                type: object
-                properties:
-                  persona:
-                    $ref: "#/components/schemas/OrgPersona"
-
-  /api/v1/organizations/{orgId}/recharge:
-    post:
-      summary: 给组织充值
-      operationId: rechargeOrg
-      security:
-        - bearerAuth: []
-      parameters:
-        - name: orgId
-          in: path
-          required: true
-          schema: { type: string }
-      requestBody:
-        required: true
-        content:
-          application/json:
-            schema:
-              type: object
-              required: [credit_amount]
-              properties:
-                credit_amount: { type: integer }
-                remark: { type: string }
-      responses:
-        "200":
-          description: 充值成功记录。
-        "502":
-          description: new-api 上游错误（仍写 failed 记录）。
-
-  /api/v1/organizations/{orgId}/recharges:
-    get:
-      summary: 列出组织充值历史
-      operationId: listRecharges
-      security:
-        - bearerAuth: []
-      parameters:
-        - name: orgId
-          in: path
-          required: true
-          schema: { type: string }
-      responses:
-        "200":
-          description: 充值记录列表。
-
-  /api/v1/organizations/{orgId}/balance:
-    get:
-      summary: 查询组织当前余额（透传 new-api）
-      operationId: getOrgBalance
-      security:
-        - bearerAuth: []
-      parameters:
-        - name: orgId
-          in: path
-          required: true
-          schema: { type: string }
-      responses:
-        "200":
-          description: 当前余额。
-
-  /api/v1/apps/{appId}:
-    get:
-      summary: 应用详情
-      operationId: getApp
-      security:
-        - bearerAuth: []
-      parameters:
-        - name: appId
-          in: path
-          required: true
-          schema: { type: string }
-      responses:
-        "200":
-          description: 应用详情。
-
-  /api/v1/apps/{appId}/initialize:
-    post:
-      summary: 重新触发初始化（仅 status ∈ {error, draft}）
-      operationId: initializeApp
-      security:
-        - bearerAuth: []
-      parameters:
-        - name: appId
-          in: path
-          required: true
-          schema: { type: string }
-      responses:
-        "202":
-          description: 初始化任务已入队。
-        "409":
-          description: 当前状态不允许重新初始化。
-
-  /api/v1/apps/{appId}/runtime:
-    get:
-      summary: 透传容器 inspect
-      operationId: getAppRuntime
-      security:
-        - bearerAuth: []
-      parameters:
-        - name: appId
-          in: path
-          required: true
-          schema: { type: string }
-      responses:
-        "200":
-          description: 运行时视图。
-
-  /api/v1/apps/{appId}/runtime/start:
-    post:
-      summary: 启动应用容器
-      operationId: startApp
-      security:
-        - bearerAuth: []
-      parameters:
-        - name: appId
-          in: path
-          required: true
-          schema: { type: string }
-      responses:
-        "202":
-          description: 启动任务已入队。
-
-  /api/v1/apps/{appId}/runtime/stop:
-    post:
-      summary: 停止应用容器
-      operationId: stopApp
-      security:
-        - bearerAuth: []
-      parameters:
-        - name: appId
-          in: path
-          required: true
-          schema: { type: string }
-      responses:
-        "202":
-          description: 停止任务已入队。
-
-  /api/v1/apps/{appId}/runtime/restart:
-    post:
-      summary: 重启应用容器
-      operationId: restartApp
-      security:
-        - bearerAuth: []
-      parameters:
-        - name: appId
-          in: path
-          required: true
-          schema: { type: string }
-      responses:
-        "202":
-          description: 重启任务已入队。
-
-  /api/v1/apps/{appId}/runtime/delete:
-    post:
-      summary: 删除应用（容器 + api_key + 工作目录回收）
-      operationId: deleteApp
-      security:
-        - bearerAuth: []
-      parameters:
-        - name: appId
-          in: path
-          required: true
-          schema: { type: string }
-      responses:
-        "202":
-          description: 删除任务已入队。
-
-  /api/v1/usage/members/{userId}:
-    get:
-      summary: 单个成员名下应用的用量聚合
-      operationId: getMemberUsage
-      security:
-        - bearerAuth: []
-      parameters:
-        - name: userId
-          in: path
-          required: true
-          schema: { type: string }
-        - name: org_id
-          in: query
-          required: true
-          schema: { type: string }
-      responses:
-        "200":
-          description: 聚合用量。
-
-  /api/v1/usage/organizations/{orgId}:
-    get:
-      summary: 组织维度的用量聚合
-      operationId: getOrgUsage
-      security:
-        - bearerAuth: []
-      parameters:
-        - name: orgId
-          in: path
-          required: true
-          schema: { type: string }
-      responses:
-        "200":
-          description: 聚合用量。
-
-  /api/v1/usage/platform:
-    get:
-      summary: 平台维度的用量聚合（仅 platform_admin）
-      operationId: getPlatformUsage
-      security:
-        - bearerAuth: []
-      responses:
-        "200":
-          description: 聚合用量。
-
 components:
-  parameters:
-    OrgId:
-      name: orgId
-      in: path
-      required: true
-      schema:
-        type: string
-    UserId:
-      name: userId
-      in: path
-      required: true
-      schema:
-        type: string
-    NodeId:
-      name: nodeId
-      in: path
-      required: true
-      schema:
-        type: string
-  securitySchemes:
-    bearerAuth:
-      type: http
-      scheme: bearer
-      bearerFormat: JWT
   schemas:
-    OrgPersona:
-      type: object
-      required:
-        - org_id
-        - system_prompt
-        - allow_member_override
-        - version
+    handlers.ErrorResponse:
       properties:
-        org_id: { type: string }
-        system_prompt: { type: string }
-        conversation_rules: { type: string }
-        forbidden_rules: { type: string }
-        reply_style: { type: string }
-        allow_member_override: { type: boolean }
-        version: { type: integer }
-    OrgPersonaInput:
-      type: object
-      required: [system_prompt]
-      properties:
-        system_prompt: { type: string }
-        conversation_rules: { type: string }
-        forbidden_rules: { type: string }
-        reply_style: { type: string }
-        allow_member_override: { type: boolean }
-    HealthResponse:
-      type: object
-      required:
-        - status
-        - time
-      properties:
-        status:
+        error:
           type: string
-          example: ok
-        time:
-          type: string
-          format: date-time
-    LoginRequest:
       type: object
-      required:
-        - username
-        - password
+    handlers.LoginRequest:
       properties:
-        username:
-          type: string
         password:
           type: string
-          format: password
-    RefreshRequest:
-      type: object
+        username:
+          type: string
       required:
-        - refresh_token
+      - password
+      - username
+      type: object
+    handlers.OrganizationRequest:
+      properties:
+        contact_name:
+          type: string
+        contact_phone:
+          type: string
+        credit_warning_threshold:
+          type: integer
+        name:
+          type: string
+        remark:
+          type: string
+      required:
+      - name
+      type: object
+    handlers.RefreshRequest:
       properties:
         refresh_token:
           type: string
-    LoginResponse:
-      type: object
       required:
-        - user
-        - tokens
-      properties:
-        user:
-          $ref: "#/components/schemas/AuthUser"
-        tokens:
-          $ref: "#/components/schemas/TokenPair"
-    CurrentUserResponse:
+      - refresh_token
       type: object
-      required:
-        - user
+    service.AuthUser:
       properties:
-        user:
-          $ref: "#/components/schemas/AuthUser"
-    AuthUser:
-      type: object
-      required:
-        - id
-        - username
-        - display_name
-        - role
-        - status
-      properties:
+        display_name:
+          type: string
         id:
           type: string
         org_id:
           type: string
-          nullable: true
-        username:
-          type: string
-        display_name:
-          type: string
         role:
           type: string
-          enum:
-            - platform_admin
-            - org_admin
-            - org_member
         status:
           type: string
-          enum:
-            - active
-            - disabled
-    TokenPair:
+        username:
+          type: string
       type: object
-      required:
-        - access_token
-        - refresh_token
+    service.LoginResult:
+      properties:
+        tokens:
+          $ref: '#/components/schemas/service.TokenPair'
+        user:
+          $ref: '#/components/schemas/service.AuthUser'
+      type: object
+    service.OrganizationResult:
+      properties:
+        contact_name:
+          type: string
+        contact_phone:
+          type: string
+        credit_warning_threshold:
+          type: integer
+        id:
+          type: string
+        name:
+          type: string
+        newapi_user_id:
+          type: string
+        remark:
+          type: string
+        status:
+          type: string
+      type: object
+    service.TokenPair:
       properties:
         access_token:
           type: string
         refresh_token:
           type: string
-    OrganizationRequest:
       type: object
-      required:
-        - name
-      properties:
-        name:
-          type: string
-        contact_name:
-          type: string
-        contact_phone:
-          type: string
-        remark:
-          type: string
-        newapi_user_id:
-          type: string
-        credit_warning_threshold:
+  securitySchemes:
+    BearerAuth:
+      description: 登录后获得的 JWT access token，前缀 "Bearer "。
+      in: header
+      name: Authorization
+      type: apiKey
+externalDocs:
+  description: ""
+  url: ""
+info:
+  description: OpenClaw 多组织管理后台 API。
+  title: OpenClaw Manager API
+  version: "1.0"
+openapi: 3.1.0
+paths:
+  /auth/login:
+    post:
+      description: 返回 access_token + refresh_token + 用户信息快照
+      requestBody:
+        content:
+          application/json:
+            schema:
+              oneOf:
+              - type: object
+              - $ref: '#/components/schemas/handlers.LoginRequest'
+                description: 登录请求
+                summary: body
+        description: 登录请求
+        required: true
+      responses:
+        "200":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/service.LoginResult'
+          description: OK
+        "400":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/handlers.ErrorResponse'
+          description: Bad Request
+        "401":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/handlers.ErrorResponse'
+          description: Unauthorized
+      summary: 登录
+      tags:
+      - auth
+  /auth/logout:
+    post:
+      description: 撤销 refresh_token，使其不可再续期
+      requestBody:
+        content:
+          application/json:
+            schema:
+              oneOf:
+              - type: object
+              - $ref: '#/components/schemas/handlers.RefreshRequest'
+                description: 包含 refresh_token 的请求体
+                summary: body
+        description: 包含 refresh_token 的请求体
+        required: true
+      responses:
+        "204":
+          description: No Content
+        "400":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/handlers.ErrorResponse'
+          description: Bad Request
+        "401":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/handlers.ErrorResponse'
+          description: Unauthorized
+      summary: 登出
+      tags:
+      - auth
+  /auth/me:
+    get:
+      description: 返回当前 access token 对应的用户档案
+      responses:
+        "200":
+          content:
+            application/json:
+              schema:
+                additionalProperties:
+                  $ref: '#/components/schemas/service.AuthUser'
+                type: object
+          description: OK
+        "401":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/handlers.ErrorResponse'
+          description: Unauthorized
+      security:
+      - BearerAuth: []
+      summary: 当前用户信息
+      tags:
+      - auth
+  /auth/refresh:
+    post:
+      description: 使用 refresh_token 换取新的 access_token + refresh_token
+      requestBody:
+        content:
+          application/json:
+            schema:
+              oneOf:
+              - type: object
+              - $ref: '#/components/schemas/handlers.RefreshRequest'
+                description: 刷新请求
+                summary: body
+        description: 刷新请求
+        required: true
+      responses:
+        "200":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/service.LoginResult'
+          description: OK
+        "400":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/handlers.ErrorResponse'
+          description: Bad Request
+        "401":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/handlers.ErrorResponse'
+          description: Unauthorized
+      summary: 刷新令牌
+      tags:
+      - auth
+  /organizations:
+    get:
+      description: 平台管理员获取所有组织；org_admin 只能看到自己所属组织
+      parameters:
+      - description: 每页条数（默认 50）
+        in: query
+        name: limit
+        schema:
           type: integer
-          minimum: 0
-          maximum: 100
-          nullable: true
-    OrganizationResponse:
-      type: object
-      required:
-        - organization
-      properties:
-        organization:
-          $ref: "#/components/schemas/Organization"
-    OrganizationListResponse:
-      type: object
-      required:
-        - organizations
-      properties:
-        organizations:
-          type: array
-          items:
-            $ref: "#/components/schemas/Organization"
-    Organization:
-      type: object
-      required:
-        - id
-        - name
-        - status
-      properties:
-        id:
-          type: string
-        name:
-          type: string
-        status:
-          type: string
-          enum:
-            - active
-            - disabled
-            - deleted
-        contact_name:
-          type: string
-        contact_phone:
-          type: string
-        remark:
-          type: string
-        newapi_user_id:
-          type: string
-        credit_warning_threshold:
+      - description: 分页偏移（默认 0）
+        in: query
+        name: offset
+        schema:
           type: integer
-          nullable: true
-    Member:
-      type: object
-      required:
-        - id
-        - username
-        - display_name
-        - role
-        - status
-      properties:
-        id:
+      responses:
+        "200":
+          content:
+            application/json:
+              schema:
+                additionalProperties:
+                  items:
+                    $ref: '#/components/schemas/service.OrganizationResult'
+                  type: array
+                type: object
+          description: OK
+        "401":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/handlers.ErrorResponse'
+          description: Unauthorized
+        "403":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/handlers.ErrorResponse'
+          description: Forbidden
+        "500":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/handlers.ErrorResponse'
+          description: Internal Server Error
+      security:
+      - BearerAuth: []
+      summary: 组织列表
+      tags:
+      - organizations
+    post:
+      description: 平台管理员创建新组织，并同步在 new-api 侧完成账户 provisioning
+      requestBody:
+        content:
+          application/json:
+            schema:
+              oneOf:
+              - type: object
+              - $ref: '#/components/schemas/handlers.OrganizationRequest'
+                description: 创建组织请求
+                summary: body
+        description: 创建组织请求
+        required: true
+      responses:
+        "201":
+          content:
+            application/json:
+              schema:
+                additionalProperties:
+                  $ref: '#/components/schemas/service.OrganizationResult'
+                type: object
+          description: Created
+        "400":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/handlers.ErrorResponse'
+          description: Bad Request
+        "401":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/handlers.ErrorResponse'
+          description: Unauthorized
+        "403":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/handlers.ErrorResponse'
+          description: Forbidden
+        "500":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/handlers.ErrorResponse'
+          description: Internal Server Error
+      security:
+      - BearerAuth: []
+      summary: 创建组织
+      tags:
+      - organizations
+  /organizations/{orgId}:
+    get:
+      description: 按 orgId 获取单个组织信息
+      parameters:
+      - description: 组织 ID
+        in: path
+        name: orgId
+        required: true
+        schema:
           type: string
-        org_id:
+      responses:
+        "200":
+          content:
+            application/json:
+              schema:
+                additionalProperties:
+                  $ref: '#/components/schemas/service.OrganizationResult'
+                type: object
+          description: OK
+        "401":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/handlers.ErrorResponse'
+          description: Unauthorized
+        "403":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/handlers.ErrorResponse'
+          description: Forbidden
+        "404":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/handlers.ErrorResponse'
+          description: Not Found
+        "500":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/handlers.ErrorResponse'
+          description: Internal Server Error
+      security:
+      - BearerAuth: []
+      summary: 组织详情
+      tags:
+      - organizations
+    patch:
+      description: 更新组织名称、联系人、备注等基础字段
+      parameters:
+      - description: 组织 ID
+        in: path
+        name: orgId
+        required: true
+        schema:
           type: string
-        username:
+      requestBody:
+        content:
+          application/json:
+            schema:
+              oneOf:
+              - type: object
+              - $ref: '#/components/schemas/handlers.OrganizationRequest'
+                description: 更新组织请求
+                summary: body
+        description: 更新组织请求
+        required: true
+      responses:
+        "200":
+          content:
+            application/json:
+              schema:
+                additionalProperties:
+                  $ref: '#/components/schemas/service.OrganizationResult'
+                type: object
+          description: OK
+        "400":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/handlers.ErrorResponse'
+          description: Bad Request
+        "401":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/handlers.ErrorResponse'
+          description: Unauthorized
+        "403":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/handlers.ErrorResponse'
+          description: Forbidden
+        "404":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/handlers.ErrorResponse'
+          description: Not Found
+        "500":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/handlers.ErrorResponse'
+          description: Internal Server Error
+      security:
+      - BearerAuth: []
+      summary: 更新组织
+      tags:
+      - organizations
+  /organizations/{orgId}/disable:
+    post:
+      description: 将组织状态设为 disabled，成员登录时将被拒绝
+      parameters:
+      - description: 组织 ID
+        in: path
+        name: orgId
+        required: true
+        schema:
           type: string
-        display_name:
+      responses:
+        "200":
+          content:
+            application/json:
+              schema:
+                additionalProperties:
+                  $ref: '#/components/schemas/service.OrganizationResult'
+                type: object
+          description: OK
+        "401":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/handlers.ErrorResponse'
+          description: Unauthorized
+        "403":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/handlers.ErrorResponse'
+          description: Forbidden
+        "404":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/handlers.ErrorResponse'
+          description: Not Found
+        "500":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/handlers.ErrorResponse'
+          description: Internal Server Error
+      security:
+      - BearerAuth: []
+      summary: 禁用组织
+      tags:
+      - organizations
+  /organizations/{orgId}/enable:
+    post:
+      description: 将组织状态从 disabled 恢复为 active
+      parameters:
+      - description: 组织 ID
+        in: path
+        name: orgId
+        required: true
+        schema:
           type: string
-        role:
-          type: string
-          enum:
-            - platform_admin
-            - org_admin
-            - org_member
-        status:
-          type: string
-          enum:
-            - active
-            - disabled
-    MemberCreateRequest:
-      type: object
-      required:
-        - username
-        - display_name
-        - password
-      properties:
-        username:
-          type: string
-        display_name:
-          type: string
-        password:
-          type: string
-          format: password
-        role:
-          type: string
-          enum:
-            - org_admin
-            - org_member
-    MemberUpdateRequest:
-      type: object
-      required:
-        - display_name
-      properties:
-        display_name:
-          type: string
-        role:
-          type: string
-          enum:
-            - org_admin
-            - org_member
-    PasswordResetRequest:
-      type: object
-      required:
-        - password
-      properties:
-        password:
-          type: string
-          format: password
-    MemberResponse:
-      type: object
-      required:
-        - member
-      properties:
-        member:
-          $ref: "#/components/schemas/Member"
-    MemberListResponse:
-      type: object
-      required:
-        - members
-      properties:
-        members:
-          type: array
-          items:
-            $ref: "#/components/schemas/Member"
-    AuditLog:
-      type: object
-      required:
-        - id
-        - actor_role
-        - target_type
-        - target_id
-        - action
-        - result
-        - created_at
-      properties:
-        id:
-          type: string
-        actor_id:
-          type: string
-        actor_role:
-          type: string
-        org_id:
-          type: string
-        target_type:
-          type: string
-        target_id:
-          type: string
-        action:
-          type: string
-        result:
-          type: string
-        error_message:
-          type: string
-        ip_address:
-          type: string
-        metadata:
-          type: object
-          additionalProperties: true
-        created_at:
-          type: string
-          format: date-time
-    AuditLogListResponse:
-      type: object
-      required:
-        - audit_logs
-      properties:
-        audit_logs:
-          type: array
-          items:
-            $ref: "#/components/schemas/AuditLog"
-    RuntimeNode:
-      type: object
-      required:
-        - id
-        - name
-        - status
-        - heartbeat_interval_seconds
-        - has_agent_token
-      properties:
-        id:
-          type: string
-        name:
-          type: string
-        status:
-          type: string
-          enum:
-            - pending
-            - active
-            - unreachable
-            - disabled
-        agent_docker_endpoint:
-          type: string
-        agent_file_endpoint:
-          type: string
-        agent_version:
-          type: string
-        heartbeat_interval_seconds:
-          type: integer
-        node_data_root:
-          type: string
-        bootstrap_token:
-          type: string
-          description: 仅在创建/旋转时返回一次。
-        bootstrap_token_expires_at:
-          type: string
-          format: date-time
-        has_agent_token:
-          type: boolean
-    RuntimeNodeCreateRequest:
-      type: object
-      required:
-        - name
-      properties:
-        name:
-          type: string
-        heartbeat_interval_seconds:
-          type: integer
-          minimum: 0
-        node_data_root:
-          type: string
-    RuntimeNodeResponse:
-      type: object
-      required:
-        - runtime_node
-      properties:
-        runtime_node:
-          $ref: "#/components/schemas/RuntimeNode"
-    RuntimeNodeListResponse:
-      type: object
-      required:
-        - runtime_nodes
-      properties:
-        runtime_nodes:
-          type: array
-          items:
-            $ref: "#/components/schemas/RuntimeNode"
-    AgentRegisterRequest:
-      type: object
-      required:
-        - bootstrap_token
-      properties:
-        bootstrap_token:
-          type: string
-        agent_docker_endpoint:
-          type: string
-        agent_file_endpoint:
-          type: string
-        agent_tls_ca_cert:
-          type: string
-        agent_version:
-          type: string
-        node_data_root:
-          type: string
-        resource_snapshot:
-          type: object
-          additionalProperties: true
-        metadata:
-          type: object
-          additionalProperties: true
-    AgentRegisterResponse:
-      type: object
-      required:
-        - node_id
-        - agent_token
-        - heartbeat_interval_seconds
-      properties:
-        node_id:
-          type: string
-        agent_token:
-          type: string
-        heartbeat_interval_seconds:
-          type: integer
-    AgentHeartbeatRequest:
-      type: object
-      required:
-        - agent_token
-      properties:
-        agent_token:
-          type: string
-        agent_version:
-          type: string
-        resource_snapshot:
-          type: object
-          additionalProperties: true
-        metadata:
-          type: object
-          additionalProperties: true
-    ErrorResponse:
-      type: object
-      required:
-        - error
-      properties:
-        error:
-          type: string
+      responses:
+        "200":
+          content:
+            application/json:
+              schema:
+                additionalProperties:
+                  $ref: '#/components/schemas/service.OrganizationResult'
+                type: object
+          description: OK
+        "401":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/handlers.ErrorResponse'
+          description: Unauthorized
+        "403":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/handlers.ErrorResponse'
+          description: Forbidden
+        "404":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/handlers.ErrorResponse'
+          description: Not Found
+        "500":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/handlers.ErrorResponse'
+          description: Internal Server Error
+      security:
+      - BearerAuth: []
+      summary: 启用组织
+      tags:
+      - organizations
+servers:
+- url: /api/v1

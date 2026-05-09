@@ -40,6 +40,21 @@ func RegisterOrganizationRoutes(router gin.IRouter, handler *OrganizationsHandle
 	group.POST("/:orgId/enable", handler.Enable)
 }
 
+// Create 创建组织。
+//
+// @Summary      创建组织
+// @Description  平台管理员创建新组织，并同步在 new-api 侧完成账户 provisioning
+// @Tags         organizations
+// @Accept       json
+// @Produce      json
+// @Security     BearerAuth
+// @Param        body  body      OrganizationRequest           true  "创建组织请求"
+// @Success      201   {object}  map[string]service.OrganizationResult
+// @Failure      400   {object}  ErrorResponse
+// @Failure      401   {object}  ErrorResponse
+// @Failure      403   {object}  ErrorResponse
+// @Failure      500   {object}  ErrorResponse
+// @Router       /organizations [post]
 func (h *OrganizationsHandler) Create(c *gin.Context) {
 	principal, ok := h.principal(c)
 	if !ok {
@@ -58,6 +73,20 @@ func (h *OrganizationsHandler) Create(c *gin.Context) {
 	c.JSON(http.StatusCreated, gin.H{"organization": result})
 }
 
+// List 列出组织列表。
+//
+// @Summary      组织列表
+// @Description  平台管理员获取所有组织；org_admin 只能看到自己所属组织
+// @Tags         organizations
+// @Produce      json
+// @Security     BearerAuth
+// @Param        limit   query     int  false  "每页条数（默认 50）"
+// @Param        offset  query     int  false  "分页偏移（默认 0）"
+// @Success      200     {object}  map[string][]service.OrganizationResult
+// @Failure      401     {object}  ErrorResponse
+// @Failure      403     {object}  ErrorResponse
+// @Failure      500     {object}  ErrorResponse
+// @Router       /organizations [get]
 func (h *OrganizationsHandler) List(c *gin.Context) {
 	principal, ok := h.principal(c)
 	if !ok {
@@ -73,6 +102,20 @@ func (h *OrganizationsHandler) List(c *gin.Context) {
 	c.JSON(http.StatusOK, gin.H{"organizations": results})
 }
 
+// Get 获取单个组织详情。
+//
+// @Summary      组织详情
+// @Description  按 orgId 获取单个组织信息
+// @Tags         organizations
+// @Produce      json
+// @Security     BearerAuth
+// @Param        orgId  path      string  true  "组织 ID"
+// @Success      200    {object}  map[string]service.OrganizationResult
+// @Failure      401    {object}  ErrorResponse
+// @Failure      403    {object}  ErrorResponse
+// @Failure      404    {object}  ErrorResponse
+// @Failure      500    {object}  ErrorResponse
+// @Router       /organizations/{orgId} [get]
 func (h *OrganizationsHandler) Get(c *gin.Context) {
 	principal, ok := h.principal(c)
 	if !ok {
@@ -86,6 +129,23 @@ func (h *OrganizationsHandler) Get(c *gin.Context) {
 	c.JSON(http.StatusOK, gin.H{"organization": result})
 }
 
+// Update 更新组织基础信息。
+//
+// @Summary      更新组织
+// @Description  更新组织名称、联系人、备注等基础字段
+// @Tags         organizations
+// @Accept       json
+// @Produce      json
+// @Security     BearerAuth
+// @Param        orgId  path      string               true  "组织 ID"
+// @Param        body   body      OrganizationRequest  true  "更新组织请求"
+// @Success      200    {object}  map[string]service.OrganizationResult
+// @Failure      400    {object}  ErrorResponse
+// @Failure      401    {object}  ErrorResponse
+// @Failure      403    {object}  ErrorResponse
+// @Failure      404    {object}  ErrorResponse
+// @Failure      500    {object}  ErrorResponse
+// @Router       /organizations/{orgId} [patch]
 func (h *OrganizationsHandler) Update(c *gin.Context) {
 	principal, ok := h.principal(c)
 	if !ok {
@@ -104,10 +164,38 @@ func (h *OrganizationsHandler) Update(c *gin.Context) {
 	c.JSON(http.StatusOK, gin.H{"organization": result})
 }
 
+// Disable 禁用组织。
+//
+// @Summary      禁用组织
+// @Description  将组织状态设为 disabled，成员登录时将被拒绝
+// @Tags         organizations
+// @Produce      json
+// @Security     BearerAuth
+// @Param        orgId  path      string  true  "组织 ID"
+// @Success      200    {object}  map[string]service.OrganizationResult
+// @Failure      401    {object}  ErrorResponse
+// @Failure      403    {object}  ErrorResponse
+// @Failure      404    {object}  ErrorResponse
+// @Failure      500    {object}  ErrorResponse
+// @Router       /organizations/{orgId}/disable [post]
 func (h *OrganizationsHandler) Disable(c *gin.Context) {
 	h.setStatus(c, domain.StatusDisabled)
 }
 
+// Enable 启用组织。
+//
+// @Summary      启用组织
+// @Description  将组织状态从 disabled 恢复为 active
+// @Tags         organizations
+// @Produce      json
+// @Security     BearerAuth
+// @Param        orgId  path      string  true  "组织 ID"
+// @Success      200    {object}  map[string]service.OrganizationResult
+// @Failure      401    {object}  ErrorResponse
+// @Failure      403    {object}  ErrorResponse
+// @Failure      404    {object}  ErrorResponse
+// @Failure      500    {object}  ErrorResponse
+// @Router       /organizations/{orgId}/enable [post]
 func (h *OrganizationsHandler) Enable(c *gin.Context) {
 	h.setStatus(c, domain.StatusActive)
 }
