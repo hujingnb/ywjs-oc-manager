@@ -9,6 +9,13 @@
 - 不做无关重构、无关格式化或批量机械改动。
 - 修改代码前先理解现有结构、命名和测试习惯，并优先沿用项目既有模式。
 
+## 权限校验
+
+- 角色 / 资源权限谓词（platform_admin / org_admin / org_member 三层判断）必须放在
+  `internal/auth/authorizer.go`，service 包不再定义本地 `canX` 函数。
+- 新增权限规则时优先扩展现有 `Can*` 函数，避免在 handler 或 service 内联写
+  `if principal.Role == "..."` 判断；如确需新增，提交 PR 时请说明设计取舍。
+
 ## Commit Message
 
 - 使用 Conventional Commits 格式：
