@@ -44,24 +44,120 @@ func RegisterAppRuntimeRoutes(router gin.IRouter, handler *AppRuntimeHandler) {
 }
 
 // Start 触发启动。
-func (h *AppRuntimeHandler) Start(c *gin.Context)   { h.trigger(c, service.RuntimeOperationStart) }
+//
+// @Summary      启动应用容器
+// @Description  异步触发指定应用容器的启动操作，返回 job 引用
+// @Tags         runtime-operations
+// @Produce      json
+// @Security     BearerAuth
+// @Param        appId  path      string  true  "应用 ID"
+// @Success      202    {object}  map[string]service.RuntimeOperationResult
+// @Failure      401    {object}  ErrorResponse
+// @Failure      403    {object}  ErrorResponse
+// @Failure      404    {object}  ErrorResponse
+// @Failure      500    {object}  ErrorResponse
+// @Router       /apps/{appId}/runtime/start [post]
+func (h *AppRuntimeHandler) Start(c *gin.Context) { h.trigger(c, service.RuntimeOperationStart) }
+
 // Stop 触发停止。
-func (h *AppRuntimeHandler) Stop(c *gin.Context)    { h.trigger(c, service.RuntimeOperationStop) }
+//
+// @Summary      停止应用容器
+// @Description  异步触发指定应用容器的停止操作，返回 job 引用
+// @Tags         runtime-operations
+// @Produce      json
+// @Security     BearerAuth
+// @Param        appId  path      string  true  "应用 ID"
+// @Success      202    {object}  map[string]service.RuntimeOperationResult
+// @Failure      401    {object}  ErrorResponse
+// @Failure      403    {object}  ErrorResponse
+// @Failure      404    {object}  ErrorResponse
+// @Failure      500    {object}  ErrorResponse
+// @Router       /apps/{appId}/runtime/stop [post]
+func (h *AppRuntimeHandler) Stop(c *gin.Context) { h.trigger(c, service.RuntimeOperationStop) }
+
 // Restart 触发重启。
+//
+// @Summary      重启应用容器
+// @Description  异步触发指定应用容器的重启操作，返回 job 引用
+// @Tags         runtime-operations
+// @Produce      json
+// @Security     BearerAuth
+// @Param        appId  path      string  true  "应用 ID"
+// @Success      202    {object}  map[string]service.RuntimeOperationResult
+// @Failure      401    {object}  ErrorResponse
+// @Failure      403    {object}  ErrorResponse
+// @Failure      404    {object}  ErrorResponse
+// @Failure      500    {object}  ErrorResponse
+// @Router       /apps/{appId}/runtime/restart [post]
 func (h *AppRuntimeHandler) Restart(c *gin.Context) { h.trigger(c, service.RuntimeOperationRestart) }
+
 // Delete 触发删除。
-func (h *AppRuntimeHandler) Delete(c *gin.Context)  { h.trigger(c, service.RuntimeOperationDelete) }
+//
+// @Summary      删除应用容器
+// @Description  异步触发指定应用容器的删除操作，返回 job 引用
+// @Tags         runtime-operations
+// @Produce      json
+// @Security     BearerAuth
+// @Param        appId  path      string  true  "应用 ID"
+// @Success      202    {object}  map[string]service.RuntimeOperationResult
+// @Failure      401    {object}  ErrorResponse
+// @Failure      403    {object}  ErrorResponse
+// @Failure      404    {object}  ErrorResponse
+// @Failure      500    {object}  ErrorResponse
+// @Router       /apps/{appId}/runtime/delete [post]
+func (h *AppRuntimeHandler) Delete(c *gin.Context) { h.trigger(c, service.RuntimeOperationDelete) }
+
 // DisableAPIKey 触发禁用 new-api token；仅平台 / 组织管理员。
+//
+// @Summary      禁用应用 API Key
+// @Description  异步触发禁用应用关联的 new-api token，仅平台或组织管理员可操作
+// @Tags         runtime-operations
+// @Produce      json
+// @Security     BearerAuth
+// @Param        appId  path      string  true  "应用 ID"
+// @Success      202    {object}  map[string]service.RuntimeOperationResult
+// @Failure      401    {object}  ErrorResponse
+// @Failure      403    {object}  ErrorResponse
+// @Failure      404    {object}  ErrorResponse
+// @Failure      500    {object}  ErrorResponse
+// @Router       /apps/{appId}/api-key/disable [post]
 func (h *AppRuntimeHandler) DisableAPIKey(c *gin.Context) {
 	h.trigger(c, service.RuntimeOperationDisableAPIKey)
 }
+
 // RestoreAPIKey 触发启用 new-api token；仅平台 / 组织管理员。
+//
+// @Summary      恢复应用 API Key
+// @Description  异步触发恢复应用关联的 new-api token，仅平台或组织管理员可操作
+// @Tags         runtime-operations
+// @Produce      json
+// @Security     BearerAuth
+// @Param        appId  path      string  true  "应用 ID"
+// @Success      202    {object}  map[string]service.RuntimeOperationResult
+// @Failure      401    {object}  ErrorResponse
+// @Failure      403    {object}  ErrorResponse
+// @Failure      404    {object}  ErrorResponse
+// @Failure      500    {object}  ErrorResponse
+// @Router       /apps/{appId}/api-key/restore [post]
 func (h *AppRuntimeHandler) RestoreAPIKey(c *gin.Context) {
 	h.trigger(c, service.RuntimeOperationRestoreAPIKey)
 }
 
 // GetRuntime 返回应用容器的 inspect 视图。
 // container_id 为空时直接返回 status="no_container"，避免无谓的 docker 调用。
+//
+// @Summary      查询应用运行时状态
+// @Description  返回应用容器的 inspect 视图；container_id 为空时返回 status="no_container"
+// @Tags         runtime-operations
+// @Produce      json
+// @Security     BearerAuth
+// @Param        appId  path      string  true  "应用 ID"
+// @Success      200    {object}  map[string]service.RuntimeView
+// @Failure      401    {object}  ErrorResponse
+// @Failure      403    {object}  ErrorResponse
+// @Failure      404    {object}  ErrorResponse
+// @Failure      500    {object}  ErrorResponse
+// @Router       /apps/{appId}/runtime [get]
 func (h *AppRuntimeHandler) GetRuntime(c *gin.Context) {
 	token, ok := bearerToken(c.GetHeader("Authorization"))
 	if !ok {
@@ -83,6 +179,20 @@ func (h *AppRuntimeHandler) GetRuntime(c *gin.Context) {
 
 // Initialize 触发应用初始化重试。
 // 仅当 status ∈ {error, draft} 允许；其它状态返回 409。
+//
+// @Summary      重新初始化应用
+// @Description  触发应用初始化重试；仅当应用状态为 error 或 draft 时允许，其它状态返回 409
+// @Tags         runtime-operations
+// @Produce      json
+// @Security     BearerAuth
+// @Param        appId  path      string  true  "应用 ID"
+// @Success      202    {object}  map[string]service.RuntimeOperationResult
+// @Failure      401    {object}  ErrorResponse
+// @Failure      403    {object}  ErrorResponse
+// @Failure      404    {object}  ErrorResponse
+// @Failure      409    {object}  ErrorResponse
+// @Failure      500    {object}  ErrorResponse
+// @Router       /apps/{appId}/initialize [post]
 func (h *AppRuntimeHandler) Initialize(c *gin.Context) {
 	token, ok := bearerToken(c.GetHeader("Authorization"))
 	if !ok {

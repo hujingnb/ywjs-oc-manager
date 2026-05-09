@@ -53,6 +53,20 @@ type JobView struct {
 }
 
 // Get 查询 job 详情。
+//
+// @Summary      查询异步任务详情
+// @Description  平台管理员按 ID 查询异步 job 的执行状态及结果
+// @Tags         jobs
+// @Produce      json
+// @Security     BearerAuth
+// @Param        jobId  path      string  true  "job UUID"
+// @Success      200    {object}  map[string]JobView
+// @Failure      400    {object}  ErrorResponse
+// @Failure      401    {object}  ErrorResponse
+// @Failure      403    {object}  ErrorResponse
+// @Failure      404    {object}  ErrorResponse
+// @Failure      500    {object}  ErrorResponse
+// @Router       /jobs/{jobId} [get]
 func (h *JobsHandler) Get(c *gin.Context) {
 	token, ok := bearerToken(c.GetHeader("Authorization"))
 	if !ok {

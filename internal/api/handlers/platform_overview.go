@@ -32,6 +32,17 @@ func RegisterPlatformOverviewRoutes(router gin.IRouter, handler *PlatformOvervie
 }
 
 // Get 返回平台总览。仅 platform_admin 可访问；service 层会再次校验。
+//
+// @Summary      平台总览
+// @Description  平台管理员查询全平台的组织、成员、应用数量汇总
+// @Tags         platform
+// @Produce      json
+// @Security     BearerAuth
+// @Success      200  {object}  map[string]service.PlatformOverview
+// @Failure      401  {object}  ErrorResponse
+// @Failure      403  {object}  ErrorResponse
+// @Failure      500  {object}  ErrorResponse
+// @Router       /platform/overview [get]
 func (h *PlatformOverviewHandler) Get(c *gin.Context) {
 	token, ok := bearerToken(c.GetHeader("Authorization"))
 	if !ok {

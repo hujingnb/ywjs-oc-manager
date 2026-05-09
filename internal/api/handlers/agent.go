@@ -48,6 +48,18 @@ func RegisterAgentRoutes(router gin.IRouter, handler *AgentEndpointsHandler) {
 }
 
 // Register 处理 agent 用 bootstrap token 注册并换取 agent token。
+//
+// @Summary      Agent 注册
+// @Description  runtime agent 用一次性 bootstrap token 注册并换取长效 agent token；鉴权通过请求体中的 bootstrap_token 字段完成
+// @Tags         agent
+// @Accept       json
+// @Produce      json
+// @Param        body  body      AgentRegisterRequest  true  "注册请求（含 bootstrap_token）"
+// @Success      200   {object}  service.AgentRegisterResult
+// @Failure      400   {object}  ErrorResponse
+// @Failure      401   {object}  ErrorResponse
+// @Failure      500   {object}  ErrorResponse
+// @Router       /agent/register [post]
 func (h *AgentEndpointsHandler) Register(c *gin.Context) {
 	var req AgentRegisterRequest
 	if err := c.ShouldBindJSON(&req); err != nil {
@@ -91,6 +103,18 @@ func (h *AgentEndpointsHandler) Register(c *gin.Context) {
 }
 
 // Heartbeat 处理 agent 上报心跳。
+//
+// @Summary      Agent 心跳
+// @Description  runtime agent 定期上报心跳及资源快照；鉴权通过请求体中的 agent_token 字段完成
+// @Tags         agent
+// @Accept       json
+// @Produce      json
+// @Param        body  body      AgentHeartbeatRequest  true  "心跳请求（含 agent_token）"
+// @Success      200   {object}  map[string]service.RuntimeNodeResult
+// @Failure      400   {object}  ErrorResponse
+// @Failure      401   {object}  ErrorResponse
+// @Failure      500   {object}  ErrorResponse
+// @Router       /agent/heartbeat [post]
 func (h *AgentEndpointsHandler) Heartbeat(c *gin.Context) {
 	var req AgentHeartbeatRequest
 	if err := c.ShouldBindJSON(&req); err != nil {

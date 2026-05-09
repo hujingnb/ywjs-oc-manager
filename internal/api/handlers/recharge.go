@@ -39,6 +39,23 @@ func RegisterRechargeRoutes(router gin.IRouter, handler *RechargeHandler) {
 }
 
 // Create 处理充值。
+//
+// @Summary      组织充值
+// @Description  平台管理员为指定组织充值额度；组织须已关联 new-api 账户
+// @Tags         recharge
+// @Accept       json
+// @Produce      json
+// @Security     BearerAuth
+// @Param        orgId  path      string          true  "组织 ID"
+// @Param        body   body      RechargeRequest true  "充值请求"
+// @Success      200    {object}  map[string]service.RechargeRecordResult
+// @Failure      400    {object}  ErrorResponse
+// @Failure      401    {object}  ErrorResponse
+// @Failure      403    {object}  ErrorResponse
+// @Failure      404    {object}  ErrorResponse
+// @Failure      409    {object}  ErrorResponse
+// @Failure      502    {object}  ErrorResponse
+// @Router       /organizations/{orgId}/recharge [post]
 func (h *RechargeHandler) Create(c *gin.Context) {
 	principal, ok := h.principal(c)
 	if !ok {
@@ -58,6 +75,21 @@ func (h *RechargeHandler) Create(c *gin.Context) {
 }
 
 // List 列出充值历史。
+//
+// @Summary      组织充值历史列表
+// @Description  分页查询指定组织的充值记录
+// @Tags         recharge
+// @Produce      json
+// @Security     BearerAuth
+// @Param        orgId   path      string  true   "组织 ID"
+// @Param        limit   query     int     false  "每页条数（默认 50）"
+// @Param        offset  query     int     false  "分页偏移（默认 0）"
+// @Success      200     {object}  map[string][]service.RechargeRecordResult
+// @Failure      401     {object}  ErrorResponse
+// @Failure      403     {object}  ErrorResponse
+// @Failure      404     {object}  ErrorResponse
+// @Failure      502     {object}  ErrorResponse
+// @Router       /organizations/{orgId}/recharges [get]
 func (h *RechargeHandler) List(c *gin.Context) {
 	principal, ok := h.principal(c)
 	if !ok {
@@ -74,6 +106,19 @@ func (h *RechargeHandler) List(c *gin.Context) {
 }
 
 // Balance 查询组织余额。
+//
+// @Summary      查询组织余额
+// @Description  查询指定组织在 new-api 中的当前额度余额
+// @Tags         recharge
+// @Produce      json
+// @Security     BearerAuth
+// @Param        orgId  path      string  true  "组织 ID"
+// @Success      200    {object}  map[string]service.BalanceView
+// @Failure      401    {object}  ErrorResponse
+// @Failure      403    {object}  ErrorResponse
+// @Failure      404    {object}  ErrorResponse
+// @Failure      502    {object}  ErrorResponse
+// @Router       /organizations/{orgId}/balance [get]
 func (h *RechargeHandler) Balance(c *gin.Context) {
 	principal, ok := h.principal(c)
 	if !ok {
