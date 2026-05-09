@@ -86,6 +86,6 @@ func (h *NewAPIAuditHelper) RecordFailure(ctx context.Context, fc NewAPIFailureC
 		Metadata:     metadata,
 	}
 	if _, err := h.recorder.Record(ctx, event); err != nil {
-		slog.ErrorContext(ctx, "newapi_audit: 写 audit_logs 失败", "error", err)
+		slog.ErrorContext(ctx, "写 audit_logs 失败", "error", err)
 	}
 }
