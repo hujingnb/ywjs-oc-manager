@@ -47,6 +47,20 @@ func RegisterRuntimeNodeRoutes(router gin.IRouter, handler *RuntimeNodesHandler)
 }
 
 // Create 平台管理员注册新节点，并返回一次性 bootstrap token。
+//
+// @Summary      注册 runtime 节点
+// @Description  平台管理员注册新 runtime 节点，返回包含一次性 bootstrap token 的节点信息
+// @Tags         runtime-nodes
+// @Accept       json
+// @Produce      json
+// @Security     BearerAuth
+// @Param        body  body      CreateRuntimeNodeRequest  true  "注册节点请求"
+// @Success      201   {object}  map[string]service.RuntimeNodeResult
+// @Failure      400   {object}  ErrorResponse
+// @Failure      401   {object}  ErrorResponse
+// @Failure      403   {object}  ErrorResponse
+// @Failure      500   {object}  ErrorResponse
+// @Router       /runtime-nodes [post]
 func (h *RuntimeNodesHandler) Create(c *gin.Context) {
 	principal, ok := h.principal(c)
 	if !ok {
@@ -70,6 +84,19 @@ func (h *RuntimeNodesHandler) Create(c *gin.Context) {
 }
 
 // List 列出 runtime 节点。
+//
+// @Summary      runtime 节点列表
+// @Description  平台管理员获取所有 runtime 节点，支持分页
+// @Tags         runtime-nodes
+// @Produce      json
+// @Security     BearerAuth
+// @Param        limit   query     int  false  "每页条数（默认不限）"
+// @Param        offset  query     int  false  "分页偏移（默认 0）"
+// @Success      200     {object}  map[string][]service.RuntimeNodeResult
+// @Failure      401     {object}  ErrorResponse
+// @Failure      403     {object}  ErrorResponse
+// @Failure      500     {object}  ErrorResponse
+// @Router       /runtime-nodes [get]
 func (h *RuntimeNodesHandler) List(c *gin.Context) {
 	principal, ok := h.principal(c)
 	if !ok {
@@ -86,6 +113,19 @@ func (h *RuntimeNodesHandler) List(c *gin.Context) {
 }
 
 // Get 获取节点详情。
+//
+// @Summary      runtime 节点详情
+// @Description  按 nodeId 获取单个 runtime 节点信息
+// @Tags         runtime-nodes
+// @Produce      json
+// @Security     BearerAuth
+// @Param        nodeId  path      string  true  "节点 ID"
+// @Success      200     {object}  map[string]service.RuntimeNodeResult
+// @Failure      401     {object}  ErrorResponse
+// @Failure      403     {object}  ErrorResponse
+// @Failure      404     {object}  ErrorResponse
+// @Failure      500     {object}  ErrorResponse
+// @Router       /runtime-nodes/{nodeId} [get]
 func (h *RuntimeNodesHandler) Get(c *gin.Context) {
 	principal, ok := h.principal(c)
 	if !ok {
@@ -100,6 +140,20 @@ func (h *RuntimeNodesHandler) Get(c *gin.Context) {
 }
 
 // RotateBootstrap 给目标节点发放新的 bootstrap token。
+//
+// @Summary      轮换 bootstrap token
+// @Description  为指定节点生成新的一次性 bootstrap token；节点处于活跃状态时返回 409
+// @Tags         runtime-nodes
+// @Produce      json
+// @Security     BearerAuth
+// @Param        nodeId  path      string  true  "节点 ID"
+// @Success      200     {object}  map[string]service.RuntimeNodeResult
+// @Failure      401     {object}  ErrorResponse
+// @Failure      403     {object}  ErrorResponse
+// @Failure      404     {object}  ErrorResponse
+// @Failure      409     {object}  ErrorResponse
+// @Failure      500     {object}  ErrorResponse
+// @Router       /runtime-nodes/{nodeId}/rotate-bootstrap [post]
 func (h *RuntimeNodesHandler) RotateBootstrap(c *gin.Context) {
 	principal, ok := h.principal(c)
 	if !ok {
@@ -114,6 +168,22 @@ func (h *RuntimeNodesHandler) RotateBootstrap(c *gin.Context) {
 }
 
 // Patch 更新节点的可调字段（v1.0.1 仅 max_apps）。
+//
+// @Summary      更新 runtime 节点
+// @Description  更新节点的可调字段；当前仅支持 max_apps（null 表示清空上限）
+// @Tags         runtime-nodes
+// @Accept       json
+// @Produce      json
+// @Security     BearerAuth
+// @Param        nodeId  path      string                   true  "节点 ID"
+// @Param        body    body      PatchRuntimeNodeRequest  true  "更新节点请求"
+// @Success      200     {object}  map[string]service.RuntimeNodeResult
+// @Failure      400     {object}  ErrorResponse
+// @Failure      401     {object}  ErrorResponse
+// @Failure      403     {object}  ErrorResponse
+// @Failure      404     {object}  ErrorResponse
+// @Failure      500     {object}  ErrorResponse
+// @Router       /runtime-nodes/{nodeId} [patch]
 func (h *RuntimeNodesHandler) Patch(c *gin.Context) {
 	principal, ok := h.principal(c)
 	if !ok {
@@ -133,11 +203,37 @@ func (h *RuntimeNodesHandler) Patch(c *gin.Context) {
 }
 
 // Disable 禁用节点。
+//
+// @Summary      禁用 runtime 节点
+// @Description  将节点状态设为 disabled，不再向该节点分配新应用
+// @Tags         runtime-nodes
+// @Produce      json
+// @Security     BearerAuth
+// @Param        nodeId  path      string  true  "节点 ID"
+// @Success      200     {object}  map[string]service.RuntimeNodeResult
+// @Failure      401     {object}  ErrorResponse
+// @Failure      403     {object}  ErrorResponse
+// @Failure      404     {object}  ErrorResponse
+// @Failure      500     {object}  ErrorResponse
+// @Router       /runtime-nodes/{nodeId}/disable [post]
 func (h *RuntimeNodesHandler) Disable(c *gin.Context) {
 	h.setStatus(c, domain.RuntimeNodeStatusDisabled)
 }
 
 // Enable 启用节点。
+//
+// @Summary      启用 runtime 节点
+// @Description  将节点状态从 disabled 恢复为 active，允许继续分配应用
+// @Tags         runtime-nodes
+// @Produce      json
+// @Security     BearerAuth
+// @Param        nodeId  path      string  true  "节点 ID"
+// @Success      200     {object}  map[string]service.RuntimeNodeResult
+// @Failure      401     {object}  ErrorResponse
+// @Failure      403     {object}  ErrorResponse
+// @Failure      404     {object}  ErrorResponse
+// @Failure      500     {object}  ErrorResponse
+// @Router       /runtime-nodes/{nodeId}/enable [post]
 func (h *RuntimeNodesHandler) Enable(c *gin.Context) {
 	h.setStatus(c, domain.RuntimeNodeStatusActive)
 }

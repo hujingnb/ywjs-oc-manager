@@ -1,5 +1,31 @@
 components:
   schemas:
+    handlers.CreateMemberRequest:
+      properties:
+        display_name:
+          type: string
+        password:
+          type: string
+        role:
+          type: string
+        username:
+          type: string
+      required:
+      - display_name
+      - password
+      - username
+      type: object
+    handlers.CreateRuntimeNodeRequest:
+      properties:
+        heartbeat_interval_seconds:
+          type: integer
+        name:
+          type: string
+        node_data_root:
+          type: string
+      required:
+      - name
+      type: object
     handlers.ErrorResponse:
       properties:
         error:
@@ -12,6 +38,32 @@ components:
         username:
           type: string
       required:
+      - password
+      - username
+      type: object
+    handlers.OnboardMemberRequest:
+      properties:
+        app_name:
+          type: string
+        app_prompt:
+          type: string
+        channel_type:
+          type: string
+        display_name:
+          type: string
+        password:
+          type: string
+        persona_mode:
+          type: string
+        role:
+          type: string
+        runtime_node_id:
+          type: string
+        username:
+          type: string
+      required:
+      - app_name
+      - display_name
       - password
       - username
       type: object
@@ -30,12 +82,63 @@ components:
       required:
       - name
       type: object
+    handlers.PatchRuntimeNodeRequest:
+      properties:
+        max_apps:
+          type: integer
+      type: object
     handlers.RefreshRequest:
       properties:
         refresh_token:
           type: string
       required:
       - refresh_token
+      type: object
+    handlers.ResetPasswordRequest:
+      properties:
+        password:
+          type: string
+      required:
+      - password
+      type: object
+    handlers.UpdateMemberRequest:
+      properties:
+        display_name:
+          type: string
+        role:
+          type: string
+      required:
+      - display_name
+      type: object
+    service.AppResult:
+      properties:
+        api_key_status:
+          type: string
+        app_prompt:
+          type: string
+        container_id:
+          type: string
+        description:
+          type: string
+        id:
+          type: string
+        name:
+          type: string
+        newapi_key_id:
+          description: |-
+            NewapiKeyID 是 new-api 中 token 的数值 id；schema 上是 text 列存的字符串，
+            这里解析成 int64 方便 usage service 直接调 GetAPIKey。0 表示未绑定。
+          type: integer
+        org_id:
+          type: string
+        owner_user_id:
+          type: string
+        persona_mode:
+          type: string
+        runtime_node_id:
+          type: string
+        status:
+          type: string
       type: object
     service.AuthUser:
       properties:
@@ -59,6 +162,30 @@ components:
         user:
           $ref: '#/components/schemas/service.AuthUser'
       type: object
+    service.MemberResult:
+      properties:
+        display_name:
+          type: string
+        id:
+          type: string
+        org_id:
+          type: string
+        role:
+          type: string
+        status:
+          type: string
+        username:
+          type: string
+      type: object
+    service.OnboardMemberResult:
+      properties:
+        app:
+          $ref: '#/components/schemas/service.AppResult'
+        job_id:
+          type: string
+        member:
+          $ref: '#/components/schemas/service.MemberResult'
+      type: object
     service.OrganizationResult:
       properties:
         contact_name:
@@ -74,6 +201,33 @@ components:
         newapi_user_id:
           type: string
         remark:
+          type: string
+        status:
+          type: string
+      type: object
+    service.RuntimeNodeResult:
+      properties:
+        agent_docker_endpoint:
+          type: string
+        agent_file_endpoint:
+          type: string
+        agent_version:
+          type: string
+        bootstrap_token:
+          type: string
+        bootstrap_token_expires_at:
+          type: string
+        has_agent_token:
+          type: boolean
+        heartbeat_interval_seconds:
+          type: integer
+        id:
+          type: string
+        max_apps:
+          type: integer
+        name:
+          type: string
+        node_data_root:
           type: string
         status:
           type: string
@@ -100,6 +254,54 @@ info:
   version: "1.0"
 openapi: 3.1.0
 paths:
+  /apps/{appId}:
+    get:
+      description: 按 appId 获取单个应用信息；org_member 只能查询自己的应用
+      parameters:
+      - description: 应用 ID
+        in: path
+        name: appId
+        required: true
+        schema:
+          type: string
+      responses:
+        "200":
+          content:
+            application/json:
+              schema:
+                additionalProperties:
+                  $ref: '#/components/schemas/service.AppResult'
+                type: object
+          description: OK
+        "401":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/handlers.ErrorResponse'
+          description: Unauthorized
+        "403":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/handlers.ErrorResponse'
+          description: Forbidden
+        "404":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/handlers.ErrorResponse'
+          description: Not Found
+        "500":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/handlers.ErrorResponse'
+          description: Internal Server Error
+      security:
+      - BearerAuth: []
+      summary: 应用详情
+      tags:
+      - apps
   /auth/login:
     post:
       description: 返回 access_token + refresh_token + 用户信息快照
@@ -227,6 +429,314 @@ paths:
       summary: 刷新令牌
       tags:
       - auth
+  /members/{userId}:
+    delete:
+      description: 软删指定成员，并联动触发应用回收任务
+      parameters:
+      - description: 成员用户 ID
+        in: path
+        name: userId
+        required: true
+        schema:
+          type: string
+      responses:
+        "204":
+          description: 删除成功，无响应体
+        "401":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/handlers.ErrorResponse'
+          description: Unauthorized
+        "403":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/handlers.ErrorResponse'
+          description: Forbidden
+        "404":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/handlers.ErrorResponse'
+          description: Not Found
+        "500":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/handlers.ErrorResponse'
+          description: Internal Server Error
+      security:
+      - BearerAuth: []
+      summary: 删除成员
+      tags:
+      - members
+    get:
+      description: 按 userId 获取单个成员信息；org_member 只能查询自身
+      parameters:
+      - description: 成员用户 ID
+        in: path
+        name: userId
+        required: true
+        schema:
+          type: string
+      responses:
+        "200":
+          content:
+            application/json:
+              schema:
+                additionalProperties:
+                  $ref: '#/components/schemas/service.MemberResult'
+                type: object
+          description: OK
+        "401":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/handlers.ErrorResponse'
+          description: Unauthorized
+        "403":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/handlers.ErrorResponse'
+          description: Forbidden
+        "404":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/handlers.ErrorResponse'
+          description: Not Found
+        "500":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/handlers.ErrorResponse'
+          description: Internal Server Error
+      security:
+      - BearerAuth: []
+      summary: 成员详情
+      tags:
+      - members
+    patch:
+      description: 更新成员显示名或角色；org_admin 仅可更新自己组织的成员
+      parameters:
+      - description: 成员用户 ID
+        in: path
+        name: userId
+        required: true
+        schema:
+          type: string
+      requestBody:
+        content:
+          application/json:
+            schema:
+              oneOf:
+              - type: object
+              - $ref: '#/components/schemas/handlers.UpdateMemberRequest'
+                description: 更新成员请求
+                summary: body
+        description: 更新成员请求
+        required: true
+      responses:
+        "200":
+          content:
+            application/json:
+              schema:
+                additionalProperties:
+                  $ref: '#/components/schemas/service.MemberResult'
+                type: object
+          description: OK
+        "400":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/handlers.ErrorResponse'
+          description: Bad Request
+        "401":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/handlers.ErrorResponse'
+          description: Unauthorized
+        "403":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/handlers.ErrorResponse'
+          description: Forbidden
+        "404":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/handlers.ErrorResponse'
+          description: Not Found
+        "500":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/handlers.ErrorResponse'
+          description: Internal Server Error
+      security:
+      - BearerAuth: []
+      summary: 更新成员
+      tags:
+      - members
+  /members/{userId}/disable:
+    post:
+      description: 将成员状态设为 disabled，成员登录时将被拒绝
+      parameters:
+      - description: 成员用户 ID
+        in: path
+        name: userId
+        required: true
+        schema:
+          type: string
+      responses:
+        "200":
+          content:
+            application/json:
+              schema:
+                additionalProperties:
+                  $ref: '#/components/schemas/service.MemberResult'
+                type: object
+          description: OK
+        "401":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/handlers.ErrorResponse'
+          description: Unauthorized
+        "403":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/handlers.ErrorResponse'
+          description: Forbidden
+        "404":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/handlers.ErrorResponse'
+          description: Not Found
+        "500":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/handlers.ErrorResponse'
+          description: Internal Server Error
+      security:
+      - BearerAuth: []
+      summary: 禁用成员
+      tags:
+      - members
+  /members/{userId}/enable:
+    post:
+      description: 将成员状态从 disabled 恢复为 active
+      parameters:
+      - description: 成员用户 ID
+        in: path
+        name: userId
+        required: true
+        schema:
+          type: string
+      responses:
+        "200":
+          content:
+            application/json:
+              schema:
+                additionalProperties:
+                  $ref: '#/components/schemas/service.MemberResult'
+                type: object
+          description: OK
+        "401":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/handlers.ErrorResponse'
+          description: Unauthorized
+        "403":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/handlers.ErrorResponse'
+          description: Forbidden
+        "404":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/handlers.ErrorResponse'
+          description: Not Found
+        "500":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/handlers.ErrorResponse'
+          description: Internal Server Error
+      security:
+      - BearerAuth: []
+      summary: 启用成员
+      tags:
+      - members
+  /members/{userId}/password:
+    post:
+      description: 平台管理员或组织管理员强制重置指定成员的密码
+      parameters:
+      - description: 成员用户 ID
+        in: path
+        name: userId
+        required: true
+        schema:
+          type: string
+      requestBody:
+        content:
+          application/json:
+            schema:
+              oneOf:
+              - type: object
+              - $ref: '#/components/schemas/handlers.ResetPasswordRequest'
+                description: 重置密码请求
+                summary: body
+        description: 重置密码请求
+        required: true
+      responses:
+        "204":
+          description: 密码重置成功，无响应体
+        "400":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/handlers.ErrorResponse'
+          description: Bad Request
+        "401":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/handlers.ErrorResponse'
+          description: Unauthorized
+        "403":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/handlers.ErrorResponse'
+          description: Forbidden
+        "404":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/handlers.ErrorResponse'
+          description: Not Found
+        "500":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/handlers.ErrorResponse'
+          description: Internal Server Error
+      security:
+      - BearerAuth: []
+      summary: 重置成员密码
+      tags:
+      - members
   /organizations:
     get:
       description: 平台管理员获取所有组织；org_admin 只能看到自己所属组织
@@ -438,6 +948,66 @@ paths:
       summary: 更新组织
       tags:
       - organizations
+  /organizations/{orgId}/apps:
+    get:
+      description: 按组织 ID 分页列出应用；org_member 只能看到自己的应用
+      parameters:
+      - description: 组织 ID
+        in: path
+        name: orgId
+        required: true
+        schema:
+          type: string
+      - description: 每页条数（默认不限）
+        in: query
+        name: limit
+        schema:
+          type: integer
+      - description: 分页偏移（默认 0）
+        in: query
+        name: offset
+        schema:
+          type: integer
+      responses:
+        "200":
+          content:
+            application/json:
+              schema:
+                additionalProperties:
+                  items:
+                    $ref: '#/components/schemas/service.AppResult'
+                  type: array
+                type: object
+          description: OK
+        "401":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/handlers.ErrorResponse'
+          description: Unauthorized
+        "403":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/handlers.ErrorResponse'
+          description: Forbidden
+        "404":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/handlers.ErrorResponse'
+          description: Not Found
+        "500":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/handlers.ErrorResponse'
+          description: Internal Server Error
+      security:
+      - BearerAuth: []
+      summary: 应用列表
+      tags:
+      - apps
   /organizations/{orgId}/disable:
     post:
       description: 将组织状态设为 disabled，成员登录时将被拒绝
@@ -534,5 +1104,561 @@ paths:
       summary: 启用组织
       tags:
       - organizations
+  /organizations/{orgId}/members:
+    get:
+      description: 按组织 ID 分页列出成员；org_member 只能看到自己
+      parameters:
+      - description: 组织 ID
+        in: path
+        name: orgId
+        required: true
+        schema:
+          type: string
+      - description: 每页条数（默认不限）
+        in: query
+        name: limit
+        schema:
+          type: integer
+      - description: 分页偏移（默认 0）
+        in: query
+        name: offset
+        schema:
+          type: integer
+      responses:
+        "200":
+          content:
+            application/json:
+              schema:
+                additionalProperties:
+                  items:
+                    $ref: '#/components/schemas/service.MemberResult'
+                  type: array
+                type: object
+          description: OK
+        "401":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/handlers.ErrorResponse'
+          description: Unauthorized
+        "403":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/handlers.ErrorResponse'
+          description: Forbidden
+        "404":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/handlers.ErrorResponse'
+          description: Not Found
+        "500":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/handlers.ErrorResponse'
+          description: Internal Server Error
+      security:
+      - BearerAuth: []
+      summary: 组织成员列表
+      tags:
+      - members
+    post:
+      description: 组织管理员或平台管理员在指定组织下创建新成员
+      parameters:
+      - description: 组织 ID
+        in: path
+        name: orgId
+        required: true
+        schema:
+          type: string
+      requestBody:
+        content:
+          application/json:
+            schema:
+              oneOf:
+              - type: object
+              - $ref: '#/components/schemas/handlers.CreateMemberRequest'
+                description: 创建成员请求
+                summary: body
+        description: 创建成员请求
+        required: true
+      responses:
+        "201":
+          content:
+            application/json:
+              schema:
+                additionalProperties:
+                  $ref: '#/components/schemas/service.MemberResult'
+                type: object
+          description: Created
+        "400":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/handlers.ErrorResponse'
+          description: Bad Request
+        "401":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/handlers.ErrorResponse'
+          description: Unauthorized
+        "403":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/handlers.ErrorResponse'
+          description: Forbidden
+        "404":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/handlers.ErrorResponse'
+          description: Not Found
+        "500":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/handlers.ErrorResponse'
+          description: Internal Server Error
+      security:
+      - BearerAuth: []
+      summary: 创建组织成员
+      tags:
+      - members
+  /organizations/{orgId}/members/onboard:
+    post:
+      description: 在单个事务内创建成员并联动初始化应用、渠道绑定和 newapi 凭证；onboarding service 未配置时返回 503
+      parameters:
+      - description: 组织 ID
+        in: path
+        name: orgId
+        required: true
+        schema:
+          type: string
+      requestBody:
+        content:
+          application/json:
+            schema:
+              oneOf:
+              - type: object
+              - $ref: '#/components/schemas/handlers.OnboardMemberRequest'
+                description: onboarding 请求
+                summary: body
+        description: onboarding 请求
+        required: true
+      responses:
+        "201":
+          content:
+            application/json:
+              schema:
+                additionalProperties:
+                  $ref: '#/components/schemas/service.OnboardMemberResult'
+                type: object
+          description: Created
+        "400":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/handlers.ErrorResponse'
+          description: Bad Request
+        "401":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/handlers.ErrorResponse'
+          description: Unauthorized
+        "403":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/handlers.ErrorResponse'
+          description: Forbidden
+        "404":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/handlers.ErrorResponse'
+          description: Not Found
+        "500":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/handlers.ErrorResponse'
+          description: Internal Server Error
+        "503":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/handlers.ErrorResponse'
+          description: Service Unavailable
+      security:
+      - BearerAuth: []
+      summary: 成员 onboarding（事务创建）
+      tags:
+      - members
+  /runtime-nodes:
+    get:
+      description: 平台管理员获取所有 runtime 节点，支持分页
+      parameters:
+      - description: 每页条数（默认不限）
+        in: query
+        name: limit
+        schema:
+          type: integer
+      - description: 分页偏移（默认 0）
+        in: query
+        name: offset
+        schema:
+          type: integer
+      responses:
+        "200":
+          content:
+            application/json:
+              schema:
+                additionalProperties:
+                  items:
+                    $ref: '#/components/schemas/service.RuntimeNodeResult'
+                  type: array
+                type: object
+          description: OK
+        "401":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/handlers.ErrorResponse'
+          description: Unauthorized
+        "403":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/handlers.ErrorResponse'
+          description: Forbidden
+        "500":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/handlers.ErrorResponse'
+          description: Internal Server Error
+      security:
+      - BearerAuth: []
+      summary: runtime 节点列表
+      tags:
+      - runtime-nodes
+    post:
+      description: 平台管理员注册新 runtime 节点，返回包含一次性 bootstrap token 的节点信息
+      requestBody:
+        content:
+          application/json:
+            schema:
+              oneOf:
+              - type: object
+              - $ref: '#/components/schemas/handlers.CreateRuntimeNodeRequest'
+                description: 注册节点请求
+                summary: body
+        description: 注册节点请求
+        required: true
+      responses:
+        "201":
+          content:
+            application/json:
+              schema:
+                additionalProperties:
+                  $ref: '#/components/schemas/service.RuntimeNodeResult'
+                type: object
+          description: Created
+        "400":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/handlers.ErrorResponse'
+          description: Bad Request
+        "401":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/handlers.ErrorResponse'
+          description: Unauthorized
+        "403":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/handlers.ErrorResponse'
+          description: Forbidden
+        "500":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/handlers.ErrorResponse'
+          description: Internal Server Error
+      security:
+      - BearerAuth: []
+      summary: 注册 runtime 节点
+      tags:
+      - runtime-nodes
+  /runtime-nodes/{nodeId}:
+    get:
+      description: 按 nodeId 获取单个 runtime 节点信息
+      parameters:
+      - description: 节点 ID
+        in: path
+        name: nodeId
+        required: true
+        schema:
+          type: string
+      responses:
+        "200":
+          content:
+            application/json:
+              schema:
+                additionalProperties:
+                  $ref: '#/components/schemas/service.RuntimeNodeResult'
+                type: object
+          description: OK
+        "401":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/handlers.ErrorResponse'
+          description: Unauthorized
+        "403":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/handlers.ErrorResponse'
+          description: Forbidden
+        "404":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/handlers.ErrorResponse'
+          description: Not Found
+        "500":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/handlers.ErrorResponse'
+          description: Internal Server Error
+      security:
+      - BearerAuth: []
+      summary: runtime 节点详情
+      tags:
+      - runtime-nodes
+    patch:
+      description: 更新节点的可调字段；当前仅支持 max_apps（null 表示清空上限）
+      parameters:
+      - description: 节点 ID
+        in: path
+        name: nodeId
+        required: true
+        schema:
+          type: string
+      requestBody:
+        content:
+          application/json:
+            schema:
+              oneOf:
+              - type: object
+              - $ref: '#/components/schemas/handlers.PatchRuntimeNodeRequest'
+                description: 更新节点请求
+                summary: body
+        description: 更新节点请求
+        required: true
+      responses:
+        "200":
+          content:
+            application/json:
+              schema:
+                additionalProperties:
+                  $ref: '#/components/schemas/service.RuntimeNodeResult'
+                type: object
+          description: OK
+        "400":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/handlers.ErrorResponse'
+          description: Bad Request
+        "401":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/handlers.ErrorResponse'
+          description: Unauthorized
+        "403":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/handlers.ErrorResponse'
+          description: Forbidden
+        "404":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/handlers.ErrorResponse'
+          description: Not Found
+        "500":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/handlers.ErrorResponse'
+          description: Internal Server Error
+      security:
+      - BearerAuth: []
+      summary: 更新 runtime 节点
+      tags:
+      - runtime-nodes
+  /runtime-nodes/{nodeId}/disable:
+    post:
+      description: 将节点状态设为 disabled，不再向该节点分配新应用
+      parameters:
+      - description: 节点 ID
+        in: path
+        name: nodeId
+        required: true
+        schema:
+          type: string
+      responses:
+        "200":
+          content:
+            application/json:
+              schema:
+                additionalProperties:
+                  $ref: '#/components/schemas/service.RuntimeNodeResult'
+                type: object
+          description: OK
+        "401":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/handlers.ErrorResponse'
+          description: Unauthorized
+        "403":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/handlers.ErrorResponse'
+          description: Forbidden
+        "404":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/handlers.ErrorResponse'
+          description: Not Found
+        "500":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/handlers.ErrorResponse'
+          description: Internal Server Error
+      security:
+      - BearerAuth: []
+      summary: 禁用 runtime 节点
+      tags:
+      - runtime-nodes
+  /runtime-nodes/{nodeId}/enable:
+    post:
+      description: 将节点状态从 disabled 恢复为 active，允许继续分配应用
+      parameters:
+      - description: 节点 ID
+        in: path
+        name: nodeId
+        required: true
+        schema:
+          type: string
+      responses:
+        "200":
+          content:
+            application/json:
+              schema:
+                additionalProperties:
+                  $ref: '#/components/schemas/service.RuntimeNodeResult'
+                type: object
+          description: OK
+        "401":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/handlers.ErrorResponse'
+          description: Unauthorized
+        "403":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/handlers.ErrorResponse'
+          description: Forbidden
+        "404":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/handlers.ErrorResponse'
+          description: Not Found
+        "500":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/handlers.ErrorResponse'
+          description: Internal Server Error
+      security:
+      - BearerAuth: []
+      summary: 启用 runtime 节点
+      tags:
+      - runtime-nodes
+  /runtime-nodes/{nodeId}/rotate-bootstrap:
+    post:
+      description: 为指定节点生成新的一次性 bootstrap token；节点处于活跃状态时返回 409
+      parameters:
+      - description: 节点 ID
+        in: path
+        name: nodeId
+        required: true
+        schema:
+          type: string
+      responses:
+        "200":
+          content:
+            application/json:
+              schema:
+                additionalProperties:
+                  $ref: '#/components/schemas/service.RuntimeNodeResult'
+                type: object
+          description: OK
+        "401":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/handlers.ErrorResponse'
+          description: Unauthorized
+        "403":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/handlers.ErrorResponse'
+          description: Forbidden
+        "404":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/handlers.ErrorResponse'
+          description: Not Found
+        "409":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/handlers.ErrorResponse'
+          description: Conflict
+        "500":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/handlers.ErrorResponse'
+          description: Internal Server Error
+      security:
+      - BearerAuth: []
+      summary: 轮换 bootstrap token
+      tags:
+      - runtime-nodes
 servers:
 - url: /api/v1

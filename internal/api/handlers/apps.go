@@ -35,6 +35,21 @@ func RegisterAppRoutes(router gin.IRouter, handler *AppsHandler) {
 }
 
 // List 列出组织内的应用。
+//
+// @Summary      应用列表
+// @Description  按组织 ID 分页列出应用；org_member 只能看到自己的应用
+// @Tags         apps
+// @Produce      json
+// @Security     BearerAuth
+// @Param        orgId   path      string  true   "组织 ID"
+// @Param        limit   query     int     false  "每页条数（默认不限）"
+// @Param        offset  query     int     false  "分页偏移（默认 0）"
+// @Success      200     {object}  map[string][]service.AppResult
+// @Failure      401     {object}  ErrorResponse
+// @Failure      403     {object}  ErrorResponse
+// @Failure      404     {object}  ErrorResponse
+// @Failure      500     {object}  ErrorResponse
+// @Router       /organizations/{orgId}/apps [get]
 func (h *AppsHandler) List(c *gin.Context) {
 	principal, ok := h.principal(c)
 	if !ok {
@@ -51,6 +66,19 @@ func (h *AppsHandler) List(c *gin.Context) {
 }
 
 // Get 查询单个应用详情。
+//
+// @Summary      应用详情
+// @Description  按 appId 获取单个应用信息；org_member 只能查询自己的应用
+// @Tags         apps
+// @Produce      json
+// @Security     BearerAuth
+// @Param        appId  path      string  true  "应用 ID"
+// @Success      200    {object}  map[string]service.AppResult
+// @Failure      401    {object}  ErrorResponse
+// @Failure      403    {object}  ErrorResponse
+// @Failure      404    {object}  ErrorResponse
+// @Failure      500    {object}  ErrorResponse
+// @Router       /apps/{appId} [get]
 func (h *AppsHandler) Get(c *gin.Context) {
 	principal, ok := h.principal(c)
 	if !ok {

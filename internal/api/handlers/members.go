@@ -74,7 +74,23 @@ func RegisterMemberRoutes(router gin.IRouter, handler *MembersHandler) {
 	memberGroup.DELETE("/:userId", handler.Delete)
 }
 
-// Create 处理创建成员。
+// Create 创建组织成员。
+//
+// @Summary      创建组织成员
+// @Description  组织管理员或平台管理员在指定组织下创建新成员
+// @Tags         members
+// @Accept       json
+// @Produce      json
+// @Security     BearerAuth
+// @Param        orgId  path      string               true  "组织 ID"
+// @Param        body   body      CreateMemberRequest  true  "创建成员请求"
+// @Success      201    {object}  map[string]service.MemberResult
+// @Failure      400    {object}  ErrorResponse
+// @Failure      401    {object}  ErrorResponse
+// @Failure      403    {object}  ErrorResponse
+// @Failure      404    {object}  ErrorResponse
+// @Failure      500    {object}  ErrorResponse
+// @Router       /organizations/{orgId}/members [post]
 func (h *MembersHandler) Create(c *gin.Context) {
 	principal, ok := h.principal(c)
 	if !ok {
@@ -98,7 +114,22 @@ func (h *MembersHandler) Create(c *gin.Context) {
 	c.JSON(http.StatusCreated, gin.H{"member": result})
 }
 
-// List 处理成员列表。
+// List 列出组织成员。
+//
+// @Summary      组织成员列表
+// @Description  按组织 ID 分页列出成员；org_member 只能看到自己
+// @Tags         members
+// @Produce      json
+// @Security     BearerAuth
+// @Param        orgId   path      string  true   "组织 ID"
+// @Param        limit   query     int     false  "每页条数（默认不限）"
+// @Param        offset  query     int     false  "分页偏移（默认 0）"
+// @Success      200     {object}  map[string][]service.MemberResult
+// @Failure      401     {object}  ErrorResponse
+// @Failure      403     {object}  ErrorResponse
+// @Failure      404     {object}  ErrorResponse
+// @Failure      500     {object}  ErrorResponse
+// @Router       /organizations/{orgId}/members [get]
 func (h *MembersHandler) List(c *gin.Context) {
 	principal, ok := h.principal(c)
 	if !ok {
@@ -114,7 +145,20 @@ func (h *MembersHandler) List(c *gin.Context) {
 	c.JSON(http.StatusOK, gin.H{"members": results})
 }
 
-// Get 查询单个成员明细。
+// Get 获取成员详情。
+//
+// @Summary      成员详情
+// @Description  按 userId 获取单个成员信息；org_member 只能查询自身
+// @Tags         members
+// @Produce      json
+// @Security     BearerAuth
+// @Param        userId  path      string  true  "成员用户 ID"
+// @Success      200     {object}  map[string]service.MemberResult
+// @Failure      401     {object}  ErrorResponse
+// @Failure      403     {object}  ErrorResponse
+// @Failure      404     {object}  ErrorResponse
+// @Failure      500     {object}  ErrorResponse
+// @Router       /members/{userId} [get]
 func (h *MembersHandler) Get(c *gin.Context) {
 	principal, ok := h.principal(c)
 	if !ok {
@@ -128,7 +172,23 @@ func (h *MembersHandler) Get(c *gin.Context) {
 	c.JSON(http.StatusOK, gin.H{"member": result})
 }
 
-// Update 修改成员显示名/角色。
+// Update 更新成员信息。
+//
+// @Summary      更新成员
+// @Description  更新成员显示名或角色；org_admin 仅可更新自己组织的成员
+// @Tags         members
+// @Accept       json
+// @Produce      json
+// @Security     BearerAuth
+// @Param        userId  path      string               true  "成员用户 ID"
+// @Param        body    body      UpdateMemberRequest  true  "更新成员请求"
+// @Success      200     {object}  map[string]service.MemberResult
+// @Failure      400     {object}  ErrorResponse
+// @Failure      401     {object}  ErrorResponse
+// @Failure      403     {object}  ErrorResponse
+// @Failure      404     {object}  ErrorResponse
+// @Failure      500     {object}  ErrorResponse
+// @Router       /members/{userId} [patch]
 func (h *MembersHandler) Update(c *gin.Context) {
 	principal, ok := h.principal(c)
 	if !ok {
@@ -151,11 +211,37 @@ func (h *MembersHandler) Update(c *gin.Context) {
 }
 
 // Disable 禁用成员。
+//
+// @Summary      禁用成员
+// @Description  将成员状态设为 disabled，成员登录时将被拒绝
+// @Tags         members
+// @Produce      json
+// @Security     BearerAuth
+// @Param        userId  path      string  true  "成员用户 ID"
+// @Success      200     {object}  map[string]service.MemberResult
+// @Failure      401     {object}  ErrorResponse
+// @Failure      403     {object}  ErrorResponse
+// @Failure      404     {object}  ErrorResponse
+// @Failure      500     {object}  ErrorResponse
+// @Router       /members/{userId}/disable [post]
 func (h *MembersHandler) Disable(c *gin.Context) {
 	h.setStatus(c, domain.StatusDisabled)
 }
 
 // Enable 启用成员。
+//
+// @Summary      启用成员
+// @Description  将成员状态从 disabled 恢复为 active
+// @Tags         members
+// @Produce      json
+// @Security     BearerAuth
+// @Param        userId  path      string  true  "成员用户 ID"
+// @Success      200     {object}  map[string]service.MemberResult
+// @Failure      401     {object}  ErrorResponse
+// @Failure      403     {object}  ErrorResponse
+// @Failure      404     {object}  ErrorResponse
+// @Failure      500     {object}  ErrorResponse
+// @Router       /members/{userId}/enable [post]
 func (h *MembersHandler) Enable(c *gin.Context) {
 	h.setStatus(c, domain.StatusActive)
 }
@@ -175,6 +261,23 @@ func (h *MembersHandler) setStatus(c *gin.Context, status string) {
 
 // Onboard 在事务中创建成员、应用、渠道绑定、审计与初始化任务。
 // 调用方未配置 onboarding service 时返回 503，避免暴露未实现的行为。
+//
+// @Summary      成员 onboarding（事务创建）
+// @Description  在单个事务内创建成员并联动初始化应用、渠道绑定和 newapi 凭证；onboarding service 未配置时返回 503
+// @Tags         members
+// @Accept       json
+// @Produce      json
+// @Security     BearerAuth
+// @Param        orgId  path      string                true  "组织 ID"
+// @Param        body   body      OnboardMemberRequest  true  "onboarding 请求"
+// @Success      201    {object}  map[string]service.OnboardMemberResult
+// @Failure      400    {object}  ErrorResponse
+// @Failure      401    {object}  ErrorResponse
+// @Failure      403    {object}  ErrorResponse
+// @Failure      404    {object}  ErrorResponse
+// @Failure      500    {object}  ErrorResponse
+// @Failure      503    {object}  ErrorResponse
+// @Router       /organizations/{orgId}/members/onboard [post]
 func (h *MembersHandler) Onboard(c *gin.Context) {
 	if h.onboarding == nil {
 		c.JSON(http.StatusServiceUnavailable, gin.H{"error": "成员联动应用流程暂未启用"})
@@ -208,6 +311,22 @@ func (h *MembersHandler) Onboard(c *gin.Context) {
 }
 
 // ResetPassword 由管理员重置成员密码。
+//
+// @Summary      重置成员密码
+// @Description  平台管理员或组织管理员强制重置指定成员的密码
+// @Tags         members
+// @Accept       json
+// @Produce      json
+// @Security     BearerAuth
+// @Param        userId  path      string               true  "成员用户 ID"
+// @Param        body    body      ResetPasswordRequest  true  "重置密码请求"
+// @Success      204     "密码重置成功，无响应体"
+// @Failure      400     {object}  ErrorResponse
+// @Failure      401     {object}  ErrorResponse
+// @Failure      403     {object}  ErrorResponse
+// @Failure      404     {object}  ErrorResponse
+// @Failure      500     {object}  ErrorResponse
+// @Router       /members/{userId}/password [post]
 func (h *MembersHandler) ResetPassword(c *gin.Context) {
 	principal, ok := h.principal(c)
 	if !ok {
@@ -226,6 +345,19 @@ func (h *MembersHandler) ResetPassword(c *gin.Context) {
 }
 
 // Delete 软删成员并联动应用回收。
+//
+// @Summary      删除成员
+// @Description  软删指定成员，并联动触发应用回收任务
+// @Tags         members
+// @Produce      json
+// @Security     BearerAuth
+// @Param        userId  path      string  true  "成员用户 ID"
+// @Success      204     "删除成功，无响应体"
+// @Failure      401     {object}  ErrorResponse
+// @Failure      403     {object}  ErrorResponse
+// @Failure      404     {object}  ErrorResponse
+// @Failure      500     {object}  ErrorResponse
+// @Router       /members/{userId} [delete]
 func (h *MembersHandler) Delete(c *gin.Context) {
 	principal, ok := h.principal(c)
 	if !ok {
