@@ -131,12 +131,13 @@ yaml 仍存在，加载时打 WARN 日志说明已废弃、值被忽略。
 挂载为持久化卷是部署强约束（README 已明确）；丢失视为节点身份丢失，按
 「disable 旧行，agent 会以新 agent_id 自动 enroll 为新行」处置。
 
-## 5. 数据库迁移 000008_runtime_nodes_auto_enroll
+## 5. 数据库迁移 000012_runtime_nodes_auto_enroll
 
 ```sql
 -- up
 ALTER TABLE runtime_nodes
   ADD COLUMN agent_id             text        NULL,
+  ADD COLUMN last_probe_attempted_at timestamptz NULL,
   ADD COLUMN last_probe_ok_at     timestamptz NULL,
   ADD COLUMN last_probe_failed_at timestamptz NULL,
   ADD COLUMN last_probe_error     text        NULL,
@@ -157,12 +158,14 @@ ALTER TABLE runtime_nodes
 
 COMMENT ON COLUMN runtime_nodes.agent_id IS
   'agent 自身持久化的 UUID（state_dir/agent-id），全表唯一；enroll 幂等键。';
+COMMENT ON COLUMN runtime_nodes.last_probe_attempted_at IS
+  'manager 最近一次主动探测该 agent 双端口的发起时间；无论请求是否到达 agent 都更新。';
 COMMENT ON COLUMN runtime_nodes.last_probe_ok_at IS
   'manager 最近一次对 agent 双端口探测全部通过的时间。';
 COMMENT ON COLUMN runtime_nodes.last_probe_failed_at IS
   'manager 最近一次对 agent 双端口探测任一失败的时间。';
 COMMENT ON COLUMN runtime_nodes.last_probe_error IS
-  '最近一次 probe 失败的简短错误分类（docker:tls / file:401 / both:timeout 等）。';
+  'manager 最近一次 probe 失败的简短错误分类（docker:tls / file:401 / both:timeout 等）。';
 ```
 
 down 文件对称恢复，包括：删除新增列与索引、恢复 `name` 唯一约束、
@@ -270,8 +273,9 @@ swag 注解重新生成，openapi.yaml 与 web 类型跟随更新（`make openap
 - `POST /api/v1/runtime-nodes/:id/disable`
 - `POST /api/v1/runtime-nodes/:id/enable`
 
-响应 `RuntimeNodeResult` 增补字段：`agent_id` / `last_probe_ok_at` /
-`last_probe_failed_at` / `last_probe_error` / `probe_failure_streak`。
+响应 `RuntimeNodeResult` 增补字段：`agent_id` / `last_probe_attempted_at` /
+`last_probe_ok_at` / `last_probe_failed_at` / `last_probe_error` /
+`probe_failure_streak` / `probe_success_streak`。
 删除 `bootstrap_token` / `bootstrap_token_expires_at` 字段。
 
 ## 7. agent 启动状态机
@@ -329,6 +333,11 @@ swag 注解重新生成，openapi.yaml 与 web 类型跟随更新（`make openap
 
 ### 8.1 探测协议
 
+probe 结果是 **manager 观测状态**，只由 manager 的 probe reconciler 写入
+`runtime_nodes`。agent 不上报这些字段，也不需要确认“探测请求到达过”。因此 DNS
+失败、TLS 握手失败、防火墙丢包、TCP 连接拒绝、HTTP 401/5xx 等都必须在 manager
+侧记录为一次探测尝试和失败结果。
+
 两个 HTTP GET，并发发出：
 
 | 目标 | URL | Header | 判定通过 |
@@ -371,18 +380,21 @@ net.Error.Timeout → `"timeout"`；HTTP 401 → `"401"`；HTTP 5xx → `"5xx:<c
 
 ```
 解密 agent_token ciphertext（token_resolver）
-  ciphertext 缺失或解密失败 → 跳过该节点 + WARN 日志 + 写 last_probe_error="token:decrypt-failed"
+  ciphertext 缺失或解密失败 → 写 last_probe_attempted_at=now(),
+    last_probe_error="token:decrypt-failed" + WARN 日志，然后跳过该节点
   （不翻 degraded：probe 是诊断手段，自身故障不应让被监控对象背锅）
 并发 probe Docker + File
   两个都 OK：
-    UPDATE last_probe_ok_at = now(),
+    UPDATE last_probe_attempted_at = now(),
+           last_probe_ok_at = now(),
            probe_success_streak = probe_success_streak + 1,
            probe_failure_streak = 0,
            last_probe_error = NULL
     IF status = 'degraded' AND probe_success_streak >= recovery_threshold:
       status → 'active'
   任一 FAIL：
-    UPDATE last_probe_failed_at = now(),
+    UPDATE last_probe_attempted_at = now(),
+           last_probe_failed_at = now(),
            probe_failure_streak = probe_failure_streak + 1,
            probe_success_streak = 0,
            last_probe_error = 组合字符串（例："docker:tls:x509 / file:timeout"）
@@ -392,6 +404,9 @@ net.Error.Timeout → `"timeout"`；HTTP 401 → `"401"`；HTTP 5xx → `"5xx:<c
 
 状态翻转写 audit_logs（`action = 'node_probe_degraded' / 'node_probe_recovered'`、
 `actor_role = 'system'`）。
+
+每次探测尝试都写 `last_probe_attempted_at`，但 audit log 只记录状态翻转，不记录
+每次失败；否则网络抖动会刷爆审计日志。
 
 `degraded` **不**把节点上应用推 `error`（与 `unreachable` 行为区别）；
 原因：入站不通不代表应用已崩，推 error 会造成误报。
@@ -419,8 +434,8 @@ g.Go(func() error { return probeTask.Run(ctx, logger) })
 
 新增：
 
-- `internal/migrations/000008_runtime_nodes_auto_enroll.up.sql`
-- `internal/migrations/000008_runtime_nodes_auto_enroll.down.sql`
+- `internal/migrations/000012_runtime_nodes_auto_enroll.up.sql`
+- `internal/migrations/000012_runtime_nodes_auto_enroll.down.sql`
 - `internal/integrations/agent/probe.go` + `probe_test.go`
 - `internal/service/probe_reconciler.go` + `probe_reconciler_test.go`
 - `internal/api/middleware/enrollment_secret.go`（或直接内嵌 handler，按最小改动）
@@ -495,7 +510,9 @@ g.Go(func() error { return probeTask.Run(ctx, logger) })
   - 删除注册节点弹窗组件 / bootstrap token 复制组件 / Rotate bootstrap 按钮
   - 列表展示 `agent_id`（短哈希前 8 位 + tooltip 全文）
   - 状态列支持 `degraded`（黄点 + tooltip 展示 `last_probe_error`）
-  - 详情页新增「最近探测」区块：`last_probe_ok_at` / `last_probe_failed_at` / `last_probe_error` / `probe_failure_streak`
+  - 详情页新增「最近探测」区块：`last_probe_attempted_at` /
+    `last_probe_ok_at` / `last_probe_failed_at` / `last_probe_error` /
+    `probe_failure_streak` / `probe_success_streak`
   - 空态文案改为「在节点上启动 oc-runtime-agent，节点会自动出现」
 - `web/src/api/generated.ts`：由 `make web-types-gen` 跟随更新
 - `web/src/domain/`：runtime-node 状态枚举加 `degraded`
@@ -537,10 +554,12 @@ manager：
   - `degraded` 节点收到心跳 → 状态保持 `degraded`（新断言，§6.2 改造验证）
   - `active` 节点收到心跳 → 状态保持 `active`
 - `service.NodeProbeReconciler`：
-  - 全绿：streak 归 0、`last_probe_ok_at` 写入、状态保持
-  - 部分失败：streak +1、状态保持
+  - 全绿：写 `last_probe_attempted_at` / `last_probe_ok_at`，streak 归 0、状态保持
+  - 部分失败：写 `last_probe_attempted_at` / `last_probe_failed_at` /
+    `last_probe_error`，streak +1、状态保持
   - 失败到 `failure_threshold`：推 `degraded`、audit 写入、`last_probe_error` 分类正确
   - degraded 节点连续成功到 `recovery_threshold`：回 `active`、audit 写入
+  - DNS / TLS / timeout / connrefused 等请求未到达 agent 的失败也记录在 manager 字段中
   - `degraded` 节点上 running 应用不被推 error（与 unreachable 对比测试）
   - `disabled` / `unreachable` 节点被跳过
 - `integrations/agent.Probe`：httptest 模拟 401 / 超时 / 5xx / 200、TLS 握手失败；
