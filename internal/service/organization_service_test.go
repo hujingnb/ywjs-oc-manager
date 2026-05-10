@@ -10,12 +10,12 @@ import (
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgtype"
 
+	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
 	"oc-manager/internal/auth"
 	"oc-manager/internal/domain"
 	"oc-manager/internal/integrations/newapi"
 	"oc-manager/internal/store/sqlc"
-	"github.com/stretchr/testify/require"
-	"github.com/stretchr/testify/assert"
 )
 
 func TestOrganizationServiceCreateRequiresPlatformAdmin(t *testing.T) {
@@ -34,12 +34,16 @@ func TestOrganizationServiceCreateProvisionsNewAPIUser(t *testing.T) {
 		accessToken: "access-tok-xyz",
 	}
 	svc := NewOrganizationService(store, prov, mustCipher(t), nil)
+	svc.hashPassword = fakeHash
 	threshold := int32(20)
 
 	result, err := svc.CreateOrganization(context.Background(), auth.Principal{Role: domain.UserRolePlatformAdmin}, OrganizationInput{
 		Name:                   "测试组织",
 		ContactName:            "张三",
 		CreditWarningThreshold: &threshold,
+		AdminUsername:          "org-admin",
+		AdminDisplayName:       "组织管理员",
+		AdminPassword:          "secret-password",
 	})
 	require.NoError(t, err)
 	if result.Name != "测试组织" || result.CreditWarningThreshold == nil || *result.CreditWarningThreshold != 20 {
@@ -66,6 +70,29 @@ func TestOrganizationServiceCreateProvisionsNewAPIUser(t *testing.T) {
 	}
 }
 
+func TestOrganizationServiceCreateAlsoCreatesOrgAdmin(t *testing.T) {
+	store := &organizationStoreStub{}
+	prov := &fakeProvisioner{user: newapi.User{ID: 42}, accessToken: "access-tok-xyz"}
+	svc := NewOrganizationService(store, prov, mustCipher(t), nil)
+	svc.hashPassword = fakeHash
+
+	_, err := svc.CreateOrganization(context.Background(), auth.Principal{Role: domain.UserRolePlatformAdmin}, OrganizationInput{
+		Name:             "测试组织",
+		AdminUsername:    "org-admin",
+		AdminDisplayName: "组织管理员",
+		AdminPassword:    "secret-password",
+	})
+	require.NoError(t, err)
+
+	require.True(t, store.createUserCalled)
+	assert.Equal(t, store.org.ID, store.createdUser.OrgID)
+	assert.Equal(t, "org-admin", store.createdUser.Username)
+	assert.Equal(t, "组织管理员", store.createdUser.DisplayName)
+	assert.Equal(t, "hashed:secret-password", store.createdUser.PasswordHash)
+	assert.Equal(t, domain.UserRoleOrgAdmin, store.createdUser.Role)
+	assert.Equal(t, domain.StatusActive, store.createdUser.Status)
+}
+
 // TestOrganizationServiceCreateRollbackOnProvisioningFailure 校验 BootstrapUserAccessToken
 // 失败时回滚 manager 端组织行（HardDeleteOrganization 被调用）。
 func TestOrganizationServiceCreateRollbackOnProvisioningFailure(t *testing.T) {
@@ -75,8 +102,14 @@ func TestOrganizationServiceCreateRollbackOnProvisioningFailure(t *testing.T) {
 		bootstrapError: errors.New("login 失败"),
 	}
 	svc := NewOrganizationService(store, prov, mustCipher(t), nil)
+	svc.hashPassword = fakeHash
 
-	_, err := svc.CreateOrganization(context.Background(), auth.Principal{Role: domain.UserRolePlatformAdmin}, OrganizationInput{Name: "测试组织"})
+	_, err := svc.CreateOrganization(context.Background(), auth.Principal{Role: domain.UserRolePlatformAdmin}, OrganizationInput{
+		Name:             "测试组织",
+		AdminUsername:    "org-admin",
+		AdminDisplayName: "组织管理员",
+		AdminPassword:    "secret-password",
+	})
 	require.Error(t, err)
 	require.True(t, store.hardDeleted)
 }
@@ -154,11 +187,13 @@ func (p *fakeProvisioner) DeleteUser(_ context.Context, userID int64) error {
 }
 
 type organizationStoreStub struct {
-	org          sqlc.Organization
-	created      sqlc.CreateOrganizationParams
-	updated      sqlc.SetOrganizationNewAPIUserParams
-	updateCalled bool
-	hardDeleted  bool
+	org              sqlc.Organization
+	created          sqlc.CreateOrganizationParams
+	updated          sqlc.SetOrganizationNewAPIUserParams
+	createdUser      sqlc.CreateUserParams
+	updateCalled     bool
+	createUserCalled bool
+	hardDeleted      bool
 }
 
 func (s *organizationStoreStub) CreateOrganization(_ context.Context, arg sqlc.CreateOrganizationParams) (sqlc.Organization, error) {
@@ -182,6 +217,21 @@ func (s *organizationStoreStub) SetOrganizationNewAPIUser(_ context.Context, arg
 	out.NewapiUserID = arg.NewapiUserID
 	out.NewapiUserCredentialsCiphertext = arg.NewapiUserCredentialsCiphertext
 	return out, nil
+}
+
+func (s *organizationStoreStub) CreateUser(_ context.Context, arg sqlc.CreateUserParams) (sqlc.User, error) {
+	s.createdUser = arg
+	s.createUserCalled = true
+	id, _ := parseUUID("00000000-0000-0000-0000-000000000201")
+	return sqlc.User{
+		ID:           id,
+		OrgID:        arg.OrgID,
+		Username:     arg.Username,
+		PasswordHash: arg.PasswordHash,
+		DisplayName:  arg.DisplayName,
+		Role:         arg.Role,
+		Status:       arg.Status,
+	}, nil
 }
 
 func (s *organizationStoreStub) HardDeleteOrganization(_ context.Context, _ pgtype.UUID) error {
@@ -229,8 +279,14 @@ func TestCreateOrganization_BootstrapTokenFailureTriggersDeleteUserAndAudit(t *t
 		bootstrapError: errors.New("login 5xx"),
 	}
 	svc := NewOrganizationService(&organizationStoreStub{}, prov, mustCipher(t), auditor)
+	svc.hashPassword = fakeHash
 
-	_, err := svc.CreateOrganization(context.Background(), auth.Principal{Role: domain.UserRolePlatformAdmin}, OrganizationInput{Name: "v102-orphan-test"})
+	_, err := svc.CreateOrganization(context.Background(), auth.Principal{Role: domain.UserRolePlatformAdmin}, OrganizationInput{
+		Name:             "v102-orphan-test",
+		AdminUsername:    "org-admin",
+		AdminDisplayName: "组织管理员",
+		AdminPassword:    "secret-password",
+	})
 	require.Error(t, err)
 	if !prov.deleteUserCalled {
 		t.Errorf("期望调用 DeleteUser 清理孤儿")
@@ -247,8 +303,14 @@ func TestCreateOrganization_CreateUserFailureNoDeleteUser(t *testing.T) {
 		createError: errors.New("create 500"),
 	}
 	svc := NewOrganizationService(&organizationStoreStub{}, prov, mustCipher(t), auditor)
+	svc.hashPassword = fakeHash
 
-	_, _ = svc.CreateOrganization(context.Background(), auth.Principal{Role: domain.UserRolePlatformAdmin}, OrganizationInput{Name: "v102-create-fail"})
+	_, _ = svc.CreateOrganization(context.Background(), auth.Principal{Role: domain.UserRolePlatformAdmin}, OrganizationInput{
+		Name:             "v102-create-fail",
+		AdminUsername:    "org-admin",
+		AdminDisplayName: "组织管理员",
+		AdminPassword:    "secret-password",
+	})
 	if prov.deleteUserCalled {
 		t.Errorf("CreateUser 失败时不应调 DeleteUser（无孤儿）")
 	}

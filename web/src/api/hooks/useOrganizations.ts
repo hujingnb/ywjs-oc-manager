@@ -12,7 +12,9 @@ export interface OrganizationFormPayload {
   contact_phone?: string
   remark?: string
   credit_warning_threshold?: number | null
-  newapi_user_id?: string
+  admin_username: string
+  admin_display_name: string
+  admin_password: string
 }
 
 // useOrganizationsQuery 提供平台维度的组织列表。

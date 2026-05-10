@@ -2722,7 +2722,7 @@ export interface paths {
             /** @description 创建组织请求 */
             requestBody: {
                 content: {
-                    "application/json": Record<string, never> | components["schemas"]["handlers.OrganizationRequest"];
+                    "application/json": Record<string, never> | components["schemas"]["handlers.CreateOrganizationRequest"];
                 };
             };
             responses: {
@@ -5253,6 +5253,16 @@ export interface components {
             password: string;
             role?: string;
             username: string;
+        };
+        "handlers.CreateOrganizationRequest": {
+            admin_display_name: string;
+            admin_password: string;
+            admin_username: string;
+            contact_name?: string;
+            contact_phone?: string;
+            credit_warning_threshold?: number;
+            name: string;
+            remark?: string;
         };
         "handlers.CreateRuntimeNodeRequest": {
             heartbeat_interval_seconds?: number;

@@ -48,7 +48,7 @@ func RegisterOrganizationRoutes(router gin.IRouter, handler *OrganizationsHandle
 // @Accept       json
 // @Produce      json
 // @Security     BearerAuth
-// @Param        body  body      OrganizationRequest           true  "创建组织请求"
+// @Param        body  body      CreateOrganizationRequest     true  "创建组织请求"
 // @Success      201   {object}  map[string]service.OrganizationResult
 // @Failure      400   {object}  ErrorResponse
 // @Failure      401   {object}  ErrorResponse
@@ -60,12 +60,12 @@ func (h *OrganizationsHandler) Create(c *gin.Context) {
 	if !ok {
 		return
 	}
-	var req OrganizationRequest
+	var req CreateOrganizationRequest
 	if err := c.ShouldBindJSON(&req); err != nil {
 		c.JSON(http.StatusBadRequest, gin.H{"error": "请求参数不完整"})
 		return
 	}
-	result, err := h.service.CreateOrganization(c.Request.Context(), principal, toOrganizationInput(req))
+	result, err := h.service.CreateOrganization(c.Request.Context(), principal, toCreateOrganizationInput(req))
 	if err != nil {
 		writeServiceError(c, err)
 		return
@@ -237,6 +237,19 @@ func toOrganizationInput(req OrganizationRequest) service.OrganizationInput {
 	}
 }
 
+func toCreateOrganizationInput(req CreateOrganizationRequest) service.OrganizationInput {
+	return service.OrganizationInput{
+		Name:                   req.Name,
+		ContactName:            req.ContactName,
+		ContactPhone:           req.ContactPhone,
+		Remark:                 req.Remark,
+		CreditWarningThreshold: req.CreditWarningThreshold,
+		AdminUsername:          req.AdminUsername,
+		AdminDisplayName:       req.AdminDisplayName,
+		AdminPassword:          req.AdminPassword,
+	}
+}
+
 func queryInt32(c *gin.Context, key string, fallback int32) int32 {
 	value := c.Query(key)
 	if value == "" {
@@ -255,6 +268,8 @@ func writeServiceError(c *gin.Context, err error) {
 		c.JSON(http.StatusForbidden, gin.H{"error": "无权执行该操作"})
 	case errors.Is(err, service.ErrNotFound):
 		c.JSON(http.StatusNotFound, gin.H{"error": "资源不存在"})
+	case errors.Is(err, service.ErrMemberCreateInvalid):
+		c.JSON(http.StatusBadRequest, gin.H{"error": "请求参数不完整"})
 	default:
 		c.JSON(http.StatusInternalServerError, gin.H{"error": "服务暂时不可用"})
 	}

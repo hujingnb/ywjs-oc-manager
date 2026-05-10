@@ -23,8 +23,19 @@ type RefreshRequest struct {
 
 // ===== 组织 organizations =====
 
-// OrganizationRequest 创建或更新组织的请求体。
-// 同时用于 Create 和 Update，两者 binding 规则一致，共用同一结构体。
+// CreateOrganizationRequest 创建组织的请求体。
+type CreateOrganizationRequest struct {
+	Name                   string `json:"name" binding:"required"`
+	ContactName            string `json:"contact_name"`
+	ContactPhone           string `json:"contact_phone"`
+	Remark                 string `json:"remark"`
+	CreditWarningThreshold *int32 `json:"credit_warning_threshold"`
+	AdminUsername          string `json:"admin_username" binding:"required"`
+	AdminDisplayName       string `json:"admin_display_name" binding:"required"`
+	AdminPassword          string `json:"admin_password" binding:"required"`
+}
+
+// OrganizationRequest 更新组织的请求体。
 type OrganizationRequest struct {
 	Name                   string `json:"name" binding:"required"`
 	ContactName            string `json:"contact_name"`

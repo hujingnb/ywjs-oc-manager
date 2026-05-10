@@ -39,6 +39,21 @@
             </n-form-item>
           </n-grid-item>
           <n-grid-item>
+            <n-form-item label="管理员用户名 *">
+              <n-input v-model:value="form.admin_username" placeholder="登录用户名" />
+            </n-form-item>
+          </n-grid-item>
+          <n-grid-item>
+            <n-form-item label="管理员姓名 *">
+              <n-input v-model:value="form.admin_display_name" placeholder="管理员显示名" />
+            </n-form-item>
+          </n-grid-item>
+          <n-grid-item>
+            <n-form-item label="管理员密码 *">
+              <n-input v-model:value="form.admin_password" type="password" show-password-on="click" placeholder="初始登录密码" />
+            </n-form-item>
+          </n-grid-item>
+          <n-grid-item>
             <n-form-item label="联系人">
               <n-input v-model:value="form.contact_name" placeholder="联系人姓名" />
             </n-form-item>
@@ -100,6 +115,9 @@ const { form, formVisible, creating, submitError, openForm, submit } = useFormMo
     contact_phone: '',
     remark: '',
     credit_warning_threshold: undefined as number | undefined,
+    admin_username: '',
+    admin_display_name: '',
+    admin_password: '',
   },
   mutation: createMutation,
   toPayload: (f) => ({
@@ -109,6 +127,9 @@ const { form, formVisible, creating, submitError, openForm, submit } = useFormMo
     remark: f.remark || undefined,
     credit_warning_threshold: typeof f.credit_warning_threshold === 'number'
       ? f.credit_warning_threshold : undefined,
+    admin_username: f.admin_username,
+    admin_display_name: f.admin_display_name,
+    admin_password: f.admin_password,
   }),
 })
 

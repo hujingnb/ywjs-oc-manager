@@ -53,6 +53,30 @@ components:
       - password
       - username
       type: object
+    handlers.CreateOrganizationRequest:
+      properties:
+        admin_display_name:
+          type: string
+        admin_password:
+          type: string
+        admin_username:
+          type: string
+        contact_name:
+          type: string
+        contact_phone:
+          type: string
+        credit_warning_threshold:
+          type: integer
+        name:
+          type: string
+        remark:
+          type: string
+      required:
+      - admin_display_name
+      - admin_password
+      - admin_username
+      - name
+      type: object
     handlers.CreateRuntimeNodeRequest:
       properties:
         heartbeat_interval_seconds:
@@ -2409,7 +2433,7 @@ paths:
             schema:
               oneOf:
               - type: object
-              - $ref: '#/components/schemas/handlers.OrganizationRequest'
+              - $ref: '#/components/schemas/handlers.CreateOrganizationRequest'
                 description: 创建组织请求
                 summary: body
         description: 创建组织请求

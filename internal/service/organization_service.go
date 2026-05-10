@@ -33,7 +33,7 @@ type NewAPIFailureContext struct {
 }
 
 // NewAPIFailureAuditor 抽象 new-api 失败审计写入能力，避免 service 直接依赖 audit 包
-//（audit 包反向依赖 service.AuditEvent，会形成导入环）。
+// （audit 包反向依赖 service.AuditEvent，会形成导入环）。
 // *audit.NewAPIAuditHelper 通过适配器满足此接口。
 type NewAPIFailureAuditor interface {
 	RecordNewAPIFailure(ctx context.Context, fc NewAPIFailureContext)
@@ -43,6 +43,7 @@ type NewAPIFailureAuditor interface {
 type OrganizationStore interface {
 	CreateOrganization(ctx context.Context, arg sqlc.CreateOrganizationParams) (sqlc.Organization, error)
 	SetOrganizationNewAPIUser(ctx context.Context, arg sqlc.SetOrganizationNewAPIUserParams) (sqlc.Organization, error)
+	CreateUser(ctx context.Context, arg sqlc.CreateUserParams) (sqlc.User, error)
 	HardDeleteOrganization(ctx context.Context, id pgtype.UUID) error
 	GetOrganization(ctx context.Context, id pgtype.UUID) (sqlc.Organization, error)
 	ListOrganizations(ctx context.Context, arg sqlc.ListOrganizationsParams) ([]sqlc.Organization, error)
@@ -75,12 +76,22 @@ type OrganizationService struct {
 	cipher       *auth.Cipher
 	failAuditor  NewAPIFailureAuditor // 新增；nil 时跳过 new-api 失败审计写入
 	usernamePool string               // 组织 user 的 username 前缀，便于改写本地与生产分布
+	hashPassword PasswordHasher
 }
 
 // NewOrganizationService 构造组织服务。
 // provisioner / cipher 必填；failAuditor 可为 nil（生产装配应注入满足 NewAPIFailureAuditor 的实现）。
 func NewOrganizationService(store OrganizationStore, provisioner NewAPIUserProvisioner, cipher *auth.Cipher, failAuditor NewAPIFailureAuditor) *OrganizationService {
-	return &OrganizationService{store: store, provisioner: provisioner, cipher: cipher, failAuditor: failAuditor, usernamePool: "org-"}
+	return &OrganizationService{
+		store:        store,
+		provisioner:  provisioner,
+		cipher:       cipher,
+		failAuditor:  failAuditor,
+		usernamePool: "org-",
+		hashPassword: func(password string) (string, error) {
+			return auth.HashPassword(password, auth.DefaultPasswordParams)
+		},
+	}
 }
 
 type OrganizationInput struct {
@@ -89,6 +100,9 @@ type OrganizationInput struct {
 	ContactPhone           string
 	Remark                 string
 	CreditWarningThreshold *int32
+	AdminUsername          string
+	AdminDisplayName       string
+	AdminPassword          string
 }
 
 type OrganizationResult struct {
@@ -114,6 +128,13 @@ func (s *OrganizationService) CreateOrganization(ctx context.Context, principal 
 	}
 	if s.provisioner == nil || s.cipher == nil {
 		return OrganizationResult{}, fmt.Errorf("organization service 未装配 newapi provisioner / cipher，无法创建组织")
+	}
+	if input.AdminUsername == "" || input.AdminDisplayName == "" || input.AdminPassword == "" {
+		return OrganizationResult{}, fmt.Errorf("%w: 管理员用户名、显示名和密码不能为空", ErrMemberCreateInvalid)
+	}
+	adminPasswordHash, err := s.hashPassword(input.AdminPassword)
+	if err != nil {
+		return OrganizationResult{}, fmt.Errorf("生成管理员密码 hash 失败: %w", err)
 	}
 
 	org, err := s.store.CreateOrganization(ctx, sqlc.CreateOrganizationParams{
@@ -172,6 +193,49 @@ func (s *OrganizationService) CreateOrganization(ctx context.Context, principal 
 		return OrganizationResult{}, err
 	}
 	org = commit
+	if _, err := s.store.CreateUser(ctx, sqlc.CreateUserParams{
+		OrgID:        org.ID,
+		Username:     input.AdminUsername,
+		PasswordHash: adminPasswordHash,
+		DisplayName:  input.AdminDisplayName,
+		Role:         domain.UserRoleOrgAdmin,
+		Status:       domain.StatusActive,
+	}); err != nil {
+		orgIDStr := uuidToString(org.ID)
+		if createdUserID != nil {
+			cleanupCtx, cleanupCancel := context.WithTimeout(context.Background(), 5*time.Second)
+			defer cleanupCancel()
+			if delErr := s.provisioner.DeleteUser(cleanupCtx, *createdUserID); delErr != nil {
+				slog.WarnContext(ctx, "best-effort 清理 newapi user 失败",
+					"newapi_user_id", *createdUserID,
+					"error", delErr,
+				)
+				if s.failAuditor != nil {
+					s.failAuditor.RecordNewAPIFailure(ctx, NewAPIFailureContext{
+						ActorID:   principal.UserID,
+						ActorRole: principal.Role,
+						OrgID:     orgIDStr,
+						Endpoint:  fmt.Sprintf("DELETE /api/user/%d", *createdUserID),
+						Err:       delErr,
+					})
+				}
+			}
+		}
+		wrappedErr := fmt.Errorf("创建组织管理员失败: %w", err)
+		if s.failAuditor != nil {
+			s.failAuditor.RecordNewAPIFailure(ctx, NewAPIFailureContext{
+				ActorID:   principal.UserID,
+				ActorRole: principal.Role,
+				OrgID:     orgIDStr,
+				Endpoint:  "CreateOrganizationAdmin",
+				Err:       wrappedErr,
+			})
+		}
+		if rollbackErr := s.store.HardDeleteOrganization(ctx, org.ID); rollbackErr != nil {
+			return OrganizationResult{}, fmt.Errorf("%w；回滚组织行失败: %v", wrappedErr, rollbackErr)
+		}
+		return OrganizationResult{}, wrappedErr
+	}
 	return toOrganizationResult(org), nil
 }
 

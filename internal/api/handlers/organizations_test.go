@@ -11,17 +11,17 @@ import (
 
 	"github.com/gin-gonic/gin"
 
+	"github.com/stretchr/testify/require"
 	"oc-manager/internal/auth"
 	"oc-manager/internal/domain"
 	"oc-manager/internal/service"
-	"github.com/stretchr/testify/require"
 )
 
 func TestOrganizationsCreateRequiresToken(t *testing.T) {
 	router, _ := newOrganizationsTestRouter(t, &organizationServiceStub{})
 
 	recorder := httptest.NewRecorder()
-	request := httptest.NewRequest(http.MethodPost, "/api/v1/organizations", bytes.NewBufferString(`{"name":"测试组织"}`))
+	request := httptest.NewRequest(http.MethodPost, "/api/v1/organizations", bytes.NewBufferString(`{"name":"测试组织","admin_username":"admin","admin_display_name":"管理员","admin_password":"secret-password"}`))
 	request.Header.Set("Content-Type", "application/json")
 	router.ServeHTTP(recorder, request)
 
@@ -37,7 +37,7 @@ func TestOrganizationsCreateReturnsCreatedOrganization(t *testing.T) {
 	require.NoError(t, err)
 
 	recorder := httptest.NewRecorder()
-	request := httptest.NewRequest(http.MethodPost, "/api/v1/organizations", bytes.NewBufferString(`{"name":"测试组织"}`))
+	request := httptest.NewRequest(http.MethodPost, "/api/v1/organizations", bytes.NewBufferString(`{"name":"测试组织","admin_username":"admin","admin_display_name":"管理员","admin_password":"secret-password"}`))
 	request.Header.Set("Content-Type", "application/json")
 	request.Header.Set("Authorization", "Bearer "+accessToken)
 	router.ServeHTTP(recorder, request)
@@ -51,6 +51,23 @@ func TestOrganizationsCreateReturnsCreatedOrganization(t *testing.T) {
 	if response.Organization.Name != "测试组织" || svc.lastPrincipal.Role != domain.UserRolePlatformAdmin {
 		t.Fatalf("response=%+v principal=%+v", response, svc.lastPrincipal)
 	}
+	require.Equal(t, "admin", svc.lastCreateInput.AdminUsername)
+	require.Equal(t, "管理员", svc.lastCreateInput.AdminDisplayName)
+	require.Equal(t, "secret-password", svc.lastCreateInput.AdminPassword)
+}
+
+func TestOrganizationsCreateRequiresAdminFields(t *testing.T) {
+	router, tokens := newOrganizationsTestRouter(t, &organizationServiceStub{})
+	accessToken, err := tokens.SignAccessToken(auth.Principal{UserID: "user-1", Role: domain.UserRolePlatformAdmin})
+	require.NoError(t, err)
+
+	recorder := httptest.NewRecorder()
+	request := httptest.NewRequest(http.MethodPost, "/api/v1/organizations", bytes.NewBufferString(`{"name":"测试组织"}`))
+	request.Header.Set("Content-Type", "application/json")
+	request.Header.Set("Authorization", "Bearer "+accessToken)
+	router.ServeHTTP(recorder, request)
+
+	require.Equal(t, http.StatusBadRequest, recorder.Code)
 }
 
 func newOrganizationsTestRouter(t *testing.T, svc *organizationServiceStub) (*gin.Engine, *auth.TokenManager) {
@@ -64,12 +81,14 @@ func newOrganizationsTestRouter(t *testing.T, svc *organizationServiceStub) (*gi
 }
 
 type organizationServiceStub struct {
-	createResult  service.OrganizationResult
-	lastPrincipal auth.Principal
+	createResult    service.OrganizationResult
+	lastPrincipal   auth.Principal
+	lastCreateInput service.OrganizationInput
 }
 
-func (s *organizationServiceStub) CreateOrganization(_ context.Context, principal auth.Principal, _ service.OrganizationInput) (service.OrganizationResult, error) {
+func (s *organizationServiceStub) CreateOrganization(_ context.Context, principal auth.Principal, input service.OrganizationInput) (service.OrganizationResult, error) {
 	s.lastPrincipal = principal
+	s.lastCreateInput = input
 	return s.createResult, nil
 }
 
