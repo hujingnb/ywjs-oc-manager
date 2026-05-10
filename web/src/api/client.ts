@@ -150,6 +150,9 @@ function extractErrorMessage(body: unknown, status: number): string {
   if (body && typeof body === 'object' && 'error' in body && typeof (body as { error: unknown }).error === 'string') {
     return (body as { error: string }).error
   }
+  if (body && typeof body === 'object' && 'message' in body && typeof (body as { message: unknown }).message === 'string') {
+    return (body as { message: string }).message
+  }
   return `请求失败 (${status})`
 }
 
