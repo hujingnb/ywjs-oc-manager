@@ -26,10 +26,10 @@ const dockerClientTimeout = 30 * time.Second
 // 关键点：
 //   - endpoint：agent 暴露的 docker 代理 URL（https://host:7001 或 https://ip:7001）；
 //     函数内部会把它改写成 tcp://host:7001/v1/docker 喂给 docker SDK，让 SDK 自动处理：
-//       1. basePath = /v1/docker，所有 REST 请求与 hijack 请求的 path 都自动加前缀；
-//       2. proto = "tcp"，使 hijack dialer 走 tls.Dial("tcp", addr, tlsConfig) 拨真 TLS 连接，
-//          否则 SDK 会用 net.Dial("https", ...) 失败（"unknown network https"）；
-//       3. scheme = "https"（由 SDK 根据 tlsConfig != nil 推导），保证非 hijack REST 走 TLS。
+//     1. basePath = /v1/docker，所有 REST 请求与 hijack 请求的 path 都自动加前缀；
+//     2. proto = "tcp"，使 hijack dialer 走 tls.Dial("tcp", addr, tlsConfig) 拨真 TLS 连接，
+//     否则 SDK 会用 net.Dial("https", ...) 失败（"unknown network https"）；
+//     3. scheme = "https"（由 SDK 根据 tlsConfig != nil 推导），保证非 hijack REST 走 TLS。
 //   - agentToken：注册成功后 manager 缓存的长期通信令牌，通过 client.WithHTTPHeaders
 //     注入为默认 Authorization 头；这样 REST 与 hijack（exec attach 等）都会自动携带。
 //   - caCertPEM：agent 自签 CA 证书 PEM，用于 manager 端 TLS 校验。
@@ -39,7 +39,7 @@ func NewDockerClientForNode(endpoint, agentToken, caCertPEM string, opts ...clie
 	if strings.TrimSpace(endpoint) == "" {
 		return nil, fmt.Errorf("agent docker endpoint 为空")
 	}
-	pool, err := buildCertPool(caCertPEM)
+	pool, err := BuildCertPool(caCertPEM)
 	if err != nil {
 		return nil, err
 	}
@@ -76,9 +76,9 @@ func NewDockerClientForNode(endpoint, agentToken, caCertPEM string, opts ...clie
 	return client.NewClientWithOpts(append(defaults, opts...)...)
 }
 
-// buildCertPool 把 caCertPEM 解析为 x509.CertPool。
+// BuildCertPool 把 caCertPEM 解析为 x509.CertPool。
 // 调用方必须提供 PEM；空字符串视作未配置 TLS 校验，第一版直接拒绝以防误用。
-func buildCertPool(caCertPEM string) (*x509.CertPool, error) {
+func BuildCertPool(caCertPEM string) (*x509.CertPool, error) {
 	if strings.TrimSpace(caCertPEM) == "" {
 		return nil, fmt.Errorf("agent CA cert PEM 为空")
 	}

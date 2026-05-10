@@ -4,6 +4,7 @@ package main
 
 import (
 	"context"
+	"crypto/tls"
 	"encoding/json"
 	"fmt"
 	"io"
@@ -44,19 +45,14 @@ type nodeQueries interface {
 // 之所以聚合到一个类型：每次都要先按 nodeID 查 runtime_node 行 + 取 token resolver，
 // 散到多个类型只会重复样板代码。
 type nodeClientResolver struct {
-	queries  nodeQueries
-	tokens   *agent.TokenResolver
-	httpAuth *http.Client
+	queries nodeQueries
+	tokens  *agent.TokenResolver
 }
 
 func newNodeClientResolver(queries nodeQueries, tokens *agent.TokenResolver) *nodeClientResolver {
 	return &nodeClientResolver{
 		queries: queries,
 		tokens:  tokens,
-		httpAuth: &http.Client{
-			// 文件 API 与镜像 API 均按节点限速；30s 是合理上限，调用方自行 ctx 收紧。
-			Timeout: 30 * time.Second,
-		},
 	}
 }
 
@@ -69,8 +65,12 @@ func (n *nodeClientResolver) FileClient(ctx context.Context, nodeID string) (*ag
 	if !node.AgentFileEndpoint.Valid || strings.TrimSpace(node.AgentFileEndpoint.String) == "" {
 		return nil, fmt.Errorf("节点 %s 未注册 agent_file_endpoint", nodeID)
 	}
+	httpClient, err := n.fileHTTPClient(node)
+	if err != nil {
+		return nil, err
+	}
 	client := agent.NewFileClient(node.AgentFileEndpoint.String, token)
-	client.HTTPClient = n.httpAuth
+	client.SetHTTPClient(httpClient)
 	return client, nil
 }
 
@@ -96,9 +96,12 @@ func (n *nodeClientResolver) InspectImage(ctx context.Context, nodeID, image str
 		return imagesync.RemoteImageInfo{}, err
 	}
 	inner := imagesync.AgentHTTPClient{
-		BaseURL:    node.AgentFileEndpoint.String,
-		Token:      token,
-		HTTPClient: n.httpAuth,
+		BaseURL: node.AgentFileEndpoint.String,
+		Token:   token,
+	}
+	inner.HTTPClient, err = n.fileHTTPClient(node)
+	if err != nil {
+		return imagesync.RemoteImageInfo{}, err
 	}
 	return inner.InspectImage(ctx, nodeID, image)
 }
@@ -110,9 +113,12 @@ func (n *nodeClientResolver) LoadImage(ctx context.Context, nodeID, image string
 		return imagesync.RemoteImageInfo{}, err
 	}
 	inner := imagesync.AgentHTTPClient{
-		BaseURL:    node.AgentFileEndpoint.String,
-		Token:      token,
-		HTTPClient: n.httpAuth,
+		BaseURL: node.AgentFileEndpoint.String,
+		Token:   token,
+	}
+	inner.HTTPClient, err = n.fileHTTPClient(node)
+	if err != nil {
+		return imagesync.RemoteImageInfo{}, err
 	}
 	return inner.LoadImage(ctx, nodeID, image, archive)
 }
@@ -135,6 +141,24 @@ func (n *nodeClientResolver) lookupNode(ctx context.Context, nodeID string) (sql
 		return sqlc.RuntimeNode{}, "", fmt.Errorf("节点 %s 的 agent token 不可用（需要重启 agent 触发自动注册）: %w", nodeID, err)
 	}
 	return node, token, nil
+}
+
+func (n *nodeClientResolver) fileHTTPClient(node sqlc.RuntimeNode) (*http.Client, error) {
+	if !node.AgentTlsCaCert.Valid || strings.TrimSpace(node.AgentTlsCaCert.String) == "" {
+		return nil, fmt.Errorf("节点 %s 缺 agent_tls_ca_cert", uuidToStringWiring(node.ID))
+	}
+	pool, err := agent.BuildCertPool(node.AgentTlsCaCert.String)
+	if err != nil {
+		return nil, err
+	}
+	return &http.Client{
+		// 文件 API 与镜像 API 均按节点限速；30s 是合理上限，调用方自行 ctx 收紧。
+		Timeout: 30 * time.Second,
+		Transport: &http.Transport{TLSClientConfig: &tls.Config{
+			RootCAs:    pool,
+			MinVersion: tls.VersionTLS12,
+		}},
+	}, nil
 }
 
 // appContainerLookup 实现 channel.AppContainerLookup，通过 sqlc.Queries 取容器 ID。

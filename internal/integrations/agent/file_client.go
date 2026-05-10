@@ -42,11 +42,25 @@ type AgentFileClient struct {
 // NewFileClient 创建一个 agent 文件 client。
 func NewFileClient(baseURL, token string) *AgentFileClient {
 	c := &AgentFileClient{BaseURL: baseURL, Token: token}
-	c.base = &httpclient.BaseHTTPClient{
-		BaseURL:   baseURL,
-		AuthToken: token,
-	}
+	c.rebuildBase()
 	return c
+}
+
+// SetHTTPClient 设置文件 API 共用 HTTP client。
+//
+// manager 访问 agent TLS 端口时必须注入信任该节点自签 CA 的 client；这里同时更新
+// 直接流式方法和 BaseHTTPClient 方法，避免不同文件 API 方法走不同 TLS 配置。
+func (c *AgentFileClient) SetHTTPClient(client *http.Client) {
+	c.HTTPClient = client
+	c.rebuildBase()
+}
+
+func (c *AgentFileClient) rebuildBase() {
+	c.base = &httpclient.BaseHTTPClient{
+		BaseURL:    c.BaseURL,
+		HTTPClient: c.HTTPClient,
+		AuthToken:  c.Token,
+	}
 }
 
 func (c *AgentFileClient) httpClient() *http.Client {

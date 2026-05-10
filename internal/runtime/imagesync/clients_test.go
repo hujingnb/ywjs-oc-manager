@@ -2,11 +2,13 @@ package imagesync
 
 import (
 	"context"
+	"crypto/tls"
+	"crypto/x509"
+	"github.com/stretchr/testify/require"
 	"net/http"
 	"net/http/httptest"
 	"strings"
 	"testing"
-	"github.com/stretchr/testify/require"
 )
 
 func TestAgentHTTPClientInspectImage(t *testing.T) {
@@ -24,6 +26,25 @@ func TestAgentHTTPClientInspectImage(t *testing.T) {
 	if !info.Exists || info.ID != "sha256:remote" {
 		t.Fatalf("unexpected info: %+v", info)
 	}
+}
+
+func TestAgentHTTPClientInspectImageUsesConfiguredTLSClient(t *testing.T) {
+	server := httptest.NewTLSServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		require.Equal(t, "/v1/images/inspect", r.URL.Path)
+		_, _ = w.Write([]byte(`{"exists":true,"info":{"id":"sha256:remote"}}`))
+	}))
+	defer server.Close()
+
+	_, err := AgentHTTPClient{BaseURL: server.URL}.InspectImage(context.Background(), "node-1", "openclaw-runtime:dev")
+	require.Error(t, err)
+
+	pool := x509.NewCertPool()
+	pool.AddCert(server.Certificate())
+	client := &http.Client{Transport: &http.Transport{TLSClientConfig: &tls.Config{RootCAs: pool}}}
+	info, err := AgentHTTPClient{BaseURL: server.URL, HTTPClient: client}.InspectImage(context.Background(), "node-1", "openclaw-runtime:dev")
+	require.NoError(t, err)
+	require.True(t, info.Exists)
+	require.Equal(t, "sha256:remote", info.ID)
 }
 
 func TestAgentHTTPClientLoadImage(t *testing.T) {

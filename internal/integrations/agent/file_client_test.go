@@ -2,11 +2,14 @@ package agent
 
 import (
 	"context"
+	"crypto/tls"
+	"crypto/x509"
 	"io"
 	"net/http"
 	"net/http/httptest"
 	"strings"
 	"testing"
+
 	"github.com/stretchr/testify/require"
 )
 
@@ -25,6 +28,26 @@ func TestFileClientList(t *testing.T) {
 	if listing.Path != "/data/foo" || len(listing.Entries) != 1 || listing.Entries[0].Name != "a.txt" {
 		t.Fatalf("listing = %+v", listing)
 	}
+}
+
+func TestFileClientListUsesConfiguredTLSClient(t *testing.T) {
+	server := httptest.NewTLSServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		require.Equal(t, "/v1/files/list", r.URL.Path)
+		require.Equal(t, "Bearer agent-1", r.Header.Get("Authorization"))
+		_, _ = w.Write([]byte(`{"path":"/","entries":[]}`))
+	}))
+	defer server.Close()
+
+	client := NewFileClient(server.URL, "agent-1")
+	_, err := client.List(context.Background(), "/")
+	require.Error(t, err)
+
+	pool := x509.NewCertPool()
+	pool.AddCert(server.Certificate())
+	client.SetHTTPClient(&http.Client{Transport: &http.Transport{TLSClientConfig: &tls.Config{RootCAs: pool}}})
+	listing, err := client.List(context.Background(), "/")
+	require.NoError(t, err)
+	require.Equal(t, "/", listing.Path)
 }
 
 func TestFileClientListPropagatesErrorBody(t *testing.T) {

@@ -46,7 +46,7 @@ func (c *ProbeClient) Probe(ctx context.Context, dockerEndpoint, fileEndpoint, t
 }
 
 func (c *ProbeClient) httpClient(caCertPEM string) (*http.Client, error) {
-	pool, err := buildCertPool(caCertPEM)
+	pool, err := BuildCertPool(caCertPEM)
 	if err != nil {
 		return nil, err
 	}
