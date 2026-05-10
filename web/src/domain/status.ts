@@ -55,6 +55,7 @@ export function formatMemberRole(role: string): string {
 const runtimeNodeStatusViews: Record<string, StatusView> = {
   pending: { label: '待注册', tone: 'warning' },
   active: { label: '在线', tone: 'success' },
+  degraded: { label: '探测异常', tone: 'warning' },
   unreachable: { label: '失联', tone: 'danger' },
   disabled: { label: '禁用', tone: 'neutral' },
 }

@@ -16,6 +16,7 @@ type Config struct {
 	Security SecurityConfig `yaml:"security"`
 	OpenClaw OpenClawConfig `yaml:"openclaw"`
 	Agent    AgentConfig    `yaml:"agent"`
+	Runtime  RuntimeConfig  `yaml:"runtime"`
 	NewAPI   NewAPIConfig   `yaml:"newapi"`
 }
 
@@ -107,6 +108,20 @@ type WorkspaceConfig struct {
 // HeartbeatIntervalSeconds 是约定值，agent 注册成功后回写并按此频率上报心跳。
 type AgentConfig struct {
 	HeartbeatIntervalSeconds int `yaml:"heartbeat_interval_seconds"`
+}
+
+// RuntimeConfig 描述 runtime node 自动注册和 manager 主动探测参数。
+type RuntimeConfig struct {
+	EnrollmentSecret string             `yaml:"enrollment_secret"`
+	Probe            RuntimeProbeConfig `yaml:"probe"`
+}
+
+// RuntimeProbeConfig 控制 manager 主动探测 agent 双端口的节奏和状态阈值。
+type RuntimeProbeConfig struct {
+	IntervalSeconds  int `yaml:"interval_seconds"`
+	TimeoutSeconds   int `yaml:"timeout_seconds"`
+	FailureThreshold int `yaml:"failure_threshold"`
+	RecoveryThreshold int `yaml:"recovery_threshold"`
 }
 
 // NewAPIConfig 描述 manager 与 new-api 网关的连接参数。

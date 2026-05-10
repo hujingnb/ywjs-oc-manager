@@ -4,7 +4,7 @@
  */
 
 export interface paths {
-    "/agent/heartbeat": {
+    "/agent/enroll": {
         parameters: {
             query?: never;
             header?: never;
@@ -14,20 +14,23 @@ export interface paths {
         get?: never;
         put?: never;
         /**
-         * Agent 心跳
-         * @description runtime agent 定期上报心跳及资源快照；鉴权通过请求体中的 agent_token 字段完成
+         * Agent 自动注册
+         * @description runtime agent 使用共享 enrollment secret 自动注册或刷新节点信息，并换取长效 agent token
          */
         post: {
             parameters: {
                 query?: never;
-                header?: never;
+                header: {
+                    /** @description Bearer enrollment_secret */
+                    Authorization: string;
+                };
                 path?: never;
                 cookie?: never;
             };
-            /** @description 心跳请求（含 agent_token） */
+            /** @description 自动注册请求 */
             requestBody: {
                 content: {
-                    "application/json": Record<string, never> | components["schemas"]["handlers.AgentHeartbeatRequest"];
+                    "application/json": Record<string, never> | components["schemas"]["handlers.AgentEnrollRequest"];
                 };
             };
             responses: {
@@ -37,9 +40,7 @@ export interface paths {
                         [name: string]: unknown;
                     };
                     content: {
-                        "application/json": {
-                            [key: string]: components["schemas"]["service.RuntimeNodeResult"];
-                        };
+                        "application/json": components["schemas"]["service.AgentEnrollResult"];
                     };
                 };
                 /** @description Bad Request */
@@ -77,7 +78,7 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
-    "/agent/register": {
+    "/agent/heartbeat": {
         parameters: {
             query?: never;
             header?: never;
@@ -87,8 +88,8 @@ export interface paths {
         get?: never;
         put?: never;
         /**
-         * Agent 注册
-         * @description runtime agent 用一次性 bootstrap token 注册并换取长效 agent token；鉴权通过请求体中的 bootstrap_token 字段完成
+         * Agent 心跳
+         * @description runtime agent 定期上报心跳及资源快照；鉴权通过请求体中的 agent_token 字段完成
          */
         post: {
             parameters: {
@@ -97,10 +98,10 @@ export interface paths {
                 path?: never;
                 cookie?: never;
             };
-            /** @description 注册请求（含 bootstrap_token） */
+            /** @description 心跳请求（含 agent_token） */
             requestBody: {
                 content: {
-                    "application/json": Record<string, never> | components["schemas"]["handlers.AgentRegisterRequest"];
+                    "application/json": Record<string, never> | components["schemas"]["handlers.AgentHeartbeatRequest"];
                 };
             };
             responses: {
@@ -110,7 +111,9 @@ export interface paths {
                         [name: string]: unknown;
                     };
                     content: {
-                        "application/json": components["schemas"]["service.AgentRegisterResult"];
+                        "application/json": {
+                            [key: string]: components["schemas"]["service.RuntimeNodeResult"];
+                        };
                     };
                 };
                 /** @description Bad Request */
@@ -4453,73 +4456,7 @@ export interface paths {
             };
         };
         put?: never;
-        /**
-         * 注册 runtime 节点
-         * @description 平台管理员注册新 runtime 节点，返回包含一次性 bootstrap token 的节点信息
-         */
-        post: {
-            parameters: {
-                query?: never;
-                header?: never;
-                path?: never;
-                cookie?: never;
-            };
-            /** @description 注册节点请求 */
-            requestBody: {
-                content: {
-                    "application/json": Record<string, never> | components["schemas"]["handlers.CreateRuntimeNodeRequest"];
-                };
-            };
-            responses: {
-                /** @description Created */
-                201: {
-                    headers: {
-                        [name: string]: unknown;
-                    };
-                    content: {
-                        "application/json": {
-                            [key: string]: components["schemas"]["service.RuntimeNodeResult"];
-                        };
-                    };
-                };
-                /** @description Bad Request */
-                400: {
-                    headers: {
-                        [name: string]: unknown;
-                    };
-                    content: {
-                        "application/json": components["schemas"]["handlers.ErrorResponse"];
-                    };
-                };
-                /** @description Unauthorized */
-                401: {
-                    headers: {
-                        [name: string]: unknown;
-                    };
-                    content: {
-                        "application/json": components["schemas"]["handlers.ErrorResponse"];
-                    };
-                };
-                /** @description Forbidden */
-                403: {
-                    headers: {
-                        [name: string]: unknown;
-                    };
-                    content: {
-                        "application/json": components["schemas"]["handlers.ErrorResponse"];
-                    };
-                };
-                /** @description Internal Server Error */
-                500: {
-                    headers: {
-                        [name: string]: unknown;
-                    };
-                    content: {
-                        "application/json": components["schemas"]["handlers.ErrorResponse"];
-                    };
-                };
-            };
-        };
+        post?: never;
         delete?: never;
         options?: never;
         head?: never;
@@ -4603,85 +4540,7 @@ export interface paths {
         delete?: never;
         options?: never;
         head?: never;
-        /**
-         * 更新 runtime 节点
-         * @description 更新节点的可调字段；当前仅支持 max_apps（null 表示清空上限）
-         */
-        patch: {
-            parameters: {
-                query?: never;
-                header?: never;
-                path: {
-                    /** @description 节点 ID */
-                    nodeId: string;
-                };
-                cookie?: never;
-            };
-            /** @description 更新节点请求 */
-            requestBody: {
-                content: {
-                    "application/json": Record<string, never> | components["schemas"]["handlers.PatchRuntimeNodeRequest"];
-                };
-            };
-            responses: {
-                /** @description OK */
-                200: {
-                    headers: {
-                        [name: string]: unknown;
-                    };
-                    content: {
-                        "application/json": {
-                            [key: string]: components["schemas"]["service.RuntimeNodeResult"];
-                        };
-                    };
-                };
-                /** @description Bad Request */
-                400: {
-                    headers: {
-                        [name: string]: unknown;
-                    };
-                    content: {
-                        "application/json": components["schemas"]["handlers.ErrorResponse"];
-                    };
-                };
-                /** @description Unauthorized */
-                401: {
-                    headers: {
-                        [name: string]: unknown;
-                    };
-                    content: {
-                        "application/json": components["schemas"]["handlers.ErrorResponse"];
-                    };
-                };
-                /** @description Forbidden */
-                403: {
-                    headers: {
-                        [name: string]: unknown;
-                    };
-                    content: {
-                        "application/json": components["schemas"]["handlers.ErrorResponse"];
-                    };
-                };
-                /** @description Not Found */
-                404: {
-                    headers: {
-                        [name: string]: unknown;
-                    };
-                    content: {
-                        "application/json": components["schemas"]["handlers.ErrorResponse"];
-                    };
-                };
-                /** @description Internal Server Error */
-                500: {
-                    headers: {
-                        [name: string]: unknown;
-                    };
-                    content: {
-                        "application/json": components["schemas"]["handlers.ErrorResponse"];
-                    };
-                };
-            };
-        };
+        patch?: never;
         trace?: never;
     };
     "/runtime-nodes/{nodeId}/disable": {
@@ -4820,95 +4679,6 @@ export interface paths {
                 };
                 /** @description Not Found */
                 404: {
-                    headers: {
-                        [name: string]: unknown;
-                    };
-                    content: {
-                        "application/json": components["schemas"]["handlers.ErrorResponse"];
-                    };
-                };
-                /** @description Internal Server Error */
-                500: {
-                    headers: {
-                        [name: string]: unknown;
-                    };
-                    content: {
-                        "application/json": components["schemas"]["handlers.ErrorResponse"];
-                    };
-                };
-            };
-        };
-        delete?: never;
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
-    };
-    "/runtime-nodes/{nodeId}/rotate-bootstrap": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        get?: never;
-        put?: never;
-        /**
-         * 轮换 bootstrap token
-         * @description 为指定节点生成新的一次性 bootstrap token；节点处于活跃状态时返回 409
-         */
-        post: {
-            parameters: {
-                query?: never;
-                header?: never;
-                path: {
-                    /** @description 节点 ID */
-                    nodeId: string;
-                };
-                cookie?: never;
-            };
-            requestBody?: never;
-            responses: {
-                /** @description OK */
-                200: {
-                    headers: {
-                        [name: string]: unknown;
-                    };
-                    content: {
-                        "application/json": {
-                            [key: string]: components["schemas"]["service.RuntimeNodeResult"];
-                        };
-                    };
-                };
-                /** @description Unauthorized */
-                401: {
-                    headers: {
-                        [name: string]: unknown;
-                    };
-                    content: {
-                        "application/json": components["schemas"]["handlers.ErrorResponse"];
-                    };
-                };
-                /** @description Forbidden */
-                403: {
-                    headers: {
-                        [name: string]: unknown;
-                    };
-                    content: {
-                        "application/json": components["schemas"]["handlers.ErrorResponse"];
-                    };
-                };
-                /** @description Not Found */
-                404: {
-                    headers: {
-                        [name: string]: unknown;
-                    };
-                    content: {
-                        "application/json": components["schemas"]["handlers.ErrorResponse"];
-                    };
-                };
-                /** @description Conflict */
-                409: {
                     headers: {
                         [name: string]: unknown;
                     };
@@ -5224,26 +4994,28 @@ export interface paths {
 export type webhooks = Record<string, never>;
 export interface components {
     schemas: {
+        "handlers.AgentEnrollRequest": {
+            agent_docker_endpoint?: string;
+            agent_file_endpoint?: string;
+            agent_id: string;
+            agent_tls_ca_cert?: string;
+            agent_version?: string;
+            max_apps?: number;
+            metadata?: {
+                [key: string]: unknown;
+            };
+            name?: string;
+            node_data_root?: string;
+            resource_snapshot?: {
+                [key: string]: unknown;
+            };
+        };
         "handlers.AgentHeartbeatRequest": {
             agent_token: string;
             agent_version?: string;
             metadata?: {
                 [key: string]: unknown;
             };
-            resource_snapshot?: {
-                [key: string]: unknown;
-            };
-        };
-        "handlers.AgentRegisterRequest": {
-            agent_docker_endpoint?: string;
-            agent_file_endpoint?: string;
-            agent_tls_ca_cert?: string;
-            agent_version?: string;
-            bootstrap_token: string;
-            metadata?: {
-                [key: string]: unknown;
-            };
-            node_data_root?: string;
             resource_snapshot?: {
                 [key: string]: unknown;
             };
@@ -5263,11 +5035,6 @@ export interface components {
             credit_warning_threshold?: number;
             name: string;
             remark?: string;
-        };
-        "handlers.CreateRuntimeNodeRequest": {
-            heartbeat_interval_seconds?: number;
-            name: string;
-            node_data_root?: string;
         };
         "handlers.ErrorResponse": {
             error?: string;
@@ -5305,9 +5072,6 @@ export interface components {
             name: string;
             remark?: string;
         };
-        "handlers.PatchRuntimeNodeRequest": {
-            max_apps?: number;
-        };
         "handlers.PersonaRequest": {
             allow_member_override?: boolean;
             conversation_rules?: string;
@@ -5332,7 +5096,7 @@ export interface components {
             display_name: string;
             role?: string;
         };
-        "service.AgentRegisterResult": {
+        "service.AgentEnrollResult": {
             agent_token?: string;
             heartbeat_interval_seconds?: number;
             node_id?: string;
@@ -5493,15 +5257,20 @@ export interface components {
         "service.RuntimeNodeResult": {
             agent_docker_endpoint?: string;
             agent_file_endpoint?: string;
+            agent_id?: string;
             agent_version?: string;
-            bootstrap_token?: string;
-            bootstrap_token_expires_at?: string;
             has_agent_token?: boolean;
             heartbeat_interval_seconds?: number;
             id?: string;
+            last_probe_attempted_at?: string;
+            last_probe_error?: string;
+            last_probe_failed_at?: string;
+            last_probe_ok_at?: string;
             max_apps?: number;
             name?: string;
             node_data_root?: string;
+            probe_failure_streak?: number;
+            probe_success_streak?: number;
             status?: string;
         };
         /** @enum {string} */

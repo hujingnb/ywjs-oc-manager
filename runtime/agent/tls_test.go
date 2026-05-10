@@ -8,9 +8,9 @@ import (
 	"crypto/x509"
 	"crypto/x509/pkix"
 	"encoding/pem"
+	"io/fs"
 	"math/big"
 	"net"
-	"io/fs"
 	"os"
 	"path/filepath"
 	"strings"
@@ -66,6 +66,19 @@ func TestEnsureSelfSignedCert_ReusesExisting(t *testing.T) {
 	mtimeAfter := mustMTime(t, filepath.Join(stateDir, "agent-tls.crt"))
 	require.True(t, mtimeBefore.Equal(mtimeAfter))
 	require.Equal(t, string(second.CertPEM), string(first.CertPEM))
+}
+
+func TestEnsureSelfSignedCert_RegeneratesWhenHostnameChanges(t *testing.T) {
+	stateDir := t.TempDir()
+	first, err := EnsureSelfSignedCert(stateDir, "old-host")
+	require.NoError(t, err)
+
+	second, err := EnsureSelfSignedCert(stateDir, "new-host")
+	require.NoError(t, err)
+
+	require.NotEqual(t, string(first.CertPEM), string(second.CertPEM))
+	leaf := mustParseLeafCert(t, second.CertPEM)
+	require.Contains(t, leaf.DNSNames, "new-host")
 }
 
 // TestEnsureSelfSignedCert_RegeneratesWhenExpired 校验过期证书会被重新生成。

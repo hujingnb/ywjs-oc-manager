@@ -35,7 +35,7 @@ const dockerProxyPathPrefix = "/v1/docker"
 // 在宿主视角解析 mount source，不重写会导致 source 路径不存在 → docker 自动创建
 // 空目录占位 → 文件级 mount（如 models.json）退化为目录，OpenClaw 读不到内容。
 // 两者相同（直接在宿主跑 / 不在容器内）时跳过重写，行为等价于原代理。
-func NewDockerProxyHandler(socketPath, agentToken, trustedCIDR, agentDataRoot, hostDataRoot string) http.Handler {
+func NewDockerProxyHandler(socketPath string, agentToken any, trustedCIDR, agentDataRoot, hostDataRoot string) http.Handler {
 	transport := &http.Transport{
 		DialContext: func(ctx context.Context, _, _ string) (net.Conn, error) {
 			var d net.Dialer
@@ -185,7 +185,7 @@ func rewriteBindString(s, from, to string) string {
 
 // wrapAuth 把 IP 白名单和 bearer 鉴权两层中间件套在 docker proxy 前面。
 // 鉴权失败统一返回 JSON 错误体，便于 manager 上报错误信息。
-func wrapAuth(agentToken, trustedCIDR string, next http.Handler) http.Handler {
+func wrapAuth(agentToken any, trustedCIDR string, next http.Handler) http.Handler {
 	var allowed *net.IPNet
 	if trustedCIDR != "" {
 		_, parsed, err := net.ParseCIDR(trustedCIDR)
@@ -205,14 +205,28 @@ func wrapAuth(agentToken, trustedCIDR string, next http.Handler) http.Handler {
 				return
 			}
 		}
-		if agentToken != "" {
-			if r.Header.Get("Authorization") != "Bearer "+agentToken {
+		if token := agentTokenString(agentToken); token != "" {
+			if r.Header.Get("Authorization") != "Bearer "+token {
 				writeJSONError(w, http.StatusUnauthorized, "agent token 校验失败")
 				return
 			}
 		}
 		next.ServeHTTP(w, r)
 	})
+}
+
+func agentTokenString(value any) string {
+	switch v := value.(type) {
+	case string:
+		return strings.TrimSpace(v)
+	case func() string:
+		if v == nil {
+			return ""
+		}
+		return strings.TrimSpace(v())
+	default:
+		return ""
+	}
 }
 
 // remoteIP 从 RemoteAddr 解析 IP；解析失败返回 nil 让上层报 403。

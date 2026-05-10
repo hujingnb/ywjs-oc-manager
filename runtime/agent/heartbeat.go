@@ -48,10 +48,18 @@ func (a *hbLoggerAdapter) Errorf(format string, args ...any) {
 // shouldStart 不满足时（manager 三字段全空）Run 立即返回，避免空跑。
 type heartbeat struct {
 	cfg          config.Config
+	agentID      string
 	client       *http.Client
 	tickInterval time.Duration
 	logger       hbLogger
 	failures     int
+	tokenGetter  func() string
+	stateDir     string
+	hostname     string
+	caPEM        string
+	dataRoot     string
+	dockerAddr   string
+	fileAddr     string
 }
 
 type heartbeatOption func(*heartbeat)
@@ -73,11 +81,19 @@ func withLogger(l hbLogger) heartbeatOption {
 
 // newHeartbeat 用配置 + 选项构造心跳器。
 // 默认 tickInterval = cfg.Heartbeat.IntervalSeconds 秒；测试可用 option 缩短到毫秒级。
-func newHeartbeat(cfg config.Config, opts ...heartbeatOption) *heartbeat {
+func newHeartbeat(cfg config.Config, agentID string, tokenGetter func() string, stateDir, hostname, caPEM, dataRoot, dockerAddr, fileAddr string, opts ...heartbeatOption) *heartbeat {
 	hb := &heartbeat{
 		cfg:          cfg,
+		agentID:      agentID,
 		tickInterval: time.Duration(cfg.Heartbeat.IntervalSeconds) * time.Second,
 		logger:       &hbLoggerAdapter{logger: slog.Default()},
+		tokenGetter:  tokenGetter,
+		stateDir:     stateDir,
+		hostname:     hostname,
+		caPEM:        caPEM,
+		dataRoot:     dataRoot,
+		dockerAddr:   dockerAddr,
+		fileAddr:     fileAddr,
 	}
 	for _, o := range opts {
 		o(hb)
@@ -92,11 +108,9 @@ func newHeartbeat(cfg config.Config, opts ...heartbeatOption) *heartbeat {
 }
 
 // shouldStart 决定 Run 是否进入主循环。
-// manager.endpoint 与 manager.agent_token 必填；node_id 仅作为 ops 留痕用，
-// 不进入 heartbeat body（manager 端 /agent/heartbeat 路由按 token 反查 node）。
 func (h *heartbeat) shouldStart() bool {
 	m := h.cfg.Manager
-	return m.Endpoint != "" && m.NodeID != "" && m.AgentToken != ""
+	return m.Endpoint != "" && strings.TrimSpace(h.tokenGetter()) != ""
 }
 
 // Run 阻塞执行心跳主循环；ctx 取消即退出。启动后立刻发一次，避免等满间隔。
@@ -119,12 +133,10 @@ func (h *heartbeat) Run(ctx context.Context) {
 }
 
 // tick 发起一次心跳；HTTP 状态非 2xx 视为失败并累加 failures。
-// manager 路由 POST /api/v1/agent/heartbeat 按 body 中的 agent_token 反查 node，
-// 不需要 path 中传 node_id。endpoint 配置示例：https://manager.example/api/v1。
 func (h *heartbeat) tick(ctx context.Context) {
 	url := strings.TrimRight(h.cfg.Manager.Endpoint, "/") + "/agent/heartbeat"
 	body := map[string]any{
-		"agent_token":       h.cfg.Manager.AgentToken,
+		"agent_token":       h.tokenGetter(),
 		"agent_version":     agentVersion,
 		"resource_snapshot": collectSnapshot(),
 	}
@@ -145,6 +157,17 @@ func (h *heartbeat) tick(ctx context.Context) {
 		return
 	}
 	defer resp.Body.Close()
+	if resp.StatusCode == http.StatusUnauthorized {
+		if err := h.reEnroll(ctx); err != nil {
+			h.recordFailure(fmt.Errorf("重新 enroll 失败: %w", err))
+			return
+		}
+		if h.failures > 0 {
+			h.logger.Infof("心跳已恢复，连续失败计数清零（之前 %d 次）", h.failures)
+		}
+		h.failures = 0
+		return
+	}
 	if resp.StatusCode/100 != 2 {
 		h.recordFailure(fmt.Errorf("manager 返回非 2xx: %d", resp.StatusCode))
 		return
@@ -153,6 +176,12 @@ func (h *heartbeat) tick(ctx context.Context) {
 		h.logger.Infof("心跳已恢复，连续失败计数清零（之前 %d 次）", h.failures)
 	}
 	h.failures = 0
+}
+
+// withReEnrollResponse 处理 401 后重新 enroll 并刷新本地 token。
+func (h *heartbeat) reEnroll(ctx context.Context) error {
+	_, _, err := enrollAgent(ctx, h.cfg, h.agentID, h.hostname, h.hostname, h.dataRoot, h.stateDir, h.dockerAddr, h.fileAddr, agentVersion, h.caPEM)
+	return err
 }
 
 // recordFailure 累加失败次数并按阈值升级日志级别。

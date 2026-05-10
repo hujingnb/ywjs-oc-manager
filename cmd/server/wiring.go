@@ -17,7 +17,6 @@ import (
 	"github.com/jackc/pgx/v5/pgtype"
 
 	"oc-manager/internal/auth"
-	workerhandlers "oc-manager/internal/worker/handlers"
 	"oc-manager/internal/domain"
 	"oc-manager/internal/integrations/agent"
 	"oc-manager/internal/integrations/newapi"
@@ -26,6 +25,7 @@ import (
 	"oc-manager/internal/service"
 	"oc-manager/internal/store"
 	"oc-manager/internal/store/sqlc"
+	workerhandlers "oc-manager/internal/worker/handlers"
 )
 
 // nodeQueries 是 nodeClientResolver 需要的最小查询子集。
@@ -132,7 +132,7 @@ func (n *nodeClientResolver) lookupNode(ctx context.Context, nodeID string) (sql
 	}
 	token, err := n.tokens.Get(nodeID)
 	if err != nil {
-		return sqlc.RuntimeNode{}, "", fmt.Errorf("节点 %s 的 agent token 未缓存（需要 rotate-bootstrap）: %w", nodeID, err)
+		return sqlc.RuntimeNode{}, "", fmt.Errorf("节点 %s 的 agent token 不可用（需要重启 agent 触发自动注册）: %w", nodeID, err)
 	}
 	return node, token, nil
 }
@@ -217,9 +217,9 @@ func (w *runtimeInspectorWrapper) InspectContainer(ctx context.Context, nodeID, 
 // 当前实现把 dispatcher 错误吞在 service 层（参见 KnowledgeService 的 _ =），
 // 因为主副本已经写入，不应因为同步失败回滚。
 type knowledgeSyncDispatcher struct {
-	queries     knowledgeJobsQueries
-	notifier    service.JobNotifier
-	syncStatus  knowledgeSyncStatusMarker
+	queries    knowledgeJobsQueries
+	notifier   service.JobNotifier
+	syncStatus knowledgeSyncStatusMarker
 }
 
 type knowledgeJobsQueries interface {
@@ -486,7 +486,7 @@ func (l *persistentTokenLoader) LoadAgentToken(ctx context.Context, nodeID strin
 }
 
 // persistAgentToken 把 agent token 加密后写入数据库。
-// 加密失败不冒泡：成功的 register 响应已经返回给 agent，持久化失败只走日志。
+// 加密失败不冒泡：成功的 enroll 响应已经返回给 agent，持久化失败只走日志。
 func persistAgentToken(ctx context.Context, s *store.AgentTokenStore, c *auth.Cipher, nodeID, token string) error {
 	if s == nil || c == nil {
 		return nil

@@ -110,7 +110,7 @@ PostgreSQL
 | `MemberService` | 组织成员 CRUD（普通成员 / 组织管理员） |
 | `MemberOnboardingService` | 创建成员账号 + 应用 + 渠道占位 + audit + job 在同一事务内完成 |
 | `AppService` | 应用查询、状态聚合（容器状态 / api_key 状态 / 渠道绑定状态） |
-| `RuntimeNodeService` | 节点 bootstrap_token / agent_token / 心跳 / max_apps |
+| `RuntimeNodeService` | 节点自动 enroll / agent_token / 心跳 / max_apps |
 | `RuntimeOperationService` | 应用容器 start / stop / restart / logs / stats |
 | `KnowledgeService` | 组织级 + 应用级文件主副本写入；触发 `knowledge_sync_node` job |
 | `WorkspaceService` | 应用工作目录浏览 / 单文件下载 / 文件夹打包 |
@@ -172,17 +172,20 @@ agent 暴露两个 HTTP 端口：
 
 通信约定：
 
-1. **首次注册**：manager 在 `/runtime-nodes` 页 rotate 出 bootstrap_token；
-   运维把 token 写入节点 `agent.yaml`（暂时是临时凭证）；agent 启动时调 manager
-   `POST /api/v1/agent/register`，manager 颁发 long-lived `agent_token`（aes-256-gcm
-   密文存表）+ `node_id`。
-2. **运维回填**：把响应里的 `node_id` / `agent_token` 写回节点
-   `agent.yaml` 的 `manager:` 段，重启 agent。
+1. **自动注册**：agent 启动时生成或读取 `state_dir/agent-id`，使用
+   `manager.enrollment_secret` 调 `POST /api/v1/agent/enroll`。manager 按
+   `agent_id` 幂等创建或刷新 `runtime_nodes`，返回 `node_id` 与 long-lived
+   `agent_token`（hash 校验 + aes-256-gcm 密文存表）。
+2. **本地持久化**：agent 把 `node-id` / `agent-token` 写入 `state_dir`，后续重启
+   直接复用；如果心跳收到 401，会自动重新 enroll 并刷新 token。
 3. **心跳**：agent ticker 周期 `agent.heartbeat_interval_seconds`（默认 30s）调
-   manager `POST /api/v1/agent/runtime-nodes/{id}/heartbeat`。manager
-   超过 90s 未收心跳标记节点 `unreachable`；下一拍恢复即翻回 `active`。
-4. **manager → agent**：所有调用走 mTLS（agent 自签 CA）+ Bearer
-   `agent_token`，并对客户端 IP 做 `trusted_cidr` 校验。
+   manager `POST /api/v1/agent/heartbeat`。manager 超过 90s 未收心跳标记节点
+   `unreachable`；下一拍心跳恢复即翻回 `active`。
+4. **主动探测**：manager 周期探测 agent 的 `/v1/docker/_ping` 与
+   `/v1/files/ping`。入站探测连续失败时节点进入 `degraded`，连续恢复后回到
+   `active`；`degraded` 不会把节点上的应用推 `error`。
+5. **manager → agent**：所有调用走 TLS（agent 自签 CA）+ Bearer `agent_token`，
+   并对客户端 IP 做 `trusted_cidr` 校验。
 
 agent 的 docker proxy 不实现 Docker API 全集，只透传 manager 用得到的几个动词
 （containers / images / volumes / events 子集）。

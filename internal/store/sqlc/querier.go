@@ -27,9 +27,10 @@ type Querier interface {
 	CreateOrganizationPersona(ctx context.Context, arg CreateOrganizationPersonaParams) (OrganizationPersona, error)
 	CreateRechargeRecord(ctx context.Context, arg CreateRechargeRecordParams) (RechargeRecord, error)
 	CreateRefreshToken(ctx context.Context, arg CreateRefreshTokenParams) (RefreshToken, error)
-	CreateRuntimeNode(ctx context.Context, arg CreateRuntimeNodeParams) (RuntimeNode, error)
 	CreateUser(ctx context.Context, arg CreateUserParams) (User, error)
 	DeleteExpiredRefreshTokens(ctx context.Context) error
+	EnrollRuntimeNodeInsert(ctx context.Context, arg EnrollRuntimeNodeInsertParams) (RuntimeNode, error)
+	EnrollRuntimeNodeUpdate(ctx context.Context, arg EnrollRuntimeNodeUpdateParams) (RuntimeNode, error)
 	GetActiveAppByOwner(ctx context.Context, ownerUserID pgtype.UUID) (App, error)
 	GetApp(ctx context.Context, id pgtype.UUID) (App, error)
 	GetChannelBindingByAppAndType(ctx context.Context, arg GetChannelBindingByAppAndTypeParams) (ChannelBinding, error)
@@ -43,6 +44,7 @@ type Querier interface {
 	GetOrganizationForUpdate(ctx context.Context, id pgtype.UUID) (Organization, error)
 	GetRefreshTokenByHash(ctx context.Context, tokenHash string) (RefreshToken, error)
 	GetRuntimeNode(ctx context.Context, id pgtype.UUID) (RuntimeNode, error)
+	GetRuntimeNodeByAgentID(ctx context.Context, agentID pgtype.Text) (RuntimeNode, error)
 	GetRuntimeNodeByName(ctx context.Context, name string) (RuntimeNode, error)
 	GetUser(ctx context.Context, id pgtype.UUID) (User, error)
 	GetUserByUsername(ctx context.Context, username string) (User, error)
@@ -51,7 +53,7 @@ type Querier interface {
 	HardDeleteOrganization(ctx context.Context, id pgtype.UUID) error
 	// ListActiveNodesWithAppCounts 列出所有 active 节点并附带其当前未删除应用数量。
 	// OnboardingService 自动选节点时按剩余容量过滤；剩余容量 = max_apps - app_count，
-	// max_apps NULL 表示不限。
+	// max_apps NULL 表示不限。degraded / unreachable / disabled 均不参与新应用调度。
 	ListActiveNodesWithAppCounts(ctx context.Context) ([]ListActiveNodesWithAppCountsRow, error)
 	ListAppsByOrg(ctx context.Context, arg ListAppsByOrgParams) ([]App, error)
 	ListAppsByRuntimeNode(ctx context.Context, arg ListAppsByRuntimeNodeParams) ([]App, error)
@@ -75,7 +77,6 @@ type Querier interface {
 	MarkJobRunning(ctx context.Context, arg MarkJobRunningParams) (Job, error)
 	MarkJobSucceeded(ctx context.Context, id pgtype.UUID) (Job, error)
 	MarkUserLoggedIn(ctx context.Context, id pgtype.UUID) (User, error)
-	RegisterRuntimeNode(ctx context.Context, arg RegisterRuntimeNodeParams) (RuntimeNode, error)
 	RetryJob(ctx context.Context, arg RetryJobParams) (Job, error)
 	RevokeRefreshToken(ctx context.Context, id pgtype.UUID) (RefreshToken, error)
 	SetAppContainer(ctx context.Context, arg SetAppContainerParams) (App, error)
@@ -101,7 +102,8 @@ type Querier interface {
 	UpdateOrganizationCredentialsCiphertext(ctx context.Context, arg UpdateOrganizationCredentialsCiphertextParams) (Organization, error)
 	UpdateOrganizationProfile(ctx context.Context, arg UpdateOrganizationProfileParams) (Organization, error)
 	UpdateRuntimeNodeHeartbeat(ctx context.Context, arg UpdateRuntimeNodeHeartbeatParams) (RuntimeNode, error)
-	UpdateRuntimeNodeMaxApps(ctx context.Context, arg UpdateRuntimeNodeMaxAppsParams) (RuntimeNode, error)
+	UpdateRuntimeNodeProbeFailure(ctx context.Context, arg UpdateRuntimeNodeProbeFailureParams) (RuntimeNode, error)
+	UpdateRuntimeNodeProbeSuccess(ctx context.Context, arg UpdateRuntimeNodeProbeSuccessParams) (RuntimeNode, error)
 	UpdateUserPassword(ctx context.Context, arg UpdateUserPasswordParams) (User, error)
 	UpdateUserProfile(ctx context.Context, arg UpdateUserProfileParams) (User, error)
 	// 插入或更新 (org_id, node_id) 的最近同步状态。

@@ -21,12 +21,9 @@ type RuntimeNodesHandler struct {
 }
 
 type runtimeNodeService interface {
-	CreateNode(ctx context.Context, principal auth.Principal, input service.RuntimeNodeInput) (service.RuntimeNodeResult, error)
 	ListNodes(ctx context.Context, principal auth.Principal, limit, offset int32) ([]service.RuntimeNodeResult, error)
 	GetNode(ctx context.Context, principal auth.Principal, nodeID string) (service.RuntimeNodeResult, error)
-	RotateBootstrap(ctx context.Context, principal auth.Principal, nodeID string) (service.RuntimeNodeResult, error)
 	SetNodeStatus(ctx context.Context, principal auth.Principal, nodeID, status string) (service.RuntimeNodeResult, error)
-	UpdateMaxApps(ctx context.Context, principal auth.Principal, nodeID string, maxApps *int32) (service.RuntimeNodeResult, error)
 }
 
 // NewRuntimeNodesHandler 创建 runtime node handler。
@@ -38,49 +35,9 @@ func NewRuntimeNodesHandler(service runtimeNodeService, tokens *auth.TokenManage
 func RegisterRuntimeNodeRoutes(router gin.IRouter, handler *RuntimeNodesHandler) {
 	group := router.Group("/api/v1/runtime-nodes")
 	group.GET("", handler.List)
-	group.POST("", handler.Create)
 	group.GET("/:nodeId", handler.Get)
-	group.PATCH("/:nodeId", handler.Patch)
-	group.POST("/:nodeId/rotate-bootstrap", handler.RotateBootstrap)
 	group.POST("/:nodeId/disable", handler.Disable)
 	group.POST("/:nodeId/enable", handler.Enable)
-}
-
-// Create 平台管理员注册新节点，并返回一次性 bootstrap token。
-//
-// @Summary      注册 runtime 节点
-// @Description  平台管理员注册新 runtime 节点，返回包含一次性 bootstrap token 的节点信息
-// @Tags         runtime-nodes
-// @Accept       json
-// @Produce      json
-// @Security     BearerAuth
-// @Param        body  body      CreateRuntimeNodeRequest  true  "注册节点请求"
-// @Success      201   {object}  map[string]service.RuntimeNodeResult
-// @Failure      400   {object}  ErrorResponse
-// @Failure      401   {object}  ErrorResponse
-// @Failure      403   {object}  ErrorResponse
-// @Failure      500   {object}  ErrorResponse
-// @Router       /runtime-nodes [post]
-func (h *RuntimeNodesHandler) Create(c *gin.Context) {
-	principal, ok := h.principal(c)
-	if !ok {
-		return
-	}
-	var req CreateRuntimeNodeRequest
-	if err := c.ShouldBindJSON(&req); err != nil {
-		c.JSON(http.StatusBadRequest, gin.H{"error": "请求参数不完整"})
-		return
-	}
-	result, err := h.service.CreateNode(c.Request.Context(), principal, service.RuntimeNodeInput{
-		Name:                     req.Name,
-		HeartbeatIntervalSeconds: req.HeartbeatIntervalSeconds,
-		NodeDataRoot:             req.NodeDataRoot,
-	})
-	if err != nil {
-		writeRuntimeNodeError(c, err)
-		return
-	}
-	c.JSON(http.StatusCreated, gin.H{"runtime_node": result})
 }
 
 // List 列出 runtime 节点。
@@ -132,69 +89,6 @@ func (h *RuntimeNodesHandler) Get(c *gin.Context) {
 		return
 	}
 	result, err := h.service.GetNode(c.Request.Context(), principal, c.Param("nodeId"))
-	if err != nil {
-		writeRuntimeNodeError(c, err)
-		return
-	}
-	c.JSON(http.StatusOK, gin.H{"runtime_node": result})
-}
-
-// RotateBootstrap 给目标节点发放新的 bootstrap token。
-//
-// @Summary      轮换 bootstrap token
-// @Description  为指定节点生成新的一次性 bootstrap token；节点处于活跃状态时返回 409
-// @Tags         runtime-nodes
-// @Produce      json
-// @Security     BearerAuth
-// @Param        nodeId  path      string  true  "节点 ID"
-// @Success      200     {object}  map[string]service.RuntimeNodeResult
-// @Failure      401     {object}  ErrorResponse
-// @Failure      403     {object}  ErrorResponse
-// @Failure      404     {object}  ErrorResponse
-// @Failure      409     {object}  ErrorResponse
-// @Failure      500     {object}  ErrorResponse
-// @Router       /runtime-nodes/{nodeId}/rotate-bootstrap [post]
-func (h *RuntimeNodesHandler) RotateBootstrap(c *gin.Context) {
-	principal, ok := h.principal(c)
-	if !ok {
-		return
-	}
-	result, err := h.service.RotateBootstrap(c.Request.Context(), principal, c.Param("nodeId"))
-	if err != nil {
-		writeRuntimeNodeError(c, err)
-		return
-	}
-	c.JSON(http.StatusOK, gin.H{"runtime_node": result})
-}
-
-// Patch 更新节点的可调字段（v1.0.1 仅 max_apps）。
-//
-// @Summary      更新 runtime 节点
-// @Description  更新节点的可调字段；当前仅支持 max_apps（null 表示清空上限）
-// @Tags         runtime-nodes
-// @Accept       json
-// @Produce      json
-// @Security     BearerAuth
-// @Param        nodeId  path      string                   true  "节点 ID"
-// @Param        body    body      PatchRuntimeNodeRequest  true  "更新节点请求"
-// @Success      200     {object}  map[string]service.RuntimeNodeResult
-// @Failure      400     {object}  ErrorResponse
-// @Failure      401     {object}  ErrorResponse
-// @Failure      403     {object}  ErrorResponse
-// @Failure      404     {object}  ErrorResponse
-// @Failure      500     {object}  ErrorResponse
-// @Router       /runtime-nodes/{nodeId} [patch]
-func (h *RuntimeNodesHandler) Patch(c *gin.Context) {
-	principal, ok := h.principal(c)
-	if !ok {
-		return
-	}
-	var req PatchRuntimeNodeRequest
-	if err := c.ShouldBindJSON(&req); err != nil {
-		c.JSON(http.StatusBadRequest, gin.H{"error": "请求参数不完整"})
-		return
-	}
-	result, err := h.service.UpdateMaxApps(c.Request.Context(), principal, c.Param("nodeId"), req.MaxApps)
 	if err != nil {
 		writeRuntimeNodeError(c, err)
 		return
@@ -271,10 +165,7 @@ func writeRuntimeNodeError(c *gin.Context, err error) {
 		c.JSON(http.StatusForbidden, gin.H{"error": "无权执行该操作"})
 	case errors.Is(err, service.ErrNotFound):
 		c.JSON(http.StatusNotFound, gin.H{"error": "资源不存在"})
-	case errors.Is(err, service.ErrRuntimeNodeBusy):
-		c.JSON(http.StatusConflict, gin.H{"error": "节点已注册，需先禁用再轮换 bootstrap"})
-	case errors.Is(err, service.ErrBootstrapTokenInvalid),
-		errors.Is(err, service.ErrAgentTokenInvalid):
+	case errors.Is(err, service.ErrAgentTokenInvalid):
 		c.JSON(http.StatusUnauthorized, gin.H{"error": redactlog.SafeErrorMessage(err)})
 	default:
 		c.JSON(http.StatusInternalServerError, gin.H{"error": "服务暂时不可用"})

@@ -6,6 +6,17 @@
 # 未设置时默认 "config/agent.yaml"（相对工作目录）。
 
 agent:
+  # 节点展示名；为空时 manager 使用 agent_id 前 8 位生成默认名。
+  name: "runtime-node-1"
+
+  # agent 上报给 manager 的对外可达主机名或 IP。
+  # 留空时使用本机 hostname；生产建议显式配置为 manager 能访问的地址。
+  advertise_host: "runtime-node-1.example.com"
+
+  # 节点最大可承载应用数；null 或留空表示不限，0 表示暂停接收新应用。
+  # 该值由 agent 配置文件定义，启动 enroll 时同步到 manager；修改后重启 agent 生效。
+  max_apps: 3
+
   # agent 维护的"业务数据根目录"。下面会派生出：
   #   <data_root>/orgs/<org_id>/...   组织级文件镜像
   #   <data_root>/apps/<app_id>/...   应用级文件 / workspace / 归档
@@ -23,12 +34,6 @@ agent:
   # 容器部署时通常 mount 宿主 /var/run/docker.sock 到容器内同名路径。
   docker_socket: "/var/run/docker.sock"
 
-  # agent ↔ manager 通信使用的 Bearer token。
-  # 含敏感凭据，必须落到 gitignored 的 agent.yaml；example 保持脱敏占位。
-  # 留空时 agent 不做 Bearer 校验（仅本地无授权 dev 场景使用）。
-  # 生产部署：由 manager bootstrap 流程下发，运维写入此处。
-  token: "CHANGE_ME_AGENT_BEARER_TOKEN"
-
   # 允许调用 agent 接口的客户端 CIDR 段，形如 "10.0.0.0/8"。
   # 留空表示不做 IP 限制（仅本地 dev 场景），生产应明确写出 manager 出口 CIDR。
   # 与 token 双重校验：token 校验失败直接 401，CIDR 校验失败直接 403。
@@ -44,17 +49,13 @@ agent:
   # 必填；为空启动 fail-fast。
   file_addr: ":7002"
 
-# manager 段：节点首次 register 完成后由运维把响应中的 node_id / agent_token 回填到这里。
-# 三字段（endpoint / node_id / agent_token）必须同时填齐或同时为空——同时为空时
-# agent 不发心跳；同时填齐则启动 heartbeat ticker，触发节点 unreachable→active 自愈。
-# 仅填部分会在启动期 fail-fast，避免悄悄不发心跳。
+# manager 段：agent 启动时使用 enrollment_secret 主动注册；
+# 注册成功后 node_id / agent_token 写入 state_dir，无需管理员后台创建节点。
 manager:
   # 形如 https://manager.example/api/v1
-  endpoint: ""
-  # POST /agent/register 响应中的 node_id（runtime_nodes.id 的 UUID）
-  node_id: ""
-  # POST /agent/register 响应中的 agent_token（长期通信凭证）
-  agent_token: ""
+  endpoint: "https://manager.example/api/v1"
+  # 与 manager.yaml runtime.enrollment_secret 完全一致。
+  enrollment_secret: "CHANGE_ME_BASE64_32_BYTES"
   # 可选：manager 自签 TLS CA PEM 全文。空则信任系统根证书。
   ca_bundle: ""
   # 仅本地调试用；生产必须 false，否则会跳过 manager TLS 证书校验。

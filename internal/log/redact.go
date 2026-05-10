@@ -23,6 +23,7 @@ var secretPatterns = []struct {
 	{re: regexp.MustCompile(`(?i)("api_key_ciphertext"\s*:\s*)"[^"]*"`), repl: `$1"***"`},
 	{re: regexp.MustCompile(`(?i)("bootstrap_token"\s*:\s*)"[^"]*"`), repl: `$1"***"`},
 	{re: regexp.MustCompile(`(?i)("agent_token"\s*:\s*)"[^"]*"`), repl: `$1"***"`},
+	{re: regexp.MustCompile(`(?i)("enrollment_secret"\s*:\s*)"[^"]*"`), repl: `$1"***"`},
 	{re: regexp.MustCompile(`(?i)("refresh_token"\s*:\s*)"[^"]*"`), repl: `$1"***"`},
 	{re: regexp.MustCompile(`(?i)("access_token"\s*:\s*)"[^"]*"`), repl: `$1"***"`},
 	{re: regexp.MustCompile(`(?i)("master_key"\s*:\s*)"[^"]*"`), repl: `$1"***"`},

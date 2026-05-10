@@ -14,7 +14,10 @@ import (
 	"strings"
 	"testing"
 	"time"
+
 	"github.com/stretchr/testify/require"
+
+	"oc-manager/runtime/agent/config"
 )
 
 func TestHealthz(t *testing.T) {
@@ -169,13 +172,19 @@ func TestRunAgent_PrintsCAPEMAndAcceptsTLS(t *testing.T) {
 		dataRoot:      dataRoot,
 		stateDir:      stateDir,
 		dockerSocket:  dockerSocket,
-		agentToken:    "secret",
 		hostname:      "127.0.0.1",
 		dockerAddr:    dockerAddr,
 		fileAddr:      fileAddr,
 		dockerProxy:   true,
 		enableSignals: false,
+		fullConfig: config.Config{
+			Manager: config.ManagerConfig{
+				Endpoint:         "",
+				EnrollmentSecret: "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA=",
+			},
+		},
 	}
+	require.NoError(t, storeCredentials(stateDir, "node-id", "secret"))
 
 	stdout := &bytes.Buffer{}
 	ctx, cancel := context.WithCancel(context.Background())
@@ -201,8 +210,8 @@ func TestRunAgent_PrintsCAPEMAndAcceptsTLS(t *testing.T) {
 	defer resp.Body.Close()
 	require.Equal(t, http.StatusOK, resp.StatusCode)
 
-	// 文件 API 仍走 plaintext，对照验证两个端口同时正常。
-	plainResp, err := http.Get("http://" + fileAddr + "/healthz")
+	// 文件 API 与 docker proxy 都走 TLS，对照验证两个端口同时正常。
+	plainResp, err := httpClient.Get("https://" + fileAddr + "/healthz")
 	require.NoError(t, err)
 	defer plainResp.Body.Close()
 	require.Equal(t, http.StatusOK, plainResp.StatusCode)

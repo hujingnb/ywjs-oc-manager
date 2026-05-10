@@ -104,26 +104,13 @@ type RechargeRequest struct {
 	Remark       string `json:"remark"`
 }
 
-// ===== Runtime 节点 runtime_nodes =====
-
-// CreateRuntimeNodeRequest 平台管理员注册新 runtime 节点的请求体。
-type CreateRuntimeNodeRequest struct {
-	Name                     string `json:"name" binding:"required"`
-	HeartbeatIntervalSeconds int32  `json:"heartbeat_interval_seconds"`
-	NodeDataRoot             string `json:"node_data_root"`
-}
-
-// PatchRuntimeNodeRequest 更新 runtime 节点可调字段的请求体。
-// max_apps 为 *int32：JSON 字段缺失或 null 均视为清空上限；正数表示设上限。
-type PatchRuntimeNodeRequest struct {
-	MaxApps *int32 `json:"max_apps"`
-}
-
 // ===== Agent 端点 agent =====
 
-// AgentRegisterRequest agent 用 bootstrap token 注册并换取 agent token 的请求体。
-type AgentRegisterRequest struct {
-	BootstrapToken      string         `json:"bootstrap_token" binding:"required"`
+// AgentEnrollRequest agent 自动注册并换取 agent token 的请求体。
+type AgentEnrollRequest struct {
+	AgentID             string         `json:"agent_id" binding:"required"`
+	Name                string         `json:"name"`
+	MaxApps             *int32         `json:"max_apps"`
 	AgentDockerEndpoint string         `json:"agent_docker_endpoint"`
 	AgentFileEndpoint   string         `json:"agent_file_endpoint"`
 	AgentTLSCACert      string         `json:"agent_tls_ca_cert"`

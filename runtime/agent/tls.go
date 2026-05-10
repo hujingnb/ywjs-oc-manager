@@ -12,6 +12,7 @@ import (
 	"net"
 	"os"
 	"path/filepath"
+	"strings"
 	"time"
 )
 
@@ -53,7 +54,7 @@ func EnsureSelfSignedCert(stateDir, hostname string) (CertBundle, error) {
 	if err := os.MkdirAll(stateDir, 0o700); err != nil {
 		return CertBundle{}, fmt.Errorf("创建 state 目录失败: %w", err)
 	}
-	if bundle, ok := loadCertBundle(stateDir); ok {
+	if bundle, ok := loadCertBundle(stateDir, hostname); ok {
 		return bundle, nil
 	}
 	bundle, err := generateCertBundle(hostname)
@@ -67,7 +68,7 @@ func EnsureSelfSignedCert(stateDir, hostname string) (CertBundle, error) {
 }
 
 // loadCertBundle 尝试从 stateDir 读取并校验证书；任何步骤失败都视作需要重建。
-func loadCertBundle(stateDir string) (CertBundle, bool) {
+func loadCertBundle(stateDir, hostname string) (CertBundle, bool) {
 	certPEM, err := os.ReadFile(filepath.Join(stateDir, certFileName))
 	if err != nil {
 		return CertBundle{}, false
@@ -90,6 +91,9 @@ func loadCertBundle(stateDir string) (CertBundle, bool) {
 	}
 	// 留 24h 余量：临近过期时主动重建，避免运行期突然失效。
 	if time.Now().Add(24 * time.Hour).After(leaf.NotAfter) {
+		return CertBundle{}, false
+	}
+	if !certificateMatchesHostname(leaf, hostname) {
 		return CertBundle{}, false
 	}
 	return CertBundle{CertPEM: certPEM, KeyPEM: keyPEM, CACertPEM: caPEM}, true
@@ -141,6 +145,27 @@ func certHostnames(hostname string) []string {
 		names = append(names, hostname)
 	}
 	return names
+}
+
+func certificateMatchesHostname(cert *x509.Certificate, hostname string) bool {
+	hostname = strings.TrimSpace(hostname)
+	if hostname == "" || hostname == "localhost" {
+		return true
+	}
+	if ip := net.ParseIP(hostname); ip != nil {
+		for _, certIP := range cert.IPAddresses {
+			if certIP.Equal(ip) {
+				return true
+			}
+		}
+		return false
+	}
+	for _, dns := range cert.DNSNames {
+		if strings.EqualFold(dns, hostname) {
+			return true
+		}
+	}
+	return false
 }
 
 func writeCertBundle(stateDir string, bundle CertBundle) error {

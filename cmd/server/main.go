@@ -152,7 +152,7 @@ func runManager(ctx context.Context, cfg config.Config, logOut io.Writer) error 
 	agentTokenResolver.SetPersistentLoader(newPersistentTokenLoader(agentTokenStore, cipher))
 	agentTokenSink := func(nodeID, token string) {
 		agentTokenResolver.Set(nodeID, token)
-		// 加密入库；任何错误只走日志，不阻断 register 响应。
+		// 加密入库；任何错误只走日志，不阻断 enroll 响应。
 		if err := persistAgentToken(context.Background(), agentTokenStore, cipher, nodeID, token); err != nil {
 			logger.Error("持久化 agent token 失败", "node_id", nodeID, "error", err)
 		}
@@ -302,6 +302,7 @@ func runManager(ctx context.Context, cfg config.Config, logOut io.Writer) error 
 			JobsStore:           dbStore.Queries,
 			TokenManager:        tokenManager,
 			AgentTokenSink:      agentTokenSink,
+			EnrollmentSecret:    cfg.Runtime.EnrollmentSecret,
 			JobNotifier:         redisQueue,
 			AllowedOrigins:      allowedOriginsFromConfig(cfg),
 		}),
@@ -321,6 +322,19 @@ func runManager(ctx context.Context, cfg config.Config, logOut io.Writer) error 
 		_, err := nodeHealth.Reconcile(ctx)
 		return err
 	})
+	nodeProbe := service.NewRuntimeNodeProbeReconciler(
+		dbStore.Queries,
+		agentTokenResolver,
+		agent.NewProbeClient(time.Duration(cfg.Runtime.Probe.TimeoutSeconds)*time.Second),
+		service.RuntimeNodeProbeConfig{
+			FailureThreshold:  int32(cfg.Runtime.Probe.FailureThreshold),
+			RecoveryThreshold: int32(cfg.Runtime.Probe.RecoveryThreshold),
+		},
+	)
+	nodeProbeTask := service.NewPeriodicReconciler("runtime_node_probe_reconcile", time.Duration(cfg.Runtime.Probe.IntervalSeconds)*time.Second, func(ctx context.Context) error {
+		_, err := nodeProbe.Reconcile(ctx)
+		return err
+	})
 	runtimeRefresh := newRuntimeRefreshDispatcher(dbStore.Queries, redisQueue)
 	runtimeRefreshTask := service.NewPeriodicReconciler("runtime_refresh_status_dispatch", 30*time.Second, runtimeRefresh.Tick)
 	healthCheckDisp := newHealthCheckDispatcher(dbStore.Queries, redisQueue)
@@ -338,6 +352,7 @@ func runManager(ctx context.Context, cfg config.Config, logOut io.Writer) error 
 	eg.Go(func() error { return pool.Run(gctx) })
 	eg.Go(func() error { return loop.Run(gctx) })
 	eg.Go(func() error { return nodeHealthTask.Run(gctx, logger) })
+	eg.Go(func() error { return nodeProbeTask.Run(gctx, logger) })
 	eg.Go(func() error { return runtimeRefreshTask.Run(gctx, logger) })
 	eg.Go(func() error { return healthCheckTask.Run(gctx, logger) })
 	eg.Go(func() error {
@@ -368,6 +383,6 @@ func hashPasswordWithDefault(password string) (string, error) {
 	return auth.HashPassword(password, auth.DefaultPasswordParams)
 }
 
-// hashTokenSHA256 用 SHA-256 对 bootstrap/agent token 做不可逆 hash 后存库。
+// hashTokenSHA256 用 SHA-256 对 agent token 做不可逆 hash 后存库。
 // runtime node 的 token 不需要密码级强度，但必须保证泄露后也无法直接调用 manager API。
 func hashTokenSHA256(token string) string { return auth.HashOpaqueToken(token) }

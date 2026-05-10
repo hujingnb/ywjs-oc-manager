@@ -78,7 +78,7 @@ func resolveScopePath(dataRoot, scope, rel string) (string, error) {
 // 所有端点统一走 bearer 鉴权，避免重复手工套 wrapAuth。
 // 子路径分三类：apps/*、orgs/*、cleanup-archives，由对应 handler 函数分派。
 // 没匹配到的子路径返回 404。
-func newScopesHandler(dataRoot, agentToken string) http.Handler {
+func newScopesHandler(dataRoot string, agentToken any) http.Handler {
 	mux := http.NewServeMux()
 	mux.HandleFunc("/v1/scopes/apps/", withAgentAuth(agentToken, scopesAppsHandler(dataRoot)))
 	mux.HandleFunc("/v1/scopes/orgs/", withAgentAuth(agentToken, scopesOrgsHandler(dataRoot)))

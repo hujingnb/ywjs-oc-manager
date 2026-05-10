@@ -5,19 +5,21 @@
       <h1 style="margin: 0">登录控制台</h1>
     </div>
 
-    <n-form-item label="账号">
+    <n-form-item label="账号" path="username">
       <n-input
         v-model:value="username"
         autocomplete="username"
+        :input-props="{ id: 'username', 'aria-label': '账号' }"
         placeholder="platform-admin"
       />
     </n-form-item>
 
-    <n-form-item label="密码">
+    <n-form-item label="密码" path="password">
       <n-input
         v-model:value="password"
         type="password"
         autocomplete="current-password"
+        :input-props="{ id: 'password', 'aria-label': '密码' }"
         placeholder="请输入密码"
         show-password-on="click"
       />

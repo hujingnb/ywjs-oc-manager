@@ -9,19 +9,20 @@ import (
 	"testing"
 
 	"github.com/gin-gonic/gin"
+	"github.com/stretchr/testify/require"
 
 	"oc-manager/internal/service"
-	"github.com/stretchr/testify/require"
 )
 
-func TestAgentRegisterReturnsToken(t *testing.T) {
-	stub := &agentEndpointsStub{registerResult: service.AgentRegisterResult{NodeID: "node-1", AgentToken: "agent-1", HeartbeatIntervalSeconds: 30}}
+func TestAgentEnrollReturnsToken(t *testing.T) {
+	stub := &agentEndpointsStub{enrollResult: service.AgentEnrollResult{NodeID: "node-1", AgentToken: "agent-1", HeartbeatIntervalSeconds: 30}}
 	router := newAgentRouter(stub)
 
-	body := bytes.NewBufferString(`{"bootstrap_token":"boot","agent_docker_endpoint":"tcp://127.0.0.1","agent_version":"0.1.0"}`)
+	body := bytes.NewBufferString(validEnrollJSON())
 	recorder := httptest.NewRecorder()
-	request := httptest.NewRequest(http.MethodPost, "/api/v1/agent/register", body)
+	request := httptest.NewRequest(http.MethodPost, "/api/v1/agent/enroll", body)
 	request.Header.Set("Content-Type", "application/json")
+	request.Header.Set("Authorization", "Bearer enroll-secret")
 	router.ServeHTTP(recorder, request)
 
 	require.Equal(t, http.StatusOK, recorder.Code)
@@ -33,17 +34,28 @@ func TestAgentRegisterReturnsToken(t *testing.T) {
 	require.Equal(t, "agent-1", resp.AgentToken)
 }
 
-func TestAgentRegisterMapsBootstrapErrorTo401(t *testing.T) {
-	stub := &agentEndpointsStub{registerErr: service.ErrBootstrapTokenInvalid}
-	router := newAgentRouter(stub)
+func TestAgentEnrollRequiresEnrollmentSecret(t *testing.T) {
+	router := newAgentRouter(&agentEndpointsStub{})
 
-	body := bytes.NewBufferString(`{"bootstrap_token":"bad"}`)
 	recorder := httptest.NewRecorder()
-	request := httptest.NewRequest(http.MethodPost, "/api/v1/agent/register", body)
+	request := httptest.NewRequest(http.MethodPost, "/api/v1/agent/enroll", bytes.NewBufferString(validEnrollJSON()))
 	request.Header.Set("Content-Type", "application/json")
 	router.ServeHTTP(recorder, request)
 
 	require.Equal(t, http.StatusUnauthorized, recorder.Code)
+}
+
+func TestAgentEnrollMapsInvalidInputTo400(t *testing.T) {
+	stub := &agentEndpointsStub{enrollErr: service.ErrEnrollInputInvalid}
+	router := newAgentRouter(stub)
+
+	recorder := httptest.NewRecorder()
+	request := httptest.NewRequest(http.MethodPost, "/api/v1/agent/enroll", bytes.NewBufferString(validEnrollJSON()))
+	request.Header.Set("Content-Type", "application/json")
+	request.Header.Set("Authorization", "Bearer enroll-secret")
+	router.ServeHTTP(recorder, request)
+
+	require.Equal(t, http.StatusBadRequest, recorder.Code)
 }
 
 func TestAgentHeartbeatRequiresAgentToken(t *testing.T) {
@@ -71,65 +83,67 @@ func TestAgentHeartbeatPropagatesAgentTokenError(t *testing.T) {
 	require.Equal(t, http.StatusUnauthorized, recorder.Code)
 }
 
-func TestAgentRegisterPushesTokenToSink(t *testing.T) {
-	stub := &agentEndpointsStub{registerResult: service.AgentRegisterResult{NodeID: "node-99", AgentToken: "agent-x", HeartbeatIntervalSeconds: 30}}
+func TestAgentEnrollPushesTokenToSink(t *testing.T) {
+	stub := &agentEndpointsStub{enrollResult: service.AgentEnrollResult{NodeID: "node-99", AgentToken: "agent-x", HeartbeatIntervalSeconds: 30}}
 	var seenNode, seenToken string
 	gin.SetMode(gin.ReleaseMode)
 	router := gin.New()
-	handler := NewAgentEndpointsHandler(stub, func(nodeID, token string) {
+	handler := NewAgentEndpointsHandler(stub, "enroll-secret", func(nodeID, token string) {
 		seenNode = nodeID
 		seenToken = token
 	})
 	RegisterAgentRoutes(router, handler)
 
-	body := bytes.NewBufferString(`{"bootstrap_token":"boot"}`)
 	recorder := httptest.NewRecorder()
-	request := httptest.NewRequest(http.MethodPost, "/api/v1/agent/register", body)
+	request := httptest.NewRequest(http.MethodPost, "/api/v1/agent/enroll", bytes.NewBufferString(validEnrollJSON()))
 	request.Header.Set("Content-Type", "application/json")
+	request.Header.Set("Authorization", "Bearer enroll-secret")
 	router.ServeHTTP(recorder, request)
 
 	require.Equal(t, http.StatusOK, recorder.Code)
-	if seenNode != "node-99" || seenToken != "agent-x" {
-		t.Fatalf("sink 收到 = (%q,%q), want (node-99, agent-x)", seenNode, seenToken)
-	}
+	require.Equal(t, "node-99", seenNode)
+	require.Equal(t, "agent-x", seenToken)
 }
 
-func TestAgentRegisterSinkSkippedWhenTokenEmpty(t *testing.T) {
-	// service 不返回 token（异常路径）也不应触发 sink，避免缓存空字符串误导后续 docker client。
-	stub := &agentEndpointsStub{registerResult: service.AgentRegisterResult{NodeID: "n", AgentToken: ""}}
+func TestAgentEnrollSinkSkippedWhenTokenEmpty(t *testing.T) {
+	stub := &agentEndpointsStub{enrollResult: service.AgentEnrollResult{NodeID: "n", AgentToken: ""}}
 	called := false
 	gin.SetMode(gin.ReleaseMode)
 	router := gin.New()
-	handler := NewAgentEndpointsHandler(stub, func(_, _ string) { called = true })
+	handler := NewAgentEndpointsHandler(stub, "enroll-secret", func(_, _ string) { called = true })
 	RegisterAgentRoutes(router, handler)
 
-	body := bytes.NewBufferString(`{"bootstrap_token":"boot"}`)
 	recorder := httptest.NewRecorder()
-	request := httptest.NewRequest(http.MethodPost, "/api/v1/agent/register", body)
+	request := httptest.NewRequest(http.MethodPost, "/api/v1/agent/enroll", bytes.NewBufferString(validEnrollJSON()))
 	request.Header.Set("Content-Type", "application/json")
+	request.Header.Set("Authorization", "Bearer enroll-secret")
 	router.ServeHTTP(recorder, request)
 	require.False(t, called)
+}
+
+func validEnrollJSON() string {
+	return `{"agent_id":"00000000-0000-0000-0000-00000000a001","max_apps":3,"agent_docker_endpoint":"https://node-1.example:7001","agent_file_endpoint":"https://node-1.example:7002","agent_tls_ca_cert":"-----BEGIN CERTIFICATE-----\nMIIB\n-----END CERTIFICATE-----\n","agent_version":"0.1.0"}`
 }
 
 func newAgentRouter(svc *agentEndpointsStub) *gin.Engine {
 	gin.SetMode(gin.ReleaseMode)
 	router := gin.New()
-	RegisterAgentRoutes(router, NewAgentEndpointsHandler(svc))
+	RegisterAgentRoutes(router, NewAgentEndpointsHandler(svc, "enroll-secret"))
 	return router
 }
 
 type agentEndpointsStub struct {
-	registerResult  service.AgentRegisterResult
-	registerErr     error
+	enrollResult    service.AgentEnrollResult
+	enrollErr       error
 	heartbeatResult service.RuntimeNodeResult
 	heartbeatErr    error
 }
 
-func (s *agentEndpointsStub) RegisterAgent(_ context.Context, _ service.AgentRegisterInput) (service.AgentRegisterResult, error) {
-	if s.registerErr != nil {
-		return service.AgentRegisterResult{}, s.registerErr
+func (s *agentEndpointsStub) EnrollAgent(_ context.Context, _ service.AgentEnrollInput) (service.AgentEnrollResult, error) {
+	if s.enrollErr != nil {
+		return service.AgentEnrollResult{}, s.enrollErr
 	}
-	return s.registerResult, nil
+	return s.enrollResult, nil
 }
 
 func (s *agentEndpointsStub) HandleHeartbeat(_ context.Context, _ service.AgentHeartbeatInput) (service.RuntimeNodeResult, error) {

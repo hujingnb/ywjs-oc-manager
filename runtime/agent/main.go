@@ -13,6 +13,7 @@ import (
 	"os"
 	"os/signal"
 	"path/filepath"
+	"strings"
 	"syscall"
 	"time"
 
@@ -38,7 +39,6 @@ type agentOptions struct {
 	dataRoot      string
 	stateDir      string
 	dockerSocket  string
-	agentToken    string
 	trustedCIDR   string
 	hostname      string
 	dockerAddr    string // ":7001"
@@ -63,7 +63,6 @@ func main() {
 		dataRoot:      cfg.Agent.DataRoot,
 		stateDir:      cfg.Agent.StateDir,
 		dockerSocket:  cfg.Agent.DockerSocket,
-		agentToken:    cfg.Agent.Token,
 		trustedCIDR:   cfg.Agent.TrustedCIDR,
 		hostname:      hostnameOrEmpty(),
 		dockerAddr:    cfg.Agent.DockerAddr,
@@ -83,7 +82,7 @@ func main() {
 //  1. 加载或生成自签 TLS 证书；
 //  2. 把 CA PEM 以 base64 单行格式写到 stdout，便于运维或自动化 bootstrap 抓取；
 //  3. 用 ListenAndServeTLS 起 docker proxy 端口（bearer + CIDR 中间件已包好）；
-//  4. 用 ListenAndServe 起文件 API 端口（B 阶段会再加 TLS）；
+//  4. 用 ListenAndServeTLS 起文件 API 端口；
 //  5. 阻塞，收到 SIGINT/SIGTERM 或 ctx 取消时优雅关闭。
 //
 // stdout 在生产是 os.Stdout，测试场景由调用方传 *bytes.Buffer，便于断言 CA PEM 输出。
@@ -98,7 +97,11 @@ func runAgent(ctx context.Context, opts agentOptions, stdout io.Writer) error {
 	if err := os.MkdirAll(opts.stateDir, 0o700); err != nil {
 		return fmt.Errorf("创建 state 目录失败: %w", err)
 	}
-	bundle, err := EnsureSelfSignedCert(opts.stateDir, opts.hostname)
+	agentID, err := loadOrCreateAgentID(opts.stateDir)
+	if err != nil {
+		return err
+	}
+	bundle, err := EnsureSelfSignedCert(opts.stateDir, certHostname(opts))
 	if err != nil {
 		return fmt.Errorf("初始化 TLS 证书失败: %w", err)
 	}
@@ -107,10 +110,19 @@ func runAgent(ctx context.Context, opts agentOptions, stdout io.Writer) error {
 		return fmt.Errorf("输出 CA PEM 失败: %w", err)
 	}
 
-	// 主动心跳：仅当 yaml manager 三字段齐全时启动；ctx 取消随 runAgent 主流程一并结束。
-	go newHeartbeat(opts.fullConfig).Run(ctx)
+	tokenGetter := func() string {
+		_, token, _ := loadCredentials(opts.stateDir)
+		return token
+	}
+	if shouldEnrollOnStartup(opts.fullConfig, tokenGetter()) {
+		if err := enrollUntilReady(ctx, opts, agentID, string(bundle.CACertPEM)); err != nil {
+			return err
+		}
+	}
+	// 主动心跳：启动后立即尝试；若收到 401 会自动 re-enroll。
+	go newHeartbeat(opts.fullConfig, agentID, tokenGetter, opts.stateDir, opts.hostname, string(bundle.CACertPEM), opts.dataRoot, opts.dockerAddr, opts.fileAddr).Run(ctx)
 
-	dataHandler := newHandler(opts.dataRoot, opts.agentToken, opts.dockerSocket)
+	dataHandler := newHandler(opts.dataRoot, tokenGetter, opts.dockerSocket)
 	fileServer := &http.Server{
 		Addr:              opts.fileAddr,
 		Handler:           dataHandler,
@@ -133,7 +145,7 @@ func runAgent(ctx context.Context, opts agentOptions, stdout io.Writer) error {
 	errCh := make(chan error, 2)
 	go func() {
 		slog.Info("file-api 启动监听", "addr", fileServer.Addr)
-		if err := fileServer.ListenAndServe(); err != nil && !errors.Is(err, http.ErrServerClosed) {
+		if err := fileServer.ListenAndServeTLS(certPath, keyPath); err != nil && !errors.Is(err, http.ErrServerClosed) {
 			errCh <- fmt.Errorf("file-api: %w", err)
 			return
 		}
@@ -163,6 +175,34 @@ func runAgent(ctx context.Context, opts agentOptions, stdout io.Writer) error {
 		return err
 	}
 	return shutdownServers(fileServer, dockerServer)
+}
+
+func shouldEnrollOnStartup(cfg config.Config, token string) bool {
+	return strings.TrimSpace(cfg.Manager.Endpoint) != "" || strings.TrimSpace(token) == ""
+}
+
+func certHostname(opts agentOptions) string {
+	if host := strings.TrimSpace(opts.fullConfig.Agent.AdvertiseHost); host != "" {
+		return host
+	}
+	return opts.hostname
+}
+
+func enrollUntilReady(ctx context.Context, opts agentOptions, agentID, caPEM string) error {
+	ticker := time.NewTicker(5 * time.Second)
+	defer ticker.Stop()
+	for {
+		_, _, err := enrollAgent(ctx, opts.fullConfig, agentID, opts.fullConfig.Agent.Name, opts.hostname, opts.dataRoot, opts.stateDir, opts.dockerAddr, opts.fileAddr, agentVersion, caPEM)
+		if err == nil {
+			return nil
+		}
+		slog.Warn("首次 enroll 失败，等待重试", "error", err)
+		select {
+		case <-ctx.Done():
+			return fmt.Errorf("首次 enroll 失败: %w", ctx.Err())
+		case <-ticker.C:
+		}
+	}
 }
 
 func shutdownServers(servers ...*http.Server) error {
@@ -203,7 +243,10 @@ func newDockerEntryHandler(opts agentOptions, fallback http.Handler) http.Handle
 	if hostDataRoot != opts.dataRoot {
 		fmt.Fprintf(os.Stderr, "agent: docker proxy mount 重写启用：%s -> %s\n", opts.dataRoot, hostDataRoot)
 	}
-	proxy := NewDockerProxyHandler(opts.dockerSocket, opts.agentToken, opts.trustedCIDR, opts.dataRoot, hostDataRoot)
+	proxy := NewDockerProxyHandler(opts.dockerSocket, func() string {
+		_, token, _ := loadCredentials(opts.stateDir)
+		return token
+	}, opts.trustedCIDR, opts.dataRoot, hostDataRoot)
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if len(r.URL.Path) >= len(dockerProxyPathPrefix) && r.URL.Path[:len(dockerProxyPathPrefix)] == dockerProxyPathPrefix {
 			proxy.ServeHTTP(w, r)
@@ -213,11 +256,11 @@ func newDockerEntryHandler(opts agentOptions, fallback http.Handler) http.Handle
 	})
 }
 
-func newHandler(dataRoot, agentToken, dockerSocket string) http.Handler {
+func newHandler(dataRoot string, agentToken any, dockerSocket string) http.Handler {
 	return newHandlerWithDocker(dataRoot, newDockerSocketClient(dockerSocket), agentToken)
 }
 
-func newHandlerWithDocker(dataRoot string, docker DockerClient, agentToken string) http.Handler {
+func newHandlerWithDocker(dataRoot string, docker DockerClient, agentToken any) http.Handler {
 	mux := http.NewServeMux()
 	mux.HandleFunc("/healthz", func(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, HealthResponse{
@@ -227,9 +270,9 @@ func newHandlerWithDocker(dataRoot string, docker DockerClient, agentToken strin
 			Timestamp: time.Now().UTC().Format(time.RFC3339),
 		})
 	})
-	mux.HandleFunc("/v1/files/ping", func(w http.ResponseWriter, r *http.Request) {
+	mux.HandleFunc("/v1/files/ping", withAgentAuth(agentToken, func(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, map[string]string{"status": "ok"})
-	})
+	}))
 	mux.HandleFunc("/v1/images/inspect", withAgentAuth(agentToken, func(w http.ResponseWriter, r *http.Request) {
 		if r.Method != http.MethodGet {
 			writeError(w, http.StatusMethodNotAllowed, "method not allowed")
@@ -291,9 +334,10 @@ func writeError(w http.ResponseWriter, code int, message string) {
 	_ = json.NewEncoder(w).Encode(ErrorResponse{Error: message})
 }
 
-func withAgentAuth(agentToken string, next http.HandlerFunc) http.HandlerFunc {
+func withAgentAuth(agentToken any, next http.HandlerFunc) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
-		if agentToken != "" && r.Header.Get("Authorization") != "Bearer "+agentToken {
+		token := agentTokenString(agentToken)
+		if token != "" && r.Header.Get("Authorization") != "Bearer "+token {
 			writeError(w, http.StatusUnauthorized, "invalid agent token")
 			return
 		}

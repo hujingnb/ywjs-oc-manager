@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest'
 import { mount } from '@vue/test-utils'
+import { nextTick } from 'vue'
 import ConfirmActionModal from '../ConfirmActionModal.vue'
 
 describe('ConfirmActionModal verifyValue', () => {
@@ -14,7 +15,8 @@ describe('ConfirmActionModal verifyValue', () => {
         verifyHint: '输入应用名 "smoke-app-1" 以确认',
       },
     })
-    const btn = document.querySelector('.modal-card .primary-button') as HTMLButtonElement
+    await nextTick()
+    const btn = document.querySelector('.n-modal button.n-button--error-type') as HTMLButtonElement
     expect(btn.disabled).toBe(true)
     wrapper.unmount()
   })
@@ -24,11 +26,12 @@ describe('ConfirmActionModal verifyValue', () => {
       attachTo: document.body,
       props: { visible: true, title: 't', message: 'm', verifyValue: 'smoke-app-1' },
     })
-    const input = document.querySelector('.modal-card .verify-input') as HTMLInputElement
+    await nextTick()
+    const input = document.querySelector('.n-modal input') as HTMLInputElement
     input.value = 'wrong-name'
     input.dispatchEvent(new Event('input'))
     await wrapper.vm.$nextTick()
-    const btn = document.querySelector('.modal-card .primary-button') as HTMLButtonElement
+    const btn = document.querySelector('.n-modal button.n-button--error-type') as HTMLButtonElement
     expect(btn.disabled).toBe(true)
     wrapper.unmount()
   })
@@ -38,11 +41,12 @@ describe('ConfirmActionModal verifyValue', () => {
       attachTo: document.body,
       props: { visible: true, title: 't', message: 'm', verifyValue: 'Smoke-App' },
     })
-    const input = document.querySelector('.modal-card .verify-input') as HTMLInputElement
+    await nextTick()
+    const input = document.querySelector('.n-modal input') as HTMLInputElement
     input.value = 'SMOKE-app'
     input.dispatchEvent(new Event('input'))
     await wrapper.vm.$nextTick()
-    const btn = document.querySelector('.modal-card .primary-button') as HTMLButtonElement
+    const btn = document.querySelector('.n-modal button.n-button--error-type') as HTMLButtonElement
     expect(btn.disabled).toBe(false)
     wrapper.unmount()
   })
@@ -52,7 +56,8 @@ describe('ConfirmActionModal verifyValue', () => {
       attachTo: document.body,
       props: { visible: true, title: 't', message: 'm' },
     })
-    const btn = document.querySelector('.modal-card .primary-button') as HTMLButtonElement
+    await nextTick()
+    const btn = document.querySelector('.n-modal button.n-button--error-type') as HTMLButtonElement
     expect(btn.disabled).toBe(false)
     wrapper.unmount()
   })

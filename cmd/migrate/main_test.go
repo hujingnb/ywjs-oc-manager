@@ -49,6 +49,8 @@ auth:
   csrf_secret: "csrf-secret"
 security:
   master_key: "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA="
+runtime:
+  enrollment_secret: "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA="
 openclaw:
   system_prompt_template: |
     {{workspace_dir}} {{knowledge_org_dir}} {{knowledge_app_dir}}

@@ -177,10 +177,7 @@ type RuntimeNode struct {
 	AgentFileEndpoint pgtype.Text `db:"agent_file_endpoint" json:"agent_file_endpoint"`
 	AgentTlsCaCert    pgtype.Text `db:"agent_tls_ca_cert" json:"agent_tls_ca_cert"`
 	// 长期通信令牌 hash，明文令牌只保存在 agent 侧。
-	AgentTokenHash pgtype.Text `db:"agent_token_hash" json:"agent_token_hash"`
-	// 一次性注册令牌 hash，节点注册成功后清空。
-	BootstrapTokenHash       pgtype.Text        `db:"bootstrap_token_hash" json:"bootstrap_token_hash"`
-	BootstrapTokenExpiresAt  pgtype.Timestamptz `db:"bootstrap_token_expires_at" json:"bootstrap_token_expires_at"`
+	AgentTokenHash           pgtype.Text        `db:"agent_token_hash" json:"agent_token_hash"`
 	AgentVersion             pgtype.Text        `db:"agent_version" json:"agent_version"`
 	HeartbeatIntervalSeconds int32              `db:"heartbeat_interval_seconds" json:"heartbeat_interval_seconds"`
 	LastHeartbeatAt          pgtype.Timestamptz `db:"last_heartbeat_at" json:"last_heartbeat_at"`
@@ -195,6 +192,20 @@ type RuntimeNode struct {
 	AgentTokenCiphertext pgtype.Text `db:"agent_token_ciphertext" json:"agent_token_ciphertext"`
 	// 节点最大未删除应用数；NULL 表示不限。OnboardingService 在自动选节点时按剩余容量过滤。
 	MaxApps pgtype.Int4 `db:"max_apps" json:"max_apps"`
+	// agent 自身持久化的 UUID（state_dir/agent-id），全表唯一；enroll 幂等键。
+	AgentID pgtype.Text `db:"agent_id" json:"agent_id"`
+	// manager 最近一次主动探测该 agent 双端口的发起时间；无论请求是否到达 agent 都更新。
+	LastProbeAttemptedAt pgtype.Timestamptz `db:"last_probe_attempted_at" json:"last_probe_attempted_at"`
+	// manager 最近一次对 agent 双端口探测全部通过的时间。
+	LastProbeOkAt pgtype.Timestamptz `db:"last_probe_ok_at" json:"last_probe_ok_at"`
+	// manager 最近一次对 agent 双端口探测任一失败的时间。
+	LastProbeFailedAt pgtype.Timestamptz `db:"last_probe_failed_at" json:"last_probe_failed_at"`
+	// manager 最近一次 probe 失败的简短错误分类。
+	LastProbeError pgtype.Text `db:"last_probe_error" json:"last_probe_error"`
+	// manager 主动探测连续失败次数，用于 active 到 degraded 的阈值判断。
+	ProbeFailureStreak int32 `db:"probe_failure_streak" json:"probe_failure_streak"`
+	// manager 主动探测连续成功次数，用于 degraded 到 active 的阈值判断。
+	ProbeSuccessStreak int32 `db:"probe_success_streak" json:"probe_success_streak"`
 }
 
 // 平台管理员、组织管理员和组织成员账号。

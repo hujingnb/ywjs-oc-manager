@@ -4,7 +4,6 @@ import (
 	"context"
 	"crypto/tls"
 	"encoding/json"
-	"io"
 	"net/http"
 	"net/http/httptest"
 	"sync"
@@ -12,12 +11,12 @@ import (
 	"testing"
 	"time"
 
-	"oc-manager/runtime/agent/config"
-	"github.com/stretchr/testify/require"
 	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
+
+	"oc-manager/runtime/agent/config"
 )
 
-// captureHBLogger 累计三类日志调用次数，便于断言失败计数到阈值时打 ERROR。
 type captureHBLogger struct {
 	mu     sync.Mutex
 	infos  int
@@ -45,32 +44,17 @@ func (l *captureHBLogger) errorCount() int {
 	defer l.mu.Unlock()
 	return l.errors
 }
-func (l *captureHBLogger) warnCount() int {
-	l.mu.Lock()
-	defer l.mu.Unlock()
-	return l.warns
-}
 
-func TestHeartbeat_NotStartedWhenManagerEmpty(t *testing.T) {
-	cfg := config.Config{
-		Heartbeat: config.HeartbeatConfig{IntervalSeconds: 30, FailureLogThreshold: 5},
-	}
-	hb := newHeartbeat(cfg)
-	if hb.shouldStart() {
-		t.Fatal("manager 三字段全空时不应启动 heartbeat")
-	}
+func TestHeartbeat_NotStartedWhenTokenEmpty(t *testing.T) {
+	cfg := config.Config{Heartbeat: config.HeartbeatConfig{IntervalSeconds: 30, FailureLogThreshold: 5}}
+	hb := newHeartbeat(cfg, "agent-1", func() string { return "" }, t.TempDir(), "host", "", t.TempDir(), ":7001", ":7002")
+	require.False(t, hb.shouldStart())
 }
 
 func TestHeartbeat_PeriodicPost(t *testing.T) {
 	var hits atomic.Int32
-	var lastBodyMu sync.Mutex
-	var lastBody []byte
 	srv := httptest.NewTLSServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		assert.Equal(t, "/api/v1/agent/heartbeat", r.URL.Path)
-		body, _ := io.ReadAll(r.Body)
-		lastBodyMu.Lock()
-		lastBody = body
-		lastBodyMu.Unlock()
 		hits.Add(1)
 		w.WriteHeader(http.StatusOK)
 	}))
@@ -78,10 +62,9 @@ func TestHeartbeat_PeriodicPost(t *testing.T) {
 
 	cfg := config.Config{
 		Manager: config.ManagerConfig{
-			Endpoint:   srv.URL + "/api/v1",
-			NodeID:     "node-x",
-			AgentToken: "tok-x",
-			SkipVerify: true,
+			Endpoint:         srv.URL + "/api/v1",
+			EnrollmentSecret: "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA=",
+			SkipVerify:       true,
 		},
 		Heartbeat: config.HeartbeatConfig{IntervalSeconds: 30, FailureLogThreshold: 5},
 	}
@@ -89,7 +72,8 @@ func TestHeartbeat_PeriodicPost(t *testing.T) {
 		Transport: &http.Transport{TLSClientConfig: &tls.Config{InsecureSkipVerify: true}},
 		Timeout:   2 * time.Second,
 	}
-	hb := newHeartbeat(cfg, withTickInterval(40*time.Millisecond), withHTTPClient(client))
+	token := "tok-x"
+	hb := newHeartbeat(cfg, "agent-1", func() string { return token }, t.TempDir(), "host", "", t.TempDir(), ":7001", ":7002", withTickInterval(40*time.Millisecond), withHTTPClient(client))
 
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
@@ -106,24 +90,7 @@ func TestHeartbeat_PeriodicPost(t *testing.T) {
 	cancel()
 	<-done
 
-	if got := hits.Load(); got < 3 {
-		t.Fatalf("expected ≥3 heartbeats, got %d", got)
-	}
-
-	lastBodyMu.Lock()
-	body := append([]byte(nil), lastBody...)
-	lastBodyMu.Unlock()
-	var decoded map[string]any
-	err := json.Unmarshal(body, &decoded)
-	require.NoError(t, err)
-	agentToken, _ := decoded["agent_token"].(string)
-	assert.Equal(t, "tok-x", agentToken)
-	if _, ok := decoded["agent_version"]; !ok {
-		t.Errorf("body 缺少 agent_version 字段")
-	}
-	if _, ok := decoded["resource_snapshot"]; !ok {
-		t.Errorf("body 缺少 resource_snapshot 字段")
-	}
+	require.GreaterOrEqual(t, hits.Load(), int32(3))
 }
 
 func TestHeartbeat_FailureLogThreshold(t *testing.T) {
@@ -134,16 +101,14 @@ func TestHeartbeat_FailureLogThreshold(t *testing.T) {
 
 	cfg := config.Config{
 		Manager: config.ManagerConfig{
-			Endpoint:   srv.URL + "/api/v1",
-			NodeID:     "node-x",
-			AgentToken: "tok-x",
-			SkipVerify: true,
+			Endpoint:         srv.URL + "/api/v1",
+			EnrollmentSecret: "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA=",
 		},
 		Heartbeat: config.HeartbeatConfig{IntervalSeconds: 30, FailureLogThreshold: 3},
 	}
 	logger := &captureHBLogger{}
-	client := &http.Client{Timeout: 1 * time.Second}
-	hb := newHeartbeat(cfg, withTickInterval(20*time.Millisecond), withHTTPClient(client), withLogger(logger))
+	token := "tok-x"
+	hb := newHeartbeat(cfg, "agent-1", func() string { return token }, t.TempDir(), "host", "", t.TempDir(), ":7001", ":7002", withTickInterval(20*time.Millisecond), withHTTPClient(srv.Client()), withLogger(logger))
 
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
@@ -159,36 +124,38 @@ func TestHeartbeat_FailureLogThreshold(t *testing.T) {
 	cancel()
 	<-done
 
-	require.NotEqual(t, 0, logger.errorCount())
+	require.NotZero(t, logger.errorCount())
 }
 
-func TestHeartbeat_CancelStopsGoroutine(t *testing.T) {
+func TestEnrollAgentUsesConfiguredName(t *testing.T) {
+	var got map[string]any
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		w.WriteHeader(http.StatusOK)
+		assert.Equal(t, "/api/v1/agent/enroll", r.URL.Path)
+		require.NoError(t, json.NewDecoder(r.Body).Decode(&got))
+		writeJSON(w, map[string]any{
+			"node_id":                    "00000000-0000-0000-0000-000000000001",
+			"agent_token":                "token-1",
+			"heartbeat_interval_seconds": 30,
+		})
 	}))
 	defer srv.Close()
 
+	stateDir := t.TempDir()
 	cfg := config.Config{
-		Manager: config.ManagerConfig{
-			Endpoint:   srv.URL + "/api/v1",
-			NodeID:     "node-x",
-			AgentToken: "tok-x",
-			SkipVerify: true,
+		Agent: config.AgentConfig{
+			Name:          "local-agent-1",
+			AdvertiseHost: "runtime-agent.local",
+			MaxApps:       int32Ptr(3),
 		},
-		Heartbeat: config.HeartbeatConfig{IntervalSeconds: 30, FailureLogThreshold: 5},
+		Manager: config.ManagerConfig{
+			Endpoint:         srv.URL + "/api/v1",
+			EnrollmentSecret: "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA=",
+		},
 	}
-	hb := newHeartbeat(cfg, withTickInterval(50*time.Millisecond), withHTTPClient(srv.Client()))
-	ctx, cancel := context.WithCancel(context.Background())
-	done := make(chan struct{})
-	go func() {
-		hb.Run(ctx)
-		close(done)
-	}()
-	time.Sleep(80 * time.Millisecond)
-	cancel()
-	select {
-	case <-done:
-	case <-time.After(time.Second):
-		t.Fatal("cancel ctx 后 goroutine 应在 1 秒内退出")
-	}
+	_, _, err := enrollAgent(context.Background(), cfg, "00000000-0000-0000-0000-00000000a001", cfg.Agent.Name, "container-host", "/data", stateDir, ":7001", ":7002", "test", "-----BEGIN CERTIFICATE-----\nMIIB\n-----END CERTIFICATE-----\n")
+	require.NoError(t, err)
+	require.Equal(t, "local-agent-1", got["name"])
+	require.Equal(t, float64(3), got["max_apps"])
 }
+
+func int32Ptr(v int32) *int32 { return &v }

@@ -37,12 +37,28 @@
           <dd>{{ node.node_data_root || '—' }}</dd>
         </div>
         <div>
-          <dt>Bootstrap 过期</dt>
-          <dd>{{ node.bootstrap_token_expires_at || '—' }}</dd>
+          <dt>Agent ID</dt>
+          <dd>{{ node.agent_id || '—' }}</dd>
         </div>
         <div>
           <dt>Agent 已注册</dt>
           <dd>{{ node.has_agent_token ? '是' : '否' }}</dd>
+        </div>
+        <div>
+          <dt>最近探测</dt>
+          <dd>{{ node.last_probe_attempted_at ? new Date(node.last_probe_attempted_at).toLocaleString() : '—' }}</dd>
+        </div>
+        <div>
+          <dt>最近成功探测</dt>
+          <dd>{{ node.last_probe_ok_at ? new Date(node.last_probe_ok_at).toLocaleString() : '—' }}</dd>
+        </div>
+        <div>
+          <dt>探测失败</dt>
+          <dd>{{ node.last_probe_error || '—' }}</dd>
+        </div>
+        <div>
+          <dt>探测计数</dt>
+          <dd>失败 {{ node.probe_failure_streak ?? 0 }} / 成功 {{ node.probe_success_streak ?? 0 }}</dd>
         </div>
       </dl>
     </section>

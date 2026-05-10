@@ -68,9 +68,8 @@ var ErrInvalidRechargeAmount = errors.New("充值金额必须为正")
 // Runtime Node -----------------------------------------------------
 // 来源：原 runtime_node_service.go
 
-var ErrBootstrapTokenInvalid = errors.New("bootstrap token 无效或已过期")
 var ErrAgentTokenInvalid = errors.New("agent token 无效")
-var ErrRuntimeNodeBusy = errors.New("runtime node 当前不可重置")
+var ErrEnrollInputInvalid = errors.New("agent enroll 参数不合法")
 
 // 应用 / 运行时操作 ------------------------------------------------
 // 来源：原 runtime_operation_service.go

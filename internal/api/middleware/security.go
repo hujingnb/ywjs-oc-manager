@@ -45,7 +45,7 @@ func CORSAllowOrigin(allowed []string) gin.HandlerFunc {
 // SecretPatterns 是日志输出前需要脱敏的字段名匹配。
 // 任何含有这些子串的 query / header / body 片段都会被替换为 ***。
 var SecretPatterns = []string{
-	"authorization", "agent_token", "bootstrap_token",
+	"authorization", "agent_token", "bootstrap_token", "enrollment_secret",
 	"newapi_admin_token", "csrf_secret", "jwt_access_secret", "jwt_refresh_secret",
 	"master_key", "password", "newapi_key_ciphertext",
 }

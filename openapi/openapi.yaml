@@ -1,5 +1,32 @@
 components:
   schemas:
+    handlers.AgentEnrollRequest:
+      properties:
+        agent_docker_endpoint:
+          type: string
+        agent_file_endpoint:
+          type: string
+        agent_id:
+          type: string
+        agent_tls_ca_cert:
+          type: string
+        agent_version:
+          type: string
+        max_apps:
+          type: integer
+        metadata:
+          additionalProperties: {}
+          type: object
+        name:
+          type: string
+        node_data_root:
+          type: string
+        resource_snapshot:
+          additionalProperties: {}
+          type: object
+      required:
+      - agent_id
+      type: object
     handlers.AgentHeartbeatRequest:
       properties:
         agent_token:
@@ -14,29 +41,6 @@ components:
           type: object
       required:
       - agent_token
-      type: object
-    handlers.AgentRegisterRequest:
-      properties:
-        agent_docker_endpoint:
-          type: string
-        agent_file_endpoint:
-          type: string
-        agent_tls_ca_cert:
-          type: string
-        agent_version:
-          type: string
-        bootstrap_token:
-          type: string
-        metadata:
-          additionalProperties: {}
-          type: object
-        node_data_root:
-          type: string
-        resource_snapshot:
-          additionalProperties: {}
-          type: object
-      required:
-      - bootstrap_token
       type: object
     handlers.CreateMemberRequest:
       properties:
@@ -75,17 +79,6 @@ components:
       - admin_display_name
       - admin_password
       - admin_username
-      - name
-      type: object
-    handlers.CreateRuntimeNodeRequest:
-      properties:
-        heartbeat_interval_seconds:
-          type: integer
-        name:
-          type: string
-        node_data_root:
-          type: string
-      required:
       - name
       type: object
     handlers.ErrorResponse:
@@ -165,11 +158,6 @@ components:
       required:
       - name
       type: object
-    handlers.PatchRuntimeNodeRequest:
-      properties:
-        max_apps:
-          type: integer
-      type: object
     handlers.PersonaRequest:
       properties:
         allow_member_override:
@@ -224,7 +212,7 @@ components:
       required:
       - display_name
       type: object
-    service.AgentRegisterResult:
+    service.AgentEnrollResult:
       properties:
         agent_token:
           type: string
@@ -517,11 +505,9 @@ components:
           type: string
         agent_file_endpoint:
           type: string
+        agent_id:
+          type: string
         agent_version:
-          type: string
-        bootstrap_token:
-          type: string
-        bootstrap_token_expires_at:
           type: string
         has_agent_token:
           type: boolean
@@ -529,12 +515,24 @@ components:
           type: integer
         id:
           type: string
+        last_probe_attempted_at:
+          type: string
+        last_probe_error:
+          type: string
+        last_probe_failed_at:
+          type: string
+        last_probe_ok_at:
+          type: string
         max_apps:
           type: integer
         name:
           type: string
         node_data_root:
           type: string
+        probe_failure_streak:
+          type: integer
+        probe_success_streak:
+          type: integer
         status:
           type: string
       type: object
@@ -645,6 +643,55 @@ info:
   version: "1.0"
 openapi: 3.1.0
 paths:
+  /agent/enroll:
+    post:
+      description: runtime agent 使用共享 enrollment secret 自动注册或刷新节点信息，并换取长效 agent token
+      parameters:
+      - description: Bearer enrollment_secret
+        in: header
+        name: Authorization
+        required: true
+        schema:
+          type: string
+      requestBody:
+        content:
+          application/json:
+            schema:
+              oneOf:
+              - type: object
+              - $ref: '#/components/schemas/handlers.AgentEnrollRequest'
+                description: 自动注册请求
+                summary: body
+        description: 自动注册请求
+        required: true
+      responses:
+        "200":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/service.AgentEnrollResult'
+          description: OK
+        "400":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/handlers.ErrorResponse'
+          description: Bad Request
+        "401":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/handlers.ErrorResponse'
+          description: Unauthorized
+        "500":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/handlers.ErrorResponse'
+          description: Internal Server Error
+      summary: Agent 自动注册
+      tags:
+      - agent
   /agent/heartbeat:
     post:
       description: runtime agent 定期上报心跳及资源快照；鉴权通过请求体中的 agent_token 字段完成
@@ -687,49 +734,6 @@ paths:
                 $ref: '#/components/schemas/handlers.ErrorResponse'
           description: Internal Server Error
       summary: Agent 心跳
-      tags:
-      - agent
-  /agent/register:
-    post:
-      description: runtime agent 用一次性 bootstrap token 注册并换取长效 agent token；鉴权通过请求体中的
-        bootstrap_token 字段完成
-      requestBody:
-        content:
-          application/json:
-            schema:
-              oneOf:
-              - type: object
-              - $ref: '#/components/schemas/handlers.AgentRegisterRequest'
-                description: 注册请求（含 bootstrap_token）
-                summary: body
-        description: 注册请求（含 bootstrap_token）
-        required: true
-      responses:
-        "200":
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/service.AgentRegisterResult'
-          description: OK
-        "400":
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/handlers.ErrorResponse'
-          description: Bad Request
-        "401":
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/handlers.ErrorResponse'
-          description: Unauthorized
-        "500":
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/handlers.ErrorResponse'
-          description: Internal Server Error
-      summary: Agent 注册
       tags:
       - agent
   /apps/{appId}:
@@ -3621,57 +3625,6 @@ paths:
       summary: runtime 节点列表
       tags:
       - runtime-nodes
-    post:
-      description: 平台管理员注册新 runtime 节点，返回包含一次性 bootstrap token 的节点信息
-      requestBody:
-        content:
-          application/json:
-            schema:
-              oneOf:
-              - type: object
-              - $ref: '#/components/schemas/handlers.CreateRuntimeNodeRequest'
-                description: 注册节点请求
-                summary: body
-        description: 注册节点请求
-        required: true
-      responses:
-        "201":
-          content:
-            application/json:
-              schema:
-                additionalProperties:
-                  $ref: '#/components/schemas/service.RuntimeNodeResult'
-                type: object
-          description: Created
-        "400":
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/handlers.ErrorResponse'
-          description: Bad Request
-        "401":
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/handlers.ErrorResponse'
-          description: Unauthorized
-        "403":
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/handlers.ErrorResponse'
-          description: Forbidden
-        "500":
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/handlers.ErrorResponse'
-          description: Internal Server Error
-      security:
-      - BearerAuth: []
-      summary: 注册 runtime 节点
-      tags:
-      - runtime-nodes
   /runtime-nodes/{nodeId}:
     get:
       description: 按 nodeId 获取单个 runtime 节点信息
@@ -3718,70 +3671,6 @@ paths:
       security:
       - BearerAuth: []
       summary: runtime 节点详情
-      tags:
-      - runtime-nodes
-    patch:
-      description: 更新节点的可调字段；当前仅支持 max_apps（null 表示清空上限）
-      parameters:
-      - description: 节点 ID
-        in: path
-        name: nodeId
-        required: true
-        schema:
-          type: string
-      requestBody:
-        content:
-          application/json:
-            schema:
-              oneOf:
-              - type: object
-              - $ref: '#/components/schemas/handlers.PatchRuntimeNodeRequest'
-                description: 更新节点请求
-                summary: body
-        description: 更新节点请求
-        required: true
-      responses:
-        "200":
-          content:
-            application/json:
-              schema:
-                additionalProperties:
-                  $ref: '#/components/schemas/service.RuntimeNodeResult'
-                type: object
-          description: OK
-        "400":
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/handlers.ErrorResponse'
-          description: Bad Request
-        "401":
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/handlers.ErrorResponse'
-          description: Unauthorized
-        "403":
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/handlers.ErrorResponse'
-          description: Forbidden
-        "404":
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/handlers.ErrorResponse'
-          description: Not Found
-        "500":
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/handlers.ErrorResponse'
-          description: Internal Server Error
-      security:
-      - BearerAuth: []
-      summary: 更新 runtime 节点
       tags:
       - runtime-nodes
   /runtime-nodes/{nodeId}/disable:
@@ -3878,60 +3767,6 @@ paths:
       security:
       - BearerAuth: []
       summary: 启用 runtime 节点
-      tags:
-      - runtime-nodes
-  /runtime-nodes/{nodeId}/rotate-bootstrap:
-    post:
-      description: 为指定节点生成新的一次性 bootstrap token；节点处于活跃状态时返回 409
-      parameters:
-      - description: 节点 ID
-        in: path
-        name: nodeId
-        required: true
-        schema:
-          type: string
-      responses:
-        "200":
-          content:
-            application/json:
-              schema:
-                additionalProperties:
-                  $ref: '#/components/schemas/service.RuntimeNodeResult'
-                type: object
-          description: OK
-        "401":
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/handlers.ErrorResponse'
-          description: Unauthorized
-        "403":
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/handlers.ErrorResponse'
-          description: Forbidden
-        "404":
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/handlers.ErrorResponse'
-          description: Not Found
-        "409":
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/handlers.ErrorResponse'
-          description: Conflict
-        "500":
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/handlers.ErrorResponse'
-          description: Internal Server Error
-      security:
-      - BearerAuth: []
-      summary: 轮换 bootstrap token
       tags:
       - runtime-nodes
   /usage/members/{userId}:

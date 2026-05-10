@@ -1,66 +1,16 @@
 package store
 
-import (
-	"context"
+import "oc-manager/internal/store/sqlc"
 
-	"github.com/jackc/pgx/v5/pgxpool"
-	"github.com/jackc/pgx/v5/pgtype"
-
-	"oc-manager/internal/service"
-	"oc-manager/internal/store/sqlc"
-)
-
-// runtimeNodeStore 在 sqlc.Queries 之外补齐 service 需要的扩展能力，例如轮换 bootstrap token。
-// 这样 service 层只依赖 RuntimeNodeStore 接口，不直接访问连接池或写裸 SQL。
+// runtimeNodeStore 目前只组合 sqlc.Queries。
+//
+// 自动注册切换后，旧 bootstrap rotate 的裸 SQL 已移除；保留这个包装类型是为了让
+// cmd/server 的装配点稳定，后续若需要事务或扩展查询仍可在这里集中补齐。
 type runtimeNodeStore struct {
 	*sqlc.Queries
-	pool *pgxpool.Pool
 }
 
-// NewRuntimeNodeStore 用现有 Store 构造满足 service.RuntimeNodeStore 与 BootstrapRotator 的实现。
+// NewRuntimeNodeStore 用现有 Store 构造 service.RuntimeNodeStore 实现。
 func NewRuntimeNodeStore(s *Store) *runtimeNodeStore {
-	return &runtimeNodeStore{Queries: s.Queries, pool: s.pool}
-}
-
-const rotateRuntimeNodeBootstrap = `
-UPDATE runtime_nodes
-SET bootstrap_token_hash = $2,
-    bootstrap_token_expires_at = $3,
-    updated_at = now()
-WHERE id = $1
-RETURNING id, name, status, agent_docker_endpoint, agent_file_endpoint, agent_tls_ca_cert,
-    agent_token_hash, bootstrap_token_hash, bootstrap_token_expires_at, agent_version,
-    heartbeat_interval_seconds, last_heartbeat_at, resource_snapshot_json, metadata_json,
-    node_data_root, registered_at, created_at, updated_at, max_apps
-`
-
-// RotateBootstrapToken 直接通过连接池执行 rotate；不在 sqlc 中生成是为了避免因单一查询触发重新生成全量代码。
-func (s *runtimeNodeStore) RotateBootstrapToken(ctx context.Context, arg service.RotateBootstrapTokenParams) (sqlc.RuntimeNode, error) {
-	row := s.pool.QueryRow(ctx, rotateRuntimeNodeBootstrap, arg.ID,
-		pgtype.Text{String: arg.BootstrapTokenHash, Valid: true},
-		pgtype.Timestamptz{Time: arg.BootstrapTokenExpiresAt, Valid: true},
-	)
-	var node sqlc.RuntimeNode
-	err := row.Scan(
-		&node.ID,
-		&node.Name,
-		&node.Status,
-		&node.AgentDockerEndpoint,
-		&node.AgentFileEndpoint,
-		&node.AgentTlsCaCert,
-		&node.AgentTokenHash,
-		&node.BootstrapTokenHash,
-		&node.BootstrapTokenExpiresAt,
-		&node.AgentVersion,
-		&node.HeartbeatIntervalSeconds,
-		&node.LastHeartbeatAt,
-		&node.ResourceSnapshotJson,
-		&node.MetadataJson,
-		&node.NodeDataRoot,
-		&node.RegisteredAt,
-		&node.CreatedAt,
-		&node.UpdatedAt,
-		&node.MaxApps,
-	)
-	return node, err
+	return &runtimeNodeStore{Queries: s.Queries}
 }

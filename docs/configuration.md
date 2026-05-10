@@ -122,6 +122,18 @@ manager 侧的 agent 协议参数（**不是** runtime-agent 自身配置）：
 |---|---|---|
 | `heartbeat_interval_seconds` | ✅ | runtime-agent 注册成功后回写并按此频率上报心跳；manager 用 90s 阈值判定离线 |
 
+### 2.9 `runtime.*`
+
+runtime 节点自动注册与主动探测配置：
+
+| 字段 | 必填 | 含义 |
+|---|---|---|
+| `enrollment_secret` | ✅ | runtime-agent 自动注册共享密钥，必须是 base64 编码的 32 字节随机数 |
+| `probe.interval_seconds` | — | manager 主动探测节点 docker/file TLS 端口的间隔，默认 `60` |
+| `probe.timeout_seconds` | — | 单次探测超时秒数，默认 `3` |
+| `probe.failure_threshold` | — | active 节点连续探测失败达到该次数后进入 `degraded`，默认 `3` |
+| `probe.recovery_threshold` | — | degraded 节点连续探测成功达到该次数后恢复 `active`，默认 `2` |
+
 ## 3. `agent.yaml` 字段速查
 
 `oc-runtime-agent` 自身配置，部署到每个 Runtime Node。
@@ -130,24 +142,25 @@ manager 侧的 agent 协议参数（**不是** runtime-agent 自身配置）：
 
 | 字段 | 必填 | 含义 |
 |---|---|---|
+| `name` | — | 节点展示名；为空时 manager 使用 `agent_id` 前 8 位生成默认名 |
+| `advertise_host` | 推荐 | agent 上报给 manager 的可达主机名或 IP；为空时使用本机 hostname |
+| `max_apps` | — | 节点最大可承载应用数；`null` / 留空 = 不限，`0` = 暂停接收新应用。该值由 agent 配置文件定义，修改后重启 agent 重新 enroll 生效 |
 | `data_root` | ✅ | 业务数据根；下挂 `orgs/<org_id>/...` 与 `apps/<app_id>/...`。容器部署一般指向 docker volume 挂载点 |
 | `state_dir` | ✅ | agent 自身状态目录，存自签 TLS 证书 / 注册结果。推荐 `data_root` 子目录 |
 | `docker_socket` | ✅ | 宿主机 Docker daemon socket，通常 `/var/run/docker.sock` |
-| `token` | ✅（生产） | agent ↔ manager 的 Bearer token；留空表示不做 Bearer 校验，**仅本地无授权 dev** |
 | `trusted_cidr` | 推荐 | 允许调用 agent 的客户端 CIDR，例如 `10.0.0.0/8`；留空 = 不做 IP 限制 |
-| `docker_addr` | ✅ | docker proxy HTTP server 监听地址，例如 `:7001` |
-| `file_addr` | ✅ | 文件 / scope API HTTP server 监听地址，例如 `:7002` |
+| `docker_addr` | ✅ | docker proxy TLS server 监听地址，例如 `:7001` |
+| `file_addr` | ✅ | 文件 / scope API TLS server 监听地址，例如 `:7002` |
 
 ### 3.2 `manager.*`
 
-节点首次 register 完成后由运维回填。三字段（`endpoint` / `node_id` / `agent_token`）
-**要么同时为空，要么同时填齐**；只填部分会启动 fail-fast。
+agent 启动时使用 `enrollment_secret` 主动注册，注册成功后的 `node_id` 与
+`agent_token` 自动写入 `state_dir`，不需要人工回填。
 
 | 字段 | 含义 |
 |---|---|
 | `endpoint` | 形如 `https://manager.example/api/v1` |
-| `node_id` | `POST /agent/register` 响应中的 `runtime_nodes.id`（UUID） |
-| `agent_token` | `POST /agent/register` 响应中的长期 bearer token |
+| `enrollment_secret` | 与 `manager.yaml` 的 `runtime.enrollment_secret` 完全一致 |
 | `ca_bundle` | manager 自签 TLS CA PEM 全文；空则信任系统根证书 |
 | `skip_verify` | 仅本地调试用；生产必须 `false`，否则会跳过 manager TLS 校验 |
 
@@ -165,10 +178,9 @@ manager 侧的 agent 协议参数（**不是** runtime-agent 自身配置）：
 cp config/manager.example.yaml config/manager.yaml
 cp config/agent.example.yaml   config/agent.yaml
 
-# 2. 生成 master_key（一次性）
-echo "security:" >> config/manager.yaml
-echo "  master_key: \"$(openssl rand -base64 32)\"" >> config/manager.yaml
-# 然后回到编辑器把这一行剪贴到 security: 下；不要遗留两段 security:
+# 2. 生成 master_key 与 enrollment_secret（一次性）
+openssl rand -base64 32  # 写入 manager.yaml security.master_key
+openssl rand -base64 32  # 写入 manager.yaml runtime.enrollment_secret 和 agent.yaml manager.enrollment_secret
 
 # 3. 改其他必填字段
 ${EDITOR:-vi} config/manager.yaml
@@ -213,11 +225,12 @@ yaml：
       非空且高熵
 - [ ] `auth.access_token_ttl` / `auth.refresh_token_ttl` 是合法 Go duration 字符串
 - [ ] `security.master_key` 是 base64 编码 + 解码后正好 32 字节
+- [ ] `runtime.enrollment_secret` 是 base64 编码 + 解码后正好 32 字节，且所有 agent 一致
 - [ ] `openclaw.system_prompt_template` 含三个占位符 `{{workspace_dir}}` /
       `{{knowledge_org_dir}}` / `{{knowledge_app_dir}}`
 - [ ] `openclaw.container_networks` 至少含 `new-api` 所在 network
 - [ ] agent 端 `agent.docker_addr` / `file_addr` 不冲突，且对 manager 网络可达
-- [ ] agent 端 `agent.token` 与 manager 注册节点时下发的 `agent_token` 完全一致
+- [ ] agent 端 `agent.advertise_host` 是 manager 能访问到的主机名或 IP
 
 ## 7. 安全要点
 
@@ -227,5 +240,5 @@ yaml：
   暴露到公网，应仅放行 manager 出口 CIDR。
 - 任何含明文凭据的字段（`database.url` / `redis.password` / `auth.*` /
   `security.master_key` / `newapi.admin_token`
-  / `agent.token` / `manager.agent_token`）只能写到 gitignored 的真实 yaml；
+  / `runtime.enrollment_secret` / `manager.enrollment_secret`）只能写到 gitignored 的真实 yaml；
   例文件保持脱敏占位。

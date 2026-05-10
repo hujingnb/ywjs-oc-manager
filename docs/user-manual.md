@@ -2,7 +2,7 @@
 
 面向终端使用者的操作指南。涵盖三类角色：
 
-- **平台管理员（platform admin）** — 管理整个平台、注册节点、开通组织、给组织充值
+- **平台管理员（platform admin）** — 管理整个平台、查看和启停节点、开通组织、给组织充值
 - **组织管理员（org admin）** — 管理本组织成员、应用、人设、知识库
 - **组织成员（org member）** — 管理自己名下唯一的 OpenClaw 应用
 
@@ -46,22 +46,22 @@ access token 默认 15 分钟有效，过期时前端用 refresh token 自动续
 
 第一次部署需要至少一个节点；否则任何应用创建都会失败（节点容量不足）。
 
-1. **运维准备节点**：在节点上启动 `oc-runtime-agent` 容器，写好
-   `agent.yaml` 的 `agent.token`（先随便填一个占位即可，下一步会被覆盖）。
-2. **manager 端创建节点**：在 **运行节点** 页点 **注册节点**，填：
-   - 节点名（如 `node-shanghai-1`，全局唯一）
-   - agent docker 代理 endpoint（如 `https://node-1.internal:7001`）
-   - agent 文件 API endpoint（如 `https://node-1.internal:7002`）
-   - agent 自签 CA PEM（从节点 agent 启动日志 `agent-ca-pem-base64:` 那行 base64 解码）
-   - 最大应用数 `max_apps`（留空表示不限）
-   manager 返回 `node_id` + 一次性 `bootstrap_token`。
-3. **运维回填到节点**：把 `node_id` 与 `bootstrap_token` 写入节点的
-   `agent.yaml.manager.endpoint / node_id / agent_token` 三字段。
-4. **agent 注册**：重启 agent 容器，agent 会调 manager `POST /api/v1/agent/register`
-   把 bootstrap_token 兑换成 long-lived `agent_token`。manager UI 上节点状态翻为
-   `pending` → 心跳到达后翻 `active`。
-5. **token 轮换**（运维操作）：节点详情页 **Rotate bootstrap token** 重新生成
-   bootstrap token；适用于丢失或泄漏场景。`agent_token` 不会自动轮换。
+1. **生成 enrollment secret**：使用 `openssl rand -base64 32`，写入
+   `manager.yaml` 的 `runtime.enrollment_secret`，并写入每台节点 `agent.yaml`
+   的 `manager.enrollment_secret`。
+2. **运维准备节点**：在节点上启动 `oc-runtime-agent` 容器，配置：
+   - `agent.name`：节点展示名
+   - `agent.advertise_host`：manager 能访问到的节点主机名或 IP
+   - `agent.max_apps`：节点最大可承载应用数；留空表示不限
+   - `agent.data_root` / `agent.state_dir`
+   - `manager.endpoint`
+   - `manager.enrollment_secret`
+3. **agent 自动注册**：agent 首次启动会调 manager `POST /api/v1/agent/enroll`，
+   自动创建或刷新 runtime node，并把 `node_id` / `agent_token` 写入 `state_dir`。
+4. **后台查看**：打开 **运行节点** 页，新节点会自动出现。后台不再提供「注册节点」
+   或「Rotate bootstrap token」操作。
+5. **token 异常恢复**：如果 agent 心跳收到 401，会自动重新 enroll；如需强制刷新，
+   重启对应 agent 即可。
 
 详细跨机部署步骤见 [`deploy/README.md`](../deploy/README.md) 「跨机部署（多 runtime node）」。
 
@@ -70,6 +70,7 @@ access token 默认 15 分钟有效，过期时前端用 refresh token 自动续
 **运行节点** 列表展示每个节点的：
 
 - 状态（待注册 / 活跃 / 不可达 / 禁用）
+- 探测状态与最近探测错误；`degraded` 表示 manager 到 agent 入站端口异常
 - 最近心跳时间
 - 当前应用数 / 最大应用数
 - agent 版本、Docker 版本、OS 内核
@@ -104,7 +105,8 @@ access token 默认 15 分钟有效，过期时前端用 refresh token 自动续
 | 应用描述 | 可选 |
 
 > 第一版「节点选择」字段已下线：服务端 `node_selector` 自动选 **剩余容量最大** 的
-> 活跃节点。若想强制把应用放到某节点，请通过节点 `max_apps` 调节。
+> 活跃节点。若要调整容量，请修改对应 runtime-agent 的 `agent.max_apps` 并重启 agent，
+> manager 会在重新 enroll 后同步新值。
 
 提交后：
 

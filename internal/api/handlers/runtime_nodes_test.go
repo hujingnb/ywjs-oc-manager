@@ -4,68 +4,32 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
-	"errors"
 	"net/http"
 	"net/http/httptest"
 	"testing"
 	"time"
 
 	"github.com/gin-gonic/gin"
+	"github.com/stretchr/testify/require"
 
 	"oc-manager/internal/auth"
 	"oc-manager/internal/domain"
 	"oc-manager/internal/service"
-	"github.com/stretchr/testify/require"
 )
 
-func TestRuntimeNodesCreateRequiresToken(t *testing.T) {
+func TestRuntimeNodesCreateRouteRemoved(t *testing.T) {
 	router, _ := newRuntimeNodesTestRouter(t, &runtimeNodeServiceStub{})
 
 	recorder := httptest.NewRecorder()
-	body := bytes.NewBufferString(`{"name":"node"}`)
-	request := httptest.NewRequest(http.MethodPost, "/api/v1/runtime-nodes", body)
+	request := httptest.NewRequest(http.MethodPost, "/api/v1/runtime-nodes", bytes.NewBufferString(`{"name":"node"}`))
 	request.Header.Set("Content-Type", "application/json")
 	router.ServeHTTP(recorder, request)
 
-	require.Equal(t, http.StatusUnauthorized, recorder.Code)
-}
-
-func TestRuntimeNodesCreateReturnsBootstrapToken(t *testing.T) {
-	stub := &runtimeNodeServiceStub{createResult: service.RuntimeNodeResult{ID: "n1", Name: "node-1", Status: domain.RuntimeNodeStatusPending, BootstrapToken: "boot"}}
-	router, tokens := newRuntimeNodesTestRouter(t, stub)
-	token := mustSignAccess(t, tokens, auth.Principal{UserID: "u1", Role: domain.UserRolePlatformAdmin})
-
-	recorder := httptest.NewRecorder()
-	body := bytes.NewBufferString(`{"name":"node-1"}`)
-	request := httptest.NewRequest(http.MethodPost, "/api/v1/runtime-nodes", body)
-	request.Header.Set("Content-Type", "application/json")
-	request.Header.Set("Authorization", "Bearer "+token)
-	router.ServeHTTP(recorder, request)
-
-	require.Equal(t, http.StatusCreated, recorder.Code)
-	var resp struct {
-		Node service.RuntimeNodeResult `json:"runtime_node"`
-	}
-	err := json.Unmarshal(recorder.Body.Bytes(), &resp)
-	require.NoError(t, err)
-	require.Equal(t, "boot", resp.Node.BootstrapToken)
-}
-
-func TestRuntimeNodesRotateBootstrapMapsBusyTo409(t *testing.T) {
-	stub := &runtimeNodeServiceStub{rotateErr: service.ErrRuntimeNodeBusy}
-	router, tokens := newRuntimeNodesTestRouter(t, stub)
-	token := mustSignAccess(t, tokens, auth.Principal{UserID: "u1", Role: domain.UserRolePlatformAdmin})
-
-	recorder := httptest.NewRecorder()
-	request := httptest.NewRequest(http.MethodPost, "/api/v1/runtime-nodes/n1/rotate-bootstrap", nil)
-	request.Header.Set("Authorization", "Bearer "+token)
-	router.ServeHTTP(recorder, request)
-
-	require.Equal(t, http.StatusConflict, recorder.Code)
+	require.Equal(t, http.StatusNotFound, recorder.Code)
 }
 
 func TestRuntimeNodesListReturnsArray(t *testing.T) {
-	stub := &runtimeNodeServiceStub{listResult: []service.RuntimeNodeResult{{ID: "n1", Name: "node-1"}}}
+	stub := &runtimeNodeServiceStub{listResult: []service.RuntimeNodeResult{{ID: "n1", Name: "node-1", Status: domain.RuntimeNodeStatusActive}}}
 	router, tokens := newRuntimeNodesTestRouter(t, stub)
 	token := mustSignAccess(t, tokens, auth.Principal{UserID: "u1", Role: domain.UserRolePlatformAdmin})
 
@@ -80,60 +44,10 @@ func TestRuntimeNodesListReturnsArray(t *testing.T) {
 	}
 	err := json.Unmarshal(recorder.Body.Bytes(), &resp)
 	require.NoError(t, err)
-	if len(resp.Nodes) != 1 || resp.Nodes[0].Name != "node-1" {
-		t.Fatalf("nodes = %+v", resp.Nodes)
-	}
+	require.Len(t, resp.Nodes, 1)
+	require.Equal(t, "node-1", resp.Nodes[0].Name)
 }
 
-func TestRuntimeNodesPatchUpdateMaxApps(t *testing.T) {
-	v := int32(3)
-	stub := &runtimeNodeServiceStub{updateMaxAppsResult: service.RuntimeNodeResult{ID: "n1", Name: "node-1", MaxApps: &v}}
-	router, tokens := newRuntimeNodesTestRouter(t, stub)
-	token := mustSignAccess(t, tokens, auth.Principal{UserID: "u1", Role: domain.UserRolePlatformAdmin})
-
-	recorder := httptest.NewRecorder()
-	body := bytes.NewBufferString(`{"max_apps":3}`)
-	request := httptest.NewRequest(http.MethodPatch, "/api/v1/runtime-nodes/n1", body)
-	request.Header.Set("Content-Type", "application/json")
-	request.Header.Set("Authorization", "Bearer "+token)
-	router.ServeHTTP(recorder, request)
-
-	require.Equal(t, http.StatusOK, recorder.Code)
-	if stub.updateMaxAppsLastVal == nil || *stub.updateMaxAppsLastVal != 3 {
-		t.Fatalf("service 收到的 maxApps = %v, want 3", stub.updateMaxAppsLastVal)
-	}
-}
-
-func TestRuntimeNodesPatchClearMaxApps(t *testing.T) {
-	stub := &runtimeNodeServiceStub{updateMaxAppsResult: service.RuntimeNodeResult{ID: "n1", Name: "node-1"}}
-	router, tokens := newRuntimeNodesTestRouter(t, stub)
-	token := mustSignAccess(t, tokens, auth.Principal{UserID: "u1", Role: domain.UserRolePlatformAdmin})
-
-	recorder := httptest.NewRecorder()
-	body := bytes.NewBufferString(`{"max_apps":null}`)
-	request := httptest.NewRequest(http.MethodPatch, "/api/v1/runtime-nodes/n1", body)
-	request.Header.Set("Content-Type", "application/json")
-	request.Header.Set("Authorization", "Bearer "+token)
-	router.ServeHTTP(recorder, request)
-
-	require.Equal(t, http.StatusOK, recorder.Code)
-	require.Nil(t, stub.updateMaxAppsLastVal)
-}
-
-func TestRuntimeNodesPatchOrgAdminForbidden(t *testing.T) {
-	stub := &runtimeNodeServiceStub{updateMaxAppsErr: service.ErrForbidden}
-	router, tokens := newRuntimeNodesTestRouter(t, stub)
-	token := mustSignAccess(t, tokens, auth.Principal{UserID: "u1", Role: domain.UserRoleOrgAdmin})
-
-	recorder := httptest.NewRecorder()
-	body := bytes.NewBufferString(`{"max_apps":1}`)
-	request := httptest.NewRequest(http.MethodPatch, "/api/v1/runtime-nodes/n1", body)
-	request.Header.Set("Content-Type", "application/json")
-	request.Header.Set("Authorization", "Bearer "+token)
-	router.ServeHTTP(recorder, request)
-
-	require.Equal(t, http.StatusForbidden, recorder.Code)
-}
 
 func newRuntimeNodesTestRouter(t *testing.T, svc runtimeNodeService) (*gin.Engine, *auth.TokenManager) {
 	t.Helper()
@@ -146,19 +60,9 @@ func newRuntimeNodesTestRouter(t *testing.T, svc runtimeNodeService) (*gin.Engin
 }
 
 type runtimeNodeServiceStub struct {
-	createResult         service.RuntimeNodeResult
-	listResult           []service.RuntimeNodeResult
-	getResult            service.RuntimeNodeResult
-	rotateResult         service.RuntimeNodeResult
-	statusResult         service.RuntimeNodeResult
-	rotateErr            error
-	updateMaxAppsResult  service.RuntimeNodeResult
-	updateMaxAppsErr     error
-	updateMaxAppsLastVal *int32
-}
-
-func (s *runtimeNodeServiceStub) CreateNode(_ context.Context, _ auth.Principal, _ service.RuntimeNodeInput) (service.RuntimeNodeResult, error) {
-	return s.createResult, nil
+	listResult   []service.RuntimeNodeResult
+	getResult    service.RuntimeNodeResult
+	statusResult service.RuntimeNodeResult
 }
 
 func (s *runtimeNodeServiceStub) ListNodes(_ context.Context, _ auth.Principal, _, _ int32) ([]service.RuntimeNodeResult, error) {
@@ -169,23 +73,6 @@ func (s *runtimeNodeServiceStub) GetNode(_ context.Context, _ auth.Principal, _ 
 	return s.getResult, nil
 }
 
-func (s *runtimeNodeServiceStub) RotateBootstrap(_ context.Context, _ auth.Principal, _ string) (service.RuntimeNodeResult, error) {
-	if s.rotateErr != nil {
-		return service.RuntimeNodeResult{}, s.rotateErr
-	}
-	return s.rotateResult, nil
-}
-
 func (s *runtimeNodeServiceStub) SetNodeStatus(_ context.Context, _ auth.Principal, _, _ string) (service.RuntimeNodeResult, error) {
 	return s.statusResult, nil
 }
-
-func (s *runtimeNodeServiceStub) UpdateMaxApps(_ context.Context, _ auth.Principal, _ string, maxApps *int32) (service.RuntimeNodeResult, error) {
-	s.updateMaxAppsLastVal = maxApps
-	if s.updateMaxAppsErr != nil {
-		return service.RuntimeNodeResult{}, s.updateMaxAppsErr
-	}
-	return s.updateMaxAppsResult, nil
-}
-
-var _ = errors.New

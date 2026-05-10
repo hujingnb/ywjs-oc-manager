@@ -2,11 +2,11 @@ package config
 
 import (
 	"encoding/base64"
+	"github.com/stretchr/testify/require"
 	"os"
 	"path/filepath"
 	"strings"
 	"testing"
-	"github.com/stretchr/testify/require"
 )
 
 // validBase64MasterKey 提供测试用的 32 字节 base64 master_key。
@@ -55,6 +55,8 @@ openclaw:
     archive_retention_days: 14
 agent:
   heartbeat_interval_seconds: 30
+runtime:
+  enrollment_secret: "` + validBase64MasterKey + `"
 `
 }
 
@@ -93,7 +95,7 @@ func TestValidateReportsRequiredFields(t *testing.T) {
 		"app.http_addr", "app.data_root", "app.knowledge_root", "database.url", "redis.addr",
 		"auth.access_token_ttl", "auth.refresh_token_ttl",
 		"auth.jwt_access_secret", "auth.jwt_refresh_secret", "auth.csrf_secret",
-		"security.master_key", "openclaw.system_prompt_template",
+		"security.master_key", "runtime.enrollment_secret", "openclaw.system_prompt_template",
 	}
 	for _, field := range required {
 		require.True(t, strings.Contains(err.Error(), field))

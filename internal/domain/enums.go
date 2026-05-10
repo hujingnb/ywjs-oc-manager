@@ -33,6 +33,7 @@ const (
 	RuntimeNodeStatusActive      = "active"
 	RuntimeNodeStatusUnreachable = "unreachable"
 	RuntimeNodeStatusDisabled    = "disabled"
+	RuntimeNodeStatusDegraded    = "degraded"
 
 	ChannelTypeWeChat = "wechat"
 
@@ -87,6 +88,7 @@ var (
 		RuntimeNodeStatusActive,
 		RuntimeNodeStatusUnreachable,
 		RuntimeNodeStatusDisabled,
+		RuntimeNodeStatusDegraded,
 	)
 
 	validChannelStatuses = set(

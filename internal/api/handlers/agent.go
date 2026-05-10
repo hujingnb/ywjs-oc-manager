@@ -2,6 +2,7 @@ package handlers
 
 import (
 	"context"
+	"crypto/subtle"
 	"encoding/json"
 	"errors"
 	"net/http"
@@ -12,56 +13,57 @@ import (
 	"oc-manager/internal/service"
 )
 
-// AgentEndpointsService 抽象 manager 处理 agent 注册与心跳所需的业务能力。
+// AgentEndpointsService 抽象 manager 处理 agent 自动注册与心跳所需的业务能力。
 type AgentEndpointsService interface {
-	RegisterAgent(ctx context.Context, input service.AgentRegisterInput) (service.AgentRegisterResult, error)
+	EnrollAgent(ctx context.Context, input service.AgentEnrollInput) (service.AgentEnrollResult, error)
 	HandleHeartbeat(ctx context.Context, input service.AgentHeartbeatInput) (service.RuntimeNodeResult, error)
 }
 
 // AgentEndpointsHandler 暴露给 runtime agent 的 HTTP 端点。
-// 这里没有 manager 用户的 Authorization，因此不复用其它 handler 的 token 校验，
-// 鉴权完全靠 bootstrap_token / agent_token 自身。
 //
-// tokenSink 可选：注册成功后把 (nodeID, agentToken) 推给调用方，
-// 用于在 manager 进程内缓存 agent token，便于后续 docker proxy / 文件 API 直连。
-// 没有 sink 时跳过推送，便于现有测试与不依赖 token resolver 的最小装配。
+// enroll 用共享 enrollment secret 鉴权；heartbeat 仍使用 agent token 本身鉴权。
 type AgentEndpointsHandler struct {
-	service   AgentEndpointsService
-	tokenSink func(nodeID, agentToken string)
+	service          AgentEndpointsService
+	enrollmentSecret string
+	tokenSink        func(nodeID, agentToken string)
 }
 
 // NewAgentEndpointsHandler 创建 agent 端点 handler。
-// sink 可不传；若传入则在 register 成功响应前以 (nodeID, agentToken) 调用。
-func NewAgentEndpointsHandler(svc AgentEndpointsService, sink ...func(nodeID, agentToken string)) *AgentEndpointsHandler {
+func NewAgentEndpointsHandler(svc AgentEndpointsService, enrollmentSecret string, sink ...func(nodeID, agentToken string)) *AgentEndpointsHandler {
 	var s func(string, string)
 	if len(sink) > 0 {
 		s = sink[0]
 	}
-	return &AgentEndpointsHandler{service: svc, tokenSink: s}
+	return &AgentEndpointsHandler{service: svc, enrollmentSecret: enrollmentSecret, tokenSink: s}
 }
 
 // RegisterAgentRoutes 注册 agent 路由前缀 /api/v1/agent。
 func RegisterAgentRoutes(router gin.IRouter, handler *AgentEndpointsHandler) {
 	group := router.Group("/api/v1/agent")
-	group.POST("/register", handler.Register)
+	group.POST("/enroll", handler.Enroll)
 	group.POST("/heartbeat", handler.Heartbeat)
 }
 
-// Register 处理 agent 用 bootstrap token 注册并换取 agent token。
+// Enroll 处理 agent 自动注册并换取 agent token。
 //
-// @Summary      Agent 注册
-// @Description  runtime agent 用一次性 bootstrap token 注册并换取长效 agent token；鉴权通过请求体中的 bootstrap_token 字段完成
+// @Summary      Agent 自动注册
+// @Description  runtime agent 使用共享 enrollment secret 自动注册或刷新节点信息，并换取长效 agent token
 // @Tags         agent
 // @Accept       json
 // @Produce      json
-// @Param        body  body      AgentRegisterRequest  true  "注册请求（含 bootstrap_token）"
-// @Success      200   {object}  service.AgentRegisterResult
-// @Failure      400   {object}  ErrorResponse
-// @Failure      401   {object}  ErrorResponse
-// @Failure      500   {object}  ErrorResponse
-// @Router       /agent/register [post]
-func (h *AgentEndpointsHandler) Register(c *gin.Context) {
-	var req AgentRegisterRequest
+// @Param        Authorization  header    string                    true  "Bearer enrollment_secret"
+// @Param        body           body      AgentEnrollRequest        true  "自动注册请求"
+// @Success      200            {object}  service.AgentEnrollResult
+// @Failure      400            {object}  ErrorResponse
+// @Failure      401            {object}  ErrorResponse
+// @Failure      500            {object}  ErrorResponse
+// @Router       /agent/enroll [post]
+func (h *AgentEndpointsHandler) Enroll(c *gin.Context) {
+	if !h.validEnrollmentSecret(c.GetHeader("Authorization")) {
+		c.JSON(http.StatusUnauthorized, gin.H{"error": "enrollment secret 无效"})
+		return
+	}
+	var req AgentEnrollRequest
 	if err := c.ShouldBindJSON(&req); err != nil {
 		c.JSON(http.StatusBadRequest, gin.H{"error": "请求参数不完整"})
 		return
@@ -76,8 +78,10 @@ func (h *AgentEndpointsHandler) Register(c *gin.Context) {
 		c.JSON(http.StatusBadRequest, gin.H{"error": "metadata 序列化失败"})
 		return
 	}
-	result, err := h.service.RegisterAgent(c.Request.Context(), service.AgentRegisterInput{
-		BootstrapToken:      req.BootstrapToken,
+	result, err := h.service.EnrollAgent(c.Request.Context(), service.AgentEnrollInput{
+		AgentID:             req.AgentID,
+		Name:                req.Name,
+		MaxApps:             req.MaxApps,
 		AgentDockerEndpoint: req.AgentDockerEndpoint,
 		AgentFileEndpoint:   req.AgentFileEndpoint,
 		AgentTLSCACert:      req.AgentTLSCACert,
@@ -90,8 +94,6 @@ func (h *AgentEndpointsHandler) Register(c *gin.Context) {
 		writeAgentEndpointError(c, err)
 		return
 	}
-	// 在响应前把 token 推到 sink；推送失败不应阻塞注册响应，因此 sink 为同步函数且
-	// 调用方只允许做内存写入，重的副作用应当通过 sink 内部异步排队。
 	if h.tokenSink != nil && result.AgentToken != "" {
 		h.tokenSink(result.NodeID, result.AgentToken)
 	}
@@ -144,6 +146,14 @@ func (h *AgentEndpointsHandler) Heartbeat(c *gin.Context) {
 	c.JSON(http.StatusOK, gin.H{"runtime_node": result})
 }
 
+func (h *AgentEndpointsHandler) validEnrollmentSecret(header string) bool {
+	token, ok := bearerToken(header)
+	if !ok || h.enrollmentSecret == "" {
+		return false
+	}
+	return subtle.ConstantTimeCompare([]byte(token), []byte(h.enrollmentSecret)) == 1
+}
+
 func agentJSONOrEmpty(value map[string]any) ([]byte, error) {
 	if len(value) == 0 {
 		return nil, nil
@@ -153,9 +163,10 @@ func agentJSONOrEmpty(value map[string]any) ([]byte, error) {
 
 func writeAgentEndpointError(c *gin.Context, err error) {
 	switch {
-	case errors.Is(err, service.ErrBootstrapTokenInvalid),
-		errors.Is(err, service.ErrAgentTokenInvalid):
+	case errors.Is(err, service.ErrAgentTokenInvalid):
 		c.JSON(http.StatusUnauthorized, gin.H{"error": redactlog.SafeErrorMessage(err)})
+	case errors.Is(err, service.ErrEnrollInputInvalid):
+		c.JSON(http.StatusBadRequest, gin.H{"error": redactlog.SafeErrorMessage(err)})
 	default:
 		c.JSON(http.StatusInternalServerError, gin.H{"error": "服务暂时不可用"})
 	}
