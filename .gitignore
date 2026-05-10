@@ -6,6 +6,7 @@
 .claude
 skills-lock.json
 .mcp.json
+.gstack
 data/
 .local/
 tmp/
