@@ -126,7 +126,7 @@ func (s *KnowledgeService) SaveOrgFile(ctx context.Context, principal auth.Princ
 }
 
 // SaveAppFile 写入应用维度的知识库。
-// 仅 owner、组织管理员、平台管理员可写。
+// 仅 owner 与本组织管理员可写，平台管理员只保留读取能力。
 func (s *KnowledgeService) SaveAppFile(ctx context.Context, principal auth.Principal, orgID, appID, ownerUserID, relative string, content io.Reader, size int64) error {
 	if s.master == nil {
 		return ErrKnowledgeMissing
