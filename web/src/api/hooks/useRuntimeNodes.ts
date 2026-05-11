@@ -23,7 +23,7 @@ export function useRuntimeNodesQuery() {
 }
 
 // useRuntimeNodeQuery 查询单个节点详情。
-// nodeId 缺失时返回 null，避免详情页路由参数未就绪时请求 /undefined。
+// nodeId 缺失时 query 被禁用，避免请求 /undefined；data 通常为 undefined，除非已有缓存。
 export function useRuntimeNodeQuery(nodeId: Ref<string | undefined>) {
   return useQuery<RuntimeNode | null>({
     queryKey: ['runtime-node', nodeId],

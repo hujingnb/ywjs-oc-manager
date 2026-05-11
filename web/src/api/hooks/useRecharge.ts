@@ -57,7 +57,7 @@ export function useRechargesQuery(orgId: Ref<string | undefined>) {
 }
 
 // useOrgBalanceQuery 查询组织当前余额。
-// 余额来自 new-api 薄代理，orgId 缺失时返回 null 让页面展示空态。
+// 余额来自 new-api 薄代理；orgId 缺失时 query 被禁用，data 通常为 undefined，除非已有缓存。
 export function useOrgBalanceQuery(orgId: Ref<string | undefined>) {
   return useQuery<BalanceDTO | null>({
     queryKey: ['org-balance', orgId],

@@ -126,7 +126,7 @@ export function useAppsByOrgQuery(orgId: Ref<string | undefined>) {
 }
 
 // useAppQuery 查询单个应用。
-// appId 为空时返回 null，调用方必须处理详情页初始路由参数尚未就绪的状态。
+// appId 为空时 query 被禁用；data 通常为 undefined，除非同一缓存键已有旧数据。
 export function useAppQuery(appId: Ref<string | undefined>) {
   return useQuery<AppDTO | null>({
     queryKey: ['app', appId],
