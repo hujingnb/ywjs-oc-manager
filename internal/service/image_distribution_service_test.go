@@ -1,3 +1,4 @@
+// Package service 的 image_distribution_service_test 覆盖运行时镜像分发服务的配置缺失和代理错误传播。
 package service
 
 import (

@@ -1,3 +1,4 @@
+// Package service 的 audit_service_test 覆盖审计事件记录的必填字段、上下文操作者和存储错误处理。
 package service
 
 import (

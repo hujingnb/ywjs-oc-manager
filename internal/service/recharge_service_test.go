@@ -1,3 +1,4 @@
+// Package service 的 recharge_service_test 覆盖组织充值服务对权限、余额同步和审计记录的处理。
 package service
 
 import (

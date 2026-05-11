@@ -1,3 +1,4 @@
+// Package service 的 persona_service_test 覆盖组织人设读取、写入权限和版本化存储边界。
 package service
 
 import (

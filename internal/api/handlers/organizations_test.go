@@ -1,3 +1,4 @@
+// Package handlers 的 organizations_test 覆盖组织管理 handler 的鉴权、创建和更新响应语义。
 package handlers
 
 import (

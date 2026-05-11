@@ -1,3 +1,4 @@
+// Package openclaw 的 prompt_test 覆盖提示词拼接顺序、变量替换和缺失占位符校验。
 package openclaw
 
 import (

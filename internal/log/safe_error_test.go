@@ -1,3 +1,4 @@
+// Package log 的 safe_error_test 覆盖对外错误消息的令牌、路径和空值脱敏。
 package log
 
 import (
