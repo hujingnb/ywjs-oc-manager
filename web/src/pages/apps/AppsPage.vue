@@ -41,13 +41,16 @@ import { useAppsByOrgQuery, type AppDTO } from '@/api/hooks/useApps'
 import { canCreateAppForOrg, canManageApp } from '@/domain/permissions'
 import { useAuthStore } from '@/stores/auth'
 
+// AppsPage 展示当前组织的应用列表，并提供运行时快捷操作和删除确认。
 const props = defineProps<{ orgId?: string }>()
 const auth = useAuthStore()
 const router = useRouter()
 const client = useQueryClient()
 
+// effectiveOrgId 优先使用平台入口传入的组织，组织用户则落到当前登录组织。
 const effectiveOrgId = computed(() => props.orgId ?? auth.user?.org_id)
 const isOrgMember = computed(() => auth.user?.role === 'org_member')
+// canCreateApp 控制创建入口，后端仍按组织边界校验创建权限。
 const canCreateApp = computed(() => canCreateAppForOrg(auth.user, effectiveOrgId.value))
 const { data: apps, isLoading } = useAppsByOrgQuery(effectiveOrgId)
 
@@ -63,6 +66,7 @@ const visibleApps = computed(() => {
 const toDelete = ref<AppDTO | null>(null)
 const deleting = ref(false)
 
+// columns 组合链接、状态和操作列；运行时操作按钮按行权限隐藏。
 const columns = [
   linkColumn<AppDTO>({
     title: '名称',
@@ -79,8 +83,10 @@ const columns = [
   ]),
 ]
 
+// confirmDelete 只记录待删除应用，真正删除在二次确认后提交。
 function confirmDelete(app: AppDTO) { toDelete.value = app }
 
+// onConfirmDelete 复用 runtime/delete 接口，完成后由 trigger 失效应用列表缓存。
 async function onConfirmDelete() {
   if (!toDelete.value) return
   deleting.value = true
@@ -88,6 +94,7 @@ async function onConfirmDelete() {
   finally { deleting.value = false; toDelete.value = null }
 }
 
+// trigger 调用运行时操作接口；成功后失效当前组织应用列表，不做前端乐观改状态。
 async function trigger(app: AppDTO, op: 'start' | 'stop' | 'restart' | 'delete') {
   await apiRequest<{ runtime_operation: { job_id: string } }>(
     `/api/v1/apps/${app.id}/runtime/${op}`, { method: 'POST' },

@@ -144,9 +144,11 @@ import DataTableList from '@/components/DataTableList.vue'
 import { statusColumn, actionColumn } from '@/components/columns'
 import { useFormModal } from '@/composables/useFormModal'
 
+// OrganizationsPage 是平台组织管理页，负责创建组织、启停组织和给组织充值。
 const { data: organizations, isLoading, error } = useOrganizationsQuery()
 const createMutation = useCreateOrganization()
 const statusMutation = useUpdateOrganizationStatus()
+// selectedOrg 保存当前充值弹框的目标组织，关闭弹框不会修改列表数据。
 const selectedOrg = ref<Organization | null>(null)
 const selectedOrgId = computed(() => selectedOrg.value?.id)
 const balanceQuery = useOrgBalanceQuery(selectedOrgId)
@@ -157,6 +159,7 @@ const rechargeAmount = ref<number | null>(null)
 const rechargeRemark = ref('')
 const rechargeFeedback = ref('')
 const rechargeFeedbackError = ref(false)
+// canSubmitRecharge 表示当前弹框是否具备调用充值接口的最小条件。
 const canSubmitRecharge = computed(() => Boolean(selectedOrgId.value && (rechargeAmount.value ?? 0) > 0))
 
 // 创建组织表单状态聚合到 useFormModal；toPayload 处理可选字段的 || undefined 过滤
@@ -185,6 +188,7 @@ const { form, formVisible, creating, submitError, openForm, submit } = useFormMo
   }),
 })
 
+// columns 展示组织基础信息、状态和操作；启用/禁用按钮按当前状态互斥显示。
 const columns = [
   // 名称列：含 remark 副标题，保留页面内 render
   {
@@ -215,10 +219,12 @@ const columns = [
   ]),
 ]
 
+// onToggle 调用组织状态切换接口，状态刷新由 mutation hook 的缓存失效策略处理。
 function onToggle(org: Organization, action: 'enable' | 'disable') {
   statusMutation.mutate({ orgId: org.id, action })
 }
 
+// openRecharge 初始化充值弹框状态，并加载当前组织余额。
 function openRecharge(org: Organization) {
   selectedOrg.value = org
   rechargeAmount.value = null
@@ -228,10 +234,12 @@ function openRecharge(org: Organization) {
   rechargeVisible.value = true
 }
 
+// closeRecharge 只关闭弹框，保留反馈文本由下次 openRecharge 统一重置。
 function closeRecharge() {
   rechargeVisible.value = false
 }
 
+// submitRecharge 调用 new-api 充值链路；成功后清空输入，失败时在弹框内展示错误。
 async function submitRecharge() {
   if (!canSubmitRecharge.value) return
   rechargeFeedback.value = ''

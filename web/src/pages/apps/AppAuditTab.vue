@@ -22,19 +22,24 @@ import { timeColumn } from '@/components/columns'
 import { canViewOwnAppAudit } from '@/domain/permissions'
 import { useAuthStore } from '@/stores/auth'
 
+// AppAuditTab 展示单个应用的审计记录，依赖父级 AppDetailPage 注入的应用上下文做权限判断。
 const props = defineProps<{ appId: string }>()
 const auth = useAuthStore()
 const app = inject<Ref<AppDTO | null>>('app')
+// canView 以当前账号和应用归属共同判定，避免成员查看非自己应用审计。
 const canView = computed(() => canViewOwnAppAudit(auth.user, app?.value))
+// target 为 undefined 时查询 hook 不发起请求，前端先拦截无权限场景减少 403。
 const target = computed(() => canView.value ? { targetType: 'app', targetId: props.appId } : undefined)
 const { data: logs, isLoading, error } = useTargetAuditLogsQuery(target)
 
+// errorMessage 合并权限失败和 API 失败，交给公共列表组件显示。
 const errorMessage = computed(() => {
   if (!canView.value) return '当前账号无权查看该应用审计。'
   if (error.value) return String(error.value)
   return undefined
 })
 
+// auditTagType 兼容 success/succeeded 两种后端结果文案，并为异常结果标红。
 function auditTagType(result: string): 'success' | 'warning' | 'error' | 'default' {
   switch (result) {
     case 'success': return 'success'
@@ -45,6 +50,7 @@ function auditTagType(result: string): 'success' | 'warning' | 'error' | 'defaul
   }
 }
 
+// columns 展示审计时间、操作者、动作和结果；错误信息跟随结果列作为诊断辅助。
 const columns: DataTableColumns<AuditLog> = [
   timeColumn('时间', r => r.created_at),
   {

@@ -34,6 +34,7 @@ import { NCard, NTabPane, NTabs } from 'naive-ui'
 import { useAppQuery, type AppDTO } from '@/api/hooks/useApps'
 import AppStatusTag from '@/components/AppStatusTag.vue'
 
+// AppDetailPage 是应用详情的父页面，负责加载应用基础信息并向子 tab 注入应用上下文。
 const route = useRoute()
 const router = useRouter()
 
@@ -41,8 +42,10 @@ const appIdRef = computed(() => route.params.appId as string | undefined)
 const appQuery = useAppQuery(appIdRef)
 const app = computed<AppDTO | null>(() => appQuery.data.value ?? null)
 
+// 子 tab 共享 app，避免每个 tab 重复查询并保持权限判断基于同一份应用数据。
 provide<typeof app>('app', app)
 
+// tabs 定义详情页的业务分区，path 必须和子路由末段保持一致。
 const tabs: ReadonlyArray<{ path: string; label: string }> = [
   { path: 'overview', label: '概览' },
   { path: 'runtime', label: '运行时' },
@@ -52,11 +55,13 @@ const tabs: ReadonlyArray<{ path: string; label: string }> = [
   { path: 'audit', label: '审计' },
 ]
 
+// currentTab 根据当前路由末段驱动 Naive tabs 激活态。
 const currentTab = computed(() => {
   const parts = route.path.split('/')
   return parts[parts.length - 1] ?? 'overview'
 })
 
+// onTabChange 只在有 appId 时导航，避免缺失路由参数时拼出无效详情地址。
 function onTabChange(name: string | number) {
   if (!appIdRef.value) return
   void router.push(`/apps/${appIdRef.value}/${name}`)

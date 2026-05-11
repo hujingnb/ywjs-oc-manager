@@ -84,6 +84,8 @@ import {
 
 import { useAuthStore } from '@/stores/auth'
 
+// DashboardLayout 负责已登录后台的导航外壳、环境标识和退出入口。
+// 具体页面权限仍由路由和页面级查询控制，这里只隐藏不适合当前角色的导航项。
 const auth = useAuthStore()
 const route = useRoute()
 const router = useRouter()
@@ -114,6 +116,7 @@ const activeKey = computed(() => {
 const isPlatformAdmin = computed(() => auth.isPlatformAdmin)
 const isOrgMember = computed(() => auth.isOrgMember)
 
+// menuOptions 根据角色裁剪入口：普通成员不显示组织管理和审计，平台管理员额外显示平台能力。
 const menuOptions = computed<MenuOption[]>(() => {
   const items: MenuOption[] = [
     { key: '/', label: '总览', icon: () => h(LayoutDashboard, { size: 18 }) },
@@ -140,15 +143,18 @@ const menuOptions = computed<MenuOption[]>(() => {
   return items
 })
 
+// onNav 由 Naive Menu 传入 key，key 与路由路径保持一致。
 function onNav(key: string) {
   router.push(key)
 }
 
+// onLogout 先清理登录态再回到登录页，避免旧 token 继续驱动后台查询。
 async function onLogout() {
   await auth.logout()
   await router.replace('/login')
 }
 
+// reload 用于调试环境快速刷新当前后台状态。
 function reload() {
   window.location.reload()
 }

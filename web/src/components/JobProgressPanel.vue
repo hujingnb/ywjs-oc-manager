@@ -27,6 +27,8 @@
 import { computed } from 'vue'
 import { NCard, NDescriptions, NDescriptionsItem, NTag } from 'naive-ui'
 
+// JobProgressPanel 展示异步任务的执行状态、重试次数和最近错误。
+// job 为空表示当前页面尚未触发任务，而不是查询失败。
 const props = defineProps<{
   title: string
   subtitle?: string
@@ -36,6 +38,7 @@ const props = defineProps<{
   } | null
 }>()
 
+// statusViews 是任务状态到中文文案和标签色的局部映射；未知状态保留原值便于排查。
 const statusViews: Record<string, { label: string; tone: string }> = {
   pending: { label: '待执行', tone: 'warning' },
   running: { label: '执行中', tone: 'warning' },
@@ -44,15 +47,18 @@ const statusViews: Record<string, { label: string; tone: string }> = {
   canceled: { label: '已取消', tone: 'default' },
 }
 
+// labelFor 负责处理未触发和未知状态两种降级展示。
 function labelFor(status?: string) {
   return status ? (statusViews[status]?.label ?? status) : '未触发'
 }
 
+// tagType 将任务 tone 收敛到 Naive UI 支持的 NTag 类型。
 const tagType = computed(() => {
   const tone = statusViews[props.job?.status ?? '']?.tone ?? 'default'
   return tone as 'success' | 'warning' | 'error' | 'default'
 })
 
+// formatTime 对后端时间做本地化展示；解析失败时保留原字符串便于定位异常数据。
 function formatTime(value?: string | null) {
   if (!value) return '—'
   const d = new Date(value)

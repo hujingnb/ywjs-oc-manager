@@ -4,6 +4,7 @@ import { describe, expect, it, vi } from 'vitest'
 
 import OrganizationsPage from './OrganizationsPage.vue'
 
+// 组织列表页测试只 mock 列表和充值 hooks，验证充值留在弹框内完成而不跳转旧页面。
 vi.mock('@/api/hooks/useOrganizations', () => ({
   useOrganizationsQuery: () => ({
     data: ref([{

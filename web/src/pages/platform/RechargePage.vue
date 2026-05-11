@@ -94,7 +94,9 @@ import { useOrgBalanceQuery, useRechargeMutation, useRechargesQuery, type Rechar
 import { useOrganizationQuery } from '@/api/hooks/useOrganizations'
 import ConfirmActionModal from '@/components/ConfirmActionModal.vue'
 
+// RechargePage 是独立组织充值页，保留余额查询、充值确认和历史记录展示。
 const route = useRoute()
+// orgId 来自路由参数，缺失时页面展示 URL 错误且相关查询不会具备有效目标。
 const orgId = computed<string | undefined>(() => route.params.orgId as string | undefined)
 
 const balanceQuery = useOrgBalanceQuery(orgId)
@@ -104,6 +106,7 @@ const recordsQuery = useRechargesQuery(orgId)
 const mutation = useRechargeMutation(orgId)
 
 const orgQuery = useOrganizationQuery(orgId)
+// orgName 用于二次确认输入，组织尚未加载时降级为组织 ID。
 const orgName = computed(() => orgQuery.data.value?.name ?? (orgId.value ? `组织 ${orgId.value}` : ''))
 const confirmHint = computed(() => `输入组织名称 "${orgName.value}" 以确认充值`)
 
@@ -113,10 +116,13 @@ const feedback = ref('')
 const feedbackError = ref(false)
 
 const confirmRecharge = ref(false)
+// pendingPayload 暂存通过基础校验的充值请求，只有二次确认后才提交。
 const pendingPayload = ref<{ credit_amount: number; remark?: string } | null>(null)
 
+// canSubmit 表示金额和组织 ID 都满足提交充值的最小条件。
 const canSubmit = computed(() => Boolean(orgId.value && (amount.value ?? 0) > 0))
 
+// onSubmit 只打开二次确认弹框，不直接调用充值接口。
 function onSubmit() {
   if (!canSubmit.value) return
   pendingPayload.value = {
@@ -126,6 +132,7 @@ function onSubmit() {
   confirmRecharge.value = true
 }
 
+// onConfirmRecharge 调用充值 mutation；成功后清空表单，失败时保留输入并展示错误。
 async function onConfirmRecharge() {
   if (!pendingPayload.value) return
   feedback.value = ''
@@ -144,11 +151,13 @@ async function onConfirmRecharge() {
   }
 }
 
+// onCancelRecharge 放弃本次待确认请求，避免下一次确认误用旧金额。
 function onCancelRecharge() {
   confirmRecharge.value = false
   pendingPayload.value = null
 }
 
+// historyColumns 展示充值历史，状态列用标签色突出成功和失败记录。
 const historyColumns: DataTableColumns<RechargeRecordDTO> = [
   { title: '时间', key: 'created_at' },
   { title: '金额', key: 'credit_amount', render: (row) => row.credit_amount.toLocaleString() },

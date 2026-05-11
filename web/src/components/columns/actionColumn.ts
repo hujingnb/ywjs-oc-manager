@@ -2,11 +2,18 @@ import { h } from 'vue'
 import { NButton, NSpace } from 'naive-ui'
 import type { DataTableBaseColumn } from 'naive-ui'
 
+// RowAction 描述列表行上的单个业务操作按钮。
+// hidden 和 disabled 都按行计算，用于表达权限、状态互斥或异步中的不可用态。
 export interface RowAction<T> {
+  // label 支持函数式文案，便于同一列按行展示“启用/禁用”等业务动作。
   label: string | ((row: T) => string)
+  // onClick 接收完整行对象，由页面把行 ID、操作类型转换成具体 API 调用。
   onClick: (row: T) => void
+  // type 直接透传给 Naive UI 按钮，用于标识主要动作或危险动作。
   type?: 'default' | 'primary' | 'error' | 'warning'
+  // disabled 保留按钮但禁止点击，常用于提交中或业务条件暂不满足。
   disabled?: (row: T) => boolean
+  // hidden 完全隐藏该动作，常用于启用/禁用等互斥状态按钮。
   hidden?: (row: T) => boolean
 }
 

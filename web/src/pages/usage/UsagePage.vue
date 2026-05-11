@@ -76,9 +76,11 @@ import { useAuthStore } from '@/stores/auth'
 
 import UsageSummary from './UsageSummary.vue'
 
+// UsagePage 聚合组织、成员、应用和平台四类用量入口，并按角色裁剪可见查询。
 type TabKey = 'organization' | 'member' | 'app' | 'platform'
 
 const auth = useAuthStore()
+// isPlatformAdmin/isOrgMember 控制 tab 可见性和查询启用条件。
 const isPlatformAdmin = computed(() => auth.user?.role === 'platform_admin')
 const isOrgMember = computed(() => auth.user?.role === 'org_member')
 
@@ -88,11 +90,13 @@ const activeTab = ref<TabKey>(
 )
 
 const { data: organizations } = useOrganizationsQuery(() => isPlatformAdmin.value)
+// orgOptions 仅平台管理员使用，用于切换查看不同组织的用量。
 const orgOptions = computed(() =>
   (organizations.value ?? []).map((o) => ({ label: o.name, value: o.id })),
 )
 
 const selectedOrgId = ref<string | undefined>(auth.user?.org_id)
+// 平台管理员首次拿到组织列表时默认选中第一个组织，避免组织维度空查询。
 watch(organizations, (orgs) => {
   if (isPlatformAdmin.value && !selectedOrgId.value && orgs && orgs.length > 0) {
     selectedOrgId.value = orgs[0].id
@@ -113,8 +117,10 @@ const memberRef = computed(() =>
 )
 const { data: memberView, isLoading: memberLoading, error: memberError } = useMemberUsageQuery(orgRef, memberRef)
 
+// appIdInput 目前仅作为应用维度入口提示，详情查询由应用详情页承接。
 const appIdInput = ref('')
 
+// platformEnabled 只在平台管理员打开平台 tab 时启用查询，减少后台不必要请求。
 const platformEnabled = computed(() => isPlatformAdmin.value && activeTab.value === 'platform')
 const { data: platformView, isLoading: platformLoading, error: platformError } = usePlatformUsageQuery(platformEnabled)
 </script>

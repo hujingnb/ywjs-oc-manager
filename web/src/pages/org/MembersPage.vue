@@ -106,9 +106,11 @@ import { useFormModal } from '@/composables/useFormModal'
 import type { Member } from '@/api'
 import { useAuthStore } from '@/stores/auth'
 
+// MembersPage 管理组织成员列表，支持创建、启停、删除和重置密码。
 const props = defineProps<{ orgId?: string }>()
 const auth = useAuthStore()
 const router = useRouter()
+// effectiveOrgId 支持平台视角传入组织 ID，也支持组织管理员默认管理自身组织。
 const effectiveOrgId = computed(() => props.orgId ?? auth.user?.org_id)
 const orgEyebrow = computed(() => auth.user?.role === 'platform_admin' ? 'Platform · 组织成员' : '我的组织')
 
@@ -116,7 +118,9 @@ const { data: members, isLoading } = useMembersQuery(effectiveOrgId)
 const createMutation = useCreateMember(effectiveOrgId)
 const statusMutation = useSetMemberStatus(effectiveOrgId)
 const deleteMutation = useDeleteMember(effectiveOrgId)
+// memberToDelete 保存二次确认中的目标成员，确认后才调用删除接口。
 const memberToDelete = ref<Member | null>(null)
+// resetTarget/resetNewPassword 暂存重置密码确认流程中的成员和新密码。
 const resetTarget = ref<Member | null>(null)
 const resetNewPassword = ref('')
 const resetMutation = useResetMemberPassword()
@@ -134,6 +138,7 @@ const roleOptions: SelectOption[] = [
   { label: '组织管理员', value: 'org_admin' },
 ]
 
+// columns 展示成员身份和状态，启用/禁用按钮按当前成员状态互斥显示。
 const columns = [
   { title: '用户名', key: 'username' },
   { title: '姓名', key: 'display_name' },
@@ -149,10 +154,12 @@ const columns = [
   ]),
 ]
 
+// onToggle 调用成员状态 mutation，列表刷新由 hook 的失效策略处理。
 function onToggle(member: Member, action: 'enable' | 'disable') {
   statusMutation.mutate({ userId: member.id, action })
 }
 
+// onConfirmDelete 删除确认目标；失败只记录控制台，避免弹框残留阻塞后续操作。
 async function onConfirmDelete() {
   if (!memberToDelete.value) return
   try { await deleteMutation.mutateAsync(memberToDelete.value.id) }
@@ -160,6 +167,7 @@ async function onConfirmDelete() {
   finally { memberToDelete.value = null }
 }
 
+// openResetForm 通过 prompt 获取新密码，长度不满足时不进入确认流程。
 function openResetForm(member: Member) {
   const pwd = window.prompt(`输入成员 ${member.username} 的新密码（至少 8 位）`)
   if (!pwd || pwd.length < 8) return
@@ -167,6 +175,7 @@ function openResetForm(member: Member) {
   resetFeedback.value = ''; resetError.value = false
 }
 
+// onConfirmReset 提交重置密码，并把结果反馈到页面内状态文本。
 async function onConfirmReset() {
   if (!resetTarget.value) return
   resetFeedback.value = ''; resetError.value = false

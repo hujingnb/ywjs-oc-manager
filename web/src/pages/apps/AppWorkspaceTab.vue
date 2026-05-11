@@ -40,23 +40,28 @@ import {
   type WorkspaceEntry,
 } from '@/api/hooks/useWorkspace'
 
+// AppWorkspaceTab 浏览和下载应用工作目录文件，路径始终以应用工作目录为根。
 const props = defineProps<{ appId?: string }>()
 const appId = toRef(props, 'appId')
+// relativePath 保存当前目录相对路径，空字符串表示工作目录根。
 const relativePath = ref('')
 const relativeRef = computed(() => relativePath.value)
 const { data: listing, isLoading, error } = useWorkspaceQuery(appId, relativeRef)
 const downloading = ref(false)
 
+// enter 只允许目录项改变当前路径，文件点击不会触发导航。
 function enter(entry: WorkspaceEntry) {
   if (entry.is_dir) relativePath.value = entryRelativePath(entry.path)
 }
 
+// goUp 去掉最后一级路径片段，已在根目录时仍保持空路径。
 function goUp() {
   const segments = relativePath.value.split('/').filter(Boolean)
   segments.pop()
   relativePath.value = segments.join('/')
 }
 
+// downloadEntry 下载单个文件；缺少 appId 时直接返回，避免构造无效下载地址。
 async function downloadEntry(entry: WorkspaceEntry) {
   if (!props.appId) return
   downloading.value = true
@@ -67,6 +72,7 @@ async function downloadEntry(entry: WorkspaceEntry) {
   }
 }
 
+// downloadArchive 下载当前目录归档，下载中的全局按钮态避免重复触发。
 async function downloadArchive() {
   if (!props.appId) return
   downloading.value = true
@@ -77,12 +83,14 @@ async function downloadArchive() {
   }
 }
 
+// formatSize 只处理文件大小展示，目录由列渲染为占位符。
 function formatSize(value: number): string {
   if (value < 1024) return `${value} B`
   if (value < 1024 * 1024) return `${(value / 1024).toFixed(1)} KB`
   return `${(value / 1024 / 1024).toFixed(2)} MB`
 }
 
+// entryRelativePath 将后端返回的绝对/带根路径条目转换成下载接口需要的相对路径。
 function entryRelativePath(entryPath: string): string {
   const root = listing.value?.path
   if (!root || root === '/') return entryPath.replace(/^\/+/, '')
@@ -92,6 +100,7 @@ function entryRelativePath(entryPath: string): string {
   return normalizedEntry.startsWith(prefix) ? normalizedEntry.slice(prefix.length) : normalizedEntry
 }
 
+// columns 提供目录进入和文件下载操作，目录不展示下载按钮。
 const columns: DataTableColumns<WorkspaceEntry> = [
   {
     title: '名称', key: 'name',

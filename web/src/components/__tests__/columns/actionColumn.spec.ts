@@ -1,6 +1,7 @@
 import { describe, expect, it, vi } from 'vitest'
 import { actionColumn } from '../../columns/actionColumn'
 
+// actionColumn 测试确保行操作列保持默认 key，并能处理隐藏、禁用和动态文案。
 describe('actionColumn', () => {
   it('default title=操作 and key=actions', () => {
     const col = actionColumn<{ id: string }>([])

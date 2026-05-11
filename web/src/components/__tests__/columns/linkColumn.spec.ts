@@ -1,6 +1,7 @@
 import { describe, expect, it, vi } from 'vitest'
 import { linkColumn } from '../../columns/linkColumn'
 
+// linkColumn 测试确保主链接列按业务回调渲染，副标题为空时不返回数组占位。
 describe('linkColumn', () => {
   it('returns column with title/key/render', () => {
     const col = linkColumn<{ id: string; name: string }>({

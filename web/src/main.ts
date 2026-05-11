@@ -7,6 +7,8 @@ import { setUnauthorizedHandler } from '@/api/client'
 import App from '@/App.vue'
 import '@/styles/base.css'
 
+// main.ts 是前端运行时入口，集中装配 Pinia、Router 和 Vue Query。
+// 业务页面不应自行创建这些单例，避免缓存和登录态出现多份实例。
 const app = createApp(App)
 
 app.use(createPinia())

@@ -8,6 +8,8 @@
 import { darkTheme, type GlobalThemeOverrides } from 'naive-ui'
 import { NConfigProvider } from 'naive-ui'
 
+// App 是前端根组件，统一挂载全局 Naive UI 主题并把页面渲染交给路由出口。
+// 这里不承载业务状态，避免根组件和页面权限、请求生命周期耦合。
 const themeOverrides: GlobalThemeOverrides = {
   common: {
     primaryColor: '#00F0FF',

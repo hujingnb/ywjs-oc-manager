@@ -53,6 +53,8 @@ import {
 import { canManageApp } from '@/domain/permissions'
 import { useAuthStore } from '@/stores/auth'
 
+// AppChannelsTab 负责应用渠道登录绑定流程，当前默认处理 wechat 渠道。
+// appId 和 channelType 来自路由，父级注入的 app 用于判断当前用户是否可管理。
 const props = defineProps<{ appId?: string; channelType?: string }>()
 
 const auth = useAuthStore()
@@ -65,8 +67,11 @@ const { data: progress } = useChannelProgressQuery(appId, channelTypeRef)
 const beginMutation = useBeginChannelAuth(appId, channelTypeRef)
 const unbindMutation = useUnbindChannel(appId, channelTypeRef)
 
+// beginning 是本地提交态，覆盖 beginMutation 尚未返回挑战内容前的按钮文案。
 const beginning = ref(false)
+// challenge 保存本次发起登录立即返回的挑战，轮询进度若有更新会优先使用 progressChallenge。
 const challenge = ref<ChannelChallenge | null>(null)
+// authStarted 区分“用户已点发起但后端还未返回二维码”和“完全未开始”的展示状态。
 const authStarted = ref(false)
 
 const statusLabel = computed(() => {
@@ -74,16 +79,20 @@ const statusLabel = computed(() => {
   return progress.value.status
 })
 
+// canManage 控制发起登录和解绑按钮，真正权限仍由后端接口再次校验。
 const canManage = computed(() => canManageApp(auth.user, app?.value))
 const canUnbind = computed(() => canManage.value && progress.value?.status === 'bound')
 
+// progressChallenge 从轮询结果恢复挑战，避免刷新页面后丢失二维码或验证码展示。
 const progressChallenge = computed<ChannelChallenge | null>(() => {
   return channelChallengeFromProgress(progress.value, channelType.value)
 })
 
+// visibleChallenge 优先展示轮询结果，只有轮询尚未携带挑战时才使用本地刚提交的响应。
 const visibleChallenge = computed(() => progressChallenge.value ?? (challenge.value?.qrcode || challenge.value?.code ? challenge.value : null))
 const isWaitingForChallenge = computed(() => shouldShowChallengePending(authStarted.value, visibleChallenge.value, progress.value?.status))
 
+// challengeExpired 用于提示用户重新生成二维码，过期时间缺失时不做前端过期判断。
 const challengeExpired = computed(() => {
   const expiresAt = visibleChallenge.value?.expires_at
   if (!expiresAt) return false
@@ -91,6 +100,7 @@ const challengeExpired = computed(() => {
   return Number.isFinite(ts) && ts < Date.now()
 })
 
+// showRefreshChallenge 覆盖过期、失败和等待授权状态，让用户可以重新拉起登录挑战。
 const showRefreshChallenge = computed(() => {
   if (challengeExpired.value) return true
   const status = progress.value?.status
@@ -98,6 +108,7 @@ const showRefreshChallenge = computed(() => {
   return false
 })
 
+// primaryButtonLabel 聚合提交态、绑定态和过期态，避免模板中散落渠道状态判断。
 const primaryButtonLabel = computed(() => {
   if (beginning.value) return '触发中…'
   if (challengeExpired.value) return '重新生成二维码'
@@ -115,6 +126,7 @@ watch(
   },
 )
 
+// beginAuth 发起渠道登录 mutation；成功后保存挑战，失败交由 mutation/error 边界显示。
 async function beginAuth() {
   if (!canManage.value) return
   beginning.value = true
@@ -126,6 +138,7 @@ async function beginAuth() {
   }
 }
 
+// unbind 解绑后清空本地挑战状态，等待查询失效后由 hook 拉取最新绑定进度。
 async function unbind() {
   if (!canManage.value) return
   await unbindMutation.mutateAsync()

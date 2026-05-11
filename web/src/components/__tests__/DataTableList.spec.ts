@@ -9,6 +9,7 @@ const baseProps = {
   data: [{ id: '1', name: 'A' }],
 }
 
+// DataTableList 测试聚焦公共列表壳层：标题、工具栏、错误横幅和 loading 透传。
 describe('DataTableList', () => {
   it('renders title and toolbar slot', () => {
     const wrapper = mount(DataTableList, {

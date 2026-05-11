@@ -4,6 +4,7 @@ import { describe, expect, it, vi } from 'vitest'
 
 import RuntimeNodesPage from './RuntimeNodesPage.vue'
 
+// 运行节点页测试固定 agent 上报的 max_apps，确保前端只展示配置而不提供编辑入口。
 vi.mock('@/api/hooks/useRuntimeNodes', () => ({
   useRuntimeNodesQuery: () => ({
     data: ref([{

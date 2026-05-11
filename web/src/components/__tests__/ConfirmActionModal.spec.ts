@@ -3,6 +3,7 @@ import { mount } from '@vue/test-utils'
 import { nextTick } from 'vue'
 import ConfirmActionModal from '../ConfirmActionModal.vue'
 
+// 覆盖二次确认弹框的 verifyValue 业务保护，确保危险操作不会在未输入确认值时提交。
 describe('ConfirmActionModal verifyValue', () => {
   it('verifyValue 非空且输入为空时，确认按钮 disabled', async () => {
     const wrapper = mount(ConfirmActionModal, {

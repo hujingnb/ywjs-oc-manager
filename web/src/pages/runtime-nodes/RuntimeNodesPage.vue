@@ -26,9 +26,11 @@ import { formatRuntimeNodeStatus } from '@/domain/status'
 import { useRuntimeNodesQuery, useSetRuntimeNodeStatus } from '@/api/hooks/useRuntimeNodes'
 import type { RuntimeNode } from '@/api'
 
+// RuntimeNodesPage 展示 runtime-agent 自动注册的节点，并提供平台侧启停操作。
 const { data: nodes, isLoading, error } = useRuntimeNodesQuery()
 const statusMutation = useSetRuntimeNodeStatus()
 
+// columns 展示 agent 上报配置和探测结果；最大应用数只读，不在前端提供编辑入口。
 const columns: DataTableColumns<RuntimeNode> = [
   {
     title: '名称', key: 'name',
@@ -60,10 +62,12 @@ const columns: DataTableColumns<RuntimeNode> = [
   ]),
 ]
 
+// onToggle 调用节点状态切换接口，列表刷新由 mutation hook 的缓存失效策略处理。
 function onToggle(node: RuntimeNode, action: 'enable' | 'disable') {
   statusMutation.mutate({ nodeId: node.id, action })
 }
 
+// formatDateTime 用于探测时间展示，保留浏览器本地时区。
 function formatDateTime(value: string) {
   return new Date(value).toLocaleString()
 }

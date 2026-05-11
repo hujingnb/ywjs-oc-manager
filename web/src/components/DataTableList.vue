@@ -28,6 +28,8 @@
 <script setup lang="ts" generic="T extends Record<string, any>">
 import { NCard, NDataTable, NAlert, type DataTableColumn } from 'naive-ui'
 
+// DataTableList 封装后台列表页的标题、工具栏、错误横幅和 Naive DataTable。
+// rowKey 由业务页提供，确保分页、刷新或状态切换时表格能稳定识别行。
 defineProps<{
   title: string
   eyebrow?: string

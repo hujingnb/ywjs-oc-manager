@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest'
 import { timeColumn } from '../../columns/timeColumn'
 
+// timeColumn 测试覆盖时间格式化和空值降级，保证各列表页使用一致占位。
 describe('timeColumn', () => {
   const col = timeColumn<{ t: string | null | undefined }>('时间', (row) => row.t)
 

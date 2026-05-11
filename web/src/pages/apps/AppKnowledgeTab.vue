@@ -39,12 +39,15 @@ import type { KnowledgeEntry } from '@/api/hooks/useKnowledge'
 import { canManageApp } from '@/domain/permissions'
 import { useAuthStore } from '@/stores/auth'
 
+// AppKnowledgeTab 管理单个应用的知识库文件，权限和路径上下文来自应用详情注入。
 const props = defineProps<{ appId: string }>()
 const appIdRef = computed<string | undefined>(() => props.appId)
 const auth = useAuthStore()
 
 const app = inject<Ref<AppDTO | null>>('app')
 
+// knowledgeContext 将应用归属转换为知识库 API 需要的组织、所有者和相对路径。
+// app 未加载完成时返回 undefined，相关查询和 mutation 会等待上下文具备后执行。
 const knowledgeContext = computed(() => {
   if (!app?.value) return undefined
   return {
@@ -59,16 +62,19 @@ const uploadMutation = useUploadAppKnowledge(appIdRef, knowledgeContext)
 const deleteMutation = useDeleteAppKnowledge(appIdRef, knowledgeContext)
 const errorMessage = ref<string>('')
 
+// canManage 控制上传和删除入口，后端仍会基于应用归属做最终权限校验。
 const canManage = computed(() => canManageApp(auth.user, app?.value))
 const uploading = computed(() => uploadMutation.isPending.value)
 const deleting = computed(() => deleteMutation.isPending.value)
 
+// formatBytes 仅用于文件大小展示，目录大小在列渲染中统一降级为占位符。
 function formatBytes(value: number) {
   if (value < 1024) return `${value} B`
   if (value < 1024 * 1024) return `${(value / 1024).toFixed(1)} KB`
   return `${(value / 1024 / 1024).toFixed(1)} MB`
 }
 
+// entryRelativePath 去掉当前目录前缀，确保删除接口收到应用知识库内的相对路径。
 function entryRelativePath(entryPath: string) {
   const root = listing.data.value?.path
   if (!root) return entryPath
@@ -76,6 +82,7 @@ function entryRelativePath(entryPath: string) {
   return entryPath.startsWith(prefix) ? entryPath.slice(prefix.length) : entryPath
 }
 
+// onUploadFile 处理原生 file input 事件；成功后清空 input 以便再次选择同名文件。
 async function onUploadFile(event: Event) {
   errorMessage.value = ''
   if (!canManage.value) return
@@ -90,6 +97,7 @@ async function onUploadFile(event: Event) {
   }
 }
 
+// deleteEntry 删除知识库条目并把 mutation 错误转为页面内反馈文案。
 async function deleteEntry(targetPath: string) {
   errorMessage.value = ''
   if (!canManage.value) return
@@ -100,6 +108,7 @@ async function deleteEntry(targetPath: string) {
   }
 }
 
+// columns 展示文件名、大小、类型和删除操作；删除按钮只在可管理时出现。
 const columns: DataTableColumns<KnowledgeEntry> = [
   { title: '名称', key: 'name', render: (row) => h('strong', `${row.name}${row.is_dir ? '/' : ''}`) },
   { title: '大小', key: 'size', render: (row) => row.is_dir ? '—' : formatBytes(row.size) },

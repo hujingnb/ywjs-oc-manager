@@ -39,6 +39,8 @@
 import { computed, ref, watch } from 'vue'
 import { NButton, NCard, NFormItem, NInput, NModal, NSpace } from 'naive-ui'
 
+// ConfirmActionModal 为删除、禁用、充值等高风险操作提供二次确认。
+// verifyValue 可要求用户输入业务对象名称，避免误点直接提交破坏性请求。
 const props = defineProps<{
   visible: boolean
   title: string
@@ -50,6 +52,7 @@ const props = defineProps<{
   verifyHint?: string
 }>()
 
+// confirm 表示用户已通过当前弹框校验；cancel 覆盖遮罩关闭和取消按钮两类关闭路径。
 const emit = defineEmits<{
   (event: 'confirm'): void
   (event: 'cancel'): void
@@ -57,7 +60,9 @@ const emit = defineEmits<{
 
 const confirmLabel = computed(() => props.confirmLabel ?? '确认')
 const cancelLabel = computed(() => props.cancelLabel ?? '取消')
+// verifyLabel 优先使用调用方给出的业务提示，默认提示展示需要输入的确认值。
 const verifyLabel = computed(() => props.verifyHint || `输入 "${props.verifyValue}" 以确认`)
+// verifyInput 每次打开弹框都会重置，避免上一次确认值复用到新的业务对象。
 const verifyInput = ref('')
 
 watch(

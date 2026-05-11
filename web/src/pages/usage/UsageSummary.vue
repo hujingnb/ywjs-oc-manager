@@ -26,10 +26,13 @@ import { NDataTable, type DataTableColumns } from 'naive-ui'
 
 import type { AggregatedUsage } from '@/api/hooks/useUsage'
 
+// UsageSummary 渲染聚合用量结果，支持不同维度共享同一套空态和表格展示。
 const props = defineProps<{ view?: AggregatedUsage; emptyText: string }>()
 
+// itemCount 只统计当前响应中的 items，total 若存在由后端单独展示。
 const itemCount = computed(() => props.view?.items?.length ?? 0)
 
+// formatCell 统一处理空值、数字和结构化字段，避免表格出现 undefined/null。
 function formatCell(v: unknown): string {
   if (v === null || v === undefined) return '—'
   if (typeof v === 'number') return v.toLocaleString('en-US')
@@ -37,10 +40,12 @@ function formatCell(v: unknown): string {
   return JSON.stringify(v)
 }
 
+// formatTime 将聚合结果更新时间展示为中文本地时间。
 function formatTime(iso: string): string {
   return new Date(iso).toLocaleString('zh-CN', { hour12: false })
 }
 
+// tableColumns 根据首行动态生成最多 6 列；token_id/date 用等宽字体便于识别。
 const tableColumns = computed<DataTableColumns<Record<string, unknown>>>(() => {
   const first = props.view?.items?.[0]
   if (!first) return []

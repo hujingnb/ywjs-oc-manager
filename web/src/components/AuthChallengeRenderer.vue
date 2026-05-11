@@ -31,11 +31,16 @@ import QRCode from 'qrcode'
 
 import type { ChannelChallenge } from '@/api/hooks/useChannel'
 
+// AuthChallengeRenderer 负责展示渠道登录挑战，当前覆盖扫码和验证码两类挑战。
+// challenge 可能来自立即发起登录的响应，也可能来自轮询进度接口。
 const props = defineProps<{ challenge?: ChannelChallenge | null }>()
 
+// qrDataUrl 保存本地编码后的二维码图片；上游给纯 URL 时必须先转成 dataURL 才能渲染。
 const qrDataUrl = ref<string>('')
+// errorMessage 只表示前端二维码编码失败，不覆盖渠道认证本身的后端错误。
 const errorMessage = ref<string>('')
 
+// expiresLabel 只在后端提供有效过期时间时显示，避免无效时间字符串误导用户。
 const expiresLabel = computed(() => {
   if (!props.challenge?.expires_at) return ''
   const date = new Date(props.challenge.expires_at)

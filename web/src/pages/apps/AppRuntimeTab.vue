@@ -112,6 +112,7 @@ import JobProgressPanel from '@/components/JobProgressPanel.vue'
 import { canManageApp } from '@/domain/permissions'
 import { useAuthStore } from '@/stores/auth'
 
+// AppRuntimeTab 展示应用容器运行时信息，并触发 start/stop/restart/delete 操作。
 const props = defineProps<{ appId: string }>()
 const appId = computed<string | undefined>(() => props.appId)
 
@@ -122,6 +123,7 @@ const runtimeQuery = useAppRuntimeQuery(appId)
 const runtime = computed(() => runtimeQuery.data.value ?? null)
 
 const mutation = useTriggerRuntimeOperation(appId)
+// trackingJobId 保存最近一次运行时操作的任务 ID，用于轮询异步执行进度。
 const trackingJobId = ref<string | undefined>()
 const jobIdRef = computed<string | undefined>(() => trackingJobId.value)
 const jobQuery = useJobQuery(jobIdRef)
@@ -132,6 +134,7 @@ const actionError = ref(false)
 const confirmDelete = ref(false)
 const confirmStop = ref(false)
 
+// runtimeStatusLabel 负责把 no_container 转成业务文案，其他未知状态保留原值。
 const runtimeStatusLabel = computed(() => {
   const status = runtime.value?.status
   if (!status) return '—'
@@ -139,6 +142,7 @@ const runtimeStatusLabel = computed(() => {
   return status
 })
 
+// canStart/canStop/canDelete 控制按钮可见性，真实权限和状态转换仍以后端校验为准。
 const canManage = computed(() => canManageApp(auth.user, app?.value))
 const canStart = computed(() => canManage.value && app?.value?.status === 'stopped')
 const canStop = computed(() => {
@@ -147,6 +151,7 @@ const canStop = computed(() => {
 })
 const canDelete = computed(() => canManage.value && app?.value?.status !== 'deleted')
 
+// onAction 对 stop/delete 先弹二次确认，其他操作直接提交运行时任务。
 async function onAction(op: 'start' | 'stop' | 'restart' | 'delete') {
   if (op === 'delete') { confirmDelete.value = true; return }
   if (op === 'stop') { confirmStop.value = true; return }
@@ -156,6 +161,7 @@ async function onAction(op: 'start' | 'stop' | 'restart' | 'delete') {
 async function onConfirmDelete() { confirmDelete.value = false; await runMutation('delete') }
 async function onConfirmStop() { confirmStop.value = false; await runMutation('stop') }
 
+// formatBytes 用于展示容器磁盘和内存指标，0 明确显示为 0 B。
 function formatBytes(value: number): string {
   if (!value) return '0 B'
   if (value < 1024) return `${value} B`
@@ -164,10 +170,12 @@ function formatBytes(value: number): string {
   return `${(value / 1024 / 1024 / 1024).toFixed(2)} GB`
 }
 
+// formatTime 使用中文本地化格式展示后端 ISO 时间。
 function formatTime(iso: string): string {
   return new Date(iso).toLocaleString('zh-CN', { hour12: false })
 }
 
+// runMutation 提交运行时操作并记录 job_id；失败时只更新本页反馈，不做乐观状态切换。
 async function runMutation(op: 'start' | 'stop' | 'restart' | 'delete') {
   actionFeedback.value = ''
   actionError.value = false

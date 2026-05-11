@@ -20,12 +20,15 @@ import { useAuthStore } from '@/stores/auth'
 import DataTableList from '@/components/DataTableList.vue'
 import { timeColumn } from '@/components/columns'
 
+// AuditLogsPage 展示组织级审计日志，平台和组织管理员可看，普通成员需去应用详情查看自己的应用审计。
 const props = defineProps<{ orgId?: string }>()
 const auth = useAuthStore()
+// effectiveOrgId 支持平台指定组织，也支持组织用户默认使用自身组织。
 const effectiveOrgId = computed(() => props.orgId ?? auth.user?.org_id)
 const orgEyebrow = computed(() => auth.user?.role === 'platform_admin' ? 'Platform · 审计' : '组织 · 审计')
 const canView = computed(() => canViewOrgAudit(auth.user, effectiveOrgId.value))
 
+// queryOrgId 为 undefined 时不发起查询，用前端权限分支减少无意义 403。
 const queryOrgId = computed(() => canView.value ? effectiveOrgId.value : undefined)
 const { data: logs, isLoading, error } = useOrgAuditLogsQuery(queryOrgId)
 
@@ -39,6 +42,7 @@ const errorMessage = computed(() => {
 
 type AuditLog = NonNullable<typeof logs.value>[number]
 
+// auditTagType 将审计结果映射为标签色，未知结果保持默认色以兼容后端扩展。
 function auditTagType(result: string): 'success' | 'warning' | 'error' | 'default' {
   switch (result) {
     case 'success': return 'success'
@@ -48,6 +52,7 @@ function auditTagType(result: string): 'success' | 'warning' | 'error' | 'defaul
   }
 }
 
+// columns 展示审计主体、资源、动作和结果；错误信息作为结果列的辅助诊断文本。
 const columns: DataTableColumns<AuditLog> = [
   timeColumn('时间', r => r.created_at),
   {

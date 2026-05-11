@@ -28,12 +28,15 @@ import { NCard, NGrid, NGridItem, NStatistic } from 'naive-ui'
 import { usePlatformOverviewQuery } from '@/api/hooks/usePlatform'
 import { useAuthStore } from '@/stores/auth'
 
+// PlatformDashboardPage 展示平台级概览，只在平台管理员身份下启用查询。
 const auth = useAuthStore()
 const isPlatformAdmin = computed(() => auth.user?.role === 'platform_admin')
 const { data: overview, isLoading, error } = usePlatformOverviewQuery(isPlatformAdmin)
 
+// formatQuota 统一平台余额数字格式，避免不同统计卡片使用不同分隔符。
 function formatQuota(value: number) { return value.toLocaleString('en-US') }
 
+// stats 将平台概览 DTO 转为统计卡片数据，用量服务不可用时余额显示占位符。
 const stats = computed(() => {
   if (!overview.value) return []
   const o = overview.value

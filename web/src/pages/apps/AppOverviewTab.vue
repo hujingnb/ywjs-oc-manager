@@ -99,6 +99,7 @@ import JobProgressPanel from '@/components/JobProgressPanel.vue'
 import { canManageApp } from '@/domain/permissions'
 import { useAuthStore } from '@/stores/auth'
 
+// AppOverviewTab 展示应用基础信息，并提供初始化重试和 API key 启停入口。
 const props = defineProps<{ appId: string }>()
 const appId = computed<string | undefined>(() => props.appId)
 
@@ -106,11 +107,13 @@ const app = inject<Ref<AppDTO | null>>('app')
 const auth = useAuthStore()
 
 const initMutation = useInitializeAppMutation(appId)
+// trackingJobId 记录最近一次后台任务，供 JobProgressPanel 轮询展示执行进度。
 const trackingJobId = ref<string | undefined>()
 const jobIdRef = computed<string | undefined>(() => trackingJobId.value)
 const jobQuery = useJobQuery(jobIdRef)
 const trackedJob = computed(() => jobQuery.data.value ?? null)
 
+// canRetryInit 仅允许可管理用户在草稿或错误状态重新提交初始化任务。
 const canRetryInit = computed(() => {
   const status = app?.value?.status
   return canManageApp(auth.user, app?.value) && (status === 'error' || status === 'draft')
@@ -119,6 +122,7 @@ const canRetryInit = computed(() => {
 const initFeedback = ref('')
 const initError = ref(false)
 
+// onRetryInit 提交初始化任务，成功后切换到任务跟踪视图，失败时保留错误文案。
 async function onRetryInit() {
   initFeedback.value = ''
   initError.value = false
@@ -132,6 +136,7 @@ async function onRetryInit() {
   }
 }
 
+// canToggleKey 控制 API key 启停按钮展示，避免非管理者看到危险操作入口。
 const canToggleKey = computed(() => canManageApp(auth.user, app?.value))
 
 const keyMutation = useToggleAppAPIKey(appId)
@@ -139,10 +144,12 @@ const confirmDisableKey = ref(false)
 const keyFeedback = ref('')
 const keyError = ref(false)
 
+// keyTagType 将 API key 状态映射为标签色，未知状态用 warning 提醒确认。
 function keyTagType(s: string): 'success' | 'warning' | 'error' | 'default' {
   return s === 'active' ? 'success' : s === 'disabled' ? 'error' : 'warning'
 }
 
+// apiKeyLabel 将后端 key 状态转换为用户可读文案，未知状态保留原值。
 function apiKeyLabel(s: string): string {
   return s === 'active' ? '启用' : s === 'disabled' ? '已禁用' : s
 }
@@ -156,6 +163,7 @@ async function onRestoreKey() {
   await runKeyMutation('restore')
 }
 
+// runKeyMutation 提交 disable/restore 后端任务；任务完成由 JobProgressPanel 继续轮询。
 async function runKeyMutation(action: 'disable' | 'restore') {
   keyFeedback.value = ''
   keyError.value = false

@@ -49,10 +49,13 @@ import { NButton, NCard, NCheckbox, NForm, NFormItem, NInput, NSpace } from 'nai
 import { usePersonaMutation, usePersonaQuery, type PersonaDTO } from '@/api/hooks/usePersona'
 import { useAuthStore } from '@/stores/auth'
 
+// PersonaPage 管理组织默认 AI 人设，组织成员只能查看，管理员可保存新版本。
 const auth = useAuthStore()
 
+// orgId 来自当前登录账号；未绑定组织时查询和保存都不会具备有效目标。
 const orgId = computed<string | undefined>(() => auth.user?.org_id ?? undefined)
 
+// personaSubtitle 展示当前生效版本，未配置时给出空状态说明。
 const personaSubtitle = computed(() => {
   if (!persona.value) return '尚未配置人设'
   return `当前生效版本：v${persona.value.version}`
@@ -62,6 +65,7 @@ const personaQuery = usePersonaQuery(orgId)
 const persona = computed<PersonaDTO | null>(() => personaQuery.data.value ?? null)
 const mutation = usePersonaMutation(orgId)
 
+// form 对齐人设保存 API；空的可选规则在提交时转成 undefined。
 const form = reactive({
   system_prompt: '',
   conversation_rules: '',
@@ -70,6 +74,7 @@ const form = reactive({
   allow_member_override: false,
 })
 
+// 服务端返回的人设变化时同步到表单，避免编辑旧版本内容。
 watch(persona, (value) => {
   if (!value) return
   form.system_prompt = value.system_prompt
@@ -79,6 +84,7 @@ watch(persona, (value) => {
   form.allow_member_override = value.allow_member_override
 }, { immediate: true })
 
+// canEdit 控制编辑表单和保存按钮，后端仍根据角色做最终权限校验。
 const canEdit = computed(() => {
   const role = auth.user?.role
   return role === 'platform_admin' || role === 'org_admin'
@@ -87,6 +93,7 @@ const canEdit = computed(() => {
 const feedback = ref('')
 const feedbackError = ref(false)
 
+// onSubmit 保存新版本人设，成功后显示版本号，失败时显示接口错误。
 async function onSubmit() {
   feedback.value = ''
   feedbackError.value = false

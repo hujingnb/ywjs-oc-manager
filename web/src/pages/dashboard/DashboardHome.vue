@@ -94,11 +94,14 @@ import { useAppsByOrgQuery, type AppDTO } from '@/api/hooks/useApps'
 import AppStatusTag from '@/components/AppStatusTag.vue'
 import { useAuthStore } from '@/stores/auth'
 
+// DashboardHome 是组织视角的调试总览页，展示当前组织应用和固定的本地环境指标。
 const auth = useAuthStore()
 const router = useRouter()
+// effectiveOrgId 来自当前登录用户，组织未绑定时应用查询不会发起有效请求。
 const effectiveOrgId = computed(() => auth.user?.org_id)
 const { data: apps, isLoading: appsLoading } = useAppsByOrgQuery(effectiveOrgId)
 
+// metrics 是本地调试占位指标，真实用量在 Usage 页面直接查询 new-api 汇总。
 const metrics = [
   { label: '组织', value: '0', unit: '', pct: 0, note: '等待初始化' },
   { label: '应用', value: '0', unit: '', pct: 0, note: '尚未创建' },
@@ -106,6 +109,7 @@ const metrics = [
   { label: '今日调用', value: '0', unit: '', pct: 0, note: '直查 new-api' },
 ]
 
+// appColumns 展示应用名称、节点和状态，状态渲染复用统一应用状态徽标。
 const appColumns: DataTableColumns<AppDTO> = [
   { title: '应用名称', key: 'name', render: (row) => h('strong', row.name) },
   { title: '节点', key: 'runtime_node_id', render: (row) => row.runtime_node_id ?? '—' },

@@ -24,8 +24,10 @@ import { RouterLink } from 'vue-router'
 
 import { useAuthStore } from '@/stores/auth'
 
+// RoleAwareHome 根据当前角色展示首屏快捷入口，避免不同角色看到无权限入口。
 const auth = useAuthStore()
 
+// roleLabel 只用于欢迎区的角色展示，未知角色返回空字符串。
 const roleLabel = computed(() => {
   switch (auth.user?.role) {
     case 'platform_admin':
@@ -41,8 +43,10 @@ const roleLabel = computed(() => {
 
 const greeting = computed(() => `欢迎回来，${auth.user?.display_name ?? auth.user?.username ?? '用户'}`)
 
+// QuickCard 描述一个首页快捷入口，path 必须对应路由表中的后台路径。
 interface QuickCard { path: string; title: string; subtitle: string }
 
+// cards 按角色返回可访问的核心工作流入口；权限兜底仍由路由和接口控制。
 const cards = computed<QuickCard[]>(() => {
   const role = auth.user?.role
   if (role === 'platform_admin') {

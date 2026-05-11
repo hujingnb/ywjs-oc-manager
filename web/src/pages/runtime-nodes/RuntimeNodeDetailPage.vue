@@ -72,7 +72,9 @@ import { useRoute } from 'vue-router'
 import RuntimeStatusTag from '@/components/RuntimeStatusTag.vue'
 import { useRuntimeNodeQuery } from '@/api/hooks/useRuntimeNodes'
 
+// RuntimeNodeDetailPage 展示单个运行节点的 agent 配置、探测状态和心跳信息。
 const route = useRoute()
+// nodeId 只接受字符串路由参数，缺失时查询 hook 不会拿到有效节点 ID。
 const nodeId = computed(() => (typeof route.params.nodeId === 'string' ? route.params.nodeId : undefined))
 const { data: node, isLoading, error } = useRuntimeNodeQuery(nodeId)
 </script>

@@ -40,13 +40,16 @@ import { NButton, NForm, NFormItem, NInput } from 'naive-ui'
 
 import { useAuthStore } from '@/stores/auth'
 
+// LoginPage 负责本地账号登录，并在登录成功后回跳原始受保护路径。
 const auth = useAuthStore()
 const router = useRouter()
 
 const username = ref('')
 const password = ref('')
+// errorMessage 只保存本次登录失败原因，下一次提交前会清空。
 const errorMessage = ref<string | null>(null)
 
+// onSubmit 调用 auth store 登录；redirect 查询参数由全局 401 处理器写入。
 async function onSubmit() {
   errorMessage.value = null
   try {

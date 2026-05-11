@@ -102,16 +102,21 @@ import {
 } from '@/api/hooks/useMembers'
 import { useAuthStore } from '@/stores/auth'
 
+// CreateMemberPage 是组织成员一站式开通页，同时创建成员、初始应用和渠道配置。
 const props = defineProps<{ orgId?: string }>()
 const auth = useAuthStore()
+// effectiveOrgId 支持平台管理员指定组织，组织管理员则默认使用自身组织。
 const effectiveOrgId = computed(() => props.orgId ?? auth.user?.org_id)
 const orgEyebrow = computed(() => (auth.user?.role === 'platform_admin' ? 'Platform · 创建成员' : '组织 · 创建成员'))
 
 const onboardMutation = useOnboardMember(effectiveOrgId)
+// creating 是页面本地提交态，用于覆盖 mutation 返回前的按钮禁用和文案。
 const creating = ref(false)
 const errorMessage = ref<string | null>(null)
+// lastResult 保存最近一次开通结果，供页面展示生成的成员和应用信息。
 const lastResult = ref<OnboardMemberResult | null>(null)
 
+// form 对齐 onboard API 请求体；可选 app_prompt 只在用户填写应用覆盖人设时提交。
 const form = reactive<OnboardMemberPayload>({
   username: '',
   display_name: '',
@@ -132,6 +137,7 @@ const personaModeOptions: SelectOption[] = [
   { label: '应用覆盖', value: 'app_override' },
 ]
 
+// onSubmit 提交完整开通流程；成功后清空敏感密码和文本输入，失败时保留表单便于修正。
 async function onSubmit() {
   errorMessage.value = null
   creating.value = true
