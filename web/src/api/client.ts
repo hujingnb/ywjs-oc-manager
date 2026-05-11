@@ -4,21 +4,31 @@
 const TOKEN_STORAGE_KEY = 'ocm.access_token'
 const REFRESH_STORAGE_KEY = 'ocm.refresh_token'
 
+// ApiError 是 apiRequest 对非 2xx 响应抛出的统一错误形态。
 export interface ApiError extends Error {
+  // HTTP 状态码，调用方可据此区分 403/409 等业务分支。
   status: number
+  // 后端响应体原文，供高级页面读取 code/message 等结构化字段。
   body?: unknown
 }
 
+// RequestOptions 描述 apiRequest 支持的请求配置。
 export interface RequestOptions {
+  // HTTP 方法，缺省为 GET。
   method?: 'GET' | 'POST' | 'PUT' | 'PATCH' | 'DELETE'
+  // JSON 请求体；非 JSON 上传不要使用 apiRequest。
   body?: unknown
+  // 查询参数；undefined、null 和空字符串会被 buildUrl 忽略。
   query?: Record<string, string | number | undefined>
   /** 关闭时不附加 Authorization，例如登录接口 */
   withAuth?: boolean
 }
 
+// AuthTokens 是前端持久化的访问令牌和刷新令牌组合。
 export interface AuthTokens {
+  // 短期访问令牌，用于 Authorization header。
   accessToken: string
+  // 刷新/注销使用的长期令牌。
   refreshToken: string
 }
 

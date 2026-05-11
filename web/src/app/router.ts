@@ -1,3 +1,5 @@
+// router.ts 定义前端路由表、角色访问边界和登录重定向行为。
+// 路由守卫只做轻量会话校验，具体资源权限仍由后端和页面 helper 共同约束。
 import { createRouter, createWebHistory } from 'vue-router'
 
 import { getStoredAccessToken } from '@/api/client'

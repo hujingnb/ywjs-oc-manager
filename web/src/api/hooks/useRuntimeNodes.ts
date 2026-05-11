@@ -1,3 +1,5 @@
+// Runtime Node API hooks 负责平台管理员管理运行节点。
+// 节点启停只刷新节点列表；节点详情页通过 nodeId 独立 query 读取。
 import { useMutation, useQuery, useQueryClient } from '@tanstack/vue-query'
 import type { Ref } from 'vue'
 
@@ -21,6 +23,7 @@ export function useRuntimeNodesQuery() {
 }
 
 // useRuntimeNodeQuery 查询单个节点详情。
+// nodeId 缺失时返回 null，避免详情页路由参数未就绪时请求 /undefined。
 export function useRuntimeNodeQuery(nodeId: Ref<string | undefined>) {
   return useQuery<RuntimeNode | null>({
     queryKey: ['runtime-node', nodeId],
@@ -34,6 +37,7 @@ export function useRuntimeNodeQuery(nodeId: Ref<string | undefined>) {
 }
 
 // useSetRuntimeNodeStatus 启用/禁用节点。
+// 状态变化会影响调度可用性，前端仅刷新节点列表，实际调度结果由后端保证。
 export function useSetRuntimeNodeStatus() {
   const client = useQueryClient()
   return useMutation({

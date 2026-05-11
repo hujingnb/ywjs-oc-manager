@@ -1,3 +1,5 @@
+// 状态格式化测试覆盖已知状态映射和未知状态降级展示。
+// 未知值必须可见，避免后端新增状态时页面静默显示为空。
 import { describe, expect, it } from 'vitest'
 
 import {

@@ -1,13 +1,22 @@
+// permissions.ts 收敛前端页面级权限 helper。
+// 这些函数只决定入口显示和前端交互，后端 authorizer 仍是最终权限来源。
 export type Role = 'platform_admin' | 'org_admin' | 'org_member'
 
+// PermissionUser 是权限判断需要的最小用户视图。
 export interface PermissionUser {
+  // 用户 ID，用于成员判断自有应用。
   id?: string
+  // 所属组织 ID，用于组织管理员边界判断。
   org_id?: string
+  // 角色允许 string 是为了兼容后端新增角色时前端降级为无写权限。
   role?: Role | string
 }
 
+// PermissionApp 是权限判断需要的最小应用视图。
 export interface PermissionApp {
+  // 应用所属组织。
   org_id?: string
+  // 应用拥有者用户。
   owner_user_id?: string
 }
 

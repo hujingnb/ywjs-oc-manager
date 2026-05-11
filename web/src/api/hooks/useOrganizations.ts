@@ -1,3 +1,5 @@
+// 组织 API hooks 负责平台管理员视角下的组织列表、详情、创建和状态变更。
+// 组织写操作只失效组织列表；详情页如需最新数据会通过自身 query 重新拉取。
 import { useMutation, useQuery, useQueryClient } from '@tanstack/vue-query'
 import type { Ref } from 'vue'
 
@@ -6,14 +8,23 @@ import type { Organization } from '@/api'
 
 const ORG_LIST_KEY = ['organizations'] as const
 
+// OrganizationFormPayload 是创建组织及首个组织管理员的提交体。
 export interface OrganizationFormPayload {
+  // 组织名称。
   name: string
+  // 联系人姓名。
   contact_name?: string
+  // 联系电话。
   contact_phone?: string
+  // 平台侧备注。
   remark?: string
+  // 余额预警阈值；null 表示清空或使用后端默认。
   credit_warning_threshold?: number | null
+  // 首个组织管理员用户名。
   admin_username: string
+  // 首个组织管理员展示名。
   admin_display_name: string
+  // 首个组织管理员初始密码。
   admin_password: string
 }
 
@@ -48,6 +59,7 @@ export function useOrganizationQuery(orgId: Ref<string | undefined>) {
 }
 
 // useCreateOrganization 创建组织，自动失效列表缓存。
+// 后端会同时创建组织管理员；前端不保存初始密码。
 export function useCreateOrganization() {
   const client = useQueryClient()
   return useMutation({
@@ -65,6 +77,7 @@ export function useCreateOrganization() {
 }
 
 // useUpdateOrganizationStatus 启用或禁用组织。
+// 状态变更只影响列表可见字段，因此失效 ORG_LIST_KEY 即可。
 export function useUpdateOrganizationStatus() {
   const client = useQueryClient()
   return useMutation({

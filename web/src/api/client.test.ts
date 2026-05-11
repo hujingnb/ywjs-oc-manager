@@ -1,3 +1,5 @@
+// apiRequest 单元测试覆盖 HTTP 客户端的错误消息提取边界。
+// 测试只 mock fetch 响应，不触发真实网络或 token 存储。
 import { afterEach, describe, expect, it, vi } from 'vitest'
 
 import { apiRequest } from './client'

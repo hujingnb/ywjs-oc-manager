@@ -67,26 +67,42 @@ export type AuditLog = WithRequired<
 // LogEntry 字段按 Go 侧 internal/integrations/newapi/client.go 中定义对齐。
 // FIXME: 等 swag v2 修复跨包扫描后，从 components['schemas']['service.LogsPage'].items 派生即可移除手补。
 export interface LogEntry {
+  // new-api 日志 ID。
   id: number
+  // new-api 用户 ID。
   user_id: number
+  // new-api 用户名。
   username: string
+  // new-api token ID。
   token_id: number
+  // token 名称。
   token_name: string
+  // 模型名称。
   model_name: string
+  // 本次调用消耗额度。
   quota: number
+  // prompt token 数。
   prompt_tokens: number
+  // completion token 数。
   completion_tokens: number
+  // 调用耗时。
   use_time: number
+  // new-api 创建时间戳。
   created_at: number
 }
 
 // QuotaDate 字段按 Go 侧 internal/integrations/newapi/client.go 中定义对齐。
 // FIXME: 等 swag v2 修复跨包扫描后，从 components['schemas']['service.QuotaSeries'].items 派生即可移除手补。
 export interface QuotaDate {
+  // 聚合日期。
   date: string
+  // 模型名称。
   model_name: string
+  // 调用次数。
   count: number
+  // 消耗额度。
   quota: number
+  // token 用量。
   token_used: number
 }
 

@@ -1,3 +1,5 @@
+// 权限 helper 测试覆盖前端入口控制的关键角色边界。
+// 后端授权仍是最终来源，这里只验证页面显示逻辑不会放宽写权限。
 import { describe, expect, it } from 'vitest'
 
 import {

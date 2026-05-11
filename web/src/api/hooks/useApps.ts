@@ -1,32 +1,54 @@
+// 应用 API hooks 负责封装应用、运行时、任务和用量相关的 TanStack Query 调用。
+// 本文件只维护缓存键、启用条件和 mutation 后的失效边界，不承载页面展示逻辑。
 import { useMutation, useQuery, useQueryClient } from '@tanstack/vue-query'
 import type { Ref } from 'vue'
 
 import { apiRequest } from '@/api/client'
 
+// AppDTO 是应用详情与列表接口共用的前端视图。
+// 字段名保持后端 JSON snake_case，避免在 hook 层做额外映射。
 export interface AppDTO {
+  // 应用主键，用于详情、运行时和渠道等子资源路由。
   id: string
+  // 应用所属组织，权限判断必须和当前用户 org_id 一起使用。
   org_id: string
+  // 应用拥有者用户，普通成员只能管理自己拥有的应用。
   owner_user_id: string
+  // 运行节点为空表示尚未分配或初始化失败。
   runtime_node_id?: string
+  // 页面展示名称。
   name: string
+  // 可选说明文案，空值由页面层决定是否展示占位。
   description?: string
+  // 后端应用状态机原值，由 domain/status.ts 统一格式化。
   status: string
+  // 人设模式，决定应用是否覆盖组织默认人设。
   persona_mode: string
+  // 应用级提示词，仅 app_override 场景有业务意义。
   app_prompt?: string
+  // runtime 容器 ID，容器尚未创建或已删除时为空。
   container_id?: string
+  // new-api token 绑定状态，用于控制 API key 操作按钮。
   api_key_status: string
 }
 
+// RuntimeOperationResult 是运行时异步操作的提交结果。
 export interface RuntimeOperationResult {
+  // 后端 job ID；调用方通常把它交给 useJobQuery 轮询。
   job_id: string
+  // 已提交的操作名，如 start / stop / restart / delete。
   operation: string
 }
 
 // RuntimeContainerInfo 与后端 service.RuntimeContainerInfo 字段一致。
 export interface RuntimeContainerInfo {
+  // Docker 容器 ID。
   id: string
+  // Docker 容器名称。
   name: string
+  // 容器镜像名。
   image: string
+  // Docker 返回的运行状态原值。
   status: string
 }
 
@@ -34,41 +56,61 @@ export interface RuntimeContainerInfo {
 // container 在 status=no_container/error 时为空。
 // snapshot 由 scheduler 30s 周期 runtime_refresh_status job 写入；首次未采集时为空。
 export interface RuntimeView {
+  // 前端展示用的运行时状态，包含 no_container / error 等 sentinel。
   status: string
+  // status 指向真实容器时才存在。
   container?: RuntimeContainerInfo
+  // 最近一次采样快照；首次采集前可能为空。
   snapshot?: RuntimeSnapshotView
 }
 
 // RuntimeSnapshotView 与后端 service.RuntimeSnapshotView 字段一一对应。
 // 字节单位：内存与网络都是绝对值；CPU 百分比 = 单核满载 100%，多核可超 100%。
 export interface RuntimeSnapshotView {
+  // CPU 使用率，单核满载为 100%，多核场景可能超过 100。
   cpu_percent: number
+  // 当前内存使用字节数。
   memory_usage_bytes: number
+  // 容器内存限制字节数，0 由展示层按“未限制”处理。
   memory_limit_bytes: number
+  // 网络接收累计字节数。
   network_rx_bytes: number
+  // 网络发送累计字节数。
   network_tx_bytes: number
+  // 后端采集时间。
   collected_at: string
+  // 最近一次采样错误；存在时页面应优先提示异常原因。
   last_error?: string
 }
 
 // JobDTO 描述 jobs API 响应。
 export interface JobDTO {
+  // job 主键，用于轮询详情。
   id: string
+  // job 类型，如 runtime_start / app_delete。
   type: string
+  // job 状态，终态会停止轮询。
   status: 'pending' | 'running' | 'succeeded' | 'failed' | 'canceled'
+  // 已尝试次数。
   attempts: number
+  // 最大尝试次数。
   max_attempts: number
+  // 下次可运行时间，pending 重试场景才有意义。
   run_after?: string
+  // 终态完成时间。
   finished_at?: string
+  // 失败原因，页面直接展示给管理员排障。
   last_error?: string
 }
 
+// 缓存键 helper 统一 mutation 的失效范围，避免散落字符串导致局部页面不刷新。
 const orgKey = (orgId: string | undefined) => ['apps', 'org', orgId] as const
 const appKey = (appId: string | undefined) => ['app', appId] as const
 const runtimeKey = (appId: string | undefined) => ['app-runtime', appId] as const
 const jobKey = (jobId: string | undefined) => ['job', jobId] as const
 
 // useAppsByOrgQuery 列出组织内的应用。
+// orgId 为空时暂停请求；列表缓存按组织隔离，避免切换组织时复用旧数据。
 export function useAppsByOrgQuery(orgId: Ref<string | undefined>) {
   return useQuery<AppDTO[]>({
     queryKey: ['apps', 'org', orgId],
@@ -84,6 +126,7 @@ export function useAppsByOrgQuery(orgId: Ref<string | undefined>) {
 }
 
 // useAppQuery 查询单个应用。
+// appId 为空时返回 null，调用方必须处理详情页初始路由参数尚未就绪的状态。
 export function useAppQuery(appId: Ref<string | undefined>) {
   return useQuery<AppDTO | null>({
     queryKey: ['app', appId],
@@ -112,6 +155,7 @@ export function useAppRuntimeQuery(appId: Ref<string | undefined>) {
 }
 
 // useTriggerRuntimeOperation 触发启动/停止/重启/删除任务。
+// mutation 成功只代表 job 已入队，因此同时失效应用详情与运行时视图，后续由轮询呈现终态。
 export function useTriggerRuntimeOperation(appId: Ref<string | undefined>) {
   const client = useQueryClient()
   return useMutation({
@@ -132,6 +176,7 @@ export function useTriggerRuntimeOperation(appId: Ref<string | undefined>) {
 
 // useToggleAppAPIKey 触发禁用 / 恢复应用绑定的 new-api token。
 // 后端只允许 platform_admin / org_admin；普通成员调用会 403。
+// 操作只影响应用详情中的 api_key_status，不需要刷新运行时快照。
 export function useToggleAppAPIKey(appId: Ref<string | undefined>) {
   const client = useQueryClient()
   return useMutation({
@@ -151,6 +196,7 @@ export function useToggleAppAPIKey(appId: Ref<string | undefined>) {
 
 // useInitializeAppMutation 触发应用初始化重试。
 // 后端在 status ∉ {error, draft} 时返 409，调用方应展示提示。
+// 初始化会重新创建运行时相关资源，因此同时刷新应用详情与 runtime query。
 export function useInitializeAppMutation(appId: Ref<string | undefined>) {
   const client = useQueryClient()
   return useMutation({
@@ -190,6 +236,7 @@ export function useJobQuery(jobId: Ref<string | undefined>) {
 }
 
 // useAppUsageQuery 查询应用维度的 token 用量。
+// context 来自应用拥有者和 new-api key 信息；缺任何一项都不能调用后端薄代理。
 export function useAppUsageQuery(
   appId: Ref<string | undefined>,
   context: Ref<{ orgId: string; ownerUserId: string; newapiKeyId: number } | undefined>,

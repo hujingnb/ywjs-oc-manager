@@ -1,3 +1,5 @@
+// 渠道认证纯函数测试覆盖挑战元数据还原和本地 pending 提示条件。
+// 这些逻辑不依赖 Vue Query，可直接用同步断言验证状态边界。
 import { describe, expect, it } from 'vitest'
 
 import {

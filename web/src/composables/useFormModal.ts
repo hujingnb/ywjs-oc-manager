@@ -1,6 +1,9 @@
+// useFormModal.ts 封装常见表单弹窗的打开、提交、错误和 loading 状态。
+// 调用方负责传入可 JSON clone 的初始值，以及与表单类型匹配的 mutation。
 import { reactive, ref, type Ref } from 'vue'
 import type { UseMutationReturnType } from '@tanstack/vue-query'
 
+// UseFormModalOptions 定义表单弹窗组合式函数的输入契约。
 export interface UseFormModalOptions<TPayload, TResult> {
   // 表单初始值；openForm 每次都会 deep clone 此对象重置 form。
   // 必须是 JSON-serializable 对象（不含 Date / Map / Set / 函数）。
@@ -15,13 +18,21 @@ export interface UseFormModalOptions<TPayload, TResult> {
   toPayload?: (form: TPayload) => TPayload
 }
 
+// UseFormModalReturn 是页面组件直接绑定的弹窗状态和动作。
 export interface UseFormModalReturn<TPayload> {
+  // 控制弹窗显隐。
   formVisible: Ref<boolean>
+  // 响应式表单对象，openForm 会重置为 initial 的深拷贝。
   form: TPayload
+  // 提交中的 loading 状态。
   creating: Ref<boolean>
+  // 最近一次提交错误，成功或重新打开时清空。
   submitError: Ref<string | null>
+  // 打开弹窗并重置表单。
   openForm: () => void
+  // 仅关闭弹窗，不清空表单。
   closeForm: () => void
+  // 提交表单并处理 mutation 成功/失败状态。
   submit: () => Promise<void>
 }
 

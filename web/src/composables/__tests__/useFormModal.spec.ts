@@ -1,3 +1,5 @@
+// useFormModal 组合式函数测试覆盖弹窗生命周期、提交成功/失败和 payload 转换。
+// fake mutation 只模拟 mutateAsync，避免把 TanStack Query 客户端引入单元测试。
 import { describe, expect, it, vi } from 'vitest'
 import { useFormModal } from '../useFormModal'
 

@@ -1,3 +1,5 @@
+// auth store 维护登录用户的内存状态，并协调 token 持久化与会话接口。
+// token 的读写细节在 api/client.ts 中封装，store 只暴露页面需要的角色派生状态。
 import { defineStore } from 'pinia'
 import { computed, ref } from 'vue'
 
@@ -17,11 +19,14 @@ export const useAuthStore = defineStore('auth', () => {
   const loading = ref(false)
   const error = ref<string | null>(null)
 
+  // isAuthenticated 同时要求内存用户和 access token 存在，避免刷新后未拉取 /me 时误判。
   const isAuthenticated = computed(() => Boolean(user.value && getStoredAccessToken()))
+  // 以下角色 computed 只服务页面展示和入口控制，后端仍负责最终授权。
   const isPlatformAdmin = computed(() => user.value?.role === 'platform_admin')
   const isOrgAdmin = computed(() => user.value?.role === 'org_admin')
   const isOrgMember = computed(() => user.value?.role === 'org_member')
 
+  // login 成功后先持久化 token 再写入 user，保证随后的路由跳转能带 Authorization。
   async function login(username: string, password: string): Promise<LoginResult> {
     loading.value = true
     error.value = null
@@ -45,6 +50,8 @@ export const useAuthStore = defineStore('auth', () => {
     }
   }
 
+  // fetchCurrentUser 用现有 access token 恢复当前用户。
+  // token 缺失直接清空 user；接口失败则清理本地 token，让路由守卫回到登录页。
   async function fetchCurrentUser(): Promise<AuthUser | null> {
     if (!getStoredAccessToken()) {
       user.value = null
@@ -62,6 +69,7 @@ export const useAuthStore = defineStore('auth', () => {
     }
   }
 
+  // logout 尽力通知后端失效 refresh token，然后无条件清理本地会话。
   async function logout(): Promise<void> {
     const refreshToken = getStoredRefreshToken()
     if (refreshToken) {
