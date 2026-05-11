@@ -11,9 +11,9 @@ import (
 )
 
 // personaStore 提供 organization_personas 表的查询能力。
-// 因 sqlc 生成目录不可写，这里手写直连 pgx 的 query；保持与 sqlc 风格一致便于后续迁移。
+// 这里手写 create query，是为了在 SQL 内计算下一个 version；sqlc 生成的创建方法需要调用方传入 version。
 type personaStore struct {
-	// pool 承载 persona 专用手写查询；sqlc 补齐后可在这里集中替换实现。
+	// pool 承载 persona 专用手写查询，避免把版本递增规则散落到 service 层。
 	pool *pgxpool.Pool
 }
 
