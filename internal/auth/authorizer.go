@@ -97,26 +97,92 @@ func CanManageOrgPersona(p Principal, orgID string) bool {
 // 以下函数当前与 CanViewApp 等价，按调用上下文命名以便未来差异化。
 
 // CanManageApp 判断主体是否可对应用执行管理写操作（如渠道绑定）。
-// 当前规则与 CanViewApp 等价；保留独立函数为未来差异化预留。
+// 平台管理员只有跨组织观察权限，不继承任何应用写权限；
+// 组织管理员仅能管理本组织应用，组织成员仅能管理自己拥有的应用。
 func CanManageApp(p Principal, appOrgID, appOwnerUserID string) bool {
-	return CanViewApp(p, appOrgID, appOwnerUserID)
+	switch p.Role {
+	case domain.UserRoleOrgAdmin:
+		return p.OrgID == appOrgID
+	case domain.UserRoleOrgMember:
+		return p.UserID == appOwnerUserID
+	default:
+		return false
+	}
+}
+
+// CanReadOrgKnowledge 判断主体是否可读取组织知识库。
+// 组织知识库读取沿用组织读权限：平台管理员可跨组织观察，本组织管理员/成员可读本组织。
+func CanReadOrgKnowledge(p Principal, orgID string) bool {
+	return CanViewOrg(p, orgID)
+}
+
+// CanWriteOrgKnowledge 判断主体是否可写入组织知识库。
+// 组织知识库写入只允许本组织管理员，平台管理员不可绕过组织边界直接写入。
+func CanWriteOrgKnowledge(p Principal, orgID string) bool {
+	return p.Role == domain.UserRoleOrgAdmin && p.OrgID == orgID
+}
+
+// CanRetryOrgKnowledgeSync 判断主体是否可重试组织知识库同步。
+// 同步重试会改变组织知识库状态，因此与组织知识库写权限保持一致。
+func CanRetryOrgKnowledgeSync(p Principal, orgID string) bool {
+	return CanWriteOrgKnowledge(p, orgID)
 }
 
 // CanWriteAppKnowledge 判断主体是否可写入指定应用的知识库。
-// 当前规则与 CanViewApp 等价；保留独立函数为未来差异化预留。
+// 应用知识库写入属于应用写操作，沿用应用管理权限；
+// 平台管理员仍可读，但不能直接写入任意组织应用的知识库。
 func CanWriteAppKnowledge(p Principal, appOrgID, appOwnerUserID string) bool {
-	return CanViewApp(p, appOrgID, appOwnerUserID)
+	return CanManageApp(p, appOrgID, appOwnerUserID)
 }
 
 // CanReadAppKnowledge 判断主体是否可读取指定应用的知识库。
-// 当前规则与 CanViewApp 等价；保留独立函数为未来差异化预留。
+// 应用知识库读取沿用应用读权限，平台管理员保留跨组织观察能力。
 func CanReadAppKnowledge(p Principal, appOrgID, appOwnerUserID string) bool {
 	return CanViewApp(p, appOrgID, appOwnerUserID)
 }
 
 // CanTriggerRuntimeOperation 判断主体是否可对应用触发运行时操作（启停/重启等）。
-// 当前规则与 CanViewApp 等价；调用方需在此之前额外校验 user.status != disabled，
-// disabled 账号不得触发任何运行时操作。
+// 运行时操作会直接影响应用状态，因此沿用应用管理权限；
+// 调用方仍需在此之前额外校验 user.status != disabled，disabled 账号不得触发任何运行时操作。
 func CanTriggerRuntimeOperation(p Principal, appOrgID, appOwnerUserID string) bool {
-	return CanViewApp(p, appOrgID, appOwnerUserID)
+	return CanManageApp(p, appOrgID, appOwnerUserID)
+}
+
+// CanCreateAppForOrg 判断主体是否可在指定组织下创建应用。
+// 当前仅允许本组织管理员通过 onboarding 等入口创建，避免平台管理员绕过组织侧写权限。
+func CanCreateAppForOrg(p Principal, orgID string) bool {
+	return p.Role == domain.UserRoleOrgAdmin && p.OrgID == orgID
+}
+
+// CanViewOrgUsage 判断主体是否可查看组织聚合用量。
+// 组织聚合视角只开放给平台管理员和本组织管理员，普通成员需降级到成员/应用视角。
+func CanViewOrgUsage(p Principal, orgID string) bool {
+	return p.Role == domain.UserRolePlatformAdmin || (p.Role == domain.UserRoleOrgAdmin && p.OrgID == orgID)
+}
+
+// CanViewMemberUsage 判断主体是否可查看成员用量。
+// 平台管理员可跨组织查看，组织管理员仅限本组织，普通成员仅可查看自己的成员维度。
+func CanViewMemberUsage(p Principal, orgID, memberID string) bool {
+	switch p.Role {
+	case domain.UserRolePlatformAdmin:
+		return true
+	case domain.UserRoleOrgAdmin:
+		return p.OrgID == orgID
+	case domain.UserRoleOrgMember:
+		return p.OrgID == orgID && p.UserID == memberID
+	default:
+		return false
+	}
+}
+
+// CanViewOrgAudit 判断主体是否可查看组织审计列表。
+// 组织级审计属于管理面能力，仅平台管理员和本组织管理员可查看。
+func CanViewOrgAudit(p Principal, orgID string) bool {
+	return p.Role == domain.UserRolePlatformAdmin || (p.Role == domain.UserRoleOrgAdmin && p.OrgID == orgID)
+}
+
+// CanViewOwnAudit 判断主体是否可查看“我的审计”视角。
+// 该视角必须能落到具体操作者，因此至少要求主体具备非空 userID。
+func CanViewOwnAudit(p Principal) bool {
+	return p.UserID != ""
 }

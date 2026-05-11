@@ -4,7 +4,7 @@ import (
 	"testing"
 
 	"oc-manager/internal/domain"
-	"github.com/stretchr/testify/require"
+	"github.com/stretchr/testify/assert"
 )
 
 const (
@@ -28,7 +28,7 @@ func runOrgCases(t *testing.T, fn func(Principal, string) bool, cases []orgCase)
 		t.Run(c.name, func(t *testing.T) {
 			p := Principal{UserID: userA, OrgID: c.pOrgID, Role: c.role}
 			got := fn(p, c.targetOrg)
-			require.Equal(t, c.want, got)
+			assert.Equal(t, c.want, got)
 		})
 	}
 }
@@ -77,7 +77,7 @@ func TestCanViewMember(t *testing.T) {
 		t.Run(c.name, func(t *testing.T) {
 			p := Principal{UserID: c.pUserID, OrgID: c.pOrgID, Role: c.role}
 			got := CanViewMember(p, c.targetOrg, c.targetUser)
-			require.Equal(t, c.want, got)
+			assert.Equal(t, c.want, got)
 		})
 	}
 }
@@ -104,7 +104,7 @@ func TestCanEditMember(t *testing.T) {
 		t.Run(c.name, func(t *testing.T) {
 			p := Principal{UserID: c.pUserID, OrgID: c.pOrgID, Role: c.role}
 			got := CanEditMember(p, c.targetOrg, c.targetUser)
-			require.Equal(t, c.want, got)
+			assert.Equal(t, c.want, got)
 		})
 	}
 }
@@ -121,7 +121,7 @@ func TestCanViewApp(t *testing.T) {
 		t.Run(c.name, func(t *testing.T) {
 			p := Principal{UserID: c.pUserID, OrgID: c.pOrgID, Role: c.role}
 			got := CanViewApp(p, c.targetOrg, c.targetUser)
-			require.Equal(t, c.want, got)
+			assert.Equal(t, c.want, got)
 		})
 	}
 }
@@ -154,14 +154,14 @@ func runAppCases(t *testing.T, fn func(Principal, string, string) bool, cases []
 		t.Run(c.name, func(t *testing.T) {
 			p := Principal{UserID: c.pUserID, OrgID: c.pOrgID, Role: c.role}
 			got := fn(p, c.targetOrg, c.targetUser)
-			require.Equal(t, c.want, got)
+			assert.Equal(t, c.want, got)
 		})
 	}
 }
 
 func TestCanManageApp(t *testing.T) {
 	cases := []memberCase{
-		{"platform_admin 跨组织可管应用", domain.UserRolePlatformAdmin, orgA, userA, orgB, userB, true},
+		{"platform_admin 跨组织不可管应用", domain.UserRolePlatformAdmin, orgA, userA, orgB, userB, false},
 		{"org_admin 同组织可管应用", domain.UserRoleOrgAdmin, orgA, userA, orgA, userB, true},
 		{"org_admin 跨组织不可管", domain.UserRoleOrgAdmin, orgA, userA, orgB, userB, false},
 		{"org_member 仅可管自己应用", domain.UserRoleOrgMember, orgA, userA, orgA, userA, true},
@@ -170,9 +170,30 @@ func TestCanManageApp(t *testing.T) {
 	runAppCases(t, CanManageApp, cases)
 }
 
+func TestOrgKnowledgePredicates(t *testing.T) {
+	readCases := []orgCase{
+		{"platform_admin 跨组织可读组织知识库", domain.UserRolePlatformAdmin, orgA, orgB, true},
+		{"org_admin 同组织可读组织知识库", domain.UserRoleOrgAdmin, orgA, orgA, true},
+		{"org_admin 跨组织不可读组织知识库", domain.UserRoleOrgAdmin, orgA, orgB, false},
+		{"org_member 同组织可读组织知识库", domain.UserRoleOrgMember, orgA, orgA, true},
+		{"org_member 跨组织不可读组织知识库", domain.UserRoleOrgMember, orgA, orgB, false},
+	}
+	runOrgCases(t, CanReadOrgKnowledge, readCases)
+
+	writeCases := []orgCase{
+		{"platform_admin 不可写组织知识库", domain.UserRolePlatformAdmin, orgA, orgB, false},
+		{"org_admin 同组织可写组织知识库", domain.UserRoleOrgAdmin, orgA, orgA, true},
+		{"org_admin 跨组织不可写组织知识库", domain.UserRoleOrgAdmin, orgA, orgB, false},
+		{"org_member 同组织不可写组织知识库", domain.UserRoleOrgMember, orgA, orgA, false},
+		{"org_member 跨组织不可写组织知识库", domain.UserRoleOrgMember, orgA, orgB, false},
+	}
+	runOrgCases(t, CanWriteOrgKnowledge, writeCases)
+	runOrgCases(t, CanRetryOrgKnowledgeSync, writeCases)
+}
+
 func TestCanWriteAppKnowledge(t *testing.T) {
 	cases := []memberCase{
-		{"platform_admin 跨组织可写知识库", domain.UserRolePlatformAdmin, orgA, userA, orgB, userB, true},
+		{"platform_admin 跨组织不可写应用知识库", domain.UserRolePlatformAdmin, orgA, userA, orgB, userB, false},
 		{"org_admin 同组织可写知识库", domain.UserRoleOrgAdmin, orgA, userA, orgA, userB, true},
 		{"org_admin 跨组织不可写", domain.UserRoleOrgAdmin, orgA, userA, orgB, userB, false},
 		{"org_member 仅可写自己应用知识库", domain.UserRoleOrgMember, orgA, userA, orgA, userA, true},
@@ -194,11 +215,71 @@ func TestCanReadAppKnowledge(t *testing.T) {
 
 func TestCanTriggerRuntimeOperation(t *testing.T) {
 	cases := []memberCase{
-		{"platform_admin 跨组织可触发运行操作", domain.UserRolePlatformAdmin, orgA, userA, orgB, userB, true},
+		{"platform_admin 跨组织不可触发运行操作", domain.UserRolePlatformAdmin, orgA, userA, orgB, userB, false},
 		{"org_admin 同组织可触发运行操作", domain.UserRoleOrgAdmin, orgA, userA, orgA, userB, true},
 		{"org_admin 跨组织不可触发", domain.UserRoleOrgAdmin, orgA, userA, orgB, userB, false},
 		{"org_member 仅可触发自己应用的运行操作", domain.UserRoleOrgMember, orgA, userA, orgA, userA, true},
 		{"org_member 不可触发他人应用的运行操作", domain.UserRoleOrgMember, orgA, userA, orgA, userB, false},
 	}
 	runAppCases(t, CanTriggerRuntimeOperation, cases)
+}
+
+func TestCanCreateAppForOrg(t *testing.T) {
+	cases := []orgCase{
+		{"platform_admin 不可为任意组织创建应用", domain.UserRolePlatformAdmin, orgA, orgA, false},
+		{"org_admin 同组织可创建应用", domain.UserRoleOrgAdmin, orgA, orgA, true},
+		{"org_admin 跨组织不可创建应用", domain.UserRoleOrgAdmin, orgA, orgB, false},
+		{"org_member 同组织不可创建应用", domain.UserRoleOrgMember, orgA, orgA, false},
+	}
+	runOrgCases(t, CanCreateAppForOrg, cases)
+}
+
+func TestCanViewOrgUsage(t *testing.T) {
+	cases := []orgCase{
+		{"platform_admin 跨组织可看组织用量", domain.UserRolePlatformAdmin, orgA, orgB, true},
+		{"org_admin 同组织可看组织用量", domain.UserRoleOrgAdmin, orgA, orgA, true},
+		{"org_admin 跨组织不可看组织用量", domain.UserRoleOrgAdmin, orgA, orgB, false},
+		{"org_member 同组织不可看组织用量", domain.UserRoleOrgMember, orgA, orgA, false},
+	}
+	runOrgCases(t, CanViewOrgUsage, cases)
+}
+
+func TestCanViewMemberUsage(t *testing.T) {
+	cases := []memberCase{
+		{"platform_admin 可看任意成员用量", domain.UserRolePlatformAdmin, orgA, userA, orgB, userB, true},
+		{"org_admin 同组织可看成员用量", domain.UserRoleOrgAdmin, orgA, userA, orgA, userB, true},
+		{"org_admin 跨组织不可看成员用量", domain.UserRoleOrgAdmin, orgA, userA, orgB, userB, false},
+		{"org_member 仅可看自己成员用量", domain.UserRoleOrgMember, orgA, userA, orgA, userA, true},
+		{"org_member 不可看他人成员用量", domain.UserRoleOrgMember, orgA, userA, orgA, userB, false},
+	}
+	runAppCases(t, CanViewMemberUsage, cases)
+}
+
+func TestCanViewOrgAudit(t *testing.T) {
+	cases := []orgCase{
+		{"platform_admin 跨组织可看组织审计", domain.UserRolePlatformAdmin, orgA, orgB, true},
+		{"org_admin 同组织可看组织审计", domain.UserRoleOrgAdmin, orgA, orgA, true},
+		{"org_admin 跨组织不可看组织审计", domain.UserRoleOrgAdmin, orgA, orgB, false},
+		{"org_member 同组织不可看组织审计", domain.UserRoleOrgMember, orgA, orgA, false},
+	}
+	runOrgCases(t, CanViewOrgAudit, cases)
+}
+
+func TestCanViewOwnAudit(t *testing.T) {
+	cases := []struct {
+		name string
+		p    Principal
+		want bool
+	}{
+		{"platform_admin 有 userID 可看自己的审计", Principal{UserID: userA, Role: domain.UserRolePlatformAdmin}, true},
+		{"org_admin 有 userID 可看自己的审计", Principal{UserID: userA, OrgID: orgA, Role: domain.UserRoleOrgAdmin}, true},
+		{"org_member 有 userID 可看自己的审计", Principal{UserID: userA, OrgID: orgA, Role: domain.UserRoleOrgMember}, true},
+		{"空 userID 不可看自己的审计", Principal{Role: domain.UserRoleOrgMember, OrgID: orgA}, false},
+	}
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			got := CanViewOwnAudit(c.p)
+			assert.Equal(t, c.want, got)
+		})
+	}
 }
