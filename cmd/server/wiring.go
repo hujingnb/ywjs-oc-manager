@@ -356,7 +356,7 @@ type knowledgeSyncJobInput struct {
 	ChangeType string
 	// RelPath 是相对知识库根目录的安全路径，不能直接当宿主机绝对路径使用。
 	RelPath string
-	// MasterPath 是 manager 主副本中的文件路径，worker 仅通过 agent API 读取同步内容。
+	// MasterPath 是 manager 主副本中的本地文件路径；worker 从本地读取后再通过 agent API 写入节点。
 	MasterPath string
 }
 

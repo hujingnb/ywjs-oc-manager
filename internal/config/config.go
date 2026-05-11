@@ -151,9 +151,9 @@ type RuntimeConfig struct {
 type RuntimeProbeConfig struct {
 	// IntervalSeconds 是探测循环间隔，0 会在 applyDefaults 中填入默认值。
 	IntervalSeconds int `yaml:"interval_seconds"`
-	// TimeoutSeconds 是单次 agent 探测超时，必须小于探测间隔以避免堆积。
+	// TimeoutSeconds 是单次 agent 探测超时；如需避免探测堆积，应按 IntervalSeconds 保守配置。
 	TimeoutSeconds int `yaml:"timeout_seconds"`
-	// FailureThreshold 是连续失败多少次后把节点标记为 unreachable/degraded。
+	// FailureThreshold 是主动探测连续失败多少次后把节点标记为 degraded；unreachable 由心跳超时路径负责。
 	FailureThreshold int `yaml:"failure_threshold"`
 	// RecoveryThreshold 是连续成功多少次后把节点恢复为 active。
 	RecoveryThreshold int `yaml:"recovery_threshold"`
