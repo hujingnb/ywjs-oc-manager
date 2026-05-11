@@ -20,10 +20,14 @@ func CanManageOrg(p Principal, orgID string) bool {
 
 // CanViewOrg 判断主体能否查看指定组织内的资源（读路径）。
 func CanViewOrg(p Principal, orgID string) bool {
-	if p.Role == domain.UserRolePlatformAdmin {
+	switch p.Role {
+	case domain.UserRolePlatformAdmin:
 		return true
+	case domain.UserRoleOrgAdmin, domain.UserRoleOrgMember:
+		return p.OrgID == orgID
+	default:
+		return false
 	}
-	return p.OrgID == orgID
 }
 
 // 成员资源 ----------------------------------------------------------
@@ -60,7 +64,12 @@ func CanEditMember(p Principal, memberOrgID, memberUserID string) bool {
 	if CanManageMember(p, memberOrgID) {
 		return true
 	}
-	return p.UserID == memberUserID
+	switch p.Role {
+	case domain.UserRoleOrgAdmin, domain.UserRoleOrgMember, domain.UserRolePlatformAdmin:
+		return p.UserID == memberUserID
+	default:
+		return false
+	}
 }
 
 // 应用资源 ----------------------------------------------------------

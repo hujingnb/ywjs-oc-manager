@@ -51,6 +51,7 @@ func TestCanViewOrg(t *testing.T) {
 		{"org_admin 跨组织不可读", domain.UserRoleOrgAdmin, orgA, orgB, false},
 		{"org_member 同组织可读", domain.UserRoleOrgMember, orgA, orgA, true},
 		{"org_member 跨组织不可读", domain.UserRoleOrgMember, orgA, orgB, false},
+		{"未知角色同组织不可读", "unknown", orgA, orgA, false},
 	}
 	runOrgCases(t, CanViewOrg, cases)
 }
@@ -99,6 +100,7 @@ func TestCanEditMember(t *testing.T) {
 		{"org_admin 跨组织不可编辑", domain.UserRoleOrgAdmin, orgA, userA, orgB, userB, false},
 		{"org_member 仅可编辑自己", domain.UserRoleOrgMember, orgA, userA, orgA, userA, true},
 		{"org_member 不可编辑他人", domain.UserRoleOrgMember, orgA, userA, orgA, userB, false},
+		{"未知角色即使命中本人也不可编辑", "unknown", orgA, userA, orgB, userA, false},
 	}
 	for _, c := range cases {
 		t.Run(c.name, func(t *testing.T) {
