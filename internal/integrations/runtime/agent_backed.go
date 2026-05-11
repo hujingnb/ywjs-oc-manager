@@ -378,8 +378,8 @@ func (a *AgentBackedAdapter) ArchiveApp(ctx context.Context, nodeID, appID strin
 // Sprint 0 实测：上游 OpenClaw 启动后约 10~12 秒才完成 plugin 加载并暴露 /healthz；
 // 之前 plugin loading 期间 curl 返回 connection refused 或非 2xx。
 //
-// 重试策略：从 startWaitSeconds 开始等候首次探测，之后按 stepSeconds 递增间隔
-// 直到 totalTimeout 或拿到 0 退出。每次 exec 单独 timeout 5s，避免单次 docker exec 阻塞。
+// 重试策略：先等待 startWaitSeconds，再最多探测 probeMaxAttempts 次；
+// 每次失败后固定等待 probeStepSeconds，单次 exec 单独 timeout 5s，避免 docker exec 长时间阻塞。
 //
 // 返回 nil 表示 healthy；非 nil 表示在窗口内未达 healthy。该错误不视为致命，
 // 调用方（如 app_initialize handler）可自行决定 retry 或推进到 binding_waiting。
@@ -388,7 +388,7 @@ func (a *AgentBackedAdapter) WaitForOpenClawHealthy(ctx context.Context, nodeID,
 		probeURL          = "http://127.0.0.1:18789/healthz"
 		startWaitSeconds  = 8 // plugin loading 实测 ~11s，先等 8s 再开始探测
 		probeStepSeconds  = 4
-		probeMaxAttempts  = 10 // 8 + 4*9 = 44s 总窗口，覆盖 plugin loading 上限
+		probeMaxAttempts  = 10 // 最多探测次数；每轮失败后仍会按固定间隔等待或响应 ctx 取消。
 		probeExecTimeoutS = 5
 	)
 	cli, err := a.dockerClient(ctx, nodeID)

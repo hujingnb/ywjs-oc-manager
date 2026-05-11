@@ -114,7 +114,8 @@ func (w *Worker) processJobID(ctx context.Context, id string) error {
 		// 来自队列的 jobID 可能已经被其他 worker 处理；幂等地跳过。
 		return nil
 	}
-	// MarkJobRunning 在 SQL 层带 pending 条件，多个 worker 同时抢到同一个 jobID 时只有一个能成功推进。
+	// 并发去重主要依赖队列层 Reserve 的 ZREM/内存弹出语义；MarkJobRunning 按 id 更新 locked_by，
+	// SQL 本身不再额外校验 status=pending，因此这里先读状态再推进。
 	running, err := w.store.MarkJobRunning(ctx, sqlc.MarkJobRunningParams{
 		ID:       job.ID,
 		LockedBy: pgtype.Text{String: w.cfg.WorkerID, Valid: true},

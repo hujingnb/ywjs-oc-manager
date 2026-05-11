@@ -29,7 +29,7 @@ var ErrQueueClosed = errors.New("redis queue 已关闭")
 
 // RedisQueue 是基于 Redis ZSET 的队列实现。
 // 使用单一 ZSET：member 为 jobID，score 为可执行时间（毫秒）。
-// Reserve 通过 ZRANGEBYSCORE+ZREM 原子取出并删除，避免重复消费。
+// Reserve 先 ZRANGEBYSCORE 读取候选，再逐个 ZREM；只有 ZREM 返回 1 的成员才算抢到。
 type RedisQueue struct {
 	client *redis.Client
 	key    string
@@ -95,8 +95,8 @@ func (q *RedisQueue) EnqueueDelayed(ctx context.Context, jobID string, runAfter 
 }
 
 // Reserve 弹出当前可执行的 jobID。
-// 实现使用 ZRANGEBYSCORE+ZREM 的 pipeline：先列出，再逐个 ZREM；ZREM 返回 1 才视为本节点抢到。
-// 这样多副本 worker 同时调用时只会有一个拿到具体 jobID。
+// 实现不是 Redis 事务或 pipeline：多副本 worker 可能读到同一批候选，
+// 但只有成功删除成员的调用方会返回该 jobID，从而降低重复消费风险。
 func (q *RedisQueue) Reserve(ctx context.Context, limit int) ([]string, error) {
 	if q.client == nil {
 		return nil, ErrQueueClosed
@@ -173,7 +173,7 @@ func (q *MemoryQueue) add(jobID string, runAfter time.Time) error {
 	defer q.mu.Unlock()
 	for _, entry := range q.entries {
 		if entry.jobID == jobID {
-			// 与 Redis ZADD 默认语义保持一致：同一 jobID 重复入队不会产生多个成员。
+			// 内存队列只保持“同一 jobID 不重复出现”的行为；不同于 Redis ZADD，这里不会更新已有 score。
 			return nil
 		}
 	}
