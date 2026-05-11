@@ -47,7 +47,7 @@ const auth = useAuthStore()
 const app = inject<Ref<AppDTO | null>>('app')
 
 // knowledgeContext 将应用归属转换为知识库 API 需要的组织、所有者和相对路径。
-// app 未加载完成时返回 undefined，相关查询和 mutation 会等待上下文具备后执行。
+// app 未加载完成时返回 undefined；页面通过 UI guard 避免常规用户操作提前触发，hook 被无上下文调用时仍会防御性抛错。
 const knowledgeContext = computed(() => {
   if (!app?.value) return undefined
   return {

@@ -126,7 +126,7 @@ watch(
   },
 )
 
-// beginAuth 发起渠道登录 mutation；成功后保存挑战，失败交由 mutation/error 边界显示。
+// beginAuth 发起渠道登录 mutation；成功后保存挑战，渠道侧失败由进度轮询暴露 error_message，mutation 传输错误仍会冒泡到调用方或控制台。
 async function beginAuth() {
   if (!canManage.value) return
   beginning.value = true

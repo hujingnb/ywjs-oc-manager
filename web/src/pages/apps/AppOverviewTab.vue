@@ -136,7 +136,7 @@ async function onRetryInit() {
   }
 }
 
-// canToggleKey 控制 API key 启停按钮展示，避免非管理者看到危险操作入口。
+// canToggleKey 沿用应用管理权限控制 API key 启停入口；后端和 mutation 仍可能执行更严格的 API key 权限校验。
 const canToggleKey = computed(() => canManageApp(auth.user, app?.value))
 
 const keyMutation = useToggleAppAPIKey(appId)
