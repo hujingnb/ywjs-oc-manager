@@ -1,3 +1,4 @@
+// Package domain 的枚举测试覆盖已登记值和未知值，防止业务字符串漂移。
 package domain
 
 import (

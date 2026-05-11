@@ -1,8 +1,9 @@
+// Package domain 的应用状态机测试覆盖合法路径、非法倒退和终态约束。
 package domain
 
 import (
-	"testing"
 	"github.com/stretchr/testify/require"
+	"testing"
 )
 
 func TestIsAppTransitionAllowedHappyPath(t *testing.T) {

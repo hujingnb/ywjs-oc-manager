@@ -31,6 +31,7 @@ func main() {
 	if len(os.Args) < 3 {
 		log.Fatalf("用法: seed-admin <username> <password> [display_name]")
 	}
+	// username/password 来自一次性运维命令参数；只在进程内用于生成 Argon2id hash，不写明文。
 	username := os.Args[1]
 	password := os.Args[2]
 	displayName := username

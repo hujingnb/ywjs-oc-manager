@@ -344,16 +344,24 @@ func (d *knowledgeSyncDispatcher) DispatchAppChange(ctx context.Context, orgID, 
 }
 
 type knowledgeSyncJobInput struct {
-	Scope      string
-	OrgID      string
-	AppID      string
-	NodeID     string
+	// Scope 区分 org/app 同步范围，worker 依此选择目标知识库目录。
+	Scope string
+	// OrgID 是知识库同步的组织边界，所有 job 都必须携带。
+	OrgID string
+	// AppID 仅在 Scope=app 时有效，用于定位应用知识库目录。
+	AppID string
+	// NodeID 是目标 runtime node，dispatcher 已在入队前完成路由选择。
+	NodeID string
+	// ChangeType 表示 upload/delete/noop，worker 依此选择同步动作。
 	ChangeType string
-	RelPath    string
+	// RelPath 是相对知识库根目录的安全路径，不能直接当宿主机绝对路径使用。
+	RelPath string
+	// MasterPath 是 manager 主副本中的文件路径，worker 仅通过 agent API 读取同步内容。
 	MasterPath string
 }
 
 func (d *knowledgeSyncDispatcher) enqueue(ctx context.Context, input knowledgeSyncJobInput) error {
+	// payload 字段名是 worker handler 的契约，不能随意改名，否则旧任务会无法解析。
 	payload := map[string]any{
 		"scope":       input.Scope,
 		"org_id":      input.OrgID,
@@ -565,10 +573,15 @@ func (a appDirInitializerAdapter) InitAppDirs(ctx context.Context, nodeID, appID
 //
 // 第一版没有事务包装：FOR UPDATE 在隐式自动提交场景下退化为普通 SELECT。
 type orgCredentialsRefresher struct {
-	store    *sqlc.Queries
-	cipher   *auth.Cipher
-	client   *newapi.Client
-	orgID    pgtype.UUID
+	// store 用于读取/写回组织凭据密文。
+	store *sqlc.Queries
+	// cipher 用于解密旧凭据和加密新 access_token。
+	cipher *auth.Cipher
+	// client 是 admin/base 视角 new-api client，用于重新换取组织用户 access_token。
+	client *newapi.Client
+	// orgID 标识当前刷新器绑定的组织，避免跨组织写回凭据。
+	orgID pgtype.UUID
+	// username/password 是组织在 new-api 中的登录凭据，只保留在内存中用于刷新 access_token。
 	username string
 	password string
 }

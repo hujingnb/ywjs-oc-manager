@@ -1,3 +1,4 @@
+// Package auth 提供 manager 登录认证、密码哈希、令牌签发与敏感字段加密等安全原语。
 package auth
 
 import (
@@ -19,6 +20,7 @@ import (
 // 该原语仅用于 manager 进程内：app 的 newapi key、agent token 等敏感字段加密入库。
 // 不要把同一份 master_key 复用到外部组件，避免横向影响面扩大。
 type Cipher struct {
+	// aead 持有 AES-GCM 实例；同一个 Cipher 可复用，但 master_key 不应跨系统共享。
 	aead cipher.AEAD
 }
 

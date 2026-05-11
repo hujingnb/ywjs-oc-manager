@@ -1,3 +1,4 @@
+// Package auth 提供 manager 登录认证、密码哈希、令牌签发与敏感字段加密等安全原语。
 package auth
 
 import (
@@ -13,20 +14,26 @@ import (
 )
 
 const (
-	TokenTypeAccess  = "access"
+	// TokenTypeAccess 标记短期访问令牌，只能用 access secret 校验。
+	TokenTypeAccess = "access"
+	// TokenTypeRefresh 标记续期令牌，只能用 refresh secret 校验并入库保存 hash。
 	TokenTypeRefresh = "refresh"
 )
 
 // Principal 是认证后的用户身份快照。
 // 权限判断必须继续在 service 层结合资源归属校验，不能只依赖 token 中的角色。
 type Principal struct {
+	// UserID 是认证主体的用户 ID，作为审计和“本人”权限判断的身份来源。
 	UserID string `json:"sub"`
-	OrgID  string `json:"org_id,omitempty"`
-	Role   string `json:"role"`
+	// OrgID 是用户所属组织；平台管理员可为空，组织角色必须结合资源组织再次校验。
+	OrgID string `json:"org_id,omitempty"`
+	// Role 是令牌签发时的角色快照，权限谓词仍需结合资源归属防止越权。
+	Role string `json:"role"`
 }
 
 type tokenClaims struct {
 	Principal
+	// Type 区分 access/refresh，防止 refresh token 被误用到 API 访问路径。
 	Type      string `json:"typ"`
 	ExpiresAt int64  `json:"exp"`
 	IssuedAt  int64  `json:"iat"`
@@ -35,11 +42,16 @@ type tokenClaims struct {
 // TokenManager 负责签发和验证 HMAC-SHA256 JWT。
 // 这里不引入大型 JWT 依赖，保持签名算法和 claims 结构显式可审计。
 type TokenManager struct {
-	accessSecret  []byte
+	// accessSecret 只签发短期 access token，不能与 refreshSecret 共用。
+	accessSecret []byte
+	// refreshSecret 只签发 refresh token，泄露影响面必须与 access token 隔离。
 	refreshSecret []byte
-	accessTTL     time.Duration
-	refreshTTL    time.Duration
-	now           func() time.Time
+	// accessTTL 控制 API 访问令牌有效期，通常短于 refreshTTL。
+	accessTTL time.Duration
+	// refreshTTL 控制续期令牌有效期，service 层会用它计算持久化过期时间。
+	refreshTTL time.Duration
+	// now 允许测试固定时间，生产路径使用 time.Now。
+	now func() time.Time
 }
 
 // NewTokenManager 创建令牌管理器。
@@ -85,6 +97,7 @@ func (m *TokenManager) RefreshTTL() time.Duration {
 }
 
 func (m *TokenManager) sign(principal Principal, tokenType string, ttl time.Duration, secret []byte) (string, error) {
+	// token 中必须至少包含用户和角色；资源组织权限仍由 authorizer 在业务层二次校验。
 	if principal.UserID == "" || principal.Role == "" {
 		return "", errors.New("token principal 不完整")
 	}
@@ -117,6 +130,7 @@ func (m *TokenManager) verify(token string, expectedType string, secret []byte) 
 		return Principal{}, errors.New("token 格式错误")
 	}
 
+	// 先验签再解析 claims，避免处理攻击者伪造的 payload。
 	expectedSignature := signHMAC(parts[0]+"."+parts[1], secret)
 	if !hmac.Equal([]byte(expectedSignature), []byte(parts[2])) {
 		return Principal{}, errors.New("token 签名无效")

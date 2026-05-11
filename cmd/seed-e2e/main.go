@@ -32,18 +32,24 @@ import (
 //     因此这里使用 string 而不是 plan 草稿里的 int64。
 //   - AppID 同样是 uuid。
 type fixture struct {
+	// PlatformAdminLogin/Password 是 Playwright 全局登录用的固定平台管理员账密。
 	PlatformAdminLogin    string `json:"platform_admin_login"`
 	PlatformAdminPassword string `json:"platform_admin_password"`
-	OrgID                 string `json:"org_id"`
-	OrgName               string `json:"org_name"`
-	NodeID                string `json:"node_id"`
-	NodeName              string `json:"node_name"`
-	OrgAdminLogin         string `json:"org_admin_login"`
-	OrgAdminPassword      string `json:"org_admin_password"`
-	OrgMemberLogin        string `json:"org_member_login"`
-	OrgMemberPassword     string `json:"org_member_password"`
-	AppID                 string `json:"app_id"`
-	AppName               string `json:"app_name"`
+	// OrgID/OrgName 标识本次 e2e 组织边界，成员、应用和知识库用例都依赖它。
+	OrgID   string `json:"org_id"`
+	OrgName string `json:"org_name"`
+	// NodeID/NodeName 标识占位 runtime node，e2e 不真实连接 agent。
+	NodeID   string `json:"node_id"`
+	NodeName string `json:"node_name"`
+	// OrgAdminLogin/Password 是组织管理员固定账密，用于覆盖组织级管理能力。
+	OrgAdminLogin    string `json:"org_admin_login"`
+	OrgAdminPassword string `json:"org_admin_password"`
+	// OrgMemberLogin/Password 是普通成员固定账密，用于覆盖成员权限边界。
+	OrgMemberLogin    string `json:"org_member_login"`
+	OrgMemberPassword string `json:"org_member_password"`
+	// AppID/AppName 标识预置 running 应用，用于渠道、运行态和权限用例。
+	AppID   string `json:"app_id"`
+	AppName string `json:"app_name"`
 }
 
 func main() {

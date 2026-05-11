@@ -85,6 +85,7 @@ func runManager(ctx context.Context, cfg config.Config, logOut io.Writer) error 
 	if err != nil {
 		return fmt.Errorf("master_key base64 解码失败: %w", err)
 	}
+	// master_key 是所有落库密文的根密钥；长度校验交给 auth.NewCipher，失败则禁止继续启动。
 	cipher, err := auth.NewCipher(masterKey)
 	if err != nil {
 		return fmt.Errorf("初始化 cipher 失败: %w", err)
@@ -358,6 +359,7 @@ func runManager(ctx context.Context, cfg config.Config, logOut io.Writer) error 
 	eg.Go(func() error {
 		<-gctx.Done()
 		shutdownCtx, shutdownCancel := context.WithTimeout(context.Background(), 30*time.Second)
+		// HTTP server 单独使用独立 timeout，避免上游 ctx 已取消导致 Shutdown 无法给连接留清理时间。
 		defer shutdownCancel()
 		_ = server.Shutdown(shutdownCtx)
 		return nil

@@ -1,15 +1,17 @@
+// Package auth 的测试覆盖密码、令牌和加密原语的安全边界，不依赖数据库或外部服务。
 package auth
 
 import (
 	"bytes"
 	"encoding/base64"
+	"github.com/stretchr/testify/require"
 	"strings"
 	"testing"
-	"github.com/stretchr/testify/require"
 )
 
 func newTestKey(t *testing.T) []byte {
 	t.Helper()
+	// 固定 32 字节 key 只用于测试可重复性，不代表生产密钥生成方式。
 	key := make([]byte, 32)
 	for i := range key {
 		key[i] = byte(i)

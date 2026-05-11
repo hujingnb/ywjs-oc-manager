@@ -1,3 +1,4 @@
+// Package config 的测试覆盖 YAML 解析、必需项校验和安全密钥格式。
 package config
 
 import (

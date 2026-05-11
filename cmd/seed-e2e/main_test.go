@@ -1,3 +1,4 @@
+// Package main 的 e2e 种子测试只校验危险命令守门，不连接数据库。
 package main
 
 import (

@@ -1,3 +1,4 @@
+// Package main 的 server 测试覆盖启动前 fail-fast 路径，避免进入外部依赖连接。
 package main
 
 import (

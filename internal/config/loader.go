@@ -1,3 +1,4 @@
+// Package config 负责加载 manager YAML 配置、解析持续时间并在进程启动前执行必需项校验。
 package config
 
 import (
@@ -20,6 +21,7 @@ func LoadFile(path string) (Config, error) {
 
 	var cfg Config
 	decoder := yaml.NewDecoder(bytes.NewReader(content))
+	// KnownFields 让拼错的 yaml key 在启动阶段报错，避免安全配置或外部依赖地址被静默忽略。
 	decoder.KnownFields(true)
 	if err := decoder.Decode(&cfg); err != nil {
 		return Config{}, fmt.Errorf("解析配置文件失败: %w", err)

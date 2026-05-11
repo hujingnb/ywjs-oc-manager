@@ -86,12 +86,12 @@ type APIKeyTransition struct {
 }
 
 var apiKeyTransitions = map[APIKeyTransition]struct{}{
-	{From: APIKeyStatusPending, To: APIKeyStatusActive}:   {},
-	{From: APIKeyStatusPending, To: APIKeyStatusError}:    {},
-	{From: APIKeyStatusActive, To: APIKeyStatusDisabled}:  {},
-	{From: APIKeyStatusActive, To: APIKeyStatusError}:     {},
-	{From: APIKeyStatusDisabled, To: APIKeyStatusActive}:  {},
-	{From: APIKeyStatusError, To: APIKeyStatusPending}:    {},
+	{From: APIKeyStatusPending, To: APIKeyStatusActive}:  {},
+	{From: APIKeyStatusPending, To: APIKeyStatusError}:   {},
+	{From: APIKeyStatusActive, To: APIKeyStatusDisabled}: {},
+	{From: APIKeyStatusActive, To: APIKeyStatusError}:    {},
+	{From: APIKeyStatusDisabled, To: APIKeyStatusActive}: {},
+	{From: APIKeyStatusError, To: APIKeyStatusPending}:   {},
 }
 
 // IsAPIKeyTransitionAllowed 判断 api_key 状态切换是否合法。

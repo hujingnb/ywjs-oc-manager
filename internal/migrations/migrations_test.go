@@ -1,15 +1,17 @@
+// Package migrations 的测试只校验 embed.FS 内容，不连接真实数据库。
 package migrations
 
 import (
+	"github.com/stretchr/testify/require"
 	"io/fs"
 	"strings"
 	"testing"
-	"github.com/stretchr/testify/require"
 )
 
 func TestFS_ContainsUpAndDownPairs(t *testing.T) {
 	entries, err := fs.ReadDir(FS, ".")
 	require.NoError(t, err)
+	// 每个 up 迁移都必须有同版本 down 文件，保证 cmd/migrate down 可回退一个版本。
 	ups := make(map[string]struct{})
 	downs := make(map[string]struct{})
 	for _, e := range entries {

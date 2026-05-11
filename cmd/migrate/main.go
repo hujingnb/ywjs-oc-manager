@@ -23,6 +23,7 @@ func main() {
 }
 
 func run(args []string) error {
+	// 迁移命令只接受显式方向，避免默认执行 up/down 带来不可预期的 schema 变更。
 	if len(args) != 1 || (args[0] != "up" && args[0] != "down") {
 		return errors.New("用法: migrate [up|down]")
 	}
@@ -73,6 +74,7 @@ func loadDatabaseURL() (string, error) {
 	if configPath == "" {
 		configPath = "config/manager.yaml"
 	}
+	// 迁移只从 manager 配置读 database.url，不读取 DATABASE_URL，避免本地环境变量误指向其他库。
 	cfg, err := config.LoadFile(configPath)
 	if err != nil {
 		return "", err

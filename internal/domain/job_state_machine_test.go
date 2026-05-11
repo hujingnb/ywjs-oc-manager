@@ -1,8 +1,9 @@
+// Package domain 的任务状态机测试覆盖调度器允许的重试、取消和终态约束。
 package domain
 
 import (
-	"testing"
 	"github.com/stretchr/testify/require"
+	"testing"
 )
 
 func TestIsJobTransitionAllowedValid(t *testing.T) {

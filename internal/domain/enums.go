@@ -1,17 +1,21 @@
+// Package domain 集中定义跨 handler、service、worker 共享的业务枚举和状态机约束。
 package domain
 
 // 业务枚举统一放在 domain 层，避免 handler、service、worker 各自散落硬编码字符串。
 // 数据库仍通过 CHECK 约束兜底；这些常量用于进入数据库前的业务校验和状态机判断。
 
 const (
+	// 用户角色按平台、组织管理、组织成员三层授权；权限谓词集中在 internal/auth/authorizer.go。
 	UserRolePlatformAdmin = "platform_admin"
 	UserRoleOrgAdmin      = "org_admin"
 	UserRoleOrgMember     = "org_member"
 
+	// 通用状态用于 users / organizations 等基础资源；users.deleted_at 语义是下线时间戳。
 	StatusActive   = "active"
 	StatusDisabled = "disabled"
 	StatusDeleted  = "deleted"
 
+	// AppStatus* 描述应用生命周期，合法转移由 app_state_machine.go 维护。
 	AppStatusDraft          = "draft"
 	AppStatusInitializing   = "initializing"
 	AppStatusBindingWaiting = "binding_waiting"
@@ -21,22 +25,27 @@ const (
 	AppStatusError          = "error"
 	AppStatusDeleted        = "deleted"
 
+	// PersonaMode* 控制应用使用组织继承人设还是应用级覆盖人设。
 	PersonaModeOrgInherited = "org_inherited"
 	PersonaModeAppOverride  = "app_override"
 
+	// APIKeyStatus* 描述 new-api token 生命周期，独立于 app.status。
 	APIKeyStatusPending  = "pending"
 	APIKeyStatusActive   = "active"
 	APIKeyStatusDisabled = "disabled"
 	APIKeyStatusError    = "error"
 
+	// RuntimeNodeStatus* 描述 runtime agent 注册、心跳和主动探测后的节点状态。
 	RuntimeNodeStatusPending     = "pending"
 	RuntimeNodeStatusActive      = "active"
 	RuntimeNodeStatusUnreachable = "unreachable"
 	RuntimeNodeStatusDisabled    = "disabled"
 	RuntimeNodeStatusDegraded    = "degraded"
 
+	// ChannelTypeWeChat 是当前唯一落地的渠道类型。
 	ChannelTypeWeChat = "wechat"
 
+	// ChannelStatus* 描述渠道绑定流程和用户主动解绑状态。
 	ChannelStatusUnbound       = "unbound"
 	ChannelStatusPendingAuth   = "pending_auth"
 	ChannelStatusBound         = "bound"
@@ -45,6 +54,7 @@ const (
 	ChannelStatusUnboundByUser = "unbound_by_user"
 	ChannelStatusDeleted       = "deleted"
 
+	// JobStatus* 描述异步任务调度状态，合法转移由 job_state_machine.go 维护。
 	JobStatusPending   = "pending"
 	JobStatusRunning   = "running"
 	JobStatusSucceeded = "succeeded"

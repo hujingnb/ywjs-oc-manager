@@ -1,3 +1,4 @@
+// Package domain 集中定义跨 handler、service、worker 共享的业务枚举和状态机约束。
 package domain
 
 import "fmt"
@@ -10,12 +11,12 @@ type JobTransition struct {
 }
 
 var jobTransitions = map[JobTransition]struct{}{
-	{From: JobStatusPending, To: JobStatusRunning}:    {},
-	{From: JobStatusPending, To: JobStatusCanceled}:   {},
-	{From: JobStatusRunning, To: JobStatusSucceeded}:  {},
-	{From: JobStatusRunning, To: JobStatusFailed}:     {},
-	{From: JobStatusRunning, To: JobStatusPending}:    {}, // 重新排队
-	{From: JobStatusFailed, To: JobStatusPending}:     {}, // 手工重试
+	{From: JobStatusPending, To: JobStatusRunning}:   {},
+	{From: JobStatusPending, To: JobStatusCanceled}:  {},
+	{From: JobStatusRunning, To: JobStatusSucceeded}: {},
+	{From: JobStatusRunning, To: JobStatusFailed}:    {},
+	{From: JobStatusRunning, To: JobStatusPending}:   {}, // 重新排队
+	{From: JobStatusFailed, To: JobStatusPending}:    {}, // 手工重试
 }
 
 // IsJobTransitionAllowed 校验 job 状态切换是否合法。

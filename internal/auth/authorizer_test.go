@@ -1,13 +1,15 @@
+// Package auth 的权限测试覆盖角色、组织归属和资源 owner 的组合边界。
 package auth
 
 import (
 	"testing"
 
-	"oc-manager/internal/domain"
 	"github.com/stretchr/testify/assert"
+	"oc-manager/internal/domain"
 )
 
 const (
+	// orgA/orgB 与 userA/userB 组成跨组织、跨成员的最小权限矩阵。
 	orgA  = "org-A"
 	orgB  = "org-B"
 	userA = "user-A"
@@ -15,8 +17,10 @@ const (
 )
 
 type orgCase struct {
-	name      string
-	role      string
+	name string
+	// role 是当前操作者角色，覆盖平台管理员、组织管理员、成员和未知角色。
+	role string
+	// pOrgID 是当前操作者所属组织，targetOrg 是被访问资源所属组织。
 	pOrgID    string
 	targetOrg string
 	want      bool
@@ -57,7 +61,8 @@ func TestCanViewOrg(t *testing.T) {
 }
 
 type memberCase struct {
-	name       string
+	name string
+	// role/pOrgID/pUserID 描述当前操作者身份，target* 描述目标成员或应用资源。
 	role       string
 	pOrgID     string
 	pUserID    string

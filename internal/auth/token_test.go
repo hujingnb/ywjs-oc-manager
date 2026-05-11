@@ -1,10 +1,11 @@
+// Package auth 的测试覆盖密码、令牌和加密原语的安全边界，不依赖数据库或外部服务。
 package auth
 
 import (
+	"github.com/stretchr/testify/require"
 	"strings"
 	"testing"
 	"time"
-	"github.com/stretchr/testify/require"
 )
 
 func TestTokenManagerSignsAndVerifiesAccessToken(t *testing.T) {
@@ -60,6 +61,7 @@ func newTestTokenManager(t *testing.T) *TokenManager {
 	t.Helper()
 	manager, err := NewTokenManager("access-secret", "refresh-secret", time.Minute, time.Hour)
 	require.NoError(t, err)
+	// 固定 now 让 exp/iat 和过期测试稳定，避免依赖真实时间流逝。
 	manager.now = func() time.Time { return time.Unix(1000, 0) }
 	return manager
 }

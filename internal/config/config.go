@@ -1,3 +1,4 @@
+// Package config 负责加载 manager YAML 配置、解析持续时间并在进程启动前执行必需项校验。
 package config
 
 import (
@@ -9,15 +10,24 @@ import (
 // Config 是 manager 进程启动所需的完整配置。
 // 这里仅放入工程基线阶段需要校验的字段；后续业务模块会在保持兼容的前提下继续扩展。
 type Config struct {
-	App      AppConfig      `yaml:"app"`
+	// App 是 manager API 自身的监听、数据目录和公开访问配置。
+	App AppConfig `yaml:"app"`
+	// Database 是业务 PostgreSQL 连接配置，缺失时禁止启动。
 	Database DatabaseConfig `yaml:"database"`
-	Redis    RedisConfig    `yaml:"redis"`
-	Auth     AuthConfig     `yaml:"auth"`
+	// Redis 是异步 job queue 与跨进程通知所需的 Redis 配置。
+	Redis RedisConfig `yaml:"redis"`
+	// Auth 是登录 cookie、JWT 和 CSRF 相关配置。
+	Auth AuthConfig `yaml:"auth"`
+	// Security 持有加密敏感字段所需的根密钥配置。
 	Security SecurityConfig `yaml:"security"`
+	// OpenClaw 描述 runtime 镜像、LLM 和工作目录归档策略。
 	OpenClaw OpenClawConfig `yaml:"openclaw"`
-	Agent    AgentConfig    `yaml:"agent"`
-	Runtime  RuntimeConfig  `yaml:"runtime"`
-	NewAPI   NewAPIConfig   `yaml:"newapi"`
+	// Agent 描述 manager 与 runtime agent 之间的心跳协议参数。
+	Agent AgentConfig `yaml:"agent"`
+	// Runtime 描述节点自动注册密钥和主动探测阈值。
+	Runtime RuntimeConfig `yaml:"runtime"`
+	// NewAPI 描述 manager 调用 new-api 管理接口所需的凭据。
+	NewAPI NewAPIConfig `yaml:"newapi"`
 }
 
 // AppConfig 描述 manager API 进程自身的运行参数。
@@ -52,12 +62,18 @@ type RedisConfig struct {
 // AuthConfig 描述后台登录和令牌签发配置。
 // access token 用于短期 API 认证，refresh token 只保存 hash 并用于续期。
 type AuthConfig struct {
-	CookieDomain     string   `yaml:"cookie_domain"`
-	AccessTokenTTL   Duration `yaml:"access_token_ttl"`
-	RefreshTokenTTL  Duration `yaml:"refresh_token_ttl"`
-	JWTAccessSecret  string   `yaml:"jwt_access_secret"`
-	JWTRefreshSecret string   `yaml:"jwt_refresh_secret"`
-	CSRFSecret       string   `yaml:"csrf_secret"`
+	// CookieDomain 控制浏览器 cookie 作用域，本地开发可为空。
+	CookieDomain string `yaml:"cookie_domain"`
+	// AccessTokenTTL 控制 access token 生命周期，必须是可解析且大于 0 的持续时间。
+	AccessTokenTTL Duration `yaml:"access_token_ttl"`
+	// RefreshTokenTTL 控制 refresh token 生命周期，也用于 refresh_tokens 表过期时间。
+	RefreshTokenTTL Duration `yaml:"refresh_token_ttl"`
+	// JWTAccessSecret 只用于 access token HMAC 签名。
+	JWTAccessSecret string `yaml:"jwt_access_secret"`
+	// JWTRefreshSecret 只用于 refresh token HMAC 签名，必须与 access secret 分离。
+	JWTRefreshSecret string `yaml:"jwt_refresh_secret"`
+	// CSRFSecret 用于 CSRF token 保护，缺失时登录态接口不得启动。
+	CSRFSecret string `yaml:"csrf_secret"`
 }
 
 // SecurityConfig 描述敏感字段加解密所需的根密钥。
@@ -112,15 +128,21 @@ type AgentConfig struct {
 
 // RuntimeConfig 描述 runtime node 自动注册和 manager 主动探测参数。
 type RuntimeConfig struct {
-	EnrollmentSecret string             `yaml:"enrollment_secret"`
-	Probe            RuntimeProbeConfig `yaml:"probe"`
+	// EnrollmentSecret 是 runtime agent 自动注册时使用的共享密钥，必须是 32 字节随机值。
+	EnrollmentSecret string `yaml:"enrollment_secret"`
+	// Probe 控制 manager 主动探测节点双端口的周期、超时和状态切换阈值。
+	Probe RuntimeProbeConfig `yaml:"probe"`
 }
 
 // RuntimeProbeConfig 控制 manager 主动探测 agent 双端口的节奏和状态阈值。
 type RuntimeProbeConfig struct {
-	IntervalSeconds  int `yaml:"interval_seconds"`
-	TimeoutSeconds   int `yaml:"timeout_seconds"`
+	// IntervalSeconds 是探测循环间隔，0 会在 applyDefaults 中填入默认值。
+	IntervalSeconds int `yaml:"interval_seconds"`
+	// TimeoutSeconds 是单次 agent 探测超时，必须小于探测间隔以避免堆积。
+	TimeoutSeconds int `yaml:"timeout_seconds"`
+	// FailureThreshold 是连续失败多少次后把节点标记为 unreachable/degraded。
 	FailureThreshold int `yaml:"failure_threshold"`
+	// RecoveryThreshold 是连续成功多少次后把节点恢复为 active。
 	RecoveryThreshold int `yaml:"recovery_threshold"`
 }
 

@@ -1,3 +1,4 @@
+// Package main 的迁移命令测试只验证配置读取和 embed source，不触碰真实数据库。
 package main
 
 import (
@@ -28,6 +29,7 @@ func TestIofsSourceLoads(t *testing.T) {
 }
 
 func TestLoadDatabaseURLReadsOnlyConfigFile(t *testing.T) {
+	// 即使环境里存在 DATABASE_URL，也必须以 OCM_CONFIG 对应的 manager.yaml 为准。
 	t.Setenv("DATABASE_URL", "postgres://env:env@localhost/env?sslmode=disable")
 
 	want := "postgres://config:config@localhost/config?sslmode=disable"

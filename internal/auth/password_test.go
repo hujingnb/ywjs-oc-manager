@@ -1,11 +1,13 @@
+// Package auth 的测试覆盖密码、令牌和加密原语的安全边界，不依赖数据库或外部服务。
 package auth
 
 import (
-	"testing"
 	"github.com/stretchr/testify/require"
+	"testing"
 )
 
 func TestHashPasswordAndVerifyPassword(t *testing.T) {
+	// 测试参数刻意降低成本，保留 PHC 格式和校验语义但避免单元测试过慢。
 	params := PasswordParams{
 		Memory:      32,
 		Iterations:  1,

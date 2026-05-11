@@ -1,3 +1,4 @@
+// Package auth 提供 manager 登录认证、密码哈希、令牌签发与敏感字段加密等安全原语。
 package auth
 
 import (
@@ -15,11 +16,16 @@ import (
 // PasswordParams 描述 Argon2id 哈希参数。
 // 默认参数偏向安全；测试可使用更小参数避免单元测试过慢。
 type PasswordParams struct {
-	Memory      uint32
-	Iterations  uint32
+	// Memory 是 Argon2id 使用的 KiB 内存成本，直接影响暴力破解成本和登录耗时。
+	Memory uint32
+	// Iterations 是 Argon2id 迭代次数；调大可增强抗破解能力但会增加 CPU 耗时。
+	Iterations uint32
+	// Parallelism 控制 Argon2id 并行度，必须与部署资源和测试参数一起权衡。
 	Parallelism uint8
-	SaltLength  uint32
-	KeyLength   uint32
+	// SaltLength 是随机盐长度，必须大于 0 以保证相同密码不会生成相同 hash。
+	SaltLength uint32
+	// KeyLength 是派生 key 长度，写入 PHC hash 后用于后续恒定时间比较。
+	KeyLength uint32
 }
 
 // DefaultPasswordParams 是后台账号密码的默认哈希参数。
@@ -63,6 +69,7 @@ func VerifyPassword(password, encodedHash string) bool {
 }
 
 func (p PasswordParams) validate() error {
+	// 所有参数都参与密码 hash 的安全边界；任何 0 值都表示调用方没有显式选择成本。
 	if p.Memory == 0 || p.Iterations == 0 || p.Parallelism == 0 || p.SaltLength == 0 || p.KeyLength == 0 {
 		return errors.New("Argon2id 参数必须全部大于 0")
 	}
@@ -78,6 +85,7 @@ func (p PasswordParams) validateCost() error {
 
 func parsePasswordHash(encodedHash string) (PasswordParams, []byte, []byte, error) {
 	parts := strings.Split(encodedHash, "$")
+	// 仅接受本系统写出的 Argon2id v19 PHC 格式，避免把旧算法或损坏 hash 当成可验证密码。
 	if len(parts) != 6 || parts[1] != "argon2id" || parts[2] != "v=19" {
 		return PasswordParams{}, nil, nil, errors.New("密码 hash 格式不支持")
 	}
