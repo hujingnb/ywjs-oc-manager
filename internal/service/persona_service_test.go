@@ -7,10 +7,10 @@ import (
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgtype"
 
+	"github.com/stretchr/testify/require"
 	"oc-manager/internal/auth"
 	"oc-manager/internal/domain"
 	"oc-manager/internal/store/sqlc"
-	"github.com/stretchr/testify/require"
 )
 
 const testPersonaOrgID = "00000000-0000-0000-0000-000000003001"

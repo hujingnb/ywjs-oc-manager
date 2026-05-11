@@ -25,11 +25,16 @@ import (
 // NewAPIFailureContext 描述 OrganizationService 内 new-api 调用失败的上下文，
 // 供注入的 NewAPIFailureAuditor 写 audit_logs。
 type NewAPIFailureContext struct {
-	ActorID   string
+	// ActorID 是触发外部调用的 manager 用户 ID，用于审计归因。
+	ActorID string
+	// ActorRole 是触发时的角色快照，避免后续角色变化影响审计解释。
 	ActorRole string
-	OrgID     string
-	Endpoint  string
-	Err       error
+	// OrgID 是失败影响到的组织 ID；组织创建早期失败时使用刚插入的 manager 行。
+	OrgID string
+	// Endpoint 是失败的 new-api 端点或内部步骤名称。
+	Endpoint string
+	// Err 是原始错误，审计辅助会做安全化处理后写入 metadata。
+	Err error
 }
 
 // NewAPIFailureAuditor 抽象 new-api 失败审计写入能力，避免 service 直接依赖 audit 包
@@ -70,12 +75,20 @@ type OrganizationCredentials struct {
 	AccessToken string `json:"access_token"`
 }
 
+// OrganizationService 负责组织生命周期、new-api 用户 provisioning 和组织管理员初始化。
+// 创建组织跨 manager DB 与 new-api 两个系统，失败时通过 best-effort 清理和审计降低孤儿资源风险。
 type OrganizationService struct {
-	store        OrganizationStore
-	provisioner  NewAPIUserProvisioner
-	cipher       *auth.Cipher
-	failAuditor  NewAPIFailureAuditor // 新增；nil 时跳过 new-api 失败审计写入
-	usernamePool string               // 组织 user 的 username 前缀，便于改写本地与生产分布
+	// store 封装 manager 端组织和管理员账号的持久化操作。
+	store OrganizationStore
+	// provisioner 封装 new-api 用户创建、token bootstrap 和失败清理。
+	provisioner NewAPIUserProvisioner
+	// cipher 加密 organizations.newapi_user_credentials_ciphertext 中的 new-api 明文凭据。
+	cipher *auth.Cipher
+	// failAuditor 记录 new-api 失败；nil 时跳过审计，主要用于单元测试或最小装配。
+	failAuditor NewAPIFailureAuditor // 新增；nil 时跳过 new-api 失败审计写入
+	// usernamePool 是 manager 自动生成 new-api username 的前缀。
+	usernamePool string // 组织 user 的 username 前缀，便于改写本地与生产分布
+	// hashPassword 仅用于创建组织管理员，测试中可替换为快 hash。
 	hashPassword PasswordHasher
 }
 
@@ -94,25 +107,44 @@ func NewOrganizationService(store OrganizationStore, provisioner NewAPIUserProvi
 	}
 }
 
+// OrganizationInput 是组织创建和更新的统一入参。
+// Admin* 字段仅 CreateOrganization 使用，更新组织资料时会被忽略。
 type OrganizationInput struct {
-	Name                   string
-	ContactName            string
-	ContactPhone           string
-	Remark                 string
+	// Name 是组织展示名。
+	Name string
+	// ContactName 是业务联系人姓名。
+	ContactName string
+	// ContactPhone 是业务联系人电话。
+	ContactPhone string
+	// Remark 是平台管理员维护的内部备注。
+	Remark string
+	// CreditWarningThreshold 是组织余额预警阈值；nil 会写入 NULL，表示不设置预警阈值。
 	CreditWarningThreshold *int32
-	AdminUsername          string
-	AdminDisplayName       string
-	AdminPassword          string
+	// AdminUsername 是创建组织时初始化的 org_admin 账号名。
+	AdminUsername string
+	// AdminDisplayName 是初始化 org_admin 的显示名。
+	AdminDisplayName string
+	// AdminPassword 是初始化 org_admin 的明文密码，写库前会 hash。
+	AdminPassword string
 }
 
+// OrganizationResult 是组织对外响应视图，包含必要的 new-api 绑定状态。
 type OrganizationResult struct {
-	ID                     string `json:"id"`
-	Name                   string `json:"name"`
-	Status                 string `json:"status"`
-	ContactName            string `json:"contact_name,omitempty"`
-	ContactPhone           string `json:"contact_phone,omitempty"`
-	Remark                 string `json:"remark,omitempty"`
-	NewAPIUserID           string `json:"newapi_user_id,omitempty"`
+	// ID 是 manager 组织 UUID。
+	ID string `json:"id"`
+	// Name 是组织展示名。
+	Name string `json:"name"`
+	// Status 是组织状态，active / disabled 决定成员是否可登录。
+	Status string `json:"status"`
+	// ContactName 是业务联系人姓名。
+	ContactName string `json:"contact_name,omitempty"`
+	// ContactPhone 是业务联系人电话。
+	ContactPhone string `json:"contact_phone,omitempty"`
+	// Remark 是平台管理员维护的内部备注。
+	Remark string `json:"remark,omitempty"`
+	// NewAPIUserID 是组织在 new-api 侧的用户 ID，缺失时充值和用量接口不可用。
+	NewAPIUserID string `json:"newapi_user_id,omitempty"`
+	// CreditWarningThreshold 是组织余额预警阈值。
 	CreditWarningThreshold *int32 `json:"credit_warning_threshold,omitempty"`
 }
 
@@ -123,6 +155,7 @@ type OrganizationResult struct {
 //   - 原失败原因 + 清理失败（如有）通过 auditHelper 落 audit_logs（OOS-3）；
 //   - manager 端组织行 HardDeleteOrganization 回滚。
 func (s *OrganizationService) CreateOrganization(ctx context.Context, principal auth.Principal, input OrganizationInput) (OrganizationResult, error) {
+	// 组织创建会在 new-api 侧创建真实计费主体，只允许平台管理员触发。
 	if principal.Role != domain.UserRolePlatformAdmin {
 		return OrganizationResult{}, ErrForbidden
 	}

@@ -176,17 +176,25 @@ func snapshotFromApp(app sqlc.App) *RuntimeSnapshotView {
 type RuntimeOperation string
 
 const (
-	RuntimeOperationStart           RuntimeOperation = "start"
-	RuntimeOperationStop            RuntimeOperation = "stop"
-	RuntimeOperationRestart         RuntimeOperation = "restart"
-	RuntimeOperationDelete          RuntimeOperation = "delete"
-	RuntimeOperationDisableAPIKey   RuntimeOperation = "disable_api_key"
-	RuntimeOperationRestoreAPIKey   RuntimeOperation = "restore_api_key"
+	// RuntimeOperationStart 表示启动应用容器。
+	RuntimeOperationStart RuntimeOperation = "start"
+	// RuntimeOperationStop 表示停止应用容器。
+	RuntimeOperationStop RuntimeOperation = "stop"
+	// RuntimeOperationRestart 表示重启应用容器。
+	RuntimeOperationRestart RuntimeOperation = "restart"
+	// RuntimeOperationDelete 表示删除应用容器及其 runtime 资源。
+	RuntimeOperationDelete RuntimeOperation = "delete"
+	// RuntimeOperationDisableAPIKey 表示临时禁用应用 new-api key，普通成员不能触发。
+	RuntimeOperationDisableAPIKey RuntimeOperation = "disable_api_key"
+	// RuntimeOperationRestoreAPIKey 表示恢复应用 new-api key，普通成员不能触发。
+	RuntimeOperationRestoreAPIKey RuntimeOperation = "restore_api_key"
 )
 
 // RuntimeOperationResult 是异步任务派发结果。
 type RuntimeOperationResult struct {
-	JobID     string           `json:"job_id"`
+	// JobID 是写入 jobs 表后的异步任务 ID，前端用它查询执行进度。
+	JobID string `json:"job_id"`
+	// Operation 是本次实际入队的操作枚举。
 	Operation RuntimeOperation `json:"operation"`
 }
 
@@ -220,10 +228,10 @@ func (s *RuntimeOperationService) Trigger(ctx context.Context, principal auth.Pr
 	}
 	jobType := jobTypeFor(op)
 	payload, err := json.Marshal(map[string]any{
-		"app_id":         uuidToString(app.ID),
-		"operation":      string(op),
-		"runtime_node":   uuidToOptionalString(app.RuntimeNodeID),
-		"requested_by":   principal.UserID,
+		"app_id":       uuidToString(app.ID),
+		"operation":    string(op),
+		"runtime_node": uuidToOptionalString(app.RuntimeNodeID),
+		"requested_by": principal.UserID,
 	})
 	if err != nil {
 		return RuntimeOperationResult{}, fmt.Errorf("序列化 payload 失败: %w", err)

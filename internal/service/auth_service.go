@@ -27,10 +27,14 @@ type AuthStore interface {
 
 // AuthService 处理登录、刷新和注销等认证业务。
 type AuthService struct {
-	store        AuthStore
-	tokens       *auth.TokenManager
+	// store 提供用户、组织与 refresh token 的持久化能力。
+	store AuthStore
+	// tokens 负责签发和校验 access / refresh token。
+	tokens *auth.TokenManager
+	// passwordHash 在测试中可替换，生产使用 auth.VerifyPassword。
 	passwordHash func(string, string) bool
-	now          func() time.Time
+	// now 在测试中可固定时间，确保 refresh token 过期判断可重复。
+	now func() time.Time
 }
 
 // NewAuthService 创建认证服务。
@@ -43,16 +47,22 @@ func NewAuthService(store AuthStore, tokens *auth.TokenManager) *AuthService {
 	}
 }
 
+// LoginInput 是用户名密码登录的 service 入参。
+// Password 只在内存中参与校验，不会写入日志或返回值。
 type LoginInput struct {
 	Username string
 	Password string
 }
 
+// TokenPair 是登录和刷新接口返回的双令牌。
+// RefreshToken 只能使用一次，Refresh 成功后旧记录会被撤销。
 type TokenPair struct {
 	AccessToken  string `json:"access_token"`
 	RefreshToken string `json:"refresh_token"`
 }
 
+// AuthUser 是认证接口暴露的用户快照。
+// 该结构不包含 PasswordHash，OrgID 对 platform_admin 为空。
 type AuthUser struct {
 	ID          string `json:"id"`
 	OrgID       string `json:"org_id,omitempty"`
@@ -62,6 +72,7 @@ type AuthUser struct {
 	Status      string `json:"status"`
 }
 
+// LoginResult 聚合当前用户快照和新签发的 token pair。
 type LoginResult struct {
 	User   AuthUser  `json:"user"`
 	Tokens TokenPair `json:"tokens"`
@@ -79,6 +90,7 @@ func (s *AuthService) Login(ctx context.Context, input LoginInput) (LoginResult,
 	if !s.passwordHash(input.Password, user.PasswordHash) {
 		return LoginResult{}, ErrInvalidCredentials
 	}
+	// 登录前重新检查用户和组织状态，避免已禁用账号继续拿到新令牌。
 	if err := s.ensureUserEnabled(ctx, user); err != nil {
 		return LoginResult{}, err
 	}
@@ -131,6 +143,7 @@ func (s *AuthService) Refresh(ctx context.Context, refreshToken string) (LoginRe
 	if err := s.ensureUserEnabled(ctx, user); err != nil {
 		return LoginResult{}, err
 	}
+	// refresh token 采用轮换策略：先撤销旧记录，再签发并持久化新 token pair。
 	if _, err := s.store.RevokeRefreshToken(ctx, record.ID); err != nil {
 		return LoginResult{}, fmt.Errorf("撤销旧 refresh token 失败: %w", err)
 	}
@@ -156,6 +169,7 @@ func (s *AuthService) Logout(ctx context.Context, refreshToken string) error {
 }
 
 func (s *AuthService) issueTokenPair(ctx context.Context, user sqlc.User) (LoginResult, error) {
+	// principal 只放最小授权上下文；角色权限的最终判断仍由 authorizer.go 完成。
 	principal := auth.Principal{
 		UserID: uuidToString(user.ID),
 		OrgID:  uuidToOptionalString(user.OrgID),
@@ -170,7 +184,8 @@ func (s *AuthService) issueTokenPair(ctx context.Context, user sqlc.User) (Login
 		return LoginResult{}, fmt.Errorf("签发 refresh token 失败: %w", err)
 	}
 	if _, err := s.store.CreateRefreshToken(ctx, sqlc.CreateRefreshTokenParams{
-		UserID:    user.ID,
+		UserID: user.ID,
+		// 数据库存 hash，明文 refresh token 只返回给客户端一次。
 		TokenHash: auth.HashOpaqueToken(refreshToken),
 		ExpiresAt: pgtype.Timestamptz{
 			Time:  s.now().Add(s.tokens.RefreshTTL()),

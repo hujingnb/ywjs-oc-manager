@@ -48,7 +48,6 @@ func TestRuntimeNodesListReturnsArray(t *testing.T) {
 	require.Equal(t, "node-1", resp.Nodes[0].Name)
 }
 
-
 func newRuntimeNodesTestRouter(t *testing.T, svc runtimeNodeService) (*gin.Engine, *auth.TokenManager) {
 	t.Helper()
 	gin.SetMode(gin.ReleaseMode)

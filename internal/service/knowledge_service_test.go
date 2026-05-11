@@ -5,11 +5,11 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
 	"oc-manager/internal/auth"
 	"oc-manager/internal/domain"
 	"oc-manager/internal/files"
-	"github.com/stretchr/testify/assert"
-	"github.com/stretchr/testify/require"
 )
 
 const (

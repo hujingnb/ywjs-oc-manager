@@ -62,20 +62,30 @@ func NewMemberService(store MemberStore, hash PasswordHasher) *MemberService {
 // MemberInput 表示成员创建/更新的入参。
 // Username 仅创建时有效；更新接口不允许修改用户名以避免影响审计追溯。
 type MemberInput struct {
-	Username    string
+	// Username 仅创建成员时使用，更新资料时不会修改登录账号。
+	Username string
+	// DisplayName 是成员展示名，创建和更新都要求非空。
 	DisplayName string
-	Password    string
-	Role        string
+	// Password 仅创建成员或重置密码时使用，写库前会 hash。
+	Password string
+	// Role 为空时创建成员使用默认 org_member；更新时为空表示保持原角色。
+	Role string
 }
 
 // MemberResult 是对外返回的成员视图，剥离了密码等敏感字段。
 type MemberResult struct {
-	ID          string `json:"id"`
-	OrgID       string `json:"org_id,omitempty"`
-	Username    string `json:"username"`
+	// ID 是成员用户 UUID。
+	ID string `json:"id"`
+	// OrgID 是成员所属组织 UUID；platform_admin 可能为空。
+	OrgID string `json:"org_id,omitempty"`
+	// Username 是登录账号名。
+	Username string `json:"username"`
+	// DisplayName 是前端展示名。
 	DisplayName string `json:"display_name"`
-	Role        string `json:"role"`
-	Status      string `json:"status"`
+	// Role 是成员角色，限定为 org_admin 或 org_member。
+	Role string `json:"role"`
+	// Status 是成员状态；disabled 会阻止登录并设置 users.deleted_at。
+	Status string `json:"status"`
 }
 
 // CreateMember 创建组织成员。
@@ -250,6 +260,7 @@ func (s *MemberService) SetMemberStatus(ctx context.Context, principal auth.Prin
 	if principal.UserID == uuidToString(user.ID) && status == domain.StatusDisabled {
 		return MemberResult{}, fmt.Errorf("%w: 不能禁用自己", ErrMemberCreateInvalid)
 	}
+	// users.deleted_at 在本项目中表示下线时间戳，由 SetUserStatus 随 status 自动维护。
 	updated, err := s.store.SetUserStatus(ctx, sqlc.SetUserStatusParams{ID: user.ID, Status: status})
 	if err != nil {
 		return MemberResult{}, fmt.Errorf("更新成员状态失败: %w", err)

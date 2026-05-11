@@ -18,12 +18,12 @@ import (
 
 // runtimeOpServiceStub 实现 runtimeOperationService 接口，仅 stub 测试用到的方法。
 type runtimeOpServiceStub struct {
-	triggerResult     service.RuntimeOperationResult
-	triggerErr        error
-	initResult        service.RuntimeOperationResult
-	initErr           error
-	inspectResult     service.RuntimeView
-	inspectErr        error
+	triggerResult service.RuntimeOperationResult
+	triggerErr    error
+	initResult    service.RuntimeOperationResult
+	initErr       error
+	inspectResult service.RuntimeView
+	inspectErr    error
 }
 
 func (s *runtimeOpServiceStub) Trigger(_ context.Context, _ auth.Principal, _ string, _ service.RuntimeOperation) (service.RuntimeOperationResult, error) {

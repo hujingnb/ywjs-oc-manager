@@ -11,24 +11,43 @@ import (
 	"oc-manager/internal/service"
 )
 
+// Dependencies 是 HTTP router 装配所需的可选依赖集合。
+// nil service 表示对应路由组不注册，便于测试或最小模式只启用健康检查和部分 API。
 type Dependencies struct {
-	AuthService         *service.AuthService
+	// AuthService 提供登录、刷新、登出和当前用户查询。
+	AuthService *service.AuthService
+	// OrganizationService 提供平台组织管理路由。
 	OrganizationService *service.OrganizationService
-	MemberService       *service.MemberService
-	OnboardingService   *service.MemberOnboardingService
-	AuditService        *service.AuditService
-	RuntimeNodeService  *service.RuntimeNodeService
-	ChannelService      *service.ChannelService
-	KnowledgeService    *service.KnowledgeService
-	WorkspaceService    *service.WorkspaceService
-	UsageService        *service.UsageService
-	RuntimeOpService    *service.RuntimeOperationService
-	AppService          *service.AppService
-	RechargeService     *service.RechargeService
-	PersonaService      *service.PersonaService
-	PlatformOverview    *service.PlatformOverviewService
-	JobsStore           handlers.JobsStore
-	TokenManager        *auth.TokenManager
+	// MemberService 提供组织成员 CRUD 与状态切换路由。
+	MemberService *service.MemberService
+	// OnboardingService 提供成员创建并初始化应用的事务路由。
+	OnboardingService *service.MemberOnboardingService
+	// AuditService 提供审计日志查询路由。
+	AuditService *service.AuditService
+	// RuntimeNodeService 提供 runtime 节点管理和 agent enroll / heartbeat 路由。
+	RuntimeNodeService *service.RuntimeNodeService
+	// ChannelService 提供渠道绑定与同步路由。
+	ChannelService *service.ChannelService
+	// KnowledgeService 提供组织和应用知识库路由。
+	KnowledgeService *service.KnowledgeService
+	// WorkspaceService 提供应用工作目录代理路由。
+	WorkspaceService *service.WorkspaceService
+	// UsageService 提供 new-api 用量代理路由。
+	UsageService *service.UsageService
+	// RuntimeOpService 提供应用运行时操作和 inspect 路由。
+	RuntimeOpService *service.RuntimeOperationService
+	// AppService 提供应用只读列表和详情路由。
+	AppService *service.AppService
+	// RechargeService 提供组织充值、充值记录和余额查询路由。
+	RechargeService *service.RechargeService
+	// PersonaService 提供组织人设读写路由。
+	PersonaService *service.PersonaService
+	// PlatformOverview 提供平台总览路由。
+	PlatformOverview *service.PlatformOverviewService
+	// JobsStore 提供按 job ID 查询异步任务状态的 handler 依赖。
+	JobsStore handlers.JobsStore
+	// TokenManager 用于所有需要 BearerAuth 的 handler 校验 access token。
+	TokenManager *auth.TokenManager
 	// AgentTokenSink 在 agent enroll 成功时由 manager 进程缓存 (nodeID, agentToken)。
 	// nil 时跳过缓存（仅供测试或未启用 docker proxy 的最小装配使用）。
 	AgentTokenSink func(nodeID, agentToken string)
@@ -47,6 +66,7 @@ func NewRouter(deps ...Dependencies) http.Handler {
 	router := gin.New()
 	router.Use(gin.Recovery())
 	if len(deps) > 0 && len(deps[0].AllowedOrigins) > 0 {
+		// CORS 只在显式配置白名单时启用；同源部署保持最小响应头。
 		router.Use(middleware.CORSAllowOrigin(deps[0].AllowedOrigins))
 	}
 	// RequestID 保证每个请求都携带 trace_id，供 slog ctx-aware 日志输出 trace_id 字段。

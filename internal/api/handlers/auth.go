@@ -8,8 +8,8 @@ import (
 
 	"github.com/gin-gonic/gin"
 
-	"oc-manager/internal/auth"
 	"oc-manager/internal/api/middleware"
+	"oc-manager/internal/auth"
 	redactlog "oc-manager/internal/log"
 	"oc-manager/internal/service"
 )
@@ -57,6 +57,7 @@ func RegisterAuthRoutes(router gin.IRouter, handler *AuthHandler) {
 // @Router       /auth/login [post]
 func (h *AuthHandler) Login(c *gin.Context) {
 	var req LoginRequest
+	// 登录接口没有 Bearer token，认证错误统一由 service 映射为 401。
 	if err := c.ShouldBindJSON(&req); err != nil {
 		c.JSON(http.StatusBadRequest, gin.H{"error": "请求参数不完整"})
 		return
@@ -162,6 +163,7 @@ func (h *AuthHandler) Me(c *gin.Context) {
 		c.JSON(http.StatusUnauthorized, gin.H{"error": "访问令牌无效"})
 		return
 	}
+	// token 只证明调用者身份，账号是否仍可用由 AuthService.Me 再查库判断。
 	user, err := h.service.Me(c.Request.Context(), principal)
 	if err != nil {
 		writeAuthError(c, err)
@@ -170,11 +172,15 @@ func (h *AuthHandler) Me(c *gin.Context) {
 	c.JSON(http.StatusOK, gin.H{"user": user})
 }
 
+// bearerToken 从 Authorization header 中提取 Bearer token。
+// scheme 比较大小写不敏感；缺失或空 token 统一返回 false。
 func bearerToken(header string) (string, bool) {
 	scheme, token, ok := strings.Cut(header, " ")
 	return token, ok && strings.EqualFold(scheme, "Bearer") && token != ""
 }
 
+// writeAuthError 将认证 service 的 sentinel error 映射为 HTTP 状态码。
+// 禁用用户和禁用组织返回 403，避免前端误判为 token 过期并循环刷新。
 func writeAuthError(c *gin.Context, err error) {
 	switch {
 	case errors.Is(err, service.ErrInvalidCredentials):

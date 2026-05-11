@@ -20,11 +20,11 @@ import (
 
 // workspaceServiceStub 实现 workspaceService 接口，仅 stub 测试用到的方法。
 type workspaceServiceStub struct {
-	listResult   service.WorkspaceListing
-	listErr      error
-	downloadRC   io.ReadCloser
-	downloadErr  error
-	archiveErr   error
+	listResult  service.WorkspaceListing
+	listErr     error
+	downloadRC  io.ReadCloser
+	downloadErr error
+	archiveErr  error
 }
 
 func (s *workspaceServiceStub) List(_ context.Context, _ auth.Principal, _, _ string) (service.WorkspaceListing, error) {

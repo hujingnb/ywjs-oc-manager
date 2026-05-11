@@ -19,10 +19,10 @@ import (
 
 // personaServiceStub 实现 personaService 接口，仅 stub 测试用到的方法。
 type personaServiceStub struct {
-	getResult  service.PersonaResult
-	getErr     error
-	putResult  service.PersonaResult
-	putErr     error
+	getResult service.PersonaResult
+	getErr    error
+	putResult service.PersonaResult
+	putErr    error
 }
 
 func (s *personaServiceStub) GetCurrent(_ context.Context, _ auth.Principal, _ string) (service.PersonaResult, error) {

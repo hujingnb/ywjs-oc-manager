@@ -11,9 +11,9 @@ import (
 
 	"github.com/gin-gonic/gin"
 
+	"github.com/stretchr/testify/require"
 	"oc-manager/internal/auth"
 	"oc-manager/internal/service"
-	"github.com/stretchr/testify/require"
 )
 
 func TestAuthLoginReturnsTokenPair(t *testing.T) {

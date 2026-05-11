@@ -7,9 +7,9 @@ import (
 
 	"github.com/jackc/pgx/v5/pgtype"
 
+	"github.com/stretchr/testify/require"
 	"oc-manager/internal/domain"
 	"oc-manager/internal/store/sqlc"
-	"github.com/stretchr/testify/require"
 )
 
 const testReconcilerNodeID = "00000000-0000-0000-0000-000000005001"

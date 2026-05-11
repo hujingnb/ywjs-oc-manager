@@ -7,9 +7,9 @@ import (
 
 	"github.com/jackc/pgx/v5/pgtype"
 
-	"oc-manager/internal/store/sqlc"
-	"github.com/stretchr/testify/require"
 	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
+	"oc-manager/internal/store/sqlc"
 )
 
 type sqlNodeSelectorStub struct {

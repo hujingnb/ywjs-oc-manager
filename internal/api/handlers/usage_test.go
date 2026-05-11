@@ -18,14 +18,14 @@ import (
 
 // usageServiceStub 实现 usageService 接口，仅 stub 测试用到的方法。
 type usageServiceStub struct {
-	memberResult service.LogsPage
-	memberErr    error
-	orgResult    service.QuotaSeries
-	orgErr       error
+	memberResult   service.LogsPage
+	memberErr      error
+	orgResult      service.QuotaSeries
+	orgErr         error
 	platformResult service.QuotaSeries
-	platformErr  error
-	appResult    service.LogsPage
-	appErr       error
+	platformErr    error
+	appResult      service.LogsPage
+	appErr         error
 }
 
 func (s *usageServiceStub) GetMemberUsage(_ context.Context, _ auth.Principal, _, _ string, _ service.LogsQueryOptions) (service.LogsPage, error) {

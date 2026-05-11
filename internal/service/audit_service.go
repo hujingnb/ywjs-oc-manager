@@ -26,18 +26,18 @@ type AuditStore interface {
 // AuditResult 表示对外返回的审计日志记录。
 // IP 与元数据以字符串形式输出，避免暴露内部 pgtype 结构。
 type AuditResult struct {
-	ID           string                 `json:"id"`
-	ActorID      string                 `json:"actor_id,omitempty"`
-	ActorRole    string                 `json:"actor_role"`
-	OrgID        string                 `json:"org_id,omitempty"`
-	TargetType   string                 `json:"target_type"`
-	TargetID     string                 `json:"target_id"`
-	Action       string                 `json:"action"`
-	Result       string                 `json:"result"`
-	ErrorMessage string                 `json:"error_message,omitempty"`
-	IPAddress    string                 `json:"ip_address,omitempty"`
-	Metadata     map[string]any         `json:"metadata,omitempty"`
-	CreatedAt    pgtype.Timestamptz     `json:"created_at" swaggertype:"string" format:"date-time"`
+	ID           string             `json:"id"`
+	ActorID      string             `json:"actor_id,omitempty"`
+	ActorRole    string             `json:"actor_role"`
+	OrgID        string             `json:"org_id,omitempty"`
+	TargetType   string             `json:"target_type"`
+	TargetID     string             `json:"target_id"`
+	Action       string             `json:"action"`
+	Result       string             `json:"result"`
+	ErrorMessage string             `json:"error_message,omitempty"`
+	IPAddress    string             `json:"ip_address,omitempty"`
+	Metadata     map[string]any     `json:"metadata,omitempty"`
+	CreatedAt    pgtype.Timestamptz `json:"created_at" swaggertype:"string" format:"date-time"`
 }
 
 // AuditEvent 是其他服务记录审计时的入参。

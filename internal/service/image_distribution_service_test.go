@@ -6,8 +6,8 @@ import (
 	"strings"
 	"testing"
 
-	"oc-manager/internal/runtime/imagesync"
 	"github.com/stretchr/testify/require"
+	"oc-manager/internal/runtime/imagesync"
 )
 
 func TestImageDistributionServiceRequiresDistributor(t *testing.T) {

@@ -18,11 +18,11 @@ import (
 
 // channelServiceStub 实现 channelService 接口，仅 stub 测试用到的方法。
 type channelServiceStub struct {
-	beginResult  service.ChallengeResult
-	beginErr     error
-	pollResult   service.ProgressResult
-	pollErr      error
-	unbindErr    error
+	beginResult service.ChallengeResult
+	beginErr    error
+	pollResult  service.ProgressResult
+	pollErr     error
+	unbindErr   error
 }
 
 func (s *channelServiceStub) BeginAuth(_ context.Context, _ auth.Principal, _, _ string) (service.ChallengeResult, error) {

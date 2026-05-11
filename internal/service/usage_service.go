@@ -56,30 +56,42 @@ func NewUsageService(store UsageStore, client UsageNewAPIClient, failAuditor New
 
 // LogsPage 是 app / member 维度的响应：透传 new-api log entries + 分页 total。
 type LogsPage struct {
-	Scope   string `json:"scope"`
+	// Scope 标识日志所属维度，当前为 app 或 member。
+	Scope string `json:"scope"`
+	// ScopeID 是对应维度的 manager UUID，便于前端复核查询上下文。
 	ScopeID string `json:"scope_id,omitempty"`
 	// Items 透传 new-api LogEntry 列表。
-	Items     []newapi.LogEntry `json:"items" swaggerignore:"true"`
-	Total     int               `json:"total"`
-	UpdatedAt time.Time         `json:"updated_at"`
+	Items []newapi.LogEntry `json:"items" swaggerignore:"true"`
+	// Total 是 new-api 返回的分页总数。
+	Total int `json:"total"`
+	// UpdatedAt 是 manager 代理完成时刻，不代表 new-api 内部采集时间。
+	UpdatedAt time.Time `json:"updated_at"`
 }
 
 // QuotaSeries 是 organization / platform 维度的响应：透传 new-api 的按日 quota 汇总。
 type QuotaSeries struct {
-	Scope   string `json:"scope"`
+	// Scope 标识配额序列所属维度，当前为 organization 或 platform。
+	Scope string `json:"scope"`
+	// ScopeID 是组织维度的 manager org UUID；平台维度为空。
 	ScopeID string `json:"scope_id,omitempty"`
 	// Items 透传 new-api QuotaDate 列表。
-	Items     []newapi.QuotaDate `json:"items" swaggerignore:"true"`
-	UpdatedAt time.Time          `json:"updated_at"`
+	Items []newapi.QuotaDate `json:"items" swaggerignore:"true"`
+	// UpdatedAt 是 manager 代理完成时刻，不代表 new-api 内部采集时间。
+	UpdatedAt time.Time `json:"updated_at"`
 }
 
 // LogsQueryOptions 是对外暴露的查询选项；service 不内置默认时间窗（避免和前端分页错位），
 // 但 PageSize 缺省 20 与 newapi.LogsQuery 保持一致。
 type LogsQueryOptions struct {
-	Since     int64
-	Until     int64
-	Page      int
-	PageSize  int
+	// Since 是查询起始 Unix 秒；0 表示不限制起始时间。
+	Since int64
+	// Until 是查询截止 Unix 秒；0 表示不限制截止时间。
+	Until int64
+	// Page 是 new-api 日志分页页码。
+	Page int
+	// PageSize 是 new-api 日志分页大小，0 时 handler/service 使用默认值。
+	PageSize int
+	// ModelName 是可选模型名过滤条件。
 	ModelName string
 }
 

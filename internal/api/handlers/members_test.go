@@ -11,10 +11,10 @@ import (
 
 	"github.com/gin-gonic/gin"
 
+	"github.com/stretchr/testify/require"
 	"oc-manager/internal/auth"
 	"oc-manager/internal/domain"
 	"oc-manager/internal/service"
-	"github.com/stretchr/testify/require"
 )
 
 func TestMembersListRequiresToken(t *testing.T) {

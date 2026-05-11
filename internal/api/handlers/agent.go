@@ -64,6 +64,7 @@ func (h *AgentEndpointsHandler) Enroll(c *gin.Context) {
 		return
 	}
 	var req AgentEnrollRequest
+	// enroll 是机器对机器接口，不经过 CSRF；请求体字段校验在这里完成，幂等 upsert 在 service 层完成。
 	if err := c.ShouldBindJSON(&req); err != nil {
 		c.JSON(http.StatusBadRequest, gin.H{"error": "请求参数不完整"})
 		return
@@ -95,6 +96,7 @@ func (h *AgentEndpointsHandler) Enroll(c *gin.Context) {
 		return
 	}
 	if h.tokenSink != nil && result.AgentToken != "" {
+		// tokenSink 只缓存本进程 docker proxy 需要的 agent token，持久化仍由 service 负责。
 		h.tokenSink(result.NodeID, result.AgentToken)
 	}
 	c.JSON(http.StatusOK, gin.H{
@@ -119,6 +121,7 @@ func (h *AgentEndpointsHandler) Enroll(c *gin.Context) {
 // @Router       /agent/heartbeat [post]
 func (h *AgentEndpointsHandler) Heartbeat(c *gin.Context) {
 	var req AgentHeartbeatRequest
+	// heartbeat 使用请求体里的 agent_token 鉴权，避免 runtime agent 额外拼 Authorization header。
 	if err := c.ShouldBindJSON(&req); err != nil {
 		c.JSON(http.StatusBadRequest, gin.H{"error": "请求参数不完整"})
 		return
@@ -146,6 +149,7 @@ func (h *AgentEndpointsHandler) Heartbeat(c *gin.Context) {
 	c.JSON(http.StatusOK, gin.H{"runtime_node": result})
 }
 
+// validEnrollmentSecret 使用常量时间比较校验共享密钥，避免长度相同场景下的时序泄露。
 func (h *AgentEndpointsHandler) validEnrollmentSecret(header string) bool {
 	token, ok := bearerToken(header)
 	if !ok || h.enrollmentSecret == "" {
@@ -154,6 +158,7 @@ func (h *AgentEndpointsHandler) validEnrollmentSecret(header string) bool {
 	return subtle.ConstantTimeCompare([]byte(token), []byte(h.enrollmentSecret)) == 1
 }
 
+// agentJSONOrEmpty 将可选 map 编码为 JSON；空 map 保持 nil，避免数据库写入无意义的 {}。
 func agentJSONOrEmpty(value map[string]any) ([]byte, error) {
 	if len(value) == 0 {
 		return nil, nil
@@ -161,6 +166,7 @@ func agentJSONOrEmpty(value map[string]any) ([]byte, error) {
 	return json.Marshal(value)
 }
 
+// writeAgentEndpointError 将 agent service 错误映射到机器调用方可处理的状态码。
 func writeAgentEndpointError(c *gin.Context, err error) {
 	switch {
 	case errors.Is(err, service.ErrAgentTokenInvalid):

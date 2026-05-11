@@ -20,17 +20,17 @@ import (
 
 // knowledgeServiceStub 实现 knowledgeService 接口，仅 stub 测试用到的方法。
 type knowledgeServiceStub struct {
-	syncStatuses []service.SyncStatusResult
-	syncErr      error
-	retryErr     error
+	syncStatuses  []service.SyncStatusResult
+	syncErr       error
+	retryErr      error
 	listOrgResult service.KnowledgeListResult
-	listOrgErr   error
-	saveOrgErr   error
-	deleteOrgErr error
+	listOrgErr    error
+	saveOrgErr    error
+	deleteOrgErr  error
 	listAppResult service.KnowledgeListResult
-	listAppErr   error
-	saveAppErr   error
-	deleteAppErr error
+	listAppErr    error
+	saveAppErr    error
+	deleteAppErr  error
 }
 
 func (s *knowledgeServiceStub) GetOrgSyncStatus(_ context.Context, _ auth.Principal, _ string) ([]service.SyncStatusResult, error) {

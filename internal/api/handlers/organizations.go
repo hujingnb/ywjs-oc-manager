@@ -13,11 +13,14 @@ import (
 	"oc-manager/internal/service"
 )
 
+// OrganizationsHandler 处理组织管理 HTTP 路由。
+// handler 只负责绑定 DTO、解析 principal 和映射错误码，组织权限与 new-api provisioning 在 service 层完成。
 type OrganizationsHandler struct {
 	service organizationService
 	tokens  *auth.TokenManager
 }
 
+// organizationService 是组织 handler 依赖的最小 service 接口，便于 handler 单测注入 stub。
 type organizationService interface {
 	CreateOrganization(ctx context.Context, principal auth.Principal, input service.OrganizationInput) (service.OrganizationResult, error)
 	ListOrganizations(ctx context.Context, principal auth.Principal, limit, offset int32) ([]service.OrganizationResult, error)
@@ -26,10 +29,13 @@ type organizationService interface {
 	SetOrganizationStatus(ctx context.Context, principal auth.Principal, orgID, status string) (service.OrganizationResult, error)
 }
 
+// NewOrganizationsHandler 创建组织 handler。
 func NewOrganizationsHandler(service organizationService, tokens *auth.TokenManager) *OrganizationsHandler {
 	return &OrganizationsHandler{service: service, tokens: tokens}
 }
 
+// RegisterOrganizationRoutes 注册组织路由组。
+// /api/v1/organizations 负责平台租户的列表、创建、资料更新和启停状态切换。
 func RegisterOrganizationRoutes(router gin.IRouter, handler *OrganizationsHandler) {
 	group := router.Group("/api/v1/organizations")
 	group.GET("", handler.List)
@@ -61,6 +67,7 @@ func (h *OrganizationsHandler) Create(c *gin.Context) {
 		return
 	}
 	var req CreateOrganizationRequest
+	// ShouldBindJSON 只做 HTTP 层必填字段校验；角色、new-api 和回滚规则由 service 处理。
 	if err := c.ShouldBindJSON(&req); err != nil {
 		c.JSON(http.StatusBadRequest, gin.H{"error": "请求参数不完整"})
 		return
@@ -152,6 +159,7 @@ func (h *OrganizationsHandler) Update(c *gin.Context) {
 		return
 	}
 	var req OrganizationRequest
+	// OpenAPI 注解只描述对外契约，handler 仍以 binding tag 作为运行时请求体校验入口。
 	if err := c.ShouldBindJSON(&req); err != nil {
 		c.JSON(http.StatusBadRequest, gin.H{"error": "请求参数不完整"})
 		return
@@ -200,6 +208,8 @@ func (h *OrganizationsHandler) Enable(c *gin.Context) {
 	h.setStatus(c, domain.StatusActive)
 }
 
+// setStatus 复用启用/禁用的 principal 提取和错误映射逻辑。
+// status 只能来自 handler 内部常量，避免客户端通过请求体传入任意状态。
 func (h *OrganizationsHandler) setStatus(c *gin.Context, status string) {
 	principal, ok := h.principal(c)
 	if !ok {
@@ -213,6 +223,8 @@ func (h *OrganizationsHandler) setStatus(c *gin.Context, status string) {
 	c.JSON(http.StatusOK, gin.H{"organization": result})
 }
 
+// principal 从 Bearer token 中提取调用主体。
+// token 只承载认证上下文，具体组织访问权限由 service 调 authorizer.go 判断。
 func (h *OrganizationsHandler) principal(c *gin.Context) (auth.Principal, bool) {
 	token, ok := bearerToken(c.GetHeader("Authorization"))
 	if !ok {
@@ -227,6 +239,7 @@ func (h *OrganizationsHandler) principal(c *gin.Context) (auth.Principal, bool) 
 	return principal, true
 }
 
+// toOrganizationInput 将更新 DTO 转为 service 入参；管理员初始化字段不参与更新。
 func toOrganizationInput(req OrganizationRequest) service.OrganizationInput {
 	return service.OrganizationInput{
 		Name:                   req.Name,
@@ -237,6 +250,7 @@ func toOrganizationInput(req OrganizationRequest) service.OrganizationInput {
 	}
 }
 
+// toCreateOrganizationInput 将创建 DTO 转为 service 入参，保留管理员初始化字段。
 func toCreateOrganizationInput(req CreateOrganizationRequest) service.OrganizationInput {
 	return service.OrganizationInput{
 		Name:                   req.Name,
@@ -250,6 +264,7 @@ func toCreateOrganizationInput(req CreateOrganizationRequest) service.Organizati
 	}
 }
 
+// queryInt32 解析分页参数；非法或缺失时使用默认值，避免 handler 将 400 暴露给旧客户端。
 func queryInt32(c *gin.Context, key string, fallback int32) int32 {
 	value := c.Query(key)
 	if value == "" {
@@ -262,6 +277,8 @@ func queryInt32(c *gin.Context, key string, fallback int32) int32 {
 	return int32(parsed)
 }
 
+// writeServiceError 将组织 service 的 sentinel error 映射到稳定 HTTP 状态码。
+// 未识别错误统一按 500 返回安全文案，避免暴露 new-api 或数据库细节。
 func writeServiceError(c *gin.Context, err error) {
 	switch {
 	case errors.Is(err, service.ErrForbidden):

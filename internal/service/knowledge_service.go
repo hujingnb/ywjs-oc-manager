@@ -42,10 +42,10 @@ type KnowledgeRetryDispatcher interface {
 // 同步状态：组织级 dispatcher 入队时写 pending、worker 完成时写 synced/failed，
 // 由独立的 KnowledgeSyncStatusService（statusSource + retryDispatcher）维护。
 type KnowledgeService struct {
-	master           *files.KnowledgeMaster
-	dispatcher       KnowledgeSyncDispatcher
-	statusSource     KnowledgeSyncStatusSource
-	retryDispatcher  KnowledgeRetryDispatcher
+	master          *files.KnowledgeMaster
+	dispatcher      KnowledgeSyncDispatcher
+	statusSource    KnowledgeSyncStatusSource
+	retryDispatcher KnowledgeRetryDispatcher
 }
 
 // NewKnowledgeService 创建知识库服务。
@@ -95,8 +95,8 @@ func (s *KnowledgeService) RetryOrgNodeSync(ctx context.Context, principal auth.
 
 // KnowledgeListResult 是列表接口的返回。
 type KnowledgeListResult struct {
-	Path    string                  `json:"path"`
-	Entries []KnowledgeEntryResult  `json:"entries"`
+	Path    string                 `json:"path"`
+	Entries []KnowledgeEntryResult `json:"entries"`
 }
 
 // KnowledgeEntryResult 是对外的条目视图。
