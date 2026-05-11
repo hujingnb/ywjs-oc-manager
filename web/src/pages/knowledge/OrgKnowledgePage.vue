@@ -9,7 +9,7 @@
         </div>
       </template>
       <template #header-extra>
-        <label class="primary-button" :class="{ disabled: !canManage }">
+        <label v-if="canManage" class="primary-button">
           <input class="hidden-input" type="file" :disabled="!canManage" @change="onUpload" />
           上传文件
         </label>
@@ -68,6 +68,7 @@ import {
   type KnowledgeEntry,
   type OrgSyncStatusEntry,
 } from '@/api/hooks/useKnowledge'
+import { canManageOrgKnowledge } from '@/domain/permissions'
 import { useAuthStore } from '@/stores/auth'
 
 const props = defineProps<{ orgId?: string }>()
@@ -77,12 +78,12 @@ const effectiveOrgId = computed(() => props.orgId ?? auth.user?.org_id)
 const relativePath = ref('')
 const relativeRef = computed(() => relativePath.value)
 const eyebrow = computed(() => (auth.user?.role === 'platform_admin' ? 'Platform · 知识库' : '组织 · 知识库'))
-const canManage = computed(() => auth.user?.role === 'platform_admin' || auth.user?.role === 'org_admin')
+const canManage = computed(() => canManageOrgKnowledge(auth.user, effectiveOrgId.value))
 
 const { data: listing, isLoading, error } = useOrgKnowledgeQuery(effectiveOrgId, relativeRef)
 const uploadMutation = useUploadOrgKnowledge(effectiveOrgId, relativeRef)
 const deleteMutation = useDeleteOrgKnowledge(effectiveOrgId, relativeRef)
-const { data: syncStatuses, isLoading: syncStatusLoading } = useOrgKnowledgeSyncStatusQuery(effectiveOrgId)
+const { data: syncStatuses, isLoading: syncStatusLoading } = useOrgKnowledgeSyncStatusQuery(effectiveOrgId, canManage)
 const retryMutation = useRetryOrgKnowledgeSync(effectiveOrgId)
 
 function syncTagType(s: string): 'success' | 'warning' | 'error' | 'default' {

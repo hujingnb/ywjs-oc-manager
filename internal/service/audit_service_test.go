@@ -4,6 +4,7 @@ import (
 	"context"
 	"testing"
 
+	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgtype"
 
 	"oc-manager/internal/auth"
@@ -57,18 +58,72 @@ func TestAuditServiceListByOrgClampsLimit(t *testing.T) {
 
 func TestAuditServiceListByTargetFiltersOrgScope(t *testing.T) {
 	store := &auditStoreStub{
+		apps: map[string]sqlc.App{
+			testAuditAppID: {
+				ID:          mustUUID(t, testAuditAppID),
+				OrgID:       mustUUID(t, testOrgID),
+				OwnerUserID: mustUUID(t, testMemUID),
+			},
+		},
 		byTarget: []sqlc.AuditLog{
-			{TargetType: "app", TargetID: "x", OrgID: mustOptionalUUID(t, testOrgID)},
-			{TargetType: "app", TargetID: "x", OrgID: mustOptionalUUID(t, testOrg2ID)},
+			{TargetType: "app", TargetID: testAuditAppID, OrgID: mustOptionalUUID(t, testOrgID)},
+			{TargetType: "app", TargetID: testAuditAppID, OrgID: mustOptionalUUID(t, testOrg2ID)},
 		},
 	}
 	svc := NewAuditService(store)
 
-	results, err := svc.ListByTarget(context.Background(), auth.Principal{Role: domain.UserRoleOrgAdmin, OrgID: testOrgID}, "app", "x", 0, 0)
+	results, err := svc.ListByTarget(context.Background(), auth.Principal{Role: domain.UserRoleOrgAdmin, OrgID: testOrgID}, "app", testAuditAppID, 0, 0)
 	require.NoError(t, err)
 	if len(results) != 1 || results[0].OrgID != testOrgID {
 		t.Fatalf("results = %+v, want only own org", results)
 	}
+}
+
+func TestAuditServiceListByTargetAllowsMemberOwnApp(t *testing.T) {
+	store := &auditStoreStub{
+		apps: map[string]sqlc.App{
+			testAuditAppID: {
+				ID:          mustUUID(t, testAuditAppID),
+				OrgID:       mustUUID(t, testOrgID),
+				OwnerUserID: mustUUID(t, testMemUID),
+			},
+		},
+		byTarget: []sqlc.AuditLog{
+			{TargetType: "app", TargetID: testAuditAppID, OrgID: mustOptionalUUID(t, testOrgID)},
+		},
+	}
+	svc := NewAuditService(store)
+
+	results, err := svc.ListByTarget(context.Background(), auth.Principal{
+		UserID: testMemUID,
+		OrgID:  testOrgID,
+		Role:   domain.UserRoleOrgMember,
+	}, "app", testAuditAppID, 0, 0)
+
+	require.NoError(t, err)
+	require.Len(t, results, 1)
+	require.Equal(t, testAuditAppID, results[0].TargetID)
+}
+
+func TestAuditServiceListByTargetRejectsMemberOtherApp(t *testing.T) {
+	store := &auditStoreStub{
+		apps: map[string]sqlc.App{
+			testAuditAppID: {
+				ID:          mustUUID(t, testAuditAppID),
+				OrgID:       mustUUID(t, testOrgID),
+				OwnerUserID: mustUUID(t, testAdminUID),
+			},
+		},
+	}
+	svc := NewAuditService(store)
+
+	_, err := svc.ListByTarget(context.Background(), auth.Principal{
+		UserID: testMemUID,
+		OrgID:  testOrgID,
+		Role:   domain.UserRoleOrgMember,
+	}, "app", testAuditAppID, 0, 0)
+
+	require.ErrorIs(t, err, ErrForbidden)
 }
 
 func mustOptionalUUID(t *testing.T, value string) pgtype.UUID {
@@ -78,11 +133,14 @@ func mustOptionalUUID(t *testing.T, value string) pgtype.UUID {
 	return id
 }
 
+const testAuditAppID = "00000000-0000-0000-0000-0000000000c1"
+
 type auditStoreStub struct {
 	created   sqlc.CreateAuditLogParams
 	byOrg     []sqlc.AuditLog
 	byTarget  []sqlc.AuditLog
 	lastByOrg sqlc.ListAuditLogsByOrgParams
+	apps      map[string]sqlc.App
 }
 
 func (s *auditStoreStub) CreateAuditLog(_ context.Context, arg sqlc.CreateAuditLogParams) (sqlc.AuditLog, error) {
@@ -105,4 +163,12 @@ func (s *auditStoreStub) ListAuditLogsByOrg(_ context.Context, arg sqlc.ListAudi
 
 func (s *auditStoreStub) ListAuditLogsByTarget(_ context.Context, _ sqlc.ListAuditLogsByTargetParams) ([]sqlc.AuditLog, error) {
 	return s.byTarget, nil
+}
+
+func (s *auditStoreStub) GetApp(_ context.Context, id pgtype.UUID) (sqlc.App, error) {
+	app, ok := s.apps[uuidToString(id)]
+	if !ok {
+		return sqlc.App{}, pgx.ErrNoRows
+	}
+	return app, nil
 }

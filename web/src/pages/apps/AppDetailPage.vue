@@ -49,6 +49,7 @@ const tabs: ReadonlyArray<{ path: string; label: string }> = [
   { path: 'channels', label: '渠道' },
   { path: 'knowledge', label: '应用知识库' },
   { path: 'workspace', label: '工作目录' },
+  { path: 'audit', label: '审计' },
 ]
 
 const currentTab = computed(() => {

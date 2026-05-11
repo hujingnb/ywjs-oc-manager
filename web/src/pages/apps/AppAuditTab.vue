@@ -1,7 +1,7 @@
 <template>
   <DataTableList
-    :title="'审计日志'"
-    :eyebrow="orgEyebrow"
+    :title="'应用审计'"
+    :eyebrow="'App · Audit'"
     :columns="columns"
     :data="logs ?? []"
     :loading="isLoading"
@@ -11,37 +11,34 @@
 </template>
 
 <script setup lang="ts">
-import { computed, h } from 'vue'
+import { computed, h, inject, type Ref } from 'vue'
 import { NTag, type DataTableColumns } from 'naive-ui'
 
-import { useOrgAuditLogsQuery } from '@/api/hooks/useAuditLogs'
-import { canViewOrgAudit } from '@/domain/permissions'
-import { useAuthStore } from '@/stores/auth'
+import type { AuditLog } from '@/api'
+import { useTargetAuditLogsQuery } from '@/api/hooks/useAuditLogs'
+import type { AppDTO } from '@/api/hooks/useApps'
 import DataTableList from '@/components/DataTableList.vue'
 import { timeColumn } from '@/components/columns'
+import { canViewOwnAppAudit } from '@/domain/permissions'
+import { useAuthStore } from '@/stores/auth'
 
-const props = defineProps<{ orgId?: string }>()
+const props = defineProps<{ appId: string }>()
 const auth = useAuthStore()
-const effectiveOrgId = computed(() => props.orgId ?? auth.user?.org_id)
-const orgEyebrow = computed(() => auth.user?.role === 'platform_admin' ? 'Platform · 审计' : '组织 · 审计')
-const canView = computed(() => canViewOrgAudit(auth.user, effectiveOrgId.value))
+const app = inject<Ref<AppDTO | null>>('app')
+const canView = computed(() => canViewOwnAppAudit(auth.user, app?.value))
+const target = computed(() => canView.value ? { targetType: 'app', targetId: props.appId } : undefined)
+const { data: logs, isLoading, error } = useTargetAuditLogsQuery(target)
 
-const queryOrgId = computed(() => canView.value ? effectiveOrgId.value : undefined)
-const { data: logs, isLoading, error } = useOrgAuditLogsQuery(queryOrgId)
-
-// 无关联组织时展示提示；有 API 错误时展示错误信息
 const errorMessage = computed(() => {
-  if (!effectiveOrgId.value) return '当前账号未关联组织，无法查看审计日志。'
-  if (!canView.value) return '当前账号无权查看组织级审计，请在自己的应用详情中查看应用审计。'
+  if (!canView.value) return '当前账号无权查看该应用审计。'
   if (error.value) return String(error.value)
   return undefined
 })
 
-type AuditLog = NonNullable<typeof logs.value>[number]
-
 function auditTagType(result: string): 'success' | 'warning' | 'error' | 'default' {
   switch (result) {
     case 'success': return 'success'
+    case 'succeeded': return 'success'
     case 'failed': case 'error': return 'error'
     case 'partial': return 'warning'
     default: return 'default'
@@ -55,13 +52,6 @@ const columns: DataTableColumns<AuditLog> = [
     render: (row) => [
       h('strong', row.actor_role),
       row.actor_id ? h('small', { style: 'display:block;color:#8A94C6;font-size:12px' }, row.actor_id) : null,
-    ],
-  },
-  {
-    title: '资源', key: 'target_type',
-    render: (row) => [
-      h('strong', row.target_type),
-      h('small', { style: 'display:block;color:#8A94C6;font-size:12px' }, row.target_id),
     ],
   },
   { title: '操作', key: 'action' },

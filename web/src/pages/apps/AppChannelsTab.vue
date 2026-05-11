@@ -8,10 +8,10 @@
     </template>
     <template #header-extra>
       <n-space :size="8">
-        <n-button type="primary" :disabled="!appId || beginning" @click="beginAuth">
+        <n-button type="primary" :disabled="!appId || !canManage || beginning" @click="beginAuth">
           {{ primaryButtonLabel }}
         </n-button>
-        <n-button v-if="showRefreshChallenge" :disabled="beginning" @click="beginAuth">
+        <n-button v-if="showRefreshChallenge" :disabled="!canManage || beginning" @click="beginAuth">
           {{ beginning ? '生成中…' : '刷新二维码' }}
         </n-button>
         <n-button v-if="canUnbind" @click="unbind">解绑</n-button>
@@ -37,9 +37,10 @@
 </template>
 
 <script setup lang="ts">
-import { computed, ref, toRef, watch } from 'vue'
+import { computed, inject, ref, toRef, watch, type Ref } from 'vue'
 import { NButton, NCard, NSpace } from 'naive-ui'
 
+import type { AppDTO } from '@/api/hooks/useApps'
 import AuthChallengeRenderer from '@/components/AuthChallengeRenderer.vue'
 import {
   useBeginChannelAuth,
@@ -49,9 +50,13 @@ import {
   shouldShowChallengePending,
   type ChannelChallenge,
 } from '@/api/hooks/useChannel'
+import { canManageApp } from '@/domain/permissions'
+import { useAuthStore } from '@/stores/auth'
 
 const props = defineProps<{ appId?: string; channelType?: string }>()
 
+const auth = useAuthStore()
+const app = inject<Ref<AppDTO | null>>('app')
 const appId = toRef(props, 'appId')
 const channelType = computed(() => props.channelType ?? 'wechat')
 const channelTypeRef = computed(() => channelType.value)
@@ -69,7 +74,8 @@ const statusLabel = computed(() => {
   return progress.value.status
 })
 
-const canUnbind = computed(() => progress.value?.status === 'bound')
+const canManage = computed(() => canManageApp(auth.user, app?.value))
+const canUnbind = computed(() => canManage.value && progress.value?.status === 'bound')
 
 const progressChallenge = computed<ChannelChallenge | null>(() => {
   return channelChallengeFromProgress(progress.value, channelType.value)
@@ -110,6 +116,7 @@ watch(
 )
 
 async function beginAuth() {
+  if (!canManage.value) return
   beginning.value = true
   try {
     challenge.value = await beginMutation.mutateAsync()
@@ -120,6 +127,7 @@ async function beginAuth() {
 }
 
 async function unbind() {
+  if (!canManage.value) return
   await unbindMutation.mutateAsync()
   authStarted.value = false
   challenge.value = null

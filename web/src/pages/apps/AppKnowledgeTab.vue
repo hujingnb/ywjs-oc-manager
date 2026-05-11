@@ -7,7 +7,7 @@
       </div>
     </template>
     <template #header-extra>
-      <label class="secondary-button file-picker" :class="{ disabled: !knowledgeContext || uploading }">
+      <label v-if="canManage" class="secondary-button file-picker" :class="{ disabled: !knowledgeContext || uploading }">
         上传文件
         <input type="file" :disabled="!knowledgeContext || uploading" @change="onUploadFile" />
       </label>
@@ -36,9 +36,12 @@ import { NButton, NCard, NDataTable, type DataTableColumns } from 'naive-ui'
 import type { AppDTO } from '@/api/hooks/useApps'
 import { useAppKnowledgeQuery, useDeleteAppKnowledge, useUploadAppKnowledge } from '@/api/hooks/useKnowledge'
 import type { KnowledgeEntry } from '@/api/hooks/useKnowledge'
+import { canManageApp } from '@/domain/permissions'
+import { useAuthStore } from '@/stores/auth'
 
 const props = defineProps<{ appId: string }>()
 const appIdRef = computed<string | undefined>(() => props.appId)
+const auth = useAuthStore()
 
 const app = inject<Ref<AppDTO | null>>('app')
 
@@ -56,6 +59,7 @@ const uploadMutation = useUploadAppKnowledge(appIdRef, knowledgeContext)
 const deleteMutation = useDeleteAppKnowledge(appIdRef, knowledgeContext)
 const errorMessage = ref<string>('')
 
+const canManage = computed(() => canManageApp(auth.user, app?.value))
 const uploading = computed(() => uploadMutation.isPending.value)
 const deleting = computed(() => deleteMutation.isPending.value)
 
@@ -74,6 +78,7 @@ function entryRelativePath(entryPath: string) {
 
 async function onUploadFile(event: Event) {
   errorMessage.value = ''
+  if (!canManage.value) return
   const input = event.target as HTMLInputElement
   const file = input.files?.[0]
   if (!file) return
@@ -87,6 +92,7 @@ async function onUploadFile(event: Event) {
 
 async function deleteEntry(targetPath: string) {
   errorMessage.value = ''
+  if (!canManage.value) return
   try {
     await deleteMutation.mutateAsync(targetPath)
   } catch (err) {
@@ -100,12 +106,12 @@ const columns: DataTableColumns<KnowledgeEntry> = [
   { title: '类型', key: 'is_dir', render: (row) => row.is_dir ? '目录' : '文件' },
   {
     title: '操作', key: 'actions',
-    render: (row) => h(NButton, {
+    render: (row) => canManage.value ? h(NButton, {
       size: 'small',
       type: 'error',
       disabled: deleting.value,
       onClick: () => deleteEntry(entryRelativePath(row.path)),
-    }, { default: () => '删除' }),
+    }, { default: () => '删除' }) : null,
   },
 ]
 </script>

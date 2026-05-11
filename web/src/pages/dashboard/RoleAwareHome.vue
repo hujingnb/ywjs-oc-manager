@@ -62,7 +62,8 @@ const cards = computed<QuickCard[]>(() => {
   }
   if (role === 'org_member') {
     return [
-      { path: '/apps', title: '我的应用', subtitle: '查看应用状态与渠道绑定' },
+      { path: '/apps', title: '我的应用', subtitle: '查看状态、用量与应用审计' },
+      { path: '/usage', title: '我的用量', subtitle: '查看自己应用的调用记录' },
       { path: '/knowledge', title: '组织知识库', subtitle: '可读资料' },
     ]
   }

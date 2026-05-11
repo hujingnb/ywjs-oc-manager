@@ -173,10 +173,10 @@ const orgSyncStatusKey = (orgId: string | undefined) => ['knowledge', 'org', org
 
 // useOrgKnowledgeSyncStatusQuery 拉取组织在所有节点的最近同步状态。
 // 4 秒轮询一次，让前端能看到 pending → synced/failed 状态翻转。
-export function useOrgKnowledgeSyncStatusQuery(orgId: Ref<string | undefined>) {
+export function useOrgKnowledgeSyncStatusQuery(orgId: Ref<string | undefined>, enabled?: Ref<boolean>) {
   return useQuery<OrgSyncStatusEntry[]>({
     queryKey: ['knowledge', 'org', orgId, 'sync-status'],
-    enabled: () => Boolean(orgId.value),
+    enabled: () => Boolean(orgId.value && (enabled?.value ?? true)),
     refetchInterval: 4000,
     queryFn: async () => {
       if (!orgId.value) return []

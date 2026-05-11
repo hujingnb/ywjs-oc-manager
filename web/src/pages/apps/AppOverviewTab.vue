@@ -96,12 +96,14 @@ import {
 import AppStatusTag from '@/components/AppStatusTag.vue'
 import ConfirmActionModal from '@/components/ConfirmActionModal.vue'
 import JobProgressPanel from '@/components/JobProgressPanel.vue'
+import { canManageApp } from '@/domain/permissions'
 import { useAuthStore } from '@/stores/auth'
 
 const props = defineProps<{ appId: string }>()
 const appId = computed<string | undefined>(() => props.appId)
 
 const app = inject<Ref<AppDTO | null>>('app')
+const auth = useAuthStore()
 
 const initMutation = useInitializeAppMutation(appId)
 const trackingJobId = ref<string | undefined>()
@@ -111,7 +113,7 @@ const trackedJob = computed(() => jobQuery.data.value ?? null)
 
 const canRetryInit = computed(() => {
   const status = app?.value?.status
-  return status === 'error' || status === 'draft'
+  return canManageApp(auth.user, app?.value) && (status === 'error' || status === 'draft')
 })
 
 const initFeedback = ref('')
@@ -130,11 +132,7 @@ async function onRetryInit() {
   }
 }
 
-const auth = useAuthStore()
-const canToggleKey = computed(() => {
-  const role = auth.user?.role
-  return role === 'platform_admin' || role === 'org_admin'
-})
+const canToggleKey = computed(() => canManageApp(auth.user, app?.value))
 
 const keyMutation = useToggleAppAPIKey(appId)
 const confirmDisableKey = ref(false)

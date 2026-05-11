@@ -88,6 +88,13 @@ func CanViewApp(p Principal, appOrgID, appOwnerUserID string) bool {
 	}
 }
 
+// CanViewAppAudit 判断主体是否可查看指定应用的审计记录。
+// 审计读取属于观察能力：平台管理员可跨组织查看，组织管理员可查看本组织应用，
+// 组织成员只能查看自己拥有的应用，避免借 target 审计窥探同组织其他成员。
+func CanViewAppAudit(p Principal, appOrgID, appOwnerUserID string) bool {
+	return CanViewApp(p, appOrgID, appOwnerUserID)
+}
+
 // Persona 资源 ----------------------------------------------------
 // 当前规则与组织读/写谓词完全等价；保留独立函数以便未来 persona
 // 单独演进权限规则时只改这两处，不动调用方。

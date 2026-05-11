@@ -3,6 +3,7 @@ import { createRouter, createWebHistory } from 'vue-router'
 import { getStoredAccessToken } from '@/api/client'
 import AuthLayout from '@/layouts/AuthLayout.vue'
 import DashboardLayout from '@/layouts/DashboardLayout.vue'
+import AppAuditTab from '@/pages/apps/AppAuditTab.vue'
 import AppChannelsTab from '@/pages/apps/AppChannelsTab.vue'
 import AppDetailPage from '@/pages/apps/AppDetailPage.vue'
 import AppKnowledgeTab from '@/pages/apps/AppKnowledgeTab.vue'
@@ -68,6 +69,7 @@ export const router = createRouter({
             { path: 'channels', component: AppChannelsTab, props: true },
             { path: 'knowledge', component: AppKnowledgeTab, props: true },
             { path: 'workspace', component: AppWorkspaceTab, props: true },
+            { path: 'audit', component: AppAuditTab, props: true },
           ],
         },
       ],

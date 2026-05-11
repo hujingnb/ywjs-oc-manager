@@ -9,7 +9,7 @@
     :row-key="(row: AppDTO) => row.id"
   >
     <template #toolbar>
-      <n-button v-if="!isOrgMember" type="primary" @click="router.push('/members/new')">创建成员并初始化</n-button>
+      <n-button v-if="canCreateApp" type="primary" @click="router.push('/members/new')">创建成员并初始化</n-button>
     </template>
   </DataTableList>
 
@@ -38,6 +38,7 @@ import { linkColumn, statusColumn, actionColumn } from '@/components/columns'
 import { formatAppStatus } from '@/domain/status'
 import { apiRequest } from '@/api/client'
 import { useAppsByOrgQuery, type AppDTO } from '@/api/hooks/useApps'
+import { canCreateAppForOrg, canManageApp } from '@/domain/permissions'
 import { useAuthStore } from '@/stores/auth'
 
 const props = defineProps<{ orgId?: string }>()
@@ -47,6 +48,7 @@ const client = useQueryClient()
 
 const effectiveOrgId = computed(() => props.orgId ?? auth.user?.org_id)
 const isOrgMember = computed(() => auth.user?.role === 'org_member')
+const canCreateApp = computed(() => canCreateAppForOrg(auth.user, effectiveOrgId.value))
 const { data: apps, isLoading } = useAppsByOrgQuery(effectiveOrgId)
 
 // org_member 只能看到自己的应用
@@ -71,9 +73,9 @@ const columns = [
   { title: 'API key', key: 'api_key_status' },
   { title: '容器', key: 'container_id', render: (r: AppDTO) => r.container_id ?? '—' },
   actionColumn<AppDTO>([
-    { label: '重启', onClick: r => trigger(r, 'restart') },
-    { label: '停止', onClick: r => trigger(r, 'stop') },
-    { label: '删除', type: 'error', onClick: r => confirmDelete(r) },
+    { label: '重启', hidden: r => !canManageApp(auth.user, r), onClick: r => trigger(r, 'restart') },
+    { label: '停止', hidden: r => !canManageApp(auth.user, r), onClick: r => trigger(r, 'stop') },
+    { label: '删除', type: 'error', hidden: r => !canManageApp(auth.user, r), onClick: r => confirmDelete(r) },
   ]),
 ]
 

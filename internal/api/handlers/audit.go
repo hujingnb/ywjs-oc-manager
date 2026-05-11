@@ -71,7 +71,7 @@ func (h *AuditHandler) ListByOrg(c *gin.Context) {
 // ListByTarget 通过 query 参数 target_type/target_id 列出资源维度审计日志。
 //
 // @Summary      资源维度审计日志列表
-// @Description  通过 target_type 和 target_id query 参数查询指定资源的审计日志
+// @Description  通过 target_type 和 target_id query 参数查询指定资源的审计日志；组织成员仅可查询自己拥有的 app 审计
 // @Tags         audit-logs
 // @Produce      json
 // @Security     BearerAuth

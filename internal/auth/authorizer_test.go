@@ -128,6 +128,17 @@ func TestCanViewApp(t *testing.T) {
 	}
 }
 
+func TestCanViewAppAudit(t *testing.T) {
+	cases := []memberCase{
+		{"platform_admin 可看任意应用审计", domain.UserRolePlatformAdmin, orgA, userA, orgB, userB, true},
+		{"org_admin 可看本组织应用审计", domain.UserRoleOrgAdmin, orgA, userA, orgA, userB, true},
+		{"org_admin 不可看跨组织应用审计", domain.UserRoleOrgAdmin, orgA, userA, orgB, userB, false},
+		{"org_member 仅可看自己应用审计", domain.UserRoleOrgMember, orgA, userA, orgA, userA, true},
+		{"org_member 不可看同组织他人应用审计", domain.UserRoleOrgMember, orgA, userA, orgA, userB, false},
+	}
+	runAppCases(t, CanViewAppAudit, cases)
+}
+
 func TestCanViewOrgPersona(t *testing.T) {
 	cases := []orgCase{
 		{"platform_admin 跨组织可读 persona", domain.UserRolePlatformAdmin, orgA, orgB, true},

@@ -3,9 +3,11 @@ package service
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"net/netip"
 
+	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgtype"
 
 	"oc-manager/internal/auth"
@@ -16,6 +18,7 @@ import (
 // AuditStore 抽象审计日志的数据访问能力。
 type AuditStore interface {
 	CreateAuditLog(ctx context.Context, arg sqlc.CreateAuditLogParams) (sqlc.AuditLog, error)
+	GetApp(ctx context.Context, id pgtype.UUID) (sqlc.App, error)
 	ListAuditLogsByOrg(ctx context.Context, arg sqlc.ListAuditLogsByOrgParams) ([]sqlc.AuditLog, error)
 	ListAuditLogsByTarget(ctx context.Context, arg sqlc.ListAuditLogsByTargetParams) ([]sqlc.AuditLog, error)
 }
@@ -140,10 +143,17 @@ func (s *AuditService) ListByOrg(ctx context.Context, principal auth.Principal, 
 }
 
 // ListByTarget 按目标资源维度查询审计日志。
-// 仅平台管理员或目标资源所属组织的管理员可访问，普通成员只能查看自己作为操作者的记录（后续扩展）。
+// app 目标先加载应用归属再判定权限：平台管理员和本组织管理员可看管理范围内应用，
+// 普通成员只能查看自己拥有的应用审计。其他目标类型仍限制为平台管理员或组织管理员。
 func (s *AuditService) ListByTarget(ctx context.Context, principal auth.Principal, targetType, targetID string, limit, offset int32) ([]AuditResult, error) {
-	if principal.Role != domain.UserRolePlatformAdmin && principal.Role != domain.UserRoleOrgAdmin {
-		return nil, ErrForbidden
+	if targetType == "app" {
+		if err := s.authorizeAppTarget(ctx, principal, targetID); err != nil {
+			return nil, err
+		}
+	} else {
+		if principal.Role != domain.UserRolePlatformAdmin && principal.Role != domain.UserRoleOrgAdmin {
+			return nil, ErrForbidden
+		}
 	}
 	limit, offset = s.normalizePagination(limit, offset)
 	rows, err := s.store.ListAuditLogsByTarget(ctx, sqlc.ListAuditLogsByTargetParams{
@@ -166,6 +176,24 @@ func (s *AuditService) ListByTarget(ctx context.Context, principal auth.Principa
 		results = filtered
 	}
 	return results, nil
+}
+
+func (s *AuditService) authorizeAppTarget(ctx context.Context, principal auth.Principal, targetID string) error {
+	id, err := parseUUID(targetID)
+	if err != nil {
+		return ErrNotFound
+	}
+	app, err := s.store.GetApp(ctx, id)
+	if err != nil {
+		if errors.Is(err, pgx.ErrNoRows) {
+			return ErrNotFound
+		}
+		return fmt.Errorf("查询应用失败: %w", err)
+	}
+	if !auth.CanViewAppAudit(principal, uuidToString(app.OrgID), uuidToString(app.OwnerUserID)) {
+		return ErrForbidden
+	}
+	return nil
 }
 
 func (s *AuditService) normalizePagination(limit, offset int32) (int32, int32) {

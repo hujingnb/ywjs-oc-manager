@@ -1768,7 +1768,7 @@ export interface paths {
         };
         /**
          * 资源维度审计日志列表
-         * @description 通过 target_type 和 target_id query 参数查询指定资源的审计日志
+         * @description 通过 target_type 和 target_id query 参数查询指定资源的审计日志；组织成员仅可查询自己拥有的 app 审计
          */
         get: {
             parameters: {

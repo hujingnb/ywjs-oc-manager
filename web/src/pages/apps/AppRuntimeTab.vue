@@ -109,11 +109,14 @@ import {
 } from '@/api/hooks/useApps'
 import ConfirmActionModal from '@/components/ConfirmActionModal.vue'
 import JobProgressPanel from '@/components/JobProgressPanel.vue'
+import { canManageApp } from '@/domain/permissions'
+import { useAuthStore } from '@/stores/auth'
 
 const props = defineProps<{ appId: string }>()
 const appId = computed<string | undefined>(() => props.appId)
 
 const app = inject<Ref<AppDTO | null>>('app')
+const auth = useAuthStore()
 
 const runtimeQuery = useAppRuntimeQuery(appId)
 const runtime = computed(() => runtimeQuery.data.value ?? null)
@@ -136,12 +139,13 @@ const runtimeStatusLabel = computed(() => {
   return status
 })
 
-const canStart = computed(() => app?.value?.status === 'stopped')
+const canManage = computed(() => canManageApp(auth.user, app?.value))
+const canStart = computed(() => canManage.value && app?.value?.status === 'stopped')
 const canStop = computed(() => {
   const status = app?.value?.status
-  return status === 'running' || status === 'binding_waiting'
+  return canManage.value && (status === 'running' || status === 'binding_waiting')
 })
-const canDelete = computed(() => app?.value?.status !== 'deleted')
+const canDelete = computed(() => canManage.value && app?.value?.status !== 'deleted')
 
 async function onAction(op: 'start' | 'stop' | 'restart' | 'delete') {
   if (op === 'delete') { confirmDelete.value = true; return }
