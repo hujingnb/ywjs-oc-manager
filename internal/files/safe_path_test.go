@@ -1,3 +1,4 @@
+// Package files 的 safe_path_test 覆盖安全根目录对空路径、越界路径和合法相对路径的校验。
 package files
 
 import (

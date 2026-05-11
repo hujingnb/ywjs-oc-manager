@@ -1,3 +1,4 @@
+// Package middleware 的 security_test 覆盖 CORS 与安全响应头 middleware 的边界行为。
 package middleware
 
 import (

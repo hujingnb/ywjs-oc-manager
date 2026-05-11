@@ -1,3 +1,4 @@
+// Package scheduler 的 scheduler_test 覆盖调度器按时间窗口重入队 pending job 的行为。
 package scheduler
 
 import (

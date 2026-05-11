@@ -1,3 +1,4 @@
+// Package handlers 的 auth_test 覆盖登录、刷新令牌和当前用户接口的 handler 行为。
 package handlers
 
 import (

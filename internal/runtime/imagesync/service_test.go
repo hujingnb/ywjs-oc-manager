@@ -1,3 +1,4 @@
+// Package imagesync 的 service_test 覆盖 OpenClaw 镜像同步服务的跳过、拉取和失败传播路径。
 package imagesync
 
 import (

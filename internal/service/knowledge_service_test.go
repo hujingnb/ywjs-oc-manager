@@ -1,3 +1,4 @@
+// Package service 的 knowledge_service_test 覆盖组织和应用知识库服务的权限、路径和同步状态逻辑。
 package service
 
 import (

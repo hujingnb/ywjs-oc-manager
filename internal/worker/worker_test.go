@@ -1,3 +1,4 @@
+// Package worker 的 worker_test 覆盖 worker 对 job 状态推进、重试和队列确认的处理。
 package worker
 
 import (

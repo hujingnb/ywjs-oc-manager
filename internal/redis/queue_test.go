@@ -1,3 +1,4 @@
+// Package redis 的 queue_test 覆盖内存队列与 Redis 队列兼容的入队、预留和重试语义。
 package redis
 
 import (

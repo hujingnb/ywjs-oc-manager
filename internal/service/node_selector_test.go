@@ -1,3 +1,4 @@
+// Package service 的 node_selector_test 覆盖运行节点选择器对容量、状态和错误场景的处理。
 package service
 
 import (

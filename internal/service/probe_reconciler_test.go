@@ -1,3 +1,4 @@
+// Package service 的 probe_reconciler_test 覆盖运行节点探测调和器的状态更新和错误记录。
 package service
 
 import (

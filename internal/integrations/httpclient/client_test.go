@@ -1,3 +1,4 @@
+// Package httpclient 的 client_test 覆盖共享 HTTP 客户端的超时、状态码和响应读取边界。
 package httpclient
 
 import (

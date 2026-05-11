@@ -1,3 +1,4 @@
+// Package files 的 knowledge_master_test 覆盖知识库主副本的写入、列举和大小限制。
 package files
 
 import (

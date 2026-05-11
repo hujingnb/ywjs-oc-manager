@@ -1,3 +1,4 @@
+// Package channel 的 registry_test 覆盖渠道 adapter 注册表的查找、重复注册和类型校验。
 package channel
 
 import (

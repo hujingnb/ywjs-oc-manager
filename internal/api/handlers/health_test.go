@@ -1,3 +1,4 @@
+// Package handlers 的 health_test 覆盖健康检查接口的响应结构和状态码约定。
 package handlers
 
 import (

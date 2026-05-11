@@ -1,3 +1,4 @@
+// Package handlers 的 audit_test 覆盖组织审计与应用审计 handler 的权限、分页和错误映射。
 package handlers
 
 import (

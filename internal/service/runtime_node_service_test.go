@@ -1,3 +1,4 @@
+// Package service 的 runtime_node_service_test 覆盖运行节点注册、心跳和管理操作的服务边界。
 package service
 
 import (

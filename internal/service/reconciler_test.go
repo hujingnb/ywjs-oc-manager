@@ -1,3 +1,4 @@
+// Package service 的 reconciler_test 覆盖应用调和器对初始化、运行时状态和失败重试的处理。
 package service
 
 import (

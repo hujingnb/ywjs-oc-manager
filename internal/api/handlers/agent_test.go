@@ -1,3 +1,4 @@
+// Package handlers 的 agent_test 覆盖 agent 注册、心跳与节点探测相关 HTTP handler 的请求绑定和响应语义。
 package handlers
 
 import (

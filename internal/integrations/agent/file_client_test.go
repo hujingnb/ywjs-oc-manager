@@ -1,3 +1,4 @@
+// Package agent 的 file_client_test 覆盖 agent 文件客户端的 TLS、认证和错误响应处理。
 package agent
 
 import (

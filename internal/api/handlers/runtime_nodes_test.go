@@ -1,3 +1,4 @@
+// Package handlers 的 runtime_nodes_test 覆盖运行节点管理 handler 的注册、更新和列表响应。
 package handlers
 
 import (

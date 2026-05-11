@@ -1,3 +1,4 @@
+// Package imagesync 的 clients_test 覆盖镜像同步客户端的仓库探测、agent 拉取和认证边界。
 package imagesync
 
 import (
