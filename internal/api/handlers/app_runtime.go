@@ -169,6 +169,7 @@ func (h *AppRuntimeHandler) GetRuntime(c *gin.Context) {
 		c.JSON(http.StatusUnauthorized, gin.H{"error": "访问令牌无效"})
 		return
 	}
+	// principal 只来自 access token；容器可见性由 service 再按 app owner/org 校验。
 	view, err := h.service.InspectApp(c.Request.Context(), principal, c.Param("appId"))
 	if err != nil {
 		writeAppRuntimeError(c, err)
@@ -204,6 +205,7 @@ func (h *AppRuntimeHandler) Initialize(c *gin.Context) {
 		c.JSON(http.StatusUnauthorized, gin.H{"error": "访问令牌无效"})
 		return
 	}
+	// 重新初始化属于写操作，状态机和权限边界由 RuntimeOperationService 统一判断。
 	result, err := h.service.RequestInitialize(c.Request.Context(), principal, c.Param("appId"))
 	if err != nil {
 		writeAppRuntimeError(c, err)
@@ -212,6 +214,8 @@ func (h *AppRuntimeHandler) Initialize(c *gin.Context) {
 	c.JSON(http.StatusAccepted, gin.H{"runtime_operation": result})
 }
 
+// trigger 提取 Bearer principal 并派发高风险 runtime 操作。
+// handler 不直接判断角色或应用归属，避免与 service 层 authorizer 规则分叉。
 func (h *AppRuntimeHandler) trigger(c *gin.Context, op service.RuntimeOperation) {
 	token, ok := bearerToken(c.GetHeader("Authorization"))
 	if !ok {
@@ -231,6 +235,8 @@ func (h *AppRuntimeHandler) trigger(c *gin.Context, op service.RuntimeOperation)
 	c.JSON(http.StatusAccepted, gin.H{"runtime_operation": result})
 }
 
+// writeAppRuntimeError 将运行操作 service 的错误映射为 HTTP 状态码。
+// ErrAppNotReinitializable 单独映射 409，便于前端区分状态冲突和权限失败。
 func writeAppRuntimeError(c *gin.Context, err error) {
 	switch {
 	case errors.Is(err, service.ErrRuntimeOperationDenied), errors.Is(err, service.ErrForbidden):

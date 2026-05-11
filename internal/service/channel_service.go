@@ -42,24 +42,38 @@ func NewChannelService(store ChannelStore, registry *channel.Registry, notifier 
 
 // ChallengeResult 是 BeginAuth 对外返回的视图。
 type ChallengeResult struct {
-	Status        string            `json:"status"`
-	ChannelType   string            `json:"channel_type"`
-	ChallengeType string            `json:"challenge_type,omitempty"`
-	QRCode        string            `json:"qrcode,omitempty"`
-	Code          string            `json:"code,omitempty"`
-	ExpiresAt     time.Time         `json:"expires_at,omitempty"`
-	Hints         map[string]string `json:"hints,omitempty"`
-	JobID         string            `json:"job_id,omitempty"`
+	// Status 是渠道绑定状态，pending_auth 表示后台 job 正在发起登录挑战。
+	Status string `json:"status"`
+	// ChannelType 是渠道标识，例如 wechat。
+	ChannelType string `json:"channel_type"`
+	// ChallengeType 是登录挑战类型，例如 qrcode 或 code；异步 worker 未生成时为空。
+	ChallengeType string `json:"challenge_type,omitempty"`
+	// QRCode 是二维码内容或 URL，具体格式由 channel adapter 决定。
+	QRCode string `json:"qrcode,omitempty"`
+	// Code 是非二维码登录场景的一次性验证码。
+	Code string `json:"code,omitempty"`
+	// ExpiresAt 是挑战过期时间；零值表示当前响应没有同步挑战。
+	ExpiresAt time.Time `json:"expires_at,omitempty"`
+	// Hints 是 adapter 返回的展示提示，key/value 均为前端可直接展示的安全文本。
+	Hints map[string]string `json:"hints,omitempty"`
+	// JobID 是异步 channel_start_login job ID，前端可据此追踪后台任务。
+	JobID string `json:"job_id,omitempty"`
 }
 
 // ProgressResult 是 PollAuth 对外返回的视图。
 type ProgressResult struct {
-	Status        string            `json:"status"`
-	BoundIdentity string            `json:"bound_identity,omitempty"`
-	ChannelName   string            `json:"channel_name,omitempty"`
-	ErrorMessage  string            `json:"error_message,omitempty"`
-	UpdatedAt     time.Time         `json:"updated_at"`
-	Metadata      map[string]string `json:"metadata,omitempty"`
+	// Status 是当前渠道绑定状态，直接来自 channel_bindings.status。
+	Status string `json:"status"`
+	// BoundIdentity 是渠道侧已绑定身份，如微信号或 OpenID 的展示值。
+	BoundIdentity string `json:"bound_identity,omitempty"`
+	// ChannelName 是渠道侧账号或会话名称。
+	ChannelName string `json:"channel_name,omitempty"`
+	// ErrorMessage 是最近一次绑定失败原因，已由 worker 写入安全错误文本。
+	ErrorMessage string `json:"error_message,omitempty"`
+	// UpdatedAt 是绑定记录最近更新时间，用于前端判断轮询新鲜度。
+	UpdatedAt time.Time `json:"updated_at"`
+	// Metadata 是绑定过程产生的附加展示信息，会经过 channelBindingMetadata 归一化。
+	Metadata map[string]string `json:"metadata,omitempty"`
 }
 
 // BeginAuth 启动指定应用、指定渠道的登录挑战。
@@ -224,6 +238,8 @@ func (s *ChannelService) loadManageableApp(ctx context.Context, principal auth.P
 	return app, nil
 }
 
+// channelBindingMetadata 将 channel_bindings.metadata_json 归一化为 string map。
+// worker 可能写入嵌套 hints，本函数只保留字符串值，避免 handler 泄露复杂内部结构。
 func channelBindingMetadata(raw []byte) map[string]string {
 	var data map[string]any
 	if err := json.Unmarshal(raw, &data); err != nil {

@@ -67,52 +67,86 @@ func NewRuntimeNodeService(store RuntimeNodeStore, hash TokenHasher) *RuntimeNod
 
 // RuntimeNodeResult 是对外返回的节点视图。
 type RuntimeNodeResult struct {
-	ID                       string `json:"id"`
-	Name                     string `json:"name"`
-	Status                   string `json:"status"`
-	AgentID                  string `json:"agent_id,omitempty"`
-	AgentDockerEndpoint      string `json:"agent_docker_endpoint,omitempty"`
-	AgentFileEndpoint        string `json:"agent_file_endpoint,omitempty"`
-	AgentVersion             string `json:"agent_version,omitempty"`
-	HeartbeatIntervalSeconds int32  `json:"heartbeat_interval_seconds"`
-	NodeDataRoot             string `json:"node_data_root,omitempty"`
-	HasAgentToken            bool   `json:"has_agent_token"`
-	MaxApps                  *int32 `json:"max_apps,omitempty"`
-	LastProbeAttemptedAt     string `json:"last_probe_attempted_at,omitempty"`
-	LastProbeOKAt            string `json:"last_probe_ok_at,omitempty"`
-	LastProbeFailedAt        string `json:"last_probe_failed_at,omitempty"`
-	LastProbeError           string `json:"last_probe_error,omitempty"`
-	ProbeFailureStreak       int32  `json:"probe_failure_streak"`
-	ProbeSuccessStreak       int32  `json:"probe_success_streak"`
+	// ID 是 manager 侧 runtime_nodes 主键。
+	ID string `json:"id"`
+	// Name 是管理员后台展示的节点名称。
+	Name string `json:"name"`
+	// Status 是节点管理状态，active 才允许 agent 心跳继续更新。
+	Status string `json:"status"`
+	// AgentID 是 agent 自报的外部稳定 ID，用于幂等 enroll。
+	AgentID string `json:"agent_id,omitempty"`
+	// AgentDockerEndpoint 是 manager 访问该节点 Docker 代理的 HTTPS 地址。
+	AgentDockerEndpoint string `json:"agent_docker_endpoint,omitempty"`
+	// AgentFileEndpoint 是 manager 访问该节点文件代理的 HTTPS 地址。
+	AgentFileEndpoint string `json:"agent_file_endpoint,omitempty"`
+	// AgentVersion 是最近一次 enroll 或 heartbeat 上报的 agent 版本。
+	AgentVersion string `json:"agent_version,omitempty"`
+	// HeartbeatIntervalSeconds 是 manager 告知 agent 的心跳间隔秒数。
+	HeartbeatIntervalSeconds int32 `json:"heartbeat_interval_seconds"`
+	// NodeDataRoot 是 agent 侧应用数据根目录。
+	NodeDataRoot string `json:"node_data_root,omitempty"`
+	// HasAgentToken 表示节点是否已保存 agent token hash；不会返回 token 明文。
+	HasAgentToken bool `json:"has_agent_token"`
+	// MaxApps 是节点可承载应用上限；nil 表示不限制。
+	MaxApps *int32 `json:"max_apps,omitempty"`
+	// LastProbeAttemptedAt 是最近一次探测开始时间，空值表示尚未探测。
+	LastProbeAttemptedAt string `json:"last_probe_attempted_at,omitempty"`
+	// LastProbeOKAt 是最近一次探测成功时间。
+	LastProbeOKAt string `json:"last_probe_ok_at,omitempty"`
+	// LastProbeFailedAt 是最近一次探测失败时间。
+	LastProbeFailedAt string `json:"last_probe_failed_at,omitempty"`
+	// LastProbeError 是最近一次探测失败原因，已由探测流程写入安全错误文本。
+	LastProbeError string `json:"last_probe_error,omitempty"`
+	// ProbeFailureStreak 是连续探测失败次数，用于前端展示节点健康风险。
+	ProbeFailureStreak int32 `json:"probe_failure_streak"`
+	// ProbeSuccessStreak 是连续探测成功次数，用于判断节点恢复稳定性。
+	ProbeSuccessStreak int32 `json:"probe_success_streak"`
 }
 
 // AgentEnrollInput 是 agent 自动注册时提交的自描述信息。
 type AgentEnrollInput struct {
-	AgentID             string
-	Name                string
-	MaxApps             *int32
+	// AgentID 是 agent 自报的外部稳定 ID，必须是 UUID 字符串并用于幂等复用节点行。
+	AgentID string
+	// Name 是节点展示名；为空时用 AgentID 前缀生成默认名称。
+	Name string
+	// MaxApps 是 agent 声明的应用容量上限；nil 表示不限，负数视为非法。
+	MaxApps *int32
+	// AgentDockerEndpoint 是 manager 访问 agent Docker 代理的 HTTPS URL。
 	AgentDockerEndpoint string
-	AgentFileEndpoint   string
-	AgentTLSCACert      string
-	AgentVersion        string
-	NodeDataRoot        string
-	ResourceSnapshot    []byte
-	Metadata            []byte
+	// AgentFileEndpoint 是 manager 访问 agent 文件代理的 HTTPS URL。
+	AgentFileEndpoint string
+	// AgentTLSCACert 是 agent 代理的 CA 证书 PEM，enroll 时必须能解析。
+	AgentTLSCACert string
+	// AgentVersion 是当前 agent 版本。
+	AgentVersion string
+	// NodeDataRoot 是 agent 侧应用数据根目录。
+	NodeDataRoot string
+	// ResourceSnapshot 是 agent 上报的资源快照 JSON 原文，由 handler 负责序列化。
+	ResourceSnapshot []byte
+	// Metadata 是 agent 上报的附加元数据 JSON 原文，由 handler 负责序列化。
+	Metadata []byte
 }
 
 // AgentEnrollResult 是 enroll 成功后返回给 agent 的凭证。
 type AgentEnrollResult struct {
-	NodeID                   string `json:"node_id"`
-	AgentToken               string `json:"agent_token"`
-	HeartbeatIntervalSeconds int32  `json:"heartbeat_interval_seconds"`
+	// NodeID 是 manager 为该 agent 分配或复用的 runtime node ID。
+	NodeID string `json:"node_id"`
+	// AgentToken 是新签发的 agent 明文 token，仅在 enroll 响应中返回一次。
+	AgentToken string `json:"agent_token"`
+	// HeartbeatIntervalSeconds 是 agent 后续上报心跳的建议间隔。
+	HeartbeatIntervalSeconds int32 `json:"heartbeat_interval_seconds"`
 }
 
 // AgentHeartbeatInput 是 agent 上报心跳时提交的快照信息。
 type AgentHeartbeatInput struct {
-	AgentToken       string
-	AgentVersion     string
+	// AgentToken 是 enroll 返回的节点令牌，service 只用其 hash 匹配节点。
+	AgentToken string
+	// AgentVersion 是心跳时的 agent 版本。
+	AgentVersion string
+	// ResourceSnapshot 是心跳上报的资源快照 JSON 原文。
 	ResourceSnapshot []byte
-	Metadata         []byte
+	// Metadata 是心跳上报的附加元数据 JSON 原文。
+	Metadata []byte
 }
 
 // EnrollAgent 按 agent_id 幂等创建或刷新 runtime 节点，并签发新的 agent token。
@@ -281,6 +315,8 @@ func (s *RuntimeNodeService) HandleHeartbeat(ctx context.Context, input AgentHea
 	return toRuntimeNodeResult(updated), nil
 }
 
+// findNodeByAgentToken 通过 agent token hash 查找节点。
+// runtime_nodes 当前没有按 token hash 的查询，临时扫描节点列表；比较对象始终是 hash，避免明文 token 入库。
 func (s *RuntimeNodeService) findNodeByAgentToken(ctx context.Context, hash string) (sqlc.RuntimeNode, error) {
 	nodes, err := s.store.ListRuntimeNodes(ctx, sqlc.ListRuntimeNodesParams{Limit: 1000, Offset: 0})
 	if err != nil {
@@ -294,6 +330,8 @@ func (s *RuntimeNodeService) findNodeByAgentToken(ctx context.Context, hash stri
 	return sqlc.RuntimeNode{}, ErrAgentTokenInvalid
 }
 
+// validateEnrollInput 校验 agent enroll 的外部 ID、代理地址和 TLS CA。
+// AgentID 必须是 UUID，两个 endpoint 必须是 HTTPS URL，CA 必须是 PEM，避免写入不可连接节点。
 func validateEnrollInput(input AgentEnrollInput) error {
 	if _, err := parseUUID(strings.TrimSpace(input.AgentID)); err != nil {
 		return ErrEnrollInputInvalid
@@ -310,6 +348,8 @@ func validateEnrollInput(input AgentEnrollInput) error {
 	return nil
 }
 
+// validateHTTPSURL 解析并规范校验 agent 暴露给 manager 的代理地址。
+// 只允许 https 且必须有 host，阻止 agent 注册本地路径、空 host 或明文 HTTP endpoint。
 func validateHTTPSURL(value string) error {
 	parsed, err := url.Parse(strings.TrimSpace(value))
 	if err != nil {
@@ -321,6 +361,8 @@ func validateHTTPSURL(value string) error {
 	return nil
 }
 
+// toRuntimeNodeResult 将 sqlc 节点行转成 API 视图。
+// pgtype 空值会被归一化为空字符串或 nil，探测时间统一输出 UTC RFC3339。
 func toRuntimeNodeResult(node sqlc.RuntimeNode) RuntimeNodeResult {
 	result := RuntimeNodeResult{
 		ID:                       uuidToString(node.ID),
@@ -365,11 +407,15 @@ func toRuntimeNodeResult(node sqlc.RuntimeNode) RuntimeNodeResult {
 	return result
 }
 
+// textOrNull 将外部输入去首尾空白后写入 pgtype.Text。
+// 空字符串写成 NULL，避免把未配置 endpoint / 版本误展示为空值字段。
 func textOrNull(value string) pgtype.Text {
 	trimmed := strings.TrimSpace(value)
 	return pgtype.Text{String: trimmed, Valid: trimmed != ""}
 }
 
+// int32OrNull 将可选容量上限转换为 pgtype.Int4。
+// nil 表示 agent 未声明上限，调用方已在 EnrollAgent 中拒绝负数。
 func int32OrNull(value *int32) pgtype.Int4 {
 	if value == nil {
 		return pgtype.Int4{}
@@ -377,6 +423,8 @@ func int32OrNull(value *int32) pgtype.Int4 {
 	return pgtype.Int4{Int32: *value, Valid: true}
 }
 
+// shortAgentID 生成默认节点名使用的短外部 ID。
+// 只截取 trim 后的前 8 位，避免默认名称过长，同时保持同一 AgentID 的展示稳定。
 func shortAgentID(value string) string {
 	trimmed := strings.TrimSpace(value)
 	if len(trimmed) <= 8 {
@@ -385,6 +433,8 @@ func shortAgentID(value string) string {
 	return trimmed[:8]
 }
 
+// generateRandomToken 生成 agent token 明文。
+// 返回 hex 字符串给 agent，service 仅保存其 hash，用于后续 heartbeat 鉴权。
 func generateRandomToken(byteLen int) (string, error) {
 	buf := make([]byte, byteLen)
 	if _, err := rand.Read(buf); err != nil {

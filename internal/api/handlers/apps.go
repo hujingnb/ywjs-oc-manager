@@ -92,6 +92,8 @@ func (h *AppsHandler) Get(c *gin.Context) {
 	c.JSON(http.StatusOK, gin.H{"app": result})
 }
 
+// principal 从 Authorization Bearer token 提取调用主体。
+// 应用接口只做认证解析，跨组织和成员自有应用的访问控制由 AppService 继续调用 authorizer 判断。
 func (h *AppsHandler) principal(c *gin.Context) (auth.Principal, bool) {
 	token, ok := bearerToken(c.GetHeader("Authorization"))
 	if !ok {
@@ -106,6 +108,8 @@ func (h *AppsHandler) principal(c *gin.Context) (auth.Principal, bool) {
 	return principal, true
 }
 
+// writeAppsError 将 AppService 的 sentinel error 映射为 HTTP 状态码。
+// 未识别错误统一返回 500 和安全文案，避免把数据库或 new-api 细节暴露给前端。
 func writeAppsError(c *gin.Context, err error) {
 	switch {
 	case errors.Is(err, service.ErrForbidden):
