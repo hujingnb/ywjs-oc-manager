@@ -3,7 +3,8 @@
 // Package integration 提供需要真实 PostgreSQL 与 Redis 的端到端测试入口。
 //
 // 跑法：
-//   make integration-test       # 在 docker compose 中启动后端容器并 go test -tags=integration ./...
+//
+//	make integration-test       # 在 docker compose 中启动后端容器并 go test -tags=integration ./...
 //
 // 这一文件只承担"汇总测试入口 + 环境检测"职责。具体场景测试分散在各包的 *_integration_test.go 中。
 package integration

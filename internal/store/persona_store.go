@@ -13,6 +13,7 @@ import (
 // personaStore 提供 organization_personas 表的查询能力。
 // 因 sqlc 生成目录不可写，这里手写直连 pgx 的 query；保持与 sqlc 风格一致便于后续迁移。
 type personaStore struct {
+	// pool 承载 persona 专用手写查询；sqlc 补齐后可在这里集中替换实现。
 	pool *pgxpool.Pool
 }
 
@@ -31,6 +32,7 @@ LIMIT 1
 `
 
 // GetCurrentOrganizationPersona 取组织当前生效的 persona（版本号最大那条）。
+// 未配置 persona 时保持 pgx.ErrNoRows 原样返回，由 service 层映射为业务错误。
 func (s *personaStore) GetCurrentOrganizationPersona(ctx context.Context, orgID pgtype.UUID) (sqlc.OrganizationPersona, error) {
 	var persona sqlc.OrganizationPersona
 	row := s.pool.QueryRow(ctx, getCurrentPersona, orgID)
@@ -77,6 +79,7 @@ RETURNING id, org_id, system_prompt, conversation_rules, forbidden_rules, reply_
 
 // CreateOrganizationPersona 写入新版本 persona，返回完整记录。
 // version 由 SQL 自动递增；并发写入时由数据库唯一约束 (org_id, version) 拦截。
+// arg 中的 prompt 与规则字段已在 service 层完成业务校验，这里只负责持久化。
 func (s *personaStore) CreateOrganizationPersona(ctx context.Context, arg service.PersonaCreateInput) (sqlc.OrganizationPersona, error) {
 	var persona sqlc.OrganizationPersona
 	row := s.pool.QueryRow(ctx, createPersonaSQL,

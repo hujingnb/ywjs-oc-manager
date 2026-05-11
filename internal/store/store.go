@@ -13,7 +13,9 @@ import (
 // Store 封装数据库连接池和 sqlc 查询入口。
 // service 层通过 Store 获取查询对象和事务能力，不直接管理连接生命周期。
 type Store struct {
-	pool    *pgxpool.Pool
+	// pool 是全局共享的 PostgreSQL 连接池，由 Store 统一关闭。
+	pool *pgxpool.Pool
+	// Queries 暴露 sqlc 生成的类型安全查询方法，供 service 层组合使用。
 	Queries *sqlc.Queries
 }
 
@@ -29,6 +31,7 @@ func Open(ctx context.Context, databaseURL string) (*Store, error) {
 	if err != nil {
 		return nil, fmt.Errorf("创建数据库连接池失败: %w", err)
 	}
+	// New 只负责组合 Store，不额外 Ping；调用方按启动流程决定是否探活。
 	return New(pool), nil
 }
 
@@ -62,6 +65,7 @@ func (s *Store) WithTx(ctx context.Context, fn func(*sqlc.Queries) error) error 
 	}
 
 	if err := fn(s.Queries.WithTx(tx)); err != nil {
+		// 业务错误优先返回；回滚失败通常说明连接已失效，此处不覆盖原始失败原因。
 		_ = tx.Rollback(ctx)
 		return err
 	}
