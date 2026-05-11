@@ -149,6 +149,7 @@ type dockerExecutor struct {
 	resolver DockerClientResolver
 }
 
+// Exec 在指定 runtime node 的容器内启动命令，并返回可读输出流与清理函数。
 func (d *dockerExecutor) Exec(ctx context.Context, nodeID, containerID string, cmd []string) (io.Reader, func(), error) {
 	cli, err := d.resolver.DockerClient(ctx, nodeID)
 	if err != nil {

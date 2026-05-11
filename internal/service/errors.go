@@ -90,7 +90,7 @@ var ErrOrgMissingNewAPIUserID = errors.New("组织缺少 new-api 用户 ID")
 // ErrInvalidRechargeAmount 表示充值额度小于等于 0。
 var ErrInvalidRechargeAmount = errors.New("充值金额必须为正")
 
-// Runtime Node -----------------------------------------------------
+// 运行节点 -----------------------------------------------------------
 // 来源：原 runtime_node_service.go
 
 // ErrAgentTokenInvalid 表示 agent 心跳令牌不存在或与节点不匹配。

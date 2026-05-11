@@ -175,7 +175,7 @@ func runManager(ctx context.Context, cfg config.Config, logOut io.Writer) error 
 	}
 
 	imageDistribution := newImageDistributorWrapper(service.NewImageDistributionService(imageSync))
-	// new-api wiring：
+	// new-api 装配：
 	//   - newapiClient 是顶层 admin 视角；可调创建 user / 充值 / 查日志 / 查 quota；
 	//   - newapiFactory 在 worker handler 跑 job 时把 (app→org→credentials) 翻译成
 	//     user-scoped client，用于创 token / 拿完整 sk- / 改 token 状态；

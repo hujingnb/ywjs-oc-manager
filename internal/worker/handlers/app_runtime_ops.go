@@ -134,10 +134,12 @@ type AppStopContainerHandler struct {
 	containers ContainerLifecycle
 }
 
+// NewAppStopContainerHandler 创建停止容器 handler，依赖由 worker 装配层注入。
 func NewAppStopContainerHandler(store AppRuntimeStore, containers ContainerLifecycle) *AppStopContainerHandler {
 	return &AppStopContainerHandler{store: store, containers: containers}
 }
 
+// Handle 执行 app_stop_container job，并把无容器场景收敛为 stopped。
 func (h *AppStopContainerHandler) Handle(ctx context.Context, job sqlc.Job) error {
 	if job.Type != domain.JobTypeAppStopContainer {
 		return fmt.Errorf("非 app_stop_container 任务: %s", job.Type)
@@ -173,10 +175,12 @@ type AppRestartContainerHandler struct {
 	containers ContainerLifecycle
 }
 
+// NewAppRestartContainerHandler 创建重启容器 handler，复用容器生命周期接口。
 func NewAppRestartContainerHandler(store AppRuntimeStore, containers ContainerLifecycle) *AppRestartContainerHandler {
 	return &AppRestartContainerHandler{store: store, containers: containers}
 }
 
+// Handle 执行 app_restart_container job，并在成功后把应用状态推回 running。
 func (h *AppRestartContainerHandler) Handle(ctx context.Context, job sqlc.Job) error {
 	if job.Type != domain.JobTypeAppRestartContainer {
 		return fmt.Errorf("非 app_restart_container 任务: %s", job.Type)
@@ -216,10 +220,12 @@ type AppDeleteHandler struct {
 	fileOps    AppDeleteFileOps
 }
 
+// NewAppDeleteHandler 创建删除应用 handler，允许 new-api 与文件操作依赖按环境为空。
 func NewAppDeleteHandler(store AppRuntimeStore, containers ContainerLifecycle, factory NewAPIClientFactory, fileOps AppDeleteFileOps) *AppDeleteHandler {
 	return &AppDeleteHandler{store: store, containers: containers, factory: factory, fileOps: fileOps}
 }
 
+// Handle 执行 app_delete job；任一步失败都返回错误交给 worker 重试。
 func (h *AppDeleteHandler) Handle(ctx context.Context, job sqlc.Job) error {
 	if job.Type != domain.JobTypeAppDelete {
 		return fmt.Errorf("非 app_delete 任务: %s", job.Type)

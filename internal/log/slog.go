@@ -27,6 +27,7 @@ type requestIDHandler struct {
 	slog.Handler
 }
 
+// Handle 在写日志前追加 trace_id，缺失时保持原始 record 不变。
 func (h *requestIDHandler) Handle(ctx context.Context, r slog.Record) error {
 	if id := requestIDExtractor(ctx); id != "" {
 		r.AddAttrs(slog.String("trace_id", id))
@@ -34,10 +35,12 @@ func (h *requestIDHandler) Handle(ctx context.Context, r slog.Record) error {
 	return h.Handler.Handle(ctx, r)
 }
 
+// WithAttrs 保持 requestIDHandler 包装，避免 slog 派生 handler 后丢失 trace_id 注入。
 func (h *requestIDHandler) WithAttrs(attrs []slog.Attr) slog.Handler {
 	return &requestIDHandler{Handler: h.Handler.WithAttrs(attrs)}
 }
 
+// WithGroup 保持 requestIDHandler 包装，确保分组日志仍能自动带 trace_id。
 func (h *requestIDHandler) WithGroup(name string) slog.Handler {
 	return &requestIDHandler{Handler: h.Handler.WithGroup(name)}
 }

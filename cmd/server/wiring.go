@@ -448,6 +448,7 @@ func newHealthCheckDispatcher(queries runtimeRefreshJobsQueries, notifier servic
 	return &healthCheckDispatcher{queries: queries, notifier: notifier}
 }
 
+// Tick 列出需要探活的应用并入队 app_health_check job。
 func (d *healthCheckDispatcher) Tick(ctx context.Context) error {
 	return enqueuePerRunningApp(ctx, d.queries, d.notifier, domain.JobTypeAppHealthCheck, 30, 1)
 }
@@ -558,6 +559,7 @@ type appDirInitializerAdapter struct {
 	}
 }
 
+// InitAppDirs 仅透传应用目录初始化调用，保持 handler 只依赖最小接口。
 func (a appDirInitializerAdapter) InitAppDirs(ctx context.Context, nodeID, appID string) error {
 	return a.adapter.InitAppDirs(ctx, nodeID, appID)
 }
@@ -586,6 +588,7 @@ type orgCredentialsRefresher struct {
 	password string
 }
 
+// RefreshAccessToken 刷新组织在 new-api 中的 access_token 并写回密文凭据。
 func (r *orgCredentialsRefresher) RefreshAccessToken(ctx context.Context) (string, error) {
 	org, err := r.store.GetOrganizationForUpdate(ctx, r.orgID)
 	if err != nil {
