@@ -274,6 +274,7 @@ func TestCanViewOwnAudit(t *testing.T) {
 		{"platform_admin 有 userID 可看自己的审计", Principal{UserID: userA, Role: domain.UserRolePlatformAdmin}, true},
 		{"org_admin 有 userID 可看自己的审计", Principal{UserID: userA, OrgID: orgA, Role: domain.UserRoleOrgAdmin}, true},
 		{"org_member 有 userID 可看自己的审计", Principal{UserID: userA, OrgID: orgA, Role: domain.UserRoleOrgMember}, true},
+		{"未知角色即使有 userID 也不可看自己的审计", Principal{UserID: userA, Role: "unknown"}, false},
 		{"空 userID 不可看自己的审计", Principal{Role: domain.UserRoleOrgMember, OrgID: orgA}, false},
 	}
 	for _, c := range cases {

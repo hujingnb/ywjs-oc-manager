@@ -94,7 +94,8 @@ func CanManageOrgPersona(p Principal, orgID string) bool {
 }
 
 // 应用资源（业务别名） ---------------------------------------------
-// 以下函数当前与 CanViewApp 等价，按调用上下文命名以便未来差异化。
+// 下面按“读权限”和“写/运行时权限”拆分应用相关谓词：
+// 读取类谓词保留 CanViewApp 的跨组织观察语义，写入/运行时类谓词则收紧到组织管理员或 owner 成员。
 
 // CanManageApp 判断主体是否可对应用执行管理写操作（如渠道绑定）。
 // 平台管理员只有跨组织观察权限，不继承任何应用写权限；
@@ -182,7 +183,15 @@ func CanViewOrgAudit(p Principal, orgID string) bool {
 }
 
 // CanViewOwnAudit 判断主体是否可查看“我的审计”视角。
-// 该视角必须能落到具体操作者，因此至少要求主体具备非空 userID。
+// 该视角必须能落到受支持的具体操作者，因此要求主体属于已知角色且具备非空 userID。
 func CanViewOwnAudit(p Principal) bool {
-	return p.UserID != ""
+	if p.UserID == "" {
+		return false
+	}
+	switch p.Role {
+	case domain.UserRolePlatformAdmin, domain.UserRoleOrgAdmin, domain.UserRoleOrgMember:
+		return true
+	default:
+		return false
+	}
 }
