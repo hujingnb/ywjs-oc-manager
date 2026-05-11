@@ -112,6 +112,14 @@ func TestKnowledgeServicePlatformAdminCannotGetOrgSyncStatus(t *testing.T) {
 	require.ErrorIs(t, err, ErrKnowledgeForbidden)
 }
 
+func TestKnowledgeServiceOrgAdminCanGetOrgSyncStatus(t *testing.T) {
+	svc := newKnowledgeService(t)
+	svc.SetSyncStatusSource(knowledgeStatusSourceStub{})
+
+	_, err := svc.GetOrgSyncStatus(context.Background(), orgKnowledgeAdmin(), testKnowledgeOrg)
+	require.NoError(t, err)
+}
+
 func newKnowledgeService(t *testing.T) *KnowledgeService {
 	t.Helper()
 	root, err := files.NewSafeRoot(t.TempDir(), 1024)

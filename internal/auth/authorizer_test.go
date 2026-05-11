@@ -190,6 +190,7 @@ func TestOrgKnowledgePredicates(t *testing.T) {
 		{"org_member 跨组织不可写组织知识库", domain.UserRoleOrgMember, orgA, orgB, false},
 	}
 	runOrgCases(t, CanWriteOrgKnowledge, writeCases)
+	runOrgCases(t, CanViewOrgKnowledgeSyncStatus, writeCases)
 	runOrgCases(t, CanRetryOrgKnowledgeSync, writeCases)
 }
 

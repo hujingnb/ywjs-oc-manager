@@ -72,7 +72,7 @@ func (s *KnowledgeService) SetRetryDispatcher(d KnowledgeRetryDispatcher) {
 // GetOrgSyncStatus 列出组织在所有节点上的最近同步状态。
 // 该状态属于组织知识库运维面，只允许本组织管理员查看。
 func (s *KnowledgeService) GetOrgSyncStatus(ctx context.Context, principal auth.Principal, orgID string) ([]SyncStatusResult, error) {
-	if !auth.CanRetryOrgKnowledgeSync(principal, orgID) {
+	if !auth.CanViewOrgKnowledgeSyncStatus(principal, orgID) {
 		return nil, ErrKnowledgeForbidden
 	}
 	if s.statusSource == nil {
