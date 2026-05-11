@@ -37,7 +37,7 @@ type CreateOrganizationRequest struct {
 	ContactPhone string `json:"contact_phone"`
 	// Remark 是平台管理员维护的内部备注。
 	Remark string `json:"remark"`
-	// CreditWarningThreshold 是组织余额预警阈值；nil 表示使用系统默认策略。
+	// CreditWarningThreshold 是组织余额预警阈值；nil 表示不启用余额预警或保持预警关闭。
 	CreditWarningThreshold *int32 `json:"credit_warning_threshold"`
 	// AdminUsername 是随组织创建的首个 org_admin 账号名。
 	AdminUsername string `json:"admin_username" binding:"required"`
