@@ -18,18 +18,12 @@ import (
 type AppHealthCheckStore interface {
 	AppRuntimeStore
 	SetAppHealthState(ctx context.Context, arg sqlc.SetAppHealthStateParams) (sqlc.App, error)
-	CreateJob(ctx context.Context, arg sqlc.CreateJobParams) (sqlc.Job, error)
 }
 
 // HealthCheckExecutor 抽象 worker 在容器内跑 healthz 探针的能力。
 // 默认实现是 RuntimeAdapter.ContainerExec；测试中替换为内存桩。
 type HealthCheckExecutor interface {
 	ContainerExec(ctx context.Context, nodeID, containerID string, cmd []string) (runtime.ExecResult, error)
-}
-
-// JobNotifier 与 service 包同名接口对齐；这里独立声明避免 worker 反向依赖 service。
-type JobNotifier interface {
-	Enqueue(ctx context.Context, jobID string) error
 }
 
 // healthCheckCmd 在 OpenClaw 容器内调本地 18789 /healthz。
@@ -53,26 +47,24 @@ type healthState struct {
 	RestartedAt   []time.Time `json:"restarted_at,omitempty"`
 }
 
-// AppHealthCheckHandler 周期跑容器内 /healthz 探针，按 restart_policy 触发自动重启。
+// AppHealthCheckHandler 周期跑容器内 /healthz 探针，记录健康状态并按 restart_policy 控制错误熔断。
 //
 // 处理流程：
 //  1. load app（已删除/无容器/non-running 直接成功跳过）；
 //  2. 解析 restart_policy + 现有 health_state；
 //  3. ContainerExec /healthz：成功 → 写 last_success_at；失败 → append failures；
-//  4. mode=on_failure/always 且窗口内失败次数 < max → 入队 app_restart_container + append restarted_at；
-//  5. 失败次数 >= max → 把 apps.status 推到 error，停止重试。
+//  4. 失败次数 > max → 把 apps.status 推到 error，停止把短时卡顿误判成可自动重启故障。
 //
-// 任意环节冒泡的错误只标记为 job 失败由 worker 重试；handler 自身保持幂等，重复执行不会重复入队（看窗口）。
+// 任意环节冒泡的错误只标记为 job 失败由 worker 重试；handler 自身保持幂等。
 type AppHealthCheckHandler struct {
 	store    AppHealthCheckStore
 	executor HealthCheckExecutor
-	notifier JobNotifier
 	now      func() time.Time
 }
 
 // NewAppHealthCheckHandler 创建 handler。
-func NewAppHealthCheckHandler(store AppHealthCheckStore, executor HealthCheckExecutor, notifier JobNotifier) *AppHealthCheckHandler {
-	return &AppHealthCheckHandler{store: store, executor: executor, notifier: notifier, now: time.Now}
+func NewAppHealthCheckHandler(store AppHealthCheckStore, executor HealthCheckExecutor) *AppHealthCheckHandler {
+	return &AppHealthCheckHandler{store: store, executor: executor, now: time.Now}
 }
 
 // Handle 执行 app_health_check job。
@@ -104,17 +96,12 @@ func (h *AppHealthCheckHandler) Handle(ctx context.Context, job sqlc.Job) error 
 	if execErr != nil || exec.ExitCode != 0 {
 		state.LastFailureAt = now
 		if execErr != nil {
-			state.LastError = execErr.Error()
+			state.LastError = sanitizeHealthStateText(execErr.Error())
 		} else {
-			state.LastError = fmt.Sprintf("exit=%d %s", exec.ExitCode, truncate(exec.Stdout, 200))
+			state.LastError = sanitizeHealthStateText(fmt.Sprintf("exit=%d %s", exec.ExitCode, truncate(exec.Stdout, 200)))
 		}
 		state.Failures = appendWithinWindow(state.Failures, now, policy)
-		if shouldTriggerRestart(policy, len(state.Failures)) {
-			if err := h.enqueueRestart(ctx, payload.AppID); err != nil {
-				return fmt.Errorf("入队 app_restart_container 失败: %w", err)
-			}
-			state.RestartedAt = appendWithinWindow(state.RestartedAt, now, policy)
-		} else if exhaustedRestartBudget(policy, len(state.Failures)) {
+		if exhaustedRestartBudget(policy, len(state.Failures)) {
 			if _, err := h.store.SetAppStatus(ctx, sqlc.SetAppStatusParams{ID: app.ID, Status: domain.AppStatusError}); err != nil {
 				return fmt.Errorf("更新应用状态失败: %w", err)
 			}
@@ -132,27 +119,6 @@ func (h *AppHealthCheckHandler) Handle(ctx context.Context, job sqlc.Job) error 
 		HealthStateJson: encoded,
 	}); err != nil {
 		return fmt.Errorf("写入 health state 失败: %w", err)
-	}
-	return nil
-}
-
-func (h *AppHealthCheckHandler) enqueueRestart(ctx context.Context, appID string) error {
-	body, err := json.Marshal(map[string]any{"app_id": appID})
-	if err != nil {
-		return err
-	}
-	job, err := h.store.CreateJob(ctx, sqlc.CreateJobParams{
-		Type:        domain.JobTypeAppRestartContainer,
-		Priority:    50,
-		MaxAttempts: 3,
-		RunAfter:    pgtype.Timestamptz{Time: time.Now(), Valid: true},
-		PayloadJson: body,
-	})
-	if err != nil {
-		return err
-	}
-	if h.notifier != nil {
-		_ = h.notifier.Enqueue(ctx, uuidToString(job.ID))
 	}
 	return nil
 }
@@ -201,15 +167,6 @@ func appendWithinWindow(list []time.Time, ts time.Time, policy restartPolicy) []
 	return out
 }
 
-// shouldTriggerRestart 决定本次失败是否触发自动重启入队。
-// mode=none 永远 false；on_failure / always 在窗口内失败次数 ≤ max 才触发。
-func shouldTriggerRestart(policy restartPolicy, failures int) bool {
-	if policy.Mode == "none" {
-		return false
-	}
-	return failures <= policy.MaxPerWindow
-}
-
 // exhaustedRestartBudget 判断是否需要把 apps.status 推到 error 锁死。
 func exhaustedRestartBudget(policy restartPolicy, failures int) bool {
 	if policy.Mode == "none" {
@@ -223,4 +180,10 @@ func truncate(s string, n int) string {
 		return strings.TrimSpace(s)
 	}
 	return strings.TrimSpace(s[:n]) + "…"
+}
+
+func sanitizeHealthStateText(s string) string {
+	// PostgreSQL jsonb 不接受 \u0000；健康检查失败文本来自容器 stdout / error，
+	// 写库前需要清洗，避免“记录失败状态”本身把 job 打失败。
+	return strings.ReplaceAll(s, "\x00", "�")
 }

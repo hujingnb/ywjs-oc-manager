@@ -4,15 +4,16 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"strings"
 	"testing"
 	"time"
 
 	"github.com/jackc/pgx/v5/pgtype"
 
+	"github.com/stretchr/testify/require"
 	"oc-manager/internal/domain"
 	"oc-manager/internal/integrations/runtime"
 	"oc-manager/internal/store/sqlc"
-	"github.com/stretchr/testify/require"
 )
 
 type fakeHealthStore struct {
@@ -77,7 +78,7 @@ func TestAppHealthCheckSuccessClearsError(t *testing.T) {
 	app.HealthStateJson = []byte(`{"last_error":"old"}`)
 	store := &fakeHealthStore{app: app}
 	exec := &fakeExecutor{result: runtime.ExecResult{ExitCode: 0, Stdout: `{"ok":true}`}}
-	h := NewAppHealthCheckHandler(store, exec, &capturingNotifier{})
+	h := NewAppHealthCheckHandler(store, exec)
 	job := sqlc.Job{Type: domain.JobTypeAppHealthCheck, PayloadJson: []byte(`{"app_id":"11111111-1111-1111-1111-111111111111"}`)}
 	err := h.Handle(context.Background(), job)
 	require.NoError(t, err)
@@ -89,18 +90,19 @@ func TestAppHealthCheckSuccessClearsError(t *testing.T) {
 	}
 }
 
-func TestAppHealthCheckFailureTriggersRestart(t *testing.T) {
+func TestAppHealthCheckFailureRecordsFailureWithoutRestart(t *testing.T) {
 	store := &fakeHealthStore{app: makeAppForHealth(t)}
 	exec := &fakeExecutor{result: runtime.ExecResult{ExitCode: 1, Stdout: "Connection refused"}}
-	notifier := &capturingNotifier{}
-	h := NewAppHealthCheckHandler(store, exec, notifier)
+	h := NewAppHealthCheckHandler(store, exec)
 	job := sqlc.Job{Type: domain.JobTypeAppHealthCheck, PayloadJson: []byte(`{"app_id":"11111111-1111-1111-1111-111111111111"}`)}
 	err := h.Handle(context.Background(), job)
 	require.NoError(t, err)
-	if len(store.jobs) != 1 || store.jobs[0].Type != domain.JobTypeAppRestartContainer {
-		t.Fatalf("应入队 1 条 app_restart_container; got %v", store.jobs)
-	}
-	require.Equal(t, 1, notifier.count)
+	require.Equal(t, 0, len(store.jobs))
+	var state healthState
+	require.NoError(t, json.Unmarshal(store.healthState, &state))
+	require.Equal(t, "exit=1 Connection refused", state.LastError)
+	require.Equal(t, 1, len(state.Failures))
+	require.Equal(t, 0, len(state.RestartedAt))
 }
 
 func TestAppHealthCheckExhaustedBudgetSetsError(t *testing.T) {
@@ -112,7 +114,7 @@ func TestAppHealthCheckExhaustedBudgetSetsError(t *testing.T) {
 	app.HealthStateJson = stateBytes
 	store := &fakeHealthStore{app: app}
 	exec := &fakeExecutor{result: runtime.ExecResult{ExitCode: 1, Stdout: "fail"}}
-	h := NewAppHealthCheckHandler(store, exec, &capturingNotifier{})
+	h := NewAppHealthCheckHandler(store, exec)
 	h.now = func() time.Time { return now.Add(time.Second) }
 	job := sqlc.Job{Type: domain.JobTypeAppHealthCheck, PayloadJson: []byte(`{"app_id":"11111111-1111-1111-1111-111111111111"}`)}
 	err := h.Handle(context.Background(), job)
@@ -126,11 +128,26 @@ func TestAppHealthCheckExhaustedBudgetSetsError(t *testing.T) {
 func TestAppHealthCheckExecErrorAlsoTreatedAsFailure(t *testing.T) {
 	store := &fakeHealthStore{app: makeAppForHealth(t)}
 	exec := &fakeExecutor{err: errors.New("docker dial")}
-	h := NewAppHealthCheckHandler(store, exec, &capturingNotifier{})
+	h := NewAppHealthCheckHandler(store, exec)
 	job := sqlc.Job{Type: domain.JobTypeAppHealthCheck, PayloadJson: []byte(`{"app_id":"11111111-1111-1111-1111-111111111111"}`)}
 	err := h.Handle(context.Background(), job)
 	require.NoError(t, err)
-	require.Equal(t, 1, len(store.jobs))
+	require.Equal(t, 0, len(store.jobs))
+}
+
+func TestAppHealthCheckSanitizesNULInFailureText(t *testing.T) {
+	store := &fakeHealthStore{app: makeAppForHealth(t)}
+	exec := &fakeExecutor{result: runtime.ExecResult{ExitCode: 1, Stdout: "bad\x00json"}}
+	h := NewAppHealthCheckHandler(store, exec)
+	job := sqlc.Job{Type: domain.JobTypeAppHealthCheck, PayloadJson: []byte(`{"app_id":"11111111-1111-1111-1111-111111111111"}`)}
+	err := h.Handle(context.Background(), job)
+	require.NoError(t, err)
+	if strings.Contains(string(store.healthState), `\u0000`) {
+		t.Fatalf("health_state_json 不应包含 PostgreSQL JSONB 拒绝的 NUL 转义: %s", store.healthState)
+	}
+	var state healthState
+	require.NoError(t, json.Unmarshal(store.healthState, &state))
+	require.Equal(t, "exit=1 bad�json", state.LastError)
 }
 
 func TestAppHealthCheckNoneModeSkipsRestart(t *testing.T) {
@@ -138,7 +155,7 @@ func TestAppHealthCheckNoneModeSkipsRestart(t *testing.T) {
 	app.RestartPolicyJson = []byte(`{"mode":"none","max_per_window":5,"window_seconds":600}`)
 	store := &fakeHealthStore{app: app}
 	exec := &fakeExecutor{result: runtime.ExecResult{ExitCode: 1, Stdout: "fail"}}
-	h := NewAppHealthCheckHandler(store, exec, &capturingNotifier{})
+	h := NewAppHealthCheckHandler(store, exec)
 	job := sqlc.Job{Type: domain.JobTypeAppHealthCheck, PayloadJson: []byte(`{"app_id":"11111111-1111-1111-1111-111111111111"}`)}
 	err := h.Handle(context.Background(), job)
 	require.NoError(t, err)

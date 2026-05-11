@@ -263,7 +263,7 @@ func runManager(ctx context.Context, cfg config.Config, logOut io.Writer) error 
 	if err := registry.Register(domain.JobTypeRuntimeRefreshStatus, runtimeRefreshHandler.Handle); err != nil {
 		return fmt.Errorf("注册 runtime_refresh_status handler 失败: %w", err)
 	}
-	healthCheckHandler := handlers.NewAppHealthCheckHandler(dbStore.Queries, runtimeAdapter, redisQueue)
+	healthCheckHandler := handlers.NewAppHealthCheckHandler(dbStore.Queries, runtimeAdapter)
 	if err := registry.Register(domain.JobTypeAppHealthCheck, healthCheckHandler.Handle); err != nil {
 		return fmt.Errorf("注册 app_health_check handler 失败: %w", err)
 	}
