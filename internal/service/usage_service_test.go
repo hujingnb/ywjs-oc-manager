@@ -8,11 +8,11 @@ import (
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgtype"
 
+	"github.com/stretchr/testify/require"
 	"oc-manager/internal/auth"
 	"oc-manager/internal/domain"
 	"oc-manager/internal/integrations/newapi"
 	"oc-manager/internal/store/sqlc"
-	"github.com/stretchr/testify/require"
 )
 
 // TestUsageServiceForbidsCrossOrg 校验非平台管理员只能看自己 org 的用量。
@@ -93,6 +93,39 @@ func TestUsageServiceMemberUsesActiveAppByOwner(t *testing.T) {
 	}
 }
 
+func TestUsageServiceMemberAllowsOrgMemberSelfOnly(t *testing.T) {
+	orgID := "00000000-0000-0000-0000-000000000b01"
+	memberID := "00000000-0000-0000-0000-000000000c01"
+	store := &fakeUsageStore{
+		activeApp: sqlc.App{
+			NewapiKeyID: pgtype.Text{String: "77", Valid: true},
+		},
+	}
+	client := &fakeUsageClient{tokenLogs: newapi.LogsPage{Items: []newapi.LogEntry{{ID: 9}}, Total: 1}}
+	svc := NewUsageService(store, client, nil)
+
+	view, err := svc.GetMemberUsage(context.Background(), auth.Principal{
+		Role:   domain.UserRoleOrgMember,
+		OrgID:  orgID,
+		UserID: memberID,
+	}, orgID, memberID, LogsQueryOptions{})
+	require.NoError(t, err)
+	require.Len(t, view.Items, 1)
+	require.Equal(t, int64(77), client.lastTokenLogsQuery.TokenID)
+}
+
+func TestUsageServiceMemberRejectsOrgMemberOtherUsage(t *testing.T) {
+	orgID := "00000000-0000-0000-0000-000000000b01"
+	svc := NewUsageService(&fakeUsageStore{}, &fakeUsageClient{}, nil)
+
+	_, err := svc.GetMemberUsage(context.Background(), auth.Principal{
+		Role:   domain.UserRoleOrgMember,
+		OrgID:  orgID,
+		UserID: "00000000-0000-0000-0000-000000000c02",
+	}, orgID, "00000000-0000-0000-0000-000000000c01", LogsQueryOptions{})
+	require.ErrorIs(t, err, ErrForbidden)
+}
+
 // TestUsageServiceOrgUsesNewapiUserID 校验 org 维度查 organizations.newapi_user_id 后调
 // GetUserQuotaDates。
 func TestUsageServiceOrgUsesNewapiUserID(t *testing.T) {
@@ -117,6 +150,18 @@ func TestUsageServiceOrgUsesNewapiUserID(t *testing.T) {
 func TestUsageServicePlatformOnlyAdmin(t *testing.T) {
 	svc := NewUsageService(&fakeUsageStore{}, &fakeUsageClient{}, nil)
 	_, err := svc.GetPlatformUsage(context.Background(), auth.Principal{Role: domain.UserRoleOrgAdmin}, 0, 0)
+	require.ErrorIs(t, err, ErrForbidden)
+}
+
+func TestUsageServiceOrgRejectsOrgMember(t *testing.T) {
+	orgID := "00000000-0000-0000-0000-000000000b01"
+	svc := NewUsageService(&fakeUsageStore{}, &fakeUsageClient{}, nil)
+
+	_, err := svc.GetOrgUsage(context.Background(), auth.Principal{
+		Role:   domain.UserRoleOrgMember,
+		OrgID:  orgID,
+		UserID: "00000000-0000-0000-0000-000000000c01",
+	}, orgID, 0, 0)
 	require.ErrorIs(t, err, ErrForbidden)
 }
 

@@ -10,12 +10,12 @@ import (
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgtype"
 
+	"github.com/stretchr/testify/require"
 	"oc-manager/internal/auth"
 	"oc-manager/internal/domain"
 	"oc-manager/internal/integrations/runtime"
 	"oc-manager/internal/runtime/imagesync"
 	"oc-manager/internal/store/sqlc"
-	"github.com/stretchr/testify/require"
 )
 
 const (
@@ -47,6 +47,24 @@ func TestWorkspaceServiceListReturnsEntries(t *testing.T) {
 	if adapter.lastAppID != testWorkAppID || adapter.lastRelPath != "logs" {
 		t.Fatalf("adapter 收到 appID=%q relPath=%q", adapter.lastAppID, adapter.lastRelPath)
 	}
+}
+
+func TestWorkspaceServiceListAllowsPlatformAdminRead(t *testing.T) {
+	store := newWorkspaceStub(t)
+	adapter := &fakeWorkspaceAdapter{
+		workspaceListing: runtime.WorkspaceListing{
+			Path: "/",
+			Entries: []runtime.WorkspaceEntry{
+				{Name: "session.log", Type: "file", Size: 18, ModifiedAt: "2026-05-03T00:00:00Z"},
+			},
+		},
+	}
+	svc := NewWorkspaceService(store, adapter, "/data")
+
+	listing, err := svc.List(context.Background(), platformAdmin(), testWorkAppID, "")
+	require.NoError(t, err)
+	require.Len(t, listing.Entries, 1)
+	require.Equal(t, "session.log", listing.Entries[0].Name)
 }
 
 func TestWorkspaceServiceListRejectsForbidden(t *testing.T) {

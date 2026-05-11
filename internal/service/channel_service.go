@@ -67,7 +67,7 @@ type ProgressResult struct {
 // 这里只负责权限校验、渠道可用性校验、状态置为 pending_auth 并入队任务，
 // 避免微信插件加载或二维码生成阻塞请求线程。
 func (s *ChannelService) BeginAuth(ctx context.Context, principal auth.Principal, appID, channelType string) (ChallengeResult, error) {
-	app, err := s.loadAuthorizedApp(ctx, principal, appID)
+	app, err := s.loadManageableApp(ctx, principal, appID)
 	if err != nil {
 		return ChallengeResult{}, err
 	}
@@ -126,7 +126,7 @@ func (s *ChannelService) BeginAuth(ctx context.Context, principal auth.Principal
 // PollAuth 查询登录进度。真实状态推进由 channel_check_binding worker 完成；
 // 这里只读取 DB 中的 channel_bindings，保证轮询接口轻量且可恢复。
 func (s *ChannelService) PollAuth(ctx context.Context, principal auth.Principal, appID, channelType string) (ProgressResult, error) {
-	app, err := s.loadAuthorizedApp(ctx, principal, appID)
+	app, err := s.loadViewableApp(ctx, principal, appID)
 	if err != nil {
 		return ProgressResult{}, err
 	}
@@ -169,7 +169,7 @@ func (s *ChannelService) PollAuth(ctx context.Context, principal auth.Principal,
 
 // Unbind 解绑指定渠道，状态置为 unbound_by_user。
 func (s *ChannelService) Unbind(ctx context.Context, principal auth.Principal, appID, channelType string) error {
-	app, err := s.loadAuthorizedApp(ctx, principal, appID)
+	app, err := s.loadManageableApp(ctx, principal, appID)
 	if err != nil {
 		return err
 	}
@@ -191,7 +191,9 @@ func (s *ChannelService) Unbind(ctx context.Context, principal auth.Principal, a
 	return nil
 }
 
-func (s *ChannelService) loadAuthorizedApp(ctx context.Context, principal auth.Principal, appID string) (sqlc.App, error) {
+// loadViewableApp 校验主体是否可读取应用渠道进度。
+// 渠道轮询属于只读视图，平台管理员保留跨组织观察能力。
+func (s *ChannelService) loadViewableApp(ctx context.Context, principal auth.Principal, appID string) (sqlc.App, error) {
 	id, err := parseUUID(appID)
 	if err != nil {
 		return sqlc.App{}, ErrNotFound
@@ -205,6 +207,16 @@ func (s *ChannelService) loadAuthorizedApp(ctx context.Context, principal auth.P
 	}
 	if !auth.CanViewApp(principal, uuidToString(app.OrgID), uuidToString(app.OwnerUserID)) {
 		return sqlc.App{}, ErrForbidden
+	}
+	return app, nil
+}
+
+// loadManageableApp 校验主体是否可修改应用渠道绑定。
+// BeginAuth / Unbind 都会写 channel_bindings，因此平台管理员不可越权执行。
+func (s *ChannelService) loadManageableApp(ctx context.Context, principal auth.Principal, appID string) (sqlc.App, error) {
+	app, err := s.loadViewableApp(ctx, principal, appID)
+	if err != nil {
+		return sqlc.App{}, err
 	}
 	if !auth.CanManageApp(principal, uuidToString(app.OrgID), uuidToString(app.OwnerUserID)) {
 		return sqlc.App{}, ErrForbidden

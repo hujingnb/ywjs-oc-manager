@@ -8,11 +8,11 @@ import (
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgtype"
 
+	"github.com/stretchr/testify/require"
 	"oc-manager/internal/auth"
 	"oc-manager/internal/domain"
 	"oc-manager/internal/integrations/channel"
 	"oc-manager/internal/store/sqlc"
-	"github.com/stretchr/testify/require"
 )
 
 const (
@@ -29,20 +29,18 @@ func TestChannelServiceBeginAuthSuccess(t *testing.T) {
 	})
 	svc := NewChannelService(store, registry)
 
-	result, err := svc.BeginAuth(context.Background(), platformAdmin(), testChannelAppID, domain.ChannelTypeWeChat)
+	result, err := svc.BeginAuth(context.Background(), channelOrgAdminPrincipal(), testChannelAppID, domain.ChannelTypeWeChat)
 	require.NoError(t, err)
 	require.NotEqual(t, "", result.JobID)
-	if !store.statusUpdated || store.lastStatus != domain.ChannelStatusPendingAuth {
-		t.Fatalf("expected status to be pending_auth, got %s", store.lastStatus)
-	}
-	if len(store.jobs) != 1 || store.jobs[0].Type != domain.JobTypeChannelStartLogin {
-		t.Fatalf("expected channel_start_login job, got %+v", store.jobs)
-	}
+	require.True(t, store.statusUpdated)
+	require.Equal(t, domain.ChannelStatusPendingAuth, store.lastStatus)
+	require.Len(t, store.jobs, 1)
+	require.Equal(t, domain.JobTypeChannelStartLogin, store.jobs[0].Type)
 }
 
 func TestChannelServiceBeginAuthMissingAdapter(t *testing.T) {
 	svc := NewChannelService(newChannelStub(t), channel.NewRegistry())
-	_, err := svc.BeginAuth(context.Background(), platformAdmin(), testChannelAppID, "missing")
+	_, err := svc.BeginAuth(context.Background(), channelOrgAdminPrincipal(), testChannelAppID, "missing")
 	require.ErrorIs(t, err, ErrChannelAdapterMissing)
 }
 
@@ -53,6 +51,16 @@ func TestChannelServiceBeginAuthForbidden(t *testing.T) {
 	svc := NewChannelService(store, registry)
 
 	_, err := svc.BeginAuth(context.Background(), auth.Principal{Role: domain.UserRoleOrgMember, OrgID: testChannelOrg, UserID: "00000000-0000-0000-0000-0000000000ff"}, testChannelAppID, domain.ChannelTypeWeChat)
+	require.ErrorIs(t, err, ErrForbidden)
+}
+
+func TestChannelServiceBeginAuthPlatformAdminForbidden(t *testing.T) {
+	store := newChannelStub(t)
+	registry := channel.NewRegistry()
+	registry.MustRegister(&fakeAdapter{})
+	svc := NewChannelService(store, registry)
+
+	_, err := svc.BeginAuth(context.Background(), platformAdmin(), testChannelAppID, domain.ChannelTypeWeChat)
 	require.ErrorIs(t, err, ErrForbidden)
 }
 
@@ -68,12 +76,10 @@ func TestChannelServicePollAuthMarksBound(t *testing.T) {
 
 	progress, err := svc.PollAuth(context.Background(), platformAdmin(), testChannelAppID, domain.ChannelTypeWeChat)
 	require.NoError(t, err)
-	if progress.Status != string(channel.AuthStatusBound) || progress.BoundIdentity != "alice" {
-		t.Fatalf("progress = %+v", progress)
-	}
-	if progress.Metadata["qrcode"] == "" || progress.Metadata["raw_qr"] == "" {
-		t.Fatalf("metadata 未展开二维码字段: %+v", progress.Metadata)
-	}
+	require.Equal(t, string(channel.AuthStatusBound), progress.Status)
+	require.Equal(t, "alice", progress.BoundIdentity)
+	require.NotEmpty(t, progress.Metadata["qrcode"])
+	require.NotEmpty(t, progress.Metadata["raw_qr"])
 }
 
 func TestChannelServicePollAuthPushesAppToRunningOnBound(t *testing.T) {
@@ -123,9 +129,17 @@ func TestChannelServiceUnbindUpdatesStatus(t *testing.T) {
 	store := newChannelStub(t)
 	svc := NewChannelService(store, channel.NewRegistry())
 
-	err := svc.Unbind(context.Background(), platformAdmin(), testChannelAppID, domain.ChannelTypeWeChat)
+	err := svc.Unbind(context.Background(), channelOrgAdminPrincipal(), testChannelAppID, domain.ChannelTypeWeChat)
 	require.NoError(t, err)
 	require.Equal(t, domain.ChannelStatusUnboundByUser, store.lastStatus)
+}
+
+func TestChannelServiceUnbindPlatformAdminForbidden(t *testing.T) {
+	store := newChannelStub(t)
+	svc := NewChannelService(store, channel.NewRegistry())
+
+	err := svc.Unbind(context.Background(), platformAdmin(), testChannelAppID, domain.ChannelTypeWeChat)
+	require.ErrorIs(t, err, ErrForbidden)
 }
 
 type fakeAdapter struct {
@@ -228,4 +242,12 @@ func (s *channelStub) CreateJob(_ context.Context, arg sqlc.CreateJobParams) (sq
 	}
 	s.jobs = append(s.jobs, job)
 	return job, nil
+}
+
+func channelOrgAdminPrincipal() auth.Principal {
+	return auth.Principal{
+		Role:   domain.UserRoleOrgAdmin,
+		OrgID:  testChannelOrg,
+		UserID: "00000000-0000-0000-0000-000000000caa",
+	}
 }

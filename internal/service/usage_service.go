@@ -56,8 +56,8 @@ func NewUsageService(store UsageStore, client UsageNewAPIClient, failAuditor New
 
 // LogsPage 是 app / member 维度的响应：透传 new-api log entries + 分页 total。
 type LogsPage struct {
-	Scope     string            `json:"scope"`
-	ScopeID   string            `json:"scope_id,omitempty"`
+	Scope   string `json:"scope"`
+	ScopeID string `json:"scope_id,omitempty"`
 	// Items 透传 new-api LogEntry 列表。
 	Items     []newapi.LogEntry `json:"items" swaggerignore:"true"`
 	Total     int               `json:"total"`
@@ -66,8 +66,8 @@ type LogsPage struct {
 
 // QuotaSeries 是 organization / platform 维度的响应：透传 new-api 的按日 quota 汇总。
 type QuotaSeries struct {
-	Scope     string             `json:"scope"`
-	ScopeID   string             `json:"scope_id,omitempty"`
+	Scope   string `json:"scope"`
+	ScopeID string `json:"scope_id,omitempty"`
 	// Items 透传 new-api QuotaDate 列表。
 	Items     []newapi.QuotaDate `json:"items" swaggerignore:"true"`
 	UpdatedAt time.Time          `json:"updated_at"`
@@ -122,11 +122,7 @@ func (s *UsageService) GetMemberUsage(ctx context.Context, principal auth.Princi
 	if s.store == nil {
 		return LogsPage{}, ErrUsageUnavailable
 	}
-	if principal.Role != domain.UserRolePlatformAdmin && principal.OrgID != orgID {
-		return LogsPage{}, ErrForbidden
-	}
-	// 普通成员只允许查询自己名下的用量；其他成员的用量属于成员视角，对其不可见。
-	if principal.Role == domain.UserRoleOrgMember && principal.UserID != memberID {
+	if !auth.CanViewMemberUsage(principal, orgID, memberID) {
 		return LogsPage{}, ErrForbidden
 	}
 	memberUUID, err := parseUUID(memberID)
@@ -172,11 +168,7 @@ func (s *UsageService) GetOrgUsage(ctx context.Context, principal auth.Principal
 	if s.store == nil || s.client == nil {
 		return QuotaSeries{}, ErrUsageUnavailable
 	}
-	if principal.Role != domain.UserRolePlatformAdmin && principal.OrgID != orgID {
-		return QuotaSeries{}, ErrForbidden
-	}
-	// 组织级聚合用量不向普通成员开放，普通成员只能看自己应用维度。
-	if principal.Role == domain.UserRoleOrgMember {
+	if !auth.CanViewOrgUsage(principal, orgID) {
 		return QuotaSeries{}, ErrForbidden
 	}
 	id, err := parseUUID(orgID)

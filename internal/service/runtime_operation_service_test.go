@@ -9,10 +9,10 @@ import (
 
 	"github.com/jackc/pgx/v5/pgtype"
 
+	"github.com/stretchr/testify/require"
 	"oc-manager/internal/auth"
 	"oc-manager/internal/domain"
 	"oc-manager/internal/store/sqlc"
-	"github.com/stretchr/testify/require"
 )
 
 // newDiscardLogger 返回丢弃所有输出的测试用 logger，避免测试日志污染。
@@ -30,14 +30,12 @@ func TestRuntimeOperationTriggersJobAndAudit(t *testing.T) {
 	store := newRuntimeOperationStub(t)
 	svc := NewRuntimeOperationService(store, newDiscardLogger())
 
-	result, err := svc.Trigger(context.Background(), platformAdmin(), testRuntimeOpAppID, RuntimeOperationStart)
+	result, err := svc.Trigger(context.Background(), runtimeOrgAdminPrincipal(), testRuntimeOpAppID, RuntimeOperationStart)
 	require.NoError(t, err)
-	if result.JobID == "" || result.Operation != RuntimeOperationStart {
-		t.Fatalf("result = %+v", result)
-	}
-	if store.lastJobType != domain.JobTypeAppStartContainer || !store.auditWritten {
-		t.Fatalf("store side effects not as expected: %+v", store)
-	}
+	require.NotEmpty(t, result.JobID)
+	require.Equal(t, RuntimeOperationStart, result.Operation)
+	require.Equal(t, domain.JobTypeAppStartContainer, store.lastJobType)
+	require.True(t, store.auditWritten)
 }
 
 func TestRuntimeOperationDeniesOtherOrg(t *testing.T) {
@@ -61,7 +59,7 @@ func TestRuntimeOperationEnqueuesNotifierWhenProvided(t *testing.T) {
 	notifier := &fakeNotifier{}
 	svc := NewRuntimeOperationService(store, newDiscardLogger(), notifier)
 
-	result, err := svc.Trigger(context.Background(), platformAdmin(), testRuntimeOpAppID, RuntimeOperationStop)
+	result, err := svc.Trigger(context.Background(), runtimeOrgAdminPrincipal(), testRuntimeOpAppID, RuntimeOperationStop)
 	require.NoError(t, err)
 	require.Equal(t, result.JobID, notifier.lastJobID)
 }
@@ -71,8 +69,16 @@ func TestRuntimeOperationSurvivesNotifierError(t *testing.T) {
 	notifier := &fakeNotifier{err: errors.New("redis down")}
 	svc := NewRuntimeOperationService(store, newDiscardLogger(), notifier)
 
-	_, err := svc.Trigger(context.Background(), platformAdmin(), testRuntimeOpAppID, RuntimeOperationStop)
+	_, err := svc.Trigger(context.Background(), runtimeOrgAdminPrincipal(), testRuntimeOpAppID, RuntimeOperationStop)
 	require.NoError(t, err)
+}
+
+func TestRuntimeOperationRejectsPlatformAdminWrite(t *testing.T) {
+	store := newRuntimeOperationStub(t)
+	svc := NewRuntimeOperationService(store, newDiscardLogger())
+
+	_, err := svc.Trigger(context.Background(), platformAdmin(), testRuntimeOpAppID, RuntimeOperationStop)
+	require.ErrorIs(t, err, ErrRuntimeOperationDenied)
 }
 
 func TestRequestInitialize_HappyPathFromError(t *testing.T) {
@@ -83,11 +89,10 @@ func TestRequestInitialize_HappyPathFromError(t *testing.T) {
 	notifier := &fakeNotifier{}
 	svc := NewRuntimeOperationService(store, newDiscardLogger(), notifier)
 
-	result, err := svc.RequestInitialize(context.Background(), platformAdmin(), testRuntimeOpAppID)
+	result, err := svc.RequestInitialize(context.Background(), runtimeOrgAdminPrincipal(), testRuntimeOpAppID)
 	require.NoError(t, err)
-	if result.JobID == "" || result.Operation != "initialize" {
-		t.Fatalf("result = %+v", result)
-	}
+	require.NotEmpty(t, result.JobID)
+	require.Equal(t, RuntimeOperation("initialize"), result.Operation)
 	require.Equal(t, domain.AppStatusDraft, store.app.Status)
 	require.Equal(t, domain.APIKeyStatusPending, store.app.ApiKeyStatus)
 	require.False(t, store.app.ContainerID.Valid)
@@ -100,8 +105,17 @@ func TestRequestInitialize_RejectsRunningStatus(t *testing.T) {
 	store := newRuntimeOperationStub(t)
 	store.app.Status = domain.AppStatusRunning
 	svc := NewRuntimeOperationService(store, newDiscardLogger())
-	_, err := svc.RequestInitialize(context.Background(), platformAdmin(), testRuntimeOpAppID)
+	_, err := svc.RequestInitialize(context.Background(), runtimeOrgAdminPrincipal(), testRuntimeOpAppID)
 	require.ErrorIs(t, err, ErrAppNotReinitializable)
+}
+
+func TestRequestInitialize_RejectsPlatformAdminWrite(t *testing.T) {
+	store := newRuntimeOperationStub(t)
+	store.app.Status = domain.AppStatusError
+	svc := NewRuntimeOperationService(store, newDiscardLogger())
+
+	_, err := svc.RequestInitialize(context.Background(), platformAdmin(), testRuntimeOpAppID)
+	require.ErrorIs(t, err, ErrRuntimeOperationDenied)
 }
 
 func TestInspectApp_NoContainerReturnsSentinel(t *testing.T) {
@@ -178,9 +192,17 @@ func TestRuntimeOperationMembersCanOnlyTriggerOwnApp(t *testing.T) {
 	require.NoError(t, err)
 }
 
+func runtimeOrgAdminPrincipal() auth.Principal {
+	return auth.Principal{
+		Role:   domain.UserRoleOrgAdmin,
+		OrgID:  testRuntimeOpOrg,
+		UserID: "00000000-0000-0000-0000-0000000010aa",
+	}
+}
+
 type runtimeOperationStub struct {
-	t            *testing.T
-	app          sqlc.App
+	t   *testing.T
+	app sqlc.App
 	// userStatus 控制 GetUser 返回的用户状态；默认为 active。
 	userStatus   string
 	lastJobType  string
