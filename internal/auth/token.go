@@ -34,9 +34,11 @@ type Principal struct {
 type tokenClaims struct {
 	Principal
 	// Type 区分 access/refresh，防止 refresh token 被误用到 API 访问路径。
-	Type      string `json:"typ"`
-	ExpiresAt int64  `json:"exp"`
-	IssuedAt  int64  `json:"iat"`
+	Type string `json:"typ"`
+	// ExpiresAt 是 UTC Unix 秒级过期时间，校验时到点即拒绝。
+	ExpiresAt int64 `json:"exp"`
+	// IssuedAt 是 UTC Unix 秒级签发时间，主要用于审计和排查令牌生命周期。
+	IssuedAt int64 `json:"iat"`
 }
 
 // TokenManager 负责签发和验证 HMAC-SHA256 JWT。

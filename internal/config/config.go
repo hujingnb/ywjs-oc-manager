@@ -33,14 +33,19 @@ type Config struct {
 // AppConfig 描述 manager API 进程自身的运行参数。
 // HTTPAddr 必须显式配置，避免容器内外端口不一致时静默监听错误地址。
 type AppConfig struct {
-	Env           string `yaml:"env"`
-	HTTPAddr      string `yaml:"http_addr"`
+	// Env 标识当前运行环境，供日志、调试和未来环境分支使用。
+	Env string `yaml:"env"`
+	// HTTPAddr 是 manager API 监听地址，必须显式配置以匹配容器端口暴露。
+	HTTPAddr string `yaml:"http_addr"`
+	// PublicBaseURL 是浏览器访问 manager 的公开地址，用作 CORS origin 和外部链接基准。
 	PublicBaseURL string `yaml:"public_base_url"`
-	DataRoot      string `yaml:"data_root"`
+	// DataRoot 是 manager 本地数据根目录，承载工作区归档等非知识库文件。
+	DataRoot string `yaml:"data_root"`
 	// KnowledgeRoot 是知识库主副本根目录（manager 端"主拷贝"，由 worker 同步到各 runtime node）。
 	// 此前由 OCM_KNOWLEDGE_ROOT 环境变量提供，现统一收口到 yaml；为空启动时 fail-fast。
 	// 路径下结构：orgs/<org_id>/...、apps/<app_id>/...，由 files.SafeRoot 沙箱化。
-	KnowledgeRoot  string        `yaml:"knowledge_root"`
+	KnowledgeRoot string `yaml:"knowledge_root"`
+	// ShutdownPeriod 是优雅退出等待时间的进程内派生配置，不从 YAML 读取。
 	ShutdownPeriod time.Duration `yaml:"-"`
 }
 
@@ -53,9 +58,13 @@ type DatabaseConfig struct {
 // RedisConfig 描述 Redis 连接和 key 命名前缀。
 // KeyPrefix 用于隔离 manager 与 new-api 等共享 Redis 的键空间。
 type RedisConfig struct {
-	Addr      string `yaml:"addr"`
-	Password  string `yaml:"password"`
-	DB        int    `yaml:"db"`
+	// Addr 是 Redis 服务地址，worker queue 和 job 通知都依赖它。
+	Addr string `yaml:"addr"`
+	// Password 是 Redis 认证密码；为空表示本地无密码 Redis，不应写入日志。
+	Password string `yaml:"password"`
+	// DB 是 Redis 逻辑库编号，用于隔离本地或测试环境。
+	DB int `yaml:"db"`
+	// KeyPrefix 是 Redis key 前缀，用于避免多个系统共享 Redis 时互相污染。
 	KeyPrefix string `yaml:"key_prefix"`
 }
 
@@ -86,10 +95,14 @@ type SecurityConfig struct {
 // SystemPromptTemplate 必须包含 {{workspace_dir}} / {{knowledge_org_dir}} / {{knowledge_app_dir}}
 // 三个占位符，避免第二/三层人设拼接时丢失目录上下文。
 type OpenClawConfig struct {
-	RuntimeImage         string            `yaml:"runtime_image"`
-	SystemPromptTemplate string            `yaml:"system_prompt_template"`
-	Workspace            WorkspaceConfig   `yaml:"workspace"`
-	LLM                  OpenClawLLMConfig `yaml:"llm"`
+	// RuntimeImage 是创建 OpenClaw 应用容器时使用的镜像名。
+	RuntimeImage string `yaml:"runtime_image"`
+	// SystemPromptTemplate 是写入 runtime 的系统提示词模板，必须包含知识库和工作目录占位符。
+	SystemPromptTemplate string `yaml:"system_prompt_template"`
+	// Workspace 描述应用工作目录归档策略。
+	Workspace WorkspaceConfig `yaml:"workspace"`
+	// LLM 描述 OpenClaw 容器内 pi-coding-agent 的默认模型路由。
+	LLM OpenClawLLMConfig `yaml:"llm"`
 	// ContainerNetworks 控制 manager 创建 OpenClaw 容器时连接哪些 docker network。
 	// 必须包含 new-api 所在的 network（默认 docker compose project name 派生的
 	// "<project>_default"，如 oc-manager_default），否则 OpenClaw 容器无法解析
@@ -157,13 +170,17 @@ type RuntimeProbeConfig struct {
 // 详见 https://www.newapi.ai/zh/docs/api/management/auth。
 // 缺失时 client 调用会被 new-api 拒绝并返回 "Unauthorized, New-Api-User header not provided"。
 type NewAPIConfig struct {
-	BaseURL     string `yaml:"base_url"`
-	AdminToken  string `yaml:"admin_token"`
-	AdminUserID int64  `yaml:"admin_user_id"`
+	// BaseURL 是 new-api 管理接口地址，通常需要包含协议和 /v1 兼容路径。
+	BaseURL string `yaml:"base_url"`
+	// AdminToken 是 new-api 系统访问令牌，具备管理权限，禁止落入日志或前端响应。
+	AdminToken string `yaml:"admin_token"`
+	// AdminUserID 是 new-api 要求的 New-Api-User header 值，必须与 AdminToken 持有人一致。
+	AdminUserID int64 `yaml:"admin_user_id"`
 }
 
 // Duration 让 YAML 中的 "15m"、"720h" 这类字符串显式解析为 time.Duration。
 type Duration struct {
+	// Duration 保存 YAML 字符串解析后的标准库持续时间值。
 	time.Duration
 }
 

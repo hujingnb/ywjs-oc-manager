@@ -63,20 +63,34 @@ const (
 )
 
 const (
-	JobTypeAppInitialize              = "app_initialize"
-	JobTypeAppStartContainer          = "app_start_container"
-	JobTypeAppStopContainer           = "app_stop_container"
-	JobTypeAppRestartContainer        = "app_restart_container"
-	JobTypeAppDelete                  = "app_delete"
-	JobTypeChannelStartLogin          = "channel_start_login"
-	JobTypeChannelCheckBinding        = "channel_check_binding"
-	JobTypeKnowledgeSyncNode          = "knowledge_sync_node"
+	// JobTypeAppInitialize 初始化应用目录、容器、new-api token 和运行时配置。
+	JobTypeAppInitialize = "app_initialize"
+	// JobTypeAppStartContainer 启动已初始化应用的 runtime 容器。
+	JobTypeAppStartContainer = "app_start_container"
+	// JobTypeAppStopContainer 停止应用 runtime 容器但保留应用数据。
+	JobTypeAppStopContainer = "app_stop_container"
+	// JobTypeAppRestartContainer 对应用 runtime 容器执行停止后启动的重启流程。
+	JobTypeAppRestartContainer = "app_restart_container"
+	// JobTypeAppDelete 清理应用容器、运行时数据和关联 new-api token 状态。
+	JobTypeAppDelete = "app_delete"
+	// JobTypeChannelStartLogin 启动渠道登录流程，例如微信扫码授权。
+	JobTypeChannelStartLogin = "channel_start_login"
+	// JobTypeChannelCheckBinding 轮询渠道授权结果并写回绑定状态。
+	JobTypeChannelCheckBinding = "channel_check_binding"
+	// JobTypeKnowledgeSyncNode 把 manager 知识库主副本同步到指定 runtime node。
+	JobTypeKnowledgeSyncNode = "knowledge_sync_node"
+	// JobTypeRuntimeNodeHealthReconcile 根据心跳时间批量修正 runtime node 健康状态。
 	JobTypeRuntimeNodeHealthReconcile = "runtime_node_health_reconcile"
-	JobTypeRuntimeRefreshStatus       = "runtime_refresh_status"
-	JobTypeAppHealthCheck             = "app_health_check"
-	JobTypeNewAPIDisableKey           = "newapi_disable_key"
-	JobTypeNewAPIRestoreKey           = "newapi_restore_key"
-	JobTypeWorkspaceArchiveCleanup    = "workspace_archive_cleanup"
+	// JobTypeRuntimeRefreshStatus 刷新运行中应用的容器 inspect 快照。
+	JobTypeRuntimeRefreshStatus = "runtime_refresh_status"
+	// JobTypeAppHealthCheck 对运行中应用执行健康检查并更新状态。
+	JobTypeAppHealthCheck = "app_health_check"
+	// JobTypeNewAPIDisableKey 在应用停用或删除时禁用对应 new-api token。
+	JobTypeNewAPIDisableKey = "newapi_disable_key"
+	// JobTypeNewAPIRestoreKey 在应用恢复时重新启用对应 new-api token。
+	JobTypeNewAPIRestoreKey = "newapi_restore_key"
+	// JobTypeWorkspaceArchiveCleanup 清理超过保留期的应用工作区归档。
+	JobTypeWorkspaceArchiveCleanup = "workspace_archive_cleanup"
 )
 
 var (
