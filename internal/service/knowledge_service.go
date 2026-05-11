@@ -70,9 +70,9 @@ func (s *KnowledgeService) SetRetryDispatcher(d KnowledgeRetryDispatcher) {
 }
 
 // GetOrgSyncStatus 列出组织在所有节点上的最近同步状态。
-// 仅组织管理员 / 平台管理员可调。
+// 该状态属于组织知识库运维面，只允许本组织管理员查看。
 func (s *KnowledgeService) GetOrgSyncStatus(ctx context.Context, principal auth.Principal, orgID string) ([]SyncStatusResult, error) {
-	if !auth.CanManageOrg(principal, orgID) {
+	if !auth.CanRetryOrgKnowledgeSync(principal, orgID) {
 		return nil, ErrKnowledgeForbidden
 	}
 	if s.statusSource == nil {
@@ -82,9 +82,9 @@ func (s *KnowledgeService) GetOrgSyncStatus(ctx context.Context, principal auth.
 }
 
 // RetryOrgNodeSync 触发指定 (org, node) 重新同步；通常由前端「重试同步」按钮调用。
-// 仅组织管理员 / 平台管理员可调。
+// 重试会改变组织知识库同步状态，因此只允许本组织管理员执行。
 func (s *KnowledgeService) RetryOrgNodeSync(ctx context.Context, principal auth.Principal, orgID, nodeID string) error {
-	if !auth.CanManageOrg(principal, orgID) {
+	if !auth.CanRetryOrgKnowledgeSync(principal, orgID) {
 		return ErrKnowledgeForbidden
 	}
 	if s.retryDispatcher == nil {
@@ -112,7 +112,7 @@ func (s *KnowledgeService) SaveOrgFile(ctx context.Context, principal auth.Princ
 	if s.master == nil {
 		return ErrKnowledgeMissing
 	}
-	if !auth.CanManageOrg(principal, orgID) {
+	if !auth.CanWriteOrgKnowledge(principal, orgID) {
 		return ErrKnowledgeForbidden
 	}
 	target := path.Join("org", orgID, "knowledge", relative)
@@ -149,7 +149,7 @@ func (s *KnowledgeService) DeleteOrgFile(ctx context.Context, principal auth.Pri
 	if s.master == nil {
 		return ErrKnowledgeMissing
 	}
-	if !auth.CanManageOrg(principal, orgID) {
+	if !auth.CanWriteOrgKnowledge(principal, orgID) {
 		return ErrKnowledgeForbidden
 	}
 	target := path.Join("org", orgID, "knowledge", relative)
@@ -185,7 +185,7 @@ func (s *KnowledgeService) ListOrg(_ context.Context, principal auth.Principal, 
 	if s.master == nil {
 		return KnowledgeListResult{}, ErrKnowledgeMissing
 	}
-	if !auth.CanViewOrg(principal, orgID) {
+	if !auth.CanReadOrgKnowledge(principal, orgID) {
 		return KnowledgeListResult{}, ErrKnowledgeForbidden
 	}
 	target := path.Join("org", orgID, "knowledge", relative)

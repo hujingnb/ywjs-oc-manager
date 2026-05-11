@@ -122,9 +122,9 @@ type OnboardMemberResult struct {
 }
 
 // OnboardMember 在事务里创建用户、应用、渠道绑定、审计、app_initialize job。
-// 平台管理员可以为任何启用组织的成员发起；组织管理员仅能为自己组织发起。
+// 该复合入口会直接创建应用，因此只允许本组织管理员发起，避免平台管理员绕过组织边界写入应用资源。
 func (s *MemberOnboardingService) OnboardMember(ctx context.Context, principal auth.Principal, orgID string, input OnboardMemberInput) (OnboardMemberResult, error) {
-	if !auth.CanManageOrg(principal, orgID) {
+	if !auth.CanCreateAppForOrg(principal, orgID) {
 		return OnboardMemberResult{}, ErrForbidden
 	}
 	if input.Username == "" || input.Password == "" || input.DisplayName == "" || input.AppName == "" {

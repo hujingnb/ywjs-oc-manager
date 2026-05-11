@@ -10,6 +10,7 @@ import (
 	"oc-manager/internal/auth"
 	"oc-manager/internal/domain"
 	"oc-manager/internal/store/sqlc"
+	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
 
@@ -18,17 +19,19 @@ func TestOnboardMemberCommitsOnSuccess(t *testing.T) {
 	tx := &txRunnerStub{store: store}
 	svc := NewMemberOnboardingService(tx, fakeHash, defaultTestSelector())
 
-	result, err := svc.OnboardMember(context.Background(), platformAdmin(), testOrgID, OnboardMemberInput{
+	result, err := svc.OnboardMember(context.Background(), orgOnboardingAdmin(), testOrgID, OnboardMemberInput{
 		Username: "alice", DisplayName: "Alice", Password: "pwd", AppName: "alice-bot",
 	})
 	require.NoError(t, err)
-	if result.JobID == "" || result.App.Name != "alice-bot" || result.Member.Username != "alice" {
-		t.Fatalf("result = %+v", result)
-	}
+	require.NotEmpty(t, result.JobID)
+	assert.Equal(t, "alice-bot", result.App.Name)
+	assert.Equal(t, "alice", result.Member.Username)
 	require.True(t, tx.committed)
-	if store.users == 0 || store.apps == 0 || store.bindings == 0 || store.audits == 0 || store.jobs == 0 {
-		t.Fatalf("missing writes: %+v", store.counters())
-	}
+	assert.Positive(t, store.users)
+	assert.Positive(t, store.apps)
+	assert.Positive(t, store.bindings)
+	assert.Positive(t, store.audits)
+	assert.Positive(t, store.jobs)
 }
 
 func TestOnboardMemberRollsBackWhenAppCreationFails(t *testing.T) {
@@ -37,7 +40,7 @@ func TestOnboardMemberRollsBackWhenAppCreationFails(t *testing.T) {
 	tx := &txRunnerStub{store: store}
 	svc := NewMemberOnboardingService(tx, fakeHash, defaultTestSelector())
 
-	_, err := svc.OnboardMember(context.Background(), platformAdmin(), testOrgID, OnboardMemberInput{
+	_, err := svc.OnboardMember(context.Background(), orgOnboardingAdmin(), testOrgID, OnboardMemberInput{
 		Username: "alice", DisplayName: "Alice", Password: "pwd", AppName: "alice-bot",
 	})
 	require.Error(t, err)
@@ -50,7 +53,7 @@ func TestOnboardMemberRollsBackWhenJobCreationFails(t *testing.T) {
 	tx := &txRunnerStub{store: store}
 	svc := NewMemberOnboardingService(tx, fakeHash, defaultTestSelector())
 
-	_, err := svc.OnboardMember(context.Background(), platformAdmin(), testOrgID, OnboardMemberInput{
+	_, err := svc.OnboardMember(context.Background(), orgOnboardingAdmin(), testOrgID, OnboardMemberInput{
 		Username: "alice", DisplayName: "Alice", Password: "pwd", AppName: "alice-bot",
 	})
 	require.Error(t, err)
@@ -67,13 +70,23 @@ func TestOnboardMemberRequiresOrgManagement(t *testing.T) {
 	require.ErrorIs(t, err, ErrForbidden)
 }
 
+func TestOnboardMemberPlatformAdminForbidden(t *testing.T) {
+	tx := &txRunnerStub{store: newOnboardingStub(t)}
+	svc := NewMemberOnboardingService(tx, fakeHash, defaultTestSelector())
+
+	_, err := svc.OnboardMember(context.Background(), platformAdmin(), testOrgID, OnboardMemberInput{
+		Username: "alice", DisplayName: "Alice", Password: "pwd", AppName: "alice-bot",
+	})
+	require.ErrorIs(t, err, ErrForbidden)
+}
+
 func TestOnboardMemberRejectsDisabledOrg(t *testing.T) {
 	store := newOnboardingStub(t)
 	store.org.Status = domain.StatusDisabled
 	tx := &txRunnerStub{store: store}
 	svc := NewMemberOnboardingService(tx, fakeHash, defaultTestSelector())
 
-	_, err := svc.OnboardMember(context.Background(), platformAdmin(), testOrgID, OnboardMemberInput{
+	_, err := svc.OnboardMember(context.Background(), orgOnboardingAdmin(), testOrgID, OnboardMemberInput{
 		Username: "alice", DisplayName: "Alice", Password: "pwd", AppName: "alice-bot",
 	})
 	require.ErrorIs(t, err, ErrMemberCreateInvalid)
@@ -224,7 +237,7 @@ func TestOnboardMember_SelectNode_NoActiveNode(t *testing.T) {
 	selector := &nodeSelectorStub{nodes: nil}
 	svc := NewMemberOnboardingService(tx, fakeHash, selector)
 
-	_, err := svc.OnboardMember(context.Background(), platformAdmin(), testOrgID, OnboardMemberInput{
+	_, err := svc.OnboardMember(context.Background(), orgOnboardingAdmin(), testOrgID, OnboardMemberInput{
 		Username: "alice", DisplayName: "Alice", Password: "pwd", AppName: "alice-bot",
 	})
 	require.ErrorIs(t, err, ErrNoNodeAvailable)
@@ -237,7 +250,7 @@ func TestOnboardMember_SelectNode_OnlyNodeAtCapacity(t *testing.T) {
 	}}
 	svc := NewMemberOnboardingService(tx, fakeHash, selector)
 
-	_, err := svc.OnboardMember(context.Background(), platformAdmin(), testOrgID, OnboardMemberInput{
+	_, err := svc.OnboardMember(context.Background(), orgOnboardingAdmin(), testOrgID, OnboardMemberInput{
 		Username: "alice", DisplayName: "Alice", Password: "pwd", AppName: "alice-bot",
 	})
 	require.ErrorIs(t, err, ErrNoNodeAvailable)
@@ -252,7 +265,7 @@ func TestOnboardMember_SelectNode_PicksLargestRemaining(t *testing.T) {
 	}}
 	svc := NewMemberOnboardingService(tx, fakeHash, selector)
 
-	_, err := svc.OnboardMember(context.Background(), platformAdmin(), testOrgID, OnboardMemberInput{
+	_, err := svc.OnboardMember(context.Background(), orgOnboardingAdmin(), testOrgID, OnboardMemberInput{
 		Username: "alice", DisplayName: "Alice", Password: "pwd", AppName: "alice-bot",
 	})
 	require.NoError(t, err)
@@ -270,7 +283,7 @@ func TestOnboardMember_SelectNode_NULLMaxAppsTreatedAsInfinity(t *testing.T) {
 	}}
 	svc := NewMemberOnboardingService(tx, fakeHash, selector)
 
-	_, err := svc.OnboardMember(context.Background(), platformAdmin(), testOrgID, OnboardMemberInput{
+	_, err := svc.OnboardMember(context.Background(), orgOnboardingAdmin(), testOrgID, OnboardMemberInput{
 		Username: "alice", DisplayName: "Alice", Password: "pwd", AppName: "alice-bot",
 	})
 	require.NoError(t, err)
@@ -283,12 +296,18 @@ func TestOnboardMember_ExplicitNodeID_BypassesSelector(t *testing.T) {
 	selector := &nodeSelectorStub{} // 故意空
 	svc := NewMemberOnboardingService(tx, fakeHash, selector)
 
-	_, err := svc.OnboardMember(context.Background(), platformAdmin(), testOrgID, OnboardMemberInput{
+	_, err := svc.OnboardMember(context.Background(), orgOnboardingAdmin(), testOrgID, OnboardMemberInput{
 		Username: "alice", DisplayName: "Alice", Password: "pwd", AppName: "alice-bot",
 		NodeID: "00000000-0000-0000-0000-000000000099",
 	})
 	require.NoError(t, err)
-	if selector.calledN > 0 {
-		t.Fatalf("selectNode 被调用了 %d 次，但显式 NodeID 应直接走旧路径", selector.calledN)
+	assert.Zero(t, selector.calledN)
+}
+
+func orgOnboardingAdmin() auth.Principal {
+	return auth.Principal{
+		Role:   domain.UserRoleOrgAdmin,
+		OrgID:  testOrgID,
+		UserID: "00000000-0000-0000-0000-0000000000aa",
 	}
 }
