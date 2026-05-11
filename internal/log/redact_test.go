@@ -2,9 +2,9 @@ package log
 
 import (
 	"bytes"
+	"github.com/stretchr/testify/require"
 	"strings"
 	"testing"
-	"github.com/stretchr/testify/require"
 )
 
 func TestRedactSecrets(t *testing.T) {

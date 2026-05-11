@@ -10,8 +10,8 @@ import (
 	"testing"
 	"time"
 
-	"oc-manager/internal/store/sqlc"
 	"github.com/stretchr/testify/require"
+	"oc-manager/internal/store/sqlc"
 )
 
 type loopStore struct {

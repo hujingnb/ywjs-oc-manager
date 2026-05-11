@@ -43,21 +43,21 @@ const (
 
 // AuthProgress 是查询登录进度时返回的视图。
 type AuthProgress struct {
-	Status         AuthStatus        `json:"status"`
-	BoundIdentity  string            `json:"bound_identity,omitempty"`
-	ChannelName    string            `json:"channel_name,omitempty"`
-	ErrorMessage   string            `json:"error_message,omitempty"`
-	UpdatedAt      time.Time         `json:"updated_at"`
-	Metadata       map[string]string `json:"metadata,omitempty"`
+	Status        AuthStatus        `json:"status"`
+	BoundIdentity string            `json:"bound_identity,omitempty"`
+	ChannelName   string            `json:"channel_name,omitempty"`
+	ErrorMessage  string            `json:"error_message,omitempty"`
+	UpdatedAt     time.Time         `json:"updated_at"`
+	Metadata      map[string]string `json:"metadata,omitempty"`
 }
 
 // AuthInput 在 BeginAuth 时携带用户上下文，供 adapter 调用 OpenClaw runtime。
 type AuthInput struct {
-	NodeID        string
-	ContainerID   string
-	AppID         string
-	OwnerUserID   string
-	ChannelName   string
+	NodeID      string
+	ContainerID string
+	AppID       string
+	OwnerUserID string
+	ChannelName string
 }
 
 // ChannelAdapter 是渠道协议的统一接口。

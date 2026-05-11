@@ -238,6 +238,8 @@ func (a *AgentBackedAdapter) ContainerExec(ctx context.Context, nodeID, containe
 	return ExecResult{}, fmt.Errorf("exec 超时")
 }
 
+// statsResponseToContainerStats 把 docker 原始 stats 响应转换为前端可直接展示的累计指标。
+// 首次采样没有有效 delta 时 CPUPercent 保持 0，避免用不完整数据制造尖峰。
 func statsResponseToContainerStats(raw container.StatsResponse) ContainerStats {
 	out := ContainerStats{
 		MemoryUsage: raw.MemoryStats.Usage,
@@ -384,7 +386,7 @@ func (a *AgentBackedAdapter) ArchiveApp(ctx context.Context, nodeID, appID strin
 func (a *AgentBackedAdapter) WaitForOpenClawHealthy(ctx context.Context, nodeID, containerID string) error {
 	const (
 		probeURL          = "http://127.0.0.1:18789/healthz"
-		startWaitSeconds  = 8  // plugin loading 实测 ~11s，先等 8s 再开始探测
+		startWaitSeconds  = 8 // plugin loading 实测 ~11s，先等 8s 再开始探测
 		probeStepSeconds  = 4
 		probeMaxAttempts  = 10 // 8 + 4*9 = 44s 总窗口，覆盖 plugin loading 上限
 		probeExecTimeoutS = 5
@@ -493,6 +495,7 @@ func (a *AgentBackedAdapter) resolveFile(ctx context.Context, nodeID string) (*a
 	if a.files == nil {
 		return nil, ErrUnimplemented
 	}
+	// nodeID 是文件 API 的隔离边界；resolver 必须返回该节点专属 endpoint/token 的 client。
 	return a.files.FileClient(ctx, nodeID)
 }
 
@@ -500,6 +503,7 @@ func (a *AgentBackedAdapter) dockerClient(ctx context.Context, nodeID string) (*
 	if a.docker == nil {
 		return nil, ErrUnimplemented
 	}
+	// docker client 绑定单个节点 agent 代理，不能跨节点缓存后复用。
 	return a.docker.DockerClient(ctx, nodeID)
 }
 

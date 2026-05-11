@@ -9,6 +9,7 @@ import (
 	"crypto/x509/pkix"
 	"encoding/base64"
 	"encoding/json"
+	"github.com/stretchr/testify/require"
 	"math/big"
 	"net/http"
 	"net/http/httptest"
@@ -16,7 +17,6 @@ import (
 	"sync"
 	"testing"
 	"time"
-	"github.com/stretchr/testify/require"
 )
 
 // dockerStubServer 启动一个 TLS http server 模拟 agent 的 docker 代理端点，

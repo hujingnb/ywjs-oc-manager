@@ -671,8 +671,8 @@ func configureOpenClawDefaultModel(ctx context.Context, execer ContainerExecer, 
 }
 
 // shellQuote 用单引号包裹字符串供 sh -c 使用，并按 shell 规则转义内部单引号
-// （'\\''：闭合 + 转义单引号 + 重开）。仅用于 manager 渲染的可控 JSON，不接受
-// 用户输入。
+// （先闭合单引号，再写入反斜杠转义的单引号，最后重开单引号）。
+// 仅用于 manager 渲染的可控 JSON，不接受用户输入。
 func shellQuote(s string) string {
 	return "'" + strings.ReplaceAll(s, "'", `'\''`) + "'"
 }

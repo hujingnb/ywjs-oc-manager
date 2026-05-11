@@ -1,3 +1,5 @@
+// Package agent 封装 manager 访问 runtime-agent 的 HTTP/TLS 客户端能力。
+// docker_proxy 负责把 agent 暴露的 Docker 代理端口转换成 Docker SDK 可用的 client。
 package agent
 
 import (

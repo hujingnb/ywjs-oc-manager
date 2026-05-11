@@ -9,6 +9,8 @@ import (
 
 	"github.com/jackc/pgx/v5/pgtype"
 
+	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
 	"oc-manager/internal/audit"
 	"oc-manager/internal/auth"
 	"oc-manager/internal/domain"
@@ -16,8 +18,6 @@ import (
 	runtimepkg "oc-manager/internal/integrations/runtime"
 	"oc-manager/internal/service"
 	"oc-manager/internal/store/sqlc"
-	"github.com/stretchr/testify/require"
-	"github.com/stretchr/testify/assert"
 )
 
 const (
@@ -248,7 +248,9 @@ func (s *appInitStub) GetApp(_ context.Context, _ pgtype.UUID) (sqlc.App, error)
 func (s *appInitStub) GetOrganization(_ context.Context, _ pgtype.UUID) (sqlc.Organization, error) {
 	return s.org, nil
 }
-func (s *appInitStub) GetUser(_ context.Context, _ pgtype.UUID) (sqlc.User, error) { return s.user, nil }
+func (s *appInitStub) GetUser(_ context.Context, _ pgtype.UUID) (sqlc.User, error) {
+	return s.user, nil
+}
 
 func (s *appInitStub) GetRuntimeNode(_ context.Context, _ pgtype.UUID) (sqlc.RuntimeNode, error) {
 	return s.node, nil
@@ -462,8 +464,8 @@ func TestEnsureAPIKey_GetTokenFullKeyFailureRecordsAudit(t *testing.T) {
 	// CreateAPIKey 成功，GetTokenFullKey 失败
 	getKeyErr := errors.New("get-key-fail")
 	client := &fakeNewAPI{
-		result:     newapi.APIKey{ID: 42, Key: ""},
-		getKeyErr:  getKeyErr,
+		result:    newapi.APIKey{ID: 42, Key: ""},
+		getKeyErr: getKeyErr,
 	}
 
 	cfg := AppInitializeConfig{

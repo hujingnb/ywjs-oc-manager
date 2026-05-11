@@ -38,12 +38,18 @@ type Queue interface {
 
 // Config 描述 worker 的运行参数。
 type Config struct {
-	WorkerID      string
-	BatchSize     int
-	BackoffBase   time.Duration
+	// WorkerID 写入 jobs.locked_by，便于排查哪一个 worker 实例抢到任务。
+	WorkerID string
+	// BatchSize 限制单次 Tick 从队列预定的 jobID 数量，避免单个 worker 长时间占住调度循环。
+	BatchSize int
+	// BackoffBase 是第一次 handler 失败后的基础重试间隔。
+	BackoffBase time.Duration
+	// BackoffFactor 控制后续失败的指数退避倍率，<=1 时使用默认倍率 2。
 	BackoffFactor float64
-	BackoffMax    time.Duration
-	OnError       func(jobID string, err error)
+	// BackoffMax 截断指数退避结果，避免故障任务无限拉长到不可观测。
+	BackoffMax time.Duration
+	// OnError 接收单个 job 的处理错误；Tick 会继续处理同批次其他 job。
+	OnError func(jobID string, err error)
 }
 
 // Worker 持有 store、queue 和 handler registry，并暴露单次 Tick 的处理入口。
@@ -95,6 +101,7 @@ func (w *Worker) Tick(ctx context.Context) error {
 }
 
 func (w *Worker) processJobID(ctx context.Context, id string) error {
+	// 队列只保存字符串 jobID，真正状态仍以 PostgreSQL 为准；解析失败说明队列 payload 已损坏。
 	jobUUID, err := parseUUID(id)
 	if err != nil {
 		return fmt.Errorf("非法 job id %q: %w", id, err)
@@ -107,6 +114,7 @@ func (w *Worker) processJobID(ctx context.Context, id string) error {
 		// 来自队列的 jobID 可能已经被其他 worker 处理；幂等地跳过。
 		return nil
 	}
+	// MarkJobRunning 在 SQL 层带 pending 条件，多个 worker 同时抢到同一个 jobID 时只有一个能成功推进。
 	running, err := w.store.MarkJobRunning(ctx, sqlc.MarkJobRunningParams{
 		ID:       job.ID,
 		LockedBy: pgtype.Text{String: w.cfg.WorkerID, Valid: true},
@@ -116,6 +124,7 @@ func (w *Worker) processJobID(ctx context.Context, id string) error {
 	}
 	handler, err := w.registry.Lookup(running.Type)
 	if err != nil {
+		// 未注册类型无法通过重试自愈，直接进入 failed 终态，避免 scheduler 反复重新入队。
 		_, finalErr := w.store.MarkJobFailed(ctx, sqlc.MarkJobFailedParams{
 			ID:        running.ID,
 			LastError: pgtype.Text{String: err.Error(), Valid: true},
@@ -134,6 +143,8 @@ func (w *Worker) processJobID(ctx context.Context, id string) error {
 	return nil
 }
 
+// handleHandlerError 根据 attempts/max_attempts 决定进入 failed 终态或安排下一次重试。
+// handlerErr 会被持久化到 last_error，供后台任务列表和审计排障展示。
 func (w *Worker) handleHandlerError(ctx context.Context, job sqlc.Job, handlerErr error) error {
 	if job.Attempts >= job.MaxAttempts {
 		if _, err := w.store.MarkJobFailed(ctx, sqlc.MarkJobFailedParams{
@@ -172,6 +183,8 @@ func (w *Worker) backoff(attempt int) time.Duration {
 // SetClock 替换 worker 内部时钟，仅供测试使用。
 func (w *Worker) SetClock(now func() time.Time) { w.now = now }
 
+// parseUUID 把 Redis 队列里的字符串 jobID 转成 pgtype.UUID。
+// 该函数不做业务校验，调用方需要再从 jobs 表读取并确认状态。
 func parseUUID(value string) (pgtype.UUID, error) {
 	var id pgtype.UUID
 	if err := id.Scan(value); err != nil {

@@ -94,6 +94,8 @@ func (c *BaseHTTPClient) DoStream(ctx context.Context, method, path string, quer
 }
 
 func (c *BaseHTTPClient) buildURL(path string, query url.Values) string {
+	// integrations 内部调用方传入的 path 已经是可信相对路径；query 统一用 url.Values 编码，
+	// 避免每个 client 手写 query string 时遗漏转义。
 	u := c.BaseURL + path
 	if len(query) > 0 {
 		u += "?" + query.Encode()
@@ -109,6 +111,8 @@ func (c *BaseHTTPClient) client() *http.Client {
 }
 
 func mapStatusToError(resp *http.Response) error {
+	// 这里不解析上游业务 JSON，只按 HTTP 状态归一化为 sentinel error；
+	// 具体协议字段由 agent/newapi 等上层 client 自己解释。
 	switch {
 	case resp.StatusCode >= 200 && resp.StatusCode < 300:
 		return nil

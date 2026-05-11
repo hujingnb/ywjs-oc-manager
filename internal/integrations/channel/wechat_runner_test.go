@@ -5,12 +5,12 @@ import (
 	"context"
 	"encoding/binary"
 	"errors"
+	"github.com/stretchr/testify/require"
 	"io"
 	"strings"
 	"sync"
 	"testing"
 	"time"
-	"github.com/stretchr/testify/require"
 )
 
 // memoryExecutor 是用于测试的 ContainerExecutor：把预设的 stdout 行按 docker stdcopy 协议

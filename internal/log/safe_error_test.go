@@ -2,9 +2,9 @@ package log
 
 import (
 	"errors"
+	"github.com/stretchr/testify/require"
 	"strings"
 	"testing"
-	"github.com/stretchr/testify/require"
 )
 
 func TestSafeErrorMessage_Nil(t *testing.T) {

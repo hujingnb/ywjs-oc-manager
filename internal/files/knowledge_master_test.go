@@ -1,11 +1,11 @@
 package files
 
 import (
+	"github.com/stretchr/testify/require"
 	"os"
 	"path/filepath"
 	"strings"
 	"testing"
-	"github.com/stretchr/testify/require"
 )
 
 func TestKnowledgeMasterSaveAndList(t *testing.T) {

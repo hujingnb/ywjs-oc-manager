@@ -8,10 +8,10 @@ import (
 
 	"github.com/jackc/pgx/v5/pgtype"
 
+	"github.com/stretchr/testify/require"
 	"oc-manager/internal/domain"
 	"oc-manager/internal/store/sqlc"
 	"oc-manager/internal/worker/handlers"
-	"github.com/stretchr/testify/require"
 )
 
 func TestWorkerTickMarksSuccess(t *testing.T) {

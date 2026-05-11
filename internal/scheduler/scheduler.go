@@ -27,6 +27,7 @@ type Queue interface {
 
 // Config 描述 scheduler 行为参数。
 type Config struct {
+	// BatchSize 限制单次扫库重新入队的 job 数量，避免积压时一次 Tick 占用过多数据库和 Redis 时间。
 	BatchSize int32
 }
 
@@ -57,6 +58,7 @@ func (s *Scheduler) Tick(ctx context.Context) error {
 	}
 	for _, job := range jobs {
 		id := uuidString(job)
+		// scheduler 只补 Redis 信号，不修改 job 状态；重复入队依赖 Queue 的 member 去重语义兜底。
 		if err := s.queue.Enqueue(ctx, id); err != nil {
 			return fmt.Errorf("将 job %s 入队失败: %w", id, err)
 		}
@@ -64,10 +66,12 @@ func (s *Scheduler) Tick(ctx context.Context) error {
 	return nil
 }
 
+// uuidString 将 sqlc.Job.ID 转为标准 UUID 字符串，作为 Redis queue 的 payload。
 func uuidString(job sqlc.Job) string {
 	return formatUUIDBytes(job.ID.Bytes[:])
 }
 
+// formatUUIDBytes 只处理 pgtype.UUID 的 16 字节输入；调用方保证来源是数据库 UUID。
 func formatUUIDBytes(value []byte) string {
 	const digits = "0123456789abcdef"
 	out := make([]byte, 0, 36)

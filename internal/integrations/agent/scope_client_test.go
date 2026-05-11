@@ -3,12 +3,12 @@ package agent
 import (
 	"bytes"
 	"context"
+	"github.com/stretchr/testify/require"
 	"io"
 	"net/http"
 	"net/http/httptest"
 	"strings"
 	"testing"
-	"github.com/stretchr/testify/require"
 )
 
 // scopeServer 把每条捕获到的请求记录下来，便于断言路径 / 方法 / body。

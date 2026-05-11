@@ -2,9 +2,9 @@ package redis
 
 import (
 	"context"
+	"github.com/stretchr/testify/require"
 	"testing"
 	"time"
-	"github.com/stretchr/testify/require"
 )
 
 func TestMemoryQueueEnqueueAndReserve(t *testing.T) {

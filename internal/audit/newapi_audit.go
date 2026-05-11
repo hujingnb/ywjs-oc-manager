@@ -1,3 +1,5 @@
+// Package audit 提供跨 service 的审计辅助能力。
+// 当前只封装 new-api 调用失败记录，确保 API handler 与后台 worker 走同一套失败落库语义。
 package audit
 
 import (
@@ -18,12 +20,18 @@ type AuditRecorder interface {
 // ActorID / ActorRole / OrgID 在 API 请求路径有 user context 时填，
 // worker 后台路径不填，由 helper 自动 fallback 到 ActorRole=system。
 type NewAPIFailureContext struct {
-	ActorID   string
+	// ActorID 是触发调用的 manager 用户；后台 worker 为空。
+	ActorID string
+	// ActorRole 是触发者角色；为空时 RecordFailure 回退为 system。
 	ActorRole string
-	OrgID     string
-	Endpoint  string // 如 "POST /api/user/"
-	Status    int
-	Err       error
+	// OrgID 是失败调用所属组织；平台级操作可为空。
+	OrgID string
+	// Endpoint 是上游接口标识，如 "POST /api/user/"。
+	Endpoint string
+	// Status 是上游 HTTP 状态码；未知或未发出请求时保持 0。
+	Status int
+	// Err 是失败原因，会写入 ErrorMessage；nil 时只记录端点和状态。
+	Err error
 }
 
 // NewAPIAuditHelper 把 new-api 失败统一落到 audit_logs.target_type=newapi_call。
@@ -64,6 +72,7 @@ func (h *NewAPIAuditHelper) RecordFailure(ctx context.Context, fc NewAPIFailureC
 	}
 	actorRole := fc.ActorRole
 	if actorRole == "" {
+		// 后台 worker 没有用户上下文，统一归为 system，避免 audit_logs.actor_role 为空导致排障困难。
 		actorRole = "system"
 	}
 	msg := ""

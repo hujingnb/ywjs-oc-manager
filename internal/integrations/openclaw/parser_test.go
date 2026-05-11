@@ -1,10 +1,10 @@
 package openclaw
 
 import (
+	"github.com/stretchr/testify/require"
 	"strings"
 	"testing"
 	"time"
-	"github.com/stretchr/testify/require"
 )
 
 // 真实 stdout 样本（Sprint 0 POC 实测）。
@@ -85,13 +85,13 @@ func TestParseChannelLoginEventRejectsNoise(t *testing.T) {
 		"   ",
 		"[plugins] loading anthropic from /root/.openclaw/...",
 		"[plugins] loaded 118 plugin(s) (70 attempted) in 11035.8ms",
-		"正在启动...",                                   // 此前是 startup 提示，不携带数据
-		"用手机微信扫描以下二维码，以继续连接：",                  // 提示行，下一行才是 ASCII QR
-		"▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄",       // ASCII QR 行
-		"█ ▄▄▄▄▄ █ ██▀▀ ▄▄▄█ ▀█▄▄▄▄▄█▄▀█ ▄▄▄▄▄ █",       // ASCII QR 行
-		"若二维码未能显示或无法使用，你可以访问以下链接以继续：",        // URL 之前的提示行
-		"Welcome to OpenClaw",                          // legacy 噪声
-		"{}",                                           // 空 JSON object
+		"正在启动...", // 此前是 startup 提示，不携带数据
+		"用手机微信扫描以下二维码，以继续连接：",                     // 提示行，下一行才是 ASCII QR
+		"▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄", // ASCII QR 行
+		"█ ▄▄▄▄▄ █ ██▀▀ ▄▄▄█ ▀█▄▄▄▄▄█▄▀█ ▄▄▄▄▄ █", // ASCII QR 行
+		"若二维码未能显示或无法使用，你可以访问以下链接以继续：",             // URL 之前的提示行
+		"Welcome to OpenClaw", // legacy 噪声
+		"{}",                  // 空 JSON object
 	}
 	for _, line := range cases {
 		_, err := ParseChannelLoginEvent(line)

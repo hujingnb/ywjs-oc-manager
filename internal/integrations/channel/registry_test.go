@@ -3,8 +3,8 @@ package channel
 import (
 	"context"
 	"errors"
-	"testing"
 	"github.com/stretchr/testify/require"
+	"testing"
 )
 
 func TestRegistryLookup(t *testing.T) {

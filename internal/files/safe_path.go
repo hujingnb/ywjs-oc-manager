@@ -24,7 +24,9 @@ var (
 
 // SafeRoot 描述一个允许操作的根目录。
 type SafeRoot struct {
-	Root        string
+	// Root 是已经 Abs 规范化后的知识库根目录。
+	Root string
+	// MaxFileSize 是单文件写入上限，防止用户上传内容撑爆本地磁盘。
 	MaxFileSize int64
 }
 
@@ -67,6 +69,7 @@ func (r *SafeRoot) Resolve(relative string) (string, error) {
 		return "", fmt.Errorf("%w: 不允许跳出根目录", ErrPathEscapesDir)
 	}
 	resolved := filepath.Join(r.Root, cleaned)
+	// filepath.Rel 是最终边界检查：即便前面的 Clean/Join 出现平台差异，也不能允许结果离开 Root。
 	rel, err := filepath.Rel(r.Root, resolved)
 	if err != nil {
 		return "", fmt.Errorf("%w: 无法相对化 %s", ErrPathEscapesDir, err.Error())
@@ -76,6 +79,7 @@ func (r *SafeRoot) Resolve(relative string) (string, error) {
 	}
 	if info, err := os.Lstat(resolved); err == nil {
 		if info.Mode()&os.ModeSymlink != 0 {
+			// 拒绝符号链接，避免攻击者先在根目录内放 link，再把读写跳转到根目录外。
 			return "", ErrPathSymlink
 		}
 		if !info.Mode().IsDir() && !info.Mode().IsRegular() {

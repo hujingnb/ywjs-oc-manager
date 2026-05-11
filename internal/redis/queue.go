@@ -38,9 +38,13 @@ type RedisQueue struct {
 
 // Config 描述 Redis 连接参数。
 type Config struct {
-	Addr     string
+	// Addr 是 Redis 地址，格式通常为 host:port。
+	Addr string
+	// Password 是 Redis AUTH 密码；空值表示不鉴权。
 	Password string
-	DB       int
+	// DB 是 Redis 逻辑库编号。
+	DB int
+	// QueueKey 是 ZSET key；为空时使用 ocm:jobs:queue。
 	QueueKey string
 }
 
@@ -142,7 +146,9 @@ type MemoryQueue struct {
 }
 
 type memoryEntry struct {
+	// jobID 与 Redis ZSET member 一致，必须是 jobs.id 的字符串形式。
 	jobID string
+	// score 与 RedisQueue 一致，使用 run_after 的 Unix 毫秒时间戳。
 	score int64
 }
 
@@ -167,6 +173,7 @@ func (q *MemoryQueue) add(jobID string, runAfter time.Time) error {
 	defer q.mu.Unlock()
 	for _, entry := range q.entries {
 		if entry.jobID == jobID {
+			// 与 Redis ZADD 默认语义保持一致：同一 jobID 重复入队不会产生多个成员。
 			return nil
 		}
 	}

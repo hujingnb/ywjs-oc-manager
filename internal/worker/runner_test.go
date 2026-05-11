@@ -12,9 +12,9 @@ import (
 
 	"github.com/jackc/pgx/v5/pgtype"
 
+	"github.com/stretchr/testify/require"
 	"oc-manager/internal/store/sqlc"
 	"oc-manager/internal/worker/handlers"
-	"github.com/stretchr/testify/require"
 )
 
 // countingStore 在 Tick 调用 Reserve 后立刻返回空，确保 Tick 快速跑完。

@@ -5,10 +5,10 @@ import (
 	"errors"
 	"testing"
 
-	"oc-manager/internal/audit"
-	"oc-manager/internal/service"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
+	"oc-manager/internal/audit"
+	"oc-manager/internal/service"
 )
 
 // fakeAuditRecorder 用于断言 RecordNewAPIFailure 实际写入的事件字段。

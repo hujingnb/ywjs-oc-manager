@@ -7,11 +7,11 @@ import (
 	"crypto/rand"
 	"encoding/hex"
 	"fmt"
+	"github.com/stretchr/testify/require"
 	"os"
 	"strconv"
 	"testing"
 	"time"
-	"github.com/stretchr/testify/require"
 )
 
 // TestIntegrationFullProvisionAndTokenFlow 用真实 new-api 实例验证全链路：

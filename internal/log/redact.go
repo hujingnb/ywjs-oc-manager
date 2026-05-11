@@ -14,7 +14,9 @@ import (
 // 注意：所有正则用 `\b` 边界匹配，避免误伤其他字段（如 "no_password=1"）。
 // JSON 形式 `"key":"value"` 与 query/form 形式 `key=value` 都覆盖。
 var secretPatterns = []struct {
-	re   *regexp.Regexp
+	// re 匹配一种敏感值出现形式，必须尽量收窄，避免误删普通业务文本。
+	re *regexp.Regexp
+	// repl 保留字段名和必要前缀，隐藏实际 secret。
 	repl string
 }{
 	{re: regexp.MustCompile(`(?i)("password"\s*:\s*)"[^"]*"`), repl: `$1"***"`},
@@ -36,6 +38,7 @@ var secretPatterns = []struct {
 // 调用方可以在写日志前主动调用，也可以借助 NewRedactingWriter 包装 io.Writer。
 func RedactSecrets(s string) string {
 	for _, p := range secretPatterns {
+		// 顺序应用所有规则，确保同一行里同时出现 password、Bearer 与 sk- token 时都能覆盖。
 		s = p.re.ReplaceAllString(s, p.repl)
 	}
 	return s
@@ -44,6 +47,7 @@ func RedactSecrets(s string) string {
 // RedactingWriter 把 io.Writer 包装成"先脱敏再写"的形式。
 // 配合 stdlib log.Logger.SetOutput 使用，可以在不改任何调用点的前提下覆盖全进程日志。
 type RedactingWriter struct {
+	// W 是最终写入目标；调用方通常传 os.Stderr 或测试用 bytes.Buffer。
 	W io.Writer
 }
 

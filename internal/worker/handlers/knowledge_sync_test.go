@@ -8,9 +8,9 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/stretchr/testify/require"
 	"oc-manager/internal/domain"
 	"oc-manager/internal/store/sqlc"
-	"github.com/stretchr/testify/require"
 )
 
 type memoryKnowledgeSource struct {
@@ -28,8 +28,8 @@ func (m *memoryKnowledgeSource) Open(p string) (io.ReadCloser, int64, error) {
 // memoryKnowledgeSink 是 KnowledgeFileSink 的内存实现，用于断言 worker 调对了哪个 scope
 // 的方法 + 哪个 scopeID + relPath。
 type memoryKnowledgeSink struct {
-	uploads []sinkCall
-	deletes []sinkCall
+	uploads   []sinkCall
+	deletes   []sinkCall
 	uploadErr error
 	deleteErr error
 }

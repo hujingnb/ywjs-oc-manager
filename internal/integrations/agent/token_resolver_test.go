@@ -3,9 +3,9 @@ package agent
 import (
 	"context"
 	"errors"
+	"github.com/stretchr/testify/require"
 	"sync"
 	"testing"
-	"github.com/stretchr/testify/require"
 )
 
 func TestTokenResolver_SetAndGet(t *testing.T) {

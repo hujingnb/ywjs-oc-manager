@@ -7,8 +7,8 @@ import (
 
 	"github.com/jackc/pgx/v5/pgtype"
 
-	"oc-manager/internal/store/sqlc"
 	"github.com/stretchr/testify/require"
+	"oc-manager/internal/store/sqlc"
 )
 
 func TestSchedulerTickReenqueuesReadyJobs(t *testing.T) {

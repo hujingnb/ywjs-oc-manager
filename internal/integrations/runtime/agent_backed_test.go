@@ -12,10 +12,10 @@ import (
 
 	"github.com/docker/docker/client"
 
+	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
 	"oc-manager/internal/integrations/agent"
 	"oc-manager/internal/runtime/imagesync"
-	"github.com/stretchr/testify/require"
-	"github.com/stretchr/testify/assert"
 )
 
 func TestAgentBackedAdapterEnsureImageDelegatesToImageSyncer(t *testing.T) {

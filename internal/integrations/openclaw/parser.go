@@ -126,4 +126,3 @@ func containsAny(line string, keywords []string) bool {
 	}
 	return false
 }
-

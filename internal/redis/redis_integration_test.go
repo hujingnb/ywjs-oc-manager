@@ -4,10 +4,10 @@ package redis
 
 import (
 	"context"
+	"github.com/stretchr/testify/require"
 	"os"
 	"testing"
 	"time"
-	"github.com/stretchr/testify/require"
 )
 
 // TestRedisQueue_LiveEnqueueAndReserve 通过真实 Redis 验证 ZSET 读写。

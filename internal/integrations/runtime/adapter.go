@@ -14,21 +14,31 @@ import (
 // ContainerSpec 描述需要在 runtime node 上启动的容器参数。
 // 仅保留 manager 当前实际使用的字段，避免一开始就泄露完整 Docker API。
 type ContainerSpec struct {
-	Name      string
-	Image     string
-	Env       map[string]string
-	Volumes   []VolumeMount
-	Networks  []string
+	// Name 是节点内容器名，由 manager 生成并用于后续 inspect/exec 排障。
+	Name string
+	// Image 是已同步到目标节点的 runtime 镜像引用。
+	Image string
+	// Env 是写入容器环境变量的键值对，不能包含明文长期密钥。
+	Env map[string]string
+	// Volumes 只允许本地 bind mount，路径合法性由调用方和 agent 共同约束。
+	Volumes []VolumeMount
+	// Networks 是容器加入的 Docker 网络名称列表；为空时使用 docker 默认网络。
+	Networks []string
+	// Resources 是可选资源上限，零值表示不限制。
 	Resources Resources
-	Command   []string
+	// Command 覆盖镜像默认启动命令；为空时沿用镜像 ENTRYPOINT/CMD。
+	Command []string
 }
 
 // VolumeMount 描述容器卷挂载。
 // 严格使用本地 bind mount 的语义，与项目“禁止 Docker named volume”的全局约束保持一致。
 type VolumeMount struct {
-	HostPath      string
+	// HostPath 是目标节点上的绝对路径，不是 manager 本机路径。
+	HostPath string
+	// ContainerPath 是容器内挂载点。
 	ContainerPath string
-	ReadOnly      bool
+	// ReadOnly 为 true 时以只读方式挂载，适合知识库主副本。
+	ReadOnly bool
 }
 
 // Resources 描述容器的资源约束。
@@ -40,17 +50,23 @@ type Resources struct {
 
 // ContainerInfo 是对外暴露的容器状态视图。
 type ContainerInfo struct {
-	ID     string
-	Name   string
-	Image  string
+	// ID 是 docker 返回的容器 ID。
+	ID string
+	// Name 是容器名，可能带或不带 docker API 返回的前导斜杠。
+	Name string
+	// Image 是容器创建时使用的镜像引用。
+	Image string
+	// Status 是 docker inspect 的状态字符串，如 created/running/exited。
 	Status string
 }
 
 // ExecResult 是 ContainerExec 返回的命令执行结果。
 // Stdout 截断到 4KB 避免 worker 内存爆炸；只用于排障的健康检查响应体。
 type ExecResult struct {
+	// ExitCode 是容器内命令退出码；0 通常表示健康检查成功。
 	ExitCode int
-	Stdout   string
+	// Stdout 保存截断后的输出，供失败时写入 health_state_json。
+	Stdout string
 }
 
 // ContainerStats 是 RuntimeAdapter.Stats 返回的归一化指标视图。
