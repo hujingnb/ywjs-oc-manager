@@ -4,12 +4,14 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"math"
 	"net/http"
 	"net/http/httptest"
 	"strings"
 	"testing"
-	"github.com/stretchr/testify/require"
+
 	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
 )
 
 // TestUserScopedCreateAPIKeyHappyPath 校验 user-scoped client 调 POST /api/token/ 时携带
@@ -123,17 +125,20 @@ func TestNewApiUserHeaderOmittedWhenAdminUserIDZero(t *testing.T) {
 }
 
 // TestRechargeUserUsesManageEndpoint 校验 RechargeUser 改走 POST /api/user/manage
-// (action=add_quota, mode=add)，避免之前 GET-修改-PUT 整对象的并发覆盖风险。
+// (action=add_quota, mode=add)，并按 new-api quota_per_unit 把展示额度转换为内部 quota。
+// 这样 manager 输入 1000 时，new-api 用户页「总额度」也增加 1000，而不是只增加 1000 个内部计费点。
 // 紧跟一次 GET /api/user/{id} 把"加完后的 quota"拉回作为 RechargeResult.RemainQuota。
 func TestRechargeUserUsesManageEndpoint(t *testing.T) {
 	var (
-		gotManage bool
-		gotGet    bool
+		gotManage  bool
+		gotGet     bool
 		manageBody map[string]any
 	)
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
 		switch {
+		case r.Method == http.MethodGet && r.URL.Path == "/api/status":
+			_, _ = w.Write([]byte(`{"success":true,"data":{"quota_per_unit":500000}}`))
 		case r.Method == http.MethodPost && r.URL.Path == "/api/user/manage":
 			gotManage = true
 			_ = decodeJSONBody(r, &manageBody)
@@ -158,9 +163,52 @@ func TestRechargeUserUsesManageEndpoint(t *testing.T) {
 	if manageBody["action"] != "add_quota" || manageBody["mode"] != "add" {
 		t.Fatalf("manage body action/mode wrong: %v", manageBody)
 	}
-	require.Equal(t, int64(1000), int64Of(manageBody["value"]))
+	require.Equal(t, int64(500000000), int64Of(manageBody["value"]))
 	require.Equal(t, int64(1500), got.RemainQuota)
 	require.NotEqual(t, "", got.RefID)
+}
+
+// TestRechargeUserRejectsInvalidQuotaPerUnit 校验 new-api 状态接口返回非法换算比例时，
+// client 不会继续调用充值接口，避免写入错误额度。
+func TestRechargeUserRejectsInvalidQuotaPerUnit(t *testing.T) {
+	gotManage := false
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		switch {
+		case r.Method == http.MethodGet && r.URL.Path == "/api/status":
+			_, _ = w.Write([]byte(`{"success":true,"data":{"quota_per_unit":0}}`))
+		case r.Method == http.MethodPost && r.URL.Path == "/api/user/manage":
+			gotManage = true
+			_, _ = w.Write([]byte(`{"success":true}`))
+		default:
+			t.Fatalf("unexpected request: %s %s", r.Method, r.URL.Path)
+		}
+	}))
+	defer server.Close()
+
+	client := NewClient(server.URL, "tok", 1)
+	_, err := client.RechargeUser(context.Background(), RechargeInput{NewAPIUserID: 42, CreditAmount: 1000})
+	require.ErrorIs(t, err, ErrPayloadInvalid)
+	require.False(t, gotManage)
+}
+
+// TestRechargeUserRejectsQuotaOverflow 校验展示额度乘以 quota_per_unit 可能溢出 int64 时直接拒绝，
+// 避免向 new-api 发送截断后的负数或错误额度。
+func TestRechargeUserRejectsQuotaOverflow(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		require.Equal(t, "/api/status", r.URL.Path)
+		_, _ = w.Write([]byte(`{"success":true,"data":{"quota_per_unit":500000}}`))
+	}))
+	defer server.Close()
+
+	client := NewClient(server.URL, "tok", 1)
+	_, err := client.RechargeUser(context.Background(), RechargeInput{
+		NewAPIUserID: 42,
+		CreditAmount: math.MaxInt64/500000 + 1,
+	})
+	require.Error(t, err)
+	require.Contains(t, err.Error(), "超出")
 }
 
 // TestCreateUserCallsAdminEndpoint 校验 CreateUser 调 admin POST /api/user/ 并回查 user_id：
@@ -168,7 +216,7 @@ func TestRechargeUserUsesManageEndpoint(t *testing.T) {
 // 拿到完整 user 实体。
 func TestCreateUserCallsAdminEndpoint(t *testing.T) {
 	var (
-		gotPost bool
+		gotPost   bool
 		gotSearch bool
 	)
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {

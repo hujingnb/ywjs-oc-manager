@@ -85,7 +85,9 @@ type CreateAPIKeyInput struct {
 }
 
 // RechargeInput 是组织充值的入参。
-// CreditAmount 必须为正数；Remark 由调用方按业务策略组装（操作员 + 业务说明）。
+// CreditAmount 必须为正数，单位为 new-api 前台展示额度；
+// 调用 add_quota 前会按 /api/status.quota_per_unit 转换为 new-api 内部 quota。
+// Remark 由调用方按业务策略组装（操作员 + 业务说明）。
 type RechargeInput struct {
 	NewAPIUserID int64
 	CreditAmount int64
@@ -493,13 +495,17 @@ func (u *UserScopedClient) SetAPIKeyStatus(ctx context.Context, id int64, status
 	return nil
 }
 
-// RechargeUser 给指定 new-api 用户增加点数（admin POST /api/user/manage action=add_quota）。
+// RechargeUser 给指定 new-api 用户增加展示额度（admin POST /api/user/manage action=add_quota）。
 //
 // new-api 的 ManageUser action=add_quota,mode=add 是服务端原子加，比之前的「GET 整 user → 改 quota →
 // PUT 整 user」干净得多：
 //   - 服务端原子操作，避免并发覆盖；
 //   - 自带审计（new-api 写 LogTypeManage）；
 //   - 调用方只传 user_id + amount。
+//
+// 注意：new-api 的 users.quota 是内部计费单位，前台「总额度」按 quota_per_unit 折算展示。
+// manager 的充值入口面向平台管理员，输入值按前台展示额度理解，因此这里必须先查 /api/status
+// 的 quota_per_unit 并做乘法转换，否则充值 1000 只会写入 1000 个内部 quota，页面看起来几乎没到账。
 //
 // 返回值的 RemainQuota 是 add 之后的最新余额，本 client 紧跟一次 GET /api/user/{id} 拿到。
 // new-api 自身没有 ref_id 概念，本函数生成 manager 端对账 ID 写入 RechargeResult.RefID。
@@ -510,12 +516,20 @@ func (c *Client) RechargeUser(ctx context.Context, input RechargeInput) (Recharg
 	if input.NewAPIUserID == 0 {
 		return RechargeResult{}, fmt.Errorf("newapi_user_id 不能为 0")
 	}
+	quotaPerUnit, err := c.GetQuotaPerUnit(ctx)
+	if err != nil {
+		return RechargeResult{}, fmt.Errorf("查询 new-api quota_per_unit 失败: %w", err)
+	}
+	if input.CreditAmount > 9223372036854775807/quotaPerUnit {
+		return RechargeResult{}, fmt.Errorf("credit_amount 超出 new-api quota 范围")
+	}
+	rawQuotaAmount := input.CreditAmount * quotaPerUnit
 
 	body := map[string]any{
 		"id":     input.NewAPIUserID,
 		"action": "add_quota",
 		"mode":   "add",
-		"value":  input.CreditAmount,
+		"value":  rawQuotaAmount,
 	}
 	var manageResp struct {
 		Success bool   `json:"success"`
@@ -536,6 +550,30 @@ func (c *Client) RechargeUser(ctx context.Context, input RechargeInput) (Recharg
 	}
 	refID := fmt.Sprintf("manager-%d", input.NewAPIUserID)
 	return RechargeResult{RefID: refID, RemainQuota: remain}, nil
+}
+
+// GetQuotaPerUnit 读取 new-api 的展示额度换算比例。
+//
+// new-api 前台的「总额度」不是直接展示 users.quota，而是按 /api/status.quota_per_unit
+// 折算；充值链路必须使用同一个比例，才能让 manager 输入值与 new-api 管理页展示值一致。
+func (c *Client) GetQuotaPerUnit(ctx context.Context) (int64, error) {
+	var response struct {
+		Success bool   `json:"success"`
+		Message string `json:"message"`
+		Data    struct {
+			QuotaPerUnit int64 `json:"quota_per_unit"`
+		} `json:"data"`
+	}
+	if err := c.do(ctx, http.MethodGet, "/api/status", nil, &response); err != nil {
+		return 0, err
+	}
+	if !response.Success {
+		return 0, fmt.Errorf("%w: %s", ErrUpstream, response.Message)
+	}
+	if response.Data.QuotaPerUnit <= 0 {
+		return 0, fmt.Errorf("%w: quota_per_unit 必须为正", ErrPayloadInvalid)
+	}
+	return response.Data.QuotaPerUnit, nil
 }
 
 // DeleteUser 调 admin DELETE /api/user/:id 删除业务 user。
