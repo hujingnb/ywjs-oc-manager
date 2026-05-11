@@ -83,21 +83,62 @@
         </n-grid>
       </n-form>
     </n-card>
+
+    <!-- 组织充值弹框 -->
+    <n-modal v-model:show="rechargeVisible" preset="card" style="max-width: 560px" title="组织充值">
+      <div v-if="selectedOrg" class="recharge-dialog">
+        <div>
+          <p class="eyebrow">Billing</p>
+          <h3 style="margin: 0">{{ selectedOrg.name }}</h3>
+        </div>
+        <p class="state-text">
+          当前余额：
+          <strong v-if="balanceQuery.isLoading.value">加载中…</strong>
+          <strong v-else-if="balance">
+            剩余 {{ balance.remain_quota.toLocaleString() }} ｜ 已用 {{ balance.used_quota.toLocaleString() }}
+          </strong>
+          <strong v-else class="danger">查询失败</strong>
+        </p>
+        <n-form label-placement="top" @submit.prevent="submitRecharge">
+          <n-form-item label="充值点数（正整数）">
+            <n-input-number v-model:value="rechargeAmount" :min="1" style="width: 100%" placeholder="输入点数" />
+          </n-form-item>
+          <n-form-item label="备注">
+            <n-input v-model:value="rechargeRemark" placeholder="业务说明，可选" />
+          </n-form-item>
+          <n-space justify="end">
+            <n-button @click="closeRecharge">取消</n-button>
+            <n-button
+              type="primary"
+              attr-type="submit"
+              :disabled="!canSubmitRecharge"
+              :loading="rechargeMutation.isPending.value"
+            >
+              确认充值
+            </n-button>
+          </n-space>
+          <p v-if="rechargeFeedback" class="state-text" :class="{ danger: rechargeFeedbackError }">
+            {{ rechargeFeedback }}
+          </p>
+        </n-form>
+      </div>
+    </n-modal>
   </div>
 </template>
 
 <script setup lang="ts">
-import { h } from 'vue'
+import { computed, h, ref } from 'vue'
 import { Plus, X } from 'lucide-vue-next'
 import {
   NButton, NCard, NForm, NFormItem, NGrid, NGridItem,
-  NInput, NInputNumber, NSpace,
+  NInput, NInputNumber, NModal, NSpace,
 } from 'naive-ui'
 
 import { formatOrgStatus } from '@/domain/status'
 import {
   useCreateOrganization, useOrganizationsQuery, useUpdateOrganizationStatus,
 } from '@/api/hooks/useOrganizations'
+import { useOrgBalanceQuery, useRechargeMutation } from '@/api/hooks/useRecharge'
 import type { Organization } from '@/api'
 import DataTableList from '@/components/DataTableList.vue'
 import { statusColumn, actionColumn } from '@/components/columns'
@@ -106,6 +147,17 @@ import { useFormModal } from '@/composables/useFormModal'
 const { data: organizations, isLoading, error } = useOrganizationsQuery()
 const createMutation = useCreateOrganization()
 const statusMutation = useUpdateOrganizationStatus()
+const selectedOrg = ref<Organization | null>(null)
+const selectedOrgId = computed(() => selectedOrg.value?.id)
+const balanceQuery = useOrgBalanceQuery(selectedOrgId)
+const balance = computed(() => balanceQuery.data.value ?? null)
+const rechargeMutation = useRechargeMutation(selectedOrgId)
+const rechargeVisible = ref(false)
+const rechargeAmount = ref<number | null>(null)
+const rechargeRemark = ref('')
+const rechargeFeedback = ref('')
+const rechargeFeedbackError = ref(false)
+const canSubmitRecharge = computed(() => Boolean(selectedOrgId.value && (rechargeAmount.value ?? 0) > 0))
 
 // 创建组织表单状态聚合到 useFormModal；toPayload 处理可选字段的 || undefined 过滤
 const { form, formVisible, creating, submitError, openForm, submit } = useFormModal({
@@ -157,6 +209,7 @@ const columns = [
   },
   // 启用/禁用互斥：用两条 RowAction + hidden 分别渲染
   actionColumn<Organization>([
+    { label: '充值', type: 'primary', onClick: openRecharge },
     { label: '禁用', onClick: r => onToggle(r, 'disable'), hidden: r => r.status !== 'active' },
     { label: '启用', type: 'primary', onClick: r => onToggle(r, 'enable'), hidden: r => r.status === 'active' },
   ]),
@@ -165,4 +218,39 @@ const columns = [
 function onToggle(org: Organization, action: 'enable' | 'disable') {
   statusMutation.mutate({ orgId: org.id, action })
 }
+
+function openRecharge(org: Organization) {
+  selectedOrg.value = org
+  rechargeAmount.value = null
+  rechargeRemark.value = ''
+  rechargeFeedback.value = ''
+  rechargeFeedbackError.value = false
+  rechargeVisible.value = true
+}
+
+function closeRecharge() {
+  rechargeVisible.value = false
+}
+
+async function submitRecharge() {
+  if (!canSubmitRecharge.value) return
+  rechargeFeedback.value = ''
+  rechargeFeedbackError.value = false
+  try {
+    const result = await rechargeMutation.mutateAsync({
+      credit_amount: rechargeAmount.value ?? 0,
+      remark: rechargeRemark.value || undefined,
+    })
+    rechargeFeedback.value = `已充值 ${result.credit_amount.toLocaleString()} 点`
+    rechargeAmount.value = null
+    rechargeRemark.value = ''
+  } catch (err: unknown) {
+    rechargeFeedbackError.value = true
+    rechargeFeedback.value = err instanceof Error ? err.message : '充值失败'
+  }
+}
 </script>
+
+<style scoped>
+.recharge-dialog { display: grid; gap: 14px; }
+</style>
