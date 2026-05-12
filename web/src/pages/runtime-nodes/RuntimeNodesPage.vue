@@ -15,7 +15,7 @@
     />
 
     <div ref="drawerTarget" class="drawer-teleport-target" />
-    <n-drawer v-model:show="isDrawerVisible" :width="960" placement="right" :to="drawerTarget ?? 'body'">
+    <n-drawer v-model:show="isDrawerVisible" width="min(960px, 100vw)" placement="right" :to="drawerTarget ?? 'body'">
       <n-drawer-content :title="selectedNode ? `节点资源 · ${selectedNode.name}` : '节点资源'" closable>
         <div v-if="selectedNode" class="node-drawer">
           <section class="drawer-section">
@@ -74,7 +74,7 @@
 </template>
 
 <script setup lang="ts">
-import { computed, defineComponent, h, ref, toRef, type PropType } from 'vue'
+import { computed, defineComponent, h, ref, toRef, watch, type PropType } from 'vue'
 import { NAlert, NButton, NDataTable, NDrawer, NDrawerContent, NRadioButton, NRadioGroup, type DataTableColumns } from 'naive-ui'
 
 import DataTableList from '@/components/DataTableList.vue'
@@ -97,28 +97,40 @@ import type { RuntimeNode } from '@/api'
 // RuntimeNodesPage 展示 runtime-agent 自动注册的节点，并提供平台侧启停操作。
 const { data: nodes, isLoading, error } = useRuntimeNodesQuery()
 const statusMutation = useSetRuntimeNodeStatus()
-const selectedNode = ref<RuntimeNode | null>(null)
+const selectedNodeId = ref<string | null>(null)
 const resourceRange = ref<ResourceRange>('7d')
 const expandedInstanceIds = ref<string[]>([])
 const drawerTarget = ref<HTMLElement | null>(null)
 
-// 抽屉显隐完全由 selectedNode 派生，关闭时清理实例展开状态，避免切换节点沿用旧行。
+// selectedNode 从最新列表数据派生，避免列表刷新后抽屉继续持有旧行对象。
+const selectedNode = computed(() => (nodes.value ?? []).find((node) => node.id === selectedNodeId.value) ?? null)
+const selectedNodeIdForQuery = computed(() => selectedNodeId.value ?? undefined)
+
+// 抽屉显隐完全由 selectedNodeId 派生，关闭时清理实例展开状态，避免切换节点沿用旧行。
 const isDrawerVisible = computed({
-  get: () => selectedNode.value !== null,
+  get: () => selectedNodeId.value !== null,
   set: (visible: boolean) => {
     if (!visible) {
-      selectedNode.value = null
+      selectedNodeId.value = null
       expandedInstanceIds.value = []
     }
   },
 })
-const selectedNodeId = computed(() => selectedNode.value?.id)
-const { data: nodeResources } = useRuntimeNodeResourcesQuery(selectedNodeId, resourceRange)
+const { data: nodeResources } = useRuntimeNodeResourcesQuery(selectedNodeIdForQuery, resourceRange)
 const {
   data: nodeInstances,
   isLoading: isNodeInstancesLoading,
   error: nodeInstancesError,
-} = useRuntimeNodeInstancesQuery(selectedNodeId)
+} = useRuntimeNodeInstancesQuery(selectedNodeIdForQuery)
+
+// 列表刷新后如果节点已不存在，关闭抽屉，避免展示过期的资源和实例关系。
+watch([nodes, selectedNodeId], ([currentNodes, currentNodeId]) => {
+  if (!currentNodeId || !currentNodes) return
+  if (!currentNodes.some((node) => node.id === currentNodeId)) {
+    selectedNodeId.value = null
+    expandedInstanceIds.value = []
+  }
+}, { flush: 'sync' })
 
 const rangeOptions: Array<{ label: string; value: ResourceRange }> = [
   { label: '1 小时', value: '1h' },
@@ -259,7 +271,7 @@ function onToggle(node: RuntimeNode, action: 'enable' | 'disable') {
 
 // onView 只更新本地抽屉状态，不写入路由，保证节点详情在当前列表页内完成。
 function onView(node: RuntimeNode) {
-  selectedNode.value = node
+  selectedNodeId.value = node.id
   expandedInstanceIds.value = []
 }
 
