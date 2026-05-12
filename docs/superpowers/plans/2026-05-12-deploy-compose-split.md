@@ -84,13 +84,33 @@ Append this block to `.gitignore`:
 ```gitignore
 
 # 生产部署目录：真实配置、数据和日志不入仓，只提交 example 与 .gitkeep。
-deploy/**/.env
+deploy/new-api/.env
+deploy/ollama/.env
+deploy/runtime-agent/.env
+deploy/manage/.env
 deploy/manage/config/manager.yaml
 deploy/runtime-agent/config/agent.yaml
-deploy/**/data/**
-deploy/**/logs/**
-!deploy/**/data/**/.gitkeep
-!deploy/**/logs/**/.gitkeep
+
+deploy/new-api/data/**
+deploy/new-api/logs/**
+deploy/ollama/data/**
+deploy/runtime-agent/data/**
+deploy/manage/data/**
+!deploy/new-api/data/
+!deploy/new-api/data/**/
+!deploy/new-api/data/**/.gitkeep
+!deploy/new-api/logs/
+!deploy/new-api/logs/**/
+!deploy/new-api/logs/**/.gitkeep
+!deploy/ollama/data/
+!deploy/ollama/data/**/
+!deploy/ollama/data/**/.gitkeep
+!deploy/runtime-agent/data/
+!deploy/runtime-agent/data/**/
+!deploy/runtime-agent/data/**/.gitkeep
+!deploy/manage/data/
+!deploy/manage/data/**/
+!deploy/manage/data/**/.gitkeep
 ```
 
 - [ ] **Step 2: Create directory skeleton**
