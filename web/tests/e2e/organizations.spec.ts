@@ -10,14 +10,15 @@ test('platform_admin 可创建组织', async ({ page }) => {
   await loginAs(page, 'platform_admin')
   await page.goto('/organizations')
   await page.getByRole('button', { name: '新增组织' }).click()
-  // 时间戳 + nanoTime 后缀保证不同跑次唯一，避免与 fixture 已有组织重名。
-  const name = `e2e-${Date.now()}-org`
-  // 表单使用 <label><span>名称 *</span><input/></label> 结构，accessible name 为「名称 *」。
-  await page.getByLabel('名称 *').fill(name)
-  await page.getByLabel('管理员用户名 *').fill(`${name}-admin`)
-  await page.getByLabel('管理员姓名 *').fill('E2E 管理员')
-  await page.getByLabel('管理员密码 *').fill('secret-password')
+  // 秒级时间戳保证不同跑次唯一，同时避免 new-api display_name 超过 20 字符。
+  const name = `e2e-${Math.floor(Date.now() / 1000)}-org`
+  // Naive UI 的表单项标题不直接作为 input label，使用稳定的 placeholder 定位输入框。
+  await page.getByPlaceholder('组织名称').fill(name)
+  await page.getByPlaceholder('test-org').fill(name)
+  await page.getByPlaceholder('登录用户名').fill(`${name}-admin`)
+  await page.getByPlaceholder('管理员显示名').fill('E2E 管理员')
+  await page.getByPlaceholder('初始登录密码').fill('secret-password')
   await page.getByRole('button', { name: '保存' }).click()
-  // 列表展示新组织名（strong 文本）。
-  await expect(page.getByRole('table').getByText(name)).toBeVisible()
+  // 列表展示新组织行；名称和组织标识相同，因此断言整行避免 strict mode 匹配到两个单元格。
+  await expect(page.getByRole('row', { name: new RegExp(name) })).toBeVisible()
 })
