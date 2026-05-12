@@ -18,17 +18,17 @@ WHERE id IN (
     FROM instance_resource_samples AS s
     WHERE s.sampled_at < $1
     ORDER BY s.sampled_at ASC
-    LIMIT $2
+    LIMIT $2::integer
 )
 `
 
 type DeleteOldInstanceResourceSamplesParams struct {
-	SampledAt pgtype.Timestamptz `db:"sampled_at" json:"sampled_at"`
-	Limit     int32              `db:"limit" json:"limit"`
+	CutoffSampledAt pgtype.Timestamptz `db:"cutoff_sampled_at" json:"cutoff_sampled_at"`
+	BatchSize       int32              `db:"batch_size" json:"batch_size"`
 }
 
 func (q *Queries) DeleteOldInstanceResourceSamples(ctx context.Context, arg DeleteOldInstanceResourceSamplesParams) (int64, error) {
-	result, err := q.db.Exec(ctx, deleteOldInstanceResourceSamples, arg.SampledAt, arg.Limit)
+	result, err := q.db.Exec(ctx, deleteOldInstanceResourceSamples, arg.CutoffSampledAt, arg.BatchSize)
 	if err != nil {
 		return 0, err
 	}
@@ -42,17 +42,17 @@ WHERE id IN (
     FROM node_resource_samples AS s
     WHERE s.sampled_at < $1
     ORDER BY s.sampled_at ASC
-    LIMIT $2
+    LIMIT $2::integer
 )
 `
 
 type DeleteOldNodeResourceSamplesParams struct {
-	SampledAt pgtype.Timestamptz `db:"sampled_at" json:"sampled_at"`
-	Limit     int32              `db:"limit" json:"limit"`
+	CutoffSampledAt pgtype.Timestamptz `db:"cutoff_sampled_at" json:"cutoff_sampled_at"`
+	BatchSize       int32              `db:"batch_size" json:"batch_size"`
 }
 
 func (q *Queries) DeleteOldNodeResourceSamples(ctx context.Context, arg DeleteOldNodeResourceSamplesParams) (int64, error) {
-	result, err := q.db.Exec(ctx, deleteOldNodeResourceSamples, arg.SampledAt, arg.Limit)
+	result, err := q.db.Exec(ctx, deleteOldNodeResourceSamples, arg.CutoffSampledAt, arg.BatchSize)
 	if err != nil {
 		return 0, err
 	}
@@ -253,7 +253,7 @@ func (q *Queries) InsertNodeResourceSample(ctx context.Context, arg InsertNodeRe
 
 const listInstanceResourceBuckets = `-- name: ListInstanceResourceBuckets :many
 SELECT
-    to_timestamp(floor(extract(epoch FROM sampled_at) / $4::integer)::bigint * $4::integer)::timestamptz AS sampled_at,
+    to_timestamp(floor(extract(epoch FROM sampled_at) / $2::integer)::bigint * $2::integer)::timestamptz AS sampled_at,
     COALESCE(((array_remove(array_agg(container_status ORDER BY sampled_at DESC), NULL))[1])::text, ''::text)::text AS container_status,
     count(container_status) > 0 AS has_container_status,
     COALESCE(avg(cpu_percent)::double precision, 0::double precision)::double precision AS cpu_percent,
@@ -274,17 +274,17 @@ SELECT
     count(last_error) > 0 AS has_last_error
 FROM instance_resource_samples
 WHERE app_id = $1
-  AND sampled_at >= $2
-  AND sampled_at <= $3
+  AND sampled_at >= $3
+  AND sampled_at <= $4
 GROUP BY 1
 ORDER BY 1 ASC
 `
 
 type ListInstanceResourceBucketsParams struct {
 	AppID         pgtype.UUID        `db:"app_id" json:"app_id"`
-	SampledAt     pgtype.Timestamptz `db:"sampled_at" json:"sampled_at"`
-	SampledAt_2   pgtype.Timestamptz `db:"sampled_at_2" json:"sampled_at_2"`
 	BucketSeconds int32              `db:"bucket_seconds" json:"bucket_seconds"`
+	FromSampledAt pgtype.Timestamptz `db:"from_sampled_at" json:"from_sampled_at"`
+	ToSampledAt   pgtype.Timestamptz `db:"to_sampled_at" json:"to_sampled_at"`
 }
 
 type ListInstanceResourceBucketsRow struct {
@@ -312,9 +312,9 @@ type ListInstanceResourceBucketsRow struct {
 func (q *Queries) ListInstanceResourceBuckets(ctx context.Context, arg ListInstanceResourceBucketsParams) ([]ListInstanceResourceBucketsRow, error) {
 	rows, err := q.db.Query(ctx, listInstanceResourceBuckets,
 		arg.AppID,
-		arg.SampledAt,
-		arg.SampledAt_2,
 		arg.BucketSeconds,
+		arg.FromSampledAt,
+		arg.ToSampledAt,
 	)
 	if err != nil {
 		return nil, err
@@ -364,13 +364,13 @@ ORDER BY sampled_at ASC, id ASC
 `
 
 type ListInstanceResourceSamplesParams struct {
-	AppID       pgtype.UUID        `db:"app_id" json:"app_id"`
-	SampledAt   pgtype.Timestamptz `db:"sampled_at" json:"sampled_at"`
-	SampledAt_2 pgtype.Timestamptz `db:"sampled_at_2" json:"sampled_at_2"`
+	AppID         pgtype.UUID        `db:"app_id" json:"app_id"`
+	FromSampledAt pgtype.Timestamptz `db:"from_sampled_at" json:"from_sampled_at"`
+	ToSampledAt   pgtype.Timestamptz `db:"to_sampled_at" json:"to_sampled_at"`
 }
 
 func (q *Queries) ListInstanceResourceSamples(ctx context.Context, arg ListInstanceResourceSamplesParams) ([]InstanceResourceSample, error) {
-	rows, err := q.db.Query(ctx, listInstanceResourceSamples, arg.AppID, arg.SampledAt, arg.SampledAt_2)
+	rows, err := q.db.Query(ctx, listInstanceResourceSamples, arg.AppID, arg.FromSampledAt, arg.ToSampledAt)
 	if err != nil {
 		return nil, err
 	}
@@ -491,7 +491,7 @@ func (q *Queries) ListLatestNodeResourceSamples(ctx context.Context, runtimeNode
 
 const listNodeInstanceResourceBuckets = `-- name: ListNodeInstanceResourceBuckets :many
 SELECT
-    to_timestamp(floor(extract(epoch FROM sampled_at) / $5::integer)::bigint * $5::integer)::timestamptz AS sampled_at,
+    to_timestamp(floor(extract(epoch FROM sampled_at) / $3::integer)::bigint * $3::integer)::timestamptz AS sampled_at,
     COALESCE(((array_remove(array_agg(container_status ORDER BY sampled_at DESC), NULL))[1])::text, ''::text)::text AS container_status,
     count(container_status) > 0 AS has_container_status,
     COALESCE(avg(cpu_percent)::double precision, 0::double precision)::double precision AS cpu_percent,
@@ -513,8 +513,8 @@ SELECT
 FROM instance_resource_samples
 WHERE runtime_node_id = $1
   AND app_id = $2
-  AND sampled_at >= $3
-  AND sampled_at <= $4
+  AND sampled_at >= $4
+  AND sampled_at <= $5
 GROUP BY 1
 ORDER BY 1 ASC
 `
@@ -522,9 +522,9 @@ ORDER BY 1 ASC
 type ListNodeInstanceResourceBucketsParams struct {
 	RuntimeNodeID pgtype.UUID        `db:"runtime_node_id" json:"runtime_node_id"`
 	AppID         pgtype.UUID        `db:"app_id" json:"app_id"`
-	SampledAt     pgtype.Timestamptz `db:"sampled_at" json:"sampled_at"`
-	SampledAt_2   pgtype.Timestamptz `db:"sampled_at_2" json:"sampled_at_2"`
 	BucketSeconds int32              `db:"bucket_seconds" json:"bucket_seconds"`
+	FromSampledAt pgtype.Timestamptz `db:"from_sampled_at" json:"from_sampled_at"`
+	ToSampledAt   pgtype.Timestamptz `db:"to_sampled_at" json:"to_sampled_at"`
 }
 
 type ListNodeInstanceResourceBucketsRow struct {
@@ -553,9 +553,9 @@ func (q *Queries) ListNodeInstanceResourceBuckets(ctx context.Context, arg ListN
 	rows, err := q.db.Query(ctx, listNodeInstanceResourceBuckets,
 		arg.RuntimeNodeID,
 		arg.AppID,
-		arg.SampledAt,
-		arg.SampledAt_2,
 		arg.BucketSeconds,
+		arg.FromSampledAt,
+		arg.ToSampledAt,
 	)
 	if err != nil {
 		return nil, err
@@ -608,16 +608,16 @@ ORDER BY sampled_at ASC, id ASC
 type ListNodeInstanceResourceSamplesParams struct {
 	RuntimeNodeID pgtype.UUID        `db:"runtime_node_id" json:"runtime_node_id"`
 	AppID         pgtype.UUID        `db:"app_id" json:"app_id"`
-	SampledAt     pgtype.Timestamptz `db:"sampled_at" json:"sampled_at"`
-	SampledAt_2   pgtype.Timestamptz `db:"sampled_at_2" json:"sampled_at_2"`
+	FromSampledAt pgtype.Timestamptz `db:"from_sampled_at" json:"from_sampled_at"`
+	ToSampledAt   pgtype.Timestamptz `db:"to_sampled_at" json:"to_sampled_at"`
 }
 
 func (q *Queries) ListNodeInstanceResourceSamples(ctx context.Context, arg ListNodeInstanceResourceSamplesParams) ([]InstanceResourceSample, error) {
 	rows, err := q.db.Query(ctx, listNodeInstanceResourceSamples,
 		arg.RuntimeNodeID,
 		arg.AppID,
-		arg.SampledAt,
-		arg.SampledAt_2,
+		arg.FromSampledAt,
+		arg.ToSampledAt,
 	)
 	if err != nil {
 		return nil, err
@@ -655,7 +655,7 @@ func (q *Queries) ListNodeInstanceResourceSamples(ctx context.Context, arg ListN
 
 const listNodeResourceBuckets = `-- name: ListNodeResourceBuckets :many
 SELECT
-    to_timestamp(floor(extract(epoch FROM sampled_at) / $4::integer)::bigint * $4::integer)::timestamptz AS sampled_at,
+    to_timestamp(floor(extract(epoch FROM sampled_at) / $2::integer)::bigint * $2::integer)::timestamptz AS sampled_at,
     COALESCE(avg(cpu_percent)::double precision, 0::double precision)::double precision AS cpu_percent,
     count(cpu_percent) > 0 AS has_cpu_percent,
     COALESCE(avg(memory_used_bytes)::bigint, 0::bigint)::bigint AS memory_used_bytes,
@@ -676,17 +676,17 @@ SELECT
     count(last_error) > 0 AS has_last_error
 FROM node_resource_samples
 WHERE runtime_node_id = $1
-  AND sampled_at >= $2
-  AND sampled_at <= $3
+  AND sampled_at >= $3
+  AND sampled_at <= $4
 GROUP BY 1
 ORDER BY 1 ASC
 `
 
 type ListNodeResourceBucketsParams struct {
 	RuntimeNodeID pgtype.UUID        `db:"runtime_node_id" json:"runtime_node_id"`
-	SampledAt     pgtype.Timestamptz `db:"sampled_at" json:"sampled_at"`
-	SampledAt_2   pgtype.Timestamptz `db:"sampled_at_2" json:"sampled_at_2"`
 	BucketSeconds int32              `db:"bucket_seconds" json:"bucket_seconds"`
+	FromSampledAt pgtype.Timestamptz `db:"from_sampled_at" json:"from_sampled_at"`
+	ToSampledAt   pgtype.Timestamptz `db:"to_sampled_at" json:"to_sampled_at"`
 }
 
 type ListNodeResourceBucketsRow struct {
@@ -714,9 +714,9 @@ type ListNodeResourceBucketsRow struct {
 func (q *Queries) ListNodeResourceBuckets(ctx context.Context, arg ListNodeResourceBucketsParams) ([]ListNodeResourceBucketsRow, error) {
 	rows, err := q.db.Query(ctx, listNodeResourceBuckets,
 		arg.RuntimeNodeID,
-		arg.SampledAt,
-		arg.SampledAt_2,
 		arg.BucketSeconds,
+		arg.FromSampledAt,
+		arg.ToSampledAt,
 	)
 	if err != nil {
 		return nil, err
@@ -767,12 +767,12 @@ ORDER BY sampled_at ASC, id ASC
 
 type ListNodeResourceSamplesParams struct {
 	RuntimeNodeID pgtype.UUID        `db:"runtime_node_id" json:"runtime_node_id"`
-	SampledAt     pgtype.Timestamptz `db:"sampled_at" json:"sampled_at"`
-	SampledAt_2   pgtype.Timestamptz `db:"sampled_at_2" json:"sampled_at_2"`
+	FromSampledAt pgtype.Timestamptz `db:"from_sampled_at" json:"from_sampled_at"`
+	ToSampledAt   pgtype.Timestamptz `db:"to_sampled_at" json:"to_sampled_at"`
 }
 
 func (q *Queries) ListNodeResourceSamples(ctx context.Context, arg ListNodeResourceSamplesParams) ([]NodeResourceSample, error) {
-	rows, err := q.db.Query(ctx, listNodeResourceSamples, arg.RuntimeNodeID, arg.SampledAt, arg.SampledAt_2)
+	rows, err := q.db.Query(ctx, listNodeResourceSamples, arg.RuntimeNodeID, arg.FromSampledAt, arg.ToSampledAt)
 	if err != nil {
 		return nil, err
 	}

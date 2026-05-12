@@ -1,4 +1,4 @@
--- resource sample tables store raw 30-second runtime metrics for node and instance trend views.
+-- 资源采样表保存 30 秒级运行节点和实例原始指标，供趋势查询使用。
 CREATE TABLE node_resource_samples (
     id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
     runtime_node_id uuid NOT NULL REFERENCES runtime_nodes(id) ON DELETE CASCADE,

@@ -45,8 +45,8 @@ ORDER BY runtime_node_id, sampled_at DESC, id DESC;
 SELECT *
 FROM node_resource_samples
 WHERE runtime_node_id = $1
-  AND sampled_at >= $2
-  AND sampled_at <= $3
+  AND sampled_at >= sqlc.arg(from_sampled_at)
+  AND sampled_at <= sqlc.arg(to_sampled_at)
 ORDER BY sampled_at ASC, id ASC;
 
 -- name: ListNodeResourceBuckets :many
@@ -72,8 +72,8 @@ SELECT
     count(last_error) > 0 AS has_last_error
 FROM node_resource_samples
 WHERE runtime_node_id = $1
-  AND sampled_at >= $2
-  AND sampled_at <= $3
+  AND sampled_at >= sqlc.arg(from_sampled_at)
+  AND sampled_at <= sqlc.arg(to_sampled_at)
 GROUP BY 1
 ORDER BY 1 ASC;
 
@@ -94,8 +94,8 @@ ORDER BY app_id, sampled_at DESC, id DESC;
 SELECT *
 FROM instance_resource_samples
 WHERE app_id = $1
-  AND sampled_at >= $2
-  AND sampled_at <= $3
+  AND sampled_at >= sqlc.arg(from_sampled_at)
+  AND sampled_at <= sqlc.arg(to_sampled_at)
 ORDER BY sampled_at ASC, id ASC;
 
 -- name: ListNodeInstanceResourceSamples :many
@@ -103,8 +103,8 @@ SELECT *
 FROM instance_resource_samples
 WHERE runtime_node_id = $1
   AND app_id = $2
-  AND sampled_at >= $3
-  AND sampled_at <= $4
+  AND sampled_at >= sqlc.arg(from_sampled_at)
+  AND sampled_at <= sqlc.arg(to_sampled_at)
 ORDER BY sampled_at ASC, id ASC;
 
 -- name: ListInstanceResourceBuckets :many
@@ -130,8 +130,8 @@ SELECT
     count(last_error) > 0 AS has_last_error
 FROM instance_resource_samples
 WHERE app_id = $1
-  AND sampled_at >= $2
-  AND sampled_at <= $3
+  AND sampled_at >= sqlc.arg(from_sampled_at)
+  AND sampled_at <= sqlc.arg(to_sampled_at)
 GROUP BY 1
 ORDER BY 1 ASC;
 
@@ -159,8 +159,8 @@ SELECT
 FROM instance_resource_samples
 WHERE runtime_node_id = $1
   AND app_id = $2
-  AND sampled_at >= $3
-  AND sampled_at <= $4
+  AND sampled_at >= sqlc.arg(from_sampled_at)
+  AND sampled_at <= sqlc.arg(to_sampled_at)
 GROUP BY 1
 ORDER BY 1 ASC;
 
@@ -169,9 +169,9 @@ DELETE FROM node_resource_samples
 WHERE id IN (
     SELECT s.id
     FROM node_resource_samples AS s
-    WHERE s.sampled_at < $1
+    WHERE s.sampled_at < sqlc.arg(cutoff_sampled_at)
     ORDER BY s.sampled_at ASC
-    LIMIT $2
+    LIMIT sqlc.arg(batch_size)::integer
 );
 
 -- name: DeleteOldInstanceResourceSamples :execrows
@@ -179,7 +179,7 @@ DELETE FROM instance_resource_samples
 WHERE id IN (
     SELECT s.id
     FROM instance_resource_samples AS s
-    WHERE s.sampled_at < $1
+    WHERE s.sampled_at < sqlc.arg(cutoff_sampled_at)
     ORDER BY s.sampled_at ASC
-    LIMIT $2
+    LIMIT sqlc.arg(batch_size)::integer
 );
