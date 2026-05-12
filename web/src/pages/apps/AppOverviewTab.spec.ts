@@ -44,7 +44,7 @@ const appRef = ref({
   id: '00000000-0000-0000-0000-000000000001',
   org_id: '00000000-0000-0000-0000-000000000101',
   owner_user_id: '00000000-0000-0000-0000-000000000201',
-  name: '测试应用',
+  name: '测试实例',
   status: 'running',
   persona_mode: 'org_inherited',
   api_key_status: 'active',

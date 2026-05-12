@@ -27,7 +27,7 @@
       </n-form-item>
       <n-form-item>
         <n-checkbox v-model:checked="form.allow_member_override">
-          允许成员应用通过 app_prompt 覆盖组织默认人设
+          允许成员实例通过 app_prompt 覆盖组织默认人设
         </n-checkbox>
       </n-form-item>
       <n-space align="center">

@@ -1,7 +1,7 @@
 <template>
   <div style="display: grid; gap: 18px">
     <n-alert type="info" :show-icon="true">
-      runtime-agent 启动后会使用 enrollment secret 自动注册到 manager；后台仅负责查看和启停节点，最大应用数由 agent.max_apps 配置同步。
+      runtime-agent 启动后会使用 enrollment secret 自动注册到 manager；后台仅负责查看和启停节点，最大实例数由 agent.max_apps 配置同步。
     </n-alert>
 
     <DataTableList
@@ -53,7 +53,7 @@ const columns: DataTableColumns<RuntimeNode> = [
     ],
   },
   {
-    title: '最大应用数', key: 'max_apps',
+    title: '最大实例数', key: 'max_apps',
     render: (row) => h('span', row.max_apps == null ? '不限' : String(row.max_apps)),
   },
   actionColumn<RuntimeNode>([

@@ -25,10 +25,10 @@ vi.mock('vue-router', () => ({
 }))
 
 describe('RuntimeNodesPage', () => {
-  it('只展示 agent 配置上报的最大应用数，不提供编辑入口', () => {
+  it('只展示 agent 配置上报的最大实例数，不提供编辑入口', () => {
     const wrapper = mount(RuntimeNodesPage)
 
-    expect(wrapper.text()).toContain('最大应用数')
+    expect(wrapper.text()).toContain('最大实例数')
     expect(wrapper.text()).toContain('3')
     expect(wrapper.text()).not.toContain('编辑')
   })

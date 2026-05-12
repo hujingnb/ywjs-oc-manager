@@ -4,14 +4,14 @@ import { describe, expect, it, vi } from 'vitest'
 
 import AppDetailPage from './AppDetailPage.vue'
 
-// 应用详情标题只展示业务可读名称，不把应用 UUID 作为主视觉信息展示给用户。
+// 实例详情标题只展示业务可读名称，不把实例 UUID 作为主视觉信息展示给用户。
 vi.mock('@/api/hooks/useApps', () => ({
   useAppQuery: () => ({
     data: ref({
       id: '00000000-0000-0000-0000-000000000001',
       org_id: '00000000-0000-0000-0000-000000000101',
       owner_user_id: '00000000-0000-0000-0000-000000000201',
-      name: '测试应用',
+      name: '测试实例',
       status: 'running',
       persona_mode: 'org_inherited',
       api_key_status: 'active',
@@ -32,7 +32,7 @@ vi.mock('vue-router', async () => {
 })
 
 describe('AppDetailPage', () => {
-  it('标题展示应用名称且不展示应用 UUID', () => {
+  it('标题展示实例名称且不展示实例 UUID', () => {
     const wrapper = mount(AppDetailPage, {
       global: {
         stubs: {
@@ -44,7 +44,7 @@ describe('AppDetailPage', () => {
       },
     })
 
-    expect(wrapper.text()).toContain('测试应用')
+    expect(wrapper.text()).toContain('测试实例')
     expect(wrapper.text()).not.toContain('00000000-0000-0000-0000-000000000001')
   })
 })

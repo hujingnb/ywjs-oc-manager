@@ -2,12 +2,12 @@ import { expect, test } from '@playwright/test'
 
 import { loadE2EFixture, loginAs } from './fixtures'
 
-// Scenario 6：删除应用强校验。覆盖 spec §5.4 Task 15 第六条 + T1 ConfirmActionModal。
+// Scenario 6：删除实例强校验。覆盖 spec §5.4 Task 15 第六条 + T1 ConfirmActionModal。
 //
 // 验证项（UI 层）：
-//   1. 应用列表渲染 fixture 应用；点击「删除」打开 modal；
-//   2. 输错应用名 → 「确认删除」按钮 disabled（T1 强校验）；
-//   3. 输对应用名 → 按钮 enabled，点击后触发 POST /runtime/delete；
+//   1. 实例列表渲染 fixture 实例；点击「删除」打开 modal；
+//   2. 输错实例名 → 「确认删除」按钮 disabled（T1 强校验）；
+//   3. 输对实例名 → 按钮 enabled，点击后触发 POST /runtime/delete；
 //   4. 点击后 modal 关闭（toDelete 复位）。
 //
 // 不断言列表 row 立即消失或 status 变 'deleted'：
@@ -17,8 +17,8 @@ import { loadE2EFixture, loginAs } from './fixtures'
 //   - 即便 audit 修好，handler 链上的 fileOps 还需要真实 agent，而 fixture node 指向
 //     127.0.0.1:9999 的 dummy endpoint；ArchiveApp / DeleteAppPath 必然失败。
 //
-// 因此把「应用最终软删」断言交给 worker / service 单元测试，UI 端仅确认强校验和触发链路。
-test('删除应用：输错名拒绝，输对名后触发删除请求', async ({ page }) => {
+// 因此把「实例最终软删」断言交给 worker / service 单元测试，UI 端仅确认强校验和触发链路。
+test('删除实例：输错名拒绝，输对名后触发删除请求', async ({ page }) => {
   const fx = loadE2EFixture()
   await loginAs(page, 'org_admin', fx)
   await page.goto('/apps')

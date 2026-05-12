@@ -54,7 +54,7 @@ const { data: logs, isLoading, error } = useOrgAuditLogsQuery(queryOrgId)
 const errorMessage = computed(() => {
   if (organizationsError.value) return String(organizationsError.value)
   if (!effectiveOrgId.value) return isPlatformAdmin.value ? '暂无可查看组织' : '当前账号未关联组织，无法查看审计日志。'
-  if (!canView.value) return '当前账号无权查看组织级审计，请在自己的应用详情中查看应用审计。'
+  if (!canView.value) return '当前账号无权查看组织级审计，请在自己的实例详情中查看实例审计。'
   if (error.value) return String(error.value)
   return undefined
 })

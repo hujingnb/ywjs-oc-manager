@@ -2,8 +2,8 @@
   <n-card :bordered="true">
     <template #header>
       <div>
-        <p class="eyebrow">App · Knowledge</p>
-        <h2 style="margin: 0">应用知识库</h2>
+        <p class="eyebrow">Instance · Knowledge</p>
+        <h2 style="margin: 0">实例知识库</h2>
       </div>
     </template>
     <template #header-extra>
@@ -13,7 +13,7 @@
       </label>
     </template>
 
-    <p v-if="!app" class="state-text">尚未加载应用信息</p>
+    <p v-if="!app" class="state-text">尚未加载实例信息</p>
     <p v-else-if="!knowledgeContext" class="state-text">无法构造知识库查询上下文（缺 org_id / owner_user_id）</p>
     <p v-else-if="errorMessage" class="state-text danger">{{ errorMessage }}</p>
     <div v-else-if="listing.isLoading.value" class="state-text">加载中…</div>

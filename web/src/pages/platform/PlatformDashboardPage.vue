@@ -43,7 +43,7 @@ const stats = computed(() => {
   return [
     { label: '组织数', value: String(o.organization_count), note: '' },
     { label: '成员数', value: String(o.member_count), note: '不含平台管理员' },
-    { label: '应用数', value: String(o.app_count), note: '' },
+    { label: '实例数', value: String(o.app_count), note: '' },
     { label: '运行中', value: String(o.running_app_count), note: '' },
     { label: '异常', value: String(o.error_app_count), note: '' },
     {

@@ -130,7 +130,7 @@ const menuOptions = computed<MenuOption[]>(() => {
     items.push({ key: '/members', label: '成员', icon: () => h(Users, { size: 18 }) })
   }
   items.push(
-    { key: '/apps', label: '应用', icon: () => h(Bot, { size: 18 }) },
+    { key: '/apps', label: '实例', icon: () => h(Bot, { size: 18 }) },
     { key: '/knowledge', label: '知识库', icon: () => h(BookOpen, { size: 18 }) },
     { key: '/usage', label: '用量', icon: () => h(BarChart3, { size: 18 }) },
   )

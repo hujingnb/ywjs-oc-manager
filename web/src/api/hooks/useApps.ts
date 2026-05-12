@@ -163,7 +163,7 @@ export function useTriggerRuntimeOperation(appId: Ref<string | undefined>) {
   const client = useQueryClient()
   return useMutation({
     mutationFn: async (op: 'start' | 'stop' | 'restart' | 'delete') => {
-      if (!appId.value) throw new Error('缺少应用 ID')
+      if (!appId.value) throw new Error('缺少实例 ID')
       const response = await apiRequest<{ runtime_operation: RuntimeOperationResult }>(
         `/api/v1/apps/${appId.value}/runtime/${op}`,
         { method: 'POST' },
@@ -184,7 +184,7 @@ export function useToggleAppAPIKey(appId: Ref<string | undefined>) {
   const client = useQueryClient()
   return useMutation({
     mutationFn: async (action: 'disable' | 'restore') => {
-      if (!appId.value) throw new Error('缺少应用 ID')
+      if (!appId.value) throw new Error('缺少实例 ID')
       const response = await apiRequest<{ runtime_operation: RuntimeOperationResult }>(
         `/api/v1/apps/${appId.value}/api-key/${action}`,
         { method: 'POST' },
@@ -204,7 +204,7 @@ export function useInitializeAppMutation(appId: Ref<string | undefined>) {
   const client = useQueryClient()
   return useMutation({
     mutationFn: async () => {
-      if (!appId.value) throw new Error('缺少应用 ID')
+      if (!appId.value) throw new Error('缺少实例 ID')
       const response = await apiRequest<{ runtime_operation: RuntimeOperationResult }>(
         `/api/v1/apps/${appId.value}/initialize`,
         { method: 'POST' },

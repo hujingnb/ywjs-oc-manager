@@ -4,8 +4,8 @@
       <template #header>
         <div style="display: flex; align-items: center; justify-content: space-between">
           <div>
-            <p class="eyebrow">App · Detail</p>
-            <h2 style="margin: 0">{{ app?.name ?? '应用详情' }}</h2>
+            <p class="eyebrow">Instance · Detail</p>
+            <h2 style="margin: 0">{{ app?.name ?? '实例详情' }}</h2>
           </div>
           <AppStatusTag v-if="app" :status="app.status" />
         </div>
@@ -47,7 +47,7 @@ const tabs: ReadonlyArray<{ path: string; label: string }> = [
   { path: 'overview', label: '概览' },
   { path: 'runtime', label: '运行时' },
   { path: 'channels', label: '渠道' },
-  { path: 'knowledge', label: '应用知识库' },
+  { path: 'knowledge', label: '实例知识库' },
   { path: 'workspace', label: '工作目录' },
   { path: 'audit', label: '审计' },
 ]

@@ -2,7 +2,7 @@
   <n-card :bordered="true">
     <template #header>
       <div>
-        <p class="eyebrow">App · Runtime</p>
+        <p class="eyebrow">Instance · Runtime</p>
         <h2 style="margin: 0">运行时</h2>
       </div>
     </template>
@@ -73,12 +73,12 @@
 
     <ConfirmActionModal
       :visible="confirmDelete"
-      title="确认删除应用"
-      message="将提交删除任务，应用容器、API key 和工作目录都会被回收。该操作不可撤销。"
+      title="确认删除实例"
+      message="将提交删除任务，实例容器、API key 和工作目录都会被回收。该操作不可撤销。"
       confirm-label="确认删除"
       :busy="mutation.isPending.value"
       :verify-value="app?.name ?? ''"
-      :verify-hint='app ? `输入应用名 "${app.name}" 以确认删除` : ""'
+      :verify-hint='app ? `输入实例名 "${app.name}" 以确认删除` : ""'
       @confirm="onConfirmDelete"
       @cancel="confirmDelete = false"
     />
@@ -90,7 +90,7 @@
       confirm-label="确认停止"
       :busy="mutation.isPending.value"
       :verify-value="app?.name ?? ''"
-      :verify-hint='app ? `输入应用名 "${app.name}" 以确认停止运行` : ""'
+      :verify-hint='app ? `输入实例名 "${app.name}" 以确认停止运行` : ""'
       @confirm="onConfirmStop"
       @cancel="confirmStop = false"
     />

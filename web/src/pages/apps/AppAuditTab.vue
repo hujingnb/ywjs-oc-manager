@@ -1,7 +1,7 @@
 <template>
   <DataTableList
-    :title="'应用审计'"
-    :eyebrow="'App · Audit'"
+    :title="'实例审计'"
+    :eyebrow="'Instance · Audit'"
     :columns="columns"
     :data="logs ?? []"
     :loading="isLoading"
@@ -34,7 +34,7 @@ const { data: logs, isLoading, error } = useTargetAuditLogsQuery(target)
 
 // errorMessage 合并权限失败和 API 失败，交给公共列表组件显示。
 const errorMessage = computed(() => {
-  if (!canView.value) return '当前账号无权查看该应用审计。'
+  if (!canView.value) return '当前账号无权查看该实例审计。'
   if (error.value) return String(error.value)
   return undefined
 })

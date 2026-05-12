@@ -89,7 +89,7 @@ export function useBeginChannelAuth(appId: Ref<string | undefined>, channelType:
   const client = useQueryClient()
   return useMutation({
     mutationFn: async () => {
-      if (!appId.value || !channelType.value) throw new Error('缺少应用或渠道类型')
+      if (!appId.value || !channelType.value) throw new Error('缺少实例或渠道类型')
       const response = await apiRequest<{ challenge: ChannelChallenge }>(
         `/api/v1/apps/${appId.value}/channels/${channelType.value}/auth`,
         { method: 'POST' },
@@ -108,7 +108,7 @@ export function useUnbindChannel(appId: Ref<string | undefined>, channelType: Re
   const client = useQueryClient()
   return useMutation({
     mutationFn: async () => {
-      if (!appId.value || !channelType.value) throw new Error('缺少应用或渠道类型')
+      if (!appId.value || !channelType.value) throw new Error('缺少实例或渠道类型')
       await apiRequest<void>(`/api/v1/apps/${appId.value}/channels/${channelType.value}/unbind`, {
         method: 'POST',
       })

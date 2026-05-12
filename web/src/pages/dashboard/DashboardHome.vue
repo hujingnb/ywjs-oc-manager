@@ -37,10 +37,10 @@
       <n-grid-item :span="17" :xs="24" :md="17">
         <n-card size="small" :bordered="true">
           <template #header>
-            <span style="font-size: 14px; font-weight: 600">应用队列</span>
+            <span style="font-size: 14px; font-weight: 600">实例队列</span>
           </template>
           <template #header-extra>
-            <n-button size="small" type="primary" @click="router.push('/apps')">前往应用列表</n-button>
+            <n-button size="small" type="primary" @click="router.push('/apps')">前往实例列表</n-button>
           </template>
           <n-data-table
             :columns="appColumns"
@@ -104,14 +104,14 @@ const { data: apps, isLoading: appsLoading } = useAppsByOrgQuery(effectiveOrgId)
 // metrics 是本地调试占位指标，真实用量在 Usage 页面直接查询 new-api 汇总。
 const metrics = [
   { label: '组织', value: '0', unit: '', pct: 0, note: '等待初始化' },
-  { label: '应用', value: '0', unit: '', pct: 0, note: '尚未创建' },
+  { label: '实例', value: '0', unit: '', pct: 0, note: '尚未创建' },
   { label: '运行节点', value: '1', unit: '', pct: 100, note: '本地调试节点' },
   { label: '今日调用', value: '0', unit: '', pct: 0, note: '直查 new-api' },
 ]
 
 // appColumns 展示应用名称、节点和状态，状态渲染复用统一应用状态徽标。
 const appColumns: DataTableColumns<AppDTO> = [
-  { title: '应用名称', key: 'name', render: (row) => h('strong', row.name) },
+  { title: '实例名称', key: 'name', render: (row) => h('strong', row.name) },
   { title: '节点', key: 'runtime_node_id', render: (row) => row.runtime_node_id ?? '—' },
   {
     title: '状态',

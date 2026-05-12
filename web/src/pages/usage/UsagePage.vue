@@ -25,7 +25,7 @@
           v-else
           :view="orgView ?? undefined"
           :billing-status="billingStatus ?? undefined"
-          empty-text="该组织暂无应用用量记录"
+          empty-text="该组织暂无实例用量记录"
         />
       </n-tab-pane>
 
@@ -59,11 +59,11 @@
           v-else
           :view="memberView ?? undefined"
           :billing-status="billingStatus ?? undefined"
-          empty-text="暂无应用用量记录"
+          empty-text="暂无实例用量记录"
         />
       </n-tab-pane>
 
-      <n-tab-pane name="app" tab="应用">
+      <n-tab-pane name="app" tab="实例">
         <n-space align="center" style="margin-bottom: 12px" :wrap="false">
           <n-space v-if="isPlatformAdmin" align="center">
             <span>组织：</span>
@@ -75,26 +75,26 @@
               placeholder="选择组织"
             />
           </n-space>
-          <span>应用：</span>
+          <span>实例：</span>
           <n-select
             v-model:value="selectedAppId"
             :options="appOptions"
             filterable
             clearable
             style="width: 300px"
-            placeholder="搜索应用"
+            placeholder="搜索实例"
           />
         </n-space>
         <div v-if="appLoading" class="state-text">加载中…</div>
         <div v-else-if="appError" class="state-text danger">查询失败：{{ appError.message }}</div>
         <div v-else-if="selectedApp && !selectedApp.newapi_key_id" class="state-text">
-          该应用尚未绑定 new-api key，暂无应用维度用量。
+          该实例尚未绑定 new-api key，暂无实例维度用量。
         </div>
         <UsageSummary
           v-else
           :view="appView ?? undefined"
           :billing-status="billingStatus ?? undefined"
-          empty-text="暂无应用用量记录"
+          empty-text="暂无实例用量记录"
         />
       </n-tab-pane>
 

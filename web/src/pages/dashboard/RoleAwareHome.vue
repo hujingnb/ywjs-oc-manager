@@ -60,14 +60,14 @@ const cards = computed<QuickCard[]>(() => {
     return [
       { path: '/members', title: '成员管理', subtitle: '创建 / 禁用 / 删除组织成员' },
       { path: '/org/persona', title: 'AI 人设', subtitle: '调整组织默认人设' },
-      { path: '/apps', title: '应用列表', subtitle: '组织内全部应用状态' },
+      { path: '/apps', title: '实例列表', subtitle: '组织内全部实例状态' },
       { path: '/knowledge', title: '组织知识库', subtitle: '上传共享文件' },
     ]
   }
   if (role === 'org_member') {
     return [
-      { path: '/apps', title: '我的应用', subtitle: '查看状态、用量与应用审计' },
-      { path: '/usage', title: '我的用量', subtitle: '查看自己应用的调用记录' },
+      { path: '/apps', title: '我的实例', subtitle: '查看状态、用量与实例审计' },
+      { path: '/usage', title: '我的用量', subtitle: '查看自己实例的调用记录' },
       { path: '/knowledge', title: '组织知识库', subtitle: '可读资料' },
     ]
   }

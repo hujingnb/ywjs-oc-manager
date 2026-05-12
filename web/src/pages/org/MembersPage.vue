@@ -74,7 +74,7 @@
     <ConfirmActionModal
       :visible="!!memberToDelete"
       title="确认删除成员"
-      :message="memberToDelete ? `将禁用账号 ${memberToDelete.username} 并提交其名下应用的删除任务，操作不可撤销。` : ''"
+      :message="memberToDelete ? `将禁用账号 ${memberToDelete.username} 并提交其名下实例的删除任务，操作不可撤销。` : ''"
       confirm-label="确认删除"
       :busy="deleteMutation.isPending.value"
       @confirm="onConfirmDelete"

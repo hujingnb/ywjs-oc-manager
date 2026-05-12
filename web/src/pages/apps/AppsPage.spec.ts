@@ -4,7 +4,7 @@ import { describe, expect, it, vi } from 'vitest'
 
 import AppsPage from './AppsPage.vue'
 
-// 平台管理员没有 auth.user.org_id，页面需要先从组织列表选择一个组织再拉应用列表。
+// 平台管理员没有 auth.user.org_id，页面需要先从组织列表选择一个组织再拉实例列表。
 vi.mock('@/stores/auth', () => ({
   useAuthStore: () => ({
     user: { id: 'admin-1', role: 'platform_admin' },
@@ -34,7 +34,7 @@ vi.mock('@/api/hooks/useApps', () => ({
           id: 'app-1',
           org_id: 'org-1',
           owner_user_id: 'member-1',
-          name: '组织应用',
+          name: '组织实例',
           status: 'running',
           persona_mode: 'org_inherited',
           api_key_status: 'active',
@@ -45,7 +45,7 @@ vi.mock('@/api/hooks/useApps', () => ({
 }))
 
 describe('AppsPage', () => {
-  it('平台管理员默认使用第一个组织加载应用列表', () => {
+  it('平台管理员默认使用第一个组织加载实例列表', () => {
     const wrapper = mount(AppsPage, {
       global: {
         stubs: {
@@ -59,7 +59,7 @@ describe('AppsPage', () => {
       },
     })
 
-    expect(wrapper.text()).toContain('组织应用')
+    expect(wrapper.text()).toContain('组织实例')
     expect(wrapper.text()).not.toContain('当前账号未关联组织')
   })
 })

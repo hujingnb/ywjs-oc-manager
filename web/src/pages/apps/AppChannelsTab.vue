@@ -2,7 +2,7 @@
   <n-card :bordered="true">
     <template #header>
       <div>
-        <p class="eyebrow">App · Channels</p>
+        <p class="eyebrow">Instance · Channels</p>
         <h2 style="margin: 0">渠道绑定</h2>
       </div>
     </template>
@@ -18,7 +18,7 @@
       </n-space>
     </template>
 
-    <div v-if="!appId" class="state-text">请选择目标应用</div>
+    <div v-if="!appId" class="state-text">请选择目标实例</div>
     <template v-else>
       <p class="state-text">
         当前状态：

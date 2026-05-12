@@ -2,7 +2,7 @@
   <n-card :bordered="true">
     <template #header>
       <div>
-        <p class="eyebrow">App · Overview</p>
+        <p class="eyebrow">Instance · Overview</p>
         <h2 style="margin: 0">概览</h2>
       </div>
     </template>
@@ -16,7 +16,7 @@
       </n-button>
     </template>
 
-    <p v-if="!app" class="state-text">尚未加载应用信息</p>
+    <p v-if="!app" class="state-text">尚未加载实例信息</p>
     <n-descriptions v-else :column="2" bordered size="small">
       <n-descriptions-item label="状态">
         <AppStatusTag :status="app.status" />

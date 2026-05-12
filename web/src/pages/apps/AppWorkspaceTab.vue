@@ -2,7 +2,7 @@
   <n-card :bordered="true">
     <template #header>
       <div>
-        <p class="eyebrow">App · Workspace</p>
+        <p class="eyebrow">Instance · Workspace</p>
         <h2 style="margin: 0">工作目录</h2>
       </div>
     </template>
@@ -15,7 +15,7 @@
       <n-button v-if="relativePath" size="small" @click="goUp">返回上级</n-button>
     </n-space>
 
-    <div v-if="!appId" class="state-text">请选择目标应用</div>
+    <div v-if="!appId" class="state-text">请选择目标实例</div>
     <div v-else-if="isLoading" class="state-text">加载中…</div>
     <div v-else-if="error" class="state-text danger">查询失败：{{ error.message }}</div>
     <n-data-table

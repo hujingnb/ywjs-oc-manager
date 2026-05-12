@@ -13,7 +13,7 @@ describe('ConfirmActionModal verifyValue', () => {
         title: 't',
         message: 'm',
         verifyValue: 'smoke-app-1',
-        verifyHint: '输入应用名 "smoke-app-1" 以确认',
+        verifyHint: '输入实例名 "smoke-app-1" 以确认',
       },
     })
     await nextTick()

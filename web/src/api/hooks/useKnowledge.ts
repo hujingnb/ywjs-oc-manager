@@ -121,7 +121,7 @@ export function useUploadAppKnowledge(
   const client = useQueryClient()
   return useMutation({
     mutationFn: async (input: { path: string; file: File }) => {
-      if (!appId.value || !context.value) throw new Error('缺少应用知识库上下文')
+      if (!appId.value || !context.value) throw new Error('缺少实例知识库上下文')
       const params = new URLSearchParams({
         org_id: context.value.orgId,
         owner_user_id: context.value.ownerUserId,
@@ -155,7 +155,7 @@ export function useDeleteAppKnowledge(
   const client = useQueryClient()
   return useMutation({
     mutationFn: async (targetPath: string) => {
-      if (!appId.value || !context.value) throw new Error('缺少应用知识库上下文')
+      if (!appId.value || !context.value) throw new Error('缺少实例知识库上下文')
       await apiRequest<void>(`/api/v1/apps/${appId.value}/knowledge`, {
         method: 'DELETE',
         query: {
