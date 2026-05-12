@@ -41,6 +41,9 @@ export async function loginAs(
     org_member: { u: fx.org_member_login, p: fx.org_member_password },
   }[role]
   await page.goto('/login')
+  if (role !== 'platform_admin') {
+    await page.getByLabel('组织标识').fill(fx.org_code)
+  }
   await page.getByLabel('账号').fill(credential.u)
   await page.getByLabel('密码').fill(credential.p)
   await page.getByRole('button', { name: '登录' }).click()

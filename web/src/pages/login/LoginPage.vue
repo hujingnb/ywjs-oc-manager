@@ -5,6 +5,15 @@
       <h1 style="margin: 0">登录控制台</h1>
     </div>
 
+    <n-form-item label="组织标识" path="orgCode">
+      <n-input
+        v-model:value="orgCode"
+        autocomplete="organization"
+        :input-props="{ id: 'org-code', 'aria-label': '组织标识' }"
+        placeholder="平台管理员可留空"
+      />
+    </n-form-item>
+
     <n-form-item label="账号" path="username">
       <n-input
         v-model:value="username"
@@ -44,6 +53,7 @@ import { useAuthStore } from '@/stores/auth'
 const auth = useAuthStore()
 const router = useRouter()
 
+const orgCode = ref('')
 const username = ref('')
 const password = ref('')
 // errorMessage 只保存本次登录失败原因，下一次提交前会清空。
@@ -53,7 +63,7 @@ const errorMessage = ref<string | null>(null)
 async function onSubmit() {
   errorMessage.value = null
   try {
-    await auth.login(username.value, password.value)
+    await auth.login(username.value, password.value, orgCode.value)
     const target = (router.currentRoute.value.query.redirect as string | undefined) ?? '/'
     await router.replace(target)
   } catch (err) {

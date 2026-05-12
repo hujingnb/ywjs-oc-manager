@@ -27,13 +27,13 @@ export const useAuthStore = defineStore('auth', () => {
   const isOrgMember = computed(() => user.value?.role === 'org_member')
 
   // login 成功后先持久化 token 再写入 user，保证随后的路由跳转能带 Authorization。
-  async function login(username: string, password: string): Promise<LoginResult> {
+  async function login(username: string, password: string, orgCode = ''): Promise<LoginResult> {
     loading.value = true
     error.value = null
     try {
       const result = await apiRequest<LoginResult>('/api/v1/auth/login', {
         method: 'POST',
-        body: { username, password },
+        body: { org_code: orgCode.trim() || undefined, username, password },
         withAuth: false,
       })
       setStoredTokens({

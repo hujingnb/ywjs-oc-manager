@@ -10,6 +10,8 @@ const ORG_LIST_KEY = ['organizations'] as const
 
 // OrganizationFormPayload 是创建组织及首个组织管理员的提交体。
 export interface OrganizationFormPayload {
+  // 组织登录标识，创建后不可修改。
+  code: string
   // 组织名称。
   name: string
   // 联系人姓名。
