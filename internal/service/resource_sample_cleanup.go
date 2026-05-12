@@ -59,15 +59,35 @@ func (c *ResourceSampleCleanup) SetClock(now func() time.Time) {
 // 返回值分别是 node_resource_samples 和 instance_resource_samples 删除的行数。
 func (c *ResourceSampleCleanup) RunOnce(ctx context.Context) (int64, int64, error) {
 	cutoff := pgtype.Timestamptz{Time: c.now().Add(-resourceSampleRetention).UTC(), Valid: true}
-	nodeDeleted, err := c.store.DeleteOldNodeResourceSamples(ctx, cutoff, resourceSampleBatchSize)
+	nodeDeleted, err := drainResourceSampleBatches(ctx, func(ctx context.Context) (int64, error) {
+		return c.store.DeleteOldNodeResourceSamples(ctx, cutoff, resourceSampleBatchSize)
+	})
 	if err != nil {
 		return nodeDeleted, 0, fmt.Errorf("清理节点资源采样失败: %w", err)
 	}
-	instanceDeleted, err := c.store.DeleteOldInstanceResourceSamples(ctx, cutoff, resourceSampleBatchSize)
+	instanceDeleted, err := drainResourceSampleBatches(ctx, func(ctx context.Context) (int64, error) {
+		return c.store.DeleteOldInstanceResourceSamples(ctx, cutoff, resourceSampleBatchSize)
+	})
 	if err != nil {
 		return nodeDeleted, instanceDeleted, fmt.Errorf("清理实例资源采样失败: %w", err)
 	}
 	return nodeDeleted, instanceDeleted, nil
+}
+
+// drainResourceSampleBatches 持续按固定批大小清理，直到某批删除数量不足批大小。
+// 这样清理任务能追平历史积压，同时每个 SQL 仍保持小事务，避免长时间锁表。
+func drainResourceSampleBatches(ctx context.Context, deleteBatch func(context.Context) (int64, error)) (int64, error) {
+	var total int64
+	for {
+		deleted, err := deleteBatch(ctx)
+		total += deleted
+		if err != nil {
+			return total, err
+		}
+		if deleted < int64(resourceSampleBatchSize) {
+			return total, nil
+		}
+	}
 }
 
 // normalizeResourceSampleCleanupStore 统一测试桩接口和 sqlc 生成接口，

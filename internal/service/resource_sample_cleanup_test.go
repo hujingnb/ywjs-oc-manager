@@ -14,26 +14,52 @@ import (
 type resourceSampleCleanupStoreStub struct {
 	// nodeCutoff 记录节点资源采样删除时使用的过期时间边界。
 	nodeCutoff pgtype.Timestamptz
+	// nodeCutoffs 记录节点资源采样每个批次的 cutoff，验证循环清理不会改变边界。
+	nodeCutoffs []pgtype.Timestamptz
 	// nodeLimit 记录节点资源采样删除时使用的单批上限。
 	nodeLimit int32
+	// nodeLimits 记录节点资源采样每个批次的 limit，验证所有批次都使用固定上限。
+	nodeLimits []int32
+	// nodeDeletes 允许测试配置每个批次的删除行数；为空时使用默认单批返回。
+	nodeDeletes []int64
 	// instanceCutoff 记录实例资源采样删除时使用的过期时间边界。
 	instanceCutoff pgtype.Timestamptz
+	// instanceCutoffs 记录实例资源采样每个批次的 cutoff。
+	instanceCutoffs []pgtype.Timestamptz
 	// instanceLimit 记录实例资源采样删除时使用的单批上限。
 	instanceLimit int32
+	// instanceLimits 记录实例资源采样每个批次的 limit。
+	instanceLimits []int32
+	// instanceDeletes 允许测试配置实例采样每个批次的删除行数。
+	instanceDeletes []int64
 }
 
 // DeleteOldNodeResourceSamples 模拟节点采样删除，并保存调用参数供断言使用。
 func (s *resourceSampleCleanupStoreStub) DeleteOldNodeResourceSamples(_ context.Context, cutoff pgtype.Timestamptz, limit int32) (int64, error) {
 	s.nodeCutoff = cutoff
+	s.nodeCutoffs = append(s.nodeCutoffs, cutoff)
 	s.nodeLimit = limit
-	return 12, nil
+	s.nodeLimits = append(s.nodeLimits, limit)
+	if len(s.nodeDeletes) == 0 {
+		return 12, nil
+	}
+	deleted := s.nodeDeletes[0]
+	s.nodeDeletes = s.nodeDeletes[1:]
+	return deleted, nil
 }
 
 // DeleteOldInstanceResourceSamples 模拟实例采样删除，并保存调用参数供断言使用。
 func (s *resourceSampleCleanupStoreStub) DeleteOldInstanceResourceSamples(_ context.Context, cutoff pgtype.Timestamptz, limit int32) (int64, error) {
 	s.instanceCutoff = cutoff
+	s.instanceCutoffs = append(s.instanceCutoffs, cutoff)
 	s.instanceLimit = limit
-	return 34, nil
+	s.instanceLimits = append(s.instanceLimits, limit)
+	if len(s.instanceDeletes) == 0 {
+		return 34, nil
+	}
+	deleted := s.instanceDeletes[0]
+	s.instanceDeletes = s.instanceDeletes[1:]
+	return deleted, nil
 }
 
 // TestResourceSampleCleanupDeletesOldSamplesInBatches 验证清理任务按固定保留期和批量上限删除两类资源采样。
@@ -55,4 +81,34 @@ func TestResourceSampleCleanupDeletesOldSamplesInBatches(t *testing.T) {
 	assert.Equal(t, expectedCutoff, store.instanceCutoff.Time)
 	assert.Equal(t, int32(1000), store.nodeLimit)
 	assert.Equal(t, int32(1000), store.instanceLimit)
+}
+
+// TestResourceSampleCleanupDrainsFullBatches 验证清理任务遇到满批删除时继续追批，避免历史数据积压超过写入速度。
+func TestResourceSampleCleanupDrainsFullBatches(t *testing.T) {
+	fixedNow := time.Date(2026, 5, 13, 12, 0, 0, 0, time.UTC)
+	expectedCutoff := fixedNow.Add(-30 * 24 * time.Hour)
+	store := &resourceSampleCleanupStoreStub{
+		nodeDeletes:     []int64{1000, 1000, 25},
+		instanceDeletes: []int64{1000, 5},
+	}
+	cleanup := NewResourceSampleCleanup(store)
+	cleanup.SetClock(func() time.Time { return fixedNow })
+
+	nodeDeleted, instanceDeleted, err := cleanup.RunOnce(context.Background())
+
+	require.NoError(t, err)
+	assert.Equal(t, int64(2025), nodeDeleted)
+	assert.Equal(t, int64(1005), instanceDeleted)
+	assert.Len(t, store.nodeCutoffs, 3)
+	assert.Len(t, store.instanceCutoffs, 2)
+	for _, cutoff := range store.nodeCutoffs {
+		assert.True(t, cutoff.Valid)
+		assert.Equal(t, expectedCutoff, cutoff.Time)
+	}
+	for _, cutoff := range store.instanceCutoffs {
+		assert.True(t, cutoff.Valid)
+		assert.Equal(t, expectedCutoff, cutoff.Time)
+	}
+	assert.Equal(t, []int32{1000, 1000, 1000}, store.nodeLimits)
+	assert.Equal(t, []int32{1000, 1000}, store.instanceLimits)
 }
