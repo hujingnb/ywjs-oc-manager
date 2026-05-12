@@ -73,6 +73,28 @@ func TestResourceMetricsServiceListNodeInstanceResourcesRequiresNodeBinding(t *t
 	require.ErrorIs(t, err, ErrNotFound)
 }
 
+// TestResourceMetricsServiceListAppResourcesRejectsDeletedApp 验证应用资源趋势不会暴露已删除应用的历史采样。
+func TestResourceMetricsServiceListAppResourcesRejectsDeletedApp(t *testing.T) {
+	store := newResourceMetricsStoreStub(t)
+	store.app = sqlc.App{
+		ID:            mustUUID(t, testResourceAppID),
+		OrgID:         mustUUID(t, testResourceOrgID),
+		OwnerUserID:   mustUUID(t, testResourceOwnerID),
+		RuntimeNodeID: mustUUID(t, testResourceRuntimeID),
+		Name:          "已删除应用",
+		Status:        domain.AppStatusDeleted,
+		DeletedAt:     pgtype.Timestamptz{Time: mustTime(t, testResourceSampleTime), Valid: true},
+	}
+	svc := NewResourceMetricsService(store)
+
+	_, err := svc.ListAppResources(context.Background(), auth.Principal{
+		Role:   domain.UserRoleOrgAdmin,
+		OrgID:  testResourceOrgID,
+		UserID: testResourceOwnerID,
+	}, testResourceAppID, ResourceTimeRange{})
+	require.ErrorIs(t, err, ErrNotFound)
+}
+
 type resourceMetricsStoreStub struct {
 	t   *testing.T
 	app sqlc.App

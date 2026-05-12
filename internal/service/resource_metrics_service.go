@@ -298,6 +298,9 @@ func (s *ResourceMetricsService) ListAppResources(ctx context.Context, principal
 	if err != nil {
 		return nil, fmt.Errorf("查询应用失败: %w", err)
 	}
+	if app.DeletedAt.Valid {
+		return nil, ErrNotFound
+	}
 	if !auth.CanViewApp(principal, uuidToString(app.OrgID), uuidToString(app.OwnerUserID)) {
 		return nil, ErrForbidden
 	}
