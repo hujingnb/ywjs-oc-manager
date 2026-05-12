@@ -34,5 +34,9 @@ deploy/manage/config/manager.yaml
 deploy/runtime-agent/config/agent.yaml
 deploy/**/data/**
 deploy/**/logs/**
+!deploy/**/data/
+!deploy/**/data/**/
 !deploy/**/data/**/.gitkeep
+!deploy/**/logs/
+!deploy/**/logs/**/
 !deploy/**/logs/**/.gitkeep
