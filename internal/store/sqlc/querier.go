@@ -39,6 +39,7 @@ type Querier interface {
 	// 查询单个 (org, node) 对的状态，主要用于幂等判断。
 	GetKnowledgeSyncStatus(ctx context.Context, arg GetKnowledgeSyncStatusParams) (KnowledgeSyncStatus, error)
 	GetOrganization(ctx context.Context, id pgtype.UUID) (Organization, error)
+	GetOrganizationByCode(ctx context.Context, code string) (Organization, error)
 	GetOrganizationByName(ctx context.Context, name string) (Organization, error)
 	// OOS-2 access_token 自愈用：以行锁查询组织，避免并发更新密文时出现写丢失。
 	GetOrganizationForUpdate(ctx context.Context, id pgtype.UUID) (Organization, error)
@@ -47,6 +48,7 @@ type Querier interface {
 	GetRuntimeNodeByAgentID(ctx context.Context, agentID pgtype.Text) (RuntimeNode, error)
 	GetRuntimeNodeByName(ctx context.Context, name string) (RuntimeNode, error)
 	GetUser(ctx context.Context, id pgtype.UUID) (User, error)
+	GetUserByOrgAndUsername(ctx context.Context, arg GetUserByOrgAndUsernameParams) (User, error)
 	GetUserByUsername(ctx context.Context, username string) (User, error)
 	// 用于组织创建链路失败时回滚刚刚 INSERT 的孤儿记录。
 	// 正常生命周期不可见此查询；普通"删除"必须走 SoftDeleteOrganization。

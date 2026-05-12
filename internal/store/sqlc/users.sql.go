@@ -85,10 +85,40 @@ func (q *Queries) GetUser(ctx context.Context, id pgtype.UUID) (User, error) {
 	return i, err
 }
 
+const getUserByOrgAndUsername = `-- name: GetUserByOrgAndUsername :one
+SELECT id, org_id, username, password_hash, display_name, role, status, last_login_at, created_at, updated_at, deleted_at
+FROM users
+WHERE org_id = $1 AND username = $2
+`
+
+type GetUserByOrgAndUsernameParams struct {
+	OrgID    pgtype.UUID `db:"org_id" json:"org_id"`
+	Username string      `db:"username" json:"username"`
+}
+
+func (q *Queries) GetUserByOrgAndUsername(ctx context.Context, arg GetUserByOrgAndUsernameParams) (User, error) {
+	row := q.db.QueryRow(ctx, getUserByOrgAndUsername, arg.OrgID, arg.Username)
+	var i User
+	err := row.Scan(
+		&i.ID,
+		&i.OrgID,
+		&i.Username,
+		&i.PasswordHash,
+		&i.DisplayName,
+		&i.Role,
+		&i.Status,
+		&i.LastLoginAt,
+		&i.CreatedAt,
+		&i.UpdatedAt,
+		&i.DeletedAt,
+	)
+	return i, err
+}
+
 const getUserByUsername = `-- name: GetUserByUsername :one
 SELECT id, org_id, username, password_hash, display_name, role, status, last_login_at, created_at, updated_at, deleted_at
 FROM users
-WHERE username = $1
+WHERE org_id IS NULL AND username = $1
 `
 
 func (q *Queries) GetUserByUsername(ctx context.Context, username string) (User, error) {

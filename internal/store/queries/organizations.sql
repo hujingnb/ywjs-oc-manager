@@ -1,13 +1,14 @@
 -- name: CreateOrganization :one
 INSERT INTO organizations (
     name,
+    code,
     status,
     contact_name,
     contact_phone,
     remark,
     credit_warning_threshold
 ) VALUES (
-    $1, $2, $3, $4, $5, $6
+    $1, $2, $3, $4, $5, $6, $7
 )
 RETURNING *;
 
@@ -29,6 +30,11 @@ WHERE id = $1;
 SELECT *
 FROM organizations
 WHERE name = $1;
+
+-- name: GetOrganizationByCode :one
+SELECT *
+FROM organizations
+WHERE code = $1;
 
 -- name: ListOrganizations :many
 SELECT *

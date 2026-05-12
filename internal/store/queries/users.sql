@@ -19,7 +19,12 @@ WHERE id = $1;
 -- name: GetUserByUsername :one
 SELECT *
 FROM users
-WHERE username = $1;
+WHERE org_id IS NULL AND username = $1;
+
+-- name: GetUserByOrgAndUsername :one
+SELECT *
+FROM users
+WHERE org_id = $1 AND username = $2;
 
 -- name: ListUsersByOrg :many
 SELECT *
