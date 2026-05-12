@@ -123,7 +123,9 @@ func TestHeartbeatPayloadIncludesNodeResource(t *testing.T) {
 	case <-time.After(2 * time.Second):
 		require.FailNow(t, "未收到心跳请求")
 	}
-	assert.NotEmpty(t, got["sampled_at"])
+	sampledAt, ok := got["sampled_at"].(string)
+	require.True(t, ok)
+	assertSampledAtUTC(t, sampledAt)
 	nodeResource, ok := got["node_resource"].(map[string]any)
 	require.True(t, ok)
 	assert.Contains(t, nodeResource, "cpu_percent")
@@ -194,6 +196,21 @@ func TestEnrollAgentUsesConfiguredName(t *testing.T) {
 	require.NoError(t, err)
 	require.Equal(t, "local-agent-1", got["name"])
 	require.Equal(t, float64(3), got["max_apps"])
+	sampledAt, ok := got["sampled_at"].(string)
+	require.True(t, ok)
+	assertSampledAtUTC(t, sampledAt)
+	nodeResource, ok := got["node_resource"].(map[string]any)
+	require.True(t, ok)
+	assert.Contains(t, nodeResource, "cpu_percent")
 }
 
 func int32Ptr(v int32) *int32 { return &v }
+
+// assertSampledAtUTC 验证采样时间采用 RFC3339 且时区偏移为 UTC，避免 manager 端接收本地时区字符串。
+func assertSampledAtUTC(t *testing.T, value string) {
+	t.Helper()
+	sampledAt, err := time.Parse(time.RFC3339, value)
+	require.NoError(t, err)
+	_, offset := sampledAt.Zone()
+	assert.Equal(t, 0, offset)
+}
