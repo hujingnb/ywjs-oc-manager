@@ -188,16 +188,18 @@ Create `deploy/new-api/.env.example`:
 ```env
 COMPOSE_PROJECT_NAME=oc-new-api
 
-NEWAPI_IMAGE=calciumion/new-api:latest
+NEWAPI_IMAGE=calciumion/new-api:CHANGE_ME_VERSION
 NEWAPI_PORT=3000
 NEWAPI_NODE_NAME=new-api-prod-1
 NEWAPI_STREAMING_TIMEOUT=600
 
 NEWAPI_POSTGRES_USER=root
 NEWAPI_POSTGRES_PASSWORD=CHANGE_ME_NEWAPI_POSTGRES_PASSWORD
+NEWAPI_POSTGRES_DSN_PASSWORD=CHANGE_ME_URL_ENCODED_NEWAPI_POSTGRES_PASSWORD
 NEWAPI_POSTGRES_DB=new-api
 
 NEWAPI_REDIS_PASSWORD=CHANGE_ME_NEWAPI_REDIS_PASSWORD
+NEWAPI_REDIS_URL_PASSWORD=CHANGE_ME_URL_ENCODED_NEWAPI_REDIS_PASSWORD
 
 TZ=Asia/Shanghai
 ```
@@ -229,11 +231,13 @@ services:
   new-api-redis:
     image: redis:7
     restart: always
+    environment:
+      REDISCLI_AUTH: ${NEWAPI_REDIS_PASSWORD}
     command: ["redis-server", "--requirepass", "${NEWAPI_REDIS_PASSWORD}", "--appendonly", "yes"]
     volumes:
       - ./data/redis:/data
     healthcheck:
-      test: ["CMD-SHELL", "redis-cli -a ${NEWAPI_REDIS_PASSWORD} ping | grep PONG"]
+      test: ["CMD", "redis-cli", "ping"]
       interval: 10s
       timeout: 5s
       retries: 20
@@ -247,8 +251,8 @@ services:
     ports:
       - "${NEWAPI_PORT:-3000}:3000"
     environment:
-      SQL_DSN: postgresql://${NEWAPI_POSTGRES_USER}:${NEWAPI_POSTGRES_PASSWORD}@new-api-postgres:5432/${NEWAPI_POSTGRES_DB}
-      REDIS_CONN_STRING: redis://:${NEWAPI_REDIS_PASSWORD}@new-api-redis:6379
+      SQL_DSN: postgresql://${NEWAPI_POSTGRES_USER}:${NEWAPI_POSTGRES_DSN_PASSWORD}@new-api-postgres:5432/${NEWAPI_POSTGRES_DB}
+      REDIS_CONN_STRING: redis://:${NEWAPI_REDIS_URL_PASSWORD}@new-api-redis:6379
       TZ: ${TZ:-Asia/Shanghai}
       ERROR_LOG_ENABLED: "true"
       BATCH_UPDATE_ENABLED: "true"
@@ -291,6 +295,14 @@ docker compose up -d
 ```
 
 首次启动后进入 new-api 后台完成管理员初始化、系统访问令牌生成、Ollama 渠道配置和模型测试。
+
+## 配置要求
+
+`NEWAPI_IMAGE` 必须固定到明确版本标签或镜像 digest，生产环境不要使用 `latest`。
+
+`NEWAPI_POSTGRES_PASSWORD` 和 `NEWAPI_REDIS_PASSWORD` 是数据库和 Redis 服务使用的原始密码。
+当密码包含 `@`、`:`、`/`、`?`、`#` 等 URL 保留字符时，需将同一密码 URL 编码后分别填入
+`NEWAPI_POSTGRES_DSN_PASSWORD` 和 `NEWAPI_REDIS_URL_PASSWORD`，供 new-api 连接串使用。
 
 ## 对接 manager
 

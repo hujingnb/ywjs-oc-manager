@@ -20,11 +20,13 @@ services:
   new-api-redis:
     image: redis:7
     restart: always
+    environment:
+      REDISCLI_AUTH: ${NEWAPI_REDIS_PASSWORD}
     command: ["redis-server", "--requirepass", "${NEWAPI_REDIS_PASSWORD}", "--appendonly", "yes"]
     volumes:
       - ./data/redis:/data
     healthcheck:
-      test: ["CMD-SHELL", "redis-cli -a ${NEWAPI_REDIS_PASSWORD} ping | grep PONG"]
+      test: ["CMD", "redis-cli", "ping"]
       interval: 10s
       timeout: 5s
       retries: 20
@@ -38,8 +40,8 @@ services:
     ports:
       - "${NEWAPI_PORT:-3000}:3000"
     environment:
-      SQL_DSN: postgresql://${NEWAPI_POSTGRES_USER}:${NEWAPI_POSTGRES_PASSWORD}@new-api-postgres:5432/${NEWAPI_POSTGRES_DB}
-      REDIS_CONN_STRING: redis://:${NEWAPI_REDIS_PASSWORD}@new-api-redis:6379
+      SQL_DSN: postgresql://${NEWAPI_POSTGRES_USER}:${NEWAPI_POSTGRES_DSN_PASSWORD}@new-api-postgres:5432/${NEWAPI_POSTGRES_DB}
+      REDIS_CONN_STRING: redis://:${NEWAPI_REDIS_URL_PASSWORD}@new-api-redis:6379
       TZ: ${TZ:-Asia/Shanghai}
       ERROR_LOG_ENABLED: "true"
       BATCH_UPDATE_ENABLED: "true"

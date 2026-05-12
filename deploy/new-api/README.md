@@ -12,6 +12,14 @@ docker compose up -d
 
 首次启动后进入 new-api 后台完成管理员初始化、系统访问令牌生成、Ollama 渠道配置和模型测试。
 
+## 配置要求
+
+`NEWAPI_IMAGE` 必须固定到明确版本标签或镜像 digest，生产环境不要使用 `latest`。
+
+`NEWAPI_POSTGRES_PASSWORD` 和 `NEWAPI_REDIS_PASSWORD` 是数据库和 Redis 服务使用的原始密码。
+当密码包含 `@`、`:`、`/`、`?`、`#` 等 URL 保留字符时，需将同一密码 URL 编码后分别填入
+`NEWAPI_POSTGRES_DSN_PASSWORD` 和 `NEWAPI_REDIS_URL_PASSWORD`，供 new-api 连接串使用。
+
 ## 对接 manager
 
 manager 的 `config/manager.yaml` 中：
