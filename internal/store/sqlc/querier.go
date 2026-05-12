@@ -38,6 +38,9 @@ type Querier interface {
 	GetJob(ctx context.Context, id pgtype.UUID) (Job, error)
 	// 查询单个 (org, node) 对的状态，主要用于幂等判断。
 	GetKnowledgeSyncStatus(ctx context.Context, arg GetKnowledgeSyncStatusParams) (KnowledgeSyncStatus, error)
+	// 组织列表复制登录信息时只需要一个可登录的组织管理员用户名。
+	// 密码明文不落库，因此这里只返回账号名，密码提示由调用方生成。
+	GetOrgAdminByOrg(ctx context.Context, orgID pgtype.UUID) (User, error)
 	GetOrganization(ctx context.Context, id pgtype.UUID) (Organization, error)
 	GetOrganizationByCode(ctx context.Context, code string) (Organization, error)
 	GetOrganizationByName(ctx context.Context, name string) (Organization, error)

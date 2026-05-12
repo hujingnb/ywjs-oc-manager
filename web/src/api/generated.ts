@@ -5359,6 +5359,8 @@ export interface components {
             member?: components["schemas"]["service.MemberResult"];
         };
         "service.OrganizationResult": {
+            /** @description AdminUsername 是组织首个可用管理员账号名，用于平台管理员复制登录信息。 */
+            admin_username?: string;
             /** @description Code 是组织登录标识，用于组织用户登录时定位租户。 */
             code?: string;
             /** @description ContactName 是业务联系人姓名。 */

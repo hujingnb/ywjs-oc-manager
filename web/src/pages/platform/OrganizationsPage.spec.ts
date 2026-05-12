@@ -17,6 +17,7 @@ vi.mock('@/api/hooks/useOrganizations', () => ({
       code: 'test-org',
       status: 'active',
       credit_warning_threshold: 20,
+      admin_username: 'org-admin',
     }]),
     isLoading: ref(false),
     error: ref(null),
@@ -36,6 +37,9 @@ vi.mock('@/api/hooks/useRecharge', () => ({
 }))
 
 describe('OrganizationsPage', () => {
+  // clipboardMock 捕获复制信息动作，避免测试依赖真实浏览器剪贴板权限。
+  const clipboardMock = vi.fn()
+
   const mountPage = () => mount(OrganizationsPage, {
     global: {
       stubs: {
@@ -143,6 +147,26 @@ describe('OrganizationsPage', () => {
 
     expect(wrapper.text()).toContain('组织标识')
     expect(wrapper.text()).toContain('test-org')
+  })
+
+  it('复制组织信息时写入指定格式的管理员登录信息', async () => {
+    Object.defineProperty(navigator, 'clipboard', {
+      configurable: true,
+      value: { writeText: clipboardMock },
+    })
+    clipboardMock.mockResolvedValue(undefined)
+    const wrapper = mountPage()
+
+    const copyButton = wrapper.findAll('button').find(button => button.text().includes('复制信息'))
+    expect(copyButton).toBeTruthy()
+    await copyButton!.trigger('click')
+
+    expect(clipboardMock).toHaveBeenCalledWith([
+      '标识： test-org',
+      '名称： 测试组织',
+      '管理员用户名： org-admin',
+      '管理员密码： <创建时设置，系统不保存明文；如忘记请重置密码>',
+    ].join('\n'))
   })
 
   it('创建组织时提交组织标识', async () => {

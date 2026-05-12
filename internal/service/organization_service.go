@@ -56,6 +56,7 @@ type OrganizationStore interface {
 	HardDeleteOrganization(ctx context.Context, id pgtype.UUID) error
 	GetOrganization(ctx context.Context, id pgtype.UUID) (sqlc.Organization, error)
 	ListOrganizations(ctx context.Context, arg sqlc.ListOrganizationsParams) ([]sqlc.Organization, error)
+	GetOrgAdminByOrg(ctx context.Context, id pgtype.UUID) (sqlc.User, error)
 	UpdateOrganizationProfile(ctx context.Context, arg sqlc.UpdateOrganizationProfileParams) (sqlc.Organization, error)
 	SetOrganizationStatus(ctx context.Context, arg sqlc.SetOrganizationStatusParams) (sqlc.Organization, error)
 }
@@ -154,6 +155,8 @@ type OrganizationResult struct {
 	NewAPIUserID string `json:"newapi_user_id,omitempty"`
 	// CreditWarningThreshold 是组织余额预警阈值。
 	CreditWarningThreshold *int32 `json:"credit_warning_threshold,omitempty"`
+	// AdminUsername 是组织首个可用管理员账号名，用于平台管理员复制登录信息。
+	AdminUsername string `json:"admin_username,omitempty"`
 }
 
 // CreateOrganization 创建组织：先 INSERT manager 端记录，再串联调 new-api 创业务 user 并落凭据密文。
@@ -285,7 +288,9 @@ func (s *OrganizationService) CreateOrganization(ctx context.Context, principal 
 		}
 		return OrganizationResult{}, wrappedErr
 	}
-	return toOrganizationResult(org), nil
+	result := toOrganizationResult(org)
+	result.AdminUsername = input.AdminUsername
+	return result, nil
 }
 
 // normalizeOrganizationCode 统一组织标识格式，避免大小写或空白导致同一标识多种写法。
@@ -395,7 +400,7 @@ func (s *OrganizationService) ListOrganizations(ctx context.Context, principal a
 	if err != nil {
 		return nil, fmt.Errorf("查询组织列表失败: %w", err)
 	}
-	return toOrganizationResults(orgs), nil
+	return s.toOrganizationResultsWithAdminUsernames(ctx, orgs), nil
 }
 
 // GetOrganization 根据角色限制组织访问范围。
@@ -414,7 +419,7 @@ func (s *OrganizationService) GetOrganization(ctx context.Context, principal aut
 	if err != nil {
 		return OrganizationResult{}, fmt.Errorf("查询组织失败: %w", err)
 	}
-	return toOrganizationResult(org), nil
+	return s.toOrganizationResultWithAdminUsername(ctx, org), nil
 }
 
 // UpdateOrganization 更新组织基础资料；生命周期状态必须走 enable/disable。
@@ -440,7 +445,7 @@ func (s *OrganizationService) UpdateOrganization(ctx context.Context, principal 
 	if err != nil {
 		return OrganizationResult{}, fmt.Errorf("更新组织失败: %w", err)
 	}
-	return toOrganizationResult(org), nil
+	return s.toOrganizationResultWithAdminUsername(ctx, org), nil
 }
 
 // SetOrganizationStatus 启用或禁用组织；软删除后续由删除流程单独处理。
@@ -462,7 +467,7 @@ func (s *OrganizationService) SetOrganizationStatus(ctx context.Context, princip
 	if err != nil {
 		return OrganizationResult{}, fmt.Errorf("更新组织状态失败: %w", err)
 	}
-	return toOrganizationResult(org), nil
+	return s.toOrganizationResultWithAdminUsername(ctx, org), nil
 }
 
 // DecryptOrganizationCredentials 把组织的 newapi_user_credentials_ciphertext 还原为明文凭据。
@@ -496,6 +501,38 @@ func toOrganizationResults(orgs []sqlc.Organization) []OrganizationResult {
 		results = append(results, toOrganizationResult(org))
 	}
 	return results
+}
+
+// toOrganizationResultsWithAdminUsernames 在组织基础视图上补充管理员用户名。
+// 密码明文只在创建请求里短暂出现，数据库只保存 hash，因此响应不会也不能包含管理员密码。
+func (s *OrganizationService) toOrganizationResultsWithAdminUsernames(ctx context.Context, orgs []sqlc.Organization) []OrganizationResult {
+	results := toOrganizationResults(orgs)
+	for idx, org := range orgs {
+		results[idx].AdminUsername = s.getOrgAdminUsername(ctx, org.ID)
+	}
+	return results
+}
+
+// toOrganizationResultWithAdminUsername 为单组织响应补充管理员用户名；查不到管理员时保留空值，
+// 避免一个历史异常组织阻断组织资料、状态切换等主流程。
+func (s *OrganizationService) toOrganizationResultWithAdminUsername(ctx context.Context, org sqlc.Organization) OrganizationResult {
+	result := toOrganizationResult(org)
+	result.AdminUsername = s.getOrgAdminUsername(ctx, org.ID)
+	return result
+}
+
+// getOrgAdminUsername 查询组织下最早创建且未下线的 org_admin。
+// pgx.ErrNoRows 表示组织尚无可用管理员，返回空字符串即可由前端显示提示。
+func (s *OrganizationService) getOrgAdminUsername(ctx context.Context, orgID pgtype.UUID) string {
+	user, err := s.store.GetOrgAdminByOrg(ctx, orgID)
+	if errors.Is(err, pgx.ErrNoRows) {
+		return ""
+	}
+	if err != nil {
+		slog.WarnContext(ctx, "查询组织管理员用户名失败", "org_id", uuidToString(orgID), "error", err)
+		return ""
+	}
+	return user.Username
 }
 
 func toOrganizationResult(org sqlc.Organization) OrganizationResult {

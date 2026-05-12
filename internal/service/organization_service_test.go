@@ -197,6 +197,29 @@ func TestOrganizationServiceSetStatus(t *testing.T) {
 	require.Equal(t, domain.StatusDisabled, result.Status)
 }
 
+// TestOrganizationServiceListIncludesAdminUsername 验证组织列表会带出首个启用组织管理员用户名，
+// 供平台管理员复制组织登录信息时使用；管理员密码明文不会从 hash 中恢复。
+func TestOrganizationServiceListIncludesAdminUsername(t *testing.T) {
+	orgID := mustUUID(t, "00000000-0000-0000-0000-000000000101")
+	store := &organizationStoreStub{
+		org: sqlc.Organization{ID: orgID, Name: "测试组织", Code: "test-org", Status: domain.StatusActive},
+		orgAdmin: sqlc.User{
+			ID:       mustUUID(t, "00000000-0000-0000-0000-000000000201"),
+			OrgID:    orgID,
+			Username: "org-admin",
+			Role:     domain.UserRoleOrgAdmin,
+			Status:   domain.StatusActive,
+		},
+	}
+	svc := NewOrganizationService(store, &fakeProvisioner{}, mustCipher(t), nil)
+
+	results, err := svc.ListOrganizations(context.Background(), auth.Principal{Role: domain.UserRolePlatformAdmin}, 50, 0)
+
+	require.NoError(t, err)
+	require.Len(t, results, 1)
+	assert.Equal(t, "org-admin", results[0].AdminUsername)
+}
+
 func mustCipher(t *testing.T) *auth.Cipher {
 	t.Helper()
 	key := make([]byte, 32)
@@ -254,6 +277,7 @@ func (p *fakeProvisioner) DeleteUser(_ context.Context, userID int64) error {
 
 type organizationStoreStub struct {
 	org              sqlc.Organization
+	orgAdmin         sqlc.User
 	created          sqlc.CreateOrganizationParams
 	updated          sqlc.SetOrganizationNewAPIUserParams
 	createdUser      sqlc.CreateUserParams
@@ -319,6 +343,13 @@ func (s *organizationStoreStub) GetOrganization(_ context.Context, id pgtype.UUI
 
 func (s *organizationStoreStub) ListOrganizations(_ context.Context, _ sqlc.ListOrganizationsParams) ([]sqlc.Organization, error) {
 	return []sqlc.Organization{s.org}, nil
+}
+
+func (s *organizationStoreStub) GetOrgAdminByOrg(_ context.Context, id pgtype.UUID) (sqlc.User, error) {
+	if !s.orgAdmin.ID.Valid || s.orgAdmin.OrgID != id {
+		return sqlc.User{}, pgx.ErrNoRows
+	}
+	return s.orgAdmin, nil
 }
 
 func (s *organizationStoreStub) UpdateOrganizationProfile(_ context.Context, arg sqlc.UpdateOrganizationProfileParams) (sqlc.Organization, error) {

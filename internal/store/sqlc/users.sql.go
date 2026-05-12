@@ -60,6 +60,37 @@ func (q *Queries) CreateUser(ctx context.Context, arg CreateUserParams) (User, e
 	return i, err
 }
 
+const getOrgAdminByOrg = `-- name: GetOrgAdminByOrg :one
+SELECT id, org_id, username, password_hash, display_name, role, status, last_login_at, created_at, updated_at, deleted_at
+FROM users
+WHERE org_id = $1
+  AND role = 'org_admin'
+  AND deleted_at IS NULL
+ORDER BY created_at ASC, id ASC
+LIMIT 1
+`
+
+// 组织列表复制登录信息时只需要一个可登录的组织管理员用户名。
+// 密码明文不落库，因此这里只返回账号名，密码提示由调用方生成。
+func (q *Queries) GetOrgAdminByOrg(ctx context.Context, orgID pgtype.UUID) (User, error) {
+	row := q.db.QueryRow(ctx, getOrgAdminByOrg, orgID)
+	var i User
+	err := row.Scan(
+		&i.ID,
+		&i.OrgID,
+		&i.Username,
+		&i.PasswordHash,
+		&i.DisplayName,
+		&i.Role,
+		&i.Status,
+		&i.LastLoginAt,
+		&i.CreatedAt,
+		&i.UpdatedAt,
+		&i.DeletedAt,
+	)
+	return i, err
+}
+
 const getUser = `-- name: GetUser :one
 SELECT id, org_id, username, password_hash, display_name, role, status, last_login_at, created_at, updated_at, deleted_at
 FROM users

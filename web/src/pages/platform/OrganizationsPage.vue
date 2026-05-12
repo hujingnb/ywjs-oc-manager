@@ -17,6 +17,7 @@
         </n-button>
       </template>
     </DataTableList>
+    <p v-if="copyFeedback" class="state-text" :class="{ danger: copyFeedbackError }">{{ copyFeedback }}</p>
 
     <!-- 创建表单 -->
     <n-card v-if="formVisible" :bordered="true">
@@ -166,6 +167,9 @@ const rechargeAmount = ref<number | null>(null)
 const rechargeRemark = ref('')
 const rechargeFeedback = ref('')
 const rechargeFeedbackError = ref(false)
+const copyFeedback = ref('')
+const copyFeedbackError = ref(false)
+const adminPasswordCopyHint = '<创建时设置，系统不保存明文；如忘记请重置密码>'
 // canSubmitRecharge 表示当前弹框是否具备调用充值接口的最小条件。
 const canSubmitRecharge = computed(() => Boolean(selectedOrgId.value && (rechargeAmount.value ?? 0) > 0))
 
@@ -223,11 +227,39 @@ const columns = [
   },
   // 启用/禁用互斥：用两条 RowAction + hidden 分别渲染
   actionColumn<Organization>([
+    { label: '复制信息', onClick: r => { void copyOrganizationInfo(r) } },
     { label: '充值', type: 'primary', onClick: openRecharge },
     { label: '禁用', onClick: r => onToggle(r, 'disable'), hidden: r => r.status !== 'active' },
     { label: '启用', type: 'primary', onClick: r => onToggle(r, 'enable'), hidden: r => r.status === 'active' },
   ]),
 ]
+
+function optionalAdminUsername(org: Organization) {
+  return org.admin_username ?? ''
+}
+
+// formatOrganizationCopyInfo 固定对外复制格式，便于平台管理员直接发送给组织管理员。
+function formatOrganizationCopyInfo(org: Organization) {
+  return [
+    `标识： ${org.code || ''}`,
+    `名称： ${org.name}`,
+    `管理员用户名： ${optionalAdminUsername(org)}`,
+    `管理员密码： ${adminPasswordCopyHint}`,
+  ].join('\n')
+}
+
+// copyOrganizationInfo 使用浏览器剪贴板写入组织登录信息，并在页面内暴露结果。
+async function copyOrganizationInfo(org: Organization) {
+  copyFeedback.value = ''
+  copyFeedbackError.value = false
+  try {
+    await navigator.clipboard.writeText(formatOrganizationCopyInfo(org))
+    copyFeedback.value = `已复制 ${org.name} 的组织信息`
+  } catch {
+    copyFeedbackError.value = true
+    copyFeedback.value = '复制失败，请检查浏览器剪贴板权限'
+  }
+}
 
 // onToggle 调用组织状态切换接口，状态刷新由 mutation hook 的缓存失效策略处理。
 function onToggle(org: Organization, action: 'enable' | 'disable') {
