@@ -14,6 +14,7 @@ sql:
       - internal/migrations/000011_users_deleted_at.up.sql
       - internal/migrations/000012_runtime_nodes_auto_enroll.up.sql
       - internal/migrations/000013_organization_code_login.up.sql
+      - internal/migrations/000014_resource_samples.up.sql
     queries: internal/store/queries
     gen:
       go:

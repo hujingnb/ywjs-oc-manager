@@ -29,6 +29,8 @@ type Querier interface {
 	CreateRefreshToken(ctx context.Context, arg CreateRefreshTokenParams) (RefreshToken, error)
 	CreateUser(ctx context.Context, arg CreateUserParams) (User, error)
 	DeleteExpiredRefreshTokens(ctx context.Context) error
+	DeleteOldInstanceResourceSamples(ctx context.Context, arg DeleteOldInstanceResourceSamplesParams) (int64, error)
+	DeleteOldNodeResourceSamples(ctx context.Context, arg DeleteOldNodeResourceSamplesParams) (int64, error)
 	EnrollRuntimeNodeInsert(ctx context.Context, arg EnrollRuntimeNodeInsertParams) (RuntimeNode, error)
 	EnrollRuntimeNodeUpdate(ctx context.Context, arg EnrollRuntimeNodeUpdateParams) (RuntimeNode, error)
 	GetActiveAppByOwner(ctx context.Context, ownerUserID pgtype.UUID) (App, error)
@@ -38,6 +40,8 @@ type Querier interface {
 	GetJob(ctx context.Context, id pgtype.UUID) (Job, error)
 	// 查询单个 (org, node) 对的状态，主要用于幂等判断。
 	GetKnowledgeSyncStatus(ctx context.Context, arg GetKnowledgeSyncStatusParams) (KnowledgeSyncStatus, error)
+	GetLatestInstanceResourceSample(ctx context.Context, appID pgtype.UUID) (InstanceResourceSample, error)
+	GetLatestNodeResourceSample(ctx context.Context, runtimeNodeID pgtype.UUID) (NodeResourceSample, error)
 	// 组织列表复制登录信息时只需要一个可登录的组织管理员用户名。
 	// 密码明文不落库，因此这里只返回账号名，密码提示由调用方生成。
 	GetOrgAdminByOrg(ctx context.Context, orgID pgtype.UUID) (User, error)
@@ -56,6 +60,8 @@ type Querier interface {
 	// 用于组织创建链路失败时回滚刚刚 INSERT 的孤儿记录。
 	// 正常生命周期不可见此查询；普通"删除"必须走 SoftDeleteOrganization。
 	HardDeleteOrganization(ctx context.Context, id pgtype.UUID) error
+	InsertInstanceResourceSample(ctx context.Context, arg InsertInstanceResourceSampleParams) (InstanceResourceSample, error)
+	InsertNodeResourceSample(ctx context.Context, arg InsertNodeResourceSampleParams) (NodeResourceSample, error)
 	// ListActiveNodesWithAppCounts 列出所有 active 节点并附带其当前未删除应用数量。
 	// OnboardingService 自动选节点时按剩余容量过滤；剩余容量 = max_apps - app_count，
 	// max_apps NULL 表示不限。degraded / unreachable / disabled 均不参与新应用调度。
@@ -64,8 +70,15 @@ type Querier interface {
 	ListAppsByRuntimeNode(ctx context.Context, arg ListAppsByRuntimeNodeParams) ([]App, error)
 	ListAuditLogsByOrg(ctx context.Context, arg ListAuditLogsByOrgParams) ([]AuditLog, error)
 	ListAuditLogsByTarget(ctx context.Context, arg ListAuditLogsByTargetParams) ([]AuditLog, error)
+	ListInstanceResourceBuckets(ctx context.Context, arg ListInstanceResourceBucketsParams) ([]ListInstanceResourceBucketsRow, error)
+	ListInstanceResourceSamples(ctx context.Context, arg ListInstanceResourceSamplesParams) ([]InstanceResourceSample, error)
 	// 列出某组织在所有节点上的最近同步状态。
 	ListKnowledgeSyncStatusByOrg(ctx context.Context, orgID pgtype.UUID) ([]KnowledgeSyncStatus, error)
+	ListLatestInstanceResourceSamplesByNode(ctx context.Context, runtimeNodeID pgtype.UUID) ([]InstanceResourceSample, error)
+	ListLatestNodeResourceSamples(ctx context.Context, dollar_1 []pgtype.UUID) ([]NodeResourceSample, error)
+	ListNodeInstanceResourceSamples(ctx context.Context, arg ListNodeInstanceResourceSamplesParams) ([]InstanceResourceSample, error)
+	ListNodeResourceBuckets(ctx context.Context, arg ListNodeResourceBucketsParams) ([]ListNodeResourceBucketsRow, error)
+	ListNodeResourceSamples(ctx context.Context, arg ListNodeResourceSamplesParams) ([]NodeResourceSample, error)
 	ListOrganizationPersonaVersions(ctx context.Context, arg ListOrganizationPersonaVersionsParams) ([]OrganizationPersona, error)
 	ListOrganizations(ctx context.Context, arg ListOrganizationsParams) ([]Organization, error)
 	ListReadyJobs(ctx context.Context, limit int32) ([]Job, error)

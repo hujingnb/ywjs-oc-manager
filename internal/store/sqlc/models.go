@@ -76,6 +76,25 @@ type ChannelBinding struct {
 	UpdatedAt    pgtype.Timestamptz `db:"updated_at" json:"updated_at"`
 }
 
+// 实例容器资源原始采样，保留 30 天供节点抽屉和实例运行页查询。
+type InstanceResourceSample struct {
+	ID               pgtype.UUID        `db:"id" json:"id"`
+	AppID            pgtype.UUID        `db:"app_id" json:"app_id"`
+	RuntimeNodeID    pgtype.UUID        `db:"runtime_node_id" json:"runtime_node_id"`
+	ContainerID      string             `db:"container_id" json:"container_id"`
+	SampledAt        pgtype.Timestamptz `db:"sampled_at" json:"sampled_at"`
+	ContainerStatus  pgtype.Text        `db:"container_status" json:"container_status"`
+	CpuPercent       pgtype.Float8      `db:"cpu_percent" json:"cpu_percent"`
+	MemoryUsedBytes  pgtype.Int8        `db:"memory_used_bytes" json:"memory_used_bytes"`
+	MemoryLimitBytes pgtype.Int8        `db:"memory_limit_bytes" json:"memory_limit_bytes"`
+	DiskReadBytes    pgtype.Int8        `db:"disk_read_bytes" json:"disk_read_bytes"`
+	DiskWriteBytes   pgtype.Int8        `db:"disk_write_bytes" json:"disk_write_bytes"`
+	NetworkRxBytes   pgtype.Int8        `db:"network_rx_bytes" json:"network_rx_bytes"`
+	NetworkTxBytes   pgtype.Int8        `db:"network_tx_bytes" json:"network_tx_bytes"`
+	LastError        pgtype.Text        `db:"last_error" json:"last_error"`
+	CreatedAt        pgtype.Timestamptz `db:"created_at" json:"created_at"`
+}
+
 // 异步任务事实表；Redis 只负责分发，任务状态以本表为准。
 type Job struct {
 	ID       pgtype.UUID `db:"id" json:"id"`
@@ -104,6 +123,23 @@ type KnowledgeSyncStatus struct {
 	LastSuccessAt pgtype.Timestamptz `db:"last_success_at" json:"last_success_at"`
 	LastError     pgtype.Text        `db:"last_error" json:"last_error"`
 	UpdatedAt     pgtype.Timestamptz `db:"updated_at" json:"updated_at"`
+}
+
+// 运行节点资源原始采样，保留 30 天供趋势图查询。
+type NodeResourceSample struct {
+	ID               pgtype.UUID        `db:"id" json:"id"`
+	RuntimeNodeID    pgtype.UUID        `db:"runtime_node_id" json:"runtime_node_id"`
+	SampledAt        pgtype.Timestamptz `db:"sampled_at" json:"sampled_at"`
+	CpuPercent       pgtype.Float8      `db:"cpu_percent" json:"cpu_percent"`
+	MemoryUsedBytes  pgtype.Int8        `db:"memory_used_bytes" json:"memory_used_bytes"`
+	MemoryTotalBytes pgtype.Int8        `db:"memory_total_bytes" json:"memory_total_bytes"`
+	DiskUsedBytes    pgtype.Int8        `db:"disk_used_bytes" json:"disk_used_bytes"`
+	DiskTotalBytes   pgtype.Int8        `db:"disk_total_bytes" json:"disk_total_bytes"`
+	NetworkRxBytes   pgtype.Int8        `db:"network_rx_bytes" json:"network_rx_bytes"`
+	NetworkTxBytes   pgtype.Int8        `db:"network_tx_bytes" json:"network_tx_bytes"`
+	InstanceCount    pgtype.Int4        `db:"instance_count" json:"instance_count"`
+	LastError        pgtype.Text        `db:"last_error" json:"last_error"`
+	CreatedAt        pgtype.Timestamptz `db:"created_at" json:"created_at"`
 }
 
 // 组织租户表，保存组织基础信息、new-api 账号映射和余额预警阈值。
