@@ -32,7 +32,7 @@ func TestWorkspaceServiceListReturnsEntries(t *testing.T) {
 		workspaceListing: runtime.WorkspaceListing{
 			Path: "/logs",
 			Entries: []runtime.WorkspaceEntry{
-				{Name: "alice.log", Type: "file", Size: 12, ModifiedAt: "2026-05-03T00:00:00Z"},
+				{Name: "alice.log", Type: "file", Size: 12, ModifiedAt: "2026-05-03T00:00:00Z"}, // 场景：adapter 返回单个文件条目时 service 应原样透传列表内容。
 			},
 		},
 	}
@@ -57,7 +57,7 @@ func TestWorkspaceServiceListAllowsPlatformAdminRead(t *testing.T) {
 		workspaceListing: runtime.WorkspaceListing{
 			Path: "/",
 			Entries: []runtime.WorkspaceEntry{
-				{Name: "session.log", Type: "file", Size: 18, ModifiedAt: "2026-05-03T00:00:00Z"},
+				{Name: "session.log", Type: "file", Size: 18, ModifiedAt: "2026-05-03T00:00:00Z"}, // 场景：平台管理员读取根目录时可看到 adapter 返回的文件条目。
 			},
 		},
 	}

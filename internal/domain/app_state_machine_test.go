@@ -9,14 +9,14 @@ import (
 // TestIsAppTransitionAllowedHappyPath 验证Is应用状态流转允许性成功路径的成功路径场景。
 func TestIsAppTransitionAllowedHappyPath(t *testing.T) {
 	cases := [][2]string{
-		{AppStatusDraft, AppStatusInitializing},
-		{AppStatusInitializing, AppStatusBindingWaiting},
-		{AppStatusBindingWaiting, AppStatusRunning},
-		{AppStatusBindingWaiting, AppStatusBindingFailed},
-		{AppStatusBindingFailed, AppStatusBindingWaiting},
-		{AppStatusRunning, AppStatusStopped},
-		{AppStatusStopped, AppStatusRunning},
-		{AppStatusError, AppStatusInitializing},
+		{AppStatusDraft, AppStatusInitializing},           // 场景：草稿应用允许进入初始化流程
+		{AppStatusInitializing, AppStatusBindingWaiting},  // 场景：初始化完成后允许进入绑定等待状态
+		{AppStatusBindingWaiting, AppStatusRunning},       // 场景：绑定完成后允许应用进入运行状态
+		{AppStatusBindingWaiting, AppStatusBindingFailed}, // 场景：绑定等待超时或失败后允许进入绑定失败状态
+		{AppStatusBindingFailed, AppStatusBindingWaiting}, // 场景：绑定失败后允许重新进入绑定等待重试
+		{AppStatusRunning, AppStatusStopped},              // 场景：运行中的应用允许被停止
+		{AppStatusStopped, AppStatusRunning},              // 场景：已停止应用允许重新启动
+		{AppStatusError, AppStatusInitializing},           // 场景：错误状态应用允许重新初始化恢复
 	}
 	for _, c := range cases {
 		if !IsAppTransitionAllowed(c[0], c[1]) {
@@ -57,12 +57,12 @@ func TestAppIsTerminalOnlyDeleted(t *testing.T) {
 // TestIsAPIKeyTransitionAllowedHappyPath 验证IsAPIKey状态流转允许性成功路径的成功路径场景。
 func TestIsAPIKeyTransitionAllowedHappyPath(t *testing.T) {
 	cases := [][2]string{
-		{APIKeyStatusPending, APIKeyStatusActive},
-		{APIKeyStatusPending, APIKeyStatusError},
-		{APIKeyStatusActive, APIKeyStatusDisabled},
-		{APIKeyStatusActive, APIKeyStatusError},
-		{APIKeyStatusDisabled, APIKeyStatusActive},
-		{APIKeyStatusError, APIKeyStatusPending},
+		{APIKeyStatusPending, APIKeyStatusActive},  // 场景：待创建 API key 成功后允许变为 active
+		{APIKeyStatusPending, APIKeyStatusError},   // 场景：待创建 API key 失败后允许变为 error
+		{APIKeyStatusActive, APIKeyStatusDisabled}, // 场景：active API key 允许被禁用
+		{APIKeyStatusActive, APIKeyStatusError},    // 场景：active API key 遇到异常时允许进入 error
+		{APIKeyStatusDisabled, APIKeyStatusActive}, // 场景：disabled API key 允许重新启用
+		{APIKeyStatusError, APIKeyStatusPending},   // 场景：error API key 允许回到 pending 重试
 	}
 	for _, c := range cases {
 		if !IsAPIKeyTransitionAllowed(c[0], c[1]) {

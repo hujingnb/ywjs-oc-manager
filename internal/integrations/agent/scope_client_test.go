@@ -113,10 +113,10 @@ func TestScopeClient_KnowledgeFile_Upload_Delete(t *testing.T) {
 		method, path string
 		query        string
 	}{
-		{http.MethodPut, "/v1/scopes/apps/app-1/knowledge/file", "path=sub%2Fnote.txt"},
-		{http.MethodPut, "/v1/scopes/orgs/org-1/knowledge/file", "path=policy.md"},
-		{http.MethodDelete, "/v1/scopes/apps/app-1/knowledge/file", "path=sub%2Fnote.txt"},
-		{http.MethodDelete, "/v1/scopes/orgs/org-1/knowledge/file", "path=policy.md"},
+		{http.MethodPut, "/v1/scopes/apps/app-1/knowledge/file", "path=sub%2Fnote.txt"},    // 场景：应用知识库上传应调用 app scope 的 PUT file 端点并编码相对路径
+		{http.MethodPut, "/v1/scopes/orgs/org-1/knowledge/file", "path=policy.md"},         // 场景：组织知识库上传应调用 org scope 的 PUT file 端点
+		{http.MethodDelete, "/v1/scopes/apps/app-1/knowledge/file", "path=sub%2Fnote.txt"}, // 场景：应用知识库删除应调用 app scope 的 DELETE file 端点并编码相对路径
+		{http.MethodDelete, "/v1/scopes/orgs/org-1/knowledge/file", "path=policy.md"},      // 场景：组织知识库删除应调用 org scope 的 DELETE file 端点
 	}
 	for i, want := range expects {
 		got := s.captured[i]

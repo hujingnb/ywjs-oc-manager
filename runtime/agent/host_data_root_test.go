@@ -1,10 +1,10 @@
 package main
 
 import (
+	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
 	"strings"
 	"testing"
-	"github.com/stretchr/testify/require"
-	"github.com/stretchr/testify/assert"
 )
 
 // TestParseHostDataRootFromMountInfo_ExactMatch 验证解析宿主数据根目录来自挂载信息精确匹配的预期行为场景。
@@ -43,13 +43,13 @@ func TestParseHostDataRootFromMountInfo_OctalEscape(t *testing.T) {
 // TestUnescapeMountInfoField 验证反转义挂载信息字段的预期行为场景。
 func TestUnescapeMountInfoField(t *testing.T) {
 	cases := []struct{ in, want string }{
-		{"abc", "abc"},
-		{`a\040b`, "a b"},
-		{`a\011b`, "a\tb"},
-		{`a\134b`, `a\b`},
-		{`\040leading`, " leading"},
-		{`trailing\040`, "trailing "},
-		{`\077`, "?"}, // 0o077 = 63 = '?' (合法 octal 但项目内不会出现)
+		{"abc", "abc"},                // 场景：普通字符串不需要反转义时保持原样
+		{`a\040b`, "a b"},             // 场景：mountinfo 空格八进制转义应还原为空格
+		{`a\011b`, "a\tb"},            // 场景：mountinfo 制表符八进制转义应还原为 tab
+		{`a\134b`, `a\b`},             // 场景：mountinfo 反斜杠八进制转义应还原为反斜杠
+		{`\040leading`, " leading"},   // 场景：开头位置的空格八进制转义应被还原
+		{`trailing\040`, "trailing "}, // 场景：结尾位置的空格八进制转义应被还原
+		{`\077`, "?"},                 // 场景：合法但项目内非常见的 octal 仍按通用规则还原为问号；0o077 = 63 = '?'
 	}
 	for _, c := range cases {
 		assert.Equal(t, c.want, unescapeMountInfoField(c.in))

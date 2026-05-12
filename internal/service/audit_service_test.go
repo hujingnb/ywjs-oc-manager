@@ -72,8 +72,8 @@ func TestAuditServiceListByTargetFiltersOrgScope(t *testing.T) {
 			},
 		},
 		byTarget: []sqlc.AuditLog{
-			{TargetType: "app", TargetID: testAuditAppID, OrgID: mustOptionalUUID(t, testOrgID)},
-			{TargetType: "app", TargetID: testAuditAppID, OrgID: mustOptionalUUID(t, testOrg2ID)},
+			{TargetType: "app", TargetID: testAuditAppID, OrgID: mustOptionalUUID(t, testOrgID)},  // 场景：目标应用所属组织内的审计记录应允许返回。
+			{TargetType: "app", TargetID: testAuditAppID, OrgID: mustOptionalUUID(t, testOrg2ID)}, // 场景：跨组织同目标审计记录用于验证组织范围过滤。
 		},
 	}
 	svc := NewAuditService(store)
@@ -96,7 +96,7 @@ func TestAuditServiceListByTargetAllowsMemberOwnApp(t *testing.T) {
 			},
 		},
 		byTarget: []sqlc.AuditLog{
-			{TargetType: "app", TargetID: testAuditAppID, OrgID: mustOptionalUUID(t, testOrgID)},
+			{TargetType: "app", TargetID: testAuditAppID, OrgID: mustOptionalUUID(t, testOrgID)}, // 场景：成员查看自己应用审计时返回同组织目标记录。
 		},
 	}
 	svc := NewAuditService(store)

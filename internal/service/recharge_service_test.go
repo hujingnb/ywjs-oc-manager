@@ -86,8 +86,8 @@ func TestListRecharges_DeniesNonPlatformAdmin(t *testing.T) {
 func TestListRecharges_HappyPath(t *testing.T) {
 	store := newRechargeStub(t, "1234")
 	store.records = []sqlc.RechargeRecord{
-		{ID: mustUUID(t, "00000000-0000-0000-0000-000000002201"), OrgID: mustUUID(t, testRechargeOrgID), CreditAmount: 100, Status: "succeeded"},
-		{ID: mustUUID(t, "00000000-0000-0000-0000-000000002202"), OrgID: mustUUID(t, testRechargeOrgID), CreditAmount: 200, Status: "failed"},
+		{ID: mustUUID(t, "00000000-0000-0000-0000-000000002201"), OrgID: mustUUID(t, testRechargeOrgID), CreditAmount: 100, Status: "succeeded"}, // 场景：成功充值记录应出现在列表结果中。
+		{ID: mustUUID(t, "00000000-0000-0000-0000-000000002202"), OrgID: mustUUID(t, testRechargeOrgID), CreditAmount: 200, Status: "failed"},    // 场景：失败充值记录也应按存储返回参与列表展示。
 	}
 	svc := NewRechargeService(store, &fakeNewAPIRecharge{})
 	results, err := svc.ListRecharges(context.Background(), platformAdmin(), testRechargeOrgID, 50, 0)

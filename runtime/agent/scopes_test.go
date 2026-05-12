@@ -5,6 +5,7 @@ import (
 	"archive/zip"
 	"bytes"
 	"encoding/json"
+	"github.com/stretchr/testify/require"
 	"io"
 	"net/http"
 	"net/http/httptest"
@@ -13,12 +14,11 @@ import (
 	"strings"
 	"testing"
 	"time"
-	"github.com/stretchr/testify/require"
 )
 
 // jsonDecoder 与 readAll 是测试辅助 helper（避免重复 import）。
 func jsonDecoder(r io.Reader) *json.Decoder { return json.NewDecoder(r) }
-func readAll(r io.Reader) ([]byte, error)    { return io.ReadAll(r) }
+func readAll(r io.Reader) ([]byte, error)   { return io.ReadAll(r) }
 
 // makeTar 把 (path → content) 打成一个 tar 流供测试用。
 func makeTar(t *testing.T, files map[string]string) *bytes.Buffer {
@@ -52,15 +52,15 @@ func TestResolveScopePath(t *testing.T) {
 		rel     string
 		wantErr bool
 	}{
-		{"empty rel returns scope root", "", false},
-		{"slash returns scope root", "/", false},
-		{"clean nested file", "workspace/foo.txt", false},
-		{"deep clean path", "knowledge/sub/dir/file.pdf", false},
-		{"rel with dot dot rejected", "../bbb", true},
-		{"abs path rejected", "/etc/passwd", true},
-		{"hidden traversal rejected", "workspace/../../etc/passwd", true},
-		{"trailing dot dot rejected", "workspace/..", true},
-		{"sibling escape rejected", "../../apps/other/workspace", true},
+		{"empty rel returns scope root", "", false},                       // 场景：空相对路径应解析到 scope 根目录
+		{"slash returns scope root", "/", false},                          // 场景：单斜杠路径应解析到 scope 根目录
+		{"clean nested file", "workspace/foo.txt", false},                 // 场景：普通嵌套文件路径应被接受
+		{"deep clean path", "knowledge/sub/dir/file.pdf", false},          // 场景：更深层级的合法知识库路径应被接受
+		{"rel with dot dot rejected", "../bbb", true},                     // 场景：显式上级目录路径应被拒绝
+		{"abs path rejected", "/etc/passwd", true},                        // 场景：绝对路径应被拒绝
+		{"hidden traversal rejected", "workspace/../../etc/passwd", true}, // 场景：隐藏在中间段的路径穿越应被拒绝
+		{"trailing dot dot rejected", "workspace/..", true},               // 场景：以父级目录结尾的路径应被拒绝
+		{"sibling escape rejected", "../../apps/other/workspace", true},   // 场景：试图跳到兄弟 scope 的路径应被拒绝
 	}
 	for _, c := range cases {
 		// 当前子测试覆盖表格用例中该名称对应的输入组合、边界条件和期望结果。

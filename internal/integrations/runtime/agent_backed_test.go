@@ -282,8 +282,8 @@ func TestAgentBackedAdapterCreateContainerHappyPath(t *testing.T) {
 		Image: "openclaw-runtime:dev",
 		Env:   map[string]string{"OPENCLAW_API_KEY": "k1", "OPENCLAW_API_BASE": "http://newapi"},
 		Volumes: []VolumeMount{
-			{HostPath: "/data/workspace", ContainerPath: "/workspace"},
-			{HostPath: "/data/knowledge/org", ContainerPath: "/knowledge/org", ReadOnly: true},
+			{HostPath: "/data/workspace", ContainerPath: "/workspace"},                         // 场景：工作区挂载应以读写 bind mount 传给 Docker。
+			{HostPath: "/data/knowledge/org", ContainerPath: "/knowledge/org", ReadOnly: true}, // 场景：组织知识库挂载应以只读 bind mount 传给 Docker。
 		},
 		Networks:  []string{"oc-net"},
 		Resources: Resources{CPULimit: 2000, MemoryBytes: 1 << 30},

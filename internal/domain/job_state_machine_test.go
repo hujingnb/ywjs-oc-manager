@@ -12,12 +12,12 @@ func TestIsJobTransitionAllowedValid(t *testing.T) {
 		from string
 		to   string
 	}{
-		{JobStatusPending, JobStatusRunning},
-		{JobStatusPending, JobStatusCanceled},
-		{JobStatusRunning, JobStatusSucceeded},
-		{JobStatusRunning, JobStatusFailed},
-		{JobStatusRunning, JobStatusPending},
-		{JobStatusFailed, JobStatusPending},
+		{JobStatusPending, JobStatusRunning},   // 场景：pending 任务允许被 worker 领取进入 running
+		{JobStatusPending, JobStatusCanceled},  // 场景：pending 任务允许在执行前取消
+		{JobStatusRunning, JobStatusSucceeded}, // 场景：running 任务允许成功结束
+		{JobStatusRunning, JobStatusFailed},    // 场景：running 任务允许失败结束
+		{JobStatusRunning, JobStatusPending},   // 场景：running 任务允许失败重试时回到 pending
+		{JobStatusFailed, JobStatusPending},    // 场景：failed 任务允许重试回到 pending
 	}
 	for _, c := range cases {
 		if !IsJobTransitionAllowed(c.from, c.to) {

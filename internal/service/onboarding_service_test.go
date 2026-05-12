@@ -255,7 +255,7 @@ func TestOnboardMember_SelectNode_NoActiveNode(t *testing.T) {
 func TestOnboardMember_SelectNode_OnlyNodeAtCapacity(t *testing.T) {
 	tx := &txRunnerStub{store: newOnboardingStub(t)}
 	selector := &nodeSelectorStub{nodes: []NodeWithCount{
-		{NodeID: "00000000-0000-0000-0000-000000000a01", MaxApps: ptrInt32(1), AppCount: 1},
+		{NodeID: "00000000-0000-0000-0000-000000000a01", MaxApps: ptrInt32(1), AppCount: 1}, // 场景：唯一节点已达容量时选择器应返回无可用节点。
 	}}
 	svc := NewMemberOnboardingService(tx, fakeHash, selector)
 

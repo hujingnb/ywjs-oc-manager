@@ -556,11 +556,11 @@ func TestConfigureOpenClawDefaultModel_PatchesAgentAndModels(t *testing.T) {
 func TestConfigureOpenClawDefaultModel_SkipsWhenLLMIncomplete(t *testing.T) {
 	exec := &fakeContainerExec{res: ExecResultStub{ExitCode: 0, Stdout: "Patched\n"}}
 	cases := []AppInitializeLLMConfig{
-		{},
-		{BaseURL: "x", DefaultProvider: "openai"},      // 缺 model
-		{BaseURL: "x", DefaultModel: "qwen2.5:0.5b"},   // 缺 provider
-		{DefaultProvider: "openai", DefaultModel: "x"}, // 缺 base
-		{BaseURL: "  ", DefaultProvider: "openai", DefaultModel: "x"},
+		{}, // 场景：完全缺失 LLM 配置时应跳过默认模型配置
+		{BaseURL: "x", DefaultProvider: "openai"},                     // 缺 model
+		{BaseURL: "x", DefaultModel: "qwen2.5:0.5b"},                  // 缺 provider
+		{DefaultProvider: "openai", DefaultModel: "x"},                // 缺 base
+		{BaseURL: "  ", DefaultProvider: "openai", DefaultModel: "x"}, // 场景：base URL 只有空白字符时应视为无效并跳过配置
 	}
 	for _, c := range cases {
 		exec.calls = nil
