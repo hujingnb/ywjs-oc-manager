@@ -36,6 +36,37 @@ describe('ResourceTrendChart', () => {
     expect(wrapper.findAll('polyline')).toHaveLength(1)
   })
 
+  // 单点采样没有折线长度，应渲染点标记保证用户仍能看到有效数据。
+  it('renders a marker when samples contain one value', () => {
+    const wrapper = mount(ResourceTrendChart, {
+      props: {
+        title: 'CPU 趋势',
+        samples: [{ sampled_at: '2026-05-13T00:00:00Z', value: 10 }],
+        unit: 'percent',
+      },
+    })
+
+    expect(wrapper.find('.trend-marker').exists()).toBe(true)
+  })
+
+  // secondary 指标用于同图展示关联序列，必须有独立线条和可见标签。
+  it('renders secondary values as a separate series and visible label', () => {
+    const wrapper = mount(ResourceTrendChart, {
+      props: {
+        title: '网络趋势',
+        samples: [
+          { sampled_at: '2026-05-13T00:00:00Z', value: 1024, secondary: 2048 },
+          { sampled_at: '2026-05-13T00:05:00Z', value: 4096, secondary: 8192 },
+        ],
+        unit: 'bytes',
+      },
+    })
+
+    expect(wrapper.find('.secondary-line').exists()).toBe(true)
+    expect(wrapper.text()).toContain('次要')
+    expect(wrapper.text()).toMatch(/8 KB/)
+  })
+
   // 字节单位场景应把原始 byte 数值格式化为 KB/MB 等可读标签。
   it('formats byte values in tooltip labels', () => {
     const wrapper = mount(ResourceTrendChart, {

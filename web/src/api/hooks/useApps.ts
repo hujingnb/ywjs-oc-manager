@@ -164,6 +164,7 @@ export function useAppResourcesQuery(appId: Ref<string | undefined>, range: Ref<
   return useQuery<InstanceResourceSample[]>({
     queryKey: ['app-resources', appId, range],
     enabled: () => Boolean(appId.value),
+    refetchInterval: 30_000,
     queryFn: async () => {
       if (!appId.value) return []
       const response = await apiRequest<{ samples?: InstanceResourceSample[] }>(

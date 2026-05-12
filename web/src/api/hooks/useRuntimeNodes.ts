@@ -7,6 +7,7 @@ import { apiRequest } from '@/api/client'
 import type { RuntimeNode } from '@/api'
 
 const RUNTIME_NODES_KEY = ['runtime-nodes'] as const
+const RESOURCE_REFETCH_INTERVAL = 30_000
 
 export type ResourceRange = '1h' | '24h' | '7d' | '30d'
 
@@ -56,26 +57,29 @@ export interface NodeInstanceResourceRow {
 // 1h 使用原始采样，其余范围使用聚合桶，避免长时间跨度返回过多点影响页面渲染。
 export function rangeQuery(range: ResourceRange): { from: string; to: string; bucket?: '5m' | '1h' } {
   const to = new Date()
-  const from = new Date(to)
+  let durationMs: number
   let bucket: '5m' | '1h' | undefined
 
   switch (range) {
     case '1h':
-      from.setHours(from.getHours() - 1)
+      durationMs = 60 * 60 * 1000
       break
     case '24h':
-      from.setDate(from.getDate() - 1)
+      durationMs = 24 * 60 * 60 * 1000
       bucket = '5m'
       break
     case '7d':
-      from.setDate(from.getDate() - 7)
+      durationMs = 7 * 24 * 60 * 60 * 1000
       bucket = '5m'
       break
     case '30d':
-      from.setDate(from.getDate() - 30)
+      durationMs = 30 * 24 * 60 * 60 * 1000
       bucket = '1h'
       break
   }
+
+  // 使用固定毫秒窗口，避免跨 DST 切换时 setHours/setDate 产生 23/25 小时偏移。
+  const from = new Date(to.getTime() - durationMs)
 
   return { from: from.toISOString(), to: to.toISOString(), bucket }
 }
@@ -114,6 +118,7 @@ export function useRuntimeNodeResourcesQuery(nodeId: Ref<string | undefined>, ra
   return useQuery<NodeResourceSample[]>({
     queryKey: ['runtime-node-resources', nodeId, range],
     enabled: () => Boolean(nodeId.value),
+    refetchInterval: RESOURCE_REFETCH_INTERVAL,
     queryFn: async () => {
       if (!nodeId.value) return []
       const response = await apiRequest<{ samples?: NodeResourceSample[] }>(
@@ -131,6 +136,7 @@ export function useRuntimeNodeInstancesQuery(nodeId: Ref<string | undefined>) {
   return useQuery<NodeInstanceResourceRow[]>({
     queryKey: ['runtime-node-instances', nodeId],
     enabled: () => Boolean(nodeId.value),
+    refetchInterval: RESOURCE_REFETCH_INTERVAL,
     queryFn: async () => {
       if (!nodeId.value) return []
       const response = await apiRequest<{ instances?: NodeInstanceResourceRow[] }>(
@@ -153,6 +159,7 @@ export function useRuntimeNodeInstanceResourcesQuery(
   return useQuery<InstanceResourceSample[]>({
     queryKey: ['runtime-node-instance-resources', nodeId, appId, range],
     enabled: () => Boolean(enabled.value && nodeId.value && appId.value),
+    refetchInterval: RESOURCE_REFETCH_INTERVAL,
     queryFn: async () => {
       if (!nodeId.value || !appId.value) return []
       const response = await apiRequest<{ samples?: InstanceResourceSample[] }>(

@@ -16,13 +16,30 @@
         preserveAspectRatio="none"
       >
         <line x1="0" y1="104" x2="320" y2="104" class="axis-line" />
-        <polyline class="trend-line" :points="polylinePoints" fill="none" />
+        <polyline v-if="primaryPoints.length > 1" class="trend-line" :points="primaryPolylinePoints" fill="none" />
+        <polyline v-if="secondaryPoints.length > 1" class="secondary-line" :points="secondaryPolylinePoints" fill="none" />
+        <circle
+          v-for="point in secondaryPoints"
+          :key="`secondary-${point.index}`"
+          class="secondary-marker"
+          :cx="point.x"
+          :cy="point.y"
+          r="3"
+        />
+        <circle
+          v-for="point in primaryPoints"
+          :key="`primary-${point.index}`"
+          class="trend-marker"
+          :cx="point.x"
+          :cy="point.y"
+          r="3.5"
+        />
       </svg>
     </div>
 
     <footer class="chart-labels" aria-live="polite">
       <span>{{ rangeLabel }}</span>
-      <span v-if="peakLabel">峰值 {{ peakLabel }}</span>
+      <span v-if="summaryLabel">{{ summaryLabel }}</span>
     </footer>
   </section>
 </template>
@@ -52,27 +69,67 @@ const chartPadding = {
   left: 12,
 }
 
-// numericSamples 过滤掉后端缺失指标的采样点，避免空值把趋势线错误拉到 0。
-const numericSamples = computed(() => props.samples.filter((sample) => isNumeric(sample.value)))
-const hasValues = computed(() => numericSamples.value.length > 0)
+interface ChartPoint {
+  index: number
+  x: string
+  y: string
+}
 
-const latestValue = computed(() => numericSamples.value.at(-1)?.value ?? null)
+interface NumericPoint {
+  index: number
+  sampled_at: string
+  value: number
+}
+
+// primarySamples / secondarySamples 过滤掉后端缺失指标的采样点，避免空值把趋势线错误拉到 0。
+const primarySamples = computed(() => numericSeries('value'))
+const secondarySamples = computed(() => numericSeries('secondary'))
+const scaleValues = computed(() => [...primarySamples.value, ...secondarySamples.value].map((sample) => sample.value))
+const hasValues = computed(() => scaleValues.value.length > 0)
+
+const latestValue = computed(() => primarySamples.value.at(-1)?.value ?? null)
 const latestLabel = computed(() => (isNumeric(latestValue.value) ? formatValue(latestValue.value, props.unit) : ''))
-const peakLabel = computed(() => {
-  if (!hasValues.value) return ''
-  const peak = Math.max(...numericSamples.value.map((sample) => sample.value as number))
+const primaryPeakLabel = computed(() => {
+  if (primarySamples.value.length === 0) return ''
+  const peak = Math.max(...primarySamples.value.map((sample) => sample.value))
   return formatValue(peak, props.unit)
+})
+const secondaryPeakLabel = computed(() => {
+  if (secondarySamples.value.length === 0) return ''
+  const peak = Math.max(...secondarySamples.value.map((sample) => sample.value))
+  return formatValue(peak, props.unit)
+})
+const summaryLabel = computed(() => {
+  if (!hasValues.value) return ''
+  const labels = []
+  if (primaryPeakLabel.value) labels.push(`峰值 ${primaryPeakLabel.value}`)
+  if (secondaryPeakLabel.value) labels.push(`次要 ${secondaryPeakLabel.value}`)
+  return labels.join(' · ')
 })
 const rangeLabel = computed(() => {
   if (!hasValues.value) return '无数据'
-  const first = numericSamples.value[0]
-  const last = numericSamples.value.at(-1) ?? first
+  const visibleSamples = [...primarySamples.value, ...secondarySamples.value].sort((a, b) => a.index - b.index)
+  const first = visibleSamples[0]
+  const last = visibleSamples.at(-1) ?? first
   return `${formatTime(first.sampled_at)} - ${formatTime(last.sampled_at)}`
 })
 
-const polylinePoints = computed(() => {
-  const values = numericSamples.value.map((sample) => sample.value as number)
-  if (values.length === 0) return ''
+const primaryPoints = computed(() => chartPoints(primarySamples.value))
+const secondaryPoints = computed(() => chartPoints(secondarySamples.value))
+const primaryPolylinePoints = computed(() => joinPoints(primaryPoints.value))
+const secondaryPolylinePoints = computed(() => joinPoints(secondaryPoints.value))
+
+function numericSeries(field: 'value' | 'secondary'): NumericPoint[] {
+  return props.samples.flatMap((sample, index) => {
+    const value = sample[field]
+    if (!isNumeric(value)) return []
+    return [{ index, sampled_at: sample.sampled_at, value }]
+  })
+}
+
+function chartPoints(series: NumericPoint[]): ChartPoint[] {
+  const values = scaleValues.value
+  if (values.length === 0) return []
 
   const min = Math.min(...values)
   const max = Math.max(...values)
@@ -80,14 +137,16 @@ const polylinePoints = computed(() => {
   const drawableWidth = chartWidth - chartPadding.left - chartPadding.right
   const drawableHeight = chartHeight - chartPadding.top - chartPadding.bottom
 
-  return values
-    .map((value, index) => {
-      const x = chartPadding.left + (values.length === 1 ? drawableWidth / 2 : (index / (values.length - 1)) * drawableWidth)
-      const y = chartPadding.top + ((max - value) / span) * drawableHeight
-      return `${roundPoint(x)},${roundPoint(y)}`
-    })
-    .join(' ')
-})
+  return series.map((sample) => {
+    const x = chartPadding.left + (props.samples.length === 1 ? drawableWidth / 2 : (sample.index / (props.samples.length - 1)) * drawableWidth)
+    const y = chartPadding.top + ((max - sample.value) / span) * drawableHeight
+    return { index: sample.index, x: roundPoint(x), y: roundPoint(y) }
+  })
+}
+
+function joinPoints(points: ChartPoint[]): string {
+  return points.map((point) => `${point.x},${point.y}`).join(' ')
+}
 
 function isNumeric(value: number | null | undefined): value is number {
   return typeof value === 'number' && Number.isFinite(value)
@@ -206,6 +265,22 @@ function formatTime(value: string): string {
   stroke-linecap: round;
   stroke-linejoin: round;
   stroke-width: 2.5;
+}
+
+.secondary-line {
+  stroke: var(--color-warning, #d97706);
+  stroke-dasharray: 5 4;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+  stroke-width: 2;
+}
+
+.trend-marker {
+  fill: var(--color-primary, #2563eb);
+}
+
+.secondary-marker {
+  fill: var(--color-warning, #d97706);
 }
 
 .chart-labels {
