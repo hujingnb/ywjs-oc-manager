@@ -253,7 +253,7 @@ func (q *Queries) InsertNodeResourceSample(ctx context.Context, arg InsertNodeRe
 
 const listInstanceResourceBuckets = `-- name: ListInstanceResourceBuckets :many
 SELECT
-    to_timestamp(floor(extract(epoch FROM sampled_at) / $4)::bigint * $4)::timestamptz AS sampled_at,
+    to_timestamp(floor(extract(epoch FROM sampled_at) / $4::integer)::bigint * $4::integer)::timestamptz AS sampled_at,
     (array_remove(array_agg(container_status ORDER BY sampled_at DESC), NULL))[1] AS container_status,
     avg(cpu_percent)::double precision AS cpu_percent,
     avg(memory_used_bytes)::bigint AS memory_used_bytes,
@@ -272,10 +272,10 @@ ORDER BY 1 ASC
 `
 
 type ListInstanceResourceBucketsParams struct {
-	AppID       pgtype.UUID        `db:"app_id" json:"app_id"`
-	SampledAt   pgtype.Timestamptz `db:"sampled_at" json:"sampled_at"`
-	SampledAt_2 pgtype.Timestamptz `db:"sampled_at_2" json:"sampled_at_2"`
-	SampledAt_3 pgtype.Timestamptz `db:"sampled_at_3" json:"sampled_at_3"`
+	AppID         pgtype.UUID        `db:"app_id" json:"app_id"`
+	SampledAt     pgtype.Timestamptz `db:"sampled_at" json:"sampled_at"`
+	SampledAt_2   pgtype.Timestamptz `db:"sampled_at_2" json:"sampled_at_2"`
+	BucketSeconds int32              `db:"bucket_seconds" json:"bucket_seconds"`
 }
 
 type ListInstanceResourceBucketsRow struct {
@@ -296,7 +296,7 @@ func (q *Queries) ListInstanceResourceBuckets(ctx context.Context, arg ListInsta
 		arg.AppID,
 		arg.SampledAt,
 		arg.SampledAt_2,
-		arg.SampledAt_3,
+		arg.BucketSeconds,
 	)
 	if err != nil {
 		return nil, err
@@ -522,7 +522,7 @@ func (q *Queries) ListNodeInstanceResourceSamples(ctx context.Context, arg ListN
 
 const listNodeResourceBuckets = `-- name: ListNodeResourceBuckets :many
 SELECT
-    to_timestamp(floor(extract(epoch FROM sampled_at) / $4)::bigint * $4)::timestamptz AS sampled_at,
+    to_timestamp(floor(extract(epoch FROM sampled_at) / $4::integer)::bigint * $4::integer)::timestamptz AS sampled_at,
     avg(cpu_percent)::double precision AS cpu_percent,
     avg(memory_used_bytes)::bigint AS memory_used_bytes,
     max(memory_total_bytes)::bigint AS memory_total_bytes,
@@ -544,7 +544,7 @@ type ListNodeResourceBucketsParams struct {
 	RuntimeNodeID pgtype.UUID        `db:"runtime_node_id" json:"runtime_node_id"`
 	SampledAt     pgtype.Timestamptz `db:"sampled_at" json:"sampled_at"`
 	SampledAt_2   pgtype.Timestamptz `db:"sampled_at_2" json:"sampled_at_2"`
-	SampledAt_3   pgtype.Timestamptz `db:"sampled_at_3" json:"sampled_at_3"`
+	BucketSeconds int32              `db:"bucket_seconds" json:"bucket_seconds"`
 }
 
 type ListNodeResourceBucketsRow struct {
@@ -565,7 +565,7 @@ func (q *Queries) ListNodeResourceBuckets(ctx context.Context, arg ListNodeResou
 		arg.RuntimeNodeID,
 		arg.SampledAt,
 		arg.SampledAt_2,
-		arg.SampledAt_3,
+		arg.BucketSeconds,
 	)
 	if err != nil {
 		return nil, err

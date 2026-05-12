@@ -51,7 +51,7 @@ ORDER BY sampled_at ASC, id ASC;
 
 -- name: ListNodeResourceBuckets :many
 SELECT
-    to_timestamp(floor(extract(epoch FROM sampled_at) / $4)::bigint * $4)::timestamptz AS sampled_at,
+    to_timestamp(floor(extract(epoch FROM sampled_at) / sqlc.arg(bucket_seconds)::integer)::bigint * sqlc.arg(bucket_seconds)::integer)::timestamptz AS sampled_at,
     avg(cpu_percent)::double precision AS cpu_percent,
     avg(memory_used_bytes)::bigint AS memory_used_bytes,
     max(memory_total_bytes)::bigint AS memory_total_bytes,
@@ -100,7 +100,7 @@ ORDER BY sampled_at ASC, id ASC;
 
 -- name: ListInstanceResourceBuckets :many
 SELECT
-    to_timestamp(floor(extract(epoch FROM sampled_at) / $4)::bigint * $4)::timestamptz AS sampled_at,
+    to_timestamp(floor(extract(epoch FROM sampled_at) / sqlc.arg(bucket_seconds)::integer)::bigint * sqlc.arg(bucket_seconds)::integer)::timestamptz AS sampled_at,
     (array_remove(array_agg(container_status ORDER BY sampled_at DESC), NULL))[1] AS container_status,
     avg(cpu_percent)::double precision AS cpu_percent,
     avg(memory_used_bytes)::bigint AS memory_used_bytes,
