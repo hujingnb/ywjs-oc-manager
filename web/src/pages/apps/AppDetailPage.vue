@@ -5,10 +5,7 @@
         <div style="display: flex; align-items: center; justify-content: space-between">
           <div>
             <p class="eyebrow">App · Detail</p>
-            <h2 style="margin: 0">
-              {{ app?.name ?? '应用详情' }}
-              <small v-if="app" style="color: #8A94C6; font-size: 14px; font-weight: 400; margin-left: 8px">{{ app.id }}</small>
-            </h2>
+            <h2 style="margin: 0">{{ app?.name ?? '应用详情' }}</h2>
           </div>
           <AppStatusTag v-if="app" :status="app.status" />
         </div>
