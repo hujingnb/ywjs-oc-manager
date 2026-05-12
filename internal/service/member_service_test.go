@@ -309,14 +309,15 @@ func TestDeleteMember_NoAppStillSoftDeletesUser(t *testing.T) {
 func TestDeleteMember_RejectsSelfDeletion(t *testing.T) {
 	stub := newMemberStoreStub(t)
 	target := sqlc.User{
-		ID:     mustUUID(t, "00000000-0000-0000-0000-000000000001"), // 与 platformAdmin 同 ID
+		ID:     mustUUID(t, testAdminUID), // 场景：组织管理员删除自己的账号应被拒绝。
 		OrgID:  stub.orgs[testOrgID].ID,
 		Status: domain.StatusActive,
+		Role:   domain.UserRoleOrgAdmin,
 	}
 	stub.users[uuidToString(target.ID)] = target
 	svc := NewMemberService(stub, fakeHash)
-	err := svc.DeleteMember(context.Background(), platformAdmin(), uuidToString(target.ID), nil)
-	require.Error(t, err)
+	err := svc.DeleteMember(context.Background(), orgAdminPrincipal(), uuidToString(target.ID), nil)
+	require.ErrorIs(t, err, ErrMemberCreateInvalid)
 }
 
 // TestDeleteMember_OrgMemberCannotDeleteOthers 验证删除成员组织成员Cannot删除其他s的预期行为场景。

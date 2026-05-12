@@ -133,6 +133,8 @@ const orgEyebrow = computed(() => auth.user?.role === 'platform_admin' ? 'Platfo
 const canOnboardMember = computed(() => auth.user?.role === 'org_admin' && Boolean(effectiveOrgId.value))
 // 成员写操作只允许本组织管理员；平台管理员在本页仅查看成员信息。
 const canManageMembers = computed(() => auth.user?.role === 'org_admin' && auth.user?.org_id === effectiveOrgId.value)
+// 当前登录用户不能删除自身；后端同样会兜底拒绝，前端隐藏危险入口减少误操作。
+const currentUserId = computed(() => auth.user?.id)
 
 const { data: members, isLoading } = useMembersQuery(effectiveOrgId)
 const createMutation = useCreateMember(effectiveOrgId)
@@ -177,7 +179,7 @@ const columns = [
     { label: '禁用', onClick: r => onToggle(r, 'disable'), hidden: r => !canManageMembers.value || r.status !== 'active' },
     { label: '启用', type: 'primary', onClick: r => onToggle(r, 'enable'), hidden: r => !canManageMembers.value || r.status === 'active' },
     { label: '重置密码', hidden: () => !canManageMembers.value, onClick: r => openResetForm(r) },
-    { label: '删除', type: 'error', hidden: () => !canManageMembers.value, onClick: r => { memberToDelete.value = r } },
+    { label: '删除', type: 'error', hidden: r => !canManageMembers.value || r.id === currentUserId.value, onClick: r => { memberToDelete.value = r } },
   ]),
 ]
 
