@@ -12,8 +12,8 @@
 
 镜像发布标签与 git tag 严格对应：`vX.Y.Z` git tag → `:X.Y.Z` 镜像发布标签。
 `:X.Y.Z` SemVer tag 仅作为 CI / release notes 识别发布版本的标签；生产发布
-必须在 `.env` 中固定到内容寻址的 `@sha256:` digest。不要使用 `:1.x`
-或 `:X.Y.Z` tag 作为生产 `.env` 值，否则重启、扩容和回滚时可能拉到不同镜像内容。
+必须在 `.env` 中固定到内容寻址的 `@sha256:` digest。不要使用分支、环境或
+版本族 tag 作为生产 `.env` 值，否则重启、扩容和回滚时可能拉到不同镜像内容。
 
 ## 升级前检查
 
@@ -111,14 +111,14 @@ docker compose up -d oc-runtime-agent
 
 ## 镜像标签管理
 
-- `:dev` → 开发环境最新 main
-- `:stage` → staging 环境，每周构建
-- `:1.0.0` `:1.1.0` ... → release notes / CI 识别发布版本的 SemVer 标签
-- `:1.x` → 可选发布 family 标签，仅供测试或人工拉取，不用于生产 `.env`
+CI / release 流程可以发布 SemVer tag label，方便人工检索镜像、关联
+release notes 和审计发版记录。
 
-每次发版可以用 `:1.x.y` 这类完整版本 tag 标识发布版本；生产 `.env` 中的
-镜像引用必须解析并固定为 `@sha256:` digest，确保重启、扩容和回滚时拉取到
-同一个镜像内容。
+部署前必须先把这些发布标签解析为内容固定的 `@sha256:` digest，并将生产
+`.env` 中的镜像引用固定到 digest 后再执行 rollout，确保重启、扩容和回滚
+时拉取到同一个镜像内容。
+
+生产部署文件不得使用会随分支、环境或版本族移动的镜像 tag。
 
 ## 常见问题
 
