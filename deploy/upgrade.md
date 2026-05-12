@@ -79,6 +79,18 @@ docker compose up -d manager-api manager-web manager-nginx
 如果新 MINOR 的迁移 add 了字段且新代码强依赖，需要按 release notes 明确指引处理
 schema；不要在未确认数据兼容性的情况下直接执行破坏性回滚。
 
+```sh
+# rollback runtime-agent, on each node
+cd deploy/runtime-agent
+${EDITOR:-vi} .env
+docker compose pull oc-runtime-agent
+docker compose up -d oc-runtime-agent
+```
+
+在每台 Runtime Node 回滚前，把 `.env` 中 `OC_RUNTIME_AGENT_IMAGE` 改回上一版本
+tag 或 digest，生产环境优先使用升级前记录的 `@sha256:` digest，避免回滚时拉到
+被覆盖的可变 tag。
+
 ### 数据回滚
 
 只在确认升级后没有写入新结构数据时才能纯靠 rollback migration 恢复。
