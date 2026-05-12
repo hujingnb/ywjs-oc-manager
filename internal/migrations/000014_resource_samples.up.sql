@@ -36,6 +36,9 @@ CREATE TABLE instance_resource_samples (
 CREATE INDEX node_resource_samples_node_time_idx
     ON node_resource_samples (runtime_node_id, sampled_at DESC);
 
+CREATE INDEX node_resource_samples_sampled_at_idx
+    ON node_resource_samples (sampled_at);
+
 CREATE INDEX instance_resource_samples_app_time_idx
     ON instance_resource_samples (app_id, sampled_at DESC);
 
@@ -44,6 +47,9 @@ CREATE INDEX instance_resource_samples_node_time_idx
 
 CREATE INDEX instance_resource_samples_node_app_time_idx
     ON instance_resource_samples (runtime_node_id, app_id, sampled_at DESC);
+
+CREATE INDEX instance_resource_samples_sampled_at_idx
+    ON instance_resource_samples (sampled_at);
 
 COMMENT ON TABLE node_resource_samples IS '运行节点资源原始采样，保留 30 天供趋势图查询。';
 COMMENT ON TABLE instance_resource_samples IS '实例容器资源原始采样，保留 30 天供节点抽屉和实例运行页查询。';

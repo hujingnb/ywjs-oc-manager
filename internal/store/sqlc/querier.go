@@ -75,7 +75,8 @@ type Querier interface {
 	// 列出某组织在所有节点上的最近同步状态。
 	ListKnowledgeSyncStatusByOrg(ctx context.Context, orgID pgtype.UUID) ([]KnowledgeSyncStatus, error)
 	ListLatestInstanceResourceSamplesByNode(ctx context.Context, runtimeNodeID pgtype.UUID) ([]InstanceResourceSample, error)
-	ListLatestNodeResourceSamples(ctx context.Context, dollar_1 []pgtype.UUID) ([]NodeResourceSample, error)
+	ListLatestNodeResourceSamples(ctx context.Context, runtimeNodeIds []pgtype.UUID) ([]NodeResourceSample, error)
+	ListNodeInstanceResourceBuckets(ctx context.Context, arg ListNodeInstanceResourceBucketsParams) ([]ListNodeInstanceResourceBucketsRow, error)
 	ListNodeInstanceResourceSamples(ctx context.Context, arg ListNodeInstanceResourceSamplesParams) ([]InstanceResourceSample, error)
 	ListNodeResourceBuckets(ctx context.Context, arg ListNodeResourceBucketsParams) ([]ListNodeResourceBucketsRow, error)
 	ListNodeResourceSamples(ctx context.Context, arg ListNodeResourceSamplesParams) ([]NodeResourceSample, error)

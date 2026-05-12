@@ -38,7 +38,7 @@ LIMIT 1;
 -- name: ListLatestNodeResourceSamples :many
 SELECT DISTINCT ON (runtime_node_id) *
 FROM node_resource_samples
-WHERE runtime_node_id = ANY($1::uuid[])
+WHERE runtime_node_id = ANY(sqlc.arg(runtime_node_ids)::uuid[])
 ORDER BY runtime_node_id, sampled_at DESC, id DESC;
 
 -- name: ListNodeResourceSamples :many
@@ -52,15 +52,24 @@ ORDER BY sampled_at ASC, id ASC;
 -- name: ListNodeResourceBuckets :many
 SELECT
     to_timestamp(floor(extract(epoch FROM sampled_at) / sqlc.arg(bucket_seconds)::integer)::bigint * sqlc.arg(bucket_seconds)::integer)::timestamptz AS sampled_at,
-    avg(cpu_percent)::double precision AS cpu_percent,
-    avg(memory_used_bytes)::bigint AS memory_used_bytes,
-    max(memory_total_bytes)::bigint AS memory_total_bytes,
-    avg(disk_used_bytes)::bigint AS disk_used_bytes,
-    max(disk_total_bytes)::bigint AS disk_total_bytes,
-    min(network_rx_bytes)::bigint AS network_rx_bytes,
-    min(network_tx_bytes)::bigint AS network_tx_bytes,
-    avg(instance_count)::integer AS instance_count,
-    (array_remove(array_agg(last_error ORDER BY sampled_at DESC), NULL))[1] AS last_error
+    COALESCE(avg(cpu_percent)::double precision, 0::double precision)::double precision AS cpu_percent,
+    count(cpu_percent) > 0 AS has_cpu_percent,
+    COALESCE(avg(memory_used_bytes)::bigint, 0::bigint)::bigint AS memory_used_bytes,
+    count(memory_used_bytes) > 0 AS has_memory_used_bytes,
+    COALESCE(max(memory_total_bytes)::bigint, 0::bigint)::bigint AS memory_total_bytes,
+    count(memory_total_bytes) > 0 AS has_memory_total_bytes,
+    COALESCE(avg(disk_used_bytes)::bigint, 0::bigint)::bigint AS disk_used_bytes,
+    count(disk_used_bytes) > 0 AS has_disk_used_bytes,
+    COALESCE(max(disk_total_bytes)::bigint, 0::bigint)::bigint AS disk_total_bytes,
+    count(disk_total_bytes) > 0 AS has_disk_total_bytes,
+    COALESCE(min(network_rx_bytes)::bigint, 0::bigint)::bigint AS network_rx_bytes,
+    count(network_rx_bytes) > 0 AS has_network_rx_bytes,
+    COALESCE(min(network_tx_bytes)::bigint, 0::bigint)::bigint AS network_tx_bytes,
+    count(network_tx_bytes) > 0 AS has_network_tx_bytes,
+    COALESCE(avg(instance_count)::integer, 0::integer)::integer AS instance_count,
+    count(instance_count) > 0 AS has_instance_count,
+    COALESCE(((array_remove(array_agg(last_error ORDER BY sampled_at DESC), NULL))[1])::text, ''::text)::text AS last_error,
+    count(last_error) > 0 AS has_last_error
 FROM node_resource_samples
 WHERE runtime_node_id = $1
   AND sampled_at >= $2
@@ -101,19 +110,57 @@ ORDER BY sampled_at ASC, id ASC;
 -- name: ListInstanceResourceBuckets :many
 SELECT
     to_timestamp(floor(extract(epoch FROM sampled_at) / sqlc.arg(bucket_seconds)::integer)::bigint * sqlc.arg(bucket_seconds)::integer)::timestamptz AS sampled_at,
-    (array_remove(array_agg(container_status ORDER BY sampled_at DESC), NULL))[1] AS container_status,
-    avg(cpu_percent)::double precision AS cpu_percent,
-    avg(memory_used_bytes)::bigint AS memory_used_bytes,
-    max(memory_limit_bytes)::bigint AS memory_limit_bytes,
-    min(disk_read_bytes)::bigint AS disk_read_bytes,
-    min(disk_write_bytes)::bigint AS disk_write_bytes,
-    min(network_rx_bytes)::bigint AS network_rx_bytes,
-    min(network_tx_bytes)::bigint AS network_tx_bytes,
-    (array_remove(array_agg(last_error ORDER BY sampled_at DESC), NULL))[1] AS last_error
+    COALESCE(((array_remove(array_agg(container_status ORDER BY sampled_at DESC), NULL))[1])::text, ''::text)::text AS container_status,
+    count(container_status) > 0 AS has_container_status,
+    COALESCE(avg(cpu_percent)::double precision, 0::double precision)::double precision AS cpu_percent,
+    count(cpu_percent) > 0 AS has_cpu_percent,
+    COALESCE(avg(memory_used_bytes)::bigint, 0::bigint)::bigint AS memory_used_bytes,
+    count(memory_used_bytes) > 0 AS has_memory_used_bytes,
+    COALESCE(max(memory_limit_bytes)::bigint, 0::bigint)::bigint AS memory_limit_bytes,
+    count(memory_limit_bytes) > 0 AS has_memory_limit_bytes,
+    COALESCE(min(disk_read_bytes)::bigint, 0::bigint)::bigint AS disk_read_bytes,
+    count(disk_read_bytes) > 0 AS has_disk_read_bytes,
+    COALESCE(min(disk_write_bytes)::bigint, 0::bigint)::bigint AS disk_write_bytes,
+    count(disk_write_bytes) > 0 AS has_disk_write_bytes,
+    COALESCE(min(network_rx_bytes)::bigint, 0::bigint)::bigint AS network_rx_bytes,
+    count(network_rx_bytes) > 0 AS has_network_rx_bytes,
+    COALESCE(min(network_tx_bytes)::bigint, 0::bigint)::bigint AS network_tx_bytes,
+    count(network_tx_bytes) > 0 AS has_network_tx_bytes,
+    COALESCE(((array_remove(array_agg(last_error ORDER BY sampled_at DESC), NULL))[1])::text, ''::text)::text AS last_error,
+    count(last_error) > 0 AS has_last_error
 FROM instance_resource_samples
 WHERE app_id = $1
   AND sampled_at >= $2
   AND sampled_at <= $3
+GROUP BY 1
+ORDER BY 1 ASC;
+
+-- name: ListNodeInstanceResourceBuckets :many
+SELECT
+    to_timestamp(floor(extract(epoch FROM sampled_at) / sqlc.arg(bucket_seconds)::integer)::bigint * sqlc.arg(bucket_seconds)::integer)::timestamptz AS sampled_at,
+    COALESCE(((array_remove(array_agg(container_status ORDER BY sampled_at DESC), NULL))[1])::text, ''::text)::text AS container_status,
+    count(container_status) > 0 AS has_container_status,
+    COALESCE(avg(cpu_percent)::double precision, 0::double precision)::double precision AS cpu_percent,
+    count(cpu_percent) > 0 AS has_cpu_percent,
+    COALESCE(avg(memory_used_bytes)::bigint, 0::bigint)::bigint AS memory_used_bytes,
+    count(memory_used_bytes) > 0 AS has_memory_used_bytes,
+    COALESCE(max(memory_limit_bytes)::bigint, 0::bigint)::bigint AS memory_limit_bytes,
+    count(memory_limit_bytes) > 0 AS has_memory_limit_bytes,
+    COALESCE(min(disk_read_bytes)::bigint, 0::bigint)::bigint AS disk_read_bytes,
+    count(disk_read_bytes) > 0 AS has_disk_read_bytes,
+    COALESCE(min(disk_write_bytes)::bigint, 0::bigint)::bigint AS disk_write_bytes,
+    count(disk_write_bytes) > 0 AS has_disk_write_bytes,
+    COALESCE(min(network_rx_bytes)::bigint, 0::bigint)::bigint AS network_rx_bytes,
+    count(network_rx_bytes) > 0 AS has_network_rx_bytes,
+    COALESCE(min(network_tx_bytes)::bigint, 0::bigint)::bigint AS network_tx_bytes,
+    count(network_tx_bytes) > 0 AS has_network_tx_bytes,
+    COALESCE(((array_remove(array_agg(last_error ORDER BY sampled_at DESC), NULL))[1])::text, ''::text)::text AS last_error,
+    count(last_error) > 0 AS has_last_error
+FROM instance_resource_samples
+WHERE runtime_node_id = $1
+  AND app_id = $2
+  AND sampled_at >= $3
+  AND sampled_at <= $4
 GROUP BY 1
 ORDER BY 1 ASC;
 

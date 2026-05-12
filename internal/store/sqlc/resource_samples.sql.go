@@ -254,15 +254,24 @@ func (q *Queries) InsertNodeResourceSample(ctx context.Context, arg InsertNodeRe
 const listInstanceResourceBuckets = `-- name: ListInstanceResourceBuckets :many
 SELECT
     to_timestamp(floor(extract(epoch FROM sampled_at) / $4::integer)::bigint * $4::integer)::timestamptz AS sampled_at,
-    (array_remove(array_agg(container_status ORDER BY sampled_at DESC), NULL))[1] AS container_status,
-    avg(cpu_percent)::double precision AS cpu_percent,
-    avg(memory_used_bytes)::bigint AS memory_used_bytes,
-    max(memory_limit_bytes)::bigint AS memory_limit_bytes,
-    min(disk_read_bytes)::bigint AS disk_read_bytes,
-    min(disk_write_bytes)::bigint AS disk_write_bytes,
-    min(network_rx_bytes)::bigint AS network_rx_bytes,
-    min(network_tx_bytes)::bigint AS network_tx_bytes,
-    (array_remove(array_agg(last_error ORDER BY sampled_at DESC), NULL))[1] AS last_error
+    COALESCE(((array_remove(array_agg(container_status ORDER BY sampled_at DESC), NULL))[1])::text, ''::text)::text AS container_status,
+    count(container_status) > 0 AS has_container_status,
+    COALESCE(avg(cpu_percent)::double precision, 0::double precision)::double precision AS cpu_percent,
+    count(cpu_percent) > 0 AS has_cpu_percent,
+    COALESCE(avg(memory_used_bytes)::bigint, 0::bigint)::bigint AS memory_used_bytes,
+    count(memory_used_bytes) > 0 AS has_memory_used_bytes,
+    COALESCE(max(memory_limit_bytes)::bigint, 0::bigint)::bigint AS memory_limit_bytes,
+    count(memory_limit_bytes) > 0 AS has_memory_limit_bytes,
+    COALESCE(min(disk_read_bytes)::bigint, 0::bigint)::bigint AS disk_read_bytes,
+    count(disk_read_bytes) > 0 AS has_disk_read_bytes,
+    COALESCE(min(disk_write_bytes)::bigint, 0::bigint)::bigint AS disk_write_bytes,
+    count(disk_write_bytes) > 0 AS has_disk_write_bytes,
+    COALESCE(min(network_rx_bytes)::bigint, 0::bigint)::bigint AS network_rx_bytes,
+    count(network_rx_bytes) > 0 AS has_network_rx_bytes,
+    COALESCE(min(network_tx_bytes)::bigint, 0::bigint)::bigint AS network_tx_bytes,
+    count(network_tx_bytes) > 0 AS has_network_tx_bytes,
+    COALESCE(((array_remove(array_agg(last_error ORDER BY sampled_at DESC), NULL))[1])::text, ''::text)::text AS last_error,
+    count(last_error) > 0 AS has_last_error
 FROM instance_resource_samples
 WHERE app_id = $1
   AND sampled_at >= $2
@@ -279,16 +288,25 @@ type ListInstanceResourceBucketsParams struct {
 }
 
 type ListInstanceResourceBucketsRow struct {
-	SampledAt        pgtype.Timestamptz `db:"sampled_at" json:"sampled_at"`
-	ContainerStatus  interface{}        `db:"container_status" json:"container_status"`
-	CpuPercent       float64            `db:"cpu_percent" json:"cpu_percent"`
-	MemoryUsedBytes  int64              `db:"memory_used_bytes" json:"memory_used_bytes"`
-	MemoryLimitBytes int64              `db:"memory_limit_bytes" json:"memory_limit_bytes"`
-	DiskReadBytes    int64              `db:"disk_read_bytes" json:"disk_read_bytes"`
-	DiskWriteBytes   int64              `db:"disk_write_bytes" json:"disk_write_bytes"`
-	NetworkRxBytes   int64              `db:"network_rx_bytes" json:"network_rx_bytes"`
-	NetworkTxBytes   int64              `db:"network_tx_bytes" json:"network_tx_bytes"`
-	LastError        interface{}        `db:"last_error" json:"last_error"`
+	SampledAt           pgtype.Timestamptz `db:"sampled_at" json:"sampled_at"`
+	ContainerStatus     string             `db:"container_status" json:"container_status"`
+	HasContainerStatus  bool               `db:"has_container_status" json:"has_container_status"`
+	CpuPercent          float64            `db:"cpu_percent" json:"cpu_percent"`
+	HasCpuPercent       bool               `db:"has_cpu_percent" json:"has_cpu_percent"`
+	MemoryUsedBytes     int64              `db:"memory_used_bytes" json:"memory_used_bytes"`
+	HasMemoryUsedBytes  bool               `db:"has_memory_used_bytes" json:"has_memory_used_bytes"`
+	MemoryLimitBytes    int64              `db:"memory_limit_bytes" json:"memory_limit_bytes"`
+	HasMemoryLimitBytes bool               `db:"has_memory_limit_bytes" json:"has_memory_limit_bytes"`
+	DiskReadBytes       int64              `db:"disk_read_bytes" json:"disk_read_bytes"`
+	HasDiskReadBytes    bool               `db:"has_disk_read_bytes" json:"has_disk_read_bytes"`
+	DiskWriteBytes      int64              `db:"disk_write_bytes" json:"disk_write_bytes"`
+	HasDiskWriteBytes   bool               `db:"has_disk_write_bytes" json:"has_disk_write_bytes"`
+	NetworkRxBytes      int64              `db:"network_rx_bytes" json:"network_rx_bytes"`
+	HasNetworkRxBytes   bool               `db:"has_network_rx_bytes" json:"has_network_rx_bytes"`
+	NetworkTxBytes      int64              `db:"network_tx_bytes" json:"network_tx_bytes"`
+	HasNetworkTxBytes   bool               `db:"has_network_tx_bytes" json:"has_network_tx_bytes"`
+	LastError           string             `db:"last_error" json:"last_error"`
+	HasLastError        bool               `db:"has_last_error" json:"has_last_error"`
 }
 
 func (q *Queries) ListInstanceResourceBuckets(ctx context.Context, arg ListInstanceResourceBucketsParams) ([]ListInstanceResourceBucketsRow, error) {
@@ -308,14 +326,23 @@ func (q *Queries) ListInstanceResourceBuckets(ctx context.Context, arg ListInsta
 		if err := rows.Scan(
 			&i.SampledAt,
 			&i.ContainerStatus,
+			&i.HasContainerStatus,
 			&i.CpuPercent,
+			&i.HasCpuPercent,
 			&i.MemoryUsedBytes,
+			&i.HasMemoryUsedBytes,
 			&i.MemoryLimitBytes,
+			&i.HasMemoryLimitBytes,
 			&i.DiskReadBytes,
+			&i.HasDiskReadBytes,
 			&i.DiskWriteBytes,
+			&i.HasDiskWriteBytes,
 			&i.NetworkRxBytes,
+			&i.HasNetworkRxBytes,
 			&i.NetworkTxBytes,
+			&i.HasNetworkTxBytes,
 			&i.LastError,
+			&i.HasLastError,
 		); err != nil {
 			return nil, err
 		}
@@ -428,8 +455,8 @@ WHERE runtime_node_id = ANY($1::uuid[])
 ORDER BY runtime_node_id, sampled_at DESC, id DESC
 `
 
-func (q *Queries) ListLatestNodeResourceSamples(ctx context.Context, dollar_1 []pgtype.UUID) ([]NodeResourceSample, error) {
-	rows, err := q.db.Query(ctx, listLatestNodeResourceSamples, dollar_1)
+func (q *Queries) ListLatestNodeResourceSamples(ctx context.Context, runtimeNodeIds []pgtype.UUID) ([]NodeResourceSample, error) {
+	rows, err := q.db.Query(ctx, listLatestNodeResourceSamples, runtimeNodeIds)
 	if err != nil {
 		return nil, err
 	}
@@ -451,6 +478,112 @@ func (q *Queries) ListLatestNodeResourceSamples(ctx context.Context, dollar_1 []
 			&i.InstanceCount,
 			&i.LastError,
 			&i.CreatedAt,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
+const listNodeInstanceResourceBuckets = `-- name: ListNodeInstanceResourceBuckets :many
+SELECT
+    to_timestamp(floor(extract(epoch FROM sampled_at) / $5::integer)::bigint * $5::integer)::timestamptz AS sampled_at,
+    COALESCE(((array_remove(array_agg(container_status ORDER BY sampled_at DESC), NULL))[1])::text, ''::text)::text AS container_status,
+    count(container_status) > 0 AS has_container_status,
+    COALESCE(avg(cpu_percent)::double precision, 0::double precision)::double precision AS cpu_percent,
+    count(cpu_percent) > 0 AS has_cpu_percent,
+    COALESCE(avg(memory_used_bytes)::bigint, 0::bigint)::bigint AS memory_used_bytes,
+    count(memory_used_bytes) > 0 AS has_memory_used_bytes,
+    COALESCE(max(memory_limit_bytes)::bigint, 0::bigint)::bigint AS memory_limit_bytes,
+    count(memory_limit_bytes) > 0 AS has_memory_limit_bytes,
+    COALESCE(min(disk_read_bytes)::bigint, 0::bigint)::bigint AS disk_read_bytes,
+    count(disk_read_bytes) > 0 AS has_disk_read_bytes,
+    COALESCE(min(disk_write_bytes)::bigint, 0::bigint)::bigint AS disk_write_bytes,
+    count(disk_write_bytes) > 0 AS has_disk_write_bytes,
+    COALESCE(min(network_rx_bytes)::bigint, 0::bigint)::bigint AS network_rx_bytes,
+    count(network_rx_bytes) > 0 AS has_network_rx_bytes,
+    COALESCE(min(network_tx_bytes)::bigint, 0::bigint)::bigint AS network_tx_bytes,
+    count(network_tx_bytes) > 0 AS has_network_tx_bytes,
+    COALESCE(((array_remove(array_agg(last_error ORDER BY sampled_at DESC), NULL))[1])::text, ''::text)::text AS last_error,
+    count(last_error) > 0 AS has_last_error
+FROM instance_resource_samples
+WHERE runtime_node_id = $1
+  AND app_id = $2
+  AND sampled_at >= $3
+  AND sampled_at <= $4
+GROUP BY 1
+ORDER BY 1 ASC
+`
+
+type ListNodeInstanceResourceBucketsParams struct {
+	RuntimeNodeID pgtype.UUID        `db:"runtime_node_id" json:"runtime_node_id"`
+	AppID         pgtype.UUID        `db:"app_id" json:"app_id"`
+	SampledAt     pgtype.Timestamptz `db:"sampled_at" json:"sampled_at"`
+	SampledAt_2   pgtype.Timestamptz `db:"sampled_at_2" json:"sampled_at_2"`
+	BucketSeconds int32              `db:"bucket_seconds" json:"bucket_seconds"`
+}
+
+type ListNodeInstanceResourceBucketsRow struct {
+	SampledAt           pgtype.Timestamptz `db:"sampled_at" json:"sampled_at"`
+	ContainerStatus     string             `db:"container_status" json:"container_status"`
+	HasContainerStatus  bool               `db:"has_container_status" json:"has_container_status"`
+	CpuPercent          float64            `db:"cpu_percent" json:"cpu_percent"`
+	HasCpuPercent       bool               `db:"has_cpu_percent" json:"has_cpu_percent"`
+	MemoryUsedBytes     int64              `db:"memory_used_bytes" json:"memory_used_bytes"`
+	HasMemoryUsedBytes  bool               `db:"has_memory_used_bytes" json:"has_memory_used_bytes"`
+	MemoryLimitBytes    int64              `db:"memory_limit_bytes" json:"memory_limit_bytes"`
+	HasMemoryLimitBytes bool               `db:"has_memory_limit_bytes" json:"has_memory_limit_bytes"`
+	DiskReadBytes       int64              `db:"disk_read_bytes" json:"disk_read_bytes"`
+	HasDiskReadBytes    bool               `db:"has_disk_read_bytes" json:"has_disk_read_bytes"`
+	DiskWriteBytes      int64              `db:"disk_write_bytes" json:"disk_write_bytes"`
+	HasDiskWriteBytes   bool               `db:"has_disk_write_bytes" json:"has_disk_write_bytes"`
+	NetworkRxBytes      int64              `db:"network_rx_bytes" json:"network_rx_bytes"`
+	HasNetworkRxBytes   bool               `db:"has_network_rx_bytes" json:"has_network_rx_bytes"`
+	NetworkTxBytes      int64              `db:"network_tx_bytes" json:"network_tx_bytes"`
+	HasNetworkTxBytes   bool               `db:"has_network_tx_bytes" json:"has_network_tx_bytes"`
+	LastError           string             `db:"last_error" json:"last_error"`
+	HasLastError        bool               `db:"has_last_error" json:"has_last_error"`
+}
+
+func (q *Queries) ListNodeInstanceResourceBuckets(ctx context.Context, arg ListNodeInstanceResourceBucketsParams) ([]ListNodeInstanceResourceBucketsRow, error) {
+	rows, err := q.db.Query(ctx, listNodeInstanceResourceBuckets,
+		arg.RuntimeNodeID,
+		arg.AppID,
+		arg.SampledAt,
+		arg.SampledAt_2,
+		arg.BucketSeconds,
+	)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []ListNodeInstanceResourceBucketsRow{}
+	for rows.Next() {
+		var i ListNodeInstanceResourceBucketsRow
+		if err := rows.Scan(
+			&i.SampledAt,
+			&i.ContainerStatus,
+			&i.HasContainerStatus,
+			&i.CpuPercent,
+			&i.HasCpuPercent,
+			&i.MemoryUsedBytes,
+			&i.HasMemoryUsedBytes,
+			&i.MemoryLimitBytes,
+			&i.HasMemoryLimitBytes,
+			&i.DiskReadBytes,
+			&i.HasDiskReadBytes,
+			&i.DiskWriteBytes,
+			&i.HasDiskWriteBytes,
+			&i.NetworkRxBytes,
+			&i.HasNetworkRxBytes,
+			&i.NetworkTxBytes,
+			&i.HasNetworkTxBytes,
+			&i.LastError,
+			&i.HasLastError,
 		); err != nil {
 			return nil, err
 		}
@@ -523,15 +656,24 @@ func (q *Queries) ListNodeInstanceResourceSamples(ctx context.Context, arg ListN
 const listNodeResourceBuckets = `-- name: ListNodeResourceBuckets :many
 SELECT
     to_timestamp(floor(extract(epoch FROM sampled_at) / $4::integer)::bigint * $4::integer)::timestamptz AS sampled_at,
-    avg(cpu_percent)::double precision AS cpu_percent,
-    avg(memory_used_bytes)::bigint AS memory_used_bytes,
-    max(memory_total_bytes)::bigint AS memory_total_bytes,
-    avg(disk_used_bytes)::bigint AS disk_used_bytes,
-    max(disk_total_bytes)::bigint AS disk_total_bytes,
-    min(network_rx_bytes)::bigint AS network_rx_bytes,
-    min(network_tx_bytes)::bigint AS network_tx_bytes,
-    avg(instance_count)::integer AS instance_count,
-    (array_remove(array_agg(last_error ORDER BY sampled_at DESC), NULL))[1] AS last_error
+    COALESCE(avg(cpu_percent)::double precision, 0::double precision)::double precision AS cpu_percent,
+    count(cpu_percent) > 0 AS has_cpu_percent,
+    COALESCE(avg(memory_used_bytes)::bigint, 0::bigint)::bigint AS memory_used_bytes,
+    count(memory_used_bytes) > 0 AS has_memory_used_bytes,
+    COALESCE(max(memory_total_bytes)::bigint, 0::bigint)::bigint AS memory_total_bytes,
+    count(memory_total_bytes) > 0 AS has_memory_total_bytes,
+    COALESCE(avg(disk_used_bytes)::bigint, 0::bigint)::bigint AS disk_used_bytes,
+    count(disk_used_bytes) > 0 AS has_disk_used_bytes,
+    COALESCE(max(disk_total_bytes)::bigint, 0::bigint)::bigint AS disk_total_bytes,
+    count(disk_total_bytes) > 0 AS has_disk_total_bytes,
+    COALESCE(min(network_rx_bytes)::bigint, 0::bigint)::bigint AS network_rx_bytes,
+    count(network_rx_bytes) > 0 AS has_network_rx_bytes,
+    COALESCE(min(network_tx_bytes)::bigint, 0::bigint)::bigint AS network_tx_bytes,
+    count(network_tx_bytes) > 0 AS has_network_tx_bytes,
+    COALESCE(avg(instance_count)::integer, 0::integer)::integer AS instance_count,
+    count(instance_count) > 0 AS has_instance_count,
+    COALESCE(((array_remove(array_agg(last_error ORDER BY sampled_at DESC), NULL))[1])::text, ''::text)::text AS last_error,
+    count(last_error) > 0 AS has_last_error
 FROM node_resource_samples
 WHERE runtime_node_id = $1
   AND sampled_at >= $2
@@ -548,16 +690,25 @@ type ListNodeResourceBucketsParams struct {
 }
 
 type ListNodeResourceBucketsRow struct {
-	SampledAt        pgtype.Timestamptz `db:"sampled_at" json:"sampled_at"`
-	CpuPercent       float64            `db:"cpu_percent" json:"cpu_percent"`
-	MemoryUsedBytes  int64              `db:"memory_used_bytes" json:"memory_used_bytes"`
-	MemoryTotalBytes int64              `db:"memory_total_bytes" json:"memory_total_bytes"`
-	DiskUsedBytes    int64              `db:"disk_used_bytes" json:"disk_used_bytes"`
-	DiskTotalBytes   int64              `db:"disk_total_bytes" json:"disk_total_bytes"`
-	NetworkRxBytes   int64              `db:"network_rx_bytes" json:"network_rx_bytes"`
-	NetworkTxBytes   int64              `db:"network_tx_bytes" json:"network_tx_bytes"`
-	InstanceCount    int32              `db:"instance_count" json:"instance_count"`
-	LastError        interface{}        `db:"last_error" json:"last_error"`
+	SampledAt           pgtype.Timestamptz `db:"sampled_at" json:"sampled_at"`
+	CpuPercent          float64            `db:"cpu_percent" json:"cpu_percent"`
+	HasCpuPercent       bool               `db:"has_cpu_percent" json:"has_cpu_percent"`
+	MemoryUsedBytes     int64              `db:"memory_used_bytes" json:"memory_used_bytes"`
+	HasMemoryUsedBytes  bool               `db:"has_memory_used_bytes" json:"has_memory_used_bytes"`
+	MemoryTotalBytes    int64              `db:"memory_total_bytes" json:"memory_total_bytes"`
+	HasMemoryTotalBytes bool               `db:"has_memory_total_bytes" json:"has_memory_total_bytes"`
+	DiskUsedBytes       int64              `db:"disk_used_bytes" json:"disk_used_bytes"`
+	HasDiskUsedBytes    bool               `db:"has_disk_used_bytes" json:"has_disk_used_bytes"`
+	DiskTotalBytes      int64              `db:"disk_total_bytes" json:"disk_total_bytes"`
+	HasDiskTotalBytes   bool               `db:"has_disk_total_bytes" json:"has_disk_total_bytes"`
+	NetworkRxBytes      int64              `db:"network_rx_bytes" json:"network_rx_bytes"`
+	HasNetworkRxBytes   bool               `db:"has_network_rx_bytes" json:"has_network_rx_bytes"`
+	NetworkTxBytes      int64              `db:"network_tx_bytes" json:"network_tx_bytes"`
+	HasNetworkTxBytes   bool               `db:"has_network_tx_bytes" json:"has_network_tx_bytes"`
+	InstanceCount       int32              `db:"instance_count" json:"instance_count"`
+	HasInstanceCount    bool               `db:"has_instance_count" json:"has_instance_count"`
+	LastError           string             `db:"last_error" json:"last_error"`
+	HasLastError        bool               `db:"has_last_error" json:"has_last_error"`
 }
 
 func (q *Queries) ListNodeResourceBuckets(ctx context.Context, arg ListNodeResourceBucketsParams) ([]ListNodeResourceBucketsRow, error) {
@@ -577,14 +728,23 @@ func (q *Queries) ListNodeResourceBuckets(ctx context.Context, arg ListNodeResou
 		if err := rows.Scan(
 			&i.SampledAt,
 			&i.CpuPercent,
+			&i.HasCpuPercent,
 			&i.MemoryUsedBytes,
+			&i.HasMemoryUsedBytes,
 			&i.MemoryTotalBytes,
+			&i.HasMemoryTotalBytes,
 			&i.DiskUsedBytes,
+			&i.HasDiskUsedBytes,
 			&i.DiskTotalBytes,
+			&i.HasDiskTotalBytes,
 			&i.NetworkRxBytes,
+			&i.HasNetworkRxBytes,
 			&i.NetworkTxBytes,
+			&i.HasNetworkTxBytes,
 			&i.InstanceCount,
+			&i.HasInstanceCount,
 			&i.LastError,
+			&i.HasLastError,
 		); err != nil {
 			return nil, err
 		}
