@@ -5,6 +5,7 @@ import type { Ref } from 'vue'
 
 import { apiRequest } from '@/api/client'
 import type { AggregatedUsage } from '@/api/hooks/useUsage'
+import { rangeQuery, type InstanceResourceSample, type ResourceRange } from '@/api/hooks/useRuntimeNodes'
 
 // AppDTO 是应用详情与列表接口共用的前端视图。
 // 字段名保持后端 JSON snake_case，避免在 hook 层做额外映射。
@@ -153,6 +154,23 @@ export function useAppRuntimeQuery(appId: Ref<string | undefined>) {
       if (!appId.value) return null
       const response = await apiRequest<{ runtime: RuntimeView }>(`/api/v1/apps/${appId.value}/runtime`)
       return response.runtime
+    },
+  })
+}
+
+// useAppResourcesQuery 查询单个应用实例的资源趋势。
+// 权限沿用应用读取权限，调用方只需要传入当前时间范围即可复用同一套趋势图。
+export function useAppResourcesQuery(appId: Ref<string | undefined>, range: Ref<ResourceRange>) {
+  return useQuery<InstanceResourceSample[]>({
+    queryKey: ['app-resources', appId, range],
+    enabled: () => Boolean(appId.value),
+    queryFn: async () => {
+      if (!appId.value) return []
+      const response = await apiRequest<{ samples?: InstanceResourceSample[] }>(
+        `/api/v1/apps/${appId.value}/resources`,
+        { query: rangeQuery(range.value) },
+      )
+      return response.samples ?? []
     },
   })
 }
