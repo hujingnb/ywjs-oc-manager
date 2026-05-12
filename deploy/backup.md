@@ -8,6 +8,7 @@
 |---|---|---|---|
 | manager 业务库 | `deploy/manage/data/postgres` | ✅ 关键 | 含组织 / 成员 / 应用 / 审计 / 任务 / refresh_tokens |
 | manager Redis | `deploy/manage/data/redis` | 📋 可选 | scheduler 会从 jobs 表重建，丢一个调度周期后自愈 |
+| manager 本地数据 | `deploy/manage/data/manager` | ✅ 关键 | manager-api 本地持久化数据 |
 | manager 知识库主副本 | `deploy/manage/data/knowledge` | ✅ 关键 | 丢失后所有节点 sync-status 全部失败 |
 | agent 节点数据 | `deploy/runtime-agent/data/agent` on each Runtime Node | ✅ 关键 | 应用 workspace / state / logs；OpenClaw 历史会话与产物 |
 | new-api 库 | `deploy/new-api/data/postgres` | ✅ 关键 | new-api 账号、渠道、令牌和用量数据 |
@@ -40,6 +41,24 @@ cd deploy/manage
 docker compose run --rm manager-api ./migrate up
 ```
 
+new-api 库使用 `deploy/new-api` 生产包内的 PostgreSQL 容器导出，避免依赖宿主机
+安装 Postgres client：
+
+```sh
+cd deploy/new-api
+docker compose exec -T new-api-postgres sh -c 'pg_dump -U "$POSTGRES_USER" -d "$POSTGRES_DB" -Fc' \
+  > /backups/new-api-$(date +%Y%m%d).dump
+find /backups -name "new-api-*.dump" -mtime +7 -delete
+```
+
+恢复（破坏性，请先确认目标库为空或允许覆盖）：
+
+```sh
+cd deploy/new-api
+docker compose exec -T new-api-postgres sh -c 'pg_restore --clean --if-exists -U "$POSTGRES_USER" -d "$POSTGRES_DB"' \
+  < /backups/new-api-20260601.dump
+```
+
 ## Redis 备份
 
 仅用于减少恢复时的 job 重新调度延迟。Redis 默认 RDB 持久化已经够用：
@@ -51,9 +70,15 @@ new-api Redis 位于 `deploy/new-api/data/redis`。如生产改用外部 Redis /
 ## manager 数据卷
 
 ```sh
+# manager 服务器：备份 manager 本地数据
+tar czf /backups/manager-data-$(date +%Y%m%d).tar.gz -C deploy/manage/data manager
+
 # manager 服务器：备份知识库主副本
 tar czf /backups/manager-knowledge-$(date +%Y%m%d).tar.gz -C deploy/manage/data knowledge
 ```
+
+恢复：先停 `manager-api`，解压对应备份覆盖 `deploy/manage/data/manager` 或
+`deploy/manage/data/knowledge`，再启动 manager 服务。
 
 ## agent 节点数据
 
