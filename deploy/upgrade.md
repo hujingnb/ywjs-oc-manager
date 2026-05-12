@@ -11,9 +11,9 @@
 - **PATCH**：bug fix；不动 schema 不动 API。
 
 镜像 tag 与 git tag 严格对应：`vX.Y.Z` git tag → `:X.Y.Z` 镜像 tag。
-生产发布必须在 `.env` 中固定到不可变 `@sha256:` digest，或固定到禁止覆盖的
-`:X.Y.Z` SemVer tag。不要使用 `:latest` 或 `:1.x` 这类浮动 family tag，
-否则重启、扩容和回滚时可能拉到不同镜像内容。
+`:X.Y.Z` SemVer tag 仅作为 CI / release notes 识别发布版本的标签；生产发布
+必须在 `.env` 中固定到不可变 `@sha256:` digest。不要使用 `:latest`、`:1.x`
+或 `:X.Y.Z` tag 作为生产 `.env` 值，否则重启、扩容和回滚时可能拉到不同镜像内容。
 
 ## 升级前检查
 
@@ -36,8 +36,9 @@ docker compose run --rm manager-api ./migrate up
 docker compose up -d manager-api manager-web manager-nginx
 ```
 
-在 `.env` 中把 `OCM_MANAGER_IMAGE` 和 `OCM_WEB_IMAGE` 更新到新版本 digest 或
-不可变 `:X.Y.Z` tag。
+在生产 `.env` 中把 `OCM_MANAGER_IMAGE` 和 `OCM_WEB_IMAGE` 更新到
+`...@sha256:<digest>`。`:X.Y.Z` tag 可由 CI / release notes 用来识别新版本，
+但运维部署前必须先解析并固定对应 digest。
 迁移失败 → 立即停止升级，按 release notes 走数据修复流程。
 **迁移要永远是 idempotent + non-destructive**：MINOR 升级只允许 add，不允许 drop / alter type。
 
@@ -53,8 +54,9 @@ docker compose pull oc-runtime-agent
 docker compose up -d oc-runtime-agent
 ```
 
-在每台 Runtime Node 的 `.env` 中把 `OC_RUNTIME_AGENT_IMAGE` 更新到新版本 digest
-或不可变 `:X.Y.Z` tag。
+在每台 Runtime Node 的生产 `.env` 中把 `OC_RUNTIME_AGENT_IMAGE` 更新到
+`...@sha256:<digest>`。`:X.Y.Z` tag 可由 CI / release notes 用来识别 runtime-agent
+发布版本，但运维部署前必须先解析并固定对应 digest。
 agent 重启不丢 OpenClaw 容器（容器本身不重启）；但 agent 重启期间
 manager 调 inspect / stats 会失败，UI 上短暂显示「资源指标尚未采集」。
 
@@ -78,8 +80,8 @@ ${EDITOR:-vi} .env
 docker compose up -d manager-api manager-web manager-nginx
 ```
 
-回滚前把 `.env` 中 `OCM_MANAGER_IMAGE` 和 `OCM_WEB_IMAGE` 改回旧版本 digest
-或不可变 `:X.Y.Z` tag。
+回滚前把 `.env` 中 `OCM_MANAGER_IMAGE` 和 `OCM_WEB_IMAGE` 改回升级前记录的
+`...@sha256:<digest>`。
 如果新 MINOR 的迁移 add 了字段且新代码强依赖，需要按 release notes 明确指引处理
 schema；不要在未确认数据兼容性的情况下直接执行破坏性回滚。
 
@@ -91,9 +93,8 @@ docker compose pull oc-runtime-agent
 docker compose up -d oc-runtime-agent
 ```
 
-在每台 Runtime Node 回滚前，把 `.env` 中 `OC_RUNTIME_AGENT_IMAGE` 改回上一版本
-digest 或不可变 `:X.Y.Z` tag，生产环境优先使用升级前记录的 `@sha256:` digest，
-避免回滚时拉到被覆盖的可变 tag。
+在每台 Runtime Node 回滚前，把 `.env` 中 `OC_RUNTIME_AGENT_IMAGE` 改回升级前
+记录的 `...@sha256:<digest>`，避免回滚时拉到被覆盖的可变 tag。
 
 ### 数据回滚
 
@@ -112,13 +113,13 @@ digest 或不可变 `:X.Y.Z` tag，生产环境优先使用升级前记录的 `@
 
 - `:dev` → 开发环境最新 main
 - `:stage` → staging 环境，每周构建
-- `:1.0.0` `:1.1.0` ... → 生产环境不可变 SemVer 标签
+- `:1.0.0` `:1.1.0` ... → release notes / CI 识别发布版本的 SemVer 标签
 - `:1.x` → 可选发布 family tag，仅供测试或人工拉取，不用于生产 `.env`
 - `:latest` → 不在生产用
 
-每次发版用于生产的镜像引用只能是 `:1.x.y` 这类不可变完整版本 tag，或
-`@sha256:` digest。高可靠生产环境应优先把 `.env` 中的镜像值固定为 digest，
-确保重启、扩容和回滚时拉取到同一个镜像内容。
+每次发版可以用 `:1.x.y` 这类完整版本 tag 标识发布版本；生产 `.env` 中的
+镜像引用必须解析并固定为 `@sha256:` digest，确保重启、扩容和回滚时拉取到
+同一个镜像内容。
 
 ## 常见问题
 
