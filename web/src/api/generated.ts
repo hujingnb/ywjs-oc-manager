@@ -5051,6 +5051,8 @@ export interface components {
             admin_password: string;
             /** @description AdminUsername 是随组织创建的首个 org_admin 账号名。 */
             admin_username: string;
+            /** @description Code 是组织登录标识，创建后不可修改。 */
+            code: string;
             /** @description ContactName 是业务联系人姓名，可为空。 */
             contact_name?: string;
             /** @description ContactPhone 是业务联系人电话，可为空；不参与权限或登录校验。 */
@@ -5078,6 +5080,8 @@ export interface components {
             type?: string;
         };
         "handlers.LoginRequest": {
+            /** @description OrgCode 是组织用户登录时填写的组织标识；平台管理员登录时留空。 */
+            org_code?: string;
             /** @description Password 是明文登录密码，仅用于本次校验，handler 不写日志。 */
             password: string;
             /** @description Username 是 manager 账号名，登录失败时不区分账号不存在和密码错误。 */
@@ -5271,6 +5275,8 @@ export interface components {
             member?: components["schemas"]["service.MemberResult"];
         };
         "service.OrganizationResult": {
+            /** @description Code 是组织登录标识，用于组织用户登录时定位租户。 */
+            code?: string;
             /** @description ContactName 是业务联系人姓名。 */
             contact_name?: string;
             /** @description ContactPhone 是业务联系人电话。 */

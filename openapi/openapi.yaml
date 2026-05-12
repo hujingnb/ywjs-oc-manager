@@ -86,6 +86,9 @@ components:
         admin_username:
           description: AdminUsername 是随组织创建的首个 org_admin 账号名。
           type: string
+        code:
+          description: Code 是组织登录标识，创建后不可修改。
+          type: string
         contact_name:
           description: ContactName 是业务联系人姓名，可为空。
           type: string
@@ -105,6 +108,7 @@ components:
       - admin_display_name
       - admin_password
       - admin_username
+      - code
       - name
       type: object
     handlers.ErrorResponse:
@@ -136,6 +140,9 @@ components:
       type: object
     handlers.LoginRequest:
       properties:
+        org_code:
+          description: OrgCode 是组织用户登录时填写的组织标识；平台管理员登录时留空。
+          type: string
         password:
           description: Password 是明文登录密码，仅用于本次校验，handler 不写日志。
           type: string
@@ -466,6 +473,9 @@ components:
       type: object
     service.OrganizationResult:
       properties:
+        code:
+          description: Code 是组织登录标识，用于组织用户登录时定位租户。
+          type: string
         contact_name:
           description: ContactName 是业务联系人姓名。
           type: string

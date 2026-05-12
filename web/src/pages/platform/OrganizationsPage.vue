@@ -8,7 +8,7 @@
       :data="organizations ?? []"
       :loading="isLoading"
       :error-message="error?.message"
-      :row-key="(row: OrganizationWithCode) => row.id"
+      :row-key="(row: Organization) => row.id"
     >
       <template #toolbar>
         <n-button type="primary" @click="openForm">
@@ -149,15 +149,12 @@ import DataTableList from '@/components/DataTableList.vue'
 import { statusColumn, actionColumn } from '@/components/columns'
 import { useFormModal } from '@/composables/useFormModal'
 
-// OrganizationWithCode 临时兼容 Task 7 前 generated Organization 类型尚未包含 code 的状态。
-type OrganizationWithCode = Organization & { code?: string }
-
 // OrganizationsPage 是平台组织管理页，负责创建组织、启停组织和给组织充值。
 const { data: organizations, isLoading, error } = useOrganizationsQuery()
 const createMutation = useCreateOrganization()
 const statusMutation = useUpdateOrganizationStatus()
 // selectedOrg 保存当前充值弹框的目标组织，关闭弹框不会修改列表数据。
-const selectedOrg = ref<OrganizationWithCode | null>(null)
+const selectedOrg = ref<Organization | null>(null)
 const selectedOrgId = computed(() => selectedOrg.value?.id)
 const balanceQuery = useOrgBalanceQuery(selectedOrgId)
 const balance = computed(() => balanceQuery.data.value ?? null)
@@ -211,19 +208,19 @@ const columns = [
         : null,
     ],
   },
-  { title: '组织标识', key: 'code', render: (row: OrganizationWithCode) => row.code || '—' },
-  statusColumn<OrganizationWithCode>('状态', r => formatOrgStatus(r.status)),
+  { title: '组织标识', key: 'code', render: (row: Organization) => row.code || '—' },
+  statusColumn<Organization>('状态', r => formatOrgStatus(r.status)),
   // 联系人/电话/预警阈值列：保留页面内 render
-  { title: '联系人', key: 'contact_name', render: (row: OrganizationWithCode) => row.contact_name || '—' },
-  { title: '电话', key: 'contact_phone', render: (row: OrganizationWithCode) => row.contact_phone || '—' },
+  { title: '联系人', key: 'contact_name', render: (row: Organization) => row.contact_name || '—' },
+  { title: '电话', key: 'contact_phone', render: (row: Organization) => row.contact_phone || '—' },
   {
     title: '预警阈值',
     key: 'credit_warning_threshold',
-    render: (row: OrganizationWithCode) => typeof row.credit_warning_threshold === 'number'
+    render: (row: Organization) => typeof row.credit_warning_threshold === 'number'
       ? `${row.credit_warning_threshold}%` : '—',
   },
   // 启用/禁用互斥：用两条 RowAction + hidden 分别渲染
-  actionColumn<OrganizationWithCode>([
+  actionColumn<Organization>([
     { label: '充值', type: 'primary', onClick: openRecharge },
     { label: '禁用', onClick: r => onToggle(r, 'disable'), hidden: r => r.status !== 'active' },
     { label: '启用', type: 'primary', onClick: r => onToggle(r, 'enable'), hidden: r => r.status === 'active' },
@@ -231,12 +228,12 @@ const columns = [
 ]
 
 // onToggle 调用组织状态切换接口，状态刷新由 mutation hook 的缓存失效策略处理。
-function onToggle(org: OrganizationWithCode, action: 'enable' | 'disable') {
+function onToggle(org: Organization, action: 'enable' | 'disable') {
   statusMutation.mutate({ orgId: org.id, action })
 }
 
 // openRecharge 初始化充值弹框状态，并加载当前组织余额。
-function openRecharge(org: OrganizationWithCode) {
+function openRecharge(org: Organization) {
   selectedOrg.value = org
   rechargeAmount.value = null
   rechargeRemark.value = ''
