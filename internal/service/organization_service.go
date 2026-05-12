@@ -13,7 +13,6 @@ import (
 	"strings"
 	"time"
 
-	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgconn"
 	"github.com/jackc/pgx/v5/pgtype"
@@ -91,8 +90,6 @@ type OrganizationService struct {
 	cipher *auth.Cipher
 	// failAuditor 记录 new-api 失败；nil 时跳过审计，主要用于单元测试或最小装配。
 	failAuditor NewAPIFailureAuditor // 新增；nil 时跳过 new-api 失败审计写入
-	// usernamePool 是 manager 自动生成 new-api username 的前缀。
-	usernamePool string // 组织 user 的 username 前缀，便于改写本地与生产分布
 	// hashPassword 仅用于创建组织管理员，测试中可替换为快 hash。
 	hashPassword PasswordHasher
 }
@@ -101,11 +98,10 @@ type OrganizationService struct {
 // provisioner / cipher 必填；failAuditor 可为 nil（生产装配应注入满足 NewAPIFailureAuditor 的实现）。
 func NewOrganizationService(store OrganizationStore, provisioner NewAPIUserProvisioner, cipher *auth.Cipher, failAuditor NewAPIFailureAuditor) *OrganizationService {
 	return &OrganizationService{
-		store:        store,
-		provisioner:  provisioner,
-		cipher:       cipher,
-		failAuditor:  failAuditor,
-		usernamePool: "org-",
+		store:       store,
+		provisioner: provisioner,
+		cipher:      cipher,
+		failAuditor: failAuditor,
 		hashPassword: func(password string) (string, error) {
 			return auth.HashPassword(password, auth.DefaultPasswordParams)
 		},
@@ -314,7 +310,7 @@ func isUniqueViolation(err error) bool {
 //   - CreateUser 之前任意失败 → nil（无孤儿）
 //   - CreateUser 之后任意失败 → 非 nil（调用方负责 best-effort 调 DeleteUser 清理孤儿）
 func (s *OrganizationService) provisionNewAPIUser(ctx context.Context, org *sqlc.Organization) (sqlc.Organization, *int64, error) {
-	username := s.deriveUsername(org.ID)
+	username := org.Code
 	password, err := generateUserPassword()
 	if err != nil {
 		return sqlc.Organization{}, nil, fmt.Errorf("生成 new-api 密码失败: %w", err)
@@ -360,21 +356,6 @@ func (s *OrganizationService) provisionNewAPIUser(ctx context.Context, org *sqlc
 		return sqlc.Organization{}, &createdUserID, fmt.Errorf("写入 new-api user 信息失败: %w", err)
 	}
 	return updated, &createdUserID, nil
-}
-
-// deriveUsername 基于组织 uuid 生成稳定 username（"org-" + uuid.String() 前 8 位）。
-//
-// 取前 8 位是为了：
-//   - 在 new-api UI 列表里仍然可读；
-//   - 避免完整 UUID 触发 new-api 对 username 长度的校验；
-//   - 同一 org.id 重复调用结果稳定（虽然本流程只在 INSERT 后执行一次）。
-func (s *OrganizationService) deriveUsername(orgID pgtype.UUID) string {
-	if !orgID.Valid {
-		// 极端兜底：org.id 应当永远 Valid，但走到这里也不要 panic。
-		return s.usernamePool + strings.ReplaceAll(uuid.NewString()[:8], "-", "")
-	}
-	full := uuid.UUID(orgID.Bytes).String()
-	return s.usernamePool + strings.ReplaceAll(full[:8], "-", "")
 }
 
 // generateUserPassword 生成 16 字符随机密码。

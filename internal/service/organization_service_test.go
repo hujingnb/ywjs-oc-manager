@@ -4,7 +4,6 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
-	"strings"
 	"testing"
 
 	"github.com/jackc/pgx/v5"
@@ -56,7 +55,7 @@ func TestOrganizationServiceCreateProvisionsNewAPIUser(t *testing.T) {
 	if prov.createCalls != 1 || prov.bootstrapCalls != 1 {
 		t.Fatalf("provisioner calls create=%d bootstrap=%d, want 1/1", prov.createCalls, prov.bootstrapCalls)
 	}
-	require.True(t, strings.HasPrefix(prov.lastCreate.Username, "org-"))
+	assert.Equal(t, "test-org", prov.lastCreate.Username)
 	require.NotEqual(t, "", prov.lastCreate.Password)
 	require.True(t, store.updateCalled)
 	require.Equal(t, "42", store.updated.NewapiUserID.String)
