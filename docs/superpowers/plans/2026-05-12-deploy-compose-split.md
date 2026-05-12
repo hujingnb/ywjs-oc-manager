@@ -661,19 +661,19 @@ Create `deploy/manage/.env.example`:
 ```env
 COMPOSE_PROJECT_NAME=oc-manage
 
-OCM_MANAGER_IMAGE=ghcr.io/your-org/openclaw-manager:1.0.0
-OCM_WEB_IMAGE=ghcr.io/your-org/openclaw-manager-web:1.0.0
+OCM_MANAGER_IMAGE=ghcr.io/your-org/openclaw-manager@sha256:CHANGE_ME_MANAGER_IMAGE_DIGEST
+OCM_WEB_IMAGE=ghcr.io/your-org/openclaw-manager-web@sha256:CHANGE_ME_WEB_IMAGE_DIGEST
 
 MANAGER_HTTP_PORT=80
 MANAGER_HTTPS_PORT=443
 
 MANAGER_POSTGRES_USER=ocm
 MANAGER_POSTGRES_PASSWORD=CHANGE_ME_MANAGER_POSTGRES_PASSWORD
+MANAGER_POSTGRES_DSN_PASSWORD=CHANGE_ME_URL_ENCODED_MANAGER_POSTGRES_PASSWORD
 MANAGER_POSTGRES_DB=ocm
 
 MANAGER_REDIS_PASSWORD=CHANGE_ME_MANAGER_REDIS_PASSWORD
 
-OCM_CONFIG=/etc/manager/config.yaml
 TZ=Asia/Shanghai
 ```
 
@@ -690,7 +690,7 @@ app:
   knowledge_root: "/var/lib/oc-manager/knowledge"
 
 database:
-  url: "postgres://ocm:CHANGE_ME_MANAGER_POSTGRES_PASSWORD@manager-postgres:5432/ocm?sslmode=disable"
+  url: "postgres://ocm:CHANGE_ME_URL_ENCODED_MANAGER_POSTGRES_PASSWORD@manager-postgres:5432/ocm?sslmode=disable"
 
 redis:
   addr: "manager-redis:6379"
@@ -707,7 +707,7 @@ newapi:
   admin_user_id: 1
 
 openclaw:
-  runtime_image: "openclaw-runtime:1.0.0"
+  runtime_image: "openclaw-runtime@sha256:CHANGE_ME_RUNTIME_IMAGE_DIGEST"
   llm:
     base_url: "https://new-api.example.com/v1"
     default_provider: "openai"
@@ -807,11 +807,13 @@ services:
   manager-redis:
     image: redis:7
     restart: always
+    environment:
+      REDISCLI_AUTH: ${MANAGER_REDIS_PASSWORD}
     command: ["redis-server", "--requirepass", "${MANAGER_REDIS_PASSWORD}", "--appendonly", "yes"]
     volumes:
       - ./data/redis:/data
     healthcheck:
-      test: ["CMD-SHELL", "redis-cli -a ${MANAGER_REDIS_PASSWORD} ping | grep PONG"]
+      test: ["CMD", "redis-cli", "ping"]
       interval: 10s
       timeout: 5s
       retries: 20
@@ -822,7 +824,7 @@ services:
     image: ${OCM_MANAGER_IMAGE}
     restart: always
     environment:
-      OCM_CONFIG: ${OCM_CONFIG:-/etc/manager/config.yaml}
+      OCM_CONFIG: /etc/manager/config.yaml
       TZ: ${TZ:-Asia/Shanghai}
     depends_on:
       manager-postgres:
@@ -830,7 +832,7 @@ services:
       manager-redis:
         condition: service_healthy
     volumes:
-      - ./config/manager.yaml:${OCM_CONFIG:-/etc/manager/config.yaml}:ro
+      - ./config/manager.yaml:/etc/manager/config.yaml:ro
       - ./data/manager:/var/lib/oc-manager/data
       - ./data/knowledge:/var/lib/oc-manager/knowledge
       - /var/run/docker.sock:/var/run/docker.sock
@@ -898,10 +900,22 @@ docker compose up -d
 
 ## 必改配置
 
-- `.env`：镜像 tag、数据库密码、Redis 密码、HTTP/HTTPS 端口。
+- `.env`：镜像 digest、数据库密码、Redis 密码、HTTP/HTTPS 端口。
 - `config/manager.yaml`：域名、JWT/CSRF secret、`security.master_key`、
   `runtime.enrollment_secret`、new-api 地址和 admin token。
 - `tls/fullchain.pem` / `tls/privkey.pem`：生产 TLS 证书。
+
+## 镜像与密码
+
+`OCM_MANAGER_IMAGE` 和 `OCM_WEB_IMAGE` 必须固定到不可变 digest，生产环境不要使用
+`latest` 或可变 tag。`openclaw.runtime_image` 也应使用 runtime 镜像 digest。
+
+`MANAGER_POSTGRES_PASSWORD` 是 PostgreSQL 容器接收的原始密码。
+`MANAGER_POSTGRES_DSN_PASSWORD` 是同一个密码的 URL 编码形式，用于写入
+`config/manager.yaml` 的 `database.url`。
+
+`manager-api` 的 Compose healthcheck 使用 `wget -qO- http://localhost:8080/healthz`，
+因此 manager-api 镜像需要内置 `wget`。
 
 ## 运行检查
 
@@ -923,8 +937,8 @@ curl -k https://manager.example.com/healthz
 Run:
 
 ```bash
-docker compose --env-file deploy/manage/.env.example -f deploy/manage/docker-compose.yml config
-./scripts/check-compose-bind-mounts.sh deploy/manage/docker-compose.yml
+rtk docker compose --env-file deploy/manage/.env.example -f deploy/manage/docker-compose.yml config
+rtk ./scripts/check-compose-bind-mounts.sh deploy/manage/docker-compose.yml
 ```
 
 Expected: both commands exit 0.
@@ -934,7 +948,7 @@ Expected: both commands exit 0.
 Run:
 
 ```bash
-git add deploy/manage
+git add deploy/manage docs/superpowers/plans/2026-05-12-deploy-compose-split.md
 git commit -m "chore(deploy): 增加 manager 生产部署包" -m "为 manager 增加独立 compose、环境变量模板、配置模板、nginx 配置和部署说明，包含私有 PostgreSQL 与 Redis。"
 ```
 
