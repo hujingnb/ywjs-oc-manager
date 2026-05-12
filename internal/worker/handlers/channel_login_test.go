@@ -2,6 +2,7 @@ package handlers
 
 import (
 	"context"
+	"errors"
 	"testing"
 	"time"
 
@@ -74,6 +75,57 @@ func TestChannelCheckBindingHandlerMarksBoundAndRunsApp(t *testing.T) {
 	if !store.appStatusSet || store.app.Status != domain.AppStatusRunning {
 		t.Fatalf("app 未推进到 running: set=%v status=%q", store.appStatusSet, store.app.Status)
 	}
+	require.Len(t, store.auditLogs, 1)
+	require.Equal(t, "app", store.auditLogs[0].TargetType)
+	require.Equal(t, testChannelWorkerAppID, store.auditLogs[0].TargetID)
+	require.Equal(t, "channel_bound", store.auditLogs[0].Action)
+	require.Equal(t, "succeeded", store.auditLogs[0].Result)
+}
+
+// TestChannelStartLoginHandlerRecordsFailedAudit 验证渠道启动登录失败时写入应用审计的错误记录场景。
+func TestChannelStartLoginHandlerRecordsFailedAudit(t *testing.T) {
+	store := newChannelWorkerStore(t)
+	registry := channel.NewRegistry()
+	registry.MustRegister(&workerFakeChannelAdapter{beginErr: errors.New("openclaw qrcode failed")})
+	handler := NewChannelStartLoginHandler(store, registry)
+
+	err := handler.Handle(context.Background(), sqlc.Job{
+		Type:        domain.JobTypeChannelStartLogin,
+		PayloadJson: []byte(`{"app_id":"` + testChannelWorkerAppID + `","channel_type":"wechat"}`),
+	})
+	require.Error(t, err)
+	require.Equal(t, domain.ChannelStatusFailed, store.binding.Status)
+	require.Len(t, store.auditLogs, 1)
+	require.Equal(t, "app", store.auditLogs[0].TargetType)
+	require.Equal(t, testChannelWorkerAppID, store.auditLogs[0].TargetID)
+	require.Equal(t, "channel_auth_start", store.auditLogs[0].Action)
+	require.Equal(t, "failed", store.auditLogs[0].Result)
+	require.Contains(t, store.auditLogs[0].ErrorMessage.String, "openclaw qrcode failed")
+}
+
+// TestChannelCheckBindingHandlerRecordsFailedAudit 验证渠道轮询确认绑定失败时写入应用审计的错误记录场景。
+func TestChannelCheckBindingHandlerRecordsFailedAudit(t *testing.T) {
+	store := newChannelWorkerStore(t)
+	registry := channel.NewRegistry()
+	registry.MustRegister(&workerFakeChannelAdapter{
+		progress: channel.AuthProgress{
+			Status:       channel.AuthStatusFailed,
+			ErrorMessage: "user rejected login",
+			UpdatedAt:    time.Now(),
+		},
+	})
+	handler := NewChannelCheckBindingHandler(store, registry, nil)
+
+	err := handler.Handle(context.Background(), sqlc.Job{
+		Type:        domain.JobTypeChannelCheckBinding,
+		PayloadJson: []byte(`{"app_id":"` + testChannelWorkerAppID + `","channel_type":"wechat"}`),
+	})
+	require.NoError(t, err)
+	require.Equal(t, domain.ChannelStatusFailed, store.binding.Status)
+	require.Len(t, store.auditLogs, 1)
+	require.Equal(t, "channel_bound", store.auditLogs[0].Action)
+	require.Equal(t, "failed", store.auditLogs[0].Result)
+	require.Contains(t, store.auditLogs[0].ErrorMessage.String, "user rejected login")
 }
 
 // TestChannelCheckBindingHandlerUsesResolverIdentity 验证渠道Check绑定处理器使用解析器身份的预期行为场景。
@@ -140,6 +192,8 @@ func TestChannelCheckBindingHandlerFallsBackToResolverWhenAdapterPending(t *test
 	require.Equal(t, "o9cq800xszCM8jyoS9YpRKpvAN9c@im.wechat", store.binding.BoundIdentity.String)
 	require.True(t, store.appStatusSet)
 	require.Equal(t, 1, resolver.calls)
+	require.Len(t, store.auditLogs, 1)
+	require.Equal(t, "channel_bound", store.auditLogs[0].Action)
 }
 
 // TestChannelCheckBindingHandlerSkipsResolverFallbackWithoutResolver 校验：
@@ -163,10 +217,14 @@ func TestChannelCheckBindingHandlerSkipsResolverFallbackWithoutResolver(t *testi
 type workerFakeChannelAdapter struct {
 	challenge channel.AuthChallenge
 	progress  channel.AuthProgress
+	beginErr  error
 }
 
 func (a *workerFakeChannelAdapter) Type() string { return domain.ChannelTypeWeChat }
 func (a *workerFakeChannelAdapter) BeginAuth(_ context.Context, _ channel.AuthInput) (channel.AuthChallenge, error) {
+	if a.beginErr != nil {
+		return channel.AuthChallenge{}, a.beginErr
+	}
 	return a.challenge, nil
 }
 func (a *workerFakeChannelAdapter) PollAuth(_ context.Context, _ channel.AuthInput) (channel.AuthProgress, error) {
@@ -188,6 +246,7 @@ type channelWorkerStore struct {
 	app          sqlc.App
 	binding      sqlc.ChannelBinding
 	jobs         []sqlc.Job
+	auditLogs    []sqlc.CreateAuditLogParams
 	appStatusSet bool
 }
 
@@ -264,6 +323,11 @@ func (s *channelWorkerStore) CreateJob(_ context.Context, arg sqlc.CreateJobPara
 	}
 	s.jobs = append(s.jobs, job)
 	return job, nil
+}
+
+func (s *channelWorkerStore) CreateAuditLog(_ context.Context, arg sqlc.CreateAuditLogParams) (sqlc.AuditLog, error) {
+	s.auditLogs = append(s.auditLogs, arg)
+	return sqlc.AuditLog{TargetType: arg.TargetType, TargetID: arg.TargetID, Action: arg.Action, Result: arg.Result, ErrorMessage: arg.ErrorMessage}, nil
 }
 
 func mustWorkerUUID(t *testing.T, value string) pgtype.UUID {

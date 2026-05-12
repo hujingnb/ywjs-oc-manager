@@ -22,6 +22,7 @@ type ChannelStore interface {
 	GetChannelBindingByAppAndType(ctx context.Context, arg sqlc.GetChannelBindingByAppAndTypeParams) (sqlc.ChannelBinding, error)
 	SetChannelBindingStatus(ctx context.Context, arg sqlc.SetChannelBindingStatusParams) (sqlc.ChannelBinding, error)
 	CreateJob(ctx context.Context, arg sqlc.CreateJobParams) (sqlc.Job, error)
+	CreateAuditLog(ctx context.Context, arg sqlc.CreateAuditLogParams) (sqlc.AuditLog, error)
 }
 
 // ChannelService 协调 channel adapter 与 channel_bindings 表。
@@ -126,6 +127,27 @@ func (s *ChannelService) BeginAuth(ctx context.Context, principal auth.Principal
 	})
 	if err != nil {
 		return ChallengeResult{}, fmt.Errorf("创建渠道登录任务失败: %w", err)
+	}
+	auditMetadata, err := json.Marshal(map[string]any{
+		"channel_type": channelType,
+		"job_id":       uuidToString(job.ID),
+		"requested_by": principal.UserID,
+	})
+	if err != nil {
+		return ChallengeResult{}, fmt.Errorf("序列化渠道发起审计元数据失败: %w", err)
+	}
+	actorUUID, _ := optionalUUID(principal.UserID)
+	if _, err := s.store.CreateAuditLog(ctx, sqlc.CreateAuditLogParams{
+		ActorID:      actorUUID,
+		ActorRole:    principal.Role,
+		OrgID:        app.OrgID,
+		TargetType:   "app",
+		TargetID:     uuidToString(app.ID),
+		Action:       "channel_auth_start",
+		Result:       "succeeded",
+		MetadataJson: auditMetadata,
+	}); err != nil {
+		return ChallengeResult{}, fmt.Errorf("写入渠道发起审计日志失败: %w", err)
 	}
 	if s.notifier != nil {
 		_ = s.notifier.Enqueue(ctx, uuidToString(job.ID))

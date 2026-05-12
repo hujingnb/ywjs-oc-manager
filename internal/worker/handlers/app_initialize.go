@@ -31,6 +31,7 @@ type AppInitializeStore interface {
 	SetAppNewAPIKey(ctx context.Context, arg sqlc.SetAppNewAPIKeyParams) (sqlc.App, error)
 	SetAppContainer(ctx context.Context, arg sqlc.SetAppContainerParams) (sqlc.App, error)
 	SetAppStatus(ctx context.Context, arg sqlc.SetAppStatusParams) (sqlc.App, error)
+	CreateAuditLog(ctx context.Context, arg sqlc.CreateAuditLogParams) (sqlc.AuditLog, error)
 }
 
 // ImageDistributor 抽象镜像分发能力。
@@ -326,13 +327,15 @@ func (h *AppInitializeHandler) Handle(ctx context.Context, job sqlc.Job) error {
 		if err != nil {
 			return fmt.Errorf("创建容器失败: %w", err)
 		}
-		if _, err := h.store.SetAppContainer(ctx, sqlc.SetAppContainerParams{
+		updated, err := h.store.SetAppContainer(ctx, sqlc.SetAppContainerParams{
 			ID:            app.ID,
 			ContainerID:   pgtype.Text{String: info.ID, Valid: info.ID != ""},
 			ContainerName: pgtype.Text{String: info.Name, Valid: info.Name != ""},
-		}); err != nil {
+		})
+		if err != nil {
 			return fmt.Errorf("写入 container_id 失败: %w", err)
 		}
+		app = updated
 		// 立刻启动容器；OpenClaw gateway 启动需 ~10s 加载 plugin。
 		if h.starter != nil && info.ID != "" {
 			if err := h.starter.StartContainer(ctx, payload.RuntimeNodeID, info.ID); err != nil {
@@ -360,11 +363,32 @@ func (h *AppInitializeHandler) Handle(ctx context.Context, job sqlc.Job) error {
 	}
 
 	if app.Status != domain.AppStatusBindingWaiting {
-		if _, err := h.store.SetAppStatus(ctx, sqlc.SetAppStatusParams{
+		updated, err := h.store.SetAppStatus(ctx, sqlc.SetAppStatusParams{
 			ID:     app.ID,
 			Status: domain.AppStatusBindingWaiting,
-		}); err != nil {
+		})
+		if err != nil {
 			return fmt.Errorf("更新应用状态失败: %w", err)
+		}
+		app = updated
+		auditMetadata, err := json.Marshal(map[string]any{
+			"job_id":       uuidToString(job.ID),
+			"runtime_node": payload.RuntimeNodeID,
+			"container_id": textOrEmpty(app.ContainerID),
+		})
+		if err != nil {
+			return fmt.Errorf("序列化应用初始化审计元数据失败: %w", err)
+		}
+		if _, err := h.store.CreateAuditLog(ctx, sqlc.CreateAuditLogParams{
+			ActorRole:    "system",
+			OrgID:        app.OrgID,
+			TargetType:   "app",
+			TargetID:     uuidToString(app.ID),
+			Action:       "initialize",
+			Result:       "succeeded",
+			MetadataJson: auditMetadata,
+		}); err != nil {
+			return fmt.Errorf("写入应用初始化审计日志失败: %w", err)
 		}
 	}
 	return nil

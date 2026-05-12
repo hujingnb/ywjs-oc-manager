@@ -92,6 +92,11 @@ func TestAppInitializeHandlesHappyPath(t *testing.T) {
 		t.Fatalf("StartContainer 调用 = calls=%d node=%s id=%s",
 			containers.startCalls, containers.lastStartNode, containers.lastStartID)
 	}
+	require.Len(t, store.auditLogs, 1)
+	require.Equal(t, "app", store.auditLogs[0].TargetType)
+	require.Equal(t, testAppID, store.auditLogs[0].TargetID)
+	require.Equal(t, "initialize", store.auditLogs[0].Action)
+	require.Equal(t, "succeeded", store.auditLogs[0].Result)
 }
 
 // TestAppInitializeWaitsForOpenClawHealthyWhenSupported 验证应用初始化等待针对OpenClaw健康当支持时的预期行为场景。
@@ -232,6 +237,7 @@ type appInitStub struct {
 	apiKeySet    bool
 	statusSet    bool
 	containerSet bool
+	auditLogs    []sqlc.CreateAuditLogParams
 }
 
 func newAppInitStub(t *testing.T) *appInitStub {
@@ -284,6 +290,11 @@ func (s *appInitStub) SetAppStatus(_ context.Context, arg sqlc.SetAppStatusParam
 	s.statusSet = true
 	s.app.Status = arg.Status
 	return s.app, nil
+}
+
+func (s *appInitStub) CreateAuditLog(_ context.Context, arg sqlc.CreateAuditLogParams) (sqlc.AuditLog, error) {
+	s.auditLogs = append(s.auditLogs, arg)
+	return sqlc.AuditLog{TargetType: arg.TargetType, TargetID: arg.TargetID, Action: arg.Action, Result: arg.Result}, nil
 }
 
 type fakeImages struct {

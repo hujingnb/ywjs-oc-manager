@@ -32,7 +32,12 @@ func TestOnboardMemberCommitsOnSuccess(t *testing.T) {
 	assert.Positive(t, store.users)
 	assert.Positive(t, store.apps)
 	assert.Positive(t, store.bindings)
-	assert.Positive(t, store.audits)
+	require.Len(t, store.auditLogs, 2)
+	assert.Equal(t, "member", store.auditLogs[0].TargetType)
+	assert.Equal(t, "create_with_app", store.auditLogs[0].Action)
+	assert.Equal(t, "app", store.auditLogs[1].TargetType)
+	assert.Equal(t, "create", store.auditLogs[1].Action)
+	assert.Equal(t, result.App.ID, store.auditLogs[1].TargetID)
 	assert.Positive(t, store.jobs)
 }
 
@@ -122,8 +127,10 @@ type onboardingStub struct {
 	apps          int
 	bindings      int
 	audits        int
+	auditLogs     []sqlc.CreateAuditLogParams
 	jobs          int
 	staged        counters
+	stagedAudits  []sqlc.CreateAuditLogParams
 	appErr        error
 	jobErr        error
 	lastAppNodeID string
@@ -149,8 +156,10 @@ func (s *onboardingStub) commit() {
 	s.apps += s.staged.apps
 	s.bindings += s.staged.bindings
 	s.audits += s.staged.audits
+	s.auditLogs = append(s.auditLogs, s.stagedAudits...)
 	s.jobs += s.staged.jobs
 	s.staged = counters{}
+	s.stagedAudits = nil
 }
 
 func (s *onboardingStub) GetOrganization(_ context.Context, id pgtype.UUID) (sqlc.Organization, error) {
@@ -200,6 +209,7 @@ func (s *onboardingStub) CreateChannelBinding(_ context.Context, arg sqlc.Create
 
 func (s *onboardingStub) CreateAuditLog(_ context.Context, arg sqlc.CreateAuditLogParams) (sqlc.AuditLog, error) {
 	s.staged.audits++
+	s.stagedAudits = append(s.stagedAudits, arg)
 	return sqlc.AuditLog{ActorRole: arg.ActorRole, TargetType: arg.TargetType, TargetID: arg.TargetID, Action: arg.Action, Result: arg.Result}, nil
 }
 

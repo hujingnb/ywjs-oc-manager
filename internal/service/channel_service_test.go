@@ -37,6 +37,11 @@ func TestChannelServiceBeginAuthSuccess(t *testing.T) {
 	require.Equal(t, domain.ChannelStatusPendingAuth, store.lastStatus)
 	require.Len(t, store.jobs, 1)
 	require.Equal(t, domain.JobTypeChannelStartLogin, store.jobs[0].Type)
+	require.Len(t, store.auditLogs, 1)
+	require.Equal(t, "app", store.auditLogs[0].TargetType)
+	require.Equal(t, testChannelAppID, store.auditLogs[0].TargetID)
+	require.Equal(t, "channel_auth_start", store.auditLogs[0].Action)
+	require.Equal(t, "succeeded", store.auditLogs[0].Result)
 }
 
 // TestChannelServiceBeginAuthMissingAdapter 验证渠道服务开始认证缺失适配器的异常或拒绝路径场景。
@@ -173,6 +178,7 @@ type channelStub struct {
 	lastStatus    string
 	boundCalled   bool
 	jobs          []sqlc.Job
+	auditLogs     []sqlc.CreateAuditLogParams
 	appStatusSet  bool
 	lastAppStatus string
 	appStatusErr  error
@@ -252,6 +258,11 @@ func (s *channelStub) CreateJob(_ context.Context, arg sqlc.CreateJobParams) (sq
 	}
 	s.jobs = append(s.jobs, job)
 	return job, nil
+}
+
+func (s *channelStub) CreateAuditLog(_ context.Context, arg sqlc.CreateAuditLogParams) (sqlc.AuditLog, error) {
+	s.auditLogs = append(s.auditLogs, arg)
+	return sqlc.AuditLog{TargetType: arg.TargetType, TargetID: arg.TargetID, Action: arg.Action, Result: arg.Result}, nil
 }
 
 func channelOrgAdminPrincipal() auth.Principal {

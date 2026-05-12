@@ -3,7 +3,9 @@ package handlers
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
+	"log/slog"
 	"time"
 
 	"github.com/jackc/pgx/v5"
@@ -11,6 +13,7 @@ import (
 
 	"oc-manager/internal/domain"
 	"oc-manager/internal/integrations/channel"
+	redactlog "oc-manager/internal/log"
 	"oc-manager/internal/store/sqlc"
 )
 
@@ -23,6 +26,7 @@ type ChannelLoginStore interface {
 	MarkChannelBindingBound(ctx context.Context, arg sqlc.MarkChannelBindingBoundParams) (sqlc.ChannelBinding, error)
 	SetAppStatus(ctx context.Context, arg sqlc.SetAppStatusParams) (sqlc.App, error)
 	CreateJob(ctx context.Context, arg sqlc.CreateJobParams) (sqlc.Job, error)
+	CreateAuditLog(ctx context.Context, arg sqlc.CreateAuditLogParams) (sqlc.AuditLog, error)
 }
 
 // ChannelStartLoginHandler 执行 channel_start_login job。
@@ -59,12 +63,18 @@ func (h *ChannelStartLoginHandler) Handle(ctx context.Context, job sqlc.Job) err
 		ContainerID: textOrEmpty(app.ContainerID),
 	})
 	if err != nil {
+		safeMessage := redactlog.SafeErrorMessage(err)
 		_, _ = h.store.SetChannelBindingStatus(ctx, sqlc.SetChannelBindingStatusParams{
 			AppID:       binding.AppID,
 			ChannelType: binding.ChannelType,
 			Status:      domain.ChannelStatusFailed,
-			LastError:   pgtype.Text{String: err.Error(), Valid: true},
+			LastError:   pgtype.Text{String: safeMessage, Valid: safeMessage != ""},
 		})
+		if auditErr := recordChannelAppAudit(ctx, h.store, app, "channel_auth_start", "failed", safeMessage, map[string]any{
+			"channel_type": payload.ChannelType,
+		}); auditErr != nil {
+			return auditErr
+		}
 		return fmt.Errorf("发起渠道登录失败: %w", err)
 	}
 	metadata, err := json.Marshal(map[string]any{
@@ -183,17 +193,34 @@ func (h *ChannelCheckBindingHandler) Handle(ctx context.Context, job sqlc.Job) e
 				return fmt.Errorf("推进应用状态到 running 失败: %w", err)
 			}
 		}
+		if err := recordChannelAppAudit(ctx, h.store, app, "channel_bound", "succeeded", "", map[string]any{
+			"channel_type":   payload.ChannelType,
+			"bound_identity": identity,
+			"channel_name":   progress.ChannelName,
+		}); err != nil {
+			return err
+		}
 	case channel.AuthStatusFailed, channel.AuthStatusExpired:
 		status := domain.ChannelStatusFailed
 		if progress.Status == channel.AuthStatusExpired {
 			status = domain.ChannelStatusExpired
 		}
+		safeMessage := string(progress.Status)
+		if progress.ErrorMessage != "" {
+			safeMessage = redactlog.SafeErrorMessage(errors.New(progress.ErrorMessage))
+		}
 		_, _ = h.store.SetChannelBindingStatus(ctx, sqlc.SetChannelBindingStatusParams{
 			AppID:       binding.AppID,
 			ChannelType: binding.ChannelType,
 			Status:      status,
-			LastError:   pgtype.Text{String: progress.ErrorMessage, Valid: progress.ErrorMessage != ""},
+			LastError:   pgtype.Text{String: safeMessage, Valid: safeMessage != ""},
 		})
+		if err := recordChannelAppAudit(ctx, h.store, app, "channel_bound", "failed", safeMessage, map[string]any{
+			"channel_type": payload.ChannelType,
+			"auth_status":  string(progress.Status),
+		}); err != nil {
+			return err
+		}
 	default:
 		// Fallback：OpenClaw weixin plugin 在 cached login（同微信账号已授权过）场景下
 		// 不再 emit "bound" 事件，但 plugin state 文件 (/root/.openclaw/openclaw-weixin/accounts/*.json)
@@ -216,6 +243,13 @@ func (h *ChannelCheckBindingHandler) Handle(ctx context.Context, job sqlc.Job) e
 						return fmt.Errorf("推进应用状态到 running 失败: %w", err)
 					}
 				}
+				if err := recordChannelAppAudit(ctx, h.store, app, "channel_bound", "succeeded", "", map[string]any{
+					"channel_type":   payload.ChannelType,
+					"bound_identity": identity,
+					"channel_name":   progress.ChannelName,
+				}); err != nil {
+					return err
+				}
 				return nil
 			}
 		}
@@ -228,6 +262,30 @@ func (h *ChannelCheckBindingHandler) Handle(ctx context.Context, job sqlc.Job) e
 		if err := enqueueChannelCheck(ctx, h.store, payload, 5*time.Second); err != nil {
 			return err
 		}
+	}
+	return nil
+}
+
+func recordChannelAppAudit(ctx context.Context, store ChannelLoginStore, app sqlc.App, action, result, errorMessage string, metadata map[string]any) error {
+	raw, err := json.Marshal(metadata)
+	if err != nil {
+		return fmt.Errorf("序列化渠道审计元数据失败: %w", err)
+	}
+	params := sqlc.CreateAuditLogParams{
+		ActorRole:    "system",
+		OrgID:        app.OrgID,
+		TargetType:   "app",
+		TargetID:     uuidToString(app.ID),
+		Action:       action,
+		Result:       result,
+		MetadataJson: raw,
+	}
+	if errorMessage != "" {
+		params.ErrorMessage = pgtype.Text{String: errorMessage, Valid: true}
+	}
+	if _, err := store.CreateAuditLog(ctx, params); err != nil {
+		slog.ErrorContext(ctx, "写渠道应用审计失败", "app_id", uuidToString(app.ID), "action", action, "error", err)
+		return fmt.Errorf("写入渠道应用审计日志失败: %w", err)
 	}
 	return nil
 }

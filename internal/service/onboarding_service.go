@@ -221,6 +221,26 @@ func (s *MemberOnboardingService) OnboardMember(ctx context.Context, principal a
 		}); err != nil {
 			return fmt.Errorf("写入审计日志失败: %w", err)
 		}
+		appAuditMetadata, err := json.Marshal(map[string]any{
+			"owner_user_id":   uuidToString(user.ID),
+			"channel_type":    channelType,
+			"runtime_node_id": input.NodeID,
+		})
+		if err != nil {
+			return fmt.Errorf("序列化应用创建审计元数据失败: %w", err)
+		}
+		if _, err := store.CreateAuditLog(ctx, sqlc.CreateAuditLogParams{
+			ActorID:      actorUUID,
+			ActorRole:    principal.Role,
+			OrgID:        org.ID,
+			TargetType:   "app",
+			TargetID:     uuidToString(app.ID),
+			Action:       "create",
+			Result:       "succeeded",
+			MetadataJson: appAuditMetadata,
+		}); err != nil {
+			return fmt.Errorf("写入应用创建审计日志失败: %w", err)
+		}
 		payload, err := json.Marshal(map[string]any{
 			"app_id":       uuidToString(app.ID),
 			"runtime_node": input.NodeID,
