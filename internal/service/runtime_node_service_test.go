@@ -67,6 +67,35 @@ func TestRuntimeNodeServiceEnrollAgentUpdatesExistingNode(t *testing.T) {
 	require.Equal(t, int32(5), node.MaxApps.Int32)
 }
 
+// TestRuntimeNodeServiceEnrollAgentPersistsNodeResourceSample 验证agent注册携带节点资源时保留首次采样。
+func TestRuntimeNodeServiceEnrollAgentPersistsNodeResourceSample(t *testing.T) {
+	store := newRuntimeNodeStoreStub(t)
+	svc := newRuntimeNodeServiceForTest(t, store)
+	sampledAt := mustTime(t, "2026-05-13T08:00:00Z")
+	input := validEnrollInput()
+	input.SampledAt = sampledAt
+	input.NodeResource = &NodeResourceInput{
+		CPUPercent:       float64PtrService(11.5),
+		MemoryUsedBytes:  int64PtrService(2048),
+		MemoryTotalBytes: int64PtrService(8192),
+		DiskUsedBytes:    int64PtrService(4096),
+		DiskTotalBytes:   int64PtrService(16384),
+		NetworkRxBytes:   int64PtrService(700),
+		NetworkTxBytes:   int64PtrService(600),
+		InstanceCount:    int32PtrService(2),
+	}
+
+	result, err := svc.EnrollAgent(context.Background(), input)
+	require.NoError(t, err)
+	require.Len(t, store.nodeSamples, 1)
+	sample := store.nodeSamples[0]
+	assert.Equal(t, mustUUID(t, result.NodeID), sample.RuntimeNodeID)
+	assert.Equal(t, sampledAt, sample.SampledAt.Time)
+	assert.Equal(t, 11.5, sample.CpuPercent.Float64)
+	assert.Equal(t, int64(2048), sample.MemoryUsedBytes.Int64)
+	assert.Equal(t, int32(2), sample.InstanceCount.Int32)
+}
+
 // TestRuntimeNodeServiceEnrollAgentRejectsInvalidInput 验证运行时节点服务注册agent拒绝非法输入的异常或拒绝路径场景。
 func TestRuntimeNodeServiceEnrollAgentRejectsInvalidInput(t *testing.T) {
 	store := newRuntimeNodeStoreStub(t)

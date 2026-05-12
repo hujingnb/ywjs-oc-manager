@@ -147,7 +147,7 @@ type AgentEnrollInput struct {
 	NodeDataRoot string
 	// SampledAt 是 agent 侧资源采样时间；handler 负责为空时补当前 UTC。
 	SampledAt time.Time
-	// NodeResource 是 enroll 时可选的节点资源采样；当前仅透传，采样写入由心跳路径完成。
+	// NodeResource 是 enroll 时可选的节点资源采样，用于保留 agent 注册时的首次资源状态。
 	NodeResource *NodeResourceInput
 	// ResourceSnapshot 是 agent 上报的资源快照 JSON 原文，由 handler 负责序列化。
 	ResourceSnapshot []byte
@@ -263,6 +263,12 @@ func (s *RuntimeNodeService) EnrollAgent(ctx context.Context, input AgentEnrollI
 	}
 	if err != nil {
 		return AgentEnrollResult{}, fmt.Errorf("写入 runtime 节点失败: %w", err)
+	}
+	if input.NodeResource != nil {
+		// enroll 首次采样同样使用数据库返回的节点 ID，避免把 agent 自报信息当作主键来源。
+		if _, err := s.store.InsertNodeResourceSample(ctx, nodeResourceSampleParams(node.ID, input.SampledAt, input.NodeResource)); err != nil {
+			return AgentEnrollResult{}, fmt.Errorf("写入节点资源采样失败: %w", err)
+		}
 	}
 	if _, err := s.store.CreateAuditLog(ctx, sqlc.CreateAuditLogParams{
 		ActorRole:  "system",
