@@ -188,7 +188,7 @@ Create `deploy/new-api/.env.example`:
 ```env
 COMPOSE_PROJECT_NAME=oc-new-api
 
-NEWAPI_IMAGE=calciumion/new-api:CHANGE_ME_VERSION
+NEWAPI_IMAGE=calciumion/new-api@sha256:CHANGE_ME_NEWAPI_IMAGE_DIGEST
 NEWAPI_PORT=3000
 NEWAPI_NODE_NAME=new-api-prod-1
 NEWAPI_STREAMING_TIMEOUT=600
@@ -298,7 +298,7 @@ docker compose up -d
 
 ## 配置要求
 
-`NEWAPI_IMAGE` 必须固定到明确版本标签或镜像 digest，生产环境不要使用 `latest`。
+`NEWAPI_IMAGE` 生产环境必须使用 `@sha256:` 不可变 digest。SemVer tag 仅可作为发布标签用于查询对应 digest，不应写入生产 `.env`。
 
 `NEWAPI_POSTGRES_PASSWORD` 和 `NEWAPI_REDIS_PASSWORD` 是数据库和 Redis 服务使用的原始密码。
 当密码包含 `@`、`:`、`/`、`?`、`#` 等 URL 保留字符时，需将同一密码 URL 编码后分别填入
@@ -365,7 +365,7 @@ Create `deploy/ollama/.env.example`:
 ```env
 COMPOSE_PROJECT_NAME=oc-ollama
 
-OLLAMA_IMAGE=ollama/ollama:CHANGE_ME_VERSION
+OLLAMA_IMAGE=ollama/ollama@sha256:CHANGE_ME_OLLAMA_IMAGE_DIGEST
 OLLAMA_PORT=11434
 OLLAMA_HOST=0.0.0.0:11434
 OLLAMA_ORIGINS=https://new-api.example.com
@@ -415,7 +415,7 @@ Create `deploy/ollama/README.md`:
 
 ## 镜像版本
 
-生产环境不要使用 `latest`。请在 `.env` 中将 `OLLAMA_IMAGE` 改为固定版本标签或镜像 digest，
+`OLLAMA_IMAGE` 生产环境必须使用 `@sha256:` 不可变 digest。SemVer tag 仅可作为发布标签用于查询对应 digest，不应写入生产 `.env`，
 避免重启或重新拉取时隐式升级。
 
 ## origins 配置

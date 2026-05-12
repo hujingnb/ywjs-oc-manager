@@ -4,7 +4,7 @@
 
 ## 镜像版本
 
-生产环境不要使用 `latest`。请在 `.env` 中将 `OLLAMA_IMAGE` 改为固定版本标签或镜像 digest，
+`OLLAMA_IMAGE` 生产环境必须使用 `@sha256:` 不可变 digest。SemVer tag 仅可作为发布标签用于查询对应 digest，不应写入生产 `.env`，
 避免重启或重新拉取时隐式升级。
 
 ## origins 配置

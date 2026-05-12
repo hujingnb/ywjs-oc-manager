@@ -14,7 +14,7 @@ docker compose up -d
 
 ## 配置要求
 
-`NEWAPI_IMAGE` 必须固定到明确版本标签或镜像 digest，生产环境不要使用 `latest`。
+`NEWAPI_IMAGE` 生产环境必须使用 `@sha256:` 不可变 digest。SemVer tag 仅可作为发布标签用于查询对应 digest，不应写入生产 `.env`。
 
 `NEWAPI_POSTGRES_PASSWORD` 和 `NEWAPI_REDIS_PASSWORD` 是数据库和 Redis 服务使用的原始密码。
 当密码包含 `@`、`:`、`/`、`?`、`#` 等 URL 保留字符时，需将同一密码 URL 编码后分别填入
