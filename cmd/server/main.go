@@ -140,6 +140,7 @@ func runManager(ctx context.Context, cfg config.Config, logOut io.Writer) error 
 	knowledgeService.SetRetryDispatcher(knowledgeDispatcher)
 	appService := service.NewAppService(dbStore.Queries)
 	runtimeOpService := service.NewRuntimeOperationService(dbStore.Queries, logger, redisQueue)
+	resourceMetricsService := service.NewResourceMetricsService(dbStore.Queries)
 	personaService := service.NewPersonaService(store.NewPersonaStore(dbStore))
 	// usage / organization service 在装配 newapi client 之后再实例化（见下方）；
 	// 这里仅声明变量，真实赋值发生在 newapi wiring 段。
@@ -285,27 +286,28 @@ func runManager(ctx context.Context, cfg config.Config, logOut io.Writer) error 
 	server := &http.Server{
 		Addr: cfg.App.HTTPAddr,
 		Handler: api.NewRouter(api.Dependencies{
-			AuthService:         authService,
-			OrganizationService: organizationService,
-			MemberService:       memberService,
-			OnboardingService:   onboardingService,
-			AuditService:        auditService,
-			RuntimeNodeService:  runtimeNodeService,
-			ChannelService:      channelService,
-			KnowledgeService:    knowledgeService,
-			WorkspaceService:    workspaceService,
-			RuntimeOpService:    runtimeOpService,
-			AppService:          appService,
-			UsageService:        usageService,
-			RechargeService:     rechargeService,
-			PlatformOverview:    platformOverviewService,
-			PersonaService:      personaService,
-			JobsStore:           dbStore.Queries,
-			TokenManager:        tokenManager,
-			AgentTokenSink:      agentTokenSink,
-			EnrollmentSecret:    cfg.Runtime.EnrollmentSecret,
-			JobNotifier:         redisQueue,
-			AllowedOrigins:      allowedOriginsFromConfig(cfg),
+			AuthService:            authService,
+			OrganizationService:    organizationService,
+			MemberService:          memberService,
+			OnboardingService:      onboardingService,
+			AuditService:           auditService,
+			RuntimeNodeService:     runtimeNodeService,
+			ChannelService:         channelService,
+			KnowledgeService:       knowledgeService,
+			WorkspaceService:       workspaceService,
+			RuntimeOpService:       runtimeOpService,
+			ResourceMetricsService: resourceMetricsService,
+			AppService:             appService,
+			UsageService:           usageService,
+			RechargeService:        rechargeService,
+			PlatformOverview:       platformOverviewService,
+			PersonaService:         personaService,
+			JobsStore:              dbStore.Queries,
+			TokenManager:           tokenManager,
+			AgentTokenSink:         agentTokenSink,
+			EnrollmentSecret:       cfg.Runtime.EnrollmentSecret,
+			JobNotifier:            redisQueue,
+			AllowedOrigins:         allowedOriginsFromConfig(cfg),
 		}),
 		ReadHeaderTimeout: 5 * time.Second,
 	}

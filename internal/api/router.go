@@ -34,6 +34,8 @@ type Dependencies struct {
 	WorkspaceService *service.WorkspaceService
 	// UsageService 提供 new-api 用量代理路由。
 	UsageService *service.UsageService
+	// ResourceMetricsService 提供 runtime 节点和应用实例资源指标查询路由。
+	ResourceMetricsService *service.ResourceMetricsService
 	// RuntimeOpService 提供应用运行时操作和 inspect 路由。
 	RuntimeOpService *service.RuntimeOperationService
 	// AppService 提供应用只读列表和详情路由。
@@ -125,6 +127,9 @@ func NewRouter(deps ...Dependencies) http.Handler {
 	}
 	if dep.UsageService != nil {
 		handlers.RegisterUsageRoutes(router, handlers.NewUsageHandler(dep.UsageService, dep.TokenManager))
+	}
+	if dep.ResourceMetricsService != nil {
+		handlers.RegisterResourceMetricsRoutes(router, handlers.NewResourceMetricsHandler(dep.ResourceMetricsService, dep.TokenManager))
 	}
 	if dep.RuntimeOpService != nil {
 		handlers.RegisterAppRuntimeRoutes(router, handlers.NewAppRuntimeHandler(dep.RuntimeOpService, dep.TokenManager))

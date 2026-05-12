@@ -956,6 +956,100 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/apps/{appId}/resources": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * 应用资源趋势
+         * @description 按应用 ID 查询实例资源趋势；权限沿用应用读取权限
+         */
+        get: {
+            parameters: {
+                query?: {
+                    /** @description 开始时间 RFC3339，默认最近 7 天 */
+                    from?: string;
+                    /** @description 结束时间 RFC3339，默认当前时间 */
+                    to?: string;
+                    /** @description 聚合粒度，可选 5m / 1h；为空返回原始采样 */
+                    bucket?: string;
+                };
+                header?: never;
+                path: {
+                    /** @description 应用 ID */
+                    appId: string;
+                };
+                cookie?: never;
+            };
+            requestBody?: never;
+            responses: {
+                /** @description OK */
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["handlers.InstanceResourceSamplesResponse"];
+                    };
+                };
+                /** @description Bad Request */
+                400: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["handlers.ErrorResponse"];
+                    };
+                };
+                /** @description Unauthorized */
+                401: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["handlers.ErrorResponse"];
+                    };
+                };
+                /** @description Forbidden */
+                403: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["handlers.ErrorResponse"];
+                    };
+                };
+                /** @description Not Found */
+                404: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["handlers.ErrorResponse"];
+                    };
+                };
+                /** @description Internal Server Error */
+                500: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["handlers.ErrorResponse"];
+                    };
+                };
+            };
+        };
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/apps/{appId}/runtime": {
         parameters: {
             query?: never;
@@ -4771,6 +4865,279 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/runtime-nodes/{nodeId}/instances": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * runtime 节点实例列表
+         * @description 平台管理员分页查看节点承载的应用实例及最近一次实例资源采样
+         */
+        get: {
+            parameters: {
+                query?: {
+                    /** @description 每页条数（默认 50，最大 200） */
+                    limit?: number;
+                    /** @description 分页偏移（默认 0） */
+                    offset?: number;
+                };
+                header?: never;
+                path: {
+                    /** @description 节点 ID */
+                    nodeId: string;
+                };
+                cookie?: never;
+            };
+            requestBody?: never;
+            responses: {
+                /** @description OK */
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["handlers.NodeInstancesResponse"];
+                    };
+                };
+                /** @description Unauthorized */
+                401: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["handlers.ErrorResponse"];
+                    };
+                };
+                /** @description Forbidden */
+                403: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["handlers.ErrorResponse"];
+                    };
+                };
+                /** @description Not Found */
+                404: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["handlers.ErrorResponse"];
+                    };
+                };
+                /** @description Internal Server Error */
+                500: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["handlers.ErrorResponse"];
+                    };
+                };
+            };
+        };
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/runtime-nodes/{nodeId}/instances/{appId}/resources": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * runtime 节点实例资源趋势
+         * @description 平台管理员按节点和应用 ID 查询该实例资源趋势
+         */
+        get: {
+            parameters: {
+                query?: {
+                    /** @description 开始时间 RFC3339，默认最近 7 天 */
+                    from?: string;
+                    /** @description 结束时间 RFC3339，默认当前时间 */
+                    to?: string;
+                    /** @description 聚合粒度，可选 5m / 1h；为空返回原始采样 */
+                    bucket?: string;
+                };
+                header?: never;
+                path: {
+                    /** @description 节点 ID */
+                    nodeId: string;
+                    /** @description 应用 ID */
+                    appId: string;
+                };
+                cookie?: never;
+            };
+            requestBody?: never;
+            responses: {
+                /** @description OK */
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["handlers.InstanceResourceSamplesResponse"];
+                    };
+                };
+                /** @description Bad Request */
+                400: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["handlers.ErrorResponse"];
+                    };
+                };
+                /** @description Unauthorized */
+                401: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["handlers.ErrorResponse"];
+                    };
+                };
+                /** @description Forbidden */
+                403: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["handlers.ErrorResponse"];
+                    };
+                };
+                /** @description Not Found */
+                404: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["handlers.ErrorResponse"];
+                    };
+                };
+                /** @description Internal Server Error */
+                500: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["handlers.ErrorResponse"];
+                    };
+                };
+            };
+        };
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/runtime-nodes/{nodeId}/resources": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * runtime 节点资源趋势
+         * @description 平台管理员按时间范围查询节点 CPU、内存、磁盘、网络和实例数量指标
+         */
+        get: {
+            parameters: {
+                query?: {
+                    /** @description 开始时间 RFC3339，默认最近 7 天 */
+                    from?: string;
+                    /** @description 结束时间 RFC3339，默认当前时间 */
+                    to?: string;
+                    /** @description 聚合粒度，可选 5m / 1h；为空返回原始采样 */
+                    bucket?: string;
+                };
+                header?: never;
+                path: {
+                    /** @description 节点 ID */
+                    nodeId: string;
+                };
+                cookie?: never;
+            };
+            requestBody?: never;
+            responses: {
+                /** @description OK */
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["handlers.NodeResourceSamplesResponse"];
+                    };
+                };
+                /** @description Bad Request */
+                400: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["handlers.ErrorResponse"];
+                    };
+                };
+                /** @description Unauthorized */
+                401: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["handlers.ErrorResponse"];
+                    };
+                };
+                /** @description Forbidden */
+                403: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["handlers.ErrorResponse"];
+                    };
+                };
+                /** @description Not Found */
+                404: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["handlers.ErrorResponse"];
+                    };
+                };
+                /** @description Internal Server Error */
+                500: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["handlers.ErrorResponse"];
+                    };
+                };
+            };
+        };
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/usage/members/{userId}": {
         parameters: {
             query?: never;
@@ -5083,10 +5450,13 @@ export interface components {
             name?: string;
             /** @description NodeDataRoot 是 agent 侧应用数据根目录。 */
             node_data_root?: string;
+            node_resource?: components["schemas"]["handlers.AgentNodeResourceRequest"];
             /** @description ResourceSnapshot 是 agent enroll 时上报的资源快照，原样保存为 JSON。 */
             resource_snapshot?: {
                 [key: string]: unknown;
             };
+            /** @description SampledAt 是资源采样时间；为空时 handler 使用当前 UTC 时间兼容旧 agent。 */
+            sampled_at?: string;
         };
         "handlers.AgentHeartbeatRequest": {
             /** @description AgentToken 是 enroll 后签发的节点令牌，用于认证心跳来源。 */
@@ -5097,10 +5467,34 @@ export interface components {
             metadata?: {
                 [key: string]: unknown;
             };
+            node_resource?: components["schemas"]["handlers.AgentNodeResourceRequest"];
             /** @description ResourceSnapshot 是心跳时的资源快照，覆盖节点当前快照。 */
             resource_snapshot?: {
                 [key: string]: unknown;
             };
+            /** @description SampledAt 是资源采样时间；为空时 handler 使用当前 UTC 时间兼容旧 agent。 */
+            sampled_at?: string;
+        };
+        /** @description NodeResource 是 agent 心跳时可选的节点资源采样。 */
+        "handlers.AgentNodeResourceRequest": {
+            /** @description CPUPercent 是节点 CPU 使用百分比；nil 表示 agent 未采集该指标。 */
+            cpu_percent?: number;
+            /** @description DiskTotalBytes 是节点磁盘总字节数。 */
+            disk_total_bytes?: number;
+            /** @description DiskUsedBytes 是节点磁盘已用字节数。 */
+            disk_used_bytes?: number;
+            /** @description InstanceCount 是采样时节点承载的实例数量。 */
+            instance_count?: number;
+            /** @description LastError 是 agent 侧采样失败原因；空字符串表示本次采样未报告错误。 */
+            last_error?: string;
+            /** @description MemoryTotalBytes 是节点内存总字节数。 */
+            memory_total_bytes?: number;
+            /** @description MemoryUsedBytes 是节点内存已用字节数。 */
+            memory_used_bytes?: number;
+            /** @description NetworkRxBytes 是节点网络累计接收字节数。 */
+            network_rx_bytes?: number;
+            /** @description NetworkTxBytes 是节点网络累计发送字节数。 */
+            network_tx_bytes?: number;
         };
         "handlers.CreateMemberRequest": {
             /** @description DisplayName 是前端显示名，创建与更新时都不能为空。 */
@@ -5136,6 +5530,10 @@ export interface components {
             /** @description Error 是面向前端展示的安全错误文案，不包含底层密钥、SQL 或外部接口细节。 */
             error?: string;
         };
+        "handlers.InstanceResourceSamplesResponse": {
+            /** @description Samples 是按时间升序返回的实例资源采样或聚合桶。 */
+            samples?: components["schemas"]["service.InstanceResourceSampleResult"][];
+        };
         "handlers.JobView": {
             attempts?: number;
             created_at?: string;
@@ -5154,6 +5552,14 @@ export interface components {
             password: string;
             /** @description Username 是 manager 账号名，登录失败时不区分账号不存在和密码错误。 */
             username: string;
+        };
+        "handlers.NodeInstancesResponse": {
+            /** @description Instances 是节点上承载的应用实例摘要。 */
+            instances?: components["schemas"]["service.NodeInstanceResult"][];
+        };
+        "handlers.NodeResourceSamplesResponse": {
+            /** @description Samples 是按时间升序返回的节点资源采样或聚合桶。 */
+            samples?: components["schemas"]["service.NodeResourceSampleResult"][];
         };
         "handlers.OnboardMemberRequest": {
             /** @description AppName 是随成员初始化的默认应用名称。 */
@@ -5315,6 +5721,29 @@ export interface components {
             /** @description Status 是渠道绑定状态，pending_auth 表示后台 job 正在发起登录挑战。 */
             status?: string;
         };
+        /** @description CurrentResource 是该应用在节点上的最近一次实例资源采样。 */
+        "service.InstanceResourceSampleResult": {
+            /** @description ContainerStatus 是容器采样时状态；bucket 查询取桶内最新非空状态。 */
+            container_status?: string;
+            /** @description CPUPercent 是实例 CPU 使用百分比；nil 表示该次采样缺失。 */
+            cpu_percent?: number;
+            /** @description DiskReadBytes 是实例磁盘读取累计字节数。 */
+            disk_read_bytes?: number;
+            /** @description DiskWriteBytes 是实例磁盘写入累计字节数。 */
+            disk_write_bytes?: number;
+            /** @description LastError 是采样过程的最近错误，空字符串表示没有错误或无采样值。 */
+            last_error?: string;
+            /** @description MemoryLimitBytes 是实例内存限制字节数。 */
+            memory_limit_bytes?: number;
+            /** @description MemoryUsedBytes 是实例内存已用字节数。 */
+            memory_used_bytes?: number;
+            /** @description NetworkRxBytes 是实例网络接收累计字节数。 */
+            network_rx_bytes?: number;
+            /** @description NetworkTxBytes 是实例网络发送累计字节数。 */
+            network_tx_bytes?: number;
+            /** @description SampledAt 是采样或聚合桶时间，统一输出 UTC RFC3339。 */
+            sampled_at?: string;
+        };
         "service.KnowledgeEntryResult": {
             is_dir?: boolean;
             name?: string;
@@ -5352,6 +5781,64 @@ export interface components {
             status?: string;
             /** @description Username 是登录账号名。 */
             username?: string;
+        };
+        /** @description CurrentResource 是节点最近一次资源采样摘要；列表页用于展示当前资源状态。 */
+        "service.NodeCurrentResourceResult": {
+            /** @description CPUPercent 是节点 CPU 使用百分比；nil 表示最近采样缺少该指标。 */
+            cpu_percent?: number;
+            /** @description DiskTotalBytes 是节点磁盘总字节数。 */
+            disk_total_bytes?: number;
+            /** @description DiskUsedBytes 是节点磁盘已用字节数。 */
+            disk_used_bytes?: number;
+            /** @description InstanceCount 是采样时节点承载的实例数量。 */
+            instance_count?: number;
+            /** @description LastError 是最近一次节点资源采样错误，空字符串表示无错误或未上报。 */
+            last_error?: string;
+            /** @description MemoryTotalBytes 是节点内存总字节数。 */
+            memory_total_bytes?: number;
+            /** @description MemoryUsedBytes 是节点内存已用字节数。 */
+            memory_used_bytes?: number;
+            /** @description SampledAt 是最近一次采样时间，统一输出 UTC RFC3339。 */
+            sampled_at?: string;
+        };
+        "service.NodeInstanceResult": {
+            /** @description AppID 是实例所属应用 ID。 */
+            app_id?: string;
+            /** @description ContainerID 是 runtime 侧容器 ID；未创建容器时为空。 */
+            container_id?: string;
+            current_resource?: components["schemas"]["service.InstanceResourceSampleResult"];
+            /** @description Name 是应用名称。 */
+            name?: string;
+            /** @description OrgID 是应用所属组织 ID，用于后续前端跳转和权限上下文。 */
+            org_id?: string;
+            /** @description OwnerUserID 是应用所有者用户 ID。 */
+            owner_user_id?: string;
+            /** @description RuntimeNodeID 是实例所在 runtime 节点 ID。 */
+            runtime_node_id?: string;
+            /** @description Status 是应用生命周期状态。 */
+            status?: string;
+        };
+        "service.NodeResourceSampleResult": {
+            /** @description CPUPercent 是节点 CPU 使用百分比；nil 表示该次采样缺失。 */
+            cpu_percent?: number;
+            /** @description DiskTotalBytes 是节点磁盘总字节数。 */
+            disk_total_bytes?: number;
+            /** @description DiskUsedBytes 是节点磁盘已用字节数。 */
+            disk_used_bytes?: number;
+            /** @description InstanceCount 是采样时节点承载的实例数量。 */
+            instance_count?: number;
+            /** @description LastError 是采样过程的最近错误，空字符串表示没有错误或无采样值。 */
+            last_error?: string;
+            /** @description MemoryTotalBytes 是节点内存总字节数。 */
+            memory_total_bytes?: number;
+            /** @description MemoryUsedBytes 是节点内存已用字节数。 */
+            memory_used_bytes?: number;
+            /** @description NetworkRxBytes 是节点网络接收累计字节数。 */
+            network_rx_bytes?: number;
+            /** @description NetworkTxBytes 是节点网络发送累计字节数。 */
+            network_tx_bytes?: number;
+            /** @description SampledAt 是采样或聚合桶时间，统一输出 UTC RFC3339。 */
+            sampled_at?: string;
         };
         "service.OnboardMemberResult": {
             app?: components["schemas"]["service.AppResult"];
@@ -5448,6 +5935,7 @@ export interface components {
             agent_id?: string;
             /** @description AgentVersion 是最近一次 enroll 或 heartbeat 上报的 agent 版本。 */
             agent_version?: string;
+            current_resource?: components["schemas"]["service.NodeCurrentResourceResult"];
             /** @description HasAgentToken 表示节点是否已保存 agent token hash；不会返回 token 明文。 */
             has_agent_token?: boolean;
             /** @description HeartbeatIntervalSeconds 是 manager 告知 agent 的心跳间隔秒数。 */

@@ -30,10 +30,15 @@ components:
         node_data_root:
           description: NodeDataRoot 是 agent 侧应用数据根目录。
           type: string
+        node_resource:
+          $ref: '#/components/schemas/handlers.AgentNodeResourceRequest'
         resource_snapshot:
           additionalProperties: {}
           description: ResourceSnapshot 是 agent enroll 时上报的资源快照，原样保存为 JSON。
           type: object
+        sampled_at:
+          description: SampledAt 是资源采样时间；为空时 handler 使用当前 UTC 时间兼容旧 agent。
+          type: string
       required:
       - agent_id
       type: object
@@ -49,12 +54,48 @@ components:
           additionalProperties: {}
           description: Metadata 是心跳时的附加元数据，覆盖节点当前元数据。
           type: object
+        node_resource:
+          $ref: '#/components/schemas/handlers.AgentNodeResourceRequest'
         resource_snapshot:
           additionalProperties: {}
           description: ResourceSnapshot 是心跳时的资源快照，覆盖节点当前快照。
           type: object
+        sampled_at:
+          description: SampledAt 是资源采样时间；为空时 handler 使用当前 UTC 时间兼容旧 agent。
+          type: string
       required:
       - agent_token
+      type: object
+    handlers.AgentNodeResourceRequest:
+      description: NodeResource 是 agent 心跳时可选的节点资源采样。
+      properties:
+        cpu_percent:
+          description: CPUPercent 是节点 CPU 使用百分比；nil 表示 agent 未采集该指标。
+          type: number
+        disk_total_bytes:
+          description: DiskTotalBytes 是节点磁盘总字节数。
+          type: integer
+        disk_used_bytes:
+          description: DiskUsedBytes 是节点磁盘已用字节数。
+          type: integer
+        instance_count:
+          description: InstanceCount 是采样时节点承载的实例数量。
+          type: integer
+        last_error:
+          description: LastError 是 agent 侧采样失败原因；空字符串表示本次采样未报告错误。
+          type: string
+        memory_total_bytes:
+          description: MemoryTotalBytes 是节点内存总字节数。
+          type: integer
+        memory_used_bytes:
+          description: MemoryUsedBytes 是节点内存已用字节数。
+          type: integer
+        network_rx_bytes:
+          description: NetworkRxBytes 是节点网络累计接收字节数。
+          type: integer
+        network_tx_bytes:
+          description: NetworkTxBytes 是节点网络累计发送字节数。
+          type: integer
       type: object
     handlers.CreateMemberRequest:
       properties:
@@ -117,6 +158,15 @@ components:
           description: Error 是面向前端展示的安全错误文案，不包含底层密钥、SQL 或外部接口细节。
           type: string
       type: object
+    handlers.InstanceResourceSamplesResponse:
+      properties:
+        samples:
+          description: Samples 是按时间升序返回的实例资源采样或聚合桶。
+          items:
+            $ref: '#/components/schemas/service.InstanceResourceSampleResult'
+          type: array
+          uniqueItems: false
+      type: object
     handlers.JobView:
       properties:
         attempts:
@@ -152,6 +202,24 @@ components:
       required:
       - password
       - username
+      type: object
+    handlers.NodeInstancesResponse:
+      properties:
+        instances:
+          description: Instances 是节点上承载的应用实例摘要。
+          items:
+            $ref: '#/components/schemas/service.NodeInstanceResult'
+          type: array
+          uniqueItems: false
+      type: object
+    handlers.NodeResourceSamplesResponse:
+      properties:
+        samples:
+          description: Samples 是按时间升序返回的节点资源采样或聚合桶。
+          items:
+            $ref: '#/components/schemas/service.NodeResourceSampleResult'
+          type: array
+          uniqueItems: false
       type: object
     handlers.OnboardMemberRequest:
       properties:
@@ -422,6 +490,40 @@ components:
           description: Status 是渠道绑定状态，pending_auth 表示后台 job 正在发起登录挑战。
           type: string
       type: object
+    service.InstanceResourceSampleResult:
+      description: CurrentResource 是该应用在节点上的最近一次实例资源采样。
+      properties:
+        container_status:
+          description: ContainerStatus 是容器采样时状态；bucket 查询取桶内最新非空状态。
+          type: string
+        cpu_percent:
+          description: CPUPercent 是实例 CPU 使用百分比；nil 表示该次采样缺失。
+          type: number
+        disk_read_bytes:
+          description: DiskReadBytes 是实例磁盘读取累计字节数。
+          type: integer
+        disk_write_bytes:
+          description: DiskWriteBytes 是实例磁盘写入累计字节数。
+          type: integer
+        last_error:
+          description: LastError 是采样过程的最近错误，空字符串表示没有错误或无采样值。
+          type: string
+        memory_limit_bytes:
+          description: MemoryLimitBytes 是实例内存限制字节数。
+          type: integer
+        memory_used_bytes:
+          description: MemoryUsedBytes 是实例内存已用字节数。
+          type: integer
+        network_rx_bytes:
+          description: NetworkRxBytes 是实例网络接收累计字节数。
+          type: integer
+        network_tx_bytes:
+          description: NetworkTxBytes 是实例网络发送累计字节数。
+          type: integer
+        sampled_at:
+          description: SampledAt 是采样或聚合桶时间，统一输出 UTC RFC3339。
+          type: string
+      type: object
     service.KnowledgeEntryResult:
       properties:
         is_dir:
@@ -484,6 +586,93 @@ components:
           type: string
         username:
           description: Username 是登录账号名。
+          type: string
+      type: object
+    service.NodeCurrentResourceResult:
+      description: CurrentResource 是节点最近一次资源采样摘要；列表页用于展示当前资源状态。
+      properties:
+        cpu_percent:
+          description: CPUPercent 是节点 CPU 使用百分比；nil 表示最近采样缺少该指标。
+          type: number
+        disk_total_bytes:
+          description: DiskTotalBytes 是节点磁盘总字节数。
+          type: integer
+        disk_used_bytes:
+          description: DiskUsedBytes 是节点磁盘已用字节数。
+          type: integer
+        instance_count:
+          description: InstanceCount 是采样时节点承载的实例数量。
+          type: integer
+        last_error:
+          description: LastError 是最近一次节点资源采样错误，空字符串表示无错误或未上报。
+          type: string
+        memory_total_bytes:
+          description: MemoryTotalBytes 是节点内存总字节数。
+          type: integer
+        memory_used_bytes:
+          description: MemoryUsedBytes 是节点内存已用字节数。
+          type: integer
+        sampled_at:
+          description: SampledAt 是最近一次采样时间，统一输出 UTC RFC3339。
+          type: string
+      type: object
+    service.NodeInstanceResult:
+      properties:
+        app_id:
+          description: AppID 是实例所属应用 ID。
+          type: string
+        container_id:
+          description: ContainerID 是 runtime 侧容器 ID；未创建容器时为空。
+          type: string
+        current_resource:
+          $ref: '#/components/schemas/service.InstanceResourceSampleResult'
+        name:
+          description: Name 是应用名称。
+          type: string
+        org_id:
+          description: OrgID 是应用所属组织 ID，用于后续前端跳转和权限上下文。
+          type: string
+        owner_user_id:
+          description: OwnerUserID 是应用所有者用户 ID。
+          type: string
+        runtime_node_id:
+          description: RuntimeNodeID 是实例所在 runtime 节点 ID。
+          type: string
+        status:
+          description: Status 是应用生命周期状态。
+          type: string
+      type: object
+    service.NodeResourceSampleResult:
+      properties:
+        cpu_percent:
+          description: CPUPercent 是节点 CPU 使用百分比；nil 表示该次采样缺失。
+          type: number
+        disk_total_bytes:
+          description: DiskTotalBytes 是节点磁盘总字节数。
+          type: integer
+        disk_used_bytes:
+          description: DiskUsedBytes 是节点磁盘已用字节数。
+          type: integer
+        instance_count:
+          description: InstanceCount 是采样时节点承载的实例数量。
+          type: integer
+        last_error:
+          description: LastError 是采样过程的最近错误，空字符串表示没有错误或无采样值。
+          type: string
+        memory_total_bytes:
+          description: MemoryTotalBytes 是节点内存总字节数。
+          type: integer
+        memory_used_bytes:
+          description: MemoryUsedBytes 是节点内存已用字节数。
+          type: integer
+        network_rx_bytes:
+          description: NetworkRxBytes 是节点网络接收累计字节数。
+          type: integer
+        network_tx_bytes:
+          description: NetworkTxBytes 是节点网络发送累计字节数。
+          type: integer
+        sampled_at:
+          description: SampledAt 是采样或聚合桶时间，统一输出 UTC RFC3339。
           type: string
       type: object
     service.OnboardMemberResult:
@@ -643,6 +832,8 @@ components:
         agent_version:
           description: AgentVersion 是最近一次 enroll 或 heartbeat 上报的 agent 版本。
           type: string
+        current_resource:
+          $ref: '#/components/schemas/service.NodeCurrentResourceResult'
         has_agent_token:
           description: HasAgentToken 表示节点是否已保存 agent token hash；不会返回 token 明文。
           type: boolean
@@ -1443,6 +1634,73 @@ paths:
       summary: 上传应用级知识库文件
       tags:
       - knowledge
+  /apps/{appId}/resources:
+    get:
+      description: 按应用 ID 查询实例资源趋势；权限沿用应用读取权限
+      parameters:
+      - description: 应用 ID
+        in: path
+        name: appId
+        required: true
+        schema:
+          type: string
+      - description: 开始时间 RFC3339，默认最近 7 天
+        in: query
+        name: from
+        schema:
+          type: string
+      - description: 结束时间 RFC3339，默认当前时间
+        in: query
+        name: to
+        schema:
+          type: string
+      - description: 聚合粒度，可选 5m / 1h；为空返回原始采样
+        in: query
+        name: bucket
+        schema:
+          type: string
+      responses:
+        "200":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/handlers.InstanceResourceSamplesResponse'
+          description: OK
+        "400":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/handlers.ErrorResponse'
+          description: Bad Request
+        "401":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/handlers.ErrorResponse'
+          description: Unauthorized
+        "403":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/handlers.ErrorResponse'
+          description: Forbidden
+        "404":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/handlers.ErrorResponse'
+          description: Not Found
+        "500":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/handlers.ErrorResponse'
+          description: Internal Server Error
+      security:
+      - BearerAuth: []
+      summary: 应用资源趋势
+      tags:
+      - apps
   /apps/{appId}/runtime:
     get:
       description: 返回应用容器的 inspect 视图；container_id 为空时返回 status="no_container"
@@ -3952,6 +4210,202 @@ paths:
       security:
       - BearerAuth: []
       summary: 启用 runtime 节点
+      tags:
+      - runtime-nodes
+  /runtime-nodes/{nodeId}/instances:
+    get:
+      description: 平台管理员分页查看节点承载的应用实例及最近一次实例资源采样
+      parameters:
+      - description: 节点 ID
+        in: path
+        name: nodeId
+        required: true
+        schema:
+          type: string
+      - description: 每页条数（默认 50，最大 200）
+        in: query
+        name: limit
+        schema:
+          type: integer
+      - description: 分页偏移（默认 0）
+        in: query
+        name: offset
+        schema:
+          type: integer
+      responses:
+        "200":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/handlers.NodeInstancesResponse'
+          description: OK
+        "401":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/handlers.ErrorResponse'
+          description: Unauthorized
+        "403":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/handlers.ErrorResponse'
+          description: Forbidden
+        "404":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/handlers.ErrorResponse'
+          description: Not Found
+        "500":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/handlers.ErrorResponse'
+          description: Internal Server Error
+      security:
+      - BearerAuth: []
+      summary: runtime 节点实例列表
+      tags:
+      - runtime-nodes
+  /runtime-nodes/{nodeId}/instances/{appId}/resources:
+    get:
+      description: 平台管理员按节点和应用 ID 查询该实例资源趋势
+      parameters:
+      - description: 节点 ID
+        in: path
+        name: nodeId
+        required: true
+        schema:
+          type: string
+      - description: 应用 ID
+        in: path
+        name: appId
+        required: true
+        schema:
+          type: string
+      - description: 开始时间 RFC3339，默认最近 7 天
+        in: query
+        name: from
+        schema:
+          type: string
+      - description: 结束时间 RFC3339，默认当前时间
+        in: query
+        name: to
+        schema:
+          type: string
+      - description: 聚合粒度，可选 5m / 1h；为空返回原始采样
+        in: query
+        name: bucket
+        schema:
+          type: string
+      responses:
+        "200":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/handlers.InstanceResourceSamplesResponse'
+          description: OK
+        "400":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/handlers.ErrorResponse'
+          description: Bad Request
+        "401":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/handlers.ErrorResponse'
+          description: Unauthorized
+        "403":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/handlers.ErrorResponse'
+          description: Forbidden
+        "404":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/handlers.ErrorResponse'
+          description: Not Found
+        "500":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/handlers.ErrorResponse'
+          description: Internal Server Error
+      security:
+      - BearerAuth: []
+      summary: runtime 节点实例资源趋势
+      tags:
+      - runtime-nodes
+  /runtime-nodes/{nodeId}/resources:
+    get:
+      description: 平台管理员按时间范围查询节点 CPU、内存、磁盘、网络和实例数量指标
+      parameters:
+      - description: 节点 ID
+        in: path
+        name: nodeId
+        required: true
+        schema:
+          type: string
+      - description: 开始时间 RFC3339，默认最近 7 天
+        in: query
+        name: from
+        schema:
+          type: string
+      - description: 结束时间 RFC3339，默认当前时间
+        in: query
+        name: to
+        schema:
+          type: string
+      - description: 聚合粒度，可选 5m / 1h；为空返回原始采样
+        in: query
+        name: bucket
+        schema:
+          type: string
+      responses:
+        "200":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/handlers.NodeResourceSamplesResponse'
+          description: OK
+        "400":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/handlers.ErrorResponse'
+          description: Bad Request
+        "401":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/handlers.ErrorResponse'
+          description: Unauthorized
+        "403":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/handlers.ErrorResponse'
+          description: Forbidden
+        "404":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/handlers.ErrorResponse'
+          description: Not Found
+        "500":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/handlers.ErrorResponse'
+          description: Internal Server Error
+      security:
+      - BearerAuth: []
+      summary: runtime 节点资源趋势
       tags:
       - runtime-nodes
   /usage/members/{userId}:
