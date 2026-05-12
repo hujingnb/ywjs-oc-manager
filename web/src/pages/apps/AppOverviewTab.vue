@@ -53,7 +53,7 @@
       </n-descriptions-item>
       <n-descriptions-item label="人设模式">{{ app.persona_mode }}</n-descriptions-item>
       <n-descriptions-item label="所属组织">
-        <code>{{ app.org_id }}</code>
+        {{ organizationName }}
       </n-descriptions-item>
       <n-descriptions-item v-if="app.description" label="描述" :span="2">
         {{ app.description }}
@@ -93,6 +93,7 @@ import {
   useToggleAppAPIKey,
   type AppDTO,
 } from '@/api/hooks/useApps'
+import { useOrganizationQuery } from '@/api/hooks/useOrganizations'
 import AppStatusTag from '@/components/AppStatusTag.vue'
 import ConfirmActionModal from '@/components/ConfirmActionModal.vue'
 import JobProgressPanel from '@/components/JobProgressPanel.vue'
@@ -105,6 +106,10 @@ const appId = computed<string | undefined>(() => props.appId)
 
 const app = inject<Ref<AppDTO | null>>('app')
 const auth = useAuthStore()
+// orgId 只用于展示组织名称；权限和业务 API 仍继续使用 app.org_id。
+const orgId = computed<string | undefined>(() => app?.value?.org_id)
+const organizationQuery = useOrganizationQuery(orgId)
+const organizationName = computed(() => organizationQuery.data.value?.name || '未知组织')
 
 const initMutation = useInitializeAppMutation(appId)
 // trackingJobId 记录最近一次后台任务，供 JobProgressPanel 轮询展示执行进度。
