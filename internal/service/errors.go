@@ -15,6 +15,9 @@ var ErrNotFound = errors.New("资源不存在")
 // ErrConflict 表示资源冲突，如唯一性约束冲突或状态冲突。
 var ErrConflict = errors.New("资源冲突")
 
+// ErrInvalidResourceRange 表示资源趋势查询的时间范围或聚合粒度非法，handler 层应映射为 400。
+var ErrInvalidResourceRange = errors.New("资源查询范围不合法")
+
 // 节点 -------------------------------------------------------------
 
 // ErrNoNodeAvailable 表示当前没有「active 且剩余容量 > 0」的节点可分配新应用。

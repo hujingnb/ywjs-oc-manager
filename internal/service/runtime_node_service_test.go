@@ -5,9 +5,11 @@ import (
 	"context"
 	"errors"
 	"testing"
+	"time"
 
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgtype"
+	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
 	"oc-manager/internal/auth"
@@ -148,6 +150,27 @@ func TestRuntimeNodeServiceListRequiresPlatformAdmin(t *testing.T) {
 	require.ErrorIs(t, err, ErrForbidden)
 }
 
+// TestRuntimeNodeServiceListNodesIncludesCurrentResource 验证运行节点列表带出每个节点最近一次资源采样摘要。
+func TestRuntimeNodeServiceListNodesIncludesCurrentResource(t *testing.T) {
+	store := newRuntimeNodeStoreStub(t)
+	svc := newRuntimeNodeServiceForTest(t, store)
+	enrolled, err := svc.EnrollAgent(context.Background(), validEnrollInput())
+	require.NoError(t, err)
+	nodeID := mustUUID(t, enrolled.NodeID)
+	store.latestNodeSamples[enrolled.NodeID] = sqlc.NodeResourceSample{
+		RuntimeNodeID: nodeID,
+		SampledAt:     pgtype.Timestamptz{Time: mustTime(t, "2026-05-13T12:00:00Z"), Valid: true},
+		CpuPercent:    pgtype.Float8{Float64: 42.5, Valid: true},
+	}
+
+	results, err := svc.ListNodes(context.Background(), auth.Principal{Role: domain.UserRolePlatformAdmin}, 10, 0)
+	require.NoError(t, err)
+	require.Len(t, results, 1)
+	require.NotNil(t, results[0].CurrentResource)
+	require.NotNil(t, results[0].CurrentResource.CPUPercent)
+	assert.Equal(t, 42.5, *results[0].CurrentResource.CPUPercent)
+}
+
 func validEnrollInput() AgentEnrollInput {
 	return AgentEnrollInput{
 		AgentID:             "00000000-0000-0000-0000-00000000a001",
@@ -178,16 +201,17 @@ func newRuntimeNodeServiceForTest(t *testing.T, store *runtimeNodeStoreStub) *Ru
 func fakeTokenHasher(token string) string { return "hashed:" + token }
 
 type runtimeNodeStoreStub struct {
-	t             *testing.T
-	nodes         map[string]sqlc.RuntimeNode
-	nextID        int
-	lastHeartbeat sqlc.UpdateRuntimeNodeHeartbeatParams
-	auditLogs     []sqlc.CreateAuditLogParams
+	t                 *testing.T
+	nodes             map[string]sqlc.RuntimeNode
+	latestNodeSamples map[string]sqlc.NodeResourceSample
+	nextID            int
+	lastHeartbeat     sqlc.UpdateRuntimeNodeHeartbeatParams
+	auditLogs         []sqlc.CreateAuditLogParams
 }
 
 func newRuntimeNodeStoreStub(t *testing.T) *runtimeNodeStoreStub {
 	t.Helper()
-	return &runtimeNodeStoreStub{t: t, nodes: map[string]sqlc.RuntimeNode{}, nextID: 1}
+	return &runtimeNodeStoreStub{t: t, nodes: map[string]sqlc.RuntimeNode{}, latestNodeSamples: map[string]sqlc.NodeResourceSample{}, nextID: 1}
 }
 
 func (s *runtimeNodeStoreStub) EnrollRuntimeNodeInsert(_ context.Context, arg sqlc.EnrollRuntimeNodeInsertParams) (sqlc.RuntimeNode, error) {
@@ -274,6 +298,16 @@ func (s *runtimeNodeStoreStub) ListRuntimeNodes(_ context.Context, _ sqlc.ListRu
 	return results, nil
 }
 
+func (s *runtimeNodeStoreStub) ListLatestNodeResourceSamples(_ context.Context, ids []pgtype.UUID) ([]sqlc.NodeResourceSample, error) {
+	results := make([]sqlc.NodeResourceSample, 0, len(ids))
+	for _, id := range ids {
+		if sample, ok := s.latestNodeSamples[uuidToString(id)]; ok {
+			results = append(results, sample)
+		}
+	}
+	return results, nil
+}
+
 func (s *runtimeNodeStoreStub) UpdateRuntimeNodeHeartbeat(_ context.Context, arg sqlc.UpdateRuntimeNodeHeartbeatParams) (sqlc.RuntimeNode, error) {
 	s.lastHeartbeat = arg
 	node, ok := s.nodes[uuidToString(arg.ID)]
@@ -322,4 +356,11 @@ func (s *runtimeNodeStoreStub) findByAgentID(t *testing.T, agentID string) sqlc.
 	}
 	require.NoError(t, err)
 	return node
+}
+
+func mustTime(t *testing.T, value string) time.Time {
+	t.Helper()
+	parsed, err := time.Parse(time.RFC3339, value)
+	require.NoError(t, err)
+	return parsed
 }

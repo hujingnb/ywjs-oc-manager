@@ -33,6 +33,7 @@ type RuntimeNodeStore interface {
 	GetRuntimeNodeByAgentID(ctx context.Context, agentID pgtype.Text) (sqlc.RuntimeNode, error)
 	GetRuntimeNodeByName(ctx context.Context, name string) (sqlc.RuntimeNode, error)
 	ListRuntimeNodes(ctx context.Context, arg sqlc.ListRuntimeNodesParams) ([]sqlc.RuntimeNode, error)
+	ListLatestNodeResourceSamples(ctx context.Context, runtimeNodeIds []pgtype.UUID) ([]sqlc.NodeResourceSample, error)
 	UpdateRuntimeNodeHeartbeat(ctx context.Context, arg sqlc.UpdateRuntimeNodeHeartbeatParams) (sqlc.RuntimeNode, error)
 	SetRuntimeNodeStatus(ctx context.Context, arg sqlc.SetRuntimeNodeStatusParams) (sqlc.RuntimeNode, error)
 	CreateAuditLog(ctx context.Context, arg sqlc.CreateAuditLogParams) (sqlc.AuditLog, error)
@@ -101,6 +102,20 @@ type RuntimeNodeResult struct {
 	ProbeFailureStreak int32 `json:"probe_failure_streak"`
 	// ProbeSuccessStreak 是连续探测成功次数，用于判断节点恢复稳定性。
 	ProbeSuccessStreak int32 `json:"probe_success_streak"`
+	// CurrentResource 是节点最近一次资源采样摘要；列表页用于展示当前资源状态。
+	CurrentResource *NodeCurrentResourceResult `json:"current_resource,omitempty"`
+}
+
+// NodeCurrentResourceResult 是运行节点最近一次资源采样摘要。
+type NodeCurrentResourceResult struct {
+	SampledAt        string   `json:"sampled_at"`
+	CPUPercent       *float64 `json:"cpu_percent,omitempty"`
+	MemoryUsedBytes  *int64   `json:"memory_used_bytes,omitempty"`
+	MemoryTotalBytes *int64   `json:"memory_total_bytes,omitempty"`
+	DiskUsedBytes    *int64   `json:"disk_used_bytes,omitempty"`
+	DiskTotalBytes   *int64   `json:"disk_total_bytes,omitempty"`
+	InstanceCount    *int32   `json:"instance_count,omitempty"`
+	LastError        string   `json:"last_error,omitempty"`
 }
 
 // AgentEnrollInput 是 agent 自动注册时提交的自描述信息。
@@ -243,9 +258,28 @@ func (s *RuntimeNodeService) ListNodes(ctx context.Context, principal auth.Princ
 	if err != nil {
 		return nil, fmt.Errorf("查询 runtime 节点失败: %w", err)
 	}
+	nodeIDs := make([]pgtype.UUID, 0, len(nodes))
+	for _, node := range nodes {
+		nodeIDs = append(nodeIDs, node.ID)
+	}
+	latestByNode := map[string]sqlc.NodeResourceSample{}
+	if len(nodeIDs) > 0 {
+		samples, err := s.store.ListLatestNodeResourceSamples(ctx, nodeIDs)
+		if err != nil {
+			return nil, fmt.Errorf("查询 runtime 节点最近资源采样失败: %w", err)
+		}
+		for _, sample := range samples {
+			latestByNode[uuidToString(sample.RuntimeNodeID)] = sample
+		}
+	}
 	results := make([]RuntimeNodeResult, 0, len(nodes))
 	for _, node := range nodes {
-		results = append(results, toRuntimeNodeResult(node))
+		result := toRuntimeNodeResult(node)
+		if sample, ok := latestByNode[uuidToString(node.ID)]; ok {
+			current := toNodeCurrentResourceResult(sample)
+			result.CurrentResource = &current
+		}
+		results = append(results, result)
 	}
 	return results, nil
 }
@@ -403,6 +437,34 @@ func toRuntimeNodeResult(node sqlc.RuntimeNode) RuntimeNodeResult {
 	}
 	if node.LastProbeError.Valid {
 		result.LastProbeError = node.LastProbeError.String
+	}
+	return result
+}
+
+// toNodeCurrentResourceResult 将最近一次节点资源采样转成列表摘要。
+// nullable 指标保持 nil，避免把采集缺失误展示为 0。
+func toNodeCurrentResourceResult(sample sqlc.NodeResourceSample) NodeCurrentResourceResult {
+	result := NodeCurrentResourceResult{SampledAt: formatSampledAt(sample.SampledAt)}
+	if sample.CpuPercent.Valid {
+		result.CPUPercent = float64Ptr(sample.CpuPercent.Float64)
+	}
+	if sample.MemoryUsedBytes.Valid {
+		result.MemoryUsedBytes = int64Ptr(sample.MemoryUsedBytes.Int64)
+	}
+	if sample.MemoryTotalBytes.Valid {
+		result.MemoryTotalBytes = int64Ptr(sample.MemoryTotalBytes.Int64)
+	}
+	if sample.DiskUsedBytes.Valid {
+		result.DiskUsedBytes = int64Ptr(sample.DiskUsedBytes.Int64)
+	}
+	if sample.DiskTotalBytes.Valid {
+		result.DiskTotalBytes = int64Ptr(sample.DiskTotalBytes.Int64)
+	}
+	if sample.InstanceCount.Valid {
+		result.InstanceCount = int32Ptr(sample.InstanceCount.Int32)
+	}
+	if sample.LastError.Valid {
+		result.LastError = sample.LastError.String
 	}
 	return result
 }
