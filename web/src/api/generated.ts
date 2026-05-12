@@ -242,7 +242,7 @@ export interface paths {
         put?: never;
         /**
          * 禁用应用 API Key
-         * @description 异步触发禁用应用关联的 new-api token，仅平台或组织管理员可操作
+         * @description 异步触发禁用应用关联的 new-api token，仅应用所属组织管理员可操作
          */
         post: {
             parameters: {
@@ -322,7 +322,7 @@ export interface paths {
         put?: never;
         /**
          * 恢复应用 API Key
-         * @description 异步触发恢复应用关联的 new-api token，仅平台或组织管理员可操作
+         * @description 异步触发恢复应用关联的 new-api token，仅应用所属组织管理员可操作
          */
         post: {
             parameters: {
@@ -2566,7 +2566,7 @@ export interface paths {
         put?: never;
         /**
          * 重置成员密码
-         * @description 平台管理员或组织管理员强制重置指定成员的密码
+         * @description 组织管理员强制重置本组织成员的密码
          */
         post: {
             parameters: {
@@ -3790,7 +3790,7 @@ export interface paths {
         put?: never;
         /**
          * 创建组织成员
-         * @description 组织管理员或平台管理员在指定组织下创建新成员
+         * @description 组织管理员在本组织下创建新成员
          */
         post: {
             parameters: {
@@ -4995,48 +4995,75 @@ export type webhooks = Record<string, never>;
 export interface components {
     schemas: {
         "handlers.AgentEnrollRequest": {
+            /** @description AgentDockerEndpoint 是 manager 访问该 agent Docker 代理的地址。 */
             agent_docker_endpoint?: string;
+            /** @description AgentFileEndpoint 是 manager 访问该 agent 文件代理的地址。 */
             agent_file_endpoint?: string;
+            /** @description AgentID 是 agent 自报的稳定外部 ID，用于幂等 enroll 与节点复用。 */
             agent_id: string;
+            /** @description AgentTLSCACert 是 agent 代理 TLS CA 证书内容，可为空。 */
             agent_tls_ca_cert?: string;
+            /** @description AgentVersion 是 agent 当前版本，用于节点巡检与升级判断。 */
             agent_version?: string;
+            /** @description MaxApps 是节点可承载应用数量上限；nil 表示不限。 */
             max_apps?: number;
+            /** @description Metadata 是 agent 附加元数据，原样保存为 JSON。 */
             metadata?: {
                 [key: string]: unknown;
             };
+            /** @description Name 是节点展示名，空值由 service 使用 AgentID 兜底。 */
             name?: string;
+            /** @description NodeDataRoot 是 agent 侧应用数据根目录。 */
             node_data_root?: string;
+            /** @description ResourceSnapshot 是 agent enroll 时上报的资源快照，原样保存为 JSON。 */
             resource_snapshot?: {
                 [key: string]: unknown;
             };
         };
         "handlers.AgentHeartbeatRequest": {
+            /** @description AgentToken 是 enroll 后签发的节点令牌，用于认证心跳来源。 */
             agent_token: string;
+            /** @description AgentVersion 是心跳时的 agent 版本。 */
             agent_version?: string;
+            /** @description Metadata 是心跳时的附加元数据，覆盖节点当前元数据。 */
             metadata?: {
                 [key: string]: unknown;
             };
+            /** @description ResourceSnapshot 是心跳时的资源快照，覆盖节点当前快照。 */
             resource_snapshot?: {
                 [key: string]: unknown;
             };
         };
         "handlers.CreateMemberRequest": {
+            /** @description DisplayName 是前端显示名，创建与更新时都不能为空。 */
             display_name: string;
+            /** @description Password 是初始密码，service 层立即 hash 后写库。 */
             password: string;
+            /** @description Role 允许 org_admin / org_member；空值由 service 层补默认 org_member。 */
             role?: string;
+            /** @description Username 是组织内登录账号名，创建后不可通过成员更新接口修改。 */
             username: string;
         };
         "handlers.CreateOrganizationRequest": {
+            /** @description AdminDisplayName 是首个 org_admin 的显示名。 */
             admin_display_name: string;
+            /** @description AdminPassword 是首个 org_admin 的初始密码，service 层立即 hash 后写库。 */
             admin_password: string;
+            /** @description AdminUsername 是随组织创建的首个 org_admin 账号名。 */
             admin_username: string;
+            /** @description ContactName 是业务联系人姓名，可为空。 */
             contact_name?: string;
+            /** @description ContactPhone 是业务联系人电话，可为空；不参与权限或登录校验。 */
             contact_phone?: string;
+            /** @description CreditWarningThreshold 是组织余额预警阈值；nil 表示不启用余额预警或保持预警关闭。 */
             credit_warning_threshold?: number;
+            /** @description Name 是组织展示名，也是平台管理员列表中识别租户的主字段。 */
             name: string;
+            /** @description Remark 是平台管理员维护的内部备注。 */
             remark?: string;
         };
         "handlers.ErrorResponse": {
+            /** @description Error 是面向前端展示的安全错误文案，不包含底层密钥、SQL 或外部接口细节。 */
             error?: string;
         };
         "handlers.JobView": {
@@ -5051,54 +5078,85 @@ export interface components {
             type?: string;
         };
         "handlers.LoginRequest": {
+            /** @description Password 是明文登录密码，仅用于本次校验，handler 不写日志。 */
             password: string;
+            /** @description Username 是 manager 账号名，登录失败时不区分账号不存在和密码错误。 */
             username: string;
         };
         "handlers.OnboardMemberRequest": {
+            /** @description AppName 是随成员初始化的默认应用名称。 */
             app_name: string;
+            /** @description AppPrompt 是默认应用的初始提示词，可为空。 */
             app_prompt?: string;
+            /** @description ChannelType 是初始化渠道绑定的渠道标识。 */
             channel_type?: string;
+            /** @description DisplayName 是新成员展示名。 */
             display_name: string;
+            /** @description Password 是新成员初始密码。 */
             password: string;
+            /** @description PersonaMode 控制新应用是否继承组织人设或使用独立人设。 */
             persona_mode?: string;
+            /** @description Role 为空时默认为 org_member；不允许创建 platform_admin。 */
             role?: string;
+            /** @description NodeID 是指定 runtime 节点；为空时 service 自动选择可用节点。 */
             runtime_node_id?: string;
+            /** @description Username 是新成员账号名，与普通创建成员保持同一约束。 */
             username: string;
         };
         "handlers.OrganizationRequest": {
+            /** @description ContactName 是业务联系人姓名，可置空。 */
             contact_name?: string;
+            /** @description ContactPhone 是业务联系人电话，可置空。 */
             contact_phone?: string;
+            /** @description CreditWarningThreshold 是组织余额预警阈值；nil 表示清空或未设置预警阈值。 */
             credit_warning_threshold?: number;
+            /** @description Name 是组织展示名；更新时仍必填，避免空名称进入前端列表。 */
             name: string;
+            /** @description Remark 是平台管理员维护的内部备注，可置空。 */
             remark?: string;
         };
         "handlers.PersonaRequest": {
+            /** @description AllowMemberOverride 表示成员应用是否允许覆盖组织默认人设。 */
             allow_member_override?: boolean;
+            /** @description ConversationRules 是会话行为约束，可为空。 */
             conversation_rules?: string;
+            /** @description ForbiddenRules 是组织层禁止规则，可为空。 */
             forbidden_rules?: string;
+            /** @description ReplyStyle 是默认回复风格描述，可为空。 */
             reply_style?: string;
+            /** @description SystemPrompt 是组织默认系统提示词，不能为空。 */
             system_prompt: string;
         };
         "handlers.RechargeRequest": {
+            /** @description CreditAmount 是充值额度，必须为正数，service 层会同步写入 new-api。 */
             credit_amount: number;
+            /** @description Remark 是本次充值的审计备注。 */
             remark?: string;
         };
         "handlers.RefreshRequest": {
+            /** @description RefreshToken 是长生命周期刷新令牌，service 层只保存其 hash 并在刷新时轮换。 */
             refresh_token: string;
         };
         "handlers.ResetPasswordRequest": {
+            /** @description Password 是新密码，service 层只保存 hash。 */
             password: string;
         };
         "handlers.RetryOrgSyncRequest": {
+            /** @description NodeID 是需要重试同步的 runtime 节点 ID。 */
             node_id: string;
         };
         "handlers.UpdateMemberRequest": {
+            /** @description DisplayName 是成员展示名，更新接口要求显式传入非空值。 */
             display_name: string;
+            /** @description Role 为空表示保持原角色；非空时需要管理员权限并限制在组织角色内。 */
             role?: string;
         };
         "service.AgentEnrollResult": {
+            /** @description AgentToken 是新签发的 agent 明文 token，仅在 enroll 响应中返回一次。 */
             agent_token?: string;
+            /** @description HeartbeatIntervalSeconds 是 agent 后续上报心跳的建议间隔。 */
             heartbeat_interval_seconds?: number;
+            /** @description NodeID 是 manager 为该 agent 分配或复用的 runtime node ID。 */
             node_id?: string;
         };
         "service.AppResult": {
@@ -5150,15 +5208,23 @@ export interface components {
             used_quota?: number;
         };
         "service.ChallengeResult": {
+            /** @description ChallengeType 是登录挑战类型，例如 qrcode 或 code；异步 worker 未生成时为空。 */
             challenge_type?: string;
+            /** @description ChannelType 是渠道标识，例如 wechat。 */
             channel_type?: string;
+            /** @description Code 是非二维码登录场景的一次性验证码。 */
             code?: string;
+            /** @description ExpiresAt 是挑战过期时间；零值表示当前响应没有同步挑战。 */
             expires_at?: string;
+            /** @description Hints 是 adapter 返回的展示提示，key/value 均为前端可直接展示的安全文本。 */
             hints?: {
                 [key: string]: string;
             };
+            /** @description JobID 是异步 channel_start_login job ID，前端可据此追踪后台任务。 */
             job_id?: string;
+            /** @description QRCode 是二维码内容或 URL，具体格式由 channel adapter 决定。 */
             qrcode?: string;
+            /** @description Status 是渠道绑定状态，pending_auth 表示后台 job 正在发起登录挑战。 */
             status?: string;
         };
         "service.KnowledgeEntryResult": {
@@ -5176,17 +5242,27 @@ export interface components {
             user?: components["schemas"]["service.AuthUser"];
         };
         "service.LogsPage": {
+            /** @description Scope 标识日志所属维度，当前为 app 或 member。 */
             scope?: string;
+            /** @description ScopeID 是对应维度的 manager UUID，便于前端复核查询上下文。 */
             scope_id?: string;
+            /** @description Total 是 new-api 返回的分页总数。 */
             total?: number;
+            /** @description UpdatedAt 是 manager 代理完成时刻，不代表 new-api 内部采集时间。 */
             updated_at?: string;
         };
         "service.MemberResult": {
+            /** @description DisplayName 是前端展示名。 */
             display_name?: string;
+            /** @description ID 是成员用户 UUID。 */
             id?: string;
+            /** @description OrgID 是成员所属组织 UUID；platform_admin 可能为空。 */
             org_id?: string;
+            /** @description Role 是成员角色，限定为 org_admin 或 org_member。 */
             role?: string;
+            /** @description Status 是成员状态；disabled 会阻止登录并设置 users.deleted_at。 */
             status?: string;
+            /** @description Username 是登录账号名。 */
             username?: string;
         };
         "service.OnboardMemberResult": {
@@ -5195,13 +5271,21 @@ export interface components {
             member?: components["schemas"]["service.MemberResult"];
         };
         "service.OrganizationResult": {
+            /** @description ContactName 是业务联系人姓名。 */
             contact_name?: string;
+            /** @description ContactPhone 是业务联系人电话。 */
             contact_phone?: string;
+            /** @description CreditWarningThreshold 是组织余额预警阈值。 */
             credit_warning_threshold?: number;
+            /** @description ID 是 manager 组织 UUID。 */
             id?: string;
+            /** @description Name 是组织展示名。 */
             name?: string;
+            /** @description NewAPIUserID 是组织在 new-api 侧的用户 ID，缺失时充值和用量接口不可用。 */
             newapi_user_id?: string;
+            /** @description Remark 是平台管理员维护的内部备注。 */
             remark?: string;
+            /** @description Status 是组织状态，active / disabled 决定成员是否可登录。 */
             status?: string;
         };
         "service.PersonaResult": {
@@ -5223,18 +5307,27 @@ export interface components {
             usage_available?: boolean;
         };
         "service.ProgressResult": {
+            /** @description BoundIdentity 是渠道侧已绑定身份，如微信号或 OpenID 的展示值。 */
             bound_identity?: string;
+            /** @description ChannelName 是渠道侧账号或会话名称。 */
             channel_name?: string;
+            /** @description ErrorMessage 是最近一次绑定失败原因，已由 worker 写入安全错误文本。 */
             error_message?: string;
+            /** @description Metadata 是绑定过程产生的附加展示信息，会经过 channelBindingMetadata 归一化。 */
             metadata?: {
                 [key: string]: string;
             };
+            /** @description Status 是当前渠道绑定状态，直接来自 channel_bindings.status。 */
             status?: string;
+            /** @description UpdatedAt 是绑定记录最近更新时间，用于前端判断轮询新鲜度。 */
             updated_at?: string;
         };
         "service.QuotaSeries": {
+            /** @description Scope 标识配额序列所属维度，当前为 organization 或 platform。 */
             scope?: string;
+            /** @description ScopeID 是组织维度的 manager org UUID；平台维度为空。 */
             scope_id?: string;
+            /** @description UpdatedAt 是 manager 代理完成时刻，不代表 new-api 内部采集时间。 */
             updated_at?: string;
         };
         "service.RechargeRecordResult": {
@@ -5255,27 +5348,48 @@ export interface components {
             status?: string;
         };
         "service.RuntimeNodeResult": {
+            /** @description AgentDockerEndpoint 是 manager 访问该节点 Docker 代理的 HTTPS 地址。 */
             agent_docker_endpoint?: string;
+            /** @description AgentFileEndpoint 是 manager 访问该节点文件代理的 HTTPS 地址。 */
             agent_file_endpoint?: string;
+            /** @description AgentID 是 agent 自报的外部稳定 ID，用于幂等 enroll。 */
             agent_id?: string;
+            /** @description AgentVersion 是最近一次 enroll 或 heartbeat 上报的 agent 版本。 */
             agent_version?: string;
+            /** @description HasAgentToken 表示节点是否已保存 agent token hash；不会返回 token 明文。 */
             has_agent_token?: boolean;
+            /** @description HeartbeatIntervalSeconds 是 manager 告知 agent 的心跳间隔秒数。 */
             heartbeat_interval_seconds?: number;
+            /** @description ID 是 manager 侧 runtime_nodes 主键。 */
             id?: string;
+            /** @description LastProbeAttemptedAt 是最近一次探测开始时间，空值表示尚未探测。 */
             last_probe_attempted_at?: string;
+            /** @description LastProbeError 是最近一次探测失败原因，已由探测流程写入安全错误文本。 */
             last_probe_error?: string;
+            /** @description LastProbeFailedAt 是最近一次探测失败时间。 */
             last_probe_failed_at?: string;
+            /** @description LastProbeOKAt 是最近一次探测成功时间。 */
             last_probe_ok_at?: string;
+            /** @description MaxApps 是节点可承载应用上限；nil 表示不限制。 */
             max_apps?: number;
+            /** @description Name 是管理员后台展示的节点名称。 */
             name?: string;
+            /** @description NodeDataRoot 是 agent 侧应用数据根目录。 */
             node_data_root?: string;
+            /** @description ProbeFailureStreak 是连续探测失败次数，用于前端展示节点健康风险。 */
             probe_failure_streak?: number;
+            /** @description ProbeSuccessStreak 是连续探测成功次数，用于判断节点恢复稳定性。 */
             probe_success_streak?: number;
+            /** @description Status 是节点管理状态，active 才允许 agent 心跳继续更新。 */
             status?: string;
         };
-        /** @enum {string} */
+        /**
+         * @description Operation 是本次实际入队的操作枚举。
+         * @enum {string}
+         */
         "service.RuntimeOperation": "start" | "stop" | "restart" | "delete" | "disable_api_key" | "restore_api_key";
         "service.RuntimeOperationResult": {
+            /** @description JobID 是写入 jobs 表后的异步任务 ID，前端用它查询执行进度。 */
             job_id?: string;
             operation?: components["schemas"]["service.RuntimeOperation"];
         };

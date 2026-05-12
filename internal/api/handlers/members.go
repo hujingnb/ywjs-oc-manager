@@ -77,7 +77,7 @@ func RegisterMemberRoutes(router gin.IRouter, handler *MembersHandler) {
 // Create 创建组织成员。
 //
 // @Summary      创建组织成员
-// @Description  组织管理员或平台管理员在指定组织下创建新成员
+// @Description  组织管理员在本组织下创建新成员
 // @Tags         members
 // @Accept       json
 // @Produce      json
@@ -313,7 +313,7 @@ func (h *MembersHandler) Onboard(c *gin.Context) {
 // ResetPassword 由管理员重置成员密码。
 //
 // @Summary      重置成员密码
-// @Description  平台管理员或组织管理员强制重置指定成员的密码
+// @Description  组织管理员强制重置本组织成员的密码
 // @Tags         members
 // @Accept       json
 // @Produce      json

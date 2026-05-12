@@ -4,11 +4,18 @@
     :eyebrow="auth.user?.role === 'platform_admin' ? 'Platform · Apps' : '组织 · Apps'"
     :columns="columns"
     :data="visibleApps"
-    :loading="isLoading"
-    :error-message="!effectiveOrgId ? '当前账号未关联组织' : undefined"
+    :loading="isLoading || organizationsLoading"
+    :error-message="errorMessage"
     :row-key="(row: AppDTO) => row.id"
   >
     <template #toolbar>
+      <n-select
+        v-if="isPlatformAdmin"
+        v-model:value="selectedOrgId"
+        :options="orgOptions"
+        style="width: 220px"
+        placeholder="选择组织"
+      />
       <n-button v-if="canCreateApp" type="primary" @click="router.push('/members/new')">创建成员并初始化</n-button>
     </template>
   </DataTableList>
@@ -30,7 +37,7 @@
 import { computed, ref } from 'vue'
 import { useRouter } from 'vue-router'
 import { useQueryClient } from '@tanstack/vue-query'
-import { NButton } from 'naive-ui'
+import { NButton, NSelect } from 'naive-ui'
 
 import ConfirmActionModal from '@/components/ConfirmActionModal.vue'
 import DataTableList from '@/components/DataTableList.vue'
@@ -38,6 +45,7 @@ import { linkColumn, statusColumn, actionColumn } from '@/components/columns'
 import { formatAppStatus } from '@/domain/status'
 import { apiRequest } from '@/api/client'
 import { useAppsByOrgQuery, type AppDTO } from '@/api/hooks/useApps'
+import { usePlatformOrgSelection } from '@/composables/usePlatformOrgSelection'
 import { canCreateAppForOrg, canManageApp } from '@/domain/permissions'
 import { useAuthStore } from '@/stores/auth'
 
@@ -47,9 +55,15 @@ const auth = useAuthStore()
 const router = useRouter()
 const client = useQueryClient()
 
-// effectiveOrgId 优先使用平台入口传入的组织，组织用户则落到当前登录组织。
-const effectiveOrgId = computed(() => props.orgId ?? auth.user?.org_id)
-const isOrgMember = computed(() => auth.user?.role === 'org_member')
+// 平台管理员通过组织选择器切换观察范围，组织用户则落到当前登录组织。
+const {
+  isPlatformAdmin,
+  selectedOrgId,
+  effectiveOrgId,
+  orgOptions,
+  organizationsLoading,
+  organizationsError,
+} = usePlatformOrgSelection(computed(() => auth.user), computed(() => props.orgId))
 // canCreateApp 控制创建入口，后端仍按组织边界校验创建权限。
 const canCreateApp = computed(() => canCreateAppForOrg(auth.user, effectiveOrgId.value))
 const { data: apps, isLoading } = useAppsByOrgQuery(effectiveOrgId)
@@ -61,6 +75,13 @@ const visibleApps = computed(() => {
     return apps.value.filter(app => app.owner_user_id === auth.user?.id)
   }
   return apps.value
+})
+
+// errorMessage 区分平台管理员未选组织和组织用户无归属，避免平台读页面误报“未关联组织”。
+const errorMessage = computed(() => {
+  if (organizationsError.value) return String(organizationsError.value)
+  if (!effectiveOrgId.value) return isPlatformAdmin.value ? '暂无可查看组织' : '当前账号未关联组织'
+  return undefined
 })
 
 const toDelete = ref<AppDTO | null>(null)

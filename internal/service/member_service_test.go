@@ -31,12 +31,22 @@ func TestMemberServiceCreateRequiresOrgManagement(t *testing.T) {
 	require.ErrorIs(t, err, ErrForbidden)
 }
 
+func TestMemberServiceCreateRejectsPlatformAdmin(t *testing.T) {
+	store := newMemberStoreStub(t)
+	svc := NewMemberService(store, fakeHash)
+
+	_, err := svc.CreateMember(context.Background(), platformAdmin(), testOrgID, MemberInput{
+		Username: "alice", DisplayName: "Alice", Password: "password",
+	})
+	require.ErrorIs(t, err, ErrForbidden)
+}
+
 func TestMemberServiceCreateRejectsDisabledOrg(t *testing.T) {
 	store := newMemberStoreStub(t)
 	store.org.Status = domain.StatusDisabled
 	svc := NewMemberService(store, fakeHash)
 
-	_, err := svc.CreateMember(context.Background(), platformAdmin(), testOrgID, MemberInput{
+	_, err := svc.CreateMember(context.Background(), orgAdminPrincipal(), testOrgID, MemberInput{
 		Username: "alice", DisplayName: "Alice", Password: "password",
 	})
 	require.ErrorIs(t, err, ErrMemberCreateInvalid)
@@ -56,7 +66,7 @@ func TestMemberServiceCreateAssignsDefaultRoleAndHashesPassword(t *testing.T) {
 	store := newMemberStoreStub(t)
 	svc := NewMemberService(store, fakeHash)
 
-	result, err := svc.CreateMember(context.Background(), platformAdmin(), testOrgID, MemberInput{
+	result, err := svc.CreateMember(context.Background(), orgAdminPrincipal(), testOrgID, MemberInput{
 		Username: "alice", DisplayName: "Alice", Password: "password",
 	})
 	require.NoError(t, err)
@@ -194,7 +204,7 @@ func TestMemberServiceResetPasswordSucceeds(t *testing.T) {
 	}
 	svc := NewMemberService(store, fakeHash)
 
-	err := svc.ResetMemberPassword(context.Background(), platformAdmin(), testMemUID, "new-pass")
+	err := svc.ResetMemberPassword(context.Background(), orgAdminPrincipal(), testMemUID, "new-pass")
 	require.NoError(t, err)
 	if store.lastPwdUpdate.PasswordHash == "" || store.lastPwdUpdate.PasswordHash == "new-pass" {
 		t.Fatalf("password not hashed, got %q", store.lastPwdUpdate.PasswordHash)
@@ -223,7 +233,7 @@ func TestDeleteMember_SoftDeletesAndEnqueuesAppDelete(t *testing.T) {
 
 	notifier := &fakeNotifier{}
 	svc := NewMemberService(stub, fakeHash)
-	err := svc.DeleteMember(context.Background(), platformAdmin(), uuidToString(target.ID), notifier)
+	err := svc.DeleteMember(context.Background(), orgAdminPrincipal(), uuidToString(target.ID), notifier)
 	require.NoError(t, err)
 	require.Equal(t, domain.StatusDisabled, stub.users[uuidToString(target.ID)].Status)
 	require.Equal(t, 1, len(stub.softDeleted))
@@ -244,7 +254,7 @@ func TestDeleteMember_NoAppStillSoftDeletesUser(t *testing.T) {
 	}
 	stub.users[uuidToString(target.ID)] = target
 	svc := NewMemberService(stub, fakeHash)
-	err := svc.DeleteMember(context.Background(), platformAdmin(), uuidToString(target.ID), nil)
+	err := svc.DeleteMember(context.Background(), orgAdminPrincipal(), uuidToString(target.ID), nil)
 	require.NoError(t, err)
 	require.Equal(t, 0, len(stub.jobs))
 }
@@ -279,6 +289,10 @@ func TestDeleteMember_OrgMemberCannotDeleteOthers(t *testing.T) {
 
 func platformAdmin() auth.Principal {
 	return auth.Principal{Role: domain.UserRolePlatformAdmin, UserID: "00000000-0000-0000-0000-000000000001"}
+}
+
+func orgAdminPrincipal() auth.Principal {
+	return auth.Principal{Role: domain.UserRoleOrgAdmin, OrgID: testOrgID, UserID: testAdminUID}
 }
 
 type memberStoreStub struct {

@@ -89,7 +89,7 @@ type MemberResult struct {
 }
 
 // CreateMember 创建组织成员。
-// 平台管理员可在任意启用组织内创建；组织管理员仅能在自己组织内创建。
+// 仅本组织管理员可创建；平台管理员只保留成员观察能力，不直接创建组织成员。
 // 当前版本仅支持创建 org_admin 或 org_member 角色，平台管理员账号通过种子数据维护。
 func (s *MemberService) CreateMember(ctx context.Context, principal auth.Principal, orgID string, input MemberInput) (MemberResult, error) {
 	role := strings.TrimSpace(input.Role)
@@ -99,7 +99,7 @@ func (s *MemberService) CreateMember(ctx context.Context, principal auth.Princip
 	if role != domain.UserRoleOrgAdmin && role != domain.UserRoleOrgMember {
 		return MemberResult{}, fmt.Errorf("%w: 不支持的角色", ErrMemberCreateInvalid)
 	}
-	if !auth.CanManageOrg(principal, orgID) {
+	if !auth.CanManageMember(principal, orgID) {
 		return MemberResult{}, ErrForbidden
 	}
 	if input.Username == "" || input.Password == "" || input.DisplayName == "" {
@@ -193,7 +193,7 @@ func (s *MemberService) GetMember(ctx context.Context, principal auth.Principal,
 }
 
 // UpdateMemberProfile 更新成员显示名和角色。
-// 普通成员仅能修改自己的显示名；调整角色需要组织管理员或平台管理员权限。
+// 普通成员仅能修改自己的显示名；调整角色需要本组织管理员权限。
 func (s *MemberService) UpdateMemberProfile(ctx context.Context, principal auth.Principal, userID string, input MemberInput) (MemberResult, error) {
 	id, err := parseUUID(userID)
 	if err != nil {
@@ -238,7 +238,7 @@ func (s *MemberService) UpdateMemberProfile(ctx context.Context, principal auth.
 }
 
 // SetMemberStatus 启用或禁用成员。
-// 仅组织管理员或平台管理员可执行；不能禁用自己以避免锁定唯一管理员。
+// 仅本组织管理员可执行；不能禁用自己以避免锁定唯一管理员。
 func (s *MemberService) SetMemberStatus(ctx context.Context, principal auth.Principal, userID, status string) (MemberResult, error) {
 	if status != domain.StatusActive && status != domain.StatusDisabled {
 		return MemberResult{}, fmt.Errorf("非法成员状态: %s", status)

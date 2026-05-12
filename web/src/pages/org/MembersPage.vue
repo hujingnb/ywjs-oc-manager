@@ -6,14 +6,22 @@
       :eyebrow="orgEyebrow"
       :columns="columns"
       :data="members ?? []"
-      :loading="isLoading"
+      :loading="isLoading || organizationsLoading"
+      :error-message="errorMessage"
       :row-key="(row: Member) => row.id"
     >
       <template #toolbar>
-        <n-button v-if="effectiveOrgId" @click="router.push('/members/new')">
+        <n-select
+          v-if="isPlatformAdmin"
+          v-model:value="selectedOrgId"
+          :options="orgOptions"
+          style="width: 220px"
+          placeholder="选择组织"
+        />
+        <n-button v-if="canOnboardMember" @click="router.push('/members/new')">
           创建并初始化
         </n-button>
-        <n-button type="primary" :disabled="!effectiveOrgId" @click="openForm">
+        <n-button v-if="canManageMembers" type="primary" @click="openForm">
           新增成员
         </n-button>
       </template>
@@ -102,6 +110,7 @@ import {
 import ConfirmActionModal from '@/components/ConfirmActionModal.vue'
 import DataTableList from '@/components/DataTableList.vue'
 import { statusColumn, actionColumn } from '@/components/columns'
+import { usePlatformOrgSelection } from '@/composables/usePlatformOrgSelection'
 import { useFormModal } from '@/composables/useFormModal'
 import type { Member } from '@/api'
 import { useAuthStore } from '@/stores/auth'
@@ -110,9 +119,20 @@ import { useAuthStore } from '@/stores/auth'
 const props = defineProps<{ orgId?: string }>()
 const auth = useAuthStore()
 const router = useRouter()
-// effectiveOrgId 支持平台视角传入组织 ID，也支持组织管理员默认管理自身组织。
-const effectiveOrgId = computed(() => props.orgId ?? auth.user?.org_id)
+// 平台管理员通过组织选择器查看成员，组织管理员默认管理自身组织。
+const {
+  isPlatformAdmin,
+  selectedOrgId,
+  effectiveOrgId,
+  orgOptions,
+  organizationsLoading,
+  organizationsError,
+} = usePlatformOrgSelection(computed(() => auth.user), computed(() => props.orgId))
 const orgEyebrow = computed(() => auth.user?.role === 'platform_admin' ? 'Platform · 组织成员' : '我的组织')
+// 一键开户会同步创建应用，按后端 CanCreateAppForOrg 规则仅开放给本组织管理员。
+const canOnboardMember = computed(() => auth.user?.role === 'org_admin' && Boolean(effectiveOrgId.value))
+// 成员写操作只允许本组织管理员；平台管理员在本页仅查看成员信息。
+const canManageMembers = computed(() => auth.user?.role === 'org_admin' && auth.user?.org_id === effectiveOrgId.value)
 
 const { data: members, isLoading } = useMembersQuery(effectiveOrgId)
 const createMutation = useCreateMember(effectiveOrgId)
@@ -126,6 +146,13 @@ const resetNewPassword = ref('')
 const resetMutation = useResetMemberPassword()
 const resetFeedback = ref('')
 const resetError = ref(false)
+
+// errorMessage 区分平台管理员无可选组织和组织用户无归属。
+const errorMessage = computed(() => {
+  if (organizationsError.value) return String(organizationsError.value)
+  if (!effectiveOrgId.value) return isPlatformAdmin.value ? '暂无可查看组织' : '当前账号未关联组织'
+  return undefined
+})
 
 // 创建成员表单状态聚合到 useFormModal
 const { form, formVisible, creating, submitError, openForm, submit } = useFormModal<MemberFormPayload>({
@@ -147,10 +174,10 @@ const columns = [
   statusColumn<Member>('状态', r => formatMemberStatus(r.status)),
   // 启用/禁用互斥：用两条 RowAction + hidden 分别渲染
   actionColumn<Member>([
-    { label: '禁用', onClick: r => onToggle(r, 'disable'), hidden: r => r.status !== 'active' },
-    { label: '启用', type: 'primary', onClick: r => onToggle(r, 'enable'), hidden: r => r.status === 'active' },
-    { label: '重置密码', onClick: r => openResetForm(r) },
-    { label: '删除', type: 'error', onClick: r => { memberToDelete.value = r } },
+    { label: '禁用', onClick: r => onToggle(r, 'disable'), hidden: r => !canManageMembers.value || r.status !== 'active' },
+    { label: '启用', type: 'primary', onClick: r => onToggle(r, 'enable'), hidden: r => !canManageMembers.value || r.status === 'active' },
+    { label: '重置密码', hidden: () => !canManageMembers.value, onClick: r => openResetForm(r) },
+    { label: '删除', type: 'error', hidden: () => !canManageMembers.value, onClick: r => { memberToDelete.value = r } },
   ]),
 ]
 

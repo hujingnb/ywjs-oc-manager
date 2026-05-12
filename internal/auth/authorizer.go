@@ -47,11 +47,10 @@ func CanViewMember(p Principal, memberOrgID, memberUserID string) bool {
 	}
 }
 
-// CanManageMember 判断主体能否对目标成员执行写操作（角色调整、状态切换、密码重置）。
+// CanManageMember 判断主体能否对目标成员执行写操作（创建、角色调整、状态切换、密码重置）。
+// 平台管理员只保留跨组织成员观察能力，不直接介入组织成员生命周期。
 func CanManageMember(p Principal, memberOrgID string) bool {
 	switch p.Role {
-	case domain.UserRolePlatformAdmin:
-		return true
 	case domain.UserRoleOrgAdmin:
 		return p.OrgID == memberOrgID
 	default:

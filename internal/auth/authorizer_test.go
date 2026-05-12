@@ -90,7 +90,7 @@ func TestCanViewMember(t *testing.T) {
 
 func TestCanManageMember(t *testing.T) {
 	cases := []orgCase{
-		{"platform_admin 跨组织可管成员", domain.UserRolePlatformAdmin, orgA, orgB, true},
+		{"platform_admin 跨组织只读成员不可管", domain.UserRolePlatformAdmin, orgA, orgB, false},
 		{"org_admin 同组织可管成员", domain.UserRoleOrgAdmin, orgA, orgA, true},
 		{"org_admin 跨组织不可管", domain.UserRoleOrgAdmin, orgA, orgB, false},
 		{"org_member 一律不可管", domain.UserRoleOrgMember, orgA, orgA, false},
@@ -100,7 +100,7 @@ func TestCanManageMember(t *testing.T) {
 
 func TestCanEditMember(t *testing.T) {
 	cases := []memberCase{
-		{"platform_admin 任意可编辑", domain.UserRolePlatformAdmin, orgA, userA, orgB, userB, true},
+		{"platform_admin 不可编辑组织成员", domain.UserRolePlatformAdmin, orgA, userA, orgB, userB, false},
 		{"org_admin 同组织可编辑", domain.UserRoleOrgAdmin, orgA, userA, orgA, userB, true},
 		{"org_admin 跨组织不可编辑", domain.UserRoleOrgAdmin, orgA, userA, orgB, userB, false},
 		{"org_member 仅可编辑自己", domain.UserRoleOrgMember, orgA, userA, orgA, userA, true},

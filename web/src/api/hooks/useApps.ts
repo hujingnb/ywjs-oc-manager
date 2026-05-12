@@ -175,7 +175,7 @@ export function useTriggerRuntimeOperation(appId: Ref<string | undefined>) {
 }
 
 // useToggleAppAPIKey 触发禁用 / 恢复应用绑定的 new-api token。
-// 后端只允许 platform_admin / org_admin；普通成员调用会 403。
+// 后端只允许应用所属组织管理员；平台管理员和普通成员调用会 403。
 // 操作只影响应用详情中的 api_key_status，不需要刷新运行时快照。
 export function useToggleAppAPIKey(appId: Ref<string | undefined>) {
   const client = useQueryClient()

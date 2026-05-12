@@ -16,12 +16,19 @@
       </template>
 
       <n-space align="center" style="margin-bottom: 12px">
+        <n-select
+          v-if="isPlatformAdmin"
+          v-model:value="selectedOrgId"
+          :options="orgOptions"
+          style="width: 220px"
+          placeholder="选择组织"
+        />
         <span class="state-text" style="margin: 0">当前路径：<code>{{ relativePath || '/' }}</code></span>
         <n-button v-if="relativePath" size="small" @click="goUp">返回上级</n-button>
       </n-space>
 
-      <div v-if="!effectiveOrgId" class="state-text">当前账号未关联组织</div>
-      <div v-else-if="isLoading" class="state-text">加载中…</div>
+      <div v-if="!effectiveOrgId" class="state-text">{{ emptyOrgMessage }}</div>
+      <div v-else-if="isLoading || organizationsLoading" class="state-text">加载中…</div>
       <div v-else-if="error" class="state-text danger">查询失败：{{ error.message }}</div>
       <n-data-table
         v-else
@@ -57,7 +64,7 @@
 
 <script setup lang="ts">
 import { computed, h, ref } from 'vue'
-import { NButton, NCard, NDataTable, NSpace, NTag, type DataTableColumns } from 'naive-ui'
+import { NButton, NCard, NDataTable, NSelect, NSpace, NTag, type DataTableColumns } from 'naive-ui'
 
 import {
   useDeleteOrgKnowledge,
@@ -68,14 +75,21 @@ import {
   type KnowledgeEntry,
   type OrgSyncStatusEntry,
 } from '@/api/hooks/useKnowledge'
+import { usePlatformOrgSelection } from '@/composables/usePlatformOrgSelection'
 import { canManageOrgKnowledge } from '@/domain/permissions'
 import { useAuthStore } from '@/stores/auth'
 
 // OrgKnowledgePage 管理组织级共享知识库，并展示各 runtime node 的同步状态。
 const props = defineProps<{ orgId?: string }>()
 const auth = useAuthStore()
-// effectiveOrgId 支持平台管理员从组织详情进入，也支持组织用户默认使用自身组织。
-const effectiveOrgId = computed(() => props.orgId ?? auth.user?.org_id)
+// 平台管理员通过组织选择器查看组织知识库，组织用户默认使用自身组织。
+const {
+  isPlatformAdmin,
+  selectedOrgId,
+  effectiveOrgId,
+  orgOptions,
+  organizationsLoading,
+} = usePlatformOrgSelection(computed(() => auth.user), computed(() => props.orgId))
 
 // relativePath 是当前浏览目录的组织内相对路径，空字符串表示知识库根目录。
 const relativePath = ref('')
@@ -83,6 +97,7 @@ const relativeRef = computed(() => relativePath.value)
 const eyebrow = computed(() => (auth.user?.role === 'platform_admin' ? 'Platform · 知识库' : '组织 · 知识库'))
 // canManage 决定上传、删除和同步重试入口是否可见，接口层仍执行最终权限校验。
 const canManage = computed(() => canManageOrgKnowledge(auth.user, effectiveOrgId.value))
+const emptyOrgMessage = computed(() => isPlatformAdmin.value ? '暂无可查看组织' : '当前账号未关联组织')
 
 const { data: listing, isLoading, error } = useOrgKnowledgeQuery(effectiveOrgId, relativeRef)
 const uploadMutation = useUploadOrgKnowledge(effectiveOrgId, relativeRef)

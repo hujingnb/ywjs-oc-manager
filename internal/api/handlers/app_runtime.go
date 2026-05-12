@@ -107,10 +107,10 @@ func (h *AppRuntimeHandler) Restart(c *gin.Context) { h.trigger(c, service.Runti
 // @Router       /apps/{appId}/runtime/delete [post]
 func (h *AppRuntimeHandler) Delete(c *gin.Context) { h.trigger(c, service.RuntimeOperationDelete) }
 
-// DisableAPIKey 触发禁用 new-api token；仅平台 / 组织管理员。
+// DisableAPIKey 触发禁用 new-api token；仅应用所属组织管理员。
 //
 // @Summary      禁用应用 API Key
-// @Description  异步触发禁用应用关联的 new-api token，仅平台或组织管理员可操作
+// @Description  异步触发禁用应用关联的 new-api token，仅应用所属组织管理员可操作
 // @Tags         runtime-operations
 // @Produce      json
 // @Security     BearerAuth
@@ -125,10 +125,10 @@ func (h *AppRuntimeHandler) DisableAPIKey(c *gin.Context) {
 	h.trigger(c, service.RuntimeOperationDisableAPIKey)
 }
 
-// RestoreAPIKey 触发启用 new-api token；仅平台 / 组织管理员。
+// RestoreAPIKey 触发启用 new-api token；仅应用所属组织管理员。
 //
 // @Summary      恢复应用 API Key
-// @Description  异步触发恢复应用关联的 new-api token，仅平台或组织管理员可操作
+// @Description  异步触发恢复应用关联的 new-api token，仅应用所属组织管理员可操作
 // @Tags         runtime-operations
 // @Produce      json
 // @Security     BearerAuth

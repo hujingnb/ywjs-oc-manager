@@ -3,26 +3,36 @@ components:
     handlers.AgentEnrollRequest:
       properties:
         agent_docker_endpoint:
+          description: AgentDockerEndpoint 是 manager 访问该 agent Docker 代理的地址。
           type: string
         agent_file_endpoint:
+          description: AgentFileEndpoint 是 manager 访问该 agent 文件代理的地址。
           type: string
         agent_id:
+          description: AgentID 是 agent 自报的稳定外部 ID，用于幂等 enroll 与节点复用。
           type: string
         agent_tls_ca_cert:
+          description: AgentTLSCACert 是 agent 代理 TLS CA 证书内容，可为空。
           type: string
         agent_version:
+          description: AgentVersion 是 agent 当前版本，用于节点巡检与升级判断。
           type: string
         max_apps:
+          description: MaxApps 是节点可承载应用数量上限；nil 表示不限。
           type: integer
         metadata:
           additionalProperties: {}
+          description: Metadata 是 agent 附加元数据，原样保存为 JSON。
           type: object
         name:
+          description: Name 是节点展示名，空值由 service 使用 AgentID 兜底。
           type: string
         node_data_root:
+          description: NodeDataRoot 是 agent 侧应用数据根目录。
           type: string
         resource_snapshot:
           additionalProperties: {}
+          description: ResourceSnapshot 是 agent enroll 时上报的资源快照，原样保存为 JSON。
           type: object
       required:
       - agent_id
@@ -30,14 +40,18 @@ components:
     handlers.AgentHeartbeatRequest:
       properties:
         agent_token:
+          description: AgentToken 是 enroll 后签发的节点令牌，用于认证心跳来源。
           type: string
         agent_version:
+          description: AgentVersion 是心跳时的 agent 版本。
           type: string
         metadata:
           additionalProperties: {}
+          description: Metadata 是心跳时的附加元数据，覆盖节点当前元数据。
           type: object
         resource_snapshot:
           additionalProperties: {}
+          description: ResourceSnapshot 是心跳时的资源快照，覆盖节点当前快照。
           type: object
       required:
       - agent_token
@@ -45,12 +59,16 @@ components:
     handlers.CreateMemberRequest:
       properties:
         display_name:
+          description: DisplayName 是前端显示名，创建与更新时都不能为空。
           type: string
         password:
+          description: Password 是初始密码，service 层立即 hash 后写库。
           type: string
         role:
+          description: Role 允许 org_admin / org_member；空值由 service 层补默认 org_member。
           type: string
         username:
+          description: Username 是组织内登录账号名，创建后不可通过成员更新接口修改。
           type: string
       required:
       - display_name
@@ -60,20 +78,28 @@ components:
     handlers.CreateOrganizationRequest:
       properties:
         admin_display_name:
+          description: AdminDisplayName 是首个 org_admin 的显示名。
           type: string
         admin_password:
+          description: AdminPassword 是首个 org_admin 的初始密码，service 层立即 hash 后写库。
           type: string
         admin_username:
+          description: AdminUsername 是随组织创建的首个 org_admin 账号名。
           type: string
         contact_name:
+          description: ContactName 是业务联系人姓名，可为空。
           type: string
         contact_phone:
+          description: ContactPhone 是业务联系人电话，可为空；不参与权限或登录校验。
           type: string
         credit_warning_threshold:
+          description: CreditWarningThreshold 是组织余额预警阈值；nil 表示不启用余额预警或保持预警关闭。
           type: integer
         name:
+          description: Name 是组织展示名，也是平台管理员列表中识别租户的主字段。
           type: string
         remark:
+          description: Remark 是平台管理员维护的内部备注。
           type: string
       required:
       - admin_display_name
@@ -84,6 +110,7 @@ components:
     handlers.ErrorResponse:
       properties:
         error:
+          description: Error 是面向前端展示的安全错误文案，不包含底层密钥、SQL 或外部接口细节。
           type: string
       type: object
     handlers.JobView:
@@ -110,8 +137,10 @@ components:
     handlers.LoginRequest:
       properties:
         password:
+          description: Password 是明文登录密码，仅用于本次校验，handler 不写日志。
           type: string
         username:
+          description: Username 是 manager 账号名，登录失败时不区分账号不存在和密码错误。
           type: string
       required:
       - password
@@ -120,22 +149,31 @@ components:
     handlers.OnboardMemberRequest:
       properties:
         app_name:
+          description: AppName 是随成员初始化的默认应用名称。
           type: string
         app_prompt:
+          description: AppPrompt 是默认应用的初始提示词，可为空。
           type: string
         channel_type:
+          description: ChannelType 是初始化渠道绑定的渠道标识。
           type: string
         display_name:
+          description: DisplayName 是新成员展示名。
           type: string
         password:
+          description: Password 是新成员初始密码。
           type: string
         persona_mode:
+          description: PersonaMode 控制新应用是否继承组织人设或使用独立人设。
           type: string
         role:
+          description: Role 为空时默认为 org_member；不允许创建 platform_admin。
           type: string
         runtime_node_id:
+          description: NodeID 是指定 runtime 节点；为空时 service 自动选择可用节点。
           type: string
         username:
+          description: Username 是新成员账号名，与普通创建成员保持同一约束。
           type: string
       required:
       - app_name
@@ -146,14 +184,19 @@ components:
     handlers.OrganizationRequest:
       properties:
         contact_name:
+          description: ContactName 是业务联系人姓名，可置空。
           type: string
         contact_phone:
+          description: ContactPhone 是业务联系人电话，可置空。
           type: string
         credit_warning_threshold:
+          description: CreditWarningThreshold 是组织余额预警阈值；nil 表示清空或未设置预警阈值。
           type: integer
         name:
+          description: Name 是组织展示名；更新时仍必填，避免空名称进入前端列表。
           type: string
         remark:
+          description: Remark 是平台管理员维护的内部备注，可置空。
           type: string
       required:
       - name
@@ -161,14 +204,19 @@ components:
     handlers.PersonaRequest:
       properties:
         allow_member_override:
+          description: AllowMemberOverride 表示成员应用是否允许覆盖组织默认人设。
           type: boolean
         conversation_rules:
+          description: ConversationRules 是会话行为约束，可为空。
           type: string
         forbidden_rules:
+          description: ForbiddenRules 是组织层禁止规则，可为空。
           type: string
         reply_style:
+          description: ReplyStyle 是默认回复风格描述，可为空。
           type: string
         system_prompt:
+          description: SystemPrompt 是组织默认系统提示词，不能为空。
           type: string
       required:
       - system_prompt
@@ -176,8 +224,10 @@ components:
     handlers.RechargeRequest:
       properties:
         credit_amount:
+          description: CreditAmount 是充值额度，必须为正数，service 层会同步写入 new-api。
           type: integer
         remark:
+          description: Remark 是本次充值的审计备注。
           type: string
       required:
       - credit_amount
@@ -185,6 +235,7 @@ components:
     handlers.RefreshRequest:
       properties:
         refresh_token:
+          description: RefreshToken 是长生命周期刷新令牌，service 层只保存其 hash 并在刷新时轮换。
           type: string
       required:
       - refresh_token
@@ -192,6 +243,7 @@ components:
     handlers.ResetPasswordRequest:
       properties:
         password:
+          description: Password 是新密码，service 层只保存 hash。
           type: string
       required:
       - password
@@ -199,6 +251,7 @@ components:
     handlers.RetryOrgSyncRequest:
       properties:
         node_id:
+          description: NodeID 是需要重试同步的 runtime 节点 ID。
           type: string
       required:
       - node_id
@@ -206,8 +259,10 @@ components:
     handlers.UpdateMemberRequest:
       properties:
         display_name:
+          description: DisplayName 是成员展示名，更新接口要求显式传入非空值。
           type: string
         role:
+          description: Role 为空表示保持原角色；非空时需要管理员权限并限制在组织角色内。
           type: string
       required:
       - display_name
@@ -215,10 +270,13 @@ components:
     service.AgentEnrollResult:
       properties:
         agent_token:
+          description: AgentToken 是新签发的 agent 明文 token，仅在 enroll 响应中返回一次。
           type: string
         heartbeat_interval_seconds:
+          description: HeartbeatIntervalSeconds 是 agent 后续上报心跳的建议间隔。
           type: integer
         node_id:
+          description: NodeID 是 manager 为该 agent 分配或复用的 runtime node ID。
           type: string
       type: object
     service.AppResult:
@@ -307,22 +365,30 @@ components:
     service.ChallengeResult:
       properties:
         challenge_type:
+          description: ChallengeType 是登录挑战类型，例如 qrcode 或 code；异步 worker 未生成时为空。
           type: string
         channel_type:
+          description: ChannelType 是渠道标识，例如 wechat。
           type: string
         code:
+          description: Code 是非二维码登录场景的一次性验证码。
           type: string
         expires_at:
+          description: ExpiresAt 是挑战过期时间；零值表示当前响应没有同步挑战。
           type: string
         hints:
           additionalProperties:
             type: string
+          description: Hints 是 adapter 返回的展示提示，key/value 均为前端可直接展示的安全文本。
           type: object
         job_id:
+          description: JobID 是异步 channel_start_login job ID，前端可据此追踪后台任务。
           type: string
         qrcode:
+          description: QRCode 是二维码内容或 URL，具体格式由 channel adapter 决定。
           type: string
         status:
+          description: Status 是渠道绑定状态，pending_auth 表示后台 job 正在发起登录挑战。
           type: string
       type: object
     service.KnowledgeEntryResult:
@@ -356,27 +422,37 @@ components:
     service.LogsPage:
       properties:
         scope:
+          description: Scope 标识日志所属维度，当前为 app 或 member。
           type: string
         scope_id:
+          description: ScopeID 是对应维度的 manager UUID，便于前端复核查询上下文。
           type: string
         total:
+          description: Total 是 new-api 返回的分页总数。
           type: integer
         updated_at:
+          description: UpdatedAt 是 manager 代理完成时刻，不代表 new-api 内部采集时间。
           type: string
       type: object
     service.MemberResult:
       properties:
         display_name:
+          description: DisplayName 是前端展示名。
           type: string
         id:
+          description: ID 是成员用户 UUID。
           type: string
         org_id:
+          description: OrgID 是成员所属组织 UUID；platform_admin 可能为空。
           type: string
         role:
+          description: Role 是成员角色，限定为 org_admin 或 org_member。
           type: string
         status:
+          description: Status 是成员状态；disabled 会阻止登录并设置 users.deleted_at。
           type: string
         username:
+          description: Username 是登录账号名。
           type: string
       type: object
     service.OnboardMemberResult:
@@ -391,20 +467,28 @@ components:
     service.OrganizationResult:
       properties:
         contact_name:
+          description: ContactName 是业务联系人姓名。
           type: string
         contact_phone:
+          description: ContactPhone 是业务联系人电话。
           type: string
         credit_warning_threshold:
+          description: CreditWarningThreshold 是组织余额预警阈值。
           type: integer
         id:
+          description: ID 是 manager 组织 UUID。
           type: string
         name:
+          description: Name 是组织展示名。
           type: string
         newapi_user_id:
+          description: NewAPIUserID 是组织在 new-api 侧的用户 ID，缺失时充值和用量接口不可用。
           type: string
         remark:
+          description: Remark 是平台管理员维护的内部备注。
           type: string
         status:
+          description: Status 是组织状态，active / disabled 决定成员是否可登录。
           type: string
       type: object
     service.PersonaResult:
@@ -444,27 +528,36 @@ components:
     service.ProgressResult:
       properties:
         bound_identity:
+          description: BoundIdentity 是渠道侧已绑定身份，如微信号或 OpenID 的展示值。
           type: string
         channel_name:
+          description: ChannelName 是渠道侧账号或会话名称。
           type: string
         error_message:
+          description: ErrorMessage 是最近一次绑定失败原因，已由 worker 写入安全错误文本。
           type: string
         metadata:
           additionalProperties:
             type: string
+          description: Metadata 是绑定过程产生的附加展示信息，会经过 channelBindingMetadata 归一化。
           type: object
         status:
+          description: Status 是当前渠道绑定状态，直接来自 channel_bindings.status。
           type: string
         updated_at:
+          description: UpdatedAt 是绑定记录最近更新时间，用于前端判断轮询新鲜度。
           type: string
       type: object
     service.QuotaSeries:
       properties:
         scope:
+          description: Scope 标识配额序列所属维度，当前为 organization 或 platform。
           type: string
         scope_id:
+          description: ScopeID 是组织维度的 manager org UUID；平台维度为空。
           type: string
         updated_at:
+          description: UpdatedAt 是 manager 代理完成时刻，不代表 new-api 内部采集时间。
           type: string
       type: object
     service.RechargeRecordResult:
@@ -502,41 +595,59 @@ components:
     service.RuntimeNodeResult:
       properties:
         agent_docker_endpoint:
+          description: AgentDockerEndpoint 是 manager 访问该节点 Docker 代理的 HTTPS 地址。
           type: string
         agent_file_endpoint:
+          description: AgentFileEndpoint 是 manager 访问该节点文件代理的 HTTPS 地址。
           type: string
         agent_id:
+          description: AgentID 是 agent 自报的外部稳定 ID，用于幂等 enroll。
           type: string
         agent_version:
+          description: AgentVersion 是最近一次 enroll 或 heartbeat 上报的 agent 版本。
           type: string
         has_agent_token:
+          description: HasAgentToken 表示节点是否已保存 agent token hash；不会返回 token 明文。
           type: boolean
         heartbeat_interval_seconds:
+          description: HeartbeatIntervalSeconds 是 manager 告知 agent 的心跳间隔秒数。
           type: integer
         id:
+          description: ID 是 manager 侧 runtime_nodes 主键。
           type: string
         last_probe_attempted_at:
+          description: LastProbeAttemptedAt 是最近一次探测开始时间，空值表示尚未探测。
           type: string
         last_probe_error:
+          description: LastProbeError 是最近一次探测失败原因，已由探测流程写入安全错误文本。
           type: string
         last_probe_failed_at:
+          description: LastProbeFailedAt 是最近一次探测失败时间。
           type: string
         last_probe_ok_at:
+          description: LastProbeOKAt 是最近一次探测成功时间。
           type: string
         max_apps:
+          description: MaxApps 是节点可承载应用上限；nil 表示不限制。
           type: integer
         name:
+          description: Name 是管理员后台展示的节点名称。
           type: string
         node_data_root:
+          description: NodeDataRoot 是 agent 侧应用数据根目录。
           type: string
         probe_failure_streak:
+          description: ProbeFailureStreak 是连续探测失败次数，用于前端展示节点健康风险。
           type: integer
         probe_success_streak:
+          description: ProbeSuccessStreak 是连续探测成功次数，用于判断节点恢复稳定性。
           type: integer
         status:
+          description: Status 是节点管理状态，active 才允许 agent 心跳继续更新。
           type: string
       type: object
     service.RuntimeOperation:
+      description: Operation 是本次实际入队的操作枚举。
       enum:
       - start
       - stop
@@ -555,6 +666,7 @@ components:
     service.RuntimeOperationResult:
       properties:
         job_id:
+          description: JobID 是写入 jobs 表后的异步任务 ID，前端用它查询执行进度。
           type: string
         operation:
           $ref: '#/components/schemas/service.RuntimeOperation'
@@ -786,7 +898,7 @@ paths:
       - apps
   /apps/{appId}/api-key/disable:
     post:
-      description: 异步触发禁用应用关联的 new-api token，仅平台或组织管理员可操作
+      description: 异步触发禁用应用关联的 new-api token，仅应用所属组织管理员可操作
       parameters:
       - description: 应用 ID
         in: path
@@ -834,7 +946,7 @@ paths:
       - runtime-operations
   /apps/{appId}/api-key/restore:
     post:
-      description: 异步触发恢复应用关联的 new-api token，仅平台或组织管理员可操作
+      description: 异步触发恢复应用关联的 new-api token，仅应用所属组织管理员可操作
       parameters:
       - description: 应用 ID
         in: path
@@ -2325,7 +2437,7 @@ paths:
       - members
   /members/{userId}/password:
     post:
-      description: 平台管理员或组织管理员强制重置指定成员的密码
+      description: 组织管理员强制重置本组织成员的密码
       parameters:
       - description: 成员用户 ID
         in: path
@@ -3166,7 +3278,7 @@ paths:
       tags:
       - members
     post:
-      description: 组织管理员或平台管理员在指定组织下创建新成员
+      description: 组织管理员在本组织下创建新成员
       parameters:
       - description: 组织 ID
         in: path

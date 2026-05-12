@@ -33,6 +33,7 @@ import { useAuthStore } from '@/stores/auth'
 // 平台专属：仅 platform_admin；组织管理视角（成员/审计）：禁止 org_member。
 const PLATFORM_ONLY = ['platform_admin'] as const
 const ORG_ADMIN_ABOVE = ['platform_admin', 'org_admin'] as const
+const ORG_ADMIN_ONLY = ['org_admin'] as const
 
 export const router = createRouter({
   history: createWebHistory(),
@@ -53,7 +54,7 @@ export const router = createRouter({
         { path: 'platform/dashboard', component: PlatformDashboardPage, meta: { allowedRoles: PLATFORM_ONLY } },
         { path: 'platform/organizations/:orgId/recharge', component: RechargePage, meta: { allowedRoles: PLATFORM_ONLY } },
         { path: 'members', component: MembersPage, meta: { allowedRoles: ORG_ADMIN_ABOVE } },
-        { path: 'members/new', component: CreateMemberPage, meta: { allowedRoles: ORG_ADMIN_ABOVE } },
+        { path: 'members/new', component: CreateMemberPage, meta: { allowedRoles: ORG_ADMIN_ONLY } },
         { path: 'org/persona', component: PersonaPage },
         { path: 'audit-logs', component: AuditLogsPage, meta: { allowedRoles: ORG_ADMIN_ABOVE } },
         { path: 'runtime-nodes', component: RuntimeNodesPage, meta: { allowedRoles: PLATFORM_ONLY } },

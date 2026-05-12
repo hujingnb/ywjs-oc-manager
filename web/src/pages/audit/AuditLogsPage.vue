@@ -4,17 +4,28 @@
     :eyebrow="orgEyebrow"
     :columns="columns"
     :data="logs ?? []"
-    :loading="isLoading"
+    :loading="isLoading || organizationsLoading"
     :error-message="errorMessage"
     :row-key="(row: AuditLog) => row.id"
-  />
+  >
+    <template #toolbar>
+      <n-select
+        v-if="isPlatformAdmin"
+        v-model:value="selectedOrgId"
+        :options="orgOptions"
+        style="width: 220px"
+        placeholder="选择组织"
+      />
+    </template>
+  </DataTableList>
 </template>
 
 <script setup lang="ts">
 import { computed, h } from 'vue'
-import { NTag, type DataTableColumns } from 'naive-ui'
+import { NSelect, NTag, type DataTableColumns } from 'naive-ui'
 
 import { useOrgAuditLogsQuery } from '@/api/hooks/useAuditLogs'
+import { usePlatformOrgSelection } from '@/composables/usePlatformOrgSelection'
 import { canViewOrgAudit } from '@/domain/permissions'
 import { useAuthStore } from '@/stores/auth'
 import DataTableList from '@/components/DataTableList.vue'
@@ -23,8 +34,15 @@ import { timeColumn } from '@/components/columns'
 // AuditLogsPage 展示组织级审计日志，平台和组织管理员可看，普通成员需去应用详情查看自己的应用审计。
 const props = defineProps<{ orgId?: string }>()
 const auth = useAuthStore()
-// effectiveOrgId 支持平台指定组织，也支持组织用户默认使用自身组织。
-const effectiveOrgId = computed(() => props.orgId ?? auth.user?.org_id)
+// 平台管理员通过组织选择器查看不同组织审计，组织用户默认使用自身组织。
+const {
+  isPlatformAdmin,
+  selectedOrgId,
+  effectiveOrgId,
+  orgOptions,
+  organizationsLoading,
+  organizationsError,
+} = usePlatformOrgSelection(computed(() => auth.user), computed(() => props.orgId))
 const orgEyebrow = computed(() => auth.user?.role === 'platform_admin' ? 'Platform · 审计' : '组织 · 审计')
 const canView = computed(() => canViewOrgAudit(auth.user, effectiveOrgId.value))
 
@@ -34,7 +52,8 @@ const { data: logs, isLoading, error } = useOrgAuditLogsQuery(queryOrgId)
 
 // 无关联组织时展示提示；有 API 错误时展示错误信息
 const errorMessage = computed(() => {
-  if (!effectiveOrgId.value) return '当前账号未关联组织，无法查看审计日志。'
+  if (organizationsError.value) return String(organizationsError.value)
+  if (!effectiveOrgId.value) return isPlatformAdmin.value ? '暂无可查看组织' : '当前账号未关联组织，无法查看审计日志。'
   if (!canView.value) return '当前账号无权查看组织级审计，请在自己的应用详情中查看应用审计。'
   if (error.value) return String(error.value)
   return undefined
