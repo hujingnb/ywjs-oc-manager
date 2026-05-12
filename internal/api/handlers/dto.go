@@ -13,6 +13,8 @@ type ErrorResponse struct {
 
 // LoginRequest 用户名密码登录的请求体。
 type LoginRequest struct {
+	// OrgCode 是组织用户登录时填写的组织标识；平台管理员登录时留空。
+	OrgCode string `json:"org_code"`
 	// Username 是 manager 账号名，登录失败时不区分账号不存在和密码错误。
 	Username string `json:"username" binding:"required"`
 	// Password 是明文登录密码，仅用于本次校验，handler 不写日志。
@@ -31,6 +33,8 @@ type RefreshRequest struct {
 type CreateOrganizationRequest struct {
 	// Name 是组织展示名，也是平台管理员列表中识别租户的主字段。
 	Name string `json:"name" binding:"required"`
+	// Code 是组织登录标识，创建后不可修改。
+	Code string `json:"code" binding:"required"`
 	// ContactName 是业务联系人姓名，可为空。
 	ContactName string `json:"contact_name"`
 	// ContactPhone 是业务联系人电话，可为空；不参与权限或登录校验。

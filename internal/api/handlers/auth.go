@@ -63,6 +63,7 @@ func (h *AuthHandler) Login(c *gin.Context) {
 		return
 	}
 	result, err := h.service.Login(c.Request.Context(), service.LoginInput{
+		OrgCode:  req.OrgCode,
 		Username: req.Username,
 		Password: req.Password,
 	})

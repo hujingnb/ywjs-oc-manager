@@ -8,8 +8,8 @@ import (
 	"testing"
 
 	"github.com/jackc/pgx/v5"
+	"github.com/jackc/pgx/v5/pgconn"
 	"github.com/jackc/pgx/v5/pgtype"
-
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 	"oc-manager/internal/auth"
@@ -39,6 +39,7 @@ func TestOrganizationServiceCreateProvisionsNewAPIUser(t *testing.T) {
 
 	result, err := svc.CreateOrganization(context.Background(), auth.Principal{Role: domain.UserRolePlatformAdmin}, OrganizationInput{
 		Name:                   "测试组织",
+		Code:                   "test-org",
 		ContactName:            "张三",
 		CreditWarningThreshold: &threshold,
 		AdminUsername:          "org-admin",
@@ -49,6 +50,8 @@ func TestOrganizationServiceCreateProvisionsNewAPIUser(t *testing.T) {
 	if result.Name != "测试组织" || result.CreditWarningThreshold == nil || *result.CreditWarningThreshold != 20 {
 		t.Fatalf("organization = %+v", result)
 	}
+	assert.Equal(t, "test-org", result.Code)
+	assert.Equal(t, "test-org", store.created.Code)
 	if prov.createCalls != 1 || prov.bootstrapCalls != 1 {
 		t.Fatalf("provisioner calls create=%d bootstrap=%d, want 1/1", prov.createCalls, prov.bootstrapCalls)
 	}
@@ -78,6 +81,7 @@ func TestOrganizationServiceCreateAlsoCreatesOrgAdmin(t *testing.T) {
 
 	_, err := svc.CreateOrganization(context.Background(), auth.Principal{Role: domain.UserRolePlatformAdmin}, OrganizationInput{
 		Name:             "测试组织",
+		Code:             "test-org",
 		AdminUsername:    "org-admin",
 		AdminDisplayName: "组织管理员",
 		AdminPassword:    "secret-password",
@@ -106,12 +110,67 @@ func TestOrganizationServiceCreateRollbackOnProvisioningFailure(t *testing.T) {
 
 	_, err := svc.CreateOrganization(context.Background(), auth.Principal{Role: domain.UserRolePlatformAdmin}, OrganizationInput{
 		Name:             "测试组织",
+		Code:             "test-org",
 		AdminUsername:    "org-admin",
 		AdminDisplayName: "组织管理员",
 		AdminPassword:    "secret-password",
 	})
 	require.Error(t, err)
 	require.True(t, store.hardDeleted)
+}
+
+func TestCreateOrganizationRequiresValidCode(t *testing.T) {
+	store := &organizationStoreStub{}
+	svc := NewOrganizationService(store, &fakeProvisioner{}, mustCipher(t), nil)
+	svc.hashPassword = fakeHash
+
+	for _, code := range []string{"", "ab", "-bad", "bad-", "Bad Org", "bad_org"} {
+		_, err := svc.CreateOrganization(context.Background(), auth.Principal{Role: domain.UserRolePlatformAdmin}, OrganizationInput{
+			Name:             "测试组织",
+			Code:             code,
+			AdminUsername:    "admin",
+			AdminDisplayName: "管理员",
+			AdminPassword:    "secret-password",
+		})
+		require.ErrorIs(t, err, ErrMemberCreateInvalid, "code=%q", code)
+	}
+}
+
+func TestCreateOrganizationNormalizesCode(t *testing.T) {
+	store := &organizationStoreStub{}
+	prov := &fakeProvisioner{user: newapi.User{ID: 42}, accessToken: "access-tok-xyz"}
+	svc := NewOrganizationService(store, prov, mustCipher(t), nil)
+	svc.hashPassword = fakeHash
+
+	result, err := svc.CreateOrganization(context.Background(), auth.Principal{Role: domain.UserRolePlatformAdmin}, OrganizationInput{
+		Name:             "测试组织",
+		Code:             " Test-Org ",
+		AdminUsername:    "admin",
+		AdminDisplayName: "管理员",
+		AdminPassword:    "secret-password",
+	})
+
+	require.NoError(t, err)
+	assert.Equal(t, "test-org", result.Code)
+	assert.Equal(t, "test-org", store.created.Code)
+}
+
+func TestCreateOrganizationMapsUniqueViolationToConflict(t *testing.T) {
+	store := &organizationStoreStub{
+		createErr: &pgconn.PgError{Code: "23505"},
+	}
+	svc := NewOrganizationService(store, &fakeProvisioner{}, mustCipher(t), nil)
+	svc.hashPassword = fakeHash
+
+	_, err := svc.CreateOrganization(context.Background(), auth.Principal{Role: domain.UserRolePlatformAdmin}, OrganizationInput{
+		Name:             "测试组织",
+		Code:             "test-org",
+		AdminUsername:    "admin",
+		AdminDisplayName: "管理员",
+		AdminPassword:    "secret-password",
+	})
+
+	require.ErrorIs(t, err, ErrConflict)
 }
 
 func TestOrganizationServiceGetRestrictsOrgScope(t *testing.T) {
@@ -191,6 +250,7 @@ type organizationStoreStub struct {
 	created          sqlc.CreateOrganizationParams
 	updated          sqlc.SetOrganizationNewAPIUserParams
 	createdUser      sqlc.CreateUserParams
+	createErr        error
 	updateCalled     bool
 	createUserCalled bool
 	hardDeleted      bool
@@ -198,10 +258,14 @@ type organizationStoreStub struct {
 
 func (s *organizationStoreStub) CreateOrganization(_ context.Context, arg sqlc.CreateOrganizationParams) (sqlc.Organization, error) {
 	s.created = arg
+	if s.createErr != nil {
+		return sqlc.Organization{}, s.createErr
+	}
 	id, _ := parseUUID("00000000-0000-0000-0000-000000000101")
 	created := sqlc.Organization{
 		ID:                     id,
 		Name:                   arg.Name,
+		Code:                   arg.Code,
 		Status:                 arg.Status,
 		ContactName:            arg.ContactName,
 		CreditWarningThreshold: arg.CreditWarningThreshold,
@@ -283,6 +347,7 @@ func TestCreateOrganization_BootstrapTokenFailureTriggersDeleteUserAndAudit(t *t
 
 	_, err := svc.CreateOrganization(context.Background(), auth.Principal{Role: domain.UserRolePlatformAdmin}, OrganizationInput{
 		Name:             "v102-orphan-test",
+		Code:             "test-org",
 		AdminUsername:    "org-admin",
 		AdminDisplayName: "组织管理员",
 		AdminPassword:    "secret-password",
@@ -307,6 +372,7 @@ func TestCreateOrganization_CreateUserFailureNoDeleteUser(t *testing.T) {
 
 	_, _ = svc.CreateOrganization(context.Background(), auth.Principal{Role: domain.UserRolePlatformAdmin}, OrganizationInput{
 		Name:             "v102-create-fail",
+		Code:             "test-org",
 		AdminUsername:    "org-admin",
 		AdminDisplayName: "组织管理员",
 		AdminPassword:    "secret-password",

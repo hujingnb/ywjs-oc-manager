@@ -8,12 +8,14 @@ import (
 	"errors"
 	"fmt"
 	"log/slog"
+	"regexp"
 	"strconv"
 	"strings"
 	"time"
 
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5"
+	"github.com/jackc/pgx/v5/pgconn"
 	"github.com/jackc/pgx/v5/pgtype"
 
 	"oc-manager/internal/auth"
@@ -21,6 +23,8 @@ import (
 	"oc-manager/internal/integrations/newapi"
 	"oc-manager/internal/store/sqlc"
 )
+
+var organizationCodePattern = regexp.MustCompile(`^[a-z0-9]([a-z0-9-]{1,30}[a-z0-9])$`)
 
 // NewAPIFailureContext 描述 OrganizationService 内 new-api 调用失败的上下文，
 // 供注入的 NewAPIFailureAuditor 写 audit_logs。
@@ -112,6 +116,8 @@ func NewOrganizationService(store OrganizationStore, provisioner NewAPIUserProvi
 type OrganizationInput struct {
 	// Name 是组织展示名。
 	Name string
+	// Code 是组织登录标识，创建后不可修改；仅允许小写字母、数字和短横线。
+	Code string
 	// ContactName 是业务联系人姓名。
 	ContactName string
 	// ContactPhone 是业务联系人电话。
@@ -134,6 +140,8 @@ type OrganizationResult struct {
 	ID string `json:"id"`
 	// Name 是组织展示名。
 	Name string `json:"name"`
+	// Code 是组织登录标识，用于组织用户登录时定位租户。
+	Code string `json:"code"`
 	// Status 是组织状态，active / disabled 决定成员是否可登录。
 	Status string `json:"status"`
 	// ContactName 是业务联系人姓名。
@@ -165,6 +173,10 @@ func (s *OrganizationService) CreateOrganization(ctx context.Context, principal 
 	if input.AdminUsername == "" || input.AdminDisplayName == "" || input.AdminPassword == "" {
 		return OrganizationResult{}, fmt.Errorf("%w: 管理员用户名、显示名和密码不能为空", ErrMemberCreateInvalid)
 	}
+	code, err := normalizeOrganizationCode(input.Code)
+	if err != nil {
+		return OrganizationResult{}, err
+	}
 	adminPasswordHash, err := s.hashPassword(input.AdminPassword)
 	if err != nil {
 		return OrganizationResult{}, fmt.Errorf("生成管理员密码 hash 失败: %w", err)
@@ -172,6 +184,7 @@ func (s *OrganizationService) CreateOrganization(ctx context.Context, principal 
 
 	org, err := s.store.CreateOrganization(ctx, sqlc.CreateOrganizationParams{
 		Name:                   input.Name,
+		Code:                   code,
 		Status:                 domain.StatusActive,
 		ContactName:            textValue(input.ContactName),
 		ContactPhone:           textValue(input.ContactPhone),
@@ -179,6 +192,9 @@ func (s *OrganizationService) CreateOrganization(ctx context.Context, principal 
 		CreditWarningThreshold: int4Ptr(input.CreditWarningThreshold),
 	})
 	if err != nil {
+		if isUniqueViolation(err) {
+			return OrganizationResult{}, fmt.Errorf("%w: 组织名称或组织标识已存在", ErrConflict)
+		}
 		return OrganizationResult{}, fmt.Errorf("创建组织失败: %w", err)
 	}
 
@@ -270,6 +286,21 @@ func (s *OrganizationService) CreateOrganization(ctx context.Context, principal 
 		return OrganizationResult{}, wrappedErr
 	}
 	return toOrganizationResult(org), nil
+}
+
+// normalizeOrganizationCode 统一组织标识格式，避免大小写或空白导致同一标识多种写法。
+func normalizeOrganizationCode(value string) (string, error) {
+	code := strings.ToLower(strings.TrimSpace(value))
+	if !organizationCodePattern.MatchString(code) {
+		return "", fmt.Errorf("%w: 组织标识必须为 3-32 位小写字母、数字或短横线，且不能以短横线开头或结尾", ErrMemberCreateInvalid)
+	}
+	return code, nil
+}
+
+// isUniqueViolation 判断底层 PostgreSQL 错误是否为唯一约束冲突。
+func isUniqueViolation(err error) bool {
+	var pgErr *pgconn.PgError
+	return errors.As(err, &pgErr) && pgErr.Code == "23505"
 }
 
 // provisionNewAPIUser 在 new-api 创建对应业务 user，登录拿 access_token，加密落库。
@@ -471,6 +502,7 @@ func toOrganizationResult(org sqlc.Organization) OrganizationResult {
 	return OrganizationResult{
 		ID:                     uuidToString(org.ID),
 		Name:                   org.Name,
+		Code:                   org.Code,
 		Status:                 org.Status,
 		ContactName:            textString(org.ContactName),
 		ContactPhone:           textString(org.ContactPhone),

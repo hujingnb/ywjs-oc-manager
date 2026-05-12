@@ -254,6 +254,7 @@ func toOrganizationInput(req OrganizationRequest) service.OrganizationInput {
 func toCreateOrganizationInput(req CreateOrganizationRequest) service.OrganizationInput {
 	return service.OrganizationInput{
 		Name:                   req.Name,
+		Code:                   req.Code,
 		ContactName:            req.ContactName,
 		ContactPhone:           req.ContactPhone,
 		Remark:                 req.Remark,
@@ -285,6 +286,8 @@ func writeServiceError(c *gin.Context, err error) {
 		c.JSON(http.StatusForbidden, gin.H{"error": "无权执行该操作"})
 	case errors.Is(err, service.ErrNotFound):
 		c.JSON(http.StatusNotFound, gin.H{"error": "资源不存在"})
+	case errors.Is(err, service.ErrConflict):
+		c.JSON(http.StatusConflict, gin.H{"error": "资源冲突"})
 	case errors.Is(err, service.ErrMemberCreateInvalid):
 		c.JSON(http.StatusBadRequest, gin.H{"error": "请求参数不完整"})
 	default:

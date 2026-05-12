@@ -18,7 +18,7 @@ import (
 )
 
 func TestAuthLoginReturnsTokenPair(t *testing.T) {
-	router, _ := newAuthTestRouter(t, &authServiceStub{
+	svc := &authServiceStub{
 		loginResult: service.LoginResult{
 			User: service.AuthUser{ID: "user-1", Username: "member@example.com"},
 			Tokens: service.TokenPair{
@@ -26,10 +26,11 @@ func TestAuthLoginReturnsTokenPair(t *testing.T) {
 				RefreshToken: "refresh-token",
 			},
 		},
-	})
+	}
+	router, _ := newAuthTestRouter(t, svc)
 
 	recorder := httptest.NewRecorder()
-	request := httptest.NewRequest(http.MethodPost, "/api/v1/auth/login", bytes.NewBufferString(`{"username":"member@example.com","password":"secret"}`))
+	request := httptest.NewRequest(http.MethodPost, "/api/v1/auth/login", bytes.NewBufferString(`{"org_code":"test-org","username":"member@example.com","password":"secret"}`))
 	request.Header.Set("Content-Type", "application/json")
 	router.ServeHTTP(recorder, request)
 
@@ -38,6 +39,7 @@ func TestAuthLoginReturnsTokenPair(t *testing.T) {
 	err := json.Unmarshal(recorder.Body.Bytes(), &response)
 	require.NoError(t, err)
 	require.Equal(t, "refresh-token", response.Tokens.RefreshToken)
+	require.Equal(t, "test-org", svc.lastLoginInput.OrgCode)
 }
 
 func TestAuthLoginRejectsInvalidBody(t *testing.T) {
@@ -87,12 +89,14 @@ func newAuthTestRouter(t *testing.T, svc *authServiceStub) (*gin.Engine, *auth.T
 }
 
 type authServiceStub struct {
-	loginResult   service.LoginResult
-	meResult      service.AuthUser
-	lastPrincipal auth.Principal
+	loginResult    service.LoginResult
+	meResult       service.AuthUser
+	lastLoginInput service.LoginInput
+	lastPrincipal  auth.Principal
 }
 
-func (s *authServiceStub) Login(_ context.Context, _ service.LoginInput) (service.LoginResult, error) {
+func (s *authServiceStub) Login(_ context.Context, input service.LoginInput) (service.LoginResult, error) {
+	s.lastLoginInput = input
 	return s.loginResult, nil
 }
 
