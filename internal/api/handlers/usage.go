@@ -5,12 +5,15 @@ import (
 	"errors"
 	"net/http"
 	"strconv"
+	"time"
 
 	"github.com/gin-gonic/gin"
 
 	"oc-manager/internal/auth"
 	"oc-manager/internal/service"
 )
+
+const usageDefaultWindowSeconds int64 = 30 * 24 * 60 * 60
 
 // UsageHandler 处理用量查询。
 //
@@ -106,7 +109,7 @@ func (h *UsageHandler) GetOrg(c *gin.Context) {
 	if !ok {
 		return
 	}
-	since, until := parseTimeWindow(c)
+	since, until := parseUsageStatsWindow(c)
 	view, err := h.service.GetOrgUsage(c.Request.Context(), principal, c.Param("orgId"), since, until)
 	if err != nil {
 		writeUsageError(c, err)
@@ -135,7 +138,7 @@ func (h *UsageHandler) GetPlatform(c *gin.Context) {
 	if !ok {
 		return
 	}
-	since, until := parseTimeWindow(c)
+	since, until := parseUsageStatsWindow(c)
 	view, err := h.service.GetPlatformUsage(c.Request.Context(), principal, since, until)
 	if err != nil {
 		writeUsageError(c, err)
@@ -221,6 +224,17 @@ func parseTimeWindow(c *gin.Context) (int64, int64) {
 	since, _ := strconv.ParseInt(c.Query("since"), 10, 64)
 	until, _ := strconv.ParseInt(c.Query("until"), 10, 64)
 	return since, until
+}
+
+// parseUsageStatsWindow 解析组织 / 平台统计时间窗；未显式传参时默认查最近 30 天，
+// 避免上游 new-api 在空时间窗语义下返回空统计。
+func parseUsageStatsWindow(c *gin.Context) (int64, int64) {
+	since, until := parseTimeWindow(c)
+	if since > 0 || until > 0 {
+		return since, until
+	}
+	now := time.Now().Unix()
+	return now - usageDefaultWindowSeconds, now
 }
 
 func writeUsageError(c *gin.Context, err error) {

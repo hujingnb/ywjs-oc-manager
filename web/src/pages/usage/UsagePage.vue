@@ -106,16 +106,18 @@ const effectiveOrgId = computed(() =>
   isPlatformAdmin.value ? selectedOrgId.value : auth.user?.org_id,
 )
 
-// 组织维度用量对普通成员不开放,前端不发起查询避免无谓 403。
-const orgRef = computed(() => (isOrgMember.value ? undefined : effectiveOrgId.value))
-const { data: orgView, isLoading: orgLoading, error: orgError } = useOrgUsageQuery(orgRef)
+// 组织维度用量对普通成员不开放，前端不发起查询避免无谓 403。
+// 成员维度仍需要 org_id 作为权限边界，因此单独保留 memberOrgRef。
+const orgUsageRef = computed(() => (isOrgMember.value ? undefined : effectiveOrgId.value))
+const memberOrgRef = computed(() => effectiveOrgId.value)
+const { data: orgView, isLoading: orgLoading, error: orgError } = useOrgUsageQuery(orgUsageRef)
 
 // 普通成员强制锁定为查询自身的用量，UI 上不暴露成员 ID 输入框。
 const memberIdInput = ref(isOrgMember.value ? auth.user?.id ?? '' : '')
 const memberRef = computed(() =>
   isOrgMember.value ? auth.user?.id : memberIdInput.value.trim() || undefined,
 )
-const { data: memberView, isLoading: memberLoading, error: memberError } = useMemberUsageQuery(orgRef, memberRef)
+const { data: memberView, isLoading: memberLoading, error: memberError } = useMemberUsageQuery(memberOrgRef, memberRef)
 
 // appIdInput 目前仅作为应用维度入口提示，详情查询由应用详情页承接。
 const appIdInput = ref('')

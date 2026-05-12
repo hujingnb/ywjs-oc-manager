@@ -26,17 +26,30 @@ type usageServiceStub struct {
 	platformErr    error
 	appResult      service.LogsPage
 	appErr         error
+
+	lastMemberOrgID   string
+	lastMemberUserID  string
+	lastOrgSince      int64
+	lastOrgUntil      int64
+	lastPlatformSince int64
+	lastPlatformUntil int64
 }
 
-func (s *usageServiceStub) GetMemberUsage(_ context.Context, _ auth.Principal, _, _ string, _ service.LogsQueryOptions) (service.LogsPage, error) {
+func (s *usageServiceStub) GetMemberUsage(_ context.Context, _ auth.Principal, orgID, userID string, _ service.LogsQueryOptions) (service.LogsPage, error) {
+	s.lastMemberOrgID = orgID
+	s.lastMemberUserID = userID
 	return s.memberResult, s.memberErr
 }
 
-func (s *usageServiceStub) GetOrgUsage(_ context.Context, _ auth.Principal, _ string, _, _ int64) (service.QuotaSeries, error) {
+func (s *usageServiceStub) GetOrgUsage(_ context.Context, _ auth.Principal, _ string, since, until int64) (service.QuotaSeries, error) {
+	s.lastOrgSince = since
+	s.lastOrgUntil = until
 	return s.orgResult, s.orgErr
 }
 
-func (s *usageServiceStub) GetPlatformUsage(_ context.Context, _ auth.Principal, _, _ int64) (service.QuotaSeries, error) {
+func (s *usageServiceStub) GetPlatformUsage(_ context.Context, _ auth.Principal, since, until int64) (service.QuotaSeries, error) {
+	s.lastPlatformSince = since
+	s.lastPlatformUntil = until
 	return s.platformResult, s.platformErr
 }
 
@@ -67,6 +80,8 @@ func TestUsageGetMemberHappy(t *testing.T) {
 
 	require.Equal(t, http.StatusOK, w.Code)
 	assert.Contains(t, w.Body.String(), "usage")
+	assert.Equal(t, "org-1", stub.lastMemberOrgID)
+	assert.Equal(t, "u1", stub.lastMemberUserID)
 }
 
 func TestUsageGetMemberMissingOrgID(t *testing.T) {
@@ -110,6 +125,37 @@ func TestUsageGetOrgHappy(t *testing.T) {
 	assert.Contains(t, w.Body.String(), "usage")
 }
 
+func TestUsageGetOrgAppliesDefaultWindow(t *testing.T) {
+	stub := &usageServiceStub{orgResult: service.QuotaSeries{}}
+	router, tokens := newUsageTestRouter(t, stub)
+	token := mustSignAccess(t, tokens, auth.Principal{UserID: "u1", Role: domain.UserRoleOrgAdmin, OrgID: "org-1"})
+
+	w := httptest.NewRecorder()
+	req := httptest.NewRequest(http.MethodGet, "/api/v1/usage/organizations/org-1", nil)
+	req.Header.Set("Authorization", "Bearer "+token)
+	router.ServeHTTP(w, req)
+
+	require.Equal(t, http.StatusOK, w.Code)
+	assert.Greater(t, stub.lastOrgSince, int64(0))
+	assert.Greater(t, stub.lastOrgUntil, stub.lastOrgSince)
+	assert.InDelta(t, int64(30*24*60*60), stub.lastOrgUntil-stub.lastOrgSince, 5)
+}
+
+func TestUsageGetOrgKeepsExplicitWindow(t *testing.T) {
+	stub := &usageServiceStub{orgResult: service.QuotaSeries{}}
+	router, tokens := newUsageTestRouter(t, stub)
+	token := mustSignAccess(t, tokens, auth.Principal{UserID: "u1", Role: domain.UserRoleOrgAdmin, OrgID: "org-1"})
+
+	w := httptest.NewRecorder()
+	req := httptest.NewRequest(http.MethodGet, "/api/v1/usage/organizations/org-1?since=100&until=200", nil)
+	req.Header.Set("Authorization", "Bearer "+token)
+	router.ServeHTTP(w, req)
+
+	require.Equal(t, http.StatusOK, w.Code)
+	assert.Equal(t, int64(100), stub.lastOrgSince)
+	assert.Equal(t, int64(200), stub.lastOrgUntil)
+}
+
 func TestUsageGetPlatformForbidden(t *testing.T) {
 	stub := &usageServiceStub{platformErr: service.ErrForbidden}
 	router, tokens := newUsageTestRouter(t, stub)
@@ -134,6 +180,22 @@ func TestUsageGetPlatformHappy(t *testing.T) {
 	router.ServeHTTP(w, req)
 
 	require.Equal(t, http.StatusOK, w.Code)
+}
+
+func TestUsageGetPlatformAppliesDefaultWindow(t *testing.T) {
+	stub := &usageServiceStub{platformResult: service.QuotaSeries{}}
+	router, tokens := newUsageTestRouter(t, stub)
+	token := mustSignAccess(t, tokens, auth.Principal{UserID: "u1", Role: domain.UserRolePlatformAdmin})
+
+	w := httptest.NewRecorder()
+	req := httptest.NewRequest(http.MethodGet, "/api/v1/usage/platform", nil)
+	req.Header.Set("Authorization", "Bearer "+token)
+	router.ServeHTTP(w, req)
+
+	require.Equal(t, http.StatusOK, w.Code)
+	assert.Greater(t, stub.lastPlatformSince, int64(0))
+	assert.Greater(t, stub.lastPlatformUntil, stub.lastPlatformSince)
+	assert.InDelta(t, int64(30*24*60*60), stub.lastPlatformUntil-stub.lastPlatformSince, 5)
 }
 
 func TestUsageGetAppHappy(t *testing.T) {
