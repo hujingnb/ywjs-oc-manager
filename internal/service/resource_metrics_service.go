@@ -245,6 +245,21 @@ func (s *ResourceMetricsService) ListNodeInstanceResources(ctx context.Context, 
 	if err != nil {
 		return nil, ErrNotFound
 	}
+	if _, err := s.store.GetRuntimeNode(ctx, nodeUUID); errors.Is(err, pgx.ErrNoRows) {
+		return nil, ErrNotFound
+	} else if err != nil {
+		return nil, fmt.Errorf("查询 runtime 节点失败: %w", err)
+	}
+	app, err := s.store.GetApp(ctx, appUUID)
+	if errors.Is(err, pgx.ErrNoRows) {
+		return nil, ErrNotFound
+	}
+	if err != nil {
+		return nil, fmt.Errorf("查询应用失败: %w", err)
+	}
+	if app.DeletedAt.Valid || !app.RuntimeNodeID.Valid || uuidToString(app.RuntimeNodeID) != uuidToString(nodeUUID) {
+		return nil, ErrNotFound
+	}
 	if r.BucketSeconds > 0 {
 		rows, err := s.store.ListNodeInstanceResourceBuckets(ctx, sqlc.ListNodeInstanceResourceBucketsParams{
 			RuntimeNodeID: nodeUUID,

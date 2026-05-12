@@ -108,14 +108,22 @@ type RuntimeNodeResult struct {
 
 // NodeCurrentResourceResult 是运行节点最近一次资源采样摘要。
 type NodeCurrentResourceResult struct {
-	SampledAt        string   `json:"sampled_at"`
-	CPUPercent       *float64 `json:"cpu_percent,omitempty"`
-	MemoryUsedBytes  *int64   `json:"memory_used_bytes,omitempty"`
-	MemoryTotalBytes *int64   `json:"memory_total_bytes,omitempty"`
-	DiskUsedBytes    *int64   `json:"disk_used_bytes,omitempty"`
-	DiskTotalBytes   *int64   `json:"disk_total_bytes,omitempty"`
-	InstanceCount    *int32   `json:"instance_count,omitempty"`
-	LastError        string   `json:"last_error,omitempty"`
+	// SampledAt 是最近一次采样时间，统一输出 UTC RFC3339。
+	SampledAt string `json:"sampled_at"`
+	// CPUPercent 是节点 CPU 使用百分比；nil 表示最近采样缺少该指标。
+	CPUPercent *float64 `json:"cpu_percent,omitempty"`
+	// MemoryUsedBytes 是节点内存已用字节数。
+	MemoryUsedBytes *int64 `json:"memory_used_bytes,omitempty"`
+	// MemoryTotalBytes 是节点内存总字节数。
+	MemoryTotalBytes *int64 `json:"memory_total_bytes,omitempty"`
+	// DiskUsedBytes 是节点磁盘已用字节数。
+	DiskUsedBytes *int64 `json:"disk_used_bytes,omitempty"`
+	// DiskTotalBytes 是节点磁盘总字节数。
+	DiskTotalBytes *int64 `json:"disk_total_bytes,omitempty"`
+	// InstanceCount 是采样时节点承载的实例数量。
+	InstanceCount *int32 `json:"instance_count,omitempty"`
+	// LastError 是最近一次节点资源采样错误，空字符串表示无错误或未上报。
+	LastError string `json:"last_error,omitempty"`
 }
 
 // AgentEnrollInput 是 agent 自动注册时提交的自描述信息。

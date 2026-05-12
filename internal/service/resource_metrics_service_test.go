@@ -54,6 +54,25 @@ func TestResourceMetricsServiceRejectsInvalidBucket(t *testing.T) {
 	require.ErrorIs(t, err, ErrInvalidResourceRange)
 }
 
+// TestResourceMetricsServiceListNodeInstanceResourcesRequiresNodeBinding 验证节点实例资源趋势拒绝查询不属于该节点的应用。
+func TestResourceMetricsServiceListNodeInstanceResourcesRequiresNodeBinding(t *testing.T) {
+	store := newResourceMetricsStoreStub(t)
+	store.app = sqlc.App{
+		ID:            mustUUID(t, testResourceAppID),
+		OrgID:         mustUUID(t, testResourceOrgID),
+		OwnerUserID:   mustUUID(t, testResourceOwnerID),
+		RuntimeNodeID: mustUUID(t, "00000000-0000-0000-0000-00000000e006"),
+		Name:          "其他节点应用",
+		Status:        domain.AppStatusRunning,
+	}
+	svc := NewResourceMetricsService(store)
+
+	_, err := svc.ListNodeInstanceResources(context.Background(), auth.Principal{
+		Role: domain.UserRolePlatformAdmin,
+	}, testResourceRuntimeID, testResourceAppID, ResourceTimeRange{})
+	require.ErrorIs(t, err, ErrNotFound)
+}
+
 type resourceMetricsStoreStub struct {
 	t   *testing.T
 	app sqlc.App
