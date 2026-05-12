@@ -1,7 +1,16 @@
+# Ollama 生产部署包：单独运行模型服务和本地模型缓存目录。
+# 本目录可复制到 GPU 节点后独立执行 `docker compose up -d`。
+
+# 保持容器内 host.docker.internal 可访问宿主机，便于连接宿主侧代理或监控端口。
+x-host-gateway: &host-gateway
+  - "host.docker.internal:host-gateway"
+
 services:
+  # Ollama 服务。默认请求 NVIDIA GPU；无 GPU 环境需要按 README 调整 deploy.resources。
   ollama:
     image: ${OLLAMA_IMAGE}
     restart: always
+    extra_hosts: *host-gateway
     ports:
       - "${OLLAMA_PORT:-11434}:11434"
     environment:

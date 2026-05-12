@@ -1,7 +1,16 @@
+# Runtime Agent 生产部署包：部署在 OpenClaw runtime node 上，负责容器运行态管理。
+# 本目录可独立复制到目标节点后执行 `docker compose up -d`。
+
+# 让 agent 容器可稳定访问宿主机网络入口，兼容宿主侧 registry、代理或管理端口。
+x-host-gateway: &host-gateway
+  - "host.docker.internal:host-gateway"
+
 services:
+  # runtime-agent 通过 Docker socket 管理本节点应用容器，并从配置文件读取注册参数。
   oc-runtime-agent:
     image: ${OC_RUNTIME_AGENT_IMAGE}
     restart: always
+    extra_hosts: *host-gateway
     environment:
       OC_AGENT_CONFIG: /etc/oc-agent/agent.yaml
       TZ: ${TZ:-Asia/Shanghai}
