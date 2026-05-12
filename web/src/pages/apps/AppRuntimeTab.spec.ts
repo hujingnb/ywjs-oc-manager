@@ -2,7 +2,7 @@ import { mount } from '@vue/test-utils'
 import { defineComponent, h, nextTick, ref, type Ref } from 'vue'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 
-import type { InstanceResourceSample, ResourceRange } from '@/api/hooks/useRuntimeNodes'
+import { rangeQuery, type InstanceResourceSample, type ResourceRange } from '@/api/hooks/useRuntimeNodes'
 import AppRuntimeTab from './AppRuntimeTab.vue'
 
 const appRef = ref({
@@ -148,7 +148,7 @@ describe('AppRuntimeTab', () => {
     )
   })
 
-  // 覆盖时间范围切换会更新资源 hook 的 range，由 hook 继续映射 30d 到 bucket=1h。
+  // 覆盖时间范围切换会更新资源 hook 的 range，并验证 30d 查询会按后端约定聚合到 1h bucket。
   it('changes resource query when range changes', async () => {
     const wrapper = mountRuntimeTab()
 
@@ -160,5 +160,6 @@ describe('AppRuntimeTab', () => {
     await nextTick()
 
     expect(resourceHookCalls[0].range.value).toBe('30d')
+    expect(rangeQuery(resourceHookCalls[0].range.value).bucket).toBe('1h')
   })
 })
