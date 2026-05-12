@@ -26,6 +26,7 @@ func TestOnboardMemberCommitsOnSuccess(t *testing.T) {
 	require.NotEmpty(t, result.JobID)
 	assert.Equal(t, "alice-bot", result.App.Name)
 	assert.Equal(t, "alice", result.Member.Username)
+	assert.NotContains(t, result.Member.Username, "test-org-")
 	require.True(t, tx.committed)
 	assert.Positive(t, store.users)
 	assert.Positive(t, store.apps)

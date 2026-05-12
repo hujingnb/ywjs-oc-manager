@@ -15,10 +15,11 @@ import (
 )
 
 const (
-	testOrgID    = "00000000-0000-0000-0000-0000000000a1"
-	testOrg2ID   = "00000000-0000-0000-0000-0000000000a2"
-	testAdminUID = "00000000-0000-0000-0000-0000000000b1"
-	testMemUID   = "00000000-0000-0000-0000-0000000000b2"
+	testOrgID     = "00000000-0000-0000-0000-0000000000a1"
+	testOrg2ID    = "00000000-0000-0000-0000-0000000000a2"
+	testAdminUID  = "00000000-0000-0000-0000-0000000000b1"
+	testAdmin2UID = "00000000-0000-0000-0000-0000000000b3"
+	testMemUID    = "00000000-0000-0000-0000-0000000000b2"
 )
 
 func TestMemberServiceCreateRequiresOrgManagement(t *testing.T) {
@@ -43,7 +44,9 @@ func TestMemberServiceCreateRejectsPlatformAdmin(t *testing.T) {
 
 func TestMemberServiceCreateRejectsDisabledOrg(t *testing.T) {
 	store := newMemberStoreStub(t)
-	store.org.Status = domain.StatusDisabled
+	org := store.orgs[testOrgID]
+	org.Status = domain.StatusDisabled
+	store.orgs[testOrgID] = org
 	svc := NewMemberService(store, fakeHash)
 
 	_, err := svc.CreateMember(context.Background(), orgAdminPrincipal(), testOrgID, MemberInput{
@@ -77,6 +80,31 @@ func TestMemberServiceCreateAssignsDefaultRoleAndHashesPassword(t *testing.T) {
 	require.Equal(t, domain.StatusActive, store.lastCreate.Status)
 }
 
+func TestCreateMemberAllowsSameUsernameAcrossDifferentOrganizations(t *testing.T) {
+	store := newMemberStoreStub(t)
+	store.orgs[testOrg2ID] = sqlc.Organization{ID: mustUUID(t, testOrg2ID), Name: "另一个组织", Status: domain.StatusActive}
+	svc := NewMemberService(store, fakeHash)
+
+	first, err := svc.CreateMember(context.Background(), orgAdminPrincipal(), testOrgID, MemberInput{
+		Username:    "admin",
+		DisplayName: "组织一管理员",
+		Password:    "password-123",
+		Role:        domain.UserRoleOrgAdmin,
+	})
+	require.NoError(t, err)
+	require.Equal(t, "admin", first.Username)
+
+	secondPrincipal := auth.Principal{Role: domain.UserRoleOrgAdmin, OrgID: testOrg2ID, UserID: testAdmin2UID}
+	second, err := svc.CreateMember(context.Background(), secondPrincipal, testOrg2ID, MemberInput{
+		Username:    "admin",
+		DisplayName: "组织二管理员",
+		Password:    "password-123",
+		Role:        domain.UserRoleOrgAdmin,
+	})
+	require.NoError(t, err)
+	require.Equal(t, "admin", second.Username)
+}
+
 func TestMemberServiceListLimitsOrgScope(t *testing.T) {
 	store := newMemberStoreStub(t)
 	svc := NewMemberService(store, fakeHash)
@@ -89,7 +117,7 @@ func TestMemberServiceListAppliesDefaultPageSize(t *testing.T) {
 	store := newMemberStoreStub(t)
 	store.users[testAdminUID] = sqlc.User{
 		ID:    mustUUID(t, testAdminUID),
-		OrgID: store.org.ID,
+		OrgID: store.orgs[testOrgID].ID,
 		Role:  domain.UserRoleOrgAdmin,
 	}
 	svc := NewMemberService(store, fakeHash)
@@ -113,7 +141,7 @@ func TestMemberServiceGetSelfAccessibleByMember(t *testing.T) {
 	store := newMemberStoreStub(t)
 	store.users[testMemUID] = sqlc.User{
 		ID:       mustUUID(t, testMemUID),
-		OrgID:    store.org.ID,
+		OrgID:    store.orgs[testOrgID].ID,
 		Username: "bob",
 		Role:     domain.UserRoleOrgMember,
 		Status:   domain.StatusActive,
@@ -129,7 +157,7 @@ func TestMemberServiceGetMemberRejectsCrossUserAccess(t *testing.T) {
 	store := newMemberStoreStub(t)
 	store.users[testMemUID] = sqlc.User{
 		ID:    mustUUID(t, testMemUID),
-		OrgID: store.org.ID,
+		OrgID: store.orgs[testOrgID].ID,
 		Role:  domain.UserRoleOrgMember,
 	}
 	svc := NewMemberService(store, fakeHash)
@@ -142,7 +170,7 @@ func TestMemberServiceUpdateProfileSelfAllowed(t *testing.T) {
 	store := newMemberStoreStub(t)
 	store.users[testMemUID] = sqlc.User{
 		ID:          mustUUID(t, testMemUID),
-		OrgID:       store.org.ID,
+		OrgID:       store.orgs[testOrgID].ID,
 		Role:        domain.UserRoleOrgMember,
 		DisplayName: "Bob",
 	}
@@ -157,7 +185,7 @@ func TestMemberServiceUpdateRoleRequiresAdmin(t *testing.T) {
 	store := newMemberStoreStub(t)
 	store.users[testMemUID] = sqlc.User{
 		ID:    mustUUID(t, testMemUID),
-		OrgID: store.org.ID,
+		OrgID: store.orgs[testOrgID].ID,
 		Role:  domain.UserRoleOrgMember,
 	}
 	svc := NewMemberService(store, fakeHash)
@@ -172,7 +200,7 @@ func TestMemberServiceSetStatusBlocksSelfDisable(t *testing.T) {
 	store := newMemberStoreStub(t)
 	store.users[testAdminUID] = sqlc.User{
 		ID:    mustUUID(t, testAdminUID),
-		OrgID: store.org.ID,
+		OrgID: store.orgs[testOrgID].ID,
 		Role:  domain.UserRoleOrgAdmin,
 	}
 	svc := NewMemberService(store, fakeHash)
@@ -185,7 +213,7 @@ func TestMemberServiceResetPasswordRequiresAdmin(t *testing.T) {
 	store := newMemberStoreStub(t)
 	store.users[testMemUID] = sqlc.User{
 		ID:    mustUUID(t, testMemUID),
-		OrgID: store.org.ID,
+		OrgID: store.orgs[testOrgID].ID,
 		Role:  domain.UserRoleOrgMember,
 	}
 	svc := NewMemberService(store, fakeHash)
@@ -199,7 +227,7 @@ func TestMemberServiceResetPasswordSucceeds(t *testing.T) {
 	store := newMemberStoreStub(t)
 	store.users[testMemUID] = sqlc.User{
 		ID:    mustUUID(t, testMemUID),
-		OrgID: store.org.ID,
+		OrgID: store.orgs[testOrgID].ID,
 		Role:  domain.UserRoleOrgMember,
 	}
 	svc := NewMemberService(store, fakeHash)
@@ -218,14 +246,14 @@ func TestDeleteMember_SoftDeletesAndEnqueuesAppDelete(t *testing.T) {
 	stub := newMemberStoreStub(t)
 	target := sqlc.User{
 		ID:     mustUUID(t, "00000000-0000-0000-0000-0000000000aa"),
-		OrgID:  stub.org.ID,
+		OrgID:  stub.orgs[testOrgID].ID,
 		Status: domain.StatusActive,
 		Role:   domain.UserRoleOrgMember,
 	}
 	stub.users[uuidToString(target.ID)] = target
 	app := sqlc.App{
 		ID:          mustUUID(t, "00000000-0000-0000-0000-0000000000bb"),
-		OrgID:       stub.org.ID,
+		OrgID:       stub.orgs[testOrgID].ID,
 		OwnerUserID: target.ID,
 		Status:      domain.AppStatusRunning,
 	}
@@ -248,7 +276,7 @@ func TestDeleteMember_NoAppStillSoftDeletesUser(t *testing.T) {
 	stub := newMemberStoreStub(t)
 	target := sqlc.User{
 		ID:     mustUUID(t, "00000000-0000-0000-0000-0000000000ab"),
-		OrgID:  stub.org.ID,
+		OrgID:  stub.orgs[testOrgID].ID,
 		Status: domain.StatusActive,
 		Role:   domain.UserRoleOrgMember,
 	}
@@ -263,7 +291,7 @@ func TestDeleteMember_RejectsSelfDeletion(t *testing.T) {
 	stub := newMemberStoreStub(t)
 	target := sqlc.User{
 		ID:     mustUUID(t, "00000000-0000-0000-0000-000000000001"), // 与 platformAdmin 同 ID
-		OrgID:  stub.org.ID,
+		OrgID:  stub.orgs[testOrgID].ID,
 		Status: domain.StatusActive,
 	}
 	stub.users[uuidToString(target.ID)] = target
@@ -276,13 +304,13 @@ func TestDeleteMember_OrgMemberCannotDeleteOthers(t *testing.T) {
 	stub := newMemberStoreStub(t)
 	target := sqlc.User{
 		ID:     mustUUID(t, "00000000-0000-0000-0000-0000000000ad"),
-		OrgID:  stub.org.ID,
+		OrgID:  stub.orgs[testOrgID].ID,
 		Status: domain.StatusActive,
 	}
 	stub.users[uuidToString(target.ID)] = target
 	svc := NewMemberService(stub, fakeHash)
 	err := svc.DeleteMember(context.Background(),
-		auth.Principal{Role: domain.UserRoleOrgMember, OrgID: uuidToString(stub.org.ID), UserID: "other"},
+		auth.Principal{Role: domain.UserRoleOrgMember, OrgID: uuidToString(stub.orgs[testOrgID].ID), UserID: "other"},
 		uuidToString(target.ID), nil)
 	require.ErrorIs(t, err, ErrForbidden)
 }
@@ -296,39 +324,49 @@ func orgAdminPrincipal() auth.Principal {
 }
 
 type memberStoreStub struct {
-	t             *testing.T
-	org           sqlc.Organization
-	users         map[string]sqlc.User
-	apps          map[string]sqlc.App
-	jobs          []sqlc.CreateJobParams
-	auditWritten  bool
-	softDeleted   []string
-	lastCreate    sqlc.CreateUserParams
-	lastList      sqlc.ListUsersByOrgParams
-	lastPwdUpdate sqlc.UpdateUserPasswordParams
+	t                  *testing.T
+	orgs               map[string]sqlc.Organization
+	users              map[string]sqlc.User
+	usersByOrgUsername map[string]sqlc.User
+	apps               map[string]sqlc.App
+	jobs               []sqlc.CreateJobParams
+	auditWritten       bool
+	softDeleted        []string
+	lastCreate         sqlc.CreateUserParams
+	lastList           sqlc.ListUsersByOrgParams
+	lastPwdUpdate      sqlc.UpdateUserPasswordParams
 }
 
 func newMemberStoreStub(t *testing.T) *memberStoreStub {
 	t.Helper()
+	org := sqlc.Organization{ID: mustUUID(t, testOrgID), Status: domain.StatusActive, Name: "测试组织"}
 	return &memberStoreStub{
-		t:     t,
-		org:   sqlc.Organization{ID: mustUUID(t, testOrgID), Status: domain.StatusActive, Name: "测试组织"},
-		users: map[string]sqlc.User{},
-		apps:  map[string]sqlc.App{},
+		t:                  t,
+		orgs:               map[string]sqlc.Organization{testOrgID: org},
+		users:              map[string]sqlc.User{},
+		usersByOrgUsername: map[string]sqlc.User{},
+		apps:               map[string]sqlc.App{},
 	}
 }
 
 func (s *memberStoreStub) GetOrganization(_ context.Context, id pgtype.UUID) (sqlc.Organization, error) {
-	if id != s.org.ID {
+	org, ok := s.orgs[uuidToString(id)]
+	if !ok {
 		return sqlc.Organization{}, pgx.ErrNoRows
 	}
-	return s.org, nil
+	return org, nil
 }
 
 func (s *memberStoreStub) CreateUser(_ context.Context, arg sqlc.CreateUserParams) (sqlc.User, error) {
 	s.lastCreate = arg
+	key := uuidToString(arg.OrgID) + "/" + arg.Username
+	if _, exists := s.usersByOrgUsername[key]; exists {
+		return sqlc.User{}, errors.New("duplicate username in organization")
+	}
+	id := mustUUID(s.t, "00000000-0000-0000-0000-0000000000ff")
+	id.Bytes[15] = byte(len(s.users) + 1)
 	user := sqlc.User{
-		ID:           mustUUID(s.t, "00000000-0000-0000-0000-0000000000ff"),
+		ID:           id,
 		OrgID:        arg.OrgID,
 		Username:     arg.Username,
 		PasswordHash: arg.PasswordHash,
@@ -336,6 +374,7 @@ func (s *memberStoreStub) CreateUser(_ context.Context, arg sqlc.CreateUserParam
 		Role:         arg.Role,
 		Status:       arg.Status,
 	}
+	s.usersByOrgUsername[key] = user
 	s.users[uuidToString(user.ID)] = user
 	return user, nil
 }
