@@ -27,3 +27,12 @@ docs/swagger.json
 docs/swagger.yaml
 docs/docs.go
 openapi/swagger.yaml
+
+# 生产部署目录：真实配置、数据和日志不入仓，只提交 example 与 .gitkeep。
+deploy/**/.env
+deploy/manage/config/manager.yaml
+deploy/runtime-agent/config/agent.yaml
+deploy/**/data/**
+deploy/**/logs/**
+!deploy/**/data/**/.gitkeep
+!deploy/**/logs/**/.gitkeep
