@@ -10,7 +10,6 @@ import (
 
 	"oc-manager/internal/auth"
 	"oc-manager/internal/domain"
-	redactlog "oc-manager/internal/log"
 	"oc-manager/internal/service"
 )
 
@@ -98,7 +97,7 @@ func (h *MembersHandler) Create(c *gin.Context) {
 	}
 	var req CreateMemberRequest
 	if err := c.ShouldBindJSON(&req); err != nil {
-		c.JSON(http.StatusBadRequest, gin.H{"error": "请求参数不完整"})
+		writeBindError(c, err)
 		return
 	}
 	result, err := h.service.CreateMember(c.Request.Context(), principal, c.Param("orgId"), service.MemberInput{
@@ -196,7 +195,7 @@ func (h *MembersHandler) Update(c *gin.Context) {
 	}
 	var req UpdateMemberRequest
 	if err := c.ShouldBindJSON(&req); err != nil {
-		c.JSON(http.StatusBadRequest, gin.H{"error": "请求参数不完整"})
+		writeBindError(c, err)
 		return
 	}
 	result, err := h.service.UpdateMemberProfile(c.Request.Context(), principal, c.Param("userId"), service.MemberInput{
@@ -289,7 +288,7 @@ func (h *MembersHandler) Onboard(c *gin.Context) {
 	}
 	var req OnboardMemberRequest
 	if err := c.ShouldBindJSON(&req); err != nil {
-		c.JSON(http.StatusBadRequest, gin.H{"error": "请求参数不完整"})
+		writeBindError(c, err)
 		return
 	}
 	result, err := h.onboarding.OnboardMember(c.Request.Context(), principal, c.Param("orgId"), service.OnboardMemberInput{
@@ -334,7 +333,7 @@ func (h *MembersHandler) ResetPassword(c *gin.Context) {
 	}
 	var req ResetPasswordRequest
 	if err := c.ShouldBindJSON(&req); err != nil {
-		c.JSON(http.StatusBadRequest, gin.H{"error": "请求参数不完整"})
+		writeBindError(c, err)
 		return
 	}
 	if err := h.service.ResetMemberPassword(c.Request.Context(), principal, c.Param("userId"), req.Password); err != nil {
@@ -391,7 +390,7 @@ func writeMemberError(c *gin.Context, err error) {
 	case errors.Is(err, service.ErrNotFound):
 		c.JSON(http.StatusNotFound, gin.H{"error": "资源不存在"})
 	case errors.Is(err, service.ErrMemberCreateInvalid):
-		c.JSON(http.StatusBadRequest, gin.H{"error": redactlog.SafeErrorMessage(err)})
+		c.JSON(http.StatusBadRequest, gin.H{"error": validationServiceMessage(err, service.ErrMemberCreateInvalid)})
 	case errors.Is(err, service.ErrNoNodeAvailable):
 		// 自动选节点失败：当前没有 active 且剩余容量 > 0 的节点；前端需要展示明确文案让 ops 加节点或解禁。
 		c.JSON(http.StatusServiceUnavailable, gin.H{

@@ -106,7 +106,7 @@ func (h *KnowledgeHandler) RetryOrgSync(c *gin.Context) {
 		NodeID string `json:"node_id" binding:"required"`
 	}
 	if err := c.ShouldBindJSON(&body); err != nil {
-		c.JSON(http.StatusBadRequest, gin.H{"error": "请求参数不完整"})
+		writeBindError(c, err)
 		return
 	}
 	if err := h.service.RetryOrgNodeSync(c.Request.Context(), principal, c.Param("orgId"), body.NodeID); err != nil {

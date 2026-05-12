@@ -84,7 +84,7 @@ func (h *PersonaHandler) Put(c *gin.Context) {
 	}
 	var req PersonaRequest
 	if err := c.ShouldBindJSON(&req); err != nil {
-		c.JSON(http.StatusBadRequest, gin.H{"error": "请求参数不完整"})
+		writeBindError(c, err)
 		return
 	}
 	result, err := h.service.Replace(c.Request.Context(), principal, c.Param("orgId"), service.PersonaInput{

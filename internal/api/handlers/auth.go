@@ -59,7 +59,7 @@ func (h *AuthHandler) Login(c *gin.Context) {
 	var req LoginRequest
 	// 登录接口没有 Bearer token，认证错误统一由 service 映射为 401。
 	if err := c.ShouldBindJSON(&req); err != nil {
-		c.JSON(http.StatusBadRequest, gin.H{"error": "请求参数不完整"})
+		writeBindError(c, err)
 		return
 	}
 	result, err := h.service.Login(c.Request.Context(), service.LoginInput{
@@ -90,7 +90,7 @@ func (h *AuthHandler) Login(c *gin.Context) {
 func (h *AuthHandler) Refresh(c *gin.Context) {
 	var req RefreshRequest
 	if err := c.ShouldBindJSON(&req); err != nil {
-		c.JSON(http.StatusBadRequest, gin.H{"error": "请求参数不完整"})
+		writeBindError(c, err)
 		return
 	}
 	result, err := h.service.Refresh(c.Request.Context(), req.RefreshToken)
@@ -133,7 +133,7 @@ func setCSRFCookie(c *gin.Context, accessToken string) {
 func (h *AuthHandler) Logout(c *gin.Context) {
 	var req RefreshRequest
 	if err := c.ShouldBindJSON(&req); err != nil {
-		c.JSON(http.StatusBadRequest, gin.H{"error": "请求参数不完整"})
+		writeBindError(c, err)
 		return
 	}
 	if err := h.service.Logout(c.Request.Context(), req.RefreshToken); err != nil {

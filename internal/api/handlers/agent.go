@@ -4,12 +4,10 @@ import (
 	"context"
 	"crypto/subtle"
 	"encoding/json"
-	"errors"
 	"net/http"
 
 	"github.com/gin-gonic/gin"
 
-	redactlog "oc-manager/internal/log"
 	"oc-manager/internal/service"
 )
 
@@ -66,7 +64,7 @@ func (h *AgentEndpointsHandler) Enroll(c *gin.Context) {
 	var req AgentEnrollRequest
 	// enroll 是机器对机器接口，不经过 CSRF；请求体字段校验在这里完成，幂等 upsert 在 service 层完成。
 	if err := c.ShouldBindJSON(&req); err != nil {
-		c.JSON(http.StatusBadRequest, gin.H{"error": "请求参数不完整"})
+		writeBindError(c, err)
 		return
 	}
 	resourceJSON, err := agentJSONOrEmpty(req.ResourceSnapshot)
@@ -92,7 +90,7 @@ func (h *AgentEndpointsHandler) Enroll(c *gin.Context) {
 		Metadata:            metadataJSON,
 	})
 	if err != nil {
-		writeAgentEndpointError(c, err)
+		writeMappedServiceError(c, err, http.StatusInternalServerError, "服务暂时不可用")
 		return
 	}
 	if h.tokenSink != nil && result.AgentToken != "" {
@@ -123,7 +121,7 @@ func (h *AgentEndpointsHandler) Heartbeat(c *gin.Context) {
 	var req AgentHeartbeatRequest
 	// heartbeat 使用请求体里的 agent_token 鉴权，避免 runtime agent 额外拼 Authorization header。
 	if err := c.ShouldBindJSON(&req); err != nil {
-		c.JSON(http.StatusBadRequest, gin.H{"error": "请求参数不完整"})
+		writeBindError(c, err)
 		return
 	}
 	resourceJSON, err := agentJSONOrEmpty(req.ResourceSnapshot)
@@ -143,7 +141,7 @@ func (h *AgentEndpointsHandler) Heartbeat(c *gin.Context) {
 		Metadata:         metadataJSON,
 	})
 	if err != nil {
-		writeAgentEndpointError(c, err)
+		writeMappedServiceError(c, err, http.StatusInternalServerError, "服务暂时不可用")
 		return
 	}
 	c.JSON(http.StatusOK, gin.H{"runtime_node": result})
@@ -164,16 +162,4 @@ func agentJSONOrEmpty(value map[string]any) ([]byte, error) {
 		return nil, nil
 	}
 	return json.Marshal(value)
-}
-
-// writeAgentEndpointError 将 agent service 错误映射到机器调用方可处理的状态码。
-func writeAgentEndpointError(c *gin.Context, err error) {
-	switch {
-	case errors.Is(err, service.ErrAgentTokenInvalid):
-		c.JSON(http.StatusUnauthorized, gin.H{"error": redactlog.SafeErrorMessage(err)})
-	case errors.Is(err, service.ErrEnrollInputInvalid):
-		c.JSON(http.StatusBadRequest, gin.H{"error": redactlog.SafeErrorMessage(err)})
-	default:
-		c.JSON(http.StatusInternalServerError, gin.H{"error": "服务暂时不可用"})
-	}
 }

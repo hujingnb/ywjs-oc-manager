@@ -53,6 +53,9 @@ func TestAuthLoginRejectsInvalidBody(t *testing.T) {
 	router.ServeHTTP(recorder, request)
 
 	require.Equal(t, http.StatusBadRequest, recorder.Code)
+	require.Contains(t, recorder.Body.String(), "缺少必填参数")
+	require.Contains(t, recorder.Body.String(), "username")
+	require.Contains(t, recorder.Body.String(), "password")
 }
 
 // TestAuthMeRequiresBearerToken 验证认证当前用户接口要求Bearer令牌的预期行为场景。

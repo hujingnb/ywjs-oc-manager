@@ -69,7 +69,7 @@ func (h *OrganizationsHandler) Create(c *gin.Context) {
 	var req CreateOrganizationRequest
 	// ShouldBindJSON 只做 HTTP 层必填字段校验；角色、new-api 和回滚规则由 service 处理。
 	if err := c.ShouldBindJSON(&req); err != nil {
-		c.JSON(http.StatusBadRequest, gin.H{"error": "请求参数不完整"})
+		writeBindError(c, err)
 		return
 	}
 	result, err := h.service.CreateOrganization(c.Request.Context(), principal, toCreateOrganizationInput(req))
@@ -161,7 +161,7 @@ func (h *OrganizationsHandler) Update(c *gin.Context) {
 	var req OrganizationRequest
 	// OpenAPI 注解只描述对外契约，handler 仍以 binding tag 作为运行时请求体校验入口。
 	if err := c.ShouldBindJSON(&req); err != nil {
-		c.JSON(http.StatusBadRequest, gin.H{"error": "请求参数不完整"})
+		writeBindError(c, err)
 		return
 	}
 	result, err := h.service.UpdateOrganization(c.Request.Context(), principal, c.Param("orgId"), toOrganizationInput(req))
@@ -289,7 +289,7 @@ func writeServiceError(c *gin.Context, err error) {
 	case errors.Is(err, service.ErrConflict):
 		c.JSON(http.StatusConflict, gin.H{"error": "资源冲突"})
 	case errors.Is(err, service.ErrMemberCreateInvalid):
-		c.JSON(http.StatusBadRequest, gin.H{"error": "请求参数不完整"})
+		c.JSON(http.StatusBadRequest, gin.H{"error": validationServiceMessage(err, service.ErrMemberCreateInvalid)})
 	default:
 		c.JSON(http.StatusInternalServerError, gin.H{"error": "服务暂时不可用"})
 	}

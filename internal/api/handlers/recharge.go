@@ -65,7 +65,7 @@ func (h *RechargeHandler) Create(c *gin.Context) {
 	}
 	var req RechargeRequest
 	if err := c.ShouldBindJSON(&req); err != nil {
-		c.JSON(http.StatusBadRequest, gin.H{"error": "请求参数不完整"})
+		writeBindError(c, err)
 		return
 	}
 	result, err := h.service.Recharge(c.Request.Context(), principal, c.Param("orgId"), req.CreditAmount, req.Remark)
