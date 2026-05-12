@@ -1,0 +1,64 @@
+services:
+  new-api-postgres:
+    image: postgres:17-alpine
+    restart: always
+    environment:
+      POSTGRES_USER: ${NEWAPI_POSTGRES_USER}
+      POSTGRES_PASSWORD: ${NEWAPI_POSTGRES_PASSWORD}
+      POSTGRES_DB: ${NEWAPI_POSTGRES_DB}
+      TZ: ${TZ:-Asia/Shanghai}
+    volumes:
+      - ./data/postgres:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${NEWAPI_POSTGRES_USER} -d ${NEWAPI_POSTGRES_DB}"]
+      interval: 10s
+      timeout: 5s
+      retries: 20
+    networks:
+      - new-api-internal
+
+  new-api-redis:
+    image: redis:7
+    restart: always
+    command: ["redis-server", "--requirepass", "${NEWAPI_REDIS_PASSWORD}", "--appendonly", "yes"]
+    volumes:
+      - ./data/redis:/data
+    healthcheck:
+      test: ["CMD-SHELL", "redis-cli -a ${NEWAPI_REDIS_PASSWORD} ping | grep PONG"]
+      interval: 10s
+      timeout: 5s
+      retries: 20
+    networks:
+      - new-api-internal
+
+  new-api:
+    image: ${NEWAPI_IMAGE}
+    restart: always
+    command: --log-dir /app/logs
+    ports:
+      - "${NEWAPI_PORT:-3000}:3000"
+    environment:
+      SQL_DSN: postgresql://${NEWAPI_POSTGRES_USER}:${NEWAPI_POSTGRES_PASSWORD}@new-api-postgres:5432/${NEWAPI_POSTGRES_DB}
+      REDIS_CONN_STRING: redis://:${NEWAPI_REDIS_PASSWORD}@new-api-redis:6379
+      TZ: ${TZ:-Asia/Shanghai}
+      ERROR_LOG_ENABLED: "true"
+      BATCH_UPDATE_ENABLED: "true"
+      NODE_NAME: ${NEWAPI_NODE_NAME:-new-api-prod-1}
+      STREAMING_TIMEOUT: ${NEWAPI_STREAMING_TIMEOUT:-600}
+    depends_on:
+      new-api-postgres:
+        condition: service_healthy
+      new-api-redis:
+        condition: service_healthy
+    volumes:
+      - ./data/new-api:/data
+      - ./logs:/app/logs
+    networks:
+      - new-api-internal
+      - new-api-public
+
+networks:
+  new-api-internal:
+    driver: bridge
+  new-api-public:
+    driver: bridge
