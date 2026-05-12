@@ -1,0 +1,70 @@
+# runtime-agent 进程（runtime/agent binary）配置文件。
+# 整个文件被 .gitignore 屏蔽，禁止把真实值提交到仓库。
+# 部署时由运维基于 agent.example.yaml 复制并改写真实值。
+#
+# bootstrap：进程启动时优先读 OC_AGENT_CONFIG 环境变量指向的路径；
+# 未设置时默认 "config/agent.yaml"（相对工作目录）。
+
+agent:
+  # 节点展示名；为空时 manager 使用 agent_id 前 8 位生成默认名。
+  name: "runtime-node-1"
+
+  # agent 上报给 manager 的对外可达主机名或 IP。
+  # 留空时使用本机 hostname；生产建议显式配置为 manager 能访问的地址。
+  advertise_host: "runtime-node-1.example.com"
+
+  # 节点最大可承载应用数；null 或留空表示不限，0 表示暂停接收新应用。
+  # 该值由 agent 配置文件定义，启动 enroll 时同步到 manager；修改后重启 agent 生效。
+  max_apps: 3
+
+  # agent 维护的"业务数据根目录"。下面会派生出：
+  #   <data_root>/orgs/<org_id>/...   组织级文件镜像
+  #   <data_root>/apps/<app_id>/...   应用级文件 / workspace / 归档
+  # 必须显式配置；为空启动 fail-fast。
+  # 容器部署一般指向 docker volume 挂载点，本地裸跑指向项目相对路径。
+  data_root: "/var/lib/oc-agent"
+
+  # agent 自身状态目录，存放自签 TLS 证书 / 注册结果等元数据。
+  # 必须显式配置；为空启动 fail-fast。
+  # 推荐放 data_root 子目录（如 "/var/lib/oc-agent/state"），便于卷挂载持久化。
+  state_dir: "/var/lib/oc-agent/state"
+
+  # 宿主机 Docker daemon socket 路径；agent 通过它做镜像 inspect / load
+  # 以及 docker proxy 反向代理。
+  # 容器部署时通常 mount 宿主 /var/run/docker.sock 到容器内同名路径。
+  docker_socket: "/var/run/docker.sock"
+
+  # 允许调用 agent 接口的客户端 CIDR 段，形如 "10.0.0.0/8"。
+  # 生产必须填写 manager 服务器出口 CIDR；留空只适合本地调试。
+  # 与 token 双重校验：token 校验失败直接 401，CIDR 校验失败直接 403。
+  trusted_cidr: "CHANGE_ME_MANAGER_CIDR"
+
+  # docker proxy HTTP server 监听地址（agent 对外暴露 docker 管控入口）。
+  # 形如 ":7001"。manager 通过该端口走 TLS + Bearer 调 docker API。
+  # 必填；为空启动 fail-fast。
+  docker_addr: ":7001"
+
+  # 文件 / scope API HTTP server 监听地址（agent 对外暴露文件管理入口）。
+  # 形如 ":7002"。处理 /v1/scopes/* / /v1/files/ping / /healthz 等路由。
+  # 必填；为空启动 fail-fast。
+  file_addr: ":7002"
+
+# manager 段：agent 启动时使用 enrollment_secret 主动注册；
+# 注册成功后 node_id / agent_token 写入 state_dir，无需管理员后台创建节点。
+manager:
+  # 生产填写 manager 对 agent 暴露的 HTTPS API 地址，必须包含 /api/v1。
+  endpoint: "https://manager.example.com/api/v1"
+  # 与 manager.yaml runtime.enrollment_secret 完全一致。
+  enrollment_secret: "CHANGE_ME_BASE64_32_BYTES"
+  # 可选：manager 自签 TLS CA PEM 全文。空则信任系统根证书。
+  ca_bundle: ""
+  # 生产必须保持 false；只有本地自签调试才允许临时跳过 TLS 校验。
+  skip_verify: false
+
+# heartbeat 段：心跳节奏与失败告警阈值。
+# 默认值在 loader 自动填充：interval_seconds=30，failure_log_threshold=5。
+heartbeat:
+  # 心跳间隔秒数；最小 5（小于会启动 fail-fast）。
+  interval_seconds: 30
+  # 连续失败到该次数时打 ERROR 日志，便于 ops 抓告警。
+  failure_log_threshold: 5
