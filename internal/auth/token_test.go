@@ -2,6 +2,7 @@
 package auth
 
 import (
+	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 	"strings"
 	"testing"
@@ -52,6 +53,22 @@ func TestTokenManagerRejectsWrongTokenType(t *testing.T) {
 
 	_, err = manager.VerifyAccessToken(token)
 	require.Error(t, err)
+}
+
+// TestTokenManagerSignsUniqueRefreshTokensWithinSameSecond 验证同一用户在同一秒内重复登录时 refresh token 仍保持唯一，避免 token_hash 唯一索引冲突。
+func TestTokenManagerSignsUniqueRefreshTokensWithinSameSecond(t *testing.T) {
+	manager := newTestTokenManager(t)
+	principal := Principal{UserID: "user-1", Role: "platform_admin"}
+
+	first, err := manager.SignRefreshToken(principal)
+	require.NoError(t, err)
+	second, err := manager.SignRefreshToken(principal)
+	require.NoError(t, err)
+
+	assert.NotEqual(t, first, second)
+	verified, err := manager.VerifyRefreshToken(second)
+	require.NoError(t, err)
+	assert.Equal(t, principal, verified)
 }
 
 // TestNewTokenManagerValidatesConfig 验证New令牌ManagerValidates配置的预期行为场景。

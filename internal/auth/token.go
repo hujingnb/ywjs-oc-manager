@@ -3,6 +3,7 @@ package auth
 
 import (
 	"crypto/hmac"
+	"crypto/rand"
 	"crypto/sha256"
 	"encoding/base64"
 	"encoding/hex"
@@ -35,6 +36,8 @@ type tokenClaims struct {
 	Principal
 	// Type 区分 access/refresh，防止 refresh token 被误用到 API 访问路径。
 	Type string `json:"typ"`
+	// ID 是每次签发生成的随机 JWT ID；同一主体同一秒重复登录也必须生成不同 token。
+	ID string `json:"jti,omitempty"`
 	// ExpiresAt 是 UTC Unix 秒级过期时间，校验时到点即拒绝。
 	ExpiresAt int64 `json:"exp"`
 	// IssuedAt 是 UTC Unix 秒级签发时间，主要用于审计和排查令牌生命周期。
@@ -110,6 +113,11 @@ func (m *TokenManager) sign(principal Principal, tokenType string, ttl time.Dura
 		IssuedAt:  now.Unix(),
 		ExpiresAt: now.Add(ttl).Unix(),
 	}
+	tokenID, err := randomTokenID()
+	if err != nil {
+		return "", fmt.Errorf("生成 token ID 失败: %w", err)
+	}
+	claims.ID = tokenID
 
 	header := map[string]string{"alg": "HS256", "typ": "JWT"}
 	headerJSON, err := json.Marshal(header)
@@ -162,6 +170,14 @@ func signHMAC(unsigned string, secret []byte) string {
 	mac := hmac.New(sha256.New, secret)
 	mac.Write([]byte(unsigned))
 	return base64.RawURLEncoding.EncodeToString(mac.Sum(nil))
+}
+
+func randomTokenID() (string, error) {
+	var id [16]byte
+	if _, err := rand.Read(id[:]); err != nil {
+		return "", err
+	}
+	return base64.RawURLEncoding.EncodeToString(id[:]), nil
 }
 
 // HashOpaqueToken 对 refresh token 做不可逆 hash 后再入库。

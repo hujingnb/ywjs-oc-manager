@@ -363,6 +363,9 @@ func (s *authStoreStub) GetOrganizationByCode(_ context.Context, code string) (s
 }
 
 func (s *authStoreStub) CreateRefreshToken(_ context.Context, arg sqlc.CreateRefreshTokenParams) (sqlc.RefreshToken, error) {
+	if _, exists := s.refreshTokens[arg.TokenHash]; exists {
+		return sqlc.RefreshToken{}, errors.New("refresh token hash 重复")
+	}
 	// 每次创建生成不同 UUID，否则 RevokeRefreshToken 用 ID 反查时会随机命中
 	// 历史 record，让"轮换后旧 token 失效"的测试断言不稳定。
 	id := s.nextRefreshID
