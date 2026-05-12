@@ -2,7 +2,6 @@ package handlers
 
 import (
 	"context"
-	"encoding/json"
 	"fmt"
 	"time"
 
@@ -16,7 +15,7 @@ import (
 // RuntimeSnapshotStore 是 RuntimeRefreshStatusHandler 需要的 sqlc 子集。
 type RuntimeSnapshotStore interface {
 	AppRuntimeStore
-	SetAppRuntimeSnapshot(ctx context.Context, arg sqlc.SetAppRuntimeSnapshotParams) (sqlc.App, error)
+	InsertInstanceResourceSample(ctx context.Context, arg sqlc.InsertInstanceResourceSampleParams) (sqlc.InstanceResourceSample, error)
 }
 
 // RuntimeInspector 抽象 worker 拉取容器实时状态 + 指标的能力，便于 fake。
@@ -25,32 +24,15 @@ type RuntimeInspector interface {
 	ContainerStats(ctx context.Context, nodeID, containerID string) (runtime.ContainerStats, error)
 }
 
-// RuntimeRefreshStatusHandler 周期性写 apps.runtime_snapshot_json：
-// scheduler 每 30s 给每个 running 应用入队一条；handler 调 docker inspect + stats 后写库，
-// 前端 AppRuntimeTab 读这一列展示资源占用。
+// RuntimeRefreshStatusHandler 周期性写 instance_resource_samples：
+// scheduler 每 30s 给每个 running 应用入队一条；handler 调 docker inspect + stats 后写采样表，
+// 前端资源展示读取最新实例采样，不再依赖 apps.runtime_snapshot_json。
 //
 // 任一步骤失败仅记录到 last_error 不会改 app.status；status 翻转交给 Task 11 的
 // app_health_check handler，避免单次 stats 抖动让 UI 闪烁。
 type RuntimeRefreshStatusHandler struct {
 	store     RuntimeSnapshotStore
 	inspector RuntimeInspector
-}
-
-// AppRuntimeSnapshot 是写入 apps.runtime_snapshot_json 的归一化结构。
-// 字段保持平铺，前端不需要再展开 nested map，且方便后续 timeseries 升级。
-type AppRuntimeSnapshot struct {
-	ContainerID    string    `json:"container_id"`
-	ContainerName  string    `json:"container_name"`
-	ContainerImage string    `json:"container_image,omitempty"`
-	Status         string    `json:"status"`
-	CPUPercent     float64   `json:"cpu_percent"`
-	MemoryUsage    uint64    `json:"memory_usage_bytes"`
-	MemoryLimit    uint64    `json:"memory_limit_bytes"`
-	NetworkRxBytes uint64    `json:"network_rx_bytes"`
-	NetworkTxBytes uint64    `json:"network_tx_bytes"`
-	CollectedAt    time.Time `json:"collected_at"`
-	// LastError 在 inspect/stats 任一失败时填入，CollectedAt 仍写入便于 UI 展示「最近尝试」时间。
-	LastError string `json:"last_error,omitempty"`
 }
 
 // NewRuntimeRefreshStatusHandler 创建 handler。
@@ -76,38 +58,43 @@ func (h *RuntimeRefreshStatusHandler) Handle(ctx context.Context, job sqlc.Job) 
 		return nil
 	}
 	nodeID := uuidToString(app.RuntimeNodeID)
-	snapshot := AppRuntimeSnapshot{
-		ContainerID: app.ContainerID.String,
-		CollectedAt: time.Now().UTC(),
+	sample := sqlc.InsertInstanceResourceSampleParams{
+		AppID:         pgtype.UUID{Bytes: app.ID.Bytes, Valid: true},
+		RuntimeNodeID: pgtype.UUID{Bytes: app.RuntimeNodeID.Bytes, Valid: true},
+		ContainerID:   app.ContainerID.String,
+		SampledAt:     pgtype.Timestamptz{Time: time.Now().UTC(), Valid: true},
 	}
 	if info, err := h.inspector.InspectContainer(ctx, nodeID, app.ContainerID.String); err != nil {
-		snapshot.LastError = fmt.Sprintf("inspect: %v", err)
+		sample.LastError = textOrNull(fmt.Sprintf("inspect: %v", err))
 	} else {
-		snapshot.ContainerName = info.Name
-		snapshot.ContainerImage = info.Image
-		snapshot.Status = info.Status
+		sample.ContainerStatus = textOrNull(info.Status)
 	}
 	if stats, err := h.inspector.ContainerStats(ctx, nodeID, app.ContainerID.String); err != nil {
 		// 只在 inspect 没记错时覆盖；保留首错以便排障。
-		if snapshot.LastError == "" {
-			snapshot.LastError = fmt.Sprintf("stats: %v", err)
+		if !sample.LastError.Valid {
+			sample.LastError = textOrNull(fmt.Sprintf("stats: %v", err))
 		}
 	} else {
-		snapshot.CPUPercent = stats.CPUPercent
-		snapshot.MemoryUsage = stats.MemoryUsage
-		snapshot.MemoryLimit = stats.MemoryLimit
-		snapshot.NetworkRxBytes = stats.NetworkRxBytes
-		snapshot.NetworkTxBytes = stats.NetworkTxBytes
+		sample.CpuPercent = pgtype.Float8{Float64: stats.CPUPercent, Valid: true}
+		sample.MemoryUsedBytes = uint64ToInt8(stats.MemoryUsage)
+		sample.MemoryLimitBytes = uint64ToInt8(stats.MemoryLimit)
+		sample.DiskReadBytes = uint64ToInt8(stats.DiskReadBytes)
+		sample.DiskWriteBytes = uint64ToInt8(stats.DiskWriteBytes)
+		sample.NetworkRxBytes = uint64ToInt8(stats.NetworkRxBytes)
+		sample.NetworkTxBytes = uint64ToInt8(stats.NetworkTxBytes)
 	}
-	encoded, err := json.Marshal(snapshot)
-	if err != nil {
-		return fmt.Errorf("序列化 runtime snapshot 失败: %w", err)
-	}
-	if _, err := h.store.SetAppRuntimeSnapshot(ctx, sqlc.SetAppRuntimeSnapshotParams{
-		ID:                  pgtype.UUID{Bytes: app.ID.Bytes, Valid: true},
-		RuntimeSnapshotJson: encoded,
-	}); err != nil {
-		return fmt.Errorf("写入 runtime snapshot 失败: %w", err)
+	if _, err := h.store.InsertInstanceResourceSample(ctx, sample); err != nil {
+		return fmt.Errorf("写入实例资源采样失败: %w", err)
 	}
 	return nil
+}
+
+// textOrNull 将错误与状态字段写成 nullable text，避免空字符串污染采样表。
+func textOrNull(value string) pgtype.Text {
+	return pgtype.Text{String: value, Valid: value != ""}
+}
+
+// uint64ToInt8 将 Docker 累计字节数写入 pg int8；项目运行指标预期不会超过 int64 上限。
+func uint64ToInt8(value uint64) pgtype.Int8 {
+	return pgtype.Int8{Int64: int64(value), Valid: true}
 }

@@ -151,6 +151,29 @@ type RechargeRequest struct {
 
 // ===== Agent 端点 agent =====
 
+// AgentNodeResourceRequest 是 agent 上报的节点资源采样。
+// 所有数值字段使用指针，区分“真实 0 值”和“本次未采集到该指标”。
+type AgentNodeResourceRequest struct {
+	// CPUPercent 是节点 CPU 使用百分比；nil 表示 agent 未采集该指标。
+	CPUPercent *float64 `json:"cpu_percent"`
+	// MemoryUsedBytes 是节点内存已用字节数。
+	MemoryUsedBytes *int64 `json:"memory_used_bytes"`
+	// MemoryTotalBytes 是节点内存总字节数。
+	MemoryTotalBytes *int64 `json:"memory_total_bytes"`
+	// DiskUsedBytes 是节点磁盘已用字节数。
+	DiskUsedBytes *int64 `json:"disk_used_bytes"`
+	// DiskTotalBytes 是节点磁盘总字节数。
+	DiskTotalBytes *int64 `json:"disk_total_bytes"`
+	// NetworkRxBytes 是节点网络累计接收字节数。
+	NetworkRxBytes *int64 `json:"network_rx_bytes"`
+	// NetworkTxBytes 是节点网络累计发送字节数。
+	NetworkTxBytes *int64 `json:"network_tx_bytes"`
+	// InstanceCount 是采样时节点承载的实例数量。
+	InstanceCount *int32 `json:"instance_count"`
+	// LastError 是 agent 侧采样失败原因；空字符串表示本次采样未报告错误。
+	LastError string `json:"last_error"`
+}
+
 // AgentEnrollRequest agent 自动注册并换取 agent token 的请求体。
 type AgentEnrollRequest struct {
 	// AgentID 是 agent 自报的稳定外部 ID，用于幂等 enroll 与节点复用。
@@ -169,6 +192,10 @@ type AgentEnrollRequest struct {
 	AgentVersion string `json:"agent_version"`
 	// NodeDataRoot 是 agent 侧应用数据根目录。
 	NodeDataRoot string `json:"node_data_root"`
+	// SampledAt 是资源采样时间；为空时 handler 使用当前 UTC 时间兼容旧 agent。
+	SampledAt string `json:"sampled_at"`
+	// NodeResource 是 agent enroll 时可选的节点资源采样。
+	NodeResource *AgentNodeResourceRequest `json:"node_resource"`
 	// ResourceSnapshot 是 agent enroll 时上报的资源快照，原样保存为 JSON。
 	ResourceSnapshot map[string]any `json:"resource_snapshot"`
 	// Metadata 是 agent 附加元数据，原样保存为 JSON。
@@ -181,6 +208,10 @@ type AgentHeartbeatRequest struct {
 	AgentToken string `json:"agent_token" binding:"required"`
 	// AgentVersion 是心跳时的 agent 版本。
 	AgentVersion string `json:"agent_version"`
+	// SampledAt 是资源采样时间；为空时 handler 使用当前 UTC 时间兼容旧 agent。
+	SampledAt string `json:"sampled_at"`
+	// NodeResource 是 agent 心跳时可选的节点资源采样。
+	NodeResource *AgentNodeResourceRequest `json:"node_resource"`
 	// ResourceSnapshot 是心跳时的资源快照，覆盖节点当前快照。
 	ResourceSnapshot map[string]any `json:"resource_snapshot"`
 	// Metadata 是心跳时的附加元数据，覆盖节点当前元数据。

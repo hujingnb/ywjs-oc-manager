@@ -5,6 +5,8 @@ import (
 	"crypto/subtle"
 	"encoding/json"
 	"net/http"
+	"strings"
+	"time"
 
 	"github.com/gin-gonic/gin"
 
@@ -77,6 +79,11 @@ func (h *AgentEndpointsHandler) Enroll(c *gin.Context) {
 		c.JSON(http.StatusBadRequest, gin.H{"error": "metadata 序列化失败"})
 		return
 	}
+	sampledAt, err := parseAgentSampledAt(req.SampledAt)
+	if err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "sampled_at 格式无效"})
+		return
+	}
 	result, err := h.service.EnrollAgent(c.Request.Context(), service.AgentEnrollInput{
 		AgentID:             req.AgentID,
 		Name:                req.Name,
@@ -86,6 +93,8 @@ func (h *AgentEndpointsHandler) Enroll(c *gin.Context) {
 		AgentTLSCACert:      req.AgentTLSCACert,
 		AgentVersion:        req.AgentVersion,
 		NodeDataRoot:        req.NodeDataRoot,
+		SampledAt:           sampledAt,
+		NodeResource:        toNodeResourceInput(req.NodeResource),
 		ResourceSnapshot:    resourceJSON,
 		Metadata:            metadataJSON,
 	})
@@ -134,9 +143,16 @@ func (h *AgentEndpointsHandler) Heartbeat(c *gin.Context) {
 		c.JSON(http.StatusBadRequest, gin.H{"error": "metadata 序列化失败"})
 		return
 	}
+	sampledAt, err := parseAgentSampledAt(req.SampledAt)
+	if err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "sampled_at 格式无效"})
+		return
+	}
 	result, err := h.service.HandleHeartbeat(c.Request.Context(), service.AgentHeartbeatInput{
 		AgentToken:       req.AgentToken,
 		AgentVersion:     req.AgentVersion,
+		SampledAt:        sampledAt,
+		NodeResource:     toNodeResourceInput(req.NodeResource),
 		ResourceSnapshot: resourceJSON,
 		Metadata:         metadataJSON,
 	})
@@ -162,4 +178,35 @@ func agentJSONOrEmpty(value map[string]any) ([]byte, error) {
 		return nil, nil
 	}
 	return json.Marshal(value)
+}
+
+// parseAgentSampledAt 兼容旧 agent：未带 sampled_at 时由 manager 生成当前 UTC 采样时间。
+func parseAgentSampledAt(value string) (time.Time, error) {
+	trimmed := strings.TrimSpace(value)
+	if trimmed == "" {
+		return time.Now().UTC(), nil
+	}
+	parsed, err := time.Parse(time.RFC3339, trimmed)
+	if err != nil {
+		return time.Time{}, err
+	}
+	return parsed.UTC(), nil
+}
+
+// toNodeResourceInput 将 HTTP DTO 转成 service 输入，保留 nil 指针表达指标缺失。
+func toNodeResourceInput(req *AgentNodeResourceRequest) *service.NodeResourceInput {
+	if req == nil {
+		return nil
+	}
+	return &service.NodeResourceInput{
+		CPUPercent:       req.CPUPercent,
+		MemoryUsedBytes:  req.MemoryUsedBytes,
+		MemoryTotalBytes: req.MemoryTotalBytes,
+		DiskUsedBytes:    req.DiskUsedBytes,
+		DiskTotalBytes:   req.DiskTotalBytes,
+		NetworkRxBytes:   req.NetworkRxBytes,
+		NetworkTxBytes:   req.NetworkTxBytes,
+		InstanceCount:    req.InstanceCount,
+		LastError:        req.LastError,
+	}
 }

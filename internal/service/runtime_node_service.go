@@ -33,6 +33,7 @@ type RuntimeNodeStore interface {
 	GetRuntimeNodeByAgentID(ctx context.Context, agentID pgtype.Text) (sqlc.RuntimeNode, error)
 	GetRuntimeNodeByName(ctx context.Context, name string) (sqlc.RuntimeNode, error)
 	ListRuntimeNodes(ctx context.Context, arg sqlc.ListRuntimeNodesParams) ([]sqlc.RuntimeNode, error)
+	InsertNodeResourceSample(ctx context.Context, arg sqlc.InsertNodeResourceSampleParams) (sqlc.NodeResourceSample, error)
 	ListLatestNodeResourceSamples(ctx context.Context, runtimeNodeIds []pgtype.UUID) ([]sqlc.NodeResourceSample, error)
 	UpdateRuntimeNodeHeartbeat(ctx context.Context, arg sqlc.UpdateRuntimeNodeHeartbeatParams) (sqlc.RuntimeNode, error)
 	SetRuntimeNodeStatus(ctx context.Context, arg sqlc.SetRuntimeNodeStatusParams) (sqlc.RuntimeNode, error)
@@ -144,6 +145,10 @@ type AgentEnrollInput struct {
 	AgentVersion string
 	// NodeDataRoot 是 agent 侧应用数据根目录。
 	NodeDataRoot string
+	// SampledAt 是 agent 侧资源采样时间；handler 负责为空时补当前 UTC。
+	SampledAt time.Time
+	// NodeResource 是 enroll 时可选的节点资源采样；当前仅透传，采样写入由心跳路径完成。
+	NodeResource *NodeResourceInput
 	// ResourceSnapshot 是 agent 上报的资源快照 JSON 原文，由 handler 负责序列化。
 	ResourceSnapshot []byte
 	// Metadata 是 agent 上报的附加元数据 JSON 原文，由 handler 负责序列化。
@@ -166,10 +171,37 @@ type AgentHeartbeatInput struct {
 	AgentToken string
 	// AgentVersion 是心跳时的 agent 版本。
 	AgentVersion string
+	// SampledAt 是 agent 侧资源采样时间；handler 负责为空时补当前 UTC。
+	SampledAt time.Time
+	// NodeResource 是心跳携带的节点资源采样；nil 表示本次心跳不写资源表。
+	NodeResource *NodeResourceInput
 	// ResourceSnapshot 是心跳上报的资源快照 JSON 原文。
 	ResourceSnapshot []byte
 	// Metadata 是心跳上报的附加元数据 JSON 原文。
 	Metadata []byte
+}
+
+// NodeResourceInput 是 service 层写入节点资源采样表的规整输入。
+// 指针字段沿用 HTTP DTO 语义，确保缺失指标写 NULL 而不是误写成 0。
+type NodeResourceInput struct {
+	// CPUPercent 是节点 CPU 使用百分比；nil 表示本次未采集。
+	CPUPercent *float64
+	// MemoryUsedBytes 是节点内存已用字节数。
+	MemoryUsedBytes *int64
+	// MemoryTotalBytes 是节点内存总字节数。
+	MemoryTotalBytes *int64
+	// DiskUsedBytes 是节点磁盘已用字节数。
+	DiskUsedBytes *int64
+	// DiskTotalBytes 是节点磁盘总字节数。
+	DiskTotalBytes *int64
+	// NetworkRxBytes 是节点网络累计接收字节数。
+	NetworkRxBytes *int64
+	// NetworkTxBytes 是节点网络累计发送字节数。
+	NetworkTxBytes *int64
+	// InstanceCount 是采样时节点承载的实例数量。
+	InstanceCount *int32
+	// LastError 是 agent 侧采样错误；空字符串表示未报告错误。
+	LastError string
 }
 
 // EnrollAgent 按 agent_id 幂等创建或刷新 runtime 节点，并签发新的 agent token。
@@ -354,6 +386,12 @@ func (s *RuntimeNodeService) HandleHeartbeat(ctx context.Context, input AgentHea
 	if err != nil {
 		return RuntimeNodeResult{}, fmt.Errorf("更新心跳失败: %w", err)
 	}
+	if input.NodeResource != nil {
+		// 资源采样必须绑定数据库更新后的节点 ID，避免信任 agent 请求体里的任何节点身份字段。
+		if _, err := s.store.InsertNodeResourceSample(ctx, nodeResourceSampleParams(updated.ID, input.SampledAt, input.NodeResource)); err != nil {
+			return RuntimeNodeResult{}, fmt.Errorf("写入节点资源采样失败: %w", err)
+		}
+	}
 	return toRuntimeNodeResult(updated), nil
 }
 
@@ -491,6 +529,42 @@ func int32OrNull(value *int32) pgtype.Int4 {
 		return pgtype.Int4{}
 	}
 	return pgtype.Int4{Int32: *value, Valid: true}
+}
+
+// nodeResourceSampleParams 将可选资源指标转换为 sqlc 参数；nil 指标保留为数据库 NULL。
+func nodeResourceSampleParams(nodeID pgtype.UUID, sampledAt time.Time, resource *NodeResourceInput) sqlc.InsertNodeResourceSampleParams {
+	if sampledAt.IsZero() {
+		sampledAt = time.Now().UTC()
+	}
+	return sqlc.InsertNodeResourceSampleParams{
+		RuntimeNodeID:    nodeID,
+		SampledAt:        pgtype.Timestamptz{Time: sampledAt.UTC(), Valid: true},
+		CpuPercent:       float8OrNull(resource.CPUPercent),
+		MemoryUsedBytes:  int8OrNull(resource.MemoryUsedBytes),
+		MemoryTotalBytes: int8OrNull(resource.MemoryTotalBytes),
+		DiskUsedBytes:    int8OrNull(resource.DiskUsedBytes),
+		DiskTotalBytes:   int8OrNull(resource.DiskTotalBytes),
+		NetworkRxBytes:   int8OrNull(resource.NetworkRxBytes),
+		NetworkTxBytes:   int8OrNull(resource.NetworkTxBytes),
+		InstanceCount:    int32OrNull(resource.InstanceCount),
+		LastError:        textOrNull(resource.LastError),
+	}
+}
+
+// float8OrNull 将可选浮点指标转换为 pgtype.Float8，保留 0 作为有效采样值。
+func float8OrNull(value *float64) pgtype.Float8 {
+	if value == nil {
+		return pgtype.Float8{}
+	}
+	return pgtype.Float8{Float64: *value, Valid: true}
+}
+
+// int8OrNull 将可选整型指标转换为 pgtype.Int8，保留 0 作为有效采样值。
+func int8OrNull(value *int64) pgtype.Int8 {
+	if value == nil {
+		return pgtype.Int8{}
+	}
+	return pgtype.Int8{Int64: *value, Valid: true}
 }
 
 // shortAgentID 生成默认节点名使用的短外部 ID。

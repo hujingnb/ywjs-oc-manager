@@ -113,6 +113,38 @@ func TestRuntimeNodeServiceHeartbeatUpdatesActiveNode(t *testing.T) {
 	require.Equal(t, "0.2.0", result.AgentVersion)
 }
 
+// TestAgentHeartbeatPersistsNodeResourceSample 验证agent心跳携带节点资源时写入节点采样表。
+func TestAgentHeartbeatPersistsNodeResourceSample(t *testing.T) {
+	store := newRuntimeNodeStoreStub(t)
+	svc := newRuntimeNodeServiceForTest(t, store)
+	enrolled, err := svc.EnrollAgent(context.Background(), validEnrollInput())
+	require.NoError(t, err)
+	sampledAt := mustTime(t, "2026-05-13T12:34:56Z")
+
+	_, err = svc.HandleHeartbeat(context.Background(), AgentHeartbeatInput{
+		AgentToken: enrolled.AgentToken,
+		SampledAt:  sampledAt,
+		NodeResource: &NodeResourceInput{
+			CPUPercent:       float64PtrService(42.5),
+			MemoryUsedBytes:  int64PtrService(1024),
+			MemoryTotalBytes: int64PtrService(4096),
+			DiskUsedBytes:    int64PtrService(2048),
+			DiskTotalBytes:   int64PtrService(8192),
+			NetworkRxBytes:   int64PtrService(300),
+			NetworkTxBytes:   int64PtrService(200),
+			InstanceCount:    int32PtrService(3),
+		},
+	})
+	require.NoError(t, err)
+	require.Len(t, store.nodeSamples, 1)
+	sample := store.nodeSamples[0]
+	assert.Equal(t, mustUUID(t, enrolled.NodeID), sample.RuntimeNodeID)
+	assert.Equal(t, sampledAt, sample.SampledAt.Time)
+	assert.Equal(t, 42.5, sample.CpuPercent.Float64)
+	assert.Equal(t, int64(1024), sample.MemoryUsedBytes.Int64)
+	assert.Equal(t, int32(3), sample.InstanceCount.Int32)
+}
+
 // TestRuntimeNodeServiceHeartbeatKeepsDegradedStatus 验证运行时节点服务心跳保留降级状态的预期行为场景。
 func TestRuntimeNodeServiceHeartbeatKeepsDegradedStatus(t *testing.T) {
 	store := newRuntimeNodeStoreStub(t)
@@ -188,6 +220,10 @@ func validEnrollInput() AgentEnrollInput {
 
 func int32PtrService(v int32) *int32 { return &v }
 
+func int64PtrService(v int64) *int64 { return &v }
+
+func float64PtrService(v float64) *float64 { return &v }
+
 func newRuntimeNodeServiceForTest(t *testing.T, store *runtimeNodeStoreStub) *RuntimeNodeService {
 	t.Helper()
 	if store == nil {
@@ -204,6 +240,7 @@ type runtimeNodeStoreStub struct {
 	t                 *testing.T
 	nodes             map[string]sqlc.RuntimeNode
 	latestNodeSamples map[string]sqlc.NodeResourceSample
+	nodeSamples       []sqlc.InsertNodeResourceSampleParams
 	nextID            int
 	lastHeartbeat     sqlc.UpdateRuntimeNodeHeartbeatParams
 	auditLogs         []sqlc.CreateAuditLogParams
@@ -306,6 +343,11 @@ func (s *runtimeNodeStoreStub) ListLatestNodeResourceSamples(_ context.Context, 
 		}
 	}
 	return results, nil
+}
+
+func (s *runtimeNodeStoreStub) InsertNodeResourceSample(_ context.Context, arg sqlc.InsertNodeResourceSampleParams) (sqlc.NodeResourceSample, error) {
+	s.nodeSamples = append(s.nodeSamples, arg)
+	return sqlc.NodeResourceSample{RuntimeNodeID: arg.RuntimeNodeID, SampledAt: arg.SampledAt}, nil
 }
 
 func (s *runtimeNodeStoreStub) UpdateRuntimeNodeHeartbeat(_ context.Context, arg sqlc.UpdateRuntimeNodeHeartbeatParams) (sqlc.RuntimeNode, error) {

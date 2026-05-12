@@ -261,6 +261,15 @@ func statsResponseToContainerStats(raw container.StatsResponse) ContainerStats {
 		out.NetworkRxBytes += n.RxBytes
 		out.NetworkTxBytes += n.TxBytes
 	}
+	for _, entry := range raw.BlkioStats.IoServiceBytesRecursive {
+		// Docker 在不同平台可能省略 blkio；缺失时保持 0，不把不可用指标当成采样错误。
+		switch strings.ToLower(entry.Op) {
+		case "read":
+			out.DiskReadBytes += entry.Value
+		case "write":
+			out.DiskWriteBytes += entry.Value
+		}
+	}
 	return out
 }
 

@@ -73,11 +73,15 @@ type ExecResult struct {
 // 单位：CPU 百分比 (0-100*核数)；内存字节；网络字节累计（容器生命周期内）。
 // Manager 不做秒级速率计算，前端展示绝对值即可，趋势由前端按时间序列差分。
 type ContainerStats struct {
-	CPUPercent     float64 `json:"cpu_percent"`
-	MemoryUsage    uint64  `json:"memory_usage_bytes"`
-	MemoryLimit    uint64  `json:"memory_limit_bytes"`
-	NetworkRxBytes uint64  `json:"network_rx_bytes"`
-	NetworkTxBytes uint64  `json:"network_tx_bytes"`
+	CPUPercent  float64 `json:"cpu_percent"`
+	MemoryUsage uint64  `json:"memory_usage_bytes"`
+	MemoryLimit uint64  `json:"memory_limit_bytes"`
+	// DiskReadBytes 是 Docker blkio Read 累计字节；缺失 blkio 时保持 0。
+	DiskReadBytes uint64 `json:"disk_read_bytes"`
+	// DiskWriteBytes 是 Docker blkio Write 累计字节；缺失 blkio 时保持 0。
+	DiskWriteBytes uint64 `json:"disk_write_bytes"`
+	NetworkRxBytes uint64 `json:"network_rx_bytes"`
+	NetworkTxBytes uint64 `json:"network_tx_bytes"`
 }
 
 // FileEntry 与 agent.FileEntry 等价，避免对调用方暴露 agent 包。

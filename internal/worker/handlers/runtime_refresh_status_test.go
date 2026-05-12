@@ -2,7 +2,6 @@ package handlers
 
 import (
 	"context"
-	"encoding/json"
 	"errors"
 	"testing"
 
@@ -19,6 +18,7 @@ type fakeRuntimeSnapshotStore struct {
 	getErr       error
 	saveErr      error
 	savedPayload []byte
+	samples      []sqlc.InsertInstanceResourceSampleParams
 }
 
 func (s *fakeRuntimeSnapshotStore) GetApp(_ context.Context, _ pgtype.UUID) (sqlc.App, error) {
@@ -42,6 +42,14 @@ func (s *fakeRuntimeSnapshotStore) SetAppRuntimeSnapshot(_ context.Context, arg 
 	}
 	s.savedPayload = arg.RuntimeSnapshotJson
 	return s.app, nil
+}
+
+func (s *fakeRuntimeSnapshotStore) InsertInstanceResourceSample(_ context.Context, arg sqlc.InsertInstanceResourceSampleParams) (sqlc.InstanceResourceSample, error) {
+	if s.saveErr != nil {
+		return sqlc.InstanceResourceSample{}, s.saveErr
+	}
+	s.samples = append(s.samples, arg)
+	return sqlc.InstanceResourceSample{}, nil
 }
 
 type fakeRuntimeInspector struct {
@@ -93,12 +101,38 @@ func TestRuntimeRefreshStatusHappyPath(t *testing.T) {
 	job := sqlc.Job{Type: domain.JobTypeRuntimeRefreshStatus, PayloadJson: []byte(`{"app_id":"11111111-1111-1111-1111-111111111111"}`)}
 	err := h.Handle(context.Background(), job)
 	require.NoError(t, err)
-	var got AppRuntimeSnapshot
-	err = json.Unmarshal(store.savedPayload, &got)
-	require.NoError(t, err)
-	if got.CPUPercent != 12.5 || got.MemoryUsage != 1024 || got.NetworkRxBytes != 100 || got.Status != "running" {
-		t.Fatalf("snapshot = %+v", got)
+	require.Len(t, store.samples, 1)
+	got := store.samples[0]
+	require.Equal(t, "ctr-abc", got.ContainerID)
+	require.Equal(t, "running", got.ContainerStatus.String)
+	require.Equal(t, 12.5, got.CpuPercent.Float64)
+	require.Equal(t, int64(1024), got.MemoryUsedBytes.Int64)
+	require.Equal(t, int64(100), got.NetworkRxBytes.Int64)
+	require.Nil(t, store.savedPayload)
+}
+
+// TestRuntimeRefreshStatusWritesInstanceSample 验证运行时刷新资源展示数据写入实例采样表而不是应用快照字段。
+func TestRuntimeRefreshStatusWritesInstanceSample(t *testing.T) {
+	store := &fakeRuntimeSnapshotStore{app: makeAppForRefresh(t)}
+	inspector := &fakeRuntimeInspector{
+		info:  runtime.ContainerInfo{ID: "ctr-abc", Name: "ocm-app", Image: "openclaw:dev", Status: "running"},
+		stats: runtime.ContainerStats{CPUPercent: 12.5, MemoryUsage: 1024, MemoryLimit: 4096, DiskReadBytes: 77, DiskWriteBytes: 88, NetworkRxBytes: 100, NetworkTxBytes: 50},
 	}
+	h := NewRuntimeRefreshStatusHandler(store, inspector)
+	job := sqlc.Job{Type: domain.JobTypeRuntimeRefreshStatus, PayloadJson: []byte(`{"app_id":"11111111-1111-1111-1111-111111111111"}`)}
+
+	err := h.Handle(context.Background(), job)
+	require.NoError(t, err)
+	require.Len(t, store.samples, 1)
+	got := store.samples[0]
+	require.Equal(t, makeAppForRefresh(t).ID, got.AppID)
+	require.Equal(t, makeAppForRefresh(t).RuntimeNodeID, got.RuntimeNodeID)
+	require.Equal(t, "ctr-abc", got.ContainerID)
+	require.Equal(t, "running", got.ContainerStatus.String)
+	require.Equal(t, 12.5, got.CpuPercent.Float64)
+	require.Equal(t, int64(77), got.DiskReadBytes.Int64)
+	require.Equal(t, int64(88), got.DiskWriteBytes.Int64)
+	require.Nil(t, store.savedPayload)
 }
 
 // TestRuntimeRefreshStatusInspectErrorRecorded 验证运行时刷新状态检查错误记录ed的预期行为场景。
@@ -109,10 +143,8 @@ func TestRuntimeRefreshStatusInspectErrorRecorded(t *testing.T) {
 	job := sqlc.Job{Type: domain.JobTypeRuntimeRefreshStatus, PayloadJson: []byte(`{"app_id":"11111111-1111-1111-1111-111111111111"}`)}
 	err := h.Handle(context.Background(), job)
 	require.NoError(t, err)
-	var got AppRuntimeSnapshot
-	err = json.Unmarshal(store.savedPayload, &got)
-	require.NoError(t, err)
-	require.NotEqual(t, "", got.LastError)
+	require.Len(t, store.samples, 1)
+	require.NotEqual(t, "", store.samples[0].LastError.String)
 }
 
 // TestRuntimeRefreshStatusSkipsNoContainer 验证运行时刷新状态跳过无容器的特殊分支或幂等场景。

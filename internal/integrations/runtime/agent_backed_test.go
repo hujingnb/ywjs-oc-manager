@@ -10,6 +10,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/docker/docker/api/types/container"
 	"github.com/docker/docker/client"
 
 	"github.com/stretchr/testify/assert"
@@ -331,6 +332,31 @@ func TestAgentBackedAdapterInspectContainer(t *testing.T) {
 		t.Fatalf("info = %+v", info)
 	}
 	require.NotEqual(t, "", findCall(t, calls, "GET", "/containers/ctr-2/json").path)
+}
+
+// TestStatsResponseToContainerStatsSumsBlockIO 验证容器stats会汇总Docker块设备读写累计字节。
+func TestStatsResponseToContainerStatsSumsBlockIO(t *testing.T) {
+	got := statsResponseToContainerStats(container.StatsResponse{
+		Stats: container.Stats{
+			BlkioStats: container.BlkioStats{IoServiceBytesRecursive: []container.BlkioStatEntry{
+				{Op: "Read", Value: 100},  // 场景：读字节来自Docker Read条目。
+				{Op: "read", Value: 25},   // 场景：大小写差异不应影响读字节累计。
+				{Op: "Write", Value: 300}, // 场景：写字节来自Docker Write条目。
+				{Op: "Sync", Value: 999},  // 场景：非读写条目不能混入磁盘读写展示。
+			}},
+		},
+	})
+
+	assert.Equal(t, uint64(125), got.DiskReadBytes)
+	assert.Equal(t, uint64(300), got.DiskWriteBytes)
+}
+
+// TestStatsResponseToContainerStatsAllowsMissingBlockIO 验证缺失块设备指标时保持零值且不产生错误状态。
+func TestStatsResponseToContainerStatsAllowsMissingBlockIO(t *testing.T) {
+	got := statsResponseToContainerStats(container.StatsResponse{})
+
+	assert.Equal(t, uint64(0), got.DiskReadBytes)
+	assert.Equal(t, uint64(0), got.DiskWriteBytes)
 }
 
 // findCall 在 calls 列表里查找 method 一致且 path 包含给定子串的调用。
