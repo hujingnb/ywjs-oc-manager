@@ -2,13 +2,16 @@ package main
 
 import (
 	"context"
+	"crypto/tls"
 	"encoding/base64"
 	"encoding/json"
 	"errors"
+	"flag"
 	"fmt"
 	"io"
 	"log"
 	"log/slog"
+	"net"
 	"net/http"
 	"os"
 	"os/signal"
@@ -19,6 +22,8 @@ import (
 
 	"oc-manager/runtime/agent/config"
 )
+
+const defaultAgentConfigPath = "config/agent.yaml"
 
 // HealthResponse 是 runtime agent 健康检查响应。
 // 后续注册、心跳和文件 API 会复用该服务入口，因此这里先固定最小可观测字段。
@@ -51,10 +56,14 @@ type agentOptions struct {
 }
 
 func main() {
-	configPath := os.Getenv("OC_AGENT_CONFIG")
-	if configPath == "" {
-		configPath = "config/agent.yaml"
+	if len(os.Args) > 1 && os.Args[1] == "healthcheck" {
+		if err := runHealthcheckCommand(os.Args[2:]); err != nil {
+			fmt.Fprintf(os.Stderr, "healthcheck failed: %v\n", err)
+			os.Exit(1)
+		}
+		return
 	}
+	configPath := defaultConfigPath()
 	cfg, err := config.LoadFile(configPath)
 	if err != nil {
 		log.Fatalf("加载 agent 配置失败: %v", err)
@@ -74,6 +83,113 @@ func main() {
 	if err := runAgent(context.Background(), opts, os.Stdout); err != nil {
 		log.Fatalf("agent 退出: %v", err)
 	}
+}
+
+// defaultConfigPath 保持普通启动和 healthcheck 省略 --config 时的配置路径规则一致。
+func defaultConfigPath() string {
+	if configPath := strings.TrimSpace(os.Getenv("OC_AGENT_CONFIG")); configPath != "" {
+		return configPath
+	}
+	return defaultAgentConfigPath
+}
+
+// runHealthcheckCommand 解析镜像内健康检查参数，并把可测试逻辑委托给 runHealthcheck。
+func runHealthcheckCommand(args []string) error {
+	flags := flag.NewFlagSet("healthcheck", flag.ContinueOnError)
+	flags.SetOutput(io.Discard)
+	configPath := flags.String("config", "", "agent config path")
+	if err := flags.Parse(args); err != nil {
+		return err
+	}
+	if flags.NArg() > 0 {
+		return fmt.Errorf("unexpected healthcheck arguments: %s", strings.Join(flags.Args(), " "))
+	}
+	return runHealthcheck(*configPath)
+}
+
+// runHealthcheck 验证容器内 agent 运行依赖和本地 TLS 健康端点，返回错误供测试断言和 main 转 exit code。
+func runHealthcheck(configPath string) error {
+	if strings.TrimSpace(configPath) == "" {
+		configPath = defaultConfigPath()
+	}
+	cfg, err := config.LoadFile(configPath)
+	if err != nil {
+		return err
+	}
+	if err := verifyDockerSocket(cfg.Agent.DockerSocket); err != nil {
+		return err
+	}
+	if err := verifyRegistrationCredentials(cfg.Agent.StateDir); err != nil {
+		return err
+	}
+	client := &http.Client{
+		Transport: &http.Transport{
+			// agent 使用自签证书；healthcheck 只在容器本地回环访问，证书链不作为存活判断条件。
+			TLSClientConfig: &tls.Config{InsecureSkipVerify: true, MinVersion: tls.VersionTLS12}, //nolint:gosec
+		},
+		Timeout: 2 * time.Second,
+	}
+	if err := verifyLocalHealthz(client, cfg.Agent.FileAddr); err != nil {
+		return fmt.Errorf("file endpoint healthz failed: %w", err)
+	}
+	if err := verifyLocalHealthz(client, cfg.Agent.DockerAddr); err != nil {
+		return fmt.Errorf("docker endpoint healthz failed: %w", err)
+	}
+	return nil
+}
+
+// verifyDockerSocket 确认 docker socket 挂载到了容器内且类型是 Unix socket。
+func verifyDockerSocket(path string) error {
+	info, err := os.Stat(path)
+	if err != nil {
+		return fmt.Errorf("docker socket unavailable: %w", err)
+	}
+	if info.Mode()&os.ModeSocket == 0 {
+		return fmt.Errorf("docker socket path is not a Unix socket: %s", path)
+	}
+	return nil
+}
+
+// verifyRegistrationCredentials 确认 agent 已完成注册并持久化了 node-id 与 agent-token。
+func verifyRegistrationCredentials(stateDir string) error {
+	nodeID, token, err := loadCredentials(stateDir)
+	if err != nil {
+		return fmt.Errorf("registration credentials unavailable: %w", err)
+	}
+	if strings.TrimSpace(nodeID) == "" || strings.TrimSpace(token) == "" {
+		return fmt.Errorf("registration credentials missing in state dir: %s", stateDir)
+	}
+	return nil
+}
+
+// verifyLocalHealthz 以 HTTPS 调用本地 /healthz，要求返回 HTTP 200。
+func verifyLocalHealthz(client *http.Client, addr string) error {
+	url, err := localHealthzURL(addr)
+	if err != nil {
+		return err
+	}
+	resp, err := client.Get(url)
+	if err != nil {
+		return fmt.Errorf("%s request failed: %w", url, err)
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusOK {
+		return fmt.Errorf("%s returned HTTP %d", url, resp.StatusCode)
+	}
+	return nil
+}
+
+// localHealthzURL 把服务监听地址归一化为容器内可访问的 HTTPS 回环地址。
+func localHealthzURL(addr string) (string, error) {
+	addr = strings.TrimSpace(addr)
+	host, port, err := net.SplitHostPort(addr)
+	if err != nil {
+		return "", fmt.Errorf("invalid local endpoint address %q: %w", addr, err)
+	}
+	if host == "" || host == "0.0.0.0" || host == "::" || host == "[::]" {
+		host = "127.0.0.1"
+	}
+	return "https://" + net.JoinHostPort(host, port) + "/healthz", nil
 }
 
 // runAgent 启动 agent 的两个 HTTP 服务并阻塞直到 ctx 取消或收到信号。

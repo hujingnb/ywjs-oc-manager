@@ -3,7 +3,7 @@ services:
     image: ${OC_RUNTIME_AGENT_IMAGE}
     restart: always
     environment:
-      OC_AGENT_CONFIG: ${OC_AGENT_CONFIG:-/etc/oc-agent/agent.yaml}
+      OC_AGENT_CONFIG: /etc/oc-agent/agent.yaml
       TZ: ${TZ:-Asia/Shanghai}
     ports:
       - "${RUNTIME_AGENT_GRPC_PORT:-7001}:7001"
@@ -11,9 +11,9 @@ services:
     volumes:
       - /var/run/docker.sock:/var/run/docker.sock
       - ./data/agent:/var/lib/oc-agent
-      - ./config/agent.yaml:${OC_AGENT_CONFIG:-/etc/oc-agent/agent.yaml}:ro
+      - ./config/agent.yaml:/etc/oc-agent/agent.yaml:ro
     healthcheck:
-      test: ["CMD-SHELL", "test -S /var/run/docker.sock && test -f ${OC_AGENT_CONFIG:-/etc/oc-agent/agent.yaml}"]
+      test: ["CMD", "oc-runtime-agent", "healthcheck", "--config", "/etc/oc-agent/agent.yaml"]
       interval: 30s
       timeout: 5s
       retries: 5

@@ -494,6 +494,7 @@ Expected: commit succeeds.
 - Create: `deploy/runtime-agent/.env.example`
 - Create: `deploy/runtime-agent/config/agent.example.yaml`
 - Create: `deploy/runtime-agent/README.md`
+- Quality fix: add `oc-runtime-agent healthcheck` in `runtime/agent/main.go`
 
 - [ ] **Step 1: Create `.env.example`**
 
@@ -502,10 +503,9 @@ Create `deploy/runtime-agent/.env.example`:
 ```env
 COMPOSE_PROJECT_NAME=oc-runtime-agent
 
-OC_RUNTIME_AGENT_IMAGE=ghcr.io/your-org/oc-runtime-agent:1.0.0
+OC_RUNTIME_AGENT_IMAGE=ghcr.io/your-org/oc-runtime-agent@sha256:CHANGE_ME_IMAGE_DIGEST
 RUNTIME_AGENT_GRPC_PORT=7001
 RUNTIME_AGENT_HTTP_PORT=7002
-OC_AGENT_CONFIG=/etc/oc-agent/agent.yaml
 
 TZ=Asia/Shanghai
 ```
@@ -560,7 +560,7 @@ services:
     image: ${OC_RUNTIME_AGENT_IMAGE}
     restart: always
     environment:
-      OC_AGENT_CONFIG: ${OC_AGENT_CONFIG:-/etc/oc-agent/agent.yaml}
+      OC_AGENT_CONFIG: /etc/oc-agent/agent.yaml
       TZ: ${TZ:-Asia/Shanghai}
     ports:
       - "${RUNTIME_AGENT_GRPC_PORT:-7001}:7001"
@@ -568,9 +568,9 @@ services:
     volumes:
       - /var/run/docker.sock:/var/run/docker.sock
       - ./data/agent:/var/lib/oc-agent
-      - ./config/agent.yaml:${OC_AGENT_CONFIG:-/etc/oc-agent/agent.yaml}:ro
+      - ./config/agent.yaml:/etc/oc-agent/agent.yaml:ro
     healthcheck:
-      test: ["CMD-SHELL", "test -S /var/run/docker.sock && test -f ${OC_AGENT_CONFIG:-/etc/oc-agent/agent.yaml}"]
+      test: ["CMD", "oc-runtime-agent", "healthcheck", "--config", "/etc/oc-agent/agent.yaml"]
       interval: 30s
       timeout: 5s
       retries: 5
@@ -597,6 +597,7 @@ docker compose up -d
 
 ## 必改配置
 
+- `OC_RUNTIME_AGENT_IMAGE`：生产环境使用 `@sha256:` 不可变摘要固定镜像；只有预发或临时验证环境才使用可变 tag。
 - `agent.name`：节点展示名。
 - `agent.advertise_host`：manager 能访问到的节点 IP 或域名。
 - `agent.trusted_cidr`：manager 出口网段，例如 `10.0.0.0/24`。
@@ -613,6 +614,8 @@ docker compose up -d
 不要把这两个端口直接暴露到公网。
 
 ## 状态检查
+
+容器 healthcheck 会在镜像内执行 `oc-runtime-agent healthcheck`，检查 Docker socket 是否为 Unix socket、注册凭据是否已写入 state 目录，以及 Docker TLS proxy 和 File API 两个本地 `/healthz` 端点是否返回 HTTP 200。
 
 ```bash
 docker compose ps

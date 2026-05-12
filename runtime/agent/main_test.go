@@ -7,10 +7,14 @@ import (
 	"crypto/x509"
 	"encoding/base64"
 	"encoding/json"
+	"fmt"
 	"io"
 	"net"
 	"net/http"
 	"net/http/httptest"
+	"net/url"
+	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 	"time"
@@ -231,6 +235,107 @@ func TestRunAgent_PrintsCAPEMAndAcceptsTLS(t *testing.T) {
 	case <-time.After(3 * time.Second):
 		t.Fatal("runAgent 未在超时内退出")
 	}
+}
+
+// TestRunHealthcheckSuccess 验证健康检查在 Docker socket、注册凭据和本地 TLS 端点都正常时通过。
+func TestRunHealthcheckSuccess(t *testing.T) {
+	stateDir := t.TempDir()
+	socketPath := startUnixDockerStub(t, func(w http.ResponseWriter, _ *http.Request) {
+		w.WriteHeader(http.StatusOK)
+	})
+	fileServer := startHealthzTLSServer(t)
+	dockerServer := startHealthzTLSServer(t)
+	require.NoError(t, storeCredentials(stateDir, "node-id", "agent-token"))
+	configPath := writeHealthcheckConfig(t, stateDir, socketPath, "0.0.0.0:"+serverPort(t, fileServer.URL), ":"+serverPort(t, dockerServer.URL))
+
+	err := runHealthcheck(configPath)
+
+	require.NoError(t, err)
+}
+
+// TestRunHealthcheckFailsWithoutCredentials 验证缺少注册凭据时健康检查返回明确的注册状态错误。
+func TestRunHealthcheckFailsWithoutCredentials(t *testing.T) {
+	stateDir := t.TempDir()
+	socketPath := startUnixDockerStub(t, func(w http.ResponseWriter, _ *http.Request) {
+		w.WriteHeader(http.StatusOK)
+	})
+	fileServer := startHealthzTLSServer(t)
+	dockerServer := startHealthzTLSServer(t)
+	configPath := writeHealthcheckConfig(t, stateDir, socketPath, fileServer.Listener.Addr().String(), dockerServer.Listener.Addr().String())
+
+	err := runHealthcheck(configPath)
+
+	require.Error(t, err)
+	require.Contains(t, strings.ToLower(err.Error()), "credentials")
+}
+
+// TestRunHealthcheckFailsWhenEndpointUnavailable 验证任一本地 TLS healthz 端点不可用时健康检查失败。
+func TestRunHealthcheckFailsWhenEndpointUnavailable(t *testing.T) {
+	stateDir := t.TempDir()
+	socketPath := startUnixDockerStub(t, func(w http.ResponseWriter, _ *http.Request) {
+		w.WriteHeader(http.StatusOK)
+	})
+	fileServer := startHealthzTLSServer(t)
+	unusedDockerAddr := freePort(t)
+	require.NoError(t, storeCredentials(stateDir, "node-id", "agent-token"))
+	configPath := writeHealthcheckConfig(t, stateDir, socketPath, fileServer.Listener.Addr().String(), unusedDockerAddr)
+
+	err := runHealthcheck(configPath)
+
+	require.Error(t, err)
+	require.Contains(t, strings.ToLower(err.Error()), "healthz")
+}
+
+// startHealthzTLSServer 启动只暴露 /healthz 的本地 TLS 服务，用于模拟 agent 的两个本地端点。
+func startHealthzTLSServer(t *testing.T) *httptest.Server {
+	t.Helper()
+	server := httptest.NewTLSServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path != "/healthz" {
+			w.WriteHeader(http.StatusNotFound)
+			return
+		}
+		w.WriteHeader(http.StatusOK)
+	}))
+	t.Cleanup(server.Close)
+	return server
+}
+
+// serverPort 从 httptest TLS server URL 中提取端口，便于覆盖 :port 与 0.0.0.0:port 归一化场景。
+func serverPort(t *testing.T, rawURL string) string {
+	t.Helper()
+	parsed, err := url.Parse(rawURL)
+	require.NoError(t, err)
+	_, port, err := net.SplitHostPort(parsed.Host)
+	require.NoError(t, err)
+	return port
+}
+
+// writeHealthcheckConfig 写入最小有效 agent 配置，让 healthcheck 走真实配置加载与校验路径。
+func writeHealthcheckConfig(t *testing.T, stateDir, dockerSocket, fileAddr, dockerAddr string) string {
+	t.Helper()
+	path := filepath.Join(t.TempDir(), "agent.yaml")
+	content := fmt.Sprintf(`
+agent:
+  name: "node-1"
+  advertise_host: "127.0.0.1"
+  max_apps: 3
+  data_root: "%s"
+  state_dir: "%s"
+  docker_socket: "%s"
+  trusted_cidr: "10.0.0.0/8"
+  docker_addr: "%s"
+  file_addr: "%s"
+manager:
+  endpoint: "https://manager.example/api/v1"
+  enrollment_secret: "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA="
+  ca_bundle: ""
+  skip_verify: false
+heartbeat:
+  interval_seconds: 30
+  failure_log_threshold: 5
+`, t.TempDir(), stateDir, dockerSocket, dockerAddr, fileAddr)
+	require.NoError(t, os.WriteFile(path, []byte(content), 0o600))
+	return path
 }
 
 // waitForCAPEM 在超时内反复扫描 stdout，直到看到 agent-ca-pem-base64 行。

@@ -14,6 +14,7 @@ docker compose up -d
 
 ## 必改配置
 
+- `OC_RUNTIME_AGENT_IMAGE`：生产环境使用 `@sha256:` 不可变摘要固定镜像；只有预发或临时验证环境才使用可变 tag。
 - `agent.name`：节点展示名。
 - `agent.advertise_host`：manager 能访问到的节点 IP 或域名。
 - `agent.trusted_cidr`：manager 出口网段，例如 `10.0.0.0/24`。
@@ -30,6 +31,8 @@ docker compose up -d
 不要把这两个端口直接暴露到公网。
 
 ## 状态检查
+
+容器 healthcheck 会在镜像内执行 `oc-runtime-agent healthcheck`，检查 Docker socket 是否为 Unix socket、注册凭据是否已写入 state 目录，以及 Docker TLS proxy 和 File API 两个本地 `/healthz` 端点是否返回 HTTP 200。
 
 ```bash
 docker compose ps
