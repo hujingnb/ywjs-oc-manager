@@ -35,6 +35,8 @@ deploy/runtime-agent/.env
 deploy/manage/.env
 deploy/manage/config/manager.yaml
 deploy/runtime-agent/config/agent.yaml
+deploy/manage/tls/*
+!deploy/manage/tls/.gitkeep
 
 deploy/new-api/data/**
 deploy/new-api/logs/**

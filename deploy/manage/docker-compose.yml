@@ -1,6 +1,6 @@
 services:
   manager-postgres:
-    image: postgres:17-alpine
+    image: ${MANAGER_POSTGRES_IMAGE}
     restart: always
     environment:
       POSTGRES_USER: ${MANAGER_POSTGRES_USER}
@@ -18,7 +18,7 @@ services:
       - manager-internal
 
   manager-redis:
-    image: redis:7
+    image: ${MANAGER_REDIS_IMAGE}
     restart: always
     environment:
       REDISCLI_AUTH: ${MANAGER_REDIS_PASSWORD}
@@ -64,7 +64,7 @@ services:
       - manager-internal
 
   manager-nginx:
-    image: nginx:1.27-alpine
+    image: ${MANAGER_NGINX_IMAGE}
     restart: always
     ports:
       - "${MANAGER_HTTP_PORT:-80}:80"

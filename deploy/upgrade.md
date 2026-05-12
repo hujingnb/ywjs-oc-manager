@@ -118,7 +118,9 @@ release notes 和审计发版记录。
 `.env` 中的镜像引用固定到 digest 后再执行 rollout，确保重启、扩容和回滚
 时拉取到同一个镜像内容。
 
-生产部署文件不得使用会随分支、环境或版本族移动的镜像 tag。
+生产部署文件不得使用会随分支、环境或版本族移动的镜像 tag。PostgreSQL、
+Redis、nginx、Ollama 等基础设施镜像同样必须在 `.env` 中固定到 digest，避免
+宿主重启或 `docker compose pull` 时拉取到不同内容。
 
 ## 常见问题
 

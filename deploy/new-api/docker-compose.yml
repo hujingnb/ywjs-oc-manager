@@ -1,6 +1,6 @@
 services:
   new-api-postgres:
-    image: postgres:17-alpine
+    image: ${NEWAPI_POSTGRES_IMAGE}
     restart: always
     environment:
       POSTGRES_USER: ${NEWAPI_POSTGRES_USER}
@@ -18,7 +18,7 @@ services:
       - new-api-internal
 
   new-api-redis:
-    image: redis:7
+    image: ${NEWAPI_REDIS_IMAGE}
     restart: always
     environment:
       REDISCLI_AUTH: ${NEWAPI_REDIS_PASSWORD}

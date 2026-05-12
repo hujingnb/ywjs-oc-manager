@@ -23,7 +23,7 @@
 - Create: `deploy/new-api/docker-compose.yml`
   - new-api、new-api-postgres、new-api-redis 完整栈。
 - Create: `deploy/new-api/.env.example`
-  - new-api 镜像、端口、数据库和 Redis 密码模板。
+  - new-api、PostgreSQL、Redis 镜像、端口、数据库和 Redis 密码模板。
 - Create: `deploy/new-api/README.md`
   - 复制目录、生成 `.env`、启动、备份和对接 manager 的说明。
 - Create: `deploy/new-api/data/postgres/.gitkeep`
@@ -49,7 +49,7 @@
 - Create: `deploy/manage/docker-compose.yml`
   - manager-postgres、manager-redis、manager-api、manager-web、manager-nginx 完整栈。
 - Create: `deploy/manage/.env.example`
-  - manager/web 镜像、端口、数据库/Redis 密码模板。
+  - manager/web、PostgreSQL、Redis、nginx 镜像、端口、数据库/Redis 密码模板。
 - Create: `deploy/manage/README.md`
   - 配置、迁移、启动、TLS、备份、升级入口说明。
 - Create: `deploy/manage/config/manager.example.yaml`
@@ -189,6 +189,8 @@ Create `deploy/new-api/.env.example`:
 COMPOSE_PROJECT_NAME=oc-new-api
 
 NEWAPI_IMAGE=calciumion/new-api@sha256:CHANGE_ME_NEWAPI_IMAGE_DIGEST
+NEWAPI_POSTGRES_IMAGE=postgres@sha256:CHANGE_ME_POSTGRES_IMAGE_DIGEST
+NEWAPI_REDIS_IMAGE=redis@sha256:CHANGE_ME_REDIS_IMAGE_DIGEST
 NEWAPI_PORT=3000
 NEWAPI_NODE_NAME=new-api-prod-1
 NEWAPI_STREAMING_TIMEOUT=600
@@ -211,7 +213,7 @@ Create `deploy/new-api/docker-compose.yml`:
 ```yaml
 services:
   new-api-postgres:
-    image: postgres:17-alpine
+    image: ${NEWAPI_POSTGRES_IMAGE}
     restart: always
     environment:
       POSTGRES_USER: ${NEWAPI_POSTGRES_USER}
@@ -229,7 +231,7 @@ services:
       - new-api-internal
 
   new-api-redis:
-    image: redis:7
+    image: ${NEWAPI_REDIS_IMAGE}
     restart: always
     environment:
       REDISCLI_AUTH: ${NEWAPI_REDIS_PASSWORD}
@@ -298,7 +300,7 @@ docker compose up -d
 
 ## 配置要求
 
-`NEWAPI_IMAGE` 生产环境必须使用内容寻址的 `@sha256:` digest。SemVer tag 仅可作为发布标签用于查询对应 digest，不应写入生产 `.env`。
+`NEWAPI_IMAGE`、`NEWAPI_POSTGRES_IMAGE` 和 `NEWAPI_REDIS_IMAGE` 生产环境必须使用内容寻址的 `@sha256:` digest。SemVer tag 仅可作为发布标签用于查询对应 digest，不应写入生产 `.env`。
 
 `NEWAPI_POSTGRES_PASSWORD` 和 `NEWAPI_REDIS_PASSWORD` 是数据库和 Redis 服务使用的原始密码。
 当密码包含 `@`、`:`、`/`、`?`、`#` 等 URL 保留字符时，需将同一密码 URL 编码后分别填入
@@ -663,6 +665,9 @@ COMPOSE_PROJECT_NAME=oc-manage
 
 OCM_MANAGER_IMAGE=ghcr.io/your-org/openclaw-manager@sha256:CHANGE_ME_MANAGER_IMAGE_DIGEST
 OCM_WEB_IMAGE=ghcr.io/your-org/openclaw-manager-web@sha256:CHANGE_ME_WEB_IMAGE_DIGEST
+MANAGER_POSTGRES_IMAGE=postgres@sha256:CHANGE_ME_POSTGRES_IMAGE_DIGEST
+MANAGER_REDIS_IMAGE=redis@sha256:CHANGE_ME_REDIS_IMAGE_DIGEST
+MANAGER_NGINX_IMAGE=nginx@sha256:CHANGE_ME_NGINX_IMAGE_DIGEST
 
 MANAGER_HTTP_PORT=80
 MANAGER_HTTPS_PORT=443
@@ -787,7 +792,7 @@ Create `deploy/manage/docker-compose.yml`:
 ```yaml
 services:
   manager-postgres:
-    image: postgres:17-alpine
+    image: ${MANAGER_POSTGRES_IMAGE}
     restart: always
     environment:
       POSTGRES_USER: ${MANAGER_POSTGRES_USER}
@@ -805,7 +810,7 @@ services:
       - manager-internal
 
   manager-redis:
-    image: redis:7
+    image: ${MANAGER_REDIS_IMAGE}
     restart: always
     environment:
       REDISCLI_AUTH: ${MANAGER_REDIS_PASSWORD}
@@ -851,7 +856,7 @@ services:
       - manager-internal
 
   manager-nginx:
-    image: nginx:1.27-alpine
+    image: ${MANAGER_NGINX_IMAGE}
     restart: always
     ports:
       - "${MANAGER_HTTP_PORT:-80}:80"
@@ -907,7 +912,8 @@ docker compose up -d
 
 ## 镜像与密码
 
-`OCM_MANAGER_IMAGE` 和 `OCM_WEB_IMAGE` 必须固定到内容寻址 digest，生产环境只把
+`OCM_MANAGER_IMAGE`、`OCM_WEB_IMAGE`、`MANAGER_POSTGRES_IMAGE`、
+`MANAGER_REDIS_IMAGE` 和 `MANAGER_NGINX_IMAGE` 必须固定到内容寻址 digest，生产环境只把
 digest 写入 `.env`。`openclaw.runtime_image` 也应使用 runtime 镜像 digest。
 
 ### manager-api 镜像契约
