@@ -13,10 +13,10 @@
 ## 本地调试账号
 
 - new-api 管理员：`admin` / `admin123`
-- manager 平台管理员：`admin` / `admin123`
-- manager 测试组织：`test-org`
-- manager 测试组织管理员：`test-org` / `test-org123`
-- manager 组织成员：`test-org-user1` / `test-org-user1`
+- manager 平台管理员：组织标识留空，`admin` / `admin123`
+- manager 测试组织：组织标识 `test-org`
+- manager 测试组织管理员：组织标识 `test-org`，`test-org` / `test-org123`
+- manager 组织成员：组织标识 `test-org`，`test-org-user1` / `test-org-user1`
 
 ## 权限校验
 

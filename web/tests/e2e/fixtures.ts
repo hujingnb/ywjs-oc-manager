@@ -7,6 +7,7 @@ export type E2EFixture = {
   platform_admin_password: string
   org_id: string
   org_name: string
+  org_code: string
   node_id: string
   node_name: string
   org_admin_login: string

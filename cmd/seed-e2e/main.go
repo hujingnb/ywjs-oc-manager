@@ -35,9 +35,10 @@ type fixture struct {
 	// PlatformAdminLogin/Password 是 Playwright 全局登录用的固定平台管理员账密。
 	PlatformAdminLogin    string `json:"platform_admin_login"`
 	PlatformAdminPassword string `json:"platform_admin_password"`
-	// OrgID/OrgName 标识本次 e2e 组织边界，成员、应用和知识库用例都依赖它。
+	// OrgID/OrgName/OrgCode 标识本次 e2e 组织边界，成员、应用和知识库用例都依赖它。
 	OrgID   string `json:"org_id"`
 	OrgName string `json:"org_name"`
+	OrgCode string `json:"org_code"`
 	// NodeID/NodeName 标识占位 runtime node，e2e 不真实连接 agent。
 	NodeID   string `json:"node_id"`
 	NodeName string `json:"node_name"`
@@ -140,7 +141,7 @@ func ensurePlatformAdmin(ctx context.Context, conn *pgx.Conn, username, password
 	if _, err := conn.Exec(ctx, `
 		INSERT INTO users (username, password_hash, display_name, role, status)
 		VALUES ($1, $2, $1, 'platform_admin', 'active')
-		ON CONFLICT (username) DO UPDATE
+		ON CONFLICT (username) WHERE org_id IS NULL DO UPDATE
 			SET password_hash = EXCLUDED.password_hash,
 			    role = 'platform_admin',
 			    status = 'active',
@@ -170,9 +171,11 @@ func buildFixture(ctx context.Context, conn *pgx.Conn) (fixture, error) {
 
 	// 1) 创建组织。
 	fx.OrgName = "e2e-org"
+	fx.OrgCode = "test-org"
 	if err := conn.QueryRow(ctx,
-		`INSERT INTO organizations (name, status) VALUES ($1, 'active') RETURNING id`,
+		`INSERT INTO organizations (name, code, status) VALUES ($1, $2, 'active') RETURNING id`,
 		fx.OrgName,
+		fx.OrgCode,
 	).Scan(&fx.OrgID); err != nil {
 		return fx, fmt.Errorf("create org: %w", err)
 	}

@@ -65,7 +65,7 @@ func main() {
 	const insertSQL = `
 INSERT INTO users (username, password_hash, display_name, role, status)
 VALUES ($1, $2, $3, 'platform_admin', 'active')
-ON CONFLICT (username) DO NOTHING
+ON CONFLICT (username) WHERE org_id IS NULL DO NOTHING
 RETURNING id`
 	var id string
 	err = conn.QueryRow(ctx, insertSQL, username, hash, displayName).Scan(&id)
