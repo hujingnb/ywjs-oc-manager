@@ -120,6 +120,27 @@ func TestGetBalance_OrgAdminMustMatchOrg(t *testing.T) {
 	}
 }
 
+// TestRechargeServiceGetBillingStatusProxiesNewAPIStatus 验证 billing status 直接透传 new-api 展示配置。
+func TestRechargeServiceGetBillingStatusProxiesNewAPIStatus(t *testing.T) {
+	client := &fakeNewAPIRecharge{statusResult: newapi.StatusView{
+		QuotaPerUnit:               500000,
+		QuotaDisplayType:           "USD",
+		DisplayInCurrency:          true,
+		CustomCurrencySymbol:       "¤",
+		CustomCurrencyExchangeRate: 1,
+		USDExchangeRate:            7.3,
+		Price:                      7.3,
+	}}
+	svc := NewRechargeService(newRechargeStub(t, "4"), client)
+
+	view, err := svc.GetBillingStatus(context.Background(), platformAdmin())
+
+	require.NoError(t, err)
+	require.Equal(t, int64(500000), view.QuotaPerUnit)
+	require.Equal(t, "USD", view.QuotaDisplayType)
+	require.True(t, view.DisplayInCurrency)
+}
+
 type rechargeStub struct {
 	t                *testing.T
 	org              sqlc.Organization
@@ -174,6 +195,8 @@ type fakeNewAPIRecharge struct {
 	rechargeErr    error
 	balanceResult  newapi.BalanceResult
 	balanceErr     error
+	statusResult   newapi.StatusView
+	statusErr      error
 	lastInput      newapi.RechargeInput
 }
 
@@ -187,4 +210,11 @@ func (f *fakeNewAPIRecharge) RechargeUser(_ context.Context, input newapi.Rechar
 
 func (f *fakeNewAPIRecharge) GetUserBalance(_ context.Context, _ int64) (newapi.BalanceResult, error) {
 	return f.balanceResult, f.balanceErr
+}
+
+func (f *fakeNewAPIRecharge) GetStatusView(_ context.Context) (newapi.StatusView, error) {
+	if f.statusErr != nil {
+		return newapi.StatusView{}, f.statusErr
+	}
+	return f.statusResult, nil
 }

@@ -25,6 +25,7 @@ import (
 	"net/url"
 	"strconv"
 	"strings"
+	"time"
 
 	"oc-manager/internal/integrations/httpclient"
 )
@@ -108,6 +109,26 @@ type BalanceResult struct {
 	UsedQuota    int64
 }
 
+// StatusView 描述 manager 前端展示 new-api 金额 / 额度所需的状态配置。
+//
+// 这些字段均来自 new-api /api/status，manager 只透传用于展示，不在本地维护单价。
+type StatusView struct {
+	// QuotaPerUnit 是 new-api 展示额度与内部 quota 的换算比例。
+	QuotaPerUnit int64 `json:"quota_per_unit"`
+	// QuotaDisplayType 是 new-api 当前配置的额度显示类型，例如 USD。
+	QuotaDisplayType string `json:"quota_display_type"`
+	// DisplayInCurrency 表示 new-api 是否按货币口径展示额度。
+	DisplayInCurrency bool `json:"display_in_currency"`
+	// CustomCurrencySymbol 是自定义货币符号。
+	CustomCurrencySymbol string `json:"custom_currency_symbol"`
+	// CustomCurrencyExchangeRate 是自定义货币汇率。
+	CustomCurrencyExchangeRate float64 `json:"custom_currency_exchange_rate"`
+	// USDExchangeRate 是 new-api 配置的美元汇率。
+	USDExchangeRate float64 `json:"usd_exchange_rate"`
+	// Price 是 new-api 配置的计价参数，manager 不解释其业务含义，仅透传。
+	Price float64 `json:"price"`
+}
+
 // LogsQuery 控制 GetTokenLogs 的过滤条件；零值字段表示不过滤。
 //
 // 时间范围 Since / Until 是 unix 秒；new-api 端字段名为 start_timestamp / end_timestamp。
@@ -147,6 +168,8 @@ type LogsPage struct {
 // QuotaDate 是 new-api `controller.GetAllQuotaDates / GetQuotaDatesByUser` 的单条记录。
 type QuotaDate struct {
 	Date      string `json:"date"`
+	CreatedAt int64  `json:"created_at,omitempty"`
+	Username  string `json:"username,omitempty"`
 	ModelName string `json:"model_name"`
 	Count     int    `json:"count"`
 	Quota     int64  `json:"quota"`
@@ -557,23 +580,30 @@ func (c *Client) RechargeUser(ctx context.Context, input RechargeInput) (Recharg
 // new-api 前台的「总额度」不是直接展示 users.quota，而是按 /api/status.quota_per_unit
 // 折算；充值链路必须使用同一个比例，才能让 manager 输入值与 new-api 管理页展示值一致。
 func (c *Client) GetQuotaPerUnit(ctx context.Context) (int64, error) {
-	var response struct {
-		Success bool   `json:"success"`
-		Message string `json:"message"`
-		Data    struct {
-			QuotaPerUnit int64 `json:"quota_per_unit"`
-		} `json:"data"`
-	}
-	if err := c.do(ctx, http.MethodGet, "/api/status", nil, &response); err != nil {
+	status, err := c.GetStatusView(ctx)
+	if err != nil {
 		return 0, err
 	}
+	return status.QuotaPerUnit, nil
+}
+
+// GetStatusView 读取 new-api 展示配置；manager 只透传展示字段，不在本地维护单价。
+func (c *Client) GetStatusView(ctx context.Context) (StatusView, error) {
+	var response struct {
+		Success bool       `json:"success"`
+		Message string     `json:"message"`
+		Data    StatusView `json:"data"`
+	}
+	if err := c.do(ctx, http.MethodGet, "/api/status", nil, &response); err != nil {
+		return StatusView{}, err
+	}
 	if !response.Success {
-		return 0, fmt.Errorf("%w: %s", ErrUpstream, response.Message)
+		return StatusView{}, fmt.Errorf("%w: %s", ErrUpstream, response.Message)
 	}
 	if response.Data.QuotaPerUnit <= 0 {
-		return 0, fmt.Errorf("%w: quota_per_unit 必须为正", ErrPayloadInvalid)
+		return StatusView{}, fmt.Errorf("%w: quota_per_unit 必须为正", ErrPayloadInvalid)
 	}
-	return response.Data.QuotaPerUnit, nil
+	return response.Data, nil
 }
 
 // DeleteUser 调 admin DELETE /api/user/:id 删除业务 user。
@@ -681,7 +711,11 @@ func (c *Client) GetUserQuotaDates(ctx context.Context, userID, since, until int
 	if until > 0 {
 		values.Set("end_timestamp", strconv.FormatInt(until, 10))
 	}
-	return c.fetchQuotaDates(ctx, "/api/data/users?"+values.Encode())
+	items, err := c.fetchQuotaDates(ctx, "/api/data/users?"+values.Encode())
+	if err != nil {
+		return nil, err
+	}
+	return c.enrichQuotaDatesWithLogModels(ctx, items, since, until)
 }
 
 // GetAllQuotaDates 调 admin GET /api/data/ 拿全平台时间窗内的按天 quota 汇总。
@@ -720,7 +754,7 @@ func (c *Client) fetchQuotaDates(ctx context.Context, path string) ([]QuotaDate,
 	// 先按数组试一次
 	var direct []QuotaDate
 	if err := json.Unmarshal(response.Data, &direct); err == nil {
-		return direct, nil
+		return normalizeQuotaDates(direct), nil
 	}
 	// 退化到对象包裹
 	var wrapped struct {
@@ -731,9 +765,126 @@ func (c *Client) fetchQuotaDates(ctx context.Context, path string) ([]QuotaDate,
 		return nil, fmt.Errorf("%w: %s", ErrPayloadInvalid, err.Error())
 	}
 	if len(wrapped.Items) > 0 {
-		return wrapped.Items, nil
+		return normalizeQuotaDates(wrapped.Items), nil
 	}
-	return wrapped.Records, nil
+	return normalizeQuotaDates(wrapped.Records), nil
+}
+
+// normalizeQuotaDates 兼容 new-api v1.0.2 聚合接口只返回 created_at、不返回 date 的响应。
+// manager 的用量页以 DATE 为主列，因此这里在代理层补齐 YYYY-MM-DD，避免前端表格空白。
+func normalizeQuotaDates(items []QuotaDate) []QuotaDate {
+	for i := range items {
+		if items[i].Date == "" && items[i].CreatedAt > 0 {
+			items[i].Date = time.Unix(items[i].CreatedAt, 0).In(time.Local).Format("2006-01-02")
+		}
+	}
+	return items
+}
+
+type quotaLogAggregate struct {
+	modelName string
+	count     int
+	quota     int64
+	tokens    int
+}
+
+// enrichQuotaDatesWithLogModels 处理 new-api /api/data/users 缺 model_name 的兼容问题。
+// v1.0.2 的用户聚合接口会返回 username 和 hourly created_at，但 model_name 为空；
+// 日志接口保留了同一 username、同一小时内的模型名，因此这里只在缺模型时按小时回填。
+func (c *Client) enrichQuotaDatesWithLogModels(ctx context.Context, items []QuotaDate, since, until int64) ([]QuotaDate, error) {
+	usernames := make(map[string]struct{})
+	for _, item := range items {
+		if item.ModelName == "" && item.Username != "" && item.CreatedAt > 0 {
+			usernames[item.Username] = struct{}{}
+		}
+	}
+	if len(usernames) == 0 {
+		return items, nil
+	}
+
+	aggregates := make(map[string]map[string]quotaLogAggregate)
+	for username := range usernames {
+		logs, err := c.fetchAllLogs(ctx, LogsQuery{
+			Username: username,
+			Since:    since,
+			Until:    until,
+			PageSize: 1000,
+		})
+		if err != nil {
+			return nil, fmt.Errorf("补齐用户用量模型名失败: %w", err)
+		}
+		for _, entry := range logs {
+			if entry.ModelName == "" || entry.CreatedAt <= 0 {
+				continue
+			}
+			bucket := quotaBucketTimestamp(entry.CreatedAt)
+			key := quotaAggregateKey(entry.Username, bucket)
+			if aggregates[key] == nil {
+				aggregates[key] = make(map[string]quotaLogAggregate)
+			}
+			modelAgg := aggregates[key][entry.ModelName]
+			modelAgg.modelName = entry.ModelName
+			modelAgg.count++
+			modelAgg.quota += entry.Quota
+			modelAgg.tokens += entry.PromptTokens + entry.CompletionTokens
+			aggregates[key][entry.ModelName] = modelAgg
+		}
+	}
+
+	enriched := make([]QuotaDate, 0, len(items))
+	for _, item := range items {
+		if item.ModelName != "" || item.Username == "" || item.CreatedAt <= 0 {
+			enriched = append(enriched, item)
+			continue
+		}
+		models := aggregates[quotaAggregateKey(item.Username, quotaBucketTimestamp(item.CreatedAt))]
+		if len(models) == 0 {
+			enriched = append(enriched, item)
+			continue
+		}
+		for _, modelAgg := range models {
+			next := item
+			next.ModelName = modelAgg.modelName
+			next.Count = modelAgg.count
+			next.Quota = modelAgg.quota
+			next.Tokens = modelAgg.tokens
+			enriched = append(enriched, next)
+		}
+	}
+	return enriched, nil
+}
+
+// fetchAllLogs 按页拉取日志，供聚合补字段使用；超过 total 或遇到短页即停止。
+func (c *Client) fetchAllLogs(ctx context.Context, q LogsQuery) ([]LogEntry, error) {
+	pageSize := q.PageSize
+	if pageSize <= 0 {
+		pageSize = 1000
+	}
+	var out []LogEntry
+	for page := 1; ; page++ {
+		q.Page = page
+		q.PageSize = pageSize
+		pageData, err := c.GetTokenLogs(ctx, q)
+		if err != nil {
+			return nil, err
+		}
+		out = append(out, pageData.Items...)
+		if len(pageData.Items) == 0 || len(pageData.Items) < pageSize {
+			break
+		}
+		if pageData.Total > 0 && len(out) >= pageData.Total {
+			break
+		}
+	}
+	return out, nil
+}
+
+func quotaBucketTimestamp(timestamp int64) int64 {
+	return timestamp - timestamp%3600
+}
+
+func quotaAggregateKey(username string, bucket int64) string {
+	return username + ":" + strconv.FormatInt(bucket, 10)
 }
 
 // newRequest 把 method / path / body 组装成 *http.Request，但不写鉴权头。

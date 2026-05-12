@@ -2088,6 +2088,74 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/billing/status": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * 查询计费展示配置
+         * @description 透传 new-api /api/status 中用于余额、用量和充值展示的配置；manager 不维护 token 单价
+         */
+        get: {
+            parameters: {
+                query?: never;
+                header?: never;
+                path?: never;
+                cookie?: never;
+            };
+            requestBody?: never;
+            responses: {
+                /** @description OK */
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": {
+                            [key: string]: components["schemas"]["service.BillingStatusView"];
+                        };
+                    };
+                };
+                /** @description Unauthorized */
+                401: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["handlers.ErrorResponse"];
+                    };
+                };
+                /** @description Forbidden */
+                403: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["handlers.ErrorResponse"];
+                    };
+                };
+                /** @description Bad Gateway */
+                502: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["handlers.ErrorResponse"];
+                    };
+                };
+            };
+        };
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/jobs/{jobId}": {
         parameters: {
             query?: never;
@@ -5210,6 +5278,22 @@ export interface components {
             newapi_user_id?: number;
             remain_quota?: number;
             used_quota?: number;
+        };
+        "service.BillingStatusView": {
+            /** @description CustomCurrencyExchangeRate 是自定义货币汇率。 */
+            custom_currency_exchange_rate?: number;
+            /** @description CustomCurrencySymbol 是自定义货币符号。 */
+            custom_currency_symbol?: string;
+            /** @description DisplayInCurrency 表示 new-api 是否按货币口径展示额度。 */
+            display_in_currency?: boolean;
+            /** @description Price 是 new-api 配置的计价参数，manager 只透传给前端展示层。 */
+            price?: number;
+            /** @description QuotaDisplayType 是 new-api 当前配置的额度显示类型，例如 USD。 */
+            quota_display_type?: string;
+            /** @description QuotaPerUnit 是 new-api 展示额度与内部 quota 的换算比例。 */
+            quota_per_unit?: number;
+            /** @description USDExchangeRate 是 new-api 配置的美元汇率。 */
+            usd_exchange_rate?: number;
         };
         "service.ChallengeResult": {
             /** @description ChallengeType 是登录挑战类型，例如 qrcode 或 code；异步 worker 未生成时为空。 */

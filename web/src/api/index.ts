@@ -96,6 +96,8 @@ export interface LogEntry {
 export interface QuotaDate {
   // 聚合日期。
   date: string
+  // new-api v1.0.2 可能仅返回创建时间，manager 会据此补齐 date。
+  created_at?: number
   // 模型名称。
   model_name: string
   // 调用次数。

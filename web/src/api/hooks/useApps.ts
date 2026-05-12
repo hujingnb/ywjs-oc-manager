@@ -4,6 +4,7 @@ import { useMutation, useQuery, useQueryClient } from '@tanstack/vue-query'
 import type { Ref } from 'vue'
 
 import { apiRequest } from '@/api/client'
+import type { AggregatedUsage } from '@/api/hooks/useUsage'
 
 // AppDTO 是应用详情与列表接口共用的前端视图。
 // 字段名保持后端 JSON snake_case，避免在 hook 层做额外映射。
@@ -30,6 +31,8 @@ export interface AppDTO {
   container_id?: string
   // new-api token 绑定状态，用于控制 API key 操作按钮。
   api_key_status: string
+  // new-api key ID 用于应用维度用量查询；未初始化成功时为空。
+  newapi_key_id?: number
 }
 
 // RuntimeOperationResult 是运行时异步操作的提交结果。
@@ -241,18 +244,19 @@ export function useAppUsageQuery(
   appId: Ref<string | undefined>,
   context: Ref<{ orgId: string; ownerUserId: string; newapiKeyId: number } | undefined>,
 ) {
-  return useQuery<{ usage?: { app_id: string; remain_quota: number; status: number; updated_at: string } } | null>({
+  return useQuery<AggregatedUsage | null>({
     queryKey: ['app-usage', appId, context],
     enabled: () => Boolean(appId.value && context.value),
     queryFn: async () => {
       if (!appId.value || !context.value) return null
-      return apiRequest(`/api/v1/apps/${appId.value}/usage`, {
+      const response = await apiRequest<{ usage: AggregatedUsage }>(`/api/v1/apps/${appId.value}/usage`, {
         query: {
           owner_org_id: context.value.orgId,
           owner_user_id: context.value.ownerUserId,
           newapi_key_id: context.value.newapiKeyId,
         },
       })
+      return response.usage
     },
   })
 }

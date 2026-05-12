@@ -100,13 +100,13 @@
           当前余额：
           <strong v-if="balanceQuery.isLoading.value">加载中…</strong>
           <strong v-else-if="balance">
-            剩余 {{ balance.remain_quota.toLocaleString() }} ｜ 已用 {{ balance.used_quota.toLocaleString() }}
+            剩余 {{ formatQuotaValue(balance.remain_quota, billingStatus) }} ｜ 已用 {{ formatQuotaValue(balance.used_quota, billingStatus) }}
           </strong>
           <strong v-else class="danger">查询失败</strong>
         </p>
         <n-form label-placement="top" @submit.prevent="submitRecharge">
-          <n-form-item label="充值点数（正整数）">
-            <n-input-number v-model:value="rechargeAmount" :min="1" style="width: 100%" placeholder="输入点数" />
+          <n-form-item label="充值金额（正整数）">
+            <n-input-number v-model:value="rechargeAmount" :min="1" :precision="0" style="width: 100%" placeholder="输入金额" />
           </n-form-item>
           <n-form-item label="备注">
             <n-input v-model:value="rechargeRemark" placeholder="业务说明，可选" />
@@ -143,11 +143,12 @@ import { formatOrgStatus } from '@/domain/status'
 import {
   useCreateOrganization, useOrganizationsQuery, useUpdateOrganizationStatus,
 } from '@/api/hooks/useOrganizations'
-import { useOrgBalanceQuery, useRechargeMutation } from '@/api/hooks/useRecharge'
+import { useBillingStatusQuery, useOrgBalanceQuery, useRechargeMutation } from '@/api/hooks/useRecharge'
 import type { Organization } from '@/api'
 import DataTableList from '@/components/DataTableList.vue'
 import { statusColumn, actionColumn } from '@/components/columns'
 import { useFormModal } from '@/composables/useFormModal'
+import { formatDisplayAmount, formatQuotaValue } from '@/pages/usage/usageFormatting'
 
 // OrganizationsPage 是平台组织管理页，负责创建组织、启停组织和给组织充值。
 const { data: organizations, isLoading, error } = useOrganizationsQuery()
@@ -158,6 +159,7 @@ const selectedOrg = ref<Organization | null>(null)
 const selectedOrgId = computed(() => selectedOrg.value?.id)
 const balanceQuery = useOrgBalanceQuery(selectedOrgId)
 const balance = computed(() => balanceQuery.data.value ?? null)
+const { data: billingStatus } = useBillingStatusQuery()
 const rechargeMutation = useRechargeMutation(selectedOrgId)
 const rechargeVisible = ref(false)
 const rechargeAmount = ref<number | null>(null)
@@ -257,7 +259,7 @@ async function submitRecharge() {
       credit_amount: rechargeAmount.value ?? 0,
       remark: rechargeRemark.value || undefined,
     })
-    rechargeFeedback.value = `已充值 ${result.credit_amount.toLocaleString()} 点`
+    rechargeFeedback.value = `已充值 ${formatDisplayAmount(result.credit_amount, billingStatus.value)}`
     rechargeAmount.value = null
     rechargeRemark.value = ''
   } catch (err: unknown) {

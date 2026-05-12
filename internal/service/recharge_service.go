@@ -26,6 +26,7 @@ type RechargeStore interface {
 type NewAPIRechargeClient interface {
 	RechargeUser(ctx context.Context, input newapi.RechargeInput) (newapi.RechargeResult, error)
 	GetUserBalance(ctx context.Context, newapiUserID int64) (newapi.BalanceResult, error)
+	GetStatusView(ctx context.Context) (newapi.StatusView, error)
 }
 
 // RechargeRecordResult 是面向 handler/前端的充值记录视图。
@@ -47,6 +48,26 @@ type BalanceView struct {
 	NewAPIUserID int64 `json:"newapi_user_id"`
 	RemainQuota  int64 `json:"remain_quota"`
 	UsedQuota    int64 `json:"used_quota"`
+}
+
+// BillingStatusView 是 manager 前端格式化余额 / 用量所需的 new-api 展示配置。
+//
+// manager 不维护 token 单价；这些字段均来自 new-api /api/status。
+type BillingStatusView struct {
+	// QuotaPerUnit 是 new-api 展示额度与内部 quota 的换算比例。
+	QuotaPerUnit int64 `json:"quota_per_unit"`
+	// QuotaDisplayType 是 new-api 当前配置的额度显示类型，例如 USD。
+	QuotaDisplayType string `json:"quota_display_type"`
+	// DisplayInCurrency 表示 new-api 是否按货币口径展示额度。
+	DisplayInCurrency bool `json:"display_in_currency"`
+	// CustomCurrencySymbol 是自定义货币符号。
+	CustomCurrencySymbol string `json:"custom_currency_symbol"`
+	// CustomCurrencyExchangeRate 是自定义货币汇率。
+	CustomCurrencyExchangeRate float64 `json:"custom_currency_exchange_rate"`
+	// USDExchangeRate 是 new-api 配置的美元汇率。
+	USDExchangeRate float64 `json:"usd_exchange_rate"`
+	// Price 是 new-api 配置的计价参数，manager 只透传给前端展示层。
+	Price float64 `json:"price"`
 }
 
 // RechargeService 串起 new-api 充值与本地审计/记录写入。
@@ -202,6 +223,28 @@ func (s *RechargeService) GetBalance(ctx context.Context, principal auth.Princip
 		NewAPIUserID: balance.NewAPIUserID,
 		RemainQuota:  balance.RemainQuota,
 		UsedQuota:    balance.UsedQuota,
+	}, nil
+}
+
+// GetBillingStatus 透传 new-api 展示配置；manager 不维护 token 单价。
+func (s *RechargeService) GetBillingStatus(ctx context.Context, principal auth.Principal) (BillingStatusView, error) {
+	if principal.Role != domain.UserRolePlatformAdmin &&
+		principal.Role != domain.UserRoleOrgAdmin &&
+		principal.Role != domain.UserRoleOrgMember {
+		return BillingStatusView{}, ErrForbidden
+	}
+	status, err := s.client.GetStatusView(ctx)
+	if err != nil {
+		return BillingStatusView{}, fmt.Errorf("查询 new-api 展示配置失败: %w", err)
+	}
+	return BillingStatusView{
+		QuotaPerUnit:               status.QuotaPerUnit,
+		QuotaDisplayType:           status.QuotaDisplayType,
+		DisplayInCurrency:          status.DisplayInCurrency,
+		CustomCurrencySymbol:       status.CustomCurrencySymbol,
+		CustomCurrencyExchangeRate: status.CustomCurrencyExchangeRate,
+		USDExchangeRate:            status.USDExchangeRate,
+		Price:                      status.Price,
 	}, nil
 }
 

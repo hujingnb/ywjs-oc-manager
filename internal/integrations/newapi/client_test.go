@@ -211,6 +211,54 @@ func TestRechargeUserRejectsQuotaOverflow(t *testing.T) {
 	require.Contains(t, err.Error(), "超出")
 }
 
+// TestGetAllQuotaDatesBackfillsDateFromCreatedAt 校验 new-api 聚合接口只返回 created_at 时，
+// client 会补齐 DATE 列需要的日期字段，避免用量页面展示空日期。
+func TestGetAllQuotaDatesBackfillsDateFromCreatedAt(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		require.Equal(t, "/api/data/", r.URL.Path)
+		_, _ = w.Write([]byte(`{"success":true,"data":[{"created_at":1778562000,"model_name":"","count":1,"quota":5,"token_used":10}]}`))
+	}))
+	defer server.Close()
+
+	client := NewClient(server.URL, "tok", 1)
+	items, err := client.GetAllQuotaDates(context.Background(), 0, 0)
+	require.NoError(t, err)
+	require.Len(t, items, 1)
+	assert.Equal(t, "2026-05-12", items[0].Date)
+	assert.Equal(t, int64(1778562000), items[0].CreatedAt)
+}
+
+// TestGetUserQuotaDatesBackfillsModelNameFromLogs 校验 new-api 用户聚合接口缺失 model_name 时，
+// client 会用同一 username 的日志补齐模型名，避免组织用量页显示“未知模型”。
+func TestGetUserQuotaDatesBackfillsModelNameFromLogs(t *testing.T) {
+	var gotLogQuery bool
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		switch {
+		case r.Method == http.MethodGet && r.URL.Path == "/api/data/users":
+			_, _ = w.Write([]byte(`{"success":true,"data":[{"username":"org-demo","created_at":1778569200,"model_name":"","count":2,"quota":15,"token_used":30}]}`))
+		case r.Method == http.MethodGet && r.URL.Path == "/api/log/":
+			gotLogQuery = true
+			assert.Equal(t, "org-demo", r.URL.Query().Get("username"))
+			_, _ = w.Write([]byte(`{"success":true,"data":{"total":2,"items":[{"username":"org-demo","created_at":1778570000,"model_name":"qwen2.5:0.5b","quota":5,"prompt_tokens":3,"completion_tokens":7},{"username":"org-demo","created_at":1778570100,"model_name":"qwen2.5:0.5b","quota":10,"prompt_tokens":8,"completion_tokens":12}]}}`))
+		default:
+			t.Fatalf("unexpected request: %s %s", r.Method, r.URL.Path)
+		}
+	}))
+	defer server.Close()
+
+	client := NewClient(server.URL, "tok", 1)
+	items, err := client.GetUserQuotaDates(context.Background(), 8, 1778486400, 1778572799)
+	require.NoError(t, err)
+	require.True(t, gotLogQuery)
+	require.Len(t, items, 1)
+	assert.Equal(t, "qwen2.5:0.5b", items[0].ModelName)
+	assert.Equal(t, 2, items[0].Count)
+	assert.Equal(t, int64(15), items[0].Quota)
+	assert.Equal(t, 30, items[0].Tokens)
+}
+
 // TestCreateUserCallsAdminEndpoint 校验 CreateUser 调 admin POST /api/user/ 并回查 user_id：
 // new-api v1 该端点响应不返回 data.id，client 必须通过 GET /api/user/search?keyword=username
 // 拿到完整 user 实体。

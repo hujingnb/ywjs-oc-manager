@@ -37,6 +37,24 @@ export interface BalanceDTO {
   used_quota: number
 }
 
+// BillingStatusDTO 是 new-api 的计费展示配置，manager 只负责透传展示，不管理单价。
+export interface BillingStatusDTO {
+  // quota_per_unit 表示多少 raw quota 折算为一个展示单位。
+  quota_per_unit: number
+  // quota_display_type 是 new-api 配置的展示单位，例如 USD。
+  quota_display_type?: string
+  // display_in_currency 标记 new-api 是否按金额展示。
+  display_in_currency?: boolean
+  // custom_currency_symbol 是 new-api 自定义货币符号。
+  custom_currency_symbol?: string
+  // custom_currency_exchange_rate 由 new-api 管理，本端不参与计算。
+  custom_currency_exchange_rate?: number
+  // usd_exchange_rate 由 new-api 管理，本端不参与计算。
+  usd_exchange_rate?: number
+  // price 由 new-api 管理，本端只透传。
+  price?: number
+}
+
 const recordsKey = (orgId: string | undefined) => ['recharges', orgId] as const
 const balanceKey = (orgId: string | undefined) => ['org-balance', orgId] as const
 
@@ -68,6 +86,20 @@ export function useOrgBalanceQuery(orgId: Ref<string | undefined>) {
         `/api/v1/organizations/${orgId.value}/balance`,
       )
       return response.balance
+    },
+  })
+}
+
+// useBillingStatusQuery 查询 new-api 当前计费展示配置。
+// 该接口不包含 manager 自定义单价，所有金额换算只按 new-api 返回配置显示。
+export function useBillingStatusQuery() {
+  return useQuery<BillingStatusDTO | null>({
+    queryKey: ['billing-status'],
+    queryFn: async () => {
+      const response = await apiRequest<{ billing_status: BillingStatusDTO }>(
+        `/api/v1/billing/status`,
+      )
+      return response.billing_status
     },
   })
 }

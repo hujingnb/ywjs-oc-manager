@@ -19,7 +19,7 @@
           当前余额：
           <strong v-if="balanceQuery.isLoading.value">加载中…</strong>
           <strong v-else-if="balance">
-            剩余 {{ balance.remain_quota.toLocaleString() }} ｜ 已用 {{ balance.used_quota.toLocaleString() }}
+            剩余 {{ formatQuotaValue(balance.remain_quota, billingStatus) }} ｜ 已用 {{ formatQuotaValue(balance.used_quota, billingStatus) }}
           </strong>
           <strong v-else class="danger">查询失败</strong>
         </p>
@@ -27,8 +27,8 @@
         <n-form label-placement="top" @submit.prevent="onSubmit">
           <n-grid :cols="3" :x-gap="14">
             <n-grid-item>
-              <n-form-item label="充值点数（正整数）">
-                <n-input-number v-model:value="amount" :min="1" style="width: 100%" placeholder="输入点数" />
+              <n-form-item label="充值金额（正整数）">
+                <n-input-number v-model:value="amount" :min="1" :precision="0" style="width: 100%" placeholder="输入金额" />
               </n-form-item>
             </n-grid-item>
             <n-grid-item>
@@ -56,7 +56,7 @@
     <ConfirmActionModal
       :visible="confirmRecharge"
       title="确认组织充值"
-      :message="pendingPayload ? `将给当前组织充值 ${pendingPayload.credit_amount} Token Credit。该操作会调用 new-api 修改余额。` : ''"
+      :message="pendingPayload ? `将给当前组织充值 ${formatDisplayAmount(pendingPayload.credit_amount, billingStatus)}。该操作会调用 new-api 修改余额。` : ''"
       confirm-label="确认充值"
       :busy="mutation.isPending.value"
       :verify-value="orgName"
@@ -90,9 +90,10 @@ import { computed, h, ref } from 'vue'
 import { RouterLink, useRoute } from 'vue-router'
 import { NButton, NCard, NDataTable, NForm, NFormItem, NGrid, NGridItem, NInput, NInputNumber, NTag, type DataTableColumns } from 'naive-ui'
 
-import { useOrgBalanceQuery, useRechargeMutation, useRechargesQuery, type RechargeRecordDTO } from '@/api/hooks/useRecharge'
+import { useBillingStatusQuery, useOrgBalanceQuery, useRechargeMutation, useRechargesQuery, type RechargeRecordDTO } from '@/api/hooks/useRecharge'
 import { useOrganizationQuery } from '@/api/hooks/useOrganizations'
 import ConfirmActionModal from '@/components/ConfirmActionModal.vue'
+import { formatDisplayAmount, formatQuotaValue } from '@/pages/usage/usageFormatting'
 
 // RechargePage 是独立组织充值页，保留余额查询、充值确认和历史记录展示。
 const route = useRoute()
@@ -101,6 +102,7 @@ const orgId = computed<string | undefined>(() => route.params.orgId as string | 
 
 const balanceQuery = useOrgBalanceQuery(orgId)
 const balance = computed(() => balanceQuery.data.value ?? null)
+const { data: billingStatus } = useBillingStatusQuery()
 
 const recordsQuery = useRechargesQuery(orgId)
 const mutation = useRechargeMutation(orgId)
@@ -140,7 +142,7 @@ async function onConfirmRecharge() {
   confirmRecharge.value = false
   try {
     const result = await mutation.mutateAsync(pendingPayload.value)
-    feedback.value = `已充值 ${result.credit_amount} 点（${result.status}）`
+    feedback.value = `已充值 ${formatDisplayAmount(result.credit_amount, billingStatus.value)}（${result.status}）`
     amount.value = null
     remark.value = ''
   } catch (err: unknown) {
@@ -158,9 +160,9 @@ function onCancelRecharge() {
 }
 
 // historyColumns 展示充值历史，状态列用标签色突出成功和失败记录。
-const historyColumns: DataTableColumns<RechargeRecordDTO> = [
+const historyColumns = computed<DataTableColumns<RechargeRecordDTO>>(() => [
   { title: '时间', key: 'created_at' },
-  { title: '金额', key: 'credit_amount', render: (row) => row.credit_amount.toLocaleString() },
+  { title: '金额', key: 'credit_amount', render: (row) => formatDisplayAmount(row.credit_amount, billingStatus.value) },
   { title: '备注', key: 'remark', render: (row) => row.remark || '—' },
   {
     title: '状态', key: 'status',
@@ -171,5 +173,5 @@ const historyColumns: DataTableColumns<RechargeRecordDTO> = [
     }, { default: () => row.status }),
   },
   { title: '错误', key: 'error_message', render: (row) => row.error_message || '—' },
-]
+])
 </script>

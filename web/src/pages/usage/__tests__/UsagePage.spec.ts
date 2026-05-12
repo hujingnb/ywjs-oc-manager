@@ -16,6 +16,19 @@ vi.mock('@/api/hooks/useOrganizations', () => ({
   useOrganizationsQuery: () => ({ data: ref([]) }),
 }))
 
+vi.mock('@/api/hooks/useMembers', () => ({
+  useMembersQuery: () => ({ data: ref([]) }),
+}))
+
+vi.mock('@/api/hooks/useApps', () => ({
+  useAppsByOrgQuery: () => ({ data: ref([]) }),
+  useAppUsageQuery: () => ({ data: ref(null), isLoading: ref(false), error: ref(null) }),
+}))
+
+vi.mock('@/api/hooks/useRecharge', () => ({
+  useBillingStatusQuery: () => ({ data: ref(null) }),
+}))
+
 vi.mock('@/api/hooks/useUsage', () => ({
   useOrgUsageQuery: (orgRef: Ref<string | undefined>) => {
     usageRefs.orgRef = orgRef

@@ -26,6 +26,7 @@ vi.mock('@/api/hooks/useOrganizations', () => ({
 }))
 
 vi.mock('@/api/hooks/useRecharge', () => ({
+  useBillingStatusQuery: () => ({ data: ref(null) }),
   useOrgBalanceQuery: () => ({
     data: ref({ newapi_user_id: 4, remain_quota: 0, used_quota: 0 }),
     isLoading: ref(false),

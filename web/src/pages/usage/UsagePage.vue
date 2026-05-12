@@ -14,13 +14,19 @@
           <n-select
             v-model:value="selectedOrgId"
             :options="orgOptions"
+            filterable
             style="width: 220px"
             placeholder="选择组织"
           />
         </n-space>
         <div v-if="orgLoading" class="state-text">加载中…</div>
         <div v-else-if="orgError" class="state-text danger">查询失败：{{ orgError.message }}</div>
-        <UsageSummary v-else :view="orgView ?? undefined" empty-text="该组织暂无应用用量记录" />
+        <UsageSummary
+          v-else
+          :view="orgView ?? undefined"
+          :billing-status="billingStatus ?? undefined"
+          empty-text="该组织暂无应用用量记录"
+        />
       </n-tab-pane>
 
       <n-tab-pane name="member" :tab="isOrgMember ? '我的用量' : '成员'">
@@ -30,32 +36,77 @@
             <n-select
               v-model:value="selectedOrgId"
               :options="orgOptions"
+              filterable
               style="width: 220px"
               placeholder="选择组织"
             />
           </n-space>
           <n-space align="center">
-            <span>成员 ID：</span>
-            <n-input v-model:value="memberIdInput" placeholder="user uuid" style="width: 240px" />
+            <span>成员：</span>
+            <n-select
+              v-model:value="selectedMemberId"
+              :options="memberOptions"
+              filterable
+              clearable
+              style="width: 280px"
+              placeholder="搜索成员"
+            />
           </n-space>
         </n-space>
         <div v-if="memberLoading" class="state-text">加载中…</div>
         <div v-else-if="memberError" class="state-text danger">查询失败：{{ memberError.message }}</div>
-        <UsageSummary v-else :view="memberView ?? undefined" empty-text="暂无应用用量记录" />
+        <UsageSummary
+          v-else
+          :view="memberView ?? undefined"
+          :billing-status="billingStatus ?? undefined"
+          empty-text="暂无应用用量记录"
+        />
       </n-tab-pane>
 
       <n-tab-pane name="app" tab="应用">
-        <n-space align="center" style="margin-bottom: 12px">
-          <span>应用 ID：</span>
-          <n-input v-model:value="appIdInput" placeholder="app uuid" style="width: 240px" />
+        <n-space align="center" style="margin-bottom: 12px" :wrap="false">
+          <n-space v-if="isPlatformAdmin" align="center">
+            <span>组织：</span>
+            <n-select
+              v-model:value="selectedOrgId"
+              :options="orgOptions"
+              filterable
+              style="width: 220px"
+              placeholder="选择组织"
+            />
+          </n-space>
+          <span>应用：</span>
+          <n-select
+            v-model:value="selectedAppId"
+            :options="appOptions"
+            filterable
+            clearable
+            style="width: 300px"
+            placeholder="搜索应用"
+          />
         </n-space>
-        <p class="state-text">应用维度详情请前往 <RouterLink to="/apps">应用列表</RouterLink> 查看。</p>
+        <div v-if="appLoading" class="state-text">加载中…</div>
+        <div v-else-if="appError" class="state-text danger">查询失败：{{ appError.message }}</div>
+        <div v-else-if="selectedApp && !selectedApp.newapi_key_id" class="state-text">
+          该应用尚未绑定 new-api key，暂无应用维度用量。
+        </div>
+        <UsageSummary
+          v-else
+          :view="appView ?? undefined"
+          :billing-status="billingStatus ?? undefined"
+          empty-text="暂无应用用量记录"
+        />
       </n-tab-pane>
 
       <n-tab-pane v-if="isPlatformAdmin" name="platform" tab="平台">
         <div v-if="platformLoading" class="state-text">加载中…</div>
         <div v-else-if="platformError" class="state-text danger">查询失败：{{ platformError.message }}</div>
-        <UsageSummary v-else :view="platformView ?? undefined" empty-text="暂无平台用量记录" />
+        <UsageSummary
+          v-else
+          :view="platformView ?? undefined"
+          :billing-status="billingStatus ?? undefined"
+          empty-text="暂无平台用量记录"
+        />
       </n-tab-pane>
     </n-tabs>
   </n-card>
@@ -63,10 +114,12 @@
 
 <script setup lang="ts">
 import { computed, ref, watch } from 'vue'
-import { RouterLink } from 'vue-router'
-import { NCard, NInput, NSelect, NSpace, NTabPane, NTabs } from 'naive-ui'
+import { NCard, NSelect, NSpace, NTabPane, NTabs } from 'naive-ui'
 
+import { useAppUsageQuery, useAppsByOrgQuery } from '@/api/hooks/useApps'
+import { useMembersQuery } from '@/api/hooks/useMembers'
 import { useOrganizationsQuery } from '@/api/hooks/useOrganizations'
+import { useBillingStatusQuery } from '@/api/hooks/useRecharge'
 import {
   useMemberUsageQuery,
   useOrgUsageQuery,
@@ -92,7 +145,7 @@ const activeTab = ref<TabKey>(
 const { data: organizations } = useOrganizationsQuery(() => isPlatformAdmin.value)
 // orgOptions 仅平台管理员使用，用于切换查看不同组织的用量。
 const orgOptions = computed(() =>
-  (organizations.value ?? []).map((o) => ({ label: o.name, value: o.id })),
+  (organizations.value ?? []).map((o) => ({ label: `${o.name} · ${o.status}`, value: o.id })),
 )
 
 const selectedOrgId = ref<string | undefined>(auth.user?.org_id)
@@ -105,6 +158,7 @@ watch(organizations, (orgs) => {
 const effectiveOrgId = computed(() =>
   isPlatformAdmin.value ? selectedOrgId.value : auth.user?.org_id,
 )
+const { data: billingStatus } = useBillingStatusQuery()
 
 // 组织维度用量对普通成员不开放，前端不发起查询避免无谓 403。
 // 成员维度仍需要 org_id 作为权限边界，因此单独保留 memberOrgRef。
@@ -113,14 +167,58 @@ const memberOrgRef = computed(() => effectiveOrgId.value)
 const { data: orgView, isLoading: orgLoading, error: orgError } = useOrgUsageQuery(orgUsageRef)
 
 // 普通成员强制锁定为查询自身的用量，UI 上不暴露成员 ID 输入框。
-const memberIdInput = ref(isOrgMember.value ? auth.user?.id ?? '' : '')
+const selectedMemberId = ref(isOrgMember.value ? auth.user?.id ?? '' : '')
 const memberRef = computed(() =>
-  isOrgMember.value ? auth.user?.id : memberIdInput.value.trim() || undefined,
+  isOrgMember.value ? auth.user?.id : selectedMemberId.value || undefined,
 )
 const { data: memberView, isLoading: memberLoading, error: memberError } = useMemberUsageQuery(memberOrgRef, memberRef)
+const memberListOrgRef = computed(() => (isOrgMember.value ? undefined : effectiveOrgId.value))
+const { data: members } = useMembersQuery(memberListOrgRef)
+const memberOptions = computed(() =>
+  (members.value ?? []).map((member) => ({
+    label: `${member.display_name || member.username} · ${member.username}`,
+    value: member.id,
+  })),
+)
 
-// appIdInput 目前仅作为应用维度入口提示，详情查询由应用详情页承接。
-const appIdInput = ref('')
+const selectedAppId = ref<string | undefined>()
+const { data: apps } = useAppsByOrgQuery(effectiveOrgId)
+const appOptions = computed(() =>
+  (apps.value ?? []).map((app) => ({
+    label: `${app.name} · ${app.status}`,
+    value: app.id,
+  })),
+)
+const selectedApp = computed(() => (apps.value ?? []).find((app) => app.id === selectedAppId.value))
+const appUsageContext = computed(() => {
+  if (!selectedApp.value?.newapi_key_id) return undefined
+  return {
+    orgId: selectedApp.value.org_id,
+    ownerUserId: selectedApp.value.owner_user_id,
+    newapiKeyId: selectedApp.value.newapi_key_id,
+  }
+})
+const { data: appView, isLoading: appLoading, error: appError } = useAppUsageQuery(selectedAppId, appUsageContext)
+
+// 切换组织时清空跨组织筛选，避免旧成员/应用 ID 被带入新组织查询。
+watch(effectiveOrgId, () => {
+  if (!isOrgMember.value) {
+    selectedMemberId.value = ''
+  }
+  selectedAppId.value = undefined
+})
+
+watch(members, (list) => {
+  if (!isOrgMember.value && !selectedMemberId.value && list && list.length > 0) {
+    selectedMemberId.value = list[0].id
+  }
+})
+
+watch(apps, (list) => {
+  if (!selectedAppId.value && list && list.length > 0) {
+    selectedAppId.value = list[0].id
+  }
+})
 
 // platformEnabled 只在平台管理员打开平台 tab 时启用查询，减少后台不必要请求。
 const platformEnabled = computed(() => isPlatformAdmin.value && activeTab.value === 'platform')

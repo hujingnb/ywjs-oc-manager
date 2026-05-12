@@ -369,6 +369,30 @@ components:
         used_quota:
           type: integer
       type: object
+    service.BillingStatusView:
+      properties:
+        custom_currency_exchange_rate:
+          description: CustomCurrencyExchangeRate 是自定义货币汇率。
+          type: number
+        custom_currency_symbol:
+          description: CustomCurrencySymbol 是自定义货币符号。
+          type: string
+        display_in_currency:
+          description: DisplayInCurrency 表示 new-api 是否按货币口径展示额度。
+          type: boolean
+        price:
+          description: Price 是 new-api 配置的计价参数，manager 只透传给前端展示层。
+          type: number
+        quota_display_type:
+          description: QuotaDisplayType 是 new-api 当前配置的额度显示类型，例如 USD。
+          type: string
+        quota_per_unit:
+          description: QuotaPerUnit 是 new-api 展示额度与内部 quota 的换算比例。
+          type: integer
+        usd_exchange_rate:
+          description: USDExchangeRate 是 new-api 配置的美元汇率。
+          type: number
+      type: object
     service.ChallengeResult:
       properties:
         challenge_type:
@@ -2142,6 +2166,41 @@ paths:
       summary: 刷新令牌
       tags:
       - auth
+  /billing/status:
+    get:
+      description: 透传 new-api /api/status 中用于余额、用量和充值展示的配置；manager 不维护 token 单价
+      responses:
+        "200":
+          content:
+            application/json:
+              schema:
+                additionalProperties:
+                  $ref: '#/components/schemas/service.BillingStatusView'
+                type: object
+          description: OK
+        "401":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/handlers.ErrorResponse'
+          description: Unauthorized
+        "403":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/handlers.ErrorResponse'
+          description: Forbidden
+        "502":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/handlers.ErrorResponse'
+          description: Bad Gateway
+      security:
+      - BearerAuth: []
+      summary: 查询计费展示配置
+      tags:
+      - recharge
   /jobs/{jobId}:
     get:
       description: 平台管理员按 ID 查询异步 job 的执行状态及结果

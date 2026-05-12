@@ -19,12 +19,14 @@ import (
 
 // rechargeServiceStub 实现 rechargeService 接口，仅 stub 测试用到的方法。
 type rechargeServiceStub struct {
-	rechargeResult service.RechargeRecordResult
-	rechargeErr    error
-	listResult     []service.RechargeRecordResult
-	listErr        error
-	balanceResult  service.BalanceView
-	balanceErr     error
+	rechargeResult      service.RechargeRecordResult
+	rechargeErr         error
+	listResult          []service.RechargeRecordResult
+	listErr             error
+	balanceResult       service.BalanceView
+	balanceErr          error
+	billingStatusResult service.BillingStatusView
+	billingStatusErr    error
 }
 
 func (s *rechargeServiceStub) Recharge(_ context.Context, _ auth.Principal, _ string, _ int64, _ string) (service.RechargeRecordResult, error) {
@@ -37,6 +39,10 @@ func (s *rechargeServiceStub) ListRecharges(_ context.Context, _ auth.Principal,
 
 func (s *rechargeServiceStub) GetBalance(_ context.Context, _ auth.Principal, _ string) (service.BalanceView, error) {
 	return s.balanceResult, s.balanceErr
+}
+
+func (s *rechargeServiceStub) GetBillingStatus(_ context.Context, _ auth.Principal) (service.BillingStatusView, error) {
+	return s.billingStatusResult, s.billingStatusErr
 }
 
 // newRechargeTestRouter 构建用于测试的 gin router + token manager。
@@ -127,6 +133,25 @@ func TestRechargeBalanceHappy(t *testing.T) {
 
 	require.Equal(t, http.StatusOK, w.Code)
 	assert.Contains(t, w.Body.String(), "balance")
+}
+
+// TestBillingStatusHappy 验证 billing status 路由返回 new-api 展示配置。
+func TestBillingStatusHappy(t *testing.T) {
+	stub := &rechargeServiceStub{billingStatusResult: service.BillingStatusView{
+		QuotaPerUnit:      500000,
+		QuotaDisplayType:  "USD",
+		DisplayInCurrency: true,
+	}}
+	router, tokens := newRechargeTestRouter(t, stub)
+	token := mustSignAccess(t, tokens, auth.Principal{UserID: "u1", Role: domain.UserRolePlatformAdmin})
+
+	w := httptest.NewRecorder()
+	req := httptest.NewRequest(http.MethodGet, "/api/v1/billing/status", nil)
+	req.Header.Set("Authorization", "Bearer "+token)
+	router.ServeHTTP(w, req)
+
+	require.Equal(t, http.StatusOK, w.Code)
+	assert.Contains(t, w.Body.String(), "quota_per_unit")
 }
 
 // TestRechargeRequiresToken 验证充值要求令牌的预期行为场景。

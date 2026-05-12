@@ -18,6 +18,7 @@ type rechargeService interface {
 	Recharge(ctx context.Context, principal auth.Principal, orgID string, amount int64, remark string) (service.RechargeRecordResult, error)
 	ListRecharges(ctx context.Context, principal auth.Principal, orgID string, limit, offset int32) ([]service.RechargeRecordResult, error)
 	GetBalance(ctx context.Context, principal auth.Principal, orgID string) (service.BalanceView, error)
+	GetBillingStatus(ctx context.Context, principal auth.Principal) (service.BillingStatusView, error)
 }
 
 // RechargeHandler 把组织充值与余额查询接口暴露给前端。
@@ -36,6 +37,7 @@ func RegisterRechargeRoutes(router gin.IRouter, handler *RechargeHandler) {
 	router.POST("/api/v1/organizations/:orgId/recharge", handler.Create)
 	router.GET("/api/v1/organizations/:orgId/recharges", handler.List)
 	router.GET("/api/v1/organizations/:orgId/balance", handler.Balance)
+	router.GET("/api/v1/billing/status", handler.BillingStatus)
 }
 
 // Create 处理充值。
@@ -130,6 +132,31 @@ func (h *RechargeHandler) Balance(c *gin.Context) {
 		return
 	}
 	c.JSON(http.StatusOK, gin.H{"balance": view})
+}
+
+// BillingStatus 查询 new-api 金额 / 额度展示配置。
+//
+// @Summary      查询计费展示配置
+// @Description  透传 new-api /api/status 中用于余额、用量和充值展示的配置；manager 不维护 token 单价
+// @Tags         recharge
+// @Produce      json
+// @Security     BearerAuth
+// @Success      200  {object}  map[string]service.BillingStatusView
+// @Failure      401  {object}  ErrorResponse
+// @Failure      403  {object}  ErrorResponse
+// @Failure      502  {object}  ErrorResponse
+// @Router       /billing/status [get]
+func (h *RechargeHandler) BillingStatus(c *gin.Context) {
+	principal, ok := h.principal(c)
+	if !ok {
+		return
+	}
+	view, err := h.service.GetBillingStatus(c.Request.Context(), principal)
+	if err != nil {
+		writeRechargeError(c, err)
+		return
+	}
+	c.JSON(http.StatusOK, gin.H{"billing_status": view})
 }
 
 func (h *RechargeHandler) principal(c *gin.Context) (auth.Principal, bool) {
