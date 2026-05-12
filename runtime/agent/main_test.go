@@ -384,6 +384,7 @@ func waitForTLSReady(t *testing.T, client *http.Client, url, token string, timeo
 type fakeDockerClient struct {
 	images      map[string]DockerImageInfo
 	loadedBytes string
+	containers  []string
 }
 
 func (f *fakeDockerClient) InspectImage(_ context.Context, image string) (DockerImageInfo, error) {
@@ -408,4 +409,14 @@ func (f *fakeDockerClient) LoadImage(_ context.Context, archive io.Reader) error
 	}
 	f.images["openclaw-runtime:dev"] = DockerImageInfo{ID: "sha256:loaded", RepoTags: []string{"openclaw-runtime:dev"}}
 	return nil
+}
+
+func (f *fakeDockerClient) ListContainers(_ context.Context, namePrefix string) (int32, error) {
+	var count int32
+	for _, name := range f.containers {
+		if strings.HasPrefix(strings.TrimPrefix(name, "/"), namePrefix) {
+			count++
+		}
+	}
+	return count, nil
 }

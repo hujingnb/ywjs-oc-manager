@@ -9,6 +9,7 @@ import (
 	"net"
 	"net/http"
 	"net/url"
+	"strings"
 )
 
 var ErrImageNotFound = errors.New("docker image not found")
@@ -18,6 +19,8 @@ var ErrImageNotFound = errors.New("docker image not found")
 type DockerClient interface {
 	InspectImage(ctx context.Context, image string) (DockerImageInfo, error)
 	LoadImage(ctx context.Context, archive io.Reader) error
+	// ListContainers 按容器名前缀统计本节点实例数；当前用于统计 ocm-* 应用容器。
+	ListContainers(ctx context.Context, namePrefix string) (int32, error)
 }
 
 // DockerImageInfo 是 manager 判断镜像一致性所需的最小元数据。
@@ -92,4 +95,38 @@ func (c *dockerSocketClient) LoadImage(ctx context.Context, archive io.Reader) e
 	}
 	_, _ = io.Copy(io.Discard, resp.Body)
 	return nil
+}
+
+// ListContainers 通过 Docker Remote API 拉取容器列表，并按 Docker 返回的 /name 格式做前缀匹配。
+func (c *dockerSocketClient) ListContainers(ctx context.Context, namePrefix string) (int32, error) {
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, "http://docker/containers/json?all=1", nil)
+	if err != nil {
+		return 0, err
+	}
+	resp, err := c.httpClient.Do(req)
+	if err != nil {
+		return 0, err
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
+		body, _ := io.ReadAll(io.LimitReader(resp.Body, 4096))
+		return 0, fmt.Errorf("docker list containers failed: status=%d body=%s", resp.StatusCode, string(body))
+	}
+
+	var payload []struct {
+		Names []string `json:"Names"`
+	}
+	if err := json.NewDecoder(resp.Body).Decode(&payload); err != nil {
+		return 0, err
+	}
+	var count int32
+	for _, container := range payload {
+		for _, name := range container.Names {
+			if strings.HasPrefix(strings.TrimPrefix(name, "/"), namePrefix) {
+				count++
+				break
+			}
+		}
+	}
+	return count, nil
 }

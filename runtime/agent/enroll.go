@@ -35,6 +35,8 @@ func enrollAgent(ctx context.Context, cfg config.Config, agentID, name, hostname
 	if err != nil {
 		return "", "", fmt.Errorf("解析 manager.endpoint 失败: %w", err)
 	}
+	sampledAt := time.Now().UTC()
+	nodeResource, _ := collectNodeResource(dataRoot, agentDockerClient(cfg), nil)
 	payload := map[string]any{
 		"agent_id":              agentID,
 		"name":                  strings.TrimSpace(name),
@@ -44,6 +46,8 @@ func enrollAgent(ctx context.Context, cfg config.Config, agentID, name, hostname
 		"agent_tls_ca_cert":     caPEM,
 		"agent_version":         version,
 		"node_data_root":        dataRoot,
+		"sampled_at":            sampledAt.Format(time.RFC3339),
+		"node_resource":         nodeResource,
 		"resource_snapshot":     collectSnapshot(),
 		"metadata": map[string]any{
 			"hostname": hostname,
@@ -83,6 +87,13 @@ func enrollAgent(ctx context.Context, cfg config.Config, agentID, name, hostname
 		return "", "", err
 	}
 	return result.NodeID, result.AgentToken, nil
+}
+
+func agentDockerClient(cfg config.Config) DockerClient {
+	if strings.TrimSpace(cfg.Agent.DockerSocket) == "" {
+		return nil
+	}
+	return newDockerSocketClient(cfg.Agent.DockerSocket)
 }
 
 func managerRootCAs(mgr config.ManagerConfig) *x509.CertPool {

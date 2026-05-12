@@ -95,6 +95,40 @@ func TestHeartbeat_PeriodicPost(t *testing.T) {
 	require.GreaterOrEqual(t, hits.Load(), int32(3))
 }
 
+// TestHeartbeatPayloadIncludesNodeResource 验证单次心跳会携带节点资源采样和采样时间。
+func TestHeartbeatPayloadIncludesNodeResource(t *testing.T) {
+	bodyCh := make(chan map[string]any, 1)
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		var got map[string]any
+		require.NoError(t, json.NewDecoder(r.Body).Decode(&got))
+		bodyCh <- got
+		w.WriteHeader(http.StatusOK)
+	}))
+	defer srv.Close()
+
+	cfg := config.Config{
+		Manager: config.ManagerConfig{
+			Endpoint:         srv.URL + "/api/v1",
+			EnrollmentSecret: "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA=",
+		},
+		Heartbeat: config.HeartbeatConfig{IntervalSeconds: 30, FailureLogThreshold: 5},
+	}
+	hb := newHeartbeat(cfg, "agent-1", func() string { return "tok-x" }, t.TempDir(), "host", "", t.TempDir(), ":7001", ":7002", withHTTPClient(srv.Client()))
+
+	hb.tick(context.Background())
+
+	var got map[string]any
+	select {
+	case got = <-bodyCh:
+	case <-time.After(2 * time.Second):
+		require.FailNow(t, "未收到心跳请求")
+	}
+	assert.NotEmpty(t, got["sampled_at"])
+	nodeResource, ok := got["node_resource"].(map[string]any)
+	require.True(t, ok)
+	assert.Contains(t, nodeResource, "cpu_percent")
+}
+
 // TestHeartbeat_FailureLogThreshold 验证心跳失败LogThreshold的预期行为场景。
 func TestHeartbeat_FailureLogThreshold(t *testing.T) {
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {

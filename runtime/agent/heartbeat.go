@@ -60,6 +60,8 @@ type heartbeat struct {
 	dataRoot     string
 	dockerAddr   string
 	fileAddr     string
+	docker       DockerClient
+	nodeCounters nodeResourceCounters
 }
 
 type heartbeatOption func(*heartbeat)
@@ -101,6 +103,9 @@ func newHeartbeat(cfg config.Config, agentID string, tokenGetter func() string, 
 	if hb.client == nil {
 		hb.client = buildHeartbeatClient(cfg.Manager)
 	}
+	if cfg.Agent.DockerSocket != "" {
+		hb.docker = newDockerSocketClient(cfg.Agent.DockerSocket)
+	}
 	if hb.tickInterval <= 0 {
 		hb.tickInterval = 30 * time.Second
 	}
@@ -135,9 +140,14 @@ func (h *heartbeat) Run(ctx context.Context) {
 // tick 发起一次心跳；HTTP 状态非 2xx 视为失败并累加 failures。
 func (h *heartbeat) tick(ctx context.Context) {
 	url := strings.TrimRight(h.cfg.Manager.Endpoint, "/") + "/agent/heartbeat"
+	sampledAt := time.Now().UTC()
+	nodeResource, counters := collectNodeResource(h.dataRoot, h.docker, &h.nodeCounters)
+	h.nodeCounters = counters
 	body := map[string]any{
 		"agent_token":       h.tokenGetter(),
 		"agent_version":     agentVersion,
+		"sampled_at":        sampledAt.Format(time.RFC3339),
+		"node_resource":     nodeResource,
 		"resource_snapshot": collectSnapshot(),
 	}
 	buf, err := json.Marshal(body)
