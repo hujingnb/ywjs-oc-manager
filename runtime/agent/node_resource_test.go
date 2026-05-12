@@ -1,9 +1,15 @@
 package main
 
 import (
+	"context"
+	"errors"
+	"io"
+	"net/http"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
+	"time"
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
@@ -41,4 +47,64 @@ func TestNodeResourceCollectorParsesLinuxProcFiles(t *testing.T) {
 	require.NoError(t, err)
 	assert.Equal(t, int64(4000), rx)
 	assert.Equal(t, int64(6000), tx)
+}
+
+// TestCollectNodeResourceTimesOutDockerSampling 验证 Docker 实例数采样卡住时不会阻塞节点资源采集。
+func TestCollectNodeResourceTimesOutDockerSampling(t *testing.T) {
+	docker := &blockingDockerClient{}
+
+	start := time.Now()
+	snapshot, _ := collectNodeResource(t.TempDir(), docker, nil)
+
+	require.Less(t, time.Since(start), 2*time.Second)
+	require.ErrorIs(t, docker.err, context.DeadlineExceeded)
+	assert.Nil(t, snapshot.InstanceCount)
+	assert.Contains(t, snapshot.LastError, "docker:")
+}
+
+// TestDockerSocketClientListContainersCountsActiveManagedContainers 验证实例数只按 Docker 当前活跃容器列表统计 ocm-* 容器。
+func TestDockerSocketClientListContainersCountsActiveManagedContainers(t *testing.T) {
+	client := &dockerSocketClient{httpClient: &http.Client{Transport: roundTripFunc(func(req *http.Request) (*http.Response, error) {
+		assert.Equal(t, "/containers/json", req.URL.Path)
+		assert.NotContains(t, req.URL.RawQuery, "all=1")
+
+		body := `[{"Names":["/ocm-active"]},{"Names":["/redis"]}]`
+		if strings.Contains(req.URL.RawQuery, "all=1") {
+			body = `[{"Names":["/ocm-active"]},{"Names":["/ocm-stopped"],"State":"exited"}]`
+		}
+		return &http.Response{
+			StatusCode: http.StatusOK,
+			Body:       io.NopCloser(strings.NewReader(body)),
+			Header:     make(http.Header),
+		}, nil
+	})}}
+
+	count, err := client.ListContainers(context.Background(), "ocm-")
+
+	require.NoError(t, err)
+	assert.Equal(t, int32(1), count)
+}
+
+type blockingDockerClient struct {
+	err error
+}
+
+func (f *blockingDockerClient) InspectImage(_ context.Context, _ string) (DockerImageInfo, error) {
+	return DockerImageInfo{}, ErrImageNotFound
+}
+
+func (f *blockingDockerClient) LoadImage(_ context.Context, _ io.Reader) error {
+	return errors.New("not implemented")
+}
+
+func (f *blockingDockerClient) ListContainers(ctx context.Context, _ string) (int32, error) {
+	<-ctx.Done()
+	f.err = ctx.Err()
+	return 0, f.err
+}
+
+type roundTripFunc func(*http.Request) (*http.Response, error)
+
+func (f roundTripFunc) RoundTrip(req *http.Request) (*http.Response, error) {
+	return f(req)
 }

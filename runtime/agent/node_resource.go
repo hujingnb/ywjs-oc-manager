@@ -7,7 +7,10 @@ import (
 	"strconv"
 	"strings"
 	"syscall"
+	"time"
 )
+
+const nodeResourceDockerTimeout = 500 * time.Millisecond
 
 // NodeResourceSnapshot 是 agent 上报给 manager 的节点级资源采样。
 // 数值字段使用指针配合 omitempty，便于在局部采集失败时只省略不可用指标。
@@ -174,7 +177,10 @@ func collectNodeResource(dataRoot string, docker DockerClient, prev *nodeResourc
 	}
 
 	if docker != nil {
-		if count, err := docker.ListContainers(context.Background(), "ocm-"); err != nil {
+		// Docker 实例数只是可选监控指标，必须给本地 Docker socket 卡顿留出上限，避免阻断注册或心跳。
+		ctx, cancel := context.WithTimeout(context.Background(), nodeResourceDockerTimeout)
+		defer cancel()
+		if count, err := docker.ListContainers(ctx, "ocm-"); err != nil {
 			errs = append(errs, "docker: "+err.Error())
 		} else {
 			snapshot.InstanceCount = &count

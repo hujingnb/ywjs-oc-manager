@@ -99,7 +99,7 @@ func (c *dockerSocketClient) LoadImage(ctx context.Context, archive io.Reader) e
 
 // ListContainers 通过 Docker Remote API 拉取容器列表，并按 Docker 返回的 /name 格式做前缀匹配。
 func (c *dockerSocketClient) ListContainers(ctx context.Context, namePrefix string) (int32, error) {
-	req, err := http.NewRequestWithContext(ctx, http.MethodGet, "http://docker/containers/json?all=1", nil)
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, "http://docker/containers/json", nil)
 	if err != nil {
 		return 0, err
 	}
