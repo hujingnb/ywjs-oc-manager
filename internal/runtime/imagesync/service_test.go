@@ -10,6 +10,7 @@ import (
 	"testing"
 )
 
+// TestSyncOpenClawImageSkipsWhenRemoteMatches 验证同步OpenClaw镜像跳过当远端匹配es的特殊分支或幂等场景。
 func TestSyncOpenClawImageSkipsWhenRemoteMatches(t *testing.T) {
 	local := &fakeLocalImage{imageID: "sha256:same"}
 	agent := &fakeAgentImage{remote: RemoteImageInfo{Exists: true, ID: "sha256:same"}}
@@ -20,6 +21,7 @@ func TestSyncOpenClawImageSkipsWhenRemoteMatches(t *testing.T) {
 	require.Equal(t, 0, agent.loadCalls)
 }
 
+// TestSyncOpenClawImageLoadsWhenRemoteMissing 验证同步OpenClaw镜像加载当远端缺失的异常或拒绝路径场景。
 func TestSyncOpenClawImageLoadsWhenRemoteMissing(t *testing.T) {
 	local := &fakeLocalImage{imageID: "sha256:local", archive: "image-tar"}
 	agent := &fakeAgentImage{remote: RemoteImageInfo{Exists: false}, loaded: RemoteImageInfo{Exists: true, ID: "sha256:local"}}
@@ -30,6 +32,7 @@ func TestSyncOpenClawImageLoadsWhenRemoteMissing(t *testing.T) {
 	require.Equal(t, "image-tar", agent.loadedArchive)
 }
 
+// TestSyncOpenClawImageLoadsWhenRemoteDiffers 验证同步OpenClaw镜像加载当远端不一致的成功路径场景。
 func TestSyncOpenClawImageLoadsWhenRemoteDiffers(t *testing.T) {
 	local := &fakeLocalImage{imageID: "sha256:new", archive: "image-tar"}
 	agent := &fakeAgentImage{remote: RemoteImageInfo{Exists: true, ID: "sha256:old"}, loaded: RemoteImageInfo{Exists: true, ID: "sha256:new"}}
@@ -41,6 +44,7 @@ func TestSyncOpenClawImageLoadsWhenRemoteDiffers(t *testing.T) {
 	}
 }
 
+// TestSyncOpenClawImageRejectsMismatchedLoadedID 验证同步OpenClaw镜像拒绝不匹配LoadedID的异常或拒绝路径场景。
 func TestSyncOpenClawImageRejectsMismatchedLoadedID(t *testing.T) {
 	local := &fakeLocalImage{imageID: "sha256:local", archive: "image-tar"}
 	agent := &fakeAgentImage{remote: RemoteImageInfo{Exists: false}, loaded: RemoteImageInfo{Exists: true, ID: "sha256:other"}}
@@ -50,6 +54,7 @@ func TestSyncOpenClawImageRejectsMismatchedLoadedID(t *testing.T) {
 	require.True(t, result.Transferred)
 }
 
+// TestSyncOpenClawImagePropagatesLocalInspectError 验证同步OpenClaw镜像透传本地检查错误的错误映射或错误记录场景。
 func TestSyncOpenClawImagePropagatesLocalInspectError(t *testing.T) {
 	local := &fakeLocalImage{err: errors.New("boom")}
 	_, err := New(local, &fakeAgentImage{}).SyncOpenClawImage(context.Background(), "node-1", "openclaw-runtime:dev")

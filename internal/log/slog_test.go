@@ -18,6 +18,7 @@ func captureLogger() (*slog.Logger, *bytes.Buffer) {
 	return logger, buf
 }
 
+// TestNewSlogLogger_输出合法JSON并含核心字段 验证NewSlogLogger的预期行为场景。
 func TestNewSlogLogger_输出合法JSON并含核心字段(t *testing.T) {
 	logger, buf := captureLogger()
 	logger.Info("hello", "user_id", "u-1")
@@ -35,6 +36,7 @@ func TestNewSlogLogger_输出合法JSON并含核心字段(t *testing.T) {
 	}
 }
 
+// TestNewSlogLogger_redact生效 验证NewSlogLoggerredact的预期行为场景。
 func TestNewSlogLogger_redact生效(t *testing.T) {
 	logger, buf := captureLogger()
 	// 写入会被 redactlog 命中的字段
@@ -43,6 +45,7 @@ func TestNewSlogLogger_redact生效(t *testing.T) {
 	assert.NotContains(t, out, "sk-secret-12345abcde")
 }
 
+// TestRequestIDExtractor_默认为空串 验证请求IDExtractor的预期行为场景。
 func TestRequestIDExtractor_默认为空串(t *testing.T) {
 	logger, buf := captureLogger()
 	ctx := context.Background()
@@ -53,6 +56,7 @@ func TestRequestIDExtractor_默认为空串(t *testing.T) {
 
 type ctxTestKey string
 
+// TestSetRequestIDExtractor_注入trace_id 验证Set请求IDExtractortraceid的预期行为场景。
 func TestSetRequestIDExtractor_注入trace_id(t *testing.T) {
 	original := requestIDExtractor
 	t.Cleanup(func() { requestIDExtractor = original })
@@ -75,6 +79,7 @@ func TestSetRequestIDExtractor_注入trace_id(t *testing.T) {
 	assert.Equal(t, "abc123", got["trace_id"])
 }
 
+// TestSetRequestIDExtractor_空串不写入字段 验证Set请求IDExtractor的预期行为场景。
 func TestSetRequestIDExtractor_空串不写入字段(t *testing.T) {
 	original := requestIDExtractor
 	t.Cleanup(func() { requestIDExtractor = original })

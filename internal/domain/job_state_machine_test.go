@@ -6,6 +6,7 @@ import (
 	"testing"
 )
 
+// TestIsJobTransitionAllowedValid 验证Is任务状态流转允许性合法的预期行为场景。
 func TestIsJobTransitionAllowedValid(t *testing.T) {
 	cases := []struct {
 		from string
@@ -25,12 +26,14 @@ func TestIsJobTransitionAllowedValid(t *testing.T) {
 	}
 }
 
+// TestIsJobTransitionAllowedRejectsBackToPendingFromTerminal 验证Is任务状态流转允许性拒绝回退到等待中来自终态的异常或拒绝路径场景。
 func TestIsJobTransitionAllowedRejectsBackToPendingFromTerminal(t *testing.T) {
 	require.False(t, IsJobTransitionAllowed(JobStatusSucceeded, JobStatusPending))
 	require.False(t, IsJobTransitionAllowed(JobStatusCanceled, JobStatusRunning))
 	require.False(t, IsJobTransitionAllowed(JobStatusRunning, JobStatusRunning))
 }
 
+// TestEnsureJobTransitionReturnsError 验证确保任务Transition返回错误的成功路径场景。
 func TestEnsureJobTransitionReturnsError(t *testing.T) {
 	err := EnsureJobTransition(JobStatusSucceeded, JobStatusPending)
 	require.Error(t, err)
@@ -38,6 +41,7 @@ func TestEnsureJobTransitionReturnsError(t *testing.T) {
 	require.NoError(t, err)
 }
 
+// TestJobIsTerminal 验证任务Is终态的预期行为场景。
 func TestJobIsTerminal(t *testing.T) {
 	require.True(t, JobIsTerminal(JobStatusSucceeded))
 	require.True(t, JobIsTerminal(JobStatusFailed))
@@ -46,6 +50,7 @@ func TestJobIsTerminal(t *testing.T) {
 	require.False(t, JobIsTerminal(JobStatusRunning))
 }
 
+// TestAllowedJobTransitionsCount 验证Allowed任务Transitions数量的预期行为场景。
 func TestAllowedJobTransitionsCount(t *testing.T) {
 	require.Len(t, AllowedJobTransitions(), 6)
 }

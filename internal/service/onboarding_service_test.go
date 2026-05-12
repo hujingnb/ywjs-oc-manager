@@ -14,6 +14,7 @@ import (
 	"oc-manager/internal/store/sqlc"
 )
 
+// TestOnboardMemberCommitsOnSuccess 验证引导成员提交On成功的成功路径场景。
 func TestOnboardMemberCommitsOnSuccess(t *testing.T) {
 	store := newOnboardingStub(t)
 	tx := &txRunnerStub{store: store}
@@ -35,6 +36,7 @@ func TestOnboardMemberCommitsOnSuccess(t *testing.T) {
 	assert.Positive(t, store.jobs)
 }
 
+// TestOnboardMemberRollsBackWhenAppCreationFails 验证引导成员回滚回退当应用Creation失败的预期行为场景。
 func TestOnboardMemberRollsBackWhenAppCreationFails(t *testing.T) {
 	store := newOnboardingStub(t)
 	store.appErr = errors.New("duplicate app for owner")
@@ -48,6 +50,7 @@ func TestOnboardMemberRollsBackWhenAppCreationFails(t *testing.T) {
 	require.False(t, tx.committed)
 }
 
+// TestOnboardMemberRollsBackWhenJobCreationFails 验证引导成员回滚回退当任务Creation失败的预期行为场景。
 func TestOnboardMemberRollsBackWhenJobCreationFails(t *testing.T) {
 	store := newOnboardingStub(t)
 	store.jobErr = errors.New("redis blocked")
@@ -61,6 +64,7 @@ func TestOnboardMemberRollsBackWhenJobCreationFails(t *testing.T) {
 	require.False(t, tx.committed)
 }
 
+// TestOnboardMemberRequiresOrgManagement 验证引导成员要求组织Management的预期行为场景。
 func TestOnboardMemberRequiresOrgManagement(t *testing.T) {
 	tx := &txRunnerStub{store: newOnboardingStub(t)}
 	svc := NewMemberOnboardingService(tx, fakeHash, defaultTestSelector())
@@ -71,6 +75,7 @@ func TestOnboardMemberRequiresOrgManagement(t *testing.T) {
 	require.ErrorIs(t, err, ErrForbidden)
 }
 
+// TestOnboardMemberPlatformAdminForbidden 验证引导成员平台管理员禁止访问的异常或拒绝路径场景。
 func TestOnboardMemberPlatformAdminForbidden(t *testing.T) {
 	tx := &txRunnerStub{store: newOnboardingStub(t)}
 	svc := NewMemberOnboardingService(tx, fakeHash, defaultTestSelector())
@@ -81,6 +86,7 @@ func TestOnboardMemberPlatformAdminForbidden(t *testing.T) {
 	require.ErrorIs(t, err, ErrForbidden)
 }
 
+// TestOnboardMemberRejectsDisabledOrg 验证引导成员拒绝禁用组织的异常或拒绝路径场景。
 func TestOnboardMemberRejectsDisabledOrg(t *testing.T) {
 	store := newOnboardingStub(t)
 	store.org.Status = domain.StatusDisabled
@@ -233,6 +239,7 @@ func defaultTestSelector() *nodeSelectorStub {
 
 func ptrInt32(v int32) *int32 { return &v }
 
+// TestOnboardMember_SelectNode_NoActiveNode 验证引导成员Select节点无启用节点的预期行为场景。
 func TestOnboardMember_SelectNode_NoActiveNode(t *testing.T) {
 	tx := &txRunnerStub{store: newOnboardingStub(t)}
 	selector := &nodeSelectorStub{nodes: nil}
@@ -244,6 +251,7 @@ func TestOnboardMember_SelectNode_NoActiveNode(t *testing.T) {
 	require.ErrorIs(t, err, ErrNoNodeAvailable)
 }
 
+// TestOnboardMember_SelectNode_OnlyNodeAtCapacity 验证引导成员Select节点仅节点At容量的预期行为场景。
 func TestOnboardMember_SelectNode_OnlyNodeAtCapacity(t *testing.T) {
 	tx := &txRunnerStub{store: newOnboardingStub(t)}
 	selector := &nodeSelectorStub{nodes: []NodeWithCount{
@@ -257,6 +265,7 @@ func TestOnboardMember_SelectNode_OnlyNodeAtCapacity(t *testing.T) {
 	require.ErrorIs(t, err, ErrNoNodeAvailable)
 }
 
+// TestOnboardMember_SelectNode_PicksLargestRemaining 验证引导成员Select节点PicksLargestRemaining的预期行为场景。
 func TestOnboardMember_SelectNode_PicksLargestRemaining(t *testing.T) {
 	store := newOnboardingStub(t)
 	tx := &txRunnerStub{store: store}
@@ -275,6 +284,7 @@ func TestOnboardMember_SelectNode_PicksLargestRemaining(t *testing.T) {
 	require.Equal(t, "00000000-0000-0000-0000-000000000a02", store.lastAppNodeID)
 }
 
+// TestOnboardMember_SelectNode_NULLMaxAppsTreatedAsInfinity 验证引导成员Select节点NULL最大应用Treated作为Infinity的边界条件场景。
 func TestOnboardMember_SelectNode_NULLMaxAppsTreatedAsInfinity(t *testing.T) {
 	store := newOnboardingStub(t)
 	tx := &txRunnerStub{store: store}
@@ -291,6 +301,7 @@ func TestOnboardMember_SelectNode_NULLMaxAppsTreatedAsInfinity(t *testing.T) {
 	require.Equal(t, "00000000-0000-0000-0000-000000000a01", store.lastAppNodeID)
 }
 
+// TestOnboardMember_ExplicitNodeID_BypassesSelector 验证引导成员显式节点ID绕过选择器的特殊分支或幂等场景。
 func TestOnboardMember_ExplicitNodeID_BypassesSelector(t *testing.T) {
 	store := newOnboardingStub(t)
 	tx := &txRunnerStub{store: store}

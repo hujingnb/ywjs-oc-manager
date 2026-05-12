@@ -14,6 +14,7 @@ func init() {
 	gin.SetMode(gin.TestMode)
 }
 
+// TestRequestID_无header时生成新ID 验证请求IDheaderID的预期行为场景。
 func TestRequestID_无header时生成新ID(t *testing.T) {
 	r := gin.New()
 	var capturedID string
@@ -33,6 +34,7 @@ func TestRequestID_无header时生成新ID(t *testing.T) {
 	assert.Equal(t, capturedID, resp)
 }
 
+// TestRequestID_有header时沿用客户端ID 验证请求IDheaderID的预期行为场景。
 func TestRequestID_有header时沿用客户端ID(t *testing.T) {
 	r := gin.New()
 	var capturedID string
@@ -52,11 +54,13 @@ func TestRequestID_有header时沿用客户端ID(t *testing.T) {
 	assert.Equal(t, clientID, w.Header().Get(RequestIDHeader))
 }
 
+// TestRequestIDFromContext_无值返回空串 验证请求ID来自Context的预期行为场景。
 func TestRequestIDFromContext_无值返回空串(t *testing.T) {
 	got := RequestIDFromContext(httptest.NewRequest(http.MethodGet, "/x", nil).Context())
 	assert.Equal(t, "", got)
 }
 
+// TestGenerateRequestID_输出32字符hex 验证Generate请求ID32hex的预期行为场景。
 func TestGenerateRequestID_输出32字符hex(t *testing.T) {
 	id := generateRequestID()
 	assert.Equal(t, 32, len(id))

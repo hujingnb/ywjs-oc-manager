@@ -21,6 +21,7 @@ const (
 	testChannelOwner = "00000000-0000-0000-0000-000000000c03"
 )
 
+// TestChannelServiceBeginAuthSuccess 验证渠道服务开始认证成功的成功路径场景。
 func TestChannelServiceBeginAuthSuccess(t *testing.T) {
 	store := newChannelStub(t)
 	registry := channel.NewRegistry()
@@ -38,12 +39,14 @@ func TestChannelServiceBeginAuthSuccess(t *testing.T) {
 	require.Equal(t, domain.JobTypeChannelStartLogin, store.jobs[0].Type)
 }
 
+// TestChannelServiceBeginAuthMissingAdapter 验证渠道服务开始认证缺失适配器的异常或拒绝路径场景。
 func TestChannelServiceBeginAuthMissingAdapter(t *testing.T) {
 	svc := NewChannelService(newChannelStub(t), channel.NewRegistry())
 	_, err := svc.BeginAuth(context.Background(), channelOrgAdminPrincipal(), testChannelAppID, "missing")
 	require.ErrorIs(t, err, ErrChannelAdapterMissing)
 }
 
+// TestChannelServiceBeginAuthForbidden 验证渠道服务开始认证禁止访问的异常或拒绝路径场景。
 func TestChannelServiceBeginAuthForbidden(t *testing.T) {
 	store := newChannelStub(t)
 	registry := channel.NewRegistry()
@@ -54,6 +57,7 @@ func TestChannelServiceBeginAuthForbidden(t *testing.T) {
 	require.ErrorIs(t, err, ErrForbidden)
 }
 
+// TestChannelServiceBeginAuthPlatformAdminForbidden 验证渠道服务开始认证平台管理员禁止访问的异常或拒绝路径场景。
 func TestChannelServiceBeginAuthPlatformAdminForbidden(t *testing.T) {
 	store := newChannelStub(t)
 	registry := channel.NewRegistry()
@@ -64,6 +68,7 @@ func TestChannelServiceBeginAuthPlatformAdminForbidden(t *testing.T) {
 	require.ErrorIs(t, err, ErrForbidden)
 }
 
+// TestChannelServicePollAuthMarksBound 验证渠道服务轮询认证Marks已绑定的预期行为场景。
 func TestChannelServicePollAuthMarksBound(t *testing.T) {
 	store := newChannelStub(t)
 	store.binding.Status = domain.ChannelStatusBound
@@ -82,6 +87,7 @@ func TestChannelServicePollAuthMarksBound(t *testing.T) {
 	require.NotEmpty(t, progress.Metadata["raw_qr"])
 }
 
+// TestChannelServicePollAuthPushesAppToRunningOnBound 验证渠道服务轮询认证Pushes应用到RunningOn已绑定的预期行为场景。
 func TestChannelServicePollAuthPushesAppToRunningOnBound(t *testing.T) {
 	// 状态推进由 channel_check_binding worker 负责，PollAuth 只读 DB。
 	store := newChannelStub(t)
@@ -97,6 +103,7 @@ func TestChannelServicePollAuthPushesAppToRunningOnBound(t *testing.T) {
 	}
 }
 
+// TestChannelServicePollAuthDoesNotOverrideRunningStatus 验证渠道服务轮询认证Does未OverrideRunning状态的预期行为场景。
 func TestChannelServicePollAuthDoesNotOverrideRunningStatus(t *testing.T) {
 	// 已经 running 的应用再次 PollAuth bound 时不应再写一次 SetAppStatus。
 	store := newChannelStub(t)
@@ -111,6 +118,7 @@ func TestChannelServicePollAuthDoesNotOverrideRunningStatus(t *testing.T) {
 	require.False(t, store.appStatusSet)
 }
 
+// TestChannelServicePollAuthDoesNotPushOnNonBindingWaiting 验证渠道服务轮询认证Does未PushOn非绑定Waiting的预期行为场景。
 func TestChannelServicePollAuthDoesNotPushOnNonBindingWaiting(t *testing.T) {
 	// stopped / error 状态时 bound 也不该自动推到 running——避免覆盖运维侧停机决策。
 	store := newChannelStub(t)
@@ -125,6 +133,7 @@ func TestChannelServicePollAuthDoesNotPushOnNonBindingWaiting(t *testing.T) {
 	require.False(t, store.appStatusSet)
 }
 
+// TestChannelServiceUnbindUpdatesStatus 验证渠道服务解绑Updates状态的预期行为场景。
 func TestChannelServiceUnbindUpdatesStatus(t *testing.T) {
 	store := newChannelStub(t)
 	svc := NewChannelService(store, channel.NewRegistry())
@@ -134,6 +143,7 @@ func TestChannelServiceUnbindUpdatesStatus(t *testing.T) {
 	require.Equal(t, domain.ChannelStatusUnboundByUser, store.lastStatus)
 }
 
+// TestChannelServiceUnbindPlatformAdminForbidden 验证渠道服务解绑平台管理员禁止访问的异常或拒绝路径场景。
 func TestChannelServiceUnbindPlatformAdminForbidden(t *testing.T) {
 	store := newChannelStub(t)
 	svc := NewChannelService(store, channel.NewRegistry())

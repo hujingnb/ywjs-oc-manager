@@ -17,6 +17,7 @@ import (
 	"oc-manager/internal/service"
 )
 
+// TestAuthLoginReturnsTokenPair 验证认证登录返回令牌令牌对的成功路径场景。
 func TestAuthLoginReturnsTokenPair(t *testing.T) {
 	svc := &authServiceStub{
 		loginResult: service.LoginResult{
@@ -42,6 +43,7 @@ func TestAuthLoginReturnsTokenPair(t *testing.T) {
 	require.Equal(t, "test-org", svc.lastLoginInput.OrgCode)
 }
 
+// TestAuthLoginRejectsInvalidBody 验证认证登录拒绝非法请求体的异常或拒绝路径场景。
 func TestAuthLoginRejectsInvalidBody(t *testing.T) {
 	router, _ := newAuthTestRouter(t, &authServiceStub{})
 
@@ -53,6 +55,7 @@ func TestAuthLoginRejectsInvalidBody(t *testing.T) {
 	require.Equal(t, http.StatusBadRequest, recorder.Code)
 }
 
+// TestAuthMeRequiresBearerToken 验证认证当前用户接口要求Bearer令牌的预期行为场景。
 func TestAuthMeRequiresBearerToken(t *testing.T) {
 	router, _ := newAuthTestRouter(t, &authServiceStub{})
 
@@ -63,6 +66,7 @@ func TestAuthMeRequiresBearerToken(t *testing.T) {
 	require.Equal(t, http.StatusUnauthorized, recorder.Code)
 }
 
+// TestAuthMeReturnsCurrentUser 验证认证当前用户接口返回当前用户的成功路径场景。
 func TestAuthMeReturnsCurrentUser(t *testing.T) {
 	svc := &authServiceStub{meResult: service.AuthUser{ID: "user-1", Username: "member@example.com"}}
 	router, tokens := newAuthTestRouter(t, svc)

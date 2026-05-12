@@ -8,6 +8,7 @@ import (
 	"testing"
 )
 
+// TestFS_ContainsUpAndDownPairs 验证FS包含Up并Down配对的预期行为场景。
 func TestFS_ContainsUpAndDownPairs(t *testing.T) {
 	entries, err := fs.ReadDir(FS, ".")
 	require.NoError(t, err)

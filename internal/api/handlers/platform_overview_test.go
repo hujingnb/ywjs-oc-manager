@@ -37,6 +37,7 @@ func newPlatformOverviewTestRouter(t *testing.T, svc platformOverviewService) (*
 	return router, tokens
 }
 
+// TestPlatformOverviewGetHappy 验证平台概览获取成功路径的成功路径场景。
 func TestPlatformOverviewGetHappy(t *testing.T) {
 	stub := &platformOverviewServiceStub{result: service.PlatformOverview{OrganizationCount: 3, MemberCount: 10}}
 	router, tokens := newPlatformOverviewTestRouter(t, stub)
@@ -51,6 +52,7 @@ func TestPlatformOverviewGetHappy(t *testing.T) {
 	assert.Contains(t, w.Body.String(), "overview")
 }
 
+// TestPlatformOverviewGetForbidden 验证平台概览获取禁止访问的异常或拒绝路径场景。
 func TestPlatformOverviewGetForbidden(t *testing.T) {
 	stub := &platformOverviewServiceStub{err: service.ErrForbidden}
 	router, tokens := newPlatformOverviewTestRouter(t, stub)
@@ -65,6 +67,7 @@ func TestPlatformOverviewGetForbidden(t *testing.T) {
 	assert.Equal(t, http.StatusForbidden, w.Code)
 }
 
+// TestPlatformOverviewGetRequiresToken 验证平台概览获取要求令牌的预期行为场景。
 func TestPlatformOverviewGetRequiresToken(t *testing.T) {
 	stub := &platformOverviewServiceStub{}
 	router, _ := newPlatformOverviewTestRouter(t, stub)

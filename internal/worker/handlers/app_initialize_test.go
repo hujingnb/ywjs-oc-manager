@@ -26,6 +26,7 @@ const (
 	testUsrID = "00000000-0000-0000-0000-000000000c01"
 )
 
+// TestAppInitializeHandlesHappyPath 验证应用初始化处理成功路径的成功路径场景。
 func TestAppInitializeHandlesHappyPath(t *testing.T) {
 	store := newAppInitStub(t)
 	images := &fakeImages{}
@@ -93,6 +94,7 @@ func TestAppInitializeHandlesHappyPath(t *testing.T) {
 	}
 }
 
+// TestAppInitializeWaitsForOpenClawHealthyWhenSupported 验证应用初始化等待针对OpenClaw健康当支持时的预期行为场景。
 func TestAppInitializeWaitsForOpenClawHealthyWhenSupported(t *testing.T) {
 	// Sprint 2：starter 同时实现 OpenClawHealthChecker 时 handler 应等 /healthz 通过再推 binding_waiting。
 	store := newAppInitStub(t)
@@ -113,6 +115,7 @@ func TestAppInitializeWaitsForOpenClawHealthyWhenSupported(t *testing.T) {
 	require.Equal(t, 1, base.healthCalls)
 }
 
+// TestAppInitializePropagatesHealthCheckError 验证应用初始化透传健康检查Check错误的错误映射或错误记录场景。
 func TestAppInitializePropagatesHealthCheckError(t *testing.T) {
 	store := newAppInitStub(t)
 	base := &fakeContainers{
@@ -130,6 +133,7 @@ func TestAppInitializePropagatesHealthCheckError(t *testing.T) {
 	require.False(t, store.statusSet)
 }
 
+// TestAppInitializeIsIdempotentForBindingWaiting 验证应用初始化保持幂等针对绑定Waiting的特殊分支或幂等场景。
 func TestAppInitializeIsIdempotentForBindingWaiting(t *testing.T) {
 	store := newAppInitStub(t)
 	store.app.Status = domain.AppStatusBindingWaiting
@@ -147,6 +151,7 @@ func TestAppInitializeIsIdempotentForBindingWaiting(t *testing.T) {
 	require.False(t, store.statusSet)
 }
 
+// TestAppInitializeSkipsAPIKeyWhenAlreadyActive 验证应用初始化跳过APIKey当已经启用的特殊分支或幂等场景。
 func TestAppInitializeSkipsAPIKeyWhenAlreadyActive(t *testing.T) {
 	store := newAppInitStub(t)
 	cipher := testCipher(t)
@@ -164,6 +169,7 @@ func TestAppInitializeSkipsAPIKeyWhenAlreadyActive(t *testing.T) {
 	require.True(t, store.statusSet)
 }
 
+// TestAppInitializePropagatesNewAPIError 验证应用初始化透传new-api错误的错误映射或错误记录场景。
 func TestAppInitializePropagatesNewAPIError(t *testing.T) {
 	store := newAppInitStub(t)
 	client := &fakeNewAPI{err: newapi.ErrUpstream}
@@ -174,6 +180,7 @@ func TestAppInitializePropagatesNewAPIError(t *testing.T) {
 	require.False(t, store.statusSet)
 }
 
+// TestAppInitializePropagatesContainerError 验证应用初始化透传容器错误的错误映射或错误记录场景。
 func TestAppInitializePropagatesContainerError(t *testing.T) {
 	store := newAppInitStub(t)
 	containers := &fakeContainers{err: errors.New("boom")}
@@ -186,6 +193,7 @@ func TestAppInitializePropagatesContainerError(t *testing.T) {
 	require.False(t, store.statusSet)
 }
 
+// TestAppInitializeRejectsInvalidPayload 验证应用初始化拒绝非法载荷的异常或拒绝路径场景。
 func TestAppInitializeRejectsInvalidPayload(t *testing.T) {
 	store := newAppInitStub(t)
 	handler := NewAppInitializeHandler(store, &fakeImages{}, &fakeDirs{}, &fakeContainers{}, &fakeContainers{}, &fakeNewAPI{}, AppInitializeConfig{})
@@ -195,6 +203,7 @@ func TestAppInitializeRejectsInvalidPayload(t *testing.T) {
 	require.Error(t, err)
 }
 
+// TestAppInitializeContainerStepSkippedWhenContainerExists 验证应用初始化容器步骤跳过当容器存在的预期行为场景。
 func TestAppInitializeContainerStepSkippedWhenContainerExists(t *testing.T) {
 	store := newAppInitStub(t)
 	store.app.ContainerID = pgtype.Text{String: "already-there", Valid: true}
@@ -437,6 +446,7 @@ func (f *fakeAuditRecorder) Record(_ context.Context, event service.AuditEvent) 
 	return service.AuditResult{}, nil
 }
 
+// TestEnsureAPIKey_CreateAPIKeyFailureRecordsAudit 验证确保APIKey创建APIKey失败记录审计的错误映射或错误记录场景。
 func TestEnsureAPIKey_CreateAPIKeyFailureRecordsAudit(t *testing.T) {
 	store := newAppInitStub(t)
 	rec := &fakeAuditRecorder{}
@@ -457,6 +467,7 @@ func TestEnsureAPIKey_CreateAPIKeyFailureRecordsAudit(t *testing.T) {
 	require.Equal(t, "failed", rec.events[0].Result)
 }
 
+// TestEnsureAPIKey_GetTokenFullKeyFailureRecordsAudit 验证确保APIKey获取令牌完整Key失败记录审计的错误映射或错误记录场景。
 func TestEnsureAPIKey_GetTokenFullKeyFailureRecordsAudit(t *testing.T) {
 	store := newAppInitStub(t)
 	rec := &fakeAuditRecorder{}
@@ -512,6 +523,7 @@ func (f *fakeContainerExec) ContainerExec(_ context.Context, nodeID, containerID
 	return runtimepkg.ExecResult{ExitCode: f.res.ExitCode, Stdout: f.res.Stdout}, nil
 }
 
+// TestConfigureOpenClawDefaultModel_PatchesAgentAndModels 验证配置OpenClaw默认值模型补丁esagent并模型的边界条件场景。
 func TestConfigureOpenClawDefaultModel_PatchesAgentAndModels(t *testing.T) {
 	exec := &fakeContainerExec{res: ExecResultStub{ExitCode: 0, Stdout: "Patched config\n"}}
 	llm := AppInitializeLLMConfig{
@@ -540,6 +552,7 @@ func TestConfigureOpenClawDefaultModel_PatchesAgentAndModels(t *testing.T) {
 	assert.Contains(t, shellLine, "${OPENAI_API_KEY}")
 }
 
+// TestConfigureOpenClawDefaultModel_SkipsWhenLLMIncomplete 验证配置OpenClaw默认值模型跳过当LLM不完整的边界条件场景。
 func TestConfigureOpenClawDefaultModel_SkipsWhenLLMIncomplete(t *testing.T) {
 	exec := &fakeContainerExec{res: ExecResultStub{ExitCode: 0, Stdout: "Patched\n"}}
 	cases := []AppInitializeLLMConfig{
@@ -557,6 +570,7 @@ func TestConfigureOpenClawDefaultModel_SkipsWhenLLMIncomplete(t *testing.T) {
 	}
 }
 
+// TestConfigureOpenClawDefaultModel_PropagatesPatchFailure 验证配置OpenClaw默认值模型透传补丁失败的错误映射或错误记录场景。
 func TestConfigureOpenClawDefaultModel_PropagatesPatchFailure(t *testing.T) {
 	exec := &fakeContainerExec{res: ExecResultStub{ExitCode: 2, Stdout: "schema validation failed\n"}}
 	llm := AppInitializeLLMConfig{

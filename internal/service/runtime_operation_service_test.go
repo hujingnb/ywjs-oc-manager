@@ -26,6 +26,7 @@ const (
 	testRuntimeOpOwner = "00000000-0000-0000-0000-000000001003"
 )
 
+// TestRuntimeOperationTriggersJobAndAudit 验证运行时OperationTriggers任务并审计的预期行为场景。
 func TestRuntimeOperationTriggersJobAndAudit(t *testing.T) {
 	store := newRuntimeOperationStub(t)
 	svc := NewRuntimeOperationService(store, newDiscardLogger())
@@ -38,6 +39,7 @@ func TestRuntimeOperationTriggersJobAndAudit(t *testing.T) {
 	require.True(t, store.auditWritten)
 }
 
+// TestRuntimeOperationDeniesOtherOrg 验证运行时OperationDenies其他组织的预期行为场景。
 func TestRuntimeOperationDeniesOtherOrg(t *testing.T) {
 	store := newRuntimeOperationStub(t)
 	svc := NewRuntimeOperationService(store, newDiscardLogger())
@@ -46,6 +48,7 @@ func TestRuntimeOperationDeniesOtherOrg(t *testing.T) {
 	require.ErrorIs(t, err, ErrRuntimeOperationDenied)
 }
 
+// TestRuntimeOperationRejectsUnknown 验证运行时Operation拒绝未知的异常或拒绝路径场景。
 func TestRuntimeOperationRejectsUnknown(t *testing.T) {
 	store := newRuntimeOperationStub(t)
 	svc := NewRuntimeOperationService(store, newDiscardLogger())
@@ -54,6 +57,7 @@ func TestRuntimeOperationRejectsUnknown(t *testing.T) {
 	require.Error(t, err)
 }
 
+// TestRuntimeOperationEnqueuesNotifierWhenProvided 验证运行时OperationEnqueuesNotifier当Provided的预期行为场景。
 func TestRuntimeOperationEnqueuesNotifierWhenProvided(t *testing.T) {
 	store := newRuntimeOperationStub(t)
 	notifier := &fakeNotifier{}
@@ -64,6 +68,7 @@ func TestRuntimeOperationEnqueuesNotifierWhenProvided(t *testing.T) {
 	require.Equal(t, result.JobID, notifier.lastJobID)
 }
 
+// TestRuntimeOperationSurvivesNotifierError 验证运行时OperationSurvivesNotifier错误的预期行为场景。
 func TestRuntimeOperationSurvivesNotifierError(t *testing.T) {
 	store := newRuntimeOperationStub(t)
 	notifier := &fakeNotifier{err: errors.New("redis down")}
@@ -73,6 +78,7 @@ func TestRuntimeOperationSurvivesNotifierError(t *testing.T) {
 	require.NoError(t, err)
 }
 
+// TestRuntimeOperationRejectsPlatformAdminWrite 验证运行时Operation拒绝平台管理员写入的异常或拒绝路径场景。
 func TestRuntimeOperationRejectsPlatformAdminWrite(t *testing.T) {
 	store := newRuntimeOperationStub(t)
 	svc := NewRuntimeOperationService(store, newDiscardLogger())
@@ -81,6 +87,7 @@ func TestRuntimeOperationRejectsPlatformAdminWrite(t *testing.T) {
 	require.ErrorIs(t, err, ErrRuntimeOperationDenied)
 }
 
+// TestRequestInitialize_HappyPathFromError 验证请求初始化成功路径来自错误的成功路径场景。
 func TestRequestInitialize_HappyPathFromError(t *testing.T) {
 	store := newRuntimeOperationStub(t)
 	store.app.Status = domain.AppStatusError
@@ -101,6 +108,7 @@ func TestRequestInitialize_HappyPathFromError(t *testing.T) {
 	require.Equal(t, result.JobID, notifier.lastJobID)
 }
 
+// TestRequestInitialize_RejectsRunningStatus 验证请求初始化拒绝Running状态的异常或拒绝路径场景。
 func TestRequestInitialize_RejectsRunningStatus(t *testing.T) {
 	store := newRuntimeOperationStub(t)
 	store.app.Status = domain.AppStatusRunning
@@ -109,6 +117,7 @@ func TestRequestInitialize_RejectsRunningStatus(t *testing.T) {
 	require.ErrorIs(t, err, ErrAppNotReinitializable)
 }
 
+// TestRequestInitialize_RejectsPlatformAdminWrite 验证请求初始化拒绝平台管理员写入的异常或拒绝路径场景。
 func TestRequestInitialize_RejectsPlatformAdminWrite(t *testing.T) {
 	store := newRuntimeOperationStub(t)
 	store.app.Status = domain.AppStatusError
@@ -118,6 +127,7 @@ func TestRequestInitialize_RejectsPlatformAdminWrite(t *testing.T) {
 	require.ErrorIs(t, err, ErrRuntimeOperationDenied)
 }
 
+// TestInspectApp_NoContainerReturnsSentinel 验证检查应用无容器返回Sentinel的成功路径场景。
 func TestInspectApp_NoContainerReturnsSentinel(t *testing.T) {
 	store := newRuntimeOperationStub(t)
 	store.app.ContainerID = pgtype.Text{}
@@ -128,6 +138,7 @@ func TestInspectApp_NoContainerReturnsSentinel(t *testing.T) {
 	require.Nil(t, view.Container)
 }
 
+// TestInspectApp_DelegatesToInspectorWhenAvailable 验证检查应用Delegates到检查or当可用的预期行为场景。
 func TestInspectApp_DelegatesToInspectorWhenAvailable(t *testing.T) {
 	store := newRuntimeOperationStub(t)
 	store.app.ContainerID = pgtype.Text{String: "ctr-x", Valid: true}
@@ -140,6 +151,7 @@ func TestInspectApp_DelegatesToInspectorWhenAvailable(t *testing.T) {
 	}
 }
 
+// TestInspectApp_FallsBackToDBStatusWithoutInspector 验证检查应用回退回退到DB状态不使用检查or的特殊分支或幂等场景。
 func TestInspectApp_FallsBackToDBStatusWithoutInspector(t *testing.T) {
 	store := newRuntimeOperationStub(t)
 	store.app.ContainerID = pgtype.Text{String: "ctr-x", Valid: true}
@@ -150,6 +162,7 @@ func TestInspectApp_FallsBackToDBStatusWithoutInspector(t *testing.T) {
 	require.Equal(t, domain.AppStatusRunning, view.Status)
 }
 
+// TestInspectApp_InspectorErrorMapsToErrorStatus 验证检查应用检查or错误映射到错误状态的错误映射或错误记录场景。
 func TestInspectApp_InspectorErrorMapsToErrorStatus(t *testing.T) {
 	store := newRuntimeOperationStub(t)
 	store.app.ContainerID = pgtype.Text{String: "ctr-x", Valid: true}
@@ -172,6 +185,7 @@ func (s stubInspector) InspectContainer(_ context.Context, _, _ string) (Runtime
 	return s.info, nil
 }
 
+// TestRequestInitialize_DeniesOtherOrg 验证请求初始化Denies其他组织的预期行为场景。
 func TestRequestInitialize_DeniesOtherOrg(t *testing.T) {
 	store := newRuntimeOperationStub(t)
 	store.app.Status = domain.AppStatusError
@@ -180,6 +194,7 @@ func TestRequestInitialize_DeniesOtherOrg(t *testing.T) {
 	require.ErrorIs(t, err, ErrRuntimeOperationDenied)
 }
 
+// TestRuntimeOperationMembersCanOnlyTriggerOwnApp 验证运行时Operation成员权限判断仅触发本人应用的预期行为场景。
 func TestRuntimeOperationMembersCanOnlyTriggerOwnApp(t *testing.T) {
 	store := newRuntimeOperationStub(t)
 	svc := NewRuntimeOperationService(store, newDiscardLogger())
@@ -272,6 +287,7 @@ func (f *fakeNotifier) Enqueue(_ context.Context, jobID string) error {
 	return f.err
 }
 
+// TestTrigger_DisabledPrincipal_Denied 验证触发禁用PrincipalDenied的预期行为场景。
 func TestTrigger_DisabledPrincipal_Denied(t *testing.T) {
 	store := newRuntimeOperationStub(t)
 	// 将主体状态设为 disabled，模拟账号被封禁后 token 仍未过期的场景。
@@ -282,6 +298,7 @@ func TestTrigger_DisabledPrincipal_Denied(t *testing.T) {
 	require.ErrorIs(t, err, ErrRuntimeOperationDenied)
 }
 
+// TestRequestInitialize_DisabledPrincipal_Denied 验证请求初始化禁用PrincipalDenied的预期行为场景。
 func TestRequestInitialize_DisabledPrincipal_Denied(t *testing.T) {
 	store := newRuntimeOperationStub(t)
 	store.app.Status = domain.AppStatusError

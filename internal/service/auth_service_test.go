@@ -22,6 +22,7 @@ const (
 	authTestOrgMemberID     = "00000000-0000-0000-0000-000000000202"
 )
 
+// TestAuthServiceLoginPlatformAdminWithoutOrgCode 验证认证服务登录平台管理员不使用组织标识的预期行为场景。
 func TestAuthServiceLoginPlatformAdminWithoutOrgCode(t *testing.T) {
 	store := newAuthStoreStub(t)
 	svc := newTestAuthService(t, store)
@@ -37,6 +38,7 @@ func TestAuthServiceLoginPlatformAdminWithoutOrgCode(t *testing.T) {
 	require.Empty(t, result.User.OrgID)
 }
 
+// TestAuthServiceLoginRejectsPlatformAdminWithOrgCode 验证认证服务登录拒绝平台管理员使用组织标识的异常或拒绝路径场景。
 func TestAuthServiceLoginRejectsPlatformAdminWithOrgCode(t *testing.T) {
 	store := newAuthStoreStub(t)
 	delete(store.orgUsersByKey, orgUserKey(store.orgsByCode["test-org"].ID, "admin"))
@@ -51,6 +53,7 @@ func TestAuthServiceLoginRejectsPlatformAdminWithOrgCode(t *testing.T) {
 	require.ErrorIs(t, err, ErrInvalidCredentials)
 }
 
+// TestAuthServiceLoginOrgUserWithOrgCode 验证认证服务登录组织用户使用组织标识的预期行为场景。
 func TestAuthServiceLoginOrgUserWithOrgCode(t *testing.T) {
 	store := newAuthStoreStub(t)
 	svc := newTestAuthService(t, store)
@@ -67,6 +70,7 @@ func TestAuthServiceLoginOrgUserWithOrgCode(t *testing.T) {
 	require.Equal(t, authTestOrgID, result.User.OrgID)
 }
 
+// TestAuthServiceLoginRejectsOrgUserWithoutOrgCode 验证认证服务登录拒绝组织用户不使用组织标识的异常或拒绝路径场景。
 func TestAuthServiceLoginRejectsOrgUserWithoutOrgCode(t *testing.T) {
 	store := newAuthStoreStub(t)
 	svc := newTestAuthService(t, store)
@@ -79,6 +83,7 @@ func TestAuthServiceLoginRejectsOrgUserWithoutOrgCode(t *testing.T) {
 	require.ErrorIs(t, err, ErrInvalidCredentials)
 }
 
+// TestAuthServiceLoginRejectsUnknownOrgCode 验证认证服务登录拒绝未知组织标识的异常或拒绝路径场景。
 func TestAuthServiceLoginRejectsUnknownOrgCode(t *testing.T) {
 	store := newAuthStoreStub(t)
 	svc := newTestAuthService(t, store)
@@ -92,6 +97,7 @@ func TestAuthServiceLoginRejectsUnknownOrgCode(t *testing.T) {
 	require.ErrorIs(t, err, ErrInvalidCredentials)
 }
 
+// TestAuthServiceLoginIssuesTokens 验证认证服务登录IssuesTokens的预期行为场景。
 func TestAuthServiceLoginIssuesTokens(t *testing.T) {
 	store := newAuthStoreStub(t)
 	svc := newTestAuthService(t, store)
@@ -110,6 +116,7 @@ func TestAuthServiceLoginIssuesTokens(t *testing.T) {
 	require.Equal(t, 1, len(store.refreshTokens))
 }
 
+// TestAuthServiceLoginRejectsWrongPassword 验证认证服务登录拒绝错误密码的异常或拒绝路径场景。
 func TestAuthServiceLoginRejectsWrongPassword(t *testing.T) {
 	store := newAuthStoreStub(t)
 	svc := newTestAuthService(t, store)
@@ -122,6 +129,7 @@ func TestAuthServiceLoginRejectsWrongPassword(t *testing.T) {
 	require.ErrorIs(t, err, ErrInvalidCredentials)
 }
 
+// TestAuthServiceLoginRejectsDisabledOrg 验证认证服务登录拒绝禁用组织的异常或拒绝路径场景。
 func TestAuthServiceLoginRejectsDisabledOrg(t *testing.T) {
 	store := newAuthStoreStub(t)
 	org := store.orgsByCode["test-org"]
@@ -138,6 +146,7 @@ func TestAuthServiceLoginRejectsDisabledOrg(t *testing.T) {
 	require.ErrorIs(t, err, ErrOrgDisabled)
 }
 
+// TestAuthServiceRefreshRotatesRefreshToken 验证认证服务刷新Rotates刷新令牌的预期行为场景。
 func TestAuthServiceRefreshRotatesRefreshToken(t *testing.T) {
 	store := newAuthStoreStub(t)
 	svc := newTestAuthService(t, store)
@@ -157,6 +166,7 @@ func TestAuthServiceRefreshRotatesRefreshToken(t *testing.T) {
 	require.Equal(t, 1, len(store.revoked))
 }
 
+// TestAuthServiceLogoutIsIdempotent 验证认证服务登出保持幂等的特殊分支或幂等场景。
 func TestAuthServiceLogoutIsIdempotent(t *testing.T) {
 	store := newAuthStoreStub(t)
 	svc := newTestAuthService(t, store)

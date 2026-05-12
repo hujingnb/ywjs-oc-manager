@@ -68,6 +68,7 @@ func TestEnsureSelfSignedCert_ReusesExisting(t *testing.T) {
 	require.Equal(t, string(second.CertPEM), string(first.CertPEM))
 }
 
+// TestEnsureSelfSignedCert_RegeneratesWhenHostnameChanges 验证确保自身SignedCert重新生成当Hostname变更s的特殊分支或幂等场景。
 func TestEnsureSelfSignedCert_RegeneratesWhenHostnameChanges(t *testing.T) {
 	stateDir := t.TempDir()
 	first, err := EnsureSelfSignedCert(stateDir, "old-host")

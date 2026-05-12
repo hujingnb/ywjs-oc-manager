@@ -12,6 +12,7 @@ import (
 	"testing"
 )
 
+// TestAgentHTTPClientInspectImage 验证agentHTTP客户端检查镜像的预期行为场景。
 func TestAgentHTTPClientInspectImage(t *testing.T) {
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if r.URL.Path != "/v1/images/inspect" || r.URL.Query().Get("image") != "openclaw-runtime:dev" {
@@ -29,6 +30,7 @@ func TestAgentHTTPClientInspectImage(t *testing.T) {
 	}
 }
 
+// TestAgentHTTPClientInspectImageUsesConfiguredTLSClient 验证agentHTTP客户端检查镜像使用配置的TLS客户端的预期行为场景。
 func TestAgentHTTPClientInspectImageUsesConfiguredTLSClient(t *testing.T) {
 	server := httptest.NewTLSServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		require.Equal(t, "/v1/images/inspect", r.URL.Path)
@@ -48,6 +50,7 @@ func TestAgentHTTPClientInspectImageUsesConfiguredTLSClient(t *testing.T) {
 	require.Equal(t, "sha256:remote", info.ID)
 }
 
+// TestAgentHTTPClientLoadImage 验证agentHTTP客户端加载镜像的预期行为场景。
 func TestAgentHTTPClientLoadImage(t *testing.T) {
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if r.URL.Path != "/v1/images/load" || r.URL.Query().Get("image") != "openclaw-runtime:dev" {

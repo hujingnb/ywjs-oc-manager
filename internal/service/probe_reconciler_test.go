@@ -13,6 +13,7 @@ import (
 	"oc-manager/internal/store/sqlc"
 )
 
+// TestRuntimeNodeProbeReconcilerFailureDegradesActiveNode 验证运行时节点探测调和器失败Degrades启用节点的预期行为场景。
 func TestRuntimeNodeProbeReconcilerFailureDegradesActiveNode(t *testing.T) {
 	store := newProbeStoreStub(t)
 	node := probeNode(t, domain.RuntimeNodeStatusActive)
@@ -29,6 +30,7 @@ func TestRuntimeNodeProbeReconcilerFailureDegradesActiveNode(t *testing.T) {
 	require.True(t, store.audited("node_probe_degraded"))
 }
 
+// TestRuntimeNodeProbeReconcilerSuccessRecoversDegradedNode 验证运行时节点探测调和器成功Recovers降级节点的成功路径场景。
 func TestRuntimeNodeProbeReconcilerSuccessRecoversDegradedNode(t *testing.T) {
 	store := newProbeStoreStub(t)
 	node := probeNode(t, domain.RuntimeNodeStatusDegraded)
@@ -45,6 +47,7 @@ func TestRuntimeNodeProbeReconcilerSuccessRecoversDegradedNode(t *testing.T) {
 	require.True(t, store.audited("node_probe_recovered"))
 }
 
+// TestRuntimeNodeProbeReconcilerSkipsDisabledNode 验证运行时节点探测调和器跳过禁用节点的特殊分支或幂等场景。
 func TestRuntimeNodeProbeReconcilerSkipsDisabledNode(t *testing.T) {
 	store := newProbeStoreStub(t)
 	node := probeNode(t, domain.RuntimeNodeStatusDisabled)

@@ -82,6 +82,7 @@ func pgUUIDFromString(s string) (pgtype.UUID, error) {
 	return out, nil
 }
 
+// TestRuntimeRefreshStatusHappyPath 验证运行时刷新状态成功路径的成功路径场景。
 func TestRuntimeRefreshStatusHappyPath(t *testing.T) {
 	store := &fakeRuntimeSnapshotStore{app: makeAppForRefresh(t)}
 	inspector := &fakeRuntimeInspector{
@@ -100,6 +101,7 @@ func TestRuntimeRefreshStatusHappyPath(t *testing.T) {
 	}
 }
 
+// TestRuntimeRefreshStatusInspectErrorRecorded 验证运行时刷新状态检查错误记录ed的预期行为场景。
 func TestRuntimeRefreshStatusInspectErrorRecorded(t *testing.T) {
 	store := &fakeRuntimeSnapshotStore{app: makeAppForRefresh(t)}
 	inspector := &fakeRuntimeInspector{inspectErr: errors.New("dial err")}
@@ -113,6 +115,7 @@ func TestRuntimeRefreshStatusInspectErrorRecorded(t *testing.T) {
 	require.NotEqual(t, "", got.LastError)
 }
 
+// TestRuntimeRefreshStatusSkipsNoContainer 验证运行时刷新状态跳过无容器的特殊分支或幂等场景。
 func TestRuntimeRefreshStatusSkipsNoContainer(t *testing.T) {
 	app := makeAppForRefresh(t)
 	app.ContainerID = pgtype.Text{}

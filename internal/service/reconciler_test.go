@@ -53,6 +53,7 @@ func (s *reconcilerStub) SetAppStatus(_ context.Context, arg sqlc.SetAppStatusPa
 	return sqlc.App{ID: arg.ID, Status: arg.Status}, nil
 }
 
+// TestNodeHealthReconciler_DemotesTimedOutNodesAndApps 验证节点健康检查ReconcilerDemotes超时超时节点并应用的预期行为场景。
 func TestNodeHealthReconciler_DemotesTimedOutNodesAndApps(t *testing.T) {
 	stub := newReconcilerStub()
 	now := time.Date(2026, 5, 1, 12, 0, 0, 0, time.UTC)
@@ -86,6 +87,7 @@ func TestNodeHealthReconciler_DemotesTimedOutNodesAndApps(t *testing.T) {
 	require.Equal(t, domain.AppStatusError, stub.updatedApps[uuidToString(app.ID)])
 }
 
+// TestNodeHealthReconciler_SkipsAlreadyDisabledNodes 验证节点健康检查Reconciler跳过已经禁用节点的特殊分支或幂等场景。
 func TestNodeHealthReconciler_SkipsAlreadyDisabledNodes(t *testing.T) {
 	stub := newReconcilerStub()
 	now := time.Date(2026, 5, 1, 12, 0, 0, 0, time.UTC)
@@ -104,6 +106,7 @@ func TestNodeHealthReconciler_SkipsAlreadyDisabledNodes(t *testing.T) {
 	require.Equal(t, 0, len(stub.updatedNodes))
 }
 
+// TestNodeHealthReconciler_NeverHeartbeatedTreatedAsTimedOut 验证节点健康检查ReconcilerNeverHeartbeatedTreated作为超时超时的预期行为场景。
 func TestNodeHealthReconciler_NeverHeartbeatedTreatedAsTimedOut(t *testing.T) {
 	stub := newReconcilerStub()
 	now := time.Date(2026, 5, 1, 12, 0, 0, 0, time.UTC)

@@ -87,6 +87,7 @@ func writeStdcopyFrame(w io.Writer, streamType byte, payload []byte) {
 	_, _ = w.Write(payload)
 }
 
+// TestDockerCommandRunner_StreamsLines 验证DockerCommand运行器流式处理Lines的成功路径场景。
 func TestDockerCommandRunner_StreamsLines(t *testing.T) {
 	exec := &memoryExecutor{
 		stdoutLines: []string{
@@ -110,6 +111,7 @@ func TestDockerCommandRunner_StreamsLines(t *testing.T) {
 	require.True(t, equalStrings(exec.seenCmd(), want))
 }
 
+// TestDockerCommandRunner_DiscardsStderr 验证DockerCommand运行器DiscardsStderr的预期行为场景。
 func TestDockerCommandRunner_DiscardsStderr(t *testing.T) {
 	exec := &memoryExecutor{
 		stdoutLines: []string{`{"type":"bound"}`},
@@ -124,24 +126,28 @@ func TestDockerCommandRunner_DiscardsStderr(t *testing.T) {
 	require.False(t, strings.Contains(got[0], "error"))
 }
 
+// TestDockerCommandRunner_RejectsMissingExecutor 验证DockerCommand运行器拒绝缺失执行器的异常或拒绝路径场景。
 func TestDockerCommandRunner_RejectsMissingExecutor(t *testing.T) {
 	runner := NewDockerCommandRunner(nil, staticLookup{containerID: "x"})
 	_, err := runner.StreamWeChatLogin(context.Background(), AuthInput{NodeID: "n", AppID: "a"})
 	require.Error(t, err)
 }
 
+// TestDockerCommandRunner_RejectsMissingLookup 验证DockerCommand运行器拒绝缺失查找的异常或拒绝路径场景。
 func TestDockerCommandRunner_RejectsMissingLookup(t *testing.T) {
 	runner := NewDockerCommandRunner(&memoryExecutor{}, nil)
 	_, err := runner.StreamWeChatLogin(context.Background(), AuthInput{NodeID: "n", AppID: "a"})
 	require.Error(t, err)
 }
 
+// TestDockerCommandRunner_RequiresNodeID 验证DockerCommand运行器要求节点ID的预期行为场景。
 func TestDockerCommandRunner_RequiresNodeID(t *testing.T) {
 	runner := NewDockerCommandRunner(&memoryExecutor{}, staticLookup{containerID: "x"})
 	_, err := runner.StreamWeChatLogin(context.Background(), AuthInput{AppID: "a"})
 	require.Error(t, err)
 }
 
+// TestDockerCommandRunner_PrefersExplicitContainerID 验证DockerCommand运行器Prefers显式容器ID的预期行为场景。
 func TestDockerCommandRunner_PrefersExplicitContainerID(t *testing.T) {
 	exec := &memoryExecutor{stdoutLines: []string{`{"type":"bound"}`}, closeAfter: true}
 	runner := NewDockerCommandRunner(exec, staticLookup{containerID: "from-lookup"})
@@ -151,12 +157,14 @@ func TestDockerCommandRunner_PrefersExplicitContainerID(t *testing.T) {
 	// Lookup 不应被调用，但 memoryExecutor 没记录 containerID；这里至少断言运行成功。
 }
 
+// TestDockerCommandRunner_LookupErrorPropagates 验证DockerCommand运行器查找错误透传的错误映射或错误记录场景。
 func TestDockerCommandRunner_LookupErrorPropagates(t *testing.T) {
 	runner := NewDockerCommandRunner(&memoryExecutor{}, errLookup{err: errors.New("db down")})
 	_, err := runner.StreamWeChatLogin(context.Background(), AuthInput{NodeID: "n", AppID: "a"})
 	require.Error(t, err)
 }
 
+// TestDockerCommandRunner_CtxCancelClosesChannel 验证DockerCommand运行器Ctx取消Closes渠道的预期行为场景。
 func TestDockerCommandRunner_CtxCancelClosesChannel(t *testing.T) {
 	exec := &memoryExecutor{stdoutLines: []string{`first`}, closeAfter: false}
 	runner := NewDockerCommandRunner(exec, staticLookup{containerID: "ctr"})

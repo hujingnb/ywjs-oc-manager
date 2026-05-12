@@ -11,6 +11,7 @@ import (
 	"oc-manager/internal/runtime/imagesync"
 )
 
+// TestImageDistributionServiceRequiresDistributor 验证镜像分发服务要求Distributor的预期行为场景。
 func TestImageDistributionServiceRequiresDistributor(t *testing.T) {
 	svc := NewImageDistributionService(nil)
 	_, err := svc.EnsureRuntimeImage(context.Background(), "node-1", "openclaw:dev")
@@ -19,6 +20,7 @@ func TestImageDistributionServiceRequiresDistributor(t *testing.T) {
 	}
 }
 
+// TestImageDistributionServiceRejectsEmptyArgs 验证镜像分发服务拒绝空值参数的异常或拒绝路径场景。
 func TestImageDistributionServiceRejectsEmptyArgs(t *testing.T) {
 	svc := NewImageDistributionService(&fakeDistributor{})
 	_, err := svc.EnsureRuntimeImage(context.Background(), "", "img")
@@ -27,6 +29,7 @@ func TestImageDistributionServiceRejectsEmptyArgs(t *testing.T) {
 	require.Error(t, err)
 }
 
+// TestImageDistributionServicePropagatesUnderlyingError 验证镜像分发服务透传底层错误的错误映射或错误记录场景。
 func TestImageDistributionServicePropagatesUnderlyingError(t *testing.T) {
 	svc := NewImageDistributionService(&fakeDistributor{err: errors.New("boom")})
 	_, err := svc.EnsureRuntimeImage(context.Background(), "node-1", "openclaw:dev")
@@ -36,6 +39,7 @@ func TestImageDistributionServicePropagatesUnderlyingError(t *testing.T) {
 	}
 }
 
+// TestImageDistributionServiceReturnsTransferredTrue 验证镜像分发服务返回已传输标记的成功路径场景。
 func TestImageDistributionServiceReturnsTransferredTrue(t *testing.T) {
 	svc := NewImageDistributionService(&fakeDistributor{result: imagesync.SyncResult{Image: "img", NodeID: "node-1", LocalID: "L", RemoteID: "L", Transferred: true}})
 	got, err := svc.EnsureRuntimeImage(context.Background(), "node-1", "img")

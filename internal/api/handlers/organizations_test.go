@@ -18,6 +18,7 @@ import (
 	"oc-manager/internal/service"
 )
 
+// TestOrganizationsCreateRequiresToken 验证组织创建要求令牌的预期行为场景。
 func TestOrganizationsCreateRequiresToken(t *testing.T) {
 	router, _ := newOrganizationsTestRouter(t, &organizationServiceStub{})
 
@@ -29,6 +30,7 @@ func TestOrganizationsCreateRequiresToken(t *testing.T) {
 	require.Equal(t, http.StatusUnauthorized, recorder.Code)
 }
 
+// TestOrganizationsCreateReturnsCreatedOrganization 验证组织创建返回已创建组织的成功路径场景。
 func TestOrganizationsCreateReturnsCreatedOrganization(t *testing.T) {
 	svc := &organizationServiceStub{
 		createResult: service.OrganizationResult{ID: "org-1", Name: "测试组织", Status: domain.StatusActive},
@@ -58,6 +60,7 @@ func TestOrganizationsCreateReturnsCreatedOrganization(t *testing.T) {
 	require.Equal(t, "secret-password", svc.lastCreateInput.AdminPassword)
 }
 
+// TestOrganizationsCreateRequiresAdminFields 验证组织创建要求管理员字段的预期行为场景。
 func TestOrganizationsCreateRequiresAdminFields(t *testing.T) {
 	router, tokens := newOrganizationsTestRouter(t, &organizationServiceStub{})
 	accessToken, err := tokens.SignAccessToken(auth.Principal{UserID: "user-1", Role: domain.UserRolePlatformAdmin})
@@ -72,6 +75,7 @@ func TestOrganizationsCreateRequiresAdminFields(t *testing.T) {
 	require.Equal(t, http.StatusBadRequest, recorder.Code)
 }
 
+// TestOrganizationsCreateMapsConflict 验证组织创建映射冲突的异常或拒绝路径场景。
 func TestOrganizationsCreateMapsConflict(t *testing.T) {
 	router, tokens := newOrganizationsTestRouter(t, &organizationServiceStub{createErr: service.ErrConflict})
 	accessToken, err := tokens.SignAccessToken(auth.Principal{UserID: "user-1", Role: domain.UserRolePlatformAdmin})

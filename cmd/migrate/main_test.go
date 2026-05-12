@@ -28,6 +28,7 @@ func TestIofsSourceLoads(t *testing.T) {
 	}
 }
 
+// TestLoadDatabaseURLReadsOnlyConfigFile 验证加载DatabaseURL读取仅配置文件的预期行为场景。
 func TestLoadDatabaseURLReadsOnlyConfigFile(t *testing.T) {
 	// 即使环境里存在 DATABASE_URL，也必须以 OCM_CONFIG 对应的 manager.yaml 为准。
 	t.Setenv("DATABASE_URL", "postgres://env:env@localhost/env?sslmode=disable")

@@ -50,6 +50,7 @@ func newRechargeTestRouter(t *testing.T, svc rechargeService) (*gin.Engine, *aut
 	return router, tokens
 }
 
+// TestRechargeCreateHappy 验证充值创建成功路径的成功路径场景。
 func TestRechargeCreateHappy(t *testing.T) {
 	stub := &rechargeServiceStub{rechargeResult: service.RechargeRecordResult{ID: "rec-1"}}
 	router, tokens := newRechargeTestRouter(t, stub)
@@ -66,6 +67,7 @@ func TestRechargeCreateHappy(t *testing.T) {
 	assert.Contains(t, w.Body.String(), "recharge")
 }
 
+// TestRechargeCreateForbidden 验证充值创建禁止访问的异常或拒绝路径场景。
 func TestRechargeCreateForbidden(t *testing.T) {
 	stub := &rechargeServiceStub{rechargeErr: service.ErrRechargeDenied}
 	router, tokens := newRechargeTestRouter(t, stub)
@@ -81,6 +83,7 @@ func TestRechargeCreateForbidden(t *testing.T) {
 	assert.Equal(t, http.StatusForbidden, w.Code)
 }
 
+// TestRechargeCreateOrgNotFound 验证充值创建组织未找到的异常或拒绝路径场景。
 func TestRechargeCreateOrgNotFound(t *testing.T) {
 	stub := &rechargeServiceStub{rechargeErr: service.ErrNotFound}
 	router, tokens := newRechargeTestRouter(t, stub)
@@ -96,6 +99,7 @@ func TestRechargeCreateOrgNotFound(t *testing.T) {
 	assert.Equal(t, http.StatusNotFound, w.Code)
 }
 
+// TestRechargeListHappy 验证充值列表成功路径的成功路径场景。
 func TestRechargeListHappy(t *testing.T) {
 	stub := &rechargeServiceStub{listResult: []service.RechargeRecordResult{{ID: "rec-1"}}}
 	router, tokens := newRechargeTestRouter(t, stub)
@@ -110,6 +114,7 @@ func TestRechargeListHappy(t *testing.T) {
 	assert.Contains(t, w.Body.String(), "recharges")
 }
 
+// TestRechargeBalanceHappy 验证充值余额成功路径的成功路径场景。
 func TestRechargeBalanceHappy(t *testing.T) {
 	stub := &rechargeServiceStub{balanceResult: service.BalanceView{RemainQuota: 5000}}
 	router, tokens := newRechargeTestRouter(t, stub)
@@ -124,6 +129,7 @@ func TestRechargeBalanceHappy(t *testing.T) {
 	assert.Contains(t, w.Body.String(), "balance")
 }
 
+// TestRechargeRequiresToken 验证充值要求令牌的预期行为场景。
 func TestRechargeRequiresToken(t *testing.T) {
 	stub := &rechargeServiceStub{}
 	router, _ := newRechargeTestRouter(t, stub)

@@ -42,6 +42,7 @@ func makeTar(t *testing.T, files map[string]string) *bytes.Buffer {
 	return &buf
 }
 
+// TestResolveScopePath 验证解析scope路径的预期行为场景。
 func TestResolveScopePath(t *testing.T) {
 	dataRoot := t.TempDir()
 	scope := "apps/abc"
@@ -62,6 +63,7 @@ func TestResolveScopePath(t *testing.T) {
 		{"sibling escape rejected", "../../apps/other/workspace", true},
 	}
 	for _, c := range cases {
+		// 当前子测试覆盖表格用例中该名称对应的输入组合、边界条件和期望结果。
 		t.Run(c.name, func(t *testing.T) {
 			abs, err := resolveScopePath(dataRoot, scope, c.rel)
 			if c.wantErr {
@@ -77,6 +79,7 @@ func TestResolveScopePath(t *testing.T) {
 	}
 }
 
+// TestScopesHandler_UnknownActionReturns404 验证scope处理器未知操作返回404的成功路径场景。
 func TestScopesHandler_UnknownActionReturns404(t *testing.T) {
 	srv := httptest.NewServer(newHandlerWithDocker(t.TempDir(), nil, "tok"))
 	defer srv.Close()
@@ -89,6 +92,7 @@ func TestScopesHandler_UnknownActionReturns404(t *testing.T) {
 	require.Equal(t, http.StatusNotFound, resp.StatusCode)
 }
 
+// TestScopesAppInit_CreatesFourDirs 验证scope 应用初始化创建四个目录的成功路径场景。
 func TestScopesAppInit_CreatesFourDirs(t *testing.T) {
 	dataRoot := t.TempDir()
 	srv := httptest.NewServer(newHandlerWithDocker(dataRoot, nil, "tok"))
@@ -110,6 +114,7 @@ func TestScopesAppInit_CreatesFourDirs(t *testing.T) {
 	}
 }
 
+// TestScopesAppInit_Idempotent 验证scope 应用初始化幂等的特殊分支或幂等场景。
 func TestScopesAppInit_Idempotent(t *testing.T) {
 	dataRoot := t.TempDir()
 	srv := httptest.NewServer(newHandlerWithDocker(dataRoot, nil, "tok"))
@@ -125,6 +130,7 @@ func TestScopesAppInit_Idempotent(t *testing.T) {
 	}
 }
 
+// TestScopesKnowledgeSync_App_ReplaceContents 验证scope 知识库同步应用替换内容的预期行为场景。
 func TestScopesKnowledgeSync_App_ReplaceContents(t *testing.T) {
 	dataRoot := t.TempDir()
 	stale := filepath.Join(dataRoot, "apps", "app-1", "knowledge", "stale.txt")
@@ -162,6 +168,7 @@ func TestScopesKnowledgeSync_App_ReplaceContents(t *testing.T) {
 	}
 }
 
+// TestScopesKnowledgeSync_Org_CreatesPath 验证scope 知识库同步组织创建路径的成功路径场景。
 func TestScopesKnowledgeSync_Org_CreatesPath(t *testing.T) {
 	dataRoot := t.TempDir()
 	srv := httptest.NewServer(newHandlerWithDocker(dataRoot, nil, "tok"))
@@ -181,6 +188,7 @@ func TestScopesKnowledgeSync_Org_CreatesPath(t *testing.T) {
 	}
 }
 
+// TestScopesKnowledgeSync_RejectsTraversalEntry 验证scope 知识库同步拒绝路径穿越条目的异常或拒绝路径场景。
 func TestScopesKnowledgeSync_RejectsTraversalEntry(t *testing.T) {
 	dataRoot := t.TempDir()
 	srv := httptest.NewServer(newHandlerWithDocker(dataRoot, nil, "tok"))
@@ -198,6 +206,7 @@ func TestScopesKnowledgeSync_RejectsTraversalEntry(t *testing.T) {
 	require.Error(t, err)
 }
 
+// TestScopesKnowledgeSync_EmptyTar 验证scope 知识库同步空 tar的边界条件场景。
 func TestScopesKnowledgeSync_EmptyTar(t *testing.T) {
 	dataRoot := t.TempDir()
 	srv := httptest.NewServer(newHandlerWithDocker(dataRoot, nil, "tok"))
@@ -218,6 +227,7 @@ func TestScopesKnowledgeSync_EmptyTar(t *testing.T) {
 	require.Len(t, entries, 0)
 }
 
+// TestScopesKnowledgeFile_PutAndDelete 验证scope 知识库文件更新并删除的预期行为场景。
 func TestScopesKnowledgeFile_PutAndDelete(t *testing.T) {
 	dataRoot := t.TempDir()
 	srv := httptest.NewServer(newHandlerWithDocker(dataRoot, nil, "tok"))
@@ -264,6 +274,7 @@ func TestScopesKnowledgeFile_PutAndDelete(t *testing.T) {
 	require.Equal(t, http.StatusOK, resp.StatusCode)
 }
 
+// TestScopesKnowledgeFile_RejectsTraversalPath 验证scope 知识库文件拒绝路径穿越路径的异常或拒绝路径场景。
 func TestScopesKnowledgeFile_RejectsTraversalPath(t *testing.T) {
 	dataRoot := t.TempDir()
 	srv := httptest.NewServer(newHandlerWithDocker(dataRoot, nil, "tok"))
@@ -278,6 +289,7 @@ func TestScopesKnowledgeFile_RejectsTraversalPath(t *testing.T) {
 	require.Equal(t, http.StatusBadRequest, resp.StatusCode)
 }
 
+// TestScopesKnowledgeFile_OrgScope 验证scope 知识库文件组织scope的预期行为场景。
 func TestScopesKnowledgeFile_OrgScope(t *testing.T) {
 	dataRoot := t.TempDir()
 	srv := httptest.NewServer(newHandlerWithDocker(dataRoot, nil, "tok"))
@@ -295,6 +307,7 @@ func TestScopesKnowledgeFile_OrgScope(t *testing.T) {
 	require.Equal(t, "# org", string(got))
 }
 
+// TestScopesWorkspaceList 验证scope 工作区列表的预期行为场景。
 func TestScopesWorkspaceList(t *testing.T) {
 	dataRoot := t.TempDir()
 	root := filepath.Join(dataRoot, "apps", "app-1", "workspace")
@@ -333,6 +346,7 @@ func TestScopesWorkspaceList(t *testing.T) {
 	require.Equal(t, http.StatusOK, resp2.StatusCode)
 }
 
+// TestScopesWorkspaceList_NotExistReturnsEmpty 验证scope 工作区列表未Exist返回空值的成功路径场景。
 func TestScopesWorkspaceList_NotExistReturnsEmpty(t *testing.T) {
 	dataRoot := t.TempDir()
 	srv := httptest.NewServer(newHandlerWithDocker(dataRoot, nil, "tok"))
@@ -345,6 +359,7 @@ func TestScopesWorkspaceList_NotExistReturnsEmpty(t *testing.T) {
 	require.Equal(t, http.StatusOK, resp.StatusCode)
 }
 
+// TestScopesWorkspaceDownload 验证scope 工作区下载的预期行为场景。
 func TestScopesWorkspaceDownload(t *testing.T) {
 	dataRoot := t.TempDir()
 	root := filepath.Join(dataRoot, "apps", "app-1", "workspace")
@@ -365,6 +380,7 @@ func TestScopesWorkspaceDownload(t *testing.T) {
 	require.True(t, strings.Contains(resp.Header.Get("Content-Disposition"), "out.txt"))
 }
 
+// TestScopesWorkspaceDownload_RejectsDirectory 验证scope 工作区下载拒绝目录的异常或拒绝路径场景。
 func TestScopesWorkspaceDownload_RejectsDirectory(t *testing.T) {
 	dataRoot := t.TempDir()
 	root := filepath.Join(dataRoot, "apps", "app-1", "workspace", "sub")
@@ -380,6 +396,7 @@ func TestScopesWorkspaceDownload_RejectsDirectory(t *testing.T) {
 	require.Equal(t, http.StatusBadRequest, resp.StatusCode)
 }
 
+// TestScopesWorkspaceArchive 验证scope 工作区归档的预期行为场景。
 func TestScopesWorkspaceArchive(t *testing.T) {
 	dataRoot := t.TempDir()
 	root := filepath.Join(dataRoot, "apps", "app-1", "workspace")
@@ -408,6 +425,7 @@ func TestScopesWorkspaceArchive(t *testing.T) {
 	}
 }
 
+// TestScopesAppArchive_MovesAndCleansUp 验证scope应用归档移动并清理的预期行为场景。
 func TestScopesAppArchive_MovesAndCleansUp(t *testing.T) {
 	dataRoot := t.TempDir()
 	root := filepath.Join(dataRoot, "apps", "app-1")
@@ -461,6 +479,7 @@ func TestScopesAppArchive_MovesAndCleansUp(t *testing.T) {
 	}
 }
 
+// TestScopesCleanupArchives_KeepsRecent 验证scope清理归档保留近期的预期行为场景。
 func TestScopesCleanupArchives_KeepsRecent(t *testing.T) {
 	dataRoot := t.TempDir()
 	keep := filepath.Join(dataRoot, "archived", "fresh-20260502T000000Z")
@@ -478,6 +497,7 @@ func TestScopesCleanupArchives_KeepsRecent(t *testing.T) {
 	require.NoError(t, err)
 }
 
+// TestScopesCleanupArchives_RejectsBadRetention 验证scope清理归档拒绝非法保留时间的异常或拒绝路径场景。
 func TestScopesCleanupArchives_RejectsBadRetention(t *testing.T) {
 	dataRoot := t.TempDir()
 	srv := httptest.NewServer(newHandlerWithDocker(dataRoot, nil, "tok"))
@@ -493,6 +513,7 @@ func TestScopesCleanupArchives_RejectsBadRetention(t *testing.T) {
 	}
 }
 
+// TestScopesAppInit_RejectsInvalidAppID 验证scope 应用初始化拒绝非法应用ID的异常或拒绝路径场景。
 func TestScopesAppInit_RejectsInvalidAppID(t *testing.T) {
 	dataRoot := t.TempDir()
 	srv := httptest.NewServer(newHandlerWithDocker(dataRoot, nil, "tok"))
@@ -509,6 +530,7 @@ func TestScopesAppInit_RejectsInvalidAppID(t *testing.T) {
 	}
 }
 
+// TestScopesHandler_RequiresAuth 验证scope处理器要求认证的预期行为场景。
 func TestScopesHandler_RequiresAuth(t *testing.T) {
 	srv := httptest.NewServer(newHandlerWithDocker(t.TempDir(), nil, "tok"))
 	defer srv.Close()

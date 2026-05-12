@@ -21,6 +21,7 @@ const (
 	testChannelWorkerNodeID  = "00000000-0000-0000-0000-00000000c104"
 )
 
+// TestChannelStartLoginHandlerWritesChallenge 验证渠道启动登录处理器写入Challenge的成功路径场景。
 func TestChannelStartLoginHandlerWritesChallenge(t *testing.T) {
 	store := newChannelWorkerStore(t)
 	registry := channel.NewRegistry()
@@ -48,6 +49,7 @@ func TestChannelStartLoginHandlerWritesChallenge(t *testing.T) {
 	}
 }
 
+// TestChannelCheckBindingHandlerMarksBoundAndRunsApp 验证渠道Check绑定处理器Marks已绑定并Runs应用的预期行为场景。
 func TestChannelCheckBindingHandlerMarksBoundAndRunsApp(t *testing.T) {
 	store := newChannelWorkerStore(t)
 	store.app.Status = domain.AppStatusBindingWaiting
@@ -74,6 +76,7 @@ func TestChannelCheckBindingHandlerMarksBoundAndRunsApp(t *testing.T) {
 	}
 }
 
+// TestChannelCheckBindingHandlerUsesResolverIdentity 验证渠道Check绑定处理器使用解析器身份的预期行为场景。
 func TestChannelCheckBindingHandlerUsesResolverIdentity(t *testing.T) {
 	store := newChannelWorkerStore(t)
 	registry := channel.NewRegistry()
@@ -92,6 +95,7 @@ func TestChannelCheckBindingHandlerUsesResolverIdentity(t *testing.T) {
 	require.Equal(t, 1, resolver.calls)
 }
 
+// TestChannelCheckBindingHandlerRequeuesPending 验证渠道Check绑定处理器Requeues等待中的预期行为场景。
 func TestChannelCheckBindingHandlerRequeuesPending(t *testing.T) {
 	store := newChannelWorkerStore(t)
 	registry := channel.NewRegistry()

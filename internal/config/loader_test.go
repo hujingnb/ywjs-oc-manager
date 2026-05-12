@@ -61,6 +61,7 @@ runtime:
 `
 }
 
+// TestLoad_DoesNotExpandEnvPlaceholders 验证加载Does未ExpandEnvPlaceholders的预期行为场景。
 func TestLoad_DoesNotExpandEnvPlaceholders(t *testing.T) {
 	t.Setenv("DATABASE_URL", "postgres://should-not-be-substituted/db")
 
@@ -89,6 +90,7 @@ func TestLoad_RejectsUnknownFields(t *testing.T) {
 	require.Error(t, err)
 }
 
+// TestValidateReportsRequiredFields 验证校验配置必填项必填字段的预期行为场景。
 func TestValidateReportsRequiredFields(t *testing.T) {
 	err := (Config{}).Validate()
 	require.Error(t, err)
@@ -103,6 +105,7 @@ func TestValidateReportsRequiredFields(t *testing.T) {
 	}
 }
 
+// TestLoadFileFailsWhenDurationInvalid 验证加载文件失败当时长非法的异常或拒绝路径场景。
 func TestLoadFileFailsWhenDurationInvalid(t *testing.T) {
 	path := writeTempConfig(t, `
 app:
@@ -138,6 +141,7 @@ func TestLoad_RejectsMissingKnowledgeRoot(t *testing.T) {
 		"empty": strings.Replace(fullValidYAML(),
 			`knowledge_root: "/var/lib/oc-manager/knowledge"`, `knowledge_root: ""`, 1),
 	} {
+		// 当前子测试覆盖表格用例中该名称对应的输入组合、边界条件和期望结果。
 		t.Run(name, func(t *testing.T) {
 			path := writeTempConfig(t, yaml)
 			_, err := LoadFile(path)

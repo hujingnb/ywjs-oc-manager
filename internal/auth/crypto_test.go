@@ -19,6 +19,7 @@ func newTestKey(t *testing.T) []byte {
 	return key
 }
 
+// TestNewCipher_RejectsNon32Bytes 验证New加密器拒绝非32Bytes的异常或拒绝路径场景。
 func TestNewCipher_RejectsNon32Bytes(t *testing.T) {
 	for _, size := range []int{0, 1, 16, 24, 31, 33, 64} {
 		_, err := NewCipher(make([]byte, size))
@@ -26,12 +27,14 @@ func TestNewCipher_RejectsNon32Bytes(t *testing.T) {
 	}
 }
 
+// TestNewCipher_AcceptsExact32Bytes 验证New加密器接受Exact32Bytes的预期行为场景。
 func TestNewCipher_AcceptsExact32Bytes(t *testing.T) {
 	c, err := NewCipher(newTestKey(t))
 	require.NoError(t, err)
 	require.NotNil(t, c)
 }
 
+// TestCipher_RoundTrip 验证加密器RoundTrip的预期行为场景。
 func TestCipher_RoundTrip(t *testing.T) {
 	c, err := NewCipher(newTestKey(t))
 	require.NoError(t, err)
@@ -50,6 +53,7 @@ func TestCipher_RoundTrip(t *testing.T) {
 	}
 }
 
+// TestCipher_EncryptIsRandomized 验证加密器EncryptIsRandomized的预期行为场景。
 func TestCipher_EncryptIsRandomized(t *testing.T) {
 	c, err := NewCipher(newTestKey(t))
 	require.NoError(t, err)
@@ -58,6 +62,7 @@ func TestCipher_EncryptIsRandomized(t *testing.T) {
 	require.NotEqual(t, b, a)
 }
 
+// TestCipher_DecryptRejectsTampered 验证加密器Decrypt拒绝篡改的异常或拒绝路径场景。
 func TestCipher_DecryptRejectsTampered(t *testing.T) {
 	c, err := NewCipher(newTestKey(t))
 	require.NoError(t, err)
@@ -70,6 +75,7 @@ func TestCipher_DecryptRejectsTampered(t *testing.T) {
 	require.Error(t, err)
 }
 
+// TestCipher_DecryptRejectsBadBase64 验证加密器Decrypt拒绝非法Base64的异常或拒绝路径场景。
 func TestCipher_DecryptRejectsBadBase64(t *testing.T) {
 	c, _ := NewCipher(newTestKey(t))
 	if _, err := c.Decrypt("!!!not-base64!!!"); err == nil || !strings.Contains(err.Error(), "base64") {
@@ -77,6 +83,7 @@ func TestCipher_DecryptRejectsBadBase64(t *testing.T) {
 	}
 }
 
+// TestCipher_DecryptRejectsTooShort 验证加密器Decrypt拒绝Too过短的异常或拒绝路径场景。
 func TestCipher_DecryptRejectsTooShort(t *testing.T) {
 	c, _ := NewCipher(newTestKey(t))
 	short := base64.StdEncoding.EncodeToString([]byte{0x00, 0x01})
@@ -84,6 +91,7 @@ func TestCipher_DecryptRejectsTooShort(t *testing.T) {
 	require.Error(t, err)
 }
 
+// TestCipher_DecryptRejectsCrossKey 验证加密器Decrypt拒绝跨Key的异常或拒绝路径场景。
 func TestCipher_DecryptRejectsCrossKey(t *testing.T) {
 	keyA := newTestKey(t)
 	keyB := make([]byte, 32)

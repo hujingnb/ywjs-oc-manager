@@ -50,6 +50,7 @@ func newWorkspaceTestRouter(t *testing.T, svc workspaceService) (*gin.Engine, *a
 	return router, tokens
 }
 
+// TestWorkspaceListHappy 验证工作区列表成功路径的成功路径场景。
 func TestWorkspaceListHappy(t *testing.T) {
 	stub := &workspaceServiceStub{listResult: service.WorkspaceListing{Path: "/", Entries: []service.WorkspaceEntryResult{}}}
 	router, tokens := newWorkspaceTestRouter(t, stub)
@@ -63,6 +64,7 @@ func TestWorkspaceListHappy(t *testing.T) {
 	require.Equal(t, http.StatusOK, w.Code)
 }
 
+// TestWorkspaceListForbidden 验证工作区列表禁止访问的异常或拒绝路径场景。
 func TestWorkspaceListForbidden(t *testing.T) {
 	stub := &workspaceServiceStub{listErr: service.ErrWorkspaceForbidden}
 	router, tokens := newWorkspaceTestRouter(t, stub)
@@ -76,6 +78,7 @@ func TestWorkspaceListForbidden(t *testing.T) {
 	assert.Equal(t, http.StatusForbidden, w.Code)
 }
 
+// TestWorkspaceListNotFound 验证工作区列表未找到的异常或拒绝路径场景。
 func TestWorkspaceListNotFound(t *testing.T) {
 	stub := &workspaceServiceStub{listErr: service.ErrNotFound}
 	router, tokens := newWorkspaceTestRouter(t, stub)
@@ -89,6 +92,7 @@ func TestWorkspaceListNotFound(t *testing.T) {
 	assert.Equal(t, http.StatusNotFound, w.Code)
 }
 
+// TestWorkspaceDownloadHappy 验证工作区下载成功路径的成功路径场景。
 func TestWorkspaceDownloadHappy(t *testing.T) {
 	// 返回一个可读的 io.ReadCloser
 	rc := io.NopCloser(strings.NewReader("file content"))
@@ -105,6 +109,7 @@ func TestWorkspaceDownloadHappy(t *testing.T) {
 	assert.Equal(t, "file content", w.Body.String())
 }
 
+// TestWorkspaceDownloadMissingPath 验证工作区下载缺失路径的异常或拒绝路径场景。
 func TestWorkspaceDownloadMissingPath(t *testing.T) {
 	stub := &workspaceServiceStub{}
 	router, tokens := newWorkspaceTestRouter(t, stub)
@@ -119,6 +124,7 @@ func TestWorkspaceDownloadMissingPath(t *testing.T) {
 	assert.Equal(t, http.StatusBadRequest, w.Code)
 }
 
+// TestWorkspaceRequiresToken 验证工作区要求令牌的预期行为场景。
 func TestWorkspaceRequiresToken(t *testing.T) {
 	stub := &workspaceServiceStub{}
 	router, _ := newWorkspaceTestRouter(t, stub)

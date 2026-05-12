@@ -17,6 +17,7 @@ import (
 
 const testAgentToken = "agent-token-bbbb"
 
+// TestRuntimeNodeServiceEnrollAgentCreatesNode 验证运行时节点服务注册agent创建节点的成功路径场景。
 func TestRuntimeNodeServiceEnrollAgentCreatesNode(t *testing.T) {
 	store := newRuntimeNodeStoreStub(t)
 	svc := newRuntimeNodeServiceForTest(t, store)
@@ -37,6 +38,7 @@ func TestRuntimeNodeServiceEnrollAgentCreatesNode(t *testing.T) {
 	require.Equal(t, int32(3), node.MaxApps.Int32)
 }
 
+// TestRuntimeNodeServiceEnrollAgentUpdatesExistingNode 验证运行时节点服务注册agentUpdates已有节点的预期行为场景。
 func TestRuntimeNodeServiceEnrollAgentUpdatesExistingNode(t *testing.T) {
 	store := newRuntimeNodeStoreStub(t)
 	svc := newRuntimeNodeServiceForTest(t, store)
@@ -63,6 +65,7 @@ func TestRuntimeNodeServiceEnrollAgentUpdatesExistingNode(t *testing.T) {
 	require.Equal(t, int32(5), node.MaxApps.Int32)
 }
 
+// TestRuntimeNodeServiceEnrollAgentRejectsInvalidInput 验证运行时节点服务注册agent拒绝非法输入的异常或拒绝路径场景。
 func TestRuntimeNodeServiceEnrollAgentRejectsInvalidInput(t *testing.T) {
 	store := newRuntimeNodeStoreStub(t)
 	svc := newRuntimeNodeServiceForTest(t, store)
@@ -73,6 +76,7 @@ func TestRuntimeNodeServiceEnrollAgentRejectsInvalidInput(t *testing.T) {
 	require.ErrorIs(t, err, ErrEnrollInputInvalid)
 }
 
+// TestRuntimeNodeServiceEnrollAgentRejectsNegativeMaxApps 验证运行时节点服务注册agent拒绝负数最大应用的异常或拒绝路径场景。
 func TestRuntimeNodeServiceEnrollAgentRejectsNegativeMaxApps(t *testing.T) {
 	store := newRuntimeNodeStoreStub(t)
 	svc := newRuntimeNodeServiceForTest(t, store)
@@ -83,6 +87,7 @@ func TestRuntimeNodeServiceEnrollAgentRejectsNegativeMaxApps(t *testing.T) {
 	require.ErrorIs(t, err, ErrEnrollInputInvalid)
 }
 
+// TestRuntimeNodeServiceHeartbeatRequiresValidAgentToken 验证运行时节点服务心跳要求合法agent令牌的预期行为场景。
 func TestRuntimeNodeServiceHeartbeatRequiresValidAgentToken(t *testing.T) {
 	store := newRuntimeNodeStoreStub(t)
 	svc := newRuntimeNodeServiceForTest(t, store)
@@ -94,6 +99,7 @@ func TestRuntimeNodeServiceHeartbeatRequiresValidAgentToken(t *testing.T) {
 	require.ErrorIs(t, err, ErrAgentTokenInvalid)
 }
 
+// TestRuntimeNodeServiceHeartbeatUpdatesActiveNode 验证运行时节点服务心跳Updates启用节点的预期行为场景。
 func TestRuntimeNodeServiceHeartbeatUpdatesActiveNode(t *testing.T) {
 	store := newRuntimeNodeStoreStub(t)
 	svc := newRuntimeNodeServiceForTest(t, store)
@@ -105,6 +111,7 @@ func TestRuntimeNodeServiceHeartbeatUpdatesActiveNode(t *testing.T) {
 	require.Equal(t, "0.2.0", result.AgentVersion)
 }
 
+// TestRuntimeNodeServiceHeartbeatKeepsDegradedStatus 验证运行时节点服务心跳保留降级状态的预期行为场景。
 func TestRuntimeNodeServiceHeartbeatKeepsDegradedStatus(t *testing.T) {
 	store := newRuntimeNodeStoreStub(t)
 	svc := newRuntimeNodeServiceForTest(t, store)
@@ -119,6 +126,7 @@ func TestRuntimeNodeServiceHeartbeatKeepsDegradedStatus(t *testing.T) {
 	require.Equal(t, domain.RuntimeNodeStatusDegraded, result.Status)
 }
 
+// TestRuntimeNodeServiceHeartbeatRejectsDisabledNode 验证运行时节点服务心跳拒绝禁用节点的异常或拒绝路径场景。
 func TestRuntimeNodeServiceHeartbeatRejectsDisabledNode(t *testing.T) {
 	store := newRuntimeNodeStoreStub(t)
 	svc := newRuntimeNodeServiceForTest(t, store)
@@ -132,6 +140,7 @@ func TestRuntimeNodeServiceHeartbeatRejectsDisabledNode(t *testing.T) {
 	require.ErrorIs(t, err, ErrAgentTokenInvalid)
 }
 
+// TestRuntimeNodeServiceListRequiresPlatformAdmin 验证运行时节点服务列表要求平台管理员的预期行为场景。
 func TestRuntimeNodeServiceListRequiresPlatformAdmin(t *testing.T) {
 	svc := newRuntimeNodeServiceForTest(t, nil)
 

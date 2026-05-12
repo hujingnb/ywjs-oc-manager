@@ -7,6 +7,7 @@ import (
 	"testing"
 )
 
+// TestRenderConcatenatesInOrder 验证RenderConcatenatesIn顺序的预期行为场景。
 func TestRenderConcatenatesInOrder(t *testing.T) {
 	got, err := Render(PromptInput{
 		PlatformPrompt: "你是 OpenClaw 助手",
@@ -22,6 +23,7 @@ func TestRenderConcatenatesInOrder(t *testing.T) {
 	}
 }
 
+// TestRenderSkipsEmptyLayers 验证Render跳过空值分层的边界条件场景。
 func TestRenderSkipsEmptyLayers(t *testing.T) {
 	got, err := Render(PromptInput{
 		PlatformPrompt: "",
@@ -36,6 +38,7 @@ func TestRenderSkipsEmptyLayers(t *testing.T) {
 	}
 }
 
+// TestRenderRejectsUnresolvedPlaceholders 验证Render拒绝未解析占位符的异常或拒绝路径场景。
 func TestRenderRejectsUnresolvedPlaceholders(t *testing.T) {
 	_, err := Render(PromptInput{
 		AppPrompt: "你好 {missing_var}",
@@ -44,11 +47,13 @@ func TestRenderRejectsUnresolvedPlaceholders(t *testing.T) {
 	require.True(t, strings.Contains(err.Error(), "{missing_var}"))
 }
 
+// TestRenderRejectsEmptyInput 验证Render拒绝空值输入的异常或拒绝路径场景。
 func TestRenderRejectsEmptyInput(t *testing.T) {
 	_, err := Render(PromptInput{})
 	require.ErrorIs(t, err, ErrPromptEmpty)
 }
 
+// TestVariablesFromContextHasExpectedKeys 验证变量来自上下文包含预期键的预期行为场景。
 func TestVariablesFromContextHasExpectedKeys(t *testing.T) {
 	got := VariablesFromContext("测试组织", "alice-bot", "Alice")
 	if got["org_name"] != "测试组织" || got["app_name"] != "alice-bot" || got["owner_name"] != "Alice" {

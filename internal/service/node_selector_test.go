@@ -25,6 +25,7 @@ func (s *sqlNodeSelectorStub) ListActiveNodesWithAppCounts(_ context.Context) ([
 	return s.rows, nil
 }
 
+// TestSQLNodeSelector_AdaptsRows 验证SQL节点选择器AdaptsRows的预期行为场景。
 func TestSQLNodeSelector_AdaptsRows(t *testing.T) {
 	id := mustUUID(t, "00000000-0000-0000-0000-000000000a01")
 	store := &sqlNodeSelectorStub{rows: []sqlc.ListActiveNodesWithAppCountsRow{{
@@ -46,6 +47,7 @@ func TestSQLNodeSelector_AdaptsRows(t *testing.T) {
 	assert.Equal(t, int64(7), got[1].AppCount)
 }
 
+// TestSQLNodeSelector_StoreError 验证SQL节点选择器存储错误的预期行为场景。
 func TestSQLNodeSelector_StoreError(t *testing.T) {
 	store := &sqlNodeSelectorStub{err: errors.New("db down")}
 	_, err := NewSQLNodeSelector(store).ListActiveNodesWithAppCounts(context.Background())

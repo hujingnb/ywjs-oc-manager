@@ -20,6 +20,7 @@ const (
 	testRechargeOpID  = "00000000-0000-0000-0000-000000002099"
 )
 
+// TestRecharge_HappyPath 验证充值成功路径的成功路径场景。
 func TestRecharge_HappyPath(t *testing.T) {
 	store := newRechargeStub(t, "1234")
 	client := &fakeNewAPIRecharge{rechargeResult: newapi.RechargeResult{RefID: "ref-9", RemainQuota: 5000}}
@@ -37,6 +38,7 @@ func TestRecharge_HappyPath(t *testing.T) {
 	}
 }
 
+// TestRecharge_DeniesNonPlatformAdmin 验证充值Denies非平台管理员的预期行为场景。
 func TestRecharge_DeniesNonPlatformAdmin(t *testing.T) {
 	store := newRechargeStub(t, "1234")
 	svc := NewRechargeService(store, &fakeNewAPIRecharge{})
@@ -44,6 +46,7 @@ func TestRecharge_DeniesNonPlatformAdmin(t *testing.T) {
 	require.ErrorIs(t, err, ErrRechargeDenied)
 }
 
+// TestRecharge_RejectsZeroAmount 验证充值拒绝零金额的异常或拒绝路径场景。
 func TestRecharge_RejectsZeroAmount(t *testing.T) {
 	store := newRechargeStub(t, "1234")
 	svc := NewRechargeService(store, &fakeNewAPIRecharge{})
@@ -51,6 +54,7 @@ func TestRecharge_RejectsZeroAmount(t *testing.T) {
 	require.ErrorIs(t, err, ErrInvalidRechargeAmount)
 }
 
+// TestRecharge_RejectsMissingNewAPIUserID 验证充值拒绝缺失new-api用户ID的异常或拒绝路径场景。
 func TestRecharge_RejectsMissingNewAPIUserID(t *testing.T) {
 	store := newRechargeStub(t, "")
 	svc := NewRechargeService(store, &fakeNewAPIRecharge{})
@@ -58,6 +62,7 @@ func TestRecharge_RejectsMissingNewAPIUserID(t *testing.T) {
 	require.ErrorIs(t, err, ErrOrgMissingNewAPIUserID)
 }
 
+// TestRecharge_NewAPIErrorStillWritesFailedRecord 验证充值new-api错误仍然写入失败记录的成功路径场景。
 func TestRecharge_NewAPIErrorStillWritesFailedRecord(t *testing.T) {
 	store := newRechargeStub(t, "1234")
 	client := &fakeNewAPIRecharge{rechargeErr: errors.New("upstream blow")}
@@ -69,6 +74,7 @@ func TestRecharge_NewAPIErrorStillWritesFailedRecord(t *testing.T) {
 	require.True(t, store.auditWritten)
 }
 
+// TestListRecharges_DeniesNonPlatformAdmin 验证列表充值记录Denies非平台管理员的预期行为场景。
 func TestListRecharges_DeniesNonPlatformAdmin(t *testing.T) {
 	store := newRechargeStub(t, "1234")
 	svc := NewRechargeService(store, &fakeNewAPIRecharge{})
@@ -76,6 +82,7 @@ func TestListRecharges_DeniesNonPlatformAdmin(t *testing.T) {
 	require.ErrorIs(t, err, ErrRechargeDenied)
 }
 
+// TestListRecharges_HappyPath 验证列表充值记录成功路径的成功路径场景。
 func TestListRecharges_HappyPath(t *testing.T) {
 	store := newRechargeStub(t, "1234")
 	store.records = []sqlc.RechargeRecord{
@@ -88,6 +95,7 @@ func TestListRecharges_HappyPath(t *testing.T) {
 	require.Len(t, results, 2)
 }
 
+// TestGetBalance_PlatformAdminAllowed 验证获取余额平台管理员Allowed的预期行为场景。
 func TestGetBalance_PlatformAdminAllowed(t *testing.T) {
 	store := newRechargeStub(t, "1234")
 	client := &fakeNewAPIRecharge{balanceResult: newapi.BalanceResult{NewAPIUserID: 1234, RemainQuota: 8000}}
@@ -97,6 +105,7 @@ func TestGetBalance_PlatformAdminAllowed(t *testing.T) {
 	require.Equal(t, int64(8000), view.RemainQuota)
 }
 
+// TestGetBalance_OrgAdminMustMatchOrg 验证获取余额组织管理员必须匹配组织的预期行为场景。
 func TestGetBalance_OrgAdminMustMatchOrg(t *testing.T) {
 	store := newRechargeStub(t, "1234")
 	client := &fakeNewAPIRecharge{balanceResult: newapi.BalanceResult{NewAPIUserID: 1234, RemainQuota: 0}}

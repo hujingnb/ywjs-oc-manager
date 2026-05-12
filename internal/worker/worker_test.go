@@ -15,6 +15,7 @@ import (
 	"oc-manager/internal/worker/handlers"
 )
 
+// TestWorkerTickMarksSuccess 验证workerTickMarks成功的成功路径场景。
 func TestWorkerTickMarksSuccess(t *testing.T) {
 	store := newJobStoreStub(t)
 	registry := handlers.NewRegistry()
@@ -33,6 +34,7 @@ func TestWorkerTickMarksSuccess(t *testing.T) {
 	require.Equal(t, domain.JobStatusSucceeded, store.snapshot("job-1").Status)
 }
 
+// TestWorkerTickRetriesUntilMaxAttempts 验证workerTickRetriesUntil最大Attempts的边界条件场景。
 func TestWorkerTickRetriesUntilMaxAttempts(t *testing.T) {
 	store := newJobStoreStub(t)
 	registry := handlers.NewRegistry()
@@ -60,6 +62,7 @@ func TestWorkerTickRetriesUntilMaxAttempts(t *testing.T) {
 	require.Equal(t, domain.JobStatusFailed, store.snapshot("job-1").Status)
 }
 
+// TestWorkerTickSkipsAlreadyClaimedJobs 验证workerTick跳过已经Claimed任务的特殊分支或幂等场景。
 func TestWorkerTickSkipsAlreadyClaimedJobs(t *testing.T) {
 	store := newJobStoreStub(t)
 	registry := handlers.NewRegistry()
@@ -73,6 +76,7 @@ func TestWorkerTickSkipsAlreadyClaimedJobs(t *testing.T) {
 	require.Equal(t, 0, store.markRunningCalls)
 }
 
+// TestWorkerTickMarksFailedForUnknownType 验证workerTickMarks失败针对未知类型的预期行为场景。
 func TestWorkerTickMarksFailedForUnknownType(t *testing.T) {
 	store := newJobStoreStub(t)
 	registry := handlers.NewRegistry()

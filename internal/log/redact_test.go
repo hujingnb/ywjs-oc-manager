@@ -7,6 +7,7 @@ import (
 	"testing"
 )
 
+// TestRedactSecrets 验证Redact密钥的预期行为场景。
 func TestRedactSecrets(t *testing.T) {
 	cases := []struct {
 		name string
@@ -27,6 +28,7 @@ func TestRedactSecrets(t *testing.T) {
 		{name: "no field untouched", in: `username=alice`, want: `username=alice`, bad: ""},
 	}
 	for _, tc := range cases {
+		// 当前子测试覆盖表格用例中该名称对应的输入组合、边界条件和期望结果。
 		t.Run(tc.name, func(t *testing.T) {
 			got := RedactSecrets(tc.in)
 			require.Contains(t, got, tc.want)
@@ -37,6 +39,7 @@ func TestRedactSecrets(t *testing.T) {
 	}
 }
 
+// TestRedactingWriter 验证RedactingWriter的预期行为场景。
 func TestRedactingWriter(t *testing.T) {
 	var buf bytes.Buffer
 	w := NewRedactingWriter(&buf)

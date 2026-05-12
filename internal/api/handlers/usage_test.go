@@ -68,6 +68,7 @@ func newUsageTestRouter(t *testing.T, svc usageService) (*gin.Engine, *auth.Toke
 	return router, tokens
 }
 
+// TestUsageGetMemberHappy 验证用量获取成员成功路径的成功路径场景。
 func TestUsageGetMemberHappy(t *testing.T) {
 	stub := &usageServiceStub{memberResult: service.LogsPage{Total: 5}}
 	router, tokens := newUsageTestRouter(t, stub)
@@ -84,6 +85,7 @@ func TestUsageGetMemberHappy(t *testing.T) {
 	assert.Equal(t, "u1", stub.lastMemberUserID)
 }
 
+// TestUsageGetMemberMissingOrgID 验证用量获取成员缺失组织ID的异常或拒绝路径场景。
 func TestUsageGetMemberMissingOrgID(t *testing.T) {
 	stub := &usageServiceStub{}
 	router, tokens := newUsageTestRouter(t, stub)
@@ -98,6 +100,7 @@ func TestUsageGetMemberMissingOrgID(t *testing.T) {
 	assert.Equal(t, http.StatusBadRequest, w.Code)
 }
 
+// TestUsageGetMemberForbidden 验证用量获取成员禁止访问的异常或拒绝路径场景。
 func TestUsageGetMemberForbidden(t *testing.T) {
 	stub := &usageServiceStub{memberErr: service.ErrForbidden}
 	router, tokens := newUsageTestRouter(t, stub)
@@ -111,6 +114,7 @@ func TestUsageGetMemberForbidden(t *testing.T) {
 	assert.Equal(t, http.StatusForbidden, w.Code)
 }
 
+// TestUsageGetOrgHappy 验证用量获取组织成功路径的成功路径场景。
 func TestUsageGetOrgHappy(t *testing.T) {
 	stub := &usageServiceStub{orgResult: service.QuotaSeries{}}
 	router, tokens := newUsageTestRouter(t, stub)
@@ -125,6 +129,7 @@ func TestUsageGetOrgHappy(t *testing.T) {
 	assert.Contains(t, w.Body.String(), "usage")
 }
 
+// TestUsageGetOrgAppliesDefaultWindow 验证组织用量缺省查询时间窗口时应用默认 30 天范围的场景。
 func TestUsageGetOrgAppliesDefaultWindow(t *testing.T) {
 	stub := &usageServiceStub{orgResult: service.QuotaSeries{}}
 	router, tokens := newUsageTestRouter(t, stub)
@@ -141,6 +146,7 @@ func TestUsageGetOrgAppliesDefaultWindow(t *testing.T) {
 	assert.InDelta(t, int64(30*24*60*60), stub.lastOrgUntil-stub.lastOrgSince, 5)
 }
 
+// TestUsageGetOrgKeepsExplicitWindow 验证组织用量传入显式 since/until 时保留调用方时间窗口的场景。
 func TestUsageGetOrgKeepsExplicitWindow(t *testing.T) {
 	stub := &usageServiceStub{orgResult: service.QuotaSeries{}}
 	router, tokens := newUsageTestRouter(t, stub)
@@ -156,6 +162,7 @@ func TestUsageGetOrgKeepsExplicitWindow(t *testing.T) {
 	assert.Equal(t, int64(200), stub.lastOrgUntil)
 }
 
+// TestUsageGetPlatformForbidden 验证用量获取平台禁止访问的异常或拒绝路径场景。
 func TestUsageGetPlatformForbidden(t *testing.T) {
 	stub := &usageServiceStub{platformErr: service.ErrForbidden}
 	router, tokens := newUsageTestRouter(t, stub)
@@ -169,6 +176,7 @@ func TestUsageGetPlatformForbidden(t *testing.T) {
 	assert.Equal(t, http.StatusForbidden, w.Code)
 }
 
+// TestUsageGetPlatformHappy 验证用量获取平台成功路径的成功路径场景。
 func TestUsageGetPlatformHappy(t *testing.T) {
 	stub := &usageServiceStub{platformResult: service.QuotaSeries{}}
 	router, tokens := newUsageTestRouter(t, stub)
@@ -182,6 +190,7 @@ func TestUsageGetPlatformHappy(t *testing.T) {
 	require.Equal(t, http.StatusOK, w.Code)
 }
 
+// TestUsageGetPlatformAppliesDefaultWindow 验证平台用量缺省查询时间窗口时应用默认 30 天范围的场景。
 func TestUsageGetPlatformAppliesDefaultWindow(t *testing.T) {
 	stub := &usageServiceStub{platformResult: service.QuotaSeries{}}
 	router, tokens := newUsageTestRouter(t, stub)
@@ -198,6 +207,7 @@ func TestUsageGetPlatformAppliesDefaultWindow(t *testing.T) {
 	assert.InDelta(t, int64(30*24*60*60), stub.lastPlatformUntil-stub.lastPlatformSince, 5)
 }
 
+// TestUsageGetAppHappy 验证用量获取应用成功路径的成功路径场景。
 func TestUsageGetAppHappy(t *testing.T) {
 	stub := &usageServiceStub{appResult: service.LogsPage{Total: 3}}
 	router, tokens := newUsageTestRouter(t, stub)
@@ -212,6 +222,7 @@ func TestUsageGetAppHappy(t *testing.T) {
 	assert.Contains(t, w.Body.String(), "usage")
 }
 
+// TestUsageGetAppMissingParams 验证用量获取应用缺失参数的异常或拒绝路径场景。
 func TestUsageGetAppMissingParams(t *testing.T) {
 	stub := &usageServiceStub{}
 	router, tokens := newUsageTestRouter(t, stub)
@@ -226,6 +237,7 @@ func TestUsageGetAppMissingParams(t *testing.T) {
 	assert.Equal(t, http.StatusBadRequest, w.Code)
 }
 
+// TestUsageRequiresToken 验证用量要求令牌的预期行为场景。
 func TestUsageRequiresToken(t *testing.T) {
 	stub := &usageServiceStub{}
 	router, _ := newUsageTestRouter(t, stub)

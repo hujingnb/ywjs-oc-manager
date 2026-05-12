@@ -8,6 +8,7 @@ import (
 	"time"
 )
 
+// TestTokenManagerSignsAndVerifiesAccessToken 验证令牌ManagerSigns并VerifiesAccess令牌的预期行为场景。
 func TestTokenManagerSignsAndVerifiesAccessToken(t *testing.T) {
 	manager := newTestTokenManager(t)
 
@@ -21,6 +22,7 @@ func TestTokenManagerSignsAndVerifiesAccessToken(t *testing.T) {
 	}
 }
 
+// TestTokenManagerRejectsTamperedToken 验证令牌Manager拒绝篡改令牌的异常或拒绝路径场景。
 func TestTokenManagerRejectsTamperedToken(t *testing.T) {
 	manager := newTestTokenManager(t)
 	token, err := manager.SignAccessToken(Principal{UserID: "user-1", Role: "platform_admin"})
@@ -31,6 +33,7 @@ func TestTokenManagerRejectsTamperedToken(t *testing.T) {
 	require.Error(t, err)
 }
 
+// TestTokenManagerRejectsExpiredToken 验证令牌Manager拒绝过期令牌的异常或拒绝路径场景。
 func TestTokenManagerRejectsExpiredToken(t *testing.T) {
 	manager := newTestTokenManager(t)
 	token, err := manager.SignAccessToken(Principal{UserID: "user-1", Role: "platform_admin"})
@@ -41,6 +44,7 @@ func TestTokenManagerRejectsExpiredToken(t *testing.T) {
 	require.Error(t, err)
 }
 
+// TestTokenManagerRejectsWrongTokenType 验证令牌Manager拒绝错误令牌类型的异常或拒绝路径场景。
 func TestTokenManagerRejectsWrongTokenType(t *testing.T) {
 	manager := newTestTokenManager(t)
 	token, err := manager.SignRefreshToken(Principal{UserID: "user-1", Role: "platform_admin"})
@@ -50,6 +54,7 @@ func TestTokenManagerRejectsWrongTokenType(t *testing.T) {
 	require.Error(t, err)
 }
 
+// TestNewTokenManagerValidatesConfig 验证New令牌ManagerValidates配置的预期行为场景。
 func TestNewTokenManagerValidatesConfig(t *testing.T) {
 	_, err := NewTokenManager("", "refresh", time.Minute, time.Hour)
 	require.Error(t, err)

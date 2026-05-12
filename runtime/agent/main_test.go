@@ -20,6 +20,7 @@ import (
 	"oc-manager/runtime/agent/config"
 )
 
+// TestHealthz 验证健康检查接口返回稳定成功响应的场景。
 func TestHealthz(t *testing.T) {
 	req := httptest.NewRequest(http.MethodGet, "/healthz", nil)
 	rec := httptest.NewRecorder()
@@ -35,6 +36,7 @@ func TestHealthz(t *testing.T) {
 	}
 }
 
+// TestInspectImage 验证镜像检查接口能返回已存在镜像信息的成功场景。
 func TestInspectImage(t *testing.T) {
 	docker := &fakeDockerClient{
 		images: map[string]DockerImageInfo{
@@ -58,6 +60,7 @@ func TestInspectImage(t *testing.T) {
 	}
 }
 
+// TestInspectImageNotFound 验证镜像不存在时检查接口返回未找到的场景。
 func TestInspectImageNotFound(t *testing.T) {
 	req := httptest.NewRequest(http.MethodGet, "/v1/images/inspect?image=missing:dev", nil)
 	rec := httptest.NewRecorder()
@@ -73,6 +76,7 @@ func TestInspectImageNotFound(t *testing.T) {
 	require.False(t, body.Exists)
 }
 
+// TestLoadImageRequiresTokenWhenConfigured 验证加载镜像要求令牌在启用配置时的预期行为场景。
 func TestLoadImageRequiresTokenWhenConfigured(t *testing.T) {
 	req := httptest.NewRequest(http.MethodPost, "/v1/images/load?image=openclaw-runtime:dev", bytes.NewBufferString("tar"))
 	rec := httptest.NewRecorder()
@@ -82,6 +86,7 @@ func TestLoadImageRequiresTokenWhenConfigured(t *testing.T) {
 	require.Equal(t, http.StatusUnauthorized, rec.Code)
 }
 
+// TestNewHandlerUsesConfiguredToken 验证新建处理器使用配置的令牌的预期行为场景。
 func TestNewHandlerUsesConfiguredToken(t *testing.T) {
 	req := httptest.NewRequest(http.MethodGet, "/v1/images/inspect?image=openclaw-runtime:dev", nil)
 	rec := httptest.NewRecorder()
@@ -91,6 +96,7 @@ func TestNewHandlerUsesConfiguredToken(t *testing.T) {
 	require.Equal(t, http.StatusUnauthorized, rec.Code)
 }
 
+// TestNewHandlerUsesConfiguredDockerSocketForImages 验证新建处理器使用配置的Dockersocket针对镜像的预期行为场景。
 func TestNewHandlerUsesConfiguredDockerSocketForImages(t *testing.T) {
 	var inspected bool
 	var loadedBytes string
@@ -133,6 +139,7 @@ func TestNewHandlerUsesConfiguredDockerSocketForImages(t *testing.T) {
 	require.Equal(t, "tar", loadedBytes)
 }
 
+// TestLoadImage 验证镜像加载接口能把请求转发给运行时并返回成功的场景。
 func TestLoadImage(t *testing.T) {
 	docker := &fakeDockerClient{images: map[string]DockerImageInfo{}}
 	req := httptest.NewRequest(http.MethodPost, "/v1/images/load?image=openclaw-runtime:dev", bytes.NewBufferString("tar"))
@@ -154,6 +161,7 @@ func freePort(t *testing.T) string {
 	return listener.Addr().String()
 }
 
+// TestRunAgent_PrintsCAPEMAndAcceptsTLS 验证 agent 启动时输出 CA PEM 并接受 TLS 请求的场景。
 func TestRunAgent_PrintsCAPEMAndAcceptsTLS(t *testing.T) {
 	stateDir := t.TempDir()
 	dataRoot := t.TempDir()

@@ -73,6 +73,7 @@ func makeAppForHealth(t *testing.T) sqlc.App {
 	return app
 }
 
+// TestAppHealthCheckSuccessClearsError 验证应用健康检查Check成功清空错误的成功路径场景。
 func TestAppHealthCheckSuccessClearsError(t *testing.T) {
 	app := makeAppForHealth(t)
 	app.HealthStateJson = []byte(`{"last_error":"old"}`)
@@ -90,6 +91,7 @@ func TestAppHealthCheckSuccessClearsError(t *testing.T) {
 	}
 }
 
+// TestAppHealthCheckFailureRecordsFailureWithoutRestart 验证应用健康检查Check失败记录失败不使用重启的错误映射或错误记录场景。
 func TestAppHealthCheckFailureRecordsFailureWithoutRestart(t *testing.T) {
 	store := &fakeHealthStore{app: makeAppForHealth(t)}
 	exec := &fakeExecutor{result: runtime.ExecResult{ExitCode: 1, Stdout: "Connection refused"}}
@@ -105,6 +107,7 @@ func TestAppHealthCheckFailureRecordsFailureWithoutRestart(t *testing.T) {
 	require.Equal(t, 0, len(state.RestartedAt))
 }
 
+// TestAppHealthCheckExhaustedBudgetSetsError 验证应用健康检查Check耗尽预算并设置错误的预期行为场景。
 func TestAppHealthCheckExhaustedBudgetSetsError(t *testing.T) {
 	app := makeAppForHealth(t)
 	// 已经累积 max_per_window=2 次失败，再失败一次 → 触发 error 状态。
@@ -125,6 +128,7 @@ func TestAppHealthCheckExhaustedBudgetSetsError(t *testing.T) {
 	require.Equal(t, 0, len(store.jobs))
 }
 
+// TestAppHealthCheckExecErrorAlsoTreatedAsFailure 验证应用健康检查Check执行错误也视为作为失败的预期行为场景。
 func TestAppHealthCheckExecErrorAlsoTreatedAsFailure(t *testing.T) {
 	store := &fakeHealthStore{app: makeAppForHealth(t)}
 	exec := &fakeExecutor{err: errors.New("docker dial")}
@@ -135,6 +139,7 @@ func TestAppHealthCheckExecErrorAlsoTreatedAsFailure(t *testing.T) {
 	require.Equal(t, 0, len(store.jobs))
 }
 
+// TestAppHealthCheckSanitizesNULInFailureText 验证应用健康检查Check清理NULIn失败Text的预期行为场景。
 func TestAppHealthCheckSanitizesNULInFailureText(t *testing.T) {
 	store := &fakeHealthStore{app: makeAppForHealth(t)}
 	exec := &fakeExecutor{result: runtime.ExecResult{ExitCode: 1, Stdout: "bad\x00json"}}
@@ -150,6 +155,7 @@ func TestAppHealthCheckSanitizesNULInFailureText(t *testing.T) {
 	require.Equal(t, "exit=1 bad�json", state.LastError)
 }
 
+// TestAppHealthCheckNoneModeSkipsRestart 验证应用健康检查Check无模式跳过重启的特殊分支或幂等场景。
 func TestAppHealthCheckNoneModeSkipsRestart(t *testing.T) {
 	app := makeAppForHealth(t)
 	app.RestartPolicyJson = []byte(`{"mode":"none","max_per_window":5,"window_seconds":600}`)

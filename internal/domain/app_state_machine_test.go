@@ -6,6 +6,7 @@ import (
 	"testing"
 )
 
+// TestIsAppTransitionAllowedHappyPath 验证Is应用状态流转允许性成功路径的成功路径场景。
 func TestIsAppTransitionAllowedHappyPath(t *testing.T) {
 	cases := [][2]string{
 		{AppStatusDraft, AppStatusInitializing},
@@ -24,17 +25,20 @@ func TestIsAppTransitionAllowedHappyPath(t *testing.T) {
 	}
 }
 
+// TestIsAppTransitionAllowedRejectsBackwards 验证Is应用状态流转允许性拒绝回退的异常或拒绝路径场景。
 func TestIsAppTransitionAllowedRejectsBackwards(t *testing.T) {
 	require.False(t, IsAppTransitionAllowed(AppStatusRunning, AppStatusInitializing))
 	require.False(t, IsAppTransitionAllowed(AppStatusDraft, AppStatusRunning))
 	require.False(t, IsAppTransitionAllowed(AppStatusDraft, AppStatusDraft))
 }
 
+// TestIsAppTransitionAllowedDeletedOnlyFromError 验证Is应用状态流转允许性删除态仅来自错误的预期行为场景。
 func TestIsAppTransitionAllowedDeletedOnlyFromError(t *testing.T) {
 	require.False(t, IsAppTransitionAllowed(AppStatusRunning, AppStatusDeleted))
 	require.True(t, IsAppTransitionAllowed(AppStatusError, AppStatusDeleted))
 }
 
+// TestEnsureAppTransitionWraps 验证确保应用Transition包装的预期行为场景。
 func TestEnsureAppTransitionWraps(t *testing.T) {
 	err := EnsureAppTransition(AppStatusRunning, AppStatusInitializing)
 	require.Error(t, err)
@@ -42,6 +46,7 @@ func TestEnsureAppTransitionWraps(t *testing.T) {
 	require.NoError(t, err)
 }
 
+// TestAppIsTerminalOnlyDeleted 验证应用Is终态仅删除态的预期行为场景。
 func TestAppIsTerminalOnlyDeleted(t *testing.T) {
 	require.True(t, AppIsTerminal(AppStatusDeleted))
 	for _, status := range []string{AppStatusError, AppStatusRunning, AppStatusStopped, AppStatusDraft} {
@@ -49,6 +54,7 @@ func TestAppIsTerminalOnlyDeleted(t *testing.T) {
 	}
 }
 
+// TestIsAPIKeyTransitionAllowedHappyPath 验证IsAPIKey状态流转允许性成功路径的成功路径场景。
 func TestIsAPIKeyTransitionAllowedHappyPath(t *testing.T) {
 	cases := [][2]string{
 		{APIKeyStatusPending, APIKeyStatusActive},
@@ -65,6 +71,7 @@ func TestIsAPIKeyTransitionAllowedHappyPath(t *testing.T) {
 	}
 }
 
+// TestAPIKeyAndAppStateAreIndependent 验证APIKey并应用StateAreIndependent的预期行为场景。
 func TestAPIKeyAndAppStateAreIndependent(t *testing.T) {
 	// 如果 app 进入 stopped，api_key 仍可保持 active；反之亦然。
 	require.True(t, IsAppTransitionAllowed(AppStatusRunning, AppStatusStopped))
@@ -72,6 +79,7 @@ func TestAPIKeyAndAppStateAreIndependent(t *testing.T) {
 	require.True(t, IsAPIKeyTransitionAllowed(APIKeyStatusActive, APIKeyStatusDisabled))
 }
 
+// TestEnsureAPIKeyTransitionFailsForInvalid 验证确保APIKeyTransition失败针对非法的异常或拒绝路径场景。
 func TestEnsureAPIKeyTransitionFailsForInvalid(t *testing.T) {
 	err := EnsureAPIKeyTransition(APIKeyStatusDisabled, APIKeyStatusError)
 	require.Error(t, err)

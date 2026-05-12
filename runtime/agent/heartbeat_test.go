@@ -45,12 +45,14 @@ func (l *captureHBLogger) errorCount() int {
 	return l.errors
 }
 
+// TestHeartbeat_NotStartedWhenTokenEmpty 验证心跳未Started当令牌空值的边界条件场景。
 func TestHeartbeat_NotStartedWhenTokenEmpty(t *testing.T) {
 	cfg := config.Config{Heartbeat: config.HeartbeatConfig{IntervalSeconds: 30, FailureLogThreshold: 5}}
 	hb := newHeartbeat(cfg, "agent-1", func() string { return "" }, t.TempDir(), "host", "", t.TempDir(), ":7001", ":7002")
 	require.False(t, hb.shouldStart())
 }
 
+// TestHeartbeat_PeriodicPost 验证心跳Periodic提交的预期行为场景。
 func TestHeartbeat_PeriodicPost(t *testing.T) {
 	var hits atomic.Int32
 	srv := httptest.NewTLSServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -93,6 +95,7 @@ func TestHeartbeat_PeriodicPost(t *testing.T) {
 	require.GreaterOrEqual(t, hits.Load(), int32(3))
 }
 
+// TestHeartbeat_FailureLogThreshold 验证心跳失败LogThreshold的预期行为场景。
 func TestHeartbeat_FailureLogThreshold(t *testing.T) {
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.WriteHeader(http.StatusInternalServerError)
@@ -127,6 +130,7 @@ func TestHeartbeat_FailureLogThreshold(t *testing.T) {
 	require.NotZero(t, logger.errorCount())
 }
 
+// TestEnrollAgentUsesConfiguredName 验证注册agent使用配置的名称的预期行为场景。
 func TestEnrollAgentUsesConfiguredName(t *testing.T) {
 	var got map[string]any
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {

@@ -14,6 +14,7 @@ import (
 	"oc-manager/internal/store/sqlc"
 )
 
+// TestAuditServiceRecordRequiresMandatoryFields 验证审计服务记录要求必填字段的预期行为场景。
 func TestAuditServiceRecordRequiresMandatoryFields(t *testing.T) {
 	store := &auditStoreStub{}
 	svc := NewAuditService(store)
@@ -22,6 +23,7 @@ func TestAuditServiceRecordRequiresMandatoryFields(t *testing.T) {
 	require.Error(t, err)
 }
 
+// TestAuditServiceRecordPersistsMetadata 验证审计服务记录持久化当前用户接口tadata的预期行为场景。
 func TestAuditServiceRecordPersistsMetadata(t *testing.T) {
 	store := &auditStoreStub{}
 	svc := NewAuditService(store)
@@ -41,6 +43,7 @@ func TestAuditServiceRecordPersistsMetadata(t *testing.T) {
 	require.NotEqual(t, 0, len(store.created.MetadataJson))
 }
 
+// TestAuditServiceListByOrgRequiresAccess 验证审计服务列表通过组织要求Access的预期行为场景。
 func TestAuditServiceListByOrgRequiresAccess(t *testing.T) {
 	svc := NewAuditService(&auditStoreStub{})
 
@@ -48,6 +51,7 @@ func TestAuditServiceListByOrgRequiresAccess(t *testing.T) {
 	require.ErrorIs(t, err, ErrForbidden)
 }
 
+// TestAuditServiceListByOrgClampsLimit 验证审计服务列表通过组织限制Limit的边界条件场景。
 func TestAuditServiceListByOrgClampsLimit(t *testing.T) {
 	store := &auditStoreStub{}
 	svc := NewAuditService(store)
@@ -57,6 +61,7 @@ func TestAuditServiceListByOrgClampsLimit(t *testing.T) {
 	require.Equal(t, int32(200), store.lastByOrg.Limit)
 }
 
+// TestAuditServiceListByTargetFiltersOrgScope 验证审计服务列表通过目标Filters组织scope的预期行为场景。
 func TestAuditServiceListByTargetFiltersOrgScope(t *testing.T) {
 	store := &auditStoreStub{
 		apps: map[string]sqlc.App{
@@ -80,6 +85,7 @@ func TestAuditServiceListByTargetFiltersOrgScope(t *testing.T) {
 	}
 }
 
+// TestAuditServiceListByTargetAllowsMemberOwnApp 验证审计服务列表通过目标允许成员本人应用的预期行为场景。
 func TestAuditServiceListByTargetAllowsMemberOwnApp(t *testing.T) {
 	store := &auditStoreStub{
 		apps: map[string]sqlc.App{
@@ -106,6 +112,7 @@ func TestAuditServiceListByTargetAllowsMemberOwnApp(t *testing.T) {
 	require.Equal(t, testAuditAppID, results[0].TargetID)
 }
 
+// TestAuditServiceListByTargetRejectsMemberOtherApp 验证审计服务列表通过目标拒绝成员其他应用的异常或拒绝路径场景。
 func TestAuditServiceListByTargetRejectsMemberOtherApp(t *testing.T) {
 	store := &auditStoreStub{
 		apps: map[string]sqlc.App{

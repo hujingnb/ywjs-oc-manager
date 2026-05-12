@@ -93,6 +93,7 @@ func TestUsageServiceMemberUsesActiveAppByOwner(t *testing.T) {
 	}
 }
 
+// TestUsageServiceMemberAllowsOrgMemberSelfOnly 验证用量服务成员允许组织成员自身仅的预期行为场景。
 func TestUsageServiceMemberAllowsOrgMemberSelfOnly(t *testing.T) {
 	orgID := "00000000-0000-0000-0000-000000000b01"
 	memberID := "00000000-0000-0000-0000-000000000c01"
@@ -114,6 +115,7 @@ func TestUsageServiceMemberAllowsOrgMemberSelfOnly(t *testing.T) {
 	require.Equal(t, int64(77), client.lastTokenLogsQuery.TokenID)
 }
 
+// TestUsageServiceMemberRejectsOrgMemberOtherUsage 验证用量服务成员拒绝组织成员其他用量的异常或拒绝路径场景。
 func TestUsageServiceMemberRejectsOrgMemberOtherUsage(t *testing.T) {
 	orgID := "00000000-0000-0000-0000-000000000b01"
 	svc := NewUsageService(&fakeUsageStore{}, &fakeUsageClient{}, nil)
@@ -153,6 +155,7 @@ func TestUsageServicePlatformOnlyAdmin(t *testing.T) {
 	require.ErrorIs(t, err, ErrForbidden)
 }
 
+// TestUsageServiceOrgRejectsOrgMember 验证用量服务组织拒绝组织成员的异常或拒绝路径场景。
 func TestUsageServiceOrgRejectsOrgMember(t *testing.T) {
 	orgID := "00000000-0000-0000-0000-000000000b01"
 	svc := NewUsageService(&fakeUsageStore{}, &fakeUsageClient{}, nil)

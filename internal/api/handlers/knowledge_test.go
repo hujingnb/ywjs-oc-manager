@@ -76,6 +76,7 @@ func newKnowledgeTestRouter(t *testing.T, svc knowledgeService) (*gin.Engine, *a
 	return router, tokens
 }
 
+// TestKnowledgeGetOrgSyncStatusHappy 验证知识库获取组织同步状态成功路径的成功路径场景。
 func TestKnowledgeGetOrgSyncStatusHappy(t *testing.T) {
 	stub := &knowledgeServiceStub{syncStatuses: []service.SyncStatusResult{{NodeID: "n1", Status: "ok"}}}
 	router, tokens := newKnowledgeTestRouter(t, stub)
@@ -90,6 +91,7 @@ func TestKnowledgeGetOrgSyncStatusHappy(t *testing.T) {
 	assert.Contains(t, w.Body.String(), "statuses")
 }
 
+// TestKnowledgeGetOrgSyncStatusForbidden 验证知识库获取组织同步状态禁止访问的异常或拒绝路径场景。
 func TestKnowledgeGetOrgSyncStatusForbidden(t *testing.T) {
 	stub := &knowledgeServiceStub{syncErr: service.ErrKnowledgeForbidden}
 	router, tokens := newKnowledgeTestRouter(t, stub)
@@ -103,6 +105,7 @@ func TestKnowledgeGetOrgSyncStatusForbidden(t *testing.T) {
 	assert.Equal(t, http.StatusForbidden, w.Code)
 }
 
+// TestKnowledgeListOrgHappy 验证知识库列表组织成功路径的成功路径场景。
 func TestKnowledgeListOrgHappy(t *testing.T) {
 	stub := &knowledgeServiceStub{listOrgResult: service.KnowledgeListResult{}}
 	router, tokens := newKnowledgeTestRouter(t, stub)
@@ -116,6 +119,7 @@ func TestKnowledgeListOrgHappy(t *testing.T) {
 	require.Equal(t, http.StatusOK, w.Code)
 }
 
+// TestKnowledgeSaveOrgHappy 验证知识库保存组织成功路径的成功路径场景。
 func TestKnowledgeSaveOrgHappy(t *testing.T) {
 	stub := &knowledgeServiceStub{}
 	router, tokens := newKnowledgeTestRouter(t, stub)
@@ -130,6 +134,7 @@ func TestKnowledgeSaveOrgHappy(t *testing.T) {
 	assert.Equal(t, http.StatusNoContent, w.Code)
 }
 
+// TestKnowledgeSaveOrgMissingPath 验证知识库保存组织缺失路径的异常或拒绝路径场景。
 func TestKnowledgeSaveOrgMissingPath(t *testing.T) {
 	stub := &knowledgeServiceStub{}
 	router, tokens := newKnowledgeTestRouter(t, stub)
@@ -145,6 +150,7 @@ func TestKnowledgeSaveOrgMissingPath(t *testing.T) {
 	assert.Equal(t, http.StatusBadRequest, w.Code)
 }
 
+// TestKnowledgeRetryOrgSyncHappy 验证知识库重试组织同步成功路径的成功路径场景。
 func TestKnowledgeRetryOrgSyncHappy(t *testing.T) {
 	stub := &knowledgeServiceStub{}
 	router, tokens := newKnowledgeTestRouter(t, stub)
@@ -160,6 +166,7 @@ func TestKnowledgeRetryOrgSyncHappy(t *testing.T) {
 	assert.Equal(t, http.StatusAccepted, w.Code)
 }
 
+// TestKnowledgeRequiresToken 验证知识库要求令牌的预期行为场景。
 func TestKnowledgeRequiresToken(t *testing.T) {
 	stub := &knowledgeServiceStub{}
 	router, _ := newKnowledgeTestRouter(t, stub)
@@ -171,6 +178,7 @@ func TestKnowledgeRequiresToken(t *testing.T) {
 	assert.Equal(t, http.StatusUnauthorized, w.Code)
 }
 
+// TestKnowledgeListAppHappy 验证知识库列表应用成功路径的成功路径场景。
 func TestKnowledgeListAppHappy(t *testing.T) {
 	stub := &knowledgeServiceStub{listAppResult: service.KnowledgeListResult{}}
 	router, tokens := newKnowledgeTestRouter(t, stub)
@@ -184,6 +192,7 @@ func TestKnowledgeListAppHappy(t *testing.T) {
 	require.Equal(t, http.StatusOK, w.Code)
 }
 
+// TestKnowledgeListAppMissingParams 验证知识库列表应用缺失参数的异常或拒绝路径场景。
 func TestKnowledgeListAppMissingParams(t *testing.T) {
 	stub := &knowledgeServiceStub{}
 	router, tokens := newKnowledgeTestRouter(t, stub)

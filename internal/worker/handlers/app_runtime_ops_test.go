@@ -36,6 +36,7 @@ func runtimeJob(jobType, appID string) sqlc.Job {
 	return sqlc.Job{Type: jobType, PayloadJson: []byte(`{"app_id":"` + appID + `"}`)}
 }
 
+// TestAppStartContainerHandler_HappyPath 验证应用启动容器处理器成功路径的成功路径场景。
 func TestAppStartContainerHandler_HappyPath(t *testing.T) {
 	stub := runtimeStub(t)
 	containers := &fakeLifecycle{}
@@ -47,6 +48,7 @@ func TestAppStartContainerHandler_HappyPath(t *testing.T) {
 	require.Equal(t, domain.AppStatusRunning, stub.statusUpdates[len(stub.statusUpdates)-1])
 }
 
+// TestAppStartContainerHandler_RejectsWithoutContainerID 验证应用启动容器处理器拒绝不使用容器ID的异常或拒绝路径场景。
 func TestAppStartContainerHandler_RejectsWithoutContainerID(t *testing.T) {
 	stub := runtimeStub(t)
 	stub.app.ContainerID = pgtype.Text{}
@@ -55,6 +57,7 @@ func TestAppStartContainerHandler_RejectsWithoutContainerID(t *testing.T) {
 	require.Error(t, err)
 }
 
+// TestAppStartContainerHandler_PropagatesAdapterError 验证应用启动容器处理器透传适配器错误的错误映射或错误记录场景。
 func TestAppStartContainerHandler_PropagatesAdapterError(t *testing.T) {
 	stub := runtimeStub(t)
 	containers := &fakeLifecycle{startErr: errors.New("docker boom")}
@@ -64,6 +67,7 @@ func TestAppStartContainerHandler_PropagatesAdapterError(t *testing.T) {
 	require.Equal(t, 0, len(stub.statusUpdates))
 }
 
+// TestAppStopContainerHandler_HappyPath 验证应用停止容器处理器成功路径的成功路径场景。
 func TestAppStopContainerHandler_HappyPath(t *testing.T) {
 	stub := runtimeStub(t)
 	containers := &fakeLifecycle{}
@@ -74,6 +78,7 @@ func TestAppStopContainerHandler_HappyPath(t *testing.T) {
 	require.Equal(t, domain.AppStatusStopped, stub.statusUpdates[len(stub.statusUpdates)-1])
 }
 
+// TestAppStopContainerHandler_NoContainerStillUpdatesStatus 验证应用停止容器处理器无容器仍然Updates状态的预期行为场景。
 func TestAppStopContainerHandler_NoContainerStillUpdatesStatus(t *testing.T) {
 	stub := runtimeStub(t)
 	stub.app.ContainerID = pgtype.Text{}
@@ -85,6 +90,7 @@ func TestAppStopContainerHandler_NoContainerStillUpdatesStatus(t *testing.T) {
 	require.Equal(t, domain.AppStatusStopped, stub.statusUpdates[len(stub.statusUpdates)-1])
 }
 
+// TestAppRestartContainerHandler_HappyPath 验证应用重启容器处理器成功路径的成功路径场景。
 func TestAppRestartContainerHandler_HappyPath(t *testing.T) {
 	stub := runtimeStub(t)
 	containers := &fakeLifecycle{}
@@ -95,6 +101,7 @@ func TestAppRestartContainerHandler_HappyPath(t *testing.T) {
 	require.Equal(t, domain.AppStatusRunning, stub.statusUpdates[len(stub.statusUpdates)-1])
 }
 
+// TestAppDeleteHandler_HappyPath 验证应用删除处理器成功路径的成功路径场景。
 func TestAppDeleteHandler_HappyPath(t *testing.T) {
 	stub := runtimeStub(t)
 	containers := &fakeLifecycle{}
@@ -113,6 +120,7 @@ func TestAppDeleteHandler_HappyPath(t *testing.T) {
 	require.True(t, stub.softDeleted)
 }
 
+// TestAppDeleteHandler_PrefersArchiveOverDelete 验证应用删除处理器Prefers归档覆盖删除的预期行为场景。
 func TestAppDeleteHandler_PrefersArchiveOverDelete(t *testing.T) {
 	// Sprint 2：fileOps 实现 AppArchiver 时应优先归档而非直接删除，保留节点目录。
 	stub := runtimeStub(t)
@@ -126,6 +134,7 @@ func TestAppDeleteHandler_PrefersArchiveOverDelete(t *testing.T) {
 	require.Equal(t, "", fileOps.deletedAppID)
 }
 
+// TestAppDeleteHandler_PropagatesArchiveError 验证应用删除处理器透传归档错误的错误映射或错误记录场景。
 func TestAppDeleteHandler_PropagatesArchiveError(t *testing.T) {
 	stub := runtimeStub(t)
 	containers := &fakeLifecycle{}
@@ -139,6 +148,7 @@ func TestAppDeleteHandler_PropagatesArchiveError(t *testing.T) {
 	require.False(t, stub.softDeleted)
 }
 
+// TestAppDeleteHandler_SkipsContainerStepWithoutID 验证应用删除处理器跳过容器Step不使用ID的特殊分支或幂等场景。
 func TestAppDeleteHandler_SkipsContainerStepWithoutID(t *testing.T) {
 	stub := runtimeStub(t)
 	stub.app.ContainerID = pgtype.Text{}
@@ -153,6 +163,7 @@ func TestAppDeleteHandler_SkipsContainerStepWithoutID(t *testing.T) {
 	require.True(t, stub.softDeleted)
 }
 
+// TestAppDeleteHandler_SkipsNewAPIWhenNoKey 验证应用删除处理器跳过new-api当无Key的特殊分支或幂等场景。
 func TestAppDeleteHandler_SkipsNewAPIWhenNoKey(t *testing.T) {
 	stub := runtimeStub(t)
 	stub.app.NewapiKeyID = pgtype.Text{}
@@ -163,6 +174,7 @@ func TestAppDeleteHandler_SkipsNewAPIWhenNoKey(t *testing.T) {
 	require.Equal(t, int64(0), disabler.id)
 }
 
+// TestAppDeleteHandler_PropagatesNewAPIError 验证应用删除处理器透传new-api错误的错误映射或错误记录场景。
 func TestAppDeleteHandler_PropagatesNewAPIError(t *testing.T) {
 	stub := runtimeStub(t)
 	disabler := &fakeDisabler{err: errors.New("upstream")}
@@ -172,6 +184,7 @@ func TestAppDeleteHandler_PropagatesNewAPIError(t *testing.T) {
 	require.False(t, stub.softDeleted)
 }
 
+// TestAppDeleteHandler_AlreadyDeletedShortCircuits 验证应用删除处理器已经删除态过短Circuits的边界条件场景。
 func TestAppDeleteHandler_AlreadyDeletedShortCircuits(t *testing.T) {
 	stub := runtimeStub(t)
 	stub.app.DeletedAt = pgtype.Timestamptz{Valid: true}
@@ -181,6 +194,7 @@ func TestAppDeleteHandler_AlreadyDeletedShortCircuits(t *testing.T) {
 	require.False(t, stub.softDeleted)
 }
 
+// TestAppRuntimeHandlers_RejectMismatchedJobType 验证应用运行时HandlersReject不匹配任务类型的预期行为场景。
 func TestAppRuntimeHandlers_RejectMismatchedJobType(t *testing.T) {
 	stub := runtimeStub(t)
 	bad := runtimeJob("unknown", testAppID)

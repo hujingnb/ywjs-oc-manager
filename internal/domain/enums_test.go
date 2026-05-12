@@ -7,6 +7,7 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
+// TestEnumValidatorsAcceptKnownValues 验证EnumValidatorsAcceptKnown值的预期行为场景。
 func TestEnumValidatorsAcceptKnownValues(t *testing.T) {
 	tests := []struct {
 		name  string
@@ -21,12 +22,14 @@ func TestEnumValidatorsAcceptKnownValues(t *testing.T) {
 	}
 
 	for _, tt := range tests {
+		// 当前子测试覆盖表格用例中该名称对应的输入组合、边界条件和期望结果。
 		t.Run(tt.name, func(t *testing.T) {
 			require.True(t, tt.check(tt.value))
 		})
 	}
 }
 
+// TestEnumValidatorsRejectUnknownValues 验证枚举校验拒绝未知值的预期行为场景。
 func TestEnumValidatorsRejectUnknownValues(t *testing.T) {
 	tests := []struct {
 		name  string
@@ -41,6 +44,7 @@ func TestEnumValidatorsRejectUnknownValues(t *testing.T) {
 	}
 
 	for _, tt := range tests {
+		// 当前子测试覆盖表格用例中该名称对应的输入组合、边界条件和期望结果。
 		t.Run(tt.name, func(t *testing.T) {
 			require.False(t, tt.check(tt.value))
 		})

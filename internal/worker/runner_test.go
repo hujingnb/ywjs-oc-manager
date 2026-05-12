@@ -64,6 +64,7 @@ func newWorker(queue Queue) *Worker {
 	return New(countingStore{}, queue, handlers.NewRegistry(), Config{BatchSize: 1, WorkerID: "test"})
 }
 
+// TestPool_RunsConcurrently 验证池RunsConcurrently的特殊分支或幂等场景。
 func TestPool_RunsConcurrently(t *testing.T) {
 	q := &countingQueue{}
 	pool := NewPool(newWorker(q), 4, 5*time.Millisecond)
@@ -80,6 +81,7 @@ func TestPool_RunsConcurrently(t *testing.T) {
 	}
 }
 
+// TestPool_PanicIsolatedAndLogged 验证池panicIsolated并Logged的预期行为场景。
 func TestPool_PanicIsolatedAndLogged(t *testing.T) {
 	q := &panicQueue{}
 	q.remaining.Store(3)
@@ -97,12 +99,14 @@ func TestPool_PanicIsolatedAndLogged(t *testing.T) {
 	require.True(t, strings.Contains(logBuf.String(), "panic"))
 }
 
+// TestPool_RejectsMissingWorker 验证池拒绝缺失worker的异常或拒绝路径场景。
 func TestPool_RejectsMissingWorker(t *testing.T) {
 	pool := NewPool(nil, 2, 5*time.Millisecond)
 	err := pool.Run(context.Background())
 	require.Error(t, err)
 }
 
+// TestPool_DefaultConcurrencyAndInterval 验证池默认值Concurrency并Interval的边界条件场景。
 func TestPool_DefaultConcurrencyAndInterval(t *testing.T) {
 	q := &countingQueue{}
 	pool := NewPool(newWorker(q), 0, 0)

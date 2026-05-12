@@ -12,6 +12,7 @@ import (
 	"oc-manager/internal/store/sqlc"
 )
 
+// TestSchedulerTickReenqueuesReadyJobs 验证调度器TickReenqueuesReady任务的预期行为场景。
 func TestSchedulerTickReenqueuesReadyJobs(t *testing.T) {
 	store := &storeStub{ready: makeJobs(t, "00000000-0000-0000-0000-0000000001a1", "00000000-0000-0000-0000-0000000001a2")}
 	queue := &queueStub{}
@@ -22,6 +23,7 @@ func TestSchedulerTickReenqueuesReadyJobs(t *testing.T) {
 	require.Equal(t, 2, len(queue.enqueued))
 }
 
+// TestSchedulerTickPropagatesEnqueueError 验证调度器Tick透传Enqueue错误的错误映射或错误记录场景。
 func TestSchedulerTickPropagatesEnqueueError(t *testing.T) {
 	store := &storeStub{ready: makeJobs(t, "00000000-0000-0000-0000-0000000001a1")}
 	queue := &queueStub{err: errors.New("redis down")}
@@ -30,6 +32,7 @@ func TestSchedulerTickPropagatesEnqueueError(t *testing.T) {
 	require.Error(t, err)
 }
 
+// TestSchedulerTickAppliesDefaultBatchSize 验证调度器Tick应用默认值BatchSize的边界条件场景。
 func TestSchedulerTickAppliesDefaultBatchSize(t *testing.T) {
 	store := &storeStub{}
 	s := New(store, &queueStub{}, Config{})

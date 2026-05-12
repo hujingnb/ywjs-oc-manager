@@ -18,6 +18,7 @@ import (
 	"oc-manager/internal/store/sqlc"
 )
 
+// TestOrganizationServiceCreateRequiresPlatformAdmin 验证组织服务创建要求平台管理员的预期行为场景。
 func TestOrganizationServiceCreateRequiresPlatformAdmin(t *testing.T) {
 	svc := NewOrganizationService(&organizationStoreStub{}, &fakeProvisioner{}, mustCipher(t), nil)
 
@@ -73,6 +74,7 @@ func TestOrganizationServiceCreateProvisionsNewAPIUser(t *testing.T) {
 	}
 }
 
+// TestOrganizationServiceCreateAlsoCreatesOrgAdmin 验证组织服务创建Also创建组织管理员的成功路径场景。
 func TestOrganizationServiceCreateAlsoCreatesOrgAdmin(t *testing.T) {
 	store := &organizationStoreStub{}
 	prov := &fakeProvisioner{user: newapi.User{ID: 42}, accessToken: "access-tok-xyz"}
@@ -119,6 +121,7 @@ func TestOrganizationServiceCreateRollbackOnProvisioningFailure(t *testing.T) {
 	require.True(t, store.hardDeleted)
 }
 
+// TestCreateOrganizationRequiresValidCode 验证创建组织要求合法标识的预期行为场景。
 func TestCreateOrganizationRequiresValidCode(t *testing.T) {
 	store := &organizationStoreStub{}
 	svc := NewOrganizationService(store, &fakeProvisioner{}, mustCipher(t), nil)
@@ -136,6 +139,7 @@ func TestCreateOrganizationRequiresValidCode(t *testing.T) {
 	}
 }
 
+// TestCreateOrganizationNormalizesCode 验证创建组织Normalizes标识的预期行为场景。
 func TestCreateOrganizationNormalizesCode(t *testing.T) {
 	store := &organizationStoreStub{}
 	prov := &fakeProvisioner{user: newapi.User{ID: 42}, accessToken: "access-tok-xyz"}
@@ -155,6 +159,7 @@ func TestCreateOrganizationNormalizesCode(t *testing.T) {
 	assert.Equal(t, "test-org", store.created.Code)
 }
 
+// TestCreateOrganizationMapsUniqueViolationToConflict 验证创建组织映射UniqueViolation到冲突的异常或拒绝路径场景。
 func TestCreateOrganizationMapsUniqueViolationToConflict(t *testing.T) {
 	store := &organizationStoreStub{
 		createErr: &pgconn.PgError{Code: "23505"},
@@ -173,6 +178,7 @@ func TestCreateOrganizationMapsUniqueViolationToConflict(t *testing.T) {
 	require.ErrorIs(t, err, ErrConflict)
 }
 
+// TestOrganizationServiceGetRestrictsOrgScope 验证组织服务获取Restricts组织scope的预期行为场景。
 func TestOrganizationServiceGetRestrictsOrgScope(t *testing.T) {
 	store := &organizationStoreStub{org: sqlc.Organization{ID: mustUUID(t, "00000000-0000-0000-0000-000000000101"), Name: "测试组织", Status: domain.StatusActive}}
 	svc := NewOrganizationService(store, &fakeProvisioner{}, mustCipher(t), nil)
@@ -181,6 +187,7 @@ func TestOrganizationServiceGetRestrictsOrgScope(t *testing.T) {
 	require.ErrorIs(t, err, ErrForbidden)
 }
 
+// TestOrganizationServiceSetStatus 验证组织服务Set状态的预期行为场景。
 func TestOrganizationServiceSetStatus(t *testing.T) {
 	store := &organizationStoreStub{org: sqlc.Organization{ID: mustUUID(t, "00000000-0000-0000-0000-000000000101"), Name: "测试组织", Status: domain.StatusActive}}
 	svc := NewOrganizationService(store, &fakeProvisioner{}, mustCipher(t), nil)

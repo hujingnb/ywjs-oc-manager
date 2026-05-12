@@ -18,6 +18,7 @@ import (
 	"oc-manager/internal/service"
 )
 
+// TestRuntimeNodesCreateRouteRemoved 验证运行时节点创建路由移除d的预期行为场景。
 func TestRuntimeNodesCreateRouteRemoved(t *testing.T) {
 	router, _ := newRuntimeNodesTestRouter(t, &runtimeNodeServiceStub{})
 
@@ -29,6 +30,7 @@ func TestRuntimeNodesCreateRouteRemoved(t *testing.T) {
 	require.Equal(t, http.StatusNotFound, recorder.Code)
 }
 
+// TestRuntimeNodesListReturnsArray 验证运行时节点列表返回数组的成功路径场景。
 func TestRuntimeNodesListReturnsArray(t *testing.T) {
 	stub := &runtimeNodeServiceStub{listResult: []service.RuntimeNodeResult{{ID: "n1", Name: "node-1", Status: domain.RuntimeNodeStatusActive}}}
 	router, tokens := newRuntimeNodesTestRouter(t, stub)

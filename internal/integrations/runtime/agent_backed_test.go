@@ -18,6 +18,7 @@ import (
 	"oc-manager/internal/runtime/imagesync"
 )
 
+// TestAgentBackedAdapterEnsureImageDelegatesToImageSyncer 验证agentBacked适配器确保镜像Delegates到镜像同步器的预期行为场景。
 func TestAgentBackedAdapterEnsureImageDelegatesToImageSyncer(t *testing.T) {
 	syncer := &fakeImageSyncer{result: imagesync.SyncResult{Image: "openclaw:dev", NodeID: "node-1", Transferred: true}}
 	adapter := NewAgentBackedAdapter(nil, nil, syncer)
@@ -30,6 +31,7 @@ func TestAgentBackedAdapterEnsureImageDelegatesToImageSyncer(t *testing.T) {
 	}
 }
 
+// TestAgentBackedAdapterEnsureImageReturnsUnimplementedWithoutSyncer 验证agentBacked适配器确保镜像返回未实现不使用同步器的成功路径场景。
 func TestAgentBackedAdapterEnsureImageReturnsUnimplementedWithoutSyncer(t *testing.T) {
 	adapter := NewAgentBackedAdapter(nil, nil, nil)
 	if _, err := adapter.EnsureImage(context.Background(), "node-1", "openclaw:dev"); !errors.Is(err, ErrUnimplemented) {
@@ -37,6 +39,7 @@ func TestAgentBackedAdapterEnsureImageReturnsUnimplementedWithoutSyncer(t *testi
 	}
 }
 
+// TestAgentBackedAdapterContainerOpsRequireDockerResolver 验证agentBacked适配器容器操作RequireDocker解析器的预期行为场景。
 func TestAgentBackedAdapterContainerOpsRequireDockerResolver(t *testing.T) {
 	// 没有 docker resolver 时所有容器接口都退化为 ErrUnimplemented，让上层快速识别装配缺失。
 	adapter := NewAgentBackedAdapter(nil, nil, nil)
@@ -60,6 +63,7 @@ func TestAgentBackedAdapterContainerOpsRequireDockerResolver(t *testing.T) {
 	}
 }
 
+// TestAgentBackedAdapterFileOpsRouteThroughAgent 验证agentBacked适配器文件操作路由通过 agent的预期行为场景。
 func TestAgentBackedAdapterFileOpsRouteThroughAgent(t *testing.T) {
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		switch r.URL.Path {
@@ -105,6 +109,7 @@ func TestAgentBackedAdapterFileOpsRouteThroughAgent(t *testing.T) {
 	require.Equal(t, "tar-bytes", string(tarBody))
 }
 
+// TestAgentBackedAdapterFileOpsRequireResolver 验证agentBacked适配器文件操作Require解析器的预期行为场景。
 func TestAgentBackedAdapterFileOpsRequireResolver(t *testing.T) {
 	adapter := NewAgentBackedAdapter(nil, nil, nil)
 	if _, err := adapter.ListFiles(context.Background(), "node-1", "/data"); !errors.Is(err, ErrUnimplemented) {
@@ -168,6 +173,7 @@ func startMockDockerLifecycle(t *testing.T, calls *[]dockerCallLog, errOn map[st
 	return server, cli
 }
 
+// TestAgentBackedAdapterStartStopRestartRemove_HappyPath 验证agentBacked适配器启动停止重启移除成功路径的成功路径场景。
 func TestAgentBackedAdapterStartStopRestartRemove_HappyPath(t *testing.T) {
 	var calls []dockerCallLog
 	_, cli := startMockDockerLifecycle(t, &calls, nil)
@@ -188,6 +194,7 @@ func TestAgentBackedAdapterStartStopRestartRemove_HappyPath(t *testing.T) {
 	findCall(t, calls, http.MethodDelete, "/containers/ctr-1")
 }
 
+// TestAgentBackedAdapterStartContainerPropagatesDockerError 验证agentBacked适配器启动容器透传Docker错误的错误映射或错误记录场景。
 func TestAgentBackedAdapterStartContainerPropagatesDockerError(t *testing.T) {
 	var calls []dockerCallLog
 	_, cli := startMockDockerLifecycle(t, &calls, map[string]int{"start": http.StatusInternalServerError})
@@ -197,6 +204,7 @@ func TestAgentBackedAdapterStartContainerPropagatesDockerError(t *testing.T) {
 	require.True(t, strings.Contains(err.Error(), "启动容器失败"))
 }
 
+// TestAgentBackedAdapterStopContainerSetsTimeout 验证agentBacked适配器停止容器Sets超时的预期行为场景。
 func TestAgentBackedAdapterStopContainerSetsTimeout(t *testing.T) {
 	var calls []dockerCallLog
 	_, cli := startMockDockerLifecycle(t, &calls, nil)
@@ -207,6 +215,7 @@ func TestAgentBackedAdapterStopContainerSetsTimeout(t *testing.T) {
 	require.True(t, strings.Contains(stop.path, "t=30"))
 }
 
+// TestAgentBackedAdapterRemoveContainerForcesDeletion 验证agentBacked适配器移除容器针对cesDeletion的预期行为场景。
 func TestAgentBackedAdapterRemoveContainerForcesDeletion(t *testing.T) {
 	var calls []dockerCallLog
 	_, cli := startMockDockerLifecycle(t, &calls, nil)
@@ -262,6 +271,7 @@ func (s *staticDockerResolver) DockerClient(_ context.Context, _ string) (*clien
 	return s.cli, nil
 }
 
+// TestAgentBackedAdapterCreateContainerHappyPath 验证agentBacked适配器创建容器成功路径的成功路径场景。
 func TestAgentBackedAdapterCreateContainerHappyPath(t *testing.T) {
 	var calls []dockerCallLog
 	_, cli := startMockDocker(t, "ctr-1", "created", &calls)
@@ -302,6 +312,7 @@ func TestAgentBackedAdapterCreateContainerHappyPath(t *testing.T) {
 	assert.Contains(t, body, `"Memory":1073741824`)
 }
 
+// TestAgentBackedAdapterCreateContainerFailsWithoutResolver 验证agentBacked适配器创建容器失败不使用解析器的预期行为场景。
 func TestAgentBackedAdapterCreateContainerFailsWithoutResolver(t *testing.T) {
 	adapter := NewAgentBackedAdapter(nil, nil, nil)
 	if _, err := adapter.CreateContainer(context.Background(), "n", ContainerSpec{}); !errors.Is(err, ErrUnimplemented) {
@@ -309,6 +320,7 @@ func TestAgentBackedAdapterCreateContainerFailsWithoutResolver(t *testing.T) {
 	}
 }
 
+// TestAgentBackedAdapterInspectContainer 验证agentBacked适配器检查容器的预期行为场景。
 func TestAgentBackedAdapterInspectContainer(t *testing.T) {
 	var calls []dockerCallLog
 	_, cli := startMockDocker(t, "ctr-2", "running", &calls)

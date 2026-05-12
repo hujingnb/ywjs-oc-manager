@@ -7,6 +7,7 @@ import (
 	"time"
 )
 
+// TestWeChatAdapterBeginAuthReturnsQRCodeChallenge 验证WeChat适配器开始认证返回二维码标识Challenge的成功路径场景。
 func TestWeChatAdapterBeginAuthReturnsQRCodeChallenge(t *testing.T) {
 	// Sprint 0 POC 实测样本：plugin loading 噪声 + 中文提示行 + ASCII QR + URL + 等待提示。
 	runner := &fakeRunner{lines: []string{
@@ -47,6 +48,7 @@ func TestWeChatAdapterBeginAuthReturnsQRCodeChallenge(t *testing.T) {
 	t.Fatalf("expected bound progress within 500ms")
 }
 
+// TestWeChatAdapterBeginAuthRejectsUnparsableOutput 验证WeChat适配器开始认证拒绝UnparsableOutput的异常或拒绝路径场景。
 func TestWeChatAdapterBeginAuthRejectsUnparsableOutput(t *testing.T) {
 	runner := &fakeRunner{lines: []string{"hello world"}}
 	adapter := NewWeChatAdapter(runner)
@@ -57,6 +59,7 @@ func TestWeChatAdapterBeginAuthRejectsUnparsableOutput(t *testing.T) {
 	require.Equal(t, AuthStatusFailed, progress.Status)
 }
 
+// TestWeChatAdapterBeginAuthDetectsExpiredFirst 验证WeChat适配器开始认证识别过期First的异常或拒绝路径场景。
 func TestWeChatAdapterBeginAuthDetectsExpiredFirst(t *testing.T) {
 	// 极少见情况：plugin 加载完后直接出 expired（如 wechat 服务端拒绝）。
 	runner := &fakeRunner{lines: []string{
@@ -69,6 +72,7 @@ func TestWeChatAdapterBeginAuthDetectsExpiredFirst(t *testing.T) {
 	require.Error(t, err)
 }
 
+// TestWeChatAdapterPollAuthDefaultsToPending 验证WeChat适配器轮询认证默认值到等待中的边界条件场景。
 func TestWeChatAdapterPollAuthDefaultsToPending(t *testing.T) {
 	adapter := NewWeChatAdapter(&fakeRunner{})
 	progress, err := adapter.PollAuth(context.Background(), AuthInput{AppID: "missing"})

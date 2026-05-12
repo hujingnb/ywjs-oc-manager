@@ -54,6 +54,7 @@ func makeTestJob() sqlc.Job {
 	}
 }
 
+// TestJobsGetHappy 验证任务获取成功路径的成功路径场景。
 func TestJobsGetHappy(t *testing.T) {
 	stub := &jobsStoreStub{job: makeTestJob()}
 	router, tokens := newJobsTestRouter(t, stub)
@@ -68,6 +69,7 @@ func TestJobsGetHappy(t *testing.T) {
 	assert.Contains(t, w.Body.String(), "job")
 }
 
+// TestJobsGetForbidden 验证任务获取禁止访问的异常或拒绝路径场景。
 func TestJobsGetForbidden(t *testing.T) {
 	stub := &jobsStoreStub{job: makeTestJob()}
 	router, tokens := newJobsTestRouter(t, stub)
@@ -82,6 +84,7 @@ func TestJobsGetForbidden(t *testing.T) {
 	assert.Equal(t, http.StatusForbidden, w.Code)
 }
 
+// TestJobsGetNotFound 验证任务获取未找到的异常或拒绝路径场景。
 func TestJobsGetNotFound(t *testing.T) {
 	stub := &jobsStoreStub{jobErr: pgx.ErrNoRows}
 	router, tokens := newJobsTestRouter(t, stub)
@@ -95,6 +98,7 @@ func TestJobsGetNotFound(t *testing.T) {
 	assert.Equal(t, http.StatusNotFound, w.Code)
 }
 
+// TestJobsGetRequiresToken 验证任务获取要求令牌的预期行为场景。
 func TestJobsGetRequiresToken(t *testing.T) {
 	stub := &jobsStoreStub{}
 	router, _ := newJobsTestRouter(t, stub)
@@ -106,6 +110,7 @@ func TestJobsGetRequiresToken(t *testing.T) {
 	assert.Equal(t, http.StatusUnauthorized, w.Code)
 }
 
+// TestJobsGetInvalidUUID 验证任务获取非法UUID的异常或拒绝路径场景。
 func TestJobsGetInvalidUUID(t *testing.T) {
 	stub := &jobsStoreStub{}
 	router, tokens := newJobsTestRouter(t, stub)

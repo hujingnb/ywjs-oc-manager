@@ -35,6 +35,7 @@ func newLoopScheduler(store *loopStore) *Scheduler {
 	return New(store, recordingQueue{}, Config{BatchSize: 10})
 }
 
+// TestLoop_TickFiresOnInterval 验证循环TickFiresOnInterval的预期行为场景。
 func TestLoop_TickFiresOnInterval(t *testing.T) {
 	store := &loopStore{}
 	loop := NewLoop(newLoopScheduler(store), 5*time.Millisecond)
@@ -47,6 +48,7 @@ func TestLoop_TickFiresOnInterval(t *testing.T) {
 	}
 }
 
+// TestLoop_LogsTickError 验证循环日志Tick错误的错误映射或错误记录场景。
 func TestLoop_LogsTickError(t *testing.T) {
 	store := &loopStore{err: errors.New("db down")}
 	logBuf := &bytes.Buffer{}
@@ -59,12 +61,14 @@ func TestLoop_LogsTickError(t *testing.T) {
 	require.True(t, strings.Contains(logBuf.String(), "scheduler tick 错误"))
 }
 
+// TestLoop_RejectsMissingScheduler 验证循环拒绝缺失调度器的异常或拒绝路径场景。
 func TestLoop_RejectsMissingScheduler(t *testing.T) {
 	loop := NewLoop(nil, 5*time.Millisecond)
 	err := loop.Run(context.Background())
 	require.Error(t, err)
 }
 
+// TestLoop_DefaultInterval 验证循环默认值Interval的边界条件场景。
 func TestLoop_DefaultInterval(t *testing.T) {
 	store := &loopStore{}
 	loop := NewLoop(newLoopScheduler(store), 0)

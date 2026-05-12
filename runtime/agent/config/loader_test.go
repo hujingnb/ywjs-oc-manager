@@ -28,6 +28,7 @@ manager:
 `
 }
 
+// TestLoadFile_AcceptsValidConfig 验证加载文件接受合法配置的预期行为场景。
 func TestLoadFile_AcceptsValidConfig(t *testing.T) {
 	path := writeTempConfig(t, validAgentYAML())
 
@@ -46,6 +47,7 @@ func TestLoadFile_AcceptsValidConfig(t *testing.T) {
 	require.Equal(t, "https://manager.example/api/v1", cfg.Manager.Endpoint)
 }
 
+// TestLoadFile_RejectsNegativeMaxApps 验证加载文件拒绝负数最大应用的异常或拒绝路径场景。
 func TestLoadFile_RejectsNegativeMaxApps(t *testing.T) {
 	yaml := strings.Replace(validAgentYAML(), `  max_apps: 3`, `  max_apps: -1`, 1)
 	path := writeTempConfig(t, yaml)
@@ -55,6 +57,7 @@ func TestLoadFile_RejectsNegativeMaxApps(t *testing.T) {
 	assert.Contains(t, err.Error(), "agent.max_apps")
 }
 
+// TestLoadFile_AllowsUnsetMaxApps 验证加载文件允许未设置最大应用的边界条件场景。
 func TestLoadFile_AllowsUnsetMaxApps(t *testing.T) {
 	yaml := strings.Replace(validAgentYAML(), "  max_apps: 3\n", "", 1)
 	path := writeTempConfig(t, yaml)
@@ -64,11 +67,13 @@ func TestLoadFile_AllowsUnsetMaxApps(t *testing.T) {
 	require.Nil(t, cfg.Agent.MaxApps)
 }
 
+// TestLoadFile_RejectsUnknownFields 验证加载文件拒绝未知字段的异常或拒绝路径场景。
 func TestLoadFile_RejectsUnknownFields(t *testing.T) {
 	for name, replacement := range map[string]string{
 		"agent typo":   `agnet: {}`,
 		"manager typo": `managr: {}`,
 	} {
+		// 当前子测试覆盖表格用例中该名称对应的输入组合、边界条件和期望结果。
 		t.Run(name, func(t *testing.T) {
 			path := writeTempConfig(t, strings.Replace(validAgentYAML(), `agent:`, replacement, 1))
 			_, err := LoadFile(path)
@@ -77,6 +82,7 @@ func TestLoadFile_RejectsUnknownFields(t *testing.T) {
 	}
 }
 
+// TestLoadFile_RejectsMalformedTrustedCIDR 验证加载文件拒绝格式错误可信CIDR的异常或拒绝路径场景。
 func TestLoadFile_RejectsMalformedTrustedCIDR(t *testing.T) {
 	yaml := strings.Replace(validAgentYAML(), `trusted_cidr: "10.0.0.0/8"`, `trusted_cidr: "10.0.0.0/not-a-mask"`, 1)
 	path := writeTempConfig(t, yaml)
@@ -85,6 +91,7 @@ func TestLoadFile_RejectsMalformedTrustedCIDR(t *testing.T) {
 	require.Error(t, err)
 }
 
+// TestLoadFile_RejectsMissingRequiredFields 验证加载文件拒绝缺失必填字段的异常或拒绝路径场景。
 func TestLoadFile_RejectsMissingRequiredFields(t *testing.T) {
 	for name, field := range map[string]string{
 		"data_root":   "agent.data_root",
@@ -92,6 +99,7 @@ func TestLoadFile_RejectsMissingRequiredFields(t *testing.T) {
 		"docker_addr": "agent.docker_addr",
 		"manager":     "manager.endpoint",
 	} {
+		// 当前子测试覆盖表格用例中该名称对应的输入组合、边界条件和期望结果。
 		t.Run(name, func(t *testing.T) {
 			yaml := validAgentYAML()
 			switch field {
@@ -117,6 +125,7 @@ func TestLoadFile_RejectsMissingRequiredFields(t *testing.T) {
 	}
 }
 
+// TestLoadFile_Defaults 验证加载文件默认值的边界条件场景。
 func TestLoadFile_Defaults(t *testing.T) {
 	path := writeTempConfig(t, validAgentYAML())
 	cfg, err := LoadFile(path)

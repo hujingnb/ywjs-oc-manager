@@ -65,6 +65,7 @@ func startDockerStubServer(t *testing.T) (*httptest.Server, []byte, *dockerSeen)
 	return server, caPEM, seen
 }
 
+// TestNewDockerClientForNode_PingPropagatesBearerOverTLS 验证新建 Docker客户端针对节点ping透传Bearer覆盖TLS的错误映射或错误记录场景。
 func TestNewDockerClientForNode_PingPropagatesBearerOverTLS(t *testing.T) {
 	server, caPEM, seen := startDockerStubServer(t)
 
@@ -79,6 +80,7 @@ func TestNewDockerClientForNode_PingPropagatesBearerOverTLS(t *testing.T) {
 	require.NotEqual(t, 0, len(paths))
 }
 
+// TestNewDockerClientForNode_RejectsUntrustedTLS 验证新建 Docker客户端针对节点拒绝不受信任TLS的异常或拒绝路径场景。
 func TestNewDockerClientForNode_RejectsUntrustedTLS(t *testing.T) {
 	server, _, seen := startDockerStubServer(t)
 	otherPEM := makeUnrelatedCAPEM(t)
@@ -92,11 +94,13 @@ func TestNewDockerClientForNode_RejectsUntrustedTLS(t *testing.T) {
 	require.Empty(t, auth)
 }
 
+// TestNewDockerClientForNode_RejectsBadCAPEM 验证新建 Docker客户端针对节点拒绝非法CAPEM的异常或拒绝路径场景。
 func TestNewDockerClientForNode_RejectsBadCAPEM(t *testing.T) {
 	_, err := NewDockerClientForNode("https://1.2.3.4:7001", "secret", "not-a-pem")
 	require.Error(t, err)
 }
 
+// TestNewDockerClientForNode_PrefixesDockerPath 验证新建 Docker客户端针对节点添加前缀Docker路径的预期行为场景。
 func TestNewDockerClientForNode_PrefixesDockerPath(t *testing.T) {
 	server, caPEM, seen := startDockerStubServer(t)
 
@@ -112,6 +116,7 @@ func TestNewDockerClientForNode_PrefixesDockerPath(t *testing.T) {
 	}
 }
 
+// TestNewDockerClientForNode_AcceptsCertPool 验证新建 Docker客户端针对节点接受证书池的预期行为场景。
 func TestNewDockerClientForNode_AcceptsCertPool(t *testing.T) {
 	server, caPEM, _ := startDockerStubServer(t)
 	if pool := x509.NewCertPool(); !pool.AppendCertsFromPEM(caPEM) {

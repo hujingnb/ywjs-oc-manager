@@ -25,6 +25,7 @@ const (
 	testWorkNode  = "00000000-0000-0000-0000-000000000f04"
 )
 
+// TestWorkspaceServiceListReturnsEntries 验证工作区服务列表返回Entries的成功路径场景。
 func TestWorkspaceServiceListReturnsEntries(t *testing.T) {
 	store := newWorkspaceStub(t)
 	adapter := &fakeWorkspaceAdapter{
@@ -49,6 +50,7 @@ func TestWorkspaceServiceListReturnsEntries(t *testing.T) {
 	}
 }
 
+// TestWorkspaceServiceListAllowsPlatformAdminRead 验证工作区服务列表允许平台管理员读取的预期行为场景。
 func TestWorkspaceServiceListAllowsPlatformAdminRead(t *testing.T) {
 	store := newWorkspaceStub(t)
 	adapter := &fakeWorkspaceAdapter{
@@ -67,6 +69,7 @@ func TestWorkspaceServiceListAllowsPlatformAdminRead(t *testing.T) {
 	require.Equal(t, "session.log", listing.Entries[0].Name)
 }
 
+// TestWorkspaceServiceListRejectsForbidden 验证工作区服务列表拒绝禁止访问的异常或拒绝路径场景。
 func TestWorkspaceServiceListRejectsForbidden(t *testing.T) {
 	store := newWorkspaceStub(t)
 	svc := NewWorkspaceService(store, &fakeWorkspaceAdapter{}, "/data")
@@ -75,6 +78,7 @@ func TestWorkspaceServiceListRejectsForbidden(t *testing.T) {
 	require.ErrorIs(t, err, ErrWorkspaceForbidden)
 }
 
+// TestWorkspaceServiceArchiveFailsWithoutAdapter 验证工作区服务归档失败不使用适配器的预期行为场景。
 func TestWorkspaceServiceArchiveFailsWithoutAdapter(t *testing.T) {
 	store := newWorkspaceStub(t)
 	svc := NewWorkspaceService(store, nil, "/data")
@@ -84,6 +88,7 @@ func TestWorkspaceServiceArchiveFailsWithoutAdapter(t *testing.T) {
 	require.ErrorIs(t, err, ErrWorkspaceMissing)
 }
 
+// TestWorkspaceServiceArchiveStreamsZip 验证工作区服务归档流式处理Zip的成功路径场景。
 func TestWorkspaceServiceArchiveStreamsZip(t *testing.T) {
 	store := newWorkspaceStub(t)
 	adapter := &fakeWorkspaceAdapter{archiveBytes: []byte("zip-content")}
@@ -98,6 +103,7 @@ func TestWorkspaceServiceArchiveStreamsZip(t *testing.T) {
 	}
 }
 
+// TestWorkspaceServiceDownloadDelegatesToAdapter 验证工作区服务下载Delegates到适配器的预期行为场景。
 func TestWorkspaceServiceDownloadDelegatesToAdapter(t *testing.T) {
 	store := newWorkspaceStub(t)
 	adapter := &fakeWorkspaceAdapter{stream: io.NopCloser(strings.NewReader("payload"))}
@@ -110,6 +116,7 @@ func TestWorkspaceServiceDownloadDelegatesToAdapter(t *testing.T) {
 	require.Equal(t, "payload", string(body))
 }
 
+// TestWorkspaceServiceRejectsUnsafePaths 验证工作区服务拒绝UnsafePaths的异常或拒绝路径场景。
 func TestWorkspaceServiceRejectsUnsafePaths(t *testing.T) {
 	store := newWorkspaceStub(t)
 	svc := NewWorkspaceService(store, &fakeWorkspaceAdapter{}, "/data")
@@ -125,6 +132,7 @@ func TestWorkspaceServiceRejectsUnsafePaths(t *testing.T) {
 	}
 }
 
+// TestWorkspaceServiceListMissingNodeReturnsError 验证工作区服务列表缺失节点返回错误的异常或拒绝路径场景。
 func TestWorkspaceServiceListMissingNodeReturnsError(t *testing.T) {
 	store := newWorkspaceStub(t)
 	store.app.RuntimeNodeID = pgtype.UUID{} // 不再设置 valid=true

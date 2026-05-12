@@ -17,6 +17,7 @@ import (
 	"oc-manager/internal/service"
 )
 
+// TestAuditListByOrgRequiresToken 验证审计列表通过组织要求令牌的预期行为场景。
 func TestAuditListByOrgRequiresToken(t *testing.T) {
 	router, _ := newAuditTestRouter(t, &auditServiceStub{})
 
@@ -27,6 +28,7 @@ func TestAuditListByOrgRequiresToken(t *testing.T) {
 	require.Equal(t, http.StatusUnauthorized, recorder.Code)
 }
 
+// TestAuditListByOrgPropagatesPrincipal 验证审计列表通过组织透传Principal的错误映射或错误记录场景。
 func TestAuditListByOrgPropagatesPrincipal(t *testing.T) {
 	svc := &auditServiceStub{byOrg: []service.AuditResult{{Action: "create"}}}
 	router, tokens := newAuditTestRouter(t, svc)
@@ -51,6 +53,7 @@ func TestAuditListByOrgPropagatesPrincipal(t *testing.T) {
 	}
 }
 
+// TestAuditListByTargetRequiresParams 验证审计列表通过目标要求参数的预期行为场景。
 func TestAuditListByTargetRequiresParams(t *testing.T) {
 	router, tokens := newAuditTestRouter(t, &auditServiceStub{})
 	token := mustSignAccess(t, tokens, auth.Principal{UserID: "u1", Role: domain.UserRolePlatformAdmin})

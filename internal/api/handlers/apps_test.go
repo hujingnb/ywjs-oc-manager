@@ -43,6 +43,7 @@ func newAppsTestRouter(t *testing.T, svc appService) (*gin.Engine, *auth.TokenMa
 	return router, tokens
 }
 
+// TestAppsListHappy 验证应用列表成功路径的成功路径场景。
 func TestAppsListHappy(t *testing.T) {
 	stub := &appsStub{listResult: []service.AppResult{{ID: "app-1", Name: "测试应用"}}}
 	router, tokens := newAppsTestRouter(t, stub)
@@ -57,6 +58,7 @@ func TestAppsListHappy(t *testing.T) {
 	assert.Contains(t, w.Body.String(), "app-1")
 }
 
+// TestAppsListForbidden 验证应用列表禁止访问的异常或拒绝路径场景。
 func TestAppsListForbidden(t *testing.T) {
 	stub := &appsStub{listErr: service.ErrForbidden}
 	router, tokens := newAppsTestRouter(t, stub)
@@ -70,6 +72,7 @@ func TestAppsListForbidden(t *testing.T) {
 	assert.Equal(t, http.StatusForbidden, w.Code)
 }
 
+// TestAppsListRequiresToken 验证应用列表要求令牌的预期行为场景。
 func TestAppsListRequiresToken(t *testing.T) {
 	stub := &appsStub{}
 	router, _ := newAppsTestRouter(t, stub)
@@ -81,6 +84,7 @@ func TestAppsListRequiresToken(t *testing.T) {
 	assert.Equal(t, http.StatusUnauthorized, w.Code)
 }
 
+// TestAppsGetHappy 验证应用获取成功路径的成功路径场景。
 func TestAppsGetHappy(t *testing.T) {
 	stub := &appsStub{getResult: service.AppResult{ID: "app-1", Name: "测试应用"}}
 	router, tokens := newAppsTestRouter(t, stub)
@@ -95,6 +99,7 @@ func TestAppsGetHappy(t *testing.T) {
 	assert.Contains(t, w.Body.String(), "app-1")
 }
 
+// TestAppsGetNotFound 验证应用获取未找到的异常或拒绝路径场景。
 func TestAppsGetNotFound(t *testing.T) {
 	stub := &appsStub{getErr: service.ErrNotFound}
 	router, tokens := newAppsTestRouter(t, stub)

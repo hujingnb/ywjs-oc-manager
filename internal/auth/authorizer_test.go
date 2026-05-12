@@ -29,6 +29,7 @@ type orgCase struct {
 func runOrgCases(t *testing.T, fn func(Principal, string) bool, cases []orgCase) {
 	t.Helper()
 	for _, c := range cases {
+		// 当前子测试覆盖表格用例中该名称对应的输入组合、边界条件和期望结果。
 		t.Run(c.name, func(t *testing.T) {
 			p := Principal{UserID: userA, OrgID: c.pOrgID, Role: c.role}
 			got := fn(p, c.targetOrg)
@@ -37,6 +38,7 @@ func runOrgCases(t *testing.T, fn func(Principal, string) bool, cases []orgCase)
 	}
 }
 
+// TestCanManageOrg 验证管理权限组织的预期行为场景。
 func TestCanManageOrg(t *testing.T) {
 	cases := []orgCase{
 		{"platform_admin 跨组织可管", domain.UserRolePlatformAdmin, orgA, orgB, true},
@@ -48,6 +50,7 @@ func TestCanManageOrg(t *testing.T) {
 	runOrgCases(t, CanManageOrg, cases)
 }
 
+// TestCanViewOrg 验证查看权限组织的预期行为场景。
 func TestCanViewOrg(t *testing.T) {
 	cases := []orgCase{
 		{"platform_admin 跨组织可读", domain.UserRolePlatformAdmin, orgA, orgB, true},
@@ -71,6 +74,7 @@ type memberCase struct {
 	want       bool
 }
 
+// TestCanViewMember 验证查看权限成员的预期行为场景。
 func TestCanViewMember(t *testing.T) {
 	cases := []memberCase{
 		{"platform_admin 任意成员可看", domain.UserRolePlatformAdmin, orgA, userA, orgB, userB, true},
@@ -80,6 +84,7 @@ func TestCanViewMember(t *testing.T) {
 		{"org_member 不可看他人", domain.UserRoleOrgMember, orgA, userA, orgA, userB, false},
 	}
 	for _, c := range cases {
+		// 当前子测试覆盖表格用例中该名称对应的输入组合、边界条件和期望结果。
 		t.Run(c.name, func(t *testing.T) {
 			p := Principal{UserID: c.pUserID, OrgID: c.pOrgID, Role: c.role}
 			got := CanViewMember(p, c.targetOrg, c.targetUser)
@@ -88,6 +93,7 @@ func TestCanViewMember(t *testing.T) {
 	}
 }
 
+// TestCanManageMember 验证管理权限成员的预期行为场景。
 func TestCanManageMember(t *testing.T) {
 	cases := []orgCase{
 		{"platform_admin 跨组织只读成员不可管", domain.UserRolePlatformAdmin, orgA, orgB, false},
@@ -98,6 +104,7 @@ func TestCanManageMember(t *testing.T) {
 	runOrgCases(t, CanManageMember, cases)
 }
 
+// TestCanEditMember 验证权限判断编辑成员的预期行为场景。
 func TestCanEditMember(t *testing.T) {
 	cases := []memberCase{
 		{"platform_admin 不可编辑组织成员", domain.UserRolePlatformAdmin, orgA, userA, orgB, userB, false},
@@ -108,6 +115,7 @@ func TestCanEditMember(t *testing.T) {
 		{"未知角色即使命中本人也不可编辑", "unknown", orgA, userA, orgB, userA, false},
 	}
 	for _, c := range cases {
+		// 当前子测试覆盖表格用例中该名称对应的输入组合、边界条件和期望结果。
 		t.Run(c.name, func(t *testing.T) {
 			p := Principal{UserID: c.pUserID, OrgID: c.pOrgID, Role: c.role}
 			got := CanEditMember(p, c.targetOrg, c.targetUser)
@@ -116,6 +124,7 @@ func TestCanEditMember(t *testing.T) {
 	}
 }
 
+// TestCanViewApp 验证查看权限应用的预期行为场景。
 func TestCanViewApp(t *testing.T) {
 	cases := []memberCase{
 		{"platform_admin 任意应用可看", domain.UserRolePlatformAdmin, orgA, userA, orgB, userB, true},
@@ -125,6 +134,7 @@ func TestCanViewApp(t *testing.T) {
 		{"org_member 不可看同组织他人", domain.UserRoleOrgMember, orgA, userA, orgA, userB, false},
 	}
 	for _, c := range cases {
+		// 当前子测试覆盖表格用例中该名称对应的输入组合、边界条件和期望结果。
 		t.Run(c.name, func(t *testing.T) {
 			p := Principal{UserID: c.pUserID, OrgID: c.pOrgID, Role: c.role}
 			got := CanViewApp(p, c.targetOrg, c.targetUser)
@@ -133,6 +143,7 @@ func TestCanViewApp(t *testing.T) {
 	}
 }
 
+// TestCanViewAppAudit 验证查看权限应用审计的预期行为场景。
 func TestCanViewAppAudit(t *testing.T) {
 	cases := []memberCase{
 		{"platform_admin 可看任意应用审计", domain.UserRolePlatformAdmin, orgA, userA, orgB, userB, true},
@@ -144,6 +155,7 @@ func TestCanViewAppAudit(t *testing.T) {
 	runAppCases(t, CanViewAppAudit, cases)
 }
 
+// TestCanViewOrgPersona 验证查看权限组织人设的预期行为场景。
 func TestCanViewOrgPersona(t *testing.T) {
 	cases := []orgCase{
 		{"platform_admin 跨组织可读 persona", domain.UserRolePlatformAdmin, orgA, orgB, true},
@@ -155,6 +167,7 @@ func TestCanViewOrgPersona(t *testing.T) {
 	runOrgCases(t, CanViewOrgPersona, cases)
 }
 
+// TestCanManageOrgPersona 验证管理权限组织人设的预期行为场景。
 func TestCanManageOrgPersona(t *testing.T) {
 	cases := []orgCase{
 		{"platform_admin 跨组织可管 persona", domain.UserRolePlatformAdmin, orgA, orgB, true},
@@ -169,6 +182,7 @@ func TestCanManageOrgPersona(t *testing.T) {
 func runAppCases(t *testing.T, fn func(Principal, string, string) bool, cases []memberCase) {
 	t.Helper()
 	for _, c := range cases {
+		// 当前子测试覆盖表格用例中该名称对应的输入组合、边界条件和期望结果。
 		t.Run(c.name, func(t *testing.T) {
 			p := Principal{UserID: c.pUserID, OrgID: c.pOrgID, Role: c.role}
 			got := fn(p, c.targetOrg, c.targetUser)
@@ -177,6 +191,7 @@ func runAppCases(t *testing.T, fn func(Principal, string, string) bool, cases []
 	}
 }
 
+// TestCanManageApp 验证管理权限应用的预期行为场景。
 func TestCanManageApp(t *testing.T) {
 	cases := []memberCase{
 		{"platform_admin 跨组织不可管应用", domain.UserRolePlatformAdmin, orgA, userA, orgB, userB, false},
@@ -188,6 +203,7 @@ func TestCanManageApp(t *testing.T) {
 	runAppCases(t, CanManageApp, cases)
 }
 
+// TestOrgKnowledgePredicates 验证组织知识库权限谓词的预期行为场景。
 func TestOrgKnowledgePredicates(t *testing.T) {
 	readCases := []orgCase{
 		{"platform_admin 跨组织可读组织知识库", domain.UserRolePlatformAdmin, orgA, orgB, true},
@@ -210,6 +226,7 @@ func TestOrgKnowledgePredicates(t *testing.T) {
 	runOrgCases(t, CanRetryOrgKnowledgeSync, writeCases)
 }
 
+// TestCanWriteAppKnowledge 验证写入权限应用知识库的预期行为场景。
 func TestCanWriteAppKnowledge(t *testing.T) {
 	cases := []memberCase{
 		{"platform_admin 跨组织不可写应用知识库", domain.UserRolePlatformAdmin, orgA, userA, orgB, userB, false},
@@ -221,6 +238,7 @@ func TestCanWriteAppKnowledge(t *testing.T) {
 	runAppCases(t, CanWriteAppKnowledge, cases)
 }
 
+// TestCanReadAppKnowledge 验证读取权限应用知识库的预期行为场景。
 func TestCanReadAppKnowledge(t *testing.T) {
 	cases := []memberCase{
 		{"platform_admin 跨组织可读知识库", domain.UserRolePlatformAdmin, orgA, userA, orgB, userB, true},
@@ -232,6 +250,7 @@ func TestCanReadAppKnowledge(t *testing.T) {
 	runAppCases(t, CanReadAppKnowledge, cases)
 }
 
+// TestCanTriggerRuntimeOperation 验证触发权限运行时Operation的预期行为场景。
 func TestCanTriggerRuntimeOperation(t *testing.T) {
 	cases := []memberCase{
 		{"platform_admin 跨组织不可触发运行操作", domain.UserRolePlatformAdmin, orgA, userA, orgB, userB, false},
@@ -243,6 +262,7 @@ func TestCanTriggerRuntimeOperation(t *testing.T) {
 	runAppCases(t, CanTriggerRuntimeOperation, cases)
 }
 
+// TestCanCreateAppForOrg 验证创建权限应用针对组织的预期行为场景。
 func TestCanCreateAppForOrg(t *testing.T) {
 	cases := []orgCase{
 		{"platform_admin 不可为任意组织创建应用", domain.UserRolePlatformAdmin, orgA, orgA, false},
@@ -253,6 +273,7 @@ func TestCanCreateAppForOrg(t *testing.T) {
 	runOrgCases(t, CanCreateAppForOrg, cases)
 }
 
+// TestCanViewOrgUsage 验证查看权限组织用量的预期行为场景。
 func TestCanViewOrgUsage(t *testing.T) {
 	cases := []orgCase{
 		{"platform_admin 跨组织可看组织用量", domain.UserRolePlatformAdmin, orgA, orgB, true},
@@ -263,6 +284,7 @@ func TestCanViewOrgUsage(t *testing.T) {
 	runOrgCases(t, CanViewOrgUsage, cases)
 }
 
+// TestCanViewMemberUsage 验证查看权限成员用量的预期行为场景。
 func TestCanViewMemberUsage(t *testing.T) {
 	cases := []memberCase{
 		{"platform_admin 可看任意成员用量", domain.UserRolePlatformAdmin, orgA, userA, orgB, userB, true},
@@ -274,6 +296,7 @@ func TestCanViewMemberUsage(t *testing.T) {
 	runAppCases(t, CanViewMemberUsage, cases)
 }
 
+// TestCanViewOrgAudit 验证查看权限组织审计的预期行为场景。
 func TestCanViewOrgAudit(t *testing.T) {
 	cases := []orgCase{
 		{"platform_admin 跨组织可看组织审计", domain.UserRolePlatformAdmin, orgA, orgB, true},
@@ -284,6 +307,7 @@ func TestCanViewOrgAudit(t *testing.T) {
 	runOrgCases(t, CanViewOrgAudit, cases)
 }
 
+// TestCanViewOwnAudit 验证查看权限本人审计的预期行为场景。
 func TestCanViewOwnAudit(t *testing.T) {
 	cases := []struct {
 		name string
@@ -297,6 +321,7 @@ func TestCanViewOwnAudit(t *testing.T) {
 		{"空 userID 不可看自己的审计", Principal{Role: domain.UserRoleOrgMember, OrgID: orgA}, false},
 	}
 	for _, c := range cases {
+		// 当前子测试覆盖表格用例中该名称对应的输入组合、边界条件和期望结果。
 		t.Run(c.name, func(t *testing.T) {
 			got := CanViewOwnAudit(c.p)
 			assert.Equal(t, c.want, got)

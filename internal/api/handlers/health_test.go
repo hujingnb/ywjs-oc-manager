@@ -11,6 +11,7 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
+// TestHealthRouteReturnsStablePayload 验证健康检查路由返回稳定载荷的成功路径场景。
 func TestHealthRouteReturnsStablePayload(t *testing.T) {
 	gin.SetMode(gin.ReleaseMode)
 	router := gin.New()

@@ -60,6 +60,7 @@ func (e *scriptedExecutor) Exec(_ context.Context, nodeID, containerID string, c
 	return &buf, func() {}, nil
 }
 
+// TestResolveWeChatBoundIdentity_HappyPath 验证解析WeChat已绑定身份成功路径的成功路径场景。
 func TestResolveWeChatBoundIdentity_HappyPath(t *testing.T) {
 	executor := &scriptedExecutor{
 		scripts: [][]byte{
@@ -77,6 +78,7 @@ func TestResolveWeChatBoundIdentity_HappyPath(t *testing.T) {
 	require.True(t, strings.Contains(executor.calls[1].cmd[1], "cba246d422f5-im-bot.json"))
 }
 
+// TestResolveWeChatBoundIdentity_EmptyAccountsList 验证解析WeChat已绑定身份空值Accounts列表的边界条件场景。
 func TestResolveWeChatBoundIdentity_EmptyAccountsList(t *testing.T) {
 	executor := &scriptedExecutor{scripts: [][]byte{[]byte(`[]`)}}
 	resolver := NewDockerBindingResolver(executor)
@@ -84,6 +86,7 @@ func TestResolveWeChatBoundIdentity_EmptyAccountsList(t *testing.T) {
 	require.ErrorIs(t, err, ErrIdentityUnavailable)
 }
 
+// TestResolveWeChatBoundIdentity_AccountMissingUserID 验证解析WeChat已绑定身份账号缺失用户ID的异常或拒绝路径场景。
 func TestResolveWeChatBoundIdentity_AccountMissingUserID(t *testing.T) {
 	executor := &scriptedExecutor{
 		scripts: [][]byte{
@@ -96,12 +99,14 @@ func TestResolveWeChatBoundIdentity_AccountMissingUserID(t *testing.T) {
 	require.ErrorIs(t, err, ErrIdentityUnavailable)
 }
 
+// TestResolveWeChatBoundIdentity_RejectsContainerlessCall 验证解析WeChat已绑定身份拒绝ContainerlessCall的异常或拒绝路径场景。
 func TestResolveWeChatBoundIdentity_RejectsContainerlessCall(t *testing.T) {
 	resolver := NewDockerBindingResolver(&scriptedExecutor{})
 	_, err := resolver.ResolveWeChatBoundIdentity(context.Background(), "n", "")
 	require.Error(t, err)
 }
 
+// TestResolveWeChatBoundIdentity_RejectsMalformedAccountName 验证解析WeChat已绑定身份拒绝格式错误账号名的异常或拒绝路径场景。
 func TestResolveWeChatBoundIdentity_RejectsMalformedAccountName(t *testing.T) {
 	executor := &scriptedExecutor{scripts: [][]byte{[]byte(`["bad/name"]`)}}
 	resolver := NewDockerBindingResolver(executor)
@@ -109,6 +114,7 @@ func TestResolveWeChatBoundIdentity_RejectsMalformedAccountName(t *testing.T) {
 	require.Error(t, err)
 }
 
+// TestResolveWeChatBoundIdentity_PropagatesExecError 验证解析WeChat已绑定身份透传执行错误的错误映射或错误记录场景。
 func TestResolveWeChatBoundIdentity_PropagatesExecError(t *testing.T) {
 	executor := &scriptedExecutor{err: errors.New("docker proxy down")}
 	resolver := NewDockerBindingResolver(executor)

@@ -44,6 +44,7 @@ func newPersonaTestRouter(t *testing.T, svc personaService) (*gin.Engine, *auth.
 	return router, tokens
 }
 
+// TestPersonaGetHappy 验证人设获取成功路径的成功路径场景。
 func TestPersonaGetHappy(t *testing.T) {
 	stub := &personaServiceStub{getResult: service.PersonaResult{SystemPrompt: "你好"}}
 	router, tokens := newPersonaTestRouter(t, stub)
@@ -58,6 +59,7 @@ func TestPersonaGetHappy(t *testing.T) {
 	assert.Contains(t, w.Body.String(), "persona")
 }
 
+// TestPersonaGetForbidden 验证人设获取禁止访问的异常或拒绝路径场景。
 func TestPersonaGetForbidden(t *testing.T) {
 	stub := &personaServiceStub{getErr: service.ErrPersonaDenied}
 	router, tokens := newPersonaTestRouter(t, stub)
@@ -71,6 +73,7 @@ func TestPersonaGetForbidden(t *testing.T) {
 	assert.Equal(t, http.StatusForbidden, w.Code)
 }
 
+// TestPersonaGetNotFound 验证人设获取未找到的异常或拒绝路径场景。
 func TestPersonaGetNotFound(t *testing.T) {
 	stub := &personaServiceStub{getErr: service.ErrPersonaNotFound}
 	router, tokens := newPersonaTestRouter(t, stub)
@@ -84,6 +87,7 @@ func TestPersonaGetNotFound(t *testing.T) {
 	assert.Equal(t, http.StatusNotFound, w.Code)
 }
 
+// TestPersonaPutHappy 验证人设更新成功路径的成功路径场景。
 func TestPersonaPutHappy(t *testing.T) {
 	stub := &personaServiceStub{putResult: service.PersonaResult{SystemPrompt: "新人设"}}
 	router, tokens := newPersonaTestRouter(t, stub)
@@ -100,6 +104,7 @@ func TestPersonaPutHappy(t *testing.T) {
 	assert.Contains(t, w.Body.String(), "persona")
 }
 
+// TestPersonaPutRequiresToken 验证人设更新要求令牌的预期行为场景。
 func TestPersonaPutRequiresToken(t *testing.T) {
 	stub := &personaServiceStub{}
 	router, _ := newPersonaTestRouter(t, stub)

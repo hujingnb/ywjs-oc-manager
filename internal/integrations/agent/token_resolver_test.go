@@ -8,6 +8,7 @@ import (
 	"testing"
 )
 
+// TestTokenResolver_SetAndGet 验证令牌解析器Set并获取的预期行为场景。
 func TestTokenResolver_SetAndGet(t *testing.T) {
 	r := NewTokenResolver()
 	r.Set("node-1", "token-a")
@@ -16,12 +17,14 @@ func TestTokenResolver_SetAndGet(t *testing.T) {
 	require.Equal(t, "token-a", got)
 }
 
+// TestTokenResolver_GetMissingReturnsErr 验证令牌解析器获取缺失返回错误的异常或拒绝路径场景。
 func TestTokenResolver_GetMissingReturnsErr(t *testing.T) {
 	r := NewTokenResolver()
 	_, err := r.Get("missing")
 	require.ErrorIs(t, err, ErrTokenNotCached)
 }
 
+// TestTokenResolver_OverwriteUpdatesValue 验证令牌解析器OverwriteUpdatesValue的预期行为场景。
 func TestTokenResolver_OverwriteUpdatesValue(t *testing.T) {
 	r := NewTokenResolver()
 	r.Set("n", "first")
@@ -30,6 +33,7 @@ func TestTokenResolver_OverwriteUpdatesValue(t *testing.T) {
 	require.Equal(t, "second", got)
 }
 
+// TestTokenResolver_Forget 验证令牌解析器针对get的预期行为场景。
 func TestTokenResolver_Forget(t *testing.T) {
 	r := NewTokenResolver()
 	r.Set("n", "x")
@@ -54,6 +58,7 @@ func (s *stubLoader) LoadAgentToken(_ context.Context, nodeID string) (string, e
 	return s.tokens[nodeID], nil
 }
 
+// TestTokenResolver_FallsBackToPersistentLoader 验证令牌解析器回退回退到PersistentLoader的特殊分支或幂等场景。
 func TestTokenResolver_FallsBackToPersistentLoader(t *testing.T) {
 	r := NewTokenResolver()
 	r.SetPersistentLoader(&stubLoader{tokens: map[string]string{"n1": "loaded"}})
@@ -68,6 +73,7 @@ func TestTokenResolver_FallsBackToPersistentLoader(t *testing.T) {
 	require.Equal(t, 0, loader.calls)
 }
 
+// TestTokenResolver_LoaderEmptyReturnsErrTokenNotCached 验证令牌解析器Loader空值返回错误令牌未缓存的成功路径场景。
 func TestTokenResolver_LoaderEmptyReturnsErrTokenNotCached(t *testing.T) {
 	r := NewTokenResolver()
 	r.SetPersistentLoader(&stubLoader{tokens: map[string]string{}})
@@ -76,6 +82,7 @@ func TestTokenResolver_LoaderEmptyReturnsErrTokenNotCached(t *testing.T) {
 	}
 }
 
+// TestTokenResolver_ConcurrentSafe 验证令牌解析器并发安全的特殊分支或幂等场景。
 func TestTokenResolver_ConcurrentSafe(t *testing.T) {
 	r := NewTokenResolver()
 	var wg sync.WaitGroup

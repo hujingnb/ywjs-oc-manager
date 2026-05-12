@@ -77,6 +77,7 @@ func buildKnowledgeJob(t *testing.T, payload []byte) sqlc.Job {
 	return sqlc.Job{Type: domain.JobTypeKnowledgeSyncNode, PayloadJson: payload}
 }
 
+// TestKnowledgeSyncHandler_UploadOrgFile 验证知识库同步处理器上传组织文件的预期行为场景。
 func TestKnowledgeSyncHandler_UploadOrgFile(t *testing.T) {
 	source := &memoryKnowledgeSource{files: map[string][]byte{
 		"org/o1/knowledge/notes/a.md": []byte("# hello"),
@@ -93,6 +94,7 @@ func TestKnowledgeSyncHandler_UploadOrgFile(t *testing.T) {
 	}
 }
 
+// TestKnowledgeSyncHandler_DeleteAppFile 验证知识库同步处理器删除应用文件的预期行为场景。
 func TestKnowledgeSyncHandler_DeleteAppFile(t *testing.T) {
 	sink := &memoryKnowledgeSink{}
 	handler := NewKnowledgeSyncHandler(nil, sink)
@@ -106,6 +108,7 @@ func TestKnowledgeSyncHandler_DeleteAppFile(t *testing.T) {
 	}
 }
 
+// TestKnowledgeSyncHandler_RejectsUnknownChangeType 验证知识库同步处理器拒绝未知变更类型的异常或拒绝路径场景。
 func TestKnowledgeSyncHandler_RejectsUnknownChangeType(t *testing.T) {
 	handler := NewKnowledgeSyncHandler(nil, &memoryKnowledgeSink{})
 	payload := []byte(`{"scope":"org","org_id":"o","node_id":"n","change_type":"boom","rel_path":"x"}`)
@@ -115,6 +118,7 @@ func TestKnowledgeSyncHandler_RejectsUnknownChangeType(t *testing.T) {
 	}
 }
 
+// TestKnowledgeSyncHandler_RejectsMissingRelPath 验证知识库同步处理器拒绝缺失相对路径路径的异常或拒绝路径场景。
 func TestKnowledgeSyncHandler_RejectsMissingRelPath(t *testing.T) {
 	handler := NewKnowledgeSyncHandler(nil, &memoryKnowledgeSink{})
 	payload := []byte(`{"scope":"org","org_id":"o","node_id":"n","change_type":"upload_file","rel_path":""}`)
@@ -124,6 +128,7 @@ func TestKnowledgeSyncHandler_RejectsMissingRelPath(t *testing.T) {
 	}
 }
 
+// TestKnowledgeSyncHandler_PropagatesUploadError 验证知识库同步处理器透传上传错误的错误映射或错误记录场景。
 func TestKnowledgeSyncHandler_PropagatesUploadError(t *testing.T) {
 	source := &memoryKnowledgeSource{files: map[string][]byte{"x": []byte("ok")}}
 	sink := &memoryKnowledgeSink{uploadErr: errors.New("agent unreachable")}
@@ -135,6 +140,7 @@ func TestKnowledgeSyncHandler_PropagatesUploadError(t *testing.T) {
 	}
 }
 
+// TestKnowledgeSyncHandler_RejectsMissingNodeID 验证知识库同步处理器拒绝缺失节点ID的异常或拒绝路径场景。
 func TestKnowledgeSyncHandler_RejectsMissingNodeID(t *testing.T) {
 	handler := NewKnowledgeSyncHandler(nil, &memoryKnowledgeSink{})
 	payload := []byte(`{"scope":"org","org_id":"o","change_type":"delete_file","rel_path":"x"}`)

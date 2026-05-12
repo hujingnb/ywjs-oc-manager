@@ -8,6 +8,7 @@ import (
 	"testing"
 )
 
+// TestRegistryLookup 验证注册表查找的预期行为场景。
 func TestRegistryLookup(t *testing.T) {
 	registry := NewRegistry()
 	err := registry.Register(&fakeAdapter{kind: "wechat"})
@@ -19,6 +20,7 @@ func TestRegistryLookup(t *testing.T) {
 	}
 }
 
+// TestRegistryRejectsDuplicate 验证注册表拒绝重复的异常或拒绝路径场景。
 func TestRegistryRejectsDuplicate(t *testing.T) {
 	registry := NewRegistry()
 	err := registry.Register(&fakeAdapter{kind: "wechat"})
@@ -27,12 +29,14 @@ func TestRegistryRejectsDuplicate(t *testing.T) {
 	require.Error(t, err)
 }
 
+// TestRegistryRejectsNil 验证注册表拒绝空值的异常或拒绝路径场景。
 func TestRegistryRejectsNil(t *testing.T) {
 	registry := NewRegistry()
 	err := registry.Register(nil)
 	require.Error(t, err)
 }
 
+// TestRegistryListTypes 验证注册表列表类型的预期行为场景。
 func TestRegistryListTypes(t *testing.T) {
 	registry := NewRegistry()
 	registry.MustRegister(&fakeAdapter{kind: "wechat"})

@@ -13,6 +13,7 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
+// TestDoJSON_happy 验证DoJSONhappy的预期行为场景。
 func TestDoJSON_happy(t *testing.T) {
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		assert.Equal(t, "application/json", r.Header.Get("Content-Type"))
@@ -31,6 +32,7 @@ func TestDoJSON_happy(t *testing.T) {
 	assert.Equal(t, "alice", out.Name)
 }
 
+// TestDoJSON_404_returnsNotFound 验证DoJSON404returns未找到的异常或拒绝路径场景。
 func TestDoJSON_404_returnsNotFound(t *testing.T) {
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.WriteHeader(http.StatusNotFound)
@@ -41,6 +43,7 @@ func TestDoJSON_404_returnsNotFound(t *testing.T) {
 	assert.True(t, errors.Is(err, ErrNotFound))
 }
 
+// TestDoJSON_401_returnsUnauthorized 验证DoJSON401returns未授权的异常或拒绝路径场景。
 func TestDoJSON_401_returnsUnauthorized(t *testing.T) {
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.WriteHeader(http.StatusUnauthorized)
@@ -51,6 +54,7 @@ func TestDoJSON_401_returnsUnauthorized(t *testing.T) {
 	assert.True(t, errors.Is(err, ErrUnauthorized))
 }
 
+// TestDoJSON_500_returnsUpstream 验证DoJSON500returnsUpstream的预期行为场景。
 func TestDoJSON_500_returnsUpstream(t *testing.T) {
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.WriteHeader(http.StatusInternalServerError)
@@ -63,6 +67,7 @@ func TestDoJSON_500_returnsUpstream(t *testing.T) {
 	assert.Contains(t, err.Error(), "upstream details")
 }
 
+// TestDoJSON_409_returnsConflict 验证DoJSON409returns冲突的异常或拒绝路径场景。
 func TestDoJSON_409_returnsConflict(t *testing.T) {
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.WriteHeader(http.StatusConflict)
@@ -73,6 +78,7 @@ func TestDoJSON_409_returnsConflict(t *testing.T) {
 	assert.True(t, errors.Is(err, ErrConflict))
 }
 
+// TestDoJSON_400_returnsPayloadInvalid 验证DoJSON400returns载荷非法的异常或拒绝路径场景。
 func TestDoJSON_400_returnsPayloadInvalid(t *testing.T) {
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.WriteHeader(http.StatusBadRequest)
@@ -83,6 +89,7 @@ func TestDoJSON_400_returnsPayloadInvalid(t *testing.T) {
 	assert.True(t, errors.Is(err, ErrPayloadInvalid))
 }
 
+// TestDoStream_happy 验证Do流happy的预期行为场景。
 func TestDoStream_happy(t *testing.T) {
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Write([]byte("binary content"))
@@ -95,6 +102,7 @@ func TestDoStream_happy(t *testing.T) {
 	assert.Equal(t, "binary content", buf.String())
 }
 
+// TestDoStream_404 验证Do流404的预期行为场景。
 func TestDoStream_404(t *testing.T) {
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.WriteHeader(http.StatusNotFound)

@@ -10,6 +10,7 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
+// TestCORSAllowOrigin_AllowsListedOrigin 验证CORS allow origin允许白名单 origin的预期行为场景。
 func TestCORSAllowOrigin_AllowsListedOrigin(t *testing.T) {
 	gin.SetMode(gin.ReleaseMode)
 	router := gin.New()
@@ -23,6 +24,7 @@ func TestCORSAllowOrigin_AllowsListedOrigin(t *testing.T) {
 	require.Equal(t, "https://app.example.com", rec.Header().Get("Access-Control-Allow-Origin"))
 }
 
+// TestCORSAllowOrigin_RejectsUnlisted 验证CORS allow origin拒绝非白名单 origin的异常或拒绝路径场景。
 func TestCORSAllowOrigin_RejectsUnlisted(t *testing.T) {
 	gin.SetMode(gin.ReleaseMode)
 	router := gin.New()
@@ -36,6 +38,7 @@ func TestCORSAllowOrigin_RejectsUnlisted(t *testing.T) {
 	require.Equal(t, "", rec.Header().Get("Access-Control-Allow-Origin"))
 }
 
+// TestCORSAllowOrigin_HandlesPreflight 验证CORS allow origin处理Preflight的预期行为场景。
 func TestCORSAllowOrigin_HandlesPreflight(t *testing.T) {
 	gin.SetMode(gin.ReleaseMode)
 	router := gin.New()
@@ -49,6 +52,7 @@ func TestCORSAllowOrigin_HandlesPreflight(t *testing.T) {
 	require.Equal(t, http.StatusNoContent, rec.Code)
 }
 
+// TestMaskSecret_ReplacesMatchedFields 验证掩码密钥替换s匹配ed字段的预期行为场景。
 func TestMaskSecret_ReplacesMatchedFields(t *testing.T) {
 	input := `authorization=Bearer xyz, agent_token=abc, master_key="secret-key", username=alice`
 	got := MaskSecret(input)

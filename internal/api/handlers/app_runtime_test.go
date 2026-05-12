@@ -49,6 +49,7 @@ func newAppRuntimeTestRouter(t *testing.T, svc runtimeOperationService) (*gin.En
 	return router, tokens
 }
 
+// TestAppRuntimeStartHappy 验证应用运行时启动成功路径的成功路径场景。
 func TestAppRuntimeStartHappy(t *testing.T) {
 	stub := &runtimeOpServiceStub{triggerResult: service.RuntimeOperationResult{JobID: "job-1", Operation: service.RuntimeOperationStart}}
 	router, tokens := newAppRuntimeTestRouter(t, stub)
@@ -63,6 +64,7 @@ func TestAppRuntimeStartHappy(t *testing.T) {
 	assert.Contains(t, w.Body.String(), "runtime_operation")
 }
 
+// TestAppRuntimeStartForbidden 验证应用运行时启动禁止访问的异常或拒绝路径场景。
 func TestAppRuntimeStartForbidden(t *testing.T) {
 	stub := &runtimeOpServiceStub{triggerErr: service.ErrRuntimeOperationDenied}
 	router, tokens := newAppRuntimeTestRouter(t, stub)
@@ -76,6 +78,7 @@ func TestAppRuntimeStartForbidden(t *testing.T) {
 	assert.Equal(t, http.StatusForbidden, w.Code)
 }
 
+// TestAppRuntimeStartNotFound 验证应用运行时启动未找到的异常或拒绝路径场景。
 func TestAppRuntimeStartNotFound(t *testing.T) {
 	stub := &runtimeOpServiceStub{triggerErr: service.ErrNotFound}
 	router, tokens := newAppRuntimeTestRouter(t, stub)
@@ -89,6 +92,7 @@ func TestAppRuntimeStartNotFound(t *testing.T) {
 	assert.Equal(t, http.StatusNotFound, w.Code)
 }
 
+// TestAppRuntimeGetRuntimeHappy 验证应用运行时获取运行时成功路径的成功路径场景。
 func TestAppRuntimeGetRuntimeHappy(t *testing.T) {
 	stub := &runtimeOpServiceStub{inspectResult: service.RuntimeView{Status: "running"}}
 	router, tokens := newAppRuntimeTestRouter(t, stub)
@@ -103,6 +107,7 @@ func TestAppRuntimeGetRuntimeHappy(t *testing.T) {
 	assert.Contains(t, w.Body.String(), "runtime")
 }
 
+// TestAppRuntimeInitializeHappy 验证应用运行时初始化成功路径的成功路径场景。
 func TestAppRuntimeInitializeHappy(t *testing.T) {
 	stub := &runtimeOpServiceStub{initResult: service.RuntimeOperationResult{JobID: "job-init"}}
 	router, tokens := newAppRuntimeTestRouter(t, stub)
@@ -117,6 +122,7 @@ func TestAppRuntimeInitializeHappy(t *testing.T) {
 	assert.Contains(t, w.Body.String(), "runtime_operation")
 }
 
+// TestAppRuntimeInitializeConflict 验证应用运行时初始化冲突的异常或拒绝路径场景。
 func TestAppRuntimeInitializeConflict(t *testing.T) {
 	stub := &runtimeOpServiceStub{initErr: service.ErrAppNotReinitializable}
 	router, tokens := newAppRuntimeTestRouter(t, stub)
@@ -130,6 +136,7 @@ func TestAppRuntimeInitializeConflict(t *testing.T) {
 	assert.Equal(t, http.StatusConflict, w.Code)
 }
 
+// TestAppRuntimeRequiresToken 验证应用运行时要求令牌的预期行为场景。
 func TestAppRuntimeRequiresToken(t *testing.T) {
 	stub := &runtimeOpServiceStub{}
 	router, _ := newAppRuntimeTestRouter(t, stub)

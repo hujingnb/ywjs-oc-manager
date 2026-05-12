@@ -15,6 +15,7 @@ import (
 	"oc-manager/internal/service"
 )
 
+// TestAgentEnrollReturnsToken 验证agent注册返回令牌的成功路径场景。
 func TestAgentEnrollReturnsToken(t *testing.T) {
 	stub := &agentEndpointsStub{enrollResult: service.AgentEnrollResult{NodeID: "node-1", AgentToken: "agent-1", HeartbeatIntervalSeconds: 30}}
 	router := newAgentRouter(stub)
@@ -35,6 +36,7 @@ func TestAgentEnrollReturnsToken(t *testing.T) {
 	require.Equal(t, "agent-1", resp.AgentToken)
 }
 
+// TestAgentEnrollRequiresEnrollmentSecret 验证agent注册要求Enrollment密钥的预期行为场景。
 func TestAgentEnrollRequiresEnrollmentSecret(t *testing.T) {
 	router := newAgentRouter(&agentEndpointsStub{})
 
@@ -46,6 +48,7 @@ func TestAgentEnrollRequiresEnrollmentSecret(t *testing.T) {
 	require.Equal(t, http.StatusUnauthorized, recorder.Code)
 }
 
+// TestAgentEnrollMapsInvalidInputTo400 验证agent注册映射非法输入到400的异常或拒绝路径场景。
 func TestAgentEnrollMapsInvalidInputTo400(t *testing.T) {
 	stub := &agentEndpointsStub{enrollErr: service.ErrEnrollInputInvalid}
 	router := newAgentRouter(stub)
@@ -59,6 +62,7 @@ func TestAgentEnrollMapsInvalidInputTo400(t *testing.T) {
 	require.Equal(t, http.StatusBadRequest, recorder.Code)
 }
 
+// TestAgentHeartbeatRequiresAgentToken 验证agent心跳要求agent令牌的预期行为场景。
 func TestAgentHeartbeatRequiresAgentToken(t *testing.T) {
 	router := newAgentRouter(&agentEndpointsStub{})
 
@@ -71,6 +75,7 @@ func TestAgentHeartbeatRequiresAgentToken(t *testing.T) {
 	require.Equal(t, http.StatusBadRequest, recorder.Code)
 }
 
+// TestAgentHeartbeatPropagatesAgentTokenError 验证agent心跳透传agent令牌错误的错误映射或错误记录场景。
 func TestAgentHeartbeatPropagatesAgentTokenError(t *testing.T) {
 	stub := &agentEndpointsStub{heartbeatErr: service.ErrAgentTokenInvalid}
 	router := newAgentRouter(stub)
@@ -84,6 +89,7 @@ func TestAgentHeartbeatPropagatesAgentTokenError(t *testing.T) {
 	require.Equal(t, http.StatusUnauthorized, recorder.Code)
 }
 
+// TestAgentEnrollPushesTokenToSink 验证agent注册Pushes令牌到Sink的预期行为场景。
 func TestAgentEnrollPushesTokenToSink(t *testing.T) {
 	stub := &agentEndpointsStub{enrollResult: service.AgentEnrollResult{NodeID: "node-99", AgentToken: "agent-x", HeartbeatIntervalSeconds: 30}}
 	var seenNode, seenToken string
@@ -106,6 +112,7 @@ func TestAgentEnrollPushesTokenToSink(t *testing.T) {
 	require.Equal(t, "agent-x", seenToken)
 }
 
+// TestAgentEnrollSinkSkippedWhenTokenEmpty 验证agent注册SinkSkipped当令牌空值的边界条件场景。
 func TestAgentEnrollSinkSkippedWhenTokenEmpty(t *testing.T) {
 	stub := &agentEndpointsStub{enrollResult: service.AgentEnrollResult{NodeID: "n", AgentToken: ""}}
 	called := false

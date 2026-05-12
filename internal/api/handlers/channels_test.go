@@ -48,6 +48,7 @@ func newChannelsTestRouter(t *testing.T, svc channelService) (*gin.Engine, *auth
 	return router, tokens
 }
 
+// TestChannelsBeginAuthHappy 验证渠道开始认证成功路径的成功路径场景。
 func TestChannelsBeginAuthHappy(t *testing.T) {
 	stub := &channelServiceStub{beginResult: service.ChallengeResult{Status: "pending_auth", ChannelType: "wechat"}}
 	router, tokens := newChannelsTestRouter(t, stub)
@@ -62,6 +63,7 @@ func TestChannelsBeginAuthHappy(t *testing.T) {
 	assert.Contains(t, w.Body.String(), "challenge")
 }
 
+// TestChannelsBeginAuthForbidden 验证渠道开始认证禁止访问的异常或拒绝路径场景。
 func TestChannelsBeginAuthForbidden(t *testing.T) {
 	stub := &channelServiceStub{beginErr: service.ErrForbidden}
 	router, tokens := newChannelsTestRouter(t, stub)
@@ -75,6 +77,7 @@ func TestChannelsBeginAuthForbidden(t *testing.T) {
 	assert.Equal(t, http.StatusForbidden, w.Code)
 }
 
+// TestChannelsBeginAuthNotFound 验证渠道开始认证未找到的异常或拒绝路径场景。
 func TestChannelsBeginAuthNotFound(t *testing.T) {
 	stub := &channelServiceStub{beginErr: service.ErrNotFound}
 	router, tokens := newChannelsTestRouter(t, stub)
@@ -88,6 +91,7 @@ func TestChannelsBeginAuthNotFound(t *testing.T) {
 	assert.Equal(t, http.StatusNotFound, w.Code)
 }
 
+// TestChannelsPollAuthHappy 验证渠道轮询认证成功路径的成功路径场景。
 func TestChannelsPollAuthHappy(t *testing.T) {
 	stub := &channelServiceStub{pollResult: service.ProgressResult{Status: "pending"}}
 	router, tokens := newChannelsTestRouter(t, stub)
@@ -102,6 +106,7 @@ func TestChannelsPollAuthHappy(t *testing.T) {
 	assert.Contains(t, w.Body.String(), "progress")
 }
 
+// TestChannelsUnbindHappy 验证渠道解绑成功路径的成功路径场景。
 func TestChannelsUnbindHappy(t *testing.T) {
 	stub := &channelServiceStub{}
 	router, tokens := newChannelsTestRouter(t, stub)
@@ -115,6 +120,7 @@ func TestChannelsUnbindHappy(t *testing.T) {
 	assert.Equal(t, http.StatusNoContent, w.Code)
 }
 
+// TestChannelsRequiresToken 验证渠道要求令牌的预期行为场景。
 func TestChannelsRequiresToken(t *testing.T) {
 	stub := &channelServiceStub{}
 	router, _ := newChannelsTestRouter(t, stub)
@@ -126,6 +132,7 @@ func TestChannelsRequiresToken(t *testing.T) {
 	assert.Equal(t, http.StatusUnauthorized, w.Code)
 }
 
+// TestChannelsAdapterMissing 验证渠道适配器缺失的异常或拒绝路径场景。
 func TestChannelsAdapterMissing(t *testing.T) {
 	stub := &channelServiceStub{beginErr: service.ErrChannelAdapterMissing}
 	router, tokens := newChannelsTestRouter(t, stub)

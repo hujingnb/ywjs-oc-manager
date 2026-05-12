@@ -22,6 +22,7 @@ const (
 	testMemUID    = "00000000-0000-0000-0000-0000000000b2"
 )
 
+// TestMemberServiceCreateRequiresOrgManagement 验证成员服务创建要求组织Management的预期行为场景。
 func TestMemberServiceCreateRequiresOrgManagement(t *testing.T) {
 	store := newMemberStoreStub(t)
 	svc := NewMemberService(store, fakeHash)
@@ -32,6 +33,7 @@ func TestMemberServiceCreateRequiresOrgManagement(t *testing.T) {
 	require.ErrorIs(t, err, ErrForbidden)
 }
 
+// TestMemberServiceCreateRejectsPlatformAdmin 验证成员服务创建拒绝平台管理员的异常或拒绝路径场景。
 func TestMemberServiceCreateRejectsPlatformAdmin(t *testing.T) {
 	store := newMemberStoreStub(t)
 	svc := NewMemberService(store, fakeHash)
@@ -42,6 +44,7 @@ func TestMemberServiceCreateRejectsPlatformAdmin(t *testing.T) {
 	require.ErrorIs(t, err, ErrForbidden)
 }
 
+// TestMemberServiceCreateRejectsDisabledOrg 验证成员服务创建拒绝禁用组织的异常或拒绝路径场景。
 func TestMemberServiceCreateRejectsDisabledOrg(t *testing.T) {
 	store := newMemberStoreStub(t)
 	org := store.orgs[testOrgID]
@@ -55,6 +58,7 @@ func TestMemberServiceCreateRejectsDisabledOrg(t *testing.T) {
 	require.ErrorIs(t, err, ErrMemberCreateInvalid)
 }
 
+// TestMemberServiceCreateRejectsInvalidRole 验证成员服务创建拒绝非法角色的异常或拒绝路径场景。
 func TestMemberServiceCreateRejectsInvalidRole(t *testing.T) {
 	store := newMemberStoreStub(t)
 	svc := NewMemberService(store, fakeHash)
@@ -65,6 +69,7 @@ func TestMemberServiceCreateRejectsInvalidRole(t *testing.T) {
 	require.ErrorIs(t, err, ErrMemberCreateInvalid)
 }
 
+// TestMemberServiceCreateAssignsDefaultRoleAndHashesPassword 验证成员服务创建Assigns默认值角色并Hashes密码的边界条件场景。
 func TestMemberServiceCreateAssignsDefaultRoleAndHashesPassword(t *testing.T) {
 	store := newMemberStoreStub(t)
 	svc := NewMemberService(store, fakeHash)
@@ -80,6 +85,7 @@ func TestMemberServiceCreateAssignsDefaultRoleAndHashesPassword(t *testing.T) {
 	require.Equal(t, domain.StatusActive, store.lastCreate.Status)
 }
 
+// TestCreateMemberAllowsSameUsernameAcrossDifferentOrganizations 验证创建成员允许相同Username跨不同组织的预期行为场景。
 func TestCreateMemberAllowsSameUsernameAcrossDifferentOrganizations(t *testing.T) {
 	store := newMemberStoreStub(t)
 	store.orgs[testOrg2ID] = sqlc.Organization{ID: mustUUID(t, testOrg2ID), Name: "另一个组织", Status: domain.StatusActive}
@@ -105,6 +111,7 @@ func TestCreateMemberAllowsSameUsernameAcrossDifferentOrganizations(t *testing.T
 	require.Equal(t, "admin", second.Username)
 }
 
+// TestMemberServiceListLimitsOrgScope 验证成员服务列表限制组织scope的边界条件场景。
 func TestMemberServiceListLimitsOrgScope(t *testing.T) {
 	store := newMemberStoreStub(t)
 	svc := NewMemberService(store, fakeHash)
@@ -113,6 +120,7 @@ func TestMemberServiceListLimitsOrgScope(t *testing.T) {
 	require.ErrorIs(t, err, ErrForbidden)
 }
 
+// TestMemberServiceListAppliesDefaultPageSize 验证成员服务列表应用默认值分页Size的边界条件场景。
 func TestMemberServiceListAppliesDefaultPageSize(t *testing.T) {
 	store := newMemberStoreStub(t)
 	store.users[testAdminUID] = sqlc.User{
@@ -128,6 +136,7 @@ func TestMemberServiceListAppliesDefaultPageSize(t *testing.T) {
 	require.Equal(t, int32(50), store.lastList.Limit)
 }
 
+// TestMemberServiceListClampsMaxPageSize 验证成员服务列表限制最大分页Size的边界条件场景。
 func TestMemberServiceListClampsMaxPageSize(t *testing.T) {
 	store := newMemberStoreStub(t)
 	svc := NewMemberService(store, fakeHash)
@@ -137,6 +146,7 @@ func TestMemberServiceListClampsMaxPageSize(t *testing.T) {
 	require.Equal(t, int32(200), store.lastList.Limit)
 }
 
+// TestMemberServiceGetSelfAccessibleByMember 验证成员服务获取自身Accessible通过成员的预期行为场景。
 func TestMemberServiceGetSelfAccessibleByMember(t *testing.T) {
 	store := newMemberStoreStub(t)
 	store.users[testMemUID] = sqlc.User{
@@ -153,6 +163,7 @@ func TestMemberServiceGetSelfAccessibleByMember(t *testing.T) {
 	require.Equal(t, "bob", result.Username)
 }
 
+// TestMemberServiceGetMemberRejectsCrossUserAccess 验证成员服务获取成员拒绝跨用户Access的异常或拒绝路径场景。
 func TestMemberServiceGetMemberRejectsCrossUserAccess(t *testing.T) {
 	store := newMemberStoreStub(t)
 	store.users[testMemUID] = sqlc.User{
@@ -166,6 +177,7 @@ func TestMemberServiceGetMemberRejectsCrossUserAccess(t *testing.T) {
 	require.ErrorIs(t, err, ErrForbidden)
 }
 
+// TestMemberServiceUpdateProfileSelfAllowed 验证成员服务更新Profile自身Allowed的预期行为场景。
 func TestMemberServiceUpdateProfileSelfAllowed(t *testing.T) {
 	store := newMemberStoreStub(t)
 	store.users[testMemUID] = sqlc.User{
@@ -181,6 +193,7 @@ func TestMemberServiceUpdateProfileSelfAllowed(t *testing.T) {
 	require.Equal(t, "Bobby", result.DisplayName)
 }
 
+// TestMemberServiceUpdateRoleRequiresAdmin 验证成员服务更新角色要求管理员的预期行为场景。
 func TestMemberServiceUpdateRoleRequiresAdmin(t *testing.T) {
 	store := newMemberStoreStub(t)
 	store.users[testMemUID] = sqlc.User{
@@ -196,6 +209,7 @@ func TestMemberServiceUpdateRoleRequiresAdmin(t *testing.T) {
 	require.ErrorIs(t, err, ErrForbidden)
 }
 
+// TestMemberServiceSetStatusBlocksSelfDisable 验证成员服务Set状态Blocks自身禁用的预期行为场景。
 func TestMemberServiceSetStatusBlocksSelfDisable(t *testing.T) {
 	store := newMemberStoreStub(t)
 	store.users[testAdminUID] = sqlc.User{
@@ -209,6 +223,7 @@ func TestMemberServiceSetStatusBlocksSelfDisable(t *testing.T) {
 	require.ErrorIs(t, err, ErrMemberCreateInvalid)
 }
 
+// TestMemberServiceResetPasswordRequiresAdmin 验证成员服务Reset密码要求管理员的预期行为场景。
 func TestMemberServiceResetPasswordRequiresAdmin(t *testing.T) {
 	store := newMemberStoreStub(t)
 	store.users[testMemUID] = sqlc.User{
@@ -223,6 +238,7 @@ func TestMemberServiceResetPasswordRequiresAdmin(t *testing.T) {
 	}
 }
 
+// TestMemberServiceResetPasswordSucceeds 验证成员服务Reset密码Succeeds的成功路径场景。
 func TestMemberServiceResetPasswordSucceeds(t *testing.T) {
 	store := newMemberStoreStub(t)
 	store.users[testMemUID] = sqlc.User{
@@ -242,6 +258,7 @@ func TestMemberServiceResetPasswordSucceeds(t *testing.T) {
 // fakeHash 在测试中用前缀代替真实 Argon2id，避免单测耗时。
 func fakeHash(password string) (string, error) { return "hashed:" + password, nil }
 
+// TestDeleteMember_SoftDeletesAndEnqueuesAppDelete 验证删除成员软删除Deletes并Enqueues应用删除的预期行为场景。
 func TestDeleteMember_SoftDeletesAndEnqueuesAppDelete(t *testing.T) {
 	stub := newMemberStoreStub(t)
 	target := sqlc.User{
@@ -272,6 +289,7 @@ func TestDeleteMember_SoftDeletesAndEnqueuesAppDelete(t *testing.T) {
 	require.NotEqual(t, "", notifier.lastJobID)
 }
 
+// TestDeleteMember_NoAppStillSoftDeletesUser 验证删除成员无应用仍然软删除Deletes用户的预期行为场景。
 func TestDeleteMember_NoAppStillSoftDeletesUser(t *testing.T) {
 	stub := newMemberStoreStub(t)
 	target := sqlc.User{
@@ -287,6 +305,7 @@ func TestDeleteMember_NoAppStillSoftDeletesUser(t *testing.T) {
 	require.Equal(t, 0, len(stub.jobs))
 }
 
+// TestDeleteMember_RejectsSelfDeletion 验证删除成员拒绝自身Deletion的异常或拒绝路径场景。
 func TestDeleteMember_RejectsSelfDeletion(t *testing.T) {
 	stub := newMemberStoreStub(t)
 	target := sqlc.User{
@@ -300,6 +319,7 @@ func TestDeleteMember_RejectsSelfDeletion(t *testing.T) {
 	require.Error(t, err)
 }
 
+// TestDeleteMember_OrgMemberCannotDeleteOthers 验证删除成员组织成员Cannot删除其他s的预期行为场景。
 func TestDeleteMember_OrgMemberCannotDeleteOthers(t *testing.T) {
 	stub := newMemberStoreStub(t)
 	target := sqlc.User{

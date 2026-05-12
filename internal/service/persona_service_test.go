@@ -16,6 +16,7 @@ import (
 
 const testPersonaOrgID = "00000000-0000-0000-0000-000000003001"
 
+// TestPersona_GetCurrentReturnsExisting 验证人设获取当前返回已有的成功路径场景。
 func TestPersona_GetCurrentReturnsExisting(t *testing.T) {
 	stub := &personaStub{
 		persona: sqlc.OrganizationPersona{
@@ -33,6 +34,7 @@ func TestPersona_GetCurrentReturnsExisting(t *testing.T) {
 	}
 }
 
+// TestPersona_GetCurrentMapsNoRowsToErrPersonaNotFound 验证人设获取当前映射无Rows到错误人设未找到的异常或拒绝路径场景。
 func TestPersona_GetCurrentMapsNoRowsToErrPersonaNotFound(t *testing.T) {
 	stub := &personaStub{getErr: pgx.ErrNoRows}
 	svc := NewPersonaService(stub)
@@ -40,6 +42,7 @@ func TestPersona_GetCurrentMapsNoRowsToErrPersonaNotFound(t *testing.T) {
 	require.ErrorIs(t, err, ErrPersonaNotFound)
 }
 
+// TestPersona_GetCurrentDeniedForOtherOrg 验证人设获取当前Denied针对其他组织的预期行为场景。
 func TestPersona_GetCurrentDeniedForOtherOrg(t *testing.T) {
 	stub := &personaStub{}
 	svc := NewPersonaService(stub)
@@ -47,6 +50,7 @@ func TestPersona_GetCurrentDeniedForOtherOrg(t *testing.T) {
 	require.ErrorIs(t, err, ErrPersonaDenied)
 }
 
+// TestPersona_ReplaceWritesNewVersion 验证人设替换写入NewVersion的成功路径场景。
 func TestPersona_ReplaceWritesNewVersion(t *testing.T) {
 	stub := &personaStub{
 		createResult: sqlc.OrganizationPersona{
@@ -65,6 +69,7 @@ func TestPersona_ReplaceWritesNewVersion(t *testing.T) {
 	require.True(t, stub.createCalled)
 }
 
+// TestPersona_ReplaceRejectsEmptyPrompt 验证人设替换拒绝空值提示词的异常或拒绝路径场景。
 func TestPersona_ReplaceRejectsEmptyPrompt(t *testing.T) {
 	stub := &personaStub{}
 	svc := NewPersonaService(stub)
@@ -72,6 +77,7 @@ func TestPersona_ReplaceRejectsEmptyPrompt(t *testing.T) {
 	require.Error(t, err)
 }
 
+// TestPersona_OrgAdminCanEditOwnOrg 验证人设组织管理员权限判断编辑本人组织的预期行为场景。
 func TestPersona_OrgAdminCanEditOwnOrg(t *testing.T) {
 	stub := &personaStub{
 		createResult: sqlc.OrganizationPersona{OrgID: mustUUID(t, testPersonaOrgID), SystemPrompt: "x", Version: 1},
@@ -87,6 +93,7 @@ func TestPersona_OrgAdminCanEditOwnOrg(t *testing.T) {
 	}
 }
 
+// TestPersona_OrgMemberCannotEdit 验证人设组织成员Cannot编辑的预期行为场景。
 func TestPersona_OrgMemberCannotEdit(t *testing.T) {
 	stub := &personaStub{}
 	svc := NewPersonaService(stub)

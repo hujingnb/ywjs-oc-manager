@@ -20,6 +20,7 @@ const (
 	testKnowledgeOwner = "00000000-0000-0000-0000-000000000e04"
 )
 
+// TestKnowledgeServiceSaveOrgRequiresOrgManager 验证知识库服务保存组织要求组织Manager的预期行为场景。
 func TestKnowledgeServiceSaveOrgRequiresOrgManager(t *testing.T) {
 	svc := newKnowledgeService(t)
 
@@ -27,6 +28,7 @@ func TestKnowledgeServiceSaveOrgRequiresOrgManager(t *testing.T) {
 	require.ErrorIs(t, err, ErrKnowledgeForbidden)
 }
 
+// TestKnowledgeServiceSaveOrgWritesFile 验证知识库服务保存组织写入文件的成功路径场景。
 func TestKnowledgeServiceSaveOrgWritesFile(t *testing.T) {
 	svc := newKnowledgeService(t)
 
@@ -38,6 +40,7 @@ func TestKnowledgeServiceSaveOrgWritesFile(t *testing.T) {
 	assert.Equal(t, "doc.md", listing.Entries[0].Name)
 }
 
+// TestKnowledgeServiceSaveAppRespectsOwnership 验证知识库服务保存应用遵守Ownership的预期行为场景。
 func TestKnowledgeServiceSaveAppRespectsOwnership(t *testing.T) {
 	svc := newKnowledgeService(t)
 
@@ -48,6 +51,7 @@ func TestKnowledgeServiceSaveAppRespectsOwnership(t *testing.T) {
 	require.NoError(t, err)
 }
 
+// TestKnowledgeServicePlatformAdminCannotWriteOrgOrAppKnowledge 验证知识库服务平台管理员Cannot写入组织或应用知识库的预期行为场景。
 func TestKnowledgeServicePlatformAdminCannotWriteOrgOrAppKnowledge(t *testing.T) {
 	svc := newKnowledgeService(t)
 
@@ -58,6 +62,7 @@ func TestKnowledgeServicePlatformAdminCannotWriteOrgOrAppKnowledge(t *testing.T)
 	require.ErrorIs(t, err, ErrKnowledgeForbidden)
 }
 
+// TestKnowledgeServiceListAppRequiresAccess 验证知识库服务列表应用要求Access的预期行为场景。
 func TestKnowledgeServiceListAppRequiresAccess(t *testing.T) {
 	svc := newKnowledgeService(t)
 
@@ -65,6 +70,7 @@ func TestKnowledgeServiceListAppRequiresAccess(t *testing.T) {
 	require.ErrorIs(t, err, ErrKnowledgeForbidden)
 }
 
+// TestKnowledgeServicePlatformAdminCanReadOrgAndAppKnowledge 验证知识库服务平台管理员读取权限组织并应用知识库的预期行为场景。
 func TestKnowledgeServicePlatformAdminCanReadOrgAndAppKnowledge(t *testing.T) {
 	svc := newKnowledgeService(t)
 
@@ -84,6 +90,7 @@ func TestKnowledgeServicePlatformAdminCanReadOrgAndAppKnowledge(t *testing.T) {
 	assert.Equal(t, "app.md", appListing.Entries[0].Name)
 }
 
+// TestKnowledgeServiceDeleteOrgRequiresManager 验证知识库服务删除组织要求Manager的预期行为场景。
 func TestKnowledgeServiceDeleteOrgRequiresManager(t *testing.T) {
 	svc := newKnowledgeService(t)
 
@@ -91,6 +98,7 @@ func TestKnowledgeServiceDeleteOrgRequiresManager(t *testing.T) {
 	require.ErrorIs(t, err, ErrKnowledgeForbidden)
 }
 
+// TestKnowledgeServicePlatformAdminCannotDeleteOrgOrRetrySync 验证知识库服务平台管理员Cannot删除组织或重试同步的预期行为场景。
 func TestKnowledgeServicePlatformAdminCannotDeleteOrgOrRetrySync(t *testing.T) {
 	svc := newKnowledgeService(t)
 	svc.SetRetryDispatcher(knowledgeRetryDispatcherStub{})
@@ -105,6 +113,7 @@ func TestKnowledgeServicePlatformAdminCannotDeleteOrgOrRetrySync(t *testing.T) {
 	require.ErrorIs(t, err, ErrKnowledgeForbidden)
 }
 
+// TestKnowledgeServicePlatformAdminCannotGetOrgSyncStatus 验证知识库服务平台管理员Cannot获取组织同步状态的预期行为场景。
 func TestKnowledgeServicePlatformAdminCannotGetOrgSyncStatus(t *testing.T) {
 	svc := newKnowledgeService(t)
 	svc.SetSyncStatusSource(knowledgeStatusSourceStub{})
@@ -113,6 +122,7 @@ func TestKnowledgeServicePlatformAdminCannotGetOrgSyncStatus(t *testing.T) {
 	require.ErrorIs(t, err, ErrKnowledgeForbidden)
 }
 
+// TestKnowledgeServiceOrgAdminCanGetOrgSyncStatus 验证知识库服务组织管理员权限判断获取组织同步状态的预期行为场景。
 func TestKnowledgeServiceOrgAdminCanGetOrgSyncStatus(t *testing.T) {
 	svc := newKnowledgeService(t)
 	svc.SetSyncStatusSource(knowledgeStatusSourceStub{})

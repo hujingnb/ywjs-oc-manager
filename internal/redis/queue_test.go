@@ -8,6 +8,7 @@ import (
 	"time"
 )
 
+// TestMemoryQueueEnqueueAndReserve 验证当前用户接口mory队列Enqueue并Reserve的预期行为场景。
 func TestMemoryQueueEnqueueAndReserve(t *testing.T) {
 	queue := NewMemoryQueue()
 	now := time.Date(2026, 1, 1, 0, 0, 0, 0, time.UTC)
@@ -26,6 +27,7 @@ func TestMemoryQueueEnqueueAndReserve(t *testing.T) {
 	require.Empty(t, queue.Pending())
 }
 
+// TestMemoryQueueDelayedEntriesNotVisibleUntilDue 验证当前用户接口mory队列DelayedEntries未VisibleUntilDue的预期行为场景。
 func TestMemoryQueueDelayedEntriesNotVisibleUntilDue(t *testing.T) {
 	queue := NewMemoryQueue()
 	now := time.Date(2026, 1, 1, 0, 0, 0, 0, time.UTC)
@@ -46,6 +48,7 @@ func TestMemoryQueueDelayedEntriesNotVisibleUntilDue(t *testing.T) {
 	}
 }
 
+// TestMemoryQueueDeduplicatesEnqueue 验证当前用户接口mory队列去重Enqueue的特殊分支或幂等场景。
 func TestMemoryQueueDeduplicatesEnqueue(t *testing.T) {
 	queue := NewMemoryQueue()
 	now := time.Date(2026, 1, 1, 0, 0, 0, 0, time.UTC)
@@ -60,6 +63,7 @@ func TestMemoryQueueDeduplicatesEnqueue(t *testing.T) {
 	require.Len(t, reserved, 1)
 }
 
+// TestMemoryQueueRespectsLimit 验证当前用户接口mory队列遵守Limit的预期行为场景。
 func TestMemoryQueueRespectsLimit(t *testing.T) {
 	queue := NewMemoryQueue()
 	now := time.Date(2026, 1, 1, 0, 0, 0, 0, time.UTC)
@@ -78,6 +82,7 @@ func TestMemoryQueueRespectsLimit(t *testing.T) {
 	require.Len(t, second, 3)
 }
 
+// TestRedisQueueEnqueueRequiresClient 验证Redis队列Enqueue要求客户端的预期行为场景。
 func TestRedisQueueEnqueueRequiresClient(t *testing.T) {
 	q := &RedisQueue{}
 	err := q.Enqueue(context.Background(), "job-1")

@@ -17,6 +17,7 @@ import (
 	"oc-manager/internal/service"
 )
 
+// TestMembersListRequiresToken 验证成员列表要求令牌的预期行为场景。
 func TestMembersListRequiresToken(t *testing.T) {
 	router, _ := newMembersTestRouter(t, &memberServiceStub{})
 
@@ -27,6 +28,7 @@ func TestMembersListRequiresToken(t *testing.T) {
 	require.Equal(t, http.StatusUnauthorized, recorder.Code)
 }
 
+// TestMembersCreateForwardsPrincipalAndOrg 验证成员创建转发Principal并组织的预期行为场景。
 func TestMembersCreateForwardsPrincipalAndOrg(t *testing.T) {
 	svc := &memberServiceStub{
 		createResult: service.MemberResult{ID: "user-1", Username: "alice", Role: domain.UserRoleOrgMember, Status: domain.StatusActive},
@@ -46,6 +48,7 @@ func TestMembersCreateForwardsPrincipalAndOrg(t *testing.T) {
 	require.Equal(t, domain.UserRolePlatformAdmin, svc.lastPrincipal.Role)
 }
 
+// TestMembersDisableMapsErrorToBadRequest 验证成员禁用映射错误到非法请求的异常或拒绝路径场景。
 func TestMembersDisableMapsErrorToBadRequest(t *testing.T) {
 	svc := &memberServiceStub{statusErr: service.ErrMemberCreateInvalid}
 	router, tokens := newMembersTestRouter(t, svc)
@@ -59,6 +62,7 @@ func TestMembersDisableMapsErrorToBadRequest(t *testing.T) {
 	require.Equal(t, http.StatusBadRequest, recorder.Code)
 }
 
+// TestMembersGetReturnsBody 验证成员获取返回请求体的成功路径场景。
 func TestMembersGetReturnsBody(t *testing.T) {
 	svc := &memberServiceStub{getResult: service.MemberResult{ID: "u1", Username: "alice"}}
 	router, tokens := newMembersTestRouter(t, svc)
@@ -113,6 +117,7 @@ func newMembersTestRouterWithOnboarding(t *testing.T, svc memberService, onboard
 	return router, tokens
 }
 
+// TestMembersOnboardMapsNoNodeAvailableTo503 验证成员引导映射无节点可用到503的错误映射或错误记录场景。
 func TestMembersOnboardMapsNoNodeAvailableTo503(t *testing.T) {
 	onboarding := &onboardingServiceStub{err: service.ErrNoNodeAvailable}
 	router, tokens := newMembersTestRouterWithOnboarding(t, &memberServiceStub{}, onboarding)

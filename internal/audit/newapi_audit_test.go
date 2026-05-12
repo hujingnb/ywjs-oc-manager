@@ -21,6 +21,7 @@ func (f *fakeAuditRecorder) Record(ctx context.Context, event service.AuditEvent
 	return service.AuditResult{}, nil
 }
 
+// TestRecordNewAPIFailure_WritesAuditEvent 验证记录 new-api失败写入审计事件的成功路径场景。
 func TestRecordNewAPIFailure_WritesAuditEvent(t *testing.T) {
 	rec := &fakeAuditRecorder{}
 	h := audit.NewNewAPIAuditHelper(rec)
@@ -45,6 +46,7 @@ func TestRecordNewAPIFailure_WritesAuditEvent(t *testing.T) {
 	assert.NotEqual(t, "", e.ErrorMessage)
 }
 
+// TestRecordNewAPIFailure_NoActorContextDefaultsToSystem 验证记录 new-api失败无操作者上下文默认值到系统的边界条件场景。
 func TestRecordNewAPIFailure_NoActorContextDefaultsToSystem(t *testing.T) {
 	rec := &fakeAuditRecorder{}
 	h := audit.NewNewAPIAuditHelper(rec)
@@ -61,6 +63,7 @@ func TestRecordNewAPIFailure_NoActorContextDefaultsToSystem(t *testing.T) {
 	assert.Equal(t, "", rec.events[0].ActorID)
 }
 
+// TestRecordNewAPIFailure_RecorderErrorDoesNotPanic 验证记录 new-api失败记录器错误不会 panic的预期行为场景。
 func TestRecordNewAPIFailure_RecorderErrorDoesNotPanic(t *testing.T) {
 	rec := &erroringAuditRecorder{}
 	h := audit.NewNewAPIAuditHelper(rec)

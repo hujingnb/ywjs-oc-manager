@@ -310,6 +310,7 @@ func int64Of(v any) int64 {
 	}
 }
 
+// TestClient_DeleteUser_AdminAuthHeaders 验证客户端删除用户管理员认证响应头的预期行为场景。
 func TestClient_DeleteUser_AdminAuthHeaders(t *testing.T) {
 	var (
 		gotAuthHeader string
@@ -336,6 +337,7 @@ func TestClient_DeleteUser_AdminAuthHeaders(t *testing.T) {
 	assert.Equal(t, "1", gotUserHeader)
 }
 
+// TestClient_DeleteUser_NotFoundMappedToErrNotFound 验证客户端删除用户未找到Mapped到错误未找到的异常或拒绝路径场景。
 func TestClient_DeleteUser_NotFoundMappedToErrNotFound(t *testing.T) {
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.WriteHeader(http.StatusNotFound)
@@ -361,6 +363,7 @@ func (f *fakeRefresher) RefreshAccessToken(ctx context.Context) (string, error) 
 	return f.nextAccessToken, nil
 }
 
+// TestUserScopedClient_401TriggersRefreshAndRetries 验证用户Scoped客户端401Triggers刷新并Retries的预期行为场景。
 func TestUserScopedClient_401TriggersRefreshAndRetries(t *testing.T) {
 	var requestCount int
 	var lastAuthHeader string
@@ -388,6 +391,7 @@ func TestUserScopedClient_401TriggersRefreshAndRetries(t *testing.T) {
 	assert.Equal(t, 1, refresher.callCount)
 }
 
+// TestUserScopedClient_401WithoutRefresherPropagates 验证用户Scoped客户端401不使用Refresher透传的错误映射或错误记录场景。
 func TestUserScopedClient_401WithoutRefresherPropagates(t *testing.T) {
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.WriteHeader(http.StatusUnauthorized)
@@ -399,6 +403,7 @@ func TestUserScopedClient_401WithoutRefresherPropagates(t *testing.T) {
 	require.ErrorIs(t, err, ErrUnauthorized)
 }
 
+// TestUserScopedClient_RefresherFailurePropagatesUnauthorized 验证用户Scoped客户端Refresher失败透传未授权的异常或拒绝路径场景。
 func TestUserScopedClient_RefresherFailurePropagatesUnauthorized(t *testing.T) {
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.WriteHeader(http.StatusUnauthorized)
@@ -411,6 +416,7 @@ func TestUserScopedClient_RefresherFailurePropagatesUnauthorized(t *testing.T) {
 	require.ErrorIs(t, err, ErrUnauthorized)
 }
 
+// TestUserScopedClient_SecondCall401AfterRefreshDoesNotLoop 验证用户Scoped客户端SecondCall401后刷新Does未循环的预期行为场景。
 func TestUserScopedClient_SecondCall401AfterRefreshDoesNotLoop(t *testing.T) {
 	var requestCount int
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
