@@ -34,6 +34,18 @@ OCM_WEB_IMAGE=ghcr.io/your-org/openclaw-manager-web@sha256:<digest>
 
 生产环境不要使用 `latest` 或可变 tag。`openclaw.runtime_image` 也应使用 runtime 镜像 digest，确保各 runtime node 运行的 OpenClaw 容器版本可追溯。
 
+### manager-api 镜像契约
+
+本仓库当前不提供生产 `manager-api` Dockerfile，因此 `OCM_MANAGER_IMAGE` 指向的生产镜像必须自行满足以下契约：
+
+- 默认入口能够启动 manager HTTP server，并按 `OCM_CONFIG=/etc/manager/config.yaml` 读取配置。
+- 镜像工作目录内必须包含可执行的 `./migrate`，用于执行 `docker compose run --rm manager-api ./migrate up`。
+- 镜像必须包含 `wget`，或包含与 Compose healthcheck 保持一致的兼容 `/healthz` 探测工具；当前 Compose 使用 `wget -qO- http://localhost:8080/healthz`。
+
+### manager-web 镜像契约
+
+`OCM_WEB_IMAGE` 指向的前端生产镜像必须监听容器内 `80` 端口，并支持 Vue history 模式的 SPA fallback。若使用 nginx，应配置 `try_files $uri $uri/ /index.html`；若使用其他静态服务，也必须提供等价行为，确保刷新或直接访问前端路由时返回 `index.html`。
+
 ## 密码编码
 
 `MANAGER_POSTGRES_PASSWORD` 是 PostgreSQL 容器接收的原始密码。`MANAGER_POSTGRES_DSN_PASSWORD` 是同一个密码的 URL 编码形式，用于写入 `config/manager.yaml` 的 `database.url`。
@@ -41,6 +53,12 @@ OCM_WEB_IMAGE=ghcr.io/your-org/openclaw-manager-web@sha256:<digest>
 当原始密码包含 `@`、`:`、`/`、`?`、`#`、空格等 URL 保留字符时，必须把编码后的值填入 DSN。例如原始密码 `p@ss:word` 对应 DSN 密码 `p%40ss%3Aword`。
 
 `MANAGER_REDIS_PASSWORD` 是 Redis 原始密码，同时写入 `.env` 和 `config/manager.yaml` 的 `redis.password`。
+
+## Docker Socket 权限
+
+`manager-api` 挂载 `/var/run/docker.sock` 是为了执行镜像同步相关操作，让 manager 能通过宿主 Docker daemon 管理生产运行所需的容器镜像。Docker socket 具备 root 等价权限：容器内进程一旦获得该 socket，就可能创建特权容器、挂载宿主路径或影响宿主上的其他容器。
+
+因此生产部署必须把 manager 服务器视为高信任主机进行加固：限制 SSH 和运维入口、最小化同机运行的其他工作负载、及时更新 Docker/内核安全补丁，并确保 `OCM_MANAGER_IMAGE` 来自可信构建链且固定到 digest。若无法接受直接暴露 Docker socket，应改用受限 Docker socket proxy，仅开放镜像同步必需 API；或改成 registry-based image distribution，由 CI/CD 或镜像仓库完成分发，避免 manager-api 直接访问宿主 Docker socket。
 
 ## 健康检查
 
@@ -50,7 +68,7 @@ OCM_WEB_IMAGE=ghcr.io/your-org/openclaw-manager-web@sha256:<digest>
 wget -qO- http://localhost:8080/healthz
 ```
 
-因此 manager-api 镜像需要内置 `wget`，否则容器会因健康检查命令不存在而保持 unhealthy。若未来镜像改用专用 healthcheck binary，应同步调整本 Compose 与 README。
+因此 manager-api 镜像需要内置 `wget`，否则容器会因健康检查命令不存在而保持 unhealthy。若未来镜像改用专用 healthcheck binary，应同步调整本 Compose 与 README 中的镜像契约。
 
 ## 运行检查
 
