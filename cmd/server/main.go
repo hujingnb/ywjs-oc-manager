@@ -342,6 +342,11 @@ func runManager(ctx context.Context, cfg config.Config, logOut io.Writer) error 
 	runtimeRefreshTask := service.NewPeriodicReconciler("runtime_refresh_status_dispatch", 30*time.Second, runtimeRefresh.Tick)
 	healthCheckDisp := newHealthCheckDispatcher(dbStore.Queries, redisQueue)
 	healthCheckTask := service.NewPeriodicReconciler("app_health_check_dispatch", 60*time.Second, healthCheckDisp.Tick)
+	resourceCleanup := service.NewResourceSampleCleanup(dbStore.Queries)
+	resourceCleanupTask := service.NewPeriodicReconciler("resource_sample_cleanup", time.Hour, func(ctx context.Context) error {
+		_, _, err := resourceCleanup.RunOnce(ctx)
+		return err
+	})
 
 	eg, gctx := errgroup.WithContext(rootCtx)
 
@@ -358,6 +363,7 @@ func runManager(ctx context.Context, cfg config.Config, logOut io.Writer) error 
 	eg.Go(func() error { return nodeProbeTask.Run(gctx, logger) })
 	eg.Go(func() error { return runtimeRefreshTask.Run(gctx, logger) })
 	eg.Go(func() error { return healthCheckTask.Run(gctx, logger) })
+	eg.Go(func() error { return resourceCleanupTask.Run(gctx, logger) })
 	eg.Go(func() error {
 		<-gctx.Done()
 		shutdownCtx, shutdownCancel := context.WithTimeout(context.Background(), 30*time.Second)
