@@ -20,22 +20,28 @@ const (
 // ResourceSampleCleanupStore 抽象资源采样清理需要的删除能力。
 // service 层只关心 cutoff 和批大小，避免把 sqlc 参数结构体泄漏到清理逻辑里。
 type ResourceSampleCleanupStore interface {
+	// DeleteOldNodeResourceSamples 按 cutoff 和批大小删除过期节点资源采样。
 	DeleteOldNodeResourceSamples(ctx context.Context, cutoff pgtype.Timestamptz, limit int32) (int64, error)
+	// DeleteOldInstanceResourceSamples 按 cutoff 和批大小删除过期实例资源采样。
 	DeleteOldInstanceResourceSamples(ctx context.Context, cutoff pgtype.Timestamptz, limit int32) (int64, error)
 }
 
 // resourceSampleCleanupSQLCStore 描述 sqlc 生成代码当前暴露的删除方法形状。
 // NewResourceSampleCleanup 会把它适配成 ResourceSampleCleanupStore，保持 cmd/server 装配简洁。
 type resourceSampleCleanupSQLCStore interface {
+	// DeleteOldNodeResourceSamples 是 sqlc 生成的节点采样批量删除入口。
 	DeleteOldNodeResourceSamples(ctx context.Context, arg sqlc.DeleteOldNodeResourceSamplesParams) (int64, error)
+	// DeleteOldInstanceResourceSamples 是 sqlc 生成的实例采样批量删除入口。
 	DeleteOldInstanceResourceSamples(ctx context.Context, arg sqlc.DeleteOldInstanceResourceSamplesParams) (int64, error)
 }
 
 // ResourceSampleCleanup 清理超出保留期的节点与实例资源采样。
 // now 可在测试中替换，生产环境默认使用 time.Now。
 type ResourceSampleCleanup struct {
+	// store 提供实际删除历史采样的持久化能力。
 	store ResourceSampleCleanupStore
-	now   func() time.Time
+	// now 提供当前时间，便于测试固定 cutoff 边界。
+	now func() time.Time
 }
 
 // NewResourceSampleCleanup 创建资源采样清理器。
@@ -79,6 +85,7 @@ func normalizeResourceSampleCleanupStore(store any) ResourceSampleCleanupStore {
 // resourceSampleCleanupSQLCAdapter 负责隔离 sqlc 参数结构体，
 // 避免保留期和批大小计算逻辑直接耦合到生成代码类型。
 type resourceSampleCleanupSQLCAdapter struct {
+	// store 保存 sqlc 生成仓储，用于把简化参数转成生成参数后委托执行。
 	store resourceSampleCleanupSQLCStore
 }
 

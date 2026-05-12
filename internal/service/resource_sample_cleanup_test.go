@@ -10,19 +10,26 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
+// resourceSampleCleanupStoreStub 记录清理器传入的 cutoff 和批大小，避免测试依赖真实数据库。
 type resourceSampleCleanupStoreStub struct {
-	nodeCutoff     pgtype.Timestamptz
-	nodeLimit      int32
+	// nodeCutoff 记录节点资源采样删除时使用的过期时间边界。
+	nodeCutoff pgtype.Timestamptz
+	// nodeLimit 记录节点资源采样删除时使用的单批上限。
+	nodeLimit int32
+	// instanceCutoff 记录实例资源采样删除时使用的过期时间边界。
 	instanceCutoff pgtype.Timestamptz
-	instanceLimit  int32
+	// instanceLimit 记录实例资源采样删除时使用的单批上限。
+	instanceLimit int32
 }
 
+// DeleteOldNodeResourceSamples 模拟节点采样删除，并保存调用参数供断言使用。
 func (s *resourceSampleCleanupStoreStub) DeleteOldNodeResourceSamples(_ context.Context, cutoff pgtype.Timestamptz, limit int32) (int64, error) {
 	s.nodeCutoff = cutoff
 	s.nodeLimit = limit
 	return 12, nil
 }
 
+// DeleteOldInstanceResourceSamples 模拟实例采样删除，并保存调用参数供断言使用。
 func (s *resourceSampleCleanupStoreStub) DeleteOldInstanceResourceSamples(_ context.Context, cutoff pgtype.Timestamptz, limit int32) (int64, error) {
 	s.instanceCutoff = cutoff
 	s.instanceLimit = limit
