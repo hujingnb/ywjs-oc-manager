@@ -15,16 +15,94 @@ import (
 	"oc-manager/internal/store/sqlc"
 )
 
+const (
+	authTestOrgID           = "00000000-0000-0000-0000-000000000101"
+	authTestPlatformAdminID = "00000000-0000-0000-0000-000000000200"
+	authTestOrgAdminID      = "00000000-0000-0000-0000-000000000201"
+	authTestOrgMemberID     = "00000000-0000-0000-0000-000000000202"
+)
+
+func TestAuthServiceLoginPlatformAdminWithoutOrgCode(t *testing.T) {
+	store := newAuthStoreStub(t)
+	svc := newTestAuthService(t, store)
+
+	result, err := svc.Login(context.Background(), LoginInput{
+		Username: "admin",
+		Password: "correct-password",
+	})
+
+	require.NoError(t, err)
+	require.Equal(t, domain.UserRolePlatformAdmin, result.User.Role)
+	require.Equal(t, "admin", result.User.Username)
+	require.Empty(t, result.User.OrgID)
+}
+
+func TestAuthServiceLoginRejectsPlatformAdminWithOrgCode(t *testing.T) {
+	store := newAuthStoreStub(t)
+	delete(store.orgUsersByKey, orgUserKey(store.orgsByCode["test-org"].ID, "admin"))
+	svc := newTestAuthService(t, store)
+
+	_, err := svc.Login(context.Background(), LoginInput{
+		OrgCode:  "test-org",
+		Username: "admin",
+		Password: "correct-password",
+	})
+
+	require.ErrorIs(t, err, ErrInvalidCredentials)
+}
+
+func TestAuthServiceLoginOrgUserWithOrgCode(t *testing.T) {
+	store := newAuthStoreStub(t)
+	svc := newTestAuthService(t, store)
+
+	result, err := svc.Login(context.Background(), LoginInput{
+		OrgCode:  "test-org",
+		Username: "admin",
+		Password: "correct-password",
+	})
+
+	require.NoError(t, err)
+	require.Equal(t, domain.UserRoleOrgAdmin, result.User.Role)
+	require.Equal(t, "admin", result.User.Username)
+	require.Equal(t, authTestOrgID, result.User.OrgID)
+}
+
+func TestAuthServiceLoginRejectsOrgUserWithoutOrgCode(t *testing.T) {
+	store := newAuthStoreStub(t)
+	svc := newTestAuthService(t, store)
+
+	_, err := svc.Login(context.Background(), LoginInput{
+		Username: "member",
+		Password: "correct-password",
+	})
+
+	require.ErrorIs(t, err, ErrInvalidCredentials)
+}
+
+func TestAuthServiceLoginRejectsUnknownOrgCode(t *testing.T) {
+	store := newAuthStoreStub(t)
+	svc := newTestAuthService(t, store)
+
+	_, err := svc.Login(context.Background(), LoginInput{
+		OrgCode:  "missing-org",
+		Username: "admin",
+		Password: "correct-password",
+	})
+
+	require.ErrorIs(t, err, ErrInvalidCredentials)
+}
+
 func TestAuthServiceLoginIssuesTokens(t *testing.T) {
 	store := newAuthStoreStub(t)
 	svc := newTestAuthService(t, store)
 
 	result, err := svc.Login(context.Background(), LoginInput{
-		Username: "member@example.com",
+		OrgCode:  "test-org",
+		Username: "admin",
 		Password: "correct-password",
 	})
 	require.NoError(t, err)
-	require.Equal(t, "member@example.com", result.User.Username)
+	require.Equal(t, "admin", result.User.Username)
 	if result.Tokens.AccessToken == "" || result.Tokens.RefreshToken == "" {
 		t.Fatal("期望登录后返回 access token 和 refresh token")
 	}
@@ -37,7 +115,8 @@ func TestAuthServiceLoginRejectsWrongPassword(t *testing.T) {
 	svc := newTestAuthService(t, store)
 
 	_, err := svc.Login(context.Background(), LoginInput{
-		Username: "member@example.com",
+		OrgCode:  "test-org",
+		Username: "admin",
 		Password: "wrong-password",
 	})
 	require.ErrorIs(t, err, ErrInvalidCredentials)
@@ -45,11 +124,15 @@ func TestAuthServiceLoginRejectsWrongPassword(t *testing.T) {
 
 func TestAuthServiceLoginRejectsDisabledOrg(t *testing.T) {
 	store := newAuthStoreStub(t)
-	store.org.Status = domain.StatusDisabled
+	org := store.orgsByCode["test-org"]
+	org.Status = domain.StatusDisabled
+	store.orgsByCode["test-org"] = org
+	store.orgsByID[uuidToString(org.ID)] = org
 	svc := newTestAuthService(t, store)
 
 	_, err := svc.Login(context.Background(), LoginInput{
-		Username: "member@example.com",
+		OrgCode:  "test-org",
+		Username: "admin",
 		Password: "correct-password",
 	})
 	require.ErrorIs(t, err, ErrOrgDisabled)
@@ -60,7 +143,8 @@ func TestAuthServiceRefreshRotatesRefreshToken(t *testing.T) {
 	svc := newTestAuthService(t, store)
 
 	login, err := svc.Login(context.Background(), LoginInput{
-		Username: "member@example.com",
+		OrgCode:  "test-org",
+		Username: "admin",
 		Password: "correct-password",
 	})
 	require.NoError(t, err)
@@ -87,7 +171,7 @@ func TestAuthServiceRefreshRejectsExpiredToken(t *testing.T) {
 	store := newAuthStoreStub(t)
 	svc := newTestAuthService(t, store)
 	login, err := svc.Login(context.Background(), LoginInput{
-		Username: "member@example.com",
+		Username: "admin",
 		Password: "correct-password",
 	})
 	require.NoError(t, err)
@@ -108,7 +192,7 @@ func TestAuthServiceRefreshRejectsRotatedToken(t *testing.T) {
 	store := newAuthStoreStub(t)
 	svc := newTestAuthService(t, store)
 	login, err := svc.Login(context.Background(), LoginInput{
-		Username: "member@example.com",
+		Username: "admin",
 		Password: "correct-password",
 	})
 	require.NoError(t, err)
@@ -131,8 +215,10 @@ func newTestAuthService(t *testing.T, store *authStoreStub) *AuthService {
 
 func newAuthStoreStub(t *testing.T) *authStoreStub {
 	t.Helper()
-	orgID := mustUUID(t, "00000000-0000-0000-0000-000000000101")
-	userID := mustUUID(t, "00000000-0000-0000-0000-000000000201")
+	orgID := mustUUID(t, authTestOrgID)
+	platformID := mustUUID(t, authTestPlatformAdminID)
+	orgAdminID := mustUUID(t, authTestOrgAdminID)
+	orgMemberID := mustUUID(t, authTestOrgMemberID)
 	refreshID := mustUUID(t, "00000000-0000-0000-0000-000000000301")
 	hash, err := auth.HashPassword("correct-password", auth.PasswordParams{
 		Memory:      32,
@@ -142,63 +228,128 @@ func newAuthStoreStub(t *testing.T) *authStoreStub {
 		KeyLength:   16,
 	})
 	require.NoError(t, err)
+	org := sqlc.Organization{
+		ID:     orgID,
+		Code:   "test-org",
+		Name:   "测试组织",
+		Status: domain.StatusActive,
+	}
+	platformAdmin := sqlc.User{
+		ID:           platformID,
+		Username:     "admin",
+		PasswordHash: hash,
+		DisplayName:  "平台管理员",
+		Role:         domain.UserRolePlatformAdmin,
+		Status:       domain.StatusActive,
+	}
+	orgAdmin := sqlc.User{
+		ID:           orgAdminID,
+		OrgID:        orgID,
+		Username:     "admin",
+		PasswordHash: hash,
+		DisplayName:  "组织管理员",
+		Role:         domain.UserRoleOrgAdmin,
+		Status:       domain.StatusActive,
+	}
+	orgMember := sqlc.User{
+		ID:           orgMemberID,
+		OrgID:        orgID,
+		Username:     "member",
+		PasswordHash: hash,
+		DisplayName:  "组织成员",
+		Role:         domain.UserRoleOrgMember,
+		Status:       domain.StatusActive,
+	}
 	return &authStoreStub{
+		usersByID: map[string]sqlc.User{
+			uuidToString(platformAdmin.ID): platformAdmin,
+			uuidToString(orgAdmin.ID):      orgAdmin,
+			uuidToString(orgMember.ID):     orgMember,
+		},
+		platformByName: map[string]sqlc.User{
+			platformAdmin.Username: platformAdmin,
+		},
+		orgUsersByKey: map[string]sqlc.User{
+			orgUserKey(org.ID, orgAdmin.Username):  orgAdmin,
+			orgUserKey(org.ID, orgMember.Username): orgMember,
+		},
+		orgsByID: map[string]sqlc.Organization{
+			uuidToString(org.ID): org,
+		},
+		orgsByCode: map[string]sqlc.Organization{
+			org.Code: org,
+		},
 		nextRefreshID: refreshID,
-		org: sqlc.Organization{
-			ID:     orgID,
-			Name:   "测试组织",
-			Status: domain.StatusActive,
-		},
-		user: sqlc.User{
-			ID:           userID,
-			OrgID:        orgID,
-			Username:     "member@example.com",
-			PasswordHash: hash,
-			DisplayName:  "测试成员",
-			Role:         domain.UserRoleOrgMember,
-			Status:       domain.StatusActive,
-		},
 		refreshTokens: map[string]sqlc.RefreshToken{},
 	}
 }
 
 type authStoreStub struct {
-	user          sqlc.User
-	org           sqlc.Organization
-	nextRefreshID pgtype.UUID
-	idCounter     byte
-	loggedIn      bool
-	refreshTokens map[string]sqlc.RefreshToken
-	revoked       []pgtype.UUID
+	usersByID      map[string]sqlc.User
+	platformByName map[string]sqlc.User
+	orgUsersByKey  map[string]sqlc.User
+	orgsByID       map[string]sqlc.Organization
+	orgsByCode     map[string]sqlc.Organization
+	nextRefreshID  pgtype.UUID
+	idCounter      byte
+	loggedIn       bool
+	lastIssuedRole string
+	refreshTokens  map[string]sqlc.RefreshToken
+	revoked        []pgtype.UUID
+}
+
+func orgUserKey(orgID pgtype.UUID, username string) string {
+	return uuidToString(orgID) + "/" + username
 }
 
 func (s *authStoreStub) GetUserByUsername(_ context.Context, username string) (sqlc.User, error) {
-	if username != s.user.Username {
+	user, ok := s.platformByName[username]
+	if !ok {
 		return sqlc.User{}, pgx.ErrNoRows
 	}
-	return s.user, nil
+	return user, nil
+}
+
+func (s *authStoreStub) GetUserByOrgAndUsername(_ context.Context, arg sqlc.GetUserByOrgAndUsernameParams) (sqlc.User, error) {
+	user, ok := s.orgUsersByKey[orgUserKey(arg.OrgID, arg.Username)]
+	if !ok {
+		return sqlc.User{}, pgx.ErrNoRows
+	}
+	return user, nil
 }
 
 func (s *authStoreStub) GetUser(_ context.Context, id pgtype.UUID) (sqlc.User, error) {
-	if id != s.user.ID {
+	user, ok := s.usersByID[uuidToString(id)]
+	if !ok {
 		return sqlc.User{}, pgx.ErrNoRows
 	}
-	return s.user, nil
+	return user, nil
 }
 
 func (s *authStoreStub) MarkUserLoggedIn(_ context.Context, id pgtype.UUID) (sqlc.User, error) {
-	if id != s.user.ID {
+	user, ok := s.usersByID[uuidToString(id)]
+	if !ok {
 		return sqlc.User{}, pgx.ErrNoRows
 	}
 	s.loggedIn = true
-	return s.user, nil
+	s.lastIssuedRole = user.Role
+	return user, nil
 }
 
 func (s *authStoreStub) GetOrganization(_ context.Context, id pgtype.UUID) (sqlc.Organization, error) {
-	if id != s.org.ID {
+	org, ok := s.orgsByID[uuidToString(id)]
+	if !ok {
 		return sqlc.Organization{}, pgx.ErrNoRows
 	}
-	return s.org, nil
+	return org, nil
+}
+
+func (s *authStoreStub) GetOrganizationByCode(_ context.Context, code string) (sqlc.Organization, error) {
+	org, ok := s.orgsByCode[code]
+	if !ok {
+		return sqlc.Organization{}, pgx.ErrNoRows
+	}
+	return org, nil
 }
 
 func (s *authStoreStub) CreateRefreshToken(_ context.Context, arg sqlc.CreateRefreshTokenParams) (sqlc.RefreshToken, error) {

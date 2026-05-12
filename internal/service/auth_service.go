@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"strings"
 	"time"
 
 	"github.com/jackc/pgx/v5"
@@ -17,9 +18,11 @@ import (
 // AuthStore 抽象认证流程所需的数据访问能力，便于 service 单元测试使用内存桩。
 type AuthStore interface {
 	GetUserByUsername(ctx context.Context, username string) (sqlc.User, error)
+	GetUserByOrgAndUsername(ctx context.Context, arg sqlc.GetUserByOrgAndUsernameParams) (sqlc.User, error)
 	GetUser(ctx context.Context, id pgtype.UUID) (sqlc.User, error)
 	MarkUserLoggedIn(ctx context.Context, id pgtype.UUID) (sqlc.User, error)
 	GetOrganization(ctx context.Context, id pgtype.UUID) (sqlc.Organization, error)
+	GetOrganizationByCode(ctx context.Context, code string) (sqlc.Organization, error)
 	CreateRefreshToken(ctx context.Context, arg sqlc.CreateRefreshTokenParams) (sqlc.RefreshToken, error)
 	GetRefreshTokenByHash(ctx context.Context, tokenHash string) (sqlc.RefreshToken, error)
 	RevokeRefreshToken(ctx context.Context, id pgtype.UUID) (sqlc.RefreshToken, error)
@@ -50,6 +53,7 @@ func NewAuthService(store AuthStore, tokens *auth.TokenManager) *AuthService {
 // LoginInput 是用户名密码登录的 service 入参。
 // Password 只在内存中参与校验，不会写入日志或返回值。
 type LoginInput struct {
+	OrgCode  string
 	Username string
 	Password string
 }
@@ -80,12 +84,12 @@ type LoginResult struct {
 
 // Login 校验用户名密码，签发 access/refresh token，并持久化 refresh token hash。
 func (s *AuthService) Login(ctx context.Context, input LoginInput) (LoginResult, error) {
-	user, err := s.store.GetUserByUsername(ctx, input.Username)
+	input.OrgCode = strings.ToLower(strings.TrimSpace(input.OrgCode))
+	input.Username = strings.TrimSpace(input.Username)
+
+	user, err := s.lookupLoginUser(ctx, input)
 	if err != nil {
-		if errors.Is(err, pgx.ErrNoRows) {
-			return LoginResult{}, ErrInvalidCredentials
-		}
-		return LoginResult{}, fmt.Errorf("查询用户失败: %w", err)
+		return LoginResult{}, err
 	}
 	if !s.passwordHash(input.Password, user.PasswordHash) {
 		return LoginResult{}, ErrInvalidCredentials
@@ -99,6 +103,47 @@ func (s *AuthService) Login(ctx context.Context, input LoginInput) (LoginResult,
 		return LoginResult{}, fmt.Errorf("更新登录时间失败: %w", err)
 	}
 	return s.issueTokenPair(ctx, user)
+}
+
+// lookupLoginUser 根据 org_code 是否为空选择平台登录或组织登录路径。
+// 账号不存在、组织标识不存在和角色不匹配统一返回 ErrInvalidCredentials，
+// 避免登录接口泄露租户或用户名枚举信息。
+func (s *AuthService) lookupLoginUser(ctx context.Context, input LoginInput) (sqlc.User, error) {
+	if input.OrgCode == "" {
+		user, err := s.store.GetUserByUsername(ctx, input.Username)
+		if err != nil {
+			if errors.Is(err, pgx.ErrNoRows) {
+				return sqlc.User{}, ErrInvalidCredentials
+			}
+			return sqlc.User{}, fmt.Errorf("查询用户失败: %w", err)
+		}
+		if user.Role != domain.UserRolePlatformAdmin || user.OrgID.Valid {
+			return sqlc.User{}, ErrInvalidCredentials
+		}
+		return user, nil
+	}
+
+	org, err := s.store.GetOrganizationByCode(ctx, input.OrgCode)
+	if err != nil {
+		if errors.Is(err, pgx.ErrNoRows) {
+			return sqlc.User{}, ErrInvalidCredentials
+		}
+		return sqlc.User{}, fmt.Errorf("查询组织标识失败: %w", err)
+	}
+	user, err := s.store.GetUserByOrgAndUsername(ctx, sqlc.GetUserByOrgAndUsernameParams{
+		OrgID:    org.ID,
+		Username: input.Username,
+	})
+	if err != nil {
+		if errors.Is(err, pgx.ErrNoRows) {
+			return sqlc.User{}, ErrInvalidCredentials
+		}
+		return sqlc.User{}, fmt.Errorf("查询组织用户失败: %w", err)
+	}
+	if user.Role == domain.UserRolePlatformAdmin || !user.OrgID.Valid {
+		return sqlc.User{}, ErrInvalidCredentials
+	}
+	return user, nil
 }
 
 // Me 根据 access token 中的主体加载最新用户状态。
