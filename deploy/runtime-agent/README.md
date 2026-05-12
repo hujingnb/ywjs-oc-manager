@@ -14,7 +14,7 @@ docker compose up -d
 
 ## 必改配置
 
-- `OC_RUNTIME_AGENT_IMAGE`：生产环境使用 `@sha256:` 不可变摘要固定镜像；只有预发或临时验证环境才使用可变 tag。
+- `OC_RUNTIME_AGENT_IMAGE`：生产环境使用 `@sha256:` 摘要固定镜像；发布标签只用于查询对应 digest，不写入 `.env`。
 - `agent.name`：节点展示名。
 - `agent.advertise_host`：manager 能访问到的节点 IP 或域名。
 - `agent.trusted_cidr`：manager 出口网段，例如 `10.0.0.0/24`。

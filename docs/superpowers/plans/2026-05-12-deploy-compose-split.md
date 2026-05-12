@@ -298,7 +298,7 @@ docker compose up -d
 
 ## 配置要求
 
-`NEWAPI_IMAGE` 生产环境必须使用 `@sha256:` 不可变 digest。SemVer tag 仅可作为发布标签用于查询对应 digest，不应写入生产 `.env`。
+`NEWAPI_IMAGE` 生产环境必须使用内容寻址的 `@sha256:` digest。SemVer tag 仅可作为发布标签用于查询对应 digest，不应写入生产 `.env`。
 
 `NEWAPI_POSTGRES_PASSWORD` 和 `NEWAPI_REDIS_PASSWORD` 是数据库和 Redis 服务使用的原始密码。
 当密码包含 `@`、`:`、`/`、`?`、`#` 等 URL 保留字符时，需将同一密码 URL 编码后分别填入
@@ -415,7 +415,7 @@ Create `deploy/ollama/README.md`:
 
 ## 镜像版本
 
-`OLLAMA_IMAGE` 生产环境必须使用 `@sha256:` 不可变 digest。SemVer tag 仅可作为发布标签用于查询对应 digest，不应写入生产 `.env`，
+`OLLAMA_IMAGE` 生产环境必须使用内容寻址的 `@sha256:` digest。SemVer tag 仅可作为发布标签用于查询对应 digest，不应写入生产 `.env`，
 避免重启或重新拉取时隐式升级。
 
 ## origins 配置
@@ -597,7 +597,7 @@ docker compose up -d
 
 ## 必改配置
 
-- `OC_RUNTIME_AGENT_IMAGE`：生产环境使用 `@sha256:` 不可变摘要固定镜像；只有预发或临时验证环境才使用可变 tag。
+- `OC_RUNTIME_AGENT_IMAGE`：生产环境使用 `@sha256:` 摘要固定镜像；发布标签只用于查询对应 digest，不写入 `.env`。
 - `agent.name`：节点展示名。
 - `agent.advertise_host`：manager 能访问到的节点 IP 或域名。
 - `agent.trusted_cidr`：manager 出口网段，例如 `10.0.0.0/24`。
@@ -907,8 +907,8 @@ docker compose up -d
 
 ## 镜像与密码
 
-`OCM_MANAGER_IMAGE` 和 `OCM_WEB_IMAGE` 必须固定到不可变 digest，生产环境不要使用
-`latest` 或可变 tag。`openclaw.runtime_image` 也应使用 runtime 镜像 digest。
+`OCM_MANAGER_IMAGE` 和 `OCM_WEB_IMAGE` 必须固定到内容寻址 digest，生产环境只把
+digest 写入 `.env`。`openclaw.runtime_image` 也应使用 runtime 镜像 digest。
 
 ### manager-api 镜像契约
 
@@ -1066,7 +1066,7 @@ ${EDITOR:-vi} .env
 docker compose pull oc-runtime-agent
 docker compose up -d oc-runtime-agent
 
-# rollback manager image tags
+# rollback manager image digests
 cd deploy/manage
 ${EDITOR:-vi} .env
 docker compose up -d manager-api manager-web manager-nginx
