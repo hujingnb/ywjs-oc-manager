@@ -111,6 +111,7 @@ export interface JobDTO {
 const orgKey = (orgId: string | undefined) => ['apps', 'org', orgId] as const
 const appKey = (appId: string | undefined) => ['app', appId] as const
 const runtimeKey = (appId: string | undefined) => ['app-runtime', appId] as const
+const appResourcesKey = (appId: string | undefined) => ['app-resources', appId] as const
 const jobKey = (jobId: string | undefined) => ['job', jobId] as const
 
 // useAppsByOrgQuery 列出组织内的应用。
@@ -192,6 +193,7 @@ export function useTriggerRuntimeOperation(appId: Ref<string | undefined>) {
     onSuccess: () => {
       void client.invalidateQueries({ queryKey: appKey(appId.value) })
       void client.invalidateQueries({ queryKey: runtimeKey(appId.value) })
+      void client.invalidateQueries({ queryKey: appResourcesKey(appId.value) })
     },
   })
 }

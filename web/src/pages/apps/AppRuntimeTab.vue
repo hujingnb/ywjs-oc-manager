@@ -27,38 +27,45 @@
         镜像：<code>{{ runtime.container.image }}</code>
       </p>
 
-      <n-grid v-if="runtime?.snapshot" :cols="4" :x-gap="12" :y-gap="12" style="margin-top: 12px">
+      <n-space :size="8" style="margin-top: 12px">
+        <n-button
+          v-for="option in rangeOptions"
+          :key="option"
+          size="small"
+          :type="resourceRange === option ? 'primary' : 'default'"
+          @click="resourceRange = option"
+        >
+          {{ option }}
+        </n-button>
+      </n-space>
+
+      <p v-if="resourcesQuery.isLoading.value" class="state-text" style="margin-top: 12px">资源趋势加载中…</p>
+      <p v-else-if="resourcesQuery.error.value" class="state-text danger" style="margin-top: 12px">
+        资源趋势查询失败：{{ resourcesQuery.error.value?.message }}
+      </p>
+      <n-grid v-else :cols="2" :x-gap="12" :y-gap="12" style="margin-top: 12px">
         <n-grid-item>
-          <n-card size="small" :bordered="true">
-            <n-statistic label="CPU" :value="`${runtime.snapshot.cpu_percent.toFixed(1)}%`" />
-          </n-card>
+          <ResourceTrendChart title="实例 CPU" :samples="cpuTrendSamples" unit="percent" />
         </n-grid-item>
         <n-grid-item>
-          <n-card size="small" :bordered="true">
-            <n-statistic label="内存" :value="formatBytes(runtime.snapshot.memory_usage_bytes)" />
-            <div style="font-size: 11px; color: #8A94C6; margin-top: 4px">
-              limit {{ formatBytes(runtime.snapshot.memory_limit_bytes) }}
-            </div>
-          </n-card>
+          <ResourceTrendChart title="实例内存 used/limit" :samples="memoryTrendSamples" unit="bytes" />
         </n-grid-item>
         <n-grid-item>
-          <n-card size="small" :bordered="true">
-            <n-statistic label="网络 RX" :value="formatBytes(runtime.snapshot.network_rx_bytes)" />
-          </n-card>
+          <ResourceTrendChart title="实例磁盘读写" :samples="diskTrendSamples" unit="bytes" />
         </n-grid-item>
         <n-grid-item>
-          <n-card size="small" :bordered="true">
-            <n-statistic label="网络 TX" :value="formatBytes(runtime.snapshot.network_tx_bytes)" />
-          </n-card>
+          <ResourceTrendChart title="实例网络 RX/TX" :samples="networkTrendSamples" unit="bytes" />
         </n-grid-item>
-        <n-grid-item :span="4">
+        <n-grid-item :span="2">
           <p class="state-text" style="margin: 0">
-            采样时间：{{ formatTime(runtime.snapshot.collected_at) }}（30s 周期）
-            <span v-if="runtime.snapshot.last_error" class="danger"> ｜ 采样错误：{{ runtime.snapshot.last_error }}</span>
+            <template v-if="latestSample">
+              最新采样：{{ latestSample.container_status ?? '未知状态' }} ｜ {{ formatTime(latestSample.sampled_at) }}
+              <span v-if="latestSample.last_error" class="danger"> ｜ 采样错误：{{ latestSample.last_error }}</span>
+            </template>
+            <template v-else>资源指标尚未采集（首次采集需 30s 内完成）。</template>
           </p>
         </n-grid-item>
       </n-grid>
-      <p v-else class="state-text">资源指标尚未采集（首次采集需 30s 内完成）。</p>
     </div>
 
     <p v-if="actionFeedback" class="state-text" :class="{ danger: actionError }" style="margin-top: 8px">{{ actionFeedback }}</p>
@@ -99,16 +106,19 @@
 
 <script setup lang="ts">
 import { computed, inject, ref, type Ref } from 'vue'
-import { NButton, NCard, NGrid, NGridItem, NSpace, NStatistic } from 'naive-ui'
+import { NButton, NCard, NGrid, NGridItem, NSpace } from 'naive-ui'
 
 import {
+  useAppResourcesQuery,
   useAppRuntimeQuery,
   useJobQuery,
   useTriggerRuntimeOperation,
   type AppDTO,
 } from '@/api/hooks/useApps'
+import type { InstanceResourceSample, ResourceRange } from '@/api/hooks/useRuntimeNodes'
 import ConfirmActionModal from '@/components/ConfirmActionModal.vue'
 import JobProgressPanel from '@/components/JobProgressPanel.vue'
+import ResourceTrendChart from '@/components/ResourceTrendChart.vue'
 import { canManageApp } from '@/domain/permissions'
 import { useAuthStore } from '@/stores/auth'
 
@@ -121,6 +131,28 @@ const auth = useAuthStore()
 
 const runtimeQuery = useAppRuntimeQuery(appId)
 const runtime = computed(() => runtimeQuery.data.value ?? null)
+const rangeOptions: ResourceRange[] = ['1h', '24h', '7d', '30d']
+// resourceRange 与资源趋势 query 绑定，默认展示排障时最常看的 7 天窗口。
+const resourceRange = ref<ResourceRange>('7d')
+const resourcesQuery = useAppResourcesQuery(appId, resourceRange)
+const resourceSamples = computed(() => resourcesQuery.data.value ?? [])
+const latestSample = computed(() => resourceSamples.value.at(-1) ?? null)
+const cpuTrendSamples = computed(() => resourceSamples.value.map((sample) => trendSample(sample, 'cpu_percent')))
+const memoryTrendSamples = computed(() => resourceSamples.value.map((sample) => ({
+  sampled_at: sample.sampled_at,
+  value: sample.memory_used_bytes,
+  secondary: sample.memory_limit_bytes,
+})))
+const diskTrendSamples = computed(() => resourceSamples.value.map((sample) => ({
+  sampled_at: sample.sampled_at,
+  value: sample.disk_read_bytes,
+  secondary: sample.disk_write_bytes,
+})))
+const networkTrendSamples = computed(() => resourceSamples.value.map((sample) => ({
+  sampled_at: sample.sampled_at,
+  value: sample.network_rx_bytes,
+  secondary: sample.network_tx_bytes,
+})))
 
 const mutation = useTriggerRuntimeOperation(appId)
 // trackingJobId 保存最近一次运行时操作的任务 ID，用于轮询异步执行进度。
@@ -161,13 +193,12 @@ async function onAction(op: 'start' | 'stop' | 'restart' | 'delete') {
 async function onConfirmDelete() { confirmDelete.value = false; await runMutation('delete') }
 async function onConfirmStop() { confirmStop.value = false; await runMutation('stop') }
 
-// formatBytes 用于展示容器磁盘和内存指标，0 明确显示为 0 B。
-function formatBytes(value: number): string {
-  if (!value) return '0 B'
-  if (value < 1024) return `${value} B`
-  if (value < 1024 * 1024) return `${(value / 1024).toFixed(1)} KB`
-  if (value < 1024 * 1024 * 1024) return `${(value / 1024 / 1024).toFixed(1)} MB`
-  return `${(value / 1024 / 1024 / 1024).toFixed(2)} GB`
+// trendSample 只做字段挑选，缺失指标交给 ResourceTrendChart 保持空点，不在页面层补 0。
+function trendSample(sample: InstanceResourceSample, field: 'cpu_percent') {
+  return {
+    sampled_at: sample.sampled_at,
+    value: sample[field],
+  }
 }
 
 // formatTime 使用中文本地化格式展示后端 ISO 时间。
