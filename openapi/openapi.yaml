@@ -108,6 +108,9 @@ components:
         channel_type:
           description: ChannelType 是初始化渠道绑定的渠道标识。
           type: string
+        model_id:
+          description: ModelID 是新实例使用的模型，必须属于组织 enabled_models。
+          type: string
         persona_mode:
           description: PersonaMode 控制新实例是否继承组织人设或使用独立人设。
           type: string
@@ -116,6 +119,7 @@ components:
           type: string
       required:
       - app_name
+      - model_id
       type: object
     handlers.CreateMemberRequest:
       properties:
@@ -261,6 +265,9 @@ components:
         display_name:
           description: DisplayName 是新成员展示名。
           type: string
+        model_id:
+          description: ModelID 是新实例使用的模型，必须属于组织 enabled_models。
+          type: string
         password:
           description: Password 是新成员初始密码。
           type: string
@@ -279,6 +286,7 @@ components:
       required:
       - app_name
       - display_name
+      - model_id
       - password
       - username
       type: object
@@ -399,6 +407,8 @@ components:
         description:
           type: string
         id:
+          type: string
+        model_id:
           type: string
         name:
           type: string

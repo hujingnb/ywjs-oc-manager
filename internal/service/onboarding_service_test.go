@@ -158,6 +158,37 @@ func TestCreateAppForMemberStoresModelID(t *testing.T) {
 	assert.Equal(t, "qwen2.5:7b", result.App.ModelID)
 }
 
+// TestCreateAppForMemberTrimsModelID 验证创建实例会保存裁剪空白后的模型 ID。
+func TestCreateAppForMemberTrimsModelID(t *testing.T) {
+	store := newOnboardingStub(t)
+	store.org.EnabledModels = []byte(`["qwen2.5:7b"]`)
+	tx := &txRunnerStub{store: store}
+	svc := NewMemberOnboardingService(tx, fakeHash, defaultTestSelector())
+
+	result, err := svc.CreateAppForMember(context.Background(), platformAdmin(), testOrgID, uuidToString(store.user.ID), CreateAppForMemberInput{
+		AppName: "alice-new-bot", ModelID: "  qwen2.5:7b  ",
+	})
+
+	require.NoError(t, err)
+	assert.Equal(t, "qwen2.5:7b", store.lastAppModelID)
+	assert.Equal(t, "qwen2.5:7b", result.App.ModelID)
+}
+
+// TestCreateAppForMemberRejectsBlankModelID 验证空白模型 ID 会在 service 层被拒绝。
+func TestCreateAppForMemberRejectsBlankModelID(t *testing.T) {
+	store := newOnboardingStub(t)
+	store.org.EnabledModels = []byte(`["qwen2.5:7b"]`)
+	tx := &txRunnerStub{store: store}
+	svc := NewMemberOnboardingService(tx, fakeHash, defaultTestSelector())
+
+	_, err := svc.CreateAppForMember(context.Background(), platformAdmin(), testOrgID, uuidToString(store.user.ID), CreateAppForMemberInput{
+		AppName: "alice-new-bot", ModelID: "   ",
+	})
+
+	require.ErrorIs(t, err, ErrMemberCreateInvalid)
+	assert.Zero(t, store.apps)
+}
+
 // TestCreateAppForMember_RejectsExistingActiveApp 验证成员已有未删除实例时拒绝创建新实例。
 func TestCreateAppForMember_RejectsExistingActiveApp(t *testing.T) {
 	store := newOnboardingStub(t)

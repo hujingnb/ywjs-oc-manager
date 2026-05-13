@@ -5676,6 +5676,8 @@ export interface components {
             app_prompt?: string;
             /** @description ChannelType 是初始化渠道绑定的渠道标识。 */
             channel_type?: string;
+            /** @description ModelID 是新实例使用的模型，必须属于组织 enabled_models。 */
+            model_id: string;
             /** @description PersonaMode 控制新实例是否继承组织人设或使用独立人设。 */
             persona_mode?: string;
             /** @description NodeID 是指定 runtime 节点；为空时 service 自动选择可用节点。 */
@@ -5757,6 +5759,8 @@ export interface components {
             channel_type?: string;
             /** @description DisplayName 是新成员展示名。 */
             display_name: string;
+            /** @description ModelID 是新实例使用的模型，必须属于组织 enabled_models。 */
+            model_id: string;
             /** @description Password 是新成员初始密码。 */
             password: string;
             /** @description PersonaMode 控制新应用是否继承组织人设或使用独立人设。 */
@@ -5835,6 +5839,7 @@ export interface components {
             container_id?: string;
             description?: string;
             id?: string;
+            model_id?: string;
             name?: string;
             /**
              * @description NewapiKeyID 是 new-api 中 token 的数值 id；schema 上是 text 列存的字符串，
