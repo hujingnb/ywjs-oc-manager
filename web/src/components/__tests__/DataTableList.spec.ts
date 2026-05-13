@@ -50,4 +50,12 @@ describe('DataTableList', () => {
     const table = wrapper.findComponent(NDataTable)
     expect(table.props('loading')).toBe(true)
   })
+
+  // 后台列表页需要撑满 DashboardLayout 提供的剩余高度，表格卡片负责吃掉标题下方空间。
+  it('marks the table card as a fill-height region', () => {
+    const wrapper = mount(DataTableList, { props: baseProps })
+
+    expect(wrapper.classes()).toContain('data-table-list')
+    expect(wrapper.find('.table-card').exists()).toBe(true)
+  })
 })

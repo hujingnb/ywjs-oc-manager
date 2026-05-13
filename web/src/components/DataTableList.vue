@@ -10,7 +10,7 @@
         <slot name="toolbar" />
       </div>
     </header>
-    <n-card>
+    <n-card class="table-card">
       <n-alert v-if="errorMessage" type="error" :show-icon="false" class="error-banner">
         {{ errorMessage }}
       </n-alert>
@@ -43,9 +43,12 @@ defineProps<{
 </script>
 
 <style scoped>
-.data-table-list { display: flex; flex-direction: column; gap: 12px; }
+.data-table-list { display: flex; min-height: 0; flex: 1; flex-direction: column; gap: 12px; }
 .toolbar { display: flex; align-items: flex-end; justify-content: space-between; gap: 16px; }
 .actions { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; }
+.table-card { min-height: 0; flex: 1; }
+.table-card :deep(.n-card__content) { display: flex; min-height: 0; flex-direction: column; }
+.table-card :deep(.n-data-table) { min-height: 0; flex: 1; }
 /* eyebrow：列表页眉上方的分类标签文本 */
 .eyebrow { font-size: 12px; color: var(--color-text-secondary, #8A94C6); margin: 0 0 4px; }
 /* subtitle：标题下方的辅助说明文本 */

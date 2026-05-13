@@ -98,7 +98,7 @@ import type { RuntimeNode } from '@/api'
 const { data: nodes, isLoading, error } = useRuntimeNodesQuery()
 const statusMutation = useSetRuntimeNodeStatus()
 const selectedNodeId = ref<string | null>(null)
-const resourceRange = ref<ResourceRange>('7d')
+const resourceRange = ref<ResourceRange>('1h')
 const expandedInstanceIds = ref<string[]>([])
 const drawerTarget = ref<HTMLElement | null>(null)
 
@@ -363,6 +363,7 @@ function formatDateTime(value: string) {
 
 .runtime-nodes-page {
   display: grid;
+  grid-template-rows: auto minmax(0, 1fr);
   gap: 18px;
 }
 

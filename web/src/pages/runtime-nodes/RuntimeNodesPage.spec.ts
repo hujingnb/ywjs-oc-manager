@@ -205,7 +205,7 @@ describe('RuntimeNodesPage', () => {
     expect(viewButton).toBeTruthy()
     await viewButton?.trigger('click')
     expect(nodeResourceHookCalls[0].nodeId.value).toBe('node-1')
-    expect(nodeResourceHookCalls[0].range.value).toBe('7d')
+    expect(nodeResourceHookCalls[0].range.value).toBe('1h')
     expect(nodeInstancesHookCalls[0].nodeId.value).toBe('node-1')
     expect(instanceResourceHookCalls).toHaveLength(0)
 
@@ -216,7 +216,7 @@ describe('RuntimeNodesPage', () => {
     expect(instanceResourceHookCalls).toHaveLength(1)
     expect(instanceResourceHookCalls[0].nodeId.value).toBe('node-1')
     expect(instanceResourceHookCalls[0].appId.value).toBe('app-1')
-    expect(instanceResourceHookCalls[0].range.value).toBe('7d')
+    expect(instanceResourceHookCalls[0].range.value).toBe('1h')
     expect(instanceResourceHookCalls[0].enabled.value).toBe(true)
     expect(wrapper.text()).toContain('实例一 CPU')
   })

@@ -7,34 +7,13 @@
 
     <div class="chart-frame">
       <p v-if="!hasValues" class="empty-state">{{ emptyText ?? '暂无资源采样' }}</p>
-      <svg
+      <div
         v-else
-        class="chart-svg"
-        viewBox="0 0 320 128"
+        ref="chartEl"
+        class="resource-echarts"
         role="img"
         :aria-label="`${title}趋势图`"
-        preserveAspectRatio="none"
-      >
-        <line x1="0" y1="104" x2="320" y2="104" class="axis-line" />
-        <polyline v-if="primaryPoints.length > 1" class="trend-line" :points="primaryPolylinePoints" fill="none" />
-        <polyline v-if="secondaryPoints.length > 1" class="secondary-line" :points="secondaryPolylinePoints" fill="none" />
-        <circle
-          v-for="point in secondaryPoints"
-          :key="`secondary-${point.index}`"
-          class="secondary-marker"
-          :cx="point.x"
-          :cy="point.y"
-          r="3"
-        />
-        <circle
-          v-for="point in primaryPoints"
-          :key="`primary-${point.index}`"
-          class="trend-marker"
-          :cx="point.x"
-          :cy="point.y"
-          r="3.5"
-        />
-      </svg>
+      />
     </div>
 
     <footer class="chart-labels" aria-live="polite">
@@ -45,7 +24,15 @@
 </template>
 
 <script setup lang="ts">
-import { computed } from 'vue'
+import { computed, nextTick, onBeforeUnmount, onMounted, ref, watch } from 'vue'
+import { init, use } from 'echarts/core'
+import { LineChart } from 'echarts/charts'
+import { GridComponent, TooltipComponent } from 'echarts/components'
+import { CanvasRenderer } from 'echarts/renderers'
+import type { EChartsCoreOption, EChartsType } from 'echarts/core'
+import type { LineSeriesOption } from 'echarts/charts'
+
+use([CanvasRenderer, LineChart, GridComponent, TooltipComponent])
 
 interface ResourceTrendSample {
   sampled_at: string
@@ -60,25 +47,19 @@ const props = defineProps<{
   emptyText?: string
 }>()
 
-const chartWidth = 320
-const chartHeight = 128
-const chartPadding = {
-  top: 16,
-  right: 12,
-  bottom: 24,
-  left: 12,
-}
-
-interface ChartPoint {
-  index: number
-  x: string
-  y: string
-}
-
 interface NumericPoint {
   index: number
   sampled_at: string
   value: number
+}
+
+type ResourceChartOption = EChartsCoreOption
+
+interface TooltipParam {
+  axisValue?: string | number
+  marker?: string
+  seriesName?: string
+  value?: number | string | null
 }
 
 // primarySamples / secondarySamples 过滤掉后端缺失指标的采样点，避免空值把趋势线错误拉到 0。
@@ -86,6 +67,9 @@ const primarySamples = computed(() => numericSeries('value'))
 const secondarySamples = computed(() => numericSeries('secondary'))
 const scaleValues = computed(() => [...primarySamples.value, ...secondarySamples.value].map((sample) => sample.value))
 const hasValues = computed(() => scaleValues.value.length > 0)
+const chartEl = ref<HTMLElement | null>(null)
+let chart: EChartsType | null = null
+let resizeObserver: ResizeObserver | null = null
 
 const latestValue = computed(() => primarySamples.value.at(-1)?.value ?? null)
 const latestLabel = computed(() => (isNumeric(latestValue.value) ? formatValue(latestValue.value, props.unit) : ''))
@@ -114,10 +98,127 @@ const rangeLabel = computed(() => {
   return `${formatTime(first.sampled_at)} - ${formatTime(last.sampled_at)}`
 })
 
-const primaryPoints = computed(() => chartPoints(primarySamples.value))
-const secondaryPoints = computed(() => chartPoints(secondarySamples.value))
-const primaryPolylinePoints = computed(() => joinPoints(primaryPoints.value))
-const secondaryPolylinePoints = computed(() => joinPoints(secondaryPoints.value))
+const chartOption = computed<ResourceChartOption>(() => ({
+  animation: false,
+  color: ['#2563eb', '#d97706'],
+  grid: {
+    top: 14,
+    right: 12,
+    bottom: 24,
+    left: props.unit === 'bytes' ? 72 : 52,
+    containLabel: false,
+  },
+  tooltip: {
+    trigger: 'axis',
+    axisPointer: { type: 'line' },
+    confine: true,
+    formatter: tooltipFormatter,
+  },
+  xAxis: {
+    type: 'category',
+    boundaryGap: false,
+    data: props.samples.map((sample) => formatTime(sample.sampled_at)),
+    axisTick: { show: false },
+    axisLabel: {
+      color: '#66758a',
+      fontSize: 11,
+      hideOverlap: true,
+      showMinLabel: true,
+      showMaxLabel: true,
+    },
+    axisLine: { lineStyle: { color: '#d9ddea' } },
+  },
+  yAxis: {
+    type: 'value',
+    scale: props.unit !== 'percent' && props.unit !== 'count',
+    min: props.unit === 'percent' ? 0 : undefined,
+    max: props.unit === 'percent' ? 100 : undefined,
+    minInterval: props.unit === 'count' ? 1 : undefined,
+    splitNumber: 3,
+    axisLabel: {
+      color: '#66758a',
+      fontSize: 11,
+      formatter: (value: number) => formatValue(value, props.unit),
+    },
+    splitLine: { lineStyle: { color: '#eef2f7' } },
+  },
+  series: chartSeries.value,
+}))
+
+const chartSeries = computed<LineSeriesOption[]>(() => {
+  const series: LineSeriesOption[] = [{
+    name: props.title,
+    type: 'line',
+    data: seriesData('value'),
+    connectNulls: false,
+    showSymbol: true,
+    symbolSize: 5,
+    lineStyle: { width: 2 },
+    emphasis: { focus: 'series' },
+  }]
+
+  if (secondarySamples.value.length > 0) {
+    series.push({
+      name: '次要',
+      type: 'line',
+      data: seriesData('secondary'),
+      connectNulls: false,
+      showSymbol: true,
+      symbolSize: 5,
+      lineStyle: { width: 2, type: 'dashed' as const },
+      emphasis: { focus: 'series' },
+    })
+  }
+
+  return series
+})
+
+onMounted(() => {
+  void renderChart()
+})
+
+watch(chartOption, () => {
+  void renderChart()
+}, { deep: true, flush: 'post' })
+
+watch(hasValues, (visible) => {
+  if (visible) {
+    void renderChart()
+    return
+  }
+  disposeChart()
+}, { flush: 'post' })
+
+onBeforeUnmount(() => {
+  disposeChart()
+})
+
+async function renderChart() {
+  if (!hasValues.value) {
+    disposeChart()
+    return
+  }
+
+  await nextTick()
+  if (!chartEl.value) return
+
+  if (!chart) {
+    chart = init(chartEl.value)
+    if (typeof ResizeObserver !== 'undefined') {
+      resizeObserver = new ResizeObserver(() => chart?.resize())
+      resizeObserver.observe(chartEl.value)
+    }
+  }
+
+  chart.setOption(chartOption.value, true)
+}
+
+function disposeChart() {
+  resizeObserver?.disconnect()
+  resizeObserver = null
+  chart?.dispose()
+  chart = null
+}
 
 function numericSeries(field: 'value' | 'secondary'): NumericPoint[] {
   return props.samples.flatMap((sample, index) => {
@@ -127,33 +228,16 @@ function numericSeries(field: 'value' | 'secondary'): NumericPoint[] {
   })
 }
 
-function chartPoints(series: NumericPoint[]): ChartPoint[] {
-  const values = scaleValues.value
-  if (values.length === 0) return []
-
-  const min = Math.min(...values)
-  const max = Math.max(...values)
-  const span = max - min || 1
-  const drawableWidth = chartWidth - chartPadding.left - chartPadding.right
-  const drawableHeight = chartHeight - chartPadding.top - chartPadding.bottom
-
-  return series.map((sample) => {
-    const x = chartPadding.left + (props.samples.length === 1 ? drawableWidth / 2 : (sample.index / (props.samples.length - 1)) * drawableWidth)
-    const y = chartPadding.top + ((max - sample.value) / span) * drawableHeight
-    return { index: sample.index, x: roundPoint(x), y: roundPoint(y) }
+function seriesData(field: 'value' | 'secondary'): Array<number | null> {
+  // ECharts 用 null 表示该采样缺指标，既保留横轴时间点，也避免把缺失值误画成 0。
+  return props.samples.map((sample) => {
+    const value = sample[field]
+    return isNumeric(value) ? value : null
   })
-}
-
-function joinPoints(points: ChartPoint[]): string {
-  return points.map((point) => `${point.x},${point.y}`).join(' ')
 }
 
 function isNumeric(value: number | null | undefined): value is number {
   return typeof value === 'number' && Number.isFinite(value)
-}
-
-function roundPoint(value: number): string {
-  return value.toFixed(2)
 }
 
 function formatValue(value: number, unit: 'percent' | 'bytes' | 'rate' | 'count'): string {
@@ -167,6 +251,39 @@ function formatValue(value: number, unit: 'percent' | 'bytes' | 'rate' | 'count'
     case 'count':
       return formatNumber(value, 0)
   }
+}
+
+function tooltipFormatter(params: TooltipParam | TooltipParam[]): string {
+  const points = Array.isArray(params) ? params : [params]
+  const title = points[0]?.axisValue ?? ''
+  const lines = points.flatMap((point) => {
+    const value = tooltipValue(point.value)
+    if (!isNumeric(value)) return []
+    const marker = point.marker ?? ''
+    const name = point.seriesName ?? ''
+    return `${marker}${escapeHtml(name)}：${escapeHtml(formatValue(value, props.unit))}`
+  })
+
+  return [escapeHtml(String(title)), ...lines].join('<br />')
+}
+
+function tooltipValue(value: TooltipParam['value']): number | null {
+  if (typeof value === 'number') return value
+  if (typeof value === 'string' && value.trim() !== '') {
+    const parsed = Number(value)
+    return Number.isFinite(parsed) ? parsed : null
+  }
+  return null
+}
+
+function escapeHtml(value: string): string {
+  // tooltip formatter 返回 HTML 字符串，转义动态文本避免样本时间或标题包含特殊字符时破坏结构。
+  return value
+    .replace(/&/g, '&amp;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;')
+    .replace(/"/g, '&quot;')
+    .replace(/'/g, '&#39;')
 }
 
 function formatNumber(value: number, maximumFractionDigits: number): string {
@@ -249,38 +366,9 @@ function formatTime(value: string): string {
   font-size: 13px;
 }
 
-.chart-svg {
-  display: block;
+.resource-echarts {
   width: 100%;
   height: 128px;
-}
-
-.axis-line {
-  stroke: var(--color-border, #d9ddea);
-  stroke-width: 1;
-}
-
-.trend-line {
-  stroke: var(--color-primary, #2563eb);
-  stroke-linecap: round;
-  stroke-linejoin: round;
-  stroke-width: 2.5;
-}
-
-.secondary-line {
-  stroke: var(--color-warning, #d97706);
-  stroke-dasharray: 5 4;
-  stroke-linecap: round;
-  stroke-linejoin: round;
-  stroke-width: 2;
-}
-
-.trend-marker {
-  fill: var(--color-primary, #2563eb);
-}
-
-.secondary-marker {
-  fill: var(--color-warning, #d97706);
 }
 
 .chart-labels {

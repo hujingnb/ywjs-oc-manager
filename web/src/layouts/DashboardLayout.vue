@@ -63,8 +63,10 @@
         </div>
       </n-layout-header>
 
-      <n-layout-content content-style="padding: 24px">
-        <RouterView />
+      <n-layout-content content-style="min-height: calc(100vh - 64px); padding: 24px; display: flex; flex-direction: column">
+        <div class="dashboard-page-frame">
+          <RouterView />
+        </div>
       </n-layout-content>
     </n-layout>
   </n-layout>
@@ -189,5 +191,18 @@ function reload() {
 .sidebar-footer {
   padding: 12px 14px 16px;
   border-top: 1px solid rgba(255, 255, 255, 0.06);
+}
+
+.dashboard-page-frame {
+  display: flex;
+  min-height: calc(100vh - 112px);
+  min-width: 0;
+  flex: 1;
+  flex-direction: column;
+}
+
+.dashboard-page-frame :deep(> *) {
+  min-height: 0;
+  flex: 1;
 }
 </style>

@@ -132,8 +132,8 @@ const auth = useAuthStore()
 const runtimeQuery = useAppRuntimeQuery(appId)
 const runtime = computed(() => runtimeQuery.data.value ?? null)
 const rangeOptions: ResourceRange[] = ['1h', '24h', '7d', '30d']
-// resourceRange 与资源趋势 query 绑定，默认展示排障时最常看的 7 天窗口。
-const resourceRange = ref<ResourceRange>('7d')
+// resourceRange 与资源趋势 query 绑定，默认展示最近 1 小时，便于打开页面后直接查看最新资源波动。
+const resourceRange = ref<ResourceRange>('1h')
 const resourcesQuery = useAppResourcesQuery(appId, resourceRange)
 const resourceSamples = computed(() => resourcesQuery.data.value ?? [])
 const latestSample = computed(() => resourceSamples.value.at(-1) ?? null)

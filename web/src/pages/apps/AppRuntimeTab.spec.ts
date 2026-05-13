@@ -152,7 +152,7 @@ describe('AppRuntimeTab', () => {
   it('changes resource query when range changes', async () => {
     const wrapper = mountRuntimeTab()
 
-    expect(resourceHookCalls[0].range.value).toBe('7d')
+    expect(resourceHookCalls[0].range.value).toBe('1h')
 
     const thirtyDayButton = wrapper.findAll('button').find((button) => button.text() === '30d')
     expect(thirtyDayButton).toBeTruthy()
