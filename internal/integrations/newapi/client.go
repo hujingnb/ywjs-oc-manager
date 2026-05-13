@@ -263,7 +263,7 @@ func (c *Client) listOpenAIModels(ctx context.Context) ([]Model, error) {
 			ID string `json:"id"`
 		} `json:"data"`
 	}
-	if err := c.do(ctx, http.MethodGet, "/v1/models", nil, &response); err != nil {
+	if err := c.doOpenAI(ctx, http.MethodGet, "/v1/models", nil, &response); err != nil {
 		return nil, err
 	}
 	set := make(map[string]struct{})
@@ -274,6 +274,22 @@ func (c *Client) listOpenAIModels(ctx context.Context) ([]Model, error) {
 		}
 	}
 	return sortedModels(set), nil
+}
+
+// doOpenAI 走 OpenAI 兼容 relay 鉴权执行请求。
+//
+// relay 路由只识别 Authorization Bearer token，不需要也不应携带 Dashboard
+// 管理接口使用的 New-Api-User header；这样 fallback 能兼容把管理凭据配置为
+// OpenAI 兼容 key 的部署，同时避免把 dashboard 专用 header 泄到 relay 端点。
+func (c *Client) doOpenAI(ctx context.Context, method, path string, body any, target any) error {
+	req, err := c.newRequest(ctx, method, path, body)
+	if err != nil {
+		return err
+	}
+	if c.AdminToken != "" {
+		req.Header.Set("Authorization", "Bearer "+c.AdminToken)
+	}
+	return executeRequest(c.httpClient(), req, target)
 }
 
 func sortedModels(set map[string]struct{}) []Model {
@@ -1063,13 +1079,19 @@ func executeRequest(httpClient *http.Client, req *http.Request, target any) erro
 	}
 	defer resp.Body.Close()
 	switch {
+	case resp.StatusCode >= 200 && resp.StatusCode < 300:
+		// 继续解析响应体。
 	case resp.StatusCode == http.StatusUnauthorized || resp.StatusCode == http.StatusForbidden:
 		return ErrUnauthorized
 	case resp.StatusCode == http.StatusNotFound:
 		return ErrNotFound
 	case resp.StatusCode == http.StatusConflict:
 		return ErrConflict
+	case resp.StatusCode == http.StatusBadRequest:
+		return ErrPayloadInvalid
 	case resp.StatusCode >= 500:
+		return fmt.Errorf("%w: status=%d", ErrUpstream, resp.StatusCode)
+	default:
 		return fmt.Errorf("%w: status=%d", ErrUpstream, resp.StatusCode)
 	}
 	if target == nil {

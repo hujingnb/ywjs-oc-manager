@@ -42,6 +42,8 @@ func TestListModelsFallsBackToOpenAIEndpoint(t *testing.T) {
 			return
 		}
 		require.Equal(t, "/v1/models", r.URL.Path)
+		require.Equal(t, "Bearer admin-token", r.Header.Get("Authorization"))
+		require.Empty(t, r.Header.Get("New-Api-User"))
 		_, _ = w.Write([]byte(`{"data":[{"id":"b-model"},{"id":"a-model"}]}`))
 	}))
 	t.Cleanup(server.Close)
@@ -51,6 +53,26 @@ func TestListModelsFallsBackToOpenAIEndpoint(t *testing.T) {
 	require.NoError(t, err)
 	assert.Equal(t, []string{"/api/models", "/v1/models"}, paths)
 	assert.Equal(t, []Model{{ID: "a-model", Name: "a-model"}, {ID: "b-model", Name: "b-model"}}, models)
+}
+
+// TestListModelsFallbackRejectsOpenAIErrorStatus 验证 /v1/models 非 2xx 响应不会被解析为空模型列表。
+func TestListModelsFallbackRejectsOpenAIErrorStatus(t *testing.T) {
+	t.Parallel()
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path == "/api/models" {
+			http.NotFound(w, r)
+			return
+		}
+		require.Equal(t, "/v1/models", r.URL.Path)
+		w.WriteHeader(http.StatusTooManyRequests)
+		_, _ = w.Write([]byte(`{"error":{"message":"rate limited"}}`))
+	}))
+	t.Cleanup(server.Close)
+
+	client := NewClient(server.URL, "admin-token", 1)
+	models, err := client.ListModels(context.Background())
+	require.ErrorIs(t, err, ErrUpstream)
+	assert.Empty(t, models)
 }
 
 // TestUserScopedCreateAPIKeyHappyPath 校验 user-scoped client 调 POST /api/token/ 时携带
