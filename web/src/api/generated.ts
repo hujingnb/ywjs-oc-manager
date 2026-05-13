@@ -4035,6 +4035,111 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/organizations/{orgId}/members/{userId}/apps": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * 为已有成员创建实例
+         * @description 平台管理员或本组织管理员为已有成员创建新的应用实例；目标成员必须没有未删除实例
+         */
+        post: {
+            parameters: {
+                query?: never;
+                header?: never;
+                path: {
+                    /** @description 组织 ID */
+                    orgId: string;
+                    /** @description 成员用户 ID */
+                    userId: string;
+                };
+                cookie?: never;
+            };
+            /** @description 创建实例请求 */
+            requestBody: {
+                content: {
+                    "application/json": Record<string, never> | components["schemas"]["handlers.CreateMemberAppRequest"];
+                };
+            };
+            responses: {
+                /** @description Created */
+                201: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": {
+                            [key: string]: components["schemas"]["service.CreateAppForMemberResult"];
+                        };
+                    };
+                };
+                /** @description Bad Request */
+                400: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["handlers.ErrorResponse"];
+                    };
+                };
+                /** @description Unauthorized */
+                401: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["handlers.ErrorResponse"];
+                    };
+                };
+                /** @description Forbidden */
+                403: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["handlers.ErrorResponse"];
+                    };
+                };
+                /** @description Not Found */
+                404: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["handlers.ErrorResponse"];
+                    };
+                };
+                /** @description Internal Server Error */
+                500: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["handlers.ErrorResponse"];
+                    };
+                };
+                /** @description Service Unavailable */
+                503: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["handlers.ErrorResponse"];
+                    };
+                };
+            };
+        };
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/organizations/{orgId}/members/onboard": {
         parameters: {
             query?: never;
@@ -5496,6 +5601,18 @@ export interface components {
             /** @description NetworkTxBytes 是节点网络累计发送字节数。 */
             network_tx_bytes?: number;
         };
+        "handlers.CreateMemberAppRequest": {
+            /** @description AppName 是新实例名称，创建时必填。 */
+            app_name: string;
+            /** @description AppPrompt 是新实例提示词，可为空。 */
+            app_prompt?: string;
+            /** @description ChannelType 是初始化渠道绑定的渠道标识。 */
+            channel_type?: string;
+            /** @description PersonaMode 控制新实例是否继承组织人设或使用独立人设。 */
+            persona_mode?: string;
+            /** @description NodeID 是指定 runtime 节点；为空时 service 自动选择可用节点。 */
+            runtime_node_id?: string;
+        };
         "handlers.CreateMemberRequest": {
             /** @description DisplayName 是前端显示名，创建与更新时都不能为空。 */
             display_name: string;
@@ -5720,6 +5837,10 @@ export interface components {
             qrcode?: string;
             /** @description Status 是渠道绑定状态，pending_auth 表示后台 job 正在发起登录挑战。 */
             status?: string;
+        };
+        "service.CreateAppForMemberResult": {
+            app?: components["schemas"]["service.AppResult"];
+            job_id?: string;
         };
         /** @description CurrentResource 是该应用在节点上的最近一次实例资源采样。 */
         "service.InstanceResourceSampleResult": {

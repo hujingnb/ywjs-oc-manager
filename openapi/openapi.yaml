@@ -97,6 +97,26 @@ components:
           description: NetworkTxBytes 是节点网络累计发送字节数。
           type: integer
       type: object
+    handlers.CreateMemberAppRequest:
+      properties:
+        app_name:
+          description: AppName 是新实例名称，创建时必填。
+          type: string
+        app_prompt:
+          description: AppPrompt 是新实例提示词，可为空。
+          type: string
+        channel_type:
+          description: ChannelType 是初始化渠道绑定的渠道标识。
+          type: string
+        persona_mode:
+          description: PersonaMode 控制新实例是否继承组织人设或使用独立人设。
+          type: string
+        runtime_node_id:
+          description: NodeID 是指定 runtime 节点；为空时 service 自动选择可用节点。
+          type: string
+      required:
+      - app_name
+      type: object
     handlers.CreateMemberRequest:
       properties:
         display_name:
@@ -488,6 +508,13 @@ components:
           type: string
         status:
           description: Status 是渠道绑定状态，pending_auth 表示后台 job 正在发起登录挑战。
+          type: string
+      type: object
+    service.CreateAppForMemberResult:
+      properties:
+        app:
+          $ref: '#/components/schemas/service.AppResult'
+        job_id:
           type: string
       type: object
     service.InstanceResourceSampleResult:
@@ -3669,6 +3696,83 @@ paths:
       security:
       - BearerAuth: []
       summary: 创建组织成员
+      tags:
+      - members
+  /organizations/{orgId}/members/{userId}/apps:
+    post:
+      description: 平台管理员或本组织管理员为已有成员创建新的应用实例；目标成员必须没有未删除实例
+      parameters:
+      - description: 组织 ID
+        in: path
+        name: orgId
+        required: true
+        schema:
+          type: string
+      - description: 成员用户 ID
+        in: path
+        name: userId
+        required: true
+        schema:
+          type: string
+      requestBody:
+        content:
+          application/json:
+            schema:
+              oneOf:
+              - type: object
+              - $ref: '#/components/schemas/handlers.CreateMemberAppRequest'
+                description: 创建实例请求
+                summary: body
+        description: 创建实例请求
+        required: true
+      responses:
+        "201":
+          content:
+            application/json:
+              schema:
+                additionalProperties:
+                  $ref: '#/components/schemas/service.CreateAppForMemberResult'
+                type: object
+          description: Created
+        "400":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/handlers.ErrorResponse'
+          description: Bad Request
+        "401":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/handlers.ErrorResponse'
+          description: Unauthorized
+        "403":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/handlers.ErrorResponse'
+          description: Forbidden
+        "404":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/handlers.ErrorResponse'
+          description: Not Found
+        "500":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/handlers.ErrorResponse'
+          description: Internal Server Error
+        "503":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/handlers.ErrorResponse'
+          description: Service Unavailable
+      security:
+      - BearerAuth: []
+      summary: 为已有成员创建实例
       tags:
       - members
   /organizations/{orgId}/members/onboard:
