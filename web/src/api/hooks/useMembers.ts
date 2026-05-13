@@ -24,6 +24,8 @@ export interface OnboardMemberPayload {
   persona_mode?: 'org_inherited' | 'app_override'
   // 首次绑定的渠道类型，目前仅支持 wechat。
   channel_type?: 'wechat'
+  // 新实例使用的模型，必须属于当前组织 enabled_models。
+  model_id: string
   // 指定 runtime 节点；为空时后端按调度策略选择。
   runtime_node_id?: string
 }
@@ -59,6 +61,8 @@ export interface CreateMemberAppPayload {
   persona_mode?: 'org_inherited' | 'app_override'
   // 首次绑定的渠道类型，目前仅支持 wechat。
   channel_type?: 'wechat'
+  // 新实例使用的模型，必须属于当前组织 enabled_models。
+  model_id: string
   // 指定 runtime 节点；为空时后端按调度策略选择。
   runtime_node_id?: string
 }

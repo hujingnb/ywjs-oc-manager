@@ -7,6 +7,11 @@ import OrganizationsPage from './OrganizationsPage.vue'
 import type { Organization } from '@/api'
 
 const createOrganization = vi.hoisted(() => vi.fn())
+const modelsState = vi.hoisted(() => ({
+  data: { value: [{ id: 'qwen2.5:7b', name: 'qwen2.5:7b' }] },
+  isLoading: { value: false },
+  isError: { value: false },
+}))
 
 // 组织列表页测试只 mock 列表和充值 hooks，验证充值留在弹框内完成而不跳转旧页面。
 vi.mock('@/api/hooks/useOrganizations', () => ({
@@ -18,10 +23,12 @@ vi.mock('@/api/hooks/useOrganizations', () => ({
       status: 'active',
       credit_warning_threshold: 20,
       admin_username: 'org-admin',
+      enabled_models: ['qwen2.5:7b'],
     }]),
     isLoading: ref(false),
     error: ref(null),
   }),
+  useModelsQuery: () => modelsState,
   useCreateOrganization: () => ({ mutateAsync: createOrganization, isPending: ref(false) }),
   useUpdateOrganizationStatus: () => ({ mutate: vi.fn() }),
 }))
@@ -47,7 +54,10 @@ describe('OrganizationsPage', () => {
           props: ['loading', 'disabled'],
           emits: ['click'],
           setup(_, { slots, emit }) {
-            return () => h('button', { onClick: () => emit('click') }, slots.default?.())
+            return () => h('button', {
+              disabled: _.disabled,
+              onClick: () => emit('click'),
+            }, slots.default?.())
           },
         }),
         NCard: defineComponent({
@@ -96,6 +106,58 @@ describe('OrganizationsPage', () => {
               value: props.value ?? '',
               onInput: (event: Event) => emit('update:value', Number((event.target as HTMLInputElement).value)),
             })
+          },
+        }),
+        'n-select': defineComponent({
+          props: {
+            value: [String, Array],
+            options: Array,
+            disabled: Boolean,
+            multiple: Boolean,
+          },
+          emits: ['update:value'],
+          setup(props, { emit }) {
+            return () => h('select', {
+              disabled: props.disabled,
+              multiple: props.multiple,
+              value: props.value,
+              onChange: (event: Event) => {
+                const target = event.target as HTMLSelectElement
+                if (props.multiple) {
+                  emit('update:value', Array.from(target.selectedOptions).map(option => option.value))
+                  return
+                }
+                emit('update:value', target.value)
+              },
+            }, ((props.options ?? []) as Array<{ label: string; value: string }>).map(option =>
+              h('option', { value: option.value }, option.label),
+            ))
+          },
+        }),
+        Select: defineComponent({
+          props: {
+            value: [String, Array],
+            options: Array,
+            disabled: Boolean,
+            multiple: Boolean,
+          },
+          emits: ['update:value'],
+          setup(props, { emit }) {
+            return () => h('select', {
+              disabled: props.disabled,
+              multiple: props.multiple,
+              value: props.value,
+              onChange: (event: Event) => {
+                const target = event.target as HTMLSelectElement
+                if (props.multiple) {
+                  emit('update:value', Array.from(target.selectedOptions).map(option => option.value))
+                  return
+                }
+                emit('update:value', target.value)
+              },
+            }, ((props.options ?? []) as Array<{ label: string; value: string }>).map(option =>
+              h('option', { value: option.value }, option.label),
+            ))
           },
         }),
         NSpace: defineComponent({
@@ -170,6 +232,8 @@ describe('OrganizationsPage', () => {
   })
 
   it('创建组织时提交组织标识', async () => {
+    modelsState.isError.value = false
+    modelsState.data.value = [{ id: 'qwen2.5:7b', name: 'qwen2.5:7b' }]
     createOrganization.mockResolvedValue({ id: 'org-2', name: '新组织', code: 'new-org', status: 'active' })
     const wrapper = mountPage()
 
@@ -184,14 +248,35 @@ describe('OrganizationsPage', () => {
     await inputs[2].setValue('org-admin')
     await inputs[3].setValue('组织管理员')
     await inputs[4].setValue('secret-password')
+    const modelSelect = wrapper.find('select')
+    await modelSelect.setValue(['qwen2.5:7b'])
     await wrapper.find('form').trigger('submit')
 
     expect(createOrganization).toHaveBeenCalledWith(expect.objectContaining({
       name: '新组织',
       code: 'new-org',
+      enabled_models: ['qwen2.5:7b'],
       admin_username: 'org-admin',
       admin_display_name: '组织管理员',
       admin_password: 'secret-password',
     }))
+  })
+
+  it('模型列表加载失败时禁用保存并阻止提交', async () => {
+    modelsState.isError.value = true
+    createOrganization.mockClear()
+    const wrapper = mountPage()
+
+    const openButton = wrapper.findAll('button').find(button => button.text().includes('新增组织'))
+    expect(openButton).toBeTruthy()
+    await openButton!.trigger('click')
+    await nextTick()
+
+    const saveButton = wrapper.findAll('button').find(button => button.text() === '保存')
+    expect(saveButton?.attributes('disabled')).toBeDefined()
+    expect(wrapper.text()).toContain('模型列表获取失败，请重试')
+
+    await wrapper.find('form').trigger('submit')
+    expect(createOrganization).not.toHaveBeenCalled()
   })
 })

@@ -32,7 +32,7 @@
           </n-button>
         </div>
       </template>
-      <n-form :model="form" label-placement="top" @submit.prevent="submit">
+      <n-form :model="form" label-placement="top" @submit.prevent="submitOrganization">
         <n-grid :cols="2" :x-gap="14">
           <n-grid-item>
             <n-form-item label="名称 *">
@@ -80,9 +80,23 @@
             </n-form-item>
           </n-grid-item>
           <n-grid-item :span="2">
+            <n-form-item label="可用模型 *">
+              <n-select
+                v-model:value="form.enabled_models"
+                multiple
+                filterable
+                :loading="modelsQuery.isLoading.value"
+                :disabled="modelsQuery.isError.value"
+                :options="modelOptions"
+                placeholder="选择组织可使用的模型"
+              />
+              <p v-if="modelsQuery.isError.value" class="state-text danger">模型列表获取失败，请重试</p>
+            </n-form-item>
+          </n-grid-item>
+          <n-grid-item :span="2">
             <n-space justify="end">
               <n-button @click="formVisible = false">取消</n-button>
-              <n-button type="primary" attr-type="submit" :loading="creating">保存</n-button>
+              <n-button type="primary" attr-type="submit" :loading="creating" :disabled="!canSubmitOrganization">保存</n-button>
             </n-space>
             <p v-if="submitError" class="state-text danger">{{ submitError }}</p>
           </n-grid-item>
@@ -137,12 +151,12 @@ import { computed, h, ref } from 'vue'
 import { Plus, X } from 'lucide-vue-next'
 import {
   NButton, NCard, NForm, NFormItem, NGrid, NGridItem,
-  NInput, NInputNumber, NModal, NSpace,
+  NInput, NInputNumber, NModal, NSelect, NSpace,
 } from 'naive-ui'
 
 import { formatOrgStatus } from '@/domain/status'
 import {
-  useCreateOrganization, useOrganizationsQuery, useUpdateOrganizationStatus,
+  useCreateOrganization, useModelsQuery, useOrganizationsQuery, useUpdateOrganizationStatus,
 } from '@/api/hooks/useOrganizations'
 import { useBillingStatusQuery, useOrgBalanceQuery, useRechargeMutation } from '@/api/hooks/useRecharge'
 import type { Organization } from '@/api'
@@ -174,7 +188,7 @@ const adminPasswordCopyHint = '<创建时设置，系统不保存明文；如忘
 const canSubmitRecharge = computed(() => Boolean(selectedOrgId.value && (rechargeAmount.value ?? 0) > 0))
 
 // 创建组织表单状态聚合到 useFormModal；toPayload 处理可选字段的 || undefined 过滤
-const { form, formVisible, creating, submitError, openForm, submit } = useFormModal({
+const { form, formVisible, creating, submitError, openForm, submit: submitForm } = useFormModal({
   initial: {
     name: '',
     code: '',
@@ -185,6 +199,7 @@ const { form, formVisible, creating, submitError, openForm, submit } = useFormMo
     admin_username: '',
     admin_display_name: '',
     admin_password: '',
+    enabled_models: [] as string[],
   },
   mutation: createMutation,
   toPayload: (f) => ({
@@ -198,8 +213,31 @@ const { form, formVisible, creating, submitError, openForm, submit } = useFormMo
     admin_username: f.admin_username,
     admin_display_name: f.admin_display_name,
     admin_password: f.admin_password,
+    enabled_models: f.enabled_models,
   }),
 })
+const modelsQuery = useModelsQuery(() => formVisible.value)
+const modelOptions = computed(() => (modelsQuery.data.value ?? []).map(model => ({
+  label: model.name,
+  value: model.id,
+})))
+// canSubmitOrganization 阻止空模型 allowlist 或模型目录错误进入后端校验。
+const canSubmitOrganization = computed(() =>
+  !creating.value && !modelsQuery.isError.value && form.enabled_models.length > 0,
+)
+
+// submitOrganization 兜底处理键盘提交，避免绕过保存按钮禁用状态。
+async function submitOrganization() {
+  if (modelsQuery.isError.value) {
+    submitError.value = '模型列表获取失败，请重试'
+    return
+  }
+  if (form.enabled_models.length === 0) {
+    submitError.value = '请至少选择一个可用模型'
+    return
+  }
+  await submitForm()
+}
 
 // columns 展示组织基础信息、状态和操作；启用/禁用按钮按当前状态互斥显示。
 const columns = [

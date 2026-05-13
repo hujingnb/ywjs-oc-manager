@@ -90,6 +90,11 @@
               <n-select v-model:value="createAppForm.persona_mode" :options="personaModeOptions" />
             </n-form-item>
           </n-grid-item>
+          <n-grid-item>
+            <n-form-item label="模型 *">
+              <n-select v-model:value="createAppForm.model_id" :options="modelOptions" placeholder="选择模型" />
+            </n-form-item>
+          </n-grid-item>
           <n-grid-item :span="2">
             <n-form-item label="实例 prompt（可选）">
               <n-input v-model:value="createAppForm.app_prompt" type="textarea" :rows="3" />
@@ -98,7 +103,15 @@
           <n-grid-item :span="2">
             <n-space justify="end">
               <n-button @click="createAppTarget = null">取消</n-button>
-              <n-button type="primary" attr-type="submit" :loading="createAppMutation.isPending.value" @click.prevent="onSubmitCreateApp">提交创建</n-button>
+              <n-button
+                type="primary"
+                attr-type="submit"
+                :loading="createAppMutation.isPending.value"
+                :disabled="!canSubmitCreateApp"
+                @click.prevent="onSubmitCreateApp"
+              >
+                提交创建
+              </n-button>
             </n-space>
             <p v-if="createAppError" class="state-text danger">{{ createAppError }}</p>
           </n-grid-item>
@@ -154,6 +167,7 @@ import { usePlatformOrgSelection } from '@/composables/usePlatformOrgSelection'
 import { useFormModal } from '@/composables/useFormModal'
 import type { Member } from '@/api'
 import { useAuthStore } from '@/stores/auth'
+import { useOrganizationQuery } from '@/api/hooks/useOrganizations'
 
 // MembersPage 管理组织成员列表，支持创建、启停、删除和重置密码。
 const props = defineProps<{ orgId?: string }>()
@@ -177,6 +191,11 @@ const canManageMembers = computed(() => auth.user?.role === 'org_admin' && auth.
 const currentUserId = computed(() => auth.user?.id)
 
 const { data: members, isLoading } = useMembersQuery(effectiveOrgId)
+const organizationQuery = useOrganizationQuery(effectiveOrgId)
+const modelOptions = computed(() => (organizationQuery.data.value?.enabled_models ?? []).map(model => ({
+  label: model,
+  value: model,
+})))
 const createMutation = useCreateMember(effectiveOrgId)
 const createAppMutation = useCreateMemberApp(effectiveOrgId)
 const statusMutation = useSetMemberStatus(effectiveOrgId)
@@ -197,7 +216,12 @@ const createAppForm = ref<CreateMemberAppPayload>({
   app_name: '',
   persona_mode: 'org_inherited',
   channel_type: 'wechat',
+  model_id: '',
 })
+// canSubmitCreateApp 保证复建实例时始终提交组织 allowlist 内的模型 ID。
+const canSubmitCreateApp = computed(() =>
+  Boolean(createAppForm.value.model_id && !createAppMutation.isPending.value),
+)
 
 // errorMessage 区分平台管理员无可选组织和组织用户无归属。
 const errorMessage = computed(() => {
@@ -265,12 +289,21 @@ function openCreateAppForm(member: Member) {
   createAppTarget.value = member
   createAppResult.value = null
   createAppError.value = ''
-  createAppForm.value = { app_name: '', persona_mode: 'org_inherited', channel_type: 'wechat' }
+  createAppForm.value = {
+    app_name: '',
+    persona_mode: 'org_inherited',
+    channel_type: 'wechat',
+    model_id: String(modelOptions.value[0]?.value ?? ''),
+  }
 }
 
 // onSubmitCreateApp 提交已有成员实例创建请求，并展示后端返回的新实例与 job。
 async function onSubmitCreateApp() {
   if (!createAppTarget.value) return
+  if (!createAppForm.value.model_id) {
+    createAppError.value = '请选择模型'
+    return
+  }
   createAppError.value = ''
   try {
     createAppResult.value = await createAppMutation.mutateAsync({

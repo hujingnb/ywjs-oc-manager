@@ -28,6 +28,8 @@ export interface AppDTO {
   persona_mode: string
   // 应用级提示词，仅 app_override 场景有业务意义。
   app_prompt?: string
+  // 实例当前使用的模型 ID，由后端在初始化或切换模型时写入 OpenClaw 配置。
+  model_id: string
   // runtime 容器 ID，容器尚未创建或已删除时为空。
   container_id?: string
   // new-api token 绑定状态，用于控制 API key 操作按钮。
@@ -42,6 +44,17 @@ export interface RuntimeOperationResult {
   job_id: string
   // 已提交的操作名，如 start / stop / restart / delete。
   operation: string
+}
+
+// AppModelUpdateResult 是实例模型切换接口返回值。
+// requires_restart 表示保存后是否已经提交或需要运行时重启才能生效。
+export interface AppModelUpdateResult {
+  // 保存后的实例详情。
+  app: AppDTO
+  // 已提交的重启任务 ID；无容器实例可能为空。
+  restart_job_id?: string
+  // true 表示模型变更需要重启运行时生效。
+  requires_restart: boolean
 }
 
 // RuntimeContainerInfo 与后端 service.RuntimeContainerInfo 字段一致。
@@ -194,6 +207,24 @@ export function useTriggerRuntimeOperation(appId: Ref<string | undefined>) {
       void client.invalidateQueries({ queryKey: appKey(appId.value) })
       void client.invalidateQueries({ queryKey: runtimeKey(appId.value) })
       void client.invalidateQueries({ queryKey: appResourcesKey(appId.value) })
+    },
+  })
+}
+
+// useUpdateAppModel 保存实例模型，并在成功后刷新实例详情和运行时视图。
+export function useUpdateAppModel(appId: Ref<string | undefined>) {
+  const client = useQueryClient()
+  return useMutation({
+    mutationFn: async (modelId: string) => {
+      if (!appId.value) throw new Error('缺少实例 ID')
+      return apiRequest<AppModelUpdateResult>(`/api/v1/apps/${appId.value}/model`, {
+        method: 'PATCH',
+        body: { model_id: modelId },
+      })
+    },
+    onSuccess: () => {
+      void client.invalidateQueries({ queryKey: appKey(appId.value) })
+      void client.invalidateQueries({ queryKey: runtimeKey(appId.value) })
     },
   })
 }

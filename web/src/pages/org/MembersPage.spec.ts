@@ -31,7 +31,12 @@ vi.mock('vue-router', () => ({
 
 vi.mock('@/api/hooks/useOrganizations', () => ({
   useOrganizationsQuery: () => ({
-    data: ref([{ id: 'org-1', name: '测试组织', status: 'active' }]),
+    data: ref([{ id: 'org-1', name: '测试组织', status: 'active', enabled_models: ['qwen2.5:7b'] }]),
+    isLoading: ref(false),
+    error: ref(null),
+  }),
+  useOrganizationQuery: () => ({
+    data: ref({ id: 'org-1', name: '测试组织', status: 'active', enabled_models: ['qwen2.5:7b'] }),
     isLoading: ref(false),
     error: ref(null),
   }),
@@ -115,7 +120,18 @@ describe('MembersPage', () => {
             })
           },
         }),
-        NSelect: true,
+        'n-select': defineComponent({
+          props: ['value', 'options'],
+          emits: ['update:value'],
+          setup(props, { emit }) {
+            return () => h('select', {
+              value: props.value,
+              onChange: (event: Event) => emit('update:value', (event.target as HTMLSelectElement).value),
+            }, (props.options ?? []).map((option: { label: string; value: string }) =>
+              h('option', { value: option.value }, option.label),
+            ))
+          },
+        }),
         NSpace: defineComponent({
           setup(_, { slots }) {
             return () => h('div', slots.default?.())
@@ -166,7 +182,7 @@ describe('MembersPage', () => {
   })
 
   // 平台管理员提交实例表单后展示新实例与初始化任务结果。
-  it('平台管理员提交创建新实例后展示结果', async () => {
+  it('平台管理员提交创建新实例时带上默认模型并展示结果', async () => {
     authUser.current = { id: 'admin-1', role: 'platform_admin' }
     createMemberAppMock.mutateAsync.mockClear()
     const wrapper = mountPage()
@@ -181,6 +197,7 @@ describe('MembersPage', () => {
         app_name: '新实例',
         persona_mode: 'org_inherited',
         channel_type: 'wechat',
+        model_id: 'qwen2.5:7b',
       },
     })
     expect(wrapper.text()).toContain('已创建实例 新实例')

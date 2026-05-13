@@ -8,6 +8,14 @@ import type { Organization } from '@/api'
 
 const ORG_LIST_KEY = ['organizations'] as const
 
+// ModelOptionDTO 是 new-api 实时模型目录在前端使用的最小视图。
+export interface ModelOptionDTO {
+  // 模型 ID 会写入组织 allowlist 和实例 model_id。
+  id: string
+  // 模型名称用于下拉展示；当前后端通常与 id 相同。
+  name: string
+}
+
 // OrganizationFormPayload 是创建组织及首个组织管理员的提交体。
 export interface OrganizationFormPayload {
   // 组织登录标识，创建后不可修改。
@@ -22,12 +30,27 @@ export interface OrganizationFormPayload {
   remark?: string
   // 余额预警阈值；null 表示清空或使用后端默认。
   credit_warning_threshold?: number | null
+  // 组织允许使用的模型 ID 列表，后端会按实时模型目录校验。
+  enabled_models: string[]
   // 首个组织管理员用户名。
   admin_username: string
   // 首个组织管理员展示名。
   admin_display_name: string
   // 首个组织管理员初始密码。
   admin_password: string
+}
+
+// useModelsQuery 获取 new-api 当前可用模型目录。
+// enabled 用于只在组织表单等需要模型选择的场景发起请求。
+export function useModelsQuery(enabled?: () => boolean) {
+  return useQuery<ModelOptionDTO[]>({
+    queryKey: ['models'],
+    enabled,
+    queryFn: async () => {
+      const response = await apiRequest<{ models: ModelOptionDTO[] }>('/api/v1/models')
+      return response.models
+    },
+  })
 }
 
 // useOrganizationsQuery 提供平台维度的组织列表。

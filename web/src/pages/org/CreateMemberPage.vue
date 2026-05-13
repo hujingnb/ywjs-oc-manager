@@ -51,6 +51,11 @@
               <n-select v-model:value="form.persona_mode" :options="personaModeOptions" />
             </n-form-item>
           </n-grid-item>
+          <n-grid-item>
+            <n-form-item label="模型 *">
+              <n-select v-model:value="form.model_id" :options="modelOptions" placeholder="选择模型" />
+            </n-form-item>
+          </n-grid-item>
           <n-grid-item :span="2">
             <n-form-item label="实例 prompt（可选）">
               <n-input v-model:value="form.app_prompt" type="textarea" :rows="3" />
@@ -59,7 +64,7 @@
           <n-grid-item :span="2">
             <n-space justify="end">
               <RouterLink class="secondary-button" to="/members">取消</RouterLink>
-              <n-button type="primary" attr-type="submit" :loading="creating">
+              <n-button type="primary" attr-type="submit" :loading="creating" :disabled="!form.model_id">
                 {{ creating ? '提交中…' : '创建并初始化' }}
               </n-button>
             </n-space>
@@ -88,7 +93,7 @@
 </template>
 
 <script setup lang="ts">
-import { computed, reactive, ref } from 'vue'
+import { computed, reactive, ref, watch } from 'vue'
 import { RouterLink } from 'vue-router'
 import {
   NButton, NCard, NForm, NFormItem, NGrid, NGridItem,
@@ -100,6 +105,7 @@ import {
   type OnboardMemberPayload,
   type OnboardMemberResult,
 } from '@/api/hooks/useMembers'
+import { useOrganizationQuery } from '@/api/hooks/useOrganizations'
 import { useAuthStore } from '@/stores/auth'
 
 // CreateMemberPage 是组织成员一站式开通页，同时创建成员、初始应用和渠道配置。
@@ -110,6 +116,11 @@ const effectiveOrgId = computed(() => props.orgId ?? auth.user?.org_id)
 const orgEyebrow = computed(() => (auth.user?.role === 'platform_admin' ? 'Platform · 创建成员' : '组织 · 创建成员'))
 
 const onboardMutation = useOnboardMember(effectiveOrgId)
+const organizationQuery = useOrganizationQuery(effectiveOrgId)
+const modelOptions = computed(() => (organizationQuery.data.value?.enabled_models ?? []).map(model => ({
+  label: model,
+  value: model,
+})))
 // creating 是页面本地提交态，用于覆盖 mutation 返回前的按钮禁用和文案。
 const creating = ref(false)
 const errorMessage = ref<string | null>(null)
@@ -125,7 +136,13 @@ const form = reactive<OnboardMemberPayload>({
   app_name: '',
   persona_mode: 'org_inherited',
   channel_type: 'wechat',
+  model_id: '',
 })
+
+// 组织模型 allowlist 加载后默认选中第一个可用模型，减少开户时的额外操作。
+watch(modelOptions, (options) => {
+  if (!form.model_id && options.length > 0) form.model_id = String(options[0].value)
+}, { immediate: true })
 
 const roleOptions: SelectOption[] = [
   { label: '组织成员', value: 'org_member' },
@@ -140,6 +157,10 @@ const personaModeOptions: SelectOption[] = [
 // onSubmit 提交完整开通流程；成功后清空敏感密码和文本输入，失败时保留表单便于修正。
 async function onSubmit() {
   errorMessage.value = null
+  if (!form.model_id) {
+    errorMessage.value = '请选择模型'
+    return
+  }
   creating.value = true
   try {
     const result = await onboardMutation.mutateAsync({ ...form })
