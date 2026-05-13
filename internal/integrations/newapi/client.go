@@ -41,6 +41,8 @@ var (
 	ErrPayloadInvalid = httpclient.ErrPayloadInvalid
 )
 
+const channelModelPageSize = 100
+
 // User 描述 new-api 中的 user 实体（仅含 manager 真正用到的字段）。
 type User struct {
 	ID          int64  `json:"id"`
@@ -226,20 +228,78 @@ func (c *Client) httpClient() *http.Client {
 
 // ListModels 实时查询 new-api 当前可用模型列表。
 //
-// new-api Dashboard 的 /api/models 能返回按渠道分组的模型映射，信息更贴近管理端；
-// 只有该接口不存在或当前 admin token 无权访问时，才降级到 OpenAI 兼容的 /v1/models。
+// new-api 的 /api/channel/ 才反映当前启用渠道实际配置的模型；
+// /api/models 是内置模型目录，可能包含未配置渠道的官方模型，因此只作为旧版本兼容降级。
 func (c *Client) ListModels(ctx context.Context) ([]Model, error) {
-	models, err := c.listDashboardModels(ctx)
+	models, err := c.listChannelModels(ctx)
 	if err == nil {
 		return models, nil
 	}
-	if !errors.Is(err, ErrNotFound) && !errors.Is(err, ErrUnauthorized) {
+	if !errors.Is(err, ErrNotFound) {
 		return nil, err
 	}
+	models, dashboardErr := c.listDashboardModels(ctx)
+	if dashboardErr == nil {
+		return models, nil
+	}
+	if !errors.Is(dashboardErr, ErrNotFound) && !errors.Is(dashboardErr, ErrUnauthorized) {
+		return nil, dashboardErr
+	}
 	if strings.TrimSpace(c.ModelRelayToken) == "" {
-		return nil, fmt.Errorf("%w: /api/models 不可用且未配置 OpenAI 兼容模型列表 token", err)
+		return nil, fmt.Errorf("%w: /api/channel/ 与 /api/models 不可用且未配置 OpenAI 兼容模型列表 token", dashboardErr)
 	}
 	return c.listOpenAIModels(ctx)
+}
+
+func (c *Client) listChannelModels(ctx context.Context) ([]Model, error) {
+	set := make(map[string]struct{})
+	for page := 1; ; page++ {
+		var response struct {
+			Success bool   `json:"success"`
+			Message string `json:"message"`
+			Data    struct {
+				Items []struct {
+					Status int64  `json:"status"`
+					Models string `json:"models"`
+				} `json:"items"`
+				Page     int `json:"page"`
+				PageSize int `json:"page_size"`
+				Total    int `json:"total"`
+			} `json:"data"`
+		}
+		path := fmt.Sprintf("/api/channel/?p=%d&page_size=%d", page, channelModelPageSize)
+		if err := c.do(ctx, http.MethodGet, path, nil, &response); err != nil {
+			return nil, err
+		}
+		if !response.Success {
+			return nil, fmt.Errorf("%w: %s", ErrUpstream, response.Message)
+		}
+		for _, channel := range response.Data.Items {
+			// status=1 是 new-api 启用渠道；禁用渠道不应出现在 manager 的可选模型中。
+			if channel.Status != 1 {
+				continue
+			}
+			for _, name := range strings.Split(channel.Models, ",") {
+				name = strings.TrimSpace(name)
+				if name != "" {
+					set[name] = struct{}{}
+				}
+			}
+		}
+		pageSize := response.Data.PageSize
+		if pageSize <= 0 {
+			pageSize = channelModelPageSize
+		}
+		currentPage := response.Data.Page
+		if currentPage <= 0 {
+			currentPage = page
+		}
+		// new-api 渠道列表是分页接口；total 缺失时按旧版本单页响应处理，避免无限翻页。
+		if response.Data.Total <= 0 || currentPage*pageSize >= response.Data.Total {
+			break
+		}
+	}
+	return sortedModels(set), nil
 }
 
 func (c *Client) listDashboardModels(ctx context.Context) ([]Model, error) {

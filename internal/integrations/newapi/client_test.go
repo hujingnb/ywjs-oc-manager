@@ -14,21 +14,81 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
-// TestListModelsPrefersDashboardEndpoint 验证模型列表优先解析 new-api Dashboard 模型映射接口。
-func TestListModelsPrefersDashboardEndpoint(t *testing.T) {
+// TestListModelsPrefersChannelEndpoint 验证模型列表优先解析 new-api 已启用渠道的模型配置。
+func TestListModelsPrefersChannelEndpoint(t *testing.T) {
 	t.Parallel()
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		require.Equal(t, "/api/models", r.URL.Path)
+		require.Equal(t, "/api/channel/", r.URL.Path)
+		require.Equal(t, "1", r.URL.Query().Get("p"))
+		require.Equal(t, "100", r.URL.Query().Get("page_size"))
 		require.Equal(t, "Bearer admin-token", r.Header.Get("Authorization"))
 		require.Equal(t, "1", r.Header.Get("New-Api-User"))
-		_, _ = w.Write([]byte(`{"success":true,"data":{"1":["qwen2.5:7b","deepseek-r1:14b"],"2":["qwen2.5:7b"]}}`))
+		_, _ = w.Write([]byte(`{"success":true,"data":{"items":[
+			{"id":1,"name":"ollama","status":1,"models":"qwen2.5:0.5b"},
+			{"id":2,"name":"public","status":1,"models":"qwen3.5:27b"},
+			{"id":3,"name":"gpt","status":1,"models":"gpt-5.4, gpt-5.2"},
+			{"id":4,"name":"disabled","status":2,"models":"should-not-appear"}
+		],"page":1,"page_size":100,"total":4}}`))
 	}))
 	t.Cleanup(server.Close)
 
 	client := NewClient(server.URL, "admin-token", 1)
 	models, err := client.ListModels(context.Background())
 	require.NoError(t, err)
-	assert.Equal(t, []Model{{ID: "deepseek-r1:14b", Name: "deepseek-r1:14b"}, {ID: "qwen2.5:7b", Name: "qwen2.5:7b"}}, models)
+	assert.Equal(t, []Model{
+		{ID: "gpt-5.2", Name: "gpt-5.2"},
+		{ID: "gpt-5.4", Name: "gpt-5.4"},
+		{ID: "qwen2.5:0.5b", Name: "qwen2.5:0.5b"},
+		{ID: "qwen3.5:27b", Name: "qwen3.5:27b"},
+	}, models)
+}
+
+// TestListModelsPaginatesChannelEndpoint 验证渠道超过单页时会继续翻页收集模型。
+func TestListModelsPaginatesChannelEndpoint(t *testing.T) {
+	t.Parallel()
+	var pages []string
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		require.Equal(t, "/api/channel/", r.URL.Path)
+		page := r.URL.Query().Get("p")
+		pages = append(pages, page)
+		require.Equal(t, "100", r.URL.Query().Get("page_size"))
+		switch page {
+		case "1":
+			_, _ = w.Write([]byte(`{"success":true,"data":{"items":[{"status":1,"models":"first-page-model"}],"page":1,"page_size":100,"total":101}}`))
+		case "2":
+			_, _ = w.Write([]byte(`{"success":true,"data":{"items":[{"status":1,"models":"second-page-model"}],"page":2,"page_size":100,"total":101}}`))
+		default:
+			t.Fatalf("unexpected page %s", page)
+		}
+	}))
+	t.Cleanup(server.Close)
+
+	client := NewClient(server.URL, "admin-token", 1)
+	models, err := client.ListModels(context.Background())
+	require.NoError(t, err)
+	assert.Equal(t, []string{"1", "2"}, pages)
+	assert.Equal(t, []Model{
+		{ID: "first-page-model", Name: "first-page-model"},
+		{ID: "second-page-model", Name: "second-page-model"},
+	}, models)
+}
+
+// TestListModelsRejectsUnauthorizedChannelEndpoint 验证渠道接口鉴权失败时不会降级到内置模型目录。
+func TestListModelsRejectsUnauthorizedChannelEndpoint(t *testing.T) {
+	t.Parallel()
+	var paths []string
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		paths = append(paths, r.URL.Path)
+		require.Equal(t, "/api/channel/", r.URL.Path)
+		w.WriteHeader(http.StatusForbidden)
+	}))
+	t.Cleanup(server.Close)
+
+	client := NewClient(server.URL, "bad-admin-token", 1)
+	models, err := client.ListModels(context.Background())
+	require.ErrorIs(t, err, ErrUnauthorized)
+	assert.Empty(t, models)
+	assert.Equal(t, []string{"/api/channel/"}, paths)
 }
 
 // TestListModelsFallsBackToOpenAIEndpoint 验证 Dashboard 模型接口不可用时兼容 OpenAI 模型列表。
@@ -37,7 +97,7 @@ func TestListModelsFallsBackToOpenAIEndpoint(t *testing.T) {
 	var paths []string
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		paths = append(paths, r.URL.Path)
-		if r.URL.Path == "/api/models" {
+		if r.URL.Path == "/api/channel/" || r.URL.Path == "/api/models" {
 			http.NotFound(w, r)
 			return
 		}
@@ -52,7 +112,7 @@ func TestListModelsFallsBackToOpenAIEndpoint(t *testing.T) {
 	client.SetModelRelayToken("sk-model-token")
 	models, err := client.ListModels(context.Background())
 	require.NoError(t, err)
-	assert.Equal(t, []string{"/api/models", "/v1/models"}, paths)
+	assert.Equal(t, []string{"/api/channel/", "/api/models", "/v1/models"}, paths)
 	assert.Equal(t, []Model{{ID: "a-model", Name: "a-model"}, {ID: "b-model", Name: "b-model"}}, models)
 }
 
@@ -62,6 +122,10 @@ func TestListModelsRequiresRelayTokenForOpenAIFallback(t *testing.T) {
 	var paths []string
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		paths = append(paths, r.URL.Path)
+		if r.URL.Path == "/api/channel/" {
+			http.NotFound(w, r)
+			return
+		}
 		require.Equal(t, "/api/models", r.URL.Path)
 		http.NotFound(w, r)
 	}))
@@ -72,14 +136,14 @@ func TestListModelsRequiresRelayTokenForOpenAIFallback(t *testing.T) {
 	require.ErrorIs(t, err, ErrNotFound)
 	assert.Contains(t, err.Error(), "未配置 OpenAI 兼容模型列表 token")
 	assert.Empty(t, models)
-	assert.Equal(t, []string{"/api/models"}, paths)
+	assert.Equal(t, []string{"/api/channel/", "/api/models"}, paths)
 }
 
 // TestListModelsFallbackRejectsOpenAIErrorStatus 验证 /v1/models 非 2xx 响应不会被解析为空模型列表。
 func TestListModelsFallbackRejectsOpenAIErrorStatus(t *testing.T) {
 	t.Parallel()
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		if r.URL.Path == "/api/models" {
+		if r.URL.Path == "/api/channel/" || r.URL.Path == "/api/models" {
 			http.NotFound(w, r)
 			return
 		}
