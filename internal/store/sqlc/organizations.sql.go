@@ -22,8 +22,8 @@ ORDER BY model_id
 `
 
 type CountActiveAppsByOrgAndModelsParams struct {
-	OrgID   pgtype.UUID `db:"org_id" json:"org_id"`
-	Column2 []string    `db:"column_2" json:"column_2"`
+	OrgID    pgtype.UUID `db:"org_id" json:"org_id"`
+	ModelIds []string    `db:"model_ids" json:"model_ids"`
 }
 
 type CountActiveAppsByOrgAndModelsRow struct {
@@ -32,7 +32,7 @@ type CountActiveAppsByOrgAndModelsRow struct {
 }
 
 func (q *Queries) CountActiveAppsByOrgAndModels(ctx context.Context, arg CountActiveAppsByOrgAndModelsParams) ([]CountActiveAppsByOrgAndModelsRow, error) {
-	rows, err := q.db.Query(ctx, countActiveAppsByOrgAndModels, arg.OrgID, arg.Column2)
+	rows, err := q.db.Query(ctx, countActiveAppsByOrgAndModels, arg.OrgID, arg.ModelIds)
 	if err != nil {
 		return nil, err
 	}
@@ -62,7 +62,7 @@ INSERT INTO organizations (
     credit_warning_threshold,
     enabled_models
 ) VALUES (
-    $1, $2, $3, $4, $5, $6, $7, $8
+    $1, $2, $3, $4, $5, $6, $7, COALESCE($8::jsonb, '[]'::jsonb)
 )
 RETURNING id, name, status, contact_name, contact_phone, remark, newapi_user_id, credit_warning_threshold, created_at, updated_at, deleted_at, newapi_user_credentials_ciphertext, code, enabled_models
 `
@@ -427,7 +427,7 @@ SET
     contact_phone = $4,
     remark = $5,
     credit_warning_threshold = $6,
-    enabled_models = $7,
+    enabled_models = COALESCE($7::jsonb, '[]'::jsonb),
     updated_at = now()
 WHERE id = $1
 RETURNING id, name, status, contact_name, contact_phone, remark, newapi_user_id, credit_warning_threshold, created_at, updated_at, deleted_at, newapi_user_credentials_ciphertext, code, enabled_models

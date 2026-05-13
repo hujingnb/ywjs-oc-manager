@@ -9,7 +9,7 @@ INSERT INTO organizations (
     credit_warning_threshold,
     enabled_models
 ) VALUES (
-    $1, $2, $3, $4, $5, $6, $7, $8
+    $1, $2, $3, $4, $5, $6, $7, COALESCE(sqlc.arg(enabled_models)::jsonb, '[]'::jsonb)
 )
 RETURNING *;
 
@@ -52,7 +52,7 @@ SET
     contact_phone = $4,
     remark = $5,
     credit_warning_threshold = $6,
-    enabled_models = $7,
+    enabled_models = COALESCE(sqlc.arg(enabled_models)::jsonb, '[]'::jsonb),
     updated_at = now()
 WHERE id = $1
 RETURNING *;
@@ -68,7 +68,7 @@ SELECT model_id, count(*)::bigint AS app_count
 FROM apps
 WHERE org_id = $1
   AND deleted_at IS NULL
-  AND model_id = ANY($2::text[])
+  AND model_id = ANY(sqlc.arg(model_ids)::text[])
 GROUP BY model_id
 ORDER BY model_id;
 

@@ -24,6 +24,10 @@ COMMENT ON COLUMN organizations.enabled_models IS 'manager 层组织可用模型
 ALTER TABLE apps
 ADD COLUMN model_id text NOT NULL;
 
+ALTER TABLE apps
+ADD CONSTRAINT apps_model_id_not_blank_check
+CHECK (btrim(model_id) <> '');
+
 COMMENT ON COLUMN apps.model_id IS '实例当前使用的模型 ID，由 manager 注入 OpenClaw 配置。';
 
 CREATE INDEX apps_org_model_active_idx
