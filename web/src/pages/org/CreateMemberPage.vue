@@ -53,7 +53,14 @@
           </n-grid-item>
           <n-grid-item>
             <n-form-item label="模型 *">
-              <n-select v-model:value="form.model_id" :options="modelOptions" placeholder="选择模型" />
+              <n-select
+                v-model:value="form.model_id"
+                :options="modelOptions"
+                :loading="organizationQuery.isLoading.value"
+                :disabled="organizationQuery.isError.value || modelOptions.length === 0"
+                placeholder="选择模型"
+              />
+              <p v-if="modelSelectError" class="state-text danger">{{ modelSelectError }}</p>
             </n-form-item>
           </n-grid-item>
           <n-grid-item :span="2">
@@ -64,7 +71,12 @@
           <n-grid-item :span="2">
             <n-space justify="end">
               <RouterLink class="secondary-button" to="/members">取消</RouterLink>
-              <n-button type="primary" attr-type="submit" :loading="creating" :disabled="!form.model_id">
+              <n-button
+                type="primary"
+                attr-type="submit"
+                :loading="creating"
+                :disabled="!form.model_id || modelSelectError !== ''"
+              >
                 {{ creating ? '提交中…' : '创建并初始化' }}
               </n-button>
             </n-space>
@@ -141,8 +153,15 @@ const form = reactive<OnboardMemberPayload>({
 
 // 组织模型 allowlist 加载后默认选中第一个可用模型，减少开户时的额外操作。
 watch(modelOptions, (options) => {
-  if (!form.model_id && options.length > 0) form.model_id = String(options[0].value)
+  const values = options.map(option => String(option.value))
+  if (!values.includes(form.model_id)) form.model_id = values[0] ?? ''
 }, { immediate: true })
+// modelSelectError 明确区分组织配置缺失和接口失败，避免用户只看到一个不可提交的空下拉框。
+const modelSelectError = computed(() => {
+  if (organizationQuery.isError.value) return '组织可用模型获取失败，请重试'
+  if (!organizationQuery.isLoading.value && modelOptions.value.length === 0) return '当前组织未配置可用模型'
+  return ''
+})
 
 const roleOptions: SelectOption[] = [
   { label: '组织成员', value: 'org_member' },

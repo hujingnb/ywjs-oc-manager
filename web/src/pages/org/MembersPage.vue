@@ -92,7 +92,14 @@
           </n-grid-item>
           <n-grid-item>
             <n-form-item label="模型 *">
-              <n-select v-model:value="createAppForm.model_id" :options="modelOptions" placeholder="选择模型" />
+              <n-select
+                v-model:value="createAppForm.model_id"
+                :options="modelOptions"
+                :loading="organizationQuery.isLoading.value"
+                :disabled="organizationQuery.isError.value || modelOptions.length === 0"
+                placeholder="选择模型"
+              />
+              <p v-if="createAppModelError" class="state-text danger">{{ createAppModelError }}</p>
             </n-form-item>
           </n-grid-item>
           <n-grid-item :span="2">
@@ -148,7 +155,7 @@
 </template>
 
 <script setup lang="ts">
-import { computed, ref } from 'vue'
+import { computed, ref, watch } from 'vue'
 import { useRouter } from 'vue-router'
 import {
   NButton, NCard, NForm, NFormItem, NGrid, NGridItem,
@@ -220,8 +227,20 @@ const createAppForm = ref<CreateMemberAppPayload>({
 })
 // canSubmitCreateApp 保证复建实例时始终提交组织 allowlist 内的模型 ID。
 const canSubmitCreateApp = computed(() =>
-  Boolean(createAppForm.value.model_id && !createAppMutation.isPending.value),
+  Boolean(createAppForm.value.model_id && !createAppModelError.value && !createAppMutation.isPending.value),
 )
+// createAppModelError 暴露组织模型配置问题，避免平台管理员只能看到禁用的提交按钮。
+const createAppModelError = computed(() => {
+  if (organizationQuery.isError.value) return '组织可用模型获取失败，请重试'
+  if (!organizationQuery.isLoading.value && modelOptions.value.length === 0) return '当前组织未配置可用模型'
+  return ''
+})
+// 平台管理员切换组织时关闭复建表单，防止旧成员和新组织 ID 组合成跨组织提交。
+watch(effectiveOrgId, () => {
+  createAppTarget.value = null
+  createAppResult.value = null
+  createAppError.value = ''
+})
 
 // errorMessage 区分平台管理员无可选组织和组织用户无归属。
 const errorMessage = computed(() => {

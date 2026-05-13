@@ -1,5 +1,5 @@
 import { mount } from '@vue/test-utils'
-import { defineComponent, h, ref, type PropType } from 'vue'
+import { computed, defineComponent, h, nextTick, ref, type PropType } from 'vue'
 import { describe, expect, it, vi } from 'vitest'
 import type { DataTableColumn } from 'naive-ui'
 
@@ -31,13 +31,22 @@ vi.mock('vue-router', () => ({
 
 vi.mock('@/api/hooks/useOrganizations', () => ({
   useOrganizationsQuery: () => ({
-    data: ref([{ id: 'org-1', name: '测试组织', status: 'active', enabled_models: ['qwen2.5:7b'] }]),
+    data: ref([
+      { id: 'org-1', name: '测试组织', status: 'active', enabled_models: ['qwen2.5:7b'] },
+      { id: 'org-2', name: '第二组织', status: 'active', enabled_models: ['deepseek-r1:14b'] },
+    ]),
     isLoading: ref(false),
     error: ref(null),
   }),
-  useOrganizationQuery: () => ({
-    data: ref({ id: 'org-1', name: '测试组织', status: 'active', enabled_models: ['qwen2.5:7b'] }),
+  useOrganizationQuery: (orgId: { value?: string }) => ({
+    data: computed(() => {
+      if (orgId.value === 'org-2') {
+        return { id: 'org-2', name: '第二组织', status: 'active', enabled_models: ['deepseek-r1:14b'] }
+      }
+      return { id: 'org-1', name: '测试组织', status: 'active', enabled_models: ['qwen2.5:7b'] }
+    }),
     isLoading: ref(false),
+    isError: ref(false),
     error: ref(null),
   }),
 }))
@@ -120,7 +129,31 @@ describe('MembersPage', () => {
             })
           },
         }),
+        NSelect: defineComponent({
+          props: ['value', 'options'],
+          emits: ['update:value'],
+          setup(props, { emit }) {
+            return () => h('select', {
+              value: props.value,
+              onChange: (event: Event) => emit('update:value', (event.target as HTMLSelectElement).value),
+            }, (props.options ?? []).map((option: { label: string; value: string }) =>
+              h('option', { value: option.value }, option.label),
+            ))
+          },
+        }),
         'n-select': defineComponent({
+          props: ['value', 'options'],
+          emits: ['update:value'],
+          setup(props, { emit }) {
+            return () => h('select', {
+              value: props.value,
+              onChange: (event: Event) => emit('update:value', (event.target as HTMLSelectElement).value),
+            }, (props.options ?? []).map((option: { label: string; value: string }) =>
+              h('option', { value: option.value }, option.label),
+            ))
+          },
+        }),
+        Select: defineComponent({
           props: ['value', 'options'],
           emits: ['update:value'],
           setup(props, { emit }) {
@@ -202,5 +235,21 @@ describe('MembersPage', () => {
     })
     expect(wrapper.text()).toContain('已创建实例 新实例')
     expect(wrapper.text()).toContain('job-1')
+  })
+
+  // 平台管理员切换组织时关闭已打开的复建实例表单，避免旧成员和新组织模型混用。
+  it('平台管理员切换组织时关闭创建新实例表单', async () => {
+    authUser.current = { id: 'admin-1', role: 'platform_admin' }
+    createMemberAppMock.mutateAsync.mockClear()
+    const wrapper = mountPage()
+
+    await wrapper.findAll('button').filter(button => button.text() === '创建新实例')[1].trigger('click')
+    expect(wrapper.text()).toContain('提交创建')
+
+    await wrapper.find('select').setValue('org-2')
+    await nextTick()
+
+    expect(wrapper.text()).not.toContain('提交创建')
+    expect(createMemberAppMock.mutateAsync).not.toHaveBeenCalled()
   })
 })
