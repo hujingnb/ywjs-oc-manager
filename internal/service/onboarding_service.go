@@ -10,6 +10,7 @@ import (
 	"time"
 
 	"github.com/jackc/pgx/v5"
+	"github.com/jackc/pgx/v5/pgconn"
 	"github.com/jackc/pgx/v5/pgtype"
 
 	"oc-manager/internal/auth"
@@ -204,7 +205,7 @@ func (s *MemberOnboardingService) OnboardMember(ctx context.Context, principal a
 		}
 		nodeUUID, err := optionalUUID(input.NodeID)
 		if err != nil {
-			return fmt.Errorf("非法 runtime node id: %w", err)
+			return fmt.Errorf("%w: 非法 runtime node id: %v", ErrMemberCreateInvalid, err)
 		}
 		app, err := store.CreateApp(ctx, sqlc.CreateAppParams{
 			OrgID:         org.ID,
@@ -353,7 +354,7 @@ func (s *MemberOnboardingService) CreateAppForMember(ctx context.Context, princi
 		}
 		nodeUUID, err := optionalUUID(input.NodeID)
 		if err != nil {
-			return fmt.Errorf("非法 runtime node id: %w", err)
+			return fmt.Errorf("%w: 非法 runtime node id: %v", ErrMemberCreateInvalid, err)
 		}
 		app, err := store.CreateApp(ctx, sqlc.CreateAppParams{
 			OrgID:         org.ID,
@@ -367,6 +368,9 @@ func (s *MemberOnboardingService) CreateAppForMember(ctx context.Context, princi
 			ApiKeyStatus:  domain.APIKeyStatusPending,
 		})
 		if err != nil {
+			if isAppsOwnerActiveUniqueViolation(err) {
+				return fmt.Errorf("%w: 成员已有未删除实例", ErrMemberCreateInvalid)
+			}
 			return fmt.Errorf("创建应用失败: %w", err)
 		}
 		if _, err := store.CreateChannelBinding(ctx, sqlc.CreateChannelBindingParams{
@@ -438,3 +442,9 @@ func optionalUUID(value string) (pgtype.UUID, error) {
 
 // errOnboardingFailed 仅用于内部测试中识别事务回滚路径。
 var errOnboardingFailed = errors.New("onboarding 事务失败")
+
+// isAppsOwnerActiveUniqueViolation 识别并发复建实例时由数据库兜底拦截的活跃实例唯一约束。
+func isAppsOwnerActiveUniqueViolation(err error) bool {
+	var pgErr *pgconn.PgError
+	return errors.As(err, &pgErr) && pgErr.Code == "23505" && pgErr.ConstraintName == "apps_owner_active"
+}

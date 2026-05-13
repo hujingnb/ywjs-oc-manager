@@ -6,6 +6,7 @@ import (
 	"testing"
 
 	"github.com/jackc/pgx/v5"
+	"github.com/jackc/pgx/v5/pgconn"
 	"github.com/jackc/pgx/v5/pgtype"
 
 	"github.com/stretchr/testify/assert"
@@ -182,6 +183,36 @@ func TestCreateAppForMember_NoActiveNode(t *testing.T) {
 	})
 
 	require.ErrorIs(t, err, ErrNoNodeAvailable)
+	require.False(t, tx.committed)
+}
+
+// TestCreateAppForMember_RejectsInvalidExplicitNodeID 验证显式节点 ID 非法时归类为成员创建参数错误。
+func TestCreateAppForMember_RejectsInvalidExplicitNodeID(t *testing.T) {
+	store := newOnboardingStub(t)
+	tx := &txRunnerStub{store: store}
+	svc := NewMemberOnboardingService(tx, fakeHash, defaultTestSelector())
+
+	_, err := svc.CreateAppForMember(context.Background(), platformAdmin(), testOrgID, uuidToString(store.user.ID), CreateAppForMemberInput{
+		AppName: "alice-new-bot",
+		NodeID:  "not-a-uuid",
+	})
+
+	require.ErrorIs(t, err, ErrMemberCreateInvalid)
+	require.False(t, tx.committed)
+}
+
+// TestCreateAppForMember_MapsOwnerActiveUniqueViolation 验证并发创建命中活跃实例唯一索引时归类为业务冲突。
+func TestCreateAppForMember_MapsOwnerActiveUniqueViolation(t *testing.T) {
+	store := newOnboardingStub(t)
+	store.appErr = &pgconn.PgError{Code: "23505", ConstraintName: "apps_owner_active"}
+	tx := &txRunnerStub{store: store}
+	svc := NewMemberOnboardingService(tx, fakeHash, defaultTestSelector())
+
+	_, err := svc.CreateAppForMember(context.Background(), platformAdmin(), testOrgID, uuidToString(store.user.ID), CreateAppForMemberInput{
+		AppName: "alice-new-bot",
+	})
+
+	require.ErrorIs(t, err, ErrMemberCreateInvalid)
 	require.False(t, tx.committed)
 }
 
