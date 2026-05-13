@@ -37,6 +37,8 @@ type App struct {
 	RuntimeSnapshotAt   pgtype.Timestamptz `db:"runtime_snapshot_at" json:"runtime_snapshot_at"`
 	RestartPolicyJson   []byte             `db:"restart_policy_json" json:"restart_policy_json"`
 	HealthStateJson     []byte             `db:"health_state_json" json:"health_state_json"`
+	// 实例当前使用的模型 ID，由 manager 注入 OpenClaw 配置。
+	ModelID string `db:"model_id" json:"model_id"`
 }
 
 // 审计日志表，记录关键操作、结果和错误信息；普通业务 API 不允许修改或删除。
@@ -160,6 +162,8 @@ type Organization struct {
 	// new-api 业务用户凭据密文，明文为 JSON {username, password, access_token}，使用 manager 的 security.master_key AES-256-GCM 加密。
 	NewapiUserCredentialsCiphertext pgtype.Text `db:"newapi_user_credentials_ciphertext" json:"newapi_user_credentials_ciphertext"`
 	Code                            string      `db:"code" json:"code"`
+	// manager 层组织可用模型列表；new-api 不用该字段做权限控制。
+	EnabledModels []byte `db:"enabled_models" json:"enabled_models"`
 }
 
 // 组织级 AI 人设版本表，当前生效版本取同组织最大 version。

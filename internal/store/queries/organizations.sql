@@ -6,9 +6,10 @@ INSERT INTO organizations (
     contact_name,
     contact_phone,
     remark,
-    credit_warning_threshold
+    credit_warning_threshold,
+    enabled_models
 ) VALUES (
-    $1, $2, $3, $4, $5, $6, $7
+    $1, $2, $3, $4, $5, $6, $7, $8
 )
 RETURNING *;
 
@@ -51,6 +52,7 @@ SET
     contact_phone = $4,
     remark = $5,
     credit_warning_threshold = $6,
+    enabled_models = $7,
     updated_at = now()
 WHERE id = $1
 RETURNING *;
@@ -60,6 +62,15 @@ UPDATE organizations
 SET status = $2, updated_at = now()
 WHERE id = $1
 RETURNING *;
+
+-- name: CountActiveAppsByOrgAndModels :many
+SELECT model_id, count(*)::bigint AS app_count
+FROM apps
+WHERE org_id = $1
+  AND deleted_at IS NULL
+  AND model_id = ANY($2::text[])
+GROUP BY model_id
+ORDER BY model_id;
 
 -- name: SoftDeleteOrganization :one
 UPDATE organizations

@@ -8,9 +8,10 @@ INSERT INTO apps (
     status,
     persona_mode,
     app_prompt,
-    api_key_status
+    api_key_status,
+    model_id
 ) VALUES (
-    $1, $2, $3, $4, $5, $6, $7, $8, $9
+    $1, $2, $3, $4, $5, $6, $7, $8, $9, $10
 )
 RETURNING *;
 
@@ -100,4 +101,12 @@ UPDATE apps
 SET health_state_json = $2,
     updated_at = now()
 WHERE id = $1
+RETURNING *;
+
+-- name: SetAppModel :one
+UPDATE apps
+SET model_id = $2,
+    updated_at = now()
+WHERE id = $1
+  AND deleted_at IS NULL
 RETURNING *;
