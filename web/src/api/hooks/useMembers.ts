@@ -4,7 +4,7 @@ import { useMutation, useQuery, useQueryClient } from '@tanstack/vue-query'
 import type { Ref } from 'vue'
 
 import { apiRequest } from '@/api/client'
-import type { Member } from '@/api'
+import type { App, Member } from '@/api'
 
 // OnboardMemberPayload 是“一键创建成员和应用”表单提交体。
 export interface OnboardMemberPayload {
@@ -46,6 +46,28 @@ export interface OnboardMemberResult {
     api_key_status: string
   }
   // 初始化 job ID，页面可用它提示后台进度。
+  job_id: string
+}
+
+// CreateMemberAppPayload 是平台管理员为已有成员创建新实例的表单提交体。
+export interface CreateMemberAppPayload {
+  // 新实例名称。
+  app_name: string
+  // 应用级提示词，persona_mode=app_override 时生效。
+  app_prompt?: string
+  // 人设继承模式，缺省时后端使用组织默认规则。
+  persona_mode?: 'org_inherited' | 'app_override'
+  // 首次绑定的渠道类型，目前仅支持 wechat。
+  channel_type?: 'wechat'
+  // 指定 runtime 节点；为空时后端按调度策略选择。
+  runtime_node_id?: string
+}
+
+// CreateMemberAppResult 是已有成员实例创建结果。
+export interface CreateMemberAppResult {
+  // 新创建的应用实例。
+  app: App
+  // 初始化 job ID。
   job_id: string
 }
 
@@ -145,6 +167,25 @@ export function useOnboardMember(orgId: Ref<string | undefined>) {
         { method: 'POST', body: payload },
       )
       return response.onboarding
+    },
+    onSuccess: () => {
+      void client.invalidateQueries({ queryKey: memberListKey(orgId.value) })
+    },
+  })
+}
+
+// useCreateMemberApp 为已有成员创建新的实例。
+// 成功后刷新成员列表；应用列表会在用户进入实例页时重新拉取。
+export function useCreateMemberApp(orgId: Ref<string | undefined>) {
+  const client = useQueryClient()
+  return useMutation({
+    mutationFn: async ({ userId, payload }: { userId: string; payload: CreateMemberAppPayload }) => {
+      if (!orgId.value) throw new Error('缺少组织 ID')
+      const response = await apiRequest<{ member_app: CreateMemberAppResult }>(
+        `/api/v1/organizations/${orgId.value}/members/${userId}/apps`,
+        { method: 'POST', body: payload },
+      )
+      return response.member_app
     },
     onSuccess: () => {
       void client.invalidateQueries({ queryKey: memberListKey(orgId.value) })

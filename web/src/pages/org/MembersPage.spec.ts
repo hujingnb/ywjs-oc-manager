@@ -10,6 +10,13 @@ const authUser = vi.hoisted(() => ({
   current: { id: 'admin-1', role: 'org_admin', org_id: 'org-1' } as { id: string; role: string; org_id?: string } | null,
 }))
 
+const createMemberAppMock = vi.hoisted(() => ({
+  mutateAsync: vi.fn(async () => ({
+    app: { id: 'app-1', name: '新实例', status: 'draft', persona_mode: 'org_inherited', api_key_status: 'pending' },
+    job_id: 'job-1',
+  })),
+}))
+
 vi.mock('@/stores/auth', () => ({
   useAuthStore: () => ({
     get user() {
@@ -53,6 +60,7 @@ vi.mock('@/api/hooks/useMembers', () => ({
     isLoading: ref(false),
   }),
   useCreateMember: () => ({ mutateAsync: vi.fn(), isPending: ref(false) }),
+  useCreateMemberApp: () => ({ mutateAsync: createMemberAppMock.mutateAsync, isPending: ref(false) }),
   useDeleteMember: () => ({ mutateAsync: vi.fn(), isPending: ref(false) }),
   useResetMemberPassword: () => ({ mutateAsync: vi.fn(), isPending: ref(false) }),
   useSetMemberStatus: () => ({ mutate: vi.fn(), isPending: ref(false) }),
@@ -97,7 +105,16 @@ describe('MembersPage', () => {
         NFormItem: true,
         NGrid: true,
         NGridItem: true,
-        NInput: true,
+        NInput: defineComponent({
+          props: ['value'],
+          emits: ['update:value'],
+          setup(props, { emit }) {
+            return () => h('input', {
+              value: props.value,
+              onInput: (event: Event) => emit('update:value', (event.target as HTMLInputElement).value),
+            })
+          },
+        }),
         NSelect: true,
         NSpace: defineComponent({
           setup(_, { slots }) {
@@ -127,5 +144,38 @@ describe('MembersPage', () => {
 
     const deleteButtons = wrapper.findAll('button').filter(button => button.text() === '删除')
     expect(deleteButtons).toHaveLength(0)
+  })
+
+  // 平台管理员可在成员行看到创建新实例入口，用于已删除实例后的复建。
+  it('平台管理员可看到创建新实例入口', () => {
+    authUser.current = { id: 'admin-1', role: 'platform_admin' }
+
+    const wrapper = mountPage()
+
+    expect(wrapper.findAll('button').some(button => button.text() === '创建新实例')).toBe(true)
+  })
+
+  // 组织管理员仍通过原开户入口创建成员，不显示平台复建实例入口。
+  it('组织管理员看不到平台复建实例入口', () => {
+    authUser.current = { id: 'admin-1', role: 'org_admin', org_id: 'org-1' }
+
+    const wrapper = mountPage()
+
+    expect(wrapper.findAll('button').some(button => button.text() === '创建新实例')).toBe(false)
+  })
+
+  // 平台管理员提交实例表单后展示新实例与初始化任务结果。
+  it('平台管理员提交创建新实例后展示结果', async () => {
+    authUser.current = { id: 'admin-1', role: 'platform_admin' }
+    createMemberAppMock.mutateAsync.mockClear()
+    const wrapper = mountPage()
+
+    await wrapper.findAll('button').find(button => button.text() === '创建新实例')!.trigger('click')
+    await wrapper.find('input').setValue('新实例')
+    await wrapper.findAll('button').find(button => button.text() === '提交创建')!.trigger('click')
+
+    expect(createMemberAppMock.mutateAsync).toHaveBeenCalledWith({ userId: 'member-1', payload: expect.objectContaining({ app_name: '新实例' }) })
+    expect(wrapper.text()).toContain('已创建实例 新实例')
+    expect(wrapper.text()).toContain('job-1')
   })
 })

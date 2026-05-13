@@ -70,6 +70,46 @@
       </n-form>
     </n-card>
 
+    <!-- 平台管理员为已有成员复建实例 -->
+    <n-card v-if="createAppTarget" :bordered="true">
+      <template #header>
+        <div style="display: flex; align-items: center; justify-content: space-between">
+          <h2 style="margin: 0">创建新实例</h2>
+          <n-button quaternary circle @click="createAppTarget = null">✕</n-button>
+        </div>
+      </template>
+      <n-form label-placement="top" @submit.prevent="onSubmitCreateApp">
+        <n-grid :cols="2" :x-gap="14">
+          <n-grid-item>
+            <n-form-item label="实例名 *">
+              <n-input v-model:value="createAppForm.app_name" placeholder="实例名称" />
+            </n-form-item>
+          </n-grid-item>
+          <n-grid-item>
+            <n-form-item label="人设模式">
+              <n-select v-model:value="createAppForm.persona_mode" :options="personaModeOptions" />
+            </n-form-item>
+          </n-grid-item>
+          <n-grid-item :span="2">
+            <n-form-item label="实例 prompt（可选）">
+              <n-input v-model:value="createAppForm.app_prompt" type="textarea" :rows="3" />
+            </n-form-item>
+          </n-grid-item>
+          <n-grid-item :span="2">
+            <n-space justify="end">
+              <n-button @click="createAppTarget = null">取消</n-button>
+              <n-button type="primary" attr-type="submit" :loading="createAppMutation.isPending.value" @click.prevent="onSubmitCreateApp">提交创建</n-button>
+            </n-space>
+            <p v-if="createAppError" class="state-text danger">{{ createAppError }}</p>
+          </n-grid-item>
+        </n-grid>
+      </n-form>
+    </n-card>
+
+    <p v-if="createAppResult" class="state-text">
+      已创建实例 {{ createAppResult.app.name }}，Job ID：{{ createAppResult.job_id }}
+    </p>
+
     <!-- Modals -->
     <ConfirmActionModal
       :visible="!!memberToDelete"
@@ -104,8 +144,8 @@ import {
 
 import { formatMemberRole, formatMemberStatus } from '@/domain/status'
 import {
-  useCreateMember, useDeleteMember, useMembersQuery, useResetMemberPassword,
-  useSetMemberStatus, type MemberFormPayload,
+  useCreateMember, useCreateMemberApp, useDeleteMember, useMembersQuery, useResetMemberPassword,
+  useSetMemberStatus, type CreateMemberAppPayload, type CreateMemberAppResult, type MemberFormPayload,
 } from '@/api/hooks/useMembers'
 import ConfirmActionModal from '@/components/ConfirmActionModal.vue'
 import DataTableList from '@/components/DataTableList.vue'
@@ -138,6 +178,7 @@ const currentUserId = computed(() => auth.user?.id)
 
 const { data: members, isLoading } = useMembersQuery(effectiveOrgId)
 const createMutation = useCreateMember(effectiveOrgId)
+const createAppMutation = useCreateMemberApp(effectiveOrgId)
 const statusMutation = useSetMemberStatus(effectiveOrgId)
 const deleteMutation = useDeleteMember(effectiveOrgId)
 // memberToDelete 保存二次确认中的目标成员，确认后才调用删除接口。
@@ -148,6 +189,15 @@ const resetNewPassword = ref('')
 const resetMutation = useResetMemberPassword()
 const resetFeedback = ref('')
 const resetError = ref(false)
+// createAppTarget 仅在平台管理员复建成员实例时有值，关闭表单即清空。
+const createAppTarget = ref<Member | null>(null)
+const createAppResult = ref<CreateMemberAppResult | null>(null)
+const createAppError = ref('')
+const createAppForm = ref<CreateMemberAppPayload>({
+  app_name: '',
+  persona_mode: 'org_inherited',
+  channel_type: 'wechat',
+})
 
 // errorMessage 区分平台管理员无可选组织和组织用户无归属。
 const errorMessage = computed(() => {
@@ -167,6 +217,11 @@ const roleOptions: SelectOption[] = [
   { label: '组织管理员', value: 'org_admin' },
 ]
 
+const personaModeOptions: SelectOption[] = [
+  { label: '沿用组织人设', value: 'org_inherited' },
+  { label: '实例覆盖', value: 'app_override' },
+]
+
 // columns 展示成员身份和状态，启用/禁用按钮按当前成员状态互斥显示。
 const columns = [
   { title: '用户名', key: 'username' },
@@ -180,6 +235,7 @@ const columns = [
     { label: '启用', type: 'primary', onClick: r => onToggle(r, 'enable'), hidden: r => !canManageMembers.value || r.status === 'active' },
     { label: '重置密码', hidden: () => !canManageMembers.value, onClick: r => openResetForm(r) },
     { label: '删除', type: 'error', hidden: r => !canManageMembers.value || r.id === currentUserId.value, onClick: r => { memberToDelete.value = r } },
+    { label: '创建新实例', type: 'primary', hidden: r => auth.user?.role !== 'platform_admin' || r.id === currentUserId.value, onClick: r => openCreateAppForm(r) },
   ]),
 ]
 
@@ -202,6 +258,29 @@ function openResetForm(member: Member) {
   if (!pwd || pwd.length < 8) return
   resetTarget.value = member; resetNewPassword.value = pwd
   resetFeedback.value = ''; resetError.value = false
+}
+
+// openCreateAppForm 打开平台管理员为已有成员复建实例的表单。
+function openCreateAppForm(member: Member) {
+  createAppTarget.value = member
+  createAppResult.value = null
+  createAppError.value = ''
+  createAppForm.value = { app_name: '', persona_mode: 'org_inherited', channel_type: 'wechat' }
+}
+
+// onSubmitCreateApp 提交已有成员实例创建请求，并展示后端返回的新实例与 job。
+async function onSubmitCreateApp() {
+  if (!createAppTarget.value) return
+  createAppError.value = ''
+  try {
+    createAppResult.value = await createAppMutation.mutateAsync({
+      userId: createAppTarget.value.id,
+      payload: { ...createAppForm.value },
+    })
+    createAppTarget.value = null
+  } catch (err) {
+    createAppError.value = err instanceof Error ? err.message : '创建实例失败'
+  }
 }
 
 // onConfirmReset 提交重置密码，并把结果反馈到页面内状态文本。
