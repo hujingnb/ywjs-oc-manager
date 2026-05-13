@@ -209,6 +209,9 @@ func runManager(ctx context.Context, cfg config.Config, logOut io.Writer) error 
 		usageService = service.NewUsageService(nil, nil, nil)
 		organizationService = service.NewOrganizationService(dbStore.Queries, nil, nil, nil)
 	}
+	if modelCatalogService != nil {
+		organizationService.SetModelValidator(modelCatalogService)
+	}
 	platformOverviewService := service.NewPlatformOverviewService(dbStore.Queries)
 
 	registry := handlers.NewRegistry()

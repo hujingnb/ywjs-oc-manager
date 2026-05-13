@@ -43,6 +43,8 @@ type CreateOrganizationRequest struct {
 	Remark string `json:"remark"`
 	// CreditWarningThreshold 是组织余额预警阈值；nil 表示不启用余额预警或保持预警关闭。
 	CreditWarningThreshold *int32 `json:"credit_warning_threshold"`
+	// EnabledModels 是该组织允许在 manager 内选择的模型列表；new-api token 不使用该字段限权。
+	EnabledModels []string `json:"enabled_models"`
 	// AdminUsername 是随组织创建的首个 org_admin 账号名。
 	AdminUsername string `json:"admin_username" binding:"required"`
 	// AdminDisplayName 是首个 org_admin 的显示名。
@@ -63,6 +65,8 @@ type OrganizationRequest struct {
 	Remark string `json:"remark"`
 	// CreditWarningThreshold 是组织余额预警阈值；nil 表示清空或未设置预警阈值。
 	CreditWarningThreshold *int32 `json:"credit_warning_threshold"`
+	// EnabledModels 是该组织允许在 manager 内选择的模型列表；new-api token 不使用该字段限权。
+	EnabledModels []string `json:"enabled_models"`
 }
 
 // ===== 成员 members =====

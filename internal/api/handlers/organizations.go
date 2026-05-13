@@ -247,6 +247,7 @@ func toOrganizationInput(req OrganizationRequest) service.OrganizationInput {
 		ContactPhone:           req.ContactPhone,
 		Remark:                 req.Remark,
 		CreditWarningThreshold: req.CreditWarningThreshold,
+		EnabledModels:          req.EnabledModels,
 	}
 }
 
@@ -262,6 +263,7 @@ func toCreateOrganizationInput(req CreateOrganizationRequest) service.Organizati
 		AdminUsername:          req.AdminUsername,
 		AdminDisplayName:       req.AdminDisplayName,
 		AdminPassword:          req.AdminPassword,
+		EnabledModels:          req.EnabledModels,
 	}
 }
 

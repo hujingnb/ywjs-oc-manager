@@ -13,6 +13,7 @@ import (
 
 	"github.com/gin-gonic/gin"
 
+	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 	"oc-manager/internal/auth"
 	"oc-manager/internal/domain"
@@ -24,7 +25,7 @@ func TestOrganizationsCreateRequiresToken(t *testing.T) {
 	router, _ := newOrganizationsTestRouter(t, &organizationServiceStub{})
 
 	recorder := httptest.NewRecorder()
-	request := httptest.NewRequest(http.MethodPost, "/api/v1/organizations", bytes.NewBufferString(`{"name":"测试组织","code":"test-org","admin_username":"admin","admin_display_name":"管理员","admin_password":"secret-password"}`))
+	request := httptest.NewRequest(http.MethodPost, "/api/v1/organizations", bytes.NewBufferString(`{"name":"测试组织","code":"test-org","admin_username":"admin","admin_display_name":"管理员","admin_password":"secret-password","enabled_models":["qwen2.5:7b"]}`))
 	request.Header.Set("Content-Type", "application/json")
 	router.ServeHTTP(recorder, request)
 
@@ -41,7 +42,7 @@ func TestOrganizationsCreateReturnsCreatedOrganization(t *testing.T) {
 	require.NoError(t, err)
 
 	recorder := httptest.NewRecorder()
-	request := httptest.NewRequest(http.MethodPost, "/api/v1/organizations", bytes.NewBufferString(`{"name":"测试组织","code":"test-org","admin_username":"admin","admin_display_name":"管理员","admin_password":"secret-password"}`))
+	request := httptest.NewRequest(http.MethodPost, "/api/v1/organizations", bytes.NewBufferString(`{"name":"测试组织","code":"test-org","admin_username":"admin","admin_display_name":"管理员","admin_password":"secret-password","enabled_models":["qwen2.5:7b"]}`))
 	request.Header.Set("Content-Type", "application/json")
 	request.Header.Set("Authorization", "Bearer "+accessToken)
 	router.ServeHTTP(recorder, request)
@@ -52,13 +53,33 @@ func TestOrganizationsCreateReturnsCreatedOrganization(t *testing.T) {
 	}
 	err = json.Unmarshal(recorder.Body.Bytes(), &response)
 	require.NoError(t, err)
-	if response.Organization.Name != "测试组织" || svc.lastPrincipal.Role != domain.UserRolePlatformAdmin {
-		t.Fatalf("response=%+v principal=%+v", response, svc.lastPrincipal)
+	assert.Equal(t, "测试组织", response.Organization.Name)
+	assert.Equal(t, domain.UserRolePlatformAdmin, svc.lastPrincipal.Role)
+	assert.Equal(t, "test-org", svc.lastCreateInput.Code)
+	assert.Equal(t, "admin", svc.lastCreateInput.AdminUsername)
+	assert.Equal(t, "管理员", svc.lastCreateInput.AdminDisplayName)
+	assert.Equal(t, "secret-password", svc.lastCreateInput.AdminPassword)
+	assert.Equal(t, []string{"qwen2.5:7b"}, svc.lastCreateInput.EnabledModels)
+}
+
+// TestOrganizationsUpdatePassesEnabledModels 验证组织更新请求会把模型 allowlist 传给 service。
+func TestOrganizationsUpdatePassesEnabledModels(t *testing.T) {
+	svc := &organizationServiceStub{
+		createResult: service.OrganizationResult{ID: "org-1", Name: "测试组织", Status: domain.StatusActive, EnabledModels: []string{"deepseek-r1:14b"}},
 	}
-	require.Equal(t, "test-org", svc.lastCreateInput.Code)
-	require.Equal(t, "admin", svc.lastCreateInput.AdminUsername)
-	require.Equal(t, "管理员", svc.lastCreateInput.AdminDisplayName)
-	require.Equal(t, "secret-password", svc.lastCreateInput.AdminPassword)
+	router, tokens := newOrganizationsTestRouter(t, svc)
+	accessToken, err := tokens.SignAccessToken(auth.Principal{UserID: "user-1", Role: domain.UserRolePlatformAdmin})
+	require.NoError(t, err)
+
+	recorder := httptest.NewRecorder()
+	request := httptest.NewRequest(http.MethodPatch, "/api/v1/organizations/org-1", bytes.NewBufferString(`{"name":"测试组织","enabled_models":["deepseek-r1:14b"]}`))
+	request.Header.Set("Content-Type", "application/json")
+	request.Header.Set("Authorization", "Bearer "+accessToken)
+	router.ServeHTTP(recorder, request)
+
+	require.Equal(t, http.StatusOK, recorder.Code)
+	assert.Equal(t, "org-1", svc.lastUpdateOrgID)
+	assert.Equal(t, []string{"deepseek-r1:14b"}, svc.lastUpdateInput.EnabledModels)
 }
 
 // TestOrganizationsCreateRequiresAdminFields 验证组织创建要求管理员字段的预期行为场景。
@@ -128,6 +149,8 @@ type organizationServiceStub struct {
 	createErr       error
 	lastPrincipal   auth.Principal
 	lastCreateInput service.OrganizationInput
+	lastUpdateOrgID string
+	lastUpdateInput service.OrganizationInput
 }
 
 func (s *organizationServiceStub) CreateOrganization(_ context.Context, principal auth.Principal, input service.OrganizationInput) (service.OrganizationResult, error) {
@@ -149,8 +172,10 @@ func (s *organizationServiceStub) GetOrganization(_ context.Context, principal a
 	return s.createResult, nil
 }
 
-func (s *organizationServiceStub) UpdateOrganization(_ context.Context, principal auth.Principal, _ string, _ service.OrganizationInput) (service.OrganizationResult, error) {
+func (s *organizationServiceStub) UpdateOrganization(_ context.Context, principal auth.Principal, orgID string, input service.OrganizationInput) (service.OrganizationResult, error) {
 	s.lastPrincipal = principal
+	s.lastUpdateOrgID = orgID
+	s.lastUpdateInput = input
 	return s.createResult, nil
 }
 

@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"testing"
 
 	"github.com/jackc/pgx/v5"
@@ -34,6 +35,7 @@ func TestOrganizationServiceCreateProvisionsNewAPIUser(t *testing.T) {
 		accessToken: "access-tok-xyz",
 	}
 	svc := NewOrganizationService(store, prov, mustCipher(t), nil)
+	svc.SetModelValidator(orgModelValidatorStub{models: []string{"qwen2.5:7b"}})
 	svc.hashPassword = fakeHash
 	threshold := int32(20)
 
@@ -45,16 +47,16 @@ func TestOrganizationServiceCreateProvisionsNewAPIUser(t *testing.T) {
 		AdminUsername:          "org-admin",
 		AdminDisplayName:       "组织管理员",
 		AdminPassword:          "secret-password",
+		EnabledModels:          []string{"qwen2.5:7b"},
 	})
 	require.NoError(t, err)
-	if result.Name != "测试组织" || result.CreditWarningThreshold == nil || *result.CreditWarningThreshold != 20 {
-		t.Fatalf("organization = %+v", result)
-	}
+	require.NotNil(t, result.CreditWarningThreshold)
+	assert.Equal(t, "测试组织", result.Name)
+	assert.Equal(t, int32(20), *result.CreditWarningThreshold)
 	assert.Equal(t, "test-org", result.Code)
 	assert.Equal(t, "test-org", store.created.Code)
-	if prov.createCalls != 1 || prov.bootstrapCalls != 1 {
-		t.Fatalf("provisioner calls create=%d bootstrap=%d, want 1/1", prov.createCalls, prov.bootstrapCalls)
-	}
+	assert.Equal(t, 1, prov.createCalls)
+	assert.Equal(t, 1, prov.bootstrapCalls)
 	assert.Equal(t, "test-org", prov.lastCreate.Username)
 	require.NotEqual(t, "", prov.lastCreate.Password)
 	require.True(t, store.updateCalled)
@@ -68,9 +70,10 @@ func TestOrganizationServiceCreateProvisionsNewAPIUser(t *testing.T) {
 	err = json.Unmarshal(plain, &creds)
 	require.NoError(t, err)
 	require.Equal(t, "access-tok-xyz", creds.AccessToken)
-	if creds.Username != prov.lastCreate.Username || creds.Password != prov.lastCreate.Password {
-		t.Fatalf("creds 三件套不一致: %+v vs created %+v", creds, prov.lastCreate)
-	}
+	assert.Equal(t, prov.lastCreate.Username, creds.Username)
+	assert.Equal(t, prov.lastCreate.Password, creds.Password)
+	assert.Equal(t, []string{"qwen2.5:7b"}, result.EnabledModels)
+	assert.JSONEq(t, `["qwen2.5:7b"]`, string(store.created.EnabledModels))
 }
 
 // TestOrganizationServiceCreateAlsoCreatesOrgAdmin 验证组织服务创建Also创建组织管理员的成功路径场景。
@@ -78,6 +81,7 @@ func TestOrganizationServiceCreateAlsoCreatesOrgAdmin(t *testing.T) {
 	store := &organizationStoreStub{}
 	prov := &fakeProvisioner{user: newapi.User{ID: 42}, accessToken: "access-tok-xyz"}
 	svc := NewOrganizationService(store, prov, mustCipher(t), nil)
+	svc.SetModelValidator(orgModelValidatorStub{models: []string{"qwen2.5:7b"}})
 	svc.hashPassword = fakeHash
 
 	_, err := svc.CreateOrganization(context.Background(), auth.Principal{Role: domain.UserRolePlatformAdmin}, OrganizationInput{
@@ -86,6 +90,7 @@ func TestOrganizationServiceCreateAlsoCreatesOrgAdmin(t *testing.T) {
 		AdminUsername:    "org-admin",
 		AdminDisplayName: "组织管理员",
 		AdminPassword:    "secret-password",
+		EnabledModels:    []string{"qwen2.5:7b"},
 	})
 	require.NoError(t, err)
 
@@ -107,6 +112,7 @@ func TestOrganizationServiceCreateRollbackOnProvisioningFailure(t *testing.T) {
 		bootstrapError: errors.New("login 失败"),
 	}
 	svc := NewOrganizationService(store, prov, mustCipher(t), nil)
+	svc.SetModelValidator(orgModelValidatorStub{models: []string{"qwen2.5:7b"}})
 	svc.hashPassword = fakeHash
 
 	_, err := svc.CreateOrganization(context.Background(), auth.Principal{Role: domain.UserRolePlatformAdmin}, OrganizationInput{
@@ -115,6 +121,7 @@ func TestOrganizationServiceCreateRollbackOnProvisioningFailure(t *testing.T) {
 		AdminUsername:    "org-admin",
 		AdminDisplayName: "组织管理员",
 		AdminPassword:    "secret-password",
+		EnabledModels:    []string{"qwen2.5:7b"},
 	})
 	require.Error(t, err)
 	require.True(t, store.hardDeleted)
@@ -124,6 +131,7 @@ func TestOrganizationServiceCreateRollbackOnProvisioningFailure(t *testing.T) {
 func TestCreateOrganizationRequiresValidCode(t *testing.T) {
 	store := &organizationStoreStub{}
 	svc := NewOrganizationService(store, &fakeProvisioner{}, mustCipher(t), nil)
+	svc.SetModelValidator(orgModelValidatorStub{models: []string{"qwen2.5:7b"}})
 	svc.hashPassword = fakeHash
 
 	for _, code := range []string{"", "ab", "-bad", "bad-", "Bad Org", "bad_org"} {
@@ -133,6 +141,7 @@ func TestCreateOrganizationRequiresValidCode(t *testing.T) {
 			AdminUsername:    "admin",
 			AdminDisplayName: "管理员",
 			AdminPassword:    "secret-password",
+			EnabledModels:    []string{"qwen2.5:7b"},
 		})
 		require.ErrorIs(t, err, ErrMemberCreateInvalid, "code=%q", code)
 	}
@@ -143,6 +152,7 @@ func TestCreateOrganizationNormalizesCode(t *testing.T) {
 	store := &organizationStoreStub{}
 	prov := &fakeProvisioner{user: newapi.User{ID: 42}, accessToken: "access-tok-xyz"}
 	svc := NewOrganizationService(store, prov, mustCipher(t), nil)
+	svc.SetModelValidator(orgModelValidatorStub{models: []string{"qwen2.5:7b"}})
 	svc.hashPassword = fakeHash
 
 	result, err := svc.CreateOrganization(context.Background(), auth.Principal{Role: domain.UserRolePlatformAdmin}, OrganizationInput{
@@ -151,6 +161,7 @@ func TestCreateOrganizationNormalizesCode(t *testing.T) {
 		AdminUsername:    "admin",
 		AdminDisplayName: "管理员",
 		AdminPassword:    "secret-password",
+		EnabledModels:    []string{"qwen2.5:7b"},
 	})
 
 	require.NoError(t, err)
@@ -164,6 +175,7 @@ func TestCreateOrganizationMapsUniqueViolationToConflict(t *testing.T) {
 		createErr: &pgconn.PgError{Code: "23505"},
 	}
 	svc := NewOrganizationService(store, &fakeProvisioner{}, mustCipher(t), nil)
+	svc.SetModelValidator(orgModelValidatorStub{models: []string{"qwen2.5:7b"}})
 	svc.hashPassword = fakeHash
 
 	_, err := svc.CreateOrganization(context.Background(), auth.Principal{Role: domain.UserRolePlatformAdmin}, OrganizationInput{
@@ -172,9 +184,85 @@ func TestCreateOrganizationMapsUniqueViolationToConflict(t *testing.T) {
 		AdminUsername:    "admin",
 		AdminDisplayName: "管理员",
 		AdminPassword:    "secret-password",
+		EnabledModels:    []string{"qwen2.5:7b"},
 	})
 
 	require.ErrorIs(t, err, ErrConflict)
+}
+
+// TestCreateOrganizationRequiresEnabledModels 验证创建组织必须通过实时模型列表校验。
+func TestCreateOrganizationRequiresEnabledModels(t *testing.T) {
+	store := &organizationStoreStub{}
+	svc := NewOrganizationService(store, &fakeProvisioner{}, mustCipher(t), nil)
+	svc.SetModelValidator(orgModelValidatorStub{err: fmt.Errorf("%w: 至少选择一个可用模型", ErrMemberCreateInvalid)})
+	svc.hashPassword = fakeHash
+
+	_, err := svc.CreateOrganization(context.Background(), auth.Principal{Role: domain.UserRolePlatformAdmin}, OrganizationInput{
+		Name:             "测试组织",
+		Code:             "test-org",
+		AdminUsername:    "admin",
+		AdminDisplayName: "管理员",
+		AdminPassword:    "admin123",
+	})
+
+	require.ErrorIs(t, err, ErrMemberCreateInvalid)
+	assert.False(t, store.createCalled)
+}
+
+// TestCreateOrganizationBlocksSaveWithoutModelValidator 验证模型校验器未装配时拒绝保存组织模型。
+func TestCreateOrganizationBlocksSaveWithoutModelValidator(t *testing.T) {
+	store := &organizationStoreStub{}
+	svc := NewOrganizationService(store, &fakeProvisioner{}, mustCipher(t), nil)
+	svc.hashPassword = fakeHash
+
+	_, err := svc.CreateOrganization(context.Background(), auth.Principal{Role: domain.UserRolePlatformAdmin}, OrganizationInput{
+		Name:             "测试组织",
+		Code:             "test-org",
+		AdminUsername:    "admin",
+		AdminDisplayName: "管理员",
+		AdminPassword:    "admin123",
+		EnabledModels:    []string{"qwen2.5:7b"},
+	})
+
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "模型校验器未配置")
+	assert.False(t, store.createCalled)
+}
+
+// TestUpdateOrganizationRejectsRemovingModelInUse 验证不能移除仍被未删除实例使用的模型。
+func TestUpdateOrganizationRejectsRemovingModelInUse(t *testing.T) {
+	store := &organizationStoreStub{}
+	org := store.mustSeedOrganization(t, "test-org", []string{"qwen2.5:7b", "deepseek-r1:14b"})
+	store.modelUsage = []sqlc.CountActiveAppsByOrgAndModelsRow{{ModelID: "qwen2.5:7b", AppCount: 1}}
+	svc := NewOrganizationService(store, &fakeProvisioner{}, mustCipher(t), nil)
+	svc.SetModelValidator(orgModelValidatorStub{models: []string{"deepseek-r1:14b"}})
+
+	_, err := svc.UpdateOrganization(context.Background(), auth.Principal{Role: domain.UserRolePlatformAdmin}, uuidToString(org.ID), OrganizationInput{
+		Name:          "测试组织",
+		EnabledModels: []string{"deepseek-r1:14b"},
+	})
+
+	require.ErrorIs(t, err, ErrConflict)
+	assert.Contains(t, err.Error(), "qwen2.5:7b")
+	assert.Equal(t, []string{"qwen2.5:7b"}, store.modelUsageArg.ModelIds)
+	assert.False(t, store.updateProfileCalled)
+}
+
+// TestUpdateOrganizationPersistsEnabledModels 验证更新组织会保存实时校验后的模型 allowlist。
+func TestUpdateOrganizationPersistsEnabledModels(t *testing.T) {
+	store := &organizationStoreStub{}
+	org := store.mustSeedOrganization(t, "test-org", []string{"qwen2.5:7b"})
+	svc := NewOrganizationService(store, &fakeProvisioner{}, mustCipher(t), nil)
+	svc.SetModelValidator(orgModelValidatorStub{models: []string{"deepseek-r1:14b"}})
+
+	result, err := svc.UpdateOrganization(context.Background(), auth.Principal{Role: domain.UserRolePlatformAdmin}, uuidToString(org.ID), OrganizationInput{
+		Name:          "测试组织改名",
+		EnabledModels: []string{"deepseek-r1:14b"},
+	})
+
+	require.NoError(t, err)
+	assert.Equal(t, []string{"deepseek-r1:14b"}, result.EnabledModels)
+	assert.JSONEq(t, `["deepseek-r1:14b"]`, string(store.updatedProfile.EnabledModels))
 }
 
 // TestOrganizationServiceGetRestrictsOrgScope 验证组织服务获取Restricts组织scope的预期行为场景。
@@ -275,19 +363,25 @@ func (p *fakeProvisioner) DeleteUser(_ context.Context, userID int64) error {
 }
 
 type organizationStoreStub struct {
-	org              sqlc.Organization
-	orgAdmin         sqlc.User
-	created          sqlc.CreateOrganizationParams
-	updated          sqlc.SetOrganizationNewAPIUserParams
-	createdUser      sqlc.CreateUserParams
-	createErr        error
-	updateCalled     bool
-	createUserCalled bool
-	hardDeleted      bool
+	org                 sqlc.Organization
+	orgAdmin            sqlc.User
+	created             sqlc.CreateOrganizationParams
+	updated             sqlc.SetOrganizationNewAPIUserParams
+	createdUser         sqlc.CreateUserParams
+	createErr           error
+	createCalled        bool
+	updateCalled        bool
+	updateProfileCalled bool
+	createUserCalled    bool
+	hardDeleted         bool
+	updatedProfile      sqlc.UpdateOrganizationProfileParams
+	modelUsage          []sqlc.CountActiveAppsByOrgAndModelsRow
+	modelUsageArg       sqlc.CountActiveAppsByOrgAndModelsParams
 }
 
 func (s *organizationStoreStub) CreateOrganization(_ context.Context, arg sqlc.CreateOrganizationParams) (sqlc.Organization, error) {
 	s.created = arg
+	s.createCalled = true
 	if s.createErr != nil {
 		return sqlc.Organization{}, s.createErr
 	}
@@ -299,6 +393,7 @@ func (s *organizationStoreStub) CreateOrganization(_ context.Context, arg sqlc.C
 		Status:                 arg.Status,
 		ContactName:            arg.ContactName,
 		CreditWarningThreshold: arg.CreditWarningThreshold,
+		EnabledModels:          arg.EnabledModels,
 	}
 	s.org = created
 	return created, nil
@@ -352,14 +447,46 @@ func (s *organizationStoreStub) GetOrgAdminByOrg(_ context.Context, id pgtype.UU
 }
 
 func (s *organizationStoreStub) UpdateOrganizationProfile(_ context.Context, arg sqlc.UpdateOrganizationProfileParams) (sqlc.Organization, error) {
+	s.updatedProfile = arg
+	s.updateProfileCalled = true
 	s.org.Name = arg.Name
 	s.org.ContactName = arg.ContactName
+	s.org.EnabledModels = arg.EnabledModels
 	return s.org, nil
 }
 
 func (s *organizationStoreStub) SetOrganizationStatus(_ context.Context, arg sqlc.SetOrganizationStatusParams) (sqlc.Organization, error) {
 	s.org.Status = arg.Status
 	return s.org, nil
+}
+
+func (s *organizationStoreStub) CountActiveAppsByOrgAndModels(_ context.Context, arg sqlc.CountActiveAppsByOrgAndModelsParams) ([]sqlc.CountActiveAppsByOrgAndModelsRow, error) {
+	s.modelUsageArg = arg
+	return s.modelUsage, nil
+}
+
+func (s *organizationStoreStub) mustSeedOrganization(t *testing.T, code string, models []string) sqlc.Organization {
+	t.Helper()
+	data, err := json.Marshal(models)
+	require.NoError(t, err)
+	org := sqlc.Organization{
+		ID:            mustUUID(t, "00000000-0000-0000-0000-000000000101"),
+		Name:          "测试组织",
+		Code:          code,
+		Status:        domain.StatusActive,
+		EnabledModels: data,
+	}
+	s.org = org
+	return org
+}
+
+type orgModelValidatorStub struct {
+	models []string
+	err    error
+}
+
+func (s orgModelValidatorStub) ValidateModelIDs(context.Context, []string) ([]string, error) {
+	return s.models, s.err
 }
 
 // fakeFailAuditor 实现 NewAPIFailureAuditor，仅记录失败事件，供测试断言审计是否被触发。
@@ -380,6 +507,7 @@ func TestCreateOrganization_BootstrapTokenFailureTriggersDeleteUserAndAudit(t *t
 		bootstrapError: errors.New("login 5xx"),
 	}
 	svc := NewOrganizationService(&organizationStoreStub{}, prov, mustCipher(t), auditor)
+	svc.SetModelValidator(orgModelValidatorStub{models: []string{"qwen2.5:7b"}})
 	svc.hashPassword = fakeHash
 
 	_, err := svc.CreateOrganization(context.Background(), auth.Principal{Role: domain.UserRolePlatformAdmin}, OrganizationInput{
@@ -388,11 +516,10 @@ func TestCreateOrganization_BootstrapTokenFailureTriggersDeleteUserAndAudit(t *t
 		AdminUsername:    "org-admin",
 		AdminDisplayName: "组织管理员",
 		AdminPassword:    "secret-password",
+		EnabledModels:    []string{"qwen2.5:7b"},
 	})
 	require.Error(t, err)
-	if !prov.deleteUserCalled {
-		t.Errorf("期望调用 DeleteUser 清理孤儿")
-	}
+	require.True(t, prov.deleteUserCalled)
 	assert.Equal(t, int64(42), prov.deleteUserUserID)
 	assert.NotEqual(t, 0, len(auditor.events))
 }
@@ -405,6 +532,7 @@ func TestCreateOrganization_CreateUserFailureNoDeleteUser(t *testing.T) {
 		createError: errors.New("create 500"),
 	}
 	svc := NewOrganizationService(&organizationStoreStub{}, prov, mustCipher(t), auditor)
+	svc.SetModelValidator(orgModelValidatorStub{models: []string{"qwen2.5:7b"}})
 	svc.hashPassword = fakeHash
 
 	_, _ = svc.CreateOrganization(context.Background(), auth.Principal{Role: domain.UserRolePlatformAdmin}, OrganizationInput{
@@ -413,8 +541,7 @@ func TestCreateOrganization_CreateUserFailureNoDeleteUser(t *testing.T) {
 		AdminUsername:    "org-admin",
 		AdminDisplayName: "组织管理员",
 		AdminPassword:    "secret-password",
+		EnabledModels:    []string{"qwen2.5:7b"},
 	})
-	if prov.deleteUserCalled {
-		t.Errorf("CreateUser 失败时不应调 DeleteUser（无孤儿）")
-	}
+	assert.False(t, prov.deleteUserCalled)
 }

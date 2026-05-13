@@ -47,6 +47,11 @@ type NewAPIFailureAuditor interface {
 	RecordNewAPIFailure(ctx context.Context, fc NewAPIFailureContext)
 }
 
+// OrganizationModelValidator 抽象模型列表校验能力，避免 OrganizationService 直接依赖具体实现。
+type OrganizationModelValidator interface {
+	ValidateModelIDs(ctx context.Context, input []string) ([]string, error)
+}
+
 // OrganizationStore 抽象组织管理所需的数据访问能力。
 type OrganizationStore interface {
 	CreateOrganization(ctx context.Context, arg sqlc.CreateOrganizationParams) (sqlc.Organization, error)
@@ -58,6 +63,7 @@ type OrganizationStore interface {
 	GetOrgAdminByOrg(ctx context.Context, id pgtype.UUID) (sqlc.User, error)
 	UpdateOrganizationProfile(ctx context.Context, arg sqlc.UpdateOrganizationProfileParams) (sqlc.Organization, error)
 	SetOrganizationStatus(ctx context.Context, arg sqlc.SetOrganizationStatusParams) (sqlc.Organization, error)
+	CountActiveAppsByOrgAndModels(ctx context.Context, arg sqlc.CountActiveAppsByOrgAndModelsParams) ([]sqlc.CountActiveAppsByOrgAndModelsRow, error)
 }
 
 // NewAPIUserProvisioner 抽象组织创建链路所需的 new-api 调用集合，便于测试中替换为 fake。
@@ -90,6 +96,8 @@ type OrganizationService struct {
 	cipher *auth.Cipher
 	// failAuditor 记录 new-api 失败；nil 时跳过审计，主要用于单元测试或最小装配。
 	failAuditor NewAPIFailureAuditor // 新增；nil 时跳过 new-api 失败审计写入
+	// modelValidator 读取 new-api 实时模型列表并校验组织 allowlist；未配置时禁止保存模型配置。
+	modelValidator OrganizationModelValidator
 	// hashPassword 仅用于创建组织管理员，测试中可替换为快 hash。
 	hashPassword PasswordHasher
 }
@@ -108,6 +116,11 @@ func NewOrganizationService(store OrganizationStore, provisioner NewAPIUserProvi
 	}
 }
 
+// SetModelValidator 注入组织模型 allowlist 校验器，生产环境由 ModelCatalogService 提供实时模型校验。
+func (s *OrganizationService) SetModelValidator(validator OrganizationModelValidator) {
+	s.modelValidator = validator
+}
+
 // OrganizationInput 是组织创建和更新的统一入参。
 // Admin* 字段仅 CreateOrganization 使用，更新组织资料时会被忽略。
 type OrganizationInput struct {
@@ -123,6 +136,8 @@ type OrganizationInput struct {
 	Remark string
 	// CreditWarningThreshold 是组织余额预警阈值；nil 会写入 NULL，表示不设置预警阈值。
 	CreditWarningThreshold *int32
+	// EnabledModels 是组织可用模型 allowlist，创建和更新时必须至少包含一个实时存在的模型。
+	EnabledModels []string
 	// AdminUsername 是创建组织时初始化的 org_admin 账号名。
 	AdminUsername string
 	// AdminDisplayName 是初始化 org_admin 的显示名。
@@ -153,6 +168,8 @@ type OrganizationResult struct {
 	CreditWarningThreshold *int32 `json:"credit_warning_threshold,omitempty"`
 	// AdminUsername 是组织首个可用管理员账号名，用于平台管理员复制登录信息。
 	AdminUsername string `json:"admin_username,omitempty"`
+	// EnabledModels 是组织在 manager 层允许创建实例时选择的模型列表。
+	EnabledModels []string `json:"enabled_models"`
 }
 
 // CreateOrganization 创建组织：先 INSERT manager 端记录，再串联调 new-api 创业务 user 并落凭据密文。
@@ -176,6 +193,14 @@ func (s *OrganizationService) CreateOrganization(ctx context.Context, principal 
 	if err != nil {
 		return OrganizationResult{}, err
 	}
+	enabledModels, err := s.validateEnabledModels(ctx, input.EnabledModels)
+	if err != nil {
+		return OrganizationResult{}, err
+	}
+	enabledModelsJSON, err := modelListJSON(enabledModels)
+	if err != nil {
+		return OrganizationResult{}, err
+	}
 	adminPasswordHash, err := s.hashPassword(input.AdminPassword)
 	if err != nil {
 		return OrganizationResult{}, fmt.Errorf("生成管理员密码 hash 失败: %w", err)
@@ -189,6 +214,7 @@ func (s *OrganizationService) CreateOrganization(ctx context.Context, principal 
 		ContactPhone:           textValue(input.ContactPhone),
 		Remark:                 textValue(input.Remark),
 		CreditWarningThreshold: int4Ptr(input.CreditWarningThreshold),
+		EnabledModels:          enabledModelsJSON,
 	})
 	if err != nil {
 		if isUniqueViolation(err) {
@@ -412,6 +438,24 @@ func (s *OrganizationService) UpdateOrganization(ctx context.Context, principal 
 	if err != nil {
 		return OrganizationResult{}, ErrNotFound
 	}
+	current, err := s.store.GetOrganization(ctx, id)
+	if errors.Is(err, pgx.ErrNoRows) {
+		return OrganizationResult{}, ErrNotFound
+	}
+	if err != nil {
+		return OrganizationResult{}, fmt.Errorf("查询组织失败: %w", err)
+	}
+	enabledModels, err := s.validateEnabledModels(ctx, input.EnabledModels)
+	if err != nil {
+		return OrganizationResult{}, err
+	}
+	if err := s.ensureRemovedModelsUnused(ctx, id, modelListFromJSON(current.EnabledModels), enabledModels); err != nil {
+		return OrganizationResult{}, err
+	}
+	enabledModelsJSON, err := modelListJSON(enabledModels)
+	if err != nil {
+		return OrganizationResult{}, err
+	}
 	org, err := s.store.UpdateOrganizationProfile(ctx, sqlc.UpdateOrganizationProfileParams{
 		ID:                     id,
 		Name:                   input.Name,
@@ -419,6 +463,7 @@ func (s *OrganizationService) UpdateOrganization(ctx context.Context, principal 
 		ContactPhone:           textValue(input.ContactPhone),
 		Remark:                 textValue(input.Remark),
 		CreditWarningThreshold: int4Ptr(input.CreditWarningThreshold),
+		EnabledModels:          enabledModelsJSON,
 	})
 	if errors.Is(err, pgx.ErrNoRows) {
 		return OrganizationResult{}, ErrNotFound
@@ -427,6 +472,43 @@ func (s *OrganizationService) UpdateOrganization(ctx context.Context, principal 
 		return OrganizationResult{}, fmt.Errorf("更新组织失败: %w", err)
 	}
 	return s.toOrganizationResultWithAdminUsername(ctx, org), nil
+}
+
+// validateEnabledModels 统一组织创建和更新的 allowlist 校验入口。
+// 未装配校验器时直接拒绝保存，避免 manager 写入未经实时模型目录确认的模型 ID。
+func (s *OrganizationService) validateEnabledModels(ctx context.Context, input []string) ([]string, error) {
+	if s.modelValidator == nil {
+		return nil, fmt.Errorf("模型校验器未配置，无法保存组织模型")
+	}
+	return s.modelValidator.ValidateModelIDs(ctx, input)
+}
+
+// ensureRemovedModelsUnused 阻止从组织 allowlist 中移除仍被未删除实例使用的模型。
+func (s *OrganizationService) ensureRemovedModelsUnused(ctx context.Context, orgID pgtype.UUID, oldModels, newModels []string) error {
+	newSet := make(map[string]struct{}, len(newModels))
+	for _, model := range newModels {
+		newSet[model] = struct{}{}
+	}
+	removed := make([]string, 0)
+	for _, model := range oldModels {
+		if _, ok := newSet[model]; !ok {
+			removed = append(removed, model)
+		}
+	}
+	if len(removed) == 0 {
+		return nil
+	}
+	rows, err := s.store.CountActiveAppsByOrgAndModels(ctx, sqlc.CountActiveAppsByOrgAndModelsParams{
+		OrgID:    orgID,
+		ModelIds: removed,
+	})
+	if err != nil {
+		return fmt.Errorf("查询模型使用情况失败: %w", err)
+	}
+	if len(rows) == 0 {
+		return nil
+	}
+	return fmt.Errorf("%w: 模型 %s 已被 %d 个实例使用，请先切换实例模型", ErrConflict, rows[0].ModelID, rows[0].AppCount)
 }
 
 // SetOrganizationStatus 启用或禁用组织；软删除后续由删除流程单独处理。
@@ -527,7 +609,29 @@ func toOrganizationResult(org sqlc.Organization) OrganizationResult {
 		Remark:                 textString(org.Remark),
 		NewAPIUserID:           textString(org.NewapiUserID),
 		CreditWarningThreshold: int4Pointer(org.CreditWarningThreshold),
+		EnabledModels:          modelListFromJSON(org.EnabledModels),
 	}
+}
+
+// modelListJSON 把已校验过的模型列表写成 jsonb 字节，供 sqlc 写入 organizations.enabled_models。
+func modelListJSON(models []string) ([]byte, error) {
+	data, err := json.Marshal(models)
+	if err != nil {
+		return nil, fmt.Errorf("序列化组织可用模型失败: %w", err)
+	}
+	return data, nil
+}
+
+// modelListFromJSON 把 organizations.enabled_models 还原为响应模型列表；历史异常数据解析失败时返回 nil。
+func modelListFromJSON(data []byte) []string {
+	if len(data) == 0 {
+		return nil
+	}
+	var models []string
+	if err := json.Unmarshal(data, &models); err != nil {
+		return nil
+	}
+	return models
 }
 
 func textValue(value string) pgtype.Text {
