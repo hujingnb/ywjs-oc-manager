@@ -83,7 +83,7 @@
 
     <JobProgressPanel
       v-if="trackingJobId"
-      :title="'初始化任务'"
+      :title="trackingJobTitle"
       :subtitle="trackingJobId"
       :job="trackedJob ?? undefined"
       style="margin-top: 12px"
@@ -137,6 +137,7 @@ const modelOptions = computed(() => (organizationQuery.data.value?.enabled_model
 const initMutation = useInitializeAppMutation(appId)
 // trackingJobId 记录最近一次后台任务，供 JobProgressPanel 轮询展示执行进度。
 const trackingJobId = ref<string | undefined>()
+const trackingJobTitle = ref('后台任务')
 const jobIdRef = computed<string | undefined>(() => trackingJobId.value)
 const jobQuery = useJobQuery(jobIdRef)
 const trackedJob = computed(() => jobQuery.data.value ?? null)
@@ -157,6 +158,7 @@ async function onRetryInit() {
   try {
     const result = await initMutation.mutateAsync()
     trackingJobId.value = result.job_id
+    trackingJobTitle.value = '初始化任务'
     initFeedback.value = `已提交初始化任务：${result.job_id}`
   } catch (err: unknown) {
     initError.value = true
@@ -207,6 +209,7 @@ async function runKeyMutation(action: 'disable' | 'restore') {
   try {
     const result = await keyMutation.mutateAsync(action)
     trackingJobId.value = result.job_id
+    trackingJobTitle.value = action === 'disable' ? '禁用 API key 任务' : '恢复 API key 任务'
     keyFeedback.value = `已提交 ${action} 任务：${result.job_id}`
   } catch (err: unknown) {
     keyError.value = true
@@ -222,6 +225,7 @@ async function onUpdateModel() {
     const result = await modelMutation.mutateAsync(modelValue.value)
     if (result.restart_job_id) {
       trackingJobId.value = result.restart_job_id
+      trackingJobTitle.value = '模型重启任务'
       modelFeedback.value = `已提交模型生效重启任务：${result.restart_job_id}`
       return
     }

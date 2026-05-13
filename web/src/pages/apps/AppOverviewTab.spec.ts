@@ -84,7 +84,7 @@ function mountOverview() {
       stubs: {
         AppStatusTag: { template: '<span />' },
         ConfirmActionModal: true,
-        JobProgressPanel: true,
+        JobProgressPanel: { props: ['title'], template: '<section>{{ title }}</section>' },
         NButton: defineComponent({
           props: ['disabled'],
           emits: ['click'],
@@ -159,5 +159,6 @@ describe('AppOverviewTab', () => {
 
     expect(updateModelMock).toHaveBeenCalledWith('deepseek-r1:14b')
     expect(wrapper.text()).toContain('已提交模型生效重启任务：job-restart-1')
+    expect(wrapper.text()).toContain('模型重启任务')
   })
 })
