@@ -71,6 +71,58 @@ func TestUpdateModelSurvivesNotifierError(t *testing.T) {
 	require.Len(t, store.jobs, 1)
 }
 
+// TestUpdateModelRollsBackWhenRestartJobFails 验证重启任务创建失败时回滚模型修改。
+func TestUpdateModelRollsBackWhenRestartJobFails(t *testing.T) {
+	t.Parallel()
+	svc, store := newAppServiceWithStore(t)
+	store.jobErr = assert.AnError
+	store.organization.EnabledModels = []byte(`["qwen2.5:7b","deepseek-r1:14b"]`)
+	app := store.mustSeedApp(t, "qwen2.5:7b")
+	app.ContainerID = pgtype.Text{String: "container-1", Valid: true}
+	store.app = app
+
+	_, err := svc.UpdateModel(context.Background(), appOrgAdminPrincipal(store.organization), uuidToString(app.ID), "deepseek-r1:14b")
+
+	require.Error(t, err)
+	assert.Equal(t, "qwen2.5:7b", store.app.ModelID)
+	assert.Empty(t, store.jobs)
+	assert.Empty(t, store.auditLogs)
+}
+
+// TestUpdateModelSameModelIsNoop 验证重复提交相同模型不会创建重启任务。
+func TestUpdateModelSameModelIsNoop(t *testing.T) {
+	t.Parallel()
+	svc, store := newAppServiceWithStore(t)
+	store.organization.EnabledModels = []byte(`["qwen2.5:7b"]`)
+	app := store.mustSeedApp(t, "qwen2.5:7b")
+	app.ContainerID = pgtype.Text{String: "container-1", Valid: true}
+	store.app = app
+
+	result, err := svc.UpdateModel(context.Background(), appOrgAdminPrincipal(store.organization), uuidToString(app.ID), "qwen2.5:7b")
+
+	require.NoError(t, err)
+	assert.Equal(t, "qwen2.5:7b", result.App.ModelID)
+	assert.False(t, result.RequiresRestart)
+	assert.Empty(t, result.RestartJobID)
+	assert.Empty(t, store.jobs)
+	assert.Empty(t, store.auditLogs)
+}
+
+// TestUpdateModelRejectsDisabledPrincipal 验证已禁用用户不能修改实例模型。
+func TestUpdateModelRejectsDisabledPrincipal(t *testing.T) {
+	t.Parallel()
+	svc, store := newAppServiceWithStore(t)
+	store.user.Status = domain.StatusDisabled
+	store.organization.EnabledModels = []byte(`["qwen2.5:7b","deepseek-r1:14b"]`)
+	app := store.mustSeedApp(t, "qwen2.5:7b")
+
+	_, err := svc.UpdateModel(context.Background(), appOrgAdminPrincipal(store.organization), uuidToString(app.ID), "deepseek-r1:14b")
+
+	require.ErrorIs(t, err, ErrForbidden)
+	assert.Empty(t, store.jobs)
+	assert.Equal(t, "qwen2.5:7b", store.app.ModelID)
+}
+
 // TestUpdateModelWithoutContainerOnlySavesModel 验证未创建容器的实例只保存模型不提交重启任务。
 func TestUpdateModelWithoutContainerOnlySavesModel(t *testing.T) {
 	t.Parallel()
@@ -96,8 +148,16 @@ func newAppServiceWithStore(t *testing.T) (*AppService, *appServiceStoreStub) {
 			Status:        domain.StatusActive,
 			EnabledModels: []byte(`["qwen2.5:7b"]`),
 		},
+		user: sqlc.User{
+			ID:     mustUUID(t, testAdminUID),
+			OrgID:  mustUUID(t, testOrgID),
+			Role:   domain.UserRoleOrgAdmin,
+			Status: domain.StatusActive,
+		},
 	}
-	return NewAppService(store), store
+	svc := NewAppService(store)
+	svc.SetTxRunner(store)
+	return svc, store
 }
 
 func appOrgAdminPrincipal(org sqlc.Organization) auth.Principal {
@@ -110,9 +170,26 @@ func appOrgAdminPrincipal(org sqlc.Organization) auth.Principal {
 
 type appServiceStoreStub struct {
 	organization sqlc.Organization
+	user         sqlc.User
 	app          sqlc.App
 	jobs         []sqlc.CreateJobParams
 	auditLogs    []sqlc.CreateAuditLogParams
+	jobErr       error
+	auditErr     error
+}
+
+func (s *appServiceStoreStub) WithAppTx(ctx context.Context, fn func(AppStore) error) error {
+	snapshotApp := s.app
+	snapshotJobs := append([]sqlc.CreateJobParams(nil), s.jobs...)
+	snapshotAuditLogs := append([]sqlc.CreateAuditLogParams(nil), s.auditLogs...)
+	if err := fn(s); err != nil {
+		s.app = snapshotApp
+		s.jobs = snapshotJobs
+		s.auditLogs = snapshotAuditLogs
+		return err
+	}
+	_ = ctx
+	return nil
 }
 
 func (s *appServiceStoreStub) mustSeedApp(t *testing.T, modelID string) sqlc.App {
@@ -155,6 +232,13 @@ func (s *appServiceStoreStub) GetApp(_ context.Context, id pgtype.UUID) (sqlc.Ap
 	return s.app, nil
 }
 
+func (s *appServiceStoreStub) GetUser(_ context.Context, id pgtype.UUID) (sqlc.User, error) {
+	if s.user.ID != id {
+		return sqlc.User{}, pgx.ErrNoRows
+	}
+	return s.user, nil
+}
+
 func (s *appServiceStoreStub) GetActiveAppByOwner(_ context.Context, ownerUserID pgtype.UUID) (sqlc.App, error) {
 	if s.app.OwnerUserID == ownerUserID && !s.app.DeletedAt.Valid {
 		return s.app, nil
@@ -195,11 +279,17 @@ func (s *appServiceStoreStub) SetAppModel(_ context.Context, arg sqlc.SetAppMode
 }
 
 func (s *appServiceStoreStub) CreateJob(_ context.Context, arg sqlc.CreateJobParams) (sqlc.Job, error) {
+	if s.jobErr != nil {
+		return sqlc.Job{}, s.jobErr
+	}
 	s.jobs = append(s.jobs, arg)
 	return sqlc.Job{ID: mustUUIDFromString("00000000-0000-0000-0000-000000002101"), Type: arg.Type}, nil
 }
 
 func (s *appServiceStoreStub) CreateAuditLog(_ context.Context, arg sqlc.CreateAuditLogParams) (sqlc.AuditLog, error) {
+	if s.auditErr != nil {
+		return sqlc.AuditLog{}, s.auditErr
+	}
 	s.auditLogs = append(s.auditLogs, arg)
 	return sqlc.AuditLog{}, nil
 }

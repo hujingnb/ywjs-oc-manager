@@ -20,6 +20,7 @@ import (
 type AppStore interface {
 	CreateApp(ctx context.Context, arg sqlc.CreateAppParams) (sqlc.App, error)
 	GetApp(ctx context.Context, id pgtype.UUID) (sqlc.App, error)
+	GetUser(ctx context.Context, id pgtype.UUID) (sqlc.User, error)
 	GetOrganization(ctx context.Context, id pgtype.UUID) (sqlc.Organization, error)
 	GetActiveAppByOwner(ctx context.Context, ownerUserID pgtype.UUID) (sqlc.App, error)
 	ListAppsByOrg(ctx context.Context, arg sqlc.ListAppsByOrgParams) ([]sqlc.App, error)
@@ -30,10 +31,16 @@ type AppStore interface {
 	CreateAuditLog(ctx context.Context, arg sqlc.CreateAuditLogParams) (sqlc.AuditLog, error)
 }
 
+// AppTxRunner 抽象实例模型修改所需的事务边界。
+type AppTxRunner interface {
+	WithAppTx(ctx context.Context, fn func(AppStore) error) error
+}
+
 // AppService 维护应用的查询和状态读取。
 // 创建应用必须经过 onboarding 事务，因为应用的初始化需要联动 channel binding、audit、job。
 type AppService struct {
 	store    AppStore
+	txRunner AppTxRunner
 	notifier JobNotifier
 }
 
@@ -43,6 +50,11 @@ func NewAppService(store AppStore) *AppService { return &AppService{store: store
 // SetJobNotifier 注入即时 job 入队器；nil 时只写 jobs 表，由 scheduler 周期兜底。
 func (s *AppService) SetJobNotifier(notifier JobNotifier) {
 	s.notifier = notifier
+}
+
+// SetTxRunner 注入事务执行器；模型修改需要把 model、job、audit 作为同一提交边界。
+func (s *AppService) SetTxRunner(txRunner AppTxRunner) {
+	s.txRunner = txRunner
 }
 
 // AppResult 是对外的应用视图。
@@ -139,6 +151,9 @@ func (s *AppService) UpdateModel(ctx context.Context, principal auth.Principal, 
 	if err != nil {
 		return AppModelUpdateResult{}, fmt.Errorf("查询应用失败: %w", err)
 	}
+	if err := s.ensurePrincipalActive(ctx, principal); err != nil {
+		return AppModelUpdateResult{}, err
+	}
 	if !auth.CanTriggerRuntimeOperation(principal, uuidToString(app.OrgID), uuidToString(app.OwnerUserID)) {
 		return AppModelUpdateResult{}, ErrForbidden
 	}
@@ -150,58 +165,92 @@ func (s *AppService) UpdateModel(ctx context.Context, principal auth.Principal, 
 	if err != nil {
 		return AppModelUpdateResult{}, err
 	}
-	updated, err := s.store.SetAppModel(ctx, sqlc.SetAppModelParams{ID: app.ID, ModelID: normalizedModelID})
+	if normalizedModelID == app.ModelID {
+		return AppModelUpdateResult{App: toAppResult(app)}, nil
+	}
+	var result AppModelUpdateResult
+	write := func(store AppStore) error {
+		updated, err := store.SetAppModel(ctx, sqlc.SetAppModelParams{ID: app.ID, ModelID: normalizedModelID})
+		if err != nil {
+			return fmt.Errorf("更新实例模型失败: %w", err)
+		}
+		result = AppModelUpdateResult{App: toAppResult(updated)}
+		if !app.ContainerID.Valid || app.ContainerID.String == "" {
+			return nil
+		}
+		payload, err := json.Marshal(map[string]any{
+			"app_id":       uuidToString(app.ID),
+			"operation":    string(RuntimeOperationRestart),
+			"runtime_node": uuidToOptionalString(app.RuntimeNodeID),
+			"requested_by": principal.UserID,
+		})
+		if err != nil {
+			return fmt.Errorf("序列化重启任务 payload 失败: %w", err)
+		}
+		job, err := store.CreateJob(ctx, sqlc.CreateJobParams{
+			Type:        domain.JobTypeAppRestartContainer,
+			Priority:    100,
+			RunAfter:    pgtype.Timestamptz{Time: time.Now(), Valid: true},
+			MaxAttempts: 3,
+			PayloadJson: payload,
+		})
+		if err != nil {
+			return fmt.Errorf("创建模型生效重启任务失败: %w", err)
+		}
+		actorUUID, _ := optionalUUID(principal.UserID)
+		metadata, _ := json.Marshal(map[string]any{
+			"old_model_id":   app.ModelID,
+			"new_model_id":   normalizedModelID,
+			"restart_job_id": uuidToString(job.ID),
+		})
+		if _, err := store.CreateAuditLog(ctx, sqlc.CreateAuditLogParams{
+			ActorID:      actorUUID,
+			ActorRole:    principal.Role,
+			OrgID:        app.OrgID,
+			TargetType:   "app",
+			TargetID:     uuidToString(app.ID),
+			Action:       "update_model",
+			Result:       "succeeded",
+			MetadataJson: metadata,
+		}); err != nil {
+			return fmt.Errorf("写入模型修改审计日志失败: %w", err)
+		}
+		result.RestartJobID = uuidToString(job.ID)
+		result.RequiresRestart = true
+		return nil
+	}
+	if s.txRunner != nil {
+		err = s.txRunner.WithAppTx(ctx, write)
+	} else {
+		err = write(s.store)
+	}
 	if err != nil {
-		return AppModelUpdateResult{}, fmt.Errorf("更新实例模型失败: %w", err)
+		return AppModelUpdateResult{}, err
 	}
-	result := AppModelUpdateResult{App: toAppResult(updated)}
-	if !app.ContainerID.Valid || app.ContainerID.String == "" {
-		return result, nil
-	}
-	payload, err := json.Marshal(map[string]any{
-		"app_id":       uuidToString(app.ID),
-		"operation":    string(RuntimeOperationRestart),
-		"runtime_node": uuidToOptionalString(app.RuntimeNodeID),
-		"requested_by": principal.UserID,
-	})
-	if err != nil {
-		return AppModelUpdateResult{}, fmt.Errorf("序列化重启任务 payload 失败: %w", err)
-	}
-	job, err := s.store.CreateJob(ctx, sqlc.CreateJobParams{
-		Type:        domain.JobTypeAppRestartContainer,
-		Priority:    100,
-		RunAfter:    pgtype.Timestamptz{Time: time.Now(), Valid: true},
-		MaxAttempts: 3,
-		PayloadJson: payload,
-	})
-	if err != nil {
-		return AppModelUpdateResult{}, fmt.Errorf("创建模型生效重启任务失败: %w", err)
-	}
-	actorUUID, _ := optionalUUID(principal.UserID)
-	metadata, _ := json.Marshal(map[string]any{
-		"old_model_id":   app.ModelID,
-		"new_model_id":   normalizedModelID,
-		"restart_job_id": uuidToString(job.ID),
-	})
-	if _, err := s.store.CreateAuditLog(ctx, sqlc.CreateAuditLogParams{
-		ActorID:      actorUUID,
-		ActorRole:    principal.Role,
-		OrgID:        app.OrgID,
-		TargetType:   "app",
-		TargetID:     uuidToString(app.ID),
-		Action:       "update_model",
-		Result:       "succeeded",
-		MetadataJson: metadata,
-	}); err != nil {
-		return AppModelUpdateResult{}, fmt.Errorf("写入模型修改审计日志失败: %w", err)
-	}
-	result.RestartJobID = uuidToString(job.ID)
-	result.RequiresRestart = true
-	if s.notifier != nil {
+	if s.notifier != nil && result.RestartJobID != "" {
 		// Redis 即时入队失败不回滚模型修改和 job 创建，scheduler 会周期性扫描 pending job 兜底。
 		_ = s.notifier.Enqueue(ctx, result.RestartJobID)
 	}
 	return result, nil
+}
+
+// ensurePrincipalActive 拒绝已禁用用户在 token 未过期期间继续修改实例模型。
+func (s *AppService) ensurePrincipalActive(ctx context.Context, principal auth.Principal) error {
+	id, err := parseUUID(principal.UserID)
+	if err != nil {
+		return ErrForbidden
+	}
+	user, err := s.store.GetUser(ctx, id)
+	if errors.Is(err, pgx.ErrNoRows) {
+		return ErrForbidden
+	}
+	if err != nil {
+		return fmt.Errorf("查询主体状态失败: %w", err)
+	}
+	if user.Status == domain.StatusDisabled {
+		return ErrForbidden
+	}
+	return nil
 }
 
 func toAppResult(app sqlc.App) AppResult {
