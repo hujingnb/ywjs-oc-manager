@@ -139,6 +139,7 @@ func runManager(ctx context.Context, cfg config.Config, logOut io.Writer) error 
 	knowledgeService.SetSyncStatusSource(knowledgeSyncStatusSvc)
 	knowledgeService.SetRetryDispatcher(knowledgeDispatcher)
 	appService := service.NewAppService(dbStore.Queries)
+	appService.SetJobNotifier(redisQueue)
 	runtimeOpService := service.NewRuntimeOperationService(dbStore.Queries, logger, redisQueue)
 	resourceMetricsService := service.NewResourceMetricsService(dbStore.Queries)
 	personaService := service.NewPersonaService(store.NewPersonaStore(dbStore))

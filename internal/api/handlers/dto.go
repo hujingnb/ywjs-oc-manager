@@ -138,6 +138,14 @@ type CreateMemberAppRequest struct {
 	NodeID string `json:"runtime_node_id"`
 }
 
+// ===== 应用 apps =====
+
+// UpdateAppModelRequest 修改实例模型的请求体。
+type UpdateAppModelRequest struct {
+	// ModelID 是目标模型，必须属于实例所属组织的 enabled_models。
+	ModelID string `json:"model_id" binding:"required"`
+}
+
 // ===== 人设 persona =====
 
 // PersonaRequest 写入组织 AI 人设的请求体。

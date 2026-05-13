@@ -956,6 +956,98 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/apps/{appId}/model": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        /**
+         * 修改实例模型
+         * @description 更新实例模型；已有容器的实例会提交重启任务让新模型生效
+         */
+        patch: {
+            parameters: {
+                query?: never;
+                header?: never;
+                path: {
+                    /** @description 应用 ID */
+                    appId: string;
+                };
+                cookie?: never;
+            };
+            /** @description 修改模型请求 */
+            requestBody: {
+                content: {
+                    "application/json": Record<string, never> | components["schemas"]["handlers.UpdateAppModelRequest"];
+                };
+            };
+            responses: {
+                /** @description OK */
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["service.AppModelUpdateResult"];
+                    };
+                };
+                /** @description Bad Request */
+                400: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["handlers.ErrorResponse"];
+                    };
+                };
+                /** @description Unauthorized */
+                401: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["handlers.ErrorResponse"];
+                    };
+                };
+                /** @description Forbidden */
+                403: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["handlers.ErrorResponse"];
+                    };
+                };
+                /** @description Not Found */
+                404: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["handlers.ErrorResponse"];
+                    };
+                };
+                /** @description Internal Server Error */
+                500: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["handlers.ErrorResponse"];
+                    };
+                };
+            };
+        };
+        trace?: never;
+    };
     "/apps/{appId}/resources": {
         parameters: {
             query?: never;
@@ -5819,6 +5911,10 @@ export interface components {
             /** @description NodeID 是需要重试同步的 runtime 节点 ID。 */
             node_id: string;
         };
+        "handlers.UpdateAppModelRequest": {
+            /** @description ModelID 是目标模型，必须属于实例所属组织的 enabled_models。 */
+            model_id: string;
+        };
         "handlers.UpdateMemberRequest": {
             /** @description DisplayName 是成员展示名，更新接口要求显式传入非空值。 */
             display_name: string;
@@ -5832,6 +5928,13 @@ export interface components {
             heartbeat_interval_seconds?: number;
             /** @description NodeID 是 manager 为该 agent 分配或复用的 runtime node ID。 */
             node_id?: string;
+        };
+        "service.AppModelUpdateResult": {
+            app?: components["schemas"]["service.AppResult"];
+            /** @description RequiresRestart 表示本次模型修改是否需要通过重启容器生效。 */
+            requires_restart?: boolean;
+            /** @description RestartJobID 是已有容器实例提交的重启任务 ID；无容器时为空。 */
+            restart_job_id?: string;
         };
         "service.AppResult": {
             api_key_status?: string;

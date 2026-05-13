@@ -373,6 +373,14 @@ components:
       required:
       - node_id
       type: object
+    handlers.UpdateAppModelRequest:
+      properties:
+        model_id:
+          description: ModelID 是目标模型，必须属于实例所属组织的 enabled_models。
+          type: string
+      required:
+      - model_id
+      type: object
     handlers.UpdateMemberRequest:
       properties:
         display_name:
@@ -394,6 +402,17 @@ components:
           type: integer
         node_id:
           description: NodeID 是 manager 为该 agent 分配或复用的 runtime node ID。
+          type: string
+      type: object
+    service.AppModelUpdateResult:
+      properties:
+        app:
+          $ref: '#/components/schemas/service.AppResult'
+        requires_restart:
+          description: RequiresRestart 表示本次模型修改是否需要通过重启容器生效。
+          type: boolean
+        restart_job_id:
+          description: RestartJobID 是已有容器实例提交的重启任务 ID；无容器时为空。
           type: string
       type: object
     service.AppResult:
@@ -1700,6 +1719,69 @@ paths:
       summary: 上传应用级知识库文件
       tags:
       - knowledge
+  /apps/{appId}/model:
+    patch:
+      description: 更新实例模型；已有容器的实例会提交重启任务让新模型生效
+      parameters:
+      - description: 应用 ID
+        in: path
+        name: appId
+        required: true
+        schema:
+          type: string
+      requestBody:
+        content:
+          application/json:
+            schema:
+              oneOf:
+              - type: object
+              - $ref: '#/components/schemas/handlers.UpdateAppModelRequest'
+                description: 修改模型请求
+                summary: body
+        description: 修改模型请求
+        required: true
+      responses:
+        "200":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/service.AppModelUpdateResult'
+          description: OK
+        "400":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/handlers.ErrorResponse'
+          description: Bad Request
+        "401":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/handlers.ErrorResponse'
+          description: Unauthorized
+        "403":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/handlers.ErrorResponse'
+          description: Forbidden
+        "404":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/handlers.ErrorResponse'
+          description: Not Found
+        "500":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/handlers.ErrorResponse'
+          description: Internal Server Error
+      security:
+      - BearerAuth: []
+      summary: 修改实例模型
+      tags:
+      - apps
   /apps/{appId}/resources:
     get:
       description: 按应用 ID 查询实例资源趋势；权限沿用应用读取权限
