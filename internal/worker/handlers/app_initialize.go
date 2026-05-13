@@ -352,11 +352,13 @@ func (h *AppInitializeHandler) Handle(ctx context.Context, job sqlc.Job) error {
 			// 必须显式 patch 进容器内的 openclaw.json，否则 embedded agent 会调 api.openai.com。
 			// `openclaw config set` 写文件后 OpenClaw gateway 自身 fs watcher 自动 hot reload，
 			// 不需要 docker restart（restart 会让 weixin plugin 加载失败）。
-			if execer, ok := h.starter.(ContainerExecer); ok && h.cfg.LLM.DefaultModel != "" {
-				if err := configureOpenClawDefaultModel(ctx, execer, payload.RuntimeNodeID, info.ID, h.cfg.LLM); err != nil {
+			llm := h.cfg.LLM
+			llm.DefaultModel = app.ModelID
+			if execer, ok := h.starter.(ContainerExecer); ok && llm.DefaultModel != "" {
+				if err := configureOpenClawDefaultModel(ctx, execer, payload.RuntimeNodeID, info.ID, llm); err != nil {
 					// 模型注入失败不阻塞主流程：容器仍会用 gpt-5.5 默认值；ops 可在 new-api 端
 					// 用 model_mapping 兜底（gpt-5.5 -> qwen2.5:0.5b）。但记日志便于排查。
-					slog.WarnContext(ctx, "app_initialize: 配置 openclaw 默认 model 失败", "app_id", uuidToString(app.ID), "error", err)
+					slog.WarnContext(ctx, "app_initialize: 配置 openclaw 默认 model 失败", "app_id", uuidToString(app.ID), "model_id", app.ModelID, "error", err)
 				}
 			}
 		}

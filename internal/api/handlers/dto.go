@@ -112,6 +112,8 @@ type OnboardMemberRequest struct {
 	AppName string `json:"app_name" binding:"required"`
 	// AppPrompt 是默认应用的初始提示词，可为空。
 	AppPrompt string `json:"app_prompt"`
+	// ModelID 是新实例使用的模型，必须属于组织 enabled_models。
+	ModelID string `json:"model_id" binding:"required"`
 	// PersonaMode 控制新应用是否继承组织人设或使用独立人设。
 	PersonaMode string `json:"persona_mode"`
 	// ChannelType 是初始化渠道绑定的渠道标识。
@@ -126,6 +128,8 @@ type CreateMemberAppRequest struct {
 	AppName string `json:"app_name" binding:"required"`
 	// AppPrompt 是新实例提示词，可为空。
 	AppPrompt string `json:"app_prompt"`
+	// ModelID 是新实例使用的模型，必须属于组织 enabled_models。
+	ModelID string `json:"model_id" binding:"required"`
 	// PersonaMode 控制新实例是否继承组织人设或使用独立人设。
 	PersonaMode string `json:"persona_mode"`
 	// ChannelType 是初始化渠道绑定的渠道标识。

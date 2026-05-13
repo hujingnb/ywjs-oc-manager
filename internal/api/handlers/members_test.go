@@ -11,6 +11,7 @@ import (
 
 	"github.com/gin-gonic/gin"
 
+	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 	"oc-manager/internal/auth"
 	"oc-manager/internal/domain"
@@ -93,15 +94,18 @@ func newMembersTestRouter(t *testing.T, svc memberService) (*gin.Engine, *auth.T
 }
 
 type onboardingServiceStub struct {
-	result          service.OnboardMemberResult
-	createAppResult service.CreateAppForMemberResult
-	lastOrgID       string
-	lastUserID      string
-	lastCreateInput service.CreateAppForMemberInput
-	err             error
+	result           service.OnboardMemberResult
+	createAppResult  service.CreateAppForMemberResult
+	lastOrgID        string
+	lastUserID       string
+	lastOnboardInput service.OnboardMemberInput
+	lastCreateInput  service.CreateAppForMemberInput
+	err              error
 }
 
-func (s *onboardingServiceStub) OnboardMember(_ context.Context, _ auth.Principal, _ string, _ service.OnboardMemberInput) (service.OnboardMemberResult, error) {
+func (s *onboardingServiceStub) OnboardMember(_ context.Context, _ auth.Principal, orgID string, input service.OnboardMemberInput) (service.OnboardMemberResult, error) {
+	s.lastOrgID = orgID
+	s.lastOnboardInput = input
 	if s.err != nil {
 		return service.OnboardMemberResult{}, s.err
 	}
@@ -138,7 +142,7 @@ func TestMembersOnboardMapsNoNodeAvailableTo503(t *testing.T) {
 	token := mustSignAccess(t, tokens, auth.Principal{UserID: "p1", Role: domain.UserRolePlatformAdmin})
 
 	recorder := httptest.NewRecorder()
-	body := bytes.NewBufferString(`{"username":"alice","display_name":"Alice","password":"pwd","app_name":"alice-bot"}`)
+	body := bytes.NewBufferString(`{"username":"alice","display_name":"Alice","password":"pwd","app_name":"alice-bot","model_id":"qwen2.5:7b"}`)
 	request := httptest.NewRequest(http.MethodPost, "/api/v1/organizations/00000000-0000-0000-0000-000000000101/members/onboard", body)
 	request.Header.Set("Content-Type", "application/json")
 	request.Header.Set("Authorization", "Bearer "+token)
@@ -146,6 +150,29 @@ func TestMembersOnboardMapsNoNodeAvailableTo503(t *testing.T) {
 
 	require.Equal(t, http.StatusServiceUnavailable, recorder.Code)
 	require.Contains(t, recorder.Body.String(), "NO_NODE_AVAILABLE")
+}
+
+// TestMembersOnboardForwardsModelID 验证成员开户路由会把模型选择传给 service。
+func TestMembersOnboardForwardsModelID(t *testing.T) {
+	onboarding := &onboardingServiceStub{
+		result: service.OnboardMemberResult{
+			App:   service.AppResult{ID: "app-1", Name: "alice-bot", Status: domain.AppStatusDraft},
+			JobID: "job-1",
+		},
+	}
+	router, tokens := newMembersTestRouterWithOnboarding(t, &memberServiceStub{}, onboarding)
+	token := mustSignAccess(t, tokens, auth.Principal{UserID: "p1", Role: domain.UserRoleOrgAdmin, OrgID: "org-1"})
+
+	recorder := httptest.NewRecorder()
+	body := bytes.NewBufferString(`{"username":"alice","display_name":"Alice","password":"pwd","app_name":"alice-bot","model_id":"qwen2.5:7b"}`)
+	request := httptest.NewRequest(http.MethodPost, "/api/v1/organizations/org-1/members/onboard", body)
+	request.Header.Set("Content-Type", "application/json")
+	request.Header.Set("Authorization", "Bearer "+token)
+	router.ServeHTTP(recorder, request)
+
+	require.Equal(t, http.StatusCreated, recorder.Code)
+	assert.Equal(t, "org-1", onboarding.lastOrgID)
+	assert.Equal(t, "qwen2.5:7b", onboarding.lastOnboardInput.ModelID)
 }
 
 // TestMembersCreateAppForMemberForwardsRequest 验证已有成员创建实例路由转发组织、成员和应用字段。
@@ -160,7 +187,7 @@ func TestMembersCreateAppForMemberForwardsRequest(t *testing.T) {
 	token := mustSignAccess(t, tokens, auth.Principal{UserID: "p1", Role: domain.UserRolePlatformAdmin})
 
 	recorder := httptest.NewRecorder()
-	body := bytes.NewBufferString(`{"app_name":"alice-new-bot","persona_mode":"app_override","app_prompt":"hello","channel_type":"wechat","runtime_node_id":"node-1"}`)
+	body := bytes.NewBufferString(`{"app_name":"alice-new-bot","persona_mode":"app_override","app_prompt":"hello","channel_type":"wechat","runtime_node_id":"node-1","model_id":"qwen2.5:7b"}`)
 	request := httptest.NewRequest(http.MethodPost, "/api/v1/organizations/org-1/members/user-1/apps", body)
 	request.Header.Set("Content-Type", "application/json")
 	request.Header.Set("Authorization", "Bearer "+token)
@@ -170,6 +197,7 @@ func TestMembersCreateAppForMemberForwardsRequest(t *testing.T) {
 	require.Equal(t, "org-1", onboarding.lastOrgID)
 	require.Equal(t, "user-1", onboarding.lastUserID)
 	require.Equal(t, "alice-new-bot", onboarding.lastCreateInput.AppName)
+	assert.Equal(t, "qwen2.5:7b", onboarding.lastCreateInput.ModelID)
 	require.Contains(t, recorder.Body.String(), `"job_id":"job-1"`)
 }
 
@@ -180,7 +208,7 @@ func TestMembersCreateAppForMemberMapsNoNodeAvailable(t *testing.T) {
 	token := mustSignAccess(t, tokens, auth.Principal{UserID: "p1", Role: domain.UserRolePlatformAdmin})
 
 	recorder := httptest.NewRecorder()
-	body := bytes.NewBufferString(`{"app_name":"alice-new-bot"}`)
+	body := bytes.NewBufferString(`{"app_name":"alice-new-bot","model_id":"qwen2.5:7b"}`)
 	request := httptest.NewRequest(http.MethodPost, "/api/v1/organizations/org-1/members/user-1/apps", body)
 	request.Header.Set("Content-Type", "application/json")
 	request.Header.Set("Authorization", "Bearer "+token)

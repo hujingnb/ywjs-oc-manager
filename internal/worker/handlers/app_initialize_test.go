@@ -222,6 +222,49 @@ func TestAppInitializeContainerStepSkippedWhenContainerExists(t *testing.T) {
 	require.False(t, store.containerSet)
 }
 
+// TestHandleConfiguresAppModelID 验证初始化使用 app.model_id 而不是全局默认模型。
+func TestHandleConfiguresAppModelID(t *testing.T) {
+	store := newAppInitStub(t)
+	store.app.ModelID = "deepseek-r1:14b"
+	containers := &fakeContainers{result: runtimepkg.ContainerInfo{ID: "ctr-1", Name: "ocm-" + testAppID, Status: "created"}}
+	starter := &execAwareStarter{
+		fakeContainers:    containers,
+		fakeContainerExec: &fakeContainerExec{res: ExecResultStub{ExitCode: 0, Stdout: "Patched config\n"}},
+	}
+	client := &fakeNewAPI{result: newapi.APIKey{ID: 99, Key: "sk-test"}}
+	handler := NewAppInitializeHandler(store, &fakeImages{}, &fakeDirs{}, containers, starter, client, AppInitializeConfig{
+		Cipher: testCipher(t),
+		LLM: AppInitializeLLMConfig{
+			BaseURL:         "http://new-api:3000/v1",
+			DefaultProvider: "openai",
+			DefaultModel:    "qwen2.5:7b",
+		},
+	})
+
+	err := handler.Handle(context.Background(), buildJob(t, testAppID, "node-1"))
+
+	require.NoError(t, err)
+	require.Len(t, starter.fakeContainerExec.calls, 1)
+	shellLine := starter.fakeContainerExec.calls[0].cmd[2]
+	assert.Contains(t, shellLine, "deepseek-r1:14b")
+	assert.NotContains(t, shellLine, "qwen2.5:7b")
+}
+
+// TestEnsureAPIKeyKeepsNewAPITokenModelsUnrestricted 验证 new-api token 创建仍不限制模型。
+func TestEnsureAPIKeyKeepsNewAPITokenModelsUnrestricted(t *testing.T) {
+	store := newAppInitStub(t)
+	store.app.ModelID = "deepseek-r1:14b"
+	api := &fakeNewAPI{result: newapi.APIKey{ID: 99, Key: "sk-test"}}
+	handler := NewAppInitializeHandler(store, &fakeImages{}, &fakeDirs{}, &fakeContainers{}, &fakeContainers{}, api, AppInitializeConfig{
+		Cipher: testCipher(t),
+	})
+
+	_, err := handler.ensureAPIKey(context.Background(), &store.app)
+
+	require.NoError(t, err)
+	assert.Empty(t, api.lastCreateInput.Models)
+}
+
 func buildJob(t *testing.T, appID, nodeID string) sqlc.Job {
 	t.Helper()
 	payload := []byte(`{"app_id":"` + appID + `","runtime_node":"` + nodeID + `"}`)
@@ -327,6 +370,12 @@ type fakeContainers struct {
 	healthErr         error
 }
 
+// execAwareStarter 同时支持启动容器和 docker exec，用于断言初始化后的 OpenClaw 配置注入。
+type execAwareStarter struct {
+	*fakeContainers
+	*fakeContainerExec
+}
+
 // WaitForOpenClawHealthy 仅当 enableHealthCheck 为 true 时通过类型断言可见。
 // 由于 Go 的接口断言看的是方法集（不论 enable flag），这里的 enable 通过 wrapper 实现。
 // 所以测试用 healthAwareContainers 包装 fakeContainers 暴露此方法。
@@ -380,11 +429,12 @@ func (f *fakeDirs) InitAppDirs(_ context.Context, nodeID, appID string) error {
 // 让现有用例（构造一次 fakeNewAPI 给 handler）继续通过；result 在 CreateAPIKey 与
 // GetTokenFullKey 之间共用，模拟 new-api 创 token + 拉完整 key 这条新链路。
 type fakeNewAPI struct {
-	result       newapi.APIKey
-	err          error // UserScopedFor / CreateAPIKey / SetAPIKeyStatus 公用错误
-	createKeyErr error // 仅让 CreateAPIKey 失败，UserScopedFor 仍成功
-	getKeyErr    error // 仅让 GetTokenFullKey 失败，CreateAPIKey 仍成功
-	calls        int
+	result          newapi.APIKey
+	err             error // UserScopedFor / CreateAPIKey / SetAPIKeyStatus 公用错误
+	createKeyErr    error // 仅让 CreateAPIKey 失败，UserScopedFor 仍成功
+	getKeyErr       error // 仅让 GetTokenFullKey 失败，CreateAPIKey 仍成功
+	calls           int
+	lastCreateInput newapi.CreateAPIKeyInput
 }
 
 func (f *fakeNewAPI) UserScopedFor(_ context.Context, _ sqlc.App) (APIKeyClient, error) {
@@ -394,8 +444,9 @@ func (f *fakeNewAPI) UserScopedFor(_ context.Context, _ sqlc.App) (APIKeyClient,
 	return f, nil
 }
 
-func (f *fakeNewAPI) CreateAPIKey(_ context.Context, _ newapi.CreateAPIKeyInput) (newapi.APIKey, error) {
+func (f *fakeNewAPI) CreateAPIKey(_ context.Context, input newapi.CreateAPIKeyInput) (newapi.APIKey, error) {
 	f.calls++
+	f.lastCreateInput = input
 	if f.createKeyErr != nil {
 		return newapi.APIKey{}, f.createKeyErr
 	}

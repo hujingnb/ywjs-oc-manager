@@ -44,6 +44,7 @@ type AppResult struct {
 	Status        string `json:"status"`
 	PersonaMode   string `json:"persona_mode"`
 	AppPrompt     string `json:"app_prompt,omitempty"`
+	ModelID       string `json:"model_id"`
 	ContainerID   string `json:"container_id,omitempty"`
 	APIKeyStatus  string `json:"api_key_status"`
 	// NewapiKeyID 是 new-api 中 token 的数值 id；schema 上是 text 列存的字符串，
@@ -112,6 +113,7 @@ func toAppResult(app sqlc.App) AppResult {
 		Name:         app.Name,
 		Status:       app.Status,
 		PersonaMode:  app.PersonaMode,
+		ModelID:      app.ModelID,
 		APIKeyStatus: app.ApiKeyStatus,
 	}
 	if app.RuntimeNodeID.Valid {
