@@ -2807,6 +2807,74 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/models": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * 模型列表
+         * @description 平台管理员实时查询 new-api 当前可用模型，供组织模型 allowlist 使用
+         */
+        get: {
+            parameters: {
+                query?: never;
+                header?: never;
+                path?: never;
+                cookie?: never;
+            };
+            requestBody?: never;
+            responses: {
+                /** @description OK */
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": {
+                            [key: string]: components["schemas"]["service.ModelResult"][];
+                        };
+                    };
+                };
+                /** @description Unauthorized */
+                401: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["handlers.ErrorResponse"];
+                    };
+                };
+                /** @description Forbidden */
+                403: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["handlers.ErrorResponse"];
+                    };
+                };
+                /** @description Internal Server Error */
+                500: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["handlers.ErrorResponse"];
+                    };
+                };
+            };
+        };
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/organizations": {
         parameters: {
             query?: never;
@@ -5638,6 +5706,8 @@ export interface components {
             contact_phone?: string;
             /** @description CreditWarningThreshold 是组织余额预警阈值；nil 表示不启用余额预警或保持预警关闭。 */
             credit_warning_threshold?: number;
+            /** @description EnabledModels 是该组织允许在 manager 内选择的模型列表；new-api token 不使用该字段限权。 */
+            enabled_models?: string[];
             /** @description Name 是组织展示名，也是平台管理员列表中识别租户的主字段。 */
             name: string;
             /** @description Remark 是平台管理员维护的内部备注。 */
@@ -5705,6 +5775,11 @@ export interface components {
             contact_phone?: string;
             /** @description CreditWarningThreshold 是组织余额预警阈值；nil 表示清空或未设置预警阈值。 */
             credit_warning_threshold?: number;
+            /**
+             * @description EnabledModels 是该组织允许在 manager 内选择的模型列表；new-api token 不使用该字段限权。
+             *     nil 表示本次只更新基础资料并保留原模型列表；显式空数组会由 service 拒绝。
+             */
+            enabled_models?: string[];
             /** @description Name 是组织展示名；更新时仍必填，避免空名称进入前端列表。 */
             name: string;
             /** @description Remark 是平台管理员维护的内部备注，可置空。 */
@@ -5903,6 +5978,12 @@ export interface components {
             /** @description Username 是登录账号名。 */
             username?: string;
         };
+        "service.ModelResult": {
+            /** @description ID 是后续组织 allowlist 和实例模型字段使用的模型标识。 */
+            id?: string;
+            /** @description Name 是前端展示名称；new-api 缺省时与 ID 一致。 */
+            name?: string;
+        };
         /** @description CurrentResource 是节点最近一次资源采样摘要；列表页用于展示当前资源状态。 */
         "service.NodeCurrentResourceResult": {
             /** @description CPUPercent 是节点 CPU 使用百分比；nil 表示最近采样缺少该指标。 */
@@ -5977,6 +6058,8 @@ export interface components {
             contact_phone?: string;
             /** @description CreditWarningThreshold 是组织余额预警阈值。 */
             credit_warning_threshold?: number;
+            /** @description EnabledModels 是组织在 manager 层允许创建实例时选择的模型列表。 */
+            enabled_models?: string[];
             /** @description ID 是 manager 组织 UUID。 */
             id?: string;
             /** @description Name 是组织展示名。 */

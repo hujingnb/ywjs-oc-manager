@@ -238,8 +238,9 @@ func TestUpdateOrganizationRejectsRemovingModelInUse(t *testing.T) {
 	svc.SetModelValidator(orgModelValidatorStub{models: []string{"deepseek-r1:14b"}})
 
 	_, err := svc.UpdateOrganization(context.Background(), auth.Principal{Role: domain.UserRolePlatformAdmin}, uuidToString(org.ID), OrganizationInput{
-		Name:          "测试组织",
-		EnabledModels: []string{"deepseek-r1:14b"},
+		Name:             "测试组织",
+		EnabledModels:    []string{"deepseek-r1:14b"},
+		EnabledModelsSet: true,
 	})
 
 	require.ErrorIs(t, err, ErrConflict)
@@ -253,16 +254,37 @@ func TestUpdateOrganizationPersistsEnabledModels(t *testing.T) {
 	store := &organizationStoreStub{}
 	org := store.mustSeedOrganization(t, "test-org", []string{"qwen2.5:7b"})
 	svc := NewOrganizationService(store, &fakeProvisioner{}, mustCipher(t), nil)
-	svc.SetModelValidator(orgModelValidatorStub{models: []string{"deepseek-r1:14b"}})
+	validator := &recordingOrgModelValidator{models: []string{"deepseek-r1:14b"}}
+	svc.SetModelValidator(validator)
 
 	result, err := svc.UpdateOrganization(context.Background(), auth.Principal{Role: domain.UserRolePlatformAdmin}, uuidToString(org.ID), OrganizationInput{
-		Name:          "测试组织改名",
-		EnabledModels: []string{"deepseek-r1:14b"},
+		Name:             "测试组织改名",
+		EnabledModels:    []string{"deepseek-r1:14b"},
+		EnabledModelsSet: true,
 	})
 
 	require.NoError(t, err)
 	assert.Equal(t, []string{"deepseek-r1:14b"}, result.EnabledModels)
+	assert.Equal(t, []string{"deepseek-r1:14b"}, validator.input)
 	assert.JSONEq(t, `["deepseek-r1:14b"]`, string(store.updatedProfile.EnabledModels))
+}
+
+// TestUpdateOrganizationKeepsModelsWhenFieldOmitted 验证更新基础资料时缺省模型字段会保留旧 allowlist。
+func TestUpdateOrganizationKeepsModelsWhenFieldOmitted(t *testing.T) {
+	store := &organizationStoreStub{}
+	org := store.mustSeedOrganization(t, "test-org", []string{"qwen2.5:7b"})
+	svc := NewOrganizationService(store, &fakeProvisioner{}, mustCipher(t), nil)
+	svc.SetModelValidator(orgModelValidatorStub{err: errors.New("不应调用模型校验")})
+
+	result, err := svc.UpdateOrganization(context.Background(), auth.Principal{Role: domain.UserRolePlatformAdmin}, uuidToString(org.ID), OrganizationInput{
+		Name: "测试组织改名",
+	})
+
+	require.NoError(t, err)
+	assert.Equal(t, "测试组织改名", result.Name)
+	assert.Equal(t, []string{"qwen2.5:7b"}, result.EnabledModels)
+	assert.JSONEq(t, `["qwen2.5:7b"]`, string(store.updatedProfile.EnabledModels))
+	assert.Empty(t, store.modelUsageArg.ModelIds)
 }
 
 // TestOrganizationServiceGetRestrictsOrgScope 验证组织服务获取Restricts组织scope的预期行为场景。
@@ -487,6 +509,18 @@ type orgModelValidatorStub struct {
 
 func (s orgModelValidatorStub) ValidateModelIDs(context.Context, []string) ([]string, error) {
 	return s.models, s.err
+}
+
+// recordingOrgModelValidator 记录 service 传入的模型列表，覆盖 handler/service 入参透传路径。
+type recordingOrgModelValidator struct {
+	input  []string
+	models []string
+}
+
+// ValidateModelIDs 返回预设模型并保存原始入参，便于测试断言请求模型没有被丢弃。
+func (s *recordingOrgModelValidator) ValidateModelIDs(_ context.Context, input []string) ([]string, error) {
+	s.input = append([]string(nil), input...)
+	return s.models, nil
 }
 
 // fakeFailAuditor 实现 NewAPIFailureAuditor，仅记录失败事件，供测试断言审计是否被触发。

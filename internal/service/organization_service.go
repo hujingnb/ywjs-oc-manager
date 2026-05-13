@@ -136,8 +136,10 @@ type OrganizationInput struct {
 	Remark string
 	// CreditWarningThreshold 是组织余额预警阈值；nil 会写入 NULL，表示不设置预警阈值。
 	CreditWarningThreshold *int32
-	// EnabledModels 是组织可用模型 allowlist，创建和更新时必须至少包含一个实时存在的模型。
+	// EnabledModels 是组织可用模型 allowlist，创建和显式更新时必须至少包含一个实时存在的模型。
 	EnabledModels []string
+	// EnabledModelsSet 区分更新请求是否携带 allowlist；false 表示保留原组织模型配置。
+	EnabledModelsSet bool
 	// AdminUsername 是创建组织时初始化的 org_admin 账号名。
 	AdminUsername string
 	// AdminDisplayName 是初始化 org_admin 的显示名。
@@ -445,16 +447,19 @@ func (s *OrganizationService) UpdateOrganization(ctx context.Context, principal 
 	if err != nil {
 		return OrganizationResult{}, fmt.Errorf("查询组织失败: %w", err)
 	}
-	enabledModels, err := s.validateEnabledModels(ctx, input.EnabledModels)
-	if err != nil {
-		return OrganizationResult{}, err
-	}
-	if err := s.ensureRemovedModelsUnused(ctx, id, modelListFromJSON(current.EnabledModels), enabledModels); err != nil {
-		return OrganizationResult{}, err
-	}
-	enabledModelsJSON, err := modelListJSON(enabledModels)
-	if err != nil {
-		return OrganizationResult{}, err
+	enabledModelsJSON := current.EnabledModels
+	if input.EnabledModelsSet {
+		enabledModels, err := s.validateEnabledModels(ctx, input.EnabledModels)
+		if err != nil {
+			return OrganizationResult{}, err
+		}
+		if err := s.ensureRemovedModelsUnused(ctx, id, modelListFromJSON(current.EnabledModels), enabledModels); err != nil {
+			return OrganizationResult{}, err
+		}
+		enabledModelsJSON, err = modelListJSON(enabledModels)
+		if err != nil {
+			return OrganizationResult{}, err
+		}
 	}
 	org, err := s.store.UpdateOrganizationProfile(ctx, sqlc.UpdateOrganizationProfileParams{
 		ID:                     id,

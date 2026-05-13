@@ -80,6 +80,28 @@ func TestOrganizationsUpdatePassesEnabledModels(t *testing.T) {
 	require.Equal(t, http.StatusOK, recorder.Code)
 	assert.Equal(t, "org-1", svc.lastUpdateOrgID)
 	assert.Equal(t, []string{"deepseek-r1:14b"}, svc.lastUpdateInput.EnabledModels)
+	assert.True(t, svc.lastUpdateInput.EnabledModelsSet)
+}
+
+// TestOrganizationsUpdateKeepsEnabledModelsWhenOmitted 验证更新请求缺省模型字段时不会要求重写 allowlist。
+func TestOrganizationsUpdateKeepsEnabledModelsWhenOmitted(t *testing.T) {
+	svc := &organizationServiceStub{
+		createResult: service.OrganizationResult{ID: "org-1", Name: "测试组织", Status: domain.StatusActive},
+	}
+	router, tokens := newOrganizationsTestRouter(t, svc)
+	accessToken, err := tokens.SignAccessToken(auth.Principal{UserID: "user-1", Role: domain.UserRolePlatformAdmin})
+	require.NoError(t, err)
+
+	recorder := httptest.NewRecorder()
+	request := httptest.NewRequest(http.MethodPatch, "/api/v1/organizations/org-1", bytes.NewBufferString(`{"name":"测试组织"}`))
+	request.Header.Set("Content-Type", "application/json")
+	request.Header.Set("Authorization", "Bearer "+accessToken)
+	router.ServeHTTP(recorder, request)
+
+	require.Equal(t, http.StatusOK, recorder.Code)
+	assert.Equal(t, "org-1", svc.lastUpdateOrgID)
+	assert.False(t, svc.lastUpdateInput.EnabledModelsSet)
+	assert.Nil(t, svc.lastUpdateInput.EnabledModels)
 }
 
 // TestOrganizationsCreateRequiresAdminFields 验证组织创建要求管理员字段的预期行为场景。

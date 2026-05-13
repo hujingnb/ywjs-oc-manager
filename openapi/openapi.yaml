@@ -159,6 +159,12 @@ components:
         credit_warning_threshold:
           description: CreditWarningThreshold 是组织余额预警阈值；nil 表示不启用余额预警或保持预警关闭。
           type: integer
+        enabled_models:
+          description: EnabledModels 是该组织允许在 manager 内选择的模型列表；new-api token 不使用该字段限权。
+          items:
+            type: string
+          type: array
+          uniqueItems: false
         name:
           description: Name 是组织展示名，也是平台管理员列表中识别租户的主字段。
           type: string
@@ -287,6 +293,14 @@ components:
         credit_warning_threshold:
           description: CreditWarningThreshold 是组织余额预警阈值；nil 表示清空或未设置预警阈值。
           type: integer
+        enabled_models:
+          description: |-
+            EnabledModels 是该组织允许在 manager 内选择的模型列表；new-api token 不使用该字段限权。
+            nil 表示本次只更新基础资料并保留原模型列表；显式空数组会由 service 拒绝。
+          items:
+            type: string
+          type: array
+          uniqueItems: false
         name:
           description: Name 是组织展示名；更新时仍必填，避免空名称进入前端列表。
           type: string
@@ -615,6 +629,15 @@ components:
           description: Username 是登录账号名。
           type: string
       type: object
+    service.ModelResult:
+      properties:
+        id:
+          description: ID 是后续组织 allowlist 和实例模型字段使用的模型标识。
+          type: string
+        name:
+          description: Name 是前端展示名称；new-api 缺省时与 ID 一致。
+          type: string
+      type: object
     service.NodeCurrentResourceResult:
       description: CurrentResource 是节点最近一次资源采样摘要；列表页用于展示当前资源状态。
       properties:
@@ -728,6 +751,12 @@ components:
         credit_warning_threshold:
           description: CreditWarningThreshold 是组织余额预警阈值。
           type: integer
+        enabled_models:
+          description: EnabledModels 是组织在 manager 层允许创建实例时选择的模型列表。
+          items:
+            type: string
+          type: array
+          uniqueItems: false
         id:
           description: ID 是 manager 组织 UUID。
           type: string
@@ -2851,6 +2880,43 @@ paths:
       summary: 重置成员密码
       tags:
       - members
+  /models:
+    get:
+      description: 平台管理员实时查询 new-api 当前可用模型，供组织模型 allowlist 使用
+      responses:
+        "200":
+          content:
+            application/json:
+              schema:
+                additionalProperties:
+                  items:
+                    $ref: '#/components/schemas/service.ModelResult'
+                  type: array
+                type: object
+          description: OK
+        "401":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/handlers.ErrorResponse'
+          description: Unauthorized
+        "403":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/handlers.ErrorResponse'
+          description: Forbidden
+        "500":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/handlers.ErrorResponse'
+          description: Internal Server Error
+      security:
+      - BearerAuth: []
+      summary: 模型列表
+      tags:
+      - models
   /organizations:
     get:
       description: 平台管理员获取所有组织；org_admin 只能看到自己所属组织

@@ -66,7 +66,8 @@ type OrganizationRequest struct {
 	// CreditWarningThreshold 是组织余额预警阈值；nil 表示清空或未设置预警阈值。
 	CreditWarningThreshold *int32 `json:"credit_warning_threshold"`
 	// EnabledModels 是该组织允许在 manager 内选择的模型列表；new-api token 不使用该字段限权。
-	EnabledModels []string `json:"enabled_models"`
+	// nil 表示本次只更新基础资料并保留原模型列表；显式空数组会由 service 拒绝。
+	EnabledModels *[]string `json:"enabled_models"`
 }
 
 // ===== 成员 members =====

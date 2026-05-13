@@ -241,14 +241,18 @@ func (h *OrganizationsHandler) principal(c *gin.Context) (auth.Principal, bool) 
 
 // toOrganizationInput 将更新 DTO 转为 service 入参；管理员初始化字段不参与更新。
 func toOrganizationInput(req OrganizationRequest) service.OrganizationInput {
-	return service.OrganizationInput{
+	input := service.OrganizationInput{
 		Name:                   req.Name,
 		ContactName:            req.ContactName,
 		ContactPhone:           req.ContactPhone,
 		Remark:                 req.Remark,
 		CreditWarningThreshold: req.CreditWarningThreshold,
-		EnabledModels:          req.EnabledModels,
 	}
+	if req.EnabledModels != nil {
+		input.EnabledModels = *req.EnabledModels
+		input.EnabledModelsSet = true
+	}
+	return input
 }
 
 // toCreateOrganizationInput 将创建 DTO 转为 service 入参，保留管理员初始化字段。
@@ -264,6 +268,7 @@ func toCreateOrganizationInput(req CreateOrganizationRequest) service.Organizati
 		AdminDisplayName:       req.AdminDisplayName,
 		AdminPassword:          req.AdminPassword,
 		EnabledModels:          req.EnabledModels,
+		EnabledModelsSet:       true,
 	}
 }
 
