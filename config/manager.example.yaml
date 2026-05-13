@@ -92,6 +92,11 @@ newapi:
   # base_url 非空时必填；缺失会让 admin API 401。
   admin_token: "CHANGE_ME_NEWAPI_ADMIN_TOKEN"
 
+  # 可选：new-api「令牌」页创建的 sk- 形式 API token。
+  # 仅在 /api/models 管理接口不可用时，用于降级查询 OpenAI 兼容 /v1/models。
+  # 留空时不会尝试 /v1/models，避免把 admin_token 当成推理 token 使用。
+  model_relay_token: ""
+
   # admin_token 持有者用户 ID，对应 new-api 的 New-Api-User header 校验。
   # 默认账号 admin/admin123! 的 id=1。base_url 非空时必填；类型为整数。
   admin_user_id: 1

@@ -42,17 +42,37 @@ func TestListModelsFallsBackToOpenAIEndpoint(t *testing.T) {
 			return
 		}
 		require.Equal(t, "/v1/models", r.URL.Path)
-		require.Equal(t, "Bearer admin-token", r.Header.Get("Authorization"))
+		require.Equal(t, "Bearer sk-model-token", r.Header.Get("Authorization"))
 		require.Empty(t, r.Header.Get("New-Api-User"))
 		_, _ = w.Write([]byte(`{"data":[{"id":"b-model"},{"id":"a-model"}]}`))
 	}))
 	t.Cleanup(server.Close)
 
 	client := NewClient(server.URL, "admin-token", 1)
+	client.SetModelRelayToken("sk-model-token")
 	models, err := client.ListModels(context.Background())
 	require.NoError(t, err)
 	assert.Equal(t, []string{"/api/models", "/v1/models"}, paths)
 	assert.Equal(t, []Model{{ID: "a-model", Name: "a-model"}, {ID: "b-model", Name: "b-model"}}, models)
+}
+
+// TestListModelsRequiresRelayTokenForOpenAIFallback 验证没有 sk- token 时不会把 admin token 误用于 /v1/models。
+func TestListModelsRequiresRelayTokenForOpenAIFallback(t *testing.T) {
+	t.Parallel()
+	var paths []string
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		paths = append(paths, r.URL.Path)
+		require.Equal(t, "/api/models", r.URL.Path)
+		http.NotFound(w, r)
+	}))
+	t.Cleanup(server.Close)
+
+	client := NewClient(server.URL, "admin-token", 1)
+	models, err := client.ListModels(context.Background())
+	require.ErrorIs(t, err, ErrNotFound)
+	assert.Contains(t, err.Error(), "未配置 OpenAI 兼容模型列表 token")
+	assert.Empty(t, models)
+	assert.Equal(t, []string{"/api/models"}, paths)
 }
 
 // TestListModelsFallbackRejectsOpenAIErrorStatus 验证 /v1/models 非 2xx 响应不会被解析为空模型列表。
@@ -70,6 +90,7 @@ func TestListModelsFallbackRejectsOpenAIErrorStatus(t *testing.T) {
 	t.Cleanup(server.Close)
 
 	client := NewClient(server.URL, "admin-token", 1)
+	client.SetModelRelayToken("sk-model-token")
 	models, err := client.ListModels(context.Background())
 	require.ErrorIs(t, err, ErrUpstream)
 	assert.Empty(t, models)

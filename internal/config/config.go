@@ -166,6 +166,9 @@ type RuntimeProbeConfig struct {
 // AdminToken 必须是 new-api「个人设置 → 安全设置 → 系统访问令牌」生成的 access_token；
 // 不是「令牌」页的 sk- 形式 API token，那个只能调模型推理，不能调 admin API。
 //
+// ModelRelayToken 是可选的 sk- 形式 API token，仅用于 /api/models 不可用时降级查询
+// OpenAI 兼容 /v1/models；不参与 user、充值、token 管理等 admin API。
+//
 // AdminUserID 对应 new-api admin API 要求的 New-Api-User header（且必须与 access_token 持有者匹配）；
 // 详见 https://www.newapi.ai/zh/docs/api/management/auth。
 // 缺失时 client 调用会被 new-api 拒绝并返回 "Unauthorized, New-Api-User header not provided"。
@@ -174,6 +177,8 @@ type NewAPIConfig struct {
 	BaseURL string `yaml:"base_url"`
 	// AdminToken 是 new-api 系统访问令牌，具备管理权限，禁止落入日志或前端响应。
 	AdminToken string `yaml:"admin_token"`
+	// ModelRelayToken 是 OpenAI 兼容 sk- token，仅用于模型列表 fallback。
+	ModelRelayToken string `yaml:"model_relay_token"`
 	// AdminUserID 是 new-api 要求的 New-Api-User header 值，必须与 AdminToken 持有人一致。
 	AdminUserID int64 `yaml:"admin_user_id"`
 }

@@ -191,10 +191,11 @@ type QuotaDate struct {
 // AdminUserID：access_token 所属的 new-api 用户 id，admin API 要求作为 New-Api-User header 同时携带；
 // 二者缺一会被 new-api 拒绝（参考 https://www.newapi.ai/zh/docs/api/management/auth）。
 type Client struct {
-	BaseURL     string
-	AdminToken  string
-	AdminUserID int64
-	HTTPClient  *http.Client
+	BaseURL         string
+	AdminToken      string
+	ModelRelayToken string
+	AdminUserID     int64
+	HTTPClient      *http.Client
 	// base 持有共用 HTTP 传输，URL 拼接与 sentinel error 由 newapi 层自己映射
 	// （new-api 对 401/403 合并处理，与 httpclient.BaseHTTPClient 默认映射不同）。
 	base *httpclient.BaseHTTPClient
@@ -209,6 +210,11 @@ func NewClient(baseURL, adminToken string, adminUserID int64) *Client {
 		AuthToken: adminToken,
 	}
 	return c
+}
+
+// SetModelRelayToken 配置 OpenAI 兼容模型列表 fallback 使用的 sk- token。
+func (c *Client) SetModelRelayToken(token string) {
+	c.ModelRelayToken = strings.TrimSpace(token)
 }
 
 func (c *Client) httpClient() *http.Client {
@@ -229,6 +235,9 @@ func (c *Client) ListModels(ctx context.Context) ([]Model, error) {
 	}
 	if !errors.Is(err, ErrNotFound) && !errors.Is(err, ErrUnauthorized) {
 		return nil, err
+	}
+	if strings.TrimSpace(c.ModelRelayToken) == "" {
+		return nil, fmt.Errorf("%w: /api/models 不可用且未配置 OpenAI 兼容模型列表 token", err)
 	}
 	return c.listOpenAIModels(ctx)
 }
@@ -278,16 +287,16 @@ func (c *Client) listOpenAIModels(ctx context.Context) ([]Model, error) {
 
 // doOpenAI 走 OpenAI 兼容 relay 鉴权执行请求。
 //
-// relay 路由只识别 Authorization Bearer token，不需要也不应携带 Dashboard
-// 管理接口使用的 New-Api-User header；这样 fallback 能兼容把管理凭据配置为
-// OpenAI 兼容 key 的部署，同时避免把 dashboard 专用 header 泄到 relay 端点。
+// relay 路由只识别 Authorization Bearer sk- token，不需要也不应携带 Dashboard
+// 管理接口使用的 New-Api-User header；该 token 独立于 admin_token，避免把
+// dashboard access_token 误用于推理侧鉴权。
 func (c *Client) doOpenAI(ctx context.Context, method, path string, body any, target any) error {
 	req, err := c.newRequest(ctx, method, path, body)
 	if err != nil {
 		return err
 	}
-	if c.AdminToken != "" {
-		req.Header.Set("Authorization", "Bearer "+c.AdminToken)
+	if c.ModelRelayToken != "" {
+		req.Header.Set("Authorization", "Bearer "+c.ModelRelayToken)
 	}
 	return executeRequest(c.httpClient(), req, target)
 }

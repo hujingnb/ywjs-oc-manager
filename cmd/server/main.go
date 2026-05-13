@@ -189,6 +189,7 @@ func runManager(ctx context.Context, cfg config.Config, logOut io.Writer) error 
 	var appInitAuditHelper *audit.NewAPIAuditHelper
 	if cfg.NewAPI.BaseURL != "" {
 		newapiClient = newapi.NewClient(cfg.NewAPI.BaseURL, cfg.NewAPI.AdminToken, cfg.NewAPI.AdminUserID)
+		newapiClient.SetModelRelayToken(cfg.NewAPI.ModelRelayToken)
 		newapiFactory = &orgScopedClientFactory{
 			client: newapiClient,
 			store:  dbStore.Queries,
