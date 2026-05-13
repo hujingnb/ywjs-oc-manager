@@ -115,6 +115,20 @@ type OnboardMemberRequest struct {
 	NodeID string `json:"runtime_node_id"`
 }
 
+// CreateMemberAppRequest 为已有成员创建新实例的请求体。
+type CreateMemberAppRequest struct {
+	// AppName 是新实例名称，创建时必填。
+	AppName string `json:"app_name" binding:"required"`
+	// AppPrompt 是新实例提示词，可为空。
+	AppPrompt string `json:"app_prompt"`
+	// PersonaMode 控制新实例是否继承组织人设或使用独立人设。
+	PersonaMode string `json:"persona_mode"`
+	// ChannelType 是初始化渠道绑定的渠道标识。
+	ChannelType string `json:"channel_type"`
+	// NodeID 是指定 runtime 节点；为空时 service 自动选择可用节点。
+	NodeID string `json:"runtime_node_id"`
+}
+
 // ===== 人设 persona =====
 
 // PersonaRequest 写入组织 AI 人设的请求体。

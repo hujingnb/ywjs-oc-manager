@@ -93,8 +93,12 @@ func newMembersTestRouter(t *testing.T, svc memberService) (*gin.Engine, *auth.T
 }
 
 type onboardingServiceStub struct {
-	result service.OnboardMemberResult
-	err    error
+	result          service.OnboardMemberResult
+	createAppResult service.CreateAppForMemberResult
+	lastOrgID       string
+	lastUserID      string
+	lastCreateInput service.CreateAppForMemberInput
+	err             error
 }
 
 func (s *onboardingServiceStub) OnboardMember(_ context.Context, _ auth.Principal, _ string, _ service.OnboardMemberInput) (service.OnboardMemberResult, error) {
@@ -102,6 +106,16 @@ func (s *onboardingServiceStub) OnboardMember(_ context.Context, _ auth.Principa
 		return service.OnboardMemberResult{}, s.err
 	}
 	return s.result, nil
+}
+
+func (s *onboardingServiceStub) CreateAppForMember(_ context.Context, _ auth.Principal, orgID, userID string, input service.CreateAppForMemberInput) (service.CreateAppForMemberResult, error) {
+	s.lastOrgID = orgID
+	s.lastUserID = userID
+	s.lastCreateInput = input
+	if s.err != nil {
+		return service.CreateAppForMemberResult{}, s.err
+	}
+	return s.createAppResult, nil
 }
 
 // newMembersTestRouterWithOnboarding 给需要触发 onboard 路由的测试构造同时挂 onboarding service 的路由器。
@@ -126,6 +140,48 @@ func TestMembersOnboardMapsNoNodeAvailableTo503(t *testing.T) {
 	recorder := httptest.NewRecorder()
 	body := bytes.NewBufferString(`{"username":"alice","display_name":"Alice","password":"pwd","app_name":"alice-bot"}`)
 	request := httptest.NewRequest(http.MethodPost, "/api/v1/organizations/00000000-0000-0000-0000-000000000101/members/onboard", body)
+	request.Header.Set("Content-Type", "application/json")
+	request.Header.Set("Authorization", "Bearer "+token)
+	router.ServeHTTP(recorder, request)
+
+	require.Equal(t, http.StatusServiceUnavailable, recorder.Code)
+	require.Contains(t, recorder.Body.String(), "NO_NODE_AVAILABLE")
+}
+
+// TestMembersCreateAppForMemberForwardsRequest 验证已有成员创建实例路由转发组织、成员和应用字段。
+func TestMembersCreateAppForMemberForwardsRequest(t *testing.T) {
+	onboarding := &onboardingServiceStub{
+		createAppResult: service.CreateAppForMemberResult{
+			App:   service.AppResult{ID: "app-1", Name: "alice-new-bot", Status: domain.AppStatusDraft},
+			JobID: "job-1",
+		},
+	}
+	router, tokens := newMembersTestRouterWithOnboarding(t, &memberServiceStub{}, onboarding)
+	token := mustSignAccess(t, tokens, auth.Principal{UserID: "p1", Role: domain.UserRolePlatformAdmin})
+
+	recorder := httptest.NewRecorder()
+	body := bytes.NewBufferString(`{"app_name":"alice-new-bot","persona_mode":"app_override","app_prompt":"hello","channel_type":"wechat","runtime_node_id":"node-1"}`)
+	request := httptest.NewRequest(http.MethodPost, "/api/v1/organizations/org-1/members/user-1/apps", body)
+	request.Header.Set("Content-Type", "application/json")
+	request.Header.Set("Authorization", "Bearer "+token)
+	router.ServeHTTP(recorder, request)
+
+	require.Equal(t, http.StatusCreated, recorder.Code)
+	require.Equal(t, "org-1", onboarding.lastOrgID)
+	require.Equal(t, "user-1", onboarding.lastUserID)
+	require.Equal(t, "alice-new-bot", onboarding.lastCreateInput.AppName)
+	require.Contains(t, recorder.Body.String(), `"job_id":"job-1"`)
+}
+
+// TestMembersCreateAppForMemberMapsNoNodeAvailable 验证已有成员创建实例无可用节点时映射为 503。
+func TestMembersCreateAppForMemberMapsNoNodeAvailable(t *testing.T) {
+	onboarding := &onboardingServiceStub{err: service.ErrNoNodeAvailable}
+	router, tokens := newMembersTestRouterWithOnboarding(t, &memberServiceStub{}, onboarding)
+	token := mustSignAccess(t, tokens, auth.Principal{UserID: "p1", Role: domain.UserRolePlatformAdmin})
+
+	recorder := httptest.NewRecorder()
+	body := bytes.NewBufferString(`{"app_name":"alice-new-bot"}`)
+	request := httptest.NewRequest(http.MethodPost, "/api/v1/organizations/org-1/members/user-1/apps", body)
 	request.Header.Set("Content-Type", "application/json")
 	request.Header.Set("Authorization", "Bearer "+token)
 	router.ServeHTTP(recorder, request)

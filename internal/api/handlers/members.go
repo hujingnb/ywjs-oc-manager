@@ -36,6 +36,7 @@ type memberService interface {
 
 type onboardingService interface {
 	OnboardMember(ctx context.Context, principal auth.Principal, orgID string, input service.OnboardMemberInput) (service.OnboardMemberResult, error)
+	CreateAppForMember(ctx context.Context, principal auth.Principal, orgID, userID string, input service.CreateAppForMemberInput) (service.CreateAppForMemberResult, error)
 }
 
 // NewMembersHandler 创建成员 handler。
@@ -57,12 +58,14 @@ func (h *MembersHandler) SetJobNotifier(notifier service.JobNotifier) {
 // RegisterMemberRoutes 注册成员路由。
 // 组织维度的列表/创建挂在 /organizations/:orgId/members；
 // 单条成员的查询、更新、状态切换、密码重置挂在 /members/:userId。
-// 创建成员并联动初始化应用的事务路由挂在 /organizations/:orgId/members/onboard。
+// 创建成员并联动初始化应用的事务路由挂在 /organizations/:orgId/members/onboard；
+// 已有成员复建实例路由挂在 /organizations/:orgId/members/:userId/apps。
 func RegisterMemberRoutes(router gin.IRouter, handler *MembersHandler) {
 	orgGroup := router.Group("/api/v1/organizations/:orgId/members")
 	orgGroup.GET("", handler.List)
 	orgGroup.POST("", handler.Create)
 	orgGroup.POST("/onboard", handler.Onboard)
+	orgGroup.POST("/:userId/apps", handler.CreateAppForMember)
 
 	memberGroup := router.Group("/api/v1/members")
 	memberGroup.GET("/:userId", handler.Get)
@@ -307,6 +310,53 @@ func (h *MembersHandler) Onboard(c *gin.Context) {
 		return
 	}
 	c.JSON(http.StatusCreated, gin.H{"onboarding": result})
+}
+
+// CreateAppForMember 为已有成员创建新的应用实例。
+//
+// @Summary      为已有成员创建实例
+// @Description  平台管理员或本组织管理员为已有成员创建新的应用实例；目标成员必须没有未删除实例
+// @Tags         members
+// @Accept       json
+// @Produce      json
+// @Security     BearerAuth
+// @Param        orgId   path      string                  true  "组织 ID"
+// @Param        userId  path      string                  true  "成员用户 ID"
+// @Param        body    body      CreateMemberAppRequest  true  "创建实例请求"
+// @Success      201     {object}  map[string]service.CreateAppForMemberResult
+// @Failure      400     {object}  ErrorResponse
+// @Failure      401     {object}  ErrorResponse
+// @Failure      403     {object}  ErrorResponse
+// @Failure      404     {object}  ErrorResponse
+// @Failure      500     {object}  ErrorResponse
+// @Failure      503     {object}  ErrorResponse
+// @Router       /organizations/{orgId}/members/{userId}/apps [post]
+func (h *MembersHandler) CreateAppForMember(c *gin.Context) {
+	if h.onboarding == nil {
+		c.JSON(http.StatusServiceUnavailable, gin.H{"error": "成员实例创建流程暂未启用"})
+		return
+	}
+	principal, ok := h.principal(c)
+	if !ok {
+		return
+	}
+	var req CreateMemberAppRequest
+	if err := c.ShouldBindJSON(&req); err != nil {
+		writeBindError(c, err)
+		return
+	}
+	result, err := h.onboarding.CreateAppForMember(c.Request.Context(), principal, c.Param("orgId"), c.Param("userId"), service.CreateAppForMemberInput{
+		AppName:     req.AppName,
+		AppPrompt:   req.AppPrompt,
+		PersonaMode: req.PersonaMode,
+		ChannelType: req.ChannelType,
+		NodeID:      req.NodeID,
+	})
+	if err != nil {
+		writeMemberError(c, err)
+		return
+	}
+	c.JSON(http.StatusCreated, gin.H{"member_app": result})
 }
 
 // ResetPassword 由管理员重置成员密码。
