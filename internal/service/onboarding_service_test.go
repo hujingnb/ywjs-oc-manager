@@ -5,6 +5,7 @@ import (
 	"errors"
 	"testing"
 
+	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgtype"
 
 	"github.com/stretchr/testify/assert"
@@ -104,6 +105,86 @@ func TestOnboardMemberRejectsDisabledOrg(t *testing.T) {
 	require.ErrorIs(t, err, ErrMemberCreateInvalid)
 }
 
+// TestCreateAppForMember_PlatformAdminCreatesAfterDelete 验证平台管理员可为无活跃实例的已有成员创建新实例。
+func TestCreateAppForMember_PlatformAdminCreatesAfterDelete(t *testing.T) {
+	store := newOnboardingStub(t)
+	tx := &txRunnerStub{store: store}
+	svc := NewMemberOnboardingService(tx, fakeHash, defaultTestSelector())
+
+	result, err := svc.CreateAppForMember(context.Background(), platformAdmin(), testOrgID, uuidToString(store.user.ID), CreateAppForMemberInput{
+		AppName: "alice-new-bot",
+	})
+
+	require.NoError(t, err)
+	require.True(t, tx.committed)
+	assert.Equal(t, "alice-new-bot", result.App.Name)
+	assert.Equal(t, uuidToString(store.user.ID), store.lastAppOwnerID)
+	assert.NotEmpty(t, result.JobID)
+	require.Len(t, store.auditLogs, 1)
+	assert.Equal(t, "app", store.auditLogs[0].TargetType)
+	assert.Equal(t, "create_for_existing_member", store.auditLogs[0].Action)
+}
+
+// TestCreateAppForMember_RejectsExistingActiveApp 验证成员已有未删除实例时拒绝创建新实例。
+func TestCreateAppForMember_RejectsExistingActiveApp(t *testing.T) {
+	store := newOnboardingStub(t)
+	existing := sqlc.App{ID: mustUUID(t, "00000000-0000-0000-0000-000000000b99"), OwnerUserID: store.user.ID}
+	store.activeApp = &existing
+	tx := &txRunnerStub{store: store}
+	svc := NewMemberOnboardingService(tx, fakeHash, defaultTestSelector())
+
+	_, err := svc.CreateAppForMember(context.Background(), platformAdmin(), testOrgID, uuidToString(store.user.ID), CreateAppForMemberInput{
+		AppName: "alice-new-bot",
+	})
+
+	require.ErrorIs(t, err, ErrMemberCreateInvalid)
+	require.False(t, tx.committed)
+}
+
+// TestCreateAppForMember_RejectsCrossOrgUser 验证路径组织与目标用户组织不一致时按不存在处理。
+func TestCreateAppForMember_RejectsCrossOrgUser(t *testing.T) {
+	store := newOnboardingStub(t)
+	store.user.OrgID = mustUUID(t, testOrg2ID)
+	tx := &txRunnerStub{store: store}
+	svc := NewMemberOnboardingService(tx, fakeHash, defaultTestSelector())
+
+	_, err := svc.CreateAppForMember(context.Background(), platformAdmin(), testOrgID, uuidToString(store.user.ID), CreateAppForMemberInput{
+		AppName: "alice-new-bot",
+	})
+
+	require.ErrorIs(t, err, ErrNotFound)
+	require.False(t, tx.committed)
+}
+
+// TestCreateAppForMember_RejectsDisabledUser 验证已下线成员不能创建新的可运行实例。
+func TestCreateAppForMember_RejectsDisabledUser(t *testing.T) {
+	store := newOnboardingStub(t)
+	store.user.Status = domain.StatusDisabled
+	tx := &txRunnerStub{store: store}
+	svc := NewMemberOnboardingService(tx, fakeHash, defaultTestSelector())
+
+	_, err := svc.CreateAppForMember(context.Background(), platformAdmin(), testOrgID, uuidToString(store.user.ID), CreateAppForMemberInput{
+		AppName: "alice-new-bot",
+	})
+
+	require.ErrorIs(t, err, ErrMemberCreateInvalid)
+	require.False(t, tx.committed)
+}
+
+// TestCreateAppForMember_NoActiveNode 验证自动选节点无容量时返回无可用节点。
+func TestCreateAppForMember_NoActiveNode(t *testing.T) {
+	store := newOnboardingStub(t)
+	tx := &txRunnerStub{store: store}
+	svc := NewMemberOnboardingService(tx, fakeHash, &nodeSelectorStub{})
+
+	_, err := svc.CreateAppForMember(context.Background(), platformAdmin(), testOrgID, uuidToString(store.user.ID), CreateAppForMemberInput{
+		AppName: "alice-new-bot",
+	})
+
+	require.ErrorIs(t, err, ErrNoNodeAvailable)
+	require.False(t, tx.committed)
+}
+
 type txRunnerStub struct {
 	store     *onboardingStub
 	committed bool
@@ -121,19 +202,22 @@ func (r *txRunnerStub) WithTx(ctx context.Context, fn func(OnboardingStore) erro
 }
 
 type onboardingStub struct {
-	t             *testing.T
-	org           sqlc.Organization
-	users         int
-	apps          int
-	bindings      int
-	audits        int
-	auditLogs     []sqlc.CreateAuditLogParams
-	jobs          int
-	staged        counters
-	stagedAudits  []sqlc.CreateAuditLogParams
-	appErr        error
-	jobErr        error
-	lastAppNodeID string
+	t              *testing.T
+	org            sqlc.Organization
+	user           sqlc.User
+	activeApp      *sqlc.App
+	users          int
+	apps           int
+	bindings       int
+	audits         int
+	auditLogs      []sqlc.CreateAuditLogParams
+	jobs           int
+	staged         counters
+	stagedAudits   []sqlc.CreateAuditLogParams
+	appErr         error
+	jobErr         error
+	lastAppNodeID  string
+	lastAppOwnerID string
 }
 
 type counters struct{ users, apps, bindings, audits, jobs int }
@@ -142,6 +226,14 @@ func newOnboardingStub(t *testing.T) *onboardingStub {
 	return &onboardingStub{
 		t:   t,
 		org: sqlc.Organization{ID: mustUUID(t, testOrgID), Status: domain.StatusActive, Name: "测试组织"},
+		user: sqlc.User{
+			ID:          mustUUID(t, "00000000-0000-0000-0000-000000000a11"),
+			OrgID:       mustUUID(t, testOrgID),
+			Username:    "alice",
+			DisplayName: "Alice",
+			Role:        domain.UserRoleOrgMember,
+			Status:      domain.StatusActive,
+		},
 	}
 }
 
@@ -169,6 +261,20 @@ func (s *onboardingStub) GetOrganization(_ context.Context, id pgtype.UUID) (sql
 	return s.org, nil
 }
 
+func (s *onboardingStub) GetUser(_ context.Context, id pgtype.UUID) (sqlc.User, error) {
+	if id != s.user.ID {
+		return sqlc.User{}, pgx.ErrNoRows
+	}
+	return s.user, nil
+}
+
+func (s *onboardingStub) GetActiveAppByOwner(_ context.Context, ownerUserID pgtype.UUID) (sqlc.App, error) {
+	if s.activeApp == nil || ownerUserID != s.activeApp.OwnerUserID {
+		return sqlc.App{}, pgx.ErrNoRows
+	}
+	return *s.activeApp, nil
+}
+
 func (s *onboardingStub) CreateUser(_ context.Context, arg sqlc.CreateUserParams) (sqlc.User, error) {
 	s.staged.users++
 	return sqlc.User{
@@ -186,6 +292,7 @@ func (s *onboardingStub) CreateApp(_ context.Context, arg sqlc.CreateAppParams) 
 	}
 	s.staged.apps++
 	s.lastAppNodeID = uuidToString(arg.RuntimeNodeID)
+	s.lastAppOwnerID = uuidToString(arg.OwnerUserID)
 	return sqlc.App{
 		ID:           mustUUID(s.t, "00000000-0000-0000-0000-000000000b01"),
 		OrgID:        arg.OrgID,

@@ -9,6 +9,7 @@ import (
 	"sort"
 	"time"
 
+	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgtype"
 
 	"oc-manager/internal/auth"
@@ -35,6 +36,8 @@ type NodeWithCount struct {
 // 而单元测试用内存桩替换全部方法。
 type OnboardingStore interface {
 	GetOrganization(ctx context.Context, id pgtype.UUID) (sqlc.Organization, error)
+	GetUser(ctx context.Context, id pgtype.UUID) (sqlc.User, error)
+	GetActiveAppByOwner(ctx context.Context, ownerUserID pgtype.UUID) (sqlc.App, error)
 	CreateUser(ctx context.Context, arg sqlc.CreateUserParams) (sqlc.User, error)
 	CreateApp(ctx context.Context, arg sqlc.CreateAppParams) (sqlc.App, error)
 	CreateChannelBinding(ctx context.Context, arg sqlc.CreateChannelBindingParams) (sqlc.ChannelBinding, error)
@@ -119,6 +122,21 @@ type OnboardMemberResult struct {
 	Member MemberResult `json:"member"`
 	App    AppResult    `json:"app"`
 	JobID  string       `json:"job_id"`
+}
+
+// CreateAppForMemberInput 描述为已有成员重建实例时需要的应用初始化字段。
+type CreateAppForMemberInput struct {
+	AppName     string
+	AppPrompt   string
+	PersonaMode string
+	ChannelType string
+	NodeID      string
+}
+
+// CreateAppForMemberResult 是为已有成员创建新实例后的视图。
+type CreateAppForMemberResult struct {
+	App   AppResult `json:"app"`
+	JobID string    `json:"job_id"`
 }
 
 // OnboardMember 在事务里创建用户、应用、渠道绑定、审计、app_initialize job。
@@ -267,6 +285,140 @@ func (s *MemberOnboardingService) OnboardMember(ctx context.Context, principal a
 	})
 	if txErr != nil {
 		return OnboardMemberResult{}, txErr
+	}
+	return result, nil
+}
+
+// CreateAppForMember 为已有成员创建新的应用实例。
+// 它只允许目标成员当前没有未删除应用；旧删除记录保留，新的应用重新创建初始化任务。
+func (s *MemberOnboardingService) CreateAppForMember(ctx context.Context, principal auth.Principal, orgID, userID string, input CreateAppForMemberInput) (CreateAppForMemberResult, error) {
+	if !auth.CanCreateAppForMember(principal, orgID) {
+		return CreateAppForMemberResult{}, ErrForbidden
+	}
+	if input.AppName == "" {
+		return CreateAppForMemberResult{}, fmt.Errorf("%w: 应用名不能为空", ErrMemberCreateInvalid)
+	}
+	channelType := input.ChannelType
+	if channelType == "" {
+		channelType = domain.ChannelTypeWeChat
+	}
+	personaMode := input.PersonaMode
+	if personaMode == "" {
+		personaMode = domain.PersonaModeOrgInherited
+	}
+	orgUUID, err := parseUUID(orgID)
+	if err != nil {
+		return CreateAppForMemberResult{}, ErrNotFound
+	}
+	userUUID, err := parseUUID(userID)
+	if err != nil {
+		return CreateAppForMemberResult{}, ErrNotFound
+	}
+
+	// 显式 NodeID 保留给运维指定节点；为空时复用 onboarding 的容量优先选择规则。
+	if input.NodeID == "" {
+		chosen, err := s.selectNode(ctx)
+		if err != nil {
+			return CreateAppForMemberResult{}, err
+		}
+		input.NodeID = chosen
+	}
+
+	var result CreateAppForMemberResult
+	txErr := s.tx.WithTx(ctx, func(store OnboardingStore) error {
+		org, err := store.GetOrganization(ctx, orgUUID)
+		if err != nil {
+			return fmt.Errorf("查询组织失败: %w", err)
+		}
+		if org.Status != domain.StatusActive {
+			return fmt.Errorf("%w: 组织已停用", ErrMemberCreateInvalid)
+		}
+		user, err := store.GetUser(ctx, userUUID)
+		if errors.Is(err, pgx.ErrNoRows) {
+			return ErrNotFound
+		}
+		if err != nil {
+			return fmt.Errorf("查询成员失败: %w", err)
+		}
+		if user.OrgID != org.ID {
+			return ErrNotFound
+		}
+		if user.Status == domain.StatusDisabled {
+			return fmt.Errorf("%w: 成员已下线", ErrMemberCreateInvalid)
+		}
+		if _, err := store.GetActiveAppByOwner(ctx, user.ID); err == nil {
+			return fmt.Errorf("%w: 成员已有未删除实例", ErrMemberCreateInvalid)
+		} else if !errors.Is(err, pgx.ErrNoRows) {
+			return fmt.Errorf("查询成员应用失败: %w", err)
+		}
+		nodeUUID, err := optionalUUID(input.NodeID)
+		if err != nil {
+			return fmt.Errorf("非法 runtime node id: %w", err)
+		}
+		app, err := store.CreateApp(ctx, sqlc.CreateAppParams{
+			OrgID:         org.ID,
+			OwnerUserID:   user.ID,
+			RuntimeNodeID: nodeUUID,
+			Name:          input.AppName,
+			Description:   pgtype.Text{},
+			Status:        domain.AppStatusDraft,
+			PersonaMode:   personaMode,
+			AppPrompt:     pgtype.Text{String: input.AppPrompt, Valid: input.AppPrompt != ""},
+			ApiKeyStatus:  domain.APIKeyStatusPending,
+		})
+		if err != nil {
+			return fmt.Errorf("创建应用失败: %w", err)
+		}
+		if _, err := store.CreateChannelBinding(ctx, sqlc.CreateChannelBindingParams{
+			AppID:       app.ID,
+			ChannelType: channelType,
+			Status:      domain.ChannelStatusUnbound,
+		}); err != nil {
+			return fmt.Errorf("创建渠道绑定失败: %w", err)
+		}
+		actorUUID, _ := optionalUUID(principal.UserID)
+		metadata, err := json.Marshal(map[string]any{
+			"owner_user_id":   uuidToString(user.ID),
+			"channel_type":    channelType,
+			"runtime_node_id": input.NodeID,
+		})
+		if err != nil {
+			return fmt.Errorf("序列化应用创建审计元数据失败: %w", err)
+		}
+		if _, err := store.CreateAuditLog(ctx, sqlc.CreateAuditLogParams{
+			ActorID:      actorUUID,
+			ActorRole:    principal.Role,
+			OrgID:        org.ID,
+			TargetType:   "app",
+			TargetID:     uuidToString(app.ID),
+			Action:       "create_for_existing_member",
+			Result:       "succeeded",
+			MetadataJson: metadata,
+		}); err != nil {
+			return fmt.Errorf("写入应用创建审计日志失败: %w", err)
+		}
+		payload, err := json.Marshal(map[string]any{
+			"app_id":       uuidToString(app.ID),
+			"runtime_node": input.NodeID,
+		})
+		if err != nil {
+			return fmt.Errorf("序列化 job payload 失败: %w", err)
+		}
+		job, err := store.CreateJob(ctx, sqlc.CreateJobParams{
+			Type:        domain.JobTypeAppInitialize,
+			Priority:    100,
+			RunAfter:    pgtype.Timestamptz{Time: time.Now(), Valid: true},
+			MaxAttempts: 5,
+			PayloadJson: payload,
+		})
+		if err != nil {
+			return fmt.Errorf("创建初始化任务失败: %w", err)
+		}
+		result = CreateAppForMemberResult{App: toAppResult(app), JobID: uuidToString(job.ID)}
+		return nil
+	})
+	if txErr != nil {
+		return CreateAppForMemberResult{}, txErr
 	}
 	return result, nil
 }
