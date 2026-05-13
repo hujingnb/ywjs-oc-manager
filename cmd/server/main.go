@@ -147,6 +147,7 @@ func runManager(ctx context.Context, cfg config.Config, logOut io.Writer) error 
 	var usageService *service.UsageService
 	var organizationService *service.OrganizationService
 	var rechargeService *service.RechargeService
+	var modelCatalogService *service.ModelCatalogService
 	// runtime inspector 在 runtimeAdapter 构造之后注入；这里先声明字段，后面赋值。
 
 	agentTokenResolver := agent.NewTokenResolver()
@@ -198,6 +199,7 @@ func runManager(ctx context.Context, cfg config.Config, logOut io.Writer) error 
 		newapiAuditHelper := audit.NewNewAPIAuditHelper(auditService)
 		usageService = service.NewUsageService(dbStore.Queries, newapiClient, newapiAuditHelper)
 		organizationService = service.NewOrganizationService(dbStore.Queries, newapiClient, cipher, newapiAuditHelper)
+		modelCatalogService = service.NewModelCatalogService(newapiClient)
 		// 同时把 helper 暴露到 if 块外，给 AppInitializeConfig.AuditHelper 装配使用。
 		appInitAuditHelper = newapiAuditHelper
 	} else {
@@ -288,6 +290,7 @@ func runManager(ctx context.Context, cfg config.Config, logOut io.Writer) error 
 		Handler: api.NewRouter(api.Dependencies{
 			AuthService:            authService,
 			OrganizationService:    organizationService,
+			ModelCatalogService:    modelCatalogService,
 			MemberService:          memberService,
 			OnboardingService:      onboardingService,
 			AuditService:           auditService,

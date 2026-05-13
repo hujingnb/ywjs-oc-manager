@@ -14,6 +14,45 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
+// TestListModelsPrefersDashboardEndpoint 验证模型列表优先解析 new-api Dashboard 模型映射接口。
+func TestListModelsPrefersDashboardEndpoint(t *testing.T) {
+	t.Parallel()
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		require.Equal(t, "/api/models", r.URL.Path)
+		require.Equal(t, "Bearer admin-token", r.Header.Get("Authorization"))
+		require.Equal(t, "1", r.Header.Get("New-Api-User"))
+		_, _ = w.Write([]byte(`{"success":true,"data":{"1":["qwen2.5:7b","deepseek-r1:14b"],"2":["qwen2.5:7b"]}}`))
+	}))
+	t.Cleanup(server.Close)
+
+	client := NewClient(server.URL, "admin-token", 1)
+	models, err := client.ListModels(context.Background())
+	require.NoError(t, err)
+	assert.Equal(t, []Model{{ID: "deepseek-r1:14b", Name: "deepseek-r1:14b"}, {ID: "qwen2.5:7b", Name: "qwen2.5:7b"}}, models)
+}
+
+// TestListModelsFallsBackToOpenAIEndpoint 验证 Dashboard 模型接口不可用时兼容 OpenAI 模型列表。
+func TestListModelsFallsBackToOpenAIEndpoint(t *testing.T) {
+	t.Parallel()
+	var paths []string
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		paths = append(paths, r.URL.Path)
+		if r.URL.Path == "/api/models" {
+			http.NotFound(w, r)
+			return
+		}
+		require.Equal(t, "/v1/models", r.URL.Path)
+		_, _ = w.Write([]byte(`{"data":[{"id":"b-model"},{"id":"a-model"}]}`))
+	}))
+	t.Cleanup(server.Close)
+
+	client := NewClient(server.URL, "admin-token", 1)
+	models, err := client.ListModels(context.Background())
+	require.NoError(t, err)
+	assert.Equal(t, []string{"/api/models", "/v1/models"}, paths)
+	assert.Equal(t, []Model{{ID: "a-model", Name: "a-model"}, {ID: "b-model", Name: "b-model"}}, models)
+}
+
 // TestUserScopedCreateAPIKeyHappyPath 校验 user-scoped client 调 POST /api/token/ 时携带
 // user 鉴权两件套（Authorization Bearer + New-Api-User），并能解析 success+data.id。
 func TestUserScopedCreateAPIKeyHappyPath(t *testing.T) {

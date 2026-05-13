@@ -23,6 +23,7 @@ import (
 	"net/http"
 	"net/http/cookiejar"
 	"net/url"
+	"sort"
 	"strconv"
 	"strings"
 	"time"
@@ -69,6 +70,14 @@ type APIKey struct {
 	RemainQuota int64    `json:"remain_quota"`
 	Models      []string `json:"models"`
 	Status      int      `json:"status"`
+}
+
+// Model 描述 new-api 当前暴露的模型。
+type Model struct {
+	// ID 是模型在 new-api 和下游 OpenAI 兼容接口中的唯一标识。
+	ID string `json:"id"`
+	// Name 是展示名称；当前 new-api 目录未单独提供展示名时与 ID 保持一致。
+	Name string `json:"name"`
 }
 
 // CreateAPIKeyInput 是创建 token 的入参。
@@ -207,6 +216,77 @@ func (c *Client) httpClient() *http.Client {
 		return c.HTTPClient
 	}
 	return http.DefaultClient
+}
+
+// ListModels 实时查询 new-api 当前可用模型列表。
+//
+// new-api Dashboard 的 /api/models 能返回按渠道分组的模型映射，信息更贴近管理端；
+// 只有该接口不存在或当前 admin token 无权访问时，才降级到 OpenAI 兼容的 /v1/models。
+func (c *Client) ListModels(ctx context.Context) ([]Model, error) {
+	models, err := c.listDashboardModels(ctx)
+	if err == nil {
+		return models, nil
+	}
+	if !errors.Is(err, ErrNotFound) && !errors.Is(err, ErrUnauthorized) {
+		return nil, err
+	}
+	return c.listOpenAIModels(ctx)
+}
+
+func (c *Client) listDashboardModels(ctx context.Context) ([]Model, error) {
+	var response struct {
+		Success bool                `json:"success"`
+		Message string              `json:"message"`
+		Data    map[string][]string `json:"data"`
+	}
+	if err := c.do(ctx, http.MethodGet, "/api/models", nil, &response); err != nil {
+		return nil, err
+	}
+	if !response.Success {
+		return nil, fmt.Errorf("%w: %s", ErrUpstream, response.Message)
+	}
+	set := make(map[string]struct{})
+	for _, names := range response.Data {
+		for _, name := range names {
+			name = strings.TrimSpace(name)
+			if name != "" {
+				set[name] = struct{}{}
+			}
+		}
+	}
+	return sortedModels(set), nil
+}
+
+func (c *Client) listOpenAIModels(ctx context.Context) ([]Model, error) {
+	var response struct {
+		Data []struct {
+			ID string `json:"id"`
+		} `json:"data"`
+	}
+	if err := c.do(ctx, http.MethodGet, "/v1/models", nil, &response); err != nil {
+		return nil, err
+	}
+	set := make(map[string]struct{})
+	for _, item := range response.Data {
+		id := strings.TrimSpace(item.ID)
+		if id != "" {
+			set[id] = struct{}{}
+		}
+	}
+	return sortedModels(set), nil
+}
+
+func sortedModels(set map[string]struct{}) []Model {
+	names := make([]string, 0, len(set))
+	for name := range set {
+		names = append(names, name)
+	}
+	sort.Strings(names)
+	models := make([]Model, 0, len(names))
+	for _, name := range names {
+		models = append(models, Model{ID: name, Name: name})
+	}
+	return models
 }
 
 // CreateUser 调 admin POST /api/user/ 创建普通业务 user。

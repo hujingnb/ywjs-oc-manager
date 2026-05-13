@@ -18,6 +18,8 @@ type Dependencies struct {
 	AuthService *service.AuthService
 	// OrganizationService 提供平台组织管理路由。
 	OrganizationService *service.OrganizationService
+	// ModelCatalogService 提供 new-api 实时模型列表路由。
+	ModelCatalogService *service.ModelCatalogService
 	// MemberService 提供组织成员 CRUD 与状态切换路由。
 	MemberService *service.MemberService
 	// OnboardingService 提供成员创建并初始化应用的事务路由。
@@ -86,6 +88,9 @@ func NewRouter(deps ...Dependencies) http.Handler {
 	}
 	if dep.AuthService != nil {
 		handlers.RegisterAuthRoutes(router, handlers.NewAuthHandler(dep.AuthService, dep.TokenManager))
+	}
+	if dep.ModelCatalogService != nil {
+		handlers.RegisterModelRoutes(router, handlers.NewModelsHandler(dep.ModelCatalogService, dep.TokenManager))
 	}
 	if dep.OrganizationService != nil {
 		handlers.RegisterOrganizationRoutes(router, handlers.NewOrganizationsHandler(dep.OrganizationService, dep.TokenManager))
