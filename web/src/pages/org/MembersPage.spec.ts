@@ -146,13 +146,14 @@ describe('MembersPage', () => {
     expect(deleteButtons).toHaveLength(0)
   })
 
-  // 平台管理员可在成员行看到创建新实例入口，用于已删除实例后的复建。
-  it('平台管理员可看到创建新实例入口', () => {
+  // 平台管理员可在每个成员行看到创建新实例入口，包括与当前平台管理员同 ID 的成员行。
+  it('平台管理员可看到每个成员行的创建新实例入口', () => {
     authUser.current = { id: 'admin-1', role: 'platform_admin' }
 
     const wrapper = mountPage()
 
-    expect(wrapper.findAll('button').some(button => button.text() === '创建新实例')).toBe(true)
+    const createAppButtons = wrapper.findAll('button').filter(button => button.text() === '创建新实例')
+    expect(createAppButtons).toHaveLength(2)
   })
 
   // 组织管理员仍通过原开户入口创建成员，不显示平台复建实例入口。
@@ -170,11 +171,18 @@ describe('MembersPage', () => {
     createMemberAppMock.mutateAsync.mockClear()
     const wrapper = mountPage()
 
-    await wrapper.findAll('button').find(button => button.text() === '创建新实例')!.trigger('click')
+    await wrapper.findAll('button').filter(button => button.text() === '创建新实例')[1].trigger('click')
     await wrapper.find('input').setValue('新实例')
     await wrapper.findAll('button').find(button => button.text() === '提交创建')!.trigger('click')
 
-    expect(createMemberAppMock.mutateAsync).toHaveBeenCalledWith({ userId: 'member-1', payload: expect.objectContaining({ app_name: '新实例' }) })
+    expect(createMemberAppMock.mutateAsync).toHaveBeenCalledWith({
+      userId: 'member-1',
+      payload: {
+        app_name: '新实例',
+        persona_mode: 'org_inherited',
+        channel_type: 'wechat',
+      },
+    })
     expect(wrapper.text()).toContain('已创建实例 新实例')
     expect(wrapper.text()).toContain('job-1')
   })

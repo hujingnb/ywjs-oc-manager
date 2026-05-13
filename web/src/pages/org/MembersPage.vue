@@ -235,7 +235,7 @@ const columns = [
     { label: '启用', type: 'primary', onClick: r => onToggle(r, 'enable'), hidden: r => !canManageMembers.value || r.status === 'active' },
     { label: '重置密码', hidden: () => !canManageMembers.value, onClick: r => openResetForm(r) },
     { label: '删除', type: 'error', hidden: r => !canManageMembers.value || r.id === currentUserId.value, onClick: r => { memberToDelete.value = r } },
-    { label: '创建新实例', type: 'primary', hidden: r => auth.user?.role !== 'platform_admin' || r.id === currentUserId.value, onClick: r => openCreateAppForm(r) },
+    { label: '创建新实例', type: 'primary', hidden: () => auth.user?.role !== 'platform_admin', onClick: r => openCreateAppForm(r) },
   ]),
 ]
 
