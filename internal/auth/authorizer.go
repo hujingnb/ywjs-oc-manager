@@ -177,6 +177,20 @@ func CanCreateAppForOrg(p Principal, orgID string) bool {
 	return p.Role == domain.UserRoleOrgAdmin && p.OrgID == orgID
 }
 
+// CanCreateAppForMember 判断主体是否可为指定组织内的已有成员创建实例。
+// 平台管理员负责跨组织运维复建；组织管理员只允许在本组织内创建；
+// 普通成员不能自行创建或复建实例。
+func CanCreateAppForMember(p Principal, orgID string) bool {
+	switch p.Role {
+	case domain.UserRolePlatformAdmin:
+		return true
+	case domain.UserRoleOrgAdmin:
+		return p.OrgID == orgID
+	default:
+		return false
+	}
+}
+
 // CanViewOrgUsage 判断主体是否可查看组织聚合用量。
 // 组织聚合视角只开放给平台管理员和本组织管理员，普通成员需降级到成员/应用视角。
 func CanViewOrgUsage(p Principal, orgID string) bool {

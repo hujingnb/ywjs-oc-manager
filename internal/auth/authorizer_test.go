@@ -273,6 +273,18 @@ func TestCanCreateAppForOrg(t *testing.T) {
 	runOrgCases(t, CanCreateAppForOrg, cases)
 }
 
+// TestCanCreateAppForMember 验证为已有成员创建实例的权限边界。
+func TestCanCreateAppForMember(t *testing.T) {
+	cases := []orgCase{
+		{"platform_admin 可为任意组织成员创建实例", domain.UserRolePlatformAdmin, orgA, orgB, true}, // 场景：平台管理员跨组织为已有成员重建实例。
+		{"org_admin 可为本组织成员创建实例", domain.UserRoleOrgAdmin, orgA, orgA, true},           // 场景：组织管理员仍保留本组织创建实例能力。
+		{"org_admin 不可为其他组织成员创建实例", domain.UserRoleOrgAdmin, orgA, orgB, false},       // 场景：组织管理员不能越过组织边界。
+		{"org_member 不可创建实例", domain.UserRoleOrgMember, orgA, orgA, false},                // 场景：普通成员没有实例创建权限。
+		{"未知角色不可创建实例", "unknown", orgA, orgA, false},                                  // 场景：未知角色降级为无权限。
+	}
+	runOrgCases(t, CanCreateAppForMember, cases)
+}
+
 // TestCanViewOrgUsage 验证查看权限组织用量的预期行为场景。
 func TestCanViewOrgUsage(t *testing.T) {
 	cases := []orgCase{
