@@ -169,15 +169,43 @@ func (h *AppStopContainerHandler) Handle(ctx context.Context, job sqlc.Job) erro
 	return nil
 }
 
+// HermesConfigRefresher 在 restart 前重写 Hermes 容器内的 config.yaml,
+// 让 model_id 等"跟 yaml 强相关"的 DB 字段在重启后真正生效。
+//
+// 当前用于 AppService.UpdateModel 流程:UpdateModel 改 DB 的 model_id 后入队
+// app_restart_container job;restart handler 拿到 job 后,先调 RefreshConfigYAML
+// 重新渲染 config.yaml 并通过 agent 上传到容器,再调 docker restart 拉起容器,
+// 这样 Hermes 启动时读到的 model.default 跟 DB 一致。
+//
+// 故意只刷 config.yaml,不刷 .env 和 SOUL.md:
+//   - .env 含 WEIXIN_* 凭证,由 channel_login.go bound 流程管理;
+//     restart handler 重写 .env 会丢失这些凭证 → bot 重启后掉线。
+//   - SOUL.md 与 persona prompt 强相关,manager 当前没有改 persona 的入口,
+//     等加上对应入口再扩展 refresher 接口。
+type HermesConfigRefresher interface {
+	RefreshConfigYAML(ctx context.Context, appID string) error
+}
+
 // AppRestartContainerHandler 直接调 docker restart，由 docker 处理 stop+start 顺序。
+//
+// 可选 configRefresher:UpdateModel 触发的 restart 必须先重写 config.yaml
+// 再 restart,否则 Hermes 启动加载的还是旧 model.default。其他 restart 场景
+// (health check 重启等)refresher 为 nil 也能正确工作(只 restart 不刷文件)。
 type AppRestartContainerHandler struct {
-	store      AppRuntimeStore
-	containers ContainerLifecycle
+	store           AppRuntimeStore
+	containers      ContainerLifecycle
+	configRefresher HermesConfigRefresher
 }
 
 // NewAppRestartContainerHandler 创建重启容器 handler，复用容器生命周期接口。
 func NewAppRestartContainerHandler(store AppRuntimeStore, containers ContainerLifecycle) *AppRestartContainerHandler {
 	return &AppRestartContainerHandler{store: store, containers: containers}
+}
+
+// SetConfigRefresher 注入 config.yaml 重写器。
+// nil 时 restart 流程跳过重写,等价于纯 docker restart。
+func (h *AppRestartContainerHandler) SetConfigRefresher(refresher HermesConfigRefresher) {
+	h.configRefresher = refresher
 }
 
 // Handle 执行 app_restart_container job，并在成功后把应用状态推回 running。
@@ -195,6 +223,14 @@ func (h *AppRestartContainerHandler) Handle(ctx context.Context, job sqlc.Job) e
 	}
 	if app.ContainerID.String == "" {
 		return fmt.Errorf("应用 %s 尚未创建容器，无法重启", payload.AppID)
+	}
+	// 先刷 config.yaml 再 restart,保证 Hermes 启动时读到 DB 最新 model_id。
+	// refresher 失败不阻塞 restart:旧 config.yaml 至少能让容器拉起来,
+	// 总比因为 yaml 写失败让容器一直 stopped 强;失败原因走 error 返回让 worker 重试。
+	if h.configRefresher != nil {
+		if err := h.configRefresher.RefreshConfigYAML(ctx, payload.AppID); err != nil {
+			return fmt.Errorf("重写 config.yaml 失败: %w", err)
+		}
 	}
 	nodeID := uuidToString(app.RuntimeNodeID)
 	if err := h.containers.RestartContainer(ctx, nodeID, app.ContainerID.String); err != nil {

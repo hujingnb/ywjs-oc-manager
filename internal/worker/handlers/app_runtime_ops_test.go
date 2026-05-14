@@ -3,6 +3,7 @@ package handlers
 import (
 	"context"
 	"errors"
+	"fmt"
 	"strings"
 	"testing"
 
@@ -99,6 +100,56 @@ func TestAppRestartContainerHandler_HappyPath(t *testing.T) {
 	require.NoError(t, err)
 	require.Equal(t, 1, containers.restartCalls)
 	require.Equal(t, domain.AppStatusRunning, stub.statusUpdates[len(stub.statusUpdates)-1])
+}
+
+// fakeConfigRefresher 是 HermesConfigRefresher 的测试桩,记录 appID 调用次数。
+// nil 时 restart 流程跳过 refresh,业务上等价于无 refresher 注入。
+type fakeConfigRefresher struct {
+	calls       int
+	lastAppID   string
+	returnError error
+}
+
+func (f *fakeConfigRefresher) RefreshConfigYAML(_ context.Context, appID string) error {
+	f.calls++
+	f.lastAppID = appID
+	return f.returnError
+}
+
+// TestAppRestartContainerHandler_RefresherCalledBeforeRestart 验证 SetConfigRefresher
+// 注入后,Handle 在 docker restart 之前先调 RefreshConfigYAML(UpdateModel 流程的核心 invariant:
+// 配置文件必须在容器启动之前写好,否则 Hermes 启动加载到的还是旧 model)。
+func TestAppRestartContainerHandler_RefresherCalledBeforeRestart(t *testing.T) {
+	stub := runtimeStub(t)
+	containers := &fakeLifecycle{}
+	refresher := &fakeConfigRefresher{}
+	handler := NewAppRestartContainerHandler(stub, containers)
+	handler.SetConfigRefresher(refresher)
+	err := handler.Handle(context.Background(), runtimeJob(domain.JobTypeAppRestartContainer, testAppID))
+	require.NoError(t, err)
+	// refresher 被调用一次,目标 appID 透传正确。
+	require.Equal(t, 1, refresher.calls)
+	require.Equal(t, testAppID, refresher.lastAppID)
+	// docker restart 也被调用,且发生在 refresher 之后(本桩用 calls 计数器,生产代码顺序由源代码保证)。
+	require.Equal(t, 1, containers.restartCalls)
+	require.Equal(t, domain.AppStatusRunning, stub.statusUpdates[len(stub.statusUpdates)-1])
+}
+
+// TestAppRestartContainerHandler_RefresherErrorAbortsRestart 验证 refresher 失败时,
+// docker restart 不会被调用,job 返回错误让 worker 重试。
+// 这是关键的 fail-fast invariant:写不出新 config.yaml 时也不应该用旧 config.yaml
+// 启动容器,避免"用户看到改了模型但其实没生效"的诡异状态。
+func TestAppRestartContainerHandler_RefresherErrorAbortsRestart(t *testing.T) {
+	stub := runtimeStub(t)
+	containers := &fakeLifecycle{}
+	refresher := &fakeConfigRefresher{returnError: fmt.Errorf("agent 上传失败")}
+	handler := NewAppRestartContainerHandler(stub, containers)
+	handler.SetConfigRefresher(refresher)
+	err := handler.Handle(context.Background(), runtimeJob(domain.JobTypeAppRestartContainer, testAppID))
+	// refresher 失败,error 必须冒泡。
+	require.Error(t, err)
+	// docker restart 被跳过(避免用旧配置启动)。
+	require.Equal(t, 0, containers.restartCalls)
 }
 
 // TestAppDeleteHandler_HappyPath 验证应用删除处理器成功路径的成功路径场景。

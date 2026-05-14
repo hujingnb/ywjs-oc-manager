@@ -261,7 +261,13 @@ func runManager(ctx context.Context, cfg config.Config, logOut io.Writer) error 
 	if err := registry.Register("app_stop_container", handlers.NewAppStopContainerHandler(dbStore.Queries, runtimeAdapter).Handle); err != nil {
 		return fmt.Errorf("注册 app_stop_container handler 失败: %w", err)
 	}
-	if err := registry.Register("app_restart_container", handlers.NewAppRestartContainerHandler(dbStore.Queries, runtimeAdapter).Handle); err != nil {
+	restartHandler := handlers.NewAppRestartContainerHandler(dbStore.Queries, runtimeAdapter)
+	// 注入 config.yaml 重写器:UpdateModel 改 DB 后入队 app_restart_container,
+	// restart handler 在 docker restart 之前重新渲染 config.yaml 并通过 agent 上传,
+	// 让 Hermes 加载到 DB 最新的 model_id;不刷 .env(WEIXIN_* 由 channel bound 流管)
+	// 也不刷 SOUL.md(persona prompt 由专用流程管)。
+	restartHandler.SetConfigRefresher(newHermesConfigRefresher(dbStore.Queries, runtimeAdapter, cipher, cfg.NewAPI.BaseURL))
+	if err := registry.Register("app_restart_container", restartHandler.Handle); err != nil {
 		return fmt.Errorf("注册 app_restart_container handler 失败: %w", err)
 	}
 	if err := registry.Register("app_delete", handlers.NewAppDeleteHandler(dbStore.Queries, runtimeAdapter, newapiFactory, nil).Handle); err != nil {

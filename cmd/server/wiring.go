@@ -20,6 +20,7 @@ import (
 	"oc-manager/internal/auth"
 	"oc-manager/internal/domain"
 	"oc-manager/internal/integrations/agent"
+	"oc-manager/internal/integrations/hermes"
 	"oc-manager/internal/integrations/newapi"
 	"oc-manager/internal/integrations/runtime"
 	"oc-manager/internal/runtime/imagesync"
@@ -118,6 +119,80 @@ func (s *streamingDockerResolver) DockerClient(ctx context.Context, nodeID strin
 		return nil, fmt.Errorf("节点 %s 缺 agent_tls_ca_cert", nodeID)
 	}
 	return agent.NewStreamingDockerClientForNode(node.AgentDockerEndpoint.String, token, node.AgentTlsCaCert.String)
+}
+
+// hermesConfigQueries 是 hermesConfigRefresher 需要的最小查询子集。
+// 抽出接口便于测试。
+type hermesConfigQueries interface {
+	GetApp(ctx context.Context, id pgtype.UUID) (sqlc.App, error)
+}
+
+// hermesConfigUploader 抽象向目标节点上传 Hermes 配置文件的能力。
+// runtime.AgentBackedAdapter 已实现 UploadAppRuntimeFile,满足此接口。
+type hermesConfigUploader interface {
+	UploadAppRuntimeFile(ctx context.Context, nodeID, appID, relPath string, content io.Reader) error
+}
+
+// hermesConfigRefresher 实现 workerhandlers.HermesConfigRefresher,
+// 在 restart job 触发时根据 DB 当前 app.model_id + 解密的 OPENAI_API_KEY
+// 重新渲染 Hermes 的 config.yaml 并通过 runtime-agent 上传到容器。
+//
+// 仅刷 config.yaml,不刷 .env / SOUL.md:.env 含 WEIXIN_* 凭证由 channel bound
+// 流管;SOUL.md 与 persona prompt 强相关,目前 manager 没有改 persona 的入口。
+type hermesConfigRefresher struct {
+	queries       hermesConfigQueries
+	uploader      hermesConfigUploader
+	cipher        *auth.Cipher
+	newAPIBaseURL string
+}
+
+func newHermesConfigRefresher(queries hermesConfigQueries, uploader hermesConfigUploader, cipher *auth.Cipher, newAPIBaseURL string) *hermesConfigRefresher {
+	return &hermesConfigRefresher{queries: queries, uploader: uploader, cipher: cipher, newAPIBaseURL: newAPIBaseURL}
+}
+
+// RefreshConfigYAML 拿当前 app 状态 + 解密 token,渲染 config.yaml 并上传。
+// 必备前提:app.NewapiKeyCiphertext 非空(由 app_initialize.ensureAPIKey 保证)。
+func (r *hermesConfigRefresher) RefreshConfigYAML(ctx context.Context, appID string) error {
+	if r.cipher == nil {
+		return fmt.Errorf("hermesConfigRefresher.cipher 未配置,无法解密 OPENAI_API_KEY")
+	}
+	if r.uploader == nil {
+		return fmt.Errorf("hermesConfigRefresher.uploader 未配置,无法上传 config.yaml")
+	}
+	id, err := uuid.Parse(appID)
+	if err != nil {
+		return fmt.Errorf("非法 app_id %q: %w", appID, err)
+	}
+	app, err := r.queries.GetApp(ctx, pgtype.UUID{Bytes: id, Valid: true})
+	if err != nil {
+		return fmt.Errorf("查询应用失败: %w", err)
+	}
+	if !app.NewapiKeyCiphertext.Valid || app.NewapiKeyCiphertext.String == "" {
+		return fmt.Errorf("应用 %s 未初始化 newapi_key_ciphertext,跳过 config.yaml 重写", appID)
+	}
+	token, err := r.cipher.Decrypt(app.NewapiKeyCiphertext.String)
+	if err != nil {
+		return fmt.Errorf("解密 OPENAI_API_KEY 失败: %w", err)
+	}
+	newAPIURL := r.newAPIBaseURL
+	if strings.TrimSpace(newAPIURL) == "" {
+		newAPIURL = "http://new-api:3000"
+	}
+	yamlContent, err := hermes.RenderConfigYAML(hermes.ConfigInput{
+		ModelName:   app.ModelID,
+		NewAPIURL:   newAPIURL,
+		NewAPIToken: string(token),
+	})
+	if err != nil {
+		return fmt.Errorf("渲染 config.yaml 失败: %w", err)
+	}
+	// RuntimeNodeID 在多节点部署下决定上传目标节点;若为空(单节点本地容器化)
+	// 此 helper 也返回空串,UploadAppRuntimeFile 内部会走默认 fallback。
+	nodeID := uuidToStringWiring(app.RuntimeNodeID)
+	if err := r.uploader.UploadAppRuntimeFile(ctx, nodeID, appID, "config.yaml", strings.NewReader(yamlContent)); err != nil {
+		return fmt.Errorf("上传 config.yaml: %w", err)
+	}
+	return nil
 }
 
 // InspectImage 适配 imagesync.AgentImageClient 接口。
