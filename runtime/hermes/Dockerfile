@@ -21,6 +21,15 @@ ARG HERMES_REF=main
 RUN curl -fsSL https://hermes-agent.nousresearch.com/install.sh \
       | bash -s -- --skip-setup --branch ${HERMES_REF}
 
+# Node.js 被 install.sh 装到 ${HERMES_HOME}/node = /opt/data/node。
+# 但 manager 启动容器时会把 apps/<app_id>/.hermes bind mount 到 /opt/data,
+# 整目录覆盖会让镜像内的 Node 失效。把 Node 重定位到 volume 外,并修正 PATH
+# 上的 /root/.local/bin/{node,npm,npx} 软链(install.sh 在那建的入口)。
+RUN mv /opt/data/node /opt/hermes-node && \
+    ln -sfn /opt/hermes-node/bin/node /root/.local/bin/node && \
+    ln -sfn /opt/hermes-node/bin/npm  /root/.local/bin/npm && \
+    ln -sfn /opt/hermes-node/bin/npx  /root/.local/bin/npx
+
 # 显式预装 weixin platform 必需的依赖,避免容器启动时走 lazy_deps.py(用户硬约束:
 # 容器启动即 ready,运行时不装任何东西)。
 # install.sh 在 root 用户下用 FHS layout,代码装到 /usr/local/lib/hermes-agent/。
