@@ -257,6 +257,22 @@ func (h *AppInitializeHandler) Handle(ctx context.Context, job sqlc.Job) error {
 	}
 	_ = org // org 已在上文用于 hermes 文件渲染；ensureAPIKey 现在通过 factory 自行获取组织凭据。
 
+	// 把 ensureAPIKey 拿到的真实 OPENAI_API_KEY 回写 .env,覆盖 writeHermesFiles 阶段
+	// 写入的占位符 placeholder-see-newapi-token。容器尚未启动,Hermes 启动时读到真实 token。
+	if h.runtimeFiles != nil && payload.RuntimeNodeID != "" && containerAPIKey != "" {
+		newAPIURL := h.cfg.NewAPIBaseURL
+		if newAPIURL == "" {
+			newAPIURL = "http://new-api:3000"
+		}
+		realEnv := hermes.RenderEnv(hermes.EnvInput{
+			NewAPIURL:   newAPIURL,
+			NewAPIToken: containerAPIKey,
+		})
+		if err := h.runtimeFiles.UploadAppRuntimeFile(ctx, payload.RuntimeNodeID, uuidToString(app.ID), ".env", strings.NewReader(realEnv)); err != nil {
+			return fmt.Errorf("更新 .env 真实 api_key: %w", err)
+		}
+	}
+
 	if app.ContainerID.String == "" && h.containers != nil {
 		node, err := h.store.GetRuntimeNode(ctx, app.RuntimeNodeID)
 		if err != nil {
