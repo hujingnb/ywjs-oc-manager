@@ -57,28 +57,60 @@ deploy/
 └── runtime-agent/README.md       runtime-agent 部署（合入旧 docs/runtime-agent-deployment 缺失细节）
 ```
 
-## 3. 删除清单
+## 3. 删除与重建策略
 
-直接 `git rm`：
+**所有旧文档统一 `git rm`，新文档从零写。**
 
-- `docs/verification-report.md`（1177 行，v1.0/v1.0.1 验证报告）
-- `docs/plans/`（整目录，含 `2026-05-08-dark-theme-naive-ui.md`）
-- `docs/specs/`（整目录，含 `2026-05-08-dark-theme-naive-ui-design.md`）
-- `docs/superpowers/plans/`（整目录，16 个 .md + 1 个 .txt）
-- `docs/superpowers/specs/` 下除本 spec 外的所有文件（17 个旧 spec）
+不做 `git mv` / 改名 / 合并 patch 这类跟踪——旧文档只是写新文档时的"素材
+参考"，不是新文档的起点。新文档按 §6 的章节大纲从空文件开始写。
 
-**保留**：`docs/superpowers/specs/2026-05-14-docs-restructure-design.md`
-（本文件）作为本次重构的历史记录；`docs/superpowers/specs/` 目录因此保留。
+### 3.1 删除清单（旧文档）
 
-## 4. 重命名 / 合并 / 移动清单
+`docs/` 下：
 
-| 旧路径 | 新路径 | 动作 |
-|---|---|---|
-| `docs/openclaw-manager-design.md` | `docs/product-design.md` | 重命名 + 激进精简（目标 ≤ 600 行） |
-| `docs/openclaw-manager-technical-design.md` | `docs/technical-design.md` | 重命名 + 激进精简（目标 ≤ 1200 行） |
-| `docs/runtime-agent-auto-enroll-principles.md` | `docs/runtime-agent.md` | 移动 + 重命名 + 加摘要 |
-| `docs/runtime-agent-deployment.md` | （合并） `deploy/runtime-agent/README.md` | 内容合入 deploy 子目录 README，原文件删除 |
-| `deploy/backup.md` + `deploy/upgrade.md` | `deploy/operations.md` | 合并为一份运维手册 |
+- `docs/architecture.md`
+- `docs/configuration.md`
+- `docs/local-development.md`
+- `docs/openclaw-manager-design.md`
+- `docs/openclaw-manager-technical-design.md`
+- `docs/runtime-agent-auto-enroll-principles.md`
+- `docs/runtime-agent-deployment.md`
+- `docs/user-manual.md`
+- `docs/verification-report.md`
+- `docs/plans/`（整目录）
+- `docs/specs/`（整目录）
+- `docs/superpowers/plans/`（整目录）
+- `docs/superpowers/specs/` 下除本 spec 外的全部文件
+
+`deploy/` 下：
+
+- `deploy/backup.md`
+- `deploy/upgrade.md`
+- `deploy/README.md`
+- `deploy/manage/README.md`
+- `deploy/new-api/README.md`
+- `deploy/ollama/README.md`
+- `deploy/runtime-agent/README.md`
+
+根目录：
+
+- `README.md`（保留 AGENTS.md 不动）
+
+### 3.2 保留
+
+- `docs/superpowers/specs/2026-05-14-docs-restructure-design.md`（本文件）
+- `AGENTS.md`
+- `deploy/` 下的非 .md 资产（`docker-compose.yml`、`.env.example`、`nginx.conf`
+  等运行包文件全部不动）
+
+### 3.3 实施顺序建议
+
+1. 先在临时分支拉一份"旧 docs 全文"快照，作为写新文档时的素材索引。
+2. 按 §3.1 批量 `git rm`。
+3. 按 §6 的大纲从零写新文档。
+4. 按 §8 的验证标准逐条检查。
+5. 提交时分多个 commit，按文档功能边界拆分（架构 / 部署 / hermes 专题 等
+   各成一个 commit）。
 
 ## 5. 通用规范：每个文档的写作规则
 
@@ -179,7 +211,7 @@ deploy/
 
 字段表对照 `config/manager.example.yaml` 与 `config/agent.example.yaml`。
 
-### 6.5 docs/product-design.md（从 openclaw-manager-design.md 精简）
+### 6.5 docs/product-design.md
 
 ```text
 > 摘要：业务角色、对象模型、核心流程与权限模型。
@@ -190,10 +222,10 @@ deploy/
 5. 计费与 token credit
 ```
 
-目标 ≤ 600 行。砍掉与 README / architecture 重复的总体描述、已实现 TODO、
-v1.0 阶段叙述。
+目标 ≤ 600 行。素材可参考旧 `openclaw-manager-design.md`，但**不复制粘贴**；
+写时严格剔除与 README / architecture 重复的内容、已实现 TODO、v1.0 阶段叙述。
 
-### 6.6 docs/technical-design.md（从 openclaw-manager-technical-design.md 精简）
+### 6.6 docs/technical-design.md
 
 ```text
 > 摘要：后端模块边界、状态机、接口契约、job 与 worker 模型。
@@ -205,7 +237,8 @@ v1.0 阶段叙述。
 6. 跨模块约束（OpenAPI 同步、权限校验、审计、镜像同步）
 ```
 
-目标 ≤ 1200 行。砍掉与 README / architecture 重复的拓扑描述、
+目标 ≤ 1200 行。素材可参考旧 `openclaw-manager-technical-design.md`，但
+**不复制粘贴**；写时严格剔除与 README / architecture 重复的拓扑描述、
 已实现 TODO、版本规划叙述。
 
 ### 6.7 docs/user-manual.md
@@ -324,7 +357,7 @@ v1.0 阶段叙述。
     - workspace 不存在 → agent ensureScope 失败
 ```
 
-### 6.9 docs/runtime-agent.md（从 auto-enroll-principles 重构）
+### 6.9 docs/runtime-agent.md
 
 ```text
 > 摘要：runtime-agent 的身份模型、enroll 流程、心跳与重新注册、
@@ -339,7 +372,8 @@ v1.0 阶段叙述。
 7. 运维含义（新增节点 / 替换硬件 / 容量调整 / token 异常 / 密钥轮换）
 ```
 
-内容大部分搬自原文，但所有事实必须对照当前代码核实。
+从零写。素材可参考旧 `runtime-agent-auto-enroll-principles.md`，所有事实
+必须对照当前代码核实，不复制粘贴。
 
 ### 6.10 deploy/README.md
 
@@ -354,7 +388,7 @@ v1.0 阶段叙述。
 5. 跳转：各子包 README、operations.md
 ```
 
-### 6.11 deploy/operations.md（合并 backup.md + upgrade.md）
+### 6.11 deploy/operations.md
 
 ```text
 > 摘要：备份 / 恢复 / 升级 / 紧急回滚 / 常见故障排查。
@@ -373,7 +407,7 @@ v1.0 阶段叙述。
 > 摘要：每台 Runtime Node 部署 oc-runtime-agent 的完整步骤。
 
 1. 启动（compose）
-2. 必改配置（.env + agent.yaml 字段表，合入旧 docs 版本的完整字段）
+2. 必改配置（.env + agent.yaml 字段表，覆盖完整字段）
 3. 防火墙
 4. 状态检查
 5. 验证清单（节点出现 / 状态 / 探测）
@@ -382,11 +416,19 @@ v1.0 阶段叙述。
 
 ### 6.13 deploy/{manage,new-api,ollama}/README.md
 
-按现状保留，仅在以下情况修改：
+从零写，覆盖各运行包的：
 
-- 开头未加摘要 → 加摘要
-- 出现 openclaw / 阶段性叙述 → 修订
-- 配置字段与当前代码不一致 → 修正
+```text
+> 摘要：本运行包部署到哪台机器、提供什么服务。
+
+1. 启动（compose）
+2. 必改配置（.env + 关键字段表）
+3. 防火墙
+4. 状态检查 / 验证
+5. 常见问题（按需）
+```
+
+事实以 `deploy/<pkg>/` 下的 `docker-compose.yml` 和 `.env.example` 为准。
 
 ## 7. README.md 文档导航新结构
 
@@ -437,8 +479,8 @@ v1.0 阶段叙述。
 
 ## 9. 实施风险与边界
 
-- **激进重构容易丢信息**：每个被重构/合并的旧文档，实施时必须在临时
-  分支保留一份，确认新文档覆盖了所有有效信息后再删。
+- **激进重构容易丢信息**：删除旧文档前必须先用 `git log` 或临时备份保留
+  一份索引，确认每个旧文档的有效信息都被某个新文档覆盖后再删。
 - **事实校对依赖代码现状**：实施过程中若代码与文档冲突，**以代码为准**；
   代码本身有疑似 bug 的，记录在 PR 描述里，不在文档里解释。
 - **范围外**：本次不修改 OpenAPI、不动 web/、不重写 AGENTS.md、不重写
