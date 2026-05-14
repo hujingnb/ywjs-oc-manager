@@ -71,13 +71,19 @@ terminal:
 }
 
 // RenderEnv 渲染 Hermes .env 文件内容。
-// 固定输出 OPENAI_API_KEY / OPENAI_BASE_URL 和 WEIXIN_DM_POLICY=open。
-// WEIXIN_DM_POLICY=open 是 weixin platform 必须显式声明的策略:Hermes weixin 默认
-// 拒绝所有未授权 DM("Unauthorized user"),必须设置 open 才接收用户消息。
+// 固定输出 OPENAI_API_KEY / OPENAI_BASE_URL / GATEWAY_ALLOW_ALL_USERS=true / WEIXIN_DM_POLICY=open。
+//
+//   - WEIXIN_DM_POLICY=open:weixin platform 必须显式声明的策略,默认拒绝所有未授权 DM
+//     ("Unauthorized user"),必须设置 open 才接收用户消息。
+//   - GATEWAY_ALLOW_ALL_USERS=true:绕过 Hermes 全局 user pairing 流程。未设置时 Hermes
+//     对每个未配对 sender 返回 "Hi~ I don't recognize you yet! Here's your pairing code: ...",
+//     要求管理员跑 `hermes pairing approve weixin <code>` — 本地容器化部署没有交互式 CLI,
+//     必须用环境变量绕过,否则所有真实用户的首条消息都拿不到模型回复。
+//
 // 当 WeixinAccountID / WeixinToken 均不为空时,追加 WEIXIN_ACCOUNT_ID/TOKEN/BASE_URL/CDN_BASE_URL。
 func RenderEnv(in EnvInput) string {
 	s := fmt.Sprintf(
-		"OPENAI_API_KEY=%s\nOPENAI_BASE_URL=%s/v1\n\n# Weixin platform policy (Hermes weixin 默认拒所有 DM,需显式 open)\nWEIXIN_DM_POLICY=open\n",
+		"OPENAI_API_KEY=%s\nOPENAI_BASE_URL=%s/v1\n\n# 绕过 Hermes user pairing 流程,接受所有未配对 sender(本地部署没有交互 CLI 跑 approve)\nGATEWAY_ALLOW_ALL_USERS=true\n\n# Weixin platform policy (Hermes weixin 默认拒所有 DM,需显式 open)\nWEIXIN_DM_POLICY=open\n",
 		in.NewAPIToken, in.NewAPIURL,
 	)
 	if in.WeixinAccountID != "" && in.WeixinToken != "" {

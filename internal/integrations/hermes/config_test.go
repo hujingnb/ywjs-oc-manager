@@ -33,7 +33,7 @@ func TestRenderConfigYAML_缺字段返回错误(t *testing.T) {
 }
 
 func TestRenderEnv_基础凭据含DM_POLICY(t *testing.T) {
-	// 覆盖 .env 渲染:OPENAI_API_KEY/OPENAI_BASE_URL + WEIXIN_DM_POLICY=open 必须存在。
+	// 覆盖 .env 渲染:OPENAI_API_KEY/OPENAI_BASE_URL + GATEWAY_ALLOW_ALL_USERS + WEIXIN_DM_POLICY 必须存在。
 	// 无 Weixin 凭证时不应包含 WEIXIN_ACCOUNT_ID。
 	got := RenderEnv(EnvInput{
 		NewAPIURL:   "http://new-api:3000",
@@ -41,6 +41,9 @@ func TestRenderEnv_基础凭据含DM_POLICY(t *testing.T) {
 	})
 	require.Contains(t, got, "OPENAI_API_KEY=sk-abc")
 	require.Contains(t, got, "OPENAI_BASE_URL=http://new-api:3000/v1")
+	// GATEWAY_ALLOW_ALL_USERS=true 用于绕过 Hermes user pairing,
+	// 否则 weixin DM 用户首条消息都被 pairing code 拦住。
+	require.Contains(t, got, "GATEWAY_ALLOW_ALL_USERS=true")
 	// WEIXIN_DM_POLICY=open 必须始终存在,否则 weixin platform 拒绝所有 DM。
 	require.Contains(t, got, "WEIXIN_DM_POLICY=open")
 	// 无 weixin 凭证时,不应写入 WEIXIN_ACCOUNT_ID。
