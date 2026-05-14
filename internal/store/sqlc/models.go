@@ -66,7 +66,8 @@ type ChannelBinding struct {
 	AppID       pgtype.UUID `db:"app_id" json:"app_id"`
 	ChannelType string      `db:"channel_type" json:"channel_type"`
 	Status      string      `db:"status" json:"status"`
-	// 渠道下的账号唯一标识，例如微信 wxid。
+	// 微信渠道 iLink Bot 身份,格式 <hex>@im.bot(Hermes runtime 时代)。
+	// 历史:OpenClaw runtime 时代为 <wxid>@im.wechat。
 	BoundIdentity pgtype.Text `db:"bound_identity" json:"bound_identity"`
 	ChannelName   pgtype.Text `db:"channel_name" json:"channel_name"`
 	// 渠道特有元数据，例如二维码 payload、过期时间和登录 challenge。
