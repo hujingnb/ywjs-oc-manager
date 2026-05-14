@@ -274,6 +274,32 @@ func (c *AgentFileClient) DeleteAppKnowledge(ctx context.Context, appID, relPath
 	return c.doKnowledgeFile(ctx, http.MethodDelete, "apps", appID, relPath, nil)
 }
 
+// ClearAppSessions 清空指定 app 的 Hermes 会话目录 (.hermes/sessions/)。
+// 调用方:配置变更类操作 (改 model / persona / 知识库 / 重启) 后调用,
+// 使 Hermes 启动新 session 时重新 snapshot 最新 system_prompt(SOUL.md)。
+//
+// Hermes 把 system_prompt 在 session 启动时冻结存进 SQLite,后续 SOUL.md
+// 改动对老 session 不生效——所以配置变更后必须清 session 才能让新内容入对话。
+//
+// 幂等:.hermes/sessions/ 目录不存在(容器未启动过)视为成功。
+func (c *AgentFileClient) ClearAppSessions(ctx context.Context, appID string) error {
+	endpoint, err := c.endpoint(fmt.Sprintf("/v1/scopes/apps/%s/sessions", url.PathEscape(appID)))
+	if err != nil {
+		return err
+	}
+	req, err := http.NewRequestWithContext(ctx, http.MethodDelete, endpoint, nil)
+	if err != nil {
+		return err
+	}
+	c.authorize(req)
+	resp, err := c.httpClient().Do(req)
+	if err != nil {
+		return err
+	}
+	defer resp.Body.Close()
+	return expectSuccess(resp, "clear app sessions")
+}
+
 // ListWorkspace 列举应用 workspace 下的内容。relPath 为根目录时传空串。
 func (c *AgentFileClient) ListWorkspace(ctx context.Context, appID, relPath string) (WorkspaceListing, error) {
 	if c.BaseURL == "" {

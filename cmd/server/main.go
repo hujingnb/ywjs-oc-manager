@@ -271,6 +271,10 @@ func runManager(ctx context.Context, cfg config.Config, logOut io.Writer) error 
 	// 让 Hermes 加载到 DB 最新的 model_id;不刷 .env(WEIXIN_* 由 channel bound 流管)
 	// 也不刷 SOUL.md(persona prompt 由专用流程管)。
 	restartHandler.SetConfigRefresher(newHermesConfigRefresher(dbStore.Queries, runtimeAdapter, cipher, knowledgeMaster, cfg.NewAPI.BaseURL, cfg.Hermes.SystemPromptTemplate))
+	// 注入 session cleaner:restart 在容器实际重启前清 .hermes/sessions/,
+	// 让 Hermes 启动新 session 时 snapshot 最新 SOUL.md(含改后的 model / persona /
+	// 知识库等)。覆盖所有触发 restart 的入口(改 model / 重启 / persona 更新 / 未来其他)。
+	restartHandler.SetSessionCleaner(runtimeAdapter)
 	if err := registry.Register("app_restart_container", restartHandler.Handle); err != nil {
 		return fmt.Errorf("注册 app_restart_container handler 失败: %w", err)
 	}

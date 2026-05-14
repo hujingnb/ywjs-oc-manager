@@ -152,6 +152,75 @@ func TestAppRestartContainerHandler_RefresherErrorAbortsRestart(t *testing.T) {
 	require.Equal(t, 0, containers.restartCalls)
 }
 
+// fakeSessionCleaner 是 SessionCleaner 测试桩。
+type fakeSessionCleaner struct {
+	calls       int
+	lastNodeID  string
+	lastAppID   string
+	returnError error
+}
+
+func (f *fakeSessionCleaner) ClearAppSessions(_ context.Context, nodeID, appID string) error {
+	f.calls++
+	f.lastNodeID = nodeID
+	f.lastAppID = appID
+	return f.returnError
+}
+
+// TestAppRestartContainerHandler_SessionCleanerCalledBeforeRestart 验证 SetSessionCleaner
+// 注入后,Handle 走 stop → clear sessions → start 三步,不走原子 RestartContainer。
+// state.db (SQLite) 持有文件锁,运行中删会损坏数据库,所以必须先停容器再清。
+// Hermes 在 session 启动时把 system_prompt 冻结进 SQLite,清掉旧 session
+// 才能让最新 SOUL.md(含改后的 model / persona / 知识库)进入新对话。
+func TestAppRestartContainerHandler_SessionCleanerCalledBeforeRestart(t *testing.T) {
+	stub := runtimeStub(t)
+	containers := &fakeLifecycle{}
+	cleaner := &fakeSessionCleaner{}
+	handler := NewAppRestartContainerHandler(stub, containers)
+	handler.SetSessionCleaner(cleaner)
+	err := handler.Handle(context.Background(), runtimeJob(domain.JobTypeAppRestartContainer, testAppID))
+	require.NoError(t, err)
+	// stop + clear + start 各调一次,RestartContainer 不被调用。
+	require.Equal(t, 1, containers.stopCalls)
+	require.Equal(t, 1, cleaner.calls)
+	require.Equal(t, 1, containers.startCalls)
+	require.Equal(t, 0, containers.restartCalls)
+	// cleaner 接收正确的 appID(透传校验)。
+	require.Equal(t, testAppID, cleaner.lastAppID)
+}
+
+// TestAppRestartContainerHandler_SessionCleanerErrorAbortsRestart 验证清 session 失败时
+// 容器不会被 start,job 返回错误让 worker 重试——清 session 是配置变更进入对话的必经路径,
+// 失败时让重试比"用旧 session 跑起来"更安全。
+func TestAppRestartContainerHandler_SessionCleanerErrorAbortsRestart(t *testing.T) {
+	stub := runtimeStub(t)
+	containers := &fakeLifecycle{}
+	cleaner := &fakeSessionCleaner{returnError: fmt.Errorf("agent 清 session 失败")}
+	handler := NewAppRestartContainerHandler(stub, containers)
+	handler.SetSessionCleaner(cleaner)
+	err := handler.Handle(context.Background(), runtimeJob(domain.JobTypeAppRestartContainer, testAppID))
+	require.Error(t, err)
+	// 容器虽然被 stop 了(SQLite 必须容器停才能清),但 cleaner 失败后不再 start——
+	// 让用户感知 restart 失败,而非用旧 session 静默成功启动。
+	require.Equal(t, 1, containers.stopCalls)
+	require.Equal(t, 0, containers.startCalls)
+	require.Equal(t, 0, containers.restartCalls)
+}
+
+// TestAppRestartContainerHandler_NoSessionCleanerFallsBackToAtomicRestart 验证 SessionCleaner
+// 未注入(旧装配 / 测试装配)时,Handle 退回到原 docker restart 行为,保持向后兼容。
+func TestAppRestartContainerHandler_NoSessionCleanerFallsBackToAtomicRestart(t *testing.T) {
+	stub := runtimeStub(t)
+	containers := &fakeLifecycle{}
+	handler := NewAppRestartContainerHandler(stub, containers)
+	// 不调 SetSessionCleaner。
+	err := handler.Handle(context.Background(), runtimeJob(domain.JobTypeAppRestartContainer, testAppID))
+	require.NoError(t, err)
+	require.Equal(t, 1, containers.restartCalls)
+	require.Equal(t, 0, containers.stopCalls)
+	require.Equal(t, 0, containers.startCalls)
+}
+
 // TestAppDeleteHandler_HappyPath 验证应用删除处理器成功路径的成功路径场景。
 func TestAppDeleteHandler_HappyPath(t *testing.T) {
 	stub := runtimeStub(t)

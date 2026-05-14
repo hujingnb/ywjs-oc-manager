@@ -186,6 +186,17 @@ type HermesConfigRefresher interface {
 	RefreshConfigYAML(ctx context.Context, appID string) error
 }
 
+// SessionCleaner 抽象"清空 app 会话"能力,使 restart 后开新 session 时
+// 重新 snapshot SOUL.md。Hermes 在 session 启动时把 system_prompt 冻结
+// 存进 SQLite,后续 SOUL.md 改动对老 session 不生效——所以配置变更类
+// 操作(改 model / persona / 知识库 / 重启)必须配合清 session 才能让
+// 最新配置进入对话。
+//
+// runtime.AgentBackedAdapter.ClearAppSessions 实现此接口。
+type SessionCleaner interface {
+	ClearAppSessions(ctx context.Context, nodeID, appID string) error
+}
+
 // AppRestartContainerHandler 直接调 docker restart，由 docker 处理 stop+start 顺序。
 //
 // 可选 configRefresher:UpdateModel 触发的 restart 必须先重写 config.yaml
@@ -195,6 +206,7 @@ type AppRestartContainerHandler struct {
 	store           AppRuntimeStore
 	containers      ContainerLifecycle
 	configRefresher HermesConfigRefresher
+	sessionCleaner  SessionCleaner
 }
 
 // NewAppRestartContainerHandler 创建重启容器 handler，复用容器生命周期接口。
@@ -206,6 +218,14 @@ func NewAppRestartContainerHandler(store AppRuntimeStore, containers ContainerLi
 // nil 时 restart 流程跳过重写,等价于纯 docker restart。
 func (h *AppRestartContainerHandler) SetConfigRefresher(refresher HermesConfigRefresher) {
 	h.configRefresher = refresher
+}
+
+// SetSessionCleaner 注入"清空 app 会话"能力。
+// 注入后 restart 会在容器实际 restart 前清空 .hermes/sessions/,
+// 让新 session snapshot 最新 SOUL.md(含最新模型 / persona / 知识库)。
+// nil 时 restart 不清 session,等价于旧行为。
+func (h *AppRestartContainerHandler) SetSessionCleaner(cleaner SessionCleaner) {
+	h.sessionCleaner = cleaner
 }
 
 // Handle 执行 app_restart_container job，并在成功后把应用状态推回 running。
@@ -233,8 +253,25 @@ func (h *AppRestartContainerHandler) Handle(ctx context.Context, job sqlc.Job) e
 		}
 	}
 	nodeID := uuidToString(app.RuntimeNodeID)
-	if err := h.containers.RestartContainer(ctx, nodeID, app.ContainerID.String); err != nil {
-		return fmt.Errorf("重启容器失败: %w", err)
+	// session 真正存储是 .hermes/state.db (SQLite),需要在容器 stop 后才能删
+	// (运行中 SQLite 持有文件锁)。所以这里把 docker restart 拆成
+	// stop → clear sessions → start 三步,而不是用原子 RestartContainer。
+	// 失败时立即冒泡让 worker 重试,避免半重启状态(容器跑着但 state.db 被清的不一致)。
+	if h.sessionCleaner != nil {
+		if err := h.containers.StopContainer(ctx, nodeID, app.ContainerID.String); err != nil {
+			return fmt.Errorf("停止容器失败: %w", err)
+		}
+		if err := h.sessionCleaner.ClearAppSessions(ctx, nodeID, payload.AppID); err != nil {
+			return fmt.Errorf("清空 sessions 失败: %w", err)
+		}
+		if err := h.containers.StartContainer(ctx, nodeID, app.ContainerID.String); err != nil {
+			return fmt.Errorf("启动容器失败: %w", err)
+		}
+	} else {
+		// 没注入 sessionCleaner 时退回到原 docker restart 行为(向后兼容)。
+		if err := h.containers.RestartContainer(ctx, nodeID, app.ContainerID.String); err != nil {
+			return fmt.Errorf("重启容器失败: %w", err)
+		}
 	}
 	if _, err := h.store.SetAppStatus(ctx, sqlc.SetAppStatusParams{ID: app.ID, Status: domain.AppStatusRunning}); err != nil {
 		return fmt.Errorf("更新应用状态失败: %w", err)

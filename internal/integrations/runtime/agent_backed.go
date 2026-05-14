@@ -478,6 +478,18 @@ func (a *AgentBackedAdapter) DeleteAppFile(ctx context.Context, nodeID, appID, r
 	return cli.DeleteAppKnowledge(ctx, appID, relPath)
 }
 
+// ClearAppSessions 清空节点上 apps/<appID>/.hermes/sessions/ 目录,
+// 使 Hermes 重启后开新 session 时 snapshot 最新 SOUL.md。
+// 调用方:配置变更类操作(改 model / persona / 知识库 / 重启)走完业务流程后
+// 必须调一次,否则旧 session 的 system_prompt 已冻结、新配置不生效。
+func (a *AgentBackedAdapter) ClearAppSessions(ctx context.Context, nodeID, appID string) error {
+	cli, err := a.resolveFile(ctx, nodeID)
+	if err != nil {
+		return err
+	}
+	return cli.ClearAppSessions(ctx, appID)
+}
+
 func (a *AgentBackedAdapter) resolveFile(ctx context.Context, nodeID string) (*agent.AgentFileClient, error) {
 	if a.files == nil {
 		return nil, ErrUnimplemented
