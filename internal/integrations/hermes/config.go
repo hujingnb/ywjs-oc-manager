@@ -15,10 +15,17 @@ type ConfigInput struct {
 	NewAPIToken string
 }
 
-// EnvInput 是 RenderEnv 的输入,字段同 ConfigInput 子集。
+// EnvInput 是 RenderEnv 的输入。
+// NewAPIURL / NewAPIToken 是 OPENAI_* 凭据;WeixinAccountID / WeixinToken / WeixinBaseURL
+// 是扫码 bound 后由 ChannelCheckBindingHandler 传入的 weixin platform 凭据(可选)。
 type EnvInput struct {
 	NewAPIURL   string
 	NewAPIToken string
+	// 以下字段为可选,bound 后由 ChannelCheckBindingHandler 传入。
+	// 未填时跳过 WEIXIN_* 行写入。
+	WeixinAccountID string
+	WeixinToken     string
+	WeixinBaseURL   string
 }
 
 // ErrConfigMissingField ConfigInput 必填字段为空。
@@ -64,8 +71,24 @@ terminal:
 }
 
 // RenderEnv 渲染 Hermes .env 文件内容。
-// 只放 OPENAI_API_KEY / OPENAI_BASE_URL,作为 auxiliary.provider=main 的兜底凭据。
-// WEIXIN_* 凭证由扫码 runner 在登录成功后追加(不在此处)。
+// 固定输出 OPENAI_API_KEY / OPENAI_BASE_URL 和 WEIXIN_DM_POLICY=open。
+// WEIXIN_DM_POLICY=open 是 weixin platform 必须显式声明的策略:Hermes weixin 默认
+// 拒绝所有未授权 DM("Unauthorized user"),必须设置 open 才接收用户消息。
+// 当 WeixinAccountID / WeixinToken 均不为空时,追加 WEIXIN_ACCOUNT_ID/TOKEN/BASE_URL/CDN_BASE_URL。
 func RenderEnv(in EnvInput) string {
-	return fmt.Sprintf("OPENAI_API_KEY=%s\nOPENAI_BASE_URL=%s/v1\n", in.NewAPIToken, in.NewAPIURL)
+	s := fmt.Sprintf(
+		"OPENAI_API_KEY=%s\nOPENAI_BASE_URL=%s/v1\n\n# Weixin platform policy (Hermes weixin 默认拒所有 DM,需显式 open)\nWEIXIN_DM_POLICY=open\n",
+		in.NewAPIToken, in.NewAPIURL,
+	)
+	if in.WeixinAccountID != "" && in.WeixinToken != "" {
+		baseURL := in.WeixinBaseURL
+		if baseURL == "" {
+			baseURL = "https://weixin.novac2c.com"
+		}
+		s += fmt.Sprintf(
+			"\n# Weixin 平台凭证,由扫码 bound 时写入\nWEIXIN_ACCOUNT_ID=%s\nWEIXIN_TOKEN=%s\nWEIXIN_BASE_URL=%s\nWEIXIN_CDN_BASE_URL=https://novac2c.cdn.weixin.qq.com/c2c\n",
+			in.WeixinAccountID, in.WeixinToken, baseURL,
+		)
+	}
+	return s
 }

@@ -12,8 +12,10 @@ import (
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgtype"
 
+	"oc-manager/internal/auth"
 	"oc-manager/internal/domain"
 	"oc-manager/internal/integrations/channel"
+	"oc-manager/internal/integrations/hermes"
 	redactlog "oc-manager/internal/log"
 	"oc-manager/internal/store/sqlc"
 )
@@ -147,6 +149,9 @@ type ChannelCheckBindingHandler struct {
 	runtimeFiles AppRuntimeFileWriter
 	restarter    ChannelRestarter
 	newAPIURL    string
+	// cipher 用于解密 app.NewapiKeyCiphertext,取真实 OPENAI_API_KEY 写入 .env。
+	// nil 时 bound 流程跳过 OPENAI_API_KEY 解密(降级:仅写 WEIXIN_*)。
+	cipher *auth.Cipher
 }
 
 // NewChannelCheckBindingHandler 创建 channel_check_binding handler。
@@ -167,6 +172,12 @@ func (h *ChannelCheckBindingHandler) SetRestarter(r ChannelRestarter) {
 // SetNewAPIBaseURL 注入 new-api 内网 URL,用于渲染新 .env 中的 OPENAI_BASE_URL。
 func (h *ChannelCheckBindingHandler) SetNewAPIBaseURL(url string) {
 	h.newAPIURL = url
+}
+
+// SetCipher 注入 Cipher,bound 时用于解密 app.NewapiKeyCiphertext 取真实 OPENAI_API_KEY。
+// 必须与 AppInitializeConfig.Cipher 使用同一 Cipher 实例，确保解密密钥一致。
+func (h *ChannelCheckBindingHandler) SetCipher(c *auth.Cipher) {
+	h.cipher = c
 }
 
 // Handle 查询渠道绑定状态，bound 后补写身份并把 binding_waiting 应用推进到 running。
@@ -212,33 +223,35 @@ func (h *ChannelCheckBindingHandler) Handle(ctx context.Context, job sqlc.Job) e
 		}); err != nil {
 			return fmt.Errorf("标记渠道绑定成功失败: %w", err)
 		}
-		// 把 weixin 凭证写入容器 .env,触发容器重启让 Hermes 加载 weixin platform。
+		// 把完整 .env(OPENAI_* + WEIXIN_DM_POLICY + WEIXIN_*)写入容器,再触发重启让 Hermes 加载 weixin platform。
 		// progress.Metadata 由 wechat.go consumeStream 在 bound 事件填充:
 		//   weixin_account_id / weixin_token / weixin_base_url / weixin_user_id。
-		// 渲染时保留 OPENAI_* 凭据(从 app.NewapiKeyCiphertext 解密重新获取较复杂,
-		// 暂用占位重写要求 manager 后续 re-init 修;简化做法:append WEIXIN_* 到现有 .env)。
+		// 必须重写完整 .env 而非仅追加 WEIXIN_*:UploadAppRuntimeFile 是覆盖写,
+		// 追加写法会把 OPENAI_* 行丢失,导致 Hermes 重启后调 new-api 返回 HTTP 401。
 		if h.runtimeFiles != nil && payload.ChannelType == domain.ChannelTypeWeChat &&
 			progress.Metadata != nil && progress.Metadata["weixin_token"] != "" {
-			envBlock := fmt.Sprintf(
-				"\n# 由 ChannelCheckBindingHandler 在扫码 bound 时写入\nWEIXIN_ACCOUNT_ID=%s\nWEIXIN_TOKEN=%s\nWEIXIN_BASE_URL=%s\nWEIXIN_CDN_BASE_URL=https://novac2c.cdn.weixin.qq.com/c2c\n",
-				progress.Metadata["weixin_account_id"],
-				progress.Metadata["weixin_token"],
-				progress.Metadata["weixin_base_url"],
-			)
-			// 重新渲染 .env: OPENAI_* 部分 + WEIXIN_* 新部分。
-			// 注:app_initialize 阶段已把 OPENAI_API_KEY 设到真实 token,此处沿用同
-			// renderer 重新输出 OPENAI_*,然后 append WEIXIN_*。
-			openAIBlock := ""
-			if h.newAPIURL != "" {
-				// 从 app.NewapiKeyCiphertext 解密获取真实 token 较复杂,
-				// 这里读取容器现有 .env 中的 OPENAI_API_KEY 不可行(adapter 只能写不读);
-				// 简化:让 .env 仅含 WEIXIN_*,Hermes 启动时 OPENAI_API_KEY 通过容器
-				// env(ContainerSpec.Env)注入(app_initialize 已设置)。
-				_ = h.newAPIURL // 暂未使用
+			newAPIURL := h.newAPIURL
+			if newAPIURL == "" {
+				newAPIURL = "http://new-api:3000"
 			}
-			fullEnv := openAIBlock + envBlock
+			// 解密拿真实 OPENAI_API_KEY；cipher 未注入或解密失败时降级用空串(不写 OPENAI_*)。
+			openAIToken := ""
+			if h.cipher != nil && app.NewapiKeyCiphertext.Valid && app.NewapiKeyCiphertext.String != "" {
+				if tok, decErr := decryptCiphertext(app.NewapiKeyCiphertext.String, h.cipher); decErr == nil {
+					openAIToken = tok
+				} else {
+					slog.WarnContext(ctx, "bound .env 解密 OPENAI_API_KEY 失败,使用空 token", "app_id", uuidToString(app.ID), "error", decErr)
+				}
+			}
+			fullEnv := hermes.RenderEnv(hermes.EnvInput{
+				NewAPIURL:       newAPIURL,
+				NewAPIToken:     openAIToken,
+				WeixinAccountID: progress.Metadata["weixin_account_id"],
+				WeixinToken:     progress.Metadata["weixin_token"],
+				WeixinBaseURL:   progress.Metadata["weixin_base_url"],
+			})
 			if err := h.runtimeFiles.UploadAppRuntimeFile(ctx, uuidToString(app.RuntimeNodeID), uuidToString(app.ID), ".env", strings.NewReader(fullEnv)); err != nil {
-				slog.ErrorContext(ctx, "写入 weixin 凭证到 .env 失败", "app_id", uuidToString(app.ID), "error", err)
+				slog.ErrorContext(ctx, "写入完整 .env 失败", "app_id", uuidToString(app.ID), "error", err)
 			} else if h.restarter != nil {
 				if err := h.restarter.RestartContainer(ctx, uuidToString(app.RuntimeNodeID), textOrEmpty(app.ContainerID)); err != nil {
 					slog.ErrorContext(ctx, "重启 hermes 容器失败", "app_id", uuidToString(app.ID), "error", err)

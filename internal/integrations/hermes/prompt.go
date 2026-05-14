@@ -70,7 +70,10 @@ func Render(input PromptInput) (PromptResult, error) {
 		return PromptResult{}, err
 	}
 
-	header := "# Agent Identity (SOUL.md)\n\n本文件由 oc-manager 在 app_initialize 时生成,Hermes 启动后注入到 system prompt。\n\n"
+	header := "# Agent Identity (SOUL.md)\n\n本文件由 oc-manager 在 app_initialize 时生成,Hermes 启动后注入到 system prompt。\n\n" +
+		"## 语言要求\n\n" +
+		"始终用简体中文回复用户。即使用户用英文或其他语言提问,也请用中文作答 " +
+		"(代码、命令、API 名称、错误码等技术标识保留英文原文)。\n\n"
 	return PromptResult{
 		Prompt:           header + rendered,
 		CompositionOrder: order,

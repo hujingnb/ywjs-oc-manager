@@ -142,9 +142,9 @@ type AppInitializeLLMConfig struct {
 //  2. 幂等：状态 ∈ {running, binding_waiting} 直接返回成功；
 //  3. 调 ImageDistributor 把 Hermes runtime 镜像同步到目标节点；
 //  4. 调 AgentDirInitializer 在节点上准备 apps/<id>/ 目录；
-//  5. 渲染 SOUL.md/config.yaml/.env/skills/ 并通过 AppRuntimeFileWriter 上传到目标节点
-//     agent 的 dataRoot/apps/<id>/.hermes/（多节点部署下 manager 与 docker daemon 不必同机）；
-//  6. api_key 不 active 时调 new-api 创建并 cipher.Encrypt 写库；
+//  5. api_key 不 active 时调 new-api 创建并 cipher.Encrypt 写库（ensureAPIKey）；
+//  6. 渲染 SOUL.md/config.yaml/.env/skills/ 并通过 AppRuntimeFileWriter 上传到目标节点
+//     agent 的 dataRoot/apps/<id>/.hermes/（使用步骤 5 的真实 token，避免 HTTP 401）；
 //  7. container_id 为空时调 ContainerCreator.CreateContainer，把 ID/Name 写库；
 //  8. 调 ContainerStarter.StartContainer 启动容器；
 //  9. starter 实现 HermesHealthChecker 时等 docker HEALTHCHECK 报 healthy；
@@ -242,34 +242,20 @@ func (h *AppInitializeHandler) Handle(ctx context.Context, job sqlc.Job) error {
 		}
 	}
 
-	// 通过 runtime-agent UploadAppRuntimeFile 把 Hermes 配置文件上传到目标节点；
-	// 支持多节点部署（manager 与 docker daemon 可在不同节点）。
-	// payload.RuntimeNodeID 为空时跳过（仅存在于旧测试装配）。
-	if payload.RuntimeNodeID != "" {
-		if err := h.writeHermesFiles(ctx, payload.RuntimeNodeID, app, org, owner); err != nil {
-			return err
-		}
-	}
-
+	// 先拿真实 containerAPIKey,再写 Hermes 配置文件,确保 config.yaml api_key 和
+	// .env OPENAI_API_KEY 都是真实 token,避免 Hermes 用占位符调 new-api 返回 HTTP 401。
 	containerAPIKey, err := h.ensureAPIKey(ctx, &app)
 	if err != nil {
 		return err
 	}
 	_ = org // org 已在上文用于 hermes 文件渲染；ensureAPIKey 现在通过 factory 自行获取组织凭据。
 
-	// 把 ensureAPIKey 拿到的真实 OPENAI_API_KEY 回写 .env,覆盖 writeHermesFiles 阶段
-	// 写入的占位符 placeholder-see-newapi-token。容器尚未启动,Hermes 启动时读到真实 token。
-	if h.runtimeFiles != nil && payload.RuntimeNodeID != "" && containerAPIKey != "" {
-		newAPIURL := h.cfg.NewAPIBaseURL
-		if newAPIURL == "" {
-			newAPIURL = "http://new-api:3000"
-		}
-		realEnv := hermes.RenderEnv(hermes.EnvInput{
-			NewAPIURL:   newAPIURL,
-			NewAPIToken: containerAPIKey,
-		})
-		if err := h.runtimeFiles.UploadAppRuntimeFile(ctx, payload.RuntimeNodeID, uuidToString(app.ID), ".env", strings.NewReader(realEnv)); err != nil {
-			return fmt.Errorf("更新 .env 真实 api_key: %w", err)
+	// 通过 runtime-agent UploadAppRuntimeFile 把 Hermes 配置文件上传到目标节点；
+	// 支持多节点部署（manager 与 docker daemon 可在不同节点）。
+	// payload.RuntimeNodeID 为空时跳过（仅存在于旧测试装配）。
+	if payload.RuntimeNodeID != "" {
+		if err := h.writeHermesFiles(ctx, payload.RuntimeNodeID, app, org, owner, containerAPIKey); err != nil {
+			return err
 		}
 	}
 
@@ -370,11 +356,13 @@ func (h *AppInitializeHandler) Handle(ctx context.Context, job sqlc.Job) error {
 //
 // 上传内容：
 //   - SOUL.md：agent identity / system prompt（三层 platform + org + app 拼接）
-//   - config.yaml：model provider 配置（指向 new-api）
-//   - .env：凭证（OPENAI_API_KEY / OPENAI_BASE_URL）
+//   - config.yaml：model provider 配置（指向 new-api），api_key 使用真实 containerAPIKey
+//   - .env：凭证（OPENAI_API_KEY / OPENAI_BASE_URL + WEIXIN_DM_POLICY=open）
 //
+// containerAPIKey 必须是 ensureAPIKey 返回的真实 sk- token；调用方保证此函数在
+// ensureAPIKey 之后执行，避免写入占位符导致 Hermes 调 new-api 返回 HTTP 401。
 // runtimeFiles 为 nil 时直接报错，因为 Hermes 容器必须有这些文件才能启动。
-func (h *AppInitializeHandler) writeHermesFiles(ctx context.Context, nodeID string, app sqlc.App, org sqlc.Organization, owner sqlc.User) error {
+func (h *AppInitializeHandler) writeHermesFiles(ctx context.Context, nodeID string, app sqlc.App, org sqlc.Organization, owner sqlc.User, containerAPIKey string) error {
 	if h.runtimeFiles == nil {
 		return fmt.Errorf("AppRuntimeFileWriter 未注入,Hermes 容器无法 bootstrap")
 	}
@@ -403,9 +391,8 @@ func (h *AppInitializeHandler) writeHermesFiles(ctx context.Context, nodeID stri
 	}
 
 	// 渲染 config.yaml（model provider 指向 new-api）。
-	// ModelName 用 app.ModelID；NewAPIURL 来自 cfg；NewAPIToken 在容器启动前暂用占位串，
-	// 真实 token 在 .env 中；此处 config.yaml api_key 字段仅作占位（Hermes 优先读 .env）。
-	// 注：ensureAPIKey 在 writeHermesFiles 之后执行，api_key 在 .env 中再写入。
+	// ModelName 用 app.ModelID；NewAPIURL 来自 cfg；NewAPIToken 使用真实 containerAPIKey
+	// (调用方已在 ensureAPIKey 之后再调本函数)，确保 Hermes 启动时 api_key 有效。
 	// ModelID 是 string 类型（非 pgtype.Text），直接使用。
 	modelName := app.ModelID
 	if modelName == "" {
@@ -418,12 +405,12 @@ func (h *AppInitializeHandler) writeHermesFiles(ctx context.Context, nodeID stri
 	if newAPIURL == "" {
 		newAPIURL = "http://new-api:3000"
 	}
+	// containerAPIKey 由调用方 ensureAPIKey 提供(真实 sk- token)；
+	// 直接写入 config.yaml api_key，避免占位符导致 Hermes 调 new-api 返回 HTTP 401。
 	yamlContent, err := hermes.RenderConfigYAML(hermes.ConfigInput{
-		ModelName: modelName,
-		NewAPIURL: newAPIURL,
-		// config.yaml 中的 api_key 使用占位符，真实 token 由 .env 提供。
-		// Hermes 优先从 .env 读 OPENAI_API_KEY，此处填占位确保字段非空通过校验。
-		NewAPIToken: "placeholder-see-dot-env",
+		ModelName:   modelName,
+		NewAPIURL:   newAPIURL,
+		NewAPIToken: containerAPIKey,
 	})
 	if err != nil {
 		return fmt.Errorf("渲染 config.yaml 失败: %w", err)
@@ -432,12 +419,11 @@ func (h *AppInitializeHandler) writeHermesFiles(ctx context.Context, nodeID stri
 		return fmt.Errorf("上传 config.yaml: %w", err)
 	}
 
-	// 渲染 .env（凭证占位；真实 api_key 在 ensureAPIKey 后追加写入）。
-	// Hermes 启动时从 .env 读取，因此 .env 必须在容器启动前存在；
-	// 即使 token 为占位符，Hermes 也会启动，channel 流程会后续更新 .env。
+	// 渲染 .env：OPENAI_API_KEY 使用真实 token，同时含 WEIXIN_DM_POLICY=open。
+	// bound 后 ChannelCheckBindingHandler 会重写 .env 追加 WEIXIN_ACCOUNT_ID 等凭证。
 	envContent := hermes.RenderEnv(hermes.EnvInput{
 		NewAPIURL:   newAPIURL,
-		NewAPIToken: "placeholder-see-newapi-token",
+		NewAPIToken: containerAPIKey,
 	})
 	if err := h.runtimeFiles.UploadAppRuntimeFile(ctx, nodeID, appID, ".env", strings.NewReader(envContent)); err != nil {
 		return fmt.Errorf("上传 .env: %w", err)
