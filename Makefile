@@ -38,14 +38,14 @@ web-typecheck:
 web-build:
 	docker compose run --rm --no-deps manager-web sh -c "npm install && npm run build"
 
-build-openclaw-runtime:
-	docker build -t openclaw-runtime:dev ./runtime/openclaw
+build-hermes-runtime:
+	docker build -t hermes-runtime:dev ./runtime/hermes
 
-verify-openclaw-runtime:
-	./scripts/verify-openclaw-runtime.sh
+verify-hermes-runtime:
+	./scripts/verify-hermes-runtime.sh
 
-sync-openclaw-runtime-image:
-	./scripts/sync-openclaw-runtime-image.sh
+sync-hermes-runtime-image:
+	./scripts/sync-hermes-runtime-image.sh
 
 debug-ollama:
 	./scripts/debug-ollama.sh
