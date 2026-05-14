@@ -45,25 +45,36 @@ type healthState struct {
 }
 
 // AppHealthCheckHandler 周期通过 docker inspect 读取容器 HEALTHCHECK 状态，
-// 记录健康状态并按 restart_policy 控制错误熔断。
+// 记录健康状态并按 restart_policy 控制错误熔断与自动拉起。
 //
 // 处理流程：
 //  1. load app（已删除/无容器/non-running 直接成功跳过）；
 //  2. 解析 restart_policy + 现有 health_state；
-//  3. InspectContainer 读 Health.Status：healthy → 写 last_success_at；
-//     unhealthy/none/空 → append failures；
-//  4. 失败次数 > max → 把 apps.status 推到 error，停止把短时卡顿误判成可自动重启故障。
+//  3. InspectContainer 读容器实际状态:
+//     - Status != "running": 容器停了(被 docker 重启 / OOM 杀 / 节点重启等
+//       基础设施事件意外停掉);在 budget 内主动调 StartContainer 自愈,
+//       超 budget 才推 status=error;
+//     - Status = "running" 且 Health = "healthy": 写 last_success_at;
+//     - Status = "running" 但 Health != "healthy": append failures,
+//       超 budget 推 status=error。
 //
 // 任意环节冒泡的错误只标记为 job 失败由 worker 重试；handler 自身保持幂等。
 type AppHealthCheckHandler struct {
-	store    AppHealthCheckStore
+	store     AppHealthCheckStore
 	inspector ContainerInspector
-	now      func() time.Time
+	lifecycle ContainerLifecycle
+	now       func() time.Time
 }
 
 // NewAppHealthCheckHandler 创建 handler。
 func NewAppHealthCheckHandler(store AppHealthCheckStore, inspector ContainerInspector) *AppHealthCheckHandler {
 	return &AppHealthCheckHandler{store: store, inspector: inspector, now: time.Now}
+}
+
+// SetLifecycle 注入容器生命周期能力,使 health check 发现容器已停时主动 StartContainer
+// 自愈。生产装配应注入 AgentBackedAdapter;nil 时退回到旧行为(只记失败不拉起)。
+func (h *AppHealthCheckHandler) SetLifecycle(lifecycle ContainerLifecycle) {
+	h.lifecycle = lifecycle
 }
 
 // Handle 执行 app_health_check job。
@@ -91,13 +102,18 @@ func (h *AppHealthCheckHandler) Handle(ctx context.Context, job sqlc.Job) error 
 	now := h.now()
 
 	nodeID := uuidToString(app.RuntimeNodeID)
-	// Hermes 时代用 docker inspect Health.Status 代替 exec curl /healthz。
-	// healthy = 容器 HEALTHCHECK 报告 OK；unhealthy/none/空 视为失败。
+	// Hermes 时代用 docker inspect 同时拿 容器 Status + Health.Status。
+	// containerStopped:Status != "running" → 容器被 docker 重启 / OOM kill 等
+	// 基础设施事件意外停掉,需要 manager 自愈 (StartContainer);
+	// 否则若 Health != "healthy" 视为失败累积。
 	info, inspectErr := h.inspector.InspectContainer(ctx, nodeID, app.ContainerID.String)
-	if inspectErr != nil || info.Health.Status != "healthy" {
+	containerStopped := inspectErr == nil && info.Status != "" && info.Status != "running"
+	if inspectErr != nil || containerStopped || info.Health.Status != "healthy" {
 		state.LastFailureAt = now
 		if inspectErr != nil {
 			state.LastError = sanitizeHealthStateText(inspectErr.Error())
+		} else if containerStopped {
+			state.LastError = sanitizeHealthStateText(fmt.Sprintf("container stopped: status=%s", info.Status))
 		} else {
 			errMsg := fmt.Sprintf("health=%s", info.Health.Status)
 			if info.Health.Output != "" {
@@ -109,6 +125,20 @@ func (h *AppHealthCheckHandler) Handle(ctx context.Context, job sqlc.Job) error 
 		if exhaustedRestartBudget(policy, len(state.Failures)) {
 			if _, err := h.store.SetAppStatus(ctx, sqlc.SetAppStatusParams{ID: app.ID, Status: domain.AppStatusError}); err != nil {
 				return fmt.Errorf("更新应用状态失败: %w", err)
+			}
+		} else if containerStopped && h.lifecycle != nil {
+			// 容器停了但 restart budget 还没耗尽——主动拉起一次,记录 RestartedAt 时间戳。
+			// StartContainer 在 docker 层是幂等的:容器已 running 时 docker 返回 304,
+			// 我们仍然记 failure 让 budget 起到熔断作用,避免无限拉起噪音容器。
+			// 失败仅记日志,不阻塞 job 完成(让下个周期再尝试)。
+			if err := h.lifecycle.StartContainer(ctx, nodeID, app.ContainerID.String); err == nil {
+				state.RestartedAt = append(state.RestartedAt, now)
+				// 截断历史 RestartedAt,避免 jsonb 无限膨胀。
+				if max := policy.MaxPerWindow + 1; len(state.RestartedAt) > max {
+					state.RestartedAt = state.RestartedAt[len(state.RestartedAt)-max:]
+				}
+			} else {
+				state.LastError = sanitizeHealthStateText(fmt.Sprintf("auto-start failed: %s", err.Error()))
 			}
 		}
 	} else {

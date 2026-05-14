@@ -167,6 +167,68 @@ func TestAppHealthCheckSanitizesNULInFailureText(t *testing.T) {
 	require.Contains(t, state.LastError, "unhealthy")
 }
 
+// TestAppHealthCheck_ContainerStoppedTriggersAutoStart 验证 health check 发现容器
+// Status != "running"(被基础设施事件意外停掉)时,在 restart budget 内主动调
+// StartContainer 自愈,并把时间戳记入 health_state.restarted_at。
+func TestAppHealthCheck_ContainerStoppedTriggersAutoStart(t *testing.T) {
+	store := &fakeHealthStore{app: makeAppForHealth(t)}
+	// docker inspect 返回 Status=exited(容器停了)。
+	inspector := &fakeInspector{info: runtime.ContainerInfo{Status: "exited"}}
+	lifecycle := &fakeLifecycle{}
+	h := NewAppHealthCheckHandler(store, inspector)
+	h.SetLifecycle(lifecycle)
+	job := sqlc.Job{Type: domain.JobTypeAppHealthCheck, PayloadJson: []byte(`{"app_id":"11111111-1111-1111-1111-111111111111"}`)}
+	err := h.Handle(context.Background(), job)
+	require.NoError(t, err)
+	// StartContainer 被调一次,自愈成功。
+	require.Equal(t, 1, lifecycle.startCalls)
+	// app.status 不被推到 error(budget 还在);last_error 记录"container stopped"。
+	require.Equal(t, 0, len(store.statusUpdates))
+	var state healthState
+	require.NoError(t, json.Unmarshal(store.healthState, &state))
+	require.Contains(t, state.LastError, "container stopped")
+	require.Equal(t, 1, len(state.RestartedAt), "应记一次自愈时间戳")
+}
+
+// TestAppHealthCheck_ContainerStoppedNoLifecycleSkipsAutoStart 验证未注入 lifecycle 时
+// handler 退回到旧行为(只记失败,不自动拉起),保持向后兼容。
+func TestAppHealthCheck_ContainerStoppedNoLifecycleSkipsAutoStart(t *testing.T) {
+	store := &fakeHealthStore{app: makeAppForHealth(t)}
+	inspector := &fakeInspector{info: runtime.ContainerInfo{Status: "exited"}}
+	h := NewAppHealthCheckHandler(store, inspector)
+	// 不调 SetLifecycle。
+	job := sqlc.Job{Type: domain.JobTypeAppHealthCheck, PayloadJson: []byte(`{"app_id":"11111111-1111-1111-1111-111111111111"}`)}
+	err := h.Handle(context.Background(), job)
+	require.NoError(t, err)
+	var state healthState
+	require.NoError(t, json.Unmarshal(store.healthState, &state))
+	require.Contains(t, state.LastError, "container stopped")
+	// 无 lifecycle 时不应产生 restarted_at 记录。
+	require.Equal(t, 0, len(state.RestartedAt))
+}
+
+// TestAppHealthCheck_ContainerStoppedExhaustedBudgetSetsError 验证容器停了且 budget
+// 已耗尽时,handler 不再自愈,而是把 status 推到 error 让用户干预。
+func TestAppHealthCheck_ContainerStoppedExhaustedBudgetSetsError(t *testing.T) {
+	app := makeAppForHealth(t)
+	now := time.Now()
+	prior := []time.Time{now.Add(-30 * time.Second), now.Add(-10 * time.Second)}
+	stateBytes, _ := json.Marshal(healthState{Failures: prior})
+	app.HealthStateJson = stateBytes
+	store := &fakeHealthStore{app: app}
+	inspector := &fakeInspector{info: runtime.ContainerInfo{Status: "exited"}}
+	lifecycle := &fakeLifecycle{}
+	h := NewAppHealthCheckHandler(store, inspector)
+	h.SetLifecycle(lifecycle)
+	h.now = func() time.Time { return now.Add(time.Second) }
+	job := sqlc.Job{Type: domain.JobTypeAppHealthCheck, PayloadJson: []byte(`{"app_id":"11111111-1111-1111-1111-111111111111"}`)}
+	err := h.Handle(context.Background(), job)
+	require.NoError(t, err)
+	// budget 耗尽分支优先于自愈分支:不再 StartContainer,直接 status=error。
+	require.Equal(t, 0, lifecycle.startCalls)
+	require.Equal(t, []string{domain.AppStatusError}, store.statusUpdates)
+}
+
 // TestAppHealthCheckNoneModeSkipsRestart 验证 restart_policy.mode=none 时
 // 即使失败次数超出 budget 也不推 error 状态的特殊场景。
 func TestAppHealthCheckNoneModeSkipsRestart(t *testing.T) {
