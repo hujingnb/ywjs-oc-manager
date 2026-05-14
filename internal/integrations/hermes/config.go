@@ -64,7 +64,12 @@ memory:
 
 terminal:
   backend: "local"
-  cwd: "."
+  # cwd 用绝对路径 /opt/data/workspace。Hermes 进程启动 cwd 是 /root,
+  # 相对路径会被解析为 /root/workspace 与 manager 期望对不上;
+  # /opt/data 是 .hermes 挂载点,workspace 子目录由 agent init 预建。
+  # manager workspace API 读宿主机 apps/<id>/.hermes/workspace,即容器内
+  # /opt/data/workspace——两边对齐才能让 agent 写的文件被 manager 浏览/下载。
+  cwd: "/opt/data/workspace"
   timeout: 180
   lifetime_seconds: 300
 `, in.ModelName, in.NewAPIURL+"/v1", in.NewAPIToken), nil

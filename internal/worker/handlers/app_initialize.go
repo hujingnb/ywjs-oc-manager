@@ -297,6 +297,11 @@ func (h *AppInitializeHandler) Handle(ctx context.Context, job sqlc.Job) error {
 			Name:     "hermes-" + payload.AppID,
 			Image:    h.cfg.RuntimeImage,
 			Networks: h.cfg.ContainerNetworks,
+			// 把容器进程启动 cwd 设为 /opt/data/workspace,让 agent 默认在
+			// workspace 子目录下执行 terminal / file 工具,生成的文件落在
+			// manager workspace API 可读的物理位置(.hermes/workspace)。
+			// agent init 已预建该目录,容器启动时无需额外 mkdir。
+			WorkingDir: "/opt/data/workspace",
 			Env: map[string]string{
 				// Hermes 读取 /opt/data/.env 中的 OPENAI_API_KEY；
 				// 此处额外传 env 作为启动时的直接覆盖，确保 token 立即可用。

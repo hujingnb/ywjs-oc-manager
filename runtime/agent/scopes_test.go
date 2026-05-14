@@ -92,8 +92,10 @@ func TestScopesHandler_UnknownActionReturns404(t *testing.T) {
 	require.Equal(t, http.StatusNotFound, resp.StatusCode)
 }
 
-// TestScopesAppInit_CreatesTwoDirs 验证 Hermes 时代 app init 只创建 .hermes 和 knowledge
-// 两个子目录(其余子目录由 Hermes 运行时自动创建,manager 不再预建)。
+// TestScopesAppInit_CreatesTwoDirs 验证 Hermes 时代 app init 预建 .hermes、
+// .hermes/workspace、knowledge 三个子目录。
+// .hermes/workspace 必须预建:Hermes config.yaml 把 terminal.cwd 设为 workspace,
+// 容器内首次 exec 命令前目录不存在会 cd 失败;manager workspace API 也读这个路径。
 func TestScopesAppInit_CreatesTwoDirs(t *testing.T) {
 	dataRoot := t.TempDir()
 	srv := httptest.NewServer(newHandlerWithDocker(dataRoot, nil, "tok"))
@@ -105,8 +107,8 @@ func TestScopesAppInit_CreatesTwoDirs(t *testing.T) {
 	require.NoError(t, err)
 	defer resp.Body.Close()
 	require.Equal(t, http.StatusOK, resp.StatusCode)
-	// 验证必须存在的 2 个子目录：.hermes(Hermes runtime 根) 和 knowledge(兼容旧调用方)。
-	for _, sub := range []string{".hermes", "knowledge"} {
+	// 验证必须存在的 3 个子目录:.hermes / .hermes/workspace / knowledge。
+	for _, sub := range []string{".hermes", ".hermes/workspace", "knowledge"} {
 		dir := filepath.Join(dataRoot, "apps", "app-123", sub)
 		fi, err := os.Stat(dir)
 		require.NoError(t, err, "目录 %q 应被创建", sub)

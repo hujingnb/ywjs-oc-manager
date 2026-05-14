@@ -515,9 +515,10 @@ func (a *AgentBackedAdapter) dockerClient(ctx context.Context, nodeID string) (*
 //   - Networks 数量 ≤1 时直接挂在 HostConfig.NetworkMode；多个网络写入 NetworkingConfig 让 docker 在创建时全部连接。
 func translateSpec(spec ContainerSpec) (*container.Config, *container.HostConfig, *network.NetworkingConfig) {
 	containerCfg := &container.Config{
-		Image: spec.Image,
-		Env:   envSlice(spec.Env),
-		Cmd:   append([]string(nil), spec.Command...),
+		Image:      spec.Image,
+		Env:        envSlice(spec.Env),
+		Cmd:        append([]string(nil), spec.Command...),
+		WorkingDir: spec.WorkingDir,
 	}
 	hostCfg := &container.HostConfig{
 		Binds: bindStrings(spec.Volumes),

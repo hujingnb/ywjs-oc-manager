@@ -29,6 +29,11 @@ type ContainerSpec struct {
 	Resources Resources
 	// Command 覆盖镜像默认启动命令；为空时沿用镜像 ENTRYPOINT/CMD。
 	Command []string
+	// WorkingDir 覆盖容器内进程的初始工作目录;为空沿用镜像 WORKDIR。
+	// Hermes 容器把它设为 /opt/data/workspace,使 agent 默认在 workspace
+	// 子目录下执行 terminal / file 工具,生成的文件被 manager workspace API
+	// 自动识别;否则 hermes 进程 cwd 是镜像的 /root,文件会落到不在挂载点的位置。
+	WorkingDir string
 }
 
 // VolumeMount 描述容器卷挂载。

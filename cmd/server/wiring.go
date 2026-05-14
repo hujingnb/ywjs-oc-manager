@@ -133,8 +133,11 @@ type hermesConfigQueries interface {
 
 // hermesConfigUploader 抽象向目标节点上传 Hermes 配置文件的能力。
 // runtime.AgentBackedAdapter 已实现 UploadAppRuntimeFile,满足此接口。
+// 同时含 InitAppDirs:restart 路径调用一次保证 .hermes/workspace 等关键
+// 子目录存在(早期版本 init 时没建 workspace,升级后的存量 app 也能补建)。
 type hermesConfigUploader interface {
 	UploadAppRuntimeFile(ctx context.Context, nodeID, appID, relPath string, content io.Reader) error
+	InitAppDirs(ctx context.Context, nodeID, appID string) error
 }
 
 // hermesConfigRefresher 实现 workerhandlers.HermesConfigRefresher,
@@ -206,6 +209,12 @@ func (r *hermesConfigRefresher) RefreshConfigYAML(ctx context.Context, appID str
 	// RuntimeNodeID 在多节点部署下决定上传目标节点;若为空(单节点本地容器化)
 	// 此 helper 也返回空串,UploadAppRuntimeFile 内部会走默认 fallback。
 	nodeID := uuidToStringWiring(app.RuntimeNodeID)
+	// 幂等地确保 .hermes/workspace 等关键子目录存在——存量 app 在升级到
+	// "cwd=workspace"配置之前没建过 workspace 目录,restart 时补建避免
+	// agent 首次 exec 时 cd 失败。InitAppDirs 内部 MkdirAll,已存在视为成功。
+	if err := r.uploader.InitAppDirs(ctx, nodeID, appID); err != nil {
+		return fmt.Errorf("确保 app 目录失败: %w", err)
+	}
 	if err := r.uploader.UploadAppRuntimeFile(ctx, nodeID, appID, "config.yaml", strings.NewReader(yamlContent)); err != nil {
 		return fmt.Errorf("上传 config.yaml: %w", err)
 	}

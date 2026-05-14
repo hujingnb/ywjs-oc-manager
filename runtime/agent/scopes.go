@@ -201,8 +201,16 @@ func isValidScopeID(id string) bool {
 //
 // 操作幂等:MkdirAll 在目录已存在时 no-op。
 func handleAppInit(w http.ResponseWriter, _ *http.Request, dataRoot, appID string) {
-	for _, sub := range []string{".hermes", "knowledge"} {
-		dir := filepath.Join(dataRoot, "apps", appID, sub)
+	// 顺带预建 .hermes/workspace:Hermes 配置 terminal.cwd=workspace,需要在
+	// 容器首次 exec 命令前目录就存在,否则 cd 失败。manager workspace API
+	// 也读这个路径,预建后即便 agent 一次都没写过文件,API 也能返回空列表
+	// 而非 "工作目录暂不可用"。
+	dirs := []string{
+		filepath.Join(dataRoot, "apps", appID, ".hermes"),
+		filepath.Join(dataRoot, "apps", appID, ".hermes", "workspace"),
+		filepath.Join(dataRoot, "apps", appID, "knowledge"),
+	}
+	for _, dir := range dirs {
 		if err := os.MkdirAll(dir, 0o755); err != nil {
 			writeError(w, http.StatusInternalServerError, err.Error())
 			return
