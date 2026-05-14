@@ -102,11 +102,20 @@ func (a *WeChatAdapter) consumeStream(appID string, events <-chan hermes.WeixinE
 	for ev := range events {
 		switch ev.Type {
 		case hermes.WeixinEventBound:
+			// 把 weixin 凭证(token / base_url / user_id)放进 Metadata,
+			// 让 channel_login.go ChannelCheckBinding handler 拿到后写入 .env
+			// + 重启 hermes 容器加载 weixin platform。
 			a.recordProgress(appID, AuthProgress{
 				Status:        AuthStatusBound,
 				BoundIdentity: ev.AccountID,
 				ChannelName:   ev.AccountID,
 				UpdatedAt:     time.Now(),
+				Metadata: map[string]string{
+					"weixin_account_id": ev.AccountID,
+					"weixin_token":      ev.Token,
+					"weixin_base_url":   ev.BaseURL,
+					"weixin_user_id":    ev.UserID,
+				},
 			})
 			return
 		case hermes.WeixinEventFailed:

@@ -266,7 +266,11 @@ func runManager(ctx context.Context, cfg config.Config, logOut io.Writer) error 
 	if err := registry.Register(domain.JobTypeChannelStartLogin, handlers.NewChannelStartLoginHandler(dbStore.Queries, channelRegistry).Handle); err != nil {
 		return fmt.Errorf("注册 channel_start_login handler 失败: %w", err)
 	}
-	if err := registry.Register(domain.JobTypeChannelCheckBinding, handlers.NewChannelCheckBindingHandler(dbStore.Queries, channelRegistry, wechatResolver).Handle); err != nil {
+	channelCheckHandler := handlers.NewChannelCheckBindingHandler(dbStore.Queries, channelRegistry, wechatResolver)
+	channelCheckHandler.SetRuntimeFileWriter(runtimeAdapter)
+	channelCheckHandler.SetRestarter(runtimeAdapter)
+	channelCheckHandler.SetNewAPIBaseURL(cfg.NewAPI.BaseURL)
+	if err := registry.Register(domain.JobTypeChannelCheckBinding, channelCheckHandler.Handle); err != nil {
 		return fmt.Errorf("注册 channel_check_binding handler 失败: %w", err)
 	}
 	knowledgeSyncHandler := handlers.NewKnowledgeSyncHandler(knowledgeMaster, runtimeAdapter)
