@@ -171,7 +171,11 @@ func runManager(ctx context.Context, cfg config.Config, logOut io.Writer) error 
 
 	channelRegistry := channel.NewRegistry()
 	channelService := service.NewChannelService(dbStore.Queries, channelRegistry, redisQueue)
-	wechatExecutor := channel.NewDockerExecutor(nodeResolver)
+	// channel 微信扫码 ExecAttach 是长连接(等用户扫码可达数分钟),
+	// 必须用 streamingDockerResolver 拿无 timeout 的 docker client,
+	// 否则 http.Client.Timeout=30s 会强制关闭 hijack 后的底层连接,
+	// 导致 stream EOF + JSON 解析失败 + 容器内 oc-weixin-login.py 进程 orphan。
+	wechatExecutor := channel.NewDockerExecutor(newStreamingDockerResolver(nodeResolver))
 	wechatRunner := channel.NewDockerCommandRunner(wechatExecutor, newAppContainerLookup(dbStore.Queries))
 	wechatResolver := channel.NewDockerBindingResolver(wechatExecutor)
 	if err := channelRegistry.Register(channel.NewWeChatAdapter(wechatRunner)); err != nil {

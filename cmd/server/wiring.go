@@ -89,6 +89,37 @@ func (n *nodeClientResolver) DockerClient(ctx context.Context, nodeID string) (*
 	return agent.NewDockerClientForNode(node.AgentDockerEndpoint.String, token, node.AgentTlsCaCert.String)
 }
 
+// streamingDockerResolver 适配 channel.DockerClientResolver,返回无 timeout 的 docker client,
+// 专门给微信扫码 ExecAttach 这类长连接场景用。
+//
+// 背景:nodeClientResolver.DockerClient 给 http.Client 设 Timeout=30s 防 worker hang,
+// 但 ExecAttach hijack 后还是受同一个 client.Timeout 影响,30s 后底层连接被强制 close,
+// 导致 docker stream EOF + JSON 解析失败 + 容器内 oc-weixin-login.py 进程 orphan hang。
+// 此 resolver 用 agent.NewStreamingDockerClientForNode 构造没有 client.Timeout 的 client,
+// 让 attach 流可以持续到 oc-weixin-login.py 主动退出(用户扫码完成或超时)。
+type streamingDockerResolver struct {
+	inner *nodeClientResolver
+}
+
+func newStreamingDockerResolver(inner *nodeClientResolver) *streamingDockerResolver {
+	return &streamingDockerResolver{inner: inner}
+}
+
+// DockerClient 实现 channel.DockerClientResolver,返回禁用 timeout 的长连接 docker client。
+func (s *streamingDockerResolver) DockerClient(ctx context.Context, nodeID string) (*dockercli.Client, error) {
+	node, token, err := s.inner.lookupNode(ctx, nodeID)
+	if err != nil {
+		return nil, err
+	}
+	if !node.AgentDockerEndpoint.Valid || strings.TrimSpace(node.AgentDockerEndpoint.String) == "" {
+		return nil, fmt.Errorf("节点 %s 未注册 agent_docker_endpoint", nodeID)
+	}
+	if !node.AgentTlsCaCert.Valid || strings.TrimSpace(node.AgentTlsCaCert.String) == "" {
+		return nil, fmt.Errorf("节点 %s 缺 agent_tls_ca_cert", nodeID)
+	}
+	return agent.NewStreamingDockerClientForNode(node.AgentDockerEndpoint.String, token, node.AgentTlsCaCert.String)
+}
+
 // InspectImage 适配 imagesync.AgentImageClient 接口。
 func (n *nodeClientResolver) InspectImage(ctx context.Context, nodeID, image string) (imagesync.RemoteImageInfo, error) {
 	node, token, err := n.lookupNode(ctx, nodeID)

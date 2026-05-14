@@ -130,7 +130,12 @@ func (d *dockerExecutor) Exec(ctx context.Context, nodeID, containerID string, c
 	if err != nil {
 		return nil, nil, err
 	}
-	attach, err := cli.ContainerExecAttach(ctx, exec.ID, container.ExecStartOptions{})
+	// Attach 用 background ctx,解绑 handler ctx:微信扫码场景下 handler 拿到 QR 事件后立即
+	// return(job 完成),ctx 取消;但 oc-weixin-login.py 还在 polling 等用户扫码,
+	// 此时 docker attach stream 必须保持开启,后台 consumeStream goroutine 接收 bound 事件。
+	// 用 caller ctx 会让 stream 立刻关闭 → 后台读到空 stdout → "解析凭证 JSON 失败"。
+	// closer 函数主动 close attach 释放 stream。
+	attach, err := cli.ContainerExecAttach(context.Background(), exec.ID, container.ExecStartOptions{})
 	if err != nil {
 		return nil, nil, err
 	}

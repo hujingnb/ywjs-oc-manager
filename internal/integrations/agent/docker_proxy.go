@@ -78,6 +78,55 @@ func NewDockerClientForNode(endpoint, agentToken, caCertPEM string, opts ...clie
 	return client.NewClientWithOpts(append(defaults, opts...)...)
 }
 
+// NewStreamingDockerClientForNode 与 NewDockerClientForNode 同义,
+// 但返回的 http.Client 没有任何 timeout,专门用于长连接 ExecAttach 场景。
+//
+// 背景:NewDockerClientForNode 给 http.Client 设了 Timeout=30s(防普通 REST 调用 hang 死 worker),
+// 但同一个 http.Client 也被 docker SDK 拿去做 ExecAttach 的 hijack,30s 后底层连接被强制关闭,
+// 导致 docker stream EOF。这对短命的 health-check exec 没问题,
+// 但对微信扫码 polling(可达数分钟)会直接断流,manager 端读到空 stdout 后 JSON 解析失败。
+//
+// 调用方:目前仅 channel.NewDockerExecutor(微信扫码长连接)。
+// 其他 docker REST 调用继续走 NewDockerClientForNode 拿到带 timeout 的 client,防止 worker hang。
+func NewStreamingDockerClientForNode(endpoint, agentToken, caCertPEM string, opts ...client.Opt) (*client.Client, error) {
+	if strings.TrimSpace(endpoint) == "" {
+		return nil, fmt.Errorf("agent docker endpoint 为空")
+	}
+	pool, err := BuildCertPool(caCertPEM)
+	if err != nil {
+		return nil, err
+	}
+	parsedURL, err := url.Parse(endpoint)
+	if err != nil {
+		return nil, fmt.Errorf("解析 agent endpoint 失败: %w", err)
+	}
+	if parsedURL.Host == "" {
+		return nil, fmt.Errorf("agent endpoint 缺少 host: %q", endpoint)
+	}
+
+	tlsConfig := &tls.Config{RootCAs: pool, MinVersion: tls.VersionTLS12}
+	// streaming 场景仅保留 TLSHandshakeTimeout(防握手卡死),其余 timeout 全部禁用:
+	//   - ResponseHeaderTimeout=0:ExecAttach 的响应头几乎即刻返回,无需限制
+	//   - http.Client.Timeout=0:整个请求(含 hijack 后的长连接)不限时长
+	transport := &http.Transport{
+		TLSClientConfig:     tlsConfig,
+		TLSHandshakeTimeout: 10 * time.Second,
+	}
+	httpClient := &http.Client{Transport: transport}
+
+	sdkHost := "tcp://" + parsedURL.Host + DockerProxyPathPrefix
+
+	defaults := []client.Opt{
+		client.WithHost(sdkHost),
+		client.WithHTTPClient(httpClient),
+		client.WithHTTPHeaders(map[string]string{
+			"Authorization": "Bearer " + agentToken,
+		}),
+		client.WithAPIVersionNegotiation(),
+	}
+	return client.NewClientWithOpts(append(defaults, opts...)...)
+}
+
 // BuildCertPool 把 caCertPEM 解析为 x509.CertPool。
 // 调用方必须提供 PEM；空字符串视作未配置 TLS 校验，第一版直接拒绝以防误用。
 func BuildCertPool(caCertPEM string) (*x509.CertPool, error) {
