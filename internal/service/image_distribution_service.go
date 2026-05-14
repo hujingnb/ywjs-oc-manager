@@ -19,7 +19,7 @@ type ImageDistributionResult struct {
 
 // ImageDistributor 抽象镜像分发能力，便于 service 与 worker 注入测试桩。
 type ImageDistributor interface {
-	SyncOpenClawImage(ctx context.Context, nodeID, image string) (imagesync.SyncResult, error)
+	SyncRuntimeImage(ctx context.Context, nodeID, image string) (imagesync.SyncResult, error)
 }
 
 // ImageDistributionService 提供面向 service/worker 的镜像分发入口。
@@ -45,7 +45,7 @@ func (s *ImageDistributionService) EnsureRuntimeImage(ctx context.Context, nodeI
 	if nodeID == "" || image == "" {
 		return ImageDistributionResult{}, fmt.Errorf("nodeID 与 image 不能为空")
 	}
-	result, err := s.distributor.SyncOpenClawImage(ctx, nodeID, image)
+	result, err := s.distributor.SyncRuntimeImage(ctx, nodeID, image)
 	if err != nil {
 		return ImageDistributionResult{}, fmt.Errorf("同步镜像 %s 到节点 %s 失败: %w", image, nodeID, err)
 	}

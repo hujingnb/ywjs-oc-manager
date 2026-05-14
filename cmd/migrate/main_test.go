@@ -54,9 +54,9 @@ security:
   master_key: "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA="
 runtime:
   enrollment_secret: "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA="
-openclaw:
+hermes:
   system_prompt_template: |
-    {{workspace_dir}} {{knowledge_org_dir}} {{knowledge_app_dir}}
+    你是 {org_name} 的助手
 `), 0o600); err != nil {
 		t.Fatalf("写入测试配置失败: %v", err)
 	}

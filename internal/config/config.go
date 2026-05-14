@@ -20,8 +20,8 @@ type Config struct {
 	Auth AuthConfig `yaml:"auth"`
 	// Security 持有加密敏感字段所需的根密钥配置。
 	Security SecurityConfig `yaml:"security"`
-	// OpenClaw 描述 runtime 镜像、LLM 和工作目录归档策略。
-	OpenClaw OpenClawConfig `yaml:"openclaw"`
+	// Hermes 描述 Hermes runtime 镜像、LLM 和工作目录归档策略。
+	Hermes HermesConfig `yaml:"hermes"`
 	// Agent 描述 manager 与 runtime agent 之间的心跳协议参数。
 	Agent AgentConfig `yaml:"agent"`
 	// Runtime 描述节点自动注册密钥和主动探测阈值。
@@ -91,37 +91,35 @@ type SecurityConfig struct {
 	MasterKey string `yaml:"master_key"`
 }
 
-// OpenClawConfig 描述 OpenClaw runtime 容器及人设模板相关配置。
-// SystemPromptTemplate 必须包含 {{workspace_dir}} / {{knowledge_org_dir}} / {{knowledge_app_dir}}
-// 三个占位符，避免第二/三层人设拼接时丢失目录上下文。
-type OpenClawConfig struct {
-	// RuntimeImage 是创建 OpenClaw 应用容器时使用的镜像名。
+// HermesConfig 是 Hermes runtime 镜像与 manager 集成的配置段。
+// 对应应用 yaml 顶级 key `hermes:`。
+type HermesConfig struct {
+	// RuntimeImage 是 manager docker run 启动 hermes 容器用的镜像引用（name:tag）。
 	RuntimeImage string `yaml:"runtime_image"`
-	// SystemPromptTemplate 是写入 runtime 的系统提示词模板，必须包含知识库和工作目录占位符。
+	// SystemPromptTemplate 是平台级 prompt 模板，会作为 hermes.PromptInput.PlatformPrompt。
 	SystemPromptTemplate string `yaml:"system_prompt_template"`
-	// Workspace 描述应用工作目录归档策略。
+	// Workspace 仅保留同名段（WorkspaceConfig 是通用类型，不绑 Hermes）。
 	Workspace WorkspaceConfig `yaml:"workspace"`
-	// LLM 描述 OpenClaw 容器内 pi-coding-agent 的默认模型路由。
-	LLM OpenClawLLMConfig `yaml:"llm"`
-	// ContainerNetworks 控制 manager 创建 OpenClaw 容器时连接哪些 docker network。
+	// LLM 是 hermes.RenderConfigYAML 时的默认值兜底，在 app 未指定模型时使用。
+	LLM HermesLLMConfig `yaml:"llm"`
+	// ContainerNetworks 是 hermes 容器接入的 docker network 清单。
 	// 必须包含 new-api 所在的 network（默认 docker compose project name 派生的
-	// "<project>_default"，如 oc-manager_default），否则 OpenClaw 容器无法解析
+	// "<project>_default"，如 oc-manager_default），否则 Hermes 容器无法解析
 	// "new-api" hostname → chat completions Connection error。
 	// 留空时 docker 默认 bridge network，与 compose 起的 new-api 不互通。
 	ContainerNetworks []string `yaml:"container_networks"`
 }
 
-// OpenClawLLMConfig 描述 OpenClaw 容器内嵌 pi-coding-agent 调模型用的配置。
+// HermesLLMConfig 仅保留兜底默认值字段（具体每 app 的模型由 apps.model_id 决定）。
 //
-//   - BaseURL：OpenAI 兼容 endpoint，OpenClaw 容器从 docker network 看到的 new-api 地址，
+//   - BaseURL：OpenAI 兼容 endpoint，Hermes 容器从 docker network 看到的 new-api 地址，
 //     必须含 /v1 路径后缀；注入为 OPENAI_BASE_URL 环境变量。
-//   - DefaultProvider / DefaultModel：写入容器内 /root/.pi/agent/settings.json，
-//     pi-coding-agent 用作默认 provider/model；缺失时 OpenClaw 默认 openai/gpt-5.5
-//     无法路由到本地 ollama。
+//   - DefaultProvider / DefaultModel：写入容器内 config.yaml，Hermes 用作默认 provider/model；
+//     缺失时 Hermes 默认去拨上游，无法路由到本地 new-api。
 //
 // 容器实际用的 OPENAI_API_KEY 来自 manager 替每个应用通过 new-api `POST /api/token/:id/key`
 // 拉到的完整 sk-，加密落 apps.newapi_key_ciphertext 后注入；不再有"全局共享 sk-"的配置项。
-type OpenClawLLMConfig struct {
+type HermesLLMConfig struct {
 	BaseURL         string `yaml:"base_url"`
 	DefaultProvider string `yaml:"default_provider"`
 	DefaultModel    string `yaml:"default_model"`

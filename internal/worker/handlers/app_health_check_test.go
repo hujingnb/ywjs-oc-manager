@@ -47,13 +47,15 @@ func (s *fakeHealthStore) CreateJob(_ context.Context, p sqlc.CreateJobParams) (
 	return sqlc.Job{ID: pgtype.UUID{Valid: true}}, nil
 }
 
-type fakeExecutor struct {
-	result runtime.ExecResult
-	err    error
+// fakeInspector 实现 ContainerInspector，返回预设的 docker inspect 结果。
+// Hermes 时代健康检查依赖 InspectContainer 读取 Health.Status，不再 exec curl /healthz。
+type fakeInspector struct {
+	info runtime.ContainerInfo
+	err  error
 }
 
-func (e *fakeExecutor) ContainerExec(_ context.Context, _, _ string, _ []string) (runtime.ExecResult, error) {
-	return e.result, e.err
+func (f *fakeInspector) InspectContainer(_ context.Context, _, _ string) (runtime.ContainerInfo, error) {
+	return f.info, f.err
 }
 
 type capturingNotifier struct {
@@ -73,13 +75,15 @@ func makeAppForHealth(t *testing.T) sqlc.App {
 	return app
 }
 
-// TestAppHealthCheckSuccessClearsError 验证应用健康检查Check成功清空错误的成功路径场景。
+// TestAppHealthCheckSuccessClearsError 验证容器 HEALTHCHECK 报 healthy 时
+// handler 清除 last_error 并写 last_success_at 的成功路径场景。
 func TestAppHealthCheckSuccessClearsError(t *testing.T) {
 	app := makeAppForHealth(t)
 	app.HealthStateJson = []byte(`{"last_error":"old"}`)
 	store := &fakeHealthStore{app: app}
-	exec := &fakeExecutor{result: runtime.ExecResult{ExitCode: 0, Stdout: `{"ok":true}`}}
-	h := NewAppHealthCheckHandler(store, exec)
+	// 场景：docker inspect 返回 healthy，健康检查应当清除错误状态。
+	inspector := &fakeInspector{info: runtime.ContainerInfo{Health: runtime.ContainerHealth{Status: "healthy"}}}
+	h := NewAppHealthCheckHandler(store, inspector)
 	job := sqlc.Job{Type: domain.JobTypeAppHealthCheck, PayloadJson: []byte(`{"app_id":"11111111-1111-1111-1111-111111111111"}`)}
 	err := h.Handle(context.Background(), job)
 	require.NoError(t, err)
@@ -91,23 +95,26 @@ func TestAppHealthCheckSuccessClearsError(t *testing.T) {
 	}
 }
 
-// TestAppHealthCheckFailureRecordsFailureWithoutRestart 验证应用健康检查Check失败记录失败不使用重启的错误映射或错误记录场景。
+// TestAppHealthCheckFailureRecordsFailureWithoutRestart 验证容器 HEALTHCHECK 报 unhealthy 时
+// handler 记录失败但未超出 restart budget 时不触发 error 状态的错误记录场景。
 func TestAppHealthCheckFailureRecordsFailureWithoutRestart(t *testing.T) {
 	store := &fakeHealthStore{app: makeAppForHealth(t)}
-	exec := &fakeExecutor{result: runtime.ExecResult{ExitCode: 1, Stdout: "Connection refused"}}
-	h := NewAppHealthCheckHandler(store, exec)
+	// 场景：docker inspect 返回 unhealthy，应记录失败次数但不推 error 状态（budget 未耗尽）。
+	inspector := &fakeInspector{info: runtime.ContainerInfo{Health: runtime.ContainerHealth{Status: "unhealthy", Output: "connection refused"}}}
+	h := NewAppHealthCheckHandler(store, inspector)
 	job := sqlc.Job{Type: domain.JobTypeAppHealthCheck, PayloadJson: []byte(`{"app_id":"11111111-1111-1111-1111-111111111111"}`)}
 	err := h.Handle(context.Background(), job)
 	require.NoError(t, err)
 	require.Equal(t, 0, len(store.jobs))
 	var state healthState
 	require.NoError(t, json.Unmarshal(store.healthState, &state))
-	require.Equal(t, "exit=1 Connection refused", state.LastError)
+	require.Contains(t, state.LastError, "unhealthy")
 	require.Equal(t, 1, len(state.Failures))
 	require.Equal(t, 0, len(state.RestartedAt))
 }
 
-// TestAppHealthCheckExhaustedBudgetSetsError 验证应用健康检查Check耗尽预算并设置错误的预期行为场景。
+// TestAppHealthCheckExhaustedBudgetSetsError 验证失败次数超出 restart budget 时
+// handler 把 apps.status 推到 error 的错误熔断场景。
 func TestAppHealthCheckExhaustedBudgetSetsError(t *testing.T) {
 	app := makeAppForHealth(t)
 	// 已经累积 max_per_window=2 次失败，再失败一次 → 触发 error 状态。
@@ -116,8 +123,9 @@ func TestAppHealthCheckExhaustedBudgetSetsError(t *testing.T) {
 	stateBytes, _ := json.Marshal(healthState{Failures: prior, RestartedAt: prior})
 	app.HealthStateJson = stateBytes
 	store := &fakeHealthStore{app: app}
-	exec := &fakeExecutor{result: runtime.ExecResult{ExitCode: 1, Stdout: "fail"}}
-	h := NewAppHealthCheckHandler(store, exec)
+	// 场景：连续失败超出 budget，应推 error 状态并停止重试。
+	inspector := &fakeInspector{info: runtime.ContainerInfo{Health: runtime.ContainerHealth{Status: "unhealthy"}}}
+	h := NewAppHealthCheckHandler(store, inspector)
 	h.now = func() time.Time { return now.Add(time.Second) }
 	job := sqlc.Job{Type: domain.JobTypeAppHealthCheck, PayloadJson: []byte(`{"app_id":"11111111-1111-1111-1111-111111111111"}`)}
 	err := h.Handle(context.Background(), job)
@@ -128,40 +136,46 @@ func TestAppHealthCheckExhaustedBudgetSetsError(t *testing.T) {
 	require.Equal(t, 0, len(store.jobs))
 }
 
-// TestAppHealthCheckExecErrorAlsoTreatedAsFailure 验证应用健康检查Check执行错误也视为作为失败的预期行为场景。
-func TestAppHealthCheckExecErrorAlsoTreatedAsFailure(t *testing.T) {
+// TestAppHealthCheckInspectErrorAlsoTreatedAsFailure 验证 InspectContainer 失败时
+// handler 也记录为健康检查失败的错误场景。
+func TestAppHealthCheckInspectErrorAlsoTreatedAsFailure(t *testing.T) {
 	store := &fakeHealthStore{app: makeAppForHealth(t)}
-	exec := &fakeExecutor{err: errors.New("docker dial")}
-	h := NewAppHealthCheckHandler(store, exec)
+	// 场景：docker inspect 本身失败（docker daemon 不可用等），应视为检查失败。
+	inspector := &fakeInspector{err: errors.New("docker dial")}
+	h := NewAppHealthCheckHandler(store, inspector)
 	job := sqlc.Job{Type: domain.JobTypeAppHealthCheck, PayloadJson: []byte(`{"app_id":"11111111-1111-1111-1111-111111111111"}`)}
 	err := h.Handle(context.Background(), job)
 	require.NoError(t, err)
 	require.Equal(t, 0, len(store.jobs))
 }
 
-// TestAppHealthCheckSanitizesNULInFailureText 验证应用健康检查Check清理NULIn失败Text的预期行为场景。
+// TestAppHealthCheckSanitizesNULInFailureText 验证 health state 中的 NUL 字节被清洗
+// 避免 PostgreSQL JSONB 报错的数据清洗场景。
 func TestAppHealthCheckSanitizesNULInFailureText(t *testing.T) {
 	store := &fakeHealthStore{app: makeAppForHealth(t)}
-	exec := &fakeExecutor{result: runtime.ExecResult{ExitCode: 1, Stdout: "bad\x00json"}}
-	h := NewAppHealthCheckHandler(store, exec)
+	// 场景：docker inspect 返回含 NUL 字节的 Output，写库前必须清洗。
+	inspector := &fakeInspector{info: runtime.ContainerInfo{Health: runtime.ContainerHealth{Status: "unhealthy", Output: "bad\x00json"}}}
+	h := NewAppHealthCheckHandler(store, inspector)
 	job := sqlc.Job{Type: domain.JobTypeAppHealthCheck, PayloadJson: []byte(`{"app_id":"11111111-1111-1111-1111-111111111111"}`)}
 	err := h.Handle(context.Background(), job)
 	require.NoError(t, err)
-	if strings.Contains(string(store.healthState), `\u0000`) {
+	if strings.Contains(string(store.healthState), "\u0000") {
 		t.Fatalf("health_state_json 不应包含 PostgreSQL JSONB 拒绝的 NUL 转义: %s", store.healthState)
 	}
 	var state healthState
 	require.NoError(t, json.Unmarshal(store.healthState, &state))
-	require.Equal(t, "exit=1 bad�json", state.LastError)
+	require.Contains(t, state.LastError, "unhealthy")
 }
 
-// TestAppHealthCheckNoneModeSkipsRestart 验证应用健康检查Check无模式跳过重启的特殊分支或幂等场景。
+// TestAppHealthCheckNoneModeSkipsRestart 验证 restart_policy.mode=none 时
+// 即使失败次数超出 budget 也不推 error 状态的特殊场景。
 func TestAppHealthCheckNoneModeSkipsRestart(t *testing.T) {
 	app := makeAppForHealth(t)
 	app.RestartPolicyJson = []byte(`{"mode":"none","max_per_window":5,"window_seconds":600}`)
 	store := &fakeHealthStore{app: app}
-	exec := &fakeExecutor{result: runtime.ExecResult{ExitCode: 1, Stdout: "fail"}}
-	h := NewAppHealthCheckHandler(store, exec)
+	// 场景：mode=none 时 exhaustedRestartBudget 总返回 false，不推 error。
+	inspector := &fakeInspector{info: runtime.ContainerInfo{Health: runtime.ContainerHealth{Status: "unhealthy"}}}
+	h := NewAppHealthCheckHandler(store, inspector)
 	job := sqlc.Job{Type: domain.JobTypeAppHealthCheck, PayloadJson: []byte(`{"app_id":"11111111-1111-1111-1111-111111111111"}`)}
 	err := h.Handle(context.Background(), job)
 	require.NoError(t, err)

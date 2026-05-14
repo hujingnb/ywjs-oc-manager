@@ -8,7 +8,9 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"strings"
+	"sync/atomic"
 	"testing"
+	"time"
 
 	"github.com/docker/docker/api/types/container"
 	"github.com/docker/docker/client"
@@ -379,7 +381,7 @@ type fakeImageSyncer struct {
 	lastNode  string
 }
 
-func (f *fakeImageSyncer) SyncOpenClawImage(_ context.Context, nodeID, image string) (imagesync.SyncResult, error) {
+func (f *fakeImageSyncer) SyncRuntimeImage(_ context.Context, nodeID, image string) (imagesync.SyncResult, error) {
 	f.lastNode = nodeID
 	f.lastImage = image
 	return f.result, f.err
@@ -389,4 +391,44 @@ type fakeResolverFn func(ctx context.Context, nodeID string) (*agent.AgentFileCl
 
 func (f fakeResolverFn) FileClient(ctx context.Context, nodeID string) (*agent.AgentFileClient, error) {
 	return f(ctx, nodeID)
+}
+
+// fakeInspector 按顺序返回预设的 ContainerInfo 序列；序列耗尽后返回最后一个值（模拟稳定状态）。
+// 用于 WaitContainerHealthy 单测注入，避免依赖真实 docker daemon。
+type fakeInspector struct {
+	seq []ContainerInfo
+	idx int32
+}
+
+func (f *fakeInspector) InspectContainer(_ context.Context, _, _ string) (ContainerInfo, error) {
+	i := atomic.AddInt32(&f.idx, 1) - 1
+	if int(i) >= len(f.seq) {
+		return f.seq[len(f.seq)-1], nil
+	}
+	return f.seq[i], nil
+}
+
+// TestWaitContainerHealthy_StartingThenHealthy 覆盖容器先 starting 后 healthy 的常规路径。
+// Hermes 启动后 HEALTHCHECK 先报 starting，数轮后报 healthy，WaitContainerHealthy 应返回 nil。
+func TestWaitContainerHealthy_StartingThenHealthy(t *testing.T) {
+	insp := &fakeInspector{seq: []ContainerInfo{
+		{Health: ContainerHealth{Status: "starting"}},
+		{Health: ContainerHealth{Status: "starting"}},
+		{Health: ContainerHealth{Status: "healthy"}},
+	}}
+	a := &AgentBackedAdapter{inspector: insp}
+	err := a.WaitContainerHealthy(context.Background(), "node1", "cont1", 30*time.Second)
+	require.NoError(t, err)
+}
+
+// TestWaitContainerHealthy_UnhealthyFailsFast 覆盖容器报 unhealthy 时快速失败，不再等 timeout。
+// Output 字段应透传到错误信息，便于排障。
+func TestWaitContainerHealthy_UnhealthyFailsFast(t *testing.T) {
+	insp := &fakeInspector{seq: []ContainerInfo{
+		{Health: ContainerHealth{Status: "unhealthy", Output: "boom"}},
+	}}
+	a := &AgentBackedAdapter{inspector: insp}
+	err := a.WaitContainerHealthy(context.Background(), "node1", "cont1", 30*time.Second)
+	require.Error(t, err)
+	require.Contains(t, err.Error(), "boom")
 }

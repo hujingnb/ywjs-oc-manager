@@ -20,15 +20,12 @@ type AppHealthCheckStore interface {
 	SetAppHealthState(ctx context.Context, arg sqlc.SetAppHealthStateParams) (sqlc.App, error)
 }
 
-// HealthCheckExecutor 抽象 worker 在容器内跑 healthz 探针的能力。
-// 默认实现是 RuntimeAdapter.ContainerExec；测试中替换为内存桩。
-type HealthCheckExecutor interface {
-	ContainerExec(ctx context.Context, nodeID, containerID string, cmd []string) (runtime.ExecResult, error)
+// ContainerInspector 抽象通过 docker inspect 获取容器状态（含 HEALTHCHECK）的能力。
+// Hermes 时代健康检查改为读取 docker inspect 的 Health.Status，
+// 不再需要在容器内 exec curl /healthz。
+type ContainerInspector interface {
+	InspectContainer(ctx context.Context, nodeID, containerID string) (runtime.ContainerInfo, error)
 }
-
-// healthCheckCmd 在 OpenClaw 容器内调本地 18789 /healthz。
-// 跟 runtime/openclaw/healthcheck.sh 保持一致。
-var healthCheckCmd = []string{"sh", "-c", "curl -fsS --max-time 5 http://127.0.0.1:18789/healthz"}
 
 // restartPolicy 与 migration 0006 默认值一一对应；从 apps.restart_policy_json 解析。
 type restartPolicy struct {
@@ -47,24 +44,26 @@ type healthState struct {
 	RestartedAt   []time.Time `json:"restarted_at,omitempty"`
 }
 
-// AppHealthCheckHandler 周期跑容器内 /healthz 探针，记录健康状态并按 restart_policy 控制错误熔断。
+// AppHealthCheckHandler 周期通过 docker inspect 读取容器 HEALTHCHECK 状态，
+// 记录健康状态并按 restart_policy 控制错误熔断。
 //
 // 处理流程：
 //  1. load app（已删除/无容器/non-running 直接成功跳过）；
 //  2. 解析 restart_policy + 现有 health_state；
-//  3. ContainerExec /healthz：成功 → 写 last_success_at；失败 → append failures；
+//  3. InspectContainer 读 Health.Status：healthy → 写 last_success_at；
+//     unhealthy/none/空 → append failures；
 //  4. 失败次数 > max → 把 apps.status 推到 error，停止把短时卡顿误判成可自动重启故障。
 //
 // 任意环节冒泡的错误只标记为 job 失败由 worker 重试；handler 自身保持幂等。
 type AppHealthCheckHandler struct {
 	store    AppHealthCheckStore
-	executor HealthCheckExecutor
+	inspector ContainerInspector
 	now      func() time.Time
 }
 
 // NewAppHealthCheckHandler 创建 handler。
-func NewAppHealthCheckHandler(store AppHealthCheckStore, executor HealthCheckExecutor) *AppHealthCheckHandler {
-	return &AppHealthCheckHandler{store: store, executor: executor, now: time.Now}
+func NewAppHealthCheckHandler(store AppHealthCheckStore, inspector ContainerInspector) *AppHealthCheckHandler {
+	return &AppHealthCheckHandler{store: store, inspector: inspector, now: time.Now}
 }
 
 // Handle 执行 app_health_check job。
@@ -81,7 +80,7 @@ func (h *AppHealthCheckHandler) Handle(ctx context.Context, job sqlc.Job) error 
 		return err
 	}
 	if app.Status != domain.AppStatusRunning {
-		// 仅对 running 状态做健康检查：binding_waiting 时容器虽起但 OpenClaw 还没就绪，会假阳性。
+		// 仅对 running 状态做健康检查：binding_waiting 时容器虽起但 Hermes gateway 还没就绪，会假阳性。
 		return nil
 	}
 	if app.ContainerID.String == "" || !app.RuntimeNodeID.Valid {
@@ -92,13 +91,19 @@ func (h *AppHealthCheckHandler) Handle(ctx context.Context, job sqlc.Job) error 
 	now := h.now()
 
 	nodeID := uuidToString(app.RuntimeNodeID)
-	exec, execErr := h.executor.ContainerExec(ctx, nodeID, app.ContainerID.String, healthCheckCmd)
-	if execErr != nil || exec.ExitCode != 0 {
+	// Hermes 时代用 docker inspect Health.Status 代替 exec curl /healthz。
+	// healthy = 容器 HEALTHCHECK 报告 OK；unhealthy/none/空 视为失败。
+	info, inspectErr := h.inspector.InspectContainer(ctx, nodeID, app.ContainerID.String)
+	if inspectErr != nil || info.Health.Status != "healthy" {
 		state.LastFailureAt = now
-		if execErr != nil {
-			state.LastError = sanitizeHealthStateText(execErr.Error())
+		if inspectErr != nil {
+			state.LastError = sanitizeHealthStateText(inspectErr.Error())
 		} else {
-			state.LastError = sanitizeHealthStateText(fmt.Sprintf("exit=%d %s", exec.ExitCode, truncate(exec.Stdout, 200)))
+			errMsg := fmt.Sprintf("health=%s", info.Health.Status)
+			if info.Health.Output != "" {
+				errMsg = fmt.Sprintf("health=%s output=%s", info.Health.Status, truncate(info.Health.Output, 200))
+			}
+			state.LastError = sanitizeHealthStateText(errMsg)
 		}
 		state.Failures = appendWithinWindow(state.Failures, now, policy)
 		if exhaustedRestartBudget(policy, len(state.Failures)) {
@@ -183,7 +188,7 @@ func truncate(s string, n int) string {
 }
 
 func sanitizeHealthStateText(s string) string {
-	// PostgreSQL jsonb 不接受 \u0000；健康检查失败文本来自容器 stdout / error，
+	// PostgreSQL jsonb 不接受 \x00；健康检查失败文本来自容器 stdout / error，
 	// 写库前需要清洗，避免“记录失败状态”本身把 job 打失败。
 	return strings.ReplaceAll(s, "\x00", "�")
 }

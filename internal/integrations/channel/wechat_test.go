@@ -2,92 +2,84 @@ package channel
 
 import (
 	"context"
-	"github.com/stretchr/testify/require"
 	"testing"
 	"time"
+
+	"github.com/stretchr/testify/require"
+
+	"oc-manager/internal/integrations/hermes"
 )
 
-// TestWeChatAdapterBeginAuthReturnsQRCodeChallenge 验证WeChat适配器开始认证返回二维码标识Challenge的成功路径场景。
+// TestWeChatAdapterBeginAuthReturnsQRCodeChallenge 验证 WeChatAdapter 在收到 QRCode 事件后
+// 返回 AuthChallenge，并在后台消费剩余事件直到 Bound 状态。
 func TestWeChatAdapterBeginAuthReturnsQRCodeChallenge(t *testing.T) {
-	// Sprint 0 POC 实测样本：plugin loading 噪声 + 中文提示行 + ASCII QR + URL + 等待提示。
-	runner := &fakeRunner{lines: []string{
-		"[plugins] loading anthropic from /root/.openclaw/...",
-		"[plugins] loaded 118 plugin(s) (70 attempted) in 11035.8ms",
-		"正在启动...",
-		"用手机微信扫描以下二维码，以继续连接：",
-		"▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄",
-		"若二维码未能显示或无法使用，你可以访问以下链接以继续：",
-		"https://liteapp.weixin.qq.com/q/7GiQu1?qrcode=85e18acc56ebd5937ad4caa5fe1b01a1&bot_type=3",
-		"正在等待操作...",
-		"已将此 OpenClaw 连接到微信。",
+	// 正常路径：先收 QRCode 事件，再收 Bound 事件。
+	runner := &fakeHermesRunner{events: []hermes.WeixinEvent{
+		{Type: hermes.WeixinEventQRCode, QRCodeURL: "https://liteapp.weixin.qq.com/q/abc"},
+		{Type: hermes.WeixinEventBound, AccountID: "610@im.bot", Token: "t"},
 	}}
 	adapter := NewWeChatAdapter(runner)
 
 	challenge, err := adapter.BeginAuth(context.Background(), AuthInput{AppID: "app-1"})
 	require.NoError(t, err)
-	if challenge.Type != "qrcode" || challenge.QRCode == "" {
-		t.Fatalf("challenge = %+v", challenge)
-	}
-	if challenge.ExpiresAt.IsZero() {
-		t.Fatalf("ExpiresAt 未设置")
-	}
+	// BeginAuth 应返回 qrcode 类型的 challenge，包含 QRCodeURL。
+	require.Equal(t, "qrcode", challenge.Type)
+	require.Equal(t, "https://liteapp.weixin.qq.com/q/abc", challenge.QRCode)
 
-	// 异步消费剩余事件，等待最长 200ms 让 progress 落地。
+	// 异步消费剩余事件；等待最长 500ms 让 Bound 状态落地。
 	deadline := time.Now().Add(500 * time.Millisecond)
 	for time.Now().Before(deadline) {
 		progress, _ := adapter.PollAuth(context.Background(), AuthInput{AppID: "app-1"})
 		if progress.Status == AuthStatusBound {
-			// stdout 不携带 wxid/userId（实测发现）；BoundIdentity 由 service 层
-			// 在收到 bound 事件后调 openclaw channels list 或读 plugin state 补齐。
-			// 此测试仅验证 bound 状态翻转。
-			require.Equal(t, "openclaw-weixin", progress.ChannelName)
+			require.Equal(t, "610@im.bot", progress.BoundIdentity)
 			return
 		}
-		time.Sleep(20 * time.Millisecond)
+		time.Sleep(10 * time.Millisecond)
 	}
-	t.Fatalf("expected bound progress within 500ms")
+	t.Fatalf("500ms 内未达到 bound 状态")
 }
 
-// TestWeChatAdapterBeginAuthRejectsUnparsableOutput 验证WeChat适配器开始认证拒绝UnparsableOutput的异常或拒绝路径场景。
-func TestWeChatAdapterBeginAuthRejectsUnparsableOutput(t *testing.T) {
-	runner := &fakeRunner{lines: []string{"hello world"}}
-	adapter := NewWeChatAdapter(runner)
-
-	_, err := adapter.BeginAuth(context.Background(), AuthInput{AppID: "app-1"})
-	require.Error(t, err)
-	progress, _ := adapter.PollAuth(context.Background(), AuthInput{AppID: "app-1"})
-	require.Equal(t, AuthStatusFailed, progress.Status)
-}
-
-// TestWeChatAdapterBeginAuthDetectsExpiredFirst 验证WeChat适配器开始认证识别过期First的异常或拒绝路径场景。
-func TestWeChatAdapterBeginAuthDetectsExpiredFirst(t *testing.T) {
-	// 极少见情况：plugin 加载完后直接出 expired（如 wechat 服务端拒绝）。
-	runner := &fakeRunner{lines: []string{
-		"[plugins] loaded 118 plugin(s)",
-		"二维码已过期",
+// TestWeChatAdapterBeginAuthFailedEvent 验证收到 Failed 事件时 BeginAuth 返回错误。
+func TestWeChatAdapterBeginAuthFailedEvent(t *testing.T) {
+	// 异常路径：直接收 Failed 事件，无 QR。
+	runner := &fakeHermesRunner{events: []hermes.WeixinEvent{
+		{Type: hermes.WeixinEventFailed, Error: "LOGIN_FAILED"},
 	}}
 	adapter := NewWeChatAdapter(runner)
 
 	_, err := adapter.BeginAuth(context.Background(), AuthInput{AppID: "app-1"})
 	require.Error(t, err)
+	require.Contains(t, err.Error(), "LOGIN_FAILED")
 }
 
-// TestWeChatAdapterPollAuthDefaultsToPending 验证WeChat适配器轮询认证默认值到等待中的边界条件场景。
+// TestWeChatAdapterBeginAuthEmptyStream 验证 events channel 立即关闭时 BeginAuth 返回错误。
+func TestWeChatAdapterBeginAuthEmptyStream(t *testing.T) {
+	// 边界条件：stream 无任何事件就关闭（如 exec 启动即失败）。
+	runner := &fakeHermesRunner{events: nil}
+	adapter := NewWeChatAdapter(runner)
+
+	_, err := adapter.BeginAuth(context.Background(), AuthInput{AppID: "app-1"})
+	require.Error(t, err)
+}
+
+// TestWeChatAdapterPollAuthDefaultsToPending 验证尚未发起登录的 app 默认返回 pending 状态。
 func TestWeChatAdapterPollAuthDefaultsToPending(t *testing.T) {
-	adapter := NewWeChatAdapter(&fakeRunner{})
+	// 边界条件：PollAuth 在没有任何事件记录时应返回 pending。
+	adapter := NewWeChatAdapter(&fakeHermesRunner{})
 	progress, err := adapter.PollAuth(context.Background(), AuthInput{AppID: "missing"})
 	require.NoError(t, err)
 	require.Equal(t, AuthStatusPending, progress.Status)
 }
 
-type fakeRunner struct {
-	lines []string
+// fakeHermesRunner 是 CommandRunner 的测试实现，返回预设的 hermes.WeixinEvent 序列。
+type fakeHermesRunner struct {
+	events []hermes.WeixinEvent
 }
 
-func (r *fakeRunner) StreamWeChatLogin(_ context.Context, _ AuthInput) (<-chan string, error) {
-	ch := make(chan string, len(r.lines))
-	for _, line := range r.lines {
-		ch <- line
+func (r *fakeHermesRunner) StreamWeChatLogin(_ context.Context, _ AuthInput) (<-chan hermes.WeixinEvent, error) {
+	ch := make(chan hermes.WeixinEvent, len(r.events))
+	for _, ev := range r.events {
+		ch <- ev
 	}
 	close(ch)
 	return ch, nil

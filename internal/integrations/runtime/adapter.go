@@ -6,6 +6,7 @@ import (
 	"context"
 	"errors"
 	"io"
+	"time"
 
 	"oc-manager/internal/integrations/agent"
 	"oc-manager/internal/runtime/imagesync"
@@ -48,6 +49,14 @@ type Resources struct {
 	MemoryBytes int64
 }
 
+// ContainerHealth 是 docker container HEALTHCHECK 的快照。
+type ContainerHealth struct {
+	// Status 是 docker inspect 返回的健康状态："healthy" / "unhealthy" / "starting" / ""（未配置 HEALTHCHECK）。
+	Status string
+	// Output 是最近一次 HEALTHCHECK 命令的 stdout/stderr 截断，失败时用于写入 health_state_json 排障。
+	Output string
+}
+
 // ContainerInfo 是对外暴露的容器状态视图。
 type ContainerInfo struct {
 	// ID 是 docker 返回的容器 ID。
@@ -58,6 +67,8 @@ type ContainerInfo struct {
 	Image string
 	// Status 是 docker inspect 的状态字符串，如 created/running/exited。
 	Status string
+	// Health 反映 docker HEALTHCHECK 当前状态；未配置 HEALTHCHECK 时各字段为零值。
+	Health ContainerHealth
 }
 
 // ExecResult 是 ContainerExec 返回的命令执行结果。
@@ -105,8 +116,10 @@ type Adapter interface {
 	// 实现层用 docker StatsOneShot，避免长连接占用 worker 线程。
 	ContainerStats(ctx context.Context, nodeID, containerID string) (ContainerStats, error)
 	// ContainerExec 在容器内执行 cmd，返回 exit code 与 stdout（截断到 4KB）。
-	// 用于 app_health_check handler 调容器内嵌的 OpenClaw `/healthz` 端点。
 	ContainerExec(ctx context.Context, nodeID, containerID string, cmd []string) (ExecResult, error)
+	// WaitContainerHealthy 阻塞至容器 docker HEALTHCHECK 报 healthy，或超时返回错误。
+	// Hermes 镜像 HEALTHCHECK 内部跑 hermes gateway status，初始 start-period 60s。
+	WaitContainerHealthy(ctx context.Context, nodeID, containerID string, timeout time.Duration) error
 
 	ListFiles(ctx context.Context, nodeID, remotePath string) (FileListing, error)
 	UploadFile(ctx context.Context, nodeID, remotePath string, content io.Reader) error

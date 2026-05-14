@@ -44,21 +44,31 @@ type DockerClientResolver interface {
 
 // ImageSyncer 是 imagesync.Service 的最小接口形态，便于在测试中替换为内存桩。
 type ImageSyncer interface {
-	SyncOpenClawImage(ctx context.Context, nodeID, image string) (imagesync.SyncResult, error)
+	SyncRuntimeImage(ctx context.Context, nodeID, image string) (imagesync.SyncResult, error)
+}
+
+// ContainerInspector 是 WaitContainerHealthy 依赖的最小接口，便于测试注入 fake。
+// 生产路径下由 AgentBackedAdapter 自身实现（调用 docker inspect）；
+// 测试中传入 fakeInspector 可控序列，避免依赖真实 docker daemon。
+type ContainerInspector interface {
+	InspectContainer(ctx context.Context, nodeID, containerID string) (ContainerInfo, error)
 }
 
 // AgentBackedAdapter 通过 agent HTTP API 完成 runtime adapter 协议。
 //
-// 三个 resolver 可独立提供：
+// 四个依赖可独立提供：
 //   - files：缺失时文件接口返回 ErrUnimplemented，便于做"只跑容器、不跑文件"的精简部署；
 //   - docker：缺失时容器接口返回 ErrUnimplemented，避免在未装配 docker proxy 时静默 panic；
-//   - imageSync：缺失时 EnsureImage 返回 ErrUnimplemented。
+//   - imageSync：缺失时 EnsureImage 返回 ErrUnimplemented；
+//   - inspector：nil 时 WaitContainerHealthy 使用自身的 InspectContainer，非 nil 时用于测试覆盖。
 //
 // 这些缺失语义统一指向"adapter 装配不完整"，由上层启动期或 worker handler 决定如何降级。
 type AgentBackedAdapter struct {
 	files     AgentResolver
 	docker    DockerClientResolver
 	imageSync ImageSyncer
+	// inspector 仅用于测试注入；nil 时 WaitContainerHealthy 使用自身的 InspectContainer 方法。
+	inspector ContainerInspector
 }
 
 // NewAgentBackedAdapter 构造 adapter。
@@ -67,12 +77,12 @@ func NewAgentBackedAdapter(files AgentResolver, docker DockerClientResolver, ima
 	return &AgentBackedAdapter{files: files, docker: docker, imageSync: imageSync}
 }
 
-// EnsureImage 将本地 OpenClaw 镜像分发到目标节点。
+// EnsureImage 将本地 runtime 镜像分发到目标节点。
 func (a *AgentBackedAdapter) EnsureImage(ctx context.Context, nodeID, image string) (imagesync.SyncResult, error) {
 	if a.imageSync == nil {
 		return imagesync.SyncResult{}, ErrUnimplemented
 	}
-	return a.imageSync.SyncOpenClawImage(ctx, nodeID, image)
+	return a.imageSync.SyncRuntimeImage(ctx, nodeID, image)
 }
 
 // CreateContainer 通过 agent docker 代理在指定节点上创建容器。
@@ -382,75 +392,42 @@ func (a *AgentBackedAdapter) ArchiveApp(ctx context.Context, nodeID, appID strin
 	return cli.ArchiveApp(ctx, appID)
 }
 
-// WaitForOpenClawHealthy 在 OpenClaw 容器内重试调 curl 直到 /healthz 返回 200。
+// WaitContainerHealthy 轮询 docker inspect 拿 .State.Health.Status，
+// 等到 "healthy" 或 ctx 超时为止。
+// 用于 app_initialize handler 在容器启动后等 Hermes HEALTHCHECK 通过。
+// HEALTHCHECK 内部跑 hermes gateway status，初始 start-period 60s，
+// 留 timeout（通常 120s）余量。
 //
-// Sprint 0 实测：上游 OpenClaw 启动后约 10~12 秒才完成 plugin 加载并暴露 /healthz；
-// 之前 plugin loading 期间 curl 返回 connection refused 或非 2xx。
-//
-// 重试策略：先等待 startWaitSeconds，再最多探测 probeMaxAttempts 次；
-// 每次失败后固定等待 probeStepSeconds，单次 exec 单独 timeout 5s，避免 docker exec 长时间阻塞。
-//
-// 返回 nil 表示 healthy；非 nil 表示在窗口内未达 healthy。该错误不视为致命，
-// 调用方（如 app_initialize handler）可自行决定 retry 或推进到 binding_waiting。
-func (a *AgentBackedAdapter) WaitForOpenClawHealthy(ctx context.Context, nodeID, containerID string) error {
-	const (
-		probeURL          = "http://127.0.0.1:18789/healthz"
-		startWaitSeconds  = 8 // plugin loading 实测 ~11s，先等 8s 再开始探测
-		probeStepSeconds  = 4
-		probeMaxAttempts  = 10 // 最多探测次数；每轮失败后仍会按固定间隔等待或响应 ctx 取消。
-		probeExecTimeoutS = 5
-	)
-	cli, err := a.dockerClient(ctx, nodeID)
-	if err != nil {
-		return err
+// 遇到 "unhealthy" 时快速失败：不再等 timeout，立即返回错误并附上最后一次 Output。
+// 遇到其他状态（starting / ""）则按 step 轮询，直到 deadline。
+func (a *AgentBackedAdapter) WaitContainerHealthy(ctx context.Context, nodeID, containerID string, timeout time.Duration) error {
+	// 确定实际用于 inspect 的接口：nil 时走自身 InspectContainer。
+	insp := a.inspector
+	if insp == nil {
+		insp = a
 	}
-
-	// 等候 plugin loading 完成；ctx 取消立刻返回。
-	select {
-	case <-ctx.Done():
-		return ctx.Err()
-	case <-timeAfter(startWaitSeconds):
-	}
-
-	for attempt := 0; attempt < probeMaxAttempts; attempt++ {
-		probeCtx, cancel := contextWithTimeout(ctx, probeExecTimeoutS)
-		exitCode, perr := execCurlExitCode(probeCtx, cli, containerID, probeURL)
-		cancel()
-		if perr == nil && exitCode == 0 {
+	deadline, cancel := context.WithTimeout(ctx, timeout)
+	defer cancel()
+	const step = 3 * time.Second
+	for {
+		info, err := insp.InspectContainer(deadline, nodeID, containerID)
+		if err != nil {
+			return err
+		}
+		switch info.Health.Status {
+		case "healthy":
 			return nil
+		case "unhealthy":
+			// HEALTHCHECK 明确失败，不再轮询，立即返回带 Output 的错误。
+			return fmt.Errorf("容器 %s HEALTHCHECK 返回 unhealthy: %s", containerID, info.Health.Output)
 		}
+		// "starting" 或 ""（未配置 HEALTHCHECK）继续等待。
 		select {
-		case <-ctx.Done():
-			return ctx.Err()
-		case <-timeAfter(probeStepSeconds):
+		case <-deadline.Done():
+			return fmt.Errorf("容器 %s 在 %s 内未达 healthy", containerID, timeout)
+		case <-time.After(step):
 		}
 	}
-	return fmt.Errorf("OpenClaw 在 %s 内未通过 healthz 探活", containerID)
-}
-
-// execCurlExitCode 通过 docker SDK exec 在容器内跑 curl，等待退出后返回 exit code。
-// 使用 -fsS（fail on HTTP error，silent，show errors）让非 2xx 响应直接 exit !=0。
-func execCurlExitCode(ctx context.Context, cli *client.Client, containerID, url string) (int, error) {
-	exec, err := cli.ContainerExecCreate(ctx, containerID, container.ExecOptions{
-		Cmd:          []string{"curl", "-fsS", "--max-time", "3", url},
-		AttachStdout: true,
-		AttachStderr: true,
-	})
-	if err != nil {
-		return -1, fmt.Errorf("ContainerExecCreate 失败: %w", err)
-	}
-	attach, err := cli.ContainerExecAttach(ctx, exec.ID, container.ExecStartOptions{})
-	if err != nil {
-		return -1, fmt.Errorf("ContainerExecAttach 失败: %w", err)
-	}
-	defer attach.Close()
-	// 排空 stream 确保命令执行结束。
-	_, _ = io.Copy(io.Discard, attach.Reader)
-	inspect, err := cli.ContainerExecInspect(ctx, exec.ID)
-	if err != nil {
-		return -1, fmt.Errorf("ContainerExecInspect 失败: %w", err)
-	}
-	return inspect.ExitCode, nil
 }
 
 // UploadOrgFile 把单文件上传到指定节点的组织级知识库。
@@ -584,18 +561,28 @@ func bindStrings(volumes []VolumeMount) []string {
 }
 
 // inspectToContainerInfo 把 docker SDK 的 inspect 结果裁成对外暴露的最小视图。
+// Health 字段从 State.Health 映射：Status 取 docker inspect 的状态字符串，
+// Output 取最近一次 HealthcheckResult 的输出，供失败时写入 health_state_json 排障。
 func inspectToContainerInfo(inspect dockerInspectResponse) ContainerInfo {
 	name := strings.TrimPrefix(inspect.Name, "/")
 	status := ""
 	if inspect.State != nil {
 		status = inspect.State.Status
 	}
-	return ContainerInfo{
+	info := ContainerInfo{
 		ID:     inspect.ID,
 		Name:   name,
 		Image:  inspect.Image,
 		Status: status,
 	}
+	if inspect.State != nil && inspect.State.Health != nil {
+		info.Health.Status = inspect.State.Health.Status
+		if n := len(inspect.State.Health.Log); n > 0 {
+			// 取最近一次 HealthcheckResult.Output（运行 healthcheck.sh 的 stdout/stderr）。
+			info.Health.Output = inspect.State.Health.Log[n-1].Output
+		}
+	}
+	return info
 }
 
 // dockerInspectResponse 是 docker SDK ContainerInspect 返回类型的别名。

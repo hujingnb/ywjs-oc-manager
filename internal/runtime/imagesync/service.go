@@ -52,15 +52,16 @@ type SyncResult struct {
 	Transferred bool
 }
 
-// New 创建镜像同步服务；local 或 agent 为 nil 时 SyncOpenClawImage 会返回配置错误。
+// New 创建镜像同步服务；local 或 agent 为 nil 时 SyncRuntimeImage 会返回配置错误。
 func New(local LocalImageProvider, agent AgentImageClient) *Service {
 	return &Service{local: local, agent: agent}
 }
 
-// SyncOpenClawImage 确保 runtime node 上的 OpenClaw runtime 镜像与 manager 本地构建结果一致。
+// SyncRuntimeImage 确保 runtime node 上的 runtime 镜像与 manager 本地构建结果一致。
 // 远端不存在或 image ID 不一致时，manager 会把本地 docker save 产物通过 agent 文件接口传过去，
 // agent 在节点侧执行 docker load；若 ID 已一致则直接跳过，避免重复传输大镜像。
-func (s *Service) SyncOpenClawImage(ctx context.Context, nodeID string, image string) (SyncResult, error) {
+// 名字保持 runtime-agnostic，Hermes 时代复用此方法。
+func (s *Service) SyncRuntimeImage(ctx context.Context, nodeID string, image string) (SyncResult, error) {
 	if s == nil || s.local == nil || s.agent == nil {
 		return SyncResult{}, fmt.Errorf("image sync service is not configured")
 	}

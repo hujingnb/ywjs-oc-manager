@@ -54,6 +54,6 @@ type fakeDistributor struct {
 	err    error
 }
 
-func (f *fakeDistributor) SyncOpenClawImage(_ context.Context, _ string, _ string) (imagesync.SyncResult, error) {
+func (f *fakeDistributor) SyncRuntimeImage(_ context.Context, _ string, _ string) (imagesync.SyncResult, error) {
 	return f.result, f.err
 }

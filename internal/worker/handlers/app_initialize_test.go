@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/jackc/pgx/v5/pgtype"
 
@@ -31,14 +32,15 @@ func TestAppInitializeHandlesHappyPath(t *testing.T) {
 	store := newAppInitStub(t)
 	images := &fakeImages{}
 	dirs := &fakeDirs{}
-	containers := &fakeContainers{result: runtimepkg.ContainerInfo{ID: "ctr-1", Name: "ocm-" + testAppID, Status: "created"}}
+	containers := &fakeContainers{result: runtimepkg.ContainerInfo{ID: "ctr-1", Name: "hermes-" + testAppID, Status: "created"}}
 	client := &fakeNewAPI{result: newapi.APIKey{ID: 99, Key: "sk-test"}}
 
 	cipher, err := auth.NewCipher(make([]byte, 32))
 	require.NoError(t, err)
 	cfg := AppInitializeConfig{
-		RuntimeImage:         "openclaw:dev",
-		SystemPromptTemplate: "工作目录:{{workspace_dir}} 组织:{{knowledge_org_dir}} 应用:{{knowledge_app_dir}}",
+		RuntimeImage: "hermes:dev",
+		// DataDir 为空，跳过 hermes 文件写入（测试只关注 api_key + 容器创建路径）。
+		SystemPromptTemplate: "你是 {org_name} 的助手",
 		Cipher:               cipher,
 	}
 	handler := NewAppInitializeHandler(store, images, dirs, containers, containers, client, cfg)
@@ -48,7 +50,7 @@ func TestAppInitializeHandlesHappyPath(t *testing.T) {
 	if !store.apiKeySet || !store.statusSet || !store.containerSet {
 		t.Fatalf("api_key/status/container 应当都被持久化: %+v", store)
 	}
-	if images.lastImage != "openclaw:dev" || images.lastNode != "node-1" {
+	if images.lastImage != "hermes:dev" || images.lastNode != "node-1" {
 		t.Fatalf("镜像分发 = %s/%s", images.lastNode, images.lastImage)
 	}
 
@@ -61,28 +63,14 @@ func TestAppInitializeHandlesHappyPath(t *testing.T) {
 	require.Equal(t, "sk-test", string(plain))
 	require.NotEqual(t, "sk-test", store.app.NewapiKeyCiphertext.String)
 
-	// 容器规格断言：6 个挂载（5 个业务目录 + 1 个 weixin plugin token 目录）。
-	// 早期版本曾有 models.json file-level mount 但因 EBUSY 问题已移除，
-	// 改由 worker 在容器启动后通过 docker exec openclaw config patch 注入 catalog。
-	require.Equal(t, 6, len(containers.lastSpec.Volumes))
-	// 反向断言：models.json 不能再被 file-level bind mount。早期实现把渲染好的
-	// catalog 用 RW 文件级 mount 覆盖容器内 models.json，但 OpenClaw embedded agent
-	// 在响应消息时会 atomic rename .tmp -> models.json，撞 mount point 触发 EBUSY，
-	// 导致 weixin 回 "Something went wrong"。改为容器启动后用 docker exec
-	// `openclaw config patch` 把 models.providers 写到 openclaw.json 规避 mount 冲突。
-	for _, vol := range containers.lastSpec.Volumes {
-		require.NotEqual(t, "/root/.openclaw/agents/main/agent/models.json", vol.ContainerPath)
-	}
-	require.Equal(t, "openclaw:dev", containers.lastSpec.Image)
-	require.Equal(t, "ocm-"+testAppID, containers.lastSpec.Name)
-	// Sprint 0 契约：上游 OpenClaw 内置 openai SDK 认 OPENAI_API_KEY，不是 OPENCLAW_API_KEY
-	require.Equal(t, "sk-test", containers.lastSpec.Env["OPENAI_API_KEY"])
-	require.Equal(t, "/workspace", containers.lastSpec.Env["OPENCLAW_WORKSPACE_DIR"])
-	require.Equal(t, "1", containers.lastSpec.Env["OPENCLAW_DISABLE_BONJOUR"])
-	prompt := containers.lastSpec.Env["OPENCLAW_SYSTEM_PROMPT"]
-	require.Contains(t, prompt, "/workspace")
-	require.Contains(t, prompt, "/knowledge/org")
-	require.Contains(t, prompt, "/knowledge/app")
+	// Hermes 容器规格断言：1 个挂载（.hermes bind mount 到 /opt/data）。
+	// Hermes 时代不再需要 5 个独立目录挂载（workspace/state/logs/knowledge）。
+	require.Equal(t, 1, len(containers.lastSpec.Volumes))
+	require.Equal(t, "/opt/data", containers.lastSpec.Volumes[0].ContainerPath)
+
+	// 容器名应以 hermes- 为前缀，替换旧的 ocm- 前缀。
+	require.Equal(t, "hermes-"+testAppID, containers.lastSpec.Name)
+	require.Equal(t, "hermes:dev", containers.lastSpec.Image)
 
 	// Sprint 1：InitAppDirs 与 StartContainer 必须被调对参数
 	if dirs.calls != 1 || dirs.lastNode != "node-1" || dirs.lastApp != testAppID {
@@ -99,40 +87,46 @@ func TestAppInitializeHandlesHappyPath(t *testing.T) {
 	require.Equal(t, "succeeded", store.auditLogs[0].Result)
 }
 
-// TestAppInitializeWaitsForOpenClawHealthyWhenSupported 验证应用初始化等待针对OpenClaw健康当支持时的预期行为场景。
-func TestAppInitializeWaitsForOpenClawHealthyWhenSupported(t *testing.T) {
-	// Sprint 2：starter 同时实现 OpenClawHealthChecker 时 handler 应等 /healthz 通过再推 binding_waiting。
+// TestAppInitializeWaitsForHermesHealthyWhenSupported 验证应用初始化等待 Hermes 容器
+// docker HEALTHCHECK 报 healthy 当 starter 实现 HermesHealthChecker 接口时的预期行为。
+func TestAppInitializeWaitsForHermesHealthyWhenSupported(t *testing.T) {
+	// Sprint 2（Hermes 版）：starter 同时实现 HermesHealthChecker 时
+	// handler 应等 docker HEALTHCHECK 报 healthy 再推 binding_waiting。
 	store := newAppInitStub(t)
 	images := &fakeImages{}
 	dirs := &fakeDirs{}
-	base := &fakeContainers{result: runtimepkg.ContainerInfo{ID: "ctr-1", Name: "ocm-" + testAppID, Status: "created"}}
+	base := &fakeContainers{result: runtimepkg.ContainerInfo{ID: "ctr-1", Name: "hermes-" + testAppID, Status: "created"}}
+	// healthAwareContainers 包装 fakeContainers，额外暴露 WaitContainerHealthy 方法。
 	containers := &healthAwareContainers{fakeContainers: base}
 	client := &fakeNewAPI{result: newapi.APIKey{ID: 99, Key: "sk-test"}}
 
 	cipher, err := auth.NewCipher(make([]byte, 32))
 	require.NoError(t, err)
 	handler := NewAppInitializeHandler(store, images, dirs, base, containers, client, AppInitializeConfig{
-		RuntimeImage: "openclaw:dev",
+		RuntimeImage: "hermes:dev",
 		Cipher:       cipher,
 	})
 	err = handler.Handle(context.Background(), buildJob(t, testAppID, "node-1"))
 	require.NoError(t, err)
+	// 断言 WaitContainerHealthy 被调用了 1 次。
 	require.Equal(t, 1, base.healthCalls)
 }
 
-// TestAppInitializePropagatesHealthCheckError 验证应用初始化透传健康检查Check错误的错误映射或错误记录场景。
+// TestAppInitializePropagatesHealthCheckError 验证 WaitContainerHealthy 失败时
+// handler 透传错误并不推进 binding_waiting 状态的错误传播场景。
 func TestAppInitializePropagatesHealthCheckError(t *testing.T) {
 	store := newAppInitStub(t)
 	base := &fakeContainers{
-		result:    runtimepkg.ContainerInfo{ID: "ctr-1", Name: "ocm-" + testAppID, Status: "created"},
-		healthErr: errors.New("/healthz timeout"),
+		result:    runtimepkg.ContainerInfo{ID: "ctr-1", Name: "hermes-" + testAppID, Status: "created"},
+		healthErr: errors.New("docker healthcheck timeout"),
 	}
 	containers := &healthAwareContainers{fakeContainers: base}
 	client := &fakeNewAPI{result: newapi.APIKey{ID: 1, Key: "k"}}
 	handler := NewAppInitializeHandler(store, &fakeImages{}, &fakeDirs{}, base, containers, client, AppInitializeConfig{Cipher: testCipher(t)})
 
 	err := handler.Handle(context.Background(), buildJob(t, testAppID, "node-1"))
-	if err == nil || !strings.Contains(err.Error(), "等待 OpenClaw 健康失败") {
+	// 错误信息应包含"等待 Hermes 容器健康失败"。
+	if err == nil || !strings.Contains(err.Error(), "等待 Hermes 容器健康失败") {
 		t.Fatalf("err=%v", err)
 	}
 	require.False(t, store.statusSet)
@@ -222,34 +216,6 @@ func TestAppInitializeContainerStepSkippedWhenContainerExists(t *testing.T) {
 	require.False(t, store.containerSet)
 }
 
-// TestHandleConfiguresAppModelID 验证初始化使用 app.model_id 而不是全局默认模型。
-func TestHandleConfiguresAppModelID(t *testing.T) {
-	store := newAppInitStub(t)
-	store.app.ModelID = "deepseek-r1:14b"
-	containers := &fakeContainers{result: runtimepkg.ContainerInfo{ID: "ctr-1", Name: "ocm-" + testAppID, Status: "created"}}
-	starter := &execAwareStarter{
-		fakeContainers:    containers,
-		fakeContainerExec: &fakeContainerExec{res: ExecResultStub{ExitCode: 0, Stdout: "Patched config\n"}},
-	}
-	client := &fakeNewAPI{result: newapi.APIKey{ID: 99, Key: "sk-test"}}
-	handler := NewAppInitializeHandler(store, &fakeImages{}, &fakeDirs{}, containers, starter, client, AppInitializeConfig{
-		Cipher: testCipher(t),
-		LLM: AppInitializeLLMConfig{
-			BaseURL:         "http://new-api:3000/v1",
-			DefaultProvider: "openai",
-			DefaultModel:    "qwen2.5:7b",
-		},
-	})
-
-	err := handler.Handle(context.Background(), buildJob(t, testAppID, "node-1"))
-
-	require.NoError(t, err)
-	require.Len(t, starter.fakeContainerExec.calls, 1)
-	shellLine := starter.fakeContainerExec.calls[0].cmd[2]
-	assert.Contains(t, shellLine, "deepseek-r1:14b")
-	assert.NotContains(t, shellLine, "qwen2.5:7b")
-}
-
 // TestEnsureAPIKeyKeepsNewAPITokenModelsUnrestricted 验证 new-api token 创建仍不限制模型。
 func TestEnsureAPIKeyKeepsNewAPITokenModelsUnrestricted(t *testing.T) {
 	store := newAppInitStub(t)
@@ -263,6 +229,23 @@ func TestEnsureAPIKeyKeepsNewAPITokenModelsUnrestricted(t *testing.T) {
 
 	require.NoError(t, err)
 	assert.Empty(t, api.lastCreateInput.Models)
+}
+
+// TestHermesHealthCheckerInterfaceUsed 验证 HermesHealthChecker 类型断言的调用与跳过行为。
+// 场景：starter 不实现 HermesHealthChecker 时，handle 正常完成但不调用 WaitContainerHealthy。
+func TestHermesHealthCheckerInterfaceUsed(t *testing.T) {
+	store := newAppInitStub(t)
+	// 普通 fakeContainers 不实现 HermesHealthChecker（无 WaitContainerHealthy 方法）。
+	// handler 的类型断言应为 false，跳过健康等待。
+	containers := &fakeContainers{result: runtimepkg.ContainerInfo{ID: "c", Name: "n"}}
+	client := &fakeNewAPI{result: newapi.APIKey{ID: 1, Key: "sk"}}
+	handler := NewAppInitializeHandler(store, &fakeImages{}, &fakeDirs{}, containers, containers, client, AppInitializeConfig{
+		Cipher: testCipher(t),
+	})
+	err := handler.Handle(context.Background(), buildJob(t, testAppID, "node-1"))
+	require.NoError(t, err)
+	// healthCalls 应为 0：普通 starter 没实现 HermesHealthChecker，handler 跳过。
+	require.Equal(t, 0, containers.healthCalls)
 }
 
 func buildJob(t *testing.T, appID, nodeID string) sqlc.Job {
@@ -351,8 +334,9 @@ func (f *fakeImages) EnsureRuntimeImage(_ context.Context, nodeID, image string)
 	return nil, nil
 }
 
-// fakeContainers 同时实现 ContainerCreator 与 ContainerLifecycle，
-// 便于测试断言 Sprint 1 新增的 InitAppDirs / StartContainer 调用次序。
+// fakeContainers 同时实现 ContainerCreator 与 ContainerStarter，
+// 便于测试断言容器创建与启动的调用次序。
+// healthCalls 计数 WaitContainerHealthy 被调用次数，仅由 healthAwareContainers 递增。
 type fakeContainers struct {
 	result        runtimepkg.ContainerInfo
 	err           error
@@ -363,27 +347,19 @@ type fakeContainers struct {
 	lastStartNode string
 	lastStartID   string
 	startErr      error
-	// Sprint 2：可选实现 OpenClawHealthChecker。enableHealthCheck=true 时 fakeContainers
-	// 暴露 WaitForOpenClawHealthy 方法（通过类型断言被 handler 探测）。
-	enableHealthCheck bool
-	healthCalls       int
-	healthErr         error
+	// healthCalls 记录 WaitContainerHealthy 调用次数（由 healthAwareContainers 包装暴露）。
+	healthCalls int
+	healthErr   error
 }
 
-// execAwareStarter 同时支持启动容器和 docker exec，用于断言初始化后的 OpenClaw 配置注入。
-type execAwareStarter struct {
-	*fakeContainers
-	*fakeContainerExec
-}
-
-// WaitForOpenClawHealthy 仅当 enableHealthCheck 为 true 时通过类型断言可见。
-// 由于 Go 的接口断言看的是方法集（不论 enable flag），这里的 enable 通过 wrapper 实现。
-// 所以测试用 healthAwareContainers 包装 fakeContainers 暴露此方法。
+// healthAwareContainers 包装 fakeContainers，同时实现 ContainerStarter 与 HermesHealthChecker。
+// 用于测试 handler 对 HermesHealthChecker 类型断言的探测与调用路径。
 type healthAwareContainers struct {
 	*fakeContainers
 }
 
-func (h *healthAwareContainers) WaitForOpenClawHealthy(_ context.Context, _, _ string) error {
+// WaitContainerHealthy 实现 HermesHealthChecker，记录调用并返回预设错误（nil 表示成功）。
+func (h *healthAwareContainers) WaitContainerHealthy(_ context.Context, _, _ string, _ time.Duration) error {
 	h.healthCalls++
 	return h.healthErr
 }
@@ -398,8 +374,8 @@ func (f *fakeContainers) CreateContainer(_ context.Context, nodeID string, spec 
 	return f.result, nil
 }
 
-// StartContainer 让 fakeContainers 同时实现 ContainerLifecycle 接口，
-// 便于测试一并断言 Sprint 1 新增的 start 步骤。
+// StartContainer 让 fakeContainers 同时实现 ContainerStarter 接口，
+// 便于测试断言 StartContainer 被正确调用。
 func (f *fakeContainers) StartContainer(_ context.Context, nodeID, containerID string) error {
 	f.startCalls++
 	f.lastStartNode = nodeID
@@ -555,92 +531,4 @@ func TestEnsureAPIKey_GetTokenFullKeyFailureRecordsAudit(t *testing.T) {
 	require.Equal(t, "newapi_call", rec.events[0].TargetType)
 	// Endpoint 应含 token ID
 	require.True(t, strings.Contains(rec.events[0].TargetID, "42"))
-}
-
-// renderOpenClawModels 已删除：早期版本通过 file-level bind mount 把渲染好的 catalog
-// 覆盖容器内 models.json，但 OpenClaw embedded agent 在响应消息时 atomic rename
-// .tmp -> models.json 撞 mount point 触发 EBUSY。改为容器启动后用
-// configureOpenClawDefaultModel 通过 docker exec openclaw config patch 注入 catalog 到
-// openclaw.json。对应单元测试在 TestConfigureOpenClawDefaultModel_PatchesAgentAndModels。
-
-// fakeContainerExec 捕获 ContainerExec 调用的命令行，用于验证 patch 内容。
-type fakeContainerExec struct {
-	calls []fakeExecCall
-	res   ExecResultStub
-}
-
-type fakeExecCall struct {
-	nodeID, containerID string
-	cmd                 []string
-}
-
-// ExecResultStub 模拟 runtime.ExecResult，与生产 runtime 包同形态便于赋值返回。
-type ExecResultStub struct {
-	ExitCode int
-	Stdout   string
-}
-
-func (f *fakeContainerExec) ContainerExec(_ context.Context, nodeID, containerID string, cmd []string) (runtimepkg.ExecResult, error) {
-	f.calls = append(f.calls, fakeExecCall{nodeID: nodeID, containerID: containerID, cmd: cmd})
-	return runtimepkg.ExecResult{ExitCode: f.res.ExitCode, Stdout: f.res.Stdout}, nil
-}
-
-// TestConfigureOpenClawDefaultModel_PatchesAgentAndModels 验证配置OpenClaw默认值模型补丁esagent并模型的边界条件场景。
-func TestConfigureOpenClawDefaultModel_PatchesAgentAndModels(t *testing.T) {
-	exec := &fakeContainerExec{res: ExecResultStub{ExitCode: 0, Stdout: "Patched config\n"}}
-	llm := AppInitializeLLMConfig{
-		BaseURL:         "http://new-api:3000/v1",
-		DefaultProvider: "openai",
-		DefaultModel:    "qwen2.5:0.5b",
-	}
-	err := configureOpenClawDefaultModel(context.Background(), exec, "node-1", "ctn-1", llm)
-	require.NoError(t, err)
-	require.Equal(t, 1, len(exec.calls))
-	call := exec.calls[0]
-	if call.cmd[0] != "sh" || call.cmd[1] != "-c" {
-		t.Fatalf("cmd 应是 sh -c form，got %v", call.cmd)
-	}
-	shellLine := call.cmd[2]
-	require.Contains(t, shellLine, "openclaw config patch --stdin")
-	// 验证 patch JSON 含必要字段
-	assert.Contains(t, shellLine, `"agents"`)
-	assert.Contains(t, shellLine, `"defaults"`)
-	assert.Contains(t, shellLine, `"qwen2.5:0.5b"`)
-	// schema 要求 models[].name 必填，未填会被 OpenClaw config validate 拒绝
-	assert.Contains(t, shellLine, `"name":"qwen2.5:0.5b"`)
-	assert.Contains(t, shellLine, `"models"`)
-	assert.Contains(t, shellLine, `"providers"`)
-	assert.Contains(t, shellLine, `"mode":"replace"`)
-	assert.Contains(t, shellLine, "${OPENAI_API_KEY}")
-}
-
-// TestConfigureOpenClawDefaultModel_SkipsWhenLLMIncomplete 验证配置OpenClaw默认值模型跳过当LLM不完整的边界条件场景。
-func TestConfigureOpenClawDefaultModel_SkipsWhenLLMIncomplete(t *testing.T) {
-	exec := &fakeContainerExec{res: ExecResultStub{ExitCode: 0, Stdout: "Patched\n"}}
-	cases := []AppInitializeLLMConfig{
-		{}, // 场景：完全缺失 LLM 配置时应跳过默认模型配置
-		{BaseURL: "x", DefaultProvider: "openai"},                     // 缺 model
-		{BaseURL: "x", DefaultModel: "qwen2.5:0.5b"},                  // 缺 provider
-		{DefaultProvider: "openai", DefaultModel: "x"},                // 缺 base
-		{BaseURL: "  ", DefaultProvider: "openai", DefaultModel: "x"}, // 场景：base URL 只有空白字符时应视为无效并跳过配置
-	}
-	for _, c := range cases {
-		exec.calls = nil
-		err := configureOpenClawDefaultModel(context.Background(), exec, "node-1", "ctn-1", c)
-		assert.NoError(t, err)
-		assert.Empty(t, exec.calls)
-	}
-}
-
-// TestConfigureOpenClawDefaultModel_PropagatesPatchFailure 验证配置OpenClaw默认值模型透传补丁失败的错误映射或错误记录场景。
-func TestConfigureOpenClawDefaultModel_PropagatesPatchFailure(t *testing.T) {
-	exec := &fakeContainerExec{res: ExecResultStub{ExitCode: 2, Stdout: "schema validation failed\n"}}
-	llm := AppInitializeLLMConfig{
-		BaseURL: "http://x", DefaultProvider: "openai", DefaultModel: "m",
-	}
-	err := configureOpenClawDefaultModel(context.Background(), exec, "node-1", "ctn-1", llm)
-	require.Error(t, err)
-	if !strings.Contains(err.Error(), "exit=2") {
-		t.Errorf("错误应含 exit code: %v", err)
-	}
 }

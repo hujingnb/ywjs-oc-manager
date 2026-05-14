@@ -89,8 +89,8 @@ func (c Config) Validate() error {
 	if strings.TrimSpace(c.Runtime.EnrollmentSecret) == "" {
 		missing = append(missing, "runtime.enrollment_secret")
 	}
-	if strings.TrimSpace(c.OpenClaw.SystemPromptTemplate) == "" {
-		missing = append(missing, "openclaw.system_prompt_template")
+	if strings.TrimSpace(c.Hermes.SystemPromptTemplate) == "" {
+		missing = append(missing, "hermes.system_prompt_template")
 	}
 	if len(missing) > 0 {
 		return fmt.Errorf("缺少必需配置: %s", strings.Join(missing, ", "))
@@ -104,9 +104,8 @@ func (c Config) Validate() error {
 	if err := c.Runtime.Probe.validate(); err != nil {
 		return err
 	}
-	if err := validatePromptTemplate(c.OpenClaw.SystemPromptTemplate); err != nil {
-		return err
-	}
+	// Hermes 时代模板不再需要 {{workspace_dir}} 等 OpenClaw 专属占位符，
+	// 仅需非空即可（上方 missing 检查已覆盖）。
 	return nil
 }
 
@@ -143,13 +142,3 @@ func (p RuntimeProbeConfig) validate() error {
 	return nil
 }
 
-// validatePromptTemplate 强制 system prompt 模板包含三类目录占位符。
-// 否则 prompt 拼接时会丢失对工作目录与知识库目录的引用，OpenClaw 容器无法正确读写文件。
-func validatePromptTemplate(template string) error {
-	for _, placeholder := range []string{"{{workspace_dir}}", "{{knowledge_org_dir}}", "{{knowledge_app_dir}}"} {
-		if !strings.Contains(template, placeholder) {
-			return fmt.Errorf("openclaw.system_prompt_template 必须包含占位符 %s", placeholder)
-		}
-	}
-	return nil
-}

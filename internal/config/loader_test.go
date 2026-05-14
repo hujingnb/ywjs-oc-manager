@@ -13,14 +13,11 @@ import (
 // validBase64MasterKey 提供测试用的 32 字节 base64 master_key。
 const validBase64MasterKey = "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA="
 
-// validSystemPromptTemplate 包含 OpenClawConfig 校验要求的全部占位符。
-const validSystemPromptTemplate = `你是 OpenClaw 智能助手。
-工作目录：{{workspace_dir}}
-组织知识库：{{knowledge_org_dir}}
-应用知识库：{{knowledge_app_dir}}`
+// validSystemPromptTemplate 包含 HermesConfig 校验要求的最小模板（非空即合法）。
+const validSystemPromptTemplate = `你是 Hermes 智能助手。`
 
 // fullValidYAML 返回一份带新字段的合法配置文本，便于多个用例共用。
-// 任何 security/openclaw/agent 校验路径都应基于此文本派生最小修改。
+// 任何 security/hermes/agent 校验路径都应基于此文本派生最小修改。
 func fullValidYAML() string {
 	return `
 app:
@@ -45,13 +42,10 @@ auth:
   csrf_secret: "csrf-secret"
 security:
   master_key: "` + validBase64MasterKey + `"
-openclaw:
-  runtime_image: "openclaw-runtime:dev"
+hermes:
+  runtime_image: "hermes-runtime:dev"
   system_prompt_template: |
-    你是 OpenClaw 智能助手。
-    工作目录：{{workspace_dir}}
-    组织知识库：{{knowledge_org_dir}}
-    应用知识库：{{knowledge_app_dir}}
+    你是 Hermes 智能助手。
   workspace:
     archive_retention_days: 14
 agent:
@@ -75,8 +69,8 @@ func TestLoad_DoesNotExpandEnvPlaceholders(t *testing.T) {
 	require.Equal(t, "${DATABASE_URL}", cfg.Database.URL)
 	require.Equal(t, "15m0s", cfg.Auth.AccessTokenTTL.Duration.String())
 	require.Equal(t, validBase64MasterKey, cfg.Security.MasterKey)
-	require.Equal(t, "openclaw-runtime:dev", cfg.OpenClaw.RuntimeImage)
-	require.Equal(t, 14, cfg.OpenClaw.Workspace.ArchiveRetentionDays)
+	require.Equal(t, "hermes-runtime:dev", cfg.Hermes.RuntimeImage)
+	require.Equal(t, 14, cfg.Hermes.Workspace.ArchiveRetentionDays)
 	require.Equal(t, 30, cfg.Agent.HeartbeatIntervalSeconds)
 }
 
@@ -98,7 +92,7 @@ func TestValidateReportsRequiredFields(t *testing.T) {
 		"app.http_addr", "app.data_root", "app.knowledge_root", "database.url", "redis.addr",
 		"auth.access_token_ttl", "auth.refresh_token_ttl",
 		"auth.jwt_access_secret", "auth.jwt_refresh_secret", "auth.csrf_secret",
-		"security.master_key", "runtime.enrollment_secret", "openclaw.system_prompt_template",
+		"security.master_key", "runtime.enrollment_secret", "hermes.system_prompt_template",
 	}
 	for _, field := range required {
 		require.True(t, strings.Contains(err.Error(), field))
@@ -124,9 +118,9 @@ auth:
   csrf_secret: "csrf-secret"
 security:
   master_key: "`+validBase64MasterKey+`"
-openclaw:
+hermes:
   system_prompt_template: |
-    {{workspace_dir}} {{knowledge_org_dir}} {{knowledge_app_dir}}
+    你是 Hermes 智能助手。
 `)
 
 	_, err := LoadFile(path)
@@ -185,15 +179,17 @@ func TestLoad_RejectsBadBase64MasterKey(t *testing.T) {
 	}
 }
 
-// TestLoad_RejectsPromptMissingPlaceholder 校验 system_prompt_template 缺占位符时 fail-fast。
-func TestLoad_RejectsPromptMissingPlaceholder(t *testing.T) {
-	for _, missing := range []string{"{{workspace_dir}}", "{{knowledge_org_dir}}", "{{knowledge_app_dir}}"} {
-		yaml := strings.Replace(fullValidYAML(), missing, "(removed)", 1)
-		path := writeTempConfig(t, yaml)
-		_, err := LoadFile(path)
-		if err == nil || !strings.Contains(err.Error(), missing) {
-			t.Fatalf("缺 %s 时 err = %v, 期望错误信息中含该占位符", missing, err)
-		}
+// TestLoad_RejectsEmptySystemPromptTemplate 校验 hermes.system_prompt_template 为空时 fail-fast。
+// Hermes 时代不再要求 {{workspace_dir}} 等占位符，但模板本身不能为空。
+func TestLoad_RejectsEmptySystemPromptTemplate(t *testing.T) {
+	// 用例：system_prompt_template 仅含空白时应被拒绝。
+	yaml := strings.Replace(fullValidYAML(),
+		"system_prompt_template: |\n    你是 Hermes 智能助手。",
+		"system_prompt_template: \"\"", 1)
+	path := writeTempConfig(t, yaml)
+	_, err := LoadFile(path)
+	if err == nil || !strings.Contains(err.Error(), "hermes.system_prompt_template") {
+		t.Fatalf("LoadFile() err = %v, 期望含 hermes.system_prompt_template 错误", err)
 	}
 }
 
@@ -203,7 +199,8 @@ func TestLoad_AcceptsValidConfig(t *testing.T) {
 	cfg, err := LoadFile(path)
 	require.NoError(t, err)
 	require.Equal(t, validBase64MasterKey, cfg.Security.MasterKey)
-	require.True(t, strings.Contains(cfg.OpenClaw.SystemPromptTemplate, "{{workspace_dir}}"))
+	// Hermes 时代模板不要求占位符，只要非空即可。
+	require.NotEmpty(t, cfg.Hermes.SystemPromptTemplate)
 }
 
 func writeTempConfig(t *testing.T, content string) string {

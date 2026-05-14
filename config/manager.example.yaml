@@ -101,19 +101,15 @@ newapi:
   # 默认账号 admin/admin123! 的 id=1。base_url 非空时必填；类型为整数。
   admin_user_id: 1
 
-openclaw:
-  # OpenClaw 容器的镜像 tag。runtime node 上必须存在该镜像；
+hermes:
+  # Hermes 容器的镜像引用（name:tag 或 digest）。runtime node 上必须存在该镜像；
   # imagesync 会用 docker save / load 把宿主镜像分发到节点。
-  runtime_image: "openclaw-runtime:dev"
+  runtime_image: "hermes-runtime:dev"
 
-  # OpenClaw 容器系统人设模板。必须包含三个占位符：
-  #   {{workspace_dir}}、{{knowledge_org_dir}}、{{knowledge_app_dir}}
-  # 缺任一占位符启动 fail-fast；模板内可写任意中文 / 英文 prompt。
+  # Hermes 容器平台级系统人设模板（SOUL.md PlatformPrompt 层）。
+  # 模板内可写任意中文 / 英文 prompt。
   system_prompt_template: |
-    你是 OpenClaw 智能助手。
-    生成文件请输出到 {{workspace_dir}}。
-    组织级知识库（只读）：{{knowledge_org_dir}}
-    应用级知识库（只读）：{{knowledge_app_dir}}
+    你是 Hermes 智能助手。
 
   workspace:
     # agent 端归档目录保留天数；0 表示不清理（仅本地调试场景使用）。
@@ -121,17 +117,15 @@ openclaw:
     archive_retention_days: 14
 
   llm:
-    # OpenClaw 容器从 docker network 看到的 new-api OpenAI 兼容 endpoint，
-    # 必须含 /v1 后缀；注入容器为 OPENAI_BASE_URL。
-    # 留空时跳过 settings.json 注入，pi-coding-agent 走默认 openai/gpt-5.5
-    # 路由不到本地 ollama，模型调用会失败。
+    # Hermes 容器从 docker network 看到的 new-api OpenAI 兼容 endpoint，
+    # 必须含 /v1 后缀；写入容器内 config.yaml base_url 与 .env OPENAI_BASE_URL。
     base_url: "http://new-api:3000/v1"
 
-    # pi-coding-agent 默认 provider 名称，写入容器内 /root/.pi/agent/settings.json。
-    # 与 default_model 配合。常用 "openai"。
+    # 默认 provider 名称，写入容器内 config.yaml model.provider。
+    # 常用 "openai"（兼容 new-api OpenAI 兼容协议）。
     default_provider: "openai"
 
-    # pi-coding-agent 默认模型名，必须是 new-api 渠道里实际可路由的名字
+    # 默认模型名，必须是 new-api 渠道里实际可路由的名字
     # （如 ollama 部署的 "qwen2.5:0.5b"）。
     default_model: "qwen2.5:0.5b"
 
@@ -139,7 +133,7 @@ openclaw:
     # `POST /api/token/:id/key` 自动拉取并加密落 apps.newapi_key_ciphertext，
     # 不再需要在配置里手填全局 sk-。
 
-  # OpenClaw 容器要连接的 docker network 列表；必须包含 new-api 所在 network，
+  # Hermes 容器要连接的 docker network 列表；必须包含 new-api 所在 network，
   # 否则容器无法解析 "new-api" hostname → chat completions Connection error。
   # docker compose project 默认派生 "<project>_default"，本仓库 project 名 oc-manager。
   container_networks:

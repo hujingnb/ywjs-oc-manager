@@ -227,15 +227,19 @@ func runManager(ctx context.Context, cfg config.Config, logOut io.Writer) error 
 		runtimeAdapter,
 		newapiFactory,
 		handlers.AppInitializeConfig{
-			RuntimeImage:         cfg.OpenClaw.RuntimeImage,
-			SystemPromptTemplate: cfg.OpenClaw.SystemPromptTemplate,
-			PlatformPrompt:       cfg.OpenClaw.SystemPromptTemplate,
+			RuntimeImage:         cfg.Hermes.RuntimeImage,
+			SystemPromptTemplate: cfg.Hermes.SystemPromptTemplate,
+			PlatformPrompt:       cfg.Hermes.SystemPromptTemplate,
 			Cipher:               cipher,
-			ContainerNetworks:    cfg.OpenClaw.ContainerNetworks,
+			// DataDir 是 manager 宿主机数据根目录；handler 在此目录下写入 Hermes 配置文件，
+			// 再 bind mount 到容器 /opt/data。
+			DataDir:           cfg.App.DataRoot,
+			NewAPIBaseURL:     cfg.NewAPI.BaseURL,
+			ContainerNetworks: cfg.Hermes.ContainerNetworks,
 			LLM: handlers.AppInitializeLLMConfig{
-				BaseURL:         cfg.OpenClaw.LLM.BaseURL,
-				DefaultProvider: cfg.OpenClaw.LLM.DefaultProvider,
-				DefaultModel:    cfg.OpenClaw.LLM.DefaultModel,
+				BaseURL:         cfg.Hermes.LLM.BaseURL,
+				DefaultProvider: cfg.Hermes.LLM.DefaultProvider,
+				DefaultModel:    cfg.Hermes.LLM.DefaultModel,
 			},
 			AuditHelper: appInitAuditHelper,
 		},
