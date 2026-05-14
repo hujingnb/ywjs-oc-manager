@@ -99,7 +99,7 @@ type NewAPIClientFactory interface {
 // 再将该目录 bind mount 到 Hermes 容器内 /opt/data。
 //
 // SystemPromptTemplate：Hermes SOUL.md 的平台层模板，{var} 占位符在渲染时展开；
-// 不再使用 OpenClaw 时代的 {{workspace_dir}} 格式。
+// 不再使用 legacy OpenClaw 时代的 {{workspace_dir}} 格式。
 //
 // Cipher：把 new-api 返回的完整 sk- 加密后写入 apps.newapi_key_ciphertext，
 // 全程不入日志。

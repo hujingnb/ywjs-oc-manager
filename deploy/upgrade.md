@@ -1,4 +1,4 @@
-# OpenClaw Manager 升级与回滚手册
+# Agent Runtime Manager 升级与回滚手册
 
 面向运维：覆盖 v1.0 RC 起的版本升级流程、迁移管理、回滚策略。
 
@@ -57,7 +57,7 @@ docker compose up -d oc-runtime-agent
 在每台 Runtime Node 的生产 `.env` 中把 `OC_RUNTIME_AGENT_IMAGE` 更新到
 `...@sha256:<digest>`。`:X.Y.Z` tag 可由 CI / release notes 用来识别 runtime-agent
 发布版本，但运维部署前必须先解析并固定对应 digest。
-agent 重启不丢 OpenClaw 容器（容器本身不重启）；但 agent 重启期间
+agent 重启不丢 Hermes 容器（容器本身不重启）；但 agent 重启期间
 manager 调 inspect / stats 会失败，UI 上短暂显示「资源指标尚未采集」。
 
 ### Step 3 验收

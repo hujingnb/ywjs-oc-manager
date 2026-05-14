@@ -1,4 +1,4 @@
-.PHONY: dev-up dev-down test vet build sqlc-generate migrate-up migrate-down check-compose logs web-test web-typecheck web-build build-openclaw-runtime verify-openclaw-runtime sync-openclaw-runtime-image debug-ollama debug-newapi newapi-probe seed-e2e smoke-v102 openapi-gen web-types-gen openapi-check
+.PHONY: dev-up dev-down test vet build sqlc-generate migrate-up migrate-down check-compose logs web-test web-typecheck web-build build-hermes-runtime verify-hermes-runtime sync-hermes-runtime-image debug-ollama debug-newapi newapi-probe seed-e2e smoke-v102 openapi-gen web-types-gen openapi-check
 
 SWAG_VERSION := v2.0.0-rc5
 OPENAPI_TS_VERSION := 7.13.0

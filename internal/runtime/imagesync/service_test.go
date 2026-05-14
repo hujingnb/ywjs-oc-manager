@@ -10,54 +10,54 @@ import (
 	"testing"
 )
 
-// TestSyncRuntimeImageSkipsWhenRemoteMatches 验证同步OpenClaw镜像跳过当远端匹配es的特殊分支或幂等场景。
+// TestSyncRuntimeImageSkipsWhenRemoteMatches 验证同步运行时镜像跳过当远端匹配时的特殊分支或幂等场景。
 func TestSyncRuntimeImageSkipsWhenRemoteMatches(t *testing.T) {
 	local := &fakeLocalImage{imageID: "sha256:same"}
 	agent := &fakeAgentImage{remote: RemoteImageInfo{Exists: true, ID: "sha256:same"}}
 
-	result, err := New(local, agent).SyncRuntimeImage(context.Background(), "node-1", "openclaw-runtime:dev")
+	result, err := New(local, agent).SyncRuntimeImage(context.Background(), "node-1", "hermes-runtime:dev")
 	require.NoError(t, err)
 	require.False(t, result.Transferred)
 	require.Equal(t, 0, agent.loadCalls)
 }
 
-// TestSyncRuntimeImageLoadsWhenRemoteMissing 验证同步OpenClaw镜像加载当远端缺失的异常或拒绝路径场景。
+// TestSyncRuntimeImageLoadsWhenRemoteMissing 验证同步运行时镜像加载当远端缺失的异常或拒绝路径场景。
 func TestSyncRuntimeImageLoadsWhenRemoteMissing(t *testing.T) {
 	local := &fakeLocalImage{imageID: "sha256:local", archive: "image-tar"}
 	agent := &fakeAgentImage{remote: RemoteImageInfo{Exists: false}, loaded: RemoteImageInfo{Exists: true, ID: "sha256:local"}}
 
-	result, err := New(local, agent).SyncRuntimeImage(context.Background(), "node-1", "openclaw-runtime:dev")
+	result, err := New(local, agent).SyncRuntimeImage(context.Background(), "node-1", "hermes-runtime:dev")
 	require.NoError(t, err)
 	require.True(t, result.Transferred)
 	require.Equal(t, "image-tar", agent.loadedArchive)
 }
 
-// TestSyncRuntimeImageLoadsWhenRemoteDiffers 验证同步OpenClaw镜像加载当远端不一致的成功路径场景。
+// TestSyncRuntimeImageLoadsWhenRemoteDiffers 验证同步运行时镜像加载当远端不一致的成功路径场景。
 func TestSyncRuntimeImageLoadsWhenRemoteDiffers(t *testing.T) {
 	local := &fakeLocalImage{imageID: "sha256:new", archive: "image-tar"}
 	agent := &fakeAgentImage{remote: RemoteImageInfo{Exists: true, ID: "sha256:old"}, loaded: RemoteImageInfo{Exists: true, ID: "sha256:new"}}
 
-	result, err := New(local, agent).SyncRuntimeImage(context.Background(), "node-1", "openclaw-runtime:dev")
+	result, err := New(local, agent).SyncRuntimeImage(context.Background(), "node-1", "hermes-runtime:dev")
 	require.NoError(t, err)
 	if !result.Transferred || result.RemoteID != "sha256:new" {
 		t.Fatalf("unexpected result: %+v", result)
 	}
 }
 
-// TestSyncRuntimeImageRejectsMismatchedLoadedID 验证同步OpenClaw镜像拒绝不匹配LoadedID的异常或拒绝路径场景。
+// TestSyncRuntimeImageRejectsMismatchedLoadedID 验证同步运行时镜像拒绝不匹配LoadedID的异常或拒绝路径场景。
 func TestSyncRuntimeImageRejectsMismatchedLoadedID(t *testing.T) {
 	local := &fakeLocalImage{imageID: "sha256:local", archive: "image-tar"}
 	agent := &fakeAgentImage{remote: RemoteImageInfo{Exists: false}, loaded: RemoteImageInfo{Exists: true, ID: "sha256:other"}}
 
-	result, err := New(local, agent).SyncRuntimeImage(context.Background(), "node-1", "openclaw-runtime:dev")
+	result, err := New(local, agent).SyncRuntimeImage(context.Background(), "node-1", "hermes-runtime:dev")
 	require.Error(t, err)
 	require.True(t, result.Transferred)
 }
 
-// TestSyncRuntimeImagePropagatesLocalInspectError 验证同步OpenClaw镜像透传本地检查错误的错误映射或错误记录场景。
+// TestSyncRuntimeImagePropagatesLocalInspectError 验证同步运行时镜像透传本地检查错误的错误映射或错误记录场景。
 func TestSyncRuntimeImagePropagatesLocalInspectError(t *testing.T) {
 	local := &fakeLocalImage{err: errors.New("boom")}
-	_, err := New(local, &fakeAgentImage{}).SyncRuntimeImage(context.Background(), "node-1", "openclaw-runtime:dev")
+	_, err := New(local, &fakeAgentImage{}).SyncRuntimeImage(context.Background(), "node-1", "hermes-runtime:dev")
 	require.Error(t, err)
 }
 

@@ -13,11 +13,11 @@ import (
 	"github.com/docker/docker/pkg/stdcopy"
 )
 
-// BindingResolver 抽象在 OpenClaw 容器内取出真实账号标识的能力。
+// BindingResolver 抽象在 runtime 容器内取出真实账号标识的能力。
 //
-// Sprint 0 POC 实测：`openclaw channels login --channel openclaw-weixin` 在 stdout
-// 不输出 wxid/userId（只说"已将此 OpenClaw 连接到微信。"）。真实凭证由 wechat plugin
-// 持久化到 /root/.openclaw/openclaw-weixin/accounts/<account-name>.json，含字段：
+// 实测：Hermes weixin plugin 与 legacy OpenClaw weixin plugin 共用相同的 state 文件
+// 路径（/root/.openclaw/openclaw-weixin/accounts/...）；Hermes 容器通过 bind mount
+// apps/<id>/weixin → /root/.openclaw/openclaw-weixin/ 持久化 plugin state，含字段：
 //
 //	{"token":"<sensitive>","userId":"<openid>@im.wechat","baseUrl":"...","savedAt":"..."}
 //
@@ -40,7 +40,7 @@ func NewDockerBindingResolver(executor ContainerExecutor) *DockerBindingResolver
 
 // ResolveWeChatBoundIdentity 在容器内 cat 出 accounts.json + accounts/<name>.json 取 userId。
 //
-// 步骤：
+// 步骤（路径沿用 legacy OpenClaw weixin plugin 约定，Hermes 容器通过 bind mount 保持相同路径）：
 //  1. cat /root/.openclaw/openclaw-weixin/accounts.json → ["account-name"] JSON 数组
 //  2. cat /root/.openclaw/openclaw-weixin/accounts/<account-name>.json → 含 userId 的 JSON
 //  3. 返回 userId 字段（OpenID 形态）

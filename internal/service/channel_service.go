@@ -78,7 +78,7 @@ type ProgressResult struct {
 }
 
 // BeginAuth 启动指定应用、指定渠道的登录挑战。
-// HTTP 层不直接执行 OpenClaw CLI：真实登录由 channel_start_login worker 完成。
+// HTTP 层不直接执行 runtime 容器命令：真实登录由 channel_start_login worker 完成。
 // 这里只负责权限校验、渠道可用性校验、状态置为 pending_auth 并入队任务，
 // 避免微信插件加载或二维码生成阻塞请求线程。
 func (s *ChannelService) BeginAuth(ctx context.Context, principal auth.Principal, appID, channelType string) (ChallengeResult, error) {

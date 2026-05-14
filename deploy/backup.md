@@ -1,4 +1,4 @@
-# OpenClaw Manager 备份与恢复手册
+# Agent Runtime Manager 备份与恢复手册
 
 本文档面向运维：覆盖 v1.0 RC 数据持久化与备份恢复的关键路径。
 
@@ -10,7 +10,7 @@
 | manager Redis | `deploy/manage/data/redis` | 📋 可选 | scheduler 会从 jobs 表重建，丢一个调度周期后自愈 |
 | manager 本地数据 | `deploy/manage/data/manager` | ✅ 关键 | manager-api 本地持久化数据 |
 | manager 知识库主副本 | `deploy/manage/data/knowledge` | ✅ 关键 | 丢失后所有节点 sync-status 全部失败 |
-| agent 节点数据 | `deploy/runtime-agent/data/agent` on each Runtime Node | ✅ 关键 | 应用 workspace / state / logs；OpenClaw 历史会话与产物 |
+| agent 节点数据 | `deploy/runtime-agent/data/agent` on each Runtime Node | ✅ 关键 | 应用 workspace / state / logs；Hermes 历史会话与产物 |
 | new-api 库 | `deploy/new-api/data/postgres` | ✅ 关键 | new-api 账号、渠道、令牌和用量数据 |
 | new-api Redis | `deploy/new-api/data/redis` | 📋 可选 | 丢失后按 new-api 自身恢复策略处理 |
 | Ollama 模型 | `deploy/ollama/data/ollama` | 可按模型拉取策略决定 | 可重新拉取的模型可不纳入关键备份 |

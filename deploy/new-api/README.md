@@ -28,7 +28,7 @@ manager 的 `config/manager.yaml` 中：
 ```yaml
 newapi:
   base_url: "https://new-api.example.com"
-openclaw:
+hermes:
   llm:
     base_url: "https://new-api.example.com/v1"
 ```

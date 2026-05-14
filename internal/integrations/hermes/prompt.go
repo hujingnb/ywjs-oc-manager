@@ -7,7 +7,7 @@ import (
 	"strings"
 )
 
-// PromptInput 是 Render 的输入,与 OpenClaw 时代签名相同。
+// PromptInput 是 Render 的输入，与 legacy OpenClaw 时代签名保持一致以便迁移。
 // 平台 / 组织 / 应用三层 prompt 任一为空时跳过该层;Variables 覆盖占位符 {var}。
 type PromptInput struct {
 	PlatformPrompt string
@@ -36,8 +36,8 @@ var (
 var placeholderPattern = regexp.MustCompile(`\{([A-Za-z_][A-Za-z0-9_]*)\}`)
 
 // Render 按 platform → organization → app 顺序拼接,返回 Hermes SOUL.md 内容。
-// 与 OpenClaw 时代的 Render 在签名上一致,产出格式从 OpenClaw config patch 字符串
-// 改为 markdown 文档(适用于 Hermes 直接写入 ~/.hermes/SOUL.md)。
+// 函数签名与 legacy openclaw 包的 Render 保持一致以方便迁移，但产出格式已从
+// config patch 字符串改为 markdown 文档（适用于 Hermes 直接写入 ~/.hermes/SOUL.md）。
 func Render(input PromptInput) (PromptResult, error) {
 	layers := []struct {
 		key   string
@@ -96,7 +96,7 @@ func replacePlaceholders(in string, vars map[string]string) (string, error) {
 }
 
 // VariablesFromContext 给三层 prompt 提供常用变量字典。
-// 跟 OpenClaw 时代同名同语义,迁移调用方仅需改 import path。
+// 与 legacy openclaw 包同名同语义,迁移调用方仅需改 import path。
 func VariablesFromContext(orgName, appName, ownerName string) map[string]string {
 	return map[string]string{
 		"org_name":   orgName,

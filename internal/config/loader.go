@@ -104,7 +104,7 @@ func (c Config) Validate() error {
 	if err := c.Runtime.Probe.validate(); err != nil {
 		return err
 	}
-	// Hermes 时代模板不再需要 {{workspace_dir}} 等 OpenClaw 专属占位符，
+	// Hermes 时代模板不再需要 {{workspace_dir}} 等 legacy OpenClaw 专属占位符，
 	// 仅需非空即可（上方 missing 检查已覆盖）。
 	return nil
 }

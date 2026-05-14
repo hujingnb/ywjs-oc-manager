@@ -1,10 +1,10 @@
-# OpenClaw Manager 用户手册
+# Agent Runtime Manager 用户手册
 
 面向终端使用者的操作指南。涵盖三类角色：
 
 - **平台管理员（platform admin）** — 管理整个平台、查看和启停节点、开通组织、给组织充值
 - **组织管理员（org admin）** — 管理本组织成员、应用、人设、知识库
-- **组织成员（org member）** — 管理自己名下唯一的 OpenClaw 应用
+- **组织成员（org member）** — 管理自己名下唯一的 Hermes 应用
 
 部署、运维相关请看 [`deploy/README.md`](../deploy/README.md)。
 
@@ -134,7 +134,7 @@ access token 默认 15 分钟有效，过期时前端用 refresh token 自动续
 - 组织级 AI 人设内容（多行文本）；
 - 是否允许成员覆盖应用级人设（开关）。
 
-最终注入 OpenClaw 容器的 system prompt 由「平台默认 → 组织 → 应用」三层拼接，顺序固定。
+最终注入 Hermes 容器的 system prompt（SOUL.md）由「平台默认 → 组织 → 应用」三层拼接，顺序固定。
 
 ### 3.4 组织级知识库
 
@@ -155,7 +155,7 @@ access token 默认 15 分钟有效，过期时前端用 refresh token 自动续
 
 ## 4. 组织成员
 
-每个成员账号绑定唯一一个 OpenClaw 应用。登录后默认跳到自己的应用详情。
+每个成员账号绑定唯一一个 Hermes 应用。登录后默认跳到自己的应用详情。
 
 ### 4.1 应用详情
 
@@ -180,7 +180,7 @@ access token 默认 15 分钟有效，过期时前端用 refresh token 自动续
 | 重启 | stop + start |
 | 查看日志 | 滚动尾部 stdout/stderr，可选时间窗 |
 | 资源指标 | CPU / 内存 / 磁盘最近一次采样（agent 上报） |
-| 健康探针 | OpenClaw `/healthz`，最近探测时间 + 结果 |
+| 健康探针 | Hermes `/healthz`，最近探测时间 + 结果 |
 
 > 高风险操作（停止 / 重启 / 删除）会弹出 `ConfirmActionModal`，要求输入应用名才能放行。
 
@@ -188,7 +188,7 @@ access token 默认 15 分钟有效，过期时前端用 refresh token 自动续
 
 第一版仅微信扫码：
 
-1. 点 **绑定微信** 弹出 modal，后端调起 OpenClaw 容器内的微信插件；
+1. 点 **绑定微信** 弹出 modal，后端调起 Hermes 容器内的微信插件；
 2. 容器返回二维码 payload，UI 用 `qrcode` 渲染成图片；
 3. 微信 App 扫码 + 确认；
 4. 后端轮询插件直至成功，应用状态更新为「已绑定」并显示微信昵称；
@@ -204,14 +204,14 @@ access token 默认 15 分钟有效，过期时前端用 refresh token 自动续
 
 #### 工作目录（Workspace）
 
-OpenClaw 容器内 `/workspace` 的浏览入口（只读）：
+Hermes 容器内 `/workspace` 的浏览入口（只读）：
 
 - 面包屑导航；
 - 单文件下载；
 - 文件夹打包下载（zip）；
-- 自动归档保留期由部署侧 `openclaw.workspace.archive_retention_days` 决定。
+- 自动归档保留期由部署侧 `hermes.workspace.archive_retention_days` 决定。
 
-> manager **不允许**用户向 workspace 写入文件，写入只能由 OpenClaw 容器进程完成。
+> manager **不允许**用户向 workspace 写入文件，写入只能由 Hermes 容器进程完成。
 
 ### 4.2 应用级 AI 人设
 

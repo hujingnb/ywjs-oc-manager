@@ -1,8 +1,8 @@
-# OpenClaw Manager
+# Agent Runtime Manager
 
-面向组织的 OpenClaw 应用管理后台。负责组织 / 成员 / 应用 / Runtime Node 编排，
+面向组织的 Hermes Agent 应用管理后台。负责组织 / 成员 / 应用 / Runtime Node 编排，
 对接 [`new-api`](https://github.com/Calcium-Ion/new-api) 网关计费，集中管控运行在
-多个 Runtime Node 上的 OpenClaw 容器。
+多个 Runtime Node 上的 Hermes 容器。
 
 > 第一版定位为「单 manager + 多 Runtime Node」管理后台。manager 不直接读节点
 > Docker socket 或文件系统，所有节点级操作经由部署在节点上的 `oc-runtime-agent`
@@ -12,7 +12,7 @@
 
 - 平台 / 组织 / 成员 三类角色的账号体系与登录。
 - 组织生命周期管理 + Token Credit 充值（实际计费由 `new-api` 完成）。
-- 创建成员账号时同步创建该成员名下唯一的 OpenClaw 应用，自动分配可用 Runtime Node。
+- 创建成员账号时同步创建该成员名下唯一的 Hermes 应用，自动分配可用 Runtime Node。
 - Runtime Node 注册、心跳、健康自愈（unreachable → active），bootstrap token 一次性发放、
   agent token 长期通信凭证。
 - 每个应用对应一个 Docker 容器（经 agent 启停）、一个 `new-api api_key`、
@@ -46,7 +46,7 @@
               │   │  proxy 7001 │                 │   │  proxy 7001 │
               │   └─ file API   │                 │   └─ file API   │
               │      7002       │                 │      7002       │
-              │  OpenClaw 容器 ×N                 │  OpenClaw 容器 ×N│
+              │  Hermes 容器 ×N                   │  Hermes 容器 ×N  │
               └─────────────────┘                 └─────────────────┘
 ```
 
@@ -76,7 +76,7 @@ oc-manager/
 │   ├── service/            业务服务层（auth / member / app / runtime / knowledge / …）
 │   ├── domain/             状态机与枚举
 │   ├── store/              sqlc 生成的 repository
-│   ├── runtime/imagesync/  OpenClaw 镜像同步到节点
+│   ├── runtime/imagesync/  agent runtime 镜像同步到节点
 │   ├── scheduler/          job 队列调度器
 │   ├── worker/             job 执行器（onboarding / knowledge sync / …）
 │   ├── integrations/       new-api / agent client
@@ -87,7 +87,7 @@ oc-manager/
 │   └── migrations/         golang-migrate up/down SQL
 ├── runtime/
 │   ├── agent/              oc-runtime-agent binary（部署到每个 Runtime Node）
-│   └── openclaw/           OpenClaw 容器镜像构建上下文
+│   └── hermes/             Hermes 容器镜像构建上下文
 ├── web/                  Vue 3 管理后台 SPA
 │   ├── src/
 │   │   ├── pages/            apps / org / platform / runtime-nodes / knowledge / …
@@ -118,8 +118,8 @@ cp config/agent.example.yaml   config/agent.yaml
 ${EDITOR:-vi} config/manager.yaml   # 至少改：database.url / redis.password / auth.* / security.master_key
 ${EDITOR:-vi} config/agent.yaml     # 至少改：agent.token / manager.* 暂留空
 
-# 2. 构建 OpenClaw runtime 镜像（首次必做）
-make build-openclaw-runtime
+# 2. 构建 Hermes runtime 镜像（首次必做）
+make build-hermes-runtime
 
 # 3. 拉起依赖 + manager + agent
 make check-compose

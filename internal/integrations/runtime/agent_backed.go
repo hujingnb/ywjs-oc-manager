@@ -448,9 +448,9 @@ func (a *AgentBackedAdapter) UploadAppFile(ctx context.Context, nodeID, appID, r
 	return cli.UploadAppKnowledgeFile(ctx, appID, relPath, content)
 }
 
-// UploadAppRuntimeFile 把 manager 渲染的 OpenClaw 运行时配置文件（如 pi-coding-agent
-// settings.json）写到指定节点的 apps/<appID>/pi-agent/，agent 端 bind mount 到容器
-// /root/.pi/agent/{relPath}。
+// UploadAppRuntimeFile 把 manager 渲染的 legacy runtime 配置文件（如 pi-coding-agent
+// settings.json）写到指定节点的 apps/<appID>/openclaw-config/，agent 端 bind mount
+// 到容器 legacy 路径；Hermes 时代已弃用此端点，保留以向后兼容。
 func (a *AgentBackedAdapter) UploadAppRuntimeFile(ctx context.Context, nodeID, appID, relPath string, content io.Reader) error {
 	cli, err := a.resolveFile(ctx, nodeID)
 	if err != nil {

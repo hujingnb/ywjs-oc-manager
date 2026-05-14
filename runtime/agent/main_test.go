@@ -44,10 +44,10 @@ func TestHealthz(t *testing.T) {
 func TestInspectImage(t *testing.T) {
 	docker := &fakeDockerClient{
 		images: map[string]DockerImageInfo{
-			"openclaw-runtime:dev": {ID: "sha256:local", RepoTags: []string{"openclaw-runtime:dev"}},
+			"hermes-runtime:dev": {ID: "sha256:local", RepoTags: []string{"hermes-runtime:dev"}},
 		},
 	}
-	req := httptest.NewRequest(http.MethodGet, "/v1/images/inspect?image=openclaw-runtime:dev", nil)
+	req := httptest.NewRequest(http.MethodGet, "/v1/images/inspect?image=hermes-runtime:dev", nil)
 	rec := httptest.NewRecorder()
 
 	newHandlerWithDocker("/tmp/agent", docker, "").ServeHTTP(rec, req)
@@ -82,7 +82,7 @@ func TestInspectImageNotFound(t *testing.T) {
 
 // TestLoadImageRequiresTokenWhenConfigured 验证加载镜像要求令牌在启用配置时的预期行为场景。
 func TestLoadImageRequiresTokenWhenConfigured(t *testing.T) {
-	req := httptest.NewRequest(http.MethodPost, "/v1/images/load?image=openclaw-runtime:dev", bytes.NewBufferString("tar"))
+	req := httptest.NewRequest(http.MethodPost, "/v1/images/load?image=hermes-runtime:dev", bytes.NewBufferString("tar"))
 	rec := httptest.NewRecorder()
 
 	newHandlerWithDocker("/tmp/agent", &fakeDockerClient{}, "secret").ServeHTTP(rec, req)
@@ -92,7 +92,7 @@ func TestLoadImageRequiresTokenWhenConfigured(t *testing.T) {
 
 // TestNewHandlerUsesConfiguredToken 验证新建处理器使用配置的令牌的预期行为场景。
 func TestNewHandlerUsesConfiguredToken(t *testing.T) {
-	req := httptest.NewRequest(http.MethodGet, "/v1/images/inspect?image=openclaw-runtime:dev", nil)
+	req := httptest.NewRequest(http.MethodGet, "/v1/images/inspect?image=hermes-runtime:dev", nil)
 	rec := httptest.NewRecorder()
 
 	newHandler("/tmp/agent", "secret", "/var/run/docker.sock").ServeHTTP(rec, req)
@@ -106,11 +106,11 @@ func TestNewHandlerUsesConfiguredDockerSocketForImages(t *testing.T) {
 	var loadedBytes string
 	socket := startUnixDockerStub(t, func(w http.ResponseWriter, r *http.Request) {
 		switch r.URL.Path {
-		case "/images/openclaw-runtime:dev/json":
+		case "/images/hermes-runtime:dev/json":
 			inspected = true
 			writeJSON(w, map[string]any{
 				"Id":       "sha256:configured",
-				"RepoTags": []string{"openclaw-runtime:dev"},
+				"RepoTags": []string{"hermes-runtime:dev"},
 			})
 		case "/images/load":
 			body, err := io.ReadAll(r.Body)
@@ -128,14 +128,14 @@ func TestNewHandlerUsesConfiguredDockerSocketForImages(t *testing.T) {
 	})
 	handler := newHandler("/tmp/agent", "secret", socket)
 
-	inspectReq := httptest.NewRequest(http.MethodGet, "/v1/images/inspect?image=openclaw-runtime:dev", nil)
+	inspectReq := httptest.NewRequest(http.MethodGet, "/v1/images/inspect?image=hermes-runtime:dev", nil)
 	inspectReq.Header.Set("Authorization", "Bearer secret")
 	inspectRec := httptest.NewRecorder()
 	handler.ServeHTTP(inspectRec, inspectReq)
 	require.Equal(t, http.StatusOK, inspectRec.Code)
 	require.True(t, inspected)
 
-	loadReq := httptest.NewRequest(http.MethodPost, "/v1/images/load?image=openclaw-runtime:dev", bytes.NewBufferString("tar"))
+	loadReq := httptest.NewRequest(http.MethodPost, "/v1/images/load?image=hermes-runtime:dev", bytes.NewBufferString("tar"))
 	loadReq.Header.Set("Authorization", "Bearer secret")
 	loadRec := httptest.NewRecorder()
 	handler.ServeHTTP(loadRec, loadReq)
@@ -146,7 +146,7 @@ func TestNewHandlerUsesConfiguredDockerSocketForImages(t *testing.T) {
 // TestLoadImage 验证镜像加载接口能把请求转发给运行时并返回成功的场景。
 func TestLoadImage(t *testing.T) {
 	docker := &fakeDockerClient{images: map[string]DockerImageInfo{}}
-	req := httptest.NewRequest(http.MethodPost, "/v1/images/load?image=openclaw-runtime:dev", bytes.NewBufferString("tar"))
+	req := httptest.NewRequest(http.MethodPost, "/v1/images/load?image=hermes-runtime:dev", bytes.NewBufferString("tar"))
 	req.Header.Set("Authorization", "Bearer secret")
 	rec := httptest.NewRecorder()
 
@@ -407,7 +407,7 @@ func (f *fakeDockerClient) LoadImage(_ context.Context, archive io.Reader) error
 	if f.images == nil {
 		f.images = map[string]DockerImageInfo{}
 	}
-	f.images["openclaw-runtime:dev"] = DockerImageInfo{ID: "sha256:loaded", RepoTags: []string{"openclaw-runtime:dev"}}
+	f.images["hermes-runtime:dev"] = DockerImageInfo{ID: "sha256:loaded", RepoTags: []string{"hermes-runtime:dev"}}
 	return nil
 }
 

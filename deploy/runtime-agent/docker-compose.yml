@@ -1,4 +1,4 @@
-# Runtime Agent 生产部署包：部署在 OpenClaw runtime node 上，负责容器运行态管理。
+# Runtime Agent 生产部署包：部署在 Hermes runtime node 上，负责容器运行态管理。
 # 本目录可独立复制到目标节点后执行 `docker compose up -d`。
 
 # 让 agent 容器可稳定访问宿主机网络入口，兼容宿主侧 registry、代理或管理端口。

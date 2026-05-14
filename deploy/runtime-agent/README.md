@@ -1,6 +1,6 @@
 # Runtime Agent 生产部署包
 
-本目录部署到每台 Runtime Node。agent 通过宿主 Docker socket 管理 OpenClaw 容器，并主动注册到 manager。
+本目录部署到每台 Runtime Node。agent 通过宿主 Docker socket 管理 Hermes 容器，并主动注册到 manager。
 
 ## 启动
 

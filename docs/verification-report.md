@@ -1,4 +1,4 @@
-# OpenClaw Manager 端到端验证报告
+# Agent Runtime Manager 端到端验证报告
 
 > 最新更新：v1.0 RC Chunk-1 真扫码闭环达成（2026-05-06）。
 > 真实微信扫码绑定 → 微信发消息 → OpenClaw embedded agent → openai SDK →

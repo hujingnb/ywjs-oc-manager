@@ -86,7 +86,7 @@ func TestChannelCheckBindingHandlerMarksBoundAndRunsApp(t *testing.T) {
 func TestChannelStartLoginHandlerRecordsFailedAudit(t *testing.T) {
 	store := newChannelWorkerStore(t)
 	registry := channel.NewRegistry()
-	registry.MustRegister(&workerFakeChannelAdapter{beginErr: errors.New("openclaw qrcode failed")})
+	registry.MustRegister(&workerFakeChannelAdapter{beginErr: errors.New("weixin qrcode failed")})
 	handler := NewChannelStartLoginHandler(store, registry)
 
 	err := handler.Handle(context.Background(), sqlc.Job{
@@ -100,7 +100,7 @@ func TestChannelStartLoginHandlerRecordsFailedAudit(t *testing.T) {
 	require.Equal(t, testChannelWorkerAppID, store.auditLogs[0].TargetID)
 	require.Equal(t, "channel_auth_start", store.auditLogs[0].Action)
 	require.Equal(t, "failed", store.auditLogs[0].Result)
-	require.Contains(t, store.auditLogs[0].ErrorMessage.String, "openclaw qrcode failed")
+	require.Contains(t, store.auditLogs[0].ErrorMessage.String, "weixin qrcode failed")
 }
 
 // TestChannelCheckBindingHandlerRecordsFailedAudit 验证渠道轮询确认绑定失败时写入应用审计的错误记录场景。
@@ -172,8 +172,9 @@ func TestChannelCheckBindingHandlerRequeuesPending(t *testing.T) {
 // 已经有真实账号 session 时（resolver 返回非空 identity），应当推到 bound 而不是
 // 等到 expired。
 //
-// 这个 fallback 修复的是 OpenClaw weixin plugin 的真实行为：第二次扫码（同一微信
-// 账号已授权过）plugin 静默成功不再 emit bound 事件，但 accounts.json 仍真实可用。
+// 这个 fallback 修复的是 Hermes weixin plugin 的真实行为（legacy OpenClaw 时代同样存在）：
+// 第二次扫码（同一微信账号已授权过）plugin 静默成功不再 emit bound 事件，但 accounts.json
+// 仍真实可用。
 func TestChannelCheckBindingHandlerFallsBackToResolverWhenAdapterPending(t *testing.T) {
 	store := newChannelWorkerStore(t)
 	registry := channel.NewRegistry()

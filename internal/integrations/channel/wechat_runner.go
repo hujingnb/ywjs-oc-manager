@@ -95,7 +95,7 @@ func NewDockerCommandRunner(executor ContainerExecutor, _ AppContainerLookup) *D
 }
 
 // StreamWeChatLogin 委托给 hermes.WeixinRunner。
-// 返回类型升级为 <-chan hermes.WeixinEvent（原 OpenClaw 时代是 <-chan string）。
+// 返回类型升级为 <-chan hermes.WeixinEvent（legacy OpenClaw 时代是 <-chan string）。
 // 上游 caller（wechat.go WeChatAdapter）在 Task 3.5 同步升级为消费 hermes.WeixinEvent。
 func (r *DockerCommandRunner) StreamWeChatLogin(ctx context.Context, input AuthInput) (<-chan hermes.WeixinEvent, error) {
 	return r.inner.StreamWeChatLogin(ctx, input.ContainerID)

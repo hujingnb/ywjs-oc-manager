@@ -37,7 +37,7 @@ type App struct {
 	RuntimeSnapshotAt   pgtype.Timestamptz `db:"runtime_snapshot_at" json:"runtime_snapshot_at"`
 	RestartPolicyJson   []byte             `db:"restart_policy_json" json:"restart_policy_json"`
 	HealthStateJson     []byte             `db:"health_state_json" json:"health_state_json"`
-	// 实例当前使用的模型 ID，由 manager 注入 OpenClaw 配置。
+	// 实例当前使用的模型 ID，由 manager 注入 Hermes 配置。
 	ModelID string `db:"model_id" json:"model_id"`
 }
 

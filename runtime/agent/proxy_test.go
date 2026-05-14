@@ -181,7 +181,7 @@ func TestDockerProxy_RewriteCreateContainerMounts(t *testing.T) {
 		"/host/data/agent")
 
 	body := `{
-		"Image":"openclaw-runtime:dev",
+		"Image":"hermes-runtime:dev",
 		"HostConfig":{
 			"Binds":["/var/lib/oc-agent/apps/x/workspace:/workspace:rw","/etc/timezone:/etc/timezone:ro"],
 			"Mounts":[

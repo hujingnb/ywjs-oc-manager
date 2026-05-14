@@ -222,9 +222,10 @@ func (h *ChannelCheckBindingHandler) Handle(ctx context.Context, job sqlc.Job) e
 			return err
 		}
 	default:
-		// Fallback：OpenClaw weixin plugin 在 cached login（同微信账号已授权过）场景下
-		// 不再 emit "bound" 事件，但 plugin state 文件 (/root/.openclaw/openclaw-weixin/accounts/*.json)
-		// 真实存在 session。这里直接调 resolver 看 plugin state 是否已有有效身份；
+		// Fallback：weixin plugin 在 cached login（同微信账号已授权过）场景下
+		// 不再 emit "bound" 事件，但 plugin state 文件（/root/.openclaw/openclaw-weixin/accounts/*.json，
+		// legacy 路径，Hermes 容器通过 bind mount 保持相同路径）真实存在 session。
+		// 这里直接调 resolver 看 plugin state 是否已有有效身份；
 		// 有就同样推到 bound，避免 5 分钟后被错误地 expire。
 		if h.resolver != nil && payload.ChannelType == domain.ChannelTypeWeChat {
 			if identity, rerr := h.resolver.ResolveWeChatBoundIdentity(ctx, uuidToString(app.RuntimeNodeID), textOrEmpty(app.ContainerID)); rerr == nil && identity != "" {

@@ -12,7 +12,7 @@ import (
 )
 
 // CommandRunner 抽象通过 agent docker exec 拉起 Hermes 扫码命令并返回事件 channel 的能力。
-// Hermes 时代事件类型升级为 hermes.WeixinEvent（原 OpenClaw 时代是 <-chan string）。
+// Hermes 时代事件类型升级为 hermes.WeixinEvent（legacy OpenClaw 时代是 <-chan string）。
 type CommandRunner interface {
 	StreamWeChatLogin(ctx context.Context, input AuthInput) (<-chan hermes.WeixinEvent, error)
 }

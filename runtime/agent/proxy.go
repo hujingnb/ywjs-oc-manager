@@ -33,7 +33,8 @@ const dockerProxyPathPrefix = "/v1/docker"
 // agentDataRoot / hostDataRoot 用于 §3 的 mount source 重写：agent 容器持有的
 // dataRoot（默认 /var/lib/oc-agent）实际是宿主某路径的 bind mount；docker daemon
 // 在宿主视角解析 mount source，不重写会导致 source 路径不存在 → docker 自动创建
-// 空目录占位 → 文件级 mount（如 models.json）退化为目录，OpenClaw 读不到内容。
+// 空目录占位 → 文件级 mount（如 models.json）退化为目录，legacy OpenClaw 读不到内容
+//（Hermes 时代已弃用 file-level mount，但路径重写逻辑保留以向后兼容）。
 // 两者相同（直接在宿主跑 / 不在容器内）时跳过重写，行为等价于原代理。
 func NewDockerProxyHandler(socketPath string, agentToken any, trustedCIDR, agentDataRoot, hostDataRoot string) http.Handler {
 	transport := &http.Transport{

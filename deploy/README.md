@@ -1,4 +1,4 @@
-# OpenClaw Manager 生产部署指南
+# Agent Runtime Manager 生产部署指南
 
 `deploy/` 下生产部署入口已拆成四个独立运行包：
 
@@ -25,6 +25,6 @@
 ## 防火墙摘要
 
 - manager：公网开放 `80/443`。
-- new-api：至少允许 manager 和 OpenClaw 容器访问 OpenAI 兼容接口。
+- new-api：至少允许 manager 和 Hermes 容器访问 OpenAI 兼容接口。
 - ollama：建议只允许 new-api 访问 `11434`。
 - runtime-agent：只允许 manager 出口网段访问 `7001/7002`。

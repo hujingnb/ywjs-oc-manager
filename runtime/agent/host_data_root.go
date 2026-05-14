@@ -15,7 +15,8 @@ import (
 // 实际宿主上指向另一处（例如 /home/.../oc-manager/.local/data/agent）。
 // docker daemon 在宿主视角解析 mount source；manager 通过 docker proxy 创建
 // ocm-* 容器时传的是 agent 视角路径，docker daemon 看不到这条路径就会创建
-// 空目录占位，文件级 mount 直接退化成空目录，OpenClaw 读不到 models.json。
+// 空目录占位，文件级 mount 直接退化成空目录，legacy OpenClaw 读不到 models.json
+//（Hermes 时代已不再使用 file-level mount，改为全量挂载，但此函数仍用于路径重写）。
 //
 // detectHostDataRoot 在 agent 启动时一次性确定宿主真实路径，docker proxy
 // 后续转发 create container 请求时把 agent 视角的 mount source 替换成宿主路径。

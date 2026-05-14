@@ -1,4 +1,4 @@
-# OpenClaw Manager 本地开发指南
+# Agent Runtime Manager 本地开发指南
 
 本仓库的本地调试通过 Docker Compose 全程托管，宿主机不直接运行 Go 或 Vite。
 本文档汇总最常用的命令、目录结构和验收清单。
@@ -6,9 +6,9 @@
 ## 先决条件
 
 - Docker Engine 24 及以上，已启用 buildx；
-- 至少 8GB 空闲内存（OpenClaw runtime 镜像、PostgreSQL、Redis、Ollama 同时启动）；
+- 至少 8GB 空闲内存（Hermes runtime 镜像、PostgreSQL、Redis、Ollama 同时启动）；
 - 仓库根目录的 `.env.example` 复制为 `.env` 后按需编辑；
-- 第一次启动前请执行 `make build-openclaw-runtime` 以产出 OpenClaw runtime 镜像。
+- 第一次启动前请执行 `make build-hermes-runtime` 以产出 Hermes runtime 镜像。
 
 ## 关键 Make 目标
 
@@ -18,9 +18,9 @@
 | `make dev-up` | 启动全部服务（manager-api / manager-web / manager-postgres / manager-redis / new-api / new-api-postgres / new-api-redis / ollama / oc-runtime-agent）。 |
 | `make dev-down` | 停止并清理容器，本地 bind mount 数据保留在 `./data`。 |
 | `make migrate-up` / `make migrate-down` | 在容器内执行迁移。 |
-| `make build-openclaw-runtime` | 构建 OpenClaw runtime 镜像。 |
-| `make verify-openclaw-runtime` | 验证 OpenClaw 与微信插件已正确安装。 |
-| `make sync-openclaw-runtime-image` | 把镜像分发到 runtime node。 |
+| `make build-hermes-runtime` | 构建 Hermes runtime 镜像。 |
+| `make verify-hermes-runtime` | 验证 Hermes runtime 镜像已正确安装。 |
+| `make sync-hermes-runtime-image` | 把镜像分发到 runtime node。 |
 | `make debug-ollama` | 检查 Ollama API、列出模型并发起一次最小调用。 |
 | `make debug-newapi` | 检查 new-api HTTP/数据库/Ollama 渠道。 |
 | `make test` / `make vet` / `make build` | 后端测试、静态检查与产物构建。 |

@@ -20,7 +20,7 @@ const (
 	maxKnowledgeFileSize   = 100 * 1024 * 1024 // 单文件 100 MiB（应用级单文件 upload）
 )
 
-// 工作目录浏览/下载上限：与 spec §11.5 openclaw.workspace.* 配置一致，
+// 工作目录浏览/下载上限：与 spec §11.5 workspace.* 配置一致，
 // agent 这层做强制兜底，manager 侧再做一次校验形成两层防御。
 const (
 	maxWorkspaceDownloadSize = 500 * 1024 * 1024       // 单文件 500 MiB
@@ -105,11 +105,13 @@ func scopesAppsHandler(dataRoot string) http.HandlerFunc {
 		case action == "init" && r.Method == http.MethodPost:
 			handleAppInit(w, r, dataRoot, appID)
 		case action == "runtime/file" && r.Method == http.MethodPut:
-			// 写 manager 渲染的 OpenClaw 运行时配置文件（如 models.json 覆盖 agent catalog）。
-			// 沙箱根 = apps/<appID>/openclaw-config/，容器内通过 file-level bind mount 暴露为
-			// /root/.openclaw/agents/main/agent/<file>（OpenClaw 上层 embedded agent 实际读取路径）。
+			// legacy runtime 沙箱配置文件(OpenClaw 时代用,Hermes 时代不再使用)。
+			// 沙箱根 = apps/<appID>/openclaw-config/，保留路径以向后兼容 OpenClaw 时代 file-level
+			// bind mount；Hermes 时代容器改用全量挂载 apps/<id>/.hermes:/opt/data，此 endpoint
+			// 在 Hermes 部署下不再被 manager 调用，但保留以兼容 legacy 调用方。
 			handleKnowledgeFileUpload(w, r, dataRoot, filepath.Join("apps", appID, "openclaw-config"))
 		case action == "runtime/file" && r.Method == http.MethodDelete:
+			// legacy OpenClaw 兼容沙箱目录(Hermes 时代未使用,保留兼容性)。
 			handleKnowledgeFileDelete(w, r, dataRoot, filepath.Join("apps", appID, "openclaw-config"))
 		case action == "knowledge/sync" && r.Method == http.MethodPost:
 			handleKnowledgeSync(w, r, dataRoot, filepath.Join("apps", appID, "knowledge"))
@@ -179,10 +181,14 @@ func isValidScopeID(id string) bool {
 }
 
 // handleAppInit 创建 apps/<appID>/{knowledge,workspace,state,logs,openclaw-config,weixin} 6 个子目录。
-// openclaw-config 用于存放 manager 渲染的 OpenClaw 上层 embedded agent 配置（如 models.json），
-// 通过 file-level bind mount 暴露到容器内 /root/.openclaw/agents/main/agent/。
-// weixin 用于持久化 OpenClaw weixin 渠道插件的 token / accounts.json，bind mount 到容器内
-// /root/.openclaw/openclaw-weixin/，让 docker restart 不丢扫码 session。
+// openclaw-config / weixin 是 legacy OpenClaw 兼容沙箱目录(Hermes 时代未使用,保留兼容性)：
+//   - openclaw-config：OpenClaw 时代存放 manager 渲染的 embedded agent 配置（如 models.json），
+//     通过 file-level bind mount 暴露到容器内 /root/.openclaw/agents/main/agent/；
+//     Hermes 时代改用全量挂载 apps/<id>/.hermes:/opt/data，此目录不再被写入。
+//   - weixin：OpenClaw 时代持久化 weixin 渠道插件的 token / accounts.json，bind mount 到
+//     /root/.openclaw/openclaw-weixin/，让 docker restart 不丢扫码 session；
+//     Hermes 时代沿用相同挂载路径，但源目录变为 apps/<id>/.hermes/weixin（如果已迁移）。
+//
 // 操作幂等：MkdirAll 在目录已存在时 no-op。
 func handleAppInit(w http.ResponseWriter, _ *http.Request, dataRoot, appID string) {
 	for _, sub := range []string{"knowledge", "workspace", "state", "logs", "openclaw-config", "weixin"} {

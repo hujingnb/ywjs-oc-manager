@@ -23,13 +23,13 @@ import (
 
 // TestAgentBackedAdapterEnsureImageDelegatesToImageSyncer 验证agentBacked适配器确保镜像Delegates到镜像同步器的预期行为场景。
 func TestAgentBackedAdapterEnsureImageDelegatesToImageSyncer(t *testing.T) {
-	syncer := &fakeImageSyncer{result: imagesync.SyncResult{Image: "openclaw:dev", NodeID: "node-1", Transferred: true}}
+	syncer := &fakeImageSyncer{result: imagesync.SyncResult{Image: "hermes-runtime:dev", NodeID: "node-1", Transferred: true}}
 	adapter := NewAgentBackedAdapter(nil, nil, syncer)
 
-	got, err := adapter.EnsureImage(context.Background(), "node-1", "openclaw:dev")
+	got, err := adapter.EnsureImage(context.Background(), "node-1", "hermes-runtime:dev")
 	require.NoError(t, err)
 	require.True(t, got.Transferred)
-	if syncer.lastImage != "openclaw:dev" || syncer.lastNode != "node-1" {
+	if syncer.lastImage != "hermes-runtime:dev" || syncer.lastNode != "node-1" {
 		t.Fatalf("syncer last = %s/%s", syncer.lastNode, syncer.lastImage)
 	}
 }
@@ -37,7 +37,7 @@ func TestAgentBackedAdapterEnsureImageDelegatesToImageSyncer(t *testing.T) {
 // TestAgentBackedAdapterEnsureImageReturnsUnimplementedWithoutSyncer 验证agentBacked适配器确保镜像返回未实现不使用同步器的成功路径场景。
 func TestAgentBackedAdapterEnsureImageReturnsUnimplementedWithoutSyncer(t *testing.T) {
 	adapter := NewAgentBackedAdapter(nil, nil, nil)
-	if _, err := adapter.EnsureImage(context.Background(), "node-1", "openclaw:dev"); !errors.Is(err, ErrUnimplemented) {
+	if _, err := adapter.EnsureImage(context.Background(), "node-1", "hermes-runtime:dev"); !errors.Is(err, ErrUnimplemented) {
 		t.Fatalf("EnsureImage() error = %v, want ErrUnimplemented", err)
 	}
 }
@@ -249,7 +249,7 @@ func startMockDocker(t *testing.T, fixedID, inspectStatus string, calls *[]docke
 			_ = json.NewEncoder(w).Encode(map[string]any{
 				"Id":    fixedID,
 				"Name":  "/" + fixedID,
-				"Image": "openclaw-runtime:dev",
+				"Image": "hermes-runtime:dev",
 				"State": map[string]any{"Status": inspectStatus},
 			})
 		case strings.HasSuffix(r.URL.Path, "/_ping"):
@@ -282,15 +282,15 @@ func TestAgentBackedAdapterCreateContainerHappyPath(t *testing.T) {
 
 	spec := ContainerSpec{
 		Name:  "ocm-app-x",
-		Image: "openclaw-runtime:dev",
-		Env:   map[string]string{"OPENCLAW_API_KEY": "k1", "OPENCLAW_API_BASE": "http://newapi"},
+		Image: "hermes-runtime:dev",
+		Env:   map[string]string{"OPENAI_API_KEY": "k1", "OPENAI_BASE_URL": "http://newapi"},
 		Volumes: []VolumeMount{
 			{HostPath: "/data/workspace", ContainerPath: "/workspace"},                         // 场景：工作区挂载应以读写 bind mount 传给 Docker。
 			{HostPath: "/data/knowledge/org", ContainerPath: "/knowledge/org", ReadOnly: true}, // 场景：组织知识库挂载应以只读 bind mount 传给 Docker。
 		},
 		Networks:  []string{"oc-net"},
 		Resources: Resources{CPULimit: 2000, MemoryBytes: 1 << 30},
-		Command:   []string{"openclaw", "run"},
+		Command:   []string{"hermes", "start"},
 	}
 
 	info, err := adapter.CreateContainer(context.Background(), "node-1", spec)
@@ -302,10 +302,10 @@ func TestAgentBackedAdapterCreateContainerHappyPath(t *testing.T) {
 	createCall := findCall(t, calls, "POST", "/containers/create")
 	body := string(createCall.body)
 	for _, fragment := range []string{
-		`"Image":"openclaw-runtime:dev"`,
-		`"OPENCLAW_API_BASE=http://newapi"`,
-		`"OPENCLAW_API_KEY=k1"`,
-		`"openclaw","run"`,
+		`"Image":"hermes-runtime:dev"`,
+		`"OPENAI_BASE_URL=http://newapi"`,
+		`"OPENAI_API_KEY=k1"`,
+		`"hermes","start"`,
 		`"/data/workspace:/workspace"`,
 		`"/data/knowledge/org:/knowledge/org:ro"`,
 	} {

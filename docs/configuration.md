@@ -95,24 +95,24 @@ openssl rand -base64 32
 | `admin_token` | base_url 非空时 ✅ | new-api「个人设置 → 安全设置 → 系统访问令牌」生成的 access_token；不是 `sk-` 形式 token |
 | `admin_user_id` | base_url 非空时 ✅ | 整数；admin_token 持有者用户 ID（默认 `admin/admin123!` 是 `1`） |
 
-### 2.7 `openclaw.*`
+### 2.7 `hermes.*`
 
-OpenClaw 容器构建相关：
+Hermes Agent runtime 容器相关配置：
 
 | 字段 | 必填 | 含义 |
 |---|---|---|
-| `runtime_image` | ✅ | OpenClaw 容器镜像 tag；imagesync 会用 `docker save / load` 分发到节点 |
-| `system_prompt_template` | ✅ | 容器系统人设模板。**必须包含三个占位符**：`{{workspace_dir}}` / `{{knowledge_org_dir}}` / `{{knowledge_app_dir}}`，缺任一启动 fail-fast |
+| `runtime_image` | ✅ | Hermes 容器镜像 tag；imagesync 会用 `docker save / load` 分发到节点 |
+| `system_prompt_template` | ✅ | 容器 SOUL.md 平台层模板；占位符格式为 `{workspace_dir}` / `{knowledge_org_dir}` / `{knowledge_app_dir}`，缺任一启动 fail-fast |
 | `workspace.archive_retention_days` | ✅ | agent 端归档保留天数；`0` 表示不清理（仅本地调试） |
-| `llm.base_url` | — | OpenClaw 容器从 docker network 看到的 new-api OpenAI 兼容 endpoint，必须含 `/v1` 后缀；留空时容器内 pi-coding-agent 走默认路由，无法命中本地 ollama |
-| `llm.default_provider` | — | 写入容器 `/root/.pi/agent/settings.json`，常用 `openai` |
+| `llm.base_url` | — | Hermes 容器从 docker network 看到的 new-api OpenAI 兼容 endpoint，必须含 `/v1` 后缀；留空时容器内走默认路由，无法命中本地 ollama |
+| `llm.default_provider` | — | 写入容器 config.yaml，常用 `openai` |
 | `llm.default_model` | — | 必须是 new-api 渠道里实际可路由的名字，例如 `qwen2.5:0.5b` |
 > 业务 user 凭据由 manager 自动管理：组织创建时调 new-api 创业务 user，
 > 加密落 `organizations.newapi_user_credentials_ciphertext`。应用初始化
 > 时 manager 用密文里的 access_token 调 `POST /api/token/:id/key` 拿
 > 完整 sk- 注入容器，每个应用的 token 独立隔离，不再有全局 sk- 配置项。
 > （v1.0.2 GA 收尾改造，参考前序 spec §1）
-| `container_networks` | ✅ | OpenClaw 容器要连接的 docker network 列表；必须包含 `new-api` 所在 network。docker-compose project 默认派生 `<project>_default`（本仓库 `oc-manager_default`） |
+| `container_networks` | ✅ | Hermes 容器要连接的 docker network 列表；必须包含 `new-api` 所在 network。docker-compose project 默认派生 `<project>_default`（本仓库 `oc-manager_default`） |
 
 ### 2.8 `agent.*`
 
@@ -207,9 +207,9 @@ yaml：
 | `NEWAPI_BASE_URL` | `newapi.base_url` |
 | `NEWAPI_ADMIN_TOKEN` | `newapi.admin_token` |
 | `NEWAPI_ADMIN_USER_ID` | `newapi.admin_user_id` |
-| `OPENCLAW_LLM_BASE_URL` | `openclaw.llm.base_url` |
-| `OPENCLAW_LLM_DEFAULT_PROVIDER` | `openclaw.llm.default_provider` |
-| `OPENCLAW_LLM_DEFAULT_MODEL` | `openclaw.llm.default_model` |
+| `HERMES_LLM_BASE_URL` | `hermes.llm.base_url` |
+| `HERMES_LLM_DEFAULT_PROVIDER` | `hermes.llm.default_provider` |
+| `HERMES_LLM_DEFAULT_MODEL` | `hermes.llm.default_model` |
 | `OPENCLAW_LLM_OPENAI_API_KEY` | 已废弃，v1.0.2 起由 manager 按应用动态注入，无需配置 |
 | `OCM_KNOWLEDGE_ROOT` | `app.knowledge_root` |
 
@@ -226,9 +226,9 @@ yaml：
 - [ ] `auth.access_token_ttl` / `auth.refresh_token_ttl` 是合法 Go duration 字符串
 - [ ] `security.master_key` 是 base64 编码 + 解码后正好 32 字节
 - [ ] `runtime.enrollment_secret` 是 base64 编码 + 解码后正好 32 字节，且所有 agent 一致
-- [ ] `openclaw.system_prompt_template` 含三个占位符 `{{workspace_dir}}` /
-      `{{knowledge_org_dir}}` / `{{knowledge_app_dir}}`
-- [ ] `openclaw.container_networks` 至少含 `new-api` 所在 network
+- [ ] `hermes.system_prompt_template` 含三个占位符 `{workspace_dir}` /
+      `{knowledge_org_dir}` / `{knowledge_app_dir}`
+- [ ] `hermes.container_networks` 至少含 `new-api` 所在 network
 - [ ] agent 端 `agent.docker_addr` / `file_addr` 不冲突，且对 manager 网络可达
 - [ ] agent 端 `agent.advertise_host` 是 manager 能访问到的主机名或 IP
 

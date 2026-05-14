@@ -21,7 +21,7 @@ const (
 	testResourceMemberID   = "00000000-0000-0000-0000-00000000e003"
 	testResourceAppID      = "00000000-0000-0000-0000-00000000e004"
 	testResourceRuntimeID  = "00000000-0000-0000-0000-00000000e005"
-	testResourceContainer  = "openclaw-resource-test"
+	testResourceContainer  = "hermes-resource-test"
 	testResourceSampleTime = "2026-05-13T12:00:00Z"
 )
 

@@ -1,8 +1,8 @@
 // Package main 是 manager-api HTTP 服务入口。
 //
-// @title           OpenClaw Manager API
+// @title           Agent Runtime Manager API
 // @version         1.0
-// @description     OpenClaw 多组织管理后台 API。
+// @description     基于 Hermes Agent runtime 的多组织管理后台 API。
 // @BasePath        /api/v1
 //
 // @securityDefinitions.apikey BearerAuth

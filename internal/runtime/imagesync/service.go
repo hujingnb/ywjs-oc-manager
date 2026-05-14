@@ -1,4 +1,4 @@
-// Package imagesync 负责把 manager 本地可用的 OpenClaw runtime 镜像同步到指定 runtime node。
+// Package imagesync 负责把 manager 本地可用的 agent runtime 镜像同步到指定 runtime node。
 //
 // 同步边界刻意放在 nodeID 维度：本包只比较“本地镜像 ID”和“目标节点镜像 ID”，
 // 不跨节点复用结果，避免某个节点镜像已更新而另一个节点仍旧落后的情况被误判为成功。

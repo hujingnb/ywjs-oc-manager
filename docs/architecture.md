@@ -21,7 +21,7 @@
 │   ├── service/*Service       业务逻辑层（auth/member/app/runtime/...）    │
 │   ├── store/sqlc             PostgreSQL repository（sqlc 生成）          │
 │   ├── domain                 状态机 + 枚举                               │
-│   ├── runtime/imagesync      把 OpenClaw runtime 镜像分发到节点          │
+│   ├── runtime/imagesync      把 agent runtime 镜像分发到节点             │
 │   ├── scheduler              job 队列调度器                              │
 │   ├── worker                 job 执行器                                  │
 │   └── integrations           new-api / agent client                      │
@@ -42,7 +42,7 @@
    │  /var/run/docker.sock        │    │  /var/run/docker.sock        │
    │       │                      │    │       │                      │
    │       ▼                      │    │       ▼                      │
-   │  OpenClaw 容器 ×N            │    │  OpenClaw 容器 ×N            │
+   │  Hermes 容器 ×N              │    │  Hermes 容器 ×N              │
    │  data_root：                 │    │                              │
    │   apps/<app_id>/workspace    │    │                              │
    │   apps/<app_id>/knowledge    │    │                              │
@@ -95,7 +95,7 @@ PostgreSQL
 - `internal/files` 路径沙箱（防止节点文件 API 越权）
 - `internal/log` 结构化日志
 - `internal/integrations` `new-api` HTTP client、agent HTTP client、Docker 代理 client
-- `internal/runtime/imagesync` 把宿主 `openclaw-runtime` 镜像 `docker save` 后流给 agent `docker load`
+- `internal/runtime/imagesync` 把宿主 `hermes-runtime` 镜像 `docker save` 后流给 agent `docker load`
 
 权限校验**必须在后端 service 层执行**，前端菜单/按钮隐藏只是 UX。
 
@@ -114,7 +114,7 @@ PostgreSQL
 | `RuntimeOperationService` | 应用容器 start / stop / restart / logs / stats |
 | `KnowledgeService` | 组织级 + 应用级文件主副本写入；触发 `knowledge_sync_node` job |
 | `WorkspaceService` | 应用工作目录浏览 / 单文件下载 / 文件夹打包 |
-| `ChannelService` | 渠道绑定状态机（第一版仅微信扫码）；轮询 OpenClaw 容器内插件 |
+| `ChannelService` | 渠道绑定状态机（第一版仅微信扫码）；轮询 Hermes 容器内插件 |
 | `RechargeService` | 平台管理员对组织充值 Token Credit；落 audit + 调 new-api |
 | `PersonaService` | 组织级 / 应用级 AI 人设；含「平台默认 → 组织 → 应用」三层模板 |
 | `UsageService` | 直查 `new-api` 用量，按 platform / org / app 聚合，不缓存 |
@@ -196,15 +196,15 @@ agent 的 docker proxy 不实现 Docker API 全集，只透传 manager 用得到
 
 - 组织级：`{manager.knowledge_root}/orgs/<org_id>/...`，由 manager 主副本主导，
   `knowledge_sync_node` 异步推送到该组织下应用所在的全部节点；
-  节点上落 `{agent.data_root}/orgs/<org_id>/...`，挂载到 OpenClaw 容器
+  节点上落 `{agent.data_root}/orgs/<org_id>/...`，挂载到 Hermes 容器
   `/knowledge/org/`（只读）。
 - 应用级：`{manager.knowledge_root}/apps/<app_id>/...` →
   `{agent.data_root}/apps/<app_id>/...` → 容器 `/knowledge/app/`（只读）。
-- 工作目录：仅在节点 `{agent.data_root}/apps/<app_id>/workspace/` 上，OpenClaw
+- 工作目录：仅在节点 `{agent.data_root}/apps/<app_id>/workspace/` 上，Hermes
   容器写，UI 通过 agent 文件 API 只读浏览 / 下载。
 
-manager 不解析文件内容；OpenClaw 通过 system prompt 模板里的
-`{{workspace_dir}}` / `{{knowledge_org_dir}}` / `{{knowledge_app_dir}}` 占位符
+manager 不解析文件内容；Hermes 通过 SOUL.md 模板里的
+`{workspace_dir}` / `{knowledge_org_dir}` / `{knowledge_app_dir}` 占位符
 得知挂载位置，自行处理。
 
 ## 9. 配置与密钥
@@ -272,9 +272,9 @@ web/src/
                               │
                               ▼
        worker member_onboarding：
-       ├─ ImageDistributionService 把 openclaw-runtime 镜像 push 到节点
+       ├─ ImageDistributionService 把 hermes-runtime 镜像 push 到节点
        ├─ DockerProxy create container（含三个 bind mount）
-       ├─ new-api: create user / api_key（写明文 sk- 到 OpenClaw 容器配置）
+       ├─ new-api: create user / api_key（写明文 sk- 到 Hermes 容器配置）
        ├─ 启动容器
        └─ UPDATE apps SET status='running'
 ```

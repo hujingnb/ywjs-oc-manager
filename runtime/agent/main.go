@@ -351,7 +351,8 @@ func newDockerEntryHandler(opts agentOptions, fallback http.Handler) http.Handle
 	hostDataRoot, err := detectHostDataRoot(opts.dataRoot)
 	if err != nil {
 		// detect 失败仅警告，按"不重写"行为继续；docker proxy 退化为透传。
-		// 实际 OpenClaw 容器的 file-level mount 仍可能撞空目录占位的旧问题，
+		// legacy OpenClaw 容器的 file-level mount 仍可能撞空目录占位的旧问题
+		//（Hermes 时代已弃用 file-level mount，但此路径重写逻辑保留以兼容 legacy）；
 		// ops 看到此日志应检查 agent 是否能读 /proc/self/mountinfo。
 		fmt.Fprintf(os.Stderr, "agent: detectHostDataRoot 失败，docker proxy 不重写 mount source: %v\n", err)
 		hostDataRoot = opts.dataRoot

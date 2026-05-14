@@ -14,7 +14,7 @@ import (
 // TestImageDistributionServiceRequiresDistributor 验证镜像分发服务要求Distributor的预期行为场景。
 func TestImageDistributionServiceRequiresDistributor(t *testing.T) {
 	svc := NewImageDistributionService(nil)
-	_, err := svc.EnsureRuntimeImage(context.Background(), "node-1", "openclaw:dev")
+	_, err := svc.EnsureRuntimeImage(context.Background(), "node-1", "hermes-runtime:dev")
 	if err == nil || !strings.Contains(err.Error(), "未配置") {
 		t.Fatalf("EnsureRuntimeImage() error = %v, want config error", err)
 	}
@@ -32,9 +32,9 @@ func TestImageDistributionServiceRejectsEmptyArgs(t *testing.T) {
 // TestImageDistributionServicePropagatesUnderlyingError 验证镜像分发服务透传底层错误的错误映射或错误记录场景。
 func TestImageDistributionServicePropagatesUnderlyingError(t *testing.T) {
 	svc := NewImageDistributionService(&fakeDistributor{err: errors.New("boom")})
-	_, err := svc.EnsureRuntimeImage(context.Background(), "node-1", "openclaw:dev")
+	_, err := svc.EnsureRuntimeImage(context.Background(), "node-1", "hermes-runtime:dev")
 	require.Error(t, err)
-	if !strings.Contains(err.Error(), "openclaw:dev") || !strings.Contains(err.Error(), "node-1") {
+	if !strings.Contains(err.Error(), "hermes-runtime:dev") || !strings.Contains(err.Error(), "node-1") {
 		t.Fatalf("error missing context: %v", err)
 	}
 }

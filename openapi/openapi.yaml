@@ -1063,8 +1063,8 @@ externalDocs:
   description: ""
   url: ""
 info:
-  description: OpenClaw 多组织管理后台 API。
-  title: OpenClaw Manager API
+  description: 基于 Hermes Agent runtime 的多组织管理后台 API。
+  title: Agent Runtime Manager API
   version: "1.0"
 openapi: 3.1.0
 paths:

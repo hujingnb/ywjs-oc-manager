@@ -28,7 +28,7 @@ ALTER TABLE apps
 ADD CONSTRAINT apps_model_id_not_blank_check
 CHECK (btrim(model_id) <> '');
 
-COMMENT ON COLUMN apps.model_id IS '实例当前使用的模型 ID，由 manager 注入 OpenClaw 配置。';
+COMMENT ON COLUMN apps.model_id IS '实例当前使用的模型 ID，由 manager 注入 Hermes 配置。';
 
 CREATE INDEX apps_org_model_active_idx
 ON apps(org_id, model_id)

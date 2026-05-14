@@ -68,7 +68,7 @@ WHERE id = $1 AND deleted_at IS NULL
 RETURNING *;
 
 -- name: ListRunningApps :many
--- 列出当前期望持有 OpenClaw 容器的应用，供 scheduler 周期 dispatch
+-- 列出当前期望持有 runtime 容器的应用，供 scheduler 周期 dispatch
 -- runtime_refresh_status 与 app_health_check job。
 -- running 是常态；binding_waiting 表示容器已起但渠道还在登录中，依然要刷指标。
 SELECT id, runtime_node_id, container_id

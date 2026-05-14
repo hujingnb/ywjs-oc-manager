@@ -29,14 +29,14 @@ docker compose up -d
 `MANAGER_REDIS_IMAGE` 和 `MANAGER_NGINX_IMAGE` 必须固定到内容寻址 digest，例如：
 
 ```env
-OCM_MANAGER_IMAGE=ghcr.io/your-org/openclaw-manager@sha256:<digest>
-OCM_WEB_IMAGE=ghcr.io/your-org/openclaw-manager-web@sha256:<digest>
+OCM_MANAGER_IMAGE=ghcr.io/your-org/agent-runtime-manager@sha256:<digest>
+OCM_WEB_IMAGE=ghcr.io/your-org/agent-runtime-manager-web@sha256:<digest>
 MANAGER_POSTGRES_IMAGE=postgres@sha256:<digest>
 MANAGER_REDIS_IMAGE=redis@sha256:<digest>
 MANAGER_NGINX_IMAGE=nginx@sha256:<digest>
 ```
 
-生产环境仅使用 digest，不把发布标签写入 `.env`。`openclaw.runtime_image` 也应使用 runtime 镜像 digest，确保各 runtime node 运行的 OpenClaw 容器版本可追溯。
+生产环境仅使用 digest，不把发布标签写入 `.env`。`hermes.runtime_image` 也应使用 runtime 镜像 digest，确保各 runtime node 运行的 Hermes 容器版本可追溯。
 
 ### manager-api 镜像契约
 

@@ -51,7 +51,7 @@ type AuthProgress struct {
 	Metadata      map[string]string `json:"metadata,omitempty"`
 }
 
-// AuthInput 在 BeginAuth 时携带用户上下文，供 adapter 调用 OpenClaw runtime。
+// AuthInput 在 BeginAuth 时携带用户上下文，供 adapter 调用 runtime 容器。
 type AuthInput struct {
 	NodeID      string
 	ContainerID string
