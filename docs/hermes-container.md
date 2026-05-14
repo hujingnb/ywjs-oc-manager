@@ -222,7 +222,7 @@ imagesync 能识别并强制重新分发。
   物理数据**(`runtime/agent/scopes.go:127-131`)。
 
 也就是说宿主机 `.hermes/workspace` 与容器内 `/opt/data/workspace` 没有路径
-映射差异——manager 不再做 OpenClaw 时代的双挂载与路径翻译。
+映射差异——manager 不再做历史上的双挂载与路径翻译。
 
 ## 7. 知识库链路:从 manager 主副本到 skills/kb-*
 
