@@ -6,8 +6,8 @@ import (
 	"errors"
 	"fmt"
 	"io"
-	"os"
 	"path/filepath"
+	"strings"
 	"time"
 
 	"github.com/jackc/pgx/v5"
@@ -53,8 +53,10 @@ type AgentDirInitializer interface {
 }
 
 // AppRuntimeFileWriter 抽象在节点 agent 上写运行时配置文件的能力。
-// Hermes 时代文件直接由 manager 写入宿主机 DataDir，此接口保留供向后兼容，
-// nil 实现表示该装配不支持远程写入；handler 跳过此步并继续。
+// Hermes 时代 manager 通过该接口把 SOUL.md / config.yaml / .env / skills/*/SKILL.md
+// 上传到节点 dataRoot/apps/<appID>/.hermes/,确保多节点部署下 manager 与 docker
+// daemon 不必同机。注入失败(nil)时 handler 直接报错,因为 Hermes 容器必须有
+// 这些文件才能启动。
 type AppRuntimeFileWriter interface {
 	UploadAppRuntimeFile(ctx context.Context, nodeID, appID, relPath string, content io.Reader) error
 }
@@ -94,23 +96,22 @@ type NewAPIClientFactory interface {
 
 // AppInitializeConfig 提供 handler 运行所需的外部配置。
 //
-// DataDir 是 manager 本地数据根目录（如 /var/lib/oc-manager/data）；
-// handler 在 DataDir/apps/<app_id>/.hermes/ 下写入 SOUL.md/config.yaml/.env/skills/，
-// 再将该目录 bind mount 到 Hermes 容器内 /opt/data。
-//
 // SystemPromptTemplate：Hermes SOUL.md 的平台层模板，{var} 占位符在渲染时展开；
 // 不再使用 legacy OpenClaw 时代的 {{workspace_dir}} 格式。
 //
 // Cipher：把 new-api 返回的完整 sk- 加密后写入 apps.newapi_key_ciphertext，
 // 全程不入日志。
+//
+// DataDir 字段已从 Hermes 文件分发路径移除：Hermes 配置文件现在通过
+// AppRuntimeFileWriter.UploadAppRuntimeFile 上传到目标节点 agent，
+// 不再写入 manager 本机目录。DataDir 保留供其他特定场景（如 workspaceService）使用。
 type AppInitializeConfig struct {
 	RuntimeImage         string
 	PlatformPrompt       string
 	SystemPromptTemplate string
 	Cipher               *auth.Cipher
-	// DataDir 是 manager 宿主机上的数据根目录。
-	// Hermes 运行时配置文件（SOUL.md/config.yaml/.env/skills/）由 manager 直接写入
-	// DataDir/apps/<app_id>/.hermes/，再 bind mount 到容器 /opt/data。
+	// DataDir 是 manager 宿主机上的数据根目录，仅供其他特定场景使用。
+	// Hermes 文件分发已走 UploadAppRuntimeFile，不再使用此字段。
 	DataDir string
 	// NewAPIBaseURL 是 new-api 内网访问 URL（不含 /v1），写入 Hermes config.yaml 与 .env。
 	NewAPIBaseURL string
@@ -140,8 +141,9 @@ type AppInitializeLLMConfig struct {
 //  1. 加载 app/org/owner/runtime_node 上下文；
 //  2. 幂等：状态 ∈ {running, binding_waiting} 直接返回成功；
 //  3. 调 ImageDistributor 把 Hermes runtime 镜像同步到目标节点；
-//  4. 调 AgentDirInitializer 在节点上准备 apps/<id>/ 目录（Hermes 时代只需 .hermes/）；
-//  5. 渲染 SOUL.md/config.yaml/.env/skills/ 写入 DataDir/apps/<id>/.hermes/；
+//  4. 调 AgentDirInitializer 在节点上准备 apps/<id>/ 目录；
+//  5. 渲染 SOUL.md/config.yaml/.env/skills/ 并通过 AppRuntimeFileWriter 上传到目标节点
+//     agent 的 dataRoot/apps/<id>/.hermes/（多节点部署下 manager 与 docker daemon 不必同机）；
 //  6. api_key 不 active 时调 new-api 创建并 cipher.Encrypt 写库；
 //  7. container_id 为空时调 ContainerCreator.CreateContainer，把 ID/Name 写库；
 //  8. 调 ContainerStarter.StartContainer 启动容器；
@@ -186,8 +188,9 @@ func NewAppInitializeHandler(
 	}
 }
 
-// SetRuntimeFileWriter 注入远程文件上传能力（Hermes 时代通常不需要）。
-// agent 装配未就绪或测试场景可不调用，handler 会跳过远程写入步骤。
+// SetRuntimeFileWriter 注入 Hermes runtime 配置文件上传能力。
+// 生产环境必须注入（Hermes 容器启动前须有 SOUL.md/config.yaml/.env），
+// nil 时 writeHermesFiles 直接返回错误。
 func (h *AppInitializeHandler) SetRuntimeFileWriter(w AppRuntimeFileWriter) {
 	h.runtimeFiles = w
 }
@@ -239,10 +242,11 @@ func (h *AppInitializeHandler) Handle(ctx context.Context, job sqlc.Job) error {
 		}
 	}
 
-	// 写 Hermes 运行时配置文件到 manager 本地 DataDir/apps/<id>/.hermes/。
-	// 仅在 DataDir 非空时执行；空 DataDir 表示旧测试装配，跳过文件写入。
-	if h.cfg.DataDir != "" {
-		if err := h.writeHermesFiles(app, org, owner); err != nil {
+	// 通过 runtime-agent UploadAppRuntimeFile 把 Hermes 配置文件上传到目标节点；
+	// 支持多节点部署（manager 与 docker daemon 可在不同节点）。
+	// payload.RuntimeNodeID 为空时跳过（仅存在于旧测试装配）。
+	if payload.RuntimeNodeID != "" {
+		if err := h.writeHermesFiles(ctx, payload.RuntimeNodeID, app, org, owner); err != nil {
 			return err
 		}
 	}
@@ -258,9 +262,9 @@ func (h *AppInitializeHandler) Handle(ctx context.Context, job sqlc.Job) error {
 		if err != nil {
 			return fmt.Errorf("查询 runtime node 失败: %w", err)
 		}
-		// Hermes 容器规格：单一 bind mount，把 .hermes/ 挂载到 /opt/data。
-		// 不再需要多个独立目录挂载（workspace/state/logs/knowledge）。
-		hermesHome := h.appHermesHome(payload.AppID)
+		// Hermes 容器规格：单一 bind mount，把节点本地 .hermes/ 挂载到 /opt/data。
+		// HostPath 使用节点 NodeDataRoot 拼接，而非 manager 本机路径，
+		// 确保多节点部署下 bind mount 路径指向 docker daemon 所在节点的正确位置。
 		nodeDataRoot := node.NodeDataRoot.String
 		if nodeDataRoot == "" {
 			nodeDataRoot = "/var/lib/oc-agent"
@@ -276,12 +280,12 @@ func (h *AppInitializeHandler) Handle(ctx context.Context, job sqlc.Job) error {
 				"OPENAI_BASE_URL": h.cfg.NewAPIBaseURL + "/v1",
 			},
 			Volumes: []runtimepkg.VolumeMount{
-				// 单一挂载：将 manager 本地 .hermes/ 目录映射到容器 /opt/data（Hermes 主目录）。
+				// 单一挂载：将节点 dataRoot/apps/<id>/.hermes/ 映射到容器 /opt/data（Hermes 主目录）。
 				// SOUL.md/config.yaml/.env/skills/ 均在此目录下，Hermes 启动时自动读取。
-				{HostPath: hermesHome, ContainerPath: "/opt/data"},
+				// HostPath 为节点本地路径（由 runtime-agent 写入），而非 manager 本机路径。
+				{HostPath: filepath.Join(nodeDataRoot, "apps", payload.AppID, ".hermes"), ContainerPath: "/opt/data"},
 			},
 		}
-		_ = nodeDataRoot // nodeDataRoot 保留备用（如未来多节点同步需求）
 		info, err := h.containers.CreateContainer(ctx, payload.RuntimeNodeID, spec)
 		if err != nil {
 			return fmt.Errorf("创建容器失败: %w", err)
@@ -344,19 +348,21 @@ func (h *AppInitializeHandler) Handle(ctx context.Context, job sqlc.Job) error {
 	return nil
 }
 
-// writeHermesFiles 将 Hermes 运行时配置文件写入 manager 本地
-// DataDir/apps/<app_id>/.hermes/ 目录，容器启动时通过 bind mount 映射到 /opt/data。
+// writeHermesFiles 把 Hermes 运行时配置文件通过 runtime-agent UploadAppRuntimeFile
+// 上传到目标节点的 dataRoot/apps/<appID>/.hermes/，确保多节点部署下 manager 与
+// docker daemon 不必同机。
 //
-// 写入内容：
+// 上传内容：
 //   - SOUL.md：agent identity / system prompt（三层 platform + org + app 拼接）
 //   - config.yaml：model provider 配置（指向 new-api）
 //   - .env：凭证（OPENAI_API_KEY / OPENAI_BASE_URL）
-//   - skills/：知识库 → Hermes skill（本期暂不写入，预留目录）
-func (h *AppInitializeHandler) writeHermesFiles(app sqlc.App, org sqlc.Organization, owner sqlc.User) error {
-	hermesHome := h.appHermesHome(uuidToString(app.ID))
-	if err := os.MkdirAll(filepath.Join(hermesHome, "skills"), 0o755); err != nil {
-		return fmt.Errorf("创建 hermes home 目录失败: %w", err)
+//
+// runtimeFiles 为 nil 时直接报错，因为 Hermes 容器必须有这些文件才能启动。
+func (h *AppInitializeHandler) writeHermesFiles(ctx context.Context, nodeID string, app sqlc.App, org sqlc.Organization, owner sqlc.User) error {
+	if h.runtimeFiles == nil {
+		return fmt.Errorf("AppRuntimeFileWriter 未注入,Hermes 容器无法 bootstrap")
 	}
+	appID := uuidToString(app.ID)
 
 	// 渲染 SOUL.md（平台层 + 组织层 + 应用层 prompt 三层拼接）。
 	// 组织层 prompt 由 OrganizationPersona 提供，当前从 GetOrganization 不含 prompt；
@@ -375,17 +381,15 @@ func (h *AppInitializeHandler) writeHermesFiles(app sqlc.App, org sqlc.Organizat
 			return fmt.Errorf("渲染 SOUL.md 失败: %w", err)
 		}
 	} else {
-		if err := os.WriteFile(filepath.Join(hermesHome, "SOUL.md"), []byte(promptResult.Prompt), 0o644); err != nil {
-			return fmt.Errorf("写入 SOUL.md 失败: %w", err)
+		if err := h.runtimeFiles.UploadAppRuntimeFile(ctx, nodeID, appID, "SOUL.md", strings.NewReader(promptResult.Prompt)); err != nil {
+			return fmt.Errorf("上传 SOUL.md: %w", err)
 		}
 	}
 
 	// 渲染 config.yaml（model provider 指向 new-api）。
-	// ModelName 用 app.ModelID；NewAPIURL 来自 cfg；NewAPIToken 在容器启动前暂用空串，
+	// ModelName 用 app.ModelID；NewAPIURL 来自 cfg；NewAPIToken 在容器启动前暂用占位串，
 	// 真实 token 在 .env 中；此处 config.yaml api_key 字段仅作占位（Hermes 优先读 .env）。
-	// 注：本期 ensureAPIKey 在 writeHermesFiles 之后执行，api_key 在 .env 中再写入。
-	// writeHermesFiles 仅写 config.yaml 的 model/provider 部分，不含 api_key。
-	// 实际上 RenderConfigYAML 要求 NewAPIToken 非空，此处用占位串，后续由 .env 覆盖。
+	// 注：ensureAPIKey 在 writeHermesFiles 之后执行，api_key 在 .env 中再写入。
 	// ModelID 是 string 类型（非 pgtype.Text），直接使用。
 	modelName := app.ModelID
 	if modelName == "" {
@@ -399,8 +403,8 @@ func (h *AppInitializeHandler) writeHermesFiles(app sqlc.App, org sqlc.Organizat
 		newAPIURL = "http://new-api:3000"
 	}
 	yamlContent, err := hermes.RenderConfigYAML(hermes.ConfigInput{
-		ModelName:   modelName,
-		NewAPIURL:   newAPIURL,
+		ModelName: modelName,
+		NewAPIURL: newAPIURL,
 		// config.yaml 中的 api_key 使用占位符，真实 token 由 .env 提供。
 		// Hermes 优先从 .env 读 OPENAI_API_KEY，此处填占位确保字段非空通过校验。
 		NewAPIToken: "placeholder-see-dot-env",
@@ -408,29 +412,22 @@ func (h *AppInitializeHandler) writeHermesFiles(app sqlc.App, org sqlc.Organizat
 	if err != nil {
 		return fmt.Errorf("渲染 config.yaml 失败: %w", err)
 	}
-	if err := os.WriteFile(filepath.Join(hermesHome, "config.yaml"), []byte(yamlContent), 0o644); err != nil {
-		return fmt.Errorf("写入 config.yaml 失败: %w", err)
+	if err := h.runtimeFiles.UploadAppRuntimeFile(ctx, nodeID, appID, "config.yaml", strings.NewReader(yamlContent)); err != nil {
+		return fmt.Errorf("上传 config.yaml: %w", err)
 	}
 
 	// 渲染 .env（凭证占位；真实 api_key 在 ensureAPIKey 后追加写入）。
-	// 目前写入 NewAPIURL，token 部分留空待 ensureAPIKey 完成后更新。
-	// 注：Hermes 启动时从 .env 读取，因此 .env 必须在容器启动前存在，
-	// 即使 token 为空 Hermes 也会启动（channel 流程会后续更新 .env）。
+	// Hermes 启动时从 .env 读取，因此 .env 必须在容器启动前存在；
+	// 即使 token 为占位符，Hermes 也会启动，channel 流程会后续更新 .env。
 	envContent := hermes.RenderEnv(hermes.EnvInput{
 		NewAPIURL:   newAPIURL,
 		NewAPIToken: "placeholder-see-newapi-token",
 	})
-	if err := os.WriteFile(filepath.Join(hermesHome, ".env"), []byte(envContent), 0o600); err != nil {
-		return fmt.Errorf("写入 .env 失败: %w", err)
+	if err := h.runtimeFiles.UploadAppRuntimeFile(ctx, nodeID, appID, ".env", strings.NewReader(envContent)); err != nil {
+		return fmt.Errorf("上传 .env: %w", err)
 	}
 
 	return nil
-}
-
-// appHermesHome 返回 manager 本地宿主机上 app 的 Hermes 主目录路径。
-// manager 启动容器时把该目录 bind mount 到容器内 /opt/data（Hermes 的 HERMES_HOME）。
-func (h *AppInitializeHandler) appHermesHome(appID string) string {
-	return filepath.Join(h.cfg.DataDir, "apps", appID, ".hermes")
 }
 
 // ensureAPIKey 走「以组织业务 user 身份创 token + 拉完整 sk-」流程，加密落库后返回明文 sk-。

@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"io"
 	"strings"
 	"testing"
 	"time"
@@ -34,16 +35,18 @@ func TestAppInitializeHandlesHappyPath(t *testing.T) {
 	dirs := &fakeDirs{}
 	containers := &fakeContainers{result: runtimepkg.ContainerInfo{ID: "ctr-1", Name: "hermes-" + testAppID, Status: "created"}}
 	client := &fakeNewAPI{result: newapi.APIKey{ID: 99, Key: "sk-test"}}
+	rw := &fakeRuntimeFileWriter{}
 
 	cipher, err := auth.NewCipher(make([]byte, 32))
 	require.NoError(t, err)
 	cfg := AppInitializeConfig{
-		RuntimeImage: "hermes:dev",
-		// DataDir 为空，跳过 hermes 文件写入（测试只关注 api_key + 容器创建路径）。
+		RuntimeImage:         "hermes:dev",
 		SystemPromptTemplate: "你是 {org_name} 的助手",
 		Cipher:               cipher,
 	}
 	handler := NewAppInitializeHandler(store, images, dirs, containers, containers, client, cfg)
+	// 注入 fakeRuntimeFileWriter，验证 Hermes 配置文件通过 UploadAppRuntimeFile 上传。
+	handler.SetRuntimeFileWriter(rw)
 
 	err = handler.Handle(context.Background(), buildJob(t, testAppID, "node-1"))
 	require.NoError(t, err)
@@ -85,6 +88,47 @@ func TestAppInitializeHandlesHappyPath(t *testing.T) {
 	require.Equal(t, testAppID, store.auditLogs[0].TargetID)
 	require.Equal(t, "initialize", store.auditLogs[0].Action)
 	require.Equal(t, "succeeded", store.auditLogs[0].Result)
+
+	// 验证 Hermes 配置文件已通过 UploadAppRuntimeFile 上传到目标节点，而非写入 manager 本机。
+	// 三个必须存在的文件：config.yaml / .env（SOUL.md 在 prompt 非空时上传）。
+	require.True(t, rw.hasUpload(testAppID, "config.yaml"), "config.yaml 应被上传")
+	require.True(t, rw.hasUpload(testAppID, ".env"), ".env 应被上传")
+	// 所有上传调用使用相同的 nodeID。
+	for _, c := range rw.calls {
+		require.Equal(t, "node-1", c.nodeID, "上传节点应为 node-1")
+	}
+}
+
+// TestWriteHermesFiles_FailsWhenWriterNil 验证 writeHermesFiles 在 AppRuntimeFileWriter 未注入时
+// 直接报错，而非静默跳过——确保多节点部署下不会因缺少配置文件导致容器启动后行为异常。
+func TestWriteHermesFiles_FailsWhenWriterNil(t *testing.T) {
+	store := newAppInitStub(t)
+	client := &fakeNewAPI{result: newapi.APIKey{ID: 1, Key: "k"}}
+	// 不注入 SetRuntimeFileWriter，runtimeFiles 保持 nil。
+	handler := NewAppInitializeHandler(store, &fakeImages{}, &fakeDirs{}, &fakeContainers{}, &fakeContainers{}, client, AppInitializeConfig{Cipher: testCipher(t)})
+
+	err := handler.Handle(context.Background(), buildJob(t, testAppID, "node-1"))
+	// nodeID 非空时 writeHermesFiles 必须被调用；nil writer 应立即报错。
+	require.Error(t, err)
+	require.Contains(t, err.Error(), "AppRuntimeFileWriter 未注入")
+}
+
+// TestWriteHermesFiles_PropagatesUploadError 验证 UploadAppRuntimeFile 返回错误时
+// writeHermesFiles 正确透传错误，handler 不继续创建容器。
+func TestWriteHermesFiles_PropagatesUploadError(t *testing.T) {
+	store := newAppInitStub(t)
+	client := &fakeNewAPI{result: newapi.APIKey{ID: 1, Key: "k"}}
+	// 模拟 agent 上传失败（网络不通 / 节点不可达）。
+	rw := &fakeRuntimeFileWriter{err: errors.New("agent upload failed")}
+	containers := &fakeContainers{result: runtimepkg.ContainerInfo{ID: "c", Name: "n"}}
+	handler := NewAppInitializeHandler(store, &fakeImages{}, &fakeDirs{}, containers, containers, client, AppInitializeConfig{Cipher: testCipher(t)})
+	handler.SetRuntimeFileWriter(rw)
+
+	err := handler.Handle(context.Background(), buildJob(t, testAppID, "node-1"))
+	// 上传失败应冒泡，容器不应被创建。
+	require.Error(t, err)
+	require.Contains(t, err.Error(), "agent upload failed")
+	require.Equal(t, 0, containers.calls, "上传失败后不应创建容器")
 }
 
 // TestAppInitializeWaitsForHermesHealthyWhenSupported 验证应用初始化等待 Hermes 容器
@@ -106,6 +150,8 @@ func TestAppInitializeWaitsForHermesHealthyWhenSupported(t *testing.T) {
 		RuntimeImage: "hermes:dev",
 		Cipher:       cipher,
 	})
+	// 注入 fakeRuntimeFileWriter，确保 writeHermesFiles 可正常执行。
+	handler.SetRuntimeFileWriter(&fakeRuntimeFileWriter{})
 	err = handler.Handle(context.Background(), buildJob(t, testAppID, "node-1"))
 	require.NoError(t, err)
 	// 断言 WaitContainerHealthy 被调用了 1 次。
@@ -123,6 +169,8 @@ func TestAppInitializePropagatesHealthCheckError(t *testing.T) {
 	containers := &healthAwareContainers{fakeContainers: base}
 	client := &fakeNewAPI{result: newapi.APIKey{ID: 1, Key: "k"}}
 	handler := NewAppInitializeHandler(store, &fakeImages{}, &fakeDirs{}, base, containers, client, AppInitializeConfig{Cipher: testCipher(t)})
+	// 注入 fakeRuntimeFileWriter，使 writeHermesFiles 不报错，聚焦健康检查失败路径。
+	handler.SetRuntimeFileWriter(&fakeRuntimeFileWriter{})
 
 	err := handler.Handle(context.Background(), buildJob(t, testAppID, "node-1"))
 	// 错误信息应包含"等待 Hermes 容器健康失败"。
@@ -185,6 +233,8 @@ func TestAppInitializePropagatesContainerError(t *testing.T) {
 	containers := &fakeContainers{err: errors.New("boom")}
 	client := &fakeNewAPI{result: newapi.APIKey{ID: 1, Key: "k"}}
 	handler := NewAppInitializeHandler(store, &fakeImages{}, &fakeDirs{}, containers, containers, client, AppInitializeConfig{Cipher: testCipher(t)})
+	// 注入 fakeRuntimeFileWriter，使 writeHermesFiles 不报错，聚焦容器创建失败路径。
+	handler.SetRuntimeFileWriter(&fakeRuntimeFileWriter{})
 	err := handler.Handle(context.Background(), buildJob(t, testAppID, "node-1"))
 	if err == nil || !strings.Contains(err.Error(), "创建容器失败") {
 		t.Fatalf("error = %v, want 创建容器失败", err)
@@ -210,6 +260,8 @@ func TestAppInitializeContainerStepSkippedWhenContainerExists(t *testing.T) {
 	client := &fakeNewAPI{result: newapi.APIKey{ID: 1, Key: "k"}}
 
 	handler := NewAppInitializeHandler(store, &fakeImages{}, &fakeDirs{}, containers, containers, client, AppInitializeConfig{Cipher: testCipher(t)})
+	// 注入 fakeRuntimeFileWriter，使 writeHermesFiles 不报错（即使容器已存在也需要上传配置文件）。
+	handler.SetRuntimeFileWriter(&fakeRuntimeFileWriter{})
 	err := handler.Handle(context.Background(), buildJob(t, testAppID, "node-1"))
 	require.NoError(t, err)
 	require.Equal(t, 0, containers.calls)
@@ -242,6 +294,8 @@ func TestHermesHealthCheckerInterfaceUsed(t *testing.T) {
 	handler := NewAppInitializeHandler(store, &fakeImages{}, &fakeDirs{}, containers, containers, client, AppInitializeConfig{
 		Cipher: testCipher(t),
 	})
+	// 注入 fakeRuntimeFileWriter，使 writeHermesFiles 不报错，聚焦健康检查接口探测路径。
+	handler.SetRuntimeFileWriter(&fakeRuntimeFileWriter{})
 	err := handler.Handle(context.Background(), buildJob(t, testAppID, "node-1"))
 	require.NoError(t, err)
 	// healthCalls 应为 0：普通 starter 没实现 HermesHealthChecker，handler 跳过。
@@ -472,6 +526,39 @@ func mustUUIDForTest(t *testing.T, value string) pgtype.UUID {
 	err := id.Scan(value)
 	require.NoError(t, err)
 	return id
+}
+
+// fakeRuntimeFileWriter 实现 AppRuntimeFileWriter，记录每次 UploadAppRuntimeFile 调用。
+// 用于断言 writeHermesFiles 通过 agent 上传文件而非写入 manager 本机文件系统。
+type fakeRuntimeFileWriter struct {
+	// calls 按调用顺序记录每次上传的参数（nodeID / appID / relPath / 内容字节数）。
+	calls []fakeRuntimeUploadCall
+	// err 非 nil 时所有调用返回该错误（模拟 agent 上传失败场景）。
+	err error
+}
+
+// fakeRuntimeUploadCall 记录单次 UploadAppRuntimeFile 调用的参数。
+type fakeRuntimeUploadCall struct {
+	nodeID  string
+	appID   string
+	relPath string
+}
+
+func (f *fakeRuntimeFileWriter) UploadAppRuntimeFile(_ context.Context, nodeID, appID, relPath string, content io.Reader) error {
+	// 消耗 content，避免调用方 strings.NewReader 被留在半读状态。
+	_, _ = io.ReadAll(content)
+	f.calls = append(f.calls, fakeRuntimeUploadCall{nodeID: nodeID, appID: appID, relPath: relPath})
+	return f.err
+}
+
+// hasUpload 检查是否存在针对给定 appID + relPath 的上传记录。
+func (f *fakeRuntimeFileWriter) hasUpload(appID, relPath string) bool {
+	for _, c := range f.calls {
+		if c.appID == appID && c.relPath == relPath {
+			return true
+		}
+	}
+	return false
 }
 
 // fakeAuditRecorder 实现 audit.AuditRecorder，用于断言审计事件被写入。

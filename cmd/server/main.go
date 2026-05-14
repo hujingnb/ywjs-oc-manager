@@ -231,8 +231,8 @@ func runManager(ctx context.Context, cfg config.Config, logOut io.Writer) error 
 			SystemPromptTemplate: cfg.Hermes.SystemPromptTemplate,
 			PlatformPrompt:       cfg.Hermes.SystemPromptTemplate,
 			Cipher:               cipher,
-			// DataDir 是 manager 宿主机数据根目录；handler 在此目录下写入 Hermes 配置文件，
-			// 再 bind mount 到容器 /opt/data。
+			// DataDir 字段保留供其他特定场景使用；Hermes 文件分发已走 UploadAppRuntimeFile，
+			// 不再在 manager 本机 DataDir 下写入配置文件。
 			DataDir:           cfg.App.DataRoot,
 			NewAPIBaseURL:     cfg.NewAPI.BaseURL,
 			ContainerNetworks: cfg.Hermes.ContainerNetworks,
@@ -245,7 +245,8 @@ func runManager(ctx context.Context, cfg config.Config, logOut io.Writer) error 
 		},
 	)
 	// runtimeAdapter 同时实现 AppRuntimeFileWriter（UploadAppRuntimeFile），
-	// 让 handler 在 InitAppDirs 之后把 pi-coding-agent settings.json 写到节点。
+	// 在多节点部署下把 Hermes 配置文件（SOUL.md/config.yaml/.env）上传到目标节点
+	// agent 的 dataRoot/apps/<id>/.hermes/，确保 manager 与 docker daemon 可不同机。
 	appInitHandler.SetRuntimeFileWriter(runtimeAdapter)
 	if err := registry.Register("app_initialize", appInitHandler.Handle); err != nil {
 		return fmt.Errorf("注册 app_initialize handler 失败: %w", err)

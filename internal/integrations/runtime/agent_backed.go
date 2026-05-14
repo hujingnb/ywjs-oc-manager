@@ -448,9 +448,10 @@ func (a *AgentBackedAdapter) UploadAppFile(ctx context.Context, nodeID, appID, r
 	return cli.UploadAppKnowledgeFile(ctx, appID, relPath, content)
 }
 
-// UploadAppRuntimeFile 把 manager 渲染的 legacy runtime 配置文件（如 pi-coding-agent
-// settings.json）写到指定节点的 apps/<appID>/openclaw-config/，agent 端 bind mount
-// 到容器 legacy 路径；Hermes 时代已弃用此端点，保留以向后兼容。
+// UploadAppRuntimeFile 把 manager 渲染的 Hermes runtime 配置文件
+// (SOUL.md / config.yaml / .env / skills/<name>/SKILL.md)上传到目标节点的
+// apps/<appID>/.hermes/<relPath>,容器启动时由该目录 bind mount 到 /opt/data。
+// 是多节点部署下 manager 端写文件的唯一路径(不再走 manager 本机 DataDir)。
 func (a *AgentBackedAdapter) UploadAppRuntimeFile(ctx context.Context, nodeID, appID, relPath string, content io.Reader) error {
 	cli, err := a.resolveFile(ctx, nodeID)
 	if err != nil {

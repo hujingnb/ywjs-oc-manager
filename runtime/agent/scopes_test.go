@@ -92,8 +92,9 @@ func TestScopesHandler_UnknownActionReturns404(t *testing.T) {
 	require.Equal(t, http.StatusNotFound, resp.StatusCode)
 }
 
-// TestScopesAppInit_CreatesFourDirs 验证scope 应用初始化创建四个目录的成功路径场景。
-func TestScopesAppInit_CreatesFourDirs(t *testing.T) {
+// TestScopesAppInit_CreatesTwoDirs 验证 Hermes 时代 app init 只创建 .hermes 和 knowledge
+// 两个子目录(其余子目录由 Hermes 运行时自动创建,manager 不再预建)。
+func TestScopesAppInit_CreatesTwoDirs(t *testing.T) {
 	dataRoot := t.TempDir()
 	srv := httptest.NewServer(newHandlerWithDocker(dataRoot, nil, "tok"))
 	defer srv.Close()
@@ -104,12 +105,20 @@ func TestScopesAppInit_CreatesFourDirs(t *testing.T) {
 	require.NoError(t, err)
 	defer resp.Body.Close()
 	require.Equal(t, http.StatusOK, resp.StatusCode)
-	for _, sub := range []string{"knowledge", "workspace", "state", "logs", "openclaw-config", "weixin"} {
+	// 验证必须存在的 2 个子目录：.hermes(Hermes runtime 根) 和 knowledge(兼容旧调用方)。
+	for _, sub := range []string{".hermes", "knowledge"} {
 		dir := filepath.Join(dataRoot, "apps", "app-123", sub)
 		fi, err := os.Stat(dir)
-		require.NoError(t, err)
+		require.NoError(t, err, "目录 %q 应被创建", sub)
 		if !fi.IsDir() {
 			t.Fatalf("%q not a directory", sub)
+		}
+	}
+	// 验证 OpenClaw 时代的旧目录不再被预建(由 Hermes 自行创建或已弃用)。
+	for _, old := range []string{"openclaw-config", "weixin", "workspace", "state", "logs"} {
+		dir := filepath.Join(dataRoot, "apps", "app-123", old)
+		if _, err := os.Stat(dir); !os.IsNotExist(err) {
+			t.Fatalf("OpenClaw legacy 目录 %q 不应被预建，err=%v", old, err)
 		}
 	}
 }

@@ -234,9 +234,10 @@ func (c *AgentFileClient) UploadOrgKnowledgeFile(ctx context.Context, orgID, rel
 	return c.doKnowledgeFile(ctx, http.MethodPut, "orgs", orgID, relPath, content)
 }
 
-// UploadAppRuntimeFile 把 manager 渲染的 legacy runtime 配置文件（pi-coding-agent settings.json 等）
-// 上传到 apps/{appID}/openclaw-config/{relPath}（legacy OpenClaw 沙箱目录，Hermes 时代不再使用）。
-// 容器内通过 bind mount 暴露为 /root/.openclaw/.../{relPath}；保留此端点以向后兼容。
+// UploadAppRuntimeFile 把 manager 渲染的 Hermes runtime 配置文件
+// (SOUL.md / config.yaml / .env / skills/<name>/SKILL.md)上传到节点
+// apps/{appID}/.hermes/{relPath};agent 端写入节点本地文件系统,
+// 容器启动时该目录整体 bind mount 到 /opt/data。
 func (c *AgentFileClient) UploadAppRuntimeFile(ctx context.Context, appID, relPath string, content io.Reader) error {
 	endpoint, err := c.endpoint(fmt.Sprintf("/v1/scopes/apps/%s/runtime/file", url.PathEscape(appID)))
 	if err != nil {

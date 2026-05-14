@@ -462,3 +462,27 @@ manager 整体可能不能完整跑通,但接受这种代价以换取 review 友
   这些是 future work)
 - Hermes 的 dashboard / API server 是否在 oc-manager 中暴露使用
 - 上游 Hermes 重大版本升级的兼容性策略
+
+## Phase 9 修订:多节点架构
+
+(本节为 Phase 1-8 实施后补充。)
+
+Phase 3 实施时把 SOUL.md / config.yaml / .env / skills 用 `os.WriteFile`
+写到 manager 本机 DataDir,然后 bind mount 到容器 `/opt/data`。这隐式假设
+manager 进程与 Docker daemon 同机,多节点部署会 broken。
+
+Phase 9 修订:
+
+- manager 不再 `os.WriteFile` 到本机;改通过 `RuntimeAdapter.UploadAppRuntimeFile`
+  把每个文件 PUT 到目标节点 `runtime-agent` 的
+  `/v1/scopes/apps/<appID>/runtime/file?path=<relPath>` endpoint,agent 写到节点
+  本地 `<dataRoot>/apps/<appID>/.hermes/<relPath>`。
+- 容器 `Mounts.HostPath` 改为 `<nodeDataRoot>/apps/<appID>/.hermes`(节点本地路径),
+  不再用 manager 本机 DataDir。
+- `AppInitializeConfig.DataDir` 字段在 Hermes 文件分发路径上不再使用。
+- `runtime/agent/scopes.go` 的 sandbox 路径从 `openclaw-config` 重命名为
+  `.hermes`,handleAppInit 子目录列表从 6 个精简为 2 个(`.hermes` + `knowledge`)。
+- `AppRuntimeFileWriter` 接口从"向后兼容备用"升级为 Hermes 文件分发的
+  唯一路径,nil 注入时直接报错。
+
+至此多节点部署可行:manager 与 runtime-agent + Docker daemon 可在不同节点。

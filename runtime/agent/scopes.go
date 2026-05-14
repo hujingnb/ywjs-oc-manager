@@ -105,14 +105,15 @@ func scopesAppsHandler(dataRoot string) http.HandlerFunc {
 		case action == "init" && r.Method == http.MethodPost:
 			handleAppInit(w, r, dataRoot, appID)
 		case action == "runtime/file" && r.Method == http.MethodPut:
-			// legacy runtime 沙箱配置文件(OpenClaw 时代用,Hermes 时代不再使用)。
-			// 沙箱根 = apps/<appID>/openclaw-config/，保留路径以向后兼容 OpenClaw 时代 file-level
-			// bind mount；Hermes 时代容器改用全量挂载 apps/<id>/.hermes:/opt/data，此 endpoint
-			// 在 Hermes 部署下不再被 manager 调用，但保留以兼容 legacy 调用方。
-			handleKnowledgeFileUpload(w, r, dataRoot, filepath.Join("apps", appID, "openclaw-config"))
+			// Hermes 时代 runtime 配置文件 sandbox = apps/<appID>/.hermes/。
+			// manager 通过该 endpoint 上传 SOUL.md / config.yaml / .env / skills/*/SKILL.md,
+			// 节点 agent 写到 dataRoot/apps/<appID>/.hermes/<relPath>;容器启动时由
+			// dataRoot/apps/<appID>/.hermes 全量 bind mount 到 /opt/data。
+			// 历史:OpenClaw 时代沙箱根曾为 apps/<appID>/openclaw-config/(file-level mount)。
+			handleKnowledgeFileUpload(w, r, dataRoot, filepath.Join("apps", appID, ".hermes"))
 		case action == "runtime/file" && r.Method == http.MethodDelete:
-			// legacy OpenClaw 兼容沙箱目录(Hermes 时代未使用,保留兼容性)。
-			handleKnowledgeFileDelete(w, r, dataRoot, filepath.Join("apps", appID, "openclaw-config"))
+			// Hermes 时代删除 apps/<appID>/.hermes/ 下的文件 / 子目录。
+			handleKnowledgeFileDelete(w, r, dataRoot, filepath.Join("apps", appID, ".hermes"))
 		case action == "knowledge/sync" && r.Method == http.MethodPost:
 			handleKnowledgeSync(w, r, dataRoot, filepath.Join("apps", appID, "knowledge"))
 		case action == "knowledge/file" && r.Method == http.MethodPut:
@@ -180,18 +181,18 @@ func isValidScopeID(id string) bool {
 	return true
 }
 
-// handleAppInit 创建 apps/<appID>/{knowledge,workspace,state,logs,openclaw-config,weixin} 6 个子目录。
-// openclaw-config / weixin 是 legacy OpenClaw 兼容沙箱目录(Hermes 时代未使用,保留兼容性)：
-//   - openclaw-config：OpenClaw 时代存放 manager 渲染的 embedded agent 配置（如 models.json），
-//     通过 file-level bind mount 暴露到容器内 /root/.openclaw/agents/main/agent/；
-//     Hermes 时代改用全量挂载 apps/<id>/.hermes:/opt/data，此目录不再被写入。
-//   - weixin：OpenClaw 时代持久化 weixin 渠道插件的 token / accounts.json，bind mount 到
-//     /root/.openclaw/openclaw-weixin/，让 docker restart 不丢扫码 session；
-//     Hermes 时代沿用相同挂载路径，但源目录变为 apps/<id>/.hermes/weixin（如果已迁移）。
+// handleAppInit 创建 apps/<appID>/{.hermes,knowledge} 2 个子目录。
+//   - .hermes:Hermes 时代 runtime 数据根。manager 通过 /runtime/file PUT 写入
+//     SOUL.md / config.yaml / .env / skills/<...>;容器启动时由该目录全量
+//     bind mount 到 /opt/data。其余 workspace/sessions/logs/cron/memories 等
+//     由 Hermes 启动时自动创建,manager 无需预建。
+//   - knowledge:legacy OpenClaw 时代知识库 sync 目标(Hermes 时代知识库走
+//     skills 机制,manager 不再调用 /knowledge/* endpoint,但保留目录以兼容
+//     旧调用方)。
 //
-// 操作幂等：MkdirAll 在目录已存在时 no-op。
+// 操作幂等:MkdirAll 在目录已存在时 no-op。
 func handleAppInit(w http.ResponseWriter, _ *http.Request, dataRoot, appID string) {
-	for _, sub := range []string{"knowledge", "workspace", "state", "logs", "openclaw-config", "weixin"} {
+	for _, sub := range []string{".hermes", "knowledge"} {
 		dir := filepath.Join(dataRoot, "apps", appID, sub)
 		if err := os.MkdirAll(dir, 0o755); err != nil {
 			writeError(w, http.StatusInternalServerError, err.Error())

@@ -1,7 +1,6 @@
 package hermes
 
 import (
-	"strings"
 	"testing"
 
 	"github.com/stretchr/testify/require"
@@ -23,8 +22,7 @@ func TestRenderConfigYAML(t *testing.T) {
 		`vision:`,
 		`provider: main`,
 	} {
-		require.True(t, strings.Contains(got, sub),
-			"config.yaml 应包含 %q,实际:\n%s", sub, got)
+		require.Contains(t, got, sub, "config.yaml 应包含 %q", sub)
 	}
 }
 

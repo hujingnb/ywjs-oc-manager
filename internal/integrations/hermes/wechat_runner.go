@@ -119,6 +119,9 @@ func (r *WeixinRunner) StreamWeChatLogin(ctx context.Context, containerID string
 			return
 		}
 
+		// cred 反序列化 oc-weixin-login.py 输出的 JSON。字段名直接绑定到
+		// 上游 gateway.platforms.weixin.qr_login 函数的返回值 (account_id /
+		// token / base_url / user_id);若上游变更字段名,此处会静默拿到零值。
 		var cred struct {
 			AccountID string `json:"account_id"`
 			Token     string `json:"token"`
