@@ -61,6 +61,19 @@ type AppRuntimeFileWriter interface {
 	UploadAppRuntimeFile(ctx context.Context, nodeID, appID, relPath string, content io.Reader) error
 }
 
+// KnowledgeReader 抽象 manager 主副本的读能力,供 writeHermesFiles 在容器启动前
+// 把组织/应用知识库批量渲染成 .hermes/skills/kb-*-<slug>/SKILL.md。
+//
+// WalkFiles 递归遍历 prefix(如 "org/<id>/knowledge")下所有普通文件,每个文件
+// 回调一次,relPath 相对 prefix、统一 '/' 分隔。
+// Open 打开主副本中的指定文件;调用方负责关闭。
+//
+// nil 装配时 writeSkillsFromKnowledge 直接跳过,使旧装配/测试装配仍可工作。
+type KnowledgeReader interface {
+	WalkFiles(prefix string, fn func(relPath string, size int64) error) error
+	Open(masterPath string) (io.ReadCloser, int64, error)
+}
+
 // ContainerStarter 抽象创建后启动容器的能力（minimal 接口）。
 // 与 app_runtime_ops.go 的 ContainerLifecycle 不重叠：那个接口要求 Start/Stop/Restart/Remove
 // 四个方法，初始化阶段只需要 Start，因此独立小接口便于测试 mock。
@@ -156,6 +169,7 @@ type AppInitializeHandler struct {
 	images       ImageDistributor
 	dirs         AgentDirInitializer
 	runtimeFiles AppRuntimeFileWriter
+	knowledge    KnowledgeReader
 	containers   ContainerCreator
 	starter      ContainerStarter
 	factory      NewAPIClientFactory
@@ -193,6 +207,14 @@ func NewAppInitializeHandler(
 // nil 时 writeHermesFiles 直接返回错误。
 func (h *AppInitializeHandler) SetRuntimeFileWriter(w AppRuntimeFileWriter) {
 	h.runtimeFiles = w
+}
+
+// SetKnowledgeReader 注入主副本知识库读取能力。
+// 装配后 writeHermesFiles 会在写完 SOUL.md/config.yaml/.env 后,
+// 遍历组织/应用主副本目录,把每个文件渲染成 .hermes/skills/kb-*-<slug>/SKILL.md。
+// nil 时跳过 skill 写入(仅保留旧测试装配兼容)。
+func (h *AppInitializeHandler) SetKnowledgeReader(r KnowledgeReader) {
+	h.knowledge = r
 }
 
 // Handle 是 worker 调用入口，签名匹配 handlers.HandlerFunc。
@@ -378,14 +400,34 @@ func (h *AppInitializeHandler) writeHermesFiles(ctx context.Context, nodeID stri
 		AppPrompt:      textOrEmpty(app.AppPrompt),
 		Variables:      hermes.VariablesFromContext(org.Name, app.Name, owner.DisplayName),
 	})
+	soulBody := ""
 	if err != nil {
-		// SOUL.md 渲染失败不阻塞容器创建：prompt 全为空时 Hermes 走默认行为，
-		// 仅记错误并跳过写入，避免 ErrPromptEmpty 时 handler 失败。
+		// SOUL.md 渲染失败不阻塞容器创建:prompt 全为空时 Hermes 走默认行为,
+		// 仅记错误并跳过 prompt 主体,但仍允许后续追加知识库 always-on context。
 		if !errors.Is(err, hermes.ErrPromptEmpty) {
 			return fmt.Errorf("渲染 SOUL.md 失败: %w", err)
 		}
 	} else {
-		if err := h.runtimeFiles.UploadAppRuntimeFile(ctx, nodeID, appID, "SOUL.md", strings.NewReader(promptResult.Prompt)); err != nil {
+		soulBody = promptResult.Prompt
+	}
+	// 把组织 + 应用知识库 inline 进 SOUL.md。
+	// Hermes 的 skill 体系是 progressive disclosure(skills_list → skill_view),
+	// agent 不主动调 skill_view 就读不到 SKILL.md 主体。SOUL.md 走 always-on 路径
+	// (agent identity 一直在 system prompt),把知识库塞进 SOUL.md 才能保证
+	// 用户每条消息都能命中知识库内容。
+	// 应用级在前(优先级最高),组织级在后,与 spec §18 优先级语义一致。
+	knowledgeInline, kerr := h.collectKnowledgeForSoul(uuidToString(app.OrgID), appID)
+	if kerr != nil {
+		return fmt.Errorf("拼接知识库到 SOUL.md 失败: %w", kerr)
+	}
+	if knowledgeInline != "" {
+		if soulBody != "" {
+			soulBody += "\n\n"
+		}
+		soulBody += knowledgeInline
+	}
+	if soulBody != "" {
+		if err := h.runtimeFiles.UploadAppRuntimeFile(ctx, nodeID, appID, "SOUL.md", strings.NewReader(soulBody)); err != nil {
 			return fmt.Errorf("上传 SOUL.md: %w", err)
 		}
 	}
@@ -429,7 +471,138 @@ func (h *AppInitializeHandler) writeHermesFiles(ctx context.Context, nodeID stri
 		return fmt.Errorf("上传 .env: %w", err)
 	}
 
+	// 把组织 / 应用知识库渲染成 .hermes/skills/kb-{org,app}-<slug>/SKILL.md,
+	// Hermes 启动时按 skill 加载机制扫描该目录,使知识库内容进入 agent 上下文。
+	// SkillScope 已在 DirName 前缀里区分 org / app,即便 slug 相同也不会冲突;
+	// Hermes 会根据 scope 决定优先级(spec §18:应用级优先于组织级)。
+	// 用 app.OrgID 取组织 ID,与 KnowledgeService 主副本路径拼接保持一致;
+	// 避免依赖 GetOrganization 返回值里可能缺失的 ID 字段。
+	if err := h.writeSkillsFromKnowledge(ctx, nodeID, appID, uuidToString(app.OrgID)); err != nil {
+		return err
+	}
+
 	return nil
+}
+
+// collectKnowledgeForSoul 把组织 + 应用知识库主副本的所有文件读出来,
+// 拼成一段适合塞进 SOUL.md 末尾的 markdown,作为 always-on 业务上下文。
+//
+// 顺序:应用级在组织级之前——agent 自顶向下读 system prompt,先读到的内容
+// 在冲突时占优(spec §18:应用级优先于组织级,同名时应用级覆盖)。
+//
+// knowledge reader 未注入 / 主副本为空时返回空串(不报错)。
+// 单文件超过 8KB 截断到前 8KB + 末尾标记,避免单个大文件撑爆 system prompt。
+func (h *AppInitializeHandler) collectKnowledgeForSoul(orgID, appID string) (string, error) {
+	if h.knowledge == nil {
+		return "", nil
+	}
+	const perFileMax = 8 * 1024
+	appPrefix := fmt.Sprintf("org/%s/app/%s/knowledge", orgID, appID)
+	orgPrefix := fmt.Sprintf("org/%s/knowledge", orgID)
+
+	// 收集器:先 app 后 org,保证 inline 顺序"应用级在前"。
+	type entry struct{ scope, relPath, body string }
+	var entries []entry
+
+	collect := func(scope, prefix string) error {
+		return h.knowledge.WalkFiles(prefix, func(relPath string, _ int64) error {
+			reader, _, err := h.knowledge.Open(prefix + "/" + relPath)
+			if err != nil {
+				return err
+			}
+			body, readErr := io.ReadAll(reader)
+			_ = reader.Close()
+			if readErr != nil {
+				return readErr
+			}
+			truncated := string(body)
+			if len(truncated) > perFileMax {
+				truncated = truncated[:perFileMax] + "\n\n... (后续内容已截断,完整版见 skills/kb-*-*/SKILL.md)"
+			}
+			entries = append(entries, entry{scope: scope, relPath: relPath, body: truncated})
+			return nil
+		})
+	}
+	if err := collect("应用级(优先生效)", appPrefix); err != nil {
+		return "", err
+	}
+	if err := collect("组织级(默认)", orgPrefix); err != nil {
+		return "", err
+	}
+	if len(entries) == 0 {
+		return "", nil
+	}
+
+	var b strings.Builder
+	b.WriteString("## 业务知识库 (always-on context)\n\n")
+	b.WriteString("以下是本应用所属组织 / 本应用的业务知识库内容,你必须在回答用户问题时严格按此内容回复,而非根据通用知识猜测。\n\n")
+	b.WriteString("**优先级规则**:同主题下,「应用级」覆盖「组织级」——如果应用级和组织级对同一问题(如计费、话术)给出不同规则,**必须使用应用级**。\n\n")
+	for _, e := range entries {
+		b.WriteString(fmt.Sprintf("### %s — %s\n\n", e.scope, e.relPath))
+		b.WriteString(strings.TrimSpace(e.body))
+		b.WriteString("\n\n")
+	}
+	return b.String(), nil
+}
+
+// writeSkillsFromKnowledge 把组织 + 应用知识库主副本递归遍历并上传到
+// 节点 dataRoot/apps/<appID>/.hermes/skills/。
+//
+// 主副本目录约定(与 service/knowledge_service.go 的 path.Join 一致):
+//   - 组织: org/<orgID>/knowledge/
+//   - 应用: org/<orgID>/app/<appID>/knowledge/
+//
+// 每个文件单独渲染一份 SKILL.md;路径冲突由 SlugifyKnowledgePath + 路径 hash
+// 兜底解决。knowledge reader 未注入时直接跳过(测试装配)。
+func (h *AppInitializeHandler) writeSkillsFromKnowledge(ctx context.Context, nodeID, appID, orgID string) error {
+	if h.knowledge == nil {
+		return nil
+	}
+	orgPrefix := fmt.Sprintf("org/%s/knowledge", orgID)
+	if err := h.uploadKnowledgeSkills(ctx, nodeID, appID, hermes.ScopeOrg, orgPrefix); err != nil {
+		return fmt.Errorf("写组织知识库 skills 失败: %w", err)
+	}
+	appPrefix := fmt.Sprintf("org/%s/app/%s/knowledge", orgID, appID)
+	if err := h.uploadKnowledgeSkills(ctx, nodeID, appID, hermes.ScopeApp, appPrefix); err != nil {
+		return fmt.Errorf("写应用知识库 skills 失败: %w", err)
+	}
+	return nil
+}
+
+// uploadKnowledgeSkills 遍历 prefix 目录下的每个文件,渲染成 SKILL.md 上传到
+// .hermes/skills/<DirName>/SKILL.md。
+// prefix 不存在视为空集(KnowledgeReader.WalkFiles 已做幂等),不报错。
+func (h *AppInitializeHandler) uploadKnowledgeSkills(ctx context.Context, nodeID, appID string, scope hermes.SkillScope, prefix string) error {
+	return h.knowledge.WalkFiles(prefix, func(relPath string, size int64) error {
+		master := prefix + "/" + relPath
+		reader, _, err := h.knowledge.Open(master)
+		if err != nil {
+			return fmt.Errorf("打开主副本 %s 失败: %w", master, err)
+		}
+		body, readErr := io.ReadAll(reader)
+		_ = reader.Close()
+		if readErr != nil {
+			return fmt.Errorf("读取主副本 %s 失败: %w", master, readErr)
+		}
+		slug := hermes.SlugifyKnowledgePath(relPath)
+		rendered, renderErr := hermes.RenderKnowledgeSkill(hermes.KnowledgeDoc{
+			Scope: scope,
+			Slug:  slug,
+			Title: relPath,
+			// Summary 拼成业务化引导文案,直接进 SKILL.md frontmatter description;
+			// agent 会按 description 决定是否主动 /kb-* 装载本 skill。
+			Summary: hermes.BuildKnowledgeSummary(scope, relPath, string(body)),
+			Body:    string(body),
+		})
+		if renderErr != nil {
+			return fmt.Errorf("渲染 SKILL.md %s 失败: %w", master, renderErr)
+		}
+		target := fmt.Sprintf("skills/%s/SKILL.md", rendered.DirName)
+		if err := h.runtimeFiles.UploadAppRuntimeFile(ctx, nodeID, appID, target, strings.NewReader(rendered.SkillMD)); err != nil {
+			return fmt.Errorf("上传 %s 失败: %w", target, err)
+		}
+		return nil
+	})
 }
 
 // ensureAPIKey 走「以组织业务 user 身份创 token + 拉完整 sk-」流程，加密落库后返回明文 sk-。

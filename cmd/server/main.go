@@ -252,6 +252,10 @@ func runManager(ctx context.Context, cfg config.Config, logOut io.Writer) error 
 	// 在多节点部署下把 Hermes 配置文件（SOUL.md/config.yaml/.env）上传到目标节点
 	// agent 的 dataRoot/apps/<id>/.hermes/，确保 manager 与 docker daemon 可不同机。
 	appInitHandler.SetRuntimeFileWriter(runtimeAdapter)
+	// 注入主副本知识库读取能力：handler 在写完 SOUL.md/config.yaml/.env 后,
+	// 遍历组织 + 应用知识库,把每个文件渲染成 .hermes/skills/kb-{org,app}-<slug>/SKILL.md,
+	// Hermes 启动时按 skill 机制扫描该目录,使知识库内容进入 agent 上下文。
+	appInitHandler.SetKnowledgeReader(knowledgeMaster)
 	if err := registry.Register("app_initialize", appInitHandler.Handle); err != nil {
 		return fmt.Errorf("注册 app_initialize handler 失败: %w", err)
 	}
@@ -266,7 +270,7 @@ func runManager(ctx context.Context, cfg config.Config, logOut io.Writer) error 
 	// restart handler 在 docker restart 之前重新渲染 config.yaml 并通过 agent 上传,
 	// 让 Hermes 加载到 DB 最新的 model_id;不刷 .env(WEIXIN_* 由 channel bound 流管)
 	// 也不刷 SOUL.md(persona prompt 由专用流程管)。
-	restartHandler.SetConfigRefresher(newHermesConfigRefresher(dbStore.Queries, runtimeAdapter, cipher, cfg.NewAPI.BaseURL))
+	restartHandler.SetConfigRefresher(newHermesConfigRefresher(dbStore.Queries, runtimeAdapter, cipher, knowledgeMaster, cfg.NewAPI.BaseURL, cfg.Hermes.SystemPromptTemplate))
 	if err := registry.Register("app_restart_container", restartHandler.Handle); err != nil {
 		return fmt.Errorf("注册 app_restart_container handler 失败: %w", err)
 	}

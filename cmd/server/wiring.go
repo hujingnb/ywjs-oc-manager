@@ -123,8 +123,12 @@ func (s *streamingDockerResolver) DockerClient(ctx context.Context, nodeID strin
 
 // hermesConfigQueries 是 hermesConfigRefresher 需要的最小查询子集。
 // 抽出接口便于测试。
+// 包含 GetOrganization / GetUser 以支持 restart 时重渲 SOUL.md
+// (用 org.Name / owner.DisplayName 替换占位符)。
 type hermesConfigQueries interface {
 	GetApp(ctx context.Context, id pgtype.UUID) (sqlc.App, error)
+	GetOrganization(ctx context.Context, id pgtype.UUID) (sqlc.Organization, error)
+	GetUser(ctx context.Context, id pgtype.UUID) (sqlc.User, error)
 }
 
 // hermesConfigUploader 抽象向目标节点上传 Hermes 配置文件的能力。
@@ -137,17 +141,30 @@ type hermesConfigUploader interface {
 // 在 restart job 触发时根据 DB 当前 app.model_id + 解密的 OPENAI_API_KEY
 // 重新渲染 Hermes 的 config.yaml 并通过 runtime-agent 上传到容器。
 //
-// 仅刷 config.yaml,不刷 .env / SOUL.md:.env 含 WEIXIN_* 凭证由 channel bound
-// 流管;SOUL.md 与 persona prompt 强相关,目前 manager 没有改 persona 的入口。
+// 同时遍历组织/应用知识库主副本,把每个文件渲染成 .hermes/skills/kb-*-<slug>/SKILL.md
+// 上传到容器——这样 restart 后 Hermes 容器内 skills 与 manager 主副本保持一致,
+// 不必依赖单独的 knowledge_sync_node 全量重推。
+//
+// 不刷 .env / SOUL.md:.env 含 WEIXIN_* 凭证由 channel bound 流管;
+// SOUL.md 与 persona prompt 强相关,目前 manager 没有改 persona 的入口。
 type hermesConfigRefresher struct {
-	queries       hermesConfigQueries
-	uploader      hermesConfigUploader
-	cipher        *auth.Cipher
-	newAPIBaseURL string
+	queries              hermesConfigQueries
+	uploader             hermesConfigUploader
+	cipher               *auth.Cipher
+	knowledge            workerhandlers.KnowledgeReader
+	newAPIBaseURL        string
+	systemPromptTemplate string
 }
 
-func newHermesConfigRefresher(queries hermesConfigQueries, uploader hermesConfigUploader, cipher *auth.Cipher, newAPIBaseURL string) *hermesConfigRefresher {
-	return &hermesConfigRefresher{queries: queries, uploader: uploader, cipher: cipher, newAPIBaseURL: newAPIBaseURL}
+func newHermesConfigRefresher(queries hermesConfigQueries, uploader hermesConfigUploader, cipher *auth.Cipher, knowledge workerhandlers.KnowledgeReader, newAPIBaseURL, systemPromptTemplate string) *hermesConfigRefresher {
+	return &hermesConfigRefresher{
+		queries:              queries,
+		uploader:             uploader,
+		cipher:               cipher,
+		knowledge:            knowledge,
+		newAPIBaseURL:        newAPIBaseURL,
+		systemPromptTemplate: systemPromptTemplate,
+	}
 }
 
 // RefreshConfigYAML 拿当前 app 状态 + 解密 token,渲染 config.yaml 并上传。
@@ -192,7 +209,178 @@ func (r *hermesConfigRefresher) RefreshConfigYAML(ctx context.Context, appID str
 	if err := r.uploader.UploadAppRuntimeFile(ctx, nodeID, appID, "config.yaml", strings.NewReader(yamlContent)); err != nil {
 		return fmt.Errorf("上传 config.yaml: %w", err)
 	}
+	// 重新渲染并上传组织/应用知识库 skills,使 restart 后容器内 skills 与
+	// manager 主副本保持一致;主副本未变时上传的是相同字节,Hermes restart 后
+	// 重新扫描即可生效(skill 加载在容器启动时一次性物化)。
+	if err := r.refreshSkills(ctx, nodeID, appID, uuidToStringWiring(app.OrgID)); err != nil {
+		return fmt.Errorf("刷新知识库 skills: %w", err)
+	}
+	// 重渲 SOUL.md,把最新知识库 inline 作为 always-on context。
+	// Hermes 的 skills 是 progressive disclosure (skill_view 才装),
+	// agent 不一定主动调,所以走 SOUL.md always-on 路径保证业务知识被读到。
+	if err := r.refreshSoulMD(ctx, nodeID, app); err != nil {
+		return fmt.Errorf("刷新 SOUL.md: %w", err)
+	}
 	return nil
+}
+
+// refreshSoulMD 在 restart 时根据当前 app/org/owner 重新渲染 SOUL.md,
+// 末尾拼上组织 + 应用知识库的全部内容作为 always-on 业务上下文。
+// 失败仅记错误,不阻塞 restart(prompt 全空 / org 缺失 / queries 失败时跳过)。
+func (r *hermesConfigRefresher) refreshSoulMD(ctx context.Context, nodeID string, app sqlc.App) error {
+	if r.uploader == nil {
+		return fmt.Errorf("hermesConfigRefresher.uploader 未配置,无法上传 SOUL.md")
+	}
+	appID := uuidToStringWiring(app.ID)
+	org, err := r.queries.GetOrganization(ctx, app.OrgID)
+	if err != nil {
+		return fmt.Errorf("查询组织失败: %w", err)
+	}
+	owner, err := r.queries.GetUser(ctx, app.OwnerUserID)
+	if err != nil {
+		return fmt.Errorf("查询应用 owner 失败: %w", err)
+	}
+	soulBody := ""
+	promptResult, perr := hermes.Render(hermes.PromptInput{
+		PlatformPrompt: r.systemPromptTemplate,
+		OrgPrompt:      "",
+		AppPrompt:      pgtypeText(app.AppPrompt),
+		Variables:      hermes.VariablesFromContext(org.Name, app.Name, owner.DisplayName),
+	})
+	if perr == nil {
+		soulBody = promptResult.Prompt
+	}
+	knowledgeInline, kerr := r.collectKnowledgeForSoul(uuidToStringWiring(app.OrgID), appID)
+	if kerr != nil {
+		return fmt.Errorf("拼接知识库到 SOUL.md 失败: %w", kerr)
+	}
+	if knowledgeInline != "" {
+		if soulBody != "" {
+			soulBody += "\n\n"
+		}
+		soulBody += knowledgeInline
+	}
+	if soulBody == "" {
+		// SOUL.md 全空(无 prompt 也无知识库)时不上传,保留原 SOUL.md 不动。
+		return nil
+	}
+	return r.uploader.UploadAppRuntimeFile(ctx, nodeID, appID, "SOUL.md", strings.NewReader(soulBody))
+}
+
+// pgtypeText 安全提取 pgtype.Text 内容;.Valid 为 false 时返回空串。
+func pgtypeText(t pgtype.Text) string {
+	if !t.Valid {
+		return ""
+	}
+	return t.String
+}
+
+// collectKnowledgeForSoul 与 worker handlers 端的实现等价:递归 org + app
+// 知识库主副本,按"应用级在前、组织级在后"的顺序拼成 markdown 块,作为
+// SOUL.md always-on 业务上下文。
+func (r *hermesConfigRefresher) collectKnowledgeForSoul(orgID, appID string) (string, error) {
+	if r.knowledge == nil {
+		return "", nil
+	}
+	const perFileMax = 8 * 1024
+	appPrefix := fmt.Sprintf("org/%s/app/%s/knowledge", orgID, appID)
+	orgPrefix := fmt.Sprintf("org/%s/knowledge", orgID)
+
+	type entry struct{ scope, relPath, body string }
+	var entries []entry
+
+	collect := func(scope, prefix string) error {
+		return r.knowledge.WalkFiles(prefix, func(relPath string, _ int64) error {
+			reader, _, err := r.knowledge.Open(prefix + "/" + relPath)
+			if err != nil {
+				return err
+			}
+			body, readErr := io.ReadAll(reader)
+			_ = reader.Close()
+			if readErr != nil {
+				return readErr
+			}
+			truncated := string(body)
+			if len(truncated) > perFileMax {
+				truncated = truncated[:perFileMax] + "\n\n... (后续内容已截断,完整版见 skills/kb-*-*/SKILL.md)"
+			}
+			entries = append(entries, entry{scope: scope, relPath: relPath, body: truncated})
+			return nil
+		})
+	}
+	if err := collect("应用级(优先生效)", appPrefix); err != nil {
+		return "", err
+	}
+	if err := collect("组织级(默认)", orgPrefix); err != nil {
+		return "", err
+	}
+	if len(entries) == 0 {
+		return "", nil
+	}
+
+	var b strings.Builder
+	b.WriteString("## 业务知识库 (always-on context)\n\n")
+	b.WriteString("以下是本应用所属组织 / 本应用的业务知识库内容,你必须在回答用户问题时严格按此内容回复,而非根据通用知识猜测。\n\n")
+	b.WriteString("**优先级规则**:同主题下,「应用级」覆盖「组织级」——如果应用级和组织级对同一问题(如计费、话术)给出不同规则,**必须使用应用级**。\n\n")
+	for _, e := range entries {
+		b.WriteString(fmt.Sprintf("### %s — %s\n\n", e.scope, e.relPath))
+		b.WriteString(strings.TrimSpace(e.body))
+		b.WriteString("\n\n")
+	}
+	return b.String(), nil
+}
+
+// refreshSkills 把组织 + 应用知识库主副本的所有文件渲染为 .hermes/skills/
+// 下的 SKILL.md 并上传到容器。knowledge 未注入时直接跳过(保留旧装配兼容);
+// 主副本目录不存在视为空集,不报错。
+func (r *hermesConfigRefresher) refreshSkills(ctx context.Context, nodeID, appID, orgID string) error {
+	if r.knowledge == nil {
+		return nil
+	}
+	orgPrefix := fmt.Sprintf("org/%s/knowledge", orgID)
+	if err := r.uploadSkillScope(ctx, nodeID, appID, hermes.ScopeOrg, orgPrefix); err != nil {
+		return fmt.Errorf("写组织 skills 失败: %w", err)
+	}
+	appPrefix := fmt.Sprintf("org/%s/app/%s/knowledge", orgID, appID)
+	if err := r.uploadSkillScope(ctx, nodeID, appID, hermes.ScopeApp, appPrefix); err != nil {
+		return fmt.Errorf("写应用 skills 失败: %w", err)
+	}
+	return nil
+}
+
+// uploadSkillScope 遍历 prefix 下所有文件,渲染并上传成 SKILL.md。
+// 与 worker handlers.uploadKnowledgeSkills 同构,共存于装配层避免反向依赖。
+func (r *hermesConfigRefresher) uploadSkillScope(ctx context.Context, nodeID, appID string, scope hermes.SkillScope, prefix string) error {
+	return r.knowledge.WalkFiles(prefix, func(relPath string, _ int64) error {
+		master := prefix + "/" + relPath
+		reader, _, err := r.knowledge.Open(master)
+		if err != nil {
+			return fmt.Errorf("打开主副本 %s 失败: %w", master, err)
+		}
+		body, readErr := io.ReadAll(reader)
+		_ = reader.Close()
+		if readErr != nil {
+			return fmt.Errorf("读取主副本 %s 失败: %w", master, readErr)
+		}
+		slug := hermes.SlugifyKnowledgePath(relPath)
+		rendered, err := hermes.RenderKnowledgeSkill(hermes.KnowledgeDoc{
+			Scope: scope,
+			Slug:  slug,
+			Title: relPath,
+			// Summary 拼成业务化引导文案,直接进 SKILL.md frontmatter description;
+			// agent 按 description 选择性装载,这里要让它知道"组织/应用知识库,涉及业务必读"。
+			Summary: hermes.BuildKnowledgeSummary(scope, relPath, string(body)),
+			Body:    string(body),
+		})
+		if err != nil {
+			return fmt.Errorf("渲染 SKILL.md %s 失败: %w", master, err)
+		}
+		target := fmt.Sprintf("skills/%s/SKILL.md", rendered.DirName)
+		if err := r.uploader.UploadAppRuntimeFile(ctx, nodeID, appID, target, strings.NewReader(rendered.SkillMD)); err != nil {
+			return fmt.Errorf("上传 %s 失败: %w", target, err)
+		}
+		return nil
+	})
 }
 
 // InspectImage 适配 imagesync.AgentImageClient 接口。

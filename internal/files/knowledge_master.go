@@ -116,6 +116,44 @@ func (m *KnowledgeMaster) Delete(relative string) error {
 	return os.RemoveAll(resolved)
 }
 
+// WalkFiles 递归遍历 relative 子树下的所有普通文件(忽略目录),
+// 每个文件回调一次。返回的相对路径相对于 relative 自身,以 '/' 分隔。
+// 用于 app_initialize 把组织/应用知识库批量渲染成 Hermes skills。
+// relative 为空或 "." 时遍历整个根。relative 指向的目录不存在视为空集(返回 nil)。
+func (m *KnowledgeMaster) WalkFiles(relative string, fn func(relPath string, size int64) error) error {
+	var base string
+	if relative == "" || relative == "." {
+		base = m.root.Root
+	} else {
+		resolved, err := m.root.Resolve(relative)
+		if err != nil {
+			return err
+		}
+		base = resolved
+	}
+	if _, err := os.Stat(base); err != nil {
+		if errors.Is(err, os.ErrNotExist) {
+			return nil
+		}
+		return err
+	}
+	return filepath.Walk(base, func(p string, info os.FileInfo, err error) error {
+		if err != nil {
+			return err
+		}
+		if info.IsDir() {
+			return nil
+		}
+		rel, relErr := filepath.Rel(base, p)
+		if relErr != nil {
+			return relErr
+		}
+		// 统一用 '/' 作分隔符,避免在容器/agent 端再次本地化。
+		rel = filepath.ToSlash(rel)
+		return fn(rel, info.Size())
+	})
+}
+
 // List 列出指定相对路径下的条目。
 func (m *KnowledgeMaster) List(relative string) ([]KnowledgeEntry, error) {
 	if relative == "" {

@@ -561,6 +561,107 @@ func (f *fakeRuntimeFileWriter) hasUpload(appID, relPath string) bool {
 	return false
 }
 
+// fakeKnowledgeReader 实现 KnowledgeReader,用于测试 writeSkillsFromKnowledge
+// 是否按主副本子树展开成 .hermes/skills/kb-*-<slug>/SKILL.md。
+//
+// files 用主副本绝对路径(含 prefix)做 key,模拟一个内存中的主副本目录。
+type fakeKnowledgeReader struct {
+	files map[string]string
+}
+
+func (f *fakeKnowledgeReader) WalkFiles(prefix string, fn func(relPath string, size int64) error) error {
+	for full, content := range f.files {
+		if !strings.HasPrefix(full, prefix+"/") {
+			continue
+		}
+		rel := strings.TrimPrefix(full, prefix+"/")
+		if err := fn(rel, int64(len(content))); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+func (f *fakeKnowledgeReader) Open(masterPath string) (io.ReadCloser, int64, error) {
+	c, ok := f.files[masterPath]
+	if !ok {
+		return nil, 0, fmt.Errorf("not found: %s", masterPath)
+	}
+	return io.NopCloser(strings.NewReader(c)), int64(len(c)), nil
+}
+
+// TestAppInitialize_WritesKnowledgeSkills 验证 app_initialize 在容器启动前
+// 把组织 + 应用知识库文件渲染为 SKILL.md 上传到 .hermes/skills/。
+//
+// 覆盖场景:
+//   - 组织级文件 billing-rules.md → skills/kb-org-billing-rules/SKILL.md
+//   - 应用级文件 quickstart.md → skills/kb-app-quickstart/SKILL.md
+//   - 子目录 policies/refund.md → skills/kb-org-policies-refund/SKILL.md
+//   - 中文文件名走 fallback hash slug, 不破坏其他文件上传
+func TestAppInitialize_WritesKnowledgeSkills(t *testing.T) {
+	store := newAppInitStub(t)
+	images := &fakeImages{}
+	dirs := &fakeDirs{}
+	containers := &fakeContainers{result: runtimepkg.ContainerInfo{ID: "ctr-1", Name: "hermes-" + testAppID}}
+	client := &fakeNewAPI{result: newapi.APIKey{ID: 99, Key: "sk-test"}}
+	rw := &fakeRuntimeFileWriter{}
+	orgPrefix := fmt.Sprintf("org/%s/knowledge", testOrgID)
+	appPrefix := fmt.Sprintf("org/%s/app/%s/knowledge", testOrgID, testAppID)
+	reader := &fakeKnowledgeReader{files: map[string]string{
+		orgPrefix + "/billing-rules.md":    "# 计费\n月度结算。",
+		orgPrefix + "/policies/refund.md":  "# 退款政策",
+		appPrefix + "/quickstart.md":       "# 应用使用入门",
+		appPrefix + "/中文文件.md":             "# 仅供 fallback 测试",
+	}}
+
+	cfg := AppInitializeConfig{
+		RuntimeImage:         "hermes:dev",
+		SystemPromptTemplate: "你是 {org_name} 的助手",
+		Cipher:               testCipher(t),
+	}
+	handler := NewAppInitializeHandler(store, images, dirs, containers, containers, client, cfg)
+	handler.SetRuntimeFileWriter(rw)
+	handler.SetKnowledgeReader(reader)
+
+	require.NoError(t, handler.Handle(context.Background(), buildJob(t, testAppID, "node-1")))
+
+	// 必须存在的 skill 文件(基础英文文件名 → 标准 slug)。
+	require.True(t, rw.hasUpload(testAppID, "skills/kb-org-billing-rules/SKILL.md"),
+		"组织级 billing-rules.md 应渲染为 kb-org-billing-rules")
+	require.True(t, rw.hasUpload(testAppID, "skills/kb-org-policies-refund/SKILL.md"),
+		"子目录 policies/refund.md 应展平成 kb-org-policies-refund")
+	require.True(t, rw.hasUpload(testAppID, "skills/kb-app-quickstart/SKILL.md"),
+		"应用级 quickstart.md 应渲染为 kb-app-quickstart")
+	// 中文文件名走 fallback,不应阻塞其他文件上传——至少一条以 kb-app-kb- 开头的 fallback 记录。
+	var hasFallback bool
+	for _, c := range rw.calls {
+		if strings.HasPrefix(c.relPath, "skills/kb-app-kb-") {
+			hasFallback = true
+			break
+		}
+	}
+	require.True(t, hasFallback, "中文文件名应走 sha256 fallback,实际上传记录: %+v", rw.calls)
+}
+
+// TestAppInitialize_KnowledgeReaderNilSkipsSkills 验证 KnowledgeReader 未注入时
+// writeHermesFiles 仅上传 SOUL/config/.env,不报错(向后兼容旧装配 / 测试)。
+func TestAppInitialize_KnowledgeReaderNilSkipsSkills(t *testing.T) {
+	store := newAppInitStub(t)
+	containers := &fakeContainers{result: runtimepkg.ContainerInfo{ID: "ctr-1", Name: "n"}}
+	client := &fakeNewAPI{result: newapi.APIKey{ID: 1, Key: "k"}}
+	rw := &fakeRuntimeFileWriter{}
+	handler := NewAppInitializeHandler(store, &fakeImages{}, &fakeDirs{}, containers, containers, client, AppInitializeConfig{Cipher: testCipher(t)})
+	handler.SetRuntimeFileWriter(rw)
+	// 不调 SetKnowledgeReader,h.knowledge 保持 nil。
+
+	require.NoError(t, handler.Handle(context.Background(), buildJob(t, testAppID, "node-1")))
+
+	for _, c := range rw.calls {
+		require.False(t, strings.HasPrefix(c.relPath, "skills/"),
+			"KnowledgeReader 未注入时不应上传任何 skill: %s", c.relPath)
+	}
+}
+
 // fakeAuditRecorder 实现 audit.AuditRecorder，用于断言审计事件被写入。
 type fakeAuditRecorder struct {
 	events []service.AuditEvent
