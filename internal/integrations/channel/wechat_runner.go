@@ -80,25 +80,27 @@ func (r *readCloserAdapter) Close() error {
 // DockerCommandRunner 是渠道适配层对外暴露的类型，委托给 hermes.WeixinRunner。
 // 保持 type 名避免修改所有 caller。
 type DockerCommandRunner struct {
-	inner  *hermes.WeixinRunner
-	nodeID string
+	executor ContainerExecutor
 }
 
 // NewDockerCommandRunner 工厂。
 // lookup 参数保留签名兼容，Hermes 时代直接从 AuthInput.ContainerID 取，不再回查。
-// nodeID 在装配阶段通过 wiring.go 取出节点 ID 后注入；本文件不感知多节点路由。
+// 每次 StreamWeChatLogin 调用时按 AuthInput.NodeID 创建临时 hermes.WeixinRunner,
+// 把 nodeID 注入到 execToHermesAdapter,确保 docker exec 路由到正确节点。
 func NewDockerCommandRunner(executor ContainerExecutor, _ AppContainerLookup) *DockerCommandRunner {
-	// execToHermesAdapter 在每次 StreamWeChatLogin 调用时独立创建，nodeID 延迟绑定。
-	return &DockerCommandRunner{
-		inner: hermes.NewWeixinRunner(&execToHermesAdapter{executor: executor}),
-	}
+	return &DockerCommandRunner{executor: executor}
 }
 
 // StreamWeChatLogin 委托给 hermes.WeixinRunner。
 // 返回类型升级为 <-chan hermes.WeixinEvent（legacy OpenClaw 时代是 <-chan string）。
 // 上游 caller（wechat.go WeChatAdapter）在 Task 3.5 同步升级为消费 hermes.WeixinEvent。
 func (r *DockerCommandRunner) StreamWeChatLogin(ctx context.Context, input AuthInput) (<-chan hermes.WeixinEvent, error) {
-	return r.inner.StreamWeChatLogin(ctx, input.ContainerID)
+	// hermes.WeixinRunner 的 ContainerExecutor 接口不携带 nodeID,
+	// 这里 per-call 创建 execToHermesAdapter,把 input.NodeID 注入,
+	// 确保 dockerExecutor.Exec 能拿到正确节点的 docker client。
+	adapter := &execToHermesAdapter{nodeID: input.NodeID, executor: r.executor}
+	runner := hermes.NewWeixinRunner(adapter)
+	return runner.StreamWeChatLogin(ctx, input.ContainerID)
 }
 
 // NewDockerExecutor 包装一个 DockerClientResolver 提供生产可用的 ContainerExecutor。

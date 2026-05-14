@@ -56,9 +56,14 @@ func (a *WeChatAdapter) BeginAuth(ctx context.Context, input AuthInput) (AuthCha
 			}
 			a.recordProgress(input.AppID, AuthProgress{Status: AuthStatusPending, UpdatedAt: time.Now()})
 			go a.consumeStream(input.AppID, events)
+			// iLink QR 默认寿命 5 分钟(参考 OpenClaw 时代 CONTRACT 实测);
+			// Hermes weixin.qr_login 内部 QR_TIMEOUT_MS=35s 是 polling 间隔,
+			// 不是 QR 寿命。前端按 ExpiresAt 显示倒计时;过期后用户点"刷新二维码"
+			// 触发新一轮 ChannelStartLogin。
 			return AuthChallenge{
-				Type:   "qrcode",
-				QRCode: ev.QRCodeURL,
+				Type:      "qrcode",
+				QRCode:    ev.QRCodeURL,
+				ExpiresAt: time.Now().Add(5 * time.Minute),
 			}, nil
 		case hermes.WeixinEventFailed:
 			a.recordProgress(input.AppID, AuthProgress{Status: AuthStatusFailed, ErrorMessage: ev.Error, UpdatedAt: time.Now()})
