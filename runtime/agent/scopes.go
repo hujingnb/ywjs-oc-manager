@@ -121,11 +121,14 @@ func scopesAppsHandler(dataRoot string) http.HandlerFunc {
 		case action == "knowledge/file" && r.Method == http.MethodDelete:
 			handleKnowledgeFileDelete(w, r, dataRoot, filepath.Join("apps", appID, "knowledge"))
 		case action == "workspace" && r.Method == http.MethodGet:
-			handleWorkspaceList(w, r, dataRoot, filepath.Join("apps", appID, "workspace"))
+			// Hermes 容器把整个 .hermes 挂载到 /opt/data,workspace 子目录因此
+			// 落在节点 apps/<id>/.hermes/workspace。manager workspace API 必须读
+			// 同一物理路径,不再是 OpenClaw 时代独立 mount 的 apps/<id>/workspace。
+			handleWorkspaceList(w, r, dataRoot, filepath.Join("apps", appID, ".hermes", "workspace"))
 		case action == "workspace/download" && r.Method == http.MethodGet:
-			handleWorkspaceDownload(w, r, dataRoot, filepath.Join("apps", appID, "workspace"))
+			handleWorkspaceDownload(w, r, dataRoot, filepath.Join("apps", appID, ".hermes", "workspace"))
 		case action == "workspace/archive" && r.Method == http.MethodGet:
-			handleWorkspaceArchive(w, r, dataRoot, filepath.Join("apps", appID, "workspace"))
+			handleWorkspaceArchive(w, r, dataRoot, filepath.Join("apps", appID, ".hermes", "workspace"))
 		case action == "archive" && r.Method == http.MethodPost:
 			handleAppArchive(w, r, dataRoot, appID)
 		case action == "sessions" && r.Method == http.MethodDelete:

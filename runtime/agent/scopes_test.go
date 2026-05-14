@@ -319,7 +319,7 @@ func TestScopesKnowledgeFile_OrgScope(t *testing.T) {
 // TestScopesWorkspaceList 验证scope 工作区列表的预期行为场景。
 func TestScopesWorkspaceList(t *testing.T) {
 	dataRoot := t.TempDir()
-	root := filepath.Join(dataRoot, "apps", "app-1", "workspace")
+	root := filepath.Join(dataRoot, "apps", "app-1", ".hermes", "workspace")
 	_ = os.MkdirAll(filepath.Join(root, "sub"), 0o755)
 	_ = os.WriteFile(filepath.Join(root, "report.pdf"), []byte("pdf"), 0o644)
 	_ = os.WriteFile(filepath.Join(root, "sub", "image.png"), []byte("png-bytes"), 0o644)
@@ -371,7 +371,7 @@ func TestScopesWorkspaceList_NotExistReturnsEmpty(t *testing.T) {
 // TestScopesWorkspaceDownload 验证scope 工作区下载的预期行为场景。
 func TestScopesWorkspaceDownload(t *testing.T) {
 	dataRoot := t.TempDir()
-	root := filepath.Join(dataRoot, "apps", "app-1", "workspace")
+	root := filepath.Join(dataRoot, "apps", "app-1", ".hermes", "workspace")
 	_ = os.MkdirAll(root, 0o755)
 	_ = os.WriteFile(filepath.Join(root, "out.txt"), []byte("hello"), 0o644)
 
@@ -392,7 +392,7 @@ func TestScopesWorkspaceDownload(t *testing.T) {
 // TestScopesWorkspaceDownload_RejectsDirectory 验证scope 工作区下载拒绝目录的异常或拒绝路径场景。
 func TestScopesWorkspaceDownload_RejectsDirectory(t *testing.T) {
 	dataRoot := t.TempDir()
-	root := filepath.Join(dataRoot, "apps", "app-1", "workspace", "sub")
+	root := filepath.Join(dataRoot, "apps", "app-1", ".hermes", "workspace", "sub")
 	_ = os.MkdirAll(root, 0o755)
 	srv := httptest.NewServer(newHandlerWithDocker(dataRoot, nil, "tok"))
 	defer srv.Close()
@@ -408,7 +408,7 @@ func TestScopesWorkspaceDownload_RejectsDirectory(t *testing.T) {
 // TestScopesWorkspaceArchive 验证scope 工作区归档的预期行为场景。
 func TestScopesWorkspaceArchive(t *testing.T) {
 	dataRoot := t.TempDir()
-	root := filepath.Join(dataRoot, "apps", "app-1", "workspace")
+	root := filepath.Join(dataRoot, "apps", "app-1", ".hermes", "workspace")
 	_ = os.MkdirAll(filepath.Join(root, "sub"), 0o755)
 	_ = os.WriteFile(filepath.Join(root, "a.txt"), []byte("AAA"), 0o644)
 	_ = os.WriteFile(filepath.Join(root, "sub", "b.txt"), []byte("BBB"), 0o644)
