@@ -1,0 +1,20 @@
+# Air 配置:runtime-agent 本地开发 hot-reload。
+# 与 .air.toml(manager-api)分开,避免互相触发重建;
+# 只关注 runtime/agent/ 子树,改 .go 文件后自动重新编译并重启 agent。
+#
+# compose 的 working_dir 是 /app/runtime/agent,air 以此为 root。
+# include_dir 用相对 root 的路径,所以 "." 就够;build cmd 用 ./ 相对路径
+# (相当于 /app/runtime/agent)。
+root = "."
+tmp_dir = "/app/tmp/air-agent"
+
+[build]
+cmd = "go build -buildvcs=false -o /app/tmp/air-agent/agent ."
+bin = "/app/tmp/air-agent/agent"
+include_ext = ["go", "yaml"]
+exclude_dir = ["tmp"]
+delay = 1000
+stop_on_error = true
+
+[log]
+time = true

@@ -173,12 +173,14 @@ services:
       - ./.local/data/node/npm:/root/.npm
 
   # runtime-agent 本地开发容器，挂载 Docker socket 管理本机调试容器。
+  # 用 air hot-reload(与 manager-api 一致):改 runtime/agent/ 下任何 .go 文件
+  # 自动重建并重启 agent 进程,无需手动 docker restart 这种基础设施操作。
   oc-runtime-agent:
     image: golang:1.25-bookworm
     container_name: oc-runtime-agent
     extra_hosts: *host-gateway
     working_dir: /app/runtime/agent
-    command: sh -c "if [ -f main.go ]; then go run .; else sleep infinity; fi"
+    command: sh -c "if [ -f main.go ]; then if ! command -v air >/dev/null 2>&1; then go install github.com/air-verse/air@latest; fi && /go/bin/air -c /app/.air.runtime-agent.toml; else sleep infinity; fi"
     environment:
       OC_AGENT_CONFIG: /app/config/agent.yaml
       PATH: /go/bin:/usr/local/go/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin
