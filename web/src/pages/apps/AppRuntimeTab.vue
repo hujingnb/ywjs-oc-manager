@@ -93,7 +93,7 @@
     <ConfirmActionModal
       :visible="confirmStop"
       title="确认停止容器"
-      message="停止后 OpenClaw 容器对话立即中断；可在恢复时重新启动。"
+      message="停止后 Hermes 容器对话立即中断；可在恢复时重新启动。"
       confirm-label="确认停止"
       :busy="mutation.isPending.value"
       :verify-value="app?.name ?? ''"

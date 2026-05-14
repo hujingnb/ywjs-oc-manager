@@ -10,7 +10,7 @@
       <div class="brand-block">
         <div class="brand-mark">OC</div>
         <div class="logo-text">
-          <strong>OpenClaw</strong>
+          <strong>Hermes</strong>
           <span>Manager</span>
         </div>
       </div>

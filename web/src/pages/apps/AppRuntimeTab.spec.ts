@@ -19,7 +19,7 @@ const runtimeData = ref({
   container: {
     id: 'container-1',
     name: 'oc-app-1',
-    image: 'openclaw:test',
+    image: 'hermes:test',
     status: 'running',
   },
 })
@@ -109,7 +109,7 @@ describe('AppRuntimeTab', () => {
       container: {
         id: 'container-1',
         name: 'oc-app-1',
-        image: 'openclaw:test',
+        image: 'hermes:test',
         status: 'running',
       },
     }

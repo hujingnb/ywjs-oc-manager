@@ -92,7 +92,7 @@
     <ConfirmActionModal
       :visible="confirmDisableKey"
       title="确认禁用 API key"
-      message="禁用后 OpenClaw 容器将无法调用模型，对话立即停止；可在恢复时重新启用。"
+      message="禁用后 Hermes 容器将无法调用模型，对话立即停止；可在恢复时重新启用。"
       confirm-label="确认禁用"
       :busy="keyMutation.isPending.value"
       @confirm="onConfirmDisable"

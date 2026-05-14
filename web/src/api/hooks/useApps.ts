@@ -28,7 +28,7 @@ export interface AppDTO {
   persona_mode: string
   // 应用级提示词，仅 app_override 场景有业务意义。
   app_prompt?: string
-  // 实例当前使用的模型 ID，由后端在初始化或切换模型时写入 OpenClaw 配置。
+  // 实例当前使用的模型 ID，由后端在初始化或切换模型时写入 Hermes 配置。
   model_id: string
   // runtime 容器 ID，容器尚未创建或已删除时为空。
   container_id?: string
