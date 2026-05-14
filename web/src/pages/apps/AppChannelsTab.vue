@@ -8,10 +8,20 @@
     </template>
     <template #header-extra>
       <n-space :size="8">
-        <n-button type="primary" :disabled="!appId || !canManage || beginning" @click="beginAuth">
+        <n-button
+          type="primary"
+          :disabled="!appId || !canManage"
+          :loading="beginning"
+          @click="beginAuth"
+        >
           {{ primaryButtonLabel }}
         </n-button>
-        <n-button v-if="showRefreshChallenge" :disabled="!canManage || beginning" @click="beginAuth">
+        <n-button
+          v-if="showRefreshChallenge"
+          :disabled="!canManage"
+          :loading="beginning"
+          @click="beginAuth"
+        >
           {{ beginning ? '生成中…' : '刷新二维码' }}
         </n-button>
         <n-button v-if="canUnbind" @click="unbind">解绑</n-button>
@@ -31,7 +41,7 @@
         当前二维码已过期，请点击右上角"刷新二维码"重新生成。
       </p>
 
-      <AuthChallengeRenderer :challenge="visibleChallenge" />
+      <AuthChallengeRenderer :challenge="visibleChallenge" @rendered="onQrRendered" />
     </template>
   </n-card>
 </template>
@@ -73,6 +83,12 @@ const beginning = ref(false)
 const challenge = ref<ChannelChallenge | null>(null)
 // authStarted 区分“用户已点发起但后端还未返回二维码”和“完全未开始”的展示状态。
 const authStarted = ref(false)
+// renderedQrcode 记录 AuthChallengeRenderer 最近一次完成 QRCode 编码 + 触发 img 渲染的 qrcode 字符串。
+// beginAuth 用这个 ref 判定 loading 何时结束——以"img 真正展示新二维码"为准，而不是 mutation 返回值。
+const renderedQrcode = ref<string | null>(null)
+function onQrRendered(qr: string) {
+  renderedQrcode.value = qr
+}
 
 const statusLabel = computed(() => {
   if (!progress.value) return '未发起'
@@ -126,13 +142,35 @@ watch(
   },
 )
 
-// beginAuth 发起渠道登录 mutation；成功后保存挑战，渠道侧失败由进度轮询暴露 error_message，mutation 传输错误仍会冒泡到调用方或控制台。
+// beginAuth 发起渠道登录 mutation；loading 持续到 AuthChallengeRenderer emit 'rendered'
+// 事件（即新二维码完成 QRCode.toDataURL 异步编码、img 即将渲染新内容）才结束，
+// 而不是 mutation 返回就结束——避免出现 "loading 已结束、页面 3-6 秒后才换图" 的体验。
+// 监听对象是 renderedQrcode，而非 visibleChallenge.qrcode：前者代表"img 真的展示了什么"，
+// 后者只是 props，受 progress 4s 轮询 + 子组件异步编码影响，会比图片实际更新更早变化。
+// 10 秒兜底防止 progress 轮询慢或网络异常时按钮卡死。
 async function beginAuth() {
   if (!canManage.value) return
+  const prevRendered = renderedQrcode.value
   beginning.value = true
   try {
     challenge.value = await beginMutation.mutateAsync()
     authStarted.value = true
+    await new Promise<void>((resolve) => {
+      const stop = watch(
+        renderedQrcode,
+        (qr) => {
+          if (qr && qr !== prevRendered) {
+            stop()
+            resolve()
+          }
+        },
+        { immediate: true },
+      )
+      setTimeout(() => {
+        stop()
+        resolve()
+      }, 10000)
+    })
   } finally {
     beginning.value = false
   }

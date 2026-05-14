@@ -35,6 +35,10 @@ import type { ChannelChallenge } from '@/api/hooks/useChannel'
 // challenge 可能来自立即发起登录的响应，也可能来自轮询进度接口。
 const props = defineProps<{ challenge?: ChannelChallenge | null }>()
 
+// rendered 事件在二维码 dataURL 设置完成（img 即将渲染新内容）时触发。
+// 父组件用这个事件作为"刷新二维码 loading 结束"的判据，避免在新图实际可见前误判结束。
+const emit = defineEmits<{ (e: 'rendered', qrcode: string): void }>()
+
 // qrDataUrl 保存本地编码后的二维码图片；上游给纯 URL 时必须先转成 dataURL 才能渲染。
 const qrDataUrl = ref<string>('')
 // errorMessage 只表示前端二维码编码失败，不覆盖渠道认证本身的后端错误。
@@ -59,6 +63,7 @@ watch(
     if (raw.startsWith('data:image/')) {
       // 兼容旧契约：上游若已直接给 base64 image，跳过本地编码。
       qrDataUrl.value = raw
+      emit('rendered', raw)
       return
     }
     try {
@@ -67,6 +72,7 @@ watch(
         width: 240,
         errorCorrectionLevel: 'M',
       })
+      emit('rendered', raw)
     } catch (err) {
       errorMessage.value = `二维码生成失败：${err instanceof Error ? err.message : String(err)}`
     }
