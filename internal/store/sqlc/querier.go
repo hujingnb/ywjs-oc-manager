@@ -91,6 +91,10 @@ type Querier interface {
 	ListRunningApps(ctx context.Context) ([]ListRunningAppsRow, error)
 	ListRuntimeNodes(ctx context.Context, arg ListRuntimeNodesParams) ([]RuntimeNode, error)
 	ListUsersByOrg(ctx context.Context, arg ListUsersByOrgParams) ([]User, error)
+	// 列出组织内成员及其当前关联的活跃实例（LEFT JOIN，无实例的成员仍返回）。
+	// apps 表上 apps_owner_active 唯一约束保证每个 owner 最多一个未软删实例，
+	// LEFT JOIN 不会产生重复行；ORDER BY 保持与 ListUsersByOrg 一致。
+	ListUsersByOrgWithActiveApp(ctx context.Context, arg ListUsersByOrgWithActiveAppParams) ([]ListUsersByOrgWithActiveAppRow, error)
 	LockJobForUpdate(ctx context.Context, id pgtype.UUID) (Job, error)
 	MarkChannelBindingBound(ctx context.Context, arg MarkChannelBindingBoundParams) (ChannelBinding, error)
 	MarkJobFailed(ctx context.Context, arg MarkJobFailedParams) (Job, error)

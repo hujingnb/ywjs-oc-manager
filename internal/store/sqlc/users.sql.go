@@ -217,6 +217,75 @@ func (q *Queries) ListUsersByOrg(ctx context.Context, arg ListUsersByOrgParams) 
 	return items, nil
 }
 
+const listUsersByOrgWithActiveApp = `-- name: ListUsersByOrgWithActiveApp :many
+SELECT u.id, u.org_id, u.username, u.password_hash, u.display_name, u.role, u.status, u.last_login_at, u.created_at, u.updated_at, u.deleted_at, a.id AS active_app_id, a.name AS active_app_name
+FROM users u
+LEFT JOIN apps a
+  ON a.owner_user_id = u.id AND a.deleted_at IS NULL
+WHERE u.org_id = $1
+ORDER BY u.created_at DESC, u.id DESC
+LIMIT $2 OFFSET $3
+`
+
+type ListUsersByOrgWithActiveAppParams struct {
+	OrgID  pgtype.UUID `db:"org_id" json:"org_id"`
+	Limit  int32       `db:"limit" json:"limit"`
+	Offset int32       `db:"offset" json:"offset"`
+}
+
+type ListUsersByOrgWithActiveAppRow struct {
+	ID            pgtype.UUID        `db:"id" json:"id"`
+	OrgID         pgtype.UUID        `db:"org_id" json:"org_id"`
+	Username      string             `db:"username" json:"username"`
+	PasswordHash  string             `db:"password_hash" json:"password_hash"`
+	DisplayName   string             `db:"display_name" json:"display_name"`
+	Role          string             `db:"role" json:"role"`
+	Status        string             `db:"status" json:"status"`
+	LastLoginAt   pgtype.Timestamptz `db:"last_login_at" json:"last_login_at"`
+	CreatedAt     pgtype.Timestamptz `db:"created_at" json:"created_at"`
+	UpdatedAt     pgtype.Timestamptz `db:"updated_at" json:"updated_at"`
+	DeletedAt     pgtype.Timestamptz `db:"deleted_at" json:"deleted_at"`
+	ActiveAppID   pgtype.UUID        `db:"active_app_id" json:"active_app_id"`
+	ActiveAppName pgtype.Text        `db:"active_app_name" json:"active_app_name"`
+}
+
+// 列出组织内成员及其当前关联的活跃实例（LEFT JOIN，无实例的成员仍返回）。
+// apps 表上 apps_owner_active 唯一约束保证每个 owner 最多一个未软删实例，
+// LEFT JOIN 不会产生重复行；ORDER BY 保持与 ListUsersByOrg 一致。
+func (q *Queries) ListUsersByOrgWithActiveApp(ctx context.Context, arg ListUsersByOrgWithActiveAppParams) ([]ListUsersByOrgWithActiveAppRow, error) {
+	rows, err := q.db.Query(ctx, listUsersByOrgWithActiveApp, arg.OrgID, arg.Limit, arg.Offset)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []ListUsersByOrgWithActiveAppRow{}
+	for rows.Next() {
+		var i ListUsersByOrgWithActiveAppRow
+		if err := rows.Scan(
+			&i.ID,
+			&i.OrgID,
+			&i.Username,
+			&i.PasswordHash,
+			&i.DisplayName,
+			&i.Role,
+			&i.Status,
+			&i.LastLoginAt,
+			&i.CreatedAt,
+			&i.UpdatedAt,
+			&i.DeletedAt,
+			&i.ActiveAppID,
+			&i.ActiveAppName,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
 const markUserLoggedIn = `-- name: MarkUserLoggedIn :one
 UPDATE users
 SET last_login_at = now(), updated_at = now()

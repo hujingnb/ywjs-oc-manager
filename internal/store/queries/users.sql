@@ -75,3 +75,15 @@ UPDATE users
 SET last_login_at = now(), updated_at = now()
 WHERE id = $1
 RETURNING *;
+
+-- name: ListUsersByOrgWithActiveApp :many
+-- 列出组织内成员及其当前关联的活跃实例（LEFT JOIN，无实例的成员仍返回）。
+-- apps 表上 apps_owner_active 唯一约束保证每个 owner 最多一个未软删实例，
+-- LEFT JOIN 不会产生重复行；ORDER BY 保持与 ListUsersByOrg 一致。
+SELECT u.*, a.id AS active_app_id, a.name AS active_app_name
+FROM users u
+LEFT JOIN apps a
+  ON a.owner_user_id = u.id AND a.deleted_at IS NULL
+WHERE u.org_id = $1
+ORDER BY u.created_at DESC, u.id DESC
+LIMIT $2 OFFSET $3;
