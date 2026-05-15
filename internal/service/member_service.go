@@ -22,7 +22,6 @@ type MemberStore interface {
 	CreateUser(ctx context.Context, arg sqlc.CreateUserParams) (sqlc.User, error)
 	GetUser(ctx context.Context, id pgtype.UUID) (sqlc.User, error)
 	GetUserByUsername(ctx context.Context, username string) (sqlc.User, error)
-	ListUsersByOrg(ctx context.Context, arg sqlc.ListUsersByOrgParams) ([]sqlc.User, error)
 	// ListUsersByOrgWithActiveApp 列出成员及其当前未软删实例的 id/name，
 	// 用于成员列表上区分「需要补建」与「已绑定」两种状态。
 	ListUsersByOrgWithActiveApp(ctx context.Context, arg sqlc.ListUsersByOrgWithActiveAppParams) ([]sqlc.ListUsersByOrgWithActiveAppRow, error)
@@ -376,14 +375,6 @@ func (s *MemberService) ResetMemberPassword(ctx context.Context, principal auth.
 		return fmt.Errorf("更新成员密码失败: %w", err)
 	}
 	return nil
-}
-
-func toMemberResults(users []sqlc.User) []MemberResult {
-	results := make([]MemberResult, 0, len(users))
-	for _, user := range users {
-		results = append(results, toMemberResult(user))
-	}
-	return results
 }
 
 func toMemberResult(user sqlc.User) MemberResult {

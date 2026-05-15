@@ -156,15 +156,15 @@ func TestMemberServiceListExposesActiveApp(t *testing.T) {
 	store := newMemberStoreStub(t)
 	orgUUID := store.orgs[testOrgID].ID
 
-	withAppID := mustUUID(t, "00000000-0000-0000-0000-0000000000a1")
-	noAppID := mustUUID(t, "00000000-0000-0000-0000-0000000000a2")
-	deletedID := mustUUID(t, "00000000-0000-0000-0000-0000000000a3")
+	withAppID := mustUUID(t, "00000000-0000-0000-0000-0000000000c1")
+	noAppID := mustUUID(t, "00000000-0000-0000-0000-0000000000c2")
+	deletedID := mustUUID(t, "00000000-0000-0000-0000-0000000000c3")
 	store.users[uuidToString(withAppID)] = sqlc.User{ID: withAppID, OrgID: orgUUID, Username: "with-app", DisplayName: "有实例的成员", Role: domain.UserRoleOrgMember, Status: domain.StatusActive}
 	store.users[uuidToString(noAppID)] = sqlc.User{ID: noAppID, OrgID: orgUUID, Username: "no-app", DisplayName: "无实例的成员", Role: domain.UserRoleOrgMember, Status: domain.StatusActive}
 	store.users[uuidToString(deletedID)] = sqlc.User{ID: deletedID, OrgID: orgUUID, Username: "deleted-app", DisplayName: "实例被删的成员", Role: domain.UserRoleOrgMember, Status: domain.StatusActive}
 
-	activeAppID := mustUUID(t, "00000000-0000-0000-0000-0000000000b1")
-	deletedAppID := mustUUID(t, "00000000-0000-0000-0000-0000000000b2")
+	activeAppID := mustUUID(t, "00000000-0000-0000-0000-0000000000d1")
+	deletedAppID := mustUUID(t, "00000000-0000-0000-0000-0000000000d2")
 	store.apps[uuidToString(activeAppID)] = sqlc.App{ID: activeAppID, OrgID: orgUUID, OwnerUserID: withAppID, Name: "现役实例"}
 	store.apps[uuidToString(deletedAppID)] = sqlc.App{ID: deletedAppID, OrgID: orgUUID, OwnerUserID: deletedID, Name: "已删实例", DeletedAt: pgtype.Timestamptz{Valid: true}}
 
@@ -404,7 +404,6 @@ type memberStoreStub struct {
 	auditWritten       bool
 	softDeleted        []string
 	lastCreate         sqlc.CreateUserParams
-	lastList           sqlc.ListUsersByOrgParams
 	lastListWithApp    sqlc.ListUsersByOrgWithActiveAppParams
 	lastPwdUpdate      sqlc.UpdateUserPasswordParams
 }
@@ -466,17 +465,6 @@ func (s *memberStoreStub) GetUserByUsername(_ context.Context, username string) 
 		}
 	}
 	return sqlc.User{}, pgx.ErrNoRows
-}
-
-func (s *memberStoreStub) ListUsersByOrg(_ context.Context, arg sqlc.ListUsersByOrgParams) ([]sqlc.User, error) {
-	s.lastList = arg
-	results := make([]sqlc.User, 0, len(s.users))
-	for _, user := range s.users {
-		if user.OrgID == arg.OrgID {
-			results = append(results, user)
-		}
-	}
-	return results, nil
 }
 
 // ListUsersByOrgWithActiveApp 模拟 sqlc 的 LEFT JOIN：先取本组织全部 users，
