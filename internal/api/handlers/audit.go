@@ -15,7 +15,6 @@ import (
 // 平台和组织维度走同一个 service，权限差异由 service 层判断。
 type AuditHandler struct {
 	service auditService
-	tokens  *auth.TokenManager
 }
 
 type auditService interface {
@@ -24,8 +23,8 @@ type auditService interface {
 }
 
 // NewAuditHandler 创建审计 handler。
-func NewAuditHandler(service auditService, tokens *auth.TokenManager) *AuditHandler {
-	return &AuditHandler{service: service, tokens: tokens}
+func NewAuditHandler(service auditService) *AuditHandler {
+	return &AuditHandler{service: service}
 }
 
 // RegisterAuditRoutes 注册审计路由。
@@ -54,10 +53,7 @@ func RegisterAuditRoutes(router gin.IRouter, handler *AuditHandler) {
 // @Failure      500     {object}  ErrorResponse
 // @Router       /organizations/{orgId}/audit-logs [get]
 func (h *AuditHandler) ListByOrg(c *gin.Context) {
-	principal, ok := h.principal(c)
-	if !ok {
-		return
-	}
+	principal := principalFromCtx(c)
 	limit := queryInt32(c, "limit", 0)
 	offset := queryInt32(c, "offset", 0)
 	results, err := h.service.ListByOrg(c.Request.Context(), principal, c.Param("orgId"), limit, offset)
@@ -87,10 +83,7 @@ func (h *AuditHandler) ListByOrg(c *gin.Context) {
 // @Failure      500          {object}  ErrorResponse
 // @Router       /audit-logs [get]
 func (h *AuditHandler) ListByTarget(c *gin.Context) {
-	principal, ok := h.principal(c)
-	if !ok {
-		return
-	}
+	principal := principalFromCtx(c)
 	targetType := c.Query("target_type")
 	targetID := c.Query("target_id")
 	if targetType == "" || targetID == "" {
@@ -105,20 +98,6 @@ func (h *AuditHandler) ListByTarget(c *gin.Context) {
 		return
 	}
 	c.JSON(http.StatusOK, gin.H{"audit_logs": results})
-}
-
-func (h *AuditHandler) principal(c *gin.Context) (auth.Principal, bool) {
-	token, ok := bearerToken(c.GetHeader("Authorization"))
-	if !ok {
-		c.JSON(http.StatusUnauthorized, gin.H{"error": "缺少访问令牌"})
-		return auth.Principal{}, false
-	}
-	principal, err := h.tokens.VerifyAccessToken(token)
-	if err != nil {
-		c.JSON(http.StatusUnauthorized, gin.H{"error": "访问令牌无效"})
-		return auth.Principal{}, false
-	}
-	return principal, true
 }
 
 func writeAuditError(c *gin.Context, err error) {

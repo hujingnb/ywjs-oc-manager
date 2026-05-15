@@ -6,7 +6,6 @@ import (
 	"net/http/httptest"
 	"strings"
 	"testing"
-	"time"
 
 	"github.com/gin-gonic/gin"
 	"github.com/stretchr/testify/assert"
@@ -43,26 +42,23 @@ func (s *appsStub) UpdateModel(_ context.Context, _ auth.Principal, appID, model
 	return s.modelResult, s.modelErr
 }
 
-// newAppsTestRouter 构建用于测试的 gin router + token manager。
-func newAppsTestRouter(t *testing.T, svc appService) (*gin.Engine, *auth.TokenManager) {
+// newAppsTestRouter 构建用于测试的 gin router。
+func newAppsTestRouter(t *testing.T, svc appService) *gin.Engine {
 	t.Helper()
 	gin.SetMode(gin.ReleaseMode)
-	tokens, err := auth.NewTokenManager("a", "b", time.Minute, time.Hour)
-	require.NoError(t, err)
 	router := gin.New()
-	RegisterAppRoutes(router, NewAppsHandler(svc, tokens))
-	return router, tokens
+	RegisterAppRoutes(router, NewAppsHandler(svc))
+	return router
 }
 
 // TestAppsListHappy 验证应用列表成功路径的成功路径场景。
 func TestAppsListHappy(t *testing.T) {
 	stub := &appsStub{listResult: []service.AppResult{{ID: "app-1", Name: "测试应用"}}}
-	router, tokens := newAppsTestRouter(t, stub)
-	token := mustSignAccess(t, tokens, auth.Principal{UserID: "u1", Role: domain.UserRolePlatformAdmin})
+	router := newAppsTestRouter(t, stub)
 
 	w := httptest.NewRecorder()
 	req := httptest.NewRequest(http.MethodGet, "/api/v1/organizations/org-1/apps", nil)
-	req.Header.Set("Authorization", "Bearer "+token)
+	req = withPrincipal(req, auth.Principal{UserID: "u1", Role: domain.UserRolePlatformAdmin})
 	router.ServeHTTP(w, req)
 
 	require.Equal(t, http.StatusOK, w.Code)
@@ -72,38 +68,24 @@ func TestAppsListHappy(t *testing.T) {
 // TestAppsListForbidden 验证应用列表禁止访问的异常或拒绝路径场景。
 func TestAppsListForbidden(t *testing.T) {
 	stub := &appsStub{listErr: service.ErrForbidden}
-	router, tokens := newAppsTestRouter(t, stub)
-	token := mustSignAccess(t, tokens, auth.Principal{UserID: "u1", Role: domain.UserRoleOrgMember, OrgID: "org-1"})
+	router := newAppsTestRouter(t, stub)
 
 	w := httptest.NewRecorder()
 	req := httptest.NewRequest(http.MethodGet, "/api/v1/organizations/org-2/apps", nil)
-	req.Header.Set("Authorization", "Bearer "+token)
+	req = withPrincipal(req, auth.Principal{UserID: "u1", Role: domain.UserRoleOrgMember, OrgID: "org-1"})
 	router.ServeHTTP(w, req)
 
 	assert.Equal(t, http.StatusForbidden, w.Code)
 }
 
-// TestAppsListRequiresToken 验证应用列表要求令牌的预期行为场景。
-func TestAppsListRequiresToken(t *testing.T) {
-	stub := &appsStub{}
-	router, _ := newAppsTestRouter(t, stub)
-
-	w := httptest.NewRecorder()
-	req := httptest.NewRequest(http.MethodGet, "/api/v1/organizations/org-1/apps", nil)
-	router.ServeHTTP(w, req)
-
-	assert.Equal(t, http.StatusUnauthorized, w.Code)
-}
-
 // TestAppsGetHappy 验证应用获取成功路径的成功路径场景。
 func TestAppsGetHappy(t *testing.T) {
 	stub := &appsStub{getResult: service.AppResult{ID: "app-1", Name: "测试应用"}}
-	router, tokens := newAppsTestRouter(t, stub)
-	token := mustSignAccess(t, tokens, auth.Principal{UserID: "u1", Role: domain.UserRolePlatformAdmin})
+	router := newAppsTestRouter(t, stub)
 
 	w := httptest.NewRecorder()
 	req := httptest.NewRequest(http.MethodGet, "/api/v1/apps/app-1", nil)
-	req.Header.Set("Authorization", "Bearer "+token)
+	req = withPrincipal(req, auth.Principal{UserID: "u1", Role: domain.UserRolePlatformAdmin})
 	router.ServeHTTP(w, req)
 
 	require.Equal(t, http.StatusOK, w.Code)
@@ -113,12 +95,11 @@ func TestAppsGetHappy(t *testing.T) {
 // TestAppsGetNotFound 验证应用获取未找到的异常或拒绝路径场景。
 func TestAppsGetNotFound(t *testing.T) {
 	stub := &appsStub{getErr: service.ErrNotFound}
-	router, tokens := newAppsTestRouter(t, stub)
-	token := mustSignAccess(t, tokens, auth.Principal{UserID: "u1", Role: domain.UserRolePlatformAdmin})
+	router := newAppsTestRouter(t, stub)
 
 	w := httptest.NewRecorder()
 	req := httptest.NewRequest(http.MethodGet, "/api/v1/apps/missing", nil)
-	req.Header.Set("Authorization", "Bearer "+token)
+	req = withPrincipal(req, auth.Principal{UserID: "u1", Role: domain.UserRolePlatformAdmin})
 	router.ServeHTTP(w, req)
 
 	assert.Equal(t, http.StatusNotFound, w.Code)
@@ -127,9 +108,9 @@ func TestAppsGetNotFound(t *testing.T) {
 // TestAppsUpdateModelForwardsRequest 验证模型修改路由转发 appId 和 model_id。
 func TestAppsUpdateModelForwardsRequest(t *testing.T) {
 	stub := &appsStub{modelResult: service.AppModelUpdateResult{App: service.AppResult{ID: "app-1", ModelID: "qwen2.5:7b"}}}
-	router, tokens := newAppsTestRouter(t, stub)
+	router := newAppsTestRouter(t, stub)
 	req := httptest.NewRequest(http.MethodPatch, "/api/v1/apps/app-1/model", strings.NewReader(`{"model_id":"qwen2.5:7b"}`))
-	req.Header.Set("Authorization", "Bearer "+mustSignAccess(t, tokens, auth.Principal{UserID: "u-1", Role: domain.UserRoleOrgAdmin, OrgID: "org-1"}))
+	req = withPrincipal(req, auth.Principal{UserID: "u-1", Role: domain.UserRoleOrgAdmin, OrgID: "org-1"})
 	resp := httptest.NewRecorder()
 
 	router.ServeHTTP(resp, req)
@@ -142,9 +123,9 @@ func TestAppsUpdateModelForwardsRequest(t *testing.T) {
 // TestAppsUpdateModelMapsInvalidModel 验证非法模型返回 400。
 func TestAppsUpdateModelMapsInvalidModel(t *testing.T) {
 	stub := &appsStub{modelErr: service.ErrMemberCreateInvalid}
-	router, tokens := newAppsTestRouter(t, stub)
+	router := newAppsTestRouter(t, stub)
 	req := httptest.NewRequest(http.MethodPatch, "/api/v1/apps/app-1/model", strings.NewReader(`{"model_id":"missing"}`))
-	req.Header.Set("Authorization", "Bearer "+mustSignAccess(t, tokens, auth.Principal{UserID: "u-1", Role: domain.UserRoleOrgAdmin, OrgID: "org-1"}))
+	req = withPrincipal(req, auth.Principal{UserID: "u-1", Role: domain.UserRoleOrgAdmin, OrgID: "org-1"})
 	resp := httptest.NewRecorder()
 
 	router.ServeHTTP(resp, req)

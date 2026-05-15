@@ -17,7 +17,6 @@ import (
 // handler 只负责绑定 DTO、解析 principal 和映射错误码，组织权限与 new-api provisioning 在 service 层完成。
 type OrganizationsHandler struct {
 	service organizationService
-	tokens  *auth.TokenManager
 }
 
 // organizationService 是组织 handler 依赖的最小 service 接口，便于 handler 单测注入 stub。
@@ -30,8 +29,8 @@ type organizationService interface {
 }
 
 // NewOrganizationsHandler 创建组织 handler。
-func NewOrganizationsHandler(service organizationService, tokens *auth.TokenManager) *OrganizationsHandler {
-	return &OrganizationsHandler{service: service, tokens: tokens}
+func NewOrganizationsHandler(service organizationService) *OrganizationsHandler {
+	return &OrganizationsHandler{service: service}
 }
 
 // RegisterOrganizationRoutes 注册组织路由组。
@@ -62,10 +61,7 @@ func RegisterOrganizationRoutes(router gin.IRouter, handler *OrganizationsHandle
 // @Failure      500   {object}  ErrorResponse
 // @Router       /organizations [post]
 func (h *OrganizationsHandler) Create(c *gin.Context) {
-	principal, ok := h.principal(c)
-	if !ok {
-		return
-	}
+	principal := principalFromCtx(c)
 	var req CreateOrganizationRequest
 	// ShouldBindJSON 只做 HTTP 层必填字段校验；角色、new-api 和回滚规则由 service 处理。
 	if err := c.ShouldBindJSON(&req); err != nil {
@@ -95,10 +91,7 @@ func (h *OrganizationsHandler) Create(c *gin.Context) {
 // @Failure      500     {object}  ErrorResponse
 // @Router       /organizations [get]
 func (h *OrganizationsHandler) List(c *gin.Context) {
-	principal, ok := h.principal(c)
-	if !ok {
-		return
-	}
+	principal := principalFromCtx(c)
 	limit := queryInt32(c, "limit", 50)
 	offset := queryInt32(c, "offset", 0)
 	results, err := h.service.ListOrganizations(c.Request.Context(), principal, limit, offset)
@@ -124,10 +117,7 @@ func (h *OrganizationsHandler) List(c *gin.Context) {
 // @Failure      500    {object}  ErrorResponse
 // @Router       /organizations/{orgId} [get]
 func (h *OrganizationsHandler) Get(c *gin.Context) {
-	principal, ok := h.principal(c)
-	if !ok {
-		return
-	}
+	principal := principalFromCtx(c)
 	result, err := h.service.GetOrganization(c.Request.Context(), principal, c.Param("orgId"))
 	if err != nil {
 		writeServiceError(c, err)
@@ -154,10 +144,7 @@ func (h *OrganizationsHandler) Get(c *gin.Context) {
 // @Failure      500    {object}  ErrorResponse
 // @Router       /organizations/{orgId} [patch]
 func (h *OrganizationsHandler) Update(c *gin.Context) {
-	principal, ok := h.principal(c)
-	if !ok {
-		return
-	}
+	principal := principalFromCtx(c)
 	var req OrganizationRequest
 	// OpenAPI 注解只描述对外契约，handler 仍以 binding tag 作为运行时请求体校验入口。
 	if err := c.ShouldBindJSON(&req); err != nil {
@@ -211,10 +198,7 @@ func (h *OrganizationsHandler) Enable(c *gin.Context) {
 // setStatus 复用启用/禁用的 principal 提取和错误映射逻辑。
 // status 只能来自 handler 内部常量，避免客户端通过请求体传入任意状态。
 func (h *OrganizationsHandler) setStatus(c *gin.Context, status string) {
-	principal, ok := h.principal(c)
-	if !ok {
-		return
-	}
+	principal := principalFromCtx(c)
 	result, err := h.service.SetOrganizationStatus(c.Request.Context(), principal, c.Param("orgId"), status)
 	if err != nil {
 		writeServiceError(c, err)
@@ -225,20 +209,6 @@ func (h *OrganizationsHandler) setStatus(c *gin.Context, status string) {
 
 // principal 从 Bearer token 中提取调用主体。
 // token 只承载认证上下文，具体组织访问权限由 service 调 authorizer.go 判断。
-func (h *OrganizationsHandler) principal(c *gin.Context) (auth.Principal, bool) {
-	token, ok := bearerToken(c.GetHeader("Authorization"))
-	if !ok {
-		c.JSON(http.StatusUnauthorized, gin.H{"error": "缺少访问令牌"})
-		return auth.Principal{}, false
-	}
-	principal, err := h.tokens.VerifyAccessToken(token)
-	if err != nil {
-		c.JSON(http.StatusUnauthorized, gin.H{"error": "访问令牌无效"})
-		return auth.Principal{}, false
-	}
-	return principal, true
-}
-
 // toOrganizationInput 将更新 DTO 转为 service 入参；管理员初始化字段不参与更新。
 func toOrganizationInput(req OrganizationRequest) service.OrganizationInput {
 	input := service.OrganizationInput{

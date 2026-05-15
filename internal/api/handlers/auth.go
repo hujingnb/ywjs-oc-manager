@@ -4,7 +4,6 @@ import (
 	"context"
 	"errors"
 	"net/http"
-	"strings"
 
 	"github.com/gin-gonic/gin"
 
@@ -26,20 +25,25 @@ type AuthService interface {
 // AuthHandler 承载认证相关 HTTP 路由。
 type AuthHandler struct {
 	service AuthService
-	tokens  *auth.TokenManager
 }
 
 // NewAuthHandler 创建认证 handler。
-func NewAuthHandler(service AuthService, tokens *auth.TokenManager) *AuthHandler {
-	return &AuthHandler{service: service, tokens: tokens}
+func NewAuthHandler(service AuthService) *AuthHandler {
+	return &AuthHandler{service: service}
 }
 
-// RegisterAuthRoutes 注册认证路由。
-func RegisterAuthRoutes(router gin.IRouter, handler *AuthHandler) {
+// RegisterPublicAuthRoutes 注册无需 Bearer token 的认证路由（public 分组）。
+// login/refresh/logout 均使用请求体携带凭证，不依赖 access token。
+func RegisterPublicAuthRoutes(router gin.IRouter, handler *AuthHandler) {
 	group := router.Group("/api/v1/auth")
 	group.POST("/login", handler.Login)
 	group.POST("/refresh", handler.Refresh)
 	group.POST("/logout", handler.Logout)
+}
+
+// RegisterAuthMeRoutes 注册需要认证的 auth 路由（user 分组，已受 RequireUserAuth 保护）。
+func RegisterAuthMeRoutes(router gin.IRouter, handler *AuthHandler) {
+	group := router.Group("/api/v1/auth")
 	group.GET("/me", handler.Me)
 }
 
@@ -154,30 +158,14 @@ func (h *AuthHandler) Logout(c *gin.Context) {
 // @Failure      401  {object}  ErrorResponse
 // @Router       /auth/me [get]
 func (h *AuthHandler) Me(c *gin.Context) {
-	token, ok := bearerToken(c.GetHeader("Authorization"))
-	if !ok {
-		c.JSON(http.StatusUnauthorized, gin.H{"error": "缺少访问令牌"})
-		return
-	}
-	principal, err := h.tokens.VerifyAccessToken(token)
-	if err != nil {
-		c.JSON(http.StatusUnauthorized, gin.H{"error": "访问令牌无效"})
-		return
-	}
-	// token 只证明调用者身份，账号是否仍可用由 AuthService.Me 再查库判断。
+	// principal 由 RequireUserAuth 中间件注入；此处只做账号状态二次查库。
+	principal := principalFromCtx(c)
 	user, err := h.service.Me(c.Request.Context(), principal)
 	if err != nil {
 		writeAuthError(c, err)
 		return
 	}
 	c.JSON(http.StatusOK, gin.H{"user": user})
-}
-
-// bearerToken 从 Authorization header 中提取 Bearer token。
-// scheme 比较大小写不敏感；缺失或空 token 统一返回 false。
-func bearerToken(header string) (string, bool) {
-	scheme, token, ok := strings.Cut(header, " ")
-	return token, ok && strings.EqualFold(scheme, "Bearer") && token != ""
 }
 
 // writeAuthError 将认证 service 的 sentinel error 映射为 HTTP 状态码。

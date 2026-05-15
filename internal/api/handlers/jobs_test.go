@@ -5,7 +5,6 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"testing"
-	"time"
 
 	"github.com/gin-gonic/gin"
 	"github.com/jackc/pgx/v5"
@@ -28,15 +27,13 @@ func (s *jobsStoreStub) GetJob(_ context.Context, _ pgtype.UUID) (sqlc.Job, erro
 	return s.job, s.jobErr
 }
 
-// newJobsTestRouter 构建用于测试的 gin router + token manager。
-func newJobsTestRouter(t *testing.T, store JobsStore) (*gin.Engine, *auth.TokenManager) {
+// newJobsTestRouter 构建用于测试的 gin router。
+func newJobsTestRouter(t *testing.T, store JobsStore) *gin.Engine {
 	t.Helper()
 	gin.SetMode(gin.ReleaseMode)
-	tokens, err := auth.NewTokenManager("a", "b", time.Minute, time.Hour)
-	require.NoError(t, err)
 	router := gin.New()
-	RegisterJobsRoutes(router, NewJobsHandler(store, tokens))
-	return router, tokens
+	RegisterJobsRoutes(router, NewJobsHandler(store))
+	return router
 }
 
 // makeTestUUID 构建一个有效的 UUID 字符串（全零）。
@@ -57,12 +54,11 @@ func makeTestJob() sqlc.Job {
 // TestJobsGetHappy 验证任务获取成功路径的成功路径场景。
 func TestJobsGetHappy(t *testing.T) {
 	stub := &jobsStoreStub{job: makeTestJob()}
-	router, tokens := newJobsTestRouter(t, stub)
-	token := mustSignAccess(t, tokens, auth.Principal{UserID: "u1", Role: domain.UserRolePlatformAdmin})
+	router := newJobsTestRouter(t, stub)
 
 	w := httptest.NewRecorder()
 	req := httptest.NewRequest(http.MethodGet, "/api/v1/jobs/"+testJobUUID, nil)
-	req.Header.Set("Authorization", "Bearer "+token)
+	req = withPrincipal(req, auth.Principal{UserID: "u1", Role: domain.UserRolePlatformAdmin})
 	router.ServeHTTP(w, req)
 
 	require.Equal(t, http.StatusOK, w.Code)
@@ -72,13 +68,12 @@ func TestJobsGetHappy(t *testing.T) {
 // TestJobsGetForbidden 验证任务获取禁止访问的异常或拒绝路径场景。
 func TestJobsGetForbidden(t *testing.T) {
 	stub := &jobsStoreStub{job: makeTestJob()}
-	router, tokens := newJobsTestRouter(t, stub)
-	// 非平台管理员被 handler 直接拒绝
-	token := mustSignAccess(t, tokens, auth.Principal{UserID: "u1", Role: domain.UserRoleOrgAdmin, OrgID: "org-1"})
+	router := newJobsTestRouter(t, stub)
 
 	w := httptest.NewRecorder()
 	req := httptest.NewRequest(http.MethodGet, "/api/v1/jobs/"+testJobUUID, nil)
-	req.Header.Set("Authorization", "Bearer "+token)
+	// 非平台管理员被 handler 直接拒绝
+	req = withPrincipal(req, auth.Principal{UserID: "u1", Role: domain.UserRoleOrgAdmin, OrgID: "org-1"})
 	router.ServeHTTP(w, req)
 
 	assert.Equal(t, http.StatusForbidden, w.Code)
@@ -87,38 +82,24 @@ func TestJobsGetForbidden(t *testing.T) {
 // TestJobsGetNotFound 验证任务获取未找到的异常或拒绝路径场景。
 func TestJobsGetNotFound(t *testing.T) {
 	stub := &jobsStoreStub{jobErr: pgx.ErrNoRows}
-	router, tokens := newJobsTestRouter(t, stub)
-	token := mustSignAccess(t, tokens, auth.Principal{UserID: "u1", Role: domain.UserRolePlatformAdmin})
+	router := newJobsTestRouter(t, stub)
 
 	w := httptest.NewRecorder()
 	req := httptest.NewRequest(http.MethodGet, "/api/v1/jobs/"+testJobUUID, nil)
-	req.Header.Set("Authorization", "Bearer "+token)
+	req = withPrincipal(req, auth.Principal{UserID: "u1", Role: domain.UserRolePlatformAdmin})
 	router.ServeHTTP(w, req)
 
 	assert.Equal(t, http.StatusNotFound, w.Code)
 }
 
-// TestJobsGetRequiresToken 验证任务获取要求令牌的预期行为场景。
-func TestJobsGetRequiresToken(t *testing.T) {
-	stub := &jobsStoreStub{}
-	router, _ := newJobsTestRouter(t, stub)
-
-	w := httptest.NewRecorder()
-	req := httptest.NewRequest(http.MethodGet, "/api/v1/jobs/"+testJobUUID, nil)
-	router.ServeHTTP(w, req)
-
-	assert.Equal(t, http.StatusUnauthorized, w.Code)
-}
-
 // TestJobsGetInvalidUUID 验证任务获取非法UUID的异常或拒绝路径场景。
 func TestJobsGetInvalidUUID(t *testing.T) {
 	stub := &jobsStoreStub{}
-	router, tokens := newJobsTestRouter(t, stub)
-	token := mustSignAccess(t, tokens, auth.Principal{UserID: "u1", Role: domain.UserRolePlatformAdmin})
+	router := newJobsTestRouter(t, stub)
 
 	w := httptest.NewRecorder()
 	req := httptest.NewRequest(http.MethodGet, "/api/v1/jobs/not-a-uuid", nil)
-	req.Header.Set("Authorization", "Bearer "+token)
+	req = withPrincipal(req, auth.Principal{UserID: "u1", Role: domain.UserRolePlatformAdmin})
 	router.ServeHTTP(w, req)
 
 	assert.Equal(t, http.StatusBadRequest, w.Code)

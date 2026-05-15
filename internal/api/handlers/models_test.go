@@ -5,7 +5,6 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"testing"
-	"time"
 
 	"github.com/gin-gonic/gin"
 	"github.com/stretchr/testify/assert"
@@ -25,24 +24,22 @@ func (s *modelServiceStub) List(context.Context, auth.Principal) ([]service.Mode
 	return s.models, s.err
 }
 
-// newModelsTestRouter 构建模型目录 handler 测试专用路由和 token manager。
-func newModelsTestRouter(t *testing.T, svc modelService) (*gin.Engine, *auth.TokenManager) {
+// newModelsTestRouter 构建模型目录 handler 测试专用路由。
+func newModelsTestRouter(t *testing.T, svc modelService) *gin.Engine {
 	t.Helper()
 	gin.SetMode(gin.ReleaseMode)
-	tokens, err := auth.NewTokenManager("a", "b", time.Minute, time.Hour)
-	require.NoError(t, err)
 	router := gin.New()
-	RegisterModelRoutes(router, NewModelsHandler(svc, tokens))
-	return router, tokens
+	RegisterModelRoutes(router, NewModelsHandler(svc))
+	return router
 }
 
 // TestModelsListReturnsCatalog 验证平台管理员可通过 manager 读取实时模型列表。
 func TestModelsListReturnsCatalog(t *testing.T) {
 	t.Parallel()
 	svc := &modelServiceStub{models: []service.ModelResult{{ID: "qwen", Name: "qwen"}}}
-	router, tokens := newModelsTestRouter(t, svc)
+	router := newModelsTestRouter(t, svc)
 	req := httptest.NewRequest(http.MethodGet, "/api/v1/models", nil)
-	req.Header.Set("Authorization", "Bearer "+mustSignAccess(t, tokens, auth.Principal{UserID: "u-1", Role: domain.UserRolePlatformAdmin}))
+	req = withPrincipal(req, auth.Principal{UserID: "u-1", Role: domain.UserRolePlatformAdmin})
 	resp := httptest.NewRecorder()
 	router.ServeHTTP(resp, req)
 	require.Equal(t, http.StatusOK, resp.Code)
@@ -53,9 +50,9 @@ func TestModelsListReturnsCatalog(t *testing.T) {
 func TestModelsListMapsForbidden(t *testing.T) {
 	t.Parallel()
 	svc := &modelServiceStub{err: service.ErrForbidden}
-	router, tokens := newModelsTestRouter(t, svc)
+	router := newModelsTestRouter(t, svc)
 	req := httptest.NewRequest(http.MethodGet, "/api/v1/models", nil)
-	req.Header.Set("Authorization", "Bearer "+mustSignAccess(t, tokens, auth.Principal{UserID: "u-1", Role: domain.UserRoleOrgAdmin}))
+	req = withPrincipal(req, auth.Principal{UserID: "u-1", Role: domain.UserRoleOrgAdmin})
 	resp := httptest.NewRecorder()
 	router.ServeHTTP(resp, req)
 	require.Equal(t, http.StatusForbidden, resp.Code)

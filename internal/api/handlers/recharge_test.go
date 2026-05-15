@@ -6,7 +6,6 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"testing"
-	"time"
 
 	"github.com/gin-gonic/gin"
 	"github.com/stretchr/testify/assert"
@@ -45,28 +44,25 @@ func (s *rechargeServiceStub) GetBillingStatus(_ context.Context, _ auth.Princip
 	return s.billingStatusResult, s.billingStatusErr
 }
 
-// newRechargeTestRouter 构建用于测试的 gin router + token manager。
-func newRechargeTestRouter(t *testing.T, svc rechargeService) (*gin.Engine, *auth.TokenManager) {
+// newRechargeTestRouter 构建用于测试的 gin router。
+func newRechargeTestRouter(t *testing.T, svc rechargeService) *gin.Engine {
 	t.Helper()
 	gin.SetMode(gin.ReleaseMode)
-	tokens, err := auth.NewTokenManager("a", "b", time.Minute, time.Hour)
-	require.NoError(t, err)
 	router := gin.New()
-	RegisterRechargeRoutes(router, NewRechargeHandler(svc, tokens))
-	return router, tokens
+	RegisterRechargeRoutes(router, NewRechargeHandler(svc))
+	return router
 }
 
 // TestRechargeCreateHappy 验证充值创建成功路径的成功路径场景。
 func TestRechargeCreateHappy(t *testing.T) {
 	stub := &rechargeServiceStub{rechargeResult: service.RechargeRecordResult{ID: "rec-1"}}
-	router, tokens := newRechargeTestRouter(t, stub)
-	token := mustSignAccess(t, tokens, auth.Principal{UserID: "u1", Role: domain.UserRolePlatformAdmin})
+	router := newRechargeTestRouter(t, stub)
 
 	w := httptest.NewRecorder()
 	body := bytes.NewBufferString(`{"credit_amount":1000,"remark":"测试充值"}`)
 	req := httptest.NewRequest(http.MethodPost, "/api/v1/organizations/org-1/recharge", body)
 	req.Header.Set("Content-Type", "application/json")
-	req.Header.Set("Authorization", "Bearer "+token)
+	req = withPrincipal(req, auth.Principal{UserID: "u1", Role: domain.UserRolePlatformAdmin})
 	router.ServeHTTP(w, req)
 
 	require.Equal(t, http.StatusOK, w.Code)
@@ -76,14 +72,13 @@ func TestRechargeCreateHappy(t *testing.T) {
 // TestRechargeCreateForbidden 验证充值创建禁止访问的异常或拒绝路径场景。
 func TestRechargeCreateForbidden(t *testing.T) {
 	stub := &rechargeServiceStub{rechargeErr: service.ErrRechargeDenied}
-	router, tokens := newRechargeTestRouter(t, stub)
-	token := mustSignAccess(t, tokens, auth.Principal{UserID: "u1", Role: domain.UserRoleOrgAdmin, OrgID: "org-1"})
+	router := newRechargeTestRouter(t, stub)
 
 	w := httptest.NewRecorder()
 	body := bytes.NewBufferString(`{"credit_amount":1000}`)
 	req := httptest.NewRequest(http.MethodPost, "/api/v1/organizations/org-1/recharge", body)
 	req.Header.Set("Content-Type", "application/json")
-	req.Header.Set("Authorization", "Bearer "+token)
+	req = withPrincipal(req, auth.Principal{UserID: "u1", Role: domain.UserRoleOrgAdmin, OrgID: "org-1"})
 	router.ServeHTTP(w, req)
 
 	assert.Equal(t, http.StatusForbidden, w.Code)
@@ -92,14 +87,13 @@ func TestRechargeCreateForbidden(t *testing.T) {
 // TestRechargeCreateOrgNotFound 验证充值创建组织未找到的异常或拒绝路径场景。
 func TestRechargeCreateOrgNotFound(t *testing.T) {
 	stub := &rechargeServiceStub{rechargeErr: service.ErrNotFound}
-	router, tokens := newRechargeTestRouter(t, stub)
-	token := mustSignAccess(t, tokens, auth.Principal{UserID: "u1", Role: domain.UserRolePlatformAdmin})
+	router := newRechargeTestRouter(t, stub)
 
 	w := httptest.NewRecorder()
 	body := bytes.NewBufferString(`{"credit_amount":500}`)
 	req := httptest.NewRequest(http.MethodPost, "/api/v1/organizations/missing/recharge", body)
 	req.Header.Set("Content-Type", "application/json")
-	req.Header.Set("Authorization", "Bearer "+token)
+	req = withPrincipal(req, auth.Principal{UserID: "u1", Role: domain.UserRolePlatformAdmin})
 	router.ServeHTTP(w, req)
 
 	assert.Equal(t, http.StatusNotFound, w.Code)
@@ -108,12 +102,11 @@ func TestRechargeCreateOrgNotFound(t *testing.T) {
 // TestRechargeListHappy 验证充值列表成功路径的成功路径场景。
 func TestRechargeListHappy(t *testing.T) {
 	stub := &rechargeServiceStub{listResult: []service.RechargeRecordResult{{ID: "rec-1"}}}
-	router, tokens := newRechargeTestRouter(t, stub)
-	token := mustSignAccess(t, tokens, auth.Principal{UserID: "u1", Role: domain.UserRolePlatformAdmin})
+	router := newRechargeTestRouter(t, stub)
 
 	w := httptest.NewRecorder()
 	req := httptest.NewRequest(http.MethodGet, "/api/v1/organizations/org-1/recharges", nil)
-	req.Header.Set("Authorization", "Bearer "+token)
+	req = withPrincipal(req, auth.Principal{UserID: "u1", Role: domain.UserRolePlatformAdmin})
 	router.ServeHTTP(w, req)
 
 	require.Equal(t, http.StatusOK, w.Code)
@@ -123,12 +116,11 @@ func TestRechargeListHappy(t *testing.T) {
 // TestRechargeBalanceHappy 验证充值余额成功路径的成功路径场景。
 func TestRechargeBalanceHappy(t *testing.T) {
 	stub := &rechargeServiceStub{balanceResult: service.BalanceView{RemainQuota: 5000}}
-	router, tokens := newRechargeTestRouter(t, stub)
-	token := mustSignAccess(t, tokens, auth.Principal{UserID: "u1", Role: domain.UserRoleOrgAdmin, OrgID: "org-1"})
+	router := newRechargeTestRouter(t, stub)
 
 	w := httptest.NewRecorder()
 	req := httptest.NewRequest(http.MethodGet, "/api/v1/organizations/org-1/balance", nil)
-	req.Header.Set("Authorization", "Bearer "+token)
+	req = withPrincipal(req, auth.Principal{UserID: "u1", Role: domain.UserRoleOrgAdmin, OrgID: "org-1"})
 	router.ServeHTTP(w, req)
 
 	require.Equal(t, http.StatusOK, w.Code)
@@ -142,26 +134,14 @@ func TestBillingStatusHappy(t *testing.T) {
 		QuotaDisplayType:  "USD",
 		DisplayInCurrency: true,
 	}}
-	router, tokens := newRechargeTestRouter(t, stub)
-	token := mustSignAccess(t, tokens, auth.Principal{UserID: "u1", Role: domain.UserRolePlatformAdmin})
+	router := newRechargeTestRouter(t, stub)
 
 	w := httptest.NewRecorder()
 	req := httptest.NewRequest(http.MethodGet, "/api/v1/billing/status", nil)
-	req.Header.Set("Authorization", "Bearer "+token)
+	req = withPrincipal(req, auth.Principal{UserID: "u1", Role: domain.UserRolePlatformAdmin})
 	router.ServeHTTP(w, req)
 
 	require.Equal(t, http.StatusOK, w.Code)
 	assert.Contains(t, w.Body.String(), "quota_per_unit")
 }
 
-// TestRechargeRequiresToken 验证充值要求令牌的预期行为场景。
-func TestRechargeRequiresToken(t *testing.T) {
-	stub := &rechargeServiceStub{}
-	router, _ := newRechargeTestRouter(t, stub)
-
-	w := httptest.NewRecorder()
-	req := httptest.NewRequest(http.MethodGet, "/api/v1/organizations/org-1/balance", nil)
-	router.ServeHTTP(w, req)
-
-	assert.Equal(t, http.StatusUnauthorized, w.Code)
-}

@@ -10,7 +10,6 @@ import (
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgtype"
 
-	"oc-manager/internal/auth"
 	"oc-manager/internal/domain"
 	"oc-manager/internal/store/sqlc"
 )
@@ -18,8 +17,7 @@ import (
 // JobsHandler 对外暴露 job 状态查询接口。
 // 当前仅支持平台管理员按 ID 查询；按组织或资源筛选放在后续 task。
 type JobsHandler struct {
-	store  JobsStore
-	tokens *auth.TokenManager
+	store JobsStore
 }
 
 // JobsStore 是 job handler 依赖的最小存储接口。
@@ -29,8 +27,8 @@ type JobsStore interface {
 }
 
 // NewJobsHandler 创建 jobs handler。
-func NewJobsHandler(store JobsStore, tokens *auth.TokenManager) *JobsHandler {
-	return &JobsHandler{store: store, tokens: tokens}
+func NewJobsHandler(store JobsStore) *JobsHandler {
+	return &JobsHandler{store: store}
 }
 
 // RegisterJobsRoutes 注册 job 路由。
@@ -68,16 +66,7 @@ type JobView struct {
 // @Failure      500    {object}  ErrorResponse
 // @Router       /jobs/{jobId} [get]
 func (h *JobsHandler) Get(c *gin.Context) {
-	token, ok := bearerToken(c.GetHeader("Authorization"))
-	if !ok {
-		c.JSON(http.StatusUnauthorized, gin.H{"error": "缺少访问令牌"})
-		return
-	}
-	principal, err := h.tokens.VerifyAccessToken(token)
-	if err != nil {
-		c.JSON(http.StatusUnauthorized, gin.H{"error": "访问令牌无效"})
-		return
-	}
+	principal := principalFromCtx(c)
 	if principal.Role != domain.UserRolePlatformAdmin {
 		c.JSON(http.StatusForbidden, gin.H{"error": "无权查看 job"})
 		return

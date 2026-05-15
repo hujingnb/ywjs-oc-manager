@@ -14,7 +14,6 @@ import (
 // AppRuntimeHandler 暴露应用容器的高风险运行操作：start/stop/restart/delete。
 type AppRuntimeHandler struct {
 	service runtimeOperationService
-	tokens  *auth.TokenManager
 }
 
 type runtimeOperationService interface {
@@ -24,8 +23,8 @@ type runtimeOperationService interface {
 }
 
 // NewAppRuntimeHandler 创建 handler。
-func NewAppRuntimeHandler(svc runtimeOperationService, tokens *auth.TokenManager) *AppRuntimeHandler {
-	return &AppRuntimeHandler{service: svc, tokens: tokens}
+func NewAppRuntimeHandler(svc runtimeOperationService) *AppRuntimeHandler {
+	return &AppRuntimeHandler{service: svc}
 }
 
 // RegisterAppRuntimeRoutes 注册路由。
@@ -159,17 +158,8 @@ func (h *AppRuntimeHandler) RestoreAPIKey(c *gin.Context) {
 // @Failure      500    {object}  ErrorResponse
 // @Router       /apps/{appId}/runtime [get]
 func (h *AppRuntimeHandler) GetRuntime(c *gin.Context) {
-	token, ok := bearerToken(c.GetHeader("Authorization"))
-	if !ok {
-		c.JSON(http.StatusUnauthorized, gin.H{"error": "缺少访问令牌"})
-		return
-	}
-	principal, err := h.tokens.VerifyAccessToken(token)
-	if err != nil {
-		c.JSON(http.StatusUnauthorized, gin.H{"error": "访问令牌无效"})
-		return
-	}
-	// principal 只来自 access token；容器可见性由 service 再按 app owner/org 校验。
+	principal := principalFromCtx(c)
+	// principal 由中间件注入；容器可见性由 service 再按 app owner/org 校验。
 	view, err := h.service.InspectApp(c.Request.Context(), principal, c.Param("appId"))
 	if err != nil {
 		writeAppRuntimeError(c, err)
@@ -195,16 +185,7 @@ func (h *AppRuntimeHandler) GetRuntime(c *gin.Context) {
 // @Failure      500    {object}  ErrorResponse
 // @Router       /apps/{appId}/initialize [post]
 func (h *AppRuntimeHandler) Initialize(c *gin.Context) {
-	token, ok := bearerToken(c.GetHeader("Authorization"))
-	if !ok {
-		c.JSON(http.StatusUnauthorized, gin.H{"error": "缺少访问令牌"})
-		return
-	}
-	principal, err := h.tokens.VerifyAccessToken(token)
-	if err != nil {
-		c.JSON(http.StatusUnauthorized, gin.H{"error": "访问令牌无效"})
-		return
-	}
+	principal := principalFromCtx(c)
 	// 重新初始化属于写操作，状态机和权限边界由 RuntimeOperationService 统一判断。
 	result, err := h.service.RequestInitialize(c.Request.Context(), principal, c.Param("appId"))
 	if err != nil {
@@ -214,19 +195,10 @@ func (h *AppRuntimeHandler) Initialize(c *gin.Context) {
 	c.JSON(http.StatusAccepted, gin.H{"runtime_operation": result})
 }
 
-// trigger 提取 Bearer principal 并派发高风险 runtime 操作。
+// trigger 由 RequireUserAuth 中间件注入 principal，派发高风险 runtime 操作。
 // handler 不直接判断角色或应用归属，避免与 service 层 authorizer 规则分叉。
 func (h *AppRuntimeHandler) trigger(c *gin.Context, op service.RuntimeOperation) {
-	token, ok := bearerToken(c.GetHeader("Authorization"))
-	if !ok {
-		c.JSON(http.StatusUnauthorized, gin.H{"error": "缺少访问令牌"})
-		return
-	}
-	principal, err := h.tokens.VerifyAccessToken(token)
-	if err != nil {
-		c.JSON(http.StatusUnauthorized, gin.H{"error": "访问令牌无效"})
-		return
-	}
+	principal := principalFromCtx(c)
 	result, err := h.service.Trigger(c.Request.Context(), principal, c.Param("appId"), op)
 	if err != nil {
 		writeAppRuntimeError(c, err)

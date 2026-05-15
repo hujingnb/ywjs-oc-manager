@@ -8,7 +8,6 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"testing"
-	"time"
 
 	"github.com/gin-gonic/gin"
 
@@ -28,7 +27,7 @@ func TestAuthLoginReturnsTokenPair(t *testing.T) {
 			},
 		},
 	}
-	router, _ := newAuthTestRouter(t, svc)
+	router := newAuthTestRouter(t, svc)
 
 	recorder := httptest.NewRecorder()
 	request := httptest.NewRequest(http.MethodPost, "/api/v1/auth/login", bytes.NewBufferString(`{"org_code":"test-org","username":"member@example.com","password":"secret"}`))
@@ -45,7 +44,7 @@ func TestAuthLoginReturnsTokenPair(t *testing.T) {
 
 // TestAuthLoginRejectsInvalidBody 验证认证登录拒绝非法请求体的异常或拒绝路径场景。
 func TestAuthLoginRejectsInvalidBody(t *testing.T) {
-	router, _ := newAuthTestRouter(t, &authServiceStub{})
+	router := newAuthTestRouter(t, &authServiceStub{})
 
 	recorder := httptest.NewRecorder()
 	request := httptest.NewRequest(http.MethodPost, "/api/v1/auth/login", bytes.NewBufferString(`{}`))
@@ -58,41 +57,28 @@ func TestAuthLoginRejectsInvalidBody(t *testing.T) {
 	require.Contains(t, recorder.Body.String(), "password")
 }
 
-// TestAuthMeRequiresBearerToken 验证认证当前用户接口要求Bearer令牌的预期行为场景。
-func TestAuthMeRequiresBearerToken(t *testing.T) {
-	router, _ := newAuthTestRouter(t, &authServiceStub{})
-
-	recorder := httptest.NewRecorder()
-	request := httptest.NewRequest(http.MethodGet, "/api/v1/auth/me", nil)
-	router.ServeHTTP(recorder, request)
-
-	require.Equal(t, http.StatusUnauthorized, recorder.Code)
-}
-
 // TestAuthMeReturnsCurrentUser 验证认证当前用户接口返回当前用户的成功路径场景。
 func TestAuthMeReturnsCurrentUser(t *testing.T) {
 	svc := &authServiceStub{meResult: service.AuthUser{ID: "user-1", Username: "member@example.com"}}
-	router, tokens := newAuthTestRouter(t, svc)
-	accessToken, err := tokens.SignAccessToken(auth.Principal{UserID: "user-1", Role: "org_member"})
-	require.NoError(t, err)
+	router := newAuthTestRouter(t, svc)
 
 	recorder := httptest.NewRecorder()
 	request := httptest.NewRequest(http.MethodGet, "/api/v1/auth/me", nil)
-	request.Header.Set("Authorization", "Bearer "+accessToken)
+	request = withPrincipal(request, auth.Principal{UserID: "user-1", Role: "org_member"})
 	router.ServeHTTP(recorder, request)
 
 	require.Equal(t, http.StatusOK, recorder.Code)
 	require.Equal(t, "user-1", svc.lastPrincipal.UserID)
 }
 
-func newAuthTestRouter(t *testing.T, svc *authServiceStub) (*gin.Engine, *auth.TokenManager) {
+func newAuthTestRouter(t *testing.T, svc *authServiceStub) *gin.Engine {
 	t.Helper()
 	gin.SetMode(gin.ReleaseMode)
-	tokens, err := auth.NewTokenManager("access-secret", "refresh-secret", time.Minute, time.Hour)
-	require.NoError(t, err)
 	router := gin.New()
-	RegisterAuthRoutes(router, NewAuthHandler(svc, tokens))
-	return router, tokens
+	handler := NewAuthHandler(svc)
+	RegisterPublicAuthRoutes(router, handler)
+	RegisterAuthMeRoutes(router, handler)
+	return router
 }
 
 type authServiceStub struct {

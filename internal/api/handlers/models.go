@@ -15,8 +15,6 @@ import (
 type ModelsHandler struct {
 	// service 负责权限判断和实时目录读取，handler 只做 HTTP 映射。
 	service modelService
-	// tokens 校验 Bearer access token 并还原 Principal。
-	tokens *auth.TokenManager
 }
 
 type modelService interface {
@@ -24,8 +22,8 @@ type modelService interface {
 }
 
 // NewModelsHandler 创建模型目录 HTTP handler。
-func NewModelsHandler(svc modelService, tokens *auth.TokenManager) *ModelsHandler {
-	return &ModelsHandler{service: svc, tokens: tokens}
+func NewModelsHandler(svc modelService) *ModelsHandler {
+	return &ModelsHandler{service: svc}
 }
 
 // RegisterModelRoutes 注册模型目录路由。
@@ -46,10 +44,7 @@ func RegisterModelRoutes(router gin.IRouter, handler *ModelsHandler) {
 // @Failure      500  {object}  ErrorResponse
 // @Router       /models [get]
 func (h *ModelsHandler) List(c *gin.Context) {
-	principal, ok := h.principal(c)
-	if !ok {
-		return
-	}
+	principal := principalFromCtx(c)
 	models, err := h.service.List(c.Request.Context(), principal)
 	if err != nil {
 		if errors.Is(err, service.ErrForbidden) {
@@ -60,18 +55,4 @@ func (h *ModelsHandler) List(c *gin.Context) {
 		return
 	}
 	c.JSON(http.StatusOK, gin.H{"models": models})
-}
-
-func (h *ModelsHandler) principal(c *gin.Context) (auth.Principal, bool) {
-	token, ok := bearerToken(c.GetHeader("Authorization"))
-	if !ok {
-		c.JSON(http.StatusUnauthorized, gin.H{"error": "缺少访问令牌"})
-		return auth.Principal{}, false
-	}
-	principal, err := h.tokens.VerifyAccessToken(token)
-	if err != nil {
-		c.JSON(http.StatusUnauthorized, gin.H{"error": "访问令牌无效"})
-		return auth.Principal{}, false
-	}
-	return principal, true
 }

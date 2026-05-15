@@ -16,8 +16,6 @@ import (
 type ResourceMetricsHandler struct {
 	// service 负责权限校验、时间范围归一化后的数据库查询和 DTO 映射。
 	service resourceMetricsService
-	// tokens 用于校验 Bearer access token，保持与其它后台 handler 一致的认证入口。
-	tokens *auth.TokenManager
 }
 
 // resourceMetricsService 抽象资源指标 handler 依赖，便于 handler 单元测试注入 stub。
@@ -47,8 +45,8 @@ type NodeInstancesResponse struct {
 }
 
 // NewResourceMetricsHandler 创建资源指标 handler。
-func NewResourceMetricsHandler(svc resourceMetricsService, tokens *auth.TokenManager) *ResourceMetricsHandler {
-	return &ResourceMetricsHandler{service: svc, tokens: tokens}
+func NewResourceMetricsHandler(svc resourceMetricsService) *ResourceMetricsHandler {
+	return &ResourceMetricsHandler{service: svc}
 }
 
 // RegisterResourceMetricsRoutes 注册资源指标查询路由。
@@ -78,10 +76,7 @@ func RegisterResourceMetricsRoutes(router gin.IRouter, handler *ResourceMetricsH
 // @Failure      500     {object}  ErrorResponse
 // @Router       /runtime-nodes/{nodeId}/resources [get]
 func (h *ResourceMetricsHandler) NodeResources(c *gin.Context) {
-	principal, ok := h.principal(c)
-	if !ok {
-		return
-	}
+	principal := principalFromCtx(c)
 	resourceRange, ok := h.resourceRange(c)
 	if !ok {
 		return
@@ -111,10 +106,7 @@ func (h *ResourceMetricsHandler) NodeResources(c *gin.Context) {
 // @Failure      500     {object}  ErrorResponse
 // @Router       /runtime-nodes/{nodeId}/instances [get]
 func (h *ResourceMetricsHandler) NodeInstances(c *gin.Context) {
-	principal, ok := h.principal(c)
-	if !ok {
-		return
-	}
+	principal := principalFromCtx(c)
 	instances, err := h.service.ListNodeInstances(c.Request.Context(), principal, c.Param("nodeId"), queryInt32(c, "limit", 0), queryInt32(c, "offset", 0))
 	if err != nil {
 		writeResourceMetricsError(c, err)
@@ -143,10 +135,7 @@ func (h *ResourceMetricsHandler) NodeInstances(c *gin.Context) {
 // @Failure      500     {object}  ErrorResponse
 // @Router       /runtime-nodes/{nodeId}/instances/{appId}/resources [get]
 func (h *ResourceMetricsHandler) NodeInstanceResources(c *gin.Context) {
-	principal, ok := h.principal(c)
-	if !ok {
-		return
-	}
+	principal := principalFromCtx(c)
 	resourceRange, ok := h.resourceRange(c)
 	if !ok {
 		return
@@ -178,10 +167,7 @@ func (h *ResourceMetricsHandler) NodeInstanceResources(c *gin.Context) {
 // @Failure      500     {object}  ErrorResponse
 // @Router       /apps/{appId}/resources [get]
 func (h *ResourceMetricsHandler) AppResources(c *gin.Context) {
-	principal, ok := h.principal(c)
-	if !ok {
-		return
-	}
+	principal := principalFromCtx(c)
 	resourceRange, ok := h.resourceRange(c)
 	if !ok {
 		return
@@ -195,20 +181,6 @@ func (h *ResourceMetricsHandler) AppResources(c *gin.Context) {
 }
 
 // principal 从 Authorization Bearer token 提取调用主体。
-func (h *ResourceMetricsHandler) principal(c *gin.Context) (auth.Principal, bool) {
-	token, ok := bearerToken(c.GetHeader("Authorization"))
-	if !ok {
-		c.JSON(http.StatusUnauthorized, gin.H{"error": "缺少访问令牌"})
-		return auth.Principal{}, false
-	}
-	principal, err := h.tokens.VerifyAccessToken(token)
-	if err != nil {
-		c.JSON(http.StatusUnauthorized, gin.H{"error": "访问令牌无效"})
-		return auth.Principal{}, false
-	}
-	return principal, true
-}
-
 // resourceRange 将 HTTP 查询参数转换为 service 层统一时间范围；非法范围直接返回 400。
 func (h *ResourceMetricsHandler) resourceRange(c *gin.Context) (service.ResourceTimeRange, bool) {
 	resourceRange, err := service.NormalizeResourceRange(c.Query("from"), c.Query("to"), c.Query("bucket"), time.Now().UTC())

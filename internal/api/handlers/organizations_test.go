@@ -9,7 +9,6 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"testing"
-	"time"
 
 	"github.com/gin-gonic/gin"
 
@@ -20,38 +19,24 @@ import (
 	"oc-manager/internal/service"
 )
 
-// TestOrganizationsCreateRequiresToken 验证组织创建要求令牌的预期行为场景。
-func TestOrganizationsCreateRequiresToken(t *testing.T) {
-	router, _ := newOrganizationsTestRouter(t, &organizationServiceStub{})
-
-	recorder := httptest.NewRecorder()
-	request := httptest.NewRequest(http.MethodPost, "/api/v1/organizations", bytes.NewBufferString(`{"name":"测试组织","code":"test-org","admin_username":"admin","admin_display_name":"管理员","admin_password":"secret-password","enabled_models":["qwen2.5:7b"]}`))
-	request.Header.Set("Content-Type", "application/json")
-	router.ServeHTTP(recorder, request)
-
-	require.Equal(t, http.StatusUnauthorized, recorder.Code)
-}
-
 // TestOrganizationsCreateReturnsCreatedOrganization 验证组织创建返回已创建组织的成功路径场景。
 func TestOrganizationsCreateReturnsCreatedOrganization(t *testing.T) {
 	svc := &organizationServiceStub{
 		createResult: service.OrganizationResult{ID: "org-1", Name: "测试组织", Status: domain.StatusActive},
 	}
-	router, tokens := newOrganizationsTestRouter(t, svc)
-	accessToken, err := tokens.SignAccessToken(auth.Principal{UserID: "user-1", Role: domain.UserRolePlatformAdmin})
-	require.NoError(t, err)
+	router := newOrganizationsTestRouter(t, svc)
 
 	recorder := httptest.NewRecorder()
 	request := httptest.NewRequest(http.MethodPost, "/api/v1/organizations", bytes.NewBufferString(`{"name":"测试组织","code":"test-org","admin_username":"admin","admin_display_name":"管理员","admin_password":"secret-password","enabled_models":["qwen2.5:7b"]}`))
 	request.Header.Set("Content-Type", "application/json")
-	request.Header.Set("Authorization", "Bearer "+accessToken)
+	request = withPrincipal(request, auth.Principal{UserID: "user-1", Role: domain.UserRolePlatformAdmin})
 	router.ServeHTTP(recorder, request)
 
 	require.Equal(t, http.StatusCreated, recorder.Code)
 	var response struct {
 		Organization service.OrganizationResult `json:"organization"`
 	}
-	err = json.Unmarshal(recorder.Body.Bytes(), &response)
+	err := json.Unmarshal(recorder.Body.Bytes(), &response)
 	require.NoError(t, err)
 	assert.Equal(t, "测试组织", response.Organization.Name)
 	assert.Equal(t, domain.UserRolePlatformAdmin, svc.lastPrincipal.Role)
@@ -67,14 +52,12 @@ func TestOrganizationsUpdatePassesEnabledModels(t *testing.T) {
 	svc := &organizationServiceStub{
 		createResult: service.OrganizationResult{ID: "org-1", Name: "测试组织", Status: domain.StatusActive, EnabledModels: []string{"deepseek-r1:14b"}},
 	}
-	router, tokens := newOrganizationsTestRouter(t, svc)
-	accessToken, err := tokens.SignAccessToken(auth.Principal{UserID: "user-1", Role: domain.UserRolePlatformAdmin})
-	require.NoError(t, err)
+	router := newOrganizationsTestRouter(t, svc)
 
 	recorder := httptest.NewRecorder()
 	request := httptest.NewRequest(http.MethodPatch, "/api/v1/organizations/org-1", bytes.NewBufferString(`{"name":"测试组织","enabled_models":["deepseek-r1:14b"]}`))
 	request.Header.Set("Content-Type", "application/json")
-	request.Header.Set("Authorization", "Bearer "+accessToken)
+	request = withPrincipal(request, auth.Principal{UserID: "user-1", Role: domain.UserRolePlatformAdmin})
 	router.ServeHTTP(recorder, request)
 
 	require.Equal(t, http.StatusOK, recorder.Code)
@@ -88,14 +71,12 @@ func TestOrganizationsUpdateKeepsEnabledModelsWhenOmitted(t *testing.T) {
 	svc := &organizationServiceStub{
 		createResult: service.OrganizationResult{ID: "org-1", Name: "测试组织", Status: domain.StatusActive},
 	}
-	router, tokens := newOrganizationsTestRouter(t, svc)
-	accessToken, err := tokens.SignAccessToken(auth.Principal{UserID: "user-1", Role: domain.UserRolePlatformAdmin})
-	require.NoError(t, err)
+	router := newOrganizationsTestRouter(t, svc)
 
 	recorder := httptest.NewRecorder()
 	request := httptest.NewRequest(http.MethodPatch, "/api/v1/organizations/org-1", bytes.NewBufferString(`{"name":"测试组织"}`))
 	request.Header.Set("Content-Type", "application/json")
-	request.Header.Set("Authorization", "Bearer "+accessToken)
+	request = withPrincipal(request, auth.Principal{UserID: "user-1", Role: domain.UserRolePlatformAdmin})
 	router.ServeHTTP(recorder, request)
 
 	require.Equal(t, http.StatusOK, recorder.Code)
@@ -106,14 +87,12 @@ func TestOrganizationsUpdateKeepsEnabledModelsWhenOmitted(t *testing.T) {
 
 // TestOrganizationsCreateRequiresAdminFields 验证组织创建要求管理员字段的预期行为场景。
 func TestOrganizationsCreateRequiresAdminFields(t *testing.T) {
-	router, tokens := newOrganizationsTestRouter(t, &organizationServiceStub{})
-	accessToken, err := tokens.SignAccessToken(auth.Principal{UserID: "user-1", Role: domain.UserRolePlatformAdmin})
-	require.NoError(t, err)
+	router := newOrganizationsTestRouter(t, &organizationServiceStub{})
 
 	recorder := httptest.NewRecorder()
 	request := httptest.NewRequest(http.MethodPost, "/api/v1/organizations", bytes.NewBufferString(`{"name":"测试组织"}`))
 	request.Header.Set("Content-Type", "application/json")
-	request.Header.Set("Authorization", "Bearer "+accessToken)
+	request = withPrincipal(request, auth.Principal{UserID: "user-1", Role: domain.UserRolePlatformAdmin})
 	router.ServeHTTP(recorder, request)
 
 	require.Equal(t, http.StatusBadRequest, recorder.Code)
@@ -126,14 +105,12 @@ func TestOrganizationsCreateReturnsBusinessValidationMessage(t *testing.T) {
 	svc := &organizationServiceStub{
 		createErr: fmt.Errorf("%w: 组织标识必须为 3-32 位小写字母、数字或短横线，且不能以短横线开头或结尾", service.ErrMemberCreateInvalid),
 	}
-	router, tokens := newOrganizationsTestRouter(t, svc)
-	accessToken, err := tokens.SignAccessToken(auth.Principal{UserID: "user-1", Role: domain.UserRolePlatformAdmin})
-	require.NoError(t, err)
+	router := newOrganizationsTestRouter(t, svc)
 
 	recorder := httptest.NewRecorder()
 	request := httptest.NewRequest(http.MethodPost, "/api/v1/organizations", bytes.NewBufferString(`{"name":"aa","code":"aa","admin_username":"admin","admin_display_name":"admin","admin_password":"admin123"}`))
 	request.Header.Set("Content-Type", "application/json")
-	request.Header.Set("Authorization", "Bearer "+accessToken)
+	request = withPrincipal(request, auth.Principal{UserID: "user-1", Role: domain.UserRolePlatformAdmin})
 	router.ServeHTTP(recorder, request)
 
 	require.Equal(t, http.StatusBadRequest, recorder.Code)
@@ -143,27 +120,23 @@ func TestOrganizationsCreateReturnsBusinessValidationMessage(t *testing.T) {
 
 // TestOrganizationsCreateMapsConflict 验证组织创建映射冲突的异常或拒绝路径场景。
 func TestOrganizationsCreateMapsConflict(t *testing.T) {
-	router, tokens := newOrganizationsTestRouter(t, &organizationServiceStub{createErr: service.ErrConflict})
-	accessToken, err := tokens.SignAccessToken(auth.Principal{UserID: "user-1", Role: domain.UserRolePlatformAdmin})
-	require.NoError(t, err)
+	router := newOrganizationsTestRouter(t, &organizationServiceStub{createErr: service.ErrConflict})
 
 	recorder := httptest.NewRecorder()
 	request := httptest.NewRequest(http.MethodPost, "/api/v1/organizations", bytes.NewBufferString(`{"name":"测试组织","code":"test-org","admin_username":"admin","admin_display_name":"管理员","admin_password":"secret-password"}`))
 	request.Header.Set("Content-Type", "application/json")
-	request.Header.Set("Authorization", "Bearer "+accessToken)
+	request = withPrincipal(request, auth.Principal{UserID: "user-1", Role: domain.UserRolePlatformAdmin})
 	router.ServeHTTP(recorder, request)
 
 	require.Equal(t, http.StatusConflict, recorder.Code)
 }
 
-func newOrganizationsTestRouter(t *testing.T, svc *organizationServiceStub) (*gin.Engine, *auth.TokenManager) {
+func newOrganizationsTestRouter(t *testing.T, svc *organizationServiceStub) *gin.Engine {
 	t.Helper()
 	gin.SetMode(gin.ReleaseMode)
-	tokens, err := auth.NewTokenManager("access-secret", "refresh-secret", time.Minute, time.Hour)
-	require.NoError(t, err)
 	router := gin.New()
-	RegisterOrganizationRoutes(router, NewOrganizationsHandler(svc, tokens))
-	return router, tokens
+	RegisterOrganizationRoutes(router, NewOrganizationsHandler(svc))
+	return router
 }
 
 type organizationServiceStub struct {

@@ -210,3 +210,11 @@ func toNodeResourceInput(req *AgentNodeResourceRequest) *service.NodeResourceInp
 		LastError:        req.LastError,
 	}
 }
+
+// bearerToken 从 Authorization header 提取 Bearer token。
+// scheme 比较大小写不敏感；缺失或空 token 统一返回 false。
+// 此函数仅供 agent 自注册鉴权（enrollment_secret 对比）使用。
+func bearerToken(header string) (string, bool) {
+	scheme, token, ok := strings.Cut(header, " ")
+	return token, ok && strings.EqualFold(scheme, "Bearer") && token != ""
+}

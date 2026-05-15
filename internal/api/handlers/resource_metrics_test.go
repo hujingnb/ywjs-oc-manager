@@ -6,7 +6,6 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"testing"
-	"time"
 
 	"github.com/gin-gonic/gin"
 	"github.com/stretchr/testify/assert"
@@ -20,12 +19,11 @@ import (
 // TestResourceMetricsHandlerRejectsOrgMemberForNodeResources 验证组织成员不能读取平台节点资源指标。
 func TestResourceMetricsHandlerRejectsOrgMemberForNodeResources(t *testing.T) {
 	stub := &resourceMetricsServiceStub{nodeResourcesErr: service.ErrForbidden}
-	router, tokens := newResourceMetricsTestRouter(t, stub)
-	token := mustSignAccess(t, tokens, auth.Principal{UserID: "u1", Role: domain.UserRoleOrgMember, OrgID: "org-1"})
+	router := newResourceMetricsTestRouter(t, stub)
 
 	recorder := httptest.NewRecorder()
 	request := httptest.NewRequest(http.MethodGet, "/api/v1/runtime-nodes/node-1/resources", nil)
-	request.Header.Set("Authorization", "Bearer "+token)
+	request = withPrincipal(request, auth.Principal{UserID: "u1", Role: domain.UserRoleOrgMember, OrgID: "org-1"})
 	router.ServeHTTP(recorder, request)
 
 	assert.Equal(t, http.StatusForbidden, recorder.Code)
@@ -37,12 +35,11 @@ func TestResourceMetricsHandlerReturnsAppResources(t *testing.T) {
 	stub := &resourceMetricsServiceStub{
 		appResourcesResult: []service.InstanceResourceSampleResult{{SampledAt: "2026-05-13T01:02:03Z"}},
 	}
-	router, tokens := newResourceMetricsTestRouter(t, stub)
-	token := mustSignAccess(t, tokens, auth.Principal{UserID: "u1", Role: domain.UserRoleOrgAdmin, OrgID: "org-1"})
+	router := newResourceMetricsTestRouter(t, stub)
 
 	recorder := httptest.NewRecorder()
 	request := httptest.NewRequest(http.MethodGet, "/api/v1/apps/app-1/resources", nil)
-	request.Header.Set("Authorization", "Bearer "+token)
+	request = withPrincipal(request, auth.Principal{UserID: "u1", Role: domain.UserRoleOrgAdmin, OrgID: "org-1"})
 	router.ServeHTTP(recorder, request)
 
 	require.Equal(t, http.StatusOK, recorder.Code)
@@ -56,15 +53,13 @@ func TestResourceMetricsHandlerReturnsAppResources(t *testing.T) {
 	assert.Equal(t, "app-1", stub.appResourcesAppID)
 }
 
-// newResourceMetricsTestRouter 构造资源指标 handler 测试专用路由和 token manager。
-func newResourceMetricsTestRouter(t *testing.T, svc resourceMetricsService) (*gin.Engine, *auth.TokenManager) {
+// newResourceMetricsTestRouter 构造资源指标 handler 测试专用路由。
+func newResourceMetricsTestRouter(t *testing.T, svc resourceMetricsService) *gin.Engine {
 	t.Helper()
 	gin.SetMode(gin.ReleaseMode)
-	tokens, err := auth.NewTokenManager("a", "b", time.Minute, time.Hour)
-	require.NoError(t, err)
 	router := gin.New()
-	RegisterResourceMetricsRoutes(router, NewResourceMetricsHandler(svc, tokens))
-	return router, tokens
+	RegisterResourceMetricsRoutes(router, NewResourceMetricsHandler(svc))
+	return router
 }
 
 // resourceMetricsServiceStub 只实现资源指标 handler 测试覆盖到的 service 方法。

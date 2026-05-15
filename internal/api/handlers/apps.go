@@ -12,9 +12,10 @@ import (
 )
 
 // AppsHandler 暴露应用读取接口；写操作位于 onboarding 与 runtime operation handler。
+//
+// 路由挂在 user 组上，token 校验由 RequireUserAuth 中间件统一完成。
 type AppsHandler struct {
 	service appService
-	tokens  *auth.TokenManager
 }
 
 type appService interface {
@@ -24,8 +25,8 @@ type appService interface {
 }
 
 // NewAppsHandler 创建 handler。
-func NewAppsHandler(svc appService, tokens *auth.TokenManager) *AppsHandler {
-	return &AppsHandler{service: svc, tokens: tokens}
+func NewAppsHandler(svc appService) *AppsHandler {
+	return &AppsHandler{service: svc}
 }
 
 // RegisterAppRoutes 注册应用路由。
@@ -53,10 +54,7 @@ func RegisterAppRoutes(router gin.IRouter, handler *AppsHandler) {
 // @Failure      500     {object}  ErrorResponse
 // @Router       /organizations/{orgId}/apps [get]
 func (h *AppsHandler) List(c *gin.Context) {
-	principal, ok := h.principal(c)
-	if !ok {
-		return
-	}
+	principal := principalFromCtx(c)
 	limit := queryInt32(c, "limit", 0)
 	offset := queryInt32(c, "offset", 0)
 	results, err := h.service.ListByOrg(c.Request.Context(), principal, c.Param("orgId"), limit, offset)
@@ -82,10 +80,7 @@ func (h *AppsHandler) List(c *gin.Context) {
 // @Failure      500    {object}  ErrorResponse
 // @Router       /apps/{appId} [get]
 func (h *AppsHandler) Get(c *gin.Context) {
-	principal, ok := h.principal(c)
-	if !ok {
-		return
-	}
+	principal := principalFromCtx(c)
 	result, err := h.service.Get(c.Request.Context(), principal, c.Param("appId"))
 	if err != nil {
 		writeAppsError(c, err)
@@ -112,10 +107,7 @@ func (h *AppsHandler) Get(c *gin.Context) {
 // @Failure      500    {object}  ErrorResponse
 // @Router       /apps/{appId}/model [patch]
 func (h *AppsHandler) UpdateModel(c *gin.Context) {
-	principal, ok := h.principal(c)
-	if !ok {
-		return
-	}
+	principal := principalFromCtx(c)
 	var req UpdateAppModelRequest
 	if err := c.ShouldBindJSON(&req); err != nil {
 		writeBindError(c, err)
@@ -131,20 +123,6 @@ func (h *AppsHandler) UpdateModel(c *gin.Context) {
 
 // principal 从 Authorization Bearer token 提取调用主体。
 // 应用接口只做认证解析，跨组织和成员自有应用的访问控制由 AppService 继续调用 authorizer 判断。
-func (h *AppsHandler) principal(c *gin.Context) (auth.Principal, bool) {
-	token, ok := bearerToken(c.GetHeader("Authorization"))
-	if !ok {
-		c.JSON(http.StatusUnauthorized, gin.H{"error": "缺少访问令牌"})
-		return auth.Principal{}, false
-	}
-	principal, err := h.tokens.VerifyAccessToken(token)
-	if err != nil {
-		c.JSON(http.StatusUnauthorized, gin.H{"error": "访问令牌无效"})
-		return auth.Principal{}, false
-	}
-	return principal, true
-}
-
 // writeAppsError 将 AppService 的 sentinel error 映射为 HTTP 状态码。
 // 未识别错误统一返回 500 和安全文案，避免把数据库或 new-api 细节暴露给前端。
 func writeAppsError(c *gin.Context, err error) {

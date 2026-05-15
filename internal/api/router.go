@@ -50,7 +50,7 @@ type Dependencies struct {
 	PlatformOverview *service.PlatformOverviewService
 	// JobsStore 提供按 job ID 查询异步任务状态的 handler 依赖。
 	JobsStore handlers.JobsStore
-	// TokenManager 用于所有需要 BearerAuth 的 handler 校验 access token。
+	// TokenManager 供 RequireUserAuth 中间件验证 access token 并注入 principal。
 	TokenManager *auth.TokenManager
 	// AgentTokenSink 在 agent enroll 成功时由 manager 进程缓存 (nodeID, agentToken)。
 	// nil 时跳过缓存（仅供测试或未启用 docker proxy 的最小装配使用）。
@@ -64,6 +64,11 @@ type Dependencies struct {
 }
 
 // NewRouter 创建 Manager API 的 HTTP 路由。
+// 路由分三组：
+//   - public：无需认证（health + auth login/refresh/logout）
+//   - agent：runtime-agent 自注册专用，使用 enrollment_secret / agent_token 自身鉴权
+//   - user：受 RequireUserAuth 中间件保护，所有业务 API
+//
 // handler 只负责 HTTP 协议层，业务权限、事务和外部系统副作用必须下沉到 service 层。
 func NewRouter(deps ...Dependencies) http.Handler {
 	gin.SetMode(gin.ReleaseMode)
@@ -78,38 +83,21 @@ func NewRouter(deps ...Dependencies) http.Handler {
 	// CSRF 双 submit cookie 校验：opt-in 模式（无 cookie 时放行），
 	// 前端拿到 csrf_token cookie 后必须把它写到 X-CSRF-Token header 才能通过写操作。
 	router.Use(middleware.RequireCSRF())
+
+	// ── public：health（无需认证，无条件注册）─────────────────────────
 	handlers.RegisterHealthRoutes(router)
+
 	if len(deps) == 0 {
 		return router
 	}
 	dep := deps[0]
 	if dep.TokenManager == nil {
+		// RequireUserAuth 依赖 TokenManager；无法初始化用户路由组，跳过全部业务路由。
 		return router
 	}
-	if dep.AuthService != nil {
-		handlers.RegisterAuthRoutes(router, handlers.NewAuthHandler(dep.AuthService, dep.TokenManager))
-	}
-	if dep.ModelCatalogService != nil {
-		handlers.RegisterModelRoutes(router, handlers.NewModelsHandler(dep.ModelCatalogService, dep.TokenManager))
-	}
-	if dep.OrganizationService != nil {
-		handlers.RegisterOrganizationRoutes(router, handlers.NewOrganizationsHandler(dep.OrganizationService, dep.TokenManager))
-	}
-	if dep.MemberService != nil {
-		memberHandler := handlers.NewMembersHandler(dep.MemberService, dep.TokenManager)
-		if dep.OnboardingService != nil {
-			memberHandler.SetOnboardingService(dep.OnboardingService)
-		}
-		if dep.JobNotifier != nil {
-			memberHandler.SetJobNotifier(dep.JobNotifier)
-		}
-		handlers.RegisterMemberRoutes(router, memberHandler)
-	}
-	if dep.AuditService != nil {
-		handlers.RegisterAuditRoutes(router, handlers.NewAuditHandler(dep.AuditService, dep.TokenManager))
-	}
+
+	// ── agent：runtime-agent 专用，使用 enrollment_secret / agent_token 自身鉴权 ──
 	if dep.RuntimeNodeService != nil {
-		handlers.RegisterRuntimeNodeRoutes(router, handlers.NewRuntimeNodesHandler(dep.RuntimeNodeService, dep.TokenManager))
 		var agentHandler *handlers.AgentEndpointsHandler
 		if dep.AgentTokenSink != nil {
 			agentHandler = handlers.NewAgentEndpointsHandler(dep.RuntimeNodeService, dep.EnrollmentSecret, dep.AgentTokenSink)
@@ -118,38 +106,72 @@ func NewRouter(deps ...Dependencies) http.Handler {
 		}
 		handlers.RegisterAgentRoutes(router, agentHandler)
 	}
+
+	// ── user：RequireUserAuth 注入 principal，所有业务路由挂载在此组 ──
+	user := router.Group("")
+	user.Use(middleware.RequireUserAuth(dep.TokenManager))
+
+	if dep.AuthService != nil {
+		authHandler := handlers.NewAuthHandler(dep.AuthService)
+		// login/refresh/logout 不需要 Bearer token，注册到外层 router（public）。
+		handlers.RegisterPublicAuthRoutes(router, authHandler)
+		// /auth/me 需要已认证 principal，注册到 user 组。
+		handlers.RegisterAuthMeRoutes(user, authHandler)
+	}
+	if dep.ModelCatalogService != nil {
+		handlers.RegisterModelRoutes(user, handlers.NewModelsHandler(dep.ModelCatalogService))
+	}
+	if dep.OrganizationService != nil {
+		handlers.RegisterOrganizationRoutes(user, handlers.NewOrganizationsHandler(dep.OrganizationService))
+	}
+	if dep.MemberService != nil {
+		memberHandler := handlers.NewMembersHandler(dep.MemberService)
+		if dep.OnboardingService != nil {
+			memberHandler.SetOnboardingService(dep.OnboardingService)
+		}
+		if dep.JobNotifier != nil {
+			memberHandler.SetJobNotifier(dep.JobNotifier)
+		}
+		handlers.RegisterMemberRoutes(user, memberHandler)
+	}
+	if dep.AuditService != nil {
+		handlers.RegisterAuditRoutes(user, handlers.NewAuditHandler(dep.AuditService))
+	}
+	if dep.RuntimeNodeService != nil {
+		handlers.RegisterRuntimeNodeRoutes(user, handlers.NewRuntimeNodesHandler(dep.RuntimeNodeService))
+	}
 	if dep.JobsStore != nil {
-		handlers.RegisterJobsRoutes(router, handlers.NewJobsHandler(dep.JobsStore, dep.TokenManager))
+		handlers.RegisterJobsRoutes(user, handlers.NewJobsHandler(dep.JobsStore))
 	}
 	if dep.ChannelService != nil {
-		handlers.RegisterChannelRoutes(router, handlers.NewChannelsHandler(dep.ChannelService, dep.TokenManager))
+		handlers.RegisterChannelRoutes(user, handlers.NewChannelsHandler(dep.ChannelService))
 	}
 	if dep.KnowledgeService != nil {
-		handlers.RegisterKnowledgeRoutes(router, handlers.NewKnowledgeHandler(dep.KnowledgeService, dep.TokenManager))
+		handlers.RegisterKnowledgeRoutes(user, handlers.NewKnowledgeHandler(dep.KnowledgeService))
 	}
 	if dep.WorkspaceService != nil {
-		handlers.RegisterWorkspaceRoutes(router, handlers.NewWorkspaceHandler(dep.WorkspaceService, dep.TokenManager))
+		handlers.RegisterWorkspaceRoutes(user, handlers.NewWorkspaceHandler(dep.WorkspaceService))
 	}
 	if dep.UsageService != nil {
-		handlers.RegisterUsageRoutes(router, handlers.NewUsageHandler(dep.UsageService, dep.TokenManager))
+		handlers.RegisterUsageRoutes(user, handlers.NewUsageHandler(dep.UsageService))
 	}
 	if dep.ResourceMetricsService != nil {
-		handlers.RegisterResourceMetricsRoutes(router, handlers.NewResourceMetricsHandler(dep.ResourceMetricsService, dep.TokenManager))
+		handlers.RegisterResourceMetricsRoutes(user, handlers.NewResourceMetricsHandler(dep.ResourceMetricsService))
 	}
 	if dep.RuntimeOpService != nil {
-		handlers.RegisterAppRuntimeRoutes(router, handlers.NewAppRuntimeHandler(dep.RuntimeOpService, dep.TokenManager))
+		handlers.RegisterAppRuntimeRoutes(user, handlers.NewAppRuntimeHandler(dep.RuntimeOpService))
 	}
 	if dep.AppService != nil {
-		handlers.RegisterAppRoutes(router, handlers.NewAppsHandler(dep.AppService, dep.TokenManager))
+		handlers.RegisterAppRoutes(user, handlers.NewAppsHandler(dep.AppService))
 	}
 	if dep.RechargeService != nil {
-		handlers.RegisterRechargeRoutes(router, handlers.NewRechargeHandler(dep.RechargeService, dep.TokenManager))
+		handlers.RegisterRechargeRoutes(user, handlers.NewRechargeHandler(dep.RechargeService))
 	}
 	if dep.PersonaService != nil {
-		handlers.RegisterPersonaRoutes(router, handlers.NewPersonaHandler(dep.PersonaService, dep.TokenManager))
+		handlers.RegisterPersonaRoutes(user, handlers.NewPersonaHandler(dep.PersonaService))
 	}
 	if dep.PlatformOverview != nil {
-		handlers.RegisterPlatformOverviewRoutes(router, handlers.NewPlatformOverviewHandler(dep.PlatformOverview, dep.TokenManager))
+		handlers.RegisterPlatformOverviewRoutes(user, handlers.NewPlatformOverviewHandler(dep.PlatformOverview))
 	}
 	return router
 }

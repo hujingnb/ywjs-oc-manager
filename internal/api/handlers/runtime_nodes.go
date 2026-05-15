@@ -17,7 +17,6 @@ import (
 // agent 自身的注册与心跳由 AgentEndpointsHandler 提供，避免暴露在管理员路由前缀下。
 type RuntimeNodesHandler struct {
 	service runtimeNodeService
-	tokens  *auth.TokenManager
 }
 
 type runtimeNodeService interface {
@@ -27,8 +26,8 @@ type runtimeNodeService interface {
 }
 
 // NewRuntimeNodesHandler 创建 runtime node handler。
-func NewRuntimeNodesHandler(service runtimeNodeService, tokens *auth.TokenManager) *RuntimeNodesHandler {
-	return &RuntimeNodesHandler{service: service, tokens: tokens}
+func NewRuntimeNodesHandler(service runtimeNodeService) *RuntimeNodesHandler {
+	return &RuntimeNodesHandler{service: service}
 }
 
 // RegisterRuntimeNodeRoutes 注册管理员侧的 runtime 节点路由。
@@ -55,10 +54,7 @@ func RegisterRuntimeNodeRoutes(router gin.IRouter, handler *RuntimeNodesHandler)
 // @Failure      500     {object}  ErrorResponse
 // @Router       /runtime-nodes [get]
 func (h *RuntimeNodesHandler) List(c *gin.Context) {
-	principal, ok := h.principal(c)
-	if !ok {
-		return
-	}
+	principal := principalFromCtx(c)
 	limit := queryInt32(c, "limit", 0)
 	offset := queryInt32(c, "offset", 0)
 	results, err := h.service.ListNodes(c.Request.Context(), principal, limit, offset)
@@ -84,10 +80,7 @@ func (h *RuntimeNodesHandler) List(c *gin.Context) {
 // @Failure      500     {object}  ErrorResponse
 // @Router       /runtime-nodes/{nodeId} [get]
 func (h *RuntimeNodesHandler) Get(c *gin.Context) {
-	principal, ok := h.principal(c)
-	if !ok {
-		return
-	}
+	principal := principalFromCtx(c)
 	result, err := h.service.GetNode(c.Request.Context(), principal, c.Param("nodeId"))
 	if err != nil {
 		writeRuntimeNodeError(c, err)
@@ -133,30 +126,13 @@ func (h *RuntimeNodesHandler) Enable(c *gin.Context) {
 }
 
 func (h *RuntimeNodesHandler) setStatus(c *gin.Context, status string) {
-	principal, ok := h.principal(c)
-	if !ok {
-		return
-	}
+	principal := principalFromCtx(c)
 	result, err := h.service.SetNodeStatus(c.Request.Context(), principal, c.Param("nodeId"), status)
 	if err != nil {
 		writeRuntimeNodeError(c, err)
 		return
 	}
 	c.JSON(http.StatusOK, gin.H{"runtime_node": result})
-}
-
-func (h *RuntimeNodesHandler) principal(c *gin.Context) (auth.Principal, bool) {
-	token, ok := bearerToken(c.GetHeader("Authorization"))
-	if !ok {
-		c.JSON(http.StatusUnauthorized, gin.H{"error": "缺少访问令牌"})
-		return auth.Principal{}, false
-	}
-	principal, err := h.tokens.VerifyAccessToken(token)
-	if err != nil {
-		c.JSON(http.StatusUnauthorized, gin.H{"error": "访问令牌无效"})
-		return auth.Principal{}, false
-	}
-	return principal, true
 }
 
 func writeRuntimeNodeError(c *gin.Context, err error) {

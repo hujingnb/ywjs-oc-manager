@@ -5,7 +5,6 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"testing"
-	"time"
 
 	"github.com/gin-gonic/gin"
 	"github.com/stretchr/testify/assert"
@@ -57,26 +56,23 @@ func (s *usageServiceStub) GetAppUsage(_ context.Context, _ auth.Principal, _, _
 	return s.appResult, s.appErr
 }
 
-// newUsageTestRouter 构建用于测试的 gin router + token manager。
-func newUsageTestRouter(t *testing.T, svc usageService) (*gin.Engine, *auth.TokenManager) {
+// newUsageTestRouter 构建用于测试的 gin router。
+func newUsageTestRouter(t *testing.T, svc usageService) *gin.Engine {
 	t.Helper()
 	gin.SetMode(gin.ReleaseMode)
-	tokens, err := auth.NewTokenManager("a", "b", time.Minute, time.Hour)
-	require.NoError(t, err)
 	router := gin.New()
-	RegisterUsageRoutes(router, NewUsageHandler(svc, tokens))
-	return router, tokens
+	RegisterUsageRoutes(router, NewUsageHandler(svc))
+	return router
 }
 
 // TestUsageGetMemberHappy 验证用量获取成员成功路径的成功路径场景。
 func TestUsageGetMemberHappy(t *testing.T) {
 	stub := &usageServiceStub{memberResult: service.LogsPage{Total: 5}}
-	router, tokens := newUsageTestRouter(t, stub)
-	token := mustSignAccess(t, tokens, auth.Principal{UserID: "u1", Role: domain.UserRoleOrgAdmin, OrgID: "org-1"})
+	router := newUsageTestRouter(t, stub)
 
 	w := httptest.NewRecorder()
 	req := httptest.NewRequest(http.MethodGet, "/api/v1/usage/members/u1?org_id=org-1", nil)
-	req.Header.Set("Authorization", "Bearer "+token)
+	req = withPrincipal(req, auth.Principal{UserID: "u1", Role: domain.UserRoleOrgAdmin, OrgID: "org-1"})
 	router.ServeHTTP(w, req)
 
 	require.Equal(t, http.StatusOK, w.Code)
@@ -88,13 +84,12 @@ func TestUsageGetMemberHappy(t *testing.T) {
 // TestUsageGetMemberMissingOrgID 验证用量获取成员缺失组织ID的异常或拒绝路径场景。
 func TestUsageGetMemberMissingOrgID(t *testing.T) {
 	stub := &usageServiceStub{}
-	router, tokens := newUsageTestRouter(t, stub)
-	token := mustSignAccess(t, tokens, auth.Principal{UserID: "u1", Role: domain.UserRoleOrgAdmin, OrgID: "org-1"})
+	router := newUsageTestRouter(t, stub)
 
 	w := httptest.NewRecorder()
 	// 缺少必填的 org_id 参数
 	req := httptest.NewRequest(http.MethodGet, "/api/v1/usage/members/u1", nil)
-	req.Header.Set("Authorization", "Bearer "+token)
+	req = withPrincipal(req, auth.Principal{UserID: "u1", Role: domain.UserRoleOrgAdmin, OrgID: "org-1"})
 	router.ServeHTTP(w, req)
 
 	assert.Equal(t, http.StatusBadRequest, w.Code)
@@ -103,12 +98,11 @@ func TestUsageGetMemberMissingOrgID(t *testing.T) {
 // TestUsageGetMemberForbidden 验证用量获取成员禁止访问的异常或拒绝路径场景。
 func TestUsageGetMemberForbidden(t *testing.T) {
 	stub := &usageServiceStub{memberErr: service.ErrForbidden}
-	router, tokens := newUsageTestRouter(t, stub)
-	token := mustSignAccess(t, tokens, auth.Principal{UserID: "u1", Role: domain.UserRoleOrgMember, OrgID: "org-1"})
+	router := newUsageTestRouter(t, stub)
 
 	w := httptest.NewRecorder()
 	req := httptest.NewRequest(http.MethodGet, "/api/v1/usage/members/u2?org_id=org-1", nil)
-	req.Header.Set("Authorization", "Bearer "+token)
+	req = withPrincipal(req, auth.Principal{UserID: "u1", Role: domain.UserRoleOrgMember, OrgID: "org-1"})
 	router.ServeHTTP(w, req)
 
 	assert.Equal(t, http.StatusForbidden, w.Code)
@@ -117,12 +111,11 @@ func TestUsageGetMemberForbidden(t *testing.T) {
 // TestUsageGetOrgHappy 验证用量获取组织成功路径的成功路径场景。
 func TestUsageGetOrgHappy(t *testing.T) {
 	stub := &usageServiceStub{orgResult: service.QuotaSeries{}}
-	router, tokens := newUsageTestRouter(t, stub)
-	token := mustSignAccess(t, tokens, auth.Principal{UserID: "u1", Role: domain.UserRoleOrgAdmin, OrgID: "org-1"})
+	router := newUsageTestRouter(t, stub)
 
 	w := httptest.NewRecorder()
 	req := httptest.NewRequest(http.MethodGet, "/api/v1/usage/organizations/org-1", nil)
-	req.Header.Set("Authorization", "Bearer "+token)
+	req = withPrincipal(req, auth.Principal{UserID: "u1", Role: domain.UserRoleOrgAdmin, OrgID: "org-1"})
 	router.ServeHTTP(w, req)
 
 	require.Equal(t, http.StatusOK, w.Code)
@@ -132,12 +125,11 @@ func TestUsageGetOrgHappy(t *testing.T) {
 // TestUsageGetOrgAppliesDefaultWindow 验证组织用量缺省查询时间窗口时应用默认 30 天范围的场景。
 func TestUsageGetOrgAppliesDefaultWindow(t *testing.T) {
 	stub := &usageServiceStub{orgResult: service.QuotaSeries{}}
-	router, tokens := newUsageTestRouter(t, stub)
-	token := mustSignAccess(t, tokens, auth.Principal{UserID: "u1", Role: domain.UserRoleOrgAdmin, OrgID: "org-1"})
+	router := newUsageTestRouter(t, stub)
 
 	w := httptest.NewRecorder()
 	req := httptest.NewRequest(http.MethodGet, "/api/v1/usage/organizations/org-1", nil)
-	req.Header.Set("Authorization", "Bearer "+token)
+	req = withPrincipal(req, auth.Principal{UserID: "u1", Role: domain.UserRoleOrgAdmin, OrgID: "org-1"})
 	router.ServeHTTP(w, req)
 
 	require.Equal(t, http.StatusOK, w.Code)
@@ -149,12 +141,11 @@ func TestUsageGetOrgAppliesDefaultWindow(t *testing.T) {
 // TestUsageGetOrgKeepsExplicitWindow 验证组织用量传入显式 since/until 时保留调用方时间窗口的场景。
 func TestUsageGetOrgKeepsExplicitWindow(t *testing.T) {
 	stub := &usageServiceStub{orgResult: service.QuotaSeries{}}
-	router, tokens := newUsageTestRouter(t, stub)
-	token := mustSignAccess(t, tokens, auth.Principal{UserID: "u1", Role: domain.UserRoleOrgAdmin, OrgID: "org-1"})
+	router := newUsageTestRouter(t, stub)
 
 	w := httptest.NewRecorder()
 	req := httptest.NewRequest(http.MethodGet, "/api/v1/usage/organizations/org-1?since=100&until=200", nil)
-	req.Header.Set("Authorization", "Bearer "+token)
+	req = withPrincipal(req, auth.Principal{UserID: "u1", Role: domain.UserRoleOrgAdmin, OrgID: "org-1"})
 	router.ServeHTTP(w, req)
 
 	require.Equal(t, http.StatusOK, w.Code)
@@ -165,12 +156,11 @@ func TestUsageGetOrgKeepsExplicitWindow(t *testing.T) {
 // TestUsageGetPlatformForbidden 验证用量获取平台禁止访问的异常或拒绝路径场景。
 func TestUsageGetPlatformForbidden(t *testing.T) {
 	stub := &usageServiceStub{platformErr: service.ErrForbidden}
-	router, tokens := newUsageTestRouter(t, stub)
-	token := mustSignAccess(t, tokens, auth.Principal{UserID: "u1", Role: domain.UserRoleOrgAdmin, OrgID: "org-1"})
+	router := newUsageTestRouter(t, stub)
 
 	w := httptest.NewRecorder()
 	req := httptest.NewRequest(http.MethodGet, "/api/v1/usage/platform", nil)
-	req.Header.Set("Authorization", "Bearer "+token)
+	req = withPrincipal(req, auth.Principal{UserID: "u1", Role: domain.UserRoleOrgAdmin, OrgID: "org-1"})
 	router.ServeHTTP(w, req)
 
 	assert.Equal(t, http.StatusForbidden, w.Code)
@@ -179,12 +169,11 @@ func TestUsageGetPlatformForbidden(t *testing.T) {
 // TestUsageGetPlatformHappy 验证用量获取平台成功路径的成功路径场景。
 func TestUsageGetPlatformHappy(t *testing.T) {
 	stub := &usageServiceStub{platformResult: service.QuotaSeries{}}
-	router, tokens := newUsageTestRouter(t, stub)
-	token := mustSignAccess(t, tokens, auth.Principal{UserID: "u1", Role: domain.UserRolePlatformAdmin})
+	router := newUsageTestRouter(t, stub)
 
 	w := httptest.NewRecorder()
 	req := httptest.NewRequest(http.MethodGet, "/api/v1/usage/platform", nil)
-	req.Header.Set("Authorization", "Bearer "+token)
+	req = withPrincipal(req, auth.Principal{UserID: "u1", Role: domain.UserRolePlatformAdmin})
 	router.ServeHTTP(w, req)
 
 	require.Equal(t, http.StatusOK, w.Code)
@@ -193,12 +182,11 @@ func TestUsageGetPlatformHappy(t *testing.T) {
 // TestUsageGetPlatformAppliesDefaultWindow 验证平台用量缺省查询时间窗口时应用默认 30 天范围的场景。
 func TestUsageGetPlatformAppliesDefaultWindow(t *testing.T) {
 	stub := &usageServiceStub{platformResult: service.QuotaSeries{}}
-	router, tokens := newUsageTestRouter(t, stub)
-	token := mustSignAccess(t, tokens, auth.Principal{UserID: "u1", Role: domain.UserRolePlatformAdmin})
+	router := newUsageTestRouter(t, stub)
 
 	w := httptest.NewRecorder()
 	req := httptest.NewRequest(http.MethodGet, "/api/v1/usage/platform", nil)
-	req.Header.Set("Authorization", "Bearer "+token)
+	req = withPrincipal(req, auth.Principal{UserID: "u1", Role: domain.UserRolePlatformAdmin})
 	router.ServeHTTP(w, req)
 
 	require.Equal(t, http.StatusOK, w.Code)
@@ -210,12 +198,11 @@ func TestUsageGetPlatformAppliesDefaultWindow(t *testing.T) {
 // TestUsageGetAppHappy 验证用量获取应用成功路径的成功路径场景。
 func TestUsageGetAppHappy(t *testing.T) {
 	stub := &usageServiceStub{appResult: service.LogsPage{Total: 3}}
-	router, tokens := newUsageTestRouter(t, stub)
-	token := mustSignAccess(t, tokens, auth.Principal{UserID: "u1", Role: domain.UserRolePlatformAdmin})
+	router := newUsageTestRouter(t, stub)
 
 	w := httptest.NewRecorder()
 	req := httptest.NewRequest(http.MethodGet, "/api/v1/apps/app-1/usage?owner_org_id=org-1&owner_user_id=u1", nil)
-	req.Header.Set("Authorization", "Bearer "+token)
+	req = withPrincipal(req, auth.Principal{UserID: "u1", Role: domain.UserRolePlatformAdmin})
 	router.ServeHTTP(w, req)
 
 	require.Equal(t, http.StatusOK, w.Code)
@@ -225,26 +212,14 @@ func TestUsageGetAppHappy(t *testing.T) {
 // TestUsageGetAppMissingParams 验证用量获取应用缺失参数的异常或拒绝路径场景。
 func TestUsageGetAppMissingParams(t *testing.T) {
 	stub := &usageServiceStub{}
-	router, tokens := newUsageTestRouter(t, stub)
-	token := mustSignAccess(t, tokens, auth.Principal{UserID: "u1", Role: domain.UserRolePlatformAdmin})
+	router := newUsageTestRouter(t, stub)
 
 	w := httptest.NewRecorder()
 	// 缺少 owner_user_id
 	req := httptest.NewRequest(http.MethodGet, "/api/v1/apps/app-1/usage?owner_org_id=org-1", nil)
-	req.Header.Set("Authorization", "Bearer "+token)
+	req = withPrincipal(req, auth.Principal{UserID: "u1", Role: domain.UserRolePlatformAdmin})
 	router.ServeHTTP(w, req)
 
 	assert.Equal(t, http.StatusBadRequest, w.Code)
 }
 
-// TestUsageRequiresToken 验证用量要求令牌的预期行为场景。
-func TestUsageRequiresToken(t *testing.T) {
-	stub := &usageServiceStub{}
-	router, _ := newUsageTestRouter(t, stub)
-
-	w := httptest.NewRecorder()
-	req := httptest.NewRequest(http.MethodGet, "/api/v1/usage/platform", nil)
-	router.ServeHTTP(w, req)
-
-	assert.Equal(t, http.StatusUnauthorized, w.Code)
-}

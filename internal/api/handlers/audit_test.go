@@ -7,7 +7,6 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"testing"
-	"time"
 
 	"github.com/gin-gonic/gin"
 
@@ -17,26 +16,14 @@ import (
 	"oc-manager/internal/service"
 )
 
-// TestAuditListByOrgRequiresToken 验证审计列表通过组织要求令牌的预期行为场景。
-func TestAuditListByOrgRequiresToken(t *testing.T) {
-	router, _ := newAuditTestRouter(t, &auditServiceStub{})
-
-	recorder := httptest.NewRecorder()
-	request := httptest.NewRequest(http.MethodGet, "/api/v1/organizations/o1/audit-logs", nil)
-	router.ServeHTTP(recorder, request)
-
-	require.Equal(t, http.StatusUnauthorized, recorder.Code)
-}
-
 // TestAuditListByOrgPropagatesPrincipal 验证审计列表通过组织透传Principal的错误映射或错误记录场景。
 func TestAuditListByOrgPropagatesPrincipal(t *testing.T) {
 	svc := &auditServiceStub{byOrg: []service.AuditResult{{Action: "create"}}}
-	router, tokens := newAuditTestRouter(t, svc)
-	token := mustSignAccess(t, tokens, auth.Principal{UserID: "u1", OrgID: "o1", Role: domain.UserRoleOrgAdmin})
+	router := newAuditTestRouter(t, svc)
 
 	recorder := httptest.NewRecorder()
 	request := httptest.NewRequest(http.MethodGet, "/api/v1/organizations/o1/audit-logs?limit=10", nil)
-	request.Header.Set("Authorization", "Bearer "+token)
+	request = withPrincipal(request, auth.Principal{UserID: "u1", OrgID: "o1", Role: domain.UserRoleOrgAdmin})
 	router.ServeHTTP(recorder, request)
 
 	require.Equal(t, http.StatusOK, recorder.Code)
@@ -55,25 +42,22 @@ func TestAuditListByOrgPropagatesPrincipal(t *testing.T) {
 
 // TestAuditListByTargetRequiresParams 验证审计列表通过目标要求参数的预期行为场景。
 func TestAuditListByTargetRequiresParams(t *testing.T) {
-	router, tokens := newAuditTestRouter(t, &auditServiceStub{})
-	token := mustSignAccess(t, tokens, auth.Principal{UserID: "u1", Role: domain.UserRolePlatformAdmin})
+	router := newAuditTestRouter(t, &auditServiceStub{})
 
 	recorder := httptest.NewRecorder()
 	request := httptest.NewRequest(http.MethodGet, "/api/v1/audit-logs", nil)
-	request.Header.Set("Authorization", "Bearer "+token)
+	request = withPrincipal(request, auth.Principal{UserID: "u1", Role: domain.UserRolePlatformAdmin})
 	router.ServeHTTP(recorder, request)
 
 	require.Equal(t, http.StatusBadRequest, recorder.Code)
 }
 
-func newAuditTestRouter(t *testing.T, svc auditService) (*gin.Engine, *auth.TokenManager) {
+func newAuditTestRouter(t *testing.T, svc auditService) *gin.Engine {
 	t.Helper()
 	gin.SetMode(gin.ReleaseMode)
-	tokens, err := auth.NewTokenManager("a", "b", time.Minute, time.Hour)
-	require.NoError(t, err)
 	router := gin.New()
-	RegisterAuditRoutes(router, NewAuditHandler(svc, tokens))
-	return router, tokens
+	RegisterAuditRoutes(router, NewAuditHandler(svc))
+	return router
 }
 
 type auditServiceStub struct {

@@ -22,7 +22,6 @@ const usageDefaultWindowSeconds int64 = 30 * 24 * 60 * 60
 //   - organization / platform 维度：返回 QuotaSeries（new-api `GET /api/data/...` 的薄包装）。
 type UsageHandler struct {
 	service usageService
-	tokens  *auth.TokenManager
 }
 
 type usageService interface {
@@ -33,8 +32,8 @@ type usageService interface {
 }
 
 // NewUsageHandler 创建 usage handler。
-func NewUsageHandler(svc usageService, tokens *auth.TokenManager) *UsageHandler {
-	return &UsageHandler{service: svc, tokens: tokens}
+func NewUsageHandler(svc usageService) *UsageHandler {
+	return &UsageHandler{service: svc}
 }
 
 // RegisterUsageRoutes 注册用量路由。
@@ -70,10 +69,7 @@ func RegisterUsageRoutes(router gin.IRouter, handler *UsageHandler) {
 // @Failure      503        {object}  ErrorResponse
 // @Router       /usage/members/{userId} [get]
 func (h *UsageHandler) GetMember(c *gin.Context) {
-	principal, ok := h.principal(c)
-	if !ok {
-		return
-	}
+	principal := principalFromCtx(c)
 	orgID := c.Query("org_id")
 	if orgID == "" {
 		c.JSON(http.StatusBadRequest, gin.H{"error": "缺少 org_id"})
@@ -105,10 +101,7 @@ func (h *UsageHandler) GetMember(c *gin.Context) {
 // @Failure      503    {object}  ErrorResponse
 // @Router       /usage/organizations/{orgId} [get]
 func (h *UsageHandler) GetOrg(c *gin.Context) {
-	principal, ok := h.principal(c)
-	if !ok {
-		return
-	}
+	principal := principalFromCtx(c)
 	since, until := parseUsageStatsWindow(c)
 	view, err := h.service.GetOrgUsage(c.Request.Context(), principal, c.Param("orgId"), since, until)
 	if err != nil {
@@ -134,10 +127,7 @@ func (h *UsageHandler) GetOrg(c *gin.Context) {
 // @Failure      503    {object}  ErrorResponse
 // @Router       /usage/platform [get]
 func (h *UsageHandler) GetPlatform(c *gin.Context) {
-	principal, ok := h.principal(c)
-	if !ok {
-		return
-	}
+	principal := principalFromCtx(c)
 	since, until := parseUsageStatsWindow(c)
 	view, err := h.service.GetPlatformUsage(c.Request.Context(), principal, since, until)
 	if err != nil {
@@ -145,20 +135,6 @@ func (h *UsageHandler) GetPlatform(c *gin.Context) {
 		return
 	}
 	c.JSON(http.StatusOK, gin.H{"usage": view})
-}
-
-func (h *UsageHandler) principal(c *gin.Context) (auth.Principal, bool) {
-	token, ok := bearerToken(c.GetHeader("Authorization"))
-	if !ok {
-		c.JSON(http.StatusUnauthorized, gin.H{"error": "缺少访问令牌"})
-		return auth.Principal{}, false
-	}
-	principal, err := h.tokens.VerifyAccessToken(token)
-	if err != nil {
-		c.JSON(http.StatusUnauthorized, gin.H{"error": "访问令牌无效"})
-		return auth.Principal{}, false
-	}
-	return principal, true
 }
 
 // GetApp 拉取应用维度的 token 调用日志。
@@ -186,10 +162,7 @@ func (h *UsageHandler) principal(c *gin.Context) (auth.Principal, bool) {
 // @Failure      503           {object}  ErrorResponse
 // @Router       /apps/{appId}/usage [get]
 func (h *UsageHandler) GetApp(c *gin.Context) {
-	principal, ok := h.principal(c)
-	if !ok {
-		return
-	}
+	principal := principalFromCtx(c)
 	orgID := c.Query("owner_org_id")
 	owner := c.Query("owner_user_id")
 	if orgID == "" || owner == "" {

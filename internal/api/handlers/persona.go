@@ -17,14 +17,16 @@ type personaService interface {
 }
 
 // PersonaHandler 暴露组织 AI 人设的读写接口。
+//
+// 路由挂载在 user 组上，token 校验由 RequireUserAuth 中间件统一完成；
+// handler 自身不再持有 *auth.TokenManager。
 type PersonaHandler struct {
 	service personaService
-	tokens  *auth.TokenManager
 }
 
 // NewPersonaHandler 创建 handler。
-func NewPersonaHandler(svc personaService, tokens *auth.TokenManager) *PersonaHandler {
-	return &PersonaHandler{service: svc, tokens: tokens}
+func NewPersonaHandler(svc personaService) *PersonaHandler {
+	return &PersonaHandler{service: svc}
 }
 
 // RegisterPersonaRoutes 注册路由。
@@ -48,10 +50,7 @@ func RegisterPersonaRoutes(router gin.IRouter, handler *PersonaHandler) {
 // @Failure      500    {object}  ErrorResponse
 // @Router       /orgs/{orgId}/persona [get]
 func (h *PersonaHandler) Get(c *gin.Context) {
-	principal, ok := h.principal(c)
-	if !ok {
-		return
-	}
+	principal := principalFromCtx(c)
 	result, err := h.service.GetCurrent(c.Request.Context(), principal, c.Param("orgId"))
 	if err != nil {
 		writePersonaError(c, err)
@@ -78,10 +77,7 @@ func (h *PersonaHandler) Get(c *gin.Context) {
 // @Failure      500    {object}  ErrorResponse
 // @Router       /orgs/{orgId}/persona [put]
 func (h *PersonaHandler) Put(c *gin.Context) {
-	principal, ok := h.principal(c)
-	if !ok {
-		return
-	}
+	principal := principalFromCtx(c)
 	var req PersonaRequest
 	if err := c.ShouldBindJSON(&req); err != nil {
 		writeBindError(c, err)
@@ -99,20 +95,6 @@ func (h *PersonaHandler) Put(c *gin.Context) {
 		return
 	}
 	c.JSON(http.StatusOK, gin.H{"persona": result})
-}
-
-func (h *PersonaHandler) principal(c *gin.Context) (auth.Principal, bool) {
-	token, ok := bearerToken(c.GetHeader("Authorization"))
-	if !ok {
-		c.JSON(http.StatusUnauthorized, gin.H{"error": "缺少访问令牌"})
-		return auth.Principal{}, false
-	}
-	principal, err := h.tokens.VerifyAccessToken(token)
-	if err != nil {
-		c.JSON(http.StatusUnauthorized, gin.H{"error": "访问令牌无效"})
-		return auth.Principal{}, false
-	}
-	return principal, true
 }
 
 func writePersonaError(c *gin.Context, err error) {

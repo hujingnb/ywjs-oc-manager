@@ -5,7 +5,6 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"testing"
-	"time"
 
 	"github.com/gin-gonic/gin"
 	"github.com/stretchr/testify/assert"
@@ -26,26 +25,23 @@ func (s *platformOverviewServiceStub) Get(_ context.Context, _ auth.Principal) (
 	return s.result, s.err
 }
 
-// newPlatformOverviewTestRouter 构建用于测试的 gin router + token manager。
-func newPlatformOverviewTestRouter(t *testing.T, svc platformOverviewService) (*gin.Engine, *auth.TokenManager) {
+// newPlatformOverviewTestRouter 构建用于测试的 gin router。
+func newPlatformOverviewTestRouter(t *testing.T, svc platformOverviewService) *gin.Engine {
 	t.Helper()
 	gin.SetMode(gin.ReleaseMode)
-	tokens, err := auth.NewTokenManager("a", "b", time.Minute, time.Hour)
-	require.NoError(t, err)
 	router := gin.New()
-	RegisterPlatformOverviewRoutes(router, NewPlatformOverviewHandler(svc, tokens))
-	return router, tokens
+	RegisterPlatformOverviewRoutes(router, NewPlatformOverviewHandler(svc))
+	return router
 }
 
 // TestPlatformOverviewGetHappy 验证平台概览获取成功路径的成功路径场景。
 func TestPlatformOverviewGetHappy(t *testing.T) {
 	stub := &platformOverviewServiceStub{result: service.PlatformOverview{OrganizationCount: 3, MemberCount: 10}}
-	router, tokens := newPlatformOverviewTestRouter(t, stub)
-	token := mustSignAccess(t, tokens, auth.Principal{UserID: "u1", Role: domain.UserRolePlatformAdmin})
+	router := newPlatformOverviewTestRouter(t, stub)
 
 	w := httptest.NewRecorder()
 	req := httptest.NewRequest(http.MethodGet, "/api/v1/platform/overview", nil)
-	req.Header.Set("Authorization", "Bearer "+token)
+	req = withPrincipal(req, auth.Principal{UserID: "u1", Role: domain.UserRolePlatformAdmin})
 	router.ServeHTTP(w, req)
 
 	require.Equal(t, http.StatusOK, w.Code)
@@ -55,26 +51,14 @@ func TestPlatformOverviewGetHappy(t *testing.T) {
 // TestPlatformOverviewGetForbidden 验证平台概览获取禁止访问的异常或拒绝路径场景。
 func TestPlatformOverviewGetForbidden(t *testing.T) {
 	stub := &platformOverviewServiceStub{err: service.ErrForbidden}
-	router, tokens := newPlatformOverviewTestRouter(t, stub)
-	// 非平台管理员，service 返回 ErrForbidden
-	token := mustSignAccess(t, tokens, auth.Principal{UserID: "u1", Role: domain.UserRoleOrgAdmin, OrgID: "org-1"})
+	router := newPlatformOverviewTestRouter(t, stub)
 
 	w := httptest.NewRecorder()
 	req := httptest.NewRequest(http.MethodGet, "/api/v1/platform/overview", nil)
-	req.Header.Set("Authorization", "Bearer "+token)
+	// 非平台管理员，service 返回 ErrForbidden
+	req = withPrincipal(req, auth.Principal{UserID: "u1", Role: domain.UserRoleOrgAdmin, OrgID: "org-1"})
 	router.ServeHTTP(w, req)
 
 	assert.Equal(t, http.StatusForbidden, w.Code)
 }
 
-// TestPlatformOverviewGetRequiresToken 验证平台概览获取要求令牌的预期行为场景。
-func TestPlatformOverviewGetRequiresToken(t *testing.T) {
-	stub := &platformOverviewServiceStub{}
-	router, _ := newPlatformOverviewTestRouter(t, stub)
-
-	w := httptest.NewRecorder()
-	req := httptest.NewRequest(http.MethodGet, "/api/v1/platform/overview", nil)
-	router.ServeHTTP(w, req)
-
-	assert.Equal(t, http.StatusUnauthorized, w.Code)
-}

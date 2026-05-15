@@ -7,7 +7,6 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"testing"
-	"time"
 
 	"github.com/gin-gonic/gin"
 
@@ -18,30 +17,18 @@ import (
 	"oc-manager/internal/service"
 )
 
-// TestMembersListRequiresToken 验证成员列表要求令牌的预期行为场景。
-func TestMembersListRequiresToken(t *testing.T) {
-	router, _ := newMembersTestRouter(t, &memberServiceStub{})
-
-	recorder := httptest.NewRecorder()
-	request := httptest.NewRequest(http.MethodGet, "/api/v1/organizations/00000000-0000-0000-0000-000000000101/members", nil)
-	router.ServeHTTP(recorder, request)
-
-	require.Equal(t, http.StatusUnauthorized, recorder.Code)
-}
-
 // TestMembersCreateForwardsPrincipalAndOrg 验证成员创建转发Principal并组织的预期行为场景。
 func TestMembersCreateForwardsPrincipalAndOrg(t *testing.T) {
 	svc := &memberServiceStub{
 		createResult: service.MemberResult{ID: "user-1", Username: "alice", Role: domain.UserRoleOrgMember, Status: domain.StatusActive},
 	}
-	router, tokens := newMembersTestRouter(t, svc)
-	token := mustSignAccess(t, tokens, auth.Principal{UserID: "platform-1", Role: domain.UserRolePlatformAdmin})
+	router := newMembersTestRouter(t, svc)
 
 	recorder := httptest.NewRecorder()
 	body := bytes.NewBufferString(`{"username":"alice","display_name":"Alice","password":"pwd"}`)
 	request := httptest.NewRequest(http.MethodPost, "/api/v1/organizations/00000000-0000-0000-0000-000000000101/members", body)
 	request.Header.Set("Content-Type", "application/json")
-	request.Header.Set("Authorization", "Bearer "+token)
+	request = withPrincipal(request, auth.Principal{UserID: "platform-1", Role: domain.UserRolePlatformAdmin})
 	router.ServeHTTP(recorder, request)
 
 	require.Equal(t, http.StatusCreated, recorder.Code)
@@ -52,12 +39,11 @@ func TestMembersCreateForwardsPrincipalAndOrg(t *testing.T) {
 // TestMembersDisableMapsErrorToBadRequest 验证成员禁用映射错误到非法请求的异常或拒绝路径场景。
 func TestMembersDisableMapsErrorToBadRequest(t *testing.T) {
 	svc := &memberServiceStub{statusErr: service.ErrMemberCreateInvalid}
-	router, tokens := newMembersTestRouter(t, svc)
-	token := mustSignAccess(t, tokens, auth.Principal{UserID: "u1", OrgID: "00000000-0000-0000-0000-000000000101", Role: domain.UserRoleOrgAdmin})
+	router := newMembersTestRouter(t, svc)
 
 	recorder := httptest.NewRecorder()
 	request := httptest.NewRequest(http.MethodPost, "/api/v1/members/u1/disable", nil)
-	request.Header.Set("Authorization", "Bearer "+token)
+	request = withPrincipal(request, auth.Principal{UserID: "u1", OrgID: "00000000-0000-0000-0000-000000000101", Role: domain.UserRoleOrgAdmin})
 	router.ServeHTTP(recorder, request)
 
 	require.Equal(t, http.StatusBadRequest, recorder.Code)
@@ -66,12 +52,11 @@ func TestMembersDisableMapsErrorToBadRequest(t *testing.T) {
 // TestMembersGetReturnsBody 验证成员获取返回请求体的成功路径场景。
 func TestMembersGetReturnsBody(t *testing.T) {
 	svc := &memberServiceStub{getResult: service.MemberResult{ID: "u1", Username: "alice"}}
-	router, tokens := newMembersTestRouter(t, svc)
-	token := mustSignAccess(t, tokens, auth.Principal{UserID: "u1", Role: domain.UserRoleOrgMember, OrgID: "org"})
+	router := newMembersTestRouter(t, svc)
 
 	recorder := httptest.NewRecorder()
 	request := httptest.NewRequest(http.MethodGet, "/api/v1/members/u1", nil)
-	request.Header.Set("Authorization", "Bearer "+token)
+	request = withPrincipal(request, auth.Principal{UserID: "u1", Role: domain.UserRoleOrgMember, OrgID: "org"})
 	router.ServeHTTP(recorder, request)
 
 	require.Equal(t, http.StatusOK, recorder.Code)
@@ -83,14 +68,12 @@ func TestMembersGetReturnsBody(t *testing.T) {
 	require.Equal(t, "alice", resp.Member.Username)
 }
 
-func newMembersTestRouter(t *testing.T, svc memberService) (*gin.Engine, *auth.TokenManager) {
+func newMembersTestRouter(t *testing.T, svc memberService) *gin.Engine {
 	t.Helper()
 	gin.SetMode(gin.ReleaseMode)
-	tokens, err := auth.NewTokenManager("a", "b", time.Minute, time.Hour)
-	require.NoError(t, err)
 	router := gin.New()
-	RegisterMemberRoutes(router, NewMembersHandler(svc, tokens))
-	return router, tokens
+	RegisterMemberRoutes(router, NewMembersHandler(svc))
+	return router
 }
 
 type onboardingServiceStub struct {
@@ -123,29 +106,26 @@ func (s *onboardingServiceStub) CreateAppForMember(_ context.Context, _ auth.Pri
 }
 
 // newMembersTestRouterWithOnboarding 给需要触发 onboard 路由的测试构造同时挂 onboarding service 的路由器。
-func newMembersTestRouterWithOnboarding(t *testing.T, svc memberService, onboarding onboardingService) (*gin.Engine, *auth.TokenManager) {
+func newMembersTestRouterWithOnboarding(t *testing.T, svc memberService, onboarding onboardingService) *gin.Engine {
 	t.Helper()
 	gin.SetMode(gin.ReleaseMode)
-	tokens, err := auth.NewTokenManager("a", "b", time.Minute, time.Hour)
-	require.NoError(t, err)
 	router := gin.New()
-	handler := NewMembersHandler(svc, tokens)
+	handler := NewMembersHandler(svc)
 	handler.SetOnboardingService(onboarding)
 	RegisterMemberRoutes(router, handler)
-	return router, tokens
+	return router
 }
 
 // TestMembersOnboardMapsNoNodeAvailableTo503 验证成员引导映射无节点可用到503的错误映射或错误记录场景。
 func TestMembersOnboardMapsNoNodeAvailableTo503(t *testing.T) {
 	onboarding := &onboardingServiceStub{err: service.ErrNoNodeAvailable}
-	router, tokens := newMembersTestRouterWithOnboarding(t, &memberServiceStub{}, onboarding)
-	token := mustSignAccess(t, tokens, auth.Principal{UserID: "p1", Role: domain.UserRolePlatformAdmin})
+	router := newMembersTestRouterWithOnboarding(t, &memberServiceStub{}, onboarding)
 
 	recorder := httptest.NewRecorder()
 	body := bytes.NewBufferString(`{"username":"alice","display_name":"Alice","password":"pwd","app_name":"alice-bot","model_id":"qwen2.5:7b"}`)
 	request := httptest.NewRequest(http.MethodPost, "/api/v1/organizations/00000000-0000-0000-0000-000000000101/members/onboard", body)
 	request.Header.Set("Content-Type", "application/json")
-	request.Header.Set("Authorization", "Bearer "+token)
+	request = withPrincipal(request, auth.Principal{UserID: "p1", Role: domain.UserRolePlatformAdmin})
 	router.ServeHTTP(recorder, request)
 
 	require.Equal(t, http.StatusServiceUnavailable, recorder.Code)
@@ -160,14 +140,13 @@ func TestMembersOnboardForwardsModelID(t *testing.T) {
 			JobID: "job-1",
 		},
 	}
-	router, tokens := newMembersTestRouterWithOnboarding(t, &memberServiceStub{}, onboarding)
-	token := mustSignAccess(t, tokens, auth.Principal{UserID: "p1", Role: domain.UserRoleOrgAdmin, OrgID: "org-1"})
+	router := newMembersTestRouterWithOnboarding(t, &memberServiceStub{}, onboarding)
 
 	recorder := httptest.NewRecorder()
 	body := bytes.NewBufferString(`{"username":"alice","display_name":"Alice","password":"pwd","app_name":"alice-bot","model_id":"qwen2.5:7b"}`)
 	request := httptest.NewRequest(http.MethodPost, "/api/v1/organizations/org-1/members/onboard", body)
 	request.Header.Set("Content-Type", "application/json")
-	request.Header.Set("Authorization", "Bearer "+token)
+	request = withPrincipal(request, auth.Principal{UserID: "p1", Role: domain.UserRoleOrgAdmin, OrgID: "org-1"})
 	router.ServeHTTP(recorder, request)
 
 	require.Equal(t, http.StatusCreated, recorder.Code)
@@ -183,14 +162,13 @@ func TestMembersCreateAppForMemberForwardsRequest(t *testing.T) {
 			JobID: "job-1",
 		},
 	}
-	router, tokens := newMembersTestRouterWithOnboarding(t, &memberServiceStub{}, onboarding)
-	token := mustSignAccess(t, tokens, auth.Principal{UserID: "p1", Role: domain.UserRolePlatformAdmin})
+	router := newMembersTestRouterWithOnboarding(t, &memberServiceStub{}, onboarding)
 
 	recorder := httptest.NewRecorder()
 	body := bytes.NewBufferString(`{"app_name":"alice-new-bot","persona_mode":"app_override","app_prompt":"hello","channel_type":"wechat","runtime_node_id":"node-1","model_id":"qwen2.5:7b"}`)
 	request := httptest.NewRequest(http.MethodPost, "/api/v1/organizations/org-1/members/user-1/apps", body)
 	request.Header.Set("Content-Type", "application/json")
-	request.Header.Set("Authorization", "Bearer "+token)
+	request = withPrincipal(request, auth.Principal{UserID: "p1", Role: domain.UserRolePlatformAdmin})
 	router.ServeHTTP(recorder, request)
 
 	require.Equal(t, http.StatusCreated, recorder.Code)
@@ -204,25 +182,17 @@ func TestMembersCreateAppForMemberForwardsRequest(t *testing.T) {
 // TestMembersCreateAppForMemberMapsNoNodeAvailable 验证已有成员创建实例无可用节点时映射为 503。
 func TestMembersCreateAppForMemberMapsNoNodeAvailable(t *testing.T) {
 	onboarding := &onboardingServiceStub{err: service.ErrNoNodeAvailable}
-	router, tokens := newMembersTestRouterWithOnboarding(t, &memberServiceStub{}, onboarding)
-	token := mustSignAccess(t, tokens, auth.Principal{UserID: "p1", Role: domain.UserRolePlatformAdmin})
+	router := newMembersTestRouterWithOnboarding(t, &memberServiceStub{}, onboarding)
 
 	recorder := httptest.NewRecorder()
 	body := bytes.NewBufferString(`{"app_name":"alice-new-bot","model_id":"qwen2.5:7b"}`)
 	request := httptest.NewRequest(http.MethodPost, "/api/v1/organizations/org-1/members/user-1/apps", body)
 	request.Header.Set("Content-Type", "application/json")
-	request.Header.Set("Authorization", "Bearer "+token)
+	request = withPrincipal(request, auth.Principal{UserID: "p1", Role: domain.UserRolePlatformAdmin})
 	router.ServeHTTP(recorder, request)
 
 	require.Equal(t, http.StatusServiceUnavailable, recorder.Code)
 	require.Contains(t, recorder.Body.String(), "NO_NODE_AVAILABLE")
-}
-
-func mustSignAccess(t *testing.T, tokens *auth.TokenManager, principal auth.Principal) string {
-	t.Helper()
-	token, err := tokens.SignAccessToken(principal)
-	require.NoError(t, err)
-	return token
 }
 
 type memberServiceStub struct {

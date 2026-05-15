@@ -17,7 +17,6 @@ import (
 // KnowledgeHandler 暴露组织和应用维度的知识库 HTTP 接口。
 type KnowledgeHandler struct {
 	service knowledgeService
-	tokens  *auth.TokenManager
 }
 
 type knowledgeService interface {
@@ -32,8 +31,8 @@ type knowledgeService interface {
 }
 
 // NewKnowledgeHandler 创建 handler。
-func NewKnowledgeHandler(svc knowledgeService, tokens *auth.TokenManager) *KnowledgeHandler {
-	return &KnowledgeHandler{service: svc, tokens: tokens}
+func NewKnowledgeHandler(svc knowledgeService) *KnowledgeHandler {
+	return &KnowledgeHandler{service: svc}
 }
 
 // RegisterKnowledgeRoutes 注册路由。
@@ -68,10 +67,7 @@ func RegisterKnowledgeRoutes(router gin.IRouter, handler *KnowledgeHandler) {
 // @Failure      503    {object}  ErrorResponse
 // @Router       /organizations/{orgId}/knowledge/sync-status [get]
 func (h *KnowledgeHandler) GetOrgSyncStatus(c *gin.Context) {
-	principal, ok := h.principal(c)
-	if !ok {
-		return
-	}
+	principal := principalFromCtx(c)
 	statuses, err := h.service.GetOrgSyncStatus(c.Request.Context(), principal, c.Param("orgId"))
 	if err != nil {
 		writeKnowledgeError(c, err)
@@ -98,10 +94,7 @@ func (h *KnowledgeHandler) GetOrgSyncStatus(c *gin.Context) {
 // @Failure      503    {object}  ErrorResponse
 // @Router       /organizations/{orgId}/knowledge/sync-status/retry [post]
 func (h *KnowledgeHandler) RetryOrgSync(c *gin.Context) {
-	principal, ok := h.principal(c)
-	if !ok {
-		return
-	}
+	principal := principalFromCtx(c)
 	var body struct {
 		NodeID string `json:"node_id" binding:"required"`
 	}
@@ -131,10 +124,7 @@ func (h *KnowledgeHandler) RetryOrgSync(c *gin.Context) {
 // @Failure      503    {object}  ErrorResponse
 // @Router       /organizations/{orgId}/knowledge [get]
 func (h *KnowledgeHandler) ListOrg(c *gin.Context) {
-	principal, ok := h.principal(c)
-	if !ok {
-		return
-	}
+	principal := principalFromCtx(c)
 	result, err := h.service.ListOrg(c.Request.Context(), principal, c.Param("orgId"), c.Query("path"))
 	if err != nil {
 		writeKnowledgeError(c, err)
@@ -160,10 +150,7 @@ func (h *KnowledgeHandler) ListOrg(c *gin.Context) {
 // @Failure      503    {object}  ErrorResponse
 // @Router       /organizations/{orgId}/knowledge [post]
 func (h *KnowledgeHandler) SaveOrg(c *gin.Context) {
-	principal, ok := h.principal(c)
-	if !ok {
-		return
-	}
+	principal := principalFromCtx(c)
 	relative := c.Query("path")
 	if relative == "" {
 		c.JSON(http.StatusBadRequest, gin.H{"error": "缺少 path 参数"})
@@ -193,10 +180,7 @@ func (h *KnowledgeHandler) SaveOrg(c *gin.Context) {
 // @Failure      503    {object}  ErrorResponse
 // @Router       /organizations/{orgId}/knowledge [delete]
 func (h *KnowledgeHandler) DeleteOrg(c *gin.Context) {
-	principal, ok := h.principal(c)
-	if !ok {
-		return
-	}
+	principal := principalFromCtx(c)
 	relative := c.Query("path")
 	if relative == "" {
 		c.JSON(http.StatusBadRequest, gin.H{"error": "缺少 path 参数"})
@@ -227,10 +211,7 @@ func (h *KnowledgeHandler) DeleteOrg(c *gin.Context) {
 // @Failure      503           {object}  ErrorResponse
 // @Router       /apps/{appId}/knowledge [get]
 func (h *KnowledgeHandler) ListApp(c *gin.Context) {
-	principal, ok := h.principal(c)
-	if !ok {
-		return
-	}
+	principal := principalFromCtx(c)
 	orgID := c.Query("org_id")
 	owner := c.Query("owner_user_id")
 	if orgID == "" || owner == "" {
@@ -264,10 +245,7 @@ func (h *KnowledgeHandler) ListApp(c *gin.Context) {
 // @Failure      503           {object}  ErrorResponse
 // @Router       /apps/{appId}/knowledge [post]
 func (h *KnowledgeHandler) SaveApp(c *gin.Context) {
-	principal, ok := h.principal(c)
-	if !ok {
-		return
-	}
+	principal := principalFromCtx(c)
 	orgID := c.Query("org_id")
 	owner := c.Query("owner_user_id")
 	relative := c.Query("path")
@@ -301,10 +279,7 @@ func (h *KnowledgeHandler) SaveApp(c *gin.Context) {
 // @Failure      503           {object}  ErrorResponse
 // @Router       /apps/{appId}/knowledge [delete]
 func (h *KnowledgeHandler) DeleteApp(c *gin.Context) {
-	principal, ok := h.principal(c)
-	if !ok {
-		return
-	}
+	principal := principalFromCtx(c)
 	orgID := c.Query("org_id")
 	owner := c.Query("owner_user_id")
 	relative := c.Query("path")
@@ -317,20 +292,6 @@ func (h *KnowledgeHandler) DeleteApp(c *gin.Context) {
 		return
 	}
 	c.Status(http.StatusNoContent)
-}
-
-func (h *KnowledgeHandler) principal(c *gin.Context) (auth.Principal, bool) {
-	token, ok := bearerToken(c.GetHeader("Authorization"))
-	if !ok {
-		c.JSON(http.StatusUnauthorized, gin.H{"error": "缺少访问令牌"})
-		return auth.Principal{}, false
-	}
-	principal, err := h.tokens.VerifyAccessToken(token)
-	if err != nil {
-		c.JSON(http.StatusUnauthorized, gin.H{"error": "访问令牌无效"})
-		return auth.Principal{}, false
-	}
-	return principal, true
 }
 
 func writeKnowledgeError(c *gin.Context, err error) {

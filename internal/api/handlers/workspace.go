@@ -15,7 +15,6 @@ import (
 // WorkspaceHandler 暴露应用工作目录的只读 HTTP 接口。
 type WorkspaceHandler struct {
 	service workspaceService
-	tokens  *auth.TokenManager
 }
 
 type workspaceService interface {
@@ -25,8 +24,8 @@ type workspaceService interface {
 }
 
 // NewWorkspaceHandler 创建 handler。
-func NewWorkspaceHandler(svc workspaceService, tokens *auth.TokenManager) *WorkspaceHandler {
-	return &WorkspaceHandler{service: svc, tokens: tokens}
+func NewWorkspaceHandler(svc workspaceService) *WorkspaceHandler {
+	return &WorkspaceHandler{service: svc}
 }
 
 // RegisterWorkspaceRoutes 注册工作目录路由。
@@ -55,10 +54,7 @@ func RegisterWorkspaceRoutes(router gin.IRouter, handler *WorkspaceHandler) {
 // @Failure      503    {object}  ErrorResponse
 // @Router       /apps/{appId}/workspace [get]
 func (h *WorkspaceHandler) List(c *gin.Context) {
-	principal, ok := h.principal(c)
-	if !ok {
-		return
-	}
+	principal := principalFromCtx(c)
 	result, err := h.service.List(c.Request.Context(), principal, c.Param("appId"), c.Query("path"))
 	if err != nil {
 		writeWorkspaceError(c, err)
@@ -85,10 +81,7 @@ func (h *WorkspaceHandler) List(c *gin.Context) {
 // @Failure      503    {object}  ErrorResponse
 // @Router       /apps/{appId}/workspace/file [get]
 func (h *WorkspaceHandler) Download(c *gin.Context) {
-	principal, ok := h.principal(c)
-	if !ok {
-		return
-	}
+	principal := principalFromCtx(c)
 	relative := c.Query("path")
 	if relative == "" {
 		c.JSON(http.StatusBadRequest, gin.H{"error": "缺少 path 参数"})
@@ -128,10 +121,7 @@ func (h *WorkspaceHandler) Download(c *gin.Context) {
 // @Failure      503    {object}  ErrorResponse
 // @Router       /apps/{appId}/workspace/archive [get]
 func (h *WorkspaceHandler) Archive(c *gin.Context) {
-	principal, ok := h.principal(c)
-	if !ok {
-		return
-	}
+	principal := principalFromCtx(c)
 	c.Header("Content-Type", "application/zip")
 	c.Status(http.StatusOK)
 	if err := h.service.Archive(c.Request.Context(), principal,
@@ -140,20 +130,6 @@ func (h *WorkspaceHandler) Archive(c *gin.Context) {
 		_ = err
 		return
 	}
-}
-
-func (h *WorkspaceHandler) principal(c *gin.Context) (auth.Principal, bool) {
-	token, ok := bearerToken(c.GetHeader("Authorization"))
-	if !ok {
-		c.JSON(http.StatusUnauthorized, gin.H{"error": "缺少访问令牌"})
-		return auth.Principal{}, false
-	}
-	principal, err := h.tokens.VerifyAccessToken(token)
-	if err != nil {
-		c.JSON(http.StatusUnauthorized, gin.H{"error": "访问令牌无效"})
-		return auth.Principal{}, false
-	}
-	return principal, true
 }
 
 func writeWorkspaceError(c *gin.Context, err error) {

@@ -24,12 +24,11 @@ type rechargeService interface {
 // RechargeHandler 把组织充值与余额查询接口暴露给前端。
 type RechargeHandler struct {
 	service rechargeService
-	tokens  *auth.TokenManager
 }
 
 // NewRechargeHandler 创建 handler。
-func NewRechargeHandler(svc rechargeService, tokens *auth.TokenManager) *RechargeHandler {
-	return &RechargeHandler{service: svc, tokens: tokens}
+func NewRechargeHandler(svc rechargeService) *RechargeHandler {
+	return &RechargeHandler{service: svc}
 }
 
 // RegisterRechargeRoutes 注册充值相关路由。
@@ -59,10 +58,7 @@ func RegisterRechargeRoutes(router gin.IRouter, handler *RechargeHandler) {
 // @Failure      502    {object}  ErrorResponse
 // @Router       /organizations/{orgId}/recharge [post]
 func (h *RechargeHandler) Create(c *gin.Context) {
-	principal, ok := h.principal(c)
-	if !ok {
-		return
-	}
+	principal := principalFromCtx(c)
 	var req RechargeRequest
 	if err := c.ShouldBindJSON(&req); err != nil {
 		writeBindError(c, err)
@@ -93,10 +89,7 @@ func (h *RechargeHandler) Create(c *gin.Context) {
 // @Failure      502     {object}  ErrorResponse
 // @Router       /organizations/{orgId}/recharges [get]
 func (h *RechargeHandler) List(c *gin.Context) {
-	principal, ok := h.principal(c)
-	if !ok {
-		return
-	}
+	principal := principalFromCtx(c)
 	limit := queryInt32(c, "limit", 50)
 	offset := queryInt32(c, "offset", 0)
 	results, err := h.service.ListRecharges(c.Request.Context(), principal, c.Param("orgId"), limit, offset)
@@ -122,10 +115,7 @@ func (h *RechargeHandler) List(c *gin.Context) {
 // @Failure      502    {object}  ErrorResponse
 // @Router       /organizations/{orgId}/balance [get]
 func (h *RechargeHandler) Balance(c *gin.Context) {
-	principal, ok := h.principal(c)
-	if !ok {
-		return
-	}
+	principal := principalFromCtx(c)
 	view, err := h.service.GetBalance(c.Request.Context(), principal, c.Param("orgId"))
 	if err != nil {
 		writeRechargeError(c, err)
@@ -147,30 +137,13 @@ func (h *RechargeHandler) Balance(c *gin.Context) {
 // @Failure      502  {object}  ErrorResponse
 // @Router       /billing/status [get]
 func (h *RechargeHandler) BillingStatus(c *gin.Context) {
-	principal, ok := h.principal(c)
-	if !ok {
-		return
-	}
+	principal := principalFromCtx(c)
 	view, err := h.service.GetBillingStatus(c.Request.Context(), principal)
 	if err != nil {
 		writeRechargeError(c, err)
 		return
 	}
 	c.JSON(http.StatusOK, gin.H{"billing_status": view})
-}
-
-func (h *RechargeHandler) principal(c *gin.Context) (auth.Principal, bool) {
-	token, ok := bearerToken(c.GetHeader("Authorization"))
-	if !ok {
-		c.JSON(http.StatusUnauthorized, gin.H{"error": "缺少访问令牌"})
-		return auth.Principal{}, false
-	}
-	principal, err := h.tokens.VerifyAccessToken(token)
-	if err != nil {
-		c.JSON(http.StatusUnauthorized, gin.H{"error": "访问令牌无效"})
-		return auth.Principal{}, false
-	}
-	return principal, true
 }
 
 func writeRechargeError(c *gin.Context, err error) {

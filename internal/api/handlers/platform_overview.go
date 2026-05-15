@@ -14,7 +14,6 @@ import (
 // PlatformOverviewHandler 暴露 /platform/overview。
 type PlatformOverviewHandler struct {
 	service platformOverviewService
-	tokens  *auth.TokenManager
 }
 
 type platformOverviewService interface {
@@ -22,8 +21,8 @@ type platformOverviewService interface {
 }
 
 // NewPlatformOverviewHandler 创建 handler。
-func NewPlatformOverviewHandler(svc platformOverviewService, tokens *auth.TokenManager) *PlatformOverviewHandler {
-	return &PlatformOverviewHandler{service: svc, tokens: tokens}
+func NewPlatformOverviewHandler(svc platformOverviewService) *PlatformOverviewHandler {
+	return &PlatformOverviewHandler{service: svc}
 }
 
 // RegisterPlatformOverviewRoutes 注册路由。
@@ -44,16 +43,7 @@ func RegisterPlatformOverviewRoutes(router gin.IRouter, handler *PlatformOvervie
 // @Failure      500  {object}  ErrorResponse
 // @Router       /platform/overview [get]
 func (h *PlatformOverviewHandler) Get(c *gin.Context) {
-	token, ok := bearerToken(c.GetHeader("Authorization"))
-	if !ok {
-		c.JSON(http.StatusUnauthorized, gin.H{"error": "缺少访问令牌"})
-		return
-	}
-	principal, err := h.tokens.VerifyAccessToken(token)
-	if err != nil {
-		c.JSON(http.StatusUnauthorized, gin.H{"error": "访问令牌无效"})
-		return
-	}
+	principal := principalFromCtx(c)
 	view, err := h.service.Get(c.Request.Context(), principal)
 	if err != nil {
 		switch {

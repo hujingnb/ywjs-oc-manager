@@ -14,7 +14,6 @@ import (
 // ChannelsHandler 处理应用渠道相关 HTTP 路由。
 type ChannelsHandler struct {
 	service channelService
-	tokens  *auth.TokenManager
 }
 
 type channelService interface {
@@ -24,8 +23,8 @@ type channelService interface {
 }
 
 // NewChannelsHandler 创建 channel handler。
-func NewChannelsHandler(svc channelService, tokens *auth.TokenManager) *ChannelsHandler {
-	return &ChannelsHandler{service: svc, tokens: tokens}
+func NewChannelsHandler(svc channelService) *ChannelsHandler {
+	return &ChannelsHandler{service: svc}
 }
 
 // RegisterChannelRoutes 注册渠道路由。
@@ -53,10 +52,7 @@ func RegisterChannelRoutes(router gin.IRouter, handler *ChannelsHandler) {
 // @Failure      503         {object}  ErrorResponse
 // @Router       /apps/{appId}/channels/{channelType}/auth [post]
 func (h *ChannelsHandler) BeginAuth(c *gin.Context) {
-	principal, ok := h.principal(c)
-	if !ok {
-		return
-	}
+	principal := principalFromCtx(c)
 	result, err := h.service.BeginAuth(c.Request.Context(), principal, c.Param("appId"), c.Param("channelType"))
 	if err != nil {
 		writeChannelError(c, err)
@@ -82,10 +78,7 @@ func (h *ChannelsHandler) BeginAuth(c *gin.Context) {
 // @Failure      503         {object}  ErrorResponse
 // @Router       /apps/{appId}/channels/{channelType}/auth [get]
 func (h *ChannelsHandler) PollAuth(c *gin.Context) {
-	principal, ok := h.principal(c)
-	if !ok {
-		return
-	}
+	principal := principalFromCtx(c)
 	result, err := h.service.PollAuth(c.Request.Context(), principal, c.Param("appId"), c.Param("channelType"))
 	if err != nil {
 		writeChannelError(c, err)
@@ -111,29 +104,12 @@ func (h *ChannelsHandler) PollAuth(c *gin.Context) {
 // @Failure      503         {object}  ErrorResponse
 // @Router       /apps/{appId}/channels/{channelType}/unbind [post]
 func (h *ChannelsHandler) Unbind(c *gin.Context) {
-	principal, ok := h.principal(c)
-	if !ok {
-		return
-	}
+	principal := principalFromCtx(c)
 	if err := h.service.Unbind(c.Request.Context(), principal, c.Param("appId"), c.Param("channelType")); err != nil {
 		writeChannelError(c, err)
 		return
 	}
 	c.Status(http.StatusNoContent)
-}
-
-func (h *ChannelsHandler) principal(c *gin.Context) (auth.Principal, bool) {
-	token, ok := bearerToken(c.GetHeader("Authorization"))
-	if !ok {
-		c.JSON(http.StatusUnauthorized, gin.H{"error": "缺少访问令牌"})
-		return auth.Principal{}, false
-	}
-	principal, err := h.tokens.VerifyAccessToken(token)
-	if err != nil {
-		c.JSON(http.StatusUnauthorized, gin.H{"error": "访问令牌无效"})
-		return auth.Principal{}, false
-	}
-	return principal, true
 }
 
 func writeChannelError(c *gin.Context, err error) {

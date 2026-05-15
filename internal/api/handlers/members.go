@@ -18,7 +18,6 @@ import (
 type MembersHandler struct {
 	service    memberService
 	onboarding onboardingService
-	tokens     *auth.TokenManager
 	// jobNotifier 用于在 DeleteMember 联动 app_delete 时即时入队 Redis；
 	// 缺失时 service 的删除依然会写库，仅入队步骤被跳过。
 	jobNotifier service.JobNotifier
@@ -40,8 +39,8 @@ type onboardingService interface {
 }
 
 // NewMembersHandler 创建成员 handler。
-func NewMembersHandler(service memberService, tokens *auth.TokenManager) *MembersHandler {
-	return &MembersHandler{service: service, tokens: tokens}
+func NewMembersHandler(service memberService) *MembersHandler {
+	return &MembersHandler{service: service}
 }
 
 // SetOnboardingService 给已存在的 handler 注入 onboarding 能力，便于按需启用。
@@ -94,10 +93,7 @@ func RegisterMemberRoutes(router gin.IRouter, handler *MembersHandler) {
 // @Failure      500    {object}  ErrorResponse
 // @Router       /organizations/{orgId}/members [post]
 func (h *MembersHandler) Create(c *gin.Context) {
-	principal, ok := h.principal(c)
-	if !ok {
-		return
-	}
+	principal := principalFromCtx(c)
 	var req CreateMemberRequest
 	if err := c.ShouldBindJSON(&req); err != nil {
 		writeBindError(c, err)
@@ -133,10 +129,7 @@ func (h *MembersHandler) Create(c *gin.Context) {
 // @Failure      500     {object}  ErrorResponse
 // @Router       /organizations/{orgId}/members [get]
 func (h *MembersHandler) List(c *gin.Context) {
-	principal, ok := h.principal(c)
-	if !ok {
-		return
-	}
+	principal := principalFromCtx(c)
 	limit := queryInt32(c, "limit", 0)
 	offset := queryInt32(c, "offset", 0)
 	results, err := h.service.ListMembers(c.Request.Context(), principal, c.Param("orgId"), limit, offset)
@@ -162,10 +155,7 @@ func (h *MembersHandler) List(c *gin.Context) {
 // @Failure      500     {object}  ErrorResponse
 // @Router       /members/{userId} [get]
 func (h *MembersHandler) Get(c *gin.Context) {
-	principal, ok := h.principal(c)
-	if !ok {
-		return
-	}
+	principal := principalFromCtx(c)
 	result, err := h.service.GetMember(c.Request.Context(), principal, c.Param("userId"))
 	if err != nil {
 		writeMemberError(c, err)
@@ -192,10 +182,7 @@ func (h *MembersHandler) Get(c *gin.Context) {
 // @Failure      500     {object}  ErrorResponse
 // @Router       /members/{userId} [patch]
 func (h *MembersHandler) Update(c *gin.Context) {
-	principal, ok := h.principal(c)
-	if !ok {
-		return
-	}
+	principal := principalFromCtx(c)
 	var req UpdateMemberRequest
 	if err := c.ShouldBindJSON(&req); err != nil {
 		writeBindError(c, err)
@@ -249,10 +236,7 @@ func (h *MembersHandler) Enable(c *gin.Context) {
 }
 
 func (h *MembersHandler) setStatus(c *gin.Context, status string) {
-	principal, ok := h.principal(c)
-	if !ok {
-		return
-	}
+	principal := principalFromCtx(c)
 	result, err := h.service.SetMemberStatus(c.Request.Context(), principal, c.Param("userId"), status)
 	if err != nil {
 		writeMemberError(c, err)
@@ -285,10 +269,7 @@ func (h *MembersHandler) Onboard(c *gin.Context) {
 		c.JSON(http.StatusServiceUnavailable, gin.H{"error": "成员联动应用流程暂未启用"})
 		return
 	}
-	principal, ok := h.principal(c)
-	if !ok {
-		return
-	}
+	principal := principalFromCtx(c)
 	var req OnboardMemberRequest
 	if err := c.ShouldBindJSON(&req); err != nil {
 		writeBindError(c, err)
@@ -337,10 +318,7 @@ func (h *MembersHandler) CreateAppForMember(c *gin.Context) {
 		c.JSON(http.StatusServiceUnavailable, gin.H{"error": "成员实例创建流程暂未启用"})
 		return
 	}
-	principal, ok := h.principal(c)
-	if !ok {
-		return
-	}
+	principal := principalFromCtx(c)
 	var req CreateMemberAppRequest
 	if err := c.ShouldBindJSON(&req); err != nil {
 		writeBindError(c, err)
@@ -379,10 +357,7 @@ func (h *MembersHandler) CreateAppForMember(c *gin.Context) {
 // @Failure      500     {object}  ErrorResponse
 // @Router       /members/{userId}/password [post]
 func (h *MembersHandler) ResetPassword(c *gin.Context) {
-	principal, ok := h.principal(c)
-	if !ok {
-		return
-	}
+	principal := principalFromCtx(c)
 	var req ResetPasswordRequest
 	if err := c.ShouldBindJSON(&req); err != nil {
 		writeBindError(c, err)
@@ -410,29 +385,12 @@ func (h *MembersHandler) ResetPassword(c *gin.Context) {
 // @Failure      500     {object}  ErrorResponse
 // @Router       /members/{userId} [delete]
 func (h *MembersHandler) Delete(c *gin.Context) {
-	principal, ok := h.principal(c)
-	if !ok {
-		return
-	}
+	principal := principalFromCtx(c)
 	if err := h.service.DeleteMember(c.Request.Context(), principal, c.Param("userId"), h.jobNotifier); err != nil {
 		writeMemberError(c, err)
 		return
 	}
 	c.Status(http.StatusNoContent)
-}
-
-func (h *MembersHandler) principal(c *gin.Context) (auth.Principal, bool) {
-	token, ok := bearerToken(c.GetHeader("Authorization"))
-	if !ok {
-		c.JSON(http.StatusUnauthorized, gin.H{"error": "缺少访问令牌"})
-		return auth.Principal{}, false
-	}
-	principal, err := h.tokens.VerifyAccessToken(token)
-	if err != nil {
-		c.JSON(http.StatusUnauthorized, gin.H{"error": "访问令牌无效"})
-		return auth.Principal{}, false
-	}
-	return principal, true
 }
 
 func writeMemberError(c *gin.Context, err error) {
