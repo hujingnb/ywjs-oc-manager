@@ -7,11 +7,14 @@ ARG GO_VERSION=1.25
 # 取 3.22 作为 builder 与 final 共用的 alpine 主版本, 稳定且 docker.io 上有对应镜像。
 ARG ALPINE_VERSION=3.22
 
-# 公网基础镜像统一走 docker.1ms.run 的 Docker Hub 镜像加速,
-# 国内构建机直连 docker.io 经常超时,且此处镜像可信。
-ARG DOCKER_HUB_MIRROR=docker.1ms.run/library
+# 公网基础镜像统一走 aliyun 私有 ACR 的 ywjs_public 命名空间, 该命名空间内
+# 已预先镜像同步好下方使用的全部 Docker Hub 原始镜像; 国内构建机直连 docker.io
+# 经常超时, 且 docker.1ms.run 等第三方加速近期不稳定。
+# 切回公网原始仓库可 --build-arg DOCKER_HUB_MIRROR=docker.io/library。
+ARG DOCKER_HUB_MIRROR=crpi-nu3ibz4f07feyghi.cn-beijing.personal.cr.aliyuncs.com/ywjs_public
 
 # ---- 构建阶段 -------------------------------------------------------------
+# 原 docker.io/library/golang:1.25-alpine3.22 → 现 crpi-nu3ibz4f07feyghi.cn-beijing.personal.cr.aliyuncs.com/ywjs_public/golang:1.25-alpine3.22
 FROM ${DOCKER_HUB_MIRROR}/golang:${GO_VERSION}-alpine${ALPINE_VERSION} AS builder
 
 # git: 部分 Go 模块依赖通过 git 协议拉取
@@ -46,6 +49,7 @@ RUN go build -trimpath -ldflags='-s -w' -o /out/oc-manager ./cmd/server \
  && go build -trimpath -ldflags='-s -w' -o /out/seed-admin ./cmd/seed-admin
 
 # ---- 运行阶段 -------------------------------------------------------------
+# 原 docker.io/library/alpine:3.22 → 现 crpi-nu3ibz4f07feyghi.cn-beijing.personal.cr.aliyuncs.com/ywjs_public/alpine:3.22
 FROM ${DOCKER_HUB_MIRROR}/alpine:${ALPINE_VERSION}
 
 # ca-certificates: manager-api 调用 new-api / agent HTTPS 端点必需

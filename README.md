@@ -167,14 +167,28 @@ docker build                                -t <registry>/hermes-runtime:<tag>  
 
 四个 Dockerfile 都已经默认走国内源，本地或 CI 环境无需额外配置：
 
-- 公网基础镜像（`golang` / `alpine` / `node` / `nginx` / `python`）通过 `ARG DOCKER_HUB_MIRROR=docker.1ms.run/library` 走 Docker Hub 镜像加速
+- 公网基础镜像（`golang` / `alpine` / `node` / `nginx` / `python`）通过 `ARG DOCKER_HUB_MIRROR=crpi-nu3ibz4f07feyghi.cn-beijing.personal.cr.aliyuncs.com/ywjs_public` 走 aliyun 私有 ACR 内已预先镜像同步好的副本
 - Go 模块默认 `GOPROXY=https://goproxy.cn,direct` + `GOSUMDB=off`（与 dev 容器一致）
 - npm 默认 `NPM_CONFIG_REGISTRY=https://registry.npmmirror.com`
 - `hermes-runtime` 的 Debian apt 源默认通过 `ARG DEBIAN_MIRROR_HOST=mirrors.aliyun.com` 替换 `deb.debian.org` / `security.debian.org`
 
 注：`hermes-runtime` 镜像内 `install.sh` 仍会去 hermes-agent.nousresearch.com / GitHub 拉源码与 Node tarball，那部分走第三方 CDN，无法整体国内化。
 
-需要切回官方源或换专网内代理时，对应 build-arg 都可覆盖：
+公网基础镜像的同步清单（推送到 aliyun ywjs_public 命名空间，所有 Docker Hub 原 namespace 折平）：
+
+| 原始公网镜像 | aliyun ywjs_public 路径 | 使用方 |
+|---|---|---|
+| `docker.io/library/golang:1.25-alpine3.22` | `crpi-nu3ibz4f07feyghi.cn-beijing.personal.cr.aliyuncs.com/ywjs_public/golang:1.25-alpine3.22` | cmd/server、runtime/agent Dockerfile builder |
+| `docker.io/library/alpine:3.22` | `crpi-nu3ibz4f07feyghi.cn-beijing.personal.cr.aliyuncs.com/ywjs_public/alpine:3.22` | cmd/server、runtime/agent Dockerfile final |
+| `docker.io/library/node:22-alpine` | `crpi-nu3ibz4f07feyghi.cn-beijing.personal.cr.aliyuncs.com/ywjs_public/node:22-alpine` | web Dockerfile builder |
+| `docker.io/library/nginx:1.27-alpine` | `crpi-nu3ibz4f07feyghi.cn-beijing.personal.cr.aliyuncs.com/ywjs_public/nginx:1.27-alpine` | web Dockerfile final + manager-nginx |
+| `docker.io/library/python:3.13-slim-bookworm` | `crpi-nu3ibz4f07feyghi.cn-beijing.personal.cr.aliyuncs.com/ywjs_public/python:3.13-slim-bookworm` | runtime/hermes Dockerfile |
+| `docker.io/library/postgres:17-alpine` | `crpi-nu3ibz4f07feyghi.cn-beijing.personal.cr.aliyuncs.com/ywjs_public/postgres:17-alpine` | manager-postgres + new-api-postgres |
+| `docker.io/library/redis:7` | `crpi-nu3ibz4f07feyghi.cn-beijing.personal.cr.aliyuncs.com/ywjs_public/redis:7` | manager-redis + new-api-redis |
+| `docker.io/calciumion/new-api:<tag>` | `crpi-nu3ibz4f07feyghi.cn-beijing.personal.cr.aliyuncs.com/ywjs_public/new-api:<tag>` | new-api 服务 |
+| `docker.io/ollama/ollama:<tag>` | `crpi-nu3ibz4f07feyghi.cn-beijing.personal.cr.aliyuncs.com/ywjs_public/ollama:<tag>` | ollama 服务 |
+
+需要切回官方源时，对应 build-arg 都可覆盖：
 
 ```bash
 docker build \
@@ -187,6 +201,8 @@ docker build \
   --build-arg NPM_REGISTRY=https://registry.npmjs.org \
   -f web/Dockerfile -t <registry>/oc-manager-web:<tag> web
 ```
+
+注意：`calciumion/new-api` 与 `ollama/ollama` 不在 Docker Hub `library/` 下，切回官方源时需要手工指定完整路径（`docker.io/calciumion/new-api:<tag>` 等），`DOCKER_HUB_MIRROR=docker.io/library` 的覆盖只适用于 `library/` 命名空间的基础镜像。
 
 推送到镜像仓库后，写入对应运行包 `.env`：把 4 个私有镜像的 `:CHANGE_ME_TAG` 替换成具体版本 tag（如 `:v1.0.0`），更严格的环境可进一步固定到 `@sha256:` digest。**生产禁止使用 `:latest`、分支 tag 或版本族 tag**。
 

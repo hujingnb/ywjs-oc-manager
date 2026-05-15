@@ -3,9 +3,11 @@
 # 容器启动即 ready,不允许运行时再装任何依赖。
 #
 # 注意: hermes install.sh 会去 hermes-agent.nousresearch.com / GitHub 拉源码与 Node tarball,
-# 这部分走第三方 CDN, 无法整体国内化; 此处仅把基础镜像走 docker.1ms.run 加速 Docker Hub 拉取。
+# 这部分走第三方 CDN, 无法整体国内化; 此处仅把基础镜像走 aliyun ywjs_public 私有 ACR 加速。
+# 切回公网原始仓库可 --build-arg DOCKER_HUB_MIRROR=docker.io/library。
 
-ARG DOCKER_HUB_MIRROR=docker.1ms.run/library
+ARG DOCKER_HUB_MIRROR=crpi-nu3ibz4f07feyghi.cn-beijing.personal.cr.aliyuncs.com/ywjs_public
+# 原 docker.io/library/python:3.13-slim-bookworm → 现 crpi-nu3ibz4f07feyghi.cn-beijing.personal.cr.aliyuncs.com/ywjs_public/python:3.13-slim-bookworm
 FROM ${DOCKER_HUB_MIRROR}/python:3.13-slim-bookworm
 
 ENV PYTHONUNBUFFERED=1 \

@@ -38,7 +38,7 @@ docker compose up -d
 
 | 变量 | 说明 |
 |------|------|
-| `OLLAMA_IMAGE` | Ollama 镜像，走 `docker.1ms.run/ollama/ollama` 镜像加速；使用具体 tag 或 `@sha256:` digest（禁用 `latest`），避免重启时隐式升级 |
+| `OLLAMA_IMAGE` | Ollama 镜像，aliyun ywjs_public 私有 ACR 镜像（原 `docker.io/ollama/ollama`）；使用具体 tag 或 `@sha256:` digest（禁用 `latest`），避免重启时隐式升级 |
 | `OLLAMA_PORT` | 对外服务端口，默认 `11434` |
 | `OLLAMA_ORIGINS` | 允许访问的来源，填写 new-api 访问地址，例如 `https://new-api.example.com` |
 | `OLLAMA_HOST` | 容器内监听地址，生产保持 `0.0.0.0:11434` |
