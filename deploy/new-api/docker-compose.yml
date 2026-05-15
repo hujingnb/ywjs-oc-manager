@@ -16,6 +16,7 @@ services:
       POSTGRES_USER: ${NEWAPI_POSTGRES_USER}
       POSTGRES_PASSWORD: ${NEWAPI_POSTGRES_PASSWORD}
       POSTGRES_DB: ${NEWAPI_POSTGRES_DB}
+      PGDATA: /var/lib/postgresql/data/pgdata
       TZ: ${TZ:-Asia/Shanghai}
     volumes:
       - ./data/postgres:/var/lib/postgresql/data
@@ -38,7 +39,7 @@ services:
     volumes:
       - ./data/redis:/data
     healthcheck:
-      test: ["CMD", "redis-cli", "ping"]
+      test: ["CMD-SHELL", "redis-cli -a $${REDISCLI_AUTH} ping | grep -q PONG"]
       interval: 10s
       timeout: 5s
       retries: 20

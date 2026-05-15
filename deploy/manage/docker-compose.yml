@@ -16,6 +16,7 @@ services:
       POSTGRES_USER: ${MANAGER_POSTGRES_USER}
       POSTGRES_PASSWORD: ${MANAGER_POSTGRES_PASSWORD}
       POSTGRES_DB: ${MANAGER_POSTGRES_DB}
+      PGDATA: /var/lib/postgresql/data/pgdata
       TZ: ${TZ:-Asia/Shanghai}
     volumes:
       - ./data/postgres:/var/lib/postgresql/data
