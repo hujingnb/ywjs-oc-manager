@@ -23,7 +23,7 @@ docker compose up -d
 
 | 变量 | 说明 |
 |------|------|
-| `OC_RUNTIME_AGENT_IMAGE` | runtime-agent 镜像，必须固定 `@sha256:` digest |
+| `OC_RUNTIME_AGENT_IMAGE` | runtime-agent 镜像，aliyun ACR 私有仓库，使用具体版本 tag 或 `@sha256:` digest（禁用 `latest`） |
 | `RUNTIME_AGENT_GRPC_PORT` | gRPC 控制面端口，默认 `7001` |
 | `RUNTIME_AGENT_HTTP_PORT` | HTTP 文件/健康检查端口，默认 `7002` |
 

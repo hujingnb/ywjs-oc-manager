@@ -23,9 +23,9 @@ docker compose up -d
 
 | 变量 | 说明 |
 |------|------|
-| `NEWAPI_IMAGE` | new-api 镜像，必须固定 `@sha256:` digest |
-| `NEWAPI_POSTGRES_IMAGE` | PostgreSQL 镜像，固定 digest |
-| `NEWAPI_REDIS_IMAGE` | Redis 镜像，固定 digest |
+| `NEWAPI_IMAGE` | new-api 镜像，走 `docker.1ms.run/calciumion/new-api` 镜像加速；使用具体 tag 或 `@sha256:` digest（禁用 `latest`） |
+| `NEWAPI_POSTGRES_IMAGE` | PostgreSQL 镜像，走 `docker.1ms.run/library/` 镜像加速；默认 `postgres:17-alpine` |
+| `NEWAPI_REDIS_IMAGE` | Redis 镜像，走 `docker.1ms.run/library/` 镜像加速；默认 `redis:7` |
 | `NEWAPI_PORT` | new-api 对外监听端口，默认 `3000` |
 | `NEWAPI_NODE_NAME` | 节点标识，按生产节点命名，默认 `new-api-prod-1` |
 | `NEWAPI_STREAMING_TIMEOUT` | 流式响应超时（秒），默认 `600` |

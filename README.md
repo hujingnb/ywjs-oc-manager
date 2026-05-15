@@ -188,11 +188,20 @@ docker build \
   -f web/Dockerfile -t <registry>/oc-manager-web:<tag> web
 ```
 
-推送到镜像仓库后，**强烈建议把镜像引用固定为 `@sha256:` digest**，再写入对应运行包 `.env`：
+推送到镜像仓库后，写入对应运行包 `.env`：把 4 个私有镜像的 `:CHANGE_ME_TAG` 替换成具体版本 tag（如 `:v1.0.0`），更严格的环境可进一步固定到 `@sha256:` digest。**生产禁止使用 `:latest`、分支 tag 或版本族 tag**。
 
 - `deploy/manage/.env` → `OCM_MANAGER_IMAGE`、`OCM_WEB_IMAGE`、`MANAGER_POSTGRES_IMAGE`、`MANAGER_REDIS_IMAGE`、`MANAGER_NGINX_IMAGE`
+- `deploy/manage/config/manager.yaml` → `hermes.runtime_image`（manager 把该镜像推送到 agent 节点）
 - `deploy/runtime-agent/.env` → `OC_RUNTIME_AGENT_IMAGE`
-- `hermes-runtime` 镜像由 manager 推送到 agent，不进入任何 `.env`
+
+线上私有镜像仓库为 aliyun ACR：
+
+```
+crpi-nu3ibz4f07feyghi.cn-beijing.personal.cr.aliyuncs.com/ywjs_app/oc-manager-api
+crpi-nu3ibz4f07feyghi.cn-beijing.personal.cr.aliyuncs.com/ywjs_app/oc-manager-web
+crpi-nu3ibz4f07feyghi.cn-beijing.personal.cr.aliyuncs.com/ywjs_app/oc-manager-agent
+crpi-nu3ibz4f07feyghi.cn-beijing.personal.cr.aliyuncs.com/ywjs_app/oc-manager-hermes
+```
 
 各字段含义见 [deploy/README.md](./deploy/README.md) 与子运行包 README。
 

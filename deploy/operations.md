@@ -138,10 +138,11 @@ docker compose up -d
 
 ### 4.2 镜像 tag 约定
 
-CI 发布时打 SemVer tag（如 `:2.1.0`），仅作为版本识别标签。
-生产 `.env` 中的镜像引用**必须固定到内容寻址的 `@sha256:<digest>`**，
-确保重启、扩容和回滚时拉取到完全一致的镜像内容。
-不得在生产环境使用 `:latest`、分支 tag 或版本族 tag 作为部署值。
+CI 发布时打 SemVer tag（如 `:2.1.0`），作为版本识别标签写入生产 `.env`。
+**生产禁止使用 `:latest`、分支 tag 或版本族 tag**（例如 `:2`、`:2.1`、`:stable`），
+因为它们会随上游推送悄悄变更，破坏重启 / 扩容 / 回滚的可复现性。
+进一步推荐把镜像引用固定到内容寻址的 `@sha256:<digest>`，
+但前提是你的 CI 在发布每次新版本时同步记录 digest 并写入 `.env`。
 
 ### 4.3 升级前检查
 
@@ -158,7 +159,7 @@ CI 发布时打 SemVer tag（如 `:2.1.0`），仅作为版本识别标签。
 
 ```sh
 cd deploy/manage
-# 在 .env 中把 OCM_MANAGER_IMAGE / OCM_WEB_IMAGE 更新到新版 @sha256:<digest>
+# 在 .env 中把 OCM_MANAGER_IMAGE / OCM_WEB_IMAGE 更新到新版本 tag 或 @sha256:<digest>
 ${EDITOR:-vi} .env
 docker compose pull manager-api manager-web
 docker compose run --rm manager-api migrate up
@@ -174,7 +175,7 @@ docker compose up -d manager-api manager-web manager-nginx
 ```sh
 # 每台 Runtime Node
 cd deploy/runtime-agent
-# 在 .env 中把 OC_RUNTIME_AGENT_IMAGE 更新到新版 @sha256:<digest>
+# 在 .env 中把 OC_RUNTIME_AGENT_IMAGE 更新到新版本 tag 或 @sha256:<digest>
 ${EDITOR:-vi} .env
 docker compose pull oc-runtime-agent
 docker compose up -d oc-runtime-agent

@@ -29,11 +29,11 @@ docker compose up -d
 
 | 变量 | 说明 |
 |------|------|
-| `OCM_MANAGER_IMAGE` | manager-api 生产镜像，必须固定 `@sha256:` digest |
-| `OCM_WEB_IMAGE` | manager-web 生产镜像，必须固定 `@sha256:` digest |
-| `MANAGER_POSTGRES_IMAGE` | PostgreSQL 镜像，固定 digest |
-| `MANAGER_REDIS_IMAGE` | Redis 镜像，固定 digest |
-| `MANAGER_NGINX_IMAGE` | nginx 镜像，固定 digest |
+| `OCM_MANAGER_IMAGE` | manager-api 生产镜像，aliyun ACR 私有仓库，使用具体版本 tag 或 `@sha256:` digest（禁用 `latest`） |
+| `OCM_WEB_IMAGE` | manager-web 生产镜像，aliyun ACR 私有仓库，使用具体版本 tag 或 `@sha256:` digest（禁用 `latest`） |
+| `MANAGER_POSTGRES_IMAGE` | PostgreSQL 镜像，走 `docker.1ms.run/library/` 镜像加速；默认 `postgres:17-alpine` |
+| `MANAGER_REDIS_IMAGE` | Redis 镜像，走 `docker.1ms.run/library/` 镜像加速；默认 `redis:7` |
+| `MANAGER_NGINX_IMAGE` | nginx 镜像，走 `docker.1ms.run/library/` 镜像加速；默认 `nginx:1.27-alpine` |
 | `MANAGER_HTTP_PORT` | nginx 对外 HTTP 端口，默认 `80` |
 | `MANAGER_HTTPS_PORT` | nginx 对外 HTTPS 端口，默认 `443` |
 | `MANAGER_POSTGRES_PASSWORD` | PostgreSQL 容器原始密码 |
