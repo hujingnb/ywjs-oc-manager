@@ -136,6 +136,84 @@ openssl rand -base64 32
 
 完整 Make 目标速查与常见问题排查见 [docs/local-development.md](./docs/local-development.md)。
 
+## 构建生产镜像
+
+线上部署所需的四个镜像各自有独立 Dockerfile：
+
+| 镜像 | Dockerfile | 构建上下文 | 引用位置 | 说明 |
+|---|---|---|---|---|
+| `manager-api` | [`cmd/server/Dockerfile`](./cmd/server/Dockerfile) | 仓库根目录 | `deploy/manage/.env` 的 `OCM_MANAGER_IMAGE` | 多阶段 Go 构建，内置 `oc-manager`、`migrate`、`seed-admin` 三个二进制 |
+| `manager-web` | [`web/Dockerfile`](./web/Dockerfile) | `web/` | `deploy/manage/.env` 的 `OCM_WEB_IMAGE` | Node 22 构建 vite 产物 + nginx:alpine 提供静态资源；外层 manager-nginx 完成 TLS 与 `/api` 反代 |
+| `oc-runtime-agent` | [`runtime/agent/Dockerfile`](./runtime/agent/Dockerfile) | 仓库根目录 | `deploy/runtime-agent/.env` 的 `OC_RUNTIME_AGENT_IMAGE` | 多阶段 Go 构建，最终镜像仅含静态二进制 + ca-certificates + tzdata |
+| `hermes-runtime` | [`runtime/hermes/Dockerfile`](./runtime/hermes/Dockerfile) | `runtime/hermes/` | manager 通过 imagesync 同步到各 Runtime Node | 应用容器运行时镜像，已在仓库内沉淀完整产线 Dockerfile |
+
+### 构建命令
+
+将 `<registry>/<tag>` 替换为实际镜像仓库与标签：
+
+```bash
+# manager-api（构建上下文必须为仓库根目录，Dockerfile 通过 -f 指定）
+docker build -f cmd/server/Dockerfile      -t <registry>/oc-manager:<tag>       .
+
+# manager-web（构建上下文为 web/ 子目录）
+docker build -f web/Dockerfile             -t <registry>/oc-manager-web:<tag>   web
+
+# oc-runtime-agent（构建上下文必须为仓库根目录）
+docker build -f runtime/agent/Dockerfile   -t <registry>/oc-runtime-agent:<tag> .
+
+# hermes-runtime（构建上下文为 runtime/hermes/，本地仍可用 `make build-hermes-runtime`）
+docker build                                -t <registry>/hermes-runtime:<tag>   runtime/hermes
+```
+
+四个 Dockerfile 都已经默认走国内源，本地或 CI 环境无需额外配置：
+
+- 公网基础镜像（`golang` / `alpine` / `node` / `nginx` / `python`）通过 `ARG DOCKER_HUB_MIRROR=docker.1ms.run/library` 走 Docker Hub 镜像加速
+- Go 模块默认 `GOPROXY=https://goproxy.cn,direct` + `GOSUMDB=off`（与 dev 容器一致）
+- npm 默认 `NPM_CONFIG_REGISTRY=https://registry.npmmirror.com`
+- `hermes-runtime` 的 Debian apt 源默认通过 `ARG DEBIAN_MIRROR_HOST=mirrors.aliyun.com` 替换 `deb.debian.org` / `security.debian.org`
+
+注：`hermes-runtime` 镜像内 `install.sh` 仍会去 hermes-agent.nousresearch.com / GitHub 拉源码与 Node tarball，那部分走第三方 CDN，无法整体国内化。
+
+需要切回官方源或换专网内代理时，对应 build-arg 都可覆盖：
+
+```bash
+docker build \
+  --build-arg DOCKER_HUB_MIRROR=docker.io/library \
+  --build-arg GOPROXY=https://proxy.golang.org,direct \
+  -f cmd/server/Dockerfile -t <registry>/oc-manager:<tag> .
+
+docker build \
+  --build-arg DOCKER_HUB_MIRROR=docker.io/library \
+  --build-arg NPM_REGISTRY=https://registry.npmjs.org \
+  -f web/Dockerfile -t <registry>/oc-manager-web:<tag> web
+```
+
+推送到镜像仓库后，**强烈建议把镜像引用固定为 `@sha256:` digest**，再写入对应运行包 `.env`：
+
+- `deploy/manage/.env` → `OCM_MANAGER_IMAGE`、`OCM_WEB_IMAGE`、`MANAGER_POSTGRES_IMAGE`、`MANAGER_REDIS_IMAGE`、`MANAGER_NGINX_IMAGE`
+- `deploy/runtime-agent/.env` → `OC_RUNTIME_AGENT_IMAGE`
+- `hermes-runtime` 镜像由 manager 推送到 agent，不进入任何 `.env`
+
+各字段含义见 [deploy/README.md](./deploy/README.md) 与子运行包 README。
+
+### 生产首次启动的两个特殊命令
+
+线上镜像不再包含 Go 工具链，原本 `go run ./cmd/...` 的两步直接走二进制。`manager-api` 镜像同时打包了 `oc-manager`（默认启动 / CMD 入口）、`migrate`、`seed-admin` 三个二进制，三者都从 `OCM_CONFIG=/etc/manager/config.yaml` 读取主配置（由 `deploy/manage/docker-compose.yml` 通过挂载与 `environment` 提供）：
+
+```bash
+# 1. 数据库迁移
+docker compose run --rm manager-api migrate up
+
+# 2. 注入初始平台管理员（仅首次部署执行；用户名与密码为命令参数，display_name 可选）
+docker compose run --rm manager-api seed-admin <username> <password> [display_name]
+```
+
+`docker compose run` 会继承服务定义的 `environment`、`volumes`、`depends_on`，因此命令能正常读到挂载进容器的 `/etc/manager/config.yaml`，并在 PostgreSQL / Redis 健康后再开始执行。
+
+镜像里之所以用 `CMD` 而非 `ENTRYPOINT`，正是为了让 `docker compose run --rm manager-api migrate up` 之类的调用能直接覆盖入口去跑另一个二进制，而不会被拼成 `oc-manager migrate up`。
+
+`oc-runtime-agent` 镜像内则包含 `oc-runtime-agent healthcheck` 子命令，作为 `deploy/runtime-agent/docker-compose.yml` 的 compose healthcheck 入口。
+
 ## 文档导航
 
 ### 开发与设计

@@ -83,7 +83,7 @@ docker compose exec -T manager-postgres sh -c \
   < /backups/manager-20260601.dump
 
 # 恢复后跑迁移，确保 schema 升到当前版本
-docker compose run --rm manager-api go run ./cmd/migrate up
+docker compose run --rm manager-api migrate up
 
 # 重新启动服务
 docker compose up -d
@@ -161,7 +161,7 @@ cd deploy/manage
 # 在 .env 中把 OCM_MANAGER_IMAGE / OCM_WEB_IMAGE 更新到新版 @sha256:<digest>
 ${EDITOR:-vi} .env
 docker compose pull manager-api manager-web
-docker compose run --rm manager-api go run ./cmd/migrate up
+docker compose run --rm manager-api migrate up
 docker compose up -d manager-api manager-web manager-nginx
 ```
 
@@ -243,7 +243,7 @@ docker compose logs --tail=100 manager-api
 ```sh
 cd deploy/manage
 # 查看迁移日志
-docker compose run --rm manager-api go run ./cmd/migrate up 2>&1
+docker compose run --rm manager-api migrate up 2>&1
 # 检查是否有持锁会话
 docker compose exec manager-postgres psql -U "$POSTGRES_USER" -d "$POSTGRES_DB" \
   -c "SELECT pid, state, query, wait_event_type, wait_event FROM pg_stat_activity WHERE state != 'idle';"

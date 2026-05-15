@@ -1,0 +1,45 @@
+# 仓库根目录的 .dockerignore,供 manager-api(cmd/server/Dockerfile)与
+# oc-runtime-agent(runtime/agent/Dockerfile)两个 Go 服务在仓库根构建时使用,
+# 用来剔除非 Go 构建所需的目录,减小上下文体积并避免敏感文件进入镜像。
+
+# git / IDE / 代理工具元数据
+.git
+.gitignore
+.idea
+.vscode
+.codex
+.claude
+.agents
+.superpowers
+.gstack
+.worktrees
+skills-lock.json
+.mcp.json
+
+# 本地 dev 数据 / 编译缓存 / 临时输出
+.local
+tmp
+data
+agent
+.air.toml
+.air.runtime-agent.toml
+
+# 敏感环境变量与运行时配置(由生产 compose 通过挂载提供,不进入镜像)
+.env
+.env.example
+config/manager.yaml
+config/agent.yaml
+
+# 前端工程与 Go 二进制无关
+web
+
+# 文档 / 部署描述 / 一切 markdown:Go 构建上下文不需要
+docs
+deploy
+*.md
+
+# 自身
+.dockerignore
+
+# 已有 Dockerfile 不需要拷进镜像
+**/Dockerfile

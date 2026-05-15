@@ -1,0 +1,15 @@
+# web/Dockerfile 的构建上下文为 web/,以下条目剔除前端构建用不到的产物 / 测试 / 元数据。
+
+node_modules
+dist
+test-results
+tests
+playwright.config.ts
+vite.config.local.ts
+
+# IDE / 元数据
+.vscode
+.idea
+
+# Dockerfile / nginx 配置由 Dockerfile 显式 COPY,不需要再次扫描
+.dockerignore

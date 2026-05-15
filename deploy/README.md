@@ -23,7 +23,7 @@
 
    ```sh
    cd deploy/manage
-   docker compose run --rm manager-api go run ./cmd/migrate up
+   docker compose run --rm manager-api migrate up
    docker compose up -d
    ```
 

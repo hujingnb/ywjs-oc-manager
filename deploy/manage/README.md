@@ -16,8 +16,8 @@ mkdir -p tls
 # 先启动数据库
 docker compose up -d manager-postgres manager-redis
 
-# 首次部署：执行数据库迁移
-docker compose run --rm manager-api go run ./cmd/migrate up
+# 首次部署：执行数据库迁移（manager-api 镜像内置 migrate 二进制）
+docker compose run --rm manager-api migrate up
 
 # 启动全部服务
 docker compose up -d
@@ -103,6 +103,6 @@ docker compose logs -f --tail=100 manager-api
 ## 6. 常见问题
 
 - **manager-api 保持 unhealthy**：检查 `manager-postgres` 和 `manager-redis` 是否已 healthy；查看 `docker compose logs manager-api` 确认配置错误信息。
-- **首次启动缺少表**：确认已执行迁移命令 `docker compose run --rm manager-api go run ./cmd/migrate up`。
+- **首次启动缺少表**：确认已执行迁移命令 `docker compose run --rm manager-api migrate up`。
 - **nginx 502**：manager-api healthcheck 未通过时 Compose 不会把 nginx 转发到 api 容器，排查 api 日志。
 - **TLS 证书错误**：确认 `./tls/fullchain.pem` 和 `./tls/privkey.pem` 存在且匹配当前域名。

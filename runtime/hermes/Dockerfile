@@ -1,12 +1,28 @@
 # Hermes Agent runtime 镜像,对应 OpenClaw 时代的 runtime/openclaw/Dockerfile。
 # manager 创建 app 时通过 docker run 启动本镜像,挂载 apps/<app_id>/.hermes 到 /opt/data。
 # 容器启动即 ready,不允许运行时再装任何依赖。
+#
+# 注意: hermes install.sh 会去 hermes-agent.nousresearch.com / GitHub 拉源码与 Node tarball,
+# 这部分走第三方 CDN, 无法整体国内化; 此处仅把基础镜像走 docker.1ms.run 加速 Docker Hub 拉取。
 
-FROM python:3.13-slim-bookworm
+ARG DOCKER_HUB_MIRROR=docker.1ms.run/library
+FROM ${DOCKER_HUB_MIRROR}/python:3.13-slim-bookworm
 
 ENV PYTHONUNBUFFERED=1 \
     HERMES_HOME=/opt/data \
     PATH=/root/.local/bin:$PATH
+
+# Debian apt 源替换为国内镜像, 加速 apt-get install 拉包;
+# CI 走专网内 mirror 时可 --build-arg DEBIAN_MIRROR_HOST=<host> 覆盖。
+# 同时处理新版 deb822 (sources.list.d/debian.sources, bookworm 默认) 和旧版 sources.list,
+# 不存在的文件不报错; 若两者都不存在, 后续 apt-get update 自然会让构建失败暴露镜像格式变更。
+ARG DEBIAN_MIRROR_HOST=mirrors.aliyun.com
+RUN set -eux; \
+    for f in /etc/apt/sources.list /etc/apt/sources.list.d/debian.sources; do \
+      [ -f "$f" ] && sed -i \
+        -e "s|deb.debian.org|${DEBIAN_MIRROR_HOST}|g" \
+        -e "s|security.debian.org|${DEBIAN_MIRROR_HOST}|g" "$f" || true; \
+    done
 
 # 系统依赖:hermes install.sh 需要 curl + git,运行时需要 ripgrep + ffmpeg(hermes 工具默认要求),
 # tini 用于在 PID 1 收割 hermes 派生的子进程(MCP stdio / git 等),
