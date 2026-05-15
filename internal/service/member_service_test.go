@@ -8,6 +8,7 @@ import (
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgtype"
 
+	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 	"oc-manager/internal/auth"
 	"oc-manager/internal/domain"
@@ -133,7 +134,7 @@ func TestMemberServiceListAppliesDefaultPageSize(t *testing.T) {
 	results, err := svc.ListMembers(context.Background(), platformAdmin(), testOrgID, 0, 0)
 	require.NoError(t, err)
 	require.NotEqual(t, 0, len(results))
-	require.Equal(t, int32(50), store.lastList.Limit)
+	require.Equal(t, int32(50), store.lastListWithApp.Limit)
 }
 
 // TestMemberServiceListClampsMaxPageSize 验证成员服务列表限制最大分页Size的边界条件场景。
@@ -143,7 +144,56 @@ func TestMemberServiceListClampsMaxPageSize(t *testing.T) {
 
 	_, err := svc.ListMembers(context.Background(), platformAdmin(), testOrgID, 5000, 0)
 	require.NoError(t, err)
-	require.Equal(t, int32(200), store.lastList.Limit)
+	require.Equal(t, int32(200), store.lastListWithApp.Limit)
+}
+
+// TestMemberServiceListExposesActiveApp 验证 ListMembers 返回每个成员当前关联的活跃实例。
+// 三类场景必须同时覆盖：有活跃实例、无活跃实例、实例被软删的成员都应正确还原。
+func TestMemberServiceListExposesActiveApp(t *testing.T) {
+	// withApp：拥有未软删 app 的成员；列表应返回 active_app_id/name 指针。
+	// noApp：组织成员只创建了用户，未来需要补建；返回值两字段为 nil。
+	// deletedApp：成员名下唯一的 app 已被软删，等同于「无实例」状态。
+	store := newMemberStoreStub(t)
+	orgUUID := store.orgs[testOrgID].ID
+
+	withAppID := mustUUID(t, "00000000-0000-0000-0000-0000000000a1")
+	noAppID := mustUUID(t, "00000000-0000-0000-0000-0000000000a2")
+	deletedID := mustUUID(t, "00000000-0000-0000-0000-0000000000a3")
+	store.users[uuidToString(withAppID)] = sqlc.User{ID: withAppID, OrgID: orgUUID, Username: "with-app", DisplayName: "有实例的成员", Role: domain.UserRoleOrgMember, Status: domain.StatusActive}
+	store.users[uuidToString(noAppID)] = sqlc.User{ID: noAppID, OrgID: orgUUID, Username: "no-app", DisplayName: "无实例的成员", Role: domain.UserRoleOrgMember, Status: domain.StatusActive}
+	store.users[uuidToString(deletedID)] = sqlc.User{ID: deletedID, OrgID: orgUUID, Username: "deleted-app", DisplayName: "实例被删的成员", Role: domain.UserRoleOrgMember, Status: domain.StatusActive}
+
+	activeAppID := mustUUID(t, "00000000-0000-0000-0000-0000000000b1")
+	deletedAppID := mustUUID(t, "00000000-0000-0000-0000-0000000000b2")
+	store.apps[uuidToString(activeAppID)] = sqlc.App{ID: activeAppID, OrgID: orgUUID, OwnerUserID: withAppID, Name: "现役实例"}
+	store.apps[uuidToString(deletedAppID)] = sqlc.App{ID: deletedAppID, OrgID: orgUUID, OwnerUserID: deletedID, Name: "已删实例", DeletedAt: pgtype.Timestamptz{Valid: true}}
+
+	svc := NewMemberService(store, fakeHash)
+	results, err := svc.ListMembers(context.Background(), platformAdmin(), testOrgID, 0, 0)
+	require.NoError(t, err)
+	require.Len(t, results, 3)
+
+	byUsername := map[string]MemberResult{}
+	for _, r := range results {
+		byUsername[r.Username] = r
+	}
+
+	// 有活跃实例：active_app_id 指向 activeAppID 字符串，active_app_name 为应用名。
+	withAppResult := byUsername["with-app"]
+	require.NotNil(t, withAppResult.ActiveAppID)
+	assert.Equal(t, uuidToString(activeAppID), *withAppResult.ActiveAppID)
+	require.NotNil(t, withAppResult.ActiveAppName)
+	assert.Equal(t, "现役实例", *withAppResult.ActiveAppName)
+
+	// 没创建实例：两字段为 nil 指针，前端据此显示「无实例」+ 补建按钮。
+	noAppResult := byUsername["no-app"]
+	assert.Nil(t, noAppResult.ActiveAppID)
+	assert.Nil(t, noAppResult.ActiveAppName)
+
+	// 实例被软删：active_app_id/name 也为 nil；与「从未创建」语义一致。
+	deletedAppResult := byUsername["deleted-app"]
+	assert.Nil(t, deletedAppResult.ActiveAppID)
+	assert.Nil(t, deletedAppResult.ActiveAppName)
 }
 
 // TestMemberServiceGetSelfAccessibleByMember 验证成员服务获取自身Accessible通过成员的预期行为场景。
@@ -355,6 +405,7 @@ type memberStoreStub struct {
 	softDeleted        []string
 	lastCreate         sqlc.CreateUserParams
 	lastList           sqlc.ListUsersByOrgParams
+	lastListWithApp    sqlc.ListUsersByOrgWithActiveAppParams
 	lastPwdUpdate      sqlc.UpdateUserPasswordParams
 }
 
@@ -426,6 +477,40 @@ func (s *memberStoreStub) ListUsersByOrg(_ context.Context, arg sqlc.ListUsersBy
 		}
 	}
 	return results, nil
+}
+
+// ListUsersByOrgWithActiveApp 模拟 sqlc 的 LEFT JOIN：先取本组织全部 users，
+// 再为每个 user 查找 apps 表中未软删的实例。apps_owner_active 约束保证最多一个。
+func (s *memberStoreStub) ListUsersByOrgWithActiveApp(_ context.Context, arg sqlc.ListUsersByOrgWithActiveAppParams) ([]sqlc.ListUsersByOrgWithActiveAppRow, error) {
+	s.lastListWithApp = arg
+	rows := make([]sqlc.ListUsersByOrgWithActiveAppRow, 0, len(s.users))
+	for _, user := range s.users {
+		if user.OrgID != arg.OrgID {
+			continue
+		}
+		row := sqlc.ListUsersByOrgWithActiveAppRow{
+			ID:           user.ID,
+			OrgID:        user.OrgID,
+			Username:     user.Username,
+			PasswordHash: user.PasswordHash,
+			DisplayName:  user.DisplayName,
+			Role:         user.Role,
+			Status:       user.Status,
+			LastLoginAt:  user.LastLoginAt,
+			CreatedAt:    user.CreatedAt,
+			UpdatedAt:    user.UpdatedAt,
+			DeletedAt:    user.DeletedAt,
+		}
+		for _, app := range s.apps {
+			if app.OwnerUserID == user.ID && !app.DeletedAt.Valid {
+				row.ActiveAppID = app.ID
+				row.ActiveAppName = pgtype.Text{String: app.Name, Valid: true}
+				break
+			}
+		}
+		rows = append(rows, row)
+	}
+	return rows, nil
 }
 
 func (s *memberStoreStub) UpdateUserProfile(_ context.Context, arg sqlc.UpdateUserProfileParams) (sqlc.User, error) {

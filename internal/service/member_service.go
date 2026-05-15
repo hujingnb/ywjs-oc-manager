@@ -23,6 +23,9 @@ type MemberStore interface {
 	GetUser(ctx context.Context, id pgtype.UUID) (sqlc.User, error)
 	GetUserByUsername(ctx context.Context, username string) (sqlc.User, error)
 	ListUsersByOrg(ctx context.Context, arg sqlc.ListUsersByOrgParams) ([]sqlc.User, error)
+	// ListUsersByOrgWithActiveApp 列出成员及其当前未软删实例的 id/name，
+	// 用于成员列表上区分「需要补建」与「已绑定」两种状态。
+	ListUsersByOrgWithActiveApp(ctx context.Context, arg sqlc.ListUsersByOrgWithActiveAppParams) ([]sqlc.ListUsersByOrgWithActiveAppRow, error)
 	UpdateUserProfile(ctx context.Context, arg sqlc.UpdateUserProfileParams) (sqlc.User, error)
 	SetUserStatus(ctx context.Context, arg sqlc.SetUserStatusParams) (sqlc.User, error)
 	UpdateUserPassword(ctx context.Context, arg sqlc.UpdateUserPasswordParams) (sqlc.User, error)
@@ -86,6 +89,11 @@ type MemberResult struct {
 	Role string `json:"role"`
 	// Status 是成员状态；disabled 会阻止登录并设置 users.deleted_at。
 	Status string `json:"status"`
+	// ActiveAppID 是该成员当前未软删实例的 UUID；nil 表示成员名下没有活跃实例。
+	// 仅在 ListMembers 列表返回里有值，单条 GetMember 等接口保持 nil。
+	ActiveAppID *string `json:"active_app_id,omitempty"`
+	// ActiveAppName 是该成员当前活跃实例的展示名；nil 与 ActiveAppID 同步。
+	ActiveAppName *string `json:"active_app_name,omitempty"`
 }
 
 // CreateMember 创建组织成员。
@@ -161,7 +169,7 @@ func (s *MemberService) ListMembers(ctx context.Context, principal auth.Principa
 	if offset < 0 {
 		offset = 0
 	}
-	users, err := s.store.ListUsersByOrg(ctx, sqlc.ListUsersByOrgParams{
+	rows, err := s.store.ListUsersByOrgWithActiveApp(ctx, sqlc.ListUsersByOrgWithActiveAppParams{
 		OrgID:  id,
 		Limit:  limit,
 		Offset: offset,
@@ -169,7 +177,7 @@ func (s *MemberService) ListMembers(ctx context.Context, principal auth.Principa
 	if err != nil {
 		return nil, fmt.Errorf("查询成员列表失败: %w", err)
 	}
-	return toMemberResults(users), nil
+	return toMemberResultsWithApp(rows), nil
 }
 
 // GetMember 查询单个成员。
@@ -387,4 +395,30 @@ func toMemberResult(user sqlc.User) MemberResult {
 		Role:        user.Role,
 		Status:      user.Status,
 	}
+}
+
+// toMemberResultsWithApp 把 sqlc 的 LEFT JOIN 行映射为 MemberResult。
+// 仅当 active_app_id 在数据库层有值时才把指针填上，避免误判「无实例」为空字符串。
+func toMemberResultsWithApp(rows []sqlc.ListUsersByOrgWithActiveAppRow) []MemberResult {
+	results := make([]MemberResult, 0, len(rows))
+	for _, row := range rows {
+		result := MemberResult{
+			ID:          uuidToString(row.ID),
+			OrgID:       uuidToOptionalString(row.OrgID),
+			Username:    row.Username,
+			DisplayName: row.DisplayName,
+			Role:        row.Role,
+			Status:      row.Status,
+		}
+		if row.ActiveAppID.Valid {
+			id := uuidToString(row.ActiveAppID)
+			result.ActiveAppID = &id
+		}
+		if row.ActiveAppName.Valid {
+			name := row.ActiveAppName.String
+			result.ActiveAppName = &name
+		}
+		results = append(results, result)
+	}
+	return results
 }
