@@ -6081,6 +6081,13 @@ export interface components {
             updated_at?: string;
         };
         "service.MemberResult": {
+            /**
+             * @description ActiveAppID 是该成员当前未软删实例的 UUID；nil 表示成员名下没有活跃实例。
+             *     仅在 ListMembers 列表返回里有值，单条 GetMember 等接口保持 nil。
+             */
+            active_app_id?: string;
+            /** @description ActiveAppName 是该成员当前活跃实例的展示名；nil 与 ActiveAppID 同步。 */
+            active_app_name?: string;
             /** @description DisplayName 是前端展示名。 */
             display_name?: string;
             /** @description ID 是成员用户 UUID。 */
