@@ -109,6 +109,7 @@ func generateCertBundle(hostname string) (CertBundle, error) {
 	if err != nil {
 		return CertBundle{}, fmt.Errorf("生成 serial 失败: %w", err)
 	}
+	ips, dnsNames := certSANs(hostname)
 	template := &x509.Certificate{
 		SerialNumber: serial,
 		Subject:      pkix.Name{CommonName: "oc-runtime-agent"},
@@ -119,8 +120,8 @@ func generateCertBundle(hostname string) (CertBundle, error) {
 			x509.ExtKeyUsageServerAuth,
 			x509.ExtKeyUsageClientAuth,
 		},
-		IPAddresses:           []net.IP{net.IPv4(127, 0, 0, 1), net.IPv6loopback},
-		DNSNames:              certHostnames(hostname),
+		IPAddresses:           ips,
+		DNSNames:              dnsNames,
 		BasicConstraintsValid: true,
 		IsCA:                  true,
 	}
@@ -137,14 +138,31 @@ func generateCertBundle(hostname string) (CertBundle, error) {
 	return CertBundle{CertPEM: certPEM, KeyPEM: keyPEM, CACertPEM: certPEM}, nil
 }
 
-// certHostnames 把 agent 启动期感知到的 hostname 加进 SAN。
-// localhost 始终保留，便于本地调试和容器内自检。
-func certHostnames(hostname string) []string {
-	names := []string{"localhost"}
-	if hostname != "" && hostname != "localhost" {
-		names = append(names, hostname)
+// certSANs 把 agent 启动期感知到的 hostname 分流到正确的 SAN 列表。
+//
+// x509 规范要求 IP 字面量(IPv4/IPv6)走 IPAddresses,DNS 名走 DNSNames;
+// 把 IP 误塞进 DNSNames 时 Go 标准库 TLS 校验会失败(SAN 不匹配),线上 manager
+// 探测 https://<IP>:7001 出现 "valid for 127.0.0.1, ::1, not <IP>" 即此场景。
+//
+// 127.0.0.1/::1 与 localhost 始终保留,确保容器内自检 / 本机调试可用。
+func certSANs(hostname string) (ips []net.IP, dnsNames []string) {
+	ips = []net.IP{net.IPv4(127, 0, 0, 1), net.IPv6loopback}
+	dnsNames = []string{"localhost"}
+	hostname = strings.TrimSpace(hostname)
+	if hostname == "" || hostname == "localhost" {
+		return ips, dnsNames
 	}
-	return names
+	if ip := net.ParseIP(hostname); ip != nil {
+		for _, existing := range ips {
+			if existing.Equal(ip) {
+				return ips, dnsNames
+			}
+		}
+		ips = append(ips, ip)
+		return ips, dnsNames
+	}
+	dnsNames = append(dnsNames, hostname)
+	return ips, dnsNames
 }
 
 func certificateMatchesHostname(cert *x509.Certificate, hostname string) bool {
