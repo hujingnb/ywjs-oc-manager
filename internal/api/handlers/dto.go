@@ -3,10 +3,15 @@
 // 字段定义、json tag、binding tag 与原非导出版本保持 1:1，业务逻辑不变。
 package handlers
 
-// ErrorResponse 统一错误返回体，所有 handler 错误响应均使用此结构。
+// ErrorResponse 统一错误返回体。
+// code 是稳定的接口契约标识（SCREAMING_SNAKE_CASE），前端据此分流处理；
+// message 是面向前端展示的安全文案，不包含底层密钥、SQL 或外部接口细节。
+// handler 通过 apierror.New 构造响应体，本类型仅供 swag 注解引用。
 type ErrorResponse struct {
-	// Error 是面向前端展示的安全错误文案，不包含底层密钥、SQL 或外部接口细节。
-	Error string `json:"error"`
+	// Code 是稳定的接口契约标识，一旦发布只增不改。
+	Code string `json:"code" example:"APP_NOT_FOUND"`
+	// Message 是面向前端展示的安全错误文案。
+	Message string `json:"message" example:"应用不存在"`
 }
 
 // ===== 认证 auth =====

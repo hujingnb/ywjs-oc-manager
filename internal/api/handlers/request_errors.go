@@ -11,6 +11,7 @@ import (
 	"github.com/gin-gonic/gin"
 	"github.com/go-playground/validator/v10"
 
+	"oc-manager/internal/api/apierror"
 	redactlog "oc-manager/internal/log"
 	"oc-manager/internal/service"
 )
@@ -36,34 +37,34 @@ var jsonFieldNames = map[string]string{
 // mappedServiceErrorRules 是 handler 层共用的 service sentinel 错误映射。
 // 只放跨接口语义稳定的规则；接口特有的 404/403 文案仍保留在各自 handler 中。
 var mappedServiceErrorRules = []serviceErrorRule{
-	safeErrorRule(service.ErrAgentTokenInvalid, http.StatusUnauthorized),
-	validationErrorRule(service.ErrEnrollInputInvalid, http.StatusBadRequest),
-	validationErrorRule(service.ErrMemberCreateInvalid, http.StatusBadRequest),
+	safeErrorRule(service.ErrAgentTokenInvalid, http.StatusUnauthorized, "AGENT_TOKEN_INVALID"),
+	validationErrorRule(service.ErrEnrollInputInvalid, http.StatusBadRequest, "ENROLL_INVALID"),
+	validationErrorRule(service.ErrMemberCreateInvalid, http.StatusBadRequest, "MEMBER_INVALID"),
 }
 
 // writeBindError 将 Gin 的 JSON 绑定错误转成面向调用方的 400 文案。
 // 该函数只暴露请求体层面的字段名、类型和 JSON 格式问题，不返回 Go 结构体名或底层解析细节。
 func writeBindError(c *gin.Context, err error) {
-	c.JSON(http.StatusBadRequest, gin.H{"error": bindErrorMessage(err)})
+	c.JSON(http.StatusBadRequest, apierror.New("BAD_REQUEST", bindErrorMessage(err)))
 }
 
 type serviceErrorRule struct {
 	target     error
 	statusCode int
+	code       string
 	message    string
-	body       gin.H
 	safe       bool
 	validation bool
 }
 
 // safeErrorRule 声明允许把脱敏后的 service 错误原因返回给调用方的映射规则。
-func safeErrorRule(target error, statusCode int) serviceErrorRule {
-	return serviceErrorRule{target: target, statusCode: statusCode, safe: true}
+func safeErrorRule(target error, statusCode int, code string) serviceErrorRule {
+	return serviceErrorRule{target: target, statusCode: statusCode, code: code, safe: true}
 }
 
 // validationErrorRule 声明业务校验错误映射规则，并剥离 sentinel 前缀后返回具体原因。
-func validationErrorRule(target error, statusCode int) serviceErrorRule {
-	return serviceErrorRule{target: target, statusCode: statusCode, validation: true}
+func validationErrorRule(target error, statusCode int, code string) serviceErrorRule {
+	return serviceErrorRule{target: target, statusCode: statusCode, code: code, validation: true}
 }
 
 // writeMappedServiceError 按顺序匹配 service sentinel error，并写入对应 HTTP 响应。
@@ -73,10 +74,6 @@ func writeMappedServiceError(c *gin.Context, err error, fallbackStatus int, fall
 		if !errors.Is(err, rule.target) {
 			continue
 		}
-		if rule.body != nil {
-			c.JSON(rule.statusCode, rule.body)
-			return
-		}
 		message := rule.message
 		if rule.safe {
 			message = redactlog.SafeErrorMessage(err)
@@ -84,10 +81,10 @@ func writeMappedServiceError(c *gin.Context, err error, fallbackStatus int, fall
 		if rule.validation {
 			message = validationServiceMessage(err, rule.target)
 		}
-		c.JSON(rule.statusCode, gin.H{"error": message})
+		c.JSON(rule.statusCode, apierror.New(rule.code, message))
 		return
 	}
-	c.JSON(fallbackStatus, gin.H{"error": fallbackMessage})
+	c.JSON(fallbackStatus, apierror.New("INTERNAL", fallbackMessage))
 }
 
 // bindErrorMessage 归一化请求体绑定错误，避免所有接口都返回含糊的“请求参数不完整”。

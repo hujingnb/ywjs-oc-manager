@@ -10,6 +10,7 @@ import (
 
 	"github.com/gin-gonic/gin"
 
+	"oc-manager/internal/api/apierror"
 	"oc-manager/internal/service"
 )
 
@@ -60,7 +61,7 @@ func RegisterAgentRoutes(router gin.IRouter, handler *AgentEndpointsHandler) {
 // @Router       /agent/enroll [post]
 func (h *AgentEndpointsHandler) Enroll(c *gin.Context) {
 	if !h.validEnrollmentSecret(c.GetHeader("Authorization")) {
-		c.JSON(http.StatusUnauthorized, gin.H{"error": "enrollment secret 无效"})
+		c.JSON(http.StatusUnauthorized, apierror.New("UNAUTHENTICATED", "enrollment secret 无效"))
 		return
 	}
 	var req AgentEnrollRequest
@@ -71,17 +72,17 @@ func (h *AgentEndpointsHandler) Enroll(c *gin.Context) {
 	}
 	resourceJSON, err := agentJSONOrEmpty(req.ResourceSnapshot)
 	if err != nil {
-		c.JSON(http.StatusBadRequest, gin.H{"error": "resource_snapshot 序列化失败"})
+		c.JSON(http.StatusBadRequest, apierror.New("BAD_REQUEST", "resource_snapshot 序列化失败"))
 		return
 	}
 	metadataJSON, err := agentJSONOrEmpty(req.Metadata)
 	if err != nil {
-		c.JSON(http.StatusBadRequest, gin.H{"error": "metadata 序列化失败"})
+		c.JSON(http.StatusBadRequest, apierror.New("BAD_REQUEST", "metadata 序列化失败"))
 		return
 	}
 	sampledAt, err := parseAgentSampledAt(req.SampledAt)
 	if err != nil {
-		c.JSON(http.StatusBadRequest, gin.H{"error": "sampled_at 格式无效"})
+		c.JSON(http.StatusBadRequest, apierror.New("BAD_REQUEST", "sampled_at 格式无效"))
 		return
 	}
 	result, err := h.service.EnrollAgent(c.Request.Context(), service.AgentEnrollInput{
@@ -135,17 +136,17 @@ func (h *AgentEndpointsHandler) Heartbeat(c *gin.Context) {
 	}
 	resourceJSON, err := agentJSONOrEmpty(req.ResourceSnapshot)
 	if err != nil {
-		c.JSON(http.StatusBadRequest, gin.H{"error": "resource_snapshot 序列化失败"})
+		c.JSON(http.StatusBadRequest, apierror.New("BAD_REQUEST", "resource_snapshot 序列化失败"))
 		return
 	}
 	metadataJSON, err := agentJSONOrEmpty(req.Metadata)
 	if err != nil {
-		c.JSON(http.StatusBadRequest, gin.H{"error": "metadata 序列化失败"})
+		c.JSON(http.StatusBadRequest, apierror.New("BAD_REQUEST", "metadata 序列化失败"))
 		return
 	}
 	sampledAt, err := parseAgentSampledAt(req.SampledAt)
 	if err != nil {
-		c.JSON(http.StatusBadRequest, gin.H{"error": "sampled_at 格式无效"})
+		c.JSON(http.StatusBadRequest, apierror.New("BAD_REQUEST", "sampled_at 格式无效"))
 		return
 	}
 	result, err := h.service.HandleHeartbeat(c.Request.Context(), service.AgentHeartbeatInput{

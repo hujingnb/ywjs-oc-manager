@@ -184,8 +184,13 @@ components:
       type: object
     handlers.ErrorResponse:
       properties:
-        error:
-          description: Error 是面向前端展示的安全错误文案，不包含底层密钥、SQL 或外部接口细节。
+        code:
+          description: Code 是稳定的接口契约标识，一旦发布只增不改。
+          example: APP_NOT_FOUND
+          type: string
+        message:
+          description: Message 是面向前端展示的安全错误文案。
+          example: 应用不存在
           type: string
       type: object
     handlers.InstanceResourceSamplesResponse:

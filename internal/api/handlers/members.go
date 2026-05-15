@@ -8,6 +8,7 @@ import (
 
 	"github.com/gin-gonic/gin"
 
+	"oc-manager/internal/api/apierror"
 	"oc-manager/internal/auth"
 	"oc-manager/internal/domain"
 	"oc-manager/internal/service"
@@ -266,7 +267,7 @@ func (h *MembersHandler) setStatus(c *gin.Context, status string) {
 // @Router       /organizations/{orgId}/members/onboard [post]
 func (h *MembersHandler) Onboard(c *gin.Context) {
 	if h.onboarding == nil {
-		c.JSON(http.StatusServiceUnavailable, gin.H{"error": "成员联动应用流程暂未启用"})
+		c.JSON(http.StatusServiceUnavailable, apierror.New("INTERNAL", "成员联动应用流程暂未启用"))
 		return
 	}
 	principal := principalFromCtx(c)
@@ -315,7 +316,7 @@ func (h *MembersHandler) Onboard(c *gin.Context) {
 // @Router       /organizations/{orgId}/members/{userId}/apps [post]
 func (h *MembersHandler) CreateAppForMember(c *gin.Context) {
 	if h.onboarding == nil {
-		c.JSON(http.StatusServiceUnavailable, gin.H{"error": "成员实例创建流程暂未启用"})
+		c.JSON(http.StatusServiceUnavailable, apierror.New("INTERNAL", "成员实例创建流程暂未启用"))
 		return
 	}
 	principal := principalFromCtx(c)
@@ -396,20 +397,17 @@ func (h *MembersHandler) Delete(c *gin.Context) {
 func writeMemberError(c *gin.Context, err error) {
 	switch {
 	case errors.Is(err, service.ErrForbidden):
-		c.JSON(http.StatusForbidden, gin.H{"error": "无权执行该操作"})
+		c.JSON(http.StatusForbidden, apierror.New("FORBIDDEN", "无权执行该操作"))
 	case errors.Is(err, service.ErrNotFound):
-		c.JSON(http.StatusNotFound, gin.H{"error": "资源不存在"})
+		c.JSON(http.StatusNotFound, apierror.New("NOT_FOUND", "资源不存在"))
 	case errors.Is(err, service.ErrMemberCreateInvalid):
-		c.JSON(http.StatusBadRequest, gin.H{"error": validationServiceMessage(err, service.ErrMemberCreateInvalid)})
+		c.JSON(http.StatusBadRequest, apierror.New("MEMBER_INVALID", validationServiceMessage(err, service.ErrMemberCreateInvalid)))
 	case errors.Is(err, service.ErrNoNodeAvailable):
 		// 自动选节点失败：当前没有 active 且剩余容量 > 0 的节点；前端需要展示明确文案让 ops 加节点或解禁。
-		c.JSON(http.StatusServiceUnavailable, gin.H{
-			"code":    "NO_NODE_AVAILABLE",
-			"message": "暂无可用 Runtime Node，请联系平台管理员调整节点容量或新增节点",
-		})
+		c.JSON(http.StatusServiceUnavailable, apierror.New("NO_NODE_AVAILABLE", "暂无可用 Runtime Node，请联系平台管理员调整节点容量或新增节点"))
 	default:
 		// 未知错误冒泡到日志，便于运维定位；响应仍保持脱敏。
 		slog.ErrorContext(c.Request.Context(), "member handler 未识别错误", "error", err)
-		c.JSON(http.StatusInternalServerError, gin.H{"error": "服务暂时不可用"})
+		c.JSON(http.StatusInternalServerError, apierror.New("INTERNAL", "服务暂时不可用"))
 	}
 }

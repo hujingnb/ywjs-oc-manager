@@ -7,6 +7,7 @@ import (
 
 	"github.com/gin-gonic/gin"
 
+	"oc-manager/internal/api/apierror"
 	"oc-manager/internal/auth"
 	"oc-manager/internal/service"
 )
@@ -212,12 +213,12 @@ func (h *AppRuntimeHandler) trigger(c *gin.Context, op service.RuntimeOperation)
 func writeAppRuntimeError(c *gin.Context, err error) {
 	switch {
 	case errors.Is(err, service.ErrRuntimeOperationDenied), errors.Is(err, service.ErrForbidden):
-		c.JSON(http.StatusForbidden, gin.H{"error": "无权执行该运行操作"})
+		c.JSON(http.StatusForbidden, apierror.New("RUNTIME_OP_FORBIDDEN", "无权执行该运行操作"))
 	case errors.Is(err, service.ErrNotFound):
-		c.JSON(http.StatusNotFound, gin.H{"error": "应用不存在"})
+		c.JSON(http.StatusNotFound, apierror.New("NOT_FOUND", "应用不存在"))
 	case errors.Is(err, service.ErrAppNotReinitializable):
-		c.JSON(http.StatusConflict, gin.H{"error": "应用当前状态不允许重新初始化"})
+		c.JSON(http.StatusConflict, apierror.New("APP_NOT_REINIT", "应用当前状态不允许重新初始化"))
 	default:
-		c.JSON(http.StatusInternalServerError, gin.H{"error": "运行操作暂不可用"})
+		c.JSON(http.StatusInternalServerError, apierror.New("INTERNAL", "运行操作暂不可用"))
 	}
 }

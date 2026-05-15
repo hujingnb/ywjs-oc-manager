@@ -7,6 +7,7 @@ import (
 
 	"github.com/gin-gonic/gin"
 
+	"oc-manager/internal/api/apierror"
 	"oc-manager/internal/auth"
 	"oc-manager/internal/service"
 )
@@ -100,12 +101,12 @@ func (h *PersonaHandler) Put(c *gin.Context) {
 func writePersonaError(c *gin.Context, err error) {
 	switch {
 	case errors.Is(err, service.ErrPersonaDenied), errors.Is(err, service.ErrForbidden):
-		c.JSON(http.StatusForbidden, gin.H{"error": "无权访问该组织人设"})
+		c.JSON(http.StatusForbidden, apierror.New("PERSONA_FORBIDDEN", "无权访问该组织人设"))
 	case errors.Is(err, service.ErrPersonaNotFound):
-		c.JSON(http.StatusNotFound, gin.H{"error": "组织尚未配置人设"})
+		c.JSON(http.StatusNotFound, apierror.New("PERSONA_NOT_FOUND", "组织尚未配置人设"))
 	case errors.Is(err, service.ErrNotFound):
-		c.JSON(http.StatusNotFound, gin.H{"error": "组织不存在"})
+		c.JSON(http.StatusNotFound, apierror.New("NOT_FOUND", "组织不存在"))
 	default:
-		c.JSON(http.StatusInternalServerError, gin.H{"error": "服务暂时不可用"})
+		c.JSON(http.StatusInternalServerError, apierror.New("INTERNAL", "服务暂时不可用"))
 	}
 }

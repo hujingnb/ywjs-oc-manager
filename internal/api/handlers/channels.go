@@ -7,6 +7,7 @@ import (
 
 	"github.com/gin-gonic/gin"
 
+	"oc-manager/internal/api/apierror"
 	"oc-manager/internal/auth"
 	"oc-manager/internal/service"
 )
@@ -115,12 +116,12 @@ func (h *ChannelsHandler) Unbind(c *gin.Context) {
 func writeChannelError(c *gin.Context, err error) {
 	switch {
 	case errors.Is(err, service.ErrForbidden):
-		c.JSON(http.StatusForbidden, gin.H{"error": "无权操作渠道"})
+		c.JSON(http.StatusForbidden, apierror.New("FORBIDDEN", "无权操作渠道"))
 	case errors.Is(err, service.ErrNotFound):
-		c.JSON(http.StatusNotFound, gin.H{"error": "应用或渠道绑定不存在"})
+		c.JSON(http.StatusNotFound, apierror.New("NOT_FOUND", "应用或渠道绑定不存在"))
 	case errors.Is(err, service.ErrChannelAdapterMissing):
-		c.JSON(http.StatusServiceUnavailable, gin.H{"error": "当前渠道未启用"})
+		c.JSON(http.StatusServiceUnavailable, apierror.New("CHANNEL_ADAPTER_MISSING", "当前渠道未启用"))
 	default:
-		c.JSON(http.StatusInternalServerError, gin.H{"error": "渠道服务暂时不可用"})
+		c.JSON(http.StatusInternalServerError, apierror.New("INTERNAL", "渠道服务暂时不可用"))
 	}
 }

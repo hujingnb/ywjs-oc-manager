@@ -7,6 +7,7 @@ import (
 
 	"github.com/gin-gonic/gin"
 
+	"oc-manager/internal/api/apierror"
 	"oc-manager/internal/auth"
 	"oc-manager/internal/service"
 )
@@ -48,9 +49,9 @@ func (h *PlatformOverviewHandler) Get(c *gin.Context) {
 	if err != nil {
 		switch {
 		case errors.Is(err, service.ErrForbidden):
-			c.JSON(http.StatusForbidden, gin.H{"error": "仅平台管理员可访问"})
+			c.JSON(http.StatusForbidden, apierror.New("FORBIDDEN", "仅平台管理员可访问"))
 		default:
-			c.JSON(http.StatusInternalServerError, gin.H{"error": "查询平台总览失败"})
+			c.JSON(http.StatusInternalServerError, apierror.New("INTERNAL", "查询平台总览失败"))
 		}
 		return
 	}

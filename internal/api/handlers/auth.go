@@ -7,6 +7,7 @@ import (
 
 	"github.com/gin-gonic/gin"
 
+	"oc-manager/internal/api/apierror"
 	"oc-manager/internal/api/middleware"
 	"oc-manager/internal/auth"
 	redactlog "oc-manager/internal/log"
@@ -173,12 +174,16 @@ func (h *AuthHandler) Me(c *gin.Context) {
 func writeAuthError(c *gin.Context, err error) {
 	switch {
 	case errors.Is(err, service.ErrInvalidCredentials):
-		c.JSON(http.StatusUnauthorized, gin.H{"error": "用户名或密码错误"})
+		c.JSON(http.StatusUnauthorized, apierror.New("INVALID_CREDENTIALS", "用户名或密码错误"))
 	case errors.Is(err, service.ErrInvalidToken):
-		c.JSON(http.StatusUnauthorized, gin.H{"error": "登录凭证无效"})
+		c.JSON(http.StatusUnauthorized, apierror.New("INVALID_TOKEN", "登录凭证无效"))
 	case errors.Is(err, service.ErrUserDisabled), errors.Is(err, service.ErrOrgDisabled):
-		c.JSON(http.StatusForbidden, gin.H{"error": redactlog.SafeErrorMessage(err)})
+		code := "USER_DISABLED"
+		if errors.Is(err, service.ErrOrgDisabled) {
+			code = "ORG_DISABLED"
+		}
+		c.JSON(http.StatusForbidden, apierror.New(code, redactlog.SafeErrorMessage(err)))
 	default:
-		c.JSON(http.StatusInternalServerError, gin.H{"error": "认证服务暂时不可用"})
+		c.JSON(http.StatusInternalServerError, apierror.New("INTERNAL", "认证服务暂时不可用"))
 	}
 }

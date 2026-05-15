@@ -8,6 +8,7 @@ import (
 
 	"github.com/gin-gonic/gin"
 
+	"oc-manager/internal/api/apierror"
 	"oc-manager/internal/auth"
 	"oc-manager/internal/domain"
 	"oc-manager/internal/service"
@@ -260,14 +261,14 @@ func queryInt32(c *gin.Context, key string, fallback int32) int32 {
 func writeServiceError(c *gin.Context, err error) {
 	switch {
 	case errors.Is(err, service.ErrForbidden):
-		c.JSON(http.StatusForbidden, gin.H{"error": "无权执行该操作"})
+		c.JSON(http.StatusForbidden, apierror.New("FORBIDDEN", "无权执行该操作"))
 	case errors.Is(err, service.ErrNotFound):
-		c.JSON(http.StatusNotFound, gin.H{"error": "资源不存在"})
+		c.JSON(http.StatusNotFound, apierror.New("NOT_FOUND", "资源不存在"))
 	case errors.Is(err, service.ErrConflict):
-		c.JSON(http.StatusConflict, gin.H{"error": "资源冲突"})
+		c.JSON(http.StatusConflict, apierror.New("CONFLICT", "资源冲突"))
 	case errors.Is(err, service.ErrMemberCreateInvalid):
-		c.JSON(http.StatusBadRequest, gin.H{"error": validationServiceMessage(err, service.ErrMemberCreateInvalid)})
+		c.JSON(http.StatusBadRequest, apierror.New("MEMBER_INVALID", validationServiceMessage(err, service.ErrMemberCreateInvalid)))
 	default:
-		c.JSON(http.StatusInternalServerError, gin.H{"error": "服务暂时不可用"})
+		c.JSON(http.StatusInternalServerError, apierror.New("INTERNAL", "服务暂时不可用"))
 	}
 }

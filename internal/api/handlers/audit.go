@@ -7,6 +7,7 @@ import (
 
 	"github.com/gin-gonic/gin"
 
+	"oc-manager/internal/api/apierror"
 	"oc-manager/internal/auth"
 	"oc-manager/internal/service"
 )
@@ -87,7 +88,7 @@ func (h *AuditHandler) ListByTarget(c *gin.Context) {
 	targetType := c.Query("target_type")
 	targetID := c.Query("target_id")
 	if targetType == "" || targetID == "" {
-		c.JSON(http.StatusBadRequest, gin.H{"error": "缺少 target_type 或 target_id"})
+		c.JSON(http.StatusBadRequest, apierror.New("BAD_REQUEST", "缺少 target_type 或 target_id"))
 		return
 	}
 	limit := queryInt32(c, "limit", 0)
@@ -103,10 +104,10 @@ func (h *AuditHandler) ListByTarget(c *gin.Context) {
 func writeAuditError(c *gin.Context, err error) {
 	switch {
 	case errors.Is(err, service.ErrForbidden):
-		c.JSON(http.StatusForbidden, gin.H{"error": "无权执行该操作"})
+		c.JSON(http.StatusForbidden, apierror.New("FORBIDDEN", "无权执行该操作"))
 	case errors.Is(err, service.ErrNotFound):
-		c.JSON(http.StatusNotFound, gin.H{"error": "资源不存在"})
+		c.JSON(http.StatusNotFound, apierror.New("NOT_FOUND", "资源不存在"))
 	default:
-		c.JSON(http.StatusInternalServerError, gin.H{"error": "服务暂时不可用"})
+		c.JSON(http.StatusInternalServerError, apierror.New("INTERNAL", "服务暂时不可用"))
 	}
 }

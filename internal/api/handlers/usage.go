@@ -9,6 +9,7 @@ import (
 
 	"github.com/gin-gonic/gin"
 
+	"oc-manager/internal/api/apierror"
 	"oc-manager/internal/auth"
 	"oc-manager/internal/service"
 )
@@ -72,7 +73,7 @@ func (h *UsageHandler) GetMember(c *gin.Context) {
 	principal := principalFromCtx(c)
 	orgID := c.Query("org_id")
 	if orgID == "" {
-		c.JSON(http.StatusBadRequest, gin.H{"error": "缺少 org_id"})
+		c.JSON(http.StatusBadRequest, apierror.New("BAD_REQUEST", "缺少 org_id"))
 		return
 	}
 	view, err := h.service.GetMemberUsage(c.Request.Context(), principal, orgID, c.Param("userId"), parseLogsQueryOptions(c))
@@ -166,7 +167,7 @@ func (h *UsageHandler) GetApp(c *gin.Context) {
 	orgID := c.Query("owner_org_id")
 	owner := c.Query("owner_user_id")
 	if orgID == "" || owner == "" {
-		c.JSON(http.StatusBadRequest, gin.H{"error": "缺少 owner_org_id 或 owner_user_id"})
+		c.JSON(http.StatusBadRequest, apierror.New("BAD_REQUEST", "缺少 owner_org_id 或 owner_user_id"))
 		return
 	}
 	keyID, _ := strconv.ParseInt(c.Query("newapi_key_id"), 10, 64)
@@ -213,12 +214,12 @@ func parseUsageStatsWindow(c *gin.Context) (int64, int64) {
 func writeUsageError(c *gin.Context, err error) {
 	switch {
 	case errors.Is(err, service.ErrForbidden):
-		c.JSON(http.StatusForbidden, gin.H{"error": "无权访问该用量"})
+		c.JSON(http.StatusForbidden, apierror.New("FORBIDDEN", "无权访问该用量"))
 	case errors.Is(err, service.ErrNotFound):
-		c.JSON(http.StatusNotFound, gin.H{"error": "资源不存在"})
+		c.JSON(http.StatusNotFound, apierror.New("NOT_FOUND", "资源不存在"))
 	case errors.Is(err, service.ErrUsageUnavailable):
-		c.JSON(http.StatusServiceUnavailable, gin.H{"error": "用量服务暂不可用"})
+		c.JSON(http.StatusServiceUnavailable, apierror.New("USAGE_UNAVAILABLE", "用量服务暂不可用"))
 	default:
-		c.JSON(http.StatusInternalServerError, gin.H{"error": "用量服务异常"})
+		c.JSON(http.StatusInternalServerError, apierror.New("INTERNAL", "用量服务异常"))
 	}
 }

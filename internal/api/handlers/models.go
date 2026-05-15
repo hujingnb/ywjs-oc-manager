@@ -7,6 +7,7 @@ import (
 
 	"github.com/gin-gonic/gin"
 
+	"oc-manager/internal/api/apierror"
 	"oc-manager/internal/auth"
 	"oc-manager/internal/service"
 )
@@ -48,10 +49,10 @@ func (h *ModelsHandler) List(c *gin.Context) {
 	models, err := h.service.List(c.Request.Context(), principal)
 	if err != nil {
 		if errors.Is(err, service.ErrForbidden) {
-			c.JSON(http.StatusForbidden, gin.H{"error": "无权查看模型列表"})
+			c.JSON(http.StatusForbidden, apierror.New("FORBIDDEN", "无权查看模型列表"))
 			return
 		}
-		c.JSON(http.StatusInternalServerError, gin.H{"error": "模型列表暂时不可用"})
+		c.JSON(http.StatusInternalServerError, apierror.New("INTERNAL", "模型列表暂时不可用"))
 		return
 	}
 	c.JSON(http.StatusOK, gin.H{"models": models})

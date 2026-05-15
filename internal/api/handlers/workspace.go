@@ -8,6 +8,7 @@ import (
 
 	"github.com/gin-gonic/gin"
 
+	"oc-manager/internal/api/apierror"
 	"oc-manager/internal/auth"
 	"oc-manager/internal/service"
 )
@@ -84,7 +85,7 @@ func (h *WorkspaceHandler) Download(c *gin.Context) {
 	principal := principalFromCtx(c)
 	relative := c.Query("path")
 	if relative == "" {
-		c.JSON(http.StatusBadRequest, gin.H{"error": "缺少 path 参数"})
+		c.JSON(http.StatusBadRequest, apierror.New("BAD_REQUEST", "缺少 path 参数"))
 		return
 	}
 	stream, err := h.service.Download(c.Request.Context(), principal, c.Param("appId"), relative)
@@ -135,14 +136,14 @@ func (h *WorkspaceHandler) Archive(c *gin.Context) {
 func writeWorkspaceError(c *gin.Context, err error) {
 	switch {
 	case errors.Is(err, service.ErrWorkspaceForbidden):
-		c.JSON(http.StatusForbidden, gin.H{"error": "无权访问工作目录"})
+		c.JSON(http.StatusForbidden, apierror.New("WORKSPACE_FORBIDDEN", "无权访问工作目录"))
 	case errors.Is(err, service.ErrNotFound):
-		c.JSON(http.StatusNotFound, gin.H{"error": "应用不存在"})
+		c.JSON(http.StatusNotFound, apierror.New("NOT_FOUND", "应用不存在"))
 	case errors.Is(err, service.ErrWorkspaceMissing):
-		c.JSON(http.StatusServiceUnavailable, gin.H{"error": "应用未关联节点或 adapter 未配置"})
+		c.JSON(http.StatusServiceUnavailable, apierror.New("WORKSPACE_NOT_CONFIGURED", "应用未关联节点或 adapter 未配置"))
 	case errors.Is(err, service.ErrWorkspaceBadPath):
-		c.JSON(http.StatusBadRequest, gin.H{"error": "非法工作目录路径"})
+		c.JSON(http.StatusBadRequest, apierror.New("WORKSPACE_INVALID_PATH", "非法工作目录路径"))
 	default:
-		c.JSON(http.StatusInternalServerError, gin.H{"error": "工作目录暂不可用"})
+		c.JSON(http.StatusInternalServerError, apierror.New("INTERNAL", "工作目录暂不可用"))
 	}
 }

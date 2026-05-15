@@ -8,6 +8,7 @@ import (
 
 	"github.com/gin-gonic/gin"
 
+	"oc-manager/internal/api/apierror"
 	"oc-manager/internal/auth"
 	"oc-manager/internal/service"
 )
@@ -195,12 +196,12 @@ func (h *ResourceMetricsHandler) resourceRange(c *gin.Context) (service.Resource
 func writeResourceMetricsError(c *gin.Context, err error) {
 	switch {
 	case errors.Is(err, service.ErrInvalidResourceRange):
-		c.JSON(http.StatusBadRequest, gin.H{"error": "资源查询范围不合法"})
+		c.JSON(http.StatusBadRequest, apierror.New("INVALID_RESOURCE_RANGE", "资源查询范围不合法"))
 	case errors.Is(err, service.ErrForbidden):
-		c.JSON(http.StatusForbidden, gin.H{"error": "无权执行该操作"})
+		c.JSON(http.StatusForbidden, apierror.New("FORBIDDEN", "无权执行该操作"))
 	case errors.Is(err, service.ErrNotFound):
-		c.JSON(http.StatusNotFound, gin.H{"error": "资源不存在"})
+		c.JSON(http.StatusNotFound, apierror.New("NOT_FOUND", "资源不存在"))
 	default:
-		c.JSON(http.StatusInternalServerError, gin.H{"error": "服务暂时不可用"})
+		c.JSON(http.StatusInternalServerError, apierror.New("INTERNAL", "服务暂时不可用"))
 	}
 }

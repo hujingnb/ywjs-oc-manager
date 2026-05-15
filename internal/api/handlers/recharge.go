@@ -7,6 +7,7 @@ import (
 
 	"github.com/gin-gonic/gin"
 
+	"oc-manager/internal/api/apierror"
 	"oc-manager/internal/auth"
 	redactlog "oc-manager/internal/log"
 	"oc-manager/internal/service"
@@ -149,14 +150,14 @@ func (h *RechargeHandler) BillingStatus(c *gin.Context) {
 func writeRechargeError(c *gin.Context, err error) {
 	switch {
 	case errors.Is(err, service.ErrRechargeDenied), errors.Is(err, service.ErrForbidden):
-		c.JSON(http.StatusForbidden, gin.H{"error": "无权执行该操作"})
+		c.JSON(http.StatusForbidden, apierror.New("RECHARGE_FORBIDDEN", "无权执行该操作"))
 	case errors.Is(err, service.ErrNotFound):
-		c.JSON(http.StatusNotFound, gin.H{"error": "组织不存在"})
+		c.JSON(http.StatusNotFound, apierror.New("NOT_FOUND", "组织不存在"))
 	case errors.Is(err, service.ErrInvalidRechargeAmount):
-		c.JSON(http.StatusBadRequest, gin.H{"error": "充值金额必须为正"})
+		c.JSON(http.StatusBadRequest, apierror.New("INVALID_RECHARGE_AMOUNT", "充值金额必须为正"))
 	case errors.Is(err, service.ErrOrgMissingNewAPIUserID):
-		c.JSON(http.StatusConflict, gin.H{"error": "组织未关联 new-api 账户"})
+		c.JSON(http.StatusConflict, apierror.New("ORG_MISSING_NEWAPI_USER", "组织未关联 new-api 账户"))
 	default:
-		c.JSON(http.StatusBadGateway, gin.H{"error": redactlog.SafeErrorMessage(err)})
+		c.JSON(http.StatusBadGateway, apierror.New("INTERNAL", redactlog.SafeErrorMessage(err)))
 	}
 }

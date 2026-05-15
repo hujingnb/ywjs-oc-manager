@@ -7,6 +7,7 @@ import (
 
 	"github.com/gin-gonic/gin"
 
+	"oc-manager/internal/api/apierror"
 	"oc-manager/internal/auth"
 	"oc-manager/internal/service"
 )
@@ -121,19 +122,17 @@ func (h *AppsHandler) UpdateModel(c *gin.Context) {
 	c.JSON(http.StatusOK, result)
 }
 
-// principal 从 Authorization Bearer token 提取调用主体。
-// 应用接口只做认证解析，跨组织和成员自有应用的访问控制由 AppService 继续调用 authorizer 判断。
 // writeAppsError 将 AppService 的 sentinel error 映射为 HTTP 状态码。
 // 未识别错误统一返回 500 和安全文案，避免把数据库或 new-api 细节暴露给前端。
 func writeAppsError(c *gin.Context, err error) {
 	switch {
 	case errors.Is(err, service.ErrForbidden):
-		c.JSON(http.StatusForbidden, gin.H{"error": "无权访问该应用"})
+		c.JSON(http.StatusForbidden, apierror.New("FORBIDDEN", "无权访问该应用"))
 	case errors.Is(err, service.ErrNotFound):
-		c.JSON(http.StatusNotFound, gin.H{"error": "应用不存在"})
+		c.JSON(http.StatusNotFound, apierror.New("NOT_FOUND", "应用不存在"))
 	case errors.Is(err, service.ErrMemberCreateInvalid):
-		c.JSON(http.StatusBadRequest, gin.H{"error": validationServiceMessage(err, service.ErrMemberCreateInvalid)})
+		c.JSON(http.StatusBadRequest, apierror.New("MEMBER_INVALID", validationServiceMessage(err, service.ErrMemberCreateInvalid)))
 	default:
-		c.JSON(http.StatusInternalServerError, gin.H{"error": "服务暂时不可用"})
+		c.JSON(http.StatusInternalServerError, apierror.New("INTERNAL", "服务暂时不可用"))
 	}
 }

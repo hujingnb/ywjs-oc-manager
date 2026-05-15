@@ -10,6 +10,7 @@ import (
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgtype"
 
+	"oc-manager/internal/api/apierror"
 	"oc-manager/internal/domain"
 	"oc-manager/internal/store/sqlc"
 )
@@ -68,21 +69,21 @@ type JobView struct {
 func (h *JobsHandler) Get(c *gin.Context) {
 	principal := principalFromCtx(c)
 	if principal.Role != domain.UserRolePlatformAdmin {
-		c.JSON(http.StatusForbidden, gin.H{"error": "无权查看 job"})
+		c.JSON(http.StatusForbidden, apierror.New("FORBIDDEN", "无权查看 job"))
 		return
 	}
 	var id pgtype.UUID
 	if err := id.Scan(c.Param("jobId")); err != nil {
-		c.JSON(http.StatusBadRequest, gin.H{"error": "非法 job id"})
+		c.JSON(http.StatusBadRequest, apierror.New("BAD_REQUEST", "非法 job id"))
 		return
 	}
 	job, err := h.store.GetJob(c.Request.Context(), id)
 	if errors.Is(err, pgx.ErrNoRows) {
-		c.JSON(http.StatusNotFound, gin.H{"error": "job 不存在"})
+		c.JSON(http.StatusNotFound, apierror.New("NOT_FOUND", "job 不存在"))
 		return
 	}
 	if err != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{"error": "查询 job 失败"})
+		c.JSON(http.StatusInternalServerError, apierror.New("INTERNAL", "查询 job 失败"))
 		return
 	}
 	c.JSON(http.StatusOK, gin.H{"job": toJobView(job)})

@@ -5808,8 +5808,16 @@ export interface components {
             remark?: string;
         };
         "handlers.ErrorResponse": {
-            /** @description Error 是面向前端展示的安全错误文案，不包含底层密钥、SQL 或外部接口细节。 */
-            error?: string;
+            /**
+             * @description Code 是稳定的接口契约标识，一旦发布只增不改。
+             * @example APP_NOT_FOUND
+             */
+            code?: string;
+            /**
+             * @description Message 是面向前端展示的安全错误文案。
+             * @example 应用不存在
+             */
+            message?: string;
         };
         "handlers.InstanceResourceSamplesResponse": {
             /** @description Samples 是按时间升序返回的实例资源采样或聚合桶。 */

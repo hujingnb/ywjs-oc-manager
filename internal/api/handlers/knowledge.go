@@ -9,6 +9,7 @@ import (
 
 	"github.com/gin-gonic/gin"
 
+	"oc-manager/internal/api/apierror"
 	"oc-manager/internal/auth"
 	redactlog "oc-manager/internal/log"
 	"oc-manager/internal/service"
@@ -153,7 +154,7 @@ func (h *KnowledgeHandler) SaveOrg(c *gin.Context) {
 	principal := principalFromCtx(c)
 	relative := c.Query("path")
 	if relative == "" {
-		c.JSON(http.StatusBadRequest, gin.H{"error": "缺少 path 参数"})
+		c.JSON(http.StatusBadRequest, apierror.New("BAD_REQUEST", "缺少 path 参数"))
 		return
 	}
 	size, _ := strconv.ParseInt(c.GetHeader("Content-Length"), 10, 64)
@@ -183,7 +184,7 @@ func (h *KnowledgeHandler) DeleteOrg(c *gin.Context) {
 	principal := principalFromCtx(c)
 	relative := c.Query("path")
 	if relative == "" {
-		c.JSON(http.StatusBadRequest, gin.H{"error": "缺少 path 参数"})
+		c.JSON(http.StatusBadRequest, apierror.New("BAD_REQUEST", "缺少 path 参数"))
 		return
 	}
 	if err := h.service.DeleteOrgFile(c.Request.Context(), principal, c.Param("orgId"), relative); err != nil {
@@ -215,7 +216,7 @@ func (h *KnowledgeHandler) ListApp(c *gin.Context) {
 	orgID := c.Query("org_id")
 	owner := c.Query("owner_user_id")
 	if orgID == "" || owner == "" {
-		c.JSON(http.StatusBadRequest, gin.H{"error": "缺少 org_id 或 owner_user_id"})
+		c.JSON(http.StatusBadRequest, apierror.New("BAD_REQUEST", "缺少 org_id 或 owner_user_id"))
 		return
 	}
 	result, err := h.service.ListApp(c.Request.Context(), principal, orgID, c.Param("appId"), owner, c.Query("path"))
@@ -250,7 +251,7 @@ func (h *KnowledgeHandler) SaveApp(c *gin.Context) {
 	owner := c.Query("owner_user_id")
 	relative := c.Query("path")
 	if orgID == "" || owner == "" || relative == "" {
-		c.JSON(http.StatusBadRequest, gin.H{"error": "缺少 org_id/owner_user_id/path"})
+		c.JSON(http.StatusBadRequest, apierror.New("BAD_REQUEST", "缺少 org_id/owner_user_id/path"))
 		return
 	}
 	size, _ := strconv.ParseInt(c.GetHeader("Content-Length"), 10, 64)
@@ -284,7 +285,7 @@ func (h *KnowledgeHandler) DeleteApp(c *gin.Context) {
 	owner := c.Query("owner_user_id")
 	relative := c.Query("path")
 	if orgID == "" || owner == "" || relative == "" {
-		c.JSON(http.StatusBadRequest, gin.H{"error": "缺少 org_id/owner_user_id/path"})
+		c.JSON(http.StatusBadRequest, apierror.New("BAD_REQUEST", "缺少 org_id/owner_user_id/path"))
 		return
 	}
 	if err := h.service.DeleteAppFile(c.Request.Context(), principal, orgID, c.Param("appId"), owner, relative); err != nil {
@@ -297,10 +298,10 @@ func (h *KnowledgeHandler) DeleteApp(c *gin.Context) {
 func writeKnowledgeError(c *gin.Context, err error) {
 	switch {
 	case errors.Is(err, service.ErrKnowledgeForbidden):
-		c.JSON(http.StatusForbidden, gin.H{"error": "无权访问该知识库"})
+		c.JSON(http.StatusForbidden, apierror.New("KNOWLEDGE_FORBIDDEN", "无权访问该知识库"))
 	case errors.Is(err, service.ErrKnowledgeMissing):
-		c.JSON(http.StatusServiceUnavailable, gin.H{"error": "知识库主副本未启用"})
+		c.JSON(http.StatusServiceUnavailable, apierror.New("KNOWLEDGE_NOT_CONFIGURED", "知识库主副本未启用"))
 	default:
-		c.JSON(http.StatusBadRequest, gin.H{"error": redactlog.SafeErrorMessage(err)})
+		c.JSON(http.StatusBadRequest, apierror.New("BAD_REQUEST", redactlog.SafeErrorMessage(err)))
 	}
 }
