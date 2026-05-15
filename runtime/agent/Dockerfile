@@ -3,7 +3,9 @@
 # deploy/runtime-agent/docker-compose.yml 通过 OC_RUNTIME_AGENT_IMAGE 引用本镜像。
 
 ARG GO_VERSION=1.25
-ARG ALPINE_VERSION=3.20
+# Go 1.25 的官方 alpine 变体只发布到 3.21/3.22/3.23, 没有 3.20;
+# 取 3.22 作为 builder 与 final 共用的 alpine 主版本, 稳定且 docker.io 上有对应镜像。
+ARG ALPINE_VERSION=3.22
 
 # 公网基础镜像统一走 docker.1ms.run 的 Docker Hub 镜像加速,
 # 国内构建机直连 docker.io 经常超时。
