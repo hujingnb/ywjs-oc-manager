@@ -70,11 +70,11 @@
       </n-form>
     </n-card>
 
-    <!-- 平台管理员为已有成员复建实例 -->
+    <!-- 为已有成员补建实例：platform_admin 跨组织 / org_admin 本组织共用此表单 -->
     <n-card v-if="createAppTarget" :bordered="true">
       <template #header>
         <div style="display: flex; align-items: center; justify-content: space-between">
-          <h2 style="margin: 0">创建新实例</h2>
+          <h2 style="margin: 0">为该成员创建实例</h2>
           <n-button quaternary circle @click="createAppTarget = null">✕</n-button>
         </div>
       </template>
@@ -220,7 +220,7 @@ const resetNewPassword = ref('')
 const resetMutation = useResetMemberPassword()
 const resetFeedback = ref('')
 const resetError = ref(false)
-// createAppTarget 仅在平台管理员复建成员实例时有值，关闭表单即清空。
+// createAppTarget 仅在管理员补建成员实例时有值，关闭表单即清空。
 const createAppTarget = ref<Member | null>(null)
 const createAppResult = ref<CreateMemberAppResult | null>(null)
 const createAppError = ref('')
@@ -230,17 +230,17 @@ const createAppForm = ref<CreateMemberAppPayload>({
   channel_type: 'wechat',
   model_id: '',
 })
-// canSubmitCreateApp 保证复建实例时始终提交组织 allowlist 内的模型 ID。
+// canSubmitCreateApp 保证补建实例时始终提交组织 allowlist 内的模型 ID。
 const canSubmitCreateApp = computed(() =>
   Boolean(createAppForm.value.model_id && !createAppModelError.value && !createAppMutation.isPending.value),
 )
-// createAppModelError 暴露组织模型配置问题，避免平台管理员只能看到禁用的提交按钮。
+// createAppModelError 暴露组织模型配置问题，避免管理员只能看到禁用的提交按钮。
 const createAppModelError = computed(() => {
   if (organizationQuery.isError.value) return '组织可用模型获取失败，请重试'
   if (!organizationQuery.isLoading.value && modelOptions.value.length === 0) return '当前组织未配置可用模型'
   return ''
 })
-// 平台管理员切换组织时关闭复建表单，防止旧成员和新组织 ID 组合成跨组织提交。
+// 切换组织时关闭补建表单，防止旧成员和新组织 ID 组合成跨组织提交。
 watch(effectiveOrgId, () => {
   createAppTarget.value = null
   createAppResult.value = null
