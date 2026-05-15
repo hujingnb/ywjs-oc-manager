@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"io"
+	"log/slog"
 	"path"
 
 	"oc-manager/internal/auth"
@@ -15,6 +16,16 @@ import (
 type KnowledgeSyncDispatcher interface {
 	DispatchOrgChange(ctx context.Context, orgID, relPath, changeType, masterPath string) error
 	DispatchAppChange(ctx context.Context, orgID, appID, relPath, changeType, masterPath string) error
+}
+
+// KnowledgeAuditRecorder 抽象写一条 audit_logs 的能力。
+// 与 service.AuditService.Record 同构,但 service 层不直接依赖具体实现,
+// 测试可注入内存 fake。装配在 cmd/server,生产实现是 *service.AuditService。
+//
+// 用途:dispatcher 入队失败时记录,主副本写入成功不回滚,但失败痕迹必须可观测。
+// 不返回 error——审计失败仅打日志,不影响主流程。
+type KnowledgeAuditRecorder interface {
+	Record(ctx context.Context, event AuditEvent) (AuditResult, error)
 }
 
 // KnowledgeSyncStatusSource 抽象按 org 取最近同步状态的能力。
@@ -46,6 +57,9 @@ type KnowledgeService struct {
 	dispatcher      KnowledgeSyncDispatcher
 	statusSource    KnowledgeSyncStatusSource
 	retryDispatcher KnowledgeRetryDispatcher
+	// auditor 用于把 dispatcher 入队失败落到 audit_logs;nil 时静默(仅打日志)。
+	// 主副本已经写成功,业务不能因为同步失败而 200 → 500 翻转,但必须留可观测痕迹。
+	auditor KnowledgeAuditRecorder
 }
 
 // NewKnowledgeService 创建知识库服务。
@@ -67,6 +81,44 @@ func (s *KnowledgeService) SetSyncStatusSource(src KnowledgeSyncStatusSource) {
 // SetRetryDispatcher 注入「重试该 (org, node) 同步」分发器。
 func (s *KnowledgeService) SetRetryDispatcher(d KnowledgeRetryDispatcher) {
 	s.retryDispatcher = d
+}
+
+// SetAuditor 注入 audit_logs 写入器,用于 dispatcher 入队失败时落痕。
+// 不注入时静默,与旧装配兼容(仅日志告警)。
+func (s *KnowledgeService) SetAuditor(a KnowledgeAuditRecorder) {
+	s.auditor = a
+}
+
+// recordDispatchFailure 把 dispatcher 入队失败写到 audit_logs。
+// 主副本已成功落盘,此处仅做"留痕",不阻断主流程,任何审计写入失败只打日志。
+// target_type=knowledge_sync 与 worker handler 端的 app_knowledge_sync 形成
+// 完整的"入队-执行"事件链,排障时按 org_id / target_id 串起来。
+func (s *KnowledgeService) recordDispatchFailure(ctx context.Context, orgID, appID, relPath, action string, dispatchErr error) {
+	slog.WarnContext(ctx, "知识库同步入队失败",
+		"org_id", orgID, "app_id", appID, "rel_path", relPath, "action", action, "error", dispatchErr)
+	if s.auditor == nil {
+		return
+	}
+	targetID := orgID
+	if appID != "" {
+		targetID = appID
+	}
+	event := AuditEvent{
+		ActorRole:    "system",
+		OrgID:        orgID,
+		TargetType:   "knowledge_sync",
+		TargetID:     targetID,
+		Action:       action, // 例如 dispatch_org_upload_file / dispatch_app_delete_file
+		Result:       "failed",
+		ErrorMessage: dispatchErr.Error(),
+		Metadata: map[string]any{
+			"app_id":   appID,
+			"rel_path": relPath,
+		},
+	}
+	if _, err := s.auditor.Record(ctx, event); err != nil {
+		slog.ErrorContext(ctx, "写 audit_logs 失败", "error", err)
+	}
 }
 
 // GetOrgSyncStatus 列出组织在所有节点上的最近同步状态。
@@ -120,7 +172,9 @@ func (s *KnowledgeService) SaveOrgFile(ctx context.Context, principal auth.Princ
 		return err
 	}
 	if s.dispatcher != nil {
-		_ = s.dispatcher.DispatchOrgChange(ctx, orgID, relative, "upload_file", target)
+		if dispatchErr := s.dispatcher.DispatchOrgChange(ctx, orgID, relative, "upload_file", target); dispatchErr != nil {
+			s.recordDispatchFailure(ctx, orgID, "", relative, "dispatch_org_upload_file", dispatchErr)
+		}
 	}
 	return nil
 }
@@ -139,7 +193,9 @@ func (s *KnowledgeService) SaveAppFile(ctx context.Context, principal auth.Princ
 		return err
 	}
 	if s.dispatcher != nil {
-		_ = s.dispatcher.DispatchAppChange(ctx, orgID, appID, relative, "upload_file", target)
+		if dispatchErr := s.dispatcher.DispatchAppChange(ctx, orgID, appID, relative, "upload_file", target); dispatchErr != nil {
+			s.recordDispatchFailure(ctx, orgID, appID, relative, "dispatch_app_upload_file", dispatchErr)
+		}
 	}
 	return nil
 }
@@ -157,7 +213,9 @@ func (s *KnowledgeService) DeleteOrgFile(ctx context.Context, principal auth.Pri
 		return err
 	}
 	if s.dispatcher != nil {
-		_ = s.dispatcher.DispatchOrgChange(ctx, orgID, relative, "delete_file", target)
+		if dispatchErr := s.dispatcher.DispatchOrgChange(ctx, orgID, relative, "delete_file", target); dispatchErr != nil {
+			s.recordDispatchFailure(ctx, orgID, "", relative, "dispatch_org_delete_file", dispatchErr)
+		}
 	}
 	return nil
 }
@@ -175,7 +233,9 @@ func (s *KnowledgeService) DeleteAppFile(ctx context.Context, principal auth.Pri
 		return err
 	}
 	if s.dispatcher != nil {
-		_ = s.dispatcher.DispatchAppChange(ctx, orgID, appID, relative, "delete_file", target)
+		if dispatchErr := s.dispatcher.DispatchAppChange(ctx, orgID, appID, relative, "delete_file", target); dispatchErr != nil {
+			s.recordDispatchFailure(ctx, orgID, appID, relative, "dispatch_app_delete_file", dispatchErr)
+		}
 	}
 	return nil
 }

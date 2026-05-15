@@ -6,10 +6,22 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
+	"log/slog"
 
 	"oc-manager/internal/domain"
+	"oc-manager/internal/service"
 	"oc-manager/internal/store/sqlc"
 )
+
+// KnowledgeAuditRecorder 抽象写 audit_logs 能力,与 service 包同构。
+// 由 cmd/server 装配时注入 *service.AuditService;handler 测试可用内存 fake。
+//
+// 用途:app scope 没有 knowledge_sync_status 行可写,worker 完成 / 失败时把事件
+// 落 audit_logs,前端可在审计页面查 target_type=app_knowledge_sync 看每次同步结果。
+// 完整事件链:service.dispatch_app_* (入队) → worker.app_knowledge_sync (执行)。
+type KnowledgeAuditRecorder interface {
+	Record(ctx context.Context, event service.AuditEvent) (service.AuditResult, error)
+}
 
 // KnowledgeFileSource 抽象 manager 主副本文件读取能力。
 // 同步任务不直接依赖 files.KnowledgeMaster，便于在测试中注入内存 reader。
@@ -65,6 +77,10 @@ type KnowledgeSyncHandler struct {
 	source       KnowledgeFileSource
 	sink         KnowledgeFileSink
 	statusWriter KnowledgeSyncStatusWriter
+	// auditor 用于 app scope 同步完成 / 失败时落 audit_logs。
+	// org scope 已经有 knowledge_sync_status 表展示;auditor 仅在 app scope 启用,
+	// 避免双写(org 已有结构化存储,再写 audit 只会让事件流冗余)。
+	auditor KnowledgeAuditRecorder
 }
 
 // NewKnowledgeSyncHandler 创建 handler。
@@ -76,6 +92,13 @@ func NewKnowledgeSyncHandler(source KnowledgeFileSource, sink KnowledgeFileSink)
 // 与旧装配兼容。生产装配应从 cmd/server 注入 db-backed 实现。
 func (h *KnowledgeSyncHandler) SetStatusWriter(w KnowledgeSyncStatusWriter) {
 	h.statusWriter = w
+}
+
+// SetAuditor 注入 app scope 的审计写入器。
+// 不注入时 app scope 完成 / 失败完全不可观测(前端无法定位是哪个 app 同步出错);
+// 生产应注入 *service.AuditService 让 audit_logs 留痕。
+func (h *KnowledgeSyncHandler) SetAuditor(a KnowledgeAuditRecorder) {
+	h.auditor = a
 }
 
 // Handle 处理一次同步事件。
@@ -99,12 +122,46 @@ func (h *KnowledgeSyncHandler) Handle(ctx context.Context, job sqlc.Job) error {
 		if payload.Scope == "org" && h.statusWriter != nil {
 			_ = h.statusWriter.MarkOrgNodeFailed(ctx, payload.OrgID, payload.NodeID, err.Error())
 		}
+		// app scope 走 audit_logs:无结构化状态表,把失败事件作为审计记录,
+		// 前端审计页面可按 target_type=app_knowledge_sync 检索失败原因。
+		if payload.Scope == "app" {
+			h.recordAppSync(ctx, payload, "failed", err.Error())
+		}
 		return err
 	}
 	if payload.Scope == "org" && h.statusWriter != nil {
 		_ = h.statusWriter.MarkOrgNodeSynced(ctx, payload.OrgID, payload.NodeID)
 	}
+	if payload.Scope == "app" {
+		h.recordAppSync(ctx, payload, "succeeded", "")
+	}
 	return nil
+}
+
+// recordAppSync 把 app scope 同步事件落到 audit_logs。
+// 失败时 errorMessage 非空,成功时 ""。任何审计写入失败仅打日志,不抛回 worker。
+// 备注:noop change_type 也会留痕,便于排查"重试按钮按了但啥都没做"的情况(虽然
+// 当前 dispatcher 没有为 app scope 入过 noop,留 hook 给未来扩展)。
+func (h *KnowledgeSyncHandler) recordAppSync(ctx context.Context, payload knowledgeSyncPayload, result, errMsg string) {
+	if h.auditor == nil {
+		return
+	}
+	event := service.AuditEvent{
+		ActorRole:    "system",
+		OrgID:        payload.OrgID,
+		TargetType:   "app_knowledge_sync",
+		TargetID:     payload.AppID,
+		Action:       payload.ChangeType, // upload_file / delete_file / noop
+		Result:       result,
+		ErrorMessage: errMsg,
+		Metadata: map[string]any{
+			"node_id":  payload.NodeID,
+			"rel_path": payload.RelPath,
+		},
+	}
+	if _, err := h.auditor.Record(ctx, event); err != nil {
+		slog.ErrorContext(ctx, "写 app_knowledge_sync 审计失败", "error", err)
+	}
 }
 
 // execute 拆出原核心同步逻辑，让 Handle 集中做 status 旁路。

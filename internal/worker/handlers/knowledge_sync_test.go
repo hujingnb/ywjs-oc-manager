@@ -8,8 +8,10 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 	"oc-manager/internal/domain"
+	"oc-manager/internal/service"
 	"oc-manager/internal/store/sqlc"
 )
 
@@ -146,4 +148,68 @@ func TestKnowledgeSyncHandler_RejectsMissingNodeID(t *testing.T) {
 	payload := []byte(`{"scope":"org","org_id":"o","change_type":"delete_file","rel_path":"x"}`)
 	err := handler.Handle(context.Background(), buildKnowledgeJob(t, payload))
 	require.Error(t, err)
+}
+
+// TestKnowledgeSyncHandler_AppScopeSuccessWritesAudit 验证 app scope 同步成功时
+// 通过注入的 auditor 写一条 result=succeeded 的 audit_logs 事件,target_type
+// 必须为 app_knowledge_sync,target_id 取 app_id,让审计页面可按应用筛选。
+func TestKnowledgeSyncHandler_AppScopeSuccessWritesAudit(t *testing.T) {
+	source := &memoryKnowledgeSource{files: map[string][]byte{"org/o1/app/a1/knowledge/x.md": []byte("body")}}
+	sink := &memoryKnowledgeSink{}
+	auditor := &fakeWorkerAuditor{}
+	handler := NewKnowledgeSyncHandler(source, sink)
+	handler.SetAuditor(auditor)
+
+	payload := []byte(`{"scope":"app","org_id":"o1","app_id":"a1","node_id":"n1","change_type":"upload_file","rel_path":"x.md","master_path":"org/o1/app/a1/knowledge/x.md"}`)
+	require.NoError(t, handler.Handle(context.Background(), buildKnowledgeJob(t, payload)))
+
+	require.Len(t, auditor.events, 1)
+	ev := auditor.events[0]
+	assert.Equal(t, "app_knowledge_sync", ev.TargetType)
+	assert.Equal(t, "a1", ev.TargetID)
+	assert.Equal(t, "upload_file", ev.Action)
+	assert.Equal(t, "succeeded", ev.Result)
+	assert.Equal(t, "n1", ev.Metadata["node_id"])
+	assert.Equal(t, "x.md", ev.Metadata["rel_path"])
+}
+
+// TestKnowledgeSyncHandler_AppScopeFailureWritesAudit 验证失败时 result=failed
+// 且 error_message 非空,handler 不吞错(仍返回原 sink 错误)。
+func TestKnowledgeSyncHandler_AppScopeFailureWritesAudit(t *testing.T) {
+	source := &memoryKnowledgeSource{files: map[string][]byte{"m": []byte("x")}}
+	sink := &memoryKnowledgeSink{uploadErr: errors.New("agent unreachable")}
+	auditor := &fakeWorkerAuditor{}
+	handler := NewKnowledgeSyncHandler(source, sink)
+	handler.SetAuditor(auditor)
+
+	payload := []byte(`{"scope":"app","org_id":"o","app_id":"a","node_id":"n","change_type":"upload_file","rel_path":"r","master_path":"m"}`)
+	err := handler.Handle(context.Background(), buildKnowledgeJob(t, payload))
+	require.Error(t, err)
+	require.Len(t, auditor.events, 1)
+	assert.Equal(t, "failed", auditor.events[0].Result)
+	assert.Contains(t, auditor.events[0].ErrorMessage, "agent unreachable")
+}
+
+// TestKnowledgeSyncHandler_OrgScopeDoesNotWriteAudit 验证 org scope 不走 audit_logs
+// (已经有 knowledge_sync_status 表),避免双写造成事件冗余。
+func TestKnowledgeSyncHandler_OrgScopeDoesNotWriteAudit(t *testing.T) {
+	source := &memoryKnowledgeSource{files: map[string][]byte{"m": []byte("x")}}
+	sink := &memoryKnowledgeSink{}
+	auditor := &fakeWorkerAuditor{}
+	handler := NewKnowledgeSyncHandler(source, sink)
+	handler.SetAuditor(auditor)
+
+	payload := []byte(`{"scope":"org","org_id":"o1","node_id":"n1","change_type":"upload_file","rel_path":"r","master_path":"m"}`)
+	require.NoError(t, handler.Handle(context.Background(), buildKnowledgeJob(t, payload)))
+	require.Empty(t, auditor.events) // org scope 必须由 knowledge_sync_status 表承担,不进 audit_logs。
+}
+
+// fakeWorkerAuditor 收集 worker handler 提交的 AuditEvent,供断言。
+type fakeWorkerAuditor struct {
+	events []service.AuditEvent
+}
+
+func (f *fakeWorkerAuditor) Record(_ context.Context, event service.AuditEvent) (service.AuditResult, error) {
+	f.events = append(f.events, event)
+	return service.AuditResult{}, nil
 }

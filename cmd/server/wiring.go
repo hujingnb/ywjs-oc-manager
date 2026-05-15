@@ -8,9 +8,11 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
+	"log/slog"
 	"net/http"
 	"strconv"
 	"strings"
+	"sync"
 	"time"
 
 	dockercli "github.com/docker/docker/client"
@@ -540,19 +542,40 @@ func (w *runtimeInspectorWrapper) InspectContainer(ctx context.Context, nodeID, 
 //   - org 维度：枚举 active 节点，全部同步（Phase A1 已知妥协，B 阶段后续可换 tar 全量）；
 //   - app 维度：仅同步该应用所在节点。
 //
-// 任意节点查询失败/job 写入失败立即冒泡，由 service 决定是否中断主流程；
-// 当前实现把 dispatcher 错误吞在 service 层（参见 KnowledgeService 的 _ =），
-// 因为主副本已经写入，不应因为同步失败回滚。
+// 同步入队完成后,还会通过 reloader 给受影响的运行中 app 入一条 debounced
+// app_restart_container job:Hermes 容器只在启动时读 SOUL.md / skills,主副本
+// 同步到节点目录后仍需重启容器才能让 LLM 真正读到新内容。
+//
+// 任意节点查询失败/job 写入失败立即冒泡到 service 层；service 层把错误写 audit_logs
+// 后仍返回主流程 nil（主副本已经写入，不应因为同步失败让用户接口翻 500）。
 type knowledgeSyncDispatcher struct {
 	queries    knowledgeJobsQueries
 	notifier   service.JobNotifier
 	syncStatus knowledgeSyncStatusMarker
+	// knowledge 用于 RetryOrgNode 全量重推时扫主副本所有文件并逐个入 upload_file job。
+	// 也用于 EnqueueOrgReload 之前判断主副本是否为空(空目录无需重启 app)——可选优化,
+	// 当前实现不做此判断:reload 是 idempotent 的,空主副本重启一次最多让 hermes 再读一遍空目录。
+	knowledge workerhandlers.KnowledgeReader
+	// reloader 负责给运行中 app 入 app_restart_container job(带 in-memory debounce),
+	// 让 hermes 容器在重启后读到最新主副本。nil 时跳过 reload(测试装配兼容)。
+	reloader knowledgeAppReloader
 }
 
 type knowledgeJobsQueries interface {
 	ListRuntimeNodes(ctx context.Context, arg sqlc.ListRuntimeNodesParams) ([]sqlc.RuntimeNode, error)
 	GetApp(ctx context.Context, id pgtype.UUID) (sqlc.App, error)
+	ListAppsByOrg(ctx context.Context, arg sqlc.ListAppsByOrgParams) ([]sqlc.App, error)
 	CreateJob(ctx context.Context, arg sqlc.CreateJobParams) (sqlc.Job, error)
+}
+
+// knowledgeAppReloader 抽象「让目标 app(s) 重启以加载新知识库」能力。
+// 实现需要做 in-memory debounce(同一 app 在 window 内只入一次 restart job),
+// 否则 N 次连续上传会引发 N 次容器重启,严重影响用户体验。
+type knowledgeAppReloader interface {
+	// EnqueueAppReload 给单个 app 入 reload job;非 running/binding_waiting 状态跳过。
+	EnqueueAppReload(ctx context.Context, appID string) error
+	// EnqueueOrgReload 列出该 org 所有 running app 并逐个入 reload job。
+	EnqueueOrgReload(ctx context.Context, orgID string) error
 }
 
 // knowledgeSyncStatusMarker 抽象 (org, node) 状态写入；与 worker handler 同的接口
@@ -570,30 +593,74 @@ func (d *knowledgeSyncDispatcher) SetStatusMarker(m knowledgeSyncStatusMarker) {
 	d.syncStatus = m
 }
 
-// RetryOrgNode 触发指定 (org, node) 重新同步：入队一个 'noop' change_type 的 sync job，
-// worker 处理时只走 status writer 把状态推到 synced（无文件改动 → upload/delete 都跳过）。
+// SetKnowledgeReader 注入主副本读取能力。RetryOrgNode 用它扫主副本所有文件,
+// 把"重试同步"真的变成全量重推(原 noop 实现只翻状态不动文件)。
+func (d *knowledgeSyncDispatcher) SetKnowledgeReader(r workerhandlers.KnowledgeReader) {
+	d.knowledge = r
+}
+
+// SetReloader 注入 app reload 入队器。注入后任何 org / app 知识库改动都会触发
+// 受影响 app 的容器重启,使 Hermes 真正读到新 SOUL.md / skills;不注入则 hermes
+// 容器内的内容停留在 app_initialize 时的快照,与主副本失同步。
+func (d *knowledgeSyncDispatcher) SetReloader(r knowledgeAppReloader) {
+	d.reloader = r
+}
+
+// RetryOrgNode 触发指定 (org, node) 重新同步:扫主副本 org/<id>/knowledge 下所有
+// 文件,每个文件单独入一条 upload_file sync job,worker 逐个推到目标节点,完成后
+// status_writer 把状态翻回 synced。
 //
-// 当前实现简化为入队 'noop' job：worker handler 看到 change_type='noop' 直接 mark synced。
-// 这避免引入"知识库目录全量打 tar 推过去"的额外路径，保持单 job 类型。
+// 历史:原实现入 noop job 直接翻 synced,但实际文件并未重推——遇到节点上文件
+// 损坏或丢失时,"重试同步"按钮按完状态变 synced 但内容照旧,完全无法修复。
+// 现在改为字面意义上的"全量重新同步"。
+//
+// 空目录或 knowledge reader 未注入(测试装配)时退化为入一条 noop,让 status 推到
+// synced(没有内容要同步,语义上也是"最新")。
 func (d *knowledgeSyncDispatcher) RetryOrgNode(ctx context.Context, orgID, nodeID string) error {
-	if err := d.enqueue(ctx, knowledgeSyncJobInput{
-		Scope:      "org",
-		OrgID:      orgID,
-		NodeID:     nodeID,
-		ChangeType: "noop",
-		RelPath:    "(retry)", // 占位，noop 不读
-		MasterPath: "(retry)",
-	}); err != nil {
-		return err
-	}
+	// pending 状态写入失败不阻塞主链路;worker 完成时会再次 upsert(synced/failed)。
 	if d.syncStatus != nil {
 		_ = d.syncStatus.MarkOrgNodePending(ctx, orgID, nodeID)
+	}
+	if d.knowledge == nil {
+		// 装配未注入 KnowledgeReader 时退化:保留旧 noop 行为,让 worker mark synced。
+		return d.enqueue(ctx, knowledgeSyncJobInput{
+			Scope: "org", OrgID: orgID, NodeID: nodeID,
+			ChangeType: "noop", RelPath: "(retry)", MasterPath: "(retry)",
+		})
+	}
+	prefix := fmt.Sprintf("org/%s/knowledge", orgID)
+	enqueued := 0
+	walkErr := d.knowledge.WalkFiles(prefix, func(relPath string, _ int64) error {
+		if err := d.enqueue(ctx, knowledgeSyncJobInput{
+			Scope:      "org",
+			OrgID:      orgID,
+			NodeID:     nodeID,
+			ChangeType: "upload_file",
+			RelPath:    relPath,
+			MasterPath: prefix + "/" + relPath,
+		}); err != nil {
+			return err
+		}
+		enqueued++
+		return nil
+	})
+	if walkErr != nil {
+		return fmt.Errorf("扫主副本失败: %w", walkErr)
+	}
+	if enqueued == 0 {
+		// 主副本为空——退化到 noop 让 worker mark synced,避免"重试按完前端永远 pending"。
+		return d.enqueue(ctx, knowledgeSyncJobInput{
+			Scope: "org", OrgID: orgID, NodeID: nodeID,
+			ChangeType: "noop", RelPath: "(retry-empty)", MasterPath: "(retry-empty)",
+		})
 	}
 	return nil
 }
 
 // DispatchOrgChange 给所有 active 节点入队一个 sync 任务。
 // 入队成功后立刻写 (org, node) = pending 状态，让前端立即可见"同步中"。
+// 最后再让 reloader 把该 org 所有 running app 排进 debounced 重启,使 Hermes 容器
+// 真正读到新主副本(SOUL.md / skills 仅在容器启动时加载)。
 func (d *knowledgeSyncDispatcher) DispatchOrgChange(ctx context.Context, orgID, relPath, changeType, masterPath string) error {
 	nodes, err := d.queries.ListRuntimeNodes(ctx, sqlc.ListRuntimeNodesParams{Limit: 200, Offset: 0})
 	if err != nil {
@@ -619,10 +686,17 @@ func (d *knowledgeSyncDispatcher) DispatchOrgChange(ctx context.Context, orgID, 
 			_ = d.syncStatus.MarkOrgNodePending(ctx, orgID, nodeID)
 		}
 	}
+	// 入队 reload:reload 是"附属操作",失败仅记日志,不让用户的上传/删除接口翻 500。
+	// 让 hermes 真读到新内容必须经过容器重启(SOUL.md / skills 启动时 snapshot)。
+	if d.reloader != nil {
+		if err := d.reloader.EnqueueOrgReload(ctx, orgID); err != nil {
+			slog.WarnContext(ctx, "入队 org reload 失败", "org_id", orgID, "error", err)
+		}
+	}
 	return nil
 }
 
-// DispatchAppChange 给应用所在节点入队 sync 任务。
+// DispatchAppChange 给应用所在节点入队 sync 任务,并对该 app 入 debounced reload。
 func (d *knowledgeSyncDispatcher) DispatchAppChange(ctx context.Context, orgID, appID, relPath, changeType, masterPath string) error {
 	id, err := parseUUIDForWiring(appID)
 	if err != nil {
@@ -635,7 +709,7 @@ func (d *knowledgeSyncDispatcher) DispatchAppChange(ctx context.Context, orgID, 
 	if !app.RuntimeNodeID.Valid {
 		return nil // 应用未绑定节点，跳过
 	}
-	return d.enqueue(ctx, knowledgeSyncJobInput{
+	if err := d.enqueue(ctx, knowledgeSyncJobInput{
 		Scope:      "app",
 		OrgID:      orgID,
 		AppID:      appID,
@@ -643,7 +717,15 @@ func (d *knowledgeSyncDispatcher) DispatchAppChange(ctx context.Context, orgID, 
 		ChangeType: changeType,
 		RelPath:    relPath,
 		MasterPath: masterPath,
-	})
+	}); err != nil {
+		return err
+	}
+	if d.reloader != nil {
+		if err := d.reloader.EnqueueAppReload(ctx, appID); err != nil {
+			slog.WarnContext(ctx, "入队 app reload 失败", "app_id", appID, "error", err)
+		}
+	}
+	return nil
 }
 
 type knowledgeSyncJobInput struct {
@@ -661,6 +743,138 @@ type knowledgeSyncJobInput struct {
 	RelPath string
 	// MasterPath 是 manager 主副本中的本地文件路径；worker 从本地读取后再通过 agent API 写入节点。
 	MasterPath string
+}
+
+// knowledgeReloadCoordinator 实现 knowledgeAppReloader:给运行中 app 入
+// app_restart_container job,让 Hermes 容器重启后读到新主副本。
+//
+// 关键设计点:
+//   - in-memory debounce:同一 appID 在 window 内只入一次 reload job。原因是
+//     用户连续上传 N 个文件 → DispatchAppChange 触发 N 次 reload → N 次重启,
+//     每次 5-10s 用户感知到 hermes 长时间不可用。debounce 把"短时间内的多次改动"
+//     合并为一次"延迟重启",在最后一次改动 ~delay 秒后才实际重启容器。
+//   - RunAfter=now+delay:让 worker 在 delay 秒后才取 job,给后续的连续改动
+//     一个时间窗口落到同一次重启。
+//   - 仅 running / binding_waiting 才入:其它状态(init/stopped/failed/deleted)
+//     重启没有业务意义,入了反而让 worker 跑空。
+//
+// 进程级状态:manager 单实例部署时 in-memory map 足够;若未来横向扩展为
+// 多个 manager 实例,需要换成 redis SETNX。当前 debounce 失效带来的代价
+// 是"多重启一次",不会引发数据问题。
+type knowledgeReloadCoordinator struct {
+	queries  knowledgeReloadQueries
+	notifier service.JobNotifier
+	mu       sync.Mutex
+	lastAt   map[string]time.Time
+	window   time.Duration // 同一 appID 多次入队的抑制窗口
+	delay    time.Duration // 入队时 RunAfter 相对 now 的偏移
+}
+
+// knowledgeReloadQueries 是 reload 协调器用到的 sqlc 子集。
+type knowledgeReloadQueries interface {
+	GetApp(ctx context.Context, id pgtype.UUID) (sqlc.App, error)
+	ListAppsByOrg(ctx context.Context, arg sqlc.ListAppsByOrgParams) ([]sqlc.App, error)
+	CreateJob(ctx context.Context, arg sqlc.CreateJobParams) (sqlc.Job, error)
+}
+
+// newKnowledgeReloadCoordinator 创建协调器,window / delay 取经验值 5s。
+//
+// 5s 的权衡:太短(<2s)用户连续上传多个文件时无法合并重启;太长(>30s)用户
+// 在前端等"刚才上传是否生效"的时间过久。5s 在两者之间,与 docker 容器健康
+// 检查的典型周期同量级。
+func newKnowledgeReloadCoordinator(queries knowledgeReloadQueries, notifier service.JobNotifier) *knowledgeReloadCoordinator {
+	return &knowledgeReloadCoordinator{
+		queries:  queries,
+		notifier: notifier,
+		lastAt:   map[string]time.Time{},
+		window:   5 * time.Second,
+		delay:    5 * time.Second,
+	}
+}
+
+// tryDebounce 在 window 内返回 false 抑制本次入队;否则更新 lastAt 并返回 true。
+func (c *knowledgeReloadCoordinator) tryDebounce(appID string) bool {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	now := time.Now()
+	if last, ok := c.lastAt[appID]; ok && now.Sub(last) < c.window {
+		return false
+	}
+	c.lastAt[appID] = now
+	return true
+}
+
+// EnqueueAppReload 给单个 app 入 app_restart_container job(若 app 处于 running /
+// binding_waiting 状态)。其它状态直接返回 nil(不算错,只是没必要重启)。
+func (c *knowledgeReloadCoordinator) EnqueueAppReload(ctx context.Context, appID string) error {
+	id, err := parseUUIDForWiring(appID)
+	if err != nil {
+		return fmt.Errorf("非法 app_id: %w", err)
+	}
+	app, err := c.queries.GetApp(ctx, id)
+	if err != nil {
+		return fmt.Errorf("查询应用失败: %w", err)
+	}
+	return c.enqueueIfReloadable(ctx, app)
+}
+
+// EnqueueOrgReload 列该 org 所有 active app,逐个调 enqueueIfReloadable。
+// 单个 app 入队失败不中断其他 app(reload 是 best-effort);最先发生的错误
+// 会作为返回值,调用方决定是否记 warn。
+func (c *knowledgeReloadCoordinator) EnqueueOrgReload(ctx context.Context, orgID string) error {
+	id, err := parseUUIDForWiring(orgID)
+	if err != nil {
+		return fmt.Errorf("非法 org_id: %w", err)
+	}
+	// limit=500:单组织 app 数量极少超过此规模;若超过则后续 page 不重启,
+	// 由 user 手动重启或下次改动自然触发。避免无界查询导致 manager 内存压力。
+	apps, err := c.queries.ListAppsByOrg(ctx, sqlc.ListAppsByOrgParams{OrgID: id, Limit: 500, Offset: 0})
+	if err != nil {
+		return fmt.Errorf("列出组织应用失败: %w", err)
+	}
+	var firstErr error
+	for _, app := range apps {
+		if err := c.enqueueIfReloadable(ctx, app); err != nil && firstErr == nil {
+			firstErr = err
+		}
+	}
+	return firstErr
+}
+
+// enqueueIfReloadable 共享逻辑:状态过滤 + debounce + 入 restart job。
+func (c *knowledgeReloadCoordinator) enqueueIfReloadable(ctx context.Context, app sqlc.App) error {
+	if app.Status != domain.AppStatusRunning && app.Status != domain.AppStatusBindingWaiting {
+		return nil
+	}
+	appID := uuidToStringWiring(app.ID)
+	if !c.tryDebounce(appID) {
+		return nil
+	}
+	payload, err := jsonMarshal(map[string]any{
+		"app_id":       appID,
+		"operation":    string(service.RuntimeOperationRestart),
+		"runtime_node": uuidToStringWiring(app.RuntimeNodeID),
+		"trigger":      "knowledge_reload", // 仅元数据,worker handler 不读;留作 audit/排障
+	})
+	if err != nil {
+		return fmt.Errorf("序列化 reload payload 失败: %w", err)
+	}
+	job, err := c.queries.CreateJob(ctx, sqlc.CreateJobParams{
+		Type:        domain.JobTypeAppRestartContainer,
+		Priority:    50,
+		MaxAttempts: 3,
+		// RunAfter 延后 delay 秒:给后续可能的连续改动一个合并窗口。
+		// worker 在该时刻之后才会取这条 job。
+		RunAfter:    pgtype.Timestamptz{Time: time.Now().Add(c.delay), Valid: true},
+		PayloadJson: payload,
+	})
+	if err != nil {
+		return fmt.Errorf("入队 reload job 失败: %w", err)
+	}
+	if c.notifier != nil {
+		_ = c.notifier.Enqueue(ctx, uuidToStringWiring(job.ID))
+	}
+	return nil
 }
 
 func (d *knowledgeSyncDispatcher) enqueue(ctx context.Context, input knowledgeSyncJobInput) error {

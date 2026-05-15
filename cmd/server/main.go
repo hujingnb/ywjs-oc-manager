@@ -133,11 +133,22 @@ func runManager(ctx context.Context, cfg config.Config, logOut io.Writer) error 
 	// 同步状态服务：dispatcher 入队时写 pending、worker handler 完成时写 synced/failed、
 	// API 层读取按 org 列出每节点状态供前端展示「重试同步」入口。
 	knowledgeSyncStatusSvc := service.NewKnowledgeSyncStatusService(dbStore.Queries)
+	// reload 协调器:knowledge 改动后给受影响 app 入 app_restart_container job
+	// (带 in-memory debounce),使 Hermes 容器重启后真正读到新主副本。
+	// 单 manager 实例:in-memory state 够用;多实例横向扩展时换 redis SETNX。
+	knowledgeReloader := newKnowledgeReloadCoordinator(dbStore.Queries, redisQueue)
 	knowledgeDispatcher := newKnowledgeSyncDispatcher(dbStore.Queries, redisQueue)
 	knowledgeDispatcher.SetStatusMarker(knowledgeSyncStatusSvc)
+	// 注入主副本读取能力:RetryOrgNode 用它扫所有文件做真正的"全量重推",
+	// 不再是空有状态翻转的 noop。
+	knowledgeDispatcher.SetKnowledgeReader(knowledgeMaster)
+	knowledgeDispatcher.SetReloader(knowledgeReloader)
 	knowledgeService.SetSyncDispatcher(knowledgeDispatcher)
 	knowledgeService.SetSyncStatusSource(knowledgeSyncStatusSvc)
 	knowledgeService.SetRetryDispatcher(knowledgeDispatcher)
+	// dispatcher 入队失败时把错误写 audit_logs(target_type=knowledge_sync),
+	// 让"主副本写成功但同步未入队"这类中间态可观测。
+	knowledgeService.SetAuditor(auditService)
 	appService := service.NewAppService(dbStore.Queries)
 	appService.SetTxRunner(store.NewAppRunner(dbStore))
 	appService.SetJobNotifier(redisQueue)
@@ -296,6 +307,9 @@ func runManager(ctx context.Context, cfg config.Config, logOut io.Writer) error 
 	}
 	knowledgeSyncHandler := handlers.NewKnowledgeSyncHandler(knowledgeMaster, runtimeAdapter)
 	knowledgeSyncHandler.SetStatusWriter(knowledgeSyncStatusSvc)
+	// app scope 没有 knowledge_sync_status 表;把完成/失败事件落到 audit_logs
+	// (target_type=app_knowledge_sync),前端审计页面可按 app_id 检索同步历史。
+	knowledgeSyncHandler.SetAuditor(auditService)
 	if err := registry.Register("knowledge_sync_node", knowledgeSyncHandler.Handle); err != nil {
 		return fmt.Errorf("注册 knowledge_sync_node handler 失败: %w", err)
 	}

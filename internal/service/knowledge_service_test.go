@@ -3,6 +3,7 @@ package service
 
 import (
 	"context"
+	"errors"
 	"strings"
 	"testing"
 
@@ -129,6 +130,73 @@ func TestKnowledgeServiceOrgAdminCanGetOrgSyncStatus(t *testing.T) {
 
 	_, err := svc.GetOrgSyncStatus(context.Background(), orgKnowledgeAdmin(), testKnowledgeOrg)
 	require.NoError(t, err)
+}
+
+// TestKnowledgeServiceSaveOrgRecordsDispatchFailure 验证主副本写入成功但 dispatcher
+// 入队失败时:1) 主流程不报错,接口仍返回成功;2) audit_logs 留下 failed 记录,
+// 让运维能从审计页面发现"知识库已落主副本但未通知节点"的中间态。
+func TestKnowledgeServiceSaveOrgRecordsDispatchFailure(t *testing.T) {
+	svc := newKnowledgeService(t)
+	auditor := &fakeKnowledgeAuditor{}
+	svc.SetAuditor(auditor)
+	svc.SetSyncDispatcher(failingDispatcher{err: errors.New("redis down")})
+
+	// 主副本仍然写成功,接口对用户返回 nil:服务层契约保留"主副本是事实来源,同步是异步事项"。
+	err := svc.SaveOrgFile(context.Background(), orgKnowledgeAdmin(), testKnowledgeOrg, "doc.md", strings.NewReader("hello"), 5)
+	require.NoError(t, err)
+
+	// audit 留下一条 result=failed、action=dispatch_org_upload_file 的记录,排障可循。
+	require.Len(t, auditor.events, 1)
+	ev := auditor.events[0]
+	assert.Equal(t, "knowledge_sync", ev.TargetType)
+	assert.Equal(t, "failed", ev.Result)
+	assert.Equal(t, "dispatch_org_upload_file", ev.Action)
+	assert.Equal(t, testKnowledgeOrg, ev.OrgID)
+	assert.Contains(t, ev.ErrorMessage, "redis down")
+}
+
+// TestKnowledgeServiceDeleteAppRecordsDispatchFailure 覆盖应用级删除走相同
+// 审计路径:确保不同 scope(app)+ change_type(delete)组合都不被静默吞掉。
+func TestKnowledgeServiceDeleteAppRecordsDispatchFailure(t *testing.T) {
+	svc := newKnowledgeService(t)
+	auditor := &fakeKnowledgeAuditor{}
+	svc.SetAuditor(auditor)
+	svc.SetSyncDispatcher(failingDispatcher{err: errors.New("queue full")})
+
+	// 先用 owner 身份写入一条主副本,确保 Delete 不因为目标缺失而提前返回。
+	owner := auth.Principal{Role: domain.UserRoleOrgMember, OrgID: testKnowledgeOrg, UserID: testKnowledgeOwner}
+	require.NoError(t, svc.SaveAppFile(context.Background(), owner, testKnowledgeOrg, testKnowledgeApp, testKnowledgeOwner, "a.md", strings.NewReader("x"), 1))
+	auditor.events = nil // 清掉 Save 那次入队失败留下的痕迹,只断言 Delete 那次。
+
+	err := svc.DeleteAppFile(context.Background(), owner, testKnowledgeOrg, testKnowledgeApp, testKnowledgeOwner, "a.md")
+	require.NoError(t, err)
+
+	require.Len(t, auditor.events, 1)
+	ev := auditor.events[0]
+	assert.Equal(t, "dispatch_app_delete_file", ev.Action)
+	assert.Equal(t, "failed", ev.Result)
+	assert.Equal(t, testKnowledgeApp, ev.TargetID) // app scope 时 target_id 用 app_id,方便按应用筛选。
+}
+
+// failingDispatcher 给所有 Dispatch* 方法返回固定 err,用于触发 audit 路径。
+type failingDispatcher struct{ err error }
+
+func (f failingDispatcher) DispatchOrgChange(_ context.Context, _, _, _, _ string) error {
+	return f.err
+}
+
+func (f failingDispatcher) DispatchAppChange(_ context.Context, _, _, _, _, _ string) error {
+	return f.err
+}
+
+// fakeKnowledgeAuditor 收集 service 投递过来的 AuditEvent,供单测断言。
+type fakeKnowledgeAuditor struct {
+	events []AuditEvent
+}
+
+func (f *fakeKnowledgeAuditor) Record(_ context.Context, event AuditEvent) (AuditResult, error) {
+	f.events = append(f.events, event)
+	return AuditResult{}, nil
 }
 
 func newKnowledgeService(t *testing.T) *KnowledgeService {
