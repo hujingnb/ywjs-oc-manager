@@ -155,11 +155,11 @@
 </template>
 
 <script setup lang="ts">
-import { computed, ref, watch } from 'vue'
-import { useRouter } from 'vue-router'
+import { computed, h, ref, watch } from 'vue'
+import { useRouter, RouterLink } from 'vue-router'
 import {
   NButton, NCard, NForm, NFormItem, NGrid, NGridItem,
-  NInput, NSelect, NSpace, type SelectOption,
+  NInput, NSelect, NSpace, NTag, type SelectOption,
 } from 'naive-ui'
 
 import { formatMemberRole, formatMemberStatus } from '@/domain/status'
@@ -194,6 +194,11 @@ const orgEyebrow = computed(() => auth.user?.role === 'platform_admin' ? 'Platfo
 const canOnboardMember = computed(() => auth.user?.role === 'org_admin' && Boolean(effectiveOrgId.value))
 // 成员写操作只允许本组织管理员；平台管理员在本页仅查看成员信息。
 const canManageMembers = computed(() => auth.user?.role === 'org_admin' && auth.user?.org_id === effectiveOrgId.value)
+// canCreateAppForMember 与后端 auth.CanCreateAppForMember 对齐：
+// platform_admin 跨组织可补建；org_admin 仅在本组织可补建；普通成员不可。
+const canCreateAppForMember = computed(() =>
+  auth.user?.role === 'platform_admin' ||
+  (auth.user?.role === 'org_admin' && auth.user?.org_id === effectiveOrgId.value))
 // 当前登录用户不能删除自身；后端同样会兜底拒绝，前端隐藏危险入口减少误操作。
 const currentUserId = computed(() => auth.user?.id)
 
@@ -272,13 +277,24 @@ const columns = [
   // 角色列页面内 render，不抽 factory
   { title: '角色', key: 'role', render: (row: Member) => formatMemberRole(row.role) },
   statusColumn<Member>('状态', r => formatMemberStatus(r.status)),
+  {
+    title: '实例',
+    key: 'active_app_name',
+    render: (row: Member) =>
+      row.active_app_id
+        ? h(RouterLink, { to: `/apps/${row.active_app_id}/overview` }, () => row.active_app_name ?? '')
+        : h(NTag, { type: 'warning', size: 'small' }, () => '无实例'),
+  },
   // 启用/禁用互斥：用两条 RowAction + hidden 分别渲染
   actionColumn<Member>([
     { label: '禁用', onClick: r => onToggle(r, 'disable'), hidden: r => !canManageMembers.value || r.status !== 'active' },
     { label: '启用', type: 'primary', onClick: r => onToggle(r, 'enable'), hidden: r => !canManageMembers.value || r.status === 'active' },
     { label: '重置密码', hidden: () => !canManageMembers.value, onClick: r => openResetForm(r) },
     { label: '删除', type: 'error', hidden: r => !canManageMembers.value || r.id === currentUserId.value, onClick: r => { memberToDelete.value = r } },
-    { label: '创建新实例', type: 'primary', hidden: () => auth.user?.role !== 'platform_admin', onClick: r => openCreateAppForm(r) },
+    // 仅在「当前账号有补建权限」且「该行没有活跃实例」时显示，避免点击后被后端 ErrMemberCreateInvalid 兜底。
+    { label: '为该成员创建实例', type: 'primary',
+      hidden: r => !canCreateAppForMember.value || Boolean(r.active_app_id),
+      onClick: r => openCreateAppForm(r) },
   ]),
 ]
 
@@ -303,13 +319,14 @@ function openResetForm(member: Member) {
   resetFeedback.value = ''; resetError.value = false
 }
 
-// openCreateAppForm 打开平台管理员为已有成员复建实例的表单。
+// openCreateAppForm 打开补建实例表单，默认 app_name 取「{显示名} 的实例」，
+// 模型默认取组织 enabled_models 首项，减少组织管理员手填项。
 function openCreateAppForm(member: Member) {
   createAppTarget.value = member
   createAppResult.value = null
   createAppError.value = ''
   createAppForm.value = {
-    app_name: '',
+    app_name: `${member.display_name} 的实例`,
     persona_mode: 'org_inherited',
     channel_type: 'wechat',
     model_id: String(modelOptions.value[0]?.value ?? ''),

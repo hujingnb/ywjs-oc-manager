@@ -25,9 +25,19 @@ vi.mock('@/stores/auth', () => ({
   }),
 }))
 
-vi.mock('vue-router', () => ({
-  useRouter: () => ({ push: vi.fn() }),
-}))
+vi.mock('vue-router', async () => {
+  const actual = await import('vue-router')
+  return {
+    ...actual,
+    useRouter: () => ({ push: vi.fn() }),
+    RouterLink: defineComponent({
+      props: ['to'],
+      setup(props, { slots }) {
+        return () => h('a', { href: typeof props.to === 'string' ? props.to : props.to?.path ?? '' }, slots.default?.())
+      },
+    }),
+  }
+})
 
 vi.mock('@/api/hooks/useOrganizations', () => ({
   useOrganizationsQuery: () => ({
@@ -61,6 +71,8 @@ vi.mock('@/api/hooks/useMembers', () => ({
         display_name: '组织管理员',
         role: 'org_admin',
         status: 'active',
+        active_app_id: 'app-admin-1',
+        active_app_name: '管理员的实例',
       },
       {
         id: 'member-1',
@@ -170,6 +182,11 @@ describe('MembersPage', () => {
             return () => h('div', slots.default?.())
           },
         }),
+        NTag: defineComponent({
+          setup(_, { slots }) {
+            return () => h('span', slots.default?.())
+          },
+        }),
       },
     },
   })
@@ -195,23 +212,24 @@ describe('MembersPage', () => {
     expect(deleteButtons).toHaveLength(0)
   })
 
-  // 平台管理员可在每个成员行看到创建新实例入口，包括与当前平台管理员同 ID 的成员行。
-  it('平台管理员可看到每个成员行的创建新实例入口', () => {
+  // 平台管理员仅在没有活跃实例的成员行看到补建入口；与新版 hidden 条件保持一致。
+  it('平台管理员只在无实例成员行看到补建入口', () => {
     authUser.current = { id: 'admin-1', role: 'platform_admin' }
 
     const wrapper = mountPage()
 
-    const createAppButtons = wrapper.findAll('button').filter(button => button.text() === '创建新实例')
-    expect(createAppButtons).toHaveLength(2)
+    const createAppButtons = wrapper.findAll('button').filter(button => button.text() === '为该成员创建实例')
+    expect(createAppButtons).toHaveLength(1)
   })
 
-  // 组织管理员仍通过原开户入口创建成员，不显示平台复建实例入口。
-  it('组织管理员看不到平台复建实例入口', () => {
+  // 组织管理员可以看到「为该成员创建实例」入口，但只对没有活跃实例的成员行显示。
+  it('组织管理员可见无实例成员的补建入口', () => {
     authUser.current = { id: 'admin-1', role: 'org_admin', org_id: 'org-1' }
 
     const wrapper = mountPage()
 
-    expect(wrapper.findAll('button').some(button => button.text() === '创建新实例')).toBe(false)
+    const buttons = wrapper.findAll('button').filter(button => button.text() === '为该成员创建实例')
+    expect(buttons).toHaveLength(1)
   })
 
   // 平台管理员提交实例表单后展示新实例与初始化任务结果。
@@ -220,8 +238,11 @@ describe('MembersPage', () => {
     createMemberAppMock.mutateAsync.mockClear()
     const wrapper = mountPage()
 
-    await wrapper.findAll('button').filter(button => button.text() === '创建新实例')[1].trigger('click')
-    await wrapper.find('input').setValue('新实例')
+    await wrapper.findAll('button').filter(button => button.text() === '为该成员创建实例')[0].trigger('click')
+    // 默认 app_name 预填为「{显示名} 的实例」，测试覆盖默认值后再改名走表单提交。
+    const appNameInput = wrapper.find('input')
+    expect((appNameInput.element as HTMLInputElement).value).toBe('组织成员 的实例')
+    await appNameInput.setValue('新实例')
     await wrapper.findAll('button').find(button => button.text() === '提交创建')!.trigger('click')
 
     expect(createMemberAppMock.mutateAsync).toHaveBeenCalledWith({
@@ -243,7 +264,7 @@ describe('MembersPage', () => {
     createMemberAppMock.mutateAsync.mockClear()
     const wrapper = mountPage()
 
-    await wrapper.findAll('button').filter(button => button.text() === '创建新实例')[1].trigger('click')
+    await wrapper.findAll('button').filter(button => button.text() === '为该成员创建实例')[0].trigger('click')
     expect(wrapper.text()).toContain('提交创建')
 
     await wrapper.find('select').setValue('org-2')
@@ -251,5 +272,25 @@ describe('MembersPage', () => {
 
     expect(wrapper.text()).not.toContain('提交创建')
     expect(createMemberAppMock.mutateAsync).not.toHaveBeenCalled()
+  })
+
+  // 列表「实例」列在有活跃实例时渲染可点击链接，跳转到 /apps/:appId/overview。
+  it('已绑定实例的成员行展示可点击实例链接', () => {
+    authUser.current = { id: 'admin-1', role: 'org_admin', org_id: 'org-1' }
+
+    const wrapper = mountPage()
+
+    const link = wrapper.find('a[href="/apps/app-admin-1/overview"]')
+    expect(link.exists()).toBe(true)
+    expect(link.text()).toBe('管理员的实例')
+  })
+
+  // 列表「实例」列在无活跃实例时展示「无实例」警告 tag。
+  it('无实例的成员行展示无实例 tag', () => {
+    authUser.current = { id: 'admin-1', role: 'org_admin', org_id: 'org-1' }
+
+    const wrapper = mountPage()
+
+    expect(wrapper.text()).toContain('无实例')
   })
 })
