@@ -13,13 +13,25 @@ ARG ALPINE_VERSION=3.22
 # 切回公网原始仓库可 --build-arg DOCKER_HUB_MIRROR=docker.io/library。
 ARG DOCKER_HUB_MIRROR=crpi-nu3ibz4f07feyghi.cn-beijing.personal.cr.aliyuncs.com/ywjs_public
 
+# Alpine apk 仓库镜像主机: 国内构建机直连 dl-cdn.alpinelinux.org 经常握手超时,
+# 默认替换为阿里云镜像(与上方 ACR 同地域同 BGP 出口, 拉取最稳定);
+# 切回官方源可 --build-arg ALPINE_MIRROR=dl-cdn.alpinelinux.org,
+# 改用清华 / 中科大可传 mirrors.tuna.tsinghua.edu.cn / mirrors.ustc.edu.cn。
+ARG ALPINE_MIRROR=mirrors.aliyun.com
+
 # ---- 构建阶段 -------------------------------------------------------------
 # 原 docker.io/library/golang:1.25-alpine3.22 → 现 crpi-nu3ibz4f07feyghi.cn-beijing.personal.cr.aliyuncs.com/ywjs_public/golang:1.25-alpine3.22
 FROM ${DOCKER_HUB_MIRROR}/golang:${GO_VERSION}-alpine${ALPINE_VERSION} AS builder
 
+# 全局 ARG 在 FROM 之后默认不可见, 需要在 stage 内 redeclare 才能被下方 RUN 引用。
+ARG ALPINE_MIRROR
+
 # git: 部分 Go 模块依赖通过 git 协议拉取
 # ca-certificates: GOPROXY 走 HTTPS 时校验证书链
-RUN apk add --no-cache git ca-certificates
+# 先把 /etc/apk/repositories 内的 dl-cdn.alpinelinux.org 整体替换为 ${ALPINE_MIRROR},
+# 同时覆盖 main / community 两个仓库; 这样后续 apk add 都走国内镜像。
+RUN sed -i "s|dl-cdn.alpinelinux.org|${ALPINE_MIRROR}|g" /etc/apk/repositories \
+ && apk add --no-cache git ca-certificates
 
 WORKDIR /src
 
@@ -52,10 +64,15 @@ RUN go build -trimpath -ldflags='-s -w' -o /out/oc-manager ./cmd/server \
 # 原 docker.io/library/alpine:3.22 → 现 crpi-nu3ibz4f07feyghi.cn-beijing.personal.cr.aliyuncs.com/ywjs_public/alpine:3.22
 FROM ${DOCKER_HUB_MIRROR}/alpine:${ALPINE_VERSION}
 
+# 全局 ARG 在 FROM 之后默认不可见, 需要在 stage 内 redeclare 才能被下方 RUN 引用。
+ARG ALPINE_MIRROR
+
 # ca-certificates: manager-api 调用 new-api / agent HTTPS 端点必需
 # tzdata        : 让 TZ=Asia/Shanghai 在容器内生效
 # wget          : deploy/manage/docker-compose.yml healthcheck 使用 `wget -qO- /healthz`
-RUN apk add --no-cache ca-certificates tzdata wget && \
+# 与 builder 阶段一致, 先把 apk 仓库切到国内镜像再安装。
+RUN sed -i "s|dl-cdn.alpinelinux.org|${ALPINE_MIRROR}|g" /etc/apk/repositories && \
+    apk add --no-cache ca-certificates tzdata wget && \
     mkdir -p /var/lib/oc-manager/data /var/lib/oc-manager/knowledge /etc/manager
 
 COPY --from=builder /out/oc-manager /usr/local/bin/oc-manager
