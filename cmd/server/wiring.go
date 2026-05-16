@@ -405,7 +405,8 @@ func (n *nodeClientResolver) InspectImage(ctx context.Context, nodeID, image str
 		BaseURL: node.AgentFileEndpoint.String,
 		Token:   token,
 	}
-	inner.HTTPClient, err = n.fileHTTPClient(node)
+	// 镜像操作使用无硬超时的 client，由调用方 ctx 控制截止时间。
+	inner.HTTPClient, err = n.imageHTTPClient(node)
 	if err != nil {
 		return imagesync.RemoteImageInfo{}, err
 	}
@@ -422,7 +423,8 @@ func (n *nodeClientResolver) LoadImage(ctx context.Context, nodeID, image string
 		BaseURL: node.AgentFileEndpoint.String,
 		Token:   token,
 	}
-	inner.HTTPClient, err = n.fileHTTPClient(node)
+	// 镜像 load 是大流式上传，必须使用无硬超时的 client，由 ctx 控制截止时间。
+	inner.HTTPClient, err = n.imageHTTPClient(node)
 	if err != nil {
 		return imagesync.RemoteImageInfo{}, err
 	}
@@ -483,8 +485,33 @@ func (n *nodeClientResolver) fileHTTPClient(node sqlc.RuntimeNode) (*http.Client
 		return nil, err
 	}
 	return &http.Client{
-		// 文件 API 与镜像 API 均按节点限速；30s 是合理上限，调用方自行 ctx 收紧。
+		// 普通文件 API（upload/download/list）请求体较小；30s 足够，调用方自行 ctx 收紧。
 		Timeout: 30 * time.Second,
+		Transport: &http.Transport{TLSClientConfig: &tls.Config{
+			RootCAs:    pool,
+			MinVersion: tls.VersionTLS12,
+		}},
+	}, nil
+}
+
+// imageHTTPClient 为镜像 inspect/load 操作构建不带 Timeout 的 HTTP client。
+//
+// 镜像 load 需要把 docker save 产生的 tar 包（可达数百 MB）完整上传到 agent，
+// 加上 agent 端 docker load 本身也需要时间，整体耗时远超文件 API 的 30s 上限。
+// http.Client.Timeout 覆盖"发请求头→上传 body→等响应头→读响应 body"全程，
+// 30s 会在等响应头阶段触发 "Client.Timeout exceeded while awaiting headers"。
+// 镜像操作通过调用方传入的 ctx 控制超时（coordinator 有 watchdog 续期机制），
+// 不再在 http.Client 层叠加硬超时。
+func (n *nodeClientResolver) imageHTTPClient(node sqlc.RuntimeNode) (*http.Client, error) {
+	if !node.AgentTlsCaCert.Valid || strings.TrimSpace(node.AgentTlsCaCert.String) == "" {
+		return nil, fmt.Errorf("节点 %s 缺 agent_tls_ca_cert", uuidToStringWiring(node.ID))
+	}
+	pool, err := agent.BuildCertPool(node.AgentTlsCaCert.String)
+	if err != nil {
+		return nil, err
+	}
+	// Timeout 为 0，完全依赖 ctx deadline，避免大镜像传输超过固定阈值时误触发。
+	return &http.Client{
 		Transport: &http.Transport{TLSClientConfig: &tls.Config{
 			RootCAs:    pool,
 			MinVersion: tls.VersionTLS12,
