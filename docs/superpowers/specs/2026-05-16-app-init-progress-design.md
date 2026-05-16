@@ -69,7 +69,7 @@
         1s/5% 节流 + 阶段切换 flush
                    │
                    ▼
-         apps.status / init_progress_*  ← Postgres 是事实来源
+         apps.status / progress_*  ← Postgres 是事实来源
                    │
                    ▼
          [前端轮询 GET /apps/:id]
@@ -122,15 +122,17 @@ error → deleted                  （SoftDeleteApp 路径，原本就有）
 
 #### 2.3 失败信息保留
 
-`error` 是吸入态，状态字段本身丢失"在哪步失败"的信息。新增 `init_failed_phase` 字段记录最后一次进入 error 时的子状态值；`RequestInitialize` 重置时清空。
+`error` 是吸入态，状态字段本身丢失"在哪一步失败"的信息。新增 `last_error_status` 字段记录最后一次进入 error 时所在的状态值；任何状态进 error 都写它（不仅限于 init 段——未来 `running → error`、`stopped → error`、`binding_failed → error` 都复用），重新启动该转移时清空。
 
 ### 三、数据库变更
 
-新增 migration `internal/migrations/000017_app_init_progress.up.sql`：
+新增 migration `internal/migrations/000017_app_progress_fields.up.sql`：
 
 ```sql
--- apps 表：扩展 status CHECK 约束、新增 init_failed_phase 与进度字段。
+-- apps 表：扩展 status CHECK 约束、新增通用进度字段与上次错误状态字段。
 -- status 值由 5 个 init 子状态替换原 'initializing'，存量行就地迁移。
+-- progress_current / progress_total / last_error_status 设计为通用字段，
+-- 不绑死 init 段，未来重启容器、停止等待优雅退出等长耗时操作都可复用。
 
 ALTER TABLE apps DROP CONSTRAINT apps_status_check;
 
@@ -147,22 +149,18 @@ ALTER TABLE apps ADD CONSTRAINT apps_status_check CHECK (
 );
 
 ALTER TABLE apps
-    ADD COLUMN init_failed_phase text NULL,
-    ADD COLUMN init_progress_current bigint NULL,
-    ADD COLUMN init_progress_total bigint NULL,
-    ADD CONSTRAINT apps_init_failed_phase_check CHECK (
-        init_failed_phase IS NULL OR init_failed_phase IN (
-            'pulling_image', 'syncing_image', 'preparing_runtime',
-            'creating_container', 'starting'
-        )
-    );
+    ADD COLUMN progress_current bigint NULL,
+    ADD COLUMN progress_total bigint NULL,
+    ADD COLUMN last_error_status text NULL;
 
-COMMENT ON COLUMN apps.init_failed_phase IS '上次进入 error 时所在的初始化子状态；RequestInitialize 重置时清空。';
-COMMENT ON COLUMN apps.init_progress_current IS '当前 init 子状态的已完成量（字节或秒），语义随 status 变化。';
-COMMENT ON COLUMN apps.init_progress_total IS '当前 init 子状态的总量；不可知时为 NULL（前端展示为不定进度）。';
+COMMENT ON COLUMN apps.progress_current IS '当前 status 对应阶段的已完成量；语义随 status 变化（字节 / 秒 / count），不可知时为 NULL。';
+COMMENT ON COLUMN apps.progress_total IS '当前 status 对应阶段的总量；不可知时为 NULL（前端展示为不定进度）。';
+COMMENT ON COLUMN apps.last_error_status IS '上次进入 error 时所在的状态值；进入 error 时写入，重新发起对应转移时清空。不加 CHECK，靠应用层在写入时校验。';
 ```
 
-down.sql 反向：把 5 个 init 子状态合并回 `initializing`，删字段与约束。
+不为 `last_error_status` 加 CHECK 约束的取舍：进入 error 的来源状态本身就受 `apps_status_check` 约束（由应用层写入前校验），再加一层 CHECK 收益不大、且未来加新状态时还要同步改约束。这与项目内 `jobs.last_error` 等已有 text 字段的处理方式一致。
+
+down.sql 反向：把 5 个 init 子状态合并回 `initializing`，删字段与 status CHECK 调整。
 
 ### 四、本地 Docker 客户端改造
 
@@ -223,7 +221,7 @@ manager:
 1. **跨 manager 串行化**：同一 image 在整个 manager 集群内最多一次 pull；同一 (image, nodeID) 集群内最多一次 sync；
 2. **跨 manager 广播**：进度事件通过 Redis Pub/Sub 复制给所有等待者（不论调用方在哪个 manager），让"2 个 app 同时初始化时进度字段都能更新"在多副本部署下也成立。
 
-> 与项目既有 `internal/redis/queue.go` 的设计哲学一致：**Postgres 是事实来源（apps.status / init_progress_*），Redis 仅是信号通道**。Redis 失联或重启最多导致重复 pull / 进度短暂不更新，不影响业务正确性。
+> 与项目既有 `internal/redis/queue.go` 的设计哲学一致：**Postgres 是事实来源（apps.status / progress_*），Redis 仅是信号通道**。Redis 失联或重启最多导致重复 pull / 进度短暂不更新，不影响业务正确性。
 
 ```go
 package imagecoord
@@ -413,9 +411,9 @@ func (h *AppInitializeHandler) Handle(ctx context.Context, job sqlc.Job) error {
 `transitionTo` 内部：
 - 用 `EnsureAppTransition(from, to)` 校验转移合法；
 - 调 `SetAppStatus`；
-- 清空 `init_progress_current/total`（新阶段从 0 开始）。
+- 清空 `progress_current/total`（新阶段从 0 开始）。
 
-`markFailed` 把 status 推到 `error`，同时写 `init_failed_phase = step.phase`。
+`markFailed` 把 status 推到 `error`，同时写 `last_error_status = step.phase`。
 
 #### 6.2 各阶段幂等
 
@@ -494,7 +492,7 @@ WHERE status IN ('pulling_image','syncing_image','preparing_runtime','creating_c
 
 1. **判定条件**：`updated_at < now() - 90s`（progressReporter 至少每秒 flush，连续 90s 无更新视作卡死或 manager 死亡）；
 2. 满足条件后单事务里：
-   - `UPDATE apps SET status='pulling_image', init_progress_current=NULL, init_progress_total=NULL, init_failed_phase=NULL WHERE id=$1`；
+   - `UPDATE apps SET status='pulling_image', progress_current=NULL, progress_total=NULL, last_error_status=NULL WHERE id=$1`；
    - 找该 app 最近一份 `app_initialize` job：
      - 存在且 status ∈ {running, succeeded}：`UPDATE jobs SET status='pending', started_at=NULL WHERE id=$id`；
      - 存在且 status = pending：跳过（scheduler 自然会拾取）；
@@ -514,7 +512,7 @@ WHERE status IN ('pulling_image','syncing_image','preparing_runtime','creating_c
 
 #### 7.4 进度字段恢复语义
 
-reaper 把 `init_progress_*` 全清空。重启后用户会看到状态从 `starting` 回退到 `pulling_image` → 1 秒内通过各阶段幂等检查 → 跳回原位继续。这个回退在 UI 上是视觉抖动，但**业务正确性不受影响**，且实现极简。可接受。
+reaper 把 `progress_*` 全清空。重启后用户会看到状态从 `starting` 回退到 `pulling_image` → 1 秒内通过各阶段幂等检查 → 跳回原位继续。这个回退在 UI 上是视觉抖动，但**业务正确性不受影响**，且实现极简。可接受。
 
 ### 八、`RequestInitialize` 重置策略
 
@@ -529,7 +527,7 @@ if app.Status != domain.AppStatusError && app.Status != domain.AppStatusDraft {
 
 // 重置：status → pulling_image（不再用 draft，因为 draft 只用于 onboarding 阶段）；
 // 清空 container_id / api_key（保留原行为）；
-// 清空 init_progress_* 与 init_failed_phase。
+// 清空 progress_* 与 last_error_status。
 ```
 
 `draft` 入参时直接走 `pulling_image` 转移即可（`draft → pulling_image` 在状态机中合法）。
@@ -565,12 +563,12 @@ const appStatusViews: Record<string, StatusView> = {
 <div v-if="isInitPhase(app.status)" class="init-progress">
   <span>{{ formatAppStatus(app.status).label }}</span>
   <progress
-    v-if="app.init_progress_total"
-    :value="app.init_progress_current"
-    :max="app.init_progress_total"
+    v-if="app.progress_total"
+    :value="app.progress_current"
+    :max="app.progress_total"
   />
-  <span v-if="app.init_progress_total">
-    {{ formatBytes(app.init_progress_current) }} / {{ formatBytes(app.init_progress_total) }}
+  <span v-if="app.progress_total">
+    {{ formatBytes(app.progress_current) }} / {{ formatBytes(app.progress_total) }}
   </span>
 </div>
 ```
@@ -579,10 +577,10 @@ const appStatusViews: Record<string, StatusView> = {
 
 #### 9.3 失败提示
 
-status=error 且 `init_failed_phase != null` 时，把"重新初始化"按钮上方的提示文案换为：
+status=error 且 `last_error_status != null` 时，把"重新初始化"按钮上方的提示文案换为：
 
 ```
-在「{{ formatAppStatus(init_failed_phase).label }}」阶段失败
+在「{{ formatAppStatus(last_error_status).label }}」阶段失败
 ```
 
 #### 9.4 「重新初始化」按钮可见条件
@@ -592,7 +590,7 @@ status=error 且 `init_failed_phase != null` 时，把"重新初始化"按钮上
 #### 9.5 OpenAPI 与生成产物
 
 按 `AGENTS.md` 流程：
-- `internal/api/handlers/dto.go` 暴露 `init_progress_current/total/init_failed_phase` 到 App 响应 DTO；
+- `internal/api/handlers/dto.go` 暴露 `progress_current/total/last_error_status` 到 App 响应 DTO；
 - 跑 `make openapi-gen` + `make web-types-gen`；
 - `web/src/api/generated.ts` 同步更新。
 
@@ -608,7 +606,7 @@ status=error 且 `init_failed_phase != null` 时，把"重新初始化"按钮上
 | `internal/runtime/imagecoord/coordinator_test.go` | 并发 PullImage 跨实例单飞合并（用真实 redis 或 miniredis）；subscriber 能收到事件；leader 失败后下个 subscriber 升级 |
 | `internal/runtime/imagecoord/progress_test.go` | NDJSON 解析；多 layer 字节累加；`Pull complete` 视为 current=total |
 | `internal/runtime/imagesync/sdk_provider_test.go` | mock docker SDK 验证 ImageID / ImageSave / ImagePull 能正确串接 |
-| `internal/worker/handlers/app_initialize_test.go` | 表驱动覆盖每阶段 status 推进；任意阶段 mock 失败应写 `init_failed_phase`；幂等检查（重跑相同 job 不重复创建容器） |
+| `internal/worker/handlers/app_initialize_test.go` | 表驱动覆盖每阶段 status 推进；任意阶段 mock 失败应写 `last_error_status`；幂等检查（重跑相同 job 不重复创建容器） |
 | `internal/worker/handlers/progress_reporter_test.go` | 1s 节流边界；5% 阈值边界；阶段切换 flush；context 取消不写库 |
 | `internal/worker/reaper/reaper_test.go` | 5 个孤儿状态都能被扫到；`updated_at < now()-90s` 阈值边界；Redis 锁抢占失败时直接退出本轮；job 状态分支（无 / pending / running / succeeded）都能正确处置 |
 
@@ -617,7 +615,7 @@ status=error 且 `init_failed_phase != null` 时，把"重新初始化"按钮上
 | 文件 | 覆盖点 |
 |---|---|
 | `web/src/domain/status.spec.ts` | 5 个新 status 都能映射到正确 label/tone；isInitPhase 边界 |
-| `web/src/pages/apps/AppOverviewTab.spec.ts` | init_progress_total=null 时不渲染 progress；status=error + init_failed_phase 时显示阶段文案 |
+| `web/src/pages/apps/AppOverviewTab.spec.ts` | progress_total=null 时不渲染 progress；status=error + last_error_status 时显示阶段文案 |
 
 #### 10.3 浏览器验证
 
@@ -627,16 +625,16 @@ status=error 且 `init_failed_phase != null` 时，把"重新初始化"按钮上
 2. 故意让 manager 本机删掉镜像后创建：验证 pulling_image 阶段进度条能动；
 3. 同时点 2 个补建：验证两个 app 都能看到镜像同步进度（Redis Pub/Sub 广播生效）；
 4. 在 syncing_image 中途 `docker compose restart manager`：重启后两个 app 仍能完成初始化；
-5. 让 agent 临时拒绝 inspect 调用：验证 status=error + init_failed_phase=syncing_image，前端"重新初始化"按钮可点；
+5. 让 agent 临时拒绝 inspect 调用：验证 status=error + last_error_status=syncing_image，前端"重新初始化"按钮可点；
 6. **多副本场景**（docker-compose scale manager=2）：在 manager-A 上发起 app1 init、manager-B 上发起 app2 init，且都需要拉取同一镜像。验证：
    - 只有一个 manager 实际执行 docker pull（看 docker daemon 日志或 `docker events`）；
-   - 两个 app 的 init_progress_* 字段都在更新；
+   - 两个 app 的 progress_* 字段都在更新；
    - kill 掉 leader manager 容器，剩余 manager 上 reaper 60s 内接管 app1，app1 重新走完 5 阶段。
 
 ### 十一、不做的事（Out of scope）
 
 - **不引入 SSE**：用户对实时性的要求是"看到进度在动"，前端 3-5 秒轮询足够；SSE 引入断连重试、多副本部署等复杂度，本期不值。
-- **不持久化进度阶段历史**：每次 reaper 重置时 init_progress_* 直接清空。如果未来要做"初始化耗时分析"，单独设计 metrics 表，不与运行态字段耦合。
+- **不持久化进度阶段历史**：每次 reaper 重置时 progress_* 直接清空。如果未来要做"初始化耗时分析"，单独设计 metrics 表，不与运行态字段耦合。
 - **不实现镜像 GC**：manager 容器的 docker daemon 镜像清理与 manager 应用无关，由运维侧周期任务负责。
 - **不改 binding_waiting 之后的状态机**：本期只动 init 段。
 
