@@ -402,7 +402,6 @@ func newHandlerWithDocker(dataRoot string, docker DockerClient, agentToken any) 
 		}
 		info, err := docker.InspectImage(r.Context(), image)
 		if errors.Is(err, ErrImageNotFound) {
-			slog.ErrorContext(r.Context(), "[hujingnb][0] agent:inspectImage not found", "image", image) // todo del
 			writeJSON(w, map[string]any{"exists": false, "image": image})
 			return
 		}
@@ -410,7 +409,6 @@ func newHandlerWithDocker(dataRoot string, docker DockerClient, agentToken any) 
 			writeError(w, http.StatusBadGateway, err.Error())
 			return
 		}
-		slog.ErrorContext(r.Context(), "[hujingnb][0] agent:inspectImage found", "image", image, "id", info.ID) // todo del
 		writeJSON(w, map[string]any{"exists": true, "image": image, "info": info})
 	}))
 	mux.HandleFunc("/v1/images/load", withAgentAuth(agentToken, func(w http.ResponseWriter, r *http.Request) {
@@ -426,18 +424,15 @@ func newHandlerWithDocker(dataRoot string, docker DockerClient, agentToken any) 
 		// expectedID 是 manager 本地 inspect 到的镜像 ID，用于在 docker load 后
 		// 核验 tag 是否指向正确内容，不一致时强制重新打 tag。
 		expectedID := r.URL.Query().Get("expected_id")
-		slog.ErrorContext(r.Context(), "[hujingnb][8] agent:loadImage start docker load", "image", image) // todo del
 		if err := docker.LoadImage(r.Context(), r.Body); err != nil {
 			writeError(w, http.StatusBadGateway, err.Error())
 			return
 		}
-		slog.ErrorContext(r.Context(), "[hujingnb][9] agent:loadImage docker load done, inspecting", "image", image) // todo del
 		info, err := docker.InspectImage(r.Context(), image)
 		if err != nil {
 			writeError(w, http.StatusBadGateway, err.Error())
 			return
 		}
-		slog.ErrorContext(r.Context(), "[hujingnb][10] agent:loadImage inspect done", "image", image, "inspectedID", info.ID) // todo del
 		// docker load 有时在 tag 已被 registry 版本占据时不会更新 tag 指向。
 		// 当调用方提供了 expected_id 且 inspect 结果不符，则通过 docker tag 强制修正。
 		if expectedID != "" && info.ID != expectedID {
