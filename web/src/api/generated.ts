@@ -5976,8 +5976,11 @@ export interface components {
         };
         "service.AuditResult": {
             action?: string;
+            /** @description 以下为展示用翻译字段，由 toAuditResult() 填充，未知值 fallback 到原始字符串。 */
+            action_label?: string;
             actor_id?: string;
             actor_role?: string;
+            actor_role_label?: string;
             /** Format: date-time */
             created_at?: string;
             error_message?: string;
@@ -5988,8 +5991,10 @@ export interface components {
             };
             org_id?: string;
             result?: string;
+            result_label?: string;
             target_id?: string;
             target_type?: string;
+            target_type_label?: string;
         };
         "service.AuthUser": {
             display_name?: string;
