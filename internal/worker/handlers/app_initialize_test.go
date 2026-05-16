@@ -177,7 +177,9 @@ func TestAppInitializePropagatesHealthCheckError(t *testing.T) {
 	if err == nil || !strings.Contains(err.Error(), "等待 Hermes 容器健康失败") {
 		t.Fatalf("err=%v", err)
 	}
-	require.False(t, store.statusSet)
+	// 5 阶段化后,每阶段进入前会推进 status;原 "statusSet=false" 等价于
+	// "终态不是 binding_waiting"。Task 5.5 重写时改为表驱动断言精确的 last_error_status。
+	require.NotEqual(t, domain.AppStatusBindingWaiting, store.app.Status)
 }
 
 // TestAppInitializeIsIdempotentForBindingWaiting 验证应用初始化保持幂等针对绑定Waiting的特殊分支或幂等场景。
@@ -224,7 +226,9 @@ func TestAppInitializePropagatesNewAPIError(t *testing.T) {
 	handler := NewAppInitializeHandler(store, &fakeImages{}, &fakeDirs{}, &fakeContainers{}, &fakeContainers{}, client, AppInitializeConfig{Cipher: testCipher(t)})
 	err := handler.Handle(context.Background(), buildJob(t, testAppID, ""))
 	require.ErrorIs(t, err, newapi.ErrUpstream)
-	require.False(t, store.statusSet)
+	// 5 阶段化后,失败前已推进过 status;等价断言改为"最终状态非 binding_waiting"。
+	// Task 5.5 重写时按表驱动检查 last_error_status=preparing_runtime。
+	require.NotEqual(t, domain.AppStatusBindingWaiting, store.app.Status)
 }
 
 // TestAppInitializePropagatesContainerError 验证应用初始化透传容器错误的错误映射或错误记录场景。
@@ -239,7 +243,9 @@ func TestAppInitializePropagatesContainerError(t *testing.T) {
 	if err == nil || !strings.Contains(err.Error(), "创建容器失败") {
 		t.Fatalf("error = %v, want 创建容器失败", err)
 	}
-	require.False(t, store.statusSet)
+	// 5 阶段化后,phase 进入时已推进 status;等价断言改为"未达到 binding_waiting"。
+	// Task 5.5 重写时按表驱动检查 last_error_status=creating_container。
+	require.NotEqual(t, domain.AppStatusBindingWaiting, store.app.Status)
 }
 
 // TestAppInitializeRejectsInvalidPayload 验证应用初始化拒绝非法载荷的异常或拒绝路径场景。
@@ -375,6 +381,21 @@ func (s *appInitStub) SetAppStatus(_ context.Context, arg sqlc.SetAppStatusParam
 func (s *appInitStub) CreateAuditLog(_ context.Context, arg sqlc.CreateAuditLogParams) (sqlc.AuditLog, error) {
 	s.auditLogs = append(s.auditLogs, arg)
 	return sqlc.AuditLog{TargetType: arg.TargetType, TargetID: arg.TargetID, Action: arg.Action, Result: arg.Result}, nil
+}
+
+// 以下 3 个 stub 仅为 Task 5.2 接口扩展后让现有测试编译通过；
+// 正式的进度 / 失败状态断言留到 Task 5.5 重写时新增表驱动测试覆盖。
+func (s *appInitStub) SetAppProgress(_ context.Context, _ sqlc.SetAppProgressParams) (sqlc.App, error) {
+	return sqlc.App{}, nil
+}
+func (s *appInitStub) ClearAppProgress(_ context.Context, _ pgtype.UUID) (sqlc.App, error) {
+	return sqlc.App{}, nil
+}
+func (s *appInitStub) MarkAppFailed(_ context.Context, p sqlc.MarkAppFailedParams) (sqlc.App, error) {
+	// 模拟真实 SQL:status 推到 error,last_error_status 记录来源 phase。
+	s.app.Status = domain.AppStatusError
+	s.app.LastErrorStatus = p.LastErrorStatus
+	return s.app, nil
 }
 
 type fakeImages struct {

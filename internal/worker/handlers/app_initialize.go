@@ -19,6 +19,7 @@ import (
 	"oc-manager/internal/integrations/hermes"
 	"oc-manager/internal/integrations/newapi"
 	runtimepkg "oc-manager/internal/integrations/runtime"
+	imagecoord "oc-manager/internal/runtime/imagecoord"
 	"oc-manager/internal/store/sqlc"
 )
 
@@ -32,11 +33,22 @@ type AppInitializeStore interface {
 	SetAppContainer(ctx context.Context, arg sqlc.SetAppContainerParams) (sqlc.App, error)
 	SetAppStatus(ctx context.Context, arg sqlc.SetAppStatusParams) (sqlc.App, error)
 	CreateAuditLog(ctx context.Context, arg sqlc.CreateAuditLogParams) (sqlc.AuditLog, error)
+	// 新增:5 阶段 handler 落进度与失败状态
+	SetAppProgress(ctx context.Context, arg sqlc.SetAppProgressParams) (sqlc.App, error)
+	ClearAppProgress(ctx context.Context, id pgtype.UUID) (sqlc.App, error)
+	MarkAppFailed(ctx context.Context, arg sqlc.MarkAppFailedParams) (sqlc.App, error)
 }
 
 // ImageDistributor 抽象镜像分发能力。
 type ImageDistributor interface {
 	EnsureRuntimeImage(ctx context.Context, nodeID, image string) (any, error)
+}
+
+// ImageCoordinator 是 imagecoord.Coordinator 的最小接口。
+// 单独声明便于测试 mock,避免直接依赖 imagecoord 包。
+type ImageCoordinator interface {
+	PullImage(ctx context.Context, image string, subscriber chan<- imagecoord.ProgressEvent) error
+	SyncToNode(ctx context.Context, image, nodeID string, subscriber chan<- imagecoord.ProgressEvent) error
 }
 
 // ContainerCreator 抽象通过 agent docker 代理创建容器的能力。
@@ -74,11 +86,22 @@ type KnowledgeReader interface {
 	Open(masterPath string) (io.ReadCloser, int64, error)
 }
 
-// ContainerStarter 抽象创建后启动容器的能力（minimal 接口）。
-// 与 app_runtime_ops.go 的 ContainerLifecycle 不重叠：那个接口要求 Start/Stop/Restart/Remove
-// 四个方法，初始化阶段只需要 Start，因此独立小接口便于测试 mock。
+// ContainerStarter 抽象创建后启动容器的能力。
+// 5 阶段 handler 在 phaseStart 内会先 InspectContainer 看 State,
+// 已 running 跳过 start 直接进健康检查;exited / created 才 Start。
+// 与 app_runtime_ops.go 的 ContainerLifecycle 不重叠:那个接口要求 Start/Stop/Restart/Remove
+// 四个方法,初始化阶段只需要 Start,因此独立小接口便于测试 mock。
 type ContainerStarter interface {
 	StartContainer(ctx context.Context, nodeID, containerID string) error
+}
+
+// ContainerState 是 phaseStart 用的最小容器状态视图。
+// 与 runtime.AgentBackedAdapter 的 ContainerInspect 返回结构对齐时,
+// 在 wiring 处用类型断言适配;adapter 未实现 InspectContainer 时,
+// phaseStart 退回直接 Start(原行为)。
+type ContainerState struct {
+	Running  bool
+	HealthOK bool
 }
 
 // HermesHealthChecker 是 ContainerStarter 的扩展：实现该接口的 starter 在容器启动后
@@ -174,6 +197,9 @@ type AppInitializeHandler struct {
 	starter      ContainerStarter
 	factory      NewAPIClientFactory
 	cfg          AppInitializeConfig
+	// 新增:跨 manager 镜像协调器,phasePull / phaseSync 使用。
+	// nil 时退回旧 ImageDistributor 路径(测试装配兼容)。
+	coord ImageCoordinator
 }
 
 // NewAppInitializeHandler 创建 handler。dirs / containers / starter 可传 nil，
@@ -217,7 +243,13 @@ func (h *AppInitializeHandler) SetKnowledgeReader(r KnowledgeReader) {
 	h.knowledge = r
 }
 
-// Handle 是 worker 调用入口，签名匹配 handlers.HandlerFunc。
+// SetImageCoordinator 注入跨 manager 镜像协调器。生产装配必须注入;
+// 测试装配可不调,phasePull / phaseSync 退化为直接调旧 images 接口。
+func (h *AppInitializeHandler) SetImageCoordinator(c ImageCoordinator) { h.coord = c }
+
+// Handle 是 worker 调用入口。
+// 5 阶段串行推进:每阶段进入前先校验状态机转移合法,跑实际工作前查幂等,
+// 任何失败收敛到 status=error 并写入 last_error_status 记录来源阶段。
 func (h *AppInitializeHandler) Handle(ctx context.Context, job sqlc.Job) error {
 	if job.Type != domain.JobTypeAppInitialize {
 		return fmt.Errorf("非 app_initialize 任务: %s", job.Type)
@@ -237,10 +269,128 @@ func (h *AppInitializeHandler) Handle(ctx context.Context, job sqlc.Job) error {
 		}
 		return fmt.Errorf("查询应用失败: %w", err)
 	}
-	if app.Status == domain.AppStatusRunning || app.Status == domain.AppStatusBindingWaiting {
-		// 幂等：应用已经离开初始化阶段，重复执行直接成功。
+	// 已离开初始化阶段直接成功(原本的幂等保留)
+	if app.Status == domain.AppStatusBindingWaiting || app.Status == domain.AppStatusRunning {
 		return nil
 	}
+
+	reporter := newProgressReporter(app.ID, h.store)
+
+	// 5 阶段定义:每阶段先 transitionTo 推 status,再 run 跑实际工作。
+	// run 内部已根据 app 当前实际状态做幂等检查,允许重启后从中间阶段重入。
+	steps := []struct {
+		phase string
+		run   func(context.Context, *sqlc.App, appInitializePayload, *progressReporter) error
+	}{
+		{domain.AppStatusPullingImage, h.phasePull},
+		{domain.AppStatusSyncingImage, h.phaseSync},
+		{domain.AppStatusPreparingRuntime, h.phasePrepare},
+		{domain.AppStatusCreatingContainer, h.phaseCreate},
+		{domain.AppStatusStarting, h.phaseStart},
+	}
+
+	for _, step := range steps {
+		if err := h.transitionTo(ctx, &app, step.phase, reporter); err != nil {
+			return h.markFailed(ctx, &app, step.phase, err)
+		}
+		if err := step.run(ctx, &app, payload, reporter); err != nil {
+			return h.markFailed(ctx, &app, step.phase, err)
+		}
+	}
+
+	if err := h.transitionTo(ctx, &app, domain.AppStatusBindingWaiting, reporter); err != nil {
+		return h.markFailed(ctx, &app, domain.AppStatusStarting, err)
+	}
+	return h.writeInitAuditLog(ctx, app, job, payload)
+}
+
+// transitionTo 推 status 并清空 progress_*;违反状态机直接返回 error,
+// 由调用方决定是否 markFailed。
+func (h *AppInitializeHandler) transitionTo(ctx context.Context, app *sqlc.App, to string, reporter *progressReporter) error {
+	if app.Status == to {
+		// 重启重入时已经处于目标阶段,跳过一次写库
+		return nil
+	}
+	if err := domain.EnsureAppTransition(app.Status, to); err != nil {
+		return err
+	}
+	updated, err := h.store.SetAppStatus(ctx, sqlc.SetAppStatusParams{ID: app.ID, Status: to})
+	if err != nil {
+		return fmt.Errorf("写入应用状态失败: %w", err)
+	}
+	*app = updated
+	reporter.FlushReset(ctx)
+	return nil
+}
+
+// markFailed 把 status 推到 error,同时写入来源 phase 到 last_error_status。
+// 即便写库失败也返回原 cause,避免吞掉真实错误。
+func (h *AppInitializeHandler) markFailed(ctx context.Context, app *sqlc.App, phase string, cause error) error {
+	if _, err := h.store.MarkAppFailed(ctx, sqlc.MarkAppFailedParams{
+		ID:              app.ID,
+		LastErrorStatus: pgtype.Text{String: phase, Valid: true},
+	}); err != nil {
+		return fmt.Errorf("%w (写入失败状态也失败: %v)", cause, err)
+	}
+	return cause
+}
+
+// phasePull:确保 manager 本机已存在 runtime 镜像。
+// 优先走 ImageCoordinator(集群内单飞 + 进度广播);未注入时退回旧
+// images.EnsureRuntimeImage 的"远端节点已就绪"快速路径,等价行为。
+func (h *AppInitializeHandler) phasePull(ctx context.Context, _ *sqlc.App, payload appInitializePayload, reporter *progressReporter) error {
+	if h.coord == nil {
+		return nil
+	}
+	sub := make(chan imagecoord.ProgressEvent, 16)
+	done := make(chan struct{})
+	go func() {
+		for ev := range sub {
+			reporter.Receive(ctx, ev)
+		}
+		close(done)
+	}()
+	err := h.coord.PullImage(ctx, h.cfg.RuntimeImage, sub)
+	<-done
+	if err != nil {
+		return fmt.Errorf("拉取 runtime 镜像失败: %w", err)
+	}
+	_ = payload
+	return nil
+}
+
+// phaseSync:把 manager 本机镜像同步到目标节点。
+// 已有节点 ID 则走 Coordinator;node 缺失视为本地装配场景,跳过。
+func (h *AppInitializeHandler) phaseSync(ctx context.Context, _ *sqlc.App, payload appInitializePayload, reporter *progressReporter) error {
+	if h.coord == nil || payload.RuntimeNodeID == "" {
+		// 退化为旧 ImageDistributor(仍幂等;远端 ID 一致跳过)
+		if h.images != nil && payload.RuntimeNodeID != "" {
+			if _, err := h.images.EnsureRuntimeImage(ctx, payload.RuntimeNodeID, h.cfg.RuntimeImage); err != nil {
+				return fmt.Errorf("分发 Hermes 镜像失败: %w", err)
+			}
+		}
+		return nil
+	}
+	sub := make(chan imagecoord.ProgressEvent, 16)
+	done := make(chan struct{})
+	go func() {
+		for ev := range sub {
+			reporter.Receive(ctx, ev)
+		}
+		close(done)
+	}()
+	err := h.coord.SyncToNode(ctx, h.cfg.RuntimeImage, payload.RuntimeNodeID, sub)
+	<-done
+	if err != nil {
+		return fmt.Errorf("同步镜像到节点失败: %w", err)
+	}
+	return nil
+}
+
+// phasePrepare:在节点 agent 上准备目录、确保 api_key、上传 hermes 配置文件。
+// 三段都已有局部幂等(InitAppDirs 覆盖写、ensureAPIKey 跳过 active、文件覆盖写),
+// 重启重入直接跑安全。
+func (h *AppInitializeHandler) phasePrepare(ctx context.Context, app *sqlc.App, payload appInitializePayload, _ *progressReporter) error {
 	org, err := h.store.GetOrganization(ctx, app.OrgID)
 	if err != nil {
 		return fmt.Errorf("查询组织失败: %w", err)
@@ -249,130 +399,134 @@ func (h *AppInitializeHandler) Handle(ctx context.Context, job sqlc.Job) error {
 	if err != nil {
 		return fmt.Errorf("查询应用 owner 失败: %w", err)
 	}
-
-	if h.images != nil && payload.RuntimeNodeID != "" {
-		if _, err := h.images.EnsureRuntimeImage(ctx, payload.RuntimeNodeID, h.cfg.RuntimeImage); err != nil {
-			return fmt.Errorf("分发 Hermes 镜像失败: %w", err)
-		}
-	}
-
-	// 节点 agent 准备应用目录；Hermes 时代 .hermes/ 由 manager 本地写入，
-	// InitAppDirs 仍保留以兼容存量部署。
 	if h.dirs != nil && payload.RuntimeNodeID != "" {
 		if err := h.dirs.InitAppDirs(ctx, payload.RuntimeNodeID, payload.AppID); err != nil {
 			return fmt.Errorf("初始化节点应用目录失败: %w", err)
 		}
 	}
-
-	// 先拿真实 containerAPIKey,再写 Hermes 配置文件,确保 config.yaml api_key 和
-	// .env OPENAI_API_KEY 都是真实 token,避免 Hermes 用占位符调 new-api 返回 HTTP 401。
-	containerAPIKey, err := h.ensureAPIKey(ctx, &app)
+	containerAPIKey, err := h.ensureAPIKey(ctx, app)
 	if err != nil {
 		return err
 	}
-	_ = org // org 已在上文用于 hermes 文件渲染；ensureAPIKey 现在通过 factory 自行获取组织凭据。
-
-	// 通过 runtime-agent UploadAppRuntimeFile 把 Hermes 配置文件上传到目标节点；
-	// 支持多节点部署（manager 与 docker daemon 可在不同节点）。
-	// payload.RuntimeNodeID 为空时跳过（仅存在于旧测试装配）。
 	if payload.RuntimeNodeID != "" {
-		if err := h.writeHermesFiles(ctx, payload.RuntimeNodeID, app, org, owner, containerAPIKey); err != nil {
+		if err := h.writeHermesFiles(ctx, payload.RuntimeNodeID, *app, org, owner, containerAPIKey); err != nil {
 			return err
 		}
 	}
+	return nil
+}
 
-	if app.ContainerID.String == "" && h.containers != nil {
-		node, err := h.store.GetRuntimeNode(ctx, app.RuntimeNodeID)
-		if err != nil {
-			return fmt.Errorf("查询 runtime node 失败: %w", err)
-		}
-		// Hermes 容器规格：单一 bind mount，把节点本地 .hermes/ 挂载到 /opt/data。
-		// HostPath 使用节点 NodeDataRoot 拼接，而非 manager 本机路径，
-		// 确保多节点部署下 bind mount 路径指向 docker daemon 所在节点的正确位置。
-		nodeDataRoot := node.NodeDataRoot.String
-		if nodeDataRoot == "" {
-			nodeDataRoot = "/var/lib/oc-agent"
-		}
-		spec := runtimepkg.ContainerSpec{
-			Name:     "hermes-" + payload.AppID,
-			Image:    h.cfg.RuntimeImage,
-			Networks: h.cfg.ContainerNetworks,
-			// 把容器进程启动 cwd 设为 /opt/data/workspace,让 agent 默认在
-			// workspace 子目录下执行 terminal / file 工具,生成的文件落在
-			// manager workspace API 可读的物理位置(.hermes/workspace)。
-			// agent init 已预建该目录,容器启动时无需额外 mkdir。
-			WorkingDir: "/opt/data/workspace",
-			Env: map[string]string{
-				// Hermes 读取 /opt/data/.env 中的 OPENAI_API_KEY；
-				// 此处额外传 env 作为启动时的直接覆盖，确保 token 立即可用。
-				"OPENAI_API_KEY":  containerAPIKey,
-				"OPENAI_BASE_URL": h.cfg.NewAPIBaseURL + "/v1",
-			},
-			Volumes: []runtimepkg.VolumeMount{
-				// 单一挂载：将节点 dataRoot/apps/<id>/.hermes/ 映射到容器 /opt/data（Hermes 主目录）。
-				// SOUL.md/config.yaml/.env/skills/ 均在此目录下，Hermes 启动时自动读取。
-				// HostPath 为节点本地路径（由 runtime-agent 写入），而非 manager 本机路径。
-				{HostPath: filepath.Join(nodeDataRoot, "apps", payload.AppID, ".hermes"), ContainerPath: "/opt/data"},
-			},
-		}
-		info, err := h.containers.CreateContainer(ctx, payload.RuntimeNodeID, spec)
-		if err != nil {
-			return fmt.Errorf("创建容器失败: %w", err)
-		}
-		updated, err := h.store.SetAppContainer(ctx, sqlc.SetAppContainerParams{
-			ID:            app.ID,
-			ContainerID:   pgtype.Text{String: info.ID, Valid: info.ID != ""},
-			ContainerName: pgtype.Text{String: info.Name, Valid: info.Name != ""},
-		})
-		if err != nil {
-			return fmt.Errorf("写入 container_id 失败: %w", err)
-		}
-		app = updated
-		// 启动容器；Hermes gateway 启动 + iLink 长轮询建立约 5-10s。
-		if h.starter != nil && info.ID != "" {
-			if err := h.starter.StartContainer(ctx, payload.RuntimeNodeID, info.ID); err != nil {
-				return fmt.Errorf("启动容器失败: %w", err)
-			}
-			// starter 实现 HermesHealthChecker 时等 docker HEALTHCHECK 报 healthy，
-			// 避免应用过早进入待绑定状态导致后续 channel_start_login 直接撞到 gateway 未就绪。
-			// 未实现的旧 starter 跳过此步，状态机会直接推到 binding_waiting。
-			if checker, ok := h.starter.(HermesHealthChecker); ok {
-				// 留 120s 余量：Hermes 启动 + iLink 连接通常 5-10s，HEALTHCHECK start-period 60s。
-				if err := checker.WaitContainerHealthy(ctx, payload.RuntimeNodeID, info.ID, 120*time.Second); err != nil {
-					return fmt.Errorf("等待 Hermes 容器健康失败: %w", err)
-				}
-			}
+// phaseCreate:container_id 已存在则跳过(原 :284 行的幂等检查保留);否则
+// 走原 ContainerCreator.CreateContainer 流程,把 ID/Name 写库。
+func (h *AppInitializeHandler) phaseCreate(ctx context.Context, app *sqlc.App, payload appInitializePayload, _ *progressReporter) error {
+	if app.ContainerID.String != "" {
+		return nil
+	}
+	if h.containers == nil || payload.RuntimeNodeID == "" {
+		return nil
+	}
+	node, err := h.store.GetRuntimeNode(ctx, app.RuntimeNodeID)
+	if err != nil {
+		return fmt.Errorf("查询 runtime node 失败: %w", err)
+	}
+	nodeDataRoot := node.NodeDataRoot.String
+	if nodeDataRoot == "" {
+		nodeDataRoot = "/var/lib/oc-agent"
+	}
+	containerAPIKey, err := h.ensureAPIKey(ctx, app)
+	if err != nil {
+		return err
+	}
+	spec := runtimepkg.ContainerSpec{
+		Name:       "hermes-" + payload.AppID,
+		Image:      h.cfg.RuntimeImage,
+		Networks:   h.cfg.ContainerNetworks,
+		WorkingDir: "/opt/data/workspace",
+		Env: map[string]string{
+			"OPENAI_API_KEY":  containerAPIKey,
+			"OPENAI_BASE_URL": h.cfg.NewAPIBaseURL + "/v1",
+		},
+		Volumes: []runtimepkg.VolumeMount{
+			{HostPath: filepath.Join(nodeDataRoot, "apps", payload.AppID, ".hermes"), ContainerPath: "/opt/data"},
+		},
+	}
+	info, err := h.containers.CreateContainer(ctx, payload.RuntimeNodeID, spec)
+	if err != nil {
+		return fmt.Errorf("创建容器失败: %w", err)
+	}
+	updated, err := h.store.SetAppContainer(ctx, sqlc.SetAppContainerParams{
+		ID:            app.ID,
+		ContainerID:   pgtype.Text{String: info.ID, Valid: info.ID != ""},
+		ContainerName: pgtype.Text{String: info.Name, Valid: info.Name != ""},
+	})
+	if err != nil {
+		return fmt.Errorf("写入 container_id 失败: %w", err)
+	}
+	*app = updated
+	return nil
+}
+
+// phaseStart:启动容器并等健康检查。先 InspectContainer 看 State 做幂等;
+// running 直接进健康检查;exited / created 才 Start。
+func (h *AppInitializeHandler) phaseStart(ctx context.Context, app *sqlc.App, payload appInitializePayload, _ *progressReporter) error {
+	if h.starter == nil || app.ContainerID.String == "" {
+		return nil
+	}
+	containerID := app.ContainerID.String
+	// inspector 实现可选;不实现时直接 Start(原行为)。
+	state, ok := h.tryInspect(ctx, payload.RuntimeNodeID, containerID)
+	if !ok || !state.Running {
+		if err := h.starter.StartContainer(ctx, payload.RuntimeNodeID, containerID); err != nil {
+			return fmt.Errorf("启动容器失败: %w", err)
 		}
 	}
+	if checker, ok := h.starter.(HermesHealthChecker); ok {
+		if err := checker.WaitContainerHealthy(ctx, payload.RuntimeNodeID, containerID, 120*time.Second); err != nil {
+			return fmt.Errorf("等待 Hermes 容器健康失败: %w", err)
+		}
+	}
+	return nil
+}
 
-	if app.Status != domain.AppStatusBindingWaiting {
-		updated, err := h.store.SetAppStatus(ctx, sqlc.SetAppStatusParams{
-			ID:     app.ID,
-			Status: domain.AppStatusBindingWaiting,
-		})
-		if err != nil {
-			return fmt.Errorf("更新应用状态失败: %w", err)
-		}
-		app = updated
-		auditMetadata, err := json.Marshal(map[string]any{
-			"job_id":       uuidToString(job.ID),
-			"runtime_node": payload.RuntimeNodeID,
-			"container_id": textOrEmpty(app.ContainerID),
-		})
-		if err != nil {
-			return fmt.Errorf("序列化应用初始化审计元数据失败: %w", err)
-		}
-		if _, err := h.store.CreateAuditLog(ctx, sqlc.CreateAuditLogParams{
-			ActorRole:    "system",
-			OrgID:        app.OrgID,
-			TargetType:   "app",
-			TargetID:     uuidToString(app.ID),
-			Action:       "initialize",
-			Result:       "succeeded",
-			MetadataJson: auditMetadata,
-		}); err != nil {
-			return fmt.Errorf("写入应用初始化审计日志失败: %w", err)
-		}
+// tryInspect 类型断言探测可选 InspectContainer 能力,未实现时返回 (zero, false)。
+// 这样既支持新 adapter(实现 InspectContainer 后避免重复 Start),
+// 也兼容旧 adapter(直接 Start,与原行为一致)。
+func (h *AppInitializeHandler) tryInspect(ctx context.Context, nodeID, containerID string) (ContainerState, bool) {
+	type inspector interface {
+		InspectContainer(ctx context.Context, nodeID, containerID string) (ContainerState, error)
+	}
+	insp, ok := h.starter.(inspector)
+	if !ok {
+		return ContainerState{}, false
+	}
+	state, err := insp.InspectContainer(ctx, nodeID, containerID)
+	if err != nil {
+		return ContainerState{}, false
+	}
+	return state, true
+}
+
+// writeInitAuditLog 把原 Handle 末尾的审计日志逻辑独立出来,Handle 完成 binding_waiting
+// 转移后调用一次。
+func (h *AppInitializeHandler) writeInitAuditLog(ctx context.Context, app sqlc.App, job sqlc.Job, payload appInitializePayload) error {
+	auditMetadata, err := json.Marshal(map[string]any{
+		"job_id":       uuidToString(job.ID),
+		"runtime_node": payload.RuntimeNodeID,
+		"container_id": textOrEmpty(app.ContainerID),
+	})
+	if err != nil {
+		return fmt.Errorf("序列化应用初始化审计元数据失败: %w", err)
+	}
+	if _, err := h.store.CreateAuditLog(ctx, sqlc.CreateAuditLogParams{
+		ActorRole:    "system",
+		OrgID:        app.OrgID,
+		TargetType:   "app",
+		TargetID:     uuidToString(app.ID),
+		Action:       "initialize",
+		Result:       "succeeded",
+		MetadataJson: auditMetadata,
+	}); err != nil {
+		return fmt.Errorf("写入应用初始化审计日志失败: %w", err)
 	}
 	return nil
 }
