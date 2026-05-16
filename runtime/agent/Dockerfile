@@ -51,7 +51,10 @@ RUN go mod download
 COPY . .
 
 # 唯一产物:oc-runtime-agent;同一二进制承担运行主进程与 `healthcheck` 子命令两种用途
-RUN go build -trimpath -ldflags='-s -w' -o /out/oc-runtime-agent ./runtime/agent
+# -X 将版本号注入 heartbeat.go 中的 agentVersion 变量,生产镜像上报 "master" 而非 "dev"。
+RUN go build -trimpath \
+    -ldflags="-s -w -X oc-manager/runtime/agent.agentVersion=master" \
+    -o /out/oc-runtime-agent ./runtime/agent
 
 # ---- 运行阶段 -------------------------------------------------------------
 # 原 docker.io/library/alpine:3.22 → 现 crpi-nu3ibz4f07feyghi.cn-beijing.personal.cr.aliyuncs.com/ywjs_public/alpine:3.22
