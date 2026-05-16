@@ -1,4 +1,4 @@
-.PHONY: dev-up dev-down test vet build sqlc-generate migrate-up migrate-down check-compose logs web-test web-typecheck web-build build-hermes-runtime verify-hermes-runtime debug-ollama debug-newapi newapi-probe seed-e2e smoke-v102 openapi-gen web-types-gen openapi-check ssh-manager ssh-agent1 logs-api logs-agent1 psql-manager redis-manager
+.PHONY: dev-up dev-down test vet build sqlc-generate migrate-up migrate-down check-compose logs web-test web-typecheck web-build build-hermes-runtime verify-hermes-runtime debug-ollama debug-newapi newapi-probe seed-e2e smoke-v102 openapi-gen web-types-gen openapi-check ssh-manager ssh-agent1 logs-api logs-agent1 psql-manager redis-manager grab-debug-logs
 
 # 加载 .env（-include 在文件不存在时静默跳过，不报错）。
 # docker compose 会自动读取 .env，Makefile 显式 include 是为了让 SSH 等 target 也能访问其中变量。
@@ -289,6 +289,24 @@ redis-manager: ## SSH 进入线上 Redis 交互式 redis-cli
 		-o StrictHostKeyChecking=no \
 		-t $(PROD_MANAGER_SSH_USER)@$(PROD_MANAGER_SSH_HOST) \
 		"cd /opt/oc-manage && docker compose exec manager-redis redis-cli"
+
+# grab-debug-logs 抓取 manager-api 和 runtime-agent 两个容器中的 [hujingnb] 调试日志。
+# 配合 bug-hunting skill 使用：加完调试日志并部署后，用此命令一次性拿回全部标记行，
+# 再将输出粘贴给 bug-hunting skill 做阶段 B 分析。
+# 两段输出各有 header 区分来源，不 follow（只抓现存日志）。
+grab-debug-logs: ## 抓取线上 manager-api 和 agent-1 的 [hujingnb] 调试日志（用于 bug-hunting 分析）
+	@echo "===== manager-api ====="
+	@sshpass -p "$(PROD_MANAGER_SSH_PASS)" ssh \
+		-p $(PROD_MANAGER_SSH_PORT) \
+		-o StrictHostKeyChecking=no \
+		$(PROD_MANAGER_SSH_USER)@$(PROD_MANAGER_SSH_HOST) \
+		"cd /opt/oc-manage && docker compose logs manager-api 2>&1 | grep hujingnb"
+	@echo "===== agent-1 ====="
+	@sshpass -p "$(PROD_AGENT1_SSH_PASS)" ssh \
+		-o StrictHostKeyChecking=no \
+		-o "ProxyCommand=sshpass -p '$(PROD_MANAGER_SSH_PASS)' ssh -W %h:%p -p $(PROD_MANAGER_SSH_PORT) -o StrictHostKeyChecking=no $(PROD_MANAGER_SSH_USER)@$(PROD_MANAGER_SSH_HOST)" \
+		$(PROD_AGENT1_SSH_USER)@$(PROD_AGENT1_SSH_HOST) \
+		"cd /opt/runtime-agent && docker compose logs 2>&1 | grep hujingnb"
 
 # logs-api 在 manage 服务器上持续 tail manager-api 容器日志，Ctrl+C 退出。
 # -t 分配伪终端，确保 Ctrl+C 信号能正确传递给远端 docker compose 进程。
