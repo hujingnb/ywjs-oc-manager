@@ -63,7 +63,14 @@ services:
       - ./config/manager.yaml:/etc/manager/config.yaml:ro
       - ./data/manager:/var/lib/oc-manager/data
       - ./data/knowledge:/var/lib/oc-manager/knowledge
+      # 宿主机 Docker daemon socket:manager-api 通过 Docker Engine HTTP API
+      # 完成镜像 inspect / save / pull(走 internal/runtime/imagesync/sdk_provider.go)。
       - /var/run/docker.sock:/var/run/docker.sock
+      # 宿主机 ~/.docker/config.json:为镜像 pull 提供 registry 凭据(只读),
+      # 生产环境运维需提前在宿主机 docker login 私有仓库(如阿里云 ACR),
+      # 让 internal/runtime/imagesync/auth_store.go 能解析 auths.<host>.auth 字段。
+      # 凭据轮换通过重启 manager-api 生效。
+      - ${HOME}/.docker/config.json:/root/.docker/config.json:ro
     healthcheck:
       test: ["CMD", "wget", "-qO-", "http://localhost:8080/healthz"]
       interval: 30s

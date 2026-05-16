@@ -73,6 +73,22 @@ manager-postgres、manager-redis、manager-api 不对外暴露端口，仅在 Do
 
 `manager-api` 挂载宿主机 `/var/run/docker.sock` 用于镜像同步操作。Docker socket 具有 root 等价权限，因此 manager 服务器需视为高信任主机进行加固：限制 SSH 访问、最小化同机其他工作负载、及时更新 Docker 和内核安全补丁，并确保 `OCM_MANAGER_IMAGE` 来自可信构建链且固定 digest。
 
+### Registry 凭据（必须）
+
+`manager-api` 通过 Docker Engine HTTP API 拉 `hermes.runtime_image`,
+私有镜像必须有 registry 凭据。部署前在 manager 宿主机执行:
+
+```bash
+docker login crpi-nu3ibz4f07feyghi.cn-beijing.personal.cr.aliyuncs.com
+```
+
+docker 会把凭据写到宿主 `~/.docker/config.json` 的 `auths.<registry>.auth`(base64(user:pass))。
+compose 文件已把该路径只读挂载到容器内 `/root/.docker/config.json`,manager 启动时
+解析一次后常驻内存,凭据轮换通过重启 manager-api 生效。
+
+一期只支持静态 `auths.<host>.auth` 格式,不支持 `credsStore` / `credHelpers` /
+macOS keychain 等 helper 形态。如使用 helper,请运维侧把凭据落成静态 auth。
+
 ## 4. 状态检查 / 验证
 
 ```bash
