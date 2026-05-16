@@ -1,4 +1,4 @@
-.PHONY: dev-up dev-down test vet build sqlc-generate migrate-up migrate-down check-compose logs web-test web-typecheck web-build build-hermes-runtime verify-hermes-runtime debug-ollama debug-newapi newapi-probe seed-e2e smoke-v102 openapi-gen web-types-gen openapi-check ssh-manager ssh-agent1 logs-api logs-agent1
+.PHONY: dev-up dev-down test vet build sqlc-generate migrate-up migrate-down check-compose logs web-test web-typecheck web-build build-hermes-runtime verify-hermes-runtime debug-ollama debug-newapi newapi-probe seed-e2e smoke-v102 openapi-gen web-types-gen openapi-check ssh-manager ssh-agent1 logs-api logs-agent1 psql-manager redis-manager
 
 # 加载 .env（-include 在文件不存在时静默跳过，不报错）。
 # docker compose 会自动读取 .env，Makefile 显式 include 是为了让 SSH 等 target 也能访问其中变量。
@@ -269,6 +269,26 @@ ssh-agent1: ## SSH 连接线上 agent-1（经由 manager 内网跳转，需 .env
 		-o "ProxyCommand=sshpass -p '$(PROD_MANAGER_SSH_PASS)' ssh -W %h:%p -p $(PROD_MANAGER_SSH_PORT) -o StrictHostKeyChecking=no $(PROD_MANAGER_SSH_USER)@$(PROD_MANAGER_SSH_HOST)" \
 		-t $(PROD_AGENT1_SSH_USER)@$(PROD_AGENT1_SSH_HOST) \
 		"cd /opt/runtime-agent && exec bash -l"
+
+# psql-manager 在 manage 服务器上进入 manager-postgres 容器的交互式 psql。
+# 密码通过 source .env 读取服务器上的 MANAGER_POSTGRES_PASSWORD，
+# 再以 PGPASSWORD 环境变量注入 docker compose exec，避免明文出现在命令行。
+psql-manager: ## SSH 进入线上 Postgres 交互式 psql
+	sshpass -p "$(PROD_MANAGER_SSH_PASS)" ssh \
+		-p $(PROD_MANAGER_SSH_PORT) \
+		-o StrictHostKeyChecking=no \
+		-t $(PROD_MANAGER_SSH_USER)@$(PROD_MANAGER_SSH_HOST) \
+		"cd /opt/oc-manage && source .env && docker compose exec -e PGPASSWORD=\$$MANAGER_POSTGRES_PASSWORD manager-postgres psql -U \$$MANAGER_POSTGRES_USER -d \$$MANAGER_POSTGRES_DB"
+
+# redis-manager 在 manage 服务器上进入 manager-redis 容器的交互式 redis-cli。
+# manager-redis 容器已通过 docker-compose.yml 将 REDISCLI_AUTH 注入容器环境变量，
+# redis-cli 自动读取该变量完成认证，无需额外传密码。
+redis-manager: ## SSH 进入线上 Redis 交互式 redis-cli
+	sshpass -p "$(PROD_MANAGER_SSH_PASS)" ssh \
+		-p $(PROD_MANAGER_SSH_PORT) \
+		-o StrictHostKeyChecking=no \
+		-t $(PROD_MANAGER_SSH_USER)@$(PROD_MANAGER_SSH_HOST) \
+		"cd /opt/oc-manage && docker compose exec manager-redis redis-cli"
 
 # logs-api 在 manage 服务器上持续 tail manager-api 容器日志，Ctrl+C 退出。
 # -t 分配伪终端，确保 Ctrl+C 信号能正确传递给远端 docker compose 进程。
