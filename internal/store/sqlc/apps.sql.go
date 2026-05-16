@@ -11,6 +11,49 @@ import (
 	"github.com/jackc/pgx/v5/pgtype"
 )
 
+const clearAppProgress = `-- name: ClearAppProgress :one
+UPDATE apps
+SET progress_current = NULL,
+    progress_total = NULL,
+    updated_at = now()
+WHERE id = $1
+RETURNING id, org_id, owner_user_id, runtime_node_id, name, description, status, persona_mode, app_prompt, container_id, container_name, newapi_key_id, newapi_key_ciphertext, api_key_status, created_at, updated_at, deleted_at, runtime_snapshot_json, runtime_snapshot_at, restart_policy_json, health_state_json, model_id, progress_current, progress_total, last_error_status
+`
+
+// transitionTo / RequestInitialize 强制清空进度字段。
+func (q *Queries) ClearAppProgress(ctx context.Context, id pgtype.UUID) (App, error) {
+	row := q.db.QueryRow(ctx, clearAppProgress, id)
+	var i App
+	err := row.Scan(
+		&i.ID,
+		&i.OrgID,
+		&i.OwnerUserID,
+		&i.RuntimeNodeID,
+		&i.Name,
+		&i.Description,
+		&i.Status,
+		&i.PersonaMode,
+		&i.AppPrompt,
+		&i.ContainerID,
+		&i.ContainerName,
+		&i.NewapiKeyID,
+		&i.NewapiKeyCiphertext,
+		&i.ApiKeyStatus,
+		&i.CreatedAt,
+		&i.UpdatedAt,
+		&i.DeletedAt,
+		&i.RuntimeSnapshotJson,
+		&i.RuntimeSnapshotAt,
+		&i.RestartPolicyJson,
+		&i.HealthStateJson,
+		&i.ModelID,
+		&i.ProgressCurrent,
+		&i.ProgressTotal,
+		&i.LastErrorStatus,
+	)
+	return i, err
+}
+
 const createApp = `-- name: CreateApp :one
 INSERT INTO apps (
     org_id,
@@ -323,6 +366,93 @@ func (q *Queries) ListRunningApps(ctx context.Context) ([]ListRunningAppsRow, er
 	return items, nil
 }
 
+const listStaleInits = `-- name: ListStaleInits :many
+SELECT id, runtime_node_id, status
+FROM apps
+WHERE deleted_at IS NULL
+  AND status IN ('pulling_image','syncing_image','preparing_runtime','creating_container','starting')
+  AND updated_at < $1
+ORDER BY id
+`
+
+type ListStaleInitsRow struct {
+	ID            pgtype.UUID `db:"id" json:"id"`
+	RuntimeNodeID pgtype.UUID `db:"runtime_node_id" json:"runtime_node_id"`
+	Status        string      `db:"status" json:"status"`
+}
+
+// reaper 扫描 5 个 init 子状态下连续 90s 无更新的孤儿；阈值由调用方传入。
+func (q *Queries) ListStaleInits(ctx context.Context, updatedAt pgtype.Timestamptz) ([]ListStaleInitsRow, error) {
+	rows, err := q.db.Query(ctx, listStaleInits, updatedAt)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []ListStaleInitsRow{}
+	for rows.Next() {
+		var i ListStaleInitsRow
+		if err := rows.Scan(&i.ID, &i.RuntimeNodeID, &i.Status); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
+const markAppFailed = `-- name: MarkAppFailed :one
+UPDATE apps
+SET status = 'error',
+    last_error_status = $2,
+    progress_current = NULL,
+    progress_total = NULL,
+    updated_at = now()
+WHERE id = $1
+RETURNING id, org_id, owner_user_id, runtime_node_id, name, description, status, persona_mode, app_prompt, container_id, container_name, newapi_key_id, newapi_key_ciphertext, api_key_status, created_at, updated_at, deleted_at, runtime_snapshot_json, runtime_snapshot_at, restart_policy_json, health_state_json, model_id, progress_current, progress_total, last_error_status
+`
+
+type MarkAppFailedParams struct {
+	ID              pgtype.UUID `db:"id" json:"id"`
+	LastErrorStatus pgtype.Text `db:"last_error_status" json:"last_error_status"`
+}
+
+// 任意状态 → error 时同时写入来源状态，保留“在哪一步失败”语义。
+// last_error_status 不加 CHECK 约束，值由调用方在 Go 层负责合法性。
+func (q *Queries) MarkAppFailed(ctx context.Context, arg MarkAppFailedParams) (App, error) {
+	row := q.db.QueryRow(ctx, markAppFailed, arg.ID, arg.LastErrorStatus)
+	var i App
+	err := row.Scan(
+		&i.ID,
+		&i.OrgID,
+		&i.OwnerUserID,
+		&i.RuntimeNodeID,
+		&i.Name,
+		&i.Description,
+		&i.Status,
+		&i.PersonaMode,
+		&i.AppPrompt,
+		&i.ContainerID,
+		&i.ContainerName,
+		&i.NewapiKeyID,
+		&i.NewapiKeyCiphertext,
+		&i.ApiKeyStatus,
+		&i.CreatedAt,
+		&i.UpdatedAt,
+		&i.DeletedAt,
+		&i.RuntimeSnapshotJson,
+		&i.RuntimeSnapshotAt,
+		&i.RestartPolicyJson,
+		&i.HealthStateJson,
+		&i.ModelID,
+		&i.ProgressCurrent,
+		&i.ProgressTotal,
+		&i.LastErrorStatus,
+	)
+	return i, err
+}
+
 const setAppContainer = `-- name: SetAppContainer :one
 UPDATE apps
 SET container_id = $2, container_name = $3, updated_at = now()
@@ -488,6 +618,55 @@ func (q *Queries) SetAppNewAPIKey(ctx context.Context, arg SetAppNewAPIKeyParams
 		arg.NewapiKeyCiphertext,
 		arg.ApiKeyStatus,
 	)
+	var i App
+	err := row.Scan(
+		&i.ID,
+		&i.OrgID,
+		&i.OwnerUserID,
+		&i.RuntimeNodeID,
+		&i.Name,
+		&i.Description,
+		&i.Status,
+		&i.PersonaMode,
+		&i.AppPrompt,
+		&i.ContainerID,
+		&i.ContainerName,
+		&i.NewapiKeyID,
+		&i.NewapiKeyCiphertext,
+		&i.ApiKeyStatus,
+		&i.CreatedAt,
+		&i.UpdatedAt,
+		&i.DeletedAt,
+		&i.RuntimeSnapshotJson,
+		&i.RuntimeSnapshotAt,
+		&i.RestartPolicyJson,
+		&i.HealthStateJson,
+		&i.ModelID,
+		&i.ProgressCurrent,
+		&i.ProgressTotal,
+		&i.LastErrorStatus,
+	)
+	return i, err
+}
+
+const setAppProgress = `-- name: SetAppProgress :one
+UPDATE apps
+SET progress_current = $2,
+    progress_total = $3,
+    updated_at = now()
+WHERE id = $1
+RETURNING id, org_id, owner_user_id, runtime_node_id, name, description, status, persona_mode, app_prompt, container_id, container_name, newapi_key_id, newapi_key_ciphertext, api_key_status, created_at, updated_at, deleted_at, runtime_snapshot_json, runtime_snapshot_at, restart_policy_json, health_state_json, model_id, progress_current, progress_total, last_error_status
+`
+
+type SetAppProgressParams struct {
+	ID              pgtype.UUID `db:"id" json:"id"`
+	ProgressCurrent pgtype.Int8 `db:"progress_current" json:"progress_current"`
+	ProgressTotal   pgtype.Int8 `db:"progress_total" json:"progress_total"`
+}
+
+// progressReporter 节流后写入；NULL/NULL 表示阶段切换或未知。
+func (q *Queries) SetAppProgress(ctx context.Context, arg SetAppProgressParams) (App, error) {
+	row := q.db.QueryRow(ctx, setAppProgress, arg.ID, arg.ProgressCurrent, arg.ProgressTotal)
 	var i App
 	err := row.Scan(
 		&i.ID,

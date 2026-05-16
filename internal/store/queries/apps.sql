@@ -110,3 +110,42 @@ SET model_id = $2,
 WHERE id = $1
   AND deleted_at IS NULL
 RETURNING *;
+
+-- name: SetAppProgress :one
+-- progressReporter 节流后写入；NULL/NULL 表示阶段切换或未知。
+UPDATE apps
+SET progress_current = $2,
+    progress_total = $3,
+    updated_at = now()
+WHERE id = $1
+RETURNING *;
+
+-- name: ClearAppProgress :one
+-- transitionTo / RequestInitialize 强制清空进度字段。
+UPDATE apps
+SET progress_current = NULL,
+    progress_total = NULL,
+    updated_at = now()
+WHERE id = $1
+RETURNING *;
+
+-- name: MarkAppFailed :one
+-- 任意状态 → error 时同时写入来源状态，保留“在哪一步失败”语义。
+-- last_error_status 不加 CHECK 约束，值由调用方在 Go 层负责合法性。
+UPDATE apps
+SET status = 'error',
+    last_error_status = $2,
+    progress_current = NULL,
+    progress_total = NULL,
+    updated_at = now()
+WHERE id = $1
+RETURNING *;
+
+-- name: ListStaleInits :many
+-- reaper 扫描 5 个 init 子状态下连续 90s 无更新的孤儿；阈值由调用方传入。
+SELECT id, runtime_node_id, status
+FROM apps
+WHERE deleted_at IS NULL
+  AND status IN ('pulling_image','syncing_image','preparing_runtime','creating_container','starting')
+  AND updated_at < $1
+ORDER BY id;

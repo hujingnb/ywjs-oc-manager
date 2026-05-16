@@ -89,6 +89,40 @@ func (q *Queries) GetJob(ctx context.Context, id pgtype.UUID) (Job, error) {
 	return i, err
 }
 
+const getLatestAppInitJob = `-- name: GetLatestAppInitJob :one
+SELECT id, type, status, priority, run_after, attempts, max_attempts, payload_json, locked_by, locked_at, last_error, created_at, updated_at, finished_at
+FROM jobs
+WHERE type = 'app_initialize'
+  AND payload_json->>'app_id' = $1::text
+ORDER BY created_at DESC
+LIMIT 1
+`
+
+// reaper 通过 payload_json->>'app_id' 查最近一份 app_initialize job。
+// 用 ORDER BY created_at DESC + LIMIT 1 取最新；不存在返回 pgx.ErrNoRows。
+// 参数显式 cast 成 text，避免 sqlc 把 `->>` 结果类型推断成 []byte。
+func (q *Queries) GetLatestAppInitJob(ctx context.Context, appID string) (Job, error) {
+	row := q.db.QueryRow(ctx, getLatestAppInitJob, appID)
+	var i Job
+	err := row.Scan(
+		&i.ID,
+		&i.Type,
+		&i.Status,
+		&i.Priority,
+		&i.RunAfter,
+		&i.Attempts,
+		&i.MaxAttempts,
+		&i.PayloadJson,
+		&i.LockedBy,
+		&i.LockedAt,
+		&i.LastError,
+		&i.CreatedAt,
+		&i.UpdatedAt,
+		&i.FinishedAt,
+	)
+	return i, err
+}
+
 const listReadyJobs = `-- name: ListReadyJobs :many
 SELECT id, type, status, priority, run_after, attempts, max_attempts, payload_json, locked_by, locked_at, last_error, created_at, updated_at, finished_at
 FROM jobs
@@ -255,6 +289,42 @@ RETURNING id, type, status, priority, run_after, attempts, max_attempts, payload
 
 func (q *Queries) MarkJobSucceeded(ctx context.Context, id pgtype.UUID) (Job, error) {
 	row := q.db.QueryRow(ctx, markJobSucceeded, id)
+	var i Job
+	err := row.Scan(
+		&i.ID,
+		&i.Type,
+		&i.Status,
+		&i.Priority,
+		&i.RunAfter,
+		&i.Attempts,
+		&i.MaxAttempts,
+		&i.PayloadJson,
+		&i.LockedBy,
+		&i.LockedAt,
+		&i.LastError,
+		&i.CreatedAt,
+		&i.UpdatedAt,
+		&i.FinishedAt,
+	)
+	return i, err
+}
+
+const requeueJob = `-- name: RequeueJob :one
+UPDATE jobs
+SET status = 'pending',
+    locked_by = NULL,
+    locked_at = NULL,
+    last_error = NULL,
+    updated_at = now()
+WHERE id = $1
+RETURNING id, type, status, priority, run_after, attempts, max_attempts, payload_json, locked_by, locked_at, last_error, created_at, updated_at, finished_at
+`
+
+// reaper 把已 running / succeeded 的 job 重置为 pending。
+// locked_by / locked_at 一并清空避免被旧 worker 误识别为本机持有。
+// 注意：jobs 表无 started_at 列，仅清 locked_* / last_error / 状态。
+func (q *Queries) RequeueJob(ctx context.Context, id pgtype.UUID) (Job, error) {
+	row := q.db.QueryRow(ctx, requeueJob, id)
 	var i Job
 	err := row.Scan(
 		&i.ID,

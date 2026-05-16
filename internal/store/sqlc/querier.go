@@ -11,6 +11,8 @@ import (
 )
 
 type Querier interface {
+	// transitionTo / RequestInitialize 强制清空进度字段。
+	ClearAppProgress(ctx context.Context, id pgtype.UUID) (App, error)
 	CountActiveAppsByOrgAndModels(ctx context.Context, arg CountActiveAppsByOrgAndModelsParams) ([]CountActiveAppsByOrgAndModelsRow, error)
 	// 平台总览组织计数：剔除 soft-deleted；status='active' 与 'disabled' 都算入册组织。
 	CountActiveOrganizations(ctx context.Context) (int64, error)
@@ -41,6 +43,10 @@ type Querier interface {
 	GetJob(ctx context.Context, id pgtype.UUID) (Job, error)
 	// 查询单个 (org, node) 对的状态，主要用于幂等判断。
 	GetKnowledgeSyncStatus(ctx context.Context, arg GetKnowledgeSyncStatusParams) (KnowledgeSyncStatus, error)
+	// reaper 通过 payload_json->>'app_id' 查最近一份 app_initialize job。
+	// 用 ORDER BY created_at DESC + LIMIT 1 取最新；不存在返回 pgx.ErrNoRows。
+	// 参数显式 cast 成 text，避免 sqlc 把 `->>` 结果类型推断成 []byte。
+	GetLatestAppInitJob(ctx context.Context, appID string) (Job, error)
 	GetLatestInstanceResourceSample(ctx context.Context, appID pgtype.UUID) (InstanceResourceSample, error)
 	GetLatestNodeResourceSample(ctx context.Context, runtimeNodeID pgtype.UUID) (NodeResourceSample, error)
 	// 组织列表复制登录信息时只需要一个可登录的组织管理员用户名。
@@ -90,17 +96,26 @@ type Querier interface {
 	// running 是常态；binding_waiting 表示容器已起但渠道还在登录中，依然要刷指标。
 	ListRunningApps(ctx context.Context) ([]ListRunningAppsRow, error)
 	ListRuntimeNodes(ctx context.Context, arg ListRuntimeNodesParams) ([]RuntimeNode, error)
+	// reaper 扫描 5 个 init 子状态下连续 90s 无更新的孤儿；阈值由调用方传入。
+	ListStaleInits(ctx context.Context, updatedAt pgtype.Timestamptz) ([]ListStaleInitsRow, error)
 	ListUsersByOrg(ctx context.Context, arg ListUsersByOrgParams) ([]User, error)
 	// 列出组织内成员及其当前关联的活跃实例（LEFT JOIN，无实例的成员仍返回）。
 	// apps 表上 apps_owner_active 唯一约束保证每个 owner 最多一个未软删实例，
 	// LEFT JOIN 不会产生重复行；ORDER BY 保持与 ListUsersByOrg 一致。
 	ListUsersByOrgWithActiveApp(ctx context.Context, arg ListUsersByOrgWithActiveAppParams) ([]ListUsersByOrgWithActiveAppRow, error)
 	LockJobForUpdate(ctx context.Context, id pgtype.UUID) (Job, error)
+	// 任意状态 → error 时同时写入来源状态，保留“在哪一步失败”语义。
+	// last_error_status 不加 CHECK 约束，值由调用方在 Go 层负责合法性。
+	MarkAppFailed(ctx context.Context, arg MarkAppFailedParams) (App, error)
 	MarkChannelBindingBound(ctx context.Context, arg MarkChannelBindingBoundParams) (ChannelBinding, error)
 	MarkJobFailed(ctx context.Context, arg MarkJobFailedParams) (Job, error)
 	MarkJobRunning(ctx context.Context, arg MarkJobRunningParams) (Job, error)
 	MarkJobSucceeded(ctx context.Context, id pgtype.UUID) (Job, error)
 	MarkUserLoggedIn(ctx context.Context, id pgtype.UUID) (User, error)
+	// reaper 把已 running / succeeded 的 job 重置为 pending。
+	// locked_by / locked_at 一并清空避免被旧 worker 误识别为本机持有。
+	// 注意：jobs 表无 started_at 列，仅清 locked_* / last_error / 状态。
+	RequeueJob(ctx context.Context, id pgtype.UUID) (Job, error)
 	RetryJob(ctx context.Context, arg RetryJobParams) (Job, error)
 	RevokeRefreshToken(ctx context.Context, id pgtype.UUID) (RefreshToken, error)
 	SetAppContainer(ctx context.Context, arg SetAppContainerParams) (App, error)
@@ -108,6 +123,8 @@ type Querier interface {
 	SetAppHealthState(ctx context.Context, arg SetAppHealthStateParams) (App, error)
 	SetAppModel(ctx context.Context, arg SetAppModelParams) (App, error)
 	SetAppNewAPIKey(ctx context.Context, arg SetAppNewAPIKeyParams) (App, error)
+	// progressReporter 节流后写入；NULL/NULL 表示阶段切换或未知。
+	SetAppProgress(ctx context.Context, arg SetAppProgressParams) (App, error)
 	// 管理员 PATCH /apps/:appId/restart-policy 写入；mode/max_per_window/window_seconds 校验在 service 层。
 	SetAppRestartPolicy(ctx context.Context, arg SetAppRestartPolicyParams) (App, error)
 	SetAppRuntimeSnapshot(ctx context.Context, arg SetAppRuntimeSnapshotParams) (App, error)

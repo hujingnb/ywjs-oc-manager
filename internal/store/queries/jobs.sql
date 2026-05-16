@@ -75,3 +75,27 @@ SET
     updated_at = now()
 WHERE id = $1
 RETURNING *;
+
+-- name: GetLatestAppInitJob :one
+-- reaper 通过 payload_json->>'app_id' 查最近一份 app_initialize job。
+-- 用 ORDER BY created_at DESC + LIMIT 1 取最新；不存在返回 pgx.ErrNoRows。
+-- 参数显式 cast 成 text，避免 sqlc 把 `->>` 结果类型推断成 []byte。
+SELECT *
+FROM jobs
+WHERE type = 'app_initialize'
+  AND payload_json->>'app_id' = sqlc.arg('app_id')::text
+ORDER BY created_at DESC
+LIMIT 1;
+
+-- name: RequeueJob :one
+-- reaper 把已 running / succeeded 的 job 重置为 pending。
+-- locked_by / locked_at 一并清空避免被旧 worker 误识别为本机持有。
+-- 注意：jobs 表无 started_at 列，仅清 locked_* / last_error / 状态。
+UPDATE jobs
+SET status = 'pending',
+    locked_by = NULL,
+    locked_at = NULL,
+    last_error = NULL,
+    updated_at = now()
+WHERE id = $1
+RETURNING *;
