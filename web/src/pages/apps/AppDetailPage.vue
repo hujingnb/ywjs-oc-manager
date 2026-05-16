@@ -1,6 +1,6 @@
 <template>
-  <div style="display: grid; gap: 18px">
-    <n-card :bordered="true" content-style="padding: 0">
+  <div style="display: grid; gap: 18px; align-items: start; align-content: start">
+    <n-card :bordered="true" content-style="display: none" header-style="padding-bottom: 0">
       <template #header>
         <div style="display: flex; align-items: center; justify-content: space-between">
           <div>
@@ -9,14 +9,18 @@
           </div>
           <AppStatusTag v-if="app" :status="app.status" />
         </div>
+        <p v-if="appQuery.isLoading.value" class="state-text" style="padding: 12px 0 0">加载中…</p>
+        <p v-else-if="appQuery.error.value" class="state-text danger" style="padding: 12px 0 0">查询失败：{{ appQuery.error.value?.message }}</p>
+        <div v-if="app" class="tab-nav">
+          <button
+            v-for="tab in tabs"
+            :key="tab.path"
+            class="tab-item"
+            :class="{ active: currentTab === tab.path }"
+            @click="onTabChange(tab.path)"
+          >{{ tab.label }}</button>
+        </div>
       </template>
-
-      <p v-if="appQuery.isLoading.value" class="state-text" style="padding: 12px 24px">加载中…</p>
-      <p v-else-if="appQuery.error.value" class="state-text danger" style="padding: 12px 24px">查询失败：{{ appQuery.error.value?.message }}</p>
-
-      <n-tabs v-if="app" :value="currentTab" type="line" @update:value="onTabChange" style="padding: 0 24px">
-        <n-tab-pane v-for="tab in tabs" :key="tab.path" :name="tab.path" :tab="tab.label" />
-      </n-tabs>
     </n-card>
 
     <RouterView v-if="app" :app-id="app.id" />
@@ -26,7 +30,7 @@
 <script setup lang="ts">
 import { computed, provide } from 'vue'
 import { useRoute, useRouter, RouterView } from 'vue-router'
-import { NCard, NTabPane, NTabs } from 'naive-ui'
+import { NCard } from 'naive-ui'
 
 import { useAppQuery, type AppDTO } from '@/api/hooks/useApps'
 import AppStatusTag from '@/components/AppStatusTag.vue'
@@ -66,8 +70,31 @@ function onTabChange(name: string | number) {
 </script>
 
 <style scoped>
-/* 隐藏空 tab pane body，内容由 RouterView 渲染 */
-:deep(.n-tabs-pane-wrapper) {
-  display: none;
+.tab-nav {
+  display: flex;
+  /* header slot 内，左右对齐 header padding，通过负 margin 拉齐两端 */
+  margin: 8px -24px 0;
+  padding: 0 24px;
+  border-top: 1px solid var(--n-border-color, #333);
+  gap: 4px;
+}
+.tab-item {
+  background: none;
+  border: none;
+  border-bottom: 3px solid transparent;
+  color: var(--n-text-color-3, #999);
+  cursor: pointer;
+  font-size: 14px;
+  padding: 10px 12px;
+  /* margin-bottom 负值让 border-bottom 紧贴卡片底边 */
+  margin-bottom: -1px;
+  transition: color 0.2s, border-color 0.2s;
+}
+.tab-item:hover {
+  color: var(--n-text-color, #fff);
+}
+.tab-item.active {
+  color: var(--primary-color, #18a058);
+  border-bottom-color: var(--primary-color, #18a058);
 }
 </style>
