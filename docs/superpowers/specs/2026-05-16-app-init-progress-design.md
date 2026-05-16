@@ -20,8 +20,8 @@
 - **失败定位差**：所有失败都收敛到 `error`，前端不知道在哪一步出错；
 - **缺镜像兜底**：manager 本机没有 `hermes-runtime:dev` 时无法从 registry 拉取；
 - **manager 容器内无 `docker` CLI**：当前 `LocalDockerCLIProvider` 用 `exec.Command("docker", ...)` 在容器内根本跑不起来；即便挂载宿主机 `docker save -o`，写出来的 tar 也在宿主机路径，manager 容器看不到；
-- **无并发协调**：同时建 2 个 app 时，两个 worker 会并发对同一镜像执行 pull/save/load，浪费带宽；
-- **无重启恢复**：manager 进程在初始化中途死掉，apps 表会留下 status=initializing 的孤儿行，没人继续推进。
+- **无并发协调**：同时建 2 个 app 时，两个 worker 会并发对同一镜像执行 pull/save/load，浪费带宽；这个问题在未来 manager 水平扩展（多副本部署）后会更突出；
+- **无重启恢复 / 无跨实例接管**：manager 进程在初始化中途死掉，apps 表会留下 status=initializing 的孤儿行，没人继续推进；多副本部署时一个实例崩溃，其他实例也无法接管它正在跑的 init。
 
 本设计同时解决以上 7 个问题。
 
@@ -31,8 +31,8 @@
 2. 暴露镜像 pull / sync 的字节级进度，长耗时阶段可视化；
 3. manager 与 docker daemon 通过 Docker Engine HTTP API 交互（走 `/var/run/docker.sock`），完全避免 shell 出 CLI；
 4. 复用宿主机 `~/.docker/config.json` 凭据，支持从 registry 兜底拉镜像；
-5. 同一镜像的 pull、同一节点的 sync 串行化，但进度对所有等待者广播；
-6. manager 任意时刻重启后能继续推进未完成的初始化；
+5. **跨 manager 实例**串行化同一镜像的 pull、同一节点的 sync，进度通过 Redis Pub/Sub 广播给所有等待者；
+6. manager 任意时刻重启或某个实例崩溃后，**任何其他存活的 manager 实例**都能接管未完成的初始化（为未来 API 水平扩展铺路）；
 7. 把"草稿"改为"待初始化"，让前端文案与业务语义对齐。
 
 ## 当前能力盘点
@@ -51,13 +51,17 @@
 [Onboarding] ──事务──→ apps(status=draft) + jobs(app_initialize, pending)
                                   │
                                   ▼
-                 [Worker 拾取 job] ── reaper 启动时也会回放孤儿
+                 [任意 manager 上的 Worker 拾取 job]
+                  ↑                              ↑
+                  │                              │
+   Redis ZSET 队列（已存在）          Reaper（启动 + 60s tick）
+   多副本天然支持                    Redis 锁 ocm:reaper:lock 互斥
                                   │
             ┌─────────────────────┼─────────────────────────────────────┐
             ▼                     ▼                                     ▼
   [ImageCoordinator.Pull]  [ImageCoordinator.SyncToNode]   [其余 3 阶段串行]
-   manager 本机             节点级串行                       秒级，无进度
-   单飞 + 进度广播          单飞 + 进度广播
+   集群内单飞                节点级集群内单飞                   秒级，无进度
+   Redis 锁 + Pub/Sub        Redis 锁 + Pub/Sub
             │                     │
             └──────┬──────────────┘
                    ▼
@@ -65,7 +69,7 @@
         1s/5% 节流 + 阶段切换 flush
                    │
                    ▼
-         apps.status / init_progress_*
+         apps.status / init_progress_*  ← Postgres 是事实来源
                    │
                    ▼
          [前端轮询 GET /apps/:id]
@@ -212,12 +216,14 @@ manager:
 
 如果 docker-compose 是在非 root 用户下运行 manager 容器，需要把 config.json 路径相应改为 `/home/<user>/.docker/config.json`。具体映射在 docker-compose 配置里直接写死，不引入额外环境变量。
 
-### 五、ImageCoordinator（单飞 + 进度广播）
+### 五、ImageCoordinator（Redis 分布式单飞 + Pub/Sub 进度广播）
 
 新增包 `internal/runtime/imagecoord/`，承担两件事：
 
-1. **串行化**：同一 image 在 manager 进程内最多一次 pull；同一节点最多一次 sync；
-2. **广播**：进度事件复制给所有等待者，让"2 个 app 同时初始化时进度字段都能更新"自然成立。
+1. **跨 manager 串行化**：同一 image 在整个 manager 集群内最多一次 pull；同一 (image, nodeID) 集群内最多一次 sync；
+2. **跨 manager 广播**：进度事件通过 Redis Pub/Sub 复制给所有等待者（不论调用方在哪个 manager），让"2 个 app 同时初始化时进度字段都能更新"在多副本部署下也成立。
+
+> 与项目既有 `internal/redis/queue.go` 的设计哲学一致：**Postgres 是事实来源（apps.status / init_progress_*），Redis 仅是信号通道**。Redis 失联或重启最多导致重复 pull / 进度短暂不更新，不影响业务正确性。
 
 ```go
 package imagecoord
@@ -226,20 +232,18 @@ type ProgressEvent struct {
     Phase    string                 // "pulling_image" / "syncing_image"
     Current  int64
     Total    int64                  // 0 表示未知
-    Layers   map[string]layerState  // 仅 pull 阶段使用，便于聚合
 }
 
 type Coordinator struct {
-    local   LocalImageProvider
-    agent   AgentImageClient
-
-    mu      sync.Mutex
-    pulls   map[string]*pullJob              // key: image
-    syncs   map[string]*syncJob              // key: image|nodeID
+    local       LocalImageProvider
+    agent       AgentImageClient
+    locker      DistLocker      // Redis 分布式锁
+    bus         ProgressBus     // Redis Pub/Sub 广播
+    instanceID  string          // 进程启动时生成的 UUID，作为锁 token
 }
 
-// PullImage 确保 manager 本机存在指定 image。已存在时直接返回；
-// 多个调用者并发请求同一 image 时合并为一次 docker pull，subscriber 都能收到事件。
+// PullImage 确保 manager 集群内本机已存在 image。
+// 集群内多个 PullImage 调用合并为一次实际 docker pull；所有 subscriber 都能收到进度。
 func (c *Coordinator) PullImage(
     ctx context.Context,
     image string,
@@ -247,7 +251,7 @@ func (c *Coordinator) PullImage(
 ) error
 
 // SyncToNode 把 manager 本机镜像同步到指定 node。
-// 同一 (image, nodeID) 并发合并；不同节点的 sync 仍可并发。
+// 同一 (image, nodeID) 集群内合并为一次 sync；不同节点的 sync 互不干扰。
 func (c *Coordinator) SyncToNode(
     ctx context.Context,
     image string,
@@ -256,29 +260,100 @@ func (c *Coordinator) SyncToNode(
 ) error
 ```
 
-#### 5.1 单飞实现
+#### 5.1 分布式锁（DistLocker）
 
-不直接用 `golang.org/x/sync/singleflight`——因为标准 singleflight 不支持"等待者拿进度流"。自己实现：
+不引入 redislock / redsync 第三方库，手写一层薄封装（与 `internal/redis/queue.go` 自实现 ZSET 队列的风格一致）：
 
 ```go
-type pullJob struct {
-    done       chan struct{}      // leader 完成时关闭
-    err        error
-    subscribers []chan<- ProgressEvent
-    mu         sync.Mutex
-}
+package imagecoord
 
-// PullImage 进入临界区：
-//   1. lookup pulls[image]：
-//      - 命中：把 subscriber 加进 job.subscribers，挂等 <-job.done；
-//      - 未命中：建 job 写 map、自己当 leader、解锁后真正调 ImagePull；
-//   2. leader 跑完后 broadcast 关闭 done、删 map entry。
-// 进度事件 leader 解析 NDJSON 时遍历 subscribers 用 non-blocking send（满了直接丢，避免慢消费拖累 leader）。
+type DistLocker interface {
+    // TryAcquire 用 SET key token NX PX ttl 抢锁；返回是否抢到。
+    TryAcquire(ctx context.Context, key, token string, ttl time.Duration) (bool, error)
+    // Renew 续期：Lua 校验 token 一致后 PEXPIRE。
+    Renew(ctx context.Context, key, token string, ttl time.Duration) error
+    // Release 释放：Lua 校验 token 一致后 DEL（防误删别人的锁）。
+    Release(ctx context.Context, key, token string) error
+    // Exists 仅用于 follower 在 SUBSCRIBE 后 double-check leader 是否还在。
+    Exists(ctx context.Context, key string) (bool, error)
+}
 ```
 
-#### 5.2 进度聚合
+锁 key 设计：
 
-Docker pull 是 layer 维度的多路并发流，每行 NDJSON 形如：
+| 用途 | key | TTL |
+|---|---|---|
+| pull 单飞 | `ocm:image:pull:lock:<image>` | 5 分钟 |
+| sync 单飞 | `ocm:image:sync:lock:<nodeID>:<image>` | 5 分钟 |
+| reaper 互斥 | `ocm:reaper:lock` | 30 秒 |
+
+token 是 manager `instanceID + ':' + uuid()`，让 Release / Renew 能精确识别"是不是自己的锁"。
+
+#### 5.2 进度总线（ProgressBus）
+
+```go
+type ProgressBus interface {
+    Publish(ctx context.Context, channel string, event ProgressEvent) error
+    Subscribe(ctx context.Context, channels ...string) (<-chan BusMessage, func(), error)
+}
+
+type BusMessage struct {
+    Channel string
+    Event   ProgressEvent  // 解码后的事件，Phase=="__done__" 表示 leader 完成
+    Err     error          // leader publish 的失败信息
+}
+```
+
+channel 命名：
+
+| 用途 | channel |
+|---|---|
+| pull 进度 | `ocm:image:pull:bus:<image>` |
+| sync 进度 | `ocm:image:sync:bus:<nodeID>:<image>` |
+
+`__done__` 是哨兵 phase（不是真实子状态值），仅在总线协议内使用，follower 收到即可退出。失败时 Event 带 Err。
+
+#### 5.3 Leader / Follower 流程
+
+```
+PullImage(ctx, image, sub):
+    if local.ImageInspect(image) 已存在 → 直接 close(sub) 返回 nil
+    token := instanceID + ":" + uuid()
+    if locker.TryAcquire(pullLockKey, token, 5min):
+        return leaderPull(ctx, image, sub, token)
+    return followerWait(ctx, image, sub)
+
+leaderPull:
+    1. 启动 watchdog goroutine：每 90s locker.Renew（防 5min 内未完成时锁过期）
+    2. 调 docker ImagePull，解析 NDJSON
+       每条聚合后的 ProgressEvent:
+         a. bus.Publish 到 channel
+         b. 同进程 fanout 给本机 sub（避免 redis 来回延迟）
+    3. 完成 / 失败 → bus.Publish 一条 phase=__done__ 的事件（带 err）
+    4. 关闭 watchdog
+    5. locker.Release（Lua check-and-del）
+    6. 把 done 事件也 fanout 给本机 sub，关闭 sub，return err
+
+followerWait:
+    1. ch, cancel, _ := bus.Subscribe(progressChannel)
+       defer cancel()
+    2. 关键：SUBSCRIBE 后再 EXISTS 一次锁。
+       Pub/Sub 没有持久化，如果 leader 在 SUBSCRIBE 之前就 publish 完 done，
+       follower 会永远等不到事件。EXISTS 不到锁说明 leader 已经完成：
+         - 若本机镜像已就绪 → return nil
+         - 若仍未就绪（极少见的 leader 失败 case）→ 递归调用 PullImage 重新抢锁
+    3. for 循环消费 ch：
+         - 进度事件 → fanout 给 sub
+         - __done__ 事件 → 关闭 sub，return Event.Err
+    4. ctx 取消或 5min30s deadline 触发 → return ErrLeaderLost
+       上层 worker 通过 job 失败重试机制重新派发，新一轮 PullImage 会自然抢锁
+```
+
+`SyncToNode` 流程结构相同，只是锁 key 与 channel 带 `nodeID`，串行粒度按节点划分（不同节点可并发 sync 同一镜像）。
+
+#### 5.4 进度聚合（manager 本机 leader 侧）
+
+Docker pull 是 layer 维度多路并发流，NDJSON 形如：
 
 ```json
 {"id":"abc123","status":"Downloading","progressDetail":{"current":1234,"total":5678}}
@@ -293,11 +368,11 @@ total   = Σ layer.total
 current = Σ layer.current  (Pull complete 的 layer 视为 current = total)
 ```
 
-每秒（或 Layer 状态变化时）发一次聚合 ProgressEvent。
+每秒（或显著变化时）发一次聚合 ProgressEvent，**不是按 NDJSON 行频率发**——避免 Redis Pub/Sub 高频写入。
 
-#### 5.3 Sync 进度
+#### 5.5 Sync 进度
 
-`ImageSave` 返回 reader 后，wrap 一层 `countingReader` 累加字节；总量从 `client.ImageInspect` 的 `Size` 字段拿（精确到单镜像总字节）。Agent 侧 `docker load` 的进度无法分阶段读取，sync 阶段进度仅覆盖 manager → agent 上传段（占主要时间）。
+`ImageSave` 返回 reader 后，wrap 一层 `countingReader` 累加字节；总量从 `client.ImageInspect` 的 `Size` 字段拿。Agent 侧 `docker load` 的进度无法分阶段读取，sync 阶段进度仅覆盖 manager → agent 上传段（占主要时间）。
 
 ### 六、Worker handler 改造
 
@@ -376,26 +451,34 @@ func (r *progressReporter) Receive(event imagecoord.ProgressEvent)
 
 ### 七、Manager 重启恢复（reaper）
 
-#### 7.1 启动时机
+#### 7.1 启动时机 + 周期 tick
 
-`cmd/server/main.go` 装配阶段，**在 worker 启动前**跑 reaper；reaper 完成才放 worker pool 接 job。
+为支持多 manager 水平扩展，reaper 不再仅在启动时跑一次，而是改为：
+
+- **进程启动时跑一次**（保证刚重启的实例能立刻接管自己之前留下的孤儿）；
+- **周期性 tick**：每 60 秒跑一次（防其他 manager 崩溃后无人接管）；
+- **跨实例互斥**：每次 tick 前用 Redis 锁 `ocm:reaper:lock` (TTL 30s) 抢占，**抢到才执行**，没抢到直接退出本轮（其他 manager 已经在跑）。
 
 ```go
 // cmd/server/main.go 装配顺序
-// 1. db / redis / agent client 等基础组件
-// 2. reaper.Run(ctx, store, jobNotifier)
-// 3. workerPool.Start()
+// 1. db / redis / agent client / locker 等基础组件
+// 2. workerPool.Start()           ← 不再要求 reaper 完成才启动 worker
+// 3. reaper.Start(ctx)             ← 后台 goroutine：先立即跑一次，再每 60s tick
 ```
+
+> 顺序变化：原方案要求 reaper 在 worker pool 之前完成，目的是避免 worker 抢到正在跑的 job。多 manager 下这个保证本来就拿不到（其他 manager 的 worker 可能正在跑），所以这个顺序约束没意义；幂等性已经在每个阶段保证（见 6.2）。
 
 #### 7.2 reaper 实现
 
 新增 `internal/worker/reaper/reaper.go`：
 
 ```go
-// ReapStaleInits 扫描所有 status ∈ 5 init 子状态的 apps，重置为 pulling_image，
-// 找最近一份 app_initialize job 重置为 pending（或重新入队），
-// 然后 enqueue 通知 scheduler 立即拾取。
-func ReapStaleInits(ctx context.Context, store ReaperStore, notifier JobNotifier) error
+// Start 启动后台 goroutine 周期跑 reaper。
+// 每次 tick 前抢 Redis 锁 ocm:reaper:lock (TTL 30s)，抢到才执行。
+func (r *Reaper) Start(ctx context.Context)
+
+// reapOnce 由 Start 内部调，单次扫描重置孤儿。
+func (r *Reaper) reapOnce(ctx context.Context) error
 ```
 
 逻辑：
@@ -407,23 +490,27 @@ WHERE status IN ('pulling_image','syncing_image','preparing_runtime','creating_c
   AND deleted_at IS NULL;
 ```
 
-对每条记录：
+对每条记录（需要识别"是否真的卡住"，避免把别的 manager 正在跑的 init 误重置）：
 
-1. 单事务里：
+1. **判定条件**：`updated_at < now() - 90s`（progressReporter 至少每秒 flush，连续 90s 无更新视作卡死或 manager 死亡）；
+2. 满足条件后单事务里：
    - `UPDATE apps SET status='pulling_image', init_progress_current=NULL, init_progress_total=NULL, init_failed_phase=NULL WHERE id=$1`；
    - 找该 app 最近一份 `app_initialize` job：
      - 存在且 status ∈ {running, succeeded}：`UPDATE jobs SET status='pending', started_at=NULL WHERE id=$id`；
      - 存在且 status = pending：跳过（scheduler 自然会拾取）；
      - 不存在：新建一份；
-2. 事务外：`notifier.Enqueue(jobID)`；通知失败仅记日志（scheduler 兜底扫表）。
+3. 事务外：`queue.Enqueue(jobID)`（已有的 Redis ZSET 队列，多副本天然支持）；入队失败仅记日志（scheduler 兜底扫表）。
 
-#### 7.3 单 manager 假设
+> `updated_at < now() - 90s` 的阈值选择：worker 进度上报节流是 1s（见 6.3），90s 是约 100x 余量，足以覆盖正常 worker 在阶段切换时的瞬时停顿，又能在 manager 死亡后 90s 内被接管。
 
-当前架构是单 manager 实例，reaper 安全。若未来引入多 manager：
-- 加 `apps.manager_instance_id` 字段（reaper 只处理本实例 id）；
-- 或 reaper 走 advisory lock（`SELECT pg_advisory_lock(...)` 防多实例同时 reap）。
+#### 7.3 多 manager 安全性
 
-本 spec 在注释中声明假设，不实现多 manager 逻辑。
+| 风险 | 缓解 |
+|---|---|
+| 两个 manager 同时跑 reaper，重复重置同一 app | Redis 锁 `ocm:reaper:lock` 互斥；锁 TTL > 单次 reap 预期耗时 |
+| 抢到锁的 manager 在 reap 中途崩溃 | 锁 30s TTL 自动释放；下个 tick 由其他 manager 接管 |
+| 一个 manager 的 worker 正在正常推进，另一个 manager 的 reaper 误判孤儿 | `updated_at` 判定阈值（90s）远大于 progressReporter 节流间隔（1s） |
+| reaper 重置后，原 manager 的 worker 醒过来继续写 progress | worker 在每个阶段开始前会调 `transitionTo` 校验 `from→to` 合法性；`pulling_image → preparing_runtime` 之类不合法转移会失败，原 worker 自然终止；reaper 触发的新 job 重新走 5 阶段 |
 
 #### 7.4 进度字段恢复语义
 
@@ -516,12 +603,14 @@ status=error 且 `init_failed_phase != null` 时，把"重新初始化"按钮上
 | 文件 | 覆盖点 |
 |---|---|
 | `internal/domain/app_state_machine_test.go` | 表驱动覆盖 21 条合法转移 + 关键非法转移（如 `running → pulling_image` 必须失败） |
-| `internal/runtime/imagecoord/coordinator_test.go` | 并发 PullImage 单飞合并；subscriber 能收到事件；leader 失败后下个 subscriber 升级 |
+| `internal/redis/dist_locker_test.go` | TryAcquire / Renew / Release Lua 脚本正确性；token 不匹配时 Release 不会误删 |
+| `internal/redis/progress_bus_test.go` | Publish/Subscribe 端到端；__done__ 哨兵识别；channel 关闭语义 |
+| `internal/runtime/imagecoord/coordinator_test.go` | 并发 PullImage 跨实例单飞合并（用真实 redis 或 miniredis）；subscriber 能收到事件；leader 失败后下个 subscriber 升级 |
 | `internal/runtime/imagecoord/progress_test.go` | NDJSON 解析；多 layer 字节累加；`Pull complete` 视为 current=total |
 | `internal/runtime/imagesync/sdk_provider_test.go` | mock docker SDK 验证 ImageID / ImageSave / ImagePull 能正确串接 |
 | `internal/worker/handlers/app_initialize_test.go` | 表驱动覆盖每阶段 status 推进；任意阶段 mock 失败应写 `init_failed_phase`；幂等检查（重跑相同 job 不重复创建容器） |
 | `internal/worker/handlers/progress_reporter_test.go` | 1s 节流边界；5% 阈值边界；阶段切换 flush；context 取消不写库 |
-| `internal/worker/reaper/reaper_test.go` | 5 个孤儿状态都能被扫到；job 状态分支（无 / pending / running / succeeded）都能正确处置 |
+| `internal/worker/reaper/reaper_test.go` | 5 个孤儿状态都能被扫到；`updated_at < now()-90s` 阈值边界；Redis 锁抢占失败时直接退出本轮；job 状态分支（无 / pending / running / succeeded）都能正确处置 |
 
 #### 10.2 前端单测
 
@@ -536,9 +625,13 @@ status=error 且 `init_failed_phase != null` 时，把"重新初始化"按钮上
 
 1. 创建一个新 app（manager 本机已有镜像）：观察 status 序列 `draft → pulling_image（瞬间）→ syncing_image（带进度）→ preparing_runtime → creating_container → starting → binding_waiting`；
 2. 故意让 manager 本机删掉镜像后创建：验证 pulling_image 阶段进度条能动；
-3. 同时点 2 个补建：验证两个 app 都能看到镜像同步进度（广播生效）；
+3. 同时点 2 个补建：验证两个 app 都能看到镜像同步进度（Redis Pub/Sub 广播生效）；
 4. 在 syncing_image 中途 `docker compose restart manager`：重启后两个 app 仍能完成初始化；
-5. 让 agent 临时拒绝 inspect 调用：验证 status=error + init_failed_phase=syncing_image，前端"重新初始化"按钮可点。
+5. 让 agent 临时拒绝 inspect 调用：验证 status=error + init_failed_phase=syncing_image，前端"重新初始化"按钮可点；
+6. **多副本场景**（docker-compose scale manager=2）：在 manager-A 上发起 app1 init、manager-B 上发起 app2 init，且都需要拉取同一镜像。验证：
+   - 只有一个 manager 实际执行 docker pull（看 docker daemon 日志或 `docker events`）；
+   - 两个 app 的 init_progress_* 字段都在更新；
+   - kill 掉 leader manager 容器，剩余 manager 上 reaper 60s 内接管 app1，app1 重新走完 5 阶段。
 
 ### 十一、不做的事（Out of scope）
 
@@ -560,17 +653,21 @@ status=error 且 `init_failed_phase != null` 时，把"重新初始化"按钮上
 | Docker SDK 版本与 daemon 不兼容 | go.mod 锁定 `github.com/docker/docker` 版本；CI 用与生产相近版本测试 |
 | `~/.docker/config.json` 凭据格式多样（credentials helper、auth keychain） | 一期只支持 `auths.<registry>.auth` 字段（base64(user:pass)）；helper 场景报错并提示运维静态写 auth |
 | `ImagePull` 长时间不返回事件被误判为卡住 | leader 维护 lastEventAt，超过 60s 无事件主动 ctx.Cancel；subscriber 收到 err 后冒泡到 error |
-| reaper 误把刚启动的 worker 正在处理的 app 重置 | reaper 在 worker pool 启动前完成（顺序约束）；不存在并发 |
-| 多 manager 部署时 reaper 互相覆盖 | 当前单 manager 假设；spec 显式声明，未来扩展走 advisory lock 或 manager_instance_id 字段 |
+| reaper 误把正在正常推进的 app 重置 | reaper 用 `apps.updated_at < now()-90s` 判定孤儿；progressReporter 至少每秒 flush，正常 worker 不会被误伤 |
+| 多 manager 同时跑 reaper 重复重置 | Redis 锁 `ocm:reaper:lock` (TTL 30s) 互斥；锁超时自动释放，崩溃可由其他实例接管 |
+| Redis 短暂不可用导致 ImageCoordinator 抢锁失败 | 抢锁失败时返回错误并冒泡为 worker job 失败；scheduler 的 PG 兜底扫表会重新派发；最坏后果是几次 pull/sync 串行性丢失，不影响正确性 |
+| Redis Pub/Sub "先发后订"导致 follower 错过 done 事件 | follower SUBSCRIBE 后再 EXISTS 检查锁，锁不在则视作 leader 已完成，再次走 PullImage 入口（详见 5.3） |
+| watchdog 续期失败 leader 仍持锁跑 | leader 在 Renew 失败超过 N 次时主动放弃（cancel ctx），让其他 manager 接管；防止"假持锁"长时间阻塞 |
 
 ## 实现顺序建议
 
 1. **数据库 + 状态机**：migration、enums.go、state_machine.go、status.ts 文案 —— 一个独立 PR，先把契约改了；
 2. **Docker SDK 替换**：LocalDockerSDKProvider 落地，去掉 LocalDockerCLIProvider；不改 worker 流程；
-3. **ImageCoordinator + progressReporter**：单飞与广播逻辑，独立测试；
-4. **Worker handler 改造**：5 阶段化 + 进度上报 + 幂等强化；
-5. **Reaper**：在 cmd/server 装配，加重启冒烟测试；
-6. **前端展示**：进度条 + 失败阶段文案；
-7. **联调 + 浏览器验证**。
+3. **Redis DistLocker + ProgressBus**：放在 `internal/redis/` 包内（与现有 ZSET 队列同级），独立测试，不绑定具体业务；
+4. **ImageCoordinator + progressReporter**：依赖步骤 3 的锁与总线，串起单飞、广播、节流；
+5. **Worker handler 改造**：5 阶段化 + 进度上报 + 幂等强化；
+6. **Reaper**：周期 tick + Redis 锁互斥，在 cmd/server 装配；加重启冒烟测试；
+7. **前端展示**：进度条 + 失败阶段文案；
+8. **联调 + 浏览器验证**（含多副本验证）。
 
 每步都能独立 commit、可回滚。
