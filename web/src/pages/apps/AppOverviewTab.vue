@@ -76,6 +76,13 @@
       <n-descriptions-item v-if="app.description" label="描述" :span="2">
         {{ app.description }}
       </n-descriptions-item>
+      <!-- runtime_image_ref / sha256 由后端仅对平台管理员填充，非管理员字段恒为空，此处不渲染 -->
+      <n-descriptions-item v-if="auth.isPlatformAdmin && app.runtime_image_ref" label="镜像引用" :span="2">
+        <code>{{ app.runtime_image_ref }}</code>
+      </n-descriptions-item>
+      <n-descriptions-item v-if="auth.isPlatformAdmin && app.runtime_image_sha256" label="镜像 Digest" :span="2">
+        <code>{{ app.runtime_image_sha256 }}</code>
+      </n-descriptions-item>
     </n-descriptions>
 
     <div

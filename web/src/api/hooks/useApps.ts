@@ -42,6 +42,12 @@ export interface AppDTO {
   progress_total?: number
   // last_error_status 是上次进入 error 时所在状态值，用于在错误态展示失败阶段。
   last_error_status?: string
+  // last_error_message 是上次进入 error 时的错误原始文本，供页面直接展示给用户。
+  last_error_message?: string
+  // runtime_image_ref 是 phasePullRuntimeImage 拉取的镜像引用；仅平台管理员可见。
+  runtime_image_ref?: string
+  // runtime_image_sha256 是 docker inspect 返回的镜像 config digest；仅平台管理员可见。
+  runtime_image_sha256?: string
 }
 
 // RuntimeOperationResult 是运行时异步操作的提交结果。

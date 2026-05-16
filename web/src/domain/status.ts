@@ -9,28 +9,26 @@ export interface StatusView {
 }
 
 // appStatusViews 覆盖应用生命周期状态，新增后端状态时应同步补充。
-// 5 个 init 子状态文案与后端状态机 1:1 对应，用户能直观看到“现在在做什么”。
+// 4 个 init 子状态文案与后端状态机 1:1 对应，用户能直观看到”现在在做什么”。
 const appStatusViews: Record<string, StatusView> = {
-  draft:               { label: '待初始化',         tone: 'neutral' },
-  pulling_image:       { label: '拉取运行时镜像',   tone: 'warning' },
-  syncing_image:       { label: '同步镜像到节点',   tone: 'warning' },
-  preparing_runtime:   { label: '准备运行时配置',   tone: 'warning' },
-  creating_container:  { label: '创建容器',         tone: 'warning' },
-  starting:            { label: '启动容器',         tone: 'warning' },
-  binding_waiting:     { label: '待绑定',           tone: 'warning' },
-  binding_failed:      { label: '绑定失败',         tone: 'danger' },
-  running:             { label: '运行中',           tone: 'success' },
-  stopped:             { label: '已停止',           tone: 'neutral' },
-  error:               { label: '异常',             tone: 'danger' },
-  deleted:             { label: '已删除',           tone: 'neutral' },
+  draft:                  { label: '待初始化',         tone: 'neutral' },
+  pulling_runtime_image:  { label: '拉取运行时镜像',   tone: 'warning' },
+  preparing_runtime:      { label: '准备运行时配置',   tone: 'warning' },
+  creating_container:     { label: '创建容器',         tone: 'warning' },
+  starting:               { label: '启动容器',         tone: 'warning' },
+  binding_waiting:        { label: '待绑定',           tone: 'warning' },
+  binding_failed:         { label: '绑定失败',         tone: 'danger' },
+  running:                { label: '运行中',           tone: 'success' },
+  stopped:                { label: '已停止',           tone: 'neutral' },
+  error:                  { label: '异常',             tone: 'danger' },
+  deleted:                { label: '已删除',           tone: 'neutral' },
 }
 
-// initPhaseStatuses 是 worker 初始化期间会出现的 5 个子状态集合。
+// initPhaseStatuses 是 worker 初始化期间会出现的 4 个子状态集合。
 // AppOverviewTab 在 status ∈ 该集合时额外渲染 progress 进度条。
 // 集合写在这里集中维护，避免组件硬编码字符串列表。
 const initPhaseStatuses: ReadonlySet<string> = new Set([
-  'pulling_image',
-  'syncing_image',
+  'pulling_runtime_image',
   'preparing_runtime',
   'creating_container',
   'starting',
