@@ -159,6 +159,9 @@ release-hermes-image: build-hermes-image push-hermes-image ## 构建并推送 he
 # SSH 凭据复用 PROD_MANAGER_SSH_* / PROD_AGENT1_SSH_* 变量（从 .env 加载）。
 # deploy-agent 无法直接访问 agent 服务器，经由 manager 内网跳转，与 ssh-agent1 相同。
 
+.PHONY: deploy-all
+deploy-all: deploy-api deploy-web deploy-agent ## 构建推送全部服务镜像并部署（api + web + agent）
+
 .PHONY: deploy-api
 deploy-api: release-api-image ## 构建推送 manager-api 并部署到 manage 服务器（更新 .env + compose up）
 	sshpass -p "$(PROD_MANAGER_SSH_PASS)" ssh \
