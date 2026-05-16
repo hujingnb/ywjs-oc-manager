@@ -27,7 +27,7 @@ import (
 type Store interface {
 	// ListStaleInits 扫 5 个 init 子状态下 updated_at < 阈值的孤儿 apps。
 	ListStaleInits(ctx context.Context, updatedAt pgtype.Timestamptz) ([]sqlc.ListStaleInitsRow, error)
-	// SetAppStatus reaper 强制把孤儿 status 回退到 pulling_image;不走状态机校验。
+	// SetAppStatus reaper 强制把孤儿 status 回退到 pulling_runtime_image;不走状态机校验。
 	SetAppStatus(ctx context.Context, arg sqlc.SetAppStatusParams) (sqlc.App, error)
 	// ClearAppProgress 清空 progress_current / progress_total,避免前端继续看到旧值。
 	ClearAppProgress(ctx context.Context, id pgtype.UUID) (sqlc.App, error)
@@ -139,14 +139,14 @@ func (r *Reaper) reapOnce(ctx context.Context) error {
 	return nil
 }
 
-// reapApp 重置 app status 到 pulling_image + 清空进度 + 重置 / 新建 job + 通知队列。
-// reset 不走 EnsureAppTransition(可能从 starting 直接跳回 pulling_image,
+// reapApp 重置 app status 到 pulling_runtime_image + 清空进度 + 重置 / 新建 job + 通知队列。
+// reset 不走 EnsureAppTransition(可能从 starting 直接跳回 pulling_runtime_image,
 // 不是状态机正常路径,但 reaper 是显式接管,直接强制 SET);
 // 状态机校验只针对 worker 阶段切换,reaper 是带外接管动作,与之是不同语义。
 func (r *Reaper) reapApp(ctx context.Context, row sqlc.ListStaleInitsRow) error {
 	if _, err := r.store.SetAppStatus(ctx, sqlc.SetAppStatusParams{
 		ID:     row.ID,
-		Status: domain.AppStatusPullingImage,
+		Status: domain.AppStatusPullingRuntimeImage,
 	}); err != nil {
 		return fmt.Errorf("重置 status: %w", err)
 	}

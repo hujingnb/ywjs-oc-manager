@@ -98,11 +98,10 @@ func TestReaper_ReapOrphanReset(t *testing.T) {
 		name        string
 		startStatus string
 	}{
-		{"pulling_image 孤儿", domain.AppStatusPullingImage},          // pull 阶段卡住,reaper 应回退到自身
-		{"syncing_image 孤儿", domain.AppStatusSyncingImage},          // sync 阶段卡住,reaper 应回退到 pulling_image
-		{"preparing_runtime 孤儿", domain.AppStatusPreparingRuntime},  // prepare 阶段卡住,reaper 应回退到 pulling_image
-		{"creating_container 孤儿", domain.AppStatusCreatingContainer}, // create 阶段卡住,reaper 应回退到 pulling_image
-		{"starting 孤儿", domain.AppStatusStarting},                   // start 阶段卡住,reaper 应回退到 pulling_image
+		{"pulling_runtime_image 孤儿", domain.AppStatusPullingRuntimeImage}, // pull 阶段卡住,reaper 应回退到自身
+		{"preparing_runtime 孤儿", domain.AppStatusPreparingRuntime},        // prepare 阶段卡住,reaper 应回退到 pulling_runtime_image
+		{"creating_container 孤儿", domain.AppStatusCreatingContainer},      // create 阶段卡住,reaper 应回退到 pulling_runtime_image
+		{"starting 孤儿", domain.AppStatusStarting},                         // start 阶段卡住,reaper 应回退到 pulling_runtime_image
 	}
 	for _, c := range cases {
 		t.Run(c.name, func(t *testing.T) {
@@ -114,9 +113,9 @@ func TestReaper_ReapOrphanReset(t *testing.T) {
 			r := New(store, notifier, &fakeLocker{acquireOK: true}, "test", slog.Default())
 			r.tickOnce(context.Background())
 
-			// status 被强制回退为 pulling_image,无论起始子状态是哪一类
+			// status 被强制回退为 pulling_runtime_image,无论起始子状态是哪一类
 			require.Len(t, store.statusCalls, 1)
-			assert.Equal(t, domain.AppStatusPullingImage, store.statusCalls[0].Status)
+			assert.Equal(t, domain.AppStatusPullingRuntimeImage, store.statusCalls[0].Status)
 			// 进度字段被清空,防前端继续看到旧值
 			require.Len(t, store.clearCalls, 1)
 			// running job 必须被 requeue 回 pending
