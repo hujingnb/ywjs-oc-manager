@@ -1,6 +1,6 @@
 <template>
   <div style="display: grid; gap: 18px">
-    <n-card :bordered="true">
+    <n-card :bordered="true" content-style="padding: 0">
       <template #header>
         <div style="display: flex; align-items: center; justify-content: space-between">
           <div>
@@ -11,10 +11,10 @@
         </div>
       </template>
 
-      <p v-if="appQuery.isLoading.value" class="state-text">加载中…</p>
-      <p v-else-if="appQuery.error.value" class="state-text danger">查询失败：{{ appQuery.error.value?.message }}</p>
+      <p v-if="appQuery.isLoading.value" class="state-text" style="padding: 12px 24px">加载中…</p>
+      <p v-else-if="appQuery.error.value" class="state-text danger" style="padding: 12px 24px">查询失败：{{ appQuery.error.value?.message }}</p>
 
-      <n-tabs v-if="app" :value="currentTab" type="line" @update:value="onTabChange">
+      <n-tabs v-if="app" :value="currentTab" type="line" @update:value="onTabChange" style="padding: 0 24px">
         <n-tab-pane v-for="tab in tabs" :key="tab.path" :name="tab.path" :tab="tab.label" />
       </n-tabs>
     </n-card>
