@@ -1018,21 +1018,6 @@ func persistAgentToken(ctx context.Context, s *store.AgentTokenStore, c *auth.Ci
 	return s.Set(ctx, id, ciphertext)
 }
 
-// imageDistributorWrapper 把 service.ImageDistributionService 适配成 handlers.ImageDistributor 的
-// (any, error) 自由签名。Go 接口要求 exact 返回类型匹配，所以转一层。
-type imageDistributorWrapper struct {
-	svc *service.ImageDistributionService
-}
-
-func newImageDistributorWrapper(svc *service.ImageDistributionService) *imageDistributorWrapper {
-	return &imageDistributorWrapper{svc: svc}
-}
-
-// EnsureRuntimeImage 把 service 的具体结构体返回值转成 handlers.ImageDistributor 期望的 any。
-func (w *imageDistributorWrapper) EnsureRuntimeImage(ctx context.Context, nodeID, image string) (any, error) {
-	return w.svc.EnsureRuntimeImage(ctx, nodeID, image)
-}
-
 // appDirInitializerAdapter 把 *runtime.AgentBackedAdapter 适配成
 // handlers.AgentDirInitializer，仅暴露 InitAppDirs 一个方法，避免 handler 依赖
 // 整个 adapter 类型导致测试 mock 复杂。生产装配传 runtimeAdapter 即可。

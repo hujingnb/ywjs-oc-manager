@@ -15,7 +15,6 @@ import (
 	"oc-manager/internal/auth"
 	"oc-manager/internal/domain"
 	"oc-manager/internal/integrations/runtime"
-	"oc-manager/internal/runtime/imagesync"
 	"oc-manager/internal/store/sqlc"
 )
 
@@ -179,9 +178,6 @@ type fakeWorkspaceAdapter struct {
 	lastRelPath      string
 }
 
-func (a *fakeWorkspaceAdapter) EnsureImage(_ context.Context, _, _ string) (imagesync.SyncResult, error) {
-	return imagesync.SyncResult{}, nil
-}
 func (a *fakeWorkspaceAdapter) CreateContainer(_ context.Context, _ string, _ runtime.ContainerSpec) (runtime.ContainerInfo, error) {
 	return runtime.ContainerInfo{}, runtime.ErrUnimplemented
 }

@@ -174,7 +174,7 @@ type AppInitializeLLMConfig struct {
 // 顺序：
 //  1. 加载 app/org/owner/runtime_node 上下文；
 //  2. 幂等：状态 ∈ {running, binding_waiting} 直接返回成功；
-//  3. 调 ImageDistributor 把 Hermes runtime 镜像同步到目标节点；
+//  3. 调 imagePullCoord 通过 agent docker proxy 在目标节点直接 pull hermes runtime 镜像；
 //  4. 调 AgentDirInitializer 在节点上准备 apps/<id>/ 目录；
 //  5. api_key 不 active 时调 new-api 创建并 cipher.Encrypt 写库（ensureAPIKey）；
 //  6. 渲染 SOUL.md/config.yaml/.env/skills/ 并通过 AppRuntimeFileWriter 上传到目标节点

@@ -18,34 +18,12 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 	"oc-manager/internal/integrations/agent"
-	"oc-manager/internal/runtime/imagesync"
 )
-
-// TestAgentBackedAdapterEnsureImageDelegatesToImageSyncer 验证agentBacked适配器确保镜像Delegates到镜像同步器的预期行为场景。
-func TestAgentBackedAdapterEnsureImageDelegatesToImageSyncer(t *testing.T) {
-	syncer := &fakeImageSyncer{result: imagesync.SyncResult{Image: "hermes-runtime:dev", NodeID: "node-1", Transferred: true}}
-	adapter := NewAgentBackedAdapter(nil, nil, syncer)
-
-	got, err := adapter.EnsureImage(context.Background(), "node-1", "hermes-runtime:dev")
-	require.NoError(t, err)
-	require.True(t, got.Transferred)
-	if syncer.lastImage != "hermes-runtime:dev" || syncer.lastNode != "node-1" {
-		t.Fatalf("syncer last = %s/%s", syncer.lastNode, syncer.lastImage)
-	}
-}
-
-// TestAgentBackedAdapterEnsureImageReturnsUnimplementedWithoutSyncer 验证agentBacked适配器确保镜像返回未实现不使用同步器的成功路径场景。
-func TestAgentBackedAdapterEnsureImageReturnsUnimplementedWithoutSyncer(t *testing.T) {
-	adapter := NewAgentBackedAdapter(nil, nil, nil)
-	if _, err := adapter.EnsureImage(context.Background(), "node-1", "hermes-runtime:dev"); !errors.Is(err, ErrUnimplemented) {
-		t.Fatalf("EnsureImage() error = %v, want ErrUnimplemented", err)
-	}
-}
 
 // TestAgentBackedAdapterContainerOpsRequireDockerResolver 验证agentBacked适配器容器操作RequireDocker解析器的预期行为场景。
 func TestAgentBackedAdapterContainerOpsRequireDockerResolver(t *testing.T) {
 	// 没有 docker resolver 时所有容器接口都退化为 ErrUnimplemented，让上层快速识别装配缺失。
-	adapter := NewAgentBackedAdapter(nil, nil, nil)
+	adapter := NewAgentBackedAdapter(nil, nil)
 	if _, err := adapter.CreateContainer(context.Background(), "n1", ContainerSpec{}); !errors.Is(err, ErrUnimplemented) {
 		t.Fatalf("CreateContainer err = %v", err)
 	}
@@ -92,7 +70,7 @@ func TestAgentBackedAdapterFileOpsRouteThroughAgent(t *testing.T) {
 		require.Equal(t, "node-1", nodeID)
 		return agent.NewFileClient(server.URL, ""), nil
 	})
-	adapter := NewAgentBackedAdapter(resolver, nil, nil)
+	adapter := NewAgentBackedAdapter(resolver, nil)
 
 	_, err := adapter.ListFiles(context.Background(), "node-1", "/data")
 	require.NoError(t, err)
@@ -114,7 +92,7 @@ func TestAgentBackedAdapterFileOpsRouteThroughAgent(t *testing.T) {
 
 // TestAgentBackedAdapterFileOpsRequireResolver 验证agentBacked适配器文件操作Require解析器的预期行为场景。
 func TestAgentBackedAdapterFileOpsRequireResolver(t *testing.T) {
-	adapter := NewAgentBackedAdapter(nil, nil, nil)
+	adapter := NewAgentBackedAdapter(nil, nil)
 	if _, err := adapter.ListFiles(context.Background(), "node-1", "/data"); !errors.Is(err, ErrUnimplemented) {
 		t.Fatalf("ListFiles() error = %v", err)
 	}
@@ -180,7 +158,7 @@ func startMockDockerLifecycle(t *testing.T, calls *[]dockerCallLog, errOn map[st
 func TestAgentBackedAdapterStartStopRestartRemove_HappyPath(t *testing.T) {
 	var calls []dockerCallLog
 	_, cli := startMockDockerLifecycle(t, &calls, nil)
-	adapter := NewAgentBackedAdapter(nil, &staticDockerResolver{cli: cli}, nil)
+	adapter := NewAgentBackedAdapter(nil, &staticDockerResolver{cli: cli})
 
 	err := adapter.StartContainer(context.Background(), "n", "ctr-1")
 	require.NoError(t, err)
@@ -201,7 +179,7 @@ func TestAgentBackedAdapterStartStopRestartRemove_HappyPath(t *testing.T) {
 func TestAgentBackedAdapterStartContainerPropagatesDockerError(t *testing.T) {
 	var calls []dockerCallLog
 	_, cli := startMockDockerLifecycle(t, &calls, map[string]int{"start": http.StatusInternalServerError})
-	adapter := NewAgentBackedAdapter(nil, &staticDockerResolver{cli: cli}, nil)
+	adapter := NewAgentBackedAdapter(nil, &staticDockerResolver{cli: cli})
 	err := adapter.StartContainer(context.Background(), "n", "ctr-x")
 	require.Error(t, err)
 	require.True(t, strings.Contains(err.Error(), "启动容器失败"))
@@ -211,7 +189,7 @@ func TestAgentBackedAdapterStartContainerPropagatesDockerError(t *testing.T) {
 func TestAgentBackedAdapterStopContainerSetsTimeout(t *testing.T) {
 	var calls []dockerCallLog
 	_, cli := startMockDockerLifecycle(t, &calls, nil)
-	adapter := NewAgentBackedAdapter(nil, &staticDockerResolver{cli: cli}, nil)
+	adapter := NewAgentBackedAdapter(nil, &staticDockerResolver{cli: cli})
 	err := adapter.StopContainer(context.Background(), "n", "ctr-1")
 	require.NoError(t, err)
 	stop := findCall(t, calls, http.MethodPost, "/stop")
@@ -222,7 +200,7 @@ func TestAgentBackedAdapterStopContainerSetsTimeout(t *testing.T) {
 func TestAgentBackedAdapterRemoveContainerForcesDeletion(t *testing.T) {
 	var calls []dockerCallLog
 	_, cli := startMockDockerLifecycle(t, &calls, nil)
-	adapter := NewAgentBackedAdapter(nil, &staticDockerResolver{cli: cli}, nil)
+	adapter := NewAgentBackedAdapter(nil, &staticDockerResolver{cli: cli})
 	err := adapter.RemoveContainer(context.Background(), "n", "ctr-1")
 	require.NoError(t, err)
 	remove := findCall(t, calls, http.MethodDelete, "/containers/ctr-1")
@@ -278,7 +256,7 @@ func (s *staticDockerResolver) DockerClient(_ context.Context, _ string) (*clien
 func TestAgentBackedAdapterCreateContainerHappyPath(t *testing.T) {
 	var calls []dockerCallLog
 	_, cli := startMockDocker(t, "ctr-1", "created", &calls)
-	adapter := NewAgentBackedAdapter(nil, &staticDockerResolver{cli: cli}, nil)
+	adapter := NewAgentBackedAdapter(nil, &staticDockerResolver{cli: cli})
 
 	spec := ContainerSpec{
 		Name:  "ocm-app-x",
@@ -317,7 +295,7 @@ func TestAgentBackedAdapterCreateContainerHappyPath(t *testing.T) {
 
 // TestAgentBackedAdapterCreateContainerFailsWithoutResolver 验证agentBacked适配器创建容器失败不使用解析器的预期行为场景。
 func TestAgentBackedAdapterCreateContainerFailsWithoutResolver(t *testing.T) {
-	adapter := NewAgentBackedAdapter(nil, nil, nil)
+	adapter := NewAgentBackedAdapter(nil, nil)
 	if _, err := adapter.CreateContainer(context.Background(), "n", ContainerSpec{}); !errors.Is(err, ErrUnimplemented) {
 		t.Fatalf("没有 docker resolver 时 err = %v, want ErrUnimplemented", err)
 	}
@@ -327,7 +305,7 @@ func TestAgentBackedAdapterCreateContainerFailsWithoutResolver(t *testing.T) {
 func TestAgentBackedAdapterInspectContainer(t *testing.T) {
 	var calls []dockerCallLog
 	_, cli := startMockDocker(t, "ctr-2", "running", &calls)
-	adapter := NewAgentBackedAdapter(nil, &staticDockerResolver{cli: cli}, nil)
+	adapter := NewAgentBackedAdapter(nil, &staticDockerResolver{cli: cli})
 	info, err := adapter.InspectContainer(context.Background(), "node", "ctr-2")
 	require.NoError(t, err)
 	if info.ID != "ctr-2" || info.Status != "running" {
@@ -372,19 +350,6 @@ func findCall(t *testing.T, calls []dockerCallLog, method, fragment string) dock
 	}
 	t.Fatalf("没找到 %s %s 调用，全部=%+v", method, fragment, calls)
 	return dockerCallLog{}
-}
-
-type fakeImageSyncer struct {
-	result    imagesync.SyncResult
-	err       error
-	lastImage string
-	lastNode  string
-}
-
-func (f *fakeImageSyncer) SyncRuntimeImage(_ context.Context, nodeID, image string) (imagesync.SyncResult, error) {
-	f.lastNode = nodeID
-	f.lastImage = image
-	return f.result, f.err
 }
 
 type fakeResolverFn func(ctx context.Context, nodeID string) (*agent.AgentFileClient, error)
