@@ -23,6 +23,9 @@ type RuntimeOperationStore interface {
 	SetAppStatus(ctx context.Context, arg sqlc.SetAppStatusParams) (sqlc.App, error)
 	SetAppNewAPIKey(ctx context.Context, arg sqlc.SetAppNewAPIKeyParams) (sqlc.App, error)
 	SetAppContainer(ctx context.Context, arg sqlc.SetAppContainerParams) (sqlc.App, error)
+	// ClearAppProgress 把 apps.progress_current / progress_total 重置为 NULL,
+	// RequestInitialize 重试时调用,避免前端看到上一次失败遗留的进度数。
+	ClearAppProgress(ctx context.Context, id pgtype.UUID) (sqlc.App, error)
 	CreateJob(ctx context.Context, arg sqlc.CreateJobParams) (sqlc.Job, error)
 	CreateAuditLog(ctx context.Context, arg sqlc.CreateAuditLogParams) (sqlc.AuditLog, error)
 }
@@ -271,10 +274,13 @@ func (s *RuntimeOperationService) Trigger(ctx context.Context, principal auth.Pr
 // RequestInitialize 触发应用初始化重试。
 //
 // 仅当应用 status ∈ {error, draft} 时允许；其它状态返回 ErrAppNotReinitializable。
-// 重置三个字段保证 worker handler 重新走完整流程：
-//   - status = draft：worker 看到 draft 后会执行 prompt 渲染、镜像分发、容器创建；
+// 重置四个字段保证 worker handler 重新走完整 5 阶段流程：
+//   - status = pulling_image：worker 直接进入第一阶段(pull image),不再停在 draft
+//     等 onboarding 拾取;状态机允许 error / draft → pulling_image。
 //   - api_key_status = pending：worker 重新调用 new-api 创建 token；
-//   - container_id = NULL：worker 重新创建容器，避免旧容器残留。
+//   - container_id = NULL：worker 重新创建容器，避免旧容器残留；
+//   - progress_current / progress_total = NULL：清空上一次失败遗留的进度数,
+//     前端从全新状态开始展示。
 //
 // 重置不在事务中——worker 自身有状态机校验和幂等处理；即便重置过程中崩溃，
 // 下次调用仍能完成或者由人工介入。审计日志记录触发人，便于追溯。
@@ -299,8 +305,16 @@ func (s *RuntimeOperationService) RequestInitialize(ctx context.Context, princip
 	if app.Status != domain.AppStatusError && app.Status != domain.AppStatusDraft {
 		return RuntimeOperationResult{}, ErrAppNotReinitializable
 	}
-	if _, err := s.store.SetAppStatus(ctx, sqlc.SetAppStatusParams{ID: app.ID, Status: domain.AppStatusDraft}); err != nil {
+	// 重置目标改为 pulling_image:worker 直接从第一阶段(pull)开始重跑,
+	// 不再回到 draft 等待 onboarding 拾取。状态机已允许 error / draft → pulling_image。
+	if _, err := s.store.SetAppStatus(ctx, sqlc.SetAppStatusParams{ID: app.ID, Status: domain.AppStatusPullingImage}); err != nil {
 		return RuntimeOperationResult{}, fmt.Errorf("重置应用状态失败: %w", err)
+	}
+	// 清空 progress_*,避免前端看到上一次失败遗留的进度数;ClearAppProgress
+	// 当前只清进度字段,last_error_status 留作历史可查(下一次状态机推进时由
+	// transitionTo 自然覆盖)。
+	if _, err := s.store.ClearAppProgress(ctx, app.ID); err != nil {
+		return RuntimeOperationResult{}, fmt.Errorf("清空应用进度字段失败: %w", err)
 	}
 	if _, err := s.store.SetAppNewAPIKey(ctx, sqlc.SetAppNewAPIKeyParams{
 		ID:                  app.ID,

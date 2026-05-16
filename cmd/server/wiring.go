@@ -25,6 +25,7 @@ import (
 	"oc-manager/internal/integrations/hermes"
 	"oc-manager/internal/integrations/newapi"
 	"oc-manager/internal/integrations/runtime"
+	"oc-manager/internal/runtime/imagecoord"
 	"oc-manager/internal/runtime/imagesync"
 	"oc-manager/internal/service"
 	"oc-manager/internal/store"
@@ -426,6 +427,31 @@ func (n *nodeClientResolver) LoadImage(ctx context.Context, nodeID, image string
 		return imagesync.RemoteImageInfo{}, err
 	}
 	return inner.LoadImage(ctx, nodeID, image, archive)
+}
+
+// agentClientAdapter 把 imagesync.AgentImageClient 适配成 imagecoord.AgentImageClient。
+// 两接口形态完全一致,差别只在 RemoteImageInfo 所属包;独立 adapter 让
+// imagecoord 包不必反向 import imagesync,保留单向依赖。
+type agentClientAdapter struct {
+	inner imagesync.AgentImageClient
+}
+
+// InspectImage 透传到 inner,只做 RemoteImageInfo 类型翻译。
+func (a agentClientAdapter) InspectImage(ctx context.Context, nodeID, image string) (imagecoord.RemoteImageInfo, error) {
+	r, err := a.inner.InspectImage(ctx, nodeID, image)
+	if err != nil {
+		return imagecoord.RemoteImageInfo{}, err
+	}
+	return imagecoord.RemoteImageInfo{Exists: r.Exists, ID: r.ID}, nil
+}
+
+// LoadImage 透传到 inner,只做 RemoteImageInfo 类型翻译。
+func (a agentClientAdapter) LoadImage(ctx context.Context, nodeID, image string, archive io.Reader) (imagecoord.RemoteImageInfo, error) {
+	r, err := a.inner.LoadImage(ctx, nodeID, image, archive)
+	if err != nil {
+		return imagecoord.RemoteImageInfo{}, err
+	}
+	return imagecoord.RemoteImageInfo{Exists: r.Exists, ID: r.ID}, nil
 }
 
 // lookupNode 同时返回节点行与 agent token；任何字段缺失立即报错让上层快速失败。

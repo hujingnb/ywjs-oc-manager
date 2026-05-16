@@ -25,6 +25,8 @@ import (
 	"syscall"
 	"time"
 
+	"github.com/google/uuid"
+	goredis "github.com/redis/go-redis/v9"
 	"golang.org/x/sync/errgroup"
 
 	"oc-manager/internal/api"
@@ -40,6 +42,7 @@ import (
 	"oc-manager/internal/integrations/runtime"
 	managerlog "oc-manager/internal/log"
 	"oc-manager/internal/redis"
+	"oc-manager/internal/runtime/imagecoord"
 	"oc-manager/internal/runtime/imagesync"
 	"oc-manager/internal/scheduler"
 	"oc-manager/internal/service"
@@ -184,6 +187,28 @@ func runManager(ctx context.Context, cfg config.Config, logOut io.Writer) error 
 		return fmt.Errorf("初始化本地 docker SDK provider: %w", err)
 	}
 	imageSync := imagesync.New(dockerSDK, nodeResolver)
+
+	// imagecoord.Coordinator 跨 manager 实例对 pull / sync 做 single-flight
+	// 并通过 Redis Pub/Sub 广播进度。这里单独开一个 go-redis client 给 DistLocker /
+	// ProgressBus 使用,与 redisQueue 共享同一 Redis 物理实例但连接池分离,
+	// 避免长时间 Subscribe 占用 queue 用到的连接。
+	imagecoordRedis := goredis.NewClient(&goredis.Options{
+		Addr:     cfg.Redis.Addr,
+		Password: cfg.Redis.Password,
+		DB:       cfg.Redis.DB,
+	})
+	defer imagecoordRedis.Close()
+	distLocker := redis.NewRedisDistLocker(imagecoordRedis)
+	progressBus := redis.NewRedisProgressBus(imagecoordRedis)
+	// agentClientAdapter(见 wiring.go)把 nodeResolver 返回的 imagesync.RemoteImageInfo
+	// 转成 imagecoord.RemoteImageInfo,避免 imagecoord 包反向 import imagesync。
+	imageCoord := imagecoord.NewCoordinator(
+		dockerSDK,
+		agentClientAdapter{inner: nodeResolver},
+		distLocker,
+		progressBus,
+		uuid.NewString(),
+	)
 	runtimeAdapter := runtime.NewAgentBackedAdapter(nodeResolver, nodeResolver, imageSync)
 	runtimeOpService.SetInspector(newRuntimeInspectorWrapper(runtimeAdapter))
 	workspaceService := service.NewWorkspaceService(dbStore.Queries, runtimeAdapter, cfg.App.DataRoot)
@@ -275,6 +300,10 @@ func runManager(ctx context.Context, cfg config.Config, logOut io.Writer) error 
 	// 遍历组织 + 应用知识库,把每个文件渲染成 .hermes/skills/kb-{org,app}-<slug>/SKILL.md,
 	// Hermes 启动时按 skill 机制扫描该目录,使知识库内容进入 agent 上下文。
 	appInitHandler.SetKnowledgeReader(knowledgeMaster)
+	// 注入 ImageCoordinator:phasePull / phaseSync 通过 Redis 锁 + Pub/Sub 实现
+	// 集群内 single-flight + 跨实例进度广播。未注入时 handler 会退回到旧的
+	// ImageDistributor 路径(无单飞、本机直接 pull/sync),仅留给测试装配。
+	appInitHandler.SetImageCoordinator(imageCoord)
 	if err := registry.Register("app_initialize", appInitHandler.Handle); err != nil {
 		return fmt.Errorf("注册 app_initialize handler 失败: %w", err)
 	}

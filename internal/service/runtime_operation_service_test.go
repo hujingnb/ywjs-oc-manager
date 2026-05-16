@@ -100,9 +100,12 @@ func TestRequestInitialize_HappyPathFromError(t *testing.T) {
 	require.NoError(t, err)
 	require.NotEmpty(t, result.JobID)
 	require.Equal(t, RuntimeOperation("initialize"), result.Operation)
-	require.Equal(t, domain.AppStatusDraft, store.app.Status)
+	// 重置目标由 draft 改为 pulling_image,worker 直接进入第一阶段重跑(5.6)。
+	require.Equal(t, domain.AppStatusPullingImage, store.app.Status)
 	require.Equal(t, domain.APIKeyStatusPending, store.app.ApiKeyStatus)
 	require.False(t, store.app.ContainerID.Valid)
+	// 5.6 新增:ClearAppProgress 必须被调用,否则前端会看到上一次失败遗留的进度数。
+	require.True(t, store.progressCleared)
 	require.Equal(t, domain.JobTypeAppInitialize, store.lastJobType)
 	require.True(t, store.auditWritten)
 	require.Equal(t, result.JobID, notifier.lastJobID)
@@ -222,6 +225,9 @@ type runtimeOperationStub struct {
 	userStatus   string
 	lastJobType  string
 	auditWritten bool
+	// progressCleared 标记 ClearAppProgress 被调用过,
+	// RequestInitialize 用例据此断言 5.6 的进度重置分支被走到。
+	progressCleared bool
 }
 
 func newRuntimeOperationStub(t *testing.T) *runtimeOperationStub {
@@ -259,6 +265,15 @@ func (s *runtimeOperationStub) CreateAuditLog(_ context.Context, _ sqlc.CreateAu
 
 func (s *runtimeOperationStub) SetAppStatus(_ context.Context, arg sqlc.SetAppStatusParams) (sqlc.App, error) {
 	s.app.Status = arg.Status
+	return s.app, nil
+}
+
+// ClearAppProgress 模拟 sqlc.ClearAppProgress:清空 progress_*,
+// 让 RequestInitialize 测试能跑通新增的进度重置分支。
+func (s *runtimeOperationStub) ClearAppProgress(_ context.Context, _ pgtype.UUID) (sqlc.App, error) {
+	s.app.ProgressCurrent = pgtype.Int8{}
+	s.app.ProgressTotal = pgtype.Int8{}
+	s.progressCleared = true
 	return s.app, nil
 }
 
