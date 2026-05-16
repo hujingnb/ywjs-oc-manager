@@ -69,7 +69,7 @@ func (n *nodeClientResolver) FileClient(ctx context.Context, nodeID string) (*ag
 	if !node.AgentFileEndpoint.Valid || strings.TrimSpace(node.AgentFileEndpoint.String) == "" {
 		return nil, fmt.Errorf("节点 %s 未注册 agent_file_endpoint", nodeID)
 	}
-	httpClient, err := n.fileHTTPClient(node)
+	httpClient, err := n.agentHTTPClient(node, 30*time.Second)
 	if err != nil {
 		return nil, err
 	}
@@ -405,8 +405,8 @@ func (n *nodeClientResolver) InspectImage(ctx context.Context, nodeID, image str
 		BaseURL: node.AgentFileEndpoint.String,
 		Token:   token,
 	}
-	// 镜像操作使用无硬超时的 client，由调用方 ctx 控制截止时间。
-	inner.HTTPClient, err = n.imageHTTPClient(node)
+	// 镜像 inspect 是小请求，ctx 已提供超时保障，不再叠加 http.Client.Timeout。
+	inner.HTTPClient, err = n.agentHTTPClient(node, 0)
 	if err != nil {
 		return imagesync.RemoteImageInfo{}, err
 	}
@@ -423,8 +423,9 @@ func (n *nodeClientResolver) LoadImage(ctx context.Context, nodeID, image string
 		BaseURL: node.AgentFileEndpoint.String,
 		Token:   token,
 	}
-	// 镜像 load 是大流式上传，必须使用无硬超时的 client，由 ctx 控制截止时间。
-	inner.HTTPClient, err = n.imageHTTPClient(node)
+	// 镜像 load 是大流式上传（tar 包可达数百 MB），0 表示不设 http.Client.Timeout，
+	// 由调用方 ctx 控制截止时间，避免触发 "Client.Timeout exceeded while awaiting headers"。
+	inner.HTTPClient, err = n.agentHTTPClient(node, 0)
 	if err != nil {
 		return imagesync.RemoteImageInfo{}, err
 	}
@@ -476,7 +477,10 @@ func (n *nodeClientResolver) lookupNode(ctx context.Context, nodeID string) (sql
 	return node, token, nil
 }
 
-func (n *nodeClientResolver) fileHTTPClient(node sqlc.RuntimeNode) (*http.Client, error) {
+// agentHTTPClient 按节点 TLS CA 构建 agent HTTP client。
+// timeout 为 0 时不设 http.Client.Timeout，由调用方 ctx 控制截止时间；
+// 普通文件 API 传 30s，大流式上传（镜像 load）传 0。
+func (n *nodeClientResolver) agentHTTPClient(node sqlc.RuntimeNode, timeout time.Duration) (*http.Client, error) {
 	if !node.AgentTlsCaCert.Valid || strings.TrimSpace(node.AgentTlsCaCert.String) == "" {
 		return nil, fmt.Errorf("节点 %s 缺 agent_tls_ca_cert", uuidToStringWiring(node.ID))
 	}
@@ -485,33 +489,7 @@ func (n *nodeClientResolver) fileHTTPClient(node sqlc.RuntimeNode) (*http.Client
 		return nil, err
 	}
 	return &http.Client{
-		// 普通文件 API（upload/download/list）请求体较小；30s 足够，调用方自行 ctx 收紧。
-		Timeout: 30 * time.Second,
-		Transport: &http.Transport{TLSClientConfig: &tls.Config{
-			RootCAs:    pool,
-			MinVersion: tls.VersionTLS12,
-		}},
-	}, nil
-}
-
-// imageHTTPClient 为镜像 inspect/load 操作构建不带 Timeout 的 HTTP client。
-//
-// 镜像 load 需要把 docker save 产生的 tar 包（可达数百 MB）完整上传到 agent，
-// 加上 agent 端 docker load 本身也需要时间，整体耗时远超文件 API 的 30s 上限。
-// http.Client.Timeout 覆盖"发请求头→上传 body→等响应头→读响应 body"全程，
-// 30s 会在等响应头阶段触发 "Client.Timeout exceeded while awaiting headers"。
-// 镜像操作通过调用方传入的 ctx 控制超时（coordinator 有 watchdog 续期机制），
-// 不再在 http.Client 层叠加硬超时。
-func (n *nodeClientResolver) imageHTTPClient(node sqlc.RuntimeNode) (*http.Client, error) {
-	if !node.AgentTlsCaCert.Valid || strings.TrimSpace(node.AgentTlsCaCert.String) == "" {
-		return nil, fmt.Errorf("节点 %s 缺 agent_tls_ca_cert", uuidToStringWiring(node.ID))
-	}
-	pool, err := agent.BuildCertPool(node.AgentTlsCaCert.String)
-	if err != nil {
-		return nil, err
-	}
-	// Timeout 为 0，完全依赖 ctx deadline，避免大镜像传输超过固定阈值时误触发。
-	return &http.Client{
+		Timeout: timeout,
 		Transport: &http.Transport{TLSClientConfig: &tls.Config{
 			RootCAs:    pool,
 			MinVersion: tls.VersionTLS12,
