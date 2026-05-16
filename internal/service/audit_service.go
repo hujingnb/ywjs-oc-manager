@@ -38,6 +38,11 @@ type AuditResult struct {
 	IPAddress    string             `json:"ip_address,omitempty"`
 	Metadata     map[string]any     `json:"metadata,omitempty"`
 	CreatedAt    pgtype.Timestamptz `json:"created_at" swaggertype:"string" format:"date-time"`
+	// 以下为展示用翻译字段，由 toAuditResult() 填充，未知值 fallback 到原始字符串。
+	ActionLabel     string `json:"action_label"`
+	TargetTypeLabel string `json:"target_type_label"`
+	ActorRoleLabel  string `json:"actor_role_label"`
+	ResultLabel     string `json:"result_label"`
 }
 
 // AuditEvent 是其他服务记录审计时的入参。
@@ -219,15 +224,19 @@ func toAuditResults(rows []sqlc.AuditLog) []AuditResult {
 
 func toAuditResult(row sqlc.AuditLog) AuditResult {
 	result := AuditResult{
-		ID:         uuidToString(row.ID),
-		ActorID:    uuidToOptionalString(row.ActorID),
-		ActorRole:  row.ActorRole,
-		OrgID:      uuidToOptionalString(row.OrgID),
-		TargetType: row.TargetType,
-		TargetID:   row.TargetID,
-		Action:     row.Action,
-		Result:     row.Result,
-		CreatedAt:  row.CreatedAt,
+		ID:              uuidToString(row.ID),
+		ActorID:         uuidToOptionalString(row.ActorID),
+		ActorRole:       row.ActorRole,
+		OrgID:           uuidToOptionalString(row.OrgID),
+		TargetType:      row.TargetType,
+		TargetID:        row.TargetID,
+		Action:          row.Action,
+		Result:          row.Result,
+		CreatedAt:       row.CreatedAt,
+		ActionLabel:     labelAction(row.TargetType, row.Action),
+		TargetTypeLabel: labelTargetType(row.TargetType),
+		ActorRoleLabel:  labelActorRole(row.ActorRole),
+		ResultLabel:     labelResult(row.Result),
 	}
 	if row.ErrorMessage.Valid {
 		result.ErrorMessage = row.ErrorMessage.String
