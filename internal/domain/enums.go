@@ -16,14 +16,19 @@ const (
 	StatusDeleted  = "deleted"
 
 	// AppStatus* 描述应用生命周期，合法转移由 app_state_machine.go 维护。
-	AppStatusDraft          = "draft"
-	AppStatusInitializing   = "initializing"
-	AppStatusBindingWaiting = "binding_waiting"
-	AppStatusBindingFailed  = "binding_failed"
-	AppStatusRunning        = "running"
-	AppStatusStopped        = "stopped"
-	AppStatusError          = "error"
-	AppStatusDeleted        = "deleted"
+	// 5 个 init 子状态对应 worker 初始化阶段；前端按 status 直接展示当前阶段。
+	AppStatusDraft             = "draft"
+	AppStatusPullingImage      = "pulling_image"
+	AppStatusSyncingImage      = "syncing_image"
+	AppStatusPreparingRuntime  = "preparing_runtime"
+	AppStatusCreatingContainer = "creating_container"
+	AppStatusStarting          = "starting"
+	AppStatusBindingWaiting    = "binding_waiting"
+	AppStatusBindingFailed     = "binding_failed"
+	AppStatusRunning           = "running"
+	AppStatusStopped           = "stopped"
+	AppStatusError             = "error"
+	AppStatusDeleted           = "deleted"
 
 	// PersonaMode* 控制应用使用组织继承人设还是应用级覆盖人设。
 	PersonaModeOrgInherited = "org_inherited"
@@ -98,7 +103,11 @@ var (
 
 	validAppStatuses = set(
 		AppStatusDraft,
-		AppStatusInitializing,
+		AppStatusPullingImage,
+		AppStatusSyncingImage,
+		AppStatusPreparingRuntime,
+		AppStatusCreatingContainer,
+		AppStatusStarting,
 		AppStatusBindingWaiting,
 		AppStatusBindingFailed,
 		AppStatusRunning,

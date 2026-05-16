@@ -2,26 +2,32 @@
 //
 // # 状态机
 //
-//	draft  ──onboarding──▶  initializing  ──worker 完成──▶  binding_waiting
-//	  │                          │                              │
-//	  │                          ▼                              ▼ 渠道扫码
-//	  │                       error ◀──────────────────────  binding_failed
-//	  │                          ▲                              │
-//	  └──────────────────────────┴──────────────────────────────┴─────▶ running
-//	                                                                    │
-//	                                                                    ▼ 停止
-//	                                                                  stopped
-//	                                                                    │
-//	                                                                    ▼ 删除
-//	                                                                  deleted
+//	draft ─▶ pulling_image ─▶ syncing_image ─▶ preparing_runtime ─▶ creating_container ─▶ starting ─▶ binding_waiting
+//	          │                  │                  │                     │                   │              │
+//	          ▼                  ▼                  ▼                     ▼                   ▼              ▼ 渠道扫码
+//	         error  ◀───────────任意 init 子状态失败────────────────────────────────────  binding_failed
+//	          ▲                                                                              │
+//	          └──────────────────────────────────────────────────────────────────────────────┴───▶ running
+//	                                                                                                │
+//	                                                                                                ▼
+//	                                                                                              stopped
+//	                                                                                                │
+//	                                                                                                ▼
+//	                                                                                              deleted
 //
 // 关键转移约束：
-//   - draft → initializing：仅 onboarding job 可触发
-//   - initializing → binding_waiting：worker 完成镜像拉取 + new-api 凭证配置
-//   - binding_waiting → binding_failed：渠道扫码超时或 token 过期
-//   - error 是吸入态：任何步骤失败都会落到 error，由用户手工 retry 才能离开
-//   - deleted 是终态：deleted_at 字段非空即认为已删
-//   - stopped → running：用户主动启动
+//   - draft → pulling_image：onboarding job 拾取后第一阶段，由 worker 触发；
+//   - pulling_image → syncing_image → preparing_runtime → creating_container → starting：
+//     worker 在 5 个 init 子状态之间串行推进，每阶段对应明确的副作用；
+//   - starting → binding_waiting：容器健康检查通过后等渠道扫码；
+//   - 任意 init 子状态 → error：失败收敛到 error，last_error_status 记录来源阶段以便排障；
+//   - binding_waiting → binding_failed：渠道扫码超时或 token 过期；
+//   - binding_failed → binding_waiting：用户手动重启绑定流程；
+//   - binding_failed → error：多次失败后用户放弃或自动收敛；
+//   - error → pulling_image：RequestInitialize 重试入口，从 worker 第一阶段重新开始；
+//   - error → deleted：由 IsAppTransitionAllowed 内置特殊分支兜底，不进 appTransitions map；
+//   - deleted 是终态，deleted_at 字段非空即认为已删；
+//   - stopped → running：用户主动启动。
 //
 // 维护提醒：状态机如有变化，本文档块必须同步更新；与代码不一致按代码为准。
 package domain
@@ -36,9 +42,15 @@ type AppTransition struct {
 }
 
 var appTransitions = map[AppTransition]struct{}{
-	{From: AppStatusDraft, To: AppStatusInitializing}:           {},
-	{From: AppStatusInitializing, To: AppStatusBindingWaiting}:  {},
-	{From: AppStatusInitializing, To: AppStatusError}:           {},
+	// 5 个 init 子状态串行推进：worker 完成一个阶段后才能进入下一个。
+	{From: AppStatusDraft, To: AppStatusPullingImage}:                 {},
+	{From: AppStatusPullingImage, To: AppStatusSyncingImage}:          {},
+	{From: AppStatusSyncingImage, To: AppStatusPreparingRuntime}:      {},
+	{From: AppStatusPreparingRuntime, To: AppStatusCreatingContainer}: {},
+	{From: AppStatusCreatingContainer, To: AppStatusStarting}:         {},
+	{From: AppStatusStarting, To: AppStatusBindingWaiting}:            {},
+
+	// binding / running 段：渠道绑定与容器运行状态切换。
 	{From: AppStatusBindingWaiting, To: AppStatusRunning}:       {},
 	{From: AppStatusBindingWaiting, To: AppStatusBindingFailed}: {},
 	{From: AppStatusBindingFailed, To: AppStatusBindingWaiting}: {},
@@ -47,19 +59,31 @@ var appTransitions = map[AppTransition]struct{}{
 	{From: AppStatusRunning, To: AppStatusError}:                {},
 	{From: AppStatusStopped, To: AppStatusRunning}:              {},
 	{From: AppStatusStopped, To: AppStatusError}:                {},
-	{From: AppStatusError, To: AppStatusInitializing}:           {},
-	{From: AppStatusError, To: AppStatusDeleted}:                {},
+
+	// 5 个 init 子状态失败都收敛到 error；last_error_status 记录失败阶段以便排障与重试。
+	{From: AppStatusPullingImage, To: AppStatusError}:      {},
+	{From: AppStatusSyncingImage, To: AppStatusError}:      {},
+	{From: AppStatusPreparingRuntime, To: AppStatusError}:  {},
+	{From: AppStatusCreatingContainer, To: AppStatusError}: {},
+	{From: AppStatusStarting, To: AppStatusError}:          {},
+
+	// error 重试入口：RequestInitialize 把状态拨回到 worker 第一阶段重新跑。
+	{From: AppStatusError, To: AppStatusPullingImage}: {},
+	// error → deleted 由 IsAppTransitionAllowed 内的特殊分支兜底，无需在 map 中重复登记。
 }
 
 // IsAppTransitionAllowed 判断 from→to 是否合法。
-// deleted 是终态；除 error→deleted 外，进入 deleted 必须由 SoftDeleteApp 调用单独完成，
-// 这里不在状态机中暴露通用 to-deleted 路径，避免业务侧绕过软删除流程直接置位。
+// deleted 是终态；只允许 error → deleted 路径（由 SoftDeleteApp 调用），
+// 其他状态进入 deleted 都必须先收敛到 error，避免业务侧绕过软删除流程直接置位。
+// error → deleted 在此处用特殊分支显式放行，不在 appTransitions map 中重复登记，
+// 与「deleted 只能由 error 进入」这一约束保持单一来源。
 func IsAppTransitionAllowed(from, to string) bool {
 	if from == to {
 		return false
 	}
-	if to == AppStatusDeleted && from != AppStatusError {
-		return false
+	if to == AppStatusDeleted {
+		// deleted 只能从 error 进入；其他来源一律拒绝。
+		return from == AppStatusError
 	}
 	_, ok := appTransitions[AppTransition{From: from, To: to}]
 	return ok
