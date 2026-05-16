@@ -53,7 +53,7 @@ COPY . .
 # 唯一产物:oc-runtime-agent;同一二进制承担运行主进程与 `healthcheck` 子命令两种用途
 # -X 将版本号注入 heartbeat.go 中的 agentVersion 变量,生产镜像上报 "master" 而非 "dev"。
 RUN go build -trimpath \
-    -ldflags="-s -w -X oc-manager/runtime/agent.agentVersion=master" \
+    -ldflags="-s -w -X main.agentVersion=master" \
     -o /out/oc-runtime-agent ./runtime/agent
 
 # ---- 运行阶段 -------------------------------------------------------------
