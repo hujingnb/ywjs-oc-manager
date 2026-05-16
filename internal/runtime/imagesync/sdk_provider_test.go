@@ -1,9 +1,10 @@
 package imagesync
 
 import (
+	"archive/tar"
+	"bytes"
 	"context"
 	"encoding/base64"
-	"encoding/json"
 	"io"
 	"net/http"
 	"net/http/httptest"
@@ -35,18 +36,34 @@ func newSDKClient(t *testing.T, baseURL string) *dockerclient.Client {
 	return cli
 }
 
-// TestLocalDockerSDKProvider_ImageID 验证 inspect 解析 ID。
-// docker SDK 的 ImageInspect 路径是 /<api-version>/images/<ref>/json,
-// fake daemon 用 PathPrefix 匹配避开版本号差异。
+// TestLocalDockerSDKProvider_ImageID 验证 ImageID 从 docker save 归档首个 tar 条目提取 sha256。
+// docker save 归档的首个条目固定命名为 <sha256hex>.json（image config 文件），
+// ImageID 从文件名提取 hex 并加 "sha256:" 前缀返回，与 docker load 落地 ID 一致。
 func TestLocalDockerSDKProvider_ImageID(t *testing.T) {
+	// 构造一个最小 tar 归档，首条目以 64 位 sha256hex.json 命名，模拟 docker save 输出。
+	const wantHex = "9cf46248b69906ff754a1cd231720d707e4ea36f9b03e81d48f008f025c66f93"
+	var tarBuf bytes.Buffer
+	tw := tar.NewWriter(&tarBuf)
+	configContent := []byte(`{"architecture":"amd64"}`)
+	require.NoError(t, tw.WriteHeader(&tar.Header{
+		Name: wantHex + ".json",
+		Size: int64(len(configContent)),
+		Mode: 0644,
+	}))
+	_, err := tw.Write(configContent)
+	require.NoError(t, err)
+	require.NoError(t, tw.Close())
+	tarBytes := tarBuf.Bytes()
+
 	mux := http.NewServeMux()
 	mux.HandleFunc("/", func(w http.ResponseWriter, r *http.Request) {
-		// 期望 inspect 路径以 /images/hermes-runtime:dev/json 结尾
-		if !strings.HasSuffix(r.URL.Path, "/images/hermes-runtime:dev/json") {
+		// ImageID 现在通过 docker save（/images/get）获取 ID，不再走 inspect。
+		if !strings.HasSuffix(r.URL.Path, "/images/get") {
 			t.Fatalf("unexpected path: %s", r.URL.Path)
 		}
-		// docker daemon ImageInspect 返回的 JSON 字段;sha256 前缀是常见格式。
-		_ = json.NewEncoder(w).Encode(map[string]any{"Id": "sha256:abc"})
+		assert.Equal(t, "hermes-runtime:dev", r.URL.Query().Get("names"))
+		w.Header().Set("Content-Type", "application/x-tar")
+		_, _ = w.Write(tarBytes)
 	})
 	srv := newFakeDockerServer(t, mux)
 	defer srv.Close()
@@ -56,7 +73,8 @@ func TestLocalDockerSDKProvider_ImageID(t *testing.T) {
 
 	id, err := prov.ImageID(context.Background(), "hermes-runtime:dev")
 	require.NoError(t, err)
-	assert.Equal(t, "sha256:abc", id)
+	// 期望从 tar 首条目文件名提取出 sha256: 前缀的完整 ID。
+	assert.Equal(t, "sha256:"+wantHex, id)
 }
 
 // TestLocalDockerSDKProvider_Archive 验证 ImageSave 流式返回 tar bytes。

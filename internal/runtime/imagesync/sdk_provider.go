@@ -1,11 +1,13 @@
 package imagesync
 
 import (
+	"archive/tar"
 	"context"
 	"encoding/base64"
 	"encoding/json"
 	"fmt"
 	"io"
+	"strings"
 
 	"github.com/docker/docker/api/types/image"
 	"github.com/docker/docker/api/types/registry"
@@ -49,16 +51,37 @@ func NewLocalDockerSDKProvider(dockerHost, configPath string) (*LocalDockerSDKPr
 	return &LocalDockerSDKProvider{cli: cli, authStore: store}, nil
 }
 
-// ImageID 走 ImageInspect API 取镜像 ID，用于跟目标节点 ID 做精确比对。
+// ImageID 从 docker save 归档的首个 tar 条目提取镜像 ID。
 //
-// 镜像不存在时 docker SDK 返回 client.IsErrNotFound 可判别的错误；调用方
-// （imagesync.Service）当前把任何 inspect 错误一律向上抛，再由上游 worker 决定是否拉取。
+// docker inspect 返回的 ID 在跨 Docker daemon 版本时可能是 schema v1 兼容 ID，
+// 与 docker load 在 agent 落地后的实际 ID 不一致（后者以归档内嵌的 v2 config sha256 为准）。
+// 改为读取 docker save 归档首个条目——固定命名为 <sha256hex>.json（image config 文件）——
+// 从文件名直接提取 sha256，保证与 agent 侧 docker load 结果完全一致。
+//
+// docker save 流式惰性输出，只读首个条目代价极低（config JSON 通常 ≤ 几 KB），
+// 不会强制 daemon 序列化全部镜像层。
 func (p *LocalDockerSDKProvider) ImageID(ctx context.Context, imageRef string) (string, error) {
-	inspect, _, err := p.cli.ImageInspectWithRaw(ctx, imageRef)
+	rc, err := p.cli.ImageSave(ctx, []string{imageRef})
 	if err != nil {
-		return "", fmt.Errorf("docker image inspect %s: %w", imageRef, err)
+		return "", fmt.Errorf("docker image save %s: %w", imageRef, err)
 	}
-	return inspect.ID, nil
+	defer rc.Close()
+
+	tr := tar.NewReader(rc)
+	hdr, err := tr.Next()
+	if err != nil {
+		return "", fmt.Errorf("docker image save %s: read archive: %w", imageRef, err)
+	}
+	// 提取 base 文件名，去掉可能的路径前缀（如 "./"）。
+	name := hdr.Name
+	if idx := strings.LastIndex(name, "/"); idx >= 0 {
+		name = name[idx+1:]
+	}
+	hex := strings.TrimSuffix(name, ".json")
+	if len(hex) != 64 {
+		return "", fmt.Errorf("docker image save %s: unexpected archive entry %q", imageRef, hdr.Name)
+	}
+	return "sha256:" + hex, nil
 }
 
 // Archive 调 ImageSave 拿到 tar 流；返回的 ReadCloser 是 daemon HTTP body，
