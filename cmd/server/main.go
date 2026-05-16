@@ -49,6 +49,7 @@ import (
 	"oc-manager/internal/store"
 	"oc-manager/internal/worker"
 	"oc-manager/internal/worker/handlers"
+	"oc-manager/internal/worker/reaper"
 )
 
 func main() {
@@ -453,6 +454,20 @@ func runManager(ctx context.Context, cfg config.Config, logOut io.Writer) error 
 	})
 	eg.Go(func() error { return pool.Run(gctx) })
 	eg.Go(func() error { return loop.Run(gctx) })
+
+	// reaper 启动:周期 60s tick,扫 5 个 init 子状态下连续 90s 无更新的孤儿。
+	// 多 manager 共存时通过 Redis 锁 ocm:reaper:lock 互斥;装配在 workerPool 启动之后,
+	// 是因为多副本场景下"reaper 在 worker 之前完成"的串行约束本就拿不到,
+	// 幂等性已由每阶段 phase* 函数保证(见 internal/worker/handlers/app_initialize.go)。
+	// Start 内部自行 spawn goroutine 并监听 gctx.Done,errgroup 不需要再 Go 包一层。
+	reaperInstance := reaper.New(
+		dbStore.Queries, // *sqlc.Queries 已直接满足 reaper.Store(6 个方法 sqlc 生成齐全)
+		redisQueue,      // redisQueue.Enqueue 满足 reaper.JobNotifier
+		distLocker,
+		uuid.NewString(),
+		logger,
+	)
+	reaperInstance.Start(gctx)
 	eg.Go(func() error { return nodeHealthTask.Run(gctx, logger) })
 	eg.Go(func() error { return nodeProbeTask.Run(gctx, logger) })
 	eg.Go(func() error { return runtimeRefreshTask.Run(gctx, logger) })
