@@ -36,6 +36,12 @@ export interface AppDTO {
   api_key_status: string
   // new-api key ID 用于应用维度用量查询；未初始化成功时为空。
   newapi_key_id?: number
+  // progress_current 是当前 status 阶段已完成量（字节或秒），缺省表示未知。
+  progress_current?: number
+  // progress_total 是当前 status 阶段总量；0 或缺省时 UI 走不定进度条。
+  progress_total?: number
+  // last_error_status 是上次进入 error 时所在状态值，用于在错误态展示失败阶段。
+  last_error_status?: string
 }
 
 // RuntimeOperationResult 是运行时异步操作的提交结果。

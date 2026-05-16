@@ -20,6 +20,22 @@
     <n-descriptions v-else :column="2" bordered size="small">
       <n-descriptions-item label="状态">
         <AppStatusTag :status="app.status" />
+        <!-- 初始化 5 个子状态时额外展示进度条:total>0 走百分比,total=0 走不定进度条 -->
+        <div v-if="isInitPhase(app.status)" class="init-progress">
+          <n-progress
+            type="line"
+            :percentage="initPercentage"
+            indicator-placement="inside"
+            :processing="initIndeterminate"
+          />
+          <span v-if="!initIndeterminate" class="init-progress-bytes">
+            {{ formatBytes(app.progress_current) }} / {{ formatBytes(app.progress_total) }}
+          </span>
+        </div>
+        <!-- error 状态附加显示最近失败阶段的中文文案,辅助用户判断在哪一步出错 -->
+        <div v-if="app.status === 'error' && app.last_error_status" class="init-failure">
+          在「{{ formatAppStatus(app.last_error_status).label }}」阶段失败
+        </div>
       </n-descriptions-item>
       <n-descriptions-item label="API key">
         <n-space align="center" :size="8">
@@ -103,7 +119,7 @@
 
 <script setup lang="ts">
 import { computed, inject, ref, watch, type Ref } from 'vue'
-import { NButton, NCard, NDescriptions, NDescriptionsItem, NFormItem, NSelect, NSpace, NTag } from 'naive-ui'
+import { NButton, NCard, NDescriptions, NDescriptionsItem, NFormItem, NProgress, NSelect, NSpace, NTag } from 'naive-ui'
 
 import {
   useInitializeAppMutation,
@@ -117,6 +133,7 @@ import AppStatusTag from '@/components/AppStatusTag.vue'
 import ConfirmActionModal from '@/components/ConfirmActionModal.vue'
 import JobProgressPanel from '@/components/JobProgressPanel.vue'
 import { canManageApp } from '@/domain/permissions'
+import { formatAppStatus, isInitPhase } from '@/domain/status'
 import { useAuthStore } from '@/stores/auth'
 
 // AppOverviewTab 展示应用基础信息，并提供初始化重试和 API key 启停入口。
@@ -147,6 +164,35 @@ const canRetryInit = computed(() => {
   const status = app?.value?.status
   return canManageApp(auth.user, app?.value) && (status === 'error' || status === 'draft')
 })
+
+// initPercentage 把 progress_current / progress_total 折算为 0~100 整数;
+// total<=0 时返回 0,真正的不定状态由 initIndeterminate 控制。
+const initPercentage = computed(() => {
+  const total = app?.value?.progress_total ?? 0
+  const current = app?.value?.progress_current ?? 0
+  if (total <= 0) return 0
+  return Math.min(100, Math.round((current / total) * 100))
+})
+
+// initIndeterminate 表示当前阶段总量未知,UI 应走不定进度条(processing=true)避免误导。
+const initIndeterminate = computed(() => {
+  const total = app?.value?.progress_total ?? 0
+  return total <= 0
+})
+
+// formatBytes 把字节展示为人类可读的 B / KB / MB / GB,本地实现避免引入额外依赖。
+// 同时兼容 progress_current 在非字节单位下被复用的场景(目前 init 阶段全部按字节)。
+function formatBytes(n: number | null | undefined): string {
+  if (!n || n <= 0) return '0 B'
+  const units = ['B', 'KB', 'MB', 'GB']
+  let i = 0
+  let v = n
+  while (v >= 1024 && i < units.length - 1) {
+    v /= 1024
+    i++
+  }
+  return `${v.toFixed(1)} ${units[i]}`
+}
 
 const initFeedback = ref('')
 const initError = ref(false)
@@ -236,3 +282,22 @@ async function onUpdateModel() {
   }
 }
 </script>
+
+<style scoped>
+/* init-progress 包裹 n-progress 与字节文案,确保进度条紧贴状态 tag 显示 */
+.init-progress {
+  margin-top: 8px;
+}
+/* 字节文案使用 12px 弱化色,作为进度条的从属辅助信息 */
+.init-progress-bytes {
+  font-size: 12px;
+  color: var(--text-color-3, #999);
+  margin-left: 8px;
+}
+/* 失败阶段提示用错误红色,与现有 state-text.danger 视觉一致 */
+.init-failure {
+  margin-top: 4px;
+  color: var(--error-color, #d03050);
+  font-size: 13px;
+}
+</style>

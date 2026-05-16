@@ -5950,6 +5950,8 @@ export interface components {
             container_id?: string;
             description?: string;
             id?: string;
+            /** @description LastErrorStatus 上次进入 error 时所在的状态值;前端用 formatAppStatus 转中文文案。 */
+            last_error_status?: string;
             model_id?: string;
             name?: string;
             /**
@@ -5960,6 +5962,13 @@ export interface components {
             org_id?: string;
             owner_user_id?: string;
             persona_mode?: string;
+            /**
+             * @description ProgressCurrent 当前 status 阶段的已完成量,单位由 status 决定(字节 / 秒);
+             *     0 或缺省表示未知 / 不显示进度条。
+             */
+            progress_current?: number;
+            /** @description ProgressTotal 当前 status 阶段的总量;0 或缺省时前端展示为不定进度。 */
+            progress_total?: number;
             runtime_node_id?: string;
             status?: string;
         };

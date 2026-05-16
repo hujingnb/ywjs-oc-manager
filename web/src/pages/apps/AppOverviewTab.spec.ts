@@ -125,6 +125,44 @@ function mountOverview() {
         }),
         NSpace: { template: '<span><slot /></span>' },
         NTag: { template: '<span><slot /></span>' },
+        // NProgress 仅作占位,断言关心父节点 .init-progress 是否渲染,而不是进度条本身。
+        NProgress: { props: ['percentage', 'processing'], template: '<div class="progress-stub" />' },
+      },
+    },
+  })
+}
+
+// mountWithApp 复用上面 mountOverview 的 stubs 配置,但允许覆盖 provide 的 app 数据,
+// 便于 init / error 等状态的进度条断言。原 mountOverview 不动以保持既有用例的语义。
+function mountWithApp(appOverride: Record<string, unknown>) {
+  const customApp = ref({ ...appRef.value, ...appOverride })
+  return mount(AppOverviewTab, {
+    props: { appId: '00000000-0000-0000-0000-000000000001' },
+    global: {
+      provide: { app: customApp },
+      stubs: {
+        AppStatusTag: { template: '<span />' },
+        ConfirmActionModal: true,
+        JobProgressPanel: { props: ['title'], template: '<section>{{ title }}</section>' },
+        NButton: defineComponent({
+          props: ['disabled'],
+          emits: ['click'],
+          setup(props, { slots, emit }) {
+            return () => h('button', {
+              disabled: props.disabled,
+              onClick: () => emit('click'),
+            }, slots.default?.())
+          },
+        }),
+        NCard: { template: '<section><slot name="header" /><slot name="header-extra" /><slot /></section>' },
+        NDescriptions: { template: '<dl><slot /></dl>' },
+        NDescriptionsItem: { props: ['label'], template: '<div><dt>{{ label }}</dt><dd><slot /></dd></div>' },
+        NFormItem: { props: ['label'], template: '<label><span>{{ label }}</span><slot /></label>' },
+        'n-select': { props: ['value', 'options'], template: '<select />' },
+        Select: { props: ['value', 'options'], template: '<select />' },
+        NSpace: { template: '<span><slot /></span>' },
+        NTag: { template: '<span><slot /></span>' },
+        NProgress: { props: ['percentage', 'processing'], template: '<div class="progress-stub" />' },
       },
     },
   })
@@ -160,5 +198,44 @@ describe('AppOverviewTab', () => {
     expect(updateModelMock).toHaveBeenCalledWith('deepseek-r1:14b')
     expect(wrapper.text()).toContain('已提交模型生效重启任务：job-restart-1')
     expect(wrapper.text()).toContain('模型重启任务')
+  })
+})
+
+// AppOverviewTab progress 覆盖 init 子状态的进度条与失败阶段提示三条分支:
+// 1) total=0 时走不定进度,不展示字节文案;
+// 2) total>0 时按字节渲染 current/total;
+// 3) status=error + last_error_status 显示对应中文阶段。
+describe('AppOverviewTab progress', () => {
+  // pulling_image 阶段且 total 未知时只渲染不定进度条,不展示字节文案
+  it('init 阶段且 total=0 时展示不定进度', () => {
+    const wrapper = mountWithApp({
+      status: 'pulling_image',
+      progress_current: 0,
+      progress_total: 0,
+    })
+    expect(wrapper.find('.init-progress').exists()).toBe(true)
+    expect(wrapper.find('.init-progress-bytes').exists()).toBe(false)
+  })
+
+  // syncing_image 阶段且 total>0 时按 1.0 KB / 4.0 KB 渲染字节文案
+  it('init 阶段且 total>0 时展示字节进度', () => {
+    const wrapper = mountWithApp({
+      status: 'syncing_image',
+      progress_current: 1024,
+      progress_total: 4096,
+    })
+    const bytes = wrapper.find('.init-progress-bytes')
+    expect(bytes.exists()).toBe(true)
+    expect(bytes.text()).toContain('1.0 KB')
+    expect(bytes.text()).toContain('4.0 KB')
+  })
+
+  // error + last_error_status=syncing_image 时按 status.ts 映射展示「同步镜像到节点」中文
+  it('error 时展示失败阶段', () => {
+    const wrapper = mountWithApp({
+      status: 'error',
+      last_error_status: 'syncing_image',
+    })
+    expect(wrapper.find('.init-failure').text()).toContain('同步镜像到节点')
   })
 })

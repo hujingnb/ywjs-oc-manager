@@ -74,6 +74,13 @@ type AppResult struct {
 	// NewapiKeyID 是 new-api 中 token 的数值 id；schema 上是 text 列存的字符串，
 	// 这里解析成 int64 方便 usage service 直接调 GetAPIKey。0 表示未绑定。
 	NewapiKeyID int64 `json:"newapi_key_id,omitempty"`
+	// ProgressCurrent 当前 status 阶段的已完成量,单位由 status 决定(字节 / 秒);
+	// 0 或缺省表示未知 / 不显示进度条。
+	ProgressCurrent int64 `json:"progress_current,omitempty"`
+	// ProgressTotal 当前 status 阶段的总量;0 或缺省时前端展示为不定进度。
+	ProgressTotal int64 `json:"progress_total,omitempty"`
+	// LastErrorStatus 上次进入 error 时所在的状态值;前端用 formatAppStatus 转中文文案。
+	LastErrorStatus string `json:"last_error_status,omitempty"`
 }
 
 // AppModelUpdateResult 是修改实例模型后的响应；App 字段返回已保存的新模型视图。
@@ -283,5 +290,10 @@ func toAppResult(app sqlc.App) AppResult {
 			result.NewapiKeyID = id
 		}
 	}
+	// 进度三字段：pgtype Valid=false 时 .Int64/.String 为零值，正好与 omitempty 对齐。
+	// 单位由 status 决定（拉取镜像走字节，启动容器走秒），service 层不做语义换算。
+	result.ProgressCurrent = app.ProgressCurrent.Int64
+	result.ProgressTotal = app.ProgressTotal.Int64
+	result.LastErrorStatus = app.LastErrorStatus.String
 	return result
 }
