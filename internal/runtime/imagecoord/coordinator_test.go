@@ -2,151 +2,177 @@ package imagecoord
 
 import (
 	"context"
-	"errors"
-	"io"
+	"net/http"
+	"net/http/httptest"
 	"strings"
-	"sync"
-	"sync/atomic"
 	"testing"
 	"time"
 
-	redis "github.com/redis/go-redis/v9"
+	dockerclient "github.com/docker/docker/client"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
 	ocredis "oc-manager/internal/redis"
 )
 
-// fakeLocalProvider 实现 LocalImageProvider:
-//   - imageExists 控制 ImageID 是否返回成功,模拟"本地是否已就绪"。
-//   - pullCalls 用于断言 single-flight:并发场景应只 +1。
-//   - pullDelay / pullErr 控制 Pull 行为,模拟真实拉取耗时与失败路径。
-type fakeLocalProvider struct {
-	mu          sync.Mutex
-	imageExists bool
-	pullCalls   int32
-	pullDelay   time.Duration
-	pullBody    string
-	pullErr     error
-}
-
-// ImageID 模拟 docker inspect:imageExists=true 返回固定 ID,否则报 not found。
-func (f *fakeLocalProvider) ImageID(_ context.Context, _ string) (string, error) {
-	f.mu.Lock()
-	defer f.mu.Unlock()
-	if f.imageExists {
-		return "sha256:exists", nil
-	}
-	return "", errors.New("not found")
-}
-
-// Archive 模拟 docker save:返回固定字节流,这里测试不依赖具体内容。
-func (f *fakeLocalProvider) Archive(_ context.Context, _ string) (io.ReadCloser, error) {
-	return io.NopCloser(strings.NewReader("tar")), nil
-}
-
-// Pull 模拟 docker pull:延迟 pullDelay 后(模拟下载耗时),把 imageExists 置真,
-// 返回一段 NDJSON 给 PullAggregator 解析。pullErr 非空时直接报错走失败路径。
-func (f *fakeLocalProvider) Pull(_ context.Context, _ string) (io.ReadCloser, error) {
-	atomic.AddInt32(&f.pullCalls, 1)
-	if f.pullErr != nil {
-		return nil, f.pullErr
-	}
-	time.Sleep(f.pullDelay)
-	f.mu.Lock()
-	f.imageExists = true
-	f.mu.Unlock()
-	body := f.pullBody
-	if body == "" {
-		body = `{"id":"a","status":"Pull complete"}` + "\n"
-	}
-	return io.NopCloser(strings.NewReader(body)), nil
-}
-
-// newTestCoord 构造一个连接本地 redis 的 Coordinator;redis 不可用即 Skip。
-// 每次返回 cleanup 清掉本次写入的 key,避免测试间相互污染。
-//
-// 选用 DB 12 与 internal/redis 包测试(DB 11)隔离:两包测试 cleanup 都
-// 走 FlushDB,go test 默认按包并行时同 DB 会互相清掉对方测试中的 key,
-// 导致 SingleFlight 锁被清、Renew 期间 key 失踪等间歇失败。
-func newTestCoord(t *testing.T, prov LocalImageProvider) (*Coordinator, func()) {
+// newTestDockerClient 构造一个指向 fake daemon 的 docker client。
+// 显式禁用 API version 协商（fake daemon 不实现 /_ping），避免握手阶段失败。
+func newTestDockerClient(t *testing.T, baseURL string) *dockerclient.Client {
 	t.Helper()
-	client := redis.NewClient(&redis.Options{Addr: "localhost:6379", Password: "123456", DB: 12})
-	if err := client.Ping(context.Background()).Err(); err != nil {
-		t.Skip("本地 Redis 不可用,跳过 Coordinator 集成测试: " + err.Error())
-	}
-	bus := ocredis.NewRedisProgressBus(client)
-	locker := ocredis.NewRedisDistLocker(client)
-	cleanup := func() {
-		_ = client.FlushDB(context.Background()).Err()
-		_ = client.Close()
-	}
-	c := NewCoordinator(prov, nil, locker, bus, "test-instance")
-	return c, cleanup
+	cli, err := dockerclient.NewClientWithOpts(
+		dockerclient.WithHost(baseURL),
+		dockerclient.WithVersion("1.45"),
+	)
+	require.NoError(t, err)
+	return cli
 }
 
-// TestCoordinator_PullImage_AlreadyPresent 覆盖"本地已存在直接返回"路径:
-// 既不应触发 docker pull,也不应抢锁,subscriber 必须被 close。
-func TestCoordinator_PullImage_AlreadyPresent(t *testing.T) {
-	// 业务场景:首次 worker 已把镜像拉好,后续 worker 调 PullImage 应零开销。
-	prov := &fakeLocalProvider{imageExists: true}
-	c, cleanup := newTestCoord(t, prov)
-	defer cleanup()
-
-	sub := make(chan ProgressEvent, 4)
-	require.NoError(t, c.PullImage(context.Background(), "x:1", sub))
-	assert.EqualValues(t, 0, atomic.LoadInt32(&prov.pullCalls), "本地已就绪不应再触发 Pull")
-	// subscriber 已被 close:再读会拿到零值 + ok=false。
-	_, ok := <-sub
-	assert.False(t, ok, "subscriber 应在返回前被关闭")
+// fakeLocker 控制 TryAcquire 是否成功；其余方法直接返回零值，适合单元测试。
+type fakeLocker struct {
+	acquireOK bool
 }
 
-// TestCoordinator_PullImage_SingleFlight 覆盖并发跨实例合并语义:
-// 两个并发 PullImage 应只触发一次 docker pull(leader 拉,follower 等)。
-func TestCoordinator_PullImage_SingleFlight(t *testing.T) {
-	// 业务场景:同一组织同时部署两个 app 用同一镜像,Pull 应合并。
-	prov := &fakeLocalProvider{pullDelay: 300 * time.Millisecond}
-	c, cleanup := newTestCoord(t, prov)
-	defer cleanup()
+func (l *fakeLocker) TryAcquire(_ context.Context, _, _ string, _ time.Duration) (bool, error) {
+	return l.acquireOK, nil
+}
+func (l *fakeLocker) Renew(_ context.Context, _, _ string, _ time.Duration) error { return nil }
+func (l *fakeLocker) Release(_ context.Context, _, _ string) error                { return nil }
+func (l *fakeLocker) Exists(_ context.Context, _ string) (bool, error)            { return false, nil }
 
-	var wg sync.WaitGroup
-	for i := 0; i < 2; i++ {
-		wg.Add(1)
-		go func() {
-			defer wg.Done()
-			sub := make(chan ProgressEvent, 16)
-			// 即便是 follower 路径,也应该返回 nil(leader 成功完成)。
-			assert.NoError(t, c.PullImage(context.Background(), "x:1", sub))
-		}()
-	}
-	wg.Wait()
-	assert.EqualValues(t, 1, atomic.LoadInt32(&prov.pullCalls), "并发 PullImage 应只触发一次 docker pull")
+// fakeBus 丢弃所有发布事件，Subscribe 返回立即关闭的 channel，供单元测试使用。
+type fakeBus struct{}
+
+func (b *fakeBus) Publish(_ context.Context, _ string, _ ProgressEvent) error { return nil }
+func (b *fakeBus) PublishDone(_ context.Context, _ string, _ error) error      { return nil }
+func (b *fakeBus) Subscribe(_ context.Context, _ ...string) (<-chan ocredis.BusMessage, func(), error) {
+	ch := make(chan ocredis.BusMessage)
+	return ch, func() { close(ch) }, nil
 }
 
-// TestCoordinator_PullImage_LeaderFailureBubblesToFollower 覆盖失败冒泡路径:
-// leader pull 失败,自身返回该错误;follower 收到 PhaseDone(带 ErrMessage)
-// 后,自身返回的 error 应包含同样语义。
-func TestCoordinator_PullImage_LeaderFailureBubblesToFollower(t *testing.T) {
-	// 业务场景:镜像仓库不可达,集群里所有 pending app 都应在同一轮失败,
-	// 而不是 leader 失败 follower 误以为成功继续后续阶段。
-	prov := &fakeLocalProvider{pullErr: errors.New("registry unreachable"), pullDelay: 100 * time.Millisecond}
-	c, cleanup := newTestCoord(t, prov)
-	defer cleanup()
-
-	errCh := make(chan error, 2)
-	for i := 0; i < 2; i++ {
-		go func() {
-			sub := make(chan ProgressEvent, 16)
-			errCh <- c.PullImage(context.Background(), "x:1", sub)
-		}()
-	}
-	for i := 0; i < 2; i++ {
-		select {
-		case err := <-errCh:
-			require.Error(t, err, "leader 失败,leader/follower 都应返回 error")
-			assert.Contains(t, err.Error(), "registry unreachable")
-		case <-time.After(3 * time.Second):
-			t.Fatal("PullImage 未在 3s 内返回,可能 follower 没收到 PhaseDone")
+// newFakeDockerHandler 构造一个极简 http.Handler 模拟 docker daemon HTTP API。
+// imagePresent=true 时 /images/<name>/json 返回 200 带 fakeID；否则返回 404。
+// pullStream 是 /images/create 端点返回的 NDJSON 内容（pull 进度流）。
+func newFakeDockerHandler(imagePresent bool, pullStream string) (http.Handler, string) {
+	const fakeID = "sha256:9cf46248b69906ff754a1cd231720d707e4ea36f9b03e81d48f008f025c66f93"
+	mux := http.NewServeMux()
+	mux.HandleFunc("/", func(w http.ResponseWriter, r *http.Request) {
+		path := r.URL.Path
+		switch {
+		case strings.Contains(path, "/images/") && strings.HasSuffix(path, "/json"):
+			// ImageInspectWithRaw
+			if !imagePresent {
+				w.WriteHeader(http.StatusNotFound)
+				_, _ = w.Write([]byte(`{"message":"No such image"}`))
+				return
+			}
+			w.Header().Set("Content-Type", "application/json")
+			_, _ = w.Write([]byte(`{"Id":"` + fakeID + `","RepoTags":["hermes:v1"]}`))
+		case strings.Contains(path, "/images/create"):
+			// ImagePull
+			w.Header().Set("Content-Type", "application/json")
+			_, _ = w.Write([]byte(pullStream))
+		default:
+			w.WriteHeader(http.StatusNotFound)
 		}
-	}
+	})
+	return mux, fakeID
+}
+
+// TestCoordinator_PullImageOnNode_AlreadyPresent 镜像已在节点上时直接返回 sha256，不触发 pull。
+func TestCoordinator_PullImageOnNode_AlreadyPresent(t *testing.T) {
+	// 场景：phasePullRuntimeImage 重入路径，镜像已存在，应零开销直接返回。
+	handler, wantID := newFakeDockerHandler(true, "")
+	srv := httptest.NewServer(handler)
+	defer srv.Close()
+	cli := newTestDockerClient(t, srv.URL)
+
+	coord := NewCoordinator(&fakeLocker{acquireOK: true}, &fakeBus{}, "test-instance")
+	sub := make(chan ProgressEvent, 4)
+
+	id, err := coord.PullImageOnNode(context.Background(), "node-1", "hermes:v1", cli, sub)
+	require.NoError(t, err)
+	assert.Equal(t, wantID, id)
+	// 镜像已存在时不应有任何进度事件
+	assert.Empty(t, sub)
+}
+
+// TestCoordinator_PullImageOnNode_Leader 镜像不存在时作为 leader 执行 pull 并返回 sha256。
+func TestCoordinator_PullImageOnNode_Leader(t *testing.T) {
+	// 场景：首次部署，节点上不存在 hermes 镜像，leader 执行 pull 后返回 sha256。
+	callCount := 0
+	const fakeID = "sha256:9cf46248b69906ff754a1cd231720d707e4ea36f9b03e81d48f008f025c66f93"
+	pullNDJSON := `{"status":"Pulling fs layer","id":"abc","progressDetail":{"current":100,"total":200}}` + "\n" +
+		`{"status":"Pull complete","id":"abc","progressDetail":{}}` + "\n"
+
+	mux := http.NewServeMux()
+	mux.HandleFunc("/", func(w http.ResponseWriter, r *http.Request) {
+		path := r.URL.Path
+		if strings.Contains(path, "/images/") && strings.HasSuffix(path, "/json") {
+			callCount++
+			if callCount == 1 {
+				// 首次 inspect：镜像不存在
+				w.WriteHeader(http.StatusNotFound)
+				_, _ = w.Write([]byte(`{"message":"No such image"}`))
+				return
+			}
+			// 二次 inspect（pull 完成后）：镜像存在
+			w.Header().Set("Content-Type", "application/json")
+			_, _ = w.Write([]byte(`{"Id":"` + fakeID + `","RepoTags":["hermes:v1"]}`))
+			return
+		}
+		if strings.Contains(path, "/images/create") {
+			w.Header().Set("Content-Type", "application/json")
+			_, _ = w.Write([]byte(pullNDJSON))
+			return
+		}
+		w.WriteHeader(http.StatusNotFound)
+	})
+	srv := httptest.NewServer(mux)
+	defer srv.Close()
+
+	cli := newTestDockerClient(t, srv.URL)
+	coord := NewCoordinator(&fakeLocker{acquireOK: true}, &fakeBus{}, "test-instance")
+	sub := make(chan ProgressEvent, 16)
+
+	id, err := coord.PullImageOnNode(context.Background(), "node-1", "hermes:v1", cli, sub)
+	require.NoError(t, err)
+	assert.Equal(t, fakeID, id)
+	// 应有至少一个进度事件（ticker 或 done 发送的）
+	assert.NotEmpty(t, sub)
+}
+
+// TestCoordinator_PullImageOnNode_Follower follower 路径：lock 已不存在时直接 inspect 获取 sha256。
+func TestCoordinator_PullImageOnNode_Follower(t *testing.T) {
+	// 场景：同一节点同一镜像并发部署，follower 等 leader 完成后自行 inspect。
+	const fakeID = "sha256:9cf46248b69906ff754a1cd231720d707e4ea36f9b03e81d48f008f025c66f93"
+
+	// 模拟首次 inspect 返回 404（触发锁竞争），后续 inspect 返回 200（leader 已完成）。
+	callCount := 0
+	mux := http.NewServeMux()
+	mux.HandleFunc("/", func(w http.ResponseWriter, r *http.Request) {
+		path := r.URL.Path
+		if strings.Contains(path, "/images/") && strings.HasSuffix(path, "/json") {
+			callCount++
+			if callCount == 1 {
+				w.WriteHeader(http.StatusNotFound)
+				_, _ = w.Write([]byte(`{"message":"No such image"}`))
+				return
+			}
+			w.Header().Set("Content-Type", "application/json")
+			_, _ = w.Write([]byte(`{"Id":"` + fakeID + `","RepoTags":["hermes:v1"]}`))
+			return
+		}
+		w.WriteHeader(http.StatusNotFound)
+	})
+	srv := httptest.NewServer(mux)
+	defer srv.Close()
+
+	cli := newTestDockerClient(t, srv.URL)
+	// follower 抢锁失败（acquireOK=false），Exists 返回 false（leader 已完成）
+	coord := NewCoordinator(&fakeLocker{acquireOK: false}, &fakeBus{}, "test-instance")
+	sub := make(chan ProgressEvent, 4)
+
+	id, err := coord.PullImageOnNode(context.Background(), "node-1", "hermes:v1", cli, sub)
+	require.NoError(t, err)
+	assert.Equal(t, fakeID, id)
 }
