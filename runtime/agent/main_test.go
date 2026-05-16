@@ -8,7 +8,6 @@ import (
 	"encoding/base64"
 	"encoding/json"
 	"fmt"
-	"io"
 	"net"
 	"net/http"
 	"net/http/httptest"
@@ -40,49 +39,9 @@ func TestHealthz(t *testing.T) {
 	}
 }
 
-// TestInspectImage 验证镜像检查接口能返回已存在镜像信息的成功场景。
-func TestInspectImage(t *testing.T) {
-	docker := &fakeDockerClient{
-		images: map[string]DockerImageInfo{
-			"hermes-runtime:dev": {ID: "sha256:local", RepoTags: []string{"hermes-runtime:dev"}},
-		},
-	}
-	req := httptest.NewRequest(http.MethodGet, "/v1/images/inspect?image=hermes-runtime:dev", nil)
-	rec := httptest.NewRecorder()
-
-	newHandlerWithDocker("/tmp/agent", docker, "").ServeHTTP(rec, req)
-
-	require.Equal(t, http.StatusOK, rec.Code)
-	var body struct {
-		Exists bool            `json:"exists"`
-		Info   DockerImageInfo `json:"info"`
-	}
-	err := json.NewDecoder(rec.Body).Decode(&body)
-	require.NoError(t, err)
-	if !body.Exists || body.Info.ID != "sha256:local" {
-		t.Fatalf("unexpected response: %+v", body)
-	}
-}
-
-// TestInspectImageNotFound 验证镜像不存在时检查接口返回未找到的场景。
-func TestInspectImageNotFound(t *testing.T) {
-	req := httptest.NewRequest(http.MethodGet, "/v1/images/inspect?image=missing:dev", nil)
-	rec := httptest.NewRecorder()
-
-	newHandlerWithDocker("/tmp/agent", &fakeDockerClient{}, "").ServeHTTP(rec, req)
-
-	require.Equal(t, http.StatusOK, rec.Code)
-	var body struct {
-		Exists bool `json:"exists"`
-	}
-	err := json.NewDecoder(rec.Body).Decode(&body)
-	require.NoError(t, err)
-	require.False(t, body.Exists)
-}
-
-// TestLoadImageRequiresTokenWhenConfigured 验证加载镜像要求令牌在启用配置时的预期行为场景。
-func TestLoadImageRequiresTokenWhenConfigured(t *testing.T) {
-	req := httptest.NewRequest(http.MethodPost, "/v1/images/load?image=hermes-runtime:dev", bytes.NewBufferString("tar"))
+// TestFilesPingRequiresToken 验证 /v1/files/ping 在配置了令牌时拒绝未授权请求。
+func TestFilesPingRequiresToken(t *testing.T) {
+	req := httptest.NewRequest(http.MethodGet, "/v1/files/ping", nil)
 	rec := httptest.NewRecorder()
 
 	newHandlerWithDocker("/tmp/agent", &fakeDockerClient{}, "secret").ServeHTTP(rec, req)
@@ -92,68 +51,13 @@ func TestLoadImageRequiresTokenWhenConfigured(t *testing.T) {
 
 // TestNewHandlerUsesConfiguredToken 验证新建处理器使用配置的令牌的预期行为场景。
 func TestNewHandlerUsesConfiguredToken(t *testing.T) {
-	req := httptest.NewRequest(http.MethodGet, "/v1/images/inspect?image=hermes-runtime:dev", nil)
+	// /v1/files/ping 是需要 token 的轻量端点，用于校验 newHandler 是否正确传递 token。
+	req := httptest.NewRequest(http.MethodGet, "/v1/files/ping", nil)
 	rec := httptest.NewRecorder()
 
 	newHandler("/tmp/agent", "secret", "/var/run/docker.sock").ServeHTTP(rec, req)
 
 	require.Equal(t, http.StatusUnauthorized, rec.Code)
-}
-
-// TestNewHandlerUsesConfiguredDockerSocketForImages 验证新建处理器使用配置的Dockersocket针对镜像的预期行为场景。
-func TestNewHandlerUsesConfiguredDockerSocketForImages(t *testing.T) {
-	var inspected bool
-	var loadedBytes string
-	socket := startUnixDockerStub(t, func(w http.ResponseWriter, r *http.Request) {
-		switch r.URL.Path {
-		case "/images/hermes-runtime:dev/json":
-			inspected = true
-			writeJSON(w, map[string]any{
-				"Id":       "sha256:configured",
-				"RepoTags": []string{"hermes-runtime:dev"},
-			})
-		case "/images/load":
-			body, err := io.ReadAll(r.Body)
-			if err != nil {
-				t.Errorf("read load body: %v", err)
-				w.WriteHeader(http.StatusInternalServerError)
-				return
-			}
-			loadedBytes = string(body)
-			w.WriteHeader(http.StatusOK)
-		default:
-			t.Errorf("unexpected docker path: %s", r.URL.Path)
-			w.WriteHeader(http.StatusNotFound)
-		}
-	})
-	handler := newHandler("/tmp/agent", "secret", socket)
-
-	inspectReq := httptest.NewRequest(http.MethodGet, "/v1/images/inspect?image=hermes-runtime:dev", nil)
-	inspectReq.Header.Set("Authorization", "Bearer secret")
-	inspectRec := httptest.NewRecorder()
-	handler.ServeHTTP(inspectRec, inspectReq)
-	require.Equal(t, http.StatusOK, inspectRec.Code)
-	require.True(t, inspected)
-
-	loadReq := httptest.NewRequest(http.MethodPost, "/v1/images/load?image=hermes-runtime:dev", bytes.NewBufferString("tar"))
-	loadReq.Header.Set("Authorization", "Bearer secret")
-	loadRec := httptest.NewRecorder()
-	handler.ServeHTTP(loadRec, loadReq)
-	require.Equal(t, http.StatusOK, loadRec.Code)
-	require.Equal(t, "tar", loadedBytes)
-}
-
-// TestLoadImage 验证镜像加载接口能把请求转发给运行时并返回成功的场景。
-func TestLoadImage(t *testing.T) {
-	docker := &fakeDockerClient{images: map[string]DockerImageInfo{}}
-	req := httptest.NewRequest(http.MethodPost, "/v1/images/load?image=hermes-runtime:dev", bytes.NewBufferString("tar"))
-	req.Header.Set("Authorization", "Bearer secret")
-	rec := httptest.NewRecorder()
-
-	newHandlerWithDocker("/tmp/agent", docker, "secret").ServeHTTP(rec, req)
-
-	require.Equal(t, http.StatusOK, rec.Code)
-	require.Equal(t, "tar", docker.loadedBytes)
 }
 
 // freePort 借助内核分配一个空闲 TCP 端口，避免测试在并发跑时端口冲突。
@@ -382,53 +286,7 @@ func waitForTLSReady(t *testing.T, client *http.Client, url, token string, timeo
 }
 
 type fakeDockerClient struct {
-	images      map[string]DockerImageInfo
-	loadedBytes string
-	containers  []string
-}
-
-func (f *fakeDockerClient) InspectImage(_ context.Context, image string) (DockerImageInfo, error) {
-	if f.images == nil {
-		return DockerImageInfo{}, ErrImageNotFound
-	}
-	info, ok := f.images[image]
-	if !ok {
-		return DockerImageInfo{}, ErrImageNotFound
-	}
-	return info, nil
-}
-
-func (f *fakeDockerClient) LoadImage(_ context.Context, archive io.Reader) error {
-	body, err := io.ReadAll(archive)
-	if err != nil {
-		return err
-	}
-	f.loadedBytes = string(body)
-	if f.images == nil {
-		f.images = map[string]DockerImageInfo{}
-	}
-	f.images["hermes-runtime:dev"] = DockerImageInfo{ID: "sha256:loaded", RepoTags: []string{"hermes-runtime:dev"}}
-	return nil
-}
-
-func (f *fakeDockerClient) TagImage(_ context.Context, sourceID, targetImage string) error {
-	// 模拟 docker tag：把 targetImage tag 更新指向 sourceID 对应的 info。
-	if f.images == nil {
-		return nil
-	}
-	// 找到 sourceID 对应的 image info（按 ID 匹配）。
-	var found *DockerImageInfo
-	for k := range f.images {
-		info := f.images[k]
-		if info.ID == sourceID {
-			found = &info
-			break
-		}
-	}
-	if found != nil {
-		f.images[targetImage] = *found
-	}
-	return nil
+	containers []string
 }
 
 func (f *fakeDockerClient) ListContainers(_ context.Context, namePrefix string) (int32, error) {

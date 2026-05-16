@@ -2,7 +2,6 @@ package main
 
 import (
 	"context"
-	"errors"
 	"io"
 	"net/http"
 	"os"
@@ -87,18 +86,6 @@ func TestDockerSocketClientListContainersCountsActiveManagedContainers(t *testin
 
 type blockingDockerClient struct {
 	err error
-}
-
-func (f *blockingDockerClient) InspectImage(_ context.Context, _ string) (DockerImageInfo, error) {
-	return DockerImageInfo{}, ErrImageNotFound
-}
-
-func (f *blockingDockerClient) LoadImage(_ context.Context, _ io.Reader) error {
-	return errors.New("not implemented")
-}
-
-func (f *blockingDockerClient) TagImage(_ context.Context, _, _ string) error {
-	return errors.New("not implemented")
 }
 
 func (f *blockingDockerClient) ListContainers(ctx context.Context, _ string) (int32, error) {
