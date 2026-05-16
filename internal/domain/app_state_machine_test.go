@@ -70,6 +70,9 @@ func TestIsAppTransitionAllowed_IllegalTransitions(t *testing.T) {
 		{"running 不能直接 → deleted", AppStatusRunning, AppStatusDeleted},
 		// draft 只能进 pulling_image，不能直接跨阶段进 binding_waiting。
 		{"draft 不能直接 → binding_waiting", AppStatusDraft, AppStatusBindingWaiting},
+		// 锁住"deleted 终态不可自循环"+ "from==to 守卫顺序"两个约束。
+		// 守卫被改回到 deleted 分支之后会让 (deleted,deleted) 漏掉，这条 case 提供 fail-fast 保护。
+		{"deleted 自环非法", AppStatusDeleted, AppStatusDeleted},
 	}
 	for _, c := range cases {
 		// 子测试 name 描述场景含义，失败时直接看出哪条约束被打破。

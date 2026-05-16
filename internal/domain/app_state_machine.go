@@ -2,18 +2,21 @@
 //
 // # 状态机
 //
-//	draft ─▶ pulling_image ─▶ syncing_image ─▶ preparing_runtime ─▶ creating_container ─▶ starting ─▶ binding_waiting
-//	          │                  │                  │                     │                   │              │
-//	          ▼                  ▼                  ▼                     ▼                   ▼              ▼ 渠道扫码
-//	         error  ◀───────────任意 init 子状态失败────────────────────────────────────  binding_failed
-//	          ▲                                                                              │
-//	          └──────────────────────────────────────────────────────────────────────────────┴───▶ running
-//	                                                                                                │
-//	                                                                                                ▼
-//	                                                                                              stopped
-//	                                                                                                │
-//	                                                                                                ▼
-//	                                                                                              deleted
+// 初始化 / 运行段（实线为合法转移，所有非终态均可意外掉入 error）：
+//
+//	draft ─▶ pulling_image ─▶ syncing_image ─▶ preparing_runtime ─▶ creating_container ─▶ starting ─▶ binding_waiting ──扫码成功──▶ running ◀──启动──▶ stopped
+//	            │                 │                   │                      │                  │              │                       │                │
+//	            │                 │                   │                      │                  │              │ 扫码超时              │ 异常退出       │ 异常退出
+//	            │                 │                   │                      │                  │              ▼                       │                │
+//	            │                 │                   │                      │                  │       binding_failed ──重启绑定──▶ binding_waiting   │
+//	            │                 │                   │                      │                  │              │ 放弃                                  │
+//	            ▼                 ▼                   ▼                      ▼                  ▼              ▼                                       ▼
+//	         ┌───────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────┐
+//	         │                                                              error                                                                        │
+//	         └───────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────┘
+//	             │ 重试入口（RequestInitialize）             │ 软删除（SoftDeleteApp，IsAppTransitionAllowed 特殊分支兜底）
+//	             ▼                                            ▼
+//	         pulling_image                                  deleted （终态）
 //
 // 关键转移约束：
 //   - draft → pulling_image：onboarding job 拾取后第一阶段，由 worker 触发；
@@ -24,8 +27,11 @@
 //   - binding_waiting → binding_failed：渠道扫码超时或 token 过期；
 //   - binding_failed → binding_waiting：用户手动重启绑定流程；
 //   - binding_failed → error：多次失败后用户放弃或自动收敛；
+//   - running → error：运行时容器异常退出，收敛到 error 等待人工或重试；
+//   - stopped → error：停止状态下底层异常（例如镜像被清理 / 节点失联）；
 //   - error → pulling_image：RequestInitialize 重试入口，从 worker 第一阶段重新开始；
 //   - error → deleted：由 IsAppTransitionAllowed 内置特殊分支兜底，不进 appTransitions map；
+//     deleted 是终态且只能由 error 进入，stopped / running 等都必须先收敛到 error 才能软删；
 //   - deleted 是终态，deleted_at 字段非空即认为已删；
 //   - stopped → running：用户主动启动。
 //
