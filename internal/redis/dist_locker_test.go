@@ -13,9 +13,12 @@ import (
 // newTestLocker 连接本地 manager-redis (localhost:6379 / password=123456)。
 // 没有 redis 时 Skip 而非 Fail,与 redis_integration_test.go 风格一致。
 // 每次 cleanup 调 FlushDB 清测试数据。
+//
+// 选用 DB 11 与 imagecoord 包测试(DB 12)隔离:两包测试都用 FlushDB
+// 清场,go test 默认按包并行时同 DB 会互相清掉对方的 key。
 func newTestLocker(t *testing.T) (*RedisDistLocker, func()) {
 	t.Helper()
-	client := redis.NewClient(&redis.Options{Addr: "localhost:6379", Password: "123456"})
+	client := redis.NewClient(&redis.Options{Addr: "localhost:6379", Password: "123456", DB: 11})
 	if err := client.Ping(context.Background()).Err(); err != nil {
 		t.Skip("本地 Redis 不可用,跳过 DistLocker 集成测试: " + err.Error())
 	}

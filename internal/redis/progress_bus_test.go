@@ -12,9 +12,12 @@ import (
 )
 
 // newTestBus 连接本地 manager-redis,缺失时 Skip。
+//
+// 与 newTestLocker 共用 DB 11(同包内串行,不会互相 FlushDB 清干净),
+// 与 imagecoord 包测试(DB 12)隔离,详见 dist_locker_test.go 说明。
 func newTestBus(t *testing.T) (*RedisProgressBus, *redis.Client, func()) {
 	t.Helper()
-	client := redis.NewClient(&redis.Options{Addr: "localhost:6379", Password: "123456"})
+	client := redis.NewClient(&redis.Options{Addr: "localhost:6379", Password: "123456", DB: 11})
 	if err := client.Ping(context.Background()).Err(); err != nil {
 		t.Skip("本地 Redis 不可用,跳过 ProgressBus 集成测试: " + err.Error())
 	}

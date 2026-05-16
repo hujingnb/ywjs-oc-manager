@@ -65,9 +65,13 @@ func (f *fakeLocalProvider) Pull(_ context.Context, _ string) (io.ReadCloser, er
 
 // newTestCoord 构造一个连接本地 redis 的 Coordinator;redis 不可用即 Skip。
 // 每次返回 cleanup 清掉本次写入的 key,避免测试间相互污染。
+//
+// 选用 DB 12 与 internal/redis 包测试(DB 11)隔离:两包测试 cleanup 都
+// 走 FlushDB,go test 默认按包并行时同 DB 会互相清掉对方测试中的 key,
+// 导致 SingleFlight 锁被清、Renew 期间 key 失踪等间歇失败。
 func newTestCoord(t *testing.T, prov LocalImageProvider) (*Coordinator, func()) {
 	t.Helper()
-	client := redis.NewClient(&redis.Options{Addr: "localhost:6379", Password: "123456"})
+	client := redis.NewClient(&redis.Options{Addr: "localhost:6379", Password: "123456", DB: 12})
 	if err := client.Ping(context.Background()).Err(); err != nil {
 		t.Skip("本地 Redis 不可用,跳过 Coordinator 集成测试: " + err.Error())
 	}
