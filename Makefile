@@ -154,6 +154,44 @@ push-hermes-image: ## 推送 hermes runtime 生产镜像到 aliyun ACR
 release-hermes-image: build-hermes-image push-hermes-image ## 构建并推送 hermes runtime 生产镜像
 	@echo "✅ hermes 镜像 $(HERMES_IMAGE) 已构建并推送"
 
+# deploy-api / deploy-web / deploy-agent：一键完成本地构建推送 + 远程更新部署。
+# 远程步骤：sed 原地更新 .env 中的镜像变量 → docker compose pull → docker compose up -d。
+# SSH 凭据复用 PROD_MANAGER_SSH_* / PROD_AGENT1_SSH_* 变量（从 .env 加载）。
+# deploy-agent 无法直接访问 agent 服务器，经由 manager 内网跳转，与 ssh-agent1 相同。
+
+.PHONY: deploy-api
+deploy-api: release-api-image ## 构建推送 manager-api 并部署到 manage 服务器（更新 .env + compose up）
+	sshpass -p "$(PROD_MANAGER_SSH_PASS)" ssh \
+		-p $(PROD_MANAGER_SSH_PORT) \
+		-o StrictHostKeyChecking=no \
+		$(PROD_MANAGER_SSH_USER)@$(PROD_MANAGER_SSH_HOST) \
+		"cd /opt/oc-manage \
+		 && sed -i 's|OCM_MANAGER_IMAGE=.*|OCM_MANAGER_IMAGE=$(API_IMAGE_REPO):$(IMAGE_TIMESTAMP)|' .env \
+		 && docker compose pull \
+		 && docker compose up -d"
+
+.PHONY: deploy-web
+deploy-web: release-web-image ## 构建推送 manager-web 并部署到 manage 服务器（更新 .env + compose up）
+	sshpass -p "$(PROD_MANAGER_SSH_PASS)" ssh \
+		-p $(PROD_MANAGER_SSH_PORT) \
+		-o StrictHostKeyChecking=no \
+		$(PROD_MANAGER_SSH_USER)@$(PROD_MANAGER_SSH_HOST) \
+		"cd /opt/oc-manage \
+		 && sed -i 's|OCM_WEB_IMAGE=.*|OCM_WEB_IMAGE=$(WEB_IMAGE_REPO):$(IMAGE_TIMESTAMP)|' .env \
+		 && docker compose pull \
+		 && docker compose up -d"
+
+.PHONY: deploy-agent
+deploy-agent: release-agent-image ## 构建推送 runtime-agent 并部署到 agent 服务器（经 manager 跳转，更新 .env + compose up）
+	sshpass -p "$(PROD_AGENT1_SSH_PASS)" ssh \
+		-o StrictHostKeyChecking=no \
+		-o "ProxyCommand=sshpass -p '$(PROD_MANAGER_SSH_PASS)' ssh -W %h:%p -p $(PROD_MANAGER_SSH_PORT) -o StrictHostKeyChecking=no $(PROD_MANAGER_SSH_USER)@$(PROD_MANAGER_SSH_HOST)" \
+		$(PROD_AGENT1_SSH_USER)@$(PROD_AGENT1_SSH_HOST) \
+		"cd /opt/runtime-agent \
+		 && sed -i 's|OC_RUNTIME_AGENT_IMAGE=.*|OC_RUNTIME_AGENT_IMAGE=$(AGENT_IMAGE_REPO):$(IMAGE_TIMESTAMP)|' .env \
+		 && docker compose pull \
+		 && docker compose up -d"
+
 ##@ 调试脚本
 
 debug-ollama: ## 跑 debug-ollama.sh, 探测 ollama 状态
