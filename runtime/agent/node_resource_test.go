@@ -97,6 +97,10 @@ func (f *blockingDockerClient) LoadImage(_ context.Context, _ io.Reader) error {
 	return errors.New("not implemented")
 }
 
+func (f *blockingDockerClient) TagImage(_ context.Context, _, _ string) error {
+	return errors.New("not implemented")
+}
+
 func (f *blockingDockerClient) ListContainers(ctx context.Context, _ string) (int32, error) {
 	<-ctx.Done()
 	f.err = ctx.Err()

@@ -32,7 +32,10 @@ type LocalImageProvider interface {
 // 是为了让 Coordinator 不直接依赖 imagesync 包(避免后者反向 import)。
 type AgentImageClient interface {
 	InspectImage(ctx context.Context, nodeID, image string) (RemoteImageInfo, error)
-	LoadImage(ctx context.Context, nodeID, image string, archive io.Reader) (RemoteImageInfo, error)
+	// LoadImage 将 archive 发送给 agent 执行 docker load。
+	// expectedID 是 manager 本地镜像的内容 ID；agent 在 load 后若 tag 未指向该 ID
+	// 会通过 docker tag 强制修正，确保 tag 始终指向正确内容。
+	LoadImage(ctx context.Context, nodeID, image, expectedID string, archive io.Reader) (RemoteImageInfo, error)
 }
 
 // RemoteImageInfo 与 imagesync.RemoteImageInfo 同语义。

@@ -50,18 +50,21 @@ func TestAgentHTTPClientInspectImageUsesConfiguredTLSClient(t *testing.T) {
 	require.Equal(t, "sha256:remote", info.ID)
 }
 
-// TestAgentHTTPClientLoadImage 验证agentHTTP客户端加载镜像的预期行为场景。
+// TestAgentHTTPClientLoadImage 验证 agentHTTP 客户端加载镜像时正确传递 image 和 expected_id 的场景。
 func TestAgentHTTPClientLoadImage(t *testing.T) {
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		// 验证 image 和 expected_id 均通过 query param 正确传递。
 		if r.URL.Path != "/v1/images/load" || r.URL.Query().Get("image") != "hermes-runtime:dev" {
 			t.Fatalf("unexpected request: %s", r.URL.String())
 		}
+		require.Equal(t, "sha256:abc", r.URL.Query().Get("expected_id"), "expected_id 应透传给 agent")
 		require.Equal(t, "application/x-tar", r.Header.Get("Content-Type"))
 		_, _ = w.Write([]byte(`{"loaded":true,"info":{"id":"sha256:loaded"}}`))
 	}))
 	defer server.Close()
 
-	info, err := AgentHTTPClient{BaseURL: server.URL}.LoadImage(context.Background(), "node-1", "hermes-runtime:dev", strings.NewReader("tar"))
+	// expectedID 透传给 agent，agent 据此在 tag 不一致时强制重新打 tag。
+	info, err := AgentHTTPClient{BaseURL: server.URL}.LoadImage(context.Background(), "node-1", "hermes-runtime:dev", "sha256:abc", strings.NewReader("tar"))
 	require.NoError(t, err)
 	if !info.Exists || info.ID != "sha256:loaded" {
 		t.Fatalf("unexpected info: %+v", info)

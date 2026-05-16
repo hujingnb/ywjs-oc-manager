@@ -92,7 +92,7 @@ func (f *fakeAgentImage) InspectImage(context.Context, string, string) (RemoteIm
 	return f.remote, nil
 }
 
-func (f *fakeAgentImage) LoadImage(_ context.Context, _ string, _ string, archive io.Reader) (RemoteImageInfo, error) {
+func (f *fakeAgentImage) LoadImage(_ context.Context, _ string, _ string, _ string, archive io.Reader) (RemoteImageInfo, error) {
 	f.loadCalls++
 	body, err := io.ReadAll(archive)
 	if err != nil {

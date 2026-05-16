@@ -22,7 +22,10 @@ type RemoteImageInfo struct {
 // nodeID 由上层 resolver 用来选择 agent endpoint，本接口实现不得把不同节点的响应混用。
 type AgentImageClient interface {
 	InspectImage(ctx context.Context, nodeID string, image string) (RemoteImageInfo, error)
-	LoadImage(ctx context.Context, nodeID string, image string, archive io.Reader) (RemoteImageInfo, error)
+	// LoadImage 将 archive 发送给 agent 执行 docker load。
+	// expectedID 是 manager 本地 inspect 到的镜像内容 ID；agent 在 load 完成后
+	// 若发现 tag 未指向该 ID，会通过 docker tag 强制修正，确保 tag 与内容一致。
+	LoadImage(ctx context.Context, nodeID string, image string, expectedID string, archive io.Reader) (RemoteImageInfo, error)
 }
 
 // LocalImageProvider 抽象 manager 本机 docker 镜像能力。
@@ -89,7 +92,7 @@ func (s *Service) SyncRuntimeImage(ctx context.Context, nodeID string, image str
 	}
 	defer archive.Close()
 
-	loaded, err := s.agent.LoadImage(ctx, nodeID, image, archive)
+	loaded, err := s.agent.LoadImage(ctx, nodeID, image, localID, archive)
 	if err != nil {
 		return SyncResult{}, fmt.Errorf("load remote image: %w", err)
 	}

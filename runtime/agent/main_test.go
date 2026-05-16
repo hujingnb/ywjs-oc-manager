@@ -411,6 +411,26 @@ func (f *fakeDockerClient) LoadImage(_ context.Context, archive io.Reader) error
 	return nil
 }
 
+func (f *fakeDockerClient) TagImage(_ context.Context, sourceID, targetImage string) error {
+	// 模拟 docker tag：把 targetImage tag 更新指向 sourceID 对应的 info。
+	if f.images == nil {
+		return nil
+	}
+	// 找到 sourceID 对应的 image info（按 ID 匹配）。
+	var found *DockerImageInfo
+	for k := range f.images {
+		info := f.images[k]
+		if info.ID == sourceID {
+			found = &info
+			break
+		}
+	}
+	if found != nil {
+		f.images[targetImage] = *found
+	}
+	return nil
+}
+
 func (f *fakeDockerClient) ListContainers(_ context.Context, namePrefix string) (int32, error) {
 	var count int32
 	for _, name := range f.containers {

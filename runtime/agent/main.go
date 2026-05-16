@@ -423,6 +423,9 @@ func newHandlerWithDocker(dataRoot string, docker DockerClient, agentToken any) 
 			writeError(w, http.StatusBadRequest, "missing image query")
 			return
 		}
+		// expectedID 是 manager 本地 inspect 到的镜像 ID，用于在 docker load 后
+		// 核验 tag 是否指向正确内容，不一致时强制重新打 tag。
+		expectedID := r.URL.Query().Get("expected_id")
 		slog.ErrorContext(r.Context(), "[hujingnb][8] agent:loadImage start docker load", "image", image) // todo del
 		if err := docker.LoadImage(r.Context(), r.Body); err != nil {
 			writeError(w, http.StatusBadGateway, err.Error())
@@ -435,6 +438,20 @@ func newHandlerWithDocker(dataRoot string, docker DockerClient, agentToken any) 
 			return
 		}
 		slog.ErrorContext(r.Context(), "[hujingnb][10] agent:loadImage inspect done", "image", image, "inspectedID", info.ID) // todo del
+		// docker load 有时在 tag 已被 registry 版本占据时不会更新 tag 指向。
+		// 当调用方提供了 expected_id 且 inspect 结果不符，则通过 docker tag 强制修正。
+		if expectedID != "" && info.ID != expectedID {
+			if tagErr := docker.TagImage(r.Context(), expectedID, image); tagErr != nil {
+				writeError(w, http.StatusBadGateway, fmt.Sprintf("re-tag image failed: %v", tagErr))
+				return
+			}
+			// 重新 inspect 确认 tag 已指向正确 ID。
+			info, err = docker.InspectImage(r.Context(), image)
+			if err != nil {
+				writeError(w, http.StatusBadGateway, err.Error())
+				return
+			}
+		}
 		writeJSON(w, map[string]any{"loaded": true, "image": image, "info": info})
 	}))
 	// Sprint 1：scope 化 file API 端点（init/sync/upload/list/download/archive/cleanup 等）。

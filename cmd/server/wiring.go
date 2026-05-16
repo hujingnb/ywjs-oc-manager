@@ -414,7 +414,7 @@ func (n *nodeClientResolver) InspectImage(ctx context.Context, nodeID, image str
 }
 
 // LoadImage 适配 imagesync.AgentImageClient 接口。
-func (n *nodeClientResolver) LoadImage(ctx context.Context, nodeID, image string, archive io.Reader) (imagesync.RemoteImageInfo, error) {
+func (n *nodeClientResolver) LoadImage(ctx context.Context, nodeID, image, expectedID string, archive io.Reader) (imagesync.RemoteImageInfo, error) {
 	node, token, err := n.lookupNode(ctx, nodeID)
 	if err != nil {
 		return imagesync.RemoteImageInfo{}, err
@@ -429,7 +429,7 @@ func (n *nodeClientResolver) LoadImage(ctx context.Context, nodeID, image string
 	if err != nil {
 		return imagesync.RemoteImageInfo{}, err
 	}
-	return inner.LoadImage(ctx, nodeID, image, archive)
+	return inner.LoadImage(ctx, nodeID, image, expectedID, archive)
 }
 
 // agentClientAdapter 把 imagesync.AgentImageClient 适配成 imagecoord.AgentImageClient。
@@ -449,8 +449,8 @@ func (a agentClientAdapter) InspectImage(ctx context.Context, nodeID, image stri
 }
 
 // LoadImage 透传到 inner,只做 RemoteImageInfo 类型翻译。
-func (a agentClientAdapter) LoadImage(ctx context.Context, nodeID, image string, archive io.Reader) (imagecoord.RemoteImageInfo, error) {
-	r, err := a.inner.LoadImage(ctx, nodeID, image, archive)
+func (a agentClientAdapter) LoadImage(ctx context.Context, nodeID, image, expectedID string, archive io.Reader) (imagecoord.RemoteImageInfo, error) {
+	r, err := a.inner.LoadImage(ctx, nodeID, image, expectedID, archive)
 	if err != nil {
 		return imagecoord.RemoteImageInfo{}, err
 	}

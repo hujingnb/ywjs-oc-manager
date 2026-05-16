@@ -63,12 +63,17 @@ func (c AgentHTTPClient) InspectImage(ctx context.Context, _ string, image strin
 
 // LoadImage 调 agent POST /v1/images/load，把 docker save tar 流加载到目标节点。
 // archive 由调用方提供，函数不会重试读取；失败重试由 worker 重新创建 archive。
-func (c AgentHTTPClient) LoadImage(ctx context.Context, _ string, image string, archive io.Reader) (RemoteImageInfo, error) {
+// expectedID 传给 agent，agent 在 docker load 后若 tag 未指向该 ID 时会强制重新打 tag。
+func (c AgentHTTPClient) LoadImage(ctx context.Context, _ string, image string, expectedID string, archive io.Reader) (RemoteImageInfo, error) {
 	endpoint, err := url.JoinPath(c.BaseURL, "/v1/images/load")
 	if err != nil {
 		return RemoteImageInfo{}, err
 	}
-	req, err := http.NewRequestWithContext(ctx, http.MethodPost, endpoint+"?image="+url.QueryEscape(image), archive)
+	q := "?image=" + url.QueryEscape(image)
+	if expectedID != "" {
+		q += "&expected_id=" + url.QueryEscape(expectedID)
+	}
+	req, err := http.NewRequestWithContext(ctx, http.MethodPost, endpoint+q, archive)
 	if err != nil {
 		return RemoteImageInfo{}, err
 	}
