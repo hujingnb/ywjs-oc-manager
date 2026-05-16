@@ -4,24 +4,25 @@
 //
 // 初始化 / 运行段（实线为合法转移，所有非终态均可意外掉入 error）：
 //
-//	draft ─▶ pulling_image ─▶ syncing_image ─▶ preparing_runtime ─▶ creating_container ─▶ starting ─▶ binding_waiting ──扫码成功──▶ running ◀──启动──▶ stopped
-//	            │                 │                   │                      │                  │              │                       │                │
-//	            │                 │                   │                      │                  │              │ 扫码超时              │ 异常退出       │ 异常退出
-//	            │                 │                   │                      │                  │              ▼                       │                │
-//	            │                 │                   │                      │                  │       binding_failed ──重启绑定──▶ binding_waiting   │
-//	            │                 │                   │                      │                  │              │ 放弃                                  │
-//	            ▼                 ▼                   ▼                      ▼                  ▼              ▼                                       ▼
+//	draft ─▶ pulling_runtime_image ─▶ preparing_runtime ─▶ creating_container ─▶ starting ─▶ binding_waiting ──扫码成功──▶ running ◀──启动──▶ stopped
+//	                 │                        │                      │                  │              │                       │                │
+//	                 │                        │                      │                  │              │ 扫码超时              │ 异常退出       │ 异常退出
+//	                 │                        │                      │                  │              ▼                       │                │
+//	                 │                        │                      │                  │       binding_failed ──重启绑定──▶ binding_waiting   │
+//	                 │                        │                      │                  │              │ 放弃                                  │
+//	                 ▼                        ▼                      ▼                  ▼              ▼                                       ▼
 //	         ┌───────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────┐
 //	         │                                                              error                                                                        │
 //	         └───────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────┘
 //	             │ 重试入口（RequestInitialize）             │ 软删除（SoftDeleteApp，IsAppTransitionAllowed 特殊分支兜底）
 //	             ▼                                            ▼
-//	         pulling_image                                  deleted （终态）
+//	         pulling_runtime_image                          deleted （终态）
 //
 // 关键转移约束：
-//   - draft → pulling_image：onboarding job 拾取后第一阶段，由 worker 触发；
-//   - pulling_image → syncing_image → preparing_runtime → creating_container → starting：
-//     worker 在 5 个 init 子状态之间串行推进，每阶段对应明确的副作用；
+//   - draft → pulling_runtime_image：onboarding job 拾取后第一阶段，由 worker 触发；
+//     agent 通过 docker proxy 直接从公网 registry 拉取 hermes 镜像，跳过原 pulling_image/syncing_image；
+//   - pulling_runtime_image → preparing_runtime → creating_container → starting：
+//     worker 在 4 个 init 子状态之间串行推进，每阶段对应明确的副作用；
 //   - starting → binding_waiting：容器健康检查通过后等渠道扫码；
 //   - 任意 init 子状态 → error：失败收敛到 error，last_error_status 记录来源阶段以便排障；
 //   - binding_waiting → binding_failed：渠道扫码超时或 token 过期；
@@ -29,7 +30,7 @@
 //   - binding_failed → error：多次失败后用户放弃或自动收敛；
 //   - running → error：运行时容器异常退出，收敛到 error 等待人工或重试；
 //   - stopped → error：停止状态下底层异常（例如镜像被清理 / 节点失联）；
-//   - error → pulling_image：RequestInitialize 重试入口，从 worker 第一阶段重新开始；
+//   - error → pulling_runtime_image：RequestInitialize 重试入口，从 worker 第一阶段重新开始；
 //   - error → deleted：由 IsAppTransitionAllowed 内置特殊分支兜底，不进 appTransitions map；
 //     deleted 是终态且只能由 error 进入，stopped / running 等都必须先收敛到 error 才能软删；
 //   - deleted 是终态，deleted_at 字段非空即认为已删；
@@ -48,10 +49,11 @@ type AppTransition struct {
 }
 
 var appTransitions = map[AppTransition]struct{}{
-	// 5 个 init 子状态串行推进：worker 完成一个阶段后才能进入下一个。
-	{From: AppStatusDraft, To: AppStatusPullingImage}:                 {},
-	{From: AppStatusPullingImage, To: AppStatusSyncingImage}:          {},
-	{From: AppStatusSyncingImage, To: AppStatusPreparingRuntime}:      {},
+	// init 子状态串行推进：worker 完成一个阶段后才能进入下一个。
+	// pulling_runtime_image 替代原 pulling_image + syncing_image 两阶段，
+	// agent 直接通过 docker proxy 从公网 registry 拉取 hermes 镜像。
+	{From: AppStatusDraft, To: AppStatusPullingRuntimeImage}:          {},
+	{From: AppStatusPullingRuntimeImage, To: AppStatusPreparingRuntime}: {},
 	{From: AppStatusPreparingRuntime, To: AppStatusCreatingContainer}: {},
 	{From: AppStatusCreatingContainer, To: AppStatusStarting}:         {},
 	{From: AppStatusStarting, To: AppStatusBindingWaiting}:            {},
@@ -66,15 +68,14 @@ var appTransitions = map[AppTransition]struct{}{
 	{From: AppStatusStopped, To: AppStatusRunning}:              {},
 	{From: AppStatusStopped, To: AppStatusError}:                {},
 
-	// 5 个 init 子状态失败都收敛到 error；last_error_status 记录失败阶段以便排障与重试。
-	{From: AppStatusPullingImage, To: AppStatusError}:      {},
-	{From: AppStatusSyncingImage, To: AppStatusError}:      {},
-	{From: AppStatusPreparingRuntime, To: AppStatusError}:  {},
-	{From: AppStatusCreatingContainer, To: AppStatusError}: {},
-	{From: AppStatusStarting, To: AppStatusError}:          {},
+	// init 子状态失败都收敛到 error；last_error_status 记录失败阶段以便排障与重试。
+	{From: AppStatusPullingRuntimeImage, To: AppStatusError}:  {},
+	{From: AppStatusPreparingRuntime, To: AppStatusError}:     {},
+	{From: AppStatusCreatingContainer, To: AppStatusError}:    {},
+	{From: AppStatusStarting, To: AppStatusError}:             {},
 
 	// error 重试入口：RequestInitialize 把状态拨回到 worker 第一阶段重新跑。
-	{From: AppStatusError, To: AppStatusPullingImage}: {},
+	{From: AppStatusError, To: AppStatusPullingRuntimeImage}: {},
 	// error → deleted 由 IsAppTransitionAllowed 内的特殊分支兜底，无需在 map 中重复登记。
 }
 

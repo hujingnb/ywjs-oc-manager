@@ -8,20 +8,21 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
-// TestIsAppTransitionAllowed_LegalTransitions 验证 21 条合法转移每条都能通过校验。
+// TestIsAppTransitionAllowed_LegalTransitions 验证全部合法转移每条都能通过校验。
 // 子测试 name 即转移本身，失败时定位精确到具体一行；任何一条新增/删除转移都必须在此处同步登记。
 func TestIsAppTransitionAllowed_LegalTransitions(t *testing.T) {
 	cases := []struct {
 		from string
 		to   string
 	}{
-		// 5 个 init 子状态串行：worker 按顺序推进，每一步对应一个明确的副作用阶段。
-		{AppStatusDraft, AppStatusPullingImage},                 // onboarding 拾取后从 draft 进入 worker 第一阶段
-		{AppStatusPullingImage, AppStatusSyncingImage},          // 镜像 pull 完成后进入跨节点 sync
-		{AppStatusSyncingImage, AppStatusPreparingRuntime},      // 镜像 sync 完成后写运行时配置
-		{AppStatusPreparingRuntime, AppStatusCreatingContainer}, // 运行时准备完成后创建容器
-		{AppStatusCreatingContainer, AppStatusStarting},         // 容器创建完成后进入启动
-		{AppStatusStarting, AppStatusBindingWaiting},            // 容器健康检查通过后等渠道扫码
+		// init 子状态串行：worker 按顺序推进，每一步对应一个明确的副作用阶段。
+		// pulling_runtime_image 替代原 pulling_image + syncing_image 两阶段，
+		// agent 通过 docker proxy 直接从公网 registry 拉取 hermes 镜像。
+		{AppStatusDraft, AppStatusPullingRuntimeImage},               // onboarding 拾取后进入镜像拉取阶段
+		{AppStatusPullingRuntimeImage, AppStatusPreparingRuntime},    // 镜像拉取完成后写运行时配置
+		{AppStatusPreparingRuntime, AppStatusCreatingContainer},      // 运行时准备完成后创建容器
+		{AppStatusCreatingContainer, AppStatusStarting},              // 容器创建完成后进入启动
+		{AppStatusStarting, AppStatusBindingWaiting},                 // 容器健康检查通过后等渠道扫码
 
 		// binding / running 段：渠道绑定与容器运行状态切换。
 		{AppStatusBindingWaiting, AppStatusRunning},       // 渠道扫码成功后进入运行态
@@ -33,16 +34,15 @@ func TestIsAppTransitionAllowed_LegalTransitions(t *testing.T) {
 		{AppStatusStopped, AppStatusRunning},              // 用户重启
 		{AppStatusStopped, AppStatusError},                // 停止状态下底层异常（例如镜像被清理）
 
-		// 5 个 init 子状态各自失败：全部收敛到 error，由 last_error_status 记录来源阶段。
-		{AppStatusPullingImage, AppStatusError},      // pull 失败
-		{AppStatusSyncingImage, AppStatusError},      // sync 失败
-		{AppStatusPreparingRuntime, AppStatusError},  // 写运行时配置失败
-		{AppStatusCreatingContainer, AppStatusError}, // 创建容器失败
-		{AppStatusStarting, AppStatusError},          // 启动 / 健康检查失败
+		// init 子状态各自失败：全部收敛到 error，由 last_error_status 记录来源阶段。
+		{AppStatusPullingRuntimeImage, AppStatusError},  // agent 拉取镜像失败
+		{AppStatusPreparingRuntime, AppStatusError},     // 写运行时配置失败
+		{AppStatusCreatingContainer, AppStatusError},    // 创建容器失败
+		{AppStatusStarting, AppStatusError},             // 启动 / 健康检查失败
 
 		// error 重试 / 软删除：error 是吸入态，离开必须显式触发。
-		{AppStatusError, AppStatusPullingImage}, // RequestInitialize 重试入口，回到 worker 第一阶段
-		{AppStatusError, AppStatusDeleted},      // SoftDeleteApp 终态由 IsAppTransitionAllowed 特殊分支兜底
+		{AppStatusError, AppStatusPullingRuntimeImage}, // RequestInitialize 重试入口，回到 worker 第一阶段
+		{AppStatusError, AppStatusDeleted},              // SoftDeleteApp 终态由 IsAppTransitionAllowed 特殊分支兜底
 	}
 	for _, c := range cases {
 		// 子测试名直接用转移本身，便于定位；失败时一眼看出哪一条未通过校验。
@@ -85,10 +85,10 @@ func TestIsAppTransitionAllowed_IllegalTransitions(t *testing.T) {
 // TestEnsureAppTransitionWraps 验证 EnsureAppTransition 对合法/非法转移的返回值与错误包装。
 func TestEnsureAppTransitionWraps(t *testing.T) {
 	// 非法转移必须返回带上下文的错误，方便 service / handler 直接向上抛。
-	err := EnsureAppTransition(AppStatusRunning, AppStatusPullingImage)
+	err := EnsureAppTransition(AppStatusRunning, AppStatusPullingRuntimeImage)
 	require.Error(t, err)
 	// 合法转移必须无错，保证业务侧能正常推进状态机。
-	err = EnsureAppTransition(AppStatusDraft, AppStatusPullingImage)
+	err = EnsureAppTransition(AppStatusDraft, AppStatusPullingRuntimeImage)
 	require.NoError(t, err)
 }
 
@@ -151,4 +151,20 @@ func TestEnsureAPIKeyTransitionFailsForInvalid(t *testing.T) {
 	// pending → active 是常规创建成功路径，必须无错。
 	err = EnsureAPIKeyTransition(APIKeyStatusPending, APIKeyStatusActive)
 	require.NoError(t, err)
+}
+
+// TestAppTransition_PullingRuntimeImage 验证新增 pulling_runtime_image 状态的合法转移路径。
+func TestAppTransition_PullingRuntimeImage(t *testing.T) {
+	// draft → pulling_runtime_image：worker 从第一阶段入口触发
+	assert.True(t, IsAppTransitionAllowed(AppStatusDraft, AppStatusPullingRuntimeImage))
+	// pulling_runtime_image → preparing_runtime：跳过原 syncing_image 直接进准备阶段
+	assert.True(t, IsAppTransitionAllowed(AppStatusPullingRuntimeImage, AppStatusPreparingRuntime))
+	// pulling_runtime_image → error：拉取失败收敛到 error
+	assert.True(t, IsAppTransitionAllowed(AppStatusPullingRuntimeImage, AppStatusError))
+	// error → pulling_runtime_image：重试入口
+	assert.True(t, IsAppTransitionAllowed(AppStatusError, AppStatusPullingRuntimeImage))
+	// pulling_runtime_image 不能直接到 syncing_image（旧路径已废弃）
+	assert.False(t, IsAppTransitionAllowed(AppStatusPullingRuntimeImage, AppStatusSyncingImage))
+	// IsAppStatus 应识别新状态
+	assert.True(t, IsAppStatus(AppStatusPullingRuntimeImage))
 }
