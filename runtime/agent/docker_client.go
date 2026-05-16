@@ -94,7 +94,7 @@ func (c *dockerSocketClient) LoadImage(ctx context.Context, archive io.Reader) e
 		body, _ := io.ReadAll(io.LimitReader(resp.Body, 4096))
 		return fmt.Errorf("docker load image failed: status=%d body=%s", resp.StatusCode, string(body))
 	}
-	dockerLoadResp, _ := io.ReadAll(io.LimitReader(resp.Body, 8192)) // todo del
+	dockerLoadResp, _ := io.ReadAll(io.LimitReader(resp.Body, 8192)) // todo del origin: _, _ = io.Copy(io.Discard, resp.Body)
 	slog.Error("[hujingnb][D] dockerSocketClient:LoadImage docker daemon response", "body", string(dockerLoadResp)) // todo del
 	return nil
 }
