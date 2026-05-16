@@ -1,4 +1,4 @@
-.PHONY: dev-up dev-down test vet build sqlc-generate migrate-up migrate-down check-compose logs web-test web-typecheck web-build build-hermes-runtime verify-hermes-runtime debug-ollama debug-newapi newapi-probe seed-e2e smoke-v102 openapi-gen web-types-gen openapi-check ssh-manager ssh-agent1
+.PHONY: dev-up dev-down test vet build sqlc-generate migrate-up migrate-down check-compose logs web-test web-typecheck web-build build-hermes-runtime verify-hermes-runtime debug-ollama debug-newapi newapi-probe seed-e2e smoke-v102 openapi-gen web-types-gen openapi-check ssh-manager ssh-agent1 logs-api logs-agent1
 
 # 加载 .env（-include 在文件不存在时静默跳过，不报错）。
 # docker compose 会自动读取 .env，Makefile 显式 include 是为了让 SSH 等 target 也能访问其中变量。
@@ -270,3 +270,20 @@ ssh-agent1: ## SSH 连接线上 agent-1（经由 manager 内网跳转，需 .env
 		-o "ProxyCommand=sshpass -p '$(PROD_MANAGER_SSH_PASS)' ssh -W %h:%p -p $(PROD_MANAGER_SSH_PORT) -o StrictHostKeyChecking=no $(PROD_MANAGER_SSH_USER)@$(PROD_MANAGER_SSH_HOST)" \
 		-t $(PROD_AGENT1_SSH_USER)@$(PROD_AGENT1_SSH_HOST) \
 		"cd /opt/runtime-agent && exec bash -l"
+
+# logs-api 在 manage 服务器上持续 tail manager-api 容器日志，Ctrl+C 退出。
+# -t 分配伪终端，确保 Ctrl+C 信号能正确传递给远端 docker compose 进程。
+logs-api: ## 查看线上 manager-api 容器日志（持续 tail，Ctrl+C 退出）
+	sshpass -p "$(PROD_MANAGER_SSH_PASS)" ssh \
+		-p $(PROD_MANAGER_SSH_PORT) \
+		-o StrictHostKeyChecking=no \
+		-t $(PROD_MANAGER_SSH_USER)@$(PROD_MANAGER_SSH_HOST) \
+		"cd /opt/oc-manage && docker compose logs -f --tail=200 manager-api"
+
+# logs-agent1 经由 manager 内网跳转到 agent-1，持续 tail runtime-agent 容器日志。
+logs-agent1: ## 查看线上 agent-1 容器日志（经 manager 跳转，持续 tail，Ctrl+C 退出）
+	sshpass -p "$(PROD_AGENT1_SSH_PASS)" ssh \
+		-o StrictHostKeyChecking=no \
+		-o "ProxyCommand=sshpass -p '$(PROD_MANAGER_SSH_PASS)' ssh -W %h:%p -p $(PROD_MANAGER_SSH_PORT) -o StrictHostKeyChecking=no $(PROD_MANAGER_SSH_USER)@$(PROD_MANAGER_SSH_HOST)" \
+		-t $(PROD_AGENT1_SSH_USER)@$(PROD_AGENT1_SSH_HOST) \
+		"cd /opt/runtime-agent && docker compose logs -f --tail=200"
