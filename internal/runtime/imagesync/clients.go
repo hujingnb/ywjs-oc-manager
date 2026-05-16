@@ -5,7 +5,6 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
-	"log/slog" // todo del
 	"net/http"
 	"net/url"
 )
@@ -89,15 +88,12 @@ func (c AgentHTTPClient) LoadImage(ctx context.Context, _ string, image string, 
 		body, _ := io.ReadAll(io.LimitReader(resp.Body, 4096))
 		return RemoteImageInfo{}, fmt.Errorf("load agent image failed: status=%d body=%s", resp.StatusCode, string(body))
 	}
-	rawBody, _ := io.ReadAll(io.LimitReader(resp.Body, 4096))                                  // todo del
-	slog.Error("[hujingnb][7] client:LoadImage raw agent response", "body", string(rawBody)) // todo del
 	var payload struct {
 		Info struct {
 			ID string `json:"id"`
 		} `json:"info"`
 	}
-	// original: if err := json.NewDecoder(resp.Body).Decode(&payload); err != nil {
-	if err := json.Unmarshal(rawBody, &payload); err != nil { // todo del origin: if err := json.NewDecoder(resp.Body).Decode(&payload); err != nil {
+	if err := json.NewDecoder(resp.Body).Decode(&payload); err != nil {
 		return RemoteImageInfo{}, err
 	}
 	return RemoteImageInfo{Exists: true, ID: payload.Info.ID}, nil
