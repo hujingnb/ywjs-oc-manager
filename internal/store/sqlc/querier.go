@@ -96,7 +96,8 @@ type Querier interface {
 	// running 是常态；binding_waiting 表示容器已起但渠道还在登录中，依然要刷指标。
 	ListRunningApps(ctx context.Context) ([]ListRunningAppsRow, error)
 	ListRuntimeNodes(ctx context.Context, arg ListRuntimeNodesParams) ([]RuntimeNode, error)
-	// reaper 扫描 5 个 init 子状态下连续 90s 无更新的孤儿；阈值由调用方传入。
+	// reaper 扫描 init 子状态下连续 90s 无更新的孤儿；阈值由调用方传入。
+	// 包含新旧两套 init 状态，确保历史孤儿也能被正确清理。
 	ListStaleInits(ctx context.Context, updatedAt pgtype.Timestamptz) ([]ListStaleInitsRow, error)
 	ListUsersByOrg(ctx context.Context, arg ListUsersByOrgParams) ([]User, error)
 	// 列出组织内成员及其当前关联的活跃实例（LEFT JOIN，无实例的成员仍返回）。
@@ -140,6 +141,8 @@ type Querier interface {
 	SoftDeleteOrganization(ctx context.Context, id pgtype.UUID) (Organization, error)
 	// 真软删除：仅设置 deleted_at（不动 status）；status 与 deleted_at 语义独立。
 	SoftDeleteUser(ctx context.Context, id pgtype.UUID) error
+	// phasePullRuntimeImage 成功后写入镜像引用与 sha256。
+	UpdateAppRuntimeImage(ctx context.Context, arg UpdateAppRuntimeImageParams) (App, error)
 	// OOS-2 access_token 自愈用：仅更新 newapi_user_credentials_ciphertext，不动 newapi_user_id。
 	UpdateOrganizationCredentialsCiphertext(ctx context.Context, arg UpdateOrganizationCredentialsCiphertextParams) (Organization, error)
 	UpdateOrganizationProfile(ctx context.Context, arg UpdateOrganizationProfileParams) (Organization, error)

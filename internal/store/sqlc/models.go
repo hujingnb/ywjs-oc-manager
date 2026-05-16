@@ -47,6 +47,10 @@ type App struct {
 	LastErrorStatus pgtype.Text `db:"last_error_status" json:"last_error_status"`
 	// 上次进入 error 时的错误消息；进入 error 时写入，重新发起对应转移时清空。
 	LastErrorMessage pgtype.Text `db:"last_error_message" json:"last_error_message"`
+	// 部署时实际使用的镜像引用（含 tag）；phasePullRuntimeImage 写入，之后不变。
+	RuntimeImageRef string `db:"runtime_image_ref" json:"runtime_image_ref"`
+	// 拉取后 docker inspect 返回的镜像 ID（sha256:…）；供展示和排查使用。
+	RuntimeImageSha256 string `db:"runtime_image_sha256" json:"runtime_image_sha256"`
 }
 
 // 审计日志表，记录关键操作、结果和错误信息；普通业务 API 不允许修改或删除。

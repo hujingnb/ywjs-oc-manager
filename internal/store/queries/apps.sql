@@ -143,10 +143,21 @@ WHERE id = $1
 RETURNING *;
 
 -- name: ListStaleInits :many
--- reaper 扫描 5 个 init 子状态下连续 90s 无更新的孤儿；阈值由调用方传入。
+-- reaper 扫描 init 子状态下连续 90s 无更新的孤儿；阈值由调用方传入。
+-- 包含新旧两套 init 状态，确保历史孤儿也能被正确清理。
 SELECT id, runtime_node_id, status
 FROM apps
 WHERE deleted_at IS NULL
-  AND status IN ('pulling_image','syncing_image','preparing_runtime','creating_container','starting')
+  AND status IN ('pulling_runtime_image','pulling_image','syncing_image','preparing_runtime','creating_container','starting')
   AND updated_at < $1
 ORDER BY id;
+
+-- name: UpdateAppRuntimeImage :one
+-- phasePullRuntimeImage 成功后写入镜像引用与 sha256。
+UPDATE apps
+SET
+    runtime_image_ref    = $2,
+    runtime_image_sha256 = $3,
+    updated_at = now()
+WHERE id = $1
+RETURNING *;
