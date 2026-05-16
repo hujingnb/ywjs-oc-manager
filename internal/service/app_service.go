@@ -83,6 +83,12 @@ type AppResult struct {
 	LastErrorStatus string `json:"last_error_status,omitempty"`
 	// LastErrorMessage 上次进入 error 时的错误原始文本;供前端直接展示给用户。
 	LastErrorMessage string `json:"last_error_message,omitempty"`
+	// RuntimeImageRef 是 phasePullRuntimeImage 拉取的镜像引用（如 ghcr.io/foo/hermes:v1.2.3）。
+	// 仅平台管理员可见，用于运维排障和版本溯源。
+	RuntimeImageRef string `json:"runtime_image_ref,omitempty"`
+	// RuntimeImageSha256 是 docker inspect 返回的镜像 config digest（sha256:...）。
+	// 仅平台管理员可见；与 RuntimeImageRef 共同标识节点上运行的精确镜像版本。
+	RuntimeImageSha256 string `json:"runtime_image_sha256,omitempty"`
 }
 
 // AppModelUpdateResult 是修改实例模型后的响应；App 字段返回已保存的新模型视图。
@@ -110,7 +116,13 @@ func (s *AppService) Get(ctx context.Context, principal auth.Principal, appID st
 	if !auth.CanViewApp(principal, uuidToString(app.OrgID), uuidToString(app.OwnerUserID)) {
 		return AppResult{}, ErrForbidden
 	}
-	return toAppResult(app), nil
+	result := toAppResult(app)
+	// runtime_image_ref / sha256 含节点内部镜像信息，仅对平台管理员开放。
+	if principal.Role == domain.UserRolePlatformAdmin {
+		result.RuntimeImageRef = app.RuntimeImageRef
+		result.RuntimeImageSha256 = app.RuntimeImageSha256
+	}
+	return result, nil
 }
 
 // ListByOrg 列出组织内的应用。

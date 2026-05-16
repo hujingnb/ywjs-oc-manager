@@ -139,6 +139,29 @@ func TestUpdateModelWithoutContainerOnlySavesModel(t *testing.T) {
 	assert.Empty(t, store.jobs)
 }
 
+// TestGetAppExposeRuntimeImageOnlyToPlatformAdmin 验证 RuntimeImageRef 和 RuntimeImageSha256
+// 仅在平台管理员调用 Get 时返回；组织管理员调用时两字段应为空。
+func TestGetAppExposeRuntimeImageOnlyToPlatformAdmin(t *testing.T) {
+	t.Parallel()
+	svc, store := newAppServiceWithStore(t)
+	app := store.mustSeedApp(t, "qwen2.5:7b")
+	app.RuntimeImageRef = "ghcr.io/foo/hermes:v1.2.3"
+	app.RuntimeImageSha256 = "sha256:abcdef1234567890"
+	store.app = app
+
+	// 平台管理员应看到两个镜像字段。
+	adminResult, err := svc.Get(context.Background(), platformAdmin(), testAppServiceAppID)
+	require.NoError(t, err)
+	assert.Equal(t, "ghcr.io/foo/hermes:v1.2.3", adminResult.RuntimeImageRef)
+	assert.Equal(t, "sha256:abcdef1234567890", adminResult.RuntimeImageSha256)
+
+	// 组织管理员不应看到这两个字段（omitempty 保证序列化时也不会输出）。
+	orgResult, err := svc.Get(context.Background(), appOrgAdminPrincipal(store.organization), testAppServiceAppID)
+	require.NoError(t, err)
+	assert.Empty(t, orgResult.RuntimeImageRef)
+	assert.Empty(t, orgResult.RuntimeImageSha256)
+}
+
 func newAppServiceWithStore(t *testing.T) (*AppService, *appServiceStoreStub) {
 	t.Helper()
 	store := &appServiceStoreStub{
