@@ -41,6 +41,7 @@ import (
 	"oc-manager/internal/integrations/newapi"
 	"oc-manager/internal/integrations/runtime"
 	managerlog "oc-manager/internal/log"
+	"oc-manager/internal/migrations"
 	"oc-manager/internal/redis"
 	"oc-manager/internal/runtime/imagecoord"
 	"oc-manager/internal/runtime/imagesync"
@@ -50,6 +51,10 @@ import (
 	"oc-manager/internal/worker"
 	"oc-manager/internal/worker/handlers"
 	"oc-manager/internal/worker/reaper"
+
+	migrate "github.com/golang-migrate/migrate/v4"
+	_ "github.com/golang-migrate/migrate/v4/database/postgres"
+	"github.com/golang-migrate/migrate/v4/source/iofs"
 )
 
 func main() {
@@ -100,6 +105,15 @@ func runManager(ctx context.Context, cfg config.Config, logOut io.Writer) error 
 		return fmt.Errorf("连接数据库失败: %w", err)
 	}
 	defer dbStore.Close()
+
+	// 启动时自动执行 schema migrate up。
+	// 与 cmd/migrate 共用 internal/migrations 的 go:embed FS,逻辑保持一致;
+	// golang-migrate 内置 PG advisory lock,多副本同时启动也只有一个真正跑 migration,
+	// 其它实例会等待 lock 释放后跳过 ErrNoChange。
+	// 失败 fail-fast,避免新 schema 字段缺失导致 sqlc 查询 panic。
+	if err := autoMigrate(cfg.Database.URL, logger); err != nil {
+		return fmt.Errorf("执行启动迁移失败: %w", err)
+	}
 
 	redisQueue := redis.NewRedisQueue(redis.Config{
 		Addr:     cfg.Redis.Addr,
@@ -505,3 +519,50 @@ func hashPasswordWithDefault(password string) (string, error) {
 // hashTokenSHA256 用 SHA-256 对 agent token 做不可逆 hash 后存库。
 // runtime node 的 token 不需要密码级强度，但必须保证泄露后也无法直接调用 manager API。
 func hashTokenSHA256(token string) string { return auth.HashOpaqueToken(token) }
+
+// autoMigrate 在 manager-api 启动早期把 schema 推到最新版本。
+//
+// 与 cmd/migrate 共用 internal/migrations 的 go:embed FS,保证迁移内容一致;
+// golang-migrate 通过 PG advisory lock(全局 hash 锁)保证多副本同时启动时只有一个
+// 真正跑迁移,其它实例阻塞等待锁,锁释放后命中 ErrNoChange 直接跳过。
+//
+// 失败语义为 fail-fast:返回 error 让 runManager 立即退出,
+// 避免新 schema 字段缺失导致后续 sqlc 查询在运行时 panic。
+// 大 schema 变更(锁全表 ALTER)的运维风险需要发版前评估,本函数不做特殊豁免。
+func autoMigrate(databaseURL string, logger *slog.Logger) error {
+	src, err := iofs.New(migrations.FS, ".")
+	if err != nil {
+		return fmt.Errorf("初始化迁移 source: %w", err)
+	}
+	m, err := migrate.NewWithSourceInstance("iofs", src, databaseURL)
+	if err != nil {
+		_ = src.Close()
+		return fmt.Errorf("初始化迁移器: %w", err)
+	}
+	defer func() {
+		sourceErr, databaseErr := m.Close()
+		if sourceErr != nil {
+			logger.Warn("关闭迁移 source 失败", "error", sourceErr)
+		}
+		if databaseErr != nil {
+			logger.Warn("关闭迁移 database 失败", "error", databaseErr)
+		}
+	}()
+
+	beforeVersion, beforeDirty, verErr := m.Version()
+	if verErr != nil && !errors.Is(verErr, migrate.ErrNilVersion) {
+		return fmt.Errorf("读取当前迁移版本: %w", verErr)
+	}
+	if err := m.Up(); err != nil && !errors.Is(err, migrate.ErrNoChange) {
+		return fmt.Errorf("执行 up 迁移: %w", err)
+	}
+	afterVersion, afterDirty, verErr := m.Version()
+	if verErr != nil && !errors.Is(verErr, migrate.ErrNilVersion) {
+		return fmt.Errorf("读取迁移后版本: %w", verErr)
+	}
+	logger.Info("启动迁移完成",
+		"before_version", beforeVersion, "before_dirty", beforeDirty,
+		"after_version", afterVersion, "after_dirty", afterDirty,
+	)
+	return nil
+}

@@ -16,10 +16,8 @@ mkdir -p tls
 # 先启动数据库
 docker compose up -d manager-postgres manager-redis
 
-# 首次部署：执行数据库迁移（manager-api 镜像内置 migrate 二进制）
-docker compose run --rm manager-api migrate up
-
-# 启动全部服务
+# 启动全部服务(manager-api 启动时会自动跑 schema migrate up,
+# 多副本部署时由 golang-migrate 的 PG advisory lock 互斥,无需手动调用)
 docker compose up -d
 ```
 

@@ -19,11 +19,11 @@
 1. **ollama**：启动模型服务，拉取并验证所需模型（`ollama pull <model>`）。
 2. **new-api**：启动后在后台配置 Ollama 渠道，并在「个人设置 → 安全设置 → 系统访问令牌」生成管理用 access token。
 3. **manage**：把 new-api 地址和 admin token 写入 `config/manager.yaml`（参考
-   `config/manager.example.yaml`），执行数据库迁移后启动服务：
+   `config/manager.example.yaml`），启动服务（manager-api 启动时自动跑
+   `migrate up`，多副本由 golang-migrate 的 PG advisory lock 互斥）：
 
    ```sh
    cd deploy/manage
-   docker compose run --rm manager-api migrate up
    docker compose up -d
    ```
 
