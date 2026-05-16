@@ -18,6 +18,7 @@ import (
 	"oc-manager/internal/domain"
 	"oc-manager/internal/integrations/newapi"
 	runtimepkg "oc-manager/internal/integrations/runtime"
+	imagecoord "oc-manager/internal/runtime/imagecoord"
 	"oc-manager/internal/service"
 	"oc-manager/internal/store/sqlc"
 )
@@ -177,9 +178,12 @@ func TestAppInitializePropagatesHealthCheckError(t *testing.T) {
 	if err == nil || !strings.Contains(err.Error(), "等待 Hermes 容器健康失败") {
 		t.Fatalf("err=%v", err)
 	}
-	// 5 阶段化后,每阶段进入前会推进 status;原 "statusSet=false" 等价于
-	// "终态不是 binding_waiting"。Task 5.5 重写时改为表驱动断言精确的 last_error_status。
-	require.NotEqual(t, domain.AppStatusBindingWaiting, store.app.Status)
+	// 健康检查在 phaseStart 中失败:MarkAppFailed 被调用,last_error_status 记为 starting,
+	// app.status 收敛到 error。
+	require.True(t, store.failedSet, "健康检查失败应触发 MarkAppFailed")
+	require.True(t, store.lastFailed.LastErrorStatus.Valid)
+	assert.Equal(t, domain.AppStatusStarting, store.lastFailed.LastErrorStatus.String)
+	assert.Equal(t, domain.AppStatusError, store.app.Status)
 }
 
 // TestAppInitializeIsIdempotentForBindingWaiting 验证应用初始化保持幂等针对绑定Waiting的特殊分支或幂等场景。
@@ -226,9 +230,12 @@ func TestAppInitializePropagatesNewAPIError(t *testing.T) {
 	handler := NewAppInitializeHandler(store, &fakeImages{}, &fakeDirs{}, &fakeContainers{}, &fakeContainers{}, client, AppInitializeConfig{Cipher: testCipher(t)})
 	err := handler.Handle(context.Background(), buildJob(t, testAppID, ""))
 	require.ErrorIs(t, err, newapi.ErrUpstream)
-	// 5 阶段化后,失败前已推进过 status;等价断言改为"最终状态非 binding_waiting"。
-	// Task 5.5 重写时按表驱动检查 last_error_status=preparing_runtime。
-	require.NotEqual(t, domain.AppStatusBindingWaiting, store.app.Status)
+	// new-api 调用在 phasePrepare 内 ensureAPIKey 阶段失败:MarkAppFailed 被调用,
+	// last_error_status 记为 preparing_runtime,app.status 收敛到 error。
+	require.True(t, store.failedSet, "new-api 失败应触发 MarkAppFailed")
+	require.True(t, store.lastFailed.LastErrorStatus.Valid)
+	assert.Equal(t, domain.AppStatusPreparingRuntime, store.lastFailed.LastErrorStatus.String)
+	assert.Equal(t, domain.AppStatusError, store.app.Status)
 }
 
 // TestAppInitializePropagatesContainerError 验证应用初始化透传容器错误的错误映射或错误记录场景。
@@ -243,9 +250,12 @@ func TestAppInitializePropagatesContainerError(t *testing.T) {
 	if err == nil || !strings.Contains(err.Error(), "创建容器失败") {
 		t.Fatalf("error = %v, want 创建容器失败", err)
 	}
-	// 5 阶段化后,phase 进入时已推进 status;等价断言改为"未达到 binding_waiting"。
-	// Task 5.5 重写时按表驱动检查 last_error_status=creating_container。
-	require.NotEqual(t, domain.AppStatusBindingWaiting, store.app.Status)
+	// 容器创建在 phaseCreate 中失败:MarkAppFailed 被调用,last_error_status 记为
+	// creating_container,app.status 收敛到 error。
+	require.True(t, store.failedSet, "容器创建失败应触发 MarkAppFailed")
+	require.True(t, store.lastFailed.LastErrorStatus.Valid)
+	assert.Equal(t, domain.AppStatusCreatingContainer, store.lastFailed.LastErrorStatus.String)
+	assert.Equal(t, domain.AppStatusError, store.app.Status)
 }
 
 // TestAppInitializeRejectsInvalidPayload 验证应用初始化拒绝非法载荷的异常或拒绝路径场景。
@@ -324,6 +334,15 @@ type appInitStub struct {
 	statusSet    bool
 	containerSet bool
 	auditLogs    []sqlc.CreateAuditLogParams
+	// statusCalls 按顺序记录每次 SetAppStatus 调用参数,用于断言 5 阶段推进序列
+	// (draft → pulling_image → ... → binding_waiting)。
+	statusCalls []sqlc.SetAppStatusParams
+	// failedSet 标记 MarkAppFailed 是否被调用,用于失败路径精确断言。
+	failedSet bool
+	// lastFailed 记录最近一次 MarkAppFailed 参数,用于断言 last_error_status 写入值。
+	lastFailed sqlc.MarkAppFailedParams
+	// getOrganizationErr 让 GetOrganization 返回指定错误,用于触发 phasePrepare 失败路径。
+	getOrganizationErr error
 }
 
 func newAppInitStub(t *testing.T) *appInitStub {
@@ -347,6 +366,9 @@ func newAppInitStub(t *testing.T) *appInitStub {
 
 func (s *appInitStub) GetApp(_ context.Context, _ pgtype.UUID) (sqlc.App, error) { return s.app, nil }
 func (s *appInitStub) GetOrganization(_ context.Context, _ pgtype.UUID) (sqlc.Organization, error) {
+	if s.getOrganizationErr != nil {
+		return sqlc.Organization{}, s.getOrganizationErr
+	}
 	return s.org, nil
 }
 func (s *appInitStub) GetUser(_ context.Context, _ pgtype.UUID) (sqlc.User, error) {
@@ -374,6 +396,8 @@ func (s *appInitStub) SetAppContainer(_ context.Context, arg sqlc.SetAppContaine
 
 func (s *appInitStub) SetAppStatus(_ context.Context, arg sqlc.SetAppStatusParams) (sqlc.App, error) {
 	s.statusSet = true
+	// 按调用顺序记录每次状态切换,便于断言 5 阶段推进序列。
+	s.statusCalls = append(s.statusCalls, arg)
 	s.app.Status = arg.Status
 	return s.app, nil
 }
@@ -383,8 +407,11 @@ func (s *appInitStub) CreateAuditLog(_ context.Context, arg sqlc.CreateAuditLogP
 	return sqlc.AuditLog{TargetType: arg.TargetType, TargetID: arg.TargetID, Action: arg.Action, Result: arg.Result}, nil
 }
 
-// 以下 3 个 stub 仅为 Task 5.2 接口扩展后让现有测试编译通过；
-// 正式的进度 / 失败状态断言留到 Task 5.5 重写时新增表驱动测试覆盖。
+// 以下 3 个 stub 覆盖 AppInitializeStore 中的进度与失败语义:
+//   - SetAppProgress / ClearAppProgress:阶段切换 / Receive 触发的进度落库;
+//     测试不关心字段值,仅需让 transitionTo → FlushReset 不报错。
+//   - MarkAppFailed:阶段失败时被调用,通过 failedSet / lastFailed 让用例
+//     断言"是否进入失败路径"以及 last_error_status 写入值。
 func (s *appInitStub) SetAppProgress(_ context.Context, _ sqlc.SetAppProgressParams) (sqlc.App, error) {
 	return sqlc.App{}, nil
 }
@@ -392,7 +419,10 @@ func (s *appInitStub) ClearAppProgress(_ context.Context, _ pgtype.UUID) (sqlc.A
 	return sqlc.App{}, nil
 }
 func (s *appInitStub) MarkAppFailed(_ context.Context, p sqlc.MarkAppFailedParams) (sqlc.App, error) {
-	// 模拟真实 SQL:status 推到 error,last_error_status 记录来源 phase。
+	// 模拟真实 SQL:status 推到 error,last_error_status 记录来源 phase;
+	// 同时记录 failedSet / lastFailed,供失败路径断言使用。
+	s.failedSet = true
+	s.lastFailed = p
 	s.app.Status = domain.AppStatusError
 	s.app.LastErrorStatus = p.LastErrorStatus
 	return s.app, nil
@@ -740,4 +770,216 @@ func TestEnsureAPIKey_GetTokenFullKeyFailureRecordsAudit(t *testing.T) {
 	require.Equal(t, "newapi_call", rec.events[0].TargetType)
 	// Endpoint 应含 token ID
 	require.True(t, strings.Contains(rec.events[0].TargetID, "42"))
+}
+
+// noopImageCoordinator 满足 ImageCoordinator 接口,PullImage / SyncToNode 都立即返回 nil。
+// 用于不关心镜像阶段细节的测试用例:推 5 阶段时不让 phasePull / phaseSync 退化成 nil
+// 快路径,而是真正走 coord 分支并正常收尾。
+type noopImageCoordinator struct{}
+
+// PullImage 关闭订阅 channel 后直接返回成功;不发送任何 ProgressEvent。
+func (noopImageCoordinator) PullImage(_ context.Context, _ string, sub chan<- imagecoord.ProgressEvent) error {
+	close(sub)
+	return nil
+}
+
+// SyncToNode 关闭订阅 channel 后直接返回成功;不发送任何 ProgressEvent。
+func (noopImageCoordinator) SyncToNode(_ context.Context, _, _ string, sub chan<- imagecoord.ProgressEvent) error {
+	close(sub)
+	return nil
+}
+
+// errCoord 在指定阶段返回 error,其它阶段返回 nil。
+// pullErr 非 nil 触发 phasePull 失败,syncErr 非 nil 触发 phaseSync 失败。
+type errCoord struct {
+	pullErr error
+	syncErr error
+}
+
+// PullImage 关闭订阅 channel 后返回 pullErr(可能为 nil)。
+func (e *errCoord) PullImage(_ context.Context, _ string, sub chan<- imagecoord.ProgressEvent) error {
+	close(sub)
+	return e.pullErr
+}
+
+// SyncToNode 关闭订阅 channel 后返回 syncErr(可能为 nil)。
+func (e *errCoord) SyncToNode(_ context.Context, _, _ string, sub chan<- imagecoord.ProgressEvent) error {
+	close(sub)
+	return e.syncErr
+}
+
+// TestAppInitializeHandler_Phases_Progress 验证 5 阶段每阶段都把 status 推进一格,
+// 共 6 次 SetAppStatus(5 个 init 子状态 + binding_waiting)。
+//
+// 注入 noopImageCoordinator,使 phasePull / phaseSync 走 coord 分支但不报错;
+// 其它依赖用既有 fake stub 让 happy path 跑完。
+func TestAppInitializeHandler_Phases_Progress(t *testing.T) {
+	store := newAppInitStub(t)
+	// 起始 status=draft,模拟新建 app
+	store.app.Status = domain.AppStatusDraft
+
+	containers := &fakeContainers{result: runtimepkg.ContainerInfo{ID: "ctr-1", Name: "hermes-" + testAppID}}
+	client := &fakeNewAPI{result: newapi.APIKey{ID: 1, Key: "sk-test"}}
+	handler := NewAppInitializeHandler(store, &fakeImages{}, &fakeDirs{}, containers, containers, client, AppInitializeConfig{
+		RuntimeImage: "hermes:dev",
+		Cipher:       testCipher(t),
+	})
+	handler.SetRuntimeFileWriter(&fakeRuntimeFileWriter{})
+	handler.SetImageCoordinator(noopImageCoordinator{})
+
+	require.NoError(t, handler.Handle(context.Background(), buildJob(t, testAppID, "node-1")))
+
+	// 期望按顺序触发:pulling_image → syncing_image → preparing_runtime →
+	// creating_container → starting → binding_waiting,共 6 次状态切换。
+	wantStatuses := []string{
+		domain.AppStatusPullingImage,
+		domain.AppStatusSyncingImage,
+		domain.AppStatusPreparingRuntime,
+		domain.AppStatusCreatingContainer,
+		domain.AppStatusStarting,
+		domain.AppStatusBindingWaiting,
+	}
+	require.Len(t, store.statusCalls, len(wantStatuses), "应触发 6 次 SetAppStatus")
+	for i, want := range wantStatuses {
+		assert.Equal(t, want, store.statusCalls[i].Status, "第 %d 次状态切换应推到 %s", i+1, want)
+	}
+	// 终态应为 binding_waiting。
+	assert.Equal(t, domain.AppStatusBindingWaiting, store.app.Status)
+	// happy path 不应触发 MarkAppFailed。
+	assert.False(t, store.failedSet, "成功路径不应调用 MarkAppFailed")
+}
+
+// TestAppInitializeHandler_Phases_FailureWritesLastError 表驱动覆盖 5 阶段任一失败时
+// MarkAppFailed 把 last_error_status 写为该阶段名;同时验证 app.status 收敛到 error。
+//
+// 每条 case 通过不同 stub 让对应阶段失败:
+//   - phasePull / phaseSync 用 errCoord 模拟镜像协调失败
+//   - phasePrepare 用 store.getOrganizationErr 模拟 GetOrganization 失败
+//   - phaseCreate 用 fakeContainers.err 模拟 CreateContainer 失败
+//   - phaseStart 用 fakeContainers.startErr 模拟 StartContainer 失败
+func TestAppInitializeHandler_Phases_FailureWritesLastError(t *testing.T) {
+	cases := []struct {
+		// name 说明该 case 触发哪一阶段失败
+		name string
+		// expect 是该阶段名,期望写入 MarkAppFailed.LastErrorStatus
+		expect string
+		// build 根据 case 类型构造特定失败行为的 handler 与 store
+		build func(t *testing.T) (*AppInitializeHandler, *appInitStub)
+	}{
+		{
+			// phasePull 失败:ImageCoordinator.PullImage 返回 error
+			name:   "phasePull 失败写入 pulling_image",
+			expect: domain.AppStatusPullingImage,
+			build: func(t *testing.T) (*AppInitializeHandler, *appInitStub) {
+				s := newAppInitStub(t)
+				s.app.Status = domain.AppStatusDraft
+				h := NewAppInitializeHandler(s, &fakeImages{}, &fakeDirs{}, &fakeContainers{}, &fakeContainers{}, &fakeNewAPI{result: newapi.APIKey{ID: 1, Key: "k"}}, AppInitializeConfig{Cipher: testCipher(t)})
+				h.SetRuntimeFileWriter(&fakeRuntimeFileWriter{})
+				h.SetImageCoordinator(&errCoord{pullErr: errors.New("pull failed")})
+				return h, s
+			},
+		},
+		{
+			// phaseSync 失败:SyncToNode 返回 error
+			name:   "phaseSync 失败写入 syncing_image",
+			expect: domain.AppStatusSyncingImage,
+			build: func(t *testing.T) (*AppInitializeHandler, *appInitStub) {
+				s := newAppInitStub(t)
+				s.app.Status = domain.AppStatusDraft
+				h := NewAppInitializeHandler(s, &fakeImages{}, &fakeDirs{}, &fakeContainers{}, &fakeContainers{}, &fakeNewAPI{result: newapi.APIKey{ID: 1, Key: "k"}}, AppInitializeConfig{Cipher: testCipher(t)})
+				h.SetRuntimeFileWriter(&fakeRuntimeFileWriter{})
+				h.SetImageCoordinator(&errCoord{syncErr: errors.New("sync failed")})
+				return h, s
+			},
+		},
+		{
+			// phasePrepare 失败:GetOrganization 返回 error
+			name:   "phasePrepare 失败写入 preparing_runtime",
+			expect: domain.AppStatusPreparingRuntime,
+			build: func(t *testing.T) (*AppInitializeHandler, *appInitStub) {
+				s := newAppInitStub(t)
+				s.app.Status = domain.AppStatusDraft
+				s.getOrganizationErr = errors.New("org lookup failed")
+				h := NewAppInitializeHandler(s, &fakeImages{}, &fakeDirs{}, &fakeContainers{}, &fakeContainers{}, &fakeNewAPI{result: newapi.APIKey{ID: 1, Key: "k"}}, AppInitializeConfig{Cipher: testCipher(t)})
+				h.SetRuntimeFileWriter(&fakeRuntimeFileWriter{})
+				h.SetImageCoordinator(noopImageCoordinator{})
+				return h, s
+			},
+		},
+		{
+			// phaseCreate 失败:CreateContainer 返回 error
+			name:   "phaseCreate 失败写入 creating_container",
+			expect: domain.AppStatusCreatingContainer,
+			build: func(t *testing.T) (*AppInitializeHandler, *appInitStub) {
+				s := newAppInitStub(t)
+				s.app.Status = domain.AppStatusDraft
+				containers := &fakeContainers{err: errors.New("create failed")}
+				h := NewAppInitializeHandler(s, &fakeImages{}, &fakeDirs{}, containers, containers, &fakeNewAPI{result: newapi.APIKey{ID: 1, Key: "k"}}, AppInitializeConfig{Cipher: testCipher(t)})
+				h.SetRuntimeFileWriter(&fakeRuntimeFileWriter{})
+				h.SetImageCoordinator(noopImageCoordinator{})
+				return h, s
+			},
+		},
+		{
+			// phaseStart 失败:StartContainer 返回 error
+			name:   "phaseStart 失败写入 starting",
+			expect: domain.AppStatusStarting,
+			build: func(t *testing.T) (*AppInitializeHandler, *appInitStub) {
+				s := newAppInitStub(t)
+				s.app.Status = domain.AppStatusDraft
+				containers := &fakeContainers{
+					result:   runtimepkg.ContainerInfo{ID: "ctr-1", Name: "hermes-" + testAppID},
+					startErr: errors.New("start failed"),
+				}
+				h := NewAppInitializeHandler(s, &fakeImages{}, &fakeDirs{}, containers, containers, &fakeNewAPI{result: newapi.APIKey{ID: 1, Key: "k"}}, AppInitializeConfig{Cipher: testCipher(t)})
+				h.SetRuntimeFileWriter(&fakeRuntimeFileWriter{})
+				h.SetImageCoordinator(noopImageCoordinator{})
+				return h, s
+			},
+		},
+	}
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			h, s := c.build(t)
+			err := h.Handle(context.Background(), buildJob(t, testAppID, "node-1"))
+			require.Error(t, err, "失败 stub 应返回 error")
+			// MarkAppFailed 必须被调用,LastErrorStatus 应等于 case 期望阶段。
+			require.True(t, s.failedSet, "MarkAppFailed 应被调用")
+			require.True(t, s.lastFailed.LastErrorStatus.Valid)
+			assert.Equal(t, c.expect, s.lastFailed.LastErrorStatus.String)
+			// 终态应收敛到 error。
+			assert.Equal(t, domain.AppStatusError, s.app.Status)
+		})
+	}
+}
+
+// TestAppInitializeHandler_IdempotentReentry 模拟 manager 在前次 init 跑到容器创建之后
+// 才崩溃 / 重启;reaper 把 status 重置回 draft 入口重跑(状态机仅允许 draft / error →
+// pulling_image 这两条入口),但 container_id 已写入数据库。
+// 此时 Handle 重入应:
+//   - 把状态从 draft 逐阶段推到 binding_waiting,共 6 次 SetAppStatus;
+//   - phaseCreate 看到 container_id 已存在,跳过 CreateContainer 不重复创建容器。
+func TestAppInitializeHandler_IdempotentReentry(t *testing.T) {
+	store := newAppInitStub(t)
+	// app 起始 draft + container_id 已存在,模拟 reaper 重置 status 但保留 container_id。
+	store.app.Status = domain.AppStatusDraft
+	store.app.ContainerID = pgtype.Text{String: "cid-1", Valid: true}
+
+	containers := &fakeContainers{result: runtimepkg.ContainerInfo{ID: "ctr-1", Name: "hermes-" + testAppID}}
+	client := &fakeNewAPI{result: newapi.APIKey{ID: 1, Key: "k"}}
+	handler := NewAppInitializeHandler(store, &fakeImages{}, &fakeDirs{}, containers, containers, client, AppInitializeConfig{
+		RuntimeImage: "hermes:dev",
+		Cipher:       testCipher(t),
+	})
+	handler.SetRuntimeFileWriter(&fakeRuntimeFileWriter{})
+	handler.SetImageCoordinator(noopImageCoordinator{})
+
+	require.NoError(t, handler.Handle(context.Background(), buildJob(t, testAppID, "node-1")))
+
+	// container_id 已存在,phaseCreate 必须跳过 CreateContainer。
+	assert.Equal(t, 0, containers.calls, "container_id 已存在不应再创建")
+	// 终态应推进到 binding_waiting。
+	assert.Equal(t, domain.AppStatusBindingWaiting, store.app.Status)
+	// 不应触发失败。
+	assert.False(t, store.failedSet)
 }
