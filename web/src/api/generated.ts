@@ -5971,6 +5971,16 @@ export interface components {
             progress_current?: number;
             /** @description ProgressTotal 当前 status 阶段的总量;0 或缺省时前端展示为不定进度。 */
             progress_total?: number;
+            /**
+             * @description RuntimeImageRef 是 phasePullRuntimeImage 拉取的镜像引用（如 ghcr.io/foo/hermes:v1.2.3）。
+             *     仅平台管理员可见，用于运维排障和版本溯源。
+             */
+            runtime_image_ref?: string;
+            /**
+             * @description RuntimeImageSha256 是 docker inspect 返回的镜像 config digest（sha256:...）。
+             *     仅平台管理员可见；与 RuntimeImageRef 共同标识节点上运行的精确镜像版本。
+             */
+            runtime_image_sha256?: string;
             runtime_node_id?: string;
             status?: string;
         };
