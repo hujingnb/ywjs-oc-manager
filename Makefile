@@ -1,4 +1,8 @@
-.PHONY: dev-up dev-down test vet build sqlc-generate migrate-up migrate-down check-compose logs web-test web-typecheck web-build build-hermes-runtime verify-hermes-runtime debug-ollama debug-newapi newapi-probe seed-e2e smoke-v102 openapi-gen web-types-gen openapi-check
+.PHONY: dev-up dev-down test vet build sqlc-generate migrate-up migrate-down check-compose logs web-test web-typecheck web-build build-hermes-runtime verify-hermes-runtime debug-ollama debug-newapi newapi-probe seed-e2e smoke-v102 openapi-gen web-types-gen openapi-check ssh-manager ssh-agent1
+
+# 加载 .env（-include 在文件不存在时静默跳过，不报错）。
+# docker compose 会自动读取 .env，Makefile 显式 include 是为了让 SSH 等 target 也能访问其中变量。
+-include .env
 
 SWAG_VERSION := v2.0.0-rc5
 OPENAPI_TS_VERSION := 7.13.0
@@ -171,3 +175,22 @@ openapi-check: openapi-gen ## 校验 yaml 是否与代码同步（git 工作区�
 	@git diff --exit-code openapi/openapi.yaml \
 		|| (echo "❌ openapi/openapi.yaml 与代码不同步，请跑 make openapi-gen 并 commit"; exit 1)
 	@echo "✅ openapi.yaml 与代码同步"
+
+##@ 运维 SSH
+
+# ssh-manager 直接 SSH 到 manager 公网 IP，端口和密码从 .env 读取。
+ssh-manager: ## SSH 连接线上 manager 服务器（需 .env 中配置 PROD_MANAGER_SSH_* 变量）
+	sshpass -p "$(PROD_MANAGER_SSH_PASS)" ssh \
+		-p $(PROD_MANAGER_SSH_PORT) \
+		-o StrictHostKeyChecking=no \
+		-t $(PROD_MANAGER_SSH_USER)@$(PROD_MANAGER_SSH_HOST) \
+		"cd /opt/oc-manage && exec bash -l"
+
+# ssh-agent1 无法直接访问，先以 manager 为跳板通过内网连接 agent-1。
+# ProxyCommand 负责建立到 manager 的 SSH 隧道，外层 sshpass 再认证 agent-1。
+ssh-agent1: ## SSH 连接线上 agent-1（经由 manager 内网跳转，需 .env 中配置 PROD_MANAGER_SSH_* 和 PROD_AGENT1_SSH_* 变量）
+	sshpass -p "$(PROD_AGENT1_SSH_PASS)" ssh \
+		-o StrictHostKeyChecking=no \
+		-o "ProxyCommand=sshpass -p '$(PROD_MANAGER_SSH_PASS)' ssh -W %h:%p -p $(PROD_MANAGER_SSH_PORT) -o StrictHostKeyChecking=no $(PROD_MANAGER_SSH_USER)@$(PROD_MANAGER_SSH_HOST)" \
+		-t $(PROD_AGENT1_SSH_USER)@$(PROD_AGENT1_SSH_HOST) \
+		"cd /opt/runtime-agent && exec bash -l"
