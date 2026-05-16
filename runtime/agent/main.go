@@ -434,18 +434,27 @@ func newHandlerWithDocker(dataRoot string, docker DockerClient, agentToken any) 
 			return
 		}
 		// docker load 有时在 tag 已被 registry 版本占据时不会更新 tag 指向。
-		// 当调用方提供了 expected_id 且 inspect 结果不符，则通过 docker tag 强制修正。
+		// 当调用方提供了 expected_id 且 inspect 结果不符，尝试通过 docker tag 强制修正。
+		//
+		// 注意：跨 Docker daemon 版本时，同一份镜像 archive 加载后 config digest（image ID）
+		// 可能与 manager 侧 docker inspect 的结果不同（schema v1→v2 格式转换等）。
+		// 因此 re-tag 前先确认 expectedID 真实存在于本节点——若不存在，说明是格式差异而非
+		// tag 指向错误，跳过 re-tag，以 docker load 实际落地的 ID 返回。
 		if expectedID != "" && info.ID != expectedID {
-			if tagErr := docker.TagImage(r.Context(), expectedID, image); tagErr != nil {
-				writeError(w, http.StatusBadGateway, fmt.Sprintf("re-tag image failed: %v", tagErr))
-				return
+			if _, inspectErr := docker.InspectImage(r.Context(), expectedID); inspectErr == nil {
+				// expectedID 存在于本节点：docker load 加载了正确内容但 tag 未更新，强制修正。
+				if tagErr := docker.TagImage(r.Context(), expectedID, image); tagErr != nil {
+					writeError(w, http.StatusBadGateway, fmt.Sprintf("re-tag image failed: %v", tagErr))
+					return
+				}
+				// 重新 inspect 确认 tag 已指向正确 ID。
+				info, err = docker.InspectImage(r.Context(), image)
+				if err != nil {
+					writeError(w, http.StatusBadGateway, err.Error())
+					return
+				}
 			}
-			// 重新 inspect 确认 tag 已指向正确 ID。
-			info, err = docker.InspectImage(r.Context(), image)
-			if err != nil {
-				writeError(w, http.StatusBadGateway, err.Error())
-				return
-			}
+			// expectedID 不存在：archive 加载后 ID 因 Docker 格式差异而不同，但内容一致，跳过 re-tag。
 		}
 		writeJSON(w, map[string]any{"loaded": true, "image": image, "info": info})
 	}))

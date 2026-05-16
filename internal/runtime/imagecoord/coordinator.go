@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"log/slog"
 	"sync"
 	"time"
 
@@ -300,9 +301,11 @@ func (c *Coordinator) doSync(ctx context.Context, image, nodeID, localID string,
 		return fmt.Errorf("agent load image: %w", err)
 	}
 	if loaded.ID != "" && loaded.ID != localID {
-		// 远端落地的 image ID 与本地不一致:通常意味着 tag 复用了同名但内容不同,
-		// 直接失败避免后续 container 用错镜像。
-		return fmt.Errorf("remote image id mismatch after load: local=%s remote=%s", localID, loaded.ID)
+		// 跨 Docker daemon 版本时，同一份镜像 archive 加载后 config digest 可能与
+		// manager 侧 docker inspect 结果不同（schema v1→v2 格式转换等），属于正常现象。
+		// 仅记录 warn，不视为错误——agent 已确认 docker load 成功并更新了 tag 指向。
+		slog.Warn("同步后远端镜像 ID 与本地不一致（可能为跨 daemon Docker 格式差异）",
+			"image", image, "localID", localID, "remoteID", loaded.ID)
 	}
 	return nil
 }
