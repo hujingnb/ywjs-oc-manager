@@ -5950,6 +5950,8 @@ export interface components {
             container_id?: string;
             description?: string;
             id?: string;
+            /** @description LastErrorMessage 上次进入 error 时的错误原始文本;供前端直接展示给用户。 */
+            last_error_message?: string;
             /** @description LastErrorStatus 上次进入 error 时所在的状态值;前端用 formatAppStatus 转中文文案。 */
             last_error_status?: string;
             model_id?: string;

@@ -130,11 +130,12 @@ WHERE id = $1
 RETURNING *;
 
 -- name: MarkAppFailed :one
--- 任意状态 → error 时同时写入来源状态，保留“在哪一步失败”语义。
+-- 任意状态 → error 时同时写入来源状态与错误文本，保留”在哪一步失败”与”为什么失败”语义。
 -- last_error_status 不加 CHECK 约束，值由调用方在 Go 层负责合法性。
 UPDATE apps
 SET status = 'error',
     last_error_status = $2,
+    last_error_message = $3,
     progress_current = NULL,
     progress_total = NULL,
     updated_at = now()

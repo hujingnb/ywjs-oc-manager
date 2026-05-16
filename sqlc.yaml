@@ -18,6 +18,7 @@ sql:
       - internal/migrations/000015_app_model_governance.up.sql
       - internal/migrations/000016_runtime_to_hermes.up.sql
       - internal/migrations/000017_app_progress_fields.up.sql
+      - internal/migrations/000018_app_last_error_message.up.sql
     queries: internal/store/queries
     gen:
       go:

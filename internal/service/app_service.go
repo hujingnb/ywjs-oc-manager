@@ -81,6 +81,8 @@ type AppResult struct {
 	ProgressTotal int64 `json:"progress_total,omitempty"`
 	// LastErrorStatus 上次进入 error 时所在的状态值;前端用 formatAppStatus 转中文文案。
 	LastErrorStatus string `json:"last_error_status,omitempty"`
+	// LastErrorMessage 上次进入 error 时的错误原始文本;供前端直接展示给用户。
+	LastErrorMessage string `json:"last_error_message,omitempty"`
 }
 
 // AppModelUpdateResult 是修改实例模型后的响应；App 字段返回已保存的新模型视图。
@@ -295,5 +297,6 @@ func toAppResult(app sqlc.App) AppResult {
 	result.ProgressCurrent = app.ProgressCurrent.Int64
 	result.ProgressTotal = app.ProgressTotal.Int64
 	result.LastErrorStatus = app.LastErrorStatus.String
+	result.LastErrorMessage = app.LastErrorMessage.String
 	return result
 }

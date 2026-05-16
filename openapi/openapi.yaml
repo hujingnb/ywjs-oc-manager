@@ -432,6 +432,9 @@ components:
           type: string
         id:
           type: string
+        last_error_message:
+          description: LastErrorMessage 上次进入 error 时的错误原始文本;供前端直接展示给用户。
+          type: string
         last_error_status:
           description: LastErrorStatus 上次进入 error 时所在的状态值;前端用 formatAppStatus 转中文文案。
           type: string

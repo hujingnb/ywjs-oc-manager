@@ -323,12 +323,14 @@ func (h *AppInitializeHandler) transitionTo(ctx context.Context, app *sqlc.App, 
 	return nil
 }
 
-// markFailed 把 status 推到 error,同时写入来源 phase 到 last_error_status。
+// markFailed 把 status 推到 error,同时写入来源 phase 与错误文本，
+// 让前端能展示"在哪一步失败"和"为什么失败"两层信息。
 // 即便写库失败也返回原 cause,避免吞掉真实错误。
 func (h *AppInitializeHandler) markFailed(ctx context.Context, app *sqlc.App, phase string, cause error) error {
 	if _, err := h.store.MarkAppFailed(ctx, sqlc.MarkAppFailedParams{
-		ID:              app.ID,
-		LastErrorStatus: pgtype.Text{String: phase, Valid: true},
+		ID:               app.ID,
+		LastErrorStatus:  pgtype.Text{String: phase, Valid: true},
+		LastErrorMessage: pgtype.Text{String: cause.Error(), Valid: true},
 	}); err != nil {
 		return fmt.Errorf("%w (写入失败状态也失败: %v)", cause, err)
 	}

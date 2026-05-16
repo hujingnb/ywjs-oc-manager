@@ -32,9 +32,10 @@
             {{ formatBytes(app.progress_current) }} / {{ formatBytes(app.progress_total) }}
           </span>
         </div>
-        <!-- error 状态附加显示最近失败阶段的中文文案,辅助用户判断在哪一步出错 -->
+        <!-- error 状态附加显示最近失败阶段的中文文案及具体错误原因 -->
         <div v-if="app.status === 'error' && app.last_error_status" class="init-failure">
-          在「{{ formatAppStatus(app.last_error_status).label }}」阶段失败
+          <span>在「{{ formatAppStatus(app.last_error_status).label }}」阶段失败</span>
+          <span v-if="app.last_error_message" class="init-failure-reason">{{ app.last_error_message }}</span>
         </div>
       </n-descriptions-item>
       <n-descriptions-item label="API key">
@@ -299,5 +300,14 @@ async function onUpdateModel() {
   margin-top: 4px;
   color: var(--error-color, #d03050);
   font-size: 13px;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+/* 具体错误原因用更小字号和低透明度,区别于阶段标题 */
+.init-failure-reason {
+  font-size: 12px;
+  opacity: 0.8;
+  word-break: break-all;
 }
 </style>

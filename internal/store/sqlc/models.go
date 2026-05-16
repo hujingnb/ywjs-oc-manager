@@ -45,6 +45,8 @@ type App struct {
 	ProgressTotal pgtype.Int8 `db:"progress_total" json:"progress_total"`
 	// 上次进入 error 时所在的状态值;进入 error 时写入,重新发起对应转移时清空。不加 CHECK,靠应用层在写入时校验。
 	LastErrorStatus pgtype.Text `db:"last_error_status" json:"last_error_status"`
+	// 上次进入 error 时的错误消息；进入 error 时写入，重新发起对应转移时清空。
+	LastErrorMessage pgtype.Text `db:"last_error_message" json:"last_error_message"`
 }
 
 // 审计日志表，记录关键操作、结果和错误信息；普通业务 API 不允许修改或删除。
