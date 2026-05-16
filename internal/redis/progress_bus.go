@@ -12,8 +12,8 @@ import (
 // 不与任何真实 status 值冲突。
 const PhaseDone = "__done__"
 
-// ProgressEvent 是镜像 pull / sync 期间 leader 广播给 follower 的进度。
-// Phase 取值:"pulling_image" / "syncing_image" / PhaseDone(完成哨兵)。
+// ProgressEvent 是镜像拉取期间 leader 广播给 follower 的进度。
+// Phase 取值:"pulling_runtime_image" / PhaseDone(完成哨兵)。
 // Total=0 表示未知,前端展示为不定进度。
 type ProgressEvent struct {
 	Phase   string `json:"phase"`

@@ -274,12 +274,12 @@ func (s *RuntimeOperationService) Trigger(ctx context.Context, principal auth.Pr
 // RequestInitialize 触发应用初始化重试。
 //
 // 仅当应用 status ∈ {error, draft} 时允许；其它状态返回 ErrAppNotReinitializable。
-// 重置四个字段保证 worker handler 重新走完整 5 阶段流程：
-//   - status = pulling_image：worker 直接进入第一阶段(pull image),不再停在 draft
-//     等 onboarding 拾取;状态机允许 error / draft → pulling_image。
+// 重置四个字段保证 worker handler 重新走完整 4 阶段流程：
+//   - status = pulling_runtime_image：worker 直接进入第一阶段，不再停在 draft
+//     等 onboarding 拾取；状态机允许 error / draft → pulling_runtime_image。
 //   - api_key_status = pending：worker 重新调用 new-api 创建 token；
 //   - container_id = NULL：worker 重新创建容器，避免旧容器残留；
-//   - progress_current / progress_total = NULL：清空上一次失败遗留的进度数,
+//   - progress_current / progress_total = NULL：清空上一次失败遗留的进度数，
 //     前端从全新状态开始展示。
 //
 // 重置不在事务中——worker 自身有状态机校验和幂等处理；即便重置过程中崩溃，
@@ -305,9 +305,9 @@ func (s *RuntimeOperationService) RequestInitialize(ctx context.Context, princip
 	if app.Status != domain.AppStatusError && app.Status != domain.AppStatusDraft {
 		return RuntimeOperationResult{}, ErrAppNotReinitializable
 	}
-	// 重置目标改为 pulling_image:worker 直接从第一阶段(pull)开始重跑,
-	// 不再回到 draft 等待 onboarding 拾取。状态机已允许 error / draft → pulling_image。
-	if _, err := s.store.SetAppStatus(ctx, sqlc.SetAppStatusParams{ID: app.ID, Status: domain.AppStatusPullingImage}); err != nil {
+	// 重置目标为 pulling_runtime_image：worker 直接从第一阶段开始重跑，
+	// 不再回到 draft 等待 onboarding 拾取。状态机已允许 error / draft → pulling_runtime_image。
+	if _, err := s.store.SetAppStatus(ctx, sqlc.SetAppStatusParams{ID: app.ID, Status: domain.AppStatusPullingRuntimeImage}); err != nil {
 		return RuntimeOperationResult{}, fmt.Errorf("重置应用状态失败: %w", err)
 	}
 	// 清空 progress_*,避免前端看到上一次失败遗留的进度数;ClearAppProgress

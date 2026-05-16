@@ -18,14 +18,10 @@ const (
 	// AppStatus* 描述应用生命周期，合法转移由 app_state_machine.go 维护。
 	// init 子状态对应 worker 初始化阶段；前端按 status 直接展示当前阶段。
 	AppStatusDraft = "draft"
-	// AppStatusPullingRuntimeImage 替代 pulling_image + syncing_image 两阶段；
-	// 由 phasePullRuntimeImage 驱动，让每个 agent 直接从公网 registry 拉取 hermes 镜像。
+	// AppStatusPullingRuntimeImage 由 phasePullRuntimeImage 驱动，
+	// 让每个 agent 直接从公网 registry 拉取 hermes 镜像。
 	AppStatusPullingRuntimeImage = "pulling_runtime_image"
-	// AppStatusPullingImage 和 AppStatusSyncingImage 保留枚举值以维持历史数据兼容；
-	// 新部署不再进入这两个状态。
-	AppStatusPullingImage      = "pulling_image"
-	AppStatusSyncingImage      = "syncing_image"
-	AppStatusPreparingRuntime  = "preparing_runtime"
+	AppStatusPreparingRuntime    = "preparing_runtime"
 	AppStatusCreatingContainer = "creating_container"
 	AppStatusStarting          = "starting"
 	AppStatusBindingWaiting    = "binding_waiting"
@@ -109,8 +105,6 @@ var (
 	validAppStatuses = set(
 		AppStatusDraft,
 		AppStatusPullingRuntimeImage,
-		AppStatusPullingImage,
-		AppStatusSyncingImage,
 		AppStatusPreparingRuntime,
 		AppStatusCreatingContainer,
 		AppStatusStarting,

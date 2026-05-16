@@ -100,8 +100,8 @@ func TestRequestInitialize_HappyPathFromError(t *testing.T) {
 	require.NoError(t, err)
 	require.NotEmpty(t, result.JobID)
 	require.Equal(t, RuntimeOperation("initialize"), result.Operation)
-	// 重置目标由 draft 改为 pulling_image,worker 直接进入第一阶段重跑(5.6)。
-	require.Equal(t, domain.AppStatusPullingImage, store.app.Status)
+	// 重置目标为 pulling_runtime_image，worker 直接从第一阶段开始重跑。
+	require.Equal(t, domain.AppStatusPullingRuntimeImage, store.app.Status)
 	require.Equal(t, domain.APIKeyStatusPending, store.app.ApiKeyStatus)
 	require.False(t, store.app.ContainerID.Valid)
 	// 5.6 新增:ClearAppProgress 必须被调用,否则前端会看到上一次失败遗留的进度数。

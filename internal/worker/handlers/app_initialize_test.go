@@ -329,8 +329,8 @@ type appInitStub struct {
 	statusSet    bool
 	containerSet bool
 	auditLogs    []sqlc.CreateAuditLogParams
-	// statusCalls 按顺序记录每次 SetAppStatus 调用参数,用于断言 5 阶段推进序列
-	// (draft → pulling_image → ... → binding_waiting)。
+	// statusCalls 按顺序记录每次 SetAppStatus 调用参数,用于断言 4 阶段推进序列
+	// (draft → pulling_runtime_image → ... → binding_waiting)。
 	statusCalls []sqlc.SetAppStatusParams
 	// failedSet 标记 MarkAppFailed 是否被调用,用于失败路径精确断言。
 	failedSet bool
@@ -904,10 +904,9 @@ func TestAppInitializeHandler_Phases_FailureWritesLastError(t *testing.T) {
 }
 
 // TestAppInitializeHandler_IdempotentReentry 模拟 manager 在前次 init 跑到容器创建之后
-// 才崩溃 / 重启;reaper 把 status 重置回 draft 入口重跑(状态机仅允许 draft / error →
-// pulling_image 这两条入口),但 container_id 已写入数据库。
-// 此时 Handle 重入应:
-//   - 把状态从 draft 逐阶段推到 binding_waiting,共 6 次 SetAppStatus;
+// 才崩溃 / 重启;reaper 把 status 重置回 pulling_runtime_image 重跑,但 container_id
+// 已写入数据库。此时 Handle 重入应:
+//   - 把状态从 draft 逐阶段推到 binding_waiting,共 5 次 SetAppStatus;
 //   - phaseCreate 看到 container_id 已存在,跳过 CreateContainer 不重复创建容器。
 func TestAppInitializeHandler_IdempotentReentry(t *testing.T) {
 	store := newAppInitStub(t)

@@ -388,7 +388,7 @@ const listStaleInits = `-- name: ListStaleInits :many
 SELECT id, runtime_node_id, status
 FROM apps
 WHERE deleted_at IS NULL
-  AND status IN ('pulling_runtime_image','pulling_image','syncing_image','preparing_runtime','creating_container','starting')
+  AND status IN ('pulling_runtime_image','preparing_runtime','creating_container','starting')
   AND updated_at < $1
 ORDER BY id
 `

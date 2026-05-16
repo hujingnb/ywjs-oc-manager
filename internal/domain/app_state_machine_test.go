@@ -60,15 +60,15 @@ func TestIsAppTransitionAllowed_IllegalTransitions(t *testing.T) {
 		from string
 		to   string
 	}{
-		// 跳阶段：worker 不能从 pulling 直接跳过 sync 进入 preparing。
-		{"跳过 sync 阶段", AppStatusPullingImage, AppStatusPreparingRuntime},
+		// 跳阶段：worker 不能从 draft 直接跨阶段进 creating_container。
+		{"跳过中间阶段", AppStatusDraft, AppStatusCreatingContainer},
 		// 不能从 running 回退到 init 子状态，避免运行中被误置为初始化阶段。
-		{"running 不能回退到 init", AppStatusRunning, AppStatusPullingImage},
+		{"running 不能回退到 init", AppStatusRunning, AppStatusPullingRuntimeImage},
 		// 同状态原地转移视为非法，避免 worker 重复触发副作用。
-		{"同状态原地转移", AppStatusPullingImage, AppStatusPullingImage},
+		{"同状态原地转移", AppStatusPullingRuntimeImage, AppStatusPullingRuntimeImage},
 		// 进入 deleted 必须从 error 出发，确保走 SoftDeleteApp 流程。
 		{"running 不能直接 → deleted", AppStatusRunning, AppStatusDeleted},
-		// draft 只能进 pulling_image，不能直接跨阶段进 binding_waiting。
+		// draft 只能进 pulling_runtime_image，不能直接跨阶段进 binding_waiting。
 		{"draft 不能直接 → binding_waiting", AppStatusDraft, AppStatusBindingWaiting},
 		// 锁住"deleted 终态不可自循环"+ "from==to 守卫顺序"两个约束。
 		// 守卫被改回到 deleted 分支之后会让 (deleted,deleted) 漏掉，这条 case 提供 fail-fast 保护。
@@ -96,14 +96,13 @@ func TestEnsureAppTransitionWraps(t *testing.T) {
 func TestAppIsTerminalOnlyDeleted(t *testing.T) {
 	// deleted 是唯一终态：deleted_at 字段非空即认为已删，状态机不再允许离开。
 	require.True(t, AppIsTerminal(AppStatusDeleted))
-	// 其他状态（含 error / 5 个 init 子状态 / running / stopped）都仍可经状态机回到运行态。
+	// 其他状态（含 error / 4 个 init 子状态 / running / stopped）都仍可经状态机回到运行态。
 	for _, status := range []string{
 		AppStatusError,
 		AppStatusRunning,
 		AppStatusStopped,
 		AppStatusDraft,
-		AppStatusPullingImage,
-		AppStatusSyncingImage,
+		AppStatusPullingRuntimeImage,
 		AppStatusPreparingRuntime,
 		AppStatusCreatingContainer,
 		AppStatusStarting,
@@ -163,8 +162,8 @@ func TestAppTransition_PullingRuntimeImage(t *testing.T) {
 	assert.True(t, IsAppTransitionAllowed(AppStatusPullingRuntimeImage, AppStatusError))
 	// error → pulling_runtime_image：重试入口
 	assert.True(t, IsAppTransitionAllowed(AppStatusError, AppStatusPullingRuntimeImage))
-	// pulling_runtime_image 不能直接到 syncing_image（旧路径已废弃）
-	assert.False(t, IsAppTransitionAllowed(AppStatusPullingRuntimeImage, AppStatusSyncingImage))
+	// pulling_runtime_image 不能直接跳到 creating_container（必须经过 preparing_runtime）
+	assert.False(t, IsAppTransitionAllowed(AppStatusPullingRuntimeImage, AppStatusCreatingContainer))
 	// IsAppStatus 应识别新状态
 	assert.True(t, IsAppStatus(AppStatusPullingRuntimeImage))
 }
