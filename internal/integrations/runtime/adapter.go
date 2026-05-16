@@ -9,7 +9,6 @@ import (
 	"time"
 
 	"oc-manager/internal/integrations/agent"
-	"oc-manager/internal/runtime/imagesync"
 )
 
 // ContainerSpec 描述需要在 runtime node 上启动的容器参数。
@@ -34,6 +33,12 @@ type ContainerSpec struct {
 	// 子目录下执行 terminal / file 工具,生成的文件被 manager workspace API
 	// 自动识别;否则 hermes 进程 cwd 是镜像的 /root,文件会落到不在挂载点的位置。
 	WorkingDir string
+	// RestartPolicy 是 Docker 容器重启策略；常用值：
+	//   "always"         — 无论退出码总是重启，适合生产长驻服务；
+	//   "on-failure"     — 非零退出码才重启；
+	//   "unless-stopped" — 除非被 docker stop 否则总是重启；
+	//   ""               — 不设置，使用 docker 默认（no 策略）。
+	RestartPolicy string
 }
 
 // VolumeMount 描述容器卷挂载。
@@ -107,10 +112,9 @@ type FileEntry = agent.FileEntry
 type FileListing = agent.FileListing
 
 // Adapter 是 manager 调用 runtime agent 的统一入口。
-// 它封装了 Docker 容器生命周期、文件操作和镜像同步三类能力，
+// 它封装了 Docker 容器生命周期和文件操作两类能力，
 // 便于上层 worker handler 依赖单一接口完成 app_initialize、运行操作和工作目录代理等任务。
 type Adapter interface {
-	EnsureImage(ctx context.Context, nodeID, image string) (imagesync.SyncResult, error)
 	CreateContainer(ctx context.Context, nodeID string, spec ContainerSpec) (ContainerInfo, error)
 	StartContainer(ctx context.Context, nodeID, containerID string) error
 	StopContainer(ctx context.Context, nodeID, containerID string) error

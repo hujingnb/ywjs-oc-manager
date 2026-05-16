@@ -25,8 +25,6 @@ import (
 	"oc-manager/internal/integrations/hermes"
 	"oc-manager/internal/integrations/newapi"
 	"oc-manager/internal/integrations/runtime"
-	"oc-manager/internal/runtime/imagecoord"
-	"oc-manager/internal/runtime/imagesync"
 	"oc-manager/internal/service"
 	"oc-manager/internal/store"
 	"oc-manager/internal/store/sqlc"
@@ -44,7 +42,6 @@ type nodeQueries interface {
 // 同时实现了：
 //   - runtime.AgentResolver（FileClient）
 //   - runtime.DockerClientResolver / channel.DockerClientResolver（DockerClient）
-//   - imagesync.AgentImageClient（InspectImage/LoadImage）
 //
 // 之所以聚合到一个类型：每次都要先按 nodeID 查 runtime_node 行 + 取 token resolver，
 // 散到多个类型只会重复样板代码。
@@ -393,68 +390,6 @@ func (r *hermesConfigRefresher) uploadSkillScope(ctx context.Context, nodeID, ap
 		}
 		return nil
 	})
-}
-
-// InspectImage 适配 imagesync.AgentImageClient 接口。
-func (n *nodeClientResolver) InspectImage(ctx context.Context, nodeID, image string) (imagesync.RemoteImageInfo, error) {
-	node, token, err := n.lookupNode(ctx, nodeID)
-	if err != nil {
-		return imagesync.RemoteImageInfo{}, err
-	}
-	inner := imagesync.AgentHTTPClient{
-		BaseURL: node.AgentFileEndpoint.String,
-		Token:   token,
-	}
-	// 镜像 inspect 是小请求，ctx 已提供超时保障，不再叠加 http.Client.Timeout。
-	inner.HTTPClient, err = n.agentHTTPClient(node, 0)
-	if err != nil {
-		return imagesync.RemoteImageInfo{}, err
-	}
-	return inner.InspectImage(ctx, nodeID, image)
-}
-
-// LoadImage 适配 imagesync.AgentImageClient 接口。
-func (n *nodeClientResolver) LoadImage(ctx context.Context, nodeID, image, expectedID string, archive io.Reader) (imagesync.RemoteImageInfo, error) {
-	node, token, err := n.lookupNode(ctx, nodeID)
-	if err != nil {
-		return imagesync.RemoteImageInfo{}, err
-	}
-	inner := imagesync.AgentHTTPClient{
-		BaseURL: node.AgentFileEndpoint.String,
-		Token:   token,
-	}
-	// 镜像 load 是大流式上传（tar 包可达数百 MB），0 表示不设 http.Client.Timeout，
-	// 由调用方 ctx 控制截止时间，避免触发 "Client.Timeout exceeded while awaiting headers"。
-	inner.HTTPClient, err = n.agentHTTPClient(node, 0)
-	if err != nil {
-		return imagesync.RemoteImageInfo{}, err
-	}
-	return inner.LoadImage(ctx, nodeID, image, expectedID, archive)
-}
-
-// agentClientAdapter 把 imagesync.AgentImageClient 适配成 imagecoord.AgentImageClient。
-// 两接口形态完全一致,差别只在 RemoteImageInfo 所属包;独立 adapter 让
-// imagecoord 包不必反向 import imagesync,保留单向依赖。
-type agentClientAdapter struct {
-	inner imagesync.AgentImageClient
-}
-
-// InspectImage 透传到 inner,只做 RemoteImageInfo 类型翻译。
-func (a agentClientAdapter) InspectImage(ctx context.Context, nodeID, image string) (imagecoord.RemoteImageInfo, error) {
-	r, err := a.inner.InspectImage(ctx, nodeID, image)
-	if err != nil {
-		return imagecoord.RemoteImageInfo{}, err
-	}
-	return imagecoord.RemoteImageInfo{Exists: r.Exists, ID: r.ID}, nil
-}
-
-// LoadImage 透传到 inner,只做 RemoteImageInfo 类型翻译。
-func (a agentClientAdapter) LoadImage(ctx context.Context, nodeID, image, expectedID string, archive io.Reader) (imagecoord.RemoteImageInfo, error) {
-	r, err := a.inner.LoadImage(ctx, nodeID, image, expectedID, archive)
-	if err != nil {
-		return imagecoord.RemoteImageInfo{}, err
-	}
-	return imagecoord.RemoteImageInfo{Exists: r.Exists, ID: r.ID}, nil
 }
 
 // lookupNode 同时返回节点行与 agent token；任何字段缺失立即报错让上层快速失败。

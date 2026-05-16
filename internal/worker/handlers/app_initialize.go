@@ -19,7 +19,6 @@ import (
 	"oc-manager/internal/integrations/hermes"
 	"oc-manager/internal/integrations/newapi"
 	runtimepkg "oc-manager/internal/integrations/runtime"
-	imagecoord "oc-manager/internal/runtime/imagecoord"
 	"oc-manager/internal/store/sqlc"
 )
 
@@ -37,18 +36,6 @@ type AppInitializeStore interface {
 	SetAppProgress(ctx context.Context, arg sqlc.SetAppProgressParams) (sqlc.App, error)
 	ClearAppProgress(ctx context.Context, id pgtype.UUID) (sqlc.App, error)
 	MarkAppFailed(ctx context.Context, arg sqlc.MarkAppFailedParams) (sqlc.App, error)
-}
-
-// ImageDistributor 抽象镜像分发能力。
-type ImageDistributor interface {
-	EnsureRuntimeImage(ctx context.Context, nodeID, image string) (any, error)
-}
-
-// ImageCoordinator 是 imagecoord.Coordinator 的最小接口。
-// 单独声明便于测试 mock,避免直接依赖 imagecoord 包。
-type ImageCoordinator interface {
-	PullImage(ctx context.Context, image string, subscriber chan<- imagecoord.ProgressEvent) error
-	SyncToNode(ctx context.Context, image, nodeID string, subscriber chan<- imagecoord.ProgressEvent) error
 }
 
 // ContainerCreator 抽象通过 agent docker 代理创建容器的能力。
@@ -189,17 +176,13 @@ type AppInitializeLLMConfig struct {
 // 任意一步失败立即冒泡，由 worker 重试或入 failed；状态机字段只在显式步骤里单独写。
 type AppInitializeHandler struct {
 	store        AppInitializeStore
-	images       ImageDistributor
 	dirs         AgentDirInitializer
 	runtimeFiles AppRuntimeFileWriter
 	knowledge    KnowledgeReader
 	containers   ContainerCreator
 	starter      ContainerStarter
-	factory      NewAPIClientFactory
-	cfg          AppInitializeConfig
-	// 新增:跨 manager 镜像协调器,phasePull / phaseSync 使用。
-	// nil 时退回旧 ImageDistributor 路径(测试装配兼容)。
-	coord ImageCoordinator
+	factory NewAPIClientFactory
+	cfg     AppInitializeConfig
 }
 
 // NewAppInitializeHandler 创建 handler。dirs / containers / starter 可传 nil，
@@ -207,7 +190,6 @@ type AppInitializeHandler struct {
 // 便于在 docker proxy / agent 装配未就绪时仍能保留旧行为兜底。
 func NewAppInitializeHandler(
 	store AppInitializeStore,
-	images ImageDistributor,
 	dirs AgentDirInitializer,
 	containers ContainerCreator,
 	starter ContainerStarter,
@@ -219,7 +201,6 @@ func NewAppInitializeHandler(
 	}
 	return &AppInitializeHandler{
 		store:      store,
-		images:     images,
 		dirs:       dirs,
 		containers: containers,
 		starter:    starter,
@@ -242,10 +223,6 @@ func (h *AppInitializeHandler) SetRuntimeFileWriter(w AppRuntimeFileWriter) {
 func (h *AppInitializeHandler) SetKnowledgeReader(r KnowledgeReader) {
 	h.knowledge = r
 }
-
-// SetImageCoordinator 注入跨 manager 镜像协调器。生产装配必须注入;
-// 测试装配可不调,phasePull / phaseSync 退化为直接调旧 images 接口。
-func (h *AppInitializeHandler) SetImageCoordinator(c ImageCoordinator) { h.coord = c }
 
 // Handle 是 worker 调用入口。
 // 5 阶段串行推进:每阶段进入前先校验状态机转移合法,跑实际工作前查幂等,
@@ -282,8 +259,7 @@ func (h *AppInitializeHandler) Handle(ctx context.Context, job sqlc.Job) error {
 		phase string
 		run   func(context.Context, *sqlc.App, appInitializePayload, *progressReporter) error
 	}{
-		{domain.AppStatusPullingImage, h.phasePull},
-		{domain.AppStatusSyncingImage, h.phaseSync},
+		{domain.AppStatusPullingRuntimeImage, h.phasePullRuntimeImage},
 		{domain.AppStatusPreparingRuntime, h.phasePrepare},
 		{domain.AppStatusCreatingContainer, h.phaseCreate},
 		{domain.AppStatusStarting, h.phaseStart},
@@ -337,55 +313,10 @@ func (h *AppInitializeHandler) markFailed(ctx context.Context, app *sqlc.App, ph
 	return cause
 }
 
-// phasePull:确保 manager 本机已存在 runtime 镜像。
-// 优先走 ImageCoordinator(集群内单飞 + 进度广播);未注入时退回旧
-// images.EnsureRuntimeImage 的"远端节点已就绪"快速路径,等价行为。
-func (h *AppInitializeHandler) phasePull(ctx context.Context, _ *sqlc.App, payload appInitializePayload, reporter *progressReporter) error {
-	if h.coord == nil {
-		return nil
-	}
-	sub := make(chan imagecoord.ProgressEvent, 16)
-	done := make(chan struct{})
-	go func() {
-		for ev := range sub {
-			reporter.Receive(ctx, ev)
-		}
-		close(done)
-	}()
-	err := h.coord.PullImage(ctx, h.cfg.RuntimeImage, sub)
-	<-done
-	if err != nil {
-		return fmt.Errorf("拉取 runtime 镜像失败: %w", err)
-	}
-	_ = payload
-	return nil
-}
-
-// phaseSync:把 manager 本机镜像同步到目标节点。
-// 已有节点 ID 则走 Coordinator;node 缺失视为本地装配场景,跳过。
-func (h *AppInitializeHandler) phaseSync(ctx context.Context, _ *sqlc.App, payload appInitializePayload, reporter *progressReporter) error {
-	if h.coord == nil || payload.RuntimeNodeID == "" {
-		// 退化为旧 ImageDistributor(仍幂等;远端 ID 一致跳过)
-		if h.images != nil && payload.RuntimeNodeID != "" {
-			if _, err := h.images.EnsureRuntimeImage(ctx, payload.RuntimeNodeID, h.cfg.RuntimeImage); err != nil {
-				return fmt.Errorf("分发 Hermes 镜像失败: %w", err)
-			}
-		}
-		return nil
-	}
-	sub := make(chan imagecoord.ProgressEvent, 16)
-	done := make(chan struct{})
-	go func() {
-		for ev := range sub {
-			reporter.Receive(ctx, ev)
-		}
-		close(done)
-	}()
-	err := h.coord.SyncToNode(ctx, h.cfg.RuntimeImage, payload.RuntimeNodeID, sub)
-	<-done
-	if err != nil {
-		return fmt.Errorf("同步镜像到节点失败: %w", err)
-	}
+// phasePullRuntimeImage 通过 agent docker proxy 在目标节点拉取 hermes runtime 镜像。
+// 完整实现在 Task 7 中注入；当前版本是占位，允许代码编译通过。
+// 生产环境须通过 SetImagePullCoord 和 SetNodeDockerProvider 注入后才有效。
+func (h *AppInitializeHandler) phasePullRuntimeImage(_ context.Context, _ *sqlc.App, _ appInitializePayload, _ *progressReporter) error {
 	return nil
 }
 

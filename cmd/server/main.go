@@ -44,7 +44,6 @@ import (
 	"oc-manager/internal/migrations"
 	"oc-manager/internal/redis"
 	"oc-manager/internal/runtime/imagecoord"
-	"oc-manager/internal/runtime/imagesync"
 	"oc-manager/internal/scheduler"
 	"oc-manager/internal/service"
 	"oc-manager/internal/store"
@@ -193,16 +192,6 @@ func runManager(ctx context.Context, cfg config.Config, logOut io.Writer) error 
 	}
 	nodeResolver := newNodeClientResolver(dbStore.Queries, agentTokenResolver)
 
-	// LocalDockerSDKProvider 通过 /var/run/docker.sock 调 Docker Engine HTTP API,
-	// 不依赖 manager 容器内的 docker CLI;凭据从挂载进来的宿主机 ~/.docker/config.json 读。
-	// dockerHost 为空走 client.FromEnv(默认 unix:///var/run/docker.sock);
-	// configPath 走容器内 /root/.docker/config.json(docker-compose 挂宿主机同名文件)。
-	dockerSDK, err := imagesync.NewLocalDockerSDKProvider("", "/root/.docker/config.json")
-	if err != nil {
-		return fmt.Errorf("初始化本地 docker SDK provider: %w", err)
-	}
-	imageSync := imagesync.New(dockerSDK, nodeResolver)
-
 	// imagecoord.Coordinator 跨 manager 实例对 pull / sync 做 single-flight
 	// 并通过 Redis Pub/Sub 广播进度。这里单独开一个 go-redis client 给 DistLocker /
 	// ProgressBus 使用,与 redisQueue 共享同一 Redis 物理实例但连接池分离,
@@ -215,16 +204,9 @@ func runManager(ctx context.Context, cfg config.Config, logOut io.Writer) error 
 	defer imagecoordRedis.Close()
 	distLocker := redis.NewRedisDistLocker(imagecoordRedis)
 	progressBus := redis.NewRedisProgressBus(imagecoordRedis)
-	// agentClientAdapter(见 wiring.go)把 nodeResolver 返回的 imagesync.RemoteImageInfo
-	// 转成 imagecoord.RemoteImageInfo,避免 imagecoord 包反向 import imagesync。
-	imageCoord := imagecoord.NewCoordinator(
-		dockerSDK,
-		agentClientAdapter{inner: nodeResolver},
-		distLocker,
-		progressBus,
-		uuid.NewString(),
-	)
-	runtimeAdapter := runtime.NewAgentBackedAdapter(nodeResolver, nodeResolver, imageSync)
+	// Coordinator 按 (nodeID, imageRef) 粒度加锁，让 agent 直接从公网 registry 拉取镜像。
+	imageCoord := imagecoord.NewCoordinator(distLocker, progressBus, uuid.NewString())
+	runtimeAdapter := runtime.NewAgentBackedAdapter(nodeResolver, nodeResolver)
 	runtimeOpService.SetInspector(newRuntimeInspectorWrapper(runtimeAdapter))
 	workspaceService := service.NewWorkspaceService(dbStore.Queries, runtimeAdapter, cfg.App.DataRoot)
 
@@ -241,7 +223,6 @@ func runManager(ctx context.Context, cfg config.Config, logOut io.Writer) error 
 		return fmt.Errorf("注册微信渠道失败: %w", err)
 	}
 
-	imageDistribution := newImageDistributorWrapper(service.NewImageDistributionService(imageSync))
 	// new-api 装配：
 	//   - newapiClient 是顶层 admin 视角；可调创建 user / 充值 / 查日志 / 查 quota；
 	//   - newapiFactory 在 worker handler 跑 job 时把 (app→org→credentials) 翻译成
@@ -284,7 +265,6 @@ func runManager(ctx context.Context, cfg config.Config, logOut io.Writer) error 
 	// 三个接口（前者经 InitAppDirs 调用 agent file API，后两者经 docker proxy）。
 	appInitHandler := handlers.NewAppInitializeHandler(
 		dbStore.Queries,
-		imageDistribution,
 		appDirInitializerAdapter{adapter: runtimeAdapter},
 		runtimeAdapter,
 		runtimeAdapter,
@@ -315,10 +295,9 @@ func runManager(ctx context.Context, cfg config.Config, logOut io.Writer) error 
 	// 遍历组织 + 应用知识库,把每个文件渲染成 .hermes/skills/kb-{org,app}-<slug>/SKILL.md,
 	// Hermes 启动时按 skill 机制扫描该目录,使知识库内容进入 agent 上下文。
 	appInitHandler.SetKnowledgeReader(knowledgeMaster)
-	// 注入 ImageCoordinator:phasePull / phaseSync 通过 Redis 锁 + Pub/Sub 实现
-	// 集群内 single-flight + 跨实例进度广播。未注入时 handler 会退回到旧的
-	// ImageDistributor 路径(无单飞、本机直接 pull/sync),仅留给测试装配。
-	appInitHandler.SetImageCoordinator(imageCoord)
+	// Task 7: SetImagePullCoord / SetNodeDockerProvider 在 phasePullRuntimeImage
+	// 实现完成后注入；imageCoord 在此保持引用避免编译报 "declared and not used"。
+	_ = imageCoord
 	if err := registry.Register("app_initialize", appInitHandler.Handle); err != nil {
 		return fmt.Errorf("注册 app_initialize handler 失败: %w", err)
 	}

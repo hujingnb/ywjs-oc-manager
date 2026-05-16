@@ -15,7 +15,6 @@ import (
 	"github.com/docker/docker/client"
 
 	"oc-manager/internal/integrations/agent"
-	"oc-manager/internal/runtime/imagesync"
 )
 
 // timeAfter / contextWithTimeout 是 healthcheck 重试用的小 helper，包级变量便于测试替换。
@@ -42,11 +41,6 @@ type DockerClientResolver interface {
 	DockerClient(ctx context.Context, nodeID string) (*client.Client, error)
 }
 
-// ImageSyncer 是 imagesync.Service 的最小接口形态，便于在测试中替换为内存桩。
-type ImageSyncer interface {
-	SyncRuntimeImage(ctx context.Context, nodeID, image string) (imagesync.SyncResult, error)
-}
-
 // ContainerInspector 是 WaitContainerHealthy 依赖的最小接口，便于测试注入 fake。
 // 生产路径下由 AgentBackedAdapter 自身实现（调用 docker inspect）；
 // 测试中传入 fakeInspector 可控序列，避免依赖真实 docker daemon。
@@ -56,33 +50,26 @@ type ContainerInspector interface {
 
 // AgentBackedAdapter 通过 agent HTTP API 完成 runtime adapter 协议。
 //
-// 四个依赖可独立提供：
-//   - files：缺失时文件接口返回 ErrUnimplemented，便于做"只跑容器、不跑文件"的精简部署；
-//   - docker：缺失时容器接口返回 ErrUnimplemented，避免在未装配 docker proxy 时静默 panic；
-//   - imageSync：缺失时 EnsureImage 返回 ErrUnimplemented；
+// 两个核心依赖：
+//   - files：缺失时文件接口返回 ErrUnimplemented；
+//   - docker：缺失时容器接口返回 ErrUnimplemented，避免未装配 docker proxy 时静默 panic；
 //   - inspector：nil 时 WaitContainerHealthy 使用自身的 InspectContainer，非 nil 时用于测试覆盖。
-//
-// 这些缺失语义统一指向"adapter 装配不完整"，由上层启动期或 worker handler 决定如何降级。
 type AgentBackedAdapter struct {
-	files     AgentResolver
-	docker    DockerClientResolver
-	imageSync ImageSyncer
+	files  AgentResolver
+	docker DockerClientResolver
 	// inspector 仅用于测试注入；nil 时 WaitContainerHealthy 使用自身的 InspectContainer 方法。
 	inspector ContainerInspector
 }
 
-// NewAgentBackedAdapter 构造 adapter。
-// 三个参数任意一个为 nil 时，对应能力降级为 ErrUnimplemented。
-func NewAgentBackedAdapter(files AgentResolver, docker DockerClientResolver, imageSync ImageSyncer) *AgentBackedAdapter {
-	return &AgentBackedAdapter{files: files, docker: docker, imageSync: imageSync}
+// NewAgentBackedAdapter 构造 adapter。参数为 nil 时对应能力降级为 ErrUnimplemented。
+func NewAgentBackedAdapter(files AgentResolver, docker DockerClientResolver) *AgentBackedAdapter {
+	return &AgentBackedAdapter{files: files, docker: docker}
 }
 
-// EnsureImage 将本地 runtime 镜像分发到目标节点。
-func (a *AgentBackedAdapter) EnsureImage(ctx context.Context, nodeID, image string) (imagesync.SyncResult, error) {
-	if a.imageSync == nil {
-		return imagesync.SyncResult{}, ErrUnimplemented
-	}
-	return a.imageSync.SyncRuntimeImage(ctx, nodeID, image)
+// DockerClientForNode 返回指向目标节点 agent docker proxy 的 SDK client。
+// 供 AppInitializeHandler.phasePullRuntimeImage 使用，不经过 Adapter 接口。
+func (a *AgentBackedAdapter) DockerClientForNode(ctx context.Context, nodeID string) (*client.Client, error) {
+	return a.dockerClient(ctx, nodeID)
 }
 
 // CreateContainer 通过 agent docker 代理在指定节点上创建容器。
@@ -525,6 +512,9 @@ func translateSpec(spec ContainerSpec) (*container.Config, *container.HostConfig
 		Resources: container.Resources{
 			NanoCPUs: spec.Resources.CPULimit * 1_000_000,
 			Memory:   spec.Resources.MemoryBytes,
+		},
+		RestartPolicy: container.RestartPolicy{
+			Name: container.RestartPolicyMode(spec.RestartPolicy),
 		},
 	}
 	if len(spec.Networks) == 1 {
