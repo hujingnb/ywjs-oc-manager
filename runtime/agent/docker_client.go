@@ -6,6 +6,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"log/slog" // todo del
 	"net"
 	"net/http"
 	"net/url"
@@ -93,7 +94,8 @@ func (c *dockerSocketClient) LoadImage(ctx context.Context, archive io.Reader) e
 		body, _ := io.ReadAll(io.LimitReader(resp.Body, 4096))
 		return fmt.Errorf("docker load image failed: status=%d body=%s", resp.StatusCode, string(body))
 	}
-	_, _ = io.Copy(io.Discard, resp.Body)
+	dockerLoadResp, _ := io.ReadAll(io.LimitReader(resp.Body, 8192)) // todo del
+	slog.Error("[hujingnb][D] dockerSocketClient:LoadImage docker daemon response", "body", string(dockerLoadResp)) // todo del
 	return nil
 }
 
