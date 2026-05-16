@@ -1,75 +1,13 @@
 package imagesync
 
 import (
-	"bytes"
 	"context"
 	"encoding/json"
 	"fmt"
 	"io"
 	"net/http"
 	"net/url"
-	"os/exec"
-	"strings"
 )
-
-// LocalDockerCLIProvider 通过本机 docker CLI inspect/save 镜像。
-// 这是 manager 侧镜像源，Command 仅用于测试或非标准 docker 二进制路径。
-type LocalDockerCLIProvider struct {
-	Command string
-}
-
-// dockerCommand 返回实际执行的 docker 命令名；空值保持生产默认 "docker"。
-func (p LocalDockerCLIProvider) dockerCommand() string {
-	if p.Command == "" {
-		return "docker"
-	}
-	return p.Command
-}
-
-// ImageID 读取本地镜像 ID，用于和目标节点返回的 ID 做精确比对。
-func (p LocalDockerCLIProvider) ImageID(ctx context.Context, image string) (string, error) {
-	cmd := exec.CommandContext(ctx, p.dockerCommand(), "image", "inspect", image, "--format", "{{.Id}}")
-	output, err := cmd.Output()
-	if err != nil {
-		return "", fmt.Errorf("docker image inspect %s: %w", image, err)
-	}
-	return strings.TrimSpace(string(output)), nil
-}
-
-// Archive 通过 docker save 生成镜像 tar 流。
-// 调用方必须 Close 返回值，否则底层 docker 子进程可能无法回收。
-func (p LocalDockerCLIProvider) Archive(ctx context.Context, image string) (io.ReadCloser, error) {
-	// docker save 可能输出很大的 tar 包，这里保持流式读取，避免 manager 把整份镜像压到内存。
-	cmd := exec.CommandContext(ctx, p.dockerCommand(), "save", image)
-	stdout, err := cmd.StdoutPipe()
-	if err != nil {
-		return nil, err
-	}
-	var stderr bytes.Buffer
-	cmd.Stderr = &stderr
-	if err := cmd.Start(); err != nil {
-		return nil, err
-	}
-	return &commandReadCloser{ReadCloser: stdout, wait: cmd.Wait, stderr: &stderr}, nil
-}
-
-// commandReadCloser 把 docker save stdout 与 cmd.Wait 绑定到同一个 Close 调用。
-// 这样读流成功但 docker 进程最终失败时，调用方仍能在 Close 阶段拿到 stderr。
-type commandReadCloser struct {
-	io.ReadCloser
-	wait   func() error
-	stderr *bytes.Buffer
-}
-
-// Close 关闭 stdout 并等待 docker save 退出。
-func (c *commandReadCloser) Close() error {
-	closeErr := c.ReadCloser.Close()
-	waitErr := c.wait()
-	if waitErr != nil {
-		return fmt.Errorf("docker save failed: %w: %s", waitErr, c.stderr.String())
-	}
-	return closeErr
-}
 
 // AgentHTTPClient 调用 runtime agent 的镜像接口。
 // BaseURL 必须指向单个节点 agent；nodeID 参数只用于满足接口形态，不在 URL 内再次拼接。

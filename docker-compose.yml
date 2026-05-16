@@ -158,6 +158,9 @@ services:
       # 这样 imagesync 能 inspect / save 本地 hermes-runtime:dev 镜像。
       - /var/run/docker.sock:/var/run/docker.sock
       - /usr/bin/docker:/usr/local/bin/docker:ro
+      # 宿主机 ~/.docker/config.json：为镜像 pull 提供 registry 凭据（只读）。
+      # LocalDockerSDKProvider 启动时读这里的 auths，作为 X-Registry-Auth 传给 daemon。
+      - ${HOME}/.docker/config.json:/root/.docker/config.json:ro
 
   # manager-web 开发容器，挂载源码并运行 Vite dev server。
   manager-web:

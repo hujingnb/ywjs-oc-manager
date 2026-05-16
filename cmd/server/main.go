@@ -175,7 +175,15 @@ func runManager(ctx context.Context, cfg config.Config, logOut io.Writer) error 
 	}
 	nodeResolver := newNodeClientResolver(dbStore.Queries, agentTokenResolver)
 
-	imageSync := imagesync.New(imagesync.LocalDockerCLIProvider{}, nodeResolver)
+	// LocalDockerSDKProvider 通过 /var/run/docker.sock 调 Docker Engine HTTP API,
+	// 不依赖 manager 容器内的 docker CLI;凭据从挂载进来的宿主机 ~/.docker/config.json 读。
+	// dockerHost 为空走 client.FromEnv(默认 unix:///var/run/docker.sock);
+	// configPath 走容器内 /root/.docker/config.json(docker-compose 挂宿主机同名文件)。
+	dockerSDK, err := imagesync.NewLocalDockerSDKProvider("", "/root/.docker/config.json")
+	if err != nil {
+		return fmt.Errorf("初始化本地 docker SDK provider: %w", err)
+	}
+	imageSync := imagesync.New(dockerSDK, nodeResolver)
 	runtimeAdapter := runtime.NewAgentBackedAdapter(nodeResolver, nodeResolver, imageSync)
 	runtimeOpService.SetInspector(newRuntimeInspectorWrapper(runtimeAdapter))
 	workspaceService := service.NewWorkspaceService(dbStore.Queries, runtimeAdapter, cfg.App.DataRoot)
