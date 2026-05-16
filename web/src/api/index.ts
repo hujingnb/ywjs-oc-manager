@@ -51,10 +51,12 @@ export type RuntimeNode = WithRequired<
   'id' | 'name' | 'status' | 'heartbeat_interval_seconds' | 'has_agent_token'
 >
 
-// AuditLog：id / actor_role / target_type / target_id / action / result / created_at 后端必返
+// AuditLog：id / actor_role / target_type / target_id / action / result / created_at 后端必返，
+// *_label 为对应字段的中文展示名，后端同步填充。
 export type AuditLog = WithRequired<
   Schemas['service.AuditResult'],
-  'id' | 'actor_role' | 'target_type' | 'target_id' | 'action' | 'result' | 'created_at'
+  | 'id' | 'actor_role' | 'target_type' | 'target_id' | 'action' | 'result' | 'created_at'
+  | 'action_label' | 'target_type_label' | 'actor_role_label' | 'result_label'
 >
 
 // ===== 手工补的类型（来自工具链限制） =====

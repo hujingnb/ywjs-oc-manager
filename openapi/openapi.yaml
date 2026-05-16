@@ -470,9 +470,14 @@ components:
       properties:
         action:
           type: string
+        action_label:
+          description: 以下为展示用翻译字段，由 toAuditResult() 填充，未知值 fallback 到原始字符串。
+          type: string
         actor_id:
           type: string
         actor_role:
+          type: string
+        actor_role_label:
           type: string
         created_at:
           format: date-time
@@ -490,9 +495,13 @@ components:
           type: string
         result:
           type: string
+        result_label:
+          type: string
         target_id:
           type: string
         target_type:
+          type: string
+        target_type_label:
           type: string
       type: object
     service.AuthUser:
