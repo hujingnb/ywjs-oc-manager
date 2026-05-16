@@ -3972,15 +3972,24 @@ cd web && pnpm dev
 
 打开 http://localhost:5173 用 `admin / admin123` 登录。
 
+> **本地镜像:** 当前 `config/manager.yaml` 已配置 RuntimeImage 为
+> `crpi-nu3ibz4f07feyghi.cn-beijing.personal.cr.aliyuncs.com/ywjs_app/oc-manager-hermes:v1.0.0`,
+> 走宿主机 `~/.docker/config.json` 的 `crpi-nu3ibz4f07feyghi.cn-beijing.personal.cr.aliyuncs.com` 凭据。
+> 若本机已 `docker pull` 过该镜像,场景 1 走快路径;场景 2 删本地镜像验证拉取进度。
+
 ### Task 8.2:场景 1 — 镜像已在 manager 本机的"快路径"
 
 - [ ] **Step 1:确认本机镜像存在**
 
 ```bash
-docker image inspect hermes-runtime:dev > /dev/null && echo OK
+docker image inspect crpi-nu3ibz4f07feyghi.cn-beijing.personal.cr.aliyuncs.com/ywjs_app/oc-manager-hermes:v1.0.0 > /dev/null && echo OK
 ```
 
-预期:OK(若不存在,先 `make build-hermes` 或自行构建一份)。
+预期:OK。若不存在先 `docker pull`(走宿主机 docker login 凭据):
+
+```bash
+docker pull crpi-nu3ibz4f07feyghi.cn-beijing.personal.cr.aliyuncs.com/ywjs_app/oc-manager-hermes:v1.0.0
+```
 
 - [ ] **Step 2:用 test-org-user1 创建一个新 app**
 
@@ -3995,15 +4004,15 @@ UI 应在数秒内连续展示:
 
 ### Task 8.3:场景 2 — 删本机镜像后 pull 进度条能动
 
-- [ ] **Step 1:删本地镜像 + 改 RuntimeImage 配置指向公共 registry**
+- [ ] **Step 1:删本地镜像让 manager 走 registry 拉**
 
 ```bash
-docker image rm hermes-runtime:dev
-# 临时改 manager 配置让它去拉一个公共镜像(eg. alpine:latest)
-# 或者把宿主机已有镜像 push 到本地 registry 再让 manager 拉
+docker image rm crpi-nu3ibz4f07feyghi.cn-beijing.personal.cr.aliyuncs.com/ywjs_app/oc-manager-hermes:v1.0.0
 ```
 
-(具体方式按本地有无 registry 决定。最简单是临时把 RuntimeImage 改成 `alpine:latest`,纯做"拉取进度展示"的视觉验证。)
+manager 容器内的 docker SDK 走 `/var/run/docker.sock` 调宿主机 daemon,
+凭据由 `RegistryAuthStore` 解析挂载进来的 `~/.docker/config.json` 中
+`crpi-nu3ibz4f07feyghi.cn-beijing.personal.cr.aliyuncs.com` 的 auth 字段。
 
 - [ ] **Step 2:重启 manager + 创建新 app**
 
