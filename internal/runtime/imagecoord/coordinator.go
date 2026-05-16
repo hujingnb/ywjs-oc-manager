@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"log/slog" // todo del
 	"sync"
 	"time"
 
@@ -130,9 +131,12 @@ func (c *Coordinator) SyncToNode(ctx context.Context, image, nodeID string, subs
 	if err != nil {
 		return fmt.Errorf("inspect remote image: %w", err)
 	}
+	slog.ErrorContext(ctx, "[hujingnb][1] coord:SyncToNode pre-check", "image", image, "nodeID", nodeID, "localID", localID, "remoteExists", remote.Exists, "remoteID", remote.ID) // todo del
 	if remote.Exists && remote.ID == localID {
+		slog.ErrorContext(ctx, "[hujingnb][2] coord:SyncToNode skip sync - already in sync", "image", image, "nodeID", nodeID) // todo del
 		return nil
 	}
+	slog.ErrorContext(ctx, "[hujingnb][3] coord:SyncToNode will sync - ID mismatch", "image", image, "nodeID", nodeID, "localID", localID, "remoteID", remote.ID) // todo del
 
 	lockKey := fmt.Sprintf("ocm:image:sync:lock:%s:%s", nodeID, image)
 	channel := fmt.Sprintf("ocm:image:sync:bus:%s:%s", nodeID, image)
@@ -285,17 +289,22 @@ func (c *Coordinator) doPull(ctx context.Context, image string, send func(Progre
 //
 // LoadImage 完成后做一次 ID 校验,确保 agent 端落地的镜像就是 manager 这边的。
 func (c *Coordinator) doSync(ctx context.Context, image, nodeID, localID string, send func(ProgressEvent)) error {
+	slog.ErrorContext(ctx, "[hujingnb][4] coord:doSync start", "image", image, "nodeID", nodeID, "localID", localID) // todo del
 	archive, err := c.local.Archive(ctx, image)
 	if err != nil {
 		return fmt.Errorf("archive local image: %w", err)
 	}
 	defer archive.Close()
 
+	reCheckedID, reCheckErr := c.local.ImageID(ctx, image)                                                                                                                                         // todo del
+	slog.ErrorContext(ctx, "[hujingnb][5] coord:doSync archive ready, re-check local ID", "image", image, "originalLocalID", localID, "reCheckedID", reCheckedID, "reCheckErr", reCheckErr) // todo del
+
 	const total int64 = 0
 	counting := newCountingReader(archive, func(n int64) {
 		send(ProgressEvent{Phase: "syncing_image", Current: n, Total: total})
 	})
 	loaded, err := c.agent.LoadImage(ctx, nodeID, image, counting)
+	slog.ErrorContext(ctx, "[hujingnb][6] coord:doSync LoadImage result", "image", image, "nodeID", nodeID, "loadedID", loaded.ID, "loadedExists", loaded.Exists, "loadErr", err) // todo del
 	if err != nil {
 		return fmt.Errorf("agent load image: %w", err)
 	}

@@ -402,6 +402,7 @@ func newHandlerWithDocker(dataRoot string, docker DockerClient, agentToken any) 
 		}
 		info, err := docker.InspectImage(r.Context(), image)
 		if errors.Is(err, ErrImageNotFound) {
+			slog.ErrorContext(r.Context(), "[hujingnb][0] agent:inspectImage not found", "image", image) // todo del
 			writeJSON(w, map[string]any{"exists": false, "image": image})
 			return
 		}
@@ -409,6 +410,7 @@ func newHandlerWithDocker(dataRoot string, docker DockerClient, agentToken any) 
 			writeError(w, http.StatusBadGateway, err.Error())
 			return
 		}
+		slog.ErrorContext(r.Context(), "[hujingnb][0] agent:inspectImage found", "image", image, "id", info.ID) // todo del
 		writeJSON(w, map[string]any{"exists": true, "image": image, "info": info})
 	}))
 	mux.HandleFunc("/v1/images/load", withAgentAuth(agentToken, func(w http.ResponseWriter, r *http.Request) {
@@ -421,15 +423,18 @@ func newHandlerWithDocker(dataRoot string, docker DockerClient, agentToken any) 
 			writeError(w, http.StatusBadRequest, "missing image query")
 			return
 		}
+		slog.ErrorContext(r.Context(), "[hujingnb][8] agent:loadImage start docker load", "image", image) // todo del
 		if err := docker.LoadImage(r.Context(), r.Body); err != nil {
 			writeError(w, http.StatusBadGateway, err.Error())
 			return
 		}
+		slog.ErrorContext(r.Context(), "[hujingnb][9] agent:loadImage docker load done, inspecting", "image", image) // todo del
 		info, err := docker.InspectImage(r.Context(), image)
 		if err != nil {
 			writeError(w, http.StatusBadGateway, err.Error())
 			return
 		}
+		slog.ErrorContext(r.Context(), "[hujingnb][10] agent:loadImage inspect done", "image", image, "inspectedID", info.ID) // todo del
 		writeJSON(w, map[string]any{"loaded": true, "image": image, "info": info})
 	}))
 	// Sprint 1：scope 化 file API 端点（init/sync/upload/list/download/archive/cleanup 等）。
