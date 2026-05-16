@@ -72,27 +72,28 @@ function auditTagType(result: string): 'success' | 'warning' | 'error' | 'defaul
 }
 
 // columns 展示审计主体、资源、动作和结果；错误信息作为结果列的辅助诊断文本。
+// 各列使用后端返回的 *_label 字段展示中文，auditTagType 仍依赖原始 result 判断颜色。
 const columns: DataTableColumns<AuditLog> = [
   timeColumn('时间', r => r.created_at),
   {
     title: '操作者', key: 'actor_role',
     render: (row) => [
-      h('strong', row.actor_role),
+      h('strong', row.actor_role_label),
       row.actor_id ? h('small', { style: 'display:block;color:#8A94C6;font-size:12px' }, row.actor_id) : null,
     ],
   },
   {
     title: '资源', key: 'target_type',
     render: (row) => [
-      h('strong', row.target_type),
+      h('strong', row.target_type_label),
       h('small', { style: 'display:block;color:#8A94C6;font-size:12px' }, row.target_id),
     ],
   },
-  { title: '操作', key: 'action' },
+  { title: '操作', key: 'action', render: (row) => row.action_label },
   {
     title: '结果', key: 'result',
     render: (row) => [
-      h(NTag, { type: auditTagType(row.result), size: 'small', bordered: false }, { default: () => row.result }),
+      h(NTag, { type: auditTagType(row.result), size: 'small', bordered: false }, { default: () => row.result_label }),
       row.error_message ? h('small', { style: 'display:block;color:#FF3B5C;font-size:12px' }, row.error_message) : null,
     ],
   },
