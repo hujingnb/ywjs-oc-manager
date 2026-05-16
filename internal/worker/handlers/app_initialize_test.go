@@ -13,6 +13,8 @@ import (
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
+	dockerclient "github.com/docker/docker/client"
+
 	"oc-manager/internal/audit"
 	"oc-manager/internal/auth"
 	"oc-manager/internal/domain"
@@ -32,7 +34,6 @@ const (
 // TestAppInitializeHandlesHappyPath 验证应用初始化处理成功路径的成功路径场景。
 func TestAppInitializeHandlesHappyPath(t *testing.T) {
 	store := newAppInitStub(t)
-	images := &fakeImages{}
 	dirs := &fakeDirs{}
 	containers := &fakeContainers{result: runtimepkg.ContainerInfo{ID: "ctr-1", Name: "hermes-" + testAppID, Status: "created"}}
 	client := &fakeNewAPI{result: newapi.APIKey{ID: 99, Key: "sk-test"}}
@@ -45,7 +46,7 @@ func TestAppInitializeHandlesHappyPath(t *testing.T) {
 		SystemPromptTemplate: "你是 {org_name} 的助手",
 		Cipher:               cipher,
 	}
-	handler := NewAppInitializeHandler(store, images, dirs, containers, containers, client, cfg)
+	handler := NewAppInitializeHandler(store, dirs, containers, containers, client, cfg)
 	// 注入 fakeRuntimeFileWriter，验证 Hermes 配置文件通过 UploadAppRuntimeFile 上传。
 	handler.SetRuntimeFileWriter(rw)
 
@@ -53,9 +54,6 @@ func TestAppInitializeHandlesHappyPath(t *testing.T) {
 	require.NoError(t, err)
 	if !store.apiKeySet || !store.statusSet || !store.containerSet {
 		t.Fatalf("api_key/status/container 应当都被持久化: %+v", store)
-	}
-	if images.lastImage != "hermes:dev" || images.lastNode != "node-1" {
-		t.Fatalf("镜像分发 = %s/%s", images.lastNode, images.lastImage)
 	}
 
 	// container_id 写库为 docker mock 返回的 ID。
@@ -106,7 +104,7 @@ func TestWriteHermesFiles_FailsWhenWriterNil(t *testing.T) {
 	store := newAppInitStub(t)
 	client := &fakeNewAPI{result: newapi.APIKey{ID: 1, Key: "k"}}
 	// 不注入 SetRuntimeFileWriter，runtimeFiles 保持 nil。
-	handler := NewAppInitializeHandler(store, &fakeImages{}, &fakeDirs{}, &fakeContainers{}, &fakeContainers{}, client, AppInitializeConfig{Cipher: testCipher(t)})
+	handler := NewAppInitializeHandler(store, &fakeDirs{}, &fakeContainers{}, &fakeContainers{}, client, AppInitializeConfig{Cipher: testCipher(t)})
 
 	err := handler.Handle(context.Background(), buildJob(t, testAppID, "node-1"))
 	// nodeID 非空时 writeHermesFiles 必须被调用；nil writer 应立即报错。
@@ -122,7 +120,7 @@ func TestWriteHermesFiles_PropagatesUploadError(t *testing.T) {
 	// 模拟 agent 上传失败（网络不通 / 节点不可达）。
 	rw := &fakeRuntimeFileWriter{err: errors.New("agent upload failed")}
 	containers := &fakeContainers{result: runtimepkg.ContainerInfo{ID: "c", Name: "n"}}
-	handler := NewAppInitializeHandler(store, &fakeImages{}, &fakeDirs{}, containers, containers, client, AppInitializeConfig{Cipher: testCipher(t)})
+	handler := NewAppInitializeHandler(store, &fakeDirs{}, containers, containers, client, AppInitializeConfig{Cipher: testCipher(t)})
 	handler.SetRuntimeFileWriter(rw)
 
 	err := handler.Handle(context.Background(), buildJob(t, testAppID, "node-1"))
@@ -138,7 +136,6 @@ func TestAppInitializeWaitsForHermesHealthyWhenSupported(t *testing.T) {
 	// Sprint 2（Hermes 版）：starter 同时实现 HermesHealthChecker 时
 	// handler 应等 docker HEALTHCHECK 报 healthy 再推 binding_waiting。
 	store := newAppInitStub(t)
-	images := &fakeImages{}
 	dirs := &fakeDirs{}
 	base := &fakeContainers{result: runtimepkg.ContainerInfo{ID: "ctr-1", Name: "hermes-" + testAppID, Status: "created"}}
 	// healthAwareContainers 包装 fakeContainers，额外暴露 WaitContainerHealthy 方法。
@@ -147,7 +144,7 @@ func TestAppInitializeWaitsForHermesHealthyWhenSupported(t *testing.T) {
 
 	cipher, err := auth.NewCipher(make([]byte, 32))
 	require.NoError(t, err)
-	handler := NewAppInitializeHandler(store, images, dirs, base, containers, client, AppInitializeConfig{
+	handler := NewAppInitializeHandler(store, dirs, base, containers, client, AppInitializeConfig{
 		RuntimeImage: "hermes:dev",
 		Cipher:       cipher,
 	})
@@ -169,7 +166,7 @@ func TestAppInitializePropagatesHealthCheckError(t *testing.T) {
 	}
 	containers := &healthAwareContainers{fakeContainers: base}
 	client := &fakeNewAPI{result: newapi.APIKey{ID: 1, Key: "k"}}
-	handler := NewAppInitializeHandler(store, &fakeImages{}, &fakeDirs{}, base, containers, client, AppInitializeConfig{Cipher: testCipher(t)})
+	handler := NewAppInitializeHandler(store, &fakeDirs{}, base, containers, client, AppInitializeConfig{Cipher: testCipher(t)})
 	// 注入 fakeRuntimeFileWriter，使 writeHermesFiles 不报错，聚焦健康检查失败路径。
 	handler.SetRuntimeFileWriter(&fakeRuntimeFileWriter{})
 
@@ -191,15 +188,13 @@ func TestAppInitializeIsIdempotentForBindingWaiting(t *testing.T) {
 	store := newAppInitStub(t)
 	store.app.Status = domain.AppStatusBindingWaiting
 	store.app.ApiKeyStatus = domain.APIKeyStatusActive
-	images := &fakeImages{}
 	containers := &fakeContainers{}
 	client := &fakeNewAPI{}
 
-	handler := NewAppInitializeHandler(store, images, &fakeDirs{}, containers, containers, client, AppInitializeConfig{})
+	handler := NewAppInitializeHandler(store, &fakeDirs{}, containers, containers, client, AppInitializeConfig{})
 	err := handler.Handle(context.Background(), buildJob(t, testAppID, "node-1"))
 	require.NoError(t, err)
 	require.Equal(t, 0, client.calls)
-	require.Equal(t, "", images.lastImage)
 	require.Equal(t, 0, containers.calls)
 	require.False(t, store.statusSet)
 }
@@ -215,7 +210,7 @@ func TestAppInitializeSkipsAPIKeyWhenAlreadyActive(t *testing.T) {
 	client := &fakeNewAPI{}
 	containers := &fakeContainers{result: runtimepkg.ContainerInfo{ID: "c", Name: "n"}}
 
-	handler := NewAppInitializeHandler(store, &fakeImages{}, &fakeDirs{}, containers, containers, client, AppInitializeConfig{Cipher: cipher})
+	handler := NewAppInitializeHandler(store, &fakeDirs{}, containers, containers, client, AppInitializeConfig{Cipher: cipher})
 	err = handler.Handle(context.Background(), buildJob(t, testAppID, ""))
 	require.NoError(t, err)
 	require.Equal(t, 0, client.calls)
@@ -227,7 +222,7 @@ func TestAppInitializePropagatesNewAPIError(t *testing.T) {
 	store := newAppInitStub(t)
 	client := &fakeNewAPI{err: newapi.ErrUpstream}
 
-	handler := NewAppInitializeHandler(store, &fakeImages{}, &fakeDirs{}, &fakeContainers{}, &fakeContainers{}, client, AppInitializeConfig{Cipher: testCipher(t)})
+	handler := NewAppInitializeHandler(store, &fakeDirs{}, &fakeContainers{}, &fakeContainers{}, client, AppInitializeConfig{Cipher: testCipher(t)})
 	err := handler.Handle(context.Background(), buildJob(t, testAppID, ""))
 	require.ErrorIs(t, err, newapi.ErrUpstream)
 	// new-api 调用在 phasePrepare 内 ensureAPIKey 阶段失败:MarkAppFailed 被调用,
@@ -243,7 +238,7 @@ func TestAppInitializePropagatesContainerError(t *testing.T) {
 	store := newAppInitStub(t)
 	containers := &fakeContainers{err: errors.New("boom")}
 	client := &fakeNewAPI{result: newapi.APIKey{ID: 1, Key: "k"}}
-	handler := NewAppInitializeHandler(store, &fakeImages{}, &fakeDirs{}, containers, containers, client, AppInitializeConfig{Cipher: testCipher(t)})
+	handler := NewAppInitializeHandler(store, &fakeDirs{}, containers, containers, client, AppInitializeConfig{Cipher: testCipher(t)})
 	// 注入 fakeRuntimeFileWriter，使 writeHermesFiles 不报错，聚焦容器创建失败路径。
 	handler.SetRuntimeFileWriter(&fakeRuntimeFileWriter{})
 	err := handler.Handle(context.Background(), buildJob(t, testAppID, "node-1"))
@@ -261,7 +256,7 @@ func TestAppInitializePropagatesContainerError(t *testing.T) {
 // TestAppInitializeRejectsInvalidPayload 验证应用初始化拒绝非法载荷的异常或拒绝路径场景。
 func TestAppInitializeRejectsInvalidPayload(t *testing.T) {
 	store := newAppInitStub(t)
-	handler := NewAppInitializeHandler(store, &fakeImages{}, &fakeDirs{}, &fakeContainers{}, &fakeContainers{}, &fakeNewAPI{}, AppInitializeConfig{})
+	handler := NewAppInitializeHandler(store, &fakeDirs{}, &fakeContainers{}, &fakeContainers{}, &fakeNewAPI{}, AppInitializeConfig{})
 
 	job := sqlc.Job{Type: domain.JobTypeAppInitialize, PayloadJson: []byte(`{"runtime_node":"node-1"}`)}
 	err := handler.Handle(context.Background(), job)
@@ -275,7 +270,7 @@ func TestAppInitializeContainerStepSkippedWhenContainerExists(t *testing.T) {
 	containers := &fakeContainers{}
 	client := &fakeNewAPI{result: newapi.APIKey{ID: 1, Key: "k"}}
 
-	handler := NewAppInitializeHandler(store, &fakeImages{}, &fakeDirs{}, containers, containers, client, AppInitializeConfig{Cipher: testCipher(t)})
+	handler := NewAppInitializeHandler(store, &fakeDirs{}, containers, containers, client, AppInitializeConfig{Cipher: testCipher(t)})
 	// 注入 fakeRuntimeFileWriter，使 writeHermesFiles 不报错（即使容器已存在也需要上传配置文件）。
 	handler.SetRuntimeFileWriter(&fakeRuntimeFileWriter{})
 	err := handler.Handle(context.Background(), buildJob(t, testAppID, "node-1"))
@@ -289,7 +284,7 @@ func TestEnsureAPIKeyKeepsNewAPITokenModelsUnrestricted(t *testing.T) {
 	store := newAppInitStub(t)
 	store.app.ModelID = "deepseek-r1:14b"
 	api := &fakeNewAPI{result: newapi.APIKey{ID: 99, Key: "sk-test"}}
-	handler := NewAppInitializeHandler(store, &fakeImages{}, &fakeDirs{}, &fakeContainers{}, &fakeContainers{}, api, AppInitializeConfig{
+	handler := NewAppInitializeHandler(store, &fakeDirs{}, &fakeContainers{}, &fakeContainers{}, api, AppInitializeConfig{
 		Cipher: testCipher(t),
 	})
 
@@ -307,7 +302,7 @@ func TestHermesHealthCheckerInterfaceUsed(t *testing.T) {
 	// handler 的类型断言应为 false，跳过健康等待。
 	containers := &fakeContainers{result: runtimepkg.ContainerInfo{ID: "c", Name: "n"}}
 	client := &fakeNewAPI{result: newapi.APIKey{ID: 1, Key: "sk"}}
-	handler := NewAppInitializeHandler(store, &fakeImages{}, &fakeDirs{}, containers, containers, client, AppInitializeConfig{
+	handler := NewAppInitializeHandler(store, &fakeDirs{}, containers, containers, client, AppInitializeConfig{
 		Cipher: testCipher(t),
 	})
 	// 注入 fakeRuntimeFileWriter，使 writeHermesFiles 不报错，聚焦健康检查接口探测路径。
@@ -428,15 +423,11 @@ func (s *appInitStub) MarkAppFailed(_ context.Context, p sqlc.MarkAppFailedParam
 	return s.app, nil
 }
 
-type fakeImages struct {
-	lastImage string
-	lastNode  string
-}
-
-func (f *fakeImages) EnsureRuntimeImage(_ context.Context, nodeID, image string) (any, error) {
-	f.lastNode = nodeID
-	f.lastImage = image
-	return nil, nil
+// UpdateAppRuntimeImage 更新 app 的镜像引用与 sha256，模拟 phasePullRuntimeImage 写库。
+func (s *appInitStub) UpdateAppRuntimeImage(_ context.Context, arg sqlc.UpdateAppRuntimeImageParams) (sqlc.App, error) {
+	s.app.RuntimeImageRef = arg.RuntimeImageRef
+	s.app.RuntimeImageSha256 = arg.RuntimeImageSha256
+	return s.app, nil
 }
 
 // fakeContainers 同时实现 ContainerCreator 与 ContainerStarter，
@@ -651,7 +642,6 @@ func (f *fakeKnowledgeReader) Open(masterPath string) (io.ReadCloser, int64, err
 //   - 中文文件名走 fallback hash slug, 不破坏其他文件上传
 func TestAppInitialize_WritesKnowledgeSkills(t *testing.T) {
 	store := newAppInitStub(t)
-	images := &fakeImages{}
 	dirs := &fakeDirs{}
 	containers := &fakeContainers{result: runtimepkg.ContainerInfo{ID: "ctr-1", Name: "hermes-" + testAppID}}
 	client := &fakeNewAPI{result: newapi.APIKey{ID: 99, Key: "sk-test"}}
@@ -670,7 +660,7 @@ func TestAppInitialize_WritesKnowledgeSkills(t *testing.T) {
 		SystemPromptTemplate: "你是 {org_name} 的助手",
 		Cipher:               testCipher(t),
 	}
-	handler := NewAppInitializeHandler(store, images, dirs, containers, containers, client, cfg)
+	handler := NewAppInitializeHandler(store, dirs, containers, containers, client, cfg)
 	handler.SetRuntimeFileWriter(rw)
 	handler.SetKnowledgeReader(reader)
 
@@ -701,7 +691,7 @@ func TestAppInitialize_KnowledgeReaderNilSkipsSkills(t *testing.T) {
 	containers := &fakeContainers{result: runtimepkg.ContainerInfo{ID: "ctr-1", Name: "n"}}
 	client := &fakeNewAPI{result: newapi.APIKey{ID: 1, Key: "k"}}
 	rw := &fakeRuntimeFileWriter{}
-	handler := NewAppInitializeHandler(store, &fakeImages{}, &fakeDirs{}, containers, containers, client, AppInitializeConfig{Cipher: testCipher(t)})
+	handler := NewAppInitializeHandler(store, &fakeDirs{}, containers, containers, client, AppInitializeConfig{Cipher: testCipher(t)})
 	handler.SetRuntimeFileWriter(rw)
 	// 不调 SetKnowledgeReader,h.knowledge 保持 nil。
 
@@ -735,7 +725,7 @@ func TestEnsureAPIKey_CreateAPIKeyFailureRecordsAudit(t *testing.T) {
 		Cipher:      testCipher(t),
 		AuditHelper: helper,
 	}
-	handler := NewAppInitializeHandler(store, &fakeImages{}, &fakeDirs{}, &fakeContainers{}, &fakeContainers{}, client, cfg)
+	handler := NewAppInitializeHandler(store, &fakeDirs{}, &fakeContainers{}, &fakeContainers{}, client, cfg)
 
 	err := handler.Handle(context.Background(), buildJob(t, testAppID, ""))
 	require.ErrorIs(t, err, newapi.ErrUpstream)
@@ -760,7 +750,7 @@ func TestEnsureAPIKey_GetTokenFullKeyFailureRecordsAudit(t *testing.T) {
 		Cipher:      testCipher(t),
 		AuditHelper: helper,
 	}
-	handler := NewAppInitializeHandler(store, &fakeImages{}, &fakeDirs{}, &fakeContainers{}, &fakeContainers{}, client, cfg)
+	handler := NewAppInitializeHandler(store, &fakeDirs{}, &fakeContainers{}, &fakeContainers{}, client, cfg)
 
 	err := handler.Handle(context.Background(), buildJob(t, testAppID, ""))
 	if err == nil || !strings.Contains(err.Error(), "取完整 sk-") {
@@ -772,46 +762,20 @@ func TestEnsureAPIKey_GetTokenFullKeyFailureRecordsAudit(t *testing.T) {
 	require.True(t, strings.Contains(rec.events[0].TargetID, "42"))
 }
 
-// noopImageCoordinator 满足 ImageCoordinator 接口,PullImage / SyncToNode 都立即返回 nil。
-// 用于不关心镜像阶段细节的测试用例:推 5 阶段时不让 phasePull / phaseSync 退化成 nil
-// 快路径,而是真正走 coord 分支并正常收尾。
-type noopImageCoordinator struct{}
-
-// PullImage 关闭订阅 channel 后直接返回成功;不发送任何 ProgressEvent。
-func (noopImageCoordinator) PullImage(_ context.Context, _ string, sub chan<- imagecoord.ProgressEvent) error {
-	close(sub)
-	return nil
+// errNodeDockerProvider 实现 NodeDockerProvider，DockerClientForNode 总是返回预设错误。
+// 用于测试 phasePullRuntimeImage 在获取 Docker 客户端失败时的错误路径。
+type errNodeDockerProvider struct {
+	err error
 }
 
-// SyncToNode 关闭订阅 channel 后直接返回成功;不发送任何 ProgressEvent。
-func (noopImageCoordinator) SyncToNode(_ context.Context, _, _ string, sub chan<- imagecoord.ProgressEvent) error {
-	close(sub)
-	return nil
-}
-
-// errCoord 在指定阶段返回 error,其它阶段返回 nil。
-// pullErr 非 nil 触发 phasePull 失败,syncErr 非 nil 触发 phaseSync 失败。
-type errCoord struct {
-	pullErr error
-	syncErr error
-}
-
-// PullImage 关闭订阅 channel 后返回 pullErr(可能为 nil)。
-func (e *errCoord) PullImage(_ context.Context, _ string, sub chan<- imagecoord.ProgressEvent) error {
-	close(sub)
-	return e.pullErr
-}
-
-// SyncToNode 关闭订阅 channel 后返回 syncErr(可能为 nil)。
-func (e *errCoord) SyncToNode(_ context.Context, _, _ string, sub chan<- imagecoord.ProgressEvent) error {
-	close(sub)
-	return e.syncErr
+func (p *errNodeDockerProvider) DockerClientForNode(_ context.Context, _ string) (*dockerclient.Client, error) {
+	return nil, p.err
 }
 
 // TestAppInitializeHandler_Phases_Progress 验证 5 阶段每阶段都把 status 推进一格,
-// 共 6 次 SetAppStatus(5 个 init 子状态 + binding_waiting)。
+// 共 5 次 SetAppStatus(4 个 init 子状态 + binding_waiting)。
 //
-// 注入 noopImageCoordinator,使 phasePull / phaseSync 走 coord 分支但不报错;
+// imagePullCoord / nodeDockerProv 均未注入，phasePullRuntimeImage 直接跳过；
 // 其它依赖用既有 fake stub 让 happy path 跑完。
 func TestAppInitializeHandler_Phases_Progress(t *testing.T) {
 	store := newAppInitStub(t)
@@ -820,26 +784,25 @@ func TestAppInitializeHandler_Phases_Progress(t *testing.T) {
 
 	containers := &fakeContainers{result: runtimepkg.ContainerInfo{ID: "ctr-1", Name: "hermes-" + testAppID}}
 	client := &fakeNewAPI{result: newapi.APIKey{ID: 1, Key: "sk-test"}}
-	handler := NewAppInitializeHandler(store, &fakeImages{}, &fakeDirs{}, containers, containers, client, AppInitializeConfig{
+	handler := NewAppInitializeHandler(store, &fakeDirs{}, containers, containers, client, AppInitializeConfig{
 		RuntimeImage: "hermes:dev",
 		Cipher:       testCipher(t),
 	})
 	handler.SetRuntimeFileWriter(&fakeRuntimeFileWriter{})
-	handler.SetImageCoordinator(noopImageCoordinator{})
 
 	require.NoError(t, handler.Handle(context.Background(), buildJob(t, testAppID, "node-1")))
 
-	// 期望按顺序触发:pulling_image → syncing_image → preparing_runtime →
-	// creating_container → starting → binding_waiting,共 6 次状态切换。
+	// 期望按顺序触发:pulling_runtime_image → preparing_runtime →
+	// creating_container → starting → binding_waiting,共 5 次状态切换。
+	// phasePullRuntimeImage 因未注入 coord/provider 直接跳过，但状态仍被推进。
 	wantStatuses := []string{
-		domain.AppStatusPullingImage,
-		domain.AppStatusSyncingImage,
+		domain.AppStatusPullingRuntimeImage,
 		domain.AppStatusPreparingRuntime,
 		domain.AppStatusCreatingContainer,
 		domain.AppStatusStarting,
 		domain.AppStatusBindingWaiting,
 	}
-	require.Len(t, store.statusCalls, len(wantStatuses), "应触发 6 次 SetAppStatus")
+	require.Len(t, store.statusCalls, len(wantStatuses), "应触发 5 次 SetAppStatus")
 	for i, want := range wantStatuses {
 		assert.Equal(t, want, store.statusCalls[i].Status, "第 %d 次状态切换应推到 %s", i+1, want)
 	}
@@ -849,11 +812,11 @@ func TestAppInitializeHandler_Phases_Progress(t *testing.T) {
 	assert.False(t, store.failedSet, "成功路径不应调用 MarkAppFailed")
 }
 
-// TestAppInitializeHandler_Phases_FailureWritesLastError 表驱动覆盖 5 阶段任一失败时
+// TestAppInitializeHandler_Phases_FailureWritesLastError 表驱动覆盖各阶段失败时
 // MarkAppFailed 把 last_error_status 写为该阶段名;同时验证 app.status 收敛到 error。
 //
 // 每条 case 通过不同 stub 让对应阶段失败:
-//   - phasePull / phaseSync 用 errCoord 模拟镜像协调失败
+//   - phasePullRuntimeImage 用 errNodeDockerProvider 模拟获取 Docker 客户端失败
 //   - phasePrepare 用 store.getOrganizationErr 模拟 GetOrganization 失败
 //   - phaseCreate 用 fakeContainers.err 模拟 CreateContainer 失败
 //   - phaseStart 用 fakeContainers.startErr 模拟 StartContainer 失败
@@ -867,28 +830,18 @@ func TestAppInitializeHandler_Phases_FailureWritesLastError(t *testing.T) {
 		build func(t *testing.T) (*AppInitializeHandler, *appInitStub)
 	}{
 		{
-			// phasePull 失败:ImageCoordinator.PullImage 返回 error
-			name:   "phasePull 失败写入 pulling_image",
-			expect: domain.AppStatusPullingImage,
+			// phasePullRuntimeImage 失败:nodeDockerProv.DockerClientForNode 返回 error
+			name:   "phasePullRuntimeImage 失败写入 pulling_runtime_image",
+			expect: domain.AppStatusPullingRuntimeImage,
 			build: func(t *testing.T) (*AppInitializeHandler, *appInitStub) {
 				s := newAppInitStub(t)
 				s.app.Status = domain.AppStatusDraft
-				h := NewAppInitializeHandler(s, &fakeImages{}, &fakeDirs{}, &fakeContainers{}, &fakeContainers{}, &fakeNewAPI{result: newapi.APIKey{ID: 1, Key: "k"}}, AppInitializeConfig{Cipher: testCipher(t)})
+				h := NewAppInitializeHandler(s, &fakeDirs{}, &fakeContainers{}, &fakeContainers{}, &fakeNewAPI{result: newapi.APIKey{ID: 1, Key: "k"}}, AppInitializeConfig{Cipher: testCipher(t)})
 				h.SetRuntimeFileWriter(&fakeRuntimeFileWriter{})
-				h.SetImageCoordinator(&errCoord{pullErr: errors.New("pull failed")})
-				return h, s
-			},
-		},
-		{
-			// phaseSync 失败:SyncToNode 返回 error
-			name:   "phaseSync 失败写入 syncing_image",
-			expect: domain.AppStatusSyncingImage,
-			build: func(t *testing.T) (*AppInitializeHandler, *appInitStub) {
-				s := newAppInitStub(t)
-				s.app.Status = domain.AppStatusDraft
-				h := NewAppInitializeHandler(s, &fakeImages{}, &fakeDirs{}, &fakeContainers{}, &fakeContainers{}, &fakeNewAPI{result: newapi.APIKey{ID: 1, Key: "k"}}, AppInitializeConfig{Cipher: testCipher(t)})
-				h.SetRuntimeFileWriter(&fakeRuntimeFileWriter{})
-				h.SetImageCoordinator(&errCoord{syncErr: errors.New("sync failed")})
+				// 注入非 nil coordinator（不会被调用，因 nodeDockerProv 更早失败）。
+				h.SetImagePullCoord(imagecoord.NewCoordinator(nil, nil, "test"))
+				// DockerClientForNode 返回错误触发 phasePullRuntimeImage 失败。
+				h.SetNodeDockerProvider(&errNodeDockerProvider{err: errors.New("docker client failed")})
 				return h, s
 			},
 		},
@@ -900,9 +853,8 @@ func TestAppInitializeHandler_Phases_FailureWritesLastError(t *testing.T) {
 				s := newAppInitStub(t)
 				s.app.Status = domain.AppStatusDraft
 				s.getOrganizationErr = errors.New("org lookup failed")
-				h := NewAppInitializeHandler(s, &fakeImages{}, &fakeDirs{}, &fakeContainers{}, &fakeContainers{}, &fakeNewAPI{result: newapi.APIKey{ID: 1, Key: "k"}}, AppInitializeConfig{Cipher: testCipher(t)})
+				h := NewAppInitializeHandler(s, &fakeDirs{}, &fakeContainers{}, &fakeContainers{}, &fakeNewAPI{result: newapi.APIKey{ID: 1, Key: "k"}}, AppInitializeConfig{Cipher: testCipher(t)})
 				h.SetRuntimeFileWriter(&fakeRuntimeFileWriter{})
-				h.SetImageCoordinator(noopImageCoordinator{})
 				return h, s
 			},
 		},
@@ -914,9 +866,8 @@ func TestAppInitializeHandler_Phases_FailureWritesLastError(t *testing.T) {
 				s := newAppInitStub(t)
 				s.app.Status = domain.AppStatusDraft
 				containers := &fakeContainers{err: errors.New("create failed")}
-				h := NewAppInitializeHandler(s, &fakeImages{}, &fakeDirs{}, containers, containers, &fakeNewAPI{result: newapi.APIKey{ID: 1, Key: "k"}}, AppInitializeConfig{Cipher: testCipher(t)})
+				h := NewAppInitializeHandler(s, &fakeDirs{}, containers, containers, &fakeNewAPI{result: newapi.APIKey{ID: 1, Key: "k"}}, AppInitializeConfig{Cipher: testCipher(t)})
 				h.SetRuntimeFileWriter(&fakeRuntimeFileWriter{})
-				h.SetImageCoordinator(noopImageCoordinator{})
 				return h, s
 			},
 		},
@@ -931,9 +882,8 @@ func TestAppInitializeHandler_Phases_FailureWritesLastError(t *testing.T) {
 					result:   runtimepkg.ContainerInfo{ID: "ctr-1", Name: "hermes-" + testAppID},
 					startErr: errors.New("start failed"),
 				}
-				h := NewAppInitializeHandler(s, &fakeImages{}, &fakeDirs{}, containers, containers, &fakeNewAPI{result: newapi.APIKey{ID: 1, Key: "k"}}, AppInitializeConfig{Cipher: testCipher(t)})
+				h := NewAppInitializeHandler(s, &fakeDirs{}, containers, containers, &fakeNewAPI{result: newapi.APIKey{ID: 1, Key: "k"}}, AppInitializeConfig{Cipher: testCipher(t)})
 				h.SetRuntimeFileWriter(&fakeRuntimeFileWriter{})
-				h.SetImageCoordinator(noopImageCoordinator{})
 				return h, s
 			},
 		},
@@ -967,12 +917,11 @@ func TestAppInitializeHandler_IdempotentReentry(t *testing.T) {
 
 	containers := &fakeContainers{result: runtimepkg.ContainerInfo{ID: "ctr-1", Name: "hermes-" + testAppID}}
 	client := &fakeNewAPI{result: newapi.APIKey{ID: 1, Key: "k"}}
-	handler := NewAppInitializeHandler(store, &fakeImages{}, &fakeDirs{}, containers, containers, client, AppInitializeConfig{
+	handler := NewAppInitializeHandler(store, &fakeDirs{}, containers, containers, client, AppInitializeConfig{
 		RuntimeImage: "hermes:dev",
 		Cipher:       testCipher(t),
 	})
 	handler.SetRuntimeFileWriter(&fakeRuntimeFileWriter{})
-	handler.SetImageCoordinator(noopImageCoordinator{})
 
 	require.NoError(t, handler.Handle(context.Background(), buildJob(t, testAppID, "node-1")))
 

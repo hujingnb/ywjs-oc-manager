@@ -18,7 +18,10 @@ import (
 	"oc-manager/internal/domain"
 	"oc-manager/internal/integrations/hermes"
 	"oc-manager/internal/integrations/newapi"
+	dockerclient "github.com/docker/docker/client"
+
 	runtimepkg "oc-manager/internal/integrations/runtime"
+	"oc-manager/internal/runtime/imagecoord"
 	"oc-manager/internal/store/sqlc"
 )
 
@@ -36,6 +39,8 @@ type AppInitializeStore interface {
 	SetAppProgress(ctx context.Context, arg sqlc.SetAppProgressParams) (sqlc.App, error)
 	ClearAppProgress(ctx context.Context, id pgtype.UUID) (sqlc.App, error)
 	MarkAppFailed(ctx context.Context, arg sqlc.MarkAppFailedParams) (sqlc.App, error)
+	// UpdateAppRuntimeImage 把 PullImageOnNode 返回的镜像引用和 sha256 写入 apps 表。
+	UpdateAppRuntimeImage(ctx context.Context, arg sqlc.UpdateAppRuntimeImageParams) (sqlc.App, error)
 }
 
 // ContainerCreator 抽象通过 agent docker 代理创建容器的能力。
@@ -97,6 +102,12 @@ type ContainerState struct {
 // 只是状态机会立即推到 binding_waiting，等后续健康检查任务再确认状态。
 type HermesHealthChecker interface {
 	WaitContainerHealthy(ctx context.Context, nodeID, containerID string, timeout time.Duration) error
+}
+
+// NodeDockerProvider 抽象按 nodeID 获取 Docker SDK 客户端（指向该节点 agent docker proxy）的能力。
+// 生产装配由 AgentBackedAdapter.DockerClientForNode 实现；测试可注入内存桩。
+type NodeDockerProvider interface {
+	DockerClientForNode(ctx context.Context, nodeID string) (*dockerclient.Client, error)
 }
 
 // APIKeyClient 是「以业务 user 身份调 token 相关接口」的最小能力集合。
@@ -181,8 +192,14 @@ type AppInitializeHandler struct {
 	knowledge    KnowledgeReader
 	containers   ContainerCreator
 	starter      ContainerStarter
-	factory NewAPIClientFactory
-	cfg     AppInitializeConfig
+	factory      NewAPIClientFactory
+	cfg          AppInitializeConfig
+	// imagePullCoord 负责跨 manager 实例对同一 (nodeID, imageRef) 做 single-flight pull。
+	// nil 时 phasePullRuntimeImage 跳过拉取（仅供测试装配）。
+	imagePullCoord *imagecoord.Coordinator
+	// nodeDockerProv 按 nodeID 返回指向目标节点 agent docker proxy 的 SDK 客户端。
+	// nil 时 phasePullRuntimeImage 跳过拉取。
+	nodeDockerProv NodeDockerProvider
 }
 
 // NewAppInitializeHandler 创建 handler。dirs / containers / starter 可传 nil，
@@ -222,6 +239,18 @@ func (h *AppInitializeHandler) SetRuntimeFileWriter(w AppRuntimeFileWriter) {
 // nil 时跳过 skill 写入(仅保留旧测试装配兼容)。
 func (h *AppInitializeHandler) SetKnowledgeReader(r KnowledgeReader) {
 	h.knowledge = r
+}
+
+// SetImagePullCoord 注入镜像拉取协调器。
+// 生产环境必须注入，否则 phasePullRuntimeImage 会直接跳过拉取步骤。
+func (h *AppInitializeHandler) SetImagePullCoord(coord *imagecoord.Coordinator) {
+	h.imagePullCoord = coord
+}
+
+// SetNodeDockerProvider 注入 per-node Docker SDK 客户端工厂。
+// 生产环境必须注入，否则 phasePullRuntimeImage 会直接跳过拉取步骤。
+func (h *AppInitializeHandler) SetNodeDockerProvider(prov NodeDockerProvider) {
+	h.nodeDockerProv = prov
 }
 
 // Handle 是 worker 调用入口。
@@ -314,9 +343,53 @@ func (h *AppInitializeHandler) markFailed(ctx context.Context, app *sqlc.App, ph
 }
 
 // phasePullRuntimeImage 通过 agent docker proxy 在目标节点拉取 hermes runtime 镜像。
-// 完整实现在 Task 7 中注入；当前版本是占位，允许代码编译通过。
-// 生产环境须通过 SetImagePullCoord 和 SetNodeDockerProvider 注入后才有效。
-func (h *AppInitializeHandler) phasePullRuntimeImage(_ context.Context, _ *sqlc.App, _ appInitializePayload, _ *progressReporter) error {
+//
+// 流程：
+//  1. 若 imagePullCoord 或 nodeDockerProv 未注入（如测试装配），直接跳过。
+//  2. 从 cfg.RuntimeImage 取镜像引用，通过 nodeDockerProv 获取目标节点的 Docker 客户端。
+//  3. 调 imagePullCoord.PullImageOnNode：跨 manager 实例 single-flight，
+//     同 (nodeID, imageRef) 串行，订阅者 chan 接收 NDJSON 进度并转发给 reporter。
+//  4. 把 imageRef 和 sha256 写入 apps.runtime_image_ref / runtime_image_sha256。
+func (h *AppInitializeHandler) phasePullRuntimeImage(ctx context.Context, app *sqlc.App, payload appInitializePayload, reporter *progressReporter) error {
+	if h.imagePullCoord == nil || h.nodeDockerProv == nil {
+		return nil
+	}
+	if payload.RuntimeNodeID == "" {
+		return nil
+	}
+	imageRef := h.cfg.RuntimeImage
+	cli, err := h.nodeDockerProv.DockerClientForNode(ctx, payload.RuntimeNodeID)
+	if err != nil {
+		return fmt.Errorf("获取节点 Docker 客户端失败: %w", err)
+	}
+
+	// subscriber 缓冲足以吸收一次 tick 积压，防止 coordinator 因满 chan 丢事件。
+	subscriber := make(chan imagecoord.ProgressEvent, 8)
+	// 启 goroutine 把进度转发给 reporter；PullImageOnNode 返回时 subscriber 已被 close。
+	progressDone := make(chan struct{})
+	go func() {
+		defer close(progressDone)
+		for ev := range subscriber {
+			reporter.Receive(ctx, ev)
+		}
+	}()
+
+	sha256, err := h.imagePullCoord.PullImageOnNode(ctx, payload.RuntimeNodeID, imageRef, cli, subscriber)
+	<-progressDone // 等进度 goroutine 结束
+	if err != nil {
+		return fmt.Errorf("在节点 %s 拉取镜像 %s 失败: %w", payload.RuntimeNodeID, imageRef, err)
+	}
+
+	// 把镜像信息写入 apps 表，供后续创建容器和前端展示使用。
+	updated, err := h.store.UpdateAppRuntimeImage(ctx, sqlc.UpdateAppRuntimeImageParams{
+		ID:                 app.ID,
+		RuntimeImageRef:    imageRef,
+		RuntimeImageSha256: sha256,
+	})
+	if err != nil {
+		return fmt.Errorf("写入 runtime 镜像信息失败: %w", err)
+	}
+	*app = updated
 	return nil
 }
 
@@ -370,11 +443,18 @@ func (h *AppInitializeHandler) phaseCreate(ctx context.Context, app *sqlc.App, p
 	if err != nil {
 		return err
 	}
+	// 优先使用 phasePullRuntimeImage 写入的 RuntimeImageRef；
+	// 若未拉取（如 imagePullCoord 未注入），退回到 cfg.RuntimeImage。
+	imageRef := app.RuntimeImageRef
+	if imageRef == "" {
+		imageRef = h.cfg.RuntimeImage
+	}
 	spec := runtimepkg.ContainerSpec{
-		Name:       "hermes-" + payload.AppID,
-		Image:      h.cfg.RuntimeImage,
-		Networks:   h.cfg.ContainerNetworks,
-		WorkingDir: "/opt/data/workspace",
+		Name:          "hermes-" + payload.AppID,
+		Image:         imageRef,
+		Networks:      h.cfg.ContainerNetworks,
+		WorkingDir:    "/opt/data/workspace",
+		RestartPolicy: "always",
 		Env: map[string]string{
 			"OPENAI_API_KEY":  containerAPIKey,
 			"OPENAI_BASE_URL": h.cfg.NewAPIBaseURL + "/v1",

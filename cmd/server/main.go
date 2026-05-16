@@ -295,9 +295,12 @@ func runManager(ctx context.Context, cfg config.Config, logOut io.Writer) error 
 	// 遍历组织 + 应用知识库,把每个文件渲染成 .hermes/skills/kb-{org,app}-<slug>/SKILL.md,
 	// Hermes 启动时按 skill 机制扫描该目录,使知识库内容进入 agent 上下文。
 	appInitHandler.SetKnowledgeReader(knowledgeMaster)
-	// Task 7: SetImagePullCoord / SetNodeDockerProvider 在 phasePullRuntimeImage
-	// 实现完成后注入；imageCoord 在此保持引用避免编译报 "declared and not used"。
-	_ = imageCoord
+	// 注入镜像拉取协调器：phasePullRuntimeImage 通过 imageCoord 在目标 agent 节点直接
+	// pull hermes runtime 镜像，Redis 锁 + Pub/Sub 保证集群内 single-flight + 跨实例进度广播。
+	appInitHandler.SetImagePullCoord(imageCoord)
+	// 注入 per-node Docker 客户端工厂：runtimeAdapter 已实现 DockerClientForNode，
+	// 返回指向目标节点 agent docker proxy 的 Docker SDK client。
+	appInitHandler.SetNodeDockerProvider(runtimeAdapter)
 	if err := registry.Register("app_initialize", appInitHandler.Handle); err != nil {
 		return fmt.Errorf("注册 app_initialize handler 失败: %w", err)
 	}
