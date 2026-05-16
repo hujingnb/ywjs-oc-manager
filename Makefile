@@ -7,14 +7,21 @@
 SWAG_VERSION := v2.0.0-rc5
 OPENAPI_TS_VERSION := 7.13.0
 
-# hermes runtime 生产镜像构建发布参数。
-# HERMES_IMAGE_REPO 默认指向 aliyun 私有 ACR 上的 ywjs_app/oc-manager-hermes,
-# 走其他 registry 时在命令行覆盖即可。
+# 统一镜像 tag：取 make 调用时的本地时间，格式 YYYY-MM-DD-HH-MM-SS。
+# 同一次 make 调用中所有生产镜像共享同一时间戳，避免同批镜像 tag 不一致。
+IMAGE_TIMESTAMP := $(shell date +%Y-%m-%d-%H-%M-%S)
+
+# 各服务生产镜像仓库（统一走 aliyun 私有 ACR ywjs_app 命名空间）。
+# 走其他 registry 时在命令行覆盖对应变量即可。
+API_IMAGE_REPO   ?= crpi-nu3ibz4f07feyghi.cn-beijing.personal.cr.aliyuncs.com/ywjs_app/oc-manager-api
+AGENT_IMAGE_REPO ?= crpi-nu3ibz4f07feyghi.cn-beijing.personal.cr.aliyuncs.com/ywjs_app/oc-manager-agent
+WEB_IMAGE_REPO   ?= crpi-nu3ibz4f07feyghi.cn-beijing.personal.cr.aliyuncs.com/ywjs_app/oc-manager-web
+
+# hermes runtime 生产镜像仓库，与上方三个服务保持一致命名风格。
 HERMES_IMAGE_REPO ?= crpi-nu3ibz4f07feyghi.cn-beijing.personal.cr.aliyuncs.com/ywjs_app/oc-manager-hermes
-# HERMES_IMAGE_TAG 必须由调用方显式指定,守门 target 会拒绝空值与 latest,
-# 与 deploy/operations.md 4.2 "禁用 latest / 分支 tag / 版本族 tag" 的约束保持一致。
-HERMES_IMAGE_TAG ?=
-HERMES_IMAGE := $(HERMES_IMAGE_REPO):$(HERMES_IMAGE_TAG)
+# hermes tag 统一使用 IMAGE_TIMESTAMP，不再要求调用方显式传入。
+HERMES_IMAGE_TAG  := $(IMAGE_TIMESTAMP)
+HERMES_IMAGE      := $(HERMES_IMAGE_REPO):$(HERMES_IMAGE_TAG)
 
 # 输入 make 不带参数时, 显式跳到 help target, 输出按分组的可用 target 列表。
 .DEFAULT_GOAL := help
@@ -87,36 +94,64 @@ build-hermes-runtime: ## 本地构建 hermes runtime dev 镜像 (tag: hermes-run
 verify-hermes-runtime: ## 跑 verify-hermes-runtime.sh 校验镜像
 	./scripts/verify-hermes-runtime.sh
 
-# .guard-hermes-image-tag 校验生产 tag 必须显式指定且不能是 latest;
-# build / push / release 三个 hermes 生产镜像 target 都先经过它,避免误推 latest 或空 tag。
-# dot-prefix 命名让 help target 的 awk 正则不会把它列出, 是隐藏的内部 target。
-.PHONY: .guard-hermes-image-tag
-.guard-hermes-image-tag:
-	@if [ -z "$(HERMES_IMAGE_TAG)" ]; then \
-	  echo "❌ HERMES_IMAGE_TAG 必须显式指定,例如: make release-hermes-image HERMES_IMAGE_TAG=v1.0.0"; \
-	  exit 1; \
-	fi
-	@if [ "$(HERMES_IMAGE_TAG)" = "latest" ]; then \
-	  echo "❌ 生产禁用 latest tag,使用具体版本号(参见 deploy/operations.md 4.2)"; \
-	  exit 1; \
-	fi
+##@ 镜像构建发布
 
-# build-hermes-image 在本地构建 hermes runtime 生产镜像,直接打上 aliyun ACR 完整 tag,
-# 不推送,便于发布前先在本地跑 verify-hermes-runtime 等校验脚本。
+# api / agent 构建上下文为仓库根目录（需访问 go.mod / internal/ 等源码），
+# web 构建上下文为 web/ 子目录（前端工程相对自包含，无需整个仓库）。
+# 同一次 make 调用中四个服务共享 IMAGE_TIMESTAMP，保证同批镜像 tag 一致。
+
+.PHONY: build-api-image
+build-api-image: ## 本地构建 manager-api 生产镜像，tag 取当前时间戳
+	docker build -t $(API_IMAGE_REPO):$(IMAGE_TIMESTAMP) -f cmd/server/Dockerfile .
+
+.PHONY: push-api-image
+push-api-image: ## 推送 manager-api 生产镜像到 aliyun ACR
+	docker push $(API_IMAGE_REPO):$(IMAGE_TIMESTAMP)
+
+.PHONY: release-api-image
+release-api-image: build-api-image push-api-image ## 构建并推送 manager-api 生产镜像
+	@echo "✅ manager-api 镜像 $(API_IMAGE_REPO):$(IMAGE_TIMESTAMP) 已构建并推送"
+
+.PHONY: build-agent-image
+build-agent-image: ## 本地构建 runtime-agent 生产镜像，tag 取当前时间戳
+	docker build -t $(AGENT_IMAGE_REPO):$(IMAGE_TIMESTAMP) -f runtime/agent/Dockerfile .
+
+.PHONY: push-agent-image
+push-agent-image: ## 推送 runtime-agent 生产镜像到 aliyun ACR
+	docker push $(AGENT_IMAGE_REPO):$(IMAGE_TIMESTAMP)
+
+.PHONY: release-agent-image
+release-agent-image: build-agent-image push-agent-image ## 构建并推送 runtime-agent 生产镜像
+	@echo "✅ runtime-agent 镜像 $(AGENT_IMAGE_REPO):$(IMAGE_TIMESTAMP) 已构建并推送"
+
+.PHONY: build-web-image
+build-web-image: ## 本地构建 manager-web 生产镜像，tag 取当前时间戳
+	docker build -t $(WEB_IMAGE_REPO):$(IMAGE_TIMESTAMP) -f web/Dockerfile ./web
+
+.PHONY: push-web-image
+push-web-image: ## 推送 manager-web 生产镜像到 aliyun ACR
+	docker push $(WEB_IMAGE_REPO):$(IMAGE_TIMESTAMP)
+
+.PHONY: release-web-image
+release-web-image: build-web-image push-web-image ## 构建并推送 manager-web 生产镜像
+	@echo "✅ manager-web 镜像 $(WEB_IMAGE_REPO):$(IMAGE_TIMESTAMP) 已构建并推送"
+
+# build-hermes-image 在本地构建 hermes runtime 生产镜像，直接打上 aliyun ACR 完整 tag，
+# 不推送，便于发布前先在本地跑 verify-hermes-runtime 等校验脚本。
 .PHONY: build-hermes-image
-build-hermes-image: .guard-hermes-image-tag ## 本地构建 hermes runtime 生产镜像, 打上 aliyun ACR tag (需 HERMES_IMAGE_TAG)
+build-hermes-image: ## 本地构建 hermes runtime 生产镜像，tag 取当前时间戳
 	docker build -t $(HERMES_IMAGE) ./runtime/hermes
 
-# push-hermes-image 推送已构建的 hermes runtime 生产镜像; 构建步骤独立,
+# push-hermes-image 推送已构建的 hermes runtime 生产镜像；构建步骤独立，
 # 方便在 ACR 凭据未就绪 / verify 未通过时只 build 不 push。
 .PHONY: push-hermes-image
-push-hermes-image: .guard-hermes-image-tag ## 推送 hermes runtime 生产镜像到 aliyun ACR (需 HERMES_IMAGE_TAG)
+push-hermes-image: ## 推送 hermes runtime 生产镜像到 aliyun ACR
 	docker push $(HERMES_IMAGE)
 
-# release-hermes-image 一步完成本地构建 + 推送,是日常发版入口;
-# 推送完成后输出最终镜像引用,方便复制到 deploy/manage/config/manager.yaml 的 hermes.runtime_image。
+# release-hermes-image 一步完成本地构建 + 推送，是日常发版入口；
+# 推送完成后输出最终镜像引用，方便复制到 deploy/manage/config/manager.yaml 的 hermes.runtime_image。
 .PHONY: release-hermes-image
-release-hermes-image: build-hermes-image push-hermes-image ## 本地构建并推送 hermes runtime 生产镜像 (需 HERMES_IMAGE_TAG)
+release-hermes-image: build-hermes-image push-hermes-image ## 构建并推送 hermes runtime 生产镜像
 	@echo "✅ hermes 镜像 $(HERMES_IMAGE) 已构建并推送"
 
 ##@ 调试脚本
