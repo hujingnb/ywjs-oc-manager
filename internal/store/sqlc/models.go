@@ -39,6 +39,12 @@ type App struct {
 	HealthStateJson     []byte             `db:"health_state_json" json:"health_state_json"`
 	// 实例当前使用的模型 ID，由 manager 注入 Hermes 配置。
 	ModelID string `db:"model_id" json:"model_id"`
+	// 当前 status 对应阶段的已完成量;语义随 status 变化(字节 / 秒 / count),不可知时为 NULL。
+	ProgressCurrent pgtype.Int8 `db:"progress_current" json:"progress_current"`
+	// 当前 status 对应阶段的总量;不可知时为 NULL(前端展示为不定进度)。
+	ProgressTotal pgtype.Int8 `db:"progress_total" json:"progress_total"`
+	// 上次进入 error 时所在的状态值;进入 error 时写入,重新发起对应转移时清空。不加 CHECK,靠应用层在写入时校验。
+	LastErrorStatus pgtype.Text `db:"last_error_status" json:"last_error_status"`
 }
 
 // 审计日志表，记录关键操作、结果和错误信息；普通业务 API 不允许修改或删除。
@@ -66,8 +72,7 @@ type ChannelBinding struct {
 	AppID       pgtype.UUID `db:"app_id" json:"app_id"`
 	ChannelType string      `db:"channel_type" json:"channel_type"`
 	Status      string      `db:"status" json:"status"`
-	// 微信渠道 iLink Bot 身份,格式 <hex>@im.bot(Hermes runtime 时代)。
-	// 历史:OpenClaw runtime 时代为 <wxid>@im.wechat。
+	// 微信渠道 iLink Bot 身份,格式 <hex>@im.bot(Hermes runtime 时代)。历史:OpenClaw runtime 时代为 <wxid>@im.wechat。
 	BoundIdentity pgtype.Text `db:"bound_identity" json:"bound_identity"`
 	ChannelName   pgtype.Text `db:"channel_name" json:"channel_name"`
 	// 渠道特有元数据，例如二维码 payload、过期时间和登录 challenge。
