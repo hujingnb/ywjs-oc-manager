@@ -9,15 +9,36 @@ export interface StatusView {
 }
 
 // appStatusViews 覆盖应用生命周期状态，新增后端状态时应同步补充。
+// 5 个 init 子状态文案与后端状态机 1:1 对应，用户能直观看到“现在在做什么”。
 const appStatusViews: Record<string, StatusView> = {
-  draft: { label: '草稿', tone: 'neutral' },
-  initializing: { label: '初始化中', tone: 'warning' },
-  binding_waiting: { label: '待绑定', tone: 'warning' },
-  binding_failed: { label: '绑定失败', tone: 'danger' },
-  running: { label: '运行中', tone: 'success' },
-  stopped: { label: '已停止', tone: 'neutral' },
-  error: { label: '异常', tone: 'danger' },
-  deleted: { label: '已删除', tone: 'neutral' },
+  draft:               { label: '待初始化',         tone: 'neutral' },
+  pulling_image:       { label: '拉取运行时镜像',   tone: 'warning' },
+  syncing_image:       { label: '同步镜像到节点',   tone: 'warning' },
+  preparing_runtime:   { label: '准备运行时配置',   tone: 'warning' },
+  creating_container:  { label: '创建容器',         tone: 'warning' },
+  starting:            { label: '启动容器',         tone: 'warning' },
+  binding_waiting:     { label: '待绑定',           tone: 'warning' },
+  binding_failed:      { label: '绑定失败',         tone: 'danger' },
+  running:             { label: '运行中',           tone: 'success' },
+  stopped:             { label: '已停止',           tone: 'neutral' },
+  error:               { label: '异常',             tone: 'danger' },
+  deleted:             { label: '已删除',           tone: 'neutral' },
+}
+
+// initPhaseStatuses 是 worker 初始化期间会出现的 5 个子状态集合。
+// AppOverviewTab 在 status ∈ 该集合时额外渲染 progress 进度条。
+// 集合写在这里集中维护，避免组件硬编码字符串列表。
+const initPhaseStatuses: ReadonlySet<string> = new Set([
+  'pulling_image',
+  'syncing_image',
+  'preparing_runtime',
+  'creating_container',
+  'starting',
+])
+
+// isInitPhase 判断 status 是否处于初始化进度可视化的 5 个子状态之一。
+export function isInitPhase(status: string): boolean {
+  return initPhaseStatuses.has(status)
 }
 
 // formatAppStatus 将后端状态机值映射为页面可展示的中文标签和视觉语义。
