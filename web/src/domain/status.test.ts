@@ -14,6 +14,8 @@ describe('formatAppStatus', () => {
   it('formats known app statuses', () => {
     expect(formatAppStatus('running')).toEqual({ label: '运行中', tone: 'success' })
     expect(formatAppStatus('binding_failed')).toEqual({ label: '绑定失败', tone: 'danger' })
+    // pulling_runtime_image 是 4 阶段 init 的第一阶段，必须有对应中文标签
+    expect(formatAppStatus('pulling_runtime_image')).toEqual({ label: '拉取运行时镜像', tone: 'warning' })
   })
 
   it('keeps unknown statuses visible', () => {

@@ -206,10 +206,10 @@ describe('AppOverviewTab', () => {
 // 2) total>0 时按字节渲染 current/total;
 // 3) status=error + last_error_status 显示对应中文阶段。
 describe('AppOverviewTab progress', () => {
-  // pulling_image 阶段且 total 未知时只渲染不定进度条,不展示字节文案
+  // pulling_runtime_image 阶段且 total 未知时只渲染不定进度条,不展示字节文案
   it('init 阶段且 total=0 时展示不定进度', () => {
     const wrapper = mountWithApp({
-      status: 'pulling_image',
+      status: 'pulling_runtime_image',
       progress_current: 0,
       progress_total: 0,
     })
@@ -217,10 +217,10 @@ describe('AppOverviewTab progress', () => {
     expect(wrapper.find('.init-progress-bytes').exists()).toBe(false)
   })
 
-  // syncing_image 阶段且 total>0 时按 1.0 KB / 4.0 KB 渲染字节文案
+  // pulling_runtime_image 阶段且 total>0 时按 1.0 KB / 4.0 KB 渲染字节文案
   it('init 阶段且 total>0 时展示字节进度', () => {
     const wrapper = mountWithApp({
-      status: 'syncing_image',
+      status: 'pulling_runtime_image',
       progress_current: 1024,
       progress_total: 4096,
     })
@@ -230,12 +230,12 @@ describe('AppOverviewTab progress', () => {
     expect(bytes.text()).toContain('4.0 KB')
   })
 
-  // error + last_error_status=syncing_image 时按 status.ts 映射展示「同步镜像到节点」中文
+  // error + last_error_status=pulling_runtime_image 时按 status.ts 映射展示「拉取运行时镜像」中文
   it('error 时展示失败阶段', () => {
     const wrapper = mountWithApp({
       status: 'error',
-      last_error_status: 'syncing_image',
+      last_error_status: 'pulling_runtime_image',
     })
-    expect(wrapper.find('.init-failure').text()).toContain('同步镜像到节点')
+    expect(wrapper.find('.init-failure').text()).toContain('拉取运行时镜像')
   })
 })

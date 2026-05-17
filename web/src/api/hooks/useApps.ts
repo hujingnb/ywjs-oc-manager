@@ -158,7 +158,7 @@ export function useAppsByOrgQuery(orgId: Ref<string | undefined>) {
 // useAppQuery 查询单个应用。
 // appId 为空时 query 被禁用；data 通常为 undefined，除非同一缓存键已有旧数据。
 // 应用处于 init / draft / starting / binding_waiting 等过渡状态时启用 1.5s 轮询，
-// 让前端进度条与状态 tag 能跟随后端 5 阶段状态机实时变化；进入稳态（running / stopped / error
+// 让前端进度条与状态 tag 能跟随后端 4 阶段状态机实时变化；进入稳态（running / stopped / error
 // 等）后停止轮询，避免长期占用带宽与 DB。
 export function useAppQuery(appId: Ref<string | undefined>) {
   return useQuery<AppDTO | null>({
@@ -169,8 +169,7 @@ export function useAppQuery(appId: Ref<string | undefined>) {
       const status = query.state.data?.status
       const transitionalStatuses = new Set([
         'draft',
-        'pulling_image',
-        'syncing_image',
+        'pulling_runtime_image',
         'preparing_runtime',
         'creating_container',
         'starting',
