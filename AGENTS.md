@@ -50,6 +50,11 @@
 - stdlib `t.Fatalf` / `t.Errorf` 仅在极个别 helper / table-driven 复合
   格式化场景保留，不再做新增。
 
+## 余额与用量数据
+
+- 余额（当前剩余额度）和用量数据必须实时从 new-api 查询获取，manager 不做本地缓存或持久化。
+- manager 仅保留自身操作产生的记录（如 `recharge_records` 充值操作日志），不得将 new-api 侧的余额/用量快照写入本地数据库。
+
 ## users.deleted_at 语义
 
 - `users.deleted_at` 字段语义为「下线时间戳」（即 `status=disabled` 时由
