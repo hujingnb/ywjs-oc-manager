@@ -27,14 +27,16 @@ export interface RechargeRecordDTO {
   created_at: string
 }
 
-// BalanceDTO 是组织在 new-api 中的余额快照。
+// BalanceDTO 是组织在 new-api 中的余额快照，附带本地聚合的累计充值金额。
 export interface BalanceDTO {
   // new-api 用户 ID。
   newapi_user_id: number
-  // 剩余额度。
+  // 剩余额度（实时从 new-api 查询）。
   remain_quota: number
   // 已用额度。
   used_quota: number
+  // 累计充值金额（来自 manager recharge_records 聚合，仅计 succeeded 记录）。
+  total_recharged: number
 }
 
 // BillingStatusDTO 是 new-api 的计费展示配置，manager 只负责透传展示，不管理单价。
