@@ -27,6 +27,7 @@ import OrgKnowledgePage from '@/pages/knowledge/OrgKnowledgePage.vue'
 import RuntimeNodeDetailPage from '@/pages/runtime-nodes/RuntimeNodeDetailPage.vue'
 import RuntimeNodesPage from '@/pages/runtime-nodes/RuntimeNodesPage.vue'
 import UsagePage from '@/pages/usage/UsagePage.vue'
+import OrgBalancePage from '@/pages/org/OrgBalancePage.vue'
 import { useAuthStore } from '@/stores/auth'
 
 // allowedRoles 表示可访问该路由的角色集合；undefined 表示对所有已登录用户开放。
@@ -61,6 +62,7 @@ export const router = createRouter({
         { path: 'runtime-nodes/:nodeId', component: RuntimeNodeDetailPage, meta: { allowedRoles: PLATFORM_ONLY } },
         { path: 'knowledge', component: OrgKnowledgePage },
         { path: 'usage', component: UsagePage },
+        { path: 'balance', component: OrgBalancePage, meta: { allowedRoles: ORG_ADMIN_ONLY } },
         { path: 'apps', component: AppsPage },
         {
           path: 'apps/:appId',

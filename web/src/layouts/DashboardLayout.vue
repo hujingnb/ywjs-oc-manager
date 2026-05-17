@@ -81,7 +81,7 @@ import {
 } from 'naive-ui'
 import {
   BarChart3, BookOpen, Bot, Building2, FileSearch, Gauge,
-  LayoutDashboard, LogOut, RefreshCw, Server, Users,
+  LayoutDashboard, LogOut, RefreshCw, Server, Users, Wallet,
 } from 'lucide-vue-next'
 
 import { useAuthStore } from '@/stores/auth'
@@ -108,6 +108,7 @@ const activeKey = computed(() => {
     '/apps',
     '/knowledge',
     '/usage',
+    '/balance',
     '/audit-logs',
     '/runtime-nodes',
     '/org/persona',
@@ -117,6 +118,8 @@ const activeKey = computed(() => {
 
 const isPlatformAdmin = computed(() => auth.isPlatformAdmin)
 const isOrgMember = computed(() => auth.isOrgMember)
+// isOrgAdmin 用于控制账户余额菜单项的可见性，仅组织管理员需要此入口。
+const isOrgAdmin = computed(() => auth.isOrgAdmin)
 
 // menuOptions 根据角色裁剪入口：普通成员不显示组织管理和审计，平台管理员额外显示平台能力。
 const menuOptions = computed<MenuOption[]>(() => {
@@ -136,6 +139,10 @@ const menuOptions = computed<MenuOption[]>(() => {
     { key: '/knowledge', label: '知识库', icon: () => h(BookOpen, { size: 18 }) },
     { key: '/usage', label: '用量', icon: () => h(BarChart3, { size: 18 }) },
   )
+  // 账户余额仅对 org_admin 显示；org_member 和 platform_admin 无此入口。
+  if (isOrgAdmin.value) {
+    items.push({ key: '/balance', label: '账户余额', icon: () => h(Wallet, { size: 18 }) })
+  }
   if (!isOrgMember.value) {
     items.push({ key: '/audit-logs', label: '审计', icon: () => h(FileSearch, { size: 18 }) })
   }
