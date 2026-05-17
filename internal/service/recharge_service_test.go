@@ -74,12 +74,13 @@ func TestRecharge_NewAPIErrorStillWritesFailedRecord(t *testing.T) {
 	require.True(t, store.auditWritten)
 }
 
-// TestListRecharges_DeniesNonPlatformAdmin 验证列表充值记录Denies非平台管理员的预期行为场景。
-func TestListRecharges_DeniesNonPlatformAdmin(t *testing.T) {
+// TestListRecharges_DeniesOrgMember 验证普通成员无权查看充值记录。
+func TestListRecharges_DeniesOrgMember(t *testing.T) {
 	store := newRechargeStub(t, "1234")
 	svc := NewRechargeService(store, &fakeNewAPIRecharge{})
-	_, err := svc.ListRecharges(context.Background(), auth.Principal{Role: domain.UserRoleOrgAdmin}, testRechargeOrgID, 0, 0)
-	require.ErrorIs(t, err, ErrRechargeDenied)
+	// org_member 不在 CanViewRecharges 允许范围内，返回 ErrForbidden。
+	_, err := svc.ListRecharges(context.Background(), auth.Principal{Role: domain.UserRoleOrgMember, OrgID: testRechargeOrgID}, testRechargeOrgID, 0, 0)
+	require.ErrorIs(t, err, ErrForbidden)
 }
 
 // TestListRecharges_HappyPath 验证列表充值记录成功路径的成功路径场景。
@@ -93,6 +94,42 @@ func TestListRecharges_HappyPath(t *testing.T) {
 	results, err := svc.ListRecharges(context.Background(), platformAdmin(), testRechargeOrgID, 50, 0)
 	require.NoError(t, err)
 	require.Len(t, results, 2)
+}
+
+// TestListRecharges_OrgAdminCanViewOwnOrg 验证 org_admin 可以查看自己组织的充值记录。
+func TestListRecharges_OrgAdminCanViewOwnOrg(t *testing.T) {
+	store := newRechargeStub(t, "1234")
+	store.records = []sqlc.RechargeRecord{
+		{ID: mustUUID(t, "00000000-0000-0000-0000-000000002201"), OrgID: mustUUID(t, testRechargeOrgID), CreditAmount: 100, Status: "succeeded"}, // 场景：org_admin 查询自己组织，应正常返回记录。
+	}
+	svc := NewRechargeService(store, &fakeNewAPIRecharge{})
+	results, err := svc.ListRecharges(context.Background(),
+		auth.Principal{Role: domain.UserRoleOrgAdmin, OrgID: testRechargeOrgID}, testRechargeOrgID, 50, 0)
+	require.NoError(t, err)
+	require.Len(t, results, 1)
+}
+
+// TestListRecharges_OrgAdminCannotViewOtherOrg 验证 org_admin 无权查看其他组织的充值记录。
+func TestListRecharges_OrgAdminCannotViewOtherOrg(t *testing.T) {
+	store := newRechargeStub(t, "1234")
+	svc := NewRechargeService(store, &fakeNewAPIRecharge{})
+	// org_admin 尝试访问非自己组织，orgID 不匹配，应返回 ErrForbidden。
+	_, err := svc.ListRecharges(context.Background(),
+		auth.Principal{Role: domain.UserRoleOrgAdmin, OrgID: "other-org-id"}, testRechargeOrgID, 50, 0)
+	require.ErrorIs(t, err, ErrForbidden)
+}
+
+// TestGetBalance_IncludesTotalRecharged 验证 GetBalance 正确聚合并返回累计充值金额。
+func TestGetBalance_IncludesTotalRecharged(t *testing.T) {
+	store := newRechargeStub(t, "1234")
+	store.totalRecharged = 3000 // 桩返回固定聚合值
+	client := &fakeNewAPIRecharge{balanceResult: newapi.BalanceResult{NewAPIUserID: 1234, RemainQuota: 2000}}
+	svc := NewRechargeService(store, client)
+	view, err := svc.GetBalance(context.Background(), platformAdmin(), testRechargeOrgID)
+	require.NoError(t, err)
+	// 累计充值金额来自 recharge_records 聚合，不依赖 new-api。
+	require.Equal(t, int64(3000), view.TotalRecharged)
+	require.Equal(t, int64(2000), view.RemainQuota)
 }
 
 // TestGetBalance_PlatformAdminAllowed 验证获取余额平台管理员Allowed的预期行为场景。
@@ -148,6 +185,7 @@ type rechargeStub struct {
 	recordWritten    bool
 	lastRecordStatus string
 	auditWritten     bool
+	totalRecharged   int64 // SumRechargeAmountByOrg 的桩返回值
 }
 
 func newRechargeStub(t *testing.T, newapiUserID string) *rechargeStub {
@@ -188,6 +226,10 @@ func (s *rechargeStub) ListRechargeRecordsByOrg(_ context.Context, _ sqlc.ListRe
 func (s *rechargeStub) CreateAuditLog(_ context.Context, _ sqlc.CreateAuditLogParams) (sqlc.AuditLog, error) {
 	s.auditWritten = true
 	return sqlc.AuditLog{}, nil
+}
+
+func (s *rechargeStub) SumRechargeAmountByOrg(_ context.Context, _ pgtype.UUID) (int64, error) {
+	return s.totalRecharged, nil
 }
 
 type fakeNewAPIRecharge struct {
