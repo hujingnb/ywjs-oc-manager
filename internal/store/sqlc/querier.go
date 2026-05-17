@@ -141,6 +141,9 @@ type Querier interface {
 	SoftDeleteOrganization(ctx context.Context, id pgtype.UUID) (Organization, error)
 	// 真软删除：仅设置 deleted_at（不动 status）；status 与 deleted_at 语义独立。
 	SoftDeleteUser(ctx context.Context, id pgtype.UUID) error
+	// SumRechargeAmountByOrg 聚合指定组织所有成功充值记录的总额。
+	// 仅统计 status='succeeded' 的记录，failed 记录不计入累计金额。
+	SumRechargeAmountByOrg(ctx context.Context, orgID pgtype.UUID) (int64, error)
 	// phasePullRuntimeImage 成功后写入镜像引用与 sha256。
 	UpdateAppRuntimeImage(ctx context.Context, arg UpdateAppRuntimeImageParams) (App, error)
 	// OOS-2 access_token 自愈用：仅更新 newapi_user_credentials_ciphertext，不动 newapi_user_id。

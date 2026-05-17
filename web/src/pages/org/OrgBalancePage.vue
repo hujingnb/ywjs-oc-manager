@@ -15,7 +15,7 @@
           <!-- 加载中展示占位符，失败时提示用户。 -->
           <template v-if="balanceQuery.isLoading.value">—</template>
           <template v-else-if="balance">
-            {{ formatQuotaValue(balance.total_recharged, billingStatus) }}
+            {{ formatDisplayAmount(balance.total_recharged, billingStatus) }}
           </template>
           <template v-else>查询失败</template>
         </n-statistic>

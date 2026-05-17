@@ -158,7 +158,7 @@
             <n-statistic label="累计充值金额">
               <template v-if="rechargeHistoryBalanceQuery.isLoading.value">—</template>
               <template v-else-if="rechargeHistoryBalance">
-                {{ formatQuotaValue(rechargeHistoryBalance.total_recharged, billingStatus) }}
+                {{ formatDisplayAmount(rechargeHistoryBalance.total_recharged, billingStatus) }}
               </template>
               <template v-else>查询失败</template>
             </n-statistic>
