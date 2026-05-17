@@ -6017,6 +6017,11 @@ export interface components {
         "service.BalanceView": {
             newapi_user_id?: number;
             remain_quota?: number;
+            /**
+             * @description TotalRecharged 是该组织历史累计充值额度之和（仅计 succeeded 记录）。
+             *     数据来源于 manager 自身 recharge_records 表，不从 new-api 获取。
+             */
+            total_recharged?: number;
             used_quota?: number;
         };
         "service.BillingStatusView": {

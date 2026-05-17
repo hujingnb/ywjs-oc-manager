@@ -535,6 +535,11 @@ components:
           type: integer
         remain_quota:
           type: integer
+        total_recharged:
+          description: |-
+            TotalRecharged 是该组织历史累计充值额度之和（仅计 succeeded 记录）。
+            数据来源于 manager 自身 recharge_records 表，不从 new-api 获取。
+          type: integer
         used_quota:
           type: integer
       type: object
