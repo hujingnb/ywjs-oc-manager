@@ -7,6 +7,7 @@ import (
 
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgtype"
+	"golang.org/x/sync/errgroup"
 
 	"oc-manager/internal/auth"
 	"oc-manager/internal/domain"
@@ -20,6 +21,8 @@ type RechargeStore interface {
 	CreateRechargeRecord(ctx context.Context, arg sqlc.CreateRechargeRecordParams) (sqlc.RechargeRecord, error)
 	ListRechargeRecordsByOrg(ctx context.Context, arg sqlc.ListRechargeRecordsByOrgParams) ([]sqlc.RechargeRecord, error)
 	CreateAuditLog(ctx context.Context, arg sqlc.CreateAuditLogParams) (sqlc.AuditLog, error)
+	// SumRechargeAmountByOrg 聚合指定组织 succeeded 充值记录总额；无记录时返回 0。
+	SumRechargeAmountByOrg(ctx context.Context, orgID pgtype.UUID) (int64, error)
 }
 
 // NewAPIRechargeClient 是 service 与 new-api 充值相关的最小接口形态。
@@ -48,6 +51,9 @@ type BalanceView struct {
 	NewAPIUserID int64 `json:"newapi_user_id"`
 	RemainQuota  int64 `json:"remain_quota"`
 	UsedQuota    int64 `json:"used_quota"`
+	// TotalRecharged 是该组织历史累计充值额度之和（仅计 succeeded 记录）。
+	// 数据来源于 manager 自身 recharge_records 表，不从 new-api 获取。
+	TotalRecharged int64 `json:"total_recharged"`
 }
 
 // BillingStatusView 是 manager 前端格式化余额 / 用量所需的 new-api 展示配置。
@@ -158,10 +164,10 @@ func (s *RechargeService) Recharge(ctx context.Context, principal auth.Principal
 	return toRechargeResult(record), nil
 }
 
-// ListRecharges 列出组织充值历史。仅平台管理员可访问。
+// ListRecharges 列出组织充值历史。平台管理员可查任意组织；org_admin 仅可查自己所属组织。
 func (s *RechargeService) ListRecharges(ctx context.Context, principal auth.Principal, orgID string, limit, offset int32) ([]RechargeRecordResult, error) {
-	if principal.Role != domain.UserRolePlatformAdmin {
-		return nil, ErrRechargeDenied
+	if !auth.CanViewRecharges(principal, orgID) {
+		return nil, ErrForbidden
 	}
 	id, err := parseUUID(orgID)
 	if err != nil {
@@ -189,7 +195,8 @@ func (s *RechargeService) ListRecharges(ctx context.Context, principal auth.Prin
 	return results, nil
 }
 
-// GetBalance 查询组织当前余额（透传 new-api）。
+// GetBalance 查询组织当前余额（透传 new-api）及累计充值金额（本地聚合）。
+// 两个数据源并发查询：① new-api 取 RemainQuota/UsedQuota；② 本地 DB 聚合 TotalRecharged。
 func (s *RechargeService) GetBalance(ctx context.Context, principal auth.Principal, orgID string) (BalanceView, error) {
 	if principal.Role != domain.UserRolePlatformAdmin && principal.Role != domain.UserRoleOrgAdmin {
 		return BalanceView{}, ErrForbidden
@@ -215,14 +222,29 @@ func (s *RechargeService) GetBalance(ctx context.Context, principal auth.Princip
 	if err != nil {
 		return BalanceView{}, fmt.Errorf("非法 newapi_user_id: %w", err)
 	}
-	balance, err := s.client.GetUserBalance(ctx, newapiUserID)
-	if err != nil {
+
+	// 并发执行：① new-api 余额查询（实时，不缓存）；② 本地 DB 累计充值聚合。
+	var balance newapi.BalanceResult
+	var totalRecharged int64
+	g, gctx := errgroup.WithContext(ctx)
+	g.Go(func() error {
+		var e error
+		balance, e = s.client.GetUserBalance(gctx, newapiUserID)
+		return e
+	})
+	g.Go(func() error {
+		var e error
+		totalRecharged, e = s.store.SumRechargeAmountByOrg(gctx, id)
+		return e
+	})
+	if err := g.Wait(); err != nil {
 		return BalanceView{}, fmt.Errorf("查询余额失败: %w", err)
 	}
 	return BalanceView{
-		NewAPIUserID: balance.NewAPIUserID,
-		RemainQuota:  balance.RemainQuota,
-		UsedQuota:    balance.UsedQuota,
+		NewAPIUserID:   balance.NewAPIUserID,
+		RemainQuota:    balance.RemainQuota,
+		UsedQuota:      balance.UsedQuota,
+		TotalRecharged: totalRecharged,
 	}, nil
 }
 

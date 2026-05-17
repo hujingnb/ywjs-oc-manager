@@ -218,7 +218,7 @@ func CanViewOrgAudit(p Principal, orgID string) bool {
 	return p.Role == domain.UserRolePlatformAdmin || (p.Role == domain.UserRoleOrgAdmin && p.OrgID == orgID)
 }
 
-// CanViewOwnAudit 判断主体是否可查看“我的审计”视角。
+// CanViewOwnAudit 判断主体是否可查看”我的审计”视角。
 // 该视角必须能落到受支持的具体操作者，因此要求主体属于已知角色且具备非空 userID。
 func CanViewOwnAudit(p Principal) bool {
 	if p.UserID == "" {
@@ -230,4 +230,11 @@ func CanViewOwnAudit(p Principal) bool {
 	default:
 		return false
 	}
+}
+
+// CanViewRecharges 判断主体是否可查看指定组织的充值记录。
+// 平台管理员可查任意组织；组织管理员仅可查自己所属组织的充值记录。
+func CanViewRecharges(p Principal, orgID string) bool {
+	return p.Role == domain.UserRolePlatformAdmin ||
+		(p.Role == domain.UserRoleOrgAdmin && p.OrgID == orgID)
 }
