@@ -246,6 +246,8 @@ const balanceByOrgId = computed(() => {
 const rechargeHistoryVisible = ref(false)
 const rechargeHistoryOrg = ref<Organization | null>(null)
 const rechargeHistoryOrgId = computed(() => rechargeHistoryOrg.value?.id)
+// 与 orgBalanceQueries 共享同一 queryKey（['org-balance', orgId]），TanStack Query 会复用缓存。
+// 单独订阅的原因：① 弹窗打开时触发主动刷新（staleTime=0 策略下确保数据最新）；② 获取独立的 isLoading 状态供弹窗内加载占位符使用。
 const rechargeHistoryBalanceQuery = useOrgBalanceQuery(rechargeHistoryOrgId)
 const rechargeHistoryBalance = computed(() => rechargeHistoryBalanceQuery.data.value ?? null)
 const { data: rechargeHistoryRecords, isLoading: rechargeHistoryLoading } = useRechargesQuery(rechargeHistoryOrgId)
