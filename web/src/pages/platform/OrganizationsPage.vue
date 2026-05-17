@@ -143,22 +143,66 @@
         </n-form>
       </div>
     </n-modal>
+
+    <!-- 充值记录弹窗 -->
+    <n-modal
+      v-model:show="rechargeHistoryVisible"
+      preset="card"
+      style="max-width: 720px"
+      :title="rechargeHistoryOrg ? `充值记录 · ${rechargeHistoryOrg.name}` : '充值记录'"
+    >
+      <div v-if="rechargeHistoryOrg" style="display: grid; gap: 16px">
+        <!-- 概况卡片 -->
+        <n-grid :cols="2" :x-gap="14">
+          <n-grid-item>
+            <n-statistic label="累计充值金额">
+              <template v-if="rechargeHistoryBalanceQuery.isLoading.value">—</template>
+              <template v-else-if="rechargeHistoryBalance">
+                {{ formatQuotaValue(rechargeHistoryBalance.total_recharged, billingStatus) }}
+              </template>
+              <template v-else>查询失败</template>
+            </n-statistic>
+          </n-grid-item>
+          <n-grid-item>
+            <n-statistic label="当前剩余金额">
+              <template v-if="rechargeHistoryBalanceQuery.isLoading.value">—</template>
+              <template v-else-if="rechargeHistoryBalance">
+                {{ formatQuotaValue(rechargeHistoryBalance.remain_quota, billingStatus) }}
+              </template>
+              <template v-else>查询失败</template>
+            </n-statistic>
+          </n-grid-item>
+        </n-grid>
+        <!-- 充值记录表格 -->
+        <div v-if="rechargeHistoryLoading" class="state-text">加载中…</div>
+        <n-data-table
+          v-else
+          size="small"
+          :columns="rechargeHistoryColumns"
+          :data="rechargeHistoryRecords ?? []"
+          :pagination="{ pageSize: 10 }"
+        />
+      </div>
+    </n-modal>
   </div>
 </template>
 
 <script setup lang="ts">
 import { computed, h, ref } from 'vue'
+import { useQueries } from '@tanstack/vue-query'
 import { Plus, X } from 'lucide-vue-next'
 import {
-  NButton, NCard, NForm, NFormItem, NGrid, NGridItem,
-  NInput, NInputNumber, NModal, NSelect, NSpace,
+  NButton, NCard, NDataTable, NForm, NFormItem, NGrid, NGridItem,
+  NInput, NInputNumber, NModal, NSelect, NSpace, NStatistic,
 } from 'naive-ui'
 
 import { formatOrgStatus } from '@/domain/status'
 import {
   useCreateOrganization, useModelsQuery, useOrganizationsQuery, useUpdateOrganizationStatus,
 } from '@/api/hooks/useOrganizations'
-import { useBillingStatusQuery, useOrgBalanceQuery, useRechargeMutation } from '@/api/hooks/useRecharge'
+import { apiRequest } from '@/api/client'
+import { useBillingStatusQuery, useOrgBalanceQuery, useRechargeMutation, useRechargesQuery } from '@/api/hooks/useRecharge'
+import type { BalanceDTO } from '@/api/hooks/useRecharge'
 import type { Organization } from '@/api'
 import DataTableList from '@/components/DataTableList.vue'
 import { statusColumn, actionColumn } from '@/components/columns'
@@ -175,6 +219,42 @@ const selectedOrgId = computed(() => selectedOrg.value?.id)
 const balanceQuery = useOrgBalanceQuery(selectedOrgId)
 const balance = computed(() => balanceQuery.data.value ?? null)
 const { data: billingStatus } = useBillingStatusQuery()
+
+// orgBalanceQueries 对列表中每个组织并发查询余额，orgId 变化时自动重建查询集合。
+const orgBalanceQueries = useQueries({
+  queries: computed(() =>
+    (organizations.value ?? []).map(org => ({
+      queryKey: ['org-balance', org.id] as const,
+      queryFn: async () => {
+        const res = await apiRequest<{ balance: BalanceDTO }>(`/api/v1/organizations/${org.id}/balance`)
+        return res.balance
+      },
+    }))
+  ),
+})
+
+// balanceByOrgId 把 useQueries 的数组结果转成 orgId → BalanceDTO 映射，供列渲染器使用。
+const balanceByOrgId = computed(() => {
+  const map: Record<string, BalanceDTO | undefined> = {}
+  ;(organizations.value ?? []).forEach((org, i) => {
+    map[org.id] = orgBalanceQueries.value[i]?.data ?? undefined
+  })
+  return map
+})
+
+// rechargeHistoryVisible 控制充值记录弹窗（与已有充值弹框 rechargeVisible 独立）。
+const rechargeHistoryVisible = ref(false)
+const rechargeHistoryOrg = ref<Organization | null>(null)
+const rechargeHistoryOrgId = computed(() => rechargeHistoryOrg.value?.id)
+const rechargeHistoryBalanceQuery = useOrgBalanceQuery(rechargeHistoryOrgId)
+const rechargeHistoryBalance = computed(() => rechargeHistoryBalanceQuery.data.value ?? null)
+const { data: rechargeHistoryRecords, isLoading: rechargeHistoryLoading } = useRechargesQuery(rechargeHistoryOrgId)
+
+function openRechargeHistory(org: Organization) {
+  rechargeHistoryOrg.value = org
+  rechargeHistoryVisible.value = true
+}
+
 const rechargeMutation = useRechargeMutation(selectedOrgId)
 const rechargeVisible = ref(false)
 const rechargeAmount = ref<number | null>(null)
@@ -239,9 +319,9 @@ async function submitOrganization() {
   await submitForm()
 }
 
-// columns 展示组织基础信息、状态和操作；启用/禁用按钮按当前状态互斥显示。
-const columns = [
-  // 名称列：含 remark 副标题，保留页面内 render
+// columns 展示组织基础信息、状态、余额和操作；改为 computed 以引用响应式的 balanceByOrgId。
+const columns = computed(() => [
+  // 名称列：含 remark 副标题
   {
     title: '名称',
     key: 'name',
@@ -254,7 +334,7 @@ const columns = [
   },
   { title: '组织标识', key: 'code', render: (row: Organization) => row.code || '—' },
   statusColumn<Organization>('状态', r => formatOrgStatus(r.status)),
-  // 联系人/电话/预警阈值列：保留页面内 render
+  // 联系人/电话/预警阈值列
   { title: '联系人', key: 'contact_name', render: (row: Organization) => row.contact_name || '—' },
   { title: '电话', key: 'contact_phone', render: (row: Organization) => row.contact_phone || '—' },
   {
@@ -263,14 +343,25 @@ const columns = [
     render: (row: Organization) => typeof row.credit_warning_threshold === 'number'
       ? `${row.credit_warning_threshold}%` : '—',
   },
+  // 当前余额列：从并发查询结果映射到对应行，未加载时显示省略号。
+  {
+    title: '当前余额',
+    key: 'remain_quota',
+    render: (row: Organization) => {
+      const b = balanceByOrgId.value[row.id]
+      if (!b) return '…'
+      return formatQuotaValue(b.remain_quota, billingStatus.value)
+    },
+  },
   // 启用/禁用互斥：用两条 RowAction + hidden 分别渲染
   actionColumn<Organization>([
     { label: '复制信息', onClick: r => { void copyOrganizationInfo(r) } },
+    { label: '充值记录', onClick: openRechargeHistory },
     { label: '充值', type: 'primary', onClick: openRecharge },
     { label: '禁用', onClick: r => onToggle(r, 'disable'), hidden: r => r.status !== 'active' },
     { label: '启用', type: 'primary', onClick: r => onToggle(r, 'enable'), hidden: r => r.status === 'active' },
   ]),
-]
+])
 
 function optionalAdminUsername(org: Organization) {
   return org.admin_username ?? ''
@@ -337,6 +428,23 @@ async function submitRecharge() {
     rechargeFeedback.value = err instanceof Error ? err.message : '充值失败'
   }
 }
+
+// rechargeHistoryColumns 是充值记录弹窗的表格列定义；含操作人 ID（平台管理员可见）。
+const rechargeHistoryColumns = [
+  { title: '时间', key: 'created_at', render: (r: { created_at: string }) => r.created_at.replace('T', ' ').slice(0, 19) },
+  {
+    title: '金额',
+    key: 'credit_amount',
+    render: (r: { credit_amount: number }) => formatDisplayAmount(r.credit_amount, billingStatus.value),
+  },
+  { title: '备注', key: 'remark', render: (r: { remark?: string }) => r.remark || '—' },
+  {
+    title: '状态',
+    key: 'status',
+    render: (r: { status: string }) => r.status === 'succeeded' ? '成功' : '失败',
+  },
+  { title: '操作人', key: 'operator_id', render: (r: { operator_id?: string }) => r.operator_id ? r.operator_id.slice(0, 8) + '…' : '—' },
+]
 </script>
 
 <style scoped>
