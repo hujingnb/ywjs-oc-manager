@@ -102,16 +102,3 @@ const columns = [
   },
 ]
 </script>
-
-<style scoped>
-/* state-text 用于加载中和错误提示的居中文本样式。 */
-.state-text {
-  padding: 24px 0;
-  text-align: center;
-  color: #8A94C6;
-}
-
-.state-text.danger {
-  color: #d03050;
-}
-</style>
