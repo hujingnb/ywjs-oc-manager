@@ -19,7 +19,7 @@ const usageDefaultWindowSeconds int64 = 30 * 24 * 60 * 60
 // UsageHandler 处理用量查询。
 //
 // 路由 / 响应字段已切换为「直接代理 new-api」语义：
-//   - app / member 维度：返回 LogsPage（new-api `GET /api/log/?token_id=` 的薄包装）；
+//   - app / member 维度：返回 LogsPage（new-api `GET /api/log/?token_name=` 的薄包装）；
 //   - organization / platform 维度：返回 QuotaSeries（new-api `GET /api/data/...` 的薄包装）。
 type UsageHandler struct {
 	service usageService
