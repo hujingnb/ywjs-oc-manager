@@ -802,8 +802,12 @@ func (h *AppInitializeHandler) ensureAPIKey(ctx context.Context, app *sqlc.App) 
 
 	// 应用级 token 默认 unlimited_quota=true：manager 不在 token 层面做限额（spec §10），
 	// 计费与额度归 new-api 的 user 级管理。
+	// keyName 是 manager 与 new-api 之间反查 token 的唯一约定（"app-" + uuid），
+	// 抽局部变量后既作为 CreateAPIKey 入参，也写入 apps.newapi_key_name 落库，
+	// 让 usage 查询直接读字段而不再依赖 "token name 与 app.ID 同值" 的隐式假设。
+	keyName := fmt.Sprintf("app-%s", uuidToString(app.ID))
 	key, err := client.CreateAPIKey(ctx, newapi.CreateAPIKeyInput{
-		Name:       fmt.Sprintf("app-%s", uuidToString(app.ID)),
+		Name:       keyName,
 		Models:     []string{},
 		UnlimitedQ: true,
 	})
@@ -842,6 +846,9 @@ func (h *AppInitializeHandler) ensureAPIKey(ctx context.Context, app *sqlc.App) 
 		NewapiKeyID:         pgtype.Text{String: fmt.Sprintf("%d", key.ID), Valid: true},
 		NewapiKeyCiphertext: pgtype.Text{String: ciphertext, Valid: true},
 		ApiKeyStatus:        domain.APIKeyStatusActive,
+		// 显式落 newapi_key_name：与上面 CreateAPIKey 用的 keyName 保持一致，
+		// 让后续 usage 查询不必再次拼 "app-<uuid>"，直接从 apps 表读字段即可。
+		NewapiKeyName: pgtype.Text{String: keyName, Valid: true},
 	})
 	if err != nil {
 		return "", fmt.Errorf("写入 api_key 失败: %w", err)

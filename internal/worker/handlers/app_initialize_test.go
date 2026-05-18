@@ -294,6 +294,31 @@ func TestEnsureAPIKeyKeepsNewAPITokenModelsUnrestricted(t *testing.T) {
 	assert.Empty(t, api.lastCreateInput.Models)
 }
 
+// TestProvisionAPIKeyPersistsKeyName 校验实例初始化链路把 new-api 侧 token name
+// （当前实现 = "app-" + app.ID）显式落到 apps.newapi_key_name，供 usage 查询直接读。
+// 防止"token name 与 app.ID 同值"这一隐式约定回归：一旦 ensureAPIKey 改了 name
+// 拼接策略或漏传 SetAppNewAPIKeyParams.NewapiKeyName 字段（Go struct literal
+// 默认 0 值，缺字段不会编译报错），本用例立刻 fail。
+func TestProvisionAPIKeyPersistsKeyName(t *testing.T) {
+	store := newAppInitStub(t)
+	api := &fakeNewAPI{result: newapi.APIKey{ID: 42, Key: "sk-test"}}
+	handler := NewAppInitializeHandler(store, &fakeDirs{}, &fakeContainers{}, &fakeContainers{}, api, AppInitializeConfig{
+		Cipher: testCipher(t),
+	})
+
+	// 走完 ensureAPIKey 完整流程：CreateAPIKey + GetTokenFullKey + 加密 + SetAppNewAPIKey。
+	_, err := handler.ensureAPIKey(context.Background(), &store.app)
+	require.NoError(t, err)
+
+	// 预期 token name 由 "app-" + uuid(app.ID) 组成；这是 manager 与 new-api 之间
+	// 用于反查 token 的唯一约定，必须双向一致（CreateAPIKey 入参与 apps 表落库值）。
+	expectedName := "app-" + testAppID
+	require.True(t, store.apiKeySet, "SetAppNewAPIKey 应被调用")
+	assert.True(t, store.lastSetAPIKey.NewapiKeyName.Valid, "newapi_key_name 应被显式落库为 Valid")
+	assert.Equal(t, expectedName, store.lastSetAPIKey.NewapiKeyName.String, "newapi_key_name 应等于 CreateAPIKey 的 Name")
+	assert.Equal(t, expectedName, api.lastCreateInput.Name, "new-api 侧 token name 也应使用同一字符串，保持双向一致")
+}
+
 // TestHermesHealthCheckerInterfaceUsed 验证 HermesHealthChecker 类型断言的调用与跳过行为。
 // 场景：starter 不实现 HermesHealthChecker 时，handle 正常完成但不调用 WaitContainerHealthy。
 func TestHermesHealthCheckerInterfaceUsed(t *testing.T) {
@@ -328,7 +353,10 @@ type appInitStub struct {
 	apiKeySet    bool
 	statusSet    bool
 	containerSet bool
-	auditLogs    []sqlc.CreateAuditLogParams
+	// lastSetAPIKey 记录最近一次 SetAppNewAPIKey 调用的入参,用于断言落库字段
+	// （特别是 newapi_key_name 是否与 new-api CreateAPIKey 用的 token name 一致）。
+	lastSetAPIKey sqlc.SetAppNewAPIKeyParams
+	auditLogs     []sqlc.CreateAuditLogParams
 	// statusCalls 按顺序记录每次 SetAppStatus 调用参数,用于断言 4 阶段推进序列
 	// (draft → pulling_runtime_image → ... → binding_waiting)。
 	statusCalls []sqlc.SetAppStatusParams
@@ -376,9 +404,12 @@ func (s *appInitStub) GetRuntimeNode(_ context.Context, _ pgtype.UUID) (sqlc.Run
 
 func (s *appInitStub) SetAppNewAPIKey(_ context.Context, arg sqlc.SetAppNewAPIKeyParams) (sqlc.App, error) {
 	s.apiKeySet = true
+	// 留存最近一次入参,允许用例断言 newapi_key_name 等字段是否被显式落库。
+	s.lastSetAPIKey = arg
 	s.app.ApiKeyStatus = arg.ApiKeyStatus
 	s.app.NewapiKeyID = arg.NewapiKeyID
 	s.app.NewapiKeyCiphertext = arg.NewapiKeyCiphertext
+	s.app.NewapiKeyName = arg.NewapiKeyName
 	return s.app, nil
 }
 
