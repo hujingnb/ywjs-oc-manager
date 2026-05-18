@@ -76,6 +76,40 @@ func TestOrganizationServiceCreateProvisionsNewAPIUser(t *testing.T) {
 	assert.JSONEq(t, `["qwen2.5:7b"]`, string(store.created.EnabledModels))
 }
 
+// TestProvisionNewAPIUserPersistsUsername 校验组织创建链路把 new-api 侧 username
+// （当前等于 org.Code）显式落到 organizations.newapi_username 字段，供 usage 查询
+// 直接读取，防止"username 与 code 同值"这一隐式约定回归——一旦 username 生成策略
+// 变化（例如加随机后缀），下游再走"凭据密文解密"或"运行时查 new-api"会代价过高。
+func TestProvisionNewAPIUserPersistsUsername(t *testing.T) {
+	// 用与 TestOrganizationServiceCreateProvisionsNewAPIUser 相同的桩件组合，
+	// 保证只额外校验 NewapiUsername 这一字段，避免与其他用例语义重叠。
+	store := &organizationStoreStub{}
+	prov := &fakeProvisioner{
+		user:        newapi.User{ID: 42, Username: "preset"},
+		accessToken: "access-tok-xyz",
+	}
+	svc := NewOrganizationService(store, prov, mustCipher(t), nil)
+	svc.SetModelValidator(orgModelValidatorStub{models: []string{"qwen2.5:7b"}})
+	svc.hashPassword = fakeHash
+
+	_, err := svc.CreateOrganization(context.Background(), auth.Principal{Role: domain.UserRolePlatformAdmin}, OrganizationInput{
+		Name:             "测试组织",
+		Code:             "test-org",
+		AdminUsername:    "org-admin",
+		AdminDisplayName: "组织管理员",
+		AdminPassword:    "secret-password",
+		EnabledModels:    []string{"qwen2.5:7b"},
+	})
+	require.NoError(t, err)
+
+	// 必须确实调用了 SetOrganizationNewAPIUser，否则 username 写入路径根本没被验证。
+	require.True(t, store.updateCalled)
+	// 关键断言：NewapiUsername 显式置为有效值，且与 org.Code 同值，保证 usage
+	// service 直接读 organizations.newapi_username 即可定位 new-api 侧账号。
+	require.True(t, store.updated.NewapiUsername.Valid, "NewapiUsername 必须 Valid，否则会落 NULL")
+	assert.Equal(t, "test-org", store.updated.NewapiUsername.String)
+}
+
 // TestOrganizationServiceCreateAlsoCreatesOrgAdmin 验证组织服务创建Also创建组织管理员的成功路径场景。
 func TestOrganizationServiceCreateAlsoCreatesOrgAdmin(t *testing.T) {
 	store := &organizationStoreStub{}

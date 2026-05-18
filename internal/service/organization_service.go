@@ -379,6 +379,9 @@ func (s *OrganizationService) provisionNewAPIUser(ctx context.Context, org *sqlc
 		ID:                              org.ID,
 		NewapiUserID:                    pgtype.Text{String: strconv.FormatInt(user.ID, 10), Valid: true},
 		NewapiUserCredentialsCiphertext: pgtype.Text{String: ciphertext, Valid: true},
+		// 同步落 new-api 侧 username（当前等于 org.Code），供 usage service 直接读
+		// organizations.newapi_username 定位 new-api 账号，避免运行时反查或解密凭据。
+		NewapiUsername: pgtype.Text{String: username, Valid: true},
 	})
 	if err != nil {
 		return sqlc.Organization{}, &createdUserID, fmt.Errorf("写入 new-api user 信息失败: %w", err)
