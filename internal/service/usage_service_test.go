@@ -302,14 +302,25 @@ func (c *fakeUsageClient) GetAllQuotaDates(_ context.Context, _, _ int64) ([]new
 }
 
 // fakeUsageStore 实现 UsageStore；activeApp / org 用作 lookup 返回值。
+// appByID 用于按 ID 注入 GetApp 返回值，覆盖 service 优先读 app.NewapiKeyName
+// 的 happy path；未注入时 GetApp 仍然返回 ErrNoRows，保证现有走回退路径
+// 的用例行为不变。
 type fakeUsageStore struct {
 	activeApp       sqlc.App
 	activeAppCalled bool
 	lastActiveOwner pgtype.UUID
 	org             sqlc.Organization
+	appByID         map[pgtype.UUID]sqlc.App
 }
 
-func (s *fakeUsageStore) GetApp(_ context.Context, _ pgtype.UUID) (sqlc.App, error) {
+func (s *fakeUsageStore) GetApp(_ context.Context, id pgtype.UUID) (sqlc.App, error) {
+	// 仅当用例显式注入 appByID 时才返回对应记录，缺省回到 ErrNoRows
+	// 以保持既有 fallback 用例（如 TestGetAppUsageFallsBackWhenKeyNameEmpty）的行为。
+	if s.appByID != nil {
+		if app, ok := s.appByID[id]; ok {
+			return app, nil
+		}
+	}
 	return sqlc.App{}, pgx.ErrNoRows
 }
 
@@ -434,4 +445,31 @@ func TestGetOrgUsageReturnsEmptyWhenUsernameEmpty(t *testing.T) {
 	assert.Empty(t, view.Items)
 	// username 缺失时绝不能调上游，否则会把别人组织的数据带回来。
 	assert.Equal(t, int64(0), client.lastUserQuotaUserID, "username 空时不应调 newapi")
+}
+
+// TestGetAppUsageUsesAppNewapiKeyName 校验 GetAppUsage 在 store 能取到 app
+// 且 app.NewapiKeyName 非空时，TokenName 使用数据库字段而非约定派生。
+// 这条 happy path 防止有人把 service 改回 "永远拼 app-+appID" 的旧约定。
+func TestGetAppUsageUsesAppNewapiKeyName(t *testing.T) {
+	appID := mustUUID(t, "0193ce63-4b8e-7000-a000-000000000001")
+	store := &fakeUsageStore{
+		appByID: map[pgtype.UUID]sqlc.App{
+			appID: {
+				ID:            appID,
+				NewapiKeyID:   pgtype.Text{String: "42", Valid: true},
+				NewapiKeyName: pgtype.Text{String: "app-database-override", Valid: true},
+			},
+		},
+	}
+	client := &fakeUsageClient{tokenLogs: newapi.LogsPage{Items: []newapi.LogEntry{{ID: 1}}, Total: 1}}
+	svc := NewUsageService(store, client, nil)
+
+	_, err := svc.GetAppUsage(context.Background(), platformAdmin(),
+		uuidToString(appID),
+		"owner-org", "owner-user",
+		42,
+		LogsQueryOptions{Page: 1, PageSize: 50})
+	require.NoError(t, err)
+	assert.Equal(t, "app-database-override", client.lastTokenLogsQuery.TokenName,
+		"GetAppUsage 应优先用数据库里写的 NewapiKeyName 而非约定派生")
 }
