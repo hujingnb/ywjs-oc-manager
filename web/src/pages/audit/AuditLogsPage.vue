@@ -21,8 +21,8 @@
 </template>
 
 <script setup lang="ts">
-import { computed, h } from 'vue'
-import { NSelect, NTag, type DataTableColumns } from 'naive-ui'
+import { computed, h, type VNode } from 'vue'
+import { NSelect, NTag, NTooltip, type DataTableColumns } from 'naive-ui'
 
 import { useOrgAuditLogsQuery } from '@/api/hooks/useAuditLogs'
 import { usePlatformOrgSelection } from '@/composables/usePlatformOrgSelection'
@@ -46,7 +46,7 @@ const {
 const orgEyebrow = computed(() => auth.user?.role === 'platform_admin' ? 'Platform · 审计' : '组织 · 审计')
 const canView = computed(() => canViewOrgAudit(auth.user, effectiveOrgId.value))
 
-// queryOrgId 为 undefined 时不发起查询，用前端权限分支减少无意义 403。
+// queryOrgId 为 undefined 时不发起查询，前端先拦截无权限场景减少 403。
 const queryOrgId = computed(() => canView.value ? effectiveOrgId.value : undefined)
 const { data: logs, isLoading, error } = useOrgAuditLogsQuery(queryOrgId)
 
@@ -64,32 +64,82 @@ type AuditLog = NonNullable<typeof logs.value>[number]
 // auditTagType 将审计结果映射为标签色，未知结果保持默认色以兼容后端扩展。
 function auditTagType(result: string): 'success' | 'warning' | 'error' | 'default' {
   switch (result) {
-    case 'success': return 'success'
+    case 'success': case 'succeeded': return 'success'
     case 'failed': case 'error': return 'error'
     case 'partial': return 'warning'
     default: return 'default'
   }
 }
 
-// columns 展示审计主体、资源、动作和结果；错误信息作为结果列的辅助诊断文本。
-// 各列使用后端返回的 *_label 字段展示中文，auditTagType 仍依赖原始 result 判断颜色。
+// shortenId 截取 UUID 末 8 位用作 fallback 展示，避免列太长。
+function shortenId(value: string | undefined | null): string {
+  if (!value) return ''
+  return value.length > 8 ? value.slice(-8) : value
+}
+
+// renderPrincipal 渲染操作者 / 资源单元格的统一结构：
+// - system actor 行直接展 actor_role_label（系统），无副文与 hover；
+// - 否则主文 name fallback shortenId(uuid) fallback role_label，副文为 sub，UUID 进 hover。
+// deleted 为 true 时主文后追加「已删除」徽章。
+function renderPrincipal(opts: {
+  primary: string
+  fallback: string
+  sub: string
+  uuid: string | null | undefined
+  deleted: boolean
+  isSystem?: boolean
+}) {
+  if (opts.isSystem) {
+    return h('strong', opts.primary || opts.fallback)
+  }
+  const main: VNode[] = [h('strong', opts.primary || opts.fallback)]
+  if (opts.deleted) {
+    main.push(h(NTag, { type: 'warning', size: 'tiny', bordered: false, style: 'margin-left:6px' }, { default: () => '已删除' }))
+  }
+  const sub = opts.sub ? h('small', { style: 'display:block;color:#8A94C6;font-size:12px' }, opts.sub) : null
+  const children: VNode[] = sub ? [...main, sub] : main
+  const cell = h('div', children)
+  if (!opts.uuid) return cell
+  return h(NTooltip, { trigger: 'hover', placement: 'top' }, {
+    trigger: () => cell,
+    default: () => opts.uuid,
+  })
+}
+
+// columns 展示审计主体、资源、动作、详情和结果；错误信息作为结果列的辅助诊断文本。
 const columns: DataTableColumns<AuditLog> = [
   timeColumn('时间', r => r.created_at),
   {
-    title: '操作者', key: 'actor_role',
-    render: (row) => [
-      h('strong', row.actor_role_label),
-      row.actor_id ? h('small', { style: 'display:block;color:#8A94C6;font-size:12px' }, row.actor_id) : null,
-    ],
+    title: '操作者', key: 'actor_name',
+    render: (row) => renderPrincipal({
+      primary: row.actor_name ?? '',
+      fallback: shortenId(row.actor_id ?? '') || row.actor_role_label,
+      sub: row.actor_role_label,
+      uuid: row.actor_id,
+      deleted: row.actor_deleted ?? false,
+      isSystem: row.actor_role === 'system' && !row.actor_id,
+    }),
   },
   {
-    title: '资源', key: 'target_type',
-    render: (row) => [
-      h('strong', row.target_type_label),
-      h('small', { style: 'display:block;color:#8A94C6;font-size:12px' }, row.target_id),
-    ],
+    title: '资源', key: 'target_name',
+    render: (row) => renderPrincipal({
+      primary: row.target_name ?? '',
+      // 没 name 的目标（newapi_call 等）直接展示 target_id 字符串本身。
+      fallback: row.target_id,
+      sub: row.target_type_label,
+      // 只有 target_id 像 UUID 才走 hover；endpoint 字符串本身在主文已经可读。
+      uuid: row.target_name ? row.target_id : null,
+      deleted: row.target_deleted ?? false,
+    }),
   },
   { title: '操作', key: 'action', render: (row) => row.action_label },
+  {
+    title: '详情', key: 'action_detail',
+    minWidth: 240,
+    render: (row) => row.action_detail
+      ? h('span', { style: 'white-space:pre-wrap' }, row.action_detail)
+      : h('span', { style: 'color:#8A94C6' }, '—'),
+  },
   {
     title: '结果', key: 'result',
     render: (row) => [

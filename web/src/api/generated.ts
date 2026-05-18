@@ -5986,9 +5986,21 @@ export interface components {
         };
         "service.AuditResult": {
             action?: string;
+            /**
+             * @description ActionDetail 是写入时冻结的详情字符串，直接读自 audit_logs.detail_message 列。
+             *     空字符串表示无详情，前端展示「—」。
+             */
+            action_detail?: string;
             /** @description 以下为展示用翻译字段，由 toAuditResult() 填充，未知值 fallback 到原始字符串。 */
             action_label?: string;
+            /** @description ActorDeleted 表示 actor 对应用户已被软删除（users.deleted_at 非空，本项目即「下线」）。 */
+            actor_deleted?: boolean;
             actor_id?: string;
+            /**
+             * @description ActorName 是 actor_id 对应用户的 display_name fallback username。
+             *     写入时不取，查询时通过 LEFT JOIN 实时填充；空字符串表示无 actor / actor 已物理删除。
+             */
+            actor_name?: string;
             actor_role?: string;
             actor_role_label?: string;
             /** Format: date-time */
@@ -6002,7 +6014,14 @@ export interface components {
             org_id?: string;
             result?: string;
             result_label?: string;
+            /** @description TargetDeleted 表示目标资源对应实体已软删除。 */
+            target_deleted?: boolean;
             target_id?: string;
+            /**
+             * @description TargetName 是 target_id 对应资源名称；按 target_type 走相关子查询，
+             *     对 newapi_call / knowledge_sync 等无对应实体的类型返回空字符串。
+             */
+            target_name?: string;
             target_type?: string;
             target_type_label?: string;
         };
