@@ -138,14 +138,15 @@ func (s *ChannelService) BeginAuth(ctx context.Context, principal auth.Principal
 	}
 	actorUUID, _ := optionalUUID(principal.UserID)
 	if _, err := s.store.CreateAuditLog(ctx, sqlc.CreateAuditLogParams{
-		ActorID:      actorUUID,
-		ActorRole:    principal.Role,
-		OrgID:        app.OrgID,
-		TargetType:   "app",
-		TargetID:     uuidToString(app.ID),
-		Action:       "channel_auth_start",
-		Result:       "succeeded",
-		MetadataJson: auditMetadata,
+		ActorID:       actorUUID,
+		ActorRole:     principal.Role,
+		OrgID:         app.OrgID,
+		TargetType:    "app",
+		TargetID:      uuidToString(app.ID),
+		Action:        "channel_auth_start",
+		Result:        "succeeded",
+		MetadataJson:  auditMetadata,
+		DetailMessage: pgtype.Text{String: fmt.Sprintf("渠道 %s", channelLabel(channelType)), Valid: true},
 	}); err != nil {
 		return ChallengeResult{}, fmt.Errorf("写入渠道发起审计日志失败: %w", err)
 	}

@@ -36,6 +36,9 @@ func TestRecharge_HappyPath(t *testing.T) {
 	if client.lastInput.NewAPIUserID != 1234 || client.lastInput.CreditAmount != 1000 {
 		t.Fatalf("client 调用 = %+v", client.lastInput)
 	}
+	// 详情字段应同时拼出金额和备注（金额单位是「点」，与 recharge_records.credit_amount 一致）。
+	require.True(t, store.lastAuditCreate.DetailMessage.Valid)
+	require.Equal(t, "+1000 点，备注 test", store.lastAuditCreate.DetailMessage.String)
 }
 
 // TestRecharge_DeniesNonPlatformAdmin 验证充值Denies非平台管理员的预期行为场景。
@@ -72,6 +75,9 @@ func TestRecharge_NewAPIErrorStillWritesFailedRecord(t *testing.T) {
 	require.True(t, store.recordWritten)
 	require.Equal(t, "failed", store.lastRecordStatus)
 	require.True(t, store.auditWritten)
+	// 场景：失败路径下空备注详情仅有金额。
+	require.True(t, store.lastAuditCreate.DetailMessage.Valid)
+	require.Equal(t, "+1000 点", store.lastAuditCreate.DetailMessage.String)
 }
 
 // TestListRecharges_DeniesOrgMember 验证普通成员无权查看充值记录。
@@ -185,7 +191,9 @@ type rechargeStub struct {
 	recordWritten    bool
 	lastRecordStatus string
 	auditWritten     bool
-	totalRecharged   int64 // SumRechargeAmountByOrg 的桩返回值
+	// lastAuditCreate 记录最近一次 CreateAuditLog 入参，便于断言 detail 等字段。
+	lastAuditCreate sqlc.CreateAuditLogParams
+	totalRecharged  int64 // SumRechargeAmountByOrg 的桩返回值
 }
 
 func newRechargeStub(t *testing.T, newapiUserID string) *rechargeStub {
@@ -223,8 +231,9 @@ func (s *rechargeStub) ListRechargeRecordsByOrg(_ context.Context, _ sqlc.ListRe
 	return s.records, nil
 }
 
-func (s *rechargeStub) CreateAuditLog(_ context.Context, _ sqlc.CreateAuditLogParams) (sqlc.AuditLog, error) {
+func (s *rechargeStub) CreateAuditLog(_ context.Context, arg sqlc.CreateAuditLogParams) (sqlc.AuditLog, error) {
 	s.auditWritten = true
+	s.lastAuditCreate = arg
 	return sqlc.AuditLog{}, nil
 }
 

@@ -38,6 +38,10 @@ func TestRuntimeNodeServiceEnrollAgentCreatesNode(t *testing.T) {
 	require.Equal(t, "https://node-1.example:7001", node.AgentDockerEndpoint.String)
 	require.True(t, node.MaxApps.Valid)
 	require.Equal(t, int32(3), node.MaxApps.Int32)
+
+	// agent_enrolled 审计详情应为「Agent 版本 <version>」。
+	require.True(t, store.auditLogs[0].DetailMessage.Valid)
+	require.Equal(t, "Agent 版本 0.1.0", store.auditLogs[0].DetailMessage.String)
 }
 
 // TestRuntimeNodeServiceEnrollAgentUpdatesExistingNode 验证运行时节点服务注册agentUpdates已有节点的预期行为场景。
@@ -65,6 +69,10 @@ func TestRuntimeNodeServiceEnrollAgentUpdatesExistingNode(t *testing.T) {
 	require.Equal(t, domain.RuntimeNodeStatusActive, node.Status)
 	require.True(t, node.MaxApps.Valid)
 	require.Equal(t, int32(5), node.MaxApps.Int32)
+
+	// re_enroll 审计详情应反映新版本。
+	require.True(t, store.auditLogs[1].DetailMessage.Valid)
+	require.Equal(t, "Agent 版本 0.2.0", store.auditLogs[1].DetailMessage.String)
 }
 
 // TestRuntimeNodeServiceEnrollAgentPersistsNodeResourceSample 验证agent注册携带节点资源时保留首次采样。

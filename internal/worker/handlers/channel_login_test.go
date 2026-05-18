@@ -80,6 +80,9 @@ func TestChannelCheckBindingHandlerMarksBoundAndRunsApp(t *testing.T) {
 	require.Equal(t, testChannelWorkerAppID, store.auditLogs[0].TargetID)
 	require.Equal(t, "channel_bound", store.auditLogs[0].Action)
 	require.Equal(t, "succeeded", store.auditLogs[0].Result)
+	// 详情字段应同时拼出渠道和绑定身份，便于审计列表识别。
+	require.True(t, store.auditLogs[0].DetailMessage.Valid)
+	require.Equal(t, "渠道 微信，身份 wxid_from_stdout", store.auditLogs[0].DetailMessage.String)
 }
 
 // TestChannelStartLoginHandlerRecordsFailedAudit 验证渠道启动登录失败时写入应用审计的错误记录场景。
@@ -101,6 +104,9 @@ func TestChannelStartLoginHandlerRecordsFailedAudit(t *testing.T) {
 	require.Equal(t, "channel_auth_start", store.auditLogs[0].Action)
 	require.Equal(t, "failed", store.auditLogs[0].Result)
 	require.Contains(t, store.auditLogs[0].ErrorMessage.String, "weixin qrcode failed")
+	// channel_auth_start 的失败详情也应包含渠道名，让审计列表区分是哪条渠道。
+	require.True(t, store.auditLogs[0].DetailMessage.Valid)
+	require.Equal(t, "渠道 微信", store.auditLogs[0].DetailMessage.String)
 }
 
 // TestChannelCheckBindingHandlerRecordsFailedAudit 验证渠道轮询确认绑定失败时写入应用审计的错误记录场景。
@@ -126,6 +132,9 @@ func TestChannelCheckBindingHandlerRecordsFailedAudit(t *testing.T) {
 	require.Equal(t, "channel_bound", store.auditLogs[0].Action)
 	require.Equal(t, "failed", store.auditLogs[0].Result)
 	require.Contains(t, store.auditLogs[0].ErrorMessage.String, "user rejected login")
+	// 场景：失败路径没有 identity，详情仅包含渠道名。
+	require.True(t, store.auditLogs[0].DetailMessage.Valid)
+	require.Equal(t, "渠道 微信", store.auditLogs[0].DetailMessage.String)
 }
 
 // TestChannelCheckBindingHandlerUsesResolverIdentity 验证渠道Check绑定处理器使用解析器身份的预期行为场景。

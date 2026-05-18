@@ -225,14 +225,15 @@ func (s *AppService) UpdateModel(ctx context.Context, principal auth.Principal, 
 			"restart_job_id": uuidToString(job.ID),
 		})
 		if _, err := store.CreateAuditLog(ctx, sqlc.CreateAuditLogParams{
-			ActorID:      actorUUID,
-			ActorRole:    principal.Role,
-			OrgID:        app.OrgID,
-			TargetType:   "app",
-			TargetID:     uuidToString(app.ID),
-			Action:       "update_model",
-			Result:       "succeeded",
-			MetadataJson: metadata,
+			ActorID:       actorUUID,
+			ActorRole:     principal.Role,
+			OrgID:         app.OrgID,
+			TargetType:    "app",
+			TargetID:      uuidToString(app.ID),
+			Action:        "update_model",
+			Result:        "succeeded",
+			MetadataJson:  metadata,
+			DetailMessage: pgtype.Text{String: fmt.Sprintf("%s → %s", app.ModelID, normalizedModelID), Valid: true},
 		}); err != nil {
 			return fmt.Errorf("写入模型修改审计日志失败: %w", err)
 		}

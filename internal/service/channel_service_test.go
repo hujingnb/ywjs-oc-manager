@@ -42,6 +42,9 @@ func TestChannelServiceBeginAuthSuccess(t *testing.T) {
 	require.Equal(t, testChannelAppID, store.auditLogs[0].TargetID)
 	require.Equal(t, "channel_auth_start", store.auditLogs[0].Action)
 	require.Equal(t, "succeeded", store.auditLogs[0].Result)
+	// 详情字段应展示渠道名称（中文），便于审计列表一眼识别。
+	require.True(t, store.auditLogs[0].DetailMessage.Valid)
+	require.Equal(t, "渠道 微信", store.auditLogs[0].DetailMessage.String)
 }
 
 // TestChannelServiceBeginAuthMissingAdapter 验证渠道服务开始认证缺失适配器的异常或拒绝路径场景。

@@ -153,6 +153,8 @@ func TestKnowledgeServiceSaveOrgRecordsDispatchFailure(t *testing.T) {
 	assert.Equal(t, "dispatch_org_upload_file", ev.Action)
 	assert.Equal(t, testKnowledgeOrg, ev.OrgID)
 	assert.Contains(t, ev.ErrorMessage, "redis down")
+	// dispatch_org_upload_file 详情应包含「组织文件 <relPath>」便于审计列表识别。
+	assert.Equal(t, "组织文件 doc.md", ev.DetailMessage)
 }
 
 // TestKnowledgeServiceDeleteAppRecordsDispatchFailure 覆盖应用级删除走相同
@@ -176,6 +178,8 @@ func TestKnowledgeServiceDeleteAppRecordsDispatchFailure(t *testing.T) {
 	assert.Equal(t, "dispatch_app_delete_file", ev.Action)
 	assert.Equal(t, "failed", ev.Result)
 	assert.Equal(t, testKnowledgeApp, ev.TargetID) // app scope 时 target_id 用 app_id,方便按应用筛选。
+	// app scope 时详情格式为「应用文件 <relPath>」。
+	assert.Equal(t, "应用文件 a.md", ev.DetailMessage)
 }
 
 // failingDispatcher 给所有 Dispatch* 方法返回固定 err,用于触发 audit 路径。

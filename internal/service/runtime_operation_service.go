@@ -260,6 +260,8 @@ func (s *RuntimeOperationService) Trigger(ctx context.Context, principal auth.Pr
 		// audit_logs.result CHECK 仅允许 succeeded/failed；
 		// 这里 audit 的语义是「操作已成功提交入队」，与其他 service 写 audit 的写法保持一致。
 		Result: "succeeded",
+		// 不填 DetailMessage：start/stop/restart/delete/disable_api_key/restore_api_key
+		// 的详情与「谁触发」列重复，按设计文档落 NULL（前端展示「—」）。
 	}); err != nil {
 		return RuntimeOperationResult{}, fmt.Errorf("写入审计日志失败: %w", err)
 	}
@@ -361,6 +363,7 @@ func (s *RuntimeOperationService) RequestInitialize(ctx context.Context, princip
 		// audit_logs.result CHECK 仅允许 succeeded/failed；
 		// 这里 audit 的语义是「操作已成功提交入队」，与其他 service 写 audit 的写法保持一致。
 		Result: "succeeded",
+		// 不填 DetailMessage：initialize 的资源列已展示 app 名，详情列冗余。
 	}); err != nil {
 		return RuntimeOperationResult{}, fmt.Errorf("写入审计日志失败: %w", err)
 	}

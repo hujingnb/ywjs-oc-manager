@@ -146,6 +146,12 @@ func (h *KnowledgeSyncHandler) recordAppSync(ctx context.Context, payload knowle
 	if h.auditor == nil {
 		return
 	}
+	// 详情字段填写「文件 <relPath>」便于审计页面识别同步对象；
+	// noop 或缺路径时留空，前端展示「—」。
+	detail := ""
+	if payload.ChangeType != "noop" && payload.RelPath != "" {
+		detail = fmt.Sprintf("文件 %s", payload.RelPath)
+	}
 	event := service.AuditEvent{
 		ActorRole:    "system",
 		OrgID:        payload.OrgID,
@@ -158,6 +164,7 @@ func (h *KnowledgeSyncHandler) recordAppSync(ctx context.Context, payload knowle
 			"node_id":  payload.NodeID,
 			"rel_path": payload.RelPath,
 		},
+		DetailMessage: detail,
 	}
 	if _, err := h.auditor.Record(ctx, event); err != nil {
 		slog.ErrorContext(ctx, "写 app_knowledge_sync 审计失败", "error", err)

@@ -103,6 +103,11 @@ func (s *KnowledgeService) recordDispatchFailure(ctx context.Context, orgID, app
 	if appID != "" {
 		targetID = appID
 	}
+	// 详情字段说明事件作用对象（组织级 vs 应用级 + 文件路径），方便审计列表筛选。
+	detail := fmt.Sprintf("组织文件 %s", relPath)
+	if appID != "" {
+		detail = fmt.Sprintf("应用文件 %s", relPath)
+	}
 	event := AuditEvent{
 		ActorRole:    "system",
 		OrgID:        orgID,
@@ -115,6 +120,7 @@ func (s *KnowledgeService) recordDispatchFailure(ctx context.Context, orgID, app
 			"app_id":   appID,
 			"rel_path": relPath,
 		},
+		DetailMessage: detail,
 	}
 	if _, err := s.auditor.Record(ctx, event); err != nil {
 		slog.ErrorContext(ctx, "写 audit_logs 失败", "error", err)

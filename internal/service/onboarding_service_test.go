@@ -41,6 +41,12 @@ func TestOnboardMemberCommitsOnSuccess(t *testing.T) {
 	assert.Equal(t, "create", store.auditLogs[1].Action)
 	assert.Equal(t, result.App.ID, store.auditLogs[1].TargetID)
 	assert.Positive(t, store.jobs)
+	// auditLogs[0] = create_with_app; 详情应为「新建成员 <显示名>（含应用 <应用名>）」。
+	require.True(t, store.auditLogs[0].DetailMessage.Valid)
+	require.Equal(t, "新建成员 Alice（含应用 alice-bot）", store.auditLogs[0].DetailMessage.String)
+	// auditLogs[1] = app create; 详情应为「归属成员 Alice，渠道 微信」。
+	require.True(t, store.auditLogs[1].DetailMessage.Valid)
+	require.Equal(t, "归属成员 Alice，渠道 微信", store.auditLogs[1].DetailMessage.String)
 }
 
 // TestOnboardMemberRollsBackWhenAppCreationFails 验证引导成员回滚回退当应用Creation失败的预期行为场景。
@@ -139,6 +145,9 @@ func TestCreateAppForMember_PlatformAdminCreatesAfterDelete(t *testing.T) {
 	require.Len(t, store.auditLogs, 1)
 	assert.Equal(t, "app", store.auditLogs[0].TargetType)
 	assert.Equal(t, "create_for_existing_member", store.auditLogs[0].Action)
+	// 详情格式与 OnboardMember 的 create 一致：归属成员 + 渠道。
+	require.True(t, store.auditLogs[0].DetailMessage.Valid)
+	require.Equal(t, "归属成员 Alice，渠道 微信", store.auditLogs[0].DetailMessage.String)
 }
 
 // TestCreateAppForMemberStoresModelID 验证为已有成员创建实例时保存选定模型。
@@ -374,11 +383,12 @@ func (s *onboardingStub) GetActiveAppByOwner(_ context.Context, ownerUserID pgty
 func (s *onboardingStub) CreateUser(_ context.Context, arg sqlc.CreateUserParams) (sqlc.User, error) {
 	s.staged.users++
 	return sqlc.User{
-		ID:       mustUUID(s.t, "00000000-0000-0000-0000-000000000a01"),
-		OrgID:    arg.OrgID,
-		Username: arg.Username,
-		Role:     arg.Role,
-		Status:   arg.Status,
+		ID:          mustUUID(s.t, "00000000-0000-0000-0000-000000000a01"),
+		OrgID:       arg.OrgID,
+		Username:    arg.Username,
+		DisplayName: arg.DisplayName,
+		Role:        arg.Role,
+		Status:      arg.Status,
 	}, nil
 }
 

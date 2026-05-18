@@ -270,12 +270,19 @@ func (s *RuntimeNodeService) EnrollAgent(ctx context.Context, input AgentEnrollI
 			return AgentEnrollResult{}, fmt.Errorf("写入节点资源采样失败: %w", err)
 		}
 	}
+	// 详情字段记录 agent 版本，方便审计列表识别是哪个版本上线 / 重连。
+	// 版本未上报时落空字符串（落库为 NULL），与 spec 设计一致。
+	auditDetail := pgtype.Text{}
+	if v := strings.TrimSpace(input.AgentVersion); v != "" {
+		auditDetail = pgtype.Text{String: "Agent 版本 " + v, Valid: true}
+	}
 	if _, err := s.store.CreateAuditLog(ctx, sqlc.CreateAuditLogParams{
-		ActorRole:  "system",
-		TargetType: "runtime_node",
-		TargetID:   uuidToString(node.ID),
-		Action:     action,
-		Result:     "succeeded",
+		ActorRole:     "system",
+		TargetType:    "runtime_node",
+		TargetID:      uuidToString(node.ID),
+		Action:        action,
+		Result:        "succeeded",
+		DetailMessage: auditDetail,
 	}); err != nil {
 		return AgentEnrollResult{}, fmt.Errorf("写审计失败: %w", err)
 	}

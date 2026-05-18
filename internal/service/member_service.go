@@ -311,7 +311,11 @@ func (s *MemberService) DeleteMember(ctx context.Context, principal auth.Princip
 	if err != nil && !errors.Is(err, pgx.ErrNoRows) {
 		return fmt.Errorf("查询成员应用失败: %w", err)
 	}
+	// 第一版每个未删除成员账号最多拥有一个未删除应用，因此 cascadeCount 仅为 0 / 1；
+	// 写进 audit 详情让运维一眼看出删除成员是否带走应用。
+	cascadeCount := 0
 	if hasApp {
+		cascadeCount = 1
 		if _, err := s.store.SoftDeleteApp(ctx, app.ID); err != nil {
 			return fmt.Errorf("软删应用失败: %w", err)
 		}
@@ -334,13 +338,14 @@ func (s *MemberService) DeleteMember(ctx context.Context, principal auth.Princip
 
 	actorUUID, _ := optionalUUID(principal.UserID)
 	if _, err := s.store.CreateAuditLog(ctx, sqlc.CreateAuditLogParams{
-		ActorID:    actorUUID,
-		ActorRole:  principal.Role,
-		OrgID:      user.OrgID,
-		TargetType: "user",
-		TargetID:   uuidToString(user.ID),
-		Action:     "delete_member",
-		Result:     "succeeded",
+		ActorID:       actorUUID,
+		ActorRole:     principal.Role,
+		OrgID:         user.OrgID,
+		TargetType:    "user",
+		TargetID:      uuidToString(user.ID),
+		Action:        "delete_member",
+		Result:        "succeeded",
+		DetailMessage: pgtype.Text{String: fmt.Sprintf("级联删除 %d 个应用", cascadeCount), Valid: true},
 	}); err != nil {
 		return fmt.Errorf("写入审计日志失败: %w", err)
 	}

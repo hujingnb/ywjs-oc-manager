@@ -538,6 +538,7 @@ func (h *AppInitializeHandler) writeInitAuditLog(ctx context.Context, app sqlc.A
 		Action:       "initialize",
 		Result:       "succeeded",
 		MetadataJson: auditMetadata,
+		// 不填 DetailMessage：initialize 的资源列已展示 app 名，详情列冗余。
 	}); err != nil {
 		return fmt.Errorf("写入应用初始化审计日志失败: %w", err)
 	}

@@ -51,6 +51,10 @@ func TestUpdateModelCreatesRestartJobForContainer(t *testing.T) {
 	assert.Equal(t, domain.JobTypeAppRestartContainer, store.jobs[0].Type)
 	require.Len(t, store.auditLogs, 1)
 	assert.Equal(t, "update_model", store.auditLogs[0].Action)
+	// 详情字段应记录从旧模型切到新模型，便于在审计列表里一眼识别变更。
+	// auditLogs[0].DetailMessage 是 pgtype.Text；通过 .String 取字符串内容做断言。
+	require.True(t, store.auditLogs[0].DetailMessage.Valid)
+	require.Equal(t, "qwen2.5:7b → deepseek-r1:14b", store.auditLogs[0].DetailMessage.String)
 }
 
 // TestUpdateModelSurvivesNotifierError 验证 Redis 入队失败不回滚模型修改和重启任务。

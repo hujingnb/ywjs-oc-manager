@@ -101,7 +101,7 @@ func (r *RuntimeNodeProbeReconciler) recordSuccess(ctx context.Context, node sql
 		return fmt.Errorf("更新节点 %s probe 成功状态失败: %w", uuidToString(node.ID), err)
 	}
 	if before == domain.RuntimeNodeStatusDegraded && updated.Status == domain.RuntimeNodeStatusActive {
-		return r.audit(ctx, updated.ID, "node_probe_recovered")
+		return r.audit(ctx, updated.ID, "node_probe_recovered", before, updated.Status)
 	}
 	return nil
 }
@@ -117,18 +117,21 @@ func (r *RuntimeNodeProbeReconciler) recordFailure(ctx context.Context, node sql
 		return fmt.Errorf("更新节点 %s probe 失败状态失败: %w", uuidToString(node.ID), err)
 	}
 	if before == domain.RuntimeNodeStatusActive && updated.Status == domain.RuntimeNodeStatusDegraded {
-		return r.audit(ctx, updated.ID, "node_probe_degraded")
+		return r.audit(ctx, updated.ID, "node_probe_degraded", before, updated.Status)
 	}
 	return nil
 }
 
-func (r *RuntimeNodeProbeReconciler) audit(ctx context.Context, nodeID pgtype.UUID, action string) error {
+// audit 写一条节点 probe 审计。before / after 是切换前后的节点状态，
+// 拼成详情字符串「状态：X → Y」，便于审计列表识别状态变化方向。
+func (r *RuntimeNodeProbeReconciler) audit(ctx context.Context, nodeID pgtype.UUID, action, before, after string) error {
 	if _, err := r.store.CreateAuditLog(ctx, sqlc.CreateAuditLogParams{
-		ActorRole:  "system",
-		TargetType: "runtime_node",
-		TargetID:   uuidToString(nodeID),
-		Action:     action,
-		Result:     "succeeded",
+		ActorRole:     "system",
+		TargetType:    "runtime_node",
+		TargetID:      uuidToString(nodeID),
+		Action:        action,
+		Result:        "succeeded",
+		DetailMessage: pgtype.Text{String: fmt.Sprintf("状态：%s → %s", before, after), Valid: true},
 	}); err != nil {
 		return fmt.Errorf("写节点 probe 审计失败: %w", err)
 	}

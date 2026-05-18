@@ -240,13 +240,14 @@ func (s *MemberOnboardingService) OnboardMember(ctx context.Context, principal a
 		}
 		actorUUID, _ := optionalUUID(principal.UserID)
 		if _, err := store.CreateAuditLog(ctx, sqlc.CreateAuditLogParams{
-			ActorID:    actorUUID,
-			ActorRole:  principal.Role,
-			OrgID:      org.ID,
-			TargetType: "member",
-			TargetID:   uuidToString(user.ID),
-			Action:     "create_with_app",
-			Result:     "succeeded",
+			ActorID:       actorUUID,
+			ActorRole:     principal.Role,
+			OrgID:         org.ID,
+			TargetType:    "member",
+			TargetID:      uuidToString(user.ID),
+			Action:        "create_with_app",
+			Result:        "succeeded",
+			DetailMessage: pgtype.Text{String: fmt.Sprintf("新建成员 %s（含应用 %s）", displayNameOrUsername(user), app.Name), Valid: true},
 		}); err != nil {
 			return fmt.Errorf("写入审计日志失败: %w", err)
 		}
@@ -259,14 +260,15 @@ func (s *MemberOnboardingService) OnboardMember(ctx context.Context, principal a
 			return fmt.Errorf("序列化应用创建审计元数据失败: %w", err)
 		}
 		if _, err := store.CreateAuditLog(ctx, sqlc.CreateAuditLogParams{
-			ActorID:      actorUUID,
-			ActorRole:    principal.Role,
-			OrgID:        org.ID,
-			TargetType:   "app",
-			TargetID:     uuidToString(app.ID),
-			Action:       "create",
-			Result:       "succeeded",
-			MetadataJson: appAuditMetadata,
+			ActorID:       actorUUID,
+			ActorRole:     principal.Role,
+			OrgID:         org.ID,
+			TargetType:    "app",
+			TargetID:      uuidToString(app.ID),
+			Action:        "create",
+			Result:        "succeeded",
+			MetadataJson:  appAuditMetadata,
+			DetailMessage: pgtype.Text{String: fmt.Sprintf("归属成员 %s，渠道 %s", displayNameOrUsername(user), channelLabel(channelType)), Valid: true},
 		}); err != nil {
 			return fmt.Errorf("写入应用创建审计日志失败: %w", err)
 		}
@@ -405,14 +407,15 @@ func (s *MemberOnboardingService) CreateAppForMember(ctx context.Context, princi
 			return fmt.Errorf("序列化应用创建审计元数据失败: %w", err)
 		}
 		if _, err := store.CreateAuditLog(ctx, sqlc.CreateAuditLogParams{
-			ActorID:      actorUUID,
-			ActorRole:    principal.Role,
-			OrgID:        org.ID,
-			TargetType:   "app",
-			TargetID:     uuidToString(app.ID),
-			Action:       "create_for_existing_member",
-			Result:       "succeeded",
-			MetadataJson: metadata,
+			ActorID:       actorUUID,
+			ActorRole:     principal.Role,
+			OrgID:         org.ID,
+			TargetType:    "app",
+			TargetID:      uuidToString(app.ID),
+			Action:        "create_for_existing_member",
+			Result:        "succeeded",
+			MetadataJson:  metadata,
+			DetailMessage: pgtype.Text{String: fmt.Sprintf("归属成员 %s，渠道 %s", displayNameOrUsername(user), channelLabel(channelType)), Valid: true},
 		}); err != nil {
 			return fmt.Errorf("写入应用创建审计日志失败: %w", err)
 		}
@@ -477,4 +480,28 @@ var errOnboardingFailed = errors.New("onboarding 事务失败")
 func isAppsOwnerActiveUniqueViolation(err error) bool {
 	var pgErr *pgconn.PgError
 	return errors.As(err, &pgErr) && pgErr.Code == "23505" && pgErr.ConstraintName == "apps_owner_active"
+}
+
+// displayNameOrUsername 返回用户用于展示的名称。
+// display_name 优先；display_name 为空时回退 username；二者都为空时返回固定占位「成员」，
+// 避免审计详情出现「新建成员 （含应用 X）」这种空白挂着的字段。
+func displayNameOrUsername(user sqlc.User) string {
+	if user.DisplayName != "" {
+		return user.DisplayName
+	}
+	if user.Username != "" {
+		return user.Username
+	}
+	return "成员"
+}
+
+// channelLabel 把 channel_type 枚举（如 "wechat"）翻译为中文便于审计展示。
+// 未知枚举回退到原始字符串，给后端扩展新渠道时保持自描述。
+func channelLabel(channelType string) string {
+	switch channelType {
+	case domain.ChannelTypeWeChat:
+		return "微信"
+	default:
+		return channelType
+	}
 }

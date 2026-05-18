@@ -337,6 +337,9 @@ func TestDeleteMember_SoftDeletesAndEnqueuesAppDelete(t *testing.T) {
 	}
 	require.True(t, stub.auditWritten)
 	require.NotEqual(t, "", notifier.lastJobID)
+	// 详情字段应记录级联删除的应用数量，方便审计列表展示「级联删除 N 个应用」。
+	require.True(t, stub.lastAuditCreate.DetailMessage.Valid)
+	require.Equal(t, "级联删除 1 个应用", stub.lastAuditCreate.DetailMessage.String)
 }
 
 // TestDeleteMember_NoAppStillSoftDeletesUser 验证删除成员无应用仍然软删除Deletes用户的预期行为场景。
@@ -353,6 +356,9 @@ func TestDeleteMember_NoAppStillSoftDeletesUser(t *testing.T) {
 	err := svc.DeleteMember(context.Background(), orgAdminPrincipal(), uuidToString(target.ID), nil)
 	require.NoError(t, err)
 	require.Equal(t, 0, len(stub.jobs))
+	// 场景：成员名下没有应用时详情仍要明确写出「0 个」便于一致展示。
+	require.True(t, stub.lastAuditCreate.DetailMessage.Valid)
+	require.Equal(t, "级联删除 0 个应用", stub.lastAuditCreate.DetailMessage.String)
 }
 
 // TestDeleteMember_RejectsSelfDeletion 验证删除成员拒绝自身Deletion的异常或拒绝路径场景。
@@ -402,6 +408,8 @@ type memberStoreStub struct {
 	apps               map[string]sqlc.App
 	jobs               []sqlc.CreateJobParams
 	auditWritten       bool
+	// lastAuditCreate 记录最近一次 CreateAuditLog 入参，便于测试断言 detail / metadata 等字段。
+	lastAuditCreate    sqlc.CreateAuditLogParams
 	softDeleted        []string
 	lastCreate         sqlc.CreateUserParams
 	lastListWithApp    sqlc.ListUsersByOrgWithActiveAppParams
@@ -558,7 +566,8 @@ func (s *memberStoreStub) CreateJob(_ context.Context, arg sqlc.CreateJobParams)
 	return sqlc.Job{ID: mustUUID(s.t, "00000000-0000-0000-0000-000000004001"), Type: arg.Type}, nil
 }
 
-func (s *memberStoreStub) CreateAuditLog(_ context.Context, _ sqlc.CreateAuditLogParams) (sqlc.AuditLog, error) {
+func (s *memberStoreStub) CreateAuditLog(_ context.Context, arg sqlc.CreateAuditLogParams) (sqlc.AuditLog, error) {
 	s.auditWritten = true
+	s.lastAuditCreate = arg
 	return sqlc.AuditLog{}, nil
 }

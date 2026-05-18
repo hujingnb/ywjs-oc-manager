@@ -171,6 +171,8 @@ func TestKnowledgeSyncHandler_AppScopeSuccessWritesAudit(t *testing.T) {
 	assert.Equal(t, "succeeded", ev.Result)
 	assert.Equal(t, "n1", ev.Metadata["node_id"])
 	assert.Equal(t, "x.md", ev.Metadata["rel_path"])
+	// 详情字段应展示「文件 <relPath>」，便于审计列表识别同步对象。
+	assert.Equal(t, "文件 x.md", ev.DetailMessage)
 }
 
 // TestKnowledgeSyncHandler_AppScopeFailureWritesAudit 验证失败时 result=failed
@@ -188,6 +190,8 @@ func TestKnowledgeSyncHandler_AppScopeFailureWritesAudit(t *testing.T) {
 	require.Len(t, auditor.events, 1)
 	assert.Equal(t, "failed", auditor.events[0].Result)
 	assert.Contains(t, auditor.events[0].ErrorMessage, "agent unreachable")
+	// 失败路径详情同样附带文件名。
+	assert.Equal(t, "文件 r", auditor.events[0].DetailMessage)
 }
 
 // TestKnowledgeSyncHandler_OrgScopeDoesNotWriteAudit 验证 org scope 不走 audit_logs

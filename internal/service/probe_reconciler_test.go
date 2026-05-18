@@ -28,6 +28,10 @@ func TestRuntimeNodeProbeReconcilerFailureDegradesActiveNode(t *testing.T) {
 	require.Equal(t, domain.RuntimeNodeStatusDegraded, updated.Status)
 	require.Equal(t, int32(1), updated.ProbeFailureStreak)
 	require.True(t, store.audited("node_probe_degraded"))
+	// 探测降级审计详情包含状态切换：active → degraded。
+	require.Len(t, store.auditLogs, 1)
+	require.True(t, store.auditLogs[0].DetailMessage.Valid)
+	require.Equal(t, "状态：active → degraded", store.auditLogs[0].DetailMessage.String)
 }
 
 // TestRuntimeNodeProbeReconcilerSuccessRecoversDegradedNode 验证运行时节点探测调和器成功Recovers降级节点的成功路径场景。
@@ -45,6 +49,10 @@ func TestRuntimeNodeProbeReconcilerSuccessRecoversDegradedNode(t *testing.T) {
 	require.Equal(t, domain.RuntimeNodeStatusActive, updated.Status)
 	require.Equal(t, int32(1), updated.ProbeSuccessStreak)
 	require.True(t, store.audited("node_probe_recovered"))
+	// 探测恢复审计详情包含状态切换：degraded → active。
+	require.Len(t, store.auditLogs, 1)
+	require.True(t, store.auditLogs[0].DetailMessage.Valid)
+	require.Equal(t, "状态：degraded → active", store.auditLogs[0].DetailMessage.String)
 }
 
 // TestRuntimeNodeProbeReconcilerSkipsDisabledNode 验证运行时节点探测调和器跳过禁用节点的特殊分支或幂等场景。
