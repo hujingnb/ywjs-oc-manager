@@ -7,6 +7,7 @@ import (
 	"math"
 	"net/http"
 	"net/http/httptest"
+	"net/url"
 	"strings"
 	"testing"
 
@@ -624,4 +625,30 @@ func TestUserScopedClient_SecondCall401AfterRefreshDoesNotLoop(t *testing.T) {
 	_, err := user.GetTokenFullKey(context.Background(), 13)
 	require.ErrorIs(t, err, ErrUnauthorized)
 	assert.Equal(t, 2, requestCount)
+}
+
+// TestGetTokenLogsSendsTokenName 校验 manager 透传给 new-api 的过滤参数
+// 改为 token_name 而非 token_id。new-api admin 端实测 token_id 静默失效、
+// token_name 才生效，本测试防止这一关键修复回归。
+func TestGetTokenLogsSendsTokenName(t *testing.T) {
+	var gotQuery url.Values
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path != "/api/log/" {
+			t.Fatalf("unexpected path: %s", r.URL.Path)
+		}
+		gotQuery = r.URL.Query()
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`{"success":true,"data":{"total":0,"items":[]}}`))
+	}))
+	defer server.Close()
+
+	client := NewClient(server.URL, "tok", 1)
+	_, err := client.GetTokenLogs(context.Background(), LogsQuery{
+		TokenName: "app-0193ce63-4b8e-7000-a000-000000000001",
+		Page:      1,
+		PageSize:  20,
+	})
+	require.NoError(t, err)
+	assert.Equal(t, "app-0193ce63-4b8e-7000-a000-000000000001", gotQuery.Get("token_name"))
+	assert.Empty(t, gotQuery.Get("token_id"), "token_id 不应再发送（new-api 静默忽略，留着误导）")
 }

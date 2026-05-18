@@ -144,10 +144,13 @@ type StatusView struct {
 //
 // 时间范围 Since / Until 是 unix 秒；new-api 端字段名为 start_timestamp / end_timestamp。
 // PageSize 缺省 20，对应 new-api `p=1&page_size=20`。
+//
+// TokenName 是 manager 唯一可靠的 token 维度过滤口径：new-api admin 端
+// 实测 token_id query 被静默忽略，只有 token_name 与 username/user_id 生效。
 type LogsQuery struct {
-	TokenID   int64
 	UserID    int64
 	Username  string
+	TokenName string
 	ModelName string
 	Since     int64
 	Until     int64
@@ -823,8 +826,8 @@ func (c *Client) GetTokenLogs(ctx context.Context, q LogsQuery) (LogsPage, error
 	values := url.Values{}
 	values.Set("p", strconv.Itoa(page))
 	values.Set("page_size", strconv.Itoa(pageSize))
-	if q.TokenID > 0 {
-		values.Set("token_id", strconv.FormatInt(q.TokenID, 10))
+	if q.TokenName != "" {
+		values.Set("token_name", q.TokenName)
 	}
 	if q.UserID > 0 {
 		values.Set("user_id", strconv.FormatInt(q.UserID, 10))
