@@ -28,6 +28,8 @@ type RuntimeOperationStore interface {
 	ClearAppProgress(ctx context.Context, id pgtype.UUID) (sqlc.App, error)
 	CreateJob(ctx context.Context, arg sqlc.CreateJobParams) (sqlc.Job, error)
 	CreateAuditLog(ctx context.Context, arg sqlc.CreateAuditLogParams) (sqlc.AuditLog, error)
+	// CountChannelBindingsByApp 统计应用下未删除的渠道绑定数；Trigger 在 delete 审计详情中展示这个数。
+	CountChannelBindingsByApp(ctx context.Context, appID pgtype.UUID) (int64, error)
 }
 
 // JobNotifier 抽象向 Redis 队列推送 jobID 的能力。
@@ -250,6 +252,16 @@ func (s *RuntimeOperationService) Trigger(ctx context.Context, principal auth.Pr
 		return RuntimeOperationResult{}, fmt.Errorf("创建运行操作任务失败: %w", err)
 	}
 	actorUUID, _ := optionalUUID(principal.UserID)
+	// app.delete 详情附带级联渠道绑定数，便于审计列表识别本次删除会清理掉多少渠道。
+	// 其他 op (start/stop/restart/disable_api_key/restore_api_key) 与 actor 列重复，留空。
+	detail := pgtype.Text{}
+	if op == RuntimeOperationDelete {
+		cascadeCount, err := s.store.CountChannelBindingsByApp(ctx, app.ID)
+		if err != nil {
+			return RuntimeOperationResult{}, fmt.Errorf("统计渠道绑定数失败: %w", err)
+		}
+		detail = pgtype.Text{String: fmt.Sprintf("级联：%d 个渠道绑定", cascadeCount), Valid: true}
+	}
 	if _, err := s.store.CreateAuditLog(ctx, sqlc.CreateAuditLogParams{
 		ActorID:    actorUUID,
 		ActorRole:  principal.Role,
@@ -259,8 +271,9 @@ func (s *RuntimeOperationService) Trigger(ctx context.Context, principal auth.Pr
 		Action:     string(op),
 		// audit_logs.result CHECK 仅允许 succeeded/failed；
 		// 这里 audit 的语义是「操作已成功提交入队」，与其他 service 写 audit 的写法保持一致。
-		Result: "succeeded",
-		// 不填 DetailMessage：start/stop/restart/delete/disable_api_key/restore_api_key
+		Result:        "succeeded",
+		DetailMessage: detail,
+		// 非 delete op 不填详情：start/stop/restart/disable_api_key/restore_api_key
 		// 的详情与「谁触发」列重复，按设计文档落 NULL（前端展示「—」）。
 	}); err != nil {
 		return RuntimeOperationResult{}, fmt.Errorf("写入审计日志失败: %w", err)

@@ -228,6 +228,10 @@ type runtimeOperationStub struct {
 	// progressCleared 标记 ClearAppProgress 被调用过,
 	// RequestInitialize 用例据此断言 5.6 的进度重置分支被走到。
 	progressCleared bool
+	// channelBindingCount 控制 CountChannelBindingsByApp 返回的渠道绑定数；默认 0。
+	channelBindingCount int64
+	// lastAuditDetail 记录最近一次 CreateAuditLog 传入的 DetailMessage，供断言使用。
+	lastAuditDetail pgtype.Text
 }
 
 func newRuntimeOperationStub(t *testing.T) *runtimeOperationStub {
@@ -258,9 +262,15 @@ func (s *runtimeOperationStub) CreateJob(_ context.Context, arg sqlc.CreateJobPa
 	return sqlc.Job{ID: mustUUID(s.t, "00000000-0000-0000-0000-000000001ff1"), Type: arg.Type}, nil
 }
 
-func (s *runtimeOperationStub) CreateAuditLog(_ context.Context, _ sqlc.CreateAuditLogParams) (sqlc.AuditLog, error) {
+func (s *runtimeOperationStub) CreateAuditLog(_ context.Context, arg sqlc.CreateAuditLogParams) (sqlc.AuditLog, error) {
 	s.auditWritten = true
+	s.lastAuditDetail = arg.DetailMessage
 	return sqlc.AuditLog{}, nil
+}
+
+// CountChannelBindingsByApp 返回 channelBindingCount，模拟查询结果。
+func (s *runtimeOperationStub) CountChannelBindingsByApp(_ context.Context, _ pgtype.UUID) (int64, error) {
+	return s.channelBindingCount, nil
 }
 
 func (s *runtimeOperationStub) SetAppStatus(_ context.Context, arg sqlc.SetAppStatusParams) (sqlc.App, error) {
@@ -311,6 +321,33 @@ func TestTrigger_DisabledPrincipal_Denied(t *testing.T) {
 
 	_, err := svc.Trigger(context.Background(), platformAdmin(), testRuntimeOpAppID, RuntimeOperationStart)
 	require.ErrorIs(t, err, ErrRuntimeOperationDenied)
+}
+
+// TestRuntimeOperationTriggerDeleteEmitsCascadeDetail 验证 delete 操作审计详情包含级联渠道绑定数。
+// 场景：触发 delete，stub 报告该 app 下有 2 个未删除渠道绑定，detail 应展示「级联：2 个渠道绑定」。
+func TestRuntimeOperationTriggerDeleteEmitsCascadeDetail(t *testing.T) {
+	store := newRuntimeOperationStub(t)
+	// 设置 stub 返回 2 个未删除渠道绑定，模拟 app.delete 前的真实状态。
+	store.channelBindingCount = 2
+	svc := NewRuntimeOperationService(store, newDiscardLogger())
+
+	_, err := svc.Trigger(context.Background(), runtimeOrgAdminPrincipal(), testRuntimeOpAppID, RuntimeOperationDelete)
+	require.NoError(t, err)
+	// delete 操作的审计详情必须展示级联渠道绑定数。
+	require.True(t, store.lastAuditDetail.Valid, "delete 操作的 DetailMessage 应为 Valid")
+	require.Equal(t, "级联：2 个渠道绑定", store.lastAuditDetail.String)
+}
+
+// TestRuntimeOperationTriggerStartHasNoDetail 验证非 delete 操作（如 start）的审计详情留空。
+// 场景：触发 start，actor 信息已在触发人列展示，详情列按设计文档保持 NULL。
+func TestRuntimeOperationTriggerStartHasNoDetail(t *testing.T) {
+	store := newRuntimeOperationStub(t)
+	svc := NewRuntimeOperationService(store, newDiscardLogger())
+
+	_, err := svc.Trigger(context.Background(), runtimeOrgAdminPrincipal(), testRuntimeOpAppID, RuntimeOperationStart)
+	require.NoError(t, err)
+	// 非 delete op 的 DetailMessage.Valid 必须为 false（前端展示「—」）。
+	require.False(t, store.lastAuditDetail.Valid, "非 delete 操作的 DetailMessage 应为 NULL")
 }
 
 // TestRequestInitialize_DisabledPrincipal_Denied 验证请求初始化禁用PrincipalDenied的预期行为场景。

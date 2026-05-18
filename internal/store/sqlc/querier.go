@@ -22,6 +22,9 @@ type Querier interface {
 	// 平台总览应用计数：按 status 分组，soft-deleted 通过 deleted_at IS NULL 排除。
 	// 调用方在 service 层把结果聚合成 {status: count}，未出现 status 视为 0。
 	CountAppsByStatus(ctx context.Context) ([]CountAppsByStatusRow, error)
+	// 统计指定应用下未被标记为 deleted 的渠道绑定数。
+	// RuntimeOperationService.Trigger 在写 delete 审计前调用，把数量塞进 detail_message。
+	CountChannelBindingsByApp(ctx context.Context, appID pgtype.UUID) (int64, error)
 	CreateApp(ctx context.Context, arg CreateAppParams) (App, error)
 	CreateAuditLog(ctx context.Context, arg CreateAuditLogParams) (AuditLog, error)
 	CreateChannelBinding(ctx context.Context, arg CreateChannelBindingParams) (ChannelBinding, error)

@@ -11,6 +11,21 @@ import (
 	"github.com/jackc/pgx/v5/pgtype"
 )
 
+const countChannelBindingsByApp = `-- name: CountChannelBindingsByApp :one
+SELECT COUNT(*)::bigint AS count
+FROM channel_bindings
+WHERE app_id = $1 AND status <> 'deleted'
+`
+
+// 统计指定应用下未被标记为 deleted 的渠道绑定数。
+// RuntimeOperationService.Trigger 在写 delete 审计前调用，把数量塞进 detail_message。
+func (q *Queries) CountChannelBindingsByApp(ctx context.Context, appID pgtype.UUID) (int64, error) {
+	row := q.db.QueryRow(ctx, countChannelBindingsByApp, appID)
+	var count int64
+	err := row.Scan(&count)
+	return count, err
+}
+
 const createChannelBinding = `-- name: CreateChannelBinding :one
 INSERT INTO channel_bindings (
     app_id,
