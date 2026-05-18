@@ -22,7 +22,9 @@ import (
 // 让 new-api 维护一切按 token / user / 平台的 quota 统计与分组。
 type UsageNewAPIClient interface {
 	GetTokenLogs(ctx context.Context, q newapi.LogsQuery) (newapi.LogsPage, error)
-	GetUserQuotaDates(ctx context.Context, userID, since, until int64) ([]newapi.QuotaDate, error)
+	// GetUserQuotaDates 需要传 username：new-api 端 id 参数被静默忽略，
+	// client 必须按 username 做客户端过滤，否则会拿到全平台所有用户的聚合数据。
+	GetUserQuotaDates(ctx context.Context, userID int64, username string, since, until int64) ([]newapi.QuotaDate, error)
 	GetAllQuotaDates(ctx context.Context, since, until int64) ([]newapi.QuotaDate, error)
 }
 
@@ -106,8 +108,20 @@ func (s *UsageService) GetAppUsage(ctx context.Context, principal auth.Principal
 	if newapiKeyID == 0 {
 		return LogsPage{Scope: "app", ScopeID: appID, Items: []newapi.LogEntry{}, UpdatedAt: time.Now()}, nil
 	}
+	// new-api admin /api/log/?token_id= 被实测静默忽略，必须用 token_name 过滤。
+	// 优先读 apps.newapi_key_name；store 缺失或字段空时回退到约定 "app-"+appID，
+	// 该值与 app_initialize 注册 token 时使用的名字保持一致。
+	keyName := "app-" + appID
+	if s.store != nil {
+		appUUID, parseErr := parseUUID(appID)
+		if parseErr == nil {
+			if app, getErr := s.store.GetApp(ctx, appUUID); getErr == nil && app.NewapiKeyName.Valid && app.NewapiKeyName.String != "" {
+				keyName = app.NewapiKeyName.String
+			}
+		}
+	}
 	page, err := s.client.GetTokenLogs(ctx, newapi.LogsQuery{
-		TokenID:   newapiKeyID,
+		TokenName: keyName,
 		Since:     opts.Since,
 		Until:     opts.Until,
 		Page:      opts.Page,
@@ -152,8 +166,14 @@ func (s *UsageService) GetMemberUsage(ctx context.Context, principal auth.Princi
 	if keyID == 0 || s.client == nil {
 		return LogsPage{Scope: "member", ScopeID: memberID, Items: []newapi.LogEntry{}, UpdatedAt: time.Now()}, nil
 	}
+	// new-api admin /api/log/?token_id= 被实测静默忽略，必须用 token_name 过滤。
+	// 优先读 apps.newapi_key_name；字段空（历史 / 未回填数据）时回退到 "app-"+app.ID。
+	keyName := app.NewapiKeyName.String
+	if keyName == "" {
+		keyName = "app-" + uuidToString(app.ID)
+	}
 	page, err := s.client.GetTokenLogs(ctx, newapi.LogsQuery{
-		TokenID:   keyID,
+		TokenName: keyName,
 		Since:     opts.Since,
 		Until:     opts.Until,
 		Page:      opts.Page,
@@ -201,7 +221,13 @@ func (s *UsageService) GetOrgUsage(ctx context.Context, principal auth.Principal
 	if userID == 0 {
 		return QuotaSeries{Scope: "organization", ScopeID: orgID, Items: []newapi.QuotaDate{}, UpdatedAt: time.Now()}, nil
 	}
-	items, err := s.client.GetUserQuotaDates(ctx, userID, since, until)
+	// org.NewapiUsername 是 client 做客户端过滤 /api/data/users 响应的依据；
+	// 字段空意味着老数据未回填，此时不调 newapi，直接返回空 series 避免污染
+	// （new-api 响应里固定包含全平台所有用户的聚合，没有 username 无法精确过滤）。
+	if !org.NewapiUsername.Valid || org.NewapiUsername.String == "" {
+		return QuotaSeries{Scope: "organization", ScopeID: orgID, Items: []newapi.QuotaDate{}, UpdatedAt: time.Now()}, nil
+	}
+	items, err := s.client.GetUserQuotaDates(ctx, userID, org.NewapiUsername.String, since, until)
 	if err != nil {
 		if s.failAuditor != nil {
 			s.failAuditor.RecordNewAPIFailure(ctx, NewAPIFailureContext{
