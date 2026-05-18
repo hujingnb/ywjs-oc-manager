@@ -168,12 +168,22 @@ const { data: orgView, isLoading: orgLoading, error: orgError } = useOrgUsageQue
 
 // 普通成员强制锁定为查询自身的用量，UI 上不暴露成员 ID 输入框。
 const selectedMemberId = ref(isOrgMember.value ? auth.user?.id ?? '' : '')
-const memberRef = computed(() =>
-  isOrgMember.value ? auth.user?.id : selectedMemberId.value || undefined,
-)
-const { data: memberView, isLoading: memberLoading, error: memberError } = useMemberUsageQuery(memberOrgRef, memberRef)
 const memberListOrgRef = computed(() => (isOrgMember.value ? undefined : effectiveOrgId.value))
 const { data: members } = useMembersQuery(memberListOrgRef)
+
+// effectiveMemberId 把"成员 ID 必须落在当前 members 列表里"作为硬约束，
+// 避免切换组织瞬间 vue-query 还以旧 memberId + 新 orgId 发查询。
+// members 列表未加载时回退到 undefined，让 watch(members) auto-select 接管。
+const effectiveMemberId = computed<string | undefined>(() => {
+  if (isOrgMember.value) return auth.user?.id
+  const id = selectedMemberId.value
+  if (!id) return undefined
+  if (!members.value) return undefined
+  return members.value.some((m) => m.id === id) ? id : undefined
+})
+
+const memberRef = effectiveMemberId
+const { data: memberView, isLoading: memberLoading, error: memberError } = useMemberUsageQuery(memberOrgRef, memberRef)
 const memberOptions = computed(() =>
   (members.value ?? []).map((member) => ({
     label: `${member.display_name || member.username} · ${member.username}`,
@@ -183,6 +193,15 @@ const memberOptions = computed(() =>
 
 const selectedAppId = ref<string | undefined>()
 const { data: apps } = useAppsByOrgQuery(effectiveOrgId)
+
+// effectiveAppId 同 effectiveMemberId，消除跨组织残留。
+const effectiveAppId = computed<string | undefined>(() => {
+  const id = selectedAppId.value
+  if (!id) return undefined
+  if (!apps.value) return undefined
+  return apps.value.some((a) => a.id === id) ? id : undefined
+})
+
 const appOptions = computed(() =>
   (apps.value ?? []).map((app) => ({
     label: `${app.name} · ${app.status}`,
@@ -198,27 +217,31 @@ const appUsageContext = computed(() => {
     newapiKeyId: selectedApp.value.newapi_key_id,
   }
 })
-const { data: appView, isLoading: appLoading, error: appError } = useAppUsageQuery(selectedAppId, appUsageContext)
+const { data: appView, isLoading: appLoading, error: appError } = useAppUsageQuery(effectiveAppId, appUsageContext)
 
-// 切换组织时清空跨组织筛选，避免旧成员/应用 ID 被带入新组织查询。
-watch(effectiveOrgId, () => {
-  if (!isOrgMember.value) {
-    selectedMemberId.value = ''
-  }
-  selectedAppId.value = undefined
-})
+// 列表加载后，如果 effective ID 还没解析出来（要么没选过、要么旧选中
+// 不在新列表里），自动选第一项。条件用 effective.value 而非
+// selectedXxx.value，确保跨组织时也能正确 auto-select。immediate 保证
+// 列表已经在 setup 阶段拿到时也能立即选中。
+watch(
+  members,
+  (list) => {
+    if (!isOrgMember.value && effectiveMemberId.value === undefined && list && list.length > 0) {
+      selectedMemberId.value = list[0].id
+    }
+  },
+  { immediate: true },
+)
 
-watch(members, (list) => {
-  if (!isOrgMember.value && !selectedMemberId.value && list && list.length > 0) {
-    selectedMemberId.value = list[0].id
-  }
-})
-
-watch(apps, (list) => {
-  if (!selectedAppId.value && list && list.length > 0) {
-    selectedAppId.value = list[0].id
-  }
-})
+watch(
+  apps,
+  (list) => {
+    if (effectiveAppId.value === undefined && list && list.length > 0) {
+      selectedAppId.value = list[0].id
+    }
+  },
+  { immediate: true },
+)
 
 // platformEnabled 只在平台管理员打开平台 tab 时启用查询，减少后台不必要请求。
 const platformEnabled = computed(() => isPlatformAdmin.value && activeTab.value === 'platform')

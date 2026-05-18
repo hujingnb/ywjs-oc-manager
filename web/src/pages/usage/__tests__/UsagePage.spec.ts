@@ -4,6 +4,7 @@ import { ref, type Ref } from 'vue'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 
 import UsagePage from '../UsagePage.vue'
+import { useMembersQuery } from '@/api/hooks/useMembers'
 import { useAuthStore } from '@/stores/auth'
 
 const usageRefs = vi.hoisted(() => ({
@@ -17,7 +18,7 @@ vi.mock('@/api/hooks/useOrganizations', () => ({
 }))
 
 vi.mock('@/api/hooks/useMembers', () => ({
-  useMembersQuery: () => ({ data: ref([]) }),
+  useMembersQuery: vi.fn(() => ({ data: ref([]) })),
 }))
 
 vi.mock('@/api/hooks/useApps', () => ({
@@ -98,5 +99,50 @@ describe('UsagePage role query refs', () => {
 
     expect(usageRefs.orgRef?.value).toBe('org-1')
     expect(usageRefs.memberOrgRef?.value).toBe('org-1')
+  })
+})
+
+describe('UsagePage effective ID 消除跨组织残留', () => {
+  beforeEach(() => {
+    setActivePinia(createPinia())
+    usageRefs.orgRef = undefined
+    usageRefs.memberOrgRef = undefined
+    usageRefs.memberRef = undefined
+  })
+
+  // effectiveMemberId 把"成员 ID 必须落在当前 members 列表里"作为硬约束，
+  // 避免切换组织瞬间 vue-query 还以旧 memberId + 新 orgId 发查询。
+  // 验证三个阶段：初始 auto-select → 列表清空（切组织瞬间）回退 undefined →
+  // 新列表到位后重新 auto-select。
+  it('memberRef 在选中成员不在当前 members 列表时解析为 undefined', async () => {
+    const auth = useAuthStore()
+    auth.user = {
+      id: 'admin-1', org_id: 'org-A',
+      username: 'admin', display_name: '平台管理员',
+      role: 'platform_admin', status: 'active',
+    }
+
+    const membersRef = ref<{ id: string; username: string; display_name: string }[]>([
+      { id: 'mem-A', username: 'a', display_name: 'A' },
+    ])
+    vi.mocked(useMembersQuery).mockReturnValue({ data: membersRef } as any)
+
+    shallowMount(UsagePage, {
+      global: { stubs: { RouterLink: true, UsageSummary: true } },
+    })
+
+    // 阶段 1：初始 auto-select 之后 memberRef 等于 mem-A
+    await new Promise((r) => setTimeout(r, 0))
+    expect(usageRefs.memberRef?.value).toBe('mem-A')
+
+    // 阶段 2：切换组织瞬间，旧 members 列表被替换为空数组
+    membersRef.value = []
+    await new Promise((r) => setTimeout(r, 0))
+    expect(usageRefs.memberRef?.value).toBeUndefined()
+
+    // 阶段 3：新 org 的列表到位（[B]），watch(members) auto-select 接管
+    membersRef.value = [{ id: 'mem-B', username: 'b', display_name: 'B' }]
+    await new Promise((r) => setTimeout(r, 0))
+    expect(usageRefs.memberRef?.value).toBe('mem-B')
   })
 })
