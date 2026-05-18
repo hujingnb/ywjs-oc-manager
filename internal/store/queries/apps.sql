@@ -57,6 +57,7 @@ SET
     newapi_key_id = $2,
     newapi_key_ciphertext = $3,
     api_key_status = $4,
+    newapi_key_name = $5,
     updated_at = now()
 WHERE id = $1
 RETURNING *;

@@ -51,6 +51,8 @@ type App struct {
 	RuntimeImageRef string `db:"runtime_image_ref" json:"runtime_image_ref"`
 	// 拉取后 docker inspect 返回的镜像 ID（sha256:…）；供展示和排查使用。
 	RuntimeImageSha256 string `db:"runtime_image_sha256" json:"runtime_image_sha256"`
+	// new-api 侧的 token.name，用于按 token_name 过滤用量日志
+	NewapiKeyName pgtype.Text `db:"newapi_key_name" json:"newapi_key_name"`
 }
 
 // 审计日志表，记录关键操作、结果和错误信息；普通业务 API 不允许修改或删除。
@@ -178,6 +180,8 @@ type Organization struct {
 	Code                            string      `db:"code" json:"code"`
 	// manager 层组织可用模型列表；new-api 不用该字段做权限控制。
 	EnabledModels []byte `db:"enabled_models" json:"enabled_models"`
+	// new-api 侧的 user.username，用于按 username 过滤用量响应
+	NewapiUsername pgtype.Text `db:"newapi_username" json:"newapi_username"`
 }
 
 // 组织级 AI 人设版本表，当前生效版本取同组织最大 version。

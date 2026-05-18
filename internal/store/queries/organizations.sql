@@ -18,6 +18,7 @@ UPDATE organizations
 SET
     newapi_user_id = $2,
     newapi_user_credentials_ciphertext = $3,
+    newapi_username = $4,
     updated_at = now()
 WHERE id = $1
 RETURNING *;
