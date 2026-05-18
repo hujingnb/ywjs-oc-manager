@@ -396,7 +396,7 @@ func TestGetUserQuotaDatesBackfillsModelNameFromLogs(t *testing.T) {
 	defer server.Close()
 
 	client := NewClient(server.URL, "tok", 1)
-	items, err := client.GetUserQuotaDates(context.Background(), 8, 1778486400, 1778572799)
+	items, err := client.GetUserQuotaDates(context.Background(), 8, "org-demo", 1778486400, 1778572799)
 	require.NoError(t, err)
 	require.True(t, gotLogQuery)
 	require.Len(t, items, 1)
@@ -651,4 +651,39 @@ func TestGetTokenLogsSendsTokenName(t *testing.T) {
 	require.NoError(t, err)
 	assert.Equal(t, "app-0193ce63-4b8e-7000-a000-000000000001", gotQuery.Get("token_name"))
 	assert.Empty(t, gotQuery.Get("token_id"), "token_id 不应再发送（new-api 静默忽略，留着误导）")
+}
+
+// TestGetUserQuotaDatesFiltersByUsername 校验 GetUserQuotaDates 在客户端
+// 按传入的 username 过滤 /api/data/users 响应。new-api admin 端实测
+// id / username 这两个 query 都被静默忽略，会返回全平台所有用户的混合
+// 按日聚合，因此 manager 必须自己再过一遍。
+func TestGetUserQuotaDatesFiltersByUsername(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		switch {
+		case r.Method == http.MethodGet && r.URL.Path == "/api/data/users":
+			// 模拟 new-api 真实行为：忽略 id，返回 3 个用户混合
+			_, _ = w.Write([]byte(`{"success":true,"data":[
+                {"username":"target","created_at":1778569200,"model_name":"qwen","count":1,"quota":5,"token_used":10},
+                {"username":"other-a","created_at":1778569200,"model_name":"qwen","count":2,"quota":7,"token_used":12},
+                {"username":"target","created_at":1778572800,"model_name":"deepseek","count":3,"quota":8,"token_used":20},
+                {"username":"other-b","created_at":1778572800,"model_name":"deepseek","count":4,"quota":11,"token_used":33}
+            ]}`))
+		case r.Method == http.MethodGet && r.URL.Path == "/api/log/":
+			// enrichQuotaDatesWithLogModels 仍会走这条；用例里 model_name 都已填，
+			// 不需要回填，但端点必须能响应。
+			_, _ = w.Write([]byte(`{"success":true,"data":{"items":[],"total":0}}`))
+		default:
+			t.Fatalf("unexpected request: %s %s", r.Method, r.URL.Path)
+		}
+	}))
+	defer server.Close()
+
+	client := NewClient(server.URL, "tok", 1)
+	items, err := client.GetUserQuotaDates(context.Background(), 42, "target", 1778486400, 1778572799)
+	require.NoError(t, err)
+	require.Len(t, items, 2)
+	for _, it := range items {
+		assert.Equal(t, "target", it.Username)
+	}
 }

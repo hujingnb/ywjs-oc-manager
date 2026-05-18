@@ -867,9 +867,16 @@ func (c *Client) GetTokenLogs(ctx context.Context, q LogsQuery) (LogsPage, error
 }
 
 // GetUserQuotaDates 调 admin GET /api/data/users 拿指定 user 在时间窗内的按天 quota 汇总。
-func (c *Client) GetUserQuotaDates(ctx context.Context, userID, since, until int64) ([]QuotaDate, error) {
+//
+// new-api 端实测 id / username 两个 query 参数都被静默忽略——响应里固定包含全平台
+// 所有用户的聚合，因此调用方必须传入目标 username，client 在响应上做精确过滤。
+// username 由调用方从 organizations.newapi_username 读出。
+func (c *Client) GetUserQuotaDates(ctx context.Context, userID int64, username string, since, until int64) ([]QuotaDate, error) {
 	if userID == 0 {
 		return nil, fmt.Errorf("GetUserQuotaDates: userID 不能为 0")
+	}
+	if username == "" {
+		return nil, fmt.Errorf("GetUserQuotaDates: username 不能为空（new-api 端 id 过滤静默失效，必须客户端按 username 过滤）")
 	}
 	values := url.Values{}
 	values.Set("id", strconv.FormatInt(userID, 10))
@@ -879,11 +886,17 @@ func (c *Client) GetUserQuotaDates(ctx context.Context, userID, since, until int
 	if until > 0 {
 		values.Set("end_timestamp", strconv.FormatInt(until, 10))
 	}
-	items, err := c.fetchQuotaDates(ctx, "/api/data/users?"+values.Encode())
+	raw, err := c.fetchQuotaDates(ctx, "/api/data/users?"+values.Encode())
 	if err != nil {
 		return nil, err
 	}
-	return c.enrichQuotaDatesWithLogModels(ctx, items, since, until)
+	filtered := raw[:0]
+	for _, it := range raw {
+		if it.Username == username {
+			filtered = append(filtered, it)
+		}
+	}
+	return c.enrichQuotaDatesWithLogModels(ctx, filtered, since, until)
 }
 
 // GetAllQuotaDates 调 admin GET /api/data/ 拿全平台时间窗内的按天 quota 汇总。
