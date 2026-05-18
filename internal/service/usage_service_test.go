@@ -201,7 +201,7 @@ func TestUsageService_AppUsageFailureRecordsAudit(t *testing.T) {
 	require.Equal(t, 1, len(auditor.events))
 	ev := auditor.events[0]
 	require.Equal(t, "owner-org", ev.OrgID)
-	require.Equal(t, "GET /api/log/?token_id=...", ev.Endpoint)
+	require.Equal(t, "GET /api/log/?token_name=...", ev.Endpoint)
 }
 
 // TestUsageService_MemberUsageFailureRecordsAudit 校验 GetMemberUsage new-api 调用失败时触发审计。
@@ -221,7 +221,7 @@ func TestUsageService_MemberUsageFailureRecordsAudit(t *testing.T) {
 	require.Equal(t, 1, len(auditor.events))
 	ev := auditor.events[0]
 	require.Equal(t, orgID, ev.OrgID)
-	require.Equal(t, "GET /api/log/?token_id=...", ev.Endpoint)
+	require.Equal(t, "GET /api/log/?token_name=...", ev.Endpoint)
 }
 
 // TestUsageService_OrgUsageFailureRecordsAudit 校验 GetOrgUsage new-api 调用失败时触发审计。
