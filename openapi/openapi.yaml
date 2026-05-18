@@ -480,10 +480,23 @@ components:
       properties:
         action:
           type: string
+        action_detail:
+          description: |-
+            ActionDetail 是写入时冻结的详情字符串，直接读自 audit_logs.detail_message 列。
+            空字符串表示无详情，前端展示「—」。
+          type: string
         action_label:
           description: 以下为展示用翻译字段，由 toAuditResult() 填充，未知值 fallback 到原始字符串。
           type: string
+        actor_deleted:
+          description: ActorDeleted 表示 actor 对应用户已被软删除（users.deleted_at 非空，本项目即「下线」）。
+          type: boolean
         actor_id:
+          type: string
+        actor_name:
+          description: |-
+            ActorName 是 actor_id 对应用户的 display_name fallback username。
+            写入时不取，查询时通过 LEFT JOIN 实时填充；空字符串表示无 actor / actor 已物理删除。
           type: string
         actor_role:
           type: string
@@ -507,7 +520,15 @@ components:
           type: string
         result_label:
           type: string
+        target_deleted:
+          description: TargetDeleted 表示目标资源对应实体已软删除。
+          type: boolean
         target_id:
+          type: string
+        target_name:
+          description: |-
+            TargetName 是 target_id 对应资源名称；按 target_type 走相关子查询，
+            对 newapi_call / knowledge_sync 等无对应实体的类型返回空字符串。
           type: string
         target_type:
           type: string

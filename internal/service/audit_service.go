@@ -16,11 +16,13 @@ import (
 )
 
 // AuditStore 抽象审计日志的数据访问能力。
+// ListAuditLogsByOrg / ListAuditLogsByTarget 由于 SELECT 含计算列，
+// sqlc 为它们生成独立的 *Row 结构体；CreateAuditLog 仍然返回 sqlc.AuditLog。
 type AuditStore interface {
 	CreateAuditLog(ctx context.Context, arg sqlc.CreateAuditLogParams) (sqlc.AuditLog, error)
 	GetApp(ctx context.Context, id pgtype.UUID) (sqlc.App, error)
-	ListAuditLogsByOrg(ctx context.Context, arg sqlc.ListAuditLogsByOrgParams) ([]sqlc.AuditLog, error)
-	ListAuditLogsByTarget(ctx context.Context, arg sqlc.ListAuditLogsByTargetParams) ([]sqlc.AuditLog, error)
+	ListAuditLogsByOrg(ctx context.Context, arg sqlc.ListAuditLogsByOrgParams) ([]sqlc.ListAuditLogsByOrgRow, error)
+	ListAuditLogsByTarget(ctx context.Context, arg sqlc.ListAuditLogsByTargetParams) ([]sqlc.ListAuditLogsByTargetRow, error)
 }
 
 // AuditResult 表示对外返回的审计日志记录。
@@ -43,6 +45,19 @@ type AuditResult struct {
 	TargetTypeLabel string `json:"target_type_label"`
 	ActorRoleLabel  string `json:"actor_role_label"`
 	ResultLabel     string `json:"result_label"`
+	// ActorName 是 actor_id 对应用户的 display_name fallback username。
+	// 写入时不取，查询时通过 LEFT JOIN 实时填充；空字符串表示无 actor / actor 已物理删除。
+	ActorName string `json:"actor_name,omitempty"`
+	// ActorDeleted 表示 actor 对应用户已被软删除（users.deleted_at 非空，本项目即「下线」）。
+	ActorDeleted bool `json:"actor_deleted"`
+	// TargetName 是 target_id 对应资源名称；按 target_type 走相关子查询，
+	// 对 newapi_call / knowledge_sync 等无对应实体的类型返回空字符串。
+	TargetName string `json:"target_name,omitempty"`
+	// TargetDeleted 表示目标资源对应实体已软删除。
+	TargetDeleted bool `json:"target_deleted"`
+	// ActionDetail 是写入时冻结的详情字符串，直接读自 audit_logs.detail_message 列。
+	// 空字符串表示无详情，前端展示「—」。
+	ActionDetail string `json:"action_detail,omitempty"`
 }
 
 // AuditEvent 是其他服务记录审计时的入参。
@@ -58,6 +73,9 @@ type AuditEvent struct {
 	ErrorMessage string
 	IPAddress    string
 	Metadata     map[string]any
+	// DetailMessage 由调用方拼好的中文短句；写入即冻结，查询时直接返回。
+	// 空字符串表示无详情，前端展示「—」。
+	DetailMessage string
 }
 
 // AuditService 处理审计日志的写入和查询。
@@ -115,6 +133,9 @@ func (s *AuditService) Record(ctx context.Context, event AuditEvent) (AuditResul
 		}
 		params.MetadataJson = raw
 	}
+	if event.DetailMessage != "" {
+		params.DetailMessage = pgtype.Text{String: event.DetailMessage, Valid: true}
+	}
 	row, err := s.store.CreateAuditLog(ctx, params)
 	if err != nil {
 		return AuditResult{}, fmt.Errorf("写入审计日志失败: %w", err)
@@ -144,7 +165,7 @@ func (s *AuditService) ListByOrg(ctx context.Context, principal auth.Principal, 
 	if err != nil {
 		return nil, fmt.Errorf("查询审计日志失败: %w", err)
 	}
-	return toAuditResults(rows), nil
+	return toAuditResultsFromOrgRows(rows), nil
 }
 
 // ListByTarget 按目标资源维度查询审计日志。
@@ -170,7 +191,7 @@ func (s *AuditService) ListByTarget(ctx context.Context, principal auth.Principa
 	if err != nil {
 		return nil, fmt.Errorf("查询资源审计日志失败: %w", err)
 	}
-	results := toAuditResults(rows)
+	results := toAuditResultsFromTargetRows(rows)
 	if principal.Role == domain.UserRoleOrgAdmin {
 		filtered := make([]AuditResult, 0, len(results))
 		for _, item := range results {
@@ -214,14 +235,9 @@ func (s *AuditService) normalizePagination(limit, offset int32) (int32, int32) {
 	return limit, offset
 }
 
-func toAuditResults(rows []sqlc.AuditLog) []AuditResult {
-	results := make([]AuditResult, 0, len(rows))
-	for _, row := range rows {
-		results = append(results, toAuditResult(row))
-	}
-	return results
-}
-
+// toAuditResult 把 INSERT 路径返回的 sqlc.AuditLog 转成 AuditResult。
+// 写入路径没有 JOIN，所以 ActorName / TargetName / *Deleted 全部留空；
+// ActionDetail 直接读 detail_message。
 func toAuditResult(row sqlc.AuditLog) AuditResult {
 	result := AuditResult{
 		ID:              uuidToString(row.ID),
@@ -250,5 +266,119 @@ func toAuditResult(row sqlc.AuditLog) AuditResult {
 			result.Metadata = metadata
 		}
 	}
+	if row.DetailMessage.Valid {
+		result.ActionDetail = row.DetailMessage.String
+	}
 	return result
+}
+
+// toAuditResultsFromOrgRows 转换 ListAuditLogsByOrg 的查询行。
+func toAuditResultsFromOrgRows(rows []sqlc.ListAuditLogsByOrgRow) []AuditResult {
+	results := make([]AuditResult, 0, len(rows))
+	for _, row := range rows {
+		results = append(results, toAuditResultFromOrgRow(row))
+	}
+	return results
+}
+
+// toAuditResultFromOrgRow 把 ListAuditLogsByOrgRow 转 AuditResult。
+// 用法：先组合一个等价的 sqlc.AuditLog 复用 toAuditResult 主逻辑，
+// 再覆盖 actor / target 名称与软删除标记。
+func toAuditResultFromOrgRow(row sqlc.ListAuditLogsByOrgRow) AuditResult {
+	base := toAuditResult(sqlc.AuditLog{
+		ID:            row.ID,
+		ActorID:       row.ActorID,
+		ActorRole:     row.ActorRole,
+		OrgID:         row.OrgID,
+		TargetType:    row.TargetType,
+		TargetID:      row.TargetID,
+		Action:        row.Action,
+		Result:        row.Result,
+		ErrorMessage:  row.ErrorMessage,
+		IpAddress:     row.IpAddress,
+		MetadataJson:  row.MetadataJson,
+		CreatedAt:     row.CreatedAt,
+		DetailMessage: row.DetailMessage,
+	})
+	applyNameColumns(&base, row.ActorName, row.ActorDeleted, row.TargetName, row.TargetDeleted)
+	return base
+}
+
+// toAuditResultsFromTargetRows 同 OrgRows 路径。
+func toAuditResultsFromTargetRows(rows []sqlc.ListAuditLogsByTargetRow) []AuditResult {
+	results := make([]AuditResult, 0, len(rows))
+	for _, row := range rows {
+		results = append(results, toAuditResultFromTargetRow(row))
+	}
+	return results
+}
+
+// toAuditResultFromTargetRow 把 ListAuditLogsByTargetRow 转 AuditResult。
+// 实现同 toAuditResultFromOrgRow，字段名完全一致，故直接复用同一模式。
+func toAuditResultFromTargetRow(row sqlc.ListAuditLogsByTargetRow) AuditResult {
+	base := toAuditResult(sqlc.AuditLog{
+		ID:            row.ID,
+		ActorID:       row.ActorID,
+		ActorRole:     row.ActorRole,
+		OrgID:         row.OrgID,
+		TargetType:    row.TargetType,
+		TargetID:      row.TargetID,
+		Action:        row.Action,
+		Result:        row.Result,
+		ErrorMessage:  row.ErrorMessage,
+		IpAddress:     row.IpAddress,
+		MetadataJson:  row.MetadataJson,
+		CreatedAt:     row.CreatedAt,
+		DetailMessage: row.DetailMessage,
+	})
+	applyNameColumns(&base, row.ActorName, row.ActorDeleted, row.TargetName, row.TargetDeleted)
+	return base
+}
+
+// applyNameColumns 将 List 查询行的名称 / 软删除标记字段写入 AuditResult。
+// sqlc 对 actor_name 推断为 string、其余三列推断为 interface{}（因为 COALESCE 表达式跨类型）；
+// 这里用 string / bool 适配 helper 屏蔽差异。
+func applyNameColumns(r *AuditResult, actorName string, actorDeleted any, targetName any, targetDeleted any) {
+	r.ActorName = actorName
+	r.ActorDeleted = boolFromColumn(actorDeleted)
+	r.TargetName = stringFromColumn(targetName)
+	r.TargetDeleted = boolFromColumn(targetDeleted)
+}
+
+// stringFromColumn 把 sqlc 推断为 interface{} 的文本列适配为 string。
+// 兼容 nil、string、*string、pgtype.Text 几种实际承载形式。
+func stringFromColumn(v any) string {
+	switch t := v.(type) {
+	case nil:
+		return ""
+	case string:
+		return t
+	case *string:
+		if t == nil {
+			return ""
+		}
+		return *t
+	case pgtype.Text:
+		if t.Valid {
+			return t.String
+		}
+		return ""
+	}
+	return ""
+}
+
+// boolFromColumn 把 sqlc 推断为 interface{} 的布尔列适配为 bool。
+func boolFromColumn(v any) bool {
+	switch t := v.(type) {
+	case nil:
+		return false
+	case bool:
+		return t
+	case *bool:
+		if t == nil {
+			return false
+		}
+		return *t
+	}
+	return false
 }

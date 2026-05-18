@@ -23,24 +23,26 @@ INSERT INTO audit_logs (
     result,
     error_message,
     ip_address,
-    metadata_json
+    metadata_json,
+    detail_message
 ) VALUES (
-    $1, $2, $3, $4, $5, $6, $7, $8, $9, $10
+    $1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11
 )
-RETURNING id, actor_id, actor_role, org_id, target_type, target_id, action, result, error_message, ip_address, metadata_json, created_at
+RETURNING id, actor_id, actor_role, org_id, target_type, target_id, action, result, error_message, ip_address, metadata_json, created_at, detail_message
 `
 
 type CreateAuditLogParams struct {
-	ActorID      pgtype.UUID `db:"actor_id" json:"actor_id"`
-	ActorRole    string      `db:"actor_role" json:"actor_role"`
-	OrgID        pgtype.UUID `db:"org_id" json:"org_id"`
-	TargetType   string      `db:"target_type" json:"target_type"`
-	TargetID     string      `db:"target_id" json:"target_id"`
-	Action       string      `db:"action" json:"action"`
-	Result       string      `db:"result" json:"result"`
-	ErrorMessage pgtype.Text `db:"error_message" json:"error_message"`
-	IpAddress    *netip.Addr `db:"ip_address" json:"ip_address"`
-	MetadataJson []byte      `db:"metadata_json" json:"metadata_json"`
+	ActorID       pgtype.UUID `db:"actor_id" json:"actor_id"`
+	ActorRole     string      `db:"actor_role" json:"actor_role"`
+	OrgID         pgtype.UUID `db:"org_id" json:"org_id"`
+	TargetType    string      `db:"target_type" json:"target_type"`
+	TargetID      string      `db:"target_id" json:"target_id"`
+	Action        string      `db:"action" json:"action"`
+	Result        string      `db:"result" json:"result"`
+	ErrorMessage  pgtype.Text `db:"error_message" json:"error_message"`
+	IpAddress     *netip.Addr `db:"ip_address" json:"ip_address"`
+	MetadataJson  []byte      `db:"metadata_json" json:"metadata_json"`
+	DetailMessage pgtype.Text `db:"detail_message" json:"detail_message"`
 }
 
 func (q *Queries) CreateAuditLog(ctx context.Context, arg CreateAuditLogParams) (AuditLog, error) {
@@ -55,6 +57,7 @@ func (q *Queries) CreateAuditLog(ctx context.Context, arg CreateAuditLogParams) 
 		arg.ErrorMessage,
 		arg.IpAddress,
 		arg.MetadataJson,
+		arg.DetailMessage,
 	)
 	var i AuditLog
 	err := row.Scan(
@@ -70,15 +73,51 @@ func (q *Queries) CreateAuditLog(ctx context.Context, arg CreateAuditLogParams) 
 		&i.IpAddress,
 		&i.MetadataJson,
 		&i.CreatedAt,
+		&i.DetailMessage,
 	)
 	return i, err
 }
 
 const listAuditLogsByOrg = `-- name: ListAuditLogsByOrg :many
-SELECT id, actor_id, actor_role, org_id, target_type, target_id, action, result, error_message, ip_address, metadata_json, created_at
-FROM audit_logs
-WHERE org_id = $1
-ORDER BY created_at DESC, id DESC
+SELECT
+    al.id,
+    al.actor_id,
+    al.actor_role,
+    al.org_id,
+    al.target_type,
+    al.target_id,
+    al.action,
+    al.result,
+    al.error_message,
+    al.ip_address,
+    al.metadata_json,
+    al.created_at,
+    al.detail_message,
+    COALESCE(NULLIF(au.display_name, ''), au.username, '')          AS actor_name,
+    COALESCE(au.deleted_at IS NOT NULL, false)                       AS actor_deleted,
+    COALESCE(
+        (SELECT a.name FROM apps a
+            WHERE al.target_type = 'app' AND a.id::text = al.target_id),
+        (SELECT o.name FROM organizations o
+            WHERE al.target_type = 'organization' AND o.id::text = al.target_id),
+        (SELECT COALESCE(NULLIF(tu.display_name, ''), tu.username) FROM users tu
+            WHERE al.target_type IN ('user', 'member') AND tu.id::text = al.target_id),
+        (SELECT n.name FROM runtime_nodes n
+            WHERE al.target_type = 'runtime_node' AND n.id::text = al.target_id)
+    ) AS target_name,
+    COALESCE(
+        (SELECT a.deleted_at IS NOT NULL FROM apps a
+            WHERE al.target_type = 'app' AND a.id::text = al.target_id),
+        (SELECT o.deleted_at IS NOT NULL FROM organizations o
+            WHERE al.target_type = 'organization' AND o.id::text = al.target_id),
+        (SELECT tu.deleted_at IS NOT NULL FROM users tu
+            WHERE al.target_type IN ('user', 'member') AND tu.id::text = al.target_id),
+        false
+    ) AS target_deleted
+FROM audit_logs al
+LEFT JOIN users au ON au.id = al.actor_id
+WHERE al.org_id = $1
+ORDER BY al.created_at DESC, al.id DESC
 LIMIT $2 OFFSET $3
 `
 
@@ -88,15 +127,38 @@ type ListAuditLogsByOrgParams struct {
 	Offset int32       `db:"offset" json:"offset"`
 }
 
-func (q *Queries) ListAuditLogsByOrg(ctx context.Context, arg ListAuditLogsByOrgParams) ([]AuditLog, error) {
+type ListAuditLogsByOrgRow struct {
+	ID            pgtype.UUID        `db:"id" json:"id"`
+	ActorID       pgtype.UUID        `db:"actor_id" json:"actor_id"`
+	ActorRole     string             `db:"actor_role" json:"actor_role"`
+	OrgID         pgtype.UUID        `db:"org_id" json:"org_id"`
+	TargetType    string             `db:"target_type" json:"target_type"`
+	TargetID      string             `db:"target_id" json:"target_id"`
+	Action        string             `db:"action" json:"action"`
+	Result        string             `db:"result" json:"result"`
+	ErrorMessage  pgtype.Text        `db:"error_message" json:"error_message"`
+	IpAddress     *netip.Addr        `db:"ip_address" json:"ip_address"`
+	MetadataJson  []byte             `db:"metadata_json" json:"metadata_json"`
+	CreatedAt     pgtype.Timestamptz `db:"created_at" json:"created_at"`
+	DetailMessage pgtype.Text        `db:"detail_message" json:"detail_message"`
+	ActorName     string             `db:"actor_name" json:"actor_name"`
+	ActorDeleted  interface{}        `db:"actor_deleted" json:"actor_deleted"`
+	TargetName    interface{}        `db:"target_name" json:"target_name"`
+	TargetDeleted interface{}        `db:"target_deleted" json:"target_deleted"`
+}
+
+// 返回审计行 + actor 实时名称 + target 实时名称（按 target_type 走子查询）。
+// 子查询里 WHERE al.target_type = X 保证 newapi_call 的 endpoint 字符串
+// 永不被尝试转 UUID，避开 cast error。
+func (q *Queries) ListAuditLogsByOrg(ctx context.Context, arg ListAuditLogsByOrgParams) ([]ListAuditLogsByOrgRow, error) {
 	rows, err := q.db.Query(ctx, listAuditLogsByOrg, arg.OrgID, arg.Limit, arg.Offset)
 	if err != nil {
 		return nil, err
 	}
 	defer rows.Close()
-	items := []AuditLog{}
+	items := []ListAuditLogsByOrgRow{}
 	for rows.Next() {
-		var i AuditLog
+		var i ListAuditLogsByOrgRow
 		if err := rows.Scan(
 			&i.ID,
 			&i.ActorID,
@@ -110,6 +172,11 @@ func (q *Queries) ListAuditLogsByOrg(ctx context.Context, arg ListAuditLogsByOrg
 			&i.IpAddress,
 			&i.MetadataJson,
 			&i.CreatedAt,
+			&i.DetailMessage,
+			&i.ActorName,
+			&i.ActorDeleted,
+			&i.TargetName,
+			&i.TargetDeleted,
 		); err != nil {
 			return nil, err
 		}
@@ -122,10 +189,45 @@ func (q *Queries) ListAuditLogsByOrg(ctx context.Context, arg ListAuditLogsByOrg
 }
 
 const listAuditLogsByTarget = `-- name: ListAuditLogsByTarget :many
-SELECT id, actor_id, actor_role, org_id, target_type, target_id, action, result, error_message, ip_address, metadata_json, created_at
-FROM audit_logs
-WHERE target_type = $1 AND target_id = $2
-ORDER BY created_at DESC, id DESC
+SELECT
+    al.id,
+    al.actor_id,
+    al.actor_role,
+    al.org_id,
+    al.target_type,
+    al.target_id,
+    al.action,
+    al.result,
+    al.error_message,
+    al.ip_address,
+    al.metadata_json,
+    al.created_at,
+    al.detail_message,
+    COALESCE(NULLIF(au.display_name, ''), au.username, '')          AS actor_name,
+    COALESCE(au.deleted_at IS NOT NULL, false)                       AS actor_deleted,
+    COALESCE(
+        (SELECT a.name FROM apps a
+            WHERE al.target_type = 'app' AND a.id::text = al.target_id),
+        (SELECT o.name FROM organizations o
+            WHERE al.target_type = 'organization' AND o.id::text = al.target_id),
+        (SELECT COALESCE(NULLIF(tu.display_name, ''), tu.username) FROM users tu
+            WHERE al.target_type IN ('user', 'member') AND tu.id::text = al.target_id),
+        (SELECT n.name FROM runtime_nodes n
+            WHERE al.target_type = 'runtime_node' AND n.id::text = al.target_id)
+    ) AS target_name,
+    COALESCE(
+        (SELECT a.deleted_at IS NOT NULL FROM apps a
+            WHERE al.target_type = 'app' AND a.id::text = al.target_id),
+        (SELECT o.deleted_at IS NOT NULL FROM organizations o
+            WHERE al.target_type = 'organization' AND o.id::text = al.target_id),
+        (SELECT tu.deleted_at IS NOT NULL FROM users tu
+            WHERE al.target_type IN ('user', 'member') AND tu.id::text = al.target_id),
+        false
+    ) AS target_deleted
+FROM audit_logs al
+LEFT JOIN users au ON au.id = al.actor_id
+WHERE al.target_type = $1 AND al.target_id = $2
+ORDER BY al.created_at DESC, al.id DESC
 LIMIT $3 OFFSET $4
 `
 
@@ -136,7 +238,28 @@ type ListAuditLogsByTargetParams struct {
 	Offset     int32  `db:"offset" json:"offset"`
 }
 
-func (q *Queries) ListAuditLogsByTarget(ctx context.Context, arg ListAuditLogsByTargetParams) ([]AuditLog, error) {
+type ListAuditLogsByTargetRow struct {
+	ID            pgtype.UUID        `db:"id" json:"id"`
+	ActorID       pgtype.UUID        `db:"actor_id" json:"actor_id"`
+	ActorRole     string             `db:"actor_role" json:"actor_role"`
+	OrgID         pgtype.UUID        `db:"org_id" json:"org_id"`
+	TargetType    string             `db:"target_type" json:"target_type"`
+	TargetID      string             `db:"target_id" json:"target_id"`
+	Action        string             `db:"action" json:"action"`
+	Result        string             `db:"result" json:"result"`
+	ErrorMessage  pgtype.Text        `db:"error_message" json:"error_message"`
+	IpAddress     *netip.Addr        `db:"ip_address" json:"ip_address"`
+	MetadataJson  []byte             `db:"metadata_json" json:"metadata_json"`
+	CreatedAt     pgtype.Timestamptz `db:"created_at" json:"created_at"`
+	DetailMessage pgtype.Text        `db:"detail_message" json:"detail_message"`
+	ActorName     string             `db:"actor_name" json:"actor_name"`
+	ActorDeleted  interface{}        `db:"actor_deleted" json:"actor_deleted"`
+	TargetName    interface{}        `db:"target_name" json:"target_name"`
+	TargetDeleted interface{}        `db:"target_deleted" json:"target_deleted"`
+}
+
+// 同 ListAuditLogsByOrg，按 target_type + target_id 过滤。
+func (q *Queries) ListAuditLogsByTarget(ctx context.Context, arg ListAuditLogsByTargetParams) ([]ListAuditLogsByTargetRow, error) {
 	rows, err := q.db.Query(ctx, listAuditLogsByTarget,
 		arg.TargetType,
 		arg.TargetID,
@@ -147,9 +270,9 @@ func (q *Queries) ListAuditLogsByTarget(ctx context.Context, arg ListAuditLogsBy
 		return nil, err
 	}
 	defer rows.Close()
-	items := []AuditLog{}
+	items := []ListAuditLogsByTargetRow{}
 	for rows.Next() {
-		var i AuditLog
+		var i ListAuditLogsByTargetRow
 		if err := rows.Scan(
 			&i.ID,
 			&i.ActorID,
@@ -163,6 +286,11 @@ func (q *Queries) ListAuditLogsByTarget(ctx context.Context, arg ListAuditLogsBy
 			&i.IpAddress,
 			&i.MetadataJson,
 			&i.CreatedAt,
+			&i.DetailMessage,
+			&i.ActorName,
+			&i.ActorDeleted,
+			&i.TargetName,
+			&i.TargetDeleted,
 		); err != nil {
 			return nil, err
 		}

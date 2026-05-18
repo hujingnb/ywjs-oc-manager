@@ -70,6 +70,8 @@ type AuditLog struct {
 	// 审计扩展元数据，例如文件大小、MIME、上传者等。
 	MetadataJson []byte             `db:"metadata_json" json:"metadata_json"`
 	CreatedAt    pgtype.Timestamptz `db:"created_at" json:"created_at"`
+	// 事件详情快照，由写入端拼装。NULL 表示无详情或老数据。
+	DetailMessage pgtype.Text `db:"detail_message" json:"detail_message"`
 }
 
 // 应用渠道绑定表，第一版仅支持 wechat，后续可扩展其他渠道。

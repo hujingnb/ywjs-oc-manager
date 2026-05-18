@@ -20,6 +20,7 @@ sql:
       - internal/migrations/000017_app_progress_fields.up.sql
       - internal/migrations/000018_app_last_error_message.up.sql
       - internal/migrations/000019_app_runtime_image.up.sql
+      - internal/migrations/000020_audit_logs_detail_message.up.sql
     queries: internal/store/queries
     gen:
       go:

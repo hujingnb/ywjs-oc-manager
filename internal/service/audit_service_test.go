@@ -71,7 +71,7 @@ func TestAuditServiceListByTargetFiltersOrgScope(t *testing.T) {
 				OwnerUserID: mustUUID(t, testMemUID),
 			},
 		},
-		byTarget: []sqlc.AuditLog{
+		byTarget: []sqlc.ListAuditLogsByTargetRow{
 			{TargetType: "app", TargetID: testAuditAppID, OrgID: mustOptionalUUID(t, testOrgID)},  // 场景：目标应用所属组织内的审计记录应允许返回。
 			{TargetType: "app", TargetID: testAuditAppID, OrgID: mustOptionalUUID(t, testOrg2ID)}, // 场景：跨组织同目标审计记录用于验证组织范围过滤。
 		},
@@ -95,7 +95,7 @@ func TestAuditServiceListByTargetAllowsMemberOwnApp(t *testing.T) {
 				OwnerUserID: mustUUID(t, testMemUID),
 			},
 		},
-		byTarget: []sqlc.AuditLog{
+		byTarget: []sqlc.ListAuditLogsByTargetRow{
 			{TargetType: "app", TargetID: testAuditAppID, OrgID: mustOptionalUUID(t, testOrgID)}, // 场景：成员查看自己应用审计时返回同组织目标记录。
 		},
 	}
@@ -134,6 +134,55 @@ func TestAuditServiceListByTargetRejectsMemberOtherApp(t *testing.T) {
 	require.ErrorIs(t, err, ErrForbidden)
 }
 
+// TestAuditServiceListByOrgPopulatesNameColumns 验证审计列表查询返回 actor / target 名称、软删除标记和详情字符串的预期行为场景。
+func TestAuditServiceListByOrgPopulatesNameColumns(t *testing.T) {
+	// 场景：actor / target 名称、软删除标记、详情字符串均被透传到 AuditResult。
+	store := &auditStoreStub{
+		byOrg: []sqlc.ListAuditLogsByOrgRow{
+			{
+				TargetType:    "app",
+				TargetID:      testAuditAppID,
+				OrgID:         mustOptionalUUID(t, testOrgID),
+				ActorRole:     domain.UserRoleOrgAdmin,
+				DetailMessage: pgtype.Text{String: "gpt-4o → claude-opus-4-7", Valid: true},
+				ActorName:     "张三",
+				ActorDeleted:  false,
+				TargetName:    "客服小助手",
+				TargetDeleted: true,
+			},
+		},
+	}
+	svc := NewAuditService(store)
+
+	results, err := svc.ListByOrg(context.Background(), platformAdmin(), testOrgID, 0, 0)
+	require.NoError(t, err)
+	require.Len(t, results, 1)
+	require.Equal(t, "张三", results[0].ActorName)
+	require.False(t, results[0].ActorDeleted)
+	require.Equal(t, "客服小助手", results[0].TargetName)
+	require.True(t, results[0].TargetDeleted)
+	require.Equal(t, "gpt-4o → claude-opus-4-7", results[0].ActionDetail)
+}
+
+// TestAuditServiceRecordPersistsDetailMessage 验证 Record 把 DetailMessage 透传到 CreateAuditLog。
+func TestAuditServiceRecordPersistsDetailMessage(t *testing.T) {
+	// 场景：写入端用 DetailMessage 字段时，落库参数携带相同字符串。
+	store := &auditStoreStub{}
+	svc := NewAuditService(store)
+
+	_, err := svc.Record(context.Background(), AuditEvent{
+		ActorRole:     domain.UserRolePlatformAdmin,
+		TargetType:    "organization",
+		TargetID:      "00000000-0000-0000-0000-000000000101",
+		Action:        "recharge",
+		Result:        "succeeded",
+		DetailMessage: "+5000.00 元，备注 vip 续费",
+	})
+	require.NoError(t, err)
+	require.True(t, store.created.DetailMessage.Valid)
+	require.Equal(t, "+5000.00 元，备注 vip 续费", store.created.DetailMessage.String)
+}
+
 func mustOptionalUUID(t *testing.T, value string) pgtype.UUID {
 	t.Helper()
 	id := mustUUID(t, value)
@@ -145,8 +194,8 @@ const testAuditAppID = "00000000-0000-0000-0000-0000000000c1"
 
 type auditStoreStub struct {
 	created   sqlc.CreateAuditLogParams
-	byOrg     []sqlc.AuditLog
-	byTarget  []sqlc.AuditLog
+	byOrg     []sqlc.ListAuditLogsByOrgRow
+	byTarget  []sqlc.ListAuditLogsByTargetRow
 	lastByOrg sqlc.ListAuditLogsByOrgParams
 	apps      map[string]sqlc.App
 }
@@ -164,12 +213,12 @@ func (s *auditStoreStub) CreateAuditLog(_ context.Context, arg sqlc.CreateAuditL
 	}, nil
 }
 
-func (s *auditStoreStub) ListAuditLogsByOrg(_ context.Context, arg sqlc.ListAuditLogsByOrgParams) ([]sqlc.AuditLog, error) {
+func (s *auditStoreStub) ListAuditLogsByOrg(_ context.Context, arg sqlc.ListAuditLogsByOrgParams) ([]sqlc.ListAuditLogsByOrgRow, error) {
 	s.lastByOrg = arg
 	return s.byOrg, nil
 }
 
-func (s *auditStoreStub) ListAuditLogsByTarget(_ context.Context, _ sqlc.ListAuditLogsByTargetParams) ([]sqlc.AuditLog, error) {
+func (s *auditStoreStub) ListAuditLogsByTarget(_ context.Context, _ sqlc.ListAuditLogsByTargetParams) ([]sqlc.ListAuditLogsByTargetRow, error) {
 	return s.byTarget, nil
 }
 

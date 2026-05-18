@@ -75,8 +75,12 @@ type Querier interface {
 	ListActiveNodesWithAppCounts(ctx context.Context) ([]ListActiveNodesWithAppCountsRow, error)
 	ListAppsByOrg(ctx context.Context, arg ListAppsByOrgParams) ([]App, error)
 	ListAppsByRuntimeNode(ctx context.Context, arg ListAppsByRuntimeNodeParams) ([]App, error)
-	ListAuditLogsByOrg(ctx context.Context, arg ListAuditLogsByOrgParams) ([]AuditLog, error)
-	ListAuditLogsByTarget(ctx context.Context, arg ListAuditLogsByTargetParams) ([]AuditLog, error)
+	// 返回审计行 + actor 实时名称 + target 实时名称（按 target_type 走子查询）。
+	// 子查询里 WHERE al.target_type = X 保证 newapi_call 的 endpoint 字符串
+	// 永不被尝试转 UUID，避开 cast error。
+	ListAuditLogsByOrg(ctx context.Context, arg ListAuditLogsByOrgParams) ([]ListAuditLogsByOrgRow, error)
+	// 同 ListAuditLogsByOrg，按 target_type + target_id 过滤。
+	ListAuditLogsByTarget(ctx context.Context, arg ListAuditLogsByTargetParams) ([]ListAuditLogsByTargetRow, error)
 	ListInstanceResourceBuckets(ctx context.Context, arg ListInstanceResourceBucketsParams) ([]ListInstanceResourceBucketsRow, error)
 	ListInstanceResourceSamples(ctx context.Context, arg ListInstanceResourceSamplesParams) ([]InstanceResourceSample, error)
 	// 列出某组织在所有节点上的最近同步状态。
