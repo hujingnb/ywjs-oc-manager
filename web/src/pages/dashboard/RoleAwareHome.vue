@@ -23,9 +23,11 @@ import { computed } from 'vue'
 import { RouterLink } from 'vue-router'
 
 import { useAuthStore } from '@/stores/auth'
+import { useMemberApp } from '@/composables/useMemberApp'
 
 // RoleAwareHome 根据当前角色展示首屏快捷入口，避免不同角色看到无权限入口。
 const auth = useAuthStore()
+const { appId: memberAppId, hasApp: memberHasApp } = useMemberApp()
 
 // roleLabel 只用于欢迎区的角色展示，未知角色返回空字符串。
 const roleLabel = computed(() => {
@@ -65,8 +67,12 @@ const cards = computed<QuickCard[]>(() => {
     ]
   }
   if (role === 'org_member') {
+    // 有实例时直达详情，无实例时进入空状态页。
+    const appPath = memberHasApp.value && memberAppId.value
+      ? `/apps/${memberAppId.value}/overview`
+      : '/apps/empty'
     return [
-      { path: '/apps', title: '我的实例', subtitle: '查看状态、用量与实例审计' },
+      { path: appPath, title: '我的实例', subtitle: '查看状态、用量与实例审计' },
       { path: '/usage', title: '我的用量', subtitle: '查看自己实例的调用记录' },
       { path: '/knowledge', title: '组织知识库', subtitle: '可读资料' },
     ]
