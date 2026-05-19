@@ -956,98 +956,6 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
-    "/apps/{appId}/model": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        get?: never;
-        put?: never;
-        post?: never;
-        delete?: never;
-        options?: never;
-        head?: never;
-        /**
-         * 修改实例模型
-         * @description 更新实例模型；已有容器的实例会提交重启任务让新模型生效
-         */
-        patch: {
-            parameters: {
-                query?: never;
-                header?: never;
-                path: {
-                    /** @description 应用 ID */
-                    appId: string;
-                };
-                cookie?: never;
-            };
-            /** @description 修改模型请求 */
-            requestBody: {
-                content: {
-                    "application/json": Record<string, never> | components["schemas"]["handlers.UpdateAppModelRequest"];
-                };
-            };
-            responses: {
-                /** @description OK */
-                200: {
-                    headers: {
-                        [name: string]: unknown;
-                    };
-                    content: {
-                        "application/json": components["schemas"]["service.AppModelUpdateResult"];
-                    };
-                };
-                /** @description Bad Request */
-                400: {
-                    headers: {
-                        [name: string]: unknown;
-                    };
-                    content: {
-                        "application/json": components["schemas"]["handlers.ErrorResponse"];
-                    };
-                };
-                /** @description Unauthorized */
-                401: {
-                    headers: {
-                        [name: string]: unknown;
-                    };
-                    content: {
-                        "application/json": components["schemas"]["handlers.ErrorResponse"];
-                    };
-                };
-                /** @description Forbidden */
-                403: {
-                    headers: {
-                        [name: string]: unknown;
-                    };
-                    content: {
-                        "application/json": components["schemas"]["handlers.ErrorResponse"];
-                    };
-                };
-                /** @description Not Found */
-                404: {
-                    headers: {
-                        [name: string]: unknown;
-                    };
-                    content: {
-                        "application/json": components["schemas"]["handlers.ErrorResponse"];
-                    };
-                };
-                /** @description Internal Server Error */
-                500: {
-                    headers: {
-                        [name: string]: unknown;
-                    };
-                    content: {
-                        "application/json": components["schemas"]["handlers.ErrorResponse"];
-                    };
-                };
-            };
-        };
-        trace?: never;
-    };
     "/apps/{appId}/resources": {
         parameters: {
             query?: never;
@@ -5768,8 +5676,6 @@ export interface components {
             app_prompt?: string;
             /** @description ChannelType 是初始化渠道绑定的渠道标识。 */
             channel_type?: string;
-            /** @description ModelID 是新实例使用的模型，必须属于组织 enabled_models。 */
-            model_id: string;
             /** @description PersonaMode 控制新实例是否继承组织人设或使用独立人设。 */
             persona_mode?: string;
             /** @description NodeID 是指定 runtime 节点；为空时 service 自动选择可用节点。 */
@@ -5800,8 +5706,8 @@ export interface components {
             contact_phone?: string;
             /** @description CreditWarningThreshold 是组织余额预警阈值；nil 表示不启用余额预警或保持预警关闭。 */
             credit_warning_threshold?: number;
-            /** @description EnabledModels 是该组织允许在 manager 内选择的模型列表；new-api token 不使用该字段限权。 */
-            enabled_models?: string[];
+            /** @description ModelID 是该组织所有实例统一使用的模型 ID，由平台管理员指定。 */
+            model_id: string;
             /** @description Name 是组织展示名，也是平台管理员列表中识别租户的主字段。 */
             name: string;
             /** @description Remark 是平台管理员维护的内部备注。 */
@@ -5859,8 +5765,6 @@ export interface components {
             channel_type?: string;
             /** @description DisplayName 是新成员展示名。 */
             display_name: string;
-            /** @description ModelID 是新实例使用的模型，必须属于组织 enabled_models。 */
-            model_id: string;
             /** @description Password 是新成员初始密码。 */
             password: string;
             /** @description PersonaMode 控制新应用是否继承组织人设或使用独立人设。 */
@@ -5879,11 +5783,8 @@ export interface components {
             contact_phone?: string;
             /** @description CreditWarningThreshold 是组织余额预警阈值；nil 表示清空或未设置预警阈值。 */
             credit_warning_threshold?: number;
-            /**
-             * @description EnabledModels 是该组织允许在 manager 内选择的模型列表；new-api token 不使用该字段限权。
-             *     nil 表示本次只更新基础资料并保留原模型列表；显式空数组会由 service 拒绝。
-             */
-            enabled_models?: string[];
+            /** @description ModelID 是该组织所有实例统一使用的模型 ID；nil 表示本次只更新基础资料并保留原模型。 */
+            model_id?: string;
             /** @description Name 是组织展示名；更新时仍必填，避免空名称进入前端列表。 */
             name: string;
             /** @description Remark 是平台管理员维护的内部备注，可置空。 */
@@ -5919,10 +5820,6 @@ export interface components {
             /** @description NodeID 是需要重试同步的 runtime 节点 ID。 */
             node_id: string;
         };
-        "handlers.UpdateAppModelRequest": {
-            /** @description ModelID 是目标模型，必须属于实例所属组织的 enabled_models。 */
-            model_id: string;
-        };
         "handlers.UpdateMemberRequest": {
             /** @description DisplayName 是成员展示名，更新接口要求显式传入非空值。 */
             display_name: string;
@@ -5937,13 +5834,6 @@ export interface components {
             /** @description NodeID 是 manager 为该 agent 分配或复用的 runtime node ID。 */
             node_id?: string;
         };
-        "service.AppModelUpdateResult": {
-            app?: components["schemas"]["service.AppResult"];
-            /** @description RequiresRestart 表示本次模型修改是否需要通过重启容器生效。 */
-            requires_restart?: boolean;
-            /** @description RestartJobID 是已有容器实例提交的重启任务 ID；无容器时为空。 */
-            restart_job_id?: string;
-        };
         "service.AppResult": {
             api_key_status?: string;
             app_prompt?: string;
@@ -5955,6 +5845,8 @@ export interface components {
             /** @description LastErrorStatus 上次进入 error 时所在的状态值;前端用 formatAppStatus 转中文文案。 */
             last_error_status?: string;
             model_id?: string;
+            /** @description ModelSynced 标记实例运行中的模型是否与数据库记录一致；false 表示需重启生效。 */
+            model_synced?: boolean;
             name?: string;
             /**
              * @description NewapiKeyID 是 new-api 中 token 的数值 id；schema 上是 text 列存的字符串，
@@ -6231,10 +6123,10 @@ export interface components {
             contact_phone?: string;
             /** @description CreditWarningThreshold 是组织余额预警阈值。 */
             credit_warning_threshold?: number;
-            /** @description EnabledModels 是组织在 manager 层允许创建实例时选择的模型列表。 */
-            enabled_models?: string[];
             /** @description ID 是 manager 组织 UUID。 */
             id?: string;
+            /** @description ModelID 是该组织所有实例统一使用的模型 ID。 */
+            model_id?: string;
             /** @description Name 是组织展示名。 */
             name?: string;
             /** @description NewAPIUserID 是组织在 new-api 侧的用户 ID，缺失时充值和用量接口不可用。 */
