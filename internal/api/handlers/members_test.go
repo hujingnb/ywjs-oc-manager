@@ -132,8 +132,8 @@ func TestMembersOnboardMapsNoNodeAvailableTo503(t *testing.T) {
 	require.Contains(t, recorder.Body.String(), "NO_NODE_AVAILABLE")
 }
 
-// TestMembersOnboardForwardsModelID 验证成员开户路由会把模型选择传给 service。
-func TestMembersOnboardForwardsModelID(t *testing.T) {
+// TestMembersOnboardForwardsRequest 验证成员开户路由会把应用名等字段传给 service。
+func TestMembersOnboardForwardsRequest(t *testing.T) {
 	onboarding := &onboardingServiceStub{
 		result: service.OnboardMemberResult{
 			App:   service.AppResult{ID: "app-1", Name: "alice-bot", Status: domain.AppStatusDraft},
@@ -143,7 +143,7 @@ func TestMembersOnboardForwardsModelID(t *testing.T) {
 	router := newMembersTestRouterWithOnboarding(t, &memberServiceStub{}, onboarding)
 
 	recorder := httptest.NewRecorder()
-	body := bytes.NewBufferString(`{"username":"alice","display_name":"Alice","password":"pwd","app_name":"alice-bot","model_id":"qwen2.5:7b"}`)
+	body := bytes.NewBufferString(`{"username":"alice","display_name":"Alice","password":"pwd","app_name":"alice-bot"}`)
 	request := httptest.NewRequest(http.MethodPost, "/api/v1/organizations/org-1/members/onboard", body)
 	request.Header.Set("Content-Type", "application/json")
 	request = withPrincipal(request, auth.Principal{UserID: "p1", Role: domain.UserRoleOrgAdmin, OrgID: "org-1"})
@@ -151,7 +151,7 @@ func TestMembersOnboardForwardsModelID(t *testing.T) {
 
 	require.Equal(t, http.StatusCreated, recorder.Code)
 	assert.Equal(t, "org-1", onboarding.lastOrgID)
-	assert.Equal(t, "qwen2.5:7b", onboarding.lastOnboardInput.ModelID)
+	assert.Equal(t, "alice-bot", onboarding.lastOnboardInput.AppName)
 }
 
 // TestMembersCreateAppForMemberForwardsRequest 验证已有成员创建实例路由转发组织、成员和应用字段。
@@ -165,7 +165,7 @@ func TestMembersCreateAppForMemberForwardsRequest(t *testing.T) {
 	router := newMembersTestRouterWithOnboarding(t, &memberServiceStub{}, onboarding)
 
 	recorder := httptest.NewRecorder()
-	body := bytes.NewBufferString(`{"app_name":"alice-new-bot","persona_mode":"app_override","app_prompt":"hello","channel_type":"wechat","runtime_node_id":"node-1","model_id":"qwen2.5:7b"}`)
+	body := bytes.NewBufferString(`{"app_name":"alice-new-bot","persona_mode":"app_override","app_prompt":"hello","channel_type":"wechat","runtime_node_id":"node-1"}`)
 	request := httptest.NewRequest(http.MethodPost, "/api/v1/organizations/org-1/members/user-1/apps", body)
 	request.Header.Set("Content-Type", "application/json")
 	request = withPrincipal(request, auth.Principal{UserID: "p1", Role: domain.UserRolePlatformAdmin})
@@ -175,7 +175,6 @@ func TestMembersCreateAppForMemberForwardsRequest(t *testing.T) {
 	require.Equal(t, "org-1", onboarding.lastOrgID)
 	require.Equal(t, "user-1", onboarding.lastUserID)
 	require.Equal(t, "alice-new-bot", onboarding.lastCreateInput.AppName)
-	assert.Equal(t, "qwen2.5:7b", onboarding.lastCreateInput.ModelID)
 	require.Contains(t, recorder.Body.String(), `"job_id":"job-1"`)
 }
 
@@ -185,7 +184,7 @@ func TestMembersCreateAppForMemberMapsNoNodeAvailable(t *testing.T) {
 	router := newMembersTestRouterWithOnboarding(t, &memberServiceStub{}, onboarding)
 
 	recorder := httptest.NewRecorder()
-	body := bytes.NewBufferString(`{"app_name":"alice-new-bot","model_id":"qwen2.5:7b"}`)
+	body := bytes.NewBufferString(`{"app_name":"alice-new-bot"}`)
 	request := httptest.NewRequest(http.MethodPost, "/api/v1/organizations/org-1/members/user-1/apps", body)
 	request.Header.Set("Content-Type", "application/json")
 	request = withPrincipal(request, auth.Principal{UserID: "p1", Role: domain.UserRolePlatformAdmin})

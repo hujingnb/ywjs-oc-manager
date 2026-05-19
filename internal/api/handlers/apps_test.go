@@ -4,7 +4,6 @@ import (
 	"context"
 	"net/http"
 	"net/http/httptest"
-	"strings"
 	"testing"
 
 	"github.com/gin-gonic/gin"
@@ -18,14 +17,10 @@ import (
 
 // appsStub 实现 appService 接口，仅 stub 测试用到的方法。
 type appsStub struct {
-	getResult   service.AppResult
-	getErr      error
-	listResult  []service.AppResult
-	listErr     error
-	modelResult service.AppModelUpdateResult
-	modelErr    error
-	lastAppID   string
-	lastModelID string
+	getResult  service.AppResult
+	getErr     error
+	listResult []service.AppResult
+	listErr    error
 }
 
 func (s *appsStub) Get(_ context.Context, _ auth.Principal, _ string) (service.AppResult, error) {
@@ -34,12 +29,6 @@ func (s *appsStub) Get(_ context.Context, _ auth.Principal, _ string) (service.A
 
 func (s *appsStub) ListByOrg(_ context.Context, _ auth.Principal, _ string, _, _ int32) ([]service.AppResult, error) {
 	return s.listResult, s.listErr
-}
-
-func (s *appsStub) UpdateModel(_ context.Context, _ auth.Principal, appID, modelID string) (service.AppModelUpdateResult, error) {
-	s.lastAppID = appID
-	s.lastModelID = modelID
-	return s.modelResult, s.modelErr
 }
 
 // newAppsTestRouter 构建用于测试的 gin router。
@@ -103,32 +92,4 @@ func TestAppsGetNotFound(t *testing.T) {
 	router.ServeHTTP(w, req)
 
 	assert.Equal(t, http.StatusNotFound, w.Code)
-}
-
-// TestAppsUpdateModelForwardsRequest 验证模型修改路由转发 appId 和 model_id。
-func TestAppsUpdateModelForwardsRequest(t *testing.T) {
-	stub := &appsStub{modelResult: service.AppModelUpdateResult{App: service.AppResult{ID: "app-1", ModelID: "qwen2.5:7b"}}}
-	router := newAppsTestRouter(t, stub)
-	req := httptest.NewRequest(http.MethodPatch, "/api/v1/apps/app-1/model", strings.NewReader(`{"model_id":"qwen2.5:7b"}`))
-	req = withPrincipal(req, auth.Principal{UserID: "u-1", Role: domain.UserRoleOrgAdmin, OrgID: "org-1"})
-	resp := httptest.NewRecorder()
-
-	router.ServeHTTP(resp, req)
-
-	require.Equal(t, http.StatusOK, resp.Code)
-	assert.Equal(t, "app-1", stub.lastAppID)
-	assert.Equal(t, "qwen2.5:7b", stub.lastModelID)
-}
-
-// TestAppsUpdateModelMapsInvalidModel 验证非法模型返回 400。
-func TestAppsUpdateModelMapsInvalidModel(t *testing.T) {
-	stub := &appsStub{modelErr: service.ErrMemberCreateInvalid}
-	router := newAppsTestRouter(t, stub)
-	req := httptest.NewRequest(http.MethodPatch, "/api/v1/apps/app-1/model", strings.NewReader(`{"model_id":"missing"}`))
-	req = withPrincipal(req, auth.Principal{UserID: "u-1", Role: domain.UserRoleOrgAdmin, OrgID: "org-1"})
-	resp := httptest.NewRecorder()
-
-	router.ServeHTTP(resp, req)
-
-	require.Equal(t, http.StatusBadRequest, resp.Code)
 }

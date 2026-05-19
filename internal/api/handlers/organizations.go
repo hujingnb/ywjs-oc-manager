@@ -208,8 +208,6 @@ func (h *OrganizationsHandler) setStatus(c *gin.Context, status string) {
 	c.JSON(http.StatusOK, gin.H{"organization": result})
 }
 
-// principal 从 Bearer token 中提取调用主体。
-// token 只承载认证上下文，具体组织访问权限由 service 调 authorizer.go 判断。
 // toOrganizationInput 将更新 DTO 转为 service 入参；管理员初始化字段不参与更新。
 func toOrganizationInput(req OrganizationRequest) service.OrganizationInput {
 	input := service.OrganizationInput{
@@ -219,9 +217,9 @@ func toOrganizationInput(req OrganizationRequest) service.OrganizationInput {
 		Remark:                 req.Remark,
 		CreditWarningThreshold: req.CreditWarningThreshold,
 	}
-	if req.EnabledModels != nil {
-		input.EnabledModels = *req.EnabledModels
-		input.EnabledModelsSet = true
+	if req.ModelID != nil {
+		input.ModelID = *req.ModelID
+		input.ModelIDSet = true
 	}
 	return input
 }
@@ -238,8 +236,8 @@ func toCreateOrganizationInput(req CreateOrganizationRequest) service.Organizati
 		AdminUsername:          req.AdminUsername,
 		AdminDisplayName:       req.AdminDisplayName,
 		AdminPassword:          req.AdminPassword,
-		EnabledModels:          req.EnabledModels,
-		EnabledModelsSet:       true,
+		ModelID:                req.ModelID,
+		ModelIDSet:             true,
 	}
 }
 

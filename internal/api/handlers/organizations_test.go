@@ -27,7 +27,7 @@ func TestOrganizationsCreateReturnsCreatedOrganization(t *testing.T) {
 	router := newOrganizationsTestRouter(t, svc)
 
 	recorder := httptest.NewRecorder()
-	request := httptest.NewRequest(http.MethodPost, "/api/v1/organizations", bytes.NewBufferString(`{"name":"测试组织","code":"test-org","admin_username":"admin","admin_display_name":"管理员","admin_password":"secret-password","enabled_models":["qwen2.5:7b"]}`))
+	request := httptest.NewRequest(http.MethodPost, "/api/v1/organizations", bytes.NewBufferString(`{"name":"测试组织","code":"test-org","admin_username":"admin","admin_display_name":"管理员","admin_password":"secret-password","model_id":"qwen2.5:7b"}`))
 	request.Header.Set("Content-Type", "application/json")
 	request = withPrincipal(request, auth.Principal{UserID: "user-1", Role: domain.UserRolePlatformAdmin})
 	router.ServeHTTP(recorder, request)
@@ -44,30 +44,30 @@ func TestOrganizationsCreateReturnsCreatedOrganization(t *testing.T) {
 	assert.Equal(t, "admin", svc.lastCreateInput.AdminUsername)
 	assert.Equal(t, "管理员", svc.lastCreateInput.AdminDisplayName)
 	assert.Equal(t, "secret-password", svc.lastCreateInput.AdminPassword)
-	assert.Equal(t, []string{"qwen2.5:7b"}, svc.lastCreateInput.EnabledModels)
+	assert.Equal(t, "qwen2.5:7b", svc.lastCreateInput.ModelID)
 }
 
-// TestOrganizationsUpdatePassesEnabledModels 验证组织更新请求会把模型 allowlist 传给 service。
-func TestOrganizationsUpdatePassesEnabledModels(t *testing.T) {
+// TestOrganizationsUpdatePassesModelID 验证组织更新请求会把单模型 ID 传给 service。
+func TestOrganizationsUpdatePassesModelID(t *testing.T) {
 	svc := &organizationServiceStub{
-		createResult: service.OrganizationResult{ID: "org-1", Name: "测试组织", Status: domain.StatusActive, EnabledModels: []string{"deepseek-r1:14b"}},
+		createResult: service.OrganizationResult{ID: "org-1", Name: "测试组织", Status: domain.StatusActive, ModelID: "deepseek-r1:14b"},
 	}
 	router := newOrganizationsTestRouter(t, svc)
 
 	recorder := httptest.NewRecorder()
-	request := httptest.NewRequest(http.MethodPatch, "/api/v1/organizations/org-1", bytes.NewBufferString(`{"name":"测试组织","enabled_models":["deepseek-r1:14b"]}`))
+	request := httptest.NewRequest(http.MethodPatch, "/api/v1/organizations/org-1", bytes.NewBufferString(`{"name":"测试组织","model_id":"deepseek-r1:14b"}`))
 	request.Header.Set("Content-Type", "application/json")
 	request = withPrincipal(request, auth.Principal{UserID: "user-1", Role: domain.UserRolePlatformAdmin})
 	router.ServeHTTP(recorder, request)
 
 	require.Equal(t, http.StatusOK, recorder.Code)
 	assert.Equal(t, "org-1", svc.lastUpdateOrgID)
-	assert.Equal(t, []string{"deepseek-r1:14b"}, svc.lastUpdateInput.EnabledModels)
-	assert.True(t, svc.lastUpdateInput.EnabledModelsSet)
+	assert.Equal(t, "deepseek-r1:14b", svc.lastUpdateInput.ModelID)
+	assert.True(t, svc.lastUpdateInput.ModelIDSet)
 }
 
-// TestOrganizationsUpdateKeepsEnabledModelsWhenOmitted 验证更新请求缺省模型字段时不会要求重写 allowlist。
-func TestOrganizationsUpdateKeepsEnabledModelsWhenOmitted(t *testing.T) {
+// TestOrganizationsUpdateKeepsModelWhenOmitted 验证更新请求缺省模型字段时不会要求重写模型。
+func TestOrganizationsUpdateKeepsModelWhenOmitted(t *testing.T) {
 	svc := &organizationServiceStub{
 		createResult: service.OrganizationResult{ID: "org-1", Name: "测试组织", Status: domain.StatusActive},
 	}
@@ -81,8 +81,8 @@ func TestOrganizationsUpdateKeepsEnabledModelsWhenOmitted(t *testing.T) {
 
 	require.Equal(t, http.StatusOK, recorder.Code)
 	assert.Equal(t, "org-1", svc.lastUpdateOrgID)
-	assert.False(t, svc.lastUpdateInput.EnabledModelsSet)
-	assert.Nil(t, svc.lastUpdateInput.EnabledModels)
+	assert.False(t, svc.lastUpdateInput.ModelIDSet)
+	assert.Empty(t, svc.lastUpdateInput.ModelID)
 }
 
 // TestOrganizationsCreateRequiresAdminFields 验证组织创建要求管理员字段的预期行为场景。
@@ -108,7 +108,7 @@ func TestOrganizationsCreateReturnsBusinessValidationMessage(t *testing.T) {
 	router := newOrganizationsTestRouter(t, svc)
 
 	recorder := httptest.NewRecorder()
-	request := httptest.NewRequest(http.MethodPost, "/api/v1/organizations", bytes.NewBufferString(`{"name":"aa","code":"aa","admin_username":"admin","admin_display_name":"admin","admin_password":"admin123"}`))
+	request := httptest.NewRequest(http.MethodPost, "/api/v1/organizations", bytes.NewBufferString(`{"name":"aa","code":"aa","admin_username":"admin","admin_display_name":"admin","admin_password":"admin123","model_id":"qwen2.5:7b"}`))
 	request.Header.Set("Content-Type", "application/json")
 	request = withPrincipal(request, auth.Principal{UserID: "user-1", Role: domain.UserRolePlatformAdmin})
 	router.ServeHTTP(recorder, request)
@@ -123,7 +123,7 @@ func TestOrganizationsCreateMapsConflict(t *testing.T) {
 	router := newOrganizationsTestRouter(t, &organizationServiceStub{createErr: service.ErrConflict})
 
 	recorder := httptest.NewRecorder()
-	request := httptest.NewRequest(http.MethodPost, "/api/v1/organizations", bytes.NewBufferString(`{"name":"测试组织","code":"test-org","admin_username":"admin","admin_display_name":"管理员","admin_password":"secret-password"}`))
+	request := httptest.NewRequest(http.MethodPost, "/api/v1/organizations", bytes.NewBufferString(`{"name":"测试组织","code":"test-org","admin_username":"admin","admin_display_name":"管理员","admin_password":"secret-password","model_id":"qwen2.5:7b"}`))
 	request.Header.Set("Content-Type", "application/json")
 	request = withPrincipal(request, auth.Principal{UserID: "user-1", Role: domain.UserRolePlatformAdmin})
 	router.ServeHTTP(recorder, request)

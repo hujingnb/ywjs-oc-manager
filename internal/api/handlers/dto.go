@@ -48,8 +48,8 @@ type CreateOrganizationRequest struct {
 	Remark string `json:"remark"`
 	// CreditWarningThreshold 是组织余额预警阈值；nil 表示不启用余额预警或保持预警关闭。
 	CreditWarningThreshold *int32 `json:"credit_warning_threshold"`
-	// EnabledModels 是该组织允许在 manager 内选择的模型列表；new-api token 不使用该字段限权。
-	EnabledModels []string `json:"enabled_models"`
+	// ModelID 是该组织所有实例统一使用的模型 ID，由平台管理员指定。
+	ModelID string `json:"model_id" binding:"required"`
 	// AdminUsername 是随组织创建的首个 org_admin 账号名。
 	AdminUsername string `json:"admin_username" binding:"required"`
 	// AdminDisplayName 是首个 org_admin 的显示名。
@@ -70,9 +70,8 @@ type OrganizationRequest struct {
 	Remark string `json:"remark"`
 	// CreditWarningThreshold 是组织余额预警阈值；nil 表示清空或未设置预警阈值。
 	CreditWarningThreshold *int32 `json:"credit_warning_threshold"`
-	// EnabledModels 是该组织允许在 manager 内选择的模型列表；new-api token 不使用该字段限权。
-	// nil 表示本次只更新基础资料并保留原模型列表；显式空数组会由 service 拒绝。
-	EnabledModels *[]string `json:"enabled_models"`
+	// ModelID 是该组织所有实例统一使用的模型 ID；nil 表示本次只更新基础资料并保留原模型。
+	ModelID *string `json:"model_id"`
 }
 
 // ===== 成员 members =====
@@ -117,8 +116,6 @@ type OnboardMemberRequest struct {
 	AppName string `json:"app_name" binding:"required"`
 	// AppPrompt 是默认应用的初始提示词，可为空。
 	AppPrompt string `json:"app_prompt"`
-	// ModelID 是新实例使用的模型，必须属于组织 enabled_models。
-	ModelID string `json:"model_id" binding:"required"`
 	// PersonaMode 控制新应用是否继承组织人设或使用独立人设。
 	PersonaMode string `json:"persona_mode"`
 	// ChannelType 是初始化渠道绑定的渠道标识。
@@ -133,22 +130,12 @@ type CreateMemberAppRequest struct {
 	AppName string `json:"app_name" binding:"required"`
 	// AppPrompt 是新实例提示词，可为空。
 	AppPrompt string `json:"app_prompt"`
-	// ModelID 是新实例使用的模型，必须属于组织 enabled_models。
-	ModelID string `json:"model_id" binding:"required"`
 	// PersonaMode 控制新实例是否继承组织人设或使用独立人设。
 	PersonaMode string `json:"persona_mode"`
 	// ChannelType 是初始化渠道绑定的渠道标识。
 	ChannelType string `json:"channel_type"`
 	// NodeID 是指定 runtime 节点；为空时 service 自动选择可用节点。
 	NodeID string `json:"runtime_node_id"`
-}
-
-// ===== 应用 apps =====
-
-// UpdateAppModelRequest 修改实例模型的请求体。
-type UpdateAppModelRequest struct {
-	// ModelID 是目标模型，必须属于实例所属组织的 enabled_models。
-	ModelID string `json:"model_id" binding:"required"`
 }
 
 // ===== 人设 persona =====

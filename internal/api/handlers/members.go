@@ -283,7 +283,6 @@ func (h *MembersHandler) Onboard(c *gin.Context) {
 		Role:        req.Role,
 		AppName:     req.AppName,
 		AppPrompt:   req.AppPrompt,
-		ModelID:     req.ModelID,
 		PersonaMode: req.PersonaMode,
 		ChannelType: req.ChannelType,
 		NodeID:      req.NodeID,
@@ -328,7 +327,6 @@ func (h *MembersHandler) CreateAppForMember(c *gin.Context) {
 	result, err := h.onboarding.CreateAppForMember(c.Request.Context(), principal, c.Param("orgId"), c.Param("userId"), service.CreateAppForMemberInput{
 		AppName:     req.AppName,
 		AppPrompt:   req.AppPrompt,
-		ModelID:     req.ModelID,
 		PersonaMode: req.PersonaMode,
 		ChannelType: req.ChannelType,
 		NodeID:      req.NodeID,

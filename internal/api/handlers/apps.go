@@ -22,7 +22,6 @@ type AppsHandler struct {
 type appService interface {
 	Get(ctx context.Context, principal auth.Principal, appID string) (service.AppResult, error)
 	ListByOrg(ctx context.Context, principal auth.Principal, orgID string, limit, offset int32) ([]service.AppResult, error)
-	UpdateModel(ctx context.Context, principal auth.Principal, appID, modelID string) (service.AppModelUpdateResult, error)
 }
 
 // NewAppsHandler 创建 handler。
@@ -35,7 +34,6 @@ func NewAppsHandler(svc appService) *AppsHandler {
 func RegisterAppRoutes(router gin.IRouter, handler *AppsHandler) {
 	router.GET("/api/v1/organizations/:orgId/apps", handler.List)
 	router.GET("/api/v1/apps/:appId", handler.Get)
-	router.PATCH("/api/v1/apps/:appId/model", handler.UpdateModel)
 }
 
 // List 列出组织内的应用。
@@ -88,38 +86,6 @@ func (h *AppsHandler) Get(c *gin.Context) {
 		return
 	}
 	c.JSON(http.StatusOK, gin.H{"app": result})
-}
-
-// UpdateModel 修改实例模型并在需要时提交重启任务。
-//
-// @Summary      修改实例模型
-// @Description  更新实例模型；已有容器的实例会提交重启任务让新模型生效
-// @Tags         apps
-// @Accept       json
-// @Produce      json
-// @Security     BearerAuth
-// @Param        appId  path      string                 true  "应用 ID"
-// @Param        body   body      UpdateAppModelRequest  true  "修改模型请求"
-// @Success      200    {object}  service.AppModelUpdateResult
-// @Failure      400    {object}  ErrorResponse
-// @Failure      401    {object}  ErrorResponse
-// @Failure      403    {object}  ErrorResponse
-// @Failure      404    {object}  ErrorResponse
-// @Failure      500    {object}  ErrorResponse
-// @Router       /apps/{appId}/model [patch]
-func (h *AppsHandler) UpdateModel(c *gin.Context) {
-	principal := principalFromCtx(c)
-	var req UpdateAppModelRequest
-	if err := c.ShouldBindJSON(&req); err != nil {
-		writeBindError(c, err)
-		return
-	}
-	result, err := h.service.UpdateModel(c.Request.Context(), principal, c.Param("appId"), req.ModelID)
-	if err != nil {
-		writeAppsError(c, err)
-		return
-	}
-	c.JSON(http.StatusOK, result)
 }
 
 // writeAppsError 将 AppService 的 sentinel error 映射为 HTTP 状态码。
