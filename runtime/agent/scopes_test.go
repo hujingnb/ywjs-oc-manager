@@ -92,9 +92,9 @@ func TestScopesHandler_UnknownActionReturns404(t *testing.T) {
 	require.Equal(t, http.StatusNotFound, resp.StatusCode)
 }
 
-// TestScopesAppInit_CreatesTwoDirs 验证 Hermes 时代 app init 预建 .hermes、
-// .hermes/workspace、knowledge 三个子目录。
-// .hermes/workspace 必须预建:Hermes config.yaml 把 terminal.cwd 设为 workspace,
+// TestScopesAppInit_CreatesTwoDirs 验证新挂载布局下 app init 预建
+// input/resources/knowledge/{org,app} 与 data/workspace 三层目录。
+// data/workspace 必须预建:Hermes config.yaml 把 terminal.cwd 设为 workspace,
 // 容器内首次 exec 命令前目录不存在会 cd 失败;manager workspace API 也读这个路径。
 func TestScopesAppInit_CreatesTwoDirs(t *testing.T) {
 	dataRoot := t.TempDir()
@@ -107,8 +107,13 @@ func TestScopesAppInit_CreatesTwoDirs(t *testing.T) {
 	require.NoError(t, err)
 	defer resp.Body.Close()
 	require.Equal(t, http.StatusOK, resp.StatusCode)
-	// 验证必须存在的 3 个子目录:.hermes / .hermes/workspace / knowledge。
-	for _, sub := range []string{".hermes", ".hermes/workspace", "knowledge"} {
+	// 验证必须存在的 3 个子目录:input/resources/knowledge/org、
+	// input/resources/knowledge/app 与 data/workspace。
+	for _, sub := range []string{
+		"input/resources/knowledge/org",
+		"input/resources/knowledge/app",
+		"data/workspace",
+	} {
 		dir := filepath.Join(dataRoot, "apps", "app-123", sub)
 		fi, err := os.Stat(dir)
 		require.NoError(t, err, "目录 %q 应被创建", sub)
@@ -116,11 +121,11 @@ func TestScopesAppInit_CreatesTwoDirs(t *testing.T) {
 			t.Fatalf("%q not a directory", sub)
 		}
 	}
-	// 验证 OpenClaw 时代的旧目录不再被预建(由 Hermes 自行创建或已弃用)。
-	for _, old := range []string{"openclaw-config", "weixin", "workspace", "state", "logs"} {
+	// 验证旧布局的目录(OpenClaw / 老 Hermes 时代)不再被预建。
+	for _, old := range []string{".hermes", "knowledge", "openclaw-config", "weixin", "workspace", "state", "logs"} {
 		dir := filepath.Join(dataRoot, "apps", "app-123", old)
 		if _, err := os.Stat(dir); !os.IsNotExist(err) {
-			t.Fatalf("OpenClaw legacy 目录 %q 不应被预建，err=%v", old, err)
+			t.Fatalf("legacy 目录 %q 不应被预建，err=%v", old, err)
 		}
 	}
 }

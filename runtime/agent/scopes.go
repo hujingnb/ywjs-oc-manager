@@ -190,25 +190,26 @@ func isValidScopeID(id string) bool {
 	return true
 }
 
-// handleAppInit 创建 apps/<appID>/{.hermes,knowledge} 2 个子目录。
-//   - .hermes:Hermes 时代 runtime 数据根。manager 通过 /runtime/file PUT 写入
-//     SOUL.md / config.yaml / .env / skills/<...>;容器启动时由该目录全量
-//     bind mount 到 /opt/data。其余 workspace/sessions/logs/cron/memories 等
-//     由 Hermes 启动时自动创建,manager 无需预建。
-//   - knowledge:legacy OpenClaw 时代知识库 sync 目标(Hermes 时代知识库走
-//     skills 机制,manager 不再调用 /knowledge/* endpoint,但保留目录以兼容
-//     旧调用方)。
+// handleAppInit 预建 input/resources/knowledge/{org,app} 与 data/workspace 三层目录。
+//
+// 新挂载布局(取代旧的 .hermes / knowledge 沙箱):
+//   - input/resources/knowledge/org:组织级知识库的容器内 read-only 挂载源,
+//     manager 通过 /input/file 写入组织维度的 SOUL.md / config / skills /
+//     知识库文件等。
+//   - input/resources/knowledge/app:应用级知识库的容器内 read-only 挂载源,
+//     manager 通过 /input/file 写入应用维度的 SOUL.md / config / skills /
+//     知识库文件等。
+//   - data/workspace:Hermes 容器运行时工作目录,terminal.cwd 指向这里,
+//     首次 exec 命令前目录就必须存在;manager workspace API 也读该路径,
+//     预建后即便 agent 一次都没写过文件,API 也能返回空列表而非
+//     "工作目录暂不可用"。
 //
 // 操作幂等:MkdirAll 在目录已存在时 no-op。
 func handleAppInit(w http.ResponseWriter, _ *http.Request, dataRoot, appID string) {
-	// 顺带预建 .hermes/workspace:Hermes 配置 terminal.cwd=workspace,需要在
-	// 容器首次 exec 命令前目录就存在,否则 cd 失败。manager workspace API
-	// 也读这个路径,预建后即便 agent 一次都没写过文件,API 也能返回空列表
-	// 而非 "工作目录暂不可用"。
 	dirs := []string{
-		filepath.Join(dataRoot, "apps", appID, ".hermes"),
-		filepath.Join(dataRoot, "apps", appID, ".hermes", "workspace"),
-		filepath.Join(dataRoot, "apps", appID, "knowledge"),
+		filepath.Join(dataRoot, "apps", appID, "input", "resources", "knowledge", "org"),
+		filepath.Join(dataRoot, "apps", appID, "input", "resources", "knowledge", "app"),
+		filepath.Join(dataRoot, "apps", appID, "data", "workspace"),
 	}
 	for _, dir := range dirs {
 		if err := os.MkdirAll(dir, 0o755); err != nil {
