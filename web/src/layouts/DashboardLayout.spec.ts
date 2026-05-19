@@ -19,6 +19,14 @@ vi.mock('@/stores/auth', () => ({
   }),
 }))
 
+vi.mock('@/composables/useMemberApp', () => ({
+  useMemberApp: () => ({
+    appId: { value: undefined },
+    hasApp: { value: false },
+    isLoading: { value: false },
+  }),
+}))
+
 // DashboardLayout 负责所有登录后页面的视口骨架，内容区必须给子页面提供可撑满的剩余高度。
 describe('DashboardLayout', () => {
   it('wraps routed pages in a fill-height content frame', () => {
@@ -31,7 +39,7 @@ describe('DashboardLayout', () => {
     })
     const content = wrapper.findComponent(NLayoutContent)
 
-    expect(content.props('contentStyle')).toContain('min-height: calc(100vh - 64px)')
+    expect(content.props('contentStyle')).toContain('height: calc(100vh - 64px)')
     expect(content.props('contentStyle')).toContain('display: flex')
     expect(wrapper.find('.dashboard-page-frame').exists()).toBe(true)
   })
