@@ -34,8 +34,10 @@ import { NCard } from 'naive-ui'
 
 import { useAppQuery, type AppDTO } from '@/api/hooks/useApps'
 import AppStatusTag from '@/components/AppStatusTag.vue'
+import { useAuthStore } from '@/stores/auth'
 
 // AppDetailPage 是应用详情的父页面，负责加载应用基础信息并向子 tab 注入应用上下文。
+const auth = useAuthStore()
 const route = useRoute()
 const router = useRouter()
 
@@ -46,8 +48,8 @@ const app = computed<AppDTO | null>(() => appQuery.data.value ?? null)
 // 子 tab 共享 app，避免每个 tab 重复查询并保持权限判断基于同一份应用数据。
 provide<typeof app>('app', app)
 
-// tabs 定义详情页的业务分区，path 必须和子路由末段保持一致。
-const tabs: ReadonlyArray<{ path: string; label: string }> = [
+// allTabs 定义详情页的全部业务分区，path 必须和子路由末段保持一致。
+const allTabs: ReadonlyArray<{ path: string; label: string }> = [
   { path: 'overview', label: '概览' },
   { path: 'runtime', label: '运行时' },
   { path: 'channels', label: '渠道' },
@@ -55,6 +57,11 @@ const tabs: ReadonlyArray<{ path: string; label: string }> = [
   { path: 'workspace', label: '工作目录' },
   { path: 'audit', label: '审计' },
 ]
+
+// 运行时 tab 仅对平台管理员可见，属基础设施层信息不向组织用户暴露。
+const tabs = computed(() =>
+  auth.isPlatformAdmin ? allTabs : allTabs.filter(t => t.path !== 'runtime')
+)
 
 // currentTab 根据当前路由末段驱动 Naive tabs 激活态。
 const currentTab = computed(() => {
