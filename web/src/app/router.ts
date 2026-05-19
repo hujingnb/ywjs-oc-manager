@@ -92,7 +92,7 @@ export const router = createRouter({
           children: [
             { path: '', redirect: (to) => ({ path: `/apps/${to.params.appId}/overview` }) },
             { path: 'overview', component: AppOverviewTab, props: true },
-            { path: 'runtime', component: AppRuntimeTab, props: true },
+            { path: 'runtime', component: AppRuntimeTab, props: true, meta: { allowedRoles: PLATFORM_ONLY } },
             { path: 'channels', component: AppChannelsTab, props: true },
             { path: 'knowledge', component: AppKnowledgeTab, props: true },
             { path: 'workspace', component: AppWorkspaceTab, props: true },
