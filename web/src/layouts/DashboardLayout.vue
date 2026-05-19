@@ -85,6 +85,7 @@ import {
 } from 'lucide-vue-next'
 
 import { useAuthStore } from '@/stores/auth'
+import { useMemberApp } from '@/composables/useMemberApp'
 
 // DashboardLayout 负责已登录后台的导航外壳、环境标识和退出入口。
 // 具体页面权限仍由路由和页面级查询控制，这里只隐藏不适合当前角色的导航项。
@@ -101,11 +102,12 @@ const environmentLabel = computed(() => {
 const activeKey = computed(() => {
   const p = route.path
   if (p === '/') return '/'
+  // org_member 的实例菜单 key 是动态路径，需要特殊匹配。
+  if (p.startsWith('/apps')) return memberAppPath.value
   const prefixes = [
     '/platform/dashboard',
     '/organizations',
     '/members',
-    '/apps',
     '/knowledge',
     '/usage',
     '/balance',
@@ -121,6 +123,15 @@ const isOrgMember = computed(() => auth.isOrgMember)
 // isOrgAdmin 用于控制账户余额菜单项的可见性，仅组织管理员需要此入口。
 const isOrgAdmin = computed(() => auth.isOrgAdmin)
 
+const { appId: memberAppId, hasApp: memberHasApp } = useMemberApp()
+
+// org_member 的实例菜单目标：有实例指向详情，无实例指向空状态。
+const memberAppPath = computed(() => {
+  if (!isOrgMember.value) return '/apps'
+  if (memberHasApp.value && memberAppId.value) return `/apps/${memberAppId.value}/overview`
+  return '/apps/empty'
+})
+
 // menuOptions 根据角色裁剪入口：普通成员不显示组织管理和审计，平台管理员额外显示平台能力。
 const menuOptions = computed<MenuOption[]>(() => {
   const items: MenuOption[] = [
@@ -135,7 +146,7 @@ const menuOptions = computed<MenuOption[]>(() => {
     items.push({ key: '/members', label: '成员', icon: () => h(Users, { size: 18 }) })
   }
   items.push(
-    { key: '/apps', label: '实例', icon: () => h(Bot, { size: 18 }) },
+    { key: memberAppPath.value, label: '实例', icon: () => h(Bot, { size: 18 }) },
     { key: '/knowledge', label: '知识库', icon: () => h(BookOpen, { size: 18 }) },
     { key: '/usage', label: '用量', icon: () => h(BarChart3, { size: 18 }) },
   )
