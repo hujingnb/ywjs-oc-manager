@@ -104,22 +104,18 @@ func scopesAppsHandler(dataRoot string) http.HandlerFunc {
 		switch {
 		case action == "init" && r.Method == http.MethodPost:
 			handleAppInit(w, r, dataRoot, appID)
-		case action == "runtime/file" && r.Method == http.MethodPut:
-			// Hermes 时代 runtime 配置文件 sandbox = apps/<appID>/.hermes/。
-			// manager 通过该 endpoint 上传 SOUL.md / config.yaml / .env / skills/*/SKILL.md,
-			// 节点 agent 写到 dataRoot/apps/<appID>/.hermes/<relPath>;容器启动时由
-			// dataRoot/apps/<appID>/.hermes 全量 bind mount 到 /opt/data。
-			// 历史:OpenClaw 时代沙箱根曾为 apps/<appID>/openclaw-config/(file-level mount)。
-			handleKnowledgeFileUpload(w, r, dataRoot, filepath.Join("apps", appID, ".hermes"))
-		case action == "runtime/file" && r.Method == http.MethodDelete:
-			// Hermes 时代删除 apps/<appID>/.hermes/ 下的文件 / 子目录。
-			handleKnowledgeFileDelete(w, r, dataRoot, filepath.Join("apps", appID, ".hermes"))
+		case action == "input/file" && r.Method == http.MethodPut:
+			// 新挂载布局下 manager 唯一的写入入口。sandbox = apps/<appID>/input/。
+			// manager 通过该 endpoint 上传 SOUL.md / config.yaml / .env /
+			// skills/* / resources/knowledge/{org,app}/* 等所有容器内 read-only
+			// 输入;容器启动时由 dataRoot/apps/<appID>/input 全量 bind mount 到
+			// 容器内的 /opt/data/input (或等价路径)。
+			handleKnowledgeFileUpload(w, r, dataRoot, filepath.Join("apps", appID, "input"))
+		case action == "input/file" && r.Method == http.MethodDelete:
+			// 删除 apps/<appID>/input/ 沙箱下的文件 / 子目录。
+			handleKnowledgeFileDelete(w, r, dataRoot, filepath.Join("apps", appID, "input"))
 		case action == "knowledge/sync" && r.Method == http.MethodPost:
 			handleKnowledgeSync(w, r, dataRoot, filepath.Join("apps", appID, "knowledge"))
-		case action == "knowledge/file" && r.Method == http.MethodPut:
-			handleKnowledgeFileUpload(w, r, dataRoot, filepath.Join("apps", appID, "knowledge"))
-		case action == "knowledge/file" && r.Method == http.MethodDelete:
-			handleKnowledgeFileDelete(w, r, dataRoot, filepath.Join("apps", appID, "knowledge"))
 		case action == "workspace" && r.Method == http.MethodGet:
 			// Hermes 容器把整个 .hermes 挂载到 /opt/data,workspace 子目录因此
 			// 落在节点 apps/<id>/.hermes/workspace。manager workspace API 必须读
@@ -160,10 +156,6 @@ func scopesOrgsHandler(dataRoot string) http.HandlerFunc {
 		switch {
 		case action == "knowledge/sync" && r.Method == http.MethodPost:
 			handleKnowledgeSync(w, r, dataRoot, filepath.Join("orgs", orgID, "knowledge"))
-		case action == "knowledge/file" && r.Method == http.MethodPut:
-			handleKnowledgeFileUpload(w, r, dataRoot, filepath.Join("orgs", orgID, "knowledge"))
-		case action == "knowledge/file" && r.Method == http.MethodDelete:
-			handleKnowledgeFileDelete(w, r, dataRoot, filepath.Join("orgs", orgID, "knowledge"))
 		default:
 			writeError(w, http.StatusNotFound, "unknown action")
 		}

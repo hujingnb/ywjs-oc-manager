@@ -243,30 +243,30 @@ func TestScopesKnowledgeSync_EmptyTar(t *testing.T) {
 	require.Len(t, entries, 0)
 }
 
-// TestScopesKnowledgeFile_PutAndDelete 验证scope 知识库文件更新并删除的预期行为场景。
-func TestScopesKnowledgeFile_PutAndDelete(t *testing.T) {
+// TestHandleAppInputFile_PutWritesIntoInputSandbox 验证 PUT 写到 apps/<id>/input/
+// sandbox 内部，且支持嵌套子路径、覆盖写入与幂等删除。
+func TestHandleAppInputFile_PutWritesIntoInputSandbox(t *testing.T) {
 	dataRoot := t.TempDir()
 	srv := httptest.NewServer(newHandlerWithDocker(dataRoot, nil, "tok"))
 	defer srv.Close()
 
-	// 上传一个文件
+	// 嵌套子路径写入:resources/knowledge/app/note.txt 应落到 input 沙箱下。
 	put, _ := http.NewRequest(http.MethodPut,
-		srv.URL+"/v1/scopes/apps/app-1/knowledge/file?path=sub/dir/note.txt",
+		srv.URL+"/v1/scopes/apps/app-1/input/file?path=resources/knowledge/app/note.txt",
 		strings.NewReader("hello world"))
 	put.Header.Set("Authorization", "Bearer tok")
 	resp, err := http.DefaultClient.Do(put)
 	require.NoError(t, err)
 	resp.Body.Close()
 	require.Equal(t, http.StatusOK, resp.StatusCode)
-	dest := filepath.Join(dataRoot, "apps", "app-1", "knowledge", "sub", "dir", "note.txt")
+	dest := filepath.Join(dataRoot, "apps", "app-1", "input", "resources", "knowledge", "app", "note.txt")
 	got, err := os.ReadFile(dest)
-	if err != nil || string(got) != "hello world" {
-		t.Fatalf("file content = %q, %v", got, err)
-	}
+	require.NoError(t, err)
+	require.Equal(t, "hello world", string(got))
 
-	// 覆盖写入（同名）
+	// 覆盖写入(同名):验证 PUT 语义。
 	put2, _ := http.NewRequest(http.MethodPut,
-		srv.URL+"/v1/scopes/apps/app-1/knowledge/file?path=sub/dir/note.txt",
+		srv.URL+"/v1/scopes/apps/app-1/input/file?path=resources/knowledge/app/note.txt",
 		strings.NewReader("v2"))
 	put2.Header.Set("Authorization", "Bearer tok")
 	resp, _ = http.DefaultClient.Do(put2)
@@ -274,9 +274,9 @@ func TestScopesKnowledgeFile_PutAndDelete(t *testing.T) {
 	got, _ = os.ReadFile(dest)
 	require.Equal(t, "v2", string(got))
 
-	// 删除
+	// 删除文件:验证 DELETE 真删了沙箱内文件。
 	del, _ := http.NewRequest(http.MethodDelete,
-		srv.URL+"/v1/scopes/apps/app-1/knowledge/file?path=sub/dir/note.txt", nil)
+		srv.URL+"/v1/scopes/apps/app-1/input/file?path=resources/knowledge/app/note.txt", nil)
 	del.Header.Set("Authorization", "Bearer tok")
 	resp, _ = http.DefaultClient.Do(del)
 	resp.Body.Close()
@@ -284,43 +284,35 @@ func TestScopesKnowledgeFile_PutAndDelete(t *testing.T) {
 		t.Fatalf("文件应被删除，err=%v", err)
 	}
 
-	// 删除不存在文件视为成功（幂等）
+	// 重复删除应幂等返回 200(不存在视为成功)。
 	resp, _ = http.DefaultClient.Do(del)
 	resp.Body.Close()
 	require.Equal(t, http.StatusOK, resp.StatusCode)
 }
 
-// TestScopesKnowledgeFile_RejectsTraversalPath 验证scope 知识库文件拒绝路径穿越路径的异常或拒绝路径场景。
-func TestScopesKnowledgeFile_RejectsTraversalPath(t *testing.T) {
+// TestHandleAppInputFile_RejectsPathTraversal 验证 ?path=../escape 越界写入被拒,
+// 沙箱外不会留下任何文件残留。
+func TestHandleAppInputFile_RejectsPathTraversal(t *testing.T) {
 	dataRoot := t.TempDir()
 	srv := httptest.NewServer(newHandlerWithDocker(dataRoot, nil, "tok"))
 	defer srv.Close()
 
+	// 显式 .. 段:应被 resolveScopePath 拒绝,返回 400。
 	put, _ := http.NewRequest(http.MethodPut,
-		srv.URL+"/v1/scopes/apps/app-1/knowledge/file?path=../../etc/passwd",
+		srv.URL+"/v1/scopes/apps/app-1/input/file?path=../../etc/passwd",
 		strings.NewReader("evil"))
 	put.Header.Set("Authorization", "Bearer tok")
 	resp, _ := http.DefaultClient.Do(put)
 	resp.Body.Close()
 	require.Equal(t, http.StatusBadRequest, resp.StatusCode)
-}
 
-// TestScopesKnowledgeFile_OrgScope 验证scope 知识库文件组织scope的预期行为场景。
-func TestScopesKnowledgeFile_OrgScope(t *testing.T) {
-	dataRoot := t.TempDir()
-	srv := httptest.NewServer(newHandlerWithDocker(dataRoot, nil, "tok"))
-	defer srv.Close()
-
-	put, _ := http.NewRequest(http.MethodPut,
-		srv.URL+"/v1/scopes/orgs/org-1/knowledge/file?path=intro.md",
-		strings.NewReader("# org"))
-	put.Header.Set("Authorization", "Bearer tok")
-	resp, err := http.DefaultClient.Do(put)
-	require.NoError(t, err)
-	resp.Body.Close()
-	require.Equal(t, http.StatusOK, resp.StatusCode)
-	got, _ := os.ReadFile(filepath.Join(dataRoot, "orgs", "org-1", "knowledge", "intro.md"))
-	require.Equal(t, "# org", string(got))
+	// DELETE 也要拒绝同样的越界路径。
+	del, _ := http.NewRequest(http.MethodDelete,
+		srv.URL+"/v1/scopes/apps/app-1/input/file?path=../../etc/passwd", nil)
+	del.Header.Set("Authorization", "Bearer tok")
+	resp2, _ := http.DefaultClient.Do(del)
+	resp2.Body.Close()
+	require.Equal(t, http.StatusBadRequest, resp2.StatusCode)
 }
 
 // TestScopesWorkspaceList 验证scope 工作区列表的预期行为场景。
