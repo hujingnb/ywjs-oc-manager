@@ -464,28 +464,35 @@ func (h *AppInitializeHandler) phaseCreate(ctx context.Context, app *sqlc.App, p
 	if nodeDataRoot == "" {
 		nodeDataRoot = "/var/lib/oc-agent"
 	}
-	containerAPIKey, err := h.ensureAPIKey(ctx, app)
-	if err != nil {
-		return err
-	}
 	// 优先使用 phasePullRuntimeImage 写入的 RuntimeImageRef；
 	// 若未拉取（如 imagePullCoord 未注入），退回到 cfg.RuntimeImage。
 	imageRef := app.RuntimeImageRef
 	if imageRef == "" {
 		imageRef = h.cfg.RuntimeImage
 	}
+	// 容器挂载布局采用 input(ro) + data(rw) 双挂载：
+	//   - apps/<id>/input → /opt/oc-input (ro)：oc-entrypoint 读 manifest.yaml +
+	//     resources/*.md 渲染配置；只读避免容器内意外篡改输入清单。
+	//   - apps/<id>/data  → /opt/data       (rw)：hermes 运行期数据 (workspace、
+	//     生成的 config.yaml、sqlite、日志等) 的可写卷。
+	// OPENAI_API_KEY / OPENAI_BASE_URL 不再通过 docker Env 注入：业务配置已经
+	// 统一进 manifest.yaml → oc-entrypoint 渲染 config.yaml，避免双路注入语义漂移。
 	spec := runtimepkg.ContainerSpec{
 		Name:          "hermes-" + payload.AppID,
 		Image:         imageRef,
 		Networks:      h.cfg.ContainerNetworks,
 		WorkingDir:    "/opt/data/workspace",
 		RestartPolicy: "always",
-		Env: map[string]string{
-			"OPENAI_API_KEY":  containerAPIKey,
-			"OPENAI_BASE_URL": h.cfg.NewAPIBaseURL + "/v1",
-		},
 		Volumes: []runtimepkg.VolumeMount{
-			{HostPath: filepath.Join(nodeDataRoot, "apps", payload.AppID, ".hermes"), ContainerPath: "/opt/data"},
+			{
+				HostPath:      filepath.Join(nodeDataRoot, "apps", payload.AppID, "input"),
+				ContainerPath: "/opt/oc-input",
+				ReadOnly:      true,
+			},
+			{
+				HostPath:      filepath.Join(nodeDataRoot, "apps", payload.AppID, "data"),
+				ContainerPath: "/opt/data",
+			},
 		},
 	}
 	info, err := h.containers.CreateContainer(ctx, payload.RuntimeNodeID, spec)

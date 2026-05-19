@@ -70,9 +70,31 @@ func TestAppInitializeHandlesHappyPath(t *testing.T) {
 	require.Equal(t, "sk-test", string(plain))
 	require.NotEqual(t, "sk-test", store.app.NewapiKeyCiphertext.String)
 
-	// Hermes 容器规格断言: 1 个挂载 (.hermes bind mount 到 /opt/data)。
-	require.Equal(t, 1, len(containers.lastSpec.Volumes))
-	require.Equal(t, "/opt/data", containers.lastSpec.Volumes[0].ContainerPath)
+	// Hermes 容器规格断言: 两个挂载——input(ro) + data(rw)，分别承担
+	// oc-entrypoint 输入清单和 hermes 运行期数据，两份不能合并避免容器内
+	// 意外覆盖只读清单。
+	require.Equal(t, 2, len(containers.lastSpec.Volumes))
+
+	// mount[0]: apps/<id>/input → /opt/oc-input (ro)，承载 manifest.yaml 与
+	// resources/*.md，oc-entrypoint 启动时只读消费。
+	inputMount := containers.lastSpec.Volumes[0]
+	require.Equal(t, "/opt/oc-input", inputMount.ContainerPath)
+	require.True(t, inputMount.ReadOnly, "input 挂载必须为只读")
+	require.Contains(t, inputMount.HostPath, "/apps/"+testAppID+"/input", "input HostPath 应指向 apps/<id>/input")
+
+	// mount[1]: apps/<id>/data → /opt/data (rw)，承载 hermes workspace、
+	// 渲染后的 config.yaml、sqlite、日志等可写数据。
+	dataMount := containers.lastSpec.Volumes[1]
+	require.Equal(t, "/opt/data", dataMount.ContainerPath)
+	require.False(t, dataMount.ReadOnly, "data 挂载必须为读写")
+	require.Contains(t, dataMount.HostPath, "/apps/"+testAppID+"/data", "data HostPath 应指向 apps/<id>/data")
+
+	// docker Env 中不能再出现 OPENAI_API_KEY / OPENAI_BASE_URL：业务配置统一走
+	// manifest.yaml → oc-entrypoint 渲染 config.yaml，避免双路注入语义漂移。
+	_, hasAPIKey := containers.lastSpec.Env["OPENAI_API_KEY"]
+	require.False(t, hasAPIKey, "OPENAI_API_KEY 不应通过 docker Env 注入")
+	_, hasBaseURL := containers.lastSpec.Env["OPENAI_BASE_URL"]
+	require.False(t, hasBaseURL, "OPENAI_BASE_URL 不应通过 docker Env 注入")
 
 	// 容器名应以 hermes- 为前缀。
 	require.Equal(t, "hermes-"+testAppID, containers.lastSpec.Name)
