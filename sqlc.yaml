@@ -22,6 +22,7 @@ sql:
       - internal/migrations/000019_app_runtime_image.up.sql
       - internal/migrations/000020_audit_logs_detail_message.up.sql
       - internal/migrations/000021_organizations_apps_newapi_names.up.sql
+      - internal/migrations/000022_org_single_model.up.sql
     queries: internal/store/queries
     gen:
       go:

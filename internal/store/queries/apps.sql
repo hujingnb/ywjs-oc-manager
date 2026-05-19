@@ -104,14 +104,6 @@ SET health_state_json = $2,
 WHERE id = $1
 RETURNING *;
 
--- name: SetAppModel :one
-UPDATE apps
-SET model_id = $2,
-    updated_at = now()
-WHERE id = $1
-  AND deleted_at IS NULL
-RETURNING *;
-
 -- name: SetAppProgress :one
 -- progressReporter 节流后写入；NULL/NULL 表示阶段切换或未知。
 UPDATE apps
@@ -159,6 +151,23 @@ UPDATE apps
 SET
     runtime_image_ref    = $2,
     runtime_image_sha256 = $3,
+    updated_at = now()
+WHERE id = $1
+RETURNING *;
+
+-- name: UpdateAppModelsByOrg :exec
+-- 组织模型变更时批量同步所有活跃实例的 model_id 并标记需重启。
+UPDATE apps
+SET model_id = $2,
+    model_synced = false,
+    updated_at = now()
+WHERE org_id = $1
+  AND deleted_at IS NULL;
+
+-- name: SetAppModelSynced :one
+-- 实例重启完成后标记模型已同步。
+UPDATE apps
+SET model_synced = true,
     updated_at = now()
 WHERE id = $1
 RETURNING *;

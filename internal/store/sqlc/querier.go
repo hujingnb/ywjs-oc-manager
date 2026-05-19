@@ -13,7 +13,6 @@ import (
 type Querier interface {
 	// transitionTo / RequestInitialize 强制清空进度字段。
 	ClearAppProgress(ctx context.Context, id pgtype.UUID) (App, error)
-	CountActiveAppsByOrgAndModels(ctx context.Context, arg CountActiveAppsByOrgAndModelsParams) ([]CountActiveAppsByOrgAndModelsRow, error)
 	// 平台总览组织计数：剔除 soft-deleted；status='active' 与 'disabled' 都算入册组织。
 	CountActiveOrganizations(ctx context.Context) (int64, error)
 	// 平台总览成员计数：仅 active 状态、非 platform_admin。
@@ -129,7 +128,8 @@ type Querier interface {
 	SetAppContainer(ctx context.Context, arg SetAppContainerParams) (App, error)
 	// worker app_health_check handler 写最近一次健康检查结果；用于自动重启窗口计数。
 	SetAppHealthState(ctx context.Context, arg SetAppHealthStateParams) (App, error)
-	SetAppModel(ctx context.Context, arg SetAppModelParams) (App, error)
+	// 实例重启完成后标记模型已同步。
+	SetAppModelSynced(ctx context.Context, id pgtype.UUID) (App, error)
 	SetAppNewAPIKey(ctx context.Context, arg SetAppNewAPIKeyParams) (App, error)
 	// progressReporter 节流后写入；NULL/NULL 表示阶段切换或未知。
 	SetAppProgress(ctx context.Context, arg SetAppProgressParams) (App, error)
@@ -151,6 +151,8 @@ type Querier interface {
 	// SumRechargeAmountByOrg 聚合指定组织所有成功充值记录的总额。
 	// 仅统计 status='succeeded' 的记录，failed 记录不计入累计金额。
 	SumRechargeAmountByOrg(ctx context.Context, orgID pgtype.UUID) (int64, error)
+	// 组织模型变更时批量同步所有活跃实例的 model_id 并标记需重启。
+	UpdateAppModelsByOrg(ctx context.Context, arg UpdateAppModelsByOrgParams) error
 	// phasePullRuntimeImage 成功后写入镜像引用与 sha256。
 	UpdateAppRuntimeImage(ctx context.Context, arg UpdateAppRuntimeImageParams) (App, error)
 	// OOS-2 access_token 自愈用：仅更新 newapi_user_credentials_ciphertext，不动 newapi_user_id。

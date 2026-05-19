@@ -53,6 +53,7 @@ type App struct {
 	RuntimeImageSha256 string `db:"runtime_image_sha256" json:"runtime_image_sha256"`
 	// new-api 侧的 token.name，用于按 token_name 过滤用量日志
 	NewapiKeyName pgtype.Text `db:"newapi_key_name" json:"newapi_key_name"`
+	ModelSynced   bool        `db:"model_synced" json:"model_synced"`
 }
 
 // 审计日志表，记录关键操作、结果和错误信息；普通业务 API 不允许修改或删除。
@@ -178,10 +179,9 @@ type Organization struct {
 	// new-api 业务用户凭据密文，明文为 JSON {username, password, access_token}，使用 manager 的 security.master_key AES-256-GCM 加密。
 	NewapiUserCredentialsCiphertext pgtype.Text `db:"newapi_user_credentials_ciphertext" json:"newapi_user_credentials_ciphertext"`
 	Code                            string      `db:"code" json:"code"`
-	// manager 层组织可用模型列表；new-api 不用该字段做权限控制。
-	EnabledModels []byte `db:"enabled_models" json:"enabled_models"`
 	// new-api 侧的 user.username，用于按 username 过滤用量响应
 	NewapiUsername pgtype.Text `db:"newapi_username" json:"newapi_username"`
+	ModelID        string      `db:"model_id" json:"model_id"`
 }
 
 // 组织级 AI 人设版本表，当前生效版本取同组织最大 version。
