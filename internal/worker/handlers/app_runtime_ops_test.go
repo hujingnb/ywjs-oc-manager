@@ -171,6 +171,116 @@ func TestAppRestartContainerHandler_NoSessionCleanerFallsBackToAtomicRestart(t *
 	require.Equal(t, 0, containers.startCalls)
 }
 
+// fakeInputRefresher 是 AppInputRefresher 的测试桩。
+// orderTracker 用来断言「refresher 在 stop 之前被调用」: stop / refresh 都把
+// 自己的 sequence 追加到 tracker, 由测试比较顺序。
+type fakeInputRefresher struct {
+	calls       int
+	lastNodeID  string
+	lastAppID   string
+	returnError error
+	// orderTracker 由测试注入, refresh 时 append "refresh", 与 fakeLifecycle 共享同一 slice
+	// 即可断言事件先后。
+	orderTracker *[]string
+}
+
+func (f *fakeInputRefresher) RefreshAppInput(_ context.Context, nodeID string, app sqlc.App) error {
+	f.calls++
+	f.lastNodeID = nodeID
+	f.lastAppID = uuidToString(app.ID)
+	if f.orderTracker != nil {
+		*f.orderTracker = append(*f.orderTracker, "refresh")
+	}
+	return f.returnError
+}
+
+// orderedLifecycle 在 fakeLifecycle 基础上把每次 stop / start / restart 调用
+// 也写到 orderTracker 上, 便于测试断言"refresh 在 stop 前发生"。
+type orderedLifecycle struct {
+	fakeLifecycle
+	orderTracker *[]string
+}
+
+func (f *orderedLifecycle) StopContainer(ctx context.Context, nodeID, containerID string) error {
+	if f.orderTracker != nil {
+		*f.orderTracker = append(*f.orderTracker, "stop")
+	}
+	return f.fakeLifecycle.StopContainer(ctx, nodeID, containerID)
+}
+
+func (f *orderedLifecycle) StartContainer(ctx context.Context, nodeID, containerID string) error {
+	if f.orderTracker != nil {
+		*f.orderTracker = append(*f.orderTracker, "start")
+	}
+	return f.fakeLifecycle.StartContainer(ctx, nodeID, containerID)
+}
+
+func (f *orderedLifecycle) RestartContainer(ctx context.Context, nodeID, containerID string) error {
+	if f.orderTracker != nil {
+		*f.orderTracker = append(*f.orderTracker, "restart")
+	}
+	return f.fakeLifecycle.RestartContainer(ctx, nodeID, containerID)
+}
+
+// TestAppRestartContainerHandler_RefreshesInputBeforeRestart 验证注入 AppInputRefresher
+// 后, Handle 会在容器实际 stop 之前调用 refresher.RefreshAppInput。
+// 这是 hermes 镜像自包含 (oc-entrypoint 启动时根据 input/ 重渲染) 流程下
+// 「改 model / 改 prompt / 改 persona 后 restart 真正生效」的关键: input 必须
+// 先被刷新到节点, 后续 stop → start 才能让容器读到最新数据。
+func TestAppRestartContainerHandler_RefreshesInputBeforeRestart(t *testing.T) {
+	stub := runtimeStub(t)
+	order := make([]string, 0, 4)
+	containers := &orderedLifecycle{orderTracker: &order}
+	cleaner := &fakeSessionCleaner{}
+	refresher := &fakeInputRefresher{orderTracker: &order}
+	handler := NewAppRestartContainerHandler(stub, containers)
+	handler.SetInputRefresher(refresher)
+	handler.SetSessionCleaner(cleaner)
+	err := handler.Handle(context.Background(), runtimeJob(domain.JobTypeAppRestartContainer, testAppID))
+	require.NoError(t, err)
+	// refresher 被调用一次, 透传到正确的 appID。
+	require.Equal(t, 1, refresher.calls)
+	require.Equal(t, testAppID, refresher.lastAppID)
+	// 顺序必须是 refresh → stop → start (cleaner 调用插在 stop 与 start 之间);
+	// refresh 不能出现在 stop 之后, 否则 oc-entrypoint 仍会读到旧 manifest。
+	require.Equal(t, []string{"refresh", "stop", "start"}, order)
+}
+
+// TestAppRestartContainerHandler_RefresherErrorAbortsRestart 验证 refresher 失败时
+// 容器不会被 stop, 错误冒泡让 worker 重试。
+// 不允许出现"先 stop 再失败"的中间态: 那会让容器陷入 stopped 状态而 input 未刷新,
+// 用户感知不到, 后续就算手动 start 也是用旧配置。
+func TestAppRestartContainerHandler_RefresherErrorAbortsRestart(t *testing.T) {
+	stub := runtimeStub(t)
+	containers := &fakeLifecycle{}
+	refresher := &fakeInputRefresher{returnError: fmt.Errorf("agent 写 manifest 失败")}
+	handler := NewAppRestartContainerHandler(stub, containers)
+	handler.SetInputRefresher(refresher)
+	err := handler.Handle(context.Background(), runtimeJob(domain.JobTypeAppRestartContainer, testAppID))
+	require.Error(t, err)
+	// refresher 调用过一次, 但任何容器生命周期方法都不应触发。
+	require.Equal(t, 1, refresher.calls)
+	require.Equal(t, 0, containers.stopCalls)
+	require.Equal(t, 0, containers.startCalls)
+	require.Equal(t, 0, containers.restartCalls)
+}
+
+// TestAppRestartContainerHandler_NoInputRefresherSkipsRefresh 验证未注入 InputRefresher
+// (测试装配 / 旧 wiring) 时, Handle 跳过 input 刷新但 stop/start 仍能正常执行,
+// 保持与原 restart 链路的向后兼容(不影响那些只测试容器生命周期的测试装配)。
+func TestAppRestartContainerHandler_NoInputRefresherSkipsRefresh(t *testing.T) {
+	stub := runtimeStub(t)
+	containers := &fakeLifecycle{}
+	handler := NewAppRestartContainerHandler(stub, containers)
+	// 注入 session cleaner 走 stop/start 路径, 不注入 input refresher。
+	handler.SetSessionCleaner(&fakeSessionCleaner{})
+	err := handler.Handle(context.Background(), runtimeJob(domain.JobTypeAppRestartContainer, testAppID))
+	require.NoError(t, err)
+	// stop/start 仍能照常调用, 不应因为 refresher 缺失而失败。
+	require.Equal(t, 1, containers.stopCalls)
+	require.Equal(t, 1, containers.startCalls)
+}
+
 // TestAppDeleteHandler_HappyPath 验证应用删除处理器成功路径的成功路径场景。
 func TestAppDeleteHandler_HappyPath(t *testing.T) {
 	stub := runtimeStub(t)

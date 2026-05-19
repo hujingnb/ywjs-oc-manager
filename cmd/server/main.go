@@ -313,11 +313,23 @@ func runManager(ctx context.Context, cfg config.Config, logOut io.Writer) error 
 	// 注入 session cleaner:restart 在容器实际重启前清 .hermes/sessions/,
 	// 让 Hermes 启动新 session 时 snapshot 最新 SOUL.md(含改后的 model / persona /
 	// 知识库等)。覆盖所有触发 restart 的入口(改 model / 重启 / persona 更新 / 未来其他)。
-	//
-	// restart 链路不再注入 config.yaml refresher:镜像 oc-entrypoint 每次启动
-	// 幂等重渲染 config.yaml / SOUL.md / skills,manager 端不需要在 restart
-	// job 里重复这套渲染逻辑。
 	restartHandler.SetSessionCleaner(runtimeAdapter)
+	// 注入 input refresher: restart 在容器 stop 之前先把节点上的 apps/<id>/input/
+	// manifest.yaml + resources/*.md 重写成 DB 当前快照。镜像 oc-entrypoint 在容器
+	// 启动时根据该目录幂等重渲染 config.yaml / SOUL.md / skills, 所以只要 input
+	// 文件是新的, restart 后容器内 hermes 自然加载到改后的 model / 三层 prompt / persona。
+	// 字段取值复用 BuildAppInputData, 与 AppInitializeHandler.writeAppInput 严格等价。
+	restartHandler.SetInputRefresher(newAppInputRefresher(
+		dbStore.Queries,
+		runtimeAdapter,
+		cipher,
+		handlers.AppInputBuildOptions{
+			PersonaText:    cfg.Hermes.SystemPromptTemplate,
+			PlatformPrompt: cfg.Hermes.SystemPromptTemplate,
+			NewAPIBaseURL:  cfg.NewAPI.BaseURL,
+			DefaultModel:   cfg.Hermes.LLM.DefaultModel,
+		},
+	))
 	if err := registry.Register("app_restart_container", restartHandler.Handle); err != nil {
 		return fmt.Errorf("注册 app_restart_container handler 失败: %w", err)
 	}

@@ -588,38 +588,15 @@ func (h *AppInitializeHandler) writeAppInput(ctx context.Context, nodeID string,
 	}
 	appID := uuidToString(app.ID)
 
-	// model: 优先使用 app.ModelID, 兜底用 cfg.LLM.DefaultModel; 都为空时
-	// 落 "default" 占位, 避免 manifest.app.model 为空字符串导致下游解析报错。
-	model := app.ModelID
-	if model == "" {
-		model = h.cfg.LLM.DefaultModel
-	}
-	if model == "" {
-		model = "default"
-	}
-	// base_url: 写入 manifest.credentials.openai.base_url; 容器内 hermes 会
-	// 再拼 "/v1" 后调 new-api, 与老 config.yaml 行为对齐。
-	baseURL := h.cfg.NewAPIBaseURL
-	if baseURL == "" {
-		baseURL = "http://new-api:3000"
-	}
-
 	// adapter 绑定 nodeID, 让 hermes.WriteAppInput 的 (ctx, appID, relPath, body)
 	// 接口形态在内部转发到 inputFiles.UploadAppInputFile (带 nodeID)。
 	writer := &appInputUploadAdapter{up: h.inputFiles, nodeID: nodeID}
-	in := hermes.AppInputData{
-		AppID:            appID,
-		AppName:          app.Name,
-		Model:            model,
-		OpenAIAPIKey:     containerAPIKey,
-		OpenAIBaseURL:    baseURL,
-		PersonaText:      h.cfg.SystemPromptTemplate,
-		PlatformRule:     h.cfg.PlatformPrompt,
-		OrganizationRule: "", // 组织层 rule 待后续 organization persona/rules 字段补齐
-		ApplicationRule:  textOrEmpty(app.AppPrompt),
-		OrgName:          org.Name,
-		OwnerName:        owner.DisplayName,
-	}
+	in := BuildAppInputData(app, org, owner, containerAPIKey, AppInputBuildOptions{
+		PersonaText:    h.cfg.SystemPromptTemplate,
+		PlatformPrompt: h.cfg.PlatformPrompt,
+		NewAPIBaseURL:  h.cfg.NewAPIBaseURL,
+		DefaultModel:   h.cfg.LLM.DefaultModel,
+	})
 	if err := hermes.WriteAppInput(ctx, writer, appID, in); err != nil {
 		return fmt.Errorf("写入应用 input 资源失败: %w", err)
 	}
@@ -631,6 +608,72 @@ func (h *AppInitializeHandler) writeAppInput(ctx context.Context, nodeID string,
 		return err
 	}
 	return nil
+}
+
+// AppInputBuildOptions 是 BuildAppInputData 的非 DB 来源参数集合。
+//
+// 单独抽成结构体而不是逐个传, 让 init handler 与 restart 阶段的 wiring 端
+// refresher 都能从同一份 AppInitializeConfig 里取出对应字段, 避免漏传一个
+// 参数导致两边语义偏移。
+type AppInputBuildOptions struct {
+	// PersonaText 写入 manifest.resources.persona 的 SOUL 模板内容。
+	// 当前 wiring 由 cfg.Hermes.SystemPromptTemplate 提供;未来若上线
+	// org-level / app-level persona, 由调用方在传入前合并好最终文本。
+	PersonaText string
+	// PlatformPrompt 写入 resources/platform-rules.md, 由配置文件
+	// hermes.system_prompt_template 提供, 容器内 hermes 按需引用。
+	PlatformPrompt string
+	// NewAPIBaseURL 写入 manifest.credentials.openai.base_url;
+	// 容器内 hermes 会再拼 "/v1" 后调 new-api。空串时回退到默认值
+	// "http://new-api:3000" (与老 config.yaml 兜底一致)。
+	NewAPIBaseURL string
+	// DefaultModel 是 app.ModelID 为空时的兜底模型名。两者都为空时
+	// 写入 "default" 占位, 避免 manifest.app.model 落空串。
+	DefaultModel string
+}
+
+// BuildAppInputData 把 DB 行 + 解密后的 api key 装配成 hermes.AppInputData。
+//
+// init 与 restart 两条链路共享同一份字段映射, 确保「初始化写入的 manifest」
+// 与「restart 前重写的 manifest」字段语义完全一致——这是 hermes-image-self-init
+// 流程的核心约束: oc-entrypoint 每次启动都重渲染 config.yaml / SOUL.md,
+// 输入字段语义偏移会直接表现为线上"改模型不生效"或"老 prompt 残留"。
+//
+// 字段策略:
+//   - model: 优先 app.ModelID, 其次 opts.DefaultModel, 最后写 "default" 占位;
+//   - base_url: 优先 opts.NewAPIBaseURL, 兜底 "http://new-api:3000";
+//   - persona / platform / application rules: 直接透传, 占位符渲染由
+//     hermes.WriteAppInput 内的 RenderPersonaText / RenderRuleText 统一处理;
+//   - organization rule: 暂留空, 与现有 init 行为对齐(后续上线 org-level
+//     rule 字段时统一改这一处即可)。
+//
+// containerAPIKey 必须是真实 sk- 明文; 调用方负责从 ciphertext 解密。
+// 该函数纯装配, 不做 IO, 因此无 ctx 参数, 也不返回 error。
+func BuildAppInputData(app sqlc.App, org sqlc.Organization, owner sqlc.User, containerAPIKey string, opts AppInputBuildOptions) hermes.AppInputData {
+	model := app.ModelID
+	if model == "" {
+		model = opts.DefaultModel
+	}
+	if model == "" {
+		model = "default"
+	}
+	baseURL := opts.NewAPIBaseURL
+	if baseURL == "" {
+		baseURL = "http://new-api:3000"
+	}
+	return hermes.AppInputData{
+		AppID:            uuidToString(app.ID),
+		AppName:          app.Name,
+		Model:            model,
+		OpenAIAPIKey:     containerAPIKey,
+		OpenAIBaseURL:    baseURL,
+		PersonaText:      opts.PersonaText,
+		PlatformRule:     opts.PlatformPrompt,
+		OrganizationRule: "", // 组织层 rule 待后续 organization persona/rules 字段补齐
+		ApplicationRule:  textOrEmpty(app.AppPrompt),
+		OrgName:          org.Name,
+		OwnerName:        owner.DisplayName,
+	}
 }
 
 // writeKnowledgeIntoInput 递归把组织 + 应用主副本知识库写到
@@ -704,6 +747,15 @@ type appInputUploadAdapter struct {
 // 不附加业务校验 (路径越界 / 沙箱由 agent 端统一拒绝)。
 func (a *appInputUploadAdapter) WriteAppInputFile(ctx context.Context, appID, relPath string, body io.Reader) error {
 	return a.up.UploadAppInputFile(ctx, a.nodeID, appID, relPath, body)
+}
+
+// NewAppInputUploadAdapter 把 nodeID 与 AppInputUploader 绑定成
+// hermes.AppInputWriter, 供 wiring 层 (cmd/server) 在 restart 链路装配
+// AppInputRefresher 时复用; init handler 内部仍用未导出的 appInputUploadAdapter。
+// 暴露这个构造器避免在 wiring 处重复定义同样的两参数 wrapper 类型,
+// 也保证 init 与 restart 两条链路走同一适配实现。
+func NewAppInputUploadAdapter(up AppInputUploader, nodeID string) hermes.AppInputWriter {
+	return &appInputUploadAdapter{up: up, nodeID: nodeID}
 }
 
 // ensureAPIKey 走「以组织业务 user 身份创 token + 拉完整 sk-」流程，加密落库后返回明文 sk-。

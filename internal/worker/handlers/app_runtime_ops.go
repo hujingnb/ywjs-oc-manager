@@ -182,17 +182,39 @@ type SessionCleaner interface {
 	ClearAppSessions(ctx context.Context, nodeID, appID string) error
 }
 
+// AppInputRefresher 抽象「restart 前重写 input/manifest.yaml + resources/*.md」的能力。
+//
+// 改 model / 三层 prompt / persona 都会落到 apps 表(或 organizations / organization_personas
+// 等关联表), 之后通过 app_restart_container job 触发本 handler。镜像 oc-entrypoint
+// 每次容器启动会幂等地把 input/ 翻译成 hermes 自有 schema(config.yaml / SOUL.md /
+// skills 等), 因此只要 restart 前把节点 apps/<id>/input/ 重写成最新数据,
+// 下次 start 后容器内 hermes 自然加载到改后的模型与 prompt。
+//
+// 实现方负责: 取 DB 当前 app / org / owner 上下文 + 解密 api key, 装配
+// hermes.AppInputData 并通过 hermes.WriteAppInput 写到目标节点的 input/ 目录。
+// 实现见 cmd/server 装配层 appInputRefresher。
+type AppInputRefresher interface {
+	RefreshAppInput(ctx context.Context, nodeID string, app sqlc.App) error
+}
+
 // AppRestartContainerHandler 触发应用容器重启,由可选的 SessionCleaner 决定走
 // stop → clear sessions → start 三步还是退回到原子 docker restart。
 //
-// restart 链路不再重渲染 Hermes 的 config.yaml / SOUL.md / skills:
-// 镜像 oc-entrypoint 每次容器启动幂等重渲染这些配置文件 + 知识库 skills,
-// manager 端只负责"停 → 清 session → 起",保证启动后 Hermes 加载到的是
-// 最新 DB / 主副本快照,且新 session 重新 snapshot 最新 SOUL.md。
+// 容器内部 hermes schema(config.yaml / SOUL.md / skills)由镜像 oc-entrypoint
+// 在每次启动时根据 apps/<id>/input/ 自动重渲染, manager 端只负责:
+//  1. 在 stop 前通过 inputRefresher 把节点上 input/manifest.yaml + resources/*.md
+//     重写成最新 DB 快照(改 model / 三层 prompt / persona 都靠这一步生效);
+//  2. 容器 stop → clear sessions → start, 让 hermes 启动新 session 时 snapshot
+//     最新 SOUL.md(覆盖 system_prompt 冻结在 SQLite 的语义)。
+//
+// 单独把 input 重写抽成接口而不是写死, 是因为生产装配需要持有 DB / cipher /
+// nodeID-aware uploader, 这些依赖只存在于 wiring 层; 测试装配可以传 nil 让 restart
+// 仍能跑(适合不关心 input 刷新语义的容器生命周期测试)。
 type AppRestartContainerHandler struct {
 	store          AppRuntimeStore
 	containers     ContainerLifecycle
 	sessionCleaner SessionCleaner
+	inputRefresher AppInputRefresher
 }
 
 // NewAppRestartContainerHandler 创建重启容器 handler，复用容器生命周期接口。
@@ -206,6 +228,16 @@ func NewAppRestartContainerHandler(store AppRuntimeStore, containers ContainerLi
 // nil 时 restart 不清 session,等价于旧行为。
 func (h *AppRestartContainerHandler) SetSessionCleaner(cleaner SessionCleaner) {
 	h.sessionCleaner = cleaner
+}
+
+// SetInputRefresher 注入「restart 前重写 input/ 目录」的能力。
+//
+// 生产环境必须注入: 没有这一步, 改 model / 三层 prompt / persona 后 restart,
+// oc-entrypoint 仍会读到旧 manifest.yaml, 容器内 hermes 模型 / SOUL.md
+// 永远停留在初始化时的值。
+// nil 时跳过 input 重写(保持原 restart 行为, 仅适合不关心 input 刷新的测试装配)。
+func (h *AppRestartContainerHandler) SetInputRefresher(r AppInputRefresher) {
+	h.inputRefresher = r
 }
 
 // Handle 执行 app_restart_container job，并在成功后把应用状态推回 running。
@@ -224,10 +256,20 @@ func (h *AppRestartContainerHandler) Handle(ctx context.Context, job sqlc.Job) e
 	if app.ContainerID.String == "" {
 		return fmt.Errorf("应用 %s 尚未创建容器，无法重启", payload.AppID)
 	}
-	// restart 链路不再 refresh hermes 文件:镜像 oc-entrypoint 每次启动会幂等
-	// 重渲染 config.yaml / SOUL.md / skills,manager 端只需要确保容器实际
-	// 经历一次"停 → 起",新启动周期里 entrypoint 会读 DB / 主副本最新快照。
 	nodeID := uuidToString(app.RuntimeNodeID)
+	// 在 stop 之前先把节点上的 apps/<id>/input/ 重写成 DB 当前快照:
+	// oc-entrypoint 在下次容器启动时读取该目录,渲染出新的 config.yaml(含 model)
+	// 与 SOUL.md(三层 prompt + persona)。改 model / 改 prompt / 改 persona
+	// 之所以需要 restart 生效,就是因为镜像内部只在启动期渲染一次,所以这里
+	// 必须先把输入数据更新到节点,再进入容器停 → 启循环。
+	//
+	// 失败时直接冒泡让 worker 重试: 没刷新就 restart 等于"重启后还是老配置",
+	// 比让容器先 stop 再失败更糟(用户感知不到, model_synced 还会被错误置位)。
+	if h.inputRefresher != nil {
+		if err := h.inputRefresher.RefreshAppInput(ctx, nodeID, app); err != nil {
+			return fmt.Errorf("刷新应用 input 失败: %w", err)
+		}
+	}
 	// session 真正存储是 .hermes/state.db (SQLite),需要在容器 stop 后才能删
 	// (运行中 SQLite 持有文件锁)。所以这里把 docker restart 拆成
 	// stop → clear sessions → start 三步,而不是用原子 RestartContainer。
