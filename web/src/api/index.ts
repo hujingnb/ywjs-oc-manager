@@ -33,10 +33,10 @@ export type Member = WithRequired<
   'id' | 'username' | 'display_name' | 'role' | 'status'
 >
 
-// Organization：id / name / status / code / enabled_models 后端必返
+// Organization：id / name / status / code / model_id 后端必返
 export type Organization = WithRequired<
   Schemas['service.OrganizationResult'],
-  'id' | 'name' | 'status' | 'code' | 'enabled_models'
+  'id' | 'name' | 'status' | 'code' | 'model_id'
 >
 
 // App：id / name / status / persona_mode / api_key_status 后端必返

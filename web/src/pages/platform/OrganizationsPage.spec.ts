@@ -23,7 +23,7 @@ vi.mock('@/api/hooks/useOrganizations', () => ({
       status: 'active',
       credit_warning_threshold: 20,
       admin_username: 'org-admin',
-      enabled_models: ['qwen2.5:7b'],
+      model_id: 'qwen2.5:7b',
     }]),
     isLoading: ref(false),
     error: ref(null),
@@ -249,13 +249,13 @@ describe('OrganizationsPage', () => {
     await inputs[3].setValue('组织管理员')
     await inputs[4].setValue('secret-password')
     const modelSelect = wrapper.find('select')
-    await modelSelect.setValue(['qwen2.5:7b'])
+    await modelSelect.setValue('qwen2.5:7b')
     await wrapper.find('form').trigger('submit')
 
     expect(createOrganization).toHaveBeenCalledWith(expect.objectContaining({
       name: '新组织',
       code: 'new-org',
-      enabled_models: ['qwen2.5:7b'],
+      model_id: 'qwen2.5:7b',
       admin_username: 'org-admin',
       admin_display_name: '组织管理员',
       admin_password: 'secret-password',

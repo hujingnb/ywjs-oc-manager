@@ -80,15 +80,14 @@
             </n-form-item>
           </n-grid-item>
           <n-grid-item :span="2">
-            <n-form-item label="可用模型 *">
+            <n-form-item label="模型 *">
               <n-select
-                v-model:value="form.enabled_models"
-                multiple
+                v-model:value="form.model_id"
                 filterable
                 :loading="modelsQuery.isLoading.value"
                 :disabled="modelsQuery.isError.value"
                 :options="modelOptions"
-                placeholder="选择组织可使用的模型"
+                placeholder="选择模型"
               />
               <p v-if="modelsQuery.isError.value" class="state-text danger">模型列表获取失败，请重试</p>
             </n-form-item>
@@ -281,7 +280,7 @@ const { form, formVisible, creating, submitError, openForm, submit: submitForm }
     admin_username: '',
     admin_display_name: '',
     admin_password: '',
-    enabled_models: [] as string[],
+    model_id: '',
   },
   mutation: createMutation,
   toPayload: (f) => ({
@@ -295,7 +294,7 @@ const { form, formVisible, creating, submitError, openForm, submit: submitForm }
     admin_username: f.admin_username,
     admin_display_name: f.admin_display_name,
     admin_password: f.admin_password,
-    enabled_models: f.enabled_models,
+    model_id: f.model_id,
   }),
 })
 const modelsQuery = useModelsQuery(() => formVisible.value)
@@ -303,9 +302,9 @@ const modelOptions = computed(() => (modelsQuery.data.value ?? []).map(model => 
   label: model.name,
   value: model.id,
 })))
-// canSubmitOrganization 阻止空模型 allowlist 或模型目录错误进入后端校验。
+// canSubmitOrganization 阻止未选模型或模型目录错误进入后端校验。
 const canSubmitOrganization = computed(() =>
-  !creating.value && !modelsQuery.isError.value && form.enabled_models.length > 0,
+  !creating.value && !modelsQuery.isError.value && Boolean(form.model_id),
 )
 
 // submitOrganization 兜底处理键盘提交，避免绕过保存按钮禁用状态。
@@ -314,8 +313,8 @@ async function submitOrganization() {
     submitError.value = '模型列表获取失败，请重试'
     return
   }
-  if (form.enabled_models.length === 0) {
-    submitError.value = '请至少选择一个可用模型'
+  if (!form.model_id) {
+    submitError.value = '请选择模型'
     return
   }
   await submitForm()

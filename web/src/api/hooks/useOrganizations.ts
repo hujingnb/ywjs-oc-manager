@@ -30,8 +30,8 @@ export interface OrganizationFormPayload {
   remark?: string
   // 余额预警阈值；null 表示清空或使用后端默认。
   credit_warning_threshold?: number | null
-  // 组织允许使用的模型 ID 列表，后端会按实时模型目录校验。
-  enabled_models: string[]
+  // 组织统一使用的模型 ID，由平台管理员在创建时指定。
+  model_id: string
   // 首个组织管理员用户名。
   admin_username: string
   // 首个组织管理员展示名。
