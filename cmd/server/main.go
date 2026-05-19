@@ -310,14 +310,13 @@ func runManager(ctx context.Context, cfg config.Config, logOut io.Writer) error 
 		return fmt.Errorf("注册 app_stop_container handler 失败: %w", err)
 	}
 	restartHandler := handlers.NewAppRestartContainerHandler(dbStore.Queries, runtimeAdapter)
-	// 注入 config.yaml 重写器:UpdateModel 改 DB 后入队 app_restart_container,
-	// restart handler 在 docker restart 之前重新渲染 config.yaml 并通过 agent 上传,
-	// 让 Hermes 加载到 DB 最新的 model_id;不刷 .env(WEIXIN_* 由 channel bound 流管)
-	// 也不刷 SOUL.md(persona prompt 由专用流程管)。
-	restartHandler.SetConfigRefresher(newHermesConfigRefresher(dbStore.Queries, runtimeAdapter, cipher, knowledgeMaster, cfg.NewAPI.BaseURL, cfg.Hermes.SystemPromptTemplate))
 	// 注入 session cleaner:restart 在容器实际重启前清 .hermes/sessions/,
 	// 让 Hermes 启动新 session 时 snapshot 最新 SOUL.md(含改后的 model / persona /
 	// 知识库等)。覆盖所有触发 restart 的入口(改 model / 重启 / persona 更新 / 未来其他)。
+	//
+	// restart 链路不再注入 config.yaml refresher:镜像 oc-entrypoint 每次启动
+	// 幂等重渲染 config.yaml / SOUL.md / skills,manager 端不需要在 restart
+	// job 里重复这套渲染逻辑。
 	restartHandler.SetSessionCleaner(runtimeAdapter)
 	if err := registry.Register("app_restart_container", restartHandler.Handle); err != nil {
 		return fmt.Errorf("注册 app_restart_container handler 失败: %w", err)
