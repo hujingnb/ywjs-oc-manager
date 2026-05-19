@@ -117,18 +117,18 @@ func scopesAppsHandler(dataRoot string) http.HandlerFunc {
 		case action == "knowledge/sync" && r.Method == http.MethodPost:
 			handleKnowledgeSync(w, r, dataRoot, filepath.Join("apps", appID, "knowledge"))
 		case action == "workspace" && r.Method == http.MethodGet:
-			// Hermes 容器把整个 .hermes 挂载到 /opt/data,workspace 子目录因此
-			// 落在节点 apps/<id>/.hermes/workspace。manager workspace API 必须读
-			// 同一物理路径,不再是 OpenClaw 时代独立 mount 的 apps/<id>/workspace。
-			handleWorkspaceList(w, r, dataRoot, filepath.Join("apps", appID, ".hermes", "workspace"))
+			// 新挂载布局下容器内 /opt/data 来自 apps/<id>/data,workspace 子目录
+			// 因此落在节点 apps/<id>/data/workspace。manager workspace API 必须
+			// 读同一物理路径。
+			handleWorkspaceList(w, r, dataRoot, filepath.Join("apps", appID, "data", "workspace"))
 		case action == "workspace/download" && r.Method == http.MethodGet:
-			handleWorkspaceDownload(w, r, dataRoot, filepath.Join("apps", appID, ".hermes", "workspace"))
+			handleWorkspaceDownload(w, r, dataRoot, filepath.Join("apps", appID, "data", "workspace"))
 		case action == "workspace/archive" && r.Method == http.MethodGet:
-			handleWorkspaceArchive(w, r, dataRoot, filepath.Join("apps", appID, ".hermes", "workspace"))
+			handleWorkspaceArchive(w, r, dataRoot, filepath.Join("apps", appID, "data", "workspace"))
 		case action == "archive" && r.Method == http.MethodPost:
 			handleAppArchive(w, r, dataRoot, appID)
 		case action == "sessions" && r.Method == http.MethodDelete:
-			// 配置变更(改 model/prompt/知识库/重启等)后清空 .hermes/sessions/,
+			// 配置变更(改 model/prompt/知识库/重启等)后清空 data/sessions/,
 			// 让 Hermes 启动新 session 时重新 snapshot system_prompt。
 			// Hermes 在 session 启动时把 system_prompt 冻结存进 SQLite,后续 SOUL.md
 			// 改动对老 session 不生效——必须清 session 才能让最新配置进入对话。
@@ -608,11 +608,12 @@ func handleAppArchive(w http.ResponseWriter, _ *http.Request, dataRoot, appID st
 // handleAppSessionsClear 清空指定 app 的 Hermes 会话相关存储,使 Hermes
 // 下次启动新 session 时 snapshot 最新 SOUL.md(含最新知识库 / 模型 / persona)。
 //
-// Hermes 的 session 存储分两处:
-//  1. .hermes/state.db (+ -shm / -wal):SQLite session history / 元数据,
+// 新挂载布局下 Hermes 容器的 /opt/data 对应宿主机 apps/<id>/data,
+// session 存储分两处:
+//  1. data/state.db (+ -shm / -wal):SQLite session history / 元数据,
 //     这是 system_prompt 冻结存储的位置——配置变更后必须清掉才能让新
 //     SOUL.md 进入新会话。
-//  2. .hermes/sessions/:request_dump、文件级 sessions.json 等附属文件。
+//  2. data/sessions/:request_dump、文件级 sessions.json 等附属文件。
 //
 // 调用前提:Hermes 容器必须先停止(SQLite 持有文件锁,运行中删 state.db
 // 会损坏数据库)。worker 端 AppRestartContainerHandler 已按 stop → clear → start
@@ -620,13 +621,13 @@ func handleAppArchive(w http.ResponseWriter, _ *http.Request, dataRoot, appID st
 //
 // 幂等:任一文件不存在视为成功(返回 cleared 列表中只列实际清掉的项)。
 func handleAppSessionsClear(w http.ResponseWriter, _ *http.Request, dataRoot, appID string) {
-	hermesHome := filepath.Join(dataRoot, "apps", appID, ".hermes")
+	dataHome := filepath.Join(dataRoot, "apps", appID, "data")
 	ts := nowFunc().UTC().Format("20060102T150405Z")
 	cleared := make([]string, 0, 4)
 	// 1) 整体 rename sessions/ 子目录,异步 RemoveAll 避免大目录阻塞 HTTP。
-	sessionsDir := filepath.Join(hermesHome, "sessions")
+	sessionsDir := filepath.Join(dataHome, "sessions")
 	if _, err := os.Stat(sessionsDir); err == nil {
-		staged := filepath.Join(hermesHome, ".sessions-cleared-"+ts)
+		staged := filepath.Join(dataHome, ".sessions-cleared-"+ts)
 		if err := os.Rename(sessionsDir, staged); err != nil {
 			writeError(w, http.StatusInternalServerError, fmt.Sprintf("rename sessions: %v", err))
 			return
@@ -639,7 +640,7 @@ func handleAppSessionsClear(w http.ResponseWriter, _ *http.Request, dataRoot, ap
 	}
 	// 2) 删 state.db / -shm / -wal 三件套(SQLite WAL 模式三个文件)。
 	for _, suffix := range []string{"state.db", "state.db-shm", "state.db-wal"} {
-		p := filepath.Join(hermesHome, suffix)
+		p := filepath.Join(dataHome, suffix)
 		if err := os.Remove(p); err == nil {
 			cleared = append(cleared, suffix)
 		} else if !os.IsNotExist(err) {
