@@ -47,7 +47,8 @@ func TestOrganizationServiceCreateProvisionsNewAPIUser(t *testing.T) {
 		AdminUsername:          "org-admin",
 		AdminDisplayName:       "组织管理员",
 		AdminPassword:          "secret-password",
-		EnabledModels:          []string{"qwen2.5:7b"},
+		ModelID:                "qwen2.5:7b",
+		ModelIDSet:             true,
 	})
 	require.NoError(t, err)
 	require.NotNil(t, result.CreditWarningThreshold)
@@ -72,8 +73,9 @@ func TestOrganizationServiceCreateProvisionsNewAPIUser(t *testing.T) {
 	require.Equal(t, "access-tok-xyz", creds.AccessToken)
 	assert.Equal(t, prov.lastCreate.Username, creds.Username)
 	assert.Equal(t, prov.lastCreate.Password, creds.Password)
-	assert.Equal(t, []string{"qwen2.5:7b"}, result.EnabledModels)
-	assert.JSONEq(t, `["qwen2.5:7b"]`, string(store.created.EnabledModels))
+	// 单模型：响应中 model_id 与创建时传入一致。
+	assert.Equal(t, "qwen2.5:7b", result.ModelID)
+	assert.Equal(t, "qwen2.5:7b", store.created.ModelID)
 }
 
 // TestProvisionNewAPIUserPersistsUsername 校验组织创建链路把 new-api 侧 username
@@ -98,7 +100,8 @@ func TestProvisionNewAPIUserPersistsUsername(t *testing.T) {
 		AdminUsername:    "org-admin",
 		AdminDisplayName: "组织管理员",
 		AdminPassword:    "secret-password",
-		EnabledModels:    []string{"qwen2.5:7b"},
+		ModelID:          "qwen2.5:7b",
+		ModelIDSet:       true,
 	})
 	require.NoError(t, err)
 
@@ -124,7 +127,8 @@ func TestOrganizationServiceCreateAlsoCreatesOrgAdmin(t *testing.T) {
 		AdminUsername:    "org-admin",
 		AdminDisplayName: "组织管理员",
 		AdminPassword:    "secret-password",
-		EnabledModels:    []string{"qwen2.5:7b"},
+		ModelID:          "qwen2.5:7b",
+		ModelIDSet:       true,
 	})
 	require.NoError(t, err)
 
@@ -155,7 +159,8 @@ func TestOrganizationServiceCreateRollbackOnProvisioningFailure(t *testing.T) {
 		AdminUsername:    "org-admin",
 		AdminDisplayName: "组织管理员",
 		AdminPassword:    "secret-password",
-		EnabledModels:    []string{"qwen2.5:7b"},
+		ModelID:          "qwen2.5:7b",
+		ModelIDSet:       true,
 	})
 	require.Error(t, err)
 	require.True(t, store.hardDeleted)
@@ -175,7 +180,8 @@ func TestCreateOrganizationRequiresValidCode(t *testing.T) {
 			AdminUsername:    "admin",
 			AdminDisplayName: "管理员",
 			AdminPassword:    "secret-password",
-			EnabledModels:    []string{"qwen2.5:7b"},
+			ModelID:          "qwen2.5:7b",
+			ModelIDSet:       true,
 		})
 		require.ErrorIs(t, err, ErrMemberCreateInvalid, "code=%q", code)
 	}
@@ -195,7 +201,8 @@ func TestCreateOrganizationNormalizesCode(t *testing.T) {
 		AdminUsername:    "admin",
 		AdminDisplayName: "管理员",
 		AdminPassword:    "secret-password",
-		EnabledModels:    []string{"qwen2.5:7b"},
+		ModelID:          "qwen2.5:7b",
+		ModelIDSet:       true,
 	})
 
 	require.NoError(t, err)
@@ -218,7 +225,8 @@ func TestCreateOrganizationMapsUniqueViolationToConflict(t *testing.T) {
 		AdminUsername:    "admin",
 		AdminDisplayName: "管理员",
 		AdminPassword:    "secret-password",
-		EnabledModels:    []string{"qwen2.5:7b"},
+		ModelID:          "qwen2.5:7b",
+		ModelIDSet:       true,
 	})
 
 	require.ErrorIs(t, err, ErrConflict)
@@ -255,7 +263,8 @@ func TestCreateOrganizationBlocksSaveWithoutModelValidator(t *testing.T) {
 		AdminUsername:    "admin",
 		AdminDisplayName: "管理员",
 		AdminPassword:    "admin123",
-		EnabledModels:    []string{"qwen2.5:7b"},
+		ModelID:          "qwen2.5:7b",
+		ModelIDSet:       true,
 	})
 
 	require.Error(t, err)
@@ -263,62 +272,48 @@ func TestCreateOrganizationBlocksSaveWithoutModelValidator(t *testing.T) {
 	assert.False(t, store.createCalled)
 }
 
-// TestUpdateOrganizationRejectsRemovingModelInUse 验证不能移除仍被未删除实例使用的模型。
-func TestUpdateOrganizationRejectsRemovingModelInUse(t *testing.T) {
+// TestUpdateOrganizationSyncsAppsWhenModelChanged 验证更新组织模型时批量同步所有活跃实例。
+func TestUpdateOrganizationSyncsAppsWhenModelChanged(t *testing.T) {
 	store := &organizationStoreStub{}
-	org := store.mustSeedOrganization(t, "test-org", []string{"qwen2.5:7b", "deepseek-r1:14b"})
-	store.modelUsage = []sqlc.CountActiveAppsByOrgAndModelsRow{{ModelID: "qwen2.5:7b", AppCount: 1}}
-	svc := NewOrganizationService(store, &fakeProvisioner{}, mustCipher(t), nil)
-	svc.SetModelValidator(orgModelValidatorStub{models: []string{"deepseek-r1:14b"}})
-
-	_, err := svc.UpdateOrganization(context.Background(), auth.Principal{Role: domain.UserRolePlatformAdmin}, uuidToString(org.ID), OrganizationInput{
-		Name:             "测试组织",
-		EnabledModels:    []string{"deepseek-r1:14b"},
-		EnabledModelsSet: true,
-	})
-
-	require.ErrorIs(t, err, ErrConflict)
-	assert.Contains(t, err.Error(), "qwen2.5:7b")
-	assert.Equal(t, []string{"qwen2.5:7b"}, store.modelUsageArg.ModelIds)
-	assert.False(t, store.updateProfileCalled)
-}
-
-// TestUpdateOrganizationPersistsEnabledModels 验证更新组织会保存实时校验后的模型 allowlist。
-func TestUpdateOrganizationPersistsEnabledModels(t *testing.T) {
-	store := &organizationStoreStub{}
-	org := store.mustSeedOrganization(t, "test-org", []string{"qwen2.5:7b"})
+	org := store.mustSeedOrganization(t, "test-org", "qwen2.5:7b")
 	svc := NewOrganizationService(store, &fakeProvisioner{}, mustCipher(t), nil)
 	validator := &recordingOrgModelValidator{models: []string{"deepseek-r1:14b"}}
 	svc.SetModelValidator(validator)
 
+	// 更新模型为新值，期望批量同步被触发。
 	result, err := svc.UpdateOrganization(context.Background(), auth.Principal{Role: domain.UserRolePlatformAdmin}, uuidToString(org.ID), OrganizationInput{
-		Name:             "测试组织改名",
-		EnabledModels:    []string{"deepseek-r1:14b"},
-		EnabledModelsSet: true,
+		Name:       "测试组织改名",
+		ModelID:    "deepseek-r1:14b",
+		ModelIDSet: true,
 	})
 
 	require.NoError(t, err)
-	assert.Equal(t, []string{"deepseek-r1:14b"}, result.EnabledModels)
+	assert.Equal(t, "deepseek-r1:14b", result.ModelID)
 	assert.Equal(t, []string{"deepseek-r1:14b"}, validator.input)
-	assert.JSONEq(t, `["deepseek-r1:14b"]`, string(store.updatedProfile.EnabledModels))
+	assert.Equal(t, "deepseek-r1:14b", store.updatedProfile.ModelID)
+	// 模型变更时应触发批量同步。
+	assert.True(t, store.updateAppModelsCalled)
+	assert.Equal(t, "deepseek-r1:14b", store.updateAppModelsArg.ModelID)
 }
 
-// TestUpdateOrganizationKeepsModelsWhenFieldOmitted 验证更新基础资料时缺省模型字段会保留旧 allowlist。
-func TestUpdateOrganizationKeepsModelsWhenFieldOmitted(t *testing.T) {
+// TestUpdateOrganizationKeepsModelWhenFieldOmitted 验证更新基础资料时缺省模型字段会保留旧模型。
+func TestUpdateOrganizationKeepsModelWhenFieldOmitted(t *testing.T) {
 	store := &organizationStoreStub{}
-	org := store.mustSeedOrganization(t, "test-org", []string{"qwen2.5:7b"})
+	org := store.mustSeedOrganization(t, "test-org", "qwen2.5:7b")
 	svc := NewOrganizationService(store, &fakeProvisioner{}, mustCipher(t), nil)
 	svc.SetModelValidator(orgModelValidatorStub{err: errors.New("不应调用模型校验")})
 
+	// 不传 ModelIDSet，期望保留原模型且不触发批量同步。
 	result, err := svc.UpdateOrganization(context.Background(), auth.Principal{Role: domain.UserRolePlatformAdmin}, uuidToString(org.ID), OrganizationInput{
 		Name: "测试组织改名",
 	})
 
 	require.NoError(t, err)
 	assert.Equal(t, "测试组织改名", result.Name)
-	assert.Equal(t, []string{"qwen2.5:7b"}, result.EnabledModels)
-	assert.JSONEq(t, `["qwen2.5:7b"]`, string(store.updatedProfile.EnabledModels))
-	assert.Empty(t, store.modelUsageArg.ModelIds)
+	assert.Equal(t, "qwen2.5:7b", result.ModelID)
+	assert.Equal(t, "qwen2.5:7b", store.updatedProfile.ModelID)
+	// 模型未变更，不应触发批量同步。
+	assert.False(t, store.updateAppModelsCalled)
 }
 
 // TestOrganizationServiceGetRestrictsOrgScope 验证组织服务获取Restricts组织scope的预期行为场景。
@@ -419,20 +414,20 @@ func (p *fakeProvisioner) DeleteUser(_ context.Context, userID int64) error {
 }
 
 type organizationStoreStub struct {
-	org                 sqlc.Organization
-	orgAdmin            sqlc.User
-	created             sqlc.CreateOrganizationParams
-	updated             sqlc.SetOrganizationNewAPIUserParams
-	createdUser         sqlc.CreateUserParams
-	createErr           error
-	createCalled        bool
-	updateCalled        bool
-	updateProfileCalled bool
-	createUserCalled    bool
-	hardDeleted         bool
-	updatedProfile      sqlc.UpdateOrganizationProfileParams
-	modelUsage          []sqlc.CountActiveAppsByOrgAndModelsRow
-	modelUsageArg       sqlc.CountActiveAppsByOrgAndModelsParams
+	org                  sqlc.Organization
+	orgAdmin             sqlc.User
+	created              sqlc.CreateOrganizationParams
+	updated              sqlc.SetOrganizationNewAPIUserParams
+	createdUser          sqlc.CreateUserParams
+	createErr            error
+	createCalled         bool
+	updateCalled         bool
+	updateProfileCalled  bool
+	createUserCalled     bool
+	hardDeleted          bool
+	updatedProfile       sqlc.UpdateOrganizationProfileParams
+	updateAppModelsCalled bool
+	updateAppModelsArg   sqlc.UpdateAppModelsByOrgParams
 }
 
 func (s *organizationStoreStub) CreateOrganization(_ context.Context, arg sqlc.CreateOrganizationParams) (sqlc.Organization, error) {
@@ -449,7 +444,7 @@ func (s *organizationStoreStub) CreateOrganization(_ context.Context, arg sqlc.C
 		Status:                 arg.Status,
 		ContactName:            arg.ContactName,
 		CreditWarningThreshold: arg.CreditWarningThreshold,
-		EnabledModels:          arg.EnabledModels,
+		ModelID:                arg.ModelID,
 	}
 	s.org = created
 	return created, nil
@@ -507,7 +502,7 @@ func (s *organizationStoreStub) UpdateOrganizationProfile(_ context.Context, arg
 	s.updateProfileCalled = true
 	s.org.Name = arg.Name
 	s.org.ContactName = arg.ContactName
-	s.org.EnabledModels = arg.EnabledModels
+	s.org.ModelID = arg.ModelID
 	return s.org, nil
 }
 
@@ -516,21 +511,20 @@ func (s *organizationStoreStub) SetOrganizationStatus(_ context.Context, arg sql
 	return s.org, nil
 }
 
-func (s *organizationStoreStub) CountActiveAppsByOrgAndModels(_ context.Context, arg sqlc.CountActiveAppsByOrgAndModelsParams) ([]sqlc.CountActiveAppsByOrgAndModelsRow, error) {
-	s.modelUsageArg = arg
-	return s.modelUsage, nil
+func (s *organizationStoreStub) UpdateAppModelsByOrg(_ context.Context, arg sqlc.UpdateAppModelsByOrgParams) error {
+	s.updateAppModelsCalled = true
+	s.updateAppModelsArg = arg
+	return nil
 }
 
-func (s *organizationStoreStub) mustSeedOrganization(t *testing.T, code string, models []string) sqlc.Organization {
+func (s *organizationStoreStub) mustSeedOrganization(t *testing.T, code string, modelID string) sqlc.Organization {
 	t.Helper()
-	data, err := json.Marshal(models)
-	require.NoError(t, err)
 	org := sqlc.Organization{
-		ID:            mustUUID(t, "00000000-0000-0000-0000-000000000101"),
-		Name:          "测试组织",
-		Code:          code,
-		Status:        domain.StatusActive,
-		EnabledModels: data,
+		ID:      mustUUID(t, "00000000-0000-0000-0000-000000000101"),
+		Name:    "测试组织",
+		Code:    code,
+		Status:  domain.StatusActive,
+		ModelID: modelID,
 	}
 	s.org = org
 	return org
@@ -584,7 +578,8 @@ func TestCreateOrganization_BootstrapTokenFailureTriggersDeleteUserAndAudit(t *t
 		AdminUsername:    "org-admin",
 		AdminDisplayName: "组织管理员",
 		AdminPassword:    "secret-password",
-		EnabledModels:    []string{"qwen2.5:7b"},
+		ModelID:          "qwen2.5:7b",
+		ModelIDSet:       true,
 	})
 	require.Error(t, err)
 	require.True(t, prov.deleteUserCalled)
@@ -609,7 +604,8 @@ func TestCreateOrganization_CreateUserFailureNoDeleteUser(t *testing.T) {
 		AdminUsername:    "org-admin",
 		AdminDisplayName: "组织管理员",
 		AdminPassword:    "secret-password",
-		EnabledModels:    []string{"qwen2.5:7b"},
+		ModelID:          "qwen2.5:7b",
+		ModelIDSet:       true,
 	})
 	assert.False(t, prov.deleteUserCalled)
 }
