@@ -12,6 +12,7 @@ import AppKnowledgeTab from '@/pages/apps/AppKnowledgeTab.vue'
 import AppOverviewTab from '@/pages/apps/AppOverviewTab.vue'
 import AppRuntimeTab from '@/pages/apps/AppRuntimeTab.vue'
 import AppWorkspaceTab from '@/pages/apps/AppWorkspaceTab.vue'
+import AppEmptyPage from '@/pages/apps/AppEmptyPage.vue'
 import AppsPage from '@/pages/apps/AppsPage.vue'
 import AuditLogsPage from '@/pages/audit/AuditLogsPage.vue'
 import DashboardHome from '@/pages/dashboard/DashboardHome.vue'
@@ -63,7 +64,28 @@ export const router = createRouter({
         { path: 'knowledge', component: OrgKnowledgePage },
         { path: 'usage', component: UsagePage },
         { path: 'balance', component: OrgBalancePage, meta: { allowedRoles: ORG_ADMIN_ONLY } },
-        { path: 'apps', component: AppsPage },
+        {
+          path: 'apps',
+          component: AppsPage,
+          beforeEnter: async (to, from, next) => {
+            const auth = useAuthStore()
+            if (auth.user?.role !== 'org_member') return next()
+            // org_member 不进列表页，重定向到详情或空状态
+            const orgId = auth.user.org_id
+            if (!orgId) return next('/apps/empty')
+            try {
+              const { apiRequest } = await import('@/api/client')
+              const response = await apiRequest<{ apps?: { id: string; owner_user_id: string }[] }>(
+                `/api/v1/organizations/${orgId}/apps`, { query: { limit: 10 } },
+              )
+              const myApp = response.apps?.find(a => a.owner_user_id === auth.user!.id)
+              return next(myApp ? `/apps/${myApp.id}/overview` : '/apps/empty')
+            } catch {
+              return next('/apps/empty')
+            }
+          },
+        },
+        { path: 'apps/empty', component: AppEmptyPage },
         {
           path: 'apps/:appId',
           component: AppDetailPage,
