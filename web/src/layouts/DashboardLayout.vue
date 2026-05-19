@@ -1,5 +1,5 @@
 <template>
-  <n-layout has-sider style="min-height: 100vh">
+  <n-layout has-sider style="height: 100vh">
     <n-layout-sider
       bordered
       :width="220"
@@ -63,7 +63,7 @@
         </div>
       </n-layout-header>
 
-      <n-layout-content content-style="min-height: calc(100vh - 64px); padding: 24px; display: flex; flex-direction: column">
+      <n-layout-content content-style="height: calc(100vh - 64px); padding: 24px; display: flex; flex-direction: column; overflow: auto">
         <div class="dashboard-page-frame">
           <RouterView />
         </div>
@@ -202,7 +202,6 @@ function reload() {
 
 .dashboard-page-frame {
   display: flex;
-  min-height: calc(100vh - 112px);
   min-width: 0;
   flex: 1;
   flex-direction: column;
