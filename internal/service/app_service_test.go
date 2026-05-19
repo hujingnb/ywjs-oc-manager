@@ -16,133 +16,6 @@ import (
 
 const testAppServiceAppID = "00000000-0000-0000-0000-000000002001"
 
-// TestUpdateModelRejectsOutsideAllowlist 验证实例模型必须属于组织 allowlist。
-func TestUpdateModelRejectsOutsideAllowlist(t *testing.T) {
-	t.Parallel()
-	svc, store := newAppServiceWithStore(t)
-	store.organization.EnabledModels = []byte(`["qwen2.5:7b"]`)
-	app := store.mustSeedApp(t, "qwen2.5:7b")
-
-	_, err := svc.UpdateModel(context.Background(), appOrgAdminPrincipal(store.organization), uuidToString(app.ID), "deepseek-r1:14b")
-
-	require.ErrorIs(t, err, ErrMemberCreateInvalid)
-	assert.Empty(t, store.jobs)
-}
-
-// TestUpdateModelCreatesRestartJobForContainer 验证有容器实例修改模型后提交重启任务。
-func TestUpdateModelCreatesRestartJobForContainer(t *testing.T) {
-	t.Parallel()
-	svc, store := newAppServiceWithStore(t)
-	notifier := &fakeNotifier{}
-	svc.SetJobNotifier(notifier)
-	store.organization.EnabledModels = []byte(`["qwen2.5:7b","deepseek-r1:14b"]`)
-	app := store.mustSeedApp(t, "qwen2.5:7b")
-	app.ContainerID = pgtype.Text{String: "container-1", Valid: true}
-	store.app = app
-
-	result, err := svc.UpdateModel(context.Background(), appOrgAdminPrincipal(store.organization), uuidToString(app.ID), "deepseek-r1:14b")
-
-	require.NoError(t, err)
-	assert.Equal(t, "deepseek-r1:14b", result.App.ModelID)
-	assert.True(t, result.RequiresRestart)
-	assert.NotEmpty(t, result.RestartJobID)
-	assert.Equal(t, result.RestartJobID, notifier.lastJobID)
-	require.Len(t, store.jobs, 1)
-	assert.Equal(t, domain.JobTypeAppRestartContainer, store.jobs[0].Type)
-	require.Len(t, store.auditLogs, 1)
-	assert.Equal(t, "update_model", store.auditLogs[0].Action)
-	// 详情字段应记录从旧模型切到新模型，便于在审计列表里一眼识别变更。
-	// auditLogs[0].DetailMessage 是 pgtype.Text；通过 .String 取字符串内容做断言。
-	require.True(t, store.auditLogs[0].DetailMessage.Valid)
-	require.Equal(t, "qwen2.5:7b → deepseek-r1:14b", store.auditLogs[0].DetailMessage.String)
-}
-
-// TestUpdateModelSurvivesNotifierError 验证 Redis 入队失败不回滚模型修改和重启任务。
-func TestUpdateModelSurvivesNotifierError(t *testing.T) {
-	t.Parallel()
-	svc, store := newAppServiceWithStore(t)
-	svc.SetJobNotifier(&fakeNotifier{err: assert.AnError})
-	store.organization.EnabledModels = []byte(`["qwen2.5:7b","deepseek-r1:14b"]`)
-	app := store.mustSeedApp(t, "qwen2.5:7b")
-	app.ContainerID = pgtype.Text{String: "container-1", Valid: true}
-	store.app = app
-
-	result, err := svc.UpdateModel(context.Background(), appOrgAdminPrincipal(store.organization), uuidToString(app.ID), "deepseek-r1:14b")
-
-	require.NoError(t, err)
-	assert.Equal(t, "deepseek-r1:14b", result.App.ModelID)
-	assert.True(t, result.RequiresRestart)
-	require.Len(t, store.jobs, 1)
-}
-
-// TestUpdateModelRollsBackWhenRestartJobFails 验证重启任务创建失败时回滚模型修改。
-func TestUpdateModelRollsBackWhenRestartJobFails(t *testing.T) {
-	t.Parallel()
-	svc, store := newAppServiceWithStore(t)
-	store.jobErr = assert.AnError
-	store.organization.EnabledModels = []byte(`["qwen2.5:7b","deepseek-r1:14b"]`)
-	app := store.mustSeedApp(t, "qwen2.5:7b")
-	app.ContainerID = pgtype.Text{String: "container-1", Valid: true}
-	store.app = app
-
-	_, err := svc.UpdateModel(context.Background(), appOrgAdminPrincipal(store.organization), uuidToString(app.ID), "deepseek-r1:14b")
-
-	require.Error(t, err)
-	assert.Equal(t, "qwen2.5:7b", store.app.ModelID)
-	assert.Empty(t, store.jobs)
-	assert.Empty(t, store.auditLogs)
-}
-
-// TestUpdateModelSameModelIsNoop 验证重复提交相同模型不会创建重启任务。
-func TestUpdateModelSameModelIsNoop(t *testing.T) {
-	t.Parallel()
-	svc, store := newAppServiceWithStore(t)
-	store.organization.EnabledModels = []byte(`["qwen2.5:7b"]`)
-	app := store.mustSeedApp(t, "qwen2.5:7b")
-	app.ContainerID = pgtype.Text{String: "container-1", Valid: true}
-	store.app = app
-
-	result, err := svc.UpdateModel(context.Background(), appOrgAdminPrincipal(store.organization), uuidToString(app.ID), "qwen2.5:7b")
-
-	require.NoError(t, err)
-	assert.Equal(t, "qwen2.5:7b", result.App.ModelID)
-	assert.False(t, result.RequiresRestart)
-	assert.Empty(t, result.RestartJobID)
-	assert.Empty(t, store.jobs)
-	assert.Empty(t, store.auditLogs)
-}
-
-// TestUpdateModelRejectsDisabledPrincipal 验证已禁用用户不能修改实例模型。
-func TestUpdateModelRejectsDisabledPrincipal(t *testing.T) {
-	t.Parallel()
-	svc, store := newAppServiceWithStore(t)
-	store.user.Status = domain.StatusDisabled
-	store.organization.EnabledModels = []byte(`["qwen2.5:7b","deepseek-r1:14b"]`)
-	app := store.mustSeedApp(t, "qwen2.5:7b")
-
-	_, err := svc.UpdateModel(context.Background(), appOrgAdminPrincipal(store.organization), uuidToString(app.ID), "deepseek-r1:14b")
-
-	require.ErrorIs(t, err, ErrForbidden)
-	assert.Empty(t, store.jobs)
-	assert.Equal(t, "qwen2.5:7b", store.app.ModelID)
-}
-
-// TestUpdateModelWithoutContainerOnlySavesModel 验证未创建容器的实例只保存模型不提交重启任务。
-func TestUpdateModelWithoutContainerOnlySavesModel(t *testing.T) {
-	t.Parallel()
-	svc, store := newAppServiceWithStore(t)
-	store.organization.EnabledModels = []byte(`["qwen2.5:7b","deepseek-r1:14b"]`)
-	app := store.mustSeedApp(t, "qwen2.5:7b")
-
-	result, err := svc.UpdateModel(context.Background(), appOrgAdminPrincipal(store.organization), uuidToString(app.ID), "deepseek-r1:14b")
-
-	require.NoError(t, err)
-	assert.Equal(t, "deepseek-r1:14b", result.App.ModelID)
-	assert.False(t, result.RequiresRestart)
-	assert.Empty(t, result.RestartJobID)
-	assert.Empty(t, store.jobs)
-}
-
 // TestGetAppExposeRuntimeImageOnlyToPlatformAdmin 验证 RuntimeImageRef 和 RuntimeImageSha256
 // 仅在平台管理员调用 Get 时返回；组织管理员调用时两字段应为空。
 func TestGetAppExposeRuntimeImageOnlyToPlatformAdmin(t *testing.T) {
@@ -170,10 +43,10 @@ func newAppServiceWithStore(t *testing.T) (*AppService, *appServiceStoreStub) {
 	t.Helper()
 	store := &appServiceStoreStub{
 		organization: sqlc.Organization{
-			ID:            mustUUID(t, testOrgID),
-			Name:          "测试组织",
-			Status:        domain.StatusActive,
-			EnabledModels: []byte(`["qwen2.5:7b"]`),
+			ID:      mustUUID(t, testOrgID),
+			Name:    "测试组织",
+			Status:  domain.StatusActive,
+			ModelID: "qwen2.5:7b",
 		},
 		user: sqlc.User{
 			ID:     mustUUID(t, testAdminUID),
@@ -183,7 +56,6 @@ func newAppServiceWithStore(t *testing.T) (*AppService, *appServiceStoreStub) {
 		},
 	}
 	svc := NewAppService(store)
-	svc.SetTxRunner(store)
 	return svc, store
 }
 
@@ -203,20 +75,6 @@ type appServiceStoreStub struct {
 	auditLogs    []sqlc.CreateAuditLogParams
 	jobErr       error
 	auditErr     error
-}
-
-func (s *appServiceStoreStub) WithAppTx(ctx context.Context, fn func(AppStore) error) error {
-	snapshotApp := s.app
-	snapshotJobs := append([]sqlc.CreateJobParams(nil), s.jobs...)
-	snapshotAuditLogs := append([]sqlc.CreateAuditLogParams(nil), s.auditLogs...)
-	if err := fn(s); err != nil {
-		s.app = snapshotApp
-		s.jobs = snapshotJobs
-		s.auditLogs = snapshotAuditLogs
-		return err
-	}
-	_ = ctx
-	return nil
 }
 
 func (s *appServiceStoreStub) mustSeedApp(t *testing.T, modelID string) sqlc.App {
@@ -259,20 +117,6 @@ func (s *appServiceStoreStub) GetApp(_ context.Context, id pgtype.UUID) (sqlc.Ap
 	return s.app, nil
 }
 
-func (s *appServiceStoreStub) GetUser(_ context.Context, id pgtype.UUID) (sqlc.User, error) {
-	if s.user.ID != id {
-		return sqlc.User{}, pgx.ErrNoRows
-	}
-	return s.user, nil
-}
-
-func (s *appServiceStoreStub) GetActiveAppByOwner(_ context.Context, ownerUserID pgtype.UUID) (sqlc.App, error) {
-	if s.app.OwnerUserID == ownerUserID && !s.app.DeletedAt.Valid {
-		return s.app, nil
-	}
-	return sqlc.App{}, pgx.ErrNoRows
-}
-
 func (s *appServiceStoreStub) ListAppsByOrg(_ context.Context, arg sqlc.ListAppsByOrgParams) ([]sqlc.App, error) {
 	if s.app.OrgID == arg.OrgID && !s.app.DeletedAt.Valid {
 		return []sqlc.App{s.app}, nil
@@ -287,21 +131,6 @@ func (s *appServiceStoreStub) SetAppStatus(_ context.Context, arg sqlc.SetAppSta
 
 func (s *appServiceStoreStub) SoftDeleteApp(_ context.Context, _ pgtype.UUID) (sqlc.App, error) {
 	s.app.DeletedAt = pgtype.Timestamptz{Valid: true}
-	return s.app, nil
-}
-
-func (s *appServiceStoreStub) GetOrganization(_ context.Context, id pgtype.UUID) (sqlc.Organization, error) {
-	if s.organization.ID != id {
-		return sqlc.Organization{}, pgx.ErrNoRows
-	}
-	return s.organization, nil
-}
-
-func (s *appServiceStoreStub) SetAppModel(_ context.Context, arg sqlc.SetAppModelParams) (sqlc.App, error) {
-	if s.app.ID != arg.ID {
-		return sqlc.App{}, pgx.ErrNoRows
-	}
-	s.app.ModelID = arg.ModelID
 	return s.app, nil
 }
 

@@ -167,7 +167,6 @@ func runManager(ctx context.Context, cfg config.Config, logOut io.Writer) error 
 	// 让"主副本写成功但同步未入队"这类中间态可观测。
 	knowledgeService.SetAuditor(auditService)
 	appService := service.NewAppService(dbStore.Queries)
-	appService.SetTxRunner(store.NewAppRunner(dbStore))
 	appService.SetJobNotifier(redisQueue)
 	runtimeOpService := service.NewRuntimeOperationService(dbStore.Queries, logger, redisQueue)
 	resourceMetricsService := service.NewResourceMetricsService(dbStore.Queries)

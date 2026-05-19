@@ -2,11 +2,9 @@ package service
 
 import (
 	"context"
-	"encoding/json"
 	"errors"
 	"fmt"
 	"strconv"
-	"time"
 
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgtype"
@@ -20,27 +18,17 @@ import (
 type AppStore interface {
 	CreateApp(ctx context.Context, arg sqlc.CreateAppParams) (sqlc.App, error)
 	GetApp(ctx context.Context, id pgtype.UUID) (sqlc.App, error)
-	GetUser(ctx context.Context, id pgtype.UUID) (sqlc.User, error)
-	GetOrganization(ctx context.Context, id pgtype.UUID) (sqlc.Organization, error)
-	GetActiveAppByOwner(ctx context.Context, ownerUserID pgtype.UUID) (sqlc.App, error)
 	ListAppsByOrg(ctx context.Context, arg sqlc.ListAppsByOrgParams) ([]sqlc.App, error)
-	SetAppModel(ctx context.Context, arg sqlc.SetAppModelParams) (sqlc.App, error)
 	SetAppStatus(ctx context.Context, arg sqlc.SetAppStatusParams) (sqlc.App, error)
 	SoftDeleteApp(ctx context.Context, id pgtype.UUID) (sqlc.App, error)
 	CreateJob(ctx context.Context, arg sqlc.CreateJobParams) (sqlc.Job, error)
 	CreateAuditLog(ctx context.Context, arg sqlc.CreateAuditLogParams) (sqlc.AuditLog, error)
 }
 
-// AppTxRunner 抽象实例模型修改所需的事务边界。
-type AppTxRunner interface {
-	WithAppTx(ctx context.Context, fn func(AppStore) error) error
-}
-
 // AppService 维护应用的查询和状态读取。
 // 创建应用必须经过 onboarding 事务，因为应用的初始化需要联动 channel binding、audit、job。
 type AppService struct {
 	store    AppStore
-	txRunner AppTxRunner
 	notifier JobNotifier
 }
 
@@ -50,11 +38,6 @@ func NewAppService(store AppStore) *AppService { return &AppService{store: store
 // SetJobNotifier 注入即时 job 入队器；nil 时只写 jobs 表，由 scheduler 周期兜底。
 func (s *AppService) SetJobNotifier(notifier JobNotifier) {
 	s.notifier = notifier
-}
-
-// SetTxRunner 注入事务执行器；模型修改需要把 model、job、audit 作为同一提交边界。
-func (s *AppService) SetTxRunner(txRunner AppTxRunner) {
-	s.txRunner = txRunner
 }
 
 // AppResult 是对外的应用视图。
@@ -89,15 +72,8 @@ type AppResult struct {
 	// RuntimeImageSha256 是 docker inspect 返回的镜像 config digest（sha256:...）。
 	// 仅平台管理员可见；与 RuntimeImageRef 共同标识节点上运行的精确镜像版本。
 	RuntimeImageSha256 string `json:"runtime_image_sha256,omitempty"`
-}
-
-// AppModelUpdateResult 是修改实例模型后的响应；App 字段返回已保存的新模型视图。
-type AppModelUpdateResult struct {
-	App AppResult `json:"app"`
-	// RestartJobID 是已有容器实例提交的重启任务 ID；无容器时为空。
-	RestartJobID string `json:"restart_job_id,omitempty"`
-	// RequiresRestart 表示本次模型修改是否需要通过重启容器生效。
-	RequiresRestart bool `json:"requires_restart"`
+	// ModelSynced 标记实例运行中的模型是否与数据库记录一致；false 表示需重启生效。
+	ModelSynced bool `json:"model_synced"`
 }
 
 // Get 查询应用。
@@ -122,7 +98,7 @@ func (s *AppService) Get(ctx context.Context, principal auth.Principal, appID st
 		result.RuntimeImageRef = app.RuntimeImageRef
 		result.RuntimeImageSha256 = app.RuntimeImageSha256
 	}
-	return result, nil
+	return filterAppResultByRole(result, principal), nil
 }
 
 // ListByOrg 列出组织内的应用。
@@ -154,125 +130,9 @@ func (s *AppService) ListByOrg(ctx context.Context, principal auth.Principal, or
 		if principal.Role == domain.UserRoleOrgMember && principal.UserID != uuidToString(app.OwnerUserID) {
 			continue
 		}
-		results = append(results, toAppResult(app))
+		results = append(results, filterAppResultByRole(toAppResult(app), principal))
 	}
 	return results, nil
-}
-
-// UpdateModel 修改实例模型；已有容器的实例会提交重启任务让新模型生效。
-func (s *AppService) UpdateModel(ctx context.Context, principal auth.Principal, appID, modelID string) (AppModelUpdateResult, error) {
-	id, err := parseUUID(appID)
-	if err != nil {
-		return AppModelUpdateResult{}, ErrNotFound
-	}
-	app, err := s.store.GetApp(ctx, id)
-	if errors.Is(err, pgx.ErrNoRows) || app.DeletedAt.Valid {
-		return AppModelUpdateResult{}, ErrNotFound
-	}
-	if err != nil {
-		return AppModelUpdateResult{}, fmt.Errorf("查询应用失败: %w", err)
-	}
-	if err := s.ensurePrincipalActive(ctx, principal); err != nil {
-		return AppModelUpdateResult{}, err
-	}
-	if !auth.CanTriggerRuntimeOperation(principal, uuidToString(app.OrgID), uuidToString(app.OwnerUserID)) {
-		return AppModelUpdateResult{}, ErrForbidden
-	}
-	org, err := s.store.GetOrganization(ctx, app.OrgID)
-	if err != nil {
-		return AppModelUpdateResult{}, fmt.Errorf("查询组织失败: %w", err)
-	}
-	normalizedModelID, err := ensureModelAllowed(org, modelID)
-	if err != nil {
-		return AppModelUpdateResult{}, err
-	}
-	if normalizedModelID == app.ModelID {
-		return AppModelUpdateResult{App: toAppResult(app)}, nil
-	}
-	var result AppModelUpdateResult
-	write := func(store AppStore) error {
-		updated, err := store.SetAppModel(ctx, sqlc.SetAppModelParams{ID: app.ID, ModelID: normalizedModelID})
-		if err != nil {
-			return fmt.Errorf("更新实例模型失败: %w", err)
-		}
-		result = AppModelUpdateResult{App: toAppResult(updated)}
-		if !app.ContainerID.Valid || app.ContainerID.String == "" {
-			return nil
-		}
-		payload, err := json.Marshal(map[string]any{
-			"app_id":       uuidToString(app.ID),
-			"operation":    string(RuntimeOperationRestart),
-			"runtime_node": uuidToOptionalString(app.RuntimeNodeID),
-			"requested_by": principal.UserID,
-		})
-		if err != nil {
-			return fmt.Errorf("序列化重启任务 payload 失败: %w", err)
-		}
-		job, err := store.CreateJob(ctx, sqlc.CreateJobParams{
-			Type:        domain.JobTypeAppRestartContainer,
-			Priority:    100,
-			RunAfter:    pgtype.Timestamptz{Time: time.Now(), Valid: true},
-			MaxAttempts: 3,
-			PayloadJson: payload,
-		})
-		if err != nil {
-			return fmt.Errorf("创建模型生效重启任务失败: %w", err)
-		}
-		actorUUID, _ := optionalUUID(principal.UserID)
-		metadata, _ := json.Marshal(map[string]any{
-			"old_model_id":   app.ModelID,
-			"new_model_id":   normalizedModelID,
-			"restart_job_id": uuidToString(job.ID),
-		})
-		if _, err := store.CreateAuditLog(ctx, sqlc.CreateAuditLogParams{
-			ActorID:       actorUUID,
-			ActorRole:     principal.Role,
-			OrgID:         app.OrgID,
-			TargetType:    "app",
-			TargetID:      uuidToString(app.ID),
-			Action:        "update_model",
-			Result:        "succeeded",
-			MetadataJson:  metadata,
-			DetailMessage: pgtype.Text{String: fmt.Sprintf("%s → %s", app.ModelID, normalizedModelID), Valid: true},
-		}); err != nil {
-			return fmt.Errorf("写入模型修改审计日志失败: %w", err)
-		}
-		result.RestartJobID = uuidToString(job.ID)
-		result.RequiresRestart = true
-		return nil
-	}
-	if s.txRunner != nil {
-		err = s.txRunner.WithAppTx(ctx, write)
-	} else {
-		err = write(s.store)
-	}
-	if err != nil {
-		return AppModelUpdateResult{}, err
-	}
-	if s.notifier != nil && result.RestartJobID != "" {
-		// Redis 即时入队失败不回滚模型修改和 job 创建，scheduler 会周期性扫描 pending job 兜底。
-		_ = s.notifier.Enqueue(ctx, result.RestartJobID)
-	}
-	return result, nil
-}
-
-// ensurePrincipalActive 拒绝已禁用用户在 token 未过期期间继续修改实例模型。
-func (s *AppService) ensurePrincipalActive(ctx context.Context, principal auth.Principal) error {
-	id, err := parseUUID(principal.UserID)
-	if err != nil {
-		return ErrForbidden
-	}
-	user, err := s.store.GetUser(ctx, id)
-	if errors.Is(err, pgx.ErrNoRows) {
-		return ErrForbidden
-	}
-	if err != nil {
-		return fmt.Errorf("查询主体状态失败: %w", err)
-	}
-	if user.Status == domain.StatusDisabled {
-		return ErrForbidden
-	}
-	return nil
 }
 
 func toAppResult(app sqlc.App) AppResult {
@@ -285,6 +145,7 @@ func toAppResult(app sqlc.App) AppResult {
 		PersonaMode:  app.PersonaMode,
 		ModelID:      app.ModelID,
 		APIKeyStatus: app.ApiKeyStatus,
+		ModelSynced:  app.ModelSynced,
 	}
 	if app.RuntimeNodeID.Valid {
 		result.RuntimeNodeID = uuidToOptionalString(app.RuntimeNodeID)
@@ -311,5 +172,13 @@ func toAppResult(app sqlc.App) AppResult {
 	result.ProgressTotal = app.ProgressTotal.Int64
 	result.LastErrorStatus = app.LastErrorStatus.String
 	result.LastErrorMessage = app.LastErrorMessage.String
+	return result
+}
+
+// filterAppResultByRole 根据调用者角色过滤敏感字段；非平台管理员不可见模型信息。
+func filterAppResultByRole(result AppResult, principal auth.Principal) AppResult {
+	if principal.Role != domain.UserRolePlatformAdmin {
+		result.ModelID = ""
+	}
 	return result
 }
