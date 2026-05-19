@@ -3,7 +3,8 @@ import { describe, expect, it } from 'vitest'
 import { formatDisplayAmount, formatQuotaValue, type BillingStatusDTO } from '../usageFormatting'
 
 describe('usage formatting helpers', () => {
-  it('按 new-api 状态将 quota 展示为金额', () => {
+  // 有 billing status 时，quota 按 quota_per_unit 折算后加 ￥ 前缀
+  it('按 quota_per_unit 折算并展示 ￥ 前缀', () => {
     const status: BillingStatusDTO = {
       quota_per_unit: 500000,
       quota_display_type: 'USD',
@@ -14,20 +15,22 @@ describe('usage formatting helpers', () => {
       price: 7.3,
     }
 
-    expect(formatQuotaValue(500000, status)).toContain('USD')
+    expect(formatQuotaValue(500000, status)).toBe('￥1')
   })
 
-  it('没有 new-api 状态时直接展示原始 quota', () => {
-    expect(formatQuotaValue(500000, undefined)).toContain('500,000')
+  // 没有 billing status 时，直接展示原始数值加 ￥ 前缀
+  it('没有 billing status 时直接展示原始 quota 加 ￥', () => {
+    expect(formatQuotaValue(500000, undefined)).toBe('￥500,000')
   })
 
-  it('充值金额直接按展示单位显示，不再二次折算 quota', () => {
+  // formatDisplayAmount 统一加 ￥ 前缀，不依赖 quota_display_type
+  it('充值金额统一展示 ￥ 前缀', () => {
     const status: BillingStatusDTO = {
       quota_per_unit: 500000,
       quota_display_type: 'USD',
       display_in_currency: true,
     }
 
-    expect(formatDisplayAmount(10, status)).toBe('USD 10')
+    expect(formatDisplayAmount(10, status)).toBe('￥10')
   })
 })

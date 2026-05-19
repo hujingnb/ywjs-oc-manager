@@ -23,25 +23,17 @@ export function formatNumber(value: number, maximumFractionDigits = 2): string {
   })
 }
 
-// formatQuotaValue 将 raw quota 按 new-api 展示状态转换为金额/额度文本。
+// formatQuotaValue 将 raw quota 按 new-api 展示状态转换为金额文本。
 export function formatQuotaValue(value: number, status?: BillingStatusDTO | null): string {
   if (!status?.quota_per_unit || status.quota_per_unit <= 0) {
-    return formatNumber(value)
+    return `￥${formatNumber(value)}`
   }
 
   const displayValue = value / status.quota_per_unit
-  return formatDisplayAmount(displayValue, status)
+  return `￥${formatNumber(displayValue, 6)}`
 }
 
 // formatDisplayAmount 用于充值输入和充值记录；这些值已经是 new-api 展示单位。
-export function formatDisplayAmount(value: number, status?: BillingStatusDTO | null): string {
-  if (!status) return formatNumber(value)
-
-  if (status.display_in_currency) {
-    const label = status.quota_display_type || status.custom_currency_symbol || '金额'
-    return `${label} ${formatNumber(value, 6)}`
-  }
-
-  const label = status.quota_display_type || '额度'
-  return `${formatNumber(value, 6)} ${label}`
+export function formatDisplayAmount(value: number, _status?: BillingStatusDTO | null): string {
+  return `￥${formatNumber(value, 6)}`
 }
