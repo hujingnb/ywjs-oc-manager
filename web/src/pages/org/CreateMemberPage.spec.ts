@@ -1,5 +1,5 @@
 import { mount } from '@vue/test-utils'
-import { computed, defineComponent, h, ref } from 'vue'
+import { defineComponent, h, ref } from 'vue'
 import { describe, expect, it, vi } from 'vitest'
 
 import CreateMemberPage from './CreateMemberPage.vue'
@@ -26,20 +26,6 @@ const onboardMock = vi.hoisted(() => vi.fn(async () => ({
 vi.mock('@/stores/auth', () => ({
   useAuthStore: () => ({
     user: { id: 'admin-1', role: 'org_admin', org_id: 'org-1' },
-  }),
-}))
-
-vi.mock('@/api/hooks/useOrganizations', () => ({
-  useOrganizationQuery: () => ({
-    data: computed(() => ({
-      id: 'org-1',
-      name: '测试组织',
-      status: 'active',
-      enabled_models: ['qwen2.5:7b', 'deepseek-r1:14b'],
-    })),
-    isLoading: ref(false),
-    isError: ref(false),
-    error: ref(null),
   }),
 }))
 
@@ -94,19 +80,6 @@ function mountPage() {
             ))
           },
         }),
-        Select: defineComponent({
-          props: ['value', 'options', 'disabled'],
-          emits: ['update:value'],
-          setup(props, { emit }) {
-            return () => h('select', {
-              disabled: props.disabled,
-              value: props.value,
-              onChange: (event: Event) => emit('update:value', (event.target as HTMLSelectElement).value),
-            }, (props.options ?? []).map((option: { label: string; value: string }) =>
-              h('option', { value: option.value }, option.label),
-            ))
-          },
-        }),
         NSpace: { template: '<div><slot /></div>' },
         NTag: { template: '<span><slot /></span>' },
       },
@@ -115,8 +88,8 @@ function mountPage() {
 }
 
 describe('CreateMemberPage', () => {
-  // 一键开户提交时必须把组织 allowlist 中选择的 model_id 传给后端。
-  it('提交创建成员并初始化实例时带上模型 ID', async () => {
+  // 一键开户提交时不再需要选择模型，模型由组织统一配置。
+  it('提交创建成员并初始化实例时不包含 model_id', async () => {
     onboardMock.mockClear()
     const wrapper = mountPage()
 
@@ -125,7 +98,6 @@ describe('CreateMemberPage', () => {
     await inputs[1].setValue('成员')
     await inputs[2].setValue('member-pass-123')
     await inputs[3].setValue('测试实例')
-    await wrapper.findAll('select')[2].setValue('deepseek-r1:14b')
     await wrapper.find('form').trigger('submit')
 
     expect(onboardMock).toHaveBeenCalledWith(expect.objectContaining({
@@ -133,7 +105,10 @@ describe('CreateMemberPage', () => {
       display_name: '成员',
       password: 'member-pass-123',
       app_name: '测试实例',
-      model_id: 'deepseek-r1:14b',
+    }))
+    // 模型由组织统一配置，前端不再传 model_id
+    expect(onboardMock).toHaveBeenCalledWith(expect.not.objectContaining({
+      model_id: expect.anything(),
     }))
     expect(wrapper.text()).toContain('Job ID：job-1')
   })

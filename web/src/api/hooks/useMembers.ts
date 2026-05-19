@@ -6,7 +6,7 @@ import type { Ref } from 'vue'
 import { apiRequest } from '@/api/client'
 import type { App, Member } from '@/api'
 
-// OnboardMemberPayload 是“一键创建成员和应用”表单提交体。
+// OnboardMemberPayload 是”一键创建成员和应用”表单提交体。
 export interface OnboardMemberPayload {
   // 登录用户名，后端会校验组织内唯一性。
   username: string
@@ -24,8 +24,6 @@ export interface OnboardMemberPayload {
   persona_mode?: 'org_inherited' | 'app_override'
   // 首次绑定的渠道类型，目前仅支持 wechat。
   channel_type?: 'wechat'
-  // 新实例使用的模型，必须属于当前组织 enabled_models。
-  model_id: string
   // 指定 runtime 节点；为空时后端按调度策略选择。
   runtime_node_id?: string
 }
@@ -61,8 +59,6 @@ export interface CreateMemberAppPayload {
   persona_mode?: 'org_inherited' | 'app_override'
   // 首次绑定的渠道类型，目前仅支持 wechat。
   channel_type?: 'wechat'
-  // 新实例使用的模型，必须属于当前组织 enabled_models。
-  model_id: string
   // 指定 runtime 节点；为空时后端按调度策略选择。
   runtime_node_id?: string
 }

@@ -51,18 +51,6 @@
               <n-select v-model:value="form.persona_mode" :options="personaModeOptions" />
             </n-form-item>
           </n-grid-item>
-          <n-grid-item>
-            <n-form-item label="模型 *">
-              <n-select
-                v-model:value="form.model_id"
-                :options="modelOptions"
-                :loading="organizationQuery.isLoading.value"
-                :disabled="organizationQuery.isError.value || modelOptions.length === 0"
-                placeholder="选择模型"
-              />
-              <p v-if="modelSelectError" class="state-text danger">{{ modelSelectError }}</p>
-            </n-form-item>
-          </n-grid-item>
           <n-grid-item :span="2">
             <n-form-item label="实例 prompt（可选）">
               <n-input v-model:value="form.app_prompt" type="textarea" :rows="3" />
@@ -75,7 +63,6 @@
                 type="primary"
                 attr-type="submit"
                 :loading="creating"
-                :disabled="!form.model_id || modelSelectError !== ''"
               >
                 {{ creating ? '提交中…' : '创建并初始化' }}
               </n-button>
@@ -105,7 +92,7 @@
 </template>
 
 <script setup lang="ts">
-import { computed, reactive, ref, watch } from 'vue'
+import { computed, reactive, ref } from 'vue'
 import { RouterLink } from 'vue-router'
 import {
   NButton, NCard, NForm, NFormItem, NGrid, NGridItem,
@@ -117,10 +104,10 @@ import {
   type OnboardMemberPayload,
   type OnboardMemberResult,
 } from '@/api/hooks/useMembers'
-import { useOrganizationQuery } from '@/api/hooks/useOrganizations'
 import { useAuthStore } from '@/stores/auth'
 
 // CreateMemberPage 是组织成员一站式开通页，同时创建成员、初始应用和渠道配置。
+// 模型由组织统一配置，开通时无需选择。
 const props = defineProps<{ orgId?: string }>()
 const auth = useAuthStore()
 // effectiveOrgId 支持平台管理员指定组织，组织管理员则默认使用自身组织。
@@ -128,11 +115,6 @@ const effectiveOrgId = computed(() => props.orgId ?? auth.user?.org_id)
 const orgEyebrow = computed(() => (auth.user?.role === 'platform_admin' ? 'Platform · 创建成员' : '组织 · 创建成员'))
 
 const onboardMutation = useOnboardMember(effectiveOrgId)
-const organizationQuery = useOrganizationQuery(effectiveOrgId)
-const modelOptions = computed(() => (organizationQuery.data.value?.enabled_models ?? []).map(model => ({
-  label: model,
-  value: model,
-})))
 // creating 是页面本地提交态，用于覆盖 mutation 返回前的按钮禁用和文案。
 const creating = ref(false)
 const errorMessage = ref<string | null>(null)
@@ -148,19 +130,6 @@ const form = reactive<OnboardMemberPayload>({
   app_name: '',
   persona_mode: 'org_inherited',
   channel_type: 'wechat',
-  model_id: '',
-})
-
-// 组织模型 allowlist 加载后默认选中第一个可用模型，减少开户时的额外操作。
-watch(modelOptions, (options) => {
-  const values = options.map(option => String(option.value))
-  if (!values.includes(form.model_id)) form.model_id = values[0] ?? ''
-}, { immediate: true })
-// modelSelectError 明确区分组织配置缺失和接口失败，避免用户只看到一个不可提交的空下拉框。
-const modelSelectError = computed(() => {
-  if (organizationQuery.isError.value) return '组织可用模型获取失败，请重试'
-  if (!organizationQuery.isLoading.value && modelOptions.value.length === 0) return '当前组织未配置可用模型'
-  return ''
 })
 
 const roleOptions: SelectOption[] = [
@@ -176,10 +145,6 @@ const personaModeOptions: SelectOption[] = [
 // onSubmit 提交完整开通流程；成功后清空敏感密码和文本输入，失败时保留表单便于修正。
 async function onSubmit() {
   errorMessage.value = null
-  if (!form.model_id) {
-    errorMessage.value = '请选择模型'
-    return
-  }
   creating.value = true
   try {
     const result = await onboardMutation.mutateAsync({ ...form })

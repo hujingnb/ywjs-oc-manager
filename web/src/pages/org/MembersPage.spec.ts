@@ -42,8 +42,8 @@ vi.mock('vue-router', async () => {
 vi.mock('@/api/hooks/useOrganizations', () => ({
   useOrganizationsQuery: () => ({
     data: ref([
-      { id: 'org-1', name: '测试组织', status: 'active', enabled_models: ['qwen2.5:7b'] },
-      { id: 'org-2', name: '第二组织', status: 'active', enabled_models: ['deepseek-r1:14b'] },
+      { id: 'org-1', name: '测试组织', status: 'active', model_id: 'qwen2.5:7b' },
+      { id: 'org-2', name: '第二组织', status: 'active', model_id: 'deepseek-r1:14b' },
     ]),
     isLoading: ref(false),
     error: ref(null),
@@ -51,9 +51,9 @@ vi.mock('@/api/hooks/useOrganizations', () => ({
   useOrganizationQuery: (orgId: { value?: string }) => ({
     data: computed(() => {
       if (orgId.value === 'org-2') {
-        return { id: 'org-2', name: '第二组织', status: 'active', enabled_models: ['deepseek-r1:14b'] }
+        return { id: 'org-2', name: '第二组织', status: 'active', model_id: 'deepseek-r1:14b' }
       }
-      return { id: 'org-1', name: '测试组织', status: 'active', enabled_models: ['qwen2.5:7b'] }
+      return { id: 'org-1', name: '测试组织', status: 'active', model_id: 'qwen2.5:7b' }
     }),
     isLoading: ref(false),
     isError: ref(false),
@@ -233,7 +233,8 @@ describe('MembersPage', () => {
   })
 
   // 平台管理员提交实例表单后展示新实例与初始化任务结果。
-  it('平台管理员提交创建新实例时带上默认模型并展示结果', async () => {
+  // 模型由组织统一配置，补建实例时不再需要选择模型。
+  it('平台管理员提交创建新实例时不包含 model_id 并展示结果', async () => {
     authUser.current = { id: 'admin-1', role: 'platform_admin' }
     createMemberAppMock.mutateAsync.mockClear()
     const wrapper = mountPage()
@@ -251,7 +252,6 @@ describe('MembersPage', () => {
         app_name: '新实例',
         persona_mode: 'org_inherited',
         channel_type: 'wechat',
-        model_id: 'qwen2.5:7b',
       },
     })
     expect(wrapper.text()).toContain('已创建实例 新实例')

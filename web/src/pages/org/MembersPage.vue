@@ -90,18 +90,6 @@
               <n-select v-model:value="createAppForm.persona_mode" :options="personaModeOptions" />
             </n-form-item>
           </n-grid-item>
-          <n-grid-item>
-            <n-form-item label="模型 *">
-              <n-select
-                v-model:value="createAppForm.model_id"
-                :options="modelOptions"
-                :loading="organizationQuery.isLoading.value"
-                :disabled="organizationQuery.isError.value || modelOptions.length === 0"
-                placeholder="选择模型"
-              />
-              <p v-if="createAppModelError" class="state-text danger">{{ createAppModelError }}</p>
-            </n-form-item>
-          </n-grid-item>
           <n-grid-item :span="2">
             <n-form-item label="实例 prompt（可选）">
               <n-input v-model:value="createAppForm.app_prompt" type="textarea" :rows="3" />
@@ -114,7 +102,7 @@
                 type="primary"
                 attr-type="submit"
                 :loading="createAppMutation.isPending.value"
-                :disabled="!canSubmitCreateApp"
+                :disabled="!createAppForm.app_name || createAppMutation.isPending.value"
                 @click.prevent="onSubmitCreateApp"
               >
                 提交创建
@@ -204,10 +192,6 @@ const currentUserId = computed(() => auth.user?.id)
 
 const { data: members, isLoading } = useMembersQuery(effectiveOrgId)
 const organizationQuery = useOrganizationQuery(effectiveOrgId)
-const modelOptions = computed(() => (organizationQuery.data.value?.enabled_models ?? []).map(model => ({
-  label: model,
-  value: model,
-})))
 const createMutation = useCreateMember(effectiveOrgId)
 const createAppMutation = useCreateMemberApp(effectiveOrgId)
 const statusMutation = useSetMemberStatus(effectiveOrgId)
@@ -228,17 +212,6 @@ const createAppForm = ref<CreateMemberAppPayload>({
   app_name: '',
   persona_mode: 'org_inherited',
   channel_type: 'wechat',
-  model_id: '',
-})
-// canSubmitCreateApp 保证补建实例时始终提交组织 allowlist 内的模型 ID。
-const canSubmitCreateApp = computed(() =>
-  Boolean(createAppForm.value.model_id && !createAppModelError.value && !createAppMutation.isPending.value),
-)
-// createAppModelError 暴露组织模型配置问题，避免管理员只能看到禁用的提交按钮。
-const createAppModelError = computed(() => {
-  if (organizationQuery.isError.value) return '组织可用模型获取失败，请重试'
-  if (!organizationQuery.isLoading.value && modelOptions.value.length === 0) return '当前组织未配置可用模型'
-  return ''
 })
 // 切换组织时关闭补建表单，防止旧成员和新组织 ID 组合成跨组织提交。
 watch(effectiveOrgId, () => {
@@ -319,8 +292,8 @@ function openResetForm(member: Member) {
   resetFeedback.value = ''; resetError.value = false
 }
 
-// openCreateAppForm 打开补建实例表单，默认 app_name 取「{显示名} 的实例」，
-// 模型默认取组织 enabled_models 首项，减少组织管理员手填项。
+// openCreateAppForm 打开补建实例表单，默认 app_name 取「{显示名} 的实例」。
+// 模型由组织统一配置，补建时无需选择。
 function openCreateAppForm(member: Member) {
   createAppTarget.value = member
   createAppResult.value = null
@@ -329,17 +302,12 @@ function openCreateAppForm(member: Member) {
     app_name: `${member.display_name} 的实例`,
     persona_mode: 'org_inherited',
     channel_type: 'wechat',
-    model_id: String(modelOptions.value[0]?.value ?? ''),
   }
 }
 
 // onSubmitCreateApp 提交已有成员实例创建请求，并展示后端返回的新实例与 job。
 async function onSubmitCreateApp() {
   if (!createAppTarget.value) return
-  if (!createAppForm.value.model_id) {
-    createAppError.value = '请选择模型'
-    return
-  }
   createAppError.value = ''
   try {
     createAppResult.value = await createAppMutation.mutateAsync({
