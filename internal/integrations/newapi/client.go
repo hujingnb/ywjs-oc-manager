@@ -642,7 +642,8 @@ func (u *UserScopedClient) findTokenByName(ctx context.Context, name string) (AP
 //
 // new-api 把"完整 key"当成敏感操作，专门给了独立端点（CriticalRateLimit + DisableCache 中间件），
 // list / GET 单条都只返回 truncated 18 字符前缀。manager 创建 token 后调一次本方法把 sk-
-// 加密落 apps.newapi_key_ciphertext 并注入容器 OPENAI_API_KEY；不要把 sk- 写入持久日志。
+// 加密落 apps.newapi_key_ciphertext，并写入 manifest.credentials.openai 字段，由镜像内
+// oc-entrypoint 渲染到 hermes config.yaml；不要把 sk- 写入持久日志。
 func (u *UserScopedClient) GetTokenFullKey(ctx context.Context, tokenID int64) (string, error) {
 	if u.base.BaseURL == "" {
 		return "", fmt.Errorf("new-api client 未配置 BaseURL")

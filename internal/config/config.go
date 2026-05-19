@@ -114,12 +114,16 @@ type HermesConfig struct {
 // HermesLLMConfig 仅保留兜底默认值字段（具体每 app 的模型由 apps.model_id 决定）。
 //
 //   - BaseURL：OpenAI 兼容 endpoint，Hermes 容器从 docker network 看到的 new-api 地址，
-//     必须含 /v1 路径后缀；注入为 OPENAI_BASE_URL 环境变量。
+//     必须含 /v1 路径后缀；作为 manifest.credentials.openai.base_url 写入
+//     input/manifest.yaml；镜像内 oc-entrypoint 渲染为 hermes config.yaml 的
+//     model.base_url。
 //   - DefaultProvider / DefaultModel：写入容器内 config.yaml，Hermes 用作默认 provider/model；
 //     缺失时 Hermes 默认去拨上游，无法路由到本地 new-api。
 //
-// 容器实际用的 OPENAI_API_KEY 来自 manager 替每个应用通过 new-api `POST /api/token/:id/key`
-// 拉到的完整 sk-，加密落 apps.newapi_key_ciphertext 后注入；不再有"全局共享 sk-"的配置项。
+// 容器实际用的 api_key 由 manager 替每个应用通过 new-api `POST /api/token/:id/key`
+// 拉到完整 sk-，加密落 apps.newapi_key_ciphertext 后在 ensureAPIKey 阶段写入
+// manifest.credentials.openai.api_key，镜像内 oc-entrypoint 渲染为 config.yaml
+// 的 model.api_key；不再有"全局共享 sk-"的配置项。
 type HermesLLMConfig struct {
 	BaseURL         string `yaml:"base_url"`
 	DefaultProvider string `yaml:"default_provider"`
