@@ -34,14 +34,15 @@
 </template>
 
 <script setup lang="ts">
-import { computed, ref } from 'vue'
+import { computed, h, ref } from 'vue'
 import { useRouter } from 'vue-router'
 import { useQueryClient } from '@tanstack/vue-query'
-import { NButton, NSelect } from 'naive-ui'
+import { NButton, NSelect, NTag } from 'naive-ui'
 
 import ConfirmActionModal from '@/components/ConfirmActionModal.vue'
 import DataTableList from '@/components/DataTableList.vue'
-import { linkColumn, statusColumn, actionColumn } from '@/components/columns'
+import { linkColumn, actionColumn } from '@/components/columns'
+import StatusBadge from '@/components/StatusBadge.vue'
 import { formatAppStatus } from '@/domain/status'
 import { apiRequest } from '@/api/client'
 import { useAppsByOrgQuery, type AppDTO } from '@/api/hooks/useApps'
@@ -94,7 +95,21 @@ const columns = [
     text: r => r.name,
     onClick: r => router.push(`/apps/${r.id}/overview`),
   }),
-  statusColumn<AppDTO>('状态', r => formatAppStatus(r.status)),
+  // 状态列：model_synced=false 时附加"需重启"警告标签，提示管理员模型变更尚未生效。
+  {
+    title: '状态',
+    key: 'status',
+    render: (r: AppDTO) => {
+      const badge = h(StatusBadge, { view: formatAppStatus(r.status) })
+      if (r.model_synced === false) {
+        return h('span', { style: 'display:inline-flex;align-items:center;gap:6px' }, [
+          badge,
+          h(NTag, { type: 'warning', size: 'small', bordered: false }, () => '需重启'),
+        ])
+      }
+      return badge
+    },
+  },
   { title: 'API key', key: 'api_key_status' },
   { title: '容器', key: 'container_id', render: (r: AppDTO) => r.container_id ?? '—' },
   actionColumn<AppDTO>([
