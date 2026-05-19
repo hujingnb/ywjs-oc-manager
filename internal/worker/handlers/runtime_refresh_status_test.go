@@ -52,6 +52,11 @@ func (s *fakeRuntimeSnapshotStore) InsertInstanceResourceSample(_ context.Contex
 	return sqlc.InstanceResourceSample{}, nil
 }
 
+// SetAppModelSynced 实现 AppRuntimeStore 接口；刷新状态流程不触发模型同步，此处仅满足接口约束。
+func (s *fakeRuntimeSnapshotStore) SetAppModelSynced(_ context.Context, _ pgtype.UUID) (sqlc.App, error) {
+	return s.app, nil
+}
+
 type fakeRuntimeInspector struct {
 	info       runtime.ContainerInfo
 	stats      runtime.ContainerStats

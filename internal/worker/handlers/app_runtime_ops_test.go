@@ -350,6 +350,12 @@ func (s *runtimeOpStub) SoftDeleteApp(_ context.Context, _ pgtype.UUID) (sqlc.Ap
 	return s.app, nil
 }
 
+// SetAppModelSynced 实现 AppRuntimeStore 接口；重启完成后标记模型已同步。
+func (s *runtimeOpStub) SetAppModelSynced(_ context.Context, _ pgtype.UUID) (sqlc.App, error) {
+	s.app.ModelSynced = true
+	return s.app, nil
+}
+
 type fakeLifecycle struct {
 	startCalls   int
 	stopCalls    int

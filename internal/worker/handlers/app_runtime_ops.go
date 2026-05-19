@@ -18,6 +18,8 @@ import (
 type AppRuntimeStore interface {
 	GetApp(ctx context.Context, id pgtype.UUID) (sqlc.App, error)
 	SetAppStatus(ctx context.Context, arg sqlc.SetAppStatusParams) (sqlc.App, error)
+	// SetAppModelSynced 在实例重启完成后标记模型已同步（model_synced=true）。
+	SetAppModelSynced(ctx context.Context, id pgtype.UUID) (sqlc.App, error)
 	SoftDeleteApp(ctx context.Context, id pgtype.UUID) (sqlc.App, error)
 }
 
@@ -275,6 +277,10 @@ func (h *AppRestartContainerHandler) Handle(ctx context.Context, job sqlc.Job) e
 	}
 	if _, err := h.store.SetAppStatus(ctx, sqlc.SetAppStatusParams{ID: app.ID, Status: domain.AppStatusRunning}); err != nil {
 		return fmt.Errorf("更新应用状态失败: %w", err)
+	}
+	// 重启完成后标记模型已同步：容器已加载最新 config.yaml 中的 model_id，DB 与运行时一致。
+	if _, err := h.store.SetAppModelSynced(ctx, app.ID); err != nil {
+		return fmt.Errorf("标记模型同步状态失败: %w", err)
 	}
 	return nil
 }
