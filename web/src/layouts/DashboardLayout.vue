@@ -56,7 +56,6 @@
         </div>
         <div class="topbar-actions">
           <n-tag type="success" size="small" :bordered="false">API 正常</n-tag>
-          <n-tag type="warning" size="small" :bordered="false">Ollama 待配置模型</n-tag>
           <n-button quaternary circle @click="reload">
             <template #icon><RefreshCw :size="17" /></template>
           </n-button>
