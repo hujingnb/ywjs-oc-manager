@@ -7,7 +7,6 @@ import (
 	"fmt"
 	"math"
 	"sort"
-	"strings"
 	"time"
 
 	"github.com/jackc/pgx/v5"
@@ -114,8 +113,6 @@ type OnboardMemberInput struct {
 	Role        string
 	AppName     string
 	AppPrompt   string
-	// ModelID 是实例当前使用的模型，必须属于组织模型 allowlist。
-	ModelID     string
 	PersonaMode string
 	ChannelType string
 	NodeID      string // 可选：指定要部署的 runtime 节点 ID。
@@ -132,8 +129,6 @@ type OnboardMemberResult struct {
 type CreateAppForMemberInput struct {
 	AppName   string
 	AppPrompt string
-	// ModelID 是实例当前使用的模型，必须属于组织模型 allowlist。
-	ModelID     string
 	PersonaMode string
 	ChannelType string
 	NodeID      string
@@ -197,10 +192,8 @@ func (s *MemberOnboardingService) OnboardMember(ctx context.Context, principal a
 		if org.Status != domain.StatusActive {
 			return fmt.Errorf("%w: 组织已停用", ErrMemberCreateInvalid)
 		}
-		modelID, err := ensureModelAllowed(org, input.ModelID)
-		if err != nil {
-			return err
-		}
+		// 实例模型直接继承组织配置，无需用户指定。
+		modelID := org.ModelID
 		user, err := store.CreateUser(ctx, sqlc.CreateUserParams{
 			OrgID:        org.ID,
 			Username:     input.Username,
@@ -346,10 +339,8 @@ func (s *MemberOnboardingService) CreateAppForMember(ctx context.Context, princi
 		if org.Status != domain.StatusActive {
 			return fmt.Errorf("%w: 组织已停用", ErrMemberCreateInvalid)
 		}
-		modelID, err := ensureModelAllowed(org, input.ModelID)
-		if err != nil {
-			return err
-		}
+		// 实例模型直接继承组织配置，无需用户指定。
+		modelID := org.ModelID
 		user, err := store.GetUser(ctx, userUUID)
 		if errors.Is(err, pgx.ErrNoRows) {
 			return ErrNotFound
@@ -443,21 +434,6 @@ func (s *MemberOnboardingService) CreateAppForMember(ctx context.Context, princi
 		return CreateAppForMemberResult{}, txErr
 	}
 	return result, nil
-}
-
-// ensureModelAllowed 校验实例模型必须是组织 allowlist 中的有效值。
-// 该校验位于创建应用前，避免 apps.model_id 非空白约束下写入空模型或越权模型。
-func ensureModelAllowed(org sqlc.Organization, modelID string) (string, error) {
-	modelID = strings.TrimSpace(modelID)
-	if modelID == "" {
-		return "", fmt.Errorf("%w: 模型不能为空", ErrMemberCreateInvalid)
-	}
-	for _, allowed := range modelListFromJSON(org.EnabledModels) {
-		if allowed == modelID {
-			return modelID, nil
-		}
-	}
-	return "", fmt.Errorf("%w: 模型 %s 不在组织可用模型列表中", ErrMemberCreateInvalid, modelID)
 }
 
 // optionalUUID 解析可选 UUID。

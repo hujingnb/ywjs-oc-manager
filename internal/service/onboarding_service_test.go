@@ -23,7 +23,7 @@ func TestOnboardMemberCommitsOnSuccess(t *testing.T) {
 	svc := NewMemberOnboardingService(tx, fakeHash, defaultTestSelector())
 
 	result, err := svc.OnboardMember(context.Background(), orgOnboardingAdmin(), testOrgID, OnboardMemberInput{
-		Username: "alice", DisplayName: "Alice", Password: "pwd", AppName: "alice-bot", ModelID: "qwen2.5:7b",
+		Username: "alice", DisplayName: "Alice", Password: "pwd", AppName: "alice-bot",
 	})
 	require.NoError(t, err)
 	require.NotEmpty(t, result.JobID)
@@ -57,7 +57,7 @@ func TestOnboardMemberRollsBackWhenAppCreationFails(t *testing.T) {
 	svc := NewMemberOnboardingService(tx, fakeHash, defaultTestSelector())
 
 	_, err := svc.OnboardMember(context.Background(), orgOnboardingAdmin(), testOrgID, OnboardMemberInput{
-		Username: "alice", DisplayName: "Alice", Password: "pwd", AppName: "alice-bot", ModelID: "qwen2.5:7b",
+		Username: "alice", DisplayName: "Alice", Password: "pwd", AppName: "alice-bot",
 	})
 	require.Error(t, err)
 	require.False(t, tx.committed)
@@ -71,7 +71,7 @@ func TestOnboardMemberRollsBackWhenJobCreationFails(t *testing.T) {
 	svc := NewMemberOnboardingService(tx, fakeHash, defaultTestSelector())
 
 	_, err := svc.OnboardMember(context.Background(), orgOnboardingAdmin(), testOrgID, OnboardMemberInput{
-		Username: "alice", DisplayName: "Alice", Password: "pwd", AppName: "alice-bot", ModelID: "qwen2.5:7b",
+		Username: "alice", DisplayName: "Alice", Password: "pwd", AppName: "alice-bot",
 	})
 	require.Error(t, err)
 	require.False(t, tx.committed)
@@ -107,24 +107,9 @@ func TestOnboardMemberRejectsDisabledOrg(t *testing.T) {
 	svc := NewMemberOnboardingService(tx, fakeHash, defaultTestSelector())
 
 	_, err := svc.OnboardMember(context.Background(), orgOnboardingAdmin(), testOrgID, OnboardMemberInput{
-		Username: "alice", DisplayName: "Alice", Password: "pwd", AppName: "alice-bot", ModelID: "qwen2.5:7b",
+		Username: "alice", DisplayName: "Alice", Password: "pwd", AppName: "alice-bot",
 	})
 	require.ErrorIs(t, err, ErrMemberCreateInvalid)
-}
-
-// TestOnboardMemberRejectsModelOutsideOrgAllowlist 验证创建实例时模型必须属于组织 allowlist。
-func TestOnboardMemberRejectsModelOutsideOrgAllowlist(t *testing.T) {
-	store := newOnboardingStub(t)
-	store.org.EnabledModels = []byte(`["qwen2.5:7b"]`)
-	tx := &txRunnerStub{store: store}
-	svc := NewMemberOnboardingService(tx, fakeHash, defaultTestSelector())
-
-	_, err := svc.OnboardMember(context.Background(), orgOnboardingAdmin(), testOrgID, OnboardMemberInput{
-		Username: "alice", DisplayName: "Alice", Password: "pwd", AppName: "alice-bot", ModelID: "deepseek-r1:14b",
-	})
-
-	require.ErrorIs(t, err, ErrMemberCreateInvalid)
-	assert.Zero(t, store.apps)
 }
 
 // TestCreateAppForMember_PlatformAdminCreatesAfterDelete 验证平台管理员可为无活跃实例的已有成员创建新实例。
@@ -134,7 +119,7 @@ func TestCreateAppForMember_PlatformAdminCreatesAfterDelete(t *testing.T) {
 	svc := NewMemberOnboardingService(tx, fakeHash, defaultTestSelector())
 
 	result, err := svc.CreateAppForMember(context.Background(), platformAdmin(), testOrgID, uuidToString(store.user.ID), CreateAppForMemberInput{
-		AppName: "alice-new-bot", ModelID: "qwen2.5:7b",
+		AppName: "alice-new-bot",
 	})
 
 	require.NoError(t, err)
@@ -150,52 +135,22 @@ func TestCreateAppForMember_PlatformAdminCreatesAfterDelete(t *testing.T) {
 	require.Equal(t, "归属成员 Alice，渠道 微信", store.auditLogs[0].DetailMessage.String)
 }
 
-// TestCreateAppForMemberStoresModelID 验证为已有成员创建实例时保存选定模型。
-func TestCreateAppForMemberStoresModelID(t *testing.T) {
+// TestCreateAppForMemberInheritsOrgModel 验证为已有成员创建实例时模型继承自组织配置。
+func TestCreateAppForMemberInheritsOrgModel(t *testing.T) {
 	store := newOnboardingStub(t)
-	store.org.EnabledModels = []byte(`["qwen2.5:7b"]`)
+	store.org.ModelID = "qwen2.5:7b"
 	tx := &txRunnerStub{store: store}
 	svc := NewMemberOnboardingService(tx, fakeHash, defaultTestSelector())
 
 	result, err := svc.CreateAppForMember(context.Background(), platformAdmin(), testOrgID, uuidToString(store.user.ID), CreateAppForMemberInput{
-		AppName: "alice-new-bot", ModelID: "qwen2.5:7b",
+		AppName: "alice-new-bot",
 	})
 
 	require.NoError(t, err)
 	require.NotEmpty(t, result.App.ID)
+	// 模型应继承自组织，而非由调用方指定。
 	assert.Equal(t, "qwen2.5:7b", store.lastAppModelID)
 	assert.Equal(t, "qwen2.5:7b", result.App.ModelID)
-}
-
-// TestCreateAppForMemberTrimsModelID 验证创建实例会保存裁剪空白后的模型 ID。
-func TestCreateAppForMemberTrimsModelID(t *testing.T) {
-	store := newOnboardingStub(t)
-	store.org.EnabledModels = []byte(`["qwen2.5:7b"]`)
-	tx := &txRunnerStub{store: store}
-	svc := NewMemberOnboardingService(tx, fakeHash, defaultTestSelector())
-
-	result, err := svc.CreateAppForMember(context.Background(), platformAdmin(), testOrgID, uuidToString(store.user.ID), CreateAppForMemberInput{
-		AppName: "alice-new-bot", ModelID: "  qwen2.5:7b  ",
-	})
-
-	require.NoError(t, err)
-	assert.Equal(t, "qwen2.5:7b", store.lastAppModelID)
-	assert.Equal(t, "qwen2.5:7b", result.App.ModelID)
-}
-
-// TestCreateAppForMemberRejectsBlankModelID 验证空白模型 ID 会在 service 层被拒绝。
-func TestCreateAppForMemberRejectsBlankModelID(t *testing.T) {
-	store := newOnboardingStub(t)
-	store.org.EnabledModels = []byte(`["qwen2.5:7b"]`)
-	tx := &txRunnerStub{store: store}
-	svc := NewMemberOnboardingService(tx, fakeHash, defaultTestSelector())
-
-	_, err := svc.CreateAppForMember(context.Background(), platformAdmin(), testOrgID, uuidToString(store.user.ID), CreateAppForMemberInput{
-		AppName: "alice-new-bot", ModelID: "   ",
-	})
-
-	require.ErrorIs(t, err, ErrMemberCreateInvalid)
-	assert.Zero(t, store.apps)
 }
 
 // TestCreateAppForMember_RejectsExistingActiveApp 验证成员已有未删除实例时拒绝创建新实例。
@@ -207,7 +162,7 @@ func TestCreateAppForMember_RejectsExistingActiveApp(t *testing.T) {
 	svc := NewMemberOnboardingService(tx, fakeHash, defaultTestSelector())
 
 	_, err := svc.CreateAppForMember(context.Background(), platformAdmin(), testOrgID, uuidToString(store.user.ID), CreateAppForMemberInput{
-		AppName: "alice-new-bot", ModelID: "qwen2.5:7b",
+		AppName: "alice-new-bot",
 	})
 
 	require.ErrorIs(t, err, ErrMemberCreateInvalid)
@@ -222,7 +177,7 @@ func TestCreateAppForMember_RejectsCrossOrgUser(t *testing.T) {
 	svc := NewMemberOnboardingService(tx, fakeHash, defaultTestSelector())
 
 	_, err := svc.CreateAppForMember(context.Background(), platformAdmin(), testOrgID, uuidToString(store.user.ID), CreateAppForMemberInput{
-		AppName: "alice-new-bot", ModelID: "qwen2.5:7b",
+		AppName: "alice-new-bot",
 	})
 
 	require.ErrorIs(t, err, ErrNotFound)
@@ -237,7 +192,7 @@ func TestCreateAppForMember_RejectsDisabledUser(t *testing.T) {
 	svc := NewMemberOnboardingService(tx, fakeHash, defaultTestSelector())
 
 	_, err := svc.CreateAppForMember(context.Background(), platformAdmin(), testOrgID, uuidToString(store.user.ID), CreateAppForMemberInput{
-		AppName: "alice-new-bot", ModelID: "qwen2.5:7b",
+		AppName: "alice-new-bot",
 	})
 
 	require.ErrorIs(t, err, ErrMemberCreateInvalid)
@@ -266,7 +221,6 @@ func TestCreateAppForMember_RejectsInvalidExplicitNodeID(t *testing.T) {
 
 	_, err := svc.CreateAppForMember(context.Background(), platformAdmin(), testOrgID, uuidToString(store.user.ID), CreateAppForMemberInput{
 		AppName: "alice-new-bot",
-		ModelID: "qwen2.5:7b",
 		NodeID:  "not-a-uuid",
 	})
 
@@ -282,7 +236,7 @@ func TestCreateAppForMember_MapsOwnerActiveUniqueViolation(t *testing.T) {
 	svc := NewMemberOnboardingService(tx, fakeHash, defaultTestSelector())
 
 	_, err := svc.CreateAppForMember(context.Background(), platformAdmin(), testOrgID, uuidToString(store.user.ID), CreateAppForMemberInput{
-		AppName: "alice-new-bot", ModelID: "qwen2.5:7b",
+		AppName: "alice-new-bot",
 	})
 
 	require.ErrorIs(t, err, ErrMemberCreateInvalid)
@@ -330,7 +284,7 @@ type counters struct{ users, apps, bindings, audits, jobs int }
 func newOnboardingStub(t *testing.T) *onboardingStub {
 	return &onboardingStub{
 		t:   t,
-		org: sqlc.Organization{ID: mustUUID(t, testOrgID), Status: domain.StatusActive, Name: "测试组织", EnabledModels: []byte(`["qwen2.5:7b"]`)},
+		org: sqlc.Organization{ID: mustUUID(t, testOrgID), Status: domain.StatusActive, Name: "测试组织", ModelID: "qwen2.5:7b"},
 		user: sqlc.User{
 			ID:          mustUUID(t, "00000000-0000-0000-0000-000000000a11"),
 			OrgID:       mustUUID(t, testOrgID),
@@ -471,7 +425,7 @@ func TestOnboardMember_SelectNode_NoActiveNode(t *testing.T) {
 	svc := NewMemberOnboardingService(tx, fakeHash, selector)
 
 	_, err := svc.OnboardMember(context.Background(), orgOnboardingAdmin(), testOrgID, OnboardMemberInput{
-		Username: "alice", DisplayName: "Alice", Password: "pwd", AppName: "alice-bot", ModelID: "qwen2.5:7b",
+		Username: "alice", DisplayName: "Alice", Password: "pwd", AppName: "alice-bot",
 	})
 	require.ErrorIs(t, err, ErrNoNodeAvailable)
 }
@@ -485,7 +439,7 @@ func TestOnboardMember_SelectNode_OnlyNodeAtCapacity(t *testing.T) {
 	svc := NewMemberOnboardingService(tx, fakeHash, selector)
 
 	_, err := svc.OnboardMember(context.Background(), orgOnboardingAdmin(), testOrgID, OnboardMemberInput{
-		Username: "alice", DisplayName: "Alice", Password: "pwd", AppName: "alice-bot", ModelID: "qwen2.5:7b",
+		Username: "alice", DisplayName: "Alice", Password: "pwd", AppName: "alice-bot",
 	})
 	require.ErrorIs(t, err, ErrNoNodeAvailable)
 }
@@ -501,7 +455,7 @@ func TestOnboardMember_SelectNode_PicksLargestRemaining(t *testing.T) {
 	svc := NewMemberOnboardingService(tx, fakeHash, selector)
 
 	_, err := svc.OnboardMember(context.Background(), orgOnboardingAdmin(), testOrgID, OnboardMemberInput{
-		Username: "alice", DisplayName: "Alice", Password: "pwd", AppName: "alice-bot", ModelID: "qwen2.5:7b",
+		Username: "alice", DisplayName: "Alice", Password: "pwd", AppName: "alice-bot",
 	})
 	require.NoError(t, err)
 	// 通过 selectNode 内排序，n2 应被优先选择；input.NodeID 在 onboarding 内被覆盖后
@@ -520,7 +474,7 @@ func TestOnboardMember_SelectNode_NULLMaxAppsTreatedAsInfinity(t *testing.T) {
 	svc := NewMemberOnboardingService(tx, fakeHash, selector)
 
 	_, err := svc.OnboardMember(context.Background(), orgOnboardingAdmin(), testOrgID, OnboardMemberInput{
-		Username: "alice", DisplayName: "Alice", Password: "pwd", AppName: "alice-bot", ModelID: "qwen2.5:7b",
+		Username: "alice", DisplayName: "Alice", Password: "pwd", AppName: "alice-bot",
 	})
 	require.NoError(t, err)
 	require.Equal(t, "00000000-0000-0000-0000-000000000a01", store.lastAppNodeID)
@@ -535,8 +489,7 @@ func TestOnboardMember_ExplicitNodeID_BypassesSelector(t *testing.T) {
 
 	_, err := svc.OnboardMember(context.Background(), orgOnboardingAdmin(), testOrgID, OnboardMemberInput{
 		Username: "alice", DisplayName: "Alice", Password: "pwd", AppName: "alice-bot",
-		ModelID: "qwen2.5:7b",
-		NodeID:  "00000000-0000-0000-0000-000000000099",
+		NodeID: "00000000-0000-0000-0000-000000000099",
 	})
 	require.NoError(t, err)
 	assert.Zero(t, selector.calledN)
