@@ -1,0 +1,77 @@
+# 本地 dev 用 stub Dockerfile：跳过 hermes-agent install.sh（需要拉上游 git 仓库，
+# 离线/网络受限场景下无法完成）。提供一个假的 hermes 二进制（sleep 模拟 gateway run），
+# 让本地端到端验证可以跑通 oc-entrypoint 渲染 / 双挂载 / oc-info / oc-doctor 等流程。
+#
+# 真实 hermes 对话流程不在此 stub 内验证；那需要 Dockerfile（非 .dev）成功 build。
+
+ARG DOCKER_HUB_MIRROR=crpi-nu3ibz4f07feyghi.cn-beijing.personal.cr.aliyuncs.com/ywjs_public
+FROM ${DOCKER_HUB_MIRROR}/python:3.13-slim-bookworm
+
+ENV PYTHONUNBUFFERED=1 \
+    HERMES_HOME=/opt/data \
+    PATH=/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin
+
+ARG DEBIAN_MIRROR_HOST=mirrors.aliyun.com
+RUN set -eux; for f in /etc/apt/sources.list /etc/apt/sources.list.d/debian.sources; do \
+      [ -f "$f" ] && sed -i \
+        -e "s|deb.debian.org|${DEBIAN_MIRROR_HOST}|g" \
+        -e "s|security.debian.org|${DEBIAN_MIRROR_HOST}|g" "$f" || true; \
+    done
+
+# 仅装最小依赖：tini 用作 PID 1；procps 提供 pgrep 给 oc-doctor。
+RUN apt-get update && apt-get install -y --no-install-recommends \
+      tini procps && \
+    rm -rf /var/lib/apt/lists/*
+
+# 装 oc-entrypoint Python 依赖（pyyaml）+ pytest 用于镜像内自检。
+# 跳过 hermes 上游 SDK，oc-channel-login 在 stub 模式下会以 ImportError 提示 "hermes SDK not available"。
+RUN pip install --no-cache-dir --break-system-packages pyyaml pytest
+
+# 本目录内 COPY
+COPY oc-entrypoint.py     /usr/local/bin/oc-entrypoint
+COPY oc-doctor.py         /usr/local/bin/oc-doctor
+COPY oc-info.py           /usr/local/bin/oc-info
+COPY oc-channel-login.py  /usr/local/bin/oc-channel-login
+COPY oc-channel-status.py /usr/local/bin/oc-channel-status
+COPY oc-channel-unbind.py /usr/local/bin/oc-channel-unbind
+COPY lib/                 /usr/local/lib/oc-entrypoint/lib/
+COPY renderer/            /usr/local/lib/oc-entrypoint/renderer/
+COPY migrator/            /usr/local/lib/oc-entrypoint/migrator/
+COPY tests/               /usr/local/lib/oc-entrypoint/tests/
+
+# Stub hermes 二进制：模拟 hermes gateway run，进入长 sleep 让 HEALTHCHECK 看到进程在跑。
+# 接收 SIGTERM 优雅退出。
+RUN printf '#!/bin/sh\n# stub hermes for local e2e\n\
+echo "[stub] hermes %s starting (stub mode, no real LLM)" >&2\n\
+case "$1" in\n\
+  gateway)\n\
+    case "$2" in\n\
+      run) trap "echo [stub] hermes exiting >&2; exit 0" TERM INT; sleep infinity ;;\n\
+      status) exit 0 ;;\n\
+      *) echo "unknown gateway subcommand: $2" >&2; exit 2 ;;\n\
+    esac ;;\n\
+  *) echo "unknown hermes subcommand: $1" >&2; exit 2 ;;\n\
+esac\n' > /usr/local/bin/hermes && chmod +x /usr/local/bin/hermes
+
+# Stub healthcheck：调 hermes gateway status，stub 永远返回 0
+RUN printf '#!/usr/bin/env bash\nexec hermes gateway status >/dev/null 2>&1\n' \
+      > /usr/local/bin/oc-healthcheck && chmod +x /usr/local/bin/oc-healthcheck
+
+RUN chmod +x /usr/local/bin/oc-entrypoint /usr/local/bin/oc-doctor \
+            /usr/local/bin/oc-info /usr/local/bin/oc-channel-login \
+            /usr/local/bin/oc-channel-status /usr/local/bin/oc-channel-unbind
+
+ARG OC_IMAGE_VARIANT
+ARG OC_BUILD_TS
+RUN printf '{"variant":"%s","hermes_upstream_ref":"%s","built_at":"%s","stub":true}\n' \
+      "$OC_IMAGE_VARIANT" "stub-no-upstream" "$OC_BUILD_TS" \
+      > /etc/oc-image.json
+
+ENV OC_IMAGE_VARIANT=${OC_IMAGE_VARIANT}
+
+HEALTHCHECK --interval=30s --timeout=10s --start-period=10s --retries=3 \
+  CMD ["/usr/local/bin/oc-healthcheck"]
+
+VOLUME /opt/data
+ENTRYPOINT ["/usr/bin/tini", "-g", "--", "/usr/local/bin/oc-entrypoint"]
+CMD []
