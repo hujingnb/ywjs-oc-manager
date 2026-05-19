@@ -63,7 +63,7 @@ import { NDataTable, type DataTableColumns } from 'naive-ui'
 
 import type { AggregatedUsage } from '@/api/hooks/useUsage'
 
-import { buildTrendPoints, normalizeModelName, normalizeUsageDate, summarizeUsage } from './usageMetrics'
+import { buildTrendPoints, normalizeUsageDate, summarizeUsage } from './usageMetrics'
 import { formatNumber, formatQuotaValue, type BillingStatusDTO } from './usageFormatting'
 
 // UsageSummary 渲染聚合用量结果，支持不同维度共享同一套空态和表格展示。
@@ -81,7 +81,6 @@ const tableRows = computed(() =>
   (props.view?.items ?? []).map((row, index) => ({
     key: index,
     date: normalizeUsageDate(row),
-    model_name: normalizeModelName(row.model_name),
     tokens: getDisplayTokens(row),
     quota: getDisplayQuota(row),
     count: getDisplayCount(row),
@@ -93,10 +92,9 @@ function formatTime(iso: string): string {
   return new Date(iso).toLocaleString('zh-CN', { hour12: false })
 }
 
-// tableColumns 明确展示用户关心字段，避免后端透传字段顺序导致 DATE/model_name 空白。
+// tableColumns 明确展示用户关心字段，避免后端透传字段顺序导致 DATE 空白。
 const tableColumns = computed<DataTableColumns<(typeof tableRows.value)[number]>>(() => [
   { title: 'DATE', key: 'date' },
-  { title: 'model_name', key: 'model_name' },
   {
     title: 'Token',
     key: 'tokens',
