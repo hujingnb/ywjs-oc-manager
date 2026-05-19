@@ -328,12 +328,9 @@ func runManager(ctx context.Context, cfg config.Config, logOut io.Writer) error 
 		return fmt.Errorf("注册 channel_start_login handler 失败: %w", err)
 	}
 	channelCheckHandler := handlers.NewChannelCheckBindingHandler(dbStore.Queries, channelRegistry, wechatResolver)
-	channelCheckHandler.SetRuntimeFileWriter(runtimeAdapter)
+	// Hermes 时代凭证由容器内 oc-channel-login 自管,manager 不再渲染 .env;
+	// bound 后仅触发容器重启让 hermes 重新读 platforms 配置,因此只注入 restarter。
 	channelCheckHandler.SetRestarter(runtimeAdapter)
-	channelCheckHandler.SetNewAPIBaseURL(cfg.NewAPI.BaseURL)
-	// SetCipher 注入根密钥,bound 时用于解密 app.NewapiKeyCiphertext 取真实 OPENAI_API_KEY,
-	// 确保重写 .env 时 OPENAI_API_KEY 是真实 token 而非空串。
-	channelCheckHandler.SetCipher(cipher)
 	if err := registry.Register(domain.JobTypeChannelCheckBinding, channelCheckHandler.Handle); err != nil {
 		return fmt.Errorf("注册 channel_check_binding handler 失败: %w", err)
 	}

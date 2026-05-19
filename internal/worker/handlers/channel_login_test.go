@@ -64,6 +64,10 @@ func TestChannelCheckBindingHandlerMarksBoundAndRunsApp(t *testing.T) {
 		},
 	})
 	handler := NewChannelCheckBindingHandler(store, registry, nil)
+	// 注入 restarter,断言 bound 后会触发 hermes 容器重启,
+	// 让 hermes 重新读 platforms 配置加载新绑定的微信账号。
+	restarter := &workerFakeRestarter{}
+	handler.SetRestarter(restarter)
 
 	err := handler.Handle(context.Background(), sqlc.Job{
 		Type:        domain.JobTypeChannelCheckBinding,
@@ -75,6 +79,9 @@ func TestChannelCheckBindingHandlerMarksBoundAndRunsApp(t *testing.T) {
 	if !store.appStatusSet || store.app.Status != domain.AppStatusRunning {
 		t.Fatalf("app 未推进到 running: set=%v status=%q", store.appStatusSet, store.app.Status)
 	}
+	// Hermes 时代:bound 后只触发容器重启,不再写 .env。
+	require.Equal(t, 1, restarter.calls, "bound 后应触发 RestartContainer")
+	require.Equal(t, "ctr-1", restarter.lastContainerID)
 	require.Len(t, store.auditLogs, 1)
 	require.Equal(t, "app", store.auditLogs[0].TargetType)
 	require.Equal(t, testChannelWorkerAppID, store.auditLogs[0].TargetID)
@@ -249,6 +256,22 @@ type workerFakeBindingResolver struct {
 func (r *workerFakeBindingResolver) ResolveWeChatBoundIdentity(_ context.Context, _, _ string) (string, error) {
 	r.calls++
 	return r.identity, nil
+}
+
+// workerFakeRestarter 是 ChannelRestarter 的测试桩,记录调用次数与最后一次调用的容器 ID,
+// 用于断言 bound 后是否正确触发 hermes 容器重启。
+type workerFakeRestarter struct {
+	calls           int
+	lastNodeID      string
+	lastContainerID string
+	err             error
+}
+
+func (r *workerFakeRestarter) RestartContainer(_ context.Context, nodeID, containerID string) error {
+	r.calls++
+	r.lastNodeID = nodeID
+	r.lastContainerID = containerID
+	return r.err
 }
 
 type channelWorkerStore struct {

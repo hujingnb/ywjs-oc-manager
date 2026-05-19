@@ -46,10 +46,12 @@ func (f *fakeExecutor) ExecExitCode(ctx context.Context) (int, error) {
 }
 
 // 覆盖正常路径:扫码 → 收 QR 事件 → 收 bound 事件。
+// Hermes 时代 oc-channel-login 不再透传 token / base_url 等凭证字段,
+// stdout 仅返回 {"status":"bound"},凭证由容器内自管。
 func TestStreamWeChatLogin_SuccessYieldsQRThenBound(t *testing.T) {
 	exec := &fakeExecutor{
 		stderrFrames: [][]byte{[]byte("https://liteapp.weixin.qq.com/q/abc?qrcode=tok&bot_type=3\n")},
-		stdoutFrames: [][]byte{[]byte(`{"account_id":"610@im.bot","token":"t","base_url":"https://ilink","user_id":"u"}` + "\n")},
+		stdoutFrames: [][]byte{[]byte(`{"status":"bound"}` + "\n")},
 		exitCode:     0,
 	}
 	runner := NewWeixinRunner(exec)
@@ -69,8 +71,6 @@ func TestStreamWeChatLogin_SuccessYieldsQRThenBound(t *testing.T) {
 	require.NotNil(t, qr, "应收到 qrcode 事件")
 	require.Equal(t, "https://liteapp.weixin.qq.com/q/abc?qrcode=tok&bot_type=3", qr.QRCodeURL)
 	require.NotNil(t, bound, "应收到 bound 事件")
-	require.Equal(t, "610@im.bot", bound.AccountID)
-	require.Equal(t, "t", bound.Token)
 }
 
 // 覆盖失败路径:exit != 0 时发 failed 事件,不带 bound。
@@ -91,6 +91,27 @@ func TestStreamWeChatLogin_NonZeroExitYieldsFailedEvent(t *testing.T) {
 	}
 	require.NotNil(t, failed)
 	require.Contains(t, failed.Error, "LOGIN_FAILED_OR_TIMEOUT")
+}
+
+// 覆盖 status!=bound 路径:stdout 返回 timeout/failed 也应转化为 Failed 事件,
+// reason 字段写入 Error 供上层审计记录。
+func TestStreamWeChatLogin_StatusNotBoundYieldsFailed(t *testing.T) {
+	exec := &fakeExecutor{
+		stdoutFrames: [][]byte{[]byte(`{"status":"timeout","reason":"qr expired"}` + "\n")},
+		exitCode:     0,
+	}
+	runner := NewWeixinRunner(exec)
+	events, err := runner.StreamWeChatLogin(context.Background(), "hermes-app-1")
+	require.NoError(t, err)
+
+	var failed *WeixinEvent
+	for ev := range events {
+		if ev.Type == WeixinEventFailed {
+			failed = &ev
+		}
+	}
+	require.NotNil(t, failed)
+	require.Equal(t, "qr expired", failed.Error)
 }
 
 // 覆盖 docker exec 启动就失败的场景。

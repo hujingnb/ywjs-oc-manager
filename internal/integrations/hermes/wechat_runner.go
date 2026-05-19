@@ -17,7 +17,8 @@ import (
 // 此处只声明接口。
 type ContainerExecutor interface {
 	// ExecAttach 在容器内 exec 命令,返回 multiplex stdout/stderr 流。
-	// 命令由实现固定:["/usr/local/bin/oc-weixin-login"]。
+	// Hermes 时代命令统一为 oc-channel-login --channel weixin,
+	// 由镜像内统一入口完成扫码 + 凭证落盘(hermes 自管目录,manager 不再写 .env)。
 	ExecAttach(ctx context.Context, containerID string, cmd []string) (io.ReadCloser, error)
 	// ExecExitCode 等待上一次 exec 完成并返回 exit code。
 	ExecExitCode(ctx context.Context) (int, error)
@@ -29,28 +30,27 @@ type WeixinEventType string
 const (
 	// WeixinEventQRCode 收到二维码 URL(供前端展示)。
 	WeixinEventQRCode WeixinEventType = "qrcode"
-	// WeixinEventBound 扫码成功,凭证可用。
+	// WeixinEventBound 扫码成功,容器内 oc-channel-login 已把凭证落盘到 hermes 自管目录
+	// (/opt/data/weixin/accounts/),manager 仅需触发 hermes 重启重新读 platforms 配置。
 	WeixinEventBound WeixinEventType = "bound"
 	// WeixinEventFailed 登录失败或超时。
 	WeixinEventFailed WeixinEventType = "failed"
 )
 
 // WeixinEvent 是 runner 推给上层的事件。
-// 不同 Type 用到的字段不同;未用字段保持空值。
+// Hermes 时代凭证由容器内 oc-channel-login 自管,manager 不再透传 account_id/token/base_url
+// 等字段;Bound 事件只表达"扫码完成"的信号,身份由 BindingResolver 从 plugin state 解析。
 type WeixinEvent struct {
 	Type      WeixinEventType
 	QRCodeURL string // QRCode 类型用
-	AccountID string // Bound 类型用 = iLink bot 身份 <hex>@im.bot
-	Token     string
-	BaseURL   string
-	UserID    string
 	Error     string // Failed 类型用
 }
 
 // WeixinRunner 是微信扫码登录的协调器。
-// 通过 docker exec 调用容器内的 oc-weixin-login 脚本,stdcopy 分流:
-//   - stdout 累积成单行 JSON → 解析为 Bound 事件
-//   - stderr 行级流,匹配 QR URL → QRCode 事件;其余进 Failed.Error
+// 通过 docker exec 调用容器内 oc-channel-login --channel weixin 命令,stdcopy 分流:
+//   - stderr 行级流,匹配 QR URL → QRCode 事件;其余作为错误信息累积
+//   - stdout 累积成单行 JSON → 解析为 ChannelResult{status,reason}:
+//     status=bound 触发 Bound 事件,其它 status 或 exit!=0 触发 Failed 事件
 type WeixinRunner struct {
 	executor ContainerExecutor
 }
@@ -63,8 +63,11 @@ func NewWeixinRunner(executor ContainerExecutor) *WeixinRunner {
 // StreamWeChatLogin 触发一次扫码登录,返回事件 channel。
 // channel 在登录结束(成功/失败/超时)后关闭。
 // 调用方负责消费 channel 直到关闭;不消费会阻塞 runner goroutine。
+// Hermes 时代统一命令入口为 oc-channel-login --channel weixin,
+// 由镜像内脚本完成扫码 + 凭证落盘到 /opt/data/weixin/accounts/,
+// manager 不再解析 token / base_url / user_id 等凭证字段。
 func (r *WeixinRunner) StreamWeChatLogin(ctx context.Context, containerID string) (<-chan WeixinEvent, error) {
-	stream, err := r.executor.ExecAttach(ctx, containerID, []string{"/usr/local/bin/oc-weixin-login"})
+	stream, err := r.executor.ExecAttach(ctx, containerID, []string{"oc-channel-login", "--channel", "weixin"})
 	if err != nil {
 		return nil, fmt.Errorf("ExecAttach 失败: %w", err)
 	}
@@ -119,30 +122,29 @@ func (r *WeixinRunner) StreamWeChatLogin(ctx context.Context, containerID string
 			return
 		}
 
-		// cred 反序列化 oc-weixin-login.py 输出的 JSON。字段名直接绑定到
-		// 上游 gateway.platforms.weixin.qr_login 函数的返回值 (account_id /
-		// token / base_url / user_id);若上游变更字段名,此处会静默拿到零值。
-		var cred struct {
-			AccountID string `json:"account_id"`
-			Token     string `json:"token"`
-			BaseURL   string `json:"base_url"`
-			UserID    string `json:"user_id"`
+		// result 反序列化 oc-channel-login 输出的 JSON,字段对齐 hermes.ChannelResult:
+		//   {"status":"bound"|"failed"|"timeout","reason":"..."}
+		// status=bound 表示容器内已完成凭证落盘;其它 status 视为失败,reason 写入 Error。
+		var result struct {
+			Status string `json:"status"`
+			Reason string `json:"reason"`
 		}
-		if err := json.Unmarshal(bytes.TrimSpace(stdoutBytes), &cred); err != nil {
+		if err := json.Unmarshal(bytes.TrimSpace(stdoutBytes), &result); err != nil {
 			events <- WeixinEvent{
 				Type:  WeixinEventFailed,
-				Error: fmt.Sprintf("解析凭证 JSON 失败: %v", err),
+				Error: fmt.Sprintf("解析 oc-channel-login 输出 JSON 失败: %v", err),
 			}
 			return
 		}
-
-		events <- WeixinEvent{
-			Type:      WeixinEventBound,
-			AccountID: cred.AccountID,
-			Token:     cred.Token,
-			BaseURL:   cred.BaseURL,
-			UserID:    cred.UserID,
+		if result.Status != "bound" {
+			reason := result.Reason
+			if reason == "" {
+				reason = result.Status
+			}
+			events <- WeixinEvent{Type: WeixinEventFailed, Error: reason}
+			return
 		}
+		events <- WeixinEvent{Type: WeixinEventBound}
 	}()
 	return events, nil
 }

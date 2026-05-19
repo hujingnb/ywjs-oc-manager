@@ -12,11 +12,13 @@ import (
 
 // TestWeChatAdapterBeginAuthReturnsQRCodeChallenge 验证 WeChatAdapter 在收到 QRCode 事件后
 // 返回 AuthChallenge，并在后台消费剩余事件直到 Bound 状态。
+// Hermes 时代 Bound 事件不再携带 account_id/token 等凭证字段，
+// adapter 仅记录 Status=Bound，BoundIdentity 由上层 BindingResolver 从 plugin state 解析。
 func TestWeChatAdapterBeginAuthReturnsQRCodeChallenge(t *testing.T) {
 	// 正常路径：先收 QRCode 事件，再收 Bound 事件。
 	runner := &fakeHermesRunner{events: []hermes.WeixinEvent{
 		{Type: hermes.WeixinEventQRCode, QRCodeURL: "https://liteapp.weixin.qq.com/q/abc"},
-		{Type: hermes.WeixinEventBound, AccountID: "610@im.bot", Token: "t"},
+		{Type: hermes.WeixinEventBound},
 	}}
 	adapter := NewWeChatAdapter(runner)
 
@@ -31,7 +33,8 @@ func TestWeChatAdapterBeginAuthReturnsQRCodeChallenge(t *testing.T) {
 	for time.Now().Before(deadline) {
 		progress, _ := adapter.PollAuth(context.Background(), AuthInput{AppID: "app-1"})
 		if progress.Status == AuthStatusBound {
-			require.Equal(t, "610@im.bot", progress.BoundIdentity)
+			// Hermes 时代 BoundIdentity 留空，由上层 resolver 填充。
+			require.Empty(t, progress.BoundIdentity)
 			return
 		}
 		time.Sleep(10 * time.Millisecond)

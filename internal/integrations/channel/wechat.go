@@ -70,10 +70,11 @@ func (a *WeChatAdapter) BeginAuth(ctx context.Context, input AuthInput) (AuthCha
 			return AuthChallenge{}, fmt.Errorf("Hermes 登录失败: %s", ev.Error)
 		case hermes.WeixinEventBound:
 			// 极少数情况下可能直接 bound（无 QR 扫码步骤）；认为成功。
+			// Hermes 时代 oc-channel-login 不再透传 account_id 等凭证字段,
+			// 身份留空交由上层 BindingResolver 从 plugin state 解析。
 			a.recordProgress(input.AppID, AuthProgress{
-				Status:        AuthStatusBound,
-				BoundIdentity: ev.AccountID,
-				UpdatedAt:     time.Now(),
+				Status:    AuthStatusBound,
+				UpdatedAt: time.Now(),
 			})
 			return AuthChallenge{Type: "qrcode", QRCode: ""}, nil
 		}
@@ -102,20 +103,13 @@ func (a *WeChatAdapter) consumeStream(appID string, events <-chan hermes.WeixinE
 	for ev := range events {
 		switch ev.Type {
 		case hermes.WeixinEventBound:
-			// 把 weixin 凭证(token / base_url / user_id)放进 Metadata,
-			// 让 channel_login.go ChannelCheckBinding handler 拿到后写入 .env
-			// + 重启 hermes 容器加载 weixin platform。
+			// Hermes 时代凭证由容器内 oc-channel-login 直接落盘到 /opt/data/weixin/accounts/,
+			// manager 不再透传 account_id / token / base_url / user_id;
+			// BoundIdentity 留空由上层 BindingResolver 从 plugin state 解析,
+			// ChannelCheckBindingHandler 仅触发 hermes 容器重启重新读 platforms 配置。
 			a.recordProgress(appID, AuthProgress{
-				Status:        AuthStatusBound,
-				BoundIdentity: ev.AccountID,
-				ChannelName:   ev.AccountID,
-				UpdatedAt:     time.Now(),
-				Metadata: map[string]string{
-					"weixin_account_id": ev.AccountID,
-					"weixin_token":      ev.Token,
-					"weixin_base_url":   ev.BaseURL,
-					"weixin_user_id":    ev.UserID,
-				},
+				Status:    AuthStatusBound,
+				UpdatedAt: time.Now(),
 			})
 			return
 		case hermes.WeixinEventFailed:

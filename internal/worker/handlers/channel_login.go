@@ -6,16 +6,13 @@ import (
 	"errors"
 	"fmt"
 	"log/slog"
-	"strings"
 	"time"
 
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgtype"
 
-	"oc-manager/internal/auth"
 	"oc-manager/internal/domain"
 	"oc-manager/internal/integrations/channel"
-	"oc-manager/internal/integrations/hermes"
 	redactlog "oc-manager/internal/log"
 	"oc-manager/internal/store/sqlc"
 )
@@ -138,22 +135,19 @@ func (h *ChannelStartLoginHandler) enqueueCheck(ctx context.Context, payload cha
 	return enqueueChannelCheck(ctx, h.store, payload, delay)
 }
 
-// ChannelRestarter 抽象重启 hermes 容器的能力(让 Hermes 加载新 .env 中的 weixin 凭证)。
+// ChannelRestarter 抽象重启 hermes 容器的能力。
+// 渠道扫码完成后,容器内 oc-channel-login 已把凭证落盘到 hermes 自管目录,
+// 重启 hermes 容器是为了让其重新读取 platforms 配置,加载新绑定的微信账号。
 type ChannelRestarter interface {
 	RestartContainer(ctx context.Context, nodeID, containerID string) error
 }
 
 // ChannelCheckBindingHandler 执行 channel_check_binding job。
 type ChannelCheckBindingHandler struct {
-	store        ChannelLoginStore
-	registry     *channel.Registry
-	resolver     channel.BindingResolver
-	runtimeFiles AppRuntimeFileWriter
-	restarter    ChannelRestarter
-	newAPIURL    string
-	// cipher 用于解密 app.NewapiKeyCiphertext,取真实 OPENAI_API_KEY 写入 .env。
-	// nil 时 bound 流程跳过 OPENAI_API_KEY 解密(降级:仅写 WEIXIN_*)。
-	cipher *auth.Cipher
+	store     ChannelLoginStore
+	registry  *channel.Registry
+	resolver  channel.BindingResolver
+	restarter ChannelRestarter
 }
 
 // NewChannelCheckBindingHandler 创建 channel_check_binding handler。
@@ -161,25 +155,9 @@ func NewChannelCheckBindingHandler(store ChannelLoginStore, registry *channel.Re
 	return &ChannelCheckBindingHandler{store: store, registry: registry, resolver: resolver}
 }
 
-// SetRuntimeFileWriter 注入 .env 上传能力,bound 时把 WEIXIN_* 追加写入容器 .env。
-func (h *ChannelCheckBindingHandler) SetRuntimeFileWriter(w AppRuntimeFileWriter) {
-	h.runtimeFiles = w
-}
-
-// SetRestarter 注入容器重启能力,写完 .env 后重启 hermes 容器加载 weixin platform。
+// SetRestarter 注入容器重启能力,bound 后触发 hermes 容器重启以重新读 platforms 配置。
 func (h *ChannelCheckBindingHandler) SetRestarter(r ChannelRestarter) {
 	h.restarter = r
-}
-
-// SetNewAPIBaseURL 注入 new-api 内网 URL,用于渲染新 .env 中的 OPENAI_BASE_URL。
-func (h *ChannelCheckBindingHandler) SetNewAPIBaseURL(url string) {
-	h.newAPIURL = url
-}
-
-// SetCipher 注入 Cipher,bound 时用于解密 app.NewapiKeyCiphertext 取真实 OPENAI_API_KEY。
-// 必须与 AppInitializeConfig.Cipher 使用同一 Cipher 实例，确保解密密钥一致。
-func (h *ChannelCheckBindingHandler) SetCipher(c *auth.Cipher) {
-	h.cipher = c
 }
 
 // Handle 查询渠道绑定状态，bound 后补写身份并把 binding_waiting 应用推进到 running。
@@ -225,39 +203,14 @@ func (h *ChannelCheckBindingHandler) Handle(ctx context.Context, job sqlc.Job) e
 		}); err != nil {
 			return fmt.Errorf("标记渠道绑定成功失败: %w", err)
 		}
-		// 把完整 .env(OPENAI_* + WEIXIN_DM_POLICY + WEIXIN_*)写入容器,再触发重启让 Hermes 加载 weixin platform。
-		// progress.Metadata 由 wechat.go consumeStream 在 bound 事件填充:
-		//   weixin_account_id / weixin_token / weixin_base_url / weixin_user_id。
-		// 必须重写完整 .env 而非仅追加 WEIXIN_*:UploadAppRuntimeFile 是覆盖写,
-		// 追加写法会把 OPENAI_* 行丢失,导致 Hermes 重启后调 new-api 返回 HTTP 401。
-		if h.runtimeFiles != nil && payload.ChannelType == domain.ChannelTypeWeChat &&
-			progress.Metadata != nil && progress.Metadata["weixin_token"] != "" {
-			newAPIURL := h.newAPIURL
-			if newAPIURL == "" {
-				newAPIURL = "http://new-api:3000"
-			}
-			// 解密拿真实 OPENAI_API_KEY；cipher 未注入或解密失败时降级用空串(不写 OPENAI_*)。
-			openAIToken := ""
-			if h.cipher != nil && app.NewapiKeyCiphertext.Valid && app.NewapiKeyCiphertext.String != "" {
-				if tok, decErr := decryptCiphertext(app.NewapiKeyCiphertext.String, h.cipher); decErr == nil {
-					openAIToken = tok
-				} else {
-					slog.WarnContext(ctx, "bound .env 解密 OPENAI_API_KEY 失败,使用空 token", "app_id", uuidToString(app.ID), "error", decErr)
-				}
-			}
-			fullEnv := hermes.RenderEnv(hermes.EnvInput{
-				NewAPIURL:       newAPIURL,
-				NewAPIToken:     openAIToken,
-				WeixinAccountID: progress.Metadata["weixin_account_id"],
-				WeixinToken:     progress.Metadata["weixin_token"],
-				WeixinBaseURL:   progress.Metadata["weixin_base_url"],
-			})
-			if err := h.runtimeFiles.UploadAppRuntimeFile(ctx, uuidToString(app.RuntimeNodeID), uuidToString(app.ID), ".env", strings.NewReader(fullEnv)); err != nil {
-				slog.ErrorContext(ctx, "写入完整 .env 失败", "app_id", uuidToString(app.ID), "error", err)
-			} else if h.restarter != nil {
-				if err := h.restarter.RestartContainer(ctx, uuidToString(app.RuntimeNodeID), textOrEmpty(app.ContainerID)); err != nil {
-					slog.ErrorContext(ctx, "重启 hermes 容器失败", "app_id", uuidToString(app.ID), "error", err)
-				}
+		// 微信凭证由容器内 oc-channel-login 直接落盘到 hermes 自管目录
+		// (/opt/data/weixin/accounts/),manager 不再写 .env;
+		// 这里仅触发 hermes 容器重启,让其重新读 platforms 配置加载新绑定账号。
+		// 注:重启失败不阻塞绑定流程,仅日志告警 — 主流程已 MarkChannelBindingBound,
+		// 即便重启失败,后续手动重启或 health check 自愈仍能让账号生效。
+		if h.restarter != nil && payload.ChannelType == domain.ChannelTypeWeChat {
+			if err := h.restarter.RestartContainer(ctx, uuidToString(app.RuntimeNodeID), textOrEmpty(app.ContainerID)); err != nil {
+				slog.ErrorContext(ctx, "渠道绑定后重启 hermes 容器失败", "app_id", uuidToString(app.ID), "error", err)
 			}
 		}
 		if app.Status == domain.AppStatusBindingWaiting {
