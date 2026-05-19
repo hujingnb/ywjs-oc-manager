@@ -107,3 +107,18 @@ func VariablesFromContext(orgName, appName, ownerName string) map[string]string 
 		"owner_name": ownerName,
 	}
 }
+
+// RenderRuleText 替换三层 rule 文本中的 {var} 占位符。
+// vars 未覆盖任一占位符即返回 ErrPromptUnresolvedPlaceholder，
+// 调用方应中止写入流程。
+//
+// 该函数为新 input/resources 流程而设；未来 Task 21 完成 worker handler
+// 改造后，老的 Render / PromptInput / PromptResult 可整体删除。
+func RenderRuleText(body string, vars map[string]string) (string, error) {
+	return replacePlaceholders(body, vars)
+}
+
+// RenderPersonaText 行为同 RenderRuleText，单独命名是为了语义清晰。
+func RenderPersonaText(body string, vars map[string]string) (string, error) {
+	return replacePlaceholders(body, vars)
+}
