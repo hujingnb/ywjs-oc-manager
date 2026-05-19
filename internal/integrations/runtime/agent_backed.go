@@ -417,42 +417,13 @@ func (a *AgentBackedAdapter) WaitContainerHealthy(ctx context.Context, nodeID, c
 	}
 }
 
-// UploadOrgFile 把单文件上传到指定节点的组织级知识库。
-func (a *AgentBackedAdapter) UploadOrgFile(ctx context.Context, nodeID, orgID, relPath string, content io.Reader) error {
-	cli, err := a.resolveFile(ctx, nodeID)
-	if err != nil {
-		return err
-	}
-	return cli.UploadOrgKnowledgeFile(ctx, orgID, relPath, content)
-}
-
-// UploadAppFile 把单文件上传到指定节点的应用级知识库。
-func (a *AgentBackedAdapter) UploadAppFile(ctx context.Context, nodeID, appID, relPath string, content io.Reader) error {
-	cli, err := a.resolveFile(ctx, nodeID)
-	if err != nil {
-		return err
-	}
-	return cli.UploadAppKnowledgeFile(ctx, appID, relPath, content)
-}
-
-// UploadAppRuntimeFile 把 manager 渲染的 Hermes runtime 配置文件
-// (SOUL.md / config.yaml / .env / skills/<name>/SKILL.md)上传到目标节点的
-// apps/<appID>/.hermes/<relPath>,容器启动时由该目录 bind mount 到 /opt/data。
-// 是多节点部署下 manager 端写文件的唯一路径(不再走 manager 本机 DataDir)。
-func (a *AgentBackedAdapter) UploadAppRuntimeFile(ctx context.Context, nodeID, appID, relPath string, content io.Reader) error {
-	cli, err := a.resolveFile(ctx, nodeID)
-	if err != nil {
-		return err
-	}
-	return cli.UploadAppRuntimeFile(ctx, appID, relPath, content)
-}
-
 // UploadAppInputFile 把 manager 渲染的 Hermes 输入资源
 // (manifest.yaml / resources/persona.md / resources/*-rules.md / resources/knowledge/{org,app}/*)
 // 上传到目标节点 apps/<appID>/input/<relPath>;容器启动时 oc-entrypoint 读取该目录并
-// 完成 hermes 自有 schema 装配。是 hermes-agent-pull 切换后 manager 端写应用输入
-// 文件的唯一路径——与 UploadAppRuntimeFile 在路由 (input/file vs runtime/file) 与目录
-// (input/ vs .hermes/) 上完全独立,并行存在至 T24/T25 切完后再统一收敛。
+// 完成 hermes 自有 schema 装配 (SOUL.md / config.yaml / .env / skills/<name>/SKILL.md)。
+// hermes-agent-pull 切换完成后, 这是 manager 端写应用输入文件的唯一路径——
+// 老的 runtime/file 与 knowledge/file 路由 (UploadAppRuntimeFile / UploadOrgFile /
+// UploadAppFile) 已随 agent T13 路由下线统一移除。
 func (a *AgentBackedAdapter) UploadAppInputFile(ctx context.Context, nodeID, appID, relPath string, content io.Reader) error {
 	cli, err := a.resolveFile(ctx, nodeID)
 	if err != nil {
@@ -466,31 +437,13 @@ func (a *AgentBackedAdapter) UploadAppInputFile(ctx context.Context, nodeID, app
 // 方法把 manager 主副本里删掉的知识库文件从节点 input/resources/knowledge/{org,app}/
 // 下同步移除,避免 oc-entrypoint 重启后仍读到已废弃的 skill。
 //
-// 文件不存在视为成功(幂等),与 DeleteAppKnowledge 行为对齐。
+// 文件不存在视为成功(幂等)。
 func (a *AgentBackedAdapter) DeleteAppInputFile(ctx context.Context, nodeID, appID, relPath string) error {
 	cli, err := a.resolveFile(ctx, nodeID)
 	if err != nil {
 		return err
 	}
 	return cli.DeleteAppInputFile(ctx, appID, relPath)
-}
-
-// DeleteOrgFile 删除节点上组织级知识库的指定文件 / 子目录。
-func (a *AgentBackedAdapter) DeleteOrgFile(ctx context.Context, nodeID, orgID, relPath string) error {
-	cli, err := a.resolveFile(ctx, nodeID)
-	if err != nil {
-		return err
-	}
-	return cli.DeleteOrgKnowledge(ctx, orgID, relPath)
-}
-
-// DeleteAppFile 删除节点上应用级知识库的指定文件 / 子目录。
-func (a *AgentBackedAdapter) DeleteAppFile(ctx context.Context, nodeID, appID, relPath string) error {
-	cli, err := a.resolveFile(ctx, nodeID)
-	if err != nil {
-		return err
-	}
-	return cli.DeleteAppKnowledge(ctx, appID, relPath)
 }
 
 // ClearAppSessions 清空节点上 apps/<appID>/.hermes/sessions/ 目录,

@@ -56,22 +56,14 @@ type AgentDirInitializer interface {
 	InitAppDirs(ctx context.Context, nodeID, appID string) error
 }
 
-// AppRuntimeFileWriter 抽象在节点 agent 上写运行时配置文件的能力。
-// 老 Hermes 链路(.hermes/SOUL.md/config.yaml/.env/skills/) 用此接口;
-// 当前 AppInitializeHandler 已切到 AppInputUploader 走 input/ 路径,
-// 该接口仅保留供 ChannelCheckBindingHandler 等老路径 handler 引用,
-// T24/T25 切完所有调用方后整体下线。
-type AppRuntimeFileWriter interface {
-	UploadAppRuntimeFile(ctx context.Context, nodeID, appID, relPath string, content io.Reader) error
-}
-
 // AppInputUploader 抽象在节点 agent 上写应用输入文件 (apps/<id>/input/) 的能力。
 // 由 internal/integrations/runtime.AgentBackedAdapter 实现 (内部转发到
-// agent.AgentFileClient.UploadAppInputFile, 命中 agent T13 新增的 input/file 路由)。
+// agent.AgentFileClient.UploadAppInputFile, 命中 agent input/file 路由)。
 //
-// 与老 AppRuntimeFileWriter 的差别:写的不再是 hermes 内部的 SOUL.md/config.yaml/.env,
-// 而是 manifest.yaml + resources/*.md 这一层「容器外可读的输入资源」;镜像 oc-entrypoint
-// 在容器启动时再把它们翻译成 hermes 自有 schema。
+// 写入对象是 manifest.yaml + resources/*.md 这一层「容器外可读的输入资源」;
+// 镜像 oc-entrypoint 在容器启动时再把它们翻译成 hermes 自有 schema (SOUL.md /
+// config.yaml / .env / skills/<name>/SKILL.md)。manager 端不再直接生成 hermes
+// 内部文件。
 //
 // nil 装配时 phasePrepare 内 WriteAppInput 调用会直接 panic, 因此生产装配必须注入。
 type AppInputUploader interface {
@@ -597,7 +589,7 @@ func (h *AppInitializeHandler) writeAppInput(ctx context.Context, nodeID string,
 	appID := uuidToString(app.ID)
 
 	// model: 优先使用 app.ModelID, 兜底用 cfg.LLM.DefaultModel; 都为空时
-	// 落 "default" 占位 (与老 RenderConfigYAML 行为一致, 避免下游 nil-deref)。
+	// 落 "default" 占位, 避免 manifest.app.model 为空字符串导致下游解析报错。
 	model := app.ModelID
 	if model == "" {
 		model = h.cfg.LLM.DefaultModel

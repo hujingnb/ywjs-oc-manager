@@ -96,11 +96,12 @@ type SecurityConfig struct {
 type HermesConfig struct {
 	// RuntimeImage 是 manager docker run 启动 hermes 容器用的镜像引用（name:tag）。
 	RuntimeImage string `yaml:"runtime_image"`
-	// SystemPromptTemplate 是平台级 prompt 模板，会作为 hermes.PromptInput.PlatformPrompt。
+	// SystemPromptTemplate 是平台级 prompt 模板，作为 input/resources/platform-rules.md
+	// 的内容写入 manager 端 input 目录，由节点 oc-entrypoint 在容器启动时翻译进 SOUL.md。
 	SystemPromptTemplate string `yaml:"system_prompt_template"`
 	// Workspace 仅保留同名段（WorkspaceConfig 是通用类型，不绑 Hermes）。
 	Workspace WorkspaceConfig `yaml:"workspace"`
-	// LLM 是 hermes.RenderConfigYAML 时的默认值兜底，在 app 未指定模型时使用。
+	// LLM 是 manager 写入 manifest.app.model 时的默认值兜底，在 app 未指定模型时使用。
 	LLM HermesLLMConfig `yaml:"llm"`
 	// ContainerNetworks 是 hermes 容器接入的 docker network 清单。
 	// 必须包含 new-api 所在的 network（默认 docker compose project name 派生的

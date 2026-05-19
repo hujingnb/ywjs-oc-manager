@@ -89,52 +89,6 @@ func TestScopeClient_SyncAppKnowledge(t *testing.T) {
 	require.Equal(t, "/v1/scopes/apps/app-1/knowledge/sync", got.path)
 }
 
-// TestScopeClient_KnowledgeFile_Upload_Delete 验证scope客户端知识库文件上传删除的预期行为场景。
-func TestScopeClient_KnowledgeFile_Upload_Delete(t *testing.T) {
-	s := newScopeServer(nil)
-	defer s.Close()
-	c := NewFileClient(s.URL, "tok")
-
-	if err := c.UploadAppKnowledgeFile(context.Background(), "app-1", "sub/note.txt",
-		strings.NewReader("hello")); err != nil {
-		t.Fatalf("upload err=%v", err)
-	}
-	if err := c.UploadOrgKnowledgeFile(context.Background(), "org-1", "policy.md",
-		strings.NewReader("policy")); err != nil {
-		t.Fatalf("upload org err=%v", err)
-	}
-	err := c.DeleteAppKnowledge(context.Background(), "app-1", "sub/note.txt")
-	require.NoError(t, err)
-	err = c.DeleteOrgKnowledge(context.Background(), "org-1", "policy.md")
-	require.NoError(t, err)
-
-	require.Equal(t, 4, len(s.captured))
-	expects := []struct {
-		method, path string
-		query        string
-	}{
-		{http.MethodPut, "/v1/scopes/apps/app-1/knowledge/file", "path=sub%2Fnote.txt"},    // 场景：应用知识库上传应调用 app scope 的 PUT file 端点并编码相对路径
-		{http.MethodPut, "/v1/scopes/orgs/org-1/knowledge/file", "path=policy.md"},         // 场景：组织知识库上传应调用 org scope 的 PUT file 端点
-		{http.MethodDelete, "/v1/scopes/apps/app-1/knowledge/file", "path=sub%2Fnote.txt"}, // 场景：应用知识库删除应调用 app scope 的 DELETE file 端点并编码相对路径
-		{http.MethodDelete, "/v1/scopes/orgs/org-1/knowledge/file", "path=policy.md"},      // 场景：组织知识库删除应调用 org scope 的 DELETE file 端点
-	}
-	for i, want := range expects {
-		got := s.captured[i]
-		if got.method != want.method || got.path != want.path || got.query != want.query {
-			t.Fatalf("call#%d: %+v != %+v", i, got, want)
-		}
-	}
-}
-
-// TestScopeClient_KnowledgeFile_RejectsEmptyRel 验证scope客户端知识库文件拒绝空值相对路径的异常或拒绝路径场景。
-func TestScopeClient_KnowledgeFile_RejectsEmptyRel(t *testing.T) {
-	c := NewFileClient("http://nowhere", "tok")
-	err := c.UploadAppKnowledgeFile(context.Background(), "app-1", "", strings.NewReader("x"))
-	require.Error(t, err)
-	err = c.DeleteAppKnowledge(context.Background(), "app-1", "")
-	require.Error(t, err)
-}
-
 // TestScopeClient_ListWorkspace 验证scope客户端列表工作区的预期行为场景。
 func TestScopeClient_ListWorkspace(t *testing.T) {
 	s := newScopeServer(func(req capturedReq, w http.ResponseWriter) {

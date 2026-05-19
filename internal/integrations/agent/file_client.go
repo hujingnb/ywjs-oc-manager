@@ -228,53 +228,16 @@ func (c *AgentFileClient) SyncAppKnowledge(ctx context.Context, appID string, ta
 		tarStream, "application/x-tar")
 }
 
-// UploadOrgKnowledgeFile 单文件上传到 orgs/{orgID}/knowledge/{relPath}。
-// relPath 必须为相对路径，agent 端会做沙箱校验。
-func (c *AgentFileClient) UploadOrgKnowledgeFile(ctx context.Context, orgID, relPath string, content io.Reader) error {
-	return c.doKnowledgeFile(ctx, http.MethodPut, "orgs", orgID, relPath, content)
-}
-
-// UploadAppRuntimeFile 把 manager 渲染的 Hermes runtime 配置文件
-// (SOUL.md / config.yaml / .env / skills/<name>/SKILL.md)上传到节点
-// apps/{appID}/.hermes/{relPath};agent 端写入节点本地文件系统,
-// 容器启动时该目录整体 bind mount 到 /opt/data。
-func (c *AgentFileClient) UploadAppRuntimeFile(ctx context.Context, appID, relPath string, content io.Reader) error {
-	endpoint, err := c.endpoint(fmt.Sprintf("/v1/scopes/apps/%s/runtime/file", url.PathEscape(appID)))
-	if err != nil {
-		return err
-	}
-	q := url.Values{}
-	q.Set("path", relPath)
-	req, err := http.NewRequestWithContext(ctx, http.MethodPut, endpoint+"?"+q.Encode(), content)
-	if err != nil {
-		return err
-	}
-	req.Header.Set("Content-Type", "application/octet-stream")
-	c.authorize(req)
-	resp, err := c.httpClient().Do(req)
-	if err != nil {
-		return err
-	}
-	defer resp.Body.Close()
-	return expectSuccess(resp, "upload app runtime file")
-}
-
-// UploadAppKnowledgeFile 同 UploadOrgKnowledgeFile，但走应用级。
-func (c *AgentFileClient) UploadAppKnowledgeFile(ctx context.Context, appID, relPath string, content io.Reader) error {
-	return c.doKnowledgeFile(ctx, http.MethodPut, "apps", appID, relPath, content)
-}
-
 // UploadAppInputFile 把 manager 渲染的 Hermes 输入资源
-// (manifest.yaml / resources/persona.md / resources/*-rules.md) 上传到节点
-// apps/{appID}/input/{relPath}; agent 端写入节点本地文件系统, 容器启动时
-// 该目录由 oc-entrypoint 读取并完成最终装配。
+// (manifest.yaml / resources/persona.md / resources/*-rules.md /
+// resources/knowledge/{org,app}/*) 上传到节点 apps/{appID}/input/{relPath};
+// agent 端写入节点本地文件系统, 容器启动时该目录由 oc-entrypoint 读取并
+// 完成最终装配 (翻译为 hermes 自有 schema 的 SOUL.md / config.yaml / .env /
+// skills/<name>/SKILL.md)。
 //
-// 与 UploadAppRuntimeFile 的差别:
-//   - 走 /v1/scopes/apps/<id>/input/file 路由 (agent T13 新增),
-//     对应节点磁盘 apps/<id>/input/;
-//   - 写入的不再是 SOUL.md / config.yaml / .env, 而是 hermes 包定义的
-//     新版 manifest + 资源文件; UploadAppRuntimeFile 暂保留供老链路使用,
-//     待全部调用方切换完毕后整体删除。
+// 走 /v1/scopes/apps/<id>/input/file 路由, 对应节点磁盘 apps/<id>/input/;
+// 这是 hermes-agent-pull 切换后 manager 端写应用输入文件的唯一路径——
+// 老的 runtime/file 与 knowledge/file 路由在 agent T13 已下线。
 //
 // relPath 必须为相对路径, agent 端会做沙箱校验, 越界返回 4xx。
 func (c *AgentFileClient) UploadAppInputFile(ctx context.Context, appID, relPath string, content io.Reader) error {
@@ -307,8 +270,7 @@ func (c *AgentFileClient) UploadAppInputFile(ctx context.Context, appID, relPath
 // 下次启动时不再读到该 skill。relPath 已由调用方按 resources/knowledge/{org,app}/
 // 前缀拼好。
 //
-// relPath 必须为相对路径, agent 端会做沙箱校验; 文件不存在视为成功 (幂等),
-// 与 DeleteOrgKnowledge / DeleteAppKnowledge 行为一致。
+// relPath 必须为相对路径, agent 端会做沙箱校验; 文件不存在视为成功 (幂等)。
 func (c *AgentFileClient) DeleteAppInputFile(ctx context.Context, appID, relPath string) error {
 	if relPath == "" {
 		return fmt.Errorf("relPath 不能为空")
@@ -363,16 +325,6 @@ func NewAppScopedFileClient(inner *AgentFileClient) *AppScopedFileClient {
 // inner.UploadAppInputFile, 不附加额外业务校验 (越界 / 路径合法性由 agent 校验)。
 func (c *AppScopedFileClient) WriteAppInputFile(ctx context.Context, appID, relPath string, body io.Reader) error {
 	return c.inner.UploadAppInputFile(ctx, appID, relPath, body)
-}
-
-// DeleteOrgKnowledge 删除组织级知识库的单文件或子目录。不存在视为成功（幂等）。
-func (c *AgentFileClient) DeleteOrgKnowledge(ctx context.Context, orgID, relPath string) error {
-	return c.doKnowledgeFile(ctx, http.MethodDelete, "orgs", orgID, relPath, nil)
-}
-
-// DeleteAppKnowledge 同 DeleteOrgKnowledge，但走应用级。
-func (c *AgentFileClient) DeleteAppKnowledge(ctx context.Context, appID, relPath string) error {
-	return c.doKnowledgeFile(ctx, http.MethodDelete, "apps", appID, relPath, nil)
 }
 
 // ClearAppSessions 清空指定 app 的 Hermes 会话目录 (.hermes/sessions/)。
@@ -523,32 +475,3 @@ func (c *AgentFileClient) doScopePost(ctx context.Context, path string, body io.
 	return expectSuccess(resp, "scope post "+path)
 }
 
-// doKnowledgeFile 把 PUT/DELETE 单文件请求统一封装。
-func (c *AgentFileClient) doKnowledgeFile(ctx context.Context, method, scopeType, scopeID, relPath string, content io.Reader) error {
-	if relPath == "" {
-		return fmt.Errorf("relPath 不能为空")
-	}
-	endpoint, err := c.endpoint(fmt.Sprintf("/v1/scopes/%s/%s/knowledge/file", scopeType, url.PathEscape(scopeID)))
-	if err != nil {
-		return err
-	}
-	q := url.Values{}
-	q.Set("path", relPath)
-	if content == nil {
-		content = bytes.NewReader(nil)
-	}
-	req, err := http.NewRequestWithContext(ctx, method, endpoint+"?"+q.Encode(), content)
-	if err != nil {
-		return err
-	}
-	if method == http.MethodPut {
-		req.Header.Set("Content-Type", "application/octet-stream")
-	}
-	c.authorize(req)
-	resp, err := c.httpClient().Do(req)
-	if err != nil {
-		return err
-	}
-	defer resp.Body.Close()
-	return expectSuccess(resp, fmt.Sprintf("%s knowledge file", strings.ToLower(method)))
-}

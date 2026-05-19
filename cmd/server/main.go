@@ -273,8 +273,8 @@ func runManager(ctx context.Context, cfg config.Config, logOut io.Writer) error 
 			SystemPromptTemplate: cfg.Hermes.SystemPromptTemplate,
 			PlatformPrompt:       cfg.Hermes.SystemPromptTemplate,
 			Cipher:               cipher,
-			// DataDir 字段保留供其他特定场景使用；Hermes 文件分发已走 UploadAppRuntimeFile，
-			// 不再在 manager 本机 DataDir 下写入配置文件。
+			// DataDir 字段保留供其他特定场景使用；Hermes 文件分发已走 UploadAppInputFile
+			// (apps/<id>/input/)，不再在 manager 本机 DataDir 下写入配置文件。
 			DataDir:           cfg.App.DataRoot,
 			NewAPIBaseURL:     cfg.NewAPI.BaseURL,
 			ContainerNetworks: cfg.Hermes.ContainerNetworks,
