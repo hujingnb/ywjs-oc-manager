@@ -447,6 +447,20 @@ func (a *AgentBackedAdapter) UploadAppRuntimeFile(ctx context.Context, nodeID, a
 	return cli.UploadAppRuntimeFile(ctx, appID, relPath, content)
 }
 
+// UploadAppInputFile 把 manager 渲染的 Hermes 输入资源
+// (manifest.yaml / resources/persona.md / resources/*-rules.md / resources/knowledge/{org,app}/*)
+// 上传到目标节点 apps/<appID>/input/<relPath>;容器启动时 oc-entrypoint 读取该目录并
+// 完成 hermes 自有 schema 装配。是 hermes-agent-pull 切换后 manager 端写应用输入
+// 文件的唯一路径——与 UploadAppRuntimeFile 在路由 (input/file vs runtime/file) 与目录
+// (input/ vs .hermes/) 上完全独立,并行存在至 T24/T25 切完后再统一收敛。
+func (a *AgentBackedAdapter) UploadAppInputFile(ctx context.Context, nodeID, appID, relPath string, content io.Reader) error {
+	cli, err := a.resolveFile(ctx, nodeID)
+	if err != nil {
+		return err
+	}
+	return cli.UploadAppInputFile(ctx, appID, relPath, content)
+}
+
 // DeleteOrgFile 删除节点上组织级知识库的指定文件 / 子目录。
 func (a *AgentBackedAdapter) DeleteOrgFile(ctx context.Context, nodeID, orgID, relPath string) error {
 	cli, err := a.resolveFile(ctx, nodeID)

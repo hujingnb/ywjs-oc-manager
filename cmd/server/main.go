@@ -286,13 +286,13 @@ func runManager(ctx context.Context, cfg config.Config, logOut io.Writer) error 
 			AuditHelper: appInitAuditHelper,
 		},
 	)
-	// runtimeAdapter 同时实现 AppRuntimeFileWriter（UploadAppRuntimeFile），
-	// 在多节点部署下把 Hermes 配置文件（SOUL.md/config.yaml/.env）上传到目标节点
-	// agent 的 dataRoot/apps/<id>/.hermes/，确保 manager 与 docker daemon 可不同机。
-	appInitHandler.SetRuntimeFileWriter(runtimeAdapter)
-	// 注入主副本知识库读取能力：handler 在写完 SOUL.md/config.yaml/.env 后,
-	// 遍历组织 + 应用知识库,把每个文件渲染成 .hermes/skills/kb-{org,app}-<slug>/SKILL.md,
-	// Hermes 启动时按 skill 机制扫描该目录,使知识库内容进入 agent 上下文。
+	// runtimeAdapter 同时实现 AppInputUploader (UploadAppInputFile), 在多节点部署
+	// 下把 manifest.yaml + resources/*.md + 知识库主副本上传到目标节点 agent 的
+	// dataRoot/apps/<id>/input/, 容器内 oc-entrypoint 在启动时翻译成 hermes 自有 schema。
+	appInitHandler.SetAppInputUploader(runtimeAdapter)
+	// 注入主副本知识库读取能力: handler 在写完 manifest + resources 后,
+	// 遍历组织 + 应用主副本目录, 把每个文件原样推送到 input/resources/knowledge/{org,app}/<rel>,
+	// 由镜像 oc-entrypoint 按需 render 成 hermes skill, manager 不再耦合 hermes skill schema。
 	appInitHandler.SetKnowledgeReader(knowledgeMaster)
 	// 注入镜像拉取协调器：phasePullRuntimeImage 通过 imageCoord 在目标 agent 节点直接
 	// pull hermes runtime 镜像，Redis 锁 + Pub/Sub 保证集群内 single-flight + 跨实例进度广播。

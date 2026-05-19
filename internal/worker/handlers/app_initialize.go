@@ -57,22 +57,35 @@ type AgentDirInitializer interface {
 }
 
 // AppRuntimeFileWriter 抽象在节点 agent 上写运行时配置文件的能力。
-// Hermes 时代 manager 通过该接口把 SOUL.md / config.yaml / .env / skills/*/SKILL.md
-// 上传到节点 dataRoot/apps/<appID>/.hermes/,确保多节点部署下 manager 与 docker
-// daemon 不必同机。注入失败(nil)时 handler 直接报错,因为 Hermes 容器必须有
-// 这些文件才能启动。
+// 老 Hermes 链路(.hermes/SOUL.md/config.yaml/.env/skills/) 用此接口;
+// 当前 AppInitializeHandler 已切到 AppInputUploader 走 input/ 路径,
+// 该接口仅保留供 ChannelCheckBindingHandler 等老路径 handler 引用,
+// T24/T25 切完所有调用方后整体下线。
 type AppRuntimeFileWriter interface {
 	UploadAppRuntimeFile(ctx context.Context, nodeID, appID, relPath string, content io.Reader) error
 }
 
-// KnowledgeReader 抽象 manager 主副本的读能力,供 writeHermesFiles 在容器启动前
-// 把组织/应用知识库批量渲染成 .hermes/skills/kb-*-<slug>/SKILL.md。
+// AppInputUploader 抽象在节点 agent 上写应用输入文件 (apps/<id>/input/) 的能力。
+// 由 internal/integrations/runtime.AgentBackedAdapter 实现 (内部转发到
+// agent.AgentFileClient.UploadAppInputFile, 命中 agent T13 新增的 input/file 路由)。
+//
+// 与老 AppRuntimeFileWriter 的差别:写的不再是 hermes 内部的 SOUL.md/config.yaml/.env,
+// 而是 manifest.yaml + resources/*.md 这一层「容器外可读的输入资源」;镜像 oc-entrypoint
+// 在容器启动时再把它们翻译成 hermes 自有 schema。
+//
+// nil 装配时 phasePrepare 内 WriteAppInput 调用会直接 panic, 因此生产装配必须注入。
+type AppInputUploader interface {
+	UploadAppInputFile(ctx context.Context, nodeID, appID, relPath string, content io.Reader) error
+}
+
+// KnowledgeReader 抽象 manager 主副本的读能力,供 writeKnowledgeIntoInput 在容器启动前
+// 把组织/应用知识库主副本原样递归上传到 apps/<id>/input/resources/knowledge/{org,app}/。
 //
 // WalkFiles 递归遍历 prefix(如 "org/<id>/knowledge")下所有普通文件,每个文件
 // 回调一次,relPath 相对 prefix、统一 '/' 分隔。
 // Open 打开主副本中的指定文件;调用方负责关闭。
 //
-// nil 装配时 writeSkillsFromKnowledge 直接跳过,使旧装配/测试装配仍可工作。
+// nil 装配时 writeKnowledgeIntoInput 直接跳过, 使旧装配 / 测试装配仍可工作。
 type KnowledgeReader interface {
 	WalkFiles(prefix string, fn func(relPath string, size int64) error) error
 	Open(masterPath string) (io.ReadCloser, int64, error)
@@ -130,14 +143,19 @@ type NewAPIClientFactory interface {
 
 // AppInitializeConfig 提供 handler 运行所需的外部配置。
 //
-// SystemPromptTemplate：Hermes SOUL.md 的平台层模板，{var} 占位符在渲染时展开；
-// 不再使用 legacy OpenClaw 时代的 {{workspace_dir}} 格式。
+// PlatformPrompt: 平台层默认 prompt 内容,作为 resources/platform-rules.md 写入
+// apps/<id>/input/; 由 oc-entrypoint 在容器启动时与 organization / application
+// rules 合并生效。
+//
+// SystemPromptTemplate: persona / SOUL 模板字符串,保留供 oc-entrypoint 历史
+// 行为兼容; hermes-agent-pull 切换后实际写入 resources/persona.md 的内容由
+// app.persona / org.persona 决定,此字段仅在装配链路上保留入口。
 //
 // Cipher：把 new-api 返回的完整 sk- 加密后写入 apps.newapi_key_ciphertext，
 // 全程不入日志。
 //
-// DataDir 字段已从 Hermes 文件分发路径移除：Hermes 配置文件现在通过
-// AppRuntimeFileWriter.UploadAppRuntimeFile 上传到目标节点 agent，
+// DataDir 字段已从 Hermes 文件分发路径移除: 应用输入文件现在通过
+// AppInputUploader.UploadAppInputFile 上传到目标节点 agent,
 // 不再写入 manager 本机目录。DataDir 保留供其他特定场景（如 workspaceService）使用。
 type AppInitializeConfig struct {
 	RuntimeImage         string
@@ -145,9 +163,10 @@ type AppInitializeConfig struct {
 	SystemPromptTemplate string
 	Cipher               *auth.Cipher
 	// DataDir 是 manager 宿主机上的数据根目录，仅供其他特定场景使用。
-	// Hermes 文件分发已走 UploadAppRuntimeFile，不再使用此字段。
+	// 应用输入文件分发已走 UploadAppInputFile，不再使用此字段。
 	DataDir string
-	// NewAPIBaseURL 是 new-api 内网访问 URL（不含 /v1），写入 Hermes config.yaml 与 .env。
+	// NewAPIBaseURL 是 new-api 内网访问 URL(不含 /v1), 用于写入 manifest.yaml 的
+	// credentials.openai.base_url; 容器内 hermes 走 +"/v1" 后端访问 new-api。
 	NewAPIBaseURL string
 	// ContainerNetworks 决定 manager 创建容器时连接哪些 docker network；
 	// 必须包含 new-api 所在的 network，否则 Hermes 容器无法路由到 new-api。
@@ -177,8 +196,9 @@ type AppInitializeLLMConfig struct {
 //  3. 调 imagePullCoord 通过 agent docker proxy 在目标节点直接 pull hermes runtime 镜像；
 //  4. 调 AgentDirInitializer 在节点上准备 apps/<id>/ 目录；
 //  5. api_key 不 active 时调 new-api 创建并 cipher.Encrypt 写库（ensureAPIKey）；
-//  6. 渲染 SOUL.md/config.yaml/.env/skills/ 并通过 AppRuntimeFileWriter 上传到目标节点
-//     agent 的 dataRoot/apps/<id>/.hermes/（使用步骤 5 的真实 token，避免 HTTP 401）；
+//  6. 通过 AppInputUploader 写 apps/<id>/input/ 的 manifest.yaml + resources/*.md
+//     + 知识库主副本(使用步骤 5 的真实 token,避免 HTTP 401);容器内 oc-entrypoint
+//     在启动时把这些输入文件翻译成 hermes 自有 schema;
 //  7. container_id 为空时调 ContainerCreator.CreateContainer，把 ID/Name 写库；
 //  8. 调 ContainerStarter.StartContainer 启动容器；
 //  9. starter 实现 HermesHealthChecker 时等 docker HEALTHCHECK 报 healthy；
@@ -186,14 +206,17 @@ type AppInitializeLLMConfig struct {
 //
 // 任意一步失败立即冒泡，由 worker 重试或入 failed；状态机字段只在显式步骤里单独写。
 type AppInitializeHandler struct {
-	store        AppInitializeStore
-	dirs         AgentDirInitializer
-	runtimeFiles AppRuntimeFileWriter
-	knowledge    KnowledgeReader
-	containers   ContainerCreator
-	starter      ContainerStarter
-	factory      NewAPIClientFactory
-	cfg          AppInitializeConfig
+	store AppInitializeStore
+	dirs  AgentDirInitializer
+	// inputFiles 是 hermes-agent-pull 切换后的主入口: 通过 agent input/file 路由
+	// 把 manifest.yaml + resources/*.md + 知识库主副本写到 apps/<id>/input/。
+	// 生产装配必须注入; nil 时 phasePrepare 写文件阶段直接报错。
+	inputFiles AppInputUploader
+	knowledge  KnowledgeReader
+	containers ContainerCreator
+	starter    ContainerStarter
+	factory    NewAPIClientFactory
+	cfg        AppInitializeConfig
 	// imagePullCoord 负责跨 manager 实例对同一 (nodeID, imageRef) 做 single-flight pull。
 	// nil 时 phasePullRuntimeImage 跳过拉取（仅供测试装配）。
 	imagePullCoord *imagecoord.Coordinator
@@ -226,17 +249,19 @@ func NewAppInitializeHandler(
 	}
 }
 
-// SetRuntimeFileWriter 注入 Hermes runtime 配置文件上传能力。
-// 生产环境必须注入（Hermes 容器启动前须有 SOUL.md/config.yaml/.env），
-// nil 时 writeHermesFiles 直接返回错误。
-func (h *AppInitializeHandler) SetRuntimeFileWriter(w AppRuntimeFileWriter) {
-	h.runtimeFiles = w
+// SetAppInputUploader 注入 apps/<id>/input/ 文件上传能力。
+// 生产环境必须注入(hermes-agent-pull 切换后 oc-entrypoint 需读取 manifest + resources),
+// nil 时 phasePrepare 内 WriteAppInput 调用会直接报错。
+func (h *AppInitializeHandler) SetAppInputUploader(w AppInputUploader) {
+	h.inputFiles = w
 }
 
 // SetKnowledgeReader 注入主副本知识库读取能力。
-// 装配后 writeHermesFiles 会在写完 SOUL.md/config.yaml/.env 后,
-// 遍历组织/应用主副本目录,把每个文件渲染成 .hermes/skills/kb-*-<slug>/SKILL.md。
-// nil 时跳过 skill 写入(仅保留旧测试装配兼容)。
+// 装配后 phasePrepare 在 WriteAppInput 之后会通过 writeKnowledgeIntoInput 把
+// 组织 + 应用知识库主副本的全部文件原样递归上传到
+// apps/<id>/input/resources/knowledge/{org,app}/<rel>;
+// 镜像 oc-entrypoint 在容器启动时自行扫描该目录、按需 render 成 hermes skills。
+// nil 时跳过知识库写入(仅保留旧测试装配兼容)。
 func (h *AppInitializeHandler) SetKnowledgeReader(r KnowledgeReader) {
 	h.knowledge = r
 }
@@ -393,7 +418,7 @@ func (h *AppInitializeHandler) phasePullRuntimeImage(ctx context.Context, app *s
 	return nil
 }
 
-// phasePrepare:在节点 agent 上准备目录、确保 api_key、上传 hermes 配置文件。
+// phasePrepare:在节点 agent 上准备目录、确保 api_key、上传 hermes 输入文件。
 // 三段都已有局部幂等(InitAppDirs 覆盖写、ensureAPIKey 跳过 active、文件覆盖写),
 // 重启重入直接跑安全。
 func (h *AppInitializeHandler) phasePrepare(ctx context.Context, app *sqlc.App, payload appInitializePayload, _ *progressReporter) error {
@@ -415,7 +440,7 @@ func (h *AppInitializeHandler) phasePrepare(ctx context.Context, app *sqlc.App, 
 		return err
 	}
 	if payload.RuntimeNodeID != "" {
-		if err := h.writeHermesFiles(ctx, payload.RuntimeNodeID, *app, org, owner, containerAPIKey); err != nil {
+		if err := h.writeAppInput(ctx, payload.RuntimeNodeID, *app, org, owner, containerAPIKey); err != nil {
 			return err
 		}
 	}
@@ -545,237 +570,141 @@ func (h *AppInitializeHandler) writeInitAuditLog(ctx context.Context, app sqlc.A
 	return nil
 }
 
-// writeHermesFiles 把 Hermes 运行时配置文件通过 runtime-agent UploadAppRuntimeFile
-// 上传到目标节点的 dataRoot/apps/<appID>/.hermes/，确保多节点部署下 manager 与
-// docker daemon 不必同机。
+// writeAppInput 通过 AppInputUploader 把应用初始化所需的 manifest.yaml + 三层
+// rules + persona + 组织/应用知识库主副本写到目标节点 apps/<id>/input/ 目录。
+// 容器内 oc-entrypoint 读取该目录, 在镜像启动时把这些输入翻译成 hermes 自有 schema。
 //
-// 上传内容：
-//   - SOUL.md：agent identity / system prompt（三层 platform + org + app 拼接）
-//   - config.yaml：model provider 配置（指向 new-api），api_key 使用真实 containerAPIKey
-//   - .env：凭证（OPENAI_API_KEY / OPENAI_BASE_URL + WEIXIN_DM_POLICY=open）
+// 与老 writeHermesFiles 的差别:
+//   - 不再写 .hermes/SOUL.md/config.yaml/.env/skills/ (这些由镜像内部生成);
+//   - 写的是「人类可读 / 工具友好」的输入资源, 由 hermes.WriteAppInput 统一编排;
+//   - 知识库不再渲染成 SKILL.md, 而是原样递归推送, 让镜像 oc-entrypoint
+//     按需 render (避免 manager 与 hermes skill schema 强耦合)。
 //
-// containerAPIKey 必须是 ensureAPIKey 返回的真实 sk- token；调用方保证此函数在
-// ensureAPIKey 之后执行，避免写入占位符导致 Hermes 调 new-api 返回 HTTP 401。
-// runtimeFiles 为 nil 时直接报错，因为 Hermes 容器必须有这些文件才能启动。
-func (h *AppInitializeHandler) writeHermesFiles(ctx context.Context, nodeID string, app sqlc.App, org sqlc.Organization, owner sqlc.User, containerAPIKey string) error {
-	if h.runtimeFiles == nil {
-		return fmt.Errorf("AppRuntimeFileWriter 未注入,Hermes 容器无法 bootstrap")
+// containerAPIKey 必须是 ensureAPIKey 返回的真实 sk- token;调用方保证此函数
+// 在 ensureAPIKey 之后执行, 避免写入占位符导致 hermes 调 new-api 返回 401。
+// inputFiles 为 nil 时直接报错: hermes 容器必须有这些输入文件才能 bootstrap。
+func (h *AppInitializeHandler) writeAppInput(ctx context.Context, nodeID string, app sqlc.App, org sqlc.Organization, owner sqlc.User, containerAPIKey string) error {
+	if h.inputFiles == nil {
+		return fmt.Errorf("AppInputUploader 未注入, hermes 容器无法 bootstrap")
 	}
 	appID := uuidToString(app.ID)
 
-	// 渲染 SOUL.md（平台层 + 组织层 + 应用层 prompt 三层拼接）。
-	// 组织层 prompt 由 OrganizationPersona 提供，当前从 GetOrganization 不含 prompt；
-	// 暂以空串占位，后续 handler 扩展接口后再补充。
-	// 占位符 {org_name}/{app_name}/{owner_name} 由 VariablesFromContext 提供。
-	promptResult, err := hermes.Render(hermes.PromptInput{
-		PlatformPrompt: h.cfg.SystemPromptTemplate,
-		OrgPrompt:      "", // 组织层 prompt 暂为空，待后续从 OrganizationPersona 注入
-		AppPrompt:      textOrEmpty(app.AppPrompt),
-		Variables:      hermes.VariablesFromContext(org.Name, app.Name, owner.DisplayName),
-	})
-	soulBody := ""
-	if err != nil {
-		// SOUL.md 渲染失败不阻塞容器创建:prompt 全为空时 Hermes 走默认行为,
-		// 仅记错误并跳过 prompt 主体,但仍允许后续追加知识库 always-on context。
-		if !errors.Is(err, hermes.ErrPromptEmpty) {
-			return fmt.Errorf("渲染 SOUL.md 失败: %w", err)
-		}
-	} else {
-		soulBody = promptResult.Prompt
+	// model: 优先使用 app.ModelID, 兜底用 cfg.LLM.DefaultModel; 都为空时
+	// 落 "default" 占位 (与老 RenderConfigYAML 行为一致, 避免下游 nil-deref)。
+	model := app.ModelID
+	if model == "" {
+		model = h.cfg.LLM.DefaultModel
 	}
-	// 把组织 + 应用知识库 inline 进 SOUL.md。
-	// Hermes 的 skill 体系是 progressive disclosure(skills_list → skill_view),
-	// agent 不主动调 skill_view 就读不到 SKILL.md 主体。SOUL.md 走 always-on 路径
-	// (agent identity 一直在 system prompt),把知识库塞进 SOUL.md 才能保证
-	// 用户每条消息都能命中知识库内容。
-	// 应用级在前(优先级最高),组织级在后,与 spec §18 优先级语义一致。
-	knowledgeInline, kerr := h.collectKnowledgeForSoul(uuidToString(app.OrgID), appID)
-	if kerr != nil {
-		return fmt.Errorf("拼接知识库到 SOUL.md 失败: %w", kerr)
+	if model == "" {
+		model = "default"
 	}
-	if knowledgeInline != "" {
-		if soulBody != "" {
-			soulBody += "\n\n"
-		}
-		soulBody += knowledgeInline
-	}
-	if soulBody != "" {
-		if err := h.runtimeFiles.UploadAppRuntimeFile(ctx, nodeID, appID, "SOUL.md", strings.NewReader(soulBody)); err != nil {
-			return fmt.Errorf("上传 SOUL.md: %w", err)
-		}
+	// base_url: 写入 manifest.credentials.openai.base_url; 容器内 hermes 会
+	// 再拼 "/v1" 后调 new-api, 与老 config.yaml 行为对齐。
+	baseURL := h.cfg.NewAPIBaseURL
+	if baseURL == "" {
+		baseURL = "http://new-api:3000"
 	}
 
-	// 渲染 config.yaml（model provider 指向 new-api）。
-	// ModelName 用 app.ModelID；NewAPIURL 来自 cfg；NewAPIToken 使用真实 containerAPIKey
-	// (调用方已在 ensureAPIKey 之后再调本函数)，确保 Hermes 启动时 api_key 有效。
-	// ModelID 是 string 类型（非 pgtype.Text），直接使用。
-	modelName := app.ModelID
-	if modelName == "" {
-		modelName = h.cfg.LLM.DefaultModel
+	// adapter 绑定 nodeID, 让 hermes.WriteAppInput 的 (ctx, appID, relPath, body)
+	// 接口形态在内部转发到 inputFiles.UploadAppInputFile (带 nodeID)。
+	writer := &appInputUploadAdapter{up: h.inputFiles, nodeID: nodeID}
+	in := hermes.AppInputData{
+		AppID:            appID,
+		AppName:          app.Name,
+		Model:            model,
+		OpenAIAPIKey:     containerAPIKey,
+		OpenAIBaseURL:    baseURL,
+		PersonaText:      h.cfg.SystemPromptTemplate,
+		PlatformRule:     h.cfg.PlatformPrompt,
+		OrganizationRule: "", // 组织层 rule 待后续 organization persona/rules 字段补齐
+		ApplicationRule:  textOrEmpty(app.AppPrompt),
+		OrgName:          org.Name,
+		OwnerName:        owner.DisplayName,
 	}
-	if modelName == "" {
-		modelName = "default"
-	}
-	newAPIURL := h.cfg.NewAPIBaseURL
-	if newAPIURL == "" {
-		newAPIURL = "http://new-api:3000"
-	}
-	// containerAPIKey 由调用方 ensureAPIKey 提供(真实 sk- token)；
-	// 直接写入 config.yaml api_key，避免占位符导致 Hermes 调 new-api 返回 HTTP 401。
-	yamlContent, err := hermes.RenderConfigYAML(hermes.ConfigInput{
-		ModelName:   modelName,
-		NewAPIURL:   newAPIURL,
-		NewAPIToken: containerAPIKey,
-	})
-	if err != nil {
-		return fmt.Errorf("渲染 config.yaml 失败: %w", err)
-	}
-	if err := h.runtimeFiles.UploadAppRuntimeFile(ctx, nodeID, appID, "config.yaml", strings.NewReader(yamlContent)); err != nil {
-		return fmt.Errorf("上传 config.yaml: %w", err)
+	if err := hermes.WriteAppInput(ctx, writer, appID, in); err != nil {
+		return fmt.Errorf("写入应用 input 资源失败: %w", err)
 	}
 
-	// 渲染 .env：OPENAI_API_KEY 使用真实 token，同时含 WEIXIN_DM_POLICY=open。
-	// bound 后 ChannelCheckBindingHandler 会重写 .env 追加 WEIXIN_ACCOUNT_ID 等凭证。
-	envContent := hermes.RenderEnv(hermes.EnvInput{
-		NewAPIURL:   newAPIURL,
-		NewAPIToken: containerAPIKey,
-	})
-	if err := h.runtimeFiles.UploadAppRuntimeFile(ctx, nodeID, appID, ".env", strings.NewReader(envContent)); err != nil {
-		return fmt.Errorf("上传 .env: %w", err)
-	}
-
-	// 把组织 / 应用知识库渲染成 .hermes/skills/kb-{org,app}-<slug>/SKILL.md,
-	// Hermes 启动时按 skill 加载机制扫描该目录,使知识库内容进入 agent 上下文。
-	// SkillScope 已在 DirName 前缀里区分 org / app,即便 slug 相同也不会冲突;
-	// Hermes 会根据 scope 决定优先级(spec §18:应用级优先于组织级)。
-	// 用 app.OrgID 取组织 ID,与 KnowledgeService 主副本路径拼接保持一致;
-	// 避免依赖 GetOrganization 返回值里可能缺失的 ID 字段。
-	if err := h.writeSkillsFromKnowledge(ctx, nodeID, appID, uuidToString(app.OrgID)); err != nil {
+	// 把组织 / 应用知识库主副本原样递归推送到 input/resources/knowledge/{org,app}/。
+	// 由镜像内 oc-entrypoint 在容器启动时按需 render 成 hermes 自身 skill;
+	// manager 不再生成 SKILL.md, 解耦 hermes skill schema 演进。
+	if err := h.writeKnowledgeIntoInput(ctx, nodeID, appID, uuidToString(app.OrgID)); err != nil {
 		return err
 	}
-
 	return nil
 }
 
-// collectKnowledgeForSoul 把组织 + 应用知识库主副本的所有文件读出来,
-// 拼成一段适合塞进 SOUL.md 末尾的 markdown,作为 always-on 业务上下文。
+// writeKnowledgeIntoInput 递归把组织 + 应用主副本知识库写到
+// apps/<appID>/input/resources/knowledge/{org,app}/<相对路径>。
 //
-// 顺序:应用级在组织级之前——agent 自顶向下读 system prompt,先读到的内容
-// 在冲突时占优(spec §18:应用级优先于组织级,同名时应用级覆盖)。
+// 顺序: 先 org 再 app, 与 KnowledgeReader 主副本路径
+// (org/<orgID>/knowledge/* 与 org/<orgID>/app/<appID>/knowledge/*) 自然对应;
+// 写入顺序对优先级无影响 (优先级由镜像 oc-entrypoint 自行解析)。
 //
-// knowledge reader 未注入 / 主副本为空时返回空串(不报错)。
-// 单文件超过 8KB 截断到前 8KB + 末尾标记,避免单个大文件撑爆 system prompt。
-func (h *AppInitializeHandler) collectKnowledgeForSoul(orgID, appID string) (string, error) {
+// h.knowledge 为 nil (测试装配 / 旧 wiring) 时直接跳过; 任一文件读写失败
+// 立即冒泡, 由 worker 决定是否重试。
+func (h *AppInitializeHandler) writeKnowledgeIntoInput(ctx context.Context, nodeID, appID, orgID string) error {
 	if h.knowledge == nil {
-		return "", nil
+		return nil
 	}
-	const perFileMax = 8 * 1024
-	appPrefix := fmt.Sprintf("org/%s/app/%s/knowledge", orgID, appID)
-	orgPrefix := fmt.Sprintf("org/%s/knowledge", orgID)
-
-	// 收集器:先 app 后 org,保证 inline 顺序"应用级在前"。
-	type entry struct{ scope, relPath, body string }
-	var entries []entry
-
-	collect := func(scope, prefix string) error {
-		return h.knowledge.WalkFiles(prefix, func(relPath string, _ int64) error {
-			reader, _, err := h.knowledge.Open(prefix + "/" + relPath)
+	// scopes 列表显式列出两类 source/target 映射, 避免在循环里硬编码字符串拼接,
+	// 让"主副本前缀 → input 子目录"的对应关系一目了然。
+	scopes := []struct {
+		// scopeName 决定写到 resources/knowledge/<scopeName>/ 下;
+		// 与镜像 oc-entrypoint 约定的 org / app 命名严格一致。
+		scopeName string
+		// prefix 是 KnowledgeReader 主副本的前缀路径, 与 KnowledgeService 写入约定一致。
+		prefix string
+	}{
+		{scopeName: "org", prefix: fmt.Sprintf("org/%s/knowledge", orgID)},
+		{scopeName: "app", prefix: fmt.Sprintf("org/%s/app/%s/knowledge", orgID, appID)},
+	}
+	for _, s := range scopes {
+		prefix := s.prefix
+		scope := s.scopeName
+		err := h.knowledge.WalkFiles(prefix, func(relPath string, _ int64) error {
+			master := prefix + "/" + relPath
+			reader, _, err := h.knowledge.Open(master)
 			if err != nil {
-				return err
+				return fmt.Errorf("打开主副本 %s 失败: %w", master, err)
 			}
 			body, readErr := io.ReadAll(reader)
 			_ = reader.Close()
 			if readErr != nil {
-				return readErr
+				return fmt.Errorf("读取主副本 %s 失败: %w", master, readErr)
 			}
-			truncated := string(body)
-			if len(truncated) > perFileMax {
-				truncated = truncated[:perFileMax] + "\n\n... (后续内容已截断,完整版见 skills/kb-*-*/SKILL.md)"
+			target := fmt.Sprintf("resources/knowledge/%s/%s", scope, relPath)
+			if err := h.inputFiles.UploadAppInputFile(ctx, nodeID, appID, target, strings.NewReader(string(body))); err != nil {
+				return fmt.Errorf("上传知识库 %s 失败: %w", target, err)
 			}
-			entries = append(entries, entry{scope: scope, relPath: relPath, body: truncated})
 			return nil
 		})
-	}
-	if err := collect("应用级(优先生效)", appPrefix); err != nil {
-		return "", err
-	}
-	if err := collect("组织级(默认)", orgPrefix); err != nil {
-		return "", err
-	}
-	if len(entries) == 0 {
-		return "", nil
-	}
-
-	var b strings.Builder
-	b.WriteString("## 业务知识库 (always-on context)\n\n")
-	b.WriteString("以下是本应用所属组织 / 本应用的业务知识库内容,你必须在回答用户问题时严格按此内容回复,而非根据通用知识猜测。\n\n")
-	b.WriteString("**优先级规则**:同主题下,「应用级」覆盖「组织级」——如果应用级和组织级对同一问题(如计费、话术)给出不同规则,**必须使用应用级**。\n\n")
-	for _, e := range entries {
-		b.WriteString(fmt.Sprintf("### %s — %s\n\n", e.scope, e.relPath))
-		b.WriteString(strings.TrimSpace(e.body))
-		b.WriteString("\n\n")
-	}
-	return b.String(), nil
-}
-
-// writeSkillsFromKnowledge 把组织 + 应用知识库主副本递归遍历并上传到
-// 节点 dataRoot/apps/<appID>/.hermes/skills/。
-//
-// 主副本目录约定(与 service/knowledge_service.go 的 path.Join 一致):
-//   - 组织: org/<orgID>/knowledge/
-//   - 应用: org/<orgID>/app/<appID>/knowledge/
-//
-// 每个文件单独渲染一份 SKILL.md;路径冲突由 SlugifyKnowledgePath + 路径 hash
-// 兜底解决。knowledge reader 未注入时直接跳过(测试装配)。
-func (h *AppInitializeHandler) writeSkillsFromKnowledge(ctx context.Context, nodeID, appID, orgID string) error {
-	if h.knowledge == nil {
-		return nil
-	}
-	orgPrefix := fmt.Sprintf("org/%s/knowledge", orgID)
-	if err := h.uploadKnowledgeSkills(ctx, nodeID, appID, hermes.ScopeOrg, orgPrefix); err != nil {
-		return fmt.Errorf("写组织知识库 skills 失败: %w", err)
-	}
-	appPrefix := fmt.Sprintf("org/%s/app/%s/knowledge", orgID, appID)
-	if err := h.uploadKnowledgeSkills(ctx, nodeID, appID, hermes.ScopeApp, appPrefix); err != nil {
-		return fmt.Errorf("写应用知识库 skills 失败: %w", err)
+		if err != nil {
+			return fmt.Errorf("写入 %s 知识库失败: %w", scope, err)
+		}
 	}
 	return nil
 }
 
-// uploadKnowledgeSkills 遍历 prefix 目录下的每个文件,渲染成 SKILL.md 上传到
-// .hermes/skills/<DirName>/SKILL.md。
-// prefix 不存在视为空集(KnowledgeReader.WalkFiles 已做幂等),不报错。
-func (h *AppInitializeHandler) uploadKnowledgeSkills(ctx context.Context, nodeID, appID string, scope hermes.SkillScope, prefix string) error {
-	return h.knowledge.WalkFiles(prefix, func(relPath string, size int64) error {
-		master := prefix + "/" + relPath
-		reader, _, err := h.knowledge.Open(master)
-		if err != nil {
-			return fmt.Errorf("打开主副本 %s 失败: %w", master, err)
-		}
-		body, readErr := io.ReadAll(reader)
-		_ = reader.Close()
-		if readErr != nil {
-			return fmt.Errorf("读取主副本 %s 失败: %w", master, readErr)
-		}
-		slug := hermes.SlugifyKnowledgePath(relPath)
-		rendered, renderErr := hermes.RenderKnowledgeSkill(hermes.KnowledgeDoc{
-			Scope: scope,
-			Slug:  slug,
-			Title: relPath,
-			// Summary 拼成业务化引导文案,直接进 SKILL.md frontmatter description;
-			// agent 会按 description 决定是否主动 /kb-* 装载本 skill。
-			Summary: hermes.BuildKnowledgeSummary(scope, relPath, string(body)),
-			Body:    string(body),
-		})
-		if renderErr != nil {
-			return fmt.Errorf("渲染 SKILL.md %s 失败: %w", master, renderErr)
-		}
-		target := fmt.Sprintf("skills/%s/SKILL.md", rendered.DirName)
-		if err := h.runtimeFiles.UploadAppRuntimeFile(ctx, nodeID, appID, target, strings.NewReader(rendered.SkillMD)); err != nil {
-			return fmt.Errorf("上传 %s 失败: %w", target, err)
-		}
-		return nil
-	})
+// appInputUploadAdapter 把 handler 持有的 AppInputUploader (带 nodeID 的 3+1 参数
+// 上传方法) 适配成 hermes.AppInputWriter (固定 appID 维度的 WriteAppInputFile)。
+//
+// hermes 包面向单 app 维度做编排, 不关心 nodeID; manager 这边一个 handler 可能
+// 同时服务多节点, 因此 wiring 注入的是按 nodeID 分发的 uploader。adapter 在
+// handler 内部为每个 app 实例化一次, 绑定其 RuntimeNodeID 后即满足 hermes 接口形态。
+type appInputUploadAdapter struct {
+	// up 是底层按 nodeID 路由的上传能力 (生产实现: AgentBackedAdapter.UploadAppInputFile)。
+	up AppInputUploader
+	// nodeID 在 handler 取出 payload.RuntimeNodeID 后绑定; 整个 WriteAppInput 调用
+	// 期间不变, 保证多文件上传都落到同一节点。
+	nodeID string
+}
+
+// WriteAppInputFile 实现 hermes.AppInputWriter。
+// 参数顺序与 hermes 包接口对齐 (ctx, appID, relPath, body); 内部追加 nodeID 后转发,
+// 不附加业务校验 (路径越界 / 沙箱由 agent 端统一拒绝)。
+func (a *appInputUploadAdapter) WriteAppInputFile(ctx context.Context, appID, relPath string, body io.Reader) error {
+	return a.up.UploadAppInputFile(ctx, a.nodeID, appID, relPath, body)
 }
 
 // ensureAPIKey 走「以组织业务 user 身份创 token + 拉完整 sk-」流程，加密落库后返回明文 sk-。
