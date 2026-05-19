@@ -336,6 +336,10 @@ func runManager(ctx context.Context, cfg config.Config, logOut io.Writer) error 
 	}
 	knowledgeSyncHandler := handlers.NewKnowledgeSyncHandler(knowledgeMaster, runtimeAdapter)
 	knowledgeSyncHandler.SetStatusWriter(knowledgeSyncStatusSvc)
+	// 注入「按组织列 app」能力:org scope 同步通过它扇出到节点上属于该 org 的每个 app
+	// input 目录(每个 app 都有自己 apps/<id>/input/ 沙箱,oc-entrypoint 仅读各自 app 的)。
+	// 不注入时 org scope 同步只翻状态、不写文件,生产装配必须注入。
+	knowledgeSyncHandler.SetAppLister(dbStore.Queries)
 	// app scope 没有 knowledge_sync_status 表;把完成/失败事件落到 audit_logs
 	// (target_type=app_knowledge_sync),前端审计页面可按 app_id 检索同步历史。
 	knowledgeSyncHandler.SetAuditor(auditService)

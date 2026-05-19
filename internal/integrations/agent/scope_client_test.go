@@ -314,6 +314,34 @@ func TestScopeClient_UploadAppInputFile_PropagatesErrorBody(t *testing.T) {
 	require.Contains(t, err.Error(), "path escapes input sandbox")
 }
 
+// TestScopeClient_DeleteAppInputFile 验证 DeleteAppInputFile 走 HTTP DELETE
+// /v1/scopes/apps/<id>/input/file?path=<relPath>，与 UploadAppInputFile 共用同一路由,
+// 仅 HTTP method 不同; 配套覆盖 knowledge_sync_node delete_file 在 input 目录里的删除。
+func TestScopeClient_DeleteAppInputFile(t *testing.T) {
+	s := newScopeServer(nil)
+	defer s.Close()
+	c := NewFileClient(s.URL, "tok")
+
+	// 场景:删除 apps/app-1/input/resources/knowledge/org/policy.md,
+	// 验证 method=DELETE、path、query 编码、Authorization 头是否就位。
+	err := c.DeleteAppInputFile(context.Background(), "app-1", "resources/knowledge/org/policy.md")
+	require.NoError(t, err)
+	require.Len(t, s.captured, 1)
+	got := s.captured[0]
+	require.Equal(t, http.MethodDelete, got.method)
+	require.Equal(t, "/v1/scopes/apps/app-1/input/file", got.path)
+	require.Equal(t, "path=resources%2Fknowledge%2Forg%2Fpolicy.md", got.query)
+	require.Equal(t, "Bearer tok", got.auth)
+}
+
+// TestScopeClient_DeleteAppInputFile_RejectsEmpty 验证 relPath 为空时
+// 不发请求即返回错误, 防止 manager 误删整个 input 目录。
+func TestScopeClient_DeleteAppInputFile_RejectsEmpty(t *testing.T) {
+	c := NewFileClient("http://nowhere", "tok")
+	err := c.DeleteAppInputFile(context.Background(), "app-1", "")
+	require.Error(t, err)
+}
+
 // TestAppScopedFileClient_WriteAppInputFile 验证 wrapper 能把
 // hermes.AppInputWriter.WriteAppInputFile 调用正确转发到底层
 // AgentFileClient.UploadAppInputFile，参数顺序保持一致 (appID, relPath, body)。

@@ -298,6 +298,40 @@ func (c *AgentFileClient) UploadAppInputFile(ctx context.Context, appID, relPath
 	return expectSuccess(resp, "upload app input file")
 }
 
+// DeleteAppInputFile 删除节点上 apps/{appID}/input/{relPath} 沙箱内的
+// 单文件或子目录。与 UploadAppInputFile 共用 /v1/scopes/apps/<id>/input/file
+// 路由 (HTTP DELETE 方法), agent T13 起同时支持 PUT/DELETE 两种 method。
+//
+// 主要调用方:knowledge_sync_node worker handler——manager 主副本删除某个知识
+// 库文件后, 把删除事件透传到目标节点的每个应用 input 目录, 让 oc-entrypoint
+// 下次启动时不再读到该 skill。relPath 已由调用方按 resources/knowledge/{org,app}/
+// 前缀拼好。
+//
+// relPath 必须为相对路径, agent 端会做沙箱校验; 文件不存在视为成功 (幂等),
+// 与 DeleteOrgKnowledge / DeleteAppKnowledge 行为一致。
+func (c *AgentFileClient) DeleteAppInputFile(ctx context.Context, appID, relPath string) error {
+	if relPath == "" {
+		return fmt.Errorf("relPath 不能为空")
+	}
+	endpoint, err := c.endpoint(fmt.Sprintf("/v1/scopes/apps/%s/input/file", url.PathEscape(appID)))
+	if err != nil {
+		return err
+	}
+	q := url.Values{}
+	q.Set("path", relPath)
+	req, err := http.NewRequestWithContext(ctx, http.MethodDelete, endpoint+"?"+q.Encode(), nil)
+	if err != nil {
+		return err
+	}
+	c.authorize(req)
+	resp, err := c.httpClient().Do(req)
+	if err != nil {
+		return err
+	}
+	defer resp.Body.Close()
+	return expectSuccess(resp, "delete app input file")
+}
+
 // AppScopedFileClient 把 *AgentFileClient 适配为 internal/integrations/hermes
 // 包定义的 AppInputWriter 接口 (方法名 WriteAppInputFile)。
 //

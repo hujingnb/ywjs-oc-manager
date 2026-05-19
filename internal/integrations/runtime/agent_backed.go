@@ -461,6 +461,20 @@ func (a *AgentBackedAdapter) UploadAppInputFile(ctx context.Context, nodeID, app
 	return cli.UploadAppInputFile(ctx, appID, relPath, content)
 }
 
+// DeleteAppInputFile 删除目标节点 apps/<appID>/input/<relPath> 下的文件 / 子目录。
+// 主要调用方:knowledge_sync_node worker handler 处理 delete_file 事件时,通过该
+// 方法把 manager 主副本里删掉的知识库文件从节点 input/resources/knowledge/{org,app}/
+// 下同步移除,避免 oc-entrypoint 重启后仍读到已废弃的 skill。
+//
+// 文件不存在视为成功(幂等),与 DeleteAppKnowledge 行为对齐。
+func (a *AgentBackedAdapter) DeleteAppInputFile(ctx context.Context, nodeID, appID, relPath string) error {
+	cli, err := a.resolveFile(ctx, nodeID)
+	if err != nil {
+		return err
+	}
+	return cli.DeleteAppInputFile(ctx, appID, relPath)
+}
+
 // DeleteOrgFile 删除节点上组织级知识库的指定文件 / 子目录。
 func (a *AgentBackedAdapter) DeleteOrgFile(ctx context.Context, nodeID, orgID, relPath string) error {
 	cli, err := a.resolveFile(ctx, nodeID)
