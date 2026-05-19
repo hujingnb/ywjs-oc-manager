@@ -69,7 +69,8 @@
         <code>{{ app.runtime_node_id || '—' }}</code>
       </n-descriptions-item>
       <n-descriptions-item label="人设模式">{{ app.persona_mode }}</n-descriptions-item>
-      <n-descriptions-item label="模型">{{ app.model_id }}</n-descriptions-item>
+      <!-- model_id 由后端对非平台管理员过滤为空字符串，此处仅对平台管理员展示 -->
+      <n-descriptions-item v-if="auth.isPlatformAdmin" label="模型">{{ app.model_id }}</n-descriptions-item>
       <n-descriptions-item label="所属组织">
         {{ organizationName }}
       </n-descriptions-item>
@@ -85,25 +86,8 @@
       </n-descriptions-item>
     </n-descriptions>
 
-    <div
-      v-if="app"
-      style="margin-top: 12px; display: grid; grid-template-columns: minmax(180px, 1fr) auto; gap: 12px; align-items: end"
-    >
-      <n-form-item label="切换模型" style="margin-bottom: 0">
-        <n-select v-model:value="modelValue" :options="modelOptions" :disabled="!canToggleKey" />
-      </n-form-item>
-      <n-button
-        type="primary"
-        :disabled="!canToggleKey || !modelValue || modelValue === app.model_id || modelMutation.isPending.value"
-        @click="onUpdateModel"
-      >
-        {{ app.container_id ? '保存并重启实例' : '保存模型' }}
-      </n-button>
-    </div>
-
     <p v-if="initFeedback" class="state-text" :class="{ danger: initError }" style="margin-top: 8px">{{ initFeedback }}</p>
     <p v-if="keyFeedback" class="state-text" :class="{ danger: keyError }" style="margin-top: 8px">{{ keyFeedback }}</p>
-    <p v-if="modelFeedback" class="state-text" :class="{ danger: modelError }" style="margin-top: 8px">{{ modelFeedback }}</p>
 
     <JobProgressPanel
       v-if="trackingJobId"
@@ -126,14 +110,13 @@
 </template>
 
 <script setup lang="ts">
-import { computed, inject, ref, watch, type Ref } from 'vue'
-import { NButton, NCard, NDescriptions, NDescriptionsItem, NFormItem, NProgress, NSelect, NSpace, NTag } from 'naive-ui'
+import { computed, inject, ref, type Ref } from 'vue'
+import { NButton, NCard, NDescriptions, NDescriptionsItem, NProgress, NSpace, NTag } from 'naive-ui'
 
 import {
   useInitializeAppMutation,
   useJobQuery,
   useToggleAppAPIKey,
-  useUpdateAppModel,
   type AppDTO,
 } from '@/api/hooks/useApps'
 import { useOrganizationQuery } from '@/api/hooks/useOrganizations'
@@ -154,10 +137,6 @@ const auth = useAuthStore()
 const orgId = computed<string | undefined>(() => app?.value?.org_id)
 const organizationQuery = useOrganizationQuery(orgId)
 const organizationName = computed(() => organizationQuery.data.value?.name || '未知组织')
-const modelOptions = computed(() => (organizationQuery.data.value?.enabled_models ?? []).map(model => ({
-  label: model,
-  value: model,
-})))
 
 const initMutation = useInitializeAppMutation(appId)
 // trackingJobId 记录最近一次后台任务，供 JobProgressPanel 轮询展示执行进度。
@@ -224,18 +203,9 @@ async function onRetryInit() {
 const canToggleKey = computed(() => canManageApp(auth.user, app?.value))
 
 const keyMutation = useToggleAppAPIKey(appId)
-const modelMutation = useUpdateAppModel(appId)
 const confirmDisableKey = ref(false)
 const keyFeedback = ref('')
 const keyError = ref(false)
-const modelValue = ref('')
-const modelFeedback = ref('')
-const modelError = ref(false)
-
-// modelValue 跟随实例详情刷新，避免切换路由或保存后继续显示旧选择。
-watch(() => app?.value?.model_id, (value) => {
-  modelValue.value = value ?? ''
-}, { immediate: true })
 
 // keyTagType 将 API key 状态映射为标签色，未知状态用 warning 提醒确认。
 function keyTagType(s: string): 'success' | 'warning' | 'error' | 'default' {
@@ -268,25 +238,6 @@ async function runKeyMutation(action: 'disable' | 'restore') {
   } catch (err: unknown) {
     keyError.value = true
     keyFeedback.value = err instanceof Error ? err.message : `${action} 失败`
-  }
-}
-
-// onUpdateModel 保存模型切换；运行中实例由后端提交重启任务后前端跟踪该 job。
-async function onUpdateModel() {
-  modelFeedback.value = ''
-  modelError.value = false
-  try {
-    const result = await modelMutation.mutateAsync(modelValue.value)
-    if (result.restart_job_id) {
-      trackingJobId.value = result.restart_job_id
-      trackingJobTitle.value = '模型重启任务'
-      modelFeedback.value = `已提交模型生效重启任务：${result.restart_job_id}`
-      return
-    }
-    modelFeedback.value = result.requires_restart ? '模型已保存，需重启实例后生效' : '模型已保存'
-  } catch (err: unknown) {
-    modelError.value = true
-    modelFeedback.value = err instanceof Error ? err.message : '模型修改失败'
   }
 }
 </script>

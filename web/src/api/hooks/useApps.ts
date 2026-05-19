@@ -44,6 +44,8 @@ export interface AppDTO {
   last_error_status?: string
   // last_error_message 是上次进入 error 时的错误原始文本，供页面直接展示给用户。
   last_error_message?: string
+  // model_synced 标记实例运行中的模型是否与数据库记录一致；false 表示需重启生效。
+  model_synced?: boolean
   // runtime_image_ref 是 phasePullRuntimeImage 拉取的镜像引用；仅平台管理员可见。
   runtime_image_ref?: string
   // runtime_image_sha256 是 docker inspect 返回的镜像 config digest；仅平台管理员可见。
@@ -56,17 +58,6 @@ export interface RuntimeOperationResult {
   job_id: string
   // 已提交的操作名，如 start / stop / restart / delete。
   operation: string
-}
-
-// AppModelUpdateResult 是实例模型切换接口返回值。
-// requires_restart 表示保存后是否已经提交或需要运行时重启才能生效。
-export interface AppModelUpdateResult {
-  // 保存后的实例详情。
-  app: AppDTO
-  // 已提交的重启任务 ID；无容器实例可能为空。
-  restart_job_id?: string
-  // true 表示模型变更需要重启运行时生效。
-  requires_restart: boolean
 }
 
 // RuntimeContainerInfo 与后端 service.RuntimeContainerInfo 字段一致。
@@ -235,24 +226,6 @@ export function useTriggerRuntimeOperation(appId: Ref<string | undefined>) {
       void client.invalidateQueries({ queryKey: appKey(appId.value) })
       void client.invalidateQueries({ queryKey: runtimeKey(appId.value) })
       void client.invalidateQueries({ queryKey: appResourcesKey(appId.value) })
-    },
-  })
-}
-
-// useUpdateAppModel 保存实例模型，并在成功后刷新实例详情和运行时视图。
-export function useUpdateAppModel(appId: Ref<string | undefined>) {
-  const client = useQueryClient()
-  return useMutation({
-    mutationFn: async (modelId: string) => {
-      if (!appId.value) throw new Error('缺少实例 ID')
-      return apiRequest<AppModelUpdateResult>(`/api/v1/apps/${appId.value}/model`, {
-        method: 'PATCH',
-        body: { model_id: modelId },
-      })
-    },
-    onSuccess: () => {
-      void client.invalidateQueries({ queryKey: appKey(appId.value) })
-      void client.invalidateQueries({ queryKey: runtimeKey(appId.value) })
     },
   })
 }
