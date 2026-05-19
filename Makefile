@@ -18,10 +18,13 @@ AGENT_IMAGE_REPO ?= crpi-nu3ibz4f07feyghi.cn-beijing.personal.cr.aliyuncs.com/yw
 WEB_IMAGE_REPO   ?= crpi-nu3ibz4f07feyghi.cn-beijing.personal.cr.aliyuncs.com/ywjs_app/oc-manager-web
 
 # hermes runtime 生产镜像仓库，与上方三个服务保持一致命名风格。
-HERMES_IMAGE_REPO ?= crpi-nu3ibz4f07feyghi.cn-beijing.personal.cr.aliyuncs.com/ywjs_app/oc-manager-hermes
-# hermes tag 统一使用 IMAGE_TIMESTAMP，不再要求调用方显式传入。
-HERMES_IMAGE_TAG  := $(IMAGE_TIMESTAMP)
-HERMES_IMAGE      := $(HERMES_IMAGE_REPO):$(HERMES_IMAGE_TAG)
+# HERMES_VARIANT 选择 runtime/hermes/ 下的 variant 子目录（自包含 Dockerfile + 资产）。
+# 默认 hermes-main 对应 upstream main 分支；新增 variant 时调用方在命令行覆盖即可。
+HERMES_VARIANT       ?= hermes-main
+HERMES_VARIANT_DIR   := runtime/hermes/$(HERMES_VARIANT)
+HERMES_IMAGE_REPO    ?= crpi-nu3ibz4f07feyghi.cn-beijing.personal.cr.aliyuncs.com/ywjs_app/oc-manager-hermes
+# hermes tag = <variant>-<timestamp>，便于在 ACR 区分不同 variant 的镜像。
+HERMES_IMAGE         := $(HERMES_IMAGE_REPO):$(HERMES_VARIANT)-$(IMAGE_TIMESTAMP)
 
 # 输入 make 不带参数时, 显式跳到 help target, 输出按分组的可用 target 列表。
 .DEFAULT_GOAL := help
@@ -88,11 +91,17 @@ web-build: ## 在 manager-web 容器内跑 vite build
 
 ##@ Hermes runtime 镜像
 
-build-hermes-runtime: ## 本地构建 hermes runtime dev 镜像 (tag: hermes-runtime:dev)
-	docker build -t hermes-runtime:dev ./runtime/hermes
+build-hermes-runtime: ## 本地 dev 构建 hermes runtime（tag: hermes-runtime:<variant>-dev）
+	docker build \
+	  -t hermes-runtime:$(HERMES_VARIANT)-dev \
+	  --build-arg HERMES_REF=$$(cat $(HERMES_VARIANT_DIR)/version.txt) \
+	  --build-arg OC_IMAGE_VARIANT=$(HERMES_VARIANT) \
+	  --build-arg OC_BUILD_TS=$(IMAGE_TIMESTAMP) \
+	  $(HERMES_VARIANT_DIR)
 
-verify-hermes-runtime: ## 跑 verify-hermes-runtime.sh 校验镜像
-	./scripts/verify-hermes-runtime.sh
+verify-hermes-runtime: ## 镜像内 pytest 自检 lib/renderer/migrator/oc-entrypoint
+	docker run --rm --entrypoint python hermes-runtime:$(HERMES_VARIANT)-dev \
+	  -m pytest /usr/local/lib/oc-entrypoint/tests/ -v
 
 ##@ 镜像构建发布
 
@@ -138,9 +147,15 @@ release-web-image: build-web-image push-web-image ## 构建并推送 manager-web
 
 # build-hermes-image 在本地构建 hermes runtime 生产镜像，直接打上 aliyun ACR 完整 tag，
 # 不推送，便于发布前先在本地跑 verify-hermes-runtime 等校验脚本。
+# build context 取自 HERMES_VARIANT 指向的子目录（自包含 Dockerfile + 资产）。
 .PHONY: build-hermes-image
-build-hermes-image: ## 本地构建 hermes runtime 生产镜像，tag 取当前时间戳
-	docker build -t $(HERMES_IMAGE) ./runtime/hermes
+build-hermes-image: ## 本地构建 hermes runtime 生产镜像，tag = <variant>-<timestamp>
+	docker build \
+	  -t $(HERMES_IMAGE) \
+	  --build-arg HERMES_REF=$$(cat $(HERMES_VARIANT_DIR)/version.txt) \
+	  --build-arg OC_IMAGE_VARIANT=$(HERMES_VARIANT) \
+	  --build-arg OC_BUILD_TS=$(IMAGE_TIMESTAMP) \
+	  $(HERMES_VARIANT_DIR)
 
 # push-hermes-image 推送已构建的 hermes runtime 生产镜像；构建步骤独立，
 # 方便在 ACR 凭据未就绪 / verify 未通过时只 build 不 push。
