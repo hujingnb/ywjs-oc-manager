@@ -83,6 +83,7 @@ func TestLabelAction(t *testing.T) {
 		{"app", "disable_api_key", "禁用 API Key"},             // 禁用 API key
 		{"app", "restore_api_key", "恢复 API Key"},             // 恢复 API key
 		{"app", "initialize", "初始化应用"},                       // worker 初始化应用容器
+		{"app", AuditActionAppRuntimeImageChanged, "应用镜像变更"}, // 平台管理员手动改 apps.runtime_image_ref；本期无 UI，常量与 label 预置
 		// user 资源
 		{"user", "delete_member", "移除成员"}, // 成员禁用/删除
 		// organization 资源

@@ -3,6 +3,13 @@ package service
 // audit_label.go 集中维护审计日志字段的中文翻译映射。
 // 所有 label 函数对未知值均 fallback 到原始字符串，保证后端扩展时前端不显示空白。
 
+// AuditActionAppRuntimeImageChanged 是审计事件 app.runtime_image_changed 的
+// action 字段值。平台管理员手动修改 apps.runtime_image_ref 时触发，
+// 写入审计时 target_type 取 "app"、action 取本常量值；metadata 应携带 from /
+// to 镜像 tag 便于排查。本期不提供 UI，常量与 i18n 标签先就位，未来加 UI
+// 直接消费，避免散落 magic string。
+const AuditActionAppRuntimeImageChanged = "runtime_image_changed"
+
 // actorRoleLabels 将 actor_role 原始值映射为中文展示名。
 var actorRoleLabels = map[string]string{
 	"system":         "系统",
@@ -47,6 +54,9 @@ var actionLabels = map[[2]string]string{
 	{"app", "disable_api_key"}:            "禁用 API Key",
 	{"app", "restore_api_key"}:            "恢复 API Key",
 	{"app", "initialize"}:                 "初始化应用",
+	// app.runtime_image_changed：平台管理员手动改 apps.runtime_image_ref 时触发。
+	// 本期不实现 UI，常量与 label 先落位避免未来散落 magic string。
+	{"app", AuditActionAppRuntimeImageChanged}: "应用镜像变更",
 	// user 资源
 	{"user", "delete_member"}: "移除成员",
 	// organization 资源
