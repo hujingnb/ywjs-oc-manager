@@ -255,3 +255,83 @@ func TestScopeClient_PropagatesErrorBody(t *testing.T) {
 		t.Fatalf("err 应携带 agent 返回的错误体: %v", err)
 	}
 }
+
+// TestScopeClient_UploadAppInputFile 验证 UploadAppInputFile 走 PUT
+// /v1/scopes/apps/<id>/input/file?path=<relPath>，并透传 body 与 Authorization 头。
+// 该端点对应 agent T13 新增的 input/file 路由，与旧 runtime/file 路由不同；
+// 用例覆盖正常路径，确保 manager 端不会再误发到已下线的 runtime/file。
+func TestScopeClient_UploadAppInputFile(t *testing.T) {
+	s := newScopeServer(nil)
+	defer s.Close()
+	c := NewFileClient(s.URL, "tok")
+
+	// 场景：上传 manifest.yaml 到 apps/app-1/input/manifest.yaml，
+	// 验证 method=PUT、URL 路径、query 内 relPath 经 url-encode、body 与 auth 头一致。
+	err := c.UploadAppInputFile(context.Background(), "app-1", "manifest.yaml",
+		strings.NewReader("yaml-body"))
+	require.NoError(t, err)
+	require.Len(t, s.captured, 1)
+	got := s.captured[0]
+	require.Equal(t, http.MethodPut, got.method)
+	require.Equal(t, "/v1/scopes/apps/app-1/input/file", got.path)
+	require.Equal(t, "path=manifest.yaml", got.query)
+	require.Equal(t, "yaml-body", string(got.body))
+	require.Equal(t, "Bearer tok", got.auth)
+	require.Equal(t, "application/octet-stream", got.contType)
+}
+
+// TestScopeClient_UploadAppInputFile_EncodesRelPath 验证含子目录的 relPath
+// 在 query 中按 url 标准编码，不会被 / 字符提前截断 path。
+func TestScopeClient_UploadAppInputFile_EncodesRelPath(t *testing.T) {
+	s := newScopeServer(nil)
+	defer s.Close()
+	c := NewFileClient(s.URL, "tok")
+
+	// 场景：写 resources/persona.md 这种带子目录的 relPath，
+	// 验证 query 编码后 / 变成 %2F，server 侧仍能拿到完整 relPath。
+	err := c.UploadAppInputFile(context.Background(), "app-1", "resources/persona.md",
+		strings.NewReader("persona"))
+	require.NoError(t, err)
+	require.Len(t, s.captured, 1)
+	require.Equal(t, "path=resources%2Fpersona.md", s.captured[0].query)
+}
+
+// TestScopeClient_UploadAppInputFile_PropagatesErrorBody 验证 agent 返回 4xx 时
+// 错误体能被透传到 manager 调用方，便于上层定位 sandbox 越界等问题。
+func TestScopeClient_UploadAppInputFile_PropagatesErrorBody(t *testing.T) {
+	s := newScopeServer(func(req capturedReq, w http.ResponseWriter) {
+		w.WriteHeader(http.StatusForbidden)
+		_, _ = w.Write([]byte(`{"error":"path escapes input sandbox"}`))
+	})
+	defer s.Close()
+	c := NewFileClient(s.URL, "tok")
+
+	// 场景：agent 拒绝越界 relPath，返回 403 + 错误说明；
+	// 验证 UploadAppInputFile 返回的 err.Error() 包含 agent 错误描述。
+	err := c.UploadAppInputFile(context.Background(), "app-1", "../escape",
+		strings.NewReader("x"))
+	require.Error(t, err)
+	require.Contains(t, err.Error(), "path escapes input sandbox")
+}
+
+// TestAppScopedFileClient_WriteAppInputFile 验证 wrapper 能把
+// hermes.AppInputWriter.WriteAppInputFile 调用正确转发到底层
+// AgentFileClient.UploadAppInputFile，参数顺序保持一致 (appID, relPath, body)。
+func TestAppScopedFileClient_WriteAppInputFile(t *testing.T) {
+	s := newScopeServer(nil)
+	defer s.Close()
+	inner := NewFileClient(s.URL, "tok")
+	wrapper := NewAppScopedFileClient(inner)
+
+	// 场景：通过 wrapper 写 resources/rules.md，wrapper 不应吞掉参数 / 改写路径，
+	// 验证最终 HTTP 请求与直接调 UploadAppInputFile 等价。
+	err := wrapper.WriteAppInputFile(context.Background(), "app-2", "resources/rules.md",
+		strings.NewReader("rule"))
+	require.NoError(t, err)
+	require.Len(t, s.captured, 1)
+	got := s.captured[0]
+	require.Equal(t, http.MethodPut, got.method)
+	require.Equal(t, "/v1/scopes/apps/app-2/input/file", got.path)
+	require.Equal(t, "path=resources%2Frules.md", got.query)
+	require.Equal(t, "rule", string(got.body))
+}

@@ -264,6 +264,73 @@ func (c *AgentFileClient) UploadAppKnowledgeFile(ctx context.Context, appID, rel
 	return c.doKnowledgeFile(ctx, http.MethodPut, "apps", appID, relPath, content)
 }
 
+// UploadAppInputFile 把 manager 渲染的 Hermes 输入资源
+// (manifest.yaml / resources/persona.md / resources/*-rules.md) 上传到节点
+// apps/{appID}/input/{relPath}; agent 端写入节点本地文件系统, 容器启动时
+// 该目录由 oc-entrypoint 读取并完成最终装配。
+//
+// 与 UploadAppRuntimeFile 的差别:
+//   - 走 /v1/scopes/apps/<id>/input/file 路由 (agent T13 新增),
+//     对应节点磁盘 apps/<id>/input/;
+//   - 写入的不再是 SOUL.md / config.yaml / .env, 而是 hermes 包定义的
+//     新版 manifest + 资源文件; UploadAppRuntimeFile 暂保留供老链路使用,
+//     待全部调用方切换完毕后整体删除。
+//
+// relPath 必须为相对路径, agent 端会做沙箱校验, 越界返回 4xx。
+func (c *AgentFileClient) UploadAppInputFile(ctx context.Context, appID, relPath string, content io.Reader) error {
+	endpoint, err := c.endpoint(fmt.Sprintf("/v1/scopes/apps/%s/input/file", url.PathEscape(appID)))
+	if err != nil {
+		return err
+	}
+	q := url.Values{}
+	q.Set("path", relPath)
+	req, err := http.NewRequestWithContext(ctx, http.MethodPut, endpoint+"?"+q.Encode(), content)
+	if err != nil {
+		return err
+	}
+	req.Header.Set("Content-Type", "application/octet-stream")
+	c.authorize(req)
+	resp, err := c.httpClient().Do(req)
+	if err != nil {
+		return err
+	}
+	defer resp.Body.Close()
+	return expectSuccess(resp, "upload app input file")
+}
+
+// AppScopedFileClient 把 *AgentFileClient 适配为 internal/integrations/hermes
+// 包定义的 AppInputWriter 接口 (方法名 WriteAppInputFile)。
+//
+// 之所以需要 wrapper:
+//   - AgentFileClient 是基础设施层 client, 方法名沿用 UploadAppXxxFile 命名;
+//   - hermes 包面向业务逻辑, 接口方法名是 WriteAppInputFile;
+//   - Go 接口按方法名结构匹配, 不能直接让 AgentFileClient 满足
+//     hermes.AppInputWriter, 因此用一层薄 wrapper 做方法名映射。
+//
+// 当前 AgentFileClient 已是「按 nodeID 解析后」的单节点 client (由
+// AgentBackedAdapter.resolveFile 在外层按 nodeID 选出), 所以 wrapper
+// 本身不再需要单独绑定 nodeID; worker handler 拿到目标 nodeID 后先
+// resolveFile 拿到 AgentFileClient, 再用 NewAppScopedFileClient 包一层
+// 即可传给 hermes.WriteAppInput。
+type AppScopedFileClient struct {
+	// inner 是已经按 nodeID 解析后的 agent 文件 client; 调用 wrapper 的
+	// WriteAppInputFile 会直接转发到 inner.UploadAppInputFile。
+	inner *AgentFileClient
+}
+
+// NewAppScopedFileClient 用既有的 AgentFileClient 构造适配实例;
+// inner 为 nil 时返回的 wrapper 在调用时会 panic, 调用方应在构造时校验。
+func NewAppScopedFileClient(inner *AgentFileClient) *AppScopedFileClient {
+	return &AppScopedFileClient{inner: inner}
+}
+
+// WriteAppInputFile 实现 internal/integrations/hermes.AppInputWriter 接口。
+// 参数顺序与接口对齐: (ctx, appID, relPath, body); 内部直接转发给
+// inner.UploadAppInputFile, 不附加额外业务校验 (越界 / 路径合法性由 agent 校验)。
+func (c *AppScopedFileClient) WriteAppInputFile(ctx context.Context, appID, relPath string, body io.Reader) error {
+	return c.inner.UploadAppInputFile(ctx, appID, relPath, body)
+}
+
 // DeleteOrgKnowledge 删除组织级知识库的单文件或子目录。不存在视为成功（幂等）。
 func (c *AgentFileClient) DeleteOrgKnowledge(ctx context.Context, orgID, relPath string) error {
 	return c.doKnowledgeFile(ctx, http.MethodDelete, "orgs", orgID, relPath, nil)
