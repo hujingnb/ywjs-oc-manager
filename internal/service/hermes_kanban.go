@@ -45,6 +45,11 @@ var kanbanStatuses = map[string]bool{
 	"blocked": true, "done": true, "archived": true,
 }
 
+// kanbanWorkspaceKinds 是合法的 workspace_kind 枚举白名单。
+var kanbanWorkspaceKinds = map[string]bool{
+	"scratch": true, "dir": true, "worktree": true,
+}
+
 // HermesKanbanService 暴露 Kanban 看板的读写能力。
 type HermesKanbanService struct {
 	execer  kanbanExecer
@@ -240,6 +245,9 @@ func (s *HermesKanbanService) Stats(ctx context.Context, principal auth.Principa
 // ————————————————————————————————————————————————————
 
 // resolveManage 解析 appID 并做写权限校验（比 resolve 多一层 CanManageAppKanban）。
+// 注：resolve 内部已含 CanViewAppKanban 读权限检查；此处 CanManageAppKanban 当前
+// 与 CanViewAppKanban 等价（均委托 CanViewApp），存在冗余，但有意保留以便将来
+// 读写权限分离演化时此处可独立收紧写权限，无需改动调用方。
 func (s *HermesKanbanService) resolveManage(ctx context.Context, principal auth.Principal, appID string) (KanbanAppLocation, error) {
 	loc, err := s.resolve(ctx, principal, appID)
 	if err != nil {
@@ -259,7 +267,13 @@ type CreateKanbanTaskInput struct {
 	Body     string
 	Assignee string // 必填
 	Priority int
-	// 以下为高级字段（仅平台管理员）
+	// 以下为高级字段，权限模型：仅平台管理员（platform_admin）可填写；
+	// 组织管理员（org_admin）和组织成员（org_member）提交的这些字段在 handler 层
+	// 按 principal.Role 被 strip（丢弃），不会进入 service 层。
+	// service 层信任已进入 CreateTask 的高级字段已经过 handler 层角色过滤：
+	//   - Skills、WorkspacePath 作为自由文本，不做内容白名单校验；
+	//   - WorkspaceKind 做枚举校验（见 kanbanWorkspaceKinds）；
+	//   - ParentID 做 taskID 正则校验（见 taskIDRe）。
 	Skills        string
 	WorkspaceKind string
 	WorkspacePath string
@@ -269,6 +283,10 @@ type CreateKanbanTaskInput struct {
 
 // CreateTask 创建一个新任务，返回新任务详情。
 // title / body 等自由文本作为独立 argv 元素传入，不拼 shell，杜绝注入。
+// 高级字段（Skills/WorkspaceKind/WorkspacePath/ParentID/MaxRetries）仅平台管理员可填，
+// 由 handler 层按 principal 角色 strip；service 层信任进入此方法的高级字段已经过
+// handler 角色过滤，故 Skills/WorkspacePath 不做内容白名单，WorkspaceKind 做枚举校验，
+// ParentID 做 taskID 正则校验。
 func (s *HermesKanbanService) CreateTask(ctx context.Context, principal auth.Principal, appID string, in CreateKanbanTaskInput) (KanbanTaskDetail, error) {
 	loc, err := s.resolveManage(ctx, principal, appID)
 	if err != nil {
@@ -299,6 +317,9 @@ func (s *HermesKanbanService) CreateTask(ctx context.Context, principal auth.Pri
 		args = append(args, "--skills", in.Skills)
 	}
 	if in.WorkspaceKind != "" {
+		if !kanbanWorkspaceKinds[in.WorkspaceKind] {
+			return KanbanTaskDetail{}, fmt.Errorf("%w: 非法 workspace_kind", ErrKanbanBadRequest)
+		}
 		args = append(args, "--workspace-kind", in.WorkspaceKind)
 	}
 	if in.WorkspacePath != "" {
@@ -467,6 +488,8 @@ func (s *HermesKanbanService) Reclaim(ctx context.Context, principal auth.Princi
 
 // StreamEvents 在 hermes 容器内执行 `kanban watch` 并把每行 NDJSON 投递到回调。
 // 该方法阻塞直到 ctx 取消、流结束或出错。board watch 覆盖整个看板所有任务事件。
+// 该方法是只读监听，仅需读权限（CanViewAppKanban），故用 resolve 而非 resolveManage，
+// 并非遗漏——watch 不产生任何写操作，不需要写权限。
 func (s *HermesKanbanService) StreamEvents(ctx context.Context, principal auth.Principal, appID, board string, onLine func(line string)) error {
 	loc, err := s.resolve(ctx, principal, appID)
 	if err != nil {

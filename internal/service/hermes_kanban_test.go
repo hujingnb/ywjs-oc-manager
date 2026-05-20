@@ -2,7 +2,9 @@ package service
 
 import (
 	"context"
+	"errors"
 	"testing"
+	"time"
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
@@ -27,7 +29,13 @@ func (f *fakeKanbanExecer) ContainerExecJSON(_ context.Context, _, _ string, cmd
 
 func (f *fakeKanbanExecer) ContainerExecStream(_ context.Context, _, _ string, cmd []string) (runtime.ExecStreamHandle, error) {
 	f.lastCmd = cmd
-	return runtime.ExecStreamHandle{}, f.err
+	ch := make(chan string)
+	close(ch)
+	return runtime.ExecStreamHandle{
+		Lines: ch,
+		Err:   func() error { return nil },
+		Close: func() {},
+	}, f.err
 }
 
 // fakeKanbanLocator 返回预设的 app 运行时坐标。
@@ -297,6 +305,8 @@ func TestCompleteHappy(t *testing.T) {
 type fakeStreamExecer struct {
 	// lines 是预设的待投递行。
 	lines []string
+	// lastCmd 记录最后一次 ContainerExecStream 收到的 cmd，用于 argv 断言。
+	lastCmd []string
 }
 
 // ContainerExecJSON 在 fakeStreamExecer 中不使用，返回空结果。
@@ -304,8 +314,9 @@ func (f *fakeStreamExecer) ContainerExecJSON(_ context.Context, _, _ string, _ [
 	return runtime.ExecJSONResult{}, nil
 }
 
-// ContainerExecStream 把 lines 全部写入 channel 后关闭，模拟流式输出。
-func (f *fakeStreamExecer) ContainerExecStream(_ context.Context, _, _ string, _ []string) (runtime.ExecStreamHandle, error) {
+// ContainerExecStream 把 lines 全部写入 channel 后关闭，模拟流式输出；同时记录 cmd 用于断言。
+func (f *fakeStreamExecer) ContainerExecStream(_ context.Context, _, _ string, cmd []string) (runtime.ExecStreamHandle, error) {
+	f.lastCmd = cmd
 	ch := make(chan string, len(f.lines))
 	for _, l := range f.lines {
 		ch <- l
@@ -318,9 +329,9 @@ func (f *fakeStreamExecer) ContainerExecStream(_ context.Context, _, _ string, _
 	}, nil
 }
 
-// TestStreamEventsDeliversLines 验证：StreamEvents 把流式行逐条交给 onLine 回调。
+// TestStreamEventsDeliversLines 验证：StreamEvents 把流式行逐条交给 onLine 回调；argv 符合 watch 计划。
 func TestStreamEventsDeliversLines(t *testing.T) {
-	// 预设两行 NDJSON，验证全部按顺序传给回调。
+	// 预设两行 NDJSON，验证全部按顺序传给回调，且 argv 含 watch/--board/--json。
 	execer := &fakeStreamExecer{lines: []string{`{"kind":"claimed"}`, `{"kind":"heartbeat"}`}}
 	svc := NewHermesKanbanService(execer, &fakeKanbanLocator{loc: healthyLoc()})
 
@@ -331,5 +342,156 @@ func TestStreamEventsDeliversLines(t *testing.T) {
 	require.NoError(t, err)
 	// 两行事件应按顺序全部到达
 	assert.Equal(t, []string{`{"kind":"claimed"}`, `{"kind":"heartbeat"}`}, got)
+	// argv 必须与计划一致：hermes kanban watch --board default --json
+	assert.Equal(t, []string{"hermes", "kanban", "watch", "--board", "default", "--json"}, execer.lastCmd)
+}
+
+// ————————————————————————————————————————————————————
+// 修复 4：写 verb 补充测试
+// ————————————————————————————————————————————————————
+
+// TestBlockRejectsEmptyReason 验证：Block 传空 reason 时返回 ErrKanbanBadRequest，且不下发 CLI。
+func TestBlockRejectsEmptyReason(t *testing.T) {
+	// 阻塞原因为空字符串，不满足 CLI 必填要求，应在进入 execer 前被拒绝。
+	execer := &fakeKanbanExecer{}
+	svc := NewHermesKanbanService(execer, &fakeKanbanLocator{loc: healthyLoc()})
+
+	err := svc.Block(context.Background(), kanbanOrgAdmin(), "app-1", "default", "t_1", "")
+	require.ErrorIs(t, err, ErrKanbanBadRequest)
+	// 非法输入不应触达 execer
+	assert.Nil(t, execer.lastCmd)
+}
+
+// TestBlockHappy 验证：Block 正常调用时无错误，且 argv 含 block/taskID/reason/--board。
+func TestBlockHappy(t *testing.T) {
+	// CLI 返回 "ok"，验证 argv 正确拼出阻塞命令。
+	execer := &fakeKanbanExecer{result: runtime.ExecJSONResult{ExitCode: 0, Stdout: "ok"}}
+	svc := NewHermesKanbanService(execer, &fakeKanbanLocator{loc: healthyLoc()})
+
+	err := svc.Block(context.Background(), kanbanOrgAdmin(), "app-1", "default", "t_1", "等待依赖")
+	require.NoError(t, err)
+	// argv 须含 block、任务 ID、阻塞原因及 --board
+	assert.Contains(t, execer.lastCmd, "block")
+	assert.Contains(t, execer.lastCmd, "t_1")
+	assert.Contains(t, execer.lastCmd, "等待依赖")
+	assert.Contains(t, execer.lastCmd, "--board")
+}
+
+// TestReassignRejectsBadProfile 验证：Reassign 传非法 profile（含大写字母和空格）返回 ErrKanbanBadRequest。
+func TestReassignRejectsBadProfile(t *testing.T) {
+	// 非法 profile 不符合 board slug 规范（boardSlugRe），应在进入 execer 前被拒绝。
+	execer := &fakeKanbanExecer{}
+	svc := NewHermesKanbanService(execer, &fakeKanbanLocator{loc: healthyLoc()})
+
+	err := svc.Reassign(context.Background(), kanbanOrgAdmin(), "app-1", "default", "t_1", "Bad Profile")
+	require.ErrorIs(t, err, ErrKanbanBadRequest)
+	// 非法 profile 不应触达 execer
+	assert.Nil(t, execer.lastCmd)
+}
+
+// TestReassignHappy 验证：Reassign 正常调用时 argv 含 reassign/--to 及目标 profile。
+func TestReassignHappy(t *testing.T) {
+	// CLI 返回 "ok"，验证 reassign 命令正确拼出 --to 参数。
+	execer := &fakeKanbanExecer{result: runtime.ExecJSONResult{ExitCode: 0, Stdout: "ok"}}
+	svc := NewHermesKanbanService(execer, &fakeKanbanLocator{loc: healthyLoc()})
+
+	err := svc.Reassign(context.Background(), kanbanOrgAdmin(), "app-1", "default", "t_1", "devops")
+	require.NoError(t, err)
+	// argv 须含 reassign、--to 和目标 profile
+	assert.Contains(t, execer.lastCmd, "reassign")
+	assert.Contains(t, execer.lastCmd, "--to")
+	assert.Contains(t, execer.lastCmd, "devops")
+}
+
+// TestArchiveHappy 验证：Archive 正常调用时 argv 含 archive 及任务 ID。
+func TestArchiveHappy(t *testing.T) {
+	// CLI 返回 "ok"，验证 archive 命令正确拼出。
+	execer := &fakeKanbanExecer{result: runtime.ExecJSONResult{ExitCode: 0, Stdout: "ok"}}
+	svc := NewHermesKanbanService(execer, &fakeKanbanLocator{loc: healthyLoc()})
+
+	err := svc.Archive(context.Background(), kanbanOrgAdmin(), "app-1", "default", "t_1")
+	require.NoError(t, err)
+	// argv 须含 archive 及任务 ID
+	assert.Contains(t, execer.lastCmd, "archive")
+	assert.Contains(t, execer.lastCmd, "t_1")
+}
+
+// TestCreateTaskRejectsBadAssignee 验证：CreateTask 传非法 assignee（含大写字母和空格）返回 ErrKanbanBadRequest。
+func TestCreateTaskRejectsBadAssignee(t *testing.T) {
+	// 非法 assignee 不符合 board slug 规范，应在进入 execer 前被拒绝。
+	execer := &fakeKanbanExecer{}
+	svc := NewHermesKanbanService(execer, &fakeKanbanLocator{loc: healthyLoc()})
+
+	_, err := svc.CreateTask(context.Background(), kanbanOrgAdmin(), "app-1", CreateKanbanTaskInput{
+		Title:    "新任务",
+		Assignee: "Bad Assignee", // 含大写字母和空格，非法
+	})
+	require.ErrorIs(t, err, ErrKanbanBadRequest)
+	// 非法 assignee 不应触达 execer
+	assert.Nil(t, execer.lastCmd)
+}
+
+// TestCreateTaskRejectsBadWorkspaceKind 验证：CreateTask 传非法 workspace_kind 返回 ErrKanbanBadRequest。
+func TestCreateTaskRejectsBadWorkspaceKind(t *testing.T) {
+	// 平台管理员场景：直接构造含非法 WorkspaceKind 的输入，应被枚举白名单拦截。
+	execer := &fakeKanbanExecer{}
+	svc := NewHermesKanbanService(execer, &fakeKanbanLocator{loc: healthyLoc()})
+
+	_, err := svc.CreateTask(context.Background(), kanbanOrgAdmin(), "app-1", CreateKanbanTaskInput{
+		Title:         "新任务",
+		Assignee:      "devops",
+		WorkspaceKind: "bogus", // 不在 kanbanWorkspaceKinds 白名单中
+	})
+	require.ErrorIs(t, err, ErrKanbanBadRequest)
+	// 非法 workspace_kind 不应触达 execer
+	assert.Nil(t, execer.lastCmd)
+}
+
+// ————————————————————————————————————————————————————
+// 修复 6：StreamEvents ctx 取消路径测试
+// ————————————————————————————————————————————————————
+
+// fakeBlockingStreamExecer 是流式 execer 的假实现，其 Lines channel 永不关闭，
+// 用于测试 ctx 取消路径——StreamEvents 应在 ctx 取消后退出并返回 context.Canceled。
+type fakeBlockingStreamExecer struct{}
+
+// ContainerExecJSON 在此 fake 中不使用，返回空结果。
+func (f *fakeBlockingStreamExecer) ContainerExecJSON(_ context.Context, _, _ string, _ []string) (runtime.ExecJSONResult, error) {
+	return runtime.ExecJSONResult{}, nil
+}
+
+// ContainerExecStream 返回一个永不关闭、永不写入的 Lines channel，模拟长时间 hang 的流。
+func (f *fakeBlockingStreamExecer) ContainerExecStream(_ context.Context, _, _ string, _ []string) (runtime.ExecStreamHandle, error) {
+	ch := make(chan string) // 永不关闭、永不写入
+	return runtime.ExecStreamHandle{
+		Lines: ch,
+		Err:   func() error { return nil },
+		Close: func() {},
+	}, nil
+}
+
+// TestStreamEventsCancelled 验证：ctx 取消后 StreamEvents 及时退出并返回 context.Canceled。
+func TestStreamEventsCancelled(t *testing.T) {
+	// 使用永不关闭的流，验证 ctx 取消是唯一退出路径，防止测试死锁。
+	svc := NewHermesKanbanService(&fakeBlockingStreamExecer{}, &fakeKanbanLocator{loc: healthyLoc()})
+
+	ctx, cancel := context.WithCancel(context.Background())
+
+	// 用带超时的 channel 接收 StreamEvents 返回值，避免测试死锁。
+	errCh := make(chan error, 1)
+	go func() {
+		errCh <- svc.StreamEvents(ctx, kanbanOrgAdmin(), "app-1", "default", func(_ string) {})
+	}()
+
+	// 取消 ctx，StreamEvents 应在合理时间内返回。
+	cancel()
+
+	select {
+	case err := <-errCh:
+		// StreamEvents 应返回 context.Canceled
+		require.True(t, errors.Is(err, context.Canceled), "期望 context.Canceled，实际: %v", err)
+	case <-time.After(3 * time.Second):
+		t.Fatal("StreamEvents 在 ctx 取消后未及时退出，疑似死锁")
+	}
 }
 
