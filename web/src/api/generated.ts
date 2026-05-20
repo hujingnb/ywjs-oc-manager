@@ -644,6 +644,896 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/apps/{appId}/hermes/kanban/boards": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** 列出实例任务看板的 board */
+        get: {
+            parameters: {
+                query?: never;
+                header?: never;
+                path: {
+                    /** @description 应用 ID */
+                    appId: string;
+                };
+                cookie?: never;
+            };
+            requestBody?: never;
+            responses: {
+                /** @description OK */
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": {
+                            [key: string]: components["schemas"]["service.KanbanBoard"][];
+                        };
+                    };
+                };
+                /** @description Forbidden */
+                403: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["handlers.ErrorResponse"];
+                    };
+                };
+                /** @description Service Unavailable */
+                503: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["handlers.ErrorResponse"];
+                    };
+                };
+            };
+        };
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/apps/{appId}/hermes/kanban/events": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * 订阅任务看板实时事件流（SSE）
+         * @description 以 Server-Sent Events 推送 hermes kanban watch 的 NDJSON 事件。board 维度订阅。
+         */
+        get: {
+            parameters: {
+                query?: {
+                    /** @description board slug */
+                    board?: string;
+                };
+                header?: never;
+                path: {
+                    /** @description 应用 ID */
+                    appId: string;
+                };
+                cookie?: never;
+            };
+            requestBody?: never;
+            responses: {
+                /** @description OK */
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "text/event-stream": string;
+                    };
+                };
+            };
+        };
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/apps/{appId}/hermes/kanban/stats": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** 查询任务看板统计 */
+        get: {
+            parameters: {
+                query?: {
+                    /** @description board slug */
+                    board?: string;
+                };
+                header?: never;
+                path: {
+                    /** @description 应用 ID */
+                    appId: string;
+                };
+                cookie?: never;
+            };
+            requestBody?: never;
+            responses: {
+                /** @description OK */
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": {
+                            [key: string]: components["schemas"]["service.KanbanStats"];
+                        };
+                    };
+                };
+                /** @description Forbidden */
+                403: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["handlers.ErrorResponse"];
+                    };
+                };
+                /** @description Internal Server Error */
+                500: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["handlers.ErrorResponse"];
+                    };
+                };
+                /** @description Bad Gateway */
+                502: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["handlers.ErrorResponse"];
+                    };
+                };
+                /** @description Service Unavailable */
+                503: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["handlers.ErrorResponse"];
+                    };
+                };
+            };
+        };
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/apps/{appId}/hermes/kanban/tasks": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** 列出某 board 的任务 */
+        get: {
+            parameters: {
+                query?: {
+                    /** @description board slug，缺省 default */
+                    board?: string;
+                    /** @description 按状态过滤 */
+                    status?: string;
+                    /** @description 按 assignee 过滤 */
+                    assignee?: string;
+                };
+                header?: never;
+                path: {
+                    /** @description 应用 ID */
+                    appId: string;
+                };
+                cookie?: never;
+            };
+            requestBody?: never;
+            responses: {
+                /** @description OK */
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": {
+                            [key: string]: components["schemas"]["service.KanbanTask"][];
+                        };
+                    };
+                };
+                /** @description Forbidden */
+                403: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["handlers.ErrorResponse"];
+                    };
+                };
+                /** @description Internal Server Error */
+                500: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["handlers.ErrorResponse"];
+                    };
+                };
+                /** @description Bad Gateway */
+                502: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["handlers.ErrorResponse"];
+                    };
+                };
+                /** @description Service Unavailable */
+                503: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["handlers.ErrorResponse"];
+                    };
+                };
+            };
+        };
+        put?: never;
+        /**
+         * 新建任务
+         * @description 创建一个 Kanban 任务。Skills/WorkspaceKind/WorkspacePath/ParentID/MaxRetries 仅平台管理员可生效。
+         */
+        post: {
+            parameters: {
+                query?: never;
+                header?: never;
+                path: {
+                    /** @description 应用 ID */
+                    appId: string;
+                };
+                cookie?: never;
+            };
+            /** @description 新建任务请求 */
+            requestBody: {
+                content: {
+                    "application/json": Record<string, never> | components["schemas"]["handlers.CreateKanbanTaskRequest"];
+                };
+            };
+            responses: {
+                /** @description OK */
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": {
+                            [key: string]: components["schemas"]["service.KanbanTaskDetail"];
+                        };
+                    };
+                };
+                /** @description Bad Request */
+                400: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["handlers.ErrorResponse"];
+                    };
+                };
+                /** @description Forbidden */
+                403: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["handlers.ErrorResponse"];
+                    };
+                };
+            };
+        };
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/apps/{appId}/hermes/kanban/tasks/{taskId}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** 查询单个任务详情 */
+        get: {
+            parameters: {
+                query?: {
+                    /** @description board slug */
+                    board?: string;
+                };
+                header?: never;
+                path: {
+                    /** @description 应用 ID */
+                    appId: string;
+                    /** @description 任务 ID */
+                    taskId: string;
+                };
+                cookie?: never;
+            };
+            requestBody?: never;
+            responses: {
+                /** @description OK */
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": {
+                            [key: string]: components["schemas"]["service.KanbanTaskDetail"];
+                        };
+                    };
+                };
+                /** @description Forbidden */
+                403: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["handlers.ErrorResponse"];
+                    };
+                };
+                /** @description Internal Server Error */
+                500: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["handlers.ErrorResponse"];
+                    };
+                };
+                /** @description Bad Gateway */
+                502: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["handlers.ErrorResponse"];
+                    };
+                };
+                /** @description Service Unavailable */
+                503: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["handlers.ErrorResponse"];
+                    };
+                };
+            };
+        };
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/apps/{appId}/hermes/kanban/tasks/{taskId}/archive": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** 归档任务 */
+        post: {
+            parameters: {
+                query?: never;
+                header?: never;
+                path: {
+                    /** @description 应用 ID */
+                    appId: string;
+                    /** @description 任务 ID */
+                    taskId: string;
+                };
+                cookie?: never;
+            };
+            /** @description board 请求 */
+            requestBody?: {
+                content: {
+                    "application/json": Record<string, never> | components["schemas"]["handlers.KanbanBoardRequest"];
+                };
+            };
+            responses: {
+                /** @description No Content */
+                204: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content?: never;
+                };
+                /** @description Forbidden */
+                403: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["handlers.ErrorResponse"];
+                    };
+                };
+            };
+        };
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/apps/{appId}/hermes/kanban/tasks/{taskId}/block": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** 阻塞任务 */
+        post: {
+            parameters: {
+                query?: never;
+                header?: never;
+                path: {
+                    /** @description 应用 ID */
+                    appId: string;
+                    /** @description 任务 ID */
+                    taskId: string;
+                };
+                cookie?: never;
+            };
+            /** @description 阻塞请求 */
+            requestBody: {
+                content: {
+                    "application/json": Record<string, never> | components["schemas"]["handlers.KanbanBlockRequest"];
+                };
+            };
+            responses: {
+                /** @description No Content */
+                204: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content?: never;
+                };
+                /** @description Bad Request */
+                400: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["handlers.ErrorResponse"];
+                    };
+                };
+                /** @description Forbidden */
+                403: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["handlers.ErrorResponse"];
+                    };
+                };
+            };
+        };
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/apps/{appId}/hermes/kanban/tasks/{taskId}/comment": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** 给任务加评论 */
+        post: {
+            parameters: {
+                query?: never;
+                header?: never;
+                path: {
+                    /** @description 应用 ID */
+                    appId: string;
+                    /** @description 任务 ID */
+                    taskId: string;
+                };
+                cookie?: never;
+            };
+            /** @description 评论请求 */
+            requestBody: {
+                content: {
+                    "application/json": Record<string, never> | components["schemas"]["handlers.KanbanCommentRequest"];
+                };
+            };
+            responses: {
+                /** @description No Content */
+                204: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content?: never;
+                };
+                /** @description Bad Request */
+                400: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["handlers.ErrorResponse"];
+                    };
+                };
+                /** @description Forbidden */
+                403: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["handlers.ErrorResponse"];
+                    };
+                };
+            };
+        };
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/apps/{appId}/hermes/kanban/tasks/{taskId}/complete": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** 标记任务完成 */
+        post: {
+            parameters: {
+                query?: never;
+                header?: never;
+                path: {
+                    /** @description 应用 ID */
+                    appId: string;
+                    /** @description 任务 ID */
+                    taskId: string;
+                };
+                cookie?: never;
+            };
+            /** @description 完成请求 */
+            requestBody: {
+                content: {
+                    "application/json": Record<string, never> | components["schemas"]["handlers.KanbanCompleteRequest"];
+                };
+            };
+            responses: {
+                /** @description No Content */
+                204: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content?: never;
+                };
+                /** @description Bad Request */
+                400: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["handlers.ErrorResponse"];
+                    };
+                };
+                /** @description Forbidden */
+                403: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["handlers.ErrorResponse"];
+                    };
+                };
+            };
+        };
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/apps/{appId}/hermes/kanban/tasks/{taskId}/reassign": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** 重新分配任务 */
+        post: {
+            parameters: {
+                query?: never;
+                header?: never;
+                path: {
+                    /** @description 应用 ID */
+                    appId: string;
+                    /** @description 任务 ID */
+                    taskId: string;
+                };
+                cookie?: never;
+            };
+            /** @description 重分配请求 */
+            requestBody: {
+                content: {
+                    "application/json": Record<string, never> | components["schemas"]["handlers.KanbanReassignRequest"];
+                };
+            };
+            responses: {
+                /** @description No Content */
+                204: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content?: never;
+                };
+                /** @description Bad Request */
+                400: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["handlers.ErrorResponse"];
+                    };
+                };
+                /** @description Forbidden */
+                403: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["handlers.ErrorResponse"];
+                    };
+                };
+            };
+        };
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/apps/{appId}/hermes/kanban/tasks/{taskId}/reclaim": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** 重置任务认领状态 */
+        post: {
+            parameters: {
+                query?: never;
+                header?: never;
+                path: {
+                    /** @description 应用 ID */
+                    appId: string;
+                    /** @description 任务 ID */
+                    taskId: string;
+                };
+                cookie?: never;
+            };
+            /** @description board 请求 */
+            requestBody?: {
+                content: {
+                    "application/json": Record<string, never> | components["schemas"]["handlers.KanbanBoardRequest"];
+                };
+            };
+            responses: {
+                /** @description No Content */
+                204: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content?: never;
+                };
+                /** @description Forbidden */
+                403: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["handlers.ErrorResponse"];
+                    };
+                };
+            };
+        };
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/apps/{appId}/hermes/kanban/tasks/{taskId}/runs": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** 查询任务历次执行 */
+        get: {
+            parameters: {
+                query?: {
+                    /** @description board slug */
+                    board?: string;
+                };
+                header?: never;
+                path: {
+                    /** @description 应用 ID */
+                    appId: string;
+                    /** @description 任务 ID */
+                    taskId: string;
+                };
+                cookie?: never;
+            };
+            requestBody?: never;
+            responses: {
+                /** @description OK */
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": {
+                            [key: string]: components["schemas"]["service.KanbanTaskRun"][];
+                        };
+                    };
+                };
+                /** @description Forbidden */
+                403: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["handlers.ErrorResponse"];
+                    };
+                };
+                /** @description Internal Server Error */
+                500: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["handlers.ErrorResponse"];
+                    };
+                };
+                /** @description Bad Gateway */
+                502: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["handlers.ErrorResponse"];
+                    };
+                };
+                /** @description Service Unavailable */
+                503: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["handlers.ErrorResponse"];
+                    };
+                };
+            };
+        };
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/apps/{appId}/hermes/kanban/tasks/{taskId}/unblock": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** 解除任务阻塞 */
+        post: {
+            parameters: {
+                query?: never;
+                header?: never;
+                path: {
+                    /** @description 应用 ID */
+                    appId: string;
+                    /** @description 任务 ID */
+                    taskId: string;
+                };
+                cookie?: never;
+            };
+            /** @description board 请求 */
+            requestBody?: {
+                content: {
+                    "application/json": Record<string, never> | components["schemas"]["handlers.KanbanBoardRequest"];
+                };
+            };
+            responses: {
+                /** @description No Content */
+                204: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content?: never;
+                };
+                /** @description Forbidden */
+                403: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["handlers.ErrorResponse"];
+                    };
+                };
+            };
+        };
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/apps/{appId}/initialize": {
         parameters: {
             query?: never;
@@ -5669,6 +6559,28 @@ export interface components {
             /** @description NetworkTxBytes 是节点网络累计发送字节数。 */
             network_tx_bytes?: number;
         };
+        "handlers.CreateKanbanTaskRequest": {
+            /** @description Assignee 是任务分配对象（hermes profile 名），必填。 */
+            assignee: string;
+            /** @description Board 是目标 board slug，为空时默认 "default"。 */
+            board?: string;
+            /** @description Body 是任务描述，可为空。 */
+            body?: string;
+            /** @description MaxRetries 是高级字段，仅平台管理员生效：最大重试次数。 */
+            max_retries?: number;
+            /** @description ParentID 是高级字段，仅平台管理员生效：父任务 ID。 */
+            parent_id?: string;
+            /** @description Priority 是任务优先级（0-9），0 为默认。 */
+            priority?: number;
+            /** @description Skills 是高级字段，仅平台管理员生效：指定任务所需技能集。 */
+            skills?: string;
+            /** @description Title 是任务标题，必填。 */
+            title: string;
+            /** @description WorkspaceKind 是高级字段，仅平台管理员生效：workspace 类型（scratch/dir/worktree）。 */
+            workspace_kind?: string;
+            /** @description WorkspacePath 是高级字段，仅平台管理员生效：workspace 路径。 */
+            workspace_path?: string;
+        };
         "handlers.CreateMemberAppRequest": {
             /** @description AppName 是新实例名称，创建时必填。 */
             app_name: string;
@@ -5739,6 +6651,34 @@ export interface components {
             run_after?: string;
             status?: string;
             type?: string;
+        };
+        "handlers.KanbanBlockRequest": {
+            /** @description Board 是目标 board slug，为空时默认 "default"。 */
+            board?: string;
+            /** @description Reason 是阻塞原因，必填。 */
+            reason: string;
+        };
+        "handlers.KanbanBoardRequest": {
+            /** @description Board 是目标 board slug，为空时默认 "default"。 */
+            board?: string;
+        };
+        "handlers.KanbanCommentRequest": {
+            /** @description Board 是目标 board slug，为空时默认 "default"。 */
+            board?: string;
+            /** @description Body 是评论内容，必填。 */
+            body: string;
+        };
+        "handlers.KanbanCompleteRequest": {
+            /** @description Board 是目标 board slug，为空时默认 "default"。 */
+            board?: string;
+            /** @description Result 是可选的完成摘要。 */
+            result?: string;
+        };
+        "handlers.KanbanReassignRequest": {
+            /** @description Board 是目标 board slug，为空时默认 "default"。 */
+            board?: string;
+            /** @description To 是目标分配对象（hermes profile 名），必填。 */
+            to: string;
         };
         "handlers.LoginRequest": {
             /** @description OrgCode 是组织用户登录时填写的组织标识；平台管理员登录时留空。 */
@@ -5997,6 +6937,71 @@ export interface components {
             network_tx_bytes?: number;
             /** @description SampledAt 是采样或聚合桶时间，统一输出 UTC RFC3339。 */
             sampled_at?: string;
+        };
+        "service.KanbanBoard": {
+            archived?: boolean;
+            description?: string;
+            name?: string;
+            slug?: string;
+        };
+        "service.KanbanComment": {
+            author?: string;
+            body?: string;
+            created_at?: number;
+        };
+        "service.KanbanEvent": {
+            created_at?: number;
+            kind?: string;
+            payload?: string;
+        };
+        "service.KanbanStats": {
+            status_counts?: {
+                [key: string]: number;
+            };
+        };
+        "service.KanbanTask": {
+            assignee?: string;
+            body?: string;
+            completed_at?: number;
+            created_at?: number;
+            id?: string;
+            priority?: number;
+            skills?: string;
+            started_at?: number;
+            /** @description triage|todo|ready|running|blocked|done|archived */
+            status?: string;
+            title?: string;
+        };
+        "service.KanbanTaskDetail": {
+            assignee?: string;
+            body?: string;
+            comments?: components["schemas"]["service.KanbanComment"][];
+            completed_at?: number;
+            created_at?: number;
+            events?: components["schemas"]["service.KanbanEvent"][];
+            id?: string;
+            last_heartbeat_at?: number;
+            parent_id?: string;
+            priority?: number;
+            result?: string;
+            skills?: string;
+            started_at?: number;
+            /** @description triage|todo|ready|running|blocked|done|archived */
+            status?: string;
+            title?: string;
+            worker_pid?: number;
+            workspace_kind?: string;
+            workspace_path?: string;
+        };
+        "service.KanbanTaskRun": {
+            ended_at?: number;
+            error?: string;
+            outcome?: string;
+            profile?: string;
+            started_at?: number;
+            status?: string;
+            summary?: string;
+            worker_pid?: number;
         };
         "service.KnowledgeEntryResult": {
             is_dir?: boolean;

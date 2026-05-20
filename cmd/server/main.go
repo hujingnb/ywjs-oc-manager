@@ -390,6 +390,13 @@ func runManager(ctx context.Context, cfg config.Config, logOut io.Writer) error 
 	jobWorker := worker.New(dbStore.Queries, redisQueue, registry, worker.Config{WorkerID: cfg.App.HTTPAddr})
 	jobScheduler := scheduler.New(dbStore.Queries, redisQueue, scheduler.Config{})
 
+	// HermesKanbanService：通过容器内 hermes kanban CLI 提供任务看板能力。
+	// runtimeAdapter 已同时实现 ContainerExecJSON（一次性 exec）和 ContainerExecStream
+	// （流式 exec，用于 hermes kanban watch）；kanbanLocator 通过 app store 解析 app
+	// 的归属组织、拥有者和运行时坐标。
+	kanbanLocator := service.NewKanbanAppLocatorFromStore(dbStore.Queries)
+	hermesKanbanService := service.NewHermesKanbanService(runtimeAdapter, kanbanLocator)
+
 	server := &http.Server{
 		Addr: cfg.App.HTTPAddr,
 		Handler: api.NewRouter(api.Dependencies{
@@ -410,6 +417,7 @@ func runManager(ctx context.Context, cfg config.Config, logOut io.Writer) error 
 			RechargeService:        rechargeService,
 			PlatformOverview:       platformOverviewService,
 			PersonaService:         personaService,
+			HermesKanbanService:    hermesKanbanService,
 			JobsStore:              dbStore.Queries,
 			TokenManager:           tokenManager,
 			AgentTokenSink:         agentTokenSink,

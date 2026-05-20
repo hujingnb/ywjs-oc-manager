@@ -48,6 +48,8 @@ type Dependencies struct {
 	PersonaService *service.PersonaService
 	// PlatformOverview 提供平台总览路由。
 	PlatformOverview *service.PlatformOverviewService
+	// HermesKanbanService 提供实例任务看板能力；nil 时不注册 kanban 路由。
+	HermesKanbanService *service.HermesKanbanService
 	// JobsStore 提供按 job ID 查询异步任务状态的 handler 依赖。
 	JobsStore handlers.JobsStore
 	// TokenManager 供 RequireUserAuth 中间件验证 access token 并注入 principal。
@@ -172,6 +174,9 @@ func NewRouter(deps ...Dependencies) http.Handler {
 	}
 	if dep.PlatformOverview != nil {
 		handlers.RegisterPlatformOverviewRoutes(user, handlers.NewPlatformOverviewHandler(dep.PlatformOverview))
+	}
+	if dep.HermesKanbanService != nil {
+		handlers.RegisterHermesKanbanRoutes(user, handlers.NewHermesKanbanHandler(dep.HermesKanbanService))
 	}
 	return router
 }

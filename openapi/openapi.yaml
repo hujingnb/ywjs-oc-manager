@@ -97,6 +97,42 @@ components:
           description: NetworkTxBytes 是节点网络累计发送字节数。
           type: integer
       type: object
+    handlers.CreateKanbanTaskRequest:
+      properties:
+        assignee:
+          description: Assignee 是任务分配对象（hermes profile 名），必填。
+          type: string
+        board:
+          description: Board 是目标 board slug，为空时默认 "default"。
+          type: string
+        body:
+          description: Body 是任务描述，可为空。
+          type: string
+        max_retries:
+          description: MaxRetries 是高级字段，仅平台管理员生效：最大重试次数。
+          type: integer
+        parent_id:
+          description: ParentID 是高级字段，仅平台管理员生效：父任务 ID。
+          type: string
+        priority:
+          description: Priority 是任务优先级（0-9），0 为默认。
+          type: integer
+        skills:
+          description: Skills 是高级字段，仅平台管理员生效：指定任务所需技能集。
+          type: string
+        title:
+          description: Title 是任务标题，必填。
+          type: string
+        workspace_kind:
+          description: WorkspaceKind 是高级字段，仅平台管理员生效：workspace 类型（scratch/dir/worktree）。
+          type: string
+        workspace_path:
+          description: WorkspacePath 是高级字段，仅平台管理员生效：workspace 路径。
+          type: string
+      required:
+      - assignee
+      - title
+      type: object
     handlers.CreateMemberAppRequest:
       properties:
         app_name:
@@ -216,6 +252,54 @@ components:
           type: string
         type:
           type: string
+      type: object
+    handlers.KanbanBlockRequest:
+      properties:
+        board:
+          description: Board 是目标 board slug，为空时默认 "default"。
+          type: string
+        reason:
+          description: Reason 是阻塞原因，必填。
+          type: string
+      required:
+      - reason
+      type: object
+    handlers.KanbanBoardRequest:
+      properties:
+        board:
+          description: Board 是目标 board slug，为空时默认 "default"。
+          type: string
+      type: object
+    handlers.KanbanCommentRequest:
+      properties:
+        board:
+          description: Board 是目标 board slug，为空时默认 "default"。
+          type: string
+        body:
+          description: Body 是评论内容，必填。
+          type: string
+      required:
+      - body
+      type: object
+    handlers.KanbanCompleteRequest:
+      properties:
+        board:
+          description: Board 是目标 board slug，为空时默认 "default"。
+          type: string
+        result:
+          description: Result 是可选的完成摘要。
+          type: string
+      type: object
+    handlers.KanbanReassignRequest:
+      properties:
+        board:
+          description: Board 是目标 board slug，为空时默认 "default"。
+          type: string
+        to:
+          description: To 是目标分配对象（hermes profile 名），必填。
+          type: string
+      required:
+      - to
       type: object
     handlers.LoginRequest:
       properties:
@@ -626,6 +710,131 @@ components:
         sampled_at:
           description: SampledAt 是采样或聚合桶时间，统一输出 UTC RFC3339。
           type: string
+      type: object
+    service.KanbanBoard:
+      properties:
+        archived:
+          type: boolean
+        description:
+          type: string
+        name:
+          type: string
+        slug:
+          type: string
+      type: object
+    service.KanbanComment:
+      properties:
+        author:
+          type: string
+        body:
+          type: string
+        created_at:
+          type: integer
+      type: object
+    service.KanbanEvent:
+      properties:
+        created_at:
+          type: integer
+        kind:
+          type: string
+        payload:
+          type: string
+      type: object
+    service.KanbanStats:
+      properties:
+        status_counts:
+          additionalProperties:
+            type: integer
+          type: object
+      type: object
+    service.KanbanTask:
+      properties:
+        assignee:
+          type: string
+        body:
+          type: string
+        completed_at:
+          type: integer
+        created_at:
+          type: integer
+        id:
+          type: string
+        priority:
+          type: integer
+        skills:
+          type: string
+        started_at:
+          type: integer
+        status:
+          description: triage|todo|ready|running|blocked|done|archived
+          type: string
+        title:
+          type: string
+      type: object
+    service.KanbanTaskDetail:
+      properties:
+        assignee:
+          type: string
+        body:
+          type: string
+        comments:
+          items:
+            $ref: '#/components/schemas/service.KanbanComment'
+          type: array
+          uniqueItems: false
+        completed_at:
+          type: integer
+        created_at:
+          type: integer
+        events:
+          items:
+            $ref: '#/components/schemas/service.KanbanEvent'
+          type: array
+          uniqueItems: false
+        id:
+          type: string
+        last_heartbeat_at:
+          type: integer
+        parent_id:
+          type: string
+        priority:
+          type: integer
+        result:
+          type: string
+        skills:
+          type: string
+        started_at:
+          type: integer
+        status:
+          description: triage|todo|ready|running|blocked|done|archived
+          type: string
+        title:
+          type: string
+        worker_pid:
+          type: integer
+        workspace_kind:
+          type: string
+        workspace_path:
+          type: string
+      type: object
+    service.KanbanTaskRun:
+      properties:
+        ended_at:
+          type: integer
+        error:
+          type: string
+        outcome:
+          type: string
+        profile:
+          type: string
+        started_at:
+          type: integer
+        status:
+          type: string
+        summary:
+          type: string
+        worker_pid:
+          type: integer
       type: object
     service.KnowledgeEntryResult:
       properties:
@@ -1516,6 +1725,652 @@ paths:
       summary: 解绑渠道
       tags:
       - channels
+  /apps/{appId}/hermes/kanban/boards:
+    get:
+      parameters:
+      - description: 应用 ID
+        in: path
+        name: appId
+        required: true
+        schema:
+          type: string
+      responses:
+        "200":
+          content:
+            application/json:
+              schema:
+                additionalProperties:
+                  items:
+                    $ref: '#/components/schemas/service.KanbanBoard'
+                  type: array
+                type: object
+          description: OK
+        "403":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/handlers.ErrorResponse'
+          description: Forbidden
+        "503":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/handlers.ErrorResponse'
+          description: Service Unavailable
+      security:
+      - BearerAuth: []
+      summary: 列出实例任务看板的 board
+      tags:
+      - hermes-kanban
+  /apps/{appId}/hermes/kanban/events:
+    get:
+      description: 以 Server-Sent Events 推送 hermes kanban watch 的 NDJSON 事件。board 维度订阅。
+      parameters:
+      - description: 应用 ID
+        in: path
+        name: appId
+        required: true
+        schema:
+          type: string
+      - description: board slug
+        in: query
+        name: board
+        schema:
+          type: string
+      responses:
+        "200":
+          content:
+            text/event-stream:
+              schema:
+                type: string
+          description: OK
+      security:
+      - BearerAuth: []
+      summary: 订阅任务看板实时事件流（SSE）
+      tags:
+      - hermes-kanban
+  /apps/{appId}/hermes/kanban/stats:
+    get:
+      parameters:
+      - description: 应用 ID
+        in: path
+        name: appId
+        required: true
+        schema:
+          type: string
+      - description: board slug
+        in: query
+        name: board
+        schema:
+          type: string
+      responses:
+        "200":
+          content:
+            application/json:
+              schema:
+                additionalProperties:
+                  $ref: '#/components/schemas/service.KanbanStats'
+                type: object
+          description: OK
+        "403":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/handlers.ErrorResponse'
+          description: Forbidden
+        "500":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/handlers.ErrorResponse'
+          description: Internal Server Error
+        "502":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/handlers.ErrorResponse'
+          description: Bad Gateway
+        "503":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/handlers.ErrorResponse'
+          description: Service Unavailable
+      security:
+      - BearerAuth: []
+      summary: 查询任务看板统计
+      tags:
+      - hermes-kanban
+  /apps/{appId}/hermes/kanban/tasks:
+    get:
+      parameters:
+      - description: 应用 ID
+        in: path
+        name: appId
+        required: true
+        schema:
+          type: string
+      - description: board slug，缺省 default
+        in: query
+        name: board
+        schema:
+          type: string
+      - description: 按状态过滤
+        in: query
+        name: status
+        schema:
+          type: string
+      - description: 按 assignee 过滤
+        in: query
+        name: assignee
+        schema:
+          type: string
+      responses:
+        "200":
+          content:
+            application/json:
+              schema:
+                additionalProperties:
+                  items:
+                    $ref: '#/components/schemas/service.KanbanTask'
+                  type: array
+                type: object
+          description: OK
+        "403":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/handlers.ErrorResponse'
+          description: Forbidden
+        "500":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/handlers.ErrorResponse'
+          description: Internal Server Error
+        "502":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/handlers.ErrorResponse'
+          description: Bad Gateway
+        "503":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/handlers.ErrorResponse'
+          description: Service Unavailable
+      security:
+      - BearerAuth: []
+      summary: 列出某 board 的任务
+      tags:
+      - hermes-kanban
+    post:
+      description: 创建一个 Kanban 任务。Skills/WorkspaceKind/WorkspacePath/ParentID/MaxRetries
+        仅平台管理员可生效。
+      parameters:
+      - description: 应用 ID
+        in: path
+        name: appId
+        required: true
+        schema:
+          type: string
+      requestBody:
+        content:
+          application/json:
+            schema:
+              oneOf:
+              - type: object
+              - $ref: '#/components/schemas/handlers.CreateKanbanTaskRequest'
+                description: 新建任务请求
+                summary: body
+        description: 新建任务请求
+        required: true
+      responses:
+        "200":
+          content:
+            application/json:
+              schema:
+                additionalProperties:
+                  $ref: '#/components/schemas/service.KanbanTaskDetail'
+                type: object
+          description: OK
+        "400":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/handlers.ErrorResponse'
+          description: Bad Request
+        "403":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/handlers.ErrorResponse'
+          description: Forbidden
+      security:
+      - BearerAuth: []
+      summary: 新建任务
+      tags:
+      - hermes-kanban
+  /apps/{appId}/hermes/kanban/tasks/{taskId}:
+    get:
+      parameters:
+      - description: 应用 ID
+        in: path
+        name: appId
+        required: true
+        schema:
+          type: string
+      - description: 任务 ID
+        in: path
+        name: taskId
+        required: true
+        schema:
+          type: string
+      - description: board slug
+        in: query
+        name: board
+        schema:
+          type: string
+      responses:
+        "200":
+          content:
+            application/json:
+              schema:
+                additionalProperties:
+                  $ref: '#/components/schemas/service.KanbanTaskDetail'
+                type: object
+          description: OK
+        "403":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/handlers.ErrorResponse'
+          description: Forbidden
+        "500":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/handlers.ErrorResponse'
+          description: Internal Server Error
+        "502":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/handlers.ErrorResponse'
+          description: Bad Gateway
+        "503":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/handlers.ErrorResponse'
+          description: Service Unavailable
+      security:
+      - BearerAuth: []
+      summary: 查询单个任务详情
+      tags:
+      - hermes-kanban
+  /apps/{appId}/hermes/kanban/tasks/{taskId}/archive:
+    post:
+      parameters:
+      - description: 应用 ID
+        in: path
+        name: appId
+        required: true
+        schema:
+          type: string
+      - description: 任务 ID
+        in: path
+        name: taskId
+        required: true
+        schema:
+          type: string
+      requestBody:
+        content:
+          application/json:
+            schema:
+              oneOf:
+              - type: object
+              - $ref: '#/components/schemas/handlers.KanbanBoardRequest'
+                description: board 请求
+                summary: body
+        description: board 请求
+      responses:
+        "204":
+          description: No Content
+        "403":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/handlers.ErrorResponse'
+          description: Forbidden
+      security:
+      - BearerAuth: []
+      summary: 归档任务
+      tags:
+      - hermes-kanban
+  /apps/{appId}/hermes/kanban/tasks/{taskId}/block:
+    post:
+      parameters:
+      - description: 应用 ID
+        in: path
+        name: appId
+        required: true
+        schema:
+          type: string
+      - description: 任务 ID
+        in: path
+        name: taskId
+        required: true
+        schema:
+          type: string
+      requestBody:
+        content:
+          application/json:
+            schema:
+              oneOf:
+              - type: object
+              - $ref: '#/components/schemas/handlers.KanbanBlockRequest'
+                description: 阻塞请求
+                summary: body
+        description: 阻塞请求
+        required: true
+      responses:
+        "204":
+          description: No Content
+        "400":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/handlers.ErrorResponse'
+          description: Bad Request
+        "403":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/handlers.ErrorResponse'
+          description: Forbidden
+      security:
+      - BearerAuth: []
+      summary: 阻塞任务
+      tags:
+      - hermes-kanban
+  /apps/{appId}/hermes/kanban/tasks/{taskId}/comment:
+    post:
+      parameters:
+      - description: 应用 ID
+        in: path
+        name: appId
+        required: true
+        schema:
+          type: string
+      - description: 任务 ID
+        in: path
+        name: taskId
+        required: true
+        schema:
+          type: string
+      requestBody:
+        content:
+          application/json:
+            schema:
+              oneOf:
+              - type: object
+              - $ref: '#/components/schemas/handlers.KanbanCommentRequest'
+                description: 评论请求
+                summary: body
+        description: 评论请求
+        required: true
+      responses:
+        "204":
+          description: No Content
+        "400":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/handlers.ErrorResponse'
+          description: Bad Request
+        "403":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/handlers.ErrorResponse'
+          description: Forbidden
+      security:
+      - BearerAuth: []
+      summary: 给任务加评论
+      tags:
+      - hermes-kanban
+  /apps/{appId}/hermes/kanban/tasks/{taskId}/complete:
+    post:
+      parameters:
+      - description: 应用 ID
+        in: path
+        name: appId
+        required: true
+        schema:
+          type: string
+      - description: 任务 ID
+        in: path
+        name: taskId
+        required: true
+        schema:
+          type: string
+      requestBody:
+        content:
+          application/json:
+            schema:
+              oneOf:
+              - type: object
+              - $ref: '#/components/schemas/handlers.KanbanCompleteRequest'
+                description: 完成请求
+                summary: body
+        description: 完成请求
+        required: true
+      responses:
+        "204":
+          description: No Content
+        "400":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/handlers.ErrorResponse'
+          description: Bad Request
+        "403":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/handlers.ErrorResponse'
+          description: Forbidden
+      security:
+      - BearerAuth: []
+      summary: 标记任务完成
+      tags:
+      - hermes-kanban
+  /apps/{appId}/hermes/kanban/tasks/{taskId}/reassign:
+    post:
+      parameters:
+      - description: 应用 ID
+        in: path
+        name: appId
+        required: true
+        schema:
+          type: string
+      - description: 任务 ID
+        in: path
+        name: taskId
+        required: true
+        schema:
+          type: string
+      requestBody:
+        content:
+          application/json:
+            schema:
+              oneOf:
+              - type: object
+              - $ref: '#/components/schemas/handlers.KanbanReassignRequest'
+                description: 重分配请求
+                summary: body
+        description: 重分配请求
+        required: true
+      responses:
+        "204":
+          description: No Content
+        "400":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/handlers.ErrorResponse'
+          description: Bad Request
+        "403":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/handlers.ErrorResponse'
+          description: Forbidden
+      security:
+      - BearerAuth: []
+      summary: 重新分配任务
+      tags:
+      - hermes-kanban
+  /apps/{appId}/hermes/kanban/tasks/{taskId}/reclaim:
+    post:
+      parameters:
+      - description: 应用 ID
+        in: path
+        name: appId
+        required: true
+        schema:
+          type: string
+      - description: 任务 ID
+        in: path
+        name: taskId
+        required: true
+        schema:
+          type: string
+      requestBody:
+        content:
+          application/json:
+            schema:
+              oneOf:
+              - type: object
+              - $ref: '#/components/schemas/handlers.KanbanBoardRequest'
+                description: board 请求
+                summary: body
+        description: board 请求
+      responses:
+        "204":
+          description: No Content
+        "403":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/handlers.ErrorResponse'
+          description: Forbidden
+      security:
+      - BearerAuth: []
+      summary: 重置任务认领状态
+      tags:
+      - hermes-kanban
+  /apps/{appId}/hermes/kanban/tasks/{taskId}/runs:
+    get:
+      parameters:
+      - description: 应用 ID
+        in: path
+        name: appId
+        required: true
+        schema:
+          type: string
+      - description: 任务 ID
+        in: path
+        name: taskId
+        required: true
+        schema:
+          type: string
+      - description: board slug
+        in: query
+        name: board
+        schema:
+          type: string
+      responses:
+        "200":
+          content:
+            application/json:
+              schema:
+                additionalProperties:
+                  items:
+                    $ref: '#/components/schemas/service.KanbanTaskRun'
+                  type: array
+                type: object
+          description: OK
+        "403":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/handlers.ErrorResponse'
+          description: Forbidden
+        "500":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/handlers.ErrorResponse'
+          description: Internal Server Error
+        "502":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/handlers.ErrorResponse'
+          description: Bad Gateway
+        "503":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/handlers.ErrorResponse'
+          description: Service Unavailable
+      security:
+      - BearerAuth: []
+      summary: 查询任务历次执行
+      tags:
+      - hermes-kanban
+  /apps/{appId}/hermes/kanban/tasks/{taskId}/unblock:
+    post:
+      parameters:
+      - description: 应用 ID
+        in: path
+        name: appId
+        required: true
+        schema:
+          type: string
+      - description: 任务 ID
+        in: path
+        name: taskId
+        required: true
+        schema:
+          type: string
+      requestBody:
+        content:
+          application/json:
+            schema:
+              oneOf:
+              - type: object
+              - $ref: '#/components/schemas/handlers.KanbanBoardRequest'
+                description: board 请求
+                summary: body
+        description: board 请求
+      responses:
+        "204":
+          description: No Content
+        "403":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/handlers.ErrorResponse'
+          description: Forbidden
+      security:
+      - BearerAuth: []
+      summary: 解除任务阻塞
+      tags:
+      - hermes-kanban
   /apps/{appId}/initialize:
     post:
       description: 触发应用初始化重试；仅当应用状态为 error 或 draft 时允许，其它状态返回 409

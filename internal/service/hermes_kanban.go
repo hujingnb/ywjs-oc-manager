@@ -10,8 +10,11 @@ import (
 	"regexp"
 	"strings"
 
+	"github.com/jackc/pgx/v5/pgtype"
+
 	"oc-manager/internal/auth"
 	"oc-manager/internal/integrations/runtime"
+	"oc-manager/internal/store/sqlc"
 )
 
 // kanbanExecer 抽象在容器内执行命令的能力，便于单测注入假实现。
@@ -521,5 +524,55 @@ func (s *HermesKanbanService) StreamEvents(ctx context.Context, principal auth.P
 			onLine(line)
 		}
 	}
+}
+
+// ————————————————————————————————————————————————————
+// Task D5：KanbanAppLocatorFromStore —— 基于 app store 解析运行时坐标
+// ————————————————————————————————————————————————————
+
+// kanbanAppStore 是 KanbanAppLocatorFromStore 依赖的最小 app 查询能力。
+// 只声明 GetApp，避免依赖整个 Querier 接口，便于单测注入假实现。
+type kanbanAppStore interface {
+	GetApp(ctx context.Context, id pgtype.UUID) (sqlc.App, error)
+}
+
+// KanbanAppLocatorFromStore 基于 app store 把 appID（UUID 字符串）解析为
+// Kanban 执行坐标（KanbanAppLocation），供 HermesKanbanService 使用。
+type KanbanAppLocatorFromStore struct {
+	store kanbanAppStore
+}
+
+// NewKanbanAppLocatorFromStore 构造 locator。
+func NewKanbanAppLocatorFromStore(store kanbanAppStore) *KanbanAppLocatorFromStore {
+	return &KanbanAppLocatorFromStore{store: store}
+}
+
+// LocateApp 查询 app 行并组装 KanbanAppLocation。
+// appID 必须是有效的 UUID 字符串，否则返回 ErrKanbanBadRequest。
+// app 不存在返回 ErrNotFound。
+func (l *KanbanAppLocatorFromStore) LocateApp(ctx context.Context, appID string) (KanbanAppLocation, error) {
+	// parseUUID 是 service 包已有的 string→pgtype.UUID 辅助函数（pgtype.go）。
+	id, err := parseUUID(appID)
+	if err != nil {
+		return KanbanAppLocation{}, fmt.Errorf("%w: 非法 app id", ErrKanbanBadRequest)
+	}
+	app, err := l.store.GetApp(ctx, id)
+	if err != nil {
+		return KanbanAppLocation{}, ErrNotFound
+	}
+	loc := KanbanAppLocation{
+		// uuidToString 是 service 包已有的 pgtype.UUID→string 辅助函数（pgtype.go）。
+		OrgID:       uuidToString(app.OrgID),
+		OwnerUserID: uuidToString(app.OwnerUserID),
+		NodeID:      uuidToString(app.RuntimeNodeID),
+	}
+	// ContainerID 是可空字段（pgtype.Text），仅在有效时填充。
+	if app.ContainerID.Valid {
+		loc.ContainerID = app.ContainerID.String
+	}
+	// stub 判定：dev stub 镜像 tag 约定以 -dev 结尾（hermes-runtime:hermes-main-dev）。
+	// 精确方案（读容器内 /etc/oc-image.json）留作后续；后缀判定已足以触发降级提示。
+	loc.Stub = strings.HasSuffix(app.RuntimeImageRef, "-dev")
+	return loc, nil
 }
 
