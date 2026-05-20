@@ -55,6 +55,10 @@ help: ## 显示本帮助文档(make 默认 target)
 	@case "$(HERMES_VERSION)" in \
 		*[!A-Za-z0-9_.-]*) echo "Hermes version 包含非法镜像 tag 字符: $(HERMES_VERSION)" >&2; exit 1;; \
 	esac
+	@case "$(HERMES_VERSION)" in \
+		.*|-*) echo "Hermes version 不能以 Docker tag 非法起始字符开头: $(HERMES_VERSION)" >&2; exit 1;; \
+	esac
+	@version="$(HERMES_VERSION)"; test $${#version} -le 108 || { echo "Hermes version 过长，无法为生产时间戳预留 Docker tag 长度: $(HERMES_VERSION)" >&2; exit 1; }
 
 ##@ 本地开发
 
@@ -180,7 +184,7 @@ build-hermes-image: hermes-inject-contract ## 本地构建 hermes runtime 生产
 # push-hermes-image 仅供 release-hermes-image 在同一次 make 调用内复用；
 # IMAGE_TIMESTAMP 每次 make 会重算，独立执行 push 可能找不到刚构建的 tag。
 .PHONY: push-hermes-image
-push-hermes-image:
+push-hermes-image: .guard-hermes-version
 	docker push "$(HERMES_IMAGE)"
 
 # release-hermes-image 一步完成本地构建 + 推送，是日常发版入口；
