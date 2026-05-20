@@ -167,6 +167,30 @@ func TestLoad_RejectsUnsafeHermesRuntimeImage(t *testing.T) {
 			want:  "旧 variant",
 		},
 		{
+			// 场景：stable 是可漂移别名，不含完整 Hermes 版本号，应被拒绝。
+			name:  "floating-stable",
+			image: "hermes-runtime:stable",
+			want:  "具体 Hermes 版本号",
+		},
+		{
+			// 场景：prod 代表环境语义，不是可复现版本，应被拒绝。
+			name:  "floating-prod",
+			image: "hermes-runtime:prod",
+			want:  "具体 Hermes 版本号",
+		},
+		{
+			// 场景：2.1 是版本族 tag，后续补丁版本可能漂移，应被拒绝。
+			name:  "version-family",
+			image: "hermes-runtime:2.1",
+			want:  "具体 Hermes 版本号",
+		},
+		{
+			// 场景：v2026.5 缺少 patch 段，不是完整 Hermes 版本号，应被拒绝。
+			name:  "partial-version",
+			image: "hermes-runtime:v2026.5",
+			want:  "具体 Hermes 版本号",
+		},
+		{
 			// 场景：缺少 tag 或 digest 时无法定位具体镜像版本，应被拒绝。
 			name:  "missing-tag",
 			image: "registry.example.com/hermes-runtime",
@@ -188,6 +212,43 @@ func TestLoad_RejectsUnsafeHermesRuntimeImage(t *testing.T) {
 			_, err := LoadFile(path)
 			require.Error(t, err)
 			assert.Contains(t, err.Error(), c.want)
+		})
+	}
+}
+
+// TestLoad_AcceptsConcreteHermesRuntimeImageTags 校验完整 Hermes 版本号 tag 可通过启动校验。
+func TestLoad_AcceptsConcreteHermesRuntimeImageTags(t *testing.T) {
+	cases := []struct {
+		// name 标识当前具体版本 tag 的形态。
+		name string
+		// image 是写入 hermes.runtime_image 的合法版本化引用。
+		image string
+	}{
+		{
+			// 场景：完整 Hermes 版本号本身是可复现版本 tag。
+			name:  "plain-version",
+			image: "hermes-runtime:v2026.5.16",
+		},
+		{
+			// 场景：本地 dev stub 允许在完整版本号后追加 -dev。
+			name:  "versioned-dev",
+			image: "hermes-runtime:v2026.5.16-dev",
+		},
+		{
+			// 场景：生产镜像 tag 在完整 Hermes 版本号后追加构建时间戳。
+			name:  "versioned-release",
+			image: "registry.example.com/oc/hermes-runtime:v2026.5.16-2026-05-21-03-40-00",
+		},
+	}
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			yaml := strings.Replace(fullValidYAML(),
+				`runtime_image: "hermes-runtime:v2026.5.16-dev"`,
+				`runtime_image: "`+c.image+`"`, 1)
+			path := writeTempConfig(t, yaml)
+			cfg, err := LoadFile(path)
+			require.NoError(t, err)
+			assert.Equal(t, c.image, cfg.Hermes.RuntimeImage)
 		})
 	}
 }

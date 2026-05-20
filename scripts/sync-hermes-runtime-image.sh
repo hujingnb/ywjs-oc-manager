@@ -36,6 +36,10 @@ validate_hermes_image_ref() {
       exit 1
       ;;
   esac
+  if [[ ! "$tag" =~ ^v[0-9]+[.][0-9]+[.][0-9]+([._-][A-Za-z0-9_.-]+)?$ ]]; then
+    echo "Hermes runtime 镜像 tag 必须以具体 Hermes 版本号开头:${tag}" >&2
+    exit 1
+  fi
 }
 
 validate_hermes_image_ref "$image"

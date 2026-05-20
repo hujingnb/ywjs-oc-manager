@@ -117,8 +117,9 @@ func (c Config) Validate() error {
 
 // validateHermesRuntimeImage 校验 Hermes 镜像必须固定到可复现引用。
 //
-// 允许 name:tag 或 name@sha256:digest；禁止 main/latest/dev 这类浮动 tag，
-// 避免 manager 运行时路径绕过 Makefile 的版本化镜像约束。
+// 允许 name:v<完整版本号>[-suffix] 或 name@sha256:digest；
+// 禁止 main/latest/stable/2.1 这类浮动或版本族 tag，避免 manager 运行时路径绕过
+// Makefile 的版本化镜像约束。
 func validateHermesRuntimeImage(value string) error {
 	image := strings.TrimSpace(value)
 	if strings.ContainsAny(image, " \t\r\n") {
@@ -161,7 +162,46 @@ func validateHermesRuntimeImageTag(tag string) error {
 	case strings.Contains(lower, "hermes-main"):
 		return fmt.Errorf("hermes.runtime_image tag 不能继续使用旧 variant 名称: %s", tag)
 	}
+	if !hasConcreteHermesVersionPrefix(tag) {
+		return fmt.Errorf("hermes.runtime_image tag 必须以具体 Hermes 版本号开头: %s", tag)
+	}
 	return nil
+}
+
+// hasConcreteHermesVersionPrefix 校验 tag 是否以 v<major>.<minor>.<patch> 开头。
+//
+// Hermes 当前 version.txt 使用 v2026.5.16 这类完整版本号；生产镜像会继续追加
+// 构建时间戳，本地 dev stub 会追加 -dev。仅允许这种完整版本前缀，避免 stable、
+// prod、nightly、2 或 2.1 等可漂移引用进入运行路径。
+func hasConcreteHermesVersionPrefix(tag string) bool {
+	if !strings.HasPrefix(tag, "v") {
+		return false
+	}
+	rest := tag[1:]
+	for i := 0; i < 3; i++ {
+		digitCount := 0
+		for len(rest) > 0 && rest[0] >= '0' && rest[0] <= '9' {
+			digitCount++
+			rest = rest[1:]
+		}
+		if digitCount == 0 {
+			return false
+		}
+		if i < 2 {
+			if len(rest) == 0 || rest[0] != '.' {
+				return false
+			}
+			rest = rest[1:]
+			continue
+		}
+	}
+	if rest == "" {
+		return true
+	}
+	if len(rest) == 1 {
+		return false
+	}
+	return rest[0] == '-' || rest[0] == '_' || rest[0] == '.'
 }
 
 // isHexDigest 校验 sha256 digest 是否为 64 位十六进制字符串。
