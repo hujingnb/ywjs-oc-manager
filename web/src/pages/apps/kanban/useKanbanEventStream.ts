@@ -36,10 +36,17 @@ export function useKanbanEventStream(appId: Ref<string | undefined>, board: Ref<
   let source: EventSource | null = null
   // retries 记录已尝试的断线重连次数，超过 3 次后停止自动重连。
   let retries = 0
+  // retryTimer 保存待执行的重连 setTimeout 句柄，组件卸载时需清除以防游离连接。
+  let retryTimer: ReturnType<typeof setTimeout> | null = null
 
   // describe 把事件对象转成一行可读预览文本，供 latestEvents 用。
+  // payload 为对象时用 JSON.stringify，避免 String() 输出无意义的 [object Object]。
   function describe(ev: KanbanStreamEvent): string {
-    const payload = ev.payload != null ? ' · ' + String(ev.payload) : ''
+    const payloadText =
+      typeof ev.payload === 'object' && ev.payload !== null
+        ? JSON.stringify(ev.payload)
+        : String(ev.payload ?? '')
+    const payload = payloadText ? ' · ' + payloadText : ''
     return `${ev.kind ?? 'event'}${payload}`
   }
 
@@ -84,13 +91,18 @@ export function useKanbanEventStream(appId: Ref<string | undefined>, board: Ref<
       if (retries < 3) {
         const delay = [1000, 3000, 5000][retries] ?? 5000
         retries += 1
-        setTimeout(connect, delay)
+        retryTimer = setTimeout(connect, delay)
       }
     }
   }
 
   // closeSource 关闭当前 EventSource，释放连接资源。
+  // 同时清除待执行的重连 timer，防止组件卸载后仍触发 connect() 产生游离连接。
   function closeSource() {
+    if (retryTimer !== null) {
+      clearTimeout(retryTimer)
+      retryTimer = null
+    }
     if (source) {
       source.close()
       source = null
@@ -105,7 +117,11 @@ export function useKanbanEventStream(appId: Ref<string | undefined>, board: Ref<
   }
 
   // appId / board 变化时重连：appId 从 undefined 变为有效值时立即建立连接。
-  watch([appId, board], () => connect(), { immediate: true })
+  // 切换到新 board/appId 时重置 retries，避免旧 board 消耗重连预算影响新订阅。
+  watch([appId, board], () => {
+    retries = 0
+    connect()
+  }, { immediate: true })
 
   // 组件卸载时关闭连接，避免游离的 EventSource 泄漏。
   onUnmounted(closeSource)
