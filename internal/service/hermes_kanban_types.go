@@ -143,3 +143,32 @@ type KanbanTaskRun struct {
 	// Error 是执行失败时的错误信息。
 	Error string `json:"error,omitempty"`
 }
+
+// KanbanFeatures 描述 oc-kanban 的细粒度能力开关，对应 capabilities.features。
+type KanbanFeatures struct {
+	// Write 表示是否支持写操作（create/comment/...）。
+	Write bool `json:"write"`
+	// Watch 表示是否支持实时事件流。
+	Watch bool `json:"watch"`
+	// Runs 表示是否支持查询执行历史。
+	Runs bool `json:"runs"`
+	// Stats 表示是否支持统计。
+	Stats bool `json:"stats"`
+}
+
+// KanbanCapabilities 对应 `oc-kanban capabilities` 的 data 段，
+// 供 manager 探测实例 oc-kanban 的契约版本与可用能力、据此降级。
+type KanbanCapabilities struct {
+	// ContractVersion 是 oc-kanban 契约版本号（MAJOR.MINOR）。
+	ContractVersion string `json:"contract_version"`
+	// OCKanbanVersion 是 oc-kanban 实现版本。
+	OCKanbanVersion string `json:"oc_kanban_version"`
+	// HermesVersion 是底层 hermes 版本（信息性，可能为空）。
+	HermesVersion string `json:"hermes_version,omitempty"`
+	// Variant 是镜像变体标识。
+	Variant string `json:"variant"`
+	// Verbs 是本镜像实际支持的功能 verb 清单。
+	Verbs []string `json:"verbs"`
+	// Features 是细粒度能力开关。
+	Features KanbanFeatures `json:"features"`
+}

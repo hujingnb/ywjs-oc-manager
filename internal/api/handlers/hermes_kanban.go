@@ -26,17 +26,18 @@ type hermesKanbanService interface {
 	ShowTask(ctx context.Context, p auth.Principal, appID, board, taskID string) (service.KanbanTaskDetail, error)
 	TaskRuns(ctx context.Context, p auth.Principal, appID, board, taskID string) ([]service.KanbanTaskRun, error)
 	Stats(ctx context.Context, p auth.Principal, appID, board string) (service.KanbanStats, error)
+	Capabilities(ctx context.Context, p auth.Principal, appID string) (service.KanbanCapabilities, error)
 	// 流方法
 	StreamEvents(ctx context.Context, p auth.Principal, appID, board string, onLine func(string)) error
 	// 写方法
 	CreateTask(ctx context.Context, p auth.Principal, appID string, in service.CreateKanbanTaskInput) (service.KanbanTaskDetail, error)
-	Comment(ctx context.Context, p auth.Principal, appID, board, taskID, body string) error
-	Complete(ctx context.Context, p auth.Principal, appID, board, taskID, result string) error
-	Block(ctx context.Context, p auth.Principal, appID, board, taskID, reason string) error
-	Unblock(ctx context.Context, p auth.Principal, appID, board, taskID string) error
-	Archive(ctx context.Context, p auth.Principal, appID, board, taskID string) error
-	Reassign(ctx context.Context, p auth.Principal, appID, board, taskID, profile string) error
-	Reclaim(ctx context.Context, p auth.Principal, appID, board, taskID string) error
+	Comment(ctx context.Context, p auth.Principal, appID, board, taskID, body string) (service.KanbanTaskDetail, error)
+	Complete(ctx context.Context, p auth.Principal, appID, board, taskID, result string) (service.KanbanTaskDetail, error)
+	Block(ctx context.Context, p auth.Principal, appID, board, taskID, reason string) (service.KanbanTaskDetail, error)
+	Unblock(ctx context.Context, p auth.Principal, appID, board, taskID string) (service.KanbanTaskDetail, error)
+	Archive(ctx context.Context, p auth.Principal, appID, board, taskID string) (service.KanbanTaskDetail, error)
+	Reassign(ctx context.Context, p auth.Principal, appID, board, taskID, profile string) (service.KanbanTaskDetail, error)
+	Reclaim(ctx context.Context, p auth.Principal, appID, board, taskID string) (service.KanbanTaskDetail, error)
 }
 
 // HermesKanbanHandler 处理 /api/v1/apps/:appId/hermes/kanban/* 路由。
@@ -58,6 +59,7 @@ func RegisterHermesKanbanRoutes(router gin.IRouter, h *HermesKanbanHandler) {
 	g.GET("/tasks/:taskId", h.ShowTask)
 	g.GET("/tasks/:taskId/runs", h.TaskRuns)
 	g.GET("/stats", h.Stats)
+	g.GET("/capabilities", h.Capabilities)
 	// SSE 事件流端点（board 级订阅，不带 taskId）
 	g.GET("/events", h.StreamEvents)
 	// 写端点
@@ -216,6 +218,29 @@ func (h *HermesKanbanHandler) Stats(c *gin.Context) {
 	c.JSON(http.StatusOK, gin.H{"stats": stats})
 }
 
+// Capabilities GET /api/v1/apps/{appId}/hermes/kanban/capabilities
+//
+// @Summary      查询实例任务看板的 oc-kanban 能力
+// @Description  返回 oc-kanban 契约版本、支持的 verb 与 feature 开关，供前端按能力降级。
+// @Tags         hermes-kanban
+// @Produce      json
+// @Security     BearerAuth
+// @Param        appId  path      string  true  "应用 ID"
+// @Success      200    {object}  map[string]service.KanbanCapabilities
+// @Failure      403    {object}  ErrorResponse
+// @Failure      502    {object}  ErrorResponse
+// @Failure      503    {object}  ErrorResponse
+// @Failure      500    {object}  ErrorResponse
+// @Router       /apps/{appId}/hermes/kanban/capabilities [get]
+func (h *HermesKanbanHandler) Capabilities(c *gin.Context) {
+	caps, err := h.service.Capabilities(c.Request.Context(), principalFromCtx(c), c.Param("appId"))
+	if err != nil {
+		writeKanbanError(c, err)
+		return
+	}
+	c.JSON(http.StatusOK, gin.H{"capabilities": caps})
+}
+
 // ————————————————————————————————————————————————————
 // SSE 事件流端点
 // ————————————————————————————————————————————————————
@@ -318,7 +343,7 @@ func (h *HermesKanbanHandler) CreateTask(c *gin.Context) {
 // @Param        appId   path      string                true  "应用 ID"
 // @Param        taskId  path      string                true  "任务 ID"
 // @Param        body    body      KanbanCommentRequest  true  "评论请求"
-// @Success      204
+// @Success      200    {object}  map[string]service.KanbanTaskDetail
 // @Failure      400    {object}  ErrorResponse
 // @Failure      403    {object}  ErrorResponse
 // @Router       /apps/{appId}/hermes/kanban/tasks/{taskId}/comment [post]
@@ -328,12 +353,12 @@ func (h *HermesKanbanHandler) Comment(c *gin.Context) {
 		writeBindError(c, err)
 		return
 	}
-	err := h.service.Comment(c.Request.Context(), principalFromCtx(c), c.Param("appId"), req.Board, c.Param("taskId"), req.Body)
+	detail, err := h.service.Comment(c.Request.Context(), principalFromCtx(c), c.Param("appId"), req.Board, c.Param("taskId"), req.Body)
 	if err != nil {
 		writeKanbanError(c, err)
 		return
 	}
-	c.Status(http.StatusNoContent)
+	c.JSON(http.StatusOK, gin.H{"task": detail})
 }
 
 // Complete POST /api/v1/apps/{appId}/hermes/kanban/tasks/{taskId}/complete
@@ -346,7 +371,7 @@ func (h *HermesKanbanHandler) Comment(c *gin.Context) {
 // @Param        appId   path      string                  true  "应用 ID"
 // @Param        taskId  path      string                  true  "任务 ID"
 // @Param        body    body      KanbanCompleteRequest   false  "完成请求"
-// @Success      204
+// @Success      200    {object}  map[string]service.KanbanTaskDetail
 // @Failure      400    {object}  ErrorResponse
 // @Failure      403    {object}  ErrorResponse
 // @Router       /apps/{appId}/hermes/kanban/tasks/{taskId}/complete [post]
@@ -356,12 +381,12 @@ func (h *HermesKanbanHandler) Complete(c *gin.Context) {
 		writeBindError(c, err)
 		return
 	}
-	err := h.service.Complete(c.Request.Context(), principalFromCtx(c), c.Param("appId"), req.Board, c.Param("taskId"), req.Result)
+	detail, err := h.service.Complete(c.Request.Context(), principalFromCtx(c), c.Param("appId"), req.Board, c.Param("taskId"), req.Result)
 	if err != nil {
 		writeKanbanError(c, err)
 		return
 	}
-	c.Status(http.StatusNoContent)
+	c.JSON(http.StatusOK, gin.H{"task": detail})
 }
 
 // Block POST /api/v1/apps/{appId}/hermes/kanban/tasks/{taskId}/block
@@ -374,7 +399,7 @@ func (h *HermesKanbanHandler) Complete(c *gin.Context) {
 // @Param        appId   path      string              true  "应用 ID"
 // @Param        taskId  path      string              true  "任务 ID"
 // @Param        body    body      KanbanBlockRequest  true  "阻塞请求"
-// @Success      204
+// @Success      200    {object}  map[string]service.KanbanTaskDetail
 // @Failure      400    {object}  ErrorResponse
 // @Failure      403    {object}  ErrorResponse
 // @Router       /apps/{appId}/hermes/kanban/tasks/{taskId}/block [post]
@@ -384,12 +409,12 @@ func (h *HermesKanbanHandler) Block(c *gin.Context) {
 		writeBindError(c, err)
 		return
 	}
-	err := h.service.Block(c.Request.Context(), principalFromCtx(c), c.Param("appId"), req.Board, c.Param("taskId"), req.Reason)
+	detail, err := h.service.Block(c.Request.Context(), principalFromCtx(c), c.Param("appId"), req.Board, c.Param("taskId"), req.Reason)
 	if err != nil {
 		writeKanbanError(c, err)
 		return
 	}
-	c.Status(http.StatusNoContent)
+	c.JSON(http.StatusOK, gin.H{"task": detail})
 }
 
 // Unblock POST /api/v1/apps/{appId}/hermes/kanban/tasks/{taskId}/unblock
@@ -402,7 +427,7 @@ func (h *HermesKanbanHandler) Block(c *gin.Context) {
 // @Param        appId   path      string              true   "应用 ID"
 // @Param        taskId  path      string              true   "任务 ID"
 // @Param        body    body      KanbanBoardRequest  false  "board 请求"
-// @Success      204
+// @Success      200    {object}  map[string]service.KanbanTaskDetail
 // @Failure      403    {object}  ErrorResponse
 // @Router       /apps/{appId}/hermes/kanban/tasks/{taskId}/unblock [post]
 func (h *HermesKanbanHandler) Unblock(c *gin.Context) {
@@ -411,12 +436,12 @@ func (h *HermesKanbanHandler) Unblock(c *gin.Context) {
 		writeBindError(c, err)
 		return
 	}
-	err := h.service.Unblock(c.Request.Context(), principalFromCtx(c), c.Param("appId"), req.Board, c.Param("taskId"))
+	detail, err := h.service.Unblock(c.Request.Context(), principalFromCtx(c), c.Param("appId"), req.Board, c.Param("taskId"))
 	if err != nil {
 		writeKanbanError(c, err)
 		return
 	}
-	c.Status(http.StatusNoContent)
+	c.JSON(http.StatusOK, gin.H{"task": detail})
 }
 
 // Archive POST /api/v1/apps/{appId}/hermes/kanban/tasks/{taskId}/archive
@@ -429,7 +454,7 @@ func (h *HermesKanbanHandler) Unblock(c *gin.Context) {
 // @Param        appId   path      string              true   "应用 ID"
 // @Param        taskId  path      string              true   "任务 ID"
 // @Param        body    body      KanbanBoardRequest  false  "board 请求"
-// @Success      204
+// @Success      200    {object}  map[string]service.KanbanTaskDetail
 // @Failure      403    {object}  ErrorResponse
 // @Router       /apps/{appId}/hermes/kanban/tasks/{taskId}/archive [post]
 func (h *HermesKanbanHandler) Archive(c *gin.Context) {
@@ -438,12 +463,12 @@ func (h *HermesKanbanHandler) Archive(c *gin.Context) {
 		writeBindError(c, err)
 		return
 	}
-	err := h.service.Archive(c.Request.Context(), principalFromCtx(c), c.Param("appId"), req.Board, c.Param("taskId"))
+	detail, err := h.service.Archive(c.Request.Context(), principalFromCtx(c), c.Param("appId"), req.Board, c.Param("taskId"))
 	if err != nil {
 		writeKanbanError(c, err)
 		return
 	}
-	c.Status(http.StatusNoContent)
+	c.JSON(http.StatusOK, gin.H{"task": detail})
 }
 
 // Reassign POST /api/v1/apps/{appId}/hermes/kanban/tasks/{taskId}/reassign
@@ -456,7 +481,7 @@ func (h *HermesKanbanHandler) Archive(c *gin.Context) {
 // @Param        appId   path      string                  true  "应用 ID"
 // @Param        taskId  path      string                  true  "任务 ID"
 // @Param        body    body      KanbanReassignRequest   true  "重分配请求"
-// @Success      204
+// @Success      200    {object}  map[string]service.KanbanTaskDetail
 // @Failure      400    {object}  ErrorResponse
 // @Failure      403    {object}  ErrorResponse
 // @Router       /apps/{appId}/hermes/kanban/tasks/{taskId}/reassign [post]
@@ -466,12 +491,12 @@ func (h *HermesKanbanHandler) Reassign(c *gin.Context) {
 		writeBindError(c, err)
 		return
 	}
-	err := h.service.Reassign(c.Request.Context(), principalFromCtx(c), c.Param("appId"), req.Board, c.Param("taskId"), req.To)
+	detail, err := h.service.Reassign(c.Request.Context(), principalFromCtx(c), c.Param("appId"), req.Board, c.Param("taskId"), req.To)
 	if err != nil {
 		writeKanbanError(c, err)
 		return
 	}
-	c.Status(http.StatusNoContent)
+	c.JSON(http.StatusOK, gin.H{"task": detail})
 }
 
 // Reclaim POST /api/v1/apps/{appId}/hermes/kanban/tasks/{taskId}/reclaim
@@ -484,7 +509,7 @@ func (h *HermesKanbanHandler) Reassign(c *gin.Context) {
 // @Param        appId   path      string              true   "应用 ID"
 // @Param        taskId  path      string              true   "任务 ID"
 // @Param        body    body      KanbanBoardRequest  false  "board 请求"
-// @Success      204
+// @Success      200    {object}  map[string]service.KanbanTaskDetail
 // @Failure      403    {object}  ErrorResponse
 // @Router       /apps/{appId}/hermes/kanban/tasks/{taskId}/reclaim [post]
 func (h *HermesKanbanHandler) Reclaim(c *gin.Context) {
@@ -493,10 +518,10 @@ func (h *HermesKanbanHandler) Reclaim(c *gin.Context) {
 		writeBindError(c, err)
 		return
 	}
-	err := h.service.Reclaim(c.Request.Context(), principalFromCtx(c), c.Param("appId"), req.Board, c.Param("taskId"))
+	detail, err := h.service.Reclaim(c.Request.Context(), principalFromCtx(c), c.Param("appId"), req.Board, c.Param("taskId"))
 	if err != nil {
 		writeKanbanError(c, err)
 		return
 	}
-	c.Status(http.StatusNoContent)
+	c.JSON(http.StatusOK, gin.H{"task": detail})
 }

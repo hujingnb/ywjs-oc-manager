@@ -14,6 +14,16 @@ import (
 	"oc-manager/internal/integrations/runtime"
 )
 
+// okEnvelope 把一段 data JSON 包成 oc-kanban 成功信封，供 fake execer 返回。
+func okEnvelope(dataJSON string) string {
+	return `{"ok":true,"data":` + dataJSON + `}`
+}
+
+// errEnvelope 把契约错误码包成 oc-kanban 失败信封。
+func errEnvelope(code, message string) string {
+	return `{"ok":false,"error":{"code":"` + code + `","message":"` + message + `"}}`
+}
+
 // fakeKanbanExecer 记录最后一次执行的 cmd，并按预设返回结果。
 type fakeKanbanExecer struct {
 	// lastCmd 由 ContainerExecJSON 与 ContainerExecStream 共享，记录最后一次调用的 cmd；测试中两者不同时使用。
@@ -58,11 +68,11 @@ func kanbanOrgAdmin() auth.Principal {
 	return auth.Principal{UserID: "admin-1", OrgID: "org-1", Role: domain.UserRoleOrgAdmin}
 }
 
-// TestListTasksHappy 验证：正常 app 上 ListTasks 解析 CLI JSON 输出。
+// TestListTasksHappy 验证：正常 app 上 ListTasks 解析 oc-kanban 信封 JSON 输出。
 func TestListTasksHappy(t *testing.T) {
 	execer := &fakeKanbanExecer{result: runtime.ExecJSONResult{
 		ExitCode: 0,
-		Stdout:   `[{"id":"t_1","title":"任务一","status":"running","assignee":"devops","priority":3}]`,
+		Stdout:   okEnvelope(`[{"id":"t_1","title":"任务一","status":"running","assignee":"devops","priority":3}]`),
 	}}
 	svc := NewHermesKanbanService(execer, &fakeKanbanLocator{loc: healthyLoc()})
 
@@ -71,8 +81,8 @@ func TestListTasksHappy(t *testing.T) {
 	require.Len(t, tasks, 1)
 	assert.Equal(t, "t_1", tasks[0].ID)
 	assert.Equal(t, "running", tasks[0].Status)
-	// 校验 argv：--board 作为全局参数在 verb 之前，缺省回退 default、带 --json
-	assert.Equal(t, []string{"hermes", "kanban", "--board", "default", "list", "--json"}, execer.lastCmd)
+	// 校验 argv：oc-kanban list --board default（board 作为 flag，不再是全局参数位置）
+	assert.Equal(t, []string{"oc-kanban", "list", "--board", "default"}, execer.lastCmd)
 }
 
 // TestListTasksRejectsBadBoard 验证：非法 board slug 被白名单拦截，返回 ErrKanbanBadRequest 且不下发 CLI。
@@ -136,17 +146,34 @@ func TestResolveRuntimeUnavailable(t *testing.T) {
 	require.ErrorIs(t, err, ErrKanbanRuntimeUnavailable)
 }
 
-// TestRunCLINonZeroExit 验证：CLI 非零退出被包成 ErrKanbanCLI 且带 stderr。
-func TestRunCLINonZeroExit(t *testing.T) {
-	execer := &fakeKanbanExecer{result: runtime.ExecJSONResult{ExitCode: 2, Stderr: "unknown task"}}
-	svc := NewHermesKanbanService(execer, &fakeKanbanLocator{loc: healthyLoc()})
-
-	_, err := svc.ListTasks(context.Background(), kanbanOrgAdmin(), "app-1", KanbanTaskFilter{})
-	require.ErrorIs(t, err, ErrKanbanCLI)
-	assert.Contains(t, err.Error(), "unknown task")
+// TestKanbanErrorCodeMapping 验证：oc-kanban 失败信封的错误码被正确映射成 service 哨兵错误。
+func TestKanbanErrorCodeMapping(t *testing.T) {
+	cases := []struct {
+		name    string // 测试场景
+		code    string // oc-kanban 错误码
+		wantErr error  // 期望映射到的哨兵错误
+	}{
+		{"参数非法映射为 BadRequest", "BAD_REQUEST", ErrKanbanBadRequest},       // BAD_REQUEST → ErrKanbanBadRequest
+		{"资源不存在映射为 NotFound", "NOT_FOUND", ErrNotFound},                 // NOT_FOUND → ErrNotFound
+		{"能力不支持映射为 NotSupported", "UNSUPPORTED", ErrKanbanNotSupported}, // UNSUPPORTED → ErrKanbanNotSupported
+		{"hermes 执行失败映射为 CLI 错误", "HERMES_CLI_FAILED", ErrKanbanCLI},   // HERMES_CLI_FAILED → ErrKanbanCLI
+		{"内部错误映射为输出非法", "INTERNAL", ErrKanbanOutputInvalid},           // INTERNAL → ErrKanbanOutputInvalid
+		{"未知错误码兜底为 CLI 错误", "UNKNOWN_CODE", ErrKanbanCLI},              // 未知 code → default 分支 → ErrKanbanCLI
+	}
+	for _, c := range cases {
+		// 每个子测试覆盖一种错误码到哨兵错误的映射路径。
+		t.Run(c.name, func(t *testing.T) {
+			execer := &fakeKanbanExecer{result: runtime.ExecJSONResult{
+				ExitCode: 1, Stdout: errEnvelope(c.code, "失败详情"),
+			}}
+			svc := NewHermesKanbanService(execer, &fakeKanbanLocator{loc: healthyLoc()})
+			_, err := svc.ListTasks(context.Background(), kanbanOrgAdmin(), "app-1", KanbanTaskFilter{})
+			require.ErrorIs(t, err, c.wantErr)
+		})
+	}
 }
 
-// TestListTasksInvalidJSON 验证：CLI 输出非法 JSON 返回 ErrKanbanOutputInvalid。
+// TestListTasksInvalidJSON 验证：stdout 非合法信封 JSON，信封解析失败，返回 ErrKanbanOutputInvalid。
 func TestListTasksInvalidJSON(t *testing.T) {
 	execer := &fakeKanbanExecer{result: runtime.ExecJSONResult{ExitCode: 0, Stdout: "not json"}}
 	svc := NewHermesKanbanService(execer, &fakeKanbanLocator{loc: healthyLoc()})
@@ -159,15 +186,16 @@ func TestListTasksInvalidJSON(t *testing.T) {
 // C2 遗留读 verb 补测
 // ————————————————————————————————————————————————————
 
-// TestShowTaskHappy 验证：ShowTask 解析任务详情 JSON 并正确映射字段；argv 含 show/--json。
-// show --json 输出的任务核心字段嵌在顶层 "task" 子对象里，而非直接平铺。
+// TestShowTaskHappy 验证：ShowTask 解析 oc-kanban 信封中的任务详情 JSON 并正确映射字段；argv 含 show/--id。
+// oc-kanban show 输出的任务核心字段嵌在顶层 "task" 子对象里，而非直接平铺。
 func TestShowTaskHappy(t *testing.T) {
-	// CLI 返回真实 show 结构：任务字段在 task 子对象内，同时含 comments/events 数组。
+	// oc-kanban 返回成功信封，data 段为真实 show 结构：任务字段在 task 子对象内，同时含 comments/events 数组。
+	showJSON := `{"task":{"id":"t_abc","title":"详情任务","status":"blocked","assignee":"devops",` +
+		`"priority":1,"workspace_kind":"scratch","created_at":1779267436,"skills":[]}` +
+		`,"latest_summary":null,"parents":[],"children":[],"comments":[],"events":[]}`
 	execer := &fakeKanbanExecer{result: runtime.ExecJSONResult{
 		ExitCode: 0,
-		Stdout: `{"task":{"id":"t_abc","title":"详情任务","status":"blocked","assignee":"devops",` +
-			`"priority":1,"workspace_kind":"scratch","created_at":1779267436,"skills":[]}` +
-			`,"latest_summary":null,"parents":[],"children":[],"comments":[],"events":[]}`,
+		Stdout:   okEnvelope(showJSON),
 	}}
 	svc := NewHermesKanbanService(execer, &fakeKanbanLocator{loc: healthyLoc()})
 
@@ -178,10 +206,10 @@ func TestShowTaskHappy(t *testing.T) {
 	assert.Equal(t, "详情任务", detail.Task.Title)
 	assert.Equal(t, "blocked", detail.Task.Status)
 	assert.Equal(t, "scratch", detail.Task.WorkspaceKind)
-	// argv 须含 show、任务 ID 与 --json
+	// argv 须含 show 与 --id（oc-kanban 用 --id 而非 positional taskID）
 	assert.Contains(t, execer.lastCmd, "show")
 	assert.Contains(t, execer.lastCmd, "t_abc")
-	assert.Contains(t, execer.lastCmd, "--json")
+	assert.Contains(t, execer.lastCmd, "--id")
 }
 
 // TestShowTaskRejectsBadTaskID 验证：非法 taskID 被白名单拦截，不下发 CLI。
@@ -196,12 +224,12 @@ func TestShowTaskRejectsBadTaskID(t *testing.T) {
 	assert.Nil(t, execer.lastCmd)
 }
 
-// TestListBoardsHappy 验证：ListBoards 解析 boards JSON 数组；argv 含 boards/list。
+// TestListBoardsHappy 验证：ListBoards 解析 oc-kanban 信封中的 boards JSON 数组；argv 为 oc-kanban boards。
 func TestListBoardsHappy(t *testing.T) {
-	// CLI 返回包含一个 board 的 JSON 数组，验证能正确解析 slug/name 字段。
+	// oc-kanban 返回成功信封，data 段为包含一个 board 的 JSON 数组，验证能正确解析 slug/name 字段。
 	execer := &fakeKanbanExecer{result: runtime.ExecJSONResult{
 		ExitCode: 0,
-		Stdout:   `[{"slug":"default","name":"默认看板","description":"主看板","archived":false}]`,
+		Stdout:   okEnvelope(`[{"slug":"default","name":"默认看板","description":"主看板","archived":false}]`),
 	}}
 	svc := NewHermesKanbanService(execer, &fakeKanbanLocator{loc: healthyLoc()})
 
@@ -210,18 +238,17 @@ func TestListBoardsHappy(t *testing.T) {
 	require.Len(t, boards, 1)
 	assert.Equal(t, "default", boards[0].Slug)
 	assert.Equal(t, "默认看板", boards[0].Name)
-	// argv 须含 boards 与 list 子命令
-	assert.Contains(t, execer.lastCmd, "boards")
-	assert.Contains(t, execer.lastCmd, "list")
+	// argv 须为 oc-kanban boards（不再含 list 子命令）
+	assert.Equal(t, []string{"oc-kanban", "boards"}, execer.lastCmd)
 }
 
-// TestStatsHappy 验证：Stats 解析 per-status 计数 JSON；by_status 字段被正确映射。
+// TestStatsHappy 验证：Stats 解析 oc-kanban 信封中的 per-status 计数 JSON；by_status 字段被正确映射。
 // 真实 CLI 输出字段名为 by_status（非 status_counts），已按 hermes v0.14.0 校准。
 func TestStatsHappy(t *testing.T) {
-	// CLI 返回真实 stats 结构：by_status 含各状态计数，by_assignee 含各 assignee 计数。
+	// oc-kanban 返回成功信封，data 段为真实 stats 结构：by_status 含各状态计数，by_assignee 含各 assignee 计数。
 	execer := &fakeKanbanExecer{result: runtime.ExecJSONResult{
 		ExitCode: 0,
-		Stdout:   `{"by_status":{"todo":2,"running":1,"done":5},"by_assignee":{"default":{"todo":2}},"oldest_ready_age_seconds":0,"now":1779267460}`,
+		Stdout:   okEnvelope(`{"by_status":{"todo":2,"running":1,"done":5},"by_assignee":{"default":{"todo":2}},"oldest_ready_age_seconds":0,"now":1779267460}`),
 	}}
 	svc := NewHermesKanbanService(execer, &fakeKanbanLocator{loc: healthyLoc()})
 
@@ -239,14 +266,14 @@ func TestStatsHappy(t *testing.T) {
 // Task C3：写 verb 单测
 // ————————————————————————————————————————————————————
 
-// TestCreateTaskHappy 验证：CreateTask 拼出正确 argv 并解析返回详情。
-// create --json 输出是扁平任务对象（与 list 元素格式一致），
-// service 层解析后包装为 KanbanTaskDetail{Task: ...}。
+// TestCreateTaskHappy 验证：CreateTask 拼出正确 argv 并解析 oc-kanban 返回的 TaskDetail。
 func TestCreateTaskHappy(t *testing.T) {
-	// CLI 返回扁平任务对象（create 输出格式），验证解析正确且 title 作为独立 argv 元素传入。
+	// oc-kanban create 返回完整 TaskDetail（task 子对象 + 关联数组）。
+	detailJSON := `{"task":{"id":"t_new","title":"新任务","status":"ready","assignee":"devops",` +
+		`"priority":2,"created_at":1779267436,"skills":[]},"latest_summary":null,` +
+		`"parents":[],"children":[],"comments":[],"events":[]}`
 	execer := &fakeKanbanExecer{result: runtime.ExecJSONResult{
-		ExitCode: 0,
-		Stdout:   `{"id":"t_new","title":"新任务","status":"ready","assignee":"devops","priority":2,"created_at":1779267436,"skills":[]}`,
+		ExitCode: 0, Stdout: okEnvelope(detailJSON),
 	}}
 	svc := NewHermesKanbanService(execer, &fakeKanbanLocator{loc: healthyLoc()})
 
@@ -254,12 +281,13 @@ func TestCreateTaskHappy(t *testing.T) {
 		Title: "新任务", Assignee: "devops", Priority: 2,
 	})
 	require.NoError(t, err)
-	// create 输出包装在 detail.Task 子对象内
+	// 任务核心字段在 detail.Task 子对象内
 	assert.Equal(t, "t_new", detail.Task.ID)
 	assert.Equal(t, "ready", detail.Task.Status)
-	// 自由文本 title 必须作为独立 argv 元素（不拼 shell），防注入
-	assert.Contains(t, execer.lastCmd, "新任务")
+	// 自由文本 title 作为 --title 的独立 argv 值（不拼 shell），防注入
 	assert.Contains(t, execer.lastCmd, "create")
+	assert.Contains(t, execer.lastCmd, "新任务")
+	assert.Equal(t, "oc-kanban", execer.lastCmd[0])
 }
 
 // TestCreateTaskRejectsEmptyTitle 验证：空标题或全空格标题被 ErrKanbanBadRequest 拦截。
@@ -277,7 +305,7 @@ func TestWriteVerbForbiddenForOutsider(t *testing.T) {
 	// outsider 属于 org-2，与 app 归属的 org-1 不同，应被 resolveManage 拒绝。
 	svc := NewHermesKanbanService(&fakeKanbanExecer{}, &fakeKanbanLocator{loc: healthyLoc()})
 	outsider := auth.Principal{UserID: "x", OrgID: "org-2", Role: domain.UserRoleOrgAdmin}
-	err := svc.Comment(context.Background(), outsider, "app-1", "default", "t_1", "hi")
+	_, err := svc.Comment(context.Background(), outsider, "app-1", "default", "t_1", "hi")
 	require.ErrorIs(t, err, ErrKanbanForbidden)
 }
 
@@ -286,23 +314,26 @@ func TestCommentRejectsBadTaskID(t *testing.T) {
 	// taskID 含分号是典型注入尝试，应被 taskIDRe 正则拒绝。
 	execer := &fakeKanbanExecer{}
 	svc := NewHermesKanbanService(execer, &fakeKanbanLocator{loc: healthyLoc()})
-	err := svc.Comment(context.Background(), kanbanOrgAdmin(), "app-1", "default", "t_1; rm -rf /", "hi")
+	_, err := svc.Comment(context.Background(), kanbanOrgAdmin(), "app-1", "default", "t_1; rm -rf /", "hi")
 	require.ErrorIs(t, err, ErrKanbanBadRequest)
 	// 非法 taskID 不应触达 execer
 	assert.Nil(t, execer.lastCmd)
 }
 
-// TestCompleteHappy 验证：Complete 拼出含 --result 的 argv。
+// TestCompleteHappy 验证：Complete 拼出含 --result 的 argv，并返回 TaskDetail。
 func TestCompleteHappy(t *testing.T) {
-	// CLI 完成操作后返回 "ok"（无需解析 JSON），验证 argv 含 complete 及 result 字符串。
-	execer := &fakeKanbanExecer{result: runtime.ExecJSONResult{ExitCode: 0, Stdout: "ok"}}
+	// oc-kanban complete 返回完整 TaskDetail，验证 argv 含 complete 及 result 字符串。
+	detailJSON := `{"task":{"id":"t_1","title":"完成任务","status":"done","assignee":"devops","priority":0,"created_at":1779267436,"skills":[]},"latest_summary":null,"parents":[],"children":[],"comments":[],"events":[]}`
+	execer := &fakeKanbanExecer{result: runtime.ExecJSONResult{ExitCode: 0, Stdout: okEnvelope(detailJSON)}}
 	svc := NewHermesKanbanService(execer, &fakeKanbanLocator{loc: healthyLoc()})
-	err := svc.Complete(context.Background(), kanbanOrgAdmin(), "app-1", "default", "t_1", "已完成")
+	detail, err := svc.Complete(context.Background(), kanbanOrgAdmin(), "app-1", "default", "t_1", "已完成")
 	require.NoError(t, err)
 	// argv 须含 complete、任务 ID 与 result 字符串
 	assert.Contains(t, execer.lastCmd, "complete")
 	assert.Contains(t, execer.lastCmd, "t_1")
 	assert.Contains(t, execer.lastCmd, "已完成")
+	// 返回的 detail 应包含任务信息
+	assert.Equal(t, "t_1", detail.Task.ID)
 }
 
 // ————————————————————————————————————————————————————
@@ -337,10 +368,9 @@ func (f *fakeStreamExecer) ContainerExecStream(_ context.Context, _, _ string, c
 	}, nil
 }
 
-// TestStreamEventsDeliversLines 验证：StreamEvents 把流式行逐条交给 onLine 回调；argv 符合 watch 计划。
+// TestStreamEventsDeliversLines 验证：StreamEvents 把流式行逐条交给 onLine 回调；argv 符合 oc-kanban watch 约定。
 func TestStreamEventsDeliversLines(t *testing.T) {
-	// 预设两行 NDJSON，验证全部按顺序传给回调，且 argv 符合 hermes kanban --board <slug> watch 约定。
-	// watch 子命令本身无 --board 参数，board 通过全局参数注入到 `hermes kanban --board ...` 位置。
+	// 预设两行 NDJSON，验证全部按顺序传给回调，且 argv 符合 oc-kanban watch --board <slug> 约定。
 	execer := &fakeStreamExecer{lines: []string{`{"kind":"claimed"}`, `{"kind":"heartbeat"}`}}
 	svc := NewHermesKanbanService(execer, &fakeKanbanLocator{loc: healthyLoc()})
 
@@ -351,8 +381,8 @@ func TestStreamEventsDeliversLines(t *testing.T) {
 	require.NoError(t, err)
 	// 两行事件应按顺序全部到达
 	assert.Equal(t, []string{`{"kind":"claimed"}`, `{"kind":"heartbeat"}`}, got)
-	// argv 必须符合实测约定：hermes kanban --board default watch（watch 无 --json）
-	assert.Equal(t, []string{"hermes", "kanban", "--board", "default", "watch"}, execer.lastCmd)
+	// argv 必须符合 oc-kanban 契约：oc-kanban watch --board default
+	assert.Equal(t, []string{"oc-kanban", "watch", "--board", "default"}, execer.lastCmd)
 }
 
 // ————————————————————————————————————————————————————
@@ -365,37 +395,27 @@ func TestBlockRejectsEmptyReason(t *testing.T) {
 	execer := &fakeKanbanExecer{}
 	svc := NewHermesKanbanService(execer, &fakeKanbanLocator{loc: healthyLoc()})
 
-	err := svc.Block(context.Background(), kanbanOrgAdmin(), "app-1", "default", "t_1", "")
+	_, err := svc.Block(context.Background(), kanbanOrgAdmin(), "app-1", "default", "t_1", "")
 	require.ErrorIs(t, err, ErrKanbanBadRequest)
 	// 非法输入不应触达 execer
 	assert.Nil(t, execer.lastCmd)
 }
 
-// TestBlockHappy 验证：Block 正常调用时无错误，且 argv 含 block/taskID/reason；--board 在 verb 之前。
+// TestBlockHappy 验证：Block 正常调用时无错误，且 argv 含 block/taskID/reason；命令以 oc-kanban 开头。
 func TestBlockHappy(t *testing.T) {
-	// CLI 返回 "ok"，验证 argv 正确拼出阻塞命令。
-	// reason 是 positional 参数；--board 通过全局参数注入到 hermes kanban --board <slug> 位置。
-	execer := &fakeKanbanExecer{result: runtime.ExecJSONResult{ExitCode: 0, Stdout: "ok"}}
+	// oc-kanban block 返回完整 TaskDetail，验证 argv 正确拼出阻塞命令。
+	// oc-kanban 中 reason 改用 --reason flag（不再是 positional），--board 是 verb 后的 flag。
+	detailJSON := `{"task":{"id":"t_1","title":"任务","status":"blocked","assignee":"devops","priority":0,"created_at":1779267436,"skills":[]},"latest_summary":null,"parents":[],"children":[],"comments":[],"events":[]}`
+	execer := &fakeKanbanExecer{result: runtime.ExecJSONResult{ExitCode: 0, Stdout: okEnvelope(detailJSON)}}
 	svc := NewHermesKanbanService(execer, &fakeKanbanLocator{loc: healthyLoc()})
 
-	err := svc.Block(context.Background(), kanbanOrgAdmin(), "app-1", "default", "t_1", "等待依赖")
+	_, err := svc.Block(context.Background(), kanbanOrgAdmin(), "app-1", "default", "t_1", "等待依赖")
 	require.NoError(t, err)
-	// argv 须含 block、任务 ID 与阻塞原因（positional）；--board 在 verb 前
+	// argv 须含 block、任务 ID 与阻塞原因
+	assert.Equal(t, "oc-kanban", execer.lastCmd[0])
 	assert.Contains(t, execer.lastCmd, "block")
 	assert.Contains(t, execer.lastCmd, "t_1")
 	assert.Contains(t, execer.lastCmd, "等待依赖")
-	// --board 必须在 block verb 之前（全局参数位置）
-	boardIdx := -1
-	blockIdx := -1
-	for i, arg := range execer.lastCmd {
-		if arg == "--board" {
-			boardIdx = i
-		}
-		if arg == "block" {
-			blockIdx = i
-		}
-	}
-	assert.Less(t, boardIdx, blockIdx, "--board 全局参数应在 block verb 之前")
 }
 
 // TestReassignRejectsBadProfile 验证：Reassign 传非法 profile（含大写字母和空格）返回 ErrKanbanBadRequest。
@@ -404,36 +424,35 @@ func TestReassignRejectsBadProfile(t *testing.T) {
 	execer := &fakeKanbanExecer{}
 	svc := NewHermesKanbanService(execer, &fakeKanbanLocator{loc: healthyLoc()})
 
-	err := svc.Reassign(context.Background(), kanbanOrgAdmin(), "app-1", "default", "t_1", "Bad Profile")
+	_, err := svc.Reassign(context.Background(), kanbanOrgAdmin(), "app-1", "default", "t_1", "Bad Profile")
 	require.ErrorIs(t, err, ErrKanbanBadRequest)
 	// 非法 profile 不应触达 execer
 	assert.Nil(t, execer.lastCmd)
 }
 
-// TestReassignHappy 验证：Reassign 正常调用时 argv 含 reassign 及目标 profile（positional，无 --to）。
+// TestReassignHappy 验证：Reassign 正常调用时 argv 含 reassign 及 --to flag。
 func TestReassignHappy(t *testing.T) {
-	// CLI 返回 "ok"，验证 reassign 命令正确拼出：profile 为 positional 参数，不使用 --to。
-	execer := &fakeKanbanExecer{result: runtime.ExecJSONResult{ExitCode: 0, Stdout: "ok"}}
+	// oc-kanban reassign 返回完整 TaskDetail，profile 改用 --to flag（不再是 positional 参数）。
+	detailJSON := `{"task":{"id":"t_1","title":"任务","status":"ready","assignee":"devops","priority":0,"created_at":1779267436,"skills":[]},"latest_summary":null,"parents":[],"children":[],"comments":[],"events":[]}`
+	execer := &fakeKanbanExecer{result: runtime.ExecJSONResult{ExitCode: 0, Stdout: okEnvelope(detailJSON)}}
 	svc := NewHermesKanbanService(execer, &fakeKanbanLocator{loc: healthyLoc()})
 
-	err := svc.Reassign(context.Background(), kanbanOrgAdmin(), "app-1", "default", "t_1", "devops")
+	_, err := svc.Reassign(context.Background(), kanbanOrgAdmin(), "app-1", "default", "t_1", "devops")
 	require.NoError(t, err)
-	// argv 须含 reassign 和目标 profile（positional，不含 --to）
+	// argv 须含 reassign 和目标 profile，且使用 --to flag（oc-kanban 契约）
 	assert.Contains(t, execer.lastCmd, "reassign")
 	assert.Contains(t, execer.lastCmd, "devops")
-	// 确认没有错误地加入 --to flag
-	for _, arg := range execer.lastCmd {
-		assert.NotEqual(t, "--to", arg, "reassign profile 应为 positional 参数，不应有 --to flag")
-	}
+	assert.Contains(t, execer.lastCmd, "--to")
 }
 
-// TestArchiveHappy 验证：Archive 正常调用时 argv 含 archive 及任务 ID。
+// TestArchiveHappy 验证：Archive 正常调用时 argv 含 archive 及任务 ID，返回 TaskDetail。
 func TestArchiveHappy(t *testing.T) {
-	// CLI 返回 "ok"，验证 archive 命令正确拼出。
-	execer := &fakeKanbanExecer{result: runtime.ExecJSONResult{ExitCode: 0, Stdout: "ok"}}
+	// oc-kanban archive 返回完整 TaskDetail，验证 archive 命令正确拼出。
+	detailJSON := `{"task":{"id":"t_1","title":"任务","status":"archived","assignee":"devops","priority":0,"created_at":1779267436,"skills":[]},"latest_summary":null,"parents":[],"children":[],"comments":[],"events":[]}`
+	execer := &fakeKanbanExecer{result: runtime.ExecJSONResult{ExitCode: 0, Stdout: okEnvelope(detailJSON)}}
 	svc := NewHermesKanbanService(execer, &fakeKanbanLocator{loc: healthyLoc()})
 
-	err := svc.Archive(context.Background(), kanbanOrgAdmin(), "app-1", "default", "t_1")
+	_, err := svc.Archive(context.Background(), kanbanOrgAdmin(), "app-1", "default", "t_1")
 	require.NoError(t, err)
 	// argv 须含 archive 及任务 ID
 	assert.Contains(t, execer.lastCmd, "archive")
@@ -518,5 +537,28 @@ func TestStreamEventsCancelled(t *testing.T) {
 	case <-time.After(3 * time.Second):
 		t.Fatal("StreamEvents 在 ctx 取消后未及时退出，疑似死锁")
 	}
+}
+
+// TestCapabilitiesHappy 验证：Capabilities 解析 oc-kanban capabilities 信封并映射字段。
+func TestCapabilitiesHappy(t *testing.T) {
+	// oc-kanban capabilities 返回契约版本、verb 清单与 feature 开关。
+	capsJSON := `{"contract_version":"1.0","oc_kanban_version":"1","hermes_version":"v0.14.0",` +
+		`"variant":"hermes-main","verbs":["list","show","create"],` +
+		`"features":{"write":true,"watch":true,"runs":true,"stats":true}}`
+	execer := &fakeKanbanExecer{result: runtime.ExecJSONResult{
+		ExitCode: 0, Stdout: okEnvelope(capsJSON),
+	}}
+	svc := NewHermesKanbanService(execer, &fakeKanbanLocator{loc: healthyLoc()})
+
+	caps, err := svc.Capabilities(context.Background(), kanbanOrgAdmin(), "app-1")
+	require.NoError(t, err)
+	assert.Equal(t, "1.0", caps.ContractVersion)
+	assert.True(t, caps.Features.Write)
+	assert.Contains(t, caps.Verbs, "create")
+	// 验证 OCKanbanVersion 与 Variant 字段被正确解析（mock 数据中分别为 "1" 和 "hermes-main"）
+	assert.Equal(t, "1", caps.OCKanbanVersion)
+	assert.Equal(t, "hermes-main", caps.Variant)
+	// argv 为 oc-kanban capabilities
+	assert.Equal(t, []string{"oc-kanban", "capabilities"}, execer.lastCmd)
 }
 

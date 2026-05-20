@@ -17,13 +17,14 @@ import (
 )
 
 // kanbanServiceStub 是 hermesKanbanService 的可控 stub，用于 handler 单测。
-// err 字段控制所有方法是否返回错误；tasks / detail / boards / runs / stats 控制读方法的成功返回值。
+// err 字段控制所有方法是否返回错误；tasks / detail / boards / runs / stats / caps 控制读方法的成功返回值。
 type kanbanServiceStub struct {
 	tasks    []service.KanbanTask
 	detail   service.KanbanTaskDetail
 	boards   []service.KanbanBoard
 	runs     []service.KanbanTaskRun
 	stats    service.KanbanStats
+	caps     service.KanbanCapabilities
 	createIn service.CreateKanbanTaskInput // 记录最后一次 CreateTask 入参
 	err      error
 }
@@ -53,6 +54,11 @@ func (s *kanbanServiceStub) Stats(_ context.Context, _ auth.Principal, _, _ stri
 	return s.stats, s.err
 }
 
+// Capabilities 返回预设能力数据或错误。
+func (s *kanbanServiceStub) Capabilities(_ context.Context, _ auth.Principal, _ string) (service.KanbanCapabilities, error) {
+	return s.caps, s.err
+}
+
 // StreamEvents 返回预设错误，不推送任何行。
 func (s *kanbanServiceStub) StreamEvents(_ context.Context, _ auth.Principal, _, _ string, _ func(string)) error {
 	return s.err
@@ -64,39 +70,39 @@ func (s *kanbanServiceStub) CreateTask(_ context.Context, _ auth.Principal, _ st
 	return s.detail, s.err
 }
 
-// Comment 返回预设错误。
-func (s *kanbanServiceStub) Comment(_ context.Context, _ auth.Principal, _, _, _, _ string) error {
-	return s.err
+// Comment 返回预设详情或错误（oc-kanban 写 verb 统一返回 TaskDetail）。
+func (s *kanbanServiceStub) Comment(_ context.Context, _ auth.Principal, _, _, _, _ string) (service.KanbanTaskDetail, error) {
+	return s.detail, s.err
 }
 
-// Complete 返回预设错误。
-func (s *kanbanServiceStub) Complete(_ context.Context, _ auth.Principal, _, _, _, _ string) error {
-	return s.err
+// Complete 返回预设详情或错误。
+func (s *kanbanServiceStub) Complete(_ context.Context, _ auth.Principal, _, _, _, _ string) (service.KanbanTaskDetail, error) {
+	return s.detail, s.err
 }
 
-// Block 返回预设错误。
-func (s *kanbanServiceStub) Block(_ context.Context, _ auth.Principal, _, _, _, _ string) error {
-	return s.err
+// Block 返回预设详情或错误。
+func (s *kanbanServiceStub) Block(_ context.Context, _ auth.Principal, _, _, _, _ string) (service.KanbanTaskDetail, error) {
+	return s.detail, s.err
 }
 
-// Unblock 返回预设错误。
-func (s *kanbanServiceStub) Unblock(_ context.Context, _ auth.Principal, _, _, _ string) error {
-	return s.err
+// Unblock 返回预设详情或错误。
+func (s *kanbanServiceStub) Unblock(_ context.Context, _ auth.Principal, _, _, _ string) (service.KanbanTaskDetail, error) {
+	return s.detail, s.err
 }
 
-// Archive 返回预设错误。
-func (s *kanbanServiceStub) Archive(_ context.Context, _ auth.Principal, _, _, _ string) error {
-	return s.err
+// Archive 返回预设详情或错误。
+func (s *kanbanServiceStub) Archive(_ context.Context, _ auth.Principal, _, _, _ string) (service.KanbanTaskDetail, error) {
+	return s.detail, s.err
 }
 
-// Reassign 返回预设错误。
-func (s *kanbanServiceStub) Reassign(_ context.Context, _ auth.Principal, _, _, _, _ string) error {
-	return s.err
+// Reassign 返回预设详情或错误。
+func (s *kanbanServiceStub) Reassign(_ context.Context, _ auth.Principal, _, _, _, _ string) (service.KanbanTaskDetail, error) {
+	return s.detail, s.err
 }
 
-// Reclaim 返回预设错误。
-func (s *kanbanServiceStub) Reclaim(_ context.Context, _ auth.Principal, _, _, _ string) error {
-	return s.err
+// Reclaim 返回预设详情或错误。
+func (s *kanbanServiceStub) Reclaim(_ context.Context, _ auth.Principal, _, _, _ string) (service.KanbanTaskDetail, error) {
+	return s.detail, s.err
 }
 
 // newKanbanTestRouter 构造挂载了 kanban 路由的测试 router。
@@ -280,10 +286,10 @@ func TestKanbanCreateKeepsAdvancedFieldsForPlatformAdmin(t *testing.T) {
 	assert.Equal(t, 5, stub.createIn.MaxRetries, "平台管理员的 max_retries 应透传")
 }
 
-// TestKanbanCommentHappy 验证：评论端点在 service 成功时返回 204 No Content。
+// TestKanbanCommentHappy 验证：评论端点在 service 成功时返回 200 并含 task 字段。
 func TestKanbanCommentHappy(t *testing.T) {
-	// stub 无错误，模拟评论成功
-	stub := &kanbanServiceStub{}
+	// stub 无错误，模拟评论成功，返回预设 TaskDetail
+	stub := &kanbanServiceStub{detail: service.KanbanTaskDetail{Task: service.KanbanTask{ID: "t_1"}}}
 	r := newKanbanTestRouter(t, stub)
 
 	body := `{"board":"default","body":"一条评论"}`
@@ -293,15 +299,16 @@ func TestKanbanCommentHappy(t *testing.T) {
 	req = withPrincipal(req, auth.Principal{UserID: "u1", Role: domain.UserRoleOrgAdmin, OrgID: "org-1"})
 	r.ServeHTTP(w, req)
 
-	// 写操作成功应返回 204 No Content
-	assert.Equal(t, http.StatusNoContent, w.Code)
+	// oc-kanban 写 verb 成功返回 200 并含更新后的 task 详情
+	assert.Equal(t, http.StatusOK, w.Code)
+	assert.Contains(t, w.Body.String(), `"task"`)
 }
 
-// TestKanbanUnblockEmptyBody 验证：unblock 端点不发 body 时应返回 204，而非 400。
+// TestKanbanUnblockEmptyBody 验证：unblock 端点不发 body 时应返回 200 并含 task 字段，而非 400。
 // body 为可选（KanbanBoardRequest 无必填字段），空请求体不应被误判为绑定错误。
 func TestKanbanUnblockEmptyBody(t *testing.T) {
-	// stub 无错误，模拟 unblock 成功
-	stub := &kanbanServiceStub{}
+	// stub 无错误，模拟 unblock 成功，返回预设 TaskDetail
+	stub := &kanbanServiceStub{detail: service.KanbanTaskDetail{Task: service.KanbanTask{ID: "t_1"}}}
 	r := newKanbanTestRouter(t, stub)
 
 	w := httptest.NewRecorder()
@@ -310,15 +317,16 @@ func TestKanbanUnblockEmptyBody(t *testing.T) {
 	req = withPrincipal(req, auth.Principal{UserID: "u1", Role: domain.UserRoleOrgAdmin, OrgID: "org-1"})
 	r.ServeHTTP(w, req)
 
-	// 空 body 不应触发 400，成功应返回 204 No Content
-	assert.Equal(t, http.StatusNoContent, w.Code)
+	// 空 body 不应触发 400，oc-kanban 写 verb 成功返回 200 并含 task 详情
+	assert.Equal(t, http.StatusOK, w.Code)
+	assert.Contains(t, w.Body.String(), `"task"`)
 }
 
-// TestKanbanArchiveEmptyBody 验证：archive 端点不发 body 时应返回 204，而非 400。
+// TestKanbanArchiveEmptyBody 验证：archive 端点不发 body 时应返回 200 并含 task 字段，而非 400。
 // body 为可选（KanbanBoardRequest 无必填字段），空请求体不应被误判为绑定错误。
 func TestKanbanArchiveEmptyBody(t *testing.T) {
-	// stub 无错误，模拟 archive 成功
-	stub := &kanbanServiceStub{}
+	// stub 无错误，模拟 archive 成功，返回预设 TaskDetail
+	stub := &kanbanServiceStub{detail: service.KanbanTaskDetail{Task: service.KanbanTask{ID: "t_1"}}}
 	r := newKanbanTestRouter(t, stub)
 
 	w := httptest.NewRecorder()
@@ -327,15 +335,16 @@ func TestKanbanArchiveEmptyBody(t *testing.T) {
 	req = withPrincipal(req, auth.Principal{UserID: "u1", Role: domain.UserRoleOrgAdmin, OrgID: "org-1"})
 	r.ServeHTTP(w, req)
 
-	// 空 body 不应触发 400，成功应返回 204 No Content
-	assert.Equal(t, http.StatusNoContent, w.Code)
+	// 空 body 不应触发 400，oc-kanban 写 verb 成功返回 200 并含 task 详情
+	assert.Equal(t, http.StatusOK, w.Code)
+	assert.Contains(t, w.Body.String(), `"task"`)
 }
 
-// TestKanbanReclaimEmptyBody 验证：reclaim 端点不发 body 时应返回 204，而非 400。
+// TestKanbanReclaimEmptyBody 验证：reclaim 端点不发 body 时应返回 200 并含 task 字段，而非 400。
 // body 为可选（KanbanBoardRequest 无必填字段），空请求体不应被误判为绑定错误。
 func TestKanbanReclaimEmptyBody(t *testing.T) {
-	// stub 无错误，模拟 reclaim 成功
-	stub := &kanbanServiceStub{}
+	// stub 无错误，模拟 reclaim 成功，返回预设 TaskDetail
+	stub := &kanbanServiceStub{detail: service.KanbanTaskDetail{Task: service.KanbanTask{ID: "t_1"}}}
 	r := newKanbanTestRouter(t, stub)
 
 	w := httptest.NewRecorder()
@@ -344,15 +353,43 @@ func TestKanbanReclaimEmptyBody(t *testing.T) {
 	req = withPrincipal(req, auth.Principal{UserID: "u1", Role: domain.UserRoleOrgAdmin, OrgID: "org-1"})
 	r.ServeHTTP(w, req)
 
-	// 空 body 不应触发 400，成功应返回 204 No Content
-	assert.Equal(t, http.StatusNoContent, w.Code)
+	// 空 body 不应触发 400，oc-kanban 写 verb 成功返回 200 并含 task 详情
+	assert.Equal(t, http.StatusOK, w.Code)
+	assert.Contains(t, w.Body.String(), `"task"`)
 }
 
-// TestKanbanCompleteEmptyBody 验证：complete 端点不发 body 时应返回 204，而非 400。
+// TestKanbanCapabilitiesHappy 验证：Capabilities 端点在 service 正常返回时，
+// HTTP 状态 200 且响应体含顶层 capabilities key 及正确的契约字段值。
+func TestKanbanCapabilitiesHappy(t *testing.T) {
+	// stub 预设能力数据，验证 capabilities 查询正常路径：
+	// ContractVersion / Features.Write / Verbs 均能通过响应体正确透传。
+	stub := &kanbanServiceStub{caps: service.KanbanCapabilities{
+		ContractVersion: "1.0",
+		OCKanbanVersion: "1",
+		Variant:         "hermes-main",
+		Verbs:           []string{"list", "show", "create"},
+		Features:        service.KanbanFeatures{Write: true},
+	}}
+	r := newKanbanTestRouter(t, stub)
+
+	w := httptest.NewRecorder()
+	req := httptest.NewRequest(http.MethodGet, "/api/v1/apps/app-1/hermes/kanban/capabilities", nil)
+	// 注入 org_admin principal，确保鉴权层通过
+	req = withPrincipal(req, auth.Principal{UserID: "u1", Role: domain.UserRoleOrgAdmin, OrgID: "org-1"})
+	r.ServeHTTP(w, req)
+
+	require.Equal(t, http.StatusOK, w.Code)
+	// 响应体须含顶层 capabilities key，确保接口契约正确
+	assert.Contains(t, w.Body.String(), `"capabilities"`)
+	// 验证契约版本字段被正确透传
+	assert.Contains(t, w.Body.String(), `"1.0"`)
+}
+
+// TestKanbanCompleteEmptyBody 验证：complete 端点不发 body 时应返回 200 并含 task 字段，而非 400。
 // body 为可选（KanbanCompleteRequest 无必填字段），空请求体不应被误判为绑定错误。
 func TestKanbanCompleteEmptyBody(t *testing.T) {
-	// stub 无错误，模拟 complete 成功
-	stub := &kanbanServiceStub{}
+	// stub 无错误，模拟 complete 成功，返回预设 TaskDetail
+	stub := &kanbanServiceStub{detail: service.KanbanTaskDetail{Task: service.KanbanTask{ID: "t_1"}}}
 	r := newKanbanTestRouter(t, stub)
 
 	w := httptest.NewRecorder()
@@ -361,6 +398,7 @@ func TestKanbanCompleteEmptyBody(t *testing.T) {
 	req = withPrincipal(req, auth.Principal{UserID: "u1", Role: domain.UserRoleOrgAdmin, OrgID: "org-1"})
 	r.ServeHTTP(w, req)
 
-	// 空 body 不应触发 400，成功应返回 204 No Content
-	assert.Equal(t, http.StatusNoContent, w.Code)
+	// 空 body 不应触发 400，oc-kanban 写 verb 成功返回 200 并含 task 详情
+	assert.Equal(t, http.StatusOK, w.Code)
+	assert.Contains(t, w.Body.String(), `"task"`)
 }

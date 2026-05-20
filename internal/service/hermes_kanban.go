@@ -1,6 +1,6 @@
 // Package service —— hermes_kanban.go 实现 Hermes Kanban 任务看板能力。
-// manager 不持有 kanban 数据，全部通过在 hermes 容器内执行 `hermes kanban`
-// CLI 并解析 --json 输出获得；写操作同样走 CLI verb。
+// manager 不持有 kanban 数据，全部通过在 hermes 容器内执行 `oc-kanban` 命令、
+// 解析其统一信封（{ok,data/error}）输出获得；`oc-kanban` 是 hermes kanban CLI 的稳定适配层。
 package service
 
 import (
@@ -83,28 +83,75 @@ func (s *HermesKanbanService) resolve(ctx context.Context, principal auth.Princi
 	return loc, nil
 }
 
-// runCLI 在 hermes 容器内执行一条 kanban 命令并返回 stdout。
-// board 是 `hermes kanban` 的全局参数，放在 verb 之前；board 为空则不加（如 boards list）。
-// verbArgs 是 verb 及其后的参数，不含 "hermes kanban [--board ...]" 前缀。
-func (s *HermesKanbanService) runCLI(ctx context.Context, loc KanbanAppLocation, board string, verbArgs []string) ([]byte, error) {
-	cmd := []string{"hermes", "kanban"}
-	if board != "" {
-		cmd = append(cmd, "--board", board)
+// kanbanEnvelope 是 oc-kanban 输出的统一信封（契约 §4.1）。
+type kanbanEnvelope struct {
+	OK    bool                 `json:"ok"`
+	Data  json.RawMessage      `json:"data"`
+	Error *kanbanEnvelopeError `json:"error"`
+}
+
+// kanbanEnvelopeError 是失败信封里的错误对象。
+type kanbanEnvelopeError struct {
+	Code    string `json:"code"`
+	Message string `json:"message"`
+}
+
+// mapKanbanErrorCode 把 oc-kanban 契约错误码映射成 service 哨兵错误。
+func mapKanbanErrorCode(e *kanbanEnvelopeError) error {
+	if e == nil {
+		return ErrKanbanCLI
 	}
-	cmd = append(cmd, verbArgs...)
+	switch e.Code {
+	case "BAD_REQUEST":
+		return fmt.Errorf("%w: %s", ErrKanbanBadRequest, e.Message)
+	case "NOT_FOUND":
+		return ErrNotFound
+	case "UNSUPPORTED":
+		return ErrKanbanNotSupported
+	case "INTERNAL":
+		return fmt.Errorf("%w: %s", ErrKanbanOutputInvalid, e.Message)
+	default: // HERMES_CLI_FAILED 及未知码统一归为 CLI 失败
+		return fmt.Errorf("%w: %s", ErrKanbanCLI, e.Message)
+	}
+}
+
+// runOCKanban 在 hermes 容器内执行一条 oc-kanban 命令，解析统一信封：
+// 成功返回 data 段；失败按契约错误码映射成 service 哨兵错误。
+// args 是 oc-kanban 的 verb 及其 flag，不含 "oc-kanban" 前缀。
+func (s *HermesKanbanService) runOCKanban(ctx context.Context, loc KanbanAppLocation, args []string) (json.RawMessage, error) {
+	cmd := append([]string{"oc-kanban"}, args...)
 	res, err := s.execer.ContainerExecJSON(ctx, loc.NodeID, loc.ContainerID, cmd)
 	if err != nil {
 		return nil, fmt.Errorf("%w: %v", ErrKanbanCLI, err)
 	}
-	if res.ExitCode != 0 {
+	var env kanbanEnvelope
+	if e := json.Unmarshal([]byte(res.Stdout), &env); e != nil {
+		// stdout 非合法信封 JSON：老镜像无 oc-kanban、argparse 用法错误等。
+		// 按 rune 截断 stderr，避免在多字节字符中间切断。
 		msg := strings.TrimSpace(res.Stderr)
-		// 按字符（rune）截断，避免在多字节中文字符中间切断产生非法 UTF-8。
 		if runes := []rune(msg); len(runes) > 1024 {
 			msg = string(runes[:1024])
 		}
-		return nil, fmt.Errorf("%w: exit %d: %s", ErrKanbanCLI, res.ExitCode, msg)
+		return nil, fmt.Errorf("%w: 信封解析失败: %v (stderr: %s)", ErrKanbanOutputInvalid, e, msg)
 	}
-	return []byte(res.Stdout), nil
+	if !env.OK {
+		return nil, mapKanbanErrorCode(env.Error)
+	}
+	return env.Data, nil
+}
+
+// runWriteVerb 执行一个写 verb 并把信封 data 解析为 KanbanTaskDetail。
+// oc-kanban 的写操作统一返回更新后的完整任务详情（契约 §4.2）。
+func (s *HermesKanbanService) runWriteVerb(ctx context.Context, loc KanbanAppLocation, args []string) (KanbanTaskDetail, error) {
+	data, err := s.runOCKanban(ctx, loc, args)
+	if err != nil {
+		return KanbanTaskDetail{}, err
+	}
+	var detail KanbanTaskDetail
+	if err := json.Unmarshal(data, &detail); err != nil {
+		return KanbanTaskDetail{}, fmt.Errorf("%w: %v", ErrKanbanOutputInvalid, err)
+	}
+	return detail, nil
 }
 
 // validateBoard 校验 board slug，空值回退到 "default"。
@@ -125,13 +172,12 @@ func (s *HermesKanbanService) ListBoards(ctx context.Context, principal auth.Pri
 	if err != nil {
 		return nil, err
 	}
-	// boards 子命令跨 board，不加 --board 全局参数。
-	out, err := s.runCLI(ctx, loc, "", []string{"boards", "list", "--all", "--json"})
+	data, err := s.runOCKanban(ctx, loc, []string{"boards"})
 	if err != nil {
 		return nil, err
 	}
 	var boards []KanbanBoard
-	if err := json.Unmarshal(out, &boards); err != nil {
+	if err := json.Unmarshal(data, &boards); err != nil {
 		return nil, fmt.Errorf("%w: %v", ErrKanbanOutputInvalid, err)
 	}
 	return boards, nil
@@ -154,8 +200,7 @@ func (s *HermesKanbanService) ListTasks(ctx context.Context, principal auth.Prin
 	if err != nil {
 		return nil, err
 	}
-	// list 本身无 --board 参数，board 通过 runCLI 作为全局参数注入 `hermes kanban --board <slug>` 位置。
-	args := []string{"list", "--json"}
+	args := []string{"list", "--board", board}
 	if f.Status != "" {
 		if !kanbanStatuses[f.Status] {
 			return nil, fmt.Errorf("%w: 非法 status", ErrKanbanBadRequest)
@@ -168,12 +213,12 @@ func (s *HermesKanbanService) ListTasks(ctx context.Context, principal auth.Prin
 		}
 		args = append(args, "--assignee", f.Assignee)
 	}
-	out, err := s.runCLI(ctx, loc, board, args)
+	data, err := s.runOCKanban(ctx, loc, args)
 	if err != nil {
 		return nil, err
 	}
 	var tasks []KanbanTask
-	if err := json.Unmarshal(out, &tasks); err != nil {
+	if err := json.Unmarshal(data, &tasks); err != nil {
 		return nil, fmt.Errorf("%w: %v", ErrKanbanOutputInvalid, err)
 	}
 	return tasks, nil
@@ -198,12 +243,12 @@ func (s *HermesKanbanService) ShowTask(ctx context.Context, principal auth.Princ
 	if !taskIDRe.MatchString(taskID) {
 		return KanbanTaskDetail{}, fmt.Errorf("%w: 非法 task id", ErrKanbanBadRequest)
 	}
-	out, err := s.runCLI(ctx, loc, b, []string{"show", taskID, "--json"})
+	data, err := s.runOCKanban(ctx, loc, []string{"show", "--board", b, "--id", taskID})
 	if err != nil {
 		return KanbanTaskDetail{}, err
 	}
 	var detail KanbanTaskDetail
-	if err := json.Unmarshal(out, &detail); err != nil {
+	if err := json.Unmarshal(data, &detail); err != nil {
 		return KanbanTaskDetail{}, fmt.Errorf("%w: %v", ErrKanbanOutputInvalid, err)
 	}
 	return detail, nil
@@ -222,12 +267,12 @@ func (s *HermesKanbanService) TaskRuns(ctx context.Context, principal auth.Princ
 	if !taskIDRe.MatchString(taskID) {
 		return nil, fmt.Errorf("%w: 非法 task id", ErrKanbanBadRequest)
 	}
-	out, err := s.runCLI(ctx, loc, b, []string{"runs", taskID, "--json"})
+	data, err := s.runOCKanban(ctx, loc, []string{"runs", "--board", b, "--id", taskID})
 	if err != nil {
 		return nil, err
 	}
 	var runs []KanbanTaskRun
-	if err := json.Unmarshal(out, &runs); err != nil {
+	if err := json.Unmarshal(data, &runs); err != nil {
 		return nil, fmt.Errorf("%w: %v", ErrKanbanOutputInvalid, err)
 	}
 	return runs, nil
@@ -243,12 +288,12 @@ func (s *HermesKanbanService) Stats(ctx context.Context, principal auth.Principa
 	if err != nil {
 		return KanbanStats{}, err
 	}
-	out, err := s.runCLI(ctx, loc, b, []string{"stats", "--json"})
+	data, err := s.runOCKanban(ctx, loc, []string{"stats", "--board", b})
 	if err != nil {
 		return KanbanStats{}, err
 	}
 	var stats KanbanStats
-	if err := json.Unmarshal(out, &stats); err != nil {
+	if err := json.Unmarshal(data, &stats); err != nil {
 		return KanbanStats{}, fmt.Errorf("%w: %v", ErrKanbanOutputInvalid, err)
 	}
 	return stats, nil
@@ -321,9 +366,8 @@ func (s *HermesKanbanService) CreateTask(ctx context.Context, principal auth.Pri
 	if in.Priority < 0 || in.Priority > 9 {
 		return KanbanTaskDetail{}, fmt.Errorf("%w: priority 越界", ErrKanbanBadRequest)
 	}
-	// board 通过 runCLI 作为全局参数注入，verb args 不含 --board。
-	args := []string{"create", in.Title, "--assignee", in.Assignee,
-		"--priority", fmt.Sprintf("%d", in.Priority), "--json"}
+	args := []string{"create", "--board", board, "--title", in.Title,
+		"--assignee", in.Assignee, "--priority", fmt.Sprintf("%d", in.Priority)}
 	if in.Body != "" {
 		args = append(args, "--body", in.Body)
 	}
@@ -350,156 +394,157 @@ func (s *HermesKanbanService) CreateTask(ctx context.Context, principal auth.Pri
 	if in.MaxRetries > 0 {
 		args = append(args, "--max-retries", fmt.Sprintf("%d", in.MaxRetries))
 	}
-	out, err := s.runCLI(ctx, loc, board, args)
-	if err != nil {
-		return KanbanTaskDetail{}, err
-	}
-	// create --json 输出的是扁平任务对象（与 list 元素格式相同），
-	// 而非 show 输出的 {task:{...}} 包装结构，需先解到 KanbanTask 再包装。
-	var task KanbanTask
-	if err := json.Unmarshal(out, &task); err != nil {
-		return KanbanTaskDetail{}, fmt.Errorf("%w: %v", ErrKanbanOutputInvalid, err)
-	}
-	return KanbanTaskDetail{Task: task}, nil
+	// oc-kanban create 直接返回完整 TaskDetail（契约 §4.2），无需二次包装。
+	return s.runWriteVerb(ctx, loc, args)
 }
 
 // Comment 给任务追加一条评论。body 为自由文本，作为独立 argv 传入，不拼 shell。
-func (s *HermesKanbanService) Comment(ctx context.Context, principal auth.Principal, appID, board, taskID, body string) error {
+func (s *HermesKanbanService) Comment(ctx context.Context, principal auth.Principal, appID, board, taskID, body string) (KanbanTaskDetail, error) {
 	loc, err := s.resolveManage(ctx, principal, appID)
 	if err != nil {
-		return err
+		return KanbanTaskDetail{}, err
 	}
 	b, err := validateBoard(board)
 	if err != nil {
-		return err
+		return KanbanTaskDetail{}, err
 	}
 	if !taskIDRe.MatchString(taskID) {
-		return fmt.Errorf("%w: 非法 task id", ErrKanbanBadRequest)
+		return KanbanTaskDetail{}, fmt.Errorf("%w: 非法 task id", ErrKanbanBadRequest)
 	}
 	// 评论内容不能为空。
 	if strings.TrimSpace(body) == "" {
-		return fmt.Errorf("%w: 评论内容不能为空", ErrKanbanBadRequest)
+		return KanbanTaskDetail{}, fmt.Errorf("%w: 评论内容不能为空", ErrKanbanBadRequest)
 	}
-	// body 作为 positional text 参数，board 通过 runCLI 全局参数注入。
-	_, err = s.runCLI(ctx, loc, b, []string{"comment", taskID, body})
-	return err
+	return s.runWriteVerb(ctx, loc, []string{"comment", "--board", b, "--id", taskID, "--body", body})
 }
 
 // Complete 把任务标记为已完成。result 可选；不为空时附加 --result 传递执行摘要。
-func (s *HermesKanbanService) Complete(ctx context.Context, principal auth.Principal, appID, board, taskID, result string) error {
+func (s *HermesKanbanService) Complete(ctx context.Context, principal auth.Principal, appID, board, taskID, result string) (KanbanTaskDetail, error) {
 	loc, err := s.resolveManage(ctx, principal, appID)
 	if err != nil {
-		return err
+		return KanbanTaskDetail{}, err
 	}
 	b, err := validateBoard(board)
 	if err != nil {
-		return err
+		return KanbanTaskDetail{}, err
 	}
 	if !taskIDRe.MatchString(taskID) {
-		return fmt.Errorf("%w: 非法 task id", ErrKanbanBadRequest)
+		return KanbanTaskDetail{}, fmt.Errorf("%w: 非法 task id", ErrKanbanBadRequest)
 	}
-	args := []string{"complete", taskID}
-	// result 为可选自由文本，非空时作为独立 argv 附加；board 通过 runCLI 全局参数注入。
+	args := []string{"complete", "--board", b, "--id", taskID}
+	// result 为可选自由文本，非空时追加 --result 参数。
 	if result != "" {
 		args = append(args, "--result", result)
 	}
-	_, err = s.runCLI(ctx, loc, b, args)
-	return err
+	return s.runWriteVerb(ctx, loc, args)
 }
 
 // Block 把任务标记为阻塞，reason 说明阻塞原因，不能为空。
-func (s *HermesKanbanService) Block(ctx context.Context, principal auth.Principal, appID, board, taskID, reason string) error {
+func (s *HermesKanbanService) Block(ctx context.Context, principal auth.Principal, appID, board, taskID, reason string) (KanbanTaskDetail, error) {
 	loc, err := s.resolveManage(ctx, principal, appID)
 	if err != nil {
-		return err
+		return KanbanTaskDetail{}, err
 	}
 	b, err := validateBoard(board)
 	if err != nil {
-		return err
+		return KanbanTaskDetail{}, err
 	}
 	if !taskIDRe.MatchString(taskID) {
-		return fmt.Errorf("%w: 非法 task id", ErrKanbanBadRequest)
+		return KanbanTaskDetail{}, fmt.Errorf("%w: 非法 task id", ErrKanbanBadRequest)
 	}
 	// 阻塞原因不能为空（CLI 要求必填）。
 	if strings.TrimSpace(reason) == "" {
-		return fmt.Errorf("%w: 阻塞原因不能为空", ErrKanbanBadRequest)
+		return KanbanTaskDetail{}, fmt.Errorf("%w: 阻塞原因不能为空", ErrKanbanBadRequest)
 	}
-	// reason 作为 positional 参数，board 通过 runCLI 全局参数注入。
-	_, err = s.runCLI(ctx, loc, b, []string{"block", taskID, reason})
-	return err
+	return s.runWriteVerb(ctx, loc, []string{"block", "--board", b, "--id", taskID, "--reason", reason})
 }
 
 // Unblock 解除任务的阻塞状态。
-func (s *HermesKanbanService) Unblock(ctx context.Context, principal auth.Principal, appID, board, taskID string) error {
+func (s *HermesKanbanService) Unblock(ctx context.Context, principal auth.Principal, appID, board, taskID string) (KanbanTaskDetail, error) {
 	loc, err := s.resolveManage(ctx, principal, appID)
 	if err != nil {
-		return err
+		return KanbanTaskDetail{}, err
 	}
 	b, err := validateBoard(board)
 	if err != nil {
-		return err
+		return KanbanTaskDetail{}, err
 	}
 	if !taskIDRe.MatchString(taskID) {
-		return fmt.Errorf("%w: 非法 task id", ErrKanbanBadRequest)
+		return KanbanTaskDetail{}, fmt.Errorf("%w: 非法 task id", ErrKanbanBadRequest)
 	}
-	_, err = s.runCLI(ctx, loc, b, []string{"unblock", taskID})
-	return err
+	return s.runWriteVerb(ctx, loc, []string{"unblock", "--board", b, "--id", taskID})
 }
 
 // Archive 归档任务。
-func (s *HermesKanbanService) Archive(ctx context.Context, principal auth.Principal, appID, board, taskID string) error {
+func (s *HermesKanbanService) Archive(ctx context.Context, principal auth.Principal, appID, board, taskID string) (KanbanTaskDetail, error) {
 	loc, err := s.resolveManage(ctx, principal, appID)
 	if err != nil {
-		return err
+		return KanbanTaskDetail{}, err
 	}
 	b, err := validateBoard(board)
 	if err != nil {
-		return err
+		return KanbanTaskDetail{}, err
 	}
 	if !taskIDRe.MatchString(taskID) {
-		return fmt.Errorf("%w: 非法 task id", ErrKanbanBadRequest)
+		return KanbanTaskDetail{}, fmt.Errorf("%w: 非法 task id", ErrKanbanBadRequest)
 	}
-	_, err = s.runCLI(ctx, loc, b, []string{"archive", taskID})
-	return err
+	return s.runWriteVerb(ctx, loc, []string{"archive", "--board", b, "--id", taskID})
 }
 
 // Reassign 把任务重新分配给指定 profile。profile 必须符合 board slug 规范。
-func (s *HermesKanbanService) Reassign(ctx context.Context, principal auth.Principal, appID, board, taskID, profile string) error {
+func (s *HermesKanbanService) Reassign(ctx context.Context, principal auth.Principal, appID, board, taskID, profile string) (KanbanTaskDetail, error) {
 	loc, err := s.resolveManage(ctx, principal, appID)
 	if err != nil {
-		return err
+		return KanbanTaskDetail{}, err
 	}
 	b, err := validateBoard(board)
 	if err != nil {
-		return err
+		return KanbanTaskDetail{}, err
 	}
 	if !taskIDRe.MatchString(taskID) {
-		return fmt.Errorf("%w: 非法 task id", ErrKanbanBadRequest)
+		return KanbanTaskDetail{}, fmt.Errorf("%w: 非法 task id", ErrKanbanBadRequest)
 	}
 	// profile 用于标识 hermes worker 配置，格式与 board slug 一致。
 	if !boardSlugRe.MatchString(profile) {
-		return fmt.Errorf("%w: 非法 profile", ErrKanbanBadRequest)
+		return KanbanTaskDetail{}, fmt.Errorf("%w: 非法 profile", ErrKanbanBadRequest)
 	}
-	// profile 是 positional 参数（不是 --to），board 通过 runCLI 全局参数注入。
-	_, err = s.runCLI(ctx, loc, b, []string{"reassign", taskID, profile})
-	return err
+	// oc-kanban reassign 用 --to flag（不再是 positional 参数）。
+	return s.runWriteVerb(ctx, loc, []string{"reassign", "--board", b, "--id", taskID, "--to", profile})
 }
 
 // Reclaim 把任务重置为等待认领状态（撤销当前 assignee）。
-func (s *HermesKanbanService) Reclaim(ctx context.Context, principal auth.Principal, appID, board, taskID string) error {
+func (s *HermesKanbanService) Reclaim(ctx context.Context, principal auth.Principal, appID, board, taskID string) (KanbanTaskDetail, error) {
 	loc, err := s.resolveManage(ctx, principal, appID)
 	if err != nil {
-		return err
+		return KanbanTaskDetail{}, err
 	}
 	b, err := validateBoard(board)
 	if err != nil {
-		return err
+		return KanbanTaskDetail{}, err
 	}
 	if !taskIDRe.MatchString(taskID) {
-		return fmt.Errorf("%w: 非法 task id", ErrKanbanBadRequest)
+		return KanbanTaskDetail{}, fmt.Errorf("%w: 非法 task id", ErrKanbanBadRequest)
 	}
-	_, err = s.runCLI(ctx, loc, b, []string{"reclaim", taskID})
-	return err
+	return s.runWriteVerb(ctx, loc, []string{"reclaim", "--board", b, "--id", taskID})
+}
+
+// Capabilities 探测实例 oc-kanban 的契约版本与可用能力。
+// 仅需读权限，故用 resolve（与读 verb 一致）。stub 实例由 resolve
+// 拦截返回 ErrKanbanNotSupported，前端按既有 stub 降级处理。
+func (s *HermesKanbanService) Capabilities(ctx context.Context, principal auth.Principal, appID string) (KanbanCapabilities, error) {
+	loc, err := s.resolve(ctx, principal, appID)
+	if err != nil {
+		return KanbanCapabilities{}, err
+	}
+	data, err := s.runOCKanban(ctx, loc, []string{"capabilities"})
+	if err != nil {
+		return KanbanCapabilities{}, err
+	}
+	var caps KanbanCapabilities
+	if err := json.Unmarshal(data, &caps); err != nil {
+		return KanbanCapabilities{}, fmt.Errorf("%w: %v", ErrKanbanOutputInvalid, err)
+	}
+	return caps, nil
 }
 
 // ————————————————————————————————————————————————————
@@ -519,9 +564,8 @@ func (s *HermesKanbanService) StreamEvents(ctx context.Context, principal auth.P
 	if err != nil {
 		return err
 	}
-	// watch 子命令不支持 --json 也不支持自身的 --board；
-	// board 通过全局参数注入到 `hermes kanban --board <slug>` 位置。
-	cmd := []string{"hermes", "kanban", "--board", b, "watch"}
+	// oc-kanban watch 以 --board flag 传入 board，不使用 hermes kanban 全局参数前缀。
+	cmd := []string{"oc-kanban", "watch", "--board", b}
 	handle, err := s.execer.ContainerExecStream(ctx, loc.NodeID, loc.ContainerID, cmd)
 	if err != nil {
 		return fmt.Errorf("%w: %v", ErrKanbanCLI, err)
