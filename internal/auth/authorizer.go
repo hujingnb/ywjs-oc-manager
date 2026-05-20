@@ -238,3 +238,17 @@ func CanViewRecharges(p Principal, orgID string) bool {
 	return p.Role == domain.UserRolePlatformAdmin ||
 		(p.Role == domain.UserRoleOrgAdmin && p.OrgID == orgID)
 }
+
+// 任务看板 -----------------------------------------------------------
+
+// CanViewAppKanban 判断 principal 能否查看应用的任务看板。
+// 与查看应用详情同权限：平台管理员、本组织管理员、应用拥有者本人。
+func CanViewAppKanban(p Principal, appOrgID, appOwnerUserID string) bool {
+	return CanViewApp(p, appOrgID, appOwnerUserID)
+}
+
+// CanManageAppKanban 判断 principal 能否对任务看板做写操作（评论 / 完成 / 阻塞等）。
+// spec 规定：所有能查看实例详情的角色都可写，因此与 CanViewApp 一致。
+func CanManageAppKanban(p Principal, appOrgID, appOwnerUserID string) bool {
+	return CanViewApp(p, appOrgID, appOwnerUserID)
+}

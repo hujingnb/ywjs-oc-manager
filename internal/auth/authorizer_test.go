@@ -340,3 +340,35 @@ func TestCanViewOwnAudit(t *testing.T) {
 		})
 	}
 }
+
+// TestCanViewAppKanban 验证 Kanban 读权限三层角色判断。
+func TestCanViewAppKanban(t *testing.T) {
+	cases := []memberCase{
+		// 平台管理员：跨组织可看
+		{"platform_admin 跨组织可看 kanban", domain.UserRolePlatformAdmin, orgA, userA, orgB, userB, true}, // 场景：platform_admin 跨组织可看 kanban
+		// 本组织管理员：可看本组织应用
+		{"org_admin 同组织可看 kanban", domain.UserRoleOrgAdmin, orgA, userA, orgA, userB, true}, // 场景：org_admin 同组织可看 kanban
+		// 外组织管理员：不可看
+		{"org_admin 跨组织不可看 kanban", domain.UserRoleOrgAdmin, orgA, userA, orgB, userB, false}, // 场景：org_admin 跨组织不可看 kanban
+		// 应用拥有者本人：可看
+		{"org_member 拥有者本人可看 kanban", domain.UserRoleOrgMember, orgA, userA, orgA, userA, true}, // 场景：org_member 拥有者本人可看 kanban
+		// 非拥有者的普通成员：不可看
+		{"org_member 非拥有者不可看 kanban", domain.UserRoleOrgMember, orgA, userA, orgA, userB, false}, // 场景：org_member 非拥有者不可看 kanban
+	}
+	runAppCases(t, CanViewAppKanban, cases)
+}
+
+// TestCanManageAppKanban 验证 Kanban 写权限：与读权限一致（所有可见角色可写）。
+func TestCanManageAppKanban(t *testing.T) {
+	cases := []memberCase{
+		// 应用拥有者本人可写
+		{"org_member 拥有者本人可写 kanban", domain.UserRoleOrgMember, orgA, userA, orgA, userA, true}, // 场景：org_member 拥有者本人可写 kanban
+		// 外组织成员不可写
+		{"org_member 外组织不可写 kanban", domain.UserRoleOrgMember, orgA, userA, orgB, userB, false}, // 场景：org_member 外组织不可写 kanban
+		// 本组织管理员可写
+		{"org_admin 同组织可写 kanban", domain.UserRoleOrgAdmin, orgA, userA, orgA, userB, true}, // 场景：org_admin 同组织可写 kanban
+		// 平台管理员跨组织可写（与 CanViewApp 一致）
+		{"platform_admin 跨组织可写 kanban", domain.UserRolePlatformAdmin, orgA, userA, orgB, userB, true}, // 场景：platform_admin 跨组织可写 kanban
+	}
+	runAppCases(t, CanManageAppKanban, cases)
+}
