@@ -1,8 +1,8 @@
 """跨 variant 数据迁移 dispatch。
 
-约定：from_<prev_variant>.py 暴露 run(data_root: Path) -> dict 函数；
-本 variant（hermes-v2026.5.16）首版无任何 from_*.py，所以遇到任何已知 prev 都抛。
-未来新 variant（如 hermes-v0.5）需新增 from_hermes-v2026.5.16.py 等模块。
+当前 variant 是 hermes-v2026.5.16。它由历史 hermes-main 目录重命名而来，
+因此允许 hermes-main → hermes-v2026.5.16 作为 no-op 迁移。
+未来版本号可能包含 "."，迁移模块名必须先规整为 Python-safe 后缀。
 """
 
 from __future__ import annotations
@@ -10,6 +10,8 @@ from __future__ import annotations
 import importlib
 from pathlib import Path
 from typing import Optional
+
+LEGACY_NOOP_PREV_VARIANTS = {"hermes-main"}
 
 
 def run(prev_variant: Optional[str], curr_variant: str, data_root: Path) -> Optional[dict]:
@@ -20,7 +22,9 @@ def run(prev_variant: Optional[str], curr_variant: str, data_root: Path) -> Opti
     """
     if prev_variant is None or prev_variant == curr_variant:
         return None
-    module_name = f"migrator.from_{prev_variant.replace('-', '_')}"
+    if curr_variant == "hermes-v2026.5.16" and prev_variant in LEGACY_NOOP_PREV_VARIANTS:
+        return {"from": prev_variant, "to": curr_variant, "mode": "noop_rename"}
+    module_name = f"migrator.from_{_migration_module_suffix(prev_variant)}"
     try:
         mod = importlib.import_module(module_name)
     except ModuleNotFoundError as e:
@@ -29,3 +33,8 @@ def run(prev_variant: Optional[str], curr_variant: str, data_root: Path) -> Opti
             f"please ship a {module_name} module"
         ) from e
     return mod.run(data_root)
+
+
+def _migration_module_suffix(variant: str) -> str:
+    """把 variant 名转换为可用于 Python module 的后缀。"""
+    return variant.replace("-", "_").replace(".", "_")
