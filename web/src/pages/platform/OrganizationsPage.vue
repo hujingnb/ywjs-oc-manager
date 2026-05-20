@@ -130,7 +130,7 @@
             <n-button
               type="primary"
               attr-type="submit"
-              :disabled="!canSubmitRecharge"
+              :disabled="!selectedOrgId"
               :loading="rechargeMutation.isPending.value"
             >
               确认充值
@@ -265,9 +265,6 @@ const rechargeFeedbackError = ref(false)
 const copyFeedback = ref('')
 const copyFeedbackError = ref(false)
 const adminPasswordCopyHint = '<创建时设置，系统不保存明文；如忘记请重置密码>'
-// canSubmitRecharge 表示当前弹框是否具备调用充值接口的最小条件。
-const canSubmitRecharge = computed(() => Boolean(selectedOrgId.value && (rechargeAmount.value ?? 0) > 0))
-
 // 创建组织表单状态聚合到 useFormModal；toPayload 处理可选字段的 || undefined 过滤
 const { form, formVisible, creating, submitError, openForm, submit: submitForm } = useFormModal({
   initial: {
@@ -412,8 +409,17 @@ function closeRecharge() {
 }
 
 // submitRecharge 调用 new-api 充值链路；成功后清空输入，失败时在弹框内展示错误。
+//
+// n-input-number 设了 :precision 后输入期间不会更新 v-model，只在 blur 时提交；
+// 点击「确认充值」按钮会先让金额输入框 blur，因此进入本函数时 rechargeAmount
+// 已是最新值。校验放在这里而不是按钮 disabled，避免「输入完按钮还灰着点不动」。
 async function submitRecharge() {
-  if (!canSubmitRecharge.value) return
+  if (!selectedOrgId.value) return
+  if (!((rechargeAmount.value ?? 0) > 0)) {
+    rechargeFeedbackError.value = true
+    rechargeFeedback.value = '请输入正整数充值金额'
+    return
+  }
   rechargeFeedback.value = ''
   rechargeFeedbackError.value = false
   try {
