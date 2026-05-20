@@ -28,6 +28,12 @@ pytestmark = pytest.mark.skipif(
 )
 
 
+@pytest.fixture(autouse=True)
+def isolated_hermes_home(tmp_path, monkeypatch):
+    """每个测试用独立的 HERMES_HOME，kanban.db 落到临时目录，避免测试间状态串扰。"""
+    monkeypatch.setenv("HERMES_HOME", str(tmp_path))
+
+
 def _run_kanban(*args: str) -> str:
     """跑一条 kanban 命令，返回 stdout；非零退出直接 fail。"""
     proc = subprocess.run(
@@ -56,7 +62,10 @@ def test_kanban_stats_json_has_status_counts():
     _run_kanban("init")
     out = _run_kanban("stats", "--json")
     stats = json.loads(out)
-    assert isinstance(stats, dict)
+    # stats 必须是非空 dict —— 至少含 per-status 计数信息。
+    # 具体字段名（status 分组的 key 结构）待生产镜像首次运行契约测试时校准，
+    # 此处不强断言具体 key，避免在真实格式未知时误报。
+    assert isinstance(stats, dict) and stats, f"stats 输出应为非空 dict: {stats!r}"
 
 
 def test_kanban_create_show_roundtrip():
