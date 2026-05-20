@@ -103,6 +103,26 @@ export interface KanbanStats {
   now?: number
 }
 
+// KanbanFeatures 是 oc-kanban 的细粒度能力开关（对应 service.KanbanFeatures）。
+export interface KanbanFeatures {
+  write?: boolean
+  watch?: boolean
+  runs?: boolean
+  stats?: boolean
+}
+
+// KanbanCapabilities 是 oc-kanban 的自描述能力（对应 service.KanbanCapabilities）。
+// 前端据此降级：隐藏不支持的操作按钮、stats 徽标等。
+export interface KanbanCapabilities {
+  contract_version?: string
+  oc_kanban_version?: string
+  hermes_version?: string
+  variant?: string
+  // verbs 是本镜像实际支持的功能 verb 清单。
+  verbs?: string[]
+  features?: KanbanFeatures
+}
+
 // ─── queryKey 约定 ───────────────────────────────────────────────────
 // 统一以 ['kanban', 子类, appId, ...] 为前缀，便于 mutation 精准失效查询缓存。
 //
@@ -119,6 +139,8 @@ const taskKey = (appId: string | undefined, board: string, taskId: string) =>
   ['kanban', 'task', appId, board, taskId] as const
 const runsKey = (appId: string | undefined, board: string, taskId: string | undefined) =>
   ['kanban', 'runs', appId, board, taskId] as const
+const statsKey = (appId: string | undefined, board: string) =>
+  ['kanban', 'stats', appId, board] as const
 
 // ─── 读 query hooks（E1）──────────────────────────────────────────────
 
@@ -231,8 +253,26 @@ export function useKanbanStatsQuery(appId: Ref<string | undefined>, board: Ref<s
   })
 }
 
+// useKanbanCapabilitiesQuery 探测实例 oc-kanban 的契约版本与可用能力。
+// capabilities 在实例生命周期内不变，故 staleTime 设为 Infinity、不轮询、不重试；
+// stub 实例返回错误时查询失败，前端按既有 stub 降级路径处理。
+export function useKanbanCapabilitiesQuery(appId: Ref<string | undefined>) {
+  return useQuery<KanbanCapabilities | null>({
+    queryKey: ['kanban', 'capabilities', appId],
+    enabled: () => Boolean(appId.value),
+    staleTime: Infinity,
+    retry: false,
+    queryFn: async () => {
+      const res = await apiRequest<{ capabilities: KanbanCapabilities }>(
+        `/api/v1/apps/${appId.value}/hermes/kanban/capabilities`,
+      )
+      return res.capabilities ?? null
+    },
+  })
+}
+
 // 给后续 Task E2 / G1 用的导出 queryKey 工具，避免调用方手写字面量。
-export { boardsKey, tasksKey, taskKey, runsKey }
+export { boardsKey, tasksKey, taskKey, runsKey, statsKey }
 
 // ─── 写 mutation hooks（E2）──────────────────────────────────────────
 
@@ -266,6 +306,7 @@ export function useCreateKanbanTask(appId: Ref<string | undefined>, board: Ref<s
       // 注意：invalidateQueries 是命令式调用，queryKey 必须传解包后的原始值，
       // 直接传 Ref 对象无法匹配已存储的（已解包的）queryKey，会导致失效无效。
       void client.invalidateQueries({ queryKey: tasksKey(appId.value, board.value) })
+      void client.invalidateQueries({ queryKey: statsKey(appId.value, board.value) })
     },
   })
 }
@@ -283,8 +324,8 @@ export type KanbanWriteAction =
   | { verb: 'reclaim'; taskId: string }
 
 // useKanbanTaskAction 是统一的任务写操作 mutation（comment/complete/block/...）。
-// 单 hook 覆盖所有非 create 写操作，避免为每个 verb 重复定义几乎相同的 hook。
-// 成功后同时失效任务列表（badge 计数）和任务详情（状态/评论变化）两个缓存。
+// 单 hook 覆盖所有非 create 写操作。oc-kanban 写操作返回更新后的完整 TaskDetail，
+// 成功后直接写入详情缓存（详情面板即时刷新），并失效列表与统计缓存。
 export function useKanbanTaskAction(appId: Ref<string | undefined>, board: Ref<string>) {
   const client = useQueryClient()
   return useMutation({
@@ -293,19 +334,20 @@ export function useKanbanTaskAction(appId: Ref<string | undefined>, board: Ref<s
       if (!appId.value) throw new Error('缺少实例 ID')
       // 解构 verb 和 taskId 作为 URL 路径参数，剩余字段作为请求体追加 board。
       const { verb, taskId, ...rest } = action
-      await apiRequest<void>(
+      const res = await apiRequest<{ task: KanbanTaskDetail }>(
         `/api/v1/apps/${appId.value}/hermes/kanban/tasks/${taskId}/${verb}`,
         { method: 'POST', body: { board: board.value, ...rest } },
       )
+      return res.task
     },
-    onSuccess: (_data, action) => {
-      // 任务状态或内容变化，同时失效列表缓存（状态计数徽标）和详情缓存。
-      // 注意：invalidateQueries 是命令式调用，queryKey 必须传解包后的原始值，
-      // 直接传 Ref 对象无法匹配已存储的（已解包的）queryKey，会导致失效无效。
+    onSuccess: (detail, action) => {
+      // 写操作返回权威 TaskDetail，直接写入详情缓存，无需再失效详情查询。
+      if (detail) {
+        client.setQueryData(taskKey(appId.value, board.value, action.taskId), detail)
+      }
+      // 状态/计数变化仍需失效任务列表与统计徽标缓存。
       void client.invalidateQueries({ queryKey: tasksKey(appId.value, board.value) })
-      void client.invalidateQueries({
-        queryKey: taskKey(appId.value, board.value, action.taskId),
-      })
+      void client.invalidateQueries({ queryKey: statsKey(appId.value, board.value) })
     },
   })
 }
