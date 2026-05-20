@@ -25,7 +25,7 @@ HERMES_VARIANT_DIR   := runtime/hermes/$(HERMES_VARIANT)
 override HERMES_VERSION := $(strip $(shell if [ -f "$(HERMES_VARIANT_DIR)/version.txt" ]; then cat "$(HERMES_VARIANT_DIR)/version.txt"; fi))
 HERMES_IMAGE_REPO    ?= crpi-nu3ibz4f07feyghi.cn-beijing.personal.cr.aliyuncs.com/ywjs_app/oc-manager-hermes
 # hermes tag 形如 v2026.5.16-2026-05-21-12-00-00，便于从镜像引用直接看出上游版本。
-HERMES_IMAGE         := $(HERMES_IMAGE_REPO):$(HERMES_VERSION)-$(IMAGE_TIMESTAMP)
+override HERMES_IMAGE := $(HERMES_IMAGE_REPO):$(HERMES_VERSION)-$(IMAGE_TIMESTAMP)
 
 # 输入 make 不带参数时, 显式跳到 help target, 输出按分组的可用 target 列表。
 .DEFAULT_GOAL := help
@@ -181,7 +181,7 @@ build-hermes-image: hermes-inject-contract ## 本地构建 hermes runtime 生产
 # IMAGE_TIMESTAMP 每次 make 会重算，独立执行 push 可能找不到刚构建的 tag。
 .PHONY: push-hermes-image
 push-hermes-image:
-	docker push $(HERMES_IMAGE)
+	docker push "$(HERMES_IMAGE)"
 
 # release-hermes-image 一步完成本地构建 + 推送，是日常发版入口；
 # 推送完成后输出最终镜像引用，方便复制到 deploy/manage/config/manager.yaml 的 hermes.runtime_image。
