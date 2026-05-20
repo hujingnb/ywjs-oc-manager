@@ -16,7 +16,13 @@ export interface KanbanBoard {
   slug?: string
   name?: string
   description?: string
+  icon?: string
+  color?: string
   archived?: boolean
+  is_current?: boolean
+  // counts 是 board 内各状态的任务计数，key 为状态名。
+  counts?: Record<string, number>
+  total?: number
 }
 
 // KanbanTask 是列表视图的任务（对应 service.KanbanTask）。
@@ -30,10 +36,17 @@ export interface KanbanTask {
   assignee?: string
   priority?: number
   body?: string
+  tenant?: string
+  workspace_kind?: string
+  workspace_path?: string
+  created_by?: string
   created_at?: number
   started_at?: number
   completed_at?: number
-  skills?: string
+  result?: string
+  // skills 是任务所需技能列表，为字符串数组（hermes v0.14.0 真实结构）。
+  skills?: string[]
+  max_retries?: number
 }
 
 // KanbanComment 对应任务详情里的一条评论（service.KanbanComment）。
@@ -44,11 +57,14 @@ export interface KanbanComment {
 }
 
 // KanbanEvent 对应任务事件流的一条事件（service.KanbanEvent）。
-// 由 hermes kanban watch 的 NDJSON 流逐条推送。
+// payload 结构随 kind 变化（任意对象），用 unknown 类型表达。
 export interface KanbanEvent {
   kind?: string
-  payload?: string
+  // payload 是任意 JSON 对象，结构随 kind 变化，前端不解析具体字段。
+  payload?: unknown
   created_at?: number
+  // run_id 是关联的执行 ID，可为 null。
+  run_id?: number | null
 }
 
 // KanbanTaskRun 对应 `hermes kanban runs <id> --json` 的一次历史执行（service.KanbanTaskRun）。
@@ -64,22 +80,27 @@ export interface KanbanTaskRun {
 }
 
 // KanbanTaskDetail 对应 `hermes kanban show <id> --json` 的完整任务详情（service.KanbanTaskDetail）。
-// 在 KanbanTask 基础上补 worker / workspace / 评论 / 事件等扩展字段。
-export interface KanbanTaskDetail extends KanbanTask {
-  workspace_kind?: string
-  workspace_path?: string
-  worker_pid?: number
-  last_heartbeat_at?: number
-  parent_id?: string
-  result?: string
+// 真实结构：任务核心字段嵌在 task 子对象，顶层不再平铺任务字段。
+// 对应 Go 的 KanbanTaskDetail，show 输出: { task, latest_summary, parents, children, comments, events }
+export interface KanbanTaskDetail {
+  // task 是任务核心字段，嵌套在 show 输出的顶层 "task" 子对象内。
+  task?: KanbanTask
+  latest_summary?: string
+  parents?: string[]
+  children?: string[]
   comments?: KanbanComment[]
   events?: KanbanEvent[]
 }
 
 // KanbanStats 对应 `hermes kanban stats --json`，用于工具栏徽标展示（service.KanbanStats）。
-// status_counts 是各状态的任务计数 map，key 为 KanbanStatus 值。
+// 字段已按真实 CLI 输出校准（hermes v0.14.0）。
 export interface KanbanStats {
-  status_counts?: Record<string, number>
+  // by_status 是各状态的任务计数，key 为状态名。
+  by_status?: Record<string, number>
+  // by_assignee 是各 assignee 下各状态的任务计数，外层 key 为 assignee，内层 key 为状态名。
+  by_assignee?: Record<string, Record<string, number>>
+  oldest_ready_age_seconds?: number
+  now?: number
 }
 
 // ─── queryKey 约定 ───────────────────────────────────────────────────
@@ -192,7 +213,8 @@ export function useCreateKanbanTask(appId: Ref<string | undefined>, board: Ref<s
       assignee: string
       priority: number
       body?: string
-      skills?: string
+      // skills 是字符串数组，与 hermes v0.14.0 真实契约一致。
+      skills?: string[]
       workspace_kind?: string
       workspace_path?: string
       parent_id?: string

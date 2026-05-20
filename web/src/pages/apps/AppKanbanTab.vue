@@ -43,8 +43,9 @@
       <div class="detail-col">
         <!-- 任务详情面板：task 为 null 时显示「从左侧选择任务」引导文案 -->
         <!-- 加载中传 null 避免切换任务时短暂显示上一个任务的旧数据 -->
+        <!-- detail prop 对应 KanbanTaskDetail 组件的嵌套结构 { task, comments, events, ... } -->
         <KanbanTaskDetail
-          :task="taskQuery.isLoading.value ? null : (taskQuery.data.value ?? null)"
+          :detail="taskQuery.isLoading.value ? null : (taskQuery.data.value ?? null)"
           :board="currentBoard"
           :runs="runsQuery.data.value ?? []"
           :live-events="selectedLiveEvents"

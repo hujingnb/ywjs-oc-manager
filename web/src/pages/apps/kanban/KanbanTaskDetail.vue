@@ -1,23 +1,23 @@
 <template>
   <n-card :bordered="true">
     <!-- 未选中任务时显示引导文案 -->
-    <template v-if="!task">
+    <template v-if="!detail">
       <p class="state-text">从左侧选择一个任务查看详情。</p>
     </template>
     <template v-else>
       <div class="detail-head">
         <!-- 状态条：status 缺失时显示 UNKNOWN -->
-        <div class="status-bar">● {{ (task.status ?? 'unknown').toUpperCase() }}</div>
-        <h3 class="detail-title">{{ task.title ?? '（无标题）' }}</h3>
-        <p class="detail-sub">task_id <code>{{ task.id ?? '—' }}</code> · board <code>{{ board }}</code></p>
+        <div class="status-bar">● {{ (detail.task?.status ?? 'unknown').toUpperCase() }}</div>
+        <h3 class="detail-title">{{ detail.task?.title ?? '（无标题）' }}</h3>
+        <p class="detail-sub">task_id <code>{{ detail.task?.id ?? '—' }}</code> · board <code>{{ board }}</code></p>
       </div>
 
       <!-- 操作按钮区：仅当 status 是已知 KanbanStatus 时渲染操作组件，
            防止 hermes 新增状态时传入 KanbanTaskActions 未知 status 值。
-           isKnownStatus 用类型谓词保证 v-if 之后 task.status 类型为 KanbanStatus。-->
+           isKnownStatus 用类型谓词保证 v-if 之后 detail.task?.status 类型为 KanbanStatus。-->
       <KanbanTaskActions
-        v-if="isKnownStatus(task.status)"
-        :status="task.status"
+        v-if="isKnownStatus(detail.task?.status)"
+        :status="detail.task!.status as KanbanStatus"
         @action="emit('action', $event)"
       />
 
@@ -25,23 +25,27 @@
       <div class="section">
         <p class="section-title">元信息</p>
         <div class="meta-grid">
-          <div><span class="k">assignee</span><span class="v">{{ task.assignee ?? '—' }}</span></div>
-          <div><span class="k">priority</span><span class="v">{{ task.priority ?? 0 }}</span></div>
-          <!-- skills 字段可选，有值才显示 -->
-          <div v-if="task.skills"><span class="k">skills</span><span class="v">{{ task.skills }}</span></div>
-          <!-- worker_pid 字段可选，有值才显示（KanbanTaskDetail 独有字段） -->
-          <div v-if="task.worker_pid"><span class="k">worker</span><span class="v">pid {{ task.worker_pid }}</span></div>
+          <div><span class="k">assignee</span><span class="v">{{ detail.task?.assignee ?? '—' }}</span></div>
+          <div><span class="k">priority</span><span class="v">{{ detail.task?.priority ?? 0 }}</span></div>
+          <!-- workspace_kind 字段可选，有值才显示 -->
+          <div v-if="detail.task?.workspace_kind"><span class="k">workspace</span><span class="v">{{ detail.task.workspace_kind }}{{ detail.task.workspace_path ? ` · ${detail.task.workspace_path}` : '' }}</span></div>
+          <!-- created_by 字段可选，有值才显示 -->
+          <div v-if="detail.task?.created_by"><span class="k">created_by</span><span class="v">{{ detail.task.created_by }}</span></div>
+          <!-- tenant 字段可选，有值才显示 -->
+          <div v-if="detail.task?.tenant"><span class="k">tenant</span><span class="v">{{ detail.task.tenant }}</span></div>
+          <!-- skills 是字符串数组，有值才显示，逗号连接展示 -->
+          <div v-if="detail.task?.skills?.length"><span class="k">skills</span><span class="v">{{ detail.task.skills.join(', ') }}</span></div>
         </div>
       </div>
 
       <!-- body：可选字段，有内容时显示 -->
-      <div v-if="task.body" class="section">
+      <div v-if="detail.task?.body" class="section">
         <p class="section-title">任务 body</p>
-        <p class="body-block">{{ task.body }}</p>
+        <p class="body-block">{{ detail.task.body }}</p>
       </div>
 
       <!-- 实时执行流：仅 running 状态显示，由父组件注入 liveEvents -->
-      <div v-if="task.status === 'running'" class="section">
+      <div v-if="detail.task?.status === 'running'" class="section">
         <p class="section-title">实时执行流 <span class="live">● LIVE</span></p>
         <div class="events-pane">
           <div v-for="(ev, i) in liveEvents" :key="i" class="ev-line">{{ ev }}</div>
@@ -68,8 +72,8 @@
 
       <!-- 评论：comments 在 KanbanTaskDetail 中为可选数组，用 ?? [] 防御 -->
       <div class="section">
-        <p class="section-title">评论 ({{ task.comments?.length ?? 0 }})</p>
-        <div v-for="(c, i) in task.comments ?? []" :key="i" class="comment">
+        <p class="section-title">评论 ({{ detail.comments?.length ?? 0 }})</p>
+        <div v-for="(c, i) in detail.comments ?? []" :key="i" class="comment">
           <div class="comment-head">{{ c.author ?? '匿名' }}</div>
           <div class="comment-body">{{ c.body ?? '' }}</div>
         </div>
@@ -85,9 +89,11 @@ import type { KanbanTaskDetail, KanbanTaskRun, KanbanStatus } from '@/api/hooks/
 
 // KanbanTaskDetail 渲染右侧任务详情面板，包含：状态条、操作栏、元信息、body、
 // 实时执行流（running 状态）、历次执行列表、评论区。
+// 注意：prop 命名为 detail 而非 task，避免与 detail.task 子字段混淆。
 defineProps<{
-  // task 为 null 时显示引导文案「从左侧选择任务」。
-  task: KanbanTaskDetail | null
+  // detail 为 null 时显示引导文案「从左侧选择任务」。
+  // 真实结构：{ task, comments, events, parents, children, latest_summary }
+  detail: KanbanTaskDetail | null
   // board 当前 board slug，显示在 task_id 元信息行。
   board: string
   // runs 由父组件通过 useKanbanRunsQuery 注入。
