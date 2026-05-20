@@ -3,7 +3,7 @@
 import { useMutation, useQuery, useQueryClient } from '@tanstack/vue-query'
 import type { Ref } from 'vue'
 
-import { apiRequest, getStoredAccessToken } from '@/api/client'
+import { apiRequest, getCsrfToken, getStoredAccessToken } from '@/api/client'
 
 // KnowledgeEntry 是知识库目录中的单个文件或目录。
 export interface KnowledgeEntry {
@@ -78,6 +78,10 @@ export function useUploadOrgKnowledge(orgId: Ref<string | undefined>, relative: 
       const headers: Record<string, string> = { 'Content-Type': 'application/octet-stream' }
       const token = getStoredAccessToken()
       if (token) headers.Authorization = `Bearer ${token}`
+      // 二进制上传绕过 apiRequest 直接 fetch，必须自己补 X-CSRF-Token，
+      // 否则 POST 写操作会被后端 RequireCSRF middleware 拒绝。
+      const csrf = getCsrfToken()
+      if (csrf) headers['X-CSRF-Token'] = csrf
       const response = await fetch(`/api/v1/organizations/${orgId.value}/knowledge?${params.toString()}`, {
         method: 'POST',
         headers,
@@ -130,6 +134,10 @@ export function useUploadAppKnowledge(
       const headers: Record<string, string> = { 'Content-Type': 'application/octet-stream' }
       const token = getStoredAccessToken()
       if (token) headers.Authorization = `Bearer ${token}`
+      // 二进制上传绕过 apiRequest 直接 fetch，必须自己补 X-CSRF-Token，
+      // 否则 POST 写操作会被后端 RequireCSRF middleware 拒绝。
+      const csrf = getCsrfToken()
+      if (csrf) headers['X-CSRF-Token'] = csrf
       const response = await fetch(`/api/v1/apps/${appId.value}/knowledge?${params.toString()}`, {
         method: 'POST',
         headers,

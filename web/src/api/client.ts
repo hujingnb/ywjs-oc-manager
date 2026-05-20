@@ -50,6 +50,13 @@ function readCookie(name: string): string | null {
   return null
 }
 
+// getCsrfToken 返回 CSRF double-submit cookie 的当前值。
+// 供需要绕过 apiRequest 直接 fetch 的写操作（如知识库二进制文件上传）复用，
+// 确保这类请求也带上 X-CSRF-Token，否则会被后端 RequireCSRF middleware 拒绝。
+export function getCsrfToken(): string | null {
+  return readCookie('csrf_token')
+}
+
 export function getStoredRefreshToken(): string | null {
   return readStorage(REFRESH_STORAGE_KEY)
 }
