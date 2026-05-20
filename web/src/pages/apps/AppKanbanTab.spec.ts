@@ -28,6 +28,12 @@ vi.mock('naive-ui', async (importOriginal) => {
 // tasksError 和 boardsError 分别控制各 query 的 error 响应式 ref，供各测试分别覆盖。
 const tasksError = ref<unknown>(null)
 const boardsError = ref<unknown>(null)
+// kanbanCapabilities 控制 useKanbanCapabilitiesQuery 返回的能力数据，供降级用例覆盖。
+const kanbanCapabilities = ref<unknown>({
+  contract_version: '1.0',
+  verbs: ['create', 'comment'],
+  features: { write: true, watch: true, runs: true, stats: true },
+})
 
 // mock @/api/hooks/useKanban：提供两条不同状态的任务用于分组渲染测试。
 vi.mock('@/api/hooks/useKanban', () => ({
@@ -59,6 +65,13 @@ vi.mock('@/api/hooks/useKanban', () => ({
   // useKanbanStatsQuery：返回工具栏徽标用的统计数据（by_status 计数 + 最老就绪等待秒数）。
   useKanbanStatsQuery: () => ({
     data: ref({ by_status: { running: 1, todo: 1 }, oldest_ready_age_seconds: 0 }),
+    isLoading: ref(false),
+    error: ref(null),
+  }),
+  // useKanbanCapabilitiesQuery：默认返回全部能力可用，不触发降级。
+  // data 指向顶层可变 ref kanbanCapabilities，供降级用例在挂载前修改。
+  useKanbanCapabilitiesQuery: () => ({
+    data: kanbanCapabilities,
     isLoading: ref(false),
     error: ref(null),
   }),
@@ -116,15 +129,24 @@ describe('AppKanbanTab', () => {
     // 每个测试前重置 error 状态，防止测试间状态污染。
     tasksError.value = null
     boardsError.value = null
+    // 重置 capabilities 为全部能力可用，确保非降级用例不受影响。
+    kanbanCapabilities.value = {
+      contract_version: '1.0',
+      verbs: ['create', 'comment'],
+      features: { write: true, watch: true, runs: true, stats: true },
+    }
   })
 
   // 覆盖：任务按状态分组渲染 —— mock 返回 running 和 todo 两条任务，
   // 断言两条任务标题都出现在渲染输出中（通过 KanbanTaskList stub 中的 span 展示）。
+  // 同时验证默认能力（write: true）下「新建任务」按钮存在（正向断言，防止 v-if 写反时 false-positive）。
   it('按状态渲染任务：运行中与待办任务标题均出现', () => {
     const wrapper = mountKanbanTab()
     const text = wrapper.text()
     expect(text).toContain('运行中任务')
     expect(text).toContain('待办任务')
+    // 默认能力（write 未被降级）下「新建任务」按钮应渲染。
+    expect(wrapper.find('.create-task-btn').exists()).toBe(true)
   })
 
   // 覆盖：stub 实例降级提示 —— 当 tasksQuery.error 含 body.code === 'KANBAN_NOT_SUPPORTED_ON_STUB'
@@ -139,5 +161,19 @@ describe('AppKanbanTab', () => {
     expect(text).toContain('该实例运行的是本地 dev 镜像，任务看板不可用')
     // 断言任务列表（分屏面板）不再显示。
     expect(wrapper.find('.task-list-stub').exists()).toBe(false)
+  })
+
+  // 覆盖：capabilities 报告 write 不支持时，工具栏「新建任务」按钮被隐藏。
+  // NButton 被 stub 为空元素，无法通过文案断言；改用 CSS class selector 区分按钮是否渲染。
+  it('能力降级：features.write 为 false 时隐藏新建任务按钮', () => {
+    // 设置 capabilities 中 write 为 false，模拟旧版 kanban 不支持创建任务的情形。
+    kanbanCapabilities.value = {
+      contract_version: '1.0',
+      verbs: ['list', 'show'],
+      features: { write: false, watch: true, runs: true, stats: true },
+    }
+    const wrapper = mountKanbanTab()
+    // 断言新建任务按钮不渲染（v-if="kanbanFeatures?.write !== false" 应为 false）。
+    expect(wrapper.find('.create-task-btn').exists()).toBe(false)
   })
 })

@@ -21,7 +21,7 @@
         <span v-if="streamConnected" class="live-tag">● 实时</span>
         <n-button v-else size="small" tertiary @click="reconnectStream">重连实时流</n-button>
         <!-- write !== false：features 未知时默认显示，明确 false 才隐藏 -->
-        <n-button v-if="kanbanFeatures?.write !== false" size="small" type="primary" @click="showCreate = true">+ 新建任务</n-button>
+        <n-button v-if="kanbanFeatures?.write !== false" class="create-task-btn" size="small" type="primary" @click="showCreate = true">+ 新建任务</n-button>
       </n-space>
     </n-card>
 
