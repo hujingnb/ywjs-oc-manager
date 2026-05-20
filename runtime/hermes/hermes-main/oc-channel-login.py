@@ -16,7 +16,19 @@ import argparse
 import asyncio
 import contextlib
 import json
+import os
 import sys
+from pathlib import Path
+
+# hermes 上游 SDK (gateway.platforms.weixin 等) 装在镜像 install.sh 创建的
+# uv venv 里 (/usr/local/lib/hermes-agent/venv)，系统 Python 看不到。
+# 这里检测到 venv 存在且当前进程不是它时, 直接 re-exec 让脚本在 venv 里跑,
+# 让后续 `from gateway.platforms.weixin import qr_login` 能正常 import。
+# venv 不存在 (例如 stub 镜像) 时落回系统 python, 由 weixin 入口的
+# ImportError 兜底返回 failed 状态, 不影响其他 channel / 命令的可用性。
+_HERMES_VENV_PYTHON = Path("/usr/local/lib/hermes-agent/venv/bin/python")
+if _HERMES_VENV_PYTHON.exists() and Path(sys.executable).resolve() != _HERMES_VENV_PYTHON.resolve():
+    os.execv(str(_HERMES_VENV_PYTHON), [str(_HERMES_VENV_PYTHON), __file__] + sys.argv[1:])
 
 
 def main() -> int:

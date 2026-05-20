@@ -2,12 +2,16 @@
 """查询渠道绑定状态。stdout 单行 JSON。
 
 调用形式：oc-channel-status --channel weixin
-读取 hermes 自管的账号目录（/opt/data/weixin/accounts/），存在条目即视为
+读取 hermes 自管的账号目录（/opt/data/weixin/accounts/），存在账号文件即视为
 已绑定；不解析具体凭证字段，凭证由 hermes 自行使用。
+
+hermes 上游把每个微信账号存为 accounts/<account_id>.json 文件
+（account_id 形如 <hex>@im.bot），不是子目录。account_id 取文件名去掉
+.json 后缀。
 
 输出协议：
 - stdout 单行 JSON：
-  - 已绑定：{"channel":"weixin","bound":true,"account_id":"<dir>"}
+  - 已绑定：{"channel":"weixin","bound":true,"account_id":"<id>"}
   - 未绑定：{"channel":"weixin","bound":false}
 - 退出码：0 表示查询成功（不论是否绑定）；1 表示未知 channel。
 """
@@ -44,13 +48,14 @@ def _weixin_status(data_root: Path) -> int:
         # 目录不存在：从未绑定或已解绑。
         sys.stdout.write(json.dumps({"channel": "weixin", "bound": False}) + "\n")
         return 0
-    # 读 hermes 自管的账号目录里第一个有效条目作为绑定状态。
-    # 当前版本只支持单账号绑定，因此遇到第一个目录即返回。
-    for entry in accounts_dir.iterdir():
-        if entry.is_dir():
-            sys.stdout.write(json.dumps({"channel": "weixin", "bound": True, "account_id": entry.name}) + "\n")
+    # 读 hermes 自管账号目录里第一个 *.json 账号文件作为绑定状态。
+    # 当前只支持单账号绑定，遇到第一个账号文件即返回。
+    for entry in sorted(accounts_dir.iterdir()):
+        if entry.is_file() and entry.suffix == ".json":
+            account_id = entry.name[: -len(".json")]
+            sys.stdout.write(json.dumps({"channel": "weixin", "bound": True, "account_id": account_id}) + "\n")
             return 0
-    # 目录存在但无子目录：视为未绑定。
+    # 目录存在但无账号文件：视为未绑定。
     sys.stdout.write(json.dumps({"channel": "weixin", "bound": False}) + "\n")
     return 0
 
