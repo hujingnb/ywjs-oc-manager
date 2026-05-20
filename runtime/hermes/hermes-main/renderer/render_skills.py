@@ -68,7 +68,9 @@ def render(input_root: Path, data_root: Path) -> List[str]:
 
 def _render_skill_md(scope: str, dir_name: str, rel: str, body: str) -> str:
     # 沿用旧 manager 端 hermes/skills.go 的 frontmatter + body 模板。
-    title = _extract_heading(body) or rel
+    # heading 为 body 首个 markdown H1；非空表示用户文件自带标题。
+    heading = _extract_heading(body)
+    title = heading or rel
     if scope == "org":
         desc = (
             f"组织级知识库文件 {title}。介绍本组织业务、产品、政策、规则等权威信息。"
@@ -81,15 +83,16 @@ def _render_skill_md(scope: str, dir_name: str, rel: str, body: str) -> str:
             "用户的任意提问都应先读取本 skill 确认是否有匹配规则；有则按本 skill 内容回答，"
             "无则回退到组织级或通用知识。"
         )
+    # body 已自带 H1 时直接输出，避免「renderer 加的标题 + 文件自带标题」重复；
+    # body 无 H1 时用相对路径补一个标题，保证 SKILL.md 正文有抬头。
+    body_section = body if heading else f"# {title}\n\n{body}"
     return f"""---
 name: {dir_name}
 description: {desc}
 scope: {scope}
 ---
 
-# {title}
-
-{body}
+{body_section}
 """
 
 

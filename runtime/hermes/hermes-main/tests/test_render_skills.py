@@ -32,3 +32,23 @@ def test_render_creates_one_dir_per_file(tmp_input: Path, tmp_data: Path) -> Non
         "skills/kb-org-policies-refund/SKILL.md",
         "skills/kb-app-tone/SKILL.md",
     }
+
+
+def test_render_no_duplicate_h1_when_body_has_heading(tmp_input: Path, tmp_data: Path) -> None:
+    # body 自带 H1 时，SKILL.md 正文不应再额外加一个标题（避免重复标题）。
+    (tmp_input / "resources" / "knowledge" / "app").mkdir(parents=True)
+    (tmp_input / "resources" / "knowledge" / "app" / "tone.md").write_text("# 话术\n\n正文")
+    render(tmp_input, tmp_data)
+    skill = (tmp_data / "skills" / "kb-app-tone" / "SKILL.md").read_text()
+    # frontmatter 之后正文部分只应出现一次 "# 话术"。
+    body_after_frontmatter = skill.split("---\n", 2)[-1]
+    assert body_after_frontmatter.count("# 话术") == 1
+
+
+def test_render_adds_h1_when_body_has_no_heading(tmp_input: Path, tmp_data: Path) -> None:
+    # body 无 H1 时，用相对路径补一个标题，保证 SKILL.md 正文有抬头。
+    (tmp_input / "resources" / "knowledge" / "app").mkdir(parents=True)
+    (tmp_input / "resources" / "knowledge" / "app" / "plain.md").write_text("没有标题的纯正文")
+    render(tmp_input, tmp_data)
+    skill = (tmp_data / "skills" / "kb-app-plain" / "SKILL.md").read_text()
+    assert "# plain.md" in skill
