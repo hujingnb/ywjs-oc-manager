@@ -1,0 +1,30 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "type": "object",
+  "oneOf": [
+    {
+      "required": ["ok", "data"],
+      "properties": {
+        "ok": { "const": true },
+        "data": {}
+      },
+      "additionalProperties": false
+    },
+    {
+      "required": ["ok", "error"],
+      "properties": {
+        "ok": { "const": false },
+        "error": {
+          "type": "object",
+          "required": ["code", "message"],
+          "properties": {
+            "code": { "enum": ["BAD_REQUEST", "NOT_FOUND", "UNSUPPORTED", "HERMES_CLI_FAILED", "INTERNAL"] },
+            "message": { "type": "string" }
+          },
+          "additionalProperties": false
+        }
+      },
+      "additionalProperties": false
+    }
+  ]
+}

@@ -94,6 +94,8 @@ web-build: ## 在 manager-web 容器内跑 vite build
 hermes-inject-contract: ## 把契约工件注入变体目录（避开 Dockerfile 跨目录 COPY 约束）
 	rm -rf $(HERMES_VARIANT_DIR)/kanban-contract
 	cp -r runtime/hermes/kanban-contract $(HERMES_VARIANT_DIR)/kanban-contract
+	rm -rf $(HERMES_VARIANT_DIR)/cron-contract
+	cp -r runtime/hermes/cron-contract $(HERMES_VARIANT_DIR)/cron-contract
 
 build-hermes-runtime: hermes-inject-contract ## 本地 dev 构建 hermes runtime（tag: hermes-runtime:<variant>-dev）
 	docker build \

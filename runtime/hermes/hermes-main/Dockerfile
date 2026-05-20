@@ -49,6 +49,8 @@ COPY oc-channel-status.py /usr/local/bin/oc-channel-status
 COPY oc-channel-unbind.py /usr/local/bin/oc-channel-unbind
 COPY oc-kanban.py         /usr/local/bin/oc-kanban
 COPY kanban-contract/     /usr/local/lib/oc-kanban/contract/
+COPY oc-cron.py           /usr/local/bin/oc-cron
+COPY cron-contract/       /usr/local/lib/oc-cron/contract/
 COPY healthcheck.sh       /usr/local/bin/oc-healthcheck
 COPY lib/                 /usr/local/lib/oc-entrypoint/lib/
 COPY renderer/            /usr/local/lib/oc-entrypoint/renderer/
@@ -58,7 +60,7 @@ COPY tests/               /usr/local/lib/oc-entrypoint/tests/
 RUN chmod +x /usr/local/bin/oc-entrypoint /usr/local/bin/oc-doctor \
             /usr/local/bin/oc-info /usr/local/bin/oc-channel-login \
             /usr/local/bin/oc-channel-status /usr/local/bin/oc-channel-unbind \
-            /usr/local/bin/oc-kanban /usr/local/bin/oc-healthcheck
+            /usr/local/bin/oc-kanban /usr/local/bin/oc-cron /usr/local/bin/oc-healthcheck
 
 # 镜像身份信息写到固定位置，供 oc-info 读取
 ARG OC_IMAGE_VARIANT

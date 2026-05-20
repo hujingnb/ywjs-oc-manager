@@ -36,6 +36,8 @@ COPY oc-channel-status.py /usr/local/bin/oc-channel-status
 COPY oc-channel-unbind.py /usr/local/bin/oc-channel-unbind
 COPY oc-kanban.py         /usr/local/bin/oc-kanban
 COPY kanban-contract/     /usr/local/lib/oc-kanban/contract/
+COPY oc-cron.py           /usr/local/bin/oc-cron
+COPY cron-contract/       /usr/local/lib/oc-cron/contract/
 COPY lib/                 /usr/local/lib/oc-entrypoint/lib/
 COPY renderer/            /usr/local/lib/oc-entrypoint/renderer/
 COPY migrator/            /usr/local/lib/oc-entrypoint/migrator/
@@ -62,7 +64,7 @@ RUN printf '#!/usr/bin/env bash\nexec hermes gateway status >/dev/null 2>&1\n' \
 RUN chmod +x /usr/local/bin/oc-entrypoint /usr/local/bin/oc-doctor \
             /usr/local/bin/oc-info /usr/local/bin/oc-channel-login \
             /usr/local/bin/oc-channel-status /usr/local/bin/oc-channel-unbind \
-            /usr/local/bin/oc-kanban
+            /usr/local/bin/oc-kanban /usr/local/bin/oc-cron
 
 ARG OC_IMAGE_VARIANT
 ARG OC_BUILD_TS
