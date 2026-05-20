@@ -358,11 +358,12 @@ func (s *HermesKanbanService) Complete(ctx context.Context, principal auth.Princ
 	if !taskIDRe.MatchString(taskID) {
 		return fmt.Errorf("%w: 非法 task id", ErrKanbanBadRequest)
 	}
-	args := []string{"complete", taskID, "--board", b}
-	// result 为可选自由文本，非空时作为独立 argv 附加。
+	args := []string{"complete", taskID}
+	// result 为可选自由文本，非空时作为独立 argv 附加（置于 --board 之前，与计划表格对齐）。
 	if result != "" {
 		args = append(args, "--result", result)
 	}
+	args = append(args, "--board", b)
 	_, err = s.runCLI(ctx, loc, args)
 	return err
 }
