@@ -56,6 +56,12 @@ vi.mock('@/api/hooks/useKanban', () => ({
     isLoading: ref(false),
     error: ref(null),
   }),
+  // useKanbanStatsQuery：返回工具栏徽标用的统计数据（by_status 计数 + 最老就绪等待秒数）。
+  useKanbanStatsQuery: () => ({
+    data: ref({ by_status: { running: 1, todo: 1 }, oldest_ready_age_seconds: 0 }),
+    isLoading: ref(false),
+    error: ref(null),
+  }),
   useCreateKanbanTask: () => ({
     mutateAsync: vi.fn(),
     isPending: ref(false),

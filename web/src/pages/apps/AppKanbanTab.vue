@@ -11,6 +11,11 @@
         />
         <n-input v-model:value="search" size="small" placeholder="搜索任务标题" style="width: 200px" />
         <span class="spacer" />
+        <!-- stats 徽标：任务总数 + 最老就绪任务等待时长（来自 kanban stats 端点）-->
+        <span v-if="statsSummary" class="stat-badge">
+          <span><strong>{{ statsSummary.total }}</strong> 个任务</span>
+          <span v-if="statsSummary.oldestReady">最老就绪 <strong class="warn">{{ statsSummary.oldestReady }}</strong></span>
+        </span>
         <!-- streamConnected 为 true 时显示绿点「实时」，否则显示「重连实时流」按钮 -->
         <span v-if="streamConnected" class="live-tag">● 实时</span>
         <n-button v-else size="small" tertiary @click="reconnectStream">重连实时流</n-button>
@@ -75,6 +80,7 @@ import {
   useKanbanTasksQuery,
   useKanbanTaskQuery,
   useKanbanRunsQuery,
+  useKanbanStatsQuery,
   useCreateKanbanTask,
   useKanbanTaskAction,
 } from '@/api/hooks/useKanban'
@@ -114,6 +120,26 @@ const taskIdRef = computed(() => selectedTaskId.value)
 const taskQuery = useKanbanTaskQuery(appId, currentBoard, taskIdRef)
 // runsQuery：拉取选中任务的历次执行记录。
 const runsQuery = useKanbanRunsQuery(appId, currentBoard, taskIdRef)
+// statsQuery：拉取当前 board 的统计信息，供工具栏徽标展示。
+const statsQuery = useKanbanStatsQuery(appId, currentBoard)
+
+// formatAge 把秒数格式化为人类可读的时长（用于「最老就绪等待时长」）。
+function formatAge(seconds: number): string {
+  if (seconds < 60) return `${Math.floor(seconds)} 秒`
+  if (seconds < 3600) return `${Math.floor(seconds / 60)} 分钟`
+  if (seconds < 86400) return `${Math.floor(seconds / 3600)} 小时`
+  return `${Math.floor(seconds / 86400)} 天`
+}
+
+// statsSummary：把 stats 端点数据归纳为工具栏徽标用的两项 —— 任务总数、最老就绪等待时长。
+// 任务总数 = by_status 各状态计数之和；oldest_ready_age_seconds 为 0 时不显示等待时长。
+const statsSummary = computed(() => {
+  const stats = statsQuery.data.value
+  if (!stats) return null
+  const total = Object.values(stats.by_status ?? {}).reduce((sum, n) => sum + n, 0)
+  const age = stats.oldest_ready_age_seconds ?? 0
+  return { total, oldestReady: age > 0 ? formatAge(age) : '' }
+})
 
 // ─── Stub 降级判断 ───────────────────────────────────────────────────────────
 // isStubError：判断给定错误是否为 KANBAN_NOT_SUPPORTED_ON_STUB，复用于多处查询。
@@ -255,6 +281,24 @@ function promptText(title: string): Promise<string | null> {
 .live-tag {
   color: var(--primary-color, #18a058);
   font-size: 11px;
+}
+
+/* stats 徽标：工具栏内任务总数 + 最老就绪等待时长 */
+.stat-badge {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  font-size: 11px;
+  color: var(--n-text-color-3, #8a94c6);
+  white-space: nowrap;
+}
+.stat-badge strong {
+  color: var(--n-text-color-2, #cbd6e5);
+  font-weight: 600;
+}
+/* 最老就绪等待时长用警示色，提示看板积压 */
+.stat-badge strong.warn {
+  color: var(--warning-color, #ffb800);
 }
 
 /* 左右分屏：左侧任务列表 380px 固定宽，右侧详情面板占剩余空间 */

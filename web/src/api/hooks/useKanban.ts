@@ -208,6 +208,29 @@ export function useKanbanRunsQuery(
   })
 }
 
+// useKanbanStatsQuery 拉取某 board 的统计信息，每 5s 轮询。
+// 用于工具栏统计徽标（任务总数 + 最老就绪任务等待时长）。
+// stub 实例返回 KANBAN_NOT_SUPPORTED_ON_STUB 时停止轮询，与 useKanbanTasksQuery 一致。
+export function useKanbanStatsQuery(appId: Ref<string | undefined>, board: Ref<string>) {
+  return useQuery<KanbanStats | null>({
+    queryKey: ['kanban', 'stats', appId, board],
+    enabled: () => Boolean(appId.value),
+    refetchInterval: (query) => {
+      // stub 实例返回 KANBAN_NOT_SUPPORTED_ON_STUB 错误码时停止轮询。
+      const err = query.state.error as { body?: { code?: string } } | null | undefined
+      if (err?.body?.code === 'KANBAN_NOT_SUPPORTED_ON_STUB') return false
+      return 5000
+    },
+    queryFn: async () => {
+      const res = await apiRequest<{ stats: KanbanStats }>(
+        `/api/v1/apps/${appId.value}/hermes/kanban/stats`,
+        { query: { board: board.value } },
+      )
+      return res.stats ?? null
+    },
+  })
+}
+
 // 给后续 Task E2 / G1 用的导出 queryKey 工具，避免调用方手写字面量。
 export { boardsKey, tasksKey, taskKey, runsKey }
 
