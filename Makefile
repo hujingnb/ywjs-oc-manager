@@ -22,7 +22,7 @@ WEB_IMAGE_REPO   ?= crpi-nu3ibz4f07feyghi.cn-beijing.personal.cr.aliyuncs.com/yw
 # 镜像 tag 从该 variant 的 version.txt 派生，禁止 main / master / latest 等浮动 ref。
 HERMES_VARIANT       ?= hermes-v2026.5.16
 HERMES_VARIANT_DIR   := runtime/hermes/$(HERMES_VARIANT)
-HERMES_VERSION       := $(strip $(shell if [ -f "$(HERMES_VARIANT_DIR)/version.txt" ]; then cat "$(HERMES_VARIANT_DIR)/version.txt"; fi))
+override HERMES_VERSION := $(strip $(shell if [ -f "$(HERMES_VARIANT_DIR)/version.txt" ]; then cat "$(HERMES_VARIANT_DIR)/version.txt"; fi))
 HERMES_IMAGE_REPO    ?= crpi-nu3ibz4f07feyghi.cn-beijing.personal.cr.aliyuncs.com/ywjs_app/oc-manager-hermes
 # hermes tag 形如 v2026.5.16-2026-05-21-12-00-00，便于从镜像引用直接看出上游版本。
 HERMES_IMAGE         := $(HERMES_IMAGE_REPO):$(HERMES_VERSION)-$(IMAGE_TIMESTAMP)
@@ -51,6 +51,9 @@ help: ## 显示本帮助文档(make 默认 target)
 	@test -n "$(HERMES_VERSION)" || { echo "Hermes version 不能为空: $(HERMES_VARIANT_DIR)/version.txt" >&2; exit 1; }
 	@case "$(HERMES_VERSION)" in \
 		main|master|latest) echo "Hermes version 不能使用浮动 tag: $(HERMES_VERSION)" >&2; exit 1;; \
+	esac
+	@case "$(HERMES_VERSION)" in \
+		*[!A-Za-z0-9_.-]*) echo "Hermes version 包含非法镜像 tag 字符: $(HERMES_VERSION)" >&2; exit 1;; \
 	esac
 
 ##@ 本地开发
@@ -109,9 +112,9 @@ hermes-inject-contract: .guard-hermes-version ## 把 HERMES_VARIANT 指定变体
 build-hermes-runtime: hermes-inject-contract ## 本地 dev 构建 hermes runtime（需 HERMES_VARIANT 指定变体）
 	status=0; \
 	docker build \
-	  -t hermes-runtime:$(HERMES_VERSION)-dev \
-	  --build-arg HERMES_REF=$(HERMES_VERSION) \
-	  --build-arg OC_IMAGE_VARIANT=$(HERMES_VARIANT) \
+	  -t "hermes-runtime:$(HERMES_VERSION)-dev" \
+	  --build-arg "HERMES_REF=$(HERMES_VERSION)" \
+	  --build-arg "OC_IMAGE_VARIANT=$(HERMES_VARIANT)" \
 	  --build-arg OC_BUILD_TS=$(IMAGE_TIMESTAMP) \
 	  $(HERMES_VARIANT_DIR) || status=$$?; \
 	rm -rf $(HERMES_VARIANT_DIR)/kanban-contract $(HERMES_VARIANT_DIR)/cron-contract; \
@@ -166,9 +169,9 @@ release-web-image: build-web-image push-web-image ## 构建并推送 manager-web
 build-hermes-image: hermes-inject-contract ## 本地构建 hermes runtime 生产镜像（需 HERMES_VARIANT 指定变体）
 	status=0; \
 	docker build \
-	  -t $(HERMES_IMAGE) \
-	  --build-arg HERMES_REF=$(HERMES_VERSION) \
-	  --build-arg OC_IMAGE_VARIANT=$(HERMES_VARIANT) \
+	  -t "$(HERMES_IMAGE)" \
+	  --build-arg "HERMES_REF=$(HERMES_VERSION)" \
+	  --build-arg "OC_IMAGE_VARIANT=$(HERMES_VARIANT)" \
 	  --build-arg OC_BUILD_TS=$(IMAGE_TIMESTAMP) \
 	  $(HERMES_VARIANT_DIR) || status=$$?; \
 	rm -rf $(HERMES_VARIANT_DIR)/kanban-contract $(HERMES_VARIANT_DIR)/cron-contract; \
