@@ -770,8 +770,9 @@ components:
             Payload 是事件附加数据，结构随 Kind 变化（任意对象）。
             用 any 类型（swag 可正确解析为 object），json.Unmarshal 会把 JSON 对象解为 map[string]any。
         run_id:
-          description: RunID 是关联的执行 ID，可为 null（零值为空字符串）。
-          type: string
+          description: |-
+            RunID 是关联的执行 ID，可为 null。真实环境多为 null，类型未经实测确定，
+            用 any 容忍 hermes 任意输出（整数 / 字符串 / null），manager 仅透传不解析。
       type: object
     service.KanbanStats:
       properties:

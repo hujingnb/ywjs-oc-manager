@@ -6979,8 +6979,11 @@ export interface components {
              *     用 any 类型（swag 可正确解析为 object），json.Unmarshal 会把 JSON 对象解为 map[string]any。
              */
             payload?: unknown;
-            /** @description RunID 是关联的执行 ID，可为 null（零值为空字符串）。 */
-            run_id?: string;
+            /**
+             * @description RunID 是关联的执行 ID，可为 null。真实环境多为 null，类型未经实测确定，
+             *     用 any 容忍 hermes 任意输出（整数 / 字符串 / null），manager 仅透传不解析。
+             */
+            run_id?: unknown;
         };
         "service.KanbanStats": {
             /** @description ByAssignee 是各 assignee 下各状态的任务计数，外层 key 为 assignee，内层 key 为状态名。 */

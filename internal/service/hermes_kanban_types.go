@@ -86,8 +86,9 @@ type KanbanEvent struct {
 	Payload any `json:"payload,omitempty"`
 	// CreatedAt 是事件创建时间戳（Unix 秒）。
 	CreatedAt int64 `json:"created_at"`
-	// RunID 是关联的执行 ID，可为 null（零值为空字符串）。
-	RunID string `json:"run_id,omitempty"`
+	// RunID 是关联的执行 ID，可为 null。真实环境多为 null，类型未经实测确定，
+	// 用 any 容忍 hermes 任意输出（整数 / 字符串 / null），manager 仅透传不解析。
+	RunID any `json:"run_id,omitempty"`
 }
 
 // KanbanTaskDetail 对应 `hermes kanban show <id> --json` 的完整任务详情。

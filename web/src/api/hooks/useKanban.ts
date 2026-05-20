@@ -63,8 +63,8 @@ export interface KanbanEvent {
   // payload 是任意 JSON 对象，结构随 kind 变化，前端不解析具体字段。
   payload?: unknown
   created_at?: number
-  // run_id 是关联的执行 ID，可为 null。
-  run_id?: number | null
+  // run_id 是关联的执行 ID，类型未经实测确定（真实环境多为 null），前端不解析。
+  run_id?: unknown
 }
 
 // KanbanTaskRun 对应 `hermes kanban runs <id> --json` 的一次历史执行（service.KanbanTaskRun）。
