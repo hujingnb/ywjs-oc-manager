@@ -7,6 +7,7 @@ import AuthLayout from '@/layouts/AuthLayout.vue'
 import DashboardLayout from '@/layouts/DashboardLayout.vue'
 import AppAuditTab from '@/pages/apps/AppAuditTab.vue'
 import AppChannelsTab from '@/pages/apps/AppChannelsTab.vue'
+import AppCronTab from '@/pages/apps/AppCronTab.vue'
 import AppKanbanTab from '@/pages/apps/AppKanbanTab.vue'
 import AppDetailPage from '@/pages/apps/AppDetailPage.vue'
 import AppKnowledgeTab from '@/pages/apps/AppKnowledgeTab.vue'
@@ -94,6 +95,7 @@ export const router = createRouter({
             { path: '', redirect: (to) => ({ path: `/apps/${to.params.appId}/overview` }) },
             { path: 'overview', component: AppOverviewTab, props: true },
             { path: 'kanban', component: AppKanbanTab, props: true },
+            { path: 'cron', component: AppCronTab, props: true },
             { path: 'runtime', component: AppRuntimeTab, props: true, meta: { allowedRoles: PLATFORM_ONLY } },
             { path: 'channels', component: AppChannelsTab, props: true },
             { path: 'knowledge', component: AppKnowledgeTab, props: true },

@@ -52,6 +52,7 @@ provide<typeof app>('app', app)
 const allTabs: ReadonlyArray<{ path: string; label: string }> = [
   { path: 'overview', label: '概览' },
   { path: 'kanban', label: '任务' },
+  { path: 'cron', label: '定时任务' },
   { path: 'runtime', label: '运行时' },
   { path: 'channels', label: '渠道' },
   { path: 'knowledge', label: '实例知识库' },

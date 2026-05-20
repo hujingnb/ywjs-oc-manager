@@ -21,6 +21,12 @@ vi.mock('@/api/hooks/useApps', () => ({
   }),
 }))
 
+vi.mock('@/stores/auth', () => ({
+  useAuthStore: () => ({
+    isPlatformAdmin: false,
+  }),
+}))
+
 vi.mock('vue-router', async () => {
   const actual = await vi.importActual<typeof import('vue-router')>('vue-router')
   return {
@@ -32,6 +38,23 @@ vi.mock('vue-router', async () => {
 })
 
 describe('AppDetailPage', () => {
+  // 覆盖实例详情页业务 tab 导航，确保 Task 6 新增的定时任务入口对组织用户可见。
+  it('渲染定时任务 tab 入口', () => {
+    const wrapper = mount(AppDetailPage, {
+      global: {
+        stubs: {
+          AppStatusTag: { template: '<span />' },
+          NCard: { template: '<section><slot name="header" /><slot /></section>' },
+          NTabs: { template: '<nav><slot /></nav>' },
+          NTabPane: true,
+        },
+      },
+    })
+
+    expect(wrapper.text()).toContain('定时任务')
+  })
+
+  // 覆盖实例详情标题展示规则，避免 UUID 泄露到主视觉标题。
   it('标题展示实例名称且不展示实例 UUID', () => {
     const wrapper = mount(AppDetailPage, {
       global: {
