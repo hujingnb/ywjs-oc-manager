@@ -98,12 +98,15 @@ hermes-inject-contract: ## 把契约工件注入变体目录（避开 Dockerfile
 	cp -r runtime/hermes/cron-contract $(HERMES_VARIANT_DIR)/cron-contract
 
 build-hermes-runtime: hermes-inject-contract ## 本地 dev 构建 hermes runtime（tag: hermes-runtime:<variant>-dev）
+	status=0; \
 	docker build \
 	  -t hermes-runtime:$(HERMES_VARIANT)-dev \
 	  --build-arg HERMES_REF=$$(cat $(HERMES_VARIANT_DIR)/version.txt) \
 	  --build-arg OC_IMAGE_VARIANT=$(HERMES_VARIANT) \
 	  --build-arg OC_BUILD_TS=$(IMAGE_TIMESTAMP) \
-	  $(HERMES_VARIANT_DIR)
+	  $(HERMES_VARIANT_DIR) || status=$$?; \
+	rm -rf $(HERMES_VARIANT_DIR)/kanban-contract $(HERMES_VARIANT_DIR)/cron-contract; \
+	exit $$status
 
 verify-hermes-runtime: ## 镜像内 pytest 自检 lib/renderer/migrator/oc-entrypoint
 	docker run --rm --entrypoint python hermes-runtime:$(HERMES_VARIANT)-dev \
@@ -156,12 +159,15 @@ release-web-image: build-web-image push-web-image ## 构建并推送 manager-web
 # build context 取自 HERMES_VARIANT 指向的子目录（自包含 Dockerfile + 资产）。
 .PHONY: build-hermes-image
 build-hermes-image: hermes-inject-contract ## 本地构建 hermes runtime 生产镜像，tag = <variant>-<timestamp>
+	status=0; \
 	docker build \
 	  -t $(HERMES_IMAGE) \
 	  --build-arg HERMES_REF=$$(cat $(HERMES_VARIANT_DIR)/version.txt) \
 	  --build-arg OC_IMAGE_VARIANT=$(HERMES_VARIANT) \
 	  --build-arg OC_BUILD_TS=$(IMAGE_TIMESTAMP) \
-	  $(HERMES_VARIANT_DIR)
+	  $(HERMES_VARIANT_DIR) || status=$$?; \
+	rm -rf $(HERMES_VARIANT_DIR)/kanban-contract $(HERMES_VARIANT_DIR)/cron-contract; \
+	exit $$status
 
 # push-hermes-image 推送已构建的 hermes runtime 生产镜像；构建步骤独立，
 # 方便在 ACR 凭据未就绪 / verify 未通过时只 build 不 push。

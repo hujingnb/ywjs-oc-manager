@@ -14,7 +14,10 @@ from pathlib import Path
 
 def run_oc_cron(*args: str, home: Path, extra_env: dict[str, str] | None = None) -> tuple[dict, int]:
     env = {**os.environ, "HERMES_HOME": str(home), **(extra_env or {})}
-    proc = subprocess.run([sys.executable, "oc-cron.py", *args], cwd=Path(__file__).parents[1],
+    source_script = Path(__file__).resolve().parents[1] / "oc-cron.py"
+    # 测试既支持源码目录布局，也支持 Docker 镜像内的 /usr/local/bin 安装布局。
+    cmd = [sys.executable, str(source_script)] if source_script.exists() else ["oc-cron"]
+    proc = subprocess.run([*cmd, *args], cwd=Path(__file__).parents[1],
                           env=env, capture_output=True, text=True, timeout=10)
     try:
         payload = json.loads(proc.stdout)

@@ -43,7 +43,9 @@ def test_entrypoint_first_boot(tmp_path: Path) -> None:
         "OC_DATA_DIR": str(data_root),
         "OC_IMAGE_VARIANT": "hermes-main",
     }
-    script = Path(__file__).resolve().parent.parent / "oc-entrypoint.py"
+    source_script = Path(__file__).resolve().parent.parent / "oc-entrypoint.py"
+    # 测试既支持源码目录布局，也支持 Docker 镜像内的 /usr/local/bin 安装布局。
+    script = source_script if source_script.exists() else Path("/usr/local/bin/oc-entrypoint")
     r = subprocess.run([sys.executable, str(script)], env=env, capture_output=True, text=True)
     assert r.returncode == 0, r.stderr
 

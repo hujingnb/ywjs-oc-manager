@@ -71,6 +71,9 @@ RUN printf '{"variant":"%s","hermes_upstream_ref":"%s","built_at":"%s"}\n' \
 
 ENV OC_IMAGE_VARIANT=${OC_IMAGE_VARIANT}
 
+# 镜像构建期即执行 runtime 自检；任一单元测试失败都会让 docker build 失败。
+RUN PYTHONDONTWRITEBYTECODE=1 python -m pytest /usr/local/lib/oc-entrypoint/tests/ -v -p no:cacheprovider
+
 HEALTHCHECK --interval=30s --timeout=10s --start-period=60s --retries=3 \
   CMD ["/usr/local/bin/oc-healthcheck"]
 
