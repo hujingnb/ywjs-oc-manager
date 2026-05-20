@@ -155,7 +155,7 @@ services:
       - ./.local/data/go/cache:/root/.cache/go-build
       - ./.local/data/go/bin:/go/bin
       # 让 manager-api 容器内的 docker CLI 直连宿主机 daemon，
-      # 这样 imagesync 能 inspect / save 本地 hermes-runtime:dev 镜像。
+      # 这样 imagesync 能 inspect / save 本地 hermes-runtime:v2026.5.16-dev 镜像。
       - /var/run/docker.sock:/var/run/docker.sock
       - /usr/bin/docker:/usr/local/bin/docker:ro
       # 宿主机 ~/.docker/config.json：为镜像 pull 提供 registry 凭据（只读）。
