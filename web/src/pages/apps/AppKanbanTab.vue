@@ -12,14 +12,16 @@
         <n-input v-model:value="search" size="small" placeholder="搜索任务标题" style="width: 200px" />
         <span class="spacer" />
         <!-- stats 徽标：任务总数 + 最老就绪任务等待时长（来自 kanban stats 端点）-->
-        <span v-if="statsSummary" class="stat-badge">
+        <!-- stats !== false：features 未知时默认显示，明确 false 才隐藏 -->
+        <span v-if="statsSummary && kanbanFeatures?.stats !== false" class="stat-badge">
           <span><strong>{{ statsSummary.total }}</strong> 个任务</span>
           <span v-if="statsSummary.oldestReady">最老就绪 <strong class="warn">{{ statsSummary.oldestReady }}</strong></span>
         </span>
         <!-- streamConnected 为 true 时显示绿点「实时」，否则显示「重连实时流」按钮 -->
         <span v-if="streamConnected" class="live-tag">● 实时</span>
         <n-button v-else size="small" tertiary @click="reconnectStream">重连实时流</n-button>
-        <n-button size="small" type="primary" @click="showCreate = true">+ 新建任务</n-button>
+        <!-- write !== false：features 未知时默认显示，明确 false 才隐藏 -->
+        <n-button v-if="kanbanFeatures?.write !== false" size="small" type="primary" @click="showCreate = true">+ 新建任务</n-button>
       </n-space>
     </n-card>
 
@@ -54,6 +56,7 @@
           :board="currentBoard"
           :runs="runsQuery.data.value ?? []"
           :live-events="selectedLiveEvents"
+          :app-id="appId"
           @action="onAction"
         />
       </div>
@@ -81,6 +84,7 @@ import {
   useKanbanTaskQuery,
   useKanbanRunsQuery,
   useKanbanStatsQuery,
+  useKanbanCapabilitiesQuery,
   useCreateKanbanTask,
   useKanbanTaskAction,
 } from '@/api/hooks/useKanban'
@@ -122,6 +126,12 @@ const taskQuery = useKanbanTaskQuery(appId, currentBoard, taskIdRef)
 const runsQuery = useKanbanRunsQuery(appId, currentBoard, taskIdRef)
 // statsQuery：拉取当前 board 的统计信息，供工具栏徽标展示。
 const statsQuery = useKanbanStatsQuery(appId, currentBoard)
+// capabilitiesQuery：探测 oc-kanban 能力，用于按需隐藏不支持的操作和 UI 元素。
+// staleTime Infinity 且不轮询，capabilities 在实例生命周期内不变。
+const capabilitiesQuery = useKanbanCapabilitiesQuery(appId)
+// kanbanFeatures：features 为 undefined 表示能力未知（加载中 / 请求失败 / 老镜像），
+// 按「默认显示」语义处理 —— 只有明确 false 才隐藏，避免误隐藏功能。
+const kanbanFeatures = computed(() => capabilitiesQuery.data.value?.features)
 
 // formatAge 把秒数格式化为人类可读的时长（用于「最老就绪等待时长」）。
 function formatAge(seconds: number): string {

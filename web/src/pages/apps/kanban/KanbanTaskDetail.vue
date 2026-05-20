@@ -18,6 +18,7 @@
       <KanbanTaskActions
         v-if="isKnownStatus(detail.task?.status)"
         :status="detail.task!.status as KanbanStatus"
+        :app-id="appId"
         @action="emit('action', $event)"
       />
 
@@ -100,6 +101,8 @@ defineProps<{
   runs: KanbanTaskRun[]
   // liveEvents 是当前任务的实时事件文本行，由父组件从 SSE 流注入。
   liveEvents: string[]
+  // appId 透传给 KanbanTaskActions，用于查询 oc-kanban capabilities 降级 UI。
+  appId?: string
 }>()
 
 // action 事件向上传递操作动词，由父组件（AppKanbanTab）收集额外参数后调用 mutation。
