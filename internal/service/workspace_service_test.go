@@ -202,6 +202,17 @@ func (a *fakeWorkspaceAdapter) ContainerStats(_ context.Context, _, _ string) (r
 func (a *fakeWorkspaceAdapter) ContainerExec(_ context.Context, _, _ string, _ []string) (runtime.ExecResult, error) {
 	return runtime.ExecResult{}, runtime.ErrUnimplemented
 }
+
+// ContainerExecJSON 满足 Adapter 接口，workspace 测试不使用该方法。
+func (a *fakeWorkspaceAdapter) ContainerExecJSON(_ context.Context, _, _ string, _ []string) (runtime.ExecJSONResult, error) {
+	return runtime.ExecJSONResult{}, runtime.ErrUnimplemented
+}
+
+// ContainerExecStream 满足 Adapter 接口，workspace 测试不使用该方法。
+func (a *fakeWorkspaceAdapter) ContainerExecStream(_ context.Context, _, _ string, _ []string) (runtime.ExecStreamHandle, error) {
+	return runtime.ExecStreamHandle{}, runtime.ErrUnimplemented
+}
+
 func (a *fakeWorkspaceAdapter) WaitContainerHealthy(_ context.Context, _, _ string, _ time.Duration) error {
 	return runtime.ErrUnimplemented
 }
