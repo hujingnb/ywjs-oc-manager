@@ -58,18 +58,23 @@ def test_kanban_list_json_parseable():
 
 
 def test_kanban_stats_json_has_status_counts():
-    """stats --json 输出含 manager 工具栏依赖的 per-status 计数。"""
+    """stats --json 输出含 manager 工具栏依赖的 by_status 字段（hermes v0.14.0 真实契约）。"""
     _run_kanban("init")
     out = _run_kanban("stats", "--json")
     stats = json.loads(out)
-    # stats 必须是非空 dict —— 至少含 per-status 计数信息。
-    # 具体字段名（status 分组的 key 结构）待生产镜像首次运行契约测试时校准，
-    # 此处不强断言具体 key，避免在真实格式未知时误报。
-    assert isinstance(stats, dict) and stats, f"stats 输出应为非空 dict: {stats!r}"
+    # stats 输出必须含 by_status 字段（而非旧的 status_counts），已按真实 CLI 输出校准。
+    assert "by_status" in stats, f"stats 输出应含 by_status: {stats!r}"
 
 
 def test_kanban_create_show_roundtrip():
-    """create 后 show --json 能取回任务，含 manager 依赖的核心字段。"""
+    """create 后 show --json 能取回任务，show 输出的任务字段在 task 子对象内。
+
+    hermes v0.14.0 真实契约：
+    - create --json 返回扁平任务对象（与 list 元素相同格式）。
+    - show --json 返回 {task: {...}, comments: [...], events: [...]} 结构，
+      任务核心字段在顶层 task 子对象内，不平铺。
+    manager hermes_kanban_types.go 的 KanbanTaskDetail.Task 依赖此结构。
+    """
     _run_kanban("init")
     create_out = _run_kanban(
         "create", "contract-test 任务", "--assignee", "default", "--json"
@@ -80,6 +85,9 @@ def test_kanban_create_show_roundtrip():
 
     show_out = _run_kanban("show", task_id, "--json")
     detail = json.loads(show_out)
-    # manager hermes_kanban_types.go 依赖以下字段名
+    # show 输出必须含顶层 task 子对象（而非直接平铺）
+    assert "task" in detail, "kanban show 输出应含 task 字段"
+    task_obj = detail["task"]
+    # manager KanbanTask 依赖以下字段名
     for field in ("id", "title", "status", "assignee", "created_at"):
-        assert field in detail, f"kanban show 输出缺字段 {field}"
+        assert field in task_obj, f"kanban show task 对象缺字段 {field}"
