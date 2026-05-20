@@ -367,6 +367,8 @@ func TestCanManageAppKanban(t *testing.T) {
 		{"org_member 外组织不可写 kanban", domain.UserRoleOrgMember, orgA, userA, orgB, userB, false}, // 场景：org_member 外组织不可写 kanban
 		// 本组织管理员可写
 		{"org_admin 同组织可写 kanban", domain.UserRoleOrgAdmin, orgA, userA, orgA, userB, true}, // 场景：org_admin 同组织可写 kanban
+		// 外组织管理员不可写（组织边界隔离）
+		{"org_admin 跨组织不可写 kanban", domain.UserRoleOrgAdmin, orgA, userA, orgB, userB, false}, // 场景：org_admin 访问非本组织应用，应被拒绝
 		// 平台管理员跨组织可写（与 CanViewApp 一致）
 		{"platform_admin 跨组织可写 kanban", domain.UserRolePlatformAdmin, orgA, userA, orgB, userB, true}, // 场景：platform_admin 跨组织可写 kanban
 	}

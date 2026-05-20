@@ -84,8 +84,9 @@ func (s *HermesKanbanService) runCLI(ctx context.Context, loc KanbanAppLocation,
 	}
 	if res.ExitCode != 0 {
 		msg := strings.TrimSpace(res.Stderr)
-		if len(msg) > 4096 {
-			msg = msg[:4096]
+		// 按字符（rune）截断，避免在多字节中文字符中间切断产生非法 UTF-8。
+		if runes := []rune(msg); len(runes) > 1024 {
+			msg = string(runes[:1024])
 		}
 		return nil, fmt.Errorf("%w: exit %d: %s", ErrKanbanCLI, res.ExitCode, msg)
 	}

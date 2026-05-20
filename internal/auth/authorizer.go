@@ -248,7 +248,10 @@ func CanViewAppKanban(p Principal, appOrgID, appOwnerUserID string) bool {
 }
 
 // CanManageAppKanban 判断 principal 能否对任务看板做写操作（评论 / 完成 / 阻塞等）。
-// spec 规定：所有能查看实例详情的角色都可写，因此与 CanViewApp 一致。
+// spec §7.4 规定：所有能查看实例详情的角色都可读写任务看板，因此委托 CanViewApp。
+// 与 CanManageApp 的关键差异：CanManageApp 不允许 platform_admin 写应用配置；
+// 而 CanManageAppKanban 委托 CanViewApp，有意保留 platform_admin 的写权限——
+// 这是 spec §7.4 的设计决策，所有能查看实例详情的角色都能读写任务看板。
 func CanManageAppKanban(p Principal, appOrgID, appOwnerUserID string) bool {
 	return CanViewApp(p, appOrgID, appOwnerUserID)
 }

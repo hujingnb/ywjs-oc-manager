@@ -14,6 +14,7 @@ import (
 
 // fakeKanbanExecer 记录最后一次执行的 cmd，并按预设返回结果。
 type fakeKanbanExecer struct {
+	// lastCmd 由 ContainerExecJSON 与 ContainerExecStream 共享，记录最后一次调用的 cmd；测试中两者不同时使用。
 	lastCmd []string
 	result  runtime.ExecJSONResult
 	err     error
@@ -64,6 +65,28 @@ func TestListTasksHappy(t *testing.T) {
 	assert.Equal(t, "running", tasks[0].Status)
 	// 校验 argv：board 缺省回退 default、带 --json
 	assert.Equal(t, []string{"hermes", "kanban", "list", "--board", "default", "--json"}, execer.lastCmd)
+}
+
+// TestListTasksRejectsBadBoard 验证：非法 board slug 被白名单拦截，返回 ErrKanbanBadRequest 且不下发 CLI。
+func TestListTasksRejectsBadBoard(t *testing.T) {
+	cases := []struct {
+		name  string
+		board string
+	}{
+		{"含空格和大写字母的非法 slug", "Bad Board"},    // 场景：board 含空格及大写字母，不符合小写 a-z0-9 规范
+		{"含分号空格的注入式非法 slug", "abc; rm"},      // 场景：board 含分号和空格，防止 CLI 注入
+	}
+	for _, c := range cases {
+		// 当前子测试覆盖非法 board slug 格式被拦截、不触达 execer 的边界条件。
+		t.Run(c.name, func(t *testing.T) {
+			execer := &fakeKanbanExecer{}
+			svc := NewHermesKanbanService(execer, &fakeKanbanLocator{loc: healthyLoc()})
+
+			_, err := svc.ListTasks(context.Background(), kanbanOrgAdmin(), "app-1", KanbanTaskFilter{Board: c.board})
+			require.ErrorIs(t, err, ErrKanbanBadRequest)
+			assert.Nil(t, execer.lastCmd) // 非法输入不应触达 execer
+		})
+	}
 }
 
 // TestListTasksRejectsBadStatus 验证：非法 status 过滤值被白名单拦截，不下发 CLI。
