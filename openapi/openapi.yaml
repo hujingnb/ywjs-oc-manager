@@ -118,16 +118,18 @@ components:
           description: Priority 是任务优先级（0-9），0 为默认。
           type: integer
         skills:
-          description: Skills 是高级字段，仅平台管理员生效：指定任务所需技能集。
-          type: string
+          description: Skills 是高级字段，仅平台管理员生效：指定任务所需技能列表（每项对应一个 --skill 参数）。
+          items:
+            type: string
+          type: array
+          uniqueItems: false
         title:
           description: Title 是任务标题，必填。
           type: string
-        workspace_kind:
-          description: WorkspaceKind 是高级字段，仅平台管理员生效：workspace 类型（scratch/dir/worktree）。
-          type: string
-        workspace_path:
-          description: WorkspacePath 是高级字段，仅平台管理员生效：workspace 路径。
+        workspace:
+          description: |-
+            Workspace 是高级字段，仅平台管理员生效：workspace 参数，对应 --workspace，
+            接受 scratch / worktree / dir:<path> 三种形式。
           type: string
       required:
       - assignee
@@ -1976,8 +1978,7 @@ paths:
       tags:
       - hermes-kanban
     post:
-      description: 创建一个 Kanban 任务。Skills/WorkspaceKind/WorkspacePath/ParentID/MaxRetries
-        仅平台管理员可生效。
+      description: 创建一个 Kanban 任务。Skills/Workspace/ParentID/MaxRetries 仅平台管理员可生效。
       parameters:
       - description: 应用 ID
         in: path

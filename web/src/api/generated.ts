@@ -907,7 +907,7 @@ export interface paths {
         put?: never;
         /**
          * 新建任务
-         * @description 创建一个 Kanban 任务。Skills/WorkspaceKind/WorkspacePath/ParentID/MaxRetries 仅平台管理员可生效。
+         * @description 创建一个 Kanban 任务。Skills/Workspace/ParentID/MaxRetries 仅平台管理员可生效。
          */
         post: {
             parameters: {
@@ -6572,14 +6572,15 @@ export interface components {
             parent_id?: string;
             /** @description Priority 是任务优先级（0-9），0 为默认。 */
             priority?: number;
-            /** @description Skills 是高级字段，仅平台管理员生效：指定任务所需技能集。 */
-            skills?: string;
+            /** @description Skills 是高级字段，仅平台管理员生效：指定任务所需技能列表（每项对应一个 --skill 参数）。 */
+            skills?: string[];
             /** @description Title 是任务标题，必填。 */
             title: string;
-            /** @description WorkspaceKind 是高级字段，仅平台管理员生效：workspace 类型（scratch/dir/worktree）。 */
-            workspace_kind?: string;
-            /** @description WorkspacePath 是高级字段，仅平台管理员生效：workspace 路径。 */
-            workspace_path?: string;
+            /**
+             * @description Workspace 是高级字段，仅平台管理员生效：workspace 参数，对应 --workspace，
+             *     接受 scratch / worktree / dir:<path> 三种形式。
+             */
+            workspace?: string;
         };
         "handlers.CreateMemberAppRequest": {
             /** @description AppName 是新实例名称，创建时必填。 */

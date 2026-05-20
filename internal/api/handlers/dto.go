@@ -244,7 +244,7 @@ type AgentHeartbeatRequest struct {
 // ===== Hermes 任务看板 hermes-kanban =====
 
 // CreateKanbanTaskRequest 是新建 Kanban 任务的请求体。
-// 高级字段（Skills/WorkspaceKind/WorkspacePath/ParentID/MaxRetries）仅平台
+// 高级字段（Skills/Workspace/ParentID/MaxRetries）仅平台
 // 管理员可生效，handler 对非平台管理员会忽略这些字段。
 type CreateKanbanTaskRequest struct {
 	// Board 是目标 board slug，为空时默认 "default"。
@@ -257,12 +257,11 @@ type CreateKanbanTaskRequest struct {
 	Assignee string `json:"assignee" binding:"required"`
 	// Priority 是任务优先级（0-9），0 为默认。
 	Priority int `json:"priority"`
-	// Skills 是高级字段，仅平台管理员生效：指定任务所需技能集。
-	Skills string `json:"skills"`
-	// WorkspaceKind 是高级字段，仅平台管理员生效：workspace 类型（scratch/dir/worktree）。
-	WorkspaceKind string `json:"workspace_kind"`
-	// WorkspacePath 是高级字段，仅平台管理员生效：workspace 路径。
-	WorkspacePath string `json:"workspace_path"`
+	// Skills 是高级字段，仅平台管理员生效：指定任务所需技能列表（每项对应一个 --skill 参数）。
+	Skills []string `json:"skills"`
+	// Workspace 是高级字段，仅平台管理员生效：workspace 参数，对应 --workspace，
+	// 接受 scratch / worktree / dir:<path> 三种形式。
+	Workspace string `json:"workspace"`
 	// ParentID 是高级字段，仅平台管理员生效：父任务 ID。
 	ParentID string `json:"parent_id"`
 	// MaxRetries 是高级字段，仅平台管理员生效：最大重试次数。

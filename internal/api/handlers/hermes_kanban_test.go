@@ -234,14 +234,15 @@ func TestKanbanStatsHappy(t *testing.T) {
 }
 
 // TestKanbanCreateStripsAdvancedFieldsForOrgAdmin 验证：
-// 组织管理员提交高级字段（skills/workspace_kind/max_retries 等）时，
+// 组织管理员提交高级字段（skills/workspace/max_retries 等）时，
 // handler 层按 principal.Role 将其静默丢弃，不透传给 service。
 func TestKanbanCreateStripsAdvancedFieldsForOrgAdmin(t *testing.T) {
 	// stub 预设成功返回，detail.ID 用于验证正常路径通过
 	stub := &kanbanServiceStub{detail: service.KanbanTaskDetail{Task: service.KanbanTask{ID: "t_new"}}}
 	r := newKanbanTestRouter(t, stub)
 
-	body := `{"title":"x","assignee":"devops","skills":"bash","workspace_kind":"worktree","max_retries":5}`
+	// skills 现为数组，workspace 合并为单一字段
+	body := `{"title":"x","assignee":"devops","skills":["bash"],"workspace":"worktree","max_retries":5}`
 	w := httptest.NewRecorder()
 	req := httptest.NewRequest(http.MethodPost, "/api/v1/apps/app-1/hermes/kanban/tasks", strings.NewReader(body))
 	req.Header.Set("Content-Type", "application/json")
@@ -252,7 +253,7 @@ func TestKanbanCreateStripsAdvancedFieldsForOrgAdmin(t *testing.T) {
 	require.Equal(t, http.StatusCreated, w.Code)
 	// 验证 handler 已将高级字段从传入 service 的 input 中剥离
 	assert.Empty(t, stub.createIn.Skills, "org_admin 的 skills 应被丢弃")
-	assert.Empty(t, stub.createIn.WorkspaceKind, "org_admin 的 workspace_kind 应被丢弃")
+	assert.Empty(t, stub.createIn.Workspace, "org_admin 的 workspace 应被丢弃")
 	assert.Zero(t, stub.createIn.MaxRetries, "org_admin 的 max_retries 应被丢弃")
 }
 
@@ -263,7 +264,8 @@ func TestKanbanCreateKeepsAdvancedFieldsForPlatformAdmin(t *testing.T) {
 	stub := &kanbanServiceStub{detail: service.KanbanTaskDetail{Task: service.KanbanTask{ID: "t_new"}}}
 	r := newKanbanTestRouter(t, stub)
 
-	body := `{"title":"x","assignee":"devops","skills":"bash","max_retries":5}`
+	// skills 为数组，workspace 为单一参数
+	body := `{"title":"x","assignee":"devops","skills":["bash","grep"],"workspace":"scratch","max_retries":5}`
 	w := httptest.NewRecorder()
 	req := httptest.NewRequest(http.MethodPost, "/api/v1/apps/app-1/hermes/kanban/tasks", strings.NewReader(body))
 	req.Header.Set("Content-Type", "application/json")
@@ -273,7 +275,8 @@ func TestKanbanCreateKeepsAdvancedFieldsForPlatformAdmin(t *testing.T) {
 
 	require.Equal(t, http.StatusCreated, w.Code)
 	// 验证高级字段被如实传入 service
-	assert.Equal(t, "bash", stub.createIn.Skills, "平台管理员的 skills 应透传")
+	assert.Equal(t, []string{"bash", "grep"}, stub.createIn.Skills, "平台管理员的 skills 应透传")
+	assert.Equal(t, "scratch", stub.createIn.Workspace, "平台管理员的 workspace 应透传")
 	assert.Equal(t, 5, stub.createIn.MaxRetries, "平台管理员的 max_retries 应透传")
 }
 

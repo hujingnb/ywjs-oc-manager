@@ -266,7 +266,7 @@ func (h *HermesKanbanHandler) StreamEvents(c *gin.Context) {
 // CreateTask POST /api/v1/apps/{appId}/hermes/kanban/tasks
 //
 // @Summary      新建任务
-// @Description  创建一个 Kanban 任务。Skills/WorkspaceKind/WorkspacePath/ParentID/MaxRetries 仅平台管理员可生效。
+// @Description  创建一个 Kanban 任务。Skills/Workspace/ParentID/MaxRetries 仅平台管理员可生效。
 // @Tags         hermes-kanban
 // @Accept       json
 // @Produce      json
@@ -296,8 +296,7 @@ func (h *HermesKanbanHandler) CreateTask(c *gin.Context) {
 	// 避免普通成员通过 API 绕过 UI 注入高级配置。
 	if principal.Role == domain.UserRolePlatformAdmin {
 		in.Skills = req.Skills
-		in.WorkspaceKind = req.WorkspaceKind
-		in.WorkspacePath = req.WorkspacePath
+		in.Workspace = req.Workspace
 		in.ParentID = req.ParentID
 		in.MaxRetries = req.MaxRetries
 	}

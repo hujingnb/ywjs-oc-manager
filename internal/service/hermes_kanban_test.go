@@ -71,8 +71,8 @@ func TestListTasksHappy(t *testing.T) {
 	require.Len(t, tasks, 1)
 	assert.Equal(t, "t_1", tasks[0].ID)
 	assert.Equal(t, "running", tasks[0].Status)
-	// 校验 argv：board 缺省回退 default、带 --json
-	assert.Equal(t, []string{"hermes", "kanban", "list", "--board", "default", "--json"}, execer.lastCmd)
+	// 校验 argv：--board 作为全局参数在 verb 之前，缺省回退 default、带 --json
+	assert.Equal(t, []string{"hermes", "kanban", "--board", "default", "list", "--json"}, execer.lastCmd)
 }
 
 // TestListTasksRejectsBadBoard 验证：非法 board slug 被白名单拦截，返回 ErrKanbanBadRequest 且不下发 CLI。
@@ -339,7 +339,8 @@ func (f *fakeStreamExecer) ContainerExecStream(_ context.Context, _, _ string, c
 
 // TestStreamEventsDeliversLines 验证：StreamEvents 把流式行逐条交给 onLine 回调；argv 符合 watch 计划。
 func TestStreamEventsDeliversLines(t *testing.T) {
-	// 预设两行 NDJSON，验证全部按顺序传给回调，且 argv 含 watch/--board/--json。
+	// 预设两行 NDJSON，验证全部按顺序传给回调，且 argv 符合 hermes kanban --board <slug> watch 约定。
+	// watch 子命令本身无 --board 参数，board 通过全局参数注入到 `hermes kanban --board ...` 位置。
 	execer := &fakeStreamExecer{lines: []string{`{"kind":"claimed"}`, `{"kind":"heartbeat"}`}}
 	svc := NewHermesKanbanService(execer, &fakeKanbanLocator{loc: healthyLoc()})
 
@@ -350,8 +351,8 @@ func TestStreamEventsDeliversLines(t *testing.T) {
 	require.NoError(t, err)
 	// 两行事件应按顺序全部到达
 	assert.Equal(t, []string{`{"kind":"claimed"}`, `{"kind":"heartbeat"}`}, got)
-	// argv 必须与计划一致：hermes kanban watch --board default --json
-	assert.Equal(t, []string{"hermes", "kanban", "watch", "--board", "default", "--json"}, execer.lastCmd)
+	// argv 必须符合实测约定：hermes kanban --board default watch（watch 无 --json）
+	assert.Equal(t, []string{"hermes", "kanban", "--board", "default", "watch"}, execer.lastCmd)
 }
 
 // ————————————————————————————————————————————————————
@@ -370,19 +371,31 @@ func TestBlockRejectsEmptyReason(t *testing.T) {
 	assert.Nil(t, execer.lastCmd)
 }
 
-// TestBlockHappy 验证：Block 正常调用时无错误，且 argv 含 block/taskID/reason/--board。
+// TestBlockHappy 验证：Block 正常调用时无错误，且 argv 含 block/taskID/reason；--board 在 verb 之前。
 func TestBlockHappy(t *testing.T) {
 	// CLI 返回 "ok"，验证 argv 正确拼出阻塞命令。
+	// reason 是 positional 参数；--board 通过全局参数注入到 hermes kanban --board <slug> 位置。
 	execer := &fakeKanbanExecer{result: runtime.ExecJSONResult{ExitCode: 0, Stdout: "ok"}}
 	svc := NewHermesKanbanService(execer, &fakeKanbanLocator{loc: healthyLoc()})
 
 	err := svc.Block(context.Background(), kanbanOrgAdmin(), "app-1", "default", "t_1", "等待依赖")
 	require.NoError(t, err)
-	// argv 须含 block、任务 ID、阻塞原因及 --board
+	// argv 须含 block、任务 ID 与阻塞原因（positional）；--board 在 verb 前
 	assert.Contains(t, execer.lastCmd, "block")
 	assert.Contains(t, execer.lastCmd, "t_1")
 	assert.Contains(t, execer.lastCmd, "等待依赖")
-	assert.Contains(t, execer.lastCmd, "--board")
+	// --board 必须在 block verb 之前（全局参数位置）
+	boardIdx := -1
+	blockIdx := -1
+	for i, arg := range execer.lastCmd {
+		if arg == "--board" {
+			boardIdx = i
+		}
+		if arg == "block" {
+			blockIdx = i
+		}
+	}
+	assert.Less(t, boardIdx, blockIdx, "--board 全局参数应在 block verb 之前")
 }
 
 // TestReassignRejectsBadProfile 验证：Reassign 传非法 profile（含大写字母和空格）返回 ErrKanbanBadRequest。
@@ -397,18 +410,21 @@ func TestReassignRejectsBadProfile(t *testing.T) {
 	assert.Nil(t, execer.lastCmd)
 }
 
-// TestReassignHappy 验证：Reassign 正常调用时 argv 含 reassign/--to 及目标 profile。
+// TestReassignHappy 验证：Reassign 正常调用时 argv 含 reassign 及目标 profile（positional，无 --to）。
 func TestReassignHappy(t *testing.T) {
-	// CLI 返回 "ok"，验证 reassign 命令正确拼出 --to 参数。
+	// CLI 返回 "ok"，验证 reassign 命令正确拼出：profile 为 positional 参数，不使用 --to。
 	execer := &fakeKanbanExecer{result: runtime.ExecJSONResult{ExitCode: 0, Stdout: "ok"}}
 	svc := NewHermesKanbanService(execer, &fakeKanbanLocator{loc: healthyLoc()})
 
 	err := svc.Reassign(context.Background(), kanbanOrgAdmin(), "app-1", "default", "t_1", "devops")
 	require.NoError(t, err)
-	// argv 须含 reassign、--to 和目标 profile
+	// argv 须含 reassign 和目标 profile（positional，不含 --to）
 	assert.Contains(t, execer.lastCmd, "reassign")
-	assert.Contains(t, execer.lastCmd, "--to")
 	assert.Contains(t, execer.lastCmd, "devops")
+	// 确认没有错误地加入 --to flag
+	for _, arg := range execer.lastCmd {
+		assert.NotEqual(t, "--to", arg, "reassign profile 应为 positional 参数，不应有 --to flag")
+	}
 }
 
 // TestArchiveHappy 验证：Archive 正常调用时 argv 含 archive 及任务 ID。
@@ -439,19 +455,20 @@ func TestCreateTaskRejectsBadAssignee(t *testing.T) {
 	assert.Nil(t, execer.lastCmd)
 }
 
-// TestCreateTaskRejectsBadWorkspaceKind 验证：CreateTask 传非法 workspace_kind 返回 ErrKanbanBadRequest。
-func TestCreateTaskRejectsBadWorkspaceKind(t *testing.T) {
-	// 平台管理员场景：直接构造含非法 WorkspaceKind 的输入，应被枚举白名单拦截。
+// TestCreateTaskRejectsBadWorkspace 验证：CreateTask 传非法 workspace 值返回 ErrKanbanBadRequest。
+func TestCreateTaskRejectsBadWorkspace(t *testing.T) {
+	// 平台管理员场景：直接构造含非法 Workspace 的输入，应被格式校验拦截。
+	// --workspace 只接受 scratch / worktree / dir:<path> 三种形式。
 	execer := &fakeKanbanExecer{}
 	svc := NewHermesKanbanService(execer, &fakeKanbanLocator{loc: healthyLoc()})
 
 	_, err := svc.CreateTask(context.Background(), kanbanOrgAdmin(), "app-1", CreateKanbanTaskInput{
-		Title:         "新任务",
-		Assignee:      "devops",
-		WorkspaceKind: "bogus", // 不在 kanbanWorkspaceKinds 白名单中
+		Title:     "新任务",
+		Assignee:  "devops",
+		Workspace: "bogus", // 不符合 scratch|worktree|dir:<path> 格式
 	})
 	require.ErrorIs(t, err, ErrKanbanBadRequest)
-	// 非法 workspace_kind 不应触达 execer
+	// 非法 workspace 值不应触达 execer
 	assert.Nil(t, execer.lastCmd)
 }
 
