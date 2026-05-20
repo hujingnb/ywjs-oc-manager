@@ -74,12 +74,12 @@ func NewAgentBackedAdapter(files AgentResolver, docker DockerClientResolver) *Ag
 	return &AgentBackedAdapter{files: files, docker: docker}
 }
 
-// WithStreamingDocker 注入专供流式长连接（ContainerExecStream）使用的 docker client resolver。
+// SetStreamingDocker 注入专供流式长连接（ContainerExecStream）使用的 docker client resolver。
 // 该 resolver 应返回无 http.Client.Timeout 的 client，防止 hermes kanban watch 长连接被截断。
 // 不调时 ContainerExecStream 回退到普通 docker resolver，调用方需自行保证超时配置兼容。
-func (a *AgentBackedAdapter) WithStreamingDocker(streaming DockerClientResolver) *AgentBackedAdapter {
+// 命名与项目现有 Set* setter（SetInspector、SetJobNotifier 等）保持一致，void 返回。
+func (a *AgentBackedAdapter) SetStreamingDocker(streaming DockerClientResolver) {
 	a.streamingDocker = streaming
-	return a
 }
 
 // DockerClientForNode 返回指向目标节点 agent docker proxy 的 SDK client。
@@ -297,7 +297,8 @@ func (a *AgentBackedAdapter) ContainerExecJSON(ctx context.Context, nodeID, cont
 		case <-time.After(100 * time.Millisecond):
 		}
 	}
-	return ExecJSONResult{}, fmt.Errorf("exec 超时")
+	// 超时返回时带上已读数据，便于排障时看到部分输出。
+	return ExecJSONResult{Stdout: stdout.String(), Stderr: stderr.String()}, fmt.Errorf("exec 超时（已读 stdout %dB / stderr %dB）", stdout.Len(), stderr.Len())
 }
 
 // ContainerExecStream 在容器内执行流式命令，逐行投递 stdout。
@@ -321,7 +322,9 @@ func (a *AgentBackedAdapter) ContainerExecStream(ctx context.Context, nodeID, co
 	}
 
 	lines := make(chan string, 64)
-	var streamErr error
+	// errCh 带缓冲容量 1，goroutine 在 scanner 自然结束后写入一次；
+	// 调用方通过 Err() 的 select default 无阻塞读取，消除 streamErr 裸变量的数据竞争。
+	errCh := make(chan error, 1)
 	streamCtx, cancel := context.WithCancel(ctx)
 
 	go func() {
@@ -329,6 +332,7 @@ func (a *AgentBackedAdapter) ContainerExecStream(ctx context.Context, nodeID, co
 		defer att.Close()
 		// stdcopy 把 multiplexed 流拆出 stdout 写进 pipe，再按行扫描。
 		pr, pw := io.Pipe()
+		defer pr.Close()
 		go func() {
 			_, copyErr := stdcopy.StdCopy(pw, io.Discard, att.Reader)
 			pw.CloseWithError(copyErr)
@@ -338,18 +342,29 @@ func (a *AgentBackedAdapter) ContainerExecStream(ctx context.Context, nodeID, co
 		for scanner.Scan() {
 			select {
 			case <-streamCtx.Done():
+				// 主动取消路径：不发 errCh，取消不算错误。
 				return
 			case lines <- scanner.Text():
 			}
 		}
+		// scanner 自然结束路径：计算结果错误后写入 errCh（缓冲容量 1，不会阻塞）。
+		var resultErr error
 		if err := scanner.Err(); err != nil && streamCtx.Err() == nil {
-			streamErr = err
+			resultErr = err
 		}
+		errCh <- resultErr
 	}()
 
 	return ExecStreamHandle{
 		Lines: lines,
-		Err:   func() error { return streamErr },
+		Err: func() error {
+			select {
+			case e := <-errCh:
+				return e
+			default:
+				return nil
+			}
+		},
 		Close: cancel,
 	}, nil
 }
@@ -594,13 +609,13 @@ func (a *AgentBackedAdapter) dockerClient(ctx context.Context, nodeID string) (*
 }
 
 // streamingDockerClient 返回用于长连接 ExecAttach 的 docker client。
-// 若已通过 WithStreamingDocker 注入专用 resolver 则优先使用（无 timeout），
+// 若已通过 SetStreamingDocker 注入专用 resolver 则优先使用（无 timeout），
 // 否则回退到普通 docker resolver（调用方需自行保证超时配置兼容）。
 func (a *AgentBackedAdapter) streamingDockerClient(ctx context.Context, nodeID string) (*client.Client, error) {
 	if a.streamingDocker != nil {
 		return a.streamingDocker.DockerClient(ctx, nodeID)
 	}
-	// 回退到普通 docker resolver；ContainerExecStream 建议通过 WithStreamingDocker 注入。
+	// 回退到普通 docker resolver；ContainerExecStream 建议通过 SetStreamingDocker 注入。
 	return a.dockerClient(ctx, nodeID)
 }
 

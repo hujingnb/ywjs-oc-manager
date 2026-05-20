@@ -211,7 +211,7 @@ func runManager(ctx context.Context, cfg config.Config, logOut io.Writer) error 
 	// nodeClientResolver.DockerClient 带 30s Timeout，长连接会在 30s 后被强制掐断，
 	// newStreamingDockerResolver 使用 agent.NewStreamingDockerClientForNode 不设 Timeout。
 	streamingResolver := newStreamingDockerResolver(nodeResolver)
-	runtimeAdapter.WithStreamingDocker(streamingResolver)
+	runtimeAdapter.SetStreamingDocker(streamingResolver)
 	runtimeOpService.SetInspector(newRuntimeInspectorWrapper(runtimeAdapter))
 	workspaceService := service.NewWorkspaceService(dbStore.Queries, runtimeAdapter, cfg.App.DataRoot)
 

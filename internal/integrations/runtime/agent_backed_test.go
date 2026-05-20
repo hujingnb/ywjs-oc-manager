@@ -402,9 +402,10 @@ func TestWaitContainerHealthy_UnhealthyFailsFast(t *testing.T) {
 	require.Contains(t, err.Error(), "boom")
 }
 
-// TestExecStreamLineSplitting 验证 ContainerExecStream 的行扫描逻辑：
-// docker multiplexed stdout 帧被 stdcopy 还原后，按行投递到 Lines channel。
-func TestExecStreamLineSplitting(t *testing.T) {
+// TestDockerMultiplexedFrameParsing 验证 docker multiplexed 帧解析 + 行切分逻辑：
+// stdcopy 把带 8 字节头的 multiplexed 流还原为纯 stdout，再经 bufio.Scanner 按行切分；
+// 与 ContainerExecStream goroutine 内部使用相同的处理路径。
+func TestDockerMultiplexedFrameParsing(t *testing.T) {
 	// 构造 docker multiplexed stdout 帧：8 字节头(stream=1) + payload。
 	frame := func(payload string) []byte {
 		hdr := make([]byte, 8)
