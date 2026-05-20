@@ -92,6 +92,9 @@ func (c Config) Validate() error {
 	if strings.TrimSpace(c.Hermes.SystemPromptTemplate) == "" {
 		missing = append(missing, "hermes.system_prompt_template")
 	}
+	if strings.TrimSpace(c.Hermes.RuntimeImage) == "" {
+		missing = append(missing, "hermes.runtime_image")
+	}
 	if len(missing) > 0 {
 		return fmt.Errorf("缺少必需配置: %s", strings.Join(missing, ", "))
 	}
@@ -101,12 +104,78 @@ func (c Config) Validate() error {
 	if err := validateEnrollmentSecret(c.Runtime.EnrollmentSecret); err != nil {
 		return err
 	}
+	if err := validateHermesRuntimeImage(c.Hermes.RuntimeImage); err != nil {
+		return err
+	}
 	if err := c.Runtime.Probe.validate(); err != nil {
 		return err
 	}
 	// Hermes 时代模板不再需要 {{workspace_dir}} 等 legacy OpenClaw 专属占位符，
 	// 仅需非空即可（上方 missing 检查已覆盖）。
 	return nil
+}
+
+// validateHermesRuntimeImage 校验 Hermes 镜像必须固定到可复现引用。
+//
+// 允许 name:tag 或 name@sha256:digest；禁止 main/latest/dev 这类浮动 tag，
+// 避免 manager 运行时路径绕过 Makefile 的版本化镜像约束。
+func validateHermesRuntimeImage(value string) error {
+	image := strings.TrimSpace(value)
+	if strings.ContainsAny(image, " \t\r\n") {
+		return fmt.Errorf("hermes.runtime_image 不能包含空白字符")
+	}
+	if strings.Contains(image, "@sha256:") {
+		parts := strings.Split(image, "@sha256:")
+		if len(parts) != 2 || parts[0] == "" || !isHexDigest(parts[1]) {
+			return fmt.Errorf("hermes.runtime_image digest 必须是 name@sha256:<64位hex>")
+		}
+		return nil
+	}
+
+	lastSlash := strings.LastIndex(image, "/")
+	lastColon := strings.LastIndex(image, ":")
+	if lastColon <= lastSlash || lastColon == len(image)-1 {
+		return fmt.Errorf("hermes.runtime_image 必须固定到具体 tag 或 sha256 digest")
+	}
+	return validateHermesRuntimeImageTag(image[lastColon+1:])
+}
+
+// validateHermesRuntimeImageTag 校验 Docker tag 语法并拒绝浮动 tag。
+func validateHermesRuntimeImageTag(tag string) error {
+	if len(tag) > 128 {
+		return fmt.Errorf("hermes.runtime_image tag 不能超过 128 字符")
+	}
+	if strings.HasPrefix(tag, ".") || strings.HasPrefix(tag, "-") {
+		return fmt.Errorf("hermes.runtime_image tag 不能以 . 或 - 开头")
+	}
+	for _, r := range tag {
+		if (r >= 'a' && r <= 'z') || (r >= 'A' && r <= 'Z') || (r >= '0' && r <= '9') || r == '_' || r == '.' || r == '-' {
+			continue
+		}
+		return fmt.Errorf("hermes.runtime_image tag 包含非法字符: %q", r)
+	}
+	lower := strings.ToLower(tag)
+	switch {
+	case lower == "main", lower == "master", lower == "latest", lower == "dev":
+		return fmt.Errorf("hermes.runtime_image tag 不能使用浮动版本: %s", tag)
+	case strings.Contains(lower, "hermes-main"):
+		return fmt.Errorf("hermes.runtime_image tag 不能继续使用旧 variant 名称: %s", tag)
+	}
+	return nil
+}
+
+// isHexDigest 校验 sha256 digest 是否为 64 位十六进制字符串。
+func isHexDigest(value string) bool {
+	if len(value) != 64 {
+		return false
+	}
+	for _, r := range value {
+		if (r >= '0' && r <= '9') || (r >= 'a' && r <= 'f') || (r >= 'A' && r <= 'F') {
+			continue
+		}
+		return false
+	}
+	return true
 }
 
 // validateMasterKey 校验 base64 解码后的根密钥长度是否为 32 字节。
@@ -141,4 +210,3 @@ func (p RuntimeProbeConfig) validate() error {
 	}
 	return nil
 }
-

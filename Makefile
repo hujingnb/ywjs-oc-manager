@@ -19,7 +19,7 @@ WEB_IMAGE_REPO   ?= crpi-nu3ibz4f07feyghi.cn-beijing.personal.cr.aliyuncs.com/yw
 
 # hermes runtime 生产镜像仓库，与上方三个服务保持一致命名风格。
 # HERMES_VARIANT 选择 runtime/hermes/ 下的 versioned variant 子目录（自包含 Dockerfile + 资产）。
-# 镜像 tag 从该 variant 的 version.txt 派生，禁止 main / master / latest 等浮动 ref。
+# 镜像 tag 从该 variant 的 version.txt 派生，禁止 main / master / latest / dev 等浮动 ref。
 HERMES_VARIANT       ?= hermes-v2026.5.16
 HERMES_VARIANT_DIR   := runtime/hermes/$(HERMES_VARIANT)
 override HERMES_VERSION := $(strip $(shell if [ -f "$(HERMES_VARIANT_DIR)/version.txt" ]; then cat "$(HERMES_VARIANT_DIR)/version.txt"; fi))
@@ -50,7 +50,7 @@ help: ## 显示本帮助文档(make 默认 target)
 	@test -f "$(HERMES_VARIANT_DIR)/version.txt" || { echo "Hermes variant 缺少 version.txt: $(HERMES_VARIANT_DIR)/version.txt" >&2; exit 1; }
 	@test -n "$(HERMES_VERSION)" || { echo "Hermes version 不能为空: $(HERMES_VARIANT_DIR)/version.txt" >&2; exit 1; }
 	@case "$(HERMES_VERSION)" in \
-		main|master|latest) echo "Hermes version 不能使用浮动 tag: $(HERMES_VERSION)" >&2; exit 1;; \
+		main|master|latest|dev|*hermes-main*) echo "Hermes version 不能使用浮动或旧 variant tag: $(HERMES_VERSION)" >&2; exit 1;; \
 	esac
 	@case "$(HERMES_VERSION)" in \
 		*[!A-Za-z0-9_.-]*) echo "Hermes version 包含非法镜像 tag 字符: $(HERMES_VERSION)" >&2; exit 1;; \

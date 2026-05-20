@@ -91,8 +91,8 @@ func TestListTasksRejectsBadBoard(t *testing.T) {
 		name  string
 		board string
 	}{
-		{"含空格和大写字母的非法 slug", "Bad Board"},    // 场景：board 含空格及大写字母，不符合小写 a-z0-9 规范
-		{"含分号空格的注入式非法 slug", "abc; rm"},      // 场景：board 含分号和空格，防止 CLI 注入
+		{"含空格和大写字母的非法 slug", "Bad Board"}, // 场景：board 含空格及大写字母，不符合小写 a-z0-9 规范
+		{"含分号空格的注入式非法 slug", "abc; rm"},   // 场景：board 含分号和空格，防止 CLI 注入
 	}
 	for _, c := range cases {
 		// 当前子测试覆盖非法 board slug 格式被拦截、不触达 execer 的边界条件。
@@ -153,12 +153,12 @@ func TestKanbanErrorCodeMapping(t *testing.T) {
 		code    string // oc-kanban 错误码
 		wantErr error  // 期望映射到的哨兵错误
 	}{
-		{"参数非法映射为 BadRequest", "BAD_REQUEST", ErrKanbanBadRequest},       // BAD_REQUEST → ErrKanbanBadRequest
+		{"参数非法映射为 BadRequest", "BAD_REQUEST", ErrKanbanBadRequest},      // BAD_REQUEST → ErrKanbanBadRequest
 		{"资源不存在映射为 NotFound", "NOT_FOUND", ErrNotFound},                 // NOT_FOUND → ErrNotFound
 		{"能力不支持映射为 NotSupported", "UNSUPPORTED", ErrKanbanNotSupported}, // UNSUPPORTED → ErrKanbanNotSupported
-		{"hermes 执行失败映射为 CLI 错误", "HERMES_CLI_FAILED", ErrKanbanCLI},   // HERMES_CLI_FAILED → ErrKanbanCLI
-		{"内部错误映射为输出非法", "INTERNAL", ErrKanbanOutputInvalid},           // INTERNAL → ErrKanbanOutputInvalid
-		{"未知错误码兜底为 CLI 错误", "UNKNOWN_CODE", ErrKanbanCLI},              // 未知 code → default 分支 → ErrKanbanCLI
+		{"hermes 执行失败映射为 CLI 错误", "HERMES_CLI_FAILED", ErrKanbanCLI},    // HERMES_CLI_FAILED → ErrKanbanCLI
+		{"内部错误映射为输出非法", "INTERNAL", ErrKanbanOutputInvalid},             // INTERNAL → ErrKanbanOutputInvalid
+		{"未知错误码兜底为 CLI 错误", "UNKNOWN_CODE", ErrKanbanCLI},               // 未知 code → default 分支 → ErrKanbanCLI
 	}
 	for _, c := range cases {
 		// 每个子测试覆盖一种错误码到哨兵错误的映射路径。
@@ -543,7 +543,7 @@ func TestStreamEventsCancelled(t *testing.T) {
 func TestCapabilitiesHappy(t *testing.T) {
 	// oc-kanban capabilities 返回契约版本、verb 清单与 feature 开关。
 	capsJSON := `{"contract_version":"1.0","oc_kanban_version":"1","hermes_version":"v0.14.0",` +
-		`"variant":"hermes-main","verbs":["list","show","create"],` +
+		`"variant":"hermes-v2026.5.16","verbs":["list","show","create"],` +
 		`"features":{"write":true,"watch":true,"runs":true,"stats":true}}`
 	execer := &fakeKanbanExecer{result: runtime.ExecJSONResult{
 		ExitCode: 0, Stdout: okEnvelope(capsJSON),
@@ -555,10 +555,9 @@ func TestCapabilitiesHappy(t *testing.T) {
 	assert.Equal(t, "1.0", caps.ContractVersion)
 	assert.True(t, caps.Features.Write)
 	assert.Contains(t, caps.Verbs, "create")
-	// 验证 OCKanbanVersion 与 Variant 字段被正确解析（mock 数据中分别为 "1" 和 "hermes-main"）
+	// 验证 OCKanbanVersion 与 Variant 字段被正确解析（mock 数据中分别为 "1" 和 "hermes-v2026.5.16"）。
 	assert.Equal(t, "1", caps.OCKanbanVersion)
-	assert.Equal(t, "hermes-main", caps.Variant)
+	assert.Equal(t, "hermes-v2026.5.16", caps.Variant)
 	// argv 为 oc-kanban capabilities
 	assert.Equal(t, []string{"oc-kanban", "capabilities"}, execer.lastCmd)
 }
-

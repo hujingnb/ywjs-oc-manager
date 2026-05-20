@@ -366,7 +366,7 @@ func TestKanbanCapabilitiesHappy(t *testing.T) {
 	stub := &kanbanServiceStub{caps: service.KanbanCapabilities{
 		ContractVersion: "1.0",
 		OCKanbanVersion: "1",
-		Variant:         "hermes-main",
+		Variant:         "hermes-v2026.5.16",
 		Verbs:           []string{"list", "show", "create"},
 		Features:        service.KanbanFeatures{Write: true},
 	}}

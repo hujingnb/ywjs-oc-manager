@@ -3,6 +3,7 @@ package config
 
 import (
 	"encoding/base64"
+	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 	"os"
 	"path/filepath"
@@ -93,10 +94,116 @@ func TestValidateReportsRequiredFields(t *testing.T) {
 		"auth.access_token_ttl", "auth.refresh_token_ttl",
 		"auth.jwt_access_secret", "auth.jwt_refresh_secret", "auth.csrf_secret",
 		"security.master_key", "runtime.enrollment_secret", "hermes.system_prompt_template",
+		"hermes.runtime_image",
 	}
 	for _, field := range required {
 		require.True(t, strings.Contains(err.Error(), field))
 	}
+}
+
+// TestLoad_RejectsMissingHermesRuntimeImage 校验 hermes.runtime_image 缺失或为空时启动 fail-fast。
+func TestLoad_RejectsMissingHermesRuntimeImage(t *testing.T) {
+	cases := []struct {
+		// name 标识当前用例覆盖的缺失形态。
+		name string
+		// yaml 是由完整合法配置派生出的异常输入。
+		yaml string
+	}{
+		{
+			// 场景：字段整行缺失时应报必填项错误。
+			name: "missing",
+			yaml: strings.Replace(fullValidYAML(),
+				`  runtime_image: "hermes-runtime:v2026.5.16-dev"`+"\n", "", 1),
+		},
+		{
+			// 场景：字段存在但值为空字符串时也应报必填项错误。
+			name: "empty",
+			yaml: strings.Replace(fullValidYAML(),
+				`runtime_image: "hermes-runtime:v2026.5.16-dev"`, `runtime_image: ""`, 1),
+		},
+	}
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			path := writeTempConfig(t, c.yaml)
+			_, err := LoadFile(path)
+			require.Error(t, err)
+			assert.Contains(t, err.Error(), "hermes.runtime_image")
+		})
+	}
+}
+
+// TestLoad_RejectsUnsafeHermesRuntimeImage 校验 runtime 镜像引用必须固定到具体版本。
+func TestLoad_RejectsUnsafeHermesRuntimeImage(t *testing.T) {
+	cases := []struct {
+		// name 标识当前非法镜像引用覆盖的边界。
+		name string
+		// image 是写入 hermes.runtime_image 的待校验镜像引用。
+		image string
+		// want 是期望错误中包含的业务说明片段。
+		want string
+	}{
+		{
+			// 场景：main 是分支语义 tag，应被拒绝。
+			name:  "floating-main",
+			image: "hermes-runtime:main",
+			want:  "浮动版本",
+		},
+		{
+			// 场景：latest 会随仓库更新漂移，应被拒绝。
+			name:  "floating-latest",
+			image: "hermes-runtime:latest",
+			want:  "浮动版本",
+		},
+		{
+			// 场景：dev 只代表开发态，不是可复现版本，应被拒绝。
+			name:  "floating-dev",
+			image: "hermes-runtime:dev",
+			want:  "浮动版本",
+		},
+		{
+			// 场景：旧 variant 名称 hermes-main 不能继续作为镜像 tag 使用。
+			name:  "old-variant",
+			image: "hermes-runtime:hermes-main-dev",
+			want:  "旧 variant",
+		},
+		{
+			// 场景：缺少 tag 或 digest 时无法定位具体镜像版本，应被拒绝。
+			name:  "missing-tag",
+			image: "registry.example.com/hermes-runtime",
+			want:  "具体 tag",
+		},
+		{
+			// 场景：tag 中带空白会被 Docker 解析为非法引用，应被拒绝。
+			name:  "whitespace",
+			image: "hermes-runtime:v2026.5.16 dev",
+			want:  "空白字符",
+		},
+	}
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			yaml := strings.Replace(fullValidYAML(),
+				`runtime_image: "hermes-runtime:v2026.5.16-dev"`,
+				`runtime_image: "`+c.image+`"`, 1)
+			path := writeTempConfig(t, yaml)
+			_, err := LoadFile(path)
+			require.Error(t, err)
+			assert.Contains(t, err.Error(), c.want)
+		})
+	}
+}
+
+// TestLoad_AcceptsHermesRuntimeImageDigest 校验 sha256 digest 固定引用可通过启动校验。
+func TestLoad_AcceptsHermesRuntimeImageDigest(t *testing.T) {
+	digest := strings.Repeat("a", 64)
+	image := "registry.example.com/oc/hermes-runtime@sha256:" + digest
+	yaml := strings.Replace(fullValidYAML(),
+		`runtime_image: "hermes-runtime:v2026.5.16-dev"`,
+		`runtime_image: "`+image+`"`, 1)
+	path := writeTempConfig(t, yaml)
+
+	cfg, err := LoadFile(path)
+	require.NoError(t, err)
+	assert.Equal(t, image, cfg.Hermes.RuntimeImage)
 }
 
 // TestLoadFileFailsWhenDurationInvalid 验证加载文件失败当时长非法的异常或拒绝路径场景。

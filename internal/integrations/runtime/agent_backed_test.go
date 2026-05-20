@@ -231,7 +231,7 @@ func startMockDocker(t *testing.T, fixedID, inspectStatus string, calls *[]docke
 			_ = json.NewEncoder(w).Encode(map[string]any{
 				"Id":    fixedID,
 				"Name":  "/" + fixedID,
-				"Image": "hermes-runtime:dev",
+				"Image": "hermes-runtime:v2026.5.16-dev",
 				"State": map[string]any{"Status": inspectStatus},
 			})
 		case strings.HasSuffix(r.URL.Path, "/_ping"):
@@ -264,7 +264,7 @@ func TestAgentBackedAdapterCreateContainerHappyPath(t *testing.T) {
 
 	spec := ContainerSpec{
 		Name:  "ocm-app-x",
-		Image: "hermes-runtime:dev",
+		Image: "hermes-runtime:v2026.5.16-dev",
 		Env:   map[string]string{"OPENAI_API_KEY": "k1", "OPENAI_BASE_URL": "http://newapi"},
 		Volumes: []VolumeMount{
 			{HostPath: "/data/workspace", ContainerPath: "/workspace"},                         // 场景：工作区挂载应以读写 bind mount 传给 Docker。
@@ -284,7 +284,7 @@ func TestAgentBackedAdapterCreateContainerHappyPath(t *testing.T) {
 	createCall := findCall(t, calls, "POST", "/containers/create")
 	body := string(createCall.body)
 	for _, fragment := range []string{
-		`"Image":"hermes-runtime:dev"`,
+		`"Image":"hermes-runtime:v2026.5.16-dev"`,
 		`"OPENAI_BASE_URL=http://newapi"`,
 		`"OPENAI_API_KEY=k1"`,
 		`"hermes","start"`,

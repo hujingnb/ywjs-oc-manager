@@ -638,9 +638,8 @@ func (l *KanbanAppLocatorFromStore) LocateApp(ctx context.Context, appID string)
 	if app.ContainerID.Valid {
 		loc.ContainerID = app.ContainerID.String
 	}
-	// stub 判定：dev stub 镜像 tag 约定以 -dev 结尾（hermes-runtime:hermes-main-dev）。
+	// stub 判定：dev stub 镜像 tag 约定以 -dev 结尾（hermes-runtime:v2026.5.16-dev）。
 	// 精确方案（读容器内 /etc/oc-image.json）留作后续；后缀判定已足以触发降级提示。
 	loc.Stub = strings.HasSuffix(app.RuntimeImageRef, "-dev")
 	return loc, nil
 }
-

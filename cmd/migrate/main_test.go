@@ -55,6 +55,7 @@ security:
 runtime:
   enrollment_secret: "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA="
 hermes:
+  runtime_image: "hermes-runtime:v2026.5.16-dev"
   system_prompt_template: |
     你是 {org_name} 的助手
 `), 0o600); err != nil {

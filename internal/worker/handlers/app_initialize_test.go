@@ -12,9 +12,9 @@ import (
 
 	"github.com/jackc/pgx/v5/pgtype"
 
+	dockerclient "github.com/docker/docker/client"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
-	dockerclient "github.com/docker/docker/client"
 
 	"oc-manager/internal/audit"
 	"oc-manager/internal/auth"
@@ -45,7 +45,7 @@ func TestAppInitializeHandlesHappyPath(t *testing.T) {
 	cipher, err := auth.NewCipher(make([]byte, 32))
 	require.NoError(t, err)
 	cfg := AppInitializeConfig{
-		RuntimeImage:         "hermes:dev",
+		RuntimeImage:         defaultHermesRuntimeImage,
 		PlatformPrompt:       "平台默认规则",
 		SystemPromptTemplate: "你是 {org_name} 的助手",
 		NewAPIBaseURL:        "http://new-api:3000",
@@ -98,7 +98,7 @@ func TestAppInitializeHandlesHappyPath(t *testing.T) {
 
 	// 容器名应以 hermes- 为前缀。
 	require.Equal(t, "hermes-"+testAppID, containers.lastSpec.Name)
-	require.Equal(t, "hermes:dev", containers.lastSpec.Image)
+	require.Equal(t, defaultHermesRuntimeImage, containers.lastSpec.Image)
 
 	// InitAppDirs 与 StartContainer 必须被调对参数。
 	if dirs.calls != 1 || dirs.lastNode != "node-1" || dirs.lastApp != testAppID {
@@ -184,7 +184,7 @@ func TestAppInitializeWaitsForHermesHealthyWhenSupported(t *testing.T) {
 	cipher, err := auth.NewCipher(make([]byte, 32))
 	require.NoError(t, err)
 	handler := NewAppInitializeHandler(store, dirs, base, containers, client, AppInitializeConfig{
-		RuntimeImage: "hermes:dev",
+		RuntimeImage: defaultHermesRuntimeImage,
 		Cipher:       cipher,
 	})
 	// 注入 fakeAppInputUploader, 确保 writeAppInput 可正常执行。
@@ -739,7 +739,7 @@ func TestAppInitialize_WritesKnowledgeIntoInput(t *testing.T) {
 	}}
 
 	cfg := AppInitializeConfig{
-		RuntimeImage:         "hermes:dev",
+		RuntimeImage:         defaultHermesRuntimeImage,
 		SystemPromptTemplate: "你是 {org_name} 的助手",
 		Cipher:               testCipher(t),
 	}
@@ -863,7 +863,7 @@ func TestAppInitializeHandler_Phases_Progress(t *testing.T) {
 	containers := &fakeContainers{result: runtimepkg.ContainerInfo{ID: "ctr-1", Name: "hermes-" + testAppID}}
 	client := &fakeNewAPI{result: newapi.APIKey{ID: 1, Key: "sk-test"}}
 	handler := NewAppInitializeHandler(store, &fakeDirs{}, containers, containers, client, AppInitializeConfig{
-		RuntimeImage: "hermes:dev",
+		RuntimeImage: defaultHermesRuntimeImage,
 		Cipher:       testCipher(t),
 	})
 	handler.SetAppInputUploader(&fakeAppInputUploader{})
@@ -994,7 +994,7 @@ func TestAppInitializeHandler_IdempotentReentry(t *testing.T) {
 	containers := &fakeContainers{result: runtimepkg.ContainerInfo{ID: "ctr-1", Name: "hermes-" + testAppID}}
 	client := &fakeNewAPI{result: newapi.APIKey{ID: 1, Key: "k"}}
 	handler := NewAppInitializeHandler(store, &fakeDirs{}, containers, containers, client, AppInitializeConfig{
-		RuntimeImage: "hermes:dev",
+		RuntimeImage: defaultHermesRuntimeImage,
 		Cipher:       testCipher(t),
 	})
 	handler.SetAppInputUploader(&fakeAppInputUploader{})

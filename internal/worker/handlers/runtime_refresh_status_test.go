@@ -99,7 +99,7 @@ func pgUUIDFromString(s string) (pgtype.UUID, error) {
 func TestRuntimeRefreshStatusHappyPath(t *testing.T) {
 	store := &fakeRuntimeSnapshotStore{app: makeAppForRefresh(t)}
 	inspector := &fakeRuntimeInspector{
-		info:  runtime.ContainerInfo{ID: "ctr-abc", Name: "ocm-app", Image: "hermes-runtime:dev", Status: "running"},
+		info:  runtime.ContainerInfo{ID: "ctr-abc", Name: "ocm-app", Image: "hermes-runtime:v2026.5.16-dev", Status: "running"},
 		stats: runtime.ContainerStats{CPUPercent: 12.5, MemoryUsage: 1024, MemoryLimit: 4096, NetworkRxBytes: 100, NetworkTxBytes: 50},
 	}
 	h := NewRuntimeRefreshStatusHandler(store, inspector)
@@ -120,7 +120,7 @@ func TestRuntimeRefreshStatusHappyPath(t *testing.T) {
 func TestRuntimeRefreshStatusWritesInstanceSample(t *testing.T) {
 	store := &fakeRuntimeSnapshotStore{app: makeAppForRefresh(t)}
 	inspector := &fakeRuntimeInspector{
-		info:  runtime.ContainerInfo{ID: "ctr-abc", Name: "ocm-app", Image: "hermes-runtime:dev", Status: "running"},
+		info:  runtime.ContainerInfo{ID: "ctr-abc", Name: "ocm-app", Image: "hermes-runtime:v2026.5.16-dev", Status: "running"},
 		stats: runtime.ContainerStats{CPUPercent: 12.5, MemoryUsage: 1024, MemoryLimit: 4096, DiskReadBytes: 77, DiskWriteBytes: 88, NetworkRxBytes: 100, NetworkTxBytes: 50},
 	}
 	h := NewRuntimeRefreshStatusHandler(store, inspector)

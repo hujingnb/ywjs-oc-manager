@@ -189,7 +189,7 @@ func TestCronCreateBuildsArgv(t *testing.T) {
 // TestCronCapabilitiesParsesEnvelope 验证：Capabilities 解析契约版本、verb 清单与 feature 开关。
 func TestCronCapabilitiesParsesEnvelope(t *testing.T) {
 	capsJSON := `{"contract_version":"1.0","oc_cron_version":"1","hermes_version":"v0.14.0",` +
-		`"variant":"hermes-main","verbs":["status","list","create"],` +
+		`"variant":"hermes-v2026.5.16","verbs":["status","list","create"],` +
 		`"features":{"status":true,"history":true,"output":true,"write":true,"script":true,"advanced_fields":true}}`
 	execer := &fakeCronExecer{result: runtime.ExecJSONResult{ExitCode: 0, Stdout: cronOKEnvelope(capsJSON)}}
 	svc := NewHermesCronService(execer, &fakeCronLocator{loc: healthyCronLoc()})

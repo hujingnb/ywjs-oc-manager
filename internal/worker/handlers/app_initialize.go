@@ -13,17 +13,21 @@ import (
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgtype"
 
+	dockerclient "github.com/docker/docker/client"
 	"oc-manager/internal/audit"
 	"oc-manager/internal/auth"
 	"oc-manager/internal/domain"
 	"oc-manager/internal/integrations/hermes"
 	"oc-manager/internal/integrations/newapi"
-	dockerclient "github.com/docker/docker/client"
 
 	runtimepkg "oc-manager/internal/integrations/runtime"
 	"oc-manager/internal/runtime/imagecoord"
 	"oc-manager/internal/store/sqlc"
 )
+
+// defaultHermesRuntimeImage 是旧单元测试装配和本地开发路径的兜底值。
+// 生产启动配置由 internal/config 校验，必须显式提供 hermes.runtime_image。
+const defaultHermesRuntimeImage = "hermes-runtime:v2026.5.16-dev"
 
 // AppInitializeStore 是 app_initialize handler 需要的最小数据访问能力。
 type AppInitializeStore interface {
@@ -194,6 +198,7 @@ type AppInitializeLLMConfig struct {
 //  7. container_id 为空时调 ContainerCreator.CreateContainer，把 ID/Name 写库；
 //  8. 调 ContainerStarter.StartContainer 启动容器；
 //  9. starter 实现 HermesHealthChecker 时等 docker HEALTHCHECK 报 healthy；
+//
 // 10. 推 status=binding_waiting，由 channel 流程接管后续。
 //
 // 任意一步失败立即冒泡，由 worker 重试或入 failed；状态机字段只在显式步骤里单独写。
@@ -229,7 +234,7 @@ func NewAppInitializeHandler(
 	cfg AppInitializeConfig,
 ) *AppInitializeHandler {
 	if cfg.RuntimeImage == "" {
-		cfg.RuntimeImage = "hermes-runtime:dev"
+		cfg.RuntimeImage = defaultHermesRuntimeImage
 	}
 	return &AppInitializeHandler{
 		store:      store,

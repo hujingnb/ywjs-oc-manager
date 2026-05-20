@@ -26,10 +26,10 @@ func (f *fakeExec) ContainerExec(_ context.Context, _, _ string, cmd []string) (
 
 // 验证 RunInfo 把 stdout JSON 解码到 Info 结构体，并执行 oc-info 命令。
 func TestRunInfo_ParsesJSON(t *testing.T) {
-	e := &fakeExec{stdout: `{"variant":"hermes-main","hermes_upstream_ref":"abc","oc_entrypoint_version":"1","built_at":"2026-05-19T00:00:00Z"}` + "\n"}
+	e := &fakeExec{stdout: `{"variant":"hermes-v2026.5.16","hermes_upstream_ref":"abc","oc_entrypoint_version":"1","built_at":"2026-05-19T00:00:00Z"}` + "\n"}
 	info, err := RunInfo(context.Background(), e, "node-1", "container-1")
 	require.NoError(t, err)
-	assert.Equal(t, "hermes-main", info.Variant)
+	assert.Equal(t, "hermes-v2026.5.16", info.Variant)
 	assert.Equal(t, "abc", info.HermesUpstreamRef)
 	assert.Equal(t, []string{"oc-info"}, e.lastCmd)
 }
