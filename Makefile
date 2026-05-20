@@ -9,7 +9,8 @@ OPENAPI_TS_VERSION := 7.13.0
 
 # 统一镜像 tag：取 make 调用时的本地时间，格式 YYYY-MM-DD-HH-MM-SS。
 # 同一次 make 调用中所有生产镜像共享同一时间戳，避免同批镜像 tag 不一致。
-IMAGE_TIMESTAMP := $(shell date +%Y-%m-%d-%H-%M-%S)
+# 使用 override 防止命令行 IMAGE_TIMESTAMP=dev 间接生成语义不明或浮动镜像 tag。
+override IMAGE_TIMESTAMP := $(shell date +%Y-%m-%d-%H-%M-%S)
 
 # 各服务生产镜像仓库（统一走 aliyun 私有 ACR ywjs_app 命名空间）。
 # 走其他 registry 时在命令行覆盖对应变量即可。
