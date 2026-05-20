@@ -27,13 +27,15 @@
       <!-- 高级字段：仅平台管理员可见（spec §5.5 字段级权限）。
            前端隐藏是 UX 优化；后端 handler 对非平台管理员仍会 strip 这些字段。-->
       <template v-if="isPlatformAdmin">
-        <!-- skills：逗号分隔的技能标签，控制 hermes 选择 worker 的能力匹配 -->
+        <!-- skills：逗号或空格分隔的多技能，提交时 split 成 string[]，
+             对应后端 CreateKanbanTaskRequest.skills（[]string） -->
         <n-form-item label="skills">
-          <n-input v-model:value="form.skills" placeholder="逗号分隔的技能" />
+          <n-input v-model:value="form.skills" placeholder="逗号分隔，如 bash,grep" />
         </n-form-item>
-        <!-- workspace_kind：工作目录类型，如 scratch / dir:<path> / worktree -->
-        <n-form-item label="workspace_kind">
-          <n-input v-model:value="form.workspace_kind" placeholder="scratch / dir:<path> / worktree" />
+        <!-- workspace：单个 workspace 参数，对应后端 CreateKanbanTaskRequest.workspace，
+             接受 scratch / worktree / dir:/路径 三种形式 -->
+        <n-form-item label="workspace">
+          <n-input v-model:value="form.workspace" placeholder="scratch / worktree / dir:/路径" />
         </n-form-item>
         <!-- parent_id：可选父任务 ID，用于任务子树结构 -->
         <n-form-item label="parent_id">
@@ -67,7 +69,7 @@ import { NModal, NForm, NFormItem, NInput, NInputNumber, NSelect, NButton, NSpac
 import { useAuthStore } from '@/stores/auth'
 
 // KanbanCreateModal 是新建任务模态框。
-// 高级字段（skills / workspace_kind / parent_id / max_retries）按角色显隐：
+// 高级字段（skills / workspace / parent_id / max_retries）按角色显隐：
 // 平台管理员可见并填写，其他角色只见必填字段（标题 / assignee / 优先级 / 描述）。
 const props = defineProps<{
   // show 控制模态框显隐，由父组件通过 v-model:show 绑定。
@@ -91,6 +93,8 @@ const isPlatformAdmin = computed(() => auth.isPlatformAdmin)
 
 // form 是表单的响应式状态。
 // 所有字段初始化为空/默认值，提交时按角色组装 payload。
+// skills 以逗号分隔字符串收集用户输入，onSubmit 时 split 成 string[]。
+// workspace 对应后端单字段（scratch / worktree / dir:/路径），不再拆分为两个字段。
 const form = reactive({
   title: '',
   assignee: '',
@@ -98,7 +102,7 @@ const form = reactive({
   body: '',
   // 以下高级字段仅在 isPlatformAdmin 时显示，非平台管理员的 payload 不带这些字段。
   skills: '',
-  workspace_kind: '',
+  workspace: '',
   parent_id: '',
   max_retries: 0,
 })
@@ -108,7 +112,7 @@ watch(() => props.show, (visible) => {
   if (!visible) {
     Object.assign(form, {
       title: '', assignee: '', priority: 1, body: '',
-      skills: '', workspace_kind: '', parent_id: '', max_retries: 0,
+      skills: '', workspace: '', parent_id: '', max_retries: 0,
     })
   }
 })
@@ -126,8 +130,10 @@ const canSubmit = computed(() => form.title.trim() !== '' && form.assignee.trim(
 
 // onSubmit 按角色组装 payload：
 // - 基础字段：所有角色都带（title / assignee / priority / body）。
-// - 高级字段：仅平台管理员带（skills / workspace_kind / parent_id / max_retries）。
+// - 高级字段：仅平台管理员带（skills / workspace / parent_id / max_retries）。
 // 空字符串字段用 undefined 传递，避免后端收到空字符串被错误解析。
+// skills：用户输入逗号或空格分隔的字符串，split 后 trim、过滤空项，得到 string[]。
+// workspace：单个字符串直接传后端（scratch / worktree / dir:/路径）。
 function onSubmit() {
   const payload: Record<string, unknown> = {
     title: form.title.trim(),
@@ -136,8 +142,13 @@ function onSubmit() {
     body: form.body.trim() || undefined,
   }
   if (isPlatformAdmin.value) {
-    payload.skills = form.skills.trim() || undefined
-    payload.workspace_kind = form.workspace_kind.trim() || undefined
+    // skills 输入框内容按逗号或空格分割，去空 trim，空数组时不传。
+    const skillList = form.skills
+      .split(/[,\s]+/)
+      .map((s) => s.trim())
+      .filter((s) => s.length > 0)
+    payload.skills = skillList.length > 0 ? skillList : undefined
+    payload.workspace = form.workspace.trim() || undefined
     payload.parent_id = form.parent_id.trim() || undefined
     // max_retries 为 0 时不传，表示用后端默认重试次数；
     // 与后端 service 层「MaxRetries > 0 才生效」的语义一致，并非 bug。

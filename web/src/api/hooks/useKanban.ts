@@ -213,10 +213,11 @@ export function useCreateKanbanTask(appId: Ref<string | undefined>, board: Ref<s
       assignee: string
       priority: number
       body?: string
-      // skills 是字符串数组，与 hermes v0.14.0 真实契约一致。
+      // skills 是字符串数组，对应后端 []string，每项对应一个 --skill 参数。
       skills?: string[]
-      workspace_kind?: string
-      workspace_path?: string
+      // workspace 是单个字段，接受 scratch / worktree / dir:<path> 三种形式，
+      // 对应后端 CreateKanbanTaskRequest.workspace（已合并原 workspace_kind + workspace_path）。
+      workspace?: string
       parent_id?: string
       max_retries?: number
     }) => {
