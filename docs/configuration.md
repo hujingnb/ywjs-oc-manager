@@ -68,7 +68,7 @@ Hermes Agent runtime 容器相关配置。
 | `runtime_image` | string | `hermes-runtime:v2026.5.16-dev` | Hermes 容器镜像引用（name:tag 或 digest）；tag 必须固定到具体 Hermes 版本，runtime 节点上必须存在该镜像，imagesync 用 `docker save / load` 分发 |
 | `system_prompt_template` | string | — | 平台级系统人设模板（SOUL.md PlatformPrompt 层），支持任意中英文 prompt 内容 |
 | `workspace.archive_retention_days` | int | `14` | agent 端归档目录保留天数；`0` 表示不清理，仅适合本地调试 |
-| `llm.base_url` | string | — | Hermes 容器从 docker network 看到的 new-api OpenAI 兼容 endpoint，必须含 `/v1` 后缀；注入容器内 `config.yaml` 的 `base_url` 与 `.env` 的 `OPENAI_BASE_URL` |
+| `llm.base_url` | string | — | Hermes 容器从 docker network 看到的 new-api OpenAI 兼容 endpoint，必须含 `/v1` 后缀；写入容器内 `config.yaml` 的 `model.base_url` |
 | `llm.default_provider` | string | `openai` | 默认 provider 名称，写入容器内 `config.yaml` 的 `model.provider`；常用 `openai`（兼容 new-api OpenAI 兼容协议） |
 | `llm.default_model` | string | `qwen2.5:0.5b` | 默认模型名，必须是 new-api 渠道里实际可路由的名字 |
 | `container_networks` | []string | `["oc-manager_default"]` | Hermes 容器要连接的 docker network 列表；必须包含 new-api 所在 network，否则容器无法解析 `new-api` hostname；docker compose project 默认派生 `<project>_default`，本仓库为 `oc-manager_default` |

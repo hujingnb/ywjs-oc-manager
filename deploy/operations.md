@@ -289,16 +289,23 @@ docker compose logs manager-api | grep -i 'hermes\|container'
 - `hermes.runtime_image` 配置的镜像不存在于 Runtime Node，需先通过 imagesync 分发。
 - `hermes.container_networks` 中列出的 Docker network（默认 `oc-manager_default`）在节点上不存在。
 
-**环境变量未生效 / 模型调用 Connection error**
+**模型调用 Connection error**
 
-Hermes 容器通过 manager 注入 `OPENAI_BASE_URL` 等变量。若 chat completions 报连接错误：
+manager 将 new-api 访问地址写入节点 `apps/<id>/input/manifest.yaml`，容器启动时由
+`oc-entrypoint` 渲染到 `/opt/data/config.yaml` 的 `model.base_url`。若 chat
+completions 报连接错误：
 1. 确认 `hermes.llm.base_url` 指向 new-api 在 Docker 网络中可访问的地址（如 `http://new-api:3000/v1`）。
 2. 确认 Hermes 容器已加入含 new-api 的 Docker 网络（参见 `hermes.container_networks` 配置）。
+3. 在节点上检查 `<nodeDataRoot>/apps/<appID>/input/manifest.yaml` 与
+   `<nodeDataRoot>/apps/<appID>/data/config.yaml`，确认 input 已刷新且容器已重启渲染。
 
 **知识库在 Hermes 容器中看不到**
 
-知识库主副本由 manager 同步到 runtime node，再挂载进 Hermes 容器。若容器内 `/workspace/.hermes/knowledge` 为空：
+知识库主副本由 manager 同步到 runtime node 的 input 目录，容器启动时由
+`oc-entrypoint` 渲染成 Hermes skills。若对话中看不到知识库内容：
 1. 检查 manager worker 同步任务日志，确认 knowledge sync 未报错。
 2. 确认 `app.knowledge_root` 对应的 `deploy/manage/data/knowledge` 目录下有内容。
+3. 在容器内检查 `/opt/oc-input/resources/knowledge/{org,app}` 是否有源文件。
+4. 重启应用后检查 `/opt/data/skills/kb-*` 是否生成对应 `SKILL.md`。
 
 更多 Hermes 容器排查细节参见 [docs/hermes-container.md](../docs/hermes-container.md)。

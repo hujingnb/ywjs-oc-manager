@@ -145,7 +145,7 @@ openssl rand -base64 32
 | `manager-api` | [`cmd/server/Dockerfile`](./cmd/server/Dockerfile) | 仓库根目录 | `deploy/manage/.env` 的 `OCM_MANAGER_IMAGE` | 多阶段 Go 构建，内置 `oc-manager`、`migrate`、`seed-admin` 三个二进制 |
 | `manager-web` | [`web/Dockerfile`](./web/Dockerfile) | `web/` | `deploy/manage/.env` 的 `OCM_WEB_IMAGE` | Node 22 构建 vite 产物 + nginx:alpine 提供静态资源；外层 manager-nginx 完成 TLS 与 `/api` 反代 |
 | `oc-runtime-agent` | [`runtime/agent/Dockerfile`](./runtime/agent/Dockerfile) | 仓库根目录 | `deploy/runtime-agent/.env` 的 `OC_RUNTIME_AGENT_IMAGE` | 多阶段 Go 构建，最终镜像仅含静态二进制 + ca-certificates + tzdata |
-| `hermes-runtime` | [`runtime/hermes/Dockerfile`](./runtime/hermes/Dockerfile) | `runtime/hermes/` | manager 通过 imagesync 同步到各 Runtime Node | 应用容器运行时镜像，已在仓库内沉淀完整产线 Dockerfile |
+| `hermes-runtime` | [`runtime/hermes/hermes-v2026.5.16/Dockerfile`](./runtime/hermes/hermes-v2026.5.16/Dockerfile) | `runtime/hermes/hermes-v2026.5.16/` | manager 通过 imagesync 同步到各 Runtime Node | 应用容器运行时镜像，按版本化 variant 独立构建 |
 
 ### 构建命令
 
@@ -161,8 +161,11 @@ docker build -f web/Dockerfile             -t <registry>/oc-manager-web:<tag>   
 # oc-runtime-agent（构建上下文必须为仓库根目录）
 docker build -f runtime/agent/Dockerfile   -t <registry>/oc-runtime-agent:<tag> .
 
-# hermes-runtime（构建上下文为 runtime/hermes/，本地仍可用 `make build-hermes-runtime`）
-docker build                                -t <registry>/hermes-runtime:<tag>   runtime/hermes
+# hermes-runtime（推荐走 Makefile，自动读取 version.txt 并传入 HERMES_REF）
+make build-hermes-image
+
+# 如需直接 docker build，构建上下文必须为版本化 variant，并显式传 HERMES_REF。
+docker build --build-arg HERMES_REF=v2026.5.16 -t <registry>/hermes-runtime:<tag> runtime/hermes/hermes-v2026.5.16
 ```
 
 四个 Dockerfile 都已经默认走国内源，本地或 CI 环境无需额外配置：
