@@ -206,6 +206,12 @@ func runManager(ctx context.Context, cfg config.Config, logOut io.Writer) error 
 	// Coordinator 按 (nodeID, imageRef) 粒度加锁，让 agent 直接从公网 registry 拉取镜像。
 	imageCoord := imagecoord.NewCoordinator(distLocker, progressBus, uuid.NewString())
 	runtimeAdapter := runtime.NewAgentBackedAdapter(nodeResolver, nodeResolver)
+	// streamingResolver 构造一次复用：ContainerExecStream（hermes kanban watch 长连接）
+	// 和 channel 微信扫码 ExecAttach 均属于长连接场景，都必须用无 timeout 的 docker client。
+	// nodeClientResolver.DockerClient 带 30s Timeout，长连接会在 30s 后被强制掐断，
+	// newStreamingDockerResolver 使用 agent.NewStreamingDockerClientForNode 不设 Timeout。
+	streamingResolver := newStreamingDockerResolver(nodeResolver)
+	runtimeAdapter.WithStreamingDocker(streamingResolver)
 	runtimeOpService.SetInspector(newRuntimeInspectorWrapper(runtimeAdapter))
 	workspaceService := service.NewWorkspaceService(dbStore.Queries, runtimeAdapter, cfg.App.DataRoot)
 
@@ -215,7 +221,7 @@ func runManager(ctx context.Context, cfg config.Config, logOut io.Writer) error 
 	// 必须用 streamingDockerResolver 拿无 timeout 的 docker client,
 	// 否则 http.Client.Timeout=30s 会强制关闭 hijack 后的底层连接,
 	// 导致 stream EOF + JSON 解析失败 + 容器内 oc-weixin-login.py 进程 orphan。
-	wechatExecutor := channel.NewDockerExecutor(newStreamingDockerResolver(nodeResolver))
+	wechatExecutor := channel.NewDockerExecutor(streamingResolver)
 	wechatRunner := channel.NewDockerCommandRunner(wechatExecutor, newAppContainerLookup(dbStore.Queries))
 	wechatResolver := channel.NewDockerBindingResolver(wechatExecutor)
 	if err := channelRegistry.Register(channel.NewWeChatAdapter(wechatRunner)); err != nil {
