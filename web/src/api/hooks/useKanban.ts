@@ -139,11 +139,20 @@ export function useKanbanBoardsQuery(appId: Ref<string | undefined>) {
 
 // useKanbanTasksQuery 拉取某 board 的任务列表，每 5s 轮询一次。
 // board 参数通过 query string 传递，为空字符串时后端默认使用 "default" board。
+// stub 实例不支持看板（后端返回 KANBAN_NOT_SUPPORTED_ON_STUB），检测到该错误后
+// 停止轮询，避免每 5s 重复打 503 并持续刷新 console 错误。
 export function useKanbanTasksQuery(appId: Ref<string | undefined>, board: Ref<string>) {
   return useQuery<KanbanTask[]>({
     queryKey: ['kanban', 'tasks', appId, board],
     enabled: () => Boolean(appId.value),
-    refetchInterval: 5000,
+    refetchInterval: (query) => {
+      // stub 实例返回 KANBAN_NOT_SUPPORTED_ON_STUB 错误码时停止轮询。
+      // 读取 ApiError 的 body.code 字段判断是否为 stub 实例。
+      const err = query.state.error as { body?: { code?: string } } | null | undefined
+      if (err?.body?.code === 'KANBAN_NOT_SUPPORTED_ON_STUB') return false
+      // 正常实例每 5s 轮询一次。
+      return 5000
+    },
     queryFn: async () => {
       const res = await apiRequest<{ tasks: KanbanTask[] }>(
         `/api/v1/apps/${appId.value}/hermes/kanban/tasks`,
