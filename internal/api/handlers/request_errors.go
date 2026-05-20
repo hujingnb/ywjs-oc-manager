@@ -23,6 +23,7 @@ var jsonFieldNames = map[string]string{
 	"AdminPassword":    "admin_password",
 	"AdminUsername":    "admin_username",
 	"AppName":          "app_name",
+	"BaseURL":          "base_url",
 	"Code":             "code",
 	"CreditAmount":     "credit_amount",
 	"DisplayName":      "display_name",
@@ -49,6 +50,13 @@ var mappedServiceErrorRules = []serviceErrorRule{
 	{target: service.ErrKanbanBadRequest, statusCode: http.StatusBadRequest, code: "KANBAN_BAD_REQUEST", message: "任务看板请求参数非法"},
 	{target: service.ErrKanbanCLI, statusCode: http.StatusBadGateway, code: "KANBAN_CLI_ERROR", message: "任务看板命令执行失败", safe: true},
 	{target: service.ErrKanbanOutputInvalid, statusCode: http.StatusBadGateway, code: "KANBAN_OUTPUT_INVALID", message: "Hermes 版本可能不兼容，请联系平台管理员"},
+	// Hermes Cron 相关 sentinel error 映射。
+	{target: service.ErrCronForbidden, statusCode: http.StatusForbidden, code: "CRON_FORBIDDEN", message: "无权访问该实例定时任务"},
+	{target: service.ErrCronRuntimeUnavailable, statusCode: http.StatusServiceUnavailable, code: "RUNTIME_NOT_AVAILABLE", message: "实例容器未运行，请先在运行时 tab 启动"},
+	{target: service.ErrCronNotSupported, statusCode: http.StatusServiceUnavailable, code: "CRON_NOT_SUPPORTED_ON_STUB", message: "该实例运行的是 dev 镜像，定时任务不可用"},
+	{target: service.ErrCronBadRequest, statusCode: http.StatusBadRequest, code: "CRON_BAD_REQUEST", message: "定时任务请求参数非法"},
+	{target: service.ErrCronCLI, statusCode: http.StatusBadGateway, code: "CRON_CLI_ERROR", message: "定时任务命令执行失败", safe: true},
+	{target: service.ErrCronOutputInvalid, statusCode: http.StatusBadGateway, code: "CRON_OUTPUT_INVALID", message: "Hermes Cron 版本可能不兼容，请联系平台管理员"},
 }
 
 // writeBindError 将 Gin 的 JSON 绑定错误转成面向调用方的 400 文案。

@@ -396,6 +396,10 @@ func runManager(ctx context.Context, cfg config.Config, logOut io.Writer) error 
 	// 的归属组织、拥有者和运行时坐标。
 	kanbanLocator := service.NewKanbanAppLocatorFromStore(dbStore.Queries)
 	hermesKanbanService := service.NewHermesKanbanService(runtimeAdapter, kanbanLocator)
+	// HermesCronService：通过容器内 oc-cron 代理 Hermes Cron 管理能力。
+	// cronLocator 只解析 app 运行时坐标；读写权限和 stub/runtime 可用性由 service 层统一校验。
+	cronLocator := service.NewCronAppLocatorFromStore(dbStore.Queries)
+	hermesCronService := service.NewHermesCronService(runtimeAdapter, cronLocator)
 
 	server := &http.Server{
 		Addr: cfg.App.HTTPAddr,
@@ -418,6 +422,7 @@ func runManager(ctx context.Context, cfg config.Config, logOut io.Writer) error 
 			PlatformOverview:       platformOverviewService,
 			PersonaService:         personaService,
 			HermesKanbanService:    hermesKanbanService,
+			HermesCronService:      hermesCronService,
 			JobsStore:              dbStore.Queries,
 			TokenManager:           tokenManager,
 			AgentTokenSink:         agentTokenSink,

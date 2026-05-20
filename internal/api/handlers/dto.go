@@ -305,3 +305,67 @@ type KanbanBoardRequest struct {
 	// Board 是目标 board slug，为空时默认 "default"。
 	Board string `json:"board"`
 }
+
+// ===== Hermes 定时任务 hermes-cron =====
+
+// CreateCronJobRequest 是新建 Hermes Cron 任务的请求体。
+// Skills/Model/Provider/BaseURL 属于高级运行字段，仅平台管理员提交时会透传给 service。
+type CreateCronJobRequest struct {
+	// Name 是任务显示名称；service 层会校验非空并生成稳定错误码。
+	Name string `json:"name"`
+	// Schedule 是任务调度表达式，必须由调用方显式提交。
+	Schedule string `json:"schedule" binding:"required"`
+	// Prompt 是任务触发时交给 Hermes 的提示词，可为空。
+	Prompt string `json:"prompt"`
+	// Deliver 是任务输出投递目标，例如 wechat；为空表示不投递。
+	Deliver string `json:"deliver"`
+	// Repeat 是任务重复次数；nil 表示不限制重复次数。
+	Repeat *int `json:"repeat"`
+	// Script 是仓库内脚本文件名，由 service 层校验为单文件名。
+	Script string `json:"script"`
+	// NoAgent 表示任务是否跳过 agent 执行路径。
+	NoAgent bool `json:"no_agent"`
+	// Workdir 是任务执行目录，由 service 层按 oc-cron 契约校验。
+	Workdir string `json:"workdir"`
+	// Skills 是高级字段，仅平台管理员生效：任务声明需要的技能列表。
+	Skills []string `json:"skills"`
+	// Model 是高级字段，仅平台管理员生效：任务指定模型。
+	Model string `json:"model"`
+	// Provider 是高级字段，仅平台管理员生效：任务指定模型提供方。
+	Provider string `json:"provider"`
+	// BaseURL 是高级字段，仅平台管理员生效：任务指定 provider base URL。
+	BaseURL string `json:"base_url"`
+}
+
+// UpdateCronJobRequest 是更新 Hermes Cron 任务的请求体。
+// 指针字段用于区分“未提交”和“提交空字符串”；ClearSkills/ClearRepeat 表示显式清空。
+type UpdateCronJobRequest struct {
+	// Name 是任务显示名称；nil 表示保持原值。
+	Name *string `json:"name"`
+	// Schedule 是任务调度表达式；nil 表示保持原值。
+	Schedule *string `json:"schedule"`
+	// Prompt 是任务提示词；nil 表示保持原值，空字符串表示清空。
+	Prompt *string `json:"prompt"`
+	// Deliver 是任务投递目标；nil 表示保持原值，空字符串表示清空。
+	Deliver *string `json:"deliver"`
+	// Repeat 是任务重复次数；nil 表示不修改重复次数。
+	Repeat *int `json:"repeat"`
+	// ClearRepeat 表示显式清空重复次数；当前 Hermes runtime 暂无稳定清空语义，提交 true 会返回 400。
+	ClearRepeat bool `json:"clear_repeat"`
+	// Script 是仓库内脚本文件名；nil 表示保持原值，空字符串表示清空。
+	Script *string `json:"script"`
+	// NoAgent 表示是否跳过 agent；nil 表示保持原值。
+	NoAgent *bool `json:"no_agent"`
+	// Workdir 是任务执行目录；nil 表示保持原值，空字符串表示清空。
+	Workdir *string `json:"workdir"`
+	// Skills 是高级字段，仅平台管理员生效：追加或替换任务技能列表。
+	Skills []string `json:"skills"`
+	// ClearSkills 是高级字段，仅平台管理员生效：显式清空任务技能列表。
+	ClearSkills bool `json:"clear_skills"`
+	// Model 是高级字段，仅平台管理员生效：任务指定模型。
+	Model *string `json:"model"`
+	// Provider 是高级字段，仅平台管理员生效：任务指定模型提供方。
+	Provider *string `json:"provider"`
+	// BaseURL 是高级字段，仅平台管理员生效：任务指定 provider base URL。
+	BaseURL *string `json:"base_url"`
+}

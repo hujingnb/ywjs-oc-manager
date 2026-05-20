@@ -97,6 +97,50 @@ components:
           description: NetworkTxBytes 是节点网络累计发送字节数。
           type: integer
       type: object
+    handlers.CreateCronJobRequest:
+      properties:
+        base_url:
+          description: BaseURL 是高级字段，仅平台管理员生效：任务指定 provider base URL。
+          type: string
+        deliver:
+          description: Deliver 是任务输出投递目标，例如 wechat；为空表示不投递。
+          type: string
+        model:
+          description: Model 是高级字段，仅平台管理员生效：任务指定模型。
+          type: string
+        name:
+          description: Name 是任务显示名称；service 层会校验非空并生成稳定错误码。
+          type: string
+        no_agent:
+          description: NoAgent 表示任务是否跳过 agent 执行路径。
+          type: boolean
+        prompt:
+          description: Prompt 是任务触发时交给 Hermes 的提示词，可为空。
+          type: string
+        provider:
+          description: Provider 是高级字段，仅平台管理员生效：任务指定模型提供方。
+          type: string
+        repeat:
+          description: Repeat 是任务重复次数；nil 表示不限制重复次数。
+          type: integer
+        schedule:
+          description: Schedule 是任务调度表达式，必须由调用方显式提交。
+          type: string
+        script:
+          description: Script 是仓库内脚本文件名，由 service 层校验为单文件名。
+          type: string
+        skills:
+          description: Skills 是高级字段，仅平台管理员生效：任务声明需要的技能列表。
+          items:
+            type: string
+          type: array
+          uniqueItems: false
+        workdir:
+          description: Workdir 是任务执行目录，由 service 层按 oc-cron 契约校验。
+          type: string
+      required:
+      - schedule
+      type: object
     handlers.CreateKanbanTaskRequest:
       properties:
         assignee:
@@ -449,6 +493,55 @@ components:
       required:
       - node_id
       type: object
+    handlers.UpdateCronJobRequest:
+      properties:
+        base_url:
+          description: BaseURL 是高级字段，仅平台管理员生效：任务指定 provider base URL。
+          type: string
+        clear_repeat:
+          description: ClearRepeat 表示显式清空重复次数；当前 Hermes runtime 暂无稳定清空语义，提交 true 会返回
+            400。
+          type: boolean
+        clear_skills:
+          description: ClearSkills 是高级字段，仅平台管理员生效：显式清空任务技能列表。
+          type: boolean
+        deliver:
+          description: Deliver 是任务投递目标；nil 表示保持原值，空字符串表示清空。
+          type: string
+        model:
+          description: Model 是高级字段，仅平台管理员生效：任务指定模型。
+          type: string
+        name:
+          description: Name 是任务显示名称；nil 表示保持原值。
+          type: string
+        no_agent:
+          description: NoAgent 表示是否跳过 agent；nil 表示保持原值。
+          type: boolean
+        prompt:
+          description: Prompt 是任务提示词；nil 表示保持原值，空字符串表示清空。
+          type: string
+        provider:
+          description: Provider 是高级字段，仅平台管理员生效：任务指定模型提供方。
+          type: string
+        repeat:
+          description: Repeat 是任务重复次数；nil 表示不修改重复次数。
+          type: integer
+        schedule:
+          description: Schedule 是任务调度表达式；nil 表示保持原值。
+          type: string
+        script:
+          description: Script 是仓库内脚本文件名；nil 表示保持原值，空字符串表示清空。
+          type: string
+        skills:
+          description: Skills 是高级字段，仅平台管理员生效：追加或替换任务技能列表。
+          items:
+            type: string
+          type: array
+          uniqueItems: false
+        workdir:
+          description: Workdir 是任务执行目录；nil 表示保持原值，空字符串表示清空。
+          type: string
+      type: object
     handlers.UpdateMemberRequest:
       properties:
         display_name:
@@ -678,6 +771,217 @@ components:
           $ref: '#/components/schemas/service.AppResult'
         job_id:
           type: string
+      type: object
+    service.CronCapabilities:
+      properties:
+        contract_version:
+          description: ContractVersion 是 oc-cron 契约版本号。
+          type: string
+        features:
+          $ref: '#/components/schemas/service.CronFeatures'
+        hermes_version:
+          description: HermesVersion 是底层 hermes 版本或构建 ref，可为空。
+          type: string
+        oc_cron_version:
+          description: OCCronVersion 是 oc-cron 适配层版本。
+          type: string
+        variant:
+          description: Variant 是镜像变体标识。
+          type: string
+        verbs:
+          description: Verbs 是本镜像支持的 manager-facing verb 清单。
+          items:
+            type: string
+          type: array
+          uniqueItems: false
+      type: object
+    service.CronFeatures:
+      description: Features 是细粒度能力开关。
+      properties:
+        advanced_fields:
+          description: AdvancedFields 表示支持 workdir/skills/model/provider/base_url
+            等高级字段。
+          type: boolean
+        history:
+          description: History 表示支持查询运行输出历史。
+          type: boolean
+        output:
+          description: Output 表示支持读取单次运行输出。
+          type: boolean
+        script:
+          description: Script 表示支持 script 字段。
+          type: boolean
+        status:
+          description: Status 表示支持调度器状态查询。
+          type: boolean
+        write:
+          description: Write 表示支持写操作（create/update/delete/toggle/run）。
+          type: boolean
+      type: object
+    service.CronJob:
+      properties:
+        base_url:
+          description: BaseURL 是任务指定 provider base URL；平台管理员高级字段。
+          type: string
+        created_at:
+          description: CreatedAt 是任务创建时间，保持 oc-cron 输出字符串以避免时区二次解释。
+          type: string
+        deliver:
+          description: Deliver 是任务输出投递目标，例如 wechat；为空表示不投递。
+          type: string
+        enabled:
+          description: Enabled 表示调度器是否会自动触发该任务。
+          type: boolean
+        id:
+          description: ID 是 Cron 任务唯一标识，最多 64 个安全字符。
+          type: string
+        last_delivery_error:
+          description: LastDeliveryError 是最近一次投递错误摘要，可为空。
+          type: string
+        last_error:
+          description: LastError 是最近一次执行错误摘要，可为空。
+          type: string
+        last_run_at:
+          description: LastRunAt 是最近一次运行时间，可为空。
+          type: string
+        last_status:
+          description: LastStatus 是最近一次运行状态，可为空。
+          type: string
+        model:
+          description: Model 是任务指定模型；平台管理员高级字段。
+          type: string
+        name:
+          description: Name 是任务显示名称。
+          type: string
+        next_run_at:
+          description: NextRunAt 是下一次计划运行时间，可为空。
+          type: string
+        no_agent:
+          description: NoAgent 表示任务是否跳过 agent 执行路径。
+          type: boolean
+        prompt:
+          description: Prompt 是任务运行时交给 Hermes 的提示词，可为空。
+          type: string
+        provider:
+          description: Provider 是任务指定模型提供方；平台管理员高级字段。
+          type: string
+        repeat:
+          $ref: '#/components/schemas/service.CronRepeat'
+        schedule:
+          $ref: '#/components/schemas/service.CronSchedule'
+        script:
+          description: Script 是任务使用的仓库内脚本文件名，可为空。
+          type: string
+        skills:
+          description: Skills 是任务声明需要的技能列表；平台管理员高级字段。
+          items:
+            type: string
+          type: array
+          uniqueItems: false
+        state:
+          description: State 是调度状态，如 scheduled / paused / disabled / removed。
+          type: string
+        workdir:
+          description: Workdir 是任务运行目录；平台管理员高级字段，handler 层可按角色过滤。
+          type: string
+      type: object
+    service.CronRepeat:
+      description: Repeat 描述重复次数和完成次数。
+      properties:
+        completed:
+          description: Completed 是已完成的调度次数。
+          type: integer
+        times:
+          description: Times 是总重复次数，nil 表示不限制次数。
+          type: integer
+      type: object
+    service.CronRunEntry:
+      properties:
+        error:
+          description: Error 是运行错误摘要，可为空。
+          type: string
+        file_name:
+          description: FileName 是输出 markdown 文件名，或 synthetic 元数据文件名。
+          type: string
+        has_output:
+          description: HasOutput 表示是否存在真实 markdown 输出文件。
+          type: boolean
+        job_id:
+          description: JobID 是所属 Cron 任务 ID。
+          type: string
+        run_time:
+          description: RunTime 是本次运行时间字符串。
+          type: string
+        size:
+          description: Size 是输出文件字节数。
+          type: integer
+        status:
+          description: Status 是运行状态，可为空。
+          type: string
+        synthetic:
+          description: Synthetic 表示该记录是否由调度元数据合成。
+          type: boolean
+      type: object
+    service.CronRunOutput:
+      properties:
+        content:
+          description: Content 是 markdown 文本内容，oc-cron 限制最大 1 MiB。
+          type: string
+        file_name:
+          description: FileName 是输出 markdown 文件名。
+          type: string
+        job_id:
+          description: JobID 是所属 Cron 任务 ID。
+          type: string
+        run_time:
+          description: RunTime 是本次运行时间字符串。
+          type: string
+      type: object
+    service.CronSchedule:
+      description: Schedule 是规整后的调度表达式。
+      properties:
+        display:
+          description: Display 是面向用户展示的调度描述。
+          type: string
+        expr:
+          description: Expr 是机器可读表达式；oc-cron 可返回 null，service 层用空字符串承接。
+          type: string
+        kind:
+          description: Kind 是调度表达式类别，例如 cron / every / at；旧数据可能为空。
+          type: string
+      type: object
+    service.CronStatus:
+      properties:
+        active_jobs:
+          description: ActiveJobs 是启用且未移除的任务数量。
+          type: integer
+        available:
+          description: Available 表示 oc-cron 能读取 Cron 状态。
+          type: boolean
+        gateway_running:
+          description: GatewayRunning 表示 hermes cron status 命令当前是否成功。
+          type: boolean
+        last_error:
+          description: LastError 是最近的调度错误摘要，可为空。
+          type: string
+        last_error_job_id:
+          description: LastErrorJobID 是最近错误对应的任务 ID，可为空。
+          type: string
+        message:
+          description: Message 是底层 hermes cron status 的人类可读摘要。
+          type: string
+        next_job_id:
+          description: NextJobID 是最近计划运行的任务 ID，可为空。
+          type: string
+        next_run_at:
+          description: NextRunAt 是最近一次计划运行时间，可为空。
+          type: string
+        pid:
+          description: PID 是调度器进程 ID；nil 表示当前镜像未暴露。
+          type: integer
+        tick_seconds:
+          description: TickSeconds 是调度器 tick 间隔；nil 表示当前镜像未暴露。
+          type: integer
       type: object
     service.InstanceResourceSampleResult:
       description: CurrentResource 是该应用在节点上的最近一次实例资源采样。
@@ -1842,6 +2146,751 @@ paths:
       summary: 解绑渠道
       tags:
       - channels
+  /apps/{appId}/hermes/cron/capabilities:
+    get:
+      description: 返回 oc-cron 契约版本、支持的 verb 与 feature 开关，供前端按能力降级。
+      parameters:
+      - description: 应用 ID
+        in: path
+        name: appId
+        required: true
+        schema:
+          type: string
+      responses:
+        "200":
+          content:
+            application/json:
+              schema:
+                additionalProperties:
+                  $ref: '#/components/schemas/service.CronCapabilities'
+                type: object
+          description: OK
+        "403":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/handlers.ErrorResponse'
+          description: Forbidden
+        "500":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/handlers.ErrorResponse'
+          description: Internal Server Error
+        "502":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/handlers.ErrorResponse'
+          description: Bad Gateway
+        "503":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/handlers.ErrorResponse'
+          description: Service Unavailable
+      security:
+      - BearerAuth: []
+      summary: 查询实例 Hermes Cron 能力
+      tags:
+      - hermes-cron
+  /apps/{appId}/hermes/cron/jobs:
+    get:
+      parameters:
+      - description: 应用 ID
+        in: path
+        name: appId
+        required: true
+        schema:
+          type: string
+      - description: 是否包含 disabled/removed 等非活动任务
+        in: query
+        name: all
+        schema:
+          type: boolean
+      responses:
+        "200":
+          content:
+            application/json:
+              schema:
+                additionalProperties:
+                  items:
+                    $ref: '#/components/schemas/service.CronJob'
+                  type: array
+                type: object
+          description: OK
+        "403":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/handlers.ErrorResponse'
+          description: Forbidden
+        "500":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/handlers.ErrorResponse'
+          description: Internal Server Error
+        "502":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/handlers.ErrorResponse'
+          description: Bad Gateway
+        "503":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/handlers.ErrorResponse'
+          description: Service Unavailable
+      security:
+      - BearerAuth: []
+      summary: 列出实例 Hermes Cron 任务
+      tags:
+      - hermes-cron
+    post:
+      description: 创建一个 Hermes Cron 任务。Skills/Model/Provider/BaseURL 仅平台管理员可生效。
+      parameters:
+      - description: 应用 ID
+        in: path
+        name: appId
+        required: true
+        schema:
+          type: string
+      requestBody:
+        content:
+          application/json:
+            schema:
+              oneOf:
+              - type: object
+              - $ref: '#/components/schemas/handlers.CreateCronJobRequest'
+                description: 新建 Cron 任务请求
+                summary: body
+        description: 新建 Cron 任务请求
+        required: true
+      responses:
+        "201":
+          content:
+            application/json:
+              schema:
+                additionalProperties:
+                  $ref: '#/components/schemas/service.CronJob'
+                type: object
+          description: Created
+        "400":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/handlers.ErrorResponse'
+          description: Bad Request
+        "403":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/handlers.ErrorResponse'
+          description: Forbidden
+        "500":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/handlers.ErrorResponse'
+          description: Internal Server Error
+        "502":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/handlers.ErrorResponse'
+          description: Bad Gateway
+        "503":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/handlers.ErrorResponse'
+          description: Service Unavailable
+      security:
+      - BearerAuth: []
+      summary: 新建 Hermes Cron 任务
+      tags:
+      - hermes-cron
+  /apps/{appId}/hermes/cron/jobs/{jobId}:
+    delete:
+      parameters:
+      - description: 应用 ID
+        in: path
+        name: appId
+        required: true
+        schema:
+          type: string
+      - description: Cron 任务 ID
+        in: path
+        name: jobId
+        required: true
+        schema:
+          type: string
+      responses:
+        "204":
+          description: No Content
+        "400":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/handlers.ErrorResponse'
+          description: Bad Request
+        "403":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/handlers.ErrorResponse'
+          description: Forbidden
+        "404":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/handlers.ErrorResponse'
+          description: Not Found
+        "500":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/handlers.ErrorResponse'
+          description: Internal Server Error
+        "502":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/handlers.ErrorResponse'
+          description: Bad Gateway
+        "503":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/handlers.ErrorResponse'
+          description: Service Unavailable
+      security:
+      - BearerAuth: []
+      summary: 删除 Hermes Cron 任务
+      tags:
+      - hermes-cron
+    get:
+      parameters:
+      - description: 应用 ID
+        in: path
+        name: appId
+        required: true
+        schema:
+          type: string
+      - description: Cron 任务 ID
+        in: path
+        name: jobId
+        required: true
+        schema:
+          type: string
+      responses:
+        "200":
+          content:
+            application/json:
+              schema:
+                additionalProperties:
+                  $ref: '#/components/schemas/service.CronJob'
+                type: object
+          description: OK
+        "400":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/handlers.ErrorResponse'
+          description: Bad Request
+        "403":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/handlers.ErrorResponse'
+          description: Forbidden
+        "404":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/handlers.ErrorResponse'
+          description: Not Found
+        "500":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/handlers.ErrorResponse'
+          description: Internal Server Error
+        "502":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/handlers.ErrorResponse'
+          description: Bad Gateway
+        "503":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/handlers.ErrorResponse'
+          description: Service Unavailable
+      security:
+      - BearerAuth: []
+      summary: 查询单个 Hermes Cron 任务
+      tags:
+      - hermes-cron
+    patch:
+      description: 更新一个 Hermes Cron 任务。Skills/ClearSkills/Model/Provider/BaseURL 仅平台管理员可生效。
+      parameters:
+      - description: 应用 ID
+        in: path
+        name: appId
+        required: true
+        schema:
+          type: string
+      - description: Cron 任务 ID
+        in: path
+        name: jobId
+        required: true
+        schema:
+          type: string
+      requestBody:
+        content:
+          application/json:
+            schema:
+              oneOf:
+              - type: object
+              - $ref: '#/components/schemas/handlers.UpdateCronJobRequest'
+                description: 更新 Cron 任务请求
+                summary: body
+        description: 更新 Cron 任务请求
+        required: true
+      responses:
+        "200":
+          content:
+            application/json:
+              schema:
+                additionalProperties:
+                  $ref: '#/components/schemas/service.CronJob'
+                type: object
+          description: OK
+        "400":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/handlers.ErrorResponse'
+          description: Bad Request
+        "403":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/handlers.ErrorResponse'
+          description: Forbidden
+        "404":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/handlers.ErrorResponse'
+          description: Not Found
+        "500":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/handlers.ErrorResponse'
+          description: Internal Server Error
+        "502":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/handlers.ErrorResponse'
+          description: Bad Gateway
+        "503":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/handlers.ErrorResponse'
+          description: Service Unavailable
+      security:
+      - BearerAuth: []
+      summary: 更新 Hermes Cron 任务
+      tags:
+      - hermes-cron
+  /apps/{appId}/hermes/cron/jobs/{jobId}/history:
+    get:
+      parameters:
+      - description: 应用 ID
+        in: path
+        name: appId
+        required: true
+        schema:
+          type: string
+      - description: Cron 任务 ID
+        in: path
+        name: jobId
+        required: true
+        schema:
+          type: string
+      responses:
+        "200":
+          content:
+            application/json:
+              schema:
+                additionalProperties:
+                  items:
+                    $ref: '#/components/schemas/service.CronRunEntry'
+                  type: array
+                type: object
+          description: OK
+        "400":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/handlers.ErrorResponse'
+          description: Bad Request
+        "403":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/handlers.ErrorResponse'
+          description: Forbidden
+        "404":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/handlers.ErrorResponse'
+          description: Not Found
+        "500":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/handlers.ErrorResponse'
+          description: Internal Server Error
+        "502":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/handlers.ErrorResponse'
+          description: Bad Gateway
+        "503":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/handlers.ErrorResponse'
+          description: Service Unavailable
+      security:
+      - BearerAuth: []
+      summary: 查询 Hermes Cron 任务执行历史
+      tags:
+      - hermes-cron
+  /apps/{appId}/hermes/cron/jobs/{jobId}/output/{fileName}:
+    get:
+      parameters:
+      - description: 应用 ID
+        in: path
+        name: appId
+        required: true
+        schema:
+          type: string
+      - description: Cron 任务 ID
+        in: path
+        name: jobId
+        required: true
+        schema:
+          type: string
+      - description: 输出文件名
+        in: path
+        name: fileName
+        required: true
+        schema:
+          type: string
+      responses:
+        "200":
+          content:
+            application/json:
+              schema:
+                additionalProperties:
+                  $ref: '#/components/schemas/service.CronRunOutput'
+                type: object
+          description: OK
+        "400":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/handlers.ErrorResponse'
+          description: Bad Request
+        "403":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/handlers.ErrorResponse'
+          description: Forbidden
+        "404":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/handlers.ErrorResponse'
+          description: Not Found
+        "500":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/handlers.ErrorResponse'
+          description: Internal Server Error
+        "502":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/handlers.ErrorResponse'
+          description: Bad Gateway
+        "503":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/handlers.ErrorResponse'
+          description: Service Unavailable
+      security:
+      - BearerAuth: []
+      summary: 读取 Hermes Cron 单次运行输出
+      tags:
+      - hermes-cron
+  /apps/{appId}/hermes/cron/jobs/{jobId}/pause:
+    post:
+      parameters:
+      - description: 应用 ID
+        in: path
+        name: appId
+        required: true
+        schema:
+          type: string
+      - description: Cron 任务 ID
+        in: path
+        name: jobId
+        required: true
+        schema:
+          type: string
+      responses:
+        "200":
+          content:
+            application/json:
+              schema:
+                additionalProperties:
+                  $ref: '#/components/schemas/service.CronJob'
+                type: object
+          description: OK
+        "400":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/handlers.ErrorResponse'
+          description: Bad Request
+        "403":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/handlers.ErrorResponse'
+          description: Forbidden
+        "404":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/handlers.ErrorResponse'
+          description: Not Found
+        "500":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/handlers.ErrorResponse'
+          description: Internal Server Error
+        "502":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/handlers.ErrorResponse'
+          description: Bad Gateway
+        "503":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/handlers.ErrorResponse'
+          description: Service Unavailable
+      security:
+      - BearerAuth: []
+      summary: 暂停 Hermes Cron 任务
+      tags:
+      - hermes-cron
+  /apps/{appId}/hermes/cron/jobs/{jobId}/resume:
+    post:
+      parameters:
+      - description: 应用 ID
+        in: path
+        name: appId
+        required: true
+        schema:
+          type: string
+      - description: Cron 任务 ID
+        in: path
+        name: jobId
+        required: true
+        schema:
+          type: string
+      responses:
+        "200":
+          content:
+            application/json:
+              schema:
+                additionalProperties:
+                  $ref: '#/components/schemas/service.CronJob'
+                type: object
+          description: OK
+        "400":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/handlers.ErrorResponse'
+          description: Bad Request
+        "403":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/handlers.ErrorResponse'
+          description: Forbidden
+        "404":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/handlers.ErrorResponse'
+          description: Not Found
+        "500":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/handlers.ErrorResponse'
+          description: Internal Server Error
+        "502":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/handlers.ErrorResponse'
+          description: Bad Gateway
+        "503":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/handlers.ErrorResponse'
+          description: Service Unavailable
+      security:
+      - BearerAuth: []
+      summary: 恢复 Hermes Cron 任务
+      tags:
+      - hermes-cron
+  /apps/{appId}/hermes/cron/jobs/{jobId}/run:
+    post:
+      parameters:
+      - description: 应用 ID
+        in: path
+        name: appId
+        required: true
+        schema:
+          type: string
+      - description: Cron 任务 ID
+        in: path
+        name: jobId
+        required: true
+        schema:
+          type: string
+      responses:
+        "200":
+          content:
+            application/json:
+              schema:
+                additionalProperties:
+                  $ref: '#/components/schemas/service.CronJob'
+                type: object
+          description: OK
+        "400":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/handlers.ErrorResponse'
+          description: Bad Request
+        "403":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/handlers.ErrorResponse'
+          description: Forbidden
+        "404":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/handlers.ErrorResponse'
+          description: Not Found
+        "500":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/handlers.ErrorResponse'
+          description: Internal Server Error
+        "502":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/handlers.ErrorResponse'
+          description: Bad Gateway
+        "503":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/handlers.ErrorResponse'
+          description: Service Unavailable
+      security:
+      - BearerAuth: []
+      summary: 立即触发 Hermes Cron 任务
+      tags:
+      - hermes-cron
+  /apps/{appId}/hermes/cron/status:
+    get:
+      parameters:
+      - description: 应用 ID
+        in: path
+        name: appId
+        required: true
+        schema:
+          type: string
+      responses:
+        "200":
+          content:
+            application/json:
+              schema:
+                additionalProperties:
+                  $ref: '#/components/schemas/service.CronStatus'
+                type: object
+          description: OK
+        "403":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/handlers.ErrorResponse'
+          description: Forbidden
+        "500":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/handlers.ErrorResponse'
+          description: Internal Server Error
+        "502":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/handlers.ErrorResponse'
+          description: Bad Gateway
+        "503":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/handlers.ErrorResponse'
+          description: Service Unavailable
+      security:
+      - BearerAuth: []
+      summary: 查询实例 Hermes Cron 调度器状态
+      tags:
+      - hermes-cron
   /apps/{appId}/hermes/kanban/boards:
     get:
       parameters:

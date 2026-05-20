@@ -50,6 +50,8 @@ type Dependencies struct {
 	PlatformOverview *service.PlatformOverviewService
 	// HermesKanbanService 提供实例任务看板能力；nil 时不注册 kanban 路由。
 	HermesKanbanService *service.HermesKanbanService
+	// HermesCronService 提供实例定时任务能力；nil 时不注册 cron 路由。
+	HermesCronService *service.HermesCronService
 	// JobsStore 提供按 job ID 查询异步任务状态的 handler 依赖。
 	JobsStore handlers.JobsStore
 	// TokenManager 供 RequireUserAuth 中间件验证 access token 并注入 principal。
@@ -177,6 +179,9 @@ func NewRouter(deps ...Dependencies) http.Handler {
 	}
 	if dep.HermesKanbanService != nil {
 		handlers.RegisterHermesKanbanRoutes(user, handlers.NewHermesKanbanHandler(dep.HermesKanbanService))
+	}
+	if dep.HermesCronService != nil {
+		handlers.RegisterHermesCronRoutes(user, handlers.NewHermesCronHandler(dep.HermesCronService))
 	}
 	return router
 }

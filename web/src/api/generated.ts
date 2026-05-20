@@ -644,6 +644,1071 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/apps/{appId}/hermes/cron/capabilities": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * 查询实例 Hermes Cron 能力
+         * @description 返回 oc-cron 契约版本、支持的 verb 与 feature 开关，供前端按能力降级。
+         */
+        get: {
+            parameters: {
+                query?: never;
+                header?: never;
+                path: {
+                    /** @description 应用 ID */
+                    appId: string;
+                };
+                cookie?: never;
+            };
+            requestBody?: never;
+            responses: {
+                /** @description OK */
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": {
+                            [key: string]: components["schemas"]["service.CronCapabilities"];
+                        };
+                    };
+                };
+                /** @description Forbidden */
+                403: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["handlers.ErrorResponse"];
+                    };
+                };
+                /** @description Internal Server Error */
+                500: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["handlers.ErrorResponse"];
+                    };
+                };
+                /** @description Bad Gateway */
+                502: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["handlers.ErrorResponse"];
+                    };
+                };
+                /** @description Service Unavailable */
+                503: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["handlers.ErrorResponse"];
+                    };
+                };
+            };
+        };
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/apps/{appId}/hermes/cron/jobs": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** 列出实例 Hermes Cron 任务 */
+        get: {
+            parameters: {
+                query?: {
+                    /** @description 是否包含 disabled/removed 等非活动任务 */
+                    all?: boolean;
+                };
+                header?: never;
+                path: {
+                    /** @description 应用 ID */
+                    appId: string;
+                };
+                cookie?: never;
+            };
+            requestBody?: never;
+            responses: {
+                /** @description OK */
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": {
+                            [key: string]: components["schemas"]["service.CronJob"][];
+                        };
+                    };
+                };
+                /** @description Forbidden */
+                403: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["handlers.ErrorResponse"];
+                    };
+                };
+                /** @description Internal Server Error */
+                500: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["handlers.ErrorResponse"];
+                    };
+                };
+                /** @description Bad Gateway */
+                502: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["handlers.ErrorResponse"];
+                    };
+                };
+                /** @description Service Unavailable */
+                503: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["handlers.ErrorResponse"];
+                    };
+                };
+            };
+        };
+        put?: never;
+        /**
+         * 新建 Hermes Cron 任务
+         * @description 创建一个 Hermes Cron 任务。Skills/Model/Provider/BaseURL 仅平台管理员可生效。
+         */
+        post: {
+            parameters: {
+                query?: never;
+                header?: never;
+                path: {
+                    /** @description 应用 ID */
+                    appId: string;
+                };
+                cookie?: never;
+            };
+            /** @description 新建 Cron 任务请求 */
+            requestBody: {
+                content: {
+                    "application/json": Record<string, never> | components["schemas"]["handlers.CreateCronJobRequest"];
+                };
+            };
+            responses: {
+                /** @description Created */
+                201: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": {
+                            [key: string]: components["schemas"]["service.CronJob"];
+                        };
+                    };
+                };
+                /** @description Bad Request */
+                400: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["handlers.ErrorResponse"];
+                    };
+                };
+                /** @description Forbidden */
+                403: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["handlers.ErrorResponse"];
+                    };
+                };
+                /** @description Internal Server Error */
+                500: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["handlers.ErrorResponse"];
+                    };
+                };
+                /** @description Bad Gateway */
+                502: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["handlers.ErrorResponse"];
+                    };
+                };
+                /** @description Service Unavailable */
+                503: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["handlers.ErrorResponse"];
+                    };
+                };
+            };
+        };
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/apps/{appId}/hermes/cron/jobs/{jobId}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** 查询单个 Hermes Cron 任务 */
+        get: {
+            parameters: {
+                query?: never;
+                header?: never;
+                path: {
+                    /** @description 应用 ID */
+                    appId: string;
+                    /** @description Cron 任务 ID */
+                    jobId: string;
+                };
+                cookie?: never;
+            };
+            requestBody?: never;
+            responses: {
+                /** @description OK */
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": {
+                            [key: string]: components["schemas"]["service.CronJob"];
+                        };
+                    };
+                };
+                /** @description Bad Request */
+                400: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["handlers.ErrorResponse"];
+                    };
+                };
+                /** @description Forbidden */
+                403: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["handlers.ErrorResponse"];
+                    };
+                };
+                /** @description Not Found */
+                404: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["handlers.ErrorResponse"];
+                    };
+                };
+                /** @description Internal Server Error */
+                500: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["handlers.ErrorResponse"];
+                    };
+                };
+                /** @description Bad Gateway */
+                502: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["handlers.ErrorResponse"];
+                    };
+                };
+                /** @description Service Unavailable */
+                503: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["handlers.ErrorResponse"];
+                    };
+                };
+            };
+        };
+        put?: never;
+        post?: never;
+        /** 删除 Hermes Cron 任务 */
+        delete: {
+            parameters: {
+                query?: never;
+                header?: never;
+                path: {
+                    /** @description 应用 ID */
+                    appId: string;
+                    /** @description Cron 任务 ID */
+                    jobId: string;
+                };
+                cookie?: never;
+            };
+            requestBody?: never;
+            responses: {
+                /** @description No Content */
+                204: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content?: never;
+                };
+                /** @description Bad Request */
+                400: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["handlers.ErrorResponse"];
+                    };
+                };
+                /** @description Forbidden */
+                403: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["handlers.ErrorResponse"];
+                    };
+                };
+                /** @description Not Found */
+                404: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["handlers.ErrorResponse"];
+                    };
+                };
+                /** @description Internal Server Error */
+                500: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["handlers.ErrorResponse"];
+                    };
+                };
+                /** @description Bad Gateway */
+                502: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["handlers.ErrorResponse"];
+                    };
+                };
+                /** @description Service Unavailable */
+                503: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["handlers.ErrorResponse"];
+                    };
+                };
+            };
+        };
+        options?: never;
+        head?: never;
+        /**
+         * 更新 Hermes Cron 任务
+         * @description 更新一个 Hermes Cron 任务。Skills/ClearSkills/Model/Provider/BaseURL 仅平台管理员可生效。
+         */
+        patch: {
+            parameters: {
+                query?: never;
+                header?: never;
+                path: {
+                    /** @description 应用 ID */
+                    appId: string;
+                    /** @description Cron 任务 ID */
+                    jobId: string;
+                };
+                cookie?: never;
+            };
+            /** @description 更新 Cron 任务请求 */
+            requestBody: {
+                content: {
+                    "application/json": Record<string, never> | components["schemas"]["handlers.UpdateCronJobRequest"];
+                };
+            };
+            responses: {
+                /** @description OK */
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": {
+                            [key: string]: components["schemas"]["service.CronJob"];
+                        };
+                    };
+                };
+                /** @description Bad Request */
+                400: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["handlers.ErrorResponse"];
+                    };
+                };
+                /** @description Forbidden */
+                403: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["handlers.ErrorResponse"];
+                    };
+                };
+                /** @description Not Found */
+                404: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["handlers.ErrorResponse"];
+                    };
+                };
+                /** @description Internal Server Error */
+                500: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["handlers.ErrorResponse"];
+                    };
+                };
+                /** @description Bad Gateway */
+                502: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["handlers.ErrorResponse"];
+                    };
+                };
+                /** @description Service Unavailable */
+                503: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["handlers.ErrorResponse"];
+                    };
+                };
+            };
+        };
+        trace?: never;
+    };
+    "/apps/{appId}/hermes/cron/jobs/{jobId}/history": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** 查询 Hermes Cron 任务执行历史 */
+        get: {
+            parameters: {
+                query?: never;
+                header?: never;
+                path: {
+                    /** @description 应用 ID */
+                    appId: string;
+                    /** @description Cron 任务 ID */
+                    jobId: string;
+                };
+                cookie?: never;
+            };
+            requestBody?: never;
+            responses: {
+                /** @description OK */
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": {
+                            [key: string]: components["schemas"]["service.CronRunEntry"][];
+                        };
+                    };
+                };
+                /** @description Bad Request */
+                400: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["handlers.ErrorResponse"];
+                    };
+                };
+                /** @description Forbidden */
+                403: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["handlers.ErrorResponse"];
+                    };
+                };
+                /** @description Not Found */
+                404: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["handlers.ErrorResponse"];
+                    };
+                };
+                /** @description Internal Server Error */
+                500: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["handlers.ErrorResponse"];
+                    };
+                };
+                /** @description Bad Gateway */
+                502: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["handlers.ErrorResponse"];
+                    };
+                };
+                /** @description Service Unavailable */
+                503: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["handlers.ErrorResponse"];
+                    };
+                };
+            };
+        };
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/apps/{appId}/hermes/cron/jobs/{jobId}/output/{fileName}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** 读取 Hermes Cron 单次运行输出 */
+        get: {
+            parameters: {
+                query?: never;
+                header?: never;
+                path: {
+                    /** @description 应用 ID */
+                    appId: string;
+                    /** @description Cron 任务 ID */
+                    jobId: string;
+                    /** @description 输出文件名 */
+                    fileName: string;
+                };
+                cookie?: never;
+            };
+            requestBody?: never;
+            responses: {
+                /** @description OK */
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": {
+                            [key: string]: components["schemas"]["service.CronRunOutput"];
+                        };
+                    };
+                };
+                /** @description Bad Request */
+                400: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["handlers.ErrorResponse"];
+                    };
+                };
+                /** @description Forbidden */
+                403: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["handlers.ErrorResponse"];
+                    };
+                };
+                /** @description Not Found */
+                404: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["handlers.ErrorResponse"];
+                    };
+                };
+                /** @description Internal Server Error */
+                500: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["handlers.ErrorResponse"];
+                    };
+                };
+                /** @description Bad Gateway */
+                502: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["handlers.ErrorResponse"];
+                    };
+                };
+                /** @description Service Unavailable */
+                503: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["handlers.ErrorResponse"];
+                    };
+                };
+            };
+        };
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/apps/{appId}/hermes/cron/jobs/{jobId}/pause": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** 暂停 Hermes Cron 任务 */
+        post: {
+            parameters: {
+                query?: never;
+                header?: never;
+                path: {
+                    /** @description 应用 ID */
+                    appId: string;
+                    /** @description Cron 任务 ID */
+                    jobId: string;
+                };
+                cookie?: never;
+            };
+            requestBody?: never;
+            responses: {
+                /** @description OK */
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": {
+                            [key: string]: components["schemas"]["service.CronJob"];
+                        };
+                    };
+                };
+                /** @description Bad Request */
+                400: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["handlers.ErrorResponse"];
+                    };
+                };
+                /** @description Forbidden */
+                403: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["handlers.ErrorResponse"];
+                    };
+                };
+                /** @description Not Found */
+                404: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["handlers.ErrorResponse"];
+                    };
+                };
+                /** @description Internal Server Error */
+                500: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["handlers.ErrorResponse"];
+                    };
+                };
+                /** @description Bad Gateway */
+                502: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["handlers.ErrorResponse"];
+                    };
+                };
+                /** @description Service Unavailable */
+                503: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["handlers.ErrorResponse"];
+                    };
+                };
+            };
+        };
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/apps/{appId}/hermes/cron/jobs/{jobId}/resume": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** 恢复 Hermes Cron 任务 */
+        post: {
+            parameters: {
+                query?: never;
+                header?: never;
+                path: {
+                    /** @description 应用 ID */
+                    appId: string;
+                    /** @description Cron 任务 ID */
+                    jobId: string;
+                };
+                cookie?: never;
+            };
+            requestBody?: never;
+            responses: {
+                /** @description OK */
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": {
+                            [key: string]: components["schemas"]["service.CronJob"];
+                        };
+                    };
+                };
+                /** @description Bad Request */
+                400: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["handlers.ErrorResponse"];
+                    };
+                };
+                /** @description Forbidden */
+                403: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["handlers.ErrorResponse"];
+                    };
+                };
+                /** @description Not Found */
+                404: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["handlers.ErrorResponse"];
+                    };
+                };
+                /** @description Internal Server Error */
+                500: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["handlers.ErrorResponse"];
+                    };
+                };
+                /** @description Bad Gateway */
+                502: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["handlers.ErrorResponse"];
+                    };
+                };
+                /** @description Service Unavailable */
+                503: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["handlers.ErrorResponse"];
+                    };
+                };
+            };
+        };
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/apps/{appId}/hermes/cron/jobs/{jobId}/run": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** 立即触发 Hermes Cron 任务 */
+        post: {
+            parameters: {
+                query?: never;
+                header?: never;
+                path: {
+                    /** @description 应用 ID */
+                    appId: string;
+                    /** @description Cron 任务 ID */
+                    jobId: string;
+                };
+                cookie?: never;
+            };
+            requestBody?: never;
+            responses: {
+                /** @description OK */
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": {
+                            [key: string]: components["schemas"]["service.CronJob"];
+                        };
+                    };
+                };
+                /** @description Bad Request */
+                400: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["handlers.ErrorResponse"];
+                    };
+                };
+                /** @description Forbidden */
+                403: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["handlers.ErrorResponse"];
+                    };
+                };
+                /** @description Not Found */
+                404: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["handlers.ErrorResponse"];
+                    };
+                };
+                /** @description Internal Server Error */
+                500: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["handlers.ErrorResponse"];
+                    };
+                };
+                /** @description Bad Gateway */
+                502: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["handlers.ErrorResponse"];
+                    };
+                };
+                /** @description Service Unavailable */
+                503: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["handlers.ErrorResponse"];
+                    };
+                };
+            };
+        };
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/apps/{appId}/hermes/cron/status": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** 查询实例 Hermes Cron 调度器状态 */
+        get: {
+            parameters: {
+                query?: never;
+                header?: never;
+                path: {
+                    /** @description 应用 ID */
+                    appId: string;
+                };
+                cookie?: never;
+            };
+            requestBody?: never;
+            responses: {
+                /** @description OK */
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": {
+                            [key: string]: components["schemas"]["service.CronStatus"];
+                        };
+                    };
+                };
+                /** @description Forbidden */
+                403: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["handlers.ErrorResponse"];
+                    };
+                };
+                /** @description Internal Server Error */
+                500: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["handlers.ErrorResponse"];
+                    };
+                };
+                /** @description Bad Gateway */
+                502: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["handlers.ErrorResponse"];
+                    };
+                };
+                /** @description Service Unavailable */
+                503: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["handlers.ErrorResponse"];
+                    };
+                };
+            };
+        };
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/apps/{appId}/hermes/kanban/boards": {
         parameters: {
             query?: never;
@@ -6667,6 +7732,32 @@ export interface components {
             /** @description NetworkTxBytes 是节点网络累计发送字节数。 */
             network_tx_bytes?: number;
         };
+        "handlers.CreateCronJobRequest": {
+            /** @description BaseURL 是高级字段，仅平台管理员生效：任务指定 provider base URL。 */
+            base_url?: string;
+            /** @description Deliver 是任务输出投递目标，例如 wechat；为空表示不投递。 */
+            deliver?: string;
+            /** @description Model 是高级字段，仅平台管理员生效：任务指定模型。 */
+            model?: string;
+            /** @description Name 是任务显示名称；service 层会校验非空并生成稳定错误码。 */
+            name?: string;
+            /** @description NoAgent 表示任务是否跳过 agent 执行路径。 */
+            no_agent?: boolean;
+            /** @description Prompt 是任务触发时交给 Hermes 的提示词，可为空。 */
+            prompt?: string;
+            /** @description Provider 是高级字段，仅平台管理员生效：任务指定模型提供方。 */
+            provider?: string;
+            /** @description Repeat 是任务重复次数；nil 表示不限制重复次数。 */
+            repeat?: number;
+            /** @description Schedule 是任务调度表达式，必须由调用方显式提交。 */
+            schedule: string;
+            /** @description Script 是仓库内脚本文件名，由 service 层校验为单文件名。 */
+            script?: string;
+            /** @description Skills 是高级字段，仅平台管理员生效：任务声明需要的技能列表。 */
+            skills?: string[];
+            /** @description Workdir 是任务执行目录，由 service 层按 oc-cron 契约校验。 */
+            workdir?: string;
+        };
         "handlers.CreateKanbanTaskRequest": {
             /** @description Assignee 是任务分配对象（hermes profile 名），必填。 */
             assignee: string;
@@ -6869,6 +7960,36 @@ export interface components {
             /** @description NodeID 是需要重试同步的 runtime 节点 ID。 */
             node_id: string;
         };
+        "handlers.UpdateCronJobRequest": {
+            /** @description BaseURL 是高级字段，仅平台管理员生效：任务指定 provider base URL。 */
+            base_url?: string;
+            /** @description ClearRepeat 表示显式清空重复次数；当前 Hermes runtime 暂无稳定清空语义，提交 true 会返回 400。 */
+            clear_repeat?: boolean;
+            /** @description ClearSkills 是高级字段，仅平台管理员生效：显式清空任务技能列表。 */
+            clear_skills?: boolean;
+            /** @description Deliver 是任务投递目标；nil 表示保持原值，空字符串表示清空。 */
+            deliver?: string;
+            /** @description Model 是高级字段，仅平台管理员生效：任务指定模型。 */
+            model?: string;
+            /** @description Name 是任务显示名称；nil 表示保持原值。 */
+            name?: string;
+            /** @description NoAgent 表示是否跳过 agent；nil 表示保持原值。 */
+            no_agent?: boolean;
+            /** @description Prompt 是任务提示词；nil 表示保持原值，空字符串表示清空。 */
+            prompt?: string;
+            /** @description Provider 是高级字段，仅平台管理员生效：任务指定模型提供方。 */
+            provider?: string;
+            /** @description Repeat 是任务重复次数；nil 表示不修改重复次数。 */
+            repeat?: number;
+            /** @description Schedule 是任务调度表达式；nil 表示保持原值。 */
+            schedule?: string;
+            /** @description Script 是仓库内脚本文件名；nil 表示保持原值，空字符串表示清空。 */
+            script?: string;
+            /** @description Skills 是高级字段，仅平台管理员生效：追加或替换任务技能列表。 */
+            skills?: string[];
+            /** @description Workdir 是任务执行目录；nil 表示保持原值，空字符串表示清空。 */
+            workdir?: string;
+        };
         "handlers.UpdateMemberRequest": {
             /** @description DisplayName 是成员展示名，更新接口要求显式传入非空值。 */
             display_name: string;
@@ -7023,6 +8144,142 @@ export interface components {
         "service.CreateAppForMemberResult": {
             app?: components["schemas"]["service.AppResult"];
             job_id?: string;
+        };
+        "service.CronCapabilities": {
+            /** @description ContractVersion 是 oc-cron 契约版本号。 */
+            contract_version?: string;
+            features?: components["schemas"]["service.CronFeatures"];
+            /** @description HermesVersion 是底层 hermes 版本或构建 ref，可为空。 */
+            hermes_version?: string;
+            /** @description OCCronVersion 是 oc-cron 适配层版本。 */
+            oc_cron_version?: string;
+            /** @description Variant 是镜像变体标识。 */
+            variant?: string;
+            /** @description Verbs 是本镜像支持的 manager-facing verb 清单。 */
+            verbs?: string[];
+        };
+        /** @description Features 是细粒度能力开关。 */
+        "service.CronFeatures": {
+            /** @description AdvancedFields 表示支持 workdir/skills/model/provider/base_url 等高级字段。 */
+            advanced_fields?: boolean;
+            /** @description History 表示支持查询运行输出历史。 */
+            history?: boolean;
+            /** @description Output 表示支持读取单次运行输出。 */
+            output?: boolean;
+            /** @description Script 表示支持 script 字段。 */
+            script?: boolean;
+            /** @description Status 表示支持调度器状态查询。 */
+            status?: boolean;
+            /** @description Write 表示支持写操作（create/update/delete/toggle/run）。 */
+            write?: boolean;
+        };
+        "service.CronJob": {
+            /** @description BaseURL 是任务指定 provider base URL；平台管理员高级字段。 */
+            base_url?: string;
+            /** @description CreatedAt 是任务创建时间，保持 oc-cron 输出字符串以避免时区二次解释。 */
+            created_at?: string;
+            /** @description Deliver 是任务输出投递目标，例如 wechat；为空表示不投递。 */
+            deliver?: string;
+            /** @description Enabled 表示调度器是否会自动触发该任务。 */
+            enabled?: boolean;
+            /** @description ID 是 Cron 任务唯一标识，最多 64 个安全字符。 */
+            id?: string;
+            /** @description LastDeliveryError 是最近一次投递错误摘要，可为空。 */
+            last_delivery_error?: string;
+            /** @description LastError 是最近一次执行错误摘要，可为空。 */
+            last_error?: string;
+            /** @description LastRunAt 是最近一次运行时间，可为空。 */
+            last_run_at?: string;
+            /** @description LastStatus 是最近一次运行状态，可为空。 */
+            last_status?: string;
+            /** @description Model 是任务指定模型；平台管理员高级字段。 */
+            model?: string;
+            /** @description Name 是任务显示名称。 */
+            name?: string;
+            /** @description NextRunAt 是下一次计划运行时间，可为空。 */
+            next_run_at?: string;
+            /** @description NoAgent 表示任务是否跳过 agent 执行路径。 */
+            no_agent?: boolean;
+            /** @description Prompt 是任务运行时交给 Hermes 的提示词，可为空。 */
+            prompt?: string;
+            /** @description Provider 是任务指定模型提供方；平台管理员高级字段。 */
+            provider?: string;
+            repeat?: components["schemas"]["service.CronRepeat"];
+            schedule?: components["schemas"]["service.CronSchedule"];
+            /** @description Script 是任务使用的仓库内脚本文件名，可为空。 */
+            script?: string;
+            /** @description Skills 是任务声明需要的技能列表；平台管理员高级字段。 */
+            skills?: string[];
+            /** @description State 是调度状态，如 scheduled / paused / disabled / removed。 */
+            state?: string;
+            /** @description Workdir 是任务运行目录；平台管理员高级字段，handler 层可按角色过滤。 */
+            workdir?: string;
+        };
+        /** @description Repeat 描述重复次数和完成次数。 */
+        "service.CronRepeat": {
+            /** @description Completed 是已完成的调度次数。 */
+            completed?: number;
+            /** @description Times 是总重复次数，nil 表示不限制次数。 */
+            times?: number;
+        };
+        "service.CronRunEntry": {
+            /** @description Error 是运行错误摘要，可为空。 */
+            error?: string;
+            /** @description FileName 是输出 markdown 文件名，或 synthetic 元数据文件名。 */
+            file_name?: string;
+            /** @description HasOutput 表示是否存在真实 markdown 输出文件。 */
+            has_output?: boolean;
+            /** @description JobID 是所属 Cron 任务 ID。 */
+            job_id?: string;
+            /** @description RunTime 是本次运行时间字符串。 */
+            run_time?: string;
+            /** @description Size 是输出文件字节数。 */
+            size?: number;
+            /** @description Status 是运行状态，可为空。 */
+            status?: string;
+            /** @description Synthetic 表示该记录是否由调度元数据合成。 */
+            synthetic?: boolean;
+        };
+        "service.CronRunOutput": {
+            /** @description Content 是 markdown 文本内容，oc-cron 限制最大 1 MiB。 */
+            content?: string;
+            /** @description FileName 是输出 markdown 文件名。 */
+            file_name?: string;
+            /** @description JobID 是所属 Cron 任务 ID。 */
+            job_id?: string;
+            /** @description RunTime 是本次运行时间字符串。 */
+            run_time?: string;
+        };
+        /** @description Schedule 是规整后的调度表达式。 */
+        "service.CronSchedule": {
+            /** @description Display 是面向用户展示的调度描述。 */
+            display?: string;
+            /** @description Expr 是机器可读表达式；oc-cron 可返回 null，service 层用空字符串承接。 */
+            expr?: string;
+            /** @description Kind 是调度表达式类别，例如 cron / every / at；旧数据可能为空。 */
+            kind?: string;
+        };
+        "service.CronStatus": {
+            /** @description ActiveJobs 是启用且未移除的任务数量。 */
+            active_jobs?: number;
+            /** @description Available 表示 oc-cron 能读取 Cron 状态。 */
+            available?: boolean;
+            /** @description GatewayRunning 表示 hermes cron status 命令当前是否成功。 */
+            gateway_running?: boolean;
+            /** @description LastError 是最近的调度错误摘要，可为空。 */
+            last_error?: string;
+            /** @description LastErrorJobID 是最近错误对应的任务 ID，可为空。 */
+            last_error_job_id?: string;
+            /** @description Message 是底层 hermes cron status 的人类可读摘要。 */
+            message?: string;
+            /** @description NextJobID 是最近计划运行的任务 ID，可为空。 */
+            next_job_id?: string;
+            /** @description NextRunAt 是最近一次计划运行时间，可为空。 */
+            next_run_at?: string;
+            /** @description PID 是调度器进程 ID；nil 表示当前镜像未暴露。 */
+            pid?: number;
+            /** @description TickSeconds 是调度器 tick 间隔；nil 表示当前镜像未暴露。 */
+            tick_seconds?: number;
         };
         /** @description CurrentResource 是该应用在节点上的最近一次实例资源采样。 */
         "service.InstanceResourceSampleResult": {
