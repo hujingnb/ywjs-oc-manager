@@ -1,5 +1,5 @@
-# runtime/hermes/hermes-main/Dockerfile
-# hermes-main variant 镜像构建脚本。build context = 本目录，COPY 不跨目录。
+# runtime/hermes/hermes-v2026.5.16/Dockerfile
+# hermes-v2026.5.16 variant 镜像构建脚本。build context = 本目录，COPY 不跨目录。
 # 输入：HERMES_REF (上游 git ref，从 version.txt 读)；OC_IMAGE_VARIANT (variant 标识)；OC_BUILD_TS (构建时间戳)。
 
 ARG DOCKER_HUB_MIRROR=crpi-nu3ibz4f07feyghi.cn-beijing.personal.cr.aliyuncs.com/ywjs_public

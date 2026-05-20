@@ -172,7 +172,7 @@ def test_not_found_returns_error_envelope():
 def test_watch_emits_contract_events():
     """覆盖：watch 把 hermes 人读文本事件解析并规整成契约 Event 的 NDJSON 流。
 
-    hermes-main v0.14.0 的 kanban watch 输出人读文本（无 --json），
+    hermes-v2026.5.16 v0.14.0 的 kanban watch 输出人读文本（无 --json），
     oc-kanban 用正则 + ast.literal_eval 把每行文本解析成契约 Event；
     这条用例在 watch 流连上后触发一个写操作，验证流确实输出符合 schema 的事件。
     """

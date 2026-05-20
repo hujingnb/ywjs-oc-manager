@@ -1,8 +1,8 @@
 """跨 variant 数据迁移 dispatch。
 
 约定：from_<prev_variant>.py 暴露 run(data_root: Path) -> dict 函数；
-本 variant（hermes-main）首版无任何 from_*.py，所以遇到任何已知 prev 都抛。
-未来新 variant（如 hermes-v0.5）需新增 from_hermes-main.py 等模块。
+本 variant（hermes-v2026.5.16）首版无任何 from_*.py，所以遇到任何已知 prev 都抛。
+未来新 variant（如 hermes-v0.5）需新增 from_hermes-v2026.5.16.py 等模块。
 """
 
 from __future__ import annotations

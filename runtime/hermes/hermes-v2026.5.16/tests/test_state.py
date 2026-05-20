@@ -14,7 +14,7 @@ def test_read_missing_returns_empty(tmp_path: Path) -> None:
 def test_write_then_read_roundtrip(tmp_path: Path) -> None:
     # 写入后再读应得到等价的 OcState。
     s = OcState(
-        image_variant="hermes-main",
+        image_variant="hermes-v2026.5.16",
         last_render_at="2026-05-19T00:00:00Z",
         last_migrate_from=None,
         manifest_sha256="ab12cd",
