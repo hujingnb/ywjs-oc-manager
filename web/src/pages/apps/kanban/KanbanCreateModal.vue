@@ -62,14 +62,14 @@
 </template>
 
 <script setup lang="ts">
-import { computed, reactive } from 'vue'
+import { computed, reactive, watch } from 'vue'
 import { NModal, NForm, NFormItem, NInput, NInputNumber, NSelect, NButton, NSpace } from 'naive-ui'
 import { useAuthStore } from '@/stores/auth'
 
 // KanbanCreateModal 是新建任务模态框。
 // 高级字段（skills / workspace_kind / parent_id / max_retries）按角色显隐：
 // 平台管理员可见并填写，其他角色只见必填字段（标题 / assignee / 优先级 / 描述）。
-defineProps<{
+const props = defineProps<{
   // show 控制模态框显隐，由父组件通过 v-model:show 绑定。
   show: boolean
   // submitting 由父组件注入 mutation 的 isPending 状态，创建中时禁用提交按钮并显示 loading。
@@ -103,7 +103,18 @@ const form = reactive({
   max_retries: 0,
 })
 
-// priorityOptions 是优先级下拉选项，value 对应后端的 0-9 整数。
+// modal 关闭时重置表单，避免下次新建任务显示上次的脏数据。
+watch(() => props.show, (visible) => {
+  if (!visible) {
+    Object.assign(form, {
+      title: '', assignee: '', priority: 1, body: '',
+      skills: '', workspace_kind: '', parent_id: '', max_retries: 0,
+    })
+  }
+})
+
+// priorityOptions 是优先级下拉选项。UI 仅暴露 低(1)/中(2)/高(3) 三档常用优先级，
+// 是 UX 简化决策；后端支持 0-9，更细粒度可后续按需扩展。
 const priorityOptions = [
   { label: '低 (1)', value: 1 },
   { label: '中 (2)', value: 2 },
@@ -128,6 +139,8 @@ function onSubmit() {
     payload.skills = form.skills.trim() || undefined
     payload.workspace_kind = form.workspace_kind.trim() || undefined
     payload.parent_id = form.parent_id.trim() || undefined
+    // max_retries 为 0 时不传，表示用后端默认重试次数；
+    // 与后端 service 层「MaxRetries > 0 才生效」的语义一致，并非 bug。
     payload.max_retries = form.max_retries || undefined
   }
   emit('submit', payload)

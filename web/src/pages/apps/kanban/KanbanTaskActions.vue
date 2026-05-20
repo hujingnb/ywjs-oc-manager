@@ -15,8 +15,8 @@ import { NButton, NSpace } from 'naive-ui'
 import type { KanbanStatus } from '@/api/hooks/useKanban'
 
 // KanbanTaskActions 按任务状态决定显示哪些操作按钮（spec §5.4 操作矩阵）。
-// status prop 为 KanbanStatus，由父组件 KanbanTaskDetail 在 v-if="task" 保护后传入，
-// 从而保证此处拿到的 status 已是已知非空值。
+// status prop 为 KanbanStatus，由父组件 KanbanTaskDetail 通过 isKnownStatus 类型守卫
+// 保证传入的 status 是合法 KanbanStatus，v-if="isKnownStatus(task.status)" 之后才渲染本组件。
 const props = defineProps<{
   // status 是当前任务的状态，用于查 ACTION_MATRIX 决定显示哪些按钮。
   status: KanbanStatus
@@ -42,7 +42,8 @@ const ACTION_MATRIX: Record<KanbanStatus, string[]> = {
 }
 
 // show 判断某操作按钮在当前状态下是否显示。
-// 使用 ?. 防御性访问：若 status 在 ACTION_MATRIX 中不存在则返回 false。
+// 类型上 status 必为合法 KanbanStatus，ACTION_MATRIX 已覆盖所有值；
+// ?. 仅为额外防御，防止运行时意外情形，不代表 status 可能不在矩阵中。
 function show(verb: string): boolean {
   return ACTION_MATRIX[props.status]?.includes(verb) ?? false
 }

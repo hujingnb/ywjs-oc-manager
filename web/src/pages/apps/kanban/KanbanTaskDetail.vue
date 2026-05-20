@@ -108,9 +108,10 @@ const KNOWN_STATUSES = new Set<KanbanStatus>([
 ])
 
 // isKnownStatus 是类型谓词：判断 status 是否为已知的 KanbanStatus 联合类型值。
-// 用于在模板 v-if 中把 status: KanbanStatus | string | undefined 收窄为 KanbanStatus，
+// 用于在模板 v-if 中把 status: string | undefined 收窄为 KanbanStatus，
 // 确保传给 KanbanTaskActions 的 status prop 类型正确，通过 vue-tsc 检查。
-function isKnownStatus(status: KanbanStatus | string | undefined): status is KanbanStatus {
+// 注：KanbanStatus | string 在 TS 里会折叠为 string，参数类型直接写 string | undefined。
+function isKnownStatus(status: string | undefined): status is KanbanStatus {
   return typeof status === 'string' && KNOWN_STATUSES.has(status as KanbanStatus)
 }
 </script>
@@ -135,6 +136,11 @@ function isKnownStatus(status: KanbanStatus | string | undefined): status is Kan
   font-size: 11px;
   max-height: 180px;
   overflow-y: auto;
+}
+.ev-line {
+  line-height: 1.5;
+  color: var(--n-text-color-2, #a0a0a8);
+  word-break: break-all;
 }
 .runs-table { width: 100%; border-collapse: collapse; font-size: 12px; }
 .runs-table th,
