@@ -1,5 +1,6 @@
 {
   "$schema": "http://json-schema.org/draft-07/schema#",
+  "$comment": "字段为 best-effort：hermes-main 的 runs 对新任务始终返回空数组，无法从真实运行记录实测校准。字段定义来源：hermes_cli/kanban_db.py Run dataclass 及 kanban.py _cmd_runs --json 输出（hermes v0.14.0 / 2026.5.16）。hermes --json 输出额外包含 id / metadata / step_key 三个字段，normalize_run 通过 RUN_FIELDS 白名单过滤，不暴露给契约层。",
   "title": "oc-kanban Run",
   "type": "object",
   "required": ["profile", "status", "started_at"],
