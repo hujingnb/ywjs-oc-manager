@@ -703,6 +703,86 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/apps/{appId}/hermes/kanban/capabilities": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * 查询实例任务看板的 oc-kanban 能力
+         * @description 返回 oc-kanban 契约版本、支持的 verb 与 feature 开关，供前端按能力降级。
+         */
+        get: {
+            parameters: {
+                query?: never;
+                header?: never;
+                path: {
+                    /** @description 应用 ID */
+                    appId: string;
+                };
+                cookie?: never;
+            };
+            requestBody?: never;
+            responses: {
+                /** @description OK */
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": {
+                            [key: string]: components["schemas"]["service.KanbanCapabilities"];
+                        };
+                    };
+                };
+                /** @description Forbidden */
+                403: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["handlers.ErrorResponse"];
+                    };
+                };
+                /** @description Internal Server Error */
+                500: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["handlers.ErrorResponse"];
+                    };
+                };
+                /** @description Bad Gateway */
+                502: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["handlers.ErrorResponse"];
+                    };
+                };
+                /** @description Service Unavailable */
+                503: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["handlers.ErrorResponse"];
+                    };
+                };
+            };
+        };
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/apps/{appId}/hermes/kanban/events": {
         parameters: {
             query?: never;
@@ -1074,12 +1154,16 @@ export interface paths {
                 };
             };
             responses: {
-                /** @description No Content */
-                204: {
+                /** @description OK */
+                200: {
                     headers: {
                         [name: string]: unknown;
                     };
-                    content?: never;
+                    content: {
+                        "application/json": {
+                            [key: string]: components["schemas"]["service.KanbanTaskDetail"];
+                        };
+                    };
                 };
                 /** @description Forbidden */
                 403: {
@@ -1127,12 +1211,16 @@ export interface paths {
                 };
             };
             responses: {
-                /** @description No Content */
-                204: {
+                /** @description OK */
+                200: {
                     headers: {
                         [name: string]: unknown;
                     };
-                    content?: never;
+                    content: {
+                        "application/json": {
+                            [key: string]: components["schemas"]["service.KanbanTaskDetail"];
+                        };
+                    };
                 };
                 /** @description Bad Request */
                 400: {
@@ -1189,12 +1277,16 @@ export interface paths {
                 };
             };
             responses: {
-                /** @description No Content */
-                204: {
+                /** @description OK */
+                200: {
                     headers: {
                         [name: string]: unknown;
                     };
-                    content?: never;
+                    content: {
+                        "application/json": {
+                            [key: string]: components["schemas"]["service.KanbanTaskDetail"];
+                        };
+                    };
                 };
                 /** @description Bad Request */
                 400: {
@@ -1251,12 +1343,16 @@ export interface paths {
                 };
             };
             responses: {
-                /** @description No Content */
-                204: {
+                /** @description OK */
+                200: {
                     headers: {
                         [name: string]: unknown;
                     };
-                    content?: never;
+                    content: {
+                        "application/json": {
+                            [key: string]: components["schemas"]["service.KanbanTaskDetail"];
+                        };
+                    };
                 };
                 /** @description Bad Request */
                 400: {
@@ -1313,12 +1409,16 @@ export interface paths {
                 };
             };
             responses: {
-                /** @description No Content */
-                204: {
+                /** @description OK */
+                200: {
                     headers: {
                         [name: string]: unknown;
                     };
-                    content?: never;
+                    content: {
+                        "application/json": {
+                            [key: string]: components["schemas"]["service.KanbanTaskDetail"];
+                        };
+                    };
                 };
                 /** @description Bad Request */
                 400: {
@@ -1375,12 +1475,16 @@ export interface paths {
                 };
             };
             responses: {
-                /** @description No Content */
-                204: {
+                /** @description OK */
+                200: {
                     headers: {
                         [name: string]: unknown;
                     };
-                    content?: never;
+                    content: {
+                        "application/json": {
+                            [key: string]: components["schemas"]["service.KanbanTaskDetail"];
+                        };
+                    };
                 };
                 /** @description Forbidden */
                 403: {
@@ -1510,12 +1614,16 @@ export interface paths {
                 };
             };
             responses: {
-                /** @description No Content */
-                204: {
+                /** @description OK */
+                200: {
                     headers: {
                         [name: string]: unknown;
                     };
-                    content?: never;
+                    content: {
+                        "application/json": {
+                            [key: string]: components["schemas"]["service.KanbanTaskDetail"];
+                        };
+                    };
                 };
                 /** @description Forbidden */
                 403: {
@@ -6961,6 +7069,19 @@ export interface components {
             /** @description Total 是 board 内任务总数。 */
             total?: number;
         };
+        "service.KanbanCapabilities": {
+            /** @description ContractVersion 是 oc-kanban 契约版本号（MAJOR.MINOR）。 */
+            contract_version?: string;
+            features?: components["schemas"]["service.KanbanFeatures"];
+            /** @description HermesVersion 是底层 hermes 版本（信息性，可能为空）。 */
+            hermes_version?: string;
+            /** @description OCKanbanVersion 是 oc-kanban 实现版本。 */
+            oc_kanban_version?: string;
+            /** @description Variant 是镜像变体标识。 */
+            variant?: string;
+            /** @description Verbs 是本镜像实际支持的功能 verb 清单。 */
+            verbs?: string[];
+        };
         "service.KanbanComment": {
             /** @description Author 是评论作者（hermes profile 名）。 */
             author?: string;
@@ -6984,6 +7105,17 @@ export interface components {
              *     用 any 容忍 hermes 任意输出（整数 / 字符串 / null），manager 仅透传不解析。
              */
             run_id?: unknown;
+        };
+        /** @description Features 是细粒度能力开关。 */
+        "service.KanbanFeatures": {
+            /** @description Runs 表示是否支持查询执行历史。 */
+            runs?: boolean;
+            /** @description Stats 表示是否支持统计。 */
+            stats?: boolean;
+            /** @description Watch 表示是否支持实时事件流。 */
+            watch?: boolean;
+            /** @description Write 表示是否支持写操作（create/comment/...）。 */
+            write?: boolean;
         };
         "service.KanbanStats": {
             /** @description ByAssignee 是各 assignee 下各状态的任务计数，外层 key 为 assignee，内层 key 为状态名。 */

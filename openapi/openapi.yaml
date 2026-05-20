@@ -745,6 +745,29 @@ components:
           description: Total 是 board 内任务总数。
           type: integer
       type: object
+    service.KanbanCapabilities:
+      properties:
+        contract_version:
+          description: ContractVersion 是 oc-kanban 契约版本号（MAJOR.MINOR）。
+          type: string
+        features:
+          $ref: '#/components/schemas/service.KanbanFeatures'
+        hermes_version:
+          description: HermesVersion 是底层 hermes 版本（信息性，可能为空）。
+          type: string
+        oc_kanban_version:
+          description: OCKanbanVersion 是 oc-kanban 实现版本。
+          type: string
+        variant:
+          description: Variant 是镜像变体标识。
+          type: string
+        verbs:
+          description: Verbs 是本镜像实际支持的功能 verb 清单。
+          items:
+            type: string
+          type: array
+          uniqueItems: false
+      type: object
     service.KanbanComment:
       properties:
         author:
@@ -773,6 +796,22 @@ components:
           description: |-
             RunID 是关联的执行 ID，可为 null。真实环境多为 null，类型未经实测确定，
             用 any 容忍 hermes 任意输出（整数 / 字符串 / null），manager 仅透传不解析。
+      type: object
+    service.KanbanFeatures:
+      description: Features 是细粒度能力开关。
+      properties:
+        runs:
+          description: Runs 表示是否支持查询执行历史。
+          type: boolean
+        stats:
+          description: Stats 表示是否支持统计。
+          type: boolean
+        watch:
+          description: Watch 表示是否支持实时事件流。
+          type: boolean
+        write:
+          description: Write 表示是否支持写操作（create/comment/...）。
+          type: boolean
       type: object
     service.KanbanStats:
       properties:
@@ -1835,6 +1874,54 @@ paths:
       summary: 列出实例任务看板的 board
       tags:
       - hermes-kanban
+  /apps/{appId}/hermes/kanban/capabilities:
+    get:
+      description: 返回 oc-kanban 契约版本、支持的 verb 与 feature 开关，供前端按能力降级。
+      parameters:
+      - description: 应用 ID
+        in: path
+        name: appId
+        required: true
+        schema:
+          type: string
+      responses:
+        "200":
+          content:
+            application/json:
+              schema:
+                additionalProperties:
+                  $ref: '#/components/schemas/service.KanbanCapabilities'
+                type: object
+          description: OK
+        "403":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/handlers.ErrorResponse'
+          description: Forbidden
+        "500":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/handlers.ErrorResponse'
+          description: Internal Server Error
+        "502":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/handlers.ErrorResponse'
+          description: Bad Gateway
+        "503":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/handlers.ErrorResponse'
+          description: Service Unavailable
+      security:
+      - BearerAuth: []
+      summary: 查询实例任务看板的 oc-kanban 能力
+      tags:
+      - hermes-kanban
   /apps/{appId}/hermes/kanban/events:
     get:
       description: 以 Server-Sent Events 推送 hermes kanban watch 的 NDJSON 事件。board 维度订阅。
@@ -2108,8 +2195,14 @@ paths:
                 summary: body
         description: board 请求
       responses:
-        "204":
-          description: No Content
+        "200":
+          content:
+            application/json:
+              schema:
+                additionalProperties:
+                  $ref: '#/components/schemas/service.KanbanTaskDetail'
+                type: object
+          description: OK
         "403":
           content:
             application/json:
@@ -2148,8 +2241,14 @@ paths:
         description: 阻塞请求
         required: true
       responses:
-        "204":
-          description: No Content
+        "200":
+          content:
+            application/json:
+              schema:
+                additionalProperties:
+                  $ref: '#/components/schemas/service.KanbanTaskDetail'
+                type: object
+          description: OK
         "400":
           content:
             application/json:
@@ -2194,8 +2293,14 @@ paths:
         description: 评论请求
         required: true
       responses:
-        "204":
-          description: No Content
+        "200":
+          content:
+            application/json:
+              schema:
+                additionalProperties:
+                  $ref: '#/components/schemas/service.KanbanTaskDetail'
+                type: object
+          description: OK
         "400":
           content:
             application/json:
@@ -2239,8 +2344,14 @@ paths:
                 summary: body
         description: 完成请求
       responses:
-        "204":
-          description: No Content
+        "200":
+          content:
+            application/json:
+              schema:
+                additionalProperties:
+                  $ref: '#/components/schemas/service.KanbanTaskDetail'
+                type: object
+          description: OK
         "400":
           content:
             application/json:
@@ -2285,8 +2396,14 @@ paths:
         description: 重分配请求
         required: true
       responses:
-        "204":
-          description: No Content
+        "200":
+          content:
+            application/json:
+              schema:
+                additionalProperties:
+                  $ref: '#/components/schemas/service.KanbanTaskDetail'
+                type: object
+          description: OK
         "400":
           content:
             application/json:
@@ -2330,8 +2447,14 @@ paths:
                 summary: body
         description: board 请求
       responses:
-        "204":
-          description: No Content
+        "200":
+          content:
+            application/json:
+              schema:
+                additionalProperties:
+                  $ref: '#/components/schemas/service.KanbanTaskDetail'
+                type: object
+          description: OK
         "403":
           content:
             application/json:
@@ -2429,8 +2552,14 @@ paths:
                 summary: body
         description: board 请求
       responses:
-        "204":
-          description: No Content
+        "200":
+          content:
+            application/json:
+              schema:
+                additionalProperties:
+                  $ref: '#/components/schemas/service.KanbanTaskDetail'
+                type: object
+          description: OK
         "403":
           content:
             application/json:
