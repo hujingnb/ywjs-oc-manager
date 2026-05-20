@@ -194,37 +194,7 @@ func (h *ChannelCheckBindingHandler) Handle(ctx context.Context, job sqlc.Job) e
 			}
 		}
 		metadata, _ := json.Marshal(progress.Metadata)
-		if _, err := h.store.MarkChannelBindingBound(ctx, sqlc.MarkChannelBindingBoundParams{
-			AppID:         binding.AppID,
-			ChannelType:   binding.ChannelType,
-			BoundIdentity: pgtype.Text{String: identity, Valid: identity != ""},
-			ChannelName:   pgtype.Text{String: progress.ChannelName, Valid: progress.ChannelName != ""},
-			MetadataJson:  metadata,
-		}); err != nil {
-			return fmt.Errorf("标记渠道绑定成功失败: %w", err)
-		}
-		// 微信凭证由容器内 oc-channel-login 直接落盘到 hermes 自管目录
-		// (/opt/data/weixin/accounts/),manager 不再写 .env;
-		// 这里仅触发 hermes 容器重启,让其重新读 platforms 配置加载新绑定账号。
-		// 注:重启失败不阻塞绑定流程,仅日志告警 — 主流程已 MarkChannelBindingBound,
-		// 即便重启失败,后续手动重启或 health check 自愈仍能让账号生效。
-		if h.restarter != nil && payload.ChannelType == domain.ChannelTypeWeChat {
-			if err := h.restarter.RestartContainer(ctx, uuidToString(app.RuntimeNodeID), textOrEmpty(app.ContainerID)); err != nil {
-				slog.ErrorContext(ctx, "渠道绑定后重启 hermes 容器失败", "app_id", uuidToString(app.ID), "error", err)
-			}
-		}
-		if app.Status == domain.AppStatusBindingWaiting {
-			if _, err := h.store.SetAppStatus(ctx, sqlc.SetAppStatusParams{ID: app.ID, Status: domain.AppStatusRunning}); err != nil {
-				return fmt.Errorf("推进应用状态到 running 失败: %w", err)
-			}
-		}
-		if err := recordChannelAppAudit(ctx, h.store, app, "channel_bound", "succeeded", "",
-			fmt.Sprintf("渠道 %s，身份 %s", channelLabelWorker(payload.ChannelType), identity),
-			map[string]any{
-				"channel_type":   payload.ChannelType,
-				"bound_identity": identity,
-				"channel_name":   progress.ChannelName,
-			}); err != nil {
+		if err := h.finalizeChannelBound(ctx, app, binding, payload, identity, progress.ChannelName, metadata); err != nil {
 			return err
 		}
 	case channel.AuthStatusFailed, channel.AuthStatusExpired:
@@ -259,27 +229,9 @@ func (h *ChannelCheckBindingHandler) Handle(ctx context.Context, job sqlc.Job) e
 		if h.resolver != nil && payload.ChannelType == domain.ChannelTypeWeChat {
 			if identity, rerr := h.resolver.ResolveWeChatBoundIdentity(ctx, uuidToString(app.RuntimeNodeID), textOrEmpty(app.ContainerID)); rerr == nil && identity != "" {
 				metadata, _ := json.Marshal(progress.Metadata)
-				if _, err := h.store.MarkChannelBindingBound(ctx, sqlc.MarkChannelBindingBoundParams{
-					AppID:         binding.AppID,
-					ChannelType:   binding.ChannelType,
-					BoundIdentity: pgtype.Text{String: identity, Valid: true},
-					ChannelName:   pgtype.Text{String: progress.ChannelName, Valid: progress.ChannelName != ""},
-					MetadataJson:  metadata,
-				}); err != nil {
-					return fmt.Errorf("基于 plugin state 标记渠道绑定成功失败: %w", err)
-				}
-				if app.Status == domain.AppStatusBindingWaiting {
-					if _, err := h.store.SetAppStatus(ctx, sqlc.SetAppStatusParams{ID: app.ID, Status: domain.AppStatusRunning}); err != nil {
-						return fmt.Errorf("推进应用状态到 running 失败: %w", err)
-					}
-				}
-				if err := recordChannelAppAudit(ctx, h.store, app, "channel_bound", "succeeded", "",
-					fmt.Sprintf("渠道 %s，身份 %s", channelLabelWorker(payload.ChannelType), identity),
-					map[string]any{
-						"channel_type":   payload.ChannelType,
-						"bound_identity": identity,
-						"channel_name":   progress.ChannelName,
-					}); err != nil {
+				// 与 case AuthStatusBound 共用 finalizeChannelBound:cached-login
+				// fallback 同样要触发容器重启,否则绑定后 weixin 平台不会被 hermes 加载。
+				if err := h.finalizeChannelBound(ctx, app, binding, payload, identity, progress.ChannelName, metadata); err != nil {
 					return err
 				}
 				return nil
@@ -296,6 +248,56 @@ func (h *ChannelCheckBindingHandler) Handle(ctx context.Context, job sqlc.Job) e
 		}
 	}
 	return nil
+}
+
+// finalizeChannelBound 把「渠道绑定成功」的统一收尾动作集中到一处:
+//  1. MarkChannelBindingBound 写 channel_bindings.status=bound;
+//  2. 触发 hermes 容器重启,让其重新读 platforms 配置加载新绑定账号
+//     (微信凭证由容器内 oc-channel-login 落盘到 /opt/data/weixin/accounts/,
+//     hermes gateway 只在启动期扫描该目录决定启用哪些 messaging platform);
+//  3. app 从 binding_waiting 推进到 running;
+//  4. 写 channel_bound:succeeded 审计日志。
+//
+// case AuthStatusBound 与 default 的 cached-login fallback 共用此函数:
+// 两条路径都代表"绑定成功",必须走完全相同的收尾,否则任一路径漏掉重启会
+// 导致绑定后 weixin 平台不被 hermes 加载(线上表现为"扫码成功但收不到消息")。
+//
+// 重启失败仅告警不阻塞:主流程已 MarkChannelBindingBound,后续手动重启或
+// health check 自愈仍能让账号生效。
+func (h *ChannelCheckBindingHandler) finalizeChannelBound(
+	ctx context.Context,
+	app sqlc.App,
+	binding sqlc.ChannelBinding,
+	payload channelLoginPayload,
+	identity, channelName string,
+	metadata []byte,
+) error {
+	if _, err := h.store.MarkChannelBindingBound(ctx, sqlc.MarkChannelBindingBoundParams{
+		AppID:         binding.AppID,
+		ChannelType:   binding.ChannelType,
+		BoundIdentity: pgtype.Text{String: identity, Valid: identity != ""},
+		ChannelName:   pgtype.Text{String: channelName, Valid: channelName != ""},
+		MetadataJson:  metadata,
+	}); err != nil {
+		return fmt.Errorf("标记渠道绑定成功失败: %w", err)
+	}
+	if h.restarter != nil && payload.ChannelType == domain.ChannelTypeWeChat {
+		if err := h.restarter.RestartContainer(ctx, uuidToString(app.RuntimeNodeID), textOrEmpty(app.ContainerID)); err != nil {
+			slog.ErrorContext(ctx, "渠道绑定后重启 hermes 容器失败", "app_id", uuidToString(app.ID), "error", err)
+		}
+	}
+	if app.Status == domain.AppStatusBindingWaiting {
+		if _, err := h.store.SetAppStatus(ctx, sqlc.SetAppStatusParams{ID: app.ID, Status: domain.AppStatusRunning}); err != nil {
+			return fmt.Errorf("推进应用状态到 running 失败: %w", err)
+		}
+	}
+	return recordChannelAppAudit(ctx, h.store, app, "channel_bound", "succeeded", "",
+		fmt.Sprintf("渠道 %s，身份 %s", channelLabelWorker(payload.ChannelType), identity),
+		map[string]any{
+			"channel_type":   payload.ChannelType,
+			"bound_identity": identity,
+			"channel_name":   channelName,
+		})
 }
 
 func recordChannelAppAudit(ctx context.Context, store ChannelLoginStore, app sqlc.App, action, result, errorMessage, detailMessage string, metadata map[string]any) error {
