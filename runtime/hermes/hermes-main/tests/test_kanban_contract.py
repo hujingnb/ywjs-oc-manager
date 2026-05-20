@@ -1,8 +1,8 @@
 """oc-kanban 契约一致性测试。
 
 验证本镜像的 oc-kanban 输出符合 kanban-contract/schema/ 定义的契约。
-该测试在构建出的镜像里运行（make verify-hermes-runtime），任何 verb
-输出违反契约即构建失败。capabilities 不依赖 hermes，stub 镜像也跑；
+该测试在 Dockerfile 构建期运行，任何 verb 输出违反契约即构建失败。
+capabilities 不依赖 hermes，stub 镜像也跑；
 其余用例需真实 hermes，stub 镜像跳过。
 """
 
@@ -16,8 +16,10 @@ from pathlib import Path
 import pytest
 from jsonschema import validate
 
-# 镜像内契约 schema 目录（Dockerfile 把 kanban-contract/ COPY 到此）。
-SCHEMA_DIR = Path("/usr/local/lib/oc-kanban/contract/schema")
+# 契约 schema 既支持镜像内安装路径，也支持源码目录下的 canonical 路径。
+IMAGE_SCHEMA_DIR = Path("/usr/local/lib/oc-kanban/contract/schema")
+SOURCE_SCHEMA_DIR = Path(__file__).resolve().parents[2] / "kanban-contract" / "schema"
+SCHEMA_DIR = IMAGE_SCHEMA_DIR if IMAGE_SCHEMA_DIR.exists() else SOURCE_SCHEMA_DIR
 
 
 def _load_schema(name):
@@ -35,7 +37,10 @@ def _has_real_hermes():
 
 def _run_oc_kanban(*args, timeout=40):
     """跑一条 oc-kanban 命令，返回 (信封 dict, 退出码)。"""
-    proc = subprocess.run(["oc-kanban", *args], capture_output=True, text=True, timeout=timeout)
+    source_script = Path(__file__).resolve().parents[1] / "oc-kanban.py"
+    # 测试既支持源码目录布局，也支持 Docker 镜像内的 /usr/local/bin 安装布局。
+    cmd = ["python3", str(source_script)] if source_script.exists() else ["oc-kanban"]
+    proc = subprocess.run([*cmd, *args], capture_output=True, text=True, timeout=timeout)
     try:
         return json.loads(proc.stdout), proc.returncode
     except json.JSONDecodeError as e:

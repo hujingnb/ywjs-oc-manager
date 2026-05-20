@@ -37,7 +37,7 @@ RUN mv /opt/data/node /opt/hermes-node && \
 RUN uv pip install --python /usr/local/lib/hermes-agent/venv/bin/python --no-cache-dir \
       aiohttp cryptography qrcode
 
-# oc-entrypoint Python 依赖：pyyaml 用于 manifest 解析；pytest 用于镜像内 verify-hermes-runtime 自检。
+# oc-entrypoint Python 依赖：pyyaml 用于 manifest 解析；pytest 用于镜像构建期自检。
 RUN uv pip install --system --no-cache-dir pyyaml pytest jsonschema
 
 # 本目录内 COPY（build context = 本 variant 目录）

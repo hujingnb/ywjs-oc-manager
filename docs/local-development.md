@@ -107,7 +107,7 @@ make seed-e2e
 | 目标 | 说明 |
 |---|---|
 | `make build-hermes-runtime` | 构建 `hermes-runtime:dev` 镜像（`./runtime/hermes`） |
-| `make verify-hermes-runtime` | 验证 Hermes runtime 镜像已正确安装（运行 `scripts/verify-hermes-runtime.sh`） |
+| `make build-hermes-runtime` | 构建 Hermes runtime 镜像，并在 Dockerfile 构建期自动运行 runtime pytest 自检 |
 | `make check-compose` | 校验 `docker-compose.yml` 所有挂载均为 bind mount，无 named volume |
 | `make debug-ollama` | 检查 Ollama API 可达性、列出模型并发起最小调用 |
 | `make debug-newapi` | 检查 new-api HTTP、数据库、Ollama 渠道连通性 |

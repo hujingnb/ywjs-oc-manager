@@ -19,5 +19,6 @@
 make build-hermes-runtime HERMES_VARIANT=hermes-main      # 本地 dev
 make build-hermes-image  HERMES_VARIANT=hermes-main       # 生产镜像
 make release-hermes-image HERMES_VARIANT=hermes-main      # 构建 + 推送
-make verify-hermes-runtime HERMES_VARIANT=hermes-main     # 镜像内 pytest
 ```
+
+Hermes runtime 的 pytest 自检已经写入 Dockerfile，构建过程中会自动执行。

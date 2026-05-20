@@ -1,4 +1,4 @@
-.PHONY: dev-up dev-down test vet build sqlc-generate migrate-up migrate-down check-compose logs web-test web-typecheck web-build build-hermes-runtime verify-hermes-runtime hermes-inject-contract debug-ollama debug-newapi newapi-probe seed-e2e smoke-v102 openapi-gen web-types-gen openapi-check ssh-manager ssh-agent1 ssh-newapi logs-api logs-agent1 psql-manager redis-manager bh-logs
+.PHONY: dev-up dev-down test vet build sqlc-generate migrate-up migrate-down check-compose logs web-test web-typecheck web-build build-hermes-runtime hermes-inject-contract debug-ollama debug-newapi newapi-probe seed-e2e smoke-v102 openapi-gen web-types-gen openapi-check ssh-manager ssh-agent1 ssh-newapi logs-api logs-agent1 psql-manager redis-manager bh-logs
 
 # 加载 .env（-include 在文件不存在时静默跳过，不报错）。
 # docker compose 会自动读取 .env，Makefile 显式 include 是为了让 SSH 等 target 也能访问其中变量。
@@ -108,10 +108,6 @@ build-hermes-runtime: hermes-inject-contract ## 本地 dev 构建 hermes runtime
 	rm -rf $(HERMES_VARIANT_DIR)/kanban-contract $(HERMES_VARIANT_DIR)/cron-contract; \
 	exit $$status
 
-verify-hermes-runtime: ## 镜像内 pytest 自检 lib/renderer/migrator/oc-entrypoint
-	docker run --rm --entrypoint python hermes-runtime:$(HERMES_VARIANT)-dev \
-	  -m pytest /usr/local/lib/oc-entrypoint/tests/ -v
-
 ##@ 镜像构建发布
 
 # api / agent 构建上下文为仓库根目录（需访问 go.mod / internal/ 等源码），
@@ -155,7 +151,7 @@ release-web-image: build-web-image push-web-image ## 构建并推送 manager-web
 	@echo "✅ manager-web 镜像 $(WEB_IMAGE_REPO):$(IMAGE_TIMESTAMP) 已构建并推送"
 
 # build-hermes-image 在本地构建 hermes runtime 生产镜像，直接打上 aliyun ACR 完整 tag，
-# 不推送，便于发布前先在本地跑 verify-hermes-runtime 等校验脚本。
+# 不推送，便于发布前先在本地完成构建期自检。
 # build context 取自 HERMES_VARIANT 指向的子目录（自包含 Dockerfile + 资产）。
 .PHONY: build-hermes-image
 build-hermes-image: hermes-inject-contract ## 本地构建 hermes runtime 生产镜像，tag = <variant>-<timestamp>
