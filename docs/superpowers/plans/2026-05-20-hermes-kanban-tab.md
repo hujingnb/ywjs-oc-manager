@@ -83,15 +83,15 @@ Run: `cat runtime/hermes/hermes-main/version.txt`
 
 - [ ] **Step 2: 把 version.txt 改成固定 tag**
 
-把内容从 `main` 改为一个已实测含 `kanban` 子命令的 hermes-agent 版本号。
-brainstorming 阶段实测 `hermes-agent==0.14.0` 含完整 kanban CLI。若 `install.sh`
-的 `--branch` 接受 git tag，用对应 tag（如 `v0.14.0`）；若只接受分支名，保留
-一个明确的 release 分支名并在文件加注释说明。
+已核实：hermes-agent 仓库（`github.com/NousResearch/hermes-agent`）的 git tag
+是日期格式 `v2026.X.Y`，最新 `v2026.5.16` 对应实测过的 hermes-agent 0.14.0
+（brainstorming 阶段实测该版本含完整 kanban CLI）。`install.sh` 用
+`git clone --branch "$BRANCH"`，`--branch` 同时接受分支名与 tag。
 
-文件内容（示例）：
+把 `version.txt` 内容从 `main` 改为：
 
 ```
-v0.14.0
+v2026.5.16
 ```
 
 - [ ] **Step 3: 提交**
