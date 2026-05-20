@@ -79,6 +79,9 @@ type KanbanComment struct {
 // KanbanEvent 对应任务事件流的一条事件（show 输出的 events 数组元素）。
 // 字段已按真实 CLI show 输出校准（hermes v0.14.0）。
 type KanbanEvent struct {
+	// TaskID 是事件所属任务 ID。watch 流的事件必带（前端按 task 分组依赖它）；
+	// TaskDetail.events 单任务上下文里可为空，故 omitempty。
+	TaskID string `json:"task_id,omitempty"`
 	// Kind 是事件类型，如 "created"、"status_changed" 等。
 	Kind string `json:"kind"`
 	// Payload 是事件附加数据，结构随 Kind 变化（任意对象）。

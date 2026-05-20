@@ -9,6 +9,8 @@
 import json
 import shutil
 import subprocess
+import threading
+import time
 from pathlib import Path
 
 import pytest
@@ -159,3 +161,38 @@ def test_not_found_returns_error_envelope():
     # 实际归类待镜像内实测确认，此处接受两者之一。
     assert env["error"]["code"] in ("NOT_FOUND", "HERMES_CLI_FAILED")
     assert code == 1
+
+
+@real_only
+def test_watch_emits_contract_events():
+    """覆盖：watch 把 hermes 人读文本事件解析并规整成契约 Event 的 NDJSON 流。
+
+    hermes-main v0.14.0 的 kanban watch 输出人读文本（无 --json），
+    oc-kanban 用正则 + ast.literal_eval 把每行文本解析成契约 Event；
+    这条用例在 watch 流连上后触发一个写操作，验证流确实输出符合 schema 的事件。
+    """
+    _init_kanban()
+    event_schema = _load_schema("event.schema.json")
+    proc = subprocess.Popen(["oc-kanban", "watch", "--board", "default"],
+                            stdout=subprocess.PIPE, text=True)
+    try:
+        time.sleep(1.5)  # 等 watch 子进程连上 hermes
+        subprocess.run(["oc-kanban", "create", "--board", "default",
+                        "--title", "watch 契约测试", "--assignee", "default"],
+                       capture_output=True, text=True, timeout=40)
+        # 用线程带超时读 watch 输出第一行，避免无事件时永久阻塞。
+        holder = {}
+
+        def _read():
+            holder["line"] = proc.stdout.readline()
+
+        t = threading.Thread(target=_read, daemon=True)
+        t.start()
+        t.join(timeout=12)
+        assert holder.get("line", "").strip(), "watch 未在 12s 内输出任何事件"
+        ev = json.loads(holder["line"])
+        validate(ev, event_schema)
+        # watch 流的事件必须带 task_id（前端按 task 分组依赖它）。
+        assert ev["task_id"], "watch 事件缺 task_id"
+    finally:
+        proc.terminate()

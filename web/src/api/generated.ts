@@ -7105,6 +7105,11 @@ export interface components {
              *     用 any 容忍 hermes 任意输出（整数 / 字符串 / null），manager 仅透传不解析。
              */
             run_id?: unknown;
+            /**
+             * @description TaskID 是事件所属任务 ID。watch 流的事件必带（前端按 task 分组依赖它）；
+             *     TaskDetail.events 单任务上下文里可为空，故 omitempty。
+             */
+            task_id?: string;
         };
         /** @description Features 是细粒度能力开关。 */
         "service.KanbanFeatures": {

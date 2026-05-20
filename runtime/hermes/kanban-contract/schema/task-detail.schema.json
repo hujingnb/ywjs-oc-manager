@@ -52,6 +52,7 @@
       "type": "object",
       "required": ["kind", "created_at"],
       "properties": {
+        "task_id": { "type": ["string", "null"] },
         "kind": { "type": "string" },
         "payload": {},
         "created_at": { "type": "integer" },

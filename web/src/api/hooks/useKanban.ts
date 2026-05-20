@@ -59,6 +59,9 @@ export interface KanbanComment {
 // KanbanEvent 对应任务事件流的一条事件（service.KanbanEvent）。
 // payload 结构随 kind 变化（任意对象），用 unknown 类型表达。
 export interface KanbanEvent {
+  // task_id 是事件所属任务 ID。watch 流的事件必带（前端按 task 分组依赖它）；
+  // TaskDetail.events 单任务上下文里可为空。
+  task_id?: string
   kind?: string
   // payload 是任意 JSON 对象，结构随 kind 变化，前端不解析具体字段。
   payload?: unknown

@@ -14,10 +14,13 @@
 from __future__ import annotations
 
 import argparse
+import ast
 import json
 import os
+import re
 import subprocess
 import sys
+import time
 from pathlib import Path
 
 # 契约版本号（MAJOR.MINOR，规则见 SPEC.md）与 oc-kanban 实现版本。
@@ -203,12 +206,63 @@ def normalize_comment(raw: dict) -> dict:
 
 
 def normalize_event(raw: dict) -> dict:
-    """把 hermes 事件对象规整成契约 Event（watch 流与 detail.events 共用）。"""
+    """把 hermes 事件对象规整成契约 Event（watch 流与 detail.events 共用）。
+
+    watch 流的事件带 task_id；TaskDetail.events 单任务上下文，hermes 原始
+    对象可能不含 task_id，取 None 即可（前端只在 watch 流按 task_id 分组）。
+    """
     return {
+        "task_id": raw.get("task_id"),
         "kind": raw.get("kind") or "",
         "payload": raw.get("payload"),
         "created_at": raw.get("created_at") if isinstance(raw.get("created_at"), int) else 0,
         "run_id": raw.get("run_id"),
+    }
+
+
+# hermes v0.14.0 的 `kanban watch` 无 --json，输出人读文本行，形如：
+#   [2026-05-20 15:19] t_0388cefe created (@default) {'status': 'ready', ...}
+# 这条正则把它拆成 [时间, task_id, kind, assignee, payload(可选)]。
+_WATCH_LINE_RE = re.compile(
+    r"^\[([0-9]{4}-[0-9]{2}-[0-9]{2} [0-9]{2}:[0-9]{2})\]\s+"
+    r"(\S+)\s+(\S+)\s+\(@([^)]*)\)\s*(\{.*\})?\s*$")
+
+
+def parse_watch_line(line: str):
+    """把 hermes kanban watch 的一行人读文本解析成契约 Event。
+
+    hermes-main v0.14.0 已确认：kanban watch 子命令无 --json 选项，输出
+    人读文本（横幅 "Watching kanban events..." + 事件行如上面正则所示）。
+    无法解析的行返回 None，由调用方跳过。
+
+    payload 是 Python dict repr（单引号 / None），用 ast.literal_eval
+    安全解析；失败时退化为空 dict，不让单行解析异常拖垮整个流。
+
+    created_at 用当前 Unix 秒近似：watch 是实时流、事件刚发生；hermes
+    文本时间仅精确到分钟、时区不确定，用当前时间既满足契约 integer 又
+    避免时区偏差。
+    """
+    m = _WATCH_LINE_RE.match(line.strip())
+    if not m:
+        return None
+    task_id, kind, assignee, payload_str = m.group(2), m.group(3), m.group(4), m.group(5)
+    payload = {}
+    if payload_str:
+        try:
+            parsed = ast.literal_eval(payload_str)
+            if isinstance(parsed, dict):
+                payload = parsed
+        except (ValueError, SyntaxError):
+            payload = {}
+    # 契约 Event 没有独立 assignee 字段，把它并入 payload 以保留信息。
+    if assignee:
+        payload.setdefault("assignee", assignee)
+    return {
+        "task_id": task_id,
+        "kind": kind,
+        "payload": payload,
+        "created_at": int(time.time()),
+        "run_id": None,
     }
 
 
@@ -367,7 +421,12 @@ def verb_reclaim(args) -> int:
 
 
 def verb_watch(args) -> int:
-    """订阅 board 事件流：把 hermes watch 的每行规整成契约 Event 后 NDJSON 输出。"""
+    """订阅 board 事件流：解析 hermes watch 的人读文本，规整成契约 Event 后 NDJSON 输出。
+
+    hermes-main v0.14.0 的 kanban watch 子命令无 --json，输出人读文本，
+    所以这里用 parse_watch_line 把每行文本解析成契约 Event；
+    横幅行、无法解析的行直接跳过，不污染契约 NDJSON 流。
+    """
     proc = subprocess.Popen(
         ["hermes", "kanban", "--board", args.board, "watch"],
         stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True)
@@ -375,15 +434,10 @@ def verb_watch(args) -> int:
     stderr_text = ""
     try:
         for line in proc.stdout:
-            line = line.strip()
-            if not line:
+            ev = parse_watch_line(line)
+            if ev is None:
                 continue
-            try:
-                raw = json.loads(line)
-            except json.JSONDecodeError:
-                # 跳过非 JSON 行（hermes 可能混入人读日志），不污染契约流。
-                continue
-            sys.stdout.write(json.dumps(normalize_event(raw), ensure_ascii=False) + "\n")
+            sys.stdout.write(json.dumps(ev, ensure_ascii=False) + "\n")
             sys.stdout.flush()
             emitted += 1
         proc.wait()

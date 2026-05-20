@@ -796,6 +796,11 @@ components:
           description: |-
             RunID 是关联的执行 ID，可为 null。真实环境多为 null，类型未经实测确定，
             用 any 容忍 hermes 任意输出（整数 / 字符串 / null），manager 仅透传不解析。
+        task_id:
+          description: |-
+            TaskID 是事件所属任务 ID。watch 流的事件必带（前端按 task 分组依赖它）；
+            TaskDetail.events 单任务上下文里可为空，故 omitempty。
+          type: string
       type: object
     service.KanbanFeatures:
       description: Features 是细粒度能力开关。
