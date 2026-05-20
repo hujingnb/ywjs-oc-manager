@@ -1,428 +1,378 @@
 # Hermes 容器运行机制
 
-> manager 如何让 runtime-agent 把 Hermes 容器跑起来:创建链路、镜像同步、
-> 环境变量、挂载目录、工作目录、知识库注入、注入 vs 运行时生成、生命周期事件。
-> 读完本文应能独立排查"容器没起来 / 配置没生效 / 知识库看不到"这一类问题。
+> manager 如何让 runtime-agent 把 Hermes 容器跑起来：创建链路、镜像同步、
+> input 目录、容器自渲染、挂载目录、知识库、渠道绑定和生命周期事件。
+> 读完本文应能独立排查“容器没起来 / 配置没生效 / 知识库看不到”这一类问题。
 
-## 1. 总览:一次 app 上线时发生了什么
+## 1. 总览：一次 app 上线时发生了什么
 
-时序(自上而下,数字与 `internal/worker/handlers/app_initialize.go` 的步骤
-顺序一致):
+时序（自上而下，数字与 `internal/worker/handlers/app_initialize.go` 的阶段
+顺序一致）：
 
-1. 组织成员注册或自助创建应用 → manager 写 `apps` 行,状态 `provisioning`,
-   入队 `app_initialize` job(payload 含 `app_id` + `runtime_node`)。
-2. worker 拉到 job 后,`AppInitializeHandler.Handle` 加载 app / org / owner /
-   runtime_node 上下文;状态已是 `running` / `binding_waiting` 直接返回幂等成功
-   (`app_initialize.go:240`)。
-3. `ImageDistributor.EnsureRuntimeImage` 把 Hermes runtime 镜像同步到目标节点
-   (`app_initialize.go:254`,实际走 `internal/runtime/imagesync/service.go`)。
+1. 组织成员注册或自助创建应用后，manager 写 `apps` 行，状态为
+   `provisioning`，并入队 `app_initialize` job。
+2. worker 拉到 job 后，`AppInitializeHandler.Handle` 加载 app / org / owner /
+   runtime_node 上下文；状态已是 `running` / `binding_waiting` 时直接返回幂等成功。
+3. `ImageDistributor.EnsureRuntimeImage` 把 Hermes runtime 镜像同步到目标节点，
+   实际走 `internal/runtime/imagesync/service.go`。
 4. `AgentDirInitializer.InitAppDirs` 通过 agent `POST /v1/scopes/apps/<id>/init`
-   预建 `.hermes/` `.hermes/workspace/` `knowledge/` 三个目录
-   (`app_initialize.go:262`、`runtime/agent/scopes.go:203`)。
-5. `ensureAPIKey` 在 new-api 上以"组织业务 user"身份创 token,拉完整 sk-,
-   加密后写 `apps.newapi_key_ciphertext`(`app_initialize.go:269`)。
-6. `writeHermesFiles` 把 `SOUL.md` / `config.yaml` / `.env` / 知识库展开后的
-   `skills/kb-{org,app}-<slug>/SKILL.md` 通过 `UploadAppRuntimeFile` PUT
-   到 agent `/v1/scopes/apps/<id>/runtime/file`(`app_initialize.go:279`、
-   `internal/integrations/agent/file_client.go:241`)。
-7. `ContainerCreator.CreateContainer` 通过 agent docker proxy 在节点上 create
-   容器(`app_initialize.go:318`、`internal/integrations/runtime/agent_backed.go:97`)。
-8. `ContainerStarter.StartContainer` 启动容器(`app_initialize.go:333`);
-   starter 实现 `HermesHealthChecker` 时再等 docker HEALTHCHECK 报 healthy
-   (`app_initialize.go:339`)。
-9. 推应用状态到 `binding_waiting`,写一条 audit log(`app_initialize.go:349`)。
-10. 后续渠道扫码绑定成功后,`ChannelLoginHandler` 把 `WEIXIN_*` 写进 `.env`
-    并 restart 容器,状态推到 `running`(`internal/worker/handlers/channel_login.go:231`)。
+   预建 app 目录。
+5. `ensureAPIKey` 在 new-api 上以“组织业务 user”身份创建 token，拉完整 sk-，
+   加密后写 `apps.newapi_key_ciphertext`。
+6. manager 只写中立输入：`manifest.yaml`、`resources/*.md`、知识库主副本镜像
+   到节点 `apps/<id>/input/`。这些文件由
+   `internal/integrations/hermes/app_input.go` 与 `writeKnowledgeIntoInput` 生成，
+   通过 agent `/v1/scopes/apps/<id>/input/file` 上传。
+7. `ContainerCreator.CreateContainer` 创建容器，挂载
+   `apps/<id>/input` 到 `/opt/oc-input`（只读），挂载 `apps/<id>/data` 到
+   `/opt/data`（可写）。
+8. `ContainerStarter.StartContainer` 启动容器；镜像入口
+   `oc-entrypoint` 读取 `/opt/oc-input`，在 `/opt/data` 内渲染
+   `config.yaml`、`SOUL.md`、`.env` 与 `skills/kb-*`，然后 exec
+   `hermes gateway run`。
+9. starter 实现 `HermesHealthChecker` 时，worker 等 docker HEALTHCHECK 报
+   healthy，再把应用状态推进到 `binding_waiting` 并写 audit log。
+10. 后续渠道扫码由容器内 `oc-channel-login --channel weixin` 完成；凭证落在
+    Hermes 自管的 `/opt/data/weixin/accounts/`。绑定成功后 manager 只重启容器，
+    让下一次 `oc-entrypoint` 从 Hermes 自管数据重新渲染 `.env`。
 
-涉及的代码文件一览:
+涉及的代码文件一览：
 
 | 角色 | 文件 |
 |---|---|
 | 编排 | `internal/worker/handlers/app_initialize.go` |
 | 镜像同步 | `internal/runtime/imagesync/service.go` |
 | 容器创建 / 启停 | `internal/integrations/runtime/agent_backed.go` |
-| Hermes 文件渲染 | `internal/integrations/hermes/{config.go,skills.go,prompt.go}` |
-| Hermes 配置文件上传 | `internal/integrations/agent/file_client.go` |
-| 容器内目录约定 | `runtime/hermes/Dockerfile`、`runtime/hermes/CONTRACT.md` |
+| input manifest / resources 生成 | `internal/integrations/hermes/app_input.go` |
+| input 文件上传 | `internal/integrations/agent/file_client.go` |
+| 容器内自渲染入口 | `runtime/hermes/hermes-v2026.5.16/oc-entrypoint.py` |
+| 容器内 renderer | `runtime/hermes/hermes-v2026.5.16/renderer/` |
+| 容器内目录约定 | `runtime/hermes/hermes-v2026.5.16/Dockerfile`、`runtime/hermes/hermes-v2026.5.16/CONTRACT.md` |
 | 节点 agent 文件 API | `runtime/agent/scopes.go` |
 | docker socket 反向代理 | `runtime/agent/proxy.go` |
 
-## 2. 镜像同步(imagesync)
+## 2. 镜像同步（imagesync）
 
 构建产物为 `hermes-runtime:v2026.5.16-dev`（本地 dev tag），由仓库内
 `runtime/hermes/hermes-v2026.5.16/Dockerfile` 构建。生产发布 tag 形如
-`oc-manager-hermes:v2026.5.16-2026-05-21-12-00-00` 这种时间戳 tag。镜像版本锁通过
+`crpi-nu3ibz4f07feyghi.cn-beijing.personal.cr.aliyuncs.com/ywjs_app/oc-manager-hermes:v2026.5.16-2026-05-21-12-00-00`
+这种时间戳 tag。镜像版本锁通过
 `runtime/hermes/hermes-v2026.5.16/version.txt` 与 Dockerfile `HERMES_REF`
 ARG 传入，Makefile 会拒绝 `main`、`master`、`latest` 等浮动 ref。
 
-`imagesync.Service.SyncRuntimeImage` 的对账逻辑(`internal/runtime/imagesync/service.go:64`):
+`imagesync.Service.SyncRuntimeImage` 的对账逻辑：
 
 1. `LocalImageProvider.ImageID` 读 manager 本机 `docker image inspect` 拿到
-   `localID`(image content digest)。
+   `localID`（image content digest）。
 2. `AgentImageClient.InspectImage` 通过 agent `GET /v1/images/inspect?image=<ref>`
-   拿到节点上的 `remote.ID`(`runtime/agent/main.go:393`)。
-3. `remote.Exists && remote.ID == localID` → 跳过同步,直接返回 `Transferred: false`。
-4. ID 不一致或节点无此镜像 → `LocalImageProvider.Archive` 流式 `docker save` 出 tar,
-   通过 agent `POST /v1/images/load?image=<ref>` 发到节点
-   (`runtime/agent/main.go:414`)。
-5. 节点 load 完成后再 inspect 一次;loaded.ID 与 localID 仍不一致直接报错,
-   阻止 `app_initialize` 拿错误镜像继续创建容器(`service.go:98`)。
+   拿到节点上的 `remote.ID`。
+3. `remote.Exists && remote.ID == localID` 时跳过同步，直接返回
+   `Transferred: false`。
+4. ID 不一致或节点无此镜像时，`LocalImageProvider.Archive` 流式
+   `docker save` 出 tar，通过 agent `POST /v1/images/load?image=<ref>` 发到节点。
+5. 节点 load 完成后再 inspect 一次；loaded.ID 与 localID 仍不一致直接报错，
+   阻止 `app_initialize` 拿错误镜像继续创建容器。
 
-对账锚点是 docker `ImageID`,**不是 tag**——重复用同一个 tag 推不同内容时,
+对账锚点是 docker `ImageID`，不是 tag。重复用同一个 tag 推不同内容时，
 imagesync 能识别并强制重新分发。
 
 ## 3. 容器创建参数
 
-入口:`ContainerCreator.CreateContainer`(实现 = `runtime.AgentBackedAdapter.CreateContainer`,
-`internal/integrations/runtime/agent_backed.go:97`),底层通过 agent
-`/v1/docker/*` 反向代理转发到节点 docker socket(`runtime/agent/proxy.go:39`)。
+入口：`ContainerCreator.CreateContainer`，实现为
+`runtime.AgentBackedAdapter.CreateContainer`，底层通过 agent `/v1/docker/*`
+反向代理转发到节点 docker socket。
 
 ### 3.1 环境变量
 
-下表列出 manager 直接注入 docker `Env` 与 `.env` 文件两种渠道的所有
-环境变量。**Hermes 启动时同时读取这两路**:`Env` 是 docker create 时的直接
-覆盖,`.env` 由 Hermes 进程自身加载。
+manager 不再通过 docker `Env` 或运行时文件 API 注入 `OPENAI_*`、`WEIXIN_*`
+等 Hermes schema。业务配置统一写入 `/opt/oc-input/manifest.yaml`，由
+`oc-entrypoint` 渲染到 `/opt/data/config.yaml`。
 
-| key | 含义 | 来源 | 何时追加 |
-|---|---|---|---|
-| `OPENAI_API_KEY` | new-api token(真实 sk-) | `ensureAPIKey` 解密自 `apps.newapi_key_ciphertext` | app 创建时(`Env` + `.env`) |
-| `OPENAI_BASE_URL` | new-api OpenAI 兼容 endpoint(`http://new-api:3000/v1`) | `AppInitializeConfig.NewAPIBaseURL` + `/v1` | app 创建时(`Env` + `.env`) |
-| `GATEWAY_ALLOW_ALL_USERS` | 固定 `true`,绕过 Hermes user pairing 流程 | 硬编码(`hermes/config.go:91`) | app 创建时(仅 `.env`) |
-| `WEIXIN_DM_POLICY` | 固定 `open`,允许微信平台接收未授权 DM | 硬编码(`hermes/config.go:91`) | app 创建时(仅 `.env`) |
-| `WEIXIN_ACCOUNT_ID` | 微信账号 ID(`<hex>@im.bot`) | 渠道扫码绑定时从 `oc-weixin-login` stdout JSON 提取 | 绑定后由 `ChannelLoginHandler` 重写 `.env` |
-| `WEIXIN_TOKEN` | 微信会话 token | 同上 | 同上 |
-| `WEIXIN_BASE_URL` | 微信平台 API base URL(默认 `https://weixin.novac2c.com`) | 同上 | 同上 |
-| `WEIXIN_CDN_BASE_URL` | 微信 CDN base URL(固定 `https://novac2c.cdn.weixin.qq.com/c2c`) | 硬编码(`hermes/config.go:100`) | 绑定后随其他 WEIXIN_* 一起写入 `.env` |
+容器启动时仍会产生 `/opt/data/.env`，但写入方是镜像内
+`renderer/render_env.py`：
 
-绑定流程关键细节:微信扫码 bound 事件触发时,handler 用 `RenderEnv` **重新生成
-完整 .env**(含 `OPENAI_*` + `GATEWAY_*` + `WEIXIN_DM_POLICY` + `WEIXIN_*`)
-并通过 `UploadAppRuntimeFile` 覆盖写,而不是追加,避免追加把 `OPENAI_*` 行漏掉
-(`channel_login.go:229`)。
+| key | 来源 | 何时写入 |
+|---|---|---|
+| `GATEWAY_ALLOW_ALL_USERS` | `render_env.py` 固定行为开关 | 每次容器启动时由 `oc-entrypoint` 写入 `.env` |
+| `WEIXIN_DM_POLICY` | `render_env.py` 固定行为开关 | 每次容器启动时由 `oc-entrypoint` 写入 `.env` |
+| `WEIXIN_ACCOUNT_ID` | `/opt/data/weixin/accounts/<account_id>.json` 文件名 | 微信账号已绑定后的下一次容器启动 |
+| `WEIXIN_TOKEN` | `/opt/data/weixin/accounts/<account_id>.json` 内容 | 微信账号已绑定后的下一次容器启动 |
+| `WEIXIN_BASE_URL` | `/opt/data/weixin/accounts/<account_id>.json` 内容，存在时写入 | 微信账号已绑定后的下一次容器启动 |
 
-`GATEWAY_ALLOW_ALL_USERS=true` 与 `WEIXIN_DM_POLICY=open` 在 spec / 部署
-文档里容易忽略,但 Hermes 容器化部署没有交互式 CLI 跑 `hermes pairing approve`,
-不带这两个变量首条消息直接被拒(参考 `hermes/config.go:80-86` 行内注释)。
+OpenAI 兼容 endpoint 与 sk- 不写 `.env`，而是来自
+`manifest.credentials.openai`，由 `renderer/render_config_yaml.py` 写入
+`config.yaml` 的 provider 配置。manager 只负责刷新 input，不直接维护
+Hermes 内部 schema 文件。
 
 ### 3.2 挂载
 
-容器只有一条 bind mount(`app_initialize.go:311-316`):
+容器有两条 bind mount：
 
-| HostPath | ContainerPath | 备注 |
-|---|---|---|
-| `<nodeDataRoot>/apps/<appID>/.hermes` | `/opt/data` | 全量 bind mount,Hermes 主目录。`nodeDataRoot` 取自 `runtime_nodes.node_data_root`,空则 fallback `/var/lib/oc-agent` |
+| HostPath | ContainerPath | 读写 | 备注 |
+|---|---|---|---|
+| `<nodeDataRoot>/apps/<appID>/input` | `/opt/oc-input` | ro | manager 写入的 manifest、rules、persona、knowledge 输入。 |
+| `<nodeDataRoot>/apps/<appID>/data` | `/opt/data` | rw | Hermes 主目录，包含渲染产物、workspace、日志、SQLite、渠道凭证等运行时数据。 |
 
-`Dockerfile` 里声明了 `VOLUME /opt/data`(`runtime/hermes/Dockerfile:49`),
-保证未 bind mount 时也能用匿名卷启动,但生产路径都是上面这条 bind。
+`Dockerfile` 里声明了 `VOLUME /opt/data`
+（`runtime/hermes/hermes-v2026.5.16/Dockerfile`），保证未 bind mount 时也能用
+匿名卷启动；生产路径使用上面的显式 bind。
 
-容器 `WorkingDir` 固定为 `/opt/data/workspace`(`app_initialize.go:304`),
-让 agent 默认在 workspace 子目录下执行 terminal / file 工具。
+容器 `WorkingDir` 固定为 `/opt/data/workspace`，让 agent 默认在 workspace
+子目录下执行 terminal / file 工具。
 
 ### 3.3 网络
 
-`ContainerSpec.Networks` 来自 `AppInitializeConfig.ContainerNetworks`,必须
-包含 new-api 所在 docker network,否则容器内 `http://new-api:3000` 无法解析
-(`app_initialize.go:131-133`)。
+`ContainerSpec.Networks` 来自 `AppInitializeConfig.ContainerNetworks`，必须包含
+new-api 所在 docker network，否则容器内 `http://new-api:3000` 无法解析。
 
 ### 3.4 容器命名
 
-固定为 `hermes-<appID>`(`app_initialize.go:297`)。
+固定为 `hermes-<appID>`。
 
 ### 3.5 健康检查
 
-镜像内 `HEALTHCHECK` 跑 `oc-healthcheck`,内部执行 `hermes gateway status`
-(`runtime/hermes/Dockerfile:46`、`runtime/hermes/scripts/healthcheck.sh`)。
+镜像内 `HEALTHCHECK` 跑 `oc-healthcheck`，内部执行 `hermes gateway status`
+（`runtime/hermes/hermes-v2026.5.16/Dockerfile`、
+`runtime/hermes/hermes-v2026.5.16/healthcheck.sh`）。
 `start-period=60s`、`interval=30s`、`timeout=10s`、`retries=3`。
 
 ## 4. 挂载目录结构
 
-容器内 `/opt/data` 与节点 `<nodeDataRoot>/apps/<appID>/.hermes/` 是同一份数据。
-按"来源"分类标注:
-
-- **[注入]** = manager 通过 agent `/v1/scopes/apps/<id>/runtime/file` PUT 写入
-- **[镜像]** = Hermes 镜像内置(install.sh 装好的资产,首次启动从镜像复制到挂载点)
-- **[运行时]** = Hermes 进程或其内部组件运行时生成
+容器内 `/opt/oc-input` 与节点 `<nodeDataRoot>/apps/<appID>/input/` 是同一份
+只读输入；容器内 `/opt/data` 与节点 `<nodeDataRoot>/apps/<appID>/data/`
+是同一份可写运行时数据。
 
 ```text
-/opt/data/                           # bind mount 根,= 节点 .hermes/
-├── SOUL.md                          # [注入] agent identity + system prompt(三层 platform + org + app + 知识库 always-on)
-├── config.yaml                      # [注入] model provider + auxiliary + memory + terminal.cwd
-├── .env                             # [注入] OPENAI_* + GATEWAY_* + WEIXIN_DM_POLICY(+ 绑定后 WEIXIN_*)
-├── bin/                             # [镜像] Hermes 内置可执行入口(install.sh 创建,首启复制到挂载点)
+/opt/oc-input/                       # [manager input] 只读挂载
+├── manifest.yaml                    # app/model/credentials/resources 索引
+└── resources/
+    ├── persona.md                   # manager 已替换占位符的人设输入
+    ├── platform-rules.md            # 平台规则输入
+    ├── organization-rules.md        # 组织规则输入
+    ├── application-rules.md         # 应用规则输入
+    └── knowledge/
+        ├── app/                     # 应用级知识库主副本镜像
+        └── org/                     # 组织级知识库主副本镜像
+
+/opt/data/                           # [Hermes data] 可写挂载
+├── SOUL.md                          # [oc-entrypoint] system prompt 渲染产物
+├── config.yaml                      # [oc-entrypoint] model provider / memory / cwd 配置
+├── .env                             # [oc-entrypoint] 行为开关 + 渠道凭证转译
+├── .oc-state.json                   # [oc-entrypoint] variant / manifest hash / render outputs
 ├── cache/
-│   ├── documents/                   # [运行时] Hermes 文档解析缓存
-│   └── images/                      # [运行时] Hermes 图片缓存
-├── channel_directory.json           # [运行时] 渠道目录运行时状态
+│   ├── documents/                   # [Hermes] 文档解析缓存
+│   └── images/                      # [Hermes] 图片缓存
+├── channel_directory.json           # [Hermes] 渠道目录运行时状态
 ├── cron/
-│   └── output/                      # [运行时] Hermes 定时任务输出
-├── gateway.lock                     # [运行时] 网关进程锁(每次启动重写)
-├── gateway_state.json               # [运行时] 网关运行状态快照
-├── kanban.db                        # [运行时] kanban 数据(SQLite)
-├── logs/
-│   ├── agent.log                    # [运行时] agent 主进程日志
-│   ├── curator/                     # [运行时] curator 子系统日志
-│   ├── errors.log                   # [运行时] 错误聚合日志
-│   ├── gateway.log                  # [运行时] 网关日志
-│   ├── gateway-exit-diag.log        # [运行时] 网关退出诊断
-│   └── gateway-shutdown-diag.log    # [运行时] 网关关停诊断
-├── memories/                        # [运行时] Hermes 长期记忆
+│   └── output/                      # [Hermes] 定时任务输出
+├── gateway.lock                     # [Hermes] 网关进程锁
+├── gateway_state.json               # [Hermes] 网关运行状态快照
+├── kanban.db                        # [Hermes] kanban 数据
+├── logs/                            # [Hermes] gateway / agent / error 日志
+├── memories/                        # [Hermes] 长期记忆
 ├── platforms/
-│   └── pairing/                     # [运行时] 平台配对状态
+│   └── pairing/                     # [Hermes] 平台配对状态
 ├── sandboxes/
-│   └── singularity/                 # [运行时] skill 执行沙盒
-├── sessions/                        # [运行时] 会话 jsonl / request_dump 等附属文件
-├── skills/                          # 混合归属,见 §5
-│   ├── apple/                       # [镜像] 内置技能类目
-│   ├── autonomous-ai-agents/        # [镜像]
-│   ├── creative/                    # [镜像]
-│   ├── devops/                      # [镜像]
-│   ├── github/                      # [镜像]
-│   ├── mlops/                       # [镜像]
-│   ├── ...                          # [镜像] 其他 Hermes 自带类目
-│   ├── kb-app-<slug>/               # [注入] 应用级知识库 → SKILL.md
-│   └── kb-org-<slug>/               # [注入] 组织级知识库 → SKILL.md
-├── state.db                         # [运行时] 主状态库(SQLite WAL,session/system_prompt 冻结存储)
-├── state.db-shm                     # [运行时] SQLite WAL shared memory
-├── state.db-wal                     # [运行时] SQLite WAL log
+│   └── singularity/                 # [Hermes] skill 执行沙盒
+├── sessions/                        # [Hermes] 会话 jsonl / request_dump 等附属文件
+├── skills/
+│   ├── kb-app-<slug>/               # [oc-entrypoint] 应用级知识库 → SKILL.md
+│   ├── kb-org-<slug>/               # [oc-entrypoint] 组织级知识库 → SKILL.md
+│   └── ...                          # [Hermes] 镜像内置 skill 类目
+├── state.db                         # [Hermes] 主状态库（SQLite WAL）
+├── state.db-shm
+├── state.db-wal
 ├── weixin/
-│   └── accounts/                    # [运行时] 微信账号 token / sync state(绑定后才出现)
-└── workspace/                       # [agent 预建] terminal.cwd,Hermes 工具产物落地点
+│   └── accounts/                    # [Hermes] 微信账号 token / sync state
+└── workspace/                       # [agent 预建] terminal.cwd 和工具产物落地点
 ```
 
-`runtime/hermes/CONTRACT.md` 列出了与 Hermes 上游约定的目录约定,本表与之
-保持一致。节点 agent 在 `handleAppInit` 时只显式 `MkdirAll` 三个目录
-(`.hermes/`、`.hermes/workspace/`、`knowledge/`,`runtime/agent/scopes.go:208`);
-其余子目录由 Hermes 启动时按需创建。
+节点 agent 在 scope 初始化时预建 app 目录；其余运行时子目录由
+`oc-entrypoint` 或 Hermes 进程按需创建。
 
 ## 5. skills/ 目录的混合归属
 
-`/opt/data/skills/` 是唯一一个"manager 注入 + 镜像自带"双重来源的目录:
+`/opt/data/skills/` 是“镜像内置 + input 渲染”双重来源目录：
 
-- manager 注入仅限 `kb-app-<slug>/` 与 `kb-org-<slug>/` 两类子目录,内部固定
-  只有一份 `SKILL.md`(由 `hermes.RenderKnowledgeSkill` 生成,
-  `internal/integrations/hermes/skills.go:57`)。
-- 其他类目(`apple/` `autonomous-ai-agents/` `creative/` `devops/` `github/`
-  `mlops/` ...)来自 Hermes 镜像 install.sh 装下来的内置 skill 库,首次容器
-  启动时由 Hermes 自身把这些目录复制到挂载点。
-- 知识库新增 / 修改时只写 `kb-*` 目录,**不会动**任何 Hermes 内置类目;反之,
-  Hermes 镜像升级覆写 `kb-*` 之外的内置类目时,manager 写入的知识库 skill
-  也不会被影响——双方在文件路径层面互不重叠。
+- `kb-app-<slug>/` 与 `kb-org-<slug>/` 由 `oc-entrypoint` 扫描
+  `/opt/oc-input/resources/knowledge/{app,org}/` 后生成，每个文件对应一份
+  `SKILL.md`。
+- 其他类目来自 Hermes 镜像安装的内置 skill 库，首次启动或镜像升级时由 Hermes
+  自身维护。
+- 知识库变更只影响 `kb-*` 目录，不改 Hermes 内置类目；镜像升级也不需要 manager
+  重写内置 skill。
 
-`slug` 由 `hermes.SlugifyKnowledgePath` 从主副本相对路径生成
-(`internal/integrations/hermes/skills.go:148`);例如组织级
-`policies/refund.md` → `kb-org-policies-refund/SKILL.md`。文件名含中文 / 全标点
-等 ASCII 之外字符时,该函数会 fallback 到 `kb-<sha256 前 12 hex>` 兜底,
-保证 slug 始终合规且对同一文件稳定。
+`slug` 由镜像内 `renderer/render_skills.py` 根据 input 知识库相对路径生成。
+文件名含中文或全标点等特殊字符时，renderer 会用 hash 兜底，保证目录名稳定且合法。
 
 ## 6. 工作目录如何定位
 
-- `config.yaml` 渲染时强制 `terminal.cwd = "/opt/data/workspace"`
-  (`internal/integrations/hermes/config.go:72`)。
-- 容器 `WorkingDir` 也固定为 `/opt/data/workspace`(`app_initialize.go:304`)。
-- 节点 agent 在 `handleAppInit` 时预建 `.hermes/workspace`(`scopes.go:210`),
-  保证 Hermes 第一次 `cd` 不会因目录缺失而失败。
-- manager workspace API(列目录 / 下载文件 / 打包 zip)读取的是节点
-  `apps/<id>/.hermes/workspace`,与容器内 `/opt/data/workspace` 是**同一份
-  物理数据**(`runtime/agent/scopes.go:127-131`)。
+- `config.yaml` 由 `oc-entrypoint` 渲染，强制 `terminal.cwd = "/opt/data/workspace"`。
+- 容器 `WorkingDir` 也固定为 `/opt/data/workspace`。
+- 节点 agent 在初始化时预建 workspace，保证 Hermes 第一次 `cd` 不会因目录缺失失败。
+- manager workspace API 读取的是节点 `apps/<id>/data/workspace`，与容器内
+  `/opt/data/workspace` 是同一份物理数据。
 
-也就是说宿主机 `.hermes/workspace` 与容器内 `/opt/data/workspace` 没有路径
-映射差异——manager 不再做历史上的双挂载与路径翻译。
+也就是说宿主机 data/workspace 与容器内 `/opt/data/workspace` 没有路径映射差异。
 
-## 7. 知识库链路:从 manager 主副本到 skills/kb-*
+## 7. 知识库链路：从 manager 主副本到 input，再到 skills/kb-*
 
 ### 7.1 主副本
 
-manager 端按以下路径组织主副本(由 `internal/files/knowledge_master.go` 或
-`internal/service/knowledge_service.go` 维护):
+manager 端按以下路径组织知识库主副本：
 
 ```text
 org/<orgID>/knowledge/              # 组织级
 org/<orgID>/app/<appID>/knowledge/  # 应用级
 ```
 
-`KnowledgeReader` 接口(`app_initialize.go:72`)抽象 `WalkFiles` 遍历 +
-`Open` 读取两个能力。
+`KnowledgeReader` 抽象 `WalkFiles` 遍历与 `Open` 读取两个能力。
 
-### 7.2 app 初始化时的批量渲染
+### 7.2 app 初始化时的 input 写入
 
-`app_initialize.go:485` 调 `writeSkillsFromKnowledge` →
-`uploadKnowledgeSkills`(`app_initialize.go:580`):
+初始化阶段，manager 将组织级与应用级知识库复制到节点
+`apps/<id>/input/resources/knowledge/{org,app}/`。manager 此时不生成
+`SOUL.md` 或 `skills/kb-*`；这些 Hermes 内部文件由容器启动时的
+`oc-entrypoint` 生成。
 
-1. `WalkFiles(prefix, ...)` 递归遍历主副本目录,每个文件回调一次。
-2. `hermes.SlugifyKnowledgePath(relPath)` 把相对路径展平成合法 slug。
-3. `hermes.RenderKnowledgeSkill` 渲染 frontmatter + body 得到 `SKILL.md`。
-4. `UploadAppRuntimeFile` PUT 到 agent
-   `/v1/scopes/apps/<id>/runtime/file?path=skills/kb-{org,app}-<slug>/SKILL.md`。
+`oc-entrypoint` 的渲染路径：
 
-同一份知识库内容还会被 `collectKnowledgeForSoul`(`app_initialize.go:500`)
-inline 进 `SOUL.md` 末尾作为 always-on context,确保即使 agent 没主动调
-`skill_view`,知识库内容也已在 system prompt 里。
+| input | output | 用途 |
+|---|---|---|
+| `manifest.yaml` | `config.yaml` | provider、model、memory、terminal.cwd 等 Hermes 配置 |
+| `resources/persona.md` + `resources/*-rules.md` | `SOUL.md` | system prompt 主体 |
+| `resources/knowledge/{app,org}/*` | `skills/kb-*/SKILL.md` | 大知识库按需深读 |
+| `resources/knowledge/{app,org}/*` | `SOUL.md` 末尾 inline | 必读规则 / 话术 always-on context |
 
-两条注入路径的对比:
+应用级知识库在渲染顺序上优先于组织级；`SOUL.md` inline 块会保留层级说明。
 
-| 路径 | 文件 | 触发时机 | 大小限制 | 用途 |
-|---|---|---|---|---|
-| `kb-*/SKILL.md` | 每个主副本文件一份,完整正文 | progressive disclosure:`skills_list` 列条目,`skill_view` 才装载主体 | 不截断 | 大知识库 / 按需深读 |
-| `SOUL.md` 末尾 inline | 单份合并 markdown,标 "应用级 / 组织级" 段 | always-on:进 system prompt 每轮可见 | **单文件超 8 KiB 截断**,提示"完整版见 `skills/kb-*-*/SKILL.md`" | 必读规则 / 话术,确保模型不主动 `skill_view` 也能命中 |
+### 7.3 增量同步与生效时机
 
-文档顺序:应用级在前、组织级在后,SOUL.md inline 块明示"应用级覆盖组织级"
-的优先级语义(spec §18)。
+知识库上传 / 删除会更新 manager 主副本，并把变化同步到节点 input 沙箱。
+但正在运行的 Hermes 不会热读 `SOUL.md` 与 `skills/kb-*`：这些文件在容器启动时
+由 `oc-entrypoint` 渲染。
 
-### 7.3 增量同步(legacy `knowledge/` 路径)
+最新内容进入对话的业务路径是 app restart / recreate：
 
-`knowledge_sync_node` job(`internal/worker/handlers/knowledge_sync.go`)按
-(scope, scopeID, relPath, change_type)单文件触发,通过 agent
-`PUT /v1/scopes/apps/<id>/knowledge/file?path=...` 或
-`PUT /v1/scopes/orgs/<id>/knowledge/file?path=...` 推送差异
-(`internal/integrations/agent/file_client.go` 同包内 `doKnowledgeFile`)。
+1. manager 先刷新节点 `apps/<id>/input/`，确保 `manifest.yaml` 与 resources 反映
+   当前 DB 与知识库主副本。
+2. 容器 stop 后清空 sessions 与 `state.db` 三件套。
+3. 容器 start 后，`oc-entrypoint` 重新渲染 `config.yaml`、`SOUL.md`、`.env`、
+   `skills/kb-*`。
+4. 新 session 启动时 snapshot 最新 `SOUL.md`。
 
-**注意**:增量同步走的是 legacy `knowledge/` 沙箱,即
-`<nodeDataRoot>/apps/<id>/knowledge/` 与
-`<nodeDataRoot>/orgs/<id>/knowledge/`;Hermes 容器内 `/opt/data` 挂载的是
-`.hermes/` 而非该 legacy 路径,所以**这条同步对容器内对话**不会立即生效。
+## 8. input vs 运行时生成（总表）
 
-最新内容进入对话的两条业务路径:
+表头说明：
 
-1. **app restart**(推荐):`AppRestartContainerHandler` 触发的 restart
-   先调 `HermesConfigRefresher.RefreshConfigYAML`(`cmd/server/wiring.go:175`),
-   后者除了重写 `config.yaml`,还会调 `refreshSkills` 重新渲染
-   `.hermes/skills/kb-*/SKILL.md`(`wiring.go:342`)与 `refreshSoulMD`
-   重新渲染 `SOUL.md`(`wiring.go:239`),最后清 session 让新 SOUL 进入下一轮
-   对话(参考 §9.4)。
-2. **app recreate / 重新初始化**:删容器 + 重走 `app_initialize`,
-   `writeHermesFiles` 会全量重新渲染所有注入文件。
+- **manager input**：manager 通过 agent input/file API 写入
+  `apps/<id>/input/`，容器只读。
+- **oc-entrypoint**：镜像入口每次启动时从 `/opt/oc-input` 与 Hermes 自管数据
+  渲染到 `/opt/data`。
+- **Hermes**：Hermes 进程或其平台组件运行时生成。
+- **agent 预建**：节点 agent 在 scope 初始化时创建。
 
-历史 `apps/<id>/knowledge/` 目录在 Hermes 时代主要作为 legacy sandbox
-保留,manager 当前不再在容器内读这条路径——Hermes 实际读的是
-`skills/kb-*/SKILL.md` 以及 `SOUL.md` 末尾的 always-on context。
-
-## 8. 注入 vs 运行时生成(总表)
-
-表头说明:
-
-- **来源**:`manager 注入` = 通过 agent file API PUT 写入;`镜像自带` =
-  Hermes 镜像 install.sh 装好、首启复制到挂载点;`agent 预建` = 节点 agent
-  在 `handleAppInit` 时 MkdirAll;`Hermes 生成` = Hermes 进程运行时产物。
-- **app restart 命令时的行为**:`AppRestartContainerHandler` 触发的 restart
-  按 stop → clear sessions → start 三步执行(参考 §9.4),途中会:
-  (1) 通过 `HermesConfigRefresher.RefreshConfigYAML` 重写 `config.yaml`、
-  重新渲染 `kb-*/SKILL.md`、重新渲染 `SOUL.md`;
-  (2) `ClearAppSessions` 删除 `sessions/` 与 `state.db` 三件套。
-  其它文件不动,留给 Hermes 进程下次启动自然继续使用。
-
-| 路径(以 `/opt/data/` 为根) | 来源 | 写入方 | 何时写 | app restart 命令行为 |
-|---|---|---|---|---|
-| `SOUL.md` | manager 注入 | `writeHermesFiles` + `hermesConfigRefresher.refreshSoulMD`(restart 时) | 创建 / restart | **重写为最新**(三层 prompt + 知识库 inline) |
-| `config.yaml` | manager 注入 | 同上 + `RefreshConfigYAML` | 创建 / restart | **重写为最新**(`config.yaml` 的 `model.default` 取自当前 `apps.model_id`) |
-| `.env` | manager 注入 | `writeHermesFiles` + `ChannelLoginHandler`(绑微信后) | 创建 / 渠道绑定时 | 不动(restart 不重写,避免擦掉 `WEIXIN_*`) |
-| `skills/kb-app-<slug>/SKILL.md` | manager 注入 | `writeSkillsFromKnowledge` + `hermesConfigRefresher.refreshSkills`(restart 时) | 创建 / restart | **重写为最新**(每次 restart 都从主副本重新渲染) |
-| `skills/kb-org-<slug>/SKILL.md` | manager 注入 | 同上 | 创建 / restart | **重写为最新** |
-| `skills/<非 kb-* 类目>/` | 镜像自带 | Hermes 首次启动复制 | 容器首次启动 | 不动 |
-| `bin/` | 镜像自带 | Hermes 首次启动复制 | 容器首次启动 | 不动 |
-| `workspace/` | agent 预建 | `handleAppInit`(`runtime/agent/scopes.go:210`) | scope 建立 / restart 前 `InitAppDirs` 幂等补建 | 不动(用户产物保留) |
-| `sessions/` | Hermes 生成 | Hermes 进程 | 运行时(request_dump、jsonl 等) | **整个目录被清**(commit `40f01a8`) |
-| `state.db` / `-shm` / `-wal` | Hermes 生成 | Hermes 进程(SQLite WAL) | 运行时(session history + 冻结的 system_prompt) | **三件套删除**,让新 session 重新 snapshot SOUL.md |
-| `memories/` | Hermes 生成 | Hermes 进程(用户偏好、稳定事实) | 运行时 | 不动(跨 session 持久) |
-| `logs/` | Hermes 生成 | Hermes 进程 | 运行时 | 不动 |
-| `kanban.db` | Hermes 生成 | Hermes 进程 | 运行时 | 不动 |
-| `gateway.lock` | Hermes 生成 | Hermes 进程 | 每次启动重写 | 不动(进程启动时自重写) |
-| `gateway_state.json` | Hermes 生成 | Hermes 进程 | 运行时 | 不动 |
-| `channel_directory.json` | Hermes 生成 | Hermes 进程 | 运行时 | 不动 |
-| `cache/{documents,images}/` | Hermes 生成 | Hermes 进程 | 运行时 | 不动 |
-| `cron/output/` | Hermes 生成 | Hermes 进程 | 运行时 | 不动 |
-| `sandboxes/singularity/` | Hermes 生成 | Hermes 进程(skill 执行) | 运行时 | 不动 |
-| `platforms/pairing/` | Hermes 生成 | Hermes 进程 | 运行时 | 不动 |
-| `weixin/accounts/` | Hermes 生成 | Hermes 微信平台 | 绑定后运行时 | 不动(保留 weixin session) |
+| 路径 | 来源 | 写入方 | app restart 行为 |
+|---|---|---|---|
+| `/opt/oc-input/manifest.yaml` | manager input | `hermes.WriteAppInput` | stop 前刷新为当前 DB 快照 |
+| `/opt/oc-input/resources/*.md` | manager input | `hermes.WriteAppInput` | stop 前刷新为当前 DB 快照 |
+| `/opt/oc-input/resources/knowledge/{app,org}/` | manager input | knowledge sync / init 写入 | stop 前保持为最新主副本镜像 |
+| `/opt/data/config.yaml` | oc-entrypoint | `renderer/render_config_yaml.py` | 容器 start 时重渲染 |
+| `/opt/data/SOUL.md` | oc-entrypoint | `renderer/render_soul_md.py` | 容器 start 时重渲染 |
+| `/opt/data/.env` | oc-entrypoint | `renderer/render_env.py` | 容器 start 时从 Hermes 自管渠道数据重渲染 |
+| `/opt/data/skills/kb-app-<slug>/SKILL.md` | oc-entrypoint | `renderer/render_skills.py` | 容器 start 时重渲染 |
+| `/opt/data/skills/kb-org-<slug>/SKILL.md` | oc-entrypoint | `renderer/render_skills.py` | 容器 start 时重渲染 |
+| `/opt/data/skills/<非 kb-* 类目>/` | Hermes 镜像 | Hermes 内置 skill 库 | 不由 manager 管理 |
+| `/opt/data/workspace/` | agent 预建 | `handleAppInit` | 不动，用户产物保留 |
+| `/opt/data/sessions/` | Hermes | Hermes 进程 | restart 时清空 |
+| `/opt/data/state.db` / `-shm` / `-wal` | Hermes | Hermes 进程 | restart 时删除，让新 session snapshot 最新 `SOUL.md` |
+| `/opt/data/memories/` | Hermes | Hermes 进程 | 不动，长期偏好与稳定事实保留 |
+| `/opt/data/logs/` | Hermes | Hermes 进程 | 不动 |
+| `/opt/data/kanban.db` | Hermes | Hermes 进程 | 不动 |
+| `/opt/data/weixin/accounts/` | Hermes | `oc-channel-login` / Hermes 微信平台 | 不动，`oc-entrypoint` 下次启动转译为 `.env` |
 
 ## 9. 生命周期事件
 
 ### 9.1 启动
 
-容器启动入口为 `tini -g -- hermes gateway run`(`runtime/hermes/Dockerfile:51`)。
-Hermes 启动时:
+容器启动入口为 `tini -g -- /usr/local/bin/oc-entrypoint`
+（`runtime/hermes/hermes-v2026.5.16/Dockerfile`）。`oc-entrypoint` 执行：
 
-- 读 `/opt/data/.env` 装载凭证。
-- 读 `/opt/data/config.yaml` 取 model provider 配置(`base_url` 指向 new-api、
-  `api_key` 真实 sk-)。
-- 读 `/opt/data/SOUL.md` 作为 system prompt(冻结存进 `state.db`)。
-- 扫描 `/opt/data/skills/` 注册 skill(含 manager 注入的 `kb-*`)。
-- 节点 agent 已预建 `/opt/data/workspace`,容器进程启动 cwd 即此目录。
+1. 读取 `/opt/oc-input/manifest.yaml`。
+2. 读取 `/opt/data/.oc-state.json`，决定是否需要 variant 迁移。
+3. 渲染 `/opt/data/config.yaml`、`/opt/data/.env`、`/opt/data/SOUL.md`、
+   `/opt/data/skills/kb-*`。
+4. 写回 `.oc-state.json`，记录 variant、manifest hash、渲染产物。
+5. exec `hermes gateway run`。
 
-`AppInitializeHandler` 在调 `StartContainer` 之后,若 starter 实现
-`HermesHealthChecker` 接口,会轮询 `docker inspect` 等待 `State.Health.Status`
-变为 `healthy`,最多 120s(`app_initialize.go:339-344`)。
+Hermes gateway 随后读取 `/opt/data/config.yaml`、`/opt/data/.env`、
+`/opt/data/SOUL.md` 与 `/opt/data/skills/`，并在新 session 中冻结当前
+system prompt。
 
 ### 9.2 停止
 
-调用 `AgentBackedAdapter.StopContainer`(`agent_backed.go:133`),给 docker
-30s 优雅退出窗口(`containerStopTimeout = 30`)。挂载内容全部保留——下次
-启动时 Hermes 会继续读现有 `state.db` / `sessions/` 等运行时数据。
+调用 `AgentBackedAdapter.StopContainer`，给 docker 30s 优雅退出窗口。
+挂载内容全部保留；下次启动时 `oc-entrypoint` 会基于现有 Hermes data 与最新
+input 重新渲染。
 
 ### 9.3 app_health_check 自动拉起
 
-`AppHealthCheckHandler`(`internal/worker/handlers/app_health_check.go`)
-通过 `docker inspect` 拿到容器 `Status` + `Health.Status`:
+`AppHealthCheckHandler` 通过 `docker inspect` 拿到容器 `Status` 与
+`Health.Status`：
 
-- `Status != "running"`:被 docker 重启 / OOM / 节点重启等基础设施事件
-  意外停掉。在 `restart_policy` budget 内主动调 `StartContainer` 自愈,
-  超 budget 才推 `apps.status = error`(`app_health_check.go:110-143`)。
-- `Status = "running"` 且 `Health = "healthy"`:写 `last_success_at`。
-- `Status = "running"` 但 `Health != "healthy"`:累计 failures,超 budget
-  推 `error`(不自动重启,等下一周期或人工干预)。
+- `Status != "running"`：在 `restart_policy` budget 内主动调 `StartContainer`
+  自愈，超 budget 才推 `apps.status = error`。
+- `Status = "running"` 且 `Health = "healthy"`：写 `last_success_at`。
+- `Status = "running"` 但 `Health != "healthy"`：累计 failures，超 budget
+  推 `error`。
 
-### 9.4 app restart 命令清空 session
+### 9.4 app restart 命令
 
-`AppRestartContainerHandler`(`internal/worker/handlers/app_runtime_ops.go:232`)
-按 `RefreshConfigYAML → stop → clear sessions → start` 顺序执行,而不是
-原子 docker restart。完整步骤:
+`AppRestartContainerHandler` 按“刷新 input → stop → clear sessions → start”
+执行，而不是依赖 manager 重写 Hermes 内部 schema：
 
-1. `RefreshConfigYAML`(`app_runtime_ops.go:250`,实现见 `wiring.go:175`):
-   - 重写 `/opt/data/config.yaml`(取 `apps.model_id` 最新值);
-   - `refreshSkills`(`wiring.go:342`)重新渲染 `kb-*/SKILL.md`;
-   - `refreshSoulMD`(`wiring.go:239`)重新渲染 `SOUL.md`(含知识库 inline)。
-2. `StopContainer`(`app_runtime_ops.go:261`,30s 优雅退出窗口):
-   `state.db` 持有 SQLite 文件锁,必须停容器后才能安全删除。
-3. `ClearAppSessions`(`app_runtime_ops.go:264`,实现 = agent
-   `DELETE /v1/scopes/apps/<id>/sessions`,`scopes.go:629`):
-   删除 `sessions/` 目录 + `state.db` / `-shm` / `-wal` 三件套。
-4. `StartContainer`(`app_runtime_ops.go:267`):容器启动后 Hermes 重建
-   `state.db`,新 session 启动时 snapshot 最新 SOUL.md。
+1. `AppInputRefresher.RefreshAppInput` 把节点 `apps/<id>/input/manifest.yaml` 与
+   `resources/*.md` 刷新成当前 DB 快照。
+2. `StopContainer` 停容器；`state.db` 持有 SQLite 文件锁，必须停容器后才能安全删除。
+3. `ClearAppSessions` 删除 `sessions/` 目录与 `state.db` / `-shm` / `-wal`。
+4. `StartContainer` 后，`oc-entrypoint` 重新渲染 `/opt/data` 内的 Hermes 文件。
 
-为什么必须清 session:Hermes 把 `system_prompt` 在 session 启动时冻结存进
-`state.db`(SQLite `sessions` 表的 `system_prompt` 字段),会话延续期间不
-刷新。配置变更类操作(改 model / persona / 知识库 / 重启)如果只 restart
-不清 session,旧 session 仍用冻结的旧 SOUL.md,新 SKILL.md 也不进对话。
-`memories/` 不在清空范围,长期偏好与稳定事实跨 session 保留。
+为什么必须清 session：Hermes 把 `system_prompt` 在 session 启动时冻结存进
+SQLite。配置变更类操作（改 model / persona / 知识库 / 重启）如果只 restart
+不清 session，旧 session 仍用冻结的旧 `SOUL.md`。`memories/` 不在清空范围，
+长期偏好与稳定事实跨 session 保留。
 
-未注入 `SessionCleaner` 时(旧装配 / 测试装配)退回原子 `RestartContainer`,
-保持向后兼容(`app_runtime_ops.go:270-274`)。
+未注入 `SessionCleaner` 时会退回原子 `RestartContainer`，仅用于旧装配或测试装配兼容。
 
-### 9.5 配置变更触发的重新注入
+### 9.5 配置变更触发
 
-| 变更类型 | manager 入口 | 触发的重新注入 | 容器是否 restart |
+| 变更类型 | manager 入口 | manager 做什么 | 容器如何生效 |
 |---|---|---|---|
-| 模型变更(`UpdateModel`) | `PATCH /apps/<id>/model` | `config.yaml`(`model.default`)、`SOUL.md`、`skills/kb-*/` | **是**(restart job 内 refresher 跑完后 stop → clear sessions → start) |
-| 渠道绑定成功(扫码 bound) | `ChannelLoginHandler`(`channel_login.go:229-256`) | `.env` 全量重写(`OPENAI_*` + `GATEWAY_*` + `WEIXIN_DM_POLICY` + `WEIXIN_*`) | 是(handler 内调 `RestartContainer`) |
-| 知识库变更(上传 / 删除) | `KnowledgeService.SaveOrgFile` / `SaveAppFile` / `DeleteOrgFile` / `DeleteAppFile` | 主副本 + legacy `knowledge/` 沙箱(容器内不读) | **否**——对话级生效需用户显式走 app restart,refresher 再重新渲染 `kb-*/SKILL.md` + `SOUL.md` |
-| Hermes runtime 镜像升级 | manager 本地 build / push 后下次 `app_initialize` | `imagesync.SyncRuntimeImage` 拉新镜像 | 是(走 recreate 路径,所有注入文件全量重写) |
+| 模型变更 | `PATCH /apps/<id>/model` | 入队 restart；restart 前刷新 input | `oc-entrypoint` 重新渲染 `config.yaml` 与 `SOUL.md` |
+| prompt / persona 变更 | 对应业务写 DB 后 restart | restart 前刷新 input resources | `oc-entrypoint` 重新渲染 `SOUL.md` |
+| 渠道绑定成功 | channel login / check binding job | 标记 binding，重启容器 | `oc-channel-login` 已落盘账号；`oc-entrypoint` 下次启动渲染 `.env` |
+| 知识库变更 | `KnowledgeService.Save*` / `Delete*` | 更新主副本与 input knowledge | restart 后 `oc-entrypoint` 重渲染 `skills/kb-*` 与 `SOUL.md` |
+| Hermes runtime 镜像升级 | manager 本地 build / push 后下次初始化 | `imagesync.SyncRuntimeImage` 分发新镜像 | recreate / start 时由新镜像入口自渲染 |
 
 ## 10. 排查 cheatsheet
 
 | 现象 | 第一步看 | 关键命令 / 路径 |
 |---|---|---|
-| 容器没起来 | `app_initialize` job 失败记录 | manager-api 日志搜 `runtime_node` + `app_id`;前端"应用详情" 看最近 audit log |
-| 镜像同步失败 | `imagesync` 调用 | manager-api 日志 `inspect remote image` / `load remote image`;在节点跑 `docker images hermes-runtime:v2026.5.16-dev` 对比 ID |
-| 环境变量没生效 | docker inspect | 进节点跑 `docker inspect hermes-<appID> --format '{{.Config.Env}}'`,确认 `OPENAI_API_KEY` 是否真实 sk- 而非占位符 |
-| .env 没有 WEIXIN_* | `ChannelLoginHandler` 是否触发 | manager-api 日志搜 `weixin_account_id`;查 `apps.<id>.channel_bindings` 状态;节点上 `cat <nodeDataRoot>/apps/<appID>/.hermes/.env` |
-| 知识库看不到 | `skills/kb-*` 是否注入 | 节点上 `ls <nodeDataRoot>/apps/<appID>/.hermes/skills/`;`SOUL.md` 末尾是否有 always-on context |
-| 改了知识库对话不变 | 缓存来自老 session | 走"重启应用",`ClearAppSessions` 会清 `state.db` |
-| workspace 不存在 | agent `handleAppInit` 是否成功 | 节点 agent 日志搜 `/v1/scopes/apps/<id>/init`;失败时 `apps.workspace` API 返回空目录但 cwd 拉起会报错 |
-| 容器频繁被拉起 | `restart_policy` budget 是否在 trip | 查 `apps.health_state_json` 字段;`Failures` 数组长度接近 `MaxPerWindow` 时已熔断为 `status=error` |
-| docker proxy 401 / 403 | agent token / IP 白名单 | manager-api 日志搜 `agent token 校验失败` 或 `源 IP 不在白名单内`(`runtime/agent/proxy.go:205-211`) |
-| HEALTHCHECK 卡 starting | gateway 启动慢 / iLink 连接失败 | 节点跑 `docker exec hermes-<id> hermes gateway status`;看 `/opt/data/logs/gateway.log` 与 `gateway-exit-diag.log` |
+| 容器没起来 | `app_initialize` job 失败记录 | manager-api 日志搜 `runtime_node` + `app_id`；前端“应用详情”看最近 audit log |
+| 镜像同步失败 | `imagesync` 调用 | manager-api 日志 `inspect remote image` / `load remote image`；在节点跑 `docker images hermes-runtime:v2026.5.16-dev` 对比 ID |
+| input 没刷新 | restart job 日志 | 节点看 `<nodeDataRoot>/apps/<appID>/input/manifest.yaml` 与 `resources/` 时间戳 |
+| `config.yaml` 没生效 | `oc-entrypoint` 渲染日志 | 节点看 `<nodeDataRoot>/apps/<appID>/data/.oc-state.json` 的 `manifest_sha256` 与 `renderer_outputs` |
+| `.env` 没有 `WEIXIN_*` | 容器侧账号文件 | 节点看 `<nodeDataRoot>/apps/<appID>/data/weixin/accounts/` 是否存在账号 JSON；再看重启后的 `data/.env` |
+| 知识库看不到 | input 与 renderer outputs | 节点看 `input/resources/knowledge/` 与 `data/skills/kb-*`；确认重启后新 session 已创建 |
+| 改了知识库对话不变 | session 缓存 | 走“重启应用”，`ClearAppSessions` 会清 `state.db` |
+| workspace 不存在 | agent `handleAppInit` 是否成功 | 节点 agent 日志搜 `/v1/scopes/apps/<id>/init`；失败时 workspace API 返回空目录但 cwd 拉起会报错 |
+| 容器频繁被拉起 | `restart_policy` budget 是否 trip | 查 `apps.health_state_json`；`Failures` 数组长度接近 `MaxPerWindow` 时已熔断为 `status=error` |
+| docker proxy 401 / 403 | agent token / IP 白名单 | manager-api 日志搜 `agent token 校验失败` 或 `源 IP 不在白名单内` |
+| HEALTHCHECK 卡 starting | gateway 启动慢 / iLink 连接失败 | 节点跑 `docker exec hermes-<id> hermes gateway status`；看 `/opt/data/logs/gateway.log` 与 `gateway-exit-diag.log` |
 
-更多依赖文档:
+更多依赖文档：
 
-- [架构总览](./architecture.md):manager / agent / Hermes 的整体拓扑
-- [runtime-agent 工作原理](./runtime-agent.md):agent 自动注册、心跳、docker proxy
-- [配置参考](./configuration.md):`manager.yaml` 里 `runtime` / `hermes` 节段字段
-- [运维手册](../deploy/operations.md):节点 `state_dir` / `data_root` 备份与升级
+- [架构总览](./architecture.md)：manager / agent / Hermes 的整体拓扑
+- [runtime-agent 工作原理](./runtime-agent.md)：agent 自动注册、心跳、docker proxy
+- [配置参考](./configuration.md)：`manager.yaml` 里 `runtime` / `hermes` 节段字段
+- [运维手册](../deploy/operations.md)：节点 `state_dir` / `data_root` 备份与升级

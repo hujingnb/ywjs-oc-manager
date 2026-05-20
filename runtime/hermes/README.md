@@ -17,7 +17,7 @@
 
 ```bash
 make build-hermes-runtime                         # 本地 dev，输出 hermes-runtime:v2026.5.16-dev
-make build-hermes-image                           # 生产镜像，输出 oc-manager-hermes:v2026.5.16-2026-05-21-12-00-00 这种时间戳 tag
+make build-hermes-image                           # 生产镜像，输出 crpi-nu3ibz4f07feyghi.cn-beijing.personal.cr.aliyuncs.com/ywjs_app/oc-manager-hermes:v2026.5.16-2026-05-21-12-00-00 这种时间戳 tag
 make release-hermes-image                         # 构建 + 推送
 make build-hermes-runtime HERMES_VARIANT=hermes-v2026.5.16
 ```
