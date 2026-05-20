@@ -6,5 +6,5 @@ set -euo pipefail
 
 image="${HERMES_RUNTIME_IMAGE:-hermes-runtime:v2026.5.16-dev}"
 
-docker run --rm "$image" --version >/dev/null
+docker run --rm --entrypoint hermes "$image" --version >/dev/null
 echo "Hermes runtime 镜像验证通过:${image}"
