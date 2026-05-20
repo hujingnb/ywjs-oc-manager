@@ -1,21 +1,23 @@
-// Package handlers —— hermes_kanban.go 暴露实例任务看板的 HTTP 读端点。
-// 写端点（CreateTask / Comment / Complete / Block / Unblock / Archive / Reassign / Reclaim）
-// 与 SSE 事件流端点（StreamEvents）的方法体由 Task D4 实现；本文件 D3 阶段仅实现
-// 5 个读端点，写端点路由与接口声明已准备好，方法体留 TODO(D4) 占位。
+// Package handlers —— hermes_kanban.go 暴露实例任务看板的 HTTP 端点。
+// 包含全部读端点（boards/tasks/show/runs/stats）、写端点（create/comment/complete/
+// block/unblock/archive/reassign/reclaim）以及 SSE 实时事件流端点（events）。
 package handlers
 
 import (
 	"context"
+	"errors"
 	"net/http"
 
 	"github.com/gin-gonic/gin"
 
+	"oc-manager/internal/api/apierror"
 	"oc-manager/internal/auth"
+	"oc-manager/internal/domain"
 	"oc-manager/internal/service"
 )
 
 // hermesKanbanService 抽象 handler 依赖的 Kanban 业务能力，便于单测注入 stub。
-// 包含全部读/写/流方法，写方法体由 D4 实现，但接口在此声明完整以便路由注册可引用。
+// 包含全部读/写/流方法。
 type hermesKanbanService interface {
 	// 读方法
 	ListBoards(ctx context.Context, p auth.Principal, appID string) ([]service.KanbanBoard, error)
@@ -23,9 +25,9 @@ type hermesKanbanService interface {
 	ShowTask(ctx context.Context, p auth.Principal, appID, board, taskID string) (service.KanbanTaskDetail, error)
 	TaskRuns(ctx context.Context, p auth.Principal, appID, board, taskID string) ([]service.KanbanTaskRun, error)
 	Stats(ctx context.Context, p auth.Principal, appID, board string) (service.KanbanStats, error)
-	// 流方法（方法体 D4 实现）
+	// 流方法
 	StreamEvents(ctx context.Context, p auth.Principal, appID, board string, onLine func(string)) error
-	// 写方法（方法体 D4 实现）
+	// 写方法
 	CreateTask(ctx context.Context, p auth.Principal, appID string, in service.CreateKanbanTaskInput) (service.KanbanTaskDetail, error)
 	Comment(ctx context.Context, p auth.Principal, appID, board, taskID, body string) error
 	Complete(ctx context.Context, p auth.Principal, appID, board, taskID, result string) error
@@ -47,17 +49,17 @@ func NewHermesKanbanHandler(svc hermesKanbanService) *HermesKanbanHandler {
 }
 
 // RegisterHermesKanbanRoutes 注册任务看板路由。
-// 读端点（D3）已完整实现；写端点和事件流路由已注册，方法体 TODO(D4) 补全。
 func RegisterHermesKanbanRoutes(router gin.IRouter, h *HermesKanbanHandler) {
 	g := router.Group("/api/v1/apps/:appId/hermes/kanban")
-	// 读端点（D3 实现）
+	// 读端点
 	g.GET("/boards", h.ListBoards)
 	g.GET("/tasks", h.ListTasks)
 	g.GET("/tasks/:taskId", h.ShowTask)
 	g.GET("/tasks/:taskId/runs", h.TaskRuns)
 	g.GET("/stats", h.Stats)
-	// TODO(D4): 写端点与事件流端点路由已注册，方法体 D4 补全
+	// SSE 事件流端点（board 级订阅，不带 taskId）
 	g.GET("/events", h.StreamEvents)
+	// 写端点
 	g.POST("/tasks", h.CreateTask)
 	g.POST("/tasks/:taskId/comment", h.Comment)
 	g.POST("/tasks/:taskId/complete", h.Complete)
@@ -75,7 +77,7 @@ func writeKanbanError(c *gin.Context, err error) {
 }
 
 // ————————————————————————————————————————————————————
-// D3：读端点
+// 读端点
 // ————————————————————————————————————————————————————
 
 // ListBoards GET /api/v1/apps/{appId}/hermes/kanban/boards
@@ -199,39 +201,95 @@ func (h *HermesKanbanHandler) Stats(c *gin.Context) {
 }
 
 // ————————————————————————————————————————————————————
-// TODO(D4)：写端点与事件流端点方法体（路由已注册，实现留待 D4）
+// SSE 事件流端点
 // ————————————————————————————————————————————————————
 
 // StreamEvents GET /api/v1/apps/{appId}/hermes/kanban/events
 //
 // @Summary      订阅任务看板实时事件流（SSE）
+// @Description  以 Server-Sent Events 推送 hermes kanban watch 的 NDJSON 事件。board 维度订阅。
 // @Tags         hermes-kanban
 // @Produce      text/event-stream
 // @Security     BearerAuth
 // @Param        appId  path   string  true   "应用 ID"
 // @Param        board  query  string  false  "board slug"
+// @Success      200
 // @Router       /apps/{appId}/hermes/kanban/events [get]
 func (h *HermesKanbanHandler) StreamEvents(c *gin.Context) {
-	// TODO(D4): 实现 SSE 推送，调用 h.service.StreamEvents 并转 text/event-stream。
-	c.JSON(http.StatusNotImplemented, gin.H{"code": "NOT_IMPLEMENTED", "message": "事件流端点将在 D4 实现"})
+	// 设置 SSE 所需响应头：禁止缓存、保持长连接、禁止反代缓冲。
+	c.Header("Content-Type", "text/event-stream")
+	c.Header("Cache-Control", "no-cache")
+	c.Header("Connection", "keep-alive")
+	c.Header("X-Accel-Buffering", "no")
+
+	// 检查 ResponseWriter 是否支持 Flusher；不支持时无法做流式推送。
+	flusher, ok := c.Writer.(http.Flusher)
+	if !ok {
+		c.JSON(http.StatusInternalServerError, apierror.New("INTERNAL", "服务端不支持流式响应"))
+		return
+	}
+
+	err := h.service.StreamEvents(c.Request.Context(), principalFromCtx(c), c.Param("appId"), c.Query("board"), func(line string) {
+		// 每行 NDJSON 包成一个 SSE data 事件推给客户端。
+		_, _ = c.Writer.WriteString("data: " + line + "\n\n")
+		flusher.Flush()
+	})
+	if err != nil && !errors.Is(err, context.Canceled) {
+		// 流已开始（响应头已发送），无法再改 HTTP 状态码，
+		// 写一个 error 事件让客户端感知异常后关闭连接。
+		_, _ = c.Writer.WriteString("event: error\ndata: " + err.Error() + "\n\n")
+		flusher.Flush()
+	}
 }
+
+// ————————————————————————————————————————————————————
+// 写端点
+// ————————————————————————————————————————————————————
 
 // CreateTask POST /api/v1/apps/{appId}/hermes/kanban/tasks
 //
 // @Summary      新建任务
+// @Description  创建一个 Kanban 任务。Skills/WorkspaceKind/WorkspacePath/ParentID/MaxRetries 仅平台管理员可生效。
 // @Tags         hermes-kanban
 // @Accept       json
 // @Produce      json
 // @Security     BearerAuth
-// @Param        appId  path   string                   true  "应用 ID"
-// @Param        body   body   CreateKanbanTaskRequest  true  "新建任务请求"
+// @Param        appId  path      string                   true  "应用 ID"
+// @Param        body   body      CreateKanbanTaskRequest  true  "新建任务请求"
 // @Success      200    {object}  map[string]service.KanbanTaskDetail
 // @Failure      400    {object}  ErrorResponse
 // @Failure      403    {object}  ErrorResponse
 // @Router       /apps/{appId}/hermes/kanban/tasks [post]
 func (h *HermesKanbanHandler) CreateTask(c *gin.Context) {
-	// TODO(D4): 解析 CreateKanbanTaskRequest，按 principal.Role 过滤高级字段，调用 service.CreateTask。
-	c.JSON(http.StatusNotImplemented, gin.H{"code": "NOT_IMPLEMENTED", "message": "新建任务端点将在 D4 实现"})
+	var req CreateKanbanTaskRequest
+	if err := c.ShouldBindJSON(&req); err != nil {
+		writeBindError(c, err)
+		return
+	}
+	principal := principalFromCtx(c)
+	// 基础字段所有可写角色均可填写。
+	in := service.CreateKanbanTaskInput{
+		Board:    req.Board,
+		Title:    req.Title,
+		Body:     req.Body,
+		Assignee: req.Assignee,
+		Priority: req.Priority,
+	}
+	// 高级字段仅平台管理员生效：非平台管理员提交的高级字段被静默丢弃（spec §5.5）。
+	// 避免普通成员通过 API 绕过 UI 注入高级配置。
+	if principal.Role == domain.UserRolePlatformAdmin {
+		in.Skills = req.Skills
+		in.WorkspaceKind = req.WorkspaceKind
+		in.WorkspacePath = req.WorkspacePath
+		in.ParentID = req.ParentID
+		in.MaxRetries = req.MaxRetries
+	}
+	detail, err := h.service.CreateTask(c.Request.Context(), principal, c.Param("appId"), in)
+	if err != nil {
+		writeKanbanError(c, err)
+		return
+	}
+	c.JSON(http.StatusOK, gin.H{"task": detail})
 }
 
 // Comment POST /api/v1/apps/{appId}/hermes/kanban/tasks/{taskId}/comment
@@ -241,14 +299,25 @@ func (h *HermesKanbanHandler) CreateTask(c *gin.Context) {
 // @Accept       json
 // @Produce      json
 // @Security     BearerAuth
-// @Param        appId   path   string                true  "应用 ID"
-// @Param        taskId  path   string                true  "任务 ID"
-// @Param        body    body   KanbanCommentRequest  true  "评论请求"
+// @Param        appId   path      string                true  "应用 ID"
+// @Param        taskId  path      string                true  "任务 ID"
+// @Param        body    body      KanbanCommentRequest  true  "评论请求"
 // @Success      204
+// @Failure      400    {object}  ErrorResponse
+// @Failure      403    {object}  ErrorResponse
 // @Router       /apps/{appId}/hermes/kanban/tasks/{taskId}/comment [post]
 func (h *HermesKanbanHandler) Comment(c *gin.Context) {
-	// TODO(D4): 解析 KanbanCommentRequest，调用 service.Comment。
-	c.JSON(http.StatusNotImplemented, gin.H{"code": "NOT_IMPLEMENTED", "message": "评论端点将在 D4 实现"})
+	var req KanbanCommentRequest
+	if err := c.ShouldBindJSON(&req); err != nil {
+		writeBindError(c, err)
+		return
+	}
+	err := h.service.Comment(c.Request.Context(), principalFromCtx(c), c.Param("appId"), req.Board, c.Param("taskId"), req.Body)
+	if err != nil {
+		writeKanbanError(c, err)
+		return
+	}
+	c.Status(http.StatusNoContent)
 }
 
 // Complete POST /api/v1/apps/{appId}/hermes/kanban/tasks/{taskId}/complete
@@ -258,14 +327,25 @@ func (h *HermesKanbanHandler) Comment(c *gin.Context) {
 // @Accept       json
 // @Produce      json
 // @Security     BearerAuth
-// @Param        appId   path   string                  true  "应用 ID"
-// @Param        taskId  path   string                  true  "任务 ID"
-// @Param        body    body   KanbanCompleteRequest   true  "完成请求"
+// @Param        appId   path      string                  true  "应用 ID"
+// @Param        taskId  path      string                  true  "任务 ID"
+// @Param        body    body      KanbanCompleteRequest   true  "完成请求"
 // @Success      204
+// @Failure      400    {object}  ErrorResponse
+// @Failure      403    {object}  ErrorResponse
 // @Router       /apps/{appId}/hermes/kanban/tasks/{taskId}/complete [post]
 func (h *HermesKanbanHandler) Complete(c *gin.Context) {
-	// TODO(D4): 解析 KanbanCompleteRequest，调用 service.Complete。
-	c.JSON(http.StatusNotImplemented, gin.H{"code": "NOT_IMPLEMENTED", "message": "完成端点将在 D4 实现"})
+	var req KanbanCompleteRequest
+	if err := c.ShouldBindJSON(&req); err != nil {
+		writeBindError(c, err)
+		return
+	}
+	err := h.service.Complete(c.Request.Context(), principalFromCtx(c), c.Param("appId"), req.Board, c.Param("taskId"), req.Result)
+	if err != nil {
+		writeKanbanError(c, err)
+		return
+	}
+	c.Status(http.StatusNoContent)
 }
 
 // Block POST /api/v1/apps/{appId}/hermes/kanban/tasks/{taskId}/block
@@ -275,14 +355,25 @@ func (h *HermesKanbanHandler) Complete(c *gin.Context) {
 // @Accept       json
 // @Produce      json
 // @Security     BearerAuth
-// @Param        appId   path   string              true  "应用 ID"
-// @Param        taskId  path   string              true  "任务 ID"
-// @Param        body    body   KanbanBlockRequest  true  "阻塞请求"
+// @Param        appId   path      string              true  "应用 ID"
+// @Param        taskId  path      string              true  "任务 ID"
+// @Param        body    body      KanbanBlockRequest  true  "阻塞请求"
 // @Success      204
+// @Failure      400    {object}  ErrorResponse
+// @Failure      403    {object}  ErrorResponse
 // @Router       /apps/{appId}/hermes/kanban/tasks/{taskId}/block [post]
 func (h *HermesKanbanHandler) Block(c *gin.Context) {
-	// TODO(D4): 解析 KanbanBlockRequest，调用 service.Block。
-	c.JSON(http.StatusNotImplemented, gin.H{"code": "NOT_IMPLEMENTED", "message": "阻塞端点将在 D4 实现"})
+	var req KanbanBlockRequest
+	if err := c.ShouldBindJSON(&req); err != nil {
+		writeBindError(c, err)
+		return
+	}
+	err := h.service.Block(c.Request.Context(), principalFromCtx(c), c.Param("appId"), req.Board, c.Param("taskId"), req.Reason)
+	if err != nil {
+		writeKanbanError(c, err)
+		return
+	}
+	c.Status(http.StatusNoContent)
 }
 
 // Unblock POST /api/v1/apps/{appId}/hermes/kanban/tasks/{taskId}/unblock
@@ -292,14 +383,24 @@ func (h *HermesKanbanHandler) Block(c *gin.Context) {
 // @Accept       json
 // @Produce      json
 // @Security     BearerAuth
-// @Param        appId   path   string             true  "应用 ID"
-// @Param        taskId  path   string             true  "任务 ID"
-// @Param        body    body   KanbanBoardRequest  false  "board 请求"
+// @Param        appId   path      string              true   "应用 ID"
+// @Param        taskId  path      string              true   "任务 ID"
+// @Param        body    body      KanbanBoardRequest  false  "board 请求"
 // @Success      204
+// @Failure      403    {object}  ErrorResponse
 // @Router       /apps/{appId}/hermes/kanban/tasks/{taskId}/unblock [post]
 func (h *HermesKanbanHandler) Unblock(c *gin.Context) {
-	// TODO(D4): 解析 KanbanBoardRequest，调用 service.Unblock。
-	c.JSON(http.StatusNotImplemented, gin.H{"code": "NOT_IMPLEMENTED", "message": "解除阻塞端点将在 D4 实现"})
+	var req KanbanBoardRequest
+	if err := c.ShouldBindJSON(&req); err != nil {
+		writeBindError(c, err)
+		return
+	}
+	err := h.service.Unblock(c.Request.Context(), principalFromCtx(c), c.Param("appId"), req.Board, c.Param("taskId"))
+	if err != nil {
+		writeKanbanError(c, err)
+		return
+	}
+	c.Status(http.StatusNoContent)
 }
 
 // Archive POST /api/v1/apps/{appId}/hermes/kanban/tasks/{taskId}/archive
@@ -309,14 +410,24 @@ func (h *HermesKanbanHandler) Unblock(c *gin.Context) {
 // @Accept       json
 // @Produce      json
 // @Security     BearerAuth
-// @Param        appId   path   string              true  "应用 ID"
-// @Param        taskId  path   string              true  "任务 ID"
-// @Param        body    body   KanbanBoardRequest  false  "board 请求"
+// @Param        appId   path      string              true   "应用 ID"
+// @Param        taskId  path      string              true   "任务 ID"
+// @Param        body    body      KanbanBoardRequest  false  "board 请求"
 // @Success      204
+// @Failure      403    {object}  ErrorResponse
 // @Router       /apps/{appId}/hermes/kanban/tasks/{taskId}/archive [post]
 func (h *HermesKanbanHandler) Archive(c *gin.Context) {
-	// TODO(D4): 解析 KanbanBoardRequest，调用 service.Archive。
-	c.JSON(http.StatusNotImplemented, gin.H{"code": "NOT_IMPLEMENTED", "message": "归档端点将在 D4 实现"})
+	var req KanbanBoardRequest
+	if err := c.ShouldBindJSON(&req); err != nil {
+		writeBindError(c, err)
+		return
+	}
+	err := h.service.Archive(c.Request.Context(), principalFromCtx(c), c.Param("appId"), req.Board, c.Param("taskId"))
+	if err != nil {
+		writeKanbanError(c, err)
+		return
+	}
+	c.Status(http.StatusNoContent)
 }
 
 // Reassign POST /api/v1/apps/{appId}/hermes/kanban/tasks/{taskId}/reassign
@@ -326,14 +437,25 @@ func (h *HermesKanbanHandler) Archive(c *gin.Context) {
 // @Accept       json
 // @Produce      json
 // @Security     BearerAuth
-// @Param        appId   path   string                  true  "应用 ID"
-// @Param        taskId  path   string                  true  "任务 ID"
-// @Param        body    body   KanbanReassignRequest   true  "重分配请求"
+// @Param        appId   path      string                  true  "应用 ID"
+// @Param        taskId  path      string                  true  "任务 ID"
+// @Param        body    body      KanbanReassignRequest   true  "重分配请求"
 // @Success      204
+// @Failure      400    {object}  ErrorResponse
+// @Failure      403    {object}  ErrorResponse
 // @Router       /apps/{appId}/hermes/kanban/tasks/{taskId}/reassign [post]
 func (h *HermesKanbanHandler) Reassign(c *gin.Context) {
-	// TODO(D4): 解析 KanbanReassignRequest，调用 service.Reassign。
-	c.JSON(http.StatusNotImplemented, gin.H{"code": "NOT_IMPLEMENTED", "message": "重分配端点将在 D4 实现"})
+	var req KanbanReassignRequest
+	if err := c.ShouldBindJSON(&req); err != nil {
+		writeBindError(c, err)
+		return
+	}
+	err := h.service.Reassign(c.Request.Context(), principalFromCtx(c), c.Param("appId"), req.Board, c.Param("taskId"), req.To)
+	if err != nil {
+		writeKanbanError(c, err)
+		return
+	}
+	c.Status(http.StatusNoContent)
 }
 
 // Reclaim POST /api/v1/apps/{appId}/hermes/kanban/tasks/{taskId}/reclaim
@@ -343,12 +465,22 @@ func (h *HermesKanbanHandler) Reassign(c *gin.Context) {
 // @Accept       json
 // @Produce      json
 // @Security     BearerAuth
-// @Param        appId   path   string              true  "应用 ID"
-// @Param        taskId  path   string              true  "任务 ID"
-// @Param        body    body   KanbanBoardRequest  false  "board 请求"
+// @Param        appId   path      string              true   "应用 ID"
+// @Param        taskId  path      string              true   "任务 ID"
+// @Param        body    body      KanbanBoardRequest  false  "board 请求"
 // @Success      204
+// @Failure      403    {object}  ErrorResponse
 // @Router       /apps/{appId}/hermes/kanban/tasks/{taskId}/reclaim [post]
 func (h *HermesKanbanHandler) Reclaim(c *gin.Context) {
-	// TODO(D4): 解析 KanbanBoardRequest，调用 service.Reclaim。
-	c.JSON(http.StatusNotImplemented, gin.H{"code": "NOT_IMPLEMENTED", "message": "重置认领端点将在 D4 实现"})
+	var req KanbanBoardRequest
+	if err := c.ShouldBindJSON(&req); err != nil {
+		writeBindError(c, err)
+		return
+	}
+	err := h.service.Reclaim(c.Request.Context(), principalFromCtx(c), c.Param("appId"), req.Board, c.Param("taskId"))
+	if err != nil {
+		writeKanbanError(c, err)
+		return
+	}
+	c.Status(http.StatusNoContent)
 }

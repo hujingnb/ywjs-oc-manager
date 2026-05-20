@@ -4,6 +4,7 @@ import (
 	"context"
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"testing"
 
 	"github.com/gin-gonic/gin"
@@ -229,4 +230,65 @@ func TestKanbanStatsHappy(t *testing.T) {
 	require.Equal(t, http.StatusOK, w.Code)
 	// 响应体须含顶层 stats key，确保接口契约正确
 	assert.Contains(t, w.Body.String(), `"stats"`)
+}
+
+// TestKanbanCreateStripsAdvancedFieldsForOrgAdmin 验证：
+// 组织管理员提交高级字段（skills/workspace_kind/max_retries 等）时，
+// handler 层按 principal.Role 将其静默丢弃，不透传给 service。
+func TestKanbanCreateStripsAdvancedFieldsForOrgAdmin(t *testing.T) {
+	// stub 预设成功返回，detail.ID 用于验证正常路径通过
+	stub := &kanbanServiceStub{detail: service.KanbanTaskDetail{KanbanTask: service.KanbanTask{ID: "t_new"}}}
+	r := newKanbanTestRouter(t, stub)
+
+	body := `{"title":"x","assignee":"devops","skills":"bash","workspace_kind":"worktree","max_retries":5}`
+	w := httptest.NewRecorder()
+	req := httptest.NewRequest(http.MethodPost, "/api/v1/apps/app-1/hermes/kanban/tasks", strings.NewReader(body))
+	req.Header.Set("Content-Type", "application/json")
+	// 组织管理员角色：高级字段应被 strip
+	req = withPrincipal(req, auth.Principal{UserID: "u1", Role: domain.UserRoleOrgAdmin, OrgID: "org-1"})
+	r.ServeHTTP(w, req)
+
+	require.Equal(t, http.StatusOK, w.Code)
+	// 验证 handler 已将高级字段从传入 service 的 input 中剥离
+	assert.Empty(t, stub.createIn.Skills, "org_admin 的 skills 应被丢弃")
+	assert.Empty(t, stub.createIn.WorkspaceKind, "org_admin 的 workspace_kind 应被丢弃")
+	assert.Zero(t, stub.createIn.MaxRetries, "org_admin 的 max_retries 应被丢弃")
+}
+
+// TestKanbanCreateKeepsAdvancedFieldsForPlatformAdmin 验证：
+// 平台管理员提交高级字段时，handler 层原样透传给 service，不做 strip。
+func TestKanbanCreateKeepsAdvancedFieldsForPlatformAdmin(t *testing.T) {
+	// stub 预设成功返回
+	stub := &kanbanServiceStub{detail: service.KanbanTaskDetail{KanbanTask: service.KanbanTask{ID: "t_new"}}}
+	r := newKanbanTestRouter(t, stub)
+
+	body := `{"title":"x","assignee":"devops","skills":"bash","max_retries":5}`
+	w := httptest.NewRecorder()
+	req := httptest.NewRequest(http.MethodPost, "/api/v1/apps/app-1/hermes/kanban/tasks", strings.NewReader(body))
+	req.Header.Set("Content-Type", "application/json")
+	// 平台管理员角色：高级字段应透传
+	req = withPrincipal(req, auth.Principal{UserID: "admin", Role: domain.UserRolePlatformAdmin})
+	r.ServeHTTP(w, req)
+
+	require.Equal(t, http.StatusOK, w.Code)
+	// 验证高级字段被如实传入 service
+	assert.Equal(t, "bash", stub.createIn.Skills, "平台管理员的 skills 应透传")
+	assert.Equal(t, 5, stub.createIn.MaxRetries, "平台管理员的 max_retries 应透传")
+}
+
+// TestKanbanCommentHappy 验证：评论端点在 service 成功时返回 204 No Content。
+func TestKanbanCommentHappy(t *testing.T) {
+	// stub 无错误，模拟评论成功
+	stub := &kanbanServiceStub{}
+	r := newKanbanTestRouter(t, stub)
+
+	body := `{"board":"default","body":"一条评论"}`
+	w := httptest.NewRecorder()
+	req := httptest.NewRequest(http.MethodPost, "/api/v1/apps/app-1/hermes/kanban/tasks/t_1/comment", strings.NewReader(body))
+	req.Header.Set("Content-Type", "application/json")
+	req = withPrincipal(req, auth.Principal{UserID: "u1", Role: domain.UserRoleOrgAdmin, OrgID: "org-1"})
+	r.ServeHTTP(w, req)
+
+	// 写操作成功应返回 204 No Content
+	assert.Equal(t, http.StatusNoContent, w.Code)
 }
