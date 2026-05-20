@@ -84,11 +84,20 @@ export interface KanbanStats {
 
 // ─── queryKey 约定 ───────────────────────────────────────────────────
 // 统一以 ['kanban', 子类, appId, ...] 为前缀，便于 mutation 精准失效查询缓存。
+//
+// 设计说明：
+// - query hook（useQuery）的 queryKey 直接传 Ref，TanStack Vue Query 会自动解包
+//   Ref 并做响应式追踪，Ref 值变化时自动重新请求。
+// - 这些 helper 函数用于 invalidateQueries 等命令式场景，接收已解包的原始值
+//   （string | undefined），不能传 Ref，否则匹配不到已存储的（已解包的）queryKey，
+//   导致失效无效。
 const boardsKey = (appId: string | undefined) => ['kanban', 'boards', appId] as const
 const tasksKey = (appId: string | undefined, board: string) =>
   ['kanban', 'tasks', appId, board] as const
 const taskKey = (appId: string | undefined, board: string, taskId: string) =>
   ['kanban', 'task', appId, board, taskId] as const
+const runsKey = (appId: string | undefined, board: string, taskId: string | undefined) =>
+  ['kanban', 'runs', appId, board, taskId] as const
 
 // ─── 读 query hooks（E1）──────────────────────────────────────────────
 
@@ -169,7 +178,7 @@ export function useKanbanRunsQuery(
 }
 
 // 给后续 Task E2 / G1 用的导出 queryKey 工具，避免调用方手写字面量。
-export { boardsKey, tasksKey, taskKey }
+export { boardsKey, tasksKey, taskKey, runsKey }
 
 // ─── 写 mutation hooks（E2）──────────────────────────────────────────
 
@@ -188,6 +197,8 @@ export function useCreateKanbanTask(appId: Ref<string | undefined>, board: Ref<s
       parent_id?: string
       max_retries?: number
     }) => {
+      // appId 为空时拒绝执行，避免向错误路径发起请求。
+      if (!appId.value) throw new Error('缺少实例 ID')
       const res = await apiRequest<{ task: KanbanTaskDetail }>(
         `/api/v1/apps/${appId.value}/hermes/kanban/tasks`,
         { method: 'POST', body: { board: board.value, ...payload } },
@@ -196,14 +207,17 @@ export function useCreateKanbanTask(appId: Ref<string | undefined>, board: Ref<s
     },
     onSuccess: () => {
       // 新建任务后立即失效任务列表，让轮询逻辑刷新数据而不等待下次 interval。
-      void client.invalidateQueries({ queryKey: ['kanban', 'tasks', appId, board] })
+      // 注意：invalidateQueries 是命令式调用，queryKey 必须传解包后的原始值，
+      // 直接传 Ref 对象无法匹配已存储的（已解包的）queryKey，会导致失效无效。
+      void client.invalidateQueries({ queryKey: tasksKey(appId.value, board.value) })
     },
   })
 }
 
 // KanbanWriteAction 是除 create 外所有任务写操作的联合类型。
 // 通过 verb 字段区分操作类型，其余字段随操作类型变化。
-type KanbanWriteAction =
+// 导出供组件（如 KanbanTaskActions.vue）复用，避免重复定义。
+export type KanbanWriteAction =
   | { verb: 'comment'; taskId: string; body: string }
   | { verb: 'complete'; taskId: string; result?: string }
   | { verb: 'block'; taskId: string; reason: string }
@@ -219,6 +233,8 @@ export function useKanbanTaskAction(appId: Ref<string | undefined>, board: Ref<s
   const client = useQueryClient()
   return useMutation({
     mutationFn: async (action: KanbanWriteAction) => {
+      // appId 为空时拒绝执行，避免向错误路径发起请求。
+      if (!appId.value) throw new Error('缺少实例 ID')
       // 解构 verb 和 taskId 作为 URL 路径参数，剩余字段作为请求体追加 board。
       const { verb, taskId, ...rest } = action
       await apiRequest<void>(
@@ -228,9 +244,11 @@ export function useKanbanTaskAction(appId: Ref<string | undefined>, board: Ref<s
     },
     onSuccess: (_data, action) => {
       // 任务状态或内容变化，同时失效列表缓存（状态计数徽标）和详情缓存。
-      void client.invalidateQueries({ queryKey: ['kanban', 'tasks', appId, board] })
+      // 注意：invalidateQueries 是命令式调用，queryKey 必须传解包后的原始值，
+      // 直接传 Ref 对象无法匹配已存储的（已解包的）queryKey，会导致失效无效。
+      void client.invalidateQueries({ queryKey: tasksKey(appId.value, board.value) })
       void client.invalidateQueries({
-        queryKey: ['kanban', 'task', appId, board, action.taskId],
+        queryKey: taskKey(appId.value, board.value, action.taskId),
       })
     },
   })
