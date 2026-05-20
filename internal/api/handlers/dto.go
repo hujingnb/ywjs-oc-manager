@@ -240,3 +240,69 @@ type AgentHeartbeatRequest struct {
 	// Metadata 是心跳时的附加元数据，覆盖节点当前元数据。
 	Metadata map[string]any `json:"metadata"`
 }
+
+// ===== Hermes 任务看板 hermes-kanban =====
+
+// CreateKanbanTaskRequest 是新建 Kanban 任务的请求体。
+// 高级字段（Skills/WorkspaceKind/WorkspacePath/ParentID/MaxRetries）仅平台
+// 管理员可生效，handler 对非平台管理员会忽略这些字段。
+type CreateKanbanTaskRequest struct {
+	// Board 是目标 board slug，为空时默认 "default"。
+	Board string `json:"board"`
+	// Title 是任务标题，必填。
+	Title string `json:"title" binding:"required"`
+	// Body 是任务描述，可为空。
+	Body string `json:"body"`
+	// Assignee 是任务分配对象（hermes profile 名），必填。
+	Assignee string `json:"assignee" binding:"required"`
+	// Priority 是任务优先级（0-9），0 为默认。
+	Priority int `json:"priority"`
+	// Skills 是高级字段，仅平台管理员生效：指定任务所需技能集。
+	Skills string `json:"skills"`
+	// WorkspaceKind 是高级字段，仅平台管理员生效：workspace 类型（scratch/dir/worktree）。
+	WorkspaceKind string `json:"workspace_kind"`
+	// WorkspacePath 是高级字段，仅平台管理员生效：workspace 路径。
+	WorkspacePath string `json:"workspace_path"`
+	// ParentID 是高级字段，仅平台管理员生效：父任务 ID。
+	ParentID string `json:"parent_id"`
+	// MaxRetries 是高级字段，仅平台管理员生效：最大重试次数。
+	MaxRetries int `json:"max_retries"`
+}
+
+// KanbanCommentRequest 是给任务加评论的请求体。
+type KanbanCommentRequest struct {
+	// Board 是目标 board slug，为空时默认 "default"。
+	Board string `json:"board"`
+	// Body 是评论内容，必填。
+	Body string `json:"body" binding:"required"`
+}
+
+// KanbanCompleteRequest 是标记任务完成的请求体。
+type KanbanCompleteRequest struct {
+	// Board 是目标 board slug，为空时默认 "default"。
+	Board string `json:"board"`
+	// Result 是可选的完成摘要。
+	Result string `json:"result"`
+}
+
+// KanbanBlockRequest 是阻塞任务的请求体。
+type KanbanBlockRequest struct {
+	// Board 是目标 board slug，为空时默认 "default"。
+	Board string `json:"board"`
+	// Reason 是阻塞原因，必填。
+	Reason string `json:"reason" binding:"required"`
+}
+
+// KanbanReassignRequest 是重新分配任务的请求体。
+type KanbanReassignRequest struct {
+	// Board 是目标 board slug，为空时默认 "default"。
+	Board string `json:"board"`
+	// To 是目标分配对象（hermes profile 名），必填。
+	To string `json:"to" binding:"required"`
+}
+
+// KanbanBoardRequest 是仅需指定 board 的写操作（unblock / archive / reclaim）请求体。
+type KanbanBoardRequest struct {
+	// Board 是目标 board slug，为空时默认 "default"。
+	Board string `json:"board"`
+}

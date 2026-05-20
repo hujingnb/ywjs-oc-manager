@@ -40,6 +40,13 @@ var mappedServiceErrorRules = []serviceErrorRule{
 	safeErrorRule(service.ErrAgentTokenInvalid, http.StatusUnauthorized, "AGENT_TOKEN_INVALID"),
 	validationErrorRule(service.ErrEnrollInputInvalid, http.StatusBadRequest, "ENROLL_INVALID"),
 	validationErrorRule(service.ErrMemberCreateInvalid, http.StatusBadRequest, "MEMBER_INVALID"),
+	// 任务看板相关 sentinel error 映射。
+	{target: service.ErrKanbanForbidden, statusCode: http.StatusForbidden, code: "KANBAN_FORBIDDEN", message: "无权访问该实例任务看板"},
+	{target: service.ErrKanbanRuntimeUnavailable, statusCode: http.StatusServiceUnavailable, code: "RUNTIME_NOT_AVAILABLE", message: "实例容器未运行，请先在运行时 tab 启动"},
+	{target: service.ErrKanbanNotSupported, statusCode: http.StatusServiceUnavailable, code: "KANBAN_NOT_SUPPORTED_ON_STUB", message: "该实例运行的是 dev 镜像，任务看板不可用"},
+	{target: service.ErrKanbanBadRequest, statusCode: http.StatusBadRequest, code: "KANBAN_BAD_REQUEST", message: "任务看板请求参数非法"},
+	{target: service.ErrKanbanCLI, statusCode: http.StatusBadGateway, code: "KANBAN_CLI_ERROR", message: "任务看板命令执行失败", safe: true},
+	{target: service.ErrKanbanOutputInvalid, statusCode: http.StatusBadGateway, code: "KANBAN_OUTPUT_INVALID", message: "Hermes 版本可能不兼容，请联系平台管理员"},
 }
 
 // writeBindError 将 Gin 的 JSON 绑定错误转成面向调用方的 400 文案。
