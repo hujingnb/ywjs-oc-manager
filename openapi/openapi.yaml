@@ -1927,14 +1927,14 @@ paths:
         description: 新建任务请求
         required: true
       responses:
-        "200":
+        "201":
           content:
             application/json:
               schema:
                 additionalProperties:
                   $ref: '#/components/schemas/service.KanbanTaskDetail'
                 type: object
-          description: OK
+          description: Created
         "400":
           content:
             application/json:
@@ -2166,7 +2166,6 @@ paths:
                 description: 完成请求
                 summary: body
         description: 完成请求
-        required: true
       responses:
         "204":
           description: No Content

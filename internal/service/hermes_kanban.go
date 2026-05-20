@@ -6,10 +6,12 @@ package service
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"regexp"
 	"strings"
 
+	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgtype"
 
 	"oc-manager/internal/auth"
@@ -558,7 +560,13 @@ func (l *KanbanAppLocatorFromStore) LocateApp(ctx context.Context, appID string)
 	}
 	app, err := l.store.GetApp(ctx, id)
 	if err != nil {
-		return KanbanAppLocation{}, ErrNotFound
+		// pgx.ErrNoRows 表示 app 记录真实不存在，映射为 ErrNotFound（404）。
+		// 其他错误（网络、超时、约束异常等）属于 DB 故障，透传原始错误，
+		// 由上层兜底映射为 500，避免将 DB 故障误报为资源不存在。
+		if errors.Is(err, pgx.ErrNoRows) {
+			return KanbanAppLocation{}, ErrNotFound
+		}
+		return KanbanAppLocation{}, fmt.Errorf("查询 app 失败: %w", err)
 	}
 	loc := KanbanAppLocation{
 		// uuidToString 是 service 包已有的 pgtype.UUID→string 辅助函数（pgtype.go）。

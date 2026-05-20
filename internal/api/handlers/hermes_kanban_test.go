@@ -248,7 +248,7 @@ func TestKanbanCreateStripsAdvancedFieldsForOrgAdmin(t *testing.T) {
 	req = withPrincipal(req, auth.Principal{UserID: "u1", Role: domain.UserRoleOrgAdmin, OrgID: "org-1"})
 	r.ServeHTTP(w, req)
 
-	require.Equal(t, http.StatusOK, w.Code)
+	require.Equal(t, http.StatusCreated, w.Code)
 	// 验证 handler 已将高级字段从传入 service 的 input 中剥离
 	assert.Empty(t, stub.createIn.Skills, "org_admin 的 skills 应被丢弃")
 	assert.Empty(t, stub.createIn.WorkspaceKind, "org_admin 的 workspace_kind 应被丢弃")
@@ -270,7 +270,7 @@ func TestKanbanCreateKeepsAdvancedFieldsForPlatformAdmin(t *testing.T) {
 	req = withPrincipal(req, auth.Principal{UserID: "admin", Role: domain.UserRolePlatformAdmin})
 	r.ServeHTTP(w, req)
 
-	require.Equal(t, http.StatusOK, w.Code)
+	require.Equal(t, http.StatusCreated, w.Code)
 	// 验证高级字段被如实传入 service
 	assert.Equal(t, "bash", stub.createIn.Skills, "平台管理员的 skills 应透传")
 	assert.Equal(t, 5, stub.createIn.MaxRetries, "平台管理员的 max_retries 应透传")
@@ -290,5 +290,73 @@ func TestKanbanCommentHappy(t *testing.T) {
 	r.ServeHTTP(w, req)
 
 	// 写操作成功应返回 204 No Content
+	assert.Equal(t, http.StatusNoContent, w.Code)
+}
+
+// TestKanbanUnblockEmptyBody 验证：unblock 端点不发 body 时应返回 204，而非 400。
+// body 为可选（KanbanBoardRequest 无必填字段），空请求体不应被误判为绑定错误。
+func TestKanbanUnblockEmptyBody(t *testing.T) {
+	// stub 无错误，模拟 unblock 成功
+	stub := &kanbanServiceStub{}
+	r := newKanbanTestRouter(t, stub)
+
+	w := httptest.NewRecorder()
+	// 不携带请求体，模拟前端省略 body 的场景
+	req := httptest.NewRequest(http.MethodPost, "/api/v1/apps/app-1/hermes/kanban/tasks/t_1/unblock", nil)
+	req = withPrincipal(req, auth.Principal{UserID: "u1", Role: domain.UserRoleOrgAdmin, OrgID: "org-1"})
+	r.ServeHTTP(w, req)
+
+	// 空 body 不应触发 400，成功应返回 204 No Content
+	assert.Equal(t, http.StatusNoContent, w.Code)
+}
+
+// TestKanbanArchiveEmptyBody 验证：archive 端点不发 body 时应返回 204，而非 400。
+// body 为可选（KanbanBoardRequest 无必填字段），空请求体不应被误判为绑定错误。
+func TestKanbanArchiveEmptyBody(t *testing.T) {
+	// stub 无错误，模拟 archive 成功
+	stub := &kanbanServiceStub{}
+	r := newKanbanTestRouter(t, stub)
+
+	w := httptest.NewRecorder()
+	// 不携带请求体，模拟前端省略 body 的场景
+	req := httptest.NewRequest(http.MethodPost, "/api/v1/apps/app-1/hermes/kanban/tasks/t_1/archive", nil)
+	req = withPrincipal(req, auth.Principal{UserID: "u1", Role: domain.UserRoleOrgAdmin, OrgID: "org-1"})
+	r.ServeHTTP(w, req)
+
+	// 空 body 不应触发 400，成功应返回 204 No Content
+	assert.Equal(t, http.StatusNoContent, w.Code)
+}
+
+// TestKanbanReclaimEmptyBody 验证：reclaim 端点不发 body 时应返回 204，而非 400。
+// body 为可选（KanbanBoardRequest 无必填字段），空请求体不应被误判为绑定错误。
+func TestKanbanReclaimEmptyBody(t *testing.T) {
+	// stub 无错误，模拟 reclaim 成功
+	stub := &kanbanServiceStub{}
+	r := newKanbanTestRouter(t, stub)
+
+	w := httptest.NewRecorder()
+	// 不携带请求体，模拟前端省略 body 的场景
+	req := httptest.NewRequest(http.MethodPost, "/api/v1/apps/app-1/hermes/kanban/tasks/t_1/reclaim", nil)
+	req = withPrincipal(req, auth.Principal{UserID: "u1", Role: domain.UserRoleOrgAdmin, OrgID: "org-1"})
+	r.ServeHTTP(w, req)
+
+	// 空 body 不应触发 400，成功应返回 204 No Content
+	assert.Equal(t, http.StatusNoContent, w.Code)
+}
+
+// TestKanbanCompleteEmptyBody 验证：complete 端点不发 body 时应返回 204，而非 400。
+// body 为可选（KanbanCompleteRequest 无必填字段），空请求体不应被误判为绑定错误。
+func TestKanbanCompleteEmptyBody(t *testing.T) {
+	// stub 无错误，模拟 complete 成功
+	stub := &kanbanServiceStub{}
+	r := newKanbanTestRouter(t, stub)
+
+	w := httptest.NewRecorder()
+	// 不携带请求体，模拟前端省略 body 的场景
+	req := httptest.NewRequest(http.MethodPost, "/api/v1/apps/app-1/hermes/kanban/tasks/t_1/complete", nil)
+	req = withPrincipal(req, auth.Principal{UserID: "u1", Role: domain.UserRoleOrgAdmin, OrgID: "org-1"})
+	r.ServeHTTP(w, req)
+
+	// 空 body 不应触发 400，成功应返回 204 No Content
 	assert.Equal(t, http.StatusNoContent, w.Code)
 }

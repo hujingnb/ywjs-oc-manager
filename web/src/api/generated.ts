@@ -926,8 +926,8 @@ export interface paths {
                 };
             };
             responses: {
-                /** @description OK */
-                200: {
+                /** @description Created */
+                201: {
                     headers: {
                         [name: string]: unknown;
                     };
@@ -1245,7 +1245,7 @@ export interface paths {
                 cookie?: never;
             };
             /** @description 完成请求 */
-            requestBody: {
+            requestBody?: {
                 content: {
                     "application/json": Record<string, never> | components["schemas"]["handlers.KanbanCompleteRequest"];
                 };

@@ -40,6 +40,8 @@ var mappedServiceErrorRules = []serviceErrorRule{
 	safeErrorRule(service.ErrAgentTokenInvalid, http.StatusUnauthorized, "AGENT_TOKEN_INVALID"),
 	validationErrorRule(service.ErrEnrollInputInvalid, http.StatusBadRequest, "ENROLL_INVALID"),
 	validationErrorRule(service.ErrMemberCreateInvalid, http.StatusBadRequest, "MEMBER_INVALID"),
+	// 通用资源不存在，映射为 404。
+	{target: service.ErrNotFound, statusCode: http.StatusNotFound, code: "NOT_FOUND", message: "资源不存在"},
 	// 任务看板相关 sentinel error 映射。
 	{target: service.ErrKanbanForbidden, statusCode: http.StatusForbidden, code: "KANBAN_FORBIDDEN", message: "无权访问该实例任务看板"},
 	{target: service.ErrKanbanRuntimeUnavailable, statusCode: http.StatusServiceUnavailable, code: "RUNTIME_NOT_AVAILABLE", message: "实例容器未运行，请先在运行时 tab 启动"},

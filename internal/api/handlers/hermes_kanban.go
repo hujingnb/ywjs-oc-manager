@@ -6,6 +6,7 @@ package handlers
 import (
 	"context"
 	"errors"
+	"io"
 	"net/http"
 
 	"github.com/gin-gonic/gin"
@@ -74,6 +75,21 @@ func RegisterHermesKanbanRoutes(router gin.IRouter, h *HermesKanbanHandler) {
 // 映射规则见 request_errors.go 的 mappedServiceErrorRules（kanban 节）。
 func writeKanbanError(c *gin.Context, err error) {
 	writeMappedServiceError(c, err, http.StatusInternalServerError, "任务看板服务暂不可用")
+}
+
+// bindOptionalJSON 绑定可选的 JSON 请求体：空 body 视为成功，req 保持零值。
+// 用于 unblock/archive/reclaim/complete 等无必填字段的写端点——前端可不发 body。
+func bindOptionalJSON(c *gin.Context, req any) error {
+	if c.Request.Body == nil || c.Request.ContentLength == 0 {
+		return nil
+	}
+	if err := c.ShouldBindJSON(req); err != nil {
+		if errors.Is(err, io.EOF) {
+			return nil
+		}
+		return err
+	}
+	return nil
 }
 
 // ————————————————————————————————————————————————————
@@ -236,8 +252,9 @@ func (h *HermesKanbanHandler) StreamEvents(c *gin.Context) {
 	})
 	if err != nil && !errors.Is(err, context.Canceled) {
 		// 流已开始（响应头已发送），无法再改 HTTP 状态码，
-		// 写一个 error 事件让客户端感知异常后关闭连接。
-		_, _ = c.Writer.WriteString("event: error\ndata: " + err.Error() + "\n\n")
+		// 写一个固定结构的 error 事件让客户端感知异常后关闭连接；
+		// 不暴露 err.Error() 内部细节（可能含容器路径等敏感信息）。
+		_, _ = c.Writer.WriteString("event: error\ndata: {\"code\":\"KANBAN_STREAM_ERROR\"}\n\n")
 		flusher.Flush()
 	}
 }
@@ -256,7 +273,7 @@ func (h *HermesKanbanHandler) StreamEvents(c *gin.Context) {
 // @Security     BearerAuth
 // @Param        appId  path      string                   true  "应用 ID"
 // @Param        body   body      CreateKanbanTaskRequest  true  "新建任务请求"
-// @Success      200    {object}  map[string]service.KanbanTaskDetail
+// @Success      201    {object}  map[string]service.KanbanTaskDetail
 // @Failure      400    {object}  ErrorResponse
 // @Failure      403    {object}  ErrorResponse
 // @Router       /apps/{appId}/hermes/kanban/tasks [post]
@@ -289,7 +306,7 @@ func (h *HermesKanbanHandler) CreateTask(c *gin.Context) {
 		writeKanbanError(c, err)
 		return
 	}
-	c.JSON(http.StatusOK, gin.H{"task": detail})
+	c.JSON(http.StatusCreated, gin.H{"task": detail})
 }
 
 // Comment POST /api/v1/apps/{appId}/hermes/kanban/tasks/{taskId}/comment
@@ -329,14 +346,14 @@ func (h *HermesKanbanHandler) Comment(c *gin.Context) {
 // @Security     BearerAuth
 // @Param        appId   path      string                  true  "应用 ID"
 // @Param        taskId  path      string                  true  "任务 ID"
-// @Param        body    body      KanbanCompleteRequest   true  "完成请求"
+// @Param        body    body      KanbanCompleteRequest   false  "完成请求"
 // @Success      204
 // @Failure      400    {object}  ErrorResponse
 // @Failure      403    {object}  ErrorResponse
 // @Router       /apps/{appId}/hermes/kanban/tasks/{taskId}/complete [post]
 func (h *HermesKanbanHandler) Complete(c *gin.Context) {
 	var req KanbanCompleteRequest
-	if err := c.ShouldBindJSON(&req); err != nil {
+	if err := bindOptionalJSON(c, &req); err != nil {
 		writeBindError(c, err)
 		return
 	}
@@ -391,7 +408,7 @@ func (h *HermesKanbanHandler) Block(c *gin.Context) {
 // @Router       /apps/{appId}/hermes/kanban/tasks/{taskId}/unblock [post]
 func (h *HermesKanbanHandler) Unblock(c *gin.Context) {
 	var req KanbanBoardRequest
-	if err := c.ShouldBindJSON(&req); err != nil {
+	if err := bindOptionalJSON(c, &req); err != nil {
 		writeBindError(c, err)
 		return
 	}
@@ -418,7 +435,7 @@ func (h *HermesKanbanHandler) Unblock(c *gin.Context) {
 // @Router       /apps/{appId}/hermes/kanban/tasks/{taskId}/archive [post]
 func (h *HermesKanbanHandler) Archive(c *gin.Context) {
 	var req KanbanBoardRequest
-	if err := c.ShouldBindJSON(&req); err != nil {
+	if err := bindOptionalJSON(c, &req); err != nil {
 		writeBindError(c, err)
 		return
 	}
@@ -473,7 +490,7 @@ func (h *HermesKanbanHandler) Reassign(c *gin.Context) {
 // @Router       /apps/{appId}/hermes/kanban/tasks/{taskId}/reclaim [post]
 func (h *HermesKanbanHandler) Reclaim(c *gin.Context) {
 	var req KanbanBoardRequest
-	if err := c.ShouldBindJSON(&req); err != nil {
+	if err := bindOptionalJSON(c, &req); err != nil {
 		writeBindError(c, err)
 		return
 	}
