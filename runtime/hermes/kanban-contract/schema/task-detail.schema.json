@@ -1,0 +1,63 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "title": "oc-kanban TaskDetail",
+  "type": "object",
+  "required": ["task"],
+  "properties": {
+    "task": { "$ref": "#/definitions/task" },
+    "latest_summary": { "type": ["string", "null"] },
+    "parents": { "type": "array", "items": { "type": "string" } },
+    "children": { "type": "array", "items": { "type": "string" } },
+    "comments": { "type": "array", "items": { "$ref": "#/definitions/comment" } },
+    "events": { "type": "array", "items": { "$ref": "#/definitions/event" } }
+  },
+  "additionalProperties": false,
+  "definitions": {
+    "task": {
+      "type": "object",
+      "required": ["id", "title", "assignee", "status", "priority", "created_at"],
+      "properties": {
+        "id": { "type": "string" },
+        "title": { "type": "string" },
+        "body": { "type": ["string", "null"] },
+        "assignee": { "type": "string" },
+        "status": {
+          "enum": ["triage", "todo", "ready", "running", "blocked", "done", "archived"]
+        },
+        "priority": { "type": "integer", "minimum": 0, "maximum": 9 },
+        "tenant": { "type": ["string", "null"] },
+        "workspace_kind": { "type": ["string", "null"] },
+        "workspace_path": { "type": ["string", "null"] },
+        "created_by": { "type": ["string", "null"] },
+        "created_at": { "type": "integer" },
+        "started_at": { "type": ["integer", "null"] },
+        "completed_at": { "type": ["integer", "null"] },
+        "result": { "type": ["string", "null"] },
+        "skills": { "type": "array", "items": { "type": "string" } },
+        "max_retries": { "type": ["integer", "null"] }
+      },
+      "additionalProperties": false
+    },
+    "comment": {
+      "type": "object",
+      "required": ["author", "body", "created_at"],
+      "properties": {
+        "author": { "type": "string" },
+        "body": { "type": "string" },
+        "created_at": { "type": "integer" }
+      },
+      "additionalProperties": false
+    },
+    "event": {
+      "type": "object",
+      "required": ["kind", "created_at"],
+      "properties": {
+        "kind": { "type": "string" },
+        "payload": {},
+        "created_at": { "type": "integer" },
+        "run_id": {}
+      },
+      "additionalProperties": false
+    }
+  }
+}

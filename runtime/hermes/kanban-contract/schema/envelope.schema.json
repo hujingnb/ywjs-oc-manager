@@ -1,0 +1,36 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "title": "oc-kanban envelope",
+  "description": "oc-kanban 所有非 watch verb 的 stdout 单行 JSON 信封。",
+  "oneOf": [
+    {
+      "type": "object",
+      "required": ["ok", "data"],
+      "properties": {
+        "ok": { "const": true },
+        "data": {}
+      },
+      "additionalProperties": false
+    },
+    {
+      "type": "object",
+      "required": ["ok", "error"],
+      "properties": {
+        "ok": { "const": false },
+        "error": {
+          "type": "object",
+          "required": ["code", "message"],
+          "properties": {
+            "code": {
+              "enum": ["BAD_REQUEST", "NOT_FOUND", "UNSUPPORTED",
+                       "HERMES_CLI_FAILED", "INTERNAL"]
+            },
+            "message": { "type": "string" }
+          },
+          "additionalProperties": false
+        }
+      },
+      "additionalProperties": false
+    }
+  ]
+}

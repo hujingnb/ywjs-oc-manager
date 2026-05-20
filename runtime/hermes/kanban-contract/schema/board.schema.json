@@ -1,0 +1,21 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "title": "oc-kanban Board",
+  "type": "object",
+  "required": ["slug", "name"],
+  "properties": {
+    "slug": { "type": "string" },
+    "name": { "type": "string" },
+    "description": { "type": ["string", "null"] },
+    "icon": { "type": ["string", "null"] },
+    "color": { "type": ["string", "null"] },
+    "archived": { "type": "boolean" },
+    "is_current": { "type": "boolean" },
+    "counts": {
+      "type": "object",
+      "additionalProperties": { "type": "integer" }
+    },
+    "total": { "type": "integer" }
+  },
+  "additionalProperties": false
+}

@@ -1,0 +1,17 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "title": "oc-kanban Run",
+  "type": "object",
+  "required": ["profile", "status", "started_at"],
+  "properties": {
+    "profile": { "type": "string" },
+    "status": { "type": "string" },
+    "worker_pid": { "type": ["integer", "null"] },
+    "started_at": { "type": "integer" },
+    "ended_at": { "type": ["integer", "null"] },
+    "outcome": { "type": ["string", "null"] },
+    "summary": { "type": ["string", "null"] },
+    "error": { "type": ["string", "null"] }
+  },
+  "additionalProperties": false
+}

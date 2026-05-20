@@ -1,0 +1,25 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "title": "oc-kanban Capabilities",
+  "type": "object",
+  "required": ["contract_version", "oc_kanban_version", "variant", "verbs", "features"],
+  "properties": {
+    "contract_version": { "type": "string", "pattern": "^[0-9]+\\.[0-9]+$" },
+    "oc_kanban_version": { "type": "string" },
+    "hermes_version": { "type": ["string", "null"] },
+    "variant": { "type": "string" },
+    "verbs": { "type": "array", "items": { "type": "string" } },
+    "features": {
+      "type": "object",
+      "properties": {
+        "write": { "type": "boolean" },
+        "watch": { "type": "boolean" },
+        "runs": { "type": "boolean" },
+        "stats": { "type": "boolean" }
+      },
+      "required": ["write", "watch", "runs", "stats"],
+      "additionalProperties": false
+    }
+  },
+  "additionalProperties": false
+}
