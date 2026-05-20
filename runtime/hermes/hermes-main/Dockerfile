@@ -38,7 +38,7 @@ RUN uv pip install --python /usr/local/lib/hermes-agent/venv/bin/python --no-cac
       aiohttp cryptography qrcode
 
 # oc-entrypoint Python 依赖：pyyaml 用于 manifest 解析；pytest 用于镜像内 verify-hermes-runtime 自检。
-RUN uv pip install --system --no-cache-dir pyyaml pytest
+RUN uv pip install --system --no-cache-dir pyyaml pytest jsonschema
 
 # 本目录内 COPY（build context = 本 variant 目录）
 COPY oc-entrypoint.py     /usr/local/bin/oc-entrypoint
@@ -47,6 +47,8 @@ COPY oc-info.py           /usr/local/bin/oc-info
 COPY oc-channel-login.py  /usr/local/bin/oc-channel-login
 COPY oc-channel-status.py /usr/local/bin/oc-channel-status
 COPY oc-channel-unbind.py /usr/local/bin/oc-channel-unbind
+COPY oc-kanban.py         /usr/local/bin/oc-kanban
+COPY kanban-contract/     /usr/local/lib/oc-kanban/contract/
 COPY healthcheck.sh       /usr/local/bin/oc-healthcheck
 COPY lib/                 /usr/local/lib/oc-entrypoint/lib/
 COPY renderer/            /usr/local/lib/oc-entrypoint/renderer/
@@ -56,7 +58,7 @@ COPY tests/               /usr/local/lib/oc-entrypoint/tests/
 RUN chmod +x /usr/local/bin/oc-entrypoint /usr/local/bin/oc-doctor \
             /usr/local/bin/oc-info /usr/local/bin/oc-channel-login \
             /usr/local/bin/oc-channel-status /usr/local/bin/oc-channel-unbind \
-            /usr/local/bin/oc-healthcheck
+            /usr/local/bin/oc-kanban /usr/local/bin/oc-healthcheck
 
 # 镜像身份信息写到固定位置，供 oc-info 读取
 ARG OC_IMAGE_VARIANT

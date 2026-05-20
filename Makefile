@@ -1,4 +1,4 @@
-.PHONY: dev-up dev-down test vet build sqlc-generate migrate-up migrate-down check-compose logs web-test web-typecheck web-build build-hermes-runtime verify-hermes-runtime debug-ollama debug-newapi newapi-probe seed-e2e smoke-v102 openapi-gen web-types-gen openapi-check ssh-manager ssh-agent1 ssh-newapi logs-api logs-agent1 psql-manager redis-manager bh-logs
+.PHONY: dev-up dev-down test vet build sqlc-generate migrate-up migrate-down check-compose logs web-test web-typecheck web-build build-hermes-runtime verify-hermes-runtime hermes-inject-contract debug-ollama debug-newapi newapi-probe seed-e2e smoke-v102 openapi-gen web-types-gen openapi-check ssh-manager ssh-agent1 ssh-newapi logs-api logs-agent1 psql-manager redis-manager bh-logs
 
 # 加载 .env（-include 在文件不存在时静默跳过，不报错）。
 # docker compose 会自动读取 .env，Makefile 显式 include 是为了让 SSH 等 target 也能访问其中变量。
@@ -91,7 +91,11 @@ web-build: ## 在 manager-web 容器内跑 vite build
 
 ##@ Hermes runtime 镜像
 
-build-hermes-runtime: ## 本地 dev 构建 hermes runtime（tag: hermes-runtime:<variant>-dev）
+hermes-inject-contract: ## 把契约工件注入变体目录（避开 Dockerfile 跨目录 COPY 约束）
+	rm -rf $(HERMES_VARIANT_DIR)/kanban-contract
+	cp -r runtime/hermes/kanban-contract $(HERMES_VARIANT_DIR)/kanban-contract
+
+build-hermes-runtime: hermes-inject-contract ## 本地 dev 构建 hermes runtime（tag: hermes-runtime:<variant>-dev）
 	docker build \
 	  -t hermes-runtime:$(HERMES_VARIANT)-dev \
 	  --build-arg HERMES_REF=$$(cat $(HERMES_VARIANT_DIR)/version.txt) \
@@ -149,7 +153,7 @@ release-web-image: build-web-image push-web-image ## 构建并推送 manager-web
 # 不推送，便于发布前先在本地跑 verify-hermes-runtime 等校验脚本。
 # build context 取自 HERMES_VARIANT 指向的子目录（自包含 Dockerfile + 资产）。
 .PHONY: build-hermes-image
-build-hermes-image: ## 本地构建 hermes runtime 生产镜像，tag = <variant>-<timestamp>
+build-hermes-image: hermes-inject-contract ## 本地构建 hermes runtime 生产镜像，tag = <variant>-<timestamp>
 	docker build \
 	  -t $(HERMES_IMAGE) \
 	  --build-arg HERMES_REF=$$(cat $(HERMES_VARIANT_DIR)/version.txt) \

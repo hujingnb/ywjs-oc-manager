@@ -58,3 +58,6 @@ deploy/manage/data/**
 !deploy/manage/data/
 !deploy/manage/data/**/
 !deploy/manage/data/**/.gitkeep
+
+# oc-kanban 契约工件构建期注入到变体目录的副本；canonical 在 runtime/hermes/kanban-contract/
+runtime/hermes/*/kanban-contract/

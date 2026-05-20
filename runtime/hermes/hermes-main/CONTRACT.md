@@ -8,4 +8,5 @@
 # 镜像对外命令
 - oc-info / oc-doctor / oc-healthcheck
 - oc-channel-login / oc-channel-status / oc-channel-unbind
+- oc-kanban
 - ENTRYPOINT: tini -g -- /usr/local/bin/oc-entrypoint
