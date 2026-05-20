@@ -51,6 +51,7 @@ provide<typeof app>('app', app)
 // allTabs 定义详情页的全部业务分区，path 必须和子路由末段保持一致。
 const allTabs: ReadonlyArray<{ path: string; label: string }> = [
   { path: 'overview', label: '概览' },
+  { path: 'kanban', label: '任务' },
   { path: 'runtime', label: '运行时' },
   { path: 'channels', label: '渠道' },
   { path: 'knowledge', label: '实例知识库' },
