@@ -6939,68 +6939,128 @@ export interface components {
             sampled_at?: string;
         };
         "service.KanbanBoard": {
+            /** @description Archived 标记 board 是否已归档。 */
             archived?: boolean;
+            /** @description Color 是 board 颜色标识，可为空。 */
+            color?: string;
+            /** @description Counts 是 board 内各状态的任务计数，key 为状态名，value 为数量。 */
+            counts?: {
+                [key: string]: number;
+            };
+            /** @description Description 是 board 描述，可为空。 */
             description?: string;
+            /** @description Icon 是 board 图标字符串，可为空。 */
+            icon?: string;
+            /** @description IsCurrent 标记是否为当前活动 board。 */
+            is_current?: boolean;
+            /** @description Name 是 board 显示名称。 */
             name?: string;
+            /** @description Slug 是 board 唯一标识，形如 "default"。 */
             slug?: string;
+            /** @description Total 是 board 内任务总数。 */
+            total?: number;
         };
         "service.KanbanComment": {
+            /** @description Author 是评论作者（hermes profile 名）。 */
             author?: string;
+            /** @description Body 是评论内容。 */
             body?: string;
+            /** @description CreatedAt 是评论创建时间戳（Unix 秒）。 */
             created_at?: number;
         };
         "service.KanbanEvent": {
+            /** @description CreatedAt 是事件创建时间戳（Unix 秒）。 */
             created_at?: number;
+            /** @description Kind 是事件类型，如 "created"、"status_changed" 等。 */
             kind?: string;
-            payload?: string;
+            /**
+             * @description Payload 是事件附加数据，结构随 Kind 变化（任意对象）。
+             *     用 any 类型（swag 可正确解析为 object），json.Unmarshal 会把 JSON 对象解为 map[string]any。
+             */
+            payload?: unknown;
+            /** @description RunID 是关联的执行 ID，可为 null（零值为空字符串）。 */
+            run_id?: string;
         };
         "service.KanbanStats": {
-            status_counts?: {
+            /** @description ByAssignee 是各 assignee 下各状态的任务计数，外层 key 为 assignee，内层 key 为状态名。 */
+            by_assignee?: {
+                [key: string]: {
+                    [key: string]: number;
+                };
+            };
+            /** @description ByStatus 是各状态的任务计数，key 为状态名，value 为任务数量。 */
+            by_status?: {
                 [key: string]: number;
             };
+            /** @description Now 是 stats 生成时的 Unix 时间戳（秒），用于客户端计算相对时间。 */
+            now?: number;
+            /** @description OldestReadyAgeSeconds 是最老的 ready 状态任务已等待的秒数。 */
+            oldest_ready_age_seconds?: number;
         };
+        /** @description Task 是任务核心字段，对应 show 输出的顶层 "task" 子对象。 */
         "service.KanbanTask": {
+            /** @description Assignee 是当前分配的 hermes profile 名称。 */
             assignee?: string;
+            /** @description Body 是任务描述，可为 null（零值为空字符串）。 */
             body?: string;
+            /** @description CompletedAt 是任务完成时间戳（Unix 秒），可为 null（零值为 0）。 */
             completed_at?: number;
+            /** @description CreatedAt 是任务创建时间戳（Unix 秒）。 */
             created_at?: number;
+            /** @description CreatedBy 是任务创建方（"user" 或 profile 名）。 */
+            created_by?: string;
+            /** @description ID 是任务唯一标识，形如 "t_85620ed7"。 */
             id?: string;
+            /** @description MaxRetries 是最大重试次数，可为 null（零值为 0）。 */
+            max_retries?: number;
+            /** @description Priority 是任务优先级（0-9）。 */
             priority?: number;
-            skills?: string;
-            started_at?: number;
-            /** @description triage|todo|ready|running|blocked|done|archived */
-            status?: string;
-            title?: string;
-        };
-        "service.KanbanTaskDetail": {
-            assignee?: string;
-            body?: string;
-            comments?: components["schemas"]["service.KanbanComment"][];
-            completed_at?: number;
-            created_at?: number;
-            events?: components["schemas"]["service.KanbanEvent"][];
-            id?: string;
-            last_heartbeat_at?: number;
-            parent_id?: string;
-            priority?: number;
+            /** @description Result 是任务完成结果摘要，可为 null（零值为空字符串）。 */
             result?: string;
-            skills?: string;
+            /** @description Skills 是任务所需技能列表，为字符串数组（空任务时为 []）。 */
+            skills?: string[];
+            /** @description StartedAt 是任务开始执行时间戳（Unix 秒），可为 null（零值为 0）。 */
             started_at?: number;
-            /** @description triage|todo|ready|running|blocked|done|archived */
+            /** @description Status 是任务状态（triage|todo|ready|running|blocked|done|archived）。 */
             status?: string;
+            /** @description Tenant 是多租户标识，可为 null（零值为空字符串）。 */
+            tenant?: string;
+            /** @description Title 是任务标题。 */
             title?: string;
-            worker_pid?: number;
+            /** @description WorkspaceKind 是 workspace 类型（scratch|dir|worktree）。 */
             workspace_kind?: string;
+            /** @description WorkspacePath 是 workspace 路径，可为 null（零值为空字符串）。 */
             workspace_path?: string;
         };
+        "service.KanbanTaskDetail": {
+            /** @description Children 是子任务 ID 列表（task id 字符串数组）。 */
+            children?: string[];
+            /** @description Comments 是任务评论列表。 */
+            comments?: components["schemas"]["service.KanbanComment"][];
+            /** @description Events 是任务事件流列表。 */
+            events?: components["schemas"]["service.KanbanEvent"][];
+            /** @description LatestSummary 是最新执行摘要，可为 null（零值为空字符串）。 */
+            latest_summary?: string;
+            /** @description Parents 是父任务 ID 列表（task id 字符串数组）。 */
+            parents?: string[];
+            task?: components["schemas"]["service.KanbanTask"];
+        };
         "service.KanbanTaskRun": {
+            /** @description EndedAt 是执行结束时间戳（Unix 秒），0 表示尚未结束。 */
             ended_at?: number;
+            /** @description Error 是执行失败时的错误信息。 */
             error?: string;
+            /** @description Outcome 是执行结果（如 "success"/"failure"）。 */
             outcome?: string;
+            /** @description Profile 是执行该任务的 hermes profile 名称。 */
             profile?: string;
+            /** @description StartedAt 是执行开始时间戳（Unix 秒）。 */
             started_at?: number;
+            /** @description Status 是本次执行状态。 */
             status?: string;
+            /** @description Summary 是执行摘要文本。 */
             summary?: string;
+            /** @description WorkerPID 是 worker 进程 ID，0 表示未知或已退出。 */
             worker_pid?: number;
         };
         "service.KnowledgeEntryResult": {

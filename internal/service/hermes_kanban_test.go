@@ -160,22 +160,24 @@ func TestListTasksInvalidJSON(t *testing.T) {
 // ————————————————————————————————————————————————————
 
 // TestShowTaskHappy 验证：ShowTask 解析任务详情 JSON 并正确映射字段；argv 含 show/--json。
+// show --json 输出的任务核心字段嵌在顶层 "task" 子对象里，而非直接平铺。
 func TestShowTaskHappy(t *testing.T) {
-	// CLI 返回一个合法的任务详情 JSON，验证字段被正确解析。
+	// CLI 返回真实 show 结构：任务字段在 task 子对象内，同时含 comments/events 数组。
 	execer := &fakeKanbanExecer{result: runtime.ExecJSONResult{
 		ExitCode: 0,
-		Stdout: `{"id":"t_abc","title":"详情任务","status":"blocked","assignee":"devops",` +
-			`"priority":1,"result":"","workspace_kind":"local","comments":[],"events":[]}`,
+		Stdout: `{"task":{"id":"t_abc","title":"详情任务","status":"blocked","assignee":"devops",` +
+			`"priority":1,"workspace_kind":"scratch","created_at":1779267436,"skills":[]}` +
+			`,"latest_summary":null,"parents":[],"children":[],"comments":[],"events":[]}`,
 	}}
 	svc := NewHermesKanbanService(execer, &fakeKanbanLocator{loc: healthyLoc()})
 
 	detail, err := svc.ShowTask(context.Background(), kanbanOrgAdmin(), "app-1", "default", "t_abc")
 	require.NoError(t, err)
-	// 核心字段解析正确
-	assert.Equal(t, "t_abc", detail.ID)
-	assert.Equal(t, "详情任务", detail.Title)
-	assert.Equal(t, "blocked", detail.Status)
-	assert.Equal(t, "local", detail.WorkspaceKind)
+	// 核心字段通过 detail.Task 访问（show 输出的 task 子对象）
+	assert.Equal(t, "t_abc", detail.Task.ID)
+	assert.Equal(t, "详情任务", detail.Task.Title)
+	assert.Equal(t, "blocked", detail.Task.Status)
+	assert.Equal(t, "scratch", detail.Task.WorkspaceKind)
 	// argv 须含 show、任务 ID 与 --json
 	assert.Contains(t, execer.lastCmd, "show")
 	assert.Contains(t, execer.lastCmd, "t_abc")
@@ -213,21 +215,24 @@ func TestListBoardsHappy(t *testing.T) {
 	assert.Contains(t, execer.lastCmd, "list")
 }
 
-// TestStatsHappy 验证：Stats 解析 per-status 计数 JSON；status_counts 字段被正确映射。
+// TestStatsHappy 验证：Stats 解析 per-status 计数 JSON；by_status 字段被正确映射。
+// 真实 CLI 输出字段名为 by_status（非 status_counts），已按 hermes v0.14.0 校准。
 func TestStatsHappy(t *testing.T) {
-	// CLI 返回各状态计数，验证解析为 KanbanStats.StatusCounts map。
+	// CLI 返回真实 stats 结构：by_status 含各状态计数，by_assignee 含各 assignee 计数。
 	execer := &fakeKanbanExecer{result: runtime.ExecJSONResult{
 		ExitCode: 0,
-		Stdout:   `{"status_counts":{"todo":2,"running":1,"done":5}}`,
+		Stdout:   `{"by_status":{"todo":2,"running":1,"done":5},"by_assignee":{"default":{"todo":2}},"oldest_ready_age_seconds":0,"now":1779267460}`,
 	}}
 	svc := NewHermesKanbanService(execer, &fakeKanbanLocator{loc: healthyLoc()})
 
 	stats, err := svc.Stats(context.Background(), kanbanOrgAdmin(), "app-1", "default")
 	require.NoError(t, err)
-	// 验证各状态计数被正确解析
-	assert.Equal(t, 2, stats.StatusCounts["todo"])
-	assert.Equal(t, 1, stats.StatusCounts["running"])
-	assert.Equal(t, 5, stats.StatusCounts["done"])
+	// 验证各状态计数通过 ByStatus 字段正确解析
+	assert.Equal(t, 2, stats.ByStatus["todo"])
+	assert.Equal(t, 1, stats.ByStatus["running"])
+	assert.Equal(t, 5, stats.ByStatus["done"])
+	// 验证时间戳字段
+	assert.Equal(t, int64(1779267460), stats.Now)
 }
 
 // ————————————————————————————————————————————————————
@@ -235,11 +240,13 @@ func TestStatsHappy(t *testing.T) {
 // ————————————————————————————————————————————————————
 
 // TestCreateTaskHappy 验证：CreateTask 拼出正确 argv 并解析返回详情。
+// create --json 输出是扁平任务对象（与 list 元素格式一致），
+// service 层解析后包装为 KanbanTaskDetail{Task: ...}。
 func TestCreateTaskHappy(t *testing.T) {
-	// CLI 返回新建任务详情，验证解析正确且 title 作为独立 argv 元素传入。
+	// CLI 返回扁平任务对象（create 输出格式），验证解析正确且 title 作为独立 argv 元素传入。
 	execer := &fakeKanbanExecer{result: runtime.ExecJSONResult{
 		ExitCode: 0,
-		Stdout:   `{"id":"t_new","title":"新任务","status":"todo","assignee":"devops","priority":2}`,
+		Stdout:   `{"id":"t_new","title":"新任务","status":"ready","assignee":"devops","priority":2,"created_at":1779267436,"skills":[]}`,
 	}}
 	svc := NewHermesKanbanService(execer, &fakeKanbanLocator{loc: healthyLoc()})
 
@@ -247,8 +254,9 @@ func TestCreateTaskHappy(t *testing.T) {
 		Title: "新任务", Assignee: "devops", Priority: 2,
 	})
 	require.NoError(t, err)
-	assert.Equal(t, "t_new", detail.ID)
-	assert.Equal(t, "todo", detail.Status)
+	// create 输出包装在 detail.Task 子对象内
+	assert.Equal(t, "t_new", detail.Task.ID)
+	assert.Equal(t, "ready", detail.Task.Status)
 	// 自由文本 title 必须作为独立 argv 元素（不拼 shell），防注入
 	assert.Contains(t, execer.lastCmd, "新任务")
 	assert.Contains(t, execer.lastCmd, "create")

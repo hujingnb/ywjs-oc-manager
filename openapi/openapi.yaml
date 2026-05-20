@@ -714,126 +714,196 @@ components:
     service.KanbanBoard:
       properties:
         archived:
+          description: Archived 标记 board 是否已归档。
           type: boolean
-        description:
+        color:
+          description: Color 是 board 颜色标识，可为空。
           type: string
+        counts:
+          additionalProperties:
+            type: integer
+          description: Counts 是 board 内各状态的任务计数，key 为状态名，value 为数量。
+          type: object
+        description:
+          description: Description 是 board 描述，可为空。
+          type: string
+        icon:
+          description: Icon 是 board 图标字符串，可为空。
+          type: string
+        is_current:
+          description: IsCurrent 标记是否为当前活动 board。
+          type: boolean
         name:
+          description: Name 是 board 显示名称。
           type: string
         slug:
+          description: Slug 是 board 唯一标识，形如 "default"。
           type: string
+        total:
+          description: Total 是 board 内任务总数。
+          type: integer
       type: object
     service.KanbanComment:
       properties:
         author:
+          description: Author 是评论作者（hermes profile 名）。
           type: string
         body:
+          description: Body 是评论内容。
           type: string
         created_at:
+          description: CreatedAt 是评论创建时间戳（Unix 秒）。
           type: integer
       type: object
     service.KanbanEvent:
       properties:
         created_at:
+          description: CreatedAt 是事件创建时间戳（Unix 秒）。
           type: integer
         kind:
+          description: Kind 是事件类型，如 "created"、"status_changed" 等。
           type: string
         payload:
+          description: |-
+            Payload 是事件附加数据，结构随 Kind 变化（任意对象）。
+            用 any 类型（swag 可正确解析为 object），json.Unmarshal 会把 JSON 对象解为 map[string]any。
+        run_id:
+          description: RunID 是关联的执行 ID，可为 null（零值为空字符串）。
           type: string
       type: object
     service.KanbanStats:
       properties:
-        status_counts:
+        by_assignee:
+          additionalProperties:
+            additionalProperties:
+              type: integer
+            type: object
+          description: ByAssignee 是各 assignee 下各状态的任务计数，外层 key 为 assignee，内层 key 为状态名。
+          type: object
+        by_status:
           additionalProperties:
             type: integer
+          description: ByStatus 是各状态的任务计数，key 为状态名，value 为任务数量。
           type: object
+        now:
+          description: Now 是 stats 生成时的 Unix 时间戳（秒），用于客户端计算相对时间。
+          type: integer
+        oldest_ready_age_seconds:
+          description: OldestReadyAgeSeconds 是最老的 ready 状态任务已等待的秒数。
+          type: integer
       type: object
     service.KanbanTask:
+      description: Task 是任务核心字段，对应 show 输出的顶层 "task" 子对象。
       properties:
         assignee:
+          description: Assignee 是当前分配的 hermes profile 名称。
           type: string
         body:
+          description: Body 是任务描述，可为 null（零值为空字符串）。
           type: string
         completed_at:
+          description: CompletedAt 是任务完成时间戳（Unix 秒），可为 null（零值为 0）。
           type: integer
         created_at:
+          description: CreatedAt 是任务创建时间戳（Unix 秒）。
           type: integer
+        created_by:
+          description: CreatedBy 是任务创建方（"user" 或 profile 名）。
+          type: string
         id:
+          description: ID 是任务唯一标识，形如 "t_85620ed7"。
           type: string
-        priority:
+        max_retries:
+          description: MaxRetries 是最大重试次数，可为 null（零值为 0）。
           type: integer
-        skills:
+        priority:
+          description: Priority 是任务优先级（0-9）。
+          type: integer
+        result:
+          description: Result 是任务完成结果摘要，可为 null（零值为空字符串）。
           type: string
+        skills:
+          description: Skills 是任务所需技能列表，为字符串数组（空任务时为 []）。
+          items:
+            type: string
+          type: array
+          uniqueItems: false
         started_at:
+          description: StartedAt 是任务开始执行时间戳（Unix 秒），可为 null（零值为 0）。
           type: integer
         status:
-          description: triage|todo|ready|running|blocked|done|archived
+          description: Status 是任务状态（triage|todo|ready|running|blocked|done|archived）。
+          type: string
+        tenant:
+          description: Tenant 是多租户标识，可为 null（零值为空字符串）。
           type: string
         title:
+          description: Title 是任务标题。
+          type: string
+        workspace_kind:
+          description: WorkspaceKind 是 workspace 类型（scratch|dir|worktree）。
+          type: string
+        workspace_path:
+          description: WorkspacePath 是 workspace 路径，可为 null（零值为空字符串）。
           type: string
       type: object
     service.KanbanTaskDetail:
       properties:
-        assignee:
-          type: string
-        body:
-          type: string
+        children:
+          description: Children 是子任务 ID 列表（task id 字符串数组）。
+          items:
+            type: string
+          type: array
+          uniqueItems: false
         comments:
+          description: Comments 是任务评论列表。
           items:
             $ref: '#/components/schemas/service.KanbanComment'
           type: array
           uniqueItems: false
-        completed_at:
-          type: integer
-        created_at:
-          type: integer
         events:
+          description: Events 是任务事件流列表。
           items:
             $ref: '#/components/schemas/service.KanbanEvent'
           type: array
           uniqueItems: false
-        id:
+        latest_summary:
+          description: LatestSummary 是最新执行摘要，可为 null（零值为空字符串）。
           type: string
-        last_heartbeat_at:
-          type: integer
-        parent_id:
-          type: string
-        priority:
-          type: integer
-        result:
-          type: string
-        skills:
-          type: string
-        started_at:
-          type: integer
-        status:
-          description: triage|todo|ready|running|blocked|done|archived
-          type: string
-        title:
-          type: string
-        worker_pid:
-          type: integer
-        workspace_kind:
-          type: string
-        workspace_path:
-          type: string
+        parents:
+          description: Parents 是父任务 ID 列表（task id 字符串数组）。
+          items:
+            type: string
+          type: array
+          uniqueItems: false
+        task:
+          $ref: '#/components/schemas/service.KanbanTask'
       type: object
     service.KanbanTaskRun:
       properties:
         ended_at:
+          description: EndedAt 是执行结束时间戳（Unix 秒），0 表示尚未结束。
           type: integer
         error:
+          description: Error 是执行失败时的错误信息。
           type: string
         outcome:
+          description: Outcome 是执行结果（如 "success"/"failure"）。
           type: string
         profile:
+          description: Profile 是执行该任务的 hermes profile 名称。
           type: string
         started_at:
+          description: StartedAt 是执行开始时间戳（Unix 秒）。
           type: integer
         status:
+          description: Status 是本次执行状态。
           type: string
         summary:
+          description: Summary 是执行摘要文本。
           type: string
         worker_pid:
+          description: WorkerPID 是 worker 进程 ID，0 表示未知或已退出。
           type: integer
       type: object
     service.KnowledgeEntryResult:

@@ -182,7 +182,7 @@ func TestKanbanListBoardsHappy(t *testing.T) {
 // HTTP 状态 200 且响应体含顶层 task key。
 func TestKanbanShowTaskHappy(t *testing.T) {
 	// stub 预设任务详情（ID=t_1），验证单任务查询正常路径
-	stub := &kanbanServiceStub{detail: service.KanbanTaskDetail{KanbanTask: service.KanbanTask{ID: "t_1", Title: "测试任务"}}}
+	stub := &kanbanServiceStub{detail: service.KanbanTaskDetail{Task: service.KanbanTask{ID: "t_1", Title: "测试任务"}}}
 	r := newKanbanTestRouter(t, stub)
 
 	w := httptest.NewRecorder()
@@ -218,7 +218,8 @@ func TestKanbanTaskRunsHappy(t *testing.T) {
 // HTTP 状态 200 且响应体含顶层 stats key。
 func TestKanbanStatsHappy(t *testing.T) {
 	// stub 预设统计数据，验证统计查询正常路径
-	stub := &kanbanServiceStub{stats: service.KanbanStats{StatusCounts: map[string]int{"todo": 3, "done": 5}}}
+	// 使用真实字段名 ByStatus（原 StatusCounts 已按 hermes v0.14.0 契约校准）
+	stub := &kanbanServiceStub{stats: service.KanbanStats{ByStatus: map[string]int{"todo": 3, "done": 5}}}
 	r := newKanbanTestRouter(t, stub)
 
 	w := httptest.NewRecorder()
@@ -237,7 +238,7 @@ func TestKanbanStatsHappy(t *testing.T) {
 // handler 层按 principal.Role 将其静默丢弃，不透传给 service。
 func TestKanbanCreateStripsAdvancedFieldsForOrgAdmin(t *testing.T) {
 	// stub 预设成功返回，detail.ID 用于验证正常路径通过
-	stub := &kanbanServiceStub{detail: service.KanbanTaskDetail{KanbanTask: service.KanbanTask{ID: "t_new"}}}
+	stub := &kanbanServiceStub{detail: service.KanbanTaskDetail{Task: service.KanbanTask{ID: "t_new"}}}
 	r := newKanbanTestRouter(t, stub)
 
 	body := `{"title":"x","assignee":"devops","skills":"bash","workspace_kind":"worktree","max_retries":5}`
@@ -259,7 +260,7 @@ func TestKanbanCreateStripsAdvancedFieldsForOrgAdmin(t *testing.T) {
 // 平台管理员提交高级字段时，handler 层原样透传给 service，不做 strip。
 func TestKanbanCreateKeepsAdvancedFieldsForPlatformAdmin(t *testing.T) {
 	// stub 预设成功返回
-	stub := &kanbanServiceStub{detail: service.KanbanTaskDetail{KanbanTask: service.KanbanTask{ID: "t_new"}}}
+	stub := &kanbanServiceStub{detail: service.KanbanTaskDetail{Task: service.KanbanTask{ID: "t_new"}}}
 	r := newKanbanTestRouter(t, stub)
 
 	body := `{"title":"x","assignee":"devops","skills":"bash","max_retries":5}`

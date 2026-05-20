@@ -343,11 +343,13 @@ func (s *HermesKanbanService) CreateTask(ctx context.Context, principal auth.Pri
 	if err != nil {
 		return KanbanTaskDetail{}, err
 	}
-	var detail KanbanTaskDetail
-	if err := json.Unmarshal(out, &detail); err != nil {
+	// create --json 输出的是扁平任务对象（与 list 元素格式相同），
+	// 而非 show 输出的 {task:{...}} 包装结构，需先解到 KanbanTask 再包装。
+	var task KanbanTask
+	if err := json.Unmarshal(out, &task); err != nil {
 		return KanbanTaskDetail{}, fmt.Errorf("%w: %v", ErrKanbanOutputInvalid, err)
 	}
-	return detail, nil
+	return KanbanTaskDetail{Task: task}, nil
 }
 
 // Comment 给任务追加一条评论。body 为自由文本，作为独立 argv 传入，不拼 shell。
