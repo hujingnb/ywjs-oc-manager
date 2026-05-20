@@ -374,3 +374,27 @@ func TestCanManageAppKanban(t *testing.T) {
 	}
 	runAppCases(t, CanManageAppKanban, cases)
 }
+
+// TestCanViewAppCron 验证 Cron 读权限与应用详情可见性保持一致。
+func TestCanViewAppCron(t *testing.T) {
+	cases := []memberCase{
+		{"platform_admin 跨组织可看 cron", domain.UserRolePlatformAdmin, orgA, userA, orgB, userB, true}, // 场景：平台管理员沿用应用详情跨组织观察能力
+		{"org_admin 同组织可看 cron", domain.UserRoleOrgAdmin, orgA, userA, orgA, userB, true},           // 场景：组织管理员可查看本组织应用 Cron
+		{"org_admin 跨组织不可看 cron", domain.UserRoleOrgAdmin, orgA, userA, orgB, userB, false},         // 场景：组织管理员不能越过组织边界
+		{"org_member 拥有者本人可看 cron", domain.UserRoleOrgMember, orgA, userA, orgA, userA, true},       // 场景：普通成员只能查看自己拥有的应用 Cron
+		{"org_member 非拥有者不可看 cron", domain.UserRoleOrgMember, orgA, userA, orgA, userB, false},      // 场景：普通成员不可查看同组织他人应用 Cron
+	}
+	runAppCases(t, CanViewAppCron, cases)
+}
+
+// TestCanManageAppCron 验证 Cron 写权限按批准范围与读权限一致。
+func TestCanManageAppCron(t *testing.T) {
+	cases := []memberCase{
+		{"platform_admin 跨组织可管理 cron", domain.UserRolePlatformAdmin, orgA, userA, orgB, userB, true}, // 场景：平台管理员可管理其可见实例的 Cron
+		{"org_admin 同组织可管理 cron", domain.UserRoleOrgAdmin, orgA, userA, orgA, userB, true},           // 场景：组织管理员可管理本组织应用 Cron
+		{"org_admin 跨组织不可管理 cron", domain.UserRoleOrgAdmin, orgA, userA, orgB, userB, false},         // 场景：组织管理员不能管理其他组织应用 Cron
+		{"org_member 拥有者本人可管理 cron", domain.UserRoleOrgMember, orgA, userA, orgA, userA, true},       // 场景：应用拥有者可管理自己的 Cron
+		{"org_member 非拥有者不可管理 cron", domain.UserRoleOrgMember, orgA, userA, orgA, userB, false},      // 场景：普通成员不能管理同组织他人应用 Cron
+	}
+	runAppCases(t, CanManageAppCron, cases)
+}

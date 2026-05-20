@@ -255,3 +255,18 @@ func CanViewAppKanban(p Principal, appOrgID, appOwnerUserID string) bool {
 func CanManageAppKanban(p Principal, appOrgID, appOwnerUserID string) bool {
 	return CanViewApp(p, appOrgID, appOwnerUserID)
 }
+
+// Cron 任务 ---------------------------------------------------------
+
+// CanViewAppCron 判断 principal 能否查看应用的 Cron 任务。
+// Cron 读权限与应用详情一致：平台管理员、本组织管理员、应用拥有者本人可读。
+func CanViewAppCron(p Principal, appOrgID, appOwnerUserID string) bool {
+	return CanViewApp(p, appOrgID, appOwnerUserID)
+}
+
+// CanManageAppCron 判断 principal 能否对应用 Cron 执行写操作（创建、更新、启停、运行、删除）。
+// 已批准的权限范围要求所有能查看实例详情的角色都可管理 Cron，因此当前委托 CanViewApp；
+// 单独保留谓词，便于未来 Cron 写权限收紧时只改权限层，不改 service/handler 调用点。
+func CanManageAppCron(p Principal, appOrgID, appOwnerUserID string) bool {
+	return CanViewApp(p, appOrgID, appOwnerUserID)
+}

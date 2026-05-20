@@ -136,3 +136,23 @@ var ErrKanbanOutputInvalid = errors.New("kanban 输出解析失败")
 
 // ErrKanbanBadRequest 表示 kanban 请求参数非法（board slug / status / task id 等白名单校验失败）。
 var ErrKanbanBadRequest = errors.New("kanban 请求参数非法")
+
+// Cron --------------------------------------------------------------
+
+// ErrCronForbidden 表示当前 principal 无权访问该实例的 Cron。
+var ErrCronForbidden = errors.New("无权访问该实例 Cron")
+
+// ErrCronRuntimeUnavailable 表示实例容器未运行，无法执行 cron CLI。
+var ErrCronRuntimeUnavailable = errors.New("实例容器未运行")
+
+// ErrCronNotSupported 表示该实例运行的镜像不支持 Hermes Cron。
+var ErrCronNotSupported = errors.New("该实例镜像不支持 Cron")
+
+// ErrCronCLI 表示 oc-cron 或底层 hermes cron 命令执行失败。
+var ErrCronCLI = errors.New("cron 命令执行失败")
+
+// ErrCronOutputInvalid 表示 oc-cron 输出不是合法契约信封或 data 结构不符合预期。
+var ErrCronOutputInvalid = errors.New("cron 输出解析失败")
+
+// ErrCronBadRequest 表示 Cron 请求参数非法（job id / script / output file 等白名单校验失败）。
+var ErrCronBadRequest = errors.New("cron 请求参数非法")
