@@ -49,10 +49,11 @@
 
 ## 2. 镜像同步(imagesync)
 
-构建产物为 `hermes-runtime:dev`(默认 tag),由仓库内 `runtime/hermes/Dockerfile`
-构建。`AppInitializeConfig.RuntimeImage` 在装配时如未设置则 fallback 到
-`hermes-runtime:dev`(`app_initialize.go:191`)。镜像版本锁通过
-`runtime/hermes/version.txt`(当前 `main`)与 Dockerfile `HERMES_REF` ARG 传入。
+构建产物为 `hermes-runtime:v2026.5.16-dev`（本地 dev tag），由仓库内
+`runtime/hermes/hermes-v2026.5.16/Dockerfile` 构建。生产发布 tag 形如
+`oc-manager-hermes:v2026.5.16-2026-05-21-12-00-00` 这种时间戳 tag。镜像版本锁通过
+`runtime/hermes/hermes-v2026.5.16/version.txt` 与 Dockerfile `HERMES_REF`
+ARG 传入，Makefile 会拒绝 `main`、`master`、`latest` 等浮动 ref。
 
 `imagesync.Service.SyncRuntimeImage` 的对账逻辑(`internal/runtime/imagesync/service.go:64`):
 
@@ -409,7 +410,7 @@ Hermes 启动时:
 | 现象 | 第一步看 | 关键命令 / 路径 |
 |---|---|---|
 | 容器没起来 | `app_initialize` job 失败记录 | manager-api 日志搜 `runtime_node` + `app_id`;前端"应用详情" 看最近 audit log |
-| 镜像同步失败 | `imagesync` 调用 | manager-api 日志 `inspect remote image` / `load remote image`;在节点跑 `docker images hermes-runtime:dev` 对比 ID |
+| 镜像同步失败 | `imagesync` 调用 | manager-api 日志 `inspect remote image` / `load remote image`;在节点跑 `docker images hermes-runtime:v2026.5.16-dev` 对比 ID |
 | 环境变量没生效 | docker inspect | 进节点跑 `docker inspect hermes-<appID> --format '{{.Config.Env}}'`,确认 `OPENAI_API_KEY` 是否真实 sk- 而非占位符 |
 | .env 没有 WEIXIN_* | `ChannelLoginHandler` 是否触发 | manager-api 日志搜 `weixin_account_id`;查 `apps.<id>.channel_bindings` 状态;节点上 `cat <nodeDataRoot>/apps/<appID>/.hermes/.env` |
 | 知识库看不到 | `skills/kb-*` 是否注入 | 节点上 `ls <nodeDataRoot>/apps/<appID>/.hermes/skills/`;`SOUL.md` 末尾是否有 always-on context |
