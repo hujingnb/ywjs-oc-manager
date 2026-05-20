@@ -460,3 +460,42 @@ func (s *HermesKanbanService) Reclaim(ctx context.Context, principal auth.Princi
 	return err
 }
 
+// ————————————————————————————————————————————————————
+// Task C4：实时事件流
+// ————————————————————————————————————————————————————
+
+// StreamEvents 在 hermes 容器内执行 `kanban watch` 并把每行 NDJSON 投递到回调。
+// 该方法阻塞直到 ctx 取消、流结束或出错。board watch 覆盖整个看板所有任务事件。
+func (s *HermesKanbanService) StreamEvents(ctx context.Context, principal auth.Principal, appID, board string, onLine func(line string)) error {
+	loc, err := s.resolve(ctx, principal, appID)
+	if err != nil {
+		return err
+	}
+	b, err := validateBoard(board)
+	if err != nil {
+		return err
+	}
+	// watch 子命令按实测决定是否带 --json；此处先带，生产环境校准后可去掉。
+	cmd := []string{"hermes", "kanban", "watch", "--board", b, "--json"}
+	handle, err := s.execer.ContainerExecStream(ctx, loc.NodeID, loc.ContainerID, cmd)
+	if err != nil {
+		return fmt.Errorf("%w: %v", ErrKanbanCLI, err)
+	}
+	defer handle.Close()
+	for {
+		select {
+		case <-ctx.Done():
+			return ctx.Err()
+		case line, ok := <-handle.Lines:
+			if !ok {
+				// channel 关闭表示流结束，检查是否有底层错误。
+				if e := handle.Err(); e != nil {
+					return fmt.Errorf("%w: %v", ErrKanbanCLI, e)
+				}
+				return nil
+			}
+			onLine(line)
+		}
+	}
+}
+

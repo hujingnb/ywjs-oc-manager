@@ -289,3 +289,47 @@ func TestCompleteHappy(t *testing.T) {
 	assert.Contains(t, execer.lastCmd, "已完成")
 }
 
+// ————————————————————————————————————————————————————
+// Task C4：实时事件流单测
+// ————————————————————————————————————————————————————
+
+// fakeStreamExecer 是支持流式输出的假 execer，把预设 lines 投递到 channel 后关闭。
+type fakeStreamExecer struct {
+	// lines 是预设的待投递行。
+	lines []string
+}
+
+// ContainerExecJSON 在 fakeStreamExecer 中不使用，返回空结果。
+func (f *fakeStreamExecer) ContainerExecJSON(_ context.Context, _, _ string, _ []string) (runtime.ExecJSONResult, error) {
+	return runtime.ExecJSONResult{}, nil
+}
+
+// ContainerExecStream 把 lines 全部写入 channel 后关闭，模拟流式输出。
+func (f *fakeStreamExecer) ContainerExecStream(_ context.Context, _, _ string, _ []string) (runtime.ExecStreamHandle, error) {
+	ch := make(chan string, len(f.lines))
+	for _, l := range f.lines {
+		ch <- l
+	}
+	close(ch)
+	return runtime.ExecStreamHandle{
+		Lines: ch,
+		Err:   func() error { return nil },
+		Close: func() {},
+	}, nil
+}
+
+// TestStreamEventsDeliversLines 验证：StreamEvents 把流式行逐条交给 onLine 回调。
+func TestStreamEventsDeliversLines(t *testing.T) {
+	// 预设两行 NDJSON，验证全部按顺序传给回调。
+	execer := &fakeStreamExecer{lines: []string{`{"kind":"claimed"}`, `{"kind":"heartbeat"}`}}
+	svc := NewHermesKanbanService(execer, &fakeKanbanLocator{loc: healthyLoc()})
+
+	var got []string
+	err := svc.StreamEvents(context.Background(), kanbanOrgAdmin(), "app-1", "default", func(l string) {
+		got = append(got, l)
+	})
+	require.NoError(t, err)
+	// 两行事件应按顺序全部到达
+	assert.Equal(t, []string{`{"kind":"claimed"}`, `{"kind":"heartbeat"}`}, got)
+}
+
