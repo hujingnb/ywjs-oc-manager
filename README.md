@@ -161,14 +161,12 @@ docker build -f web/Dockerfile             -t <registry>/oc-manager-web:<tag>   
 # oc-runtime-agent（构建上下文必须为仓库根目录）
 docker build -f runtime/agent/Dockerfile   -t <registry>/oc-runtime-agent:<tag> .
 
-# hermes-runtime（推荐走 Makefile，自动读取 version.txt 并传入 HERMES_REF）
+# hermes-runtime（必须走 Makefile：会注入契约资产，设置 HERMES_REF / OC_IMAGE_VARIANT，
+# 并输出 crpi-nu3ibz4f07feyghi.cn-beijing.personal.cr.aliyuncs.com/ywjs_app/oc-manager-hermes:v2026.5.16-<timestamp>）
 make build-hermes-image
-
-# 如需直接 docker build，构建上下文必须为版本化 variant，并显式传 HERMES_REF。
-docker build --build-arg HERMES_REF=v2026.5.16 -t <registry>/hermes-runtime:<tag> runtime/hermes/hermes-v2026.5.16
 ```
 
-四个 Dockerfile 都已经默认走国内源，本地或 CI 环境无需额外配置：
+上述镜像构建入口都已经默认走国内源，本地或 CI 环境无需额外配置：
 
 - 公网基础镜像（`golang` / `alpine` / `node` / `nginx` / `python`）通过 `ARG DOCKER_HUB_MIRROR=crpi-nu3ibz4f07feyghi.cn-beijing.personal.cr.aliyuncs.com/ywjs_public` 走 aliyun 私有 ACR 内已预先镜像同步好的副本
 - Go 模块默认 `GOPROXY=https://goproxy.cn,direct` + `GOSUMDB=off`（与 dev 容器一致）
