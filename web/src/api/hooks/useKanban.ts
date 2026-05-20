@@ -170,3 +170,68 @@ export function useKanbanRunsQuery(
 
 // 给后续 Task E2 / G1 用的导出 queryKey 工具，避免调用方手写字面量。
 export { boardsKey, tasksKey, taskKey }
+
+// ─── 写 mutation hooks（E2）──────────────────────────────────────────
+
+// useCreateKanbanTask 新建任务，成功后失效任务列表缓存触发重新拉取。
+export function useCreateKanbanTask(appId: Ref<string | undefined>, board: Ref<string>) {
+  const client = useQueryClient()
+  return useMutation({
+    mutationFn: async (payload: {
+      title: string
+      assignee: string
+      priority: number
+      body?: string
+      skills?: string
+      workspace_kind?: string
+      workspace_path?: string
+      parent_id?: string
+      max_retries?: number
+    }) => {
+      const res = await apiRequest<{ task: KanbanTaskDetail }>(
+        `/api/v1/apps/${appId.value}/hermes/kanban/tasks`,
+        { method: 'POST', body: { board: board.value, ...payload } },
+      )
+      return res.task
+    },
+    onSuccess: () => {
+      // 新建任务后立即失效任务列表，让轮询逻辑刷新数据而不等待下次 interval。
+      void client.invalidateQueries({ queryKey: ['kanban', 'tasks', appId, board] })
+    },
+  })
+}
+
+// KanbanWriteAction 是除 create 外所有任务写操作的联合类型。
+// 通过 verb 字段区分操作类型，其余字段随操作类型变化。
+type KanbanWriteAction =
+  | { verb: 'comment'; taskId: string; body: string }
+  | { verb: 'complete'; taskId: string; result?: string }
+  | { verb: 'block'; taskId: string; reason: string }
+  | { verb: 'unblock'; taskId: string }
+  | { verb: 'archive'; taskId: string }
+  | { verb: 'reassign'; taskId: string; to: string }
+  | { verb: 'reclaim'; taskId: string }
+
+// useKanbanTaskAction 是统一的任务写操作 mutation（comment/complete/block/...）。
+// 单 hook 覆盖所有非 create 写操作，避免为每个 verb 重复定义几乎相同的 hook。
+// 成功后同时失效任务列表（badge 计数）和任务详情（状态/评论变化）两个缓存。
+export function useKanbanTaskAction(appId: Ref<string | undefined>, board: Ref<string>) {
+  const client = useQueryClient()
+  return useMutation({
+    mutationFn: async (action: KanbanWriteAction) => {
+      // 解构 verb 和 taskId 作为 URL 路径参数，剩余字段作为请求体追加 board。
+      const { verb, taskId, ...rest } = action
+      await apiRequest<void>(
+        `/api/v1/apps/${appId.value}/hermes/kanban/tasks/${taskId}/${verb}`,
+        { method: 'POST', body: { board: board.value, ...rest } },
+      )
+    },
+    onSuccess: (_data, action) => {
+      // 任务状态或内容变化，同时失效列表缓存（状态计数徽标）和详情缓存。
+      void client.invalidateQueries({ queryKey: ['kanban', 'tasks', appId, board] })
+      void client.invalidateQueries({
+        queryKey: ['kanban', 'task', appId, board, action.taskId],
+      })
+    },
+  })
+}
