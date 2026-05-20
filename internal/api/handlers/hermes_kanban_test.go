@@ -16,17 +16,20 @@ import (
 )
 
 // kanbanServiceStub 是 hermesKanbanService 的可控 stub，用于 handler 单测。
-// err 字段控制所有方法是否返回错误；tasks / detail 控制读方法的成功返回值。
+// err 字段控制所有方法是否返回错误；tasks / detail / boards / runs / stats 控制读方法的成功返回值。
 type kanbanServiceStub struct {
 	tasks    []service.KanbanTask
 	detail   service.KanbanTaskDetail
+	boards   []service.KanbanBoard
+	runs     []service.KanbanTaskRun
+	stats    service.KanbanStats
 	createIn service.CreateKanbanTaskInput // 记录最后一次 CreateTask 入参
 	err      error
 }
 
-// ListBoards 返回预设错误，无需测试数据。
+// ListBoards 返回预设 boards 列表或错误。
 func (s *kanbanServiceStub) ListBoards(_ context.Context, _ auth.Principal, _ string) ([]service.KanbanBoard, error) {
-	return nil, s.err
+	return s.boards, s.err
 }
 
 // ListTasks 返回预设任务列表或错误。
@@ -39,14 +42,14 @@ func (s *kanbanServiceStub) ShowTask(_ context.Context, _ auth.Principal, _, _, 
 	return s.detail, s.err
 }
 
-// TaskRuns 返回预设错误，无需测试数据。
+// TaskRuns 返回预设任务执行历史列表或错误。
 func (s *kanbanServiceStub) TaskRuns(_ context.Context, _ auth.Principal, _, _, _ string) ([]service.KanbanTaskRun, error) {
-	return nil, s.err
+	return s.runs, s.err
 }
 
-// Stats 返回预设错误，无需测试数据。
+// Stats 返回预设统计数据或错误。
 func (s *kanbanServiceStub) Stats(_ context.Context, _ auth.Principal, _, _ string) (service.KanbanStats, error) {
-	return service.KanbanStats{}, s.err
+	return s.stats, s.err
 }
 
 // StreamEvents 返回预设错误，不推送任何行。
@@ -119,6 +122,8 @@ func TestKanbanListTasksHappy(t *testing.T) {
 	require.Equal(t, http.StatusOK, w.Code)
 	// 响应体须含任务 ID
 	assert.Contains(t, w.Body.String(), "t_1")
+	// 响应体须含顶层 tasks key，确保 JSON 结构符合接口契约
+	assert.Contains(t, w.Body.String(), `"tasks"`)
 }
 
 // TestKanbanListTasksForbidden 验证：service 返回 ErrKanbanForbidden 时端点返回 403。
@@ -152,4 +157,76 @@ func TestKanbanStubReturns503(t *testing.T) {
 	assert.Equal(t, http.StatusServiceUnavailable, w.Code)
 	// 响应体须含稳定的接口契约错误码
 	assert.Contains(t, w.Body.String(), "KANBAN_NOT_SUPPORTED_ON_STUB")
+}
+
+// TestKanbanListBoardsHappy 验证：ListBoards 端点在 service 正常返回时，
+// HTTP 状态 200 且响应体含顶层 boards key。
+func TestKanbanListBoardsHappy(t *testing.T) {
+	// stub 预设一个 board，验证正常路径下响应结构正确
+	stub := &kanbanServiceStub{boards: []service.KanbanBoard{{Slug: "default", Name: "默认看板"}}}
+	r := newKanbanTestRouter(t, stub)
+
+	w := httptest.NewRecorder()
+	req := httptest.NewRequest(http.MethodGet, "/api/v1/apps/app-1/hermes/kanban/boards", nil)
+	// 注入 org_admin principal，确保鉴权层通过
+	req = withPrincipal(req, auth.Principal{UserID: "u1", Role: domain.UserRoleOrgAdmin, OrgID: "org-1"})
+	r.ServeHTTP(w, req)
+
+	require.Equal(t, http.StatusOK, w.Code)
+	// 响应体须含顶层 boards key，确保接口契约正确
+	assert.Contains(t, w.Body.String(), `"boards"`)
+}
+
+// TestKanbanShowTaskHappy 验证：ShowTask 端点在 service 正常返回时，
+// HTTP 状态 200 且响应体含顶层 task key。
+func TestKanbanShowTaskHappy(t *testing.T) {
+	// stub 预设任务详情（ID=t_1），验证单任务查询正常路径
+	stub := &kanbanServiceStub{detail: service.KanbanTaskDetail{KanbanTask: service.KanbanTask{ID: "t_1", Title: "测试任务"}}}
+	r := newKanbanTestRouter(t, stub)
+
+	w := httptest.NewRecorder()
+	req := httptest.NewRequest(http.MethodGet, "/api/v1/apps/app-1/hermes/kanban/tasks/t_1", nil)
+	// 注入 org_admin principal，确保鉴权层通过
+	req = withPrincipal(req, auth.Principal{UserID: "u1", Role: domain.UserRoleOrgAdmin, OrgID: "org-1"})
+	r.ServeHTTP(w, req)
+
+	require.Equal(t, http.StatusOK, w.Code)
+	// 响应体须含顶层 task key，确保接口契约正确
+	assert.Contains(t, w.Body.String(), `"task"`)
+}
+
+// TestKanbanTaskRunsHappy 验证：TaskRuns 端点在 service 正常返回时，
+// HTTP 状态 200 且响应体含顶层 runs key。
+func TestKanbanTaskRunsHappy(t *testing.T) {
+	// stub 预设一条执行历史，验证任务执行历史查询正常路径
+	stub := &kanbanServiceStub{runs: []service.KanbanTaskRun{{Profile: "default", Status: "done"}}}
+	r := newKanbanTestRouter(t, stub)
+
+	w := httptest.NewRecorder()
+	req := httptest.NewRequest(http.MethodGet, "/api/v1/apps/app-1/hermes/kanban/tasks/t_1/runs", nil)
+	// 注入 org_admin principal，确保鉴权层通过
+	req = withPrincipal(req, auth.Principal{UserID: "u1", Role: domain.UserRoleOrgAdmin, OrgID: "org-1"})
+	r.ServeHTTP(w, req)
+
+	require.Equal(t, http.StatusOK, w.Code)
+	// 响应体须含顶层 runs key，确保接口契约正确
+	assert.Contains(t, w.Body.String(), `"runs"`)
+}
+
+// TestKanbanStatsHappy 验证：Stats 端点在 service 正常返回时，
+// HTTP 状态 200 且响应体含顶层 stats key。
+func TestKanbanStatsHappy(t *testing.T) {
+	// stub 预设统计数据，验证统计查询正常路径
+	stub := &kanbanServiceStub{stats: service.KanbanStats{StatusCounts: map[string]int{"todo": 3, "done": 5}}}
+	r := newKanbanTestRouter(t, stub)
+
+	w := httptest.NewRecorder()
+	req := httptest.NewRequest(http.MethodGet, "/api/v1/apps/app-1/hermes/kanban/stats", nil)
+	// 注入 org_admin principal，确保鉴权层通过
+	req = withPrincipal(req, auth.Principal{UserID: "u1", Role: domain.UserRoleOrgAdmin, OrgID: "org-1"})
+	r.ServeHTTP(w, req)
+
+	require.Equal(t, http.StatusOK, w.Code)
+	// 响应体须含顶层 stats key，确保接口契约正确
+	assert.Contains(t, w.Body.String(), `"stats"`)
 }

@@ -110,6 +110,9 @@ func (h *HermesKanbanHandler) ListBoards(c *gin.Context) {
 // @Param        assignee  query     string  false  "按 assignee 过滤"
 // @Success      200       {object}  map[string][]service.KanbanTask
 // @Failure      403       {object}  ErrorResponse
+// @Failure      502       {object}  ErrorResponse
+// @Failure      503       {object}  ErrorResponse
+// @Failure      500       {object}  ErrorResponse
 // @Router       /apps/{appId}/hermes/kanban/tasks [get]
 func (h *HermesKanbanHandler) ListTasks(c *gin.Context) {
 	tasks, err := h.service.ListTasks(c.Request.Context(), principalFromCtx(c), c.Param("appId"), service.KanbanTaskFilter{
@@ -134,6 +137,10 @@ func (h *HermesKanbanHandler) ListTasks(c *gin.Context) {
 // @Param        taskId  path      string  true   "任务 ID"
 // @Param        board   query     string  false  "board slug"
 // @Success      200     {object}  map[string]service.KanbanTaskDetail
+// @Failure      403     {object}  ErrorResponse
+// @Failure      502     {object}  ErrorResponse
+// @Failure      503     {object}  ErrorResponse
+// @Failure      500     {object}  ErrorResponse
 // @Router       /apps/{appId}/hermes/kanban/tasks/{taskId} [get]
 func (h *HermesKanbanHandler) ShowTask(c *gin.Context) {
 	detail, err := h.service.ShowTask(c.Request.Context(), principalFromCtx(c), c.Param("appId"), c.Query("board"), c.Param("taskId"))
@@ -154,6 +161,10 @@ func (h *HermesKanbanHandler) ShowTask(c *gin.Context) {
 // @Param        taskId  path      string  true   "任务 ID"
 // @Param        board   query     string  false  "board slug"
 // @Success      200     {object}  map[string][]service.KanbanTaskRun
+// @Failure      403     {object}  ErrorResponse
+// @Failure      502     {object}  ErrorResponse
+// @Failure      503     {object}  ErrorResponse
+// @Failure      500     {object}  ErrorResponse
 // @Router       /apps/{appId}/hermes/kanban/tasks/{taskId}/runs [get]
 func (h *HermesKanbanHandler) TaskRuns(c *gin.Context) {
 	runs, err := h.service.TaskRuns(c.Request.Context(), principalFromCtx(c), c.Param("appId"), c.Query("board"), c.Param("taskId"))
@@ -173,6 +184,10 @@ func (h *HermesKanbanHandler) TaskRuns(c *gin.Context) {
 // @Param        appId  path      string  true   "应用 ID"
 // @Param        board  query     string  false  "board slug"
 // @Success      200    {object}  map[string]service.KanbanStats
+// @Failure      403    {object}  ErrorResponse
+// @Failure      502    {object}  ErrorResponse
+// @Failure      503    {object}  ErrorResponse
+// @Failure      500    {object}  ErrorResponse
 // @Router       /apps/{appId}/hermes/kanban/stats [get]
 func (h *HermesKanbanHandler) Stats(c *gin.Context) {
 	stats, err := h.service.Stats(c.Request.Context(), principalFromCtx(c), c.Param("appId"), c.Query("board"))
