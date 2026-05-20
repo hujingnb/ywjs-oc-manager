@@ -234,3 +234,229 @@ func (s *HermesKanbanService) Stats(ctx context.Context, principal auth.Principa
 	}
 	return stats, nil
 }
+
+// ————————————————————————————————————————————————————
+// Task C3：写 verb
+// ————————————————————————————————————————————————————
+
+// resolveManage 解析 appID 并做写权限校验（比 resolve 多一层 CanManageAppKanban）。
+func (s *HermesKanbanService) resolveManage(ctx context.Context, principal auth.Principal, appID string) (KanbanAppLocation, error) {
+	loc, err := s.resolve(ctx, principal, appID)
+	if err != nil {
+		return KanbanAppLocation{}, err
+	}
+	if !auth.CanManageAppKanban(principal, loc.OrgID, loc.OwnerUserID) {
+		return KanbanAppLocation{}, ErrKanbanForbidden
+	}
+	return loc, nil
+}
+
+// CreateKanbanTaskInput 是新建任务的输入。
+// 基础字段所有可写角色都能填；高级字段仅平台管理员可填，handler 层按角色 strip。
+type CreateKanbanTaskInput struct {
+	Board    string
+	Title    string // 必填
+	Body     string
+	Assignee string // 必填
+	Priority int
+	// 以下为高级字段（仅平台管理员）
+	Skills        string
+	WorkspaceKind string
+	WorkspacePath string
+	ParentID      string
+	MaxRetries    int
+}
+
+// CreateTask 创建一个新任务，返回新任务详情。
+// title / body 等自由文本作为独立 argv 元素传入，不拼 shell，杜绝注入。
+func (s *HermesKanbanService) CreateTask(ctx context.Context, principal auth.Principal, appID string, in CreateKanbanTaskInput) (KanbanTaskDetail, error) {
+	loc, err := s.resolveManage(ctx, principal, appID)
+	if err != nil {
+		return KanbanTaskDetail{}, err
+	}
+	board, err := validateBoard(in.Board)
+	if err != nil {
+		return KanbanTaskDetail{}, err
+	}
+	// 标题为必填项，空白字符串不允许。
+	if strings.TrimSpace(in.Title) == "" {
+		return KanbanTaskDetail{}, fmt.Errorf("%w: 标题不能为空", ErrKanbanBadRequest)
+	}
+	// assignee 必须符合 board slug 规范（hermes 内部 profile 名称约定）。
+	if !boardSlugRe.MatchString(in.Assignee) {
+		return KanbanTaskDetail{}, fmt.Errorf("%w: 非法 assignee", ErrKanbanBadRequest)
+	}
+	// priority 合法范围 0-9。
+	if in.Priority < 0 || in.Priority > 9 {
+		return KanbanTaskDetail{}, fmt.Errorf("%w: priority 越界", ErrKanbanBadRequest)
+	}
+	args := []string{"create", in.Title, "--board", board, "--assignee", in.Assignee,
+		"--priority", fmt.Sprintf("%d", in.Priority), "--json"}
+	if in.Body != "" {
+		args = append(args, "--body", in.Body)
+	}
+	if in.Skills != "" {
+		args = append(args, "--skills", in.Skills)
+	}
+	if in.WorkspaceKind != "" {
+		args = append(args, "--workspace-kind", in.WorkspaceKind)
+	}
+	if in.WorkspacePath != "" {
+		args = append(args, "--workspace-path", in.WorkspacePath)
+	}
+	if in.ParentID != "" {
+		if !taskIDRe.MatchString(in.ParentID) {
+			return KanbanTaskDetail{}, fmt.Errorf("%w: 非法 parent id", ErrKanbanBadRequest)
+		}
+		args = append(args, "--parent", in.ParentID)
+	}
+	if in.MaxRetries > 0 {
+		args = append(args, "--max-retries", fmt.Sprintf("%d", in.MaxRetries))
+	}
+	out, err := s.runCLI(ctx, loc, args)
+	if err != nil {
+		return KanbanTaskDetail{}, err
+	}
+	var detail KanbanTaskDetail
+	if err := json.Unmarshal(out, &detail); err != nil {
+		return KanbanTaskDetail{}, fmt.Errorf("%w: %v", ErrKanbanOutputInvalid, err)
+	}
+	return detail, nil
+}
+
+// Comment 给任务追加一条评论。body 为自由文本，作为独立 argv 传入，不拼 shell。
+func (s *HermesKanbanService) Comment(ctx context.Context, principal auth.Principal, appID, board, taskID, body string) error {
+	loc, err := s.resolveManage(ctx, principal, appID)
+	if err != nil {
+		return err
+	}
+	b, err := validateBoard(board)
+	if err != nil {
+		return err
+	}
+	if !taskIDRe.MatchString(taskID) {
+		return fmt.Errorf("%w: 非法 task id", ErrKanbanBadRequest)
+	}
+	// 评论内容不能为空。
+	if strings.TrimSpace(body) == "" {
+		return fmt.Errorf("%w: 评论内容不能为空", ErrKanbanBadRequest)
+	}
+	_, err = s.runCLI(ctx, loc, []string{"comment", taskID, body, "--board", b})
+	return err
+}
+
+// Complete 把任务标记为已完成。result 可选；不为空时附加 --result 传递执行摘要。
+func (s *HermesKanbanService) Complete(ctx context.Context, principal auth.Principal, appID, board, taskID, result string) error {
+	loc, err := s.resolveManage(ctx, principal, appID)
+	if err != nil {
+		return err
+	}
+	b, err := validateBoard(board)
+	if err != nil {
+		return err
+	}
+	if !taskIDRe.MatchString(taskID) {
+		return fmt.Errorf("%w: 非法 task id", ErrKanbanBadRequest)
+	}
+	args := []string{"complete", taskID, "--board", b}
+	// result 为可选自由文本，非空时作为独立 argv 附加。
+	if result != "" {
+		args = append(args, "--result", result)
+	}
+	_, err = s.runCLI(ctx, loc, args)
+	return err
+}
+
+// Block 把任务标记为阻塞，reason 说明阻塞原因，不能为空。
+func (s *HermesKanbanService) Block(ctx context.Context, principal auth.Principal, appID, board, taskID, reason string) error {
+	loc, err := s.resolveManage(ctx, principal, appID)
+	if err != nil {
+		return err
+	}
+	b, err := validateBoard(board)
+	if err != nil {
+		return err
+	}
+	if !taskIDRe.MatchString(taskID) {
+		return fmt.Errorf("%w: 非法 task id", ErrKanbanBadRequest)
+	}
+	// 阻塞原因不能为空（CLI 要求必填）。
+	if strings.TrimSpace(reason) == "" {
+		return fmt.Errorf("%w: 阻塞原因不能为空", ErrKanbanBadRequest)
+	}
+	_, err = s.runCLI(ctx, loc, []string{"block", taskID, reason, "--board", b})
+	return err
+}
+
+// Unblock 解除任务的阻塞状态。
+func (s *HermesKanbanService) Unblock(ctx context.Context, principal auth.Principal, appID, board, taskID string) error {
+	loc, err := s.resolveManage(ctx, principal, appID)
+	if err != nil {
+		return err
+	}
+	b, err := validateBoard(board)
+	if err != nil {
+		return err
+	}
+	if !taskIDRe.MatchString(taskID) {
+		return fmt.Errorf("%w: 非法 task id", ErrKanbanBadRequest)
+	}
+	_, err = s.runCLI(ctx, loc, []string{"unblock", taskID, "--board", b})
+	return err
+}
+
+// Archive 归档任务。
+func (s *HermesKanbanService) Archive(ctx context.Context, principal auth.Principal, appID, board, taskID string) error {
+	loc, err := s.resolveManage(ctx, principal, appID)
+	if err != nil {
+		return err
+	}
+	b, err := validateBoard(board)
+	if err != nil {
+		return err
+	}
+	if !taskIDRe.MatchString(taskID) {
+		return fmt.Errorf("%w: 非法 task id", ErrKanbanBadRequest)
+	}
+	_, err = s.runCLI(ctx, loc, []string{"archive", taskID, "--board", b})
+	return err
+}
+
+// Reassign 把任务重新分配给指定 profile。profile 必须符合 board slug 规范。
+func (s *HermesKanbanService) Reassign(ctx context.Context, principal auth.Principal, appID, board, taskID, profile string) error {
+	loc, err := s.resolveManage(ctx, principal, appID)
+	if err != nil {
+		return err
+	}
+	b, err := validateBoard(board)
+	if err != nil {
+		return err
+	}
+	if !taskIDRe.MatchString(taskID) {
+		return fmt.Errorf("%w: 非法 task id", ErrKanbanBadRequest)
+	}
+	// profile 用于标识 hermes worker 配置，格式与 board slug 一致。
+	if !boardSlugRe.MatchString(profile) {
+		return fmt.Errorf("%w: 非法 profile", ErrKanbanBadRequest)
+	}
+	_, err = s.runCLI(ctx, loc, []string{"reassign", taskID, "--to", profile, "--board", b})
+	return err
+}
+
+// Reclaim 把任务重置为等待认领状态（撤销当前 assignee）。
+func (s *HermesKanbanService) Reclaim(ctx context.Context, principal auth.Principal, appID, board, taskID string) error {
+	loc, err := s.resolveManage(ctx, principal, appID)
+	if err != nil {
+		return err
+	}
+	b, err := validateBoard(board)
+	if err != nil {
+		return err
+	}
+	if !taskIDRe.MatchString(taskID) {
+		return fmt.Errorf("%w: 非法 task id", ErrKanbanBadRequest)
+	}
+	_, err = s.runCLI(ctx, loc, []string{"reclaim", taskID, "--board", b})
+	return err
+}
+
