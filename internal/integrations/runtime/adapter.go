@@ -90,6 +90,29 @@ type ExecResult struct {
 	Stdout string
 }
 
+// ExecJSONResult 是 ContainerExecJSON 返回的一次性命令执行结果。
+// 与 ExecResult 不同：Stdout 不截断、已用 stdcopy 与 stderr 分离，可直接 JSON 解析。
+type ExecJSONResult struct {
+	// ExitCode 是容器内命令退出码。
+	ExitCode int
+	// Stdout 是分离后的标准输出全文（kanban --json 的 JSON 体）。
+	Stdout string
+	// Stderr 是分离后的标准错误全文（CLI 失败时的人类可读信息）。
+	Stderr string
+}
+
+// ExecStreamHandle 是 ContainerExecStream 返回的流式执行句柄。
+// 用于 hermes kanban watch 这类长连接 NDJSON 输出。
+type ExecStreamHandle struct {
+	// Lines 逐行投递容器 stdout（已剥离 docker multiplexed 帧头）。
+	// 流正常结束或出错时该 channel 被关闭。
+	Lines <-chan string
+	// Err 在流结束后可读，nil 表示正常结束。读取前必须先确认 Lines 已关闭。
+	Err func() error
+	// Close 主动终止流并释放底层连接，可重复调用。
+	Close func()
+}
+
 // ContainerStats 是 RuntimeAdapter.Stats 返回的归一化指标视图。
 // 单位：CPU 百分比 (0-100*核数)；内存字节；网络字节累计（容器生命周期内）。
 // Manager 不做秒级速率计算，前端展示绝对值即可，趋势由前端按时间序列差分。
@@ -126,6 +149,12 @@ type Adapter interface {
 	ContainerStats(ctx context.Context, nodeID, containerID string) (ContainerStats, error)
 	// ContainerExec 在容器内执行 cmd，返回 exit code 与 stdout（截断到 4KB）。
 	ContainerExec(ctx context.Context, nodeID, containerID string, cmd []string) (ExecResult, error)
+	// ContainerExecJSON 在容器内执行一次性命令，返回完整未截断的 stdout/stderr 与 exit code。
+	// 用于 hermes kanban 读 / 写 verb（输出是单段 JSON）。
+	ContainerExecJSON(ctx context.Context, nodeID, containerID string, cmd []string) (ExecJSONResult, error)
+	// ContainerExecStream 在容器内执行流式命令，逐行投递 stdout。
+	// 用于 hermes kanban watch（NDJSON 长连接）。调用方负责 Close。
+	ContainerExecStream(ctx context.Context, nodeID, containerID string, cmd []string) (ExecStreamHandle, error)
 	// WaitContainerHealthy 阻塞至容器 docker HEALTHCHECK 报 healthy，或超时返回错误。
 	// Hermes 镜像 HEALTHCHECK 内部跑 hermes gateway status，初始 start-period 60s。
 	WaitContainerHealthy(ctx context.Context, nodeID, containerID string, timeout time.Duration) error

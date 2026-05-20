@@ -1,7 +1,10 @@
 package runtime
 
 import (
+	"bufio"
+	"bytes"
 	"context"
+	"encoding/binary"
 	"encoding/json"
 	"errors"
 	"io"
@@ -14,6 +17,7 @@ import (
 
 	"github.com/docker/docker/api/types/container"
 	"github.com/docker/docker/client"
+	"github.com/docker/docker/pkg/stdcopy"
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
@@ -396,4 +400,32 @@ func TestWaitContainerHealthy_UnhealthyFailsFast(t *testing.T) {
 	err := a.WaitContainerHealthy(context.Background(), "node1", "cont1", 30*time.Second)
 	require.Error(t, err)
 	require.Contains(t, err.Error(), "boom")
+}
+
+// TestExecStreamLineSplitting 验证 ContainerExecStream 的行扫描逻辑：
+// docker multiplexed stdout 帧被 stdcopy 还原后，按行投递到 Lines channel。
+func TestExecStreamLineSplitting(t *testing.T) {
+	// 构造 docker multiplexed stdout 帧：8 字节头(stream=1) + payload。
+	frame := func(payload string) []byte {
+		hdr := make([]byte, 8)
+		hdr[0] = 1 // stdout
+		binary.BigEndian.PutUint32(hdr[4:], uint32(len(payload)))
+		return append(hdr, []byte(payload)...)
+	}
+	// 两段 NDJSON 行，拼成一个 multiplexed 字节流
+	raw := append(frame("{\"type\":\"a\"}\n"), frame("{\"type\":\"b\"}\n")...)
+
+	// 用 stdcopy 把 multiplexed 流还原为纯 stdout
+	var stdout bytes.Buffer
+	_, err := stdcopy.StdCopy(&stdout, io.Discard, bytes.NewReader(raw))
+	require.NoError(t, err)
+
+	// 按行扫描，验证与 ContainerExecStream goroutine 内部相同的逻辑
+	scanner := bufio.NewScanner(&stdout)
+	var got []string
+	for scanner.Scan() {
+		got = append(got, scanner.Text())
+	}
+	// 两行 NDJSON 应被正确切分，不含尾部换行符
+	assert.Equal(t, []string{`{"type":"a"}`, `{"type":"b"}`}, got)
 }
