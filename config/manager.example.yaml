@@ -103,8 +103,8 @@ newapi:
 
 hermes:
   # Hermes 容器的镜像引用（name:tag 或 digest）。runtime node 上必须存在该镜像；
-  # imagesync 会用 docker save / load 把宿主镜像分发到节点。
-  runtime_image: "hermes-runtime:dev"
+  # imagesync 会用 docker save / load 把宿主镜像分发到节点。tag 必须固定到具体 Hermes 版本。
+  runtime_image: "hermes-runtime:v2026.5.16-dev"
 
   # Hermes 容器平台级系统人设模板（SOUL.md PlatformPrompt 层）。
   # 模板内可写任意中文 / 英文 prompt。

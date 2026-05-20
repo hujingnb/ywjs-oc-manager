@@ -3,9 +3,9 @@ set -euo pipefail
 
 # Hermes runtime 镜像同步到 runtime node 的本地调试脚本。
 # 实现路径与 legacy OpenClaw 时代同源:走 runtime-agent /v1/images/{inspect,load}。
-# 默认假设 hermes-runtime:dev 已在本机 build(参见 Makefile 的 build-hermes-runtime)。
+# 默认假设 hermes-runtime:v2026.5.16-dev 已在本机 build(参见 Makefile 的 build-hermes-runtime)。
 
-image="${HERMES_RUNTIME_IMAGE:-hermes-runtime:dev}"
+image="${HERMES_RUNTIME_IMAGE:-hermes-runtime:v2026.5.16-dev}"
 agent_url="${RUNTIME_AGENT_FILE_URL:-http://127.0.0.1:7002}"
 agent_token="${RUNTIME_AGENT_TOKEN:-}"
 

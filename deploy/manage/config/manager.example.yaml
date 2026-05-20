@@ -99,8 +99,8 @@ newapi:
 
 hermes:
   # Hermes 容器的镜像引用（name:tag 或 name@sha256:digest）。runtime node 上必须存在该镜像；
-  # imagesync 会用 docker save / load 把宿主镜像分发到节点。tag 必须固定到具体版本，禁用 latest。
-  runtime_image: "crpi-nu3ibz4f07feyghi.cn-beijing.personal.cr.aliyuncs.com/ywjs_app/oc-manager-hermes:CHANGE_ME_TAG"
+  # imagesync 会用 docker save / load 把宿主镜像分发到节点。tag 必须固定到具体 Hermes 版本，禁用 main / latest。
+  runtime_image: "crpi-nu3ibz4f07feyghi.cn-beijing.personal.cr.aliyuncs.com/ywjs_app/oc-manager-hermes:v2026.5.16-2026-05-21-12-00-00"
 
   # Hermes 容器平台级系统人设模板（SOUL.md PlatformPrompt 层）。
   # 模板内可写任意中文 / 英文 prompt。

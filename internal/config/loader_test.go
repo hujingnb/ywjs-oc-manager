@@ -43,7 +43,7 @@ auth:
 security:
   master_key: "` + validBase64MasterKey + `"
 hermes:
-  runtime_image: "hermes-runtime:dev"
+  runtime_image: "hermes-runtime:v2026.5.16-dev"
   system_prompt_template: |
     你是 Hermes 智能助手。
   workspace:
@@ -69,7 +69,7 @@ func TestLoad_DoesNotExpandEnvPlaceholders(t *testing.T) {
 	require.Equal(t, "${DATABASE_URL}", cfg.Database.URL)
 	require.Equal(t, "15m0s", cfg.Auth.AccessTokenTTL.Duration.String())
 	require.Equal(t, validBase64MasterKey, cfg.Security.MasterKey)
-	require.Equal(t, "hermes-runtime:dev", cfg.Hermes.RuntimeImage)
+	require.Equal(t, "hermes-runtime:v2026.5.16-dev", cfg.Hermes.RuntimeImage)
 	require.Equal(t, 14, cfg.Hermes.Workspace.ArchiveRetentionDays)
 	require.Equal(t, 30, cfg.Agent.HeartbeatIntervalSeconds)
 }
