@@ -128,7 +128,8 @@ export function useKanbanTasksQuery(appId: Ref<string | undefined>, board: Ref<s
         `/api/v1/apps/${appId.value}/hermes/kanban/tasks`,
         { query: { board: board.value } },
       )
-      return res.tasks ?? []
+      // 过滤掉后端返回的无 id 任务，从数据源头保证组件层可安全使用 task.id。
+      return (res.tasks ?? []).filter((t) => t.id)
     },
   })
 }

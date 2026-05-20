@@ -1,6 +1,6 @@
 <template>
   <n-card :bordered="true" content-style="padding: 0">
-    <n-collapse :default-expanded-names="expandedGroups" @update:expanded-names="onExpandChange">
+    <n-collapse :expanded-names="expandedGroups" @update:expanded-names="onExpandChange">
       <n-collapse-item
         v-for="group in groups"
         :key="group.status"
@@ -9,7 +9,7 @@
       >
         <KanbanTaskRow
           v-for="task in group.tasks"
-          :key="task.id"
+          :key="task.id ?? task.title"
           :task="task"
           :selected="task.id === selectedId"
           :latest-event="latestEvents[task.id ?? '']"
@@ -22,7 +22,7 @@
 </template>
 
 <script setup lang="ts">
-import { computed } from 'vue'
+import { computed, ref, watch } from 'vue'
 import { NCard, NCollapse, NCollapseItem } from 'naive-ui'
 import KanbanTaskRow from './KanbanTaskRow.vue'
 import type { KanbanTask, KanbanStatus } from '@/api/hooks/useKanban'
@@ -36,7 +36,7 @@ const props = defineProps<{
 }>()
 const emit = defineEmits<{ select: [taskId: string] }>()
 
-// 状态分组顺序与中文标签。
+// 状态分组顺序与英文标签。
 const GROUP_DEFS: ReadonlyArray<{ status: KanbanStatus; label: string }> = [
   { status: 'running', label: 'Running' },
   { status: 'ready', label: 'Ready' },
@@ -55,21 +55,27 @@ const groups = computed(() =>
   })),
 )
 
-// 折叠态 localStorage key（含 appId，按实例隔离）。
-const storageKey = computed(() => `kanban-expanded-${props.appId}`)
-
-// expandedGroups 初值：localStorage 有则用，否则默认展开活跃状态。
-const expandedGroups = computed<string[]>(() => {
-  const saved = localStorage.getItem(storageKey.value)
+// readExpanded 从 localStorage 读某 appId 的分组折叠态，无记录则给默认展开集。
+function readExpanded(appId: string): string[] {
+  const saved = localStorage.getItem(`kanban-expanded-${appId}`)
   if (saved) {
     try { return JSON.parse(saved) as string[] } catch { /* 忽略损坏数据 */ }
   }
   return ['running', 'ready', 'todo', 'blocked']
-})
+}
 
-// onExpandChange 持久化折叠态。
+// expandedGroups 使用 ref 实现 controlled 模式：
+// 用 ref 而非 computed，确保 appId 切换时可通过 watch 重读 localStorage，
+// 同时支持 NCollapse :expanded-names 的 controlled 绑定（而非 default-expanded-names 一次性 prop）。
+const expandedGroups = ref<string[]>(readExpanded(props.appId))
+
+// 监听 appId 变化，切换实例时重读对应折叠态。
+watch(() => props.appId, (id) => { expandedGroups.value = readExpanded(id) })
+
+// onExpandChange 先更新 ref（driven controlled 绑定），再持久化到 localStorage。
 function onExpandChange(names: Array<string | number>) {
-  localStorage.setItem(storageKey.value, JSON.stringify(names))
+  expandedGroups.value = names as string[]
+  localStorage.setItem(`kanban-expanded-${props.appId}`, JSON.stringify(names))
 }
 </script>
 

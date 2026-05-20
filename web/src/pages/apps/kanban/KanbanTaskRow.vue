@@ -2,11 +2,11 @@
   <div
     class="task-row"
     :class="{ selected: selected }"
-    @click="emit('select', task.id ?? '')"
+    @click="task.id && emit('select', task.id)"
   >
     <div class="row-title">{{ task.title }}</div>
     <div class="row-meta">
-      <n-tag size="tiny" type="info">{{ task.assignee }}</n-tag>
+      <n-tag v-if="task.assignee" size="tiny" type="info">{{ task.assignee }}</n-tag>
       <n-tag v-if="(task.priority ?? 0) >= 2" size="tiny" :type="priorityType">{{ priorityLabel }}</n-tag>
       <span class="row-time">{{ relativeTime }}</span>
     </div>
@@ -32,8 +32,10 @@ const priorityType = computed(() => ((props.task.priority ?? 0) >= 3 ? 'error' :
 const priorityLabel = computed(() => ((props.task.priority ?? 0) >= 3 ? 'high' : 'medium'))
 
 // relativeTime：把 created_at（秒级 epoch）转成相对时间中文。
+// created_at 缺失时返回占位符，避免 fallback 到 epoch(0) 显示「20000+ 天前」。
 const relativeTime = computed(() => {
-  const diff = Date.now() / 1000 - (props.task.created_at ?? 0)
+  if (!props.task.created_at) return '—'
+  const diff = Date.now() / 1000 - props.task.created_at
   if (diff < 60) return '刚刚'
   if (diff < 3600) return `${Math.floor(diff / 60)} 分钟前`
   if (diff < 86400) return `${Math.floor(diff / 3600)} 小时前`
