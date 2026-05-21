@@ -96,6 +96,9 @@ type SecurityConfig struct {
 type HermesConfig struct {
 	// RuntimeImage 是 manager docker run 启动 hermes 容器用的镜像引用（name:tag）。
 	RuntimeImage string `yaml:"runtime_image"`
+	// RuntimeImages 是平台可选的 Hermes 镜像列表，助手版本的 image_id 引用其中的 id。
+	// 与单值 RuntimeImage 并存（后续 Phase 移除单值字段）。
+	RuntimeImages []RuntimeImageConfig `yaml:"runtime_images"`
 	// SystemPromptTemplate 是平台级 prompt 模板，作为 input/resources/platform-rules.md
 	// 的内容写入 manager 端 input 目录，由节点 oc-entrypoint 在容器启动时翻译进 SOUL.md。
 	SystemPromptTemplate string `yaml:"system_prompt_template"`
@@ -109,6 +112,14 @@ type HermesConfig struct {
 	// "new-api" hostname → chat completions Connection error。
 	// 留空时 docker 默认 bridge network，与 compose 起的 new-api 不互通。
 	ContainerNetworks []string `yaml:"container_networks"`
+}
+
+// RuntimeImageConfig 是单个可选 Hermes 镜像条目。
+// id 是稳定槽位标识（助手版本存它），label 供前端展示，ref 是具体可拉取 tag。
+type RuntimeImageConfig struct {
+	ID    string `yaml:"id"`
+	Label string `yaml:"label"`
+	Ref   string `yaml:"ref"`
 }
 
 // HermesLLMConfig 仅保留兜底默认值字段（具体每 app 的模型由 apps.model_id 决定）。

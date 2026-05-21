@@ -107,6 +107,9 @@ func (c Config) Validate() error {
 	if err := validateHermesRuntimeImage(c.Hermes.RuntimeImage); err != nil {
 		return err
 	}
+	if err := ValidateRuntimeImages(c.Hermes.RuntimeImages); err != nil {
+		return err
+	}
 	if err := c.Runtime.Probe.validate(); err != nil {
 		return err
 	}
