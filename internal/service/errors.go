@@ -156,3 +156,23 @@ var ErrCronOutputInvalid = errors.New("cron 输出解析失败")
 
 // ErrCronBadRequest 表示 Cron 请求参数非法（job id / script / output file 等白名单校验失败）。
 var ErrCronBadRequest = errors.New("cron 请求参数非法")
+
+// 助手版本 -----------------------------------------------------------
+
+// ErrAssistantVersionNotFound 助手版本不存在或已删除。
+var ErrAssistantVersionNotFound = errors.New("助手版本不存在")
+
+// ErrAssistantVersionDenied 无权操作助手版本。
+var ErrAssistantVersionDenied = errors.New("无权操作助手版本")
+
+// ErrAssistantVersionInvalid 助手版本入参非法（名称空、模型不存在、镜像 id 未知等）。
+var ErrAssistantVersionInvalid = errors.New("助手版本入参非法")
+
+// ErrAssistantVersionNameTaken 助手版本名称已被占用。
+var ErrAssistantVersionNameTaken = errors.New("助手版本名称已存在")
+
+// ErrAssistantVersionInUse 助手版本正被组织或实例引用，不可删除。
+var ErrAssistantVersionInUse = errors.New("助手版本正被引用，不可删除")
+
+// ErrSkillTooLarge 上传的 skill tar 超过大小上限。
+var ErrSkillTooLarge = errors.New("skill tar 超过大小上限")
