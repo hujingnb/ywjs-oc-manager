@@ -1,9 +1,9 @@
 """渲染 SOUL.md。
 
-结构（与 spec §6.2 一致）：
+结构（manifest v2，与 spec §6.2 一致）：
 1. 固定 header（语言要求）
 2. persona 段
-3. 三层 rules：## 平台层 / ## 组织层 / ## 应用层；空层跳过
+3. 平台层 rules：## 平台层；空层跳过。组织层 / 应用层已并入助手版本的 persona，不再单独渲染。
 4. 知识库 always-on inline：应用级在前、组织级在后，单文件 > 8 KiB 截断并提示完整版位置
 
 manager 端 prompt 占位符已替换完毕，本 renderer 只做拼装。
@@ -36,18 +36,12 @@ def render(m: Manifest, input_root: Path, data_root: Path) -> str:
     if persona.strip():
         parts.append(persona.rstrip() + "\n\n")
 
-    for title, rel in (
-        ("平台层", m.rule_platform_rel),
-        ("组织层", m.rule_organization_rel),
-        ("应用层", m.rule_application_rel),
-    ):
-        path = input_root / rel
-        if not path.exists():
-            continue
-        body = path.read_text().strip()
-        if not body:
-            continue
-        parts.append(f"## {title}\n\n{body}\n\n")
+    # manifest v2：只保留平台层 prompt；组织层 / 应用层已并入助手版本的 persona。
+    platform_path = input_root / m.rule_platform_rel
+    if m.rule_platform_rel and platform_path.exists():
+        body = platform_path.read_text().strip()
+        if body:
+            parts.append(f"## 平台层\n\n{body}\n\n")
 
     inline = _collect_inline(input_root)
     if inline:

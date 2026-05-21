@@ -1,4 +1,4 @@
-"""验证 SOUL.md：三层 rules 顺序、persona 拼接、知识库 inline 截断、空层跳过。"""
+"""验证 SOUL.md：平台层渲染、persona 拼接、知识库 inline 截断、空层跳过。manifest v2 只渲染平台层。"""
 
 from pathlib import Path
 from lib.manifest import Manifest
@@ -38,20 +38,23 @@ def _setup(input_root: Path, *, persona="", platform="", org="", app="", kb_org=
 
 
 def test_three_layers_in_order(tmp_input: Path, tmp_data: Path) -> None:
-    # 验证渲染顺序：persona → platform → org → app。
+    # manifest v2：验证渲染顺序 persona → platform；组织层 / 应用层不再渲染。
     _setup(tmp_input, persona="P body", platform="PLT", org="ORG", app="APP")
     render(make_manifest(), tmp_input, tmp_data)
     soul = (tmp_data / "SOUL.md").read_text()
-    assert soul.index("P body") < soul.index("PLT") < soul.index("ORG") < soul.index("APP")
+    assert soul.index("P body") < soul.index("PLT")
+    assert "ORG" not in soul
+    assert "APP" not in soul
 
 
 def test_empty_layer_skipped(tmp_input: Path, tmp_data: Path) -> None:
-    # 验证某一层为空时，对应 section 不出现。
+    # 验证平台层为空时，平台层 section 不出现；组织层 / 应用层 manifest v2 起始终不渲染。
     _setup(tmp_input, persona="P", platform="", org="ORG", app="APP")
     render(make_manifest(), tmp_input, tmp_data)
     soul = (tmp_data / "SOUL.md").read_text()
     assert "平台层" not in soul
-    assert "组织层" in soul
+    assert "组织层" not in soul
+    assert "应用层" not in soul
 
 
 def test_knowledge_inline_truncated_at_8kib(tmp_input: Path, tmp_data: Path) -> None:
@@ -63,3 +66,30 @@ def test_knowledge_inline_truncated_at_8kib(tmp_input: Path, tmp_data: Path) -> 
     assert "AAAA" in soul
     assert "完整版见" in soul or "skills/kb-" in soul
     assert soul.count("A") < 9000
+
+
+def test_render_drops_org_and_app_layers(tmp_input: Path, tmp_data: Path) -> None:
+    # manifest v2：即使 input 里仍有组织层 / 应用层 rule 文件，SOUL.md 也只渲染平台层。
+    res = tmp_input / "resources"
+    res.mkdir(parents=True)
+    (res / "persona.md").write_text("我是版本人设")
+    (res / "platform-rules.md").write_text("平台规则正文")
+    (res / "organization-rules.md").write_text("组织规则正文")
+    (res / "application-rules.md").write_text("应用规则正文")
+    m = Manifest(
+        app_id="a", app_name="A", app_model="m",
+        openai_api_key="sk", openai_base_url="http://x",
+        persona_rel="resources/persona.md",
+        rule_platform_rel="resources/platform-rules.md",
+        rule_organization_rel="resources/organization-rules.md",
+        rule_application_rel="resources/application-rules.md",
+    )
+    render(m, tmp_input, tmp_data)
+    soul = (tmp_data / "SOUL.md").read_text()
+    assert "## 平台层" in soul
+    assert "平台规则正文" in soul
+    assert "我是版本人设" in soul
+    assert "## 组织层" not in soul
+    assert "## 应用层" not in soul
+    assert "组织规则正文" not in soul
+    assert "应用规则正文" not in soul
