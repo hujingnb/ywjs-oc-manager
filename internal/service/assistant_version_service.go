@@ -1,7 +1,10 @@
 package service
 
 import (
+	"bytes"
 	"context"
+	"crypto/sha256"
+	"encoding/hex"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -11,6 +14,7 @@ import (
 	"github.com/jackc/pgx/v5/pgtype"
 
 	"oc-manager/internal/auth"
+	"oc-manager/internal/integrations/hermes"
 	"oc-manager/internal/store/sqlc"
 )
 
@@ -380,6 +384,91 @@ func (s *AssistantVersionService) Delete(ctx context.Context, principal auth.Pri
 		return fmt.Errorf("删除版本失败: %w", err)
 	}
 	return nil
+}
+
+// UploadSkill 上传一个 skill tar：校验大小、合法性、推导名称，写文件系统主副本，
+// 把元信息追加进 skills_json 并把 revision +1。
+func (s *AssistantVersionService) UploadSkill(ctx context.Context, principal auth.Principal, id string, data []byte) (AssistantVersionResult, error) {
+	if !auth.CanManageAssistantVersion(principal) {
+		return AssistantVersionResult{}, ErrAssistantVersionDenied
+	}
+	if int64(len(data)) > s.maxSkillBytes {
+		return AssistantVersionResult{}, fmt.Errorf("%w: 上限 %d 字节", ErrSkillTooLarge, s.maxSkillBytes)
+	}
+	row, err := s.loadVersion(ctx, id)
+	if err != nil {
+		return AssistantVersionResult{}, err
+	}
+	info, err := hermes.InspectSkillArchive(bytes.NewReader(data))
+	if err != nil {
+		return AssistantVersionResult{}, fmt.Errorf("%w: %v", ErrAssistantVersionInvalid, err)
+	}
+	skills, err := decodeSkills(row.SkillsJson)
+	if err != nil {
+		return AssistantVersionResult{}, err
+	}
+	for _, sk := range skills {
+		if sk.Name == info.Name {
+			return AssistantVersionResult{}, fmt.Errorf("%w: skill %s 已存在", ErrAssistantVersionInvalid, info.Name)
+		}
+	}
+	relPath, err := s.blobs.PutSkill(uuidToString(row.ID), info.Name, data)
+	if err != nil {
+		return AssistantVersionResult{}, fmt.Errorf("写入 skill tar 失败: %w", err)
+	}
+	sum := sha256.Sum256(data)
+	skills = append(skills, AssistantVersionSkill{
+		Name: info.Name, FilePath: relPath, FileSize: int64(len(data)), FileSha256: hex.EncodeToString(sum[:]),
+	})
+	return s.persistSkills(ctx, row, skills)
+}
+
+// DeleteSkill 从版本中删除一个 skill：删文件系统主副本、从 skills_json 移除、revision +1。
+func (s *AssistantVersionService) DeleteSkill(ctx context.Context, principal auth.Principal, id, skillName string) (AssistantVersionResult, error) {
+	if !auth.CanManageAssistantVersion(principal) {
+		return AssistantVersionResult{}, ErrAssistantVersionDenied
+	}
+	row, err := s.loadVersion(ctx, id)
+	if err != nil {
+		return AssistantVersionResult{}, err
+	}
+	skills, err := decodeSkills(row.SkillsJson)
+	if err != nil {
+		return AssistantVersionResult{}, err
+	}
+	kept := make([]AssistantVersionSkill, 0, len(skills))
+	var removed *AssistantVersionSkill
+	for i := range skills {
+		if skills[i].Name == skillName {
+			removed = &skills[i]
+			continue
+		}
+		kept = append(kept, skills[i])
+	}
+	if removed == nil {
+		return AssistantVersionResult{}, fmt.Errorf("%w: skill %s 不存在", ErrAssistantVersionInvalid, skillName)
+	}
+	if err := s.blobs.DeleteSkill(removed.FilePath); err != nil {
+		return AssistantVersionResult{}, fmt.Errorf("删除 skill tar 失败: %w", err)
+	}
+	return s.persistSkills(ctx, row, kept)
+}
+
+// persistSkills 把更新后的 skill 列表写库并把 revision +1（skill 变更属于容器相关变更）。
+func (s *AssistantVersionService) persistSkills(ctx context.Context, row sqlc.AssistantVersion, skills []AssistantVersionSkill) (AssistantVersionResult, error) {
+	skillsJSON, err := json.Marshal(skills)
+	if err != nil {
+		return AssistantVersionResult{}, fmt.Errorf("序列化 skills 失败: %w", err)
+	}
+	updated, err := s.store.UpdateAssistantVersionSkills(ctx, sqlc.UpdateAssistantVersionSkillsParams{
+		ID:         row.ID,
+		SkillsJson: skillsJSON,
+		Revision:   row.Revision + 1,
+	})
+	if err != nil {
+		return AssistantVersionResult{}, fmt.Errorf("更新版本 skill 失败: %w", err)
+	}
+	return toAssistantVersionResult(updated)
 }
 
 // Create 创建一个新版本，revision 初始为 1。

@@ -1,6 +1,8 @@
 package service
 
 import (
+	"archive/tar"
+	"bytes"
 	"context"
 	"errors"
 	"testing"
@@ -411,4 +413,90 @@ func TestAssistantVersionDeleteNotFound(t *testing.T) {
 	svc := newTestAVService(t, newFakeAVStore())
 	err := svc.Delete(context.Background(), platformPrincipal(), "00000000-0000-0000-0000-0000000000e7")
 	require.ErrorIs(t, err, ErrAssistantVersionNotFound)
+}
+
+// buildSkillTar 构造一个含合法 SKILL.md 的内存 tar。
+func buildSkillTar(t *testing.T, skillName string) []byte {
+	t.Helper()
+	var buf bytes.Buffer
+	tw := tar.NewWriter(&buf)
+	body := "---\nname: " + skillName + "\ndescription: d\n---\n# t\n正文"
+	require.NoError(t, tw.WriteHeader(&tar.Header{
+		Name: skillName + "/SKILL.md", Mode: 0o644, Size: int64(len(body)), Typeflag: tar.TypeReg,
+	}))
+	_, err := tw.Write([]byte(body))
+	require.NoError(t, err)
+	require.NoError(t, tw.Close())
+	return buf.Bytes()
+}
+
+// TestAssistantVersionUploadSkillOK 验证上传合法 skill tar 后 skills 增加且 revision +1。
+func TestAssistantVersionUploadSkillOK(t *testing.T) {
+	store := newFakeAVStore()
+	id := seedVersion(store, "标准版", 2)
+	svc := newTestAVService(t, store)
+	got, err := svc.UploadSkill(context.Background(), platformPrincipal(), id, buildSkillTar(t, "weather"))
+	require.NoError(t, err)
+	require.Len(t, got.Skills, 1)
+	assert.Equal(t, "weather", got.Skills[0].Name)
+	assert.EqualValues(t, 3, got.Revision)
+}
+
+// TestAssistantVersionUploadSkillRejectsDuplicateName 验证同版本内 skill 重名被拒。
+func TestAssistantVersionUploadSkillRejectsDuplicateName(t *testing.T) {
+	store := newFakeAVStore()
+	id := seedVersion(store, "标准版", 1)
+	svc := newTestAVService(t, store)
+	_, err := svc.UploadSkill(context.Background(), platformPrincipal(), id, buildSkillTar(t, "weather"))
+	require.NoError(t, err)
+	_, err = svc.UploadSkill(context.Background(), platformPrincipal(), id, buildSkillTar(t, "weather"))
+	require.ErrorIs(t, err, ErrAssistantVersionInvalid)
+}
+
+// TestAssistantVersionUploadSkillRejectsTooLarge 验证超过大小上限被拒。
+func TestAssistantVersionUploadSkillRejectsTooLarge(t *testing.T) {
+	store := newFakeAVStore()
+	id := seedVersion(store, "标准版", 1)
+	svc := NewAssistantVersionService(store, fakeImageResolver{}, fakeModelValidator{}, fakeBlobStore{}, 8)
+	_, err := svc.UploadSkill(context.Background(), platformPrincipal(), id, buildSkillTar(t, "weather"))
+	require.ErrorIs(t, err, ErrSkillTooLarge)
+}
+
+// TestAssistantVersionUploadSkillDeniesOrgAdmin 验证组织管理员不能上传 skill。
+func TestAssistantVersionUploadSkillDeniesOrgAdmin(t *testing.T) {
+	store := newFakeAVStore()
+	id := seedVersion(store, "标准版", 1)
+	svc := newTestAVService(t, store)
+	_, err := svc.UploadSkill(context.Background(), orgAdminPrincipal(), id, buildSkillTar(t, "weather"))
+	require.ErrorIs(t, err, ErrAssistantVersionDenied)
+}
+
+// TestAssistantVersionUploadSkillRejectsInvalidTar 验证非法 tar（无 SKILL.md）被拒。
+func TestAssistantVersionUploadSkillRejectsInvalidTar(t *testing.T) {
+	store := newFakeAVStore()
+	id := seedVersion(store, "标准版", 1)
+	svc := newTestAVService(t, store)
+	_, err := svc.UploadSkill(context.Background(), platformPrincipal(), id, []byte("not a tar"))
+	require.ErrorIs(t, err, ErrAssistantVersionInvalid)
+}
+
+// TestAssistantVersionDeleteSkillOK 验证删除已存在 skill 后 skills 清空且 revision +1。
+func TestAssistantVersionDeleteSkillOK(t *testing.T) {
+	store := newFakeAVStore()
+	id := seedVersion(store, "标准版", 1)
+	svc := newTestAVService(t, store)
+	_, err := svc.UploadSkill(context.Background(), platformPrincipal(), id, buildSkillTar(t, "weather"))
+	require.NoError(t, err)
+	got, err := svc.DeleteSkill(context.Background(), platformPrincipal(), id, "weather")
+	require.NoError(t, err)
+	assert.Empty(t, got.Skills)
+}
+
+// TestAssistantVersionDeleteSkillNotFound 验证删除不存在的 skill 报 Invalid。
+func TestAssistantVersionDeleteSkillNotFound(t *testing.T) {
+	store := newFakeAVStore()
+	id := seedVersion(store, "标准版", 1)
+	svc := newTestAVService(t, store)
+	_, err := svc.DeleteSkill(context.Background(), platformPrincipal(), id, "nope")
+	require.ErrorIs(t, err, ErrAssistantVersionInvalid)
 }
