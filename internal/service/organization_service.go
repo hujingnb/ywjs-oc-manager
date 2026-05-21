@@ -68,7 +68,8 @@ type OrganizationStore interface {
 	GetOrgAdminByOrg(ctx context.Context, id pgtype.UUID) (sqlc.User, error)
 	UpdateOrganizationProfile(ctx context.Context, arg sqlc.UpdateOrganizationProfileParams) (sqlc.Organization, error)
 	SetOrganizationStatus(ctx context.Context, arg sqlc.SetOrganizationStatusParams) (sqlc.Organization, error)
-	// UpdateAppModelsByOrg 在组织模型变更时批量同步所有活跃实例的 model_id 并标记需重启。
+	// UpdateAppModelsByOrg 历史上在组织模型变更时批量同步实例 model_id；助手版本特性接管模型选择后
+	// UpdateOrganization 不再调用它，保留接口方法待 Phase 5 统一清理。
 	UpdateAppModelsByOrg(ctx context.Context, arg sqlc.UpdateAppModelsByOrgParams) error
 }
 
@@ -603,7 +604,12 @@ func toOrganizationResult(org sqlc.Organization) OrganizationResult {
 	// 解析助手版本 allowlist，列为空时兜底为空 slice，避免前端收到 null。
 	versionIDs := []string{}
 	if len(org.AssistantVersionIds) > 0 {
-		_ = json.Unmarshal(org.AssistantVersionIds, &versionIDs)
+		if err := json.Unmarshal(org.AssistantVersionIds, &versionIDs); err != nil {
+			// 组织 assistant_version_ids 列由本服务统一以 JSON 数组写入，理论上不会损坏；
+			// 真出现损坏时记日志而不是静默吞掉，避免组织列表/详情无声降级。
+			slog.Warn("解析组织 assistant_version_ids 失败", "org_id", uuidToString(org.ID), "error", err)
+			versionIDs = []string{}
+		}
 	}
 	return OrganizationResult{
 		ID:                     uuidToString(org.ID),
