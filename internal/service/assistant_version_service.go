@@ -473,6 +473,14 @@ func (s *AssistantVersionService) persistSkills(ctx context.Context, row sqlc.As
 	return toAssistantVersionResult(updated)
 }
 
+// ListRuntimeImages 返回全部可选镜像，供前端版本编辑表单的镜像 select 使用。
+func (s *AssistantVersionService) ListRuntimeImages(_ context.Context, principal auth.Principal) ([]RuntimeImageOption, error) {
+	if !auth.CanViewAssistantVersion(principal) {
+		return nil, ErrAssistantVersionDenied
+	}
+	return s.images.ListRuntimeImages(), nil
+}
+
 // Create 创建一个新版本，revision 初始为 1。
 func (s *AssistantVersionService) Create(ctx context.Context, principal auth.Principal, in AssistantVersionInput) (AssistantVersionResult, error) {
 	if !auth.CanManageAssistantVersion(principal) {
