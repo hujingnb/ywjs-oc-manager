@@ -66,7 +66,7 @@
               />
             </n-form-item>
           </n-grid-item>
-          <n-grid-item>
+          <n-grid-item :span="2">
             <n-form-item label="主模型 *">
               <n-select
                 v-model:value="form.main_model"
@@ -180,6 +180,7 @@ function openCreate() {
   resetForm()
   editingId.value = null
   submitError.value = null
+  actionFeedback.value = ''
   formVisible.value = true
 }
 
@@ -194,6 +195,7 @@ function openEdit(version: AssistantVersionDTO) {
   form.routing = { ...emptyRouting(), ...version.routing }
   editingId.value = version.id
   submitError.value = null
+  actionFeedback.value = ''
   formVisible.value = true
 }
 
@@ -207,6 +209,7 @@ function buildPayload(): AssistantVersionFormPayload {
   return {
     name: form.name.trim(),
     description: form.description.trim(),
+    // system_prompt 不做 trim：多行人设/规则内容按用户原样保存，与后端一致。
     system_prompt: form.system_prompt,
     image_id: form.image_id,
     main_model: form.main_model,
