@@ -14,7 +14,8 @@ type AppInputWriter interface {
 }
 
 // AppInputData manager 端写入 input/ 所需的全部业务数据。
-// 占位符替换在 WriteAppInput 内部完成；调用方传入「原始」三层 prompt 文本。
+// v2：移除 OrganizationRule / ApplicationRule；新增 Routing 智能路由映射与
+// SkillRelPaths 技能包相对路径列表。占位符替换在 WriteAppInput 内部完成。
 type AppInputData struct {
 	AppID         string
 	AppName       string
@@ -22,16 +23,23 @@ type AppInputData struct {
 	OpenAIAPIKey  string
 	OpenAIBaseURL string
 
-	PersonaText      string
-	PlatformRule     string
-	OrganizationRule string
-	ApplicationRule  string
+	// PersonaText 版本内置提示词（即 version.SystemPrompt），写入 resources/persona.md。
+	PersonaText  string
+	// PlatformRule 平台层规则文本，写入 resources/platform-rules.md。
+	PlatformRule string
+
+	// Routing 智能路由映射，透传到 manifest.routing；空 map 时 omitempty 省略。
+	Routing map[string]string
+	// SkillRelPaths 已推送到 input/ 的版本 skill tar 相对路径列表，
+	// 透传到 manifest.resources.skills；空时 omitempty 省略。
+	SkillRelPaths []string
 
 	OrgName   string
 	OwnerName string
 }
 
-// WriteAppInput 一次性写入 manifest.yaml + resources/persona.md + 三份 rules.md。
+// WriteAppInput 一次性写入 manifest.yaml + resources/persona.md + resources/platform-rules.md。
+// v2：不再写入 resources/organization-rules.md 和 resources/application-rules.md；
 // 知识库文件由 knowledge_sync 链路单独写入 resources/knowledge/{org,app}/。
 //
 // 上传顺序：先写 resources/* 后写 manifest.yaml，最大限度避免 oc-entrypoint
@@ -46,26 +54,12 @@ func WriteAppInput(ctx context.Context, w AppInputWriter, appID string, in AppIn
 	if err != nil {
 		return fmt.Errorf("render platform rule: %w", err)
 	}
-	organization, err := RenderRuleText(in.OrganizationRule, vars)
-	if err != nil {
-		return fmt.Errorf("render organization rule: %w", err)
-	}
-	application, err := RenderRuleText(in.ApplicationRule, vars)
-	if err != nil {
-		return fmt.Errorf("render application rule: %w", err)
-	}
 
 	if err := w.WriteAppInputFile(ctx, appID, "resources/persona.md", bytes.NewBufferString(persona)); err != nil {
 		return fmt.Errorf("upload persona: %w", err)
 	}
 	if err := w.WriteAppInputFile(ctx, appID, "resources/platform-rules.md", bytes.NewBufferString(platform)); err != nil {
 		return fmt.Errorf("upload platform rules: %w", err)
-	}
-	if err := w.WriteAppInputFile(ctx, appID, "resources/organization-rules.md", bytes.NewBufferString(organization)); err != nil {
-		return fmt.Errorf("upload organization rules: %w", err)
-	}
-	if err := w.WriteAppInputFile(ctx, appID, "resources/application-rules.md", bytes.NewBufferString(application)); err != nil {
-		return fmt.Errorf("upload application rules: %w", err)
 	}
 
 	m := Manifest{
@@ -76,11 +70,11 @@ func WriteAppInput(ctx context.Context, w AppInputWriter, appID string, in AppIn
 		Resources: ManifestResources{
 			Persona: "resources/persona.md",
 			Rules: ManifestRules{
-				Platform:     "resources/platform-rules.md",
-				Organization: "resources/organization-rules.md",
-				Application:  "resources/application-rules.md",
+				Platform: "resources/platform-rules.md",
 			},
+			Skills: in.SkillRelPaths,
 		},
+		Routing: in.Routing,
 	}
 	body, err := MarshalManifestYAML(m)
 	if err != nil {
@@ -91,3 +85,4 @@ func WriteAppInput(ctx context.Context, w AppInputWriter, appID string, in AppIn
 	}
 	return nil
 }
+
