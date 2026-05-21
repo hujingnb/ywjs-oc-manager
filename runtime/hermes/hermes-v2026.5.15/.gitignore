@@ -1,0 +1,3 @@
+# 契约工件由 Makefile 构建期注入，canonical 位于 runtime/hermes/ 下。
+/kanban-contract/
+/cron-contract/
