@@ -80,22 +80,20 @@
             </n-form-item>
           </n-grid-item>
           <n-grid-item :span="2">
-            <n-form-item label="模型 *">
+            <n-form-item label="可用助手版本">
               <n-select
-                v-model:value="form.model_id"
-                filterable
-                :loading="modelsQuery.isLoading.value"
-                :disabled="modelsQuery.isError.value"
-                :options="modelOptions"
-                placeholder="选择模型"
+                v-model:value="form.assistant_version_ids"
+                multiple
+                :loading="versionsQuery.isLoading.value"
+                :options="versionOptions"
+                placeholder="选择该组织可用的助手版本（可多选，可留空）"
               />
-              <p v-if="modelsQuery.isError.value" class="state-text danger">模型列表获取失败，请重试</p>
             </n-form-item>
           </n-grid-item>
           <n-grid-item :span="2">
             <n-space justify="end">
               <n-button @click="formVisible = false">取消</n-button>
-              <n-button type="primary" attr-type="submit" :loading="creating" :disabled="!canSubmitOrganization">保存</n-button>
+              <n-button type="primary" attr-type="submit" :loading="creating" :disabled="creating">保存</n-button>
             </n-space>
             <p v-if="submitError" class="state-text danger">{{ submitError }}</p>
           </n-grid-item>
@@ -197,8 +195,9 @@ import {
 
 import { formatOrgStatus } from '@/domain/status'
 import {
-  useCreateOrganization, useModelsQuery, useOrganizationsQuery, useUpdateOrganizationStatus,
+  useCreateOrganization, useOrganizationsQuery, useUpdateOrganizationStatus,
 } from '@/api/hooks/useOrganizations'
+import { useAssistantVersionsQuery } from '@/api/hooks/useAssistantVersions'
 import { apiRequest } from '@/api/client'
 import { useBillingStatusQuery, useOrgBalanceQuery, useRechargeMutation, useRechargesQuery } from '@/api/hooks/useRecharge'
 import type { BalanceDTO } from '@/api/hooks/useRecharge'
@@ -277,7 +276,7 @@ const { form, formVisible, creating, submitError, openForm, submit: submitForm }
     admin_username: '',
     admin_display_name: '',
     admin_password: '',
-    model_id: '',
+    assistant_version_ids: [] as string[],
   },
   mutation: createMutation,
   toPayload: (f) => ({
@@ -291,29 +290,19 @@ const { form, formVisible, creating, submitError, openForm, submit: submitForm }
     admin_username: f.admin_username,
     admin_display_name: f.admin_display_name,
     admin_password: f.admin_password,
-    model_id: f.model_id,
+    assistant_version_ids: f.assistant_version_ids,
   }),
 })
-const modelsQuery = useModelsQuery(() => formVisible.value)
-const modelOptions = computed(() => (modelsQuery.data.value ?? []).map(model => ({
-  label: model.name,
-  value: model.id,
+// versionsQuery 仅在表单打开时发起请求，避免页面初始化时的无谓请求。
+const versionsQuery = useAssistantVersionsQuery(() => formVisible.value)
+const versionOptions = computed(() => (versionsQuery.data.value ?? []).map(v => ({
+  label: v.name,
+  value: v.id,
 })))
-// canSubmitOrganization 阻止未选模型或模型目录错误进入后端校验。
-const canSubmitOrganization = computed(() =>
-  !creating.value && !modelsQuery.isError.value && Boolean(form.model_id),
-)
 
 // submitOrganization 兜底处理键盘提交，避免绕过保存按钮禁用状态。
+// 助手版本为可选项，无需前置校验；直接调用 submitForm。
 async function submitOrganization() {
-  if (modelsQuery.isError.value) {
-    submitError.value = '模型列表获取失败，请重试'
-    return
-  }
-  if (!form.model_id) {
-    submitError.value = '请选择模型'
-    return
-  }
   await submitForm()
 }
 

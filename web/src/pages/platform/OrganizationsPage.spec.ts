@@ -1,14 +1,20 @@
 import { mount } from '@vue/test-utils'
 import { defineComponent, h, nextTick, ref, type PropType } from 'vue'
 import { describe, expect, it, vi } from 'vitest'
+import { QueryClient, VueQueryPlugin } from '@tanstack/vue-query'
 import type { DataTableColumn } from 'naive-ui'
 
 import OrganizationsPage from './OrganizationsPage.vue'
 import type { Organization } from '@/api'
 
 const createOrganization = vi.hoisted(() => vi.fn())
-const modelsState = vi.hoisted(() => ({
-  data: { value: [{ id: 'qwen2.5:7b', name: 'qwen2.5:7b' }] },
+
+// versionsState 模拟助手版本列表查询状态，供创建组织表单多选使用。
+const versionsState = vi.hoisted(() => ({
+  data: { value: [
+    { id: 'v-1', name: '版本 A' },
+    { id: 'v-2', name: '版本 B' },
+  ] },
   isLoading: { value: false },
   isError: { value: false },
 }))
@@ -23,14 +29,19 @@ vi.mock('@/api/hooks/useOrganizations', () => ({
       status: 'active',
       credit_warning_threshold: 20,
       admin_username: 'org-admin',
-      model_id: 'qwen2.5:7b',
     }]),
     isLoading: ref(false),
     error: ref(null),
   }),
-  useModelsQuery: () => modelsState,
+  // useModelsQuery 保留 mock：其他页面（如版本编辑页）仍依赖此导出，避免影响其他测试。
+  useModelsQuery: () => ({ data: ref([]), isLoading: ref(false), isError: ref(false) }),
   useCreateOrganization: () => ({ mutateAsync: createOrganization, isPending: ref(false) }),
   useUpdateOrganizationStatus: () => ({ mutate: vi.fn() }),
+}))
+
+// mock 助手版本查询，供创建表单版本多选使用。
+vi.mock('@/api/hooks/useAssistantVersions', () => ({
+  useAssistantVersionsQuery: () => versionsState,
 }))
 
 vi.mock('@/api/hooks/useRecharge', () => ({
@@ -41,6 +52,7 @@ vi.mock('@/api/hooks/useRecharge', () => ({
     error: ref(null),
   }),
   useRechargeMutation: () => ({ mutateAsync: vi.fn(), isPending: ref(false) }),
+  useRechargesQuery: () => ({ data: ref([]), isLoading: ref(false) }),
 }))
 
 describe('OrganizationsPage', () => {
@@ -49,6 +61,8 @@ describe('OrganizationsPage', () => {
 
   const mountPage = () => mount(OrganizationsPage, {
     global: {
+      // 注入 QueryClient，解决 useQueries 调用报 "No 'queryClient' found" 的问题。
+      plugins: [[VueQueryPlugin, { queryClient: new QueryClient() }]],
       stubs: {
         NButton: defineComponent({
           props: ['loading', 'disabled'],
@@ -231,9 +245,8 @@ describe('OrganizationsPage', () => {
     ].join('\n'))
   })
 
-  it('创建组织时提交组织标识', async () => {
-    modelsState.isError.value = false
-    modelsState.data.value = [{ id: 'qwen2.5:7b', name: 'qwen2.5:7b' }]
+  // 创建组织时选择助手版本，验证提交载荷包含 assistant_version_ids 而不再有 model_id。
+  it('创建组织时提交组织标识和助手版本', async () => {
     createOrganization.mockResolvedValue({ id: 'org-2', name: '新组织', code: 'new-org', status: 'active' })
     const wrapper = mountPage()
 
@@ -243,28 +256,37 @@ describe('OrganizationsPage', () => {
     await nextTick()
 
     const inputs = wrapper.findAll('input')
+    // 按表单字段顺序填写：名称、组织标识、管理员用户名、管理员姓名、管理员密码
     await inputs[0].setValue('新组织')
     await inputs[1].setValue('new-org')
     await inputs[2].setValue('org-admin')
     await inputs[3].setValue('组织管理员')
     await inputs[4].setValue('secret-password')
-    const modelSelect = wrapper.find('select')
-    await modelSelect.setValue('qwen2.5:7b')
+
+    // 选择助手版本（版本 A），通过直接设置 option selected 状态并触发 change 事件来模拟多选。
+    const versionSelect = wrapper.find('select')
+    const options = versionSelect.element.options
+    if (options.length > 0) {
+      options[0].selected = true
+    }
+    await versionSelect.trigger('change')
     await wrapper.find('form').trigger('submit')
 
     expect(createOrganization).toHaveBeenCalledWith(expect.objectContaining({
       name: '新组织',
       code: 'new-org',
-      model_id: 'qwen2.5:7b',
       admin_username: 'org-admin',
       admin_display_name: '组织管理员',
       admin_password: 'secret-password',
+      assistant_version_ids: expect.any(Array),
     }))
+    // 确认不再有 model_id 字段
+    expect(createOrganization).not.toHaveBeenCalledWith(expect.objectContaining({ model_id: expect.anything() }))
   })
 
-  it('模型列表加载失败时禁用保存并阻止提交', async () => {
-    modelsState.isError.value = true
-    createOrganization.mockClear()
+  // 助手版本为可选项，留空时表单仍可正常提交。
+  it('不选助手版本时表单仍可提交', async () => {
+    createOrganization.mockResolvedValue({ id: 'org-3', name: '空版本组织', code: 'empty-org', status: 'active' })
     const wrapper = mountPage()
 
     const openButton = wrapper.findAll('button').find(button => button.text().includes('新增组织'))
@@ -272,11 +294,19 @@ describe('OrganizationsPage', () => {
     await openButton!.trigger('click')
     await nextTick()
 
-    const saveButton = wrapper.findAll('button').find(button => button.text() === '保存')
-    expect(saveButton?.attributes('disabled')).toBeDefined()
-    expect(wrapper.text()).toContain('模型列表获取失败，请重试')
+    const inputs = wrapper.findAll('input')
+    // 仅填写必填字段，不选助手版本，验证可以正常提交。
+    await inputs[0].setValue('空版本组织')
+    await inputs[1].setValue('empty-org')
+    await inputs[2].setValue('admin2')
+    await inputs[3].setValue('管理员2')
+    await inputs[4].setValue('password2')
 
     await wrapper.find('form').trigger('submit')
-    expect(createOrganization).not.toHaveBeenCalled()
+
+    expect(createOrganization).toHaveBeenCalledWith(expect.objectContaining({
+      name: '空版本组织',
+      assistant_version_ids: [],
+    }))
   })
 })
