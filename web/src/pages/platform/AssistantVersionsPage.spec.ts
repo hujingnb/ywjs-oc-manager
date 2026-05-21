@@ -74,6 +74,40 @@ function mountPage() {
             })
           },
         }),
+        // NSelect 的三种注册名（naive-ui 内部以多名称解析组件），统一渲染为原生 <select>。
+        NSelect: defineComponent({
+          props: { value: [String], options: Array, disabled: Boolean },
+          emits: ['update:value'],
+          setup(p, { emit }) {
+            return () => h('select', {
+              disabled: p.disabled, value: p.value,
+              onChange: (e: Event) => emit('update:value', (e.target as HTMLSelectElement).value),
+            }, ((p.options ?? []) as Array<{ label: string; value: string }>).map(o =>
+              h('option', { value: o.value }, o.label)))
+          },
+        }),
+        'n-select': defineComponent({
+          props: { value: [String], options: Array, disabled: Boolean },
+          emits: ['update:value'],
+          setup(p, { emit }) {
+            return () => h('select', {
+              disabled: p.disabled, value: p.value,
+              onChange: (e: Event) => emit('update:value', (e.target as HTMLSelectElement).value),
+            }, ((p.options ?? []) as Array<{ label: string; value: string }>).map(o =>
+              h('option', { value: o.value }, o.label)))
+          },
+        }),
+        Select: defineComponent({
+          props: { value: [String], options: Array, disabled: Boolean },
+          emits: ['update:value'],
+          setup(p, { emit }) {
+            return () => h('select', {
+              disabled: p.disabled, value: p.value,
+              onChange: (e: Event) => emit('update:value', (e.target as HTMLSelectElement).value),
+            }, ((p.options ?? []) as Array<{ label: string; value: string }>).map(o =>
+              h('option', { value: o.value }, o.label)))
+          },
+        }),
         NSpace: defineComponent({ setup(_, { slots }) { return () => h('div', slots.default?.()) } }),
         DataTableList: defineComponent({
           props: {
@@ -115,8 +149,8 @@ describe('AssistantVersionsPage', () => {
   })
 
   // 填写必填项后提交调用创建接口。
-  // naive-ui NSelect 是 div 实现，不渲染 <select>；通过 vm.$.setupState.form 直接设置。
-  // naive-ui NInput textarea 渲染 <textarea>；名称字段渲染 <input type="text">。
+  // NInput text 渲染 <input>；NInput textarea 渲染 <textarea>；
+  // NSelect stub 渲染原生 <select>，通过 setValue 触发 update:value 事件回写 form。
   it('创建版本时提交表单数据', async () => {
     createVersion.mockResolvedValue(sampleVersion)
     const wrapper = mountPage()
@@ -129,11 +163,11 @@ describe('AssistantVersionsPage', () => {
     await textareas[0].setValue('一些描述') // 描述
     await textareas[1].setValue('你是助手') // 内置提示词
 
-    // NSelect 不产生原生 <select>，直接写入 form 响应式对象完成 image_id 与 main_model 设置。
-    const form = (wrapper.vm as any).$.setupState.form as Record<string, string>
-    form.image_id = 'v2026.5.16'
-    form.main_model = 'qwen'
-    await nextTick()
+    // selects[0] = 使用镜像（image_id）；selects[1] = 主模型（main_model）；
+    // selects[2..9] = 8 个智能路由槽位（AUXILIARY_SLOTS v-for 渲染顺序）。
+    const selects = wrapper.findAll('select')
+    await selects[0].setValue('v2026.5.16') // 使用镜像
+    await selects[1].setValue('qwen') // 主模型
 
     await wrapper.find('form').trigger('submit')
     expect(createVersion).toHaveBeenCalledWith(expect.objectContaining({
