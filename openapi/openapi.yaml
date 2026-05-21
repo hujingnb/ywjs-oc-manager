@@ -291,7 +291,9 @@ components:
           description: CreditWarningThreshold 是组织余额预警阈值；nil 表示不启用余额预警或保持预警关闭。
           type: integer
         model_id:
-          description: ModelID 是该组织所有实例统一使用的模型 ID，由平台管理员指定。
+          description: |-
+            ModelID 历史字段：助手版本接管模型选择后，组织创建不再需要它；
+            保留以兼容旧调用方，前端新表单不再发送，留待后续阶段移除。
           type: string
         name:
           description: Name 是组织展示名，也是平台管理员列表中识别租户的主字段。
@@ -304,7 +306,6 @@ components:
       - admin_password
       - admin_username
       - code
-      - model_id
       - name
       type: object
     handlers.ErrorResponse:
