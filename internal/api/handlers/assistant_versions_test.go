@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"mime/multipart"
 	"net/http"
 	"net/http/httptest"
 	"testing"
@@ -119,4 +120,50 @@ func TestAVListRuntimeImages(t *testing.T) {
 	router.ServeHTTP(resp, req)
 	require.Equal(t, http.StatusOK, resp.Code)
 	assert.Contains(t, resp.Body.String(), "v2026.5.16")
+}
+
+// avUploadRequest 构造一个 multipart skill 上传请求，供 UploadSkill handler 测试复用。
+func avUploadRequest(t *testing.T) *http.Request {
+	t.Helper()
+	body := &bytes.Buffer{}
+	w := multipart.NewWriter(body)
+	fw, err := w.CreateFormFile("file", "skill.tar")
+	require.NoError(t, err)
+	_, err = fw.Write([]byte("dummy-tar-bytes"))
+	require.NoError(t, err)
+	require.NoError(t, w.Close())
+	req := httptest.NewRequest(http.MethodPost, "/api/v1/assistant-versions/v1/skills", body)
+	req.Header.Set("Content-Type", w.FormDataContentType())
+	return req
+}
+
+// TestAVUploadSkillReturns200 验证 multipart 上传 skill 成功时返回 200。
+func TestAVUploadSkillReturns200(t *testing.T) {
+	svc := &avServiceStub{one: service.AssistantVersionResult{ID: "v1", Name: "标准版"}}
+	router := newAVTestRouter(t, svc)
+	req := withPrincipal(avUploadRequest(t), auth.Principal{Role: domain.UserRolePlatformAdmin})
+	resp := httptest.NewRecorder()
+	router.ServeHTTP(resp, req)
+	require.Equal(t, http.StatusOK, resp.Code)
+}
+
+// TestAVUploadSkillMapsTooLarge 验证 service 返回 SkillTooLarge 时映射 413。
+func TestAVUploadSkillMapsTooLarge(t *testing.T) {
+	svc := &avServiceStub{err: service.ErrSkillTooLarge}
+	router := newAVTestRouter(t, svc)
+	req := withPrincipal(avUploadRequest(t), auth.Principal{Role: domain.UserRolePlatformAdmin})
+	resp := httptest.NewRecorder()
+	router.ServeHTTP(resp, req)
+	require.Equal(t, http.StatusRequestEntityTooLarge, resp.Code)
+}
+
+// TestAVUploadSkillRejectsMissingFile 验证缺少 file 表单字段时返回 400。
+func TestAVUploadSkillRejectsMissingFile(t *testing.T) {
+	svc := &avServiceStub{}
+	router := newAVTestRouter(t, svc)
+	req := httptest.NewRequest(http.MethodPost, "/api/v1/assistant-versions/v1/skills", nil)
+	req = withPrincipal(req, auth.Principal{Role: domain.UserRolePlatformAdmin})
+	resp := httptest.NewRecorder()
+	router.ServeHTTP(resp, req)
+	require.Equal(t, http.StatusBadRequest, resp.Code)
 }

@@ -105,6 +105,7 @@ func (h *AssistantVersionsHandler) List(c *gin.Context) {
 // @Security BearerAuth
 // @Param    id path string true "版本 ID"
 // @Success  200 {object} map[string]service.AssistantVersionResult
+// @Failure  403 {object} ErrorResponse
 // @Failure  404 {object} ErrorResponse
 // @Router   /assistant-versions/{id} [get]
 func (h *AssistantVersionsHandler) Get(c *gin.Context) {
@@ -156,6 +157,8 @@ func (h *AssistantVersionsHandler) Create(c *gin.Context) {
 // @Param    body body UpdateAssistantVersionRequest true "版本"
 // @Success  200 {object} map[string]service.AssistantVersionResult
 // @Failure  400 {object} ErrorResponse
+// @Failure  403 {object} ErrorResponse
+// @Failure  404 {object} ErrorResponse
 // @Router   /assistant-versions/{id} [put]
 func (h *AssistantVersionsHandler) Update(c *gin.Context) {
 	var req UpdateAssistantVersionRequest
@@ -182,6 +185,8 @@ func (h *AssistantVersionsHandler) Update(c *gin.Context) {
 // @Security BearerAuth
 // @Param    id path string true "版本 ID"
 // @Success  204 "已删除"
+// @Failure  403 {object} ErrorResponse
+// @Failure  404 {object} ErrorResponse
 // @Failure  409 {object} ErrorResponse
 // @Router   /assistant-versions/{id} [delete]
 func (h *AssistantVersionsHandler) Delete(c *gin.Context) {
@@ -222,6 +227,10 @@ func (h *AssistantVersionsHandler) UploadSkill(c *gin.Context) {
 		c.JSON(http.StatusBadRequest, apierror.New("INVALID_REQUEST", "读取上传文件失败"))
 		return
 	}
+	if int64(len(data)) > maxSkillUploadBytes {
+		c.JSON(http.StatusRequestEntityTooLarge, apierror.New("SKILL_TOO_LARGE", "skill 包超过大小上限"))
+		return
+	}
 	out, err := h.service.UploadSkill(c.Request.Context(), principalFromCtx(c), c.Param("id"), data)
 	if err != nil {
 		writeAVError(c, err)
@@ -240,6 +249,7 @@ func (h *AssistantVersionsHandler) UploadSkill(c *gin.Context) {
 // @Param    skill path string true "skill 名称"
 // @Success  200 {object} map[string]service.AssistantVersionResult
 // @Failure  400 {object} ErrorResponse
+// @Failure  403 {object} ErrorResponse
 // @Router   /assistant-versions/{id}/skills/{skill} [delete]
 func (h *AssistantVersionsHandler) DeleteSkill(c *gin.Context) {
 	out, err := h.service.DeleteSkill(c.Request.Context(), principalFromCtx(c), c.Param("id"), c.Param("skill"))

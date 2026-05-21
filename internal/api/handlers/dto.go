@@ -341,65 +341,65 @@ type CreateCronJobRequest struct {
 // 指针字段用于区分”未提交”和”提交空字符串”；ClearSkills/ClearRepeat 表示显式清空。
 type UpdateCronJobRequest struct {
 	// Name 是任务显示名称；nil 表示保持原值。
-	Name *string `json:”name”`
+	Name *string `json:"name"`
 	// Schedule 是任务调度表达式；nil 表示保持原值。
-	Schedule *string `json:”schedule”`
+	Schedule *string `json:"schedule"`
 	// Prompt 是任务提示词；nil 表示保持原值，空字符串表示清空。
-	Prompt *string `json:”prompt”`
+	Prompt *string `json:"prompt"`
 	// Deliver 是任务投递目标；nil 表示保持原值，空字符串表示清空。
-	Deliver *string `json:”deliver”`
+	Deliver *string `json:"deliver"`
 	// Repeat 是任务重复次数；nil 表示不修改重复次数。
-	Repeat *int `json:”repeat”`
+	Repeat *int `json:"repeat"`
 	// ClearRepeat 表示显式清空重复次数；当前 Hermes runtime 暂无稳定清空语义，提交 true 会返回 400。
-	ClearRepeat bool `json:”clear_repeat”`
+	ClearRepeat bool `json:"clear_repeat"`
 	// Script 是仓库内脚本文件名；nil 表示保持原值，空字符串表示清空。
-	Script *string `json:”script”`
+	Script *string `json:"script"`
 	// NoAgent 表示是否跳过 agent；nil 表示保持原值。
-	NoAgent *bool `json:”no_agent”`
+	NoAgent *bool `json:"no_agent"`
 	// Workdir 是任务执行目录；nil 表示保持原值，空字符串表示清空。
-	Workdir *string `json:”workdir”`
+	Workdir *string `json:"workdir"`
 	// Skills 是高级字段，仅平台管理员生效：追加或替换任务技能列表。
-	Skills []string `json:”skills”`
+	Skills []string `json:"skills"`
 	// ClearSkills 是高级字段，仅平台管理员生效：显式清空任务技能列表。
-	ClearSkills bool `json:”clear_skills”`
+	ClearSkills bool `json:"clear_skills"`
 	// Model 是高级字段，仅平台管理员生效：任务指定模型。
-	Model *string `json:”model”`
+	Model *string `json:"model"`
 	// Provider 是高级字段，仅平台管理员生效：任务指定模型提供方。
-	Provider *string `json:”provider”`
+	Provider *string `json:"provider"`
 	// BaseURL 是高级字段，仅平台管理员生效：任务指定 provider base URL。
-	BaseURL *string `json:”base_url”`
+	BaseURL *string `json:"base_url"`
 }
 
 // ===== 助手版本 assistant-versions =====
 
 // AssistantVersionRoutingDTO 是智能路由 8 槽位的请求结构；空字符串表示走主模型。
 type AssistantVersionRoutingDTO struct {
-	Vision          string `json:”vision”`
-	Compression     string `json:”compression”`
-	WebExtract      string `json:”web_extract”`
-	SessionSearch   string `json:”session_search”`
-	TitleGeneration string `json:”title_generation”`
-	Approval        string `json:”approval”`
-	SkillsHub       string `json:”skills_hub”`
-	Mcp             string `json:”mcp”`
+	Vision          string `json:"vision"`
+	Compression     string `json:"compression"`
+	WebExtract      string `json:"web_extract"`
+	SessionSearch   string `json:"session_search"`
+	TitleGeneration string `json:"title_generation"`
+	Approval        string `json:"approval"`
+	SkillsHub       string `json:"skills_hub"`
+	Mcp             string `json:"mcp"`
 }
 
 // CreateAssistantVersionRequest 是创建助手版本的请求体。
 type CreateAssistantVersionRequest struct {
-	Name         string                     `json:”name” binding:”required”`
-	Description  string                     `json:”description”`
-	SystemPrompt string                     `json:”system_prompt” binding:”required”`
-	ImageID      string                     `json:”image_id” binding:”required”`
-	MainModel    string                     `json:”main_model” binding:”required”`
-	Routing      AssistantVersionRoutingDTO `json:”routing”`
+	Name         string                     `json:"name" binding:"required"`
+	Description  string                     `json:"description"`
+	SystemPrompt string                     `json:"system_prompt" binding:"required"`
+	ImageID      string                     `json:"image_id" binding:"required"`
+	MainModel    string                     `json:"main_model" binding:"required"`
+	Routing      AssistantVersionRoutingDTO `json:"routing"`
 }
 
 // UpdateAssistantVersionRequest 是编辑助手版本的请求体，字段同创建。
 type UpdateAssistantVersionRequest struct {
-	Name         string                     `json:”name” binding:”required”`
-	Description  string                     `json:”description”`
-	SystemPrompt string                     `json:”system_prompt” binding:”required”`
-	ImageID      string                     `json:”image_id” binding:”required”`
-	MainModel    string                     `json:”main_model” binding:”required”`
-	Routing      AssistantVersionRoutingDTO `json:”routing”`
+	Name         string                     `json:"name" binding:"required"`
+	Description  string                     `json:"description"`
+	SystemPrompt string                     `json:"system_prompt" binding:"required"`
+	ImageID      string                     `json:"image_id" binding:"required"`
+	MainModel    string                     `json:"main_model" binding:"required"`
+	Routing      AssistantVersionRoutingDTO `json:"routing"`
 }
