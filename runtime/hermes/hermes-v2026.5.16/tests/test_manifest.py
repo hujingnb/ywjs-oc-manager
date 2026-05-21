@@ -71,3 +71,52 @@ resources:
 """)
     with pytest.raises(ManifestError):
         load(p)
+
+
+def test_load_v2_parses_routing_and_skills(tmp_path: Path) -> None:
+    # 验证 manifest v2 的 routing 与 resources.skills 被解析；org/app rule 缺省也合法。
+    p = write(tmp_path / "manifest.yaml", """
+app:
+  id: app-x
+  name: x
+  model: m
+routing:
+  vision: gpt-5.4
+  compression: deepseek-flash
+credentials:
+  openai: { api_key: sk-x, base_url: http://x }
+resources:
+  persona: resources/persona.md
+  rules:
+    platform: resources/platform-rules.md
+  skills:
+    - resources/skills/weather.tar
+    - resources/skills/calc.tar
+""")
+    m = load(p)
+    assert m.routing == {"vision": "gpt-5.4", "compression": "deepseek-flash"}
+    assert m.skills == ["resources/skills/weather.tar", "resources/skills/calc.tar"]
+    assert m.rule_organization_rel == ""
+    assert m.rule_application_rel == ""
+
+
+def test_load_v1_without_routing_skills_defaults_empty(tmp_path: Path) -> None:
+    # 验证老 v1 manifest（无 routing / skills）解析后 routing={}、skills=[]，保持向后兼容。
+    p = write(tmp_path / "manifest.yaml", """
+app:
+  id: app-x
+  name: x
+  model: m
+credentials:
+  openai: { api_key: sk-x, base_url: http://x }
+resources:
+  persona: resources/persona.md
+  rules:
+    platform: resources/platform-rules.md
+    organization: resources/organization-rules.md
+    application: resources/application-rules.md
+""")
+    m = load(p)
+    assert m.routing == {}
+    assert m.skills == []
+    assert m.rule_platform_rel == "resources/platform-rules.md"

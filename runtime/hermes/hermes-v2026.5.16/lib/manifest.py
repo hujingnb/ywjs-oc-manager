@@ -6,7 +6,7 @@
 
 from __future__ import annotations
 
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any, Union
 
@@ -19,7 +19,7 @@ class ManifestError(Exception):
 
 @dataclass(frozen=True)
 class Manifest:
-    """业务化视图。字段语义对应 spec §4.2。"""
+    """业务化视图。字段语义对应 spec §4.2 / §5（manifest v2）。"""
     app_id: str
     app_name: str
     app_model: str
@@ -27,8 +27,13 @@ class Manifest:
     openai_base_url: str
     persona_rel: str
     rule_platform_rel: str
-    rule_organization_rel: str
-    rule_application_rel: str
+    # 组织层 / 应用层 rule：manifest v2 不再写；解析为可选，缺省空串。
+    rule_organization_rel: str = ""
+    rule_application_rel: str = ""
+    # routing：8 个 auxiliary 槽位到模型名的映射；缺省空 dict（全部走主模型）。
+    routing: dict = field(default_factory=dict)
+    # skills：版本 skill tar 的相对路径列表（相对 input_root）；缺省空 list。
+    skills: list = field(default_factory=list)
 
 
 def _require(d: dict, *path: str) -> Any:
@@ -44,10 +49,15 @@ def _require(d: dict, *path: str) -> Any:
 
 
 def load(path: Union[str, Path]) -> Manifest:
-    """读 manifest.yaml 并构造 Manifest；未知顶层字段忽略。"""
+    """读 manifest.yaml 并构造 Manifest；未知顶层字段忽略；routing / skills / 组织层 / 应用层 rule 可选。"""
     raw = yaml.safe_load(Path(path).read_text())
     if not isinstance(raw, dict):
         raise ManifestError("manifest yaml root must be a mapping")
+    resources = raw.get("resources")
+    rules = resources.get("rules") if isinstance(resources, dict) else None
+    rules = rules if isinstance(rules, dict) else {}
+    routing = raw.get("routing")
+    skills = resources.get("skills") if isinstance(resources, dict) else None
     return Manifest(
         app_id=_require(raw, "app", "id"),
         app_name=_require(raw, "app", "name"),
@@ -56,6 +66,8 @@ def load(path: Union[str, Path]) -> Manifest:
         openai_base_url=_require(raw, "credentials", "openai", "base_url"),
         persona_rel=_require(raw, "resources", "persona"),
         rule_platform_rel=_require(raw, "resources", "rules", "platform"),
-        rule_organization_rel=_require(raw, "resources", "rules", "organization"),
-        rule_application_rel=_require(raw, "resources", "rules", "application"),
+        rule_organization_rel=str(rules.get("organization") or ""),
+        rule_application_rel=str(rules.get("application") or ""),
+        routing={str(k): str(v) for k, v in routing.items()} if isinstance(routing, dict) else {},
+        skills=[str(s) for s in skills] if isinstance(skills, list) else [],
     )
