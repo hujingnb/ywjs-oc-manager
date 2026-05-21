@@ -74,6 +74,21 @@ func (s *ModelCatalogService) ValidateModelIDs(ctx context.Context, input []stri
 	return out, nil
 }
 
+// HasModelInCatalog 判断单个模型是否存在于 new-api 实时模型列表。
+// 供助手版本 service 校验主模型与路由模型；查询失败时保守返回 false。
+func (s *ModelCatalogService) HasModelInCatalog(ctx context.Context, id string) bool {
+	models, err := s.list(ctx)
+	if err != nil {
+		return false
+	}
+	for _, m := range models {
+		if m.ID == id {
+			return true
+		}
+	}
+	return false
+}
+
 func (s *ModelCatalogService) list(ctx context.Context) ([]ModelResult, error) {
 	if s.catalog == nil {
 		return nil, fmt.Errorf("模型目录未配置")

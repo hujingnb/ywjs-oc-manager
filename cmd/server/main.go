@@ -263,6 +263,19 @@ func runManager(ctx context.Context, cfg config.Config, logOut io.Writer) error 
 	if modelCatalogService != nil {
 		organizationService.SetModelValidator(modelCatalogService)
 	}
+
+	// 助手版本 service：镜像来自配置、模型校验走 new-api 目录、skill tar 存数据根目录。
+	// modelCatalogService 为 nil 时（未配 newapi）跳过构造，路由自动不注册。
+	var assistantVersionService *service.AssistantVersionService
+	if modelCatalogService != nil {
+		assistantVersionService = service.NewAssistantVersionService(
+			store.NewAssistantVersionStore(dbStore),
+			runtimeImageAdapter{images: cfg.Hermes.RuntimeImages},
+			modelValidatorAdapter{catalog: modelCatalogService},
+			service.NewFSSkillBlobStore(cfg.App.DataRoot),
+			0,
+		)
+	}
 	platformOverviewService := service.NewPlatformOverviewService(dbStore.Queries)
 
 	registry := handlers.NewRegistry()
@@ -421,6 +434,7 @@ func runManager(ctx context.Context, cfg config.Config, logOut io.Writer) error 
 			RechargeService:        rechargeService,
 			PlatformOverview:       platformOverviewService,
 			PersonaService:         personaService,
+			AssistantVersionService: assistantVersionService,
 			HermesKanbanService:    hermesKanbanService,
 			HermesCronService:      hermesCronService,
 			JobsStore:              dbStore.Queries,

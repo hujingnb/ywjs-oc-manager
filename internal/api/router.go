@@ -46,6 +46,8 @@ type Dependencies struct {
 	RechargeService *service.RechargeService
 	// PersonaService 提供组织人设读写路由。
 	PersonaService *service.PersonaService
+	// AssistantVersionService 提供助手版本目录管理路由。
+	AssistantVersionService *service.AssistantVersionService
 	// PlatformOverview 提供平台总览路由。
 	PlatformOverview *service.PlatformOverviewService
 	// HermesKanbanService 提供实例任务看板能力；nil 时不注册 kanban 路由。
@@ -173,6 +175,9 @@ func NewRouter(deps ...Dependencies) http.Handler {
 	}
 	if dep.PersonaService != nil {
 		handlers.RegisterPersonaRoutes(user, handlers.NewPersonaHandler(dep.PersonaService))
+	}
+	if dep.AssistantVersionService != nil {
+		handlers.RegisterAssistantVersionRoutes(user, handlers.NewAssistantVersionsHandler(dep.AssistantVersionService))
 	}
 	if dep.PlatformOverview != nil {
 		handlers.RegisterPlatformOverviewRoutes(user, handlers.NewPlatformOverviewHandler(dep.PlatformOverview))
