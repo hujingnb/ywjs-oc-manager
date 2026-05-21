@@ -314,6 +314,7 @@ def test_create_returns_new_job_when_hermes_writes_out_of_order(tmp_path: Path) 
     bin_dir.mkdir()
     fake_hermes = bin_dir / "hermes"
     fake_hermes.write_text(f"""#!/bin/sh
+printf '%s\\n' "$*" >> "$HERMES_HOME/hermes-args.log"
 mkdir -p "$HERMES_HOME/cron"
 cat > "$HERMES_HOME/cron/jobs.json" <<'JSON'
 {{"jobs":[
@@ -328,52 +329,76 @@ exit 0
                             home=tmp_path, extra_env={"PATH": f"{bin_dir}:{os.environ['PATH']}"})
     assert code == 0
     assert env["data"]["id"] == "new_job"
+    assert read_fake_hermes_args(tmp_path) == ["cron create --name 新任务 0 9 * * *"]
 
 
-# 覆盖：update 是 manager 稳定 verb，内部翻译为当前 runtime 的 hermes cron edit。
+# 覆盖：create 的 no_agent 模式必须提供 script，避免把无可执行内容的任务交给上游。
+def test_create_no_agent_requires_script(tmp_path: Path) -> None:
+    env, code = run_oc_cron("create", "--name", "巡检", "--schedule", "*/5 * * * *", "--no-agent",
+                            home=tmp_path, extra_env=install_fake_hermes(tmp_path))
+    assert code == 1
+    assert env["ok"] is False
+    assert env["error"]["code"] == "BAD_REQUEST"
+
+
+# 覆盖：update 是 manager 稳定 verb，内部翻译为当前 runtime 的 hermes cron edit 位置参数。
 def test_update_translates_to_hermes_edit(tmp_path: Path) -> None:
     write_jobs(tmp_path, [{"id": "abc123", "name": "旧任务", "schedule": {"display": "0 8 * * *"}}])
     env, code = run_oc_cron("update", "--id", "abc123", "--name", "新任务",
                             home=tmp_path, extra_env=install_fake_hermes(tmp_path))
     assert code == 0
     assert env["ok"] is True
-    assert read_fake_hermes_args(tmp_path) == ["cron edit --id abc123 --name 新任务"]
+    assert read_fake_hermes_args(tmp_path) == ["cron edit abc123 --name 新任务"]
 
 
-# 覆盖：delete 是 manager 稳定 verb，内部翻译为当前 runtime 的 hermes cron remove。
+# 覆盖：Hermes CLI 未暴露 model/provider/base_url 时，oc-cron 在 jobs.json 补齐高级字段。
+def test_update_patches_advanced_fields_after_hermes_edit(tmp_path: Path) -> None:
+    write_jobs(tmp_path, [{"id": "abc123", "name": "旧任务", "schedule": {"display": "0 8 * * *"}}])
+    env, code = run_oc_cron("update", "--id", "abc123", "--model", "gpt-5", "--provider", "openai",
+                            "--base-url", "https://api.example/v1/",
+                            home=tmp_path, extra_env=install_fake_hermes(tmp_path))
+    assert code == 0
+    assert env["ok"] is True
+    assert env["data"]["model"] == "gpt-5"
+    assert env["data"]["provider"] == "openai"
+    assert env["data"]["base_url"] == "https://api.example/v1"
+    assert read_fake_hermes_args(tmp_path) == ["cron edit abc123"]
+
+
+# 覆盖：delete 是 manager 稳定 verb，内部翻译为当前 runtime 的 hermes cron remove 位置参数。
 def test_delete_translates_to_hermes_remove(tmp_path: Path) -> None:
     env, code = run_oc_cron("delete", "--id", "abc123", home=tmp_path,
                             extra_env=install_fake_hermes(tmp_path))
     assert code == 0
     assert env["ok"] is True
-    assert read_fake_hermes_args(tmp_path) == ["cron remove --id abc123"]
+    assert read_fake_hermes_args(tmp_path) == ["cron remove abc123"]
 
 
-# 覆盖：toggle --enabled false 内部翻译为 pause，并返回任务信封。
+# 覆盖：toggle --enabled false 内部翻译为 pause 位置参数，并返回任务信封。
 def test_toggle_false_translates_to_hermes_pause(tmp_path: Path) -> None:
     write_jobs(tmp_path, [{"id": "abc123", "name": "巡检", "schedule": {"display": "every 30m"}}])
     env, code = run_oc_cron("toggle", "--id", "abc123", "--enabled", "false",
                             home=tmp_path, extra_env=install_fake_hermes(tmp_path))
     assert code == 0
     assert env["ok"] is True
-    assert read_fake_hermes_args(tmp_path) == ["cron pause --id abc123"]
+    assert read_fake_hermes_args(tmp_path) == ["cron pause abc123"]
 
 
-# 覆盖：toggle --enabled true 内部翻译为 resume，并返回任务信封。
+# 覆盖：toggle --enabled true 内部翻译为 resume 位置参数，并返回任务信封。
 def test_toggle_true_translates_to_hermes_resume(tmp_path: Path) -> None:
     write_jobs(tmp_path, [{"id": "abc123", "name": "巡检", "schedule": {"display": "every 30m"}}])
     env, code = run_oc_cron("toggle", "--id", "abc123", "--enabled", "true",
                             home=tmp_path, extra_env=install_fake_hermes(tmp_path))
     assert code == 0
     assert env["ok"] is True
-    assert read_fake_hermes_args(tmp_path) == ["cron resume --id abc123"]
+    assert read_fake_hermes_args(tmp_path) == ["cron resume abc123"]
 
 
-# 覆盖：run 保持 manager 稳定 verb，并调用 hermes cron run。
+# 覆盖：run 保持 manager 稳定 verb，并调用 hermes cron run 位置参数。
 def test_run_translates_to_hermes_run(tmp_path: Path) -> None:
     write_jobs(tmp_path, [{"id": "abc123", "name": "巡检", "schedule": {"display": "every 30m"}}])
     env, code = run_oc_cron("run", "--id", "abc123", home=tmp_path,
                             extra_env=install_fake_hermes(tmp_path))
     assert code == 0
     assert env["ok"] is True
-    assert read_fake_hermes_args(tmp_path) == ["cron run --id abc123"]
+    assert read_fake_hermes_args(tmp_path) == ["cron run abc123"]

@@ -127,6 +127,18 @@ def read_jobs() -> list[dict]:
     return [job for job in jobs if isinstance(job, dict)]
 
 
+def write_jobs(jobs: list[dict]) -> None:
+    """写回 jobs.json；用于补齐当前 Hermes CLI 尚未暴露的字段。"""
+    path = jobs_file()
+    try:
+        path.parent.mkdir(parents=True, exist_ok=True)
+        tmp = path.with_suffix(".json.tmp")
+        tmp.write_text(json.dumps({"jobs": jobs}, ensure_ascii=False, indent=2), encoding="utf-8")
+        tmp.replace(path)
+    except OSError as exc:
+        raise CronError("INTERNAL", f"jobs.json 写入失败: {exc}") from exc
+
+
 def _read_image_info() -> dict:
     """读取构建期镜像元信息；缺失时 capabilities 仍可稳定返回。"""
     try:
@@ -376,15 +388,39 @@ def _select_created_job(before: list[dict], after: list[dict]) -> dict | None:
     return max(candidates, key=lambda job: job.get("created_at") or "")
 
 
-def _append_common_write_flags(cmd: list[str], args, *, include_id: bool = False) -> list[str]:
-    """把 create/edit 共用字段转换为 hermes cron argv。"""
-    if include_id:
-        cmd += ["--id", validate_job_id(args.id)]
-    for field in ("name", "schedule", "prompt", "deliver", "workdir", "model", "provider", "base_url"):
+def _advanced_job_updates(args) -> dict:
+    """提取 manager 支持但 Hermes v2026.5.16 CLI 未直接暴露的 per-job 字段。"""
+    updates = {}
+    for field in ("model", "provider", "base_url"):
+        value = getattr(args, field, None)
+        if value is None:
+            continue
+        text = _text(value, field)
+        if field == "base_url" and text:
+            text = text.rstrip("/")
+        updates[field] = text or None
+    return updates
+
+
+def _patch_job_fields(job_id: str, updates: dict) -> None:
+    """在 CLI 写操作后补写高级字段，保持 manager 的统一输入契约。"""
+    if not updates:
+        return
+    jobs = read_jobs()
+    for job in jobs:
+        if job.get("id") == job_id:
+            job.update(updates)
+            write_jobs(jobs)
+            return
+    raise CronError("NOT_FOUND", "Cron 任务不存在")
+
+
+def _append_common_write_flags(cmd: list[str], args) -> list[str]:
+    """把 manager 稳定字段转换为当前 Hermes create/edit 支持的 argv。"""
+    for field in ("name", "deliver", "workdir"):
         value = getattr(args, field, None)
         if value is not None:
-            limit_key = "schedule" if field == "schedule" else field
-            cmd += [f"--{field.replace('_', '-')}", _text(value, limit_key) or ""]
+            cmd += [f"--{field.replace('_', '-')}", _text(value, field) or ""]
     if getattr(args, "repeat", None) is not None:
         repeat = int(args.repeat)
         if repeat <= 0:
@@ -400,6 +436,29 @@ def _append_common_write_flags(cmd: list[str], args, *, include_id: bool = False
         cmd.append("--clear-skills")
     for skill in getattr(args, "skill", []) or []:
         cmd += ["--skill", skill]
+    return cmd
+
+
+def _create_args(args) -> list[str]:
+    """适配 Hermes v2026.5.16：create 的 schedule/prompt 是位置参数。"""
+    if getattr(args, "no_agent", False) and not getattr(args, "script", None):
+        raise CronError("BAD_REQUEST", "no_agent 模式必须提供 script")
+    cmd = _append_common_write_flags(["create"], args)
+    cmd.append(_text(args.schedule, "schedule") or "")
+    prompt = _text(getattr(args, "prompt", None), "prompt")
+    if prompt is not None:
+        cmd.append(prompt)
+    return cmd
+
+
+def _update_args(args) -> list[str]:
+    """适配 Hermes v2026.5.16：edit 的 job_id 是位置参数，其余字段仍用 flag。"""
+    cmd = ["edit", validate_job_id(args.id)]
+    cmd = _append_common_write_flags(cmd, args)
+    for field in ("schedule", "prompt"):
+        value = getattr(args, field, None)
+        if value is not None:
+            cmd += [f"--{field}", _text(value, field) or ""]
     return cmd
 
 
@@ -544,25 +603,26 @@ def cmd_output(args) -> int:
 def cmd_create(args) -> int:
     """创建 Cron 任务，并在写后重读 jobs.json 返回稳定任务对象。"""
     before = read_jobs()
-    cmd = _append_common_write_flags(["create"], args)
-    _hermes_ok(cmd)
+    _hermes_ok(_create_args(args))
     created = _select_created_job(before, read_jobs())
     if created:
-        return emit_ok(normalize_job(created))
+        job_id = validate_job_id(created["id"])
+        _patch_job_fields(job_id, _advanced_job_updates(args))
+        return emit_ok(_show_after_write(job_id))
     return emit_ok({})
 
 
 def cmd_update(args) -> int:
     """编辑 Cron 任务，并返回更新后的任务对象。"""
-    cmd = _append_common_write_flags(["edit"], args, include_id=True)
-    _hermes_ok(cmd)
+    _hermes_ok(_update_args(args))
+    _patch_job_fields(args.id, _advanced_job_updates(args))
     return emit_ok(_show_after_write(args.id))
 
 
 def cmd_delete(args) -> int:
     """删除 Cron 任务，内部适配当前 runtime 的 remove 命令。"""
     job_id = validate_job_id(args.id)
-    _hermes_ok(["remove", "--id", job_id])
+    _hermes_ok(["remove", job_id])
     return emit_ok({"ok": True})
 
 
@@ -573,14 +633,14 @@ def cmd_toggle(args) -> int:
     if desired not in ("true", "false"):
         raise CronError("BAD_REQUEST", "enabled 必须是 true 或 false")
     hermes_verb = "resume" if desired == "true" else "pause"
-    _hermes_ok([hermes_verb, "--id", job_id])
+    _hermes_ok([hermes_verb, job_id])
     return emit_ok(_show_after_write(job_id))
 
 
 def cmd_run(args) -> int:
     """立即触发 Cron 任务，返回触发后的任务对象。"""
     job_id = validate_job_id(args.id)
-    _hermes_ok(["run", "--id", job_id])
+    _hermes_ok(["run", job_id])
     return emit_ok(_show_after_write(job_id))
 
 
