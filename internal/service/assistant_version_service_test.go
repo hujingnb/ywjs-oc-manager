@@ -500,3 +500,12 @@ func TestAssistantVersionDeleteSkillNotFound(t *testing.T) {
 	_, err := svc.DeleteSkill(context.Background(), platformPrincipal(), id, "nope")
 	require.ErrorIs(t, err, ErrAssistantVersionInvalid)
 }
+
+// TestAssistantVersionDeleteSkillDeniesOrgAdmin 验证组织管理员不能删除 skill。
+func TestAssistantVersionDeleteSkillDeniesOrgAdmin(t *testing.T) {
+	store := newFakeAVStore()
+	id := seedVersion(store, "标准版", 1)
+	svc := newTestAVService(t, store)
+	_, err := svc.DeleteSkill(context.Background(), orgAdminPrincipal(), id, "weather")
+	require.ErrorIs(t, err, ErrAssistantVersionDenied)
+}

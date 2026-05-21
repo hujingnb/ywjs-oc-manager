@@ -401,7 +401,7 @@ func (s *AssistantVersionService) UploadSkill(ctx context.Context, principal aut
 	}
 	info, err := hermes.InspectSkillArchive(bytes.NewReader(data))
 	if err != nil {
-		return AssistantVersionResult{}, fmt.Errorf("%w: %v", ErrAssistantVersionInvalid, err)
+		return AssistantVersionResult{}, fmt.Errorf("%w: %w", ErrAssistantVersionInvalid, err)
 	}
 	skills, err := decodeSkills(row.SkillsJson)
 	if err != nil {
@@ -412,6 +412,7 @@ func (s *AssistantVersionService) UploadSkill(ctx context.Context, principal aut
 			return AssistantVersionResult{}, fmt.Errorf("%w: skill %s 已存在", ErrAssistantVersionInvalid, info.Name)
 		}
 	}
+	// 先写 blob 再写库：persistSkills 失败时最多留下一个无引用的 tar（可由清理任务回收），不会出现 DB 指向缺失文件。
 	relPath, err := s.blobs.PutSkill(uuidToString(row.ID), info.Name, data)
 	if err != nil {
 		return AssistantVersionResult{}, fmt.Errorf("写入 skill tar 失败: %w", err)
@@ -448,6 +449,7 @@ func (s *AssistantVersionService) DeleteSkill(ctx context.Context, principal aut
 	if removed == nil {
 		return AssistantVersionResult{}, fmt.Errorf("%w: skill %s 不存在", ErrAssistantVersionInvalid, skillName)
 	}
+	// 先删 blob 再更新库；与 UploadSkill 的顺序相反，保持「DB 不指向已不存在文件」由 persistSkills 收尾。
 	if err := s.blobs.DeleteSkill(removed.FilePath); err != nil {
 		return AssistantVersionResult{}, fmt.Errorf("删除 skill tar 失败: %w", err)
 	}
