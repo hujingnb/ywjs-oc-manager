@@ -97,6 +97,45 @@ components:
           description: NetworkTxBytes 是节点网络累计发送字节数。
           type: integer
       type: object
+    handlers.AssistantVersionRoutingDTO:
+      properties:
+        approval:
+          type: string
+        compression:
+          type: string
+        mcp:
+          type: string
+        session_search:
+          type: string
+        skills_hub:
+          type: string
+        title_generation:
+          type: string
+        vision:
+          type: string
+        web_extract:
+          type: string
+      type: object
+    handlers.CreateAssistantVersionRequest:
+      properties:
+        description:
+          type: string
+        image_id:
+          type: string
+        main_model:
+          type: string
+        name:
+          type: string
+        routing:
+          $ref: '#/components/schemas/handlers.AssistantVersionRoutingDTO'
+        system_prompt:
+          type: string
+      required:
+      - image_id
+      - main_model
+      - name
+      - system_prompt
+      type: object
     handlers.CreateCronJobRequest:
       properties:
         base_url:
@@ -493,6 +532,26 @@ components:
       required:
       - node_id
       type: object
+    handlers.UpdateAssistantVersionRequest:
+      properties:
+        description:
+          type: string
+        image_id:
+          type: string
+        main_model:
+          type: string
+        name:
+          type: string
+        routing:
+          $ref: '#/components/schemas/handlers.AssistantVersionRoutingDTO'
+        system_prompt:
+          type: string
+      required:
+      - image_id
+      - main_model
+      - name
+      - system_prompt
+      type: object
     handlers.UpdateCronJobRequest:
       properties:
         base_url:
@@ -622,6 +681,43 @@ components:
         runtime_node_id:
           type: string
         status:
+          type: string
+      type: object
+    service.AssistantVersionResult:
+      properties:
+        description:
+          type: string
+        id:
+          type: string
+        image_id:
+          type: string
+        main_model:
+          type: string
+        name:
+          type: string
+        revision:
+          type: integer
+        routing:
+          additionalProperties:
+            type: string
+          type: object
+        skills:
+          items:
+            $ref: '#/components/schemas/service.AssistantVersionSkill'
+          type: array
+          uniqueItems: false
+        system_prompt:
+          type: string
+      type: object
+    service.AssistantVersionSkill:
+      properties:
+        file_path:
+          type: string
+        file_sha256:
+          type: string
+        file_size:
+          type: integer
+        name:
           type: string
       type: object
     service.AuditResult:
@@ -1569,6 +1665,13 @@ components:
         name:
           type: string
         status:
+          type: string
+      type: object
+    service.RuntimeImageOption:
+      properties:
+        id:
+          type: string
+        label:
           type: string
       type: object
     service.RuntimeNodeResult:
@@ -4459,6 +4562,275 @@ paths:
       summary: 下载工作目录文件
       tags:
       - workspace
+  /assistant-versions:
+    get:
+      responses:
+        "200":
+          content:
+            application/json:
+              schema:
+                additionalProperties:
+                  items:
+                    $ref: '#/components/schemas/service.AssistantVersionResult'
+                  type: array
+                type: object
+          description: OK
+        "403":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/handlers.ErrorResponse'
+          description: Forbidden
+      security:
+      - BearerAuth: []
+      summary: 助手版本列表
+      tags:
+      - assistant-versions
+    post:
+      requestBody:
+        content:
+          application/json:
+            schema:
+              oneOf:
+              - type: object
+              - $ref: '#/components/schemas/handlers.CreateAssistantVersionRequest'
+                description: 版本
+                summary: body
+        description: 版本
+        required: true
+      responses:
+        "201":
+          content:
+            application/json:
+              schema:
+                additionalProperties:
+                  $ref: '#/components/schemas/service.AssistantVersionResult'
+                type: object
+          description: Created
+        "400":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/handlers.ErrorResponse'
+          description: Bad Request
+        "403":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/handlers.ErrorResponse'
+          description: Forbidden
+      security:
+      - BearerAuth: []
+      summary: 创建助手版本
+      tags:
+      - assistant-versions
+  /assistant-versions/{id}:
+    delete:
+      parameters:
+      - description: 版本 ID
+        in: path
+        name: id
+        required: true
+        schema:
+          type: string
+      responses:
+        "204":
+          description: 已删除
+        "403":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/handlers.ErrorResponse'
+          description: Forbidden
+        "404":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/handlers.ErrorResponse'
+          description: Not Found
+        "409":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/handlers.ErrorResponse'
+          description: Conflict
+      security:
+      - BearerAuth: []
+      summary: 删除助手版本
+      tags:
+      - assistant-versions
+    get:
+      parameters:
+      - description: 版本 ID
+        in: path
+        name: id
+        required: true
+        schema:
+          type: string
+      responses:
+        "200":
+          content:
+            application/json:
+              schema:
+                additionalProperties:
+                  $ref: '#/components/schemas/service.AssistantVersionResult'
+                type: object
+          description: OK
+        "403":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/handlers.ErrorResponse'
+          description: Forbidden
+        "404":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/handlers.ErrorResponse'
+          description: Not Found
+      security:
+      - BearerAuth: []
+      summary: 助手版本详情
+      tags:
+      - assistant-versions
+    put:
+      parameters:
+      - description: 版本 ID
+        in: path
+        name: id
+        required: true
+        schema:
+          type: string
+      requestBody:
+        content:
+          application/json:
+            schema:
+              oneOf:
+              - type: object
+              - $ref: '#/components/schemas/handlers.UpdateAssistantVersionRequest'
+                description: 版本
+                summary: body
+        description: 版本
+        required: true
+      responses:
+        "200":
+          content:
+            application/json:
+              schema:
+                additionalProperties:
+                  $ref: '#/components/schemas/service.AssistantVersionResult'
+                type: object
+          description: OK
+        "400":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/handlers.ErrorResponse'
+          description: Bad Request
+        "403":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/handlers.ErrorResponse'
+          description: Forbidden
+        "404":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/handlers.ErrorResponse'
+          description: Not Found
+      security:
+      - BearerAuth: []
+      summary: 编辑助手版本
+      tags:
+      - assistant-versions
+  /assistant-versions/{id}/skills:
+    post:
+      parameters:
+      - description: 版本 ID
+        in: path
+        name: id
+        required: true
+        schema:
+          type: string
+      requestBody:
+        content:
+          application/x-www-form-urlencoded:
+            schema:
+              title: file
+              type: file
+          multipart/form-data:
+            schema:
+              type: object
+        description: skill tar 包
+        required: true
+      responses:
+        "200":
+          content:
+            application/json:
+              schema:
+                additionalProperties:
+                  $ref: '#/components/schemas/service.AssistantVersionResult'
+                type: object
+          description: OK
+        "400":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/handlers.ErrorResponse'
+          description: Bad Request
+        "413":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/handlers.ErrorResponse'
+          description: Request Entity Too Large
+      security:
+      - BearerAuth: []
+      summary: 上传版本 skill
+      tags:
+      - assistant-versions
+  /assistant-versions/{id}/skills/{skill}:
+    delete:
+      parameters:
+      - description: 版本 ID
+        in: path
+        name: id
+        required: true
+        schema:
+          type: string
+      - description: skill 名称
+        in: path
+        name: skill
+        required: true
+        schema:
+          type: string
+      responses:
+        "200":
+          content:
+            application/json:
+              schema:
+                additionalProperties:
+                  $ref: '#/components/schemas/service.AssistantVersionResult'
+                type: object
+          description: OK
+        "400":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/handlers.ErrorResponse'
+          description: Bad Request
+        "403":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/handlers.ErrorResponse'
+          description: Forbidden
+      security:
+      - BearerAuth: []
+      summary: 删除版本 skill
+      tags:
+      - assistant-versions
   /audit-logs:
     get:
       description: 通过 target_type 和 target_id query 参数查询指定资源的审计日志；组织成员仅可查询自己拥有的 app
@@ -6366,6 +6738,30 @@ paths:
       summary: 平台总览
       tags:
       - platform
+  /runtime-images:
+    get:
+      responses:
+        "200":
+          content:
+            application/json:
+              schema:
+                additionalProperties:
+                  items:
+                    $ref: '#/components/schemas/service.RuntimeImageOption'
+                  type: array
+                type: object
+          description: OK
+        "403":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/handlers.ErrorResponse'
+          description: Forbidden
+      security:
+      - BearerAuth: []
+      summary: 可选 Hermes 镜像列表
+      tags:
+      - assistant-versions
   /runtime-nodes:
     get:
       description: 平台管理员获取所有 runtime 节点，支持分页
