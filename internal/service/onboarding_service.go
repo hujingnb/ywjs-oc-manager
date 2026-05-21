@@ -53,7 +53,7 @@ type TxRunner interface {
 }
 
 // MemberOnboardingService 把成员-应用-渠道绑定-审计-任务放在同一个事务里完成。
-// 任意一步失败都要让整个事务回滚，避免“成员创建成功但应用没创建”这种悬挂状态。
+// 任意一步失败都要让整个事务回滚，避免"成员创建成功但应用没创建"这种悬挂状态。
 type MemberOnboardingService struct {
 	tx           TxRunner
 	hashPassword PasswordHasher
@@ -116,6 +116,7 @@ type OnboardMemberInput struct {
 	PersonaMode string
 	ChannelType string
 	NodeID      string // 可选：指定要部署的 runtime 节点 ID。
+	VersionID   string // 必填：实例绑定的助手版本 ID，必须在组织的 assistant_version_ids 允许列表内。
 }
 
 // OnboardMemberResult 是事务成功后的视图。
@@ -127,11 +128,12 @@ type OnboardMemberResult struct {
 
 // CreateAppForMemberInput 描述为已有成员重建实例时需要的应用初始化字段。
 type CreateAppForMemberInput struct {
-	AppName   string
-	AppPrompt string
+	AppName     string
+	AppPrompt   string
 	PersonaMode string
 	ChannelType string
 	NodeID      string
+	VersionID   string // 必填：实例绑定的助手版本 ID，必须在组织的 assistant_version_ids 允许列表内。
 }
 
 // CreateAppForMemberResult 是为已有成员创建新实例后的视图。
@@ -146,8 +148,8 @@ func (s *MemberOnboardingService) OnboardMember(ctx context.Context, principal a
 	if !auth.CanCreateAppForOrg(principal, orgID) {
 		return OnboardMemberResult{}, ErrForbidden
 	}
-	if input.Username == "" || input.Password == "" || input.DisplayName == "" || input.AppName == "" {
-		return OnboardMemberResult{}, fmt.Errorf("%w: 用户名、密码、显示名、应用名不能为空", ErrMemberCreateInvalid)
+	if input.Username == "" || input.Password == "" || input.DisplayName == "" || input.AppName == "" || input.VersionID == "" {
+		return OnboardMemberResult{}, fmt.Errorf("%w: 用户名、密码、显示名、应用名、助手版本不能为空", ErrMemberCreateInvalid)
 	}
 	role := input.Role
 	if role == "" {
@@ -192,6 +194,14 @@ func (s *MemberOnboardingService) OnboardMember(ctx context.Context, principal a
 		if org.Status != domain.StatusActive {
 			return fmt.Errorf("%w: 组织已停用", ErrMemberCreateInvalid)
 		}
+		// 校验所选助手版本在组织 allowlist 内，防止跨组织使用未授权版本。
+		if !versionInOrgAllowlist(org, input.VersionID) {
+			return fmt.Errorf("%w: 所选助手版本不在组织可用范围内", ErrMemberCreateInvalid)
+		}
+		versionUUID, err := parseUUID(input.VersionID)
+		if err != nil {
+			return fmt.Errorf("%w: 非法助手版本 id", ErrMemberCreateInvalid)
+		}
 		// 实例模型直接继承组织配置，无需用户指定。
 		modelID := org.ModelID
 		user, err := store.CreateUser(ctx, sqlc.CreateUserParams{
@@ -220,6 +230,7 @@ func (s *MemberOnboardingService) OnboardMember(ctx context.Context, principal a
 			AppPrompt:     pgtype.Text{String: input.AppPrompt, Valid: input.AppPrompt != ""},
 			ApiKeyStatus:  domain.APIKeyStatusPending,
 			ModelID:       modelID,
+			VersionID:     versionUUID,
 		})
 		if err != nil {
 			return fmt.Errorf("创建应用失败: %w", err)
@@ -304,6 +315,9 @@ func (s *MemberOnboardingService) CreateAppForMember(ctx context.Context, princi
 	if input.AppName == "" {
 		return CreateAppForMemberResult{}, fmt.Errorf("%w: 应用名不能为空", ErrMemberCreateInvalid)
 	}
+	if input.VersionID == "" {
+		return CreateAppForMemberResult{}, fmt.Errorf("%w: 助手版本不能为空", ErrMemberCreateInvalid)
+	}
 	channelType := input.ChannelType
 	if channelType == "" {
 		channelType = domain.ChannelTypeWeChat
@@ -338,6 +352,14 @@ func (s *MemberOnboardingService) CreateAppForMember(ctx context.Context, princi
 		}
 		if org.Status != domain.StatusActive {
 			return fmt.Errorf("%w: 组织已停用", ErrMemberCreateInvalid)
+		}
+		// 校验所选助手版本在组织 allowlist 内，防止跨组织使用未授权版本。
+		if !versionInOrgAllowlist(org, input.VersionID) {
+			return fmt.Errorf("%w: 所选助手版本不在组织可用范围内", ErrMemberCreateInvalid)
+		}
+		versionUUID, err := parseUUID(input.VersionID)
+		if err != nil {
+			return fmt.Errorf("%w: 非法助手版本 id", ErrMemberCreateInvalid)
 		}
 		// 实例模型直接继承组织配置，无需用户指定。
 		modelID := org.ModelID
@@ -374,6 +396,7 @@ func (s *MemberOnboardingService) CreateAppForMember(ctx context.Context, princi
 			AppPrompt:     pgtype.Text{String: input.AppPrompt, Valid: input.AppPrompt != ""},
 			ApiKeyStatus:  domain.APIKeyStatusPending,
 			ModelID:       modelID,
+			VersionID:     versionUUID,
 		})
 		if err != nil {
 			if isAppsOwnerActiveUniqueViolation(err) {
@@ -436,8 +459,28 @@ func (s *MemberOnboardingService) CreateAppForMember(ctx context.Context, princi
 	return result, nil
 }
 
+// versionInOrgAllowlist 判断 version_id 是否在组织 assistant_version_ids allowlist 内。
+// org.AssistantVersionIds 存储 jsonb 格式的 UUID 字符串数组；空字节表示未配置任何版本。
+func versionInOrgAllowlist(org sqlc.Organization, versionID string) bool {
+	if versionID == "" {
+		return false
+	}
+	ids := []string{}
+	if len(org.AssistantVersionIds) > 0 {
+		if err := json.Unmarshal(org.AssistantVersionIds, &ids); err != nil {
+			return false
+		}
+	}
+	for _, id := range ids {
+		if id == versionID {
+			return true
+		}
+	}
+	return false
+}
+
 // optionalUUID 解析可选 UUID。
-// 空字符串返回 invalid pgtype.UUID 而不是错误，方便上层把“未指定节点”作为合法情况处理。
+// 空字符串返回 invalid pgtype.UUID 而不是错误，方便上层把"未指定节点"作为合法情况处理。
 func optionalUUID(value string) (pgtype.UUID, error) {
 	if value == "" {
 		return pgtype.UUID{}, nil

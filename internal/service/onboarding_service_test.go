@@ -24,6 +24,7 @@ func TestOnboardMemberCommitsOnSuccess(t *testing.T) {
 
 	result, err := svc.OnboardMember(context.Background(), orgOnboardingAdmin(), testOrgID, OnboardMemberInput{
 		Username: "alice", DisplayName: "Alice", Password: "pwd", AppName: "alice-bot",
+		VersionID: testVersionID,
 	})
 	require.NoError(t, err)
 	require.NotEmpty(t, result.JobID)
@@ -58,6 +59,7 @@ func TestOnboardMemberRollsBackWhenAppCreationFails(t *testing.T) {
 
 	_, err := svc.OnboardMember(context.Background(), orgOnboardingAdmin(), testOrgID, OnboardMemberInput{
 		Username: "alice", DisplayName: "Alice", Password: "pwd", AppName: "alice-bot",
+		VersionID: testVersionID,
 	})
 	require.Error(t, err)
 	require.False(t, tx.committed)
@@ -72,6 +74,7 @@ func TestOnboardMemberRollsBackWhenJobCreationFails(t *testing.T) {
 
 	_, err := svc.OnboardMember(context.Background(), orgOnboardingAdmin(), testOrgID, OnboardMemberInput{
 		Username: "alice", DisplayName: "Alice", Password: "pwd", AppName: "alice-bot",
+		VersionID: testVersionID,
 	})
 	require.Error(t, err)
 	require.False(t, tx.committed)
@@ -84,6 +87,7 @@ func TestOnboardMemberRequiresOrgManagement(t *testing.T) {
 
 	_, err := svc.OnboardMember(context.Background(), auth.Principal{Role: domain.UserRoleOrgAdmin, OrgID: testOrg2ID}, testOrgID, OnboardMemberInput{
 		Username: "alice", DisplayName: "Alice", Password: "pwd", AppName: "alice-bot",
+		VersionID: testVersionID,
 	})
 	require.ErrorIs(t, err, ErrForbidden)
 }
@@ -95,6 +99,7 @@ func TestOnboardMemberPlatformAdminForbidden(t *testing.T) {
 
 	_, err := svc.OnboardMember(context.Background(), platformAdmin(), testOrgID, OnboardMemberInput{
 		Username: "alice", DisplayName: "Alice", Password: "pwd", AppName: "alice-bot",
+		VersionID: testVersionID,
 	})
 	require.ErrorIs(t, err, ErrForbidden)
 }
@@ -108,6 +113,7 @@ func TestOnboardMemberRejectsDisabledOrg(t *testing.T) {
 
 	_, err := svc.OnboardMember(context.Background(), orgOnboardingAdmin(), testOrgID, OnboardMemberInput{
 		Username: "alice", DisplayName: "Alice", Password: "pwd", AppName: "alice-bot",
+		VersionID: testVersionID,
 	})
 	require.ErrorIs(t, err, ErrMemberCreateInvalid)
 }
@@ -119,7 +125,8 @@ func TestCreateAppForMember_PlatformAdminCreatesAfterDelete(t *testing.T) {
 	svc := NewMemberOnboardingService(tx, fakeHash, defaultTestSelector())
 
 	result, err := svc.CreateAppForMember(context.Background(), platformAdmin(), testOrgID, uuidToString(store.user.ID), CreateAppForMemberInput{
-		AppName: "alice-new-bot",
+		AppName:   "alice-new-bot",
+		VersionID: testVersionID,
 	})
 
 	require.NoError(t, err)
@@ -133,6 +140,8 @@ func TestCreateAppForMember_PlatformAdminCreatesAfterDelete(t *testing.T) {
 	// 详情格式与 OnboardMember 的 create 一致：归属成员 + 渠道。
 	require.True(t, store.auditLogs[0].DetailMessage.Valid)
 	require.Equal(t, "归属成员 Alice，渠道 微信", store.auditLogs[0].DetailMessage.String)
+	// 创建的应用应绑定指定的助手版本 ID。
+	assert.Equal(t, testVersionID, store.lastAppVersionID)
 }
 
 // TestCreateAppForMemberInheritsOrgModel 验证为已有成员创建实例时模型继承自组织配置。
@@ -143,7 +152,8 @@ func TestCreateAppForMemberInheritsOrgModel(t *testing.T) {
 	svc := NewMemberOnboardingService(tx, fakeHash, defaultTestSelector())
 
 	result, err := svc.CreateAppForMember(context.Background(), platformAdmin(), testOrgID, uuidToString(store.user.ID), CreateAppForMemberInput{
-		AppName: "alice-new-bot",
+		AppName:   "alice-new-bot",
+		VersionID: testVersionID,
 	})
 
 	require.NoError(t, err)
@@ -162,7 +172,8 @@ func TestCreateAppForMember_RejectsExistingActiveApp(t *testing.T) {
 	svc := NewMemberOnboardingService(tx, fakeHash, defaultTestSelector())
 
 	_, err := svc.CreateAppForMember(context.Background(), platformAdmin(), testOrgID, uuidToString(store.user.ID), CreateAppForMemberInput{
-		AppName: "alice-new-bot",
+		AppName:   "alice-new-bot",
+		VersionID: testVersionID,
 	})
 
 	require.ErrorIs(t, err, ErrMemberCreateInvalid)
@@ -177,7 +188,8 @@ func TestCreateAppForMember_RejectsCrossOrgUser(t *testing.T) {
 	svc := NewMemberOnboardingService(tx, fakeHash, defaultTestSelector())
 
 	_, err := svc.CreateAppForMember(context.Background(), platformAdmin(), testOrgID, uuidToString(store.user.ID), CreateAppForMemberInput{
-		AppName: "alice-new-bot",
+		AppName:   "alice-new-bot",
+		VersionID: testVersionID,
 	})
 
 	require.ErrorIs(t, err, ErrNotFound)
@@ -192,7 +204,8 @@ func TestCreateAppForMember_RejectsDisabledUser(t *testing.T) {
 	svc := NewMemberOnboardingService(tx, fakeHash, defaultTestSelector())
 
 	_, err := svc.CreateAppForMember(context.Background(), platformAdmin(), testOrgID, uuidToString(store.user.ID), CreateAppForMemberInput{
-		AppName: "alice-new-bot",
+		AppName:   "alice-new-bot",
+		VersionID: testVersionID,
 	})
 
 	require.ErrorIs(t, err, ErrMemberCreateInvalid)
@@ -206,7 +219,8 @@ func TestCreateAppForMember_NoActiveNode(t *testing.T) {
 	svc := NewMemberOnboardingService(tx, fakeHash, &nodeSelectorStub{})
 
 	_, err := svc.CreateAppForMember(context.Background(), platformAdmin(), testOrgID, uuidToString(store.user.ID), CreateAppForMemberInput{
-		AppName: "alice-new-bot",
+		AppName:   "alice-new-bot",
+		VersionID: testVersionID,
 	})
 
 	require.ErrorIs(t, err, ErrNoNodeAvailable)
@@ -220,8 +234,9 @@ func TestCreateAppForMember_RejectsInvalidExplicitNodeID(t *testing.T) {
 	svc := NewMemberOnboardingService(tx, fakeHash, defaultTestSelector())
 
 	_, err := svc.CreateAppForMember(context.Background(), platformAdmin(), testOrgID, uuidToString(store.user.ID), CreateAppForMemberInput{
-		AppName: "alice-new-bot",
-		NodeID:  "not-a-uuid",
+		AppName:   "alice-new-bot",
+		NodeID:    "not-a-uuid",
+		VersionID: testVersionID,
 	})
 
 	require.ErrorIs(t, err, ErrMemberCreateInvalid)
@@ -236,7 +251,8 @@ func TestCreateAppForMember_MapsOwnerActiveUniqueViolation(t *testing.T) {
 	svc := NewMemberOnboardingService(tx, fakeHash, defaultTestSelector())
 
 	_, err := svc.CreateAppForMember(context.Background(), platformAdmin(), testOrgID, uuidToString(store.user.ID), CreateAppForMemberInput{
-		AppName: "alice-new-bot",
+		AppName:   "alice-new-bot",
+		VersionID: testVersionID,
 	})
 
 	require.ErrorIs(t, err, ErrMemberCreateInvalid)
@@ -272,19 +288,30 @@ type onboardingStub struct {
 	jobs           int
 	staged         counters
 	stagedAudits   []sqlc.CreateAuditLogParams
-	appErr         error
-	jobErr         error
-	lastAppNodeID  string
-	lastAppOwnerID string
-	lastAppModelID string
+	appErr           error
+	jobErr           error
+	lastAppNodeID    string
+	lastAppOwnerID   string
+	lastAppModelID   string
+	lastAppVersionID string // 记录最近一次 CreateApp 使用的 VersionID，供断言校验。
 }
 
 type counters struct{ users, apps, bindings, audits, jobs int }
 
+// testVersionID 是测试用的固定助手版本 UUID，存入 org.AssistantVersionIds allowlist 供校验通过。
+const testVersionID = "00000000-0000-0000-0000-000000000f01"
+
 func newOnboardingStub(t *testing.T) *onboardingStub {
 	return &onboardingStub{
-		t:   t,
-		org: sqlc.Organization{ID: mustUUID(t, testOrgID), Status: domain.StatusActive, Name: "测试组织", ModelID: "qwen2.5:7b"},
+		t: t,
+		org: sqlc.Organization{
+			ID:     mustUUID(t, testOrgID),
+			Status: domain.StatusActive,
+			Name:   "测试组织",
+			ModelID: "qwen2.5:7b",
+			// 预置 allowlist，包含 testVersionID，供创建实例时的版本校验通过。
+			AssistantVersionIds: []byte(`["` + testVersionID + `"]`),
+		},
 		user: sqlc.User{
 			ID:          mustUUID(t, "00000000-0000-0000-0000-000000000a11"),
 			OrgID:       mustUUID(t, testOrgID),
@@ -354,6 +381,7 @@ func (s *onboardingStub) CreateApp(_ context.Context, arg sqlc.CreateAppParams) 
 	s.lastAppNodeID = uuidToString(arg.RuntimeNodeID)
 	s.lastAppOwnerID = uuidToString(arg.OwnerUserID)
 	s.lastAppModelID = arg.ModelID
+	s.lastAppVersionID = uuidToString(arg.VersionID)
 	return sqlc.App{
 		ID:           mustUUID(s.t, "00000000-0000-0000-0000-000000000b01"),
 		OrgID:        arg.OrgID,
@@ -426,6 +454,7 @@ func TestOnboardMember_SelectNode_NoActiveNode(t *testing.T) {
 
 	_, err := svc.OnboardMember(context.Background(), orgOnboardingAdmin(), testOrgID, OnboardMemberInput{
 		Username: "alice", DisplayName: "Alice", Password: "pwd", AppName: "alice-bot",
+		VersionID: testVersionID,
 	})
 	require.ErrorIs(t, err, ErrNoNodeAvailable)
 }
@@ -440,6 +469,7 @@ func TestOnboardMember_SelectNode_OnlyNodeAtCapacity(t *testing.T) {
 
 	_, err := svc.OnboardMember(context.Background(), orgOnboardingAdmin(), testOrgID, OnboardMemberInput{
 		Username: "alice", DisplayName: "Alice", Password: "pwd", AppName: "alice-bot",
+		VersionID: testVersionID,
 	})
 	require.ErrorIs(t, err, ErrNoNodeAvailable)
 }
@@ -456,6 +486,7 @@ func TestOnboardMember_SelectNode_PicksLargestRemaining(t *testing.T) {
 
 	_, err := svc.OnboardMember(context.Background(), orgOnboardingAdmin(), testOrgID, OnboardMemberInput{
 		Username: "alice", DisplayName: "Alice", Password: "pwd", AppName: "alice-bot",
+		VersionID: testVersionID,
 	})
 	require.NoError(t, err)
 	// 通过 selectNode 内排序，n2 应被优先选择；input.NodeID 在 onboarding 内被覆盖后
@@ -475,6 +506,7 @@ func TestOnboardMember_SelectNode_NULLMaxAppsTreatedAsInfinity(t *testing.T) {
 
 	_, err := svc.OnboardMember(context.Background(), orgOnboardingAdmin(), testOrgID, OnboardMemberInput{
 		Username: "alice", DisplayName: "Alice", Password: "pwd", AppName: "alice-bot",
+		VersionID: testVersionID,
 	})
 	require.NoError(t, err)
 	require.Equal(t, "00000000-0000-0000-0000-000000000a01", store.lastAppNodeID)
@@ -489,10 +521,86 @@ func TestOnboardMember_ExplicitNodeID_BypassesSelector(t *testing.T) {
 
 	_, err := svc.OnboardMember(context.Background(), orgOnboardingAdmin(), testOrgID, OnboardMemberInput{
 		Username: "alice", DisplayName: "Alice", Password: "pwd", AppName: "alice-bot",
-		NodeID: "00000000-0000-0000-0000-000000000099",
+		NodeID:    "00000000-0000-0000-0000-000000000099",
+		VersionID: testVersionID,
 	})
 	require.NoError(t, err)
 	assert.Zero(t, selector.calledN)
+}
+
+// TestOnboardMember_RejectsMissingVersionID 验证 VersionID 为空时 OnboardMember 返回参数错误。
+func TestOnboardMember_RejectsMissingVersionID(t *testing.T) {
+	tx := &txRunnerStub{store: newOnboardingStub(t)}
+	svc := NewMemberOnboardingService(tx, fakeHash, defaultTestSelector())
+
+	// VersionID 留空，应被前置校验拦截，返回 ErrMemberCreateInvalid。
+	_, err := svc.OnboardMember(context.Background(), orgOnboardingAdmin(), testOrgID, OnboardMemberInput{
+		Username: "alice", DisplayName: "Alice", Password: "pwd", AppName: "alice-bot",
+	})
+	require.ErrorIs(t, err, ErrMemberCreateInvalid)
+}
+
+// TestOnboardMember_RejectsVersionNotInAllowlist 验证所选助手版本不在组织 allowlist 内时拒绝创建。
+func TestOnboardMember_RejectsVersionNotInAllowlist(t *testing.T) {
+	store := newOnboardingStub(t)
+	tx := &txRunnerStub{store: store}
+	svc := NewMemberOnboardingService(tx, fakeHash, defaultTestSelector())
+
+	// 使用一个不在 org.AssistantVersionIds 内的版本 ID，应触发 allowlist 校验失败。
+	_, err := svc.OnboardMember(context.Background(), orgOnboardingAdmin(), testOrgID, OnboardMemberInput{
+		Username:  "alice",
+		DisplayName: "Alice",
+		Password:  "pwd",
+		AppName:   "alice-bot",
+		VersionID: "00000000-0000-0000-0000-000000000fff", // 不在 allowlist 内
+	})
+	require.ErrorIs(t, err, ErrMemberCreateInvalid)
+	require.False(t, tx.committed)
+}
+
+// TestOnboardMember_HappyPath_VersionIDRecorded 验证正常路径下创建的应用绑定了正确的助手版本 ID。
+func TestOnboardMember_HappyPath_VersionIDRecorded(t *testing.T) {
+	store := newOnboardingStub(t)
+	tx := &txRunnerStub{store: store}
+	svc := NewMemberOnboardingService(tx, fakeHash, defaultTestSelector())
+
+	// 正常路径：VersionID 在 allowlist 内，应成功创建并记录版本绑定。
+	_, err := svc.OnboardMember(context.Background(), orgOnboardingAdmin(), testOrgID, OnboardMemberInput{
+		Username: "alice", DisplayName: "Alice", Password: "pwd", AppName: "alice-bot",
+		VersionID: testVersionID,
+	})
+	require.NoError(t, err)
+	require.True(t, tx.committed)
+	// CreateApp 被调用时传入的 VersionID 应等于 testVersionID。
+	assert.Equal(t, testVersionID, store.lastAppVersionID)
+}
+
+// TestCreateAppForMember_RejectsMissingVersionID 验证 VersionID 为空时 CreateAppForMember 返回参数错误。
+func TestCreateAppForMember_RejectsMissingVersionID(t *testing.T) {
+	store := newOnboardingStub(t)
+	tx := &txRunnerStub{store: store}
+	svc := NewMemberOnboardingService(tx, fakeHash, defaultTestSelector())
+
+	// VersionID 留空，应被前置校验拦截，返回 ErrMemberCreateInvalid。
+	_, err := svc.CreateAppForMember(context.Background(), platformAdmin(), testOrgID, uuidToString(store.user.ID), CreateAppForMemberInput{
+		AppName: "alice-new-bot",
+	})
+	require.ErrorIs(t, err, ErrMemberCreateInvalid)
+}
+
+// TestCreateAppForMember_RejectsVersionNotInAllowlist 验证所选助手版本不在组织 allowlist 内时拒绝创建。
+func TestCreateAppForMember_RejectsVersionNotInAllowlist(t *testing.T) {
+	store := newOnboardingStub(t)
+	tx := &txRunnerStub{store: store}
+	svc := NewMemberOnboardingService(tx, fakeHash, defaultTestSelector())
+
+	// 使用一个不在 org.AssistantVersionIds 内的版本 ID，应触发 allowlist 校验失败。
+	_, err := svc.CreateAppForMember(context.Background(), platformAdmin(), testOrgID, uuidToString(store.user.ID), CreateAppForMemberInput{
+		AppName:   "alice-new-bot",
+		VersionID: "00000000-0000-0000-0000-000000000fff", // 不在 allowlist 内
+	})
+	require.ErrorIs(t, err, ErrMemberCreateInvalid)
+	require.False(t, tx.committed)
 }
 
 func orgOnboardingAdmin() auth.Principal {

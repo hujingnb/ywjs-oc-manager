@@ -73,9 +73,10 @@ INSERT INTO apps (
     persona_mode,
     app_prompt,
     api_key_status,
-    model_id
+    model_id,
+    version_id
 ) VALUES (
-    $1, $2, $3, $4, $5, $6, $7, $8, $9, $10
+    $1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11
 )
 RETURNING id, org_id, owner_user_id, runtime_node_id, name, description, status, persona_mode, app_prompt, container_id, container_name, newapi_key_id, newapi_key_ciphertext, api_key_status, created_at, updated_at, deleted_at, runtime_snapshot_json, runtime_snapshot_at, restart_policy_json, health_state_json, model_id, progress_current, progress_total, last_error_status, last_error_message, runtime_image_ref, runtime_image_sha256, newapi_key_name, model_synced, version_id, applied_version_revision, applied_image_ref
 `
@@ -91,6 +92,7 @@ type CreateAppParams struct {
 	AppPrompt     pgtype.Text `db:"app_prompt" json:"app_prompt"`
 	ApiKeyStatus  string      `db:"api_key_status" json:"api_key_status"`
 	ModelID       string      `db:"model_id" json:"model_id"`
+	VersionID     pgtype.UUID `db:"version_id" json:"version_id"`
 }
 
 func (q *Queries) CreateApp(ctx context.Context, arg CreateAppParams) (App, error) {
@@ -105,6 +107,7 @@ func (q *Queries) CreateApp(ctx context.Context, arg CreateAppParams) (App, erro
 		arg.AppPrompt,
 		arg.ApiKeyStatus,
 		arg.ModelID,
+		arg.VersionID,
 	)
 	var i App
 	err := row.Scan(
