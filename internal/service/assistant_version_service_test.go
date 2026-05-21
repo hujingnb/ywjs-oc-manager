@@ -298,14 +298,15 @@ func seedVersion(store *fakeAVStore, name string, revision int32) string {
 	return uuidToString(id)
 }
 
-// TestAssistantVersionUpdateBumpsRevisionOnPromptChange 验证改提示词会 revision +1。
+// TestAssistantVersionUpdateBumpsRevisionOnPromptChange 验证仅改提示词（其它容器相关字段不变）会 revision +1。
 func TestAssistantVersionUpdateBumpsRevisionOnPromptChange(t *testing.T) {
 	store := newFakeAVStore()
 	id := seedVersion(store, "标准版", 3)
 	svc := newTestAVService(t, store)
-	in := validCreateInput()
-	in.Name = "标准版"
-	in.SystemPrompt = "新的提示词"
+	in := AssistantVersionInput{
+		Name: "标准版", Description: "默认版本", SystemPrompt: "新的提示词",
+		ImageID: "v2026.5.16", MainModel: "qwen", Routing: map[string]string{},
+	}
 	got, err := svc.Update(context.Background(), platformPrincipal(), id, in)
 	require.NoError(t, err)
 	assert.EqualValues(t, 4, got.Revision)
@@ -335,4 +336,34 @@ func TestAssistantVersionUpdateRejectsNameTakenByOther(t *testing.T) {
 	in.Name = "高级版"
 	_, err := svc.Update(context.Background(), platformPrincipal(), id, in)
 	require.ErrorIs(t, err, ErrAssistantVersionNameTaken)
+}
+
+// TestAssistantVersionUpdateBumpsRevisionOnRoutingChange 验证仅改智能路由（其它字段不变）也会 revision +1。
+func TestAssistantVersionUpdateBumpsRevisionOnRoutingChange(t *testing.T) {
+	store := newFakeAVStore()
+	id := seedVersion(store, "标准版", 3)
+	svc := newTestAVService(t, store)
+	in := AssistantVersionInput{
+		Name: "标准版", Description: "默认版本", SystemPrompt: "p",
+		ImageID: "v2026.5.16", MainModel: "qwen", Routing: map[string]string{"vision": "gpt"},
+	}
+	got, err := svc.Update(context.Background(), platformPrincipal(), id, in)
+	require.NoError(t, err)
+	assert.EqualValues(t, 4, got.Revision)
+}
+
+// TestAssistantVersionUpdateNotFound 验证更新不存在的版本返回 NotFound。
+func TestAssistantVersionUpdateNotFound(t *testing.T) {
+	svc := newTestAVService(t, newFakeAVStore())
+	_, err := svc.Update(context.Background(), platformPrincipal(), "00000000-0000-0000-0000-0000000000e9", validCreateInput())
+	require.ErrorIs(t, err, ErrAssistantVersionNotFound)
+}
+
+// TestAssistantVersionUpdateDeniesOrgAdmin 验证组织管理员不能更新版本。
+func TestAssistantVersionUpdateDeniesOrgAdmin(t *testing.T) {
+	store := newFakeAVStore()
+	id := seedVersion(store, "标准版", 1)
+	svc := newTestAVService(t, store)
+	_, err := svc.Update(context.Background(), orgAdminPrincipal(), id, validCreateInput())
+	require.ErrorIs(t, err, ErrAssistantVersionDenied)
 }
