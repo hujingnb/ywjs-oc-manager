@@ -21,10 +21,15 @@ type Querier interface {
 	// 平台总览应用计数：按 status 分组，soft-deleted 通过 deleted_at IS NULL 排除。
 	// 调用方在 service 层把结果聚合成 {status: count}，未出现 status 视为 0。
 	CountAppsByStatus(ctx context.Context) ([]CountAppsByStatusRow, error)
+	// 严格保护：版本被未删除实例引用时不可删除。
+	CountAppsUsingVersion(ctx context.Context, versionID pgtype.UUID) (int64, error)
 	// 统计指定应用下未被标记为 deleted 的渠道绑定数。
 	// RuntimeOperationService.Trigger 在写 delete 审计前调用，把数量塞进 detail_message。
 	CountChannelBindingsByApp(ctx context.Context, appID pgtype.UUID) (int64, error)
+	// 严格保护：版本出现在任意未删除组织 allowlist 时不可删除。
+	CountOrgsUsingVersion(ctx context.Context, jsonbExists string) (int64, error)
 	CreateApp(ctx context.Context, arg CreateAppParams) (App, error)
+	CreateAssistantVersion(ctx context.Context, arg CreateAssistantVersionParams) (AssistantVersion, error)
 	CreateAuditLog(ctx context.Context, arg CreateAuditLogParams) (AuditLog, error)
 	CreateChannelBinding(ctx context.Context, arg CreateChannelBindingParams) (ChannelBinding, error)
 	CreateJob(ctx context.Context, arg CreateJobParams) (Job, error)
@@ -40,6 +45,8 @@ type Querier interface {
 	EnrollRuntimeNodeUpdate(ctx context.Context, arg EnrollRuntimeNodeUpdateParams) (RuntimeNode, error)
 	GetActiveAppByOwner(ctx context.Context, ownerUserID pgtype.UUID) (App, error)
 	GetApp(ctx context.Context, id pgtype.UUID) (App, error)
+	GetAssistantVersion(ctx context.Context, id pgtype.UUID) (AssistantVersion, error)
+	GetAssistantVersionByName(ctx context.Context, name string) (AssistantVersion, error)
 	GetChannelBindingByAppAndType(ctx context.Context, arg GetChannelBindingByAppAndTypeParams) (ChannelBinding, error)
 	GetCurrentOrganizationPersona(ctx context.Context, orgID pgtype.UUID) (OrganizationPersona, error)
 	GetJob(ctx context.Context, id pgtype.UUID) (Job, error)
@@ -77,6 +84,7 @@ type Querier interface {
 	ListActiveNodesWithAppCounts(ctx context.Context) ([]ListActiveNodesWithAppCountsRow, error)
 	ListAppsByOrg(ctx context.Context, arg ListAppsByOrgParams) ([]App, error)
 	ListAppsByRuntimeNode(ctx context.Context, arg ListAppsByRuntimeNodeParams) ([]App, error)
+	ListAssistantVersions(ctx context.Context) ([]AssistantVersion, error)
 	// 返回审计行 + actor 实时名称 + target 实时名称（按 target_type 走子查询）。
 	// 子查询里 WHERE al.target_type = X 保证 newapi_call 的 endpoint 字符串
 	// 永不被尝试转 UUID，避开 cast error。
@@ -145,6 +153,7 @@ type Querier interface {
 	// disabled 时同步写 deleted_at（下线时间戳）；enabled 时清空，让重启用户能恢复。
 	SetUserStatus(ctx context.Context, arg SetUserStatusParams) (User, error)
 	SoftDeleteApp(ctx context.Context, id pgtype.UUID) (App, error)
+	SoftDeleteAssistantVersion(ctx context.Context, id pgtype.UUID) (AssistantVersion, error)
 	SoftDeleteOrganization(ctx context.Context, id pgtype.UUID) (Organization, error)
 	// 真软删除：仅设置 deleted_at（不动 status）；status 与 deleted_at 语义独立。
 	SoftDeleteUser(ctx context.Context, id pgtype.UUID) error
@@ -155,6 +164,10 @@ type Querier interface {
 	UpdateAppModelsByOrg(ctx context.Context, arg UpdateAppModelsByOrgParams) error
 	// phasePullRuntimeImage 成功后写入镜像引用与 sha256。
 	UpdateAppRuntimeImage(ctx context.Context, arg UpdateAppRuntimeImageParams) (App, error)
+	// revision 由 service 计算后整体写入（仅容器相关字段变更才递增）。
+	UpdateAssistantVersion(ctx context.Context, arg UpdateAssistantVersionParams) (AssistantVersion, error)
+	// skill 上传/删除单独走此查询：只改 skills_json 与 revision，避免覆盖其它字段。
+	UpdateAssistantVersionSkills(ctx context.Context, arg UpdateAssistantVersionSkillsParams) (AssistantVersion, error)
 	// OOS-2 access_token 自愈用：仅更新 newapi_user_credentials_ciphertext，不动 newapi_user_id。
 	UpdateOrganizationCredentialsCiphertext(ctx context.Context, arg UpdateOrganizationCredentialsCiphertextParams) (Organization, error)
 	UpdateOrganizationProfile(ctx context.Context, arg UpdateOrganizationProfileParams) (Organization, error)

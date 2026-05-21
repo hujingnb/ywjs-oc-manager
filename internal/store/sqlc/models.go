@@ -54,6 +54,34 @@ type App struct {
 	// new-api 侧的 token.name，用于按 token_name 过滤用量日志
 	NewapiKeyName pgtype.Text `db:"newapi_key_name" json:"newapi_key_name"`
 	ModelSynced   bool        `db:"model_synced" json:"model_synced"`
+	// 实例绑定的助手版本。
+	VersionID pgtype.UUID `db:"version_id" json:"version_id"`
+	// 上次初始化/重启时使用的版本 revision；与版本当前 revision 比较得出 version_synced。
+	AppliedVersionRevision int32 `db:"applied_version_revision" json:"applied_version_revision"`
+	// 上次实际拉取的镜像 ref；与配置解析出的 ref 比较得出 version_synced。
+	AppliedImageRef string `db:"applied_image_ref" json:"applied_image_ref"`
+}
+
+// 助手版本目录：把智能路由、skill、内置提示词、镜像打包成可复用的命名版本。
+type AssistantVersion struct {
+	ID          pgtype.UUID `db:"id" json:"id"`
+	Name        string      `db:"name" json:"name"`
+	Description string      `db:"description" json:"description"`
+	// 版本内置提示词，渲染进容器 SOUL.md 的版本层；字段语义泛化，可填写人设、行为规则等。
+	SystemPrompt string `db:"system_prompt" json:"system_prompt"`
+	// 引用配置文件 hermes.runtime_images[].id。
+	ImageID   string `db:"image_id" json:"image_id"`
+	MainModel string `db:"main_model" json:"main_model"`
+	// 智能路由：8 个 auxiliary 槽位到模型名的映射，空槽位省略。
+	RoutingJson []byte `db:"routing_json" json:"routing_json"`
+	// skill 元信息数组，每项 {name,file_path,file_size,file_sha256}；tar 字节存文件系统主副本。
+	SkillsJson []byte `db:"skills_json" json:"skills_json"`
+	// 内容修订号，影响容器的字段变更时 +1，供实例 version_synced 检测使用。
+	Revision  int32              `db:"revision" json:"revision"`
+	CreatedBy pgtype.UUID        `db:"created_by" json:"created_by"`
+	CreatedAt pgtype.Timestamptz `db:"created_at" json:"created_at"`
+	UpdatedAt pgtype.Timestamptz `db:"updated_at" json:"updated_at"`
+	DeletedAt pgtype.Timestamptz `db:"deleted_at" json:"deleted_at"`
 }
 
 // 审计日志表，记录关键操作、结果和错误信息；普通业务 API 不允许修改或删除。
@@ -182,6 +210,8 @@ type Organization struct {
 	// new-api 侧的 user.username，用于按 username 过滤用量响应
 	NewapiUsername pgtype.Text `db:"newapi_username" json:"newapi_username"`
 	ModelID        string      `db:"model_id" json:"model_id"`
+	// 该组织可用的助手版本 id 数组（allowlist）。
+	AssistantVersionIds []byte `db:"assistant_version_ids" json:"assistant_version_ids"`
 }
 
 // 组织级 AI 人设版本表，当前生效版本取同组织最大 version。
