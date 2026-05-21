@@ -1,6 +1,7 @@
 package handlers
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"errors"
@@ -45,6 +46,11 @@ type AppInitializeStore interface {
 	MarkAppFailed(ctx context.Context, arg sqlc.MarkAppFailedParams) (sqlc.App, error)
 	// UpdateAppRuntimeImage 把 PullImageOnNode 返回的镜像引用和 sha256 写入 apps 表。
 	UpdateAppRuntimeImage(ctx context.Context, arg sqlc.UpdateAppRuntimeImageParams) (sqlc.App, error)
+	// GetAssistantVersion 加载实例绑定的助手版本；初始化时必须存在否则标记失败。
+	GetAssistantVersion(ctx context.Context, id pgtype.UUID) (sqlc.AssistantVersion, error)
+	// SetAppAppliedVersion 在初始化/重启成功后记录已应用的版本修订与镜像 ref，
+	// 供前端 version_synced 检测使用。
+	SetAppAppliedVersion(ctx context.Context, arg sqlc.SetAppAppliedVersionParams) (sqlc.App, error)
 }
 
 // ContainerCreator 抽象通过 agent docker 代理创建容器的能力。
@@ -85,6 +91,13 @@ type AppInputUploader interface {
 type KnowledgeReader interface {
 	WalkFiles(prefix string, fn func(relPath string, size int64) error) error
 	Open(masterPath string) (io.ReadCloser, int64, error)
+}
+
+// SkillBlobReader 抽象「读取 manager 文件系统上版本 skill tar 主副本」的能力。
+// relPath 是版本 skills_json 中存储的 file_path（相对 manager 数据根目录）。
+// nil 装配时 writeSkillsIntoInput 跳过推送，返回空路径列表，保持旧装配/测试装配兼容。
+type SkillBlobReader interface {
+	OpenSkill(relPath string) (io.ReadCloser, error)
 }
 
 // ContainerStarter 抽象创建后启动容器的能力。
@@ -154,6 +167,8 @@ type NewAPIClientFactory interface {
 // AppInputUploader.UploadAppInputFile 上传到目标节点 agent,
 // 不再写入 manager 本机目录。DataDir 保留供其他特定场景（如 workspaceService）使用。
 type AppInitializeConfig struct {
+	// RuntimeImage 是旧单镜像兜底值；Phase 4 后生产路径由 ResolveRuntimeImage 提供，
+	// 此字段仅在 ResolveRuntimeImage 未注入时（测试/历史兼容）作为 fallback。
 	RuntimeImage         string
 	PlatformPrompt       string
 	SystemPromptTemplate string
@@ -174,6 +189,12 @@ type AppInitializeConfig struct {
 	// AuditHelper 在 new-api 调用失败时写 audit_logs.target_type=newapi_call。
 	// nil 时跳过审计，不影响主流程；生产装配应注入。
 	AuditHelper *audit.NewAPIAuditHelper
+	// ResolveRuntimeImage 由 cmd/server 在装配时注入，把版本 image_id 解析为
+	// 完整 imageRef（含 tag）。nil 时退回到 RuntimeImage 字段兜底（仅限测试/旧路径）。
+	ResolveRuntimeImage func(imageID string) (ref string, ok bool)
+	// SkillBlobs 提供版本 skill tar 主副本的读能力，用于 writeSkillsIntoInput 把
+	// skill 推送到节点 input/resources/skills/。nil 时跳过 skill 推送（测试/旧装配兼容）。
+	SkillBlobs SkillBlobReader
 }
 
 // AppInitializeLLMConfig 是 AppInitializeConfig.LLM 的类型，与 internal/config 的
@@ -302,16 +323,46 @@ func (h *AppInitializeHandler) Handle(ctx context.Context, job sqlc.Job) error {
 		return nil
 	}
 
+	// 加载实例绑定的助手版本：未绑定版本的实例无法初始化，直接标记失败。
+	if !app.VersionID.Valid {
+		return h.markFailed(ctx, &app, domain.AppStatusPullingRuntimeImage, errors.New("实例未绑定助手版本，无法初始化"))
+	}
+	version, err := h.store.GetAssistantVersion(ctx, app.VersionID)
+	if err != nil {
+		return h.markFailed(ctx, &app, domain.AppStatusPullingRuntimeImage, fmt.Errorf("加载助手版本失败: %w", err))
+	}
+
+	// 解析版本镜像 ref：优先使用注入的 ResolveRuntimeImage 函数（生产路径），
+	// 未注入时退回 cfg.RuntimeImage（测试/旧装配兼容）。
+	var imageRef string
+	if h.cfg.ResolveRuntimeImage != nil {
+		ref, ok := h.cfg.ResolveRuntimeImage(version.ImageID)
+		if !ok {
+			return h.markFailed(ctx, &app, domain.AppStatusPullingRuntimeImage,
+				fmt.Errorf("版本镜像 %s 未在配置中", version.ImageID))
+		}
+		imageRef = ref
+	} else {
+		// 兜底：ResolveRuntimeImage 未注入时（测试装配）使用 RuntimeImage 字段。
+		imageRef = h.cfg.RuntimeImage
+	}
+
 	reporter := newProgressReporter(app.ID, h.store)
 
 	// 5 阶段定义:每阶段先 transitionTo 推 status,再 run 跑实际工作。
 	// run 内部已根据 app 当前实际状态做幂等检查,允许重启后从中间阶段重入。
+	// version 与 imageRef 通过闭包注入各阶段，避免在 handler 结构体上存储
+	// 每次 Handle 调用的私有状态（防止并发安全问题）。
 	steps := []struct {
 		phase string
 		run   func(context.Context, *sqlc.App, appInitializePayload, *progressReporter) error
 	}{
-		{domain.AppStatusPullingRuntimeImage, h.phasePullRuntimeImage},
-		{domain.AppStatusPreparingRuntime, h.phasePrepare},
+		{domain.AppStatusPullingRuntimeImage, func(ctx context.Context, app *sqlc.App, p appInitializePayload, r *progressReporter) error {
+			return h.phasePullRuntimeImage(ctx, app, p, r, imageRef)
+		}},
+		{domain.AppStatusPreparingRuntime, func(ctx context.Context, app *sqlc.App, p appInitializePayload, r *progressReporter) error {
+			return h.phasePrepare(ctx, app, p, r, version)
+		}},
 		{domain.AppStatusCreatingContainer, h.phaseCreate},
 		{domain.AppStatusStarting, h.phaseStart},
 	}
@@ -328,6 +379,18 @@ func (h *AppInitializeHandler) Handle(ctx context.Context, job sqlc.Job) error {
 	if err := h.transitionTo(ctx, &app, domain.AppStatusBindingWaiting, reporter); err != nil {
 		return h.markFailed(ctx, &app, domain.AppStatusStarting, err)
 	}
+
+	// 初始化成功后记录已应用的版本修订与镜像 ref，供前端 version_synced 检测使用。
+	// 写库失败时与 Handle 其余步骤一致走 markFailed：把 app 收敛到 status=error 并
+	// 记录 last_error_status，避免行卡在 binding_waiting 而 worker 又把 job 当失败处理。
+	if _, err := h.store.SetAppAppliedVersion(ctx, sqlc.SetAppAppliedVersionParams{
+		ID:                     app.ID,
+		AppliedVersionRevision: version.Revision,
+		AppliedImageRef:        imageRef,
+	}); err != nil {
+		return h.markFailed(ctx, &app, domain.AppStatusBindingWaiting, fmt.Errorf("记录已应用版本信息失败: %w", err))
+	}
+
 	return h.writeInitAuditLog(ctx, app, job, payload)
 }
 
@@ -368,18 +431,17 @@ func (h *AppInitializeHandler) markFailed(ctx context.Context, app *sqlc.App, ph
 //
 // 流程：
 //  1. 若 imagePullCoord 或 nodeDockerProv 未注入（如测试装配），直接跳过。
-//  2. 从 cfg.RuntimeImage 取镜像引用，通过 nodeDockerProv 获取目标节点的 Docker 客户端。
+//  2. 使用调用方传入的 imageRef（由版本配置解析），通过 nodeDockerProv 获取目标节点的 Docker 客户端。
 //  3. 调 imagePullCoord.PullImageOnNode：跨 manager 实例 single-flight，
 //     同 (nodeID, imageRef) 串行，订阅者 chan 接收 NDJSON 进度并转发给 reporter。
 //  4. 把 imageRef 和 sha256 写入 apps.runtime_image_ref / runtime_image_sha256。
-func (h *AppInitializeHandler) phasePullRuntimeImage(ctx context.Context, app *sqlc.App, payload appInitializePayload, reporter *progressReporter) error {
+func (h *AppInitializeHandler) phasePullRuntimeImage(ctx context.Context, app *sqlc.App, payload appInitializePayload, reporter *progressReporter, imageRef string) error {
 	if h.imagePullCoord == nil || h.nodeDockerProv == nil {
 		return nil
 	}
 	if payload.RuntimeNodeID == "" {
 		return nil
 	}
-	imageRef := h.cfg.RuntimeImage
 	cli, err := h.nodeDockerProv.DockerClientForNode(ctx, payload.RuntimeNodeID)
 	if err != nil {
 		return fmt.Errorf("获取节点 Docker 客户端失败: %w", err)
@@ -417,8 +479,8 @@ func (h *AppInitializeHandler) phasePullRuntimeImage(ctx context.Context, app *s
 
 // phasePrepare:在节点 agent 上准备目录、确保 api_key、上传 hermes 输入文件。
 // 三段都已有局部幂等(InitAppDirs 覆盖写、ensureAPIKey 跳过 active、文件覆盖写),
-// 重启重入直接跑安全。
-func (h *AppInitializeHandler) phasePrepare(ctx context.Context, app *sqlc.App, payload appInitializePayload, _ *progressReporter) error {
+// 重启重入直接跑安全。version 由 Handle 从 DB 加载后通过参数传入，避免重复查询。
+func (h *AppInitializeHandler) phasePrepare(ctx context.Context, app *sqlc.App, payload appInitializePayload, _ *progressReporter, version sqlc.AssistantVersion) error {
 	org, err := h.store.GetOrganization(ctx, app.OrgID)
 	if err != nil {
 		return fmt.Errorf("查询组织失败: %w", err)
@@ -437,7 +499,7 @@ func (h *AppInitializeHandler) phasePrepare(ctx context.Context, app *sqlc.App, 
 		return err
 	}
 	if payload.RuntimeNodeID != "" {
-		if err := h.writeAppInput(ctx, payload.RuntimeNodeID, *app, org, owner, containerAPIKey); err != nil {
+		if err := h.writeAppInput(ctx, payload.RuntimeNodeID, *app, org, owner, containerAPIKey, version); err != nil {
 			return err
 		}
 	}
@@ -574,30 +636,44 @@ func (h *AppInitializeHandler) writeInitAuditLog(ctx context.Context, app sqlc.A
 	return nil
 }
 
-// writeAppInput 通过 AppInputUploader 把应用初始化所需的 manifest.yaml + 三层
-// rules + persona + 组织/应用知识库主副本写到目标节点 apps/<id>/input/ 目录。
+// writeAppInput 通过 AppInputUploader 把应用初始化所需的 manifest.yaml + resources/*.md
+// + 版本 skill tar + 组织/应用知识库主副本写到目标节点 apps/<id>/input/ 目录。
 // 容器内 oc-entrypoint 读取该目录, 在镜像启动时把这些输入翻译成 hermes 自有 schema。
 //
-// 与老 writeHermesFiles 的差别:
-//   - 不再写 .hermes/SOUL.md/config.yaml/.env/skills/ (这些由镜像内部生成);
-//   - 写的是「人类可读 / 工具友好」的输入资源, 由 hermes.WriteAppInput 统一编排;
-//   - 知识库不再渲染成 SKILL.md, 而是原样递归推送, 让镜像 oc-entrypoint
-//     按需 render (避免 manager 与 hermes skill schema 强耦合)。
+// version 参数提供版本级别的模型/路由/提示词/skill 信息，由 Handle 从 DB 加载后传入。
 //
 // containerAPIKey 必须是 ensureAPIKey 返回的真实 sk- token;调用方保证此函数
 // 在 ensureAPIKey 之后执行, 避免写入占位符导致 hermes 调 new-api 返回 401。
 // inputFiles 为 nil 时直接报错: hermes 容器必须有这些输入文件才能 bootstrap。
-func (h *AppInitializeHandler) writeAppInput(ctx context.Context, nodeID string, app sqlc.App, org sqlc.Organization, owner sqlc.User, containerAPIKey string) error {
+func (h *AppInitializeHandler) writeAppInput(ctx context.Context, nodeID string, app sqlc.App, org sqlc.Organization, owner sqlc.User, containerAPIKey string, version sqlc.AssistantVersion) error {
 	if h.inputFiles == nil {
 		return fmt.Errorf("AppInputUploader 未注入, hermes 容器无法 bootstrap")
 	}
 	appID := uuidToString(app.ID)
 
+	// 推送版本 skill tar 到 input/resources/skills/，收集写入 manifest 的相对路径列表。
+	skillRelPaths, err := h.writeSkillsIntoInput(ctx, nodeID, appID, version.SkillsJson)
+	if err != nil {
+		return err
+	}
+
+	// 解析版本智能路由配置：空/null JSON 对应空 map，manifest omitempty 时自动省略。
+	var routing map[string]string
+	if len(version.RoutingJson) > 0 {
+		if err := json.Unmarshal(version.RoutingJson, &routing); err != nil {
+			return fmt.Errorf("解析版本 routing_json 失败: %w", err)
+		}
+	}
+
 	// adapter 绑定 nodeID, 让 hermes.WriteAppInput 的 (ctx, appID, relPath, body)
 	// 接口形态在内部转发到 inputFiles.UploadAppInputFile (带 nodeID)。
 	writer := &appInputUploadAdapter{up: h.inputFiles, nodeID: nodeID}
-	in := BuildAppInputData(app, org, owner, containerAPIKey, AppInputBuildOptions{
-		PersonaText:    h.cfg.SystemPromptTemplate,
+	in := BuildAppInputData(app, org, owner, containerAPIKey, AppInputVersionData{
+		MainModel:     version.MainModel,
+		Routing:       routing,
+		SystemPrompt:  version.SystemPrompt,
+		SkillRelPaths: skillRelPaths,
+	}, AppInputBuildOptions{
 		PlatformPrompt: h.cfg.PlatformPrompt,
 		NewAPIBaseURL:  h.cfg.NewAPIBaseURL,
 		DefaultModel:   h.cfg.LLM.DefaultModel,
@@ -615,16 +691,71 @@ func (h *AppInitializeHandler) writeAppInput(ctx context.Context, nodeID string,
 	return nil
 }
 
-// AppInputBuildOptions 是 BuildAppInputData 的非 DB 来源参数集合。
+// versionSkillMeta 是解析 skills_json 时使用的局部结构，只取 writeSkillsIntoInput 所需字段。
+// 与 service.AssistantVersionSkill 语义相同，局部定义避免 handlers 包反向依赖 service 包。
+type versionSkillMeta struct {
+	Name     string `json:"name"`
+	FilePath string `json:"file_path"`
+}
+
+// writeSkillsIntoInput 把版本 skill tar 推送到节点 apps/<appID>/input/resources/skills/，
+// 返回写入 manifest.resources.skills 的相对路径列表。
+//
+// skillsJson 是版本 skills_json 字段的原始字节；空/null 时返回空列表（无 skill）。
+// cfg.SkillBlobs 为 nil（测试装配/无 skill 配置）时跳过推送，返回空列表——
+// 与 writeKnowledgeIntoInput 的 nil-guard 模式一致。
+func (h *AppInitializeHandler) writeSkillsIntoInput(ctx context.Context, nodeID, appID string, skillsJson []byte) ([]string, error) {
+	if h.cfg.SkillBlobs == nil || len(skillsJson) == 0 {
+		return nil, nil
+	}
+	var skills []versionSkillMeta
+	if err := json.Unmarshal(skillsJson, &skills); err != nil {
+		return nil, fmt.Errorf("解析版本 skills_json 失败: %w", err)
+	}
+	relPaths := make([]string, 0, len(skills))
+	for _, skill := range skills {
+		// skill.Name 来自版本 skills_json，会被拼进上传相对路径；为防路径穿越，
+		// 拒绝空名或含 '/'、'\\'、'..' 的名称。
+		if skill.Name == "" || strings.ContainsAny(skill.Name, "/\\") || strings.Contains(skill.Name, "..") {
+			return nil, fmt.Errorf("非法 skill 名称 %q", skill.Name)
+		}
+		rc, err := h.cfg.SkillBlobs.OpenSkill(skill.FilePath)
+		if err != nil {
+			return nil, fmt.Errorf("打开 skill %s 主副本失败: %w", skill.Name, err)
+		}
+		body, readErr := io.ReadAll(rc)
+		_ = rc.Close()
+		if readErr != nil {
+			return nil, fmt.Errorf("读取 skill %s 主副本失败: %w", skill.Name, readErr)
+		}
+		relPath := "resources/skills/" + skill.Name + ".tar"
+		if err := h.inputFiles.UploadAppInputFile(ctx, nodeID, appID, relPath, bytes.NewReader(body)); err != nil {
+			return nil, fmt.Errorf("上传 skill %s 失败: %w", skill.Name, err)
+		}
+		relPaths = append(relPaths, relPath)
+	}
+	return relPaths, nil
+}
+
+// AppInputVersionData 是 BuildAppInputData 所需的「实例绑定版本」业务数据。
+// 由 Handle 从 DB 加载 AssistantVersion 后解析，再传给 BuildAppInputData。
+type AppInputVersionData struct {
+	// MainModel 版本主模型 → manifest.app.model；空时退回 opts.DefaultModel，再退回 "default"。
+	MainModel string
+	// Routing 版本智能路由 → manifest.routing；空 map 时 omitempty 省略。
+	Routing map[string]string
+	// SystemPrompt 版本内置提示词 → resources/persona.md。
+	SystemPrompt string
+	// SkillRelPaths 已推送到 input/ 的版本 skill tar 相对路径 → manifest.resources.skills。
+	SkillRelPaths []string
+}
+
+// AppInputBuildOptions 是 BuildAppInputData 的非 DB / 非版本来源参数集合。
 //
 // 单独抽成结构体而不是逐个传, 让 init handler 与 restart 阶段的 wiring 端
 // refresher 都能从同一份 AppInitializeConfig 里取出对应字段, 避免漏传一个
 // 参数导致两边语义偏移。
 type AppInputBuildOptions struct {
-	// PersonaText 写入 manifest.resources.persona 的 SOUL 模板内容。
-	// 当前 wiring 由 cfg.Hermes.SystemPromptTemplate 提供;未来若上线
-	// org-level / app-level persona, 由调用方在传入前合并好最终文本。
-	PersonaText string
 	// PlatformPrompt 写入 resources/platform-rules.md, 由配置文件
 	// hermes.system_prompt_template 提供, 容器内 hermes 按需引用。
 	PlatformPrompt string
@@ -632,12 +763,12 @@ type AppInputBuildOptions struct {
 	// 容器内 hermes 会再拼 "/v1" 后调 new-api。空串时回退到默认值
 	// "http://new-api:3000" (与老 config.yaml 兜底一致)。
 	NewAPIBaseURL string
-	// DefaultModel 是 app.ModelID 为空时的兜底模型名。两者都为空时
+	// DefaultModel 是 version.MainModel 为空时的兜底模型名。两者都为空时
 	// 写入 "default" 占位, 避免 manifest.app.model 落空串。
 	DefaultModel string
 }
 
-// BuildAppInputData 把 DB 行 + 解密后的 api key 装配成 hermes.AppInputData。
+// BuildAppInputData 把 DB 行 + 版本数据 + 解密后的 api key 装配成 hermes.AppInputData。
 //
 // init 与 restart 两条链路共享同一份字段映射, 确保「初始化写入的 manifest」
 // 与「restart 前重写的 manifest」字段语义完全一致——这是 hermes-image-self-init
@@ -645,17 +776,15 @@ type AppInputBuildOptions struct {
 // 输入字段语义偏移会直接表现为线上"改模型不生效"或"老 prompt 残留"。
 //
 // 字段策略:
-//   - model: 优先 app.ModelID, 其次 opts.DefaultModel, 最后写 "default" 占位;
+//   - model: 优先 version.MainModel, 其次 opts.DefaultModel, 最后写 "default" 占位;
 //   - base_url: 优先 opts.NewAPIBaseURL, 兜底 "http://new-api:3000";
-//   - persona / platform / application rules: 直接透传, 占位符渲染由
-//     hermes.WriteAppInput 内的 RenderPersonaText / RenderRuleText 统一处理;
-//   - organization rule: 暂留空, 与现有 init 行为对齐(后续上线 org-level
-//     rule 字段时统一改这一处即可)。
+//   - persona: 来自 version.SystemPrompt，占位符渲染由 hermes.WriteAppInput 统一处理;
+//   - routing / skills: 直接透传版本数据，hermes manifest v2 格式。
 //
 // containerAPIKey 必须是真实 sk- 明文; 调用方负责从 ciphertext 解密。
 // 该函数纯装配, 不做 IO, 因此无 ctx 参数, 也不返回 error。
-func BuildAppInputData(app sqlc.App, org sqlc.Organization, owner sqlc.User, containerAPIKey string, opts AppInputBuildOptions) hermes.AppInputData {
-	model := app.ModelID
+func BuildAppInputData(app sqlc.App, org sqlc.Organization, owner sqlc.User, containerAPIKey string, version AppInputVersionData, opts AppInputBuildOptions) hermes.AppInputData {
+	model := version.MainModel
 	if model == "" {
 		model = opts.DefaultModel
 	}
@@ -667,17 +796,17 @@ func BuildAppInputData(app sqlc.App, org sqlc.Organization, owner sqlc.User, con
 		baseURL = "http://new-api:3000"
 	}
 	return hermes.AppInputData{
-		AppID:            uuidToString(app.ID),
-		AppName:          app.Name,
-		Model:            model,
-		OpenAIAPIKey:     containerAPIKey,
-		OpenAIBaseURL:    baseURL,
-		PersonaText:      opts.PersonaText,
-		PlatformRule:     opts.PlatformPrompt,
-		OrganizationRule: "", // 组织层 rule 待后续 organization persona/rules 字段补齐
-		ApplicationRule:  textOrEmpty(app.AppPrompt),
-		OrgName:          org.Name,
-		OwnerName:        owner.DisplayName,
+		AppID:         uuidToString(app.ID),
+		AppName:       app.Name,
+		Model:         model,
+		OpenAIAPIKey:  containerAPIKey,
+		OpenAIBaseURL: baseURL,
+		PersonaText:   version.SystemPrompt,
+		PlatformRule:  opts.PlatformPrompt,
+		Routing:       version.Routing,
+		SkillRelPaths: version.SkillRelPaths,
+		OrgName:       org.Name,
+		OwnerName:     owner.DisplayName,
 	}
 }
 

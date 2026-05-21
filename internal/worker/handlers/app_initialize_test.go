@@ -10,6 +10,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgtype"
 
 	dockerclient "github.com/docker/docker/client"
@@ -30,6 +31,8 @@ const (
 	testAppID = "00000000-0000-0000-0000-000000000a01"
 	testOrgID = "00000000-0000-0000-0000-000000000b01"
 	testUsrID = "00000000-0000-0000-0000-000000000c01"
+	// testVersionID 是测试中默认绑定的助手版本 ID。
+	testVersionID = "00000000-0000-0000-0000-000000000d01"
 )
 
 // TestAppInitializeHandlesHappyPath 验证应用初始化处理成功路径的成功路径场景:
@@ -114,7 +117,8 @@ func TestAppInitializeHandlesHappyPath(t *testing.T) {
 	require.Equal(t, "initialize", store.auditLogs[0].Action)
 	require.Equal(t, "succeeded", store.auditLogs[0].Result)
 
-	// 必须上传的 5 份文件: 4 份 resources/*.md + manifest.yaml。
+	// manifest v2 必须上传 3 份文件: persona.md + platform-rules.md + manifest.yaml。
+	// v2 不再写 organization-rules.md / application-rules.md（两字段已从 AppInputData 移除）。
 	// 顺序断言: manifest.yaml 必须最后写, 避免 oc-entrypoint 读到 resources 文件还没就绪
 	// 的中间态。
 	relPaths := up.relPathsForApp(testAppID)
@@ -122,12 +126,10 @@ func TestAppInitializeHandlesHappyPath(t *testing.T) {
 		[]string{
 			"resources/persona.md",
 			"resources/platform-rules.md",
-			"resources/organization-rules.md",
-			"resources/application-rules.md",
 			"manifest.yaml",
 		},
 		relPaths,
-		"happy path 必须上传 4 份 resources + manifest.yaml; 实际: %v", relPaths,
+		"happy path 必须上传 persona.md + platform-rules.md + manifest.yaml; 实际: %v", relPaths,
 	)
 	require.Equal(t, "manifest.yaml", relPaths[len(relPaths)-1], "manifest.yaml 必须最后写")
 
@@ -378,11 +380,13 @@ func buildJob(t *testing.T, appID, nodeID string) sqlc.Job {
 }
 
 type appInitStub struct {
-	t            *testing.T
-	app          sqlc.App
-	org          sqlc.Organization
-	user         sqlc.User
-	node         sqlc.RuntimeNode
+	t    *testing.T
+	app  sqlc.App
+	org  sqlc.Organization
+	user sqlc.User
+	node sqlc.RuntimeNode
+	// versions 按 UUID 存放助手版本；GetAssistantVersion 从此 map 查找。
+	versions     map[pgtype.UUID]sqlc.AssistantVersion
 	apiKeySet    bool
 	statusSet    bool
 	containerSet bool
@@ -399,15 +403,34 @@ type appInitStub struct {
 	lastFailed sqlc.MarkAppFailedParams
 	// getOrganizationErr 让 GetOrganization 返回指定错误, 用于触发 phasePrepare 失败路径。
 	getOrganizationErr error
+	// appliedVersionSet 标记 SetAppAppliedVersion 是否被调用。
+	appliedVersionSet bool
+	// lastAppliedVersion 记录最近一次 SetAppAppliedVersion 的入参，供断言使用。
+	lastAppliedVersion sqlc.SetAppAppliedVersionParams
 }
 
 func newAppInitStub(t *testing.T) *appInitStub {
+	t.Helper()
+	versionUUID := mustUUIDForTest(t, testVersionID)
+	// 默认助手版本：主模型 gpt-4o，含路由与 persona，供 happy path 测试使用。
+	defaultVersion := sqlc.AssistantVersion{
+		ID:           versionUUID,
+		Name:         "v1",
+		MainModel:    "gpt-4o",
+		SystemPrompt: "你是 {org_name} 的专属助手",
+		ImageID:      "hermes-v1",
+		Revision:     1,
+		RoutingJson:  []byte(`{"aux1":"gpt-3.5-turbo"}`),
+		SkillsJson:   []byte(`[]`),
+	}
 	return &appInitStub{
 		t: t,
 		app: sqlc.App{
-			ID:           mustUUIDForTest(t, testAppID),
-			OrgID:        mustUUIDForTest(t, testOrgID),
-			OwnerUserID:  mustUUIDForTest(t, testUsrID),
+			ID:          mustUUIDForTest(t, testAppID),
+			OrgID:       mustUUIDForTest(t, testOrgID),
+			OwnerUserID: mustUUIDForTest(t, testUsrID),
+			// Phase 4：实例必须绑定助手版本，否则 Handle 直接标记失败。
+			VersionID:    versionUUID,
 			Name:         "alice-bot",
 			Status:       domain.AppStatusDraft,
 			PersonaMode:  domain.PersonaModeOrgInherited,
@@ -417,6 +440,9 @@ func newAppInitStub(t *testing.T) *appInitStub {
 		org:  sqlc.Organization{Name: "测试组织", Status: domain.StatusActive},
 		user: sqlc.User{DisplayName: "Alice"},
 		node: sqlc.RuntimeNode{NodeDataRoot: pgtype.Text{String: "/var/lib/oc-agent", Valid: true}},
+		versions: map[pgtype.UUID]sqlc.AssistantVersion{
+			versionUUID: defaultVersion,
+		},
 	}
 }
 
@@ -491,6 +517,25 @@ func (s *appInitStub) MarkAppFailed(_ context.Context, p sqlc.MarkAppFailedParam
 func (s *appInitStub) UpdateAppRuntimeImage(_ context.Context, arg sqlc.UpdateAppRuntimeImageParams) (sqlc.App, error) {
 	s.app.RuntimeImageRef = arg.RuntimeImageRef
 	s.app.RuntimeImageSha256 = arg.RuntimeImageSha256
+	return s.app, nil
+}
+
+// GetAssistantVersion 从内存 versions map 返回版本，模拟 DB 查询。
+// 版本不存在时返回 pgx.ErrNoRows（与真实 DB 行为一致）。
+func (s *appInitStub) GetAssistantVersion(_ context.Context, id pgtype.UUID) (sqlc.AssistantVersion, error) {
+	if v, ok := s.versions[id]; ok {
+		return v, nil
+	}
+	return sqlc.AssistantVersion{}, pgx.ErrNoRows
+}
+
+// SetAppAppliedVersion 记录 applied_version_revision / applied_image_ref 写库，
+// 供 Handle 成功收尾时调用；通过 appliedVersionSet / lastAppliedVersion 供断言使用。
+func (s *appInitStub) SetAppAppliedVersion(_ context.Context, arg sqlc.SetAppAppliedVersionParams) (sqlc.App, error) {
+	s.appliedVersionSet = true
+	s.lastAppliedVersion = arg
+	s.app.AppliedVersionRevision = arg.AppliedVersionRevision
+	s.app.AppliedImageRef = arg.AppliedImageRef
 	return s.app, nil
 }
 
@@ -1007,4 +1052,241 @@ func TestAppInitializeHandler_IdempotentReentry(t *testing.T) {
 	assert.Equal(t, domain.AppStatusBindingWaiting, store.app.Status)
 	// 不应触发失败。
 	assert.False(t, store.failedSet)
+}
+
+// --- Phase 4 新增测试 ---
+
+// TestAppInitialize_NullVersionIDFails 验证实例未绑定助手版本时
+// Handle 直接标记失败，不进入任何阶段推进。
+// 覆盖场景：app.VersionID.Valid == false → markFailed 被调用，错误含"未绑定助手版本"。
+func TestAppInitialize_NullVersionIDFails(t *testing.T) {
+	store := newAppInitStub(t)
+	// 清空 VersionID，模拟未绑定版本的实例。
+	store.app.VersionID = pgtype.UUID{}
+
+	handler := NewAppInitializeHandler(store, &fakeDirs{}, &fakeContainers{}, &fakeContainers{}, &fakeNewAPI{}, AppInitializeConfig{Cipher: testCipher(t)})
+	handler.SetAppInputUploader(&fakeAppInputUploader{})
+
+	err := handler.Handle(context.Background(), buildJob(t, testAppID, "node-1"))
+	// 未绑定版本应立即失败，错误信息应含"未绑定助手版本"。
+	require.Error(t, err)
+	require.Contains(t, err.Error(), "未绑定助手版本")
+	// MarkAppFailed 必须被调用。
+	require.True(t, store.failedSet, "未绑定版本应触发 MarkAppFailed")
+	assert.Equal(t, domain.AppStatusError, store.app.Status)
+}
+
+// TestAppInitialize_GetAssistantVersionErrorFails 验证 GetAssistantVersion 返回错误时
+// Handle 直接标记失败，不进入任何阶段推进。
+// 覆盖场景：app.VersionID.Valid == true 但版本加载失败 → markFailed 被调用，
+// last_error_status 记为 pulling_runtime_image，错误信息含"加载助手版本失败"。
+func TestAppInitialize_GetAssistantVersionErrorFails(t *testing.T) {
+	store := newAppInitStub(t)
+	// 清空 versions map，使 GetAssistantVersion 对有效 VersionID 返回 pgx.ErrNoRows。
+	store.versions = map[pgtype.UUID]sqlc.AssistantVersion{}
+
+	handler := NewAppInitializeHandler(store, &fakeDirs{}, &fakeContainers{}, &fakeContainers{}, &fakeNewAPI{}, AppInitializeConfig{Cipher: testCipher(t)})
+	handler.SetAppInputUploader(&fakeAppInputUploader{})
+
+	err := handler.Handle(context.Background(), buildJob(t, testAppID, "node-1"))
+	// 版本加载失败应立即返回错误，错误信息应含"加载助手版本失败"。
+	require.Error(t, err)
+	require.Contains(t, err.Error(), "加载助手版本失败")
+	// MarkAppFailed 必须被调用，app.status 收敛到 error。
+	require.True(t, store.failedSet, "版本加载失败应触发 MarkAppFailed")
+	assert.Equal(t, domain.AppStatusError, store.app.Status)
+	// last_error_status 记为 pulling_runtime_image（版本加载属于初始化前置步骤）。
+	require.True(t, store.lastFailed.LastErrorStatus.Valid)
+	assert.Equal(t, domain.AppStatusPullingRuntimeImage, store.lastFailed.LastErrorStatus.String)
+	// last_error_message 应反映版本加载失败原因。
+	require.True(t, store.lastFailed.LastErrorMessage.Valid)
+	assert.Contains(t, store.lastFailed.LastErrorMessage.String, "加载助手版本失败")
+}
+
+// TestAppInitialize_AppliedVersionRecorded 验证初始化成功后
+// SetAppAppliedVersion 以正确的 revision 和 imageRef 被调用。
+// 覆盖场景：happy path → appliedVersionSet=true + revision/imageRef 与版本数据一致。
+func TestAppInitialize_AppliedVersionRecorded(t *testing.T) {
+	store := newAppInitStub(t)
+	containers := &fakeContainers{result: runtimepkg.ContainerInfo{ID: "ctr-1", Name: "hermes-" + testAppID}}
+	client := &fakeNewAPI{result: newapi.APIKey{ID: 1, Key: "sk-test"}}
+
+	// 注入 ResolveRuntimeImage：版本 image_id "hermes-v1" → "hermes:v2026-test"。
+	resolvedRef := "hermes:v2026-test"
+	handler := NewAppInitializeHandler(store, &fakeDirs{}, containers, containers, client, AppInitializeConfig{
+		Cipher: testCipher(t),
+		ResolveRuntimeImage: func(imageID string) (string, bool) {
+			if imageID == "hermes-v1" {
+				return resolvedRef, true
+			}
+			return "", false
+		},
+	})
+	handler.SetAppInputUploader(&fakeAppInputUploader{})
+
+	require.NoError(t, handler.Handle(context.Background(), buildJob(t, testAppID, "node-1")))
+
+	// 初始化成功后 SetAppAppliedVersion 必须被调用。
+	require.True(t, store.appliedVersionSet, "初始化成功应调用 SetAppAppliedVersion")
+	// revision 应与版本 stub 中的 Revision(=1) 一致。
+	assert.Equal(t, int32(1), store.lastAppliedVersion.AppliedVersionRevision, "applied_version_revision 应等于版本 Revision")
+	// applied_image_ref 应等于 ResolveRuntimeImage 解析出的 ref。
+	assert.Equal(t, resolvedRef, store.lastAppliedVersion.AppliedImageRef, "applied_image_ref 应等于解析出的镜像 ref")
+}
+
+// TestAppInitialize_VersionModelWrittenToManifest 验证版本 MainModel 通过 BuildAppInputData
+// 正确写入 manifest，而非使用 app.ModelID 或默认值。
+// 覆盖场景：版本 MainModel="gpt-4o"，opts.DefaultModel="default-model"
+// → BuildAppInputData 优先采用版本 MainModel。
+func TestAppInitialize_VersionModelWrittenToManifest(t *testing.T) {
+	// 仅测试 BuildAppInputData 纯函数，不走完整 Handle 流程。
+	app := sqlc.App{
+		ID:      mustUUIDForTest(t, testAppID),
+		Name:    "test-app",
+		ModelID: "old-model", // 旧字段，Phase 4 已不采用。
+	}
+	org := sqlc.Organization{Name: "TestOrg"}
+	owner := sqlc.User{DisplayName: "Bob"}
+
+	// 版本 MainModel 非空时，model 字段必须使用版本值，不受 app.ModelID 影响。
+	in := BuildAppInputData(app, org, owner, "sk-x", AppInputVersionData{
+		MainModel: "gpt-4o",
+	}, AppInputBuildOptions{DefaultModel: "default-model"})
+	assert.Equal(t, "gpt-4o", in.Model, "版本 MainModel 非空时应优先于 DefaultModel")
+
+	// 版本 MainModel 为空时，退回 opts.DefaultModel。
+	inFallback := BuildAppInputData(app, org, owner, "sk-x", AppInputVersionData{
+		MainModel: "",
+	}, AppInputBuildOptions{DefaultModel: "default-model"})
+	assert.Equal(t, "default-model", inFallback.Model, "版本 MainModel 为空时应退回 DefaultModel")
+
+	// 版本 MainModel 和 DefaultModel 都为空时，写 "default" 占位。
+	inDouble := BuildAppInputData(app, org, owner, "sk-x", AppInputVersionData{}, AppInputBuildOptions{})
+	assert.Equal(t, "default", inDouble.Model, "两者都为空时应写 default 占位")
+}
+
+// TestAppInitialize_VersionRoutingAndPersonaPassedThrough 验证版本 Routing 和 SystemPrompt
+// 通过 BuildAppInputData 原样传递到 hermes.AppInputData。
+// 覆盖场景：version.Routing 与 version.SystemPrompt 直接映射到输出字段。
+func TestAppInitialize_VersionRoutingAndPersonaPassedThrough(t *testing.T) {
+	// 仅测试 BuildAppInputData 纯函数。
+	app := sqlc.App{ID: mustUUIDForTest(t, testAppID), Name: "r-app"}
+	org := sqlc.Organization{Name: "O"}
+	owner := sqlc.User{DisplayName: "U"}
+	routing := map[string]string{"aux1": "claude-3-haiku", "aux2": "gpt-3.5-turbo"}
+	persona := "你是 {org_name} 的路由助手，优先使用 aux1 做摘要。"
+
+	in := BuildAppInputData(app, org, owner, "sk-y", AppInputVersionData{
+		MainModel:     "gpt-4o",
+		Routing:       routing,
+		SystemPrompt:  persona,
+		SkillRelPaths: []string{"resources/skills/search.tar"},
+	}, AppInputBuildOptions{PlatformPrompt: "平台规则"})
+
+	// Routing 原样透传到 AppInputData。
+	assert.Equal(t, routing, in.Routing, "版本 Routing 应原样写入 AppInputData.Routing")
+	// SystemPrompt 映射到 PersonaText。
+	assert.Equal(t, persona, in.PersonaText, "版本 SystemPrompt 应映射到 AppInputData.PersonaText")
+	// SkillRelPaths 原样透传。
+	assert.Equal(t, []string{"resources/skills/search.tar"}, in.SkillRelPaths, "版本 SkillRelPaths 应原样写入 AppInputData.SkillRelPaths")
+	// PlatformPrompt 来自 opts，原样透传。
+	assert.Equal(t, "平台规则", in.PlatformRule, "opts.PlatformPrompt 应写入 AppInputData.PlatformRule")
+}
+
+// fakeSkillBlobReader 实现 SkillBlobReader，内存存储 skill tar 内容。
+// 用于验证 writeSkillsIntoInput 能正确读取并上传 skill tar。
+type fakeSkillBlobReader struct {
+	// blobs 以 relPath 为 key，存储伪 tar 内容。
+	blobs map[string]string
+	// errOnPath 若非空，当 relPath 等于此值时返回错误，测试错误路径。
+	errOnPath string
+}
+
+func (f *fakeSkillBlobReader) OpenSkill(relPath string) (io.ReadCloser, error) {
+	if f.errOnPath != "" && relPath == f.errOnPath {
+		return nil, fmt.Errorf("mock open skill error: %s", relPath)
+	}
+	content, ok := f.blobs[relPath]
+	if !ok {
+		return nil, fmt.Errorf("skill not found: %s", relPath)
+	}
+	return io.NopCloser(strings.NewReader(content)), nil
+}
+
+// TestAppInitialize_SkillsUploadedToInput 验证版本 skills_json 中的 skill tar
+// 被正确读取并推送到 input/resources/skills/<name>.tar。
+// 覆盖场景：两个 skill → 上传两份文件 + manifest SkillRelPaths 包含对应路径。
+func TestAppInitialize_SkillsUploadedToInput(t *testing.T) {
+	store := newAppInitStub(t)
+	// 更新版本 stub：添加两个 skill。
+	versionUUID := mustUUIDForTest(t, testVersionID)
+	store.versions[versionUUID] = sqlc.AssistantVersion{
+		ID:           versionUUID,
+		Name:         "v1-with-skills",
+		MainModel:    "gpt-4o",
+		SystemPrompt: "你是助手",
+		ImageID:      "hermes-v1",
+		Revision:     2,
+		RoutingJson:  []byte(`{}`),
+		// skills_json 含两个 skill，FilePath 指向 manager 数据根的相对路径。
+		SkillsJson: []byte(`[
+			{"name":"search","file_path":"skills/search.tar","file_size":1024,"file_sha256":"abc"},
+			{"name":"calc","file_path":"skills/calc.tar","file_size":512,"file_sha256":"def"}
+		]`),
+	}
+
+	containers := &fakeContainers{result: runtimepkg.ContainerInfo{ID: "ctr-1", Name: "hermes-" + testAppID}}
+	client := &fakeNewAPI{result: newapi.APIKey{ID: 1, Key: "sk-test"}}
+	up := &fakeAppInputUploader{}
+	blobs := &fakeSkillBlobReader{blobs: map[string]string{
+		"skills/search.tar": "fake-search-tar-content",
+		"skills/calc.tar":   "fake-calc-tar-content",
+	}}
+
+	handler := NewAppInitializeHandler(store, &fakeDirs{}, containers, containers, client, AppInitializeConfig{
+		Cipher:     testCipher(t),
+		SkillBlobs: blobs,
+	})
+	handler.SetAppInputUploader(up)
+
+	require.NoError(t, handler.Handle(context.Background(), buildJob(t, testAppID, "node-1")))
+
+	// 两个 skill tar 必须被上传到 resources/skills/。
+	require.True(t, up.hasUpload(testAppID, "resources/skills/search.tar"),
+		"search skill 应被上传到 resources/skills/search.tar")
+	require.True(t, up.hasUpload(testAppID, "resources/skills/calc.tar"),
+		"calc skill 应被上传到 resources/skills/calc.tar")
+}
+
+// TestAppInitialize_SkillBlobsNilSkipsSkills 验证 SkillBlobs 未注入时
+// writeSkillsIntoInput 跳过推送，Handle 正常完成（向后兼容无 skill 的装配）。
+func TestAppInitialize_SkillBlobsNilSkipsSkills(t *testing.T) {
+	store := newAppInitStub(t)
+	// 版本含 skill，但 SkillBlobs 未注入，应安全跳过。
+	versionUUID := mustUUIDForTest(t, testVersionID)
+	store.versions[versionUUID] = sqlc.AssistantVersion{
+		ID:          versionUUID,
+		MainModel:   "gpt-4o",
+		ImageID:     "hermes-v1",
+		Revision:    1,
+		RoutingJson: []byte(`{}`),
+		SkillsJson:  []byte(`[{"name":"search","file_path":"skills/search.tar","file_size":1024,"file_sha256":"abc"}]`),
+	}
+
+	containers := &fakeContainers{result: runtimepkg.ContainerInfo{ID: "ctr-1", Name: "hermes-" + testAppID}}
+	client := &fakeNewAPI{result: newapi.APIKey{ID: 1, Key: "sk"}}
+	up := &fakeAppInputUploader{}
+	handler := NewAppInitializeHandler(store, &fakeDirs{}, containers, containers, client, AppInitializeConfig{
+		Cipher: testCipher(t),
+		// SkillBlobs 未注入（nil），应安全跳过。
+	})
+	handler.SetAppInputUploader(up)
+
+	require.NoError(t, handler.Handle(context.Background(), buildJob(t, testAppID, "node-1")))
+
+	// 不应出现任何 resources/skills/* 上传记录。
+	for _, c := range up.calls {
+		require.False(t, strings.HasPrefix(c.relPath, "resources/skills/"),
+			"SkillBlobs 未注入时不应上传任何 skill: %s", c.relPath)
+	}
 }
