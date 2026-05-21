@@ -70,7 +70,7 @@ help: ## 显示本帮助文档(make 默认 target)
 	@case "$(HERMES_VERSION)" in \
 		.*|-*) echo "Hermes version 不能以 Docker tag 非法起始字符开头: $(HERMES_VERSION)" >&2; exit 1;; \
 	esac
-	@version="$(HERMES_VERSION)"; test $${#version} -le 108 || { echo "Hermes version 过长，无法为生产时间戳预留 Docker tag 长度: $(HERMES_VERSION)" >&2; exit 1; }
+	@version="$(HERMES_VERSION)"; test $${#version} -le 99 || { echo "Hermes version 过长，无法为生产时间戳和提交号预留 Docker tag 长度: $(HERMES_VERSION)" >&2; exit 1; }
 
 .PHONY: .guard-image-git-state
 .guard-image-git-state:
