@@ -2,6 +2,7 @@ package service
 
 import (
 	"fmt"
+	"io"
 	"os"
 	"path"
 	"path/filepath"
@@ -54,6 +55,23 @@ func (s *FSSkillBlobStore) DeleteSkill(relPath string) error {
 		return fmt.Errorf("删除 skill tar 失败: %w", err)
 	}
 	return nil
+}
+
+// OpenSkill 打开一个 skill tar 主副本用于读取；relPath 是 PutSkill 返回的相对 root 路径。
+// 调用方负责 Close 返回的 ReadCloser。relPath 经路径净化后必须仍落在 root 内，防止 DB 中
+// 异常 file_path 造成目录穿越读取。
+func (s *FSSkillBlobStore) OpenSkill(relPath string) (io.ReadCloser, error) {
+	abs := filepath.Join(s.root, filepath.FromSlash(relPath))
+	// 净化后 abs 必须仍以 root 为前缀，否则视为非法路径。
+	cleanRoot := filepath.Clean(s.root)
+	if abs != cleanRoot && !strings.HasPrefix(abs, cleanRoot+string(filepath.Separator)) {
+		return nil, fmt.Errorf("非法 skill 路径: %q", relPath)
+	}
+	f, err := os.Open(abs)
+	if err != nil {
+		return nil, fmt.Errorf("打开 skill tar 失败: %w", err)
+	}
+	return f, nil
 }
 
 // 编译时检查：FSSkillBlobStore 必须实现 SkillBlobStore 接口。

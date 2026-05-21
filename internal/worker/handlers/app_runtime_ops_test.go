@@ -9,6 +9,7 @@ import (
 
 	"github.com/jackc/pgx/v5/pgtype"
 
+	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 	"oc-manager/internal/domain"
 	"oc-manager/internal/integrations/newapi"
@@ -179,19 +180,21 @@ type fakeInputRefresher struct {
 	lastNodeID  string
 	lastAppID   string
 	returnError error
+	// returnResult 是 RefreshAppInput 成功时返回的版本信息，供测试断言 SetAppAppliedVersion 入参。
+	returnResult AppInputRefreshResult
 	// orderTracker 由测试注入, refresh 时 append "refresh", 与 fakeLifecycle 共享同一 slice
 	// 即可断言事件先后。
 	orderTracker *[]string
 }
 
-func (f *fakeInputRefresher) RefreshAppInput(_ context.Context, nodeID string, app sqlc.App) error {
+func (f *fakeInputRefresher) RefreshAppInput(_ context.Context, nodeID string, app sqlc.App) (AppInputRefreshResult, error) {
 	f.calls++
 	f.lastNodeID = nodeID
 	f.lastAppID = uuidToString(app.ID)
 	if f.orderTracker != nil {
 		*f.orderTracker = append(*f.orderTracker, "refresh")
 	}
-	return f.returnError
+	return f.returnResult, f.returnError
 }
 
 // orderedLifecycle 在 fakeLifecycle 基础上把每次 stop / start / restart 调用
@@ -279,6 +282,48 @@ func TestAppRestartContainerHandler_NoInputRefresherSkipsRefresh(t *testing.T) {
 	// stop/start 仍能照常调用, 不应因为 refresher 缺失而失败。
 	require.Equal(t, 1, containers.stopCalls)
 	require.Equal(t, 1, containers.startCalls)
+}
+
+// TestAppRestartContainerHandler_RecordsAppliedVersionAfterRefresh 验证注入 inputRefresher
+// 后，Handle 在成功重启完成后调用 SetAppAppliedVersion，把 refresher 返回的
+// VersionRevision / ImageRef 写入 DB，供前端 version_synced 检测使用。
+func TestAppRestartContainerHandler_RecordsAppliedVersionAfterRefresh(t *testing.T) {
+	stub := runtimeStub(t)
+	containers := &fakeLifecycle{}
+	// refresher 返回版本修订=5，镜像 ref="hermes-v2:sha256-abc"。
+	refresher := &fakeInputRefresher{
+		returnResult: AppInputRefreshResult{
+			VersionRevision: 5,
+			ImageRef:        "hermes-v2:sha256-abc",
+		},
+	}
+	handler := NewAppRestartContainerHandler(stub, containers)
+	handler.SetInputRefresher(refresher)
+
+	err := handler.Handle(context.Background(), runtimeJob(domain.JobTypeAppRestartContainer, testAppID))
+	require.NoError(t, err)
+	// refresher 被调用一次。
+	require.Equal(t, 1, refresher.calls)
+	// SetAppAppliedVersion 必须被调用，入参与 refresher 返回值一致。
+	require.True(t, stub.appliedVersionSet, "重启后应调用 SetAppAppliedVersion 记录已应用版本")
+	assert.Equal(t, mustUUIDForTest(t, testAppID), stub.lastAppliedVersion.ID)
+	require.Equal(t, int32(5), stub.lastAppliedVersion.AppliedVersionRevision)
+	require.Equal(t, "hermes-v2:sha256-abc", stub.lastAppliedVersion.AppliedImageRef)
+}
+
+// TestAppRestartContainerHandler_NilRefresherSkipsAppliedVersion 验证 inputRefresher 为 nil
+// （测试装配）时，Handle 完成重启但不调用 SetAppAppliedVersion——未刷新版本数据，
+// 不应声称 applied，避免前端 version_synced 误置位。
+func TestAppRestartContainerHandler_NilRefresherSkipsAppliedVersion(t *testing.T) {
+	stub := runtimeStub(t)
+	containers := &fakeLifecycle{}
+	handler := NewAppRestartContainerHandler(stub, containers)
+	// 不注入 inputRefresher，走 nil 路径。
+
+	err := handler.Handle(context.Background(), runtimeJob(domain.JobTypeAppRestartContainer, testAppID))
+	require.NoError(t, err)
+	// SetAppAppliedVersion 不应被调用：没有刷新版本数据，无法确认 applied。
+	require.False(t, stub.appliedVersionSet, "inputRefresher 为 nil 时不应调用 SetAppAppliedVersion")
 }
 
 // TestAppDeleteHandler_HappyPath 验证应用删除处理器成功路径的成功路径场景。
@@ -394,6 +439,10 @@ type runtimeOpStub struct {
 	app           sqlc.App
 	statusUpdates []string
 	softDeleted   bool
+	// appliedVersionSet 标记 SetAppAppliedVersion 是否被调用，供重启链路断言使用。
+	appliedVersionSet bool
+	// lastAppliedVersion 记录最近一次 SetAppAppliedVersion 的入参，供断言 applied 字段。
+	lastAppliedVersion sqlc.SetAppAppliedVersionParams
 }
 
 func (s *runtimeOpStub) GetApp(_ context.Context, _ pgtype.UUID) (sqlc.App, error) { return s.app, nil }
@@ -413,6 +462,15 @@ func (s *runtimeOpStub) SoftDeleteApp(_ context.Context, _ pgtype.UUID) (sqlc.Ap
 // SetAppModelSynced 实现 AppRuntimeStore 接口；重启完成后标记模型已同步。
 func (s *runtimeOpStub) SetAppModelSynced(_ context.Context, _ pgtype.UUID) (sqlc.App, error) {
 	s.app.ModelSynced = true
+	return s.app, nil
+}
+
+// SetAppAppliedVersion 实现 AppRuntimeStore 接口；记录已应用的版本修订与镜像 ref。
+func (s *runtimeOpStub) SetAppAppliedVersion(_ context.Context, arg sqlc.SetAppAppliedVersionParams) (sqlc.App, error) {
+	s.appliedVersionSet = true
+	s.lastAppliedVersion = arg
+	s.app.AppliedVersionRevision = arg.AppliedVersionRevision
+	s.app.AppliedImageRef = arg.AppliedImageRef
 	return s.app, nil
 }
 

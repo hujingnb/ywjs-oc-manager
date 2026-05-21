@@ -651,29 +651,17 @@ func (h *AppInitializeHandler) writeAppInput(ctx context.Context, nodeID string,
 	}
 	appID := uuidToString(app.ID)
 
-	// 推送版本 skill tar 到 input/resources/skills/，收集写入 manifest 的相对路径列表。
-	skillRelPaths, err := h.writeSkillsIntoInput(ctx, nodeID, appID, version.SkillsJson)
+	// 通过共用的 AssembleVersionInputData 装配版本数据：推 skill tar + 解析 routing，
+	// 与 restart 链路共享同一逻辑，避免两条链路写出的 manifest 版本字段漂移。
+	versionData, err := AssembleVersionInputData(ctx, version, app, nodeID, h.cfg.SkillBlobs, h.inputFiles)
 	if err != nil {
 		return err
-	}
-
-	// 解析版本智能路由配置：空/null JSON 对应空 map，manifest omitempty 时自动省略。
-	var routing map[string]string
-	if len(version.RoutingJson) > 0 {
-		if err := json.Unmarshal(version.RoutingJson, &routing); err != nil {
-			return fmt.Errorf("解析版本 routing_json 失败: %w", err)
-		}
 	}
 
 	// adapter 绑定 nodeID, 让 hermes.WriteAppInput 的 (ctx, appID, relPath, body)
 	// 接口形态在内部转发到 inputFiles.UploadAppInputFile (带 nodeID)。
 	writer := &appInputUploadAdapter{up: h.inputFiles, nodeID: nodeID}
-	in := BuildAppInputData(app, org, owner, containerAPIKey, AppInputVersionData{
-		MainModel:     version.MainModel,
-		Routing:       routing,
-		SystemPrompt:  version.SystemPrompt,
-		SkillRelPaths: skillRelPaths,
-	}, AppInputBuildOptions{
+	in := BuildAppInputData(app, org, owner, containerAPIKey, versionData, AppInputBuildOptions{
 		PlatformPrompt: h.cfg.PlatformPrompt,
 		NewAPIBaseURL:  h.cfg.NewAPIBaseURL,
 		DefaultModel:   h.cfg.LLM.DefaultModel,
@@ -691,21 +679,18 @@ func (h *AppInitializeHandler) writeAppInput(ctx context.Context, nodeID string,
 	return nil
 }
 
-// versionSkillMeta 是解析 skills_json 时使用的局部结构，只取 writeSkillsIntoInput 所需字段。
+// versionSkillMeta 是解析 skills_json 时使用的局部结构，只取 pushVersionSkills 所需字段。
 // 与 service.AssistantVersionSkill 语义相同，局部定义避免 handlers 包反向依赖 service 包。
 type versionSkillMeta struct {
 	Name     string `json:"name"`
 	FilePath string `json:"file_path"`
 }
 
-// writeSkillsIntoInput 把版本 skill tar 推送到节点 apps/<appID>/input/resources/skills/，
+// pushVersionSkills 把版本 skill tar 推送到节点 apps/<appID>/input/resources/skills/<name>.tar，
 // 返回写入 manifest.resources.skills 的相对路径列表。
-//
-// skillsJson 是版本 skills_json 字段的原始字节；空/null 时返回空列表（无 skill）。
-// cfg.SkillBlobs 为 nil（测试装配/无 skill 配置）时跳过推送，返回空列表——
-// 与 writeKnowledgeIntoInput 的 nil-guard 模式一致。
-func (h *AppInitializeHandler) writeSkillsIntoInput(ctx context.Context, nodeID, appID string, skillsJson []byte) ([]string, error) {
-	if h.cfg.SkillBlobs == nil || len(skillsJson) == 0 {
+// skillBlobs 或 uploader 为 nil（测试装配/无 skill 配置）时跳过推送，返回空列表。
+func pushVersionSkills(ctx context.Context, skillBlobs SkillBlobReader, uploader AppInputUploader, nodeID, appID string, skillsJson []byte) ([]string, error) {
+	if skillBlobs == nil || uploader == nil || len(skillsJson) == 0 {
 		return nil, nil
 	}
 	var skills []versionSkillMeta
@@ -719,7 +704,7 @@ func (h *AppInitializeHandler) writeSkillsIntoInput(ctx context.Context, nodeID,
 		if skill.Name == "" || strings.ContainsAny(skill.Name, "/\\") || strings.Contains(skill.Name, "..") {
 			return nil, fmt.Errorf("非法 skill 名称 %q", skill.Name)
 		}
-		rc, err := h.cfg.SkillBlobs.OpenSkill(skill.FilePath)
+		rc, err := skillBlobs.OpenSkill(skill.FilePath)
 		if err != nil {
 			return nil, fmt.Errorf("打开 skill %s 主副本失败: %w", skill.Name, err)
 		}
@@ -729,12 +714,36 @@ func (h *AppInitializeHandler) writeSkillsIntoInput(ctx context.Context, nodeID,
 			return nil, fmt.Errorf("读取 skill %s 主副本失败: %w", skill.Name, readErr)
 		}
 		relPath := "resources/skills/" + skill.Name + ".tar"
-		if err := h.inputFiles.UploadAppInputFile(ctx, nodeID, appID, relPath, bytes.NewReader(body)); err != nil {
+		if err := uploader.UploadAppInputFile(ctx, nodeID, appID, relPath, bytes.NewReader(body)); err != nil {
 			return nil, fmt.Errorf("上传 skill %s 失败: %w", skill.Name, err)
 		}
 		relPaths = append(relPaths, relPath)
 	}
 	return relPaths, nil
+}
+
+// AssembleVersionInputData 把 AssistantVersion 装配成 BuildAppInputData 所需的 AppInputVersionData：
+// 解析 routing_json，并把版本 skill tar 经 uploader 推送到节点 input/resources/skills/。
+// init(writeAppInput) 与 restart(appInputRefresher) 两条链路共用此函数，确保两边写出的
+// manifest 版本数据完全一致，避免「初始化看得见、restart 后字段漂移」。
+func AssembleVersionInputData(ctx context.Context, version sqlc.AssistantVersion, app sqlc.App, nodeID string, skillBlobs SkillBlobReader, uploader AppInputUploader) (AppInputVersionData, error) {
+	appID := uuidToString(app.ID)
+	skillRelPaths, err := pushVersionSkills(ctx, skillBlobs, uploader, nodeID, appID, version.SkillsJson)
+	if err != nil {
+		return AppInputVersionData{}, err
+	}
+	var routing map[string]string
+	if len(version.RoutingJson) > 0 {
+		if err := json.Unmarshal(version.RoutingJson, &routing); err != nil {
+			return AppInputVersionData{}, fmt.Errorf("解析版本 routing_json 失败: %w", err)
+		}
+	}
+	return AppInputVersionData{
+		MainModel:     version.MainModel,
+		Routing:       routing,
+		SystemPrompt:  version.SystemPrompt,
+		SkillRelPaths: skillRelPaths,
+	}, nil
 }
 
 // AppInputVersionData 是 BuildAppInputData 所需的「实例绑定版本」业务数据。

@@ -42,6 +42,11 @@ func (s *fakeHealthStore) SetAppModelSynced(_ context.Context, _ pgtype.UUID) (s
 	return s.app, nil
 }
 
+// SetAppAppliedVersion 实现 AppRuntimeStore 接口；健康检查流程不写版本已应用信息，此处仅满足接口约束。
+func (s *fakeHealthStore) SetAppAppliedVersion(_ context.Context, _ sqlc.SetAppAppliedVersionParams) (sqlc.App, error) {
+	return s.app, nil
+}
+
 func (s *fakeHealthStore) SetAppHealthState(_ context.Context, p sqlc.SetAppHealthStateParams) (sqlc.App, error) {
 	s.healthState = p.HealthStateJson
 	return s.app, nil

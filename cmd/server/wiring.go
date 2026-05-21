@@ -204,24 +204,22 @@ func parseUUIDForWiring(value string) (pgtype.UUID, error) {
 type appInputRefresherQueries interface {
 	GetOrganization(ctx context.Context, id pgtype.UUID) (sqlc.Organization, error)
 	GetUser(ctx context.Context, id pgtype.UUID) (sqlc.User, error)
+	GetAssistantVersion(ctx context.Context, id pgtype.UUID) (sqlc.AssistantVersion, error)
 }
 
 // appInputRefresher 实现 workerhandlers.AppInputRefresher,
 // 在 app_restart_container job 真正调 stop/start 之前, 把节点上的
-// apps/<id>/input/manifest.yaml + resources/*.md 重写成 DB 当前快照。
+// apps/<id>/input/manifest.yaml + resources/*.md 重写成 DB 当前版本快照。
 //
-// 这是 hermes 镜像自包含 (oc-entrypoint 启动重渲染) 流程下「让改 model /
-// 改 prompt / 改 persona 后 restart 真正生效」的关键步骤——T23 把
-// hermesConfigRefresher 删掉时漏了这一步, 直接导致 restart 后
-// oc-entrypoint 仍读到旧 manifest.yaml, 渲染出来的 config.yaml model
-// 字段永远停留在初始化时的值。
+// 与 AppInitializeHandler.writeAppInput 共用 workerhandlers.AssembleVersionInputData
+// 装配版本数据（routing / skill tar 推送），确保 init 与 restart 两条链路写出的
+// manifest 版本字段完全一致，不会出现"初始化看得见、restart 后字段漂移"的问题。
 //
-// 字段取值与 AppInitializeHandler.writeAppInput 严格保持一致(都走
-// workerhandlers.BuildAppInputData), 确保 init 与 restart 两条链路
-// 写出的 manifest 等价, 不会出现"初始化看得见、restart 后字段消失"的偏移。
+// RefreshAppInput 成功后返回 AppInputRefreshResult，包含版本修订与镜像 ref，
+// 供 restart handler 写入 apps.applied_version_revision / applied_image_ref。
 type appInputRefresher struct {
-	// queries 取 organization + owner 上下文。app 由 handler 传入时已经
-	// 是 GetApp 拿到的最新行, 不需要再查一次, 减少一次冗余 IO。
+	// queries 取 organization + owner + assistant_version 上下文。app 由 handler
+	// 传入时已经是 GetApp 拿到的最新行，不需要再查一次，减少一次冗余 IO。
 	queries appInputRefresherQueries
 	// uploader 是按 nodeID 路由的应用 input 文件上传能力 (生产装配
 	// 由 runtime.AgentBackedAdapter 提供, 内部转发到目标节点 agent file API)。
@@ -229,74 +227,109 @@ type appInputRefresher struct {
 	// cipher 用于解密 apps.newapi_key_ciphertext 取出 sk- 明文。
 	// nil 时 RefreshAppInput 直接报错: 没法解密就无法写入正确的 manifest.credentials。
 	cipher *auth.Cipher
-	// opts 携带 init handler 同款的 PersonaText / PlatformPrompt / NewAPIBaseURL /
-	// DefaultModel 兜底配置。BuildAppInputData 根据它构造 hermes.AppInputData。
+	// resolveImage 把版本 image_id 解析为完整 imageRef（含 tag）。
+	// nil 时 RefreshAppInput 直接报错，无法确定运行时镜像 ref。
+	resolveImage func(imageID string) (string, bool)
+	// skillBlobs 提供版本 skill tar 主副本的读能力，用于推送 skill 到节点 input/resources/skills/。
+	// nil 时跳过 skill 推送（测试/旧装配兼容）。
+	skillBlobs workerhandlers.SkillBlobReader
+	// opts 携带 PlatformPrompt / NewAPIBaseURL / DefaultModel 兜底配置。
+	// BuildAppInputData 根据它构造 hermes.AppInputData。
 	opts workerhandlers.AppInputBuildOptions
 }
 
 // newAppInputRefresher 构造生产装配用的 refresher。
-// uploader / cipher 任一为 nil 都允许 (调用 RefreshAppInput 时再报错), 保留
-// 与现有 wiring 一致的"未配某依赖就跳过"语义, 避免启动失败影响其他无关功能。
-func newAppInputRefresher(queries appInputRefresherQueries, uploader workerhandlers.AppInputUploader, cipher *auth.Cipher, opts workerhandlers.AppInputBuildOptions) *appInputRefresher {
+// uploader / cipher / resolveImage 任一为 nil 都允许 (调用 RefreshAppInput 时再报错),
+// 保留与现有 wiring 一致的"未配某依赖就跳过"语义, 避免启动失败影响其他无关功能。
+func newAppInputRefresher(queries appInputRefresherQueries, uploader workerhandlers.AppInputUploader, cipher *auth.Cipher, resolveImage func(string) (string, bool), skillBlobs workerhandlers.SkillBlobReader, opts workerhandlers.AppInputBuildOptions) *appInputRefresher {
 	return &appInputRefresher{
-		queries:  queries,
-		uploader: uploader,
-		cipher:   cipher,
-		opts:     opts,
+		queries:      queries,
+		uploader:     uploader,
+		cipher:       cipher,
+		resolveImage: resolveImage,
+		skillBlobs:   skillBlobs,
+		opts:         opts,
 	}
 }
 
 // RefreshAppInput 实现 workerhandlers.AppInputRefresher。
 //
 // 流程:
-//  1. 校验依赖(queries / uploader / cipher 任一缺失立即报错, 让 restart 失败
-//     比"静默用旧 input 重启"更安全);
-//  2. 取 organization / owner 上下文;
-//  3. 解密 apps.newapi_key_ciphertext 拿到 sk- 明文(BuildAppInputData 需要);
-//  4. 调 workerhandlers.BuildAppInputData 装配 hermes.AppInputData;
-//  5. 调 hermes.WriteAppInput 写到节点 apps/<id>/input/manifest.yaml +
-//     resources/*.md(知识库不在 restart 路径重写, 仍由 knowledge_sync 单独同步)。
+//  1. 校验依赖(queries / uploader / cipher / resolveImage 任一缺失立即报错,
+//     让 restart 失败比"静默用旧 input 重启"更安全);
+//  2. 校验应用已绑定助手版本；
+//  3. 加载版本并解析镜像 ref；
+//  4. 取 organization / owner 上下文；
+//  5. 解密 apps.newapi_key_ciphertext 拿到 sk- 明文(BuildAppInputData 需要);
+//  6. 调 AssembleVersionInputData 装配版本数据（推 skill tar + 解析 routing）；
+//  7. 调 workerhandlers.BuildAppInputData 装配 hermes.AppInputData;
+//  8. 调 hermes.WriteAppInput 写到节点 apps/<id>/input/manifest.yaml +
+//     resources/*.md（知识库不在 restart 路径重写，仍由 knowledge_sync 单独同步）；
+//  9. 返回 AppInputRefreshResult（版本修订 + 镜像 ref），供 handler 记录 applied 信息。
 //
 // 任意步骤失败立即冒泡: handler 上层会把错误带回 worker 触发重试, 重试时
 // 这里完全幂等(覆盖写 + DB 重新读最新值)。
-func (r *appInputRefresher) RefreshAppInput(ctx context.Context, nodeID string, app sqlc.App) error {
+func (r *appInputRefresher) RefreshAppInput(ctx context.Context, nodeID string, app sqlc.App) (workerhandlers.AppInputRefreshResult, error) {
 	if r.queries == nil {
-		return fmt.Errorf("appInputRefresher queries 未注入")
+		return workerhandlers.AppInputRefreshResult{}, fmt.Errorf("appInputRefresher queries 未注入")
 	}
 	if r.uploader == nil {
-		return fmt.Errorf("appInputRefresher uploader 未注入")
+		return workerhandlers.AppInputRefreshResult{}, fmt.Errorf("appInputRefresher uploader 未注入")
 	}
 	if r.cipher == nil {
-		return fmt.Errorf("appInputRefresher cipher 未注入")
+		return workerhandlers.AppInputRefreshResult{}, fmt.Errorf("appInputRefresher cipher 未注入")
 	}
 	if nodeID == "" {
-		return fmt.Errorf("appInputRefresher 收到空 nodeID")
+		return workerhandlers.AppInputRefreshResult{}, fmt.Errorf("appInputRefresher 收到空 nodeID")
+	}
+	if r.resolveImage == nil {
+		return workerhandlers.AppInputRefreshResult{}, fmt.Errorf("appInputRefresher resolveImage 未注入")
+	}
+	if !app.VersionID.Valid {
+		return workerhandlers.AppInputRefreshResult{}, fmt.Errorf("应用未绑定助手版本, 无法刷新 input")
+	}
+	version, err := r.queries.GetAssistantVersion(ctx, app.VersionID)
+	if err != nil {
+		return workerhandlers.AppInputRefreshResult{}, fmt.Errorf("加载助手版本失败: %w", err)
+	}
+	imageRef, ok := r.resolveImage(version.ImageID)
+	if !ok {
+		return workerhandlers.AppInputRefreshResult{}, fmt.Errorf("版本镜像 %s 未在配置中", version.ImageID)
 	}
 	org, err := r.queries.GetOrganization(ctx, app.OrgID)
 	if err != nil {
-		return fmt.Errorf("查询组织失败: %w", err)
+		return workerhandlers.AppInputRefreshResult{}, fmt.Errorf("查询组织失败: %w", err)
 	}
 	owner, err := r.queries.GetUser(ctx, app.OwnerUserID)
 	if err != nil {
-		return fmt.Errorf("查询应用 owner 失败: %w", err)
+		return workerhandlers.AppInputRefreshResult{}, fmt.Errorf("查询应用 owner 失败: %w", err)
 	}
 	// app.NewapiKeyCiphertext 为空意味着应用从未初始化完毕,
 	// 此时调 restart 是误用; 让错误冒泡比写出无密钥的 manifest 更安全。
 	if !app.NewapiKeyCiphertext.Valid || app.NewapiKeyCiphertext.String == "" {
-		return fmt.Errorf("应用 newapi_key_ciphertext 为空, 无法刷新 input")
+		return workerhandlers.AppInputRefreshResult{}, fmt.Errorf("应用 newapi_key_ciphertext 为空, 无法刷新 input")
 	}
 	plain, err := r.cipher.Decrypt(app.NewapiKeyCiphertext.String)
 	if err != nil {
-		return fmt.Errorf("解密 api_key 失败: %w", err)
+		return workerhandlers.AppInputRefreshResult{}, fmt.Errorf("解密 api_key 失败: %w", err)
 	}
-	in := workerhandlers.BuildAppInputData(app, org, owner, string(plain), r.opts)
+	// 通过共用的 AssembleVersionInputData 装配版本数据（推 skill tar + 解析 routing），
+	// 与 init 链路共享同一逻辑，避免两条链路写出的 manifest 版本字段漂移。
+	versionData, err := workerhandlers.AssembleVersionInputData(ctx, version, app, nodeID, r.skillBlobs, r.uploader)
+	if err != nil {
+		return workerhandlers.AppInputRefreshResult{}, fmt.Errorf("装配版本输入数据失败: %w", err)
+	}
+	in := workerhandlers.BuildAppInputData(app, org, owner, string(plain), versionData, r.opts)
 	// 复用 init handler 同款 adapter 把 (uploader + nodeID) 适配成 hermes.AppInputWriter,
 	// 保证 init 与 restart 走完全一致的上传路径(底层都是 agent input/file 路由)。
 	writer := workerhandlers.NewAppInputUploadAdapter(r.uploader, nodeID)
 	if err := hermes.WriteAppInput(ctx, writer, in.AppID, in); err != nil {
-		return fmt.Errorf("写入应用 input 失败: %w", err)
+		return workerhandlers.AppInputRefreshResult{}, fmt.Errorf("写入应用 input 失败: %w", err)
 	}
-	return nil
+	return workerhandlers.AppInputRefreshResult{
+		VersionRevision: version.Revision,
+		ImageRef:        imageRef,
+	}, nil
 }
 
 // runtimeInspectorWrapper 把 runtime.Adapter.InspectContainer 适配成 service.RuntimeInspector。

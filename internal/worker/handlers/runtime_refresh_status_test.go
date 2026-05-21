@@ -57,6 +57,11 @@ func (s *fakeRuntimeSnapshotStore) SetAppModelSynced(_ context.Context, _ pgtype
 	return s.app, nil
 }
 
+// SetAppAppliedVersion 实现 AppRuntimeStore 接口；刷新状态流程不写版本已应用信息，此处仅满足接口约束。
+func (s *fakeRuntimeSnapshotStore) SetAppAppliedVersion(_ context.Context, _ sqlc.SetAppAppliedVersionParams) (sqlc.App, error) {
+	return s.app, nil
+}
+
 type fakeRuntimeInspector struct {
 	info       runtime.ContainerInfo
 	stats      runtime.ContainerStats

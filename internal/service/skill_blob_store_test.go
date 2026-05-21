@@ -30,3 +30,25 @@ func TestFSSkillBlobStoreRejectsUnsafeName(t *testing.T) {
 	_, err := bs.PutSkill("ver-1", "../evil", []byte("x"))
 	require.Error(t, err)
 }
+
+// TestFSSkillBlobStoreOpenSkillRejectsTraversal 验证 OpenSkill 拒绝目录穿越路径，
+// 同时对不存在的合法路径返回打开失败错误——覆盖 traversal 拒绝与 open 失败两条分支。
+func TestFSSkillBlobStoreOpenSkillRejectsTraversal(t *testing.T) {
+	tmp := t.TempDir()
+	bs := NewFSSkillBlobStore(tmp)
+
+	// 穿越路径：../../etc/passwd 净化后落在 root 之外，应返回含"非法 skill 路径"的错误。
+	_, err := bs.OpenSkill("../../etc/passwd")
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "非法 skill 路径")
+
+	// 穿越路径变体：../sibling/x.tar 同样落在 root 之外，应被同等拒绝。
+	_, err = bs.OpenSkill("../" + filepath.Base(tmp) + "_sibling/x.tar")
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "非法 skill 路径")
+
+	// 合法但不存在的路径：路径净化后仍在 root 内，应通过 traversal 检查并以打开失败结束。
+	_, err = bs.OpenSkill("versions/v1/skills/missing.tar")
+	require.Error(t, err)
+	assert.NotContains(t, err.Error(), "非法 skill 路径", "合法路径不应触发 traversal 拒绝")
+}
