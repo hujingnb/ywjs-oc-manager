@@ -169,11 +169,9 @@ func toAssistantVersionResult(row sqlc.AssistantVersion) (AssistantVersionResult
 			return AssistantVersionResult{}, fmt.Errorf("解析 routing_json 失败: %w", err)
 		}
 	}
-	skills := []AssistantVersionSkill{}
-	if len(row.SkillsJson) > 0 {
-		if err := json.Unmarshal(row.SkillsJson, &skills); err != nil {
-			return AssistantVersionResult{}, fmt.Errorf("解析 skills_json 失败: %w", err)
-		}
+	skills, err := decodeSkills(row.SkillsJson)
+	if err != nil {
+		return AssistantVersionResult{}, err
 	}
 	return AssistantVersionResult{
 		ID:           uuidToString(row.ID),

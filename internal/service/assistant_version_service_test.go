@@ -6,6 +6,7 @@ import (
 
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgtype"
+	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
 	"oc-manager/internal/auth"
@@ -156,3 +157,43 @@ func (fakeBlobStore) PutSkill(versionID, skillName string, _ []byte) (string, er
 	return "versions/" + versionID + "/skills/" + skillName + ".tar", nil
 }
 func (fakeBlobStore) DeleteSkill(string) error { return nil }
+
+// TestAssistantVersionListReturnsVersions 验证有权限时 List 返回库中的版本，并正确反序列化 routing/skills。
+func TestAssistantVersionListReturnsVersions(t *testing.T) {
+	store := newFakeAVStore()
+	id := mustParseUUID("00000000-0000-0000-0000-0000000000d1")
+	store.versions[uuidToString(id)] = sqlc.AssistantVersion{
+		ID: id, Name: "标准版", Description: "默认", SystemPrompt: "p",
+		ImageID: "v2026.5.16", MainModel: "qwen",
+		RoutingJson: []byte(`{"vision":"gpt"}`), SkillsJson: []byte(`[]`), Revision: 2,
+	}
+	svc := newTestAVService(t, store)
+	out, err := svc.List(context.Background(), platformPrincipal())
+	require.NoError(t, err)
+	require.Len(t, out, 1)
+	assert.Equal(t, "标准版", out[0].Name)
+	assert.Equal(t, "gpt", out[0].Routing["vision"])
+	assert.EqualValues(t, 2, out[0].Revision)
+}
+
+// TestAssistantVersionGetReturnsVersion 验证有权限时 Get 按 id 返回正确组装的版本视图。
+func TestAssistantVersionGetReturnsVersion(t *testing.T) {
+	store := newFakeAVStore()
+	id := mustParseUUID("00000000-0000-0000-0000-0000000000d2")
+	store.versions[uuidToString(id)] = sqlc.AssistantVersion{
+		ID: id, Name: "高级版", SystemPrompt: "p", ImageID: "v2026.5.16",
+		MainModel: "qwen", RoutingJson: []byte(`{}`), SkillsJson: []byte(`[]`), Revision: 1,
+	}
+	svc := newTestAVService(t, store)
+	got, err := svc.Get(context.Background(), platformPrincipal(), uuidToString(id))
+	require.NoError(t, err)
+	assert.Equal(t, "高级版", got.Name)
+	assert.Equal(t, "qwen", got.MainModel)
+}
+
+// TestAssistantVersionGetRejectsInvalidUUID 验证传入非法 UUID 字符串时返回 NotFound。
+func TestAssistantVersionGetRejectsInvalidUUID(t *testing.T) {
+	svc := newTestAVService(t, newFakeAVStore())
+	_, err := svc.Get(context.Background(), platformPrincipal(), "not-a-uuid")
+	require.ErrorIs(t, err, ErrAssistantVersionNotFound)
+}
