@@ -449,11 +449,17 @@ func (s *AssistantVersionService) DeleteSkill(ctx context.Context, principal aut
 	if removed == nil {
 		return AssistantVersionResult{}, fmt.Errorf("%w: skill %s 不存在", ErrAssistantVersionInvalid, skillName)
 	}
-	// 先删 blob 再更新库；与 UploadSkill 的顺序相反，保持「DB 不指向已不存在文件」由 persistSkills 收尾。
+	// 先更新库（移除 skills_json 条目）再删 blob：persistSkills 失败时 blob 仍在、
+	// DB 仍指向有效文件，不会出现「DB 指向已不存在文件」的损坏状态；blob 删除失败
+	// 时最多留下一个无引用的 tar，可由后续清理任务回收。
+	result, err := s.persistSkills(ctx, row, kept)
+	if err != nil {
+		return AssistantVersionResult{}, err
+	}
 	if err := s.blobs.DeleteSkill(removed.FilePath); err != nil {
 		return AssistantVersionResult{}, fmt.Errorf("删除 skill tar 失败: %w", err)
 	}
-	return s.persistSkills(ctx, row, kept)
+	return result, nil
 }
 
 // persistSkills 把更新后的 skill 列表写库并把 revision +1（skill 变更属于容器相关变更）。

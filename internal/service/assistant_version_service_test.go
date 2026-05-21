@@ -509,3 +509,10 @@ func TestAssistantVersionDeleteSkillDeniesOrgAdmin(t *testing.T) {
 	_, err := svc.DeleteSkill(context.Background(), orgAdminPrincipal(), id, "weather")
 	require.ErrorIs(t, err, ErrAssistantVersionDenied)
 }
+
+// TestAssistantVersionListRuntimeImagesDeniesMember 验证普通成员不能读取镜像列表。
+func TestAssistantVersionListRuntimeImagesDeniesMember(t *testing.T) {
+	svc := newTestAVService(t, newFakeAVStore())
+	_, err := svc.ListRuntimeImages(context.Background(), auth.Principal{Role: domain.UserRoleOrgMember})
+	require.ErrorIs(t, err, ErrAssistantVersionDenied)
+}
