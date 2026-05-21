@@ -220,11 +220,13 @@ func (s *AssistantVersionService) validateInput(in AssistantVersionInput) error 
 	if trimSpace(in.SystemPrompt) == "" {
 		return fmt.Errorf("%w: 内置提示词不能为空", ErrAssistantVersionInvalid)
 	}
-	if !s.images.HasRuntimeImage(in.ImageID) {
-		return fmt.Errorf("%w: 镜像 %s 不存在于配置", ErrAssistantVersionInvalid, in.ImageID)
+	imageID := trimSpace(in.ImageID)
+	if !s.images.HasRuntimeImage(imageID) {
+		return fmt.Errorf("%w: 镜像 %s 不存在于配置", ErrAssistantVersionInvalid, imageID)
 	}
-	if trimSpace(in.MainModel) == "" || !s.models.HasModel(in.MainModel) {
-		return fmt.Errorf("%w: 主模型 %s 不可用", ErrAssistantVersionInvalid, in.MainModel)
+	mainModel := trimSpace(in.MainModel)
+	if mainModel == "" || !s.models.HasModel(mainModel) {
+		return fmt.Errorf("%w: 主模型 %s 不可用", ErrAssistantVersionInvalid, mainModel)
 	}
 	valid := make(map[string]struct{}, len(auxiliarySlots))
 	for _, slot := range auxiliarySlots {
@@ -234,17 +236,19 @@ func (s *AssistantVersionService) validateInput(in AssistantVersionInput) error 
 		if _, ok := valid[slot]; !ok {
 			return fmt.Errorf("%w: 未知路由槽位 %s", ErrAssistantVersionInvalid, slot)
 		}
-		if trimSpace(model) == "" {
+		m := trimSpace(model)
+		if m == "" {
 			continue
 		}
-		if !s.models.HasModel(model) {
-			return fmt.Errorf("%w: 路由槽位 %s 的模型 %s 不可用", ErrAssistantVersionInvalid, slot, model)
+		if !s.models.HasModel(m) {
+			return fmt.Errorf("%w: 路由槽位 %s 的模型 %s 不可用", ErrAssistantVersionInvalid, slot, m)
 		}
 	}
 	return nil
 }
 
 // normalizeRouting 丢弃空值槽位，返回紧凑的 routing map。
+// 调用前必须已经过 validateInput 校验（槽位名合法、模型存在）。
 func normalizeRouting(in map[string]string) map[string]string {
 	out := map[string]string{}
 	for slot, model := range in {
@@ -277,7 +281,7 @@ func (s *AssistantVersionService) Create(ctx context.Context, principal auth.Pri
 		Name:         trimSpace(in.Name),
 		Description:  trimSpace(in.Description),
 		SystemPrompt: in.SystemPrompt,
-		ImageID:      in.ImageID,
+		ImageID:      trimSpace(in.ImageID),
 		MainModel:    trimSpace(in.MainModel),
 		RoutingJson:  routingJSON,
 		SkillsJson:   []byte("[]"),

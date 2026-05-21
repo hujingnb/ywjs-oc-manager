@@ -2,6 +2,7 @@ package service
 
 import (
 	"context"
+	"errors"
 	"testing"
 
 	"github.com/jackc/pgx/v5"
@@ -274,3 +275,13 @@ func (rejectingImageResolver) ListRuntimeImages() []RuntimeImageOption { return 
 type rejectingModelValidator struct{}
 
 func (rejectingModelValidator) HasModel(string) bool { return false }
+
+// TestAssistantVersionCreateWrapsStoreError 验证底层 store 写入失败时 Create 返回包装后的错误。
+func TestAssistantVersionCreateWrapsStoreError(t *testing.T) {
+	store := newFakeAVStore()
+	store.createErr = errors.New("db down")
+	svc := newTestAVService(t, store)
+	_, err := svc.Create(context.Background(), platformPrincipal(), validCreateInput())
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "db down")
+}
