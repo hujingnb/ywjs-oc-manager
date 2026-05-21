@@ -398,3 +398,17 @@ func TestCanManageAppCron(t *testing.T) {
 	}
 	runAppCases(t, CanManageAppCron, cases)
 }
+
+// TestCanManageAssistantVersion 验证仅平台管理员可写助手版本。
+func TestCanManageAssistantVersion(t *testing.T) {
+	assert.True(t, CanManageAssistantVersion(Principal{Role: domain.UserRolePlatformAdmin}))
+	assert.False(t, CanManageAssistantVersion(Principal{Role: domain.UserRoleOrgAdmin}))
+	assert.False(t, CanManageAssistantVersion(Principal{Role: domain.UserRoleOrgMember}))
+}
+
+// TestCanViewAssistantVersion 验证平台管理员与组织管理员可读助手版本，普通成员不可。
+func TestCanViewAssistantVersion(t *testing.T) {
+	assert.True(t, CanViewAssistantVersion(Principal{Role: domain.UserRolePlatformAdmin}))
+	assert.True(t, CanViewAssistantVersion(Principal{Role: domain.UserRoleOrgAdmin}))
+	assert.False(t, CanViewAssistantVersion(Principal{Role: domain.UserRoleOrgMember}))
+}

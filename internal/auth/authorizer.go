@@ -270,3 +270,22 @@ func CanViewAppCron(p Principal, appOrgID, appOwnerUserID string) bool {
 func CanManageAppCron(p Principal, appOrgID, appOwnerUserID string) bool {
 	return CanViewApp(p, appOrgID, appOwnerUserID)
 }
+
+// 助手版本资源 ----------------------------------------------------------
+
+// CanManageAssistantVersion 判断主体能否创建/编辑/删除助手版本。
+// 助手版本是平台级目录，仅平台管理员可写。
+func CanManageAssistantVersion(p Principal) bool {
+	return p.Role == domain.UserRolePlatformAdmin
+}
+
+// CanViewAssistantVersion 判断主体能否查看助手版本。
+// 平台管理员维护目录，组织管理员需读取版本以便创建实例时选用；普通成员不可见。
+func CanViewAssistantVersion(p Principal) bool {
+	switch p.Role {
+	case domain.UserRolePlatformAdmin, domain.UserRoleOrgAdmin:
+		return true
+	default:
+		return false
+	}
+}
