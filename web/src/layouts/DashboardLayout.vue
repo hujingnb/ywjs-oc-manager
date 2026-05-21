@@ -79,7 +79,7 @@ import {
   type MenuOption,
 } from 'naive-ui'
 import {
-  BarChart3, BookOpen, Bot, Building2, FileSearch, Gauge,
+  BarChart3, BookOpen, Bot, Boxes, Building2, FileSearch, Gauge,
   LayoutDashboard, LogOut, RefreshCw, Server, Users, Wallet,
 } from 'lucide-vue-next'
 
@@ -106,6 +106,7 @@ const activeKey = computed(() => {
   const prefixes = [
     '/platform/dashboard',
     '/organizations',
+    '/assistant-versions',
     '/members',
     '/knowledge',
     '/usage',
@@ -139,6 +140,7 @@ const menuOptions = computed<MenuOption[]>(() => {
   if (isPlatformAdmin.value) {
     items.push({ key: '/platform/dashboard', label: '平台', icon: () => h(Gauge, { size: 18 }) })
     items.push({ key: '/organizations', label: '组织', icon: () => h(Building2, { size: 18 }) })
+    items.push({ key: '/assistant-versions', label: '助手版本', icon: () => h(Boxes, { size: 18 }) })
   }
   // 成员/审计 是组织管理视角，普通成员不展示。
   if (!isOrgMember.value) {

@@ -23,6 +23,7 @@ import LoginPage from '@/pages/login/LoginPage.vue'
 import CreateMemberPage from '@/pages/org/CreateMemberPage.vue'
 import MembersPage from '@/pages/org/MembersPage.vue'
 import PersonaPage from '@/pages/org/PersonaPage.vue'
+import AssistantVersionsPage from '@/pages/platform/AssistantVersionsPage.vue'
 import OrganizationsPage from '@/pages/platform/OrganizationsPage.vue'
 import PlatformDashboardPage from '@/pages/platform/PlatformDashboardPage.vue'
 import RechargePage from '@/pages/platform/RechargePage.vue'
@@ -55,6 +56,7 @@ export const router = createRouter({
         { path: '', component: RoleAwareHome },
         { path: 'dashboard', component: DashboardHome },
         { path: 'organizations', component: OrganizationsPage, meta: { allowedRoles: PLATFORM_ONLY } },
+        { path: 'assistant-versions', component: AssistantVersionsPage, meta: { allowedRoles: PLATFORM_ONLY } },
         { path: 'platform/dashboard', component: PlatformDashboardPage, meta: { allowedRoles: PLATFORM_ONLY } },
         { path: 'platform/organizations/:orgId/recharge', component: RechargePage, meta: { allowedRoles: PLATFORM_ONLY } },
         { path: 'members', component: MembersPage, meta: { allowedRoles: ORG_ADMIN_ABOVE } },
