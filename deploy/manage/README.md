@@ -27,8 +27,8 @@ docker compose up -d
 
 | 变量 | 说明 |
 |------|------|
-| `OCM_MANAGER_IMAGE` | manager-api 生产镜像，aliyun ACR 私有仓库，使用具体版本 tag 或 `@sha256:` digest（禁用 `latest`） |
-| `OCM_WEB_IMAGE` | manager-web 生产镜像，aliyun ACR 私有仓库，使用具体版本 tag 或 `@sha256:` digest（禁用 `latest`） |
+| `OCM_MANAGER_IMAGE` | manager-api 生产镜像，aliyun ACR 私有仓库，使用 Makefile 生成的 `YYYY-MM-DD-HH-MM-SS-<commit8>` tag 或 `@sha256:` digest（禁用 `latest`） |
+| `OCM_WEB_IMAGE` | manager-web 生产镜像，aliyun ACR 私有仓库，使用 Makefile 生成的 `YYYY-MM-DD-HH-MM-SS-<commit8>` tag 或 `@sha256:` digest（禁用 `latest`） |
 | `MANAGER_POSTGRES_IMAGE` | PostgreSQL 镜像，aliyun ywjs_public 私有 ACR 镜像（原 `docker.io/library/postgres:17-alpine`） |
 | `MANAGER_REDIS_IMAGE` | Redis 镜像，aliyun ywjs_public 私有 ACR 镜像（原 `docker.io/library/redis:7`） |
 | `MANAGER_NGINX_IMAGE` | nginx 镜像，aliyun ywjs_public 私有 ACR 镜像（原 `docker.io/library/nginx:1.27-alpine`） |
