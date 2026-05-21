@@ -473,7 +473,7 @@ def cmd_capabilities(args) -> int:
             or info.get("hermes_ref")
             or info.get("hermes_version")
         ),
-        "variant": info.get("variant") or info.get("oc_image_variant") or "hermes-v2026.5.16",
+        "variant": info.get("variant") or info.get("oc_image_variant") or "hermes-v2026.5.7",
         "verbs": FUNCTIONAL_VERBS,
         "features": {
             "status": True,

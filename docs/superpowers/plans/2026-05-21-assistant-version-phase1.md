@@ -260,11 +260,11 @@ import (
 func TestResolveRuntimeImageFound(t *testing.T) {
 	imgs := []RuntimeImageConfig{
 		{ID: "v2026.5.16", Label: "当前", Ref: "repo/hermes:v2026.5.16-x"},
-		{ID: "v2026.5.15", Label: "旧版", Ref: "repo/hermes:v2026.5.15-x"},
+		{ID: "v2026.5.7", Label: "旧版", Ref: "repo/hermes:v2026.5.7-x"},
 	}
-	ref, ok := ResolveRuntimeImage(imgs, "v2026.5.15")
+	ref, ok := ResolveRuntimeImage(imgs, "v2026.5.7")
 	require.True(t, ok)
-	assert.Equal(t, "repo/hermes:v2026.5.15-x", ref)
+	assert.Equal(t, "repo/hermes:v2026.5.7-x", ref)
 }
 
 // TestResolveRuntimeImageMissing 验证未知 id 返回 ok=false。
@@ -389,9 +389,9 @@ Expected: 全部 PASS。
     - id: "v2026.5.16"
       label: "Hermes v2026.5.16（当前）"
       ref: "crpi-nu3ibz4f07feyghi.cn-beijing.personal.cr.aliyuncs.com/ywjs_app/oc-manager-hermes:v2026.5.16-2026-05-21-12-00-00"
-    - id: "v2026.5.15"
-      label: "Hermes v2026.5.15（旧版）"
-      ref: "crpi-nu3ibz4f07feyghi.cn-beijing.personal.cr.aliyuncs.com/ywjs_app/oc-manager-hermes:v2026.5.15-2026-05-21-12-00-00"
+    - id: "v2026.5.7"
+      label: "Hermes v2026.5.7（旧版）"
+      ref: "crpi-nu3ibz4f07feyghi.cn-beijing.personal.cr.aliyuncs.com/ywjs_app/oc-manager-hermes:v2026.5.7-2026-05-21-12-00-00"
 ```
 
 在 `deploy/manage/config/manager.example.yaml` 的 `hermes:` 段做同样追加（ref 用占位示例值即可）。
@@ -2786,7 +2786,7 @@ Expected: `000023` 迁移已应用。
 
 本计划交付后，依次为以下 Phase 各写一份独立计划（每份在前一 Phase 落地后编写，以引用真实类型签名）：
 - **Phase 1b：** 前端助手版本管理页（列表 / 编辑表单 / skill 上传组件 / 路由与导航）。
-- **Phase 2：** manifest 契约 v2 + oc-entrypoint 改动 + 第二个 variant `hermes-v2026.5.15`。
+- **Phase 2：** manifest 契约 v2 + oc-entrypoint 改动 + 第二个 variant `hermes-v2026.5.7`。
 - **Phase 3：** 组织 allowlist + 实例绑定版本 + 创建流程改造。
 - **Phase 4：** 实例初始化/重启写入版本数据 + `version_synced` 检测 + 切换版本。
 - **Phase 5：** 切换消费方至新列，再删除旧 persona/model 列与表、清理 dead code。

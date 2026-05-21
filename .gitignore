@@ -18,6 +18,11 @@ web/test-results/
 # 顶层临时编译产物（agent 二进制 build 时出现）
 /agent
 
+# Python 字节码缓存（runtime/hermes 下 oc-entrypoint 跑 pytest 时产生）
+__pycache__/
+*.pyc
+.pytest_cache/
+
 config/manager.yaml
 config/agent.yaml
 

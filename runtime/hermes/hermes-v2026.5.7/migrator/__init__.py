@@ -1,7 +1,7 @@
 """跨 variant 数据迁移 dispatch。
 
-当前 variant 是 hermes-v2026.5.15。它由历史 hermes-main 目录重命名而来，
-因此允许 hermes-main → hermes-v2026.5.15 作为 no-op 迁移。
+当前 variant 是 hermes-v2026.5.7。它由历史 hermes-main 目录重命名而来，
+因此允许 hermes-main → hermes-v2026.5.7 作为 no-op 迁移。
 未来版本号可能包含 "."，迁移模块名必须先规整为 Python-safe 后缀。
 """
 
@@ -22,7 +22,7 @@ def run(prev_variant: Optional[str], curr_variant: str, data_root: Path) -> Opti
     """
     if prev_variant is None or prev_variant == curr_variant:
         return None
-    if curr_variant == "hermes-v2026.5.15" and prev_variant in LEGACY_NOOP_PREV_VARIANTS:
+    if curr_variant == "hermes-v2026.5.7" and prev_variant in LEGACY_NOOP_PREV_VARIANTS:
         return {"from": prev_variant, "to": curr_variant, "mode": "noop_rename"}
     module_name = f"migrator.from_{_migration_module_suffix(prev_variant)}"
     try:

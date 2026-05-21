@@ -315,7 +315,7 @@ def verb_capabilities(args) -> int:
         "contract_version": CONTRACT_VERSION,
         "oc_kanban_version": OC_KANBAN_VERSION,
         "hermes_version": info.get("hermes_ref") or info.get("hermes_version"),
-        "variant": info.get("variant") or info.get("oc_image_variant") or "hermes-v2026.5.16",
+        "variant": info.get("variant") or info.get("oc_image_variant") or "hermes-v2026.5.7",
         "verbs": FUNCTIONAL_VERBS if real else [],
         "features": {"write": real, "watch": real, "runs": real, "stats": real},
     })

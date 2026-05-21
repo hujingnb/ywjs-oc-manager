@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""hermes-v2026.5.16 ENTRYPOINT。
+"""hermes-v2026.5.7 ENTRYPOINT。
 
 phase 1 load manifest → 2 load state → 3 migrate → 4 render → 5 commit state → 6 exec hermes。
 任何 phase 失败统一退出 1；详细错误通过 lib.logging.emit 写 stderr JSON。

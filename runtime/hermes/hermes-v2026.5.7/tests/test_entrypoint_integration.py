@@ -41,7 +41,7 @@ def test_entrypoint_first_boot(tmp_path: Path) -> None:
         "OC_TEST_NO_EXEC": "1",
         "OC_INPUT_DIR": str(input_root),
         "OC_DATA_DIR": str(data_root),
-        "OC_IMAGE_VARIANT": "hermes-v2026.5.15",
+        "OC_IMAGE_VARIANT": "hermes-v2026.5.7",
     }
     source_script = Path(__file__).resolve().parent.parent / "oc-entrypoint.py"
     # 测试既支持源码目录布局，也支持 Docker 镜像内的 /usr/local/bin 安装布局。
@@ -56,5 +56,5 @@ def test_entrypoint_first_boot(tmp_path: Path) -> None:
 
     # phase 5 写下 .oc-state.json
     state = json.loads((data_root / ".oc-state.json").read_text())
-    assert state["image_variant"] == "hermes-v2026.5.15"
+    assert state["image_variant"] == "hermes-v2026.5.7"
     assert state["last_migrate_from"] is None
