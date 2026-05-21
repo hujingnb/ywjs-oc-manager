@@ -94,7 +94,35 @@
             </n-form-item>
           </n-grid-item>
 
-          <!-- SKILL_SECTION_ANCHOR：Task 3 在此处插入 skill 管理区 -->
+          <!-- skill 管理：仅编辑态显示，操作即时生效 -->
+          <n-grid-item v-if="editingId" :span="2">
+            <n-form-item label="Skill 列表">
+              <div style="display: grid; gap: 8px; width: 100%">
+                <div v-if="editingSkills.length === 0" class="state-text">暂无 skill</div>
+                <div
+                  v-for="skill in editingSkills"
+                  :key="skill.name"
+                  style="display: flex; align-items: center; justify-content: space-between; gap: 12px"
+                >
+                  <span>{{ skill.name }} <small class="data-table-subtitle">{{ formatBytes(skill.file_size) }}</small></span>
+                  <n-button size="small" tertiary @click="onDeleteSkill(skill.name)">删除</n-button>
+                </div>
+                <div>
+                  <input
+                    ref="skillFileInput"
+                    type="file"
+                    accept=".tar"
+                    style="display: none"
+                    @change="onSkillFileChange"
+                  />
+                  <n-button size="small" :loading="skillUploading" @click="triggerSkillUpload">
+                    上传 skill tar
+                  </n-button>
+                </div>
+                <p v-if="skillFeedback" class="state-text" :class="{ danger: skillFeedbackError }">{{ skillFeedback }}</p>
+              </div>
+            </n-form-item>
+          </n-grid-item>
 
           <n-grid-item :span="2">
             <n-space justify="end">
@@ -123,10 +151,13 @@ import {
   useAssistantVersionsQuery,
   useCreateAssistantVersion,
   useDeleteAssistantVersion,
+  useDeleteAssistantVersionSkill,
   useRuntimeImagesQuery,
   useUpdateAssistantVersion,
+  useUploadAssistantVersionSkill,
   type AssistantVersionDTO,
   type AssistantVersionFormPayload,
+  type AssistantVersionSkillDTO,
 } from '@/api/hooks/useAssistantVersions'
 
 // AssistantVersionsPage 是平台管理员的助手版本目录管理页：列表 + 新建/编辑 + 删除。
@@ -134,6 +165,63 @@ const { data: versions, isLoading, error } = useAssistantVersionsQuery()
 const createMutation = useCreateAssistantVersion()
 const updateMutation = useUpdateAssistantVersion()
 const deleteMutation = useDeleteAssistantVersion()
+
+// skill 管理状态：editingSkills 是当前编辑版本的 skill 列表，随上传/删除即时刷新。
+const uploadSkillMutation = useUploadAssistantVersionSkill()
+const deleteSkillMutation = useDeleteAssistantVersionSkill()
+const editingSkills = ref<AssistantVersionSkillDTO[]>([])
+const skillFileInput = ref<HTMLInputElement | null>(null)
+const skillUploading = ref(false)
+const skillFeedback = ref('')
+const skillFeedbackError = ref(false)
+
+// formatBytes 把字节数格式化为人类可读大小。
+function formatBytes(n: number): string {
+  if (n < 1024) return `${n} B`
+  if (n < 1024 * 1024) return `${(n / 1024).toFixed(1)} KB`
+  return `${(n / 1024 / 1024).toFixed(1)} MB`
+}
+
+// triggerSkillUpload 触发隐藏的文件选择框。
+function triggerSkillUpload() {
+  skillFileInput.value?.click()
+}
+
+// onSkillFileChange 在选中文件后立即上传到当前编辑的版本。
+async function onSkillFileChange(event: Event) {
+  const input = event.target as HTMLInputElement
+  const file = input.files?.[0]
+  input.value = '' // 允许重复选择同名文件
+  if (!file || !editingId.value) return
+  skillUploading.value = true
+  skillFeedback.value = ''
+  skillFeedbackError.value = false
+  try {
+    const updated = await uploadSkillMutation.mutateAsync({ id: editingId.value, file })
+    editingSkills.value = updated.skills
+    skillFeedback.value = `已上传 skill ${file.name}`
+  } catch (err) {
+    skillFeedbackError.value = true
+    skillFeedback.value = err instanceof Error ? err.message : '上传失败'
+  } finally {
+    skillUploading.value = false
+  }
+}
+
+// onDeleteSkill 从当前编辑的版本删除一个 skill。
+async function onDeleteSkill(skillName: string) {
+  if (!editingId.value) return
+  skillFeedback.value = ''
+  skillFeedbackError.value = false
+  try {
+    const updated = await deleteSkillMutation.mutateAsync({ id: editingId.value, skillName })
+    editingSkills.value = updated.skills
+    skillFeedback.value = `已删除 skill ${skillName}`
+  } catch (err) {
+    skillFeedbackError.value = true
+    skillFeedback.value = err instanceof Error ? err.message : '删除失败'
+  }
+}
 
 // 表单状态：editingId 为 null 时是新建，否则是编辑该 id。
 const formVisible = ref(false)
@@ -181,6 +269,8 @@ function openCreate() {
   editingId.value = null
   submitError.value = null
   actionFeedback.value = ''
+  editingSkills.value = []
+  skillFeedback.value = ''
   formVisible.value = true
 }
 
@@ -196,6 +286,8 @@ function openEdit(version: AssistantVersionDTO) {
   editingId.value = version.id
   submitError.value = null
   actionFeedback.value = ''
+  editingSkills.value = [...version.skills]
+  skillFeedback.value = ''
   formVisible.value = true
 }
 
