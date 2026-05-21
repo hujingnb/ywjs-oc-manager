@@ -109,6 +109,34 @@ function mountPage() {
             ))
           },
         }),
+        // naive-ui 内部以 'n-select' 和 'Select' 注册组件，VTU stub 需覆盖三个 key
+        // 才能可靠拦截模板中的 <n-select> 元素，与 MembersPage.spec.ts 保持一致。
+        'n-select': defineComponent({
+          props: ['value', 'options', 'disabled'],
+          emits: ['update:value'],
+          setup(props, { emit }) {
+            return () => h('select', {
+              disabled: props.disabled,
+              value: props.value,
+              onChange: (event: Event) => emit('update:value', (event.target as HTMLSelectElement).value),
+            }, (props.options ?? []).map((option: { label: string; value: string }) =>
+              h('option', { value: option.value }, option.label),
+            ))
+          },
+        }),
+        Select: defineComponent({
+          props: ['value', 'options', 'disabled'],
+          emits: ['update:value'],
+          setup(props, { emit }) {
+            return () => h('select', {
+              disabled: props.disabled,
+              value: props.value,
+              onChange: (event: Event) => emit('update:value', (event.target as HTMLSelectElement).value),
+            }, (props.options ?? []).map((option: { label: string; value: string }) =>
+              h('option', { value: option.value }, option.label),
+            ))
+          },
+        }),
         NSpace: { template: '<div><slot /></div>' },
         NTag: { template: '<span><slot /></span>' },
       },
@@ -131,10 +159,10 @@ describe('CreateMemberPage', () => {
     await inputs[2].setValue('member-pass-123')
     await inputs[3].setValue('测试实例')
 
-    // 直接设置 form.version_id：NSelect stub 无法可靠渲染 <select> 元素（naive-ui 内部名称不匹配），
-    // 通过组件实例直接修改 reactive form 值以模拟用户选择。
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    ;(wrapper.vm as unknown as { form: { version_id: string } }).form.version_id = 'version-1'
+    // 表单有两个 <select>：index 0 = role，index 1 = version_id。
+    // 通过 DOM setValue 模拟用户选择助手版本，与 MembersPage.spec.ts 保持一致。
+    const selects = wrapper.findAll('select')
+    await selects[1].setValue('version-1')
     await nextTick()
 
     await wrapper.find('form').trigger('submit')
