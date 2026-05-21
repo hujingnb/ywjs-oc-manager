@@ -242,6 +242,63 @@ func (q *Queries) GetApp(ctx context.Context, id pgtype.UUID) (App, error) {
 	return i, err
 }
 
+const getAppWithVersion = `-- name: GetAppWithVersion :one
+SELECT apps.id, apps.org_id, apps.owner_user_id, apps.runtime_node_id, apps.name, apps.description, apps.status, apps.persona_mode, apps.app_prompt, apps.container_id, apps.container_name, apps.newapi_key_id, apps.newapi_key_ciphertext, apps.api_key_status, apps.created_at, apps.updated_at, apps.deleted_at, apps.runtime_snapshot_json, apps.runtime_snapshot_at, apps.restart_policy_json, apps.health_state_json, apps.model_id, apps.progress_current, apps.progress_total, apps.last_error_status, apps.last_error_message, apps.runtime_image_ref, apps.runtime_image_sha256, apps.newapi_key_name, apps.model_synced, apps.version_id, apps.applied_version_revision, apps.applied_image_ref, av.revision AS version_revision, av.image_id AS version_image_id
+FROM apps
+JOIN assistant_versions av ON av.id = apps.version_id
+WHERE apps.id = $1
+`
+
+type GetAppWithVersionRow struct {
+	App             App    `db:"app" json:"app"`
+	VersionRevision int32  `db:"version_revision" json:"version_revision"`
+	VersionImageID  string `db:"version_image_id" json:"version_image_id"`
+}
+
+// 取实例及其绑定版本的 revision / image_id，供 version_synced 计算。
+func (q *Queries) GetAppWithVersion(ctx context.Context, id pgtype.UUID) (GetAppWithVersionRow, error) {
+	row := q.db.QueryRow(ctx, getAppWithVersion, id)
+	var i GetAppWithVersionRow
+	err := row.Scan(
+		&i.App.ID,
+		&i.App.OrgID,
+		&i.App.OwnerUserID,
+		&i.App.RuntimeNodeID,
+		&i.App.Name,
+		&i.App.Description,
+		&i.App.Status,
+		&i.App.PersonaMode,
+		&i.App.AppPrompt,
+		&i.App.ContainerID,
+		&i.App.ContainerName,
+		&i.App.NewapiKeyID,
+		&i.App.NewapiKeyCiphertext,
+		&i.App.ApiKeyStatus,
+		&i.App.CreatedAt,
+		&i.App.UpdatedAt,
+		&i.App.DeletedAt,
+		&i.App.RuntimeSnapshotJson,
+		&i.App.RuntimeSnapshotAt,
+		&i.App.RestartPolicyJson,
+		&i.App.HealthStateJson,
+		&i.App.ModelID,
+		&i.App.ProgressCurrent,
+		&i.App.ProgressTotal,
+		&i.App.LastErrorStatus,
+		&i.App.LastErrorMessage,
+		&i.App.RuntimeImageRef,
+		&i.App.RuntimeImageSha256,
+		&i.App.NewapiKeyName,
+		&i.App.ModelSynced,
+		&i.App.VersionID,
+		&i.App.AppliedVersionRevision,
+		&i.App.AppliedImageRef,
+		&i.VersionRevision,
+		&i.VersionImageID,
+	)
+	return i, err
+}
+
 const listAppsByOrg = `-- name: ListAppsByOrg :many
 SELECT id, org_id, owner_user_id, runtime_node_id, name, description, status, persona_mode, app_prompt, container_id, container_name, newapi_key_id, newapi_key_ciphertext, api_key_status, created_at, updated_at, deleted_at, runtime_snapshot_json, runtime_snapshot_at, restart_policy_json, health_state_json, model_id, progress_current, progress_total, last_error_status, last_error_message, runtime_image_ref, runtime_image_sha256, newapi_key_name, model_synced, version_id, applied_version_revision, applied_image_ref
 FROM apps
@@ -299,6 +356,84 @@ func (q *Queries) ListAppsByOrg(ctx context.Context, arg ListAppsByOrgParams) ([
 			&i.VersionID,
 			&i.AppliedVersionRevision,
 			&i.AppliedImageRef,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
+const listAppsByOrgWithVersion = `-- name: ListAppsByOrgWithVersion :many
+SELECT apps.id, apps.org_id, apps.owner_user_id, apps.runtime_node_id, apps.name, apps.description, apps.status, apps.persona_mode, apps.app_prompt, apps.container_id, apps.container_name, apps.newapi_key_id, apps.newapi_key_ciphertext, apps.api_key_status, apps.created_at, apps.updated_at, apps.deleted_at, apps.runtime_snapshot_json, apps.runtime_snapshot_at, apps.restart_policy_json, apps.health_state_json, apps.model_id, apps.progress_current, apps.progress_total, apps.last_error_status, apps.last_error_message, apps.runtime_image_ref, apps.runtime_image_sha256, apps.newapi_key_name, apps.model_synced, apps.version_id, apps.applied_version_revision, apps.applied_image_ref, av.revision AS version_revision, av.image_id AS version_image_id
+FROM apps
+JOIN assistant_versions av ON av.id = apps.version_id
+WHERE apps.org_id = $1 AND apps.deleted_at IS NULL
+ORDER BY apps.created_at DESC, apps.id DESC
+LIMIT $2 OFFSET $3
+`
+
+type ListAppsByOrgWithVersionParams struct {
+	OrgID  pgtype.UUID `db:"org_id" json:"org_id"`
+	Limit  int32       `db:"limit" json:"limit"`
+	Offset int32       `db:"offset" json:"offset"`
+}
+
+type ListAppsByOrgWithVersionRow struct {
+	App             App    `db:"app" json:"app"`
+	VersionRevision int32  `db:"version_revision" json:"version_revision"`
+	VersionImageID  string `db:"version_image_id" json:"version_image_id"`
+}
+
+// 组织实例列表联查版本 revision / image_id，供 version_synced 批量计算。
+func (q *Queries) ListAppsByOrgWithVersion(ctx context.Context, arg ListAppsByOrgWithVersionParams) ([]ListAppsByOrgWithVersionRow, error) {
+	rows, err := q.db.Query(ctx, listAppsByOrgWithVersion, arg.OrgID, arg.Limit, arg.Offset)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []ListAppsByOrgWithVersionRow{}
+	for rows.Next() {
+		var i ListAppsByOrgWithVersionRow
+		if err := rows.Scan(
+			&i.App.ID,
+			&i.App.OrgID,
+			&i.App.OwnerUserID,
+			&i.App.RuntimeNodeID,
+			&i.App.Name,
+			&i.App.Description,
+			&i.App.Status,
+			&i.App.PersonaMode,
+			&i.App.AppPrompt,
+			&i.App.ContainerID,
+			&i.App.ContainerName,
+			&i.App.NewapiKeyID,
+			&i.App.NewapiKeyCiphertext,
+			&i.App.ApiKeyStatus,
+			&i.App.CreatedAt,
+			&i.App.UpdatedAt,
+			&i.App.DeletedAt,
+			&i.App.RuntimeSnapshotJson,
+			&i.App.RuntimeSnapshotAt,
+			&i.App.RestartPolicyJson,
+			&i.App.HealthStateJson,
+			&i.App.ModelID,
+			&i.App.ProgressCurrent,
+			&i.App.ProgressTotal,
+			&i.App.LastErrorStatus,
+			&i.App.LastErrorMessage,
+			&i.App.RuntimeImageRef,
+			&i.App.RuntimeImageSha256,
+			&i.App.NewapiKeyName,
+			&i.App.ModelSynced,
+			&i.App.VersionID,
+			&i.App.AppliedVersionRevision,
+			&i.App.AppliedImageRef,
+			&i.VersionRevision,
+			&i.VersionImageID,
 		); err != nil {
 			return nil, err
 		}
@@ -476,6 +611,63 @@ type MarkAppFailedParams struct {
 // last_error_status 不加 CHECK 约束，值由调用方在 Go 层负责合法性。
 func (q *Queries) MarkAppFailed(ctx context.Context, arg MarkAppFailedParams) (App, error) {
 	row := q.db.QueryRow(ctx, markAppFailed, arg.ID, arg.LastErrorStatus, arg.LastErrorMessage)
+	var i App
+	err := row.Scan(
+		&i.ID,
+		&i.OrgID,
+		&i.OwnerUserID,
+		&i.RuntimeNodeID,
+		&i.Name,
+		&i.Description,
+		&i.Status,
+		&i.PersonaMode,
+		&i.AppPrompt,
+		&i.ContainerID,
+		&i.ContainerName,
+		&i.NewapiKeyID,
+		&i.NewapiKeyCiphertext,
+		&i.ApiKeyStatus,
+		&i.CreatedAt,
+		&i.UpdatedAt,
+		&i.DeletedAt,
+		&i.RuntimeSnapshotJson,
+		&i.RuntimeSnapshotAt,
+		&i.RestartPolicyJson,
+		&i.HealthStateJson,
+		&i.ModelID,
+		&i.ProgressCurrent,
+		&i.ProgressTotal,
+		&i.LastErrorStatus,
+		&i.LastErrorMessage,
+		&i.RuntimeImageRef,
+		&i.RuntimeImageSha256,
+		&i.NewapiKeyName,
+		&i.ModelSynced,
+		&i.VersionID,
+		&i.AppliedVersionRevision,
+		&i.AppliedImageRef,
+	)
+	return i, err
+}
+
+const setAppAppliedVersion = `-- name: SetAppAppliedVersion :one
+UPDATE apps
+SET applied_version_revision = $2,
+    applied_image_ref = $3,
+    updated_at = now()
+WHERE id = $1
+RETURNING id, org_id, owner_user_id, runtime_node_id, name, description, status, persona_mode, app_prompt, container_id, container_name, newapi_key_id, newapi_key_ciphertext, api_key_status, created_at, updated_at, deleted_at, runtime_snapshot_json, runtime_snapshot_at, restart_policy_json, health_state_json, model_id, progress_current, progress_total, last_error_status, last_error_message, runtime_image_ref, runtime_image_sha256, newapi_key_name, model_synced, version_id, applied_version_revision, applied_image_ref
+`
+
+type SetAppAppliedVersionParams struct {
+	ID                     pgtype.UUID `db:"id" json:"id"`
+	AppliedVersionRevision int32       `db:"applied_version_revision" json:"applied_version_revision"`
+	AppliedImageRef        string      `db:"applied_image_ref" json:"applied_image_ref"`
+}
+
+// 初始化/重启成功后记录已应用的版本修订与镜像 ref，用于 version_synced 检测。
+func (q *Queries) SetAppAppliedVersion(ctx context.Context, arg SetAppAppliedVersionParams) (App, error) {
+	row := q.db.QueryRow(ctx, setAppAppliedVersion, arg.ID, arg.AppliedVersionRevision, arg.AppliedImageRef)
 	var i App
 	err := row.Scan(
 		&i.ID,
@@ -922,6 +1114,61 @@ type SetAppStatusParams struct {
 
 func (q *Queries) SetAppStatus(ctx context.Context, arg SetAppStatusParams) (App, error) {
 	row := q.db.QueryRow(ctx, setAppStatus, arg.ID, arg.Status)
+	var i App
+	err := row.Scan(
+		&i.ID,
+		&i.OrgID,
+		&i.OwnerUserID,
+		&i.RuntimeNodeID,
+		&i.Name,
+		&i.Description,
+		&i.Status,
+		&i.PersonaMode,
+		&i.AppPrompt,
+		&i.ContainerID,
+		&i.ContainerName,
+		&i.NewapiKeyID,
+		&i.NewapiKeyCiphertext,
+		&i.ApiKeyStatus,
+		&i.CreatedAt,
+		&i.UpdatedAt,
+		&i.DeletedAt,
+		&i.RuntimeSnapshotJson,
+		&i.RuntimeSnapshotAt,
+		&i.RestartPolicyJson,
+		&i.HealthStateJson,
+		&i.ModelID,
+		&i.ProgressCurrent,
+		&i.ProgressTotal,
+		&i.LastErrorStatus,
+		&i.LastErrorMessage,
+		&i.RuntimeImageRef,
+		&i.RuntimeImageSha256,
+		&i.NewapiKeyName,
+		&i.ModelSynced,
+		&i.VersionID,
+		&i.AppliedVersionRevision,
+		&i.AppliedImageRef,
+	)
+	return i, err
+}
+
+const setAppVersion = `-- name: SetAppVersion :one
+UPDATE apps
+SET version_id = $2,
+    updated_at = now()
+WHERE id = $1 AND deleted_at IS NULL
+RETURNING id, org_id, owner_user_id, runtime_node_id, name, description, status, persona_mode, app_prompt, container_id, container_name, newapi_key_id, newapi_key_ciphertext, api_key_status, created_at, updated_at, deleted_at, runtime_snapshot_json, runtime_snapshot_at, restart_policy_json, health_state_json, model_id, progress_current, progress_total, last_error_status, last_error_message, runtime_image_ref, runtime_image_sha256, newapi_key_name, model_synced, version_id, applied_version_revision, applied_image_ref
+`
+
+type SetAppVersionParams struct {
+	ID        pgtype.UUID `db:"id" json:"id"`
+	VersionID pgtype.UUID `db:"version_id" json:"version_id"`
+}
+
+// 切换实例绑定的助手版本；切换后 applied_* 不变，实例自然进入需重启态。
+func (q *Queries) SetAppVersion(ctx context.Context, arg SetAppVersionParams) (App, error) {
+	row := q.db.QueryRow(ctx, setAppVersion, arg.ID, arg.VersionID)
 	var i App
 	err := row.Scan(
 		&i.ID,

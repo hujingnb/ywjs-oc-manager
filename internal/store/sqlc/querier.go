@@ -45,6 +45,8 @@ type Querier interface {
 	EnrollRuntimeNodeUpdate(ctx context.Context, arg EnrollRuntimeNodeUpdateParams) (RuntimeNode, error)
 	GetActiveAppByOwner(ctx context.Context, ownerUserID pgtype.UUID) (App, error)
 	GetApp(ctx context.Context, id pgtype.UUID) (App, error)
+	// 取实例及其绑定版本的 revision / image_id，供 version_synced 计算。
+	GetAppWithVersion(ctx context.Context, id pgtype.UUID) (GetAppWithVersionRow, error)
 	GetAssistantVersion(ctx context.Context, id pgtype.UUID) (AssistantVersion, error)
 	GetAssistantVersionByName(ctx context.Context, name string) (AssistantVersion, error)
 	GetChannelBindingByAppAndType(ctx context.Context, arg GetChannelBindingByAppAndTypeParams) (ChannelBinding, error)
@@ -83,6 +85,8 @@ type Querier interface {
 	// max_apps NULL 表示不限。degraded / unreachable / disabled 均不参与新应用调度。
 	ListActiveNodesWithAppCounts(ctx context.Context) ([]ListActiveNodesWithAppCountsRow, error)
 	ListAppsByOrg(ctx context.Context, arg ListAppsByOrgParams) ([]App, error)
+	// 组织实例列表联查版本 revision / image_id，供 version_synced 批量计算。
+	ListAppsByOrgWithVersion(ctx context.Context, arg ListAppsByOrgWithVersionParams) ([]ListAppsByOrgWithVersionRow, error)
 	ListAppsByRuntimeNode(ctx context.Context, arg ListAppsByRuntimeNodeParams) ([]App, error)
 	ListAssistantVersions(ctx context.Context) ([]AssistantVersion, error)
 	// 返回审计行 + actor 实时名称 + target 实时名称（按 target_type 走子查询）。
@@ -133,6 +137,8 @@ type Querier interface {
 	RequeueJob(ctx context.Context, id pgtype.UUID) (Job, error)
 	RetryJob(ctx context.Context, arg RetryJobParams) (Job, error)
 	RevokeRefreshToken(ctx context.Context, id pgtype.UUID) (RefreshToken, error)
+	// 初始化/重启成功后记录已应用的版本修订与镜像 ref，用于 version_synced 检测。
+	SetAppAppliedVersion(ctx context.Context, arg SetAppAppliedVersionParams) (App, error)
 	SetAppContainer(ctx context.Context, arg SetAppContainerParams) (App, error)
 	// worker app_health_check handler 写最近一次健康检查结果；用于自动重启窗口计数。
 	SetAppHealthState(ctx context.Context, arg SetAppHealthStateParams) (App, error)
@@ -145,6 +151,8 @@ type Querier interface {
 	SetAppRestartPolicy(ctx context.Context, arg SetAppRestartPolicyParams) (App, error)
 	SetAppRuntimeSnapshot(ctx context.Context, arg SetAppRuntimeSnapshotParams) (App, error)
 	SetAppStatus(ctx context.Context, arg SetAppStatusParams) (App, error)
+	// 切换实例绑定的助手版本；切换后 applied_* 不变，实例自然进入需重启态。
+	SetAppVersion(ctx context.Context, arg SetAppVersionParams) (App, error)
 	SetChannelBindingChallenge(ctx context.Context, arg SetChannelBindingChallengeParams) (ChannelBinding, error)
 	SetChannelBindingStatus(ctx context.Context, arg SetChannelBindingStatusParams) (ChannelBinding, error)
 	SetOrganizationNewAPIUser(ctx context.Context, arg SetOrganizationNewAPIUserParams) (Organization, error)

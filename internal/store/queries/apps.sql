@@ -172,3 +172,36 @@ SET model_synced = true,
     updated_at = now()
 WHERE id = $1
 RETURNING *;
+
+-- name: SetAppAppliedVersion :one
+-- 初始化/重启成功后记录已应用的版本修订与镜像 ref，用于 version_synced 检测。
+UPDATE apps
+SET applied_version_revision = $2,
+    applied_image_ref = $3,
+    updated_at = now()
+WHERE id = $1
+RETURNING *;
+
+-- name: SetAppVersion :one
+-- 切换实例绑定的助手版本；切换后 applied_* 不变，实例自然进入需重启态。
+UPDATE apps
+SET version_id = $2,
+    updated_at = now()
+WHERE id = $1 AND deleted_at IS NULL
+RETURNING *;
+
+-- name: GetAppWithVersion :one
+-- 取实例及其绑定版本的 revision / image_id，供 version_synced 计算。
+SELECT sqlc.embed(apps), av.revision AS version_revision, av.image_id AS version_image_id
+FROM apps
+JOIN assistant_versions av ON av.id = apps.version_id
+WHERE apps.id = $1;
+
+-- name: ListAppsByOrgWithVersion :many
+-- 组织实例列表联查版本 revision / image_id，供 version_synced 批量计算。
+SELECT sqlc.embed(apps), av.revision AS version_revision, av.image_id AS version_image_id
+FROM apps
+JOIN assistant_versions av ON av.id = apps.version_id
+WHERE apps.org_id = $1 AND apps.deleted_at IS NULL
+ORDER BY apps.created_at DESC, apps.id DESC
+LIMIT $2 OFFSET $3;
