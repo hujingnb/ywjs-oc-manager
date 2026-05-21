@@ -51,10 +51,8 @@ export interface OnboardMemberResult {
 export interface CreateMemberAppPayload {
   // 新实例名称。
   app_name: string
-  // 应用级提示词，persona_mode=app_override 时生效。
-  app_prompt?: string
-  // 人设继承模式，缺省时后端使用组织默认规则。
-  persona_mode?: 'org_inherited' | 'app_override'
+  // 实例绑定的助手版本 id，必须在组织 allowlist 内；后端做最终校验。
+  version_id: string
   // 首次绑定的渠道类型，目前仅支持 wechat。
   channel_type?: 'wechat'
   // 指定 runtime 节点；为空时后端按调度策略选择。

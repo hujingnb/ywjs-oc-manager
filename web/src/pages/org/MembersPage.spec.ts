@@ -2,6 +2,7 @@ import { mount } from '@vue/test-utils'
 import { computed, defineComponent, h, nextTick, ref, type PropType } from 'vue'
 import { describe, expect, it, vi } from 'vitest'
 import type { DataTableColumn } from 'naive-ui'
+import { QueryClient, VueQueryPlugin } from '@tanstack/vue-query'
 
 import MembersPage from './MembersPage.vue'
 import type { Member } from '@/api'
@@ -48,16 +49,28 @@ vi.mock('@/api/hooks/useOrganizations', () => ({
     isLoading: ref(false),
     error: ref(null),
   }),
+  // useOrganizationQuery mock 包含 assistant_version_ids，供补建实例表单的版本选项过滤。
   useOrganizationQuery: (orgId: { value?: string }) => ({
     data: computed(() => {
       if (orgId.value === 'org-2') {
-        return { id: 'org-2', name: '第二组织', status: 'active', model_id: 'deepseek-r1:14b' }
+        return { id: 'org-2', name: '第二组织', status: 'active', model_id: 'deepseek-r1:14b', assistant_version_ids: [] }
       }
-      return { id: 'org-1', name: '测试组织', status: 'active', model_id: 'qwen2.5:7b' }
+      return { id: 'org-1', name: '测试组织', status: 'active', model_id: 'qwen2.5:7b', assistant_version_ids: ['version-1'] }
     }),
     isLoading: ref(false),
     isError: ref(false),
     error: ref(null),
+  }),
+}))
+
+// mock 助手版本目录，仅 version-1 在 org-1 的 allowlist 内。
+vi.mock('@/api/hooks/useAssistantVersions', () => ({
+  useAssistantVersionsQuery: () => ({
+    data: ref([
+      { id: 'version-1', name: '测试版本 A' },
+      { id: 'version-2', name: '测试版本 B（不在 allowlist）' },
+    ]),
+    isLoading: ref(false),
   }),
 }))
 
@@ -95,6 +108,8 @@ vi.mock('@/api/hooks/useMembers', () => ({
 describe('MembersPage', () => {
   const mountPage = () => mount(MembersPage, {
     global: {
+      // 注入 QueryClient，解决 useQuery 调用报 "No 'queryClient' found" 的问题。
+      plugins: [[VueQueryPlugin, { queryClient: new QueryClient() }]],
       stubs: {
         ConfirmActionModal: true,
         DataTableList: defineComponent({
@@ -233,24 +248,31 @@ describe('MembersPage', () => {
   })
 
   // 平台管理员提交实例表单后展示新实例与初始化任务结果。
-  // 模型由组织统一配置，补建实例时不再需要选择模型。
-  it('平台管理员提交创建新实例时不包含 model_id 并展示结果', async () => {
+  // 补建实例必须选择助手版本，version_id 通过组织 allowlist 过滤后呈现可选项。
+  it('平台管理员提交创建新实例时包含 version_id 并展示结果', async () => {
     authUser.current = { id: 'admin-1', role: 'platform_admin' }
     createMemberAppMock.mutateAsync.mockClear()
     const wrapper = mountPage()
 
     await wrapper.findAll('button').filter(button => button.text() === '为该成员创建实例')[0].trigger('click')
+    await nextTick()
     // 默认 app_name 预填为「{显示名} 的实例」，测试覆盖默认值后再改名走表单提交。
     const appNameInput = wrapper.find('input')
     expect((appNameInput.element as HTMLInputElement).value).toBe('组织成员 的实例')
     await appNameInput.setValue('新实例')
+    // 选择助手版本：补建表单中第一个 <select> 是助手版本下拉（只有版本选择，无角色/人设）。
+    const selects = wrapper.findAll('select')
+    const versionSelect = selects.find(s => Array.from(s.element.options).some(o => o.value === 'version-1'))
+    expect(versionSelect).toBeDefined()
+    await versionSelect!.setValue('version-1')
+    await nextTick()
     await wrapper.findAll('button').find(button => button.text() === '提交创建')!.trigger('click')
 
     expect(createMemberAppMock.mutateAsync).toHaveBeenCalledWith({
       userId: 'member-1',
       payload: {
         app_name: '新实例',
-        persona_mode: 'org_inherited',
+        version_id: 'version-1',
         channel_type: 'wechat',
       },
     })

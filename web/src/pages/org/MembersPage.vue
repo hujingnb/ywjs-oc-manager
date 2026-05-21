@@ -86,13 +86,14 @@
             </n-form-item>
           </n-grid-item>
           <n-grid-item>
-            <n-form-item label="人设模式">
-              <n-select v-model:value="createAppForm.persona_mode" :options="personaModeOptions" />
-            </n-form-item>
-          </n-grid-item>
-          <n-grid-item :span="2">
-            <n-form-item label="实例 prompt（可选）">
-              <n-input v-model:value="createAppForm.app_prompt" type="textarea" :rows="3" />
+            <!-- 助手版本从组织 allowlist 过滤，必选；与 CreateMemberPage 保持一致 -->
+            <n-form-item label="助手版本 *">
+              <n-select
+                v-model:value="createAppForm.version_id"
+                :options="versionOptions"
+                :loading="versionsLoading || organizationQuery.isLoading.value"
+                placeholder="请选择助手版本"
+              />
             </n-form-item>
           </n-grid-item>
           <n-grid-item :span="2">
@@ -102,7 +103,7 @@
                 type="primary"
                 attr-type="submit"
                 :loading="createAppMutation.isPending.value"
-                :disabled="!createAppForm.app_name || createAppMutation.isPending.value"
+                :disabled="!createAppForm.app_name || !createAppForm.version_id || createAppMutation.isPending.value"
                 @click.prevent="onSubmitCreateApp"
               >
                 提交创建
@@ -155,6 +156,7 @@ import {
   useCreateMember, useCreateMemberApp, useDeleteMember, useMembersQuery, useResetMemberPassword,
   useSetMemberStatus, type CreateMemberAppPayload, type CreateMemberAppResult, type MemberFormPayload,
 } from '@/api/hooks/useMembers'
+import { useAssistantVersionsQuery } from '@/api/hooks/useAssistantVersions'
 import ConfirmActionModal from '@/components/ConfirmActionModal.vue'
 import DataTableList from '@/components/DataTableList.vue'
 import { statusColumn, actionColumn } from '@/components/columns'
@@ -192,6 +194,18 @@ const currentUserId = computed(() => auth.user?.id)
 
 const { data: members, isLoading } = useMembersQuery(effectiveOrgId)
 const organizationQuery = useOrganizationQuery(effectiveOrgId)
+// 查询全部助手版本目录，与组织 allowlist 取交集供补建表单选择。
+const { data: versionsData, isLoading: versionsLoading } = useAssistantVersionsQuery()
+// versionOptions 由组织 allowlist 与全量版本目录取交集，仅展示允许使用的版本。
+const versionOptions = computed<SelectOption[]>(() => {
+  const org = organizationQuery.data.value
+  const versions = versionsData.value
+  if (!org || !versions) return []
+  const allowedIds = new Set(org.assistant_version_ids ?? [])
+  return versions
+    .filter(v => allowedIds.has(v.id))
+    .map(v => ({ label: v.name, value: v.id }))
+})
 const createMutation = useCreateMember(effectiveOrgId)
 const createAppMutation = useCreateMemberApp(effectiveOrgId)
 const statusMutation = useSetMemberStatus(effectiveOrgId)
@@ -208,9 +222,10 @@ const resetError = ref(false)
 const createAppTarget = ref<Member | null>(null)
 const createAppResult = ref<CreateMemberAppResult | null>(null)
 const createAppError = ref('')
+// createAppForm 补建实例表单；version_id 必填，与 CreateMemberPage 保持一致。
 const createAppForm = ref<CreateMemberAppPayload>({
   app_name: '',
-  persona_mode: 'org_inherited',
+  version_id: '',
   channel_type: 'wechat',
 })
 // 切换组织时关闭补建表单，防止旧成员和新组织 ID 组合成跨组织提交。
@@ -236,11 +251,6 @@ const { form, formVisible, creating, submitError, openForm, submit } = useFormMo
 const roleOptions: SelectOption[] = [
   { label: '组织成员', value: 'org_member' },
   { label: '组织管理员', value: 'org_admin' },
-]
-
-const personaModeOptions: SelectOption[] = [
-  { label: '沿用组织人设', value: 'org_inherited' },
-  { label: '实例覆盖', value: 'app_override' },
 ]
 
 // columns 展示成员身份和状态，启用/禁用按钮按当前成员状态互斥显示。
@@ -293,21 +303,26 @@ function openResetForm(member: Member) {
 }
 
 // openCreateAppForm 打开补建实例表单，默认 app_name 取「{显示名} 的实例」。
-// 模型由组织统一配置，补建时无需选择。
+// version_id 需用户从组织 allowlist 中选择，与 CreateMemberPage 保持一致。
 function openCreateAppForm(member: Member) {
   createAppTarget.value = member
   createAppResult.value = null
   createAppError.value = ''
   createAppForm.value = {
     app_name: `${member.display_name} 的实例`,
-    persona_mode: 'org_inherited',
+    version_id: '',
     channel_type: 'wechat',
   }
 }
 
 // onSubmitCreateApp 提交已有成员实例创建请求，并展示后端返回的新实例与 job。
+// version_id 必填校验在按钮 disabled 条件中前置，此处二次兜底防止绕过。
 async function onSubmitCreateApp() {
   if (!createAppTarget.value) return
+  if (!createAppForm.value.version_id) {
+    createAppError.value = '请选择助手版本'
+    return
+  }
   createAppError.value = ''
   try {
     createAppResult.value = await createAppMutation.mutateAsync({
