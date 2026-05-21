@@ -20,9 +20,10 @@ INSERT INTO organizations (
     contact_phone,
     remark,
     credit_warning_threshold,
-    model_id
+    model_id,
+    assistant_version_ids
 ) VALUES (
-    $1, $2, $3, $4, $5, $6, $7, $8
+    $1, $2, $3, $4, $5, $6, $7, $8, $9
 )
 RETURNING id, name, status, contact_name, contact_phone, remark, newapi_user_id, credit_warning_threshold, created_at, updated_at, deleted_at, newapi_user_credentials_ciphertext, code, newapi_username, model_id, assistant_version_ids
 `
@@ -36,6 +37,7 @@ type CreateOrganizationParams struct {
 	Remark                 pgtype.Text `db:"remark" json:"remark"`
 	CreditWarningThreshold pgtype.Int4 `db:"credit_warning_threshold" json:"credit_warning_threshold"`
 	ModelID                string      `db:"model_id" json:"model_id"`
+	AssistantVersionIds    []byte      `db:"assistant_version_ids" json:"assistant_version_ids"`
 }
 
 func (q *Queries) CreateOrganization(ctx context.Context, arg CreateOrganizationParams) (Organization, error) {
@@ -48,6 +50,7 @@ func (q *Queries) CreateOrganization(ctx context.Context, arg CreateOrganization
 		arg.Remark,
 		arg.CreditWarningThreshold,
 		arg.ModelID,
+		arg.AssistantVersionIds,
 	)
 	var i Organization
 	err := row.Scan(
@@ -415,6 +418,7 @@ SET
     remark = $5,
     credit_warning_threshold = $6,
     model_id = $7,
+    assistant_version_ids = $8,
     updated_at = now()
 WHERE id = $1
 RETURNING id, name, status, contact_name, contact_phone, remark, newapi_user_id, credit_warning_threshold, created_at, updated_at, deleted_at, newapi_user_credentials_ciphertext, code, newapi_username, model_id, assistant_version_ids
@@ -428,6 +432,7 @@ type UpdateOrganizationProfileParams struct {
 	Remark                 pgtype.Text `db:"remark" json:"remark"`
 	CreditWarningThreshold pgtype.Int4 `db:"credit_warning_threshold" json:"credit_warning_threshold"`
 	ModelID                string      `db:"model_id" json:"model_id"`
+	AssistantVersionIds    []byte      `db:"assistant_version_ids" json:"assistant_version_ids"`
 }
 
 func (q *Queries) UpdateOrganizationProfile(ctx context.Context, arg UpdateOrganizationProfileParams) (Organization, error) {
@@ -439,6 +444,7 @@ func (q *Queries) UpdateOrganizationProfile(ctx context.Context, arg UpdateOrgan
 		arg.Remark,
 		arg.CreditWarningThreshold,
 		arg.ModelID,
+		arg.AssistantVersionIds,
 	)
 	var i Organization
 	err := row.Scan(

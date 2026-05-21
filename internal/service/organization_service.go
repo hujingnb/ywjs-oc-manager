@@ -52,6 +52,11 @@ type OrganizationModelValidator interface {
 	ValidateModelIDs(ctx context.Context, input []string) ([]string, error)
 }
 
+// OrganizationVersionValidator 抽象「校验一组助手版本 id 都存在」的能力。
+type OrganizationVersionValidator interface {
+	ValidateAssistantVersionIDs(ctx context.Context, ids []string) ([]string, error)
+}
+
 // OrganizationStore 抽象组织管理所需的数据访问能力。
 type OrganizationStore interface {
 	CreateOrganization(ctx context.Context, arg sqlc.CreateOrganizationParams) (sqlc.Organization, error)
@@ -99,6 +104,8 @@ type OrganizationService struct {
 	failAuditor NewAPIFailureAuditor // 新增；nil 时跳过 new-api 失败审计写入
 	// modelValidator 读取 new-api 实时模型列表并校验组织 allowlist；未配置时禁止保存模型配置。
 	modelValidator OrganizationModelValidator
+	// versionValidator 校验一组助手版本 id 都存在且未删除；未配置时禁止保存版本 allowlist。
+	versionValidator OrganizationVersionValidator
 	// hashPassword 仅用于创建组织管理员，测试中可替换为快 hash。
 	hashPassword PasswordHasher
 }
@@ -122,6 +129,11 @@ func (s *OrganizationService) SetModelValidator(validator OrganizationModelValid
 	s.modelValidator = validator
 }
 
+// SetVersionValidator 注入助手版本 allowlist 校验器。
+func (s *OrganizationService) SetVersionValidator(v OrganizationVersionValidator) {
+	s.versionValidator = v
+}
+
 // OrganizationInput 是组织创建和更新的统一入参。
 // Admin* 字段仅 CreateOrganization 使用，更新组织资料时会被忽略。
 type OrganizationInput struct {
@@ -141,6 +153,10 @@ type OrganizationInput struct {
 	ModelID string
 	// ModelIDSet 标记更新请求中是否显式传入了 model_id（用于区分"不修改"和"修改为某值"）。
 	ModelIDSet bool
+	// AssistantVersionIDs 是该组织可用的助手版本 id 列表（allowlist）。
+	AssistantVersionIDs []string
+	// AssistantVersionIDsSet 标记更新请求是否显式传入了 allowlist。
+	AssistantVersionIDsSet bool
 	// AdminUsername 是创建组织时初始化的 org_admin 账号名。
 	AdminUsername string
 	// AdminDisplayName 是初始化 org_admin 的显示名。
@@ -173,6 +189,8 @@ type OrganizationResult struct {
 	AdminUsername string `json:"admin_username,omitempty"`
 	// ModelID 是该组织所有实例统一使用的模型 ID。
 	ModelID string `json:"model_id"`
+	// AssistantVersionIDs 是该组织可用的助手版本 id 列表（allowlist）。
+	AssistantVersionIDs []string `json:"assistant_version_ids"`
 }
 
 // CreateOrganization 创建组织：先 INSERT manager 端记录，再串联调 new-api 创业务 user 并落凭据密文。
@@ -196,13 +214,18 @@ func (s *OrganizationService) CreateOrganization(ctx context.Context, principal 
 	if err != nil {
 		return OrganizationResult{}, err
 	}
-	// 校验 model_id 是否为实时存在的有效模型。
-	// modelValidator 未装配时直接拒绝，避免写入未经实时模型目录确认的模型 ID。
-	if s.modelValidator == nil {
-		return OrganizationResult{}, fmt.Errorf("模型校验器未配置，无法保存组织模型")
+	// 校验助手版本 allowlist 中的每个 id 都存在且未删除。
+	// versionValidator 未装配时直接拒绝，避免写入未经版本目录确认的 id。
+	if s.versionValidator == nil {
+		return OrganizationResult{}, fmt.Errorf("版本校验器未配置，无法保存组织可用版本")
 	}
-	if _, err := s.modelValidator.ValidateModelIDs(ctx, []string{input.ModelID}); err != nil {
-		return OrganizationResult{}, fmt.Errorf("%w: %v", ErrMemberCreateInvalid, err)
+	cleanVersionIDs, err := s.versionValidator.ValidateAssistantVersionIDs(ctx, input.AssistantVersionIDs)
+	if err != nil {
+		return OrganizationResult{}, err
+	}
+	versionIDsJSON, err := json.Marshal(cleanVersionIDs)
+	if err != nil {
+		return OrganizationResult{}, fmt.Errorf("序列化组织可用版本失败: %w", err)
 	}
 	adminPasswordHash, err := s.hashPassword(input.AdminPassword)
 	if err != nil {
@@ -218,6 +241,7 @@ func (s *OrganizationService) CreateOrganization(ctx context.Context, principal 
 		Remark:                 textValue(input.Remark),
 		CreditWarningThreshold: int4Ptr(input.CreditWarningThreshold),
 		ModelID:                input.ModelID,
+		AssistantVersionIds:    versionIDsJSON,
 	})
 	if err != nil {
 		if isUniqueViolation(err) {
@@ -451,20 +475,23 @@ func (s *OrganizationService) UpdateOrganization(ctx context.Context, principal 
 	if err != nil {
 		return OrganizationResult{}, fmt.Errorf("查询组织失败: %w", err)
 	}
-	// 默认保留原 model_id；仅在显式传入时校验并更新。
-	modelID := current.ModelID
-	modelChanged := false
-	if input.ModelIDSet {
-		if s.modelValidator == nil {
-			return OrganizationResult{}, fmt.Errorf("模型校验器未配置，无法保存组织模型")
+	// 处理助手版本 allowlist：显式传入时校验并更新，否则保留原有值。
+	var versionIDsJSON []byte
+	if input.AssistantVersionIDsSet {
+		if s.versionValidator == nil {
+			return OrganizationResult{}, fmt.Errorf("版本校验器未配置，无法保存组织可用版本")
 		}
-		if _, err := s.modelValidator.ValidateModelIDs(ctx, []string{input.ModelID}); err != nil {
-			return OrganizationResult{}, fmt.Errorf("%w: %v", ErrMemberCreateInvalid, err)
+		cleanVersionIDs, err := s.versionValidator.ValidateAssistantVersionIDs(ctx, input.AssistantVersionIDs)
+		if err != nil {
+			return OrganizationResult{}, err
 		}
-		if input.ModelID != current.ModelID {
-			modelID = input.ModelID
-			modelChanged = true
+		versionIDsJSON, err = json.Marshal(cleanVersionIDs)
+		if err != nil {
+			return OrganizationResult{}, fmt.Errorf("序列化组织可用版本失败: %w", err)
 		}
+	} else {
+		// 未显式传入时原样保留数据库中已有的版本 allowlist。
+		versionIDsJSON = current.AssistantVersionIds
 	}
 	org, err := s.store.UpdateOrganizationProfile(ctx, sqlc.UpdateOrganizationProfileParams{
 		ID:                     id,
@@ -473,22 +500,14 @@ func (s *OrganizationService) UpdateOrganization(ctx context.Context, principal 
 		ContactPhone:           textValue(input.ContactPhone),
 		Remark:                 textValue(input.Remark),
 		CreditWarningThreshold: int4Ptr(input.CreditWarningThreshold),
-		ModelID:                modelID,
+		ModelID:                current.ModelID,
+		AssistantVersionIds:    versionIDsJSON,
 	})
 	if errors.Is(err, pgx.ErrNoRows) {
 		return OrganizationResult{}, ErrNotFound
 	}
 	if err != nil {
 		return OrganizationResult{}, fmt.Errorf("更新组织失败: %w", err)
-	}
-	// 模型发生变更时批量同步所有活跃实例的 model_id，并标记 model_synced=false 等待重启生效。
-	if modelChanged {
-		if err := s.store.UpdateAppModelsByOrg(ctx, sqlc.UpdateAppModelsByOrgParams{
-			OrgID:   id,
-			ModelID: modelID,
-		}); err != nil {
-			return OrganizationResult{}, fmt.Errorf("批量同步实例模型失败: %w", err)
-		}
 	}
 	return s.toOrganizationResultWithAdminUsername(ctx, org), nil
 }
@@ -581,6 +600,11 @@ func (s *OrganizationService) getOrgAdminUsername(ctx context.Context, orgID pgt
 }
 
 func toOrganizationResult(org sqlc.Organization) OrganizationResult {
+	// 解析助手版本 allowlist，列为空时兜底为空 slice，避免前端收到 null。
+	versionIDs := []string{}
+	if len(org.AssistantVersionIds) > 0 {
+		_ = json.Unmarshal(org.AssistantVersionIds, &versionIDs)
+	}
 	return OrganizationResult{
 		ID:                     uuidToString(org.ID),
 		Name:                   org.Name,
@@ -592,6 +616,7 @@ func toOrganizationResult(org sqlc.Organization) OrganizationResult {
 		NewAPIUserID:           textString(org.NewapiUserID),
 		CreditWarningThreshold: int4Pointer(org.CreditWarningThreshold),
 		ModelID:                org.ModelID,
+		AssistantVersionIDs:    versionIDs,
 	}
 }
 
