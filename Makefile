@@ -12,6 +12,14 @@ OPENAPI_TS_VERSION := 7.13.0
 # 使用 override 防止命令行 IMAGE_TIMESTAMP=dev 间接生成语义不明或浮动镜像 tag。
 override IMAGE_TIMESTAMP := $(shell date +%Y-%m-%d-%H-%M-%S)
 
+# 当前 HEAD 的 8 位短 commit id，用于把本仓库构建产物追溯到源码提交。
+# 使用 override 防止命令行 GIT_COMMIT_SHORT=main 改写发布镜像 tag。
+override GIT_COMMIT_SHORT := $(strip $(shell git rev-parse --short=8 HEAD 2>/dev/null))
+
+# 本仓库发布镜像统一 tag：构建时间戳 + 源码 commit 前 8 位。
+# 使用 override 防止命令行 IMAGE_TAG=latest 绕过 tag 规则。
+override IMAGE_TAG := $(IMAGE_TIMESTAMP)-$(GIT_COMMIT_SHORT)
+
 # 各服务生产镜像仓库（统一走 aliyun 私有 ACR ywjs_app 命名空间）。
 # 走其他 registry 时在命令行覆盖对应变量即可。
 API_IMAGE_REPO   ?= crpi-nu3ibz4f07feyghi.cn-beijing.personal.cr.aliyuncs.com/ywjs_app/oc-manager-api
@@ -26,8 +34,8 @@ HERMES_VARIANT       ?= hermes-v2026.5.16
 override HERMES_VARIANT_DIR := runtime/hermes/$(HERMES_VARIANT)
 override HERMES_VERSION := $(strip $(shell if [ -f "$(HERMES_VARIANT_DIR)/version.txt" ]; then cat "$(HERMES_VARIANT_DIR)/version.txt"; fi))
 HERMES_IMAGE_REPO    ?= crpi-nu3ibz4f07feyghi.cn-beijing.personal.cr.aliyuncs.com/ywjs_app/oc-manager-hermes
-# hermes tag 形如 v2026.5.16-2026-05-21-12-00-00，便于从镜像引用直接看出上游版本。
-override HERMES_IMAGE := $(HERMES_IMAGE_REPO):$(HERMES_VERSION)-$(IMAGE_TIMESTAMP)
+# hermes tag 形如 v2026.5.16-2026-05-21-12-00-00-be70e40，便于从镜像引用直接看出上游版本和源码提交。
+override HERMES_IMAGE := $(HERMES_IMAGE_REPO):$(HERMES_VERSION)-$(IMAGE_TAG)
 
 # 输入 make 不带参数时, 显式跳到 help target, 输出按分组的可用 target 列表。
 .DEFAULT_GOAL := help
@@ -63,6 +71,13 @@ help: ## 显示本帮助文档(make 默认 target)
 		.*|-*) echo "Hermes version 不能以 Docker tag 非法起始字符开头: $(HERMES_VERSION)" >&2; exit 1;; \
 	esac
 	@version="$(HERMES_VERSION)"; test $${#version} -le 108 || { echo "Hermes version 过长，无法为生产时间戳预留 Docker tag 长度: $(HERMES_VERSION)" >&2; exit 1; }
+
+.PHONY: .guard-image-git-state
+.guard-image-git-state:
+	@git rev-parse --is-inside-work-tree >/dev/null 2>&1 || { echo "发布镜像必须在 git worktree 内构建" >&2; exit 1; }
+	@test -n "$(GIT_COMMIT_SHORT)" || { echo "无法读取当前 git commit id" >&2; exit 1; }
+	@git diff --quiet || { echo "发布镜像前请先提交 tracked 工作区改动" >&2; exit 1; }
+	@git diff --cached --quiet || { echo "发布镜像前请先提交 staged 改动" >&2; exit 1; }
 
 ##@ 本地开发
 
@@ -135,7 +150,7 @@ build-hermes-runtime: hermes-inject-contract ## 本地 dev 构建 hermes runtime
 # 同一次 make 调用中四个服务共享 IMAGE_TIMESTAMP，保证同批镜像 tag 一致。
 
 .PHONY: build-api-image
-build-api-image: ## 本地构建 manager-api 生产镜像，tag 取当前时间戳
+build-api-image: .guard-image-git-state ## 本地构建 manager-api 生产镜像，tag 取当前时间戳和 git commit 前 8 位
 	docker build -t $(API_IMAGE_REPO):$(IMAGE_TIMESTAMP) -f cmd/server/Dockerfile .
 
 .PHONY: push-api-image
@@ -147,7 +162,7 @@ release-api-image: build-api-image push-api-image ## 构建并推送 manager-api
 	@echo "✅ manager-api 镜像 $(API_IMAGE_REPO):$(IMAGE_TIMESTAMP) 已构建并推送"
 
 .PHONY: build-agent-image
-build-agent-image: ## 本地构建 runtime-agent 生产镜像，tag 取当前时间戳
+build-agent-image: .guard-image-git-state ## 本地构建 runtime-agent 生产镜像，tag 取当前时间戳和 git commit 前 8 位
 	docker build -t $(AGENT_IMAGE_REPO):$(IMAGE_TIMESTAMP) -f runtime/agent/Dockerfile .
 
 .PHONY: push-agent-image
@@ -159,7 +174,7 @@ release-agent-image: build-agent-image push-agent-image ## 构建并推送 runti
 	@echo "✅ runtime-agent 镜像 $(AGENT_IMAGE_REPO):$(IMAGE_TIMESTAMP) 已构建并推送"
 
 .PHONY: build-web-image
-build-web-image: ## 本地构建 manager-web 生产镜像，tag 取当前时间戳
+build-web-image: .guard-image-git-state ## 本地构建 manager-web 生产镜像，tag 取当前时间戳和 git commit 前 8 位
 	docker build -t $(WEB_IMAGE_REPO):$(IMAGE_TIMESTAMP) -f web/Dockerfile ./web
 
 .PHONY: push-web-image
@@ -174,7 +189,7 @@ release-web-image: build-web-image push-web-image ## 构建并推送 manager-web
 # 不推送，便于发布前先在本地完成构建期自检。
 # build context 取自 HERMES_VARIANT 指向的子目录（自包含 Dockerfile + 资产）。
 .PHONY: build-hermes-image
-build-hermes-image: hermes-inject-contract ## 本地构建 hermes runtime 生产镜像（需 HERMES_VARIANT 指定变体）
+build-hermes-image: .guard-image-git-state hermes-inject-contract ## 本地构建 hermes runtime 生产镜像（需 HERMES_VARIANT 指定变体）
 	status=0; \
 	docker build \
 	  -t "$(HERMES_IMAGE)" \
