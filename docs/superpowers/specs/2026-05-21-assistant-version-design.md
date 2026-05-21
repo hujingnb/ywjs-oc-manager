@@ -201,6 +201,14 @@ resources:
 
 SOUL.md 结构简化为：内置 header（语言要求）+ 平台层（`resources/platform-rules.md`）+ 版本 persona（`resources/persona.md`）+ 知识库 always-on 摘要。去掉组织层、应用层两段。
 
+**SOUL.md 所有权与「提示词加载方式」设计取舍**：oc-entrypoint 是 SOUL.md 的唯一所有者——phase 4 在每次容器启动时从 manifest 全量重新生成 `/opt/data/SOUL.md`，因此版本提示词的后台编辑在实例重启后必然生效。曾考虑过「SOUL.md 用 `@/data/xxx.md` 导入额外文件」以隔离 manager 内容与 Hermes 改动，经 Hermes 官方文档核实，此方案不可行、也不必要：
+
+- Hermes 的 SOUL.md 与 context 文件**均不支持** `@path` / `@file` / `{{include}}` 文件导入语法（developer-guide/prompt-assembly、user-guide/features/context-files 一致确认）。`@/data/xxx.md` 只会被当作字面文本注入 system prompt。
+- Hermes **不会自动改写已存在的 SOUL.md**（"Existing user SOUL.md files are never overwritten"），只在文件缺失时 seed 一份初始文件；oc-entrypoint 在 exec hermes 前必定已写好 SOUL.md，seed 逻辑永不触发，不存在「Hermes 自动更新 SOUL.md」冲突。
+- Hermes 的 memory / user_profile 特性写入独立的 `MEMORY.md` / `USER.md`（system prompt 第 5、6 槽位），不污染 SOUL.md；这两个文件在 `/opt/data` 卷内跨重启保留，renderer 不得触碰。
+
+结论：把版本提示词直接嵌入 oc-entrypoint 全量重渲染的 SOUL.md 是正确做法。参考：`https://hermes-agent.nousresearch.com/docs/developer-guide/prompt-assembly`、`https://hermes-agent.nousresearch.com/docs/user-guide/features/personality`。
+
 ### 6.4 `renderer/render_skills.py`：隐藏标记文件机制
 
 不靠目录名前缀区分 skill 来源（tar 内部目录名不可控）。改为：oc-entrypoint 安装的每个 skill 目录内放一个隐藏标记文件 `.oc-managed`（小 JSON，记 `source: "version-skill" | "knowledge"`、`installed_at`）。
