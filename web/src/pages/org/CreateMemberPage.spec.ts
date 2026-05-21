@@ -1,6 +1,7 @@
 import { mount } from '@vue/test-utils'
-import { defineComponent, h, ref } from 'vue'
+import { defineComponent, h, nextTick, ref } from 'vue'
 import { describe, expect, it, vi } from 'vitest'
+import { QueryClient, VueQueryPlugin } from '@tanstack/vue-query'
 
 import CreateMemberPage from './CreateMemberPage.vue'
 
@@ -33,9 +34,37 @@ vi.mock('@/api/hooks/useMembers', () => ({
   useOnboardMember: () => ({ mutateAsync: onboardMock, isPending: ref(false) }),
 }))
 
+// mock 组织查询，返回包含测试版本 id 的 allowlist。
+vi.mock('@/api/hooks/useOrganizations', () => ({
+  useOrganizationQuery: () => ({
+    data: ref({
+      id: 'org-1',
+      name: '测试组织',
+      code: 'test',
+      status: 'active',
+      model_id: 'gpt-4',
+      assistant_version_ids: ['version-1'],
+    }),
+    isLoading: ref(false),
+  }),
+}))
+
+// mock 助手版本目录，仅包含一个与 allowlist 匹配的版本。
+vi.mock('@/api/hooks/useAssistantVersions', () => ({
+  useAssistantVersionsQuery: () => ({
+    data: ref([
+      { id: 'version-1', name: '测试版本 A' },
+      { id: 'version-2', name: '测试版本 B（不在 allowlist）' },
+    ]),
+    isLoading: ref(false),
+  }),
+}))
+
 function mountPage() {
   return mount(CreateMemberPage, {
     global: {
+      // 注入 QueryClient，解决 useQuery 调用报 "No 'queryClient' found" 的问题。
+      plugins: [[VueQueryPlugin, { queryClient: new QueryClient() }]],
       stubs: {
         RouterLink: defineComponent({
           setup(_, { slots }) {
@@ -88,16 +117,26 @@ function mountPage() {
 }
 
 describe('CreateMemberPage', () => {
-  // 一键开户提交时不再需要选择模型，模型由组织统一配置。
-  it('提交创建成员并初始化实例时不包含 model_id', async () => {
+  // 选择助手版本后提交，mutation 应携带 version_id，不包含 model_id。
+  it('提交创建成员并初始化实例时包含 version_id 且不包含 model_id', async () => {
     onboardMock.mockClear()
     const wrapper = mountPage()
+    // 等待 computed 初始化（versionOptions 依赖 mock 数据）。
+    await nextTick()
 
+    // 依次填写用户名、显示名、密码、实例名。
     const inputs = wrapper.findAll('input')
     await inputs[0].setValue('member')
     await inputs[1].setValue('成员')
     await inputs[2].setValue('member-pass-123')
     await inputs[3].setValue('测试实例')
+
+    // 直接设置 form.version_id：NSelect stub 无法可靠渲染 <select> 元素（naive-ui 内部名称不匹配），
+    // 通过组件实例直接修改 reactive form 值以模拟用户选择。
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    ;(wrapper.vm as unknown as { form: { version_id: string } }).form.version_id = 'version-1'
+    await nextTick()
+
     await wrapper.find('form').trigger('submit')
 
     expect(onboardMock).toHaveBeenCalledWith(expect.objectContaining({
@@ -105,11 +144,33 @@ describe('CreateMemberPage', () => {
       display_name: '成员',
       password: 'member-pass-123',
       app_name: '测试实例',
+      version_id: 'version-1',
     }))
     // 模型由组织统一配置，前端不再传 model_id
     expect(onboardMock).toHaveBeenCalledWith(expect.not.objectContaining({
       model_id: expect.anything(),
     }))
     expect(wrapper.text()).toContain('Job ID：job-1')
+  })
+
+  // version_id 为空时，提交应被阻断并显示提示信息，mutation 不被调用。
+  it('未选择助手版本时提交被阻断并显示错误提示', async () => {
+    onboardMock.mockClear()
+    const wrapper = mountPage()
+
+    // 填写必填账号字段，但不选择助手版本。
+    const inputs = wrapper.findAll('input')
+    await inputs[0].setValue('member2')
+    await inputs[1].setValue('成员2')
+    await inputs[2].setValue('pass-123456')
+    await inputs[3].setValue('测试实例2')
+
+    // version_id 保持空，直接提交。
+    await wrapper.find('form').trigger('submit')
+
+    // mutation 不应被调用。
+    expect(onboardMock).not.toHaveBeenCalled()
+    // 页面应显示版本未选择的错误提示。
+    expect(wrapper.text()).toContain('请选择助手版本')
   })
 })
