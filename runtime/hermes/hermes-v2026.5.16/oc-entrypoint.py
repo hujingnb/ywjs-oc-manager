@@ -60,7 +60,7 @@ def main() -> int:
         outputs.append(render_config_yaml.render(manifest, data_root))
         outputs.append(render_env.render(data_root))
         outputs.append(render_soul_md.render(manifest, input_root, data_root))
-        outputs.extend(render_skills.render(input_root, data_root))
+        outputs.extend(render_skills.render(manifest, input_root, data_root))
     except Exception as e:  # noqa: BLE001
         oclog.emit("render", "error", str(e))
         return 1
