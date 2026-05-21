@@ -275,6 +275,8 @@ func runManager(ctx context.Context, cfg config.Config, logOut io.Writer) error 
 			service.NewFSSkillBlobStore(cfg.App.DataRoot),
 			0,
 		)
+		// 助手版本服务作为组织 allowlist 校验器：组织创建/编辑时校验所选版本 id 都存在。
+		organizationService.SetVersionValidator(assistantVersionService)
 	}
 	platformOverviewService := service.NewPlatformOverviewService(dbStore.Queries)
 
