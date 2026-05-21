@@ -286,6 +286,7 @@ func (h *MembersHandler) Onboard(c *gin.Context) {
 		PersonaMode: req.PersonaMode,
 		ChannelType: req.ChannelType,
 		NodeID:      req.NodeID,
+		VersionID:   req.VersionID,
 	})
 	if err != nil {
 		writeMemberError(c, err)
@@ -330,6 +331,7 @@ func (h *MembersHandler) CreateAppForMember(c *gin.Context) {
 		PersonaMode: req.PersonaMode,
 		ChannelType: req.ChannelType,
 		NodeID:      req.NodeID,
+		VersionID:   req.VersionID,
 	})
 	if err != nil {
 		writeMemberError(c, err)

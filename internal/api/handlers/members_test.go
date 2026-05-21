@@ -122,7 +122,8 @@ func TestMembersOnboardMapsNoNodeAvailableTo503(t *testing.T) {
 	router := newMembersTestRouterWithOnboarding(t, &memberServiceStub{}, onboarding)
 
 	recorder := httptest.NewRecorder()
-	body := bytes.NewBufferString(`{"username":"alice","display_name":"Alice","password":"pwd","app_name":"alice-bot","model_id":"qwen2.5:7b"}`)
+	// version_id 为必填字段，需包含在请求体中。
+	body := bytes.NewBufferString(`{"username":"alice","display_name":"Alice","password":"pwd","app_name":"alice-bot","version_id":"v-id-1"}`)
 	request := httptest.NewRequest(http.MethodPost, "/api/v1/organizations/00000000-0000-0000-0000-000000000101/members/onboard", body)
 	request.Header.Set("Content-Type", "application/json")
 	request = withPrincipal(request, auth.Principal{UserID: "p1", Role: domain.UserRolePlatformAdmin})
@@ -132,7 +133,7 @@ func TestMembersOnboardMapsNoNodeAvailableTo503(t *testing.T) {
 	require.Contains(t, recorder.Body.String(), "NO_NODE_AVAILABLE")
 }
 
-// TestMembersOnboardForwardsRequest 验证成员开户路由会把应用名等字段传给 service。
+// TestMembersOnboardForwardsRequest 验证成员开户路由会把应用名和助手版本 id 等字段传给 service。
 func TestMembersOnboardForwardsRequest(t *testing.T) {
 	onboarding := &onboardingServiceStub{
 		result: service.OnboardMemberResult{
@@ -143,7 +144,8 @@ func TestMembersOnboardForwardsRequest(t *testing.T) {
 	router := newMembersTestRouterWithOnboarding(t, &memberServiceStub{}, onboarding)
 
 	recorder := httptest.NewRecorder()
-	body := bytes.NewBufferString(`{"username":"alice","display_name":"Alice","password":"pwd","app_name":"alice-bot"}`)
+	// version_id 为必填字段，与 app_name 一同传入；验证两者均透传给 service 入参。
+	body := bytes.NewBufferString(`{"username":"alice","display_name":"Alice","password":"pwd","app_name":"alice-bot","version_id":"v-id-onboard"}`)
 	request := httptest.NewRequest(http.MethodPost, "/api/v1/organizations/org-1/members/onboard", body)
 	request.Header.Set("Content-Type", "application/json")
 	request = withPrincipal(request, auth.Principal{UserID: "p1", Role: domain.UserRoleOrgAdmin, OrgID: "org-1"})
@@ -152,9 +154,11 @@ func TestMembersOnboardForwardsRequest(t *testing.T) {
 	require.Equal(t, http.StatusCreated, recorder.Code)
 	assert.Equal(t, "org-1", onboarding.lastOrgID)
 	assert.Equal(t, "alice-bot", onboarding.lastOnboardInput.AppName)
+	// 确认助手版本 id 被透传到 service 入参，供 service 层校验 allowlist。
+	assert.Equal(t, "v-id-onboard", onboarding.lastOnboardInput.VersionID)
 }
 
-// TestMembersCreateAppForMemberForwardsRequest 验证已有成员创建实例路由转发组织、成员和应用字段。
+// TestMembersCreateAppForMemberForwardsRequest 验证已有成员创建实例路由转发组织、成员、应用和助手版本字段。
 func TestMembersCreateAppForMemberForwardsRequest(t *testing.T) {
 	onboarding := &onboardingServiceStub{
 		createAppResult: service.CreateAppForMemberResult{
@@ -165,7 +169,8 @@ func TestMembersCreateAppForMemberForwardsRequest(t *testing.T) {
 	router := newMembersTestRouterWithOnboarding(t, &memberServiceStub{}, onboarding)
 
 	recorder := httptest.NewRecorder()
-	body := bytes.NewBufferString(`{"app_name":"alice-new-bot","persona_mode":"app_override","app_prompt":"hello","channel_type":"wechat","runtime_node_id":"node-1"}`)
+	// version_id 为必填字段，与应用字段一同传入；验证全部字段透传给 service 入参。
+	body := bytes.NewBufferString(`{"app_name":"alice-new-bot","persona_mode":"app_override","app_prompt":"hello","channel_type":"wechat","runtime_node_id":"node-1","version_id":"v-id-create-app"}`)
 	request := httptest.NewRequest(http.MethodPost, "/api/v1/organizations/org-1/members/user-1/apps", body)
 	request.Header.Set("Content-Type", "application/json")
 	request = withPrincipal(request, auth.Principal{UserID: "p1", Role: domain.UserRolePlatformAdmin})
@@ -176,6 +181,8 @@ func TestMembersCreateAppForMemberForwardsRequest(t *testing.T) {
 	require.Equal(t, "user-1", onboarding.lastUserID)
 	require.Equal(t, "alice-new-bot", onboarding.lastCreateInput.AppName)
 	require.Contains(t, recorder.Body.String(), `"job_id":"job-1"`)
+	// 确认助手版本 id 被透传到 service 入参，供 service 层校验 allowlist。
+	require.Equal(t, "v-id-create-app", onboarding.lastCreateInput.VersionID)
 }
 
 // TestMembersCreateAppForMemberMapsNoNodeAvailable 验证已有成员创建实例无可用节点时映射为 503。
@@ -184,7 +191,8 @@ func TestMembersCreateAppForMemberMapsNoNodeAvailable(t *testing.T) {
 	router := newMembersTestRouterWithOnboarding(t, &memberServiceStub{}, onboarding)
 
 	recorder := httptest.NewRecorder()
-	body := bytes.NewBufferString(`{"app_name":"alice-new-bot"}`)
+	// version_id 为必填字段，需包含在请求体中以通过 binding 校验。
+	body := bytes.NewBufferString(`{"app_name":"alice-new-bot","version_id":"v-id-1"}`)
 	request := httptest.NewRequest(http.MethodPost, "/api/v1/organizations/org-1/members/user-1/apps", body)
 	request.Header.Set("Content-Type", "application/json")
 	request = withPrincipal(request, auth.Principal{UserID: "p1", Role: domain.UserRolePlatformAdmin})

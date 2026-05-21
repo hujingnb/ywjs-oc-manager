@@ -48,6 +48,8 @@ type CreateOrganizationRequest struct {
 	Remark string `json:"remark"`
 	// CreditWarningThreshold 是组织余额预警阈值；nil 表示不启用余额预警或保持预警关闭。
 	CreditWarningThreshold *int32 `json:"credit_warning_threshold"`
+	// AssistantVersionIDs 是该组织可用的助手版本 id 列表（allowlist）。
+	AssistantVersionIDs []string `json:"assistant_version_ids"`
 	// ModelID 是该组织所有实例统一使用的模型 ID，由平台管理员指定。
 	ModelID string `json:"model_id" binding:"required"`
 	// AdminUsername 是随组织创建的首个 org_admin 账号名。
@@ -70,6 +72,8 @@ type OrganizationRequest struct {
 	Remark string `json:"remark"`
 	// CreditWarningThreshold 是组织余额预警阈值；nil 表示清空或未设置预警阈值。
 	CreditWarningThreshold *int32 `json:"credit_warning_threshold"`
+	// AssistantVersionIDs 是该组织可用的助手版本 id 列表（allowlist）。
+	AssistantVersionIDs []string `json:"assistant_version_ids"`
 	// ModelID 是该组织所有实例统一使用的模型 ID；nil 表示本次只更新基础资料并保留原模型。
 	ModelID *string `json:"model_id"`
 }
@@ -122,6 +126,8 @@ type OnboardMemberRequest struct {
 	ChannelType string `json:"channel_type"`
 	// NodeID 是指定 runtime 节点；为空时 service 自动选择可用节点。
 	NodeID string `json:"runtime_node_id"`
+	// VersionID 是实例绑定的助手版本 id，必须落在组织 allowlist 内。
+	VersionID string `json:"version_id" binding:"required"`
 }
 
 // CreateMemberAppRequest 为已有成员创建新实例的请求体。
@@ -136,6 +142,8 @@ type CreateMemberAppRequest struct {
 	ChannelType string `json:"channel_type"`
 	// NodeID 是指定 runtime 节点；为空时 service 自动选择可用节点。
 	NodeID string `json:"runtime_node_id"`
+	// VersionID 是实例绑定的助手版本 id，必须落在组织 allowlist 内。
+	VersionID string `json:"version_id" binding:"required"`
 }
 
 // ===== 人设 persona =====

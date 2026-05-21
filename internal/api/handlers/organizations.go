@@ -209,6 +209,7 @@ func (h *OrganizationsHandler) setStatus(c *gin.Context, status string) {
 }
 
 // toOrganizationInput 将更新 DTO 转为 service 入参；管理员初始化字段不参与更新。
+// AssistantVersionIDsSet 始终设为 true，以请求体中的 allowlist 为权威值；前端更新表单需完整传入列表。
 func toOrganizationInput(req OrganizationRequest) service.OrganizationInput {
 	input := service.OrganizationInput{
 		Name:                   req.Name,
@@ -216,6 +217,8 @@ func toOrganizationInput(req OrganizationRequest) service.OrganizationInput {
 		ContactPhone:           req.ContactPhone,
 		Remark:                 req.Remark,
 		CreditWarningThreshold: req.CreditWarningThreshold,
+		AssistantVersionIDs:    req.AssistantVersionIDs,
+		AssistantVersionIDsSet: true,
 	}
 	if req.ModelID != nil {
 		input.ModelID = *req.ModelID
@@ -238,6 +241,7 @@ func toCreateOrganizationInput(req CreateOrganizationRequest) service.Organizati
 		AdminPassword:          req.AdminPassword,
 		ModelID:                req.ModelID,
 		ModelIDSet:             true,
+		AssistantVersionIDs:    req.AssistantVersionIDs,
 	}
 }
 

@@ -66,6 +66,47 @@ func TestOrganizationsUpdatePassesModelID(t *testing.T) {
 	assert.True(t, svc.lastUpdateInput.ModelIDSet)
 }
 
+// TestOrganizationsCreateForwardsAssistantVersionIDs 验证组织创建请求把助手版本 allowlist 传给 service。
+func TestOrganizationsCreateForwardsAssistantVersionIDs(t *testing.T) {
+	svc := &organizationServiceStub{
+		createResult: service.OrganizationResult{ID: "org-2", Name: "版本测试组织", Status: domain.StatusActive},
+	}
+	router := newOrganizationsTestRouter(t, svc)
+
+	recorder := httptest.NewRecorder()
+	// 携带两个助手版本 id，验证 handler 正确透传给 service 入参。
+	body := `{"name":"版本测试组织","code":"version-org","admin_username":"admin","admin_display_name":"管理员","admin_password":"secret","model_id":"qwen2.5:7b","assistant_version_ids":["v-id-1","v-id-2"]}`
+	request := httptest.NewRequest(http.MethodPost, "/api/v1/organizations", bytes.NewBufferString(body))
+	request.Header.Set("Content-Type", "application/json")
+	request = withPrincipal(request, auth.Principal{UserID: "user-1", Role: domain.UserRolePlatformAdmin})
+	router.ServeHTTP(recorder, request)
+
+	require.Equal(t, http.StatusCreated, recorder.Code)
+	// 确认 allowlist 字段被完整传入 service 入参。
+	require.Equal(t, []string{"v-id-1", "v-id-2"}, svc.lastCreateInput.AssistantVersionIDs)
+}
+
+// TestOrganizationsUpdateForwardsAssistantVersionIDs 验证组织更新请求把助手版本 allowlist 传给 service 并标记为已设置。
+func TestOrganizationsUpdateForwardsAssistantVersionIDs(t *testing.T) {
+	svc := &organizationServiceStub{
+		createResult: service.OrganizationResult{ID: "org-1", Name: "版本测试组织", Status: domain.StatusActive},
+	}
+	router := newOrganizationsTestRouter(t, svc)
+
+	recorder := httptest.NewRecorder()
+	// 更新时携带单个助手版本 id，验证 handler 设置 AssistantVersionIDsSet = true。
+	body := `{"name":"版本测试组织","assistant_version_ids":["v-id-3"]}`
+	request := httptest.NewRequest(http.MethodPatch, "/api/v1/organizations/org-1", bytes.NewBufferString(body))
+	request.Header.Set("Content-Type", "application/json")
+	request = withPrincipal(request, auth.Principal{UserID: "user-1", Role: domain.UserRolePlatformAdmin})
+	router.ServeHTTP(recorder, request)
+
+	require.Equal(t, http.StatusOK, recorder.Code)
+	// 确认 allowlist 字段被传入 service，且 AssistantVersionIDsSet 为 true 以触发 service 层更新逻辑。
+	require.Equal(t, []string{"v-id-3"}, svc.lastUpdateInput.AssistantVersionIDs)
+	require.True(t, svc.lastUpdateInput.AssistantVersionIDsSet)
+}
+
 // TestOrganizationsUpdateKeepsModelWhenOmitted 验证更新请求缺省模型字段时不会要求重写模型。
 func TestOrganizationsUpdateKeepsModelWhenOmitted(t *testing.T) {
 	svc := &organizationServiceStub{
