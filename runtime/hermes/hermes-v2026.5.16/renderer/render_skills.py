@@ -135,7 +135,9 @@ def _extract_version_skills(skill_rels: List[str], input_root: Path, skills_root
                     top = member.name.split("/", 1)[0]
                     if top:
                         top_dirs.add(top)
-            tf.extractall(skills_root)
+            # filter="data" 在 extractall 内部再校验每个成员（含 symlink/hardlink 的 linkname），
+            # 拒绝越界条目；与上面逐条 _is_safe_member_path 形成双重防护。
+            tf.extractall(skills_root, filter="data")
         for top in sorted(top_dirs):
             skill_dir = skills_root / top
             if skill_dir.is_dir():

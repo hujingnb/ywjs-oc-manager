@@ -121,3 +121,17 @@ def test_render_rejects_unsafe_tar_path(tmp_input: Path, tmp_data: Path) -> None
         tw.addfile(info, io.BytesIO(body))
     with pytest.raises(Exception):
         render(_manifest(["resources/skills/evil.tar"]), tmp_input, tmp_data)
+
+
+def test_render_rejects_tar_symlink_escape(tmp_input: Path, tmp_data: Path) -> None:
+    # tar 含指向解压目录之外的符号链接时，extractall(filter="data") 拒绝，不写出界文件。
+    import pytest
+    tar_path = tmp_input / "resources" / "skills" / "evil-link.tar"
+    tar_path.parent.mkdir(parents=True, exist_ok=True)
+    with tarfile.open(tar_path, "w") as tw:
+        link = tarfile.TarInfo("skill/escape")
+        link.type = tarfile.SYMTYPE
+        link.linkname = "../../../../tmp"
+        tw.addfile(link)
+    with pytest.raises(Exception):
+        render(_manifest(["resources/skills/evil-link.tar"]), tmp_input, tmp_data)
