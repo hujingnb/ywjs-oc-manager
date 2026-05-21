@@ -20,6 +20,11 @@ func (a runtimeImageAdapter) HasRuntimeImage(id string) bool {
 	return ok
 }
 
+// ResolveRuntimeImage 把 image_id 解析成镜像 ref，供 AppService 计算 version_synced。
+func (a runtimeImageAdapter) ResolveRuntimeImage(id string) (string, bool) {
+	return config.ResolveRuntimeImage(a.images, id)
+}
+
 // ListRuntimeImages 返回全部镜像选项（仅 id + label），供前端版本编辑表单的镜像 select 使用。
 func (a runtimeImageAdapter) ListRuntimeImages() []service.RuntimeImageOption {
 	out := make([]service.RuntimeImageOption, 0, len(a.images))

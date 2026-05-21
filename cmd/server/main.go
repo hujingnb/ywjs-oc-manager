@@ -168,6 +168,8 @@ func runManager(ctx context.Context, cfg config.Config, logOut io.Writer) error 
 	knowledgeService.SetAuditor(auditService)
 	appService := service.NewAppService(dbStore.Queries)
 	appService.SetJobNotifier(redisQueue)
+	// 注入版本镜像解析器：AppService 计算 version_synced 时需要把版本 image_id 解析成镜像 ref。
+	appService.SetImageResolver(runtimeImageAdapter{images: cfg.Hermes.RuntimeImages})
 	runtimeOpService := service.NewRuntimeOperationService(dbStore.Queries, logger, redisQueue)
 	resourceMetricsService := service.NewResourceMetricsService(dbStore.Queries)
 	personaService := service.NewPersonaService(store.NewPersonaStore(dbStore))
