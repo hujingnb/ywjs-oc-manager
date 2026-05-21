@@ -197,3 +197,80 @@ func TestAssistantVersionGetRejectsInvalidUUID(t *testing.T) {
 	_, err := svc.Get(context.Background(), platformPrincipal(), "not-a-uuid")
 	require.ErrorIs(t, err, ErrAssistantVersionNotFound)
 }
+
+// validCreateInput 返回一组合法的版本创建入参。
+func validCreateInput() AssistantVersionInput {
+	return AssistantVersionInput{
+		Name: "标准版", Description: "默认版本", SystemPrompt: "你是助手",
+		ImageID: "v2026.5.16", MainModel: "qwen", Routing: map[string]string{"vision": "gpt"},
+	}
+}
+
+// TestAssistantVersionCreateOK 验证合法入参创建成功且 revision 为 1。
+func TestAssistantVersionCreateOK(t *testing.T) {
+	svc := newTestAVService(t, newFakeAVStore())
+	got, err := svc.Create(context.Background(), platformPrincipal(), validCreateInput())
+	require.NoError(t, err)
+	assert.Equal(t, "标准版", got.Name)
+	assert.EqualValues(t, 1, got.Revision)
+	assert.Equal(t, "gpt", got.Routing["vision"])
+}
+
+// TestAssistantVersionCreateDeniesOrgAdmin 验证组织管理员不能创建版本。
+func TestAssistantVersionCreateDeniesOrgAdmin(t *testing.T) {
+	svc := newTestAVService(t, newFakeAVStore())
+	_, err := svc.Create(context.Background(), orgAdminPrincipal(), validCreateInput())
+	require.ErrorIs(t, err, ErrAssistantVersionDenied)
+}
+
+// TestAssistantVersionCreateRejectsEmptyName 验证名称为空时报 Invalid。
+func TestAssistantVersionCreateRejectsEmptyName(t *testing.T) {
+	svc := newTestAVService(t, newFakeAVStore())
+	in := validCreateInput()
+	in.Name = "  "
+	_, err := svc.Create(context.Background(), platformPrincipal(), in)
+	require.ErrorIs(t, err, ErrAssistantVersionInvalid)
+}
+
+// TestAssistantVersionCreateRejectsDuplicateName 验证名称已存在时报 NameTaken。
+func TestAssistantVersionCreateRejectsDuplicateName(t *testing.T) {
+	store := newFakeAVStore()
+	store.byName["标准版"] = sqlc.AssistantVersion{Name: "标准版"}
+	svc := newTestAVService(t, store)
+	_, err := svc.Create(context.Background(), platformPrincipal(), validCreateInput())
+	require.ErrorIs(t, err, ErrAssistantVersionNameTaken)
+}
+
+// TestAssistantVersionCreateRejectsUnknownImage 验证 image_id 不在配置内时报 Invalid。
+func TestAssistantVersionCreateRejectsUnknownImage(t *testing.T) {
+	svc := NewAssistantVersionService(newFakeAVStore(), rejectingImageResolver{}, fakeModelValidator{}, fakeBlobStore{}, 0)
+	_, err := svc.Create(context.Background(), platformPrincipal(), validCreateInput())
+	require.ErrorIs(t, err, ErrAssistantVersionInvalid)
+}
+
+// TestAssistantVersionCreateRejectsUnknownModel 验证主模型不存在时报 Invalid。
+func TestAssistantVersionCreateRejectsUnknownModel(t *testing.T) {
+	svc := NewAssistantVersionService(newFakeAVStore(), fakeImageResolver{}, rejectingModelValidator{}, fakeBlobStore{}, 0)
+	_, err := svc.Create(context.Background(), platformPrincipal(), validCreateInput())
+	require.ErrorIs(t, err, ErrAssistantVersionInvalid)
+}
+
+// TestAssistantVersionCreateRejectsUnknownRoutingSlot 验证 routing 含非法槽位名时报 Invalid。
+func TestAssistantVersionCreateRejectsUnknownRoutingSlot(t *testing.T) {
+	svc := newTestAVService(t, newFakeAVStore())
+	in := validCreateInput()
+	in.Routing = map[string]string{"not_a_slot": "qwen"}
+	_, err := svc.Create(context.Background(), platformPrincipal(), in)
+	require.ErrorIs(t, err, ErrAssistantVersionInvalid)
+}
+
+// rejectingImageResolver 认为所有 image_id 都不存在；ListRuntimeImages 返回空。
+type rejectingImageResolver struct{}
+
+func (rejectingImageResolver) HasRuntimeImage(string) bool             { return false }
+func (rejectingImageResolver) ListRuntimeImages() []RuntimeImageOption { return nil }
+
+// rejectingModelValidator 认为所有模型都不存在。
+type rejectingModelValidator struct{}
+
+func (rejectingModelValidator) HasModel(string) bool { return false }

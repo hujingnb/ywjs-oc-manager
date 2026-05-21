@@ -200,3 +200,91 @@ func decodeSkills(raw []byte) ([]AssistantVersionSkill, error) {
 
 // trimSpace 是 strings.TrimSpace 的本地别名，保持调用点简洁。
 func trimSpace(s string) string { return strings.TrimSpace(s) }
+
+// AssistantVersionInput 是创建/更新版本的入参。
+type AssistantVersionInput struct {
+	Name         string
+	Description  string
+	SystemPrompt string
+	ImageID      string
+	MainModel    string
+	// Routing 是 auxiliary 槽位到模型名的映射；key 必须是 auxiliarySlots 之一。
+	Routing map[string]string
+}
+
+// validateInput 校验版本入参的业务规则（不含名称唯一性，由调用方单独查）。
+func (s *AssistantVersionService) validateInput(in AssistantVersionInput) error {
+	if trimSpace(in.Name) == "" {
+		return fmt.Errorf("%w: 名称不能为空", ErrAssistantVersionInvalid)
+	}
+	if trimSpace(in.SystemPrompt) == "" {
+		return fmt.Errorf("%w: 内置提示词不能为空", ErrAssistantVersionInvalid)
+	}
+	if !s.images.HasRuntimeImage(in.ImageID) {
+		return fmt.Errorf("%w: 镜像 %s 不存在于配置", ErrAssistantVersionInvalid, in.ImageID)
+	}
+	if trimSpace(in.MainModel) == "" || !s.models.HasModel(in.MainModel) {
+		return fmt.Errorf("%w: 主模型 %s 不可用", ErrAssistantVersionInvalid, in.MainModel)
+	}
+	valid := make(map[string]struct{}, len(auxiliarySlots))
+	for _, slot := range auxiliarySlots {
+		valid[slot] = struct{}{}
+	}
+	for slot, model := range in.Routing {
+		if _, ok := valid[slot]; !ok {
+			return fmt.Errorf("%w: 未知路由槽位 %s", ErrAssistantVersionInvalid, slot)
+		}
+		if trimSpace(model) == "" {
+			continue
+		}
+		if !s.models.HasModel(model) {
+			return fmt.Errorf("%w: 路由槽位 %s 的模型 %s 不可用", ErrAssistantVersionInvalid, slot, model)
+		}
+	}
+	return nil
+}
+
+// normalizeRouting 丢弃空值槽位，返回紧凑的 routing map。
+func normalizeRouting(in map[string]string) map[string]string {
+	out := map[string]string{}
+	for slot, model := range in {
+		if trimSpace(model) != "" {
+			out[slot] = trimSpace(model)
+		}
+	}
+	return out
+}
+
+// Create 创建一个新版本，revision 初始为 1。
+func (s *AssistantVersionService) Create(ctx context.Context, principal auth.Principal, in AssistantVersionInput) (AssistantVersionResult, error) {
+	if !auth.CanManageAssistantVersion(principal) {
+		return AssistantVersionResult{}, ErrAssistantVersionDenied
+	}
+	if err := s.validateInput(in); err != nil {
+		return AssistantVersionResult{}, err
+	}
+	if _, err := s.store.GetAssistantVersionByName(ctx, trimSpace(in.Name)); err == nil {
+		return AssistantVersionResult{}, ErrAssistantVersionNameTaken
+	} else if !errors.Is(err, pgx.ErrNoRows) {
+		return AssistantVersionResult{}, fmt.Errorf("查询版本名称失败: %w", err)
+	}
+	routingJSON, err := json.Marshal(normalizeRouting(in.Routing))
+	if err != nil {
+		return AssistantVersionResult{}, fmt.Errorf("序列化 routing 失败: %w", err)
+	}
+	creator, _ := optionalUUID(principal.UserID)
+	row, err := s.store.CreateAssistantVersion(ctx, sqlc.CreateAssistantVersionParams{
+		Name:         trimSpace(in.Name),
+		Description:  trimSpace(in.Description),
+		SystemPrompt: in.SystemPrompt,
+		ImageID:      in.ImageID,
+		MainModel:    trimSpace(in.MainModel),
+		RoutingJson:  routingJSON,
+		SkillsJson:   []byte("[]"),
+		CreatedBy:    creator,
+	})
+	if err != nil {
+		return AssistantVersionResult{}, fmt.Errorf("写入版本失败: %w", err)
+	}
+	return toAssistantVersionResult(row)
+}
