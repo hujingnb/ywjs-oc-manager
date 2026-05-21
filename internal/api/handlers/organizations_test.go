@@ -126,6 +126,28 @@ func TestOrganizationsUpdateKeepsModelWhenOmitted(t *testing.T) {
 	assert.Empty(t, svc.lastUpdateInput.ModelID)
 }
 
+// TestOrganizationsCreateAllowsMissingModelID 回归测试：组织创建请求不携带 model_id 时应正常通过 gin
+// binding 校验并返回 201，防止 CreateOrganizationRequest.ModelID 被再次错误地标注为
+// binding:"required" 而导致前端 Phase 3 表单（不发送 model_id）的请求全部被 400 拒绝。
+func TestOrganizationsCreateAllowsMissingModelID(t *testing.T) {
+	svc := &organizationServiceStub{
+		createResult: service.OrganizationResult{ID: "org-99", Name: "无模型组织", Status: domain.StatusActive},
+	}
+	router := newOrganizationsTestRouter(t, svc)
+
+	recorder := httptest.NewRecorder()
+	// 请求体故意不含 model_id，只携带创建组织所必须的其他字段。
+	body := `{"name":"无模型组织","code":"no-model-org","admin_username":"admin","admin_display_name":"管理员","admin_password":"secret-password"}`
+	request := httptest.NewRequest(http.MethodPost, "/api/v1/organizations", bytes.NewBufferString(body))
+	request.Header.Set("Content-Type", "application/json")
+	request = withPrincipal(request, auth.Principal{UserID: "user-1", Role: domain.UserRolePlatformAdmin})
+	router.ServeHTTP(recorder, request)
+
+	// 缺少 model_id 不应触发 400；请求应成功到达 service 并返回 201。
+	require.Equal(t, http.StatusCreated, recorder.Code)
+	assert.Empty(t, svc.lastCreateInput.ModelID)
+}
+
 // TestOrganizationsCreateRequiresAdminFields 验证组织创建要求管理员字段的预期行为场景。
 func TestOrganizationsCreateRequiresAdminFields(t *testing.T) {
 	router := newOrganizationsTestRouter(t, &organizationServiceStub{})
