@@ -430,11 +430,12 @@ export function useCronJobAction(appId: Ref<string | undefined>) {
       if (action.verb === 'delete') {
         client.removeQueries({ queryKey: cronJobKey(appId.value, action.jobId) })
         client.removeQueries({ queryKey: cronHistoryKey(appId.value, action.jobId) })
+        client.removeQueries({ queryKey: cronOutputPrefixKey(appId.value, action.jobId) })
       } else {
         setCronJobCache(client, appId.value, job?.id || action.jobId, job)
       }
       invalidateCronOverview(client, appId.value)
-      if (action.verb === 'run' || action.verb === 'delete') {
+      if (action.verb === 'run') {
         invalidateCronRunArtifacts(client, appId.value, action.jobId)
       }
     },

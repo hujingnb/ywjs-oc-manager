@@ -14,6 +14,7 @@ import {
   cronStatusKey,
   useCreateCronJob,
   useCronHistoryQuery,
+  useCronJobAction,
   useCronJobQuery,
   useCronJobsQuery,
   useCronOutputQuery,
@@ -141,5 +142,28 @@ describe('useCron hooks', () => {
         '/api/v1/apps/app-1/hermes/cron/jobs/job-1/output/2026-05-20.md',
       )
     })
+  })
+
+  // 删除任务时应移除详情、历史和输出缓存，避免 URL 刚清理前 stale output query 重新打已删除资源。
+  it('delete action removes output cache without refetching deleted artifacts', async () => {
+    apiRequestMock.mockResolvedValueOnce(undefined)
+    const appId = ref('app-1')
+    const { queryClient, wrapper } = mountWithQueryClient(() => ({
+      action: useCronJobAction(appId),
+    }))
+    const removeSpy = vi.spyOn(queryClient, 'removeQueries')
+    const invalidateSpy = vi.spyOn(queryClient, 'invalidateQueries')
+
+    await (wrapper.vm as unknown as {
+      action: ReturnType<typeof useCronJobAction>
+    }).action.mutateAsync({ verb: 'delete', jobId: 'job-1' })
+
+    expect(apiRequestMock).toHaveBeenCalledWith('/api/v1/apps/app-1/hermes/cron/jobs/job-1', {
+      method: 'DELETE',
+    })
+    expect(removeSpy).toHaveBeenCalledWith({ queryKey: cronJobKey('app-1', 'job-1') })
+    expect(removeSpy).toHaveBeenCalledWith({ queryKey: cronHistoryKey('app-1', 'job-1') })
+    expect(removeSpy).toHaveBeenCalledWith({ queryKey: ['cron', 'output', 'app-1', 'job-1'] })
+    expect(invalidateSpy).not.toHaveBeenCalledWith({ queryKey: ['cron', 'output', 'app-1', 'job-1'] })
   })
 })
