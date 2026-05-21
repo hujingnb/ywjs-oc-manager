@@ -516,3 +516,28 @@ func TestAssistantVersionListRuntimeImagesDeniesMember(t *testing.T) {
 	_, err := svc.ListRuntimeImages(context.Background(), auth.Principal{Role: domain.UserRoleOrgMember})
 	require.ErrorIs(t, err, ErrAssistantVersionDenied)
 }
+
+// TestAssistantVersionValidateIDsOK 验证全部 id 存在时返回去重后的列表。
+func TestAssistantVersionValidateIDsOK(t *testing.T) {
+	store := newFakeAVStore()
+	id := seedVersion(store, "标准版", 1)
+	svc := newTestAVService(t, store)
+	out, err := svc.ValidateAssistantVersionIDs(context.Background(), []string{id, id})
+	require.NoError(t, err)
+	assert.Equal(t, []string{id}, out)
+}
+
+// TestAssistantVersionValidateIDsRejectsUnknown 验证含不存在 id 时报 Invalid。
+func TestAssistantVersionValidateIDsRejectsUnknown(t *testing.T) {
+	svc := newTestAVService(t, newFakeAVStore())
+	_, err := svc.ValidateAssistantVersionIDs(context.Background(), []string{"00000000-0000-0000-0000-0000000000e1"})
+	require.ErrorIs(t, err, ErrAssistantVersionInvalid)
+}
+
+// TestAssistantVersionValidateIDsEmpty 验证空列表合法（组织可不配版本）。
+func TestAssistantVersionValidateIDsEmpty(t *testing.T) {
+	svc := newTestAVService(t, newFakeAVStore())
+	out, err := svc.ValidateAssistantVersionIDs(context.Background(), nil)
+	require.NoError(t, err)
+	assert.Empty(t, out)
+}

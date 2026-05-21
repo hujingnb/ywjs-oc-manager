@@ -487,6 +487,31 @@ func (s *AssistantVersionService) ListRuntimeImages(_ context.Context, principal
 	return s.images.ListRuntimeImages(), nil
 }
 
+// ValidateAssistantVersionIDs 校验一组版本 id 全部存在且未删除，返回去重后的列表。
+// 供组织 allowlist 写入前校验；空列表合法（组织可暂不配置任何版本）。
+func (s *AssistantVersionService) ValidateAssistantVersionIDs(ctx context.Context, ids []string) ([]string, error) {
+	seen := make(map[string]struct{}, len(ids))
+	out := make([]string, 0, len(ids))
+	for _, raw := range ids {
+		id := trimSpace(raw)
+		if id == "" {
+			continue
+		}
+		if _, dup := seen[id]; dup {
+			continue
+		}
+		if _, err := s.loadVersion(ctx, id); err != nil {
+			if errors.Is(err, ErrAssistantVersionNotFound) {
+				return nil, fmt.Errorf("%w: 版本 %s 不存在", ErrAssistantVersionInvalid, id)
+			}
+			return nil, err
+		}
+		seen[id] = struct{}{}
+		out = append(out, id)
+	}
+	return out, nil
+}
+
 // Create 创建一个新版本，revision 初始为 1。
 func (s *AssistantVersionService) Create(ctx context.Context, principal auth.Principal, in AssistantVersionInput) (AssistantVersionResult, error) {
 	if !auth.CanManageAssistantVersion(principal) {
