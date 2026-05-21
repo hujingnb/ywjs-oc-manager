@@ -134,6 +134,17 @@
         </n-grid>
       </n-form>
     </n-card>
+
+    <!-- 删除二次确认：删除是破坏性操作，需用户确认后才发起请求 -->
+    <ConfirmActionModal
+      :visible="deleteTarget !== null"
+      title="删除助手版本"
+      :message="deleteTarget ? `确定删除版本「${deleteTarget.name}」？删除后不可恢复。` : ''"
+      :busy="deleteBusy"
+      confirm-label="删除"
+      @confirm="confirmDelete"
+      @cancel="cancelDelete"
+    />
   </div>
 </template>
 
@@ -143,6 +154,7 @@ import { Plus, X } from 'lucide-vue-next'
 import { NButton, NCard, NForm, NFormItem, NGrid, NGridItem, NInput, NSelect, NSpace } from 'naive-ui'
 
 import DataTableList from '@/components/DataTableList.vue'
+import ConfirmActionModal from '@/components/ConfirmActionModal.vue'
 import { actionColumn } from '@/components/columns'
 import { useModelsQuery } from '@/api/hooks/useOrganizations'
 import {
@@ -328,8 +340,25 @@ async function submit() {
   }
 }
 
-// onDelete 删除版本；后端在版本被引用时返回 409，错误文案直接展示给用户。
-async function onDelete(version: AssistantVersionDTO) {
+// 删除确认状态：deleteTarget 非空时弹出二次确认窗。
+const deleteTarget = ref<AssistantVersionDTO | null>(null)
+const deleteBusy = ref(false)
+
+// requestDelete 由列表「删除」操作触发，打开二次确认窗（不直接发请求）。
+function requestDelete(version: AssistantVersionDTO) {
+  deleteTarget.value = version
+}
+
+// cancelDelete 关闭二次确认窗，不做任何删除。
+function cancelDelete() {
+  deleteTarget.value = null
+}
+
+// confirmDelete 用户确认后执行删除；后端在版本被引用时返回 409，错误文案直接展示给用户。
+async function confirmDelete() {
+  const version = deleteTarget.value
+  if (!version) return
+  deleteBusy.value = true
   actionFeedback.value = ''
   actionFeedbackError.value = false
   try {
@@ -338,6 +367,9 @@ async function onDelete(version: AssistantVersionDTO) {
   } catch (err) {
     actionFeedbackError.value = true
     actionFeedback.value = err instanceof Error ? err.message : '删除失败'
+  } finally {
+    deleteBusy.value = false
+    deleteTarget.value = null
   }
 }
 
@@ -357,7 +389,7 @@ const columns = computed(() => [
   { title: 'Skill 数', key: 'skills', render: (row: AssistantVersionDTO) => String(row.skills?.length ?? 0) },
   actionColumn<AssistantVersionDTO>([
     { label: '编辑', type: 'primary', onClick: openEdit },
-    { label: '删除', onClick: (r: AssistantVersionDTO) => { void onDelete(r) } },
+    { label: '删除', onClick: requestDelete },
   ]),
 ])
 </script>

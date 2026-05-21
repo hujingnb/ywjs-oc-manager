@@ -109,6 +109,18 @@ function mountPage() {
           },
         }),
         NSpace: defineComponent({ setup(_, { slots }) { return () => h('div', slots.default?.()) } }),
+        // ConfirmActionModal stub：visible 时渲染一个「确认删除」按钮，点击即 emit confirm。
+        ConfirmActionModal: defineComponent({
+          props: ['visible'],
+          emits: ['confirm', 'cancel'],
+          setup(p, { emit }) {
+            return () => p.visible
+              ? h('div', { class: 'confirm-modal' }, [
+                  h('button', { class: 'confirm-yes', onClick: () => emit('confirm') }, '确认删除'),
+                ])
+              : null
+          },
+        }),
         DataTableList: defineComponent({
           props: {
             columns: { type: Array as PropType<DataTableColumn<AssistantVersionDTO>[]>, required: true },
@@ -189,13 +201,19 @@ describe('AssistantVersionsPage', () => {
     expect(updateVersion).toHaveBeenCalledWith(expect.objectContaining({ id: 'ver-1' }))
   })
 
-  // 点击删除调用删除接口；版本行的删除按钮在非编辑态渲染，仅行内操作列可见。
-  it('删除版本调用删除接口', async () => {
+  // 点击删除先弹二次确认窗，仅在确认后才调用删除接口。
+  it('删除版本经二次确认后才调用删除接口', async () => {
     deleteVersion.mockResolvedValue(undefined)
     const wrapper = mountPage()
     const delBtn = wrapper.findAll('button').find(b => b.text() === '删除')
     expect(delBtn).toBeTruthy()
     await delBtn!.trigger('click')
+    await nextTick()
+    // 点击删除只打开确认窗，此时尚未发起删除请求。
+    expect(deleteVersion).not.toHaveBeenCalled()
+    const confirmBtn = wrapper.find('.confirm-yes')
+    expect(confirmBtn.exists()).toBe(true)
+    await confirmBtn.trigger('click')
     expect(deleteVersion).toHaveBeenCalledWith('ver-1')
   })
 })
