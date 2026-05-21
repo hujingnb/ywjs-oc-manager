@@ -235,8 +235,12 @@ components:
         runtime_node_id:
           description: NodeID 是指定 runtime 节点；为空时 service 自动选择可用节点。
           type: string
+        version_id:
+          description: VersionID 是实例绑定的助手版本 id，必须落在组织 allowlist 内。
+          type: string
       required:
       - app_name
+      - version_id
       type: object
     handlers.CreateMemberRequest:
       properties:
@@ -268,6 +272,12 @@ components:
         admin_username:
           description: AdminUsername 是随组织创建的首个 org_admin 账号名。
           type: string
+        assistant_version_ids:
+          description: AssistantVersionIDs 是该组织可用的助手版本 id 列表（allowlist）。
+          items:
+            type: string
+          type: array
+          uniqueItems: false
         code:
           description: Code 是组织登录标识，创建后不可修改。
           type: string
@@ -448,14 +458,24 @@ components:
         username:
           description: Username 是新成员账号名，与普通创建成员保持同一约束。
           type: string
+        version_id:
+          description: VersionID 是实例绑定的助手版本 id，必须落在组织 allowlist 内。
+          type: string
       required:
       - app_name
       - display_name
       - password
       - username
+      - version_id
       type: object
     handlers.OrganizationRequest:
       properties:
+        assistant_version_ids:
+          description: AssistantVersionIDs 是该组织可用的助手版本 id 列表（allowlist）。
+          items:
+            type: string
+          type: array
+          uniqueItems: false
         contact_name:
           description: ContactName 是业务联系人姓名，可置空。
           type: string
@@ -1535,6 +1555,12 @@ components:
         admin_username:
           description: AdminUsername 是组织首个可用管理员账号名，用于平台管理员复制登录信息。
           type: string
+        assistant_version_ids:
+          description: AssistantVersionIDs 是该组织可用的助手版本 id 列表（allowlist）。
+          items:
+            type: string
+          type: array
+          uniqueItems: false
         code:
           description: Code 是组织登录标识，用于组织用户登录时定位租户。
           type: string

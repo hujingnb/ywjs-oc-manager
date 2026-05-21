@@ -8239,6 +8239,8 @@ export interface components {
             persona_mode?: string;
             /** @description NodeID 是指定 runtime 节点；为空时 service 自动选择可用节点。 */
             runtime_node_id?: string;
+            /** @description VersionID 是实例绑定的助手版本 id，必须落在组织 allowlist 内。 */
+            version_id: string;
         };
         "handlers.CreateMemberRequest": {
             /** @description DisplayName 是前端显示名，创建与更新时都不能为空。 */
@@ -8257,6 +8259,8 @@ export interface components {
             admin_password: string;
             /** @description AdminUsername 是随组织创建的首个 org_admin 账号名。 */
             admin_username: string;
+            /** @description AssistantVersionIDs 是该组织可用的助手版本 id 列表（allowlist）。 */
+            assistant_version_ids?: string[];
             /** @description Code 是组织登录标识，创建后不可修改。 */
             code: string;
             /** @description ContactName 是业务联系人姓名，可为空。 */
@@ -8362,8 +8366,12 @@ export interface components {
             runtime_node_id?: string;
             /** @description Username 是新成员账号名，与普通创建成员保持同一约束。 */
             username: string;
+            /** @description VersionID 是实例绑定的助手版本 id，必须落在组织 allowlist 内。 */
+            version_id: string;
         };
         "handlers.OrganizationRequest": {
+            /** @description AssistantVersionIDs 是该组织可用的助手版本 id 列表（allowlist）。 */
+            assistant_version_ids?: string[];
             /** @description ContactName 是业务联系人姓名，可置空。 */
             contact_name?: string;
             /** @description ContactPhone 是业务联系人电话，可置空。 */
@@ -9052,6 +9060,8 @@ export interface components {
         "service.OrganizationResult": {
             /** @description AdminUsername 是组织首个可用管理员账号名，用于平台管理员复制登录信息。 */
             admin_username?: string;
+            /** @description AssistantVersionIDs 是该组织可用的助手版本 id 列表（allowlist）。 */
+            assistant_version_ids?: string[];
             /** @description Code 是组织登录标识，用于组织用户登录时定位租户。 */
             code?: string;
             /** @description ContactName 是业务联系人姓名。 */
