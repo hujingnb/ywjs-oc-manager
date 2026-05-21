@@ -130,8 +130,8 @@ docker compose up -d
 
 ### 4.1 发布风险分级
 
-镜像 tag 只表达构建时间和源码 commit，不承载 SemVer。每次发布必须在 release notes
-中标明风险等级：
+普通三镜像 tag 只表达构建时间和源码 commit；Hermes 镜像 tag 额外带
+`HERMES_VERSION` 前缀。每次发布必须在 release notes 中标明风险等级：
 
 - **破坏性变更**：含破坏性 API / schema 变更，必须读 release notes 并在 staging 完整演练后再升级。
 - **兼容功能**：新功能，向后兼容；可能含 schema 增量迁移（仅 add column / new table，不做破坏性变更）。

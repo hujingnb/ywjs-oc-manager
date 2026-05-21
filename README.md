@@ -196,7 +196,7 @@ make release-hermes-image
 docker build \
   --build-arg DOCKER_HUB_MIRROR=docker.io/library \
   --build-arg GOPROXY=https://proxy.golang.org,direct \
-  -f cmd/server/Dockerfile -t <registry>/oc-manager:<tag> .
+  -f cmd/server/Dockerfile -t <registry>/oc-manager-api:<tag> .
 
 docker build \
   --build-arg DOCKER_HUB_MIRROR=docker.io/library \
