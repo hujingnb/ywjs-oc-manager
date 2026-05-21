@@ -367,3 +367,48 @@ func TestAssistantVersionUpdateDeniesOrgAdmin(t *testing.T) {
 	_, err := svc.Update(context.Background(), orgAdminPrincipal(), id, validCreateInput())
 	require.ErrorIs(t, err, ErrAssistantVersionDenied)
 }
+
+// TestAssistantVersionDeleteOK 验证未被引用的版本可删除。
+func TestAssistantVersionDeleteOK(t *testing.T) {
+	store := newFakeAVStore()
+	id := seedVersion(store, "标准版", 1)
+	svc := newTestAVService(t, store)
+	err := svc.Delete(context.Background(), platformPrincipal(), id)
+	require.NoError(t, err)
+}
+
+// TestAssistantVersionDeleteRejectsAppInUse 验证被实例引用时拒绝删除。
+func TestAssistantVersionDeleteRejectsAppInUse(t *testing.T) {
+	store := newFakeAVStore()
+	id := seedVersion(store, "标准版", 1)
+	store.appCount = 1
+	svc := newTestAVService(t, store)
+	err := svc.Delete(context.Background(), platformPrincipal(), id)
+	require.ErrorIs(t, err, ErrAssistantVersionInUse)
+}
+
+// TestAssistantVersionDeleteRejectsOrgInUse 验证出现在组织 allowlist 时拒绝删除。
+func TestAssistantVersionDeleteRejectsOrgInUse(t *testing.T) {
+	store := newFakeAVStore()
+	id := seedVersion(store, "标准版", 1)
+	store.orgCount = 1
+	svc := newTestAVService(t, store)
+	err := svc.Delete(context.Background(), platformPrincipal(), id)
+	require.ErrorIs(t, err, ErrAssistantVersionInUse)
+}
+
+// TestAssistantVersionDeleteDeniesOrgAdmin 验证组织管理员不能删除版本。
+func TestAssistantVersionDeleteDeniesOrgAdmin(t *testing.T) {
+	store := newFakeAVStore()
+	id := seedVersion(store, "标准版", 1)
+	svc := newTestAVService(t, store)
+	err := svc.Delete(context.Background(), orgAdminPrincipal(), id)
+	require.ErrorIs(t, err, ErrAssistantVersionDenied)
+}
+
+// TestAssistantVersionDeleteNotFound 验证删除不存在的版本返回 NotFound。
+func TestAssistantVersionDeleteNotFound(t *testing.T) {
+	svc := newTestAVService(t, newFakeAVStore())
+	err := svc.Delete(context.Background(), platformPrincipal(), "00000000-0000-0000-0000-0000000000e7")
+	require.ErrorIs(t, err, ErrAssistantVersionNotFound)
+}

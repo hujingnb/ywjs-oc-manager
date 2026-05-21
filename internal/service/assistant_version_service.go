@@ -351,6 +351,37 @@ func normalizeEmptyJSON(b []byte) []byte {
 	return b
 }
 
+// Delete 软删除一个版本。严格保护：被任何未删除组织 allowlist 或未删除实例
+// 引用时拒绝删除，调用方需先迁移/删除引用方。
+func (s *AssistantVersionService) Delete(ctx context.Context, principal auth.Principal, id string) error {
+	if !auth.CanManageAssistantVersion(principal) {
+		return ErrAssistantVersionDenied
+	}
+	row, err := s.loadVersion(ctx, id)
+	if err != nil {
+		return err
+	}
+	appCount, err := s.store.CountAppsUsingVersion(ctx, row.ID)
+	if err != nil {
+		return fmt.Errorf("统计引用实例失败: %w", err)
+	}
+	if appCount > 0 {
+		return fmt.Errorf("%w: 仍有 %d 个实例使用", ErrAssistantVersionInUse, appCount)
+	}
+	// jsonb_exists 的参数是裸字符串 id。
+	orgCount, err := s.store.CountOrgsUsingVersion(ctx, uuidToString(row.ID))
+	if err != nil {
+		return fmt.Errorf("统计引用组织失败: %w", err)
+	}
+	if orgCount > 0 {
+		return fmt.Errorf("%w: 仍有 %d 个组织 allowlist 包含", ErrAssistantVersionInUse, orgCount)
+	}
+	if _, err := s.store.SoftDeleteAssistantVersion(ctx, row.ID); err != nil {
+		return fmt.Errorf("删除版本失败: %w", err)
+	}
+	return nil
+}
+
 // Create 创建一个新版本，revision 初始为 1。
 func (s *AssistantVersionService) Create(ctx context.Context, principal auth.Principal, in AssistantVersionInput) (AssistantVersionResult, error) {
 	if !auth.CanManageAssistantVersion(principal) {
