@@ -128,13 +128,14 @@ docker compose up -d
 
 ## 4. 升级流程
 
-### 4.1 版本号约定
+### 4.1 发布风险分级
 
-遵循 SemVer `MAJOR.MINOR.PATCH`：
+镜像 tag 只表达构建时间和源码 commit，不承载 SemVer。每次发布必须在 release notes
+中标明风险等级：
 
-- **MAJOR**：含破坏性 API / schema 变更，必须读 release notes 并在 staging 完整演练后再升级。
-- **MINOR**：新功能，向后兼容；可能含 schema 增量迁移（仅 add column / new table，不做破坏性变更）。
-- **PATCH**：bug fix，不动 schema 也不动 API。
+- **破坏性变更**：含破坏性 API / schema 变更，必须读 release notes 并在 staging 完整演练后再升级。
+- **兼容功能**：新功能，向后兼容；可能含 schema 增量迁移（仅 add column / new table，不做破坏性变更）。
+- **缺陷修复**：bug fix，不动 schema 也不动 API。
 
 ### 4.2 镜像 tag 约定
 
@@ -210,10 +211,10 @@ docker compose up -d oc-runtime-agent
 ### 5.2 schema 回滚边界
 
 `internal/migrations/` 目录下包含各版本的 up / down SQL。
-MINOR 升级的迁移仅做 add column / new table，不做 drop / alter type，
+仅新增 schema 的兼容迁移只做 add column / new table，不做 drop / alter type，
 直接回滚镜像后旧代码忽略新列，通常无兼容问题。
 
-若某次 MAJOR 迁移删除了列或改变了类型，无法通过单纯的镜像回滚还原数据；
+若某次破坏性迁移删除了列或改变了类型，无法通过单纯的镜像回滚还原数据；
 此时必须先从 pg_dump 备份恢复数据库，再回滚镜像。
 
 ### 5.3 回滚检查清单

@@ -206,7 +206,10 @@ docker build \
 
 注意：`calciumion/new-api` 与 `ollama/ollama` 不在 Docker Hub `library/` 下，切回官方源时需要手工指定完整路径（`docker.io/calciumion/new-api:<tag>` 等），`DOCKER_HUB_MIRROR=docker.io/library` 的覆盖只适用于 `library/` 命名空间的基础镜像。
 
-推送到镜像仓库后，写入对应运行包配置：把本仓库发布的 4 个私有镜像替换为 Makefile 生成的时间戳 + commit8 tag；更严格的环境可进一步固定到 `@sha256:` digest。**生产禁止使用 `:latest`、分支 tag 或版本族 tag**。
+推送到镜像仓库后，写入对应运行包配置：普通三镜像使用 Makefile 生成的
+`YYYY-MM-DD-HH-MM-SS-<commit8>` tag，`oc-manager-hermes` 使用
+`<HERMES_VERSION>-YYYY-MM-DD-HH-MM-SS-<commit8>` tag；更严格的环境可进一步固定到
+`@sha256:` digest。**生产禁止使用 `:latest`、分支 tag 或版本族 tag**。
 
 - `deploy/manage/.env` → `OCM_MANAGER_IMAGE`、`OCM_WEB_IMAGE`
 - `deploy/manage/config/manager.yaml` → `hermes.runtime_image`（manager 把该镜像推送到 agent 节点）
