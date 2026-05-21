@@ -285,3 +285,54 @@ func TestAssistantVersionCreateWrapsStoreError(t *testing.T) {
 	require.Error(t, err)
 	assert.Contains(t, err.Error(), "db down")
 }
+
+// seedVersion 在 fakeAVStore 内放一个已存在版本，返回其 id。
+func seedVersion(store *fakeAVStore, name string, revision int32) string {
+	id := mustParseUUID("00000000-0000-0000-0000-0000000000b1")
+	v := sqlc.AssistantVersion{
+		ID: id, Name: name, SystemPrompt: "p", ImageID: "v2026.5.16", MainModel: "qwen",
+		RoutingJson: []byte("{}"), SkillsJson: []byte("[]"), Revision: revision,
+	}
+	store.versions[uuidToString(id)] = v
+	store.byName[name] = v
+	return uuidToString(id)
+}
+
+// TestAssistantVersionUpdateBumpsRevisionOnPromptChange 验证改提示词会 revision +1。
+func TestAssistantVersionUpdateBumpsRevisionOnPromptChange(t *testing.T) {
+	store := newFakeAVStore()
+	id := seedVersion(store, "标准版", 3)
+	svc := newTestAVService(t, store)
+	in := validCreateInput()
+	in.Name = "标准版"
+	in.SystemPrompt = "新的提示词"
+	got, err := svc.Update(context.Background(), platformPrincipal(), id, in)
+	require.NoError(t, err)
+	assert.EqualValues(t, 4, got.Revision)
+}
+
+// TestAssistantVersionUpdateKeepsRevisionOnDescriptionOnly 验证只改描述不 bump revision。
+func TestAssistantVersionUpdateKeepsRevisionOnDescriptionOnly(t *testing.T) {
+	store := newFakeAVStore()
+	id := seedVersion(store, "标准版", 3)
+	svc := newTestAVService(t, store)
+	in := AssistantVersionInput{
+		Name: "标准版", Description: "只改描述", SystemPrompt: "p",
+		ImageID: "v2026.5.16", MainModel: "qwen", Routing: map[string]string{},
+	}
+	got, err := svc.Update(context.Background(), platformPrincipal(), id, in)
+	require.NoError(t, err)
+	assert.EqualValues(t, 3, got.Revision)
+}
+
+// TestAssistantVersionUpdateRejectsNameTakenByOther 验证改名撞到他人名称时报 NameTaken。
+func TestAssistantVersionUpdateRejectsNameTakenByOther(t *testing.T) {
+	store := newFakeAVStore()
+	id := seedVersion(store, "标准版", 1)
+	store.byName["高级版"] = sqlc.AssistantVersion{ID: mustParseUUID("00000000-0000-0000-0000-0000000000c9"), Name: "高级版"}
+	svc := newTestAVService(t, store)
+	in := validCreateInput()
+	in.Name = "高级版"
+	_, err := svc.Update(context.Background(), platformPrincipal(), id, in)
+	require.ErrorIs(t, err, ErrAssistantVersionNameTaken)
+}

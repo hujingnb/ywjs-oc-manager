@@ -259,6 +259,98 @@ func normalizeRouting(in map[string]string) map[string]string {
 	return out
 }
 
+// Update 编辑版本。仅当「影响容器」的字段变更时才把 revision +1：
+// system_prompt / image_id / main_model / routing。name / description 变更不 bump。
+func (s *AssistantVersionService) Update(ctx context.Context, principal auth.Principal, id string, in AssistantVersionInput) (AssistantVersionResult, error) {
+	if !auth.CanManageAssistantVersion(principal) {
+		return AssistantVersionResult{}, ErrAssistantVersionDenied
+	}
+	if err := s.validateInput(in); err != nil {
+		return AssistantVersionResult{}, err
+	}
+	current, err := s.loadVersion(ctx, id)
+	if err != nil {
+		return AssistantVersionResult{}, err
+	}
+	// 改名时确认新名称未被「其它」版本占用。
+	newName := trimSpace(in.Name)
+	if newName != current.Name {
+		if existing, err := s.store.GetAssistantVersionByName(ctx, newName); err == nil {
+			if uuidToString(existing.ID) != uuidToString(current.ID) {
+				return AssistantVersionResult{}, ErrAssistantVersionNameTaken
+			}
+		} else if !errors.Is(err, pgx.ErrNoRows) {
+			return AssistantVersionResult{}, fmt.Errorf("查询版本名称失败: %w", err)
+		}
+	}
+	routingJSON, err := json.Marshal(normalizeRouting(in.Routing))
+	if err != nil {
+		return AssistantVersionResult{}, fmt.Errorf("序列化 routing 失败: %w", err)
+	}
+	revision := current.Revision
+	if containerAffectingChanged(current, in, routingJSON) {
+		revision++
+	}
+	row, err := s.store.UpdateAssistantVersion(ctx, sqlc.UpdateAssistantVersionParams{
+		ID:           current.ID,
+		Name:         newName,
+		Description:  trimSpace(in.Description),
+		SystemPrompt: in.SystemPrompt,
+		ImageID:      trimSpace(in.ImageID),
+		MainModel:    trimSpace(in.MainModel),
+		RoutingJson:  routingJSON,
+		SkillsJson:   current.SkillsJson,
+		Revision:     revision,
+	})
+	if err != nil {
+		return AssistantVersionResult{}, fmt.Errorf("更新版本失败: %w", err)
+	}
+	return toAssistantVersionResult(row)
+}
+
+// containerAffectingChanged 判断本次更新是否动了「影响容器」的字段。
+// routingJSON 是已归一化序列化后的新 routing，与库中现值做语义比较。
+func containerAffectingChanged(current sqlc.AssistantVersion, in AssistantVersionInput, routingJSON []byte) bool {
+	if current.SystemPrompt != in.SystemPrompt {
+		return true
+	}
+	if current.ImageID != trimSpace(in.ImageID) {
+		return true
+	}
+	if current.MainModel != trimSpace(in.MainModel) {
+		return true
+	}
+	return !jsonEqual(current.RoutingJson, routingJSON)
+}
+
+// jsonEqual 比较两段 routing jsonb 字节在语义上是否相等（忽略 key 顺序与空白）。
+func jsonEqual(a, b []byte) bool {
+	var ma, mb map[string]string
+	if err := json.Unmarshal(normalizeEmptyJSON(a), &ma); err != nil {
+		return false
+	}
+	if err := json.Unmarshal(normalizeEmptyJSON(b), &mb); err != nil {
+		return false
+	}
+	if len(ma) != len(mb) {
+		return false
+	}
+	for k, v := range ma {
+		if mb[k] != v {
+			return false
+		}
+	}
+	return true
+}
+
+// normalizeEmptyJSON 把空字节视作空对象，避免 json.Unmarshal 报错。
+func normalizeEmptyJSON(b []byte) []byte {
+	if len(b) == 0 {
+		return []byte("{}")
+	}
+	return b
+}
+
 // Create 创建一个新版本，revision 初始为 1。
 func (s *AssistantVersionService) Create(ctx context.Context, principal auth.Principal, in AssistantVersionInput) (AssistantVersionResult, error) {
 	if !auth.CanManageAssistantVersion(principal) {
