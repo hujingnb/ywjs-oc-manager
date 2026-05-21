@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"log/slog"
 	"math"
 	"sort"
 	"time"
@@ -468,6 +469,9 @@ func versionInOrgAllowlist(org sqlc.Organization, versionID string) bool {
 	ids := []string{}
 	if len(org.AssistantVersionIds) > 0 {
 		if err := json.Unmarshal(org.AssistantVersionIds, &ids); err != nil {
+			// allowlist 列由组织服务统一以 JSON 数组写入，理论上不会损坏；
+			// 真损坏时记日志后按「拒绝」处理（返回 false），不静默吞掉。
+			slog.Warn("解析组织 assistant_version_ids 失败", "org_id", uuidToString(org.ID), "error", err)
 			return false
 		}
 	}
