@@ -420,10 +420,11 @@ func (h *AppInitializeHandler) markFailed(ctx context.Context, app *sqlc.App, ph
 
 // pullRuntimeImageTimeout 是单次运行时镜像拉取的总时长上限。
 //
-// 取值 30 分钟：远大于数 GB 镜像在慢网络下的正常拉取耗时，不会误杀正常拉取；
-// 又能保证拉取流卡死时最终冒泡成 error，让实例从 pulling_runtime_image 恢复为
-// 可重试状态，而不是永久卡死（详见 phasePullRuntimeImage 内注释）。
-const pullRuntimeImageTimeout = 30 * time.Minute
+// 取值 6 小时：运行时镜像体积大，且节点常经阿里云 ACR 个人版等带宽受限链路拉取，
+// 慢网络下数小时才拉完属正常，上限必须足够大以免误杀正常拉取；同时又能保证
+// 拉取流彻底卡死时最终冒泡成 error，让实例从 pulling_runtime_image 恢复为可重试
+// 状态，而不是永久卡死（详见 phasePullRuntimeImage 内注释）。
+const pullRuntimeImageTimeout = 6 * time.Hour
 
 // phasePullRuntimeImage 通过 agent docker proxy 在目标节点拉取 hermes runtime 镜像。
 //
