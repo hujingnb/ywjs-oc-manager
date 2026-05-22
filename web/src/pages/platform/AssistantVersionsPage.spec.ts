@@ -1,6 +1,6 @@
-import { mount } from '@vue/test-utils'
+import { flushPromises, mount } from '@vue/test-utils'
 import { defineComponent, h, nextTick, ref, type PropType } from 'vue'
-import { describe, expect, it, vi } from 'vitest'
+import { beforeEach, describe, expect, it, vi } from 'vitest'
 import type { DataTableColumn } from 'naive-ui'
 
 import AssistantVersionsPage from './AssistantVersionsPage.vue'
@@ -9,6 +9,7 @@ import type { AssistantVersionDTO } from '@/api/hooks/useAssistantVersions'
 const createVersion = vi.hoisted(() => vi.fn())
 const updateVersion = vi.hoisted(() => vi.fn())
 const deleteVersion = vi.hoisted(() => vi.fn())
+const uploadSkill = vi.hoisted(() => vi.fn())
 
 // 一个用于列表与编辑回填的样例版本。
 const sampleVersion: AssistantVersionDTO = {
@@ -33,7 +34,7 @@ vi.mock('@/api/hooks/useAssistantVersions', async () => {
     useCreateAssistantVersion: () => ({ mutateAsync: createVersion }),
     useUpdateAssistantVersion: () => ({ mutateAsync: updateVersion }),
     useDeleteAssistantVersion: () => ({ mutateAsync: deleteVersion }),
-    useUploadAssistantVersionSkill: () => ({ mutateAsync: vi.fn() }),
+    useUploadAssistantVersionSkill: () => ({ mutateAsync: uploadSkill }),
     useDeleteAssistantVersionSkill: () => ({ mutateAsync: vi.fn() }),
   }
 })
@@ -143,6 +144,11 @@ function mountPage() {
 }
 
 describe('AssistantVersionsPage', () => {
+  // 各用例间清理 mock 调用历史，避免 toHaveBeenCalled 跨用例累积导致误判。
+  beforeEach(() => {
+    vi.clearAllMocks()
+  })
+
   // 列表展示已有版本的名称与修订号。
   it('展示版本列表', () => {
     const wrapper = mountPage()
@@ -215,5 +221,82 @@ describe('AssistantVersionsPage', () => {
     expect(confirmBtn.exists()).toBe(true)
     await confirmBtn.trigger('click')
     expect(deleteVersion).toHaveBeenCalledWith('ver-1')
+  })
+
+  // 新建态也应出现 skill 暂存入口（此前仅编辑态可见），选中文件后进入暂存列表，
+  // 保存版本时先创建版本、再用新版本 ID 把暂存的 skill 逐个上传。
+  it('新建版本时可暂存 skill 并在保存后上传', async () => {
+    createVersion.mockResolvedValue({ ...sampleVersion, id: 'ver-new', skills: [] })
+    uploadSkill.mockResolvedValue({
+      skills: [{ name: 'weather', file_path: 'p', file_size: 10, file_sha256: 'x' }],
+    })
+    const wrapper = mountPage()
+    await wrapper.findAll('button').find(b => b.text().includes('新增版本'))!.trigger('click')
+    await nextTick()
+
+    // 新建态出现「添加 skill tar」入口。
+    const addSkillBtn = wrapper.findAll('button').find(b => b.text().includes('添加 skill tar'))
+    expect(addSkillBtn).toBeTruthy()
+
+    // 通过隐藏的 file input 选中一个 skill tar，文件名应出现在暂存列表中。
+    const file = new File(['skill-data'], 'weather.tar', { type: 'application/x-tar' })
+    const fileInput = wrapper.find('input[type="file"]')
+    Object.defineProperty(fileInput.element, 'files', { value: [file], configurable: true })
+    await fileInput.trigger('change')
+    await nextTick()
+    expect(wrapper.text()).toContain('weather.tar')
+
+    // 填写必填项：inputs[0] 是名称（file input 在 DOM 中位于其后）。
+    await wrapper.findAll('input')[0].setValue('带技能的版本')
+    const textareas = wrapper.findAll('textarea')
+    await textareas[1].setValue('你是助手') // 内置提示词
+    const selects = wrapper.findAll('select')
+    await selects[0].setValue('v2026.5.16') // 使用镜像
+    await selects[1].setValue('qwen') // 主模型
+
+    await wrapper.find('form').trigger('submit')
+    await flushPromises()
+
+    // 先创建版本，再用新版本 ID 上传暂存的 skill。
+    expect(createVersion).toHaveBeenCalledTimes(1)
+    expect(uploadSkill).toHaveBeenCalledTimes(1)
+    const uploadArg = uploadSkill.mock.calls[0][0]
+    expect(uploadArg.id).toBe('ver-new')
+    // 暂存的 File 必须原样传递（未被 Vue 响应式代理包装），否则 multipart 上传会失败。
+    expect(uploadArg.file).toBe(file)
+  })
+
+  // 新建态移除已暂存的 skill 后，保存版本只创建版本、不触发任何 skill 上传。
+  it('新建版本时移除暂存 skill 后不再上传', async () => {
+    createVersion.mockResolvedValue({ ...sampleVersion, id: 'ver-new', skills: [] })
+    const wrapper = mountPage()
+    await wrapper.findAll('button').find(b => b.text().includes('新增版本'))!.trigger('click')
+    await nextTick()
+
+    // 先暂存一个 skill 文件。
+    const file = new File(['skill-data'], 'weather.tar', { type: 'application/x-tar' })
+    const fileInput = wrapper.find('input[type="file"]')
+    Object.defineProperty(fileInput.element, 'files', { value: [file], configurable: true })
+    await fileInput.trigger('change')
+    await nextTick()
+    expect(wrapper.text()).toContain('weather.tar')
+
+    // 点击「移除」清空暂存项，列表不再显示该文件。
+    await wrapper.findAll('button').find(b => b.text() === '移除')!.trigger('click')
+    await nextTick()
+    expect(wrapper.text()).not.toContain('weather.tar')
+
+    // 填必填项并提交：只应创建版本，不应调用 skill 上传。
+    await wrapper.findAll('input')[0].setValue('无技能版本')
+    const textareas = wrapper.findAll('textarea')
+    await textareas[1].setValue('你是助手')
+    const selects = wrapper.findAll('select')
+    await selects[0].setValue('v2026.5.16')
+    await selects[1].setValue('qwen')
+    await wrapper.find('form').trigger('submit')
+    await flushPromises()
+
+    expect(createVersion).toHaveBeenCalledTimes(1)
+    expect(uploadSkill).not.toHaveBeenCalled()
   })
 })
