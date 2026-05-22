@@ -113,7 +113,6 @@ const activeKey = computed(() => {
     '/balance',
     '/audit-logs',
     '/runtime-nodes',
-    '/org/persona',
   ]
   return prefixes.find(k => p.startsWith(k)) ?? '/'
 })
