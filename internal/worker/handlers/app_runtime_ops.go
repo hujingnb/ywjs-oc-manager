@@ -19,8 +19,6 @@ import (
 type AppRuntimeStore interface {
 	GetApp(ctx context.Context, id pgtype.UUID) (sqlc.App, error)
 	SetAppStatus(ctx context.Context, arg sqlc.SetAppStatusParams) (sqlc.App, error)
-	// SetAppModelSynced 在实例重启完成后标记模型已同步（model_synced=true）。
-	SetAppModelSynced(ctx context.Context, id pgtype.UUID) (sqlc.App, error)
 	SoftDeleteApp(ctx context.Context, id pgtype.UUID) (sqlc.App, error)
 	// SetAppAppliedVersion 在重启成功后记录已应用的版本修订与镜像 ref，
 	// 供前端 version_synced 检测使用。
@@ -206,11 +204,11 @@ type AppInputRefreshResult struct {
 // 成功后返回 AppInputRefreshResult，包含版本修订与镜像 ref，供 restart handler
 // 写入 apps.applied_version_revision / applied_image_ref。
 //
-// 改 model / 三层 prompt / persona 都会落到 apps 表(或 organizations / organization_personas
-// 等关联表), 之后通过 app_restart_container job 触发本 handler。镜像 oc-entrypoint
+// 改三层 prompt / persona 都会落到 apps 表及相关联表, 之后通过
+// app_restart_container job 触发本 handler。镜像 oc-entrypoint
 // 每次容器启动会幂等地把 input/ 翻译成 hermes 自有 schema(config.yaml / SOUL.md /
 // skills 等), 因此只要 restart 前把节点 apps/<id>/input/ 重写成最新数据,
-// 下次 start 后容器内 hermes 自然加载到改后的模型与 prompt。
+// 下次 start 后容器内 hermes 自然加载到改后的版本配置与 prompt。
 //
 // 实现方负责: 取 DB 当前 app / org / owner 上下文 + 解密 api key, 装配
 // hermes.AppInputData 并通过 hermes.WriteAppInput 写到目标节点的 input/ 目录。
@@ -304,7 +302,7 @@ func (h *AppRestartContainerHandler) Handle(ctx context.Context, job sqlc.Job) e
 	// 必须先把输入数据更新到节点,再进入容器停 → 启循环。
 	//
 	// 失败时直接冒泡让 worker 重试: 没刷新就 restart 等于"重启后还是老配置",
-	// 比让容器先 stop 再失败更糟(用户感知不到, model_synced 还会被错误置位)。
+	// 比让容器先 stop 再失败更糟(用户感知不到, version_synced 还会被错误置位)。
 	var refreshResult AppInputRefreshResult
 	if h.inputRefresher != nil {
 		refreshResult, err = h.inputRefresher.RefreshAppInput(ctx, nodeID, app)
@@ -366,7 +364,7 @@ func (h *AppRestartContainerHandler) Handle(ctx context.Context, job sqlc.Job) e
 			_ = h.notifier.Enqueue(ctx, uuidToString(job.ID))
 		}
 		// 直接返回：不再走后续 stop/clear/start，也不调 SetAppStatus(running) /
-		// SetAppModelSynced / SetAppAppliedVersion——这些由 app_initialize handler
+		// SetAppAppliedVersion——这些由 app_initialize handler
 		// 在到达 binding_waiting 时负责，避免对镜像维度谎报 synced。
 		return nil
 	}
@@ -398,10 +396,6 @@ func (h *AppRestartContainerHandler) Handle(ctx context.Context, job sqlc.Job) e
 	}
 	if _, err := h.store.SetAppStatus(ctx, sqlc.SetAppStatusParams{ID: app.ID, Status: domain.AppStatusRunning}); err != nil {
 		return fmt.Errorf("更新应用状态失败: %w", err)
-	}
-	// 重启完成后标记模型已同步：容器已加载最新 config.yaml 中的 model_id，DB 与运行时一致。
-	if _, err := h.store.SetAppModelSynced(ctx, app.ID); err != nil {
-		return fmt.Errorf("标记模型同步状态失败: %w", err)
 	}
 	// 重启刷新已把节点 input 重写成当前版本快照，记录已应用版本修订与镜像 ref，
 	// 供前端 version_synced 检测；inputRefresher 为 nil（测试装配）时跳过。

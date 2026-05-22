@@ -122,7 +122,7 @@ type RuntimeImageConfig struct {
 	Ref   string `yaml:"ref"`
 }
 
-// HermesLLMConfig 仅保留兜底默认值字段（具体每 app 的模型由 apps.model_id 决定）。
+// HermesLLMConfig 仅保留兜底默认值字段（具体每 app 的模型由绑定的助手版本 main_model 决定）。
 //
 //   - BaseURL：OpenAI 兼容 endpoint，Hermes 容器从 docker network 看到的 new-api 地址，
 //     必须含 /v1 路径后缀；作为 manifest.credentials.openai.base_url 写入

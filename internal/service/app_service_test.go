@@ -28,7 +28,7 @@ const (
 func TestGetAppExposeRuntimeImageOnlyToPlatformAdmin(t *testing.T) {
 	t.Parallel()
 	svc, store := newAppServiceWithStore(t)
-	app := store.mustSeedApp(t, "qwen2.5:7b")
+	app := store.mustSeedApp(t)
 	app.RuntimeImageRef = "ghcr.io/foo/hermes:v1.2.3"
 	app.RuntimeImageSha256 = "sha256:abcdef1234567890"
 	store.app = app
@@ -90,7 +90,7 @@ type appServiceStoreStub struct {
 	setVersionCalls []sqlc.SetAppVersionParams
 }
 
-func (s *appServiceStoreStub) mustSeedApp(t *testing.T, modelID string) sqlc.App {
+func (s *appServiceStoreStub) mustSeedApp(t *testing.T) sqlc.App {
 	t.Helper()
 	s.app = sqlc.App{
 		ID:            mustUUID(t, testAppServiceAppID),
@@ -100,7 +100,6 @@ func (s *appServiceStoreStub) mustSeedApp(t *testing.T, modelID string) sqlc.App
 		Name:          "测试实例",
 		Status:        domain.AppStatusRunning,
 		ApiKeyStatus:  domain.APIKeyStatusActive,
-		ModelID:       modelID,
 	}
 	return s.app
 }
@@ -115,7 +114,6 @@ func (s *appServiceStoreStub) CreateApp(_ context.Context, arg sqlc.CreateAppPar
 		Description:   arg.Description,
 		Status:        arg.Status,
 		ApiKeyStatus:  arg.ApiKeyStatus,
-		ModelID:       arg.ModelID,
 	}
 	return s.app, nil
 }
@@ -309,7 +307,7 @@ func TestGetVersionSynced(t *testing.T) {
 		"img-v1": "ghcr.io/foo/hermes:v1.0",
 	}})
 
-	app := store.mustSeedApp(t, "qwen2.5:7b")
+	app := store.mustSeedApp(t)
 	// 实例已应用版本 revision=2、镜像 ref 与版本一致。
 	app.AppliedVersionRevision = 2
 	app.AppliedImageRef = "ghcr.io/foo/hermes:v1.0"
@@ -352,7 +350,7 @@ func TestSwitchAppVersionSuccess(t *testing.T) {
 	svc, store := newAppServiceWithStore(t)
 
 	// 预置实例：applied_version_revision=0，模拟切换前状态。
-	app := store.mustSeedApp(t, "qwen2.5:7b")
+	app := store.mustSeedApp(t)
 	app.AppliedVersionRevision = 0
 	store.app = app
 	// 组织 allowlist 内含目标版本 testSwitchVersionID。
@@ -379,7 +377,7 @@ func TestSwitchAppVersionSuccessByOwnerMember(t *testing.T) {
 	svc, store := newAppServiceWithStore(t)
 
 	// 预置实例：owner 为 testMemUID，模拟切换前状态（applied_version_revision=0）。
-	app := store.mustSeedApp(t, "qwen2.5:7b")
+	app := store.mustSeedApp(t)
 	app.AppliedVersionRevision = 0
 	store.app = app
 	// 组织 allowlist 内含目标版本 testSwitchVersionID。
@@ -421,7 +419,7 @@ func TestSwitchAppVersionResetsAppliedSoVersionSyncedIsFalse(t *testing.T) {
 	}})
 
 	// 预置实例：模拟切换前已对齐旧版本 A —— applied_version_revision=2、applied_image_ref 与解析结果一致。
-	app := store.mustSeedApp(t, "qwen2.5:7b")
+	app := store.mustSeedApp(t)
 	app.AppliedVersionRevision = 2
 	app.AppliedImageRef = "ghcr.io/foo/hermes:v1.0"
 	store.app = app
@@ -450,7 +448,7 @@ func TestSwitchAppVersionNotInAllowlist(t *testing.T) {
 	svc, store := newAppServiceWithStore(t)
 
 	// 预置实例，allowlist 只含 testSwitchVersionID，不含 testSwitchVersionID2。
-	store.mustSeedApp(t, "qwen2.5:7b")
+	store.mustSeedApp(t)
 	store.organization = mustOrgWithAllowlist(t, testSwitchVersionID)
 
 	principal := appOrgAdminPrincipal(store.organization)
@@ -502,7 +500,7 @@ func TestSwitchAppVersionForbidden(t *testing.T) {
 		t.Run(tc.name, func(t *testing.T) {
 			t.Parallel()
 			svc, store := newAppServiceWithStore(t)
-			store.mustSeedApp(t, "qwen2.5:7b")
+			store.mustSeedApp(t)
 			store.organization = mustOrgWithAllowlist(t, testSwitchVersionID)
 
 			// 无权调用者尝试切换版本，期望返回 ErrForbidden。
@@ -517,7 +515,7 @@ func TestSwitchAppVersionAppNotFound(t *testing.T) {
 	t.Parallel()
 	svc, store := newAppServiceWithStore(t)
 	// store.app 未设置（零值 ID），传入有效但不存在的 appID 触发 pgx.ErrNoRows。
-	store.mustSeedApp(t, "qwen2.5:7b")
+	store.mustSeedApp(t)
 	store.organization = mustOrgWithAllowlist(t, testSwitchVersionID)
 
 	const nonExistentAppID = "00000000-0000-0000-0000-000000009001"

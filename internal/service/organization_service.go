@@ -68,9 +68,6 @@ type OrganizationStore interface {
 	GetOrgAdminByOrg(ctx context.Context, id pgtype.UUID) (sqlc.User, error)
 	UpdateOrganizationProfile(ctx context.Context, arg sqlc.UpdateOrganizationProfileParams) (sqlc.Organization, error)
 	SetOrganizationStatus(ctx context.Context, arg sqlc.SetOrganizationStatusParams) (sqlc.Organization, error)
-	// UpdateAppModelsByOrg 历史上在组织模型变更时批量同步实例 model_id；助手版本特性接管模型选择后
-	// UpdateOrganization 不再调用它，保留接口方法待 Phase 5 统一清理。
-	UpdateAppModelsByOrg(ctx context.Context, arg sqlc.UpdateAppModelsByOrgParams) error
 }
 
 // NewAPIUserProvisioner 抽象组织创建链路所需的 new-api 调用集合，便于测试中替换为 fake。

@@ -139,8 +139,6 @@ type Querier interface {
 	SetAppContainer(ctx context.Context, arg SetAppContainerParams) (App, error)
 	// worker app_health_check handler 写最近一次健康检查结果；用于自动重启窗口计数。
 	SetAppHealthState(ctx context.Context, arg SetAppHealthStateParams) (App, error)
-	// 实例重启完成后标记模型已同步。
-	SetAppModelSynced(ctx context.Context, id pgtype.UUID) (App, error)
 	SetAppNewAPIKey(ctx context.Context, arg SetAppNewAPIKeyParams) (App, error)
 	// progressReporter 节流后写入；NULL/NULL 表示阶段切换或未知。
 	SetAppProgress(ctx context.Context, arg SetAppProgressParams) (App, error)
@@ -169,8 +167,6 @@ type Querier interface {
 	// SumRechargeAmountByOrg 聚合指定组织所有成功充值记录的总额。
 	// 仅统计 status='succeeded' 的记录，failed 记录不计入累计金额。
 	SumRechargeAmountByOrg(ctx context.Context, orgID pgtype.UUID) (int64, error)
-	// 组织模型变更时批量同步所有活跃实例的 model_id 并标记需重启。
-	UpdateAppModelsByOrg(ctx context.Context, arg UpdateAppModelsByOrgParams) error
 	// phasePullRuntimeImage 成功后写入镜像引用与 sha256。
 	UpdateAppRuntimeImage(ctx context.Context, arg UpdateAppRuntimeImageParams) (App, error)
 	// revision 由 service 计算后整体写入（仅容器相关字段变更才递增）。

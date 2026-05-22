@@ -67,7 +67,6 @@ type AppResult struct {
 	Name          string `json:"name"`
 	Description   string `json:"description,omitempty"`
 	Status        string `json:"status"`
-	ModelID       string `json:"model_id"`
 	ContainerID   string `json:"container_id,omitempty"`
 	APIKeyStatus  string `json:"api_key_status"`
 	// NewapiKeyID 是 new-api 中 token 的数值 id；schema 上是 text 列存的字符串，
@@ -88,8 +87,6 @@ type AppResult struct {
 	// RuntimeImageSha256 是 docker inspect 返回的镜像 config digest（sha256:...）。
 	// 仅平台管理员可见；与 RuntimeImageRef 共同标识节点上运行的精确镜像版本。
 	RuntimeImageSha256 string `json:"runtime_image_sha256,omitempty"`
-	// ModelSynced 标记实例运行中的模型是否与数据库记录一致；false 表示需重启生效。
-	ModelSynced bool `json:"model_synced"`
 	// VersionID 是实例绑定的助手版本 id；空表示未绑定（仅历史数据）。
 	VersionID string `json:"version_id,omitempty"`
 	// VersionSynced 标记实例运行时是否已与绑定版本对齐（修订 + 镜像都一致）；
@@ -121,7 +118,7 @@ func (s *AppService) Get(ctx context.Context, principal auth.Principal, appID st
 		result.RuntimeImageRef = row.App.RuntimeImageRef
 		result.RuntimeImageSha256 = row.App.RuntimeImageSha256
 	}
-	return filterAppResultByRole(result, principal), nil
+	return result, nil
 }
 
 // ListByOrg 列出组织内的应用。
@@ -156,7 +153,7 @@ func (s *AppService) ListByOrg(ctx context.Context, principal auth.Principal, or
 		r := toAppResult(row.App)
 		// version_synced：修订 + 镜像双维度对比，判断实例是否需要重启。
 		r.VersionSynced = computeVersionSynced(row.App, row.VersionRevision, row.VersionImageID, s.imageResolver)
-		results = append(results, filterAppResultByRole(r, principal))
+		results = append(results, r)
 	}
 	return results, nil
 }
@@ -168,9 +165,7 @@ func toAppResult(app sqlc.App) AppResult {
 		OwnerUserID:  uuidToString(app.OwnerUserID),
 		Name:         app.Name,
 		Status:       app.Status,
-		ModelID:      app.ModelID,
 		APIKeyStatus: app.ApiKeyStatus,
-		ModelSynced:  app.ModelSynced,
 	}
 	if app.RuntimeNodeID.Valid {
 		result.RuntimeNodeID = uuidToOptionalString(app.RuntimeNodeID)
@@ -213,14 +208,6 @@ func computeVersionSynced(app sqlc.App, versionRevision int32, versionImageID st
 	}
 	ref, ok := resolver.ResolveRuntimeImage(versionImageID)
 	return ok && app.AppliedImageRef == ref
-}
-
-// filterAppResultByRole 根据调用者角色过滤敏感字段；非平台管理员不可见模型信息。
-func filterAppResultByRole(result AppResult, principal auth.Principal) AppResult {
-	if principal.Role != domain.UserRolePlatformAdmin {
-		result.ModelID = ""
-	}
-	return result
 }
 
 // SwitchAppVersion 切换实例绑定的助手版本。
@@ -273,5 +260,5 @@ func (s *AppService) SwitchAppVersion(ctx context.Context, principal auth.Princi
 	}
 	result := toAppResult(newRow.App)
 	result.VersionSynced = computeVersionSynced(newRow.App, newRow.VersionRevision, newRow.VersionImageID, s.imageResolver)
-	return filterAppResultByRole(result, principal), nil
+	return result, nil
 }

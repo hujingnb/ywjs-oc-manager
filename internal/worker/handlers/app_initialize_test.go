@@ -320,10 +320,9 @@ func TestAppInitializeContainerStepSkippedWhenContainerExists(t *testing.T) {
 	require.False(t, store.containerSet)
 }
 
-// TestEnsureAPIKeyKeepsNewAPITokenModelsUnrestricted 验证 new-api token 创建仍不限制模型。
+// TestEnsureAPIKeyKeepsNewAPITokenModelsUnrestricted 验证 new-api token 创建不限制模型。
 func TestEnsureAPIKeyKeepsNewAPITokenModelsUnrestricted(t *testing.T) {
 	store := newAppInitStub(t)
-	store.app.ModelID = "deepseek-r1:14b"
 	api := &fakeNewAPI{result: newapi.APIKey{ID: 99, Key: "sk-test"}}
 	handler := NewAppInitializeHandler(store, &fakeDirs{}, &fakeContainers{}, &fakeContainers{}, api, AppInitializeConfig{
 		Cipher: testCipher(t),
@@ -433,9 +432,7 @@ func newAppInitStub(t *testing.T) *appInitStub {
 			VersionID:    versionUUID,
 			Name:         "alice-bot",
 			Status:       domain.AppStatusDraft,
-			PersonaMode:  domain.PersonaModeOrgInherited,
 			ApiKeyStatus: domain.APIKeyStatusPending,
-			AppPrompt:    pgtype.Text{String: "{org_name} 应用 {app_name}", Valid: true},
 		},
 		org:  sqlc.Organization{Name: "测试组织", Status: domain.StatusActive},
 		user: sqlc.User{DisplayName: "Alice"},
@@ -1135,20 +1132,19 @@ func TestAppInitialize_AppliedVersionRecorded(t *testing.T) {
 }
 
 // TestAppInitialize_VersionModelWrittenToManifest 验证版本 MainModel 通过 BuildAppInputData
-// 正确写入 manifest，而非使用 app.ModelID 或默认值。
+// 正确写入 manifest，而非使用默认值。
 // 覆盖场景：版本 MainModel="gpt-4o"，opts.DefaultModel="default-model"
 // → BuildAppInputData 优先采用版本 MainModel。
 func TestAppInitialize_VersionModelWrittenToManifest(t *testing.T) {
 	// 仅测试 BuildAppInputData 纯函数，不走完整 Handle 流程。
 	app := sqlc.App{
-		ID:      mustUUIDForTest(t, testAppID),
-		Name:    "test-app",
-		ModelID: "old-model", // 旧字段，Phase 4 已不采用。
+		ID:   mustUUIDForTest(t, testAppID),
+		Name: "test-app",
 	}
 	org := sqlc.Organization{Name: "TestOrg"}
 	owner := sqlc.User{DisplayName: "Bob"}
 
-	// 版本 MainModel 非空时，model 字段必须使用版本值，不受 app.ModelID 影响。
+	// 版本 MainModel 非空时，model 字段必须使用版本值，不受默认值影响。
 	in := BuildAppInputData(app, org, owner, "sk-x", AppInputVersionData{
 		MainModel: "gpt-4o",
 	}, AppInputBuildOptions{DefaultModel: "default-model"})

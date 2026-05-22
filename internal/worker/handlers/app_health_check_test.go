@@ -37,11 +37,6 @@ func (s *fakeHealthStore) SoftDeleteApp(_ context.Context, _ pgtype.UUID) (sqlc.
 	return s.app, nil
 }
 
-// SetAppModelSynced 实现 AppRuntimeStore 接口；健康检查流程不触发模型同步，此处仅满足接口约束。
-func (s *fakeHealthStore) SetAppModelSynced(_ context.Context, _ pgtype.UUID) (sqlc.App, error) {
-	return s.app, nil
-}
-
 // SetAppAppliedVersion 实现 AppRuntimeStore 接口；健康检查流程不写版本已应用信息，此处仅满足接口约束。
 func (s *fakeHealthStore) SetAppAppliedVersion(_ context.Context, _ sqlc.SetAppAppliedVersionParams) (sqlc.App, error) {
 	return s.app, nil

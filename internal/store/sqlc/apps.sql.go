@@ -17,7 +17,7 @@ SET progress_current = NULL,
     progress_total = NULL,
     updated_at = now()
 WHERE id = $1
-RETURNING id, org_id, owner_user_id, runtime_node_id, name, description, status, container_id, container_name, newapi_key_id, newapi_key_ciphertext, api_key_status, created_at, updated_at, deleted_at, runtime_snapshot_json, runtime_snapshot_at, restart_policy_json, health_state_json, model_id, progress_current, progress_total, last_error_status, last_error_message, runtime_image_ref, runtime_image_sha256, newapi_key_name, model_synced, version_id, applied_version_revision, applied_image_ref
+RETURNING id, org_id, owner_user_id, runtime_node_id, name, description, status, container_id, container_name, newapi_key_id, newapi_key_ciphertext, api_key_status, created_at, updated_at, deleted_at, runtime_snapshot_json, runtime_snapshot_at, restart_policy_json, health_state_json, progress_current, progress_total, last_error_status, last_error_message, runtime_image_ref, runtime_image_sha256, newapi_key_name, version_id, applied_version_revision, applied_image_ref
 `
 
 // transitionTo / RequestInitialize 强制清空进度字段。
@@ -44,7 +44,6 @@ func (q *Queries) ClearAppProgress(ctx context.Context, id pgtype.UUID) (App, er
 		&i.RuntimeSnapshotAt,
 		&i.RestartPolicyJson,
 		&i.HealthStateJson,
-		&i.ModelID,
 		&i.ProgressCurrent,
 		&i.ProgressTotal,
 		&i.LastErrorStatus,
@@ -52,7 +51,6 @@ func (q *Queries) ClearAppProgress(ctx context.Context, id pgtype.UUID) (App, er
 		&i.RuntimeImageRef,
 		&i.RuntimeImageSha256,
 		&i.NewapiKeyName,
-		&i.ModelSynced,
 		&i.VersionID,
 		&i.AppliedVersionRevision,
 		&i.AppliedImageRef,
@@ -69,12 +67,11 @@ INSERT INTO apps (
     description,
     status,
     api_key_status,
-    model_id,
     version_id
 ) VALUES (
-    $1, $2, $3, $4, $5, $6, $7, $8, $9
+    $1, $2, $3, $4, $5, $6, $7, $8
 )
-RETURNING id, org_id, owner_user_id, runtime_node_id, name, description, status, container_id, container_name, newapi_key_id, newapi_key_ciphertext, api_key_status, created_at, updated_at, deleted_at, runtime_snapshot_json, runtime_snapshot_at, restart_policy_json, health_state_json, model_id, progress_current, progress_total, last_error_status, last_error_message, runtime_image_ref, runtime_image_sha256, newapi_key_name, model_synced, version_id, applied_version_revision, applied_image_ref
+RETURNING id, org_id, owner_user_id, runtime_node_id, name, description, status, container_id, container_name, newapi_key_id, newapi_key_ciphertext, api_key_status, created_at, updated_at, deleted_at, runtime_snapshot_json, runtime_snapshot_at, restart_policy_json, health_state_json, progress_current, progress_total, last_error_status, last_error_message, runtime_image_ref, runtime_image_sha256, newapi_key_name, version_id, applied_version_revision, applied_image_ref
 `
 
 type CreateAppParams struct {
@@ -85,7 +82,6 @@ type CreateAppParams struct {
 	Description   pgtype.Text `db:"description" json:"description"`
 	Status        string      `db:"status" json:"status"`
 	ApiKeyStatus  string      `db:"api_key_status" json:"api_key_status"`
-	ModelID       string      `db:"model_id" json:"model_id"`
 	VersionID     pgtype.UUID `db:"version_id" json:"version_id"`
 }
 
@@ -98,7 +94,6 @@ func (q *Queries) CreateApp(ctx context.Context, arg CreateAppParams) (App, erro
 		arg.Description,
 		arg.Status,
 		arg.ApiKeyStatus,
-		arg.ModelID,
 		arg.VersionID,
 	)
 	var i App
@@ -122,7 +117,6 @@ func (q *Queries) CreateApp(ctx context.Context, arg CreateAppParams) (App, erro
 		&i.RuntimeSnapshotAt,
 		&i.RestartPolicyJson,
 		&i.HealthStateJson,
-		&i.ModelID,
 		&i.ProgressCurrent,
 		&i.ProgressTotal,
 		&i.LastErrorStatus,
@@ -130,7 +124,6 @@ func (q *Queries) CreateApp(ctx context.Context, arg CreateAppParams) (App, erro
 		&i.RuntimeImageRef,
 		&i.RuntimeImageSha256,
 		&i.NewapiKeyName,
-		&i.ModelSynced,
 		&i.VersionID,
 		&i.AppliedVersionRevision,
 		&i.AppliedImageRef,
@@ -139,7 +132,7 @@ func (q *Queries) CreateApp(ctx context.Context, arg CreateAppParams) (App, erro
 }
 
 const getActiveAppByOwner = `-- name: GetActiveAppByOwner :one
-SELECT id, org_id, owner_user_id, runtime_node_id, name, description, status, container_id, container_name, newapi_key_id, newapi_key_ciphertext, api_key_status, created_at, updated_at, deleted_at, runtime_snapshot_json, runtime_snapshot_at, restart_policy_json, health_state_json, model_id, progress_current, progress_total, last_error_status, last_error_message, runtime_image_ref, runtime_image_sha256, newapi_key_name, model_synced, version_id, applied_version_revision, applied_image_ref
+SELECT id, org_id, owner_user_id, runtime_node_id, name, description, status, container_id, container_name, newapi_key_id, newapi_key_ciphertext, api_key_status, created_at, updated_at, deleted_at, runtime_snapshot_json, runtime_snapshot_at, restart_policy_json, health_state_json, progress_current, progress_total, last_error_status, last_error_message, runtime_image_ref, runtime_image_sha256, newapi_key_name, version_id, applied_version_revision, applied_image_ref
 FROM apps
 WHERE owner_user_id = $1 AND deleted_at IS NULL
 `
@@ -167,7 +160,6 @@ func (q *Queries) GetActiveAppByOwner(ctx context.Context, ownerUserID pgtype.UU
 		&i.RuntimeSnapshotAt,
 		&i.RestartPolicyJson,
 		&i.HealthStateJson,
-		&i.ModelID,
 		&i.ProgressCurrent,
 		&i.ProgressTotal,
 		&i.LastErrorStatus,
@@ -175,7 +167,6 @@ func (q *Queries) GetActiveAppByOwner(ctx context.Context, ownerUserID pgtype.UU
 		&i.RuntimeImageRef,
 		&i.RuntimeImageSha256,
 		&i.NewapiKeyName,
-		&i.ModelSynced,
 		&i.VersionID,
 		&i.AppliedVersionRevision,
 		&i.AppliedImageRef,
@@ -184,7 +175,7 @@ func (q *Queries) GetActiveAppByOwner(ctx context.Context, ownerUserID pgtype.UU
 }
 
 const getApp = `-- name: GetApp :one
-SELECT id, org_id, owner_user_id, runtime_node_id, name, description, status, container_id, container_name, newapi_key_id, newapi_key_ciphertext, api_key_status, created_at, updated_at, deleted_at, runtime_snapshot_json, runtime_snapshot_at, restart_policy_json, health_state_json, model_id, progress_current, progress_total, last_error_status, last_error_message, runtime_image_ref, runtime_image_sha256, newapi_key_name, model_synced, version_id, applied_version_revision, applied_image_ref
+SELECT id, org_id, owner_user_id, runtime_node_id, name, description, status, container_id, container_name, newapi_key_id, newapi_key_ciphertext, api_key_status, created_at, updated_at, deleted_at, runtime_snapshot_json, runtime_snapshot_at, restart_policy_json, health_state_json, progress_current, progress_total, last_error_status, last_error_message, runtime_image_ref, runtime_image_sha256, newapi_key_name, version_id, applied_version_revision, applied_image_ref
 FROM apps
 WHERE id = $1
 `
@@ -212,7 +203,6 @@ func (q *Queries) GetApp(ctx context.Context, id pgtype.UUID) (App, error) {
 		&i.RuntimeSnapshotAt,
 		&i.RestartPolicyJson,
 		&i.HealthStateJson,
-		&i.ModelID,
 		&i.ProgressCurrent,
 		&i.ProgressTotal,
 		&i.LastErrorStatus,
@@ -220,7 +210,6 @@ func (q *Queries) GetApp(ctx context.Context, id pgtype.UUID) (App, error) {
 		&i.RuntimeImageRef,
 		&i.RuntimeImageSha256,
 		&i.NewapiKeyName,
-		&i.ModelSynced,
 		&i.VersionID,
 		&i.AppliedVersionRevision,
 		&i.AppliedImageRef,
@@ -229,7 +218,7 @@ func (q *Queries) GetApp(ctx context.Context, id pgtype.UUID) (App, error) {
 }
 
 const getAppWithVersion = `-- name: GetAppWithVersion :one
-SELECT apps.id, apps.org_id, apps.owner_user_id, apps.runtime_node_id, apps.name, apps.description, apps.status, apps.container_id, apps.container_name, apps.newapi_key_id, apps.newapi_key_ciphertext, apps.api_key_status, apps.created_at, apps.updated_at, apps.deleted_at, apps.runtime_snapshot_json, apps.runtime_snapshot_at, apps.restart_policy_json, apps.health_state_json, apps.model_id, apps.progress_current, apps.progress_total, apps.last_error_status, apps.last_error_message, apps.runtime_image_ref, apps.runtime_image_sha256, apps.newapi_key_name, apps.model_synced, apps.version_id, apps.applied_version_revision, apps.applied_image_ref, av.revision AS version_revision, av.image_id AS version_image_id
+SELECT apps.id, apps.org_id, apps.owner_user_id, apps.runtime_node_id, apps.name, apps.description, apps.status, apps.container_id, apps.container_name, apps.newapi_key_id, apps.newapi_key_ciphertext, apps.api_key_status, apps.created_at, apps.updated_at, apps.deleted_at, apps.runtime_snapshot_json, apps.runtime_snapshot_at, apps.restart_policy_json, apps.health_state_json, apps.progress_current, apps.progress_total, apps.last_error_status, apps.last_error_message, apps.runtime_image_ref, apps.runtime_image_sha256, apps.newapi_key_name, apps.version_id, apps.applied_version_revision, apps.applied_image_ref, av.revision AS version_revision, av.image_id AS version_image_id
 FROM apps
 JOIN assistant_versions av ON av.id = apps.version_id
 WHERE apps.id = $1
@@ -265,7 +254,6 @@ func (q *Queries) GetAppWithVersion(ctx context.Context, id pgtype.UUID) (GetApp
 		&i.App.RuntimeSnapshotAt,
 		&i.App.RestartPolicyJson,
 		&i.App.HealthStateJson,
-		&i.App.ModelID,
 		&i.App.ProgressCurrent,
 		&i.App.ProgressTotal,
 		&i.App.LastErrorStatus,
@@ -273,7 +261,6 @@ func (q *Queries) GetAppWithVersion(ctx context.Context, id pgtype.UUID) (GetApp
 		&i.App.RuntimeImageRef,
 		&i.App.RuntimeImageSha256,
 		&i.App.NewapiKeyName,
-		&i.App.ModelSynced,
 		&i.App.VersionID,
 		&i.App.AppliedVersionRevision,
 		&i.App.AppliedImageRef,
@@ -284,7 +271,7 @@ func (q *Queries) GetAppWithVersion(ctx context.Context, id pgtype.UUID) (GetApp
 }
 
 const listAppsByOrg = `-- name: ListAppsByOrg :many
-SELECT id, org_id, owner_user_id, runtime_node_id, name, description, status, container_id, container_name, newapi_key_id, newapi_key_ciphertext, api_key_status, created_at, updated_at, deleted_at, runtime_snapshot_json, runtime_snapshot_at, restart_policy_json, health_state_json, model_id, progress_current, progress_total, last_error_status, last_error_message, runtime_image_ref, runtime_image_sha256, newapi_key_name, model_synced, version_id, applied_version_revision, applied_image_ref
+SELECT id, org_id, owner_user_id, runtime_node_id, name, description, status, container_id, container_name, newapi_key_id, newapi_key_ciphertext, api_key_status, created_at, updated_at, deleted_at, runtime_snapshot_json, runtime_snapshot_at, restart_policy_json, health_state_json, progress_current, progress_total, last_error_status, last_error_message, runtime_image_ref, runtime_image_sha256, newapi_key_name, version_id, applied_version_revision, applied_image_ref
 FROM apps
 WHERE org_id = $1 AND deleted_at IS NULL
 ORDER BY created_at DESC, id DESC
@@ -326,7 +313,6 @@ func (q *Queries) ListAppsByOrg(ctx context.Context, arg ListAppsByOrgParams) ([
 			&i.RuntimeSnapshotAt,
 			&i.RestartPolicyJson,
 			&i.HealthStateJson,
-			&i.ModelID,
 			&i.ProgressCurrent,
 			&i.ProgressTotal,
 			&i.LastErrorStatus,
@@ -334,7 +320,6 @@ func (q *Queries) ListAppsByOrg(ctx context.Context, arg ListAppsByOrgParams) ([
 			&i.RuntimeImageRef,
 			&i.RuntimeImageSha256,
 			&i.NewapiKeyName,
-			&i.ModelSynced,
 			&i.VersionID,
 			&i.AppliedVersionRevision,
 			&i.AppliedImageRef,
@@ -350,7 +335,7 @@ func (q *Queries) ListAppsByOrg(ctx context.Context, arg ListAppsByOrgParams) ([
 }
 
 const listAppsByOrgWithVersion = `-- name: ListAppsByOrgWithVersion :many
-SELECT apps.id, apps.org_id, apps.owner_user_id, apps.runtime_node_id, apps.name, apps.description, apps.status, apps.container_id, apps.container_name, apps.newapi_key_id, apps.newapi_key_ciphertext, apps.api_key_status, apps.created_at, apps.updated_at, apps.deleted_at, apps.runtime_snapshot_json, apps.runtime_snapshot_at, apps.restart_policy_json, apps.health_state_json, apps.model_id, apps.progress_current, apps.progress_total, apps.last_error_status, apps.last_error_message, apps.runtime_image_ref, apps.runtime_image_sha256, apps.newapi_key_name, apps.model_synced, apps.version_id, apps.applied_version_revision, apps.applied_image_ref, av.revision AS version_revision, av.image_id AS version_image_id
+SELECT apps.id, apps.org_id, apps.owner_user_id, apps.runtime_node_id, apps.name, apps.description, apps.status, apps.container_id, apps.container_name, apps.newapi_key_id, apps.newapi_key_ciphertext, apps.api_key_status, apps.created_at, apps.updated_at, apps.deleted_at, apps.runtime_snapshot_json, apps.runtime_snapshot_at, apps.restart_policy_json, apps.health_state_json, apps.progress_current, apps.progress_total, apps.last_error_status, apps.last_error_message, apps.runtime_image_ref, apps.runtime_image_sha256, apps.newapi_key_name, apps.version_id, apps.applied_version_revision, apps.applied_image_ref, av.revision AS version_revision, av.image_id AS version_image_id
 FROM apps
 JOIN assistant_versions av ON av.id = apps.version_id
 WHERE apps.org_id = $1 AND apps.deleted_at IS NULL
@@ -400,7 +385,6 @@ func (q *Queries) ListAppsByOrgWithVersion(ctx context.Context, arg ListAppsByOr
 			&i.App.RuntimeSnapshotAt,
 			&i.App.RestartPolicyJson,
 			&i.App.HealthStateJson,
-			&i.App.ModelID,
 			&i.App.ProgressCurrent,
 			&i.App.ProgressTotal,
 			&i.App.LastErrorStatus,
@@ -408,7 +392,6 @@ func (q *Queries) ListAppsByOrgWithVersion(ctx context.Context, arg ListAppsByOr
 			&i.App.RuntimeImageRef,
 			&i.App.RuntimeImageSha256,
 			&i.App.NewapiKeyName,
-			&i.App.ModelSynced,
 			&i.App.VersionID,
 			&i.App.AppliedVersionRevision,
 			&i.App.AppliedImageRef,
@@ -426,7 +409,7 @@ func (q *Queries) ListAppsByOrgWithVersion(ctx context.Context, arg ListAppsByOr
 }
 
 const listAppsByRuntimeNode = `-- name: ListAppsByRuntimeNode :many
-SELECT id, org_id, owner_user_id, runtime_node_id, name, description, status, container_id, container_name, newapi_key_id, newapi_key_ciphertext, api_key_status, created_at, updated_at, deleted_at, runtime_snapshot_json, runtime_snapshot_at, restart_policy_json, health_state_json, model_id, progress_current, progress_total, last_error_status, last_error_message, runtime_image_ref, runtime_image_sha256, newapi_key_name, model_synced, version_id, applied_version_revision, applied_image_ref
+SELECT id, org_id, owner_user_id, runtime_node_id, name, description, status, container_id, container_name, newapi_key_id, newapi_key_ciphertext, api_key_status, created_at, updated_at, deleted_at, runtime_snapshot_json, runtime_snapshot_at, restart_policy_json, health_state_json, progress_current, progress_total, last_error_status, last_error_message, runtime_image_ref, runtime_image_sha256, newapi_key_name, version_id, applied_version_revision, applied_image_ref
 FROM apps
 WHERE runtime_node_id = $1 AND deleted_at IS NULL
 ORDER BY created_at DESC, id DESC
@@ -468,7 +451,6 @@ func (q *Queries) ListAppsByRuntimeNode(ctx context.Context, arg ListAppsByRunti
 			&i.RuntimeSnapshotAt,
 			&i.RestartPolicyJson,
 			&i.HealthStateJson,
-			&i.ModelID,
 			&i.ProgressCurrent,
 			&i.ProgressTotal,
 			&i.LastErrorStatus,
@@ -476,7 +458,6 @@ func (q *Queries) ListAppsByRuntimeNode(ctx context.Context, arg ListAppsByRunti
 			&i.RuntimeImageRef,
 			&i.RuntimeImageSha256,
 			&i.NewapiKeyName,
-			&i.ModelSynced,
 			&i.VersionID,
 			&i.AppliedVersionRevision,
 			&i.AppliedImageRef,
@@ -576,7 +557,7 @@ SET status = 'error',
     progress_total = NULL,
     updated_at = now()
 WHERE id = $1
-RETURNING id, org_id, owner_user_id, runtime_node_id, name, description, status, container_id, container_name, newapi_key_id, newapi_key_ciphertext, api_key_status, created_at, updated_at, deleted_at, runtime_snapshot_json, runtime_snapshot_at, restart_policy_json, health_state_json, model_id, progress_current, progress_total, last_error_status, last_error_message, runtime_image_ref, runtime_image_sha256, newapi_key_name, model_synced, version_id, applied_version_revision, applied_image_ref
+RETURNING id, org_id, owner_user_id, runtime_node_id, name, description, status, container_id, container_name, newapi_key_id, newapi_key_ciphertext, api_key_status, created_at, updated_at, deleted_at, runtime_snapshot_json, runtime_snapshot_at, restart_policy_json, health_state_json, progress_current, progress_total, last_error_status, last_error_message, runtime_image_ref, runtime_image_sha256, newapi_key_name, version_id, applied_version_revision, applied_image_ref
 `
 
 type MarkAppFailedParams struct {
@@ -610,7 +591,6 @@ func (q *Queries) MarkAppFailed(ctx context.Context, arg MarkAppFailedParams) (A
 		&i.RuntimeSnapshotAt,
 		&i.RestartPolicyJson,
 		&i.HealthStateJson,
-		&i.ModelID,
 		&i.ProgressCurrent,
 		&i.ProgressTotal,
 		&i.LastErrorStatus,
@@ -618,7 +598,6 @@ func (q *Queries) MarkAppFailed(ctx context.Context, arg MarkAppFailedParams) (A
 		&i.RuntimeImageRef,
 		&i.RuntimeImageSha256,
 		&i.NewapiKeyName,
-		&i.ModelSynced,
 		&i.VersionID,
 		&i.AppliedVersionRevision,
 		&i.AppliedImageRef,
@@ -632,7 +611,7 @@ SET applied_version_revision = $2,
     applied_image_ref = $3,
     updated_at = now()
 WHERE id = $1
-RETURNING id, org_id, owner_user_id, runtime_node_id, name, description, status, container_id, container_name, newapi_key_id, newapi_key_ciphertext, api_key_status, created_at, updated_at, deleted_at, runtime_snapshot_json, runtime_snapshot_at, restart_policy_json, health_state_json, model_id, progress_current, progress_total, last_error_status, last_error_message, runtime_image_ref, runtime_image_sha256, newapi_key_name, model_synced, version_id, applied_version_revision, applied_image_ref
+RETURNING id, org_id, owner_user_id, runtime_node_id, name, description, status, container_id, container_name, newapi_key_id, newapi_key_ciphertext, api_key_status, created_at, updated_at, deleted_at, runtime_snapshot_json, runtime_snapshot_at, restart_policy_json, health_state_json, progress_current, progress_total, last_error_status, last_error_message, runtime_image_ref, runtime_image_sha256, newapi_key_name, version_id, applied_version_revision, applied_image_ref
 `
 
 type SetAppAppliedVersionParams struct {
@@ -665,7 +644,6 @@ func (q *Queries) SetAppAppliedVersion(ctx context.Context, arg SetAppAppliedVer
 		&i.RuntimeSnapshotAt,
 		&i.RestartPolicyJson,
 		&i.HealthStateJson,
-		&i.ModelID,
 		&i.ProgressCurrent,
 		&i.ProgressTotal,
 		&i.LastErrorStatus,
@@ -673,7 +651,6 @@ func (q *Queries) SetAppAppliedVersion(ctx context.Context, arg SetAppAppliedVer
 		&i.RuntimeImageRef,
 		&i.RuntimeImageSha256,
 		&i.NewapiKeyName,
-		&i.ModelSynced,
 		&i.VersionID,
 		&i.AppliedVersionRevision,
 		&i.AppliedImageRef,
@@ -685,7 +662,7 @@ const setAppContainer = `-- name: SetAppContainer :one
 UPDATE apps
 SET container_id = $2, container_name = $3, updated_at = now()
 WHERE id = $1
-RETURNING id, org_id, owner_user_id, runtime_node_id, name, description, status, container_id, container_name, newapi_key_id, newapi_key_ciphertext, api_key_status, created_at, updated_at, deleted_at, runtime_snapshot_json, runtime_snapshot_at, restart_policy_json, health_state_json, model_id, progress_current, progress_total, last_error_status, last_error_message, runtime_image_ref, runtime_image_sha256, newapi_key_name, model_synced, version_id, applied_version_revision, applied_image_ref
+RETURNING id, org_id, owner_user_id, runtime_node_id, name, description, status, container_id, container_name, newapi_key_id, newapi_key_ciphertext, api_key_status, created_at, updated_at, deleted_at, runtime_snapshot_json, runtime_snapshot_at, restart_policy_json, health_state_json, progress_current, progress_total, last_error_status, last_error_message, runtime_image_ref, runtime_image_sha256, newapi_key_name, version_id, applied_version_revision, applied_image_ref
 `
 
 type SetAppContainerParams struct {
@@ -717,7 +694,6 @@ func (q *Queries) SetAppContainer(ctx context.Context, arg SetAppContainerParams
 		&i.RuntimeSnapshotAt,
 		&i.RestartPolicyJson,
 		&i.HealthStateJson,
-		&i.ModelID,
 		&i.ProgressCurrent,
 		&i.ProgressTotal,
 		&i.LastErrorStatus,
@@ -725,7 +701,6 @@ func (q *Queries) SetAppContainer(ctx context.Context, arg SetAppContainerParams
 		&i.RuntimeImageRef,
 		&i.RuntimeImageSha256,
 		&i.NewapiKeyName,
-		&i.ModelSynced,
 		&i.VersionID,
 		&i.AppliedVersionRevision,
 		&i.AppliedImageRef,
@@ -738,7 +713,7 @@ UPDATE apps
 SET health_state_json = $2,
     updated_at = now()
 WHERE id = $1
-RETURNING id, org_id, owner_user_id, runtime_node_id, name, description, status, container_id, container_name, newapi_key_id, newapi_key_ciphertext, api_key_status, created_at, updated_at, deleted_at, runtime_snapshot_json, runtime_snapshot_at, restart_policy_json, health_state_json, model_id, progress_current, progress_total, last_error_status, last_error_message, runtime_image_ref, runtime_image_sha256, newapi_key_name, model_synced, version_id, applied_version_revision, applied_image_ref
+RETURNING id, org_id, owner_user_id, runtime_node_id, name, description, status, container_id, container_name, newapi_key_id, newapi_key_ciphertext, api_key_status, created_at, updated_at, deleted_at, runtime_snapshot_json, runtime_snapshot_at, restart_policy_json, health_state_json, progress_current, progress_total, last_error_status, last_error_message, runtime_image_ref, runtime_image_sha256, newapi_key_name, version_id, applied_version_revision, applied_image_ref
 `
 
 type SetAppHealthStateParams struct {
@@ -770,7 +745,6 @@ func (q *Queries) SetAppHealthState(ctx context.Context, arg SetAppHealthStatePa
 		&i.RuntimeSnapshotAt,
 		&i.RestartPolicyJson,
 		&i.HealthStateJson,
-		&i.ModelID,
 		&i.ProgressCurrent,
 		&i.ProgressTotal,
 		&i.LastErrorStatus,
@@ -778,55 +752,6 @@ func (q *Queries) SetAppHealthState(ctx context.Context, arg SetAppHealthStatePa
 		&i.RuntimeImageRef,
 		&i.RuntimeImageSha256,
 		&i.NewapiKeyName,
-		&i.ModelSynced,
-		&i.VersionID,
-		&i.AppliedVersionRevision,
-		&i.AppliedImageRef,
-	)
-	return i, err
-}
-
-const setAppModelSynced = `-- name: SetAppModelSynced :one
-UPDATE apps
-SET model_synced = true,
-    updated_at = now()
-WHERE id = $1
-RETURNING id, org_id, owner_user_id, runtime_node_id, name, description, status, container_id, container_name, newapi_key_id, newapi_key_ciphertext, api_key_status, created_at, updated_at, deleted_at, runtime_snapshot_json, runtime_snapshot_at, restart_policy_json, health_state_json, model_id, progress_current, progress_total, last_error_status, last_error_message, runtime_image_ref, runtime_image_sha256, newapi_key_name, model_synced, version_id, applied_version_revision, applied_image_ref
-`
-
-// 实例重启完成后标记模型已同步。
-func (q *Queries) SetAppModelSynced(ctx context.Context, id pgtype.UUID) (App, error) {
-	row := q.db.QueryRow(ctx, setAppModelSynced, id)
-	var i App
-	err := row.Scan(
-		&i.ID,
-		&i.OrgID,
-		&i.OwnerUserID,
-		&i.RuntimeNodeID,
-		&i.Name,
-		&i.Description,
-		&i.Status,
-		&i.ContainerID,
-		&i.ContainerName,
-		&i.NewapiKeyID,
-		&i.NewapiKeyCiphertext,
-		&i.ApiKeyStatus,
-		&i.CreatedAt,
-		&i.UpdatedAt,
-		&i.DeletedAt,
-		&i.RuntimeSnapshotJson,
-		&i.RuntimeSnapshotAt,
-		&i.RestartPolicyJson,
-		&i.HealthStateJson,
-		&i.ModelID,
-		&i.ProgressCurrent,
-		&i.ProgressTotal,
-		&i.LastErrorStatus,
-		&i.LastErrorMessage,
-		&i.RuntimeImageRef,
-		&i.RuntimeImageSha256,
-		&i.NewapiKeyName,
-		&i.ModelSynced,
 		&i.VersionID,
 		&i.AppliedVersionRevision,
 		&i.AppliedImageRef,
@@ -843,7 +768,7 @@ SET
     newapi_key_name = $5,
     updated_at = now()
 WHERE id = $1
-RETURNING id, org_id, owner_user_id, runtime_node_id, name, description, status, container_id, container_name, newapi_key_id, newapi_key_ciphertext, api_key_status, created_at, updated_at, deleted_at, runtime_snapshot_json, runtime_snapshot_at, restart_policy_json, health_state_json, model_id, progress_current, progress_total, last_error_status, last_error_message, runtime_image_ref, runtime_image_sha256, newapi_key_name, model_synced, version_id, applied_version_revision, applied_image_ref
+RETURNING id, org_id, owner_user_id, runtime_node_id, name, description, status, container_id, container_name, newapi_key_id, newapi_key_ciphertext, api_key_status, created_at, updated_at, deleted_at, runtime_snapshot_json, runtime_snapshot_at, restart_policy_json, health_state_json, progress_current, progress_total, last_error_status, last_error_message, runtime_image_ref, runtime_image_sha256, newapi_key_name, version_id, applied_version_revision, applied_image_ref
 `
 
 type SetAppNewAPIKeyParams struct {
@@ -883,7 +808,6 @@ func (q *Queries) SetAppNewAPIKey(ctx context.Context, arg SetAppNewAPIKeyParams
 		&i.RuntimeSnapshotAt,
 		&i.RestartPolicyJson,
 		&i.HealthStateJson,
-		&i.ModelID,
 		&i.ProgressCurrent,
 		&i.ProgressTotal,
 		&i.LastErrorStatus,
@@ -891,7 +815,6 @@ func (q *Queries) SetAppNewAPIKey(ctx context.Context, arg SetAppNewAPIKeyParams
 		&i.RuntimeImageRef,
 		&i.RuntimeImageSha256,
 		&i.NewapiKeyName,
-		&i.ModelSynced,
 		&i.VersionID,
 		&i.AppliedVersionRevision,
 		&i.AppliedImageRef,
@@ -905,7 +828,7 @@ SET progress_current = $2,
     progress_total = $3,
     updated_at = now()
 WHERE id = $1
-RETURNING id, org_id, owner_user_id, runtime_node_id, name, description, status, container_id, container_name, newapi_key_id, newapi_key_ciphertext, api_key_status, created_at, updated_at, deleted_at, runtime_snapshot_json, runtime_snapshot_at, restart_policy_json, health_state_json, model_id, progress_current, progress_total, last_error_status, last_error_message, runtime_image_ref, runtime_image_sha256, newapi_key_name, model_synced, version_id, applied_version_revision, applied_image_ref
+RETURNING id, org_id, owner_user_id, runtime_node_id, name, description, status, container_id, container_name, newapi_key_id, newapi_key_ciphertext, api_key_status, created_at, updated_at, deleted_at, runtime_snapshot_json, runtime_snapshot_at, restart_policy_json, health_state_json, progress_current, progress_total, last_error_status, last_error_message, runtime_image_ref, runtime_image_sha256, newapi_key_name, version_id, applied_version_revision, applied_image_ref
 `
 
 type SetAppProgressParams struct {
@@ -938,7 +861,6 @@ func (q *Queries) SetAppProgress(ctx context.Context, arg SetAppProgressParams) 
 		&i.RuntimeSnapshotAt,
 		&i.RestartPolicyJson,
 		&i.HealthStateJson,
-		&i.ModelID,
 		&i.ProgressCurrent,
 		&i.ProgressTotal,
 		&i.LastErrorStatus,
@@ -946,7 +868,6 @@ func (q *Queries) SetAppProgress(ctx context.Context, arg SetAppProgressParams) 
 		&i.RuntimeImageRef,
 		&i.RuntimeImageSha256,
 		&i.NewapiKeyName,
-		&i.ModelSynced,
 		&i.VersionID,
 		&i.AppliedVersionRevision,
 		&i.AppliedImageRef,
@@ -959,7 +880,7 @@ UPDATE apps
 SET restart_policy_json = $2,
     updated_at = now()
 WHERE id = $1
-RETURNING id, org_id, owner_user_id, runtime_node_id, name, description, status, container_id, container_name, newapi_key_id, newapi_key_ciphertext, api_key_status, created_at, updated_at, deleted_at, runtime_snapshot_json, runtime_snapshot_at, restart_policy_json, health_state_json, model_id, progress_current, progress_total, last_error_status, last_error_message, runtime_image_ref, runtime_image_sha256, newapi_key_name, model_synced, version_id, applied_version_revision, applied_image_ref
+RETURNING id, org_id, owner_user_id, runtime_node_id, name, description, status, container_id, container_name, newapi_key_id, newapi_key_ciphertext, api_key_status, created_at, updated_at, deleted_at, runtime_snapshot_json, runtime_snapshot_at, restart_policy_json, health_state_json, progress_current, progress_total, last_error_status, last_error_message, runtime_image_ref, runtime_image_sha256, newapi_key_name, version_id, applied_version_revision, applied_image_ref
 `
 
 type SetAppRestartPolicyParams struct {
@@ -991,7 +912,6 @@ func (q *Queries) SetAppRestartPolicy(ctx context.Context, arg SetAppRestartPoli
 		&i.RuntimeSnapshotAt,
 		&i.RestartPolicyJson,
 		&i.HealthStateJson,
-		&i.ModelID,
 		&i.ProgressCurrent,
 		&i.ProgressTotal,
 		&i.LastErrorStatus,
@@ -999,7 +919,6 @@ func (q *Queries) SetAppRestartPolicy(ctx context.Context, arg SetAppRestartPoli
 		&i.RuntimeImageRef,
 		&i.RuntimeImageSha256,
 		&i.NewapiKeyName,
-		&i.ModelSynced,
 		&i.VersionID,
 		&i.AppliedVersionRevision,
 		&i.AppliedImageRef,
@@ -1013,7 +932,7 @@ SET runtime_snapshot_json = $2,
     runtime_snapshot_at = now(),
     updated_at = now()
 WHERE id = $1
-RETURNING id, org_id, owner_user_id, runtime_node_id, name, description, status, container_id, container_name, newapi_key_id, newapi_key_ciphertext, api_key_status, created_at, updated_at, deleted_at, runtime_snapshot_json, runtime_snapshot_at, restart_policy_json, health_state_json, model_id, progress_current, progress_total, last_error_status, last_error_message, runtime_image_ref, runtime_image_sha256, newapi_key_name, model_synced, version_id, applied_version_revision, applied_image_ref
+RETURNING id, org_id, owner_user_id, runtime_node_id, name, description, status, container_id, container_name, newapi_key_id, newapi_key_ciphertext, api_key_status, created_at, updated_at, deleted_at, runtime_snapshot_json, runtime_snapshot_at, restart_policy_json, health_state_json, progress_current, progress_total, last_error_status, last_error_message, runtime_image_ref, runtime_image_sha256, newapi_key_name, version_id, applied_version_revision, applied_image_ref
 `
 
 type SetAppRuntimeSnapshotParams struct {
@@ -1044,7 +963,6 @@ func (q *Queries) SetAppRuntimeSnapshot(ctx context.Context, arg SetAppRuntimeSn
 		&i.RuntimeSnapshotAt,
 		&i.RestartPolicyJson,
 		&i.HealthStateJson,
-		&i.ModelID,
 		&i.ProgressCurrent,
 		&i.ProgressTotal,
 		&i.LastErrorStatus,
@@ -1052,7 +970,6 @@ func (q *Queries) SetAppRuntimeSnapshot(ctx context.Context, arg SetAppRuntimeSn
 		&i.RuntimeImageRef,
 		&i.RuntimeImageSha256,
 		&i.NewapiKeyName,
-		&i.ModelSynced,
 		&i.VersionID,
 		&i.AppliedVersionRevision,
 		&i.AppliedImageRef,
@@ -1064,7 +981,7 @@ const setAppStatus = `-- name: SetAppStatus :one
 UPDATE apps
 SET status = $2, updated_at = now()
 WHERE id = $1
-RETURNING id, org_id, owner_user_id, runtime_node_id, name, description, status, container_id, container_name, newapi_key_id, newapi_key_ciphertext, api_key_status, created_at, updated_at, deleted_at, runtime_snapshot_json, runtime_snapshot_at, restart_policy_json, health_state_json, model_id, progress_current, progress_total, last_error_status, last_error_message, runtime_image_ref, runtime_image_sha256, newapi_key_name, model_synced, version_id, applied_version_revision, applied_image_ref
+RETURNING id, org_id, owner_user_id, runtime_node_id, name, description, status, container_id, container_name, newapi_key_id, newapi_key_ciphertext, api_key_status, created_at, updated_at, deleted_at, runtime_snapshot_json, runtime_snapshot_at, restart_policy_json, health_state_json, progress_current, progress_total, last_error_status, last_error_message, runtime_image_ref, runtime_image_sha256, newapi_key_name, version_id, applied_version_revision, applied_image_ref
 `
 
 type SetAppStatusParams struct {
@@ -1095,7 +1012,6 @@ func (q *Queries) SetAppStatus(ctx context.Context, arg SetAppStatusParams) (App
 		&i.RuntimeSnapshotAt,
 		&i.RestartPolicyJson,
 		&i.HealthStateJson,
-		&i.ModelID,
 		&i.ProgressCurrent,
 		&i.ProgressTotal,
 		&i.LastErrorStatus,
@@ -1103,7 +1019,6 @@ func (q *Queries) SetAppStatus(ctx context.Context, arg SetAppStatusParams) (App
 		&i.RuntimeImageRef,
 		&i.RuntimeImageSha256,
 		&i.NewapiKeyName,
-		&i.ModelSynced,
 		&i.VersionID,
 		&i.AppliedVersionRevision,
 		&i.AppliedImageRef,
@@ -1118,7 +1033,7 @@ SET version_id = $2,
     applied_image_ref = '',
     updated_at = now()
 WHERE id = $1 AND deleted_at IS NULL
-RETURNING id, org_id, owner_user_id, runtime_node_id, name, description, status, container_id, container_name, newapi_key_id, newapi_key_ciphertext, api_key_status, created_at, updated_at, deleted_at, runtime_snapshot_json, runtime_snapshot_at, restart_policy_json, health_state_json, model_id, progress_current, progress_total, last_error_status, last_error_message, runtime_image_ref, runtime_image_sha256, newapi_key_name, model_synced, version_id, applied_version_revision, applied_image_ref
+RETURNING id, org_id, owner_user_id, runtime_node_id, name, description, status, container_id, container_name, newapi_key_id, newapi_key_ciphertext, api_key_status, created_at, updated_at, deleted_at, runtime_snapshot_json, runtime_snapshot_at, restart_policy_json, health_state_json, progress_current, progress_total, last_error_status, last_error_message, runtime_image_ref, runtime_image_sha256, newapi_key_name, version_id, applied_version_revision, applied_image_ref
 `
 
 type SetAppVersionParams struct {
@@ -1154,7 +1069,6 @@ func (q *Queries) SetAppVersion(ctx context.Context, arg SetAppVersionParams) (A
 		&i.RuntimeSnapshotAt,
 		&i.RestartPolicyJson,
 		&i.HealthStateJson,
-		&i.ModelID,
 		&i.ProgressCurrent,
 		&i.ProgressTotal,
 		&i.LastErrorStatus,
@@ -1162,7 +1076,6 @@ func (q *Queries) SetAppVersion(ctx context.Context, arg SetAppVersionParams) (A
 		&i.RuntimeImageRef,
 		&i.RuntimeImageSha256,
 		&i.NewapiKeyName,
-		&i.ModelSynced,
 		&i.VersionID,
 		&i.AppliedVersionRevision,
 		&i.AppliedImageRef,
@@ -1174,7 +1087,7 @@ const softDeleteApp = `-- name: SoftDeleteApp :one
 UPDATE apps
 SET status = 'deleted', deleted_at = now(), updated_at = now()
 WHERE id = $1 AND deleted_at IS NULL
-RETURNING id, org_id, owner_user_id, runtime_node_id, name, description, status, container_id, container_name, newapi_key_id, newapi_key_ciphertext, api_key_status, created_at, updated_at, deleted_at, runtime_snapshot_json, runtime_snapshot_at, restart_policy_json, health_state_json, model_id, progress_current, progress_total, last_error_status, last_error_message, runtime_image_ref, runtime_image_sha256, newapi_key_name, model_synced, version_id, applied_version_revision, applied_image_ref
+RETURNING id, org_id, owner_user_id, runtime_node_id, name, description, status, container_id, container_name, newapi_key_id, newapi_key_ciphertext, api_key_status, created_at, updated_at, deleted_at, runtime_snapshot_json, runtime_snapshot_at, restart_policy_json, health_state_json, progress_current, progress_total, last_error_status, last_error_message, runtime_image_ref, runtime_image_sha256, newapi_key_name, version_id, applied_version_revision, applied_image_ref
 `
 
 func (q *Queries) SoftDeleteApp(ctx context.Context, id pgtype.UUID) (App, error) {
@@ -1200,7 +1113,6 @@ func (q *Queries) SoftDeleteApp(ctx context.Context, id pgtype.UUID) (App, error
 		&i.RuntimeSnapshotAt,
 		&i.RestartPolicyJson,
 		&i.HealthStateJson,
-		&i.ModelID,
 		&i.ProgressCurrent,
 		&i.ProgressTotal,
 		&i.LastErrorStatus,
@@ -1208,32 +1120,11 @@ func (q *Queries) SoftDeleteApp(ctx context.Context, id pgtype.UUID) (App, error
 		&i.RuntimeImageRef,
 		&i.RuntimeImageSha256,
 		&i.NewapiKeyName,
-		&i.ModelSynced,
 		&i.VersionID,
 		&i.AppliedVersionRevision,
 		&i.AppliedImageRef,
 	)
 	return i, err
-}
-
-const updateAppModelsByOrg = `-- name: UpdateAppModelsByOrg :exec
-UPDATE apps
-SET model_id = $2,
-    model_synced = false,
-    updated_at = now()
-WHERE org_id = $1
-  AND deleted_at IS NULL
-`
-
-type UpdateAppModelsByOrgParams struct {
-	OrgID   pgtype.UUID `db:"org_id" json:"org_id"`
-	ModelID string      `db:"model_id" json:"model_id"`
-}
-
-// 组织模型变更时批量同步所有活跃实例的 model_id 并标记需重启。
-func (q *Queries) UpdateAppModelsByOrg(ctx context.Context, arg UpdateAppModelsByOrgParams) error {
-	_, err := q.db.Exec(ctx, updateAppModelsByOrg, arg.OrgID, arg.ModelID)
-	return err
 }
 
 const updateAppRuntimeImage = `-- name: UpdateAppRuntimeImage :one
@@ -1243,7 +1134,7 @@ SET
     runtime_image_sha256 = $3,
     updated_at = now()
 WHERE id = $1
-RETURNING id, org_id, owner_user_id, runtime_node_id, name, description, status, container_id, container_name, newapi_key_id, newapi_key_ciphertext, api_key_status, created_at, updated_at, deleted_at, runtime_snapshot_json, runtime_snapshot_at, restart_policy_json, health_state_json, model_id, progress_current, progress_total, last_error_status, last_error_message, runtime_image_ref, runtime_image_sha256, newapi_key_name, model_synced, version_id, applied_version_revision, applied_image_ref
+RETURNING id, org_id, owner_user_id, runtime_node_id, name, description, status, container_id, container_name, newapi_key_id, newapi_key_ciphertext, api_key_status, created_at, updated_at, deleted_at, runtime_snapshot_json, runtime_snapshot_at, restart_policy_json, health_state_json, progress_current, progress_total, last_error_status, last_error_message, runtime_image_ref, runtime_image_sha256, newapi_key_name, version_id, applied_version_revision, applied_image_ref
 `
 
 type UpdateAppRuntimeImageParams struct {
@@ -1276,7 +1167,6 @@ func (q *Queries) UpdateAppRuntimeImage(ctx context.Context, arg UpdateAppRuntim
 		&i.RuntimeSnapshotAt,
 		&i.RestartPolicyJson,
 		&i.HealthStateJson,
-		&i.ModelID,
 		&i.ProgressCurrent,
 		&i.ProgressTotal,
 		&i.LastErrorStatus,
@@ -1284,7 +1174,6 @@ func (q *Queries) UpdateAppRuntimeImage(ctx context.Context, arg UpdateAppRuntim
 		&i.RuntimeImageRef,
 		&i.RuntimeImageSha256,
 		&i.NewapiKeyName,
-		&i.ModelSynced,
 		&i.VersionID,
 		&i.AppliedVersionRevision,
 		&i.AppliedImageRef,

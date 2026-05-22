@@ -34,8 +34,6 @@ type App struct {
 	RuntimeSnapshotAt   pgtype.Timestamptz `db:"runtime_snapshot_at" json:"runtime_snapshot_at"`
 	RestartPolicyJson   []byte             `db:"restart_policy_json" json:"restart_policy_json"`
 	HealthStateJson     []byte             `db:"health_state_json" json:"health_state_json"`
-	// 实例当前使用的模型 ID，由 manager 注入 Hermes 配置。
-	ModelID string `db:"model_id" json:"model_id"`
 	// 当前 status 对应阶段的已完成量;语义随 status 变化(字节 / 秒 / count),不可知时为 NULL。
 	ProgressCurrent pgtype.Int8 `db:"progress_current" json:"progress_current"`
 	// 当前 status 对应阶段的总量;不可知时为 NULL(前端展示为不定进度)。
@@ -50,7 +48,6 @@ type App struct {
 	RuntimeImageSha256 string `db:"runtime_image_sha256" json:"runtime_image_sha256"`
 	// new-api 侧的 token.name，用于按 token_name 过滤用量日志
 	NewapiKeyName pgtype.Text `db:"newapi_key_name" json:"newapi_key_name"`
-	ModelSynced   bool        `db:"model_synced" json:"model_synced"`
 	// 实例绑定的助手版本。
 	VersionID pgtype.UUID `db:"version_id" json:"version_id"`
 	// 上次初始化/重启时使用的版本 revision；与版本当前 revision 比较得出 version_synced。

@@ -144,25 +144,6 @@ func TestCreateAppForMember_PlatformAdminCreatesAfterDelete(t *testing.T) {
 	assert.Equal(t, testVersionID, store.lastAppVersionID)
 }
 
-// TestCreateAppForMemberInheritsOrgModel 验证为已有成员创建实例时模型继承自组织配置。
-func TestCreateAppForMemberInheritsOrgModel(t *testing.T) {
-	store := newOnboardingStub(t)
-	store.org.ModelID = "qwen2.5:7b"
-	tx := &txRunnerStub{store: store}
-	svc := NewMemberOnboardingService(tx, fakeHash, defaultTestSelector())
-
-	result, err := svc.CreateAppForMember(context.Background(), platformAdmin(), testOrgID, uuidToString(store.user.ID), CreateAppForMemberInput{
-		AppName:   "alice-new-bot",
-		VersionID: testVersionID,
-	})
-
-	require.NoError(t, err)
-	require.NotEmpty(t, result.App.ID)
-	// 模型应继承自组织，而非由调用方指定。
-	assert.Equal(t, "qwen2.5:7b", store.lastAppModelID)
-	assert.Equal(t, "qwen2.5:7b", result.App.ModelID)
-}
-
 // TestCreateAppForMember_RejectsExistingActiveApp 验证成员已有未删除实例时拒绝创建新实例。
 func TestCreateAppForMember_RejectsExistingActiveApp(t *testing.T) {
 	store := newOnboardingStub(t)
@@ -292,7 +273,6 @@ type onboardingStub struct {
 	jobErr           error
 	lastAppNodeID    string
 	lastAppOwnerID   string
-	lastAppModelID   string
 	lastAppVersionID string // 记录最近一次 CreateApp 使用的 VersionID，供断言校验。
 }
 
@@ -380,7 +360,6 @@ func (s *onboardingStub) CreateApp(_ context.Context, arg sqlc.CreateAppParams) 
 	s.staged.apps++
 	s.lastAppNodeID = uuidToString(arg.RuntimeNodeID)
 	s.lastAppOwnerID = uuidToString(arg.OwnerUserID)
-	s.lastAppModelID = arg.ModelID
 	s.lastAppVersionID = uuidToString(arg.VersionID)
 	return sqlc.App{
 		ID:           mustUUID(s.t, "00000000-0000-0000-0000-000000000b01"),
@@ -389,7 +368,6 @@ func (s *onboardingStub) CreateApp(_ context.Context, arg sqlc.CreateAppParams) 
 		Name:         arg.Name,
 		Status:       arg.Status,
 		ApiKeyStatus: arg.ApiKeyStatus,
-		ModelID:      arg.ModelID,
 	}, nil
 }
 

@@ -290,8 +290,6 @@ func TestUpdateOrganizationPreservesModelID(t *testing.T) {
 	// model_id 应保持原值，不被外部传入值覆盖。
 	assert.Equal(t, "qwen2.5:7b", result.ModelID)
 	assert.Equal(t, "qwen2.5:7b", store.updatedProfile.ModelID)
-	// 不再触发批量同步（该逻辑已移除）。
-	assert.False(t, store.updateAppModelsCalled)
 }
 
 // TestOrganizationServiceGetRestrictsOrgScope 验证组织服务获取Restricts组织scope的预期行为场景。
@@ -392,20 +390,18 @@ func (p *fakeProvisioner) DeleteUser(_ context.Context, userID int64) error {
 }
 
 type organizationStoreStub struct {
-	org                  sqlc.Organization
-	orgAdmin             sqlc.User
-	created              sqlc.CreateOrganizationParams
-	updated              sqlc.SetOrganizationNewAPIUserParams
-	createdUser          sqlc.CreateUserParams
-	createErr            error
-	createCalled         bool
-	updateCalled         bool
-	updateProfileCalled  bool
-	createUserCalled     bool
-	hardDeleted          bool
-	updatedProfile       sqlc.UpdateOrganizationProfileParams
-	updateAppModelsCalled bool
-	updateAppModelsArg   sqlc.UpdateAppModelsByOrgParams
+	org                 sqlc.Organization
+	orgAdmin            sqlc.User
+	created             sqlc.CreateOrganizationParams
+	updated             sqlc.SetOrganizationNewAPIUserParams
+	createdUser         sqlc.CreateUserParams
+	createErr           error
+	createCalled        bool
+	updateCalled        bool
+	updateProfileCalled bool
+	createUserCalled    bool
+	hardDeleted         bool
+	updatedProfile      sqlc.UpdateOrganizationProfileParams
 }
 
 func (s *organizationStoreStub) CreateOrganization(_ context.Context, arg sqlc.CreateOrganizationParams) (sqlc.Organization, error) {
@@ -489,12 +485,6 @@ func (s *organizationStoreStub) UpdateOrganizationProfile(_ context.Context, arg
 func (s *organizationStoreStub) SetOrganizationStatus(_ context.Context, arg sqlc.SetOrganizationStatusParams) (sqlc.Organization, error) {
 	s.org.Status = arg.Status
 	return s.org, nil
-}
-
-func (s *organizationStoreStub) UpdateAppModelsByOrg(_ context.Context, arg sqlc.UpdateAppModelsByOrgParams) error {
-	s.updateAppModelsCalled = true
-	s.updateAppModelsArg = arg
-	return nil
 }
 
 func (s *organizationStoreStub) mustSeedOrganization(t *testing.T, code string, modelID string) sqlc.Organization {
@@ -653,9 +643,9 @@ func TestUpdateOrganizationWithVersionIDsSet(t *testing.T) {
 	}})
 
 	result, err := svc.UpdateOrganization(context.Background(), auth.Principal{Role: domain.UserRolePlatformAdmin}, uuidToString(org.ID), OrganizationInput{
-		Name:                    "测试组织改名",
-		AssistantVersionIDs:     []string{"ver-new"},
-		AssistantVersionIDsSet:  true,
+		Name:                   "测试组织改名",
+		AssistantVersionIDs:    []string{"ver-new"},
+		AssistantVersionIDsSet: true,
 	})
 
 	require.NoError(t, err)

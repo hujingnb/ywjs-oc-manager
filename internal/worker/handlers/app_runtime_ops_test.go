@@ -334,7 +334,7 @@ func TestAppRestartContainerHandler_NilRefresherSkipsAppliedVersion(t *testing.T
 // 绑定版本解析镜像与 apps.runtime_image_ref 不一致时进入重建分支：
 // stop + remove 旧容器、清空 container_id、置 status=pulling_runtime_image、入队
 // app_initialize job 复用初始化 4 阶段重拉新镜像并重建容器，不再走原 restart 三步，
-// 也不调 SetAppAppliedVersion / SetAppModelSynced（由 init handler 负责）。
+// 也不调 SetAppAppliedVersion（由 init handler 负责）。
 func TestAppRestartContainerHandler_ImageChangeRecreatesViaInitJob(t *testing.T) {
 	stub := runtimeStub(t)
 	// 容器当前镜像为旧 ref，模拟绑定版本镜像已升级。
@@ -372,9 +372,8 @@ func TestAppRestartContainerHandler_ImageChangeRecreatesViaInitJob(t *testing.T)
 	// notifier 收到 CreateJob 桩返回的固定 job ID。
 	require.Equal(t, 1, notifier.calls)
 	assert.Equal(t, testRestartInitJobID, notifier.enqueuedJobID)
-	// 镜像变更分支不应记录 applied 版本，也不应标记 model_synced——交由 init handler。
+	// 镜像变更分支不应记录 applied 版本，交由 init handler 在初始化完成时写入。
 	require.False(t, stub.appliedVersionSet, "镜像变更重建分支不应调用 SetAppAppliedVersion")
-	require.False(t, stub.app.ModelSynced, "镜像变更重建分支不应标记 model_synced")
 }
 
 // TestAppRestartContainerHandler_ImageUnchangedKeepsRestart 验证 restart 解析镜像与
@@ -570,12 +569,6 @@ func (s *runtimeOpStub) SetAppStatus(_ context.Context, arg sqlc.SetAppStatusPar
 func (s *runtimeOpStub) SoftDeleteApp(_ context.Context, _ pgtype.UUID) (sqlc.App, error) {
 	s.softDeleted = true
 	s.app.DeletedAt = pgtype.Timestamptz{Valid: true}
-	return s.app, nil
-}
-
-// SetAppModelSynced 实现 AppRuntimeStore 接口；重启完成后标记模型已同步。
-func (s *runtimeOpStub) SetAppModelSynced(_ context.Context, _ pgtype.UUID) (sqlc.App, error) {
-	s.app.ModelSynced = true
 	return s.app, nil
 }
 

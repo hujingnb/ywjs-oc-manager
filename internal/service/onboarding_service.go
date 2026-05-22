@@ -195,8 +195,6 @@ func (s *MemberOnboardingService) OnboardMember(ctx context.Context, principal a
 		if err != nil {
 			return fmt.Errorf("%w: 非法助手版本 id", ErrMemberCreateInvalid)
 		}
-		// 实例模型直接继承组织配置，无需用户指定。
-		modelID := org.ModelID
 		user, err := store.CreateUser(ctx, sqlc.CreateUserParams{
 			OrgID:        org.ID,
 			Username:     input.Username,
@@ -220,7 +218,6 @@ func (s *MemberOnboardingService) OnboardMember(ctx context.Context, principal a
 			Description:   pgtype.Text{},
 			Status:        domain.AppStatusDraft,
 			ApiKeyStatus:  domain.APIKeyStatusPending,
-			ModelID:       modelID,
 			VersionID:     versionUUID,
 		})
 		if err != nil {
@@ -348,8 +345,6 @@ func (s *MemberOnboardingService) CreateAppForMember(ctx context.Context, princi
 		if err != nil {
 			return fmt.Errorf("%w: 非法助手版本 id", ErrMemberCreateInvalid)
 		}
-		// 实例模型直接继承组织配置，无需用户指定。
-		modelID := org.ModelID
 		user, err := store.GetUser(ctx, userUUID)
 		if errors.Is(err, pgx.ErrNoRows) {
 			return ErrNotFound
@@ -380,7 +375,6 @@ func (s *MemberOnboardingService) CreateAppForMember(ctx context.Context, princi
 			Description:   pgtype.Text{},
 			Status:        domain.AppStatusDraft,
 			ApiKeyStatus:  domain.APIKeyStatusPending,
-			ModelID:       modelID,
 			VersionID:     versionUUID,
 		})
 		if err != nil {

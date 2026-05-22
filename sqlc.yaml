@@ -27,6 +27,7 @@ sql:
       - internal/migrations/000024_apps_model_id_optional.up.sql
       - internal/migrations/000025_drop_organization_personas.up.sql
       - internal/migrations/000026_drop_apps_persona_columns.up.sql
+      - internal/migrations/000027_drop_apps_model_columns.up.sql
     queries: internal/store/queries
     gen:
       go:
