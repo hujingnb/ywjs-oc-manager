@@ -71,6 +71,19 @@ func CanEditMember(p Principal, memberOrgID, memberUserID string) bool {
 	}
 }
 
+// CanListMembers 判断主体能否获取组织成员列表。
+// 成员列表属于组织管理视角，普通成员无需访问他人信息，仅管理员可查。
+func CanListMembers(p Principal, orgID string) bool {
+	switch p.Role {
+	case domain.UserRolePlatformAdmin:
+		return true
+	case domain.UserRoleOrgAdmin:
+		return p.OrgID == orgID
+	default:
+		return false
+	}
+}
+
 // 应用资源 ----------------------------------------------------------
 
 // CanViewApp 判断主体能否查看指定应用。
@@ -103,6 +116,22 @@ func CanViewAppAudit(p Principal, appOrgID, appOwnerUserID string) bool {
 // 组织管理员仅能管理本组织应用，组织成员仅能管理自己拥有的应用。
 func CanManageApp(p Principal, appOrgID, appOwnerUserID string) bool {
 	switch p.Role {
+	case domain.UserRoleOrgAdmin:
+		return p.OrgID == appOrgID
+	case domain.UserRoleOrgMember:
+		return p.UserID == appOwnerUserID
+	default:
+		return false
+	}
+}
+
+// CanSwitchAppVersion 判断主体是否可切换应用绑定的助手版本。
+// 版本切换是运维操作，平台管理员需介入版本统一管理；与渠道绑定、知识库写入等
+// 纯组织侧操作不同，故单独建谓词而非扩展 CanManageApp。
+func CanSwitchAppVersion(p Principal, appOrgID, appOwnerUserID string) bool {
+	switch p.Role {
+	case domain.UserRolePlatformAdmin:
+		return true
 	case domain.UserRoleOrgAdmin:
 		return p.OrgID == appOrgID
 	case domain.UserRoleOrgMember:
@@ -151,10 +180,19 @@ func CanReadAppKnowledge(p Principal, appOrgID, appOwnerUserID string) bool {
 }
 
 // CanTriggerRuntimeOperation 判断主体是否可对应用触发运行时操作（启停/重启等）。
-// 运行时操作会直接影响应用状态，因此沿用应用管理权限；
-// 调用方仍需在此之前额外校验 user.status != disabled，disabled 账号不得触发任何运行时操作。
+// 平台管理员需要介入实例运维（如强制重启故障实例），故此处与 CanManageApp 分离。
+// 注：调用方仍需在此之前额外校验 user.status != disabled，disabled 账号不得触发运行时操作。
 func CanTriggerRuntimeOperation(p Principal, appOrgID, appOwnerUserID string) bool {
-	return CanManageApp(p, appOrgID, appOwnerUserID)
+	switch p.Role {
+	case domain.UserRolePlatformAdmin:
+		return true
+	case domain.UserRoleOrgAdmin:
+		return p.OrgID == appOrgID
+	case domain.UserRoleOrgMember:
+		return p.UserID == appOwnerUserID
+	default:
+		return false
+	}
 }
 
 // CanCreateAppForOrg 判断主体是否可在指定组织下创建应用。
@@ -266,10 +304,11 @@ func CanManageAssistantVersion(p Principal) bool {
 }
 
 // CanViewAssistantVersion 判断主体能否查看助手版本。
-// 平台管理员维护目录，组织管理员需读取版本以便创建实例时选用；普通成员不可见。
+// 平台管理员维护目录；组织管理员创建实例时需要读取版本；
+// 组织成员需要在应用概览中查看自己实例绑定的版本名称，故同样开放。
 func CanViewAssistantVersion(p Principal) bool {
 	switch p.Role {
-	case domain.UserRolePlatformAdmin, domain.UserRoleOrgAdmin:
+	case domain.UserRolePlatformAdmin, domain.UserRoleOrgAdmin, domain.UserRoleOrgMember:
 		return true
 	default:
 		return false

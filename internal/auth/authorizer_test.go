@@ -226,10 +226,10 @@ func TestCanReadAppKnowledge(t *testing.T) {
 	runAppCases(t, CanReadAppKnowledge, cases)
 }
 
-// TestCanTriggerRuntimeOperation 验证触发权限运行时Operation的预期行为场景。
+// TestCanTriggerRuntimeOperation 验证触发运行时操作的权限边界。
 func TestCanTriggerRuntimeOperation(t *testing.T) {
 	cases := []memberCase{
-		{"platform_admin 跨组织不可触发运行操作", domain.UserRolePlatformAdmin, orgA, userA, orgB, userB, false}, // 场景：platform_admin 跨组织不可触发运行操作
+		{"platform_admin 可触发任意应用运行操作", domain.UserRolePlatformAdmin, orgA, userA, orgB, userB, true}, // 场景：平台管理员跨组织可触发运行时操作（启停/重启）
 		{"org_admin 同组织可触发运行操作", domain.UserRoleOrgAdmin, orgA, userA, orgA, userB, true},             // 场景：org_admin 同组织可触发运行操作
 		{"org_admin 跨组织不可触发", domain.UserRoleOrgAdmin, orgA, userA, orgB, userB, false},               // 场景：org_admin 跨组织不可触发
 		{"org_member 仅可触发自己应用的运行操作", domain.UserRoleOrgMember, orgA, userA, orgA, userA, true},        // 场景：org_member 仅可触发自己应用的运行操作
@@ -382,9 +382,39 @@ func TestCanManageAssistantVersion(t *testing.T) {
 	assert.False(t, CanManageAssistantVersion(Principal{Role: domain.UserRoleOrgMember}))
 }
 
-// TestCanViewAssistantVersion 验证平台管理员与组织管理员可读助手版本，普通成员不可。
+// TestCanViewAssistantVersion 验证三角色均可查看助手版本，未知角色不可。
 func TestCanViewAssistantVersion(t *testing.T) {
+	// 平台管理员维护版本目录，可查看。
 	assert.True(t, CanViewAssistantVersion(Principal{Role: domain.UserRolePlatformAdmin}))
+	// 组织管理员创建实例时需读取版本，可查看。
 	assert.True(t, CanViewAssistantVersion(Principal{Role: domain.UserRoleOrgAdmin}))
-	assert.False(t, CanViewAssistantVersion(Principal{Role: domain.UserRoleOrgMember}))
+	// 组织成员需在应用概览中查看绑定版本名称，可查看。
+	assert.True(t, CanViewAssistantVersion(Principal{Role: domain.UserRoleOrgMember}))
+	// 未知角色无权查看助手版本。
+	assert.False(t, CanViewAssistantVersion(Principal{Role: "unknown"}))
+}
+
+// TestCanListMembers 验证成员列表读权限：仅平台管理员和组织管理员可访问，普通成员不可。
+func TestCanListMembers(t *testing.T) {
+	cases := []orgCase{
+		{"platform_admin 跨组织可查列表", domain.UserRolePlatformAdmin, orgA, orgB, true},   // 场景：平台管理员跨组织可查成员列表
+		{"org_admin 本组织可查列表", domain.UserRoleOrgAdmin, orgA, orgA, true},             // 场景：组织管理员在本组织内可查成员列表
+		{"org_admin 跨组织不可查", domain.UserRoleOrgAdmin, orgA, orgB, false},             // 场景：组织管理员不可跨组织查成员列表
+		{"org_member 本组织不可查列表", domain.UserRoleOrgMember, orgA, orgA, false},        // 场景：普通成员不可查看本组织成员列表
+		{"未知角色不可查", "unknown", orgA, orgA, false},                                    // 场景：未知角色不可查
+	}
+	runOrgCases(t, CanListMembers, cases)
+}
+
+// TestCanSwitchAppVersion 验证应用版本切换权限：平台管理员可跨组织切换，组织管理员限本组织，成员限 owner。
+func TestCanSwitchAppVersion(t *testing.T) {
+	cases := []memberCase{
+		{"platform_admin 任意应用可切换版本", domain.UserRolePlatformAdmin, orgA, userA, orgB, userB, true}, // 场景：平台管理员跨组织可切换版本
+		{"org_admin 本组织可切换版本", domain.UserRoleOrgAdmin, orgA, userA, orgA, userB, true},            // 场景：组织管理员可切换本组织应用版本
+		{"org_admin 跨组织不可切换", domain.UserRoleOrgAdmin, orgA, userA, orgB, userB, false},            // 场景：组织管理员不可跨组织切换版本
+		{"org_member 自己应用可切换", domain.UserRoleOrgMember, orgA, userA, orgA, userA, true},           // 场景：成员可切换自己拥有的应用版本
+		{"org_member 他人应用不可切换", domain.UserRoleOrgMember, orgA, userA, orgA, userB, false},        // 场景：成员不可切换他人拥有的应用版本
+		{"未知角色不可切换", "unknown", orgA, userA, orgA, userA, false},                                  // 场景：未知角色不可切换
+	}
+	runAppCases(t, CanSwitchAppVersion, cases)
 }
