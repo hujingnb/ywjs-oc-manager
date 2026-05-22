@@ -82,10 +82,17 @@ func (a *AgentBackedAdapter) SetStreamingDocker(streaming DockerClientResolver) 
 	a.streamingDocker = streaming
 }
 
-// DockerClientForNode 返回指向目标节点 agent docker proxy 的 SDK client。
-// 供 AppInitializeHandler.phasePullRuntimeImage 使用，不经过 Adapter 接口。
+// DockerClientForNode 返回指向目标节点 agent docker proxy 的 SDK client，
+// 专供 AppInitializeHandler.phasePullRuntimeImage 拉取运行时镜像使用，不经过 Adapter 接口。
+//
+// 必须返回无 http.Client.Timeout 的 streaming 客户端：docker ImagePull 是流式接口，
+// NDJSON 进度流会一直保持到整个镜像拉完，大镜像耗时远超普通 docker client 的 30s
+// http.Client.Timeout。该 Timeout 是「含响应 body 读取」的整请求硬上限，请求 ctx
+// 只能让它更短、无法延长；若走带 timeout 的客户端，拉取会在 30s 后被强制断流，
+// 报 "context deadline exceeded (Client.Timeout ... while reading body)"。
+// 与 ContainerExecStream 复用同一 streaming resolver；未注入时回退到普通 resolver。
 func (a *AgentBackedAdapter) DockerClientForNode(ctx context.Context, nodeID string) (*client.Client, error) {
-	return a.dockerClient(ctx, nodeID)
+	return a.streamingDockerClient(ctx, nodeID)
 }
 
 // CreateContainer 通过 agent docker 代理在指定节点上创建容器。

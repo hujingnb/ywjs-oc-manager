@@ -256,6 +256,60 @@ func (s *staticDockerResolver) DockerClient(_ context.Context, _ string) (*clien
 	return s.cli, nil
 }
 
+// flagDockerResolver 是记录是否被调用的 docker resolver 测试桩，
+// 用于断言 DockerClientForNode 命中的是 streaming resolver 还是普通 resolver。
+type flagDockerResolver struct {
+	cli    *client.Client
+	called bool
+}
+
+func (r *flagDockerResolver) DockerClient(_ context.Context, _ string) (*client.Client, error) {
+	r.called = true
+	return r.cli, nil
+}
+
+// newBareDockerClient 构造一个不发起任何请求的占位 docker 客户端，
+// 仅用于按指针身份区分「streaming / 普通」两个 resolver 返回的对象。
+func newBareDockerClient(t *testing.T) *client.Client {
+	t.Helper()
+	cli, err := client.NewClientWithOpts(client.WithHost("tcp://127.0.0.1:1"))
+	require.NoError(t, err)
+	return cli
+}
+
+// TestAgentBackedAdapterDockerClientForNodeUsesStreamingResolver 验证已注入 streaming
+// resolver 时 DockerClientForNode 返回无 timeout 的 streaming docker 客户端。
+// 业务场景：镜像拉取是长连接流式操作，必须避开普通 docker client 的 30s
+// http.Client.Timeout，否则大镜像在 30s 后被强制断流（context deadline exceeded
+// while reading body），即线上「拉取运行时镜像」阶段失败的根因。
+func TestAgentBackedAdapterDockerClientForNodeUsesStreamingResolver(t *testing.T) {
+	regularCli := newBareDockerClient(t)
+	streamingCli := newBareDockerClient(t)
+	regular := &flagDockerResolver{cli: regularCli}
+	streaming := &flagDockerResolver{cli: streamingCli}
+	adapter := NewAgentBackedAdapter(nil, regular)
+	adapter.SetStreamingDocker(streaming)
+
+	got, err := adapter.DockerClientForNode(context.Background(), "node-1")
+	require.NoError(t, err)
+	assert.Same(t, streamingCli, got)   // 返回的是 streaming resolver 的客户端
+	assert.True(t, streaming.called)    // streaming resolver 被调用
+	assert.False(t, regular.called)     // 带 30s timeout 的普通 resolver 未被调用
+}
+
+// TestAgentBackedAdapterDockerClientForNodeFallsBackToRegular 验证未注入 streaming
+// resolver 时 DockerClientForNode 回退到普通 docker resolver，保持旧装配/测试装配兼容。
+func TestAgentBackedAdapterDockerClientForNodeFallsBackToRegular(t *testing.T) {
+	regularCli := newBareDockerClient(t)
+	regular := &flagDockerResolver{cli: regularCli}
+	adapter := NewAgentBackedAdapter(nil, regular) // 不调 SetStreamingDocker
+
+	got, err := adapter.DockerClientForNode(context.Background(), "node-1")
+	require.NoError(t, err)
+	assert.Same(t, regularCli, got) // 回退到普通 resolver 的客户端
+	assert.True(t, regular.called)
+}
+
 // TestAgentBackedAdapterCreateContainerHappyPath 验证agentBacked适配器创建容器成功路径的成功路径场景。
 func TestAgentBackedAdapterCreateContainerHappyPath(t *testing.T) {
 	var calls []dockerCallLog
