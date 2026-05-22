@@ -306,11 +306,12 @@ func (c *fakeUsageClient) GetAllQuotaDates(_ context.Context, _, _ int64) ([]new
 // 的 happy path；未注入时 GetApp 仍然返回 ErrNoRows，保证现有走回退路径
 // 的用例行为不变。
 type fakeUsageStore struct {
-	activeApp       sqlc.App
-	activeAppCalled bool
-	lastActiveOwner pgtype.UUID
-	org             sqlc.Organization
-	appByID         map[pgtype.UUID]sqlc.App
+	activeApp         sqlc.App
+	activeAppCalled   bool
+	lastActiveOwner   pgtype.UUID
+	org               sqlc.Organization
+	appByID           map[pgtype.UUID]sqlc.App
+	allActiveOrgs     []sqlc.Organization
 }
 
 func (s *fakeUsageStore) GetApp(_ context.Context, id pgtype.UUID) (sqlc.App, error) {
@@ -335,6 +336,11 @@ func (s *fakeUsageStore) GetOrganization(_ context.Context, id pgtype.UUID) (sql
 		return s.org, nil
 	}
 	return sqlc.Organization{}, pgx.ErrNoRows
+}
+
+// ListAllActiveOrganizations 是 ListAllActiveOrganizations 的返回值。
+func (s *fakeUsageStore) ListAllActiveOrganizations(_ context.Context) ([]sqlc.Organization, error) {
+	return s.allActiveOrgs, nil
 }
 
 // TestGetAppUsageFallsBackWhenKeyNameEmpty 校验 app 维度 store.GetApp 返回 ErrNoRows
