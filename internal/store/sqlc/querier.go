@@ -82,6 +82,9 @@ type Querier interface {
 	// OnboardingService 自动选节点时按剩余容量过滤；剩余容量 = max_apps - app_count，
 	// max_apps NULL 表示不限。degraded / unreachable / disabled 均不参与新应用调度。
 	ListActiveNodesWithAppCounts(ctx context.Context) ([]ListActiveNodesWithAppCountsRow, error)
+	// 全量返回活跃组织（deleted_at IS NULL），不分页；
+	// 仅供平台内部聚合使用（如 GetOrgUsageBreakdown），请勿用于用户可见的列表接口。
+	ListAllActiveOrganizations(ctx context.Context) ([]Organization, error)
 	ListAppsByOrg(ctx context.Context, arg ListAppsByOrgParams) ([]App, error)
 	// 组织实例列表联查版本 revision / image_id，供 version_synced 批量计算。
 	ListAppsByOrgWithVersion(ctx context.Context, arg ListAppsByOrgWithVersionParams) ([]ListAppsByOrgWithVersionRow, error)

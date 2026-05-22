@@ -199,6 +199,51 @@ func (q *Queries) HardDeleteOrganization(ctx context.Context, id pgtype.UUID) er
 	return err
 }
 
+const listAllActiveOrganizations = `-- name: ListAllActiveOrganizations :many
+SELECT id, name, status, contact_name, contact_phone, remark, newapi_user_id, credit_warning_threshold, created_at, updated_at, deleted_at, newapi_user_credentials_ciphertext, code, newapi_username, assistant_version_ids
+FROM organizations
+WHERE deleted_at IS NULL
+ORDER BY created_at DESC, id DESC
+`
+
+// 全量返回活跃组织（deleted_at IS NULL），不分页；
+// 仅供平台内部聚合使用（如 GetOrgUsageBreakdown），请勿用于用户可见的列表接口。
+func (q *Queries) ListAllActiveOrganizations(ctx context.Context) ([]Organization, error) {
+	rows, err := q.db.Query(ctx, listAllActiveOrganizations)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []Organization{}
+	for rows.Next() {
+		var i Organization
+		if err := rows.Scan(
+			&i.ID,
+			&i.Name,
+			&i.Status,
+			&i.ContactName,
+			&i.ContactPhone,
+			&i.Remark,
+			&i.NewapiUserID,
+			&i.CreditWarningThreshold,
+			&i.CreatedAt,
+			&i.UpdatedAt,
+			&i.DeletedAt,
+			&i.NewapiUserCredentialsCiphertext,
+			&i.Code,
+			&i.NewapiUsername,
+			&i.AssistantVersionIds,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
 const listOrganizations = `-- name: ListOrganizations :many
 SELECT id, name, status, contact_name, contact_phone, remark, newapi_user_id, credit_warning_threshold, created_at, updated_at, deleted_at, newapi_user_credentials_ciphertext, code, newapi_username, assistant_version_ids
 FROM organizations

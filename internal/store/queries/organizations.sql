@@ -89,3 +89,11 @@ SET newapi_user_credentials_ciphertext = $2,
     updated_at = now()
 WHERE id = $1
 RETURNING *;
+
+-- name: ListAllActiveOrganizations :many
+-- 全量返回活跃组织（deleted_at IS NULL），不分页；
+-- 仅供平台内部聚合使用（如 GetOrgUsageBreakdown），请勿用于用户可见的列表接口。
+SELECT *
+FROM organizations
+WHERE deleted_at IS NULL
+ORDER BY created_at DESC, id DESC;
