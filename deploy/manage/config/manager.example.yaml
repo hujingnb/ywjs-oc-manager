@@ -93,16 +93,19 @@ newapi:
   # base_url 非空时必填；缺失会让 admin API 401。
   admin_token: "CHANGE_ME_NEWAPI_ADMIN_TOKEN"
 
+  # 可选的 sk- 形式 OpenAI 兼容 API token，仅用于 new-api `/api/models` 不可用时
+  # 降级查询 `/v1/models`；不参与 user、充值、token 管理等 admin API。留空则不降级。
+  model_relay_token: ""
+
   # admin_token 持有者用户 ID，对应 new-api 的 New-Api-User header 校验。
   # 默认账号 admin/admin123! 的 id=1。base_url 非空时必填；类型为整数。
   admin_user_id: 1
 
 hermes:
-  # Hermes 容器的镜像引用（name:tag 或 name@sha256:digest）。runtime node 上必须存在该镜像；
-  # imagesync 会用 docker save / load 把宿主镜像分发到节点。tag 必须固定到具体 Hermes 版本，禁用 main / latest。
-  runtime_image: "crpi-nu3ibz4f07feyghi.cn-beijing.personal.cr.aliyuncs.com/ywjs_app/oc-manager-hermes:v2026.5.16-2026-05-21-12-00-00"
-
   # 助手版本可选的 Hermes 镜像列表。id 稳定、ref 为具体可拉取 tag。
+  # 实例初始化 / 重启的运行时镜像严格由绑定的助手版本经 ResolveRuntimeImage 从此列表解析；
+  # runtime node 上必须存在对应镜像，imagesync 会用 docker save / load 把宿主镜像分发到节点。
+  # ref 的 tag 必须固定到具体 Hermes 版本，禁用 main / latest。
   runtime_images:
     - id: "v2026.5.16"
       label: "Hermes v2026.5.16（当前）"
