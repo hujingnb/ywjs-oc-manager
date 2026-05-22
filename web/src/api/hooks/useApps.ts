@@ -46,6 +46,8 @@ export interface AppDTO {
   last_error_message?: string
   // model_synced 标记实例运行中的模型是否与数据库记录一致；false 表示需重启生效。
   model_synced?: boolean
+  // version_synced 标记实例运行时是否已与绑定的助手版本对齐；false 表示版本被编辑过，需重启生效。
+  version_synced?: boolean
   // runtime_image_ref 是 phasePullRuntimeImage 拉取的镜像引用；仅平台管理员可见。
   runtime_image_ref?: string
   // runtime_image_sha256 是 docker inspect 返回的镜像 config digest；仅平台管理员可见。

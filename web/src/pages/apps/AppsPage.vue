@@ -37,7 +37,7 @@
 import { computed, h, ref } from 'vue'
 import { useRouter } from 'vue-router'
 import { useQueryClient } from '@tanstack/vue-query'
-import { NButton, NSelect, NTag } from 'naive-ui'
+import { NButton, NSelect, NTag, NTooltip } from 'naive-ui'
 
 import ConfirmActionModal from '@/components/ConfirmActionModal.vue'
 import DataTableList from '@/components/DataTableList.vue'
@@ -95,16 +95,19 @@ const columns = [
     text: r => r.name,
     onClick: r => router.push(`/apps/${r.id}/overview`),
   }),
-  // 状态列：model_synced=false 时附加"需重启"警告标签，提示管理员模型变更尚未生效。
+  // 状态列：version_synced=false 时附加「需重启」标签，提示绑定的助手版本已更新、尚未生效。
   {
     title: '状态',
     key: 'status',
     render: (r: AppDTO) => {
       const badge = h(StatusBadge, { view: formatAppStatus(r.status) })
-      if (r.model_synced === false) {
+      if (r.version_synced === false) {
         return h('span', { style: 'display:inline-flex;align-items:center;gap:6px' }, [
           badge,
-          h(NTag, { type: 'warning', size: 'small', bordered: false }, () => '需重启'),
+          h(NTooltip, null, {
+            trigger: () => h(NTag, { type: 'warning', size: 'small', bordered: false }, () => '需重启'),
+            default: () => '版本已更新，需重启生效',
+          }),
         ])
       }
       return badge
