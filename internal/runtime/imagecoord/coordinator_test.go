@@ -176,3 +176,61 @@ func TestCoordinator_PullImageOnNode_Follower(t *testing.T) {
 	require.NoError(t, err)
 	assert.Equal(t, fakeID, id)
 }
+
+// TestCoordinator_PullImageOnNode_ContextCanceled 验证 pull 流卡死时 leader 路径
+// 能被 ctx 取消打断，而不是永久阻塞——这是实例「卡死在 pulling_runtime_image
+// 无法恢复」bug 的根治点的回归保护。
+//
+// 业务场景：agent docker proxy 的 NDJSON 流半开卡死（不再来数据也不 EOF）。
+// streaming docker client 无 http.Client.Timeout、worker job ctx 也无 deadline，
+// 唯一兜底是 phasePullRuntimeImage 用 context.WithTimeout 包出来的 deadline。
+// 本用例模拟该 deadline 触发：doPullOnNode 的 select 必须命中 ctx.Done() 分支返回，
+// 否则 app 会永远停在 pulling_runtime_image。
+func TestCoordinator_PullImageOnNode_ContextCanceled(t *testing.T) {
+	// /images/create 模拟卡死的 pull 流：刷出响应头后阻塞，直到请求 ctx 取消才返回，
+	// 全程不写任何 NDJSON，等价于线上「流半开、进度一直 0%」。
+	mux := http.NewServeMux()
+	mux.HandleFunc("/", func(w http.ResponseWriter, r *http.Request) {
+		path := r.URL.Path
+		if strings.Contains(path, "/images/") && strings.HasSuffix(path, "/json") {
+			// inspect：镜像不存在，触发 leader pull。
+			w.WriteHeader(http.StatusNotFound)
+			_, _ = w.Write([]byte(`{"message":"No such image"}`))
+			return
+		}
+		if strings.Contains(path, "/images/create") {
+			w.Header().Set("Content-Type", "application/json")
+			w.WriteHeader(http.StatusOK)
+			if f, ok := w.(http.Flusher); ok {
+				f.Flush() // 刷出响应头，让 ImagePull 返回 reader 后 FeedReader 卡在 Scan
+			}
+			<-r.Context().Done() // 模拟流卡死：不写数据、不 EOF
+			return
+		}
+		w.WriteHeader(http.StatusNotFound)
+	})
+	srv := httptest.NewServer(mux)
+	defer srv.Close()
+
+	cli := newTestDockerClient(t, srv.URL)
+	coord := NewCoordinator(&fakeLocker{acquireOK: true}, &fakeBus{}, "test-instance")
+	sub := make(chan ProgressEvent, 64)
+
+	// 1s 后取消，模拟 phasePullRuntimeImage 的 pullRuntimeImageTimeout 兜底触发。
+	ctx, cancel := context.WithTimeout(context.Background(), time.Second)
+	defer cancel()
+
+	done := make(chan error, 1)
+	go func() {
+		_, err := coord.PullImageOnNode(ctx, "node-1", "hermes:v1", cli, sub)
+		done <- err
+	}()
+
+	select {
+	case err := <-done:
+		// 必须返回 ctx 取消相关错误，而不是 nil 或永久阻塞。
+		require.Error(t, err)
+	case <-time.After(10 * time.Second):
+		t.Fatal("PullImageOnNode 在 ctx 取消后仍未返回，存在永久阻塞")
+	}
+}

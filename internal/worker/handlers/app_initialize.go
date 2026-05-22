@@ -418,6 +418,13 @@ func (h *AppInitializeHandler) markFailed(ctx context.Context, app *sqlc.App, ph
 	return cause
 }
 
+// pullRuntimeImageTimeout 是单次运行时镜像拉取的总时长上限。
+//
+// 取值 30 分钟：远大于数 GB 镜像在慢网络下的正常拉取耗时，不会误杀正常拉取；
+// 又能保证拉取流卡死时最终冒泡成 error，让实例从 pulling_runtime_image 恢复为
+// 可重试状态，而不是永久卡死（详见 phasePullRuntimeImage 内注释）。
+const pullRuntimeImageTimeout = 30 * time.Minute
+
 // phasePullRuntimeImage 通过 agent docker proxy 在目标节点拉取 hermes runtime 镜像。
 //
 // 流程：
@@ -449,7 +456,16 @@ func (h *AppInitializeHandler) phasePullRuntimeImage(ctx context.Context, app *s
 		}
 	}()
 
-	sha256, err := h.imagePullCoord.PullImageOnNode(ctx, payload.RuntimeNodeID, imageRef, cli, subscriber)
+	// 给整次镜像拉取套一个总时长上限。streaming docker client 无 http.Client.Timeout、
+	// worker 也不给 job ctx 设 deadline，若 agent docker proxy 的 NDJSON 流半开卡死
+	// （不来数据也不 EOF），doPullOnNode 会永久阻塞，实例永远停在 pulling_runtime_image：
+	// progressReporter 每秒刷新 updated_at 让 reaper 的孤儿检测失明，前端 / 后端又都
+	// 拒绝从该状态重试，最终无法恢复。这里的 deadline 是唯一兜底——命中后 doPullOnNode
+	// 经 ctx.Done() 返回，失败冒泡至 markFailed，实例落到 error 后可重新初始化。
+	pullCtx, cancelPull := context.WithTimeout(ctx, pullRuntimeImageTimeout)
+	defer cancelPull()
+
+	sha256, err := h.imagePullCoord.PullImageOnNode(pullCtx, payload.RuntimeNodeID, imageRef, cli, subscriber)
 	<-progressDone // 等进度 goroutine 结束
 	if err != nil {
 		return fmt.Errorf("在节点 %s 拉取镜像 %s 失败: %w", payload.RuntimeNodeID, imageRef, err)
