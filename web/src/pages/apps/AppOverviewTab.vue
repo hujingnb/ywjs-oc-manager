@@ -69,6 +69,22 @@
         <code>{{ app.runtime_node_id || '—' }}</code>
       </n-descriptions-item>
       <n-descriptions-item label="人设模式">{{ app.persona_mode }}</n-descriptions-item>
+      <!-- 助手版本：展示绑定的版本名，version_synced=false 时附加需重启标签，组织管理员可切换 -->
+      <n-descriptions-item label="助手版本">
+        <n-space align="center" :size="8">
+          <span>{{ versionName }}</span>
+          <!-- version_synced 为 false 时提示需重启，与实例列表的需重启提示视觉一致 -->
+          <n-tag v-if="app.version_synced === false" type="warning" size="small" :bordered="false">需重启</n-tag>
+          <!-- 切换按钮仅对有应用管理权限且可查看版本目录的用户展示 -->
+          <n-button
+            v-if="canManageApp(auth.user, app) && canViewVersions"
+            size="small"
+            @click="openSwitchVersionModal"
+          >
+            切换
+          </n-button>
+        </n-space>
+      </n-descriptions-item>
       <!-- model_id 由后端对非平台管理员过滤为空字符串，此处仅对平台管理员展示 -->
       <n-descriptions-item v-if="auth.isPlatformAdmin" label="模型">{{ app.model_id }}</n-descriptions-item>
       <n-descriptions-item label="所属组织">
@@ -88,6 +104,7 @@
 
     <p v-if="initFeedback" class="state-text" :class="{ danger: initError }" style="margin-top: 8px">{{ initFeedback }}</p>
     <p v-if="keyFeedback" class="state-text" :class="{ danger: keyError }" style="margin-top: 8px">{{ keyFeedback }}</p>
+    <p v-if="versionFeedback" class="state-text" :class="{ danger: versionError }" style="margin-top: 8px">{{ versionFeedback }}</p>
 
     <JobProgressPanel
       v-if="trackingJobId"
@@ -106,19 +123,43 @@
       @confirm="onConfirmDisable"
       @cancel="confirmDisableKey = false"
     />
+
+    <!-- 切换助手版本弹窗：从组织 allowlist 与版本目录交集中选择目标版本 -->
+    <n-modal v-model:show="showSwitchVersionModal" preset="card" title="切换助手版本" style="width: 420px">
+      <n-select
+        v-model:value="selectedVersionId"
+        :options="versionOptions"
+        :loading="versionsQuery.isLoading.value"
+        placeholder="请选择助手版本"
+        style="margin-bottom: 16px"
+      />
+      <n-space justify="end">
+        <n-button @click="showSwitchVersionModal = false">取消</n-button>
+        <n-button
+          type="primary"
+          :loading="switchVersionMutation.isPending.value"
+          :disabled="!selectedVersionId || switchVersionMutation.isPending.value"
+          @click="onConfirmSwitchVersion"
+        >
+          确认切换
+        </n-button>
+      </n-space>
+    </n-modal>
   </n-card>
 </template>
 
 <script setup lang="ts">
 import { computed, inject, ref, type Ref } from 'vue'
-import { NButton, NCard, NDescriptions, NDescriptionsItem, NProgress, NSpace, NTag } from 'naive-ui'
+import { NButton, NCard, NDescriptions, NDescriptionsItem, NModal, NProgress, NSelect, NSpace, NTag, type SelectOption } from 'naive-ui'
 
 import {
   useInitializeAppMutation,
   useJobQuery,
+  useSwitchAppVersion,
   useToggleAppAPIKey,
   type AppDTO,
 } from '@/api/hooks/useApps'
+import { useAssistantVersionsQuery } from '@/api/hooks/useAssistantVersions'
 import { useOrganizationQuery } from '@/api/hooks/useOrganizations'
 import AppStatusTag from '@/components/AppStatusTag.vue'
 import ConfirmActionModal from '@/components/ConfirmActionModal.vue'
@@ -137,6 +178,60 @@ const auth = useAuthStore()
 const orgId = computed<string | undefined>(() => app?.value?.org_id)
 const organizationQuery = useOrganizationQuery(orgId)
 const organizationName = computed(() => organizationQuery.data.value?.name || '未知组织')
+
+// canViewVersions 控制是否拉取助手版本目录：仅平台管理员和组织管理员可读 /assistant-versions。
+const canViewVersions = computed(() => auth.isPlatformAdmin || auth.user?.role === 'org_admin')
+
+// 仅在有权限时拉取助手版本目录，避免普通成员触发 403。
+const versionsQuery = useAssistantVersionsQuery(() => canViewVersions.value)
+
+// versionOptions 取组织 allowlist 与全量版本目录的交集，仅展示本组织允许使用的版本。
+const versionOptions = computed<SelectOption[]>(() => {
+  const org = organizationQuery.data.value
+  const versions = versionsQuery.data.value
+  if (!org || !versions) return []
+  const allowedIds = new Set(org.assistant_version_ids ?? [])
+  return versions
+    .filter(v => allowedIds.has(v.id))
+    .map(v => ({ label: v.name, value: v.id }))
+})
+
+// versionName 根据 version_id 从版本目录反查版本名称；目录不可用时回退到 id 原值或 '—'。
+const versionName = computed(() => {
+  const id = app?.value?.version_id
+  if (!id) return '—'
+  const found = versionsQuery.data.value?.find(v => v.id === id)
+  return found ? found.name : id
+})
+
+// 切换版本 modal 的开关与选中版本 ref。
+const showSwitchVersionModal = ref(false)
+const selectedVersionId = ref<string | null>(null)
+
+// openSwitchVersionModal 打开切换版本弹窗，并预选当前绑定的版本。
+function openSwitchVersionModal() {
+  selectedVersionId.value = app?.value?.version_id ?? null
+  showSwitchVersionModal.value = true
+}
+
+const switchVersionMutation = useSwitchAppVersion(appId)
+const versionFeedback = ref('')
+const versionError = ref(false)
+
+// onConfirmSwitchVersion 提交版本切换请求，成功关闭弹窗并展示需重启提示；失败展示错误文案。
+async function onConfirmSwitchVersion() {
+  if (!selectedVersionId.value) return
+  versionFeedback.value = ''
+  versionError.value = false
+  try {
+    await switchVersionMutation.mutateAsync(selectedVersionId.value)
+    showSwitchVersionModal.value = false
+    versionFeedback.value = '已切换助手版本，重启实例后生效'
+  } catch (err: unknown) {
+    versionError.value = true
+    versionFeedback.value = err instanceof Error ? err.message : '切换版本失败'
+  }
+}
 
 const initMutation = useInitializeAppMutation(appId)
 // trackingJobId 记录最近一次后台任务，供 JobProgressPanel 轮询展示执行进度。

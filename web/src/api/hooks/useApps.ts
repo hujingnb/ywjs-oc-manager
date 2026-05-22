@@ -48,6 +48,8 @@ export interface AppDTO {
   model_synced?: boolean
   // version_synced 标记实例运行时是否已与绑定的助手版本对齐；false 表示版本被编辑过，需重启生效。
   version_synced?: boolean
+  // version_id 是实例绑定的助手版本 id；空表示未绑定（仅历史数据）。
+  version_id?: string
   // runtime_image_ref 是 phasePullRuntimeImage 拉取的镜像引用；仅平台管理员可见。
   runtime_image_ref?: string
   // runtime_image_sha256 是 docker inspect 返回的镜像 config digest；仅平台管理员可见。
@@ -313,6 +315,23 @@ export function useAppUsageQuery(
       })
       return response.usage
     },
+  })
+}
+
+// useSwitchAppVersion 切换实例绑定的助手版本。
+// 切换后实例进入需重启态（version_synced=false）；失效应用详情让 UI 立即反映新版本与需重启提示。
+export function useSwitchAppVersion(appId: Ref<string | undefined>) {
+  const client = useQueryClient()
+  return useMutation({
+    mutationFn: async (versionId: string) => {
+      if (!appId.value) throw new Error('缺少实例 ID')
+      const response = await apiRequest<{ app: AppDTO }>(
+        `/api/v1/apps/${appId.value}/version`,
+        { method: 'POST', body: { version_id: versionId } },
+      )
+      return response.app
+    },
+    onSuccess: () => { void client.invalidateQueries({ queryKey: appKey(appId.value) }) },
   })
 }
 
