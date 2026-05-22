@@ -46,7 +46,7 @@ func RegisterUsageRoutes(router gin.IRouter, handler *UsageHandler) {
 	router.GET("/api/v1/usage/members/:userId", handler.GetMember)
 	router.GET("/api/v1/usage/organizations/:orgId", handler.GetOrg)
 	router.GET("/api/v1/usage/platform", handler.GetPlatform)
-	router.GET("/api/v1/usage/org-breakdown", handler.GetOrgBreakdown)
+	router.GET("/api/v1/platform/usage/org-breakdown", handler.GetOrgBreakdown)
 }
 
 // GetMember 返回单个成员名下应用的调用日志。
@@ -155,7 +155,7 @@ func (h *UsageHandler) GetPlatform(c *gin.Context) {
 // @Failure      403    {object}  ErrorResponse
 // @Failure      500    {object}  ErrorResponse
 // @Failure      503    {object}  ErrorResponse
-// @Router       /usage/org-breakdown [get]
+// @Router       /platform/usage/org-breakdown [get]
 func (h *UsageHandler) GetOrgBreakdown(c *gin.Context) {
 	principal := principalFromCtx(c)
 	since, until := parseUsageStatsWindow(c)
