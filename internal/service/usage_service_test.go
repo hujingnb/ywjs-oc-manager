@@ -3,6 +3,7 @@ package service
 import (
 	"context"
 	"errors"
+	"fmt"
 	"testing"
 
 	"github.com/jackc/pgx/v5"
@@ -478,4 +479,93 @@ func TestGetAppUsageUsesAppNewapiKeyName(t *testing.T) {
 	require.NoError(t, err)
 	assert.Equal(t, "app-database-override", client.lastTokenLogsQuery.TokenName,
 		"GetAppUsage 应优先用数据库里写的 NewapiKeyName 而非约定派生")
+}
+
+// TestGetOrgUsageBreakdownForbidsNonPlatformAdmin 校验非 platform_admin 拿不到分组用量。
+func TestGetOrgUsageBreakdownForbidsNonPlatformAdmin(t *testing.T) {
+	svc := NewUsageService(&fakeUsageStore{}, &fakeUsageClient{}, nil)
+	_, err := svc.GetOrgUsageBreakdown(context.Background(), auth.Principal{Role: domain.UserRoleOrgAdmin}, 0, 0)
+	require.ErrorIs(t, err, ErrForbidden)
+}
+
+// TestGetOrgUsageBreakdownSkipsOrgsWithoutNewAPIUser 校验无 newapi_user_id 或 newapi_username
+// 的组织不触发 new-api 调用、也不报错，仅在结果中静默跳过。
+func TestGetOrgUsageBreakdownSkipsOrgsWithoutNewAPIUser(t *testing.T) {
+	// org1 有 newapi 账号（user_id + username 均填写），org2 没有；期望结果只有 org1。
+	orgWithUser := sqlc.Organization{
+		ID:             mustUUID(t, "00000000-0000-0000-0000-000000000a01"),
+		Name:           "org-with-user",
+		NewapiUserID:   pgtype.Text{String: "10", Valid: true},
+		NewapiUsername: pgtype.Text{String: "org-10-user", Valid: true},
+	}
+	orgWithout := sqlc.Organization{
+		ID:   mustUUID(t, "00000000-0000-0000-0000-000000000a02"),
+		Name: "org-without-user",
+		// NewapiUserID / NewapiUsername 均为零值（Invalid），模拟未初始化的组织
+	}
+	store := &fakeUsageStore{allActiveOrgs: []sqlc.Organization{orgWithUser, orgWithout}}
+	client := &fakeUsageClient{userQuota: []newapi.QuotaDate{{Date: "2026-05-22", Quota: 500}}}
+	svc := NewUsageService(store, client, nil)
+
+	result, err := svc.GetOrgUsageBreakdown(context.Background(), platformAdmin(), 0, 0)
+	require.NoError(t, err)
+	// 仅 orgWithUser 出现在结果中；orgWithout 被静默跳过。
+	require.Len(t, result.Items, 1)
+	assert.Equal(t, "org-with-user", result.Items[0].OrgName)
+	assert.Equal(t, int64(500), result.Items[0].TotalQuota)
+}
+
+// TestGetOrgUsageBreakdownSortsAndCapsAt10 校验结果按 TotalQuota 降序并截取前 10 条。
+func TestGetOrgUsageBreakdownSortsAndCapsAt10(t *testing.T) {
+	// 构建 12 个组织，每个组织对应的 quota 由 fakeUsageClientWithPerUserQuota 按 userID * 100 返回，
+	// 即 org-01 quota=100，org-12 quota=1200；期望排序后 top 10 且第一条 quota 最大。
+	orgs := make([]sqlc.Organization, 12)
+	for i := range orgs {
+		// 生成格式化的 UUID 字符串，使每个组织 ID 唯一。
+		idStr := fmt.Sprintf("00000000-0000-0000-0000-%012d", i+1)
+		orgs[i] = sqlc.Organization{
+			ID:             mustUUID(t, idStr),
+			Name:           fmt.Sprintf("org-%02d", i+1),
+			NewapiUserID:   pgtype.Text{String: fmt.Sprintf("%d", i+1), Valid: true},
+			NewapiUsername: pgtype.Text{String: fmt.Sprintf("user-%d", i+1), Valid: true},
+		}
+	}
+	// fakeUsageClientWithPerUserQuota 对 userID=N 返回 quota=N*100，
+	// 因此 12 个组织的 quota 分别为 100~1200，降序 top 10 应从 1200 开始。
+	client := &fakeUsageClientWithPerUserQuota{
+		quotaByUserID: func(id int64) int64 { return id * 100 },
+	}
+	store := &fakeUsageStore{allActiveOrgs: orgs}
+	svc := NewUsageService(store, client, nil)
+
+	result, err := svc.GetOrgUsageBreakdown(context.Background(), platformAdmin(), 0, 0)
+	require.NoError(t, err)
+	// 最多返回 10 条（12 个组织截取 top 10）。
+	require.Len(t, result.Items, 10)
+	// 第一条应是 quota 最大的（org-12，quota=1200）。
+	assert.Equal(t, int64(1200), result.Items[0].TotalQuota)
+	// 结果整体降序排列。
+	for i := 1; i < len(result.Items); i++ {
+		assert.GreaterOrEqual(t, result.Items[i-1].TotalQuota, result.Items[i].TotalQuota,
+			"结果应按 TotalQuota 降序排列")
+	}
+}
+
+// fakeUsageClientWithPerUserQuota 是支持按 userID 返回不同 quota 的 UsageNewAPIClient 实现，
+// 专用于 TestGetOrgUsageBreakdownSortsAndCapsAt10，验证多组织 quota 排序与截取逻辑。
+type fakeUsageClientWithPerUserQuota struct {
+	// quotaByUserID 根据 userID 计算该用户应返回的 quota 值。
+	quotaByUserID func(id int64) int64
+}
+
+func (c *fakeUsageClientWithPerUserQuota) GetTokenLogs(_ context.Context, _ newapi.LogsQuery) (newapi.LogsPage, error) {
+	return newapi.LogsPage{}, nil
+}
+
+func (c *fakeUsageClientWithPerUserQuota) GetUserQuotaDates(_ context.Context, userID int64, _ string, _, _ int64) ([]newapi.QuotaDate, error) {
+	return []newapi.QuotaDate{{Date: "2026-05-22", Quota: c.quotaByUserID(userID)}}, nil
+}
+
+func (c *fakeUsageClientWithPerUserQuota) GetAllQuotaDates(_ context.Context, _, _ int64) ([]newapi.QuotaDate, error) {
+	return nil, nil
 }
