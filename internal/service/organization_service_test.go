@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"strings"
 	"testing"
 
 	"github.com/jackc/pgx/v5"
@@ -56,7 +57,9 @@ func TestOrganizationServiceCreateProvisionsNewAPIUser(t *testing.T) {
 	assert.Equal(t, "test-org", store.created.Code)
 	assert.Equal(t, 1, prov.createCalls)
 	assert.Equal(t, 1, prov.bootstrapCalls)
-	assert.Equal(t, "test-org", prov.lastCreate.Username)
+	// new-api username 由 org.Code 加随机后缀派生：带 code 前缀，但不等于裸 code。
+	assert.True(t, strings.HasPrefix(prov.lastCreate.Username, "test-org-"), "new-api username 应带 code 前缀: %q", prov.lastCreate.Username)
+	assert.NotEqual(t, "test-org", prov.lastCreate.Username)
 	require.NotEqual(t, "", prov.lastCreate.Password)
 	require.True(t, store.updateCalled)
 	require.Equal(t, "42", store.updated.NewapiUserID.String)
@@ -73,10 +76,10 @@ func TestOrganizationServiceCreateProvisionsNewAPIUser(t *testing.T) {
 	assert.Equal(t, prov.lastCreate.Password, creds.Password)
 }
 
-// TestProvisionNewAPIUserPersistsUsername 校验组织创建链路把 new-api 侧 username
-// （当前等于 org.Code）显式落到 organizations.newapi_username 字段，供 usage 查询
-// 直接读取，防止"username 与 code 同值"这一隐式约定回归——一旦 username 生成策略
-// 变化（例如加随机后缀），下游再走"凭据密文解密"或"运行时查 new-api"会代价过高。
+// TestProvisionNewAPIUserPersistsUsername 校验组织创建链路把 new-api 侧实际 username
+// 显式落到 organizations.newapi_username 字段。new-api username 是 org.Code 加随机
+// 后缀派生值、不再等于裸 code，因此下游 usage 查询必须读该列定位 new-api 账号，
+// 不能用 org.Code 反推；本用例锁定"派生 username 与落库值一致"这一约定。
 func TestProvisionNewAPIUserPersistsUsername(t *testing.T) {
 	// 用与 TestOrganizationServiceCreateProvisionsNewAPIUser 相同的桩件组合，
 	// 保证只额外校验 NewapiUsername 这一字段，避免与其他用例语义重叠。
@@ -100,10 +103,12 @@ func TestProvisionNewAPIUserPersistsUsername(t *testing.T) {
 
 	// 必须确实调用了 SetOrganizationNewAPIUser，否则 username 写入路径根本没被验证。
 	require.True(t, store.updateCalled)
-	// 关键断言：NewapiUsername 显式置为有效值，且与 org.Code 同值，保证 usage
-	// service 直接读 organizations.newapi_username 即可定位 new-api 侧账号。
 	require.True(t, store.updated.NewapiUsername.Valid, "NewapiUsername 必须 Valid，否则会落 NULL")
-	assert.Equal(t, "test-org", store.updated.NewapiUsername.String)
+	// 关键断言：落库的 newapi_username 与实际传给 new-api CreateUser 的 username
+	// 完全一致，且为 code 加随机后缀派生值（带 code 前缀、不等于裸 code）。
+	assert.Equal(t, prov.lastCreate.Username, store.updated.NewapiUsername.String)
+	assert.True(t, strings.HasPrefix(store.updated.NewapiUsername.String, "test-org-"))
+	assert.NotEqual(t, "test-org", store.updated.NewapiUsername.String)
 }
 
 // TestOrganizationServiceCreateAlsoCreatesOrgAdmin 验证组织服务创建Also创建组织管理员的成功路径场景。
@@ -216,57 +221,37 @@ func TestCreateOrganizationMapsUniqueViolationToConflict(t *testing.T) {
 	require.ErrorIs(t, err, ErrConflict)
 }
 
-// TestCreateOrganization_RejectsWhenNewAPIUsernameTaken 复现并校验错误码映射修复：
-// 当 new-api 侧已存在与组织 code 同名的 user（历史遗留孤儿账号）时，创建组织应在
-// INSERT 组织行之前提前返回 ErrConflict（handler 据此回 409），而不是先建行、再因
-// new-api CreateUser 撞 users_username_key 唯一约束、把底层错误透传成 500。
-func TestCreateOrganization_RejectsWhenNewAPIUsernameTaken(t *testing.T) {
-	store := &organizationStoreStub{}
-	// findUserExists=true：模拟 new-api 已占用 username "test-org"。
-	prov := &fakeProvisioner{findUserExists: true}
-	svc := NewOrganizationService(store, prov, mustCipher(t), nil)
-	svc.SetVersionValidator(fakeVersionValidator{known: map[string]bool{}})
-	svc.hashPassword = fakeHash
-
-	_, err := svc.CreateOrganization(context.Background(), auth.Principal{Role: domain.UserRolePlatformAdmin}, OrganizationInput{
-		Name:             "测试组织",
-		Code:             "test-org",
-		AdminUsername:    "admin",
-		AdminDisplayName: "管理员",
-		AdminPassword:    "secret-password",
-	})
-
-	// 应映射为 ErrConflict（handler 据此回 409 + 明确文案），而非透传成内部错误。
-	require.ErrorIs(t, err, ErrConflict)
-	// 冲突原因须可读，便于 handler 透出给前端。
-	assert.Contains(t, err.Error(), "已被占用")
-	// 提前探测命中后必须中止，不得 INSERT 组织行，避免脏行残留。
-	assert.False(t, store.createCalled)
-}
-
-// TestCreateOrganization_ProbeFailureAbortsCreate 校验 new-api 用户名占用探测调用
-// 本身失败（非 ErrNotFound）时，创建组织中止并返回错误，且不 INSERT 组织行。
-func TestCreateOrganization_ProbeFailureAbortsCreate(t *testing.T) {
-	store := &organizationStoreStub{}
-	// findUserErr 注入非 ErrNotFound 错误，模拟探测请求 5xx / 网络异常。
-	prov := &fakeProvisioner{findUserErr: errors.New("search 503")}
-	svc := NewOrganizationService(store, prov, mustCipher(t), nil)
-	svc.SetVersionValidator(fakeVersionValidator{known: map[string]bool{}})
-	svc.hashPassword = fakeHash
-
-	_, err := svc.CreateOrganization(context.Background(), auth.Principal{Role: domain.UserRolePlatformAdmin}, OrganizationInput{
-		Name:             "测试组织",
-		Code:             "test-org",
-		AdminUsername:    "admin",
-		AdminDisplayName: "管理员",
-		AdminPassword:    "secret-password",
-	})
-
-	require.Error(t, err)
-	// 探测失败不是冲突，不应误判为 ErrConflict。
-	require.NotErrorIs(t, err, ErrConflict)
-	// 探测未通过，不得 INSERT 组织行。
-	assert.False(t, store.createCalled)
+// TestBuildNewAPIUsername 校验 new-api username 派生规则：code 前缀 + "-" + 随机后缀，
+// 整体长度不超过 new-api `validate:"max=20"` 上限，长 code 截断前缀。
+func TestBuildNewAPIUsername(t *testing.T) {
+	cases := []struct {
+		name string // 子场景说明
+		code string // 输入组织 code
+	}{
+		{name: "短 code 完整保留为前缀", code: "acme"},                        // 4+1+6=11，未超上限
+		{name: "13 位 code 恰好用满前缀预算", code: "abcdefghijklm"},            // 13+1+6=20，等于上限
+		{name: "超长 code 前缀被截断", code: "abcdefghijklmnopqrstuvwxyz"},   // 26 位，前缀截到 13
+		{name: "截断点落在短横线上不产生双横线", code: "abc-def-ghij-klmn"}, // 截到 13 位会以 "-" 结尾
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			got, err := buildNewAPIUsername(tc.code)
+			require.NoError(t, err)
+			// 整体长度受 new-api username max=20 限制。
+			assert.LessOrEqual(t, len(got), newapiUsernameMaxLen)
+			// 必须带随机后缀，不等于裸 code。
+			assert.NotEqual(t, tc.code, got)
+			lastDash := strings.LastIndex(got, "-")
+			require.Greater(t, lastDash, 0, "派生 username 必须含分隔符")
+			prefix, suffix := got[:lastDash], got[lastDash+1:]
+			// 后缀长度固定为 newapiUsernameSuffixLen。
+			assert.Len(t, suffix, newapiUsernameSuffixLen)
+			// 前缀必须是 code 的前缀（截断只缩短长度，不改写字符）。
+			assert.True(t, strings.HasPrefix(tc.code, prefix), "前缀 %q 应为 code %q 的前缀", prefix, tc.code)
+			// 前缀不以短横线结尾，避免出现 "xxx--suffix"。
+			assert.False(t, strings.HasSuffix(prefix, "-"), "前缀不应以短横线结尾: %q", prefix)
+		})
+	}
 }
 
 // TestCreateOrganizationRejectsUnknownVersionID 验证创建组织时传入不存在的助手版本 id 会被拒绝，
@@ -380,26 +365,6 @@ type fakeProvisioner struct {
 	deleteUserCalled bool
 	deleteUserUserID int64
 	deleteUserErr    error
-
-	// findUserExists 为 true 时模拟 new-api 已存在同名 user（触发组织标识占用冲突）。
-	findUserExists bool
-	// findUserErr 注入 FindUserByUsername 的非 ErrNotFound 错误，模拟探测调用本身失败。
-	findUserErr error
-	// findUserCalls 记录 FindUserByUsername 被调用次数。
-	findUserCalls int
-}
-
-// FindUserByUsername 模拟 new-api 用户名占用探测：默认返回 ErrNotFound（用户名可用），
-// findUserExists=true 时返回已存在的 user，findUserErr 注入探测调用本身失败。
-func (p *fakeProvisioner) FindUserByUsername(_ context.Context, username string) (newapi.User, error) {
-	p.findUserCalls++
-	if p.findUserErr != nil {
-		return newapi.User{}, p.findUserErr
-	}
-	if p.findUserExists {
-		return newapi.User{ID: 999, Username: username}, nil
-	}
-	return newapi.User{}, newapi.ErrNotFound
 }
 
 func (p *fakeProvisioner) CreateUser(_ context.Context, input newapi.CreateUserInput) (newapi.User, error) {

@@ -70,10 +70,6 @@ type NewAPIUserProvisioner interface {
 	CreateUser(ctx context.Context, input newapi.CreateUserInput) (newapi.User, error)
 	BootstrapUserAccessToken(ctx context.Context, username, password string) (string, error)
 	DeleteUser(ctx context.Context, userID int64) error // OOS-1 孤儿清理：CreateOrganization 失败时 best-effort 调用
-	// FindUserByUsername 探测 new-api 是否已存在指定 username 的 user。
-	// 创建组织前用它提前发现 org.Code 对应的 new-api 账号已被占用，
-	// 避免走到 CreateUser 才撞 users_username_key 唯一约束、把底层错误透传成 500。
-	FindUserByUsername(ctx context.Context, username string) (newapi.User, error)
 }
 
 // OrganizationCredentials 是 organizations.newapi_user_credentials_ciphertext 解密后的明文。
@@ -197,19 +193,6 @@ func (s *OrganizationService) CreateOrganization(ctx context.Context, principal 
 	code, err := normalizeOrganizationCode(input.Code)
 	if err != nil {
 		return OrganizationResult{}, err
-	}
-	// new-api 侧 username 与组织 code 一一对应。若 new-api 已存在同名 user
-	// （多为历史遗留、未随组织一起清理的孤儿账号），继续创建会在 provisionNewAPIUser
-	// 的 CreateUser 阶段撞 new-api users_username_key 唯一约束。此处提前探测：
-	//   - 命中（err == nil）→ 返回 ErrConflict，让 handler 回 409 + 明确文案，
-	//     而不是把底层唯一约束错误透传成 500「服务暂时不可用」；
-	//   - ErrNotFound → 用户名可用，继续创建；
-	//   - 其它错误 → 探测调用本身异常，视为服务错误中止创建。
-	// 提前探测同时避免了先 INSERT 组织行、再因 new-api 冲突回滚的无谓往返。
-	if _, findErr := s.provisioner.FindUserByUsername(ctx, code); findErr == nil {
-		return OrganizationResult{}, fmt.Errorf("%w: 组织标识 %q 已被占用（new-api 侧存在同名账号），请更换标识或先清理 new-api 孤儿账号", ErrConflict, code)
-	} else if !errors.Is(findErr, newapi.ErrNotFound) {
-		return OrganizationResult{}, fmt.Errorf("探测 new-api 用户名占用失败: %w", findErr)
 	}
 	// 校验助手版本 allowlist 中的每个 id 都存在且未删除。
 	// versionValidator 未装配时直接拒绝，避免写入未经版本目录确认的 id。
@@ -360,7 +343,12 @@ func isUniqueViolation(err error) bool {
 //   - CreateUser 之前任意失败 → nil（无孤儿）
 //   - CreateUser 之后任意失败 → 非 nil（调用方负责 best-effort 调 DeleteUser 清理孤儿）
 func (s *OrganizationService) provisionNewAPIUser(ctx context.Context, org *sqlc.Organization) (sqlc.Organization, *int64, error) {
-	username := org.Code
+	// new-api username 由组织 code 派生并追加随机后缀，避免与历史遗留、未随组织
+	// 清理的 new-api 孤儿账号同名而撞唯一约束、导致创建失败。
+	username, err := buildNewAPIUsername(org.Code)
+	if err != nil {
+		return sqlc.Organization{}, nil, err
+	}
 	password, err := generateUserPassword()
 	if err != nil {
 		return sqlc.Organization{}, nil, fmt.Errorf("生成 new-api 密码失败: %w", err)
@@ -401,8 +389,9 @@ func (s *OrganizationService) provisionNewAPIUser(ctx context.Context, org *sqlc
 		ID:                              org.ID,
 		NewapiUserID:                    pgtype.Text{String: strconv.FormatInt(user.ID, 10), Valid: true},
 		NewapiUserCredentialsCiphertext: pgtype.Text{String: ciphertext, Valid: true},
-		// 同步落 new-api 侧 username（当前等于 org.Code），供 usage service 直接读
-		// organizations.newapi_username 定位 new-api 账号，避免运行时反查或解密凭据。
+		// 同步落 new-api 侧 username（org.Code 派生 + 随机后缀），供 usage service
+		// 直接读 organizations.newapi_username 定位 new-api 账号，避免运行时反查或
+		// 解密凭据；该列是 user-scoped 调用定位 new-api 账号的唯一权威来源。
 		NewapiUsername: pgtype.Text{String: username, Valid: true},
 	})
 	if err != nil {
@@ -423,6 +412,51 @@ func generateUserPassword() (string, error) {
 		return "", err
 	}
 	return strings.TrimRight(base32.StdEncoding.EncodeToString(raw), "="), nil
+}
+
+// new-api username 生成相关常量。
+const (
+	// newapiUsernameMaxLen 是 new-api 侧 username 的最大长度，对应 new-api
+	// model.User.Username 的 `validate:"max=20"` 校验，超出会被 new-api 拒绝。
+	newapiUsernameMaxLen = 20
+	// newapiUsernameSuffixLen 是拼到 new-api username 末尾的随机后缀长度。
+	// 6 位 base32 小写字符（[a-z2-7]）熵约 30 bits，足以避免与同 code 的少量
+	// 历史残留账号碰撞，同时为 code 前缀留出足够长度。
+	newapiUsernameSuffixLen = 6
+)
+
+// generateNewAPIUsernameSuffix 生成 new-api username 的随机后缀。
+//
+// base32 小写后字符集为 [a-z2-7]，是组织 code 合法字符集 [a-z0-9-] 的子集，
+// 拼接后不会引入 new-api 不接受的字符。
+func generateNewAPIUsernameSuffix() (string, error) {
+	raw := make([]byte, 4)
+	if _, err := rand.Read(raw); err != nil {
+		return "", err
+	}
+	encoded := strings.ToLower(strings.TrimRight(base32.StdEncoding.EncodeToString(raw), "="))
+	return encoded[:newapiUsernameSuffixLen], nil
+}
+
+// buildNewAPIUsername 由组织 code 派生 new-api username：code 前缀 + "-" + 随机后缀。
+//
+// 加随机后缀是为了防止与历史遗留、未随组织清理的 new-api 孤儿账号同名而撞
+// users_username_key 唯一约束、导致组织创建失败。整体长度受 new-api
+// `validate:"max=20"` 限制，code 过长时按预算截断前缀。派生出的 username 会随
+// 组织一起落 organizations.newapi_username，后续 user-scoped 调用一律以该列为准。
+func buildNewAPIUsername(code string) (string, error) {
+	suffix, err := generateNewAPIUsernameSuffix()
+	if err != nil {
+		return "", fmt.Errorf("生成 new-api 用户名后缀失败: %w", err)
+	}
+	// code 前缀预算 = 上限 - 分隔符 "-" - 后缀长度。
+	prefixBudget := newapiUsernameMaxLen - 1 - len(suffix)
+	prefix := code
+	if len(prefix) > prefixBudget {
+		// 截断后去掉可能残留的尾部 "-"，避免出现 "xxx--suffix" 这种双横线。
+		prefix = strings.TrimRight(prefix[:prefixBudget], "-")
+	}
+	return prefix + "-" + suffix, nil
 }
 
 // ListOrganizations 列出未删除组织；第一版仅平台管理员可访问全量组织。
