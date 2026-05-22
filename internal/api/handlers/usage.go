@@ -30,6 +30,7 @@ type usageService interface {
 	GetMemberUsage(ctx context.Context, principal auth.Principal, orgID, memberID string, opts service.LogsQueryOptions) (service.LogsPage, error)
 	GetOrgUsage(ctx context.Context, principal auth.Principal, orgID string, since, until int64) (service.QuotaSeries, error)
 	GetPlatformUsage(ctx context.Context, principal auth.Principal, since, until int64) (service.QuotaSeries, error)
+	GetOrgUsageBreakdown(ctx context.Context, principal auth.Principal, since, until int64) (service.OrgUsageBreakdown, error)
 }
 
 // NewUsageHandler 创建 usage handler。
@@ -45,6 +46,7 @@ func RegisterUsageRoutes(router gin.IRouter, handler *UsageHandler) {
 	router.GET("/api/v1/usage/members/:userId", handler.GetMember)
 	router.GET("/api/v1/usage/organizations/:orgId", handler.GetOrg)
 	router.GET("/api/v1/usage/platform", handler.GetPlatform)
+	router.GET("/api/v1/usage/org-breakdown", handler.GetOrgBreakdown)
 }
 
 // GetMember 返回单个成员名下应用的调用日志。
@@ -136,6 +138,33 @@ func (h *UsageHandler) GetPlatform(c *gin.Context) {
 		return
 	}
 	c.JSON(http.StatusOK, gin.H{"usage": view})
+}
+
+// GetOrgBreakdown 返回各组织近期 quota 消耗的 top 10 汇总，供平台控制台图表使用。
+// 仅 platform_admin 可调；service 层再做一次角色校验。
+//
+// @Summary      各组织用量分布
+// @Description  平台维度各组织在时间窗口内的 quota 消耗 top 10，仅平台管理员可调
+// @Tags         usage
+// @Produce      json
+// @Security     BearerAuth
+// @Param        since  query     int     false  "起始时间（Unix 秒）"
+// @Param        until  query     int     false  "结束时间（Unix 秒）"
+// @Success      200    {object}  map[string]service.OrgUsageBreakdown
+// @Failure      401    {object}  ErrorResponse
+// @Failure      403    {object}  ErrorResponse
+// @Failure      500    {object}  ErrorResponse
+// @Failure      503    {object}  ErrorResponse
+// @Router       /usage/org-breakdown [get]
+func (h *UsageHandler) GetOrgBreakdown(c *gin.Context) {
+	principal := principalFromCtx(c)
+	since, until := parseUsageStatsWindow(c)
+	view, err := h.service.GetOrgUsageBreakdown(c.Request.Context(), principal, since, until)
+	if err != nil {
+		writeUsageError(c, err)
+		return
+	}
+	c.JSON(http.StatusOK, gin.H{"breakdown": view})
 }
 
 // GetApp 拉取应用维度的 token 调用日志。
