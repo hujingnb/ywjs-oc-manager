@@ -183,9 +183,15 @@ WHERE id = $1
 RETURNING *;
 
 -- name: SetAppVersion :one
--- 切换实例绑定的助手版本；切换后 applied_* 不变，实例自然进入需重启态。
+-- 切换实例绑定的助手版本，并把 applied_version_revision / applied_image_ref 清零。
+-- 不同版本各自维护独立的 revision 计数，若切换后保留旧 applied_*，当新旧版本
+-- 的 revision 数字恰好相同（且镜像相同）时 version_synced 会误判为已同步。
+-- 清零后 applied_version_revision=0 永远不等于任何真实版本 revision（从 1 起），
+-- 实例切换后必然进入需重启态，直到重启重新写入 applied_*。
 UPDATE apps
 SET version_id = $2,
+    applied_version_revision = 0,
+    applied_image_ref = '',
     updated_at = now()
 WHERE id = $1 AND deleted_at IS NULL
 RETURNING *;

@@ -231,7 +231,7 @@ func filterAppResultByRole(result AppResult, principal auth.Principal) AppResult
 
 // SwitchAppVersion 切换实例绑定的助手版本。
 // 校验调用者可管理该实例、目标版本在实例所属组织的 allowlist 内，写入新 version_id 后
-// 返回最新实例视图——切换后 applied_* 仍指向旧版本，version_synced 一般为 false，提示需重启。
+// 返回最新实例视图——SetAppVersion 切换时清零 applied_*，切换后 version_synced 必为 false，提示需重启。
 func (s *AppService) SwitchAppVersion(ctx context.Context, principal auth.Principal, appID, versionID string) (AppResult, error) {
 	// 解析实例 id；格式非法时等同于资源不存在。
 	id, err := parseUUID(appID)
@@ -267,7 +267,7 @@ func (s *AppService) SwitchAppVersion(ctx context.Context, principal auth.Princi
 	if err != nil {
 		return AppResult{}, ErrVersionNotInAllowlist
 	}
-	// 写入新 version_id；切换后 applied_* 仍指向旧版本，需重启生效。
+	// 写入新 version_id，并由 SetAppVersion 同步清零 applied_*，确保切换后必然进入需重启态。
 	if _, err := s.store.SetAppVersion(ctx, sqlc.SetAppVersionParams{ID: row.App.ID, VersionID: versionUUID}); err != nil {
 		return AppResult{}, fmt.Errorf("切换助手版本失败: %w", err)
 	}

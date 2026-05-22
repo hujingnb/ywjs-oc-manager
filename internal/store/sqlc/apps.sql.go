@@ -1156,6 +1156,8 @@ func (q *Queries) SetAppStatus(ctx context.Context, arg SetAppStatusParams) (App
 const setAppVersion = `-- name: SetAppVersion :one
 UPDATE apps
 SET version_id = $2,
+    applied_version_revision = 0,
+    applied_image_ref = '',
     updated_at = now()
 WHERE id = $1 AND deleted_at IS NULL
 RETURNING id, org_id, owner_user_id, runtime_node_id, name, description, status, persona_mode, app_prompt, container_id, container_name, newapi_key_id, newapi_key_ciphertext, api_key_status, created_at, updated_at, deleted_at, runtime_snapshot_json, runtime_snapshot_at, restart_policy_json, health_state_json, model_id, progress_current, progress_total, last_error_status, last_error_message, runtime_image_ref, runtime_image_sha256, newapi_key_name, model_synced, version_id, applied_version_revision, applied_image_ref
@@ -1166,7 +1168,11 @@ type SetAppVersionParams struct {
 	VersionID pgtype.UUID `db:"version_id" json:"version_id"`
 }
 
-// 切换实例绑定的助手版本；切换后 applied_* 不变，实例自然进入需重启态。
+// 切换实例绑定的助手版本，并把 applied_version_revision / applied_image_ref 清零。
+// 不同版本各自维护独立的 revision 计数，若切换后保留旧 applied_*，当新旧版本
+// 的 revision 数字恰好相同（且镜像相同）时 version_synced 会误判为已同步。
+// 清零后 applied_version_revision=0 永远不等于任何真实版本 revision（从 1 起），
+// 实例切换后必然进入需重启态，直到重启重新写入 applied_*。
 func (q *Queries) SetAppVersion(ctx context.Context, arg SetAppVersionParams) (App, error) {
 	row := q.db.QueryRow(ctx, setAppVersion, arg.ID, arg.VersionID)
 	var i App

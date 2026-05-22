@@ -184,9 +184,13 @@ func (s *appServiceStoreStub) GetOrganization(_ context.Context, id pgtype.UUID)
 }
 
 // SetAppVersion 记录调用参数并将 app.VersionID 更新到 stub 状态，模拟数据库写入。
+// 同时把 AppliedVersionRevision 清零、AppliedImageRef 置空，与真实 SQL 行为一致：
+// 切换版本必然让实例进入需重启态，避免新旧版本 revision 相同导致 version_synced 误判。
 func (s *appServiceStoreStub) SetAppVersion(_ context.Context, arg sqlc.SetAppVersionParams) (sqlc.App, error) {
 	s.setVersionCalls = append(s.setVersionCalls, arg)
 	s.app.VersionID = pgtype.UUID{Bytes: arg.VersionID.Bytes, Valid: true}
+	s.app.AppliedVersionRevision = 0
+	s.app.AppliedImageRef = ""
 	return s.app, nil
 }
 
@@ -401,6 +405,45 @@ func TestSwitchAppVersionSuccessByOwnerMember(t *testing.T) {
 	// applied_version_revision=0 而 versionRevision=1，version_synced 应为 false，提示需重启。
 	assert.False(t, result.VersionSynced, "切换后 applied_* 未更新，version_synced 应为 false")
 	// 验证 SetAppVersion 被实际调用一次，确认写入路径已执行。
+	require.Len(t, store.setVersionCalls, 1, "SetAppVersion 应被调用一次")
+}
+
+// TestSwitchAppVersionResetsAppliedSoVersionSyncedIsFalse 是针对「同 revision 误判」bug 的回归测试。
+// 复现场景：每个 assistant_versions 行各自维护独立的 revision 计数，旧版本 A 与目标版本 B
+// 可能恰好都处于 revision=2 且镜像相同。修复前 SetAppVersion 切换时保留 applied_version_revision
+// 与 applied_image_ref，computeVersionSynced 会判定 applied_version_revision(2)==B.revision(2)
+// 且镜像 ref 相同 → version_synced=true，实例列表/详情不显示「需重启」，而实例实际仍在跑旧版本
+// A 的 manifest。修复后 SetAppVersion 切换时清零 applied_*，切换后 version_synced 必为 false。
+func TestSwitchAppVersionResetsAppliedSoVersionSyncedIsFalse(t *testing.T) {
+	t.Parallel()
+	svc, store := newAppServiceWithStore(t)
+
+	// 注入镜像解析器：目标版本的 image_id 解析为与旧版本完全相同的镜像 ref。
+	svc.SetImageResolver(&stubImageResolver{refs: map[string]string{
+		"img-v1": "ghcr.io/foo/hermes:v1.0",
+	}})
+
+	// 预置实例：模拟切换前已对齐旧版本 A —— applied_version_revision=2、applied_image_ref 与解析结果一致。
+	app := store.mustSeedApp(t, "qwen2.5:7b")
+	app.AppliedVersionRevision = 2
+	app.AppliedImageRef = "ghcr.io/foo/hermes:v1.0"
+	store.app = app
+	// 组织 allowlist 内含目标版本 testSwitchVersionID。
+	store.organization = mustOrgWithAllowlist(t, testSwitchVersionID)
+	// 关键碰撞条件：目标版本 B 的 revision 也是 2，image_id 解析出的 ref 与旧版本完全相同。
+	store.versionRevision = 2
+	store.versionImageID = "img-v1"
+
+	principal := appOrgAdminPrincipal(store.organization)
+	result, err := svc.SwitchAppVersion(context.Background(), principal, testAppServiceAppID, testSwitchVersionID)
+
+	// 切换成功：无错误，返回的实例 VersionID 指向目标版本。
+	require.NoError(t, err)
+	assert.Equal(t, testSwitchVersionID, result.VersionID, "返回的实例 VersionID 应等于目标版本")
+	// 回归断言：尽管新旧版本 revision 同为 2、镜像相同，切换后 applied_* 已被清零，
+	// version_synced 必须为 false（修复前此处会误判为 true）。
+	assert.False(t, result.VersionSynced, "新旧版本 revision 相同且镜像相同时，切换后 version_synced 仍应为 false")
+	// 验证 SetAppVersion 被实际调用一次，确认走到了清零写入路径。
 	require.Len(t, store.setVersionCalls, 1, "SetAppVersion 应被调用一次")
 }
 
