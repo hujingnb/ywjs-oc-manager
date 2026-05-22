@@ -13,7 +13,7 @@ const authUser = vi.hoisted(() => ({
 
 const createMemberAppMock = vi.hoisted(() => ({
   mutateAsync: vi.fn(async () => ({
-    app: { id: 'app-1', name: '新实例', status: 'draft', persona_mode: 'org_inherited', api_key_status: 'pending' },
+    app: { id: 'app-1', name: '新实例', status: 'draft', api_key_status: 'pending' },
     job_id: 'job-1',
   })),
 }))
@@ -43,8 +43,8 @@ vi.mock('vue-router', async () => {
 vi.mock('@/api/hooks/useOrganizations', () => ({
   useOrganizationsQuery: () => ({
     data: ref([
-      { id: 'org-1', name: '测试组织', status: 'active', model_id: 'qwen2.5:7b' },
-      { id: 'org-2', name: '第二组织', status: 'active', model_id: 'deepseek-r1:14b' },
+      { id: 'org-1', name: '测试组织', status: 'active' },
+      { id: 'org-2', name: '第二组织', status: 'active' },
     ]),
     isLoading: ref(false),
     error: ref(null),
@@ -53,9 +53,9 @@ vi.mock('@/api/hooks/useOrganizations', () => ({
   useOrganizationQuery: (orgId: { value?: string }) => ({
     data: computed(() => {
       if (orgId.value === 'org-2') {
-        return { id: 'org-2', name: '第二组织', status: 'active', model_id: 'deepseek-r1:14b', assistant_version_ids: [] }
+        return { id: 'org-2', name: '第二组织', status: 'active', assistant_version_ids: [] }
       }
-      return { id: 'org-1', name: '测试组织', status: 'active', model_id: 'qwen2.5:7b', assistant_version_ids: ['version-1'] }
+      return { id: 'org-1', name: '测试组织', status: 'active', assistant_version_ids: ['version-1'] }
     }),
     isLoading: ref(false),
     isError: ref(false),

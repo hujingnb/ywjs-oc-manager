@@ -223,14 +223,8 @@ components:
         app_name:
           description: AppName 是新实例名称，创建时必填。
           type: string
-        app_prompt:
-          description: AppPrompt 是新实例提示词，可为空。
-          type: string
         channel_type:
           description: ChannelType 是初始化渠道绑定的渠道标识。
-          type: string
-        persona_mode:
-          description: PersonaMode 控制新实例是否继承组织人设或使用独立人设。
           type: string
         runtime_node_id:
           description: NodeID 是指定 runtime 节点；为空时 service 自动选择可用节点。
@@ -290,11 +284,6 @@ components:
         credit_warning_threshold:
           description: CreditWarningThreshold 是组织余额预警阈值；nil 表示不启用余额预警或保持预警关闭。
           type: integer
-        model_id:
-          description: |-
-            ModelID 历史字段：助手版本接管模型选择后，组织创建不再需要它；
-            保留以兼容旧调用方，前端新表单不再发送，留待后续阶段移除。
-          type: string
         name:
           description: Name 是组织展示名，也是平台管理员列表中识别租户的主字段。
           type: string
@@ -435,9 +424,6 @@ components:
         app_name:
           description: AppName 是随成员初始化的默认应用名称。
           type: string
-        app_prompt:
-          description: AppPrompt 是默认应用的初始提示词，可为空。
-          type: string
         channel_type:
           description: ChannelType 是初始化渠道绑定的渠道标识。
           type: string
@@ -446,9 +432,6 @@ components:
           type: string
         password:
           description: Password 是新成员初始密码。
-          type: string
-        persona_mode:
-          description: PersonaMode 控制新应用是否继承组织人设或使用独立人设。
           type: string
         role:
           description: Role 为空时默认为 org_member；不允许创建 platform_admin。
@@ -486,9 +469,6 @@ components:
         credit_warning_threshold:
           description: CreditWarningThreshold 是组织余额预警阈值；nil 表示清空或未设置预警阈值。
           type: integer
-        model_id:
-          description: ModelID 是该组织所有实例统一使用的模型 ID；nil 表示本次只更新基础资料并保留原模型。
-          type: string
         name:
           description: Name 是组织展示名；更新时仍必填，避免空名称进入前端列表。
           type: string
@@ -497,26 +477,6 @@ components:
           type: string
       required:
       - name
-      type: object
-    handlers.PersonaRequest:
-      properties:
-        allow_member_override:
-          description: AllowMemberOverride 表示成员应用是否允许覆盖组织默认人设。
-          type: boolean
-        conversation_rules:
-          description: ConversationRules 是会话行为约束，可为空。
-          type: string
-        forbidden_rules:
-          description: ForbiddenRules 是组织层禁止规则，可为空。
-          type: string
-        reply_style:
-          description: ReplyStyle 是默认回复风格描述，可为空。
-          type: string
-        system_prompt:
-          description: SystemPrompt 是组织默认系统提示词，不能为空。
-          type: string
-      required:
-      - system_prompt
       type: object
     handlers.RechargeRequest:
       properties:
@@ -657,8 +617,6 @@ components:
       properties:
         api_key_status:
           type: string
-        app_prompt:
-          type: string
         container_id:
           type: string
         description:
@@ -671,11 +629,6 @@ components:
         last_error_status:
           description: LastErrorStatus 上次进入 error 时所在的状态值;前端用 formatAppStatus 转中文文案。
           type: string
-        model_id:
-          type: string
-        model_synced:
-          description: ModelSynced 标记实例运行中的模型是否与数据库记录一致；false 表示需重启生效。
-          type: boolean
         name:
           type: string
         newapi_key_id:
@@ -686,8 +639,6 @@ components:
         org_id:
           type: string
         owner_user_id:
-          type: string
-        persona_mode:
           type: string
         progress_current:
           description: |-
@@ -1593,9 +1544,6 @@ components:
         id:
           description: ID 是 manager 组织 UUID。
           type: string
-        model_id:
-          description: ModelID 是该组织所有实例统一使用的模型 ID。
-          type: string
         name:
           description: Name 是组织展示名。
           type: string
@@ -1608,23 +1556,6 @@ components:
         status:
           description: Status 是组织状态，active / disabled 决定成员是否可登录。
           type: string
-      type: object
-    service.PersonaResult:
-      properties:
-        allow_member_override:
-          type: boolean
-        conversation_rules:
-          type: string
-        forbidden_rules:
-          type: string
-        org_id:
-          type: string
-        reply_style:
-          type: string
-        system_prompt:
-          type: string
-        version:
-          type: integer
       type: object
     service.PlatformOverview:
       properties:
@@ -6699,118 +6630,6 @@ paths:
       summary: 组织充值历史列表
       tags:
       - recharge
-  /orgs/{orgId}/persona:
-    get:
-      description: 返回指定组织当前生效的 AI 人设配置
-      parameters:
-      - description: 组织 ID
-        in: path
-        name: orgId
-        required: true
-        schema:
-          type: string
-      responses:
-        "200":
-          content:
-            application/json:
-              schema:
-                additionalProperties:
-                  $ref: '#/components/schemas/service.PersonaResult'
-                type: object
-          description: OK
-        "401":
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/handlers.ErrorResponse'
-          description: Unauthorized
-        "403":
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/handlers.ErrorResponse'
-          description: Forbidden
-        "404":
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/handlers.ErrorResponse'
-          description: Not Found
-        "500":
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/handlers.ErrorResponse'
-          description: Internal Server Error
-      security:
-      - BearerAuth: []
-      summary: 获取组织人设
-      tags:
-      - persona
-    put:
-      description: 替换指定组织的 AI 人设配置，写入后立即生效
-      parameters:
-      - description: 组织 ID
-        in: path
-        name: orgId
-        required: true
-        schema:
-          type: string
-      requestBody:
-        content:
-          application/json:
-            schema:
-              oneOf:
-              - type: object
-              - $ref: '#/components/schemas/handlers.PersonaRequest'
-                description: 人设请求
-                summary: body
-        description: 人设请求
-        required: true
-      responses:
-        "200":
-          content:
-            application/json:
-              schema:
-                additionalProperties:
-                  $ref: '#/components/schemas/service.PersonaResult'
-                type: object
-          description: OK
-        "400":
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/handlers.ErrorResponse'
-          description: Bad Request
-        "401":
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/handlers.ErrorResponse'
-          description: Unauthorized
-        "403":
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/handlers.ErrorResponse'
-          description: Forbidden
-        "404":
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/handlers.ErrorResponse'
-          description: Not Found
-        "500":
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/handlers.ErrorResponse'
-          description: Internal Server Error
-      security:
-      - BearerAuth: []
-      summary: 写入组织人设
-      tags:
-      - persona
   /platform/overview:
     get:
       description: 平台管理员查询全平台的组织、成员、应用数量汇总

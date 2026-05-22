@@ -24,12 +24,6 @@ export interface AppDTO {
   description?: string
   // 后端应用状态机原值，由 domain/status.ts 统一格式化。
   status: string
-  // 人设模式，决定应用是否覆盖组织默认人设。
-  persona_mode: string
-  // 应用级提示词，仅 app_override 场景有业务意义。
-  app_prompt?: string
-  // 实例当前使用的模型 ID，由后端在初始化或切换模型时写入 Hermes 配置。
-  model_id: string
   // runtime 容器 ID，容器尚未创建或已删除时为空。
   container_id?: string
   // new-api token 绑定状态，用于控制 API key 操作按钮。
@@ -44,8 +38,6 @@ export interface AppDTO {
   last_error_status?: string
   // last_error_message 是上次进入 error 时的错误原始文本，供页面直接展示给用户。
   last_error_message?: string
-  // model_synced 标记实例运行中的模型是否与数据库记录一致；false 表示需重启生效。
-  model_synced?: boolean
   // version_synced 标记实例运行时是否已与绑定的助手版本对齐；false 表示版本被编辑过，需重启生效。
   version_synced?: boolean
   // version_id 是实例绑定的助手版本 id；空表示未绑定（仅历史数据）。

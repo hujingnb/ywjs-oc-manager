@@ -7038,164 +7038,6 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
-    "/orgs/{orgId}/persona": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        /**
-         * 获取组织人设
-         * @description 返回指定组织当前生效的 AI 人设配置
-         */
-        get: {
-            parameters: {
-                query?: never;
-                header?: never;
-                path: {
-                    /** @description 组织 ID */
-                    orgId: string;
-                };
-                cookie?: never;
-            };
-            requestBody?: never;
-            responses: {
-                /** @description OK */
-                200: {
-                    headers: {
-                        [name: string]: unknown;
-                    };
-                    content: {
-                        "application/json": {
-                            [key: string]: components["schemas"]["service.PersonaResult"];
-                        };
-                    };
-                };
-                /** @description Unauthorized */
-                401: {
-                    headers: {
-                        [name: string]: unknown;
-                    };
-                    content: {
-                        "application/json": components["schemas"]["handlers.ErrorResponse"];
-                    };
-                };
-                /** @description Forbidden */
-                403: {
-                    headers: {
-                        [name: string]: unknown;
-                    };
-                    content: {
-                        "application/json": components["schemas"]["handlers.ErrorResponse"];
-                    };
-                };
-                /** @description Not Found */
-                404: {
-                    headers: {
-                        [name: string]: unknown;
-                    };
-                    content: {
-                        "application/json": components["schemas"]["handlers.ErrorResponse"];
-                    };
-                };
-                /** @description Internal Server Error */
-                500: {
-                    headers: {
-                        [name: string]: unknown;
-                    };
-                    content: {
-                        "application/json": components["schemas"]["handlers.ErrorResponse"];
-                    };
-                };
-            };
-        };
-        /**
-         * 写入组织人设
-         * @description 替换指定组织的 AI 人设配置，写入后立即生效
-         */
-        put: {
-            parameters: {
-                query?: never;
-                header?: never;
-                path: {
-                    /** @description 组织 ID */
-                    orgId: string;
-                };
-                cookie?: never;
-            };
-            /** @description 人设请求 */
-            requestBody: {
-                content: {
-                    "application/json": Record<string, never> | components["schemas"]["handlers.PersonaRequest"];
-                };
-            };
-            responses: {
-                /** @description OK */
-                200: {
-                    headers: {
-                        [name: string]: unknown;
-                    };
-                    content: {
-                        "application/json": {
-                            [key: string]: components["schemas"]["service.PersonaResult"];
-                        };
-                    };
-                };
-                /** @description Bad Request */
-                400: {
-                    headers: {
-                        [name: string]: unknown;
-                    };
-                    content: {
-                        "application/json": components["schemas"]["handlers.ErrorResponse"];
-                    };
-                };
-                /** @description Unauthorized */
-                401: {
-                    headers: {
-                        [name: string]: unknown;
-                    };
-                    content: {
-                        "application/json": components["schemas"]["handlers.ErrorResponse"];
-                    };
-                };
-                /** @description Forbidden */
-                403: {
-                    headers: {
-                        [name: string]: unknown;
-                    };
-                    content: {
-                        "application/json": components["schemas"]["handlers.ErrorResponse"];
-                    };
-                };
-                /** @description Not Found */
-                404: {
-                    headers: {
-                        [name: string]: unknown;
-                    };
-                    content: {
-                        "application/json": components["schemas"]["handlers.ErrorResponse"];
-                    };
-                };
-                /** @description Internal Server Error */
-                500: {
-                    headers: {
-                        [name: string]: unknown;
-                    };
-                    content: {
-                        "application/json": components["schemas"]["handlers.ErrorResponse"];
-                    };
-                };
-            };
-        };
-        post?: never;
-        delete?: never;
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
-    };
     "/platform/overview": {
         parameters: {
             query?: never;
@@ -8325,12 +8167,8 @@ export interface components {
         "handlers.CreateMemberAppRequest": {
             /** @description AppName 是新实例名称，创建时必填。 */
             app_name: string;
-            /** @description AppPrompt 是新实例提示词，可为空。 */
-            app_prompt?: string;
             /** @description ChannelType 是初始化渠道绑定的渠道标识。 */
             channel_type?: string;
-            /** @description PersonaMode 控制新实例是否继承组织人设或使用独立人设。 */
-            persona_mode?: string;
             /** @description NodeID 是指定 runtime 节点；为空时 service 自动选择可用节点。 */
             runtime_node_id?: string;
             /** @description VersionID 是实例绑定的助手版本 id，必须落在组织 allowlist 内。 */
@@ -8363,11 +8201,6 @@ export interface components {
             contact_phone?: string;
             /** @description CreditWarningThreshold 是组织余额预警阈值；nil 表示不启用余额预警或保持预警关闭。 */
             credit_warning_threshold?: number;
-            /**
-             * @description ModelID 历史字段：助手版本接管模型选择后，组织创建不再需要它；
-             *     保留以兼容旧调用方，前端新表单不再发送，留待后续阶段移除。
-             */
-            model_id?: string;
             /** @description Name 是组织展示名，也是平台管理员列表中识别租户的主字段。 */
             name: string;
             /** @description Remark 是平台管理员维护的内部备注。 */
@@ -8447,16 +8280,12 @@ export interface components {
         "handlers.OnboardMemberRequest": {
             /** @description AppName 是随成员初始化的默认应用名称。 */
             app_name: string;
-            /** @description AppPrompt 是默认应用的初始提示词，可为空。 */
-            app_prompt?: string;
             /** @description ChannelType 是初始化渠道绑定的渠道标识。 */
             channel_type?: string;
             /** @description DisplayName 是新成员展示名。 */
             display_name: string;
             /** @description Password 是新成员初始密码。 */
             password: string;
-            /** @description PersonaMode 控制新应用是否继承组织人设或使用独立人设。 */
-            persona_mode?: string;
             /** @description Role 为空时默认为 org_member；不允许创建 platform_admin。 */
             role?: string;
             /** @description NodeID 是指定 runtime 节点；为空时 service 自动选择可用节点。 */
@@ -8475,24 +8304,10 @@ export interface components {
             contact_phone?: string;
             /** @description CreditWarningThreshold 是组织余额预警阈值；nil 表示清空或未设置预警阈值。 */
             credit_warning_threshold?: number;
-            /** @description ModelID 是该组织所有实例统一使用的模型 ID；nil 表示本次只更新基础资料并保留原模型。 */
-            model_id?: string;
             /** @description Name 是组织展示名；更新时仍必填，避免空名称进入前端列表。 */
             name: string;
             /** @description Remark 是平台管理员维护的内部备注，可置空。 */
             remark?: string;
-        };
-        "handlers.PersonaRequest": {
-            /** @description AllowMemberOverride 表示成员应用是否允许覆盖组织默认人设。 */
-            allow_member_override?: boolean;
-            /** @description ConversationRules 是会话行为约束，可为空。 */
-            conversation_rules?: string;
-            /** @description ForbiddenRules 是组织层禁止规则，可为空。 */
-            forbidden_rules?: string;
-            /** @description ReplyStyle 是默认回复风格描述，可为空。 */
-            reply_style?: string;
-            /** @description SystemPrompt 是组织默认系统提示词，不能为空。 */
-            system_prompt: string;
         };
         "handlers.RechargeRequest": {
             /** @description CreditAmount 是充值额度，必须为正数，service 层会同步写入 new-api。 */
@@ -8570,7 +8385,6 @@ export interface components {
         };
         "service.AppResult": {
             api_key_status?: string;
-            app_prompt?: string;
             container_id?: string;
             description?: string;
             id?: string;
@@ -8578,9 +8392,6 @@ export interface components {
             last_error_message?: string;
             /** @description LastErrorStatus 上次进入 error 时所在的状态值;前端用 formatAppStatus 转中文文案。 */
             last_error_status?: string;
-            model_id?: string;
-            /** @description ModelSynced 标记实例运行中的模型是否与数据库记录一致；false 表示需重启生效。 */
-            model_synced?: boolean;
             name?: string;
             /**
              * @description NewapiKeyID 是 new-api 中 token 的数值 id；schema 上是 text 列存的字符串，
@@ -8589,7 +8400,6 @@ export interface components {
             newapi_key_id?: number;
             org_id?: string;
             owner_user_id?: string;
-            persona_mode?: string;
             /**
              * @description ProgressCurrent 当前 status 阶段的已完成量,单位由 status 决定(字节 / 秒);
              *     0 或缺省表示未知 / 不显示进度条。
@@ -9180,8 +8990,6 @@ export interface components {
             credit_warning_threshold?: number;
             /** @description ID 是 manager 组织 UUID。 */
             id?: string;
-            /** @description ModelID 是该组织所有实例统一使用的模型 ID。 */
-            model_id?: string;
             /** @description Name 是组织展示名。 */
             name?: string;
             /** @description NewAPIUserID 是组织在 new-api 侧的用户 ID，缺失时充值和用量接口不可用。 */
@@ -9190,15 +8998,6 @@ export interface components {
             remark?: string;
             /** @description Status 是组织状态，active / disabled 决定成员是否可登录。 */
             status?: string;
-        };
-        "service.PersonaResult": {
-            allow_member_override?: boolean;
-            conversation_rules?: string;
-            forbidden_rules?: string;
-            org_id?: string;
-            reply_style?: string;
-            system_prompt?: string;
-            version?: number;
         };
         "service.PlatformOverview": {
             app_count?: number;

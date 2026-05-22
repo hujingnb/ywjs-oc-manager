@@ -26,7 +26,6 @@ vi.mock('@/api/hooks/useOrganizations', () => ({
           id: '00000000-0000-0000-0000-000000000101',
           name: organizationName.value,
           status: 'active',
-          model_id: 'qwen2.5:7b',
           // assistant_version_ids 用于版本选项过滤，与后端字段一致。
           assistant_version_ids: orgAssistantVersionIds.value,
         }
@@ -80,9 +79,7 @@ const appRef = ref({
   owner_user_id: '00000000-0000-0000-0000-000000000201',
   name: '测试实例',
   status: 'running',
-  persona_mode: 'org_inherited',
   api_key_status: 'active',
-  model_id: 'qwen2.5:7b',
   container_id: 'container-1',
   // version_id 默认绑定 version-001，供助手版本展示与切换测试使用。
   version_id: 'version-001',

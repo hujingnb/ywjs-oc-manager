@@ -39,8 +39,6 @@ vi.mock('@/api/hooks/useApps', () => ({
             owner_user_id: 'member-1',
             name: '组织实例',
             status: 'running',
-            persona_mode: 'org_inherited',
-            model_id: 'gpt-4o',
             api_key_status: 'active',
           },
           {
@@ -49,8 +47,6 @@ vi.mock('@/api/hooks/useApps', () => ({
             owner_user_id: 'member-1',
             name: '版本未同步实例',
             status: 'running',
-            persona_mode: 'org_inherited',
-            model_id: 'gpt-4o',
             api_key_status: 'active',
             // version_synced=false 表示绑定的助手版本已被编辑，实例需重启才能生效。
             version_synced: false,

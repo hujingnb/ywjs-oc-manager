@@ -33,16 +33,16 @@ export type Member = WithRequired<
   'id' | 'username' | 'display_name' | 'role' | 'status'
 >
 
-// Organization：id / name / status / code / model_id 后端必返
+// Organization：id / name / status / code 后端必返
 export type Organization = WithRequired<
   Schemas['service.OrganizationResult'],
-  'id' | 'name' | 'status' | 'code' | 'model_id'
+  'id' | 'name' | 'status' | 'code'
 >
 
-// App：id / name / status / persona_mode / api_key_status 后端必返
+// App：id / name / status / api_key_status 后端必返
 export type App = WithRequired<
   Schemas['service.AppResult'],
-  'id' | 'name' | 'status' | 'persona_mode' | 'api_key_status'
+  'id' | 'name' | 'status' | 'api_key_status'
 >
 
 // RuntimeNode：id / name / status / heartbeat_interval_seconds / has_agent_token 后端必返

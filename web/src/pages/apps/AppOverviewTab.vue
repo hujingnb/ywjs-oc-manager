@@ -68,7 +68,6 @@
       <n-descriptions-item label="Runtime Node">
         <code>{{ app.runtime_node_id || '—' }}</code>
       </n-descriptions-item>
-      <n-descriptions-item label="人设模式">{{ app.persona_mode }}</n-descriptions-item>
       <!-- 助手版本：展示绑定的版本名，version_synced=false 时附加需重启标签，组织管理员可切换 -->
       <n-descriptions-item label="助手版本">
         <n-space align="center" :size="8">
@@ -85,8 +84,6 @@
           </n-button>
         </n-space>
       </n-descriptions-item>
-      <!-- model_id 由后端对非平台管理员过滤为空字符串，此处仅对平台管理员展示 -->
-      <n-descriptions-item v-if="auth.isPlatformAdmin" label="模型">{{ app.model_id }}</n-descriptions-item>
       <n-descriptions-item label="所属组织">
         {{ organizationName }}
       </n-descriptions-item>

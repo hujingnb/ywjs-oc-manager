@@ -38,8 +38,6 @@ export interface OnboardMemberResult {
     name: string
     // 初始化后的应用状态。
     status: string
-    // 应用人设模式。
-    persona_mode: string
     // new-api token 绑定状态。
     api_key_status: string
   }

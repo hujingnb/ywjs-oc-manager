@@ -13,7 +13,6 @@ vi.mock('@/api/hooks/useApps', () => ({
       owner_user_id: '00000000-0000-0000-0000-000000000201',
       name: '测试实例',
       status: 'running',
-      persona_mode: 'org_inherited',
       api_key_status: 'active',
     }),
     isLoading: ref(false),
