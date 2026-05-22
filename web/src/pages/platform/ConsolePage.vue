@@ -37,6 +37,7 @@
         <!-- Tab 3：实例状态 -->
         <n-tab-pane name="status" tab="实例状态">
           <div v-if="overviewLoading" class="chart-state">加载中…</div>
+          <div v-else-if="overviewError" class="chart-state danger">平台数据不可用</div>
           <div v-else ref="statusChartEl" class="chart-container" />
         </n-tab-pane>
       </n-tabs>
@@ -67,7 +68,7 @@ const auth = useAuthStore()
 const isPlatformAdmin = computed(() => auth.isPlatformAdmin)
 
 // ── 数据查询 ──────────────────────────────────────────────
-const { data: overview, isLoading: overviewLoading } = usePlatformOverviewQuery(isPlatformAdmin)
+const { data: overview, isLoading: overviewLoading, error: overviewError } = usePlatformOverviewQuery(isPlatformAdmin)
 const { data: orgBreakdownData, isLoading: orgBreakdownLoading, error: orgBreakdownError } = usePlatformOrgBreakdownQuery(isPlatformAdmin)
 
 // 平台近 7 天 quota 序列：用于 Token 趋势折线图和「今日 Token」统计卡片。
@@ -248,14 +249,25 @@ function onTabChange(tab: string) {
   })
 }
 
+// resizeAll 在窗口尺寸变化时通知所有已初始化的图表重绘。
+function resizeAll() {
+  tokenChart?.resize()
+  orgChart?.resize()
+  statusChart?.resize()
+}
+
 // 数据就绪后自动重绘；watch 保证初始加载完成也触发。
 watch(platformUsageItems, () => { if (activeTab.value === 'token') nextTick(buildTokenChart) })
 watch(orgBreakdownData, () => { if (activeTab.value === 'orgs') nextTick(buildOrgChart) })
 watch(overview, () => { if (activeTab.value === 'status') nextTick(buildStatusChart) })
 
-onMounted(() => { nextTick(buildTokenChart) })
+onMounted(() => {
+  nextTick(buildTokenChart)
+  window.addEventListener('resize', resizeAll)
+})
 
 onBeforeUnmount(() => {
+  window.removeEventListener('resize', resizeAll)
   tokenChart?.dispose()
   orgChart?.dispose()
   statusChart?.dispose()
