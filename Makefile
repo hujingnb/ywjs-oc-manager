@@ -16,9 +16,15 @@ override IMAGE_TIMESTAMP := $(shell date +%Y-%m-%d-%H-%M-%S)
 # 使用 override 防止命令行 GIT_COMMIT_SHORT=main 改写发布镜像 tag。
 override GIT_COMMIT_SHORT := $(strip $(shell git rev-parse --short=8 HEAD 2>/dev/null))
 
-# 本仓库发布镜像统一 tag：构建时间戳 + 源码 commit 前 8 位。
+# 工作区脏标记：当存在未提交的 tracked 改动（unstaged 或 staged）时取值 "-dirty"，
+# 干净工作区时为空字符串。允许带未提交改动构建镜像，但通过 tag 后缀显式标识
+# 该镜像并非来自干净提交，避免事后无法分辨镜像对应的实际源码状态。
+# 使用 override 防止命令行覆盖该标记，绕过脏镜像识别。
+override GIT_DIRTY_SUFFIX := $(strip $(shell git diff --quiet 2>/dev/null && git diff --cached --quiet 2>/dev/null || echo -dirty))
+
+# 本仓库发布镜像统一 tag：构建时间戳 + 源码 commit 前 8 位 + 可选 -dirty 脏标记。
 # 使用 override 防止命令行 IMAGE_TAG=latest 绕过 tag 规则。
-override IMAGE_TAG := $(IMAGE_TIMESTAMP)-$(GIT_COMMIT_SHORT)
+override IMAGE_TAG := $(IMAGE_TIMESTAMP)-$(GIT_COMMIT_SHORT)$(GIT_DIRTY_SUFFIX)
 
 # 各服务生产镜像仓库（统一走 aliyun 私有 ACR ywjs_app 命名空间）。
 # 走其他 registry 时在命令行覆盖对应变量即可。
@@ -76,8 +82,7 @@ help: ## 显示本帮助文档(make 默认 target)
 .guard-image-git-state:
 	@git rev-parse --is-inside-work-tree >/dev/null 2>&1 || { echo "发布镜像必须在 git worktree 内构建" >&2; exit 1; }
 	@test -n "$(GIT_COMMIT_SHORT)" || { echo "无法读取当前 git commit id" >&2; exit 1; }
-	@git diff --quiet || { echo "发布镜像前请先提交 tracked 工作区改动" >&2; exit 1; }
-	@git diff --cached --quiet || { echo "发布镜像前请先提交 staged 改动" >&2; exit 1; }
+	@test -z "$(GIT_DIRTY_SUFFIX)" || echo "⚠️  工作区存在未提交的 tracked 改动，镜像 tag 将追加 -dirty 标记: $(IMAGE_TAG)" >&2
 
 ##@ 本地开发
 
