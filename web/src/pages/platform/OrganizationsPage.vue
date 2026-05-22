@@ -19,70 +19,136 @@
     </DataTableList>
     <p v-if="copyFeedback" class="state-text" :class="{ danger: copyFeedbackError }">{{ copyFeedback }}</p>
 
-    <!-- 创建表单 -->
-    <n-card v-if="formVisible" :bordered="true">
+    <!-- 创建 / 编辑组织表单（modalMode 区分两种模式） -->
+    <n-card v-if="formVisible || editFormVisible" :bordered="true">
       <template #header>
         <div style="display: flex; align-items: center; justify-content: space-between">
           <div>
-            <p class="eyebrow">New</p>
-            <h2 style="margin: 0">创建组织</h2>
+            <p class="eyebrow">{{ modalMode === 'create' ? 'New' : 'Edit' }}</p>
+            <h2 style="margin: 0">{{ modalMode === 'create' ? '创建组织' : '编辑组织' }}</h2>
           </div>
-          <n-button quaternary circle @click="formVisible = false">
+          <n-button quaternary circle @click="closeAnyForm">
             <template #icon><X :size="18" /></template>
           </n-button>
         </div>
       </template>
-      <n-form :model="form" label-placement="top" @submit.prevent="submitOrganization">
+      <!-- 创建模式使用 createForm，编辑模式使用 editForm -->
+      <n-form :model="modalMode === 'create' ? form : editForm" label-placement="top" @submit.prevent="submitAnyForm">
         <n-grid :cols="2" :x-gap="14">
           <n-grid-item>
             <n-form-item label="名称 *">
-              <n-input v-model:value="form.name" placeholder="组织名称" />
+              <n-input
+                v-if="modalMode === 'create'"
+                v-model:value="form.name"
+                placeholder="组织名称"
+              />
+              <n-input
+                v-else
+                v-model:value="editForm.name"
+                placeholder="组织名称"
+              />
             </n-form-item>
           </n-grid-item>
-          <n-grid-item>
+          <!-- 组织标识：创建时必填，编辑时只读展示 -->
+          <n-grid-item v-if="modalMode === 'create'">
             <n-form-item label="组织标识 *">
               <n-input v-model:value="form.code" placeholder="test-org" />
             </n-form-item>
           </n-grid-item>
-          <n-grid-item>
-            <n-form-item label="管理员用户名 *">
-              <n-input v-model:value="form.admin_username" placeholder="登录用户名" />
+          <n-grid-item v-else>
+            <n-form-item label="组织标识（不可修改）">
+              <n-input :value="editingOrg?.code ?? ''" disabled />
             </n-form-item>
           </n-grid-item>
-          <n-grid-item>
-            <n-form-item label="管理员姓名 *">
-              <n-input v-model:value="form.admin_display_name" placeholder="管理员显示名" />
-            </n-form-item>
-          </n-grid-item>
-          <n-grid-item>
-            <n-form-item label="管理员密码 *">
-              <n-input v-model:value="form.admin_password" type="password" show-password-on="click" placeholder="初始登录密码" />
-            </n-form-item>
-          </n-grid-item>
+          <!-- 管理员账号字段仅创建模式展示 -->
+          <template v-if="modalMode === 'create'">
+            <n-grid-item>
+              <n-form-item label="管理员用户名 *">
+                <n-input v-model:value="form.admin_username" placeholder="登录用户名" />
+              </n-form-item>
+            </n-grid-item>
+            <n-grid-item>
+              <n-form-item label="管理员姓名 *">
+                <n-input v-model:value="form.admin_display_name" placeholder="管理员显示名" />
+              </n-form-item>
+            </n-grid-item>
+            <n-grid-item>
+              <n-form-item label="管理员密码 *">
+                <n-input v-model:value="form.admin_password" type="password" show-password-on="click" placeholder="初始登录密码" />
+              </n-form-item>
+            </n-grid-item>
+          </template>
           <n-grid-item>
             <n-form-item label="联系人">
-              <n-input v-model:value="form.contact_name" placeholder="联系人姓名" />
+              <n-input
+                v-if="modalMode === 'create'"
+                v-model:value="form.contact_name"
+                placeholder="联系人姓名"
+              />
+              <n-input
+                v-else
+                v-model:value="editForm.contact_name"
+                placeholder="联系人姓名"
+              />
             </n-form-item>
           </n-grid-item>
           <n-grid-item>
             <n-form-item label="联系电话">
-              <n-input v-model:value="form.contact_phone" placeholder="手机号" />
+              <n-input
+                v-if="modalMode === 'create'"
+                v-model:value="form.contact_phone"
+                placeholder="手机号"
+              />
+              <n-input
+                v-else
+                v-model:value="editForm.contact_phone"
+                placeholder="手机号"
+              />
             </n-form-item>
           </n-grid-item>
           <n-grid-item>
             <n-form-item label="余额预警阈值 (%)">
-              <n-input-number v-model:value="form.credit_warning_threshold" :min="0" :max="100" style="width: 100%" />
+              <n-input-number
+                v-if="modalMode === 'create'"
+                v-model:value="form.credit_warning_threshold"
+                :min="0" :max="100" style="width: 100%"
+              />
+              <n-input-number
+                v-else
+                v-model:value="editForm.credit_warning_threshold"
+                :min="0" :max="100" style="width: 100%"
+              />
             </n-form-item>
           </n-grid-item>
           <n-grid-item :span="2">
             <n-form-item label="备注">
-              <n-input v-model:value="form.remark" type="textarea" :rows="2" />
+              <n-input
+                v-if="modalMode === 'create'"
+                v-model:value="form.remark"
+                type="textarea"
+                :rows="2"
+              />
+              <n-input
+                v-else
+                v-model:value="editForm.remark"
+                type="textarea"
+                :rows="2"
+              />
             </n-form-item>
           </n-grid-item>
           <n-grid-item :span="2">
             <n-form-item label="可用助手版本">
               <n-select
+                v-if="modalMode === 'create'"
                 v-model:value="form.assistant_version_ids"
+                multiple
+                :loading="versionsQuery.isLoading.value"
+                :options="versionOptions"
+                placeholder="选择该组织可用的助手版本（可多选，可留空）"
+              />
+              <n-select
+                v-else
+                v-model:value="editForm.assistant_version_ids"
                 multiple
                 :loading="versionsQuery.isLoading.value"
                 :options="versionOptions"
@@ -92,10 +158,17 @@
           </n-grid-item>
           <n-grid-item :span="2">
             <n-space justify="end">
-              <n-button @click="formVisible = false">取消</n-button>
-              <n-button type="primary" attr-type="submit" :loading="creating" :disabled="creating">保存</n-button>
+              <n-button @click="closeAnyForm">取消</n-button>
+              <n-button
+                type="primary"
+                attr-type="submit"
+                :loading="modalMode === 'create' ? creating : editSubmitting"
+                :disabled="modalMode === 'create' ? creating : editSubmitting"
+              >保存</n-button>
             </n-space>
-            <p v-if="submitError" class="state-text danger">{{ submitError }}</p>
+            <p v-if="modalMode === 'create' ? submitError : editError" class="state-text danger">
+              {{ modalMode === 'create' ? submitError : editError }}
+            </p>
           </n-grid-item>
         </n-grid>
       </n-form>
@@ -185,7 +258,7 @@
 </template>
 
 <script setup lang="ts">
-import { computed, h, ref } from 'vue'
+import { computed, h, reactive, ref } from 'vue'
 import { useQueries } from '@tanstack/vue-query'
 import { Plus, X } from 'lucide-vue-next'
 import {
@@ -195,7 +268,7 @@ import {
 
 import { formatOrgStatus } from '@/domain/status'
 import {
-  useCreateOrganization, useOrganizationsQuery, useUpdateOrganizationStatus,
+  useCreateOrganization, useOrganizationsQuery, useUpdateOrganization, useUpdateOrganizationStatus,
 } from '@/api/hooks/useOrganizations'
 import { useAssistantVersionsQuery } from '@/api/hooks/useAssistantVersions'
 import { apiRequest } from '@/api/client'
@@ -207,10 +280,89 @@ import { statusColumn, actionColumn } from '@/components/columns'
 import { useFormModal } from '@/composables/useFormModal'
 import { formatDisplayAmount, formatQuotaValue } from '@/pages/usage/usageFormatting'
 
-// OrganizationsPage 是平台组织管理页，负责创建组织、启停组织和给组织充值。
+// OrganizationsPage 是平台组织管理页，负责创建组织、编辑组织、启停组织和给组织充值。
 const { data: organizations, isLoading, error } = useOrganizationsQuery()
 const createMutation = useCreateOrganization()
+const updateMutation = useUpdateOrganization()
 const statusMutation = useUpdateOrganizationStatus()
+
+// modalMode 区分当前表单是创建模式还是编辑模式，控制字段显隐和提交目标。
+const modalMode = ref<'create' | 'edit'>('create')
+// editingOrg 保存正在编辑的组织对象，用于只读展示 code 和预填编辑表单。
+const editingOrg = ref<Organization | null>(null)
+// editFormVisible 控制编辑模式下表单的显隐（与 formVisible 分离以避免状态混用）。
+const editFormVisible = ref(false)
+// editForm 是编辑模式的响应式表单对象，由 openEditForm 按当前组织数据预填。
+const editForm = reactive({
+  name: '',
+  contact_name: '',
+  contact_phone: '',
+  remark: '',
+  credit_warning_threshold: undefined as number | undefined,
+  assistant_version_ids: [] as string[],
+})
+// editSubmitting 控制编辑提交中的 loading 状态。
+const editSubmitting = ref(false)
+// editError 保存编辑提交的错误信息。
+const editError = ref<string | null>(null)
+
+// openEditForm 打开编辑模式，将当前组织的资料预填到 editForm。
+function openEditForm(org: Organization) {
+  editingOrg.value = org
+  modalMode.value = 'edit'
+  editForm.name = org.name
+  editForm.contact_name = org.contact_name ?? ''
+  editForm.contact_phone = org.contact_phone ?? ''
+  editForm.remark = org.remark ?? ''
+  editForm.credit_warning_threshold = typeof org.credit_warning_threshold === 'number'
+    ? org.credit_warning_threshold : undefined
+  editForm.assistant_version_ids = org.assistant_version_ids ? [...org.assistant_version_ids] : []
+  editError.value = null
+  editFormVisible.value = true
+}
+
+// closeAnyForm 关闭创建或编辑表单，复位 modalMode。
+function closeAnyForm() {
+  formVisible.value = false
+  editFormVisible.value = false
+  modalMode.value = 'create'
+}
+
+// submitAnyForm 根据 modalMode 分别调用创建或编辑 mutation。
+async function submitAnyForm() {
+  if (modalMode.value === 'create') {
+    await submitOrganization()
+  } else {
+    await submitEditOrganization()
+  }
+}
+
+// submitEditOrganization 提交编辑表单，调用 PATCH /organizations/:id。
+async function submitEditOrganization() {
+  if (!editingOrg.value) return
+  editError.value = null
+  editSubmitting.value = true
+  try {
+    await updateMutation.mutateAsync({
+      id: editingOrg.value.id,
+      payload: {
+        name: editForm.name,
+        contact_name: editForm.contact_name || undefined,
+        contact_phone: editForm.contact_phone || undefined,
+        remark: editForm.remark || undefined,
+        credit_warning_threshold: typeof editForm.credit_warning_threshold === 'number'
+          ? editForm.credit_warning_threshold : undefined,
+        assistant_version_ids: editForm.assistant_version_ids,
+      },
+    })
+    editFormVisible.value = false
+    modalMode.value = 'create'
+  } catch (err) {
+    editError.value = err instanceof Error ? err.message : '编辑失败'
+  } finally {
+    editSubmitting.value = false
+  }
+}
 // selectedOrg 保存当前充值弹框的目标组织，关闭弹框不会修改列表数据。
 const selectedOrg = ref<Organization | null>(null)
 const selectedOrgId = computed(() => selectedOrg.value?.id)
@@ -265,7 +417,7 @@ const copyFeedback = ref('')
 const copyFeedbackError = ref(false)
 const adminPasswordCopyHint = '<创建时设置，系统不保存明文；如忘记请重置密码>'
 // 创建组织表单状态聚合到 useFormModal；toPayload 处理可选字段的 || undefined 过滤
-const { form, formVisible, creating, submitError, openForm, submit: submitForm } = useFormModal({
+const { form, formVisible, creating, submitError, openForm: _openForm, submit: submitForm } = useFormModal({
   initial: {
     name: '',
     code: '',
@@ -293,12 +445,18 @@ const { form, formVisible, creating, submitError, openForm, submit: submitForm }
     assistant_version_ids: f.assistant_version_ids,
   }),
 })
-// versionsQuery 仅在表单打开时发起请求，避免页面初始化时的无谓请求。
-const versionsQuery = useAssistantVersionsQuery(() => formVisible.value)
+// versionsQuery 在创建或编辑表单打开时发起请求，避免页面初始化时的无谓请求。
+const versionsQuery = useAssistantVersionsQuery(() => formVisible.value || editFormVisible.value)
 const versionOptions = computed(() => (versionsQuery.data.value ?? []).map(v => ({
   label: v.name,
   value: v.id,
 })))
+
+// openForm 设置创建模式后打开表单，确保 modalMode 与 formVisible 始终同步。
+function openForm() {
+  modalMode.value = 'create'
+  _openForm()
+}
 
 // submitOrganization 兜底处理键盘提交，避免绕过保存按钮禁用状态。
 // 助手版本为可选项，无需前置校验；直接调用 submitForm。
@@ -340,8 +498,9 @@ const columns = computed(() => [
       return formatQuotaValue(b.remain_quota, billingStatus.value)
     },
   },
-  // 启用/禁用互斥：用两条 RowAction + hidden 分别渲染
+  // 启用/禁用互斥：用两条 RowAction + hidden 分别渲染；编辑按钮放在首位方便操作
   actionColumn<Organization>([
+    { label: '编辑', onClick: openEditForm },
     { label: '复制信息', onClick: r => { void copyOrganizationInfo(r) } },
     { label: '充值记录', onClick: openRechargeHistory },
     { label: '充值', type: 'primary', onClick: openRecharge },

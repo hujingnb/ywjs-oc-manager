@@ -101,6 +101,40 @@ export function useCreateOrganization() {
   })
 }
 
+// OrganizationUpdatePayload 是更新组织资料的提交体；不含 code（不可修改）和管理员账号字段（创建时专用）。
+export interface OrganizationUpdatePayload {
+  // 组织名称，必填。
+  name: string
+  // 联系人姓名。
+  contact_name?: string
+  // 联系电话。
+  contact_phone?: string
+  // 平台侧备注。
+  remark?: string
+  // 余额预警阈值；null 表示清空或使用后端默认。
+  credit_warning_threshold?: number | null
+  // 组织可用的助手版本 id 列表。
+  assistant_version_ids: string[]
+}
+
+// useUpdateOrganization 更新组织资料与助手版本 allowlist，自动失效列表缓存。
+// 传入 id（组织 id）与 payload（OrganizationUpdatePayload），调用 PATCH /api/v1/organizations/:id。
+export function useUpdateOrganization() {
+  const client = useQueryClient()
+  return useMutation({
+    mutationFn: async ({ id, payload }: { id: string; payload: OrganizationUpdatePayload }) => {
+      const response = await apiRequest<{ organization: Organization }>(
+        `/api/v1/organizations/${id}`,
+        { method: 'PATCH', body: payload },
+      )
+      return response.organization
+    },
+    onSuccess: () => {
+      void client.invalidateQueries({ queryKey: ORG_LIST_KEY })
+    },
+  })
+}
+
 // useUpdateOrganizationStatus 启用或禁用组织。
 // 状态变更只影响列表可见字段，因此失效 ORG_LIST_KEY 即可。
 export function useUpdateOrganizationStatus() {

@@ -8,6 +8,7 @@ import OrganizationsPage from './OrganizationsPage.vue'
 import type { Organization } from '@/api'
 
 const createOrganization = vi.hoisted(() => vi.fn())
+const updateOrganization = vi.hoisted(() => vi.fn())
 
 // versionsState 模拟助手版本列表查询状态，供创建组织表单多选使用。
 const versionsState = vi.hoisted(() => ({
@@ -29,6 +30,10 @@ vi.mock('@/api/hooks/useOrganizations', () => ({
       status: 'active',
       credit_warning_threshold: 20,
       admin_username: 'org-admin',
+      contact_name: '张三',
+      contact_phone: '13800138000',
+      remark: '测试备注',
+      assistant_version_ids: ['v-1'],
     }]),
     isLoading: ref(false),
     error: ref(null),
@@ -36,6 +41,8 @@ vi.mock('@/api/hooks/useOrganizations', () => ({
   // useModelsQuery 保留 mock：其他页面（如版本编辑页）仍依赖此导出，避免影响其他测试。
   useModelsQuery: () => ({ data: ref([]), isLoading: ref(false), isError: ref(false) }),
   useCreateOrganization: () => ({ mutateAsync: createOrganization, isPending: ref(false) }),
+  // useUpdateOrganization mock 供编辑组织场景使用。
+  useUpdateOrganization: () => ({ mutateAsync: updateOrganization, isPending: ref(false) }),
   useUpdateOrganizationStatus: () => ({ mutate: vi.fn() }),
 }))
 
@@ -282,6 +289,48 @@ describe('OrganizationsPage', () => {
     }))
     // 确认不再有 model_id 字段
     expect(createOrganization).not.toHaveBeenCalledWith(expect.objectContaining({ model_id: expect.anything() }))
+  })
+
+  // 编辑组织：点击「编辑」打开表单，验证预填数据正确且提交时携带 id 与 assistant_version_ids。
+  it('编辑组织时预填现有数据并提交 update mutation', async () => {
+    updateOrganization.mockResolvedValue({
+      id: 'org-1',
+      name: '测试组织（已修改）',
+      code: 'test-org',
+      status: 'active',
+    })
+    const wrapper = mountPage()
+
+    // 点击「编辑」按钮，应打开编辑模式的表单
+    const editButton = wrapper.findAll('button').find(button => button.text().includes('编辑'))
+    expect(editButton).toBeTruthy()
+    await editButton!.trigger('click')
+    await nextTick()
+
+    // 表单应预填当前组织数据，首个 input 为名称字段
+    const inputs = wrapper.findAll('input')
+    // 预填名称应为「测试组织」
+    const nameInput = inputs.find(i => (i.element as HTMLInputElement).value === '测试组织')
+    expect(nameInput).toBeTruthy()
+
+    // 修改名称字段
+    await nameInput!.setValue('测试组织（已修改）')
+
+    // 编辑模式下不应存在管理员用户名输入项（create-only 字段）
+    const labels = wrapper.findAll('label span')
+    expect(labels.some(l => l.text().includes('管理员用户名'))).toBe(false)
+
+    // 提交表单
+    await wrapper.find('form').trigger('submit')
+
+    // 应调用 updateOrganization 并携带正确的 id 与 assistant_version_ids
+    expect(updateOrganization).toHaveBeenCalledWith(expect.objectContaining({
+      id: 'org-1',
+      payload: expect.objectContaining({
+        name: '测试组织（已修改）',
+        assistant_version_ids: ['v-1'],
+      }),
+    }))
   })
 
   // 助手版本为可选项，留空时表单仍可正常提交。
