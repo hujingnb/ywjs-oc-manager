@@ -464,27 +464,6 @@ func (s *organizationStoreStub) mustSeedOrganization(t *testing.T, code string) 
 	return org
 }
 
-type orgModelValidatorStub struct {
-	models []string
-	err    error
-}
-
-func (s orgModelValidatorStub) ValidateModelIDs(context.Context, []string) ([]string, error) {
-	return s.models, s.err
-}
-
-// recordingOrgModelValidator 记录 service 传入的模型列表，覆盖 handler/service 入参透传路径。
-type recordingOrgModelValidator struct {
-	input  []string
-	models []string
-}
-
-// ValidateModelIDs 返回预设模型并保存原始入参，便于测试断言请求模型没有被丢弃。
-func (s *recordingOrgModelValidator) ValidateModelIDs(_ context.Context, input []string) ([]string, error) {
-	s.input = append([]string(nil), input...)
-	return s.models, nil
-}
-
 // fakeVersionValidator 是 OrganizationVersionValidator 的内存桩：known 集合内的 id 通过，其余报错。
 type fakeVersionValidator struct {
 	known map[string]bool

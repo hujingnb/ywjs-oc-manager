@@ -47,11 +47,6 @@ type NewAPIFailureAuditor interface {
 	RecordNewAPIFailure(ctx context.Context, fc NewAPIFailureContext)
 }
 
-// OrganizationModelValidator 抽象模型列表校验能力，避免 OrganizationService 直接依赖具体实现。
-type OrganizationModelValidator interface {
-	ValidateModelIDs(ctx context.Context, input []string) ([]string, error)
-}
-
 // OrganizationVersionValidator 抽象「校验一组助手版本 id 都存在」的能力。
 type OrganizationVersionValidator interface {
 	ValidateAssistantVersionIDs(ctx context.Context, ids []string) ([]string, error)
@@ -100,8 +95,6 @@ type OrganizationService struct {
 	cipher *auth.Cipher
 	// failAuditor 记录 new-api 失败；nil 时跳过审计，主要用于单元测试或最小装配。
 	failAuditor NewAPIFailureAuditor // 新增；nil 时跳过 new-api 失败审计写入
-	// modelValidator 读取 new-api 实时模型列表并校验组织 allowlist；未配置时禁止保存模型配置。
-	modelValidator OrganizationModelValidator
 	// versionValidator 校验一组助手版本 id 都存在且未删除；未配置时禁止保存版本 allowlist。
 	versionValidator OrganizationVersionValidator
 	// hashPassword 仅用于创建组织管理员，测试中可替换为快 hash。
@@ -120,11 +113,6 @@ func NewOrganizationService(store OrganizationStore, provisioner NewAPIUserProvi
 			return auth.HashPassword(password, auth.DefaultPasswordParams)
 		},
 	}
-}
-
-// SetModelValidator 注入组织模型 allowlist 校验器，生产环境由 ModelCatalogService 提供实时模型校验。
-func (s *OrganizationService) SetModelValidator(validator OrganizationModelValidator) {
-	s.modelValidator = validator
 }
 
 // SetVersionValidator 注入助手版本 allowlist 校验器。

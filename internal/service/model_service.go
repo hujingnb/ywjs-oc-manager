@@ -42,38 +42,6 @@ func (s *ModelCatalogService) List(ctx context.Context, principal auth.Principal
 	return s.list(ctx)
 }
 
-// ValidateModelIDs 校验组织模型 allowlist 非空、去重并且全部存在于实时模型列表。
-func (s *ModelCatalogService) ValidateModelIDs(ctx context.Context, input []string) ([]string, error) {
-	models, err := s.list(ctx)
-	if err != nil {
-		return nil, err
-	}
-	available := make(map[string]struct{}, len(models))
-	for _, model := range models {
-		available[model.ID] = struct{}{}
-	}
-	seen := make(map[string]struct{}, len(input))
-	out := make([]string, 0, len(input))
-	for _, raw := range input {
-		id := strings.TrimSpace(raw)
-		if id == "" {
-			continue
-		}
-		if _, ok := available[id]; !ok {
-			return nil, fmt.Errorf("%w: 模型 %s 不存在", ErrMemberCreateInvalid, id)
-		}
-		if _, ok := seen[id]; ok {
-			continue
-		}
-		seen[id] = struct{}{}
-		out = append(out, id)
-	}
-	if len(out) == 0 {
-		return nil, fmt.Errorf("%w: 至少选择一个可用模型", ErrMemberCreateInvalid)
-	}
-	return out, nil
-}
-
 // HasModelInCatalog 判断单个模型是否存在于 new-api 实时模型列表。
 // 供助手版本 service 校验主模型与路由模型；查询失败时保守返回 false。
 func (s *ModelCatalogService) HasModelInCatalog(ctx context.Context, id string) bool {

@@ -39,20 +39,10 @@ func TestModelCatalogServiceListReturnsModels(t *testing.T) {
 	assert.Equal(t, []ModelResult{{ID: "qwen", Name: "qwen"}}, got)
 }
 
-// TestValidateModelIDsRejectsMissingModel 验证组织提交的模型必须来自实时模型列表。
-func TestValidateModelIDsRejectsMissingModel(t *testing.T) {
-	t.Parallel()
-	svc := NewModelCatalogService(fakeModelCatalog{models: []newapi.Model{{ID: "qwen", Name: "qwen"}}})
-	_, err := svc.ValidateModelIDs(context.Background(), []string{"missing"})
-	require.Error(t, err)
-	assert.Contains(t, err.Error(), "模型 missing 不存在")
-}
-
-// TestModelCatalogServiceSurfacesUpstreamFailure 验证 new-api 不可用时阻止上层继续提交。
-func TestModelCatalogServiceSurfacesUpstreamFailure(t *testing.T) {
+// TestModelCatalogServiceListSurfacesUpstreamError 验证 new-api 上游查询失败时 List 冒泡错误。
+func TestModelCatalogServiceListSurfacesUpstreamError(t *testing.T) {
 	t.Parallel()
 	svc := NewModelCatalogService(fakeModelCatalog{err: errors.New("upstream down")})
-	_, err := svc.ValidateModelIDs(context.Background(), []string{"qwen"})
-	require.Error(t, err)
-	assert.Contains(t, err.Error(), "查询模型列表失败")
+	_, err := svc.List(context.Background(), auth.Principal{Role: domain.UserRolePlatformAdmin})
+	require.ErrorContains(t, err, "查询模型列表失败")
 }

@@ -261,10 +261,6 @@ func runManager(ctx context.Context, cfg config.Config, logOut io.Writer) error 
 		usageService = service.NewUsageService(nil, nil, nil)
 		organizationService = service.NewOrganizationService(dbStore.Queries, nil, nil, nil)
 	}
-	if modelCatalogService != nil {
-		organizationService.SetModelValidator(modelCatalogService)
-	}
-
 	// 助手版本 service：镜像来自配置、模型校验走 new-api 目录、skill tar 存数据根目录。
 	// modelCatalogService 为 nil 时（未配 newapi）跳过构造，路由自动不注册。
 	var assistantVersionService *service.AssistantVersionService
