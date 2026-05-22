@@ -17,14 +17,13 @@ import AppWorkspaceTab from '@/pages/apps/AppWorkspaceTab.vue'
 import AppEmptyPage from '@/pages/apps/AppEmptyPage.vue'
 import AppsPage from '@/pages/apps/AppsPage.vue'
 import AuditLogsPage from '@/pages/audit/AuditLogsPage.vue'
-import DashboardHome from '@/pages/dashboard/DashboardHome.vue'
 import RoleAwareHome from '@/pages/dashboard/RoleAwareHome.vue'
 import LoginPage from '@/pages/login/LoginPage.vue'
 import CreateMemberPage from '@/pages/org/CreateMemberPage.vue'
 import MembersPage from '@/pages/org/MembersPage.vue'
 import AssistantVersionsPage from '@/pages/platform/AssistantVersionsPage.vue'
 import OrganizationsPage from '@/pages/platform/OrganizationsPage.vue'
-import PlatformDashboardPage from '@/pages/platform/PlatformDashboardPage.vue'
+import ConsolePage from '@/pages/platform/ConsolePage.vue'
 import RechargePage from '@/pages/platform/RechargePage.vue'
 import OrgKnowledgePage from '@/pages/knowledge/OrgKnowledgePage.vue'
 import RuntimeNodeDetailPage from '@/pages/runtime-nodes/RuntimeNodeDetailPage.vue'
@@ -54,10 +53,11 @@ export const router = createRouter({
       component: DashboardLayout,
       children: [
         { path: '', component: RoleAwareHome },
-        { path: 'dashboard', component: DashboardHome },
+        { path: 'console', component: ConsolePage, meta: { allowedRoles: PLATFORM_ONLY } },
+        { path: 'platform/dashboard', redirect: '/console' },
+        { path: 'dashboard', redirect: '/console' },
         { path: 'organizations', component: OrganizationsPage, meta: { allowedRoles: PLATFORM_ONLY } },
         { path: 'assistant-versions', component: AssistantVersionsPage, meta: { allowedRoles: PLATFORM_ONLY } },
-        { path: 'platform/dashboard', component: PlatformDashboardPage, meta: { allowedRoles: PLATFORM_ONLY } },
         { path: 'platform/organizations/:orgId/recharge', component: RechargePage, meta: { allowedRoles: PLATFORM_ONLY } },
         { path: 'platform/permissions', component: PermissionsPage, meta: { allowedRoles: PLATFORM_ONLY } },
         { path: 'members', component: MembersPage, meta: { allowedRoles: ORG_ADMIN_ABOVE } },

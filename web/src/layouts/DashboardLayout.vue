@@ -104,7 +104,7 @@ const activeKey = computed(() => {
   // org_member 的实例菜单 key 是动态路径，需要特殊匹配。
   if (p.startsWith('/apps')) return memberAppPath.value
   const prefixes = [
-    '/platform/dashboard',
+    '/console',
     '/organizations',
     '/assistant-versions',
     '/members',
@@ -132,13 +132,13 @@ const memberAppPath = computed(() => {
   return '/apps/empty'
 })
 
-// menuOptions 根据角色裁剪入口：普通成员不显示组织管理和审计，平台管理员额外显示平台能力。
+// menuOptions 根据角色裁剪入口：普通成员不显示组织管理和审计，平台管理员仅显示控制台单一入口。
 const menuOptions = computed<MenuOption[]>(() => {
-  const items: MenuOption[] = [
-    { key: '/', label: '总览', icon: () => h(LayoutDashboard, { size: 18 }) },
-  ]
+  // platform_admin 使用单一「控制台」入口，替代原来「总览+平台」两个菜单项。
+  const items: MenuOption[] = isPlatformAdmin.value
+    ? [{ key: '/console', label: '控制台', icon: () => h(Gauge, { size: 18 }) }]
+    : [{ key: '/', label: '总览', icon: () => h(LayoutDashboard, { size: 18 }) }]
   if (isPlatformAdmin.value) {
-    items.push({ key: '/platform/dashboard', label: '平台', icon: () => h(Gauge, { size: 18 }) })
     items.push({ key: '/organizations', label: '组织', icon: () => h(Building2, { size: 18 }) })
     items.push({ key: '/assistant-versions', label: '助手版本', icon: () => h(Boxes, { size: 18 }) })
   }
