@@ -51,8 +51,6 @@ type fixture struct {
 	// AppID/AppName 标识预置 running 应用，用于渠道、运行态和权限用例。
 	AppID   string `json:"app_id"`
 	AppName string `json:"app_name"`
-	// ModelIDs 是 fixture 组织允许使用的模型集合，首个模型会写入预置应用。
-	ModelIDs []string `json:"model_ids"`
 }
 
 func main() {
@@ -168,19 +166,13 @@ func buildFixture(ctx context.Context, conn *pgx.Conn) (fixture, error) {
 		return fx, err
 	}
 
-	// 1) 创建组织。
+	// 1) 创建组织。Phase 5 已删除 enabled_models / model_id 列，仅写入基础字段。
 	fx.OrgName = "e2e-org"
 	fx.OrgCode = "test-org"
-	fx.ModelIDs = []string{"qwen2.5:0.5b", "qwen2.5:7b"}
-	enabledModelsJSON, err := json.Marshal(fx.ModelIDs)
-	if err != nil {
-		return fx, fmt.Errorf("marshal enabled models: %w", err)
-	}
 	if err := conn.QueryRow(ctx,
-		`INSERT INTO organizations (name, code, status, enabled_models) VALUES ($1, $2, 'active', $3::jsonb) RETURNING id`,
+		`INSERT INTO organizations (name, code, status) VALUES ($1, $2, 'active') RETURNING id`,
 		fx.OrgName,
 		fx.OrgCode,
-		string(enabledModelsJSON),
 	).Scan(&fx.OrgID); err != nil {
 		return fx, fmt.Errorf("create org: %w", err)
 	}
@@ -230,12 +222,13 @@ func buildFixture(ctx context.Context, conn *pgx.Conn) (fixture, error) {
 	}
 
 	// 4) 创建 fixture app（status=running，跳过实际容器路径）。owner_user_id 用 org_admin。
+	// Phase 5 已删除 apps.model_id / model_synced / persona_mode / app_prompt 列。
 	fx.AppName = "e2e-app"
 	if err := conn.QueryRow(ctx, `
 		INSERT INTO apps
-			(org_id, owner_user_id, runtime_node_id, name, status, api_key_status, model_id)
-		VALUES ($1, $2, $3, $4, 'running', 'active', $5)
-		RETURNING id`, fx.OrgID, orgAdminID, fx.NodeID, fx.AppName, fx.ModelIDs[0],
+			(org_id, owner_user_id, runtime_node_id, name, status, api_key_status)
+		VALUES ($1, $2, $3, $4, 'running', 'active')
+		RETURNING id`, fx.OrgID, orgAdminID, fx.NodeID, fx.AppName,
 	).Scan(&fx.AppID); err != nil {
 		return fx, fmt.Errorf("create app: %w", err)
 	}
