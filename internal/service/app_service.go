@@ -211,8 +211,8 @@ func computeVersionSynced(app sqlc.App, versionRevision int32, versionImageID st
 }
 
 // SwitchAppVersion 切换实例绑定的助手版本。
-// 校验调用者可管理该实例、目标版本在实例所属组织的 allowlist 内，写入新 version_id 后
-// 返回最新实例视图——SetAppVersion 切换时清零 applied_*，切换后 version_synced 必为 false，提示需重启。
+// 校验调用者可通过 CanSwitchAppVersion（平台管理员、本组织管理员或实例 owner）、目标版本在实例所属组织的 allowlist 内，
+// 写入新 version_id 后返回最新实例视图——SetAppVersion 切换时清零 applied_*，切换后 version_synced 必为 false，提示需重启。
 func (s *AppService) SwitchAppVersion(ctx context.Context, principal auth.Principal, appID, versionID string) (AppResult, error) {
 	// 解析实例 id；格式非法时等同于资源不存在。
 	id, err := parseUUID(appID)
@@ -227,8 +227,8 @@ func (s *AppService) SwitchAppVersion(ctx context.Context, principal auth.Princi
 	if err != nil {
 		return AppResult{}, fmt.Errorf("查询应用失败: %w", err)
 	}
-	// 权限校验：仅组织管理员（本组织）或实例 owner 成员可管理；平台管理员无写权限。
-	if !auth.CanManageApp(principal, uuidToString(row.App.OrgID), uuidToString(row.App.OwnerUserID)) {
+	// 权限校验：平台管理员、本组织管理员或实例 owner 成员可切换版本。
+	if !auth.CanSwitchAppVersion(principal, uuidToString(row.App.OrgID), uuidToString(row.App.OwnerUserID)) {
 		return AppResult{}, ErrForbidden
 	}
 	// 加载组织记录，用于 allowlist 校验。

@@ -401,6 +401,31 @@ func TestSwitchAppVersionSuccessByOwnerMember(t *testing.T) {
 	require.Len(t, store.setVersionCalls, 1, "SetAppVersion 应被调用一次")
 }
 
+// TestSwitchAppVersionSuccessByPlatformAdmin 验证平台管理员可跨组织切换任意实例的助手版本。
+// 平台管理员无 OrgID，CanSwitchAppVersion 应仍返回 true，使管理员可统一管理版本。
+func TestSwitchAppVersionSuccessByPlatformAdmin(t *testing.T) {
+	t.Parallel()
+	svc, store := newAppServiceWithStore(t)
+
+	// 预置实例：applied_version_revision=0，模拟切换前状态。
+	app := store.mustSeedApp(t)
+	app.AppliedVersionRevision = 0
+	store.app = app
+	// 组织 allowlist 内含目标版本 testSwitchVersionID。
+	store.organization = mustOrgWithAllowlist(t, testSwitchVersionID)
+	store.versionRevision = 1
+
+	// platformAdmin() 无 OrgID，应通过 CanSwitchAppVersion 的 platform_admin 分支。
+	result, err := svc.SwitchAppVersion(context.Background(), platformAdmin(), testAppServiceAppID, testSwitchVersionID)
+
+	// 平台管理员切换成功：无错误，返回的实例 VersionID 为目标版本。
+	require.NoError(t, err)
+	assert.Equal(t, testSwitchVersionID, result.VersionID, "返回的实例 VersionID 应等于目标版本")
+	// applied_version_revision=0 而 versionRevision=1，version_synced 应为 false，提示需重启。
+	assert.False(t, result.VersionSynced, "切换后 applied_* 未更新，version_synced 应为 false")
+	require.Len(t, store.setVersionCalls, 1, "SetAppVersion 应被调用一次")
+}
+
 // TestSwitchAppVersionResetsAppliedSoVersionSyncedIsFalse 是针对「同 revision 误判」bug 的回归测试。
 // 复现场景：每个 assistant_versions 行各自维护独立的 revision 计数，旧版本 A 与目标版本 B
 // 可能恰好都处于 revision=2 且镜像相同。修复前 SetAppVersion 切换时保留 applied_version_revision
@@ -468,11 +493,6 @@ func TestSwitchAppVersionForbidden(t *testing.T) {
 		// principal 是没有该实例管理权限的调用者。
 		principal auth.Principal
 	}{
-		{
-			// 平台管理员无应用写权限，CanManageApp 始终返回 false。
-			name:      "平台管理员无应用写权限",
-			principal: platformAdmin(),
-		},
 		{
 			// 属于其他组织的组织管理员无权管理本组织的实例。
 			name: "其他组织的管理员无权管理",
