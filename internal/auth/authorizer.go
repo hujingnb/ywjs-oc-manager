@@ -303,6 +303,12 @@ func CanManageAssistantVersion(p Principal) bool {
 	return p.Role == domain.UserRolePlatformAdmin
 }
 
+// CanViewPlatformUsage 返回 principal 是否有权查看平台用量数据（包括组织分布）。
+// 仅 platform_admin 有此权限。
+func CanViewPlatformUsage(p Principal) bool {
+	return p.Role == domain.UserRolePlatformAdmin
+}
+
 // CanViewAssistantVersion 判断主体能否查看助手版本。
 // 平台管理员维护目录；组织管理员创建实例时需要读取版本；
 // 组织成员需要在应用概览中查看自己实例绑定的版本名称，故同样开放。

@@ -338,7 +338,7 @@ func (s *fakeUsageStore) GetOrganization(_ context.Context, id pgtype.UUID) (sql
 	return sqlc.Organization{}, pgx.ErrNoRows
 }
 
-// ListAllActiveOrganizations 是 ListAllActiveOrganizations 的返回值。
+// ListAllActiveOrganizations 是 allActiveOrgs 的预置返回值，供测试注入。
 func (s *fakeUsageStore) ListAllActiveOrganizations(_ context.Context) ([]sqlc.Organization, error) {
 	return s.allActiveOrgs, nil
 }

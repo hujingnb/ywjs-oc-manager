@@ -298,7 +298,7 @@ func (s *UsageService) GetOrgUsageBreakdown(ctx context.Context, principal auth.
 	if s.client == nil {
 		return OrgUsageBreakdown{}, ErrUsageUnavailable
 	}
-	if principal.Role != domain.UserRolePlatformAdmin {
+	if !auth.CanViewPlatformUsage(principal) {
 		return OrgUsageBreakdown{}, ErrForbidden
 	}
 
@@ -327,6 +327,16 @@ func (s *UsageService) GetOrgUsageBreakdown(ctx context.Context, principal auth.
 			}
 			dates, err := s.client.GetUserQuotaDates(gctx, userID, org.NewapiUsername.String, since, until)
 			if err != nil {
+				// 记录 new-api 调用失败，供监控统计使用。
+				if s.failAuditor != nil {
+					s.failAuditor.RecordNewAPIFailure(gctx, NewAPIFailureContext{
+						ActorID:   principal.UserID,
+						ActorRole: principal.Role,
+						OrgID:     uuidToString(org.ID),
+						Endpoint:  "GET /api/data/users?id=...",
+						Err:       err,
+					})
+				}
 				return fmt.Errorf("查询组织 %s 用量失败: %w", uuidToString(org.ID), err)
 			}
 			var total int64
