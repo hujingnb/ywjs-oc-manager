@@ -2,7 +2,7 @@
 // 写操作统一失效版本列表缓存；skill 上传走原生 fetch（apiRequest 只支持 JSON body）。
 import { useMutation, useQuery, useQueryClient } from '@tanstack/vue-query'
 
-import { apiRequest, getCsrfToken, getStoredAccessToken } from '@/api/client'
+import { apiRequest, extractErrorMessage, getCsrfToken, getStoredAccessToken } from '@/api/client'
 
 // AUXILIARY_SLOTS 是智能路由的 8 个 auxiliary 槽位，key 与后端约定一致，顺序固定用于表单渲染。
 export const AUXILIARY_SLOTS = [
@@ -156,8 +156,16 @@ export function useUploadAssistantVersionSkill() {
         method: 'POST', headers, body,
       })
       if (!response.ok) {
+        // multipart 上传绕过 apiRequest，这里复用同一套错误文案提取：
+        // 后端错误体是 JSON 时取其 message/error 字段，避免把整段 JSON 直接弹给用户。
         const text = await response.text().catch(() => '')
-        throw new Error(text || '上传失败')
+        let message = text || '上传失败'
+        try {
+          message = extractErrorMessage(JSON.parse(text), response.status)
+        } catch {
+          // 响应体不是 JSON（如网关纯文本错误），保留原始文本。
+        }
+        throw new Error(message)
       }
       const json = (await response.json()) as { version: AssistantVersionDTO }
       return json.version

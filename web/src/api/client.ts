@@ -163,7 +163,9 @@ function buildUrl(path: string, query?: RequestOptions['query']): string {
   return search ? `${path}?${search}` : path
 }
 
-function extractErrorMessage(body: unknown, status: number): string {
+// extractErrorMessage 从后端错误响应体里取可读文案：优先 error/message 字段，
+// 取不到再回落到状态码。导出供 multipart 等绕过 apiRequest 的请求复用同一套提取逻辑。
+export function extractErrorMessage(body: unknown, status: number): string {
   if (body && typeof body === 'object' && 'error' in body && typeof (body as { error: unknown }).error === 'string') {
     return (body as { error: string }).error
   }
