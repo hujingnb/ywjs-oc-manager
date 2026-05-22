@@ -149,10 +149,7 @@ func (s *MemberService) CreateMember(ctx context.Context, principal auth.Princip
 // ListMembers 分页列出指定组织的成员。
 // 平台管理员可以查看任意组织；组织管理员仅能查看本组织；普通成员无成员视角。
 func (s *MemberService) ListMembers(ctx context.Context, principal auth.Principal, orgID string, limit, offset int32) ([]MemberResult, error) {
-	if principal.Role == domain.UserRoleOrgMember {
-		return nil, ErrForbidden
-	}
-	if !auth.CanViewOrg(principal, orgID) {
+	if !auth.CanListMembers(principal, orgID) {
 		return nil, ErrForbidden
 	}
 	id, err := parseUUID(orgID)

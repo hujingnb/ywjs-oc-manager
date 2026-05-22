@@ -121,6 +121,20 @@ func TestMemberServiceListLimitsOrgScope(t *testing.T) {
 	require.ErrorIs(t, err, ErrForbidden)
 }
 
+// TestMemberServiceListForbidsMember 验证 org_member 无权查看成员列表，应返回 ErrForbidden。
+// 成员列表属于组织管理视角（CanListMembers），org_member 无需访问他人信息。
+func TestMemberServiceListForbidsMember(t *testing.T) {
+	store := newMemberStoreStub(t)
+	svc := NewMemberService(store, fakeHash)
+
+	// org_member 尝试获取本组织成员列表，应被拒绝。
+	_, err := svc.ListMembers(context.Background(),
+		auth.Principal{Role: domain.UserRoleOrgMember, OrgID: testOrgID, UserID: testMemUID},
+		testOrgID, 0, 0,
+	)
+	require.ErrorIs(t, err, ErrForbidden, "org_member 调用 ListMembers 应返回 ErrForbidden")
+}
+
 // TestMemberServiceListAppliesDefaultPageSize 验证成员服务列表应用默认值分页Size的边界条件场景。
 func TestMemberServiceListAppliesDefaultPageSize(t *testing.T) {
 	store := newMemberStoreStub(t)
