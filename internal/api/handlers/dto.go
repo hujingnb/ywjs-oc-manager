@@ -50,9 +50,6 @@ type CreateOrganizationRequest struct {
 	CreditWarningThreshold *int32 `json:"credit_warning_threshold"`
 	// AssistantVersionIDs 是该组织可用的助手版本 id 列表（allowlist）。
 	AssistantVersionIDs []string `json:"assistant_version_ids"`
-	// ModelID 历史字段：助手版本接管模型选择后，组织创建不再需要它；
-	// 保留以兼容旧调用方，前端新表单不再发送，留待后续阶段移除。
-	ModelID string `json:"model_id"`
 	// AdminUsername 是随组织创建的首个 org_admin 账号名。
 	AdminUsername string `json:"admin_username" binding:"required"`
 	// AdminDisplayName 是首个 org_admin 的显示名。
@@ -75,8 +72,6 @@ type OrganizationRequest struct {
 	CreditWarningThreshold *int32 `json:"credit_warning_threshold"`
 	// AssistantVersionIDs 是该组织可用的助手版本 id 列表（allowlist）。
 	AssistantVersionIDs []string `json:"assistant_version_ids"`
-	// ModelID 是该组织所有实例统一使用的模型 ID；nil 表示本次只更新基础资料并保留原模型。
-	ModelID *string `json:"model_id"`
 }
 
 // ===== 成员 members =====

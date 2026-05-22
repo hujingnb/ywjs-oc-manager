@@ -47,7 +47,6 @@ func TestOrganizationServiceCreateProvisionsNewAPIUser(t *testing.T) {
 		AdminUsername:          "org-admin",
 		AdminDisplayName:       "组织管理员",
 		AdminPassword:          "secret-password",
-		ModelID:                "qwen2.5:7b",
 	})
 	require.NoError(t, err)
 	require.NotNil(t, result.CreditWarningThreshold)
@@ -72,9 +71,6 @@ func TestOrganizationServiceCreateProvisionsNewAPIUser(t *testing.T) {
 	require.Equal(t, "access-tok-xyz", creds.AccessToken)
 	assert.Equal(t, prov.lastCreate.Username, creds.Username)
 	assert.Equal(t, prov.lastCreate.Password, creds.Password)
-	// model_id 直接透传，不再校验；版本校验器通过则创建成功。
-	assert.Equal(t, "qwen2.5:7b", result.ModelID)
-	assert.Equal(t, "qwen2.5:7b", store.created.ModelID)
 }
 
 // TestProvisionNewAPIUserPersistsUsername 校验组织创建链路把 new-api 侧 username
@@ -99,7 +95,6 @@ func TestProvisionNewAPIUserPersistsUsername(t *testing.T) {
 		AdminUsername:    "org-admin",
 		AdminDisplayName: "组织管理员",
 		AdminPassword:    "secret-password",
-		ModelID:          "qwen2.5:7b",
 	})
 	require.NoError(t, err)
 
@@ -125,7 +120,6 @@ func TestOrganizationServiceCreateAlsoCreatesOrgAdmin(t *testing.T) {
 		AdminUsername:    "org-admin",
 		AdminDisplayName: "组织管理员",
 		AdminPassword:    "secret-password",
-		ModelID:          "qwen2.5:7b",
 	})
 	require.NoError(t, err)
 
@@ -156,7 +150,6 @@ func TestOrganizationServiceCreateRollbackOnProvisioningFailure(t *testing.T) {
 		AdminUsername:    "org-admin",
 		AdminDisplayName: "组织管理员",
 		AdminPassword:    "secret-password",
-		ModelID:          "qwen2.5:7b",
 	})
 	require.Error(t, err)
 	require.True(t, store.hardDeleted)
@@ -177,7 +170,6 @@ func TestCreateOrganizationRequiresValidCode(t *testing.T) {
 			AdminUsername:    "admin",
 			AdminDisplayName: "管理员",
 			AdminPassword:    "secret-password",
-			ModelID:          "qwen2.5:7b",
 		})
 		require.ErrorIs(t, err, ErrMemberCreateInvalid, "code=%q", code)
 	}
@@ -197,7 +189,6 @@ func TestCreateOrganizationNormalizesCode(t *testing.T) {
 		AdminUsername:    "admin",
 		AdminDisplayName: "管理员",
 		AdminPassword:    "secret-password",
-		ModelID:          "qwen2.5:7b",
 	})
 
 	require.NoError(t, err)
@@ -220,7 +211,6 @@ func TestCreateOrganizationMapsUniqueViolationToConflict(t *testing.T) {
 		AdminUsername:    "admin",
 		AdminDisplayName: "管理员",
 		AdminPassword:    "secret-password",
-		ModelID:          "qwen2.5:7b",
 	})
 
 	require.ErrorIs(t, err, ErrConflict)
@@ -267,29 +257,6 @@ func TestCreateOrganizationBlocksSaveWithoutVersionValidator(t *testing.T) {
 	require.Error(t, err)
 	assert.Contains(t, err.Error(), "版本校验器未配置")
 	assert.False(t, store.createCalled)
-}
-
-// TestUpdateOrganizationPreservesModelID 验证更新组织基础资料时，model_id 始终保留数据库中原有值，
-// 不再接受外部传入的 model_id 覆盖（model_id 变更由后续独立接口负责）。
-func TestUpdateOrganizationPreservesModelID(t *testing.T) {
-	store := &organizationStoreStub{}
-	org := store.mustSeedOrganization(t, "test-org", "qwen2.5:7b")
-	svc := NewOrganizationService(store, &fakeProvisioner{}, mustCipher(t), nil)
-	// 不注入版本 allowlist，版本 allowlist 未设置时保留原值。
-	svc.SetVersionValidator(fakeVersionValidator{known: map[string]bool{}})
-
-	// 即使传入了 ModelIDSet 和新的 ModelID，结果仍保留原模型。
-	result, err := svc.UpdateOrganization(context.Background(), auth.Principal{Role: domain.UserRolePlatformAdmin}, uuidToString(org.ID), OrganizationInput{
-		Name:       "测试组织改名",
-		ModelID:    "deepseek-r1:14b",
-		ModelIDSet: true,
-	})
-
-	require.NoError(t, err)
-	assert.Equal(t, "测试组织改名", result.Name)
-	// model_id 应保持原值，不被外部传入值覆盖。
-	assert.Equal(t, "qwen2.5:7b", result.ModelID)
-	assert.Equal(t, "qwen2.5:7b", store.updatedProfile.ModelID)
 }
 
 // TestOrganizationServiceGetRestrictsOrgScope 验证组织服务获取Restricts组织scope的预期行为场景。
@@ -418,7 +385,6 @@ func (s *organizationStoreStub) CreateOrganization(_ context.Context, arg sqlc.C
 		Status:                 arg.Status,
 		ContactName:            arg.ContactName,
 		CreditWarningThreshold: arg.CreditWarningThreshold,
-		ModelID:                arg.ModelID,
 		AssistantVersionIds:    arg.AssistantVersionIds,
 	}
 	s.org = created
@@ -477,7 +443,6 @@ func (s *organizationStoreStub) UpdateOrganizationProfile(_ context.Context, arg
 	s.updateProfileCalled = true
 	s.org.Name = arg.Name
 	s.org.ContactName = arg.ContactName
-	s.org.ModelID = arg.ModelID
 	s.org.AssistantVersionIds = arg.AssistantVersionIds
 	return s.org, nil
 }
@@ -487,14 +452,13 @@ func (s *organizationStoreStub) SetOrganizationStatus(_ context.Context, arg sql
 	return s.org, nil
 }
 
-func (s *organizationStoreStub) mustSeedOrganization(t *testing.T, code string, modelID string) sqlc.Organization {
+func (s *organizationStoreStub) mustSeedOrganization(t *testing.T, code string) sqlc.Organization {
 	t.Helper()
 	org := sqlc.Organization{
-		ID:      mustUUID(t, "00000000-0000-0000-0000-000000000101"),
-		Name:    "测试组织",
-		Code:    code,
-		Status:  domain.StatusActive,
-		ModelID: modelID,
+		ID:     mustUUID(t, "00000000-0000-0000-0000-000000000101"),
+		Name:   "测试组织",
+		Code:   code,
+		Status: domain.StatusActive,
 	}
 	s.org = org
 	return org
@@ -569,7 +533,6 @@ func TestCreateOrganization_BootstrapTokenFailureTriggersDeleteUserAndAudit(t *t
 		AdminUsername:    "org-admin",
 		AdminDisplayName: "组织管理员",
 		AdminPassword:    "secret-password",
-		ModelID:          "qwen2.5:7b",
 	})
 	require.Error(t, err)
 	require.True(t, prov.deleteUserCalled)
@@ -594,7 +557,6 @@ func TestCreateOrganization_CreateUserFailureNoDeleteUser(t *testing.T) {
 		AdminUsername:    "org-admin",
 		AdminDisplayName: "组织管理员",
 		AdminPassword:    "secret-password",
-		ModelID:          "qwen2.5:7b",
 	})
 	assert.False(t, prov.deleteUserCalled)
 }
@@ -635,7 +597,7 @@ func TestCreateOrganizationWithVersionIDs(t *testing.T) {
 func TestUpdateOrganizationWithVersionIDsSet(t *testing.T) {
 	store := &organizationStoreStub{}
 	// 初始化组织，预置旧 allowlist（可以为空或已有值）。
-	org := store.mustSeedOrganization(t, "test-org", "qwen2.5:7b")
+	org := store.mustSeedOrganization(t, "test-org")
 	svc := NewOrganizationService(store, &fakeProvisioner{}, mustCipher(t), nil)
 	// 注入新版本 id。
 	svc.SetVersionValidator(fakeVersionValidator{known: map[string]bool{

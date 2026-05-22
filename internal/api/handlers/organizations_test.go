@@ -44,17 +44,18 @@ func TestOrganizationsCreateReturnsCreatedOrganization(t *testing.T) {
 	assert.Equal(t, "admin", svc.lastCreateInput.AdminUsername)
 	assert.Equal(t, "管理员", svc.lastCreateInput.AdminDisplayName)
 	assert.Equal(t, "secret-password", svc.lastCreateInput.AdminPassword)
-	assert.Equal(t, "qwen2.5:7b", svc.lastCreateInput.ModelID)
 }
 
-// TestOrganizationsUpdatePassesModelID 验证组织更新请求会把单模型 ID 传给 service。
-func TestOrganizationsUpdatePassesModelID(t *testing.T) {
+// TestOrganizationsUpdateIgnoresModelID 验证组织更新请求即使携带旧的 model_id 字段也能正常处理，
+// 该字段已从 DTO 移除，gin 会静默忽略未知字段，服务调用正常完成。
+func TestOrganizationsUpdateIgnoresModelID(t *testing.T) {
 	svc := &organizationServiceStub{
-		createResult: service.OrganizationResult{ID: "org-1", Name: "测试组织", Status: domain.StatusActive, ModelID: "deepseek-r1:14b"},
+		createResult: service.OrganizationResult{ID: "org-1", Name: "测试组织", Status: domain.StatusActive},
 	}
 	router := newOrganizationsTestRouter(t, svc)
 
 	recorder := httptest.NewRecorder()
+	// 请求体携带已废弃的 model_id 字段，handler 应正常返回 200，忽略未知字段。
 	request := httptest.NewRequest(http.MethodPatch, "/api/v1/organizations/org-1", bytes.NewBufferString(`{"name":"测试组织","model_id":"deepseek-r1:14b"}`))
 	request.Header.Set("Content-Type", "application/json")
 	request = withPrincipal(request, auth.Principal{UserID: "user-1", Role: domain.UserRolePlatformAdmin})
@@ -62,8 +63,6 @@ func TestOrganizationsUpdatePassesModelID(t *testing.T) {
 
 	require.Equal(t, http.StatusOK, recorder.Code)
 	assert.Equal(t, "org-1", svc.lastUpdateOrgID)
-	assert.Equal(t, "deepseek-r1:14b", svc.lastUpdateInput.ModelID)
-	assert.True(t, svc.lastUpdateInput.ModelIDSet)
 }
 
 // TestOrganizationsCreateForwardsAssistantVersionIDs 验证组织创建请求把助手版本 allowlist 传给 service。
@@ -75,7 +74,7 @@ func TestOrganizationsCreateForwardsAssistantVersionIDs(t *testing.T) {
 
 	recorder := httptest.NewRecorder()
 	// 携带两个助手版本 id，验证 handler 正确透传给 service 入参。
-	body := `{"name":"版本测试组织","code":"version-org","admin_username":"admin","admin_display_name":"管理员","admin_password":"secret","model_id":"qwen2.5:7b","assistant_version_ids":["v-id-1","v-id-2"]}`
+	body := `{"name":"版本测试组织","code":"version-org","admin_username":"admin","admin_display_name":"管理员","admin_password":"secret","assistant_version_ids":["v-id-1","v-id-2"]}`
 	request := httptest.NewRequest(http.MethodPost, "/api/v1/organizations", bytes.NewBufferString(body))
 	request.Header.Set("Content-Type", "application/json")
 	request = withPrincipal(request, auth.Principal{UserID: "user-1", Role: domain.UserRolePlatformAdmin})
@@ -122,30 +121,27 @@ func TestOrganizationsUpdateKeepsModelWhenOmitted(t *testing.T) {
 
 	require.Equal(t, http.StatusOK, recorder.Code)
 	assert.Equal(t, "org-1", svc.lastUpdateOrgID)
-	assert.False(t, svc.lastUpdateInput.ModelIDSet)
-	assert.Empty(t, svc.lastUpdateInput.ModelID)
 }
 
-// TestOrganizationsCreateAllowsMissingModelID 回归测试：组织创建请求不携带 model_id 时应正常通过 gin
-// binding 校验并返回 201，防止 CreateOrganizationRequest.ModelID 被再次错误地标注为
-// binding:"required" 而导致前端 Phase 3 表单（不发送 model_id）的请求全部被 400 拒绝。
-func TestOrganizationsCreateAllowsMissingModelID(t *testing.T) {
+// TestOrganizationsCreateRequiredFields 验证组织创建仅需必填字段即可成功，
+// model_id 字段已从 DTO 移除，请求体不应包含它。
+func TestOrganizationsCreateRequiredFields(t *testing.T) {
 	svc := &organizationServiceStub{
-		createResult: service.OrganizationResult{ID: "org-99", Name: "无模型组织", Status: domain.StatusActive},
+		createResult: service.OrganizationResult{ID: "org-99", Name: "测试组织2", Status: domain.StatusActive},
 	}
 	router := newOrganizationsTestRouter(t, svc)
 
 	recorder := httptest.NewRecorder()
-	// 请求体故意不含 model_id，只携带创建组织所必须的其他字段。
-	body := `{"name":"无模型组织","code":"no-model-org","admin_username":"admin","admin_display_name":"管理员","admin_password":"secret-password"}`
+	// 请求体仅携带必填字段，验证请求可正常处理并返回 201。
+	body := `{"name":"测试组织2","code":"test-org-2","admin_username":"admin","admin_display_name":"管理员","admin_password":"secret-password"}`
 	request := httptest.NewRequest(http.MethodPost, "/api/v1/organizations", bytes.NewBufferString(body))
 	request.Header.Set("Content-Type", "application/json")
 	request = withPrincipal(request, auth.Principal{UserID: "user-1", Role: domain.UserRolePlatformAdmin})
 	router.ServeHTTP(recorder, request)
 
-	// 缺少 model_id 不应触发 400；请求应成功到达 service 并返回 201。
+	// 仅必填字段应成功到达 service 并返回 201。
 	require.Equal(t, http.StatusCreated, recorder.Code)
-	assert.Empty(t, svc.lastCreateInput.ModelID)
+	assert.Equal(t, "test-org-2", svc.lastCreateInput.Code)
 }
 
 // TestOrganizationsCreateRequiresAdminFields 验证组织创建要求管理员字段的预期行为场景。

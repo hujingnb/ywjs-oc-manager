@@ -285,10 +285,9 @@ func newOnboardingStub(t *testing.T) *onboardingStub {
 	return &onboardingStub{
 		t: t,
 		org: sqlc.Organization{
-			ID:      mustUUID(t, testOrgID),
-			Status:  domain.StatusActive,
-			Name:    "测试组织",
-			ModelID: "qwen2.5:7b",
+			ID:     mustUUID(t, testOrgID),
+			Status: domain.StatusActive,
+			Name:   "测试组织",
 			// 预置 allowlist，包含 testVersionID，供创建实例时的版本校验通过。
 			AssistantVersionIds: []byte(`["` + testVersionID + `"]`),
 		},

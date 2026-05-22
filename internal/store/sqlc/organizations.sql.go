@@ -20,12 +20,11 @@ INSERT INTO organizations (
     contact_phone,
     remark,
     credit_warning_threshold,
-    model_id,
     assistant_version_ids
 ) VALUES (
-    $1, $2, $3, $4, $5, $6, $7, $8, $9
+    $1, $2, $3, $4, $5, $6, $7, $8
 )
-RETURNING id, name, status, contact_name, contact_phone, remark, newapi_user_id, credit_warning_threshold, created_at, updated_at, deleted_at, newapi_user_credentials_ciphertext, code, newapi_username, model_id, assistant_version_ids
+RETURNING id, name, status, contact_name, contact_phone, remark, newapi_user_id, credit_warning_threshold, created_at, updated_at, deleted_at, newapi_user_credentials_ciphertext, code, newapi_username, assistant_version_ids
 `
 
 type CreateOrganizationParams struct {
@@ -36,7 +35,6 @@ type CreateOrganizationParams struct {
 	ContactPhone           pgtype.Text `db:"contact_phone" json:"contact_phone"`
 	Remark                 pgtype.Text `db:"remark" json:"remark"`
 	CreditWarningThreshold pgtype.Int4 `db:"credit_warning_threshold" json:"credit_warning_threshold"`
-	ModelID                string      `db:"model_id" json:"model_id"`
 	AssistantVersionIds    []byte      `db:"assistant_version_ids" json:"assistant_version_ids"`
 }
 
@@ -49,7 +47,6 @@ func (q *Queries) CreateOrganization(ctx context.Context, arg CreateOrganization
 		arg.ContactPhone,
 		arg.Remark,
 		arg.CreditWarningThreshold,
-		arg.ModelID,
 		arg.AssistantVersionIds,
 	)
 	var i Organization
@@ -68,14 +65,13 @@ func (q *Queries) CreateOrganization(ctx context.Context, arg CreateOrganization
 		&i.NewapiUserCredentialsCiphertext,
 		&i.Code,
 		&i.NewapiUsername,
-		&i.ModelID,
 		&i.AssistantVersionIds,
 	)
 	return i, err
 }
 
 const getOrganization = `-- name: GetOrganization :one
-SELECT id, name, status, contact_name, contact_phone, remark, newapi_user_id, credit_warning_threshold, created_at, updated_at, deleted_at, newapi_user_credentials_ciphertext, code, newapi_username, model_id, assistant_version_ids
+SELECT id, name, status, contact_name, contact_phone, remark, newapi_user_id, credit_warning_threshold, created_at, updated_at, deleted_at, newapi_user_credentials_ciphertext, code, newapi_username, assistant_version_ids
 FROM organizations
 WHERE id = $1
 `
@@ -98,14 +94,13 @@ func (q *Queries) GetOrganization(ctx context.Context, id pgtype.UUID) (Organiza
 		&i.NewapiUserCredentialsCiphertext,
 		&i.Code,
 		&i.NewapiUsername,
-		&i.ModelID,
 		&i.AssistantVersionIds,
 	)
 	return i, err
 }
 
 const getOrganizationByCode = `-- name: GetOrganizationByCode :one
-SELECT id, name, status, contact_name, contact_phone, remark, newapi_user_id, credit_warning_threshold, created_at, updated_at, deleted_at, newapi_user_credentials_ciphertext, code, newapi_username, model_id, assistant_version_ids
+SELECT id, name, status, contact_name, contact_phone, remark, newapi_user_id, credit_warning_threshold, created_at, updated_at, deleted_at, newapi_user_credentials_ciphertext, code, newapi_username, assistant_version_ids
 FROM organizations
 WHERE code = $1
 `
@@ -128,14 +123,13 @@ func (q *Queries) GetOrganizationByCode(ctx context.Context, code string) (Organ
 		&i.NewapiUserCredentialsCiphertext,
 		&i.Code,
 		&i.NewapiUsername,
-		&i.ModelID,
 		&i.AssistantVersionIds,
 	)
 	return i, err
 }
 
 const getOrganizationByName = `-- name: GetOrganizationByName :one
-SELECT id, name, status, contact_name, contact_phone, remark, newapi_user_id, credit_warning_threshold, created_at, updated_at, deleted_at, newapi_user_credentials_ciphertext, code, newapi_username, model_id, assistant_version_ids
+SELECT id, name, status, contact_name, contact_phone, remark, newapi_user_id, credit_warning_threshold, created_at, updated_at, deleted_at, newapi_user_credentials_ciphertext, code, newapi_username, assistant_version_ids
 FROM organizations
 WHERE name = $1
 `
@@ -158,14 +152,13 @@ func (q *Queries) GetOrganizationByName(ctx context.Context, name string) (Organ
 		&i.NewapiUserCredentialsCiphertext,
 		&i.Code,
 		&i.NewapiUsername,
-		&i.ModelID,
 		&i.AssistantVersionIds,
 	)
 	return i, err
 }
 
 const getOrganizationForUpdate = `-- name: GetOrganizationForUpdate :one
-SELECT id, name, status, contact_name, contact_phone, remark, newapi_user_id, credit_warning_threshold, created_at, updated_at, deleted_at, newapi_user_credentials_ciphertext, code, newapi_username, model_id, assistant_version_ids
+SELECT id, name, status, contact_name, contact_phone, remark, newapi_user_id, credit_warning_threshold, created_at, updated_at, deleted_at, newapi_user_credentials_ciphertext, code, newapi_username, assistant_version_ids
 FROM organizations
 WHERE id = $1
 FOR UPDATE
@@ -190,7 +183,6 @@ func (q *Queries) GetOrganizationForUpdate(ctx context.Context, id pgtype.UUID) 
 		&i.NewapiUserCredentialsCiphertext,
 		&i.Code,
 		&i.NewapiUsername,
-		&i.ModelID,
 		&i.AssistantVersionIds,
 	)
 	return i, err
@@ -208,7 +200,7 @@ func (q *Queries) HardDeleteOrganization(ctx context.Context, id pgtype.UUID) er
 }
 
 const listOrganizations = `-- name: ListOrganizations :many
-SELECT id, name, status, contact_name, contact_phone, remark, newapi_user_id, credit_warning_threshold, created_at, updated_at, deleted_at, newapi_user_credentials_ciphertext, code, newapi_username, model_id, assistant_version_ids
+SELECT id, name, status, contact_name, contact_phone, remark, newapi_user_id, credit_warning_threshold, created_at, updated_at, deleted_at, newapi_user_credentials_ciphertext, code, newapi_username, assistant_version_ids
 FROM organizations
 WHERE deleted_at IS NULL
 ORDER BY created_at DESC, id DESC
@@ -244,7 +236,6 @@ func (q *Queries) ListOrganizations(ctx context.Context, arg ListOrganizationsPa
 			&i.NewapiUserCredentialsCiphertext,
 			&i.Code,
 			&i.NewapiUsername,
-			&i.ModelID,
 			&i.AssistantVersionIds,
 		); err != nil {
 			return nil, err
@@ -265,7 +256,7 @@ SET
     newapi_username = $4,
     updated_at = now()
 WHERE id = $1
-RETURNING id, name, status, contact_name, contact_phone, remark, newapi_user_id, credit_warning_threshold, created_at, updated_at, deleted_at, newapi_user_credentials_ciphertext, code, newapi_username, model_id, assistant_version_ids
+RETURNING id, name, status, contact_name, contact_phone, remark, newapi_user_id, credit_warning_threshold, created_at, updated_at, deleted_at, newapi_user_credentials_ciphertext, code, newapi_username, assistant_version_ids
 `
 
 type SetOrganizationNewAPIUserParams struct {
@@ -298,7 +289,6 @@ func (q *Queries) SetOrganizationNewAPIUser(ctx context.Context, arg SetOrganiza
 		&i.NewapiUserCredentialsCiphertext,
 		&i.Code,
 		&i.NewapiUsername,
-		&i.ModelID,
 		&i.AssistantVersionIds,
 	)
 	return i, err
@@ -308,7 +298,7 @@ const setOrganizationStatus = `-- name: SetOrganizationStatus :one
 UPDATE organizations
 SET status = $2, updated_at = now()
 WHERE id = $1
-RETURNING id, name, status, contact_name, contact_phone, remark, newapi_user_id, credit_warning_threshold, created_at, updated_at, deleted_at, newapi_user_credentials_ciphertext, code, newapi_username, model_id, assistant_version_ids
+RETURNING id, name, status, contact_name, contact_phone, remark, newapi_user_id, credit_warning_threshold, created_at, updated_at, deleted_at, newapi_user_credentials_ciphertext, code, newapi_username, assistant_version_ids
 `
 
 type SetOrganizationStatusParams struct {
@@ -334,7 +324,6 @@ func (q *Queries) SetOrganizationStatus(ctx context.Context, arg SetOrganization
 		&i.NewapiUserCredentialsCiphertext,
 		&i.Code,
 		&i.NewapiUsername,
-		&i.ModelID,
 		&i.AssistantVersionIds,
 	)
 	return i, err
@@ -344,7 +333,7 @@ const softDeleteOrganization = `-- name: SoftDeleteOrganization :one
 UPDATE organizations
 SET status = 'deleted', deleted_at = now(), updated_at = now()
 WHERE id = $1 AND deleted_at IS NULL
-RETURNING id, name, status, contact_name, contact_phone, remark, newapi_user_id, credit_warning_threshold, created_at, updated_at, deleted_at, newapi_user_credentials_ciphertext, code, newapi_username, model_id, assistant_version_ids
+RETURNING id, name, status, contact_name, contact_phone, remark, newapi_user_id, credit_warning_threshold, created_at, updated_at, deleted_at, newapi_user_credentials_ciphertext, code, newapi_username, assistant_version_ids
 `
 
 func (q *Queries) SoftDeleteOrganization(ctx context.Context, id pgtype.UUID) (Organization, error) {
@@ -365,7 +354,6 @@ func (q *Queries) SoftDeleteOrganization(ctx context.Context, id pgtype.UUID) (O
 		&i.NewapiUserCredentialsCiphertext,
 		&i.Code,
 		&i.NewapiUsername,
-		&i.ModelID,
 		&i.AssistantVersionIds,
 	)
 	return i, err
@@ -376,7 +364,7 @@ UPDATE organizations
 SET newapi_user_credentials_ciphertext = $2,
     updated_at = now()
 WHERE id = $1
-RETURNING id, name, status, contact_name, contact_phone, remark, newapi_user_id, credit_warning_threshold, created_at, updated_at, deleted_at, newapi_user_credentials_ciphertext, code, newapi_username, model_id, assistant_version_ids
+RETURNING id, name, status, contact_name, contact_phone, remark, newapi_user_id, credit_warning_threshold, created_at, updated_at, deleted_at, newapi_user_credentials_ciphertext, code, newapi_username, assistant_version_ids
 `
 
 type UpdateOrganizationCredentialsCiphertextParams struct {
@@ -403,7 +391,6 @@ func (q *Queries) UpdateOrganizationCredentialsCiphertext(ctx context.Context, a
 		&i.NewapiUserCredentialsCiphertext,
 		&i.Code,
 		&i.NewapiUsername,
-		&i.ModelID,
 		&i.AssistantVersionIds,
 	)
 	return i, err
@@ -417,11 +404,10 @@ SET
     contact_phone = $4,
     remark = $5,
     credit_warning_threshold = $6,
-    model_id = $7,
-    assistant_version_ids = $8,
+    assistant_version_ids = $7,
     updated_at = now()
 WHERE id = $1
-RETURNING id, name, status, contact_name, contact_phone, remark, newapi_user_id, credit_warning_threshold, created_at, updated_at, deleted_at, newapi_user_credentials_ciphertext, code, newapi_username, model_id, assistant_version_ids
+RETURNING id, name, status, contact_name, contact_phone, remark, newapi_user_id, credit_warning_threshold, created_at, updated_at, deleted_at, newapi_user_credentials_ciphertext, code, newapi_username, assistant_version_ids
 `
 
 type UpdateOrganizationProfileParams struct {
@@ -431,7 +417,6 @@ type UpdateOrganizationProfileParams struct {
 	ContactPhone           pgtype.Text `db:"contact_phone" json:"contact_phone"`
 	Remark                 pgtype.Text `db:"remark" json:"remark"`
 	CreditWarningThreshold pgtype.Int4 `db:"credit_warning_threshold" json:"credit_warning_threshold"`
-	ModelID                string      `db:"model_id" json:"model_id"`
 	AssistantVersionIds    []byte      `db:"assistant_version_ids" json:"assistant_version_ids"`
 }
 
@@ -443,7 +428,6 @@ func (q *Queries) UpdateOrganizationProfile(ctx context.Context, arg UpdateOrgan
 		arg.ContactPhone,
 		arg.Remark,
 		arg.CreditWarningThreshold,
-		arg.ModelID,
 		arg.AssistantVersionIds,
 	)
 	var i Organization
@@ -462,7 +446,6 @@ func (q *Queries) UpdateOrganizationProfile(ctx context.Context, arg UpdateOrgan
 		&i.NewapiUserCredentialsCiphertext,
 		&i.Code,
 		&i.NewapiUsername,
-		&i.ModelID,
 		&i.AssistantVersionIds,
 	)
 	return i, err

@@ -203,7 +203,6 @@ type Organization struct {
 	Code                            string      `db:"code" json:"code"`
 	// new-api 侧的 user.username，用于按 username 过滤用量响应
 	NewapiUsername pgtype.Text `db:"newapi_username" json:"newapi_username"`
-	ModelID        string      `db:"model_id" json:"model_id"`
 	// 该组织可用的助手版本 id 数组（allowlist）。
 	AssistantVersionIds []byte `db:"assistant_version_ids" json:"assistant_version_ids"`
 }

@@ -220,10 +220,6 @@ func toOrganizationInput(req OrganizationRequest) service.OrganizationInput {
 		AssistantVersionIDs:    req.AssistantVersionIDs,
 		AssistantVersionIDsSet: true,
 	}
-	if req.ModelID != nil {
-		input.ModelID = *req.ModelID
-		input.ModelIDSet = true
-	}
 	return input
 }
 
@@ -239,8 +235,6 @@ func toCreateOrganizationInput(req CreateOrganizationRequest) service.Organizati
 		AdminUsername:          req.AdminUsername,
 		AdminDisplayName:       req.AdminDisplayName,
 		AdminPassword:          req.AdminPassword,
-		ModelID:                req.ModelID,
-		ModelIDSet:             true,
 		AssistantVersionIDs:    req.AssistantVersionIDs,
 	}
 }

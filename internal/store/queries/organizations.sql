@@ -7,10 +7,9 @@ INSERT INTO organizations (
     contact_phone,
     remark,
     credit_warning_threshold,
-    model_id,
     assistant_version_ids
 ) VALUES (
-    $1, $2, $3, $4, $5, $6, $7, $8, $9
+    $1, $2, $3, $4, $5, $6, $7, $8
 )
 RETURNING *;
 
@@ -54,8 +53,7 @@ SET
     contact_phone = $4,
     remark = $5,
     credit_warning_threshold = $6,
-    model_id = $7,
-    assistant_version_ids = $8,
+    assistant_version_ids = $7,
     updated_at = now()
 WHERE id = $1
 RETURNING *;

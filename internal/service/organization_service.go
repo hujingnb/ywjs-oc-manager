@@ -147,10 +147,6 @@ type OrganizationInput struct {
 	Remark string
 	// CreditWarningThreshold 是组织余额预警阈值；nil 会写入 NULL，表示不设置预警阈值。
 	CreditWarningThreshold *int32
-	// ModelID 是该组织所有实例统一使用的模型 ID，由平台管理员指定。
-	ModelID string
-	// ModelIDSet 标记更新请求中是否显式传入了 model_id（用于区分"不修改"和"修改为某值"）。
-	ModelIDSet bool
 	// AssistantVersionIDs 是该组织可用的助手版本 id 列表（allowlist）。
 	AssistantVersionIDs []string
 	// AssistantVersionIDsSet 标记更新请求是否显式传入了 allowlist。
@@ -185,8 +181,6 @@ type OrganizationResult struct {
 	CreditWarningThreshold *int32 `json:"credit_warning_threshold,omitempty"`
 	// AdminUsername 是组织首个可用管理员账号名，用于平台管理员复制登录信息。
 	AdminUsername string `json:"admin_username,omitempty"`
-	// ModelID 是该组织所有实例统一使用的模型 ID。
-	ModelID string `json:"model_id"`
 	// AssistantVersionIDs 是该组织可用的助手版本 id 列表（allowlist）。
 	AssistantVersionIDs []string `json:"assistant_version_ids"`
 }
@@ -238,7 +232,6 @@ func (s *OrganizationService) CreateOrganization(ctx context.Context, principal 
 		ContactPhone:           textValue(input.ContactPhone),
 		Remark:                 textValue(input.Remark),
 		CreditWarningThreshold: int4Ptr(input.CreditWarningThreshold),
-		ModelID:                input.ModelID,
 		AssistantVersionIds:    versionIDsJSON,
 	})
 	if err != nil {
@@ -498,7 +491,6 @@ func (s *OrganizationService) UpdateOrganization(ctx context.Context, principal 
 		ContactPhone:           textValue(input.ContactPhone),
 		Remark:                 textValue(input.Remark),
 		CreditWarningThreshold: int4Ptr(input.CreditWarningThreshold),
-		ModelID:                current.ModelID,
 		AssistantVersionIds:    versionIDsJSON,
 	})
 	if errors.Is(err, pgx.ErrNoRows) {
@@ -618,7 +610,6 @@ func toOrganizationResult(org sqlc.Organization) OrganizationResult {
 		Remark:                 textString(org.Remark),
 		NewAPIUserID:           textString(org.NewapiUserID),
 		CreditWarningThreshold: int4Pointer(org.CreditWarningThreshold),
-		ModelID:                org.ModelID,
 		AssistantVersionIDs:    versionIDs,
 	}
 }

@@ -50,10 +50,9 @@ func newAppServiceWithStore(t *testing.T) (*AppService, *appServiceStoreStub) {
 	t.Helper()
 	store := &appServiceStoreStub{
 		organization: sqlc.Organization{
-			ID:      mustUUID(t, testOrgID),
-			Name:    "测试组织",
-			Status:  domain.StatusActive,
-			ModelID: "qwen2.5:7b",
+			ID:     mustUUID(t, testOrgID),
+			Name:   "测试组织",
+			Status: domain.StatusActive,
 		},
 		user: sqlc.User{
 			ID:     mustUUID(t, testAdminUID),
@@ -338,7 +337,6 @@ func mustOrgWithAllowlist(t *testing.T, versionIDs ...string) sqlc.Organization 
 		ID:                  mustUUID(t, testOrgID),
 		Name:                "测试组织",
 		Status:              domain.StatusActive,
-		ModelID:             "qwen2.5:7b",
 		AssistantVersionIds: raw,
 	}
 }
