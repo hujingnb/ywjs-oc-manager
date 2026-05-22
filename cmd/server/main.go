@@ -172,7 +172,6 @@ func runManager(ctx context.Context, cfg config.Config, logOut io.Writer) error 
 	appService.SetImageResolver(runtimeImageAdapter{images: cfg.Hermes.RuntimeImages})
 	runtimeOpService := service.NewRuntimeOperationService(dbStore.Queries, logger, redisQueue)
 	resourceMetricsService := service.NewResourceMetricsService(dbStore.Queries)
-	personaService := service.NewPersonaService(store.NewPersonaStore(dbStore))
 	// usage / organization service 在装配 newapi client 之后再实例化（见下方）；
 	// 这里仅声明变量，真实赋值发生在 newapi wiring 段。
 	var usageService *service.UsageService
@@ -446,7 +445,6 @@ func runManager(ctx context.Context, cfg config.Config, logOut io.Writer) error 
 			UsageService:            usageService,
 			RechargeService:         rechargeService,
 			PlatformOverview:        platformOverviewService,
-			PersonaService:          personaService,
 			AssistantVersionService: assistantVersionService,
 			HermesKanbanService:     hermesKanbanService,
 			HermesCronService:       hermesCronService,

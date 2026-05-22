@@ -34,7 +34,6 @@ type Querier interface {
 	CreateChannelBinding(ctx context.Context, arg CreateChannelBindingParams) (ChannelBinding, error)
 	CreateJob(ctx context.Context, arg CreateJobParams) (Job, error)
 	CreateOrganization(ctx context.Context, arg CreateOrganizationParams) (Organization, error)
-	CreateOrganizationPersona(ctx context.Context, arg CreateOrganizationPersonaParams) (OrganizationPersona, error)
 	CreateRechargeRecord(ctx context.Context, arg CreateRechargeRecordParams) (RechargeRecord, error)
 	CreateRefreshToken(ctx context.Context, arg CreateRefreshTokenParams) (RefreshToken, error)
 	CreateUser(ctx context.Context, arg CreateUserParams) (User, error)
@@ -50,7 +49,6 @@ type Querier interface {
 	GetAssistantVersion(ctx context.Context, id pgtype.UUID) (AssistantVersion, error)
 	GetAssistantVersionByName(ctx context.Context, name string) (AssistantVersion, error)
 	GetChannelBindingByAppAndType(ctx context.Context, arg GetChannelBindingByAppAndTypeParams) (ChannelBinding, error)
-	GetCurrentOrganizationPersona(ctx context.Context, orgID pgtype.UUID) (OrganizationPersona, error)
 	GetJob(ctx context.Context, id pgtype.UUID) (Job, error)
 	// 查询单个 (org, node) 对的状态，主要用于幂等判断。
 	GetKnowledgeSyncStatus(ctx context.Context, arg GetKnowledgeSyncStatusParams) (KnowledgeSyncStatus, error)
@@ -105,7 +103,6 @@ type Querier interface {
 	ListNodeInstanceResourceSamples(ctx context.Context, arg ListNodeInstanceResourceSamplesParams) ([]InstanceResourceSample, error)
 	ListNodeResourceBuckets(ctx context.Context, arg ListNodeResourceBucketsParams) ([]ListNodeResourceBucketsRow, error)
 	ListNodeResourceSamples(ctx context.Context, arg ListNodeResourceSamplesParams) ([]NodeResourceSample, error)
-	ListOrganizationPersonaVersions(ctx context.Context, arg ListOrganizationPersonaVersionsParams) ([]OrganizationPersona, error)
 	ListOrganizations(ctx context.Context, arg ListOrganizationsParams) ([]Organization, error)
 	ListReadyJobs(ctx context.Context, limit int32) ([]Job, error)
 	ListRechargeRecordsByOrg(ctx context.Context, arg ListRechargeRecordsByOrgParams) ([]RechargeRecord, error)

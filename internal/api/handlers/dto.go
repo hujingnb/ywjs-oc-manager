@@ -147,22 +147,6 @@ type CreateMemberAppRequest struct {
 	VersionID string `json:"version_id" binding:"required"`
 }
 
-// ===== 人设 persona =====
-
-// PersonaRequest 写入组织 AI 人设的请求体。
-type PersonaRequest struct {
-	// SystemPrompt 是组织默认系统提示词，不能为空。
-	SystemPrompt string `json:"system_prompt" binding:"required"`
-	// ConversationRules 是会话行为约束，可为空。
-	ConversationRules string `json:"conversation_rules"`
-	// ForbiddenRules 是组织层禁止规则，可为空。
-	ForbiddenRules string `json:"forbidden_rules"`
-	// ReplyStyle 是默认回复风格描述，可为空。
-	ReplyStyle string `json:"reply_style"`
-	// AllowMemberOverride 表示成员应用是否允许覆盖组织默认人设。
-	AllowMemberOverride bool `json:"allow_member_override"`
-}
-
 // ===== 知识库 knowledge =====
 
 // RetryOrgSyncRequest 重试组织知识库节点同步的请求体。

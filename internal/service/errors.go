@@ -63,15 +63,6 @@ var ErrWorkspaceMissing = errors.New("应用未关联节点或 adapter 未配置
 // ErrWorkspaceBadPath 表示请求路径越界或包含非法清理后的相对路径。
 var ErrWorkspaceBadPath = errors.New("非法工作目录路径")
 
-// 人设 -------------------------------------------------------------
-// 来源：原 persona_service.go
-
-// ErrPersonaNotFound 表示组织还没有写入过默认人设。
-var ErrPersonaNotFound = errors.New("组织尚未配置人设")
-
-// ErrPersonaDenied 表示当前主体无权读写目标组织人设。
-var ErrPersonaDenied = errors.New("无权访问该组织人设")
-
 // 知识库 -----------------------------------------------------------
 // 来源：原 knowledge_service.go
 

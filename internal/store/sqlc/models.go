@@ -214,21 +214,6 @@ type Organization struct {
 	AssistantVersionIds []byte `db:"assistant_version_ids" json:"assistant_version_ids"`
 }
 
-// 组织级 AI 人设版本表，当前生效版本取同组织最大 version。
-type OrganizationPersona struct {
-	ID                pgtype.UUID `db:"id" json:"id"`
-	OrgID             pgtype.UUID `db:"org_id" json:"org_id"`
-	SystemPrompt      string      `db:"system_prompt" json:"system_prompt"`
-	ConversationRules pgtype.Text `db:"conversation_rules" json:"conversation_rules"`
-	ForbiddenRules    pgtype.Text `db:"forbidden_rules" json:"forbidden_rules"`
-	ReplyStyle        pgtype.Text `db:"reply_style" json:"reply_style"`
-	// 是否允许成员应用使用 app_prompt 覆盖组织默认人设。
-	AllowMemberOverride bool               `db:"allow_member_override" json:"allow_member_override"`
-	Version             int32              `db:"version" json:"version"`
-	CreatedBy           pgtype.UUID        `db:"created_by" json:"created_by"`
-	CreatedAt           pgtype.Timestamptz `db:"created_at" json:"created_at"`
-}
-
 // 组织点数充值记录，计费事实仍以 new-api 为准。
 type RechargeRecord struct {
 	ID         pgtype.UUID `db:"id" json:"id"`

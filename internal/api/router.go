@@ -44,8 +44,6 @@ type Dependencies struct {
 	AppService *service.AppService
 	// RechargeService 提供组织充值、充值记录和余额查询路由。
 	RechargeService *service.RechargeService
-	// PersonaService 提供组织人设读写路由。
-	PersonaService *service.PersonaService
 	// AssistantVersionService 提供助手版本目录管理路由。
 	AssistantVersionService *service.AssistantVersionService
 	// PlatformOverview 提供平台总览路由。
@@ -172,9 +170,6 @@ func NewRouter(deps ...Dependencies) http.Handler {
 	}
 	if dep.RechargeService != nil {
 		handlers.RegisterRechargeRoutes(user, handlers.NewRechargeHandler(dep.RechargeService))
-	}
-	if dep.PersonaService != nil {
-		handlers.RegisterPersonaRoutes(user, handlers.NewPersonaHandler(dep.PersonaService))
 	}
 	if dep.AssistantVersionService != nil {
 		handlers.RegisterAssistantVersionRoutes(user, handlers.NewAssistantVersionsHandler(dep.AssistantVersionService))

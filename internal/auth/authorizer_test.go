@@ -155,30 +155,6 @@ func TestCanViewAppAudit(t *testing.T) {
 	runAppCases(t, CanViewAppAudit, cases)
 }
 
-// TestCanViewOrgPersona 验证查看权限组织人设的预期行为场景。
-func TestCanViewOrgPersona(t *testing.T) {
-	cases := []orgCase{
-		{"platform_admin 跨组织可读 persona", domain.UserRolePlatformAdmin, orgA, orgB, true}, // 场景：platform_admin 跨组织可读 persona
-		{"org_admin 同组织可读 persona", domain.UserRoleOrgAdmin, orgA, orgA, true},           // 场景：org_admin 同组织可读 persona
-		{"org_admin 跨组织不可读 persona", domain.UserRoleOrgAdmin, orgA, orgB, false},         // 场景：org_admin 跨组织不可读 persona
-		{"org_member 同组织可读 persona", domain.UserRoleOrgMember, orgA, orgA, true},         // 场景：org_member 同组织可读 persona
-		{"org_member 跨组织不可读 persona", domain.UserRoleOrgMember, orgA, orgB, false},       // 场景：org_member 跨组织不可读 persona
-	}
-	runOrgCases(t, CanViewOrgPersona, cases)
-}
-
-// TestCanManageOrgPersona 验证管理权限组织人设的预期行为场景。
-func TestCanManageOrgPersona(t *testing.T) {
-	cases := []orgCase{
-		{"platform_admin 跨组织可管 persona", domain.UserRolePlatformAdmin, orgA, orgB, true}, // 场景：platform_admin 跨组织可管 persona
-		{"org_admin 同组织可管 persona", domain.UserRoleOrgAdmin, orgA, orgA, true},           // 场景：org_admin 同组织可管 persona
-		{"org_admin 跨组织不可管 persona", domain.UserRoleOrgAdmin, orgA, orgB, false},         // 场景：org_admin 跨组织不可管 persona
-		{"org_member 同组织也不可管 persona", domain.UserRoleOrgMember, orgA, orgA, false},      // 场景：org_member 同组织也不可管 persona
-		{"未知角色不可管 persona", "unknown", orgA, orgA, false},                                // 场景：未知角色不可管 persona
-	}
-	runOrgCases(t, CanManageOrgPersona, cases)
-}
-
 func runAppCases(t *testing.T, fn func(Principal, string, string) bool, cases []memberCase) {
 	t.Helper()
 	for _, c := range cases {
@@ -277,10 +253,10 @@ func TestCanCreateAppForOrg(t *testing.T) {
 func TestCanCreateAppForMember(t *testing.T) {
 	cases := []orgCase{
 		{"platform_admin 可为任意组织成员创建实例", domain.UserRolePlatformAdmin, orgA, orgB, true}, // 场景：平台管理员跨组织为已有成员重建实例。
-		{"org_admin 可为本组织成员创建实例", domain.UserRoleOrgAdmin, orgA, orgA, true},           // 场景：组织管理员仍保留本组织创建实例能力。
-		{"org_admin 不可为其他组织成员创建实例", domain.UserRoleOrgAdmin, orgA, orgB, false},       // 场景：组织管理员不能越过组织边界。
-		{"org_member 不可创建实例", domain.UserRoleOrgMember, orgA, orgA, false},                // 场景：普通成员没有实例创建权限。
-		{"未知角色不可创建实例", "unknown", orgA, orgA, false},                                  // 场景：未知角色降级为无权限。
+		{"org_admin 可为本组织成员创建实例", domain.UserRoleOrgAdmin, orgA, orgA, true},            // 场景：组织管理员仍保留本组织创建实例能力。
+		{"org_admin 不可为其他组织成员创建实例", domain.UserRoleOrgAdmin, orgA, orgB, false},         // 场景：组织管理员不能越过组织边界。
+		{"org_member 不可创建实例", domain.UserRoleOrgMember, orgA, orgA, false},              // 场景：普通成员没有实例创建权限。
+		{"未知角色不可创建实例", "unknown", orgA, orgA, false},                                    // 场景：未知角色降级为无权限。
 	}
 	runOrgCases(t, CanCreateAppForMember, cases)
 }

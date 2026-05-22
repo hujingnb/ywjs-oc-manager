@@ -94,20 +94,6 @@ func CanViewAppAudit(p Principal, appOrgID, appOwnerUserID string) bool {
 	return CanViewApp(p, appOrgID, appOwnerUserID)
 }
 
-// Persona 资源 ----------------------------------------------------
-// 当前规则与组织读/写谓词完全等价；保留独立函数以便未来 persona
-// 单独演进权限规则时只改这两处，不动调用方。
-
-// CanViewOrgPersona 等价于 CanViewOrg，保留位置以便未来差异化。
-func CanViewOrgPersona(p Principal, orgID string) bool {
-	return CanViewOrg(p, orgID)
-}
-
-// CanManageOrgPersona 等价于 CanManageOrg，保留位置以便未来差异化。
-func CanManageOrgPersona(p Principal, orgID string) bool {
-	return CanManageOrg(p, orgID)
-}
-
 // 应用资源（业务别名） ---------------------------------------------
 // 下面按“读权限”和“写/运行时权限”拆分应用相关谓词：
 // 读取类谓词保留 CanViewApp 的跨组织观察语义，写入/运行时类谓词则收紧到组织管理员或 owner 成员。
