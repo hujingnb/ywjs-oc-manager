@@ -379,6 +379,14 @@ type UpdateCronJobRequest struct {
 	BaseURL *string `json:"base_url"`
 }
 
+// ===== 应用 apps =====
+
+// SwitchAppVersionRequest 是 POST /api/v1/apps/:appId/version 的请求体。
+type SwitchAppVersionRequest struct {
+	// VersionID 是目标助手版本 id，必须在实例所属组织的 allowlist 内。
+	VersionID string `json:"version_id" binding:"required"`
+}
+
 // ===== 助手版本 assistant-versions =====
 
 // AssistantVersionRoutingDTO 是智能路由 8 槽位的请求结构；空字符串表示走主模型。

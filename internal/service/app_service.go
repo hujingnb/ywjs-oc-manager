@@ -25,6 +25,10 @@ type AppStore interface {
 	SoftDeleteApp(ctx context.Context, id pgtype.UUID) (sqlc.App, error)
 	CreateJob(ctx context.Context, arg sqlc.CreateJobParams) (sqlc.Job, error)
 	CreateAuditLog(ctx context.Context, arg sqlc.CreateAuditLogParams) (sqlc.AuditLog, error)
+	// GetOrganization 按 id 加载组织记录，用于 allowlist 校验等场景。
+	GetOrganization(ctx context.Context, id pgtype.UUID) (sqlc.Organization, error)
+	// SetAppVersion 更新实例绑定的助手版本 id，返回更新后的实例记录。
+	SetAppVersion(ctx context.Context, arg sqlc.SetAppVersionParams) (sqlc.App, error)
 }
 
 // AppImageResolver 把版本 image_id 解析成镜像 ref，用于计算 version_synced 的镜像维度。
@@ -223,4 +227,57 @@ func filterAppResultByRole(result AppResult, principal auth.Principal) AppResult
 		result.ModelID = ""
 	}
 	return result
+}
+
+// SwitchAppVersion 切换实例绑定的助手版本。
+// 校验调用者可管理该实例、目标版本在实例所属组织的 allowlist 内，写入新 version_id 后
+// 返回最新实例视图——切换后 applied_* 仍指向旧版本，version_synced 一般为 false，提示需重启。
+func (s *AppService) SwitchAppVersion(ctx context.Context, principal auth.Principal, appID, versionID string) (AppResult, error) {
+	// 解析实例 id；格式非法时等同于资源不存在。
+	id, err := parseUUID(appID)
+	if err != nil {
+		return AppResult{}, ErrNotFound
+	}
+	// 加载实例及绑定版本信息，用于权限校验和 version_synced 计算。
+	row, err := s.store.GetAppWithVersion(ctx, id)
+	if errors.Is(err, pgx.ErrNoRows) {
+		return AppResult{}, ErrNotFound
+	}
+	if err != nil {
+		return AppResult{}, fmt.Errorf("查询应用失败: %w", err)
+	}
+	// 权限校验：仅组织管理员（本组织）或实例 owner 成员可管理；平台管理员无写权限。
+	if !auth.CanManageApp(principal, uuidToString(row.App.OrgID), uuidToString(row.App.OwnerUserID)) {
+		return AppResult{}, ErrForbidden
+	}
+	// 加载组织记录，用于 allowlist 校验。
+	org, err := s.store.GetOrganization(ctx, row.App.OrgID)
+	if errors.Is(err, pgx.ErrNoRows) {
+		return AppResult{}, ErrNotFound
+	}
+	if err != nil {
+		return AppResult{}, fmt.Errorf("查询组织失败: %w", err)
+	}
+	// 目标版本必须在组织 allowlist 内，否则拒绝切换。
+	if !versionInOrgAllowlist(org, versionID) {
+		return AppResult{}, ErrVersionNotInAllowlist
+	}
+	// allowlist 内的 id 必然是合法 UUID；解析失败视为输入非法，同样拒绝。
+	versionUUID, err := parseUUID(versionID)
+	if err != nil {
+		return AppResult{}, ErrVersionNotInAllowlist
+	}
+	// 写入新 version_id；切换后 applied_* 仍指向旧版本，需重启生效。
+	if _, err := s.store.SetAppVersion(ctx, sqlc.SetAppVersionParams{ID: row.App.ID, VersionID: versionUUID}); err != nil {
+		return AppResult{}, fmt.Errorf("切换助手版本失败: %w", err)
+	}
+	// 重新加载而非复用写前行：新 version_id 绑定的版本可能在并发写入时已推进 revision / image_id，
+	// 重读可获取最新版本数据，确保 version_synced 基于新版本的真实状态计算。
+	newRow, err := s.store.GetAppWithVersion(ctx, id)
+	if err != nil {
+		return AppResult{}, fmt.Errorf("重新查询应用失败: %w", err)
+	}
+	result := toAppResult(newRow.App)
+	result.VersionSynced = computeVersionSynced(newRow.App, newRow.VersionRevision, newRow.VersionImageID, s.imageResolver)
+	return filterAppResultByRole(result, principal), nil
 }

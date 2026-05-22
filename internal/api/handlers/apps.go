@@ -22,6 +22,7 @@ type AppsHandler struct {
 type appService interface {
 	Get(ctx context.Context, principal auth.Principal, appID string) (service.AppResult, error)
 	ListByOrg(ctx context.Context, principal auth.Principal, orgID string, limit, offset int32) ([]service.AppResult, error)
+	SwitchAppVersion(ctx context.Context, principal auth.Principal, appID, versionID string) (service.AppResult, error)
 }
 
 // NewAppsHandler 创建 handler。
@@ -34,6 +35,7 @@ func NewAppsHandler(svc appService) *AppsHandler {
 func RegisterAppRoutes(router gin.IRouter, handler *AppsHandler) {
 	router.GET("/api/v1/organizations/:orgId/apps", handler.List)
 	router.GET("/api/v1/apps/:appId", handler.Get)
+	router.POST("/api/v1/apps/:appId/version", handler.SwitchVersion)
 }
 
 // List 列出组织内的应用。
@@ -88,6 +90,38 @@ func (h *AppsHandler) Get(c *gin.Context) {
 	c.JSON(http.StatusOK, gin.H{"app": result})
 }
 
+// SwitchVersion 切换实例绑定的助手版本。
+//
+// @Summary      切换实例助手版本
+// @Description  切换实例绑定的助手版本；目标版本必须在实例所属组织的 allowlist 内。切换后需重启实例生效。
+// @Tags         apps
+// @Accept       json
+// @Produce      json
+// @Security     BearerAuth
+// @Param        appId  path      string                  true  "应用 ID"
+// @Param        body   body      SwitchAppVersionRequest true  "目标版本"
+// @Success      200    {object}  map[string]service.AppResult
+// @Failure      400    {object}  ErrorResponse
+// @Failure      401    {object}  ErrorResponse
+// @Failure      403    {object}  ErrorResponse
+// @Failure      404    {object}  ErrorResponse
+// @Failure      500    {object}  ErrorResponse
+// @Router       /apps/{appId}/version [post]
+func (h *AppsHandler) SwitchVersion(c *gin.Context) {
+	var req SwitchAppVersionRequest
+	if err := c.ShouldBindJSON(&req); err != nil {
+		c.JSON(http.StatusBadRequest, apierror.New("INVALID_REQUEST", "请求体格式错误"))
+		return
+	}
+	principal := principalFromCtx(c)
+	result, err := h.service.SwitchAppVersion(c.Request.Context(), principal, c.Param("appId"), req.VersionID)
+	if err != nil {
+		writeAppsError(c, err)
+		return
+	}
+	c.JSON(http.StatusOK, gin.H{"app": result})
+}
+
 // writeAppsError 将 AppService 的 sentinel error 映射为 HTTP 状态码。
 // 未识别错误统一返回 500 和安全文案，避免把数据库或 new-api 细节暴露给前端。
 func writeAppsError(c *gin.Context, err error) {
@@ -98,6 +132,8 @@ func writeAppsError(c *gin.Context, err error) {
 		c.JSON(http.StatusNotFound, apierror.New("NOT_FOUND", "应用不存在"))
 	case errors.Is(err, service.ErrMemberCreateInvalid):
 		c.JSON(http.StatusBadRequest, apierror.New("MEMBER_INVALID", validationServiceMessage(err, service.ErrMemberCreateInvalid)))
+	case errors.Is(err, service.ErrVersionNotInAllowlist):
+		c.JSON(http.StatusBadRequest, apierror.New("VERSION_NOT_ALLOWED", "助手版本不在组织允许列表内"))
 	default:
 		c.JSON(http.StatusInternalServerError, apierror.New("INTERNAL", "服务暂时不可用"))
 	}

@@ -2,6 +2,7 @@ package service
 
 import (
 	"context"
+	"encoding/json"
 	"testing"
 
 	"github.com/jackc/pgx/v5"
@@ -14,7 +15,13 @@ import (
 	"oc-manager/internal/store/sqlc"
 )
 
-const testAppServiceAppID = "00000000-0000-0000-0000-000000002001"
+const (
+	testAppServiceAppID = "00000000-0000-0000-0000-000000002001"
+	// testSwitchVersionID 是用于 SwitchAppVersion 测试的目标助手版本 id。
+	testSwitchVersionID = "00000000-0000-0000-0000-000000003001"
+	// testSwitchVersionID2 是第二个助手版本 id，不在组织 allowlist 内，用于拒绝场景测试。
+	testSwitchVersionID2 = "00000000-0000-0000-0000-000000003002"
+)
 
 // TestGetAppExposeRuntimeImageOnlyToPlatformAdmin 验证 RuntimeImageRef 和 RuntimeImageSha256
 // 仅在平台管理员调用 Get 时返回；组织管理员调用时两字段应为空。
@@ -79,6 +86,8 @@ type appServiceStoreStub struct {
 	auditLogs      []sqlc.CreateAuditLogParams
 	jobErr         error
 	auditErr       error
+	// setVersionCalls 记录 SetAppVersion 被调用的参数，用于断言写入行为。
+	setVersionCalls []sqlc.SetAppVersionParams
 }
 
 func (s *appServiceStoreStub) mustSeedApp(t *testing.T, modelID string) sqlc.App {
@@ -164,6 +173,21 @@ func (s *appServiceStoreStub) CreateAuditLog(_ context.Context, arg sqlc.CreateA
 	}
 	s.auditLogs = append(s.auditLogs, arg)
 	return sqlc.AuditLog{}, nil
+}
+
+// GetOrganization 返回 stub 预设的组织记录；id 不匹配时返回 pgx.ErrNoRows。
+func (s *appServiceStoreStub) GetOrganization(_ context.Context, id pgtype.UUID) (sqlc.Organization, error) {
+	if s.organization.ID != id {
+		return sqlc.Organization{}, pgx.ErrNoRows
+	}
+	return s.organization, nil
+}
+
+// SetAppVersion 记录调用参数并将 app.VersionID 更新到 stub 状态，模拟数据库写入。
+func (s *appServiceStoreStub) SetAppVersion(_ context.Context, arg sqlc.SetAppVersionParams) (sqlc.App, error) {
+	s.setVersionCalls = append(s.setVersionCalls, arg)
+	s.app.VersionID = pgtype.UUID{Bytes: arg.VersionID.Bytes, Valid: true}
+	return s.app, nil
 }
 
 func mustUUIDFromString(value string) pgtype.UUID {
@@ -303,4 +327,162 @@ func TestGetVersionSynced(t *testing.T) {
 	result2, err := svc.Get(context.Background(), platformAdmin(), testAppServiceAppID)
 	require.NoError(t, err)
 	assert.False(t, result2.VersionSynced, "实例 revision 落后于版本，version_synced 应为 false")
+}
+
+// mustOrgWithAllowlist 构造一个包含给定版本 id allowlist 的 Organization sqlc 记录。
+// allowlist 以 JSON 数组形式写入 AssistantVersionIds 字段，模拟数据库存储格式。
+func mustOrgWithAllowlist(t *testing.T, versionIDs ...string) sqlc.Organization {
+	t.Helper()
+	raw, err := json.Marshal(versionIDs)
+	require.NoError(t, err, "序列化 allowlist 失败")
+	return sqlc.Organization{
+		ID:                  mustUUID(t, testOrgID),
+		Name:                "测试组织",
+		Status:              domain.StatusActive,
+		ModelID:             "qwen2.5:7b",
+		AssistantVersionIds: raw,
+	}
+}
+
+// TestSwitchAppVersionSuccess 验证组织管理员切换到 allowlist 内的版本时成功返回更新后的实例视图，
+// 且 version_synced 为 false（applied_* 仍指向旧版本，需重启生效）。
+func TestSwitchAppVersionSuccess(t *testing.T) {
+	t.Parallel()
+	svc, store := newAppServiceWithStore(t)
+
+	// 预置实例：applied_version_revision=0，模拟切换前状态。
+	app := store.mustSeedApp(t, "qwen2.5:7b")
+	app.AppliedVersionRevision = 0
+	store.app = app
+	// 组织 allowlist 内含目标版本 testSwitchVersionID。
+	store.organization = mustOrgWithAllowlist(t, testSwitchVersionID)
+	// stub 的 versionRevision 设为 1，使切换后 version_synced=false（applied 仍为 0）。
+	store.versionRevision = 1
+
+	principal := appOrgAdminPrincipal(store.organization)
+	result, err := svc.SwitchAppVersion(context.Background(), principal, testAppServiceAppID, testSwitchVersionID)
+
+	// 切换成功：无错误，返回的实例 VersionID 为目标版本。
+	require.NoError(t, err)
+	assert.Equal(t, testSwitchVersionID, result.VersionID, "返回的实例 VersionID 应等于目标版本")
+	// applied_version_revision=0 而 versionRevision=1，version_synced 应为 false，提示需重启。
+	assert.False(t, result.VersionSynced, "切换后 applied_* 未更新，version_synced 应为 false")
+	// 验证 SetAppVersion 被实际调用一次，且参数正确。
+	require.Len(t, store.setVersionCalls, 1, "SetAppVersion 应被调用一次")
+}
+
+// TestSwitchAppVersionSuccessByOwnerMember 验证组织成员作为实例 owner 时，
+// 可通过 CanManageApp 的 owner-member 自服务路径成功切换版本。
+func TestSwitchAppVersionSuccessByOwnerMember(t *testing.T) {
+	t.Parallel()
+	svc, store := newAppServiceWithStore(t)
+
+	// 预置实例：owner 为 testMemUID，模拟切换前状态（applied_version_revision=0）。
+	app := store.mustSeedApp(t, "qwen2.5:7b")
+	app.AppliedVersionRevision = 0
+	store.app = app
+	// 组织 allowlist 内含目标版本 testSwitchVersionID。
+	store.organization = mustOrgWithAllowlist(t, testSwitchVersionID)
+	// stub versionRevision=1，确保切换后 version_synced=false（applied 仍为 0）。
+	store.versionRevision = 1
+
+	// 构造 owner-member principal：角色为 org_member，UserID 等于实例的 OwnerUserID（testMemUID）。
+	ownerMember := auth.Principal{
+		Role:   domain.UserRoleOrgMember,
+		OrgID:  testOrgID,
+		UserID: testMemUID, // 与 mustSeedApp 写入的 OwnerUserID 一致，满足 CanManageApp 自服务路径
+	}
+
+	result, err := svc.SwitchAppVersion(context.Background(), ownerMember, testAppServiceAppID, testSwitchVersionID)
+
+	// owner-member 切换成功：无错误，返回的实例 VersionID 为目标版本。
+	require.NoError(t, err)
+	assert.Equal(t, testSwitchVersionID, result.VersionID, "返回的实例 VersionID 应等于目标版本")
+	// applied_version_revision=0 而 versionRevision=1，version_synced 应为 false，提示需重启。
+	assert.False(t, result.VersionSynced, "切换后 applied_* 未更新，version_synced 应为 false")
+	// 验证 SetAppVersion 被实际调用一次，确认写入路径已执行。
+	require.Len(t, store.setVersionCalls, 1, "SetAppVersion 应被调用一次")
+}
+
+// TestSwitchAppVersionNotInAllowlist 验证目标版本不在组织 allowlist 内时返回 ErrVersionNotInAllowlist。
+func TestSwitchAppVersionNotInAllowlist(t *testing.T) {
+	t.Parallel()
+	svc, store := newAppServiceWithStore(t)
+
+	// 预置实例，allowlist 只含 testSwitchVersionID，不含 testSwitchVersionID2。
+	store.mustSeedApp(t, "qwen2.5:7b")
+	store.organization = mustOrgWithAllowlist(t, testSwitchVersionID)
+
+	principal := appOrgAdminPrincipal(store.organization)
+	// 尝试切换到 allowlist 外的 testSwitchVersionID2，期望返回 ErrVersionNotInAllowlist。
+	_, err := svc.SwitchAppVersion(context.Background(), principal, testAppServiceAppID, testSwitchVersionID2)
+	require.ErrorIs(t, err, ErrVersionNotInAllowlist, "allowlist 外的版本应返回 ErrVersionNotInAllowlist")
+	// SetAppVersion 不应被调用。
+	assert.Empty(t, store.setVersionCalls, "allowlist 校验失败时不应写入数据库")
+}
+
+// TestSwitchAppVersionForbidden 验证无权管理该实例的调用者被拒绝（返回 ErrForbidden）。
+// 测试用例：组织成员尝试管理不属于自己的实例，或错误组织的管理员。
+func TestSwitchAppVersionForbidden(t *testing.T) {
+	t.Parallel()
+
+	tests := []struct {
+		// name 是子测试场景说明。
+		name string
+		// principal 是没有该实例管理权限的调用者。
+		principal auth.Principal
+	}{
+		{
+			// 平台管理员无应用写权限，CanManageApp 始终返回 false。
+			name:      "平台管理员无应用写权限",
+			principal: platformAdmin(),
+		},
+		{
+			// 属于其他组织的组织管理员无权管理本组织的实例。
+			name: "其他组织的管理员无权管理",
+			principal: auth.Principal{
+				Role:   domain.UserRoleOrgAdmin,
+				OrgID:  "00000000-0000-0000-0000-000000009999", // 与实例所属组织不同
+				UserID: testAdminUID,
+			},
+		},
+		{
+			// 组织成员只能管理自己的实例；testMemUID2 不是实例 owner（owner 为 testMemUID）。
+			name: "非 owner 组织成员无权管理",
+			principal: auth.Principal{
+				Role:   domain.UserRoleOrgMember,
+				OrgID:  testOrgID,
+				UserID: "00000000-0000-0000-0000-000000009998", // 不是实例 owner
+			},
+		},
+	}
+
+	for _, tc := range tests {
+		tc := tc
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+			svc, store := newAppServiceWithStore(t)
+			store.mustSeedApp(t, "qwen2.5:7b")
+			store.organization = mustOrgWithAllowlist(t, testSwitchVersionID)
+
+			// 无权调用者尝试切换版本，期望返回 ErrForbidden。
+			_, err := svc.SwitchAppVersion(context.Background(), tc.principal, testAppServiceAppID, testSwitchVersionID)
+			require.ErrorIs(t, err, ErrForbidden, "无权调用者应返回 ErrForbidden")
+		})
+	}
+}
+
+// TestSwitchAppVersionAppNotFound 验证实例不存在时返回 ErrNotFound。
+func TestSwitchAppVersionAppNotFound(t *testing.T) {
+	t.Parallel()
+	svc, store := newAppServiceWithStore(t)
+	// store.app 未设置（零值 ID），传入有效但不存在的 appID 触发 pgx.ErrNoRows。
+	store.mustSeedApp(t, "qwen2.5:7b")
+	store.organization = mustOrgWithAllowlist(t, testSwitchVersionID)
+
+	const nonExistentAppID = "00000000-0000-0000-0000-000000009001"
+	principal := appOrgAdminPrincipal(store.organization)
+	// 传入不存在的实例 id，stub 返回 pgx.ErrNoRows，期望 service 映射为 ErrNotFound。
+	_, err := svc.SwitchAppVersion(context.Background(), principal, nonExistentAppID, testSwitchVersionID)
+	require.ErrorIs(t, err, ErrNotFound, "实例不存在时应返回 ErrNotFound")
 }
