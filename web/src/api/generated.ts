@@ -3628,6 +3628,100 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/apps/{appId}/version": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * 切换实例助手版本
+         * @description 切换实例绑定的助手版本；目标版本必须在实例所属组织的 allowlist 内。切换后需重启实例生效。
+         */
+        post: {
+            parameters: {
+                query?: never;
+                header?: never;
+                path: {
+                    /** @description 应用 ID */
+                    appId: string;
+                };
+                cookie?: never;
+            };
+            /** @description 目标版本 */
+            requestBody: {
+                content: {
+                    "application/json": Record<string, never> | components["schemas"]["handlers.SwitchAppVersionRequest"];
+                };
+            };
+            responses: {
+                /** @description OK */
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": {
+                            [key: string]: components["schemas"]["service.AppResult"];
+                        };
+                    };
+                };
+                /** @description Bad Request */
+                400: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["handlers.ErrorResponse"];
+                    };
+                };
+                /** @description Unauthorized */
+                401: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["handlers.ErrorResponse"];
+                    };
+                };
+                /** @description Forbidden */
+                403: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["handlers.ErrorResponse"];
+                    };
+                };
+                /** @description Not Found */
+                404: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["handlers.ErrorResponse"];
+                    };
+                };
+                /** @description Internal Server Error */
+                500: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["handlers.ErrorResponse"];
+                    };
+                };
+            };
+        };
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/apps/{appId}/workspace": {
         parameters: {
             query?: never;
@@ -8418,6 +8512,10 @@ export interface components {
             /** @description NodeID 是需要重试同步的 runtime 节点 ID。 */
             node_id: string;
         };
+        "handlers.SwitchAppVersionRequest": {
+            /** @description VersionID 是目标助手版本 id，必须在实例所属组织的 allowlist 内。 */
+            version_id: string;
+        };
         "handlers.UpdateAssistantVersionRequest": {
             description?: string;
             image_id: string;
@@ -8511,6 +8609,13 @@ export interface components {
             runtime_image_sha256?: string;
             runtime_node_id?: string;
             status?: string;
+            /** @description VersionID 是实例绑定的助手版本 id；空表示未绑定（仅历史数据）。 */
+            version_id?: string;
+            /**
+             * @description VersionSynced 标记实例运行时是否已与绑定版本对齐（修订 + 镜像都一致）；
+             *     false 表示版本被编辑过，需重启实例生效。
+             */
+            version_synced?: boolean;
         };
         "service.AssistantVersionResult": {
             description?: string;

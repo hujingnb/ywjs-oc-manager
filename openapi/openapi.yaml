@@ -553,6 +553,14 @@ components:
       required:
       - node_id
       type: object
+    handlers.SwitchAppVersionRequest:
+      properties:
+        version_id:
+          description: VersionID 是目标助手版本 id，必须在实例所属组织的 allowlist 内。
+          type: string
+      required:
+      - version_id
+      type: object
     handlers.UpdateAssistantVersionRequest:
       properties:
         description:
@@ -703,6 +711,14 @@ components:
           type: string
         status:
           type: string
+        version_id:
+          description: VersionID 是实例绑定的助手版本 id；空表示未绑定（仅历史数据）。
+          type: string
+        version_synced:
+          description: |-
+            VersionSynced 标记实例运行时是否已与绑定版本对齐（修订 + 镜像都一致）；
+            false 表示版本被编辑过，需重启实例生效。
+          type: boolean
       type: object
     service.AssistantVersionResult:
       properties:
@@ -4405,6 +4421,71 @@ paths:
       summary: 应用用量日志
       tags:
       - usage
+  /apps/{appId}/version:
+    post:
+      description: 切换实例绑定的助手版本；目标版本必须在实例所属组织的 allowlist 内。切换后需重启实例生效。
+      parameters:
+      - description: 应用 ID
+        in: path
+        name: appId
+        required: true
+        schema:
+          type: string
+      requestBody:
+        content:
+          application/json:
+            schema:
+              oneOf:
+              - type: object
+              - $ref: '#/components/schemas/handlers.SwitchAppVersionRequest'
+                description: 目标版本
+                summary: body
+        description: 目标版本
+        required: true
+      responses:
+        "200":
+          content:
+            application/json:
+              schema:
+                additionalProperties:
+                  $ref: '#/components/schemas/service.AppResult'
+                type: object
+          description: OK
+        "400":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/handlers.ErrorResponse'
+          description: Bad Request
+        "401":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/handlers.ErrorResponse'
+          description: Unauthorized
+        "403":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/handlers.ErrorResponse'
+          description: Forbidden
+        "404":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/handlers.ErrorResponse'
+          description: Not Found
+        "500":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/handlers.ErrorResponse'
+          description: Internal Server Error
+      security:
+      - BearerAuth: []
+      summary: 切换实例助手版本
+      tags:
+      - apps
   /apps/{appId}/workspace:
     get:
       description: 列出应用工作目录下的文件和子目录；path 为空时列出根目录
