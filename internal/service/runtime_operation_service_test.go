@@ -78,13 +78,18 @@ func TestRuntimeOperationSurvivesNotifierError(t *testing.T) {
 	require.NoError(t, err)
 }
 
-// TestRuntimeOperationRejectsPlatformAdminWrite 验证运行时Operation拒绝平台管理员写入的异常或拒绝路径场景。
-func TestRuntimeOperationRejectsPlatformAdminWrite(t *testing.T) {
+// TestRuntimeOperationAllowsPlatformAdmin 验证 CanTriggerRuntimeOperation 扩展后平台管理员可触发 stop 等运行时操作。
+// 规格变更：平台管理员需要介入实例运维（启停/重启），故从原来的拒绝改为允许。
+func TestRuntimeOperationAllowsPlatformAdmin(t *testing.T) {
 	store := newRuntimeOperationStub(t)
+	// 使 app 处于 running 状态才允许 stop。
+	store.app.Status = domain.AppStatusRunning
 	svc := NewRuntimeOperationService(store, newDiscardLogger())
 
-	_, err := svc.Trigger(context.Background(), platformAdmin(), testRuntimeOpAppID, RuntimeOperationStop)
-	require.ErrorIs(t, err, ErrRuntimeOperationDenied)
+	// 平台管理员调用 stop，应成功返回 job_id 而非 ErrRuntimeOperationDenied。
+	result, err := svc.Trigger(context.Background(), platformAdmin(), testRuntimeOpAppID, RuntimeOperationStop)
+	require.NoError(t, err, "CanTriggerRuntimeOperation 已扩展至 platform_admin，Trigger 应允许")
+	require.NotEmpty(t, result.JobID, "成功触发后应返回非空 job_id")
 }
 
 // TestRequestInitialize_HappyPathFromError 验证请求初始化成功路径来自错误的成功路径场景。

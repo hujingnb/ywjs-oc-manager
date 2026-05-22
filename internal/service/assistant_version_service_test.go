@@ -111,11 +111,13 @@ func platformPrincipal() auth.Principal {
 	return auth.Principal{UserID: "00000000-0000-0000-0000-0000000000ff", Role: domain.UserRolePlatformAdmin}
 }
 
-// TestAssistantVersionListDeniesMember 验证普通成员读版本列表被拒。
-func TestAssistantVersionListDeniesMember(t *testing.T) {
+// TestAssistantVersionListAllowsMember 验证 CanViewAssistantVersion 扩展后 org_member 可正常读版本列表。
+// org_member 需要在应用概览中查询版本名称，因此后端开放了该接口。
+func TestAssistantVersionListAllowsMember(t *testing.T) {
 	svc := newTestAVService(t, newFakeAVStore())
+	// org_member 调用 List 应无权限错误，返回空列表（存根无数据）。
 	_, err := svc.List(context.Background(), auth.Principal{Role: domain.UserRoleOrgMember})
-	require.ErrorIs(t, err, ErrAssistantVersionDenied)
+	require.NoError(t, err, "CanViewAssistantVersion 已扩展至 org_member，List 应返回 nil 错误")
 }
 
 // TestAssistantVersionGetNotFound 验证查询不存在的版本返回 NotFound。

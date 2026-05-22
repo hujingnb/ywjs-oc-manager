@@ -314,7 +314,8 @@ func (s *RuntimeOperationService) RequestInitialize(ctx context.Context, princip
 	if err := s.ensurePrincipalActive(ctx, principal); err != nil {
 		return RuntimeOperationResult{}, err
 	}
-	if !auth.CanTriggerRuntimeOperation(principal, uuidToString(app.OrgID), uuidToString(app.OwnerUserID)) {
+	// RequestInitialize 对应"重新初始化"操作，不属于常规启停运维；平台管理员不开放此入口。
+	if !auth.CanManageApp(principal, uuidToString(app.OrgID), uuidToString(app.OwnerUserID)) {
 		return RuntimeOperationResult{}, ErrRuntimeOperationDenied
 	}
 	if app.Status != domain.AppStatusError && app.Status != domain.AppStatusDraft {

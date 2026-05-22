@@ -480,8 +480,9 @@ func (s *AssistantVersionService) persistSkills(ctx context.Context, row sqlc.As
 }
 
 // ListRuntimeImages 返回全部可选镜像，供前端版本编辑表单的镜像 select 使用。
+// 镜像目录属于平台运维数据，使用 CanManageAssistantVersion（仅 platform_admin）保护。
 func (s *AssistantVersionService) ListRuntimeImages(_ context.Context, principal auth.Principal) ([]RuntimeImageOption, error) {
-	if !auth.CanViewAssistantVersion(principal) {
+	if !auth.CanManageAssistantVersion(principal) {
 		return nil, ErrAssistantVersionDenied
 	}
 	return s.images.ListRuntimeImages(), nil
