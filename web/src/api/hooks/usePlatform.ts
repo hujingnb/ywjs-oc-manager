@@ -36,3 +36,32 @@ export function usePlatformOverviewQuery(enabled: Ref<boolean>) {
     },
   })
 }
+
+// OrgUsageBreakdownItem 与后端 service.OrgUsageItem 字段一一对应。
+export interface OrgUsageBreakdownItem {
+  // 组织 UUID。
+  org_id: string
+  // 组织显示名。
+  org_name: string
+  // [since, until] 内各日 quota 累计值（new-api 原始单位）。
+  total_quota: number
+}
+
+// usePlatformOrgBreakdownQuery 拉各组织近 7 天 quota 消耗汇总，仅 platform_admin 可调。
+// 60 秒刷新，图表数据变化频率低于统计卡片。
+export function usePlatformOrgBreakdownQuery(enabled: Ref<boolean>) {
+  return useQuery<OrgUsageBreakdownItem[]>({
+    queryKey: ['platform', 'usage', 'org-breakdown'],
+    enabled: () => enabled.value,
+    refetchInterval: 60000,
+    queryFn: async () => {
+      const now = Math.floor(Date.now() / 1000)
+      const since = now - 7 * 24 * 60 * 60
+      const resp = await apiRequest<{ breakdown: { items: OrgUsageBreakdownItem[] } }>(
+        '/api/v1/platform/usage/org-breakdown',
+        { query: { since: String(since), until: String(now) } },
+      )
+      return resp.breakdown.items ?? []
+    },
+  })
+}
