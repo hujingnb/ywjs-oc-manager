@@ -76,7 +76,7 @@
           <n-tag v-if="app.version_synced === false" type="warning" size="small" :bordered="false">需重启</n-tag>
           <!-- 切换按钮仅对有应用管理权限且可查看版本目录的用户展示 -->
           <n-button
-            v-if="canManageApp(auth.user, app) && canViewVersions"
+            v-if="canSwitchAppVersion(auth.user, app) && canViewVersions"
             size="small"
             @click="openSwitchVersionModal"
           >
@@ -161,7 +161,7 @@ import { useOrganizationQuery } from '@/api/hooks/useOrganizations'
 import AppStatusTag from '@/components/AppStatusTag.vue'
 import ConfirmActionModal from '@/components/ConfirmActionModal.vue'
 import JobProgressPanel from '@/components/JobProgressPanel.vue'
-import { canManageApp } from '@/domain/permissions'
+import { canManageApp, canSwitchAppVersion } from '@/domain/permissions'
 import { formatAppStatus, isInitPhase } from '@/domain/status'
 import { useAuthStore } from '@/stores/auth'
 
@@ -176,8 +176,8 @@ const orgId = computed<string | undefined>(() => app?.value?.org_id)
 const organizationQuery = useOrganizationQuery(orgId)
 const organizationName = computed(() => organizationQuery.data.value?.name || '未知组织')
 
-// canViewVersions 控制是否拉取助手版本目录：仅平台管理员和组织管理员可读 /assistant-versions。
-const canViewVersions = computed(() => auth.isPlatformAdmin || auth.user?.role === 'org_admin')
+// canViewVersions：三角色均可查看助手版本目录（CanViewAssistantVersion 已扩展至 org_member）。
+const canViewVersions = computed(() => !!auth.user)
 
 // 仅在有权限时拉取助手版本目录，避免普通成员触发 403。
 const versionsQuery = useAssistantVersionsQuery(() => canViewVersions.value)
