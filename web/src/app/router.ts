@@ -31,6 +31,7 @@ import RuntimeNodeDetailPage from '@/pages/runtime-nodes/RuntimeNodeDetailPage.v
 import RuntimeNodesPage from '@/pages/runtime-nodes/RuntimeNodesPage.vue'
 import UsagePage from '@/pages/usage/UsagePage.vue'
 import OrgBalancePage from '@/pages/org/OrgBalancePage.vue'
+import PermissionsPage from '@/pages/platform/PermissionsPage.vue'
 import { useAuthStore } from '@/stores/auth'
 
 // allowedRoles 表示可访问该路由的角色集合；undefined 表示对所有已登录用户开放。
@@ -58,6 +59,7 @@ export const router = createRouter({
         { path: 'assistant-versions', component: AssistantVersionsPage, meta: { allowedRoles: PLATFORM_ONLY } },
         { path: 'platform/dashboard', component: PlatformDashboardPage, meta: { allowedRoles: PLATFORM_ONLY } },
         { path: 'platform/organizations/:orgId/recharge', component: RechargePage, meta: { allowedRoles: PLATFORM_ONLY } },
+        { path: 'platform/permissions', component: PermissionsPage, meta: { allowedRoles: PLATFORM_ONLY } },
         { path: 'members', component: MembersPage, meta: { allowedRoles: ORG_ADMIN_ABOVE } },
         { path: 'members/new', component: CreateMemberPage, meta: { allowedRoles: ORG_ADMIN_ONLY } },
         { path: 'audit-logs', component: AuditLogsPage, meta: { allowedRoles: ORG_ADMIN_ABOVE } },

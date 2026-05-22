@@ -80,7 +80,7 @@ import {
 } from 'naive-ui'
 import {
   BarChart3, BookOpen, Bot, Boxes, Building2, FileSearch, Gauge,
-  LayoutDashboard, LogOut, RefreshCw, Server, Users, Wallet,
+  LayoutDashboard, LogOut, RefreshCw, Server, ShieldCheck, Users, Wallet,
 } from 'lucide-vue-next'
 
 import { useAuthStore } from '@/stores/auth'
@@ -113,6 +113,7 @@ const activeKey = computed(() => {
     '/balance',
     '/audit-logs',
     '/runtime-nodes',
+    '/platform/permissions',
   ]
   return prefixes.find(k => p.startsWith(k)) ?? '/'
 })
@@ -159,6 +160,7 @@ const menuOptions = computed<MenuOption[]>(() => {
   }
   if (isPlatformAdmin.value) {
     items.push({ key: '/runtime-nodes', label: '运行节点', icon: () => h(Server, { size: 18 }) })
+    items.push({ key: '/platform/permissions', label: '权限说明', icon: () => h(ShieldCheck, { size: 18 }) })
   }
   return items
 })
