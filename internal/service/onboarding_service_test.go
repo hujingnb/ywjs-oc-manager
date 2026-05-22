@@ -276,18 +276,18 @@ func (r *txRunnerStub) WithTx(ctx context.Context, fn func(OnboardingStore) erro
 }
 
 type onboardingStub struct {
-	t              *testing.T
-	org            sqlc.Organization
-	user           sqlc.User
-	activeApp      *sqlc.App
-	users          int
-	apps           int
-	bindings       int
-	audits         int
-	auditLogs      []sqlc.CreateAuditLogParams
-	jobs           int
-	staged         counters
-	stagedAudits   []sqlc.CreateAuditLogParams
+	t                *testing.T
+	org              sqlc.Organization
+	user             sqlc.User
+	activeApp        *sqlc.App
+	users            int
+	apps             int
+	bindings         int
+	audits           int
+	auditLogs        []sqlc.CreateAuditLogParams
+	jobs             int
+	staged           counters
+	stagedAudits     []sqlc.CreateAuditLogParams
 	appErr           error
 	jobErr           error
 	lastAppNodeID    string
@@ -305,9 +305,9 @@ func newOnboardingStub(t *testing.T) *onboardingStub {
 	return &onboardingStub{
 		t: t,
 		org: sqlc.Organization{
-			ID:     mustUUID(t, testOrgID),
-			Status: domain.StatusActive,
-			Name:   "测试组织",
+			ID:      mustUUID(t, testOrgID),
+			Status:  domain.StatusActive,
+			Name:    "测试组织",
 			ModelID: "qwen2.5:7b",
 			// 预置 allowlist，包含 testVersionID，供创建实例时的版本校验通过。
 			AssistantVersionIds: []byte(`["` + testVersionID + `"]`),
@@ -388,7 +388,6 @@ func (s *onboardingStub) CreateApp(_ context.Context, arg sqlc.CreateAppParams) 
 		OwnerUserID:  arg.OwnerUserID,
 		Name:         arg.Name,
 		Status:       arg.Status,
-		PersonaMode:  arg.PersonaMode,
 		ApiKeyStatus: arg.ApiKeyStatus,
 		ModelID:      arg.ModelID,
 	}, nil
@@ -548,11 +547,11 @@ func TestOnboardMember_RejectsVersionNotInAllowlist(t *testing.T) {
 
 	// 使用一个不在 org.AssistantVersionIds 内的版本 ID，应触发 allowlist 校验失败。
 	_, err := svc.OnboardMember(context.Background(), orgOnboardingAdmin(), testOrgID, OnboardMemberInput{
-		Username:  "alice",
+		Username:    "alice",
 		DisplayName: "Alice",
-		Password:  "pwd",
-		AppName:   "alice-bot",
-		VersionID: "00000000-0000-0000-0000-000000000fff", // 不在 allowlist 内
+		Password:    "pwd",
+		AppName:     "alice-bot",
+		VersionID:   "00000000-0000-0000-0000-000000000fff", // 不在 allowlist 内
 	})
 	require.ErrorIs(t, err, ErrMemberCreateInvalid)
 	require.False(t, tx.committed)

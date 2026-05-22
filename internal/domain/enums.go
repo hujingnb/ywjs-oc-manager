@@ -22,18 +22,14 @@ const (
 	// 让每个 agent 直接从公网 registry 拉取 hermes 镜像。
 	AppStatusPullingRuntimeImage = "pulling_runtime_image"
 	AppStatusPreparingRuntime    = "preparing_runtime"
-	AppStatusCreatingContainer = "creating_container"
-	AppStatusStarting          = "starting"
-	AppStatusBindingWaiting    = "binding_waiting"
-	AppStatusBindingFailed     = "binding_failed"
-	AppStatusRunning           = "running"
-	AppStatusStopped           = "stopped"
-	AppStatusError             = "error"
-	AppStatusDeleted           = "deleted"
-
-	// PersonaMode* 控制应用使用组织继承人设还是应用级覆盖人设。
-	PersonaModeOrgInherited = "org_inherited"
-	PersonaModeAppOverride  = "app_override"
+	AppStatusCreatingContainer   = "creating_container"
+	AppStatusStarting            = "starting"
+	AppStatusBindingWaiting      = "binding_waiting"
+	AppStatusBindingFailed       = "binding_failed"
+	AppStatusRunning             = "running"
+	AppStatusStopped             = "stopped"
+	AppStatusError               = "error"
+	AppStatusDeleted             = "deleted"
 
 	// APIKeyStatus* 描述 new-api token 生命周期，独立于 app.status。
 	APIKeyStatusPending  = "pending"

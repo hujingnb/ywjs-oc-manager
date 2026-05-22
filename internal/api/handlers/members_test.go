@@ -170,7 +170,7 @@ func TestMembersCreateAppForMemberForwardsRequest(t *testing.T) {
 
 	recorder := httptest.NewRecorder()
 	// version_id 为必填字段，与应用字段一同传入；验证全部字段透传给 service 入参。
-	body := bytes.NewBufferString(`{"app_name":"alice-new-bot","persona_mode":"app_override","app_prompt":"hello","channel_type":"wechat","runtime_node_id":"node-1","version_id":"v-id-create-app"}`)
+	body := bytes.NewBufferString(`{"app_name":"alice-new-bot","channel_type":"wechat","runtime_node_id":"node-1","version_id":"v-id-create-app"}`)
 	request := httptest.NewRequest(http.MethodPost, "/api/v1/organizations/org-1/members/user-1/apps", body)
 	request.Header.Set("Content-Type", "application/json")
 	request = withPrincipal(request, auth.Principal{UserID: "p1", Role: domain.UserRolePlatformAdmin})

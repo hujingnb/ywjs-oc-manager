@@ -20,9 +20,6 @@ type App struct {
 	Name          string      `db:"name" json:"name"`
 	Description   pgtype.Text `db:"description" json:"description"`
 	Status        string      `db:"status" json:"status"`
-	// 人设模式：继承组织人设或使用应用级覆盖提示词。
-	PersonaMode   string      `db:"persona_mode" json:"persona_mode"`
-	AppPrompt     pgtype.Text `db:"app_prompt" json:"app_prompt"`
 	ContainerID   pgtype.Text `db:"container_id" json:"container_id"`
 	ContainerName pgtype.Text `db:"container_name" json:"container_name"`
 	NewapiKeyID   pgtype.Text `db:"newapi_key_id" json:"newapi_key_id"`

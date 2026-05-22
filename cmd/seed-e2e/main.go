@@ -157,7 +157,6 @@ func ensurePlatformAdmin(ctx context.Context, conn *pgx.Conn, username, password
 // 与 plan 草稿的字段差异（以 internal/migrations 实际 schema 为准）：
 //   - users / apps 的外键列叫 org_id（plan 写的是 organization_id）。
 //   - runtime_nodes 文件 endpoint 列名是 agent_file_endpoint（单数），数据根目录列名是 node_data_root。
-//   - apps.persona_mode 合法枚举为 'org_inherited'（plan 写的 'org_inherit' 会被 CHECK 拒绝）。
 //   - apps.owner_user_id NOT NULL，必须挂在某个真实用户上，这里用 org_admin。
 func buildFixture(ctx context.Context, conn *pgx.Conn) (fixture, error) {
 	var fx fixture
@@ -234,8 +233,8 @@ func buildFixture(ctx context.Context, conn *pgx.Conn) (fixture, error) {
 	fx.AppName = "e2e-app"
 	if err := conn.QueryRow(ctx, `
 		INSERT INTO apps
-			(org_id, owner_user_id, runtime_node_id, name, status, persona_mode, api_key_status, model_id)
-		VALUES ($1, $2, $3, $4, 'running', 'org_inherited', 'active', $5)
+			(org_id, owner_user_id, runtime_node_id, name, status, api_key_status, model_id)
+		VALUES ($1, $2, $3, $4, 'running', 'active', $5)
 		RETURNING id`, fx.OrgID, orgAdminID, fx.NodeID, fx.AppName, fx.ModelIDs[0],
 	).Scan(&fx.AppID); err != nil {
 		return fx, fmt.Errorf("create app: %w", err)

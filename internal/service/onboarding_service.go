@@ -113,8 +113,6 @@ type OnboardMemberInput struct {
 	Password    string
 	Role        string
 	AppName     string
-	AppPrompt   string
-	PersonaMode string
 	ChannelType string
 	NodeID      string // 可选：指定要部署的 runtime 节点 ID。
 	VersionID   string // 必填：实例绑定的助手版本 ID，必须在组织的 assistant_version_ids 允许列表内。
@@ -130,8 +128,6 @@ type OnboardMemberResult struct {
 // CreateAppForMemberInput 描述为已有成员重建实例时需要的应用初始化字段。
 type CreateAppForMemberInput struct {
 	AppName     string
-	AppPrompt   string
-	PersonaMode string
 	ChannelType string
 	NodeID      string
 	VersionID   string // 必填：实例绑定的助手版本 ID，必须在组织的 assistant_version_ids 允许列表内。
@@ -162,10 +158,6 @@ func (s *MemberOnboardingService) OnboardMember(ctx context.Context, principal a
 	channelType := input.ChannelType
 	if channelType == "" {
 		channelType = domain.ChannelTypeWeChat
-	}
-	personaMode := input.PersonaMode
-	if personaMode == "" {
-		personaMode = domain.PersonaModeOrgInherited
 	}
 	orgUUID, err := parseUUID(orgID)
 	if err != nil {
@@ -227,8 +219,6 @@ func (s *MemberOnboardingService) OnboardMember(ctx context.Context, principal a
 			Name:          input.AppName,
 			Description:   pgtype.Text{},
 			Status:        domain.AppStatusDraft,
-			PersonaMode:   personaMode,
-			AppPrompt:     pgtype.Text{String: input.AppPrompt, Valid: input.AppPrompt != ""},
 			ApiKeyStatus:  domain.APIKeyStatusPending,
 			ModelID:       modelID,
 			VersionID:     versionUUID,
@@ -323,10 +313,6 @@ func (s *MemberOnboardingService) CreateAppForMember(ctx context.Context, princi
 	if channelType == "" {
 		channelType = domain.ChannelTypeWeChat
 	}
-	personaMode := input.PersonaMode
-	if personaMode == "" {
-		personaMode = domain.PersonaModeOrgInherited
-	}
 	orgUUID, err := parseUUID(orgID)
 	if err != nil {
 		return CreateAppForMemberResult{}, ErrNotFound
@@ -393,8 +379,6 @@ func (s *MemberOnboardingService) CreateAppForMember(ctx context.Context, princi
 			Name:          input.AppName,
 			Description:   pgtype.Text{},
 			Status:        domain.AppStatusDraft,
-			PersonaMode:   personaMode,
-			AppPrompt:     pgtype.Text{String: input.AppPrompt, Valid: input.AppPrompt != ""},
 			ApiKeyStatus:  domain.APIKeyStatusPending,
 			ModelID:       modelID,
 			VersionID:     versionUUID,

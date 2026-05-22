@@ -148,7 +148,6 @@ func newWorkspaceStub(t *testing.T) *workspaceStub {
 		OrgID:        mustUUID(t, testWorkOrg),
 		OwnerUserID:  mustUUID(t, testWorkOwner),
 		Status:       domain.AppStatusRunning,
-		PersonaMode:  domain.PersonaModeOrgInherited,
 		ApiKeyStatus: domain.APIKeyStatusActive,
 	}
 	app.RuntimeNodeID = mustUUID(t, testWorkNode)

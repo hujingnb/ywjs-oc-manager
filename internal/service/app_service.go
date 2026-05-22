@@ -67,8 +67,6 @@ type AppResult struct {
 	Name          string `json:"name"`
 	Description   string `json:"description,omitempty"`
 	Status        string `json:"status"`
-	PersonaMode   string `json:"persona_mode"`
-	AppPrompt     string `json:"app_prompt,omitempty"`
 	ModelID       string `json:"model_id"`
 	ContainerID   string `json:"container_id,omitempty"`
 	APIKeyStatus  string `json:"api_key_status"`
@@ -170,7 +168,6 @@ func toAppResult(app sqlc.App) AppResult {
 		OwnerUserID:  uuidToString(app.OwnerUserID),
 		Name:         app.Name,
 		Status:       app.Status,
-		PersonaMode:  app.PersonaMode,
 		ModelID:      app.ModelID,
 		APIKeyStatus: app.ApiKeyStatus,
 		ModelSynced:  app.ModelSynced,
@@ -180,9 +177,6 @@ func toAppResult(app sqlc.App) AppResult {
 	}
 	if app.Description.Valid {
 		result.Description = app.Description.String
-	}
-	if app.AppPrompt.Valid {
-		result.AppPrompt = app.AppPrompt.String
 	}
 	if app.ContainerID.Valid {
 		result.ContainerID = app.ContainerID.String

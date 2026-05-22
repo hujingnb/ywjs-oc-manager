@@ -193,7 +193,6 @@ func newChannelStub(t *testing.T) *channelStub {
 		OrgID:        mustUUID(t, testChannelOrg),
 		OwnerUserID:  mustUUID(t, testChannelOwner),
 		Status:       domain.AppStatusBindingWaiting,
-		PersonaMode:  domain.PersonaModeOrgInherited,
 		ApiKeyStatus: domain.APIKeyStatusActive,
 	}
 	binding := sqlc.ChannelBinding{

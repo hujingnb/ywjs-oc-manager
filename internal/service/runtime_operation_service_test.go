@@ -240,7 +240,6 @@ func newRuntimeOperationStub(t *testing.T) *runtimeOperationStub {
 		OrgID:        mustUUID(t, testRuntimeOpOrg),
 		OwnerUserID:  mustUUID(t, testRuntimeOpOwner),
 		Status:       domain.AppStatusRunning,
-		PersonaMode:  domain.PersonaModeOrgInherited,
 		ApiKeyStatus: domain.APIKeyStatusActive,
 	}
 	return &runtimeOperationStub{t: t, app: app, userStatus: domain.StatusActive}

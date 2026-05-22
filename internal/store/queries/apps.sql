@@ -6,13 +6,11 @@ INSERT INTO apps (
     name,
     description,
     status,
-    persona_mode,
-    app_prompt,
     api_key_status,
     model_id,
     version_id
 ) VALUES (
-    $1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11
+    $1, $2, $3, $4, $5, $6, $7, $8, $9
 )
 RETURNING *;
 

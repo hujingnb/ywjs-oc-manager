@@ -99,7 +99,6 @@ func (s *appServiceStoreStub) mustSeedApp(t *testing.T, modelID string) sqlc.App
 		RuntimeNodeID: mustUUID(t, "00000000-0000-0000-0000-000000002002"),
 		Name:          "测试实例",
 		Status:        domain.AppStatusRunning,
-		PersonaMode:   domain.PersonaModeOrgInherited,
 		ApiKeyStatus:  domain.APIKeyStatusActive,
 		ModelID:       modelID,
 	}
@@ -115,8 +114,6 @@ func (s *appServiceStoreStub) CreateApp(_ context.Context, arg sqlc.CreateAppPar
 		Name:          arg.Name,
 		Description:   arg.Description,
 		Status:        arg.Status,
-		PersonaMode:   arg.PersonaMode,
-		AppPrompt:     arg.AppPrompt,
 		ApiKeyStatus:  arg.ApiKeyStatus,
 		ModelID:       arg.ModelID,
 	}
