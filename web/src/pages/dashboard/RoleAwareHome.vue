@@ -31,11 +31,13 @@ const router = useRouter()
 
 const { appId: memberAppId, hasApp: memberHasApp } = useMemberApp()
 
-// platform_admin 访问首页直接跳转到控制台，不展示欢迎卡片。
+// platform_admin / org_admin 访问首页直接跳转到各自控制台，不展示欢迎卡片。
 // 在 mounted 后再跳转，避免当前导航事务尚未完成时的 navigation warning。
 onMounted(() => {
   if (auth.user?.role === 'platform_admin') {
     router.replace('/console')
+  } else if (auth.user?.role === 'org_admin') {
+    router.replace('/org-console')
   }
 })
 

@@ -29,6 +29,7 @@ import OrgKnowledgePage from '@/pages/knowledge/OrgKnowledgePage.vue'
 import RuntimeNodeDetailPage from '@/pages/runtime-nodes/RuntimeNodeDetailPage.vue'
 import RuntimeNodesPage from '@/pages/runtime-nodes/RuntimeNodesPage.vue'
 import UsagePage from '@/pages/usage/UsagePage.vue'
+import OrgConsolePage from '@/pages/org/OrgConsolePage.vue'
 import OrgBalancePage from '@/pages/org/OrgBalancePage.vue'
 import PermissionsPage from '@/pages/platform/PermissionsPage.vue'
 import { useAuthStore } from '@/stores/auth'
@@ -54,6 +55,7 @@ export const router = createRouter({
       children: [
         { path: '', component: RoleAwareHome },
         { path: 'console', component: ConsolePage, meta: { allowedRoles: PLATFORM_ONLY } },
+        { path: 'org-console', component: OrgConsolePage, meta: { allowedRoles: ORG_ADMIN_ONLY } },
         { path: 'platform/dashboard', redirect: '/console' },
         { path: 'dashboard', redirect: '/console' },
         { path: 'organizations', component: OrganizationsPage, meta: { allowedRoles: PLATFORM_ONLY } },
