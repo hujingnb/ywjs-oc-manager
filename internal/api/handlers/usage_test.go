@@ -56,6 +56,11 @@ func (s *usageServiceStub) GetAppUsage(_ context.Context, _ auth.Principal, _, _
 	return s.appResult, s.appErr
 }
 
+// GetOrgUsageBreakdown 实现 usageService 接口的 GetOrgUsageBreakdown 方法。
+func (s *usageServiceStub) GetOrgUsageBreakdown(_ context.Context, _ auth.Principal, _, _ int64) (service.OrgUsageBreakdown, error) {
+	return service.OrgUsageBreakdown{}, nil
+}
+
 // newUsageTestRouter 构建用于测试的 gin router。
 func newUsageTestRouter(t *testing.T, svc usageService) *gin.Engine {
 	t.Helper()
