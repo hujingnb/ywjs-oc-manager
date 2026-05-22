@@ -56,3 +56,29 @@ export function canViewOwnAppAudit(user: PermissionUser | null | undefined, app:
   if (user.role === 'org_member') return user.id === app.owner_user_id
   return false
 }
+
+// canSwitchAppVersion：版本切换是运维操作，平台管理员可统一管理；与 canManageApp 分离。
+// 与后端 CanSwitchAppVersion 保持一致。
+export function canSwitchAppVersion(
+  user: PermissionUser | null | undefined,
+  app: PermissionApp | null | undefined,
+): boolean {
+  if (!user || !app) return false
+  if (user.role === 'platform_admin') return true
+  if (user.role === 'org_admin') return user.org_id === app.org_id
+  if (user.role === 'org_member') return user.id === app.owner_user_id
+  return false
+}
+
+// canTriggerRuntimeOperation：运行时启停/重启，平台管理员需要运维介入能力。
+// 与后端 CanTriggerRuntimeOperation 保持一致。
+export function canTriggerRuntimeOperation(
+  user: PermissionUser | null | undefined,
+  app: PermissionApp | null | undefined,
+): boolean {
+  if (!user || !app) return false
+  if (user.role === 'platform_admin') return true
+  if (user.role === 'org_admin') return user.org_id === app.org_id
+  if (user.role === 'org_member') return user.id === app.owner_user_id
+  return false
+}
