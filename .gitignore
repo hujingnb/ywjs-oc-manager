@@ -14,6 +14,8 @@ tmp/
 web/node_modules/
 web/dist/
 web/test-results/
+# 顶层 node_modules：make web-types-gen 跑 npx 时在仓库根遗留的 .vite 缓存
+/node_modules/
 
 # 顶层临时编译产物（agent 二进制 build 时出现）
 /agent
