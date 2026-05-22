@@ -360,6 +360,8 @@ func runManager(ctx context.Context, cfg config.Config, logOut io.Writer) error 
 			DefaultModel:   cfg.Hermes.LLM.DefaultModel,
 		},
 	))
+	// 注入 job notifier：restart 检测到镜像变更时入队 app_initialize job 后即时唤醒 worker。
+	restartHandler.SetJobNotifier(redisQueue)
 	if err := registry.Register("app_restart_container", restartHandler.Handle); err != nil {
 		return fmt.Errorf("注册 app_restart_container handler 失败: %w", err)
 	}

@@ -47,6 +47,11 @@ func (s *fakeHealthStore) SetAppAppliedVersion(_ context.Context, _ sqlc.SetAppA
 	return s.app, nil
 }
 
+// SetAppContainer 实现 AppRuntimeStore 接口；健康检查流程不重建容器，此处仅满足接口约束。
+func (s *fakeHealthStore) SetAppContainer(_ context.Context, _ sqlc.SetAppContainerParams) (sqlc.App, error) {
+	return s.app, nil
+}
+
 func (s *fakeHealthStore) SetAppHealthState(_ context.Context, p sqlc.SetAppHealthStateParams) (sqlc.App, error) {
 	s.healthState = p.HealthStateJson
 	return s.app, nil

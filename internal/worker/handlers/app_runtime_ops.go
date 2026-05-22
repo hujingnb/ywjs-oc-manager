@@ -6,6 +6,7 @@ import (
 	"errors"
 	"fmt"
 	"strconv"
+	"time"
 
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgtype"
@@ -24,6 +25,12 @@ type AppRuntimeStore interface {
 	// SetAppAppliedVersion 在重启成功后记录已应用的版本修订与镜像 ref，
 	// 供前端 version_synced 检测使用。
 	SetAppAppliedVersion(ctx context.Context, arg sqlc.SetAppAppliedVersionParams) (sqlc.App, error)
+	// SetAppContainer 在重启检测到镜像变更后清空 apps.container_id / container_name，
+	// 让后续 app_initialize job 重新创建容器（空 ContainerID/ContainerName 即清空）。
+	SetAppContainer(ctx context.Context, arg sqlc.SetAppContainerParams) (sqlc.App, error)
+	// CreateJob 在重启检测到镜像变更后入队 app_initialize job，
+	// 复用初始化 4 阶段重拉新镜像并重建容器。
+	CreateJob(ctx context.Context, arg sqlc.CreateJobParams) (sqlc.Job, error)
 }
 
 // ContainerLifecycle 抽象 worker 需要的容器生命周期能力。
@@ -212,6 +219,12 @@ type AppInputRefresher interface {
 	RefreshAppInput(ctx context.Context, nodeID string, app sqlc.App) (AppInputRefreshResult, error)
 }
 
+// RestartJobNotifier 抽象向 Redis 队列即时推送 jobID 的能力。
+// 与 service.JobNotifier 同形态；nil 时由 scheduler 兜底入队。
+type RestartJobNotifier interface {
+	Enqueue(ctx context.Context, jobID string) error
+}
+
 // AppRestartContainerHandler 触发应用容器重启,由可选的 SessionCleaner 决定走
 // stop → clear sessions → start 三步还是退回到原子 docker restart。
 //
@@ -230,6 +243,9 @@ type AppRestartContainerHandler struct {
 	containers     ContainerLifecycle
 	sessionCleaner SessionCleaner
 	inputRefresher AppInputRefresher
+	// notifier 在重启检测到镜像变更、入队 app_initialize job 后即时推送 jobID，
+	// 让 worker 不必等 scheduler 轮询即可拾取；nil 时由 scheduler 兜底入队。
+	notifier RestartJobNotifier
 }
 
 // NewAppRestartContainerHandler 创建重启容器 handler，复用容器生命周期接口。
@@ -255,6 +271,15 @@ func (h *AppRestartContainerHandler) SetInputRefresher(r AppInputRefresher) {
 	h.inputRefresher = r
 }
 
+// SetJobNotifier 注入「向 Redis 队列即时推送 jobID」的能力。
+//
+// 仅在重启检测到镜像变更、入队 app_initialize job 后用于即时唤醒 worker；
+// nil 时入队的 job 由 scheduler 周期轮询兜底拾取（与现有 SetSessionCleaner /
+// SetInputRefresher 一致，为可选的 nil 安全注入）。
+func (h *AppRestartContainerHandler) SetJobNotifier(n RestartJobNotifier) {
+	h.notifier = n
+}
+
 // Handle 执行 app_restart_container job，并在成功后把应用状态推回 running。
 func (h *AppRestartContainerHandler) Handle(ctx context.Context, job sqlc.Job) error {
 	if job.Type != domain.JobTypeAppRestartContainer {
@@ -268,9 +293,9 @@ func (h *AppRestartContainerHandler) Handle(ctx context.Context, job sqlc.Job) e
 	if err != nil {
 		return err
 	}
-	if app.ContainerID.String == "" {
-		return fmt.Errorf("应用 %s 尚未创建容器，无法重启", payload.AppID)
-	}
+	// 注意：「缺 container_id」的拒绝校验下移到原 stop/clear/start 路径之前。
+	// 镜像变更重建分支被 worker 重试时 container_id 可能已被上一次尝试清空，
+	// 此时仍须放行进入重建分支重新入队 app_initialize，不能在此提前报错。
 	nodeID := uuidToString(app.RuntimeNodeID)
 	// 在 stop 之前先把节点上的 apps/<id>/input/ 重写成 DB 当前快照:
 	// oc-entrypoint 在下次容器启动时读取该目录,渲染出新的 config.yaml(含 model)
@@ -286,6 +311,70 @@ func (h *AppRestartContainerHandler) Handle(ctx context.Context, job sqlc.Job) e
 		if err != nil {
 			return fmt.Errorf("刷新应用 input 失败: %w", err)
 		}
+	}
+	// 镜像变更重建分支：容器镜像在创建时即固定，restart 只是 stop → start 同一个
+	// 容器，绑定版本换了运行时镜像后 restart 永远拉不到新镜像。检测到 refresher
+	// 解析出的镜像 ref 与 apps.runtime_image_ref(容器当前镜像)不一致时，必须重建
+	// 容器：stop + remove 旧容器 → 清空 container_id → 置 status=pulling_runtime_image
+	// → 入队 app_initialize job，复用已测的初始化 4 阶段(pull → prepare → create →
+	// start → binding_waiting)重拉新镜像并重建容器，避免 restart 对镜像维度谎报
+	// version_synced。
+	//
+	// 委托给 re-initialize 而非在此重新装配 ContainerSpec / 拉镜像逻辑，是因为这些
+	// 逻辑已由 AppInitializeHandler 完整实现并测试覆盖，复制一份只会引入重复依赖。
+	//
+	// 幂等：本分支若被 worker 重试(job MaxAttempts=3)，重入时 container_id 可能已被
+	// 上一次尝试清空——此时跳过 stop/remove，仅重新建 job 并入队即可。
+	if h.inputRefresher != nil && refreshResult.ImageRef != "" && refreshResult.ImageRef != app.RuntimeImageRef {
+		if app.ContainerID.String != "" {
+			if err := h.containers.StopContainer(ctx, nodeID, app.ContainerID.String); err != nil {
+				return fmt.Errorf("镜像变更重建前停止旧容器失败: %w", err)
+			}
+			if err := h.containers.RemoveContainer(ctx, nodeID, app.ContainerID.String); err != nil {
+				return fmt.Errorf("镜像变更重建前删除旧容器失败: %w", err)
+			}
+		}
+		// 清空 container_id / container_name，让 app_initialize 重新创建容器。
+		if _, err := h.store.SetAppContainer(ctx, sqlc.SetAppContainerParams{ID: app.ID}); err != nil {
+			return fmt.Errorf("清空容器引用失败: %w", err)
+		}
+		// raw SetAppStatus：restart 一贯不走 EnsureAppTransition，与原逻辑一致。
+		if _, err := h.store.SetAppStatus(ctx, sqlc.SetAppStatusParams{ID: app.ID, Status: domain.AppStatusPullingRuntimeImage}); err != nil {
+			return fmt.Errorf("更新应用状态失败: %w", err)
+		}
+		// payload 与 RuntimeOperationService.RequestInitialize 入队的 app_initialize
+		// job 同形态；init handler 的 decodePayload 只读 app_id + runtime_node。
+		payload, err := json.Marshal(map[string]any{
+			"app_id":       uuidToString(app.ID),
+			"runtime_node": nodeID,
+		})
+		if err != nil {
+			return fmt.Errorf("构造 app_initialize payload 失败: %w", err)
+		}
+		job, err := h.store.CreateJob(ctx, sqlc.CreateJobParams{
+			Type:        domain.JobTypeAppInitialize,
+			Priority:    100,
+			RunAfter:    pgtype.Timestamptz{Time: time.Now(), Valid: true},
+			MaxAttempts: 3,
+			PayloadJson: payload,
+		})
+		if err != nil {
+			return fmt.Errorf("入队 app_initialize job 失败: %w", err)
+		}
+		// 入队失败不阻塞：scheduler 周期轮询会兜底拾取该 job。
+		if h.notifier != nil {
+			_ = h.notifier.Enqueue(ctx, uuidToString(job.ID))
+		}
+		// 直接返回：不再走后续 stop/clear/start，也不调 SetAppStatus(running) /
+		// SetAppModelSynced / SetAppAppliedVersion——这些由 app_initialize handler
+		// 在到达 binding_waiting 时负责，避免对镜像维度谎报 synced。
+		return nil
+	}
+	// 走原 stop/clear/start 重启路径前必须有容器：镜像未变时 restart 操作的就是
+	// 当前容器，缺 container_id 说明实例尚未初始化，无法重启。
+	// （镜像变更重建分支已在上方处理并 return，不受此校验影响。）
+	if app.ContainerID.String == "" {
+		return fmt.Errorf("应用 %s 尚未创建容器，无法重启", payload.AppID)
 	}
 	// session 真正存储是 .hermes/state.db (SQLite),需要在容器 stop 后才能删
 	// (运行中 SQLite 持有文件锁)。所以这里把 docker restart 拆成

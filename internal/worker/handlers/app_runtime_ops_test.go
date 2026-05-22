@@ -2,6 +2,7 @@ package handlers
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"strings"
@@ -289,6 +290,9 @@ func TestAppRestartContainerHandler_NoInputRefresherSkipsRefresh(t *testing.T) {
 // VersionRevision / ImageRef 写入 DB，供前端 version_synced 检测使用。
 func TestAppRestartContainerHandler_RecordsAppliedVersionAfterRefresh(t *testing.T) {
 	stub := runtimeStub(t)
+	// 容器当前镜像与 refresher 返回镜像同值：本用例验证镜像未变时的常规重启路径，
+	// 必须让 RuntimeImageRef 与 refresher.ImageRef 一致，避免触发镜像变更重建分支。
+	stub.app.RuntimeImageRef = "hermes-v2:sha256-abc"
 	containers := &fakeLifecycle{}
 	// refresher 返回版本修订=5，镜像 ref="hermes-v2:sha256-abc"。
 	refresher := &fakeInputRefresher{
@@ -324,6 +328,112 @@ func TestAppRestartContainerHandler_NilRefresherSkipsAppliedVersion(t *testing.T
 	require.NoError(t, err)
 	// SetAppAppliedVersion 不应被调用：没有刷新版本数据，无法确认 applied。
 	require.False(t, stub.appliedVersionSet, "inputRefresher 为 nil 时不应调用 SetAppAppliedVersion")
+}
+
+// TestAppRestartContainerHandler_ImageChangeRecreatesViaInitJob 验证 restart 检测到
+// 绑定版本解析镜像与 apps.runtime_image_ref 不一致时进入重建分支：
+// stop + remove 旧容器、清空 container_id、置 status=pulling_runtime_image、入队
+// app_initialize job 复用初始化 4 阶段重拉新镜像并重建容器，不再走原 restart 三步，
+// 也不调 SetAppAppliedVersion / SetAppModelSynced（由 init handler 负责）。
+func TestAppRestartContainerHandler_ImageChangeRecreatesViaInitJob(t *testing.T) {
+	stub := runtimeStub(t)
+	// 容器当前镜像为旧 ref，模拟绑定版本镜像已升级。
+	stub.app.RuntimeImageRef = "hermes-v1:old"
+	containers := &fakeLifecycle{}
+	cleaner := &fakeSessionCleaner{}
+	// refresher 返回新镜像 ref，触发镜像变更重建分支。
+	refresher := &fakeInputRefresher{
+		returnResult: AppInputRefreshResult{VersionRevision: 7, ImageRef: "hermes-v2:new"},
+	}
+	notifier := &fakeRestartNotifier{}
+	handler := NewAppRestartContainerHandler(stub, containers)
+	handler.SetSessionCleaner(cleaner)
+	handler.SetInputRefresher(refresher)
+	handler.SetJobNotifier(notifier)
+
+	err := handler.Handle(context.Background(), runtimeJob(domain.JobTypeAppRestartContainer, testAppID))
+	require.NoError(t, err)
+	// 旧容器 stop + remove 各一次，原 restart 路径的 start 不应被调用。
+	require.Equal(t, 1, containers.stopCalls)
+	require.Equal(t, 1, containers.removeCalls)
+	require.Equal(t, 0, containers.startCalls)
+	require.Equal(t, 0, containers.restartCalls)
+	// container_id 已被清空，便于 app_initialize 重新创建容器。
+	require.True(t, stub.containerCleared)
+	// 状态被推到 pulling_runtime_image，交还初始化 4 阶段。
+	require.Contains(t, stub.statusUpdates, domain.AppStatusPullingRuntimeImage)
+	// 恰好入队一条 app_initialize job。
+	require.Len(t, stub.createdJobs, 1)
+	assert.Equal(t, domain.JobTypeAppInitialize, stub.createdJobs[0].Type)
+	// payload 中 app_id 必须指向当前应用。
+	var payload map[string]any
+	require.NoError(t, json.Unmarshal(stub.createdJobs[0].PayloadJson, &payload))
+	assert.Equal(t, testAppID, payload["app_id"])
+	// notifier 收到 CreateJob 桩返回的固定 job ID。
+	require.Equal(t, 1, notifier.calls)
+	assert.Equal(t, testRestartInitJobID, notifier.enqueuedJobID)
+	// 镜像变更分支不应记录 applied 版本，也不应标记 model_synced——交由 init handler。
+	require.False(t, stub.appliedVersionSet, "镜像变更重建分支不应调用 SetAppAppliedVersion")
+	require.False(t, stub.app.ModelSynced, "镜像变更重建分支不应标记 model_synced")
+}
+
+// TestAppRestartContainerHandler_ImageUnchangedKeepsRestart 验证 restart 解析镜像与
+// apps.runtime_image_ref 一致时保持原 stop → clear sessions → start 行为，
+// 不重建容器、不入队 app_initialize，并正常记录 applied 版本。
+func TestAppRestartContainerHandler_ImageUnchangedKeepsRestart(t *testing.T) {
+	stub := runtimeStub(t)
+	// 容器当前镜像与 refresher 返回镜像同值，镜像未变。
+	stub.app.RuntimeImageRef = "hermes-v1:same"
+	containers := &fakeLifecycle{}
+	cleaner := &fakeSessionCleaner{}
+	refresher := &fakeInputRefresher{
+		returnResult: AppInputRefreshResult{VersionRevision: 3, ImageRef: "hermes-v1:same"},
+	}
+	notifier := &fakeRestartNotifier{}
+	handler := NewAppRestartContainerHandler(stub, containers)
+	handler.SetSessionCleaner(cleaner)
+	handler.SetInputRefresher(refresher)
+	handler.SetJobNotifier(notifier)
+
+	err := handler.Handle(context.Background(), runtimeJob(domain.JobTypeAppRestartContainer, testAppID))
+	require.NoError(t, err)
+	// 走原 stop → clear sessions → start 三步，不 remove 容器、不入队 job。
+	require.Equal(t, 1, containers.stopCalls)
+	require.Equal(t, 1, containers.startCalls)
+	require.Equal(t, 0, containers.removeCalls)
+	require.Len(t, stub.createdJobs, 0)
+	require.Equal(t, 0, notifier.calls)
+	// 镜像未变，原路径应正常记录 applied 版本。
+	require.True(t, stub.appliedVersionSet, "镜像未变时仍应调用 SetAppAppliedVersion")
+	assert.Equal(t, "hermes-v1:same", stub.lastAppliedVersion.AppliedImageRef)
+}
+
+// TestAppRestartContainerHandler_ImageChangeRetryAfterContainerCleared 验证镜像变更
+// 重建分支被 worker 重试时的幂等性：上一次尝试已清空 container_id，重入时跳过
+// stop/remove，仍重新建 app_initialize job 并即时入队。
+func TestAppRestartContainerHandler_ImageChangeRetryAfterContainerCleared(t *testing.T) {
+	stub := runtimeStub(t)
+	stub.app.RuntimeImageRef = "hermes-v1:old"
+	// 模拟重试：container_id 已被上一次尝试清空。
+	stub.app.ContainerID = pgtype.Text{}
+	containers := &fakeLifecycle{}
+	refresher := &fakeInputRefresher{
+		returnResult: AppInputRefreshResult{VersionRevision: 7, ImageRef: "hermes-v2:new"},
+	}
+	notifier := &fakeRestartNotifier{}
+	handler := NewAppRestartContainerHandler(stub, containers)
+	handler.SetInputRefresher(refresher)
+	handler.SetJobNotifier(notifier)
+
+	err := handler.Handle(context.Background(), runtimeJob(domain.JobTypeAppRestartContainer, testAppID))
+	require.NoError(t, err)
+	// container_id 已空，不应再 stop/remove 容器。
+	require.Equal(t, 0, containers.stopCalls)
+	require.Equal(t, 0, containers.removeCalls)
+	// 仍应重新建恰好一条 app_initialize job 并入队。
+	require.Len(t, stub.createdJobs, 1)
+	assert.Equal(t, domain.JobTypeAppInitialize, stub.createdJobs[0].Type)
+	require.Equal(t, 1, notifier.calls)
 }
 
 // TestAppDeleteHandler_HappyPath 验证应用删除处理器成功路径的成功路径场景。
@@ -443,6 +553,10 @@ type runtimeOpStub struct {
 	appliedVersionSet bool
 	// lastAppliedVersion 记录最近一次 SetAppAppliedVersion 的入参，供断言 applied 字段。
 	lastAppliedVersion sqlc.SetAppAppliedVersionParams
+	// containerCleared 标记 SetAppContainer 是否被调用（镜像变更重建时清空 container_id）。
+	containerCleared bool
+	// createdJobs 记录所有 CreateJob 入参，供断言 restart 镜像变更后入队 app_initialize。
+	createdJobs []sqlc.CreateJobParams
 }
 
 func (s *runtimeOpStub) GetApp(_ context.Context, _ pgtype.UUID) (sqlc.App, error) { return s.app, nil }
@@ -472,6 +586,38 @@ func (s *runtimeOpStub) SetAppAppliedVersion(_ context.Context, arg sqlc.SetAppA
 	s.app.AppliedVersionRevision = arg.AppliedVersionRevision
 	s.app.AppliedImageRef = arg.AppliedImageRef
 	return s.app, nil
+}
+
+// SetAppContainer 实现 AppRuntimeStore 接口；镜像变更重建时清空 container_id / container_name。
+func (s *runtimeOpStub) SetAppContainer(_ context.Context, arg sqlc.SetAppContainerParams) (sqlc.App, error) {
+	s.containerCleared = true
+	s.app.ContainerID = arg.ContainerID
+	s.app.ContainerName = arg.ContainerName
+	return s.app, nil
+}
+
+// CreateJob 实现 AppRuntimeStore 接口；记录入参并返回带固定 ID 的 job，供断言入队。
+func (s *runtimeOpStub) CreateJob(_ context.Context, arg sqlc.CreateJobParams) (sqlc.Job, error) {
+	s.createdJobs = append(s.createdJobs, arg)
+	var id pgtype.UUID
+	// 忽略 Scan 错误：testRestartInitJobID 是固定合法 UUID 字面量。
+	_ = id.Scan(testRestartInitJobID)
+	return sqlc.Job{ID: id, Type: arg.Type}, nil
+}
+
+// testRestartInitJobID 是 CreateJob 桩返回的固定 job ID，供 notifier 入队断言。
+const testRestartInitJobID = "00000000-0000-0000-0000-0000000a0b01"
+
+// fakeRestartNotifier 是 RestartJobNotifier 测试桩，记录被即时推送的 jobID。
+type fakeRestartNotifier struct {
+	enqueuedJobID string
+	calls         int
+}
+
+func (f *fakeRestartNotifier) Enqueue(_ context.Context, jobID string) error {
+	f.calls++
+	f.enqueuedJobID = jobID
+	return nil
 }
 
 type fakeLifecycle struct {
