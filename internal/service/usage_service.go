@@ -4,11 +4,14 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"sort"
 	"strconv"
+	"sync"
 	"time"
 
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgtype"
+	"golang.org/x/sync/errgroup"
 
 	"oc-manager/internal/auth"
 	"oc-manager/internal/domain"
@@ -33,6 +36,8 @@ type UsageStore interface {
 	GetApp(ctx context.Context, id pgtype.UUID) (sqlc.App, error)
 	GetActiveAppByOwner(ctx context.Context, ownerUserID pgtype.UUID) (sqlc.App, error)
 	GetOrganization(ctx context.Context, id pgtype.UUID) (sqlc.Organization, error)
+	// ListAllActiveOrganizations 全量返回未软删除的组织，供 GetOrgUsageBreakdown 批量查询用量。
+	ListAllActiveOrganizations(ctx context.Context) ([]sqlc.Organization, error)
 }
 
 // UsageService 提供 4 个维度的用量代理：app / member / organization / platform。
@@ -79,6 +84,24 @@ type QuotaSeries struct {
 	// Items 透传 new-api QuotaDate 列表。
 	Items []newapi.QuotaDate `json:"items" swaggerignore:"true"`
 	// UpdatedAt 是 manager 代理完成时刻，不代表 new-api 内部采集时间。
+	UpdatedAt time.Time `json:"updated_at"`
+}
+
+// OrgUsageItem 是单个组织在指定时间窗内的 quota 消耗汇总。
+type OrgUsageItem struct {
+	// OrgID 是组织 UUID。
+	OrgID string `json:"org_id"`
+	// OrgName 是组织显示名。
+	OrgName string `json:"org_name"`
+	// TotalQuota 是 [since, until] 内各日 QuotaDate.Quota 的累加值。
+	TotalQuota int64 `json:"total_quota"`
+}
+
+// OrgUsageBreakdown 是 GET /api/v1/platform/usage/org-breakdown 的响应视图。
+type OrgUsageBreakdown struct {
+	// Items 按 TotalQuota 降序排列，最多 10 条。
+	Items []OrgUsageItem `json:"items"`
+	// UpdatedAt 是 manager 完成聚合的时刻。
 	UpdatedAt time.Time `json:"updated_at"`
 }
 
@@ -265,6 +288,73 @@ func (s *UsageService) GetPlatformUsage(ctx context.Context, principal auth.Prin
 		return QuotaSeries{}, mapUsageError(err)
 	}
 	return QuotaSeries{Scope: "platform", Items: items, UpdatedAt: time.Now()}, nil
+}
+
+// GetOrgUsageBreakdown 聚合全平台各组织在 [since, until] 内的 quota 消耗，
+// 按消耗量降序返回 top 10。仅 platform_admin 可调。
+//
+// 并发上限 5：避免对 new-api 产生瞬时大批请求；无 newapi 账号的组织跳过。
+func (s *UsageService) GetOrgUsageBreakdown(ctx context.Context, principal auth.Principal, since, until int64) (OrgUsageBreakdown, error) {
+	if s.client == nil {
+		return OrgUsageBreakdown{}, ErrUsageUnavailable
+	}
+	if principal.Role != domain.UserRolePlatformAdmin {
+		return OrgUsageBreakdown{}, ErrForbidden
+	}
+
+	orgs, err := s.store.ListAllActiveOrganizations(ctx)
+	if err != nil {
+		return OrgUsageBreakdown{}, fmt.Errorf("查询组织列表失败: %w", err)
+	}
+
+	// 并发收集各组织用量；mu 保护 items 切片。
+	var mu sync.Mutex
+	var items []OrgUsageItem
+
+	g, gctx := errgroup.WithContext(ctx)
+	g.SetLimit(5) // 并发上限，避免 new-api 过载
+	for _, org := range orgs {
+		// 跳过没有 new-api 账号或 username 的组织（历史数据 / 尚未初始化）。
+		if !org.NewapiUserID.Valid || org.NewapiUserID.String == "" ||
+			!org.NewapiUsername.Valid || org.NewapiUsername.String == "" {
+			continue
+		}
+		org := org
+		g.Go(func() error {
+			userID := parseInt64Default(org.NewapiUserID.String, 0)
+			if userID == 0 {
+				return nil
+			}
+			dates, err := s.client.GetUserQuotaDates(gctx, userID, org.NewapiUsername.String, since, until)
+			if err != nil {
+				return fmt.Errorf("查询组织 %s 用量失败: %w", uuidToString(org.ID), err)
+			}
+			var total int64
+			for _, d := range dates {
+				total += d.Quota
+			}
+			mu.Lock()
+			items = append(items, OrgUsageItem{
+				OrgID:      uuidToString(org.ID),
+				OrgName:    org.Name,
+				TotalQuota: total,
+			})
+			mu.Unlock()
+			return nil
+		})
+	}
+	if err := g.Wait(); err != nil {
+		return OrgUsageBreakdown{}, mapUsageError(err)
+	}
+
+	// 降序排列，截取前 10 条。
+	sort.Slice(items, func(i, j int) bool {
+		return items[i].TotalQuota > items[j].TotalQuota
+	})
+	if len(items) > 10 {
+		items = items[:10]
+	}
+	return OrgUsageBreakdown{Items: items, UpdatedAt: time.Now()}, nil
 }
 
 // mapUsageError 把 newapi sentinel error 转成 service 层错误，避免暴露上游具体形态。
