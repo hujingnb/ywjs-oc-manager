@@ -19,7 +19,7 @@
 </template>
 
 <script setup lang="ts">
-import { computed } from 'vue'
+import { computed, onMounted } from 'vue'
 import { RouterLink, useRouter } from 'vue-router'
 
 import { useAuthStore } from '@/stores/auth'
@@ -29,11 +29,15 @@ import { useMemberApp } from '@/composables/useMemberApp'
 const auth = useAuthStore()
 const router = useRouter()
 
-// platform_admin 访问首页直接跳转到控制台，不展示欢迎卡片。
-if (auth.user?.role === 'platform_admin') {
-  router.replace('/console')
-}
 const { appId: memberAppId, hasApp: memberHasApp } = useMemberApp()
+
+// platform_admin 访问首页直接跳转到控制台，不展示欢迎卡片。
+// 在 mounted 后再跳转，避免当前导航事务尚未完成时的 navigation warning。
+onMounted(() => {
+  if (auth.user?.role === 'platform_admin') {
+    router.replace('/console')
+  }
+})
 
 // roleLabel 只用于欢迎区的角色展示，未知角色返回空字符串。
 const roleLabel = computed(() => {
