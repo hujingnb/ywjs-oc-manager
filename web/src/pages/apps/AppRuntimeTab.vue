@@ -11,7 +11,7 @@
         <n-button size="small" :disabled="!canStart || mutation.isPending.value" @click="onAction('start')">启动</n-button>
         <n-button size="small" :disabled="!canStop || mutation.isPending.value" @click="onAction('stop')">停止</n-button>
         <n-button size="small" :disabled="!canStop || mutation.isPending.value" @click="onAction('restart')">重启</n-button>
-        <n-button size="small" type="error" :disabled="!canDelete || mutation.isPending.value" @click="onAction('delete')">删除</n-button>
+        <n-button v-if="canDelete" size="small" type="error" :disabled="mutation.isPending.value" @click="onAction('delete')">删除</n-button>
       </n-space>
     </template>
 
