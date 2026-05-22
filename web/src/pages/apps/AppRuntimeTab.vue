@@ -119,7 +119,7 @@ import type { InstanceResourceSample, ResourceRange } from '@/api/hooks/useRunti
 import ConfirmActionModal from '@/components/ConfirmActionModal.vue'
 import JobProgressPanel from '@/components/JobProgressPanel.vue'
 import ResourceTrendChart from '@/components/ResourceTrendChart.vue'
-import { canTriggerRuntimeOperation } from '@/domain/permissions'
+import { canManageApp, canTriggerRuntimeOperation } from '@/domain/permissions'
 import { useAuthStore } from '@/stores/auth'
 
 // AppRuntimeTab 展示应用容器运行时信息，并触发 start/stop/restart/delete 操作。
@@ -182,7 +182,8 @@ const canStop = computed(() => {
   const status = app?.value?.status
   return canManage.value && (status === 'running' || status === 'binding_waiting')
 })
-const canDelete = computed(() => canManage.value && app?.value?.status !== 'deleted')
+// canDelete 仅限应用管理者（不含平台管理员），删除操作不可逆，不向跨组织角色开放。
+const canDelete = computed(() => canManageApp(auth.user, app?.value) && app?.value?.status !== 'deleted')
 
 // onAction 对 stop/delete 先弹二次确认，其他操作直接提交运行时任务。
 async function onAction(op: 'start' | 'stop' | 'restart' | 'delete') {
