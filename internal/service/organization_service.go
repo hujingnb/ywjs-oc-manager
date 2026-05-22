@@ -70,6 +70,10 @@ type NewAPIUserProvisioner interface {
 	CreateUser(ctx context.Context, input newapi.CreateUserInput) (newapi.User, error)
 	BootstrapUserAccessToken(ctx context.Context, username, password string) (string, error)
 	DeleteUser(ctx context.Context, userID int64) error // OOS-1 孤儿清理：CreateOrganization 失败时 best-effort 调用
+	// FindUserByUsername 探测 new-api 是否已存在指定 username 的 user。
+	// 创建组织前用它提前发现 org.Code 对应的 new-api 账号已被占用，
+	// 避免走到 CreateUser 才撞 users_username_key 唯一约束、把底层错误透传成 500。
+	FindUserByUsername(ctx context.Context, username string) (newapi.User, error)
 }
 
 // OrganizationCredentials 是 organizations.newapi_user_credentials_ciphertext 解密后的明文。
@@ -194,6 +198,19 @@ func (s *OrganizationService) CreateOrganization(ctx context.Context, principal 
 	if err != nil {
 		return OrganizationResult{}, err
 	}
+	// new-api 侧 username 与组织 code 一一对应。若 new-api 已存在同名 user
+	// （多为历史遗留、未随组织一起清理的孤儿账号），继续创建会在 provisionNewAPIUser
+	// 的 CreateUser 阶段撞 new-api users_username_key 唯一约束。此处提前探测：
+	//   - 命中（err == nil）→ 返回 ErrConflict，让 handler 回 409 + 明确文案，
+	//     而不是把底层唯一约束错误透传成 500「服务暂时不可用」；
+	//   - ErrNotFound → 用户名可用，继续创建；
+	//   - 其它错误 → 探测调用本身异常，视为服务错误中止创建。
+	// 提前探测同时避免了先 INSERT 组织行、再因 new-api 冲突回滚的无谓往返。
+	if _, findErr := s.provisioner.FindUserByUsername(ctx, code); findErr == nil {
+		return OrganizationResult{}, fmt.Errorf("%w: 组织标识 %q 已被占用（new-api 侧存在同名账号），请更换标识或先清理 new-api 孤儿账号", ErrConflict, code)
+	} else if !errors.Is(findErr, newapi.ErrNotFound) {
+		return OrganizationResult{}, fmt.Errorf("探测 new-api 用户名占用失败: %w", findErr)
+	}
 	// 校验助手版本 allowlist 中的每个 id 都存在且未删除。
 	// versionValidator 未装配时直接拒绝，避免写入未经版本目录确认的 id。
 	if s.versionValidator == nil {
@@ -232,7 +249,6 @@ func (s *OrganizationService) CreateOrganization(ctx context.Context, principal 
 	// 失败时回滚刚刚 INSERT 的 manager 行；rollback 自身失败只记入返回错误，不掩盖原因。
 	commit, createdUserID, err := s.provisionNewAPIUser(ctx, &org)
 	if err != nil {
-		orgIDStr := uuidToString(org.ID)
 		// OOS-1：best-effort 调 DeleteUser 清理 new-api 孤儿 user。
 		// 使用独立的短超时 ctx，避免原 ctx 取消导致清理也被中止。
 		// slog.WarnContext 仍传原 ctx，让 trace_id 自动注入（A-4 SetRequestIDExtractor 已配）。
@@ -244,24 +260,26 @@ func (s *OrganizationService) CreateOrganization(ctx context.Context, principal 
 					"newapi_user_id", *createdUserID,
 					"error", delErr,
 				)
-				// OOS-3：DeleteUser 自身失败也写审计
+				// OOS-3：DeleteUser 自身失败也写审计。
+				// 此处刻意不带 OrgID：该组织行随后会被 HardDeleteOrganization 回滚删除，
+				// 若审计 org_id 指向它，audit_logs_org_id_fkey 外键（无 ON DELETE CASCADE）
+				// 反过来会阻止回滚删除，导致组织脏行残留并返回 500。
 				if s.failAuditor != nil {
 					s.failAuditor.RecordNewAPIFailure(ctx, NewAPIFailureContext{
 						ActorID:   principal.UserID,
 						ActorRole: principal.Role,
-						OrgID:     orgIDStr,
 						Endpoint:  fmt.Sprintf("DELETE /api/user/%d", *createdUserID),
 						Err:       delErr,
 					})
 				}
 			}
 		}
-		// OOS-3：原失败原因写审计（区别于 DeleteUser 失败）
+		// OOS-3：原失败原因写审计（区别于 DeleteUser 失败）。
+		// 同上：不带 OrgID，避免审计记录阻止后续组织行回滚。
 		if s.failAuditor != nil {
 			s.failAuditor.RecordNewAPIFailure(ctx, NewAPIFailureContext{
 				ActorID:   principal.UserID,
 				ActorRole: principal.Role,
-				OrgID:     orgIDStr,
 				Endpoint:  "CreateOrganization",
 				Err:       err,
 			})
@@ -281,7 +299,6 @@ func (s *OrganizationService) CreateOrganization(ctx context.Context, principal 
 		Role:         domain.UserRoleOrgAdmin,
 		Status:       domain.StatusActive,
 	}); err != nil {
-		orgIDStr := uuidToString(org.ID)
 		if createdUserID != nil {
 			cleanupCtx, cleanupCancel := context.WithTimeout(context.Background(), 5*time.Second)
 			defer cleanupCancel()
@@ -290,11 +307,12 @@ func (s *OrganizationService) CreateOrganization(ctx context.Context, principal 
 					"newapi_user_id", *createdUserID,
 					"error", delErr,
 				)
+				// 不带 OrgID：组织行随后会被 HardDeleteOrganization 回滚删除，
+				// 审计 org_id 指向它会因外键约束阻止回滚（详见 provision 失败分支注释）。
 				if s.failAuditor != nil {
 					s.failAuditor.RecordNewAPIFailure(ctx, NewAPIFailureContext{
 						ActorID:   principal.UserID,
 						ActorRole: principal.Role,
-						OrgID:     orgIDStr,
 						Endpoint:  fmt.Sprintf("DELETE /api/user/%d", *createdUserID),
 						Err:       delErr,
 					})
@@ -302,11 +320,11 @@ func (s *OrganizationService) CreateOrganization(ctx context.Context, principal 
 			}
 		}
 		wrappedErr := fmt.Errorf("创建组织管理员失败: %w", err)
+		// 不带 OrgID：同上，避免审计记录阻止后续组织行回滚。
 		if s.failAuditor != nil {
 			s.failAuditor.RecordNewAPIFailure(ctx, NewAPIFailureContext{
 				ActorID:   principal.UserID,
 				ActorRole: principal.Role,
-				OrgID:     orgIDStr,
 				Endpoint:  "CreateOrganizationAdmin",
 				Err:       wrappedErr,
 			})

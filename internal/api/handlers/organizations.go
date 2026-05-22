@@ -261,7 +261,9 @@ func writeServiceError(c *gin.Context, err error) {
 	case errors.Is(err, service.ErrNotFound):
 		c.JSON(http.StatusNotFound, apierror.New("NOT_FOUND", "资源不存在"))
 	case errors.Is(err, service.ErrConflict):
-		c.JSON(http.StatusConflict, apierror.New("CONFLICT", "资源冲突"))
+		// 透出 service 层用 "%w: 具体原因" 包装的冲突原因（如「组织标识已被占用」），
+		// 裸 ErrConflict 时回落为 sentinel 自身文案「资源冲突」。
+		c.JSON(http.StatusConflict, apierror.New("CONFLICT", validationServiceMessage(err, service.ErrConflict)))
 	case errors.Is(err, service.ErrMemberCreateInvalid):
 		c.JSON(http.StatusBadRequest, apierror.New("MEMBER_INVALID", validationServiceMessage(err, service.ErrMemberCreateInvalid)))
 	default:

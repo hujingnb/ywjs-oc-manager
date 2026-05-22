@@ -216,6 +216,59 @@ func TestCreateOrganizationMapsUniqueViolationToConflict(t *testing.T) {
 	require.ErrorIs(t, err, ErrConflict)
 }
 
+// TestCreateOrganization_RejectsWhenNewAPIUsernameTaken 复现并校验错误码映射修复：
+// 当 new-api 侧已存在与组织 code 同名的 user（历史遗留孤儿账号）时，创建组织应在
+// INSERT 组织行之前提前返回 ErrConflict（handler 据此回 409），而不是先建行、再因
+// new-api CreateUser 撞 users_username_key 唯一约束、把底层错误透传成 500。
+func TestCreateOrganization_RejectsWhenNewAPIUsernameTaken(t *testing.T) {
+	store := &organizationStoreStub{}
+	// findUserExists=true：模拟 new-api 已占用 username "test-org"。
+	prov := &fakeProvisioner{findUserExists: true}
+	svc := NewOrganizationService(store, prov, mustCipher(t), nil)
+	svc.SetVersionValidator(fakeVersionValidator{known: map[string]bool{}})
+	svc.hashPassword = fakeHash
+
+	_, err := svc.CreateOrganization(context.Background(), auth.Principal{Role: domain.UserRolePlatformAdmin}, OrganizationInput{
+		Name:             "测试组织",
+		Code:             "test-org",
+		AdminUsername:    "admin",
+		AdminDisplayName: "管理员",
+		AdminPassword:    "secret-password",
+	})
+
+	// 应映射为 ErrConflict（handler 据此回 409 + 明确文案），而非透传成内部错误。
+	require.ErrorIs(t, err, ErrConflict)
+	// 冲突原因须可读，便于 handler 透出给前端。
+	assert.Contains(t, err.Error(), "已被占用")
+	// 提前探测命中后必须中止，不得 INSERT 组织行，避免脏行残留。
+	assert.False(t, store.createCalled)
+}
+
+// TestCreateOrganization_ProbeFailureAbortsCreate 校验 new-api 用户名占用探测调用
+// 本身失败（非 ErrNotFound）时，创建组织中止并返回错误，且不 INSERT 组织行。
+func TestCreateOrganization_ProbeFailureAbortsCreate(t *testing.T) {
+	store := &organizationStoreStub{}
+	// findUserErr 注入非 ErrNotFound 错误，模拟探测请求 5xx / 网络异常。
+	prov := &fakeProvisioner{findUserErr: errors.New("search 503")}
+	svc := NewOrganizationService(store, prov, mustCipher(t), nil)
+	svc.SetVersionValidator(fakeVersionValidator{known: map[string]bool{}})
+	svc.hashPassword = fakeHash
+
+	_, err := svc.CreateOrganization(context.Background(), auth.Principal{Role: domain.UserRolePlatformAdmin}, OrganizationInput{
+		Name:             "测试组织",
+		Code:             "test-org",
+		AdminUsername:    "admin",
+		AdminDisplayName: "管理员",
+		AdminPassword:    "secret-password",
+	})
+
+	require.Error(t, err)
+	// 探测失败不是冲突，不应误判为 ErrConflict。
+	require.NotErrorIs(t, err, ErrConflict)
+	// 探测未通过，不得 INSERT 组织行。
+	assert.False(t, store.createCalled)
+}
+
 // TestCreateOrganizationRejectsUnknownVersionID 验证创建组织时传入不存在的助手版本 id 会被拒绝，
 // 保证 allowlist 中只能包含系统已有的版本，防止引用幽灵 id。
 func TestCreateOrganizationRejectsUnknownVersionID(t *testing.T) {
@@ -327,6 +380,26 @@ type fakeProvisioner struct {
 	deleteUserCalled bool
 	deleteUserUserID int64
 	deleteUserErr    error
+
+	// findUserExists 为 true 时模拟 new-api 已存在同名 user（触发组织标识占用冲突）。
+	findUserExists bool
+	// findUserErr 注入 FindUserByUsername 的非 ErrNotFound 错误，模拟探测调用本身失败。
+	findUserErr error
+	// findUserCalls 记录 FindUserByUsername 被调用次数。
+	findUserCalls int
+}
+
+// FindUserByUsername 模拟 new-api 用户名占用探测：默认返回 ErrNotFound（用户名可用），
+// findUserExists=true 时返回已存在的 user，findUserErr 注入探测调用本身失败。
+func (p *fakeProvisioner) FindUserByUsername(_ context.Context, username string) (newapi.User, error) {
+	p.findUserCalls++
+	if p.findUserErr != nil {
+		return newapi.User{}, p.findUserErr
+	}
+	if p.findUserExists {
+		return newapi.User{ID: 999, Username: username}, nil
+	}
+	return newapi.User{}, newapi.ErrNotFound
 }
 
 func (p *fakeProvisioner) CreateUser(_ context.Context, input newapi.CreateUserInput) (newapi.User, error) {
@@ -517,6 +590,12 @@ func TestCreateOrganization_BootstrapTokenFailureTriggersDeleteUserAndAudit(t *t
 	require.True(t, prov.deleteUserCalled)
 	assert.Equal(t, int64(42), prov.deleteUserUserID)
 	assert.NotEqual(t, 0, len(auditor.events))
+	// 回滚路径写的审计事件一律不带 OrgID：组织行随后被 HardDeleteOrganization
+	// 回滚删除，审计 org_id 指向它会触发 audit_logs_org_id_fkey 外键冲突、
+	// 反过来阻止回滚（回滚外键 bug 修复）。
+	for i, ev := range auditor.events {
+		assert.Empty(t, ev.OrgID, "回滚路径审计事件[%d] 不应带 OrgID", i)
+	}
 }
 
 // TestCreateOrganization_CreateUserFailureNoDeleteUser 校验 CreateUser 失败时不调
