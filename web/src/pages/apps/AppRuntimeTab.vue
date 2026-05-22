@@ -119,7 +119,7 @@ import type { InstanceResourceSample, ResourceRange } from '@/api/hooks/useRunti
 import ConfirmActionModal from '@/components/ConfirmActionModal.vue'
 import JobProgressPanel from '@/components/JobProgressPanel.vue'
 import ResourceTrendChart from '@/components/ResourceTrendChart.vue'
-import { canManageApp } from '@/domain/permissions'
+import { canTriggerRuntimeOperation } from '@/domain/permissions'
 import { useAuthStore } from '@/stores/auth'
 
 // AppRuntimeTab 展示应用容器运行时信息，并触发 start/stop/restart/delete 操作。
@@ -175,7 +175,8 @@ const runtimeStatusLabel = computed(() => {
 })
 
 // canStart/canStop/canDelete 控制按钮可见性，真实权限和状态转换仍以后端校验为准。
-const canManage = computed(() => canManageApp(auth.user, app?.value))
+// canManage：运行时启停/重启需平台管理员运维介入能力，使用 canTriggerRuntimeOperation。
+const canManage = computed(() => canTriggerRuntimeOperation(auth.user, app?.value))
 const canStart = computed(() => canManage.value && app?.value?.status === 'stopped')
 const canStop = computed(() => {
   const status = app?.value?.status
