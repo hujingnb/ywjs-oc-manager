@@ -48,11 +48,11 @@ func TestAppInitializeHandlesHappyPath(t *testing.T) {
 	cipher, err := auth.NewCipher(make([]byte, 32))
 	require.NoError(t, err)
 	cfg := AppInitializeConfig{
-		RuntimeImage:         defaultHermesRuntimeImage,
 		PlatformPrompt:       "平台默认规则",
 		SystemPromptTemplate: "你是 {org_name} 的助手",
 		NewAPIBaseURL:        "http://new-api:3000",
 		Cipher:               cipher,
+		ResolveRuntimeImage:  testResolveRuntimeImage,
 	}
 	handler := NewAppInitializeHandler(store, dirs, containers, containers, client, cfg)
 	// 注入 fakeAppInputUploader, 验证 hermes 输入资源经 UploadAppInputFile 上传到目标节点。
@@ -101,7 +101,8 @@ func TestAppInitializeHandlesHappyPath(t *testing.T) {
 
 	// 容器名应以 hermes- 为前缀。
 	require.Equal(t, "hermes-"+testAppID, containers.lastSpec.Name)
-	require.Equal(t, defaultHermesRuntimeImage, containers.lastSpec.Image)
+	// 容器镜像应为 ResolveRuntimeImage 桩按版本 image_id 解析出的 ref。
+	require.Equal(t, testRuntimeImageRef, containers.lastSpec.Image)
 
 	// InitAppDirs 与 StartContainer 必须被调对参数。
 	if dirs.calls != 1 || dirs.lastNode != "node-1" || dirs.lastApp != testAppID {
@@ -145,7 +146,7 @@ func TestWriteAppInput_FailsWhenUploaderNil(t *testing.T) {
 	store := newAppInitStub(t)
 	client := &fakeNewAPI{result: newapi.APIKey{ID: 1, Key: "k"}}
 	// 不调 SetAppInputUploader, inputFiles 保持 nil。
-	handler := NewAppInitializeHandler(store, &fakeDirs{}, &fakeContainers{}, &fakeContainers{}, client, AppInitializeConfig{Cipher: testCipher(t)})
+	handler := NewAppInitializeHandler(store, &fakeDirs{}, &fakeContainers{}, &fakeContainers{}, client, AppInitializeConfig{Cipher: testCipher(t), ResolveRuntimeImage: testResolveRuntimeImage})
 
 	err := handler.Handle(context.Background(), buildJob(t, testAppID, "node-1"))
 	// nodeID 非空时 writeAppInput 必须被调用; nil uploader 应立即报错。
@@ -161,7 +162,7 @@ func TestWriteAppInput_PropagatesUploadError(t *testing.T) {
 	// 模拟 agent 上传失败 (网络不通 / 节点不可达)。
 	up := &fakeAppInputUploader{err: errors.New("agent upload failed")}
 	containers := &fakeContainers{result: runtimepkg.ContainerInfo{ID: "c", Name: "n"}}
-	handler := NewAppInitializeHandler(store, &fakeDirs{}, containers, containers, client, AppInitializeConfig{Cipher: testCipher(t)})
+	handler := NewAppInitializeHandler(store, &fakeDirs{}, containers, containers, client, AppInitializeConfig{Cipher: testCipher(t), ResolveRuntimeImage: testResolveRuntimeImage})
 	handler.SetAppInputUploader(up)
 
 	err := handler.Handle(context.Background(), buildJob(t, testAppID, "node-1"))
@@ -186,8 +187,8 @@ func TestAppInitializeWaitsForHermesHealthyWhenSupported(t *testing.T) {
 	cipher, err := auth.NewCipher(make([]byte, 32))
 	require.NoError(t, err)
 	handler := NewAppInitializeHandler(store, dirs, base, containers, client, AppInitializeConfig{
-		RuntimeImage: defaultHermesRuntimeImage,
-		Cipher:       cipher,
+		Cipher:              cipher,
+		ResolveRuntimeImage: testResolveRuntimeImage,
 	})
 	// 注入 fakeAppInputUploader, 确保 writeAppInput 可正常执行。
 	handler.SetAppInputUploader(&fakeAppInputUploader{})
@@ -207,7 +208,7 @@ func TestAppInitializePropagatesHealthCheckError(t *testing.T) {
 	}
 	containers := &healthAwareContainers{fakeContainers: base}
 	client := &fakeNewAPI{result: newapi.APIKey{ID: 1, Key: "k"}}
-	handler := NewAppInitializeHandler(store, &fakeDirs{}, base, containers, client, AppInitializeConfig{Cipher: testCipher(t)})
+	handler := NewAppInitializeHandler(store, &fakeDirs{}, base, containers, client, AppInitializeConfig{Cipher: testCipher(t), ResolveRuntimeImage: testResolveRuntimeImage})
 	// 注入 fakeAppInputUploader, 使 writeAppInput 不报错, 聚焦健康检查失败路径。
 	handler.SetAppInputUploader(&fakeAppInputUploader{})
 
@@ -251,7 +252,7 @@ func TestAppInitializeSkipsAPIKeyWhenAlreadyActive(t *testing.T) {
 	client := &fakeNewAPI{}
 	containers := &fakeContainers{result: runtimepkg.ContainerInfo{ID: "c", Name: "n"}}
 
-	handler := NewAppInitializeHandler(store, &fakeDirs{}, containers, containers, client, AppInitializeConfig{Cipher: cipher})
+	handler := NewAppInitializeHandler(store, &fakeDirs{}, containers, containers, client, AppInitializeConfig{Cipher: cipher, ResolveRuntimeImage: testResolveRuntimeImage})
 	err = handler.Handle(context.Background(), buildJob(t, testAppID, ""))
 	require.NoError(t, err)
 	require.Equal(t, 0, client.calls)
@@ -263,7 +264,7 @@ func TestAppInitializePropagatesNewAPIError(t *testing.T) {
 	store := newAppInitStub(t)
 	client := &fakeNewAPI{err: newapi.ErrUpstream}
 
-	handler := NewAppInitializeHandler(store, &fakeDirs{}, &fakeContainers{}, &fakeContainers{}, client, AppInitializeConfig{Cipher: testCipher(t)})
+	handler := NewAppInitializeHandler(store, &fakeDirs{}, &fakeContainers{}, &fakeContainers{}, client, AppInitializeConfig{Cipher: testCipher(t), ResolveRuntimeImage: testResolveRuntimeImage})
 	err := handler.Handle(context.Background(), buildJob(t, testAppID, ""))
 	require.ErrorIs(t, err, newapi.ErrUpstream)
 	// new-api 调用在 phasePrepare 内 ensureAPIKey 阶段失败:MarkAppFailed 被调用,
@@ -279,7 +280,7 @@ func TestAppInitializePropagatesContainerError(t *testing.T) {
 	store := newAppInitStub(t)
 	containers := &fakeContainers{err: errors.New("boom")}
 	client := &fakeNewAPI{result: newapi.APIKey{ID: 1, Key: "k"}}
-	handler := NewAppInitializeHandler(store, &fakeDirs{}, containers, containers, client, AppInitializeConfig{Cipher: testCipher(t)})
+	handler := NewAppInitializeHandler(store, &fakeDirs{}, containers, containers, client, AppInitializeConfig{Cipher: testCipher(t), ResolveRuntimeImage: testResolveRuntimeImage})
 	// 注入 fakeAppInputUploader, 使 writeAppInput 不报错, 聚焦容器创建失败路径。
 	handler.SetAppInputUploader(&fakeAppInputUploader{})
 	err := handler.Handle(context.Background(), buildJob(t, testAppID, "node-1"))
@@ -311,7 +312,7 @@ func TestAppInitializeContainerStepSkippedWhenContainerExists(t *testing.T) {
 	containers := &fakeContainers{}
 	client := &fakeNewAPI{result: newapi.APIKey{ID: 1, Key: "k"}}
 
-	handler := NewAppInitializeHandler(store, &fakeDirs{}, containers, containers, client, AppInitializeConfig{Cipher: testCipher(t)})
+	handler := NewAppInitializeHandler(store, &fakeDirs{}, containers, containers, client, AppInitializeConfig{Cipher: testCipher(t), ResolveRuntimeImage: testResolveRuntimeImage})
 	// 注入 fakeAppInputUploader, 使 writeAppInput 不报错 (即使容器已存在也需要上传 input 文件)。
 	handler.SetAppInputUploader(&fakeAppInputUploader{})
 	err := handler.Handle(context.Background(), buildJob(t, testAppID, "node-1"))
@@ -362,7 +363,8 @@ func TestHermesHealthCheckerInterfaceUsed(t *testing.T) {
 	containers := &fakeContainers{result: runtimepkg.ContainerInfo{ID: "c", Name: "n"}}
 	client := &fakeNewAPI{result: newapi.APIKey{ID: 1, Key: "sk"}}
 	handler := NewAppInitializeHandler(store, &fakeDirs{}, containers, containers, client, AppInitializeConfig{
-		Cipher: testCipher(t),
+		Cipher:              testCipher(t),
+		ResolveRuntimeImage: testResolveRuntimeImage,
 	})
 	// 注入 fakeAppInputUploader, 使 writeAppInput 不报错, 聚焦健康检查接口探测路径。
 	handler.SetAppInputUploader(&fakeAppInputUploader{})
@@ -666,6 +668,21 @@ func testCipher(t *testing.T) *auth.Cipher {
 	return c
 }
 
+// testRuntimeImageRef 是测试装配中 ResolveRuntimeImage 桩为默认版本 image_id
+// "hermes-v1" 解析出的运行时镜像引用，供需要走完整 Handle 的用例断言容器镜像。
+const testRuntimeImageRef = "hermes-runtime:v2026.5.16-test"
+
+// testResolveRuntimeImage 是 AppInitializeConfig.ResolveRuntimeImage 的测试桩。
+// Phase 5 起 ResolveRuntimeImage 是 Handle 解析运行时镜像的唯一来源、必需依赖，
+// 任何走完整 Handle 的用例都必须注入它；这里把默认版本 image_id "hermes-v1"
+// 映射到 testRuntimeImageRef，其余 id 返回未命中。
+func testResolveRuntimeImage(imageID string) (string, bool) {
+	if imageID == "hermes-v1" {
+		return testRuntimeImageRef, true
+	}
+	return "", false
+}
+
 func mustUUIDForTest(t *testing.T, value string) pgtype.UUID {
 	t.Helper()
 	var id pgtype.UUID
@@ -781,9 +798,9 @@ func TestAppInitialize_WritesKnowledgeIntoInput(t *testing.T) {
 	}}
 
 	cfg := AppInitializeConfig{
-		RuntimeImage:         defaultHermesRuntimeImage,
 		SystemPromptTemplate: "你是 {org_name} 的助手",
 		Cipher:               testCipher(t),
+		ResolveRuntimeImage:  testResolveRuntimeImage,
 	}
 	handler := NewAppInitializeHandler(store, dirs, containers, containers, client, cfg)
 	handler.SetAppInputUploader(up)
@@ -809,7 +826,7 @@ func TestAppInitialize_KnowledgeReaderNilSkipsKnowledge(t *testing.T) {
 	containers := &fakeContainers{result: runtimepkg.ContainerInfo{ID: "ctr-1", Name: "n"}}
 	client := &fakeNewAPI{result: newapi.APIKey{ID: 1, Key: "k"}}
 	up := &fakeAppInputUploader{}
-	handler := NewAppInitializeHandler(store, &fakeDirs{}, containers, containers, client, AppInitializeConfig{Cipher: testCipher(t)})
+	handler := NewAppInitializeHandler(store, &fakeDirs{}, containers, containers, client, AppInitializeConfig{Cipher: testCipher(t), ResolveRuntimeImage: testResolveRuntimeImage})
 	handler.SetAppInputUploader(up)
 	// 不调 SetKnowledgeReader, h.knowledge 保持 nil。
 
@@ -841,8 +858,9 @@ func TestEnsureAPIKey_CreateAPIKeyFailureRecordsAudit(t *testing.T) {
 	client := &fakeNewAPI{createKeyErr: newapi.ErrUpstream}
 
 	cfg := AppInitializeConfig{
-		Cipher:      testCipher(t),
-		AuditHelper: helper,
+		Cipher:              testCipher(t),
+		AuditHelper:         helper,
+		ResolveRuntimeImage: testResolveRuntimeImage,
 	}
 	handler := NewAppInitializeHandler(store, &fakeDirs{}, &fakeContainers{}, &fakeContainers{}, client, cfg)
 
@@ -867,8 +885,9 @@ func TestEnsureAPIKey_GetTokenFullKeyFailureRecordsAudit(t *testing.T) {
 	}
 
 	cfg := AppInitializeConfig{
-		Cipher:      testCipher(t),
-		AuditHelper: helper,
+		Cipher:              testCipher(t),
+		AuditHelper:         helper,
+		ResolveRuntimeImage: testResolveRuntimeImage,
 	}
 	handler := NewAppInitializeHandler(store, &fakeDirs{}, &fakeContainers{}, &fakeContainers{}, client, cfg)
 
@@ -905,8 +924,8 @@ func TestAppInitializeHandler_Phases_Progress(t *testing.T) {
 	containers := &fakeContainers{result: runtimepkg.ContainerInfo{ID: "ctr-1", Name: "hermes-" + testAppID}}
 	client := &fakeNewAPI{result: newapi.APIKey{ID: 1, Key: "sk-test"}}
 	handler := NewAppInitializeHandler(store, &fakeDirs{}, containers, containers, client, AppInitializeConfig{
-		RuntimeImage: defaultHermesRuntimeImage,
-		Cipher:       testCipher(t),
+		Cipher:              testCipher(t),
+		ResolveRuntimeImage: testResolveRuntimeImage,
 	})
 	handler.SetAppInputUploader(&fakeAppInputUploader{})
 
@@ -955,7 +974,7 @@ func TestAppInitializeHandler_Phases_FailureWritesLastError(t *testing.T) {
 			build: func(t *testing.T) (*AppInitializeHandler, *appInitStub) {
 				s := newAppInitStub(t)
 				s.app.Status = domain.AppStatusDraft
-				h := NewAppInitializeHandler(s, &fakeDirs{}, &fakeContainers{}, &fakeContainers{}, &fakeNewAPI{result: newapi.APIKey{ID: 1, Key: "k"}}, AppInitializeConfig{Cipher: testCipher(t)})
+				h := NewAppInitializeHandler(s, &fakeDirs{}, &fakeContainers{}, &fakeContainers{}, &fakeNewAPI{result: newapi.APIKey{ID: 1, Key: "k"}}, AppInitializeConfig{Cipher: testCipher(t), ResolveRuntimeImage: testResolveRuntimeImage})
 				h.SetAppInputUploader(&fakeAppInputUploader{})
 				// 注入非 nil coordinator (不会被调用, 因 nodeDockerProv 更早失败)。
 				h.SetImagePullCoord(imagecoord.NewCoordinator(nil, nil, "test"))
@@ -972,7 +991,7 @@ func TestAppInitializeHandler_Phases_FailureWritesLastError(t *testing.T) {
 				s := newAppInitStub(t)
 				s.app.Status = domain.AppStatusDraft
 				s.getOrganizationErr = errors.New("org lookup failed")
-				h := NewAppInitializeHandler(s, &fakeDirs{}, &fakeContainers{}, &fakeContainers{}, &fakeNewAPI{result: newapi.APIKey{ID: 1, Key: "k"}}, AppInitializeConfig{Cipher: testCipher(t)})
+				h := NewAppInitializeHandler(s, &fakeDirs{}, &fakeContainers{}, &fakeContainers{}, &fakeNewAPI{result: newapi.APIKey{ID: 1, Key: "k"}}, AppInitializeConfig{Cipher: testCipher(t), ResolveRuntimeImage: testResolveRuntimeImage})
 				h.SetAppInputUploader(&fakeAppInputUploader{})
 				return h, s
 			},
@@ -985,7 +1004,7 @@ func TestAppInitializeHandler_Phases_FailureWritesLastError(t *testing.T) {
 				s := newAppInitStub(t)
 				s.app.Status = domain.AppStatusDraft
 				containers := &fakeContainers{err: errors.New("create failed")}
-				h := NewAppInitializeHandler(s, &fakeDirs{}, containers, containers, &fakeNewAPI{result: newapi.APIKey{ID: 1, Key: "k"}}, AppInitializeConfig{Cipher: testCipher(t)})
+				h := NewAppInitializeHandler(s, &fakeDirs{}, containers, containers, &fakeNewAPI{result: newapi.APIKey{ID: 1, Key: "k"}}, AppInitializeConfig{Cipher: testCipher(t), ResolveRuntimeImage: testResolveRuntimeImage})
 				h.SetAppInputUploader(&fakeAppInputUploader{})
 				return h, s
 			},
@@ -1001,7 +1020,7 @@ func TestAppInitializeHandler_Phases_FailureWritesLastError(t *testing.T) {
 					result:   runtimepkg.ContainerInfo{ID: "ctr-1", Name: "hermes-" + testAppID},
 					startErr: errors.New("start failed"),
 				}
-				h := NewAppInitializeHandler(s, &fakeDirs{}, containers, containers, &fakeNewAPI{result: newapi.APIKey{ID: 1, Key: "k"}}, AppInitializeConfig{Cipher: testCipher(t)})
+				h := NewAppInitializeHandler(s, &fakeDirs{}, containers, containers, &fakeNewAPI{result: newapi.APIKey{ID: 1, Key: "k"}}, AppInitializeConfig{Cipher: testCipher(t), ResolveRuntimeImage: testResolveRuntimeImage})
 				h.SetAppInputUploader(&fakeAppInputUploader{})
 				return h, s
 			},
@@ -1036,8 +1055,8 @@ func TestAppInitializeHandler_IdempotentReentry(t *testing.T) {
 	containers := &fakeContainers{result: runtimepkg.ContainerInfo{ID: "ctr-1", Name: "hermes-" + testAppID}}
 	client := &fakeNewAPI{result: newapi.APIKey{ID: 1, Key: "k"}}
 	handler := NewAppInitializeHandler(store, &fakeDirs{}, containers, containers, client, AppInitializeConfig{
-		RuntimeImage: defaultHermesRuntimeImage,
-		Cipher:       testCipher(t),
+		Cipher:              testCipher(t),
+		ResolveRuntimeImage: testResolveRuntimeImage,
 	})
 	handler.SetAppInputUploader(&fakeAppInputUploader{})
 
@@ -1061,7 +1080,7 @@ func TestAppInitialize_NullVersionIDFails(t *testing.T) {
 	// 清空 VersionID，模拟未绑定版本的实例。
 	store.app.VersionID = pgtype.UUID{}
 
-	handler := NewAppInitializeHandler(store, &fakeDirs{}, &fakeContainers{}, &fakeContainers{}, &fakeNewAPI{}, AppInitializeConfig{Cipher: testCipher(t)})
+	handler := NewAppInitializeHandler(store, &fakeDirs{}, &fakeContainers{}, &fakeContainers{}, &fakeNewAPI{}, AppInitializeConfig{Cipher: testCipher(t), ResolveRuntimeImage: testResolveRuntimeImage})
 	handler.SetAppInputUploader(&fakeAppInputUploader{})
 
 	err := handler.Handle(context.Background(), buildJob(t, testAppID, "node-1"))
@@ -1082,7 +1101,7 @@ func TestAppInitialize_GetAssistantVersionErrorFails(t *testing.T) {
 	// 清空 versions map，使 GetAssistantVersion 对有效 VersionID 返回 pgx.ErrNoRows。
 	store.versions = map[pgtype.UUID]sqlc.AssistantVersion{}
 
-	handler := NewAppInitializeHandler(store, &fakeDirs{}, &fakeContainers{}, &fakeContainers{}, &fakeNewAPI{}, AppInitializeConfig{Cipher: testCipher(t)})
+	handler := NewAppInitializeHandler(store, &fakeDirs{}, &fakeContainers{}, &fakeContainers{}, &fakeNewAPI{}, AppInitializeConfig{Cipher: testCipher(t), ResolveRuntimeImage: testResolveRuntimeImage})
 	handler.SetAppInputUploader(&fakeAppInputUploader{})
 
 	err := handler.Handle(context.Background(), buildJob(t, testAppID, "node-1"))
@@ -1240,8 +1259,9 @@ func TestAppInitialize_SkillsUploadedToInput(t *testing.T) {
 	}}
 
 	handler := NewAppInitializeHandler(store, &fakeDirs{}, containers, containers, client, AppInitializeConfig{
-		Cipher:     testCipher(t),
-		SkillBlobs: blobs,
+		Cipher:              testCipher(t),
+		SkillBlobs:          blobs,
+		ResolveRuntimeImage: testResolveRuntimeImage,
 	})
 	handler.SetAppInputUploader(up)
 
@@ -1275,6 +1295,7 @@ func TestAppInitialize_SkillBlobsNilSkipsSkills(t *testing.T) {
 	handler := NewAppInitializeHandler(store, &fakeDirs{}, containers, containers, client, AppInitializeConfig{
 		Cipher: testCipher(t),
 		// SkillBlobs 未注入（nil），应安全跳过。
+		ResolveRuntimeImage: testResolveRuntimeImage,
 	})
 	handler.SetAppInputUploader(up)
 

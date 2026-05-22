@@ -26,10 +26,6 @@ import (
 	"oc-manager/internal/store/sqlc"
 )
 
-// defaultHermesRuntimeImage 是旧单元测试装配和本地开发路径的兜底值。
-// 生产启动配置由 internal/config 校验，必须显式提供 hermes.runtime_image。
-const defaultHermesRuntimeImage = "hermes-runtime:v2026.5.16-dev"
-
 // AppInitializeStore 是 app_initialize handler 需要的最小数据访问能力。
 type AppInitializeStore interface {
 	GetApp(ctx context.Context, id pgtype.UUID) (sqlc.App, error)
@@ -167,9 +163,6 @@ type NewAPIClientFactory interface {
 // AppInputUploader.UploadAppInputFile 上传到目标节点 agent,
 // 不再写入 manager 本机目录。DataDir 保留供其他特定场景（如 workspaceService）使用。
 type AppInitializeConfig struct {
-	// RuntimeImage 是旧单镜像兜底值；Phase 4 后生产路径由 ResolveRuntimeImage 提供，
-	// 此字段仅在 ResolveRuntimeImage 未注入时（测试/历史兼容）作为 fallback。
-	RuntimeImage         string
 	PlatformPrompt       string
 	SystemPromptTemplate string
 	Cipher               *auth.Cipher
@@ -190,7 +183,8 @@ type AppInitializeConfig struct {
 	// nil 时跳过审计，不影响主流程；生产装配应注入。
 	AuditHelper *audit.NewAPIAuditHelper
 	// ResolveRuntimeImage 由 cmd/server 在装配时注入，把版本 image_id 解析为
-	// 完整 imageRef（含 tag）。nil 时退回到 RuntimeImage 字段兜底（仅限测试/旧路径）。
+	// 完整 imageRef（含 tag），是运行时镜像的唯一来源。必需依赖：未注入时
+	// Handle 直接 markFailed，不再有单值字段兜底。
 	ResolveRuntimeImage func(imageID string) (ref string, ok bool)
 	// SkillBlobs 提供版本 skill tar 主副本的读能力，用于 writeSkillsIntoInput 把
 	// skill 推送到节点 input/resources/skills/。nil 时跳过 skill 推送（测试/旧装配兼容）。
@@ -254,9 +248,6 @@ func NewAppInitializeHandler(
 	factory NewAPIClientFactory,
 	cfg AppInitializeConfig,
 ) *AppInitializeHandler {
-	if cfg.RuntimeImage == "" {
-		cfg.RuntimeImage = defaultHermesRuntimeImage
-	}
 	return &AppInitializeHandler{
 		store:      store,
 		dirs:       dirs,
@@ -332,19 +323,17 @@ func (h *AppInitializeHandler) Handle(ctx context.Context, job sqlc.Job) error {
 		return h.markFailed(ctx, &app, domain.AppStatusPullingRuntimeImage, fmt.Errorf("加载助手版本失败: %w", err))
 	}
 
-	// 解析版本镜像 ref：优先使用注入的 ResolveRuntimeImage 函数（生产路径），
-	// 未注入时退回 cfg.RuntimeImage（测试/旧装配兼容）。
-	var imageRef string
-	if h.cfg.ResolveRuntimeImage != nil {
-		ref, ok := h.cfg.ResolveRuntimeImage(version.ImageID)
-		if !ok {
-			return h.markFailed(ctx, &app, domain.AppStatusPullingRuntimeImage,
-				fmt.Errorf("版本镜像 %s 未在配置中", version.ImageID))
-		}
-		imageRef = ref
-	} else {
-		// 兜底：ResolveRuntimeImage 未注入时（测试装配）使用 RuntimeImage 字段。
-		imageRef = h.cfg.RuntimeImage
+	// 解析版本镜像 ref：运行时镜像严格由绑定版本经 ResolveRuntimeImage 从
+	// runtime_images 列表解析。ResolveRuntimeImage 是必需依赖，未注入属于装配
+	// 错误，直接标记失败而非静默兜底。
+	if h.cfg.ResolveRuntimeImage == nil {
+		return h.markFailed(ctx, &app, domain.AppStatusPullingRuntimeImage,
+			errors.New("ResolveRuntimeImage 未注入，无法解析运行时镜像"))
+	}
+	imageRef, ok := h.cfg.ResolveRuntimeImage(version.ImageID)
+	if !ok {
+		return h.markFailed(ctx, &app, domain.AppStatusPullingRuntimeImage,
+			fmt.Errorf("版本镜像 %s 未在配置中", version.ImageID))
 	}
 
 	reporter := newProgressReporter(app.ID, h.store)
@@ -363,7 +352,9 @@ func (h *AppInitializeHandler) Handle(ctx context.Context, job sqlc.Job) error {
 		{domain.AppStatusPreparingRuntime, func(ctx context.Context, app *sqlc.App, p appInitializePayload, r *progressReporter) error {
 			return h.phasePrepare(ctx, app, p, r, version)
 		}},
-		{domain.AppStatusCreatingContainer, h.phaseCreate},
+		{domain.AppStatusCreatingContainer, func(ctx context.Context, app *sqlc.App, p appInitializePayload, r *progressReporter) error {
+			return h.phaseCreate(ctx, app, p, r, imageRef)
+		}},
 		{domain.AppStatusStarting, h.phaseStart},
 	}
 
@@ -508,7 +499,10 @@ func (h *AppInitializeHandler) phasePrepare(ctx context.Context, app *sqlc.App, 
 
 // phaseCreate:container_id 已存在则跳过(原 :284 行的幂等检查保留);否则
 // 走原 ContainerCreator.CreateContainer 流程,把 ID/Name 写库。
-func (h *AppInitializeHandler) phaseCreate(ctx context.Context, app *sqlc.App, payload appInitializePayload, _ *progressReporter) error {
+//
+// imageRef 由 Handle 经 ResolveRuntimeImage 解析后通过闭包传入，与
+// phasePullRuntimeImage 收到的是同一值，是容器镜像的唯一来源。
+func (h *AppInitializeHandler) phaseCreate(ctx context.Context, app *sqlc.App, payload appInitializePayload, _ *progressReporter, imageRef string) error {
 	if app.ContainerID.String != "" {
 		return nil
 	}
@@ -522,12 +516,6 @@ func (h *AppInitializeHandler) phaseCreate(ctx context.Context, app *sqlc.App, p
 	nodeDataRoot := node.NodeDataRoot.String
 	if nodeDataRoot == "" {
 		nodeDataRoot = "/var/lib/oc-agent"
-	}
-	// 优先使用 phasePullRuntimeImage 写入的 RuntimeImageRef；
-	// 若未拉取（如 imagePullCoord 未注入），退回到 cfg.RuntimeImage。
-	imageRef := app.RuntimeImageRef
-	if imageRef == "" {
-		imageRef = h.cfg.RuntimeImage
 	}
 	// 容器挂载布局采用 input(ro) + data(rw) 双挂载：
 	//   - apps/<id>/input → /opt/oc-input (ro)：oc-entrypoint 读 manifest.yaml +

@@ -94,10 +94,8 @@ type SecurityConfig struct {
 // HermesConfig 是 Hermes runtime 镜像与 manager 集成的配置段。
 // 对应应用 yaml 顶级 key `hermes:`。
 type HermesConfig struct {
-	// RuntimeImage 是 manager docker run 启动 hermes 容器用的镜像引用（name:tag）。
-	RuntimeImage string `yaml:"runtime_image"`
 	// RuntimeImages 是平台可选的 Hermes 镜像列表，助手版本的 image_id 引用其中的 id。
-	// 与单值 RuntimeImage 并存（后续 Phase 移除单值字段）。
+	// 实例初始化/重启的运行时镜像严格由绑定的助手版本经 ResolveRuntimeImage 从此列表解析。
 	RuntimeImages []RuntimeImageConfig `yaml:"runtime_images"`
 	// SystemPromptTemplate 是平台级 prompt 模板，作为 input/resources/platform-rules.md
 	// 的内容写入 manager 端 input 目录，由节点 oc-entrypoint 在容器启动时翻译进 SOUL.md。

@@ -287,7 +287,6 @@ func runManager(ctx context.Context, cfg config.Config, logOut io.Writer) error 
 		runtimeAdapter,
 		newapiFactory,
 		handlers.AppInitializeConfig{
-			RuntimeImage:         cfg.Hermes.RuntimeImage,
 			SystemPromptTemplate: cfg.Hermes.SystemPromptTemplate,
 			PlatformPrompt:       cfg.Hermes.SystemPromptTemplate,
 			Cipher:               cipher,
