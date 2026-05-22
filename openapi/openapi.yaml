@@ -1518,6 +1518,30 @@ components:
         member:
           $ref: '#/components/schemas/service.MemberResult'
       type: object
+    service.OrgUsageBreakdown:
+      properties:
+        items:
+          description: Items 按 TotalQuota 降序排列，最多 10 条。
+          items:
+            $ref: '#/components/schemas/service.OrgUsageItem'
+          type: array
+          uniqueItems: false
+        updated_at:
+          description: UpdatedAt 是 manager 完成聚合的时刻。
+          type: string
+      type: object
+    service.OrgUsageItem:
+      properties:
+        org_id:
+          description: OrgID 是组织 UUID。
+          type: string
+        org_name:
+          description: OrgName 是组织显示名。
+          type: string
+        total_quota:
+          description: TotalQuota 是 [since, until] 内各日 QuotaDate.Quota 的累加值。
+          type: integer
+      type: object
     service.OrganizationResult:
       properties:
         admin_username:
@@ -6665,6 +6689,58 @@ paths:
       summary: 平台总览
       tags:
       - platform
+  /platform/usage/org-breakdown:
+    get:
+      description: 平台维度各组织在时间窗口内的 quota 消耗 top 10，仅平台管理员可调
+      parameters:
+      - description: 起始时间（Unix 秒）
+        in: query
+        name: since
+        schema:
+          type: integer
+      - description: 结束时间（Unix 秒）
+        in: query
+        name: until
+        schema:
+          type: integer
+      responses:
+        "200":
+          content:
+            application/json:
+              schema:
+                additionalProperties:
+                  $ref: '#/components/schemas/service.OrgUsageBreakdown'
+                type: object
+          description: OK
+        "401":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/handlers.ErrorResponse'
+          description: Unauthorized
+        "403":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/handlers.ErrorResponse'
+          description: Forbidden
+        "500":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/handlers.ErrorResponse'
+          description: Internal Server Error
+        "503":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/handlers.ErrorResponse'
+          description: Service Unavailable
+      security:
+      - BearerAuth: []
+      summary: 各组织用量分布
+      tags:
+      - usage
   /runtime-images:
     get:
       responses:

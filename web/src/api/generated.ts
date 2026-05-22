@@ -7106,6 +7106,88 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/platform/usage/org-breakdown": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * 各组织用量分布
+         * @description 平台维度各组织在时间窗口内的 quota 消耗 top 10，仅平台管理员可调
+         */
+        get: {
+            parameters: {
+                query?: {
+                    /** @description 起始时间（Unix 秒） */
+                    since?: number;
+                    /** @description 结束时间（Unix 秒） */
+                    until?: number;
+                };
+                header?: never;
+                path?: never;
+                cookie?: never;
+            };
+            requestBody?: never;
+            responses: {
+                /** @description OK */
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": {
+                            [key: string]: components["schemas"]["service.OrgUsageBreakdown"];
+                        };
+                    };
+                };
+                /** @description Unauthorized */
+                401: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["handlers.ErrorResponse"];
+                    };
+                };
+                /** @description Forbidden */
+                403: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["handlers.ErrorResponse"];
+                    };
+                };
+                /** @description Internal Server Error */
+                500: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["handlers.ErrorResponse"];
+                    };
+                };
+                /** @description Service Unavailable */
+                503: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["handlers.ErrorResponse"];
+                    };
+                };
+            };
+        };
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/runtime-images": {
         parameters: {
             query?: never;
@@ -8974,6 +9056,20 @@ export interface components {
             app?: components["schemas"]["service.AppResult"];
             job_id?: string;
             member?: components["schemas"]["service.MemberResult"];
+        };
+        "service.OrgUsageBreakdown": {
+            /** @description Items 按 TotalQuota 降序排列，最多 10 条。 */
+            items?: components["schemas"]["service.OrgUsageItem"][];
+            /** @description UpdatedAt 是 manager 完成聚合的时刻。 */
+            updated_at?: string;
+        };
+        "service.OrgUsageItem": {
+            /** @description OrgID 是组织 UUID。 */
+            org_id?: string;
+            /** @description OrgName 是组织显示名。 */
+            org_name?: string;
+            /** @description TotalQuota 是 [since, until] 内各日 QuotaDate.Quota 的累加值。 */
+            total_quota?: number;
         };
         "service.OrganizationResult": {
             /** @description AdminUsername 是组织首个可用管理员账号名，用于平台管理员复制登录信息。 */
