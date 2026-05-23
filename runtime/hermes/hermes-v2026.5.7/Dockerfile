@@ -23,9 +23,25 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     rm -rf /var/lib/apt/lists/*
 
 # hermes 上游安装：install.sh 装 hermes-agent + uv + Node + skill 库。
+# install.sh 的 node 下载、git clone 等失败分支全部走 log_warn 后 exit 0，
+# 会把"装了一半"甚至"一行没装"的半成品当作成功结果留在镜像层；docker
+# 看不见层内容是否真的健全，会把这种空/坏层缓存为"成功"，后续构建无论
+# 远程脚本如何修复都会无限复用这个坏层（已出现过该缓存命中后下游
+# `mv /opt/data/node` 一直报 cannot stat 的事故，单纯重跑 make 也绕不开）。
+# 这里把关键产物校验并进同一条 RUN：缺 hermes-agent / venv python /
+# Node 任一项即 exit 1，让 docker build 不缓存坏层；同时命令字符串变更
+# 也顺带让历史上已存在的空缓存层失效，本次构建必然重新跑 install.sh。
 ARG HERMES_REF
-RUN curl -fsSL https://hermes-agent.nousresearch.com/install.sh \
-      | bash -s -- --skip-setup --branch ${HERMES_REF}
+RUN set -e; \
+    curl -fsSL https://hermes-agent.nousresearch.com/install.sh \
+      | bash -s -- --skip-setup --branch ${HERMES_REF}; \
+    for p in \
+        /usr/local/lib/hermes-agent \
+        /usr/local/lib/hermes-agent/venv/bin/python \
+        /opt/data/node/bin/node; \
+    do \
+        [ -e "$p" ] || { echo "[install.sh guard] 缺少关键产物 $p——install.sh 可能静默失败（如 nodejs.org / github.com 不通），中断构建以阻止坏层进入缓存" >&2; exit 1; }; \
+    done
 
 # Node.js 默认装到 /opt/data/node，与运行时挂载点重叠；移到 /opt/hermes-node 并修软链。
 RUN mv /opt/data/node /opt/hermes-node && \
