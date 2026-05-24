@@ -3,7 +3,7 @@
 import { useMutation, useQuery, useQueryClient } from '@tanstack/vue-query'
 import type { Ref } from 'vue'
 
-import { apiRequest } from '@/api/client'
+import { apiRequest, type ApiError } from '@/api/client'
 import type { AggregatedUsage } from '@/api/hooks/useUsage'
 import { rangeQuery, type InstanceResourceSample, type ResourceRange } from '@/api/hooks/useRuntimeNodes'
 
@@ -269,11 +269,24 @@ export function useInitializeAppMutation(appId: Ref<string | undefined>) {
 
 // useJobQuery 查询 job 详情，支持轮询直至 succeeded/failed/canceled。
 // 调用方通过 enabled / refetchInterval 控制轮询窗口。
+// 4xx 错误（403/404/400）视为终态：停止轮询且不重试，避免后端权限或资源不存在时
+// 把 2s 一次的请求打到永远；5xx 仍然走 TanStack Query 默认重试以容忍偶发故障。
 export function useJobQuery(jobId: Ref<string | undefined>) {
   return useQuery<JobDTO | null>({
     queryKey: ['job', jobId],
     enabled: () => Boolean(jobId.value),
+    retry: (failureCount, error) => {
+      const status = (error as ApiError | undefined)?.status
+      if (status !== undefined && status >= 400 && status < 500) {
+        return false
+      }
+      return failureCount < 3
+    },
     refetchInterval: (query) => {
+      const err = query.state.error as ApiError | null
+      if (err && err.status >= 400 && err.status < 500) {
+        return false
+      }
       const data = query.state.data as JobDTO | null | undefined
       if (!data) return 2000
       if (data.status === 'pending' || data.status === 'running') return 2000
