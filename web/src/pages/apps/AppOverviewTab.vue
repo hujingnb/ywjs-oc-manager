@@ -82,6 +82,19 @@
           >
             切换
           </n-button>
+          <!-- 立即重启按钮：version_synced=false 且实例正在运行时，提供本页直接重启入口，
+               避免用户为了同步镜像还要切换到运行时 tab。restart job 后端已实现镜像变更
+               自动重建分支（worker/handlers/app_runtime_ops.go 的 Handle 镜像变更分支），
+               因此这里直接复用 restart 操作即可生效。 -->
+          <n-button
+            v-if="canRestartForVersionSync"
+            size="small"
+            type="primary"
+            :disabled="restartMutation.isPending.value"
+            @click="onRestartForVersionSync"
+          >
+            {{ restartMutation.isPending.value ? '提交中…' : '立即重启' }}
+          </n-button>
         </n-space>
       </n-descriptions-item>
       <n-descriptions-item label="所属组织">
@@ -102,6 +115,8 @@
     <p v-if="initFeedback" class="state-text" :class="{ danger: initError }" style="margin-top: 8px">{{ initFeedback }}</p>
     <p v-if="keyFeedback" class="state-text" :class="{ danger: keyError }" style="margin-top: 8px">{{ keyFeedback }}</p>
     <p v-if="versionFeedback" class="state-text" :class="{ danger: versionError }" style="margin-top: 8px">{{ versionFeedback }}</p>
+    <!-- 立即重启的反馈与版本切换、初始化反馈走相同样式，便于用户在同一卡片内捕获最近一次操作结果 -->
+    <p v-if="restartFeedback" class="state-text" :class="{ danger: restartError }" style="margin-top: 8px">{{ restartFeedback }}</p>
 
     <JobProgressPanel
       v-if="trackingJobId"
@@ -154,6 +169,7 @@ import {
   useJobQuery,
   useSwitchAppVersion,
   useToggleAppAPIKey,
+  useTriggerRuntimeOperation,
   type AppDTO,
 } from '@/api/hooks/useApps'
 import { useAssistantVersionsQuery } from '@/api/hooks/useAssistantVersions'
@@ -161,7 +177,7 @@ import { useOrganizationQuery } from '@/api/hooks/useOrganizations'
 import AppStatusTag from '@/components/AppStatusTag.vue'
 import ConfirmActionModal from '@/components/ConfirmActionModal.vue'
 import JobProgressPanel from '@/components/JobProgressPanel.vue'
-import { canManageApp, canSwitchAppVersion } from '@/domain/permissions'
+import { canManageApp, canSwitchAppVersion, canTriggerRuntimeOperation } from '@/domain/permissions'
 import { formatAppStatus, isInitPhase } from '@/domain/status'
 import { useAuthStore } from '@/stores/auth'
 
@@ -227,6 +243,43 @@ async function onConfirmSwitchVersion() {
   } catch (err: unknown) {
     versionError.value = true
     versionFeedback.value = err instanceof Error ? err.message : '切换版本失败'
+  }
+}
+
+// restartMutation 与运行时 tab 共用同一个后端入口（POST /apps/:id/runtime/restart）；
+// 后端 restart handler 在检测到 image_ref 变化时会自动停旧容器 + 入队 app_initialize
+// 重建容器，因此这里无需新增专用 API。
+const restartMutation = useTriggerRuntimeOperation(appId)
+const restartFeedback = ref('')
+const restartError = ref(false)
+
+// canRestartForVersionSync 控制「立即重启」按钮的展示：
+//   1) 必须有触发运行时操作的权限（与 AppRuntimeTab 的启停按钮口径一致）；
+//   2) version_synced=false，即当前确实存在「需重启」的同步需求；
+//   3) 实例状态为 running 或 binding_waiting，与 AppRuntimeTab.canStop 一致——
+//      只有跑着容器的实例才能走 restart 路径；stopped/error/draft 等状态用户应当
+//      去运行时 tab 的「启动」或概览页的「重新初始化」走对应入口。
+const canRestartForVersionSync = computed(() => {
+  if (!app?.value) return false
+  if (!canTriggerRuntimeOperation(auth.user, app.value)) return false
+  if (app.value.version_synced !== false) return false
+  const status = app.value.status
+  return status === 'running' || status === 'binding_waiting'
+})
+
+// onRestartForVersionSync 提交 restart 任务，并复用 trackingJobId 让 JobProgressPanel
+// 接管进度展示；与 AppRuntimeTab 的 restart 流程实质等价，只是入口前移到概览卡片。
+async function onRestartForVersionSync() {
+  restartFeedback.value = ''
+  restartError.value = false
+  try {
+    const result = await restartMutation.mutateAsync('restart')
+    trackingJobId.value = result.job_id
+    trackingJobTitle.value = '重启任务'
+    restartFeedback.value = `已提交重启任务：${result.job_id}`
+  } catch (err: unknown) {
+    restartError.value = true
+    restartFeedback.value = err instanceof Error ? err.message : '重启失败'
   }
 }
 

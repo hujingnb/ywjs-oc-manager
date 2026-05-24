@@ -38,6 +38,11 @@ vi.mock('@/api/hooks/useOrganizations', () => ({
 // switchVersionMutateAsync 作为 spy 供版本切换用例断言调用参数。
 const switchVersionMutateAsync = vi.fn()
 
+// triggerRuntimeMutateAsync 作为 spy 供「立即重启」用例断言传入的操作类型为 'restart'。
+const triggerRuntimeMutateAsync = vi.fn()
+// triggerRuntimeIsPending 暴露给用例切换以模拟按钮 loading 文案。
+const triggerRuntimeIsPending = ref(false)
+
 vi.mock('@/api/hooks/useApps', () => ({
   useInitializeAppMutation: () => ({
     isPending: ref(false),
@@ -53,6 +58,12 @@ vi.mock('@/api/hooks/useApps', () => ({
   useSwitchAppVersion: () => ({
     isPending: ref(false),
     mutateAsync: switchVersionMutateAsync,
+  }),
+  // useTriggerRuntimeOperation 在概览页用于「立即重启」按钮，复用 RuntimeTab 同一个后端接口；
+  // mock 暴露 spy 让用例可以断言传入 'restart' 操作。
+  useTriggerRuntimeOperation: () => ({
+    isPending: triggerRuntimeIsPending,
+    mutateAsync: triggerRuntimeMutateAsync,
   }),
 }))
 
@@ -246,6 +257,46 @@ describe('AppOverviewTab 助手版本', () => {
 
     // 5. 断言 mutation 以 version-002 调用，业务切换逻辑正确。
     expect(switchVersionMutateAsync).toHaveBeenCalledWith('version-002')
+  })
+
+  // 镜像/版本变更后实例需要重启同步，概览页应该提供「立即重启」入口避免用户去找运行时 tab。
+  // version_synced=false 且 status=running 时按钮可见，与 canRestartForVersionSync 三条件吻合。
+  it('version_synced=false 且实例运行中时展示立即重启按钮', () => {
+    const wrapper = mountWithApp({ status: 'running', version_synced: false })
+    const buttons = wrapper.findAll('button')
+    // 仅匹配「立即重启」文案，与「重新初始化」「切换」等其他按钮明确区分。
+    const restartBtn = buttons.find(b => b.text() === '立即重启')
+    expect(restartBtn).toBeDefined()
+  })
+
+  // version_synced=true 时实例已与版本同步，不应展示重启按钮，避免误导用户做无意义重启。
+  it('version_synced=true 时不展示立即重启按钮', () => {
+    const wrapper = mountWithApp({ status: 'running', version_synced: true })
+    const buttons = wrapper.findAll('button')
+    const restartBtn = buttons.find(b => b.text() === '立即重启')
+    expect(restartBtn).toBeUndefined()
+  })
+
+  // stopped 状态下容器不存在，restart 后端要么直接拒绝、要么走 stop→start 失败；
+  // 这种边界场景应当让用户去运行时 tab 走「启动」入口，本按钮不展示。
+  it('实例非运行状态时不展示立即重启按钮', () => {
+    const wrapper = mountWithApp({ status: 'stopped', version_synced: false })
+    const buttons = wrapper.findAll('button')
+    const restartBtn = buttons.find(b => b.text() === '立即重启')
+    expect(restartBtn).toBeUndefined()
+  })
+
+  // 点击「立即重启」按钮应该提交 restart 任务；断言 mutation 以 'restart' 参数调用。
+  it('点击立即重启按钮以 restart 操作调用 mutation', async () => {
+    triggerRuntimeMutateAsync.mockResolvedValueOnce({ job_id: 'job-restart-001', operation: 'restart' })
+    const wrapper = mountWithApp({ status: 'running', version_synced: false })
+    const buttons = wrapper.findAll('button')
+    const restartBtn = buttons.find(b => b.text() === '立即重启')
+    expect(restartBtn).toBeDefined()
+    await restartBtn!.trigger('click')
+    await nextTick()
+    // mutation 的入参类型固定为四个枚举值之一，这里只验证 'restart' 被传入。
+    expect(triggerRuntimeMutateAsync).toHaveBeenCalledWith('restart')
   })
 })
 
