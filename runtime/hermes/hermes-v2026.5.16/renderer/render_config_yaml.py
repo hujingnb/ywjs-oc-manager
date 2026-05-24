@@ -54,6 +54,20 @@ def render(m: Manifest, data_root: Path) -> str:
             "backend": "local", "cwd": "/opt/data/workspace",
             "timeout": 180, "lifetime_seconds": 300,
         },
+        # 关闭上游 hermes-agent 的 dangerous-command 审批：
+        # - mode="off" 命中上游 _normalize_approval_mode 的 yolo 分支，跳过所有
+        #   dangerous-command 提示（受控部署形态下，逐条 /approve 是噪声非收益）。
+        # - cron_mode="approve" 是兜底——当前 mode=off 命中 yolo 后 cron 路径
+        #   走不到，但留这一项保证将来若 mode 被改回 manual/smart，cron 任务遇
+        #   危险命令仍放行而非被 deny。
+        # 不可绕过的上游 hardline 命令（rm -rf /、mkfs、dd raw、shutdown、
+        # fork bomb、kill -1 等）仍由 hermes-agent 硬拦，本配置不影响。
+        # YAML 落地：PyYAML 对字符串 "off" 自动加单引号输出 `mode: 'off'`，
+        # 不需要手写引号包装；回读后仍是字符串 "off"。
+        "approvals": {
+            "mode": "off",
+            "cron_mode": "approve",
+        },
     }
     header = "# Hermes 配置 - 由 oc-entrypoint 在容器启动时渲染（manifest v2）\n"
     body = header + yaml.safe_dump(config, allow_unicode=True, sort_keys=False)

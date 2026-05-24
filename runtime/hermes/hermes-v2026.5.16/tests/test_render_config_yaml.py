@@ -1,4 +1,4 @@
-"""验证 config.yaml 渲染：model、provider、base_url、api_key、auxiliary 8 槽位、terminal 全部就位。"""
+"""验证 config.yaml 渲染：model、provider、base_url、api_key、auxiliary 8 槽位、terminal、approvals 全部就位。"""
 
 from pathlib import Path
 import yaml
@@ -56,3 +56,13 @@ def test_render_is_atomic(tmp_data: Path) -> None:
     render(make_manifest(), tmp_data)
     leftovers = [p.name for p in tmp_data.iterdir() if p.suffix == ".tmp"]
     assert leftovers == []
+
+
+def test_render_writes_approvals_skip_block(tmp_data: Path) -> None:
+    # 验证 approvals 段就位：mode=off 命中上游 yolo 分支跳过审批；
+    # cron_mode=approve 兜未来 mode 被改回 manual/smart 时 cron 仍放行。
+    # 业务目的：hermes 实例对话中不再每条命令都通过 messaging platform 问 /approve。
+    render(make_manifest(), tmp_data)
+    out = yaml.safe_load((tmp_data / "config.yaml").read_text())
+    assert out["approvals"]["mode"] == "off"
+    assert out["approvals"]["cron_mode"] == "approve"
