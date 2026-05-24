@@ -4798,7 +4798,7 @@ export interface paths {
         };
         /**
          * 查询异步任务详情
-         * @description 平台管理员按 ID 查询异步 job 的执行状态及结果
+         * @description 按 job 关联应用的可见性鉴权：平台管理员跨组织放行；组织管理员可查本组织 app 的 job；组织成员可查自己拥有的 app 的 job。payload 无 app_id 的 job 仅平台管理员可查。
          */
         get: {
             parameters: {
