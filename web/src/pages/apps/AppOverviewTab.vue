@@ -43,15 +43,8 @@
           <n-tag :type="keyTagType(app.api_key_status)" size="small" :bordered="false">
             {{ apiKeyLabel(app.api_key_status) }}
           </n-tag>
-          <n-button
-            v-if="canToggleKey && app.api_key_status === 'active'"
-            size="small"
-            type="error"
-            :disabled="keyMutation.isPending.value"
-            @click="confirmDisableKey = true"
-          >
-            禁用
-          </n-button>
+          <!-- 仅保留「恢复」入口：UI 不再提供主动禁用 API key 的能力，避免用户误操作把仍在使用的
+               实例 key 关停；若历史/外部流程已把 key 置为 disabled，组织管理员仍可在此恢复。 -->
           <n-button
             v-if="canToggleKey && app.api_key_status === 'disabled'"
             size="small"
@@ -126,16 +119,6 @@
       style="margin-top: 12px"
     />
 
-    <ConfirmActionModal
-      :visible="confirmDisableKey"
-      title="确认禁用 API key"
-      message="禁用后 Hermes 容器将无法调用模型，对话立即停止；可在恢复时重新启用。"
-      confirm-label="确认禁用"
-      :busy="keyMutation.isPending.value"
-      @confirm="onConfirmDisable"
-      @cancel="confirmDisableKey = false"
-    />
-
     <!-- 切换助手版本弹窗：从组织 allowlist 与版本目录交集中选择目标版本 -->
     <n-modal v-model:show="showSwitchVersionModal" preset="card" title="切换助手版本" style="width: 420px">
       <n-select
@@ -175,7 +158,6 @@ import {
 import { useAssistantVersionsQuery } from '@/api/hooks/useAssistantVersions'
 import { useOrganizationQuery } from '@/api/hooks/useOrganizations'
 import AppStatusTag from '@/components/AppStatusTag.vue'
-import ConfirmActionModal from '@/components/ConfirmActionModal.vue'
 import JobProgressPanel from '@/components/JobProgressPanel.vue'
 import { canManageApp, canSwitchAppVersion, canTriggerRuntimeOperation } from '@/domain/permissions'
 import { formatAppStatus, isInitPhase } from '@/domain/status'
@@ -345,10 +327,10 @@ async function onRetryInit() {
 }
 
 // canToggleKey 沿用应用管理权限控制 API key 启停入口；后端和 mutation 仍可能执行更严格的 API key 权限校验。
+// UI 当前仅保留「恢复」操作，禁用入口已被移除（详见 API key 描述项注释）。
 const canToggleKey = computed(() => canManageApp(auth.user, app?.value))
 
 const keyMutation = useToggleAppAPIKey(appId)
-const confirmDisableKey = ref(false)
 const keyFeedback = ref('')
 const keyError = ref(false)
 
@@ -362,27 +344,19 @@ function apiKeyLabel(s: string): string {
   return s === 'active' ? '启用' : s === 'disabled' ? '已禁用' : s
 }
 
-async function onConfirmDisable() {
-  confirmDisableKey.value = false
-  await runKeyMutation('disable')
-}
-
+// onRestoreKey 提交 restore 后端任务；任务完成由 JobProgressPanel 继续轮询。
+// 禁用入口已下线后，本组件对 keyMutation 仅有 restore 一种调用，逻辑内联在此函数中。
 async function onRestoreKey() {
-  await runKeyMutation('restore')
-}
-
-// runKeyMutation 提交 disable/restore 后端任务；任务完成由 JobProgressPanel 继续轮询。
-async function runKeyMutation(action: 'disable' | 'restore') {
   keyFeedback.value = ''
   keyError.value = false
   try {
-    const result = await keyMutation.mutateAsync(action)
+    const result = await keyMutation.mutateAsync('restore')
     trackingJobId.value = result.job_id
-    trackingJobTitle.value = action === 'disable' ? '禁用 API key 任务' : '恢复 API key 任务'
-    keyFeedback.value = `已提交 ${action} 任务：${result.job_id}`
+    trackingJobTitle.value = '恢复 API key 任务'
+    keyFeedback.value = `已提交 restore 任务：${result.job_id}`
   } catch (err: unknown) {
     keyError.value = true
-    keyFeedback.value = err instanceof Error ? err.message : `${action} 失败`
+    keyFeedback.value = err instanceof Error ? err.message : 'restore 失败'
   }
 }
 </script>
