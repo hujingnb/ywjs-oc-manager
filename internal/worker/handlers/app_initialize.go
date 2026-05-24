@@ -47,6 +47,12 @@ type AppInitializeStore interface {
 	// SetAppAppliedVersion 在初始化/重启成功后记录已应用的版本修订与镜像 ref，
 	// 供前端 version_synced 检测使用。
 	SetAppAppliedVersion(ctx context.Context, arg sqlc.SetAppAppliedVersionParams) (sqlc.App, error)
+	// AppHasBoundChannelBinding 用于 init 完成进入 binding_waiting 后做一次「渠道
+	// 已绑定」快照判定：切换助手版本触发镜像重建时，channel_bindings 行不会被
+	// 重置，凭证又落在 bind mount 持久目录，重启后 hermes 容器仍可直接加载——
+	// 此场景下 app.status 应跳过 binding_waiting 直接进入 running，避免概览页
+	// 长期显示「待绑定」而渠道页显示「bound」。
+	AppHasBoundChannelBinding(ctx context.Context, appID pgtype.UUID) (bool, error)
 }
 
 // ContainerCreator 抽象通过 agent docker 代理创建容器的能力。
@@ -309,8 +315,18 @@ func (h *AppInitializeHandler) Handle(ctx context.Context, job sqlc.Job) error {
 		}
 		return fmt.Errorf("查询应用失败: %w", err)
 	}
-	// 已离开初始化阶段直接成功(原本的幂等保留)
-	if app.Status == domain.AppStatusBindingWaiting || app.Status == domain.AppStatusRunning {
+	// 已离开初始化阶段直接成功(原本的幂等保留)。
+	// binding_waiting 分支再做一次「渠道已绑定」自愈：上一次切换助手版本+重启
+	// 触发的镜像重建在 transitionTo 阶段已经把行推到 binding_waiting，但若此时
+	// channel_bindings 已是 bound（凭证保留在 bind mount，hermes 容器重启后无需
+	// 重新扫码），就直接续推到 running，让概览页与渠道页状态收敛。
+	if app.Status == domain.AppStatusBindingWaiting {
+		if err := h.promoteIfChannelBound(ctx, &app); err != nil {
+			return err
+		}
+		return nil
+	}
+	if app.Status == domain.AppStatusRunning {
 		return nil
 	}
 
@@ -382,7 +398,47 @@ func (h *AppInitializeHandler) Handle(ctx context.Context, job sqlc.Job) error {
 		return h.markFailed(ctx, &app, domain.AppStatusBindingWaiting, fmt.Errorf("记录已应用版本信息失败: %w", err))
 	}
 
+	// 镜像重建场景下，channel_bindings 上一次的 bound 状态不会被清空，凭证又落在
+	// bind mount 目录被新容器复用，无需用户重新扫码。若发现已 bound 就直接续推
+	// 到 running，让概览页与渠道页状态一致——否则会出现「渠道页 bound、概览页
+	// 待绑定」的卡死视图（finalizeChannelBound 只在 PollAuth 返回 bound 的边沿
+	// 触发推进，不会被周期性兜底）。
+	if err := h.promoteIfChannelBound(ctx, &app); err != nil {
+		return h.markFailed(ctx, &app, domain.AppStatusBindingWaiting, err)
+	}
+
 	return h.writeInitAuditLog(ctx, app, job, payload)
+}
+
+// promoteIfChannelBound 在 status=binding_waiting 时探测该 app 是否已有 bound 渠道，
+// 若有则把 status 推到 running。
+//
+// 触发场景：切换助手版本 + 重启 → 镜像变更走 app_runtime_ops 重建分支 → 入队新的
+// app_initialize → 重建容器后走到 binding_waiting。整个流程不会重置渠道行，凭证又
+// 在 bind mount 目录里持续可用，所以最终态应当是 running 而不是 binding_waiting。
+//
+// 仅在 status=binding_waiting 时调用，调用方负责前置判断；状态机转移不合法时
+// 冒泡 error，由调用方决定 markFailed 还是直接返回。
+func (h *AppInitializeHandler) promoteIfChannelBound(ctx context.Context, app *sqlc.App) error {
+	if app.Status != domain.AppStatusBindingWaiting {
+		return nil
+	}
+	hasBound, err := h.store.AppHasBoundChannelBinding(ctx, app.ID)
+	if err != nil {
+		return fmt.Errorf("查询渠道绑定状态失败: %w", err)
+	}
+	if !hasBound {
+		return nil
+	}
+	if err := domain.EnsureAppTransition(app.Status, domain.AppStatusRunning); err != nil {
+		return fmt.Errorf("校验状态转移失败: %w", err)
+	}
+	updated, err := h.store.SetAppStatus(ctx, sqlc.SetAppStatusParams{ID: app.ID, Status: domain.AppStatusRunning})
+	if err != nil {
+		return fmt.Errorf("推进应用状态到 running 失败: %w", err)
+	}
+	*app = updated
+	return nil
 }
 
 // transitionTo 推 status 并清空 progress_*;违反状态机直接返回 error,

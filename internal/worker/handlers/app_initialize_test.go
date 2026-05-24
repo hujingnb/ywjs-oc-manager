@@ -408,6 +408,12 @@ type appInitStub struct {
 	appliedVersionSet bool
 	// lastAppliedVersion 记录最近一次 SetAppAppliedVersion 的入参，供断言使用。
 	lastAppliedVersion sqlc.SetAppAppliedVersionParams
+	// channelBound 让 AppHasBoundChannelBinding 返回的 bool 值受测试控制；
+	// 默认 false 保持「init 进入 binding_waiting 不再续推」的原行为。
+	channelBound bool
+	// hasBoundCalls 记录 AppHasBoundChannelBinding 被调用次数，
+	// 供「init 完成 / 幂等分支 都应触发自愈探测」的用例断言。
+	hasBoundCalls int
 }
 
 func newAppInitStub(t *testing.T) *appInitStub {
@@ -536,6 +542,14 @@ func (s *appInitStub) SetAppAppliedVersion(_ context.Context, arg sqlc.SetAppApp
 	s.app.AppliedVersionRevision = arg.AppliedVersionRevision
 	s.app.AppliedImageRef = arg.AppliedImageRef
 	return s.app, nil
+}
+
+// AppHasBoundChannelBinding 返回 channelBound 字段值，模拟「该 app 是否存在
+// status='bound' 的渠道行」DB 查询；hasBoundCalls 计数供断言「init 完成 /
+// 幂等分支 都正确触发自愈探测」。
+func (s *appInitStub) AppHasBoundChannelBinding(_ context.Context, _ pgtype.UUID) (bool, error) {
+	s.hasBoundCalls++
+	return s.channelBound, nil
 }
 
 // fakeContainers 同时实现 ContainerCreator 与 ContainerStarter,
@@ -1148,6 +1162,99 @@ func TestAppInitialize_AppliedVersionRecorded(t *testing.T) {
 	assert.Equal(t, int32(1), store.lastAppliedVersion.AppliedVersionRevision, "applied_version_revision 应等于版本 Revision")
 	// applied_image_ref 应等于 ResolveRuntimeImage 解析出的 ref。
 	assert.Equal(t, resolvedRef, store.lastAppliedVersion.AppliedImageRef, "applied_image_ref 应等于解析出的镜像 ref")
+}
+
+// TestAppInitialize_PromotesToRunningWhenChannelAlreadyBound 验证切换助手版本+重启
+// 触发镜像重建后的「已绑定渠道」自愈：app_initialize 完整跑完 5 阶段进入
+// binding_waiting 后，若 AppHasBoundChannelBinding 返回 true（凭证仍在 bind mount
+// 目录里、容器重启后即可复用），则 handler 应继续把 status 推到 running，避免
+// 概览页与渠道页状态不一致（渠道页 bound、概览页待绑定）。
+func TestAppInitialize_PromotesToRunningWhenChannelAlreadyBound(t *testing.T) {
+	store := newAppInitStub(t)
+	store.app.Status = domain.AppStatusDraft
+	// 关键前置：渠道已 bound——模拟镜像重建前的历史绑定行没有被重置。
+	store.channelBound = true
+
+	containers := &fakeContainers{result: runtimepkg.ContainerInfo{ID: "ctr-1", Name: "hermes-" + testAppID}}
+	client := &fakeNewAPI{result: newapi.APIKey{ID: 1, Key: "sk-test"}}
+	handler := NewAppInitializeHandler(store, &fakeDirs{}, containers, containers, client, AppInitializeConfig{
+		Cipher:              testCipher(t),
+		ResolveRuntimeImage: testResolveRuntimeImage,
+	})
+	handler.SetAppInputUploader(&fakeAppInputUploader{})
+
+	require.NoError(t, handler.Handle(context.Background(), buildJob(t, testAppID, "node-1")))
+
+	// 期望 6 次状态切换：4 阶段 init + binding_waiting + 自愈推到 running。
+	wantStatuses := []string{
+		domain.AppStatusPullingRuntimeImage,
+		domain.AppStatusPreparingRuntime,
+		domain.AppStatusCreatingContainer,
+		domain.AppStatusStarting,
+		domain.AppStatusBindingWaiting,
+		domain.AppStatusRunning,
+	}
+	require.Len(t, store.statusCalls, len(wantStatuses), "渠道已 bound 应再触发一次 SetAppStatus(running)")
+	for i, want := range wantStatuses {
+		assert.Equal(t, want, store.statusCalls[i].Status, "第 %d 次状态切换应推到 %s", i+1, want)
+	}
+	// 终态应为 running。
+	assert.Equal(t, domain.AppStatusRunning, store.app.Status)
+	// 自愈探测应至少调用一次（init 完成后那次）。
+	assert.GreaterOrEqual(t, store.hasBoundCalls, 1, "init 完成后应触发渠道绑定快照查询")
+	assert.False(t, store.failedSet, "自愈路径不应触发 MarkAppFailed")
+}
+
+// TestAppInitialize_StaysBindingWaitingWhenNoChannelBound 反向断言：在 channelBound=false
+// 的默认场景下，init 走完仍应停在 binding_waiting，保持「等待用户扫码绑定」的原行为
+// （只在自愈条件命中时才提前推到 running）。
+func TestAppInitialize_StaysBindingWaitingWhenNoChannelBound(t *testing.T) {
+	store := newAppInitStub(t)
+	store.app.Status = domain.AppStatusDraft
+	// 渠道未 bound：保持原行为，等渠道扫码完成由 finalizeChannelBound 推到 running。
+	store.channelBound = false
+
+	containers := &fakeContainers{result: runtimepkg.ContainerInfo{ID: "ctr-1", Name: "hermes-" + testAppID}}
+	client := &fakeNewAPI{result: newapi.APIKey{ID: 1, Key: "sk-test"}}
+	handler := NewAppInitializeHandler(store, &fakeDirs{}, containers, containers, client, AppInitializeConfig{
+		Cipher:              testCipher(t),
+		ResolveRuntimeImage: testResolveRuntimeImage,
+	})
+	handler.SetAppInputUploader(&fakeAppInputUploader{})
+
+	require.NoError(t, handler.Handle(context.Background(), buildJob(t, testAppID, "node-1")))
+
+	// 终态应为 binding_waiting：不应被错误地推到 running。
+	assert.Equal(t, domain.AppStatusBindingWaiting, store.app.Status)
+	// 最后一次 SetAppStatus 应是 binding_waiting，证明没有额外续推。
+	require.Greater(t, len(store.statusCalls), 0)
+	assert.Equal(t, domain.AppStatusBindingWaiting, store.statusCalls[len(store.statusCalls)-1].Status)
+	// 自愈探测仍应被调用一次（即便 channelBound=false，handler 也要查一次）。
+	assert.Equal(t, 1, store.hasBoundCalls, "init 完成后应至少查一次渠道绑定快照")
+}
+
+// TestAppInitialize_IdempotentBindingWaitingPromotesWhenChannelBound 验证 Handle 入口
+// 的 binding_waiting 幂等分支也带「自愈」能力：当 app 已经卡在 binding_waiting 但
+// 渠道实际已 bound 时（典型场景：上一次 init 跑完瞬间渠道刚 bound，但 worker 错过了
+// 续推；或重启时进入了 binding_waiting 而渠道行未被重置），worker 下一次重入 init
+// job 时应当能把状态收敛到 running，不再要求用户重新扫码。
+func TestAppInitialize_IdempotentBindingWaitingPromotesWhenChannelBound(t *testing.T) {
+	store := newAppInitStub(t)
+	store.app.Status = domain.AppStatusBindingWaiting
+	store.app.ApiKeyStatus = domain.APIKeyStatusActive
+	store.channelBound = true
+	containers := &fakeContainers{}
+	client := &fakeNewAPI{}
+
+	handler := NewAppInitializeHandler(store, &fakeDirs{}, containers, containers, client, AppInitializeConfig{})
+	require.NoError(t, handler.Handle(context.Background(), buildJob(t, testAppID, "node-1")))
+
+	// 幂等分支不会走容器创建 / new-api 调用，但应触发一次自愈推进。
+	assert.Equal(t, 0, containers.calls)
+	assert.Equal(t, 0, client.calls)
+	require.Len(t, store.statusCalls, 1, "幂等分支命中自愈应仅触发一次 SetAppStatus")
+	assert.Equal(t, domain.AppStatusRunning, store.statusCalls[0].Status)
+	assert.Equal(t, domain.AppStatusRunning, store.app.Status)
 }
 
 // TestAppInitialize_VersionModelWrittenToManifest 验证版本 MainModel 通过 BuildAppInputData
