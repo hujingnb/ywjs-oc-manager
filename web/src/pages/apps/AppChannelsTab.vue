@@ -444,6 +444,16 @@ async function unbind() {
     grid-template-columns: minmax(0, 1fr);
   }
 
+  .channel-list-item {
+    grid-template-columns: 36px minmax(0, 1fr);
+  }
+
+  .channel-support-label {
+    grid-column: 2;
+    min-width: 0;
+    text-align: left;
+  }
+
   .channel-list {
     padding-right: 0;
     padding-bottom: 14px;
