@@ -109,8 +109,12 @@ export const useUploadProgressStore = defineStore('uploadProgress', () => {
         currentAbort = new AbortController()
         try {
           const result = await runner(item, items[i].file, {
+            // 守卫：只在 session 仍指向当前 item 时回写字节数。
+            // 防止前一文件结束后浏览器仍然投递的延迟 progress 事件覆盖下一文件已开始的进度。
             onProgress: (loaded) => {
-              if (session.value) session.value.currentLoaded = loaded
+              if (session.value && session.value.currentIndex === i) {
+                session.value.currentLoaded = loaded
+              }
             },
             signal: currentAbort.signal,
           })
