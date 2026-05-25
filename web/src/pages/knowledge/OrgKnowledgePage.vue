@@ -71,6 +71,7 @@ import { NButton, NCard, NDataTable, NSelect, NSpace, NTag, useMessage, type Dat
 
 import {
   KNOWLEDGE_UPLOAD_MAX_MESSAGE,
+  downloadOrgKnowledgeFile,
   isKnowledgeUploadTooLarge,
   useDeleteOrgKnowledge,
   useOrgKnowledgeQuery,
@@ -112,6 +113,8 @@ const uploadMutation = useUploadOrgKnowledge(effectiveOrgId, relativeRef)
 const deleteMutation = useDeleteOrgKnowledge(effectiveOrgId, relativeRef)
 const { data: syncStatuses, isLoading: syncStatusLoading } = useOrgKnowledgeSyncStatusQuery(effectiveOrgId, canManage)
 const retryMutation = useRetryOrgKnowledgeSync(effectiveOrgId)
+// downloading 标记当前页面正在触发浏览器下载，防止同一页面重复点击下载按钮。
+const downloading = ref(false)
 
 // syncTagType 将同步状态映射为标签颜色，未知状态保留默认色便于兼容后端新增状态。
 function syncTagType(s: string): 'success' | 'warning' | 'error' | 'default' {
@@ -183,12 +186,25 @@ async function onDelete(entry: KnowledgeEntry) {
   await deleteMutation.mutateAsync(entry.path)
 }
 
+// onDownload 下载组织知识库中的单个文件；目录行不调用此函数。
+async function onDownload(entry: KnowledgeEntry) {
+  if (!effectiveOrgId.value) return
+  downloading.value = true
+  try {
+    await downloadOrgKnowledgeFile(effectiveOrgId.value, entry.path, entry.name)
+  } catch (err) {
+    message.error(err instanceof Error ? err.message : '下载失败')
+  } finally {
+    downloading.value = false
+  }
+}
+
 // onRetry 针对单个 runtime node 重新入队同步任务。
 async function onRetry(nodeId: string) {
   await retryMutation.mutateAsync(nodeId)
 }
 
-// fileColumns 展示知识库文件，并只在可管理且非目录行提供删除操作。
+// fileColumns 展示知识库文件；文件行始终可下载，删除入口仅对可管理用户开放。
 const fileColumns: DataTableColumns<KnowledgeEntry> = [
   {
     title: '名称', key: 'name',
@@ -199,9 +215,20 @@ const fileColumns: DataTableColumns<KnowledgeEntry> = [
   { title: '大小', key: 'size', render: (row) => row.is_dir ? '—' : formatSize(row.size) },
   {
     title: '操作', key: 'actions',
-    render: (row) => canManage.value && !row.is_dir
-      ? h(NButton, { size: 'small', onClick: () => onDelete(row) }, { default: () => '删除' })
-      : null,
+    render: (row) => {
+      if (row.is_dir) return null
+      const actions = [
+        h(NButton, {
+          size: 'small',
+          disabled: downloading.value,
+          onClick: () => onDownload(row),
+        }, { default: () => downloading.value ? '下载中…' : '下载' }),
+      ]
+      if (canManage.value) {
+        actions.push(h(NButton, { size: 'small', onClick: () => onDelete(row) }, { default: () => '删除' }))
+      }
+      return h('div', { style: 'display: flex; gap: 8px; flex-wrap: wrap' }, actions)
+    },
   },
 ]
 
