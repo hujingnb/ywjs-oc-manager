@@ -3,16 +3,23 @@ package files
 
 import (
 	"errors"
-	"github.com/stretchr/testify/require"
 	"os"
 	"path/filepath"
 	"testing"
+
+	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
 )
 
 // TestNewSafeRootRejectsEmpty 验证New安全根目录拒绝空值的异常或拒绝路径场景。
 func TestNewSafeRootRejectsEmpty(t *testing.T) {
 	_, err := NewSafeRoot("", 0)
 	require.Error(t, err)
+}
+
+// TestKnowledgeMaxFileSizeIs100MB 验证知识库单文件业务上限固定为 100MB。
+func TestKnowledgeMaxFileSizeIs100MB(t *testing.T) {
+	assert.Equal(t, int64(100*1024*1024), KnowledgeMaxFileSize)
 }
 
 // TestSafeRootResolveRejectsAbsolute 验证安全根目录解析拒绝绝对的异常或拒绝路径场景。

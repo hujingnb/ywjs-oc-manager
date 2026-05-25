@@ -22,6 +22,9 @@ var (
 	ErrFileTooLarge   = errors.New("文件大小超过上限")
 )
 
+// KnowledgeMaxFileSize 是知识库上传单文件业务上限；部署入口和前端提示必须保持同值。
+const KnowledgeMaxFileSize int64 = 100 * 1024 * 1024
+
 // SafeRoot 描述一个允许操作的根目录。
 type SafeRoot struct {
 	// Root 是已经 Abs 规范化后的知识库根目录。
