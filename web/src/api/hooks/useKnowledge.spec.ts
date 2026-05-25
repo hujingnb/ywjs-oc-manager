@@ -11,6 +11,17 @@ import {
 } from './useKnowledge'
 
 let clickSpy: ReturnType<typeof vi.spyOn>
+const originalCreateObjectURLDescriptor = Object.getOwnPropertyDescriptor(URL, 'createObjectURL')
+const originalRevokeObjectURLDescriptor = Object.getOwnPropertyDescriptor(URL, 'revokeObjectURL')
+
+// restoreURLDescriptor 恢复测试前的 URL 全局方法状态，避免手动 defineProperty 污染后续用例。
+function restoreURLDescriptor(name: 'createObjectURL' | 'revokeObjectURL', descriptor: PropertyDescriptor | undefined) {
+  if (descriptor) {
+    Object.defineProperty(URL, name, descriptor)
+    return
+  }
+  Reflect.deleteProperty(URL, name)
+}
 
 beforeEach(() => {
   setStoredTokens({ accessToken: 'access-1', refreshToken: 'refresh-1' })
@@ -29,6 +40,8 @@ afterEach(() => {
   clearStoredTokens()
   vi.unstubAllGlobals()
   vi.restoreAllMocks()
+  restoreURLDescriptor('createObjectURL', originalCreateObjectURLDescriptor)
+  restoreURLDescriptor('revokeObjectURL', originalRevokeObjectURLDescriptor)
 })
 
 describe('知识库上传大小限制', () => {
