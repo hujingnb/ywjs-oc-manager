@@ -1,9 +1,10 @@
 // 知识库 API hooks 负责组织级与应用级文件列表、上传、删除和节点同步状态。
-// 上传使用原始字节流 fetch，其余 JSON 接口统一走 apiRequest。
+// 上传走 xhrUpload 支持进度反馈与取消；其余 JSON 接口统一走 apiRequest。
 import { useMutation, useQuery, useQueryClient } from '@tanstack/vue-query'
 import type { Ref } from 'vue'
 
-import { apiRequest, getCsrfToken, getStoredAccessToken } from '@/api/client'
+import { apiRequest } from '@/api/client'
+import { xhrUpload } from '@/api/xhrUpload'
 
 // KnowledgeEntry 是知识库目录中的单个文件或目录。
 export interface KnowledgeEntry {
@@ -67,32 +68,29 @@ export function useAppKnowledgeQuery(
 }
 
 // useUploadOrgKnowledge 上传组织级文件。
-// 这里直接走 fetch 发原始字节流，不通过 apiRequest，因为 body 不是 JSON。
-// 成功后只失效当前目录，父级目录是否刷新由调用方切换路径时自然触发。
+// 走 xhrUpload 以支持进度回调与取消信号；底层会自动注入 Bearer + CSRF，
+// 与 apiRequest 等价的 401 处理也由 xhrUpload 复用。
+// onSuccess 改为 onSettled：取消或失败时同样刷新当前目录，避免列表与实际状态脱节。
 export function useUploadOrgKnowledge(orgId: Ref<string | undefined>, relative: Ref<string>) {
   const client = useQueryClient()
   return useMutation({
-    mutationFn: async (input: { path: string; file: File }) => {
+    mutationFn: async (input: {
+      path: string
+      file: File
+      onProgress?: (loaded: number, total: number) => void
+      signal?: AbortSignal
+    }) => {
       if (!orgId.value) throw new Error('缺少组织 ID')
       const params = new URLSearchParams({ path: input.path })
-      const headers: Record<string, string> = { 'Content-Type': 'application/octet-stream' }
-      const token = getStoredAccessToken()
-      if (token) headers.Authorization = `Bearer ${token}`
-      // 二进制上传绕过 apiRequest 直接 fetch，必须自己补 X-CSRF-Token，
-      // 否则 POST 写操作会被后端 RequireCSRF middleware 拒绝。
-      const csrf = getCsrfToken()
-      if (csrf) headers['X-CSRF-Token'] = csrf
-      const response = await fetch(`/api/v1/organizations/${orgId.value}/knowledge?${params.toString()}`, {
+      await xhrUpload(`/api/v1/organizations/${orgId.value}/knowledge?${params.toString()}`, {
         method: 'POST',
-        headers,
+        headers: { 'Content-Type': 'application/octet-stream' },
         body: input.file,
+        onProgress: input.onProgress,
+        signal: input.signal,
       })
-      if (!response.ok) {
-        const text = await response.text().catch(() => '')
-        throw new Error(text || '上传失败')
-      }
     },
-    onSuccess: () => {
+    onSettled: () => {
       void client.invalidateQueries({ queryKey: orgKey(orgId.value, relative.value) })
     },
   })
@@ -117,38 +115,35 @@ export function useDeleteOrgKnowledge(orgId: Ref<string | undefined>, relative: 
 }
 
 // useUploadAppKnowledge 上传应用级文件。
-// 应用知识库 mutation 失效 app 级前缀，覆盖当前目录和可能受新增目录影响的列表。
+// 走 xhrUpload 以支持进度回调与取消信号；其他语义与 useUploadOrgKnowledge 一致。
+// 失效 app 级前缀：兜底覆盖当前目录与可能受新增目录影响的列表。
 export function useUploadAppKnowledge(
   appId: Ref<string | undefined>,
   context: Ref<{ orgId: string; ownerUserId: string; path: string } | undefined>,
 ) {
   const client = useQueryClient()
   return useMutation({
-    mutationFn: async (input: { path: string; file: File }) => {
+    mutationFn: async (input: {
+      path: string
+      file: File
+      onProgress?: (loaded: number, total: number) => void
+      signal?: AbortSignal
+    }) => {
       if (!appId.value || !context.value) throw new Error('缺少实例知识库上下文')
       const params = new URLSearchParams({
         org_id: context.value.orgId,
         owner_user_id: context.value.ownerUserId,
         path: input.path,
       })
-      const headers: Record<string, string> = { 'Content-Type': 'application/octet-stream' }
-      const token = getStoredAccessToken()
-      if (token) headers.Authorization = `Bearer ${token}`
-      // 二进制上传绕过 apiRequest 直接 fetch，必须自己补 X-CSRF-Token，
-      // 否则 POST 写操作会被后端 RequireCSRF middleware 拒绝。
-      const csrf = getCsrfToken()
-      if (csrf) headers['X-CSRF-Token'] = csrf
-      const response = await fetch(`/api/v1/apps/${appId.value}/knowledge?${params.toString()}`, {
+      await xhrUpload(`/api/v1/apps/${appId.value}/knowledge?${params.toString()}`, {
         method: 'POST',
-        headers,
+        headers: { 'Content-Type': 'application/octet-stream' },
         body: input.file,
+        onProgress: input.onProgress,
+        signal: input.signal,
       })
-      if (!response.ok) {
-        const text = await response.text().catch(() => '')
-        throw new Error(text || '上传失败')
-      }
     },
-    onSuccess: () => {
+    onSettled: () => {
       void client.invalidateQueries({ queryKey: ['knowledge', 'app'] })
     },
   })
