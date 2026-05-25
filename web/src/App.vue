@@ -1,5 +1,5 @@
 <template>
-  <NConfigProvider :theme="darkTheme" :theme-overrides="themeOverrides">
+  <NConfigProvider :theme-overrides="themeOverrides">
     <!-- NMessageProvider 提供全局 message API，供页面通过 useMessage() 弹出操作反馈 -->
     <NMessageProvider>
       <RouterView />
@@ -11,7 +11,7 @@
 </template>
 
 <script setup lang="ts">
-import { darkTheme, type GlobalThemeOverrides } from 'naive-ui'
+import type { GlobalThemeOverrides } from 'naive-ui'
 import { NConfigProvider, NMessageProvider } from 'naive-ui'
 
 import UploadProgressModal from '@/components/UploadProgressModal.vue'
@@ -24,50 +24,62 @@ useBeforeUnloadGuard()
 
 const themeOverrides: GlobalThemeOverrides = {
   common: {
-    primaryColor: '#00F0FF',
-    primaryColorHover: '#33F5FF',
-    primaryColorPressed: '#00C8D4',
-    primaryColorSuppl: '#00C8D4',
-    bodyColor: '#0A0E27',
-    cardColor: 'rgba(20,28,58,0.8)',
-    modalColor: 'rgba(15,21,53,0.98)',
-    tableColor: 'rgba(20,28,58,0.6)',
-    tableColorStriped: 'rgba(20,28,58,0.3)',
-    borderColor: 'rgba(0,240,255,0.2)',
-    dividerColor: 'rgba(0,240,255,0.12)',
-    textColorBase: '#FFFFFF',
-    textColor1: '#FFFFFF',
-    textColor2: '#CBD6E5',
-    textColor3: '#8A94C6',
-    successColor: '#00FF88',
-    warningColor: '#FFB800',
-    errorColor: '#FF3B5C',
-    inputColor: 'rgba(15,21,53,0.8)',
-    inputColorDisabled: 'rgba(15,21,53,0.4)',
-    placeholderColor: '#8A94C6',
+    primaryColor: '#ff6a00',
+    primaryColorHover: '#ff8126',
+    primaryColorPressed: '#e65f00',
+    primaryColorSuppl: '#ff6a00',
+    infoColor: '#1677ff',
+    infoColorHover: '#4096ff',
+    infoColorPressed: '#0958d9',
+    successColor: '#16a34a',
+    warningColor: '#f59e0b',
+    errorColor: '#d93026',
+    bodyColor: '#f5f7fa',
+    cardColor: '#ffffff',
+    modalColor: '#ffffff',
+    popoverColor: '#ffffff',
+    tableColor: '#ffffff',
+    tableColorStriped: '#fbfcfd',
+    borderColor: '#e5e7eb',
+    dividerColor: '#edf0f5',
+    textColorBase: '#1f2329',
+    textColor1: '#1f2329',
+    textColor2: '#4b5563',
+    textColor3: '#6b7280',
+    inputColor: '#ffffff',
+    inputColorDisabled: '#f3f5f8',
+    placeholderColor: '#8a94a6',
   },
   Layout: {
-    siderColor: 'rgba(10,14,39,0.95)',
-    headerColor: 'rgba(10,14,39,0.6)',
-    footerColor: 'transparent',
-    color: '#0A0E27',
+    siderColor: '#ffffff',
+    headerColor: '#ffffff',
+    footerColor: '#ffffff',
+    color: '#f5f7fa',
   },
   Menu: {
-    itemTextColor: '#8A94C6',
-    itemTextColorHover: '#FFFFFF',
-    itemTextColorActive: '#FFFFFF',
-    itemTextColorActiveHover: '#FFFFFF',
-    itemColorActive: 'rgba(0,240,255,0.15)',
-    itemColorActiveHover: 'rgba(0,240,255,0.18)',
-    itemColorHover: 'rgba(255,255,255,0.05)',
-    borderColorActive: 'rgba(0,240,255,0.4)',
+    itemTextColor: '#4b5563',
+    itemTextColorHover: '#ff6a00',
+    itemTextColorActive: '#ff6a00',
+    itemTextColorActiveHover: '#ff6a00',
+    itemColorActive: '#fff4ed',
+    itemColorActiveHover: '#fff4ed',
+    itemColorHover: '#f5f7fa',
+    borderColorActive: '#ff6a00',
   },
   DataTable: {
-    thColor: 'rgba(10,14,39,0.8)',
-    tdColor: 'transparent',
-    tdColorHover: 'rgba(0,240,255,0.05)',
-    borderColor: 'rgba(0,240,255,0.12)',
-    thTextColor: '#8A94C6',
+    thColor: '#fbfcfd',
+    tdColor: '#ffffff',
+    tdColorHover: '#f8fafc',
+    borderColor: '#edf0f5',
+    thTextColor: '#6b7280',
+  },
+  Card: {
+    borderColor: '#e5e7eb',
+    color: '#ffffff',
+  },
+  Button: {
+    borderRadiusMedium: '4px',
+    borderRadiusSmall: '4px',
   },
 }
 </script>
