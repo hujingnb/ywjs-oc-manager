@@ -167,7 +167,6 @@ func (h *KnowledgeHandler) DownloadOrg(c *gin.Context) {
 		writeKnowledgeError(c, err)
 		return
 	}
-	defer reader.Close()
 	writeKnowledgeDownload(c, relative, reader, size)
 }
 
@@ -295,7 +294,6 @@ func (h *KnowledgeHandler) DownloadApp(c *gin.Context) {
 		writeKnowledgeError(c, err)
 		return
 	}
-	defer reader.Close()
 	writeKnowledgeDownload(c, relative, reader, size)
 }
 
@@ -367,12 +365,14 @@ func (h *KnowledgeHandler) DeleteApp(c *gin.Context) {
 	c.Status(http.StatusNoContent)
 }
 
-func writeKnowledgeDownload(c *gin.Context, relative string, reader io.Reader, size int64) {
+// writeKnowledgeDownload 负责设置下载响应头、写出二进制流，并统一接管流关闭，避免调用方重复管理下载流生命周期。
+func writeKnowledgeDownload(c *gin.Context, relative string, stream io.ReadCloser, size int64) {
+	defer stream.Close()
 	c.Header("Content-Type", "application/octet-stream")
 	c.Header("Content-Length", strconv.FormatInt(size, 10))
 	c.Header("Content-Disposition", mime.FormatMediaType("attachment", map[string]string{"filename": path.Base(relative)}))
 	c.Status(http.StatusOK)
-	if _, err := io.Copy(c.Writer, reader); err != nil {
+	if _, err := io.Copy(c.Writer, stream); err != nil {
 		c.Error(err)
 	}
 }

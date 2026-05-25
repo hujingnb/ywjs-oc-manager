@@ -27,6 +27,10 @@ type knowledgeServiceStub struct {
 	openOrgContent string
 	openOrgSize    int64
 	openOrgErr     error
+	openOrgCalls   int
+	openOrgID      string
+	openOrgPath    string
+	openOrgCloses  int
 	saveOrgErr     error
 	deleteOrgErr   error
 	listAppResult  service.KnowledgeListResult
@@ -34,8 +38,27 @@ type knowledgeServiceStub struct {
 	openAppContent string
 	openAppSize    int64
 	openAppErr     error
+	openAppCalls   int
+	openAppOrgID   string
+	openAppID      string
+	openAppOwner   string
+	openAppPath    string
+	openAppCloses  int
 	saveAppErr     error
 	deleteAppErr   error
+}
+
+// trackedReadCloser 用于测试下载流在响应写出后是否被负责写响应的代码关闭。
+type trackedReadCloser struct {
+	*bytes.Buffer
+	onClose func()
+}
+
+func (r *trackedReadCloser) Close() error {
+	if r.onClose != nil {
+		r.onClose()
+	}
+	return nil
 }
 
 func (s *knowledgeServiceStub) GetOrgSyncStatus(_ context.Context, _ auth.Principal, _ string) ([]service.SyncStatusResult, error) {
@@ -58,11 +81,19 @@ func (s *knowledgeServiceStub) DeleteOrgFile(_ context.Context, _ auth.Principal
 	return s.deleteOrgErr
 }
 
-func (s *knowledgeServiceStub) OpenOrgFile(_ context.Context, _ auth.Principal, _, _ string) (io.ReadCloser, int64, error) {
+func (s *knowledgeServiceStub) OpenOrgFile(_ context.Context, _ auth.Principal, orgID, relative string) (io.ReadCloser, int64, error) {
+	s.openOrgCalls++
+	s.openOrgID = orgID
+	s.openOrgPath = relative
 	if s.openOrgErr != nil {
 		return nil, 0, s.openOrgErr
 	}
-	return io.NopCloser(bytes.NewBufferString(s.openOrgContent)), s.openOrgSize, nil
+	return &trackedReadCloser{
+		Buffer: bytes.NewBufferString(s.openOrgContent),
+		onClose: func() {
+			s.openOrgCloses++
+		},
+	}, s.openOrgSize, nil
 }
 
 func (s *knowledgeServiceStub) ListApp(_ context.Context, _ auth.Principal, _, _, _, _ string) (service.KnowledgeListResult, error) {
@@ -77,11 +108,21 @@ func (s *knowledgeServiceStub) DeleteAppFile(_ context.Context, _ auth.Principal
 	return s.deleteAppErr
 }
 
-func (s *knowledgeServiceStub) OpenAppFile(_ context.Context, _ auth.Principal, _, _, _, _ string) (io.ReadCloser, int64, error) {
+func (s *knowledgeServiceStub) OpenAppFile(_ context.Context, _ auth.Principal, orgID, appID, ownerUserID, relative string) (io.ReadCloser, int64, error) {
+	s.openAppCalls++
+	s.openAppOrgID = orgID
+	s.openAppID = appID
+	s.openAppOwner = ownerUserID
+	s.openAppPath = relative
 	if s.openAppErr != nil {
 		return nil, 0, s.openAppErr
 	}
-	return io.NopCloser(bytes.NewBufferString(s.openAppContent)), s.openAppSize, nil
+	return &trackedReadCloser{
+		Buffer: bytes.NewBufferString(s.openAppContent),
+		onClose: func() {
+			s.openAppCloses++
+		},
+	}, s.openAppSize, nil
 }
 
 // newKnowledgeTestRouter 构建用于测试的 gin router。
@@ -145,9 +186,13 @@ func TestKnowledgeDownloadOrgHappy(t *testing.T) {
 
 	require.Equal(t, http.StatusOK, w.Code)
 	assert.Equal(t, "application/octet-stream", w.Header().Get("Content-Type"))
-	assert.Contains(t, w.Header().Get("Content-Disposition"), "readme.md")
+	assert.Equal(t, "attachment; filename=readme.md", w.Header().Get("Content-Disposition"))
 	assert.Equal(t, "5", w.Header().Get("Content-Length"))
 	assert.Equal(t, "hello", w.Body.String())
+	assert.Equal(t, 1, stub.openOrgCalls)
+	assert.Equal(t, "org-1", stub.openOrgID)
+	assert.Equal(t, "docs/readme.md", stub.openOrgPath)
+	assert.Equal(t, 1, stub.openOrgCloses)
 }
 
 // TestKnowledgeDownloadOrgMissingPath 验证组织知识库下载缺少 path 时返回 400。
@@ -161,6 +206,7 @@ func TestKnowledgeDownloadOrgMissingPath(t *testing.T) {
 	router.ServeHTTP(w, req)
 
 	assert.Equal(t, http.StatusBadRequest, w.Code)
+	assert.Equal(t, 0, stub.openOrgCalls)
 }
 
 // TestKnowledgeSaveOrgHappy 验证知识库保存组织成功路径的成功路径场景。
@@ -232,9 +278,15 @@ func TestKnowledgeDownloadAppHappy(t *testing.T) {
 
 	require.Equal(t, http.StatusOK, w.Code)
 	assert.Equal(t, "application/octet-stream", w.Header().Get("Content-Type"))
-	assert.Contains(t, w.Header().Get("Content-Disposition"), "app.md")
+	assert.Equal(t, "attachment; filename=app.md", w.Header().Get("Content-Disposition"))
 	assert.Equal(t, "3", w.Header().Get("Content-Length"))
 	assert.Equal(t, "app", w.Body.String())
+	assert.Equal(t, 1, stub.openAppCalls)
+	assert.Equal(t, "org-1", stub.openAppOrgID)
+	assert.Equal(t, "app-1", stub.openAppID)
+	assert.Equal(t, "u1", stub.openAppOwner)
+	assert.Equal(t, "app.md", stub.openAppPath)
+	assert.Equal(t, 1, stub.openAppCloses)
 }
 
 // TestKnowledgeDownloadAppMissingParams 验证实例知识库下载缺少任一必填参数时返回 400。
@@ -259,6 +311,7 @@ func TestKnowledgeDownloadAppMissingParams(t *testing.T) {
 			router.ServeHTTP(w, req)
 
 			assert.Equal(t, http.StatusBadRequest, w.Code)
+			assert.Equal(t, 0, stub.openAppCalls)
 		})
 	}
 }
