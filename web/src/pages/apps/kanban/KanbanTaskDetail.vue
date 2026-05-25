@@ -128,17 +128,17 @@ function isKnownStatus(status: string | undefined): status is KanbanStatus {
 <style scoped>
 .detail-head { margin-bottom: 12px; }
 /* 状态色用主题色，与左侧列表的 running 行颜色一致 */
-.status-bar { color: var(--primary-color, #18a058); font-size: 12px; font-weight: 500; }
+.status-bar { color: var(--color-brand-text, #8a3700); font-size: 12px; font-weight: 500; }
 .detail-title { margin: 4px 0; font-size: 16px; }
-.detail-sub { color: var(--n-text-color-3, #707078); font-size: 11px; }
-.section { margin-top: 14px; border-top: 1px solid var(--n-border-color, #2a2a30); padding-top: 12px; }
-.section-title { font-size: 11px; text-transform: uppercase; color: var(--n-text-color-3, #707078); margin: 0 0 8px; }
-.live { color: var(--primary-color, #18a058); }
+.detail-sub { color: var(--color-text-secondary, #6b7280); font-size: 11px; }
+.section { margin-top: 14px; border-top: 1px solid var(--color-border, #e5e7eb); padding-top: 12px; }
+.section-title { font-size: 11px; text-transform: uppercase; color: var(--color-text-secondary, #6b7280); margin: 0 0 8px; }
+.live { color: var(--color-brand-text, #8a3700); }
 .meta-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; font-size: 12px; }
-.meta-grid .k { color: var(--n-text-color-3, #707078); margin-right: 8px; }
-.body-block { font-size: 12px; white-space: pre-wrap; color: var(--n-text-color-2, #a0a0a8); }
+.meta-grid .k { color: var(--color-text-secondary, #6b7280); margin-right: 8px; }
+.body-block { font-size: 12px; white-space: pre-wrap; color: var(--color-text-primary, #1f2329); }
 .events-pane {
-  background: var(--n-color, #101014);
+  background: var(--color-surface, #ffffff);
   border-radius: 3px;
   padding: 10px;
   font-family: ui-monospace, monospace;
@@ -148,7 +148,7 @@ function isKnownStatus(status: string | undefined): status is KanbanStatus {
 }
 .ev-line {
   line-height: 1.5;
-  color: var(--n-text-color-2, #a0a0a8);
+  color: var(--color-text-primary, #1f2329);
   word-break: break-all;
 }
 .runs-table { width: 100%; border-collapse: collapse; font-size: 12px; }
@@ -156,15 +156,15 @@ function isKnownStatus(status: string | undefined): status is KanbanStatus {
 .runs-table td {
   text-align: left;
   padding: 6px 8px;
-  border-bottom: 1px solid var(--n-border-color, #2a2a30);
+  border-bottom: 1px solid var(--color-border, #e5e7eb);
 }
 .comment {
-  background: var(--n-color-embedded, #1f1f24);
+  background: var(--color-surface-muted, #fbfcfd);
   border-radius: 3px;
   padding: 8px 10px;
   margin-bottom: 6px;
 }
-.comment-head { font-size: 11px; color: var(--n-text-color-3, #707078); }
-.comment-body { font-size: 12px; color: var(--n-text-color-2, #a0a0a8); }
-.state-text { color: var(--n-text-color-3, #707078); font-size: 13px; }
+.comment-head { font-size: 11px; color: var(--color-text-secondary, #6b7280); }
+.comment-body { font-size: 12px; color: var(--color-text-primary, #1f2329); }
+.state-text { color: var(--color-text-secondary, #6b7280); font-size: 13px; }
 </style>

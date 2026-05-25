@@ -296,7 +296,7 @@ async function onAction(verb: CronJobAction['verb']) {
   padding: 10px 14px;
 }
 .status-summary {
-  color: var(--n-text-color-2, #cbd6e5);
+  color: var(--color-text-primary, #1f2329);
   font-size: 12px;
   white-space: nowrap;
 }
@@ -310,11 +310,11 @@ async function onAction(verb: CronJobAction['verb']) {
   align-items: start;
 }
 .state-text {
-  color: var(--n-text-color-3, #707078);
+  color: var(--color-text-secondary, #6b7280);
   font-size: 13px;
 }
 .danger {
-  color: var(--error-color, #d03050);
+  color: var(--color-danger, #d93026);
 }
 @media (max-width: 1200px) {
   .split {

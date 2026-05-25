@@ -289,7 +289,7 @@ function promptText(title: string): Promise<string | null> {
 
 /* 实时连接绿点标签 */
 .live-tag {
-  color: var(--primary-color, #18a058);
+  color: var(--color-brand-text, #8a3700);
   font-size: 11px;
 }
 
@@ -299,16 +299,16 @@ function promptText(title: string): Promise<string | null> {
   align-items: center;
   gap: 10px;
   font-size: 11px;
-  color: var(--n-text-color-3, #8a94c6);
+  color: var(--color-text-secondary, #6b7280);
   white-space: nowrap;
 }
 .stat-badge strong {
-  color: var(--n-text-color-2, #cbd6e5);
+  color: var(--color-text-primary, #1f2329);
   font-weight: 600;
 }
 /* 最老就绪等待时长用警示色，提示看板积压 */
 .stat-badge strong.warn {
-  color: var(--warning-color, #ffb800);
+  color: var(--color-warning-text, #92400e);
 }
 
 /* 左右分屏：左侧任务列表 380px 固定宽，右侧详情面板占剩余空间 */
@@ -328,11 +328,11 @@ function promptText(title: string): Promise<string | null> {
 
 /* 加载 / 错误状态文本 */
 .state-text {
-  color: var(--n-text-color-3, #707078);
+  color: var(--color-text-secondary, #6b7280);
   font-size: 13px;
 }
 
 .danger {
-  color: var(--error-color, #d03050);
+  color: var(--color-danger, #d93026);
 }
 </style>

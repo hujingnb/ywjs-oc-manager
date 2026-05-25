@@ -49,10 +49,10 @@ const relativeTime = computed(() => {
   border-left: 2px solid transparent;
   cursor: pointer;
 }
-.task-row:hover { background: var(--n-color-embedded, #1f1f24); }
+.task-row:hover { background: var(--color-surface-muted, #fbfcfd); }
 .task-row.selected {
-  background: var(--n-color-embedded, #1f1f24);
-  border-left-color: var(--primary-color, #18a058);
+  background: var(--color-brand-soft);
+  border-left-color: var(--color-brand, #ff6a00);
 }
 .row-title {
   font-size: 13px;
@@ -64,11 +64,11 @@ const relativeTime = computed(() => {
   overflow: hidden;
 }
 .row-meta { display: flex; align-items: center; gap: 5px; }
-.row-time { margin-left: auto; color: var(--n-text-color-3, #707078); font-size: 11px; }
+.row-time { margin-left: auto; color: var(--color-text-secondary, #6b7280); font-size: 11px; }
 .row-running {
   margin-top: 6px;
   font-size: 10px;
-  color: var(--primary-color, #18a058);
+  color: var(--color-brand-text, #8a3700);
   font-family: ui-monospace, monospace;
 }
 </style>

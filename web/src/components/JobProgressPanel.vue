@@ -10,14 +10,14 @@
       </div>
     </template>
 
-    <div v-if="!job" style="color: #8A94C6; font-size: 13px">尚未触发任务</div>
-    <n-descriptions v-else :column="2" size="small" label-style="color:#8A94C6" content-style="font-weight:600">
+    <div v-if="!job" style="color: var(--color-text-secondary); font-size: 13px">尚未触发任务</div>
+    <n-descriptions v-else :column="2" size="small" label-style="color:var(--color-text-secondary)" content-style="font-weight:600">
       <n-descriptions-item label="类型">{{ job.type }}</n-descriptions-item>
       <n-descriptions-item label="尝试次数">{{ job.attempts }} / {{ job.max_attempts }}</n-descriptions-item>
       <n-descriptions-item label="下一次执行">{{ formatTime(job.run_after) }}</n-descriptions-item>
       <n-descriptions-item label="完成时间">{{ formatTime(job.finished_at) }}</n-descriptions-item>
       <n-descriptions-item v-if="job.last_error" label="最近错误" :span="2">
-        <span style="color: #FF3B5C">{{ job.last_error }}</span>
+        <span style="color: var(--color-danger-text)">{{ job.last_error }}</span>
       </n-descriptions-item>
     </n-descriptions>
   </n-card>

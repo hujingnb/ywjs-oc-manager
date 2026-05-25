@@ -100,15 +100,15 @@ function onSelect(job: CronJob) {
   font-size: 12px;
 }
 .job-table th {
-  color: var(--n-text-color-3, #707078);
+  color: var(--color-text-secondary, #6b7280);
   font-weight: 500;
   text-align: left;
   padding: 8px 10px;
-  border-bottom: 1px solid var(--n-border-color, #2a2a30);
+  border-bottom: 1px solid var(--color-border, #e5e7eb);
 }
 .job-table td {
   padding: 9px 10px;
-  border-bottom: 1px solid var(--n-border-color, #2a2a30);
+  border-bottom: 1px solid var(--color-border, #e5e7eb);
   min-height: 48px;
   vertical-align: middle;
   overflow: hidden;
@@ -130,11 +130,11 @@ function onSelect(job: CronJob) {
   transition: background 0.15s, box-shadow 0.15s;
 }
 .job-row:hover {
-  background: var(--n-color-hover, rgba(255, 255, 255, 0.04));
+  background: var(--color-surface-muted, #fbfcfd);
 }
 .job-row.selected {
-  background: rgba(24, 160, 88, 0.1);
-  box-shadow: inset 3px 0 0 var(--primary-color, #18a058);
+  background: var(--color-brand-soft);
+  box-shadow: inset 3px 0 0 var(--color-brand);
 }
 .name-cell {
   display: grid;
@@ -146,7 +146,7 @@ function onSelect(job: CronJob) {
   text-overflow: ellipsis;
 }
 .name-cell code {
-  color: var(--n-text-color-3, #707078);
+  color: var(--color-text-secondary, #6b7280);
   font-size: 10px;
   overflow: hidden;
   text-overflow: ellipsis;

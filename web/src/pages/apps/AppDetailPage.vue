@@ -84,14 +84,14 @@ function onTabChange(name: string | number) {
   /* header slot 内，左右对齐 header padding，通过负 margin 拉齐两端 */
   margin: 8px -24px 0;
   padding: 0 24px;
-  border-top: 1px solid var(--n-border-color, #333);
+  border-top: 1px solid var(--color-border, #e5e7eb);
   gap: 4px;
 }
 .tab-item {
   background: none;
   border: none;
   border-bottom: 3px solid transparent;
-  color: var(--n-text-color-3, #999);
+  color: var(--color-text-secondary, #6b7280);
   cursor: pointer;
   font-size: 14px;
   padding: 10px 12px;
@@ -100,10 +100,10 @@ function onTabChange(name: string | number) {
   transition: color 0.2s, border-color 0.2s;
 }
 .tab-item:hover {
-  color: var(--n-text-color, #fff);
+  color: var(--color-text-primary, #1f2329);
 }
 .tab-item.active {
-  color: var(--primary-color, #18a058);
-  border-bottom-color: var(--primary-color, #18a058);
+  color: var(--color-brand-text, #8a3700);
+  border-bottom-color: var(--color-brand, #ff6a00);
 }
 </style>

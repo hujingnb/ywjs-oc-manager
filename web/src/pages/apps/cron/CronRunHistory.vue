@@ -67,10 +67,10 @@ function onSelect(run: CronRunEntry) {
   gap: 8px;
   min-height: 42px;
   padding: 8px 10px;
-  border: 1px solid var(--n-border-color, #2a2a30);
+  border: 1px solid var(--color-border, #e5e7eb);
   border-radius: 4px;
   background: transparent;
-  color: var(--n-text-color-2, #a0a0a8);
+  color: var(--color-text-primary, #1f2329);
   cursor: pointer;
   text-align: left;
 }
@@ -79,8 +79,8 @@ function onSelect(run: CronRunEntry) {
   opacity: 0.64;
 }
 .run-row.selected {
-  border-color: var(--primary-color, #18a058);
-  background: rgba(24, 160, 88, 0.08);
+  border-color: var(--color-brand);
+  background: var(--color-brand-soft);
 }
 .run-row strong,
 .run-row small,
@@ -91,17 +91,17 @@ function onSelect(run: CronRunEntry) {
   white-space: nowrap;
 }
 .run-row small {
-  color: var(--n-text-color-3, #707078);
+  color: var(--color-text-secondary, #6b7280);
   margin-top: 2px;
 }
 .run-output {
-  color: var(--n-text-color-3, #707078);
+  color: var(--color-text-secondary, #6b7280);
   font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
   font-size: 11px;
   text-align: right;
 }
 .state-text {
-  color: var(--n-text-color-3, #707078);
+  color: var(--color-text-secondary, #6b7280);
   font-size: 13px;
 }
 </style>

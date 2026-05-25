@@ -369,13 +369,13 @@ async function onRestoreKey() {
 /* 字节文案使用 12px 弱化色,作为进度条的从属辅助信息 */
 .init-progress-bytes {
   font-size: 12px;
-  color: var(--text-color-3, #999);
+  color: var(--color-text-secondary, #6b7280);
   margin-left: 8px;
 }
 /* 失败阶段提示用错误红色,与现有 state-text.danger 视觉一致 */
 .init-failure {
   margin-top: 4px;
-  color: var(--error-color, #d03050);
+  color: var(--color-danger, #d93026);
   font-size: 13px;
   display: flex;
   flex-direction: column;

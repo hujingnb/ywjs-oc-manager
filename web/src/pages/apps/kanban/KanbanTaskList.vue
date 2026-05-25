@@ -82,7 +82,7 @@ function onExpandChange(names: Array<string | number>) {
 <style scoped>
 .empty-hint {
   padding: 12px 14px;
-  color: var(--n-text-color-3, #707078);
+  color: var(--color-text-secondary, #6b7280);
   font-size: 11px;
   text-align: center;
 }

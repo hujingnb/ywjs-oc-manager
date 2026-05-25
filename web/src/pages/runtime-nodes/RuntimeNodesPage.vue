@@ -386,14 +386,14 @@ function formatDateTime(value: string) {
 .drawer-section-heading h3,
 .instance-resource-heading h4 {
   margin: 0;
-  color: var(--color-text-primary, #1f2433);
+  color: var(--color-text-primary, #1f2329);
   font-size: 16px;
   line-height: 24px;
 }
 
 .section-kicker {
   margin: 0 0 2px;
-  color: var(--color-text-secondary, #8a94c6);
+  color: var(--color-text-secondary, #6b7280);
   font-size: 12px;
   font-weight: 700;
   text-transform: uppercase;
@@ -401,7 +401,7 @@ function formatDateTime(value: string) {
 
 .section-meta,
 .instance-resource-heading span {
-  color: var(--color-text-secondary, #66758a);
+  color: var(--color-text-secondary, #6b7280);
   font-size: 12px;
 }
 
@@ -412,7 +412,7 @@ function formatDateTime(value: string) {
 }
 
 .instance-resource-panel {
-  border-top: 1px solid var(--color-border, #d9ddea);
+  border-top: 1px solid var(--color-border, #e5e7eb);
   padding-top: 14px;
 }
 

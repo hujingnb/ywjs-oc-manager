@@ -141,29 +141,29 @@ const repeatText = computed(() => {
   font-size: 16px;
 }
 .status-line {
-  color: var(--primary-color, #18a058);
+  color: var(--color-brand-text, #8a3700);
   font-size: 12px;
   margin: 0;
 }
 .detail-sub {
-  color: var(--n-text-color-3, #707078);
+  color: var(--color-text-secondary, #6b7280);
   font-size: 11px;
   margin: 0;
 }
 .section {
   margin-top: 14px;
-  border-top: 1px solid var(--n-border-color, #2a2a30);
+  border-top: 1px solid var(--color-border, #e5e7eb);
   padding-top: 12px;
 }
 .section-title {
   font-size: 11px;
   text-transform: uppercase;
-  color: var(--n-text-color-3, #707078);
+  color: var(--color-text-secondary, #6b7280);
   margin: 0 0 8px;
 }
 .prompt-block {
   white-space: pre-wrap;
-  color: var(--n-text-color-2, #a0a0a8);
+  color: var(--color-text-primary, #1f2329);
   font-size: 13px;
   margin: 0;
 }
@@ -174,20 +174,20 @@ const repeatText = computed(() => {
   font-size: 12px;
 }
 .meta-grid .k {
-  color: var(--n-text-color-3, #707078);
+  color: var(--color-text-secondary, #6b7280);
   margin-right: 8px;
 }
 .meta-grid .v {
   word-break: break-all;
 }
 .error-text {
-  color: var(--error-color, #d03050);
+  color: var(--color-danger, #d93026);
   font-size: 12px;
   margin: 10px 0 0;
   white-space: pre-wrap;
 }
 .output-pane {
-  background: var(--n-color, #101014);
+  background: var(--color-surface, #ffffff);
   border-radius: 4px;
   padding: 12px;
   max-height: 280px;
@@ -197,7 +197,7 @@ const repeatText = computed(() => {
   font-size: 12px;
 }
 .state-text {
-  color: var(--n-text-color-3, #707078);
+  color: var(--color-text-secondary, #6b7280);
   font-size: 13px;
 }
 </style>

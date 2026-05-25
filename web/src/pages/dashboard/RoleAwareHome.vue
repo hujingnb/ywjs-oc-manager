@@ -103,17 +103,18 @@ const cards = computed<QuickCard[]>(() => {
 .quick-card {
   display: block;
   padding: 16px;
-  border: 1px solid rgba(0, 0, 0, 0.08);
-  border-radius: 10px;
-  background: white;
-  color: var(--color-text);
+  border: 1px solid var(--color-border);
+  border-radius: 8px;
+  background: var(--color-surface);
+  color: var(--color-text-primary);
   text-decoration: none;
-  transition: transform 0.12s ease, box-shadow 0.12s ease;
+  transition: transform 0.12s ease, box-shadow 0.12s ease, border-color 0.12s ease;
 }
 
 .quick-card:hover {
   transform: translateY(-2px);
-  box-shadow: 0 6px 20px rgba(0, 0, 0, 0.08);
+  border-color: var(--color-brand);
+  box-shadow: 0 8px 24px rgba(15, 23, 42, 0.08);
 }
 
 .quick-card h3 {
@@ -123,7 +124,7 @@ const cards = computed<QuickCard[]>(() => {
 
 .quick-card p {
   margin: 0;
-  color: rgba(0, 0, 0, 0.55);
+  color: var(--color-text-secondary);
   font-size: 13px;
 }
 </style>

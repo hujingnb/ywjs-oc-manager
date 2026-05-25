@@ -88,15 +88,15 @@ const { data: node, isLoading, error } = useRuntimeNodeQuery(nodeId)
 }
 
 .detail-grid div {
-  border: 1px solid #e4eaf2;
+  border: 1px solid var(--color-border);
   border-radius: 8px;
   padding: 14px;
-  background: #f8fafc;
+  background: var(--color-surface-muted);
 }
 
 .detail-grid dt {
   margin: 0 0 6px;
-  color: #66758a;
+  color: var(--color-text-secondary);
   font-size: 12px;
   font-weight: 700;
   text-transform: uppercase;
@@ -104,7 +104,7 @@ const { data: node, isLoading, error } = useRuntimeNodeQuery(nodeId)
 
 .detail-grid dd {
   margin: 0;
-  color: #172033;
+  color: var(--color-text-primary);
   font-weight: 600;
   word-break: break-all;
 }
