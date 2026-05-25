@@ -16,14 +16,6 @@ const (
 	stateFileMode     = 0o600
 )
 
-// agentState 封装 runtime agent 进程在 state_dir 中持久化的身份和凭证。
-type agentState struct {
-	dir        string
-	agentID    string
-	nodeID     string
-	agentToken string
-}
-
 // loadOrCreateAgentID 确保 agent-id 文件存在；首次启动时生成新的 UUID v4。
 func loadOrCreateAgentID(stateDir string) (string, error) {
 	path := filepath.Join(stateDir, agentIDFileName)

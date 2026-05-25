@@ -13,9 +13,6 @@ import (
 // validBase64MasterKey 提供测试用的 32 字节 base64 master_key。
 const validBase64MasterKey = "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA="
 
-// validSystemPromptTemplate 包含 HermesConfig 校验要求的最小模板（非空即合法）。
-const validSystemPromptTemplate = `你是 Hermes 智能助手。`
-
 // fullValidYAML 返回一份带新字段的合法配置文本，便于多个用例共用。
 // 任何 security/hermes/agent 校验路径都应基于此文本派生最小修改。
 func fullValidYAML() string {

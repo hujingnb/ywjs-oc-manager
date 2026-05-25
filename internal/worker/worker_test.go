@@ -90,8 +90,7 @@ func TestWorkerTickMarksFailedForUnknownType(t *testing.T) {
 }
 
 type queueStub struct {
-	ids       []string
-	reserveOk bool
+	ids []string
 }
 
 func (q *queueStub) Reserve(_ context.Context, _ int) ([]string, error) {

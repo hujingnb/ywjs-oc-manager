@@ -302,10 +302,6 @@ func newOnboardingStub(t *testing.T) *onboardingStub {
 	}
 }
 
-func (s *onboardingStub) counters() counters {
-	return counters{s.users, s.apps, s.bindings, s.audits, s.jobs}
-}
-
 func (s *onboardingStub) reset() { s.staged = counters{} }
 
 func (s *onboardingStub) commit() {
@@ -400,10 +396,9 @@ func (s *onboardingStub) CreateJob(_ context.Context, arg sqlc.CreateJobParams) 
 // nodeSelectorStub 给 selectNode 路径提供可断言的内存桩。
 // 调用 ListActiveNodesWithAppCounts 时会记录调用次数与最后一次返回的节点 id。
 type nodeSelectorStub struct {
-	nodes      []NodeWithCount
-	calledN    int
-	listErr    error
-	lastChosen string
+	nodes   []NodeWithCount
+	calledN int
+	listErr error
 }
 
 func (s *nodeSelectorStub) ListActiveNodesWithAppCounts(_ context.Context) ([]NodeWithCount, error) {

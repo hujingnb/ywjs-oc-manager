@@ -474,9 +474,6 @@ func optionalUUID(value string) (pgtype.UUID, error) {
 	return id, nil
 }
 
-// errOnboardingFailed 仅用于内部测试中识别事务回滚路径。
-var errOnboardingFailed = errors.New("onboarding 事务失败")
-
 // isAppsOwnerActiveUniqueViolation 识别并发复建实例时由数据库兜底拦截的活跃实例唯一约束。
 func isAppsOwnerActiveUniqueViolation(err error) bool {
 	var pgErr *pgconn.PgError

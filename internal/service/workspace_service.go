@@ -140,14 +140,6 @@ func (s *WorkspaceService) loadAuthorizedApp(ctx context.Context, principal auth
 	return app, nil
 }
 
-func (s *WorkspaceService) resolvePath(orgID, appID, relative string) string {
-	parts := []string{s.dataRoot, "org", orgID, "app", appID}
-	if relative != "" {
-		parts = append(parts, relative)
-	}
-	return joinSlash(parts...)
-}
-
 func cleanWorkspaceRelative(relative string, allowRoot bool) (string, error) {
 	value := strings.TrimSpace(relative)
 	if value == "" || value == "/" {

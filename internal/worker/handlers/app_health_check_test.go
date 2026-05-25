@@ -68,15 +68,6 @@ func (f *fakeInspector) InspectContainer(_ context.Context, _, _ string) (runtim
 	return f.info, f.err
 }
 
-type capturingNotifier struct {
-	count int
-}
-
-func (n *capturingNotifier) Enqueue(_ context.Context, _ string) error {
-	n.count++
-	return nil
-}
-
 func makeAppForHealth(t *testing.T) sqlc.App {
 	t.Helper()
 	app := makeAppForRefresh(t)

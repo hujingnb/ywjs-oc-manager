@@ -14,17 +14,6 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
-// frameStdout 把 raw 内容包成 docker stdcopy 的 multiplexed stream（stdout 流）。
-func frameStdout(t *testing.T, payload string) io.Reader {
-	t.Helper()
-	var buf bytes.Buffer
-	header := []byte{byte(stdcopy.Stdout), 0, 0, 0, 0, 0, 0, 0}
-	binary.BigEndian.PutUint32(header[4:8], uint32(len(payload)))
-	buf.Write(header)
-	buf.WriteString(payload)
-	return &buf
-}
-
 // scriptedExecutor 按调用顺序返回预设的 stdout 流。
 type scriptedExecutor struct {
 	mu       sync.Mutex

@@ -20,16 +20,6 @@ import (
 	"oc-manager/internal/integrations/agent"
 )
 
-// timeAfter / contextWithTimeout 是 healthcheck 重试用的小 helper，包级变量便于测试替换。
-var (
-	timeAfter = func(seconds int) <-chan time.Time {
-		return time.After(time.Duration(seconds) * time.Second)
-	}
-	contextWithTimeout = func(parent context.Context, seconds int) (context.Context, context.CancelFunc) {
-		return context.WithTimeout(parent, time.Duration(seconds)*time.Second)
-	}
-)
-
 // AgentResolver 根据 nodeID 取出 manager 需要的 agent 文件 client。
 // 注册流程会把 agent 的 file/docker endpoint 与 token 写入 runtime_nodes，
 // 调用方需在请求时按 nodeID 取出对应客户端，否则不同节点会被错误路由。
