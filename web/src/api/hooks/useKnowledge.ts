@@ -3,7 +3,7 @@
 import { useMutation, useQuery, useQueryClient } from '@tanstack/vue-query'
 import type { Ref } from 'vue'
 
-import { apiRequest } from '@/api/client'
+import { apiRequest, getStoredAccessToken } from '@/api/client'
 import { xhrUpload } from '@/api/xhrUpload'
 
 // KnowledgeEntry 是知识库目录中的单个文件或目录。
@@ -38,6 +38,50 @@ export const KNOWLEDGE_UPLOAD_MAX_MESSAGE = `单文件最多支持 ${KNOWLEDGE_U
 // isKnowledgeUploadTooLarge 在页面发起上传会话前做本地拦截，避免超限文件进入网络请求。
 export function isKnowledgeUploadTooLarge(file: Pick<File, 'size'>): boolean {
   return file.size > KNOWLEDGE_UPLOAD_MAX_BYTES
+}
+
+// downloadKnowledgeBlob 负责把受保护知识库下载接口返回的二进制内容转成浏览器下载。
+// 下载接口是 GET，但仍需要 Authorization，不能用裸 a.href 直接访问。
+async function downloadKnowledgeBlob(url: string, fileName: string): Promise<void> {
+  const headers: Record<string, string> = {}
+  const token = getStoredAccessToken()
+  if (token) headers.Authorization = `Bearer ${token}`
+  const response = await fetch(url, { headers })
+  if (!response.ok) {
+    const text = await response.text().catch(() => '')
+    throw new Error(text || '下载失败')
+  }
+  const blob = await response.blob()
+  const objectUrl = URL.createObjectURL(blob)
+  const link = document.createElement('a')
+  link.href = objectUrl
+  link.download = fileName
+  document.body.appendChild(link)
+  link.click()
+  link.remove()
+  URL.revokeObjectURL(objectUrl)
+}
+
+// downloadOrgKnowledgeFile 下载组织级知识库中的单个普通文件。
+export function downloadOrgKnowledgeFile(orgId: string, targetPath: string, fileName: string): Promise<void> {
+  const params = new URLSearchParams({ path: targetPath })
+  return downloadKnowledgeBlob(`/api/v1/organizations/${orgId}/knowledge/file?${params.toString()}`, fileName)
+}
+
+// downloadAppKnowledgeFile 下载实例级知识库中的单个普通文件。
+export function downloadAppKnowledgeFile(
+  appId: string,
+  orgId: string,
+  ownerUserId: string,
+  targetPath: string,
+  fileName: string,
+): Promise<void> {
+  const params = new URLSearchParams({
+    org_id: orgId,
+    owner_user_id: ownerUserId,
+    path: targetPath,
+  })
+  return downloadKnowledgeBlob(`/api/v1/apps/${appId}/knowledge/file?${params.toString()}`, fileName)
 }
 
 // useOrgKnowledgeQuery 列出组织级知识库。
