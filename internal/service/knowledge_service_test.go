@@ -5,6 +5,7 @@ import (
 	"context"
 	"errors"
 	"io"
+	"path"
 	"strings"
 	"testing"
 
@@ -83,13 +84,49 @@ func TestKnowledgeServiceOpenAppRejectsOtherOwner(t *testing.T) {
 	assert.Equal(t, int64(0), size)
 }
 
-// TestKnowledgeServiceOpenOrgRejectsEscapingPath 验证下载路径仍受 SafeRoot 边界约束保护。
+// TestKnowledgeServiceOpenOrgRejectsEscapingPath 验证下载路径先按知识库子树校验，不能读取子树外同组织文件。
 func TestKnowledgeServiceOpenOrgRejectsEscapingPath(t *testing.T) {
 	svc := newKnowledgeService(t)
+	require.NoError(t, svc.master.Save(path.Join("org", testKnowledgeOrg, "secret.md"), strings.NewReader("secret"), 6))
 
 	stream, size, err := svc.OpenOrgFile(context.Background(), orgKnowledgeAdmin(), testKnowledgeOrg, "../../secret.md")
 
-	require.Error(t, err)
+	require.ErrorIs(t, err, files.ErrInvalidPath)
+	require.Nil(t, stream)
+	assert.Equal(t, int64(0), size)
+}
+
+// TestKnowledgeServiceOpenAppRejectsEscapingPath 验证应用级下载路径不能越过实例 knowledge 子目录读取外层文件。
+func TestKnowledgeServiceOpenAppRejectsEscapingPath(t *testing.T) {
+	svc := newKnowledgeService(t)
+	require.NoError(t, svc.master.Save(path.Join("org", testKnowledgeOrg, "app", "secret.md"), strings.NewReader("secret"), 6))
+
+	stream, size, err := svc.OpenAppFile(context.Background(), platformAdmin(), testKnowledgeOrg, testKnowledgeApp, testKnowledgeOwner, "../../secret.md")
+
+	require.ErrorIs(t, err, files.ErrInvalidPath)
+	require.Nil(t, stream)
+	assert.Equal(t, int64(0), size)
+}
+
+// TestKnowledgeServiceOpenRejectsEncodedTraversal 验证 URL 编码的 .. 仍按用户输入路径拦截，不能被前缀拼接掩盖。
+func TestKnowledgeServiceOpenRejectsEncodedTraversal(t *testing.T) {
+	svc := newKnowledgeService(t)
+	require.NoError(t, svc.master.Save(path.Join("org", testKnowledgeOrg, "secret.md"), strings.NewReader("secret"), 6))
+
+	stream, size, err := svc.OpenOrgFile(context.Background(), orgKnowledgeAdmin(), testKnowledgeOrg, "%2e%2e/%2e%2e/secret.md")
+
+	require.ErrorIs(t, err, files.ErrInvalidPath)
+	require.Nil(t, stream)
+	assert.Equal(t, int64(0), size)
+}
+
+// TestKnowledgeServiceOpenRejectsAbsolutePath 验证下载路径拒绝绝对路径，避免用户输入绕过知识库相对路径契约。
+func TestKnowledgeServiceOpenRejectsAbsolutePath(t *testing.T) {
+	svc := newKnowledgeService(t)
+
+	stream, size, err := svc.OpenOrgFile(context.Background(), orgKnowledgeAdmin(), testKnowledgeOrg, "/secret.md")
+
+	require.ErrorIs(t, err, files.ErrInvalidPath)
 	require.Nil(t, stream)
 	assert.Equal(t, int64(0), size)
 }

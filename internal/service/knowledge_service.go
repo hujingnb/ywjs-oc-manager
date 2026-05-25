@@ -5,7 +5,9 @@ import (
 	"fmt"
 	"io"
 	"log/slog"
+	"net/url"
 	"path"
+	"strings"
 
 	"oc-manager/internal/auth"
 	"oc-manager/internal/files"
@@ -246,6 +248,38 @@ func (s *KnowledgeService) DeleteAppFile(ctx context.Context, principal auth.Pri
 	return nil
 }
 
+// validateKnowledgeOpenRelative 在拼接可信租户前缀前校验用户传入的下载路径。
+// 读取接口必须先约束 relative 本身，否则 path.Join 会把 ../../secret.md 规范化成
+// org/<orgID>/secret.md，导致 SafeRoot 只能保护全局根目录，不能保护知识库子树边界。
+func validateKnowledgeOpenRelative(relative string) (string, error) {
+	if strings.ContainsRune(relative, 0) {
+		return "", fmt.Errorf("%w: 路径包含 NUL", files.ErrInvalidPath)
+	}
+	if path.IsAbs(relative) {
+		return "", fmt.Errorf("%w: 不允许绝对路径", files.ErrInvalidPath)
+	}
+	decoded, err := url.PathUnescape(relative)
+	if err != nil {
+		return "", fmt.Errorf("%w: %s", files.ErrInvalidPath, err.Error())
+	}
+	if strings.ContainsRune(decoded, 0) {
+		return "", fmt.Errorf("%w: 路径包含 NUL", files.ErrInvalidPath)
+	}
+	if path.IsAbs(decoded) {
+		return "", fmt.Errorf("%w: 不允许绝对路径", files.ErrInvalidPath)
+	}
+	for _, part := range strings.Split(decoded, "/") {
+		if part == ".." {
+			return "", fmt.Errorf("%w: 不允许的相对前缀", files.ErrInvalidPath)
+		}
+	}
+	cleaned := path.Clean(decoded)
+	if cleaned == "." {
+		return "", files.ErrInvalidPath
+	}
+	return cleaned, nil
+}
+
 // OpenOrgFile 打开组织级知识库中的普通文件供下载。
 // 下载属于读取能力，权限沿用 CanReadOrgKnowledge；写入和同步权限不参与判断。
 func (s *KnowledgeService) OpenOrgFile(ctx context.Context, principal auth.Principal, orgID, relative string) (io.ReadCloser, int64, error) {
@@ -255,7 +289,11 @@ func (s *KnowledgeService) OpenOrgFile(ctx context.Context, principal auth.Princ
 	if !auth.CanReadOrgKnowledge(principal, orgID) {
 		return nil, 0, ErrKnowledgeForbidden
 	}
-	target := path.Join("org", orgID, "knowledge", relative)
+	cleaned, err := validateKnowledgeOpenRelative(relative)
+	if err != nil {
+		return nil, 0, err
+	}
+	target := path.Join("org", orgID, "knowledge", cleaned)
 	stream, size, err := s.master.Open(target)
 	if err != nil {
 		return nil, 0, fmt.Errorf("打开组织知识库文件失败: %w", err)
@@ -272,7 +310,11 @@ func (s *KnowledgeService) OpenAppFile(ctx context.Context, principal auth.Princ
 	if !auth.CanReadAppKnowledge(principal, orgID, ownerUserID) {
 		return nil, 0, ErrKnowledgeForbidden
 	}
-	target := path.Join("org", orgID, "app", appID, "knowledge", relative)
+	cleaned, err := validateKnowledgeOpenRelative(relative)
+	if err != nil {
+		return nil, 0, err
+	}
+	target := path.Join("org", orgID, "app", appID, "knowledge", cleaned)
 	stream, size, err := s.master.Open(target)
 	if err != nil {
 		return nil, 0, fmt.Errorf("打开应用知识库文件失败: %w", err)
