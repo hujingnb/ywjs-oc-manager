@@ -1,7 +1,6 @@
 <template>
   <div class="challenge-renderer">
-    <div v-if="!challenge" class="state-text">尚未发起挑战</div>
-    <template v-else-if="challenge.challenge_type === 'qrcode' && challenge.qrcode">
+    <template v-if="challenge?.challenge_type === 'qrcode' && challenge.qrcode">
       <!--
         Sprint 0 实测：上游 wechat plugin 的 qrcode 字段是纯文本 URL
         （形如 https://liteapp.weixin.qq.com/q/<id>?qrcode=<token>&bot_type=3），
@@ -17,11 +16,11 @@
         <a :href="challenge.qrcode" target="_blank" rel="noopener">{{ challenge.qrcode }}</a>
       </p>
     </template>
-    <template v-else-if="challenge.challenge_type === 'code' && challenge.code">
+    <template v-else-if="challenge?.challenge_type === 'code' && challenge.code">
       <p class="challenge-code">{{ challenge.code }}</p>
       <p class="state-text">{{ expiresLabel }}</p>
     </template>
-    <p v-else class="state-text danger">未知挑战类型：{{ challenge.challenge_type ?? challenge.status }}</p>
+    <p v-else-if="challenge" class="state-text danger">未知挑战类型：{{ challenge.challenge_type ?? challenge.status }}</p>
   </div>
 </template>
 
