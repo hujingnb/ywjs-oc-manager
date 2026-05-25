@@ -82,6 +82,14 @@ export function setUnauthorizedHandler(h: UnauthorizedHandler | null): void {
   unauthorizedHandler = h
 }
 
+// triggerUnauthorized 让模块外的请求工具（如 xhrUpload）也能复用 401 跳登录逻辑。
+// 该函数仅转发到当前注册的 unauthorizedHandler；handler 未注册时静默无操作，与 apiRequest 行为一致。
+export function triggerUnauthorized(path: string): void {
+  if (unauthorizedHandler) {
+    unauthorizedHandler(path)
+  }
+}
+
 // apiRequest 是底层的 fetch 包装。
 // 仅做 JSON 编解码和状态码映射，不处理重试和缓存——重试与缓存交给 TanStack Query。
 export async function apiRequest<T>(path: string, options: RequestOptions = {}): Promise<T> {
