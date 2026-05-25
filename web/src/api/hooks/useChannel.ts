@@ -41,6 +41,24 @@ export interface ChannelProgress {
   metadata?: Record<string, string>
 }
 
+// channelStatusLabels 将后端渠道状态机原值映射为渠道 tab 的中文业务文案。
+// 未知状态由 formatChannelStatus 保留原值，方便后端新增状态时前端及时暴露差异。
+const channelStatusLabels: Record<string, string> = {
+  unbound: '未绑定',
+  pending_auth: '等待扫码授权',
+  bound: '已绑定',
+  failed: '绑定失败',
+  expired: '二维码已过期',
+  unbound_by_user: '已解绑',
+  deleted: '已删除',
+}
+
+// formatChannelStatus 将渠道绑定状态转成用户可读文案；空值表示轮询尚未返回或尚未发起登录。
+export function formatChannelStatus(status?: string): string {
+  if (!status) return '未发起'
+  return channelStatusLabels[status] ?? `未知状态：${status}`
+}
+
 // channelChallengeFromProgress 从进度 metadata 中还原可展示挑战。
 // 只有 qrcode 或 code 至少存在一个时才返回挑战，避免把普通进度误判成待扫码。
 export function channelChallengeFromProgress(progress: ChannelProgress | null | undefined, channelType: string): ChannelChallenge | null {
