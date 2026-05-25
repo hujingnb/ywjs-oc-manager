@@ -80,6 +80,20 @@ const themeOverrides: GlobalThemeOverrides = {
   Button: {
     borderRadiusMedium: '4px',
     borderRadiusSmall: '4px',
+    // 主按钮保留阿里云风格亮橙背景，文字使用深色以满足普通文本对比度。
+    textColorPrimary: '#1f2329',
+    textColorHoverPrimary: '#1f2329',
+    textColorPressedPrimary: '#1f2329',
+    textColorFocusPrimary: '#1f2329',
+    textColorDisabledPrimary: 'rgba(31, 35, 41, 0.45)',
+    textColorTextPrimary: '#8a3700',
+    textColorTextHoverPrimary: '#8a3700',
+    textColorTextPressedPrimary: '#8a3700',
+    textColorTextFocusPrimary: '#8a3700',
+    textColorGhostPrimary: '#8a3700',
+    textColorGhostHoverPrimary: '#8a3700',
+    textColorGhostPressedPrimary: '#8a3700',
+    textColorGhostFocusPrimary: '#8a3700',
   },
 }
 </script>

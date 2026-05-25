@@ -102,7 +102,7 @@ input {
   border-radius: 6px;
   background: var(--color-brand);
   box-shadow: none;
-  color: #ffffff;
+  color: var(--color-on-brand);
   font-weight: 800;
   font-size: 14px;
   flex-shrink: 0;
