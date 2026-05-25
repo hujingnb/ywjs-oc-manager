@@ -22,6 +22,8 @@
           }"
           :disabled="!channel.supported"
           :aria-disabled="channel.supported ? 'false' : 'true'"
+          :aria-current="channel.type === activeChannel.type ? 'true' : undefined"
+          @click="selectChannel(channel)"
         >
           <span
             class="channel-logo"
@@ -175,6 +177,11 @@ const channelType = computed(() => supportedChannelType)
 const channelTypeRef = computed(() => channelType.value)
 // activeChannel 当前始终落在微信；保留 computed 是为了让模板只依赖展示模型。
 const activeChannel = computed(() => channels.find(channel => channel.type === channelType.value) ?? channels[0])
+
+// selectChannel 只接受当前已支持的微信渠道；暂不支持渠道保持禁用且不改变详情或请求参数。
+function selectChannel(channel: ChannelDisplay) {
+  if (!channel.supported) return
+}
 
 const { data: progress } = useChannelProgressQuery(appId, channelTypeRef)
 const beginMutation = useBeginChannelAuth(appId, channelTypeRef)

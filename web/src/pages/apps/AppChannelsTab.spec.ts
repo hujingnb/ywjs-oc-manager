@@ -114,6 +114,7 @@ describe('AppChannelsTab', () => {
     const unsupported = wrapper.findAll('.channel-list-item.unsupported')
     expect(unsupported).toHaveLength(3)
     expect(unsupported.every(item => item.attributes('aria-disabled') === 'true')).toBe(true)
+    expect(unsupported.every(item => item.attributes('disabled') !== undefined)).toBe(true)
     expect(unsupported.every(item => item.text().includes('暂不支持'))).toBe(true)
     expect(wrapper.find('.channel-logo.work-wechat').exists()).toBe(true)
     expect(wrapper.find('.channel-logo.feishu').exists()).toBe(true)
