@@ -3,6 +3,9 @@
     <!-- NMessageProvider 提供全局 message API，供页面通过 useMessage() 弹出操作反馈 -->
     <NMessageProvider>
       <RouterView />
+      <!-- 全局上传进度对话框：订阅 uploadProgress store 自动显示 / 隐藏，
+           App 根挂一次即可覆盖所有业务页面 -->
+      <UploadProgressModal />
     </NMessageProvider>
   </NConfigProvider>
 </template>
@@ -11,8 +14,14 @@
 import { darkTheme, type GlobalThemeOverrides } from 'naive-ui'
 import { NConfigProvider, NMessageProvider } from 'naive-ui'
 
+import UploadProgressModal from '@/components/UploadProgressModal.vue'
+import { useBeforeUnloadGuard } from '@/composables/useBeforeUnloadGuard'
+
 // App 是前端根组件，统一挂载全局 Naive UI 主题并把页面渲染交给路由出口。
 // 这里不承载业务状态，避免根组件和页面权限、请求生命周期耦合。
+// 上传相关的全局副作用（进度对话框、刷新拦截）统一在此装配，业务页面无需自行挂载。
+useBeforeUnloadGuard()
+
 const themeOverrides: GlobalThemeOverrides = {
   common: {
     primaryColor: '#00F0FF',
