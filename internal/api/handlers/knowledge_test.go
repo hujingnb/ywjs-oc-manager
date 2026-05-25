@@ -19,17 +19,23 @@ import (
 
 // knowledgeServiceStub 实现 knowledgeService 接口，仅 stub 测试用到的方法。
 type knowledgeServiceStub struct {
-	syncStatuses  []service.SyncStatusResult
-	syncErr       error
-	retryErr      error
-	listOrgResult service.KnowledgeListResult
-	listOrgErr    error
-	saveOrgErr    error
-	deleteOrgErr  error
-	listAppResult service.KnowledgeListResult
-	listAppErr    error
-	saveAppErr    error
-	deleteAppErr  error
+	syncStatuses   []service.SyncStatusResult
+	syncErr        error
+	retryErr       error
+	listOrgResult  service.KnowledgeListResult
+	listOrgErr     error
+	openOrgContent string
+	openOrgSize    int64
+	openOrgErr     error
+	saveOrgErr     error
+	deleteOrgErr   error
+	listAppResult  service.KnowledgeListResult
+	listAppErr     error
+	openAppContent string
+	openAppSize    int64
+	openAppErr     error
+	saveAppErr     error
+	deleteAppErr   error
 }
 
 func (s *knowledgeServiceStub) GetOrgSyncStatus(_ context.Context, _ auth.Principal, _ string) ([]service.SyncStatusResult, error) {
@@ -52,6 +58,13 @@ func (s *knowledgeServiceStub) DeleteOrgFile(_ context.Context, _ auth.Principal
 	return s.deleteOrgErr
 }
 
+func (s *knowledgeServiceStub) OpenOrgFile(_ context.Context, _ auth.Principal, _, _ string) (io.ReadCloser, int64, error) {
+	if s.openOrgErr != nil {
+		return nil, 0, s.openOrgErr
+	}
+	return io.NopCloser(bytes.NewBufferString(s.openOrgContent)), s.openOrgSize, nil
+}
+
 func (s *knowledgeServiceStub) ListApp(_ context.Context, _ auth.Principal, _, _, _, _ string) (service.KnowledgeListResult, error) {
 	return s.listAppResult, s.listAppErr
 }
@@ -62,6 +75,13 @@ func (s *knowledgeServiceStub) SaveAppFile(_ context.Context, _ auth.Principal, 
 
 func (s *knowledgeServiceStub) DeleteAppFile(_ context.Context, _ auth.Principal, _, _, _, _ string) error {
 	return s.deleteAppErr
+}
+
+func (s *knowledgeServiceStub) OpenAppFile(_ context.Context, _ auth.Principal, _, _, _, _ string) (io.ReadCloser, int64, error) {
+	if s.openAppErr != nil {
+		return nil, 0, s.openAppErr
+	}
+	return io.NopCloser(bytes.NewBufferString(s.openAppContent)), s.openAppSize, nil
 }
 
 // newKnowledgeTestRouter 构建用于测试的 gin router。
@@ -111,6 +131,36 @@ func TestKnowledgeListOrgHappy(t *testing.T) {
 	router.ServeHTTP(w, req)
 
 	require.Equal(t, http.StatusOK, w.Code)
+}
+
+// TestKnowledgeDownloadOrgHappy 验证组织知识库下载成功返回二进制内容。
+func TestKnowledgeDownloadOrgHappy(t *testing.T) {
+	stub := &knowledgeServiceStub{openOrgContent: "hello", openOrgSize: 5}
+	router := newKnowledgeTestRouter(t, stub)
+
+	w := httptest.NewRecorder()
+	req := httptest.NewRequest(http.MethodGet, "/api/v1/organizations/org-1/knowledge/file?path=docs/readme.md", nil)
+	req = withPrincipal(req, auth.Principal{UserID: "u1", Role: domain.UserRoleOrgMember, OrgID: "org-1"})
+	router.ServeHTTP(w, req)
+
+	require.Equal(t, http.StatusOK, w.Code)
+	assert.Equal(t, "application/octet-stream", w.Header().Get("Content-Type"))
+	assert.Contains(t, w.Header().Get("Content-Disposition"), "readme.md")
+	assert.Equal(t, "5", w.Header().Get("Content-Length"))
+	assert.Equal(t, "hello", w.Body.String())
+}
+
+// TestKnowledgeDownloadOrgMissingPath 验证组织知识库下载缺少 path 时返回 400。
+func TestKnowledgeDownloadOrgMissingPath(t *testing.T) {
+	stub := &knowledgeServiceStub{}
+	router := newKnowledgeTestRouter(t, stub)
+
+	w := httptest.NewRecorder()
+	req := httptest.NewRequest(http.MethodGet, "/api/v1/organizations/org-1/knowledge/file", nil)
+	req = withPrincipal(req, auth.Principal{UserID: "u1", Role: domain.UserRoleOrgMember, OrgID: "org-1"})
+	router.ServeHTTP(w, req)
+
+	assert.Equal(t, http.StatusBadRequest, w.Code)
 }
 
 // TestKnowledgeSaveOrgHappy 验证知识库保存组织成功路径的成功路径场景。
@@ -168,6 +218,49 @@ func TestKnowledgeListAppHappy(t *testing.T) {
 	router.ServeHTTP(w, req)
 
 	require.Equal(t, http.StatusOK, w.Code)
+}
+
+// TestKnowledgeDownloadAppHappy 验证实例知识库下载成功返回二进制内容。
+func TestKnowledgeDownloadAppHappy(t *testing.T) {
+	stub := &knowledgeServiceStub{openAppContent: "app", openAppSize: 3}
+	router := newKnowledgeTestRouter(t, stub)
+
+	w := httptest.NewRecorder()
+	req := httptest.NewRequest(http.MethodGet, "/api/v1/apps/app-1/knowledge/file?org_id=org-1&owner_user_id=u1&path=app.md", nil)
+	req = withPrincipal(req, auth.Principal{UserID: "u1", Role: domain.UserRoleOrgMember, OrgID: "org-1"})
+	router.ServeHTTP(w, req)
+
+	require.Equal(t, http.StatusOK, w.Code)
+	assert.Equal(t, "application/octet-stream", w.Header().Get("Content-Type"))
+	assert.Contains(t, w.Header().Get("Content-Disposition"), "app.md")
+	assert.Equal(t, "3", w.Header().Get("Content-Length"))
+	assert.Equal(t, "app", w.Body.String())
+}
+
+// TestKnowledgeDownloadAppMissingParams 验证实例知识库下载缺少任一必填参数时返回 400。
+func TestKnowledgeDownloadAppMissingParams(t *testing.T) {
+	cases := []struct {
+		name string
+		url  string
+	}{
+		{name: "缺少 org_id", url: "/api/v1/apps/app-1/knowledge/file?owner_user_id=u1&path=app.md"},    // 场景：缺少组织归属参数。
+		{name: "缺少 owner_user_id", url: "/api/v1/apps/app-1/knowledge/file?org_id=org-1&path=app.md"}, // 场景：缺少应用所有者参数。
+		{name: "缺少 path", url: "/api/v1/apps/app-1/knowledge/file?org_id=org-1&owner_user_id=u1"},     // 场景：缺少文件路径参数。
+	}
+	for _, tc := range cases {
+		// 当前子测试覆盖 tc.name 描述的实例知识库下载参数校验场景。
+		t.Run(tc.name, func(t *testing.T) {
+			stub := &knowledgeServiceStub{}
+			router := newKnowledgeTestRouter(t, stub)
+
+			w := httptest.NewRecorder()
+			req := httptest.NewRequest(http.MethodGet, tc.url, nil)
+			req = withPrincipal(req, auth.Principal{UserID: "u1", Role: domain.UserRoleOrgMember, OrgID: "org-1"})
+			router.ServeHTTP(w, req)
+
+			assert.Equal(t, http.StatusBadRequest, w.Code)
+		})
+	}
 }
 
 // TestKnowledgeListAppMissingParams 验证知识库列表应用缺失参数的异常或拒绝路径场景。

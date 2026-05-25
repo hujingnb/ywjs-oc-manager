@@ -4,7 +4,9 @@ import (
 	"context"
 	"errors"
 	"io"
+	"mime"
 	"net/http"
+	"path"
 	"strconv"
 
 	"github.com/gin-gonic/gin"
@@ -25,6 +27,8 @@ type knowledgeService interface {
 	SaveAppFile(ctx context.Context, principal auth.Principal, orgID, appID, ownerUserID, relative string, content io.Reader, size int64) error
 	DeleteOrgFile(ctx context.Context, principal auth.Principal, orgID, relative string) error
 	DeleteAppFile(ctx context.Context, principal auth.Principal, orgID, appID, ownerUserID, relative string) error
+	OpenOrgFile(ctx context.Context, principal auth.Principal, orgID, relative string) (io.ReadCloser, int64, error)
+	OpenAppFile(ctx context.Context, principal auth.Principal, orgID, appID, ownerUserID, relative string) (io.ReadCloser, int64, error)
 	ListOrg(ctx context.Context, principal auth.Principal, orgID, relative string) (service.KnowledgeListResult, error)
 	ListApp(ctx context.Context, principal auth.Principal, orgID, appID, ownerUserID, relative string) (service.KnowledgeListResult, error)
 	GetOrgSyncStatus(ctx context.Context, principal auth.Principal, orgID string) ([]service.SyncStatusResult, error)
@@ -42,6 +46,7 @@ func NewKnowledgeHandler(svc knowledgeService) *KnowledgeHandler {
 func RegisterKnowledgeRoutes(router gin.IRouter, handler *KnowledgeHandler) {
 	orgGroup := router.Group("/api/v1/organizations/:orgId/knowledge")
 	orgGroup.GET("", handler.ListOrg)
+	orgGroup.GET("/file", handler.DownloadOrg)
 	orgGroup.POST("", handler.SaveOrg)
 	orgGroup.DELETE("", handler.DeleteOrg)
 	orgGroup.GET("/sync-status", handler.GetOrgSyncStatus)
@@ -49,6 +54,7 @@ func RegisterKnowledgeRoutes(router gin.IRouter, handler *KnowledgeHandler) {
 
 	appGroup := router.Group("/api/v1/apps/:appId/knowledge")
 	appGroup.GET("", handler.ListApp)
+	appGroup.GET("/file", handler.DownloadApp)
 	appGroup.POST("", handler.SaveApp)
 	appGroup.DELETE("", handler.DeleteApp)
 }
@@ -132,6 +138,37 @@ func (h *KnowledgeHandler) ListOrg(c *gin.Context) {
 		return
 	}
 	c.JSON(http.StatusOK, result)
+}
+
+// DownloadOrg 下载组织级文件。
+//
+// @Summary      下载组织级知识库文件
+// @Description  通过 path query 参数指定目标路径，从组织知识库主副本下载单个文件
+// @Tags         knowledge
+// @Produce      application/octet-stream
+// @Security     BearerAuth
+// @Param        orgId  path      string  true  "组织 ID"
+// @Param        path   query     string  true  "文件相对路径"
+// @Success      200    {string}  binary  "二进制文件流"
+// @Failure      400    {object}  ErrorResponse
+// @Failure      401    {object}  ErrorResponse
+// @Failure      403    {object}  ErrorResponse
+// @Failure      503    {object}  ErrorResponse
+// @Router       /organizations/{orgId}/knowledge/file [get]
+func (h *KnowledgeHandler) DownloadOrg(c *gin.Context) {
+	principal := principalFromCtx(c)
+	relative := c.Query("path")
+	if relative == "" {
+		c.JSON(http.StatusBadRequest, apierror.New("BAD_REQUEST", "缺少 path 参数"))
+		return
+	}
+	reader, size, err := h.service.OpenOrgFile(c.Request.Context(), principal, c.Param("orgId"), relative)
+	if err != nil {
+		writeKnowledgeError(c, err)
+		return
+	}
+	defer reader.Close()
+	writeKnowledgeDownload(c, relative, reader, size)
 }
 
 // SaveOrg 写入组织级文件。
@@ -227,6 +264,41 @@ func (h *KnowledgeHandler) ListApp(c *gin.Context) {
 	c.JSON(http.StatusOK, result)
 }
 
+// DownloadApp 下载应用级文件。
+//
+// @Summary      下载应用级知识库文件
+// @Description  通过 path query 参数指定目标路径，从应用知识库主副本下载单个文件；需同时提供 org_id/owner_user_id/path
+// @Tags         knowledge
+// @Produce      application/octet-stream
+// @Security     BearerAuth
+// @Param        appId         path      string  true  "应用 ID"
+// @Param        org_id        query     string  true  "应用所属组织 ID"
+// @Param        owner_user_id query     string  true  "应用所有者用户 ID"
+// @Param        path          query     string  true  "文件相对路径"
+// @Success      200           {string}  binary  "二进制文件流"
+// @Failure      400           {object}  ErrorResponse
+// @Failure      401           {object}  ErrorResponse
+// @Failure      403           {object}  ErrorResponse
+// @Failure      503           {object}  ErrorResponse
+// @Router       /apps/{appId}/knowledge/file [get]
+func (h *KnowledgeHandler) DownloadApp(c *gin.Context) {
+	principal := principalFromCtx(c)
+	orgID := c.Query("org_id")
+	owner := c.Query("owner_user_id")
+	relative := c.Query("path")
+	if orgID == "" || owner == "" || relative == "" {
+		c.JSON(http.StatusBadRequest, apierror.New("BAD_REQUEST", "缺少 org_id/owner_user_id/path"))
+		return
+	}
+	reader, size, err := h.service.OpenAppFile(c.Request.Context(), principal, orgID, c.Param("appId"), owner, relative)
+	if err != nil {
+		writeKnowledgeError(c, err)
+		return
+	}
+	defer reader.Close()
+	writeKnowledgeDownload(c, relative, reader, size)
+}
+
 // SaveApp 写入应用级文件。
 //
 // @Summary      上传应用级知识库文件
@@ -293,6 +365,16 @@ func (h *KnowledgeHandler) DeleteApp(c *gin.Context) {
 		return
 	}
 	c.Status(http.StatusNoContent)
+}
+
+func writeKnowledgeDownload(c *gin.Context, relative string, reader io.Reader, size int64) {
+	c.Header("Content-Type", "application/octet-stream")
+	c.Header("Content-Length", strconv.FormatInt(size, 10))
+	c.Header("Content-Disposition", mime.FormatMediaType("attachment", map[string]string{"filename": path.Base(relative)}))
+	c.Status(http.StatusOK)
+	if _, err := io.Copy(c.Writer, reader); err != nil {
+		c.Error(err)
+	}
 }
 
 func writeKnowledgeError(c *gin.Context, err error) {
