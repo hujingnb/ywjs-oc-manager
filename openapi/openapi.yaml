@@ -3967,6 +3967,70 @@ paths:
       summary: 上传应用级知识库文件
       tags:
       - knowledge
+  /apps/{appId}/knowledge/file:
+    get:
+      description: 通过 path query 参数指定目标路径，从应用知识库主副本下载单个文件；需同时提供 org_id/owner_user_id/path
+      parameters:
+      - description: 应用 ID
+        in: path
+        name: appId
+        required: true
+        schema:
+          type: string
+      - description: 应用所属组织 ID
+        in: query
+        name: org_id
+        required: true
+        schema:
+          type: string
+      - description: 应用所有者用户 ID
+        in: query
+        name: owner_user_id
+        required: true
+        schema:
+          type: string
+      - description: 文件相对路径
+        in: query
+        name: path
+        required: true
+        schema:
+          type: string
+      responses:
+        "200":
+          content:
+            application/octet-stream:
+              schema:
+                type: string
+          description: 二进制文件流
+        "400":
+          content:
+            application/octet-stream:
+              schema:
+                $ref: '#/components/schemas/handlers.ErrorResponse'
+          description: Bad Request
+        "401":
+          content:
+            application/octet-stream:
+              schema:
+                $ref: '#/components/schemas/handlers.ErrorResponse'
+          description: Unauthorized
+        "403":
+          content:
+            application/octet-stream:
+              schema:
+                $ref: '#/components/schemas/handlers.ErrorResponse'
+          description: Forbidden
+        "503":
+          content:
+            application/octet-stream:
+              schema:
+                $ref: '#/components/schemas/handlers.ErrorResponse'
+          description: Service Unavailable
+      security:
+      - BearerAuth: []
+      summary: 下载应用级知识库文件
+      tags:
+      - knowledge
   /apps/{appId}/resources:
     get:
       description: 按应用 ID 查询实例资源趋势；权限沿用应用读取权限
@@ -6147,6 +6211,58 @@ paths:
       security:
       - BearerAuth: []
       summary: 上传组织级知识库文件
+      tags:
+      - knowledge
+  /organizations/{orgId}/knowledge/file:
+    get:
+      description: 通过 path query 参数指定目标路径，从组织知识库主副本下载单个文件
+      parameters:
+      - description: 组织 ID
+        in: path
+        name: orgId
+        required: true
+        schema:
+          type: string
+      - description: 文件相对路径
+        in: query
+        name: path
+        required: true
+        schema:
+          type: string
+      responses:
+        "200":
+          content:
+            application/octet-stream:
+              schema:
+                type: string
+          description: 二进制文件流
+        "400":
+          content:
+            application/octet-stream:
+              schema:
+                $ref: '#/components/schemas/handlers.ErrorResponse'
+          description: Bad Request
+        "401":
+          content:
+            application/octet-stream:
+              schema:
+                $ref: '#/components/schemas/handlers.ErrorResponse'
+          description: Unauthorized
+        "403":
+          content:
+            application/octet-stream:
+              schema:
+                $ref: '#/components/schemas/handlers.ErrorResponse'
+          description: Forbidden
+        "503":
+          content:
+            application/octet-stream:
+              schema:
+                $ref: '#/components/schemas/handlers.ErrorResponse'
+          description: Service Unavailable
+      security:
+      - BearerAuth: []
+      summary: 下载组织级知识库文件
       tags:
       - knowledge
   /organizations/{orgId}/knowledge/sync-status:
