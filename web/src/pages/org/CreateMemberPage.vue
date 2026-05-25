@@ -195,7 +195,7 @@ async function onSubmit() {
   font-size: 11px;
   font-weight: 700;
   text-transform: uppercase;
-  color: #8A94C6;
+  color: var(--color-text-secondary);
   letter-spacing: 0.08em;
   margin: 12px 0 4px;
 }

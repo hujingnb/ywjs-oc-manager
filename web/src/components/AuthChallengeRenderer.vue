@@ -99,10 +99,10 @@ watch(
 .challenge-code {
   margin: 0;
   padding: 16px;
-  border: 1px dashed rgba(0, 240, 255, 0.3);
-  border-radius: 8px;
-  background: rgba(15, 21, 53, 0.8);
-  color: #00F0FF;
+  border: 1px dashed var(--color-border);
+  border-radius: 6px;
+  background: var(--color-info-soft);
+  color: var(--color-info);
   font-size: 22px;
   font-weight: 800;
   letter-spacing: 4px;
@@ -110,7 +110,7 @@ watch(
 
 .fallback-hint {
   font-size: 12px;
-  color: #8A94C6;
+  color: var(--color-text-secondary);
   word-break: break-all;
 }
 </style>

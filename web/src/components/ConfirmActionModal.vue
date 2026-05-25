@@ -7,7 +7,7 @@
       aria-modal="true"
       style="width: min(440px, 92vw)"
     >
-      <p style="margin: 0 0 16px; color: #CBD6E5">{{ message }}</p>
+      <p class="confirm-message">{{ message }}</p>
 
       <n-form-item v-if="verifyValue" :label="verifyLabel" :show-feedback="false">
         <n-input
@@ -80,3 +80,10 @@ const canConfirm = computed(() => {
 function onConfirm() { emit('confirm') }
 function onCancel() { emit('cancel') }
 </script>
+
+<style scoped>
+.confirm-message {
+  margin: 0 0 16px;
+  color: var(--color-text-secondary);
+}
+</style>

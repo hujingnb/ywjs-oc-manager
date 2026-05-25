@@ -96,7 +96,7 @@ function renderPrincipal(opts: {
   if (opts.deleted) {
     main.push(h(NTag, { type: 'warning', size: 'tiny', bordered: false, style: 'margin-left:6px' }, { default: () => '已删除' }))
   }
-  const sub = opts.sub ? h('small', { style: 'display:block;color:#8A94C6;font-size:12px' }, opts.sub) : null
+  const sub = opts.sub ? h('small', { style: 'display:block;color:var(--color-text-secondary);font-size:12px' }, opts.sub) : null
   const children: VNode[] = sub ? [...main, sub] : main
   const cell = h('div', children)
   if (!opts.uuid) return cell
@@ -138,13 +138,13 @@ const columns: DataTableColumns<AuditLog> = [
     minWidth: 240,
     render: (row) => row.action_detail
       ? h('span', { style: 'white-space:pre-wrap' }, row.action_detail)
-      : h('span', { style: 'color:#8A94C6' }, '—'),
+      : h('span', { style: 'color:var(--color-text-secondary)' }, '—'),
   },
   {
     title: '结果', key: 'result',
     render: (row) => [
       h(NTag, { type: auditTagType(row.result), size: 'small', bordered: false }, { default: () => row.result_label }),
-      row.error_message ? h('small', { style: 'display:block;color:#FF3B5C;font-size:12px' }, row.error_message) : null,
+      row.error_message ? h('small', { style: 'display:block;color:var(--color-danger);font-size:12px' }, row.error_message) : null,
     ],
   },
 ]

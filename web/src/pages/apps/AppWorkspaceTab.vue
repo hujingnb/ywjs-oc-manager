@@ -105,7 +105,7 @@ const columns: DataTableColumns<WorkspaceEntry> = [
   {
     title: '名称', key: 'name',
     render: (row) => row.is_dir
-      ? h('strong', { style: 'cursor: pointer; color: #00F0FF; text-decoration: underline dotted', onClick: () => enter(row) }, `${row.name}/`)
+      ? h('strong', { style: 'cursor: pointer; color: var(--color-info-text); text-decoration: underline dotted', onClick: () => enter(row) }, `${row.name}/`)
       : row.name,
   },
   { title: '大小', key: 'size', render: (row) => row.is_dir ? '—' : formatSize(row.size) },

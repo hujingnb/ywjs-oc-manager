@@ -50,8 +50,8 @@ defineProps<{
 .table-card :deep(.n-card__content) { display: flex; min-height: 0; flex-direction: column; }
 .table-card :deep(.n-data-table) { min-height: 0; flex: 1; }
 /* eyebrow：列表页眉上方的分类标签文本 */
-.eyebrow { font-size: 12px; color: var(--color-text-secondary, #8A94C6); margin: 0 0 4px; }
+.eyebrow { font-size: 12px; color: var(--color-text-secondary, #6b7280); margin: 0 0 4px; }
 /* subtitle：标题下方的辅助说明文本 */
-.subtitle { font-size: 13px; color: var(--color-text-secondary, #8A94C6); margin: 4px 0 0; }
+.subtitle { font-size: 13px; color: var(--color-text-secondary, #6b7280); margin: 4px 0 0; }
 .error-banner { margin-bottom: 12px; }
 </style>

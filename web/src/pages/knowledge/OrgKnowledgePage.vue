@@ -193,7 +193,7 @@ const fileColumns: DataTableColumns<KnowledgeEntry> = [
   {
     title: '名称', key: 'name',
     render: (row) => row.is_dir
-      ? h('strong', { style: 'cursor: pointer; color: #00F0FF; text-decoration: underline dotted', onClick: () => enter(row) }, `${row.name}/`)
+      ? h('strong', { style: 'cursor: pointer; color: var(--color-info-text); text-decoration: underline dotted', onClick: () => enter(row) }, `${row.name}/`)
       : row.name,
   },
   { title: '大小', key: 'size', render: (row) => row.is_dir ? '—' : formatSize(row.size) },
@@ -216,7 +216,7 @@ const syncColumns: DataTableColumns<OrgSyncStatusEntry> = [
   {
     title: '最近错误', key: 'last_error',
     render: (row) => row.last_error
-      ? h('span', { style: 'color: #FF3B5C; font-size: 12px' }, row.last_error)
+      ? h('span', { style: 'color: var(--color-danger); font-size: 12px' }, row.last_error)
       : '—',
   },
   {
@@ -240,7 +240,7 @@ const syncColumns: DataTableColumns<OrgSyncStatusEntry> = [
 }
 
 .upload-limit {
-  color: rgba(255, 255, 255, 0.64);
+  color: var(--color-text-secondary);
   font-size: 12px;
 }
 

@@ -160,7 +160,7 @@ const columns: DataTableColumns<KnowledgeEntry> = [
 }
 
 .upload-limit {
-  color: rgba(255, 255, 255, 0.64);
+  color: var(--color-text-secondary);
   font-size: 12px;
 }
 
