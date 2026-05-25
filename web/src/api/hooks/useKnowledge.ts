@@ -3,7 +3,7 @@
 import { useMutation, useQuery, useQueryClient } from '@tanstack/vue-query'
 import type { Ref } from 'vue'
 
-import { apiRequest, getStoredAccessToken } from '@/api/client'
+import { apiRequest, extractErrorMessage, getStoredAccessToken } from '@/api/client'
 import { xhrUpload } from '@/api/xhrUpload'
 
 // KnowledgeEntry 是知识库目录中的单个文件或目录。
@@ -48,8 +48,12 @@ async function downloadKnowledgeBlob(url: string, fileName: string): Promise<voi
   if (token) headers.Authorization = `Bearer ${token}`
   const response = await fetch(url, { headers })
   if (!response.ok) {
-    const text = await response.text().catch(() => '')
-    throw new Error(text || '下载失败')
+    const contentType = response.headers.get('content-type') ?? ''
+    const body =
+      contentType.includes('application/json')
+        ? await response.json().catch(() => undefined)
+        : await response.text().catch(() => undefined)
+    throw new Error(extractErrorMessage(body, response.status))
   }
   const blob = await response.blob()
   const objectUrl = URL.createObjectURL(blob)
@@ -57,9 +61,12 @@ async function downloadKnowledgeBlob(url: string, fileName: string): Promise<voi
   link.href = objectUrl
   link.download = fileName
   document.body.appendChild(link)
-  link.click()
-  link.remove()
-  URL.revokeObjectURL(objectUrl)
+  try {
+    link.click()
+  } finally {
+    link.remove()
+    URL.revokeObjectURL(objectUrl)
+  }
 }
 
 // downloadOrgKnowledgeFile 下载组织级知识库中的单个普通文件。

@@ -86,4 +86,36 @@ describe('知识库文件下载', () => {
     )
     expect(clickSpy).toHaveBeenCalledTimes(1)
   })
+
+  // 覆盖浏览器下载触发失败的异常路径：即使 click 抛错，也必须释放 object URL 并移除临时 a 标签。
+  it('浏览器下载点击失败时仍清理临时资源并继续抛出错误', async () => {
+    const fetchMock = vi.fn().mockResolvedValue(new Response(new Blob(['hello']), { status: 200 }))
+    vi.stubGlobal('fetch', fetchMock)
+    clickSpy.mockImplementationOnce(() => {
+      throw new Error('click failed')
+    })
+
+    await expect(downloadOrgKnowledgeFile('org-1', 'docs/read me.md', 'read me.md')).rejects.toThrow('click failed')
+
+    expect(URL.revokeObjectURL).toHaveBeenCalledWith('blob:knowledge')
+    expect(document.body.querySelector('a[download="read me.md"]')).toBeNull()
+  })
+
+  // 覆盖 JSON 错误响应：知识库下载接口应复用统一错误提取逻辑，优先展示后端 message 字段。
+  it('下载接口返回 JSON 错误时展示后端错误文案', async () => {
+    const fetchMock = vi.fn().mockResolvedValue(
+      new Response(JSON.stringify({ code: 'KNOWLEDGE_FORBIDDEN', message: '无权访问该知识库' }), {
+        status: 403,
+        headers: { 'content-type': 'application/json' },
+      }),
+    )
+    vi.stubGlobal('fetch', fetchMock)
+
+    try {
+      await downloadOrgKnowledgeFile('org-1', 'docs/secret.md', 'secret.md')
+      throw new Error('expected download to fail')
+    } catch (error) {
+      expect((error as Error).message).toBe('无权访问该知识库')
+    }
+  })
 })
