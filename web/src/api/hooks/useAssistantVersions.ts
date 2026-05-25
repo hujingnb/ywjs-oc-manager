@@ -1,8 +1,9 @@
 // 助手版本 API hooks：平台管理员维护版本目录（列表、详情、增删改）与 skill tar 上传。
-// 写操作统一失效版本列表缓存；skill 上传走原生 fetch（apiRequest 只支持 JSON body）。
+// 写操作统一失效版本列表缓存；skill 上传走 xhrUpload 以支持进度反馈与取消。
 import { useMutation, useQuery, useQueryClient } from '@tanstack/vue-query'
 
-import { apiRequest, extractErrorMessage, getCsrfToken, getStoredAccessToken } from '@/api/client'
+import { apiRequest } from '@/api/client'
+import { xhrUpload } from '@/api/xhrUpload'
 
 // AUXILIARY_SLOTS 是智能路由的 8 个 auxiliary 槽位，key 与后端约定一致，顺序固定用于表单渲染。
 export const AUXILIARY_SLOTS = [
@@ -140,37 +141,30 @@ export function useDeleteAssistantVersion() {
 }
 
 // useUploadAssistantVersionSkill 上传一个 skill tar（multipart 表单字段名 file）。
-// 走原生 fetch：apiRequest 只支持 JSON body，无法发 multipart。
+// 走 xhrUpload 支持进度回调与取消信号；multipart body 由 xhrUpload 透传，不强制 Content-Type，
+// 让浏览器自动设置 boundary。
+// onSuccess 改为 onSettled：取消或失败时同样刷新列表，避免新建态批量上传部分失败后视图错位。
 export function useUploadAssistantVersionSkill() {
   const client = useQueryClient()
   return useMutation({
-    mutationFn: async ({ id, file }: { id: string; file: File }) => {
-      const headers: Record<string, string> = {}
-      const token = getStoredAccessToken()
-      if (token) headers.Authorization = `Bearer ${token}`
-      const csrf = getCsrfToken()
-      if (csrf) headers['X-CSRF-Token'] = csrf
+    mutationFn: async (input: {
+      id: string
+      file: File
+      onProgress?: (loaded: number, total: number) => void
+      signal?: AbortSignal
+    }) => {
       const body = new FormData()
-      body.append('file', file)
-      const response = await fetch(`/api/v1/assistant-versions/${id}/skills`, {
-        method: 'POST', headers, body,
+      body.append('file', input.file)
+      const res = await xhrUpload(`/api/v1/assistant-versions/${input.id}/skills`, {
+        method: 'POST',
+        body,
+        onProgress: input.onProgress,
+        signal: input.signal,
       })
-      if (!response.ok) {
-        // multipart 上传绕过 apiRequest，这里复用同一套错误文案提取：
-        // 后端错误体是 JSON 时取其 message/error 字段，避免把整段 JSON 直接弹给用户。
-        const text = await response.text().catch(() => '')
-        let message = text || '上传失败'
-        try {
-          message = extractErrorMessage(JSON.parse(text), response.status)
-        } catch {
-          // 响应体不是 JSON（如网关纯文本错误），保留原始文本。
-        }
-        throw new Error(message)
-      }
-      const json = (await response.json()) as { version: AssistantVersionDTO }
-      return json.version
+      // 后端响应体形如 { version: AssistantVersionDTO }；xhrUpload 已按 content-type 解析为对象。
+      return (res.body as { version: AssistantVersionDTO }).version
     },
-    onSuccess: () => { void client.invalidateQueries({ queryKey: VERSION_LIST_KEY }) },
+    onSettled: () => { void client.invalidateQueries({ queryKey: VERSION_LIST_KEY }) },
   })
 }
 
