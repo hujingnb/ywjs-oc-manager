@@ -1,5 +1,5 @@
 import { mount } from '@vue/test-utils'
-import { h, ref } from 'vue'
+import { defineComponent, h, ref, type PropType, type VNodeChild } from 'vue'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 
 import { KNOWLEDGE_UPLOAD_MAX_BYTES } from '@/api/hooks/useKnowledge'
@@ -12,6 +12,29 @@ const mocks = vi.hoisted(() => ({
   canManage: vi.fn(() => true),
   downloadOrgKnowledgeFile: vi.fn(),
 }))
+
+type RenderableColumn = {
+  key: string
+  render?: (row: unknown) => VNodeChild
+}
+
+type RenderedChild = NonNullable<VNodeChild>
+
+function renderCellChildren(column: RenderableColumn, row: unknown): RenderedChild[] {
+  const child = column.render?.(row)
+  return child == null ? [] : [child as RenderedChild]
+}
+
+// DataTableStub 渲染列 render 结果，确保单元测试能覆盖表格操作按钮。
+const DataTableStub = defineComponent({
+  props: {
+    columns: { type: Array as PropType<RenderableColumn[]>, default: () => [] },
+    data: { type: Array as PropType<unknown[]>, default: () => [] },
+  },
+  setup(props) {
+    return () => h('div', props.data.flatMap((row) => props.columns.map((column) => h('div', { class: `cell-${column.key}` }, renderCellChildren(column, row)))))
+  },
+})
 
 vi.mock('@/stores/auth', () => ({
   useAuthStore: () => ({ user: { id: 'admin-1', role: 'org_admin', org_id: 'org-1' } }),
@@ -79,14 +102,7 @@ function mountPage() {
         NCard: { template: '<section><slot name="header" /><slot name="header-extra" /><slot /></section>' },
         NSpace: { template: '<div><slot /></div>' },
         NSelect: { template: '<select />' },
-        NDataTable: {
-          props: ['columns', 'data'],
-          setup(props: { columns: Array<{ key: string; render?: (row: unknown) => unknown }>; data: unknown[] }) {
-            return () => h('div', props.data.flatMap((row) => props.columns.map((column) => h('div', { class: `cell-${column.key}` }, [
-              column.render ? column.render(row) : '',
-            ]))))
-          },
-        },
+        NDataTable: DataTableStub,
         NButton: { template: '<button><slot /></button>' },
         NTag: { template: '<span><slot /></span>' },
       },

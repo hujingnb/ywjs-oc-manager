@@ -39,6 +39,7 @@ import { NButton, NCard, NDataTable, useMessage, type DataTableColumns } from 'n
 import type { AppDTO } from '@/api/hooks/useApps'
 import {
   KNOWLEDGE_UPLOAD_MAX_MESSAGE,
+  downloadAppKnowledgeFile,
   isKnowledgeUploadTooLarge,
   useAppKnowledgeQuery,
   useDeleteAppKnowledge,
@@ -78,6 +79,8 @@ const message = useMessage()
 const canManage = computed(() => canManageApp(auth.user, app?.value))
 const uploading = computed(() => uploadMutation.isPending.value)
 const deleting = computed(() => deleteMutation.isPending.value)
+// downloading 标记当前页面正在触发浏览器下载，避免重复点击生成多次下载请求。
+const downloading = ref(false)
 
 // formatBytes 仅用于文件大小展示，目录大小在列渲染中统一降级为占位符。
 function formatBytes(value: number) {
@@ -133,19 +136,46 @@ async function deleteEntry(targetPath: string) {
   }
 }
 
-// columns 展示文件名、大小、类型和删除操作；删除按钮只在可管理时出现。
+// onDownload 下载应用知识库中的单个文件；目录行不进入该流程。
+async function onDownload(entry: KnowledgeEntry) {
+  const context = knowledgeContext.value
+  if (!context || entry.is_dir || downloading.value) return
+  downloading.value = true
+  try {
+    await downloadAppKnowledgeFile(props.appId, context.orgId, context.ownerUserId, entry.path, entry.name)
+  } catch (err) {
+    message.error(err instanceof Error ? err.message : '下载失败')
+  } finally {
+    downloading.value = false
+  }
+}
+
+// columns 展示文件名、大小、类型和操作；文件行始终可下载，删除按钮只在可管理时出现。
 const columns: DataTableColumns<KnowledgeEntry> = [
   { title: '名称', key: 'name', render: (row) => h('strong', `${row.name}${row.is_dir ? '/' : ''}`) },
   { title: '大小', key: 'size', render: (row) => row.is_dir ? '—' : formatBytes(row.size) },
   { title: '类型', key: 'is_dir', render: (row) => row.is_dir ? '目录' : '文件' },
   {
     title: '操作', key: 'actions',
-    render: (row) => canManage.value ? h(NButton, {
-      size: 'small',
-      type: 'error',
-      disabled: deleting.value,
-      onClick: () => deleteEntry(entryRelativePath(row.path)),
-    }, { default: () => '删除' }) : null,
+    render: (row) => {
+      const actions = []
+      if (!row.is_dir) {
+        actions.push(h(NButton, {
+          size: 'small',
+          disabled: downloading.value,
+          onClick: () => onDownload(row),
+        }, { default: () => downloading.value ? '下载中…' : '下载' }))
+      }
+      if (canManage.value) {
+        actions.push(h(NButton, {
+          size: 'small',
+          type: 'error',
+          disabled: deleting.value,
+          onClick: () => deleteEntry(entryRelativePath(row.path)),
+        }, { default: () => '删除' }))
+      }
+      return actions.length ? h('div', { style: 'display: flex; gap: 8px; flex-wrap: wrap' }, actions) : null
+    },
   },
 ]
 </script>

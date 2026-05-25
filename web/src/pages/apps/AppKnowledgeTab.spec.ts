@@ -1,15 +1,41 @@
 import { mount } from '@vue/test-utils'
-import { ref } from 'vue'
-import { describe, expect, it, vi } from 'vitest'
+import { defineComponent, h, ref, type PropType, type VNodeChild } from 'vue'
+import { beforeEach, describe, expect, it, vi } from 'vitest'
 
 import { KNOWLEDGE_UPLOAD_MAX_BYTES } from '@/api/hooks/useKnowledge'
 import AppKnowledgeTab from './AppKnowledgeTab.vue'
 
 const mocks = vi.hoisted(() => ({
   run: vi.fn(),
+  error: vi.fn(),
   warning: vi.fn(),
   mutateAsync: vi.fn(),
+  canManage: vi.fn(() => true),
+  downloadAppKnowledgeFile: vi.fn(),
 }))
+
+type RenderableColumn = {
+  key: string
+  render?: (row: unknown) => VNodeChild
+}
+
+type RenderedChild = NonNullable<VNodeChild>
+
+function renderCellChildren(column: RenderableColumn, row: unknown): RenderedChild[] {
+  const child = column.render?.(row)
+  return child == null ? [] : [child as RenderedChild]
+}
+
+// DataTableStub 渲染列 render 结果，确保单元测试能点击表格操作按钮。
+const DataTableStub = defineComponent({
+  props: {
+    columns: { type: Array as PropType<RenderableColumn[]>, default: () => [] },
+    data: { type: Array as PropType<unknown[]>, default: () => [] },
+  },
+  setup(props) {
+    return () => h('div', props.data.flatMap((row) => props.columns.map((column) => h('div', { class: `cell-${column.key}` }, renderCellChildren(column, row)))))
+  },
+})
 
 vi.mock('@/stores/auth', () => ({
   useAuthStore: () => ({ user: { id: 'user-1', role: 'org_member', org_id: 'org-1' } }),
@@ -20,14 +46,14 @@ vi.mock('@/stores/uploadProgress', () => ({
 }))
 
 vi.mock('@/domain/permissions', () => ({
-  canManageApp: () => true,
+  canManageApp: mocks.canManage,
 }))
 
 vi.mock('naive-ui', async () => {
   const actual = await vi.importActual<typeof import('naive-ui')>('naive-ui')
   return {
     ...actual,
-    useMessage: () => ({ warning: mocks.warning }),
+    useMessage: () => ({ error: mocks.error, warning: mocks.warning }),
   }
 })
 
@@ -36,10 +62,11 @@ vi.mock('@/api/hooks/useKnowledge', async () => {
   return {
     ...actual,
     useAppKnowledgeQuery: () => ({
-      data: ref({ path: '', entries: [] }),
+      data: ref({ path: '', entries: [{ path: 'docs/readme.md', name: 'readme.md', size: 5, is_dir: false }] }),
       isLoading: ref(false),
       error: ref(null),
     }),
+    downloadAppKnowledgeFile: mocks.downloadAppKnowledgeFile,
     useUploadAppKnowledge: () => ({
       mutateAsync: mocks.mutateAsync,
       isPending: ref(false),
@@ -67,7 +94,7 @@ function mountTab() {
       },
       stubs: {
         NCard: { template: '<section><slot name="header" /><slot name="header-extra" /><slot /></section>' },
-        NDataTable: { template: '<table />' },
+        NDataTable: DataTableStub,
         NButton: { template: '<button><slot /></button>' },
       },
     },
@@ -81,6 +108,15 @@ function oversizedFile(): File {
 }
 
 describe('AppKnowledgeTab', () => {
+  beforeEach(() => {
+    mocks.canManage.mockReturnValue(true)
+    mocks.downloadAppKnowledgeFile.mockReset()
+    mocks.error.mockReset()
+    mocks.warning.mockReset()
+    mocks.run.mockReset()
+    mocks.mutateAsync.mockReset()
+  })
+
   // 覆盖实例知识库上传超限路径：前端提示 100MB 限制，并且不创建上传会话。
   it('拒绝超过 100MB 的实例知识库文件', async () => {
     const wrapper = mountTab()
@@ -92,5 +128,18 @@ describe('AppKnowledgeTab', () => {
     expect(mocks.warning).toHaveBeenCalledWith('单文件最多支持 100MB')
     expect(mocks.run).not.toHaveBeenCalled()
     expect(mocks.mutateAsync).not.toHaveBeenCalled()
+  })
+
+  // 覆盖实例知识库只读场景：可读用户可以下载文件，但不可看到删除入口。
+  it('只读用户可下载实例知识库文件但不可删除', async () => {
+    mocks.canManage.mockReturnValue(false)
+    const wrapper = mountTab()
+
+    expect(wrapper.text()).toContain('下载')
+    expect(wrapper.text()).not.toContain('删除')
+
+    await wrapper.find('button').trigger('click')
+
+    expect(mocks.downloadAppKnowledgeFile).toHaveBeenCalledWith('app-1', 'org-1', 'user-1', 'docs/readme.md', 'readme.md')
   })
 })
