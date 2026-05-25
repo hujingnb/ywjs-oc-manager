@@ -120,13 +120,13 @@ const chartOption = computed<ResourceChartOption>(() => ({
     data: props.samples.map((sample) => formatTime(sample.sampled_at)),
     axisTick: { show: false },
     axisLabel: {
-      color: '#66758a',
+      color: '#6b7280',
       fontSize: 11,
       hideOverlap: true,
       showMinLabel: true,
       showMaxLabel: true,
     },
-    axisLine: { lineStyle: { color: '#d9ddea' } },
+    axisLine: { lineStyle: { color: '#e5e7eb' } },
   },
   yAxis: {
     type: 'value',
@@ -136,11 +136,11 @@ const chartOption = computed<ResourceChartOption>(() => ({
     minInterval: props.unit === 'count' ? 1 : undefined,
     splitNumber: 3,
     axisLabel: {
-      color: '#66758a',
+      color: '#6b7280',
       fontSize: 11,
       formatter: (value: number) => formatValue(value, props.unit),
     },
-    splitLine: { lineStyle: { color: '#eef2f7' } },
+    splitLine: { lineStyle: { color: '#edf0f5' } },
   },
   series: chartSeries.value,
 }))
@@ -351,7 +351,7 @@ function formatTime(value: string): string {
 .chart-frame {
   position: relative;
   min-height: 128px;
-  border: 1px solid var(--color-border, #d9ddea);
+  border: 1px solid var(--color-border, #e5e7eb);
   border-radius: 8px;
   background: var(--color-surface, #fff);
 }
@@ -362,7 +362,7 @@ function formatTime(value: string): string {
   align-items: center;
   justify-content: center;
   margin: 0;
-  color: var(--color-text-secondary, #8a94c6);
+  color: var(--color-text-secondary, #6b7280);
   font-size: 13px;
 }
 
@@ -377,7 +377,7 @@ function formatTime(value: string): string {
   align-items: center;
   justify-content: space-between;
   gap: 12px;
-  color: var(--color-text-secondary, #8a94c6);
+  color: var(--color-text-secondary, #6b7280);
   font-size: 12px;
   line-height: 18px;
 }

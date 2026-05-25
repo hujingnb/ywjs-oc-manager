@@ -6,10 +6,10 @@
         <n-card size="small" :bordered="true">
           <n-statistic :label="stat.label" :value="stat.value">
             <template v-if="stat.suffix" #suffix>
-              <span style="font-size: 11px; color: #8A94C6">{{ stat.suffix }}</span>
+              <span style="font-size: 11px; color: var(--color-text-secondary)">{{ stat.suffix }}</span>
             </template>
           </n-statistic>
-          <div v-if="stat.note" style="font-size: 11px; margin-top: 4px" :style="{ color: stat.noteColor ?? '#8A94C6' }">
+          <div v-if="stat.note" style="font-size: 11px; margin-top: 4px" :style="{ color: stat.noteColor ?? 'var(--color-text-secondary)' }">
             {{ stat.note }}
           </div>
         </n-card>
@@ -64,6 +64,17 @@ import { useQuery } from '@tanstack/vue-query'
 use([CanvasRenderer, LineChart, BarChart, PieChart, GridComponent, TooltipComponent, LegendComponent])
 
 // ConsolePage 是平台管理员专属的控制台首页：统计条 + Token 趋势/组织用量/实例状态三图。
+// 图表颜色与全局浅色主题保持一致，避免 ECharts 默认色回到深色控制台残留。
+const CHART_TEXT_COLOR = '#6b7280'
+const CHART_AXIS_COLOR = '#d9dde5'
+const CHART_GRID_COLOR = '#edf0f5'
+const CHART_INFO_COLOR = '#1677ff'
+const CHART_INFO_AREA = 'rgba(22, 119, 255, 0.08)'
+const CHART_SUCCESS_COLOR = '#16a34a'
+const CHART_MUTED_COLOR = '#8a94a6'
+const CHART_DANGER_COLOR = '#d93026'
+const CHART_PIE_BORDER = '#ffffff'
+
 const auth = useAuthStore()
 const isPlatformAdmin = computed(() => auth.isPlatformAdmin)
 
@@ -106,8 +117,8 @@ const stats = computed(() => {
     { label: '组织数', value: String(o?.organization_count ?? '—'), note: '', noteColor: undefined, suffix: undefined },
     { label: '成员数', value: String(o?.member_count ?? '—'), note: '不含平台管理员', noteColor: undefined, suffix: undefined },
     { label: '实例数', value: String(o?.app_count ?? '—'), note: '', noteColor: undefined, suffix: undefined },
-    { label: '运行中', value: String(o?.running_app_count ?? '—'), note: '', noteColor: '#18a058', suffix: undefined },
-    { label: '异常', value: String(o?.error_app_count ?? '—'), note: '', noteColor: '#d03050', suffix: undefined },
+    { label: '运行中', value: String(o?.running_app_count ?? '—'), note: '', noteColor: 'var(--color-success)', suffix: undefined },
+    { label: '异常', value: String(o?.error_app_count ?? '—'), note: '', noteColor: 'var(--color-danger)', suffix: undefined },
     {
       label: '今日 Token',
       value: todayTokenTotal.value !== null ? String(todayTokenTotal.value.toLocaleString('en-US')) : '—',
@@ -157,14 +168,14 @@ function buildTokenChart() {
     xAxis: {
       type: 'category',
       data: dates,
-      axisLabel: { color: '#8A94C6', fontSize: 11 },
-      axisLine: { lineStyle: { color: '#30363d' } },
+      axisLabel: { color: CHART_TEXT_COLOR, fontSize: 11 },
+      axisLine: { lineStyle: { color: CHART_AXIS_COLOR } },
       axisTick: { show: false },
     },
     yAxis: {
       type: 'value',
-      axisLabel: { color: '#8A94C6', fontSize: 11, formatter: (v: number) => formatQuota(v) },
-      splitLine: { lineStyle: { color: '#2d3139' } },
+      axisLabel: { color: CHART_TEXT_COLOR, fontSize: 11, formatter: (v: number) => formatQuota(v) },
+      splitLine: { lineStyle: { color: CHART_GRID_COLOR } },
     },
     series: [{
       type: 'line',
@@ -172,9 +183,9 @@ function buildTokenChart() {
       smooth: true,
       showSymbol: true,
       symbolSize: 5,
-      lineStyle: { width: 2, color: '#1f6feb' },
-      itemStyle: { color: '#1f6feb' },
-      areaStyle: { color: 'rgba(31,111,235,0.08)' },
+      lineStyle: { width: 2, color: CHART_INFO_COLOR },
+      itemStyle: { color: CHART_INFO_COLOR },
+      areaStyle: { color: CHART_INFO_AREA },
     }],
   })
 }
@@ -195,21 +206,21 @@ function buildOrgChart() {
     },
     xAxis: {
       type: 'value',
-      axisLabel: { color: '#8A94C6', fontSize: 11, formatter: (v: number) => formatQuota(v) },
-      splitLine: { lineStyle: { color: '#2d3139' } },
+      axisLabel: { color: CHART_TEXT_COLOR, fontSize: 11, formatter: (v: number) => formatQuota(v) },
+      splitLine: { lineStyle: { color: CHART_GRID_COLOR } },
     },
     yAxis: {
       type: 'category',
       data: items.map(i => i.org_name),
-      axisLabel: { color: '#8A94C6', fontSize: 11, width: 110, overflow: 'truncate' },
+      axisLabel: { color: CHART_TEXT_COLOR, fontSize: 11, width: 110, overflow: 'truncate' },
       axisLine: { show: false },
       axisTick: { show: false },
     },
     series: [{
       type: 'bar',
       data: items.map(i => i.total_quota),
-      itemStyle: { color: '#1f6feb', borderRadius: [0, 3, 3, 0] },
-      label: { show: true, position: 'right', color: '#8A94C6', fontSize: 11, formatter: (p: { value: number }) => formatQuota(p.value) },
+      itemStyle: { color: CHART_INFO_COLOR, borderRadius: [0, 3, 3, 0] },
+      label: { show: true, position: 'right', color: CHART_TEXT_COLOR, fontSize: 11, formatter: (p: { value: number }) => formatQuota(p.value) },
     }],
   })
 }
@@ -224,17 +235,17 @@ function buildStatusChart() {
   statusChart.setOption({
     animation: false,
     tooltip: { trigger: 'item', formatter: '{b}: {c} ({d}%)' },
-    legend: { bottom: 0, textStyle: { color: '#8A94C6', fontSize: 12 } },
+    legend: { bottom: 0, textStyle: { color: CHART_TEXT_COLOR, fontSize: 12 } },
     series: [{
       type: 'pie',
       radius: ['40%', '68%'],
       center: ['50%', '44%'],
-      itemStyle: { borderWidth: 2, borderColor: '#0d1117' },
+      itemStyle: { borderWidth: 2, borderColor: CHART_PIE_BORDER },
       label: { show: false },
       data: [
-        { name: '运行中', value: o.running_app_count ?? 0, itemStyle: { color: '#18a058' } },
-        { name: '停止', value: stopped < 0 ? 0 : stopped, itemStyle: { color: '#63748a' } },
-        { name: '异常', value: o.error_app_count ?? 0, itemStyle: { color: '#d03050' } },
+        { name: '运行中', value: o.running_app_count ?? 0, itemStyle: { color: CHART_SUCCESS_COLOR } },
+        { name: '停止', value: stopped < 0 ? 0 : stopped, itemStyle: { color: CHART_MUTED_COLOR } },
+        { name: '异常', value: o.error_app_count ?? 0, itemStyle: { color: CHART_DANGER_COLOR } },
       ],
     }],
   })
@@ -285,9 +296,9 @@ onBeforeUnmount(() => {
   align-items: center;
   justify-content: center;
   height: 320px;
-  color: #8a94c6;
+  color: var(--color-text-secondary);
   font-size: 13px;
 }
 
-.chart-state.danger { color: #d03050; }
+.chart-state.danger { color: var(--color-danger); }
 </style>

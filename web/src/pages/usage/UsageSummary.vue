@@ -183,22 +183,22 @@ function chartY(value: number, max: number): number {
 }
 
 .summary-card {
-  border: 1px solid rgba(148, 163, 184, 0.24);
+  border: 1px solid var(--color-border);
   border-radius: 8px;
   padding: 12px;
-  background: rgba(15, 23, 42, 0.36);
+  background: var(--color-surface);
 }
 
 .summary-card span {
   display: block;
-  color: rgba(226, 232, 240, 0.68);
+  color: var(--color-text-secondary);
   font-size: 12px;
   margin-bottom: 6px;
 }
 
 .summary-card strong {
   display: block;
-  color: #f8fafc;
+  color: var(--color-text-primary);
   font-size: 20px;
   line-height: 1.25;
   word-break: break-word;
@@ -206,9 +206,10 @@ function chartY(value: number, max: number): number {
 
 .chart-panel {
   margin-bottom: 16px;
-  border: 1px solid rgba(148, 163, 184, 0.2);
+  border: 1px solid var(--color-border);
   border-radius: 8px;
   padding: 12px;
+  background: var(--color-surface);
 }
 
 .chart-header {
@@ -219,6 +220,10 @@ function chartY(value: number, max: number): number {
   margin-bottom: 8px;
 }
 
+.chart-header span {
+  color: var(--color-text-secondary);
+}
+
 .trend-chart {
   width: 100%;
   height: 180px;
@@ -227,7 +232,7 @@ function chartY(value: number, max: number): number {
 
 .trend-grid {
   fill: none;
-  stroke: rgba(148, 163, 184, 0.25);
+  stroke: var(--color-divider);
   stroke-width: 1;
 }
 
@@ -241,32 +246,32 @@ function chartY(value: number, max: number): number {
 .token-line,
 .token-dot,
 .legend-token {
-  stroke: #38bdf8;
-  background: #38bdf8;
+  stroke: var(--color-info);
+  background: var(--color-info);
 }
 
 .quota-line,
 .quota-dot,
 .legend-quota {
-  stroke: #f59e0b;
-  background: #f59e0b;
+  stroke: var(--color-warning);
+  background: var(--color-warning);
 }
 
 .token-dot,
 .quota-dot {
-  fill: #0f172a;
+  fill: var(--color-text-primary);
   stroke-width: 2;
 }
 
 .axis-label {
-  fill: rgba(226, 232, 240, 0.65);
+  fill: var(--color-text-secondary);
   font-size: 12px;
 }
 
 .chart-legend {
   display: flex;
   gap: 14px;
-  color: rgba(226, 232, 240, 0.72);
+  color: var(--color-text-secondary);
   font-size: 12px;
 }
 

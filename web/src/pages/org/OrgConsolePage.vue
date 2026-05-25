@@ -8,7 +8,7 @@
           <div
             v-if="stat.note"
             style="font-size: 11px; margin-top: 4px"
-            :style="{ color: stat.noteColor ?? '#8A94C6' }"
+            :style="{ color: stat.noteColor ?? 'var(--color-text-secondary)' }"
           >
             {{ stat.note }}
           </div>
@@ -58,6 +58,17 @@ import { formatQuotaValue } from '@/pages/usage/usageFormatting'
 use([CanvasRenderer, LineChart, PieChart, GridComponent, TooltipComponent, LegendComponent])
 
 // OrgConsolePage 是组织管理员专属的控制台首页：统计条 + 用量趋势/实例状态两图。
+// 图表颜色与全局浅色主题保持一致，避免 ECharts 默认色回到深色控制台残留。
+const CHART_TEXT_COLOR = '#6b7280'
+const CHART_AXIS_COLOR = '#d9dde5'
+const CHART_GRID_COLOR = '#edf0f5'
+const CHART_INFO_COLOR = '#1677ff'
+const CHART_INFO_AREA = 'rgba(22, 119, 255, 0.08)'
+const CHART_SUCCESS_COLOR = '#16a34a'
+const CHART_MUTED_COLOR = '#8a94a6'
+const CHART_DANGER_COLOR = '#d93026'
+const CHART_PIE_BORDER = '#ffffff'
+
 const auth = useAuthStore()
 const isOrgAdmin = computed(() => auth.isOrgAdmin)
 const orgId = computed(() => auth.user?.org_id)
@@ -119,13 +130,13 @@ const stats = computed(() => {
       label: '运行中',
       value: appsLoading.value ? '—' : String(runningCount),
       note: '',
-      noteColor: '#18a058',
+      noteColor: 'var(--color-success)',
     },
     {
       label: '异常',
       value: appsLoading.value ? '—' : String(errorCount),
       note: '',
-      noteColor: '#d03050',
+      noteColor: 'var(--color-danger)',
     },
     {
       label: '当前余额',
@@ -183,14 +194,14 @@ function buildUsageChart() {
     xAxis: {
       type: 'category',
       data: dates,
-      axisLabel: { color: '#8A94C6', fontSize: 11 },
-      axisLine: { lineStyle: { color: '#30363d' } },
+      axisLabel: { color: CHART_TEXT_COLOR, fontSize: 11 },
+      axisLine: { lineStyle: { color: CHART_AXIS_COLOR } },
       axisTick: { show: false },
     },
     yAxis: {
       type: 'value',
-      axisLabel: { color: '#8A94C6', fontSize: 11, formatter: (v: number) => formatQuota(v) },
-      splitLine: { lineStyle: { color: '#2d3139' } },
+      axisLabel: { color: CHART_TEXT_COLOR, fontSize: 11, formatter: (v: number) => formatQuota(v) },
+      splitLine: { lineStyle: { color: CHART_GRID_COLOR } },
     },
     series: [{
       type: 'line',
@@ -198,9 +209,9 @@ function buildUsageChart() {
       smooth: true,
       showSymbol: true,
       symbolSize: 5,
-      lineStyle: { width: 2, color: '#18a058' },
-      itemStyle: { color: '#18a058' },
-      areaStyle: { color: 'rgba(24,160,88,0.08)' },
+      lineStyle: { width: 2, color: CHART_INFO_COLOR },
+      itemStyle: { color: CHART_INFO_COLOR },
+      areaStyle: { color: CHART_INFO_AREA },
     }],
   })
 }
@@ -218,17 +229,17 @@ function buildStatusChart() {
   statusChart.setOption({
     animation: false,
     tooltip: { trigger: 'item', formatter: '{b}: {c} ({d}%)' },
-    legend: { bottom: 0, textStyle: { color: '#8A94C6', fontSize: 12 } },
+    legend: { bottom: 0, textStyle: { color: CHART_TEXT_COLOR, fontSize: 12 } },
     series: [{
       type: 'pie',
       radius: ['40%', '68%'],
       center: ['50%', '44%'],
-      itemStyle: { borderWidth: 2, borderColor: '#0d1117' },
+      itemStyle: { borderWidth: 2, borderColor: CHART_PIE_BORDER },
       label: { show: false },
       data: [
-        { name: '运行中', value: running, itemStyle: { color: '#18a058' } },
-        { name: '停止', value: stopped < 0 ? 0 : stopped, itemStyle: { color: '#63748a' } },
-        { name: '异常', value: error, itemStyle: { color: '#d03050' } },
+        { name: '运行中', value: running, itemStyle: { color: CHART_SUCCESS_COLOR } },
+        { name: '停止', value: stopped < 0 ? 0 : stopped, itemStyle: { color: CHART_MUTED_COLOR } },
+        { name: '异常', value: error, itemStyle: { color: CHART_DANGER_COLOR } },
       ],
     }],
   })
@@ -275,9 +286,9 @@ onBeforeUnmount(() => {
   align-items: center;
   justify-content: center;
   height: 320px;
-  color: #8a94c6;
+  color: var(--color-text-secondary);
   font-size: 13px;
 }
 
-.chart-state.danger { color: #d03050; }
+.chart-state.danger { color: var(--color-danger); }
 </style>
