@@ -30,6 +30,16 @@ export interface KnowledgeListing {
 const orgKey = (orgId: string | undefined, path: string) => ['knowledge', 'org', orgId, path] as const
 const appKey = (appId: string | undefined, path: string) => ['knowledge', 'app', appId, path] as const
 
+// 知识库上传单文件上限与 manager-api files.KnowledgeMaxFileSize、nginx client_max_body_size 保持一致。
+export const KNOWLEDGE_UPLOAD_MAX_BYTES = 100 * 1024 * 1024
+export const KNOWLEDGE_UPLOAD_MAX_LABEL = '100MB'
+export const KNOWLEDGE_UPLOAD_MAX_MESSAGE = `单文件最多支持 ${KNOWLEDGE_UPLOAD_MAX_LABEL}`
+
+// isKnowledgeUploadTooLarge 在页面发起上传会话前做本地拦截，避免超限文件进入网络请求。
+export function isKnowledgeUploadTooLarge(file: Pick<File, 'size'>): boolean {
+  return file.size > KNOWLEDGE_UPLOAD_MAX_BYTES
+}
+
 // useOrgKnowledgeQuery 列出组织级知识库。
 // orgId 为空时暂停；relative 由调用方维护，通常来自面包屑或目录点击。
 export function useOrgKnowledgeQuery(orgId: Ref<string | undefined>, relative: Ref<string>) {
