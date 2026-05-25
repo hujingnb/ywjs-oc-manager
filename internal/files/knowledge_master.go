@@ -75,8 +75,8 @@ func (m *KnowledgeMaster) Save(relative string, content io.Reader, size int64) e
 	return nil
 }
 
-// Open 打开主副本中的指定文件供读取。
-// 关闭返回的 ReadCloser 由调用方负责。
+// Open 打开主副本中的指定普通文件供读取。
+// 关闭返回的 ReadCloser 由调用方负责；目录和非常规文件会被拒绝，避免下载接口返回非文件流。
 func (m *KnowledgeMaster) Open(relative string) (io.ReadCloser, int64, error) {
 	if relative == "" {
 		return nil, 0, ErrKnowledgePathRequired
@@ -93,6 +93,10 @@ func (m *KnowledgeMaster) Open(relative string) (io.ReadCloser, int64, error) {
 	if err != nil {
 		f.Close()
 		return nil, 0, fmt.Errorf("查询知识库文件大小失败: %w", err)
+	}
+	if !info.Mode().IsRegular() {
+		f.Close()
+		return nil, 0, fmt.Errorf("%w: %s", ErrPathNotRegular, relative)
 	}
 	return f, info.Size(), nil
 }

@@ -62,6 +62,18 @@ func TestKnowledgeMasterListReturnsSortedEntries(t *testing.T) {
 	}
 }
 
+// TestKnowledgeMasterOpenRejectsDirectory 验证下载入口拒绝目录路径，避免把目录句柄当作文件流返回。
+func TestKnowledgeMasterOpenRejectsDirectory(t *testing.T) {
+	master := newMaster(t, 1024)
+	err := os.MkdirAll(filepath.Join(master.root.Root, "docs"), 0o755)
+	require.NoError(t, err)
+
+	stream, size, err := master.Open("docs")
+	require.ErrorIs(t, err, ErrPathNotRegular)
+	require.Nil(t, stream)
+	require.Equal(t, int64(0), size)
+}
+
 func newMaster(t *testing.T, max int64) *KnowledgeMaster {
 	t.Helper()
 	root, err := NewSafeRoot(t.TempDir(), max)
