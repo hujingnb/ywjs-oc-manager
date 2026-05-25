@@ -168,7 +168,10 @@ const channels: ReadonlyArray<ChannelDisplay> = [
 const auth = useAuthStore()
 const app = inject<Ref<AppDTO | null>>('app')
 const appId = toRef(props, 'appId')
-const channelType = computed(() => props.channelType ?? 'wechat')
+// supportedChannelType 是当前唯一可操作渠道；外部传入的非微信 channelType 只影响未来扩展场景，
+// 在后端正式支持前必须忽略，避免详情区和绑定接口误用暂不支持渠道。
+const supportedChannelType = 'wechat'
+const channelType = computed(() => supportedChannelType)
 const channelTypeRef = computed(() => channelType.value)
 // activeChannel 当前始终落在微信；保留 computed 是为了让模板只依赖展示模型。
 const activeChannel = computed(() => channels.find(channel => channel.type === channelType.value) ?? channels[0])

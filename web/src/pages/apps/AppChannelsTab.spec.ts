@@ -9,6 +9,7 @@ import type { AppDTO } from '@/api/hooks/useApps'
 const progress = ref<ChannelProgress | null>(null)
 const beginAuth = vi.fn()
 const unbindChannel = vi.fn()
+const observedChannelTypes: string[] = []
 
 vi.mock('naive-ui', () => ({
   NButton: defineComponent({
@@ -50,9 +51,18 @@ vi.mock('@/api/hooks/useChannel', async (importOriginal) => {
   const actual = await importOriginal<typeof import('@/api/hooks/useChannel')>()
   return {
     ...actual,
-    useChannelProgressQuery: () => ({ data: progress }),
-    useBeginChannelAuth: () => ({ mutateAsync: beginAuth }),
-    useUnbindChannel: () => ({ mutateAsync: unbindChannel }),
+    useChannelProgressQuery: (_appId: unknown, channelTypeRef: { value: string }) => {
+      observedChannelTypes.push(channelTypeRef.value)
+      return { data: progress }
+    },
+    useBeginChannelAuth: (_appId: unknown, channelTypeRef: { value: string }) => {
+      observedChannelTypes.push(channelTypeRef.value)
+      return { mutateAsync: beginAuth }
+    },
+    useUnbindChannel: (_appId: unknown, channelTypeRef: { value: string }) => {
+      observedChannelTypes.push(channelTypeRef.value)
+      return { mutateAsync: unbindChannel }
+    },
   }
 })
 
@@ -65,11 +75,11 @@ const app = ref<AppDTO>({
   api_key_status: 'succeeded',
 })
 
-function mountChannelsTab() {
+function mountChannelsTab(channelType?: string) {
   return mount(defineComponent({
     setup() {
       provide('app', app)
-      return () => h(AppChannelsTab, { appId: 'app-1' })
+      return () => h(AppChannelsTab, { appId: 'app-1', channelType })
     },
   }))
 }
@@ -79,6 +89,7 @@ describe('AppChannelsTab', () => {
     progress.value = null
     beginAuth.mockReset()
     unbindChannel.mockReset()
+    observedChannelTypes.length = 0
   })
 
   // 渠道清单：实例详情页必须一次性展示全部规划渠道，并明确哪些渠道当前不可用。
@@ -107,6 +118,16 @@ describe('AppChannelsTab', () => {
     expect(wrapper.find('.channel-logo.work-wechat').exists()).toBe(true)
     expect(wrapper.find('.channel-logo.feishu').exists()).toBe(true)
     expect(wrapper.find('.channel-logo.dingtalk').exists()).toBe(true)
+  })
+
+  // 非微信路由参数：未支持渠道只能作为灰色入口展示，详情区和接口参数仍固定使用微信。
+  it('非微信 channelType 仍固定展示并请求微信渠道详情', () => {
+    const wrapper = mountChannelsTab('feishu')
+    const detail = wrapper.find('.channel-detail')
+
+    expect(detail.text()).toContain('微信')
+    expect(detail.text()).not.toContain('飞书')
+    expect(observedChannelTypes).toEqual(['wechat', 'wechat', 'wechat'])
   })
 
   // 已绑定状态：页面展示中文“已绑定”，不泄露后端原值 bound 或内部 challenge 空态。
