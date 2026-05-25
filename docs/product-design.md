@@ -34,6 +34,7 @@
 - 查看和管理本组织所有应用（渠道绑定、启停、重建）
 - 设置组织级 AI 人设及成员是否允许覆盖的策略
 - 上传、删除组织级知识库文件（同步到本组织下所有应用节点）
+- 浏览和下载本组织组织级、应用级知识库文件
 - 查看本组织 Token 用量、成员用量、审计日志
 - 触发知识库同步重试（`CanRetryOrgKnowledgeSync`）
 
@@ -50,7 +51,7 @@
 - 查看和操作自己名下唯一的应用（启停、重启、绑定渠道）
 - 在策略允许时编辑应用级 AI 人设
 - 上传、删除自己应用的知识库文件
-- 浏览和下载自己应用工作目录中的文件
+- 浏览和下载本组织组织级知识库、自己应用的知识库与工作目录文件
 - 查看自己的应用状态和 Token 用量
 
 **权限边界**：
@@ -144,8 +145,8 @@
 
 分为两个层级：
 
-- **组织级知识库**：由组织管理员上传，同步到本组织所有应用所在的 Runtime Node。
-- **应用级知识库**：由应用所有者上传，仅同步到该应用所在节点。
+- **组织级知识库**：由组织管理员上传，同步到本组织所有应用所在的 Runtime Node；读取者可下载单个普通文件。
+- **应用级知识库**：由应用所有者上传，仅同步到该应用所在节点；读取者可下载单个普通文件。
 
 知识库内容以文件系统为事实来源；manager 只维护文件元数据和同步状态。同步状态追踪在 `internal/service/knowledge_sync_status.go`。
 
@@ -269,11 +270,11 @@ worker 执行 knowledge_sync_node：
 | `CanCreateAppForOrg` | 在组织下创建应用（onboarding） | 不可 | 本组织 | 不可 |
 | `CanCreateAppForMember` | 为已有成员补建应用实例 | 全部 | 本组织 | 不可 |
 | `CanTriggerRuntimeOperation` | 启停/重启容器等运行时操作 | 不可 | 本组织应用 | 自己应用 |
-| `CanReadOrgKnowledge` | 读取组织知识库 | 全部 | 本组织 | 本组织 |
+| `CanReadOrgKnowledge` | 读取 / 下载组织知识库 | 全部 | 本组织 | 本组织 |
 | `CanWriteOrgKnowledge` | 写入组织知识库 | 不可 | 本组织 | 不可 |
 | `CanViewOrgKnowledgeSyncStatus` | 查看知识库同步状态 | 不可 | 本组织 | 不可 |
 | `CanRetryOrgKnowledgeSync` | 重试知识库同步 | 不可 | 本组织 | 不可 |
-| `CanReadAppKnowledge` | 读取应用知识库 | 全部 | 本组织应用 | 自己应用 |
+| `CanReadAppKnowledge` | 读取 / 下载应用知识库 | 全部 | 本组织应用 | 自己应用 |
 | `CanWriteAppKnowledge` | 写入应用知识库 | 不可 | 本组织应用 | 自己应用 |
 | `CanViewOrgPersona` | 读取组织人设 | 全部 | 本组织 | 本组织 |
 | `CanManageOrgPersona` | 写入组织人设 | 全部（等同 CanManageOrg） | 本组织 | 不可 |
