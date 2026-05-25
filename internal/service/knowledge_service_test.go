@@ -4,6 +4,7 @@ package service
 import (
 	"context"
 	"errors"
+	"io"
 	"strings"
 	"testing"
 
@@ -20,6 +21,78 @@ const (
 	testKnowledgeApp   = "00000000-0000-0000-0000-000000000e03"
 	testKnowledgeOwner = "00000000-0000-0000-0000-000000000e04"
 )
+
+// TestKnowledgeServiceOpenOrgAllowsOrgMember 验证组织成员可下载本组织组织知识库文件。
+func TestKnowledgeServiceOpenOrgAllowsOrgMember(t *testing.T) {
+	svc := newKnowledgeService(t)
+	require.NoError(t, svc.SaveOrgFile(context.Background(), orgKnowledgeAdmin(), testKnowledgeOrg, "docs/readme.md", strings.NewReader("hello"), 5))
+
+	member := auth.Principal{Role: domain.UserRoleOrgMember, OrgID: testKnowledgeOrg, UserID: "member-1"}
+	stream, size, err := svc.OpenOrgFile(context.Background(), member, testKnowledgeOrg, "docs/readme.md")
+	require.NoError(t, err)
+	defer stream.Close()
+	body, err := io.ReadAll(stream)
+	require.NoError(t, err)
+
+	assert.Equal(t, int64(5), size)
+	assert.Equal(t, "hello", string(body))
+}
+
+// TestKnowledgeServiceOpenOrgAllowsPlatformAdmin 验证平台管理员沿用组织知识库读取权限下载任意组织文件。
+func TestKnowledgeServiceOpenOrgAllowsPlatformAdmin(t *testing.T) {
+	svc := newKnowledgeService(t)
+	require.NoError(t, svc.SaveOrgFile(context.Background(), orgKnowledgeAdmin(), testKnowledgeOrg, "policy.md", strings.NewReader("policy"), 6))
+
+	stream, size, err := svc.OpenOrgFile(context.Background(), platformAdmin(), testKnowledgeOrg, "policy.md")
+	require.NoError(t, err)
+	defer stream.Close()
+	body, err := io.ReadAll(stream)
+	require.NoError(t, err)
+
+	assert.Equal(t, int64(6), size)
+	assert.Equal(t, "policy", string(body))
+}
+
+// TestKnowledgeServiceOpenAppAllowsPlatformAdmin 验证平台管理员沿用应用知识库读取权限下载任意实例文件。
+func TestKnowledgeServiceOpenAppAllowsPlatformAdmin(t *testing.T) {
+	svc := newKnowledgeService(t)
+	owner := auth.Principal{Role: domain.UserRoleOrgMember, OrgID: testKnowledgeOrg, UserID: testKnowledgeOwner}
+	require.NoError(t, svc.SaveAppFile(context.Background(), owner, testKnowledgeOrg, testKnowledgeApp, testKnowledgeOwner, "app.md", strings.NewReader("app"), 3))
+
+	stream, size, err := svc.OpenAppFile(context.Background(), platformAdmin(), testKnowledgeOrg, testKnowledgeApp, testKnowledgeOwner, "app.md")
+	require.NoError(t, err)
+	defer stream.Close()
+	body, err := io.ReadAll(stream)
+	require.NoError(t, err)
+
+	assert.Equal(t, int64(3), size)
+	assert.Equal(t, "app", string(body))
+}
+
+// TestKnowledgeServiceOpenAppRejectsOtherOwner 验证组织成员不能下载其他成员的实例知识库文件。
+func TestKnowledgeServiceOpenAppRejectsOtherOwner(t *testing.T) {
+	svc := newKnowledgeService(t)
+	owner := auth.Principal{Role: domain.UserRoleOrgMember, OrgID: testKnowledgeOrg, UserID: testKnowledgeOwner}
+	require.NoError(t, svc.SaveAppFile(context.Background(), owner, testKnowledgeOrg, testKnowledgeApp, testKnowledgeOwner, "app.md", strings.NewReader("app"), 3))
+
+	stranger := auth.Principal{Role: domain.UserRoleOrgMember, OrgID: testKnowledgeOrg, UserID: "stranger"}
+	stream, size, err := svc.OpenAppFile(context.Background(), stranger, testKnowledgeOrg, testKnowledgeApp, testKnowledgeOwner, "app.md")
+
+	require.ErrorIs(t, err, ErrKnowledgeForbidden)
+	require.Nil(t, stream)
+	assert.Equal(t, int64(0), size)
+}
+
+// TestKnowledgeServiceOpenOrgRejectsEscapingPath 验证下载路径仍受 SafeRoot 边界约束保护。
+func TestKnowledgeServiceOpenOrgRejectsEscapingPath(t *testing.T) {
+	svc := newKnowledgeService(t)
+
+	stream, size, err := svc.OpenOrgFile(context.Background(), orgKnowledgeAdmin(), testKnowledgeOrg, "../../secret.md")
+
+	require.Error(t, err)
+	require.Nil(t, stream)
+	assert.Equal(t, int64(0), size)
+}
 
 // TestKnowledgeServiceSaveOrgRequiresOrgManager 验证知识库服务保存组织要求组织Manager的预期行为场景。
 func TestKnowledgeServiceSaveOrgRequiresOrgManager(t *testing.T) {

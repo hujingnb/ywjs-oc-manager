@@ -246,6 +246,40 @@ func (s *KnowledgeService) DeleteAppFile(ctx context.Context, principal auth.Pri
 	return nil
 }
 
+// OpenOrgFile 打开组织级知识库中的普通文件供下载。
+// 下载属于读取能力，权限沿用 CanReadOrgKnowledge；写入和同步权限不参与判断。
+func (s *KnowledgeService) OpenOrgFile(ctx context.Context, principal auth.Principal, orgID, relative string) (io.ReadCloser, int64, error) {
+	if s.master == nil {
+		return nil, 0, ErrKnowledgeMissing
+	}
+	if !auth.CanReadOrgKnowledge(principal, orgID) {
+		return nil, 0, ErrKnowledgeForbidden
+	}
+	target := path.Join("org", orgID, "knowledge", relative)
+	stream, size, err := s.master.Open(target)
+	if err != nil {
+		return nil, 0, fmt.Errorf("打开组织知识库文件失败: %w", err)
+	}
+	return stream, size, nil
+}
+
+// OpenAppFile 打开应用级知识库中的普通文件供下载。
+// 下载属于读取能力，权限沿用 CanReadAppKnowledge；平台管理员保留跨组织观察和下载能力。
+func (s *KnowledgeService) OpenAppFile(ctx context.Context, principal auth.Principal, orgID, appID, ownerUserID, relative string) (io.ReadCloser, int64, error) {
+	if s.master == nil {
+		return nil, 0, ErrKnowledgeMissing
+	}
+	if !auth.CanReadAppKnowledge(principal, orgID, ownerUserID) {
+		return nil, 0, ErrKnowledgeForbidden
+	}
+	target := path.Join("org", orgID, "app", appID, "knowledge", relative)
+	stream, size, err := s.master.Open(target)
+	if err != nil {
+		return nil, 0, fmt.Errorf("打开应用知识库文件失败: %w", err)
+	}
+	return stream, size, nil
+}
+
 // ListOrg 列出组织级知识库；组织成员只读。
 func (s *KnowledgeService) ListOrg(_ context.Context, principal auth.Principal, orgID, relative string) (KnowledgeListResult, error) {
 	if s.master == nil {
