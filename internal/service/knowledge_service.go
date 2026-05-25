@@ -193,13 +193,17 @@ func (s *KnowledgeService) SaveOrgFile(ctx context.Context, principal auth.Princ
 	if !auth.CanWriteOrgKnowledge(principal, orgID) {
 		return ErrKnowledgeForbidden
 	}
-	target := path.Join("org", orgID, "knowledge", relative)
+	cleaned, err := validateKnowledgeRelative(relative, false)
+	if err != nil {
+		return err
+	}
+	target := path.Join("org", orgID, "knowledge", cleaned)
 	if err := s.master.Save(target, content, size); err != nil {
 		return err
 	}
 	if s.dispatcher != nil {
-		if dispatchErr := s.dispatcher.DispatchOrgChange(ctx, orgID, relative, "upload_file", target); dispatchErr != nil {
-			s.recordDispatchFailure(ctx, orgID, "", relative, "dispatch_org_upload_file", dispatchErr)
+		if dispatchErr := s.dispatcher.DispatchOrgChange(ctx, orgID, cleaned, "upload_file", target); dispatchErr != nil {
+			s.recordDispatchFailure(ctx, orgID, "", cleaned, "dispatch_org_upload_file", dispatchErr)
 		}
 	}
 	return nil
@@ -218,13 +222,17 @@ func (s *KnowledgeService) SaveAppFile(ctx context.Context, principal auth.Princ
 	if !auth.CanWriteAppKnowledge(principal, appCtx.orgID, appCtx.ownerUserID) {
 		return ErrKnowledgeForbidden
 	}
-	target := path.Join("org", appCtx.orgID, "app", appID, "knowledge", relative)
+	cleaned, err := validateKnowledgeRelative(relative, false)
+	if err != nil {
+		return err
+	}
+	target := path.Join("org", appCtx.orgID, "app", appID, "knowledge", cleaned)
 	if err := s.master.Save(target, content, size); err != nil {
 		return err
 	}
 	if s.dispatcher != nil {
-		if dispatchErr := s.dispatcher.DispatchAppChange(ctx, appCtx.orgID, appID, relative, "upload_file", target); dispatchErr != nil {
-			s.recordDispatchFailure(ctx, appCtx.orgID, appID, relative, "dispatch_app_upload_file", dispatchErr)
+		if dispatchErr := s.dispatcher.DispatchAppChange(ctx, appCtx.orgID, appID, cleaned, "upload_file", target); dispatchErr != nil {
+			s.recordDispatchFailure(ctx, appCtx.orgID, appID, cleaned, "dispatch_app_upload_file", dispatchErr)
 		}
 	}
 	return nil
@@ -238,13 +246,17 @@ func (s *KnowledgeService) DeleteOrgFile(ctx context.Context, principal auth.Pri
 	if !auth.CanWriteOrgKnowledge(principal, orgID) {
 		return ErrKnowledgeForbidden
 	}
-	target := path.Join("org", orgID, "knowledge", relative)
+	cleaned, err := validateKnowledgeRelative(relative, false)
+	if err != nil {
+		return err
+	}
+	target := path.Join("org", orgID, "knowledge", cleaned)
 	if err := s.master.Delete(target); err != nil {
 		return err
 	}
 	if s.dispatcher != nil {
-		if dispatchErr := s.dispatcher.DispatchOrgChange(ctx, orgID, relative, "delete_file", target); dispatchErr != nil {
-			s.recordDispatchFailure(ctx, orgID, "", relative, "dispatch_org_delete_file", dispatchErr)
+		if dispatchErr := s.dispatcher.DispatchOrgChange(ctx, orgID, cleaned, "delete_file", target); dispatchErr != nil {
+			s.recordDispatchFailure(ctx, orgID, "", cleaned, "dispatch_org_delete_file", dispatchErr)
 		}
 	}
 	return nil
@@ -262,13 +274,17 @@ func (s *KnowledgeService) DeleteAppFile(ctx context.Context, principal auth.Pri
 	if !auth.CanWriteAppKnowledge(principal, appCtx.orgID, appCtx.ownerUserID) {
 		return ErrKnowledgeForbidden
 	}
-	target := path.Join("org", appCtx.orgID, "app", appID, "knowledge", relative)
+	cleaned, err := validateKnowledgeRelative(relative, false)
+	if err != nil {
+		return err
+	}
+	target := path.Join("org", appCtx.orgID, "app", appID, "knowledge", cleaned)
 	if err := s.master.Delete(target); err != nil {
 		return err
 	}
 	if s.dispatcher != nil {
-		if dispatchErr := s.dispatcher.DispatchAppChange(ctx, appCtx.orgID, appID, relative, "delete_file", target); dispatchErr != nil {
-			s.recordDispatchFailure(ctx, appCtx.orgID, appID, relative, "dispatch_app_delete_file", dispatchErr)
+		if dispatchErr := s.dispatcher.DispatchAppChange(ctx, appCtx.orgID, appID, cleaned, "delete_file", target); dispatchErr != nil {
+			s.recordDispatchFailure(ctx, appCtx.orgID, appID, cleaned, "dispatch_app_delete_file", dispatchErr)
 		}
 	}
 	return nil
@@ -309,10 +325,13 @@ func (s *KnowledgeService) resolveAppKnowledgeContext(ctx context.Context, appID
 	return actual, nil
 }
 
-// validateKnowledgeOpenRelative 在拼接可信租户前缀前校验用户传入的下载路径。
-// 读取接口必须先约束 relative 本身，否则 path.Join 会把 ../../secret.md 规范化成
+// validateKnowledgeRelative 在拼接可信租户前缀前校验用户传入路径。
+// 所有知识库入口都必须先约束 relative 本身，否则 path.Join 会把 ../../secret.md 规范化成
 // org/<orgID>/secret.md，导致 SafeRoot 只能保护全局根目录，不能保护知识库子树边界。
-func validateKnowledgeOpenRelative(relative string) (string, error) {
+func validateKnowledgeRelative(relative string, allowEmpty bool) (string, error) {
+	if relative == "" && allowEmpty {
+		return "", nil
+	}
 	if strings.ContainsRune(relative, 0) {
 		return "", fmt.Errorf("%w: 路径包含 NUL", files.ErrInvalidPath)
 	}
@@ -343,6 +362,9 @@ func validateKnowledgeOpenRelative(relative string) (string, error) {
 	}
 	cleaned := path.Clean(decoded)
 	if cleaned == "." {
+		if allowEmpty {
+			return "", nil
+		}
 		return "", files.ErrInvalidPath
 	}
 	return cleaned, nil
@@ -357,7 +379,7 @@ func (s *KnowledgeService) OpenOrgFile(ctx context.Context, principal auth.Princ
 	if !auth.CanReadOrgKnowledge(principal, orgID) {
 		return nil, 0, ErrKnowledgeForbidden
 	}
-	cleaned, err := validateKnowledgeOpenRelative(relative)
+	cleaned, err := validateKnowledgeRelative(relative, false)
 	if err != nil {
 		return nil, 0, err
 	}
@@ -382,7 +404,7 @@ func (s *KnowledgeService) OpenAppFile(ctx context.Context, principal auth.Princ
 	if !auth.CanReadAppKnowledge(principal, appCtx.orgID, appCtx.ownerUserID) {
 		return nil, 0, ErrKnowledgeForbidden
 	}
-	cleaned, err := validateKnowledgeOpenRelative(relative)
+	cleaned, err := validateKnowledgeRelative(relative, false)
 	if err != nil {
 		return nil, 0, err
 	}
@@ -402,7 +424,11 @@ func (s *KnowledgeService) ListOrg(_ context.Context, principal auth.Principal, 
 	if !auth.CanReadOrgKnowledge(principal, orgID) {
 		return KnowledgeListResult{}, ErrKnowledgeForbidden
 	}
-	target := path.Join("org", orgID, "knowledge", relative)
+	cleaned, err := validateKnowledgeRelative(relative, true)
+	if err != nil {
+		return KnowledgeListResult{}, err
+	}
+	target := path.Join("org", orgID, "knowledge", cleaned)
 	entries, err := s.master.List(target)
 	if err != nil {
 		return KnowledgeListResult{}, fmt.Errorf("读取组织知识库失败: %w", err)
@@ -422,7 +448,11 @@ func (s *KnowledgeService) ListApp(ctx context.Context, principal auth.Principal
 	if !auth.CanReadAppKnowledge(principal, appCtx.orgID, appCtx.ownerUserID) {
 		return KnowledgeListResult{}, ErrKnowledgeForbidden
 	}
-	target := path.Join("org", appCtx.orgID, "app", appID, "knowledge", relative)
+	cleaned, err := validateKnowledgeRelative(relative, true)
+	if err != nil {
+		return KnowledgeListResult{}, err
+	}
+	target := path.Join("org", appCtx.orgID, "app", appID, "knowledge", cleaned)
 	entries, err := s.master.List(target)
 	if err != nil {
 		return KnowledgeListResult{}, fmt.Errorf("读取应用知识库失败: %w", err)

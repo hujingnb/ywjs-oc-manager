@@ -173,6 +173,85 @@ func TestKnowledgeServiceOpenRejectsAbsolutePath(t *testing.T) {
 	assert.Equal(t, int64(0), size)
 }
 
+// TestKnowledgeServiceRejectsTraversalForListSaveDelete 验证列表、上传、删除入口都先校验业务相对路径，不能在拼接租户前缀时吞掉 ..。
+func TestKnowledgeServiceRejectsTraversalForListSaveDelete(t *testing.T) {
+	svc := newKnowledgeService(t)
+	owner := auth.Principal{Role: domain.UserRoleOrgMember, OrgID: testKnowledgeOrg, UserID: testKnowledgeOwner}
+	cases := []struct {
+		name     string
+		relative string
+		run      func(string) error
+	}{
+		{name: "组织列表拒绝原始上级路径", relative: "../secret.md", run: func(rel string) error {
+			_, err := svc.ListOrg(context.Background(), orgKnowledgeAdmin(), testKnowledgeOrg, rel)
+			return err
+		}}, // 场景：组织列表不能用原始 .. 越出组织 knowledge 子树。
+		{name: "组织列表拒绝编码上级路径", relative: "%2e%2e/secret.md", run: func(rel string) error {
+			_, err := svc.ListOrg(context.Background(), orgKnowledgeAdmin(), testKnowledgeOrg, rel)
+			return err
+		}}, // 场景：组织列表不能用 URL 编码 .. 越出组织 knowledge 子树。
+		{name: "组织列表拒绝双重编码上级路径", relative: "%252e%252e/secret.md", run: func(rel string) error {
+			_, err := svc.ListOrg(context.Background(), orgKnowledgeAdmin(), testKnowledgeOrg, rel)
+			return err
+		}}, // 场景：组织列表不能用双重编码 .. 越出组织 knowledge 子树。
+		{name: "组织上传拒绝原始上级路径", relative: "../secret.md", run: func(rel string) error {
+			return svc.SaveOrgFile(context.Background(), orgKnowledgeAdmin(), testKnowledgeOrg, rel, strings.NewReader("x"), 1)
+		}}, // 场景：组织上传不能用原始 .. 写到组织 knowledge 子树外。
+		{name: "组织上传拒绝编码上级路径", relative: "%2e%2e/secret.md", run: func(rel string) error {
+			return svc.SaveOrgFile(context.Background(), orgKnowledgeAdmin(), testKnowledgeOrg, rel, strings.NewReader("x"), 1)
+		}}, // 场景：组织上传不能用 URL 编码 .. 写到组织 knowledge 子树外。
+		{name: "组织上传拒绝双重编码上级路径", relative: "%252e%252e/secret.md", run: func(rel string) error {
+			return svc.SaveOrgFile(context.Background(), orgKnowledgeAdmin(), testKnowledgeOrg, rel, strings.NewReader("x"), 1)
+		}}, // 场景：组织上传不能用双重编码 .. 写到组织 knowledge 子树外。
+		{name: "组织删除拒绝原始上级路径", relative: "../secret.md", run: func(rel string) error {
+			return svc.DeleteOrgFile(context.Background(), orgKnowledgeAdmin(), testKnowledgeOrg, rel)
+		}}, // 场景：组织删除不能用原始 .. 删除组织 knowledge 子树外文件。
+		{name: "组织删除拒绝编码上级路径", relative: "%2e%2e/secret.md", run: func(rel string) error {
+			return svc.DeleteOrgFile(context.Background(), orgKnowledgeAdmin(), testKnowledgeOrg, rel)
+		}}, // 场景：组织删除不能用 URL 编码 .. 删除组织 knowledge 子树外文件。
+		{name: "组织删除拒绝双重编码上级路径", relative: "%252e%252e/secret.md", run: func(rel string) error {
+			return svc.DeleteOrgFile(context.Background(), orgKnowledgeAdmin(), testKnowledgeOrg, rel)
+		}}, // 场景：组织删除不能用双重编码 .. 删除组织 knowledge 子树外文件。
+		{name: "应用列表拒绝原始上级路径", relative: "../secret.md", run: func(rel string) error {
+			_, err := svc.ListApp(context.Background(), owner, testKnowledgeOrg, testKnowledgeApp, testKnowledgeOwner, rel)
+			return err
+		}}, // 场景：应用列表不能用原始 .. 越出应用 knowledge 子树。
+		{name: "应用列表拒绝编码上级路径", relative: "%2e%2e/secret.md", run: func(rel string) error {
+			_, err := svc.ListApp(context.Background(), owner, testKnowledgeOrg, testKnowledgeApp, testKnowledgeOwner, rel)
+			return err
+		}}, // 场景：应用列表不能用 URL 编码 .. 越出应用 knowledge 子树。
+		{name: "应用列表拒绝双重编码上级路径", relative: "%252e%252e/secret.md", run: func(rel string) error {
+			_, err := svc.ListApp(context.Background(), owner, testKnowledgeOrg, testKnowledgeApp, testKnowledgeOwner, rel)
+			return err
+		}}, // 场景：应用列表不能用双重编码 .. 越出应用 knowledge 子树。
+		{name: "应用上传拒绝原始上级路径", relative: "../secret.md", run: func(rel string) error {
+			return svc.SaveAppFile(context.Background(), owner, testKnowledgeOrg, testKnowledgeApp, testKnowledgeOwner, rel, strings.NewReader("x"), 1)
+		}}, // 场景：应用上传不能用原始 .. 写到应用 knowledge 子树外。
+		{name: "应用上传拒绝编码上级路径", relative: "%2e%2e/secret.md", run: func(rel string) error {
+			return svc.SaveAppFile(context.Background(), owner, testKnowledgeOrg, testKnowledgeApp, testKnowledgeOwner, rel, strings.NewReader("x"), 1)
+		}}, // 场景：应用上传不能用 URL 编码 .. 写到应用 knowledge 子树外。
+		{name: "应用上传拒绝双重编码上级路径", relative: "%252e%252e/secret.md", run: func(rel string) error {
+			return svc.SaveAppFile(context.Background(), owner, testKnowledgeOrg, testKnowledgeApp, testKnowledgeOwner, rel, strings.NewReader("x"), 1)
+		}}, // 场景：应用上传不能用双重编码 .. 写到应用 knowledge 子树外。
+		{name: "应用删除拒绝原始上级路径", relative: "../secret.md", run: func(rel string) error {
+			return svc.DeleteAppFile(context.Background(), owner, testKnowledgeOrg, testKnowledgeApp, testKnowledgeOwner, rel)
+		}}, // 场景：应用删除不能用原始 .. 删除应用 knowledge 子树外文件。
+		{name: "应用删除拒绝编码上级路径", relative: "%2e%2e/secret.md", run: func(rel string) error {
+			return svc.DeleteAppFile(context.Background(), owner, testKnowledgeOrg, testKnowledgeApp, testKnowledgeOwner, rel)
+		}}, // 场景：应用删除不能用 URL 编码 .. 删除应用 knowledge 子树外文件。
+		{name: "应用删除拒绝双重编码上级路径", relative: "%252e%252e/secret.md", run: func(rel string) error {
+			return svc.DeleteAppFile(context.Background(), owner, testKnowledgeOrg, testKnowledgeApp, testKnowledgeOwner, rel)
+		}}, // 场景：应用删除不能用双重编码 .. 删除应用 knowledge 子树外文件。
+	}
+	for _, tc := range cases {
+		// 当前子测试覆盖 tc.name 描述的知识库路径穿越拒绝场景。
+		t.Run(tc.name, func(t *testing.T) {
+			err := tc.run(tc.relative)
+			require.ErrorIs(t, err, files.ErrInvalidPath)
+		})
+	}
+}
+
 // TestKnowledgeServiceSaveOrgRequiresOrgManager 验证知识库服务保存组织要求组织Manager的预期行为场景。
 func TestKnowledgeServiceSaveOrgRequiresOrgManager(t *testing.T) {
 	svc := newKnowledgeService(t)
