@@ -245,6 +245,7 @@ func (h *KnowledgeHandler) DeleteOrg(c *gin.Context) {
 // @Failure      400           {object}  ErrorResponse
 // @Failure      401           {object}  ErrorResponse
 // @Failure      403           {object}  ErrorResponse
+// @Failure      404           {object}  ErrorResponse
 // @Failure      503           {object}  ErrorResponse
 // @Router       /apps/{appId}/knowledge [get]
 func (h *KnowledgeHandler) ListApp(c *gin.Context) {
@@ -278,6 +279,7 @@ func (h *KnowledgeHandler) ListApp(c *gin.Context) {
 // @Failure      400           {object}  ErrorResponse
 // @Failure      401           {object}  ErrorResponse
 // @Failure      403           {object}  ErrorResponse
+// @Failure      404           {object}  ErrorResponse
 // @Failure      503           {object}  ErrorResponse
 // @Router       /apps/{appId}/knowledge/file [get]
 func (h *KnowledgeHandler) DownloadApp(c *gin.Context) {
@@ -313,6 +315,7 @@ func (h *KnowledgeHandler) DownloadApp(c *gin.Context) {
 // @Failure      400           {object}  ErrorResponse
 // @Failure      401           {object}  ErrorResponse
 // @Failure      403           {object}  ErrorResponse
+// @Failure      404           {object}  ErrorResponse
 // @Failure      503           {object}  ErrorResponse
 // @Router       /apps/{appId}/knowledge [post]
 func (h *KnowledgeHandler) SaveApp(c *gin.Context) {
@@ -347,6 +350,7 @@ func (h *KnowledgeHandler) SaveApp(c *gin.Context) {
 // @Failure      400           {object}  ErrorResponse
 // @Failure      401           {object}  ErrorResponse
 // @Failure      403           {object}  ErrorResponse
+// @Failure      404           {object}  ErrorResponse
 // @Failure      503           {object}  ErrorResponse
 // @Router       /apps/{appId}/knowledge [delete]
 func (h *KnowledgeHandler) DeleteApp(c *gin.Context) {
@@ -381,6 +385,8 @@ func writeKnowledgeError(c *gin.Context, err error) {
 	switch {
 	case errors.Is(err, service.ErrKnowledgeForbidden):
 		c.JSON(http.StatusForbidden, apierror.New("KNOWLEDGE_FORBIDDEN", "无权访问该知识库"))
+	case errors.Is(err, service.ErrNotFound):
+		c.JSON(http.StatusNotFound, apierror.New("NOT_FOUND", "资源不存在"))
 	case errors.Is(err, service.ErrKnowledgeMissing):
 		c.JSON(http.StatusServiceUnavailable, apierror.New("KNOWLEDGE_NOT_CONFIGURED", "知识库主副本未启用"))
 	default:

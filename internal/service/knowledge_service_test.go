@@ -9,11 +9,14 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/jackc/pgx/v5"
+	"github.com/jackc/pgx/v5/pgtype"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 	"oc-manager/internal/auth"
 	"oc-manager/internal/domain"
 	"oc-manager/internal/files"
+	"oc-manager/internal/store/sqlc"
 )
 
 const (
@@ -78,6 +81,21 @@ func TestKnowledgeServiceOpenAppRejectsOtherOwner(t *testing.T) {
 
 	stranger := auth.Principal{Role: domain.UserRoleOrgMember, OrgID: testKnowledgeOrg, UserID: "stranger"}
 	stream, size, err := svc.OpenAppFile(context.Background(), stranger, testKnowledgeOrg, testKnowledgeApp, testKnowledgeOwner, "app.md")
+
+	require.ErrorIs(t, err, ErrKnowledgeForbidden)
+	require.Nil(t, stream)
+	assert.Equal(t, int64(0), size)
+}
+
+// TestKnowledgeServiceOpenAppRejectsSpoofedOwner 验证下载接口不会信任客户端伪造的 owner_user_id 越权读取他人实例知识库。
+func TestKnowledgeServiceOpenAppRejectsSpoofedOwner(t *testing.T) {
+	svc := newKnowledgeService(t)
+	owner := auth.Principal{Role: domain.UserRoleOrgMember, OrgID: testKnowledgeOrg, UserID: testKnowledgeOwner}
+	require.NoError(t, svc.SaveAppFile(context.Background(), owner, testKnowledgeOrg, testKnowledgeApp, testKnowledgeOwner, "secret.md", strings.NewReader("secret"), 6))
+
+	attackerID := "00000000-0000-0000-0000-000000000e99"
+	attacker := auth.Principal{Role: domain.UserRoleOrgMember, OrgID: testKnowledgeOrg, UserID: attackerID}
+	stream, size, err := svc.OpenAppFile(context.Background(), attacker, testKnowledgeOrg, testKnowledgeApp, attackerID, "secret.md")
 
 	require.ErrorIs(t, err, ErrKnowledgeForbidden)
 	require.Nil(t, stream)
@@ -341,7 +359,35 @@ func newKnowledgeService(t *testing.T) *KnowledgeService {
 	t.Helper()
 	root, err := files.NewSafeRoot(t.TempDir(), 1024)
 	require.NoError(t, err)
-	return NewKnowledgeService(files.NewKnowledgeMaster(root))
+	svc := NewKnowledgeService(files.NewKnowledgeMaster(root))
+	svc.SetAppStore(&fakeKnowledgeAppStore{apps: map[string]sqlc.App{
+		testKnowledgeApp: {
+			ID:          knowledgeTestUUID(t, testKnowledgeApp),
+			OrgID:       knowledgeTestUUID(t, testKnowledgeOrg),
+			OwnerUserID: knowledgeTestUUID(t, testKnowledgeOwner),
+		},
+	}})
+	return svc
+}
+
+// fakeKnowledgeAppStore 为知识库服务测试提供 app_id 到真实归属的查询能力。
+type fakeKnowledgeAppStore struct {
+	apps map[string]sqlc.App
+}
+
+func (s *fakeKnowledgeAppStore) GetApp(_ context.Context, id pgtype.UUID) (sqlc.App, error) {
+	app, ok := s.apps[uuidToString(id)]
+	if !ok {
+		return sqlc.App{}, pgx.ErrNoRows
+	}
+	return app, nil
+}
+
+func knowledgeTestUUID(t *testing.T, value string) pgtype.UUID {
+	t.Helper()
+	id, err := parseUUID(value)
+	require.NoError(t, err)
+	return id
 }
 
 func orgKnowledgeAdmin() auth.Principal {

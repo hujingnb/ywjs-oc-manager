@@ -2,6 +2,7 @@ package service
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"io"
 	"log/slog"
@@ -9,8 +10,11 @@ import (
 	"path"
 	"strings"
 
+	"github.com/jackc/pgx/v5"
+	"github.com/jackc/pgx/v5/pgtype"
 	"oc-manager/internal/auth"
 	"oc-manager/internal/files"
+	"oc-manager/internal/store/sqlc"
 )
 
 // KnowledgeSyncDispatcher 抽象向 worker 入队 knowledge_sync_node 任务的能力。
@@ -43,6 +47,13 @@ type KnowledgeRetryDispatcher interface {
 	RetryOrgNode(ctx context.Context, orgID, nodeID string) error
 }
 
+// KnowledgeAppStore 抽象按 app_id 读取应用真实归属的能力。
+// 应用知识库接口仍保留 org_id / owner_user_id query 以兼容前端缓存上下文，
+// 但权限和路径拼接必须以数据库中的真实归属为准，不能信任客户端传入值。
+type KnowledgeAppStore interface {
+	GetApp(ctx context.Context, id pgtype.UUID) (sqlc.App, error)
+}
+
 // KnowledgeService 维护组织和应用维度的知识库主副本。
 //
 // 设计要点：
@@ -59,6 +70,7 @@ type KnowledgeService struct {
 	dispatcher      KnowledgeSyncDispatcher
 	statusSource    KnowledgeSyncStatusSource
 	retryDispatcher KnowledgeRetryDispatcher
+	appStore        KnowledgeAppStore
 	// auditor 用于把 dispatcher 入队失败落到 audit_logs;nil 时静默(仅打日志)。
 	// 主副本已经写成功,业务不能因为同步失败而 200 → 500 翻转,但必须留可观测痕迹。
 	auditor KnowledgeAuditRecorder
@@ -83,6 +95,12 @@ func (s *KnowledgeService) SetSyncStatusSource(src KnowledgeSyncStatusSource) {
 // SetRetryDispatcher 注入「重试该 (org, node) 同步」分发器。
 func (s *KnowledgeService) SetRetryDispatcher(d KnowledgeRetryDispatcher) {
 	s.retryDispatcher = d
+}
+
+// SetAppStore 注入应用归属查询器。
+// 应用级知识库读写需要先按 app_id 查出真实 org / owner，再做权限判断。
+func (s *KnowledgeService) SetAppStore(store KnowledgeAppStore) {
+	s.appStore = store
 }
 
 // SetAuditor 注入 audit_logs 写入器,用于 dispatcher 入队失败时落痕。
@@ -193,16 +211,20 @@ func (s *KnowledgeService) SaveAppFile(ctx context.Context, principal auth.Princ
 	if s.master == nil {
 		return ErrKnowledgeMissing
 	}
-	if !auth.CanWriteAppKnowledge(principal, orgID, ownerUserID) {
+	appCtx, err := s.resolveAppKnowledgeContext(ctx, appID, orgID, ownerUserID)
+	if err != nil {
+		return err
+	}
+	if !auth.CanWriteAppKnowledge(principal, appCtx.orgID, appCtx.ownerUserID) {
 		return ErrKnowledgeForbidden
 	}
-	target := path.Join("org", orgID, "app", appID, "knowledge", relative)
+	target := path.Join("org", appCtx.orgID, "app", appID, "knowledge", relative)
 	if err := s.master.Save(target, content, size); err != nil {
 		return err
 	}
 	if s.dispatcher != nil {
-		if dispatchErr := s.dispatcher.DispatchAppChange(ctx, orgID, appID, relative, "upload_file", target); dispatchErr != nil {
-			s.recordDispatchFailure(ctx, orgID, appID, relative, "dispatch_app_upload_file", dispatchErr)
+		if dispatchErr := s.dispatcher.DispatchAppChange(ctx, appCtx.orgID, appID, relative, "upload_file", target); dispatchErr != nil {
+			s.recordDispatchFailure(ctx, appCtx.orgID, appID, relative, "dispatch_app_upload_file", dispatchErr)
 		}
 	}
 	return nil
@@ -233,19 +255,58 @@ func (s *KnowledgeService) DeleteAppFile(ctx context.Context, principal auth.Pri
 	if s.master == nil {
 		return ErrKnowledgeMissing
 	}
-	if !auth.CanWriteAppKnowledge(principal, orgID, ownerUserID) {
+	appCtx, err := s.resolveAppKnowledgeContext(ctx, appID, orgID, ownerUserID)
+	if err != nil {
+		return err
+	}
+	if !auth.CanWriteAppKnowledge(principal, appCtx.orgID, appCtx.ownerUserID) {
 		return ErrKnowledgeForbidden
 	}
-	target := path.Join("org", orgID, "app", appID, "knowledge", relative)
+	target := path.Join("org", appCtx.orgID, "app", appID, "knowledge", relative)
 	if err := s.master.Delete(target); err != nil {
 		return err
 	}
 	if s.dispatcher != nil {
-		if dispatchErr := s.dispatcher.DispatchAppChange(ctx, orgID, appID, relative, "delete_file", target); dispatchErr != nil {
-			s.recordDispatchFailure(ctx, orgID, appID, relative, "dispatch_app_delete_file", dispatchErr)
+		if dispatchErr := s.dispatcher.DispatchAppChange(ctx, appCtx.orgID, appID, relative, "delete_file", target); dispatchErr != nil {
+			s.recordDispatchFailure(ctx, appCtx.orgID, appID, relative, "dispatch_app_delete_file", dispatchErr)
 		}
 	}
 	return nil
+}
+
+type appKnowledgeContext struct {
+	orgID       string
+	ownerUserID string
+}
+
+func (s *KnowledgeService) resolveAppKnowledgeContext(ctx context.Context, appID, requestedOrgID, requestedOwnerUserID string) (appKnowledgeContext, error) {
+	if s.appStore == nil {
+		return appKnowledgeContext{}, ErrKnowledgeMissing
+	}
+	id, err := parseUUID(appID)
+	if err != nil {
+		return appKnowledgeContext{}, ErrNotFound
+	}
+	app, err := s.appStore.GetApp(ctx, id)
+	if errors.Is(err, pgx.ErrNoRows) {
+		return appKnowledgeContext{}, ErrNotFound
+	}
+	if err != nil {
+		return appKnowledgeContext{}, fmt.Errorf("查询应用归属失败: %w", err)
+	}
+	if app.DeletedAt.Valid {
+		return appKnowledgeContext{}, ErrNotFound
+	}
+	actual := appKnowledgeContext{
+		orgID:       uuidToString(app.OrgID),
+		ownerUserID: uuidToString(app.OwnerUserID),
+	}
+	// query 参数仅作为前端上下文一致性校验。权限判断与文件路径均使用数据库中的真实归属，
+	// 防止调用方用 victim app_id + 自己的 owner_user_id 组合绕过应用知识库读取边界。
+	if requestedOrgID != actual.orgID || requestedOwnerUserID != actual.ownerUserID {
+		return appKnowledgeContext{}, ErrKnowledgeForbidden
+	}
+	return actual, nil
 }
 
 // validateKnowledgeOpenRelative 在拼接可信租户前缀前校验用户传入的下载路径。
@@ -314,14 +375,18 @@ func (s *KnowledgeService) OpenAppFile(ctx context.Context, principal auth.Princ
 	if s.master == nil {
 		return nil, 0, ErrKnowledgeMissing
 	}
-	if !auth.CanReadAppKnowledge(principal, orgID, ownerUserID) {
+	appCtx, err := s.resolveAppKnowledgeContext(ctx, appID, orgID, ownerUserID)
+	if err != nil {
+		return nil, 0, err
+	}
+	if !auth.CanReadAppKnowledge(principal, appCtx.orgID, appCtx.ownerUserID) {
 		return nil, 0, ErrKnowledgeForbidden
 	}
 	cleaned, err := validateKnowledgeOpenRelative(relative)
 	if err != nil {
 		return nil, 0, err
 	}
-	target := path.Join("org", orgID, "app", appID, "knowledge", cleaned)
+	target := path.Join("org", appCtx.orgID, "app", appID, "knowledge", cleaned)
 	stream, size, err := s.master.Open(target)
 	if err != nil {
 		return nil, 0, fmt.Errorf("打开应用知识库文件失败: %w", err)
@@ -346,14 +411,18 @@ func (s *KnowledgeService) ListOrg(_ context.Context, principal auth.Principal, 
 }
 
 // ListApp 列出应用级知识库；只能由 owner 或更高权限读取。
-func (s *KnowledgeService) ListApp(_ context.Context, principal auth.Principal, orgID, appID, ownerUserID, relative string) (KnowledgeListResult, error) {
+func (s *KnowledgeService) ListApp(ctx context.Context, principal auth.Principal, orgID, appID, ownerUserID, relative string) (KnowledgeListResult, error) {
 	if s.master == nil {
 		return KnowledgeListResult{}, ErrKnowledgeMissing
 	}
-	if !auth.CanReadAppKnowledge(principal, orgID, ownerUserID) {
+	appCtx, err := s.resolveAppKnowledgeContext(ctx, appID, orgID, ownerUserID)
+	if err != nil {
+		return KnowledgeListResult{}, err
+	}
+	if !auth.CanReadAppKnowledge(principal, appCtx.orgID, appCtx.ownerUserID) {
 		return KnowledgeListResult{}, ErrKnowledgeForbidden
 	}
-	target := path.Join("org", orgID, "app", appID, "knowledge", relative)
+	target := path.Join("org", appCtx.orgID, "app", appID, "knowledge", relative)
 	entries, err := s.master.List(target)
 	if err != nil {
 		return KnowledgeListResult{}, fmt.Errorf("读取应用知识库失败: %w", err)

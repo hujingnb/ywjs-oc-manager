@@ -160,6 +160,7 @@ func runManager(ctx context.Context, cfg config.Config, logOut io.Writer) error 
 	// 不再是空有状态翻转的 noop。
 	knowledgeDispatcher.SetKnowledgeReader(knowledgeMaster)
 	knowledgeDispatcher.SetReloader(knowledgeReloader)
+	knowledgeService.SetAppStore(dbStore.Queries)
 	knowledgeService.SetSyncDispatcher(knowledgeDispatcher)
 	knowledgeService.SetSyncStatusSource(knowledgeSyncStatusSvc)
 	knowledgeService.SetRetryDispatcher(knowledgeDispatcher)
