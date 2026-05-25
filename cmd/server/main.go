@@ -141,7 +141,7 @@ func runManager(ctx context.Context, cfg config.Config, logOut io.Writer) error 
 	runtimeNodeStore := store.NewRuntimeNodeStore(dbStore)
 	runtimeNodeService := service.NewRuntimeNodeService(runtimeNodeStore, hashTokenSHA256)
 
-	safeRoot, err := files.NewSafeRoot(cfg.App.KnowledgeRoot, 0)
+	safeRoot, err := newKnowledgeSafeRoot(cfg.App.KnowledgeRoot)
 	if err != nil {
 		return fmt.Errorf("初始化知识库主副本失败: %w", err)
 	}
@@ -551,6 +551,11 @@ func hashPasswordWithDefault(password string) (string, error) {
 // hashTokenSHA256 用 SHA-256 对 agent token 做不可逆 hash 后存库。
 // runtime node 的 token 不需要密码级强度，但必须保证泄露后也无法直接调用 manager API。
 func hashTokenSHA256(token string) string { return auth.HashOpaqueToken(token) }
+
+func newKnowledgeSafeRoot(root string) (*files.SafeRoot, error) {
+	// 知识库上传上限需要与 nginx client_max_body_size 和前端本地校验保持一致。
+	return files.NewSafeRoot(root, files.KnowledgeMaxFileSize)
+}
 
 // autoMigrate 在 manager-api 启动早期把 schema 推到最新版本。
 //
