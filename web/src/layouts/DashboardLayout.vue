@@ -36,7 +36,8 @@
           v-if="auth.user"
           size="small"
           quaternary
-          style="width: 100%; justify-content: flex-start; color: #8A94C6"
+          class="logout-button"
+          style="width: 100%; justify-content: flex-start"
           @click="onLogout"
         >
           <template #icon><LogOut :size="15" /></template>
@@ -188,29 +189,39 @@ function reload() {
   align-items: center;
   gap: 12px;
   padding: 16px;
-  border-bottom: 1px solid rgba(255, 255, 255, 0.06);
+  border-bottom: 1px solid var(--color-divider);
   min-height: 64px;
 }
 
 .brand-mark {
   width: 36px;
   height: 36px;
-  border-radius: 10px;
+  border-radius: 6px;
   display: grid;
   place-items: center;
-  background: linear-gradient(135deg, #00F0FF, #7B2EDA);
-  box-shadow: 0 0 14px rgba(0, 240, 255, 0.3);
+  background: var(--color-brand);
+  box-shadow: none;
+  color: var(--color-on-brand);
   font-size: 13px;
   font-weight: 800;
   flex-shrink: 0;
 }
 
-.logo-text strong { display: block; font-size: 15px; }
-.logo-text span { display: block; font-size: 11px; color: #8A94C6; }
+.logo-text strong { display: block; font-size: 15px; color: var(--color-text-primary); }
+.logo-text span { display: block; font-size: 11px; color: var(--color-text-secondary); }
 
 .sidebar-footer {
   padding: 12px 14px 16px;
-  border-top: 1px solid rgba(255, 255, 255, 0.06);
+  border-top: 1px solid var(--color-divider);
+  background: var(--color-surface);
+}
+
+.logout-button {
+  color: var(--color-text-secondary);
+}
+
+.logout-button:hover {
+  color: var(--color-brand-text);
 }
 
 .dashboard-page-frame {

@@ -1,7 +1,7 @@
 <template>
   <n-form class="login-form" label-placement="top" @submit.prevent="onSubmit">
     <div style="margin-bottom: 24px">
-      <p class="eyebrow">Agent Runtime Manager</p>
+      <p class="eyebrow login-eyebrow">Agent Runtime Manager</p>
       <h1 style="margin: 0">登录控制台</h1>
     </div>
 
@@ -71,3 +71,9 @@ async function onSubmit() {
   }
 }
 </script>
+
+<style scoped>
+.login-eyebrow {
+  color: var(--color-brand-text);
+}
+</style>
