@@ -9,10 +9,13 @@
         </div>
       </template>
       <template #header-extra>
-        <label v-if="canManage" class="primary-button">
-          <input class="hidden-input" type="file" :disabled="!canManage" @change="onUpload" />
-          上传文件
-        </label>
+        <div v-if="canManage" class="upload-actions">
+          <span class="upload-limit">{{ KNOWLEDGE_UPLOAD_MAX_MESSAGE }}</span>
+          <label class="primary-button">
+            <input class="hidden-input" type="file" :disabled="!canManage" @change="onUpload" />
+            上传文件
+          </label>
+        </div>
       </template>
 
       <n-space align="center" style="margin-bottom: 12px">
@@ -67,6 +70,8 @@ import { computed, h, ref } from 'vue'
 import { NButton, NCard, NDataTable, NSelect, NSpace, NTag, useMessage, type DataTableColumns } from 'naive-ui'
 
 import {
+  KNOWLEDGE_UPLOAD_MAX_MESSAGE,
+  isKnowledgeUploadTooLarge,
   useDeleteOrgKnowledge,
   useOrgKnowledgeQuery,
   useOrgKnowledgeSyncStatusQuery,
@@ -151,6 +156,11 @@ async function onUpload(event: Event) {
   // 不论是否真正发起上传，都清空 input.value 以便用户重新选择同名文件。
   input.value = ''
   if (!file) return
+  // 前端先拦截超过知识库业务上限的文件，避免创建进度会话后再被网关或后端拒绝。
+  if (isKnowledgeUploadTooLarge(file)) {
+    message.warning(KNOWLEDGE_UPLOAD_MAX_MESSAGE)
+    return
+  }
   const target = relativePath.value ? `${relativePath.value}/${file.name}` : file.name
   try {
     await uploadProgress.run([{ file, label: file.name }], async (_item, f, ctx) => {
@@ -221,6 +231,19 @@ const syncColumns: DataTableColumns<OrgSyncStatusEntry> = [
 </script>
 
 <style scoped>
+.upload-actions {
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 10px;
+  flex-wrap: wrap;
+}
+
+.upload-limit {
+  color: rgba(255, 255, 255, 0.64);
+  font-size: 12px;
+}
+
 .hidden-input {
   display: none;
 }

@@ -7,10 +7,13 @@
       </div>
     </template>
     <template #header-extra>
-      <label v-if="canManage" class="secondary-button file-picker" :class="{ disabled: !knowledgeContext || uploading }">
-        上传文件
-        <input type="file" :disabled="!knowledgeContext || uploading" @change="onUploadFile" />
-      </label>
+      <div v-if="canManage" class="upload-actions">
+        <span class="upload-limit">{{ KNOWLEDGE_UPLOAD_MAX_MESSAGE }}</span>
+        <label class="secondary-button file-picker" :class="{ disabled: !knowledgeContext || uploading }">
+          上传文件
+          <input type="file" :disabled="!knowledgeContext || uploading" @change="onUploadFile" />
+        </label>
+      </div>
     </template>
 
     <p v-if="!app" class="state-text">尚未加载实例信息</p>
@@ -34,7 +37,13 @@ import { computed, h, inject, ref, type Ref } from 'vue'
 import { NButton, NCard, NDataTable, useMessage, type DataTableColumns } from 'naive-ui'
 
 import type { AppDTO } from '@/api/hooks/useApps'
-import { useAppKnowledgeQuery, useDeleteAppKnowledge, useUploadAppKnowledge } from '@/api/hooks/useKnowledge'
+import {
+  KNOWLEDGE_UPLOAD_MAX_MESSAGE,
+  isKnowledgeUploadTooLarge,
+  useAppKnowledgeQuery,
+  useDeleteAppKnowledge,
+  useUploadAppKnowledge,
+} from '@/api/hooks/useKnowledge'
 import type { KnowledgeEntry } from '@/api/hooks/useKnowledge'
 import { canManageApp } from '@/domain/permissions'
 import { useAuthStore } from '@/stores/auth'
@@ -94,6 +103,11 @@ async function onUploadFile(event: Event) {
   input.value = ''
   if (!canManage.value) return
   if (!file) return
+  // 前端先拦截超过知识库业务上限的文件，避免创建进度会话后再被网关或后端拒绝。
+  if (isKnowledgeUploadTooLarge(file)) {
+    message.warning(KNOWLEDGE_UPLOAD_MAX_MESSAGE)
+    return
+  }
   try {
     await uploadProgress.run([{ file, label: file.name }], async (_item, f, ctx) => {
       await uploadMutation.mutateAsync({
@@ -137,6 +151,19 @@ const columns: DataTableColumns<KnowledgeEntry> = [
 </script>
 
 <style scoped>
+.upload-actions {
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 10px;
+  flex-wrap: wrap;
+}
+
+.upload-limit {
+  color: rgba(255, 255, 255, 0.64);
+  font-size: 12px;
+}
+
 .file-picker {
   position: relative;
   overflow: hidden;
