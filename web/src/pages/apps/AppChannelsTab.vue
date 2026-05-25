@@ -31,8 +31,7 @@
     <div v-if="!appId" class="state-text">请选择目标实例</div>
     <template v-else>
       <p class="state-text">
-        当前状态：
-        <strong>{{ statusLabel }}</strong>
+        当前状态：<strong>{{ statusLabel }}</strong>
         <span v-if="progress?.bound_identity"> ｜ 已绑定：{{ progress.bound_identity }}</span>
       </p>
       <p v-if="progress?.error_message" class="state-text danger">最近错误：{{ progress.error_message }}</p>
@@ -41,7 +40,7 @@
         当前二维码已过期，请点击右上角"刷新二维码"重新生成。
       </p>
 
-      <AuthChallengeRenderer :challenge="visibleChallenge" @rendered="onQrRendered" />
+      <AuthChallengeRenderer v-if="visibleChallenge" :challenge="visibleChallenge" @rendered="onQrRendered" />
     </template>
   </n-card>
 </template>
@@ -57,6 +56,7 @@ import {
   useChannelProgressQuery,
   useUnbindChannel,
   channelChallengeFromProgress,
+  formatChannelStatus,
   shouldShowChallengePending,
   type ChannelChallenge,
 } from '@/api/hooks/useChannel'
@@ -90,10 +90,7 @@ function onQrRendered(qr: string) {
   renderedQrcode.value = qr
 }
 
-const statusLabel = computed(() => {
-  if (!progress.value) return '未发起'
-  return progress.value.status
-})
+const statusLabel = computed(() => formatChannelStatus(progress.value?.status))
 
 // canManage 控制发起登录和解绑按钮，真正权限仍由后端接口再次校验。
 const canManage = computed(() => canManageApp(auth.user, app?.value))
