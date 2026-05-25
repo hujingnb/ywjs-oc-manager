@@ -81,6 +81,34 @@ describe('AppChannelsTab', () => {
     unbindChannel.mockReset()
   })
 
+  // 渠道清单：实例详情页必须一次性展示全部规划渠道，并明确哪些渠道当前不可用。
+  it('列出全部渠道并置灰暂不支持渠道', () => {
+    const wrapper = mountChannelsTab()
+
+    const items = wrapper.findAll('.channel-list-item')
+    expect(items).toHaveLength(4)
+    expect(items.map(item => item.text())).toEqual([
+      expect.stringContaining('微信'),
+      expect.stringContaining('企业微信'),
+      expect.stringContaining('飞书'),
+      expect.stringContaining('钉钉'),
+    ])
+
+    const supported = wrapper.findAll('.channel-list-item.supported')
+    expect(supported).toHaveLength(1)
+    expect(supported[0].text()).toContain('已支持')
+    expect(supported[0].text()).toContain('微信')
+    expect(wrapper.find('.channel-logo.wechat').exists()).toBe(true)
+
+    const unsupported = wrapper.findAll('.channel-list-item.unsupported')
+    expect(unsupported).toHaveLength(3)
+    expect(unsupported.every(item => item.attributes('aria-disabled') === 'true')).toBe(true)
+    expect(unsupported.every(item => item.text().includes('暂不支持'))).toBe(true)
+    expect(wrapper.find('.channel-logo.work-wechat').exists()).toBe(true)
+    expect(wrapper.find('.channel-logo.feishu').exists()).toBe(true)
+    expect(wrapper.find('.channel-logo.dingtalk').exists()).toBe(true)
+  })
+
   // 已绑定状态：页面展示中文“已绑定”，不泄露后端原值 bound 或内部 challenge 空态。
   it('已绑定渠道展示中文状态且不显示 challenge 空态', () => {
     progress.value = {
@@ -90,9 +118,11 @@ describe('AppChannelsTab', () => {
     }
 
     const wrapper = mountChannelsTab()
+    const detail = wrapper.find('.channel-detail')
 
-    expect(wrapper.text()).toContain('当前状态：已绑定')
-    expect(wrapper.text()).toContain('已绑定：alice')
+    expect(detail.text()).toContain('微信')
+    expect(detail.text()).toContain('当前状态：已绑定')
+    expect(detail.text()).toContain('已绑定：alice')
     expect(wrapper.text()).not.toContain('当前状态：bound')
     expect(wrapper.text()).not.toContain('尚未发起挑战')
   })

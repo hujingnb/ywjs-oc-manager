@@ -6,42 +6,88 @@
         <h2 style="margin: 0">渠道绑定</h2>
       </div>
     </template>
-    <template #header-extra>
-      <n-space :size="8">
-        <n-button
-          type="primary"
-          :disabled="!appId || !canManage"
-          :loading="beginning"
-          @click="beginAuth"
-        >
-          {{ primaryButtonLabel }}
-        </n-button>
-        <n-button
-          v-if="showRefreshChallenge"
-          :disabled="!canManage"
-          :loading="beginning"
-          @click="beginAuth"
-        >
-          {{ beginning ? '生成中…' : '刷新二维码' }}
-        </n-button>
-        <n-button v-if="canUnbind" @click="unbind">解绑</n-button>
-      </n-space>
-    </template>
 
     <div v-if="!appId" class="state-text">请选择目标实例</div>
-    <template v-else>
-      <p class="state-text">
-        当前状态：<strong>{{ statusLabel }}</strong>
-        <span v-if="progress?.bound_identity"> ｜ 已绑定：{{ progress.bound_identity }}</span>
-      </p>
-      <p v-if="progress?.error_message" class="state-text danger">最近错误：{{ progress.error_message }}</p>
-      <p v-if="isWaitingForChallenge" class="state-text">正在生成登录二维码…</p>
-      <p v-if="challengeExpired" class="state-text danger">
-        当前二维码已过期，请点击右上角"刷新二维码"重新生成。
-      </p>
+    <div v-else class="channels-layout">
+      <aside class="channel-list" aria-label="渠道列表">
+        <button
+          v-for="channel in channels"
+          :key="channel.type"
+          type="button"
+          class="channel-list-item"
+          :class="{
+            active: channel.type === activeChannel.type,
+            supported: channel.supported,
+            unsupported: !channel.supported,
+          }"
+          :disabled="!channel.supported"
+          :aria-disabled="channel.supported ? 'false' : 'true'"
+        >
+          <span
+            class="channel-logo"
+            :class="[channel.logoClass, { muted: !channel.supported }]"
+            aria-hidden="true"
+          >
+            {{ channel.logoText }}
+          </span>
+          <span class="channel-copy">
+            <strong>{{ channel.name }}</strong>
+            <span>{{ channel.description }}</span>
+          </span>
+          <span class="channel-support-label">{{ channel.statusLabel }}</span>
+        </button>
+      </aside>
 
-      <AuthChallengeRenderer v-if="visibleChallenge" :challenge="visibleChallenge" @rendered="onQrRendered" />
-    </template>
+      <section class="channel-detail" aria-label="微信渠道详情">
+        <div class="channel-detail-head">
+          <div class="channel-title">
+            <span
+              class="channel-logo large"
+              :class="activeChannel.logoClass"
+              aria-hidden="true"
+            >
+              {{ activeChannel.logoText }}
+            </span>
+            <div>
+              <p class="channel-title-kicker">当前渠道</p>
+              <h3>{{ activeChannel.name }}</h3>
+            </div>
+          </div>
+
+          <n-space :size="8">
+            <n-button
+              type="primary"
+              :disabled="!appId || !canManage"
+              :loading="beginning"
+              @click="beginAuth"
+            >
+              {{ primaryButtonLabel }}
+            </n-button>
+            <n-button
+              v-if="showRefreshChallenge"
+              :disabled="!canManage"
+              :loading="beginning"
+              @click="beginAuth"
+            >
+              {{ beginning ? '生成中…' : '刷新二维码' }}
+            </n-button>
+            <n-button v-if="canUnbind" @click="unbind">解绑</n-button>
+          </n-space>
+        </div>
+
+        <p class="state-text">
+          当前状态：<strong>{{ statusLabel }}</strong>
+          <span v-if="progress?.bound_identity"> ｜ 已绑定：{{ progress.bound_identity }}</span>
+        </p>
+        <p v-if="progress?.error_message" class="state-text danger">最近错误：{{ progress.error_message }}</p>
+        <p v-if="isWaitingForChallenge" class="state-text">正在生成登录二维码…</p>
+        <p v-if="challengeExpired" class="state-text danger">
+          当前二维码已过期，请点击"刷新二维码"重新生成。
+        </p>
+
+        <AuthChallengeRenderer v-if="visibleChallenge" :challenge="visibleChallenge" @rendered="onQrRendered" />
+      </section>
+    </div>
   </n-card>
 </template>
 
@@ -67,11 +113,65 @@ import { useAuthStore } from '@/stores/auth'
 // appId 和 channelType 来自路由，父级注入的 app 用于判断当前用户是否可管理。
 const props = defineProps<{ appId?: string; channelType?: string }>()
 
+// ChannelDisplay 是渠道 tab 的纯前端展示模型；当前仅 wechat 接入真实绑定能力。
+// 其他渠道作为能力边界展示，不参与 API 参数或后端状态机。
+interface ChannelDisplay {
+  type: 'wechat' | 'work_wechat' | 'feishu' | 'dingtalk'
+  name: string
+  description: string
+  supported: boolean
+  statusLabel: string
+  logoText: string
+  logoClass: string
+}
+
+// channels 固定列出当前产品规划中需要展示的渠道；supported=false 的渠道只做灰色预告。
+const channels: ReadonlyArray<ChannelDisplay> = [
+  {
+    type: 'wechat',
+    name: '微信',
+    description: '扫码绑定后接收助手消息',
+    supported: true,
+    statusLabel: '已支持',
+    logoText: '微',
+    logoClass: 'wechat',
+  },
+  {
+    type: 'work_wechat',
+    name: '企业微信',
+    description: '企业内部协作场景',
+    supported: false,
+    statusLabel: '暂不支持',
+    logoText: '企',
+    logoClass: 'work-wechat',
+  },
+  {
+    type: 'feishu',
+    name: '飞书',
+    description: '团队消息与工作台场景',
+    supported: false,
+    statusLabel: '暂不支持',
+    logoText: '飞',
+    logoClass: 'feishu',
+  },
+  {
+    type: 'dingtalk',
+    name: '钉钉',
+    description: '组织通讯与审批场景',
+    supported: false,
+    statusLabel: '暂不支持',
+    logoText: '钉',
+    logoClass: 'dingtalk',
+  },
+]
+
 const auth = useAuthStore()
 const app = inject<Ref<AppDTO | null>>('app')
 const appId = toRef(props, 'appId')
 const channelType = computed(() => props.channelType ?? 'wechat')
 const channelTypeRef = computed(() => channelType.value)
+// activeChannel 当前始终落在微信；保留 computed 是为了让模板只依赖展示模型。
+const activeChannel = computed(() => channels.find(channel => channel.type === channelType.value) ?? channels[0])
 
 const { data: progress } = useChannelProgressQuery(appId, channelTypeRef)
 const beginMutation = useBeginChannelAuth(appId, channelTypeRef)
@@ -181,3 +281,169 @@ async function unbind() {
   challenge.value = null
 }
 </script>
+
+<style scoped>
+.channels-layout {
+  display: grid;
+  grid-template-columns: minmax(200px, 260px) minmax(0, 1fr);
+  gap: 18px;
+  align-items: stretch;
+}
+
+.channel-list {
+  display: grid;
+  align-content: start;
+  gap: 8px;
+  padding-right: 16px;
+  border-right: 1px solid var(--color-divider);
+}
+
+.channel-list-item {
+  display: grid;
+  grid-template-columns: 36px minmax(0, 1fr) auto;
+  gap: 10px;
+  align-items: center;
+  width: 100%;
+  min-height: 58px;
+  padding: 10px;
+  border: 1px solid var(--color-border);
+  border-radius: 8px;
+  background: var(--color-surface);
+  color: var(--color-text-primary);
+  cursor: pointer;
+  text-align: left;
+  transition: border-color 0.15s, background 0.15s, color 0.15s;
+}
+
+.channel-list-item.supported.active {
+  border-color: var(--color-success-border);
+  background: var(--color-success-soft);
+}
+
+.channel-list-item.unsupported {
+  color: var(--color-text-tertiary);
+  background: var(--color-neutral-soft);
+  cursor: not-allowed;
+}
+
+.channel-list-item:disabled {
+  opacity: 1;
+}
+
+.channel-logo {
+  display: grid;
+  width: 36px;
+  height: 36px;
+  place-items: center;
+  border-radius: 8px;
+  color: #ffffff;
+  font-size: 14px;
+  font-weight: 800;
+  line-height: 1;
+  flex-shrink: 0;
+}
+
+.channel-logo.large {
+  width: 44px;
+  height: 44px;
+  border-radius: 10px;
+  font-size: 17px;
+}
+
+.channel-logo.wechat {
+  background: #1aad19;
+}
+
+.channel-logo.work-wechat,
+.channel-logo.feishu,
+.channel-logo.dingtalk,
+.channel-logo.muted {
+  background: #c7ccd1;
+}
+
+.channel-copy {
+  display: grid;
+  gap: 3px;
+  min-width: 0;
+}
+
+.channel-copy strong {
+  font-size: 14px;
+}
+
+.channel-copy span {
+  overflow: hidden;
+  color: var(--color-text-secondary);
+  font-size: 12px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.channel-list-item.unsupported .channel-copy span {
+  color: var(--color-text-tertiary);
+}
+
+.channel-support-label {
+  min-width: 58px;
+  color: var(--color-text-secondary);
+  font-size: 12px;
+  text-align: right;
+  white-space: nowrap;
+}
+
+.channel-list-item.supported .channel-support-label {
+  color: var(--color-success-text);
+  font-weight: 700;
+}
+
+.channel-detail {
+  min-width: 0;
+}
+
+.channel-detail-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  margin-bottom: 14px;
+}
+
+.channel-title {
+  display: flex;
+  align-items: center;
+  min-width: 0;
+  gap: 12px;
+}
+
+.channel-title h3,
+.channel-title-kicker {
+  margin: 0;
+}
+
+.channel-title h3 {
+  font-size: 16px;
+}
+
+.channel-title-kicker {
+  color: var(--color-text-secondary);
+  font-size: 12px;
+}
+
+@media (max-width: 760px) {
+  .channels-layout {
+    grid-template-columns: minmax(0, 1fr);
+  }
+
+  .channel-list {
+    padding-right: 0;
+    padding-bottom: 14px;
+    border-right: 0;
+    border-bottom: 1px solid var(--color-divider);
+  }
+
+  .channel-detail-head {
+    align-items: flex-start;
+    flex-direction: column;
+  }
+}
+</style>
