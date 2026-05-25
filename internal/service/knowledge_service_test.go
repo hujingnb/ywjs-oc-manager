@@ -120,6 +120,30 @@ func TestKnowledgeServiceOpenRejectsEncodedTraversal(t *testing.T) {
 	assert.Equal(t, int64(0), size)
 }
 
+// TestKnowledgeServiceOpenOrgRejectsDoubleEncodedTraversal 验证双重编码的 .. 不会在 SafeRoot 二次解码后越过组织 knowledge 子树。
+func TestKnowledgeServiceOpenOrgRejectsDoubleEncodedTraversal(t *testing.T) {
+	svc := newKnowledgeService(t)
+	require.NoError(t, svc.master.Save(path.Join("org", testKnowledgeOrg, "secret.md"), strings.NewReader("secret"), 6))
+
+	stream, size, err := svc.OpenOrgFile(context.Background(), orgKnowledgeAdmin(), testKnowledgeOrg, "%252e%252e/secret.md")
+
+	require.ErrorIs(t, err, files.ErrInvalidPath)
+	require.Nil(t, stream)
+	assert.Equal(t, int64(0), size)
+}
+
+// TestKnowledgeServiceOpenAppRejectsDoubleEncodedTraversal 验证双重编码的 .. 不会在 SafeRoot 二次解码后越过实例 knowledge 子树。
+func TestKnowledgeServiceOpenAppRejectsDoubleEncodedTraversal(t *testing.T) {
+	svc := newKnowledgeService(t)
+	require.NoError(t, svc.master.Save(path.Join("org", testKnowledgeOrg, "app", testKnowledgeApp, "secret.md"), strings.NewReader("secret"), 6))
+
+	stream, size, err := svc.OpenAppFile(context.Background(), platformAdmin(), testKnowledgeOrg, testKnowledgeApp, testKnowledgeOwner, "%252e%252e/secret.md")
+
+	require.ErrorIs(t, err, files.ErrInvalidPath)
+	require.Nil(t, stream)
+	assert.Equal(t, int64(0), size)
+}
+
 // TestKnowledgeServiceOpenRejectsAbsolutePath 验证下载路径拒绝绝对路径，避免用户输入绕过知识库相对路径契约。
 func TestKnowledgeServiceOpenRejectsAbsolutePath(t *testing.T) {
 	svc := newKnowledgeService(t)

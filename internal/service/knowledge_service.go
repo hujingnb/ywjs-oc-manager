@@ -258,9 +258,16 @@ func validateKnowledgeOpenRelative(relative string) (string, error) {
 	if path.IsAbs(relative) {
 		return "", fmt.Errorf("%w: 不允许绝对路径", files.ErrInvalidPath)
 	}
-	decoded, err := url.PathUnescape(relative)
-	if err != nil {
-		return "", fmt.Errorf("%w: %s", files.ErrInvalidPath, err.Error())
+	decoded := relative
+	for {
+		next, err := url.PathUnescape(decoded)
+		if err != nil {
+			return "", fmt.Errorf("%w: %s", files.ErrInvalidPath, err.Error())
+		}
+		if next == decoded {
+			break
+		}
+		decoded = next
 	}
 	if strings.ContainsRune(decoded, 0) {
 		return "", fmt.Errorf("%w: 路径包含 NUL", files.ErrInvalidPath)
