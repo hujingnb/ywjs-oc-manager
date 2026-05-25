@@ -89,11 +89,11 @@ function formatBytes(value: number) {
   return `${(value / 1024 / 1024).toFixed(1)} MB`
 }
 
-// entryRelativePath 去掉当前目录前缀，确保删除接口收到应用知识库内的相对路径。
+// entryRelativePath 去掉主副本租户前缀，确保删除和下载接口收到应用知识库内的相对路径。
 function entryRelativePath(entryPath: string) {
-  const root = listing.data.value?.path
-  if (!root) return entryPath
-  const prefix = `${root}/`
+  const context = knowledgeContext.value
+  if (!context) return entryPath
+  const prefix = `org/${context.orgId}/app/${props.appId}/knowledge/`
   return entryPath.startsWith(prefix) ? entryPath.slice(prefix.length) : entryPath
 }
 
@@ -142,7 +142,7 @@ async function onDownload(entry: KnowledgeEntry) {
   if (!context || entry.is_dir || downloading.value) return
   downloading.value = true
   try {
-    await downloadAppKnowledgeFile(props.appId, context.orgId, context.ownerUserId, entry.path, entry.name)
+    await downloadAppKnowledgeFile(props.appId, context.orgId, context.ownerUserId, entryRelativePath(entry.path), entry.name)
   } catch (err) {
     message.error(err instanceof Error ? err.message : '下载失败')
   } finally {

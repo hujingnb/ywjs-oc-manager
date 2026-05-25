@@ -151,6 +151,13 @@ function goUp() {
   relativePath.value = segments.join('/')
 }
 
+// entryRelativePath 去掉主副本租户前缀，确保删除和下载接口收到组织知识库内的相对路径。
+function entryRelativePath(entryPath: string) {
+  if (!effectiveOrgId.value) return entryPath
+  const prefix = `org/${effectiveOrgId.value}/knowledge/`
+  return entryPath.startsWith(prefix) ? entryPath.slice(prefix.length) : entryPath
+}
+
 // onUpload 将文件保存到当前目录；上传进度统一由全局 UploadProgressModal 展示。
 // 互斥规则：会话进行中 store.run 抛错，业务侧用 n-message 提示用户。
 async function onUpload(event: Event) {
@@ -183,7 +190,7 @@ async function onUpload(event: Event) {
 // onDelete 使用浏览器确认框拦截误删，删除后由 mutation hook 负责刷新列表缓存。
 async function onDelete(entry: KnowledgeEntry) {
   if (!confirm(`确认删除 ${entry.name} ？`)) return
-  await deleteMutation.mutateAsync(entry.path)
+  await deleteMutation.mutateAsync(entryRelativePath(entry.path))
 }
 
 // onDownload 下载组织知识库中的单个文件；目录行不调用此函数。
@@ -191,7 +198,7 @@ async function onDownload(entry: KnowledgeEntry) {
   if (!effectiveOrgId.value) return
   downloading.value = true
   try {
-    await downloadOrgKnowledgeFile(effectiveOrgId.value, entry.path, entry.name)
+    await downloadOrgKnowledgeFile(effectiveOrgId.value, entryRelativePath(entry.path), entry.name)
   } catch (err) {
     message.error(err instanceof Error ? err.message : '下载失败')
   } finally {

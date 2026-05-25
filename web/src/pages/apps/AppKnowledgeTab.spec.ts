@@ -62,7 +62,10 @@ vi.mock('@/api/hooks/useKnowledge', async () => {
   return {
     ...actual,
     useAppKnowledgeQuery: () => ({
-      data: ref({ path: '', entries: [{ path: 'docs/readme.md', name: 'readme.md', size: 5, is_dir: false }] }),
+      data: ref({
+        path: 'org/org-1/app/app-1/knowledge',
+        entries: [{ path: 'org/org-1/app/app-1/knowledge/docs/readme.md', name: 'readme.md', size: 5, is_dir: false }],
+      }),
       isLoading: ref(false),
       error: ref(null),
     }),
@@ -130,7 +133,7 @@ describe('AppKnowledgeTab', () => {
     expect(mocks.mutateAsync).not.toHaveBeenCalled()
   })
 
-  // 覆盖实例知识库只读场景：可读用户可以下载文件，但不可看到删除入口。
+  // 覆盖实例知识库只读场景：可读用户可以下载文件，且真实列表前缀会转换为业务相对路径。
   it('只读用户可下载实例知识库文件但不可删除', async () => {
     mocks.canManage.mockReturnValue(false)
     const wrapper = mountTab()

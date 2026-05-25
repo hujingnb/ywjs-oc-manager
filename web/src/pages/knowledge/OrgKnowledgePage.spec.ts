@@ -71,7 +71,10 @@ vi.mock('@/api/hooks/useKnowledge', async () => {
   return {
     ...actual,
     useOrgKnowledgeQuery: () => ({
-      data: ref({ path: '', entries: [{ path: 'docs/readme.md', name: 'readme.md', size: 5, is_dir: false }] }),
+      data: ref({
+        path: 'org/org-1/knowledge',
+        entries: [{ path: 'org/org-1/knowledge/docs/readme.md', name: 'readme.md', size: 5, is_dir: false }],
+      }),
       isLoading: ref(false),
       error: ref(null),
     }),
@@ -138,7 +141,7 @@ describe('OrgKnowledgePage', () => {
     expect(mocks.mutateAsync).not.toHaveBeenCalled()
   })
 
-  // 覆盖组织成员只读场景：可下载组织知识库文件，但不可看到删除入口。
+  // 覆盖组织成员只读场景：可下载组织知识库文件，且真实列表前缀会转换为业务相对路径。
   it('组织成员可下载组织知识库文件但不可删除', async () => {
     mocks.canManage.mockReturnValue(false)
     const wrapper = mountPage()
