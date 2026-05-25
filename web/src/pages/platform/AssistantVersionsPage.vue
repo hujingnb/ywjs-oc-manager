@@ -166,7 +166,7 @@
 <script setup lang="ts">
 import { computed, h, reactive, ref } from 'vue'
 import { Plus, X } from 'lucide-vue-next'
-import { NButton, NCard, NForm, NFormItem, NGrid, NGridItem, NInput, NSelect, NSpace } from 'naive-ui'
+import { NButton, NCard, NForm, NFormItem, NGrid, NGridItem, NInput, NSelect, NSpace, useMessage } from 'naive-ui'
 
 import DataTableList from '@/components/DataTableList.vue'
 import ConfirmActionModal from '@/components/ConfirmActionModal.vue'
@@ -186,12 +186,15 @@ import {
   type AssistantVersionFormPayload,
   type AssistantVersionSkillDTO,
 } from '@/api/hooks/useAssistantVersions'
+import { useUploadProgressStore } from '@/stores/uploadProgress'
 
 // AssistantVersionsPage 是平台管理员的助手版本目录管理页：列表 + 新建/编辑 + 删除。
 const { data: versions, isLoading, error } = useAssistantVersionsQuery()
 const createMutation = useCreateAssistantVersion()
 const updateMutation = useUpdateAssistantVersion()
 const deleteMutation = useDeleteAssistantVersion()
+const uploadProgress = useUploadProgressStore()
+const message = useMessage()
 
 // skill 管理状态：editingSkills 是当前编辑版本的 skill 列表，随上传/删除即时刷新。
 const uploadSkillMutation = useUploadAssistantVersionSkill()
@@ -217,7 +220,8 @@ function triggerSkillUpload() {
   skillFileInput.value?.click()
 }
 
-// onSkillFileChange 处理 skill tar 选择：编辑态立即上传到当前版本；
+// onSkillFileChange 处理 skill tar 选择：编辑态版本已存在，立即上传；
+// 上传进度统一由全局 UploadProgressModal 展示，按钮 loading 退化为短暂闪烁。
 // 新建态版本尚未创建，先把文件暂存进 pendingSkillFiles，待保存表单时一并上传。
 async function onSkillFileChange(event: Event) {
   const input = event.target as HTMLInputElement
@@ -228,16 +232,30 @@ async function onSkillFileChange(event: Event) {
   skillFeedbackError.value = false
   // 编辑态：版本已存在，沿用即时上传。
   if (editingId.value) {
-    skillUploading.value = true
     try {
-      const updated = await uploadSkillMutation.mutateAsync({ id: editingId.value, file })
-      editingSkills.value = updated.skills
-      skillFeedback.value = `已上传 skill ${file.name}`
+      const result = await uploadProgress.run(
+        [{ file, label: file.name }],
+        async (_item, f, ctx) => {
+          return uploadSkillMutation.mutateAsync({
+            id: editingId.value!,
+            file: f,
+            onProgress: ctx.onProgress,
+            signal: ctx.signal,
+          })
+        },
+      )
+      // run 不抛错；成功路径取最新 skill 列表回写本地状态。
+      const updated = result.results[0]
+      if (updated) {
+        editingSkills.value = updated.skills
+        skillFeedback.value = `已上传 skill ${file.name}`
+      } else if (result.failed.length > 0) {
+        skillFeedbackError.value = true
+        skillFeedback.value = result.failed[0].error ?? '上传失败'
+      }
     } catch (err) {
-      skillFeedbackError.value = true
-      skillFeedback.value = err instanceof Error ? err.message : '上传失败'
-    } finally {
-      skillUploading.value = false
+      // 唯一会被抛的错误是会话互斥：用 message 提示，不破坏本地状态。
+      message.warning(err instanceof Error ? err.message : '已有上传任务正在进行')
     }
     return
   }
@@ -363,22 +381,35 @@ function buildPayload(): AssistantVersionFormPayload {
   }
 }
 
-// uploadPendingSkills 把新建态暂存的 skill tar 逐个上传到指定版本，
-// 返回服务端最新 skill 列表与上传失败的文件名集合；单个文件失败不影响其余文件。
+// uploadPendingSkills 把新建态暂存的 skill tar 通过全局 uploadProgress.run 一次性提交。
+// 串行执行 + N/M 计数由 store 管理；单文件失败不阻塞后续，run 返回汇总后供调用方判断。
 async function uploadPendingSkills(
   versionId: string,
 ): Promise<{ skills: AssistantVersionSkillDTO[]; failed: string[] }> {
-  let skills: AssistantVersionSkillDTO[] = []
-  const failed: string[] = []
-  for (const file of pendingSkillFiles.value) {
-    try {
-      const updated = await uploadSkillMutation.mutateAsync({ id: versionId, file })
-      skills = updated.skills
-    } catch {
-      failed.push(file.name)
-    }
+  if (pendingSkillFiles.value.length === 0) {
+    return { skills: [], failed: [] }
   }
-  return { skills, failed }
+  const items = pendingSkillFiles.value.map(f => ({ file: f, label: f.name }))
+  try {
+    const result = await uploadProgress.run(items, async (_item, f, ctx) => {
+      return uploadSkillMutation.mutateAsync({
+        id: versionId,
+        file: f,
+        onProgress: ctx.onProgress,
+        signal: ctx.signal,
+      })
+    })
+    // 取最后一次成功的 skill 列表作为最终视图；后端每次返回的都是完整列表，最后一次为准。
+    const lastVersion = result.results[result.results.length - 1]
+    const skills = lastVersion?.skills ?? []
+    // failed + cancelled 都视为「未成功」，返回给调用方提示用户。
+    const failed = [...result.failed, ...result.cancelled].map(it => it.label)
+    return { skills, failed }
+  } catch (err) {
+    // 会话互斥：返回全部待传文件为 failed，让 submit 流程把表单切到编辑态并提示。
+    message.warning(err instanceof Error ? err.message : '已有上传任务正在进行')
+    return { skills: [], failed: pendingSkillFiles.value.map(f => f.name) }
+  }
 }
 
 // submit 根据 editingId 决定走创建还是更新；新建态在版本落库后再上传暂存的 skill。

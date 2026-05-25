@@ -10,6 +10,7 @@ const createVersion = vi.hoisted(() => vi.fn())
 const updateVersion = vi.hoisted(() => vi.fn())
 const deleteVersion = vi.hoisted(() => vi.fn())
 const uploadSkill = vi.hoisted(() => vi.fn())
+const uploadProgressRun = vi.hoisted(() => vi.fn())
 
 // 一个用于列表与编辑回填的样例版本。
 const sampleVersion: AssistantVersionDTO = {
@@ -44,6 +45,24 @@ vi.mock('@/api/hooks/useOrganizations', () => ({
     data: ref([{ id: 'qwen', name: 'qwen' }]), isLoading: ref(false), isError: ref(false),
   }),
 }))
+
+// uploadProgress store mock：默认行为是直接调用 runner 完成单文件 / 批量上传，
+// 让既有用例不感知到 Modal 的存在；用例需要时可改 mockRejectedValueOnce 注入互斥错。
+vi.mock('@/stores/uploadProgress', () => ({
+  useUploadProgressStore: () => ({
+    run: uploadProgressRun,
+    cancel: vi.fn(),
+    reset: vi.fn(),
+    isUploading: false,
+    session: null,
+  }),
+}))
+
+// useMessage 的 stub：测试里不需要弹窗，只验证上传流程是否按预期调用。
+vi.mock('naive-ui', async () => {
+  const actual = await vi.importActual<typeof import('naive-ui')>('naive-ui')
+  return { ...actual, useMessage: () => ({ warning: vi.fn(), success: vi.fn(), error: vi.fn() }) }
+})
 
 // stub 出最小可交互的 naive-ui 组件集合，与 OrganizationsPage.spec.ts 保持一致风格。
 function mountPage() {
@@ -147,6 +166,26 @@ describe('AssistantVersionsPage', () => {
   // 各用例间清理 mock 调用历史，避免 toHaveBeenCalled 跨用例累积导致误判。
   beforeEach(() => {
     vi.clearAllMocks()
+    // 默认 run 行为：顺序调用 runner，返回 { succeeded, failed:[], cancelled:[], results }。
+    uploadProgressRun.mockImplementation(async (
+      items: Array<{ file: File; label?: string }>,
+      runner: (
+        item: { id: string; label?: string; size: number; status: string },
+        file: File,
+        ctx: { onProgress: () => void; signal: AbortSignal },
+      ) => Promise<unknown>,
+    ) => {
+      const results: unknown[] = []
+      for (const it of items) {
+        // ctx.onProgress 在测试里不需要真正触发；signal 用 AbortController.signal 占位。
+        const ctrl = new AbortController()
+        results.push(await runner({ id: 'x', label: it.label, size: it.file.size, status: 'uploading' }, it.file, {
+          onProgress: () => {},
+          signal: ctrl.signal,
+        }))
+      }
+      return { succeeded: items, failed: [], cancelled: [], results }
+    })
   })
 
   // 列表展示已有版本的名称与修订号。
@@ -257,8 +296,12 @@ describe('AssistantVersionsPage', () => {
     await wrapper.find('form').trigger('submit')
     await flushPromises()
 
-    // 先创建版本，再用新版本 ID 上传暂存的 skill。
+    // 先创建版本，再把暂存文件交给 uploadProgress.run 串行上传。
     expect(createVersion).toHaveBeenCalledTimes(1)
+    expect(uploadProgressRun).toHaveBeenCalledTimes(1)
+    const runItems = uploadProgressRun.mock.calls[0][0] as Array<{ file: File; label: string }>
+    expect(runItems).toHaveLength(1)
+    expect(runItems[0]).toMatchObject({ file, label: 'weather.tar' })
     expect(uploadSkill).toHaveBeenCalledTimes(1)
     const uploadArg = uploadSkill.mock.calls[0][0]
     expect(uploadArg.id).toBe('ver-new')
@@ -297,6 +340,7 @@ describe('AssistantVersionsPage', () => {
     await flushPromises()
 
     expect(createVersion).toHaveBeenCalledTimes(1)
+    expect(uploadProgressRun).not.toHaveBeenCalled()
     expect(uploadSkill).not.toHaveBeenCalled()
   })
 })

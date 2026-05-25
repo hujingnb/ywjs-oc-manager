@@ -64,7 +64,7 @@
 
 <script setup lang="ts">
 import { computed, h, ref } from 'vue'
-import { NButton, NCard, NDataTable, NSelect, NSpace, NTag, type DataTableColumns } from 'naive-ui'
+import { NButton, NCard, NDataTable, NSelect, NSpace, NTag, useMessage, type DataTableColumns } from 'naive-ui'
 
 import {
   useDeleteOrgKnowledge,
@@ -78,10 +78,13 @@ import {
 import { usePlatformOrgSelection } from '@/composables/usePlatformOrgSelection'
 import { canManageOrgKnowledge } from '@/domain/permissions'
 import { useAuthStore } from '@/stores/auth'
+import { useUploadProgressStore } from '@/stores/uploadProgress'
 
 // OrgKnowledgePage 管理组织级共享知识库，并展示各 runtime node 的同步状态。
 const props = defineProps<{ orgId?: string }>()
 const auth = useAuthStore()
+const uploadProgress = useUploadProgressStore()
+const message = useMessage()
 // 平台管理员通过组织选择器查看组织知识库，组织用户默认使用自身组织。
 const {
   isPlatformAdmin,
@@ -140,14 +143,28 @@ function goUp() {
   relativePath.value = segments.join('/')
 }
 
-// onUpload 将文件保存到当前目录；成功后清空 input，允许重复上传同名文件。
+// onUpload 将文件保存到当前目录；上传进度统一由全局 UploadProgressModal 展示。
+// 互斥规则：会话进行中 store.run 抛错，业务侧用 n-message 提示用户。
 async function onUpload(event: Event) {
   const input = event.target as HTMLInputElement
   const file = input.files?.[0]
+  // 不论是否真正发起上传，都清空 input.value 以便用户重新选择同名文件。
+  input.value = ''
   if (!file) return
   const target = relativePath.value ? `${relativePath.value}/${file.name}` : file.name
-  await uploadMutation.mutateAsync({ path: target, file })
-  input.value = ''
+  try {
+    await uploadProgress.run([{ file, label: file.name }], async (_item, f, ctx) => {
+      await uploadMutation.mutateAsync({
+        path: target,
+        file: f,
+        onProgress: ctx.onProgress,
+        signal: ctx.signal,
+      })
+    })
+  } catch (err) {
+    // 唯一会被抛出的错误是「会话互斥」：仅此一种情况下提示用户。
+    message.warning(err instanceof Error ? err.message : '已有上传任务正在进行')
+  }
 }
 
 // onDelete 使用浏览器确认框拦截误删，删除后由 mutation hook 负责刷新列表缓存。

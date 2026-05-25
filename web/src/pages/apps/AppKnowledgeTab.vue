@@ -31,13 +31,14 @@
 
 <script setup lang="ts">
 import { computed, h, inject, ref, type Ref } from 'vue'
-import { NButton, NCard, NDataTable, type DataTableColumns } from 'naive-ui'
+import { NButton, NCard, NDataTable, useMessage, type DataTableColumns } from 'naive-ui'
 
 import type { AppDTO } from '@/api/hooks/useApps'
 import { useAppKnowledgeQuery, useDeleteAppKnowledge, useUploadAppKnowledge } from '@/api/hooks/useKnowledge'
 import type { KnowledgeEntry } from '@/api/hooks/useKnowledge'
 import { canManageApp } from '@/domain/permissions'
 import { useAuthStore } from '@/stores/auth'
+import { useUploadProgressStore } from '@/stores/uploadProgress'
 
 // AppKnowledgeTab 管理单个应用的知识库文件，权限和路径上下文来自应用详情注入。
 const props = defineProps<{ appId: string }>()
@@ -61,6 +62,8 @@ const listing = useAppKnowledgeQuery(appIdRef, knowledgeContext)
 const uploadMutation = useUploadAppKnowledge(appIdRef, knowledgeContext)
 const deleteMutation = useDeleteAppKnowledge(appIdRef, knowledgeContext)
 const errorMessage = ref<string>('')
+const uploadProgress = useUploadProgressStore()
+const message = useMessage()
 
 // canManage 控制上传和删除入口，后端仍会基于应用归属做最终权限校验。
 const canManage = computed(() => canManageApp(auth.user, app?.value))
@@ -82,18 +85,26 @@ function entryRelativePath(entryPath: string) {
   return entryPath.startsWith(prefix) ? entryPath.slice(prefix.length) : entryPath
 }
 
-// onUploadFile 处理原生 file input 事件；成功后清空 input 以便再次选择同名文件。
+// onUploadFile 处理原生 file input 事件；上传进度统一由全局 UploadProgressModal 展示。
+// 失败 / 取消的视觉反馈也来自 Modal 汇总区，本页只承担互斥提示。
 async function onUploadFile(event: Event) {
   errorMessage.value = ''
-  if (!canManage.value) return
   const input = event.target as HTMLInputElement
   const file = input.files?.[0]
+  input.value = ''
+  if (!canManage.value) return
   if (!file) return
   try {
-    await uploadMutation.mutateAsync({ path: file.name, file })
-    input.value = ''
+    await uploadProgress.run([{ file, label: file.name }], async (_item, f, ctx) => {
+      await uploadMutation.mutateAsync({
+        path: f.name,
+        file: f,
+        onProgress: ctx.onProgress,
+        signal: ctx.signal,
+      })
+    })
   } catch (err) {
-    errorMessage.value = err instanceof Error ? err.message : '上传失败'
+    message.warning(err instanceof Error ? err.message : '已有上传任务正在进行')
   }
 }
 
