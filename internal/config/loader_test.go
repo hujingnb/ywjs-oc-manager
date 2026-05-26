@@ -3,11 +3,13 @@ package config
 
 import (
 	"encoding/base64"
-	"github.com/stretchr/testify/require"
 	"os"
 	"path/filepath"
 	"strings"
 	"testing"
+
+	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
 )
 
 // validBase64MasterKey 提供测试用的 32 字节 base64 master_key。
@@ -198,10 +200,70 @@ func TestLoad_AcceptsValidConfig(t *testing.T) {
 	require.NotEmpty(t, cfg.Hermes.SystemPromptTemplate)
 }
 
+// TestLoad_AllowsMissingRAGFlowConfig 验证本地未启用 RAGFlow 时 manager 仍可启动，知识库请求由 service 层返回未配置。
+func TestLoad_AllowsMissingRAGFlowConfig(t *testing.T) {
+	cfg := loadConfigFromString(t, fullValidYAML())
+	assert.Empty(t, cfg.RAGFlow.BaseURL)
+	assert.Empty(t, cfg.RAGFlow.APIKey)
+}
+
+// TestLoad_RejectsInvalidRAGFlowBaseURL 验证 RAGFlow 地址配置错误时启动阶段直接失败。
+func TestLoad_RejectsInvalidRAGFlowBaseURL(t *testing.T) {
+	yaml := fullValidYAML() + "\nragflow:\n  base_url: \"://bad\"\n  api_key: \"secret\"\n"
+	_, err := loadConfigFromStringErr(t, yaml)
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "ragflow.base_url")
+}
+
+// TestLoad_RejectsIncompleteRAGFlowConfig 验证 RAGFlow 地址和 API key 必须成对配置。
+func TestLoad_RejectsIncompleteRAGFlowConfig(t *testing.T) {
+	for name, yaml := range map[string]string{
+		// 只配置 base_url 会让运行期鉴权失败，启动阶段应直接拒绝。
+		"missing_api_key": fullValidYAML() + "\nragflow:\n  base_url: \"http://ragflow:9380\"\n",
+		// 只配置 api_key 无法确定上游地址，启动阶段应直接拒绝。
+		"missing_base_url": fullValidYAML() + "\nragflow:\n  api_key: \"secret\"\n",
+	} {
+		t.Run(name, func(t *testing.T) {
+			_, err := loadConfigFromStringErr(t, yaml)
+			require.Error(t, err)
+			assert.Contains(t, err.Error(), "ragflow.")
+		})
+	}
+}
+
+// TestLoad_DefaultsHermesRuntimeBaseURL 验证 Hermes 容器访问 manager 的内部地址有稳定默认值。
+func TestLoad_DefaultsHermesRuntimeBaseURL(t *testing.T) {
+	cfg := loadConfigFromString(t, fullValidYAML())
+	assert.Equal(t, "http://manager-api:8080", cfg.Hermes.ManagerRuntimeBaseURL)
+}
+
+// TestLoad_DefaultsRAGFlowOptions 验证 RAGFlow 启用后未显式配置的请求选项会使用保守默认值。
+func TestLoad_DefaultsRAGFlowOptions(t *testing.T) {
+	cfg := loadConfigFromString(t, fullValidYAML()+`
+ragflow:
+  base_url: "http://ragflow:9380"
+  api_key: "secret"
+`)
+	assert.Equal(t, "30s", cfg.RAGFlow.RequestTimeout.Duration.String())
+	assert.Equal(t, "naive", cfg.RAGFlow.ChunkMethod)
+}
+
 func writeTempConfig(t *testing.T, content string) string {
 	t.Helper()
 	path := filepath.Join(t.TempDir(), "config.yaml")
 	err := os.WriteFile(path, []byte(content), 0o600)
 	require.NoError(t, err)
 	return path
+}
+
+func loadConfigFromString(t *testing.T, content string) Config {
+	t.Helper()
+	cfg, err := loadConfigFromStringErr(t, content)
+	require.NoError(t, err)
+	return cfg
+}
+
+func loadConfigFromStringErr(t *testing.T, content string) (Config, error) {
+	t.Helper()
+	return LoadFile(writeTempConfig(t, content))
 }

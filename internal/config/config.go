@@ -22,6 +22,8 @@ type Config struct {
 	Security SecurityConfig `yaml:"security"`
 	// Hermes 描述 Hermes runtime 镜像、LLM 和工作目录归档策略。
 	Hermes HermesConfig `yaml:"hermes"`
+	// RAGFlow 描述 manager 后端访问 RAGFlow HTTP API 所需配置。
+	RAGFlow RAGFlowConfig `yaml:"ragflow"`
 	// Agent 描述 manager 与 runtime agent 之间的心跳协议参数。
 	Agent AgentConfig `yaml:"agent"`
 	// Runtime 描述节点自动注册密钥和主动探测阈值。
@@ -110,6 +112,22 @@ type HermesConfig struct {
 	// "new-api" hostname → chat completions Connection error。
 	// 留空时 docker 默认 bridge network，与 compose 起的 new-api 不互通。
 	ContainerNetworks []string `yaml:"container_networks"`
+	// ManagerRuntimeBaseURL 是 Hermes 容器内访问 manager runtime API 的地址。
+	// 默认使用 compose service name，避免把浏览器 public_base_url 写进容器内部。
+	ManagerRuntimeBaseURL string `yaml:"manager_runtime_base_url"`
+}
+
+// RAGFlowConfig 描述 RAGFlow HTTP API 连接信息。
+// 为空表示未启用 RAGFlow-backed 知识库，业务请求应返回明确的未配置错误。
+type RAGFlowConfig struct {
+	// BaseURL 是 RAGFlow 服务地址，例如 http://ragflow:9380。
+	BaseURL string `yaml:"base_url"`
+	// APIKey 是 manager 后端调用 RAGFlow HTTP API 使用的 Bearer token。
+	APIKey string `yaml:"api_key"`
+	// RequestTimeout 是单次 RAGFlow HTTP 请求超时，缺省 30 秒。
+	RequestTimeout Duration `yaml:"request_timeout"`
+	// ChunkMethod 是自动创建 dataset 时使用的默认分块方法，缺省 naive。
+	ChunkMethod string `yaml:"chunk_method"`
 }
 
 // RuntimeImageConfig 是单个可选 Hermes 镜像条目。

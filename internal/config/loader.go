@@ -5,8 +5,10 @@ import (
 	"bytes"
 	"encoding/base64"
 	"fmt"
+	"net/url"
 	"os"
 	"strings"
+	"time"
 
 	"gopkg.in/yaml.v3"
 )
@@ -46,6 +48,15 @@ func (c *Config) applyDefaults() {
 	}
 	if c.Runtime.Probe.RecoveryThreshold == 0 {
 		c.Runtime.Probe.RecoveryThreshold = 2
+	}
+	if strings.TrimSpace(c.Hermes.ManagerRuntimeBaseURL) == "" {
+		c.Hermes.ManagerRuntimeBaseURL = "http://manager-api:8080"
+	}
+	if c.RAGFlow.RequestTimeout.Duration == 0 {
+		c.RAGFlow.RequestTimeout.Duration = 30 * time.Second
+	}
+	if strings.TrimSpace(c.RAGFlow.ChunkMethod) == "" {
+		c.RAGFlow.ChunkMethod = "naive"
 	}
 }
 
@@ -107,6 +118,9 @@ func (c Config) Validate() error {
 	if err := c.Runtime.Probe.validate(); err != nil {
 		return err
 	}
+	if err := c.RAGFlow.validate(); err != nil {
+		return err
+	}
 	// Hermes 时代模板不再需要 {{workspace_dir}} 等 legacy OpenClaw 专属占位符，
 	// 仅需非空即可（上方 missing 检查已覆盖）。
 	return nil
@@ -141,6 +155,30 @@ func validateEnrollmentSecret(value string) error {
 func (p RuntimeProbeConfig) validate() error {
 	if p.IntervalSeconds <= 0 || p.TimeoutSeconds <= 0 || p.FailureThreshold <= 0 || p.RecoveryThreshold <= 0 {
 		return fmt.Errorf("runtime.probe.* 必须为正整数")
+	}
+	return nil
+}
+
+// validate 校验 RAGFlow 外部依赖配置。
+// RAGFlow 在本地开发可不启用；一旦配置任意连接字段，就必须同时提供地址和 API key。
+func (r RAGFlowConfig) validate() error {
+	baseURL := strings.TrimSpace(r.BaseURL)
+	apiKey := strings.TrimSpace(r.APIKey)
+	if baseURL == "" && apiKey == "" {
+		return nil
+	}
+	if baseURL == "" {
+		return fmt.Errorf("缺少必需配置: ragflow.base_url")
+	}
+	if apiKey == "" {
+		return fmt.Errorf("缺少必需配置: ragflow.api_key")
+	}
+	parsed, err := url.ParseRequestURI(baseURL)
+	if err != nil || parsed.Scheme == "" || parsed.Host == "" {
+		return fmt.Errorf("ragflow.base_url 必须是合法 URL")
+	}
+	if r.RequestTimeout.Duration <= 0 {
+		return fmt.Errorf("ragflow.request_timeout 必须为正持续时间")
 	}
 	return nil
 }
