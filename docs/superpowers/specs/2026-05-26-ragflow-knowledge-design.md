@@ -18,7 +18,7 @@
 
 - RAGFlow 成为知识库文件、解析状态、chunk 与检索索引的唯一主库。
 - manager 继续负责 oc-manager 权限、审计、组织 / 实例边界、管理 UI 和文件生命周期。
-- Hermes 能读取“当前实例知识库 + 所属组织知识库”。
+- Hermes 能通过 manager 提供的知识库 skill 读取“当前实例知识库 + 所属组织知识库”。
 - Hermes 能把工作目录中的产物写入当前实例知识库，例如用户要求“把这份报告加入知识库”。
 - Hermes 对组织知识库只有只读检索权限。
 - 组织知识库和实例知识库保留上传、下载、删除、重新解析能力。
@@ -31,82 +31,77 @@
 - 第一版不做文件预览，只保留下载。
 - 第一版不做自动解析重试；解析失败后由用户在列表中手动点击重新解析。
 - 不把 RAGFlow API key 暴露给前端浏览器。
+- 第一版不引入 MCP 作为 Hermes 知识库接入层；RAGFlow MCP 只作为后续可选 POC。
 
 ## 推荐方案
 
-采用“RAGFlow 主库 + manager 管理面 + Hermes MCP 检索 + manager 实例写入 API”的方案。
+采用“RAGFlow 主库 + manager 管理面 + Hermes 知识库 skill”的方案。
 
 1. manager 通过 RAGFlow HTTP API 管理 dataset、document、下载、删除、解析和解析状态。
-2. Hermes 通过 RAGFlow MCP host mode 做只读检索。
-3. Hermes 不直连 RAGFlow HTTP API；容器网络只允许访问 RAGFlow MCP endpoint。
-4. Hermes 写实例知识库时调用 manager 内部 runtime API，由 manager 校验实例 runtime token 后写入对应 app dataset。
-5. manager 用自身 RAGFlow 管理凭证执行所有 RAGFlow HTTP 写操作。
+2. Hermes 通过知识库 skill 调用 manager runtime API 做检索。
+3. Hermes 写实例知识库时也通过知识库 skill 调用 manager runtime API。
+4. manager 根据实例 runtime token 固定解析当前 app 与所属 org，决定可读 / 可写 dataset。
+5. manager 用自身 RAGFlow 管理凭证执行所有 RAGFlow HTTP 检索和写操作。
 
 这个拆分能同时满足：
 
 - 组织知识库对 Hermes 只读；
 - 实例知识库对 Hermes 可读可写；
 - 管理面仍保留完整文件生命周期；
-- 不需要实现 manager MCP proxy。
+- 不依赖 RAGFlow MCP 或源码推导出的 tenant / team 权限模型。
 
 ## RAGFlow 权限模型
 
-RAGFlow MCP 当前提供 `ragflow_retrieval` 检索工具，按请求携带的 API key 决定可访问 dataset。RAGFlow dataset 权限为租户级：
+RAGFlow 第一版只作为 manager 后端依赖，不作为 Hermes 的直接依赖。Hermes 不持有 RAGFlow API key，不接收 RAGFlow dataset ID，也不访问 RAGFlow MCP endpoint 或 RAGFlow HTTP API。
+
+RAGFlow dataset 权限仍可作为后台管理侧的组织方式，但不作为 oc-manager 的安全边界。RAGFlow 当前权限为租户级：
 
 - `permission = "me"`：只有 owner tenant 可访问。
 - `permission = "team"`：加入该 tenant 的用户可访问。
 
-源码与文档显示，RAGFlow API token 是 tenant 级 token，不是 dataset 级只读 token。`team` dataset 也不是严格只读能力：部分文档、chunk、dataset 写接口使用 `KnowledgebaseService.accessible` 或 `check_kb_team_permission` 判权，team 成员可能具备写路径。因此不能让 Hermes 用同一凭证同时访问 RAGFlow MCP 和 RAGFlow HTTP API。
+源码与文档显示，RAGFlow API token 是 tenant 级 token，不是 dataset 级只读 token。`team` dataset 也不是严格只读能力：部分文档、chunk、dataset 写接口使用 `KnowledgebaseService.accessible` 或 `check_kb_team_permission` 判权，team 成员可能具备写路径。
 
-### 租户与凭证
+因此第一版不把 RAGFlow tenant / team 行为作为“组织只读、实例读写”的权限实现。该权限由 manager runtime API 统一控制：
 
-manager 维护 RAGFlow 侧身份映射：
+- 检索时，manager 只使用 runtime token 解析出的当前 app dataset 与所属 org dataset；
+- 写入时，manager 固定选择当前 app dataset；
+- runtime API 不接受外部传入的 `dataset_id`、`org_id` 或任意目标参数。
 
-- 每个 oc-manager 组织对应一个 RAGFlow org service user / tenant。
-- 每个 oc-manager 实例对应一个 RAGFlow app service user / tenant。
-- 每个 app service user 加入其所属 org service tenant。
-- org dataset 创建在 org tenant 下，`permission = "team"`。
-- app dataset 创建在 app tenant 下，`permission = "me"`。
-- Hermes 使用 app service user 的 RAGFlow API token 连接 RAGFlow MCP host mode。
+### RAGFlow 凭证
 
-这样 Hermes 通过 MCP 可检索：
+manager 维护一个受控的 RAGFlow 后端凭证：
 
-- app tenant 自己的实例 dataset；
-- 所属 org tenant 暴露为 `team` 的组织 dataset。
+- RAGFlow API key 只保存在 manager 后端配置或密钥存储中。
+- 组织 / 实例 dataset 可以由同一个 RAGFlow service tenant 持有。
+- oc-manager 通过本地映射表维护 org / app 与 RAGFlow dataset 的关系。
+- Hermes 不持有任何 RAGFlow 凭证。
 
-但 Hermes 不能访问 RAGFlow HTTP API，所以无法写组织 dataset。
+这样做的核心取舍是：RAGFlow 负责文件主库、解析和检索能力；oc-manager 负责业务权限、实例隔离和可写目标控制。
 
 ### 自动创建前置验证
 
-RAGFlow 公开文档说明 API key 可从 UI 获取；主仓库源码存在 `/api/v1/system/tokens`，可为当前登录用户所属 tenant 创建 API token。实现计划必须先在目标 RAGFlow 版本上做真实验证：
+第一版只要求验证目标 RAGFlow 版本能通过 HTTP API 自动完成 dataset 与 document 生命周期：
+
+- 创建组织 dataset；
+- 创建实例 dataset；
+- 上传、下载、删除 document；
+- 触发解析并读取解析状态；
+- 对指定 dataset 执行 retrieval。
+
+RAGFlow 公开文档说明 API key 可从 UI 获取；主仓库源码存在 `/api/v1/system/tokens`，但自动创建 service user / tenant / token 不再是第一版必要条件。只有在后续希望增加 RAGFlow 侧租户隔离或直接开放 RAGFlow MCP 时，才需要继续验证：
 
 - 能否自动创建 service user；
 - 能否自动登录或以受控方式取得创建 token 所需的 session / auth；
 - 能否自动创建 tenant API token；
-- app service user 加入 org tenant 后，MCP host mode 是否只列出 app dataset + org team dataset；
-- Hermes 网络隔离后，app token 是否无法访问 RAGFlow HTTP API。
+- app service user 加入 org tenant 后，RAGFlow MCP host mode 是否只列出预期 dataset；
+- RAGFlow MCP 是否能稳定限制在显式 dataset allowlist 内。
 
-如果目标 RAGFlow 版本不支持自动 service user/token 生命周期，则不直接进入主体实现，需要在以下两条路线中选择一条：
+如果目标 RAGFlow 版本不支持 service user / token 生命周期，不影响第一版 skill 方案；只影响后续 MCP 或 RAGFlow 侧隔离增强。
 
-- 给 RAGFlow 增加受控管理接口；
-- 回退到 manager 代理检索 / manager MCP proxy。
 
 ## 数据模型
 
-新增 RAGFlow 映射表，manager 只保存映射、状态和审计所需元数据，不保存文件主副本。
-
-### `ragflow_identities`
-
-记录 oc-manager 组织 / 实例与 RAGFlow service user / tenant / token 的关系。
-
-- `scope_type`：`org` 或 `app`。
-- `org_id`：oc-manager 组织 ID。
-- `app_id`：实例级身份时填写。
-- `ragflow_user_id`：RAGFlow 用户 ID。
-- `ragflow_tenant_id`：RAGFlow tenant ID。
-- `api_token_ciphertext`：加密保存的 RAGFlow app service token，仅用于注入 Hermes MCP。
-- `status`：`active`、`provisioning`、`failed`。
-- `last_error`：最近一次 RAGFlow 身份或 token 操作失败原因。
+新增 RAGFlow 映射表，manager 只保存映射、状态和审计所需元数据，不保存文件主副本。RAGFlow 后端凭证作为 manager 配置或密钥保存，不按组织 / 实例下发给 Hermes。
 
 ### `ragflow_datasets`
 
@@ -116,8 +111,8 @@ RAGFlow 公开文档说明 API key 可从 UI 获取；主仓库源码存在 `/ap
 - `org_id`：oc-manager 组织 ID。
 - `app_id`：实例级 dataset 时填写。
 - `ragflow_dataset_id`：RAGFlow dataset ID。
-- `ragflow_tenant_id`：dataset owner tenant。
-- `permission`：`team` 或 `me`。
+- `ragflow_tenant_id`：dataset owner tenant，可选保存，便于排障。
+- `permission`：RAGFlow dataset permission，仅记录实际创建值，不作为 oc-manager 权限判断依据。
 - `name`：RAGFlow dataset 名称。
 - `status`：`active`、`creating`、`deleting`、`failed`。
 - `last_error`：最近一次 dataset 生命周期失败原因。
@@ -193,21 +188,25 @@ API 能力：
 
 ### 检索
 
-应用 input / manifest 增加 RAGFlow MCP 配置：
+Hermes 使用知识库 skill 检索，不直接连接 RAGFlow。应用 input / manifest 增加 manager runtime 知识库配置：
 
-- MCP endpoint；
-- app service API token；
-- 当前 app dataset ID；
-- 当前 org dataset ID；
-- 工具说明中强调：优先使用 app dataset，再使用 org dataset；组织知识库为只读参考资料。
+- manager runtime API endpoint；
+- app runtime token；
+- 知识库 search 工具说明：优先使用实例知识库，再使用组织知识库；组织知识库为只读参考资料。
 
-Hermes 运行时通过 RAGFlow MCP host mode 调用 `ragflow_retrieval`。RAGFlow MCP 依据 app service token 返回可见 dataset 列表与检索结果。
+Hermes 运行时通过 skill 调用 manager runtime search API。manager 根据 runtime token 解析 app ID 和 org ID，固定选择当前 app dataset 与所属 org dataset，然后调用 RAGFlow retrieval API。
+
+为满足“实例知识库优先”，manager 第一版采用两路检索：
+
+1. 对 app dataset 单独 retrieval；
+2. 对 org dataset 单独 retrieval；
+3. 合并结果时保留来源 scope，并对 app 结果排序优先。
 
 旧的 `resources/knowledge/{org,app}` 输入、`skills/kb-*` 渲染和知识库变更后重启加载逻辑删除。
 
 ### 写实例知识库
 
-Hermes 镜像内新增一个受控工具或命令，例如：
+Hermes 镜像内新增知识库写入 skill 或受控命令，例如：
 
 ```text
 oc-kb add <workspace-relative-file>
@@ -229,22 +228,19 @@ oc-kb add <workspace-relative-file>
 ### 组织创建
 
 1. manager 创建 oc-manager 组织。
-2. 创建 RAGFlow org service user / tenant。
-3. 创建 org dataset，`permission = "team"`。
-4. 写入 `ragflow_identities` 和 `ragflow_datasets`。
+2. 使用 manager 后端 RAGFlow 凭证创建 org dataset。
+3. 写入 `ragflow_datasets`。
 
-组织删除时删除对应 RAGFlow dataset 与 service identity。RAGFlow 删除失败不阻塞本地删除，但写 audit log 并保留失败状态用于排障。
+组织删除时删除对应 RAGFlow dataset。RAGFlow 删除失败不阻塞本地删除，但写 audit log 并保留失败状态用于排障。
 
 ### 实例创建
 
 1. manager 创建 app。
-2. 创建 RAGFlow app service user / tenant。
-3. 将 app service user 加入 org tenant。
-4. 创建 app dataset，`permission = "me"`。
-5. 创建 app service API token。
-6. app 初始化时把 MCP endpoint、app token 和 dataset ID 写入 Hermes input。
+2. 使用 manager 后端 RAGFlow 凭证创建 app dataset。
+3. 写入 `ragflow_datasets`。
+4. app 初始化时把 manager runtime API endpoint、app runtime token 和知识库 skill 配置写入 Hermes input。
 
-实例删除时删除 app dataset、app service token / identity 映射。RAGFlow 删除失败不阻塞本地删除，但记录 audit。
+实例删除时删除 app dataset。RAGFlow 删除失败不阻塞本地删除，但记录 audit。
 
 ### 文件上传
 
@@ -285,9 +281,9 @@ Hermes 上传：
 ## 安全约束
 
 - RAGFlow 管理 token 只保存在 manager 后端配置中。
-- RAGFlow app service token 加密存储，仅写入对应 app 的 Hermes input。
-- Hermes 容器网络只能访问 RAGFlow MCP endpoint 和 manager runtime API，不能访问 RAGFlow HTTP API。
-- manager runtime API 使用 per-app token，token 只授权当前 app 的实例知识库写入。
+- Hermes input 只包含 manager runtime API endpoint 和 app runtime token，不包含 RAGFlow API key 或 dataset ID。
+- Hermes 容器网络只需要访问 manager runtime API，不需要访问 RAGFlow MCP endpoint 或 RAGFlow HTTP API。
+- manager runtime API 使用 per-app token，token 授权当前 app 的知识库检索与实例知识库写入。
 - runtime API 不接受外部传入 dataset ID。
 - 所有 manager 用户侧权限仍由 `internal/auth/authorizer.go` 统一判断。
 - 所有 RAGFlow 生命周期失败写 audit log，便于追踪跨系统状态。
@@ -296,12 +292,12 @@ Hermes 上传：
 
 后端：
 
-- 新增 RAGFlow client，封装 dataset、document、download、parse、status、token / identity 验证调用。
-- 新增 RAGFlow identity / dataset / document 表和 sqlc 查询。
+- 新增 RAGFlow client，封装 dataset、document、download、parse、status、retrieval 调用。
+- 新增 RAGFlow dataset / document 表和 sqlc 查询。
 - 替换 `KnowledgeService` 为 RAGFlow-backed 实现。
 - 删除本地 `KnowledgeMaster` 主副本装配、知识库 sync dispatcher、sync status service 在知识库页面的依赖。
-- 修改 app 初始化 input，加入 MCP 配置并停止写 knowledge resources。
-- 新增 Hermes runtime 写入实例知识库的 manager internal API。
+- 修改 app 初始化 input，加入知识库 skill 配置并停止写 knowledge resources。
+- 新增 Hermes runtime 知识库 search / add 的 manager internal API。
 
 前端：
 
@@ -325,8 +321,9 @@ OpenAPI：
 ### 后端单元测试
 
 - RAGFlow client：dataset 创建 / 删除、document 上传 / 下载 / 删除、解析触发、状态刷新、404 幂等。
-- 权限：组织知识库写权限、实例知识库写权限、runtime token 只能写当前 app。
+- 权限：组织知识库写权限、实例知识库写权限、runtime token 只能读取当前 app + 所属 org，且只能写当前 app。
 - 生命周期：组织创建 / 删除、app 创建 / 删除时 RAGFlow 映射与失败状态。
+- Hermes 检索：search API 不接受任意 dataset，app 结果优先于 org 结果。
 - Hermes 写入：workspace 路径校验、禁止父目录穿越、禁止传入任意 dataset。
 
 ### 前端测试
@@ -338,7 +335,8 @@ OpenAPI：
 
 ### Hermes runtime 测试
 
-- MCP 配置渲染到 Hermes input / config。
+- 知识库 skill 配置渲染到 Hermes input / config。
+- 知识库 search skill 只能通过 manager runtime API 检索当前 app + 所属 org。
 - `oc-kb add` 只能读取 workspace 文件。
 - `oc-kb add` 上传成功后 manager 生成实例 document 记录。
 - Hermes 无法访问 RAGFlow HTTP API。
@@ -350,13 +348,14 @@ OpenAPI：
 - 组织管理员上传组织知识库，实例对话能检索到但不能通过 Hermes 写组织知识库。
 - 有实例管理权限的用户上传实例知识库。
 - 用户让 Hermes 把 workspace 中的报告加入实例知识库，列表出现该文件并进入解析状态。
-- 解析完成后，Hermes 能通过 MCP 检索到新加入报告内容。
+- 解析完成后，Hermes 能通过知识库 search skill 检索到新加入报告内容。
 
 ## 风险与取舍
 
-- RAGFlow service user / token 自动化接口并非公开 HTTP API 文档中的核心管理接口，实现前必须用目标版本验证。
-- RAGFlow `team` dataset 不能表达“只读成员”，所以网络隔离是组织知识库只读的关键安全边界。
-- Hermes 写实例知识库通过 manager runtime API 多一跳，但这是保住权限边界的必要代价。
+- Hermes 检索和写入都通过 manager runtime API 多一跳，但这是保住权限边界、降低 RAGFlow MCP 权限不确定性的必要代价。
+- manager 成为知识库检索代理后，需要关注检索延迟、结果合并和引用来源展示。
+- RAGFlow service user / token 自动化接口不是第一版必要条件；如果未来要开放 RAGFlow MCP 或 RAGFlow 侧租户隔离，仍需单独验证。
+- RAGFlow `team` dataset 不能表达“只读成员”，所以它不能作为组织知识库只读的安全边界。
 - 删除旧知识库链路会减少兼容成本，但也意味着启用新方案前需要明确告知旧本地文件不迁移。
 
 ## 参考
