@@ -54,6 +54,10 @@ type App struct {
 	AppliedVersionRevision int32 `db:"applied_version_revision" json:"applied_version_revision"`
 	// 上次实际拉取的镜像 ref；与配置解析出的 ref 比较得出 version_synced。
 	AppliedImageRef string `db:"applied_image_ref" json:"applied_image_ref"`
+	// Hermes 调 manager runtime API 的 app 级 token hash。
+	RuntimeTokenHash pgtype.Text `db:"runtime_token_hash" json:"runtime_token_hash"`
+	// Hermes 调 manager runtime API 的 app 级 token 密文，使用 manager master key 加密。
+	RuntimeTokenCiphertext pgtype.Text `db:"runtime_token_ciphertext" json:"runtime_token_ciphertext"`
 }
 
 // 助手版本目录：把智能路由、skill、内置提示词、镜像打包成可复用的命名版本。
@@ -205,6 +209,46 @@ type Organization struct {
 	NewapiUsername pgtype.Text `db:"newapi_username" json:"newapi_username"`
 	// 该组织可用的助手版本 id 数组（allowlist）。
 	AssistantVersionIds []byte `db:"assistant_version_ids" json:"assistant_version_ids"`
+}
+
+// oc-manager 组织/实例知识库到 RAGFlow dataset 的映射。
+type RagflowDataset struct {
+	ID pgtype.UUID `db:"id" json:"id"`
+	// 映射归属范围：org 表示组织知识库，app 表示实例知识库。
+	ScopeType string      `db:"scope_type" json:"scope_type"`
+	OrgID     pgtype.UUID `db:"org_id" json:"org_id"`
+	AppID     pgtype.UUID `db:"app_id" json:"app_id"`
+	// RAGFlow 返回的 dataset ID，创建中或失败时可为空。
+	RagflowDatasetID pgtype.Text `db:"ragflow_dataset_id" json:"ragflow_dataset_id"`
+	Name             string      `db:"name" json:"name"`
+	// dataset 生命周期状态：creating、active、deleting、failed。
+	Status    string             `db:"status" json:"status"`
+	LastError pgtype.Text        `db:"last_error" json:"last_error"`
+	CreatedAt pgtype.Timestamptz `db:"created_at" json:"created_at"`
+	UpdatedAt pgtype.Timestamptz `db:"updated_at" json:"updated_at"`
+}
+
+// manager 展示文件列表所需的 RAGFlow document 元数据缓存。
+type RagflowDocument struct {
+	ID        pgtype.UUID `db:"id" json:"id"`
+	DatasetID pgtype.UUID `db:"dataset_id" json:"dataset_id"`
+	ScopeType string      `db:"scope_type" json:"scope_type"`
+	OrgID     pgtype.UUID `db:"org_id" json:"org_id"`
+	AppID     pgtype.UUID `db:"app_id" json:"app_id"`
+	// RAGFlow 返回的 document ID。
+	RagflowDocumentID string      `db:"ragflow_document_id" json:"ragflow_document_id"`
+	Name              string      `db:"name" json:"name"`
+	SizeBytes         int64       `db:"size_bytes" json:"size_bytes"`
+	MimeType          pgtype.Text `db:"mime_type" json:"mime_type"`
+	Suffix            pgtype.Text `db:"suffix" json:"suffix"`
+	// manager 归一化后的解析状态：queued、running、completed、failed、stopped。
+	ParseStatus string      `db:"parse_status" json:"parse_status"`
+	Progress    int32       `db:"progress" json:"progress"`
+	LastError   pgtype.Text `db:"last_error" json:"last_error"`
+	// 创建来源标识，可为用户 ID 或 runtime app ID。
+	CreatedBy string             `db:"created_by" json:"created_by"`
+	CreatedAt pgtype.Timestamptz `db:"created_at" json:"created_at"`
+	UpdatedAt pgtype.Timestamptz `db:"updated_at" json:"updated_at"`
 }
 
 // 组织点数充值记录，计费事实仍以 new-api 为准。

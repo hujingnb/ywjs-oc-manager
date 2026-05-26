@@ -33,22 +33,34 @@ type Querier interface {
 	CountChannelBindingsByApp(ctx context.Context, appID pgtype.UUID) (int64, error)
 	// 严格保护：版本出现在任意未删除组织 allowlist 时不可删除。
 	CountOrgsUsingVersion(ctx context.Context, jsonbExists string) (int64, error)
+	// 统计扁平文件列表总数，过滤条件必须与 ListRAGFlowDocumentsByScope 保持一致。
+	CountRAGFlowDocumentsByScope(ctx context.Context, arg CountRAGFlowDocumentsByScopeParams) (int64, error)
 	CreateApp(ctx context.Context, arg CreateAppParams) (App, error)
 	CreateAssistantVersion(ctx context.Context, arg CreateAssistantVersionParams) (AssistantVersion, error)
 	CreateAuditLog(ctx context.Context, arg CreateAuditLogParams) (AuditLog, error)
 	CreateChannelBinding(ctx context.Context, arg CreateChannelBindingParams) (ChannelBinding, error)
 	CreateJob(ctx context.Context, arg CreateJobParams) (Job, error)
 	CreateOrganization(ctx context.Context, arg CreateOrganizationParams) (Organization, error)
+	// 创建 manager scope 到 RAGFlow dataset 的本地映射，远端创建失败时可先记录 failed 状态便于排障。
+	CreateRAGFlowDatasetMapping(ctx context.Context, arg CreateRAGFlowDatasetMappingParams) (RagflowDataset, error)
+	// 缓存 RAGFlow document 元数据，manager 不保存文件主副本。
+	CreateRAGFlowDocument(ctx context.Context, arg CreateRAGFlowDocumentParams) (RagflowDocument, error)
 	CreateRechargeRecord(ctx context.Context, arg CreateRechargeRecordParams) (RechargeRecord, error)
 	CreateRefreshToken(ctx context.Context, arg CreateRefreshTokenParams) (RefreshToken, error)
 	CreateUser(ctx context.Context, arg CreateUserParams) (User, error)
 	DeleteExpiredRefreshTokens(ctx context.Context) error
 	DeleteOldInstanceResourceSamples(ctx context.Context, arg DeleteOldInstanceResourceSamplesParams) (int64, error)
 	DeleteOldNodeResourceSamples(ctx context.Context, arg DeleteOldNodeResourceSamplesParams) (int64, error)
+	// 删除本地 dataset 映射；document 缓存通过外键级联清理。
+	DeleteRAGFlowDatasetMapping(ctx context.Context, id pgtype.UUID) error
+	// 删除本地 document 缓存；RAGFlow 远端删除由 service 在同一业务流程中处理。
+	DeleteRAGFlowDocumentMapping(ctx context.Context, id pgtype.UUID) error
 	EnrollRuntimeNodeInsert(ctx context.Context, arg EnrollRuntimeNodeInsertParams) (RuntimeNode, error)
 	EnrollRuntimeNodeUpdate(ctx context.Context, arg EnrollRuntimeNodeUpdateParams) (RuntimeNode, error)
 	GetActiveAppByOwner(ctx context.Context, ownerUserID pgtype.UUID) (App, error)
 	GetApp(ctx context.Context, id pgtype.UUID) (App, error)
+	// runtime API 只接受 token hash 解析出的当前 app，不允许请求方传入目标 app/dataset。
+	GetAppByRuntimeTokenHash(ctx context.Context, runtimeTokenHash pgtype.Text) (App, error)
 	// 取实例及其绑定版本的 revision / image_id，供 version_synced 计算。
 	GetAppWithVersion(ctx context.Context, id pgtype.UUID) (GetAppWithVersionRow, error)
 	GetAssistantVersion(ctx context.Context, id pgtype.UUID) (AssistantVersion, error)
@@ -71,6 +83,14 @@ type Querier interface {
 	GetOrganizationByName(ctx context.Context, name string) (Organization, error)
 	// OOS-2 access_token 自愈用：以行锁查询组织，避免并发更新密文时出现写丢失。
 	GetOrganizationForUpdate(ctx context.Context, id pgtype.UUID) (Organization, error)
+	// 读取实例知识库 dataset 映射，runtime 写入只能落到该 dataset。
+	GetRAGFlowAppDataset(ctx context.Context, appID pgtype.UUID) (RagflowDataset, error)
+	// 按 manager 本地 ID 读取 document 缓存，供下载和删除前做权限校验。
+	GetRAGFlowDocument(ctx context.Context, id pgtype.UUID) (RagflowDocument, error)
+	// 按 RAGFlow document ID 读取缓存，用于解析状态回刷和幂等处理。
+	GetRAGFlowDocumentByRemoteID(ctx context.Context, arg GetRAGFlowDocumentByRemoteIDParams) (RagflowDocument, error)
+	// 读取组织知识库 dataset 映射，供管理面列表和 runtime 检索使用。
+	GetRAGFlowOrgDataset(ctx context.Context, orgID pgtype.UUID) (RagflowDataset, error)
 	GetRefreshTokenByHash(ctx context.Context, tokenHash string) (RefreshToken, error)
 	GetRuntimeNode(ctx context.Context, id pgtype.UUID) (RuntimeNode, error)
 	GetRuntimeNodeByAgentID(ctx context.Context, agentID pgtype.Text) (RuntimeNode, error)
@@ -112,6 +132,10 @@ type Querier interface {
 	ListNodeResourceBuckets(ctx context.Context, arg ListNodeResourceBucketsParams) ([]ListNodeResourceBucketsRow, error)
 	ListNodeResourceSamples(ctx context.Context, arg ListNodeResourceSamplesParams) ([]NodeResourceSample, error)
 	ListOrganizations(ctx context.Context, arg ListOrganizationsParams) ([]Organization, error)
+	// 扁平列出某个组织或实例知识库文件，支持按状态和文件名过滤。
+	ListRAGFlowDocumentsByScope(ctx context.Context, arg ListRAGFlowDocumentsByScopeParams) ([]RagflowDocument, error)
+	// 找出需要刷新解析状态的 document，按最久未更新优先。
+	ListRAGFlowDocumentsNeedingRefresh(ctx context.Context, limit int32) ([]RagflowDocument, error)
 	ListReadyJobs(ctx context.Context, limit int32) ([]Job, error)
 	ListRechargeRecordsByOrg(ctx context.Context, arg ListRechargeRecordsByOrgParams) ([]RechargeRecord, error)
 	// 列出当前期望持有 runtime 容器的应用，供 scheduler 周期 dispatch
@@ -135,6 +159,8 @@ type Querier interface {
 	MarkJobFailed(ctx context.Context, arg MarkJobFailedParams) (Job, error)
 	MarkJobRunning(ctx context.Context, arg MarkJobRunningParams) (Job, error)
 	MarkJobSucceeded(ctx context.Context, id pgtype.UUID) (Job, error)
+	// 标记 dataset 生命周期失败，保留错误文本用于管理面排障。
+	MarkRAGFlowDatasetFailed(ctx context.Context, arg MarkRAGFlowDatasetFailedParams) (RagflowDataset, error)
 	MarkUserLoggedIn(ctx context.Context, id pgtype.UUID) (User, error)
 	// reaper 把已 running / succeeded 的 job 重置为 pending。
 	// locked_by / locked_at 一并清空避免被旧 worker 误识别为本机持有。
@@ -153,6 +179,8 @@ type Querier interface {
 	// 管理员 PATCH /apps/:appId/restart-policy 写入；mode/max_per_window/window_seconds 校验在 service 层。
 	SetAppRestartPolicy(ctx context.Context, arg SetAppRestartPolicyParams) (App, error)
 	SetAppRuntimeSnapshot(ctx context.Context, arg SetAppRuntimeSnapshotParams) (App, error)
+	// 写入 Hermes 调 manager runtime API 的 app 级 token，明文只在 manifest 渲染时短暂使用。
+	SetAppRuntimeToken(ctx context.Context, arg SetAppRuntimeTokenParams) (App, error)
 	SetAppStatus(ctx context.Context, arg SetAppStatusParams) (App, error)
 	// 切换实例绑定的助手版本，并把 applied_version_revision / applied_image_ref 清零。
 	// 不同版本各自维护独立的 revision 计数，若切换后保留旧 applied_*，当新旧版本
@@ -164,6 +192,8 @@ type Querier interface {
 	SetChannelBindingStatus(ctx context.Context, arg SetChannelBindingStatusParams) (ChannelBinding, error)
 	SetOrganizationNewAPIUser(ctx context.Context, arg SetOrganizationNewAPIUserParams) (Organization, error)
 	SetOrganizationStatus(ctx context.Context, arg SetOrganizationStatusParams) (Organization, error)
+	// 远端 dataset 创建成功后写入 RAGFlow ID，并清理上一轮生命周期错误。
+	SetRAGFlowDatasetActive(ctx context.Context, arg SetRAGFlowDatasetActiveParams) (RagflowDataset, error)
 	SetRuntimeNodeStatus(ctx context.Context, arg SetRuntimeNodeStatusParams) (RuntimeNode, error)
 	// disabled 时同步写 deleted_at（下线时间戳）；enabled 时清空，让重启用户能恢复。
 	SetUserStatus(ctx context.Context, arg SetUserStatusParams) (User, error)
@@ -184,6 +214,8 @@ type Querier interface {
 	// OOS-2 access_token 自愈用：仅更新 newapi_user_credentials_ciphertext，不动 newapi_user_id。
 	UpdateOrganizationCredentialsCiphertext(ctx context.Context, arg UpdateOrganizationCredentialsCiphertextParams) (Organization, error)
 	UpdateOrganizationProfile(ctx context.Context, arg UpdateOrganizationProfileParams) (Organization, error)
+	// 回写解析状态、进度和错误；状态值由 service 层从 RAGFlow run 值归一化。
+	UpdateRAGFlowDocumentParseStatus(ctx context.Context, arg UpdateRAGFlowDocumentParseStatusParams) (RagflowDocument, error)
 	UpdateRuntimeNodeHeartbeat(ctx context.Context, arg UpdateRuntimeNodeHeartbeatParams) (RuntimeNode, error)
 	UpdateRuntimeNodeProbeFailure(ctx context.Context, arg UpdateRuntimeNodeProbeFailureParams) (RuntimeNode, error)
 	UpdateRuntimeNodeProbeSuccess(ctx context.Context, arg UpdateRuntimeNodeProbeSuccessParams) (RuntimeNode, error)

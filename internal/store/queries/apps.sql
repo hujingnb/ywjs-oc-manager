@@ -60,6 +60,21 @@ SET
 WHERE id = $1
 RETURNING *;
 
+-- name: SetAppRuntimeToken :one
+-- 写入 Hermes 调 manager runtime API 的 app 级 token，明文只在 manifest 渲染时短暂使用。
+UPDATE apps
+SET runtime_token_hash = $2,
+    runtime_token_ciphertext = $3,
+    updated_at = now()
+WHERE id = $1 AND deleted_at IS NULL
+RETURNING *;
+
+-- name: GetAppByRuntimeTokenHash :one
+-- runtime API 只接受 token hash 解析出的当前 app，不允许请求方传入目标 app/dataset。
+SELECT *
+FROM apps
+WHERE runtime_token_hash = $1 AND deleted_at IS NULL;
+
 -- name: SoftDeleteApp :one
 UPDATE apps
 SET status = 'deleted', deleted_at = now(), updated_at = now()
