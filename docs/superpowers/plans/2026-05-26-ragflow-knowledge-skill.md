@@ -6,6 +6,8 @@
 
 **Architecture:** RAGFlow is a backend dependency of manager only. Manager owns all org/app/runtime permissions, maps org/app scopes to RAGFlow datasets, proxies retrieval and document lifecycle APIs, and exposes a narrow runtime API for Hermes search/add. Hermes receives only manager runtime endpoint + app runtime token, never RAGFlow credentials or dataset IDs.
 
+**RAGFlow Model Setup:** RAGFlow uses the existing new-api deployment as its model provider. An administrator manually creates a dedicated new-api key for RAGFlow, configures that key in the RAGFlow console, and selects a DeepSeek model. Manager does not create, store, rotate, or inject the new-api key used internally by RAGFlow.
+
 **Tech Stack:** Go, Gin, sqlc, PostgreSQL migrations, testify, RAGFlow HTTP API, Vue 3, TanStack Query, Naive UI, Vitest, Python runtime scripts, pytest, OpenAPI via swag and openapi-typescript.
 
 ---
@@ -23,6 +25,8 @@ This spec spans several subsystems but they are coupled by one deployable featur
 7. Generated contracts, docs, browser verification.
 
 Do not implement RAGFlow MCP in this feature. MCP remains a future POC only.
+
+Do not implement RAGFlow model-provider automation in manager. The implementation assumes RAGFlow has already been configured by an administrator to call existing new-api with a DeepSeek model.
 
 ## External API References
 
@@ -49,6 +53,7 @@ Do not implement RAGFlow MCP in this feature. MCP remains a future POC only.
 - Modify `internal/config/config.go`
   - Add `RAGFlowConfig` with `base_url`, `api_key`, request timeout, and default parser settings.
   - Add `Hermes.ManagerRuntimeBaseURL` for Hermes to call manager from inside the container network.
+  - Do not add new-api model provider fields for RAGFlow; that setup is manual in the RAGFlow console.
 - Modify `internal/config/loader.go` and `internal/config/loader_test.go`
   - RAGFlow config may be empty so local development can start, but configured values must be syntactically valid.
   - `app.knowledge_root` is no longer required after old local knowledge code is removed.
@@ -281,7 +286,7 @@ In `Validate`, if either `ragflow.base_url` or `ragflow.api_key` is set, require
 
 In `internal/integrations/ragflow/client_test.go`, add these tests with Chinese comments beside each test:
 
-- `TestClientCreateDataset`: `httptest.Server` asserts `Authorization: Bearer secret`, method `POST`, path `/api/v1/datasets`, JSON body `{"name":"oc-org-1","permission":"me","chunk_method":"naive"}`, and the client returns dataset ID `ds-1`.
+- `TestClientCreateDataset`: `httptest.Server` asserts `Authorization: Bearer secret`, method `POST`, path `/api/v1/datasets`, JSON body contains `{"name":"oc-org-1","chunk_method":"naive"}` and no oc-manager permission fields, and the client returns dataset ID `ds-1`.
 - `TestClientUploadDocumentUsesMultipart`: server asserts `Content-Type` starts with `multipart/form-data`, multipart field `file` has filename `report.md`, and the client returns document ID `doc-1`, name `report.md`, size `12`, run `UNSTART`.
 - `TestClientRetrievalIncludesDatasetIDs`: server decodes retrieval JSON and asserts `dataset_ids` equals `["app-ds","org-ds"]`, question equals `退款政策`, and the client returns two chunks.
 - `TestClientRAGFlowCodeError`: server returns `{"code":102,"message":"bad api key"}` and the client error contains `bad api key`.
@@ -300,7 +305,6 @@ type Client struct {
 type Dataset struct {
 	ID string `json:"id"`
 	Name string `json:"name"`
-	Permission string `json:"permission"`
 }
 
 type Document struct {
@@ -322,7 +326,7 @@ type RetrievalChunk struct {
 }
 
 func NewClient(baseURL, apiKey string, timeout time.Duration) (*Client, error)
-func (c *Client) CreateDataset(ctx context.Context, name, permission, chunkMethod string) (Dataset, error)
+func (c *Client) CreateDataset(ctx context.Context, name, chunkMethod string) (Dataset, error)
 func (c *Client) DeleteDatasets(ctx context.Context, ids []string) error
 func (c *Client) UploadDocument(ctx context.Context, datasetID, filename string, body io.Reader) (Document, error)
 func (c *Client) DownloadDocument(ctx context.Context, datasetID, documentID string) (io.ReadCloser, int64, error)
@@ -373,8 +377,6 @@ CREATE TABLE ragflow_datasets (
     org_id uuid NOT NULL REFERENCES organizations(id),
     app_id uuid NULL REFERENCES apps(id),
     ragflow_dataset_id text NULL,
-    ragflow_tenant_id text NULL,
-    permission text NULL,
     name text NOT NULL,
     status text NOT NULL DEFAULT 'active' CHECK (status IN ('creating', 'active', 'deleting', 'failed')),
     last_error text NULL,
@@ -440,18 +442,16 @@ Create `internal/store/queries/ragflow_knowledge.sql` with queries named:
 ```sql
 -- name: CreateRAGFlowDatasetMapping :one
 INSERT INTO ragflow_datasets (
-    scope_type, org_id, app_id, ragflow_dataset_id, ragflow_tenant_id, permission, name, status, last_error
+    scope_type, org_id, app_id, ragflow_dataset_id, name, status, last_error
 ) VALUES (
-    $1, $2, $3, $4, $5, $6, $7, $8, $9
+    $1, $2, $3, $4, $5, $6, $7
 )
 RETURNING *;
 
 -- name: SetRAGFlowDatasetActive :one
 UPDATE ragflow_datasets
 SET ragflow_dataset_id = $2,
-    ragflow_tenant_id = $3,
-    permission = $4,
-    name = $5,
+    name = $3,
     status = 'active',
     last_error = NULL,
     updated_at = now()
@@ -1082,7 +1082,7 @@ Do not let service packages import `ragflow` concrete client. Define small inter
 
 ```go
 type RAGFlowDatasetProvisioner interface {
-	CreateDataset(ctx context.Context, name, permission, chunkMethod string) (ragflow.Dataset, error)
+	CreateDataset(ctx context.Context, name, chunkMethod string) (ragflow.Dataset, error)
 	DeleteDatasets(ctx context.Context, ids []string) error
 }
 ```
@@ -1098,7 +1098,7 @@ oc-org-<orgID>
 oc-app-<appID>
 ```
 
-Use RAGFlow permission `"me"` for both first-version datasets. Manager enforces all org/app permissions.
+Do not pass oc-manager permission concepts into RAGFlow lifecycle calls. If the RAGFlow HTTP endpoint requires any visibility field, keep it fixed inside `internal/integrations/ragflow.Client`; service-layer interfaces and database mappings must not expose it.
 
 - [ ] **Step 4: Run service lifecycle tests**
 
@@ -1114,7 +1114,7 @@ Expected: pass.
 
 ```bash
 rtk git add internal/service cmd/server/main.go
-rtk git commit -m "feat(knowledge): 接入 RAGFlow dataset 生命周期" -m "组织和实例创建时创建对应 RAGFlow dataset 映射，删除时 best-effort 清理远端 dataset。\n\nRAGFlow 权限仅作为后台资源属性，业务访问控制仍由 manager 完成。"
+rtk git commit -m "feat(knowledge): 接入 RAGFlow dataset 生命周期" -m "组织和实例创建时创建对应 RAGFlow dataset 映射，删除时 best-effort 清理远端 dataset。\n\nRAGFlow 不承载 oc-manager 权限语义，业务访问控制全部由 manager 完成。"
 ```
 
 ---
