@@ -1,23 +1,24 @@
-"""验证 render_skills：扫 input/resources/knowledge/{org,app}/，slug 算法稳定。"""
+"""验证 render_skills：渲染 oc-kb skill 并解压版本 skill tar。"""
 
 import io
 import json
-import re
 import tarfile
 from pathlib import Path
 
 from lib.manifest import Manifest
-from renderer.render_skills import render, slugify_knowledge_path
+from renderer.render_skills import render
 
 
-def _manifest(skills: list[str] | None = None) -> Manifest:
-    # 构造渲染 skill 所需的最小 Manifest；skills 缺省空。
+def _manifest(skills: list[str] | None = None, knowledge: bool = False) -> Manifest:
+    # 构造渲染 skill 所需的最小 Manifest；knowledge=True 时启用 oc-kb skill。
     return Manifest(
         app_id="a", app_name="A", app_model="m",
         openai_api_key="sk", openai_base_url="http://x",
         persona_rel="resources/persona.md",
         rule_platform_rel="resources/platform-rules.md",
         skills=skills or [],
+        knowledge_runtime_base_url="http://manager-api:8080" if knowledge else "",
+        knowledge_app_token="runtime-token" if knowledge else "",
     )
 
 
@@ -31,53 +32,27 @@ def _make_skill_tar(path: Path, skill_dir: str, skill_name: str) -> None:
         tw.addfile(info, io.BytesIO(body))
 
 
-def test_slug_ascii(tmp_path) -> None:
-    # 常规 ASCII 路径生成可读 slug。
-    assert slugify_knowledge_path("policies/refund.md") == "policies-refund"
-    assert slugify_knowledge_path("Tone.MD") == "tone"
+def test_render_creates_runtime_knowledge_skill(tmp_input: Path, tmp_data: Path) -> None:
+    # manifest.knowledge 存在时生成固定 oc-kb skill，但不把 app token 写入 SKILL.md。
+    outputs = render(_manifest(knowledge=True), tmp_input, tmp_data)
+
+    skill_path = tmp_data / "skills" / "oc-kb" / "SKILL.md"
+    assert skill_path.exists()
+    body = skill_path.read_text()
+    assert "oc-kb search" in body
+    assert "oc-kb add" in body
+    assert "runtime-token" not in body
+    assert outputs == ["skills/oc-kb/SKILL.md"]
+    marker = tmp_data / "skills" / "oc-kb" / ".oc-managed"
+    assert json.loads(marker.read_text())["source"] == "runtime-knowledge"
 
 
-def test_slug_non_ascii_falls_back_to_hash(tmp_path) -> None:
-    # 含中文的路径回落到 kb-<sha256[:12]> 固定后缀。
-    slug = slugify_knowledge_path("退款政策.md")
-    assert re.match(r"^kb-[0-9a-f]{12}$", slug)
-
-
-def test_render_creates_one_dir_per_file(tmp_input: Path, tmp_data: Path) -> None:
-    # 每个 knowledge 文件生成一份 skills/kb-<scope>-<slug>/SKILL.md。
-    (tmp_input / "resources" / "knowledge" / "org" / "policies").mkdir(parents=True)
-    (tmp_input / "resources" / "knowledge" / "org" / "policies" / "refund.md").write_text("# Refund\n\nbody")
-    (tmp_input / "resources" / "knowledge" / "app").mkdir(parents=True)
-    (tmp_input / "resources" / "knowledge" / "app" / "tone.md").write_text("# Tone\n\nbody")
-
+def test_render_skips_runtime_knowledge_skill_without_manifest_config(tmp_input: Path, tmp_data: Path) -> None:
+    # manifest 没有 knowledge 配置时不生成 oc-kb，避免没有 token 的 skill 误导 Hermes。
     outputs = render(_manifest(), tmp_input, tmp_data)
 
-    assert (tmp_data / "skills" / "kb-org-policies-refund" / "SKILL.md").exists()
-    assert (tmp_data / "skills" / "kb-app-tone" / "SKILL.md").exists()
-    assert set(outputs) == {
-        "skills/kb-org-policies-refund/SKILL.md",
-        "skills/kb-app-tone/SKILL.md",
-    }
-
-
-def test_render_no_duplicate_h1_when_body_has_heading(tmp_input: Path, tmp_data: Path) -> None:
-    # body 自带 H1 时，SKILL.md 正文不应再额外加一个标题（避免重复标题）。
-    (tmp_input / "resources" / "knowledge" / "app").mkdir(parents=True)
-    (tmp_input / "resources" / "knowledge" / "app" / "tone.md").write_text("# 话术\n\n正文")
-    render(_manifest(), tmp_input, tmp_data)
-    skill = (tmp_data / "skills" / "kb-app-tone" / "SKILL.md").read_text()
-    # frontmatter 之后正文部分只应出现一次 "# 话术"。
-    body_after_frontmatter = skill.split("---\n", 2)[-1]
-    assert body_after_frontmatter.count("# 话术") == 1
-
-
-def test_render_adds_h1_when_body_has_no_heading(tmp_input: Path, tmp_data: Path) -> None:
-    # body 无 H1 时，用相对路径补一个标题，保证 SKILL.md 正文有抬头。
-    (tmp_input / "resources" / "knowledge" / "app").mkdir(parents=True)
-    (tmp_input / "resources" / "knowledge" / "app" / "plain.md").write_text("没有标题的纯正文")
-    render(_manifest(), tmp_input, tmp_data)
-    skill = (tmp_data / "skills" / "kb-app-plain" / "SKILL.md").read_text()
-    assert "# plain.md" in skill
+    assert outputs == []
+    assert not (tmp_data / "skills" / "oc-kb").exists()
 
 
 def test_render_extracts_version_skill_tar(tmp_input: Path, tmp_data: Path) -> None:

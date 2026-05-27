@@ -1,4 +1,4 @@
-"""验证 SOUL.md：平台层渲染、persona 拼接、知识库 inline 截断、空层跳过。manifest v2 只渲染平台层。"""
+"""验证 SOUL.md：平台层渲染、persona 拼接、旧知识库目录忽略、空层跳过。manifest v2 只渲染平台层。"""
 
 from pathlib import Path
 from lib.manifest import Manifest
@@ -57,15 +57,13 @@ def test_empty_layer_skipped(tmp_input: Path, tmp_data: Path) -> None:
     assert "应用层" not in soul
 
 
-def test_knowledge_inline_truncated_at_8kib(tmp_input: Path, tmp_data: Path) -> None:
-    # 验证单个知识库文件超过 8 KiB 被截断，并附带 "完整版见 skills/kb-*" 提示。
-    big = "A" * 9000
-    _setup(tmp_input, persona="P", platform="", org="", app="", kb_org={"big.md": big})
+def test_legacy_knowledge_files_are_ignored(tmp_input: Path, tmp_data: Path) -> None:
+    # RAGFlow 接管知识库后，旧 input/resources/knowledge 文件不再 inline 到 SOUL.md。
+    _setup(tmp_input, persona="P", platform="", org="", app="", kb_org={"big.md": "旧知识库内容"})
     render(make_manifest(), tmp_input, tmp_data)
     soul = (tmp_data / "SOUL.md").read_text()
-    assert "AAAA" in soul
-    assert "完整版见" in soul or "skills/kb-" in soul
-    assert soul.count("A") < 9000
+    assert "旧知识库内容" not in soul
+    assert "skills/kb-" not in soul
 
 
 def test_render_drops_org_and_app_layers(tmp_input: Path, tmp_data: Path) -> None:

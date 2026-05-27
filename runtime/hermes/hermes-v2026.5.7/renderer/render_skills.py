@@ -1,5 +1,8 @@
-"""扫描 input/resources/knowledge/{org,app}/* 生成 skills/kb-{scope}-{slug}/SKILL.md，
-同时解压 manifest.skills 列出的版本 skill tar 到 skills/ 下。
+"""渲染 Hermes skills。
+
+当前来源：
+- manifest.knowledge 存在时生成固定 oc-kb skill，指引 Hermes 通过 manager runtime API 检索/写入知识库；
+- manifest.resources.skills 列出的版本 skill tar 解压到 skills/ 下。
 
 每个由 oc-entrypoint 管理的 skill 目录都写入 .oc-managed 标记文件；
 每次渲染前先清掉所有含该标记的目录，再重新渲染，保证已删除/切换的 skill 不残留。
@@ -9,9 +12,7 @@
 from __future__ import annotations
 
 import datetime as _dt
-import hashlib
 import json
-import re
 import shutil
 import tarfile
 from pathlib import Path
@@ -20,52 +21,17 @@ from typing import List
 from lib.atomic import write_text
 from lib.manifest import Manifest
 
-# slug 仅含小写字母数字与连字符；首尾不能是连字符。
-SLUG_PATTERN = re.compile(r"^[a-z0-9]+(-[a-z0-9]+)*$")
-
 # OC_SKILL_MARKER 是 oc-entrypoint 安装的 skill 目录里的隐藏标记文件名。
 # 含该文件的目录由 oc-entrypoint 管理，每次渲染前清空重建；不含的视为镜像内置 skill，永不触碰。
 OC_SKILL_MARKER = ".oc-managed"
 
 
-def slugify_knowledge_path(rel: str) -> str:
-    """规范化为 slugPattern；纯非 ASCII 路径回落到 sha256 短哈希。"""
-    if not rel:
-        return _fallback(rel)
-    # 仅当最后一段含 '.' 时才视为扩展名；纯目录路径不做扩展名裁剪。
-    base = rel.rsplit(".", 1)[0] if "." in rel.rsplit("/", 1)[-1] else rel
-    chars: list[str] = []
-    for c in base:
-        if "a" <= c <= "z" or "0" <= c <= "9":
-            chars.append(c)
-        elif "A" <= c <= "Z":
-            chars.append(c.lower())
-        else:
-            chars.append("-")
-    s = "".join(chars)
-    while "--" in s:
-        s = s.replace("--", "-")
-    s = s.strip("-")
-    if not s or not SLUG_PATTERN.match(s):
-        return _fallback(rel)
-    return s
-
-
-def _fallback(rel: str) -> str:
-    # 与 manager 端 slugFallback 一致：sha256 前 6 字节 hex = 12 个字符。
-    h = hashlib.sha256(rel.encode()).hexdigest()
-    return f"kb-{h[:12]}"
-
-
 def render(m: Manifest, input_root: Path, data_root: Path) -> List[str]:
-    """渲染 skill：先清理上次 oc-entrypoint 安装的 skill，再渲染知识库 kb-* 与版本 skill tar。
-
-    返回写入的相对路径列表。镜像内置 skill（无 .oc-managed 标记）不受影响。
-    """
+    """渲染 skill：先清理上次 oc-entrypoint 安装的 skill，再渲染 oc-kb 与版本 skill tar。"""
     skills_root = data_root / "skills"
     _wipe_managed_skills(skills_root)
     outputs: list[str] = []
-    outputs.extend(_render_knowledge_skills(input_root, skills_root))
+    outputs.extend(_render_runtime_knowledge_skill(m, skills_root))
     outputs.extend(_extract_version_skills(m.skills or [], input_root, skills_root))
     return outputs
 
@@ -88,24 +54,15 @@ def _write_marker(skill_dir: Path, source: str) -> None:
     write_text(skill_dir / OC_SKILL_MARKER, json.dumps(payload, ensure_ascii=False) + "\n")
 
 
-def _render_knowledge_skills(input_root: Path, skills_root: Path) -> List[str]:
-    """扫 input/resources/knowledge/{org,app}/* 生成 kb-* skill，每个目录补 .oc-managed 标记。"""
-    outputs: list[str] = []
-    for scope in ("org", "app"):
-        base = input_root / "resources" / "knowledge" / scope
-        if not base.exists():
-            continue
-        for f in sorted(base.rglob("*.md")):
-            rel = f.relative_to(base).as_posix()
-            slug = slugify_knowledge_path(rel)
-            dir_name = f"kb-{scope}-{slug}"
-            target_dir = skills_root / dir_name
-            target_dir.mkdir(parents=True, exist_ok=True)
-            body = _render_skill_md(scope, dir_name, rel, f.read_text())
-            write_text(target_dir / "SKILL.md", body)
-            _write_marker(target_dir, "knowledge")
-            outputs.append(f"skills/{dir_name}/SKILL.md")
-    return outputs
+def _render_runtime_knowledge_skill(m: Manifest, skills_root: Path) -> List[str]:
+    """manifest 含 knowledge 配置时生成固定 oc-kb skill；token 只进环境变量，不写入 SKILL.md。"""
+    if not (m.knowledge_runtime_base_url and m.knowledge_app_token):
+        return []
+    skill_dir = skills_root / "oc-kb"
+    skill_dir.mkdir(parents=True, exist_ok=True)
+    write_text(skill_dir / "SKILL.md", _OC_KB_SKILL_MD)
+    _write_marker(skill_dir, "runtime-knowledge")
+    return ["skills/oc-kb/SKILL.md"]
 
 
 def _is_safe_member_path(name: str) -> bool:
@@ -146,40 +103,19 @@ def _extract_version_skills(skill_rels: List[str], input_root: Path, skills_root
     return outputs
 
 
-def _render_skill_md(scope: str, dir_name: str, rel: str, body: str) -> str:
-    # 沿用旧 manager 端 hermes/skills.go 的 frontmatter + body 模板。
-    # heading 为 body 首个 markdown H1；非空表示用户文件自带标题。
-    heading = _extract_heading(body)
-    title = heading or rel
-    if scope == "org":
-        desc = (
-            f"组织级知识库文件 {title}。介绍本组织业务、产品、政策、规则等权威信息。"
-            "当用户的提问涉及组织业务、公司、产品、规则、政策、流程时，必须读取本 skill 获取最新内容，"
-            "不要根据通用知识猜测。"
-        )
-    else:
-        desc = (
-            f"应用级知识库文件 {title}。包含本应用专属规则、话术、配置，优先级高于同名组织级知识。"
-            "用户的任意提问都应先读取本 skill 确认是否有匹配规则；有则按本 skill 内容回答，"
-            "无则回退到组织级或通用知识。"
-        )
-    # body 已自带 H1 时直接输出，避免「renderer 加的标题 + 文件自带标题」重复；
-    # body 无 H1 时用相对路径补一个标题，保证 SKILL.md 正文有抬头。
-    body_section = body if heading else f"# {title}\n\n{body}"
-    return f"""---
-name: {dir_name}
-description: {desc}
-scope: {scope}
+_OC_KB_SKILL_MD = """---
+name: oc-kb
+description: Search the organization and current app knowledge base through manager, and add local reports to the current app knowledge base.
 ---
 
-{body_section}
+# oc-kb
+
+Use this skill when a user asks questions that may depend on organization policy, product documentation, app-specific rules, or files previously added to the knowledge base.
+
+Commands:
+
+- `oc-kb search "<question>" --top-k 8` searches both the current app knowledge base and the organization knowledge base. App results have higher priority than organization results.
+- `oc-kb add relative/path.md` uploads an existing workspace file into the current app knowledge base. Absolute paths, parent directory traversal, and directories are rejected.
+
+Do not call RAGFlow directly and do not ask for RAGFlow credentials. The `oc-kb` command talks only to manager runtime APIs using the app-scoped token injected by the container entrypoint.
 """
-
-
-def _extract_heading(body: str) -> str:
-    # 提取 markdown body 首个 # 开头行的标题文本（去 # 与空格）。
-    for line in body.splitlines():
-        s = line.strip()
-        if s.startswith("#"):
-            return s.lstrip("#").strip()
-    return ""

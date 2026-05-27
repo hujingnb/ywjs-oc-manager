@@ -20,6 +20,9 @@ def _setup_input(input_root: Path) -> None:
     (input_root / "resources" / "application-rules.md").write_text("APP")
     (input_root / "manifest.yaml").write_text("""
 app: { id: x, name: X, model: m }
+knowledge:
+  runtime_base_url: http://manager-api:8080
+  app_token: runtime-token
 credentials:
   openai: { api_key: sk-x, base_url: http://x }
 resources:
@@ -53,6 +56,7 @@ def test_entrypoint_first_boot(tmp_path: Path) -> None:
     assert (data_root / "config.yaml").exists()
     assert (data_root / "SOUL.md").exists()
     assert (data_root / ".env").exists()
+    assert (data_root / "skills" / "oc-kb" / "SKILL.md").exists()
 
     # phase 5 写下 .oc-state.json
     state = json.loads((data_root / ".oc-state.json").read_text())

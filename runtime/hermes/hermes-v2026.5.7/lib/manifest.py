@@ -34,6 +34,9 @@ class Manifest:
     routing: dict = field(default_factory=dict)
     # skills：版本 skill tar 的相对路径列表（相对 input_root）；缺省空 list。
     skills: list = field(default_factory=list)
+    # knowledge：manager runtime API 配置；不包含 RAGFlow 凭证。
+    knowledge_runtime_base_url: str = ""
+    knowledge_app_token: str = ""
 
 
 def _require(d: dict, *path: str) -> Any:
@@ -58,6 +61,8 @@ def load(path: Union[str, Path]) -> Manifest:
     rules = rules if isinstance(rules, dict) else {}
     routing = raw.get("routing")
     skills = resources.get("skills") if isinstance(resources, dict) else None
+    knowledge = raw.get("knowledge")
+    knowledge = knowledge if isinstance(knowledge, dict) else {}
     return Manifest(
         app_id=_require(raw, "app", "id"),
         app_name=_require(raw, "app", "name"),
@@ -70,4 +75,6 @@ def load(path: Union[str, Path]) -> Manifest:
         rule_application_rel=str(rules.get("application") or ""),
         routing={str(k): str(v) for k, v in routing.items()} if isinstance(routing, dict) else {},
         skills=[str(s) for s in skills] if isinstance(skills, list) else [],
+        knowledge_runtime_base_url=str(knowledge.get("runtime_base_url") or ""),
+        knowledge_app_token=str(knowledge.get("app_token") or ""),
     )

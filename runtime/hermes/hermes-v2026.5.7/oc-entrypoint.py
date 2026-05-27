@@ -40,6 +40,7 @@ def main() -> int:
     except (ManifestError, FileNotFoundError, OSError) as e:
         oclog.emit("load_manifest", "error", str(e))
         return 1
+    _configure_knowledge_env(manifest)
 
     # phase 2 load state
     state = read_state(data_root)
@@ -88,6 +89,16 @@ def main() -> int:
 
 def _sha256(data: bytes) -> str:
     return hashlib.sha256(data).hexdigest()
+
+
+def _configure_knowledge_env(manifest) -> None:
+    """把 manifest knowledge 配置注入 Hermes 进程环境，供 oc-kb 子命令使用。"""
+    if manifest.knowledge_runtime_base_url and manifest.knowledge_app_token:
+        os.environ["OC_KB_RUNTIME_BASE_URL"] = manifest.knowledge_runtime_base_url
+        os.environ["OC_KB_APP_TOKEN"] = manifest.knowledge_app_token
+        return
+    os.environ.pop("OC_KB_RUNTIME_BASE_URL", None)
+    os.environ.pop("OC_KB_APP_TOKEN", None)
 
 
 if __name__ == "__main__":

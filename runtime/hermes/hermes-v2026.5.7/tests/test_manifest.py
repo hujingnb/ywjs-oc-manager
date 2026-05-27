@@ -74,7 +74,7 @@ resources:
 
 
 def test_load_v2_parses_routing_and_skills(tmp_path: Path) -> None:
-    # 验证 manifest v2 的 routing 与 resources.skills 被解析；org/app rule 缺省也合法。
+    # 验证 manifest v2 的 routing、resources.skills 与 knowledge 配置被解析；org/app rule 缺省也合法。
     p = write(tmp_path / "manifest.yaml", """
 app:
   id: app-x
@@ -83,6 +83,9 @@ app:
 routing:
   vision: gpt-5.4
   compression: deepseek-flash
+knowledge:
+  runtime_base_url: http://manager-api:8080
+  app_token: runtime-token
 credentials:
   openai: { api_key: sk-x, base_url: http://x }
 resources:
@@ -96,6 +99,8 @@ resources:
     m = load(p)
     assert m.routing == {"vision": "gpt-5.4", "compression": "deepseek-flash"}
     assert m.skills == ["resources/skills/weather.tar", "resources/skills/calc.tar"]
+    assert m.knowledge_runtime_base_url == "http://manager-api:8080"
+    assert m.knowledge_app_token == "runtime-token"
     assert m.rule_organization_rel == ""
     assert m.rule_application_rel == ""
 
