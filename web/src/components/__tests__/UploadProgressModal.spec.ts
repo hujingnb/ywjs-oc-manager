@@ -140,5 +140,7 @@ describe('UploadProgressModal', () => {
     await nextTick()
     await wrapper.find('button').trigger('click')
     expect(store.session).toBeNull()
+    await nextTick()
+    expect(wrapper.find('.modal').exists()).toBe(false)
   })
 })

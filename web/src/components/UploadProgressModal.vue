@@ -1,6 +1,7 @@
 <template>
   <NModal
-    :show="session !== null"
+    v-if="session !== null"
+    :show="true"
     :mask-closable="false"
     :closable="!isUploading"
     preset="card"
@@ -50,7 +51,8 @@ import { NButton, NCollapse, NCollapseItem, NModal, NProgress } from 'naive-ui'
 
 import { useUploadProgressStore } from '@/stores/uploadProgress'
 
-// UploadProgressModal 是全局唯一的文件上传进度反馈窗口；订阅 store 自动显示 / 隐藏。
+// UploadProgressModal 是全局唯一的文件上传进度反馈窗口；订阅 store 自动挂载 / 卸载。
+// 关闭时直接卸载 NModal，避免 show=false 过渡期间留下无内容弹窗。
 // App.vue 根节点统一挂载，业务页面不需要自己渲染 modal。
 const store = useUploadProgressStore()
 const session = computed(() => store.session)
