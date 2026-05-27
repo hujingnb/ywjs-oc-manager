@@ -148,8 +148,13 @@ func CanReadOrgKnowledge(p Principal, orgID string) bool {
 }
 
 // CanWriteOrgKnowledge 判断主体是否可写入组织知识库。
-// 组织知识库写入只允许本组织管理员，平台管理员不可绕过组织边界直接写入。
+// 与 ragflow-knowledge-design 一致：允许组织管理员管本组织，平台管理员可跨组织维护知识库
+// （上传公共制度文档、运维补充资料等场景需要平台侧介入；不放开会强迫将平台管理员降级为
+// 某个组织的临时管理员，权限模型反而更乱）。
 func CanWriteOrgKnowledge(p Principal, orgID string) bool {
+	if p.Role == domain.UserRolePlatformAdmin {
+		return true
+	}
 	return p.Role == domain.UserRoleOrgAdmin && p.OrgID == orgID
 }
 

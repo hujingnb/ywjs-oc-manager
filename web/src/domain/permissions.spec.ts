@@ -28,11 +28,19 @@ describe('canManageOrgKnowledge', () => {
     ).toBe(false)
   })
 
-  // 覆盖 platform_admin 无法管理组织知识库（只读观察视角）。
-  it('platform_admin 返回 false', () => {
+  // 覆盖 platform_admin 跨组织也可管理组织知识库
+  // （运维 / 公共制度文档场景必须由平台侧介入，与后端 CanWriteOrgKnowledge 保持一致）。
+  it('platform_admin 跨组织也返回 true', () => {
     expect(
       canManageOrgKnowledge({ role: 'platform_admin', org_id: undefined }, 'org-1'),
-    ).toBe(false)
+    ).toBe(true)
+  })
+
+  // 覆盖 platform_admin 不传 orgId 时也允许（管理后台默认入口场景）。
+  it('platform_admin 省略 orgId 时返回 true', () => {
+    expect(
+      canManageOrgKnowledge({ role: 'platform_admin' }),
+    ).toBe(true)
   })
 
   // 覆盖 org_member 无法管理组织知识库（仅 org_admin 可写）。

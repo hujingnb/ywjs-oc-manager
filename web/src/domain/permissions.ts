@@ -25,10 +25,13 @@ export function canCreateAppForOrg(user: PermissionUser | null | undefined, orgI
   return user?.role === 'org_admin' && Boolean(orgId) && user.org_id === orgId
 }
 
-// 组织知识库写入会影响组织共享上下文，只允许本组织管理员执行。
+// 组织知识库写入：组织管理员管本组织、平台管理员可跨组织维护
+// （上传公共制度文档、运维补充资料等场景需要平台侧介入，与后端 CanWriteOrgKnowledge 保持一致）。
 // orgId 省略时回退到用户自身的 org_id，避免页面未显式传入组织上下文时按钮消失。
 export function canManageOrgKnowledge(user: PermissionUser | null | undefined, orgId?: string): boolean {
-  if (!user || user.role !== 'org_admin') return false
+  if (!user) return false
+  if (user.role === 'platform_admin') return true
+  if (user.role !== 'org_admin') return false
   // target 优先使用调用方传入的 orgId；未传时回退用户自身 org_id（org_admin 只有一个归属组织）。
   const target = orgId ?? user.org_id
   return Boolean(target) && user.org_id === target

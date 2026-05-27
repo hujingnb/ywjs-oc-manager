@@ -191,11 +191,12 @@ func TestOrgKnowledgePredicates(t *testing.T) {
 	runOrgCases(t, CanReadOrgKnowledge, readCases)
 
 	writeCases := []orgCase{
-		{"platform_admin 不可写组织知识库", domain.UserRolePlatformAdmin, orgA, orgB, false}, // 场景：platform_admin 不可写组织知识库
-		{"org_admin 同组织可写组织知识库", domain.UserRoleOrgAdmin, orgA, orgA, true},          // 场景：org_admin 同组织可写组织知识库
-		{"org_admin 跨组织不可写组织知识库", domain.UserRoleOrgAdmin, orgA, orgB, false},        // 场景：org_admin 跨组织不可写组织知识库
-		{"org_member 同组织不可写组织知识库", domain.UserRoleOrgMember, orgA, orgA, false},      // 场景：org_member 同组织不可写组织知识库
-		{"org_member 跨组织不可写组织知识库", domain.UserRoleOrgMember, orgA, orgB, false},      // 场景：org_member 跨组织不可写组织知识库
+		{"platform_admin 跨组织可写组织知识库", domain.UserRolePlatformAdmin, orgA, orgB, true}, // 场景：platform_admin 可跨组织维护知识库（上传公共制度文档 / 运维场景）
+		{"platform_admin 同组织可写组织知识库", domain.UserRolePlatformAdmin, orgA, orgA, true}, // 场景：platform_admin 对自身归属组织也可写
+		{"org_admin 同组织可写组织知识库", domain.UserRoleOrgAdmin, orgA, orgA, true},           // 场景：org_admin 同组织可写组织知识库
+		{"org_admin 跨组织不可写组织知识库", domain.UserRoleOrgAdmin, orgA, orgB, false},         // 场景：org_admin 跨组织不可写组织知识库
+		{"org_member 同组织不可写组织知识库", domain.UserRoleOrgMember, orgA, orgA, false},       // 场景：org_member 同组织不可写组织知识库
+		{"org_member 跨组织不可写组织知识库", domain.UserRoleOrgMember, orgA, orgB, false},       // 场景：org_member 跨组织不可写组织知识库
 	}
 	runOrgCases(t, CanWriteOrgKnowledge, writeCases)
 }
