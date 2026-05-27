@@ -9,32 +9,31 @@
     <template #header-extra>
       <div v-if="canManage" class="upload-actions">
         <span class="upload-limit">{{ KNOWLEDGE_UPLOAD_MAX_MESSAGE }}</span>
-        <label class="secondary-button file-picker" :class="{ disabled: !knowledgeContext || uploading }">
+        <label class="secondary-button file-picker" :class="{ disabled: uploading }">
           上传文件
-          <input type="file" :disabled="!knowledgeContext || uploading" @change="onUploadFile" />
+          <input type="file" :disabled="uploading" @change="onUploadFile" />
         </label>
       </div>
     </template>
 
     <p v-if="!app" class="state-text">尚未加载实例信息</p>
-    <p v-else-if="!knowledgeContext" class="state-text">无法构造知识库查询上下文（缺 org_id / owner_user_id）</p>
     <p v-else-if="errorMessage" class="state-text danger">{{ errorMessage }}</p>
     <div v-else-if="listing.isLoading.value" class="state-text">加载中…</div>
     <p v-else-if="listing.error.value" class="state-text danger">查询失败：{{ listing.error.value?.message }}</p>
     <n-data-table
       v-else
       :columns="columns"
-      :data="listing.data.value?.entries ?? []"
+      :data="listing.data.value?.items ?? []"
       size="small"
       :bordered="false"
-      :row-key="(row) => row.path"
+      :row-key="(row) => row.id"
     />
   </n-card>
 </template>
 
 <script setup lang="ts">
 import { computed, h, inject, ref, type Ref } from 'vue'
-import { NButton, NCard, NDataTable, useMessage, type DataTableColumns } from 'naive-ui'
+import { NButton, NCard, NDataTable, NTag, useMessage, type DataTableColumns } from 'naive-ui'
 
 import type { AppDTO } from '@/api/hooks/useApps'
 import {
@@ -43,34 +42,25 @@ import {
   isKnowledgeUploadTooLarge,
   useAppKnowledgeQuery,
   useDeleteAppKnowledge,
+  useReparseAppKnowledge,
   useUploadAppKnowledge,
+  type KnowledgeDocument,
 } from '@/api/hooks/useKnowledge'
-import type { KnowledgeEntry } from '@/api/hooks/useKnowledge'
 import { canManageApp } from '@/domain/permissions'
 import { useAuthStore } from '@/stores/auth'
 import { useUploadProgressStore } from '@/stores/uploadProgress'
 
-// AppKnowledgeTab 管理单个应用的知识库文件，权限和路径上下文来自应用详情注入。
+// AppKnowledgeTab 管理单个应用的 RAGFlow 知识库文件，权限来自应用详情注入。
 const props = defineProps<{ appId: string }>()
 const appIdRef = computed<string | undefined>(() => props.appId)
 const auth = useAuthStore()
 
 const app = inject<Ref<AppDTO | null>>('app')
 
-// knowledgeContext 将应用归属转换为知识库 API 需要的组织、所有者和相对路径。
-// app 未加载完成时返回 undefined；页面通过 UI guard 避免常规用户操作提前触发，hook 被无上下文调用时仍会防御性抛错。
-const knowledgeContext = computed(() => {
-  if (!app?.value) return undefined
-  return {
-    orgId: app.value.org_id,
-    ownerUserId: app.value.owner_user_id,
-    path: '',
-  }
-})
-
-const listing = useAppKnowledgeQuery(appIdRef, knowledgeContext)
-const uploadMutation = useUploadAppKnowledge(appIdRef, knowledgeContext)
-const deleteMutation = useDeleteAppKnowledge(appIdRef, knowledgeContext)
+const listing = useAppKnowledgeQuery(appIdRef)
+const uploadMutation = useUploadAppKnowledge(appIdRef)
+const deleteMutation = useDeleteAppKnowledge(appIdRef)
+const reparseMutation = useReparseAppKnowledge(appIdRef)
 const errorMessage = ref<string>('')
 const uploadProgress = useUploadProgressStore()
 const message = useMessage()
@@ -82,19 +72,42 @@ const deleting = computed(() => deleteMutation.isPending.value)
 // downloading 标记当前页面正在触发浏览器下载，避免重复点击生成多次下载请求。
 const downloading = ref(false)
 
-// formatBytes 仅用于文件大小展示，目录大小在列渲染中统一降级为占位符。
+// formatBytes 仅用于文件大小展示，RAGFlow 未返回大小时由后端归一化为 0。
 function formatBytes(value: number) {
   if (value < 1024) return `${value} B`
   if (value < 1024 * 1024) return `${(value / 1024).toFixed(1)} KB`
   return `${(value / 1024 / 1024).toFixed(1)} MB`
 }
 
-// entryRelativePath 去掉主副本租户前缀，确保删除和下载接口收到应用知识库内的相对路径。
-function entryRelativePath(entryPath: string) {
-  const context = knowledgeContext.value
-  if (!context) return entryPath
-  const prefix = `org/${context.orgId}/app/${props.appId}/knowledge/`
-  return entryPath.startsWith(prefix) ? entryPath.slice(prefix.length) : entryPath
+// formatTime 对可选创建时间做本地化展示，缺失时统一显示占位符。
+function formatTime(iso?: string): string {
+  if (!iso) return '—'
+  return new Date(iso).toLocaleString('zh-CN', { hour12: false })
+}
+
+// documentTypeLabel 优先展示后端归一化后的后缀，其次展示 MIME type。
+function documentTypeLabel(row: KnowledgeDocument): string {
+  return row.suffix || row.mime_type || '—'
+}
+
+// parseTagType 将 RAGFlow 解析状态映射为标签颜色，未知状态保留默认色便于兼容服务端新增状态。
+function parseTagType(status: string): 'success' | 'warning' | 'error' | 'default' {
+  if (status === 'completed') return 'success'
+  if (status === 'queued' || status === 'running') return 'warning'
+  if (status === 'failed' || status === 'stopped') return 'error'
+  return 'default'
+}
+
+// parseStatusLabel 将 RAGFlow 状态转换为页面文案，未知值直接透出便于排障。
+function parseStatusLabel(status: string): string {
+  const labels: Record<string, string> = {
+    queued: '等待解析',
+    running: '解析中',
+    completed: '已完成',
+    failed: '解析失败',
+    stopped: '已停止',
+  }
+  return labels[status] ?? status
 }
 
 // onUploadFile 处理原生 file input 事件；上传进度统一由全局 UploadProgressModal 展示。
@@ -114,7 +127,6 @@ async function onUploadFile(event: Event) {
   try {
     await uploadProgress.run([{ file, label: file.name }], async (_item, f, ctx) => {
       await uploadMutation.mutateAsync({
-        path: f.name,
         file: f,
         onProgress: ctx.onProgress,
         signal: ctx.signal,
@@ -126,23 +138,22 @@ async function onUploadFile(event: Event) {
 }
 
 // deleteEntry 删除知识库条目并把 mutation 错误转为页面内反馈文案。
-async function deleteEntry(targetPath: string) {
+async function deleteEntry(documentId: string) {
   errorMessage.value = ''
   if (!canManage.value) return
   try {
-    await deleteMutation.mutateAsync(targetPath)
+    await deleteMutation.mutateAsync(documentId)
   } catch (err) {
     errorMessage.value = err instanceof Error ? err.message : '删除失败'
   }
 }
 
-// onDownload 下载应用知识库中的单个文件；目录行不进入该流程。
-async function onDownload(entry: KnowledgeEntry) {
-  const context = knowledgeContext.value
-  if (!context || entry.is_dir || downloading.value) return
+// onDownload 通过 manager 受保护接口下载 RAGFlow document 原文件。
+async function onDownload(entry: KnowledgeDocument) {
+  if (downloading.value) return
   downloading.value = true
   try {
-    await downloadAppKnowledgeFile(props.appId, context.orgId, context.ownerUserId, entryRelativePath(entry.path), entry.name)
+    await downloadAppKnowledgeFile(props.appId, entry.id, entry.name)
   } catch (err) {
     message.error(err instanceof Error ? err.message : '下载失败')
   } finally {
@@ -150,28 +161,58 @@ async function onDownload(entry: KnowledgeEntry) {
   }
 }
 
-// columns 展示文件名、大小、类型和操作；文件行始终可下载，删除按钮只在可管理时出现。
-const columns: DataTableColumns<KnowledgeEntry> = [
-  { title: '名称', key: 'name', render: (row) => h('strong', `${row.name}${row.is_dir ? '/' : ''}`) },
-  { title: '大小', key: 'size', render: (row) => row.is_dir ? '—' : formatBytes(row.size) },
-  { title: '类型', key: 'is_dir', render: (row) => row.is_dir ? '目录' : '文件' },
+// reparseEntry 重新触发 RAGFlow 解析，仅失败或停止的文件允许重新入队。
+async function reparseEntry(documentId: string) {
+  errorMessage.value = ''
+  if (!canManage.value) return
+  try {
+    await reparseMutation.mutateAsync(documentId)
+  } catch (err) {
+    errorMessage.value = err instanceof Error ? err.message : '重解析失败'
+  }
+}
+
+function canReparse(row: KnowledgeDocument): boolean {
+  return row.parse_status === 'failed' || row.parse_status === 'stopped'
+}
+
+// columns 展示 RAGFlow 文档；可读用户可下载，可管理用户额外可删除和重解析。
+const columns: DataTableColumns<KnowledgeDocument> = [
+  { title: '名称', key: 'name', render: (row) => h('strong', row.name) },
+  { title: '大小', key: 'size', render: (row) => formatBytes(row.size) },
+  { title: '类型', key: 'type', render: (row) => documentTypeLabel(row) },
+  {
+    title: '解析状态', key: 'parse_status',
+    render: (row) => h('div', { style: 'display: flex; align-items: center; gap: 8px; flex-wrap: wrap' }, [
+      h(NTag, { type: parseTagType(row.parse_status), size: 'small', bordered: false }, { default: () => parseStatusLabel(row.parse_status) }),
+      row.parse_status === 'running' ? h('span', { class: 'state-text', style: 'margin: 0; font-size: 12px' }, `${row.progress}%`) : null,
+      row.last_error ? h('span', { style: 'color: var(--color-danger); font-size: 12px' }, row.last_error) : null,
+    ]),
+  },
+  { title: '创建时间', key: 'created_at', render: (row) => formatTime(row.created_at) },
   {
     title: '操作', key: 'actions',
     render: (row) => {
-      const actions = []
-      if (!row.is_dir) {
-        actions.push(h(NButton, {
+      const actions = [
+        h(NButton, {
           size: 'small',
           disabled: downloading.value,
           onClick: () => onDownload(row),
-        }, { default: () => downloading.value ? '下载中…' : '下载' }))
-      }
+        }, { default: () => downloading.value ? '下载中…' : '下载' }),
+      ]
       if (canManage.value) {
+        if (canReparse(row)) {
+          actions.push(h(NButton, {
+            size: 'small',
+            disabled: reparseMutation.isPending.value,
+            onClick: () => reparseEntry(row.id),
+          }, { default: () => reparseMutation.isPending.value ? '提交中…' : '重解析' }))
+        }
         actions.push(h(NButton, {
           size: 'small',
           type: 'error',
           disabled: deleting.value,
-          onClick: () => deleteEntry(entryRelativePath(row.path)),
+          onClick: () => deleteEntry(row.id),
         }, { default: () => '删除' }))
       }
       return actions.length ? h('div', { style: 'display: flex; gap: 8px; flex-wrap: wrap' }, actions) : null

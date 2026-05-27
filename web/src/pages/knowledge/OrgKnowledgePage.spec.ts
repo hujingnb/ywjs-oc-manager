@@ -72,8 +72,8 @@ vi.mock('@/api/hooks/useKnowledge', async () => {
     ...actual,
     useOrgKnowledgeQuery: () => ({
       data: ref({
-        path: 'org/org-1/knowledge',
-        entries: [{ path: 'org/org-1/knowledge/docs/readme.md', name: 'readme.md', size: 5, is_dir: false }],
+        items: [{ id: 'doc-1', name: 'readme.md', size: 5, parse_status: 'completed', progress: 100, created_at: '2026-05-27T00:00:00Z' }],
+        total: 1,
       }),
       isLoading: ref(false),
       error: ref(null),
@@ -87,11 +87,7 @@ vi.mock('@/api/hooks/useKnowledge', async () => {
       mutateAsync: vi.fn(),
       isPending: ref(false),
     }),
-    useOrgKnowledgeSyncStatusQuery: () => ({
-      data: ref([]),
-      isLoading: ref(false),
-    }),
-    useRetryOrgKnowledgeSync: () => ({
+    useReparseOrgKnowledge: () => ({
       mutateAsync: vi.fn(),
       isPending: ref(false),
     }),
@@ -141,7 +137,7 @@ describe('OrgKnowledgePage', () => {
     expect(mocks.mutateAsync).not.toHaveBeenCalled()
   })
 
-  // 覆盖组织成员只读场景：可下载组织知识库文件，且真实列表前缀会转换为业务相对路径。
+  // 覆盖组织成员只读场景：可下载组织知识库文件，且下载按 RAGFlow document ID 定位。
   it('组织成员可下载组织知识库文件但不可删除', async () => {
     mocks.canManage.mockReturnValue(false)
     const wrapper = mountPage()
@@ -151,6 +147,6 @@ describe('OrgKnowledgePage', () => {
 
     await wrapper.find('button').trigger('click')
 
-    expect(mocks.downloadOrgKnowledgeFile).toHaveBeenCalledWith('org-1', 'docs/readme.md', 'readme.md')
+    expect(mocks.downloadOrgKnowledgeFile).toHaveBeenCalledWith('org-1', 'doc-1', 'readme.md')
   })
 })

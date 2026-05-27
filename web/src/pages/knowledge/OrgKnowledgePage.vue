@@ -18,16 +18,13 @@
         </div>
       </template>
 
-      <n-space align="center" style="margin-bottom: 12px">
+      <n-space v-if="isPlatformAdmin" align="center" style="margin-bottom: 12px">
         <n-select
-          v-if="isPlatformAdmin"
           v-model:value="selectedOrgId"
           :options="orgOptions"
           style="width: 220px"
           placeholder="选择组织"
         />
-        <span class="state-text" style="margin: 0">当前路径：<code>{{ relativePath || '/' }}</code></span>
-        <n-button v-if="relativePath" size="small" @click="goUp">返回上级</n-button>
       </n-space>
 
       <div v-if="!effectiveOrgId" class="state-text">{{ emptyOrgMessage }}</div>
@@ -36,30 +33,10 @@
       <n-data-table
         v-else
         :columns="fileColumns"
-        :data="listing?.entries ?? []"
+        :data="listing?.items ?? []"
         size="small"
         :bordered="false"
-        :row-key="(row) => row.path"
-      />
-    </n-card>
-
-    <!-- 节点同步状态 -->
-    <n-card v-if="canManage && effectiveOrgId" :bordered="true">
-      <template #header>
-        <div>
-          <p class="eyebrow">Sync · 节点同步状态</p>
-          <h2 style="margin: 0">各节点同步状态</h2>
-        </div>
-      </template>
-
-      <div v-if="syncStatusLoading" class="state-text">加载中…</div>
-      <n-data-table
-        v-else
-        :columns="syncColumns"
-        :data="syncStatuses ?? []"
-        size="small"
-        :bordered="false"
-        :row-key="(row) => row.node_id"
+        :row-key="(row) => row.id"
       />
     </n-card>
   </div>
@@ -75,18 +52,16 @@ import {
   isKnowledgeUploadTooLarge,
   useDeleteOrgKnowledge,
   useOrgKnowledgeQuery,
-  useOrgKnowledgeSyncStatusQuery,
-  useRetryOrgKnowledgeSync,
+  useReparseOrgKnowledge,
   useUploadOrgKnowledge,
-  type KnowledgeEntry,
-  type OrgSyncStatusEntry,
+  type KnowledgeDocument,
 } from '@/api/hooks/useKnowledge'
 import { usePlatformOrgSelection } from '@/composables/usePlatformOrgSelection'
 import { canManageOrgKnowledge } from '@/domain/permissions'
 import { useAuthStore } from '@/stores/auth'
 import { useUploadProgressStore } from '@/stores/uploadProgress'
 
-// OrgKnowledgePage 管理组织级共享知识库，并展示各 runtime node 的同步状态。
+// OrgKnowledgePage 管理组织级共享知识库；文件主库由 RAGFlow 承担，页面只展示扁平 document 列表。
 const props = defineProps<{ orgId?: string }>()
 const auth = useAuthStore()
 const uploadProgress = useUploadProgressStore()
@@ -100,65 +75,57 @@ const {
   organizationsLoading,
 } = usePlatformOrgSelection(computed(() => auth.user), computed(() => props.orgId))
 
-// relativePath 是当前浏览目录的组织内相对路径，空字符串表示知识库根目录。
-const relativePath = ref('')
-const relativeRef = computed(() => relativePath.value)
 const eyebrow = computed(() => (auth.user?.role === 'platform_admin' ? 'Platform · 知识库' : '组织 · 知识库'))
-// canManage 决定上传、删除和同步重试入口是否可见，接口层仍执行最终权限校验。
+// canManage 决定上传、删除和重解析入口是否可见，接口层仍执行最终权限校验。
 const canManage = computed(() => canManageOrgKnowledge(auth.user, effectiveOrgId.value))
 const emptyOrgMessage = computed(() => isPlatformAdmin.value ? '暂无可查看组织' : '当前账号未关联组织')
 
-const { data: listing, isLoading, error } = useOrgKnowledgeQuery(effectiveOrgId, relativeRef)
-const uploadMutation = useUploadOrgKnowledge(effectiveOrgId, relativeRef)
-const deleteMutation = useDeleteOrgKnowledge(effectiveOrgId, relativeRef)
-const { data: syncStatuses, isLoading: syncStatusLoading } = useOrgKnowledgeSyncStatusQuery(effectiveOrgId, canManage)
-const retryMutation = useRetryOrgKnowledgeSync(effectiveOrgId)
+const { data: listing, isLoading, error } = useOrgKnowledgeQuery(effectiveOrgId)
+const uploadMutation = useUploadOrgKnowledge(effectiveOrgId)
+const deleteMutation = useDeleteOrgKnowledge(effectiveOrgId)
+const reparseMutation = useReparseOrgKnowledge(effectiveOrgId)
 // downloading 标记当前页面正在触发浏览器下载，防止同一页面重复点击下载按钮。
 const downloading = ref(false)
 
-// syncTagType 将同步状态映射为标签颜色，未知状态保留默认色便于兼容后端新增状态。
-function syncTagType(s: string): 'success' | 'warning' | 'error' | 'default' {
-  return s === 'synced' ? 'success' : s === 'pending' ? 'warning' : s === 'failed' ? 'error' : 'default'
+// parseTagType 将 RAGFlow 解析状态映射为标签颜色，未知状态保留默认色便于兼容服务端新增状态。
+function parseTagType(status: string): 'success' | 'warning' | 'error' | 'default' {
+  if (status === 'completed') return 'success'
+  if (status === 'queued' || status === 'running') return 'warning'
+  if (status === 'failed' || status === 'stopped') return 'error'
+  return 'default'
 }
 
-// syncStatusLabel 将同步状态映射为中文文案，未知状态保留原始值。
-function syncStatusLabel(s: string): string {
-  return s === 'synced' ? '已同步' : s === 'pending' ? '同步中' : s === 'failed' ? '失败' : s
+// parseStatusLabel 将 RAGFlow 状态转换为页面文案，未知值直接透出便于排障。
+function parseStatusLabel(status: string): string {
+  const labels: Record<string, string> = {
+    queued: '等待解析',
+    running: '解析中',
+    completed: '已完成',
+    failed: '解析失败',
+    stopped: '已停止',
+  }
+  return labels[status] ?? status
 }
 
-// formatTime 对可选同步时间做本地化展示，缺失时统一显示占位符。
+// formatTime 对可选创建时间做本地化展示，缺失时统一显示占位符。
 function formatTime(iso?: string): string {
   if (!iso) return '—'
   return new Date(iso).toLocaleString('zh-CN', { hour12: false })
 }
 
-// formatSize 用于文件大小展示，目录大小由表格列降级为占位符。
+// documentTypeLabel 优先展示后端归一化后的后缀，其次展示 MIME type。
+function documentTypeLabel(row: KnowledgeDocument): string {
+  return row.suffix || row.mime_type || '—'
+}
+
+// formatSize 用于文件大小展示，RAGFlow 未返回大小时降级为 0 B。
 function formatSize(value: number): string {
   if (value < 1024) return `${value} B`
   if (value < 1024 * 1024) return `${(value / 1024).toFixed(1)} KB`
   return `${(value / 1024 / 1024).toFixed(2)} MB`
 }
 
-// enter 只允许目录项进入下一级，文件项点击不改变当前路径。
-function enter(entry: KnowledgeEntry) {
-  if (entry.is_dir) relativePath.value = entry.path
-}
-
-// goUp 返回上一级目录，根目录继续保持空路径。
-function goUp() {
-  const segments = relativePath.value.split('/').filter(Boolean)
-  segments.pop()
-  relativePath.value = segments.join('/')
-}
-
-// entryRelativePath 去掉主副本租户前缀，确保删除和下载接口收到组织知识库内的相对路径。
-function entryRelativePath(entryPath: string) {
-  if (!effectiveOrgId.value) return entryPath
-  const prefix = `org/${effectiveOrgId.value}/knowledge/`
-  return entryPath.startsWith(prefix) ? entryPath.slice(prefix.length) : entryPath
-}
-
-// onUpload 将文件保存到当前目录；上传进度统一由全局 UploadProgressModal 展示。
+// onUpload 将文件上传到 RAGFlow 组织 dataset；上传进度统一由全局 UploadProgressModal 展示。
 // 互斥规则：会话进行中 store.run 抛错，业务侧用 n-message 提示用户。
 async function onUpload(event: Event) {
   const input = event.target as HTMLInputElement
@@ -171,11 +138,9 @@ async function onUpload(event: Event) {
     message.warning(KNOWLEDGE_UPLOAD_MAX_MESSAGE)
     return
   }
-  const target = relativePath.value ? `${relativePath.value}/${file.name}` : file.name
   try {
     await uploadProgress.run([{ file, label: file.name }], async (_item, f, ctx) => {
       await uploadMutation.mutateAsync({
-        path: target,
         file: f,
         onProgress: ctx.onProgress,
         signal: ctx.signal,
@@ -188,17 +153,17 @@ async function onUpload(event: Event) {
 }
 
 // onDelete 使用浏览器确认框拦截误删，删除后由 mutation hook 负责刷新列表缓存。
-async function onDelete(entry: KnowledgeEntry) {
+async function onDelete(entry: KnowledgeDocument) {
   if (!confirm(`确认删除 ${entry.name} ？`)) return
-  await deleteMutation.mutateAsync(entryRelativePath(entry.path))
+  await deleteMutation.mutateAsync(entry.id)
 }
 
-// onDownload 下载组织知识库中的单个文件；目录行不调用此函数。
-async function onDownload(entry: KnowledgeEntry) {
+// onDownload 通过 manager 受保护接口下载 RAGFlow document 原文件。
+async function onDownload(entry: KnowledgeDocument) {
   if (!effectiveOrgId.value) return
   downloading.value = true
   try {
-    await downloadOrgKnowledgeFile(effectiveOrgId.value, entryRelativePath(entry.path), entry.name)
+    await downloadOrgKnowledgeFile(effectiveOrgId.value, entry.id, entry.name)
   } catch (err) {
     message.error(err instanceof Error ? err.message : '下载失败')
   } finally {
@@ -206,24 +171,35 @@ async function onDownload(entry: KnowledgeEntry) {
   }
 }
 
-// onRetry 针对单个 runtime node 重新入队同步任务。
-async function onRetry(nodeId: string) {
-  await retryMutation.mutateAsync(nodeId)
+// onReparse 重新触发 RAGFlow 解析，仅失败或停止的文件允许重新入队。
+async function onReparse(entry: KnowledgeDocument) {
+  await reparseMutation.mutateAsync(entry.id)
 }
 
-// fileColumns 展示知识库文件；文件行始终可下载，删除入口仅对可管理用户开放。
-const fileColumns: DataTableColumns<KnowledgeEntry> = [
+function canReparse(row: KnowledgeDocument): boolean {
+  return row.parse_status === 'failed' || row.parse_status === 'stopped'
+}
+
+// fileColumns 展示 RAGFlow 文档；组织成员可下载，管理者额外可删除和重解析。
+const fileColumns: DataTableColumns<KnowledgeDocument> = [
   {
     title: '名称', key: 'name',
-    render: (row) => row.is_dir
-      ? h('strong', { style: 'cursor: pointer; color: var(--color-info-text); text-decoration: underline dotted', onClick: () => enter(row) }, `${row.name}/`)
-      : row.name,
+    render: (row) => h('strong', row.name),
   },
-  { title: '大小', key: 'size', render: (row) => row.is_dir ? '—' : formatSize(row.size) },
+  { title: '大小', key: 'size', render: (row) => formatSize(row.size) },
+  { title: '类型', key: 'type', render: (row) => documentTypeLabel(row) },
+  {
+    title: '解析状态', key: 'parse_status',
+    render: (row) => h('div', { style: 'display: flex; align-items: center; gap: 8px; flex-wrap: wrap' }, [
+      h(NTag, { type: parseTagType(row.parse_status), size: 'small', bordered: false }, { default: () => parseStatusLabel(row.parse_status) }),
+      row.parse_status === 'running' ? h('span', { class: 'state-text', style: 'margin: 0; font-size: 12px' }, `${row.progress}%`) : null,
+      row.last_error ? h('span', { style: 'color: var(--color-danger); font-size: 12px' }, row.last_error) : null,
+    ]),
+  },
+  { title: '创建时间', key: 'created_at', render: (row) => formatTime(row.created_at) },
   {
     title: '操作', key: 'actions',
     render: (row) => {
-      if (row.is_dir) return null
       const actions = [
         h(NButton, {
           size: 'small',
@@ -232,34 +208,22 @@ const fileColumns: DataTableColumns<KnowledgeEntry> = [
         }, { default: () => downloading.value ? '下载中…' : '下载' }),
       ]
       if (canManage.value) {
-        actions.push(h(NButton, { size: 'small', onClick: () => onDelete(row) }, { default: () => '删除' }))
+        if (canReparse(row)) {
+          actions.push(h(NButton, {
+            size: 'small',
+            disabled: reparseMutation.isPending.value,
+            onClick: () => onReparse(row),
+          }, { default: () => reparseMutation.isPending.value ? '提交中…' : '重解析' }))
+        }
+        actions.push(h(NButton, {
+          size: 'small',
+          type: 'error',
+          disabled: deleteMutation.isPending.value,
+          onClick: () => onDelete(row),
+        }, { default: () => '删除' }))
       }
       return h('div', { style: 'display: flex; gap: 8px; flex-wrap: wrap' }, actions)
     },
-  },
-]
-
-// syncColumns 展示各节点同步状态和错误，便于组织管理员定位分发问题。
-const syncColumns: DataTableColumns<OrgSyncStatusEntry> = [
-  { title: '节点 ID', key: 'node_id', render: (row) => h('code', row.node_id.slice(0, 12)) },
-  {
-    title: '状态', key: 'status',
-    render: (row) => h(NTag, { type: syncTagType(row.status), size: 'small', bordered: false }, { default: () => syncStatusLabel(row.status) }),
-  },
-  { title: '最近成功', key: 'last_success_at', render: (row) => formatTime(row.last_success_at) },
-  {
-    title: '最近错误', key: 'last_error',
-    render: (row) => row.last_error
-      ? h('span', { style: 'color: var(--color-danger); font-size: 12px' }, row.last_error)
-      : '—',
-  },
-  {
-    title: '操作', key: 'actions',
-    render: (row) => h(NButton, {
-      size: 'small',
-      disabled: retryMutation.isPending.value,
-      onClick: () => onRetry(row.node_id),
-    }, { default: () => retryMutation.isPending.value ? '入队中…' : '重试同步' }),
   },
 ]
 </script>

@@ -60,28 +60,28 @@ describe('知识库上传大小限制', () => {
 })
 
 describe('知识库文件下载', () => {
-  // 覆盖组织知识库下载工具：路径参数需要 URL 编码，且受保护接口必须携带 Bearer token。
+  // 覆盖组织知识库下载工具：document ID 进入路径，且受保护接口必须携带 Bearer token。
   it('请求组织知识库下载接口并触发浏览器下载', async () => {
     const fetchMock = vi.fn().mockResolvedValue(new Response(new Blob(['hello']), { status: 200 }))
     vi.stubGlobal('fetch', fetchMock)
 
-    await downloadOrgKnowledgeFile('org-1', 'docs/read me.md', 'read me.md')
+    await downloadOrgKnowledgeFile('org-1', 'doc-1', 'read me.md')
 
-    expect(fetchMock).toHaveBeenCalledWith('/api/v1/organizations/org-1/knowledge/file?path=docs%2Fread+me.md', {
+    expect(fetchMock).toHaveBeenCalledWith('/api/v1/organizations/org-1/knowledge/doc-1/file', {
       headers: { Authorization: 'Bearer access-1' },
     })
     expect(clickSpy).toHaveBeenCalledTimes(1)
   })
 
-  // 覆盖实例知识库下载工具：实例、组织、所有者和路径共同定位应用级知识库文件。
+  // 覆盖实例知识库下载工具：实例 ID 与 document ID 共同定位应用级知识库文件。
   it('请求实例知识库下载接口并触发浏览器下载', async () => {
     const fetchMock = vi.fn().mockResolvedValue(new Response(new Blob(['app']), { status: 200 }))
     vi.stubGlobal('fetch', fetchMock)
 
-    await downloadAppKnowledgeFile('app-1', 'org-1', 'user-1', 'docs/app.md', 'app.md')
+    await downloadAppKnowledgeFile('app-1', 'doc-app-1', 'app.md')
 
     expect(fetchMock).toHaveBeenCalledWith(
-      '/api/v1/apps/app-1/knowledge/file?org_id=org-1&owner_user_id=user-1&path=docs%2Fapp.md',
+      '/api/v1/apps/app-1/knowledge/doc-app-1/file',
       { headers: { Authorization: 'Bearer access-1' } },
     )
     expect(clickSpy).toHaveBeenCalledTimes(1)
@@ -95,7 +95,7 @@ describe('知识库文件下载', () => {
       throw new Error('click failed')
     })
 
-    await expect(downloadOrgKnowledgeFile('org-1', 'docs/read me.md', 'read me.md')).rejects.toThrow('click failed')
+    await expect(downloadOrgKnowledgeFile('org-1', 'doc-1', 'read me.md')).rejects.toThrow('click failed')
 
     expect(URL.revokeObjectURL).toHaveBeenCalledWith('blob:knowledge')
     expect(document.body.querySelector('a[download="read me.md"]')).toBeNull()
@@ -112,7 +112,7 @@ describe('知识库文件下载', () => {
     vi.stubGlobal('fetch', fetchMock)
 
     try {
-      await downloadOrgKnowledgeFile('org-1', 'docs/secret.md', 'secret.md')
+      await downloadOrgKnowledgeFile('org-1', 'doc-secret', 'secret.md')
       throw new Error('expected download to fail')
     } catch (error) {
       expect((error as Error).message).toBe('无权访问该知识库')

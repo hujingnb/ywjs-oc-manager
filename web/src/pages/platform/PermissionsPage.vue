@@ -67,11 +67,9 @@ const sections: PermSection[] = [
     title: '知识库',
     rows: [
       { op: '读取组织知识库', admin: '✅', orgAdmin: '🟡 本组织', member: '🟡 本组织' },
-      { op: '写入组织知识库', admin: '❌', orgAdmin: '🟡 本组织', member: '❌' },
-      { op: '查看组织知识库同步状态', admin: '❌', orgAdmin: '🟡 本组织', member: '❌' },
-      { op: '触发组织知识库同步重试', admin: '❌', orgAdmin: '🟡 本组织', member: '❌' },
+      { op: '写入 / 重解析组织知识库', admin: '❌', orgAdmin: '🟡 本组织', member: '❌' },
       { op: '读取应用知识库', admin: '✅', orgAdmin: '🟡 本组织', member: '🟡 仅自己' },
-      { op: '写入应用知识库', admin: '❌', orgAdmin: '🟡 本组织', member: '🟡 仅自己' },
+      { op: '写入 / 重解析应用知识库', admin: '❌', orgAdmin: '🟡 本组织', member: '🟡 仅自己' },
     ],
   },
   {
