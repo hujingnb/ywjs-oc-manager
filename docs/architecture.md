@@ -79,11 +79,10 @@ PostgreSQL
 | `internal/migrations` | golang-migrate up/down SQL，数据库 schema 唯一来源 |
 | `internal/scheduler` | 定时扫描 PostgreSQL jobs 表，把到期任务推入 Redis 队列；兜底机制 |
 | `internal/worker` | 从 Redis 队列消费 job ID，派发到 `handlers/` 下对应 handler 执行 |
-| `internal/worker/handlers` | 各 job 类型的执行逻辑：`app_initialize` / `app_health_check` / `app_runtime_ops` / `channel_login` / `knowledge_sync` / `newapi_key_status` / `runtime_refresh_status` |
+| `internal/worker/handlers` | 各 job 类型的执行逻辑：`app_initialize` / `app_health_check` / `app_runtime_ops` / `channel_login` / `newapi_key_status` / `runtime_refresh_status` |
 | `internal/integrations` | 外部系统 HTTP client 封装：`agent`（docker proxy + file client + scope client）/ `newapi`（渠道 / 计费）/ `hermes`（配置渲染）/ `channel`（微信扫码）/ `runtime`（节点层抽象）/ `httpclient`（基础 HTTP 工具） |
 | `internal/runtime/imagesync` | 把宿主 `hermes-runtime` 镜像 `docker save` 后流给 agent `docker load`，以 Docker ImageID 为对账锚点 |
 | `internal/auth` | JWT 签发与校验 / CSRF token / 密码哈希 / 密钥加密（AES-256-GCM） |
-| `internal/files` | 路径沙箱（`SafeRoot`），防止节点文件 API 路径遍历越权 |
 | `internal/redis` | Redis 客户端封装与队列（Stream-based job 信号） |
 | `internal/log` | 结构化日志（slog 封装）与日志脱敏（`redact`） |
 
@@ -156,7 +155,7 @@ docker proxy 创建。
 容器以只读方式挂载为 `/opt/oc-input`；Hermes 运行时数据位于
 `{data_root}/apps/<app_id>/data/`，容器挂载为 `/opt/data`。容器启动工作目录为
 `/opt/data/workspace`，`oc-entrypoint` 在启动时从 input 渲染 `config.yaml`、
-`SOUL.md`、`.env` 与 `skills/kb-*`。详细约定见
+`SOUL.md`、`.env` 与 `skills/oc-kb`。详细约定见
 `runtime/hermes/hermes-v2026.5.16/CONTRACT.md`，Hermes 容器机制专题见
 `docs/hermes-container.md`。
 
@@ -164,10 +163,10 @@ docker proxy 创建。
 
 | 存储 | 内容 | 备份策略 |
 |---|---|---|
-| PostgreSQL | 业务库（组织 / 成员 / 应用 / 节点 / 知识库元数据）/ job 队列状态 / 审计日志 / 资源指标样本 | 见 `deploy/operations.md` |
+| PostgreSQL | 业务库（组织 / 成员 / 应用 / 节点 / RAGFlow dataset/document 映射）/ job 队列状态 / 审计日志 / 资源指标样本 | 见 `deploy/operations.md` |
 | Redis | job 信号队列（Stream）/ 短期锁 / 无需长期保存的状态 | 不需要长期备份；重启后 scheduler 从 PostgreSQL jobs 表重建队列 |
-| agent 文件系统 | `{data_root}/apps/<id>/input/`（挂载到 Hermes `/opt/oc-input`）/ `{data_root}/apps/<id>/data/`（挂载到 Hermes `/opt/data`）/ 组织与应用知识库同步副本（`{data_root}/orgs/<org_id>/...`、`{data_root}/apps/<app_id>/...`） | 节点本地磁盘，建议定期快照；参考 `docs/hermes-container.md` |
-| manager 文件系统 | 知识库主副本（`{manager.knowledge_root}/...`） | 与 PostgreSQL 同步备份；主副本丢失则所有节点的知识库同步将失效 |
+| agent 文件系统 | `{data_root}/apps/<id>/input/`（挂载到 Hermes `/opt/oc-input`）/ `{data_root}/apps/<id>/data/`（挂载到 Hermes `/opt/data`） | 节点本地磁盘，建议定期快照；参考 `docs/hermes-container.md` |
+| RAGFlow | 知识库文件主库、解析状态、chunk 与检索索引 | 由 `deploy/ragflow` 独立部署和备份；manager 通过 HTTP API 访问 |
 | Hermes 镜像 | skills 内置库 / Hermes bin / oc-entrypoint renderer | 由 `runtime/hermes/hermes-v2026.5.16/` 构建产物决定；通过 `make build-hermes-runtime` 构建后由 `imagesync` 分发到节点 |
 
 ## 4. 关键数据流
@@ -194,32 +193,38 @@ MemberOnboardingService.OnboardMember
                 ▼（异步）
 worker app_initialize handler：
    ├─ ImageDistributionService 把 hermes-runtime 镜像 push 到目标节点
-   ├─ 上传 .hermes/ 配置文件到节点（SOUL.md / persona / knowledge skills）
-   ├─ DockerProxy 创建容器（单一 bind mount：.hermes/ → /opt/data）
+   ├─ 上传 manifest/resources/skills 到节点 input
+   ├─ 写入 Hermes 知识库 runtime API endpoint 与 app token
+   ├─ DockerProxy 创建容器（input 只读挂载 + data 可写挂载）
    ├─ new-api 创建用户 + api_key（sk- 写入 Hermes 配置）
    ├─ 启动容器
    └─ UPDATE apps SET status='running'
 ```
 
-### 4.2 知识库同步（manager 主副本 → 节点）
+### 4.2 知识库（manager 权限 → RAGFlow 主库 → Hermes runtime）
 
 ```text
-上传文件：PUT /api/v1/orgs/{orgId}/knowledge?path=foo/bar.pdf
+上传文件：POST /api/v1/organizations/{orgId}/knowledge?filename=foo.pdf
        │
        ▼
-KnowledgeHandler → KnowledgeService.PutOrgFile
-   ├─ files.SafeRoot 沙箱化路径
-   ├─ 写本地主副本（manager knowledge_root）
-   ├─ 写 audit
-   ├─ 列出该组织所有 active 应用所在节点
-   └─ 为每个节点入队 knowledge_sync_node job
+KnowledgeHandler → KnowledgeService.SaveOrgFile
+   ├─ authorizer 校验 manager 业务权限
+   ├─ 确保 org/app RAGFlow dataset 映射存在
+   ├─ 调 RAGFlow 上传 document 并触发 parse
+   ├─ 写 ragflow_documents 元数据缓存
+   └─ 返回扁平 document 列表/解析状态
 
-                ▼（异步）
-worker knowledge_sync_node handler：
-   ├─ 读主副本，向 agent :7002 /v1/scopes/orgs/<id>/knowledge PUT（tar 流）
-   ├─ 写 knowledge_sync_status（per node：synced / failed / pending）
-   └─ 失败按指数退避重试；超过 max_attempts 标记 failed
+Hermes 检索 / 写入：
+   ├─ oc-kb search/add 调 manager runtime API
+   ├─ manager 用 app runtime token 解析当前实例
+   ├─ 组织知识库只读、实例知识库读写
+   └─ manager 代理 RAGFlow retrieval / document upload
 ```
+
+RAGFlow 只承担文件主库、解析和检索能力，不承载 oc-manager 的业务权限。
+manager 是唯一权限边界：用户侧请求先走 JWT/角色权限校验，Hermes runtime 请求
+先走 app runtime token 校验，再由 manager 固定解析可访问的 org/app dataset。
+Hermes 不接收 RAGFlow API key、RAGFlow dataset ID，也不直接访问 RAGFlow HTTP API。
 
 ### 4.3 容器生命周期
 

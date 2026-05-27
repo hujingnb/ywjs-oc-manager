@@ -1,9 +1,13 @@
 # manager 服务生产部署
 
 > 本运行包部署到 manager 服务器，提供 manager-api + manager-web + nginx 反代 + PostgreSQL 17 + Redis 7。
-> 依赖 new-api 与 ollama 已部署并可从本机访问。
+> 依赖 new-api、ollama 与独立的 RAGFlow 服务已部署并可从本机或内网访问。
 
 ## 1. 启动
+
+启动前先确认 `deploy/ragflow` 已完成初始化，并能从 manager 服务器访问
+RAGFlow HTTP API。RAGFlow 控制台内需要先配置 new-api + DeepSeek 模型供应商，
+并创建供 manager 后端使用的 RAGFlow API key。
 
 ```bash
 cp .env.example .env
@@ -51,6 +55,8 @@ docker compose up -d
 - `runtime.enrollment_secret`：与每台 runtime-agent 的 `manager.enrollment_secret` 保持一致，使用 `openssl rand -base64 32` 生成
 - `newapi.base_url`：new-api 服务地址，例如 `https://new-api.example.com`
 - `newapi.admin_token`：在 new-api 后台生成的系统访问令牌
+- `ragflow.base_url`：独立 RAGFlow HTTP API 地址；同机部署可填 `http://host.docker.internal:9380`
+- `ragflow.api_key`：RAGFlow 控制台创建的 API key，仅保存在 manager 后端配置
 - `hermes.llm.base_url`：new-api OpenAI 兼容接口，例如 `https://new-api.example.com/v1`
 - `app.public_base_url`：manager 对外访问地址，用于链接生成和 cookie domain 计算
 
@@ -109,7 +115,6 @@ docker compose logs -f --tail=100 manager-api
 | `./data/postgres` | PostgreSQL 持久化数据 |
 | `./data/redis` | Redis AOF 持久化数据 |
 | `./data/manager` | manager-api 运行数据 |
-| `./data/knowledge` | 知识库文件主副本 |
 | `./tls` | TLS 证书 |
 
 备份和迁移前建议先确认 `docker compose ps` 中所有服务健康。
@@ -117,6 +122,8 @@ docker compose logs -f --tail=100 manager-api
 ## 6. 常见问题
 
 - **manager-api 保持 unhealthy**：检查 `manager-postgres` 和 `manager-redis` 是否已 healthy；查看 `docker compose logs manager-api` 确认配置错误信息。
-- **首次启动缺少表**：确认已执行迁移命令 `docker compose run --rm manager-api migrate up`。
+- **迁移失败或缺少表**：`manager-api` 启动时会自动执行 `migrate up`。若日志显示迁移失败，先修复配置或数据库连接，再按需执行 `docker compose run --rm manager-api migrate up` 排障。
 - **nginx 502**：manager-api healthcheck 未通过时 Compose 不会把 nginx 转发到 api 容器，排查 api 日志。
 - **TLS 证书错误**：确认 `./tls/fullchain.pem` 和 `./tls/privkey.pem` 存在且匹配当前域名。
+- **知识库接口报错**：优先检查 `deploy/ragflow` 是否已启动，以及 `config/manager.yaml`
+  中 `ragflow.base_url`、`ragflow.api_key` 是否与独立 RAGFlow 服务一致。

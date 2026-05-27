@@ -123,6 +123,147 @@ services:
               count: all
               capabilities: [gpu]
 
+  # RAGFlow 本地 MySQL，保存 RAGFlow 自身账号、dataset 与任务元数据。
+  ragflow-mysql:
+    image: ${RAGFLOW_MYSQL_IMAGE:-mysql:8.0.39}
+    container_name: ragflow-mysql
+    extra_hosts: *host-gateway
+    environment:
+      MYSQL_ROOT_PASSWORD: ${RAGFLOW_MYSQL_PASSWORD:-infini_rag_flow}
+      TZ: Asia/Shanghai
+    command:
+      - --max_connections=1000
+      - --character-set-server=utf8mb4
+      - --collation-server=utf8mb4_unicode_ci
+      - --default-authentication-plugin=mysql_native_password
+      - --tls_version=TLSv1.2,TLSv1.3
+      - --init-file
+      - /data/application/init.sql
+      - --binlog_expire_logs_seconds=604800
+    ports:
+      - "${RAGFLOW_MYSQL_PORT:-13306}:3306"
+    volumes:
+      - ./.local/data/ragflow/mysql:/var/lib/mysql
+      - ./deploy/ragflow/init.sql:/data/application/init.sql:ro
+    healthcheck:
+      test: ["CMD", "mysqladmin", "ping", "-uroot", "-p${RAGFLOW_MYSQL_PASSWORD:-infini_rag_flow}"]
+      interval: 10s
+      timeout: 10s
+      retries: 120
+
+  # RAGFlow 本地 Redis/Valkey，仅供 RAGFlow 内部队列和缓存使用。
+  ragflow-redis:
+    image: ${RAGFLOW_REDIS_IMAGE:-valkey/valkey:8}
+    container_name: ragflow-redis
+    extra_hosts: *host-gateway
+    command: ["redis-server", "--requirepass", "${RAGFLOW_REDIS_PASSWORD:-infini_rag_flow}", "--maxmemory", "128mb", "--maxmemory-policy", "allkeys-lru"]
+    ports:
+      - "${RAGFLOW_REDIS_PORT:-16379}:6379"
+    volumes:
+      - ./.local/data/ragflow/redis:/data
+    healthcheck:
+      test: ["CMD", "redis-cli", "-a", "${RAGFLOW_REDIS_PASSWORD:-infini_rag_flow}", "ping"]
+      interval: 10s
+      timeout: 10s
+      retries: 120
+
+  # RAGFlow 本地 MinIO，保存上传到 RAGFlow 的原始文件与解析中间产物。
+  ragflow-minio:
+    image: ${RAGFLOW_MINIO_IMAGE:-pgsty/minio:RELEASE.2026-03-25T00-00-00Z}
+    container_name: ragflow-minio
+    extra_hosts: *host-gateway
+    command: ["server", "--console-address", ":9001", "/data"]
+    environment:
+      MINIO_ROOT_USER: ${RAGFLOW_MINIO_USER:-rag_flow}
+      MINIO_ROOT_PASSWORD: ${RAGFLOW_MINIO_PASSWORD:-infini_rag_flow}
+      TZ: Asia/Shanghai
+    ports:
+      - "${RAGFLOW_MINIO_PORT:-19000}:9000"
+      - "${RAGFLOW_MINIO_CONSOLE_PORT:-19001}:9001"
+    volumes:
+      - ./.local/data/ragflow/minio:/data
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:9000/minio/health/live"]
+      interval: 10s
+      timeout: 10s
+      retries: 120
+
+  # RAGFlow 本地 Elasticsearch，作为默认向量/全文检索后端。
+  ragflow-es:
+    image: ${RAGFLOW_ELASTICSEARCH_IMAGE:-elasticsearch:8.11.3}
+    container_name: ragflow-es
+    extra_hosts: *host-gateway
+    environment:
+      node.name: ragflow-es
+      ELASTIC_PASSWORD: ${RAGFLOW_ELASTIC_PASSWORD:-infini_rag_flow}
+      bootstrap.memory_lock: "false"
+      discovery.type: single-node
+      xpack.security.enabled: "true"
+      xpack.security.http.ssl.enabled: "false"
+      xpack.security.transport.ssl.enabled: "false"
+      cluster.routing.allocation.disk.watermark.low: 5gb
+      cluster.routing.allocation.disk.watermark.high: 3gb
+      cluster.routing.allocation.disk.watermark.flood_stage: 2gb
+      TZ: Asia/Shanghai
+    mem_limit: ${RAGFLOW_MEM_LIMIT:-4294967296}
+    ulimits:
+      memlock:
+        soft: -1
+        hard: -1
+    ports:
+      - "${RAGFLOW_ES_PORT:-19200}:9200"
+    volumes:
+      - ./.local/data/ragflow/elasticsearch:/usr/share/elasticsearch/data
+    healthcheck:
+      test: ["CMD-SHELL", "curl http://localhost:9200"]
+      interval: 10s
+      timeout: 10s
+      retries: 120
+
+  # RAGFlow 本地服务。manager 通过 http://ragflow:9380 访问 HTTP API；
+  # RAGFlow 调模型时由管理员在 RAGFlow 控制台配置 existing new-api + DeepSeek key。
+  ragflow:
+    image: ${RAGFLOW_IMAGE:-infiniflow/ragflow:v0.25.6}
+    container_name: ragflow
+    extra_hosts: *host-gateway
+    command:
+      - --enable-adminserver
+    environment:
+      DOC_ENGINE: elasticsearch
+      DEVICE: cpu
+      STACK_VERSION: ${RAGFLOW_STACK_VERSION:-8.11.3}
+      ES_HOST: ragflow-es
+      ELASTIC_PASSWORD: ${RAGFLOW_ELASTIC_PASSWORD:-infini_rag_flow}
+      MYSQL_HOST: ragflow-mysql
+      MYSQL_PORT: 3306
+      MYSQL_DBNAME: rag_flow
+      MYSQL_PASSWORD: ${RAGFLOW_MYSQL_PASSWORD:-infini_rag_flow}
+      MYSQL_MAX_PACKET: 1073741824
+      MINIO_HOST: ragflow-minio
+      MINIO_USER: ${RAGFLOW_MINIO_USER:-rag_flow}
+      MINIO_PASSWORD: ${RAGFLOW_MINIO_PASSWORD:-infini_rag_flow}
+      REDIS_HOST: ragflow-redis
+      REDIS_PASSWORD: ${RAGFLOW_REDIS_PASSWORD:-infini_rag_flow}
+      API_PROXY_SCHEME: python
+      REGISTER_ENABLED: ${RAGFLOW_REGISTER_ENABLED:-1}
+      TZ: Asia/Shanghai
+    ports:
+      - "${RAGFLOW_WEB_HTTP_PORT:-8088}:80"
+      - "${RAGFLOW_HTTP_PORT:-9380}:9380"
+      - "${RAGFLOW_ADMIN_HTTP_PORT:-9381}:9381"
+    depends_on:
+      ragflow-mysql:
+        condition: service_healthy
+      ragflow-redis:
+        condition: service_healthy
+      ragflow-minio:
+        condition: service_healthy
+      ragflow-es:
+        condition: service_healthy
+    volumes:
+      - ./.local/data/ragflow/logs:/ragflow/logs
+      - ./deploy/ragflow/service_conf.yaml.template:/ragflow/conf/service_conf.yaml.template:ro
+
   # manager-api 开发容器，挂载源码并通过 air 热重载运行 Go API。
   manager-api:
     image: golang:1.25-bookworm

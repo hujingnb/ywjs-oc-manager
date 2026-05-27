@@ -33,10 +33,10 @@
 - 创建、禁用、重置、删除本组织成员账号；创建账号时同步创建对应应用
 - 查看和管理本组织所有应用（渠道绑定、启停、重建）
 - 设置组织级 AI 人设及成员是否允许覆盖的策略
-- 上传、删除组织级知识库文件（同步到本组织下所有应用节点）
+- 上传、删除组织级知识库文件（由 RAGFlow 解析后供本组织应用检索）
 - 浏览和下载本组织组织级、应用级知识库文件
 - 查看本组织 Token 用量、成员用量、审计日志
-- 触发知识库同步重试（`CanRetryOrgKnowledgeSync`）
+- 对解析失败或已停止的知识库文件触发重新解析
 
 **权限边界**：
 - 只能操作本组织资源（`p.OrgID == orgID` 校验）
@@ -145,10 +145,10 @@
 
 分为两个层级：
 
-- **组织级知识库**：由组织管理员上传，同步到本组织所有应用所在的 Runtime Node；读取者可下载单个普通文件。
-- **应用级知识库**：由应用所有者上传，仅同步到该应用所在节点；读取者可下载单个普通文件。
+- **组织级知识库**：由组织管理员上传到 RAGFlow org dataset；Hermes 只读检索，读取者可下载单个原文件。
+- **应用级知识库**：由应用所有者上传到 RAGFlow app dataset；Hermes 可检索并可通过 `oc-kb add` 写入当前实例知识库。
 
-知识库内容以文件系统为事实来源；manager 只维护文件元数据和同步状态。同步状态追踪在 `internal/service/knowledge_sync_status.go`。
+知识库内容以 RAGFlow 为事实来源；manager 只维护 org/app 与 RAGFlow dataset/document 的映射，并在自身权限模型内控制读写边界。
 
 ### 2.6 渠道（Channel）
 
@@ -202,19 +202,20 @@ worker 执行 app_initialize：
 
 关键状态变更：`draft → initializing → binding_waiting → running`
 
-### 3.3 知识库同步
+### 3.3 知识库管理与检索
 
 ```
 管理员/成员 → 上传知识库文件（CanWriteOrgKnowledge / CanWriteAppKnowledge）
-  → manager 保存文件元数据
-  → 入队 knowledge_sync_node Job（每个目标节点一个 Job）
+  → manager 校验组织/实例权限
+  → manager 上传文件到 RAGFlow document
+  → manager 触发 RAGFlow parse 并缓存 document 元数据
 
-worker 执行 knowledge_sync_node：
-  → 调用 runtime_node_agent 文件 API 推送文件
-  → 更新同步状态（pending → running → succeeded / failed）
+Hermes → oc-kb search/add
+  → 调 manager runtime API
+  → manager 用 app runtime token 解析当前实例
+  → 固定访问当前实例 dataset 和所属组织 dataset
 
-组织知识库变更同步到本组织所有应用节点；
-应用知识库变更只同步到该应用所在节点。
+组织知识库对 Hermes 只读；实例知识库对 Hermes 读写。
 ```
 
 ### 3.4 容器治理（启停 / 重启 / 健康自愈 / 重建）
@@ -271,11 +272,9 @@ worker 执行 knowledge_sync_node：
 | `CanCreateAppForMember` | 为已有成员补建应用实例 | 全部 | 本组织 | 不可 |
 | `CanTriggerRuntimeOperation` | 启停/重启容器等运行时操作 | 不可 | 本组织应用 | 自己应用 |
 | `CanReadOrgKnowledge` | 读取 / 下载组织知识库 | 全部 | 本组织 | 本组织 |
-| `CanWriteOrgKnowledge` | 写入组织知识库 | 不可 | 本组织 | 不可 |
-| `CanViewOrgKnowledgeSyncStatus` | 查看知识库同步状态 | 不可 | 本组织 | 不可 |
-| `CanRetryOrgKnowledgeSync` | 重试知识库同步 | 不可 | 本组织 | 不可 |
+| `CanWriteOrgKnowledge` | 写入 / 删除 / 重解析组织知识库文档 | 不可 | 本组织 | 不可 |
 | `CanReadAppKnowledge` | 读取 / 下载应用知识库 | 全部 | 本组织应用 | 自己应用 |
-| `CanWriteAppKnowledge` | 写入应用知识库 | 不可 | 本组织应用 | 自己应用 |
+| `CanWriteAppKnowledge` | 写入 / 删除 / 重解析应用知识库文档 | 不可 | 本组织应用 | 自己应用 |
 | `CanViewOrgPersona` | 读取组织人设 | 全部 | 本组织 | 本组织 |
 | `CanManageOrgPersona` | 写入组织人设 | 全部（等同 CanManageOrg） | 本组织 | 不可 |
 | `CanViewOrgUsage` | 查看组织聚合用量 | 全部 | 本组织 | 不可 |

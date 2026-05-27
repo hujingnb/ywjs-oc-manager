@@ -22,7 +22,8 @@ This spec spans several subsystems but they are coupled by one deployable featur
 4. User-facing manager APIs and frontend.
 5. Hermes runtime search/add API and image skill.
 6. Removal of the old local sync/render path.
-7. Generated contracts, docs, browser verification.
+7. Docker Compose deployment shape for local debugging and production RAGFlow.
+8. Generated contracts, docs, browser verification.
 
 Do not implement RAGFlow MCP in this feature. MCP remains a future POC only.
 
@@ -187,6 +188,15 @@ Do not implement RAGFlow model-provider automation in manager. The implementatio
 - Modify `docs/hermes-container.md`
 - Modify `docs/product-design.md`
 - Modify `docs/user-manual.md`
+- Modify `deploy/README.md`
+- Modify `deploy/manage/README.md`
+- Create `deploy/ragflow/README.md`
+- Create `deploy/ragflow/.env.example`
+- Create `deploy/ragflow/docker-compose.yml`
+- Create `deploy/ragflow/init.sql`
+- Create `deploy/ragflow/service_conf.yaml.template`
+- Modify root `.env.example`
+- Modify root `docker-compose.yml`
 
 ---
 
@@ -380,6 +390,7 @@ CREATE TABLE ragflow_datasets (
     name text NOT NULL,
     status text NOT NULL DEFAULT 'active' CHECK (status IN ('creating', 'active', 'deleting', 'failed')),
     last_error text NULL,
+    create_claim_token text NULL,
     created_at timestamptz NOT NULL DEFAULT now(),
     updated_at timestamptz NOT NULL DEFAULT now(),
     CONSTRAINT ragflow_datasets_scope_app_check CHECK (
@@ -419,6 +430,14 @@ CREATE INDEX ragflow_documents_parse_status_idx ON ragflow_documents(parse_statu
 
 ALTER TABLE apps ADD COLUMN runtime_token_hash text NULL;
 ALTER TABLE apps ADD COLUMN runtime_token_ciphertext text NULL;
+ALTER TABLE apps ADD CONSTRAINT apps_runtime_token_pair_check CHECK (
+    (runtime_token_hash IS NULL AND runtime_token_ciphertext IS NULL)
+    OR (runtime_token_hash IS NOT NULL AND runtime_token_ciphertext IS NOT NULL)
+);
+
+CREATE UNIQUE INDEX apps_runtime_token_hash_active_unique
+    ON apps(runtime_token_hash)
+    WHERE runtime_token_hash IS NOT NULL AND deleted_at IS NULL;
 
 COMMENT ON TABLE ragflow_datasets IS 'oc-manager 组织/实例知识库到 RAGFlow dataset 的映射。';
 COMMENT ON TABLE ragflow_documents IS 'manager 展示文件列表所需的 RAGFlow document 元数据缓存。';
@@ -429,6 +448,8 @@ COMMENT ON COLUMN apps.runtime_token_ciphertext IS 'Hermes 调 manager runtime A
 Create `internal/migrations/000029_ragflow_knowledge.down.sql`:
 
 ```sql
+DROP INDEX IF EXISTS apps_runtime_token_hash_active_unique;
+ALTER TABLE apps DROP CONSTRAINT IF EXISTS apps_runtime_token_pair_check;
 ALTER TABLE apps DROP COLUMN IF EXISTS runtime_token_ciphertext;
 ALTER TABLE apps DROP COLUMN IF EXISTS runtime_token_hash;
 DROP TABLE IF EXISTS ragflow_documents;
@@ -440,12 +461,35 @@ DROP TABLE IF EXISTS ragflow_datasets;
 Create `internal/store/queries/ragflow_knowledge.sql` with queries named:
 
 ```sql
--- name: CreateRAGFlowDatasetMapping :one
+-- name: CreateRAGFlowOrgDatasetMapping :one
 INSERT INTO ragflow_datasets (
-    scope_type, org_id, app_id, ragflow_dataset_id, name, status, last_error
+    scope_type, org_id, app_id, ragflow_dataset_id, name, status, last_error, create_claim_token
 ) VALUES (
-    $1, $2, $3, $4, $5, $6, $7
+    'org', sqlc.arg(org_id), NULL, NULL, sqlc.arg(name), 'creating', NULL, sqlc.arg(create_claim_token)::text
 )
+ON CONFLICT (org_id) WHERE scope_type = 'org' DO NOTHING
+RETURNING *;
+
+-- name: CreateRAGFlowAppDatasetMapping :one
+INSERT INTO ragflow_datasets (
+    scope_type, org_id, app_id, ragflow_dataset_id, name, status, last_error, create_claim_token
+) VALUES (
+    'app', sqlc.arg(org_id), sqlc.arg(app_id), NULL, sqlc.arg(name), 'creating', NULL, sqlc.arg(create_claim_token)::text
+)
+ON CONFLICT (app_id) WHERE scope_type = 'app' DO NOTHING
+RETURNING *;
+
+-- name: ClaimRAGFlowDatasetCreation :one
+UPDATE ragflow_datasets
+SET status = 'creating',
+    last_error = NULL,
+    create_claim_token = sqlc.arg(create_claim_token)::text,
+    updated_at = now()
+WHERE id = sqlc.arg(id)
+  AND (
+    status = 'failed'
+    OR (status = 'creating' AND updated_at < sqlc.arg(stale_before)::timestamptz)
+  )
 RETURNING *;
 
 -- name: SetRAGFlowDatasetActive :one
@@ -454,8 +498,11 @@ SET ragflow_dataset_id = $2,
     name = $3,
     status = 'active',
     last_error = NULL,
+    create_claim_token = NULL,
     updated_at = now()
 WHERE id = $1
+  AND status = 'creating'
+  AND create_claim_token = $4
 RETURNING *;
 
 -- name: GetRAGFlowOrgDataset :one
@@ -465,8 +512,15 @@ SELECT * FROM ragflow_datasets WHERE scope_type = 'org' AND org_id = $1;
 SELECT * FROM ragflow_datasets WHERE scope_type = 'app' AND app_id = $1;
 
 -- name: MarkRAGFlowDatasetFailed :one
-UPDATE ragflow_datasets SET status = 'failed', last_error = $2, updated_at = now()
-WHERE id = $1 RETURNING *;
+UPDATE ragflow_datasets
+SET status = 'failed',
+    last_error = $2,
+    create_claim_token = NULL,
+    updated_at = now()
+WHERE id = $1
+  AND status = 'creating'
+  AND create_claim_token = $3
+RETURNING *;
 
 -- name: DeleteRAGFlowDatasetMapping :exec
 DELETE FROM ragflow_datasets WHERE id = $1;
@@ -530,6 +584,8 @@ SET runtime_token_hash = $2,
     runtime_token_ciphertext = $3,
     updated_at = now()
 WHERE id = $1 AND deleted_at IS NULL
+  AND runtime_token_hash IS NULL
+  AND runtime_token_ciphertext IS NULL
 RETURNING *;
 
 -- name: GetAppByRuntimeTokenHash :one
@@ -1323,6 +1379,15 @@ rtk git commit -m "chore(api): 同步 RAGFlow 知识库接口契约" -m "根据�
 - Modify: `docs/hermes-container.md`
 - Modify: `docs/product-design.md`
 - Modify: `docs/user-manual.md`
+- Modify: `deploy/README.md`
+- Modify: `deploy/manage/README.md`
+- Create: `deploy/ragflow/README.md`
+- Create: `deploy/ragflow/.env.example`
+- Create: `deploy/ragflow/docker-compose.yml`
+- Create: `deploy/ragflow/init.sql`
+- Create: `deploy/ragflow/service_conf.yaml.template`
+- Modify: `.env.example`
+- Modify: `docker-compose.yml`
 
 - [ ] **Step 1: Update configuration docs**
 
@@ -1341,7 +1406,191 @@ hermes:
 
 Remove `app.knowledge_root` as required config.
 
-- [ ] **Step 2: Update architecture docs**
+- [ ] **Step 2: Update local Compose docs**
+
+Update `.env.example` with local RAGFlow variables:
+
+```dotenv
+RAGFLOW_HTTP_PORT=9380
+RAGFLOW_WEB_HTTP_PORT=8088
+RAGFLOW_ADMIN_HTTP_PORT=9381
+RAGFLOW_MYSQL_PORT=13306
+RAGFLOW_REDIS_PORT=16379
+RAGFLOW_MINIO_PORT=19000
+RAGFLOW_MINIO_CONSOLE_PORT=19001
+RAGFLOW_ES_PORT=19200
+RAGFLOW_IMAGE=infiniflow/ragflow:v0.25.6
+RAGFLOW_MYSQL_PASSWORD=infini_rag_flow
+RAGFLOW_REDIS_PASSWORD=infini_rag_flow
+RAGFLOW_MINIO_USER=rag_flow
+RAGFLOW_MINIO_PASSWORD=infini_rag_flow
+RAGFLOW_ELASTIC_PASSWORD=infini_rag_flow
+```
+
+Update root `docker-compose.yml` so the local development stack includes these services:
+
+```yaml
+ragflow-mysql:
+  image: ${RAGFLOW_MYSQL_IMAGE:-mysql:8.0.39}
+
+ragflow-redis:
+  image: ${RAGFLOW_REDIS_IMAGE:-valkey/valkey:8}
+
+ragflow-minio:
+  image: ${RAGFLOW_MINIO_IMAGE:-pgsty/minio:RELEASE.2026-03-25T00-00-00Z}
+
+ragflow-es:
+  image: ${RAGFLOW_ELASTICSEARCH_IMAGE:-elasticsearch:8.11.3}
+
+ragflow:
+  image: ${RAGFLOW_IMAGE:-infiniflow/ragflow:v0.25.6}
+  ports:
+    - "${RAGFLOW_WEB_HTTP_PORT:-8088}:80"
+    - "${RAGFLOW_HTTP_PORT:-9380}:9380"
+    - "${RAGFLOW_ADMIN_HTTP_PORT:-9381}:9381"
+```
+
+In `docs/configuration.md`, replace the old `.env` description with:
+
+```markdown
+`.env` 文件用于根目录本地 `docker-compose.yml` 的端口映射、RAGFlow 本地依赖镜像和开发默认密码，不替代 `config/manager.yaml` / `config/agent.yaml` 的应用配置。
+```
+
+- [ ] **Step 3: Add production RAGFlow Compose package**
+
+Create `deploy/ragflow/.env.example` with fixed production inputs:
+
+```dotenv
+COMPOSE_PROJECT_NAME=oc-ragflow
+RAGFLOW_IMAGE=infiniflow/ragflow:v0.25.6
+RAGFLOW_MYSQL_IMAGE=mysql:8.0.39
+RAGFLOW_REDIS_IMAGE=valkey/valkey:8
+RAGFLOW_MINIO_IMAGE=pgsty/minio:RELEASE.2026-03-25T00-00-00Z
+RAGFLOW_STACK_VERSION=8.11.3
+RAGFLOW_ELASTICSEARCH_IMAGE=elasticsearch:8.11.3
+RAGFLOW_WEB_HTTP_PORT=8088
+RAGFLOW_HTTP_PORT=9380
+RAGFLOW_ADMIN_HTTP_PORT=9381
+RAGFLOW_MYSQL_PASSWORD=CHANGE_ME_RAGFLOW_MYSQL_PASSWORD
+RAGFLOW_REDIS_PASSWORD=CHANGE_ME_RAGFLOW_REDIS_PASSWORD
+RAGFLOW_MINIO_USER=rag_flow
+RAGFLOW_MINIO_PASSWORD=CHANGE_ME_RAGFLOW_MINIO_PASSWORD
+RAGFLOW_ELASTIC_PASSWORD=CHANGE_ME_RAGFLOW_ELASTIC_PASSWORD
+RAGFLOW_MEM_LIMIT=8589934592
+RAGFLOW_WEB_BIND=127.0.0.1
+RAGFLOW_HTTP_BIND=127.0.0.1
+RAGFLOW_ADMIN_BIND=127.0.0.1
+RAGFLOW_REGISTER_ENABLED=0
+TZ=Asia/Shanghai
+```
+
+Create `deploy/ragflow/docker-compose.yml` with a separate `ragflow-internal` bridge network. The only host ports are:
+
+```yaml
+ports:
+  - "${RAGFLOW_WEB_BIND:-127.0.0.1}:${RAGFLOW_WEB_HTTP_PORT}:80"
+  - "${RAGFLOW_HTTP_BIND:-127.0.0.1}:${RAGFLOW_HTTP_PORT}:9380"
+  - "${RAGFLOW_ADMIN_BIND:-127.0.0.1}:${RAGFLOW_ADMIN_HTTP_PORT}:9381"
+```
+
+Create `deploy/ragflow/init.sql`:
+
+```sql
+CREATE DATABASE IF NOT EXISTS rag_flow;
+USE rag_flow;
+```
+
+Create `deploy/ragflow/service_conf.yaml.template`:
+
+```yaml
+ragflow:
+  host: ${RAGFLOW_HOST:-0.0.0.0}
+  http_port: 9380
+admin:
+  host: ${RAGFLOW_HOST:-0.0.0.0}
+  http_port: 9381
+mysql:
+  name: '${MYSQL_DBNAME:-rag_flow}'
+  user: '${MYSQL_USER:-root}'
+  password: '${MYSQL_PASSWORD:-infini_rag_flow}'
+  host: '${MYSQL_HOST:-ragflow-mysql}'
+  port: ${MYSQL_PORT:-3306}
+  max_connections: 900
+  stale_timeout: 300
+  max_allowed_packet: ${MYSQL_MAX_PACKET:-1073741824}
+minio:
+  user: '${MINIO_USER:-rag_flow}'
+  password: '${MINIO_PASSWORD:-infini_rag_flow}'
+  host: '${MINIO_HOST:-ragflow-minio}:9000'
+  bucket: '${MINIO_BUCKET:-}'
+  prefix_path: '${MINIO_PREFIX_PATH:-}'
+es:
+  hosts: 'http://${ES_HOST:-ragflow-es}:9200'
+  username: '${ES_USER:-elastic}'
+  password: '${ELASTIC_PASSWORD:-infini_rag_flow}'
+redis:
+  db: 1
+  username: '${REDIS_USERNAME:-}'
+  password: '${REDIS_PASSWORD:-infini_rag_flow}'
+  host: '${REDIS_HOST:-ragflow-redis}:6379'
+user_default_llm:
+  default_models:
+    embedding_model:
+      api_key: 'xxx'
+      base_url: 'http://${TEI_HOST:-tei}:80'
+# RAGFlow 调 existing new-api 的模型供应商由管理员在 RAGFlow 控制台配置。
+# manager 不在此文件中保存或注入 new-api 推理 key。
+permission:
+  switch: false
+  component: false
+  dataset: false
+```
+
+Create `deploy/ragflow/README.md` stating:
+
+```markdown
+本目录独立启动 RAGFlow 及其 MySQL、Redis/Valkey、MinIO、Elasticsearch 依赖。
+manager 不加入该 Compose 网络，只通过 RAGFlow HTTP API 访问。
+```
+
+Also document:
+
+- production must not use root `.env` development passwords,
+- production RAGFlow ports bind to `127.0.0.1` by default and must only be opened through controlled network paths,
+- `RAGFLOW_REGISTER_ENABLED` is `0` by default; first-time registration requires a temporary enable/restart/disable cycle,
+- RAGFlow model provider setup remains manual in the RAGFlow console,
+- same-host manager uses `http://host.docker.internal:9380`,
+- remote RAGFlow uses an internal address or HTTPS endpoint.
+
+- [ ] **Step 4: Update production deployment docs**
+
+In `deploy/README.md`, add `ragflow/` to the production topology and deployment order:
+
+````markdown
+3. **ragflow**：复制 `deploy/ragflow/.env.example` 为 `.env`，填入真实密码与端口，
+   启动独立 RAGFlow 服务：
+
+   ```sh
+   cd deploy/ragflow
+   docker compose up -d
+   ```
+````
+
+In `deploy/manage/README.md`, state that RAGFlow must already be initialized:
+
+```markdown
+启动前先确认 `deploy/ragflow` 已完成初始化，并能从 manager 服务器访问
+RAGFlow HTTP API。RAGFlow 控制台内需要先配置 new-api + DeepSeek 模型供应商，
+并创建供 manager 后端使用的 RAGFlow API key。
+```
+
+Update the migration troubleshooting bullet to match auto-migrate behavior:
+
+```markdown
+- **迁移失败或缺少表**：`manager-api` 启动时会自动执行 `migrate up`。若日志显示迁移失败，先修复配置或数据库连接，再按需执行 `docker compose run --rm manager-api migrate up` 排障。
+```
+
+- [ ] **Step 5: Update architecture docs**
 
 Replace local sync flow with:
 
@@ -1357,7 +1606,7 @@ State explicitly:
 - Manager is the only permission boundary.
 - Hermes never receives RAGFlow credentials or dataset IDs.
 
-- [ ] **Step 3: Update user docs**
+- [ ] **Step 6: Update user docs**
 
 Document:
 
@@ -1367,11 +1616,11 @@ Document:
 - no preview in first version,
 - Hermes can add workspace file to current instance knowledge only.
 
-- [ ] **Step 4: Commit**
+- [ ] **Step 7: Commit**
 
 ```bash
-rtk git add docs/configuration.md docs/architecture.md docs/hermes-container.md docs/product-design.md docs/user-manual.md
-rtk git commit -m "docs: 更新 RAGFlow 知识库使用说明" -m "同步配置、架构、Hermes 容器和用户手册中的知识库描述。\n\n文档明确 RAGFlow 只承担主库和检索能力，业务权限全部由 manager 控制。"
+rtk git add .env.example docker-compose.yml deploy/README.md deploy/manage/README.md deploy/ragflow docs/configuration.md docs/architecture.md docs/hermes-container.md docs/product-design.md docs/user-manual.md
+rtk git commit -m "docs: 更新 RAGFlow 知识库部署说明" -m "同步配置、架构、Hermes 容器和用户手册中的知识库描述。\n\n补充本地与生产 Compose 部署边界，明确 RAGFlow 只承担主库和检索能力，业务权限全部由 manager 控制。"
 ```
 
 ---
@@ -1431,8 +1680,17 @@ Start the stack using the project’s normal local flow:
 rtk make dev-up
 ```
 
+Before browser checks, verify the local Compose RAGFlow services are present:
+
+```bash
+rtk docker compose ps ragflow ragflow-mysql ragflow-redis ragflow-minio ragflow-es
+```
+
+Expected: all five services exist; dependency services are healthy or running, and `ragflow` exposes the configured Web/API/Admin ports.
+
 Use a real browser and verify:
 
+- RAGFlow console opens at `http://localhost:${RAGFLOW_WEB_HTTP_PORT:-8088}` and can create the manager API key.
 - Org admin uploads an org knowledge document; list shows `queued/running/completed`.
 - App detail knowledge tab uploads an app document; list shows parse status.
 - Failed/stopped document exposes reparse.
@@ -1458,9 +1716,10 @@ Expected: only intentional changes are present before final commit or PR. Do not
 - Spec coverage:
   - RAGFlow sole file master: Tasks 1, 2, 4, 8, 9.
   - Manager-only permission boundary: Tasks 3, 4, 6, 12.
-  - Hermes skill search/add: Tasks 3, 6, 7.
-  - Org read-only and app read/write for Hermes: Tasks 4, 6, 7.
-  - Flat manager UI, no file tree: Task 10.
+- Hermes skill search/add: Tasks 3, 6, 7.
+- Org read-only and app read/write for Hermes: Tasks 4, 6, 7.
+- Docker Compose deployment shape: Task 12.
+- Flat manager UI, no file tree: Task 10.
   - No preview, download only: Tasks 5 and 10.
   - Async parse status and manual reparse: Tasks 4, 5, 10.
   - Remove old sync and kb render path: Tasks 7 and 9.
