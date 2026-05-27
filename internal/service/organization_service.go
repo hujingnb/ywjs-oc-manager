@@ -97,6 +97,8 @@ type OrganizationService struct {
 	failAuditor NewAPIFailureAuditor // 新增；nil 时跳过 new-api 失败审计写入
 	// versionValidator 校验一组助手版本 id 都存在且未删除；未配置时禁止保存版本 allowlist。
 	versionValidator OrganizationVersionValidator
+	// knowledgeDatasets 在组织创建成功后预创建组织级 RAGFlow dataset；失败不回滚组织。
+	knowledgeDatasets KnowledgeDatasetProvisioner
 	// hashPassword 仅用于创建组织管理员，测试中可替换为快 hash。
 	hashPassword PasswordHasher
 }
@@ -118,6 +120,11 @@ func NewOrganizationService(store OrganizationStore, provisioner NewAPIUserProvi
 // SetVersionValidator 注入助手版本 allowlist 校验器。
 func (s *OrganizationService) SetVersionValidator(v OrganizationVersionValidator) {
 	s.versionValidator = v
+}
+
+// SetKnowledgeDatasetProvisioner 注入组织创建后的知识库 dataset 预创建能力。
+func (s *OrganizationService) SetKnowledgeDatasetProvisioner(p KnowledgeDatasetProvisioner) {
+	s.knowledgeDatasets = p
 }
 
 // OrganizationInput 是组织创建和更新的统一入参。
@@ -319,6 +326,11 @@ func (s *OrganizationService) CreateOrganization(ctx context.Context, principal 
 	}
 	result := toOrganizationResult(org)
 	result.AdminUsername = input.AdminUsername
+	if s.knowledgeDatasets != nil {
+		if _, err := s.knowledgeDatasets.EnsureOrgDataset(ctx, org); err != nil {
+			slog.WarnContext(ctx, "预创建组织 RAGFlow dataset 失败", "org_id", uuidToString(org.ID), "error", err)
+		}
+	}
 	return result, nil
 }
 

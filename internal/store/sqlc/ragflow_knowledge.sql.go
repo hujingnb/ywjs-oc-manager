@@ -11,6 +11,46 @@ import (
 	"github.com/jackc/pgx/v5/pgtype"
 )
 
+const claimRAGFlowDatasetCreation = `-- name: ClaimRAGFlowDatasetCreation :one
+UPDATE ragflow_datasets
+SET status = 'creating',
+    last_error = NULL,
+    create_claim_token = $1::text,
+    updated_at = now()
+WHERE id = $2
+  AND (
+    status = 'failed'
+    OR (status = 'creating' AND updated_at < $3::timestamptz)
+  )
+RETURNING id, scope_type, org_id, app_id, ragflow_dataset_id, name, status, last_error, create_claim_token, created_at, updated_at
+`
+
+type ClaimRAGFlowDatasetCreationParams struct {
+	CreateClaimToken string             `db:"create_claim_token" json:"create_claim_token"`
+	ID               pgtype.UUID        `db:"id" json:"id"`
+	StaleBefore      pgtype.Timestamptz `db:"stale_before" json:"stale_before"`
+}
+
+// 抢占 failed 或超时 creating 的 dataset 创建租约；只有返回行的调用方允许访问 RAGFlow 创建远端 dataset。
+func (q *Queries) ClaimRAGFlowDatasetCreation(ctx context.Context, arg ClaimRAGFlowDatasetCreationParams) (RagflowDataset, error) {
+	row := q.db.QueryRow(ctx, claimRAGFlowDatasetCreation, arg.CreateClaimToken, arg.ID, arg.StaleBefore)
+	var i RagflowDataset
+	err := row.Scan(
+		&i.ID,
+		&i.ScopeType,
+		&i.OrgID,
+		&i.AppID,
+		&i.RagflowDatasetID,
+		&i.Name,
+		&i.Status,
+		&i.LastError,
+		&i.CreateClaimToken,
+		&i.CreatedAt,
+		&i.UpdatedAt,
+	)
+	return i, err
+}
+
 const countRAGFlowDocumentsByScope = `-- name: CountRAGFlowDocumentsByScope :one
 SELECT count(*)
 FROM ragflow_documents
@@ -43,35 +83,30 @@ func (q *Queries) CountRAGFlowDocumentsByScope(ctx context.Context, arg CountRAG
 	return count, err
 }
 
-const createRAGFlowDatasetMapping = `-- name: CreateRAGFlowDatasetMapping :one
+const createRAGFlowAppDatasetMapping = `-- name: CreateRAGFlowAppDatasetMapping :one
 INSERT INTO ragflow_datasets (
-    scope_type, org_id, app_id, ragflow_dataset_id, name, status, last_error
+    scope_type, org_id, app_id, ragflow_dataset_id, name, status, last_error, create_claim_token
 ) VALUES (
-    $1, $2, $3, $4, $5, $6, $7
+    'app', $1, $2, NULL, $3, 'creating', NULL, $4::text
 )
-RETURNING id, scope_type, org_id, app_id, ragflow_dataset_id, name, status, last_error, created_at, updated_at
+ON CONFLICT (app_id) WHERE scope_type = 'app' DO NOTHING
+RETURNING id, scope_type, org_id, app_id, ragflow_dataset_id, name, status, last_error, create_claim_token, created_at, updated_at
 `
 
-type CreateRAGFlowDatasetMappingParams struct {
-	ScopeType        string      `db:"scope_type" json:"scope_type"`
+type CreateRAGFlowAppDatasetMappingParams struct {
 	OrgID            pgtype.UUID `db:"org_id" json:"org_id"`
 	AppID            pgtype.UUID `db:"app_id" json:"app_id"`
-	RagflowDatasetID pgtype.Text `db:"ragflow_dataset_id" json:"ragflow_dataset_id"`
 	Name             string      `db:"name" json:"name"`
-	Status           string      `db:"status" json:"status"`
-	LastError        pgtype.Text `db:"last_error" json:"last_error"`
+	CreateClaimToken string      `db:"create_claim_token" json:"create_claim_token"`
 }
 
-// 创建 manager scope 到 RAGFlow dataset 的本地映射，远端创建失败时可先记录 failed 状态便于排障。
-func (q *Queries) CreateRAGFlowDatasetMapping(ctx context.Context, arg CreateRAGFlowDatasetMappingParams) (RagflowDataset, error) {
-	row := q.db.QueryRow(ctx, createRAGFlowDatasetMapping,
-		arg.ScopeType,
+// 懒创建实例级 dataset 映射；并发首创命中部分唯一索引时不返回行，由 service 读取已有映射且不重复创建远端 dataset。
+func (q *Queries) CreateRAGFlowAppDatasetMapping(ctx context.Context, arg CreateRAGFlowAppDatasetMappingParams) (RagflowDataset, error) {
+	row := q.db.QueryRow(ctx, createRAGFlowAppDatasetMapping,
 		arg.OrgID,
 		arg.AppID,
-		arg.RagflowDatasetID,
 		arg.Name,
-		arg.Status,
-		arg.LastError,
+		arg.CreateClaimToken,
 	)
 	var i RagflowDataset
 	err := row.Scan(
@@ -83,6 +118,7 @@ func (q *Queries) CreateRAGFlowDatasetMapping(ctx context.Context, arg CreateRAG
 		&i.Name,
 		&i.Status,
 		&i.LastError,
+		&i.CreateClaimToken,
 		&i.CreatedAt,
 		&i.UpdatedAt,
 	)
@@ -155,6 +191,42 @@ func (q *Queries) CreateRAGFlowDocument(ctx context.Context, arg CreateRAGFlowDo
 	return i, err
 }
 
+const createRAGFlowOrgDatasetMapping = `-- name: CreateRAGFlowOrgDatasetMapping :one
+INSERT INTO ragflow_datasets (
+    scope_type, org_id, app_id, ragflow_dataset_id, name, status, last_error, create_claim_token
+) VALUES (
+    'org', $1, NULL, NULL, $2, 'creating', NULL, $3::text
+)
+ON CONFLICT (org_id) WHERE scope_type = 'org' DO NOTHING
+RETURNING id, scope_type, org_id, app_id, ragflow_dataset_id, name, status, last_error, create_claim_token, created_at, updated_at
+`
+
+type CreateRAGFlowOrgDatasetMappingParams struct {
+	OrgID            pgtype.UUID `db:"org_id" json:"org_id"`
+	Name             string      `db:"name" json:"name"`
+	CreateClaimToken string      `db:"create_claim_token" json:"create_claim_token"`
+}
+
+// 懒创建组织级 dataset 映射；并发首创命中部分唯一索引时不返回行，由 service 读取已有映射且不重复创建远端 dataset。
+func (q *Queries) CreateRAGFlowOrgDatasetMapping(ctx context.Context, arg CreateRAGFlowOrgDatasetMappingParams) (RagflowDataset, error) {
+	row := q.db.QueryRow(ctx, createRAGFlowOrgDatasetMapping, arg.OrgID, arg.Name, arg.CreateClaimToken)
+	var i RagflowDataset
+	err := row.Scan(
+		&i.ID,
+		&i.ScopeType,
+		&i.OrgID,
+		&i.AppID,
+		&i.RagflowDatasetID,
+		&i.Name,
+		&i.Status,
+		&i.LastError,
+		&i.CreateClaimToken,
+		&i.CreatedAt,
+		&i.UpdatedAt,
+	)
+	return i, err
+}
+
 const deleteRAGFlowDatasetMapping = `-- name: DeleteRAGFlowDatasetMapping :exec
 DELETE FROM ragflow_datasets
 WHERE id = $1
@@ -178,7 +250,7 @@ func (q *Queries) DeleteRAGFlowDocumentMapping(ctx context.Context, id pgtype.UU
 }
 
 const getRAGFlowAppDataset = `-- name: GetRAGFlowAppDataset :one
-SELECT id, scope_type, org_id, app_id, ragflow_dataset_id, name, status, last_error, created_at, updated_at
+SELECT id, scope_type, org_id, app_id, ragflow_dataset_id, name, status, last_error, create_claim_token, created_at, updated_at
 FROM ragflow_datasets
 WHERE scope_type = 'app' AND app_id = $1
 `
@@ -196,6 +268,7 @@ func (q *Queries) GetRAGFlowAppDataset(ctx context.Context, appID pgtype.UUID) (
 		&i.Name,
 		&i.Status,
 		&i.LastError,
+		&i.CreateClaimToken,
 		&i.CreatedAt,
 		&i.UpdatedAt,
 	)
@@ -270,7 +343,7 @@ func (q *Queries) GetRAGFlowDocumentByRemoteID(ctx context.Context, arg GetRAGFl
 }
 
 const getRAGFlowOrgDataset = `-- name: GetRAGFlowOrgDataset :one
-SELECT id, scope_type, org_id, app_id, ragflow_dataset_id, name, status, last_error, created_at, updated_at
+SELECT id, scope_type, org_id, app_id, ragflow_dataset_id, name, status, last_error, create_claim_token, created_at, updated_at
 FROM ragflow_datasets
 WHERE scope_type = 'org' AND org_id = $1
 `
@@ -288,6 +361,7 @@ func (q *Queries) GetRAGFlowOrgDataset(ctx context.Context, orgID pgtype.UUID) (
 		&i.Name,
 		&i.Status,
 		&i.LastError,
+		&i.CreateClaimToken,
 		&i.CreatedAt,
 		&i.UpdatedAt,
 	)
@@ -410,19 +484,25 @@ func (q *Queries) ListRAGFlowDocumentsNeedingRefresh(ctx context.Context, limit 
 
 const markRAGFlowDatasetFailed = `-- name: MarkRAGFlowDatasetFailed :one
 UPDATE ragflow_datasets
-SET status = 'failed', last_error = $2, updated_at = now()
+SET status = 'failed',
+    last_error = $2,
+    create_claim_token = NULL,
+    updated_at = now()
 WHERE id = $1
-RETURNING id, scope_type, org_id, app_id, ragflow_dataset_id, name, status, last_error, created_at, updated_at
+  AND status = 'creating'
+  AND create_claim_token = $3
+RETURNING id, scope_type, org_id, app_id, ragflow_dataset_id, name, status, last_error, create_claim_token, created_at, updated_at
 `
 
 type MarkRAGFlowDatasetFailedParams struct {
-	ID        pgtype.UUID `db:"id" json:"id"`
-	LastError pgtype.Text `db:"last_error" json:"last_error"`
+	ID               pgtype.UUID `db:"id" json:"id"`
+	LastError        pgtype.Text `db:"last_error" json:"last_error"`
+	CreateClaimToken pgtype.Text `db:"create_claim_token" json:"create_claim_token"`
 }
 
 // 标记 dataset 生命周期失败，保留错误文本用于管理面排障。
 func (q *Queries) MarkRAGFlowDatasetFailed(ctx context.Context, arg MarkRAGFlowDatasetFailedParams) (RagflowDataset, error) {
-	row := q.db.QueryRow(ctx, markRAGFlowDatasetFailed, arg.ID, arg.LastError)
+	row := q.db.QueryRow(ctx, markRAGFlowDatasetFailed, arg.ID, arg.LastError, arg.CreateClaimToken)
 	var i RagflowDataset
 	err := row.Scan(
 		&i.ID,
@@ -433,6 +513,7 @@ func (q *Queries) MarkRAGFlowDatasetFailed(ctx context.Context, arg MarkRAGFlowD
 		&i.Name,
 		&i.Status,
 		&i.LastError,
+		&i.CreateClaimToken,
 		&i.CreatedAt,
 		&i.UpdatedAt,
 	)
@@ -445,20 +526,29 @@ SET ragflow_dataset_id = $2,
     name = $3,
     status = 'active',
     last_error = NULL,
+    create_claim_token = NULL,
     updated_at = now()
 WHERE id = $1
-RETURNING id, scope_type, org_id, app_id, ragflow_dataset_id, name, status, last_error, created_at, updated_at
+  AND status = 'creating'
+  AND create_claim_token = $4
+RETURNING id, scope_type, org_id, app_id, ragflow_dataset_id, name, status, last_error, create_claim_token, created_at, updated_at
 `
 
 type SetRAGFlowDatasetActiveParams struct {
 	ID               pgtype.UUID `db:"id" json:"id"`
 	RagflowDatasetID pgtype.Text `db:"ragflow_dataset_id" json:"ragflow_dataset_id"`
 	Name             string      `db:"name" json:"name"`
+	CreateClaimToken pgtype.Text `db:"create_claim_token" json:"create_claim_token"`
 }
 
 // 远端 dataset 创建成功后写入 RAGFlow ID，并清理上一轮生命周期错误。
 func (q *Queries) SetRAGFlowDatasetActive(ctx context.Context, arg SetRAGFlowDatasetActiveParams) (RagflowDataset, error) {
-	row := q.db.QueryRow(ctx, setRAGFlowDatasetActive, arg.ID, arg.RagflowDatasetID, arg.Name)
+	row := q.db.QueryRow(ctx, setRAGFlowDatasetActive,
+		arg.ID,
+		arg.RagflowDatasetID,
+		arg.Name,
+		arg.CreateClaimToken,
+	)
 	var i RagflowDataset
 	err := row.Scan(
 		&i.ID,
@@ -469,6 +559,7 @@ func (q *Queries) SetRAGFlowDatasetActive(ctx context.Context, arg SetRAGFlowDat
 		&i.Name,
 		&i.Status,
 		&i.LastError,
+		&i.CreateClaimToken,
 		&i.CreatedAt,
 		&i.UpdatedAt,
 	)

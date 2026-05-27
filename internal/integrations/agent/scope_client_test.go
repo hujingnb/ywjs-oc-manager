@@ -63,32 +63,6 @@ func TestScopeClient_InitAppDirs(t *testing.T) {
 	require.Equal(t, "Bearer agent-tok", got.auth)
 }
 
-// TestScopeClient_SyncOrgKnowledge 验证scope客户端同步组织知识库的预期行为场景。
-func TestScopeClient_SyncOrgKnowledge(t *testing.T) {
-	s := newScopeServer(nil)
-	defer s.Close()
-	c := NewFileClient(s.URL, "tok")
-
-	body := bytes.NewReader([]byte("fake-tar-bytes"))
-	err := c.SyncOrgKnowledge(context.Background(), "org-7", body)
-	require.NoError(t, err)
-	got := s.captured[0]
-	require.Equal(t, "/v1/scopes/orgs/org-7/knowledge/sync", got.path)
-	require.Equal(t, "application/x-tar", got.contType)
-	require.Equal(t, "fake-tar-bytes", string(got.body))
-}
-
-// TestScopeClient_SyncAppKnowledge 验证scope客户端同步应用知识库的预期行为场景。
-func TestScopeClient_SyncAppKnowledge(t *testing.T) {
-	s := newScopeServer(nil)
-	defer s.Close()
-	c := NewFileClient(s.URL, "tok")
-	err := c.SyncAppKnowledge(context.Background(), "app-1", strings.NewReader("x"))
-	require.NoError(t, err)
-	got := s.captured[0]
-	require.Equal(t, "/v1/scopes/apps/app-1/knowledge/sync", got.path)
-}
-
 // TestScopeClient_ListWorkspace 验证scope客户端列表工作区的预期行为场景。
 func TestScopeClient_ListWorkspace(t *testing.T) {
 	s := newScopeServer(func(req capturedReq, w http.ResponseWriter) {
@@ -270,21 +244,21 @@ func TestScopeClient_UploadAppInputFile_PropagatesErrorBody(t *testing.T) {
 
 // TestScopeClient_DeleteAppInputFile 验证 DeleteAppInputFile 走 HTTP DELETE
 // /v1/scopes/apps/<id>/input/file?path=<relPath>，与 UploadAppInputFile 共用同一路由,
-// 仅 HTTP method 不同; 配套覆盖 knowledge_sync_node delete_file 在 input 目录里的删除。
+// 仅 HTTP method 不同。
 func TestScopeClient_DeleteAppInputFile(t *testing.T) {
 	s := newScopeServer(nil)
 	defer s.Close()
 	c := NewFileClient(s.URL, "tok")
 
-	// 场景:删除 apps/app-1/input/resources/knowledge/org/policy.md,
+	// 场景:删除 apps/app-1/input/resources/config/policy.md,
 	// 验证 method=DELETE、path、query 编码、Authorization 头是否就位。
-	err := c.DeleteAppInputFile(context.Background(), "app-1", "resources/knowledge/org/policy.md")
+	err := c.DeleteAppInputFile(context.Background(), "app-1", "resources/config/policy.md")
 	require.NoError(t, err)
 	require.Len(t, s.captured, 1)
 	got := s.captured[0]
 	require.Equal(t, http.MethodDelete, got.method)
 	require.Equal(t, "/v1/scopes/apps/app-1/input/file", got.path)
-	require.Equal(t, "path=resources%2Fknowledge%2Forg%2Fpolicy.md", got.query)
+	require.Equal(t, "path=resources%2Fconfig%2Fpolicy.md", got.query)
 	require.Equal(t, "Bearer tok", got.auth)
 }
 

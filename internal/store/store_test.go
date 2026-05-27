@@ -2,9 +2,11 @@ package store
 
 import (
 	"context"
+	"os"
 	"strings"
 	"testing"
 
+	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
 
@@ -19,4 +21,37 @@ func TestOpenRejectsInvalidDatabaseURL(t *testing.T) {
 func TestCloseNilStoreIsSafe(t *testing.T) {
 	var s *Store
 	s.Close()
+}
+
+// TestSetAppRuntimeTokenQueryUsesFirstCreationCAS 验证 runtime token 写入只允许首次创建，避免并发初始化覆盖已渲染 manifest 的 token。
+func TestSetAppRuntimeTokenQueryUsesFirstCreationCAS(t *testing.T) {
+	sqlBytes, err := os.ReadFile("queries/apps.sql")
+	require.NoError(t, err)
+	sqlText := string(sqlBytes)
+
+	start := strings.Index(sqlText, "-- name: SetAppRuntimeToken :one")
+	require.NotEqual(t, -1, start)
+	end := strings.Index(sqlText[start:], "-- name: GetAppByRuntimeTokenHash :one")
+	require.NotEqual(t, -1, end)
+	query := sqlText[start : start+end]
+
+	// 首次写入成功后，后续并发任务必须拿不到 RETURNING 行，并交给 service 重新读取既有 token。
+	assert.Contains(t, query, "runtime_token_hash IS NULL")
+	assert.Contains(t, query, "runtime_token_ciphertext IS NULL")
+}
+
+// TestCreateRAGFlowDatasetMappingQueriesUseInsertOnlyClaims 验证懒创建 dataset 映射时只让插入成功者拥有远端创建权。
+func TestCreateRAGFlowDatasetMappingQueriesUseInsertOnlyClaims(t *testing.T) {
+	sqlBytes, err := os.ReadFile("queries/ragflow_knowledge.sql")
+	require.NoError(t, err)
+	sqlText := string(sqlBytes)
+
+	assert.NotContains(t, sqlText, "-- name: CreateRAGFlowDatasetMapping :one")
+	assert.Contains(t, sqlText, "-- name: CreateRAGFlowOrgDatasetMapping :one")
+	assert.Contains(t, sqlText, "ON CONFLICT (org_id) WHERE scope_type = 'org'")
+	assert.Contains(t, sqlText, "-- name: CreateRAGFlowAppDatasetMapping :one")
+	assert.Contains(t, sqlText, "ON CONFLICT (app_id) WHERE scope_type = 'app'")
+	assert.Contains(t, sqlText, "DO NOTHING")
+	assert.Contains(t, sqlText, "create_claim_token")
+	assert.NotContains(t, sqlText, "SET updated_at = ragflow_datasets.updated_at")
 }

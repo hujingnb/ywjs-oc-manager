@@ -2,473 +2,989 @@ package service
 
 import (
 	"context"
+	"crypto/sha256"
+	"encoding/hex"
 	"errors"
 	"fmt"
 	"io"
-	"log/slog"
-	"net/url"
+	"mime"
 	"path"
+	"sort"
 	"strings"
+	"time"
 
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgtype"
+
 	"oc-manager/internal/auth"
-	"oc-manager/internal/files"
+	"oc-manager/internal/integrations/ragflow"
 	"oc-manager/internal/store/sqlc"
 )
 
-// KnowledgeSyncDispatcher 抽象向 worker 入队 knowledge_sync_node 任务的能力。
-// 实现负责按写入对象（org / app）找到目标节点并去重生成 job。
-type KnowledgeSyncDispatcher interface {
-	DispatchOrgChange(ctx context.Context, orgID, relPath, changeType, masterPath string) error
-	DispatchAppChange(ctx context.Context, orgID, appID, relPath, changeType, masterPath string) error
+const (
+	// runtimeKnowledgeDefaultTopK 与 Hermes oc-kb 默认值保持一致，避免 RAGFlow 使用 1024 的服务端默认值。
+	runtimeKnowledgeDefaultTopK int32 = 8
+	// runtimeKnowledgeMaxTopK 是单个作用域的检索上限；runtime 检索会分别查询 app 与 org 两个作用域。
+	runtimeKnowledgeMaxTopK int32 = 50
+	// ragflowDatasetCreateClaimTimeout 是创建租约的保守超时，避免进程崩溃后 creating 状态永久卡住。
+	ragflowDatasetCreateClaimTimeout = 15 * time.Minute
+)
+
+// RAGFlowKnowledgeClient 是 service 层依赖的 RAGFlow 最小能力集。
+// 这里不暴露 RAGFlow 凭证、dataset 选择权或权限字段，调用方只能传 service 解析后的 dataset ID。
+type RAGFlowKnowledgeClient interface {
+	CreateDataset(ctx context.Context, name, chunkMethod string) (ragflow.Dataset, error)
+	DeleteDatasets(ctx context.Context, ids []string) error
+	UploadDocument(ctx context.Context, datasetID, filename string, body io.Reader) (ragflow.Document, error)
+	DownloadDocument(ctx context.Context, datasetID, documentID string) (io.ReadCloser, int64, error)
+	DeleteDocuments(ctx context.Context, datasetID string, documentIDs []string) error
+	ParseDocuments(ctx context.Context, datasetID string, documentIDs []string) error
+	ListDocuments(ctx context.Context, datasetID string, page, pageSize int32, keywords, run string) ([]ragflow.Document, int32, error)
+	Retrieve(ctx context.Context, datasetIDs []string, question string, topK int32) ([]ragflow.RetrievalChunk, error)
 }
 
-// KnowledgeAuditRecorder 抽象写一条 audit_logs 的能力。
-// 与 service.AuditService.Record 同构,但 service 层不直接依赖具体实现,
-// 测试可注入内存 fake。装配在 cmd/server,生产实现是 *service.AuditService。
-//
-// 用途:dispatcher 入队失败时记录,主副本写入成功不回滚,但失败痕迹必须可观测。
-// 不返回 error——审计失败仅打日志,不影响主流程。
-type KnowledgeAuditRecorder interface {
-	Record(ctx context.Context, event AuditEvent) (AuditResult, error)
-}
-
-// KnowledgeSyncStatusSource 抽象按 org 取最近同步状态的能力。
-// 由前端 OrgKnowledgePage 通过 GetOrgSyncStatus → 列表展示节点徽章。
-type KnowledgeSyncStatusSource interface {
-	ListByOrg(ctx context.Context, orgID string) ([]SyncStatusResult, error)
-}
-
-// KnowledgeRetryDispatcher 抽象「触发该 (org, node) 立即重试同步」的能力。
-// dev 实现可走与首次入队相同的 dispatcher（DispatchOrgChange 用 noop change_type）；
-// 简化版直接 enqueue 一个 'noop' job 让 worker 推 status=synced。
-type KnowledgeRetryDispatcher interface {
-	RetryOrgNode(ctx context.Context, orgID, nodeID string) error
-}
-
-// KnowledgeAppStore 抽象按 app_id 读取应用真实归属的能力。
-// 应用知识库接口仍保留 org_id / owner_user_id query 以兼容前端缓存上下文，
-// 但权限和路径拼接必须以数据库中的真实归属为准，不能信任客户端传入值。
-type KnowledgeAppStore interface {
+// KnowledgeStore 是知识库 service 所需的数据库查询子集。
+// 所有 org/app/runtime 权限和 dataset 解析都在 manager 内完成，RAGFlow 不参与业务鉴权。
+type KnowledgeStore interface {
+	GetOrganization(ctx context.Context, id pgtype.UUID) (sqlc.Organization, error)
 	GetApp(ctx context.Context, id pgtype.UUID) (sqlc.App, error)
+	GetAppByRuntimeTokenHash(ctx context.Context, runtimeTokenHash pgtype.Text) (sqlc.App, error)
+	GetRAGFlowOrgDataset(ctx context.Context, orgID pgtype.UUID) (sqlc.RagflowDataset, error)
+	GetRAGFlowAppDataset(ctx context.Context, appID pgtype.UUID) (sqlc.RagflowDataset, error)
+	CreateRAGFlowOrgDatasetMapping(ctx context.Context, arg sqlc.CreateRAGFlowOrgDatasetMappingParams) (sqlc.RagflowDataset, error)
+	CreateRAGFlowAppDatasetMapping(ctx context.Context, arg sqlc.CreateRAGFlowAppDatasetMappingParams) (sqlc.RagflowDataset, error)
+	ClaimRAGFlowDatasetCreation(ctx context.Context, arg sqlc.ClaimRAGFlowDatasetCreationParams) (sqlc.RagflowDataset, error)
+	SetRAGFlowDatasetActive(ctx context.Context, arg sqlc.SetRAGFlowDatasetActiveParams) (sqlc.RagflowDataset, error)
+	MarkRAGFlowDatasetFailed(ctx context.Context, arg sqlc.MarkRAGFlowDatasetFailedParams) (sqlc.RagflowDataset, error)
+	CreateRAGFlowDocument(ctx context.Context, arg sqlc.CreateRAGFlowDocumentParams) (sqlc.RagflowDocument, error)
+	ListRAGFlowDocumentsByScope(ctx context.Context, arg sqlc.ListRAGFlowDocumentsByScopeParams) ([]sqlc.RagflowDocument, error)
+	CountRAGFlowDocumentsByScope(ctx context.Context, arg sqlc.CountRAGFlowDocumentsByScopeParams) (int64, error)
+	GetRAGFlowDocument(ctx context.Context, id pgtype.UUID) (sqlc.RagflowDocument, error)
+	UpdateRAGFlowDocumentParseStatus(ctx context.Context, arg sqlc.UpdateRAGFlowDocumentParseStatusParams) (sqlc.RagflowDocument, error)
+	DeleteRAGFlowDocumentMapping(ctx context.Context, id pgtype.UUID) error
+	DeleteRAGFlowDatasetMapping(ctx context.Context, id pgtype.UUID) error
 }
 
-// KnowledgeService 维护组织和应用维度的知识库主副本。
-//
-// 设计要点：
-//   - 主副本统一存放在 manager 容器内（bind mount 到宿主），各 runtime node 上的工作目录由 worker 同步；
-//   - 路径必须经过 files.SafeRoot 校验，防止越权访问；
-//   - 写入路径会按租户拆分：org/{orgID}/...、org/{orgID}/app/{appID}/...；
-//   - 应用级同步在主副本写入失败时回滚（这里是文件操作，整体最多一次写入，不需要 SQL 事务）；
-//   - 组织级同步走异步任务，不阻塞主流程。
-//
-// 同步状态：组织级 dispatcher 入队时写 pending、worker 完成时写 synced/failed，
-// 由独立的 KnowledgeSyncStatusService（statusSource + retryDispatcher）维护。
+// KnowledgeDatasetProvisioner 抽象组织 / 实例生命周期中预创建 RAGFlow dataset 的能力。
+type KnowledgeDatasetProvisioner interface {
+	EnsureOrgDataset(ctx context.Context, org sqlc.Organization) (sqlc.RagflowDataset, error)
+	EnsureAppDataset(ctx context.Context, app sqlc.App) (sqlc.RagflowDataset, error)
+}
+
+// KnowledgeService 以 RAGFlow 作为唯一文件主库，对外提供 manager 权限控制后的知识库能力。
 type KnowledgeService struct {
-	master          *files.KnowledgeMaster
-	dispatcher      KnowledgeSyncDispatcher
-	statusSource    KnowledgeSyncStatusSource
-	retryDispatcher KnowledgeRetryDispatcher
-	appStore        KnowledgeAppStore
-	// auditor 用于把 dispatcher 入队失败落到 audit_logs;nil 时静默(仅打日志)。
-	// 主副本已经写成功,业务不能因为同步失败而 200 → 500 翻转,但必须留可观测痕迹。
-	auditor KnowledgeAuditRecorder
+	store              KnowledgeStore
+	ragflow            RAGFlowKnowledgeClient
+	datasetChunkMethod string
 }
 
-// NewKnowledgeService 创建知识库服务。
-func NewKnowledgeService(master *files.KnowledgeMaster) *KnowledgeService {
-	return &KnowledgeService{master: master}
+// NewKnowledgeService 创建 RAGFlow-backed 知识库服务。
+func NewKnowledgeService(store KnowledgeStore, client RAGFlowKnowledgeClient) *KnowledgeService {
+	return &KnowledgeService{store: store, ragflow: client, datasetChunkMethod: "naive"}
 }
 
-// SetSyncDispatcher 注入同步分发器（可选）。
-// 不注入时主副本仍正常写入，但不会触发节点同步——cmd/server 装配阶段必须传入。
-func (s *KnowledgeService) SetSyncDispatcher(d KnowledgeSyncDispatcher) {
-	s.dispatcher = d
-}
-
-// SetSyncStatusSource 注入同步状态读取器，让 GetOrgSyncStatus 暴露每节点状态。
-func (s *KnowledgeService) SetSyncStatusSource(src KnowledgeSyncStatusSource) {
-	s.statusSource = src
-}
-
-// SetRetryDispatcher 注入「重试该 (org, node) 同步」分发器。
-func (s *KnowledgeService) SetRetryDispatcher(d KnowledgeRetryDispatcher) {
-	s.retryDispatcher = d
-}
-
-// SetAppStore 注入应用归属查询器。
-// 应用级知识库读写需要先按 app_id 查出真实 org / owner，再做权限判断。
-func (s *KnowledgeService) SetAppStore(store KnowledgeAppStore) {
-	s.appStore = store
-}
-
-// SetAuditor 注入 audit_logs 写入器,用于 dispatcher 入队失败时落痕。
-// 不注入时静默,与旧装配兼容(仅日志告警)。
-func (s *KnowledgeService) SetAuditor(a KnowledgeAuditRecorder) {
-	s.auditor = a
-}
-
-// recordDispatchFailure 把 dispatcher 入队失败写到 audit_logs。
-// 主副本已成功落盘,此处仅做"留痕",不阻断主流程,任何审计写入失败只打日志。
-// target_type=knowledge_sync 与 worker handler 端的 app_knowledge_sync 形成
-// 完整的"入队-执行"事件链,排障时按 org_id / target_id 串起来。
-func (s *KnowledgeService) recordDispatchFailure(ctx context.Context, orgID, appID, relPath, action string, dispatchErr error) {
-	slog.WarnContext(ctx, "知识库同步入队失败",
-		"org_id", orgID, "app_id", appID, "rel_path", relPath, "action", action, "error", dispatchErr)
-	if s.auditor == nil {
-		return
+// SetDatasetChunkMethod 设置自动创建 RAGFlow dataset 时使用的分块方法。
+func (s *KnowledgeService) SetDatasetChunkMethod(method string) {
+	method = strings.TrimSpace(method)
+	if method == "" {
+		method = "naive"
 	}
-	targetID := orgID
-	if appID != "" {
-		targetID = appID
-	}
-	// 详情字段说明事件作用对象（组织级 vs 应用级 + 文件路径），方便审计列表筛选。
-	detail := fmt.Sprintf("组织文件 %s", relPath)
-	if appID != "" {
-		detail = fmt.Sprintf("应用文件 %s", relPath)
-	}
-	event := AuditEvent{
-		ActorRole:    "system",
-		OrgID:        orgID,
-		TargetType:   "knowledge_sync",
-		TargetID:     targetID,
-		Action:       action, // 例如 dispatch_org_upload_file / dispatch_app_delete_file
-		Result:       "failed",
-		ErrorMessage: dispatchErr.Error(),
-		Metadata: map[string]any{
-			"app_id":   appID,
-			"rel_path": relPath,
-		},
-		DetailMessage: detail,
-	}
-	if _, err := s.auditor.Record(ctx, event); err != nil {
-		slog.ErrorContext(ctx, "写 audit_logs 失败", "error", err)
-	}
+	s.datasetChunkMethod = method
 }
 
-// GetOrgSyncStatus 列出组织在所有节点上的最近同步状态。
-// 该状态属于组织知识库运维面，只允许本组织管理员查看。
-func (s *KnowledgeService) GetOrgSyncStatus(ctx context.Context, principal auth.Principal, orgID string) ([]SyncStatusResult, error) {
-	if !auth.CanViewOrgKnowledgeSyncStatus(principal, orgID) {
-		return nil, ErrKnowledgeForbidden
-	}
-	if s.statusSource == nil {
-		return []SyncStatusResult{}, nil
-	}
-	return s.statusSource.ListByOrg(ctx, orgID)
-}
-
-// RetryOrgNodeSync 触发指定 (org, node) 重新同步；通常由前端「重试同步」按钮调用。
-// 重试会改变组织知识库同步状态，因此只允许本组织管理员执行。
-func (s *KnowledgeService) RetryOrgNodeSync(ctx context.Context, principal auth.Principal, orgID, nodeID string) error {
-	if !auth.CanRetryOrgKnowledgeSync(principal, orgID) {
-		return ErrKnowledgeForbidden
-	}
-	if s.retryDispatcher == nil {
-		return fmt.Errorf("重试分发器未配置")
-	}
-	return s.retryDispatcher.RetryOrgNode(ctx, orgID, nodeID)
-}
-
-// KnowledgeListResult 是列表接口的返回。
+// KnowledgeListResult 是扁平文档列表接口的返回。
 type KnowledgeListResult struct {
-	Path    string                 `json:"path"`
-	Entries []KnowledgeEntryResult `json:"entries"`
+	Items []KnowledgeDocumentResult `json:"items"`
+	Total int64                     `json:"total"`
 }
 
-// KnowledgeEntryResult 是对外的条目视图。
-type KnowledgeEntryResult struct {
-	Path  string `json:"path"`
-	Name  string `json:"name"`
-	Size  int64  `json:"size"`
-	IsDir bool   `json:"is_dir"`
+// KnowledgeDocumentResult 是 manager 对 RAGFlow document 元数据的用户侧视图。
+type KnowledgeDocumentResult struct {
+	ID          string `json:"id"`
+	Name        string `json:"name"`
+	Size        int64  `json:"size"`
+	MimeType    string `json:"mime_type,omitempty"`
+	Suffix      string `json:"suffix,omitempty"`
+	ParseStatus string `json:"parse_status"`
+	Progress    int32  `json:"progress"`
+	LastError   string `json:"last_error,omitempty"`
+	CreatedAt   string `json:"created_at"`
 }
 
-// SaveOrgFile 将文件写入指定组织的主副本。
-func (s *KnowledgeService) SaveOrgFile(ctx context.Context, principal auth.Principal, orgID, relative string, content io.Reader, size int64) error {
-	if s.master == nil {
-		return ErrKnowledgeMissing
+// KnowledgeSearchResult 是 Hermes runtime 检索 API 的返回。
+type KnowledgeSearchResult struct {
+	Results []KnowledgeSearchHit `json:"results"`
+}
+
+// KnowledgeSearchHit 是一次 retrieval 命中的文本块。
+type KnowledgeSearchHit struct {
+	Scope        string  `json:"scope"`
+	DocumentID   string  `json:"document_id"`
+	DocumentName string  `json:"document_name"`
+	Content      string  `json:"content"`
+	Similarity   float64 `json:"similarity"`
+}
+
+// ListOrg 列出组织知识库文件。组织成员只读，组织管理员可写。
+func (s *KnowledgeService) ListOrg(ctx context.Context, principal auth.Principal, orgID string, page, pageSize int32, keyword, status string) (KnowledgeListResult, error) {
+	if !auth.CanReadOrgKnowledge(principal, orgID) {
+		return KnowledgeListResult{}, ErrKnowledgeForbidden
 	}
+	orgUUID, err := parseUUID(orgID)
+	if err != nil {
+		return KnowledgeListResult{}, ErrNotFound
+	}
+	dataset, err := s.getOrgDataset(ctx, orgUUID)
+	if err != nil {
+		return KnowledgeListResult{}, err
+	}
+	return s.listDocuments(ctx, dataset, "org", dataset.OrgID, pgtype.UUID{}, page, pageSize, keyword, status)
+}
+
+// SaveOrgFile 上传组织知识库文件并触发解析。
+func (s *KnowledgeService) SaveOrgFile(ctx context.Context, principal auth.Principal, orgID, filename string, content io.Reader, size int64) (KnowledgeDocumentResult, error) {
+	if !auth.CanWriteOrgKnowledge(principal, orgID) {
+		return KnowledgeDocumentResult{}, ErrKnowledgeForbidden
+	}
+	orgUUID, err := parseUUID(orgID)
+	if err != nil {
+		return KnowledgeDocumentResult{}, ErrNotFound
+	}
+	dataset, err := s.getOrgDataset(ctx, orgUUID)
+	if err != nil {
+		return KnowledgeDocumentResult{}, err
+	}
+	return s.uploadToDataset(ctx, dataset, "", principal.UserID, filename, content, size)
+}
+
+// OpenOrgFile 打开组织知识库文件流供下载。
+func (s *KnowledgeService) OpenOrgFile(ctx context.Context, principal auth.Principal, orgID, documentID string) (io.ReadCloser, int64, string, error) {
+	if !auth.CanReadOrgKnowledge(principal, orgID) {
+		return nil, 0, "", ErrKnowledgeForbidden
+	}
+	orgUUID, err := parseUUID(orgID)
+	if err != nil {
+		return nil, 0, "", ErrNotFound
+	}
+	document, dataset, err := s.getDocumentForScope(ctx, documentID, "org", orgUUID, pgtype.UUID{})
+	if err != nil {
+		return nil, 0, "", err
+	}
+	return s.openDocument(ctx, dataset, document)
+}
+
+// DeleteOrgFile 删除组织知识库文件。
+func (s *KnowledgeService) DeleteOrgFile(ctx context.Context, principal auth.Principal, orgID, documentID string) error {
 	if !auth.CanWriteOrgKnowledge(principal, orgID) {
 		return ErrKnowledgeForbidden
 	}
-	cleaned, err := validateKnowledgeRelative(relative, false)
+	orgUUID, err := parseUUID(orgID)
+	if err != nil {
+		return ErrNotFound
+	}
+	document, dataset, err := s.getDocumentForScope(ctx, documentID, "org", orgUUID, pgtype.UUID{})
 	if err != nil {
 		return err
 	}
-	target := path.Join("org", orgID, "knowledge", cleaned)
-	if err := s.master.Save(target, content, size); err != nil {
-		return err
-	}
-	if s.dispatcher != nil {
-		if dispatchErr := s.dispatcher.DispatchOrgChange(ctx, orgID, cleaned, "upload_file", target); dispatchErr != nil {
-			s.recordDispatchFailure(ctx, orgID, "", cleaned, "dispatch_org_upload_file", dispatchErr)
-		}
-	}
-	return nil
+	return s.deleteDocument(ctx, dataset, document)
 }
 
-// SaveAppFile 写入应用维度的知识库。
-// 仅 owner 与本组织管理员可写，平台管理员只保留读取能力。
-func (s *KnowledgeService) SaveAppFile(ctx context.Context, principal auth.Principal, orgID, appID, ownerUserID, relative string, content io.Reader, size int64) error {
-	if s.master == nil {
-		return ErrKnowledgeMissing
-	}
-	appCtx, err := s.resolveAppKnowledgeContext(ctx, appID, orgID, ownerUserID)
-	if err != nil {
-		return err
-	}
-	if !auth.CanWriteAppKnowledge(principal, appCtx.orgID, appCtx.ownerUserID) {
-		return ErrKnowledgeForbidden
-	}
-	cleaned, err := validateKnowledgeRelative(relative, false)
-	if err != nil {
-		return err
-	}
-	target := path.Join("org", appCtx.orgID, "app", appID, "knowledge", cleaned)
-	if err := s.master.Save(target, content, size); err != nil {
-		return err
-	}
-	if s.dispatcher != nil {
-		if dispatchErr := s.dispatcher.DispatchAppChange(ctx, appCtx.orgID, appID, cleaned, "upload_file", target); dispatchErr != nil {
-			s.recordDispatchFailure(ctx, appCtx.orgID, appID, cleaned, "dispatch_app_upload_file", dispatchErr)
-		}
-	}
-	return nil
-}
-
-// DeleteOrgFile 删除组织级文件。
-func (s *KnowledgeService) DeleteOrgFile(ctx context.Context, principal auth.Principal, orgID, relative string) error {
-	if s.master == nil {
-		return ErrKnowledgeMissing
-	}
+// ReparseOrgFile 重新触发组织知识库文件解析。
+func (s *KnowledgeService) ReparseOrgFile(ctx context.Context, principal auth.Principal, orgID, documentID string) (KnowledgeDocumentResult, error) {
 	if !auth.CanWriteOrgKnowledge(principal, orgID) {
-		return ErrKnowledgeForbidden
+		return KnowledgeDocumentResult{}, ErrKnowledgeForbidden
 	}
-	cleaned, err := validateKnowledgeRelative(relative, false)
+	orgUUID, err := parseUUID(orgID)
+	if err != nil {
+		return KnowledgeDocumentResult{}, ErrNotFound
+	}
+	document, dataset, err := s.getDocumentForScope(ctx, documentID, "org", orgUUID, pgtype.UUID{})
+	if err != nil {
+		return KnowledgeDocumentResult{}, err
+	}
+	return s.reparseDocument(ctx, dataset, document)
+}
+
+// ListApp 列出实例知识库文件。权限由 app 的真实 owner/org 决定，不信任请求方传入归属。
+func (s *KnowledgeService) ListApp(ctx context.Context, principal auth.Principal, appID string, page, pageSize int32, keyword, status string) (KnowledgeListResult, error) {
+	app, err := s.getApp(ctx, appID)
+	if err != nil {
+		return KnowledgeListResult{}, err
+	}
+	if !auth.CanReadAppKnowledge(principal, uuidToString(app.OrgID), uuidToString(app.OwnerUserID)) {
+		return KnowledgeListResult{}, ErrKnowledgeForbidden
+	}
+	dataset, err := s.getAppDataset(ctx, app.ID)
+	if err != nil {
+		return KnowledgeListResult{}, err
+	}
+	return s.listDocuments(ctx, dataset, "app", app.OrgID, dataset.AppID, page, pageSize, keyword, status)
+}
+
+// SaveAppFile 上传实例知识库文件并触发解析。
+func (s *KnowledgeService) SaveAppFile(ctx context.Context, principal auth.Principal, appID, filename string, content io.Reader, size int64) (KnowledgeDocumentResult, error) {
+	app, err := s.getApp(ctx, appID)
+	if err != nil {
+		return KnowledgeDocumentResult{}, err
+	}
+	if !auth.CanWriteAppKnowledge(principal, uuidToString(app.OrgID), uuidToString(app.OwnerUserID)) {
+		return KnowledgeDocumentResult{}, ErrKnowledgeForbidden
+	}
+	dataset, err := s.getAppDataset(ctx, app.ID)
+	if err != nil {
+		return KnowledgeDocumentResult{}, err
+	}
+	return s.uploadToDataset(ctx, dataset, uuidToString(app.ID), principal.UserID, filename, content, size)
+}
+
+// OpenAppFile 打开实例知识库文件流供下载。
+func (s *KnowledgeService) OpenAppFile(ctx context.Context, principal auth.Principal, appID, documentID string) (io.ReadCloser, int64, string, error) {
+	app, err := s.getApp(ctx, appID)
+	if err != nil {
+		return nil, 0, "", err
+	}
+	if !auth.CanReadAppKnowledge(principal, uuidToString(app.OrgID), uuidToString(app.OwnerUserID)) {
+		return nil, 0, "", ErrKnowledgeForbidden
+	}
+	document, dataset, err := s.getDocumentForScope(ctx, documentID, "app", app.OrgID, app.ID)
+	if err != nil {
+		return nil, 0, "", err
+	}
+	return s.openDocument(ctx, dataset, document)
+}
+
+// DeleteAppFile 删除实例知识库文件。
+func (s *KnowledgeService) DeleteAppFile(ctx context.Context, principal auth.Principal, appID, documentID string) error {
+	app, err := s.getApp(ctx, appID)
 	if err != nil {
 		return err
 	}
-	target := path.Join("org", orgID, "knowledge", cleaned)
-	if err := s.master.Delete(target); err != nil {
+	if !auth.CanWriteAppKnowledge(principal, uuidToString(app.OrgID), uuidToString(app.OwnerUserID)) {
+		return ErrKnowledgeForbidden
+	}
+	document, dataset, err := s.getDocumentForScope(ctx, documentID, "app", app.OrgID, app.ID)
+	if err != nil {
 		return err
 	}
-	if s.dispatcher != nil {
-		if dispatchErr := s.dispatcher.DispatchOrgChange(ctx, orgID, cleaned, "delete_file", target); dispatchErr != nil {
-			s.recordDispatchFailure(ctx, orgID, "", cleaned, "dispatch_org_delete_file", dispatchErr)
+	return s.deleteDocument(ctx, dataset, document)
+}
+
+// ReparseAppFile 重新触发实例知识库文件解析。
+func (s *KnowledgeService) ReparseAppFile(ctx context.Context, principal auth.Principal, appID, documentID string) (KnowledgeDocumentResult, error) {
+	app, err := s.getApp(ctx, appID)
+	if err != nil {
+		return KnowledgeDocumentResult{}, err
+	}
+	if !auth.CanWriteAppKnowledge(principal, uuidToString(app.OrgID), uuidToString(app.OwnerUserID)) {
+		return KnowledgeDocumentResult{}, ErrKnowledgeForbidden
+	}
+	document, dataset, err := s.getDocumentForScope(ctx, documentID, "app", app.OrgID, app.ID)
+	if err != nil {
+		return KnowledgeDocumentResult{}, err
+	}
+	return s.reparseDocument(ctx, dataset, document)
+}
+
+// RuntimeSearch 供 Hermes 以 app runtime token 检索当前实例与所属组织知识库。
+// 请求体中的任何 dataset / org / app 意图都不会传入本方法，dataset 只由 token 解析出的 app 决定。
+func (s *KnowledgeService) RuntimeSearch(ctx context.Context, appToken, question string, topK int32) (KnowledgeSearchResult, error) {
+	if strings.TrimSpace(question) == "" {
+		return KnowledgeSearchResult{}, fmt.Errorf("question 不能为空")
+	}
+	app, err := s.appByRuntimeToken(ctx, appToken)
+	if err != nil {
+		return KnowledgeSearchResult{}, err
+	}
+	appDataset, err := s.getAppDataset(ctx, app.ID)
+	if err != nil {
+		return KnowledgeSearchResult{}, err
+	}
+	orgDataset, err := s.getOrgDataset(ctx, app.OrgID)
+	if err != nil {
+		return KnowledgeSearchResult{}, err
+	}
+	appRemoteID, err := requireRemoteDatasetID(appDataset)
+	if err != nil {
+		return KnowledgeSearchResult{}, err
+	}
+	orgRemoteID, err := requireRemoteDatasetID(orgDataset)
+	if err != nil {
+		return KnowledgeSearchResult{}, err
+	}
+	topK = normalizeRuntimeTopK(topK)
+	// 两路检索避免 RAGFlow 在 top_k 截断时让组织知识库命中挤占实例知识库命中。
+	appChunks, err := s.ragflowClient().Retrieve(ctx, []string{appRemoteID}, question, topK)
+	if err != nil {
+		return KnowledgeSearchResult{}, fmt.Errorf("RAGFlow 检索实例知识库失败: %w", err)
+	}
+	orgChunks, err := s.ragflowClient().Retrieve(ctx, []string{orgRemoteID}, question, topK)
+	if err != nil {
+		return KnowledgeSearchResult{}, fmt.Errorf("RAGFlow 检索组织知识库失败: %w", err)
+	}
+	hits := make([]KnowledgeSearchHit, 0, len(appChunks)+len(orgChunks))
+	hits = append(hits, searchHitsFromChunks("app", appChunks)...)
+	hits = append(hits, searchHitsFromChunks("org", orgChunks)...)
+	return KnowledgeSearchResult{Results: hits}, nil
+}
+
+// RuntimeAddFile 供 Hermes 把工作目录中的报告写入当前实例知识库。
+// 写入目标固定为当前 app dataset，组织 dataset 在写路径完全不可达。
+func (s *KnowledgeService) RuntimeAddFile(ctx context.Context, appToken, filename string, content io.Reader, size int64) (KnowledgeDocumentResult, error) {
+	app, err := s.appByRuntimeToken(ctx, appToken)
+	if err != nil {
+		return KnowledgeDocumentResult{}, err
+	}
+	dataset, err := s.getAppDataset(ctx, app.ID)
+	if err != nil {
+		return KnowledgeDocumentResult{}, err
+	}
+	return s.uploadToDataset(ctx, dataset, uuidToString(app.ID), "runtime:"+uuidToString(app.ID), filename, content, size)
+}
+
+// EnsureOrgDataset 确保组织知识库存在可用的 RAGFlow dataset。
+func (s *KnowledgeService) EnsureOrgDataset(ctx context.Context, org sqlc.Organization) (sqlc.RagflowDataset, error) {
+	name := buildRAGFlowDatasetName("org", org.Code, org.Name, org.ID)
+	return s.ensureDataset(ctx, "org", org.ID, pgtype.UUID{}, name)
+}
+
+// EnsureAppDataset 确保实例知识库存在可用的 RAGFlow dataset。
+func (s *KnowledgeService) EnsureAppDataset(ctx context.Context, app sqlc.App) (sqlc.RagflowDataset, error) {
+	name := buildRAGFlowDatasetName("app", app.Name, "", app.ID)
+	return s.ensureDataset(ctx, "app", app.OrgID, app.ID, name)
+}
+
+// DeleteAppDataset 删除实例私有知识库的远端 RAGFlow dataset 和本地映射。
+// app_delete 在软删 apps 行前调用本方法，避免应用不可见后留下无人管理的索引和原文件。
+func (s *KnowledgeService) DeleteAppDataset(ctx context.Context, appID pgtype.UUID) error {
+	if s.store == nil {
+		return nil
+	}
+	dataset, err := s.store.GetRAGFlowAppDataset(ctx, appID)
+	if errors.Is(err, pgx.ErrNoRows) {
+		return nil
+	}
+	if err != nil {
+		return fmt.Errorf("查询实例 RAGFlow dataset 失败: %w", err)
+	}
+	if remoteDatasetID, err := requireRemoteDatasetID(dataset); err == nil {
+		if err := s.ragflowClient().DeleteDatasets(ctx, []string{remoteDatasetID}); err != nil {
+			return fmt.Errorf("删除 RAGFlow app dataset 失败: %w", err)
 		}
+	}
+	if err := s.store.DeleteRAGFlowDatasetMapping(ctx, dataset.ID); err != nil {
+		return fmt.Errorf("删除实例 RAGFlow dataset 映射失败: %w", err)
 	}
 	return nil
 }
 
-// DeleteAppFile 删除应用级文件。
-func (s *KnowledgeService) DeleteAppFile(ctx context.Context, principal auth.Principal, orgID, appID, ownerUserID, relative string) error {
-	if s.master == nil {
-		return ErrKnowledgeMissing
+func (s *KnowledgeService) listDocuments(ctx context.Context, dataset sqlc.RagflowDataset, scope string, orgID, appID pgtype.UUID, page, pageSize int32, keyword, status string) (KnowledgeListResult, error) {
+	page, pageSize = normalizePage(page, pageSize)
+	params := sqlc.ListRAGFlowDocumentsByScopeParams{
+		ScopeType:   scope,
+		OrgID:       orgID,
+		AppID:       appID,
+		Limit:       pageSize,
+		Offset:      (page - 1) * pageSize,
+		ParseStatus: textValue(strings.TrimSpace(status)),
+		Keywords:    textValue(strings.TrimSpace(keyword)),
 	}
-	appCtx, err := s.resolveAppKnowledgeContext(ctx, appID, orgID, ownerUserID)
+	items, err := s.store.ListRAGFlowDocumentsByScope(ctx, params)
 	if err != nil {
-		return err
+		return KnowledgeListResult{}, fmt.Errorf("查询知识库文件列表失败: %w", err)
 	}
-	if !auth.CanWriteAppKnowledge(principal, appCtx.orgID, appCtx.ownerUserID) {
-		return ErrKnowledgeForbidden
-	}
-	cleaned, err := validateKnowledgeRelative(relative, false)
+	items = s.refreshDocumentStatuses(ctx, dataset, items)
+	total, err := s.store.CountRAGFlowDocumentsByScope(ctx, sqlc.CountRAGFlowDocumentsByScopeParams{
+		ScopeType:   params.ScopeType,
+		OrgID:       params.OrgID,
+		AppID:       params.AppID,
+		ParseStatus: params.ParseStatus,
+		Keywords:    params.Keywords,
+	})
 	if err != nil {
-		return err
+		return KnowledgeListResult{}, fmt.Errorf("统计知识库文件失败: %w", err)
 	}
-	target := path.Join("org", appCtx.orgID, "app", appID, "knowledge", cleaned)
-	if err := s.master.Delete(target); err != nil {
-		return err
+	results := make([]KnowledgeDocumentResult, 0, len(items))
+	for _, item := range items {
+		results = append(results, toKnowledgeDocumentResult(item))
 	}
-	if s.dispatcher != nil {
-		if dispatchErr := s.dispatcher.DispatchAppChange(ctx, appCtx.orgID, appID, cleaned, "delete_file", target); dispatchErr != nil {
-			s.recordDispatchFailure(ctx, appCtx.orgID, appID, cleaned, "dispatch_app_delete_file", dispatchErr)
+	return KnowledgeListResult{Items: results, Total: total}, nil
+}
+
+func (s *KnowledgeService) uploadToDataset(ctx context.Context, dataset sqlc.RagflowDataset, appID, createdBy, filename string, content io.Reader, size int64) (KnowledgeDocumentResult, error) {
+	if filename = strings.TrimSpace(filename); filename == "" {
+		return KnowledgeDocumentResult{}, fmt.Errorf("filename 不能为空")
+	}
+	remoteDatasetID, err := requireRemoteDatasetID(dataset)
+	if err != nil {
+		return KnowledgeDocumentResult{}, err
+	}
+	remote, err := s.ragflowClient().UploadDocument(ctx, remoteDatasetID, path.Base(filename), content)
+	if err != nil {
+		return KnowledgeDocumentResult{}, fmt.Errorf("上传 RAGFlow document 失败: %w", err)
+	}
+	if remote.Size > 0 {
+		size = remote.Size
+	}
+	if createdBy == "" {
+		createdBy = "unknown"
+	}
+	suffix := strings.TrimPrefix(path.Ext(filename), ".")
+	mimeType := mime.TypeByExtension(path.Ext(filename))
+	arg := sqlc.CreateRAGFlowDocumentParams{
+		DatasetID:         dataset.ID,
+		ScopeType:         dataset.ScopeType,
+		OrgID:             dataset.OrgID,
+		AppID:             dataset.AppID,
+		RagflowDocumentID: remote.ID,
+		Name:              path.Base(filename),
+		SizeBytes:         size,
+		MimeType:          textValue(mimeType),
+		Suffix:            textValue(suffix),
+		ParseStatus:       normalizeRAGFlowRun(remote.Run),
+		Progress:          progressForStatus(normalizeRAGFlowRun(remote.Run)),
+		CreatedBy:         createdBy,
+	}
+	if appID == "" {
+		arg.AppID = pgtype.UUID{}
+	}
+	row, err := s.store.CreateRAGFlowDocument(ctx, arg)
+	if err != nil {
+		return KnowledgeDocumentResult{}, fmt.Errorf("保存知识库文件元数据失败: %w", err)
+	}
+	if err := s.ragflowClient().ParseDocuments(ctx, remoteDatasetID, []string{remote.ID}); err != nil {
+		return KnowledgeDocumentResult{}, fmt.Errorf("触发 RAGFlow 解析失败: %w", err)
+	}
+	if row.ParseStatus != "queued" && row.ParseStatus != "running" {
+		row, err = s.store.UpdateRAGFlowDocumentParseStatus(ctx, sqlc.UpdateRAGFlowDocumentParseStatusParams{
+			ID:          row.ID,
+			ParseStatus: "queued",
+			Progress:    0,
+			LastError:   pgtype.Text{},
+		})
+		if err != nil {
+			return KnowledgeDocumentResult{}, fmt.Errorf("更新知识库解析状态失败: %w", err)
 		}
+	}
+	return toKnowledgeDocumentResult(row), nil
+}
+
+func (s *KnowledgeService) openDocument(ctx context.Context, dataset sqlc.RagflowDataset, document sqlc.RagflowDocument) (io.ReadCloser, int64, string, error) {
+	remoteDatasetID, err := requireRemoteDatasetID(dataset)
+	if err != nil {
+		return nil, 0, "", err
+	}
+	stream, size, err := s.ragflowClient().DownloadDocument(ctx, remoteDatasetID, document.RagflowDocumentID)
+	if err != nil {
+		return nil, 0, "", fmt.Errorf("下载 RAGFlow document 失败: %w", err)
+	}
+	return stream, size, document.Name, nil
+}
+
+func (s *KnowledgeService) deleteDocument(ctx context.Context, dataset sqlc.RagflowDataset, document sqlc.RagflowDocument) error {
+	remoteDatasetID, err := requireRemoteDatasetID(dataset)
+	if err != nil {
+		return err
+	}
+	if err := s.ragflowClient().DeleteDocuments(ctx, remoteDatasetID, []string{document.RagflowDocumentID}); err != nil {
+		return fmt.Errorf("删除 RAGFlow document 失败: %w", err)
+	}
+	if err := s.store.DeleteRAGFlowDocumentMapping(ctx, document.ID); err != nil {
+		return fmt.Errorf("删除知识库文件元数据失败: %w", err)
 	}
 	return nil
 }
 
-type appKnowledgeContext struct {
-	orgID       string
-	ownerUserID string
+func (s *KnowledgeService) reparseDocument(ctx context.Context, dataset sqlc.RagflowDataset, document sqlc.RagflowDocument) (KnowledgeDocumentResult, error) {
+	if document.ParseStatus != "failed" && document.ParseStatus != "stopped" {
+		return KnowledgeDocumentResult{}, fmt.Errorf("只有解析失败或已停止的文件可以重新解析")
+	}
+	remoteDatasetID, err := requireRemoteDatasetID(dataset)
+	if err != nil {
+		return KnowledgeDocumentResult{}, err
+	}
+	if err := s.ragflowClient().ParseDocuments(ctx, remoteDatasetID, []string{document.RagflowDocumentID}); err != nil {
+		return KnowledgeDocumentResult{}, fmt.Errorf("触发 RAGFlow 重新解析失败: %w", err)
+	}
+	row, err := s.store.UpdateRAGFlowDocumentParseStatus(ctx, sqlc.UpdateRAGFlowDocumentParseStatusParams{
+		ID:          document.ID,
+		ParseStatus: "queued",
+		Progress:    0,
+		LastError:   pgtype.Text{},
+	})
+	if err != nil {
+		return KnowledgeDocumentResult{}, fmt.Errorf("更新知识库解析状态失败: %w", err)
+	}
+	return toKnowledgeDocumentResult(row), nil
 }
 
-func (s *KnowledgeService) resolveAppKnowledgeContext(ctx context.Context, appID, requestedOrgID, requestedOwnerUserID string) (appKnowledgeContext, error) {
-	if s.appStore == nil {
-		return appKnowledgeContext{}, ErrKnowledgeMissing
+func (s *KnowledgeService) refreshDocumentStatuses(ctx context.Context, dataset sqlc.RagflowDataset, items []sqlc.RagflowDocument) []sqlc.RagflowDocument {
+	if len(items) == 0 {
+		return items
+	}
+	remoteDatasetID, err := requireRemoteDatasetID(dataset)
+	if err != nil {
+		return items
+	}
+	remoteDocs, _, err := s.ragflowClient().ListDocuments(ctx, remoteDatasetID, 1, 1000, "", "")
+	if err != nil {
+		return items
+	}
+	remoteByID := make(map[string]ragflow.Document, len(remoteDocs))
+	for _, remote := range remoteDocs {
+		remoteByID[remote.ID] = remote
+	}
+	refreshed := append([]sqlc.RagflowDocument(nil), items...)
+	for i, item := range refreshed {
+		remote, ok := remoteByID[item.RagflowDocumentID]
+		if !ok {
+			continue
+		}
+		status := normalizeRAGFlowRun(remote.Run)
+		progress := progressForStatus(status)
+		if status == item.ParseStatus && progress == item.Progress {
+			continue
+		}
+		row, err := s.store.UpdateRAGFlowDocumentParseStatus(ctx, sqlc.UpdateRAGFlowDocumentParseStatusParams{
+			ID:          item.ID,
+			ParseStatus: status,
+			Progress:    progress,
+			LastError:   item.LastError,
+		})
+		if err != nil {
+			continue
+		}
+		refreshed[i] = row
+	}
+	return refreshed
+}
+
+func searchHitsFromChunks(scope string, chunks []ragflow.RetrievalChunk) []KnowledgeSearchHit {
+	hits := make([]KnowledgeSearchHit, 0, len(chunks))
+	for _, chunk := range chunks {
+		hits = append(hits, KnowledgeSearchHit{
+			Scope:        scope,
+			DocumentID:   chunk.DocumentID,
+			DocumentName: chunk.DocumentName,
+			Content:      chunk.Content,
+			Similarity:   chunk.Similarity,
+		})
+	}
+	sort.SliceStable(hits, func(i, j int) bool {
+		return hits[i].Similarity > hits[j].Similarity
+	})
+	return hits
+}
+
+func (s *KnowledgeService) getDocumentForScope(ctx context.Context, documentID, scope string, orgID, appID pgtype.UUID) (sqlc.RagflowDocument, sqlc.RagflowDataset, error) {
+	id, err := parseUUID(documentID)
+	if err != nil {
+		return sqlc.RagflowDocument{}, sqlc.RagflowDataset{}, ErrNotFound
+	}
+	document, err := s.store.GetRAGFlowDocument(ctx, id)
+	if errors.Is(err, pgx.ErrNoRows) {
+		return sqlc.RagflowDocument{}, sqlc.RagflowDataset{}, ErrNotFound
+	}
+	if err != nil {
+		return sqlc.RagflowDocument{}, sqlc.RagflowDataset{}, fmt.Errorf("查询知识库文件失败: %w", err)
+	}
+	if document.ScopeType != scope || uuidToString(document.OrgID) != uuidToString(orgID) {
+		return sqlc.RagflowDocument{}, sqlc.RagflowDataset{}, ErrNotFound
+	}
+	if scope == "app" && uuidToString(document.AppID) != uuidToString(appID) {
+		return sqlc.RagflowDocument{}, sqlc.RagflowDataset{}, ErrNotFound
+	}
+	dataset, err := s.datasetByDocument(ctx, document)
+	if err != nil {
+		return sqlc.RagflowDocument{}, sqlc.RagflowDataset{}, err
+	}
+	return document, dataset, nil
+}
+
+func (s *KnowledgeService) datasetByDocument(ctx context.Context, document sqlc.RagflowDocument) (sqlc.RagflowDataset, error) {
+	switch document.ScopeType {
+	case "org":
+		return s.getOrgDataset(ctx, document.OrgID)
+	case "app":
+		return s.getAppDataset(ctx, document.AppID)
+	default:
+		return sqlc.RagflowDataset{}, ErrNotFound
+	}
+}
+
+func (s *KnowledgeService) getApp(ctx context.Context, appID string) (sqlc.App, error) {
+	if s.store == nil {
+		return sqlc.App{}, ErrKnowledgeMissing
 	}
 	id, err := parseUUID(appID)
 	if err != nil {
-		return appKnowledgeContext{}, ErrNotFound
+		return sqlc.App{}, ErrNotFound
 	}
-	app, err := s.appStore.GetApp(ctx, id)
+	app, err := s.store.GetApp(ctx, id)
+	if errors.Is(err, pgx.ErrNoRows) || app.DeletedAt.Valid {
+		return sqlc.App{}, ErrNotFound
+	}
+	if err != nil {
+		return sqlc.App{}, fmt.Errorf("查询应用失败: %w", err)
+	}
+	return app, nil
+}
+
+func (s *KnowledgeService) appByRuntimeToken(ctx context.Context, token string) (sqlc.App, error) {
+	if strings.TrimSpace(token) == "" {
+		return sqlc.App{}, ErrInvalidToken
+	}
+	hash := HashAppRuntimeToken(token)
+	app, err := s.store.GetAppByRuntimeTokenHash(ctx, pgtype.Text{String: hash, Valid: true})
+	if errors.Is(err, pgx.ErrNoRows) || app.DeletedAt.Valid {
+		return sqlc.App{}, ErrInvalidToken
+	}
+	if err != nil {
+		return sqlc.App{}, fmt.Errorf("解析 runtime token 失败: %w", err)
+	}
+	return app, nil
+}
+
+func (s *KnowledgeService) getOrgDataset(ctx context.Context, orgID pgtype.UUID) (sqlc.RagflowDataset, error) {
+	if s.store == nil {
+		return sqlc.RagflowDataset{}, ErrKnowledgeMissing
+	}
+	dataset, err := s.store.GetRAGFlowOrgDataset(ctx, orgID)
 	if errors.Is(err, pgx.ErrNoRows) {
-		return appKnowledgeContext{}, ErrNotFound
-	}
-	if err != nil {
-		return appKnowledgeContext{}, fmt.Errorf("查询应用归属失败: %w", err)
-	}
-	if app.DeletedAt.Valid {
-		return appKnowledgeContext{}, ErrNotFound
-	}
-	actual := appKnowledgeContext{
-		orgID:       uuidToString(app.OrgID),
-		ownerUserID: uuidToString(app.OwnerUserID),
-	}
-	// query 参数仅作为前端上下文一致性校验。权限判断与文件路径均使用数据库中的真实归属，
-	// 防止调用方用 victim app_id + 自己的 owner_user_id 组合绕过应用知识库读取边界。
-	if requestedOrgID != actual.orgID || requestedOwnerUserID != actual.ownerUserID {
-		return appKnowledgeContext{}, ErrKnowledgeForbidden
-	}
-	return actual, nil
-}
-
-// validateKnowledgeRelative 在拼接可信租户前缀前校验用户传入路径。
-// 所有知识库入口都必须先约束 relative 本身，否则 path.Join 会把 ../../secret.md 规范化成
-// org/<orgID>/secret.md，导致 SafeRoot 只能保护全局根目录，不能保护知识库子树边界。
-func validateKnowledgeRelative(relative string, allowEmpty bool) (string, error) {
-	if relative == "" && allowEmpty {
-		return "", nil
-	}
-	if strings.ContainsRune(relative, 0) {
-		return "", fmt.Errorf("%w: 路径包含 NUL", files.ErrInvalidPath)
-	}
-	if path.IsAbs(relative) {
-		return "", fmt.Errorf("%w: 不允许绝对路径", files.ErrInvalidPath)
-	}
-	decoded := relative
-	for {
-		next, err := url.PathUnescape(decoded)
-		if err != nil {
-			return "", fmt.Errorf("%w: %s", files.ErrInvalidPath, err.Error())
+		org, orgErr := s.store.GetOrganization(ctx, orgID)
+		if errors.Is(orgErr, pgx.ErrNoRows) {
+			return sqlc.RagflowDataset{}, ErrNotFound
 		}
-		if next == decoded {
-			break
+		if orgErr != nil {
+			return sqlc.RagflowDataset{}, fmt.Errorf("查询组织失败: %w", orgErr)
 		}
-		decoded = next
+		return s.EnsureOrgDataset(ctx, org)
 	}
-	if strings.ContainsRune(decoded, 0) {
-		return "", fmt.Errorf("%w: 路径包含 NUL", files.ErrInvalidPath)
+	if err != nil {
+		return sqlc.RagflowDataset{}, fmt.Errorf("查询组织 RAGFlow dataset 失败: %w", err)
 	}
-	if path.IsAbs(decoded) {
-		return "", fmt.Errorf("%w: 不允许绝对路径", files.ErrInvalidPath)
+	if dataset.Status != "active" || !dataset.RagflowDatasetID.Valid || strings.TrimSpace(dataset.RagflowDatasetID.String) == "" {
+		return s.ensureExistingDataset(ctx, dataset)
 	}
-	for _, part := range strings.Split(decoded, "/") {
-		if part == ".." {
-			return "", fmt.Errorf("%w: 不允许的相对前缀", files.ErrInvalidPath)
+	return dataset, nil
+}
+
+func (s *KnowledgeService) getAppDataset(ctx context.Context, appID pgtype.UUID) (sqlc.RagflowDataset, error) {
+	if s.store == nil {
+		return sqlc.RagflowDataset{}, ErrKnowledgeMissing
+	}
+	dataset, err := s.store.GetRAGFlowAppDataset(ctx, appID)
+	if errors.Is(err, pgx.ErrNoRows) {
+		app, appErr := s.store.GetApp(ctx, appID)
+		if errors.Is(appErr, pgx.ErrNoRows) {
+			return sqlc.RagflowDataset{}, ErrNotFound
 		}
-	}
-	cleaned := path.Clean(decoded)
-	if cleaned == "." {
-		if allowEmpty {
-			return "", nil
+		if appErr != nil {
+			return sqlc.RagflowDataset{}, fmt.Errorf("查询实例失败: %w", appErr)
 		}
-		return "", files.ErrInvalidPath
+		return s.EnsureAppDataset(ctx, app)
 	}
-	return cleaned, nil
+	if err != nil {
+		return sqlc.RagflowDataset{}, fmt.Errorf("查询实例 RAGFlow dataset 失败: %w", err)
+	}
+	if dataset.Status != "active" || !dataset.RagflowDatasetID.Valid || strings.TrimSpace(dataset.RagflowDatasetID.String) == "" {
+		return s.ensureExistingDataset(ctx, dataset)
+	}
+	return dataset, nil
 }
 
-// OpenOrgFile 打开组织级知识库中的普通文件供下载。
-// 下载属于读取能力，权限沿用 CanReadOrgKnowledge；写入和同步权限不参与判断。
-func (s *KnowledgeService) OpenOrgFile(ctx context.Context, principal auth.Principal, orgID, relative string) (io.ReadCloser, int64, error) {
-	if s.master == nil {
-		return nil, 0, ErrKnowledgeMissing
+func (s *KnowledgeService) ensureDataset(ctx context.Context, scope string, orgID, appID pgtype.UUID, name string) (sqlc.RagflowDataset, error) {
+	if s.store == nil {
+		return sqlc.RagflowDataset{}, ErrKnowledgeMissing
 	}
-	if !auth.CanReadOrgKnowledge(principal, orgID) {
-		return nil, 0, ErrKnowledgeForbidden
+	var (
+		existing sqlc.RagflowDataset
+		err      error
+	)
+	if scope == "org" {
+		existing, err = s.store.GetRAGFlowOrgDataset(ctx, orgID)
+	} else {
+		existing, err = s.store.GetRAGFlowAppDataset(ctx, appID)
 	}
-	cleaned, err := validateKnowledgeRelative(relative, false)
+	if err == nil {
+		if existing.Status == "active" && existing.RagflowDatasetID.Valid && strings.TrimSpace(existing.RagflowDatasetID.String) != "" {
+			return existing, nil
+		}
+		return s.ensureExistingDataset(ctx, existing)
+	}
+	if !errors.Is(err, pgx.ErrNoRows) {
+		return sqlc.RagflowDataset{}, fmt.Errorf("查询 RAGFlow dataset 映射失败: %w", err)
+	}
+	claimToken, err := generateRAGFlowDatasetClaimToken()
 	if err != nil {
-		return nil, 0, err
+		return sqlc.RagflowDataset{}, err
 	}
-	target := path.Join("org", orgID, "knowledge", cleaned)
-	stream, size, err := s.master.Open(target)
-	if err != nil {
-		return nil, 0, fmt.Errorf("打开组织知识库文件失败: %w", err)
-	}
-	return stream, size, nil
-}
-
-// OpenAppFile 打开应用级知识库中的普通文件供下载。
-// 下载属于读取能力，权限沿用 CanReadAppKnowledge；平台管理员保留跨组织观察和下载能力。
-func (s *KnowledgeService) OpenAppFile(ctx context.Context, principal auth.Principal, orgID, appID, ownerUserID, relative string) (io.ReadCloser, int64, error) {
-	if s.master == nil {
-		return nil, 0, ErrKnowledgeMissing
-	}
-	appCtx, err := s.resolveAppKnowledgeContext(ctx, appID, orgID, ownerUserID)
-	if err != nil {
-		return nil, 0, err
-	}
-	if !auth.CanReadAppKnowledge(principal, appCtx.orgID, appCtx.ownerUserID) {
-		return nil, 0, ErrKnowledgeForbidden
-	}
-	cleaned, err := validateKnowledgeRelative(relative, false)
-	if err != nil {
-		return nil, 0, err
-	}
-	target := path.Join("org", appCtx.orgID, "app", appID, "knowledge", cleaned)
-	stream, size, err := s.master.Open(target)
-	if err != nil {
-		return nil, 0, fmt.Errorf("打开应用知识库文件失败: %w", err)
-	}
-	return stream, size, nil
-}
-
-// ListOrg 列出组织级知识库；组织成员只读。
-func (s *KnowledgeService) ListOrg(_ context.Context, principal auth.Principal, orgID, relative string) (KnowledgeListResult, error) {
-	if s.master == nil {
-		return KnowledgeListResult{}, ErrKnowledgeMissing
-	}
-	if !auth.CanReadOrgKnowledge(principal, orgID) {
-		return KnowledgeListResult{}, ErrKnowledgeForbidden
-	}
-	cleaned, err := validateKnowledgeRelative(relative, true)
-	if err != nil {
-		return KnowledgeListResult{}, err
-	}
-	target := path.Join("org", orgID, "knowledge", cleaned)
-	entries, err := s.master.List(target)
-	if err != nil {
-		return KnowledgeListResult{}, fmt.Errorf("读取组织知识库失败: %w", err)
-	}
-	return toKnowledgeListResult(target, entries), nil
-}
-
-// ListApp 列出应用级知识库；只能由 owner 或更高权限读取。
-func (s *KnowledgeService) ListApp(ctx context.Context, principal auth.Principal, orgID, appID, ownerUserID, relative string) (KnowledgeListResult, error) {
-	if s.master == nil {
-		return KnowledgeListResult{}, ErrKnowledgeMissing
-	}
-	appCtx, err := s.resolveAppKnowledgeContext(ctx, appID, orgID, ownerUserID)
-	if err != nil {
-		return KnowledgeListResult{}, err
-	}
-	if !auth.CanReadAppKnowledge(principal, appCtx.orgID, appCtx.ownerUserID) {
-		return KnowledgeListResult{}, ErrKnowledgeForbidden
-	}
-	cleaned, err := validateKnowledgeRelative(relative, true)
-	if err != nil {
-		return KnowledgeListResult{}, err
-	}
-	target := path.Join("org", appCtx.orgID, "app", appID, "knowledge", cleaned)
-	entries, err := s.master.List(target)
-	if err != nil {
-		return KnowledgeListResult{}, fmt.Errorf("读取应用知识库失败: %w", err)
-	}
-	return toKnowledgeListResult(target, entries), nil
-}
-
-func toKnowledgeListResult(targetPath string, entries []files.KnowledgeEntry) KnowledgeListResult {
-	out := make([]KnowledgeEntryResult, 0, len(entries))
-	for _, entry := range entries {
-		out = append(out, KnowledgeEntryResult{
-			Path:  entry.Path,
-			Name:  entry.Name,
-			Size:  entry.Size,
-			IsDir: entry.IsDir,
+	var dataset sqlc.RagflowDataset
+	if scope == "org" {
+		dataset, err = s.store.CreateRAGFlowOrgDatasetMapping(ctx, sqlc.CreateRAGFlowOrgDatasetMappingParams{
+			OrgID:            orgID,
+			Name:             name,
+			CreateClaimToken: claimToken,
+		})
+	} else {
+		dataset, err = s.store.CreateRAGFlowAppDatasetMapping(ctx, sqlc.CreateRAGFlowAppDatasetMappingParams{
+			OrgID:            orgID,
+			AppID:            appID,
+			Name:             name,
+			CreateClaimToken: claimToken,
 		})
 	}
-	return KnowledgeListResult{Path: targetPath, Entries: out}
+	if errors.Is(err, pgx.ErrNoRows) {
+		return s.datasetAfterCreateConflict(ctx, scope, orgID, appID)
+	}
+	if err != nil {
+		return sqlc.RagflowDataset{}, fmt.Errorf("创建 RAGFlow dataset 映射失败: %w", err)
+	}
+	return s.createRemoteDataset(ctx, dataset, claimToken)
+}
+
+func (s *KnowledgeService) datasetAfterCreateConflict(ctx context.Context, scope string, orgID, appID pgtype.UUID) (sqlc.RagflowDataset, error) {
+	var (
+		existing sqlc.RagflowDataset
+		err      error
+	)
+	if scope == "org" {
+		existing, err = s.store.GetRAGFlowOrgDataset(ctx, orgID)
+	} else {
+		existing, err = s.store.GetRAGFlowAppDataset(ctx, appID)
+	}
+	if err != nil {
+		return sqlc.RagflowDataset{}, fmt.Errorf("读取并发创建的 RAGFlow dataset 映射失败: %w", err)
+	}
+	if existing.Status == "active" && existing.RagflowDatasetID.Valid && strings.TrimSpace(existing.RagflowDatasetID.String) != "" {
+		return existing, nil
+	}
+	return s.ensureExistingDataset(ctx, existing)
+}
+
+func (s *KnowledgeService) ensureExistingDataset(ctx context.Context, dataset sqlc.RagflowDataset) (sqlc.RagflowDataset, error) {
+	if dataset.Status == "deleting" {
+		return sqlc.RagflowDataset{}, ErrKnowledgeMissing
+	}
+	if dataset.RagflowDatasetID.Valid && strings.TrimSpace(dataset.RagflowDatasetID.String) != "" && dataset.Status == "active" {
+		return dataset, nil
+	}
+	claimToken, err := generateRAGFlowDatasetClaimToken()
+	if err != nil {
+		return sqlc.RagflowDataset{}, err
+	}
+	claimed, err := s.store.ClaimRAGFlowDatasetCreation(ctx, sqlc.ClaimRAGFlowDatasetCreationParams{
+		ID:               dataset.ID,
+		CreateClaimToken: claimToken,
+		StaleBefore:      pgtype.Timestamptz{Time: time.Now().Add(-ragflowDatasetCreateClaimTimeout), Valid: true},
+	})
+	if errors.Is(err, pgx.ErrNoRows) {
+		return sqlc.RagflowDataset{}, ErrKnowledgeDatasetCreating
+	}
+	if err != nil {
+		return sqlc.RagflowDataset{}, fmt.Errorf("抢占 RAGFlow dataset 创建租约失败: %w", err)
+	}
+	return s.createRemoteDataset(ctx, claimed, claimToken)
+}
+
+func (s *KnowledgeService) createRemoteDataset(ctx context.Context, dataset sqlc.RagflowDataset, claimToken string) (sqlc.RagflowDataset, error) {
+	remote, err := s.ragflowClient().CreateDataset(ctx, dataset.Name, s.datasetChunkMethod)
+	if err != nil {
+		_, _ = s.store.MarkRAGFlowDatasetFailed(ctx, sqlc.MarkRAGFlowDatasetFailedParams{
+			ID:               dataset.ID,
+			LastError:        pgtype.Text{String: err.Error(), Valid: true},
+			CreateClaimToken: pgtype.Text{String: claimToken, Valid: true},
+		})
+		return sqlc.RagflowDataset{}, fmt.Errorf("创建 RAGFlow dataset 失败: %w", err)
+	}
+	if strings.TrimSpace(remote.ID) == "" {
+		err := fmt.Errorf("RAGFlow CreateDataset 返回空 dataset_id")
+		_, _ = s.store.MarkRAGFlowDatasetFailed(ctx, sqlc.MarkRAGFlowDatasetFailedParams{
+			ID:               dataset.ID,
+			LastError:        pgtype.Text{String: err.Error(), Valid: true},
+			CreateClaimToken: pgtype.Text{String: claimToken, Valid: true},
+		})
+		return sqlc.RagflowDataset{}, err
+	}
+	name := strings.TrimSpace(remote.Name)
+	if name == "" {
+		name = dataset.Name
+	}
+	active, err := s.store.SetRAGFlowDatasetActive(ctx, sqlc.SetRAGFlowDatasetActiveParams{
+		ID:               dataset.ID,
+		RagflowDatasetID: pgtype.Text{String: remote.ID, Valid: true},
+		Name:             name,
+		CreateClaimToken: pgtype.Text{String: claimToken, Valid: true},
+	})
+	if err != nil {
+		if errors.Is(err, pgx.ErrNoRows) {
+			_ = s.ragflowClient().DeleteDatasets(ctx, []string{remote.ID})
+			return s.datasetAfterCreateConflict(ctx, dataset.ScopeType, dataset.OrgID, dataset.AppID)
+		}
+		return sqlc.RagflowDataset{}, fmt.Errorf("回写 RAGFlow dataset 映射失败: %w", err)
+	}
+	return active, nil
+}
+
+func generateRAGFlowDatasetClaimToken() (string, error) {
+	token, err := generateAppRuntimeToken()
+	if err != nil {
+		return "", fmt.Errorf("生成 RAGFlow dataset 创建租约失败: %w", err)
+	}
+	return token, nil
+}
+
+func (s *KnowledgeService) ragflowClient() RAGFlowKnowledgeClient {
+	if s.ragflow == nil {
+		return missingRAGFlowClient{}
+	}
+	return s.ragflow
+}
+
+type missingRAGFlowClient struct{}
+
+func (missingRAGFlowClient) CreateDataset(context.Context, string, string) (ragflow.Dataset, error) {
+	return ragflow.Dataset{}, ErrKnowledgeMissing
+}
+func (missingRAGFlowClient) DeleteDatasets(context.Context, []string) error {
+	return ErrKnowledgeMissing
+}
+func (missingRAGFlowClient) UploadDocument(context.Context, string, string, io.Reader) (ragflow.Document, error) {
+	return ragflow.Document{}, ErrKnowledgeMissing
+}
+func (missingRAGFlowClient) DownloadDocument(context.Context, string, string) (io.ReadCloser, int64, error) {
+	return nil, 0, ErrKnowledgeMissing
+}
+func (missingRAGFlowClient) DeleteDocuments(context.Context, string, []string) error {
+	return ErrKnowledgeMissing
+}
+func (missingRAGFlowClient) ParseDocuments(context.Context, string, []string) error {
+	return ErrKnowledgeMissing
+}
+func (missingRAGFlowClient) ListDocuments(context.Context, string, int32, int32, string, string) ([]ragflow.Document, int32, error) {
+	return nil, 0, ErrKnowledgeMissing
+}
+func (missingRAGFlowClient) Retrieve(context.Context, []string, string, int32) ([]ragflow.RetrievalChunk, error) {
+	return nil, ErrKnowledgeMissing
+}
+
+func requireRemoteDatasetID(dataset sqlc.RagflowDataset) (string, error) {
+	if dataset.RagflowDatasetID.Valid && strings.TrimSpace(dataset.RagflowDatasetID.String) != "" {
+		return dataset.RagflowDatasetID.String, nil
+	}
+	return "", ErrKnowledgeMissing
+}
+
+func buildRAGFlowDatasetName(scope, primary, fallback string, id pgtype.UUID) string {
+	shortID := uuidToString(id)
+	if len(shortID) > 8 {
+		shortID = shortID[:8]
+	}
+	label := sanitizeDatasetLabel(primary)
+	if label == "" {
+		label = sanitizeDatasetLabel(fallback)
+	}
+	if label == "" {
+		return fmt.Sprintf("ocm-%s-%s", scope, shortID)
+	}
+	return fmt.Sprintf("ocm-%s-%s-%s", scope, label, shortID)
+}
+
+func sanitizeDatasetLabel(value string) string {
+	value = strings.ToLower(strings.TrimSpace(value))
+	var b strings.Builder
+	lastDash := false
+	for _, r := range value {
+		keep := (r >= 'a' && r <= 'z') || (r >= '0' && r <= '9')
+		if keep {
+			b.WriteRune(r)
+			lastDash = false
+			continue
+		}
+		if !lastDash && b.Len() > 0 {
+			b.WriteByte('-')
+			lastDash = true
+		}
+	}
+	return strings.Trim(b.String(), "-")
+}
+
+func normalizePage(page, pageSize int32) (int32, int32) {
+	if page <= 0 {
+		page = 1
+	}
+	if pageSize <= 0 {
+		pageSize = 50
+	}
+	if pageSize > 200 {
+		pageSize = 200
+	}
+	return page, pageSize
+}
+
+func normalizeRuntimeTopK(topK int32) int32 {
+	if topK <= 0 {
+		return runtimeKnowledgeDefaultTopK
+	}
+	if topK > runtimeKnowledgeMaxTopK {
+		return runtimeKnowledgeMaxTopK
+	}
+	return topK
+}
+
+func normalizeRAGFlowRun(run string) string {
+	switch strings.ToUpper(strings.TrimSpace(run)) {
+	case "", "0", "UNSTART":
+		return "queued"
+	case "1", "RUNNING":
+		return "running"
+	case "3", "DONE", "SUCCESS", "SUCCEEDED", "COMPLETED":
+		return "completed"
+	case "4", "FAIL", "FAILED", "ERROR":
+		return "failed"
+	case "2", "CANCEL", "CANCELLED", "STOPPED":
+		return "stopped"
+	default:
+		return "running"
+	}
+}
+
+func progressForStatus(status string) int32 {
+	if status == "completed" {
+		return 100
+	}
+	return 0
+}
+
+func toKnowledgeDocumentResult(row sqlc.RagflowDocument) KnowledgeDocumentResult {
+	result := KnowledgeDocumentResult{
+		ID:          uuidToString(row.ID),
+		Name:        row.Name,
+		Size:        row.SizeBytes,
+		ParseStatus: row.ParseStatus,
+		Progress:    row.Progress,
+		CreatedAt:   timeString(row.CreatedAt),
+	}
+	if row.MimeType.Valid {
+		result.MimeType = row.MimeType.String
+	}
+	if row.Suffix.Valid {
+		result.Suffix = row.Suffix.String
+	}
+	if row.LastError.Valid {
+		result.LastError = row.LastError.String
+	}
+	return result
+}
+
+func timeString(value pgtype.Timestamptz) string {
+	if !value.Valid {
+		return ""
+	}
+	return value.Time.UTC().Format(time.RFC3339)
+}
+
+// HashAppRuntimeToken 对 app runtime token 做不可逆 hash 后入库和鉴权。
+func HashAppRuntimeToken(token string) string {
+	sum := sha256.Sum256([]byte(token))
+	return hex.EncodeToString(sum[:])
 }

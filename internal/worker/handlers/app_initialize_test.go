@@ -544,6 +544,13 @@ func (s *appInitStub) SetAppAppliedVersion(_ context.Context, arg sqlc.SetAppApp
 	return s.app, nil
 }
 
+// SetAppRuntimeToken 记录 runtime API token 字段，模拟初始化写 manifest 前的密文落库。
+func (s *appInitStub) SetAppRuntimeToken(_ context.Context, arg sqlc.SetAppRuntimeTokenParams) (sqlc.App, error) {
+	s.app.RuntimeTokenHash = arg.RuntimeTokenHash
+	s.app.RuntimeTokenCiphertext = arg.RuntimeTokenCiphertext
+	return s.app, nil
+}
+
 // AppHasBoundChannelBinding 返回 channelBound 字段值，模拟「该 app 是否存在
 // status='bound' 的渠道行」DB 查询；hasBoundCalls 计数供断言「init 完成 /
 // 幂等分支 都正确触发自愈探测」。
@@ -706,7 +713,7 @@ func mustUUIDForTest(t *testing.T, value string) pgtype.UUID {
 }
 
 // fakeAppInputUploader 实现 AppInputUploader, 记录每次 UploadAppInputFile 调用。
-// 用于断言 writeAppInput / writeKnowledgeIntoInput 通过 agent 上传文件 (而非写入 manager 本机)。
+// 用于断言 writeAppInput 通过 agent 上传文件 (而非写入 manager 本机)。
 type fakeAppInputUploader struct {
 	// mu 保护 calls 切片;handler 单 goroutine 跑, 但桩做并发安全更稳妥, 避免未来
 	// handler 内部 goroutine 化时引入竞态。
@@ -759,97 +766,22 @@ func (f *fakeAppInputUploader) relPathsForApp(appID string) []string {
 	return out
 }
 
-// fakeKnowledgeReader 实现 KnowledgeReader, 用于测试 writeKnowledgeIntoInput
-// 是否按主副本子树递归推送到 input/resources/knowledge/{org,app}/<rel>。
-//
-// files 用主副本绝对路径 (含 prefix) 做 key, 模拟一个内存中的主副本目录。
-type fakeKnowledgeReader struct {
-	files map[string]string
-}
-
-func (f *fakeKnowledgeReader) WalkFiles(prefix string, fn func(relPath string, size int64) error) error {
-	for full, content := range f.files {
-		if !strings.HasPrefix(full, prefix+"/") {
-			continue
-		}
-		rel := strings.TrimPrefix(full, prefix+"/")
-		if err := fn(rel, int64(len(content))); err != nil {
-			return err
-		}
-	}
-	return nil
-}
-
-func (f *fakeKnowledgeReader) Open(masterPath string) (io.ReadCloser, int64, error) {
-	c, ok := f.files[masterPath]
-	if !ok {
-		return nil, 0, fmt.Errorf("not found: %s", masterPath)
-	}
-	return io.NopCloser(strings.NewReader(c)), int64(len(c)), nil
-}
-
-// TestAppInitialize_WritesKnowledgeIntoInput 验证 app_initialize 在容器启动前
-// 把组织 + 应用知识库主副本原样推送到 input/resources/knowledge/{org,app}/。
-//
-// 覆盖场景:
-//   - 组织级根目录文件 billing-rules.md → resources/knowledge/org/billing-rules.md
-//   - 组织级子目录文件 policies/refund.md → resources/knowledge/org/policies/refund.md
-//   - 应用级文件 quickstart.md → resources/knowledge/app/quickstart.md
-//   - 中文文件名 (relPath 原样转发, 不再做 slug, 由 agent 沙箱校验路径合法性)
-func TestAppInitialize_WritesKnowledgeIntoInput(t *testing.T) {
-	store := newAppInitStub(t)
-	dirs := &fakeDirs{}
-	containers := &fakeContainers{result: runtimepkg.ContainerInfo{ID: "ctr-1", Name: "hermes-" + testAppID}}
-	client := &fakeNewAPI{result: newapi.APIKey{ID: 99, Key: "sk-test"}}
-	up := &fakeAppInputUploader{}
-	orgPrefix := fmt.Sprintf("org/%s/knowledge", testOrgID)
-	appPrefix := fmt.Sprintf("org/%s/app/%s/knowledge", testOrgID, testAppID)
-	reader := &fakeKnowledgeReader{files: map[string]string{
-		orgPrefix + "/billing-rules.md":   "# 计费\n月度结算。",
-		orgPrefix + "/policies/refund.md": "# 退款政策",
-		appPrefix + "/quickstart.md":      "# 应用使用入门",
-		appPrefix + "/中文文件.md":            "# 中文 relPath 也应原样推送",
-	}}
-
-	cfg := AppInitializeConfig{
-		SystemPromptTemplate: "你是 {org_name} 的助手",
-		Cipher:               testCipher(t),
-		ResolveRuntimeImage:  testResolveRuntimeImage,
-	}
-	handler := NewAppInitializeHandler(store, dirs, containers, containers, client, cfg)
-	handler.SetAppInputUploader(up)
-	handler.SetKnowledgeReader(reader)
-
-	require.NoError(t, handler.Handle(context.Background(), buildJob(t, testAppID, "node-1")))
-
-	// 组织级与应用级主副本文件都必须按相对路径原样落到 resources/knowledge/{org,app}/。
-	require.True(t, up.hasUpload(testAppID, "resources/knowledge/org/billing-rules.md"),
-		"组织级根目录文件应推送到 resources/knowledge/org/")
-	require.True(t, up.hasUpload(testAppID, "resources/knowledge/org/policies/refund.md"),
-		"组织级子目录文件应保留子目录结构推送到 resources/knowledge/org/")
-	require.True(t, up.hasUpload(testAppID, "resources/knowledge/app/quickstart.md"),
-		"应用级文件应推送到 resources/knowledge/app/")
-	require.True(t, up.hasUpload(testAppID, "resources/knowledge/app/中文文件.md"),
-		"中文 relPath 应被原样转发, 不在 manager 端 slug")
-}
-
-// TestAppInitialize_KnowledgeReaderNilSkipsKnowledge 验证 KnowledgeReader 未注入时
-// writeAppInput 仅上传 manifest + resources, 不报错 (向后兼容旧装配 / 测试)。
-func TestAppInitialize_KnowledgeReaderNilSkipsKnowledge(t *testing.T) {
+// TestAppInitialize_DoesNotUploadKnowledgeFiles 验证 app_initialize 只上传 manifest/resources，
+// 知识库由 oc-kb 通过 manager runtime API 访问，不再复制本地主副本文件。
+func TestAppInitialize_DoesNotUploadKnowledgeFiles(t *testing.T) {
 	store := newAppInitStub(t)
 	containers := &fakeContainers{result: runtimepkg.ContainerInfo{ID: "ctr-1", Name: "n"}}
 	client := &fakeNewAPI{result: newapi.APIKey{ID: 1, Key: "k"}}
 	up := &fakeAppInputUploader{}
 	handler := NewAppInitializeHandler(store, &fakeDirs{}, containers, containers, client, AppInitializeConfig{Cipher: testCipher(t), ResolveRuntimeImage: testResolveRuntimeImage})
 	handler.SetAppInputUploader(up)
-	// 不调 SetKnowledgeReader, h.knowledge 保持 nil。
 
 	require.NoError(t, handler.Handle(context.Background(), buildJob(t, testAppID, "node-1")))
 
 	// 不应出现任何 resources/knowledge/* 上传记录。
 	for _, c := range up.calls {
 		require.False(t, strings.HasPrefix(c.relPath, "resources/knowledge/"),
-			"KnowledgeReader 未注入时不应上传任何知识库文件: %s", c.relPath)
+			"app_initialize 不应上传本地知识库文件: %s", c.relPath)
 	}
 }
 

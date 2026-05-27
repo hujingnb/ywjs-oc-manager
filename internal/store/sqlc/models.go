@@ -161,15 +161,6 @@ type Job struct {
 	FinishedAt pgtype.Timestamptz `db:"finished_at" json:"finished_at"`
 }
 
-type KnowledgeSyncStatus struct {
-	OrgID         pgtype.UUID        `db:"org_id" json:"org_id"`
-	NodeID        pgtype.UUID        `db:"node_id" json:"node_id"`
-	Status        string             `db:"status" json:"status"`
-	LastSuccessAt pgtype.Timestamptz `db:"last_success_at" json:"last_success_at"`
-	LastError     pgtype.Text        `db:"last_error" json:"last_error"`
-	UpdatedAt     pgtype.Timestamptz `db:"updated_at" json:"updated_at"`
-}
-
 // 运行节点资源原始采样，保留 30 天供趋势图查询。
 type NodeResourceSample struct {
 	ID               pgtype.UUID        `db:"id" json:"id"`
@@ -222,10 +213,12 @@ type RagflowDataset struct {
 	RagflowDatasetID pgtype.Text `db:"ragflow_dataset_id" json:"ragflow_dataset_id"`
 	Name             string      `db:"name" json:"name"`
 	// dataset 生命周期状态：creating、active、deleting、failed。
-	Status    string             `db:"status" json:"status"`
-	LastError pgtype.Text        `db:"last_error" json:"last_error"`
-	CreatedAt pgtype.Timestamptz `db:"created_at" json:"created_at"`
-	UpdatedAt pgtype.Timestamptz `db:"updated_at" json:"updated_at"`
+	Status    string      `db:"status" json:"status"`
+	LastError pgtype.Text `db:"last_error" json:"last_error"`
+	// dataset 创建租约 token，仅持有该 token 的进程可回写 active 或 failed，避免并发远端创建互相覆盖。
+	CreateClaimToken pgtype.Text        `db:"create_claim_token" json:"create_claim_token"`
+	CreatedAt        pgtype.Timestamptz `db:"created_at" json:"created_at"`
+	UpdatedAt        pgtype.Timestamptz `db:"updated_at" json:"updated_at"`
 }
 
 // manager 展示文件列表所需的 RAGFlow document 元数据缓存。

@@ -441,7 +441,8 @@ func TestAppDeleteHandler_HappyPath(t *testing.T) {
 	containers := &fakeLifecycle{}
 	disabler := &fakeDisabler{}
 	fileOps := &fakeFileOps{}
-	handler := NewAppDeleteHandler(stub, containers, disabler, fileOps)
+	knowledge := &fakeKnowledgeCleaner{}
+	handler := NewAppDeleteHandler(stub, containers, disabler, fileOps, knowledge)
 	err := handler.Handle(context.Background(), runtimeJob(domain.JobTypeAppDelete, testAppID))
 	require.NoError(t, err)
 	if containers.stopCalls != 1 || containers.removeCalls != 1 {
@@ -451,7 +452,22 @@ func TestAppDeleteHandler_HappyPath(t *testing.T) {
 		t.Fatalf("disabler 调用 = (%d,%d), want (42,2)", disabler.id, disabler.status)
 	}
 	require.Equal(t, testAppID, fileOps.deletedAppID)
+	require.Equal(t, testAppID, knowledge.cleanedAppID)
 	require.True(t, stub.softDeleted)
+}
+
+// TestAppDeleteHandler_PropagatesKnowledgeCleanupError 验证 RAGFlow app dataset 清理失败时不软删应用，
+// 让 worker 重试可以继续回收远端文件和索引。
+func TestAppDeleteHandler_PropagatesKnowledgeCleanupError(t *testing.T) {
+	stub := runtimeStub(t)
+	knowledge := &fakeKnowledgeCleaner{err: errors.New("ragflow unavailable")}
+	handler := NewAppDeleteHandler(stub, &fakeLifecycle{}, &fakeDisabler{}, nil, knowledge)
+
+	err := handler.Handle(context.Background(), runtimeJob(domain.JobTypeAppDelete, testAppID))
+
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "清理应用 RAGFlow dataset 失败")
+	require.False(t, stub.softDeleted)
 }
 
 // TestAppDeleteHandler_PrefersArchiveOverDelete 验证应用删除处理器Prefers归档覆盖删除的预期行为场景。
@@ -621,6 +637,16 @@ type fakeLifecycle struct {
 	startErr     error
 	stopErr      error
 	removeErr    error
+}
+
+type fakeKnowledgeCleaner struct {
+	cleanedAppID string
+	err          error
+}
+
+func (f *fakeKnowledgeCleaner) DeleteAppDataset(_ context.Context, appID pgtype.UUID) error {
+	f.cleanedAppID = uuidToString(appID)
+	return f.err
 }
 
 func (f *fakeLifecycle) StartContainer(_ context.Context, _, _ string) error {

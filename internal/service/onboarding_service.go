@@ -56,15 +56,21 @@ type TxRunner interface {
 // MemberOnboardingService 把成员-应用-渠道绑定-审计-任务放在同一个事务里完成。
 // 任意一步失败都要让整个事务回滚，避免"成员创建成功但应用没创建"这种悬挂状态。
 type MemberOnboardingService struct {
-	tx           TxRunner
-	hashPassword PasswordHasher
-	selector     NodeSelector
+	tx                TxRunner
+	hashPassword      PasswordHasher
+	selector          NodeSelector
+	knowledgeDatasets KnowledgeDatasetProvisioner
 }
 
 // NewMemberOnboardingService 创建 onboarding 服务。selector 可以为 nil；
 // 此时 input.NodeID 为空会直接返 ErrNoNodeAvailable（生产部署应注入 SQLNodeSelector）。
 func NewMemberOnboardingService(tx TxRunner, hash PasswordHasher, selector NodeSelector) *MemberOnboardingService {
 	return &MemberOnboardingService{tx: tx, hashPassword: hash, selector: selector}
+}
+
+// SetKnowledgeDatasetProvisioner 注入实例创建后的知识库 dataset 预创建能力。
+func (s *MemberOnboardingService) SetKnowledgeDatasetProvisioner(p KnowledgeDatasetProvisioner) {
+	s.knowledgeDatasets = p
 }
 
 // selectNode 在显式 NodeID 为空时按剩余容量自动选。
@@ -179,6 +185,7 @@ func (s *MemberOnboardingService) OnboardMember(ctx context.Context, principal a
 	}
 
 	var result OnboardMemberResult
+	var createdApp sqlc.App
 	txErr := s.tx.WithTx(ctx, func(store OnboardingStore) error {
 		org, err := store.GetOrganization(ctx, orgUUID)
 		if err != nil {
@@ -223,6 +230,7 @@ func (s *MemberOnboardingService) OnboardMember(ctx context.Context, principal a
 		if err != nil {
 			return fmt.Errorf("创建应用失败: %w", err)
 		}
+		createdApp = app
 		if _, err := store.CreateChannelBinding(ctx, sqlc.CreateChannelBindingParams{
 			AppID:       app.ID,
 			ChannelType: channelType,
@@ -291,6 +299,11 @@ func (s *MemberOnboardingService) OnboardMember(ctx context.Context, principal a
 	if txErr != nil {
 		return OnboardMemberResult{}, txErr
 	}
+	if s.knowledgeDatasets != nil {
+		if _, err := s.knowledgeDatasets.EnsureAppDataset(ctx, createdApp); err != nil {
+			slog.WarnContext(ctx, "预创建实例 RAGFlow dataset 失败", "app_id", uuidToString(createdApp.ID), "error", err)
+		}
+	}
 	return result, nil
 }
 
@@ -329,6 +342,7 @@ func (s *MemberOnboardingService) CreateAppForMember(ctx context.Context, princi
 	}
 
 	var result CreateAppForMemberResult
+	var createdApp sqlc.App
 	txErr := s.tx.WithTx(ctx, func(store OnboardingStore) error {
 		org, err := store.GetOrganization(ctx, orgUUID)
 		if err != nil {
@@ -383,6 +397,7 @@ func (s *MemberOnboardingService) CreateAppForMember(ctx context.Context, princi
 			}
 			return fmt.Errorf("创建应用失败: %w", err)
 		}
+		createdApp = app
 		if _, err := store.CreateChannelBinding(ctx, sqlc.CreateChannelBindingParams{
 			AppID:       app.ID,
 			ChannelType: channelType,
@@ -434,6 +449,11 @@ func (s *MemberOnboardingService) CreateAppForMember(ctx context.Context, princi
 	})
 	if txErr != nil {
 		return CreateAppForMemberResult{}, txErr
+	}
+	if s.knowledgeDatasets != nil {
+		if _, err := s.knowledgeDatasets.EnsureAppDataset(ctx, createdApp); err != nil {
+			slog.WarnContext(ctx, "预创建实例 RAGFlow dataset 失败", "app_id", uuidToString(createdApp.ID), "error", err)
+		}
 	}
 	return result, nil
 }

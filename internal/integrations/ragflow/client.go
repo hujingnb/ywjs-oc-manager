@@ -45,6 +45,43 @@ type Document struct {
 	Type     string `json:"type"`
 }
 
+// uploadDocumentResponse 兼容 RAGFlow 上传接口的 data 数组响应。
+// 客户端一次只上传一个 file 字段，因此取数组中的第一个 document 作为本次上传结果。
+type uploadDocumentResponse struct {
+	Document Document
+}
+
+// UnmarshalJSON 兼容旧测试桩中的单对象响应和官方文档中的数组响应。
+func (r *uploadDocumentResponse) UnmarshalJSON(raw []byte) error {
+	raw = bytes.TrimSpace(raw)
+	if len(raw) == 0 || bytes.Equal(raw, []byte("null")) {
+		return fmt.Errorf("RAGFlow 上传响应缺少 document")
+	}
+	if raw[0] == '[' {
+		var docs []Document
+		if err := json.Unmarshal(raw, &docs); err != nil {
+			return err
+		}
+		if len(docs) == 0 {
+			return fmt.Errorf("RAGFlow 上传响应 document 数组为空")
+		}
+		return r.setDocument(docs[0])
+	}
+	var doc Document
+	if err := json.Unmarshal(raw, &doc); err != nil {
+		return err
+	}
+	return r.setDocument(doc)
+}
+
+func (r *uploadDocumentResponse) setDocument(doc Document) error {
+	if strings.TrimSpace(doc.ID) == "" {
+		return fmt.Errorf("RAGFlow 上传响应缺少 document id")
+	}
+	r.Document = doc
+	return nil
+}
+
 // RetrievalChunk 描述 RAGFlow retrieval 返回的单个命中文本块。
 type RetrievalChunk struct {
 	ID           string  `json:"id"`
@@ -53,6 +90,57 @@ type RetrievalChunk struct {
 	DocumentName string  `json:"document_name"`
 	DatasetID    string  `json:"dataset_id"`
 	Similarity   float64 `json:"similarity"`
+}
+
+// UnmarshalJSON 同时兼容 manager 旧测试桩字段和 RAGFlow 官方 retrieval 字段。
+func (c *RetrievalChunk) UnmarshalJSON(raw []byte) error {
+	var value struct {
+		ID              string  `json:"id"`
+		Content         string  `json:"content"`
+		DocumentID      string  `json:"document_id"`
+		DocumentName    string  `json:"document_name"`
+		DocumentKeyword string  `json:"document_keyword"`
+		DatasetID       string  `json:"dataset_id"`
+		KBID            string  `json:"kb_id"`
+		Similarity      float64 `json:"similarity"`
+	}
+	if err := json.Unmarshal(raw, &value); err != nil {
+		return err
+	}
+	c.ID = value.ID
+	c.Content = value.Content
+	c.DocumentID = value.DocumentID
+	c.DocumentName = value.DocumentName
+	if c.DocumentName == "" {
+		c.DocumentName = value.DocumentKeyword
+	}
+	c.DatasetID = value.DatasetID
+	if c.DatasetID == "" {
+		c.DatasetID = value.KBID
+	}
+	c.Similarity = value.Similarity
+	return nil
+}
+
+type retrievalDocAgg struct {
+	DocID        string `json:"doc_id"`
+	DocName      string `json:"doc_name"`
+	DocumentID   string `json:"document_id"`
+	DocumentName string `json:"document_name"`
+}
+
+func (a retrievalDocAgg) documentID() string {
+	if a.DocID != "" {
+		return a.DocID
+	}
+	return a.DocumentID
+}
+
+func (a retrievalDocAgg) documentName() string {
+	if a.DocName != "" {
+		return a.DocName
+	}
+	return a.DocumentName
 }
 
 // NewClient 构造 RAGFlow 客户端。
@@ -66,6 +154,9 @@ func NewClient(baseURL, apiKey string, timeout time.Duration) (*Client, error) {
 	parsed, err := url.ParseRequestURI(baseURL)
 	if err != nil || parsed.Scheme == "" || parsed.Host == "" {
 		return nil, fmt.Errorf("ragflow baseURL 非法")
+	}
+	if parsed.Scheme != "http" && parsed.Scheme != "https" {
+		return nil, fmt.Errorf("ragflow baseURL 必须使用 http 或 https 协议")
 	}
 	if apiKey == "" {
 		return nil, fmt.Errorf("ragflow apiKey 不能为空")
@@ -121,11 +212,11 @@ func (c *Client) UploadDocument(ctx context.Context, datasetID, filename string,
 	req.Header.Set("Content-Type", writer.FormDataContentType())
 	req.Header.Set("Accept", "application/json")
 
-	var out Document
+	var out uploadDocumentResponse
 	if err := c.do(req, &out); err != nil {
 		return Document{}, err
 	}
-	return out, nil
+	return out.Document, nil
 }
 
 // DownloadDocument 下载指定 document 的原始文件流。
@@ -161,9 +252,10 @@ func (c *Client) ListDocuments(ctx context.Context, datasetID string, page, page
 		query.Set("run", strings.TrimSpace(run))
 	}
 	var out struct {
-		Docs  []Document `json:"docs"`
-		Items []Document `json:"items"`
-		Total int32      `json:"total"`
+		Docs          []Document `json:"docs"`
+		Items         []Document `json:"items"`
+		Total         *int32     `json:"total"`
+		TotalDatasets *int32     `json:"total_datasets"`
 	}
 	if err := c.doJSON(ctx, http.MethodGet, c.apiPath("/api/v1/datasets", datasetID, "documents"), query, nil, &out); err != nil {
 		return nil, 0, err
@@ -172,7 +264,13 @@ func (c *Client) ListDocuments(ctx context.Context, datasetID string, page, page
 	if len(items) == 0 {
 		items = out.Items
 	}
-	return items, out.Total, nil
+	total := int32(0)
+	if out.Total != nil {
+		total = *out.Total
+	} else if out.TotalDatasets != nil {
+		total = *out.TotalDatasets
+	}
+	return items, total, nil
 }
 
 // DeleteDocuments 删除指定 dataset 下的一组 document。
@@ -197,12 +295,34 @@ func (c *Client) Retrieve(ctx context.Context, datasetIDs []string, question str
 		body["top_k"] = topK
 	}
 	var out struct {
-		Chunks []RetrievalChunk `json:"chunks"`
+		Chunks  []RetrievalChunk  `json:"chunks"`
+		DocAggs []retrievalDocAgg `json:"doc_aggs"`
 	}
 	if err := c.doJSON(ctx, http.MethodPost, "/api/v1/retrieval", nil, body, &out); err != nil {
 		return nil, err
 	}
+	applyDocAggNames(out.Chunks, out.DocAggs)
 	return out.Chunks, nil
+}
+
+func applyDocAggNames(chunks []RetrievalChunk, docAggs []retrievalDocAgg) {
+	if len(chunks) == 0 || len(docAggs) == 0 {
+		return
+	}
+	names := make(map[string]string, len(docAggs))
+	for _, agg := range docAggs {
+		if id, name := agg.documentID(), agg.documentName(); id != "" && name != "" {
+			names[id] = name
+		}
+	}
+	for index := range chunks {
+		if chunks[index].DocumentName != "" {
+			continue
+		}
+		if name := names[chunks[index].DocumentID]; name != "" {
+			chunks[index].DocumentName = name
+		}
+	}
 }
 
 func (c *Client) doJSON(ctx context.Context, method, pathValue string, query url.Values, body any, out any) error {
@@ -310,6 +430,9 @@ func decodeJSONBody(raw []byte, out any) error {
 	}
 	target := bytes.TrimSpace(envelope.Data)
 	if len(target) == 0 || bytes.Equal(target, []byte("null")) {
+		if envelope.Code != nil {
+			return fmt.Errorf("RAGFlow 响应缺少 data")
+		}
 		target = raw
 	}
 	if err := json.Unmarshal(target, out); err != nil {

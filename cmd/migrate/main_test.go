@@ -39,7 +39,6 @@ func TestLoadDatabaseURLReadsOnlyConfigFile(t *testing.T) {
 app:
   http_addr: ":8080"
   data_root: "./data/manager"
-  knowledge_root: "/var/lib/oc-manager/knowledge"
 database:
   url: "`+want+`"
 redis:

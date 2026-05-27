@@ -51,7 +51,7 @@ type AuditResult struct {
 	// ActorDeleted 表示 actor 对应用户已被软删除（users.deleted_at 非空，本项目即「下线」）。
 	ActorDeleted bool `json:"actor_deleted"`
 	// TargetName 是 target_id 对应资源名称；按 target_type 走相关子查询，
-	// 对 newapi_call / knowledge_sync 等无对应实体的类型返回空字符串。
+	// 对 newapi_call 等无对应实体的类型返回空字符串。
 	TargetName string `json:"target_name,omitempty"`
 	// TargetDeleted 表示目标资源对应实体已软删除。
 	TargetDeleted bool `json:"target_deleted"`

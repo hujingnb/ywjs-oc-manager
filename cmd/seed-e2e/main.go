@@ -102,14 +102,12 @@ func main() {
 //
 // 与 plan 草稿的差异：
 //   - 增加 refresh_tokens：refresh_tokens.user_id 引用 users(id)，否则 DELETE users 会被外键阻挡。
-//   - knowledge_sync_status 引用 organizations / runtime_nodes，必须先于这两张表清。
 //   - organizations 不能用 TRUNCATE … CASCADE：users.org_id 引用 organizations，CASCADE
 //     会顺带把 platform_admin 也清掉；改用 DELETE，让外键保护已经从 users 解除关联的 admin 行。
 func truncate(ctx context.Context, conn *pgx.Conn) error {
 	stmts := []string{
 		`TRUNCATE TABLE channel_bindings RESTART IDENTITY CASCADE`,
 		`TRUNCATE TABLE apps RESTART IDENTITY CASCADE`,
-		`TRUNCATE TABLE knowledge_sync_status RESTART IDENTITY CASCADE`,
 		`TRUNCATE TABLE recharge_records RESTART IDENTITY CASCADE`,
 		`TRUNCATE TABLE jobs RESTART IDENTITY CASCADE`,
 		`TRUNCATE TABLE audit_logs RESTART IDENTITY CASCADE`,

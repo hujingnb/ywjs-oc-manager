@@ -23,6 +23,7 @@ import (
 
 	runtimepkg "oc-manager/internal/integrations/runtime"
 	"oc-manager/internal/runtime/imagecoord"
+	"oc-manager/internal/service"
 	"oc-manager/internal/store/sqlc"
 )
 
@@ -53,6 +54,8 @@ type AppInitializeStore interface {
 	// 此场景下 app.status 应跳过 binding_waiting 直接进入 running，避免概览页
 	// 长期显示「待绑定」而渠道页显示「bound」。
 	AppHasBoundChannelBinding(ctx context.Context, appID pgtype.UUID) (bool, error)
+	// SetAppRuntimeToken 写入 Hermes 调 manager runtime API 的 app 级 token。
+	SetAppRuntimeToken(ctx context.Context, arg sqlc.SetAppRuntimeTokenParams) (sqlc.App, error)
 }
 
 // ContainerCreator 抽象通过 agent docker 代理创建容器的能力。
@@ -80,19 +83,6 @@ type AgentDirInitializer interface {
 // nil 装配时 phasePrepare 内 WriteAppInput 调用会直接 panic, 因此生产装配必须注入。
 type AppInputUploader interface {
 	UploadAppInputFile(ctx context.Context, nodeID, appID, relPath string, content io.Reader) error
-}
-
-// KnowledgeReader 抽象 manager 主副本的读能力,供 writeKnowledgeIntoInput 在容器启动前
-// 把组织/应用知识库主副本原样递归上传到 apps/<id>/input/resources/knowledge/{org,app}/。
-//
-// WalkFiles 递归遍历 prefix(如 "org/<id>/knowledge")下所有普通文件,每个文件
-// 回调一次,relPath 相对 prefix、统一 '/' 分隔。
-// Open 打开主副本中的指定文件;调用方负责关闭。
-//
-// nil 装配时 writeKnowledgeIntoInput 直接跳过, 使旧装配 / 测试装配仍可工作。
-type KnowledgeReader interface {
-	WalkFiles(prefix string, fn func(relPath string, size int64) error) error
-	Open(masterPath string) (io.ReadCloser, int64, error)
 }
 
 // SkillBlobReader 抽象「读取 manager 文件系统上版本 skill tar 主副本」的能力。
@@ -195,6 +185,8 @@ type AppInitializeConfig struct {
 	// SkillBlobs 提供版本 skill tar 主副本的读能力，用于 writeSkillsIntoInput 把
 	// skill 推送到节点 input/resources/skills/。nil 时跳过 skill 推送（测试/旧装配兼容）。
 	SkillBlobs SkillBlobReader
+	// ManagerRuntimeBaseURL 是 Hermes 容器内访问 manager runtime API 的地址。
+	ManagerRuntimeBaseURL string
 }
 
 // AppInitializeLLMConfig 是 AppInitializeConfig.LLM 的类型，与 internal/config 的
@@ -213,9 +205,8 @@ type AppInitializeLLMConfig struct {
 //  3. 调 imagePullCoord 通过 agent docker proxy 在目标节点直接 pull hermes runtime 镜像；
 //  4. 调 AgentDirInitializer 在节点上准备 apps/<id>/ 目录；
 //  5. api_key 不 active 时调 new-api 创建并 cipher.Encrypt 写库（ensureAPIKey）；
-//  6. 通过 AppInputUploader 写 apps/<id>/input/ 的 manifest.yaml + resources/*.md
-//     + 知识库主副本(使用步骤 5 的真实 token,避免 HTTP 401);容器内 oc-entrypoint
-//     在启动时把这些输入文件翻译成 hermes 自有 schema;
+//  6. 通过 AppInputUploader 写 apps/<id>/input/ 的 manifest.yaml + resources/*.md；
+//     容器内 oc-entrypoint 在启动时把这些输入文件翻译成 hermes 自有 schema；
 //  7. container_id 为空时调 ContainerCreator.CreateContainer，把 ID/Name 写库；
 //  8. 调 ContainerStarter.StartContainer 启动容器；
 //  9. starter 实现 HermesHealthChecker 时等 docker HEALTHCHECK 报 healthy；
@@ -227,10 +218,9 @@ type AppInitializeHandler struct {
 	store AppInitializeStore
 	dirs  AgentDirInitializer
 	// inputFiles 是 hermes-agent-pull 切换后的主入口: 通过 agent input/file 路由
-	// 把 manifest.yaml + resources/*.md + 知识库主副本写到 apps/<id>/input/。
+	// 把 manifest.yaml + resources/*.md 写到 apps/<id>/input/。
 	// 生产装配必须注入; nil 时 phasePrepare 写文件阶段直接报错。
 	inputFiles AppInputUploader
-	knowledge  KnowledgeReader
 	containers ContainerCreator
 	starter    ContainerStarter
 	factory    NewAPIClientFactory
@@ -269,16 +259,6 @@ func NewAppInitializeHandler(
 // nil 时 phasePrepare 内 WriteAppInput 调用会直接报错。
 func (h *AppInitializeHandler) SetAppInputUploader(w AppInputUploader) {
 	h.inputFiles = w
-}
-
-// SetKnowledgeReader 注入主副本知识库读取能力。
-// 装配后 phasePrepare 在 WriteAppInput 之后会通过 writeKnowledgeIntoInput 把
-// 组织 + 应用知识库主副本的全部文件原样递归上传到
-// apps/<id>/input/resources/knowledge/{org,app}/<rel>;
-// 镜像 oc-entrypoint 在容器启动时自行扫描该目录、按需 render 成 hermes skills。
-// nil 时跳过知识库写入(仅保留旧测试装配兼容)。
-func (h *AppInitializeHandler) SetKnowledgeReader(r KnowledgeReader) {
-	h.knowledge = r
 }
 
 // SetImagePullCoord 注入镜像拉取协调器。
@@ -723,20 +703,21 @@ func (h *AppInitializeHandler) writeAppInput(ctx context.Context, nodeID string,
 	// 接口形态在内部转发到 inputFiles.UploadAppInputFile (带 nodeID)。
 	writer := &appInputUploadAdapter{up: h.inputFiles, nodeID: nodeID}
 	in := BuildAppInputData(app, org, owner, containerAPIKey, versionData, AppInputBuildOptions{
-		PlatformPrompt: h.cfg.PlatformPrompt,
-		NewAPIBaseURL:  h.cfg.NewAPIBaseURL,
-		DefaultModel:   h.cfg.LLM.DefaultModel,
+		PlatformPrompt:        h.cfg.PlatformPrompt,
+		NewAPIBaseURL:         h.cfg.NewAPIBaseURL,
+		DefaultModel:          h.cfg.LLM.DefaultModel,
+		ManagerRuntimeBaseURL: h.cfg.ManagerRuntimeBaseURL,
 	})
+	_, runtimeToken, err := service.EnsureAppRuntimeToken(ctx, h.store, h.cfg.Cipher, app)
+	if err != nil {
+		return err
+	}
+	in.KnowledgeRuntimeBaseURL = h.cfg.ManagerRuntimeBaseURL
+	in.KnowledgeAppToken = runtimeToken
 	if err := hermes.WriteAppInput(ctx, writer, appID, in); err != nil {
 		return fmt.Errorf("写入应用 input 资源失败: %w", err)
 	}
 
-	// 把组织 / 应用知识库主副本原样递归推送到 input/resources/knowledge/{org,app}/。
-	// 由镜像内 oc-entrypoint 在容器启动时按需 render 成 hermes 自身 skill;
-	// manager 不再生成 SKILL.md, 解耦 hermes skill schema 演进。
-	if err := h.writeKnowledgeIntoInput(ctx, nodeID, appID, uuidToString(app.OrgID)); err != nil {
-		return err
-	}
 	return nil
 }
 
@@ -836,6 +817,8 @@ type AppInputBuildOptions struct {
 	// DefaultModel 是 version.MainModel 为空时的兜底模型名。两者都为空时
 	// 写入 "default" 占位, 避免 manifest.app.model 落空串。
 	DefaultModel string
+	// ManagerRuntimeBaseURL 写入 manifest.knowledge.runtime_base_url，供 Hermes 调 manager runtime API。
+	ManagerRuntimeBaseURL string
 }
 
 // BuildAppInputData 把 DB 行 + 版本数据 + 解密后的 api key 装配成 hermes.AppInputData。
@@ -866,70 +849,19 @@ func BuildAppInputData(app sqlc.App, org sqlc.Organization, owner sqlc.User, con
 		baseURL = "http://new-api:3000"
 	}
 	return hermes.AppInputData{
-		AppID:         uuidToString(app.ID),
-		AppName:       app.Name,
-		Model:         model,
-		OpenAIAPIKey:  containerAPIKey,
-		OpenAIBaseURL: baseURL,
-		PersonaText:   version.SystemPrompt,
-		PlatformRule:  opts.PlatformPrompt,
-		Routing:       version.Routing,
-		SkillRelPaths: version.SkillRelPaths,
-		OrgName:       org.Name,
-		OwnerName:     owner.DisplayName,
+		AppID:                   uuidToString(app.ID),
+		AppName:                 app.Name,
+		Model:                   model,
+		OpenAIAPIKey:            containerAPIKey,
+		OpenAIBaseURL:           baseURL,
+		KnowledgeRuntimeBaseURL: opts.ManagerRuntimeBaseURL,
+		PersonaText:             version.SystemPrompt,
+		PlatformRule:            opts.PlatformPrompt,
+		Routing:                 version.Routing,
+		SkillRelPaths:           version.SkillRelPaths,
+		OrgName:                 org.Name,
+		OwnerName:               owner.DisplayName,
 	}
-}
-
-// writeKnowledgeIntoInput 递归把组织 + 应用主副本知识库写到
-// apps/<appID>/input/resources/knowledge/{org,app}/<相对路径>。
-//
-// 顺序: 先 org 再 app, 与 KnowledgeReader 主副本路径
-// (org/<orgID>/knowledge/* 与 org/<orgID>/app/<appID>/knowledge/*) 自然对应;
-// 写入顺序对优先级无影响 (优先级由镜像 oc-entrypoint 自行解析)。
-//
-// h.knowledge 为 nil (测试装配 / 旧 wiring) 时直接跳过; 任一文件读写失败
-// 立即冒泡, 由 worker 决定是否重试。
-func (h *AppInitializeHandler) writeKnowledgeIntoInput(ctx context.Context, nodeID, appID, orgID string) error {
-	if h.knowledge == nil {
-		return nil
-	}
-	// scopes 列表显式列出两类 source/target 映射, 避免在循环里硬编码字符串拼接,
-	// 让"主副本前缀 → input 子目录"的对应关系一目了然。
-	scopes := []struct {
-		// scopeName 决定写到 resources/knowledge/<scopeName>/ 下;
-		// 与镜像 oc-entrypoint 约定的 org / app 命名严格一致。
-		scopeName string
-		// prefix 是 KnowledgeReader 主副本的前缀路径, 与 KnowledgeService 写入约定一致。
-		prefix string
-	}{
-		{scopeName: "org", prefix: fmt.Sprintf("org/%s/knowledge", orgID)},
-		{scopeName: "app", prefix: fmt.Sprintf("org/%s/app/%s/knowledge", orgID, appID)},
-	}
-	for _, s := range scopes {
-		prefix := s.prefix
-		scope := s.scopeName
-		err := h.knowledge.WalkFiles(prefix, func(relPath string, _ int64) error {
-			master := prefix + "/" + relPath
-			reader, _, err := h.knowledge.Open(master)
-			if err != nil {
-				return fmt.Errorf("打开主副本 %s 失败: %w", master, err)
-			}
-			body, readErr := io.ReadAll(reader)
-			_ = reader.Close()
-			if readErr != nil {
-				return fmt.Errorf("读取主副本 %s 失败: %w", master, readErr)
-			}
-			target := fmt.Sprintf("resources/knowledge/%s/%s", scope, relPath)
-			if err := h.inputFiles.UploadAppInputFile(ctx, nodeID, appID, target, strings.NewReader(string(body))); err != nil {
-				return fmt.Errorf("上传知识库 %s 失败: %w", target, err)
-			}
-			return nil
-		})
-		if err != nil {
-			return fmt.Errorf("写入 %s 知识库失败: %w", scope, err)
-		}
-	}
-	return nil
 }
 
 // appInputUploadAdapter 把 handler 持有的 AppInputUploader (带 nodeID 的 3+1 参数

@@ -43,10 +43,6 @@ type AppConfig struct {
 	PublicBaseURL string `yaml:"public_base_url"`
 	// DataRoot 是 manager 本地数据根目录，承载工作区归档等非知识库文件。
 	DataRoot string `yaml:"data_root"`
-	// KnowledgeRoot 是知识库主副本根目录（manager 端"主拷贝"，由 worker 同步到各 runtime node）。
-	// 此前由 OCM_KNOWLEDGE_ROOT 环境变量提供，现统一收口到 yaml；为空启动时 fail-fast。
-	// 路径下结构：orgs/<org_id>/...、apps/<app_id>/...，由 files.SafeRoot 沙箱化。
-	KnowledgeRoot string `yaml:"knowledge_root"`
 	// ShutdownPeriod 是优雅退出等待时间的进程内派生配置，不从 YAML 读取。
 	ShutdownPeriod time.Duration `yaml:"-"`
 }

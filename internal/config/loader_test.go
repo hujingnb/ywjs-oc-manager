@@ -24,7 +24,6 @@ app:
   http_addr: ":8080"
   public_base_url: "http://localhost:8080"
   data_root: "./data/manager"
-  knowledge_root: "/var/lib/oc-manager/knowledge"
 database:
   url: "postgres://ocm:ocm@manager-postgres:5432/ocm?sslmode=disable"
 redis:
@@ -86,7 +85,7 @@ func TestValidateReportsRequiredFields(t *testing.T) {
 	err := (Config{}).Validate()
 	require.Error(t, err)
 	required := []string{
-		"app.http_addr", "app.data_root", "app.knowledge_root", "database.url", "redis.addr",
+		"app.http_addr", "app.data_root", "database.url", "redis.addr",
 		"auth.access_token_ttl", "auth.refresh_token_ttl",
 		"auth.jwt_access_secret", "auth.jwt_refresh_secret", "auth.csrf_secret",
 		"security.master_key", "runtime.enrollment_secret", "hermes.system_prompt_template",
@@ -102,7 +101,6 @@ func TestLoadFileFailsWhenDurationInvalid(t *testing.T) {
 app:
   http_addr: ":8080"
   data_root: "./data/manager"
-  knowledge_root: "/var/lib/oc-manager/knowledge"
 database:
   url: "postgres://ocm:ocm@manager-postgres:5432/ocm?sslmode=disable"
 redis:
@@ -122,25 +120,6 @@ hermes:
 
 	_, err := LoadFile(path)
 	require.Error(t, err)
-}
-
-// TestLoad_RejectsMissingKnowledgeRoot 校验 app.knowledge_root 缺失或为空时启动 fail-fast。
-func TestLoad_RejectsMissingKnowledgeRoot(t *testing.T) {
-	for name, yaml := range map[string]string{
-		"missing": strings.Replace(fullValidYAML(),
-			`  knowledge_root: "/var/lib/oc-manager/knowledge"`+"\n", "", 1),
-		"empty": strings.Replace(fullValidYAML(),
-			`knowledge_root: "/var/lib/oc-manager/knowledge"`, `knowledge_root: ""`, 1),
-	} {
-		// 当前子测试覆盖表格用例中该名称对应的输入组合、边界条件和期望结果。
-		t.Run(name, func(t *testing.T) {
-			path := writeTempConfig(t, yaml)
-			_, err := LoadFile(path)
-			if err == nil || !strings.Contains(err.Error(), "app.knowledge_root") {
-				t.Fatalf("LoadFile() err = %v, want app.knowledge_root 错误", err)
-			}
-		})
-	}
 }
 
 // TestLoad_RejectsMissingMasterKey 校验 security.master_key 缺失时启动 fail-fast。
@@ -210,6 +189,14 @@ func TestLoad_AllowsMissingRAGFlowConfig(t *testing.T) {
 // TestLoad_RejectsInvalidRAGFlowBaseURL 验证 RAGFlow 地址配置错误时启动阶段直接失败。
 func TestLoad_RejectsInvalidRAGFlowBaseURL(t *testing.T) {
 	yaml := fullValidYAML() + "\nragflow:\n  base_url: \"://bad\"\n  api_key: \"secret\"\n"
+	_, err := loadConfigFromStringErr(t, yaml)
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "ragflow.base_url")
+}
+
+// TestLoad_RejectsUnsupportedRAGFlowBaseURLScheme 验证 RAGFlow 仅允许 http/https 地址，避免误把 ftp 等非 HTTP 协议交给运行期客户端。
+func TestLoad_RejectsUnsupportedRAGFlowBaseURLScheme(t *testing.T) {
+	yaml := fullValidYAML() + "\nragflow:\n  base_url: \"ftp://ragflow:9380\"\n  api_key: \"secret\"\n"
 	_, err := loadConfigFromStringErr(t, yaml)
 	require.Error(t, err)
 	assert.Contains(t, err.Error(), "ragflow.base_url")

@@ -14,6 +14,8 @@ type Manifest struct {
 	App         ManifestApp         `yaml:"app"`
 	Credentials ManifestCredentials `yaml:"credentials"`
 	Resources   ManifestResources   `yaml:"resources"`
+	// Knowledge 是 manager runtime API 配置；Hermes 只拿 manager app token，不拿 RAGFlow 凭证。
+	Knowledge ManifestKnowledge `yaml:"knowledge,omitempty"`
 	// Routing 智能路由映射，键为模型别名，值为实际模型名；空时省略。
 	Routing map[string]string `yaml:"routing,omitempty"`
 }
@@ -49,6 +51,12 @@ type ManifestResources struct {
 // v2 仅保留 platform 一层；org/app 层规则已由版本实例 system_prompt 覆盖。
 type ManifestRules struct {
 	Platform string `yaml:"platform"`
+}
+
+// ManifestKnowledge 描述 Hermes 通过 manager runtime API 使用知识库所需的最小配置。
+type ManifestKnowledge struct {
+	RuntimeBaseURL string `yaml:"runtime_base_url"`
+	AppToken       string `yaml:"app_token"`
 }
 
 // MarshalManifestYAML 把 Manifest 序列化为 YAML。

@@ -110,6 +110,9 @@ func NewRouter(deps ...Dependencies) http.Handler {
 		}
 		handlers.RegisterAgentRoutes(router, agentHandler)
 	}
+	if dep.KnowledgeService != nil {
+		handlers.RegisterRuntimeKnowledgeRoutes(router, handlers.NewRuntimeKnowledgeHandler(dep.KnowledgeService))
+	}
 
 	// ── user：RequireUserAuth 注入 principal，所有业务路由挂载在此组 ──
 	user := router.Group("")

@@ -1,7 +1,6 @@
 package main
 
 import (
-	"archive/tar"
 	"archive/zip"
 	"errors"
 	"fmt"
@@ -13,19 +12,15 @@ import (
 	"time"
 )
 
-// tar 同步硬上限：避免恶意 tar 撑爆磁盘。
-const (
-	maxKnowledgeTarSize    = 2 * 1024 * 1024 * 1024 // 2 GiB 总大小（与 spec §11.5 工作目录上限同源）
-	maxKnowledgeTarEntries = 10000
-	maxKnowledgeFileSize   = 100 * 1024 * 1024 // 单文件 100 MiB（应用级单文件 upload）
-)
+// app input 单文件写入上限，避免 manager 渲染异常或恶意请求撑爆节点磁盘。
+const maxAppInputFileSize = 100 * 1024 * 1024
 
 // 工作目录浏览/下载上限：与 spec §11.5 workspace.* 配置一致，
 // agent 这层做强制兜底，manager 侧再做一次校验形成两层防御。
 const (
-	maxWorkspaceDownloadSize = 500 * 1024 * 1024       // 单文件 500 MiB
-	maxWorkspaceArchiveSize  = 2 * 1024 * 1024 * 1024  // archive 总 2 GiB
-	maxWorkspaceArchiveItems = 10000                   // archive 最多条目
+	maxWorkspaceDownloadSize = 500 * 1024 * 1024      // 单文件 500 MiB
+	maxWorkspaceArchiveSize  = 2 * 1024 * 1024 * 1024 // archive 总 2 GiB
+	maxWorkspaceArchiveItems = 10000                  // archive 最多条目
 )
 
 // ErrInvalidPath 表示用户输入的相对路径越出 scope 沙箱。
@@ -81,13 +76,12 @@ func resolveScopePath(dataRoot, scope, rel string) (string, error) {
 func newScopesHandler(dataRoot string, agentToken any) http.Handler {
 	mux := http.NewServeMux()
 	mux.HandleFunc("/v1/scopes/apps/", withAgentAuth(agentToken, scopesAppsHandler(dataRoot)))
-	mux.HandleFunc("/v1/scopes/orgs/", withAgentAuth(agentToken, scopesOrgsHandler(dataRoot)))
 	mux.HandleFunc("/v1/scopes/cleanup-archives", withAgentAuth(agentToken, handleCleanupArchives(dataRoot)))
 	return mux
 }
 
 // scopesAppsHandler 处理 /v1/scopes/apps/<appID>/<action>... 路径。
-// action 由后续 Task 注册（init/knowledge/workspace/archive 等）。
+// action 覆盖 init/input/workspace/archive/sessions 等应用级文件操作。
 func scopesAppsHandler(dataRoot string) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		rest := strings.TrimPrefix(r.URL.Path, "/v1/scopes/apps/")
@@ -106,16 +100,13 @@ func scopesAppsHandler(dataRoot string) http.HandlerFunc {
 			handleAppInit(w, r, dataRoot, appID)
 		case action == "input/file" && r.Method == http.MethodPut:
 			// 新挂载布局下 manager 唯一的写入入口。sandbox = apps/<appID>/input/。
-			// manager 通过该 endpoint 上传 SOUL.md / config.yaml / .env /
-			// skills/* / resources/knowledge/{org,app}/* 等所有容器内 read-only
-			// 输入;容器启动时由 dataRoot/apps/<appID>/input 全量 bind mount 到
-			// 容器内的 /opt/data/input (或等价路径)。
-			handleKnowledgeFileUpload(w, r, dataRoot, filepath.Join("apps", appID, "input"))
+			// manager 通过该 endpoint 上传 manifest.yaml、resources/* 和 skills/* 等
+			// 容器内 read-only 输入；容器启动时由 dataRoot/apps/<appID>/input 全量
+			// bind mount 到 /opt/oc-input。
+			handleAppInputFileUpload(w, r, dataRoot, filepath.Join("apps", appID, "input"))
 		case action == "input/file" && r.Method == http.MethodDelete:
 			// 删除 apps/<appID>/input/ 沙箱下的文件 / 子目录。
-			handleKnowledgeFileDelete(w, r, dataRoot, filepath.Join("apps", appID, "input"))
-		case action == "knowledge/sync" && r.Method == http.MethodPost:
-			handleKnowledgeSync(w, r, dataRoot, filepath.Join("apps", appID, "knowledge"))
+			handleAppInputFileDelete(w, r, dataRoot, filepath.Join("apps", appID, "input"))
 		case action == "workspace" && r.Method == http.MethodGet:
 			// 新挂载布局下容器内 /opt/data 来自 apps/<id>/data,workspace 子目录
 			// 因此落在节点 apps/<id>/data/workspace。manager workspace API 必须
@@ -133,29 +124,6 @@ func scopesAppsHandler(dataRoot string) http.HandlerFunc {
 			// Hermes 在 session 启动时把 system_prompt 冻结存进 SQLite,后续 SOUL.md
 			// 改动对老 session 不生效——必须清 session 才能让最新配置进入对话。
 			handleAppSessionsClear(w, r, dataRoot, appID)
-		default:
-			writeError(w, http.StatusNotFound, "unknown action")
-		}
-	}
-}
-
-// scopesOrgsHandler 处理 /v1/scopes/orgs/<orgID>/<action>... 路径。
-func scopesOrgsHandler(dataRoot string) http.HandlerFunc {
-	return func(w http.ResponseWriter, r *http.Request) {
-		rest := strings.TrimPrefix(r.URL.Path, "/v1/scopes/orgs/")
-		parts := strings.SplitN(rest, "/", 2)
-		if len(parts) < 2 || parts[0] == "" {
-			writeError(w, http.StatusBadRequest, "missing org id or action")
-			return
-		}
-		orgID, action := parts[0], parts[1]
-		if !isValidScopeID(orgID) {
-			writeError(w, http.StatusBadRequest, "invalid org id")
-			return
-		}
-		switch {
-		case action == "knowledge/sync" && r.Method == http.MethodPost:
-			handleKnowledgeSync(w, r, dataRoot, filepath.Join("orgs", orgID, "knowledge"))
 		default:
 			writeError(w, http.StatusNotFound, "unknown action")
 		}
@@ -182,15 +150,10 @@ func isValidScopeID(id string) bool {
 	return true
 }
 
-// handleAppInit 预建 input/resources/knowledge/{org,app} 与 data/workspace 三层目录。
+// handleAppInit 预建 app input 与 data/workspace 目录。
 //
 // 新挂载布局(取代旧的 .hermes / knowledge 沙箱):
-//   - input/resources/knowledge/org:组织级知识库的容器内 read-only 挂载源,
-//     manager 通过 /input/file 写入组织维度的 SOUL.md / config / skills /
-//     知识库文件等。
-//   - input/resources/knowledge/app:应用级知识库的容器内 read-only 挂载源,
-//     manager 通过 /input/file 写入应用维度的 SOUL.md / config / skills /
-//     知识库文件等。
+//   - input:manifest.yaml、resources/*、skills/* 等容器只读输入的挂载源。
 //   - data/workspace:Hermes 容器运行时工作目录,terminal.cwd 指向这里,
 //     首次 exec 命令前目录就必须存在;manager workspace API 也读该路径,
 //     预建后即便 agent 一次都没写过文件,API 也能返回空列表而非
@@ -199,8 +162,7 @@ func isValidScopeID(id string) bool {
 // 操作幂等:MkdirAll 在目录已存在时 no-op。
 func handleAppInit(w http.ResponseWriter, _ *http.Request, dataRoot, appID string) {
 	dirs := []string{
-		filepath.Join(dataRoot, "apps", appID, "input", "resources", "knowledge", "org"),
-		filepath.Join(dataRoot, "apps", appID, "input", "resources", "knowledge", "app"),
+		filepath.Join(dataRoot, "apps", appID, "input"),
 		filepath.Join(dataRoot, "apps", appID, "data", "workspace"),
 	}
 	for _, dir := range dirs {
@@ -212,129 +174,9 @@ func handleAppInit(w http.ResponseWriter, _ *http.Request, dataRoot, appID strin
 	writeJSON(w, map[string]any{"ok": true, "app_id": appID})
 }
 
-// handleKnowledgeSync 接收 tar 流并把 scopeRel（如 "apps/<id>/knowledge"）
-// 的内容整体替换为 tar 解压结果。
-//
-// 流程：解压到同级 .sync-* 临时目录 → 原子 rename 替换旧目录 → 删旧。
-// 失败时 tmp 目录 RemoveAll，不影响旧目录。
-//
-// 安全：
-//   - 总字节上限 maxKnowledgeTarSize；超限断开请求
-//   - 条目数上限 maxKnowledgeTarEntries
-//   - tar 内每个 entry 名拒绝绝对路径与含 .. 段
-//   - 跳过非常规文件（symlink / device / fifo），仅写目录与普通文件
-func handleKnowledgeSync(w http.ResponseWriter, r *http.Request, dataRoot, scopeRel string) {
-	scopeAbs, err := resolveScopePath(dataRoot, scopeRel, "")
-	if err != nil {
-		writeError(w, http.StatusBadRequest, err.Error())
-		return
-	}
-	parent := filepath.Dir(scopeAbs)
-	if err := os.MkdirAll(parent, 0o755); err != nil {
-		writeError(w, http.StatusInternalServerError, err.Error())
-		return
-	}
-	tmpDir, err := os.MkdirTemp(parent, ".sync-*")
-	if err != nil {
-		writeError(w, http.StatusInternalServerError, err.Error())
-		return
-	}
-	cleanup := true
-	defer func() {
-		if cleanup {
-			_ = os.RemoveAll(tmpDir)
-		}
-	}()
-
-	// 限制总大小：多 1 字节用来检测溢出
-	limit := io.LimitReader(r.Body, maxKnowledgeTarSize+1)
-	tr := tar.NewReader(limit)
-	totalRead := int64(0)
-	count := 0
-	for {
-		hdr, err := tr.Next()
-		if err == io.EOF {
-			break
-		}
-		if err != nil {
-			writeError(w, http.StatusBadRequest, "tar parse: "+err.Error())
-			return
-		}
-		count++
-		if count > maxKnowledgeTarEntries {
-			writeError(w, http.StatusBadRequest, fmt.Sprintf("too many entries (max %d)", maxKnowledgeTarEntries))
-			return
-		}
-		// entry 名安全校验
-		name := filepath.ToSlash(filepath.Clean(hdr.Name))
-		if filepath.IsAbs(hdr.Name) || strings.HasPrefix(name, "../") || strings.Contains(name, "/../") || name == ".." {
-			writeError(w, http.StatusBadRequest, "invalid entry path: "+hdr.Name)
-			return
-		}
-		dest := filepath.Join(tmpDir, name)
-		// 二次防御：dest 必须仍在 tmpDir 内
-		if !strings.HasPrefix(dest+string(filepath.Separator), tmpDir+string(filepath.Separator)) && dest != tmpDir {
-			writeError(w, http.StatusBadRequest, "entry escapes scope: "+hdr.Name)
-			return
-		}
-		switch hdr.Typeflag {
-		case tar.TypeDir:
-			if err := os.MkdirAll(dest, 0o755); err != nil {
-				writeError(w, http.StatusInternalServerError, err.Error())
-				return
-			}
-		case tar.TypeReg:
-			if err := os.MkdirAll(filepath.Dir(dest), 0o755); err != nil {
-				writeError(w, http.StatusInternalServerError, err.Error())
-				return
-			}
-			f, err := os.OpenFile(dest, os.O_CREATE|os.O_WRONLY|os.O_TRUNC, 0o644)
-			if err != nil {
-				writeError(w, http.StatusInternalServerError, err.Error())
-				return
-			}
-			n, err := io.Copy(f, tr)
-			_ = f.Close()
-			if err != nil {
-				writeError(w, http.StatusInternalServerError, err.Error())
-				return
-			}
-			totalRead += n
-			if totalRead > maxKnowledgeTarSize {
-				writeError(w, http.StatusBadRequest, fmt.Sprintf("tar exceeds size limit (max %d bytes)", maxKnowledgeTarSize))
-				return
-			}
-		default:
-			// symlink/device/fifo 全部跳过
-		}
-	}
-
-	// 原子替换旧目录：先把旧目录改名挪走 → rename tmp 为目标 → 删旧
-	if _, err := os.Stat(scopeAbs); err == nil {
-		stale, err := os.MkdirTemp(parent, ".stale-*")
-		if err != nil {
-			writeError(w, http.StatusInternalServerError, err.Error())
-			return
-		}
-		// 把旧目录内容挪进 stale
-		if err := os.Rename(scopeAbs, filepath.Join(stale, "old")); err != nil {
-			_ = os.RemoveAll(stale)
-			writeError(w, http.StatusInternalServerError, err.Error())
-			return
-		}
-		go func(p string) { _ = os.RemoveAll(p) }(stale)
-	}
-	if err := os.Rename(tmpDir, scopeAbs); err != nil {
-		writeError(w, http.StatusInternalServerError, err.Error())
-		return
-	}
-	cleanup = false
-	writeJSON(w, map[string]any{"ok": true, "entries": count, "bytes": totalRead})
-}
-
-// handleKnowledgeFileUpload 把单文件写入 scope 目录的 ?path= 指定子路径。
+// handleAppInputFileUpload 把单文件写入 app input 目录的 ?path= 指定子路径。
 // body 为文件原始字节，最多 100 MiB。
-func handleKnowledgeFileUpload(w http.ResponseWriter, r *http.Request, dataRoot, scopeRel string) {
+func handleAppInputFileUpload(w http.ResponseWriter, r *http.Request, dataRoot, scopeRel string) {
 	rel := r.URL.Query().Get("path")
 	if rel == "" {
 		writeError(w, http.StatusBadRequest, "missing ?path=")
@@ -358,7 +200,7 @@ func handleKnowledgeFileUpload(w http.ResponseWriter, r *http.Request, dataRoot,
 		writeError(w, http.StatusInternalServerError, err.Error())
 		return
 	}
-	limit := io.LimitReader(r.Body, maxKnowledgeFileSize+1)
+	limit := io.LimitReader(r.Body, maxAppInputFileSize+1)
 	tmp := dest + ".tmp"
 	f, err := os.OpenFile(tmp, os.O_CREATE|os.O_WRONLY|os.O_TRUNC, 0o644)
 	if err != nil {
@@ -372,9 +214,9 @@ func handleKnowledgeFileUpload(w http.ResponseWriter, r *http.Request, dataRoot,
 		writeError(w, http.StatusInternalServerError, err.Error())
 		return
 	}
-	if n > maxKnowledgeFileSize {
+	if n > maxAppInputFileSize {
 		_ = os.Remove(tmp)
-		writeError(w, http.StatusBadRequest, fmt.Sprintf("file exceeds size limit (max %d bytes)", maxKnowledgeFileSize))
+		writeError(w, http.StatusBadRequest, fmt.Sprintf("file exceeds size limit (max %d bytes)", maxAppInputFileSize))
 		return
 	}
 	if err := os.Rename(tmp, dest); err != nil {
@@ -718,9 +560,9 @@ func parsePositiveInt(s string) (int, error) {
 	return n, nil
 }
 
-// handleKnowledgeFileDelete 删除单文件或子目录。
+// handleAppInputFileDelete 删除 app input 下的单文件或子目录。
 // 不存在视为成功（幂等）。
-func handleKnowledgeFileDelete(w http.ResponseWriter, r *http.Request, dataRoot, scopeRel string) {
+func handleAppInputFileDelete(w http.ResponseWriter, r *http.Request, dataRoot, scopeRel string) {
 	rel := r.URL.Query().Get("path")
 	if rel == "" {
 		writeError(w, http.StatusBadRequest, "missing ?path=")

@@ -70,9 +70,6 @@ func (c Config) Validate() error {
 	if strings.TrimSpace(c.App.DataRoot) == "" {
 		missing = append(missing, "app.data_root")
 	}
-	if strings.TrimSpace(c.App.KnowledgeRoot) == "" {
-		missing = append(missing, "app.knowledge_root")
-	}
 	if strings.TrimSpace(c.Database.URL) == "" {
 		missing = append(missing, "database.url")
 	}
@@ -176,6 +173,9 @@ func (r RAGFlowConfig) validate() error {
 	parsed, err := url.ParseRequestURI(baseURL)
 	if err != nil || parsed.Scheme == "" || parsed.Host == "" {
 		return fmt.Errorf("ragflow.base_url 必须是合法 URL")
+	}
+	if parsed.Scheme != "http" && parsed.Scheme != "https" {
+		return fmt.Errorf("ragflow.base_url 必须使用 http 或 https 协议")
 	}
 	if r.RequestTimeout.Duration <= 0 {
 		return fmt.Errorf("ragflow.request_timeout 必须为正持续时间")

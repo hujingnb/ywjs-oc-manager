@@ -61,12 +61,15 @@ WHERE id = $1
 RETURNING *;
 
 -- name: SetAppRuntimeToken :one
--- 写入 Hermes 调 manager runtime API 的 app 级 token，明文只在 manifest 渲染时短暂使用。
+-- 首次写入 Hermes 调 manager runtime API 的 app 级 token；并发重复初始化拿不到行，由 service 读取既有 token。
 UPDATE apps
 SET runtime_token_hash = $2,
     runtime_token_ciphertext = $3,
     updated_at = now()
-WHERE id = $1 AND deleted_at IS NULL
+WHERE id = $1
+  AND deleted_at IS NULL
+  AND runtime_token_hash IS NULL
+  AND runtime_token_ciphertext IS NULL
 RETURNING *;
 
 -- name: GetAppByRuntimeTokenHash :one

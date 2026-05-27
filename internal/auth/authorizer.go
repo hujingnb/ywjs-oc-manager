@@ -153,19 +153,6 @@ func CanWriteOrgKnowledge(p Principal, orgID string) bool {
 	return p.Role == domain.UserRoleOrgAdmin && p.OrgID == orgID
 }
 
-// CanViewOrgKnowledgeSyncStatus 判断主体是否可查看组织知识库同步状态。
-// 同步状态属于组织知识库的运维读视图，当前只开放给本组织管理员；
-// 单独保留该谓词，避免调用方把“查看状态”和“触发重试”混用成同一个权限语义。
-func CanViewOrgKnowledgeSyncStatus(p Principal, orgID string) bool {
-	return p.Role == domain.UserRoleOrgAdmin && p.OrgID == orgID
-}
-
-// CanRetryOrgKnowledgeSync 判断主体是否可重试组织知识库同步。
-// 同步重试会改变组织知识库状态，因此与组织知识库写权限保持一致。
-func CanRetryOrgKnowledgeSync(p Principal, orgID string) bool {
-	return CanWriteOrgKnowledge(p, orgID)
-}
-
 // CanWriteAppKnowledge 判断主体是否可写入指定应用的知识库。
 // 应用知识库写入属于应用写操作，沿用应用管理权限；
 // 平台管理员仍可读，但不能直接写入任意组织应用的知识库。

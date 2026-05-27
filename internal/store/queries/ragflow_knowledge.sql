@@ -1,10 +1,35 @@
--- name: CreateRAGFlowDatasetMapping :one
--- 创建 manager scope 到 RAGFlow dataset 的本地映射，远端创建失败时可先记录 failed 状态便于排障。
+-- name: CreateRAGFlowOrgDatasetMapping :one
+-- 懒创建组织级 dataset 映射；并发首创命中部分唯一索引时不返回行，由 service 读取已有映射且不重复创建远端 dataset。
 INSERT INTO ragflow_datasets (
-    scope_type, org_id, app_id, ragflow_dataset_id, name, status, last_error
+    scope_type, org_id, app_id, ragflow_dataset_id, name, status, last_error, create_claim_token
 ) VALUES (
-    $1, $2, $3, $4, $5, $6, $7
+    'org', sqlc.arg(org_id), NULL, NULL, sqlc.arg(name), 'creating', NULL, sqlc.arg(create_claim_token)::text
 )
+ON CONFLICT (org_id) WHERE scope_type = 'org' DO NOTHING
+RETURNING *;
+
+-- name: CreateRAGFlowAppDatasetMapping :one
+-- 懒创建实例级 dataset 映射；并发首创命中部分唯一索引时不返回行，由 service 读取已有映射且不重复创建远端 dataset。
+INSERT INTO ragflow_datasets (
+    scope_type, org_id, app_id, ragflow_dataset_id, name, status, last_error, create_claim_token
+) VALUES (
+    'app', sqlc.arg(org_id), sqlc.arg(app_id), NULL, sqlc.arg(name), 'creating', NULL, sqlc.arg(create_claim_token)::text
+)
+ON CONFLICT (app_id) WHERE scope_type = 'app' DO NOTHING
+RETURNING *;
+
+-- name: ClaimRAGFlowDatasetCreation :one
+-- 抢占 failed 或超时 creating 的 dataset 创建租约；只有返回行的调用方允许访问 RAGFlow 创建远端 dataset。
+UPDATE ragflow_datasets
+SET status = 'creating',
+    last_error = NULL,
+    create_claim_token = sqlc.arg(create_claim_token)::text,
+    updated_at = now()
+WHERE id = sqlc.arg(id)
+  AND (
+    status = 'failed'
+    OR (status = 'creating' AND updated_at < sqlc.arg(stale_before)::timestamptz)
+  )
 RETURNING *;
 
 -- name: SetRAGFlowDatasetActive :one
@@ -14,8 +39,11 @@ SET ragflow_dataset_id = $2,
     name = $3,
     status = 'active',
     last_error = NULL,
+    create_claim_token = NULL,
     updated_at = now()
 WHERE id = $1
+  AND status = 'creating'
+  AND create_claim_token = $4
 RETURNING *;
 
 -- name: GetRAGFlowOrgDataset :one
@@ -33,8 +61,13 @@ WHERE scope_type = 'app' AND app_id = $1;
 -- name: MarkRAGFlowDatasetFailed :one
 -- 标记 dataset 生命周期失败，保留错误文本用于管理面排障。
 UPDATE ragflow_datasets
-SET status = 'failed', last_error = $2, updated_at = now()
+SET status = 'failed',
+    last_error = $2,
+    create_claim_token = NULL,
+    updated_at = now()
 WHERE id = $1
+  AND status = 'creating'
+  AND create_claim_token = $3
 RETURNING *;
 
 -- name: DeleteRAGFlowDatasetMapping :exec

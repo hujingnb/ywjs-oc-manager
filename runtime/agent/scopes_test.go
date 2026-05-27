@@ -1,7 +1,6 @@
 package main
 
 import (
-	"archive/tar"
 	"archive/zip"
 	"bytes"
 	"encoding/json"
@@ -20,28 +19,6 @@ import (
 func jsonDecoder(r io.Reader) *json.Decoder { return json.NewDecoder(r) }
 func readAll(r io.Reader) ([]byte, error)   { return io.ReadAll(r) }
 
-// makeTar 把 (path → content) 打成一个 tar 流供测试用。
-func makeTar(t *testing.T, files map[string]string) *bytes.Buffer {
-	t.Helper()
-	var buf bytes.Buffer
-	tw := tar.NewWriter(&buf)
-	for name, content := range files {
-		if err := tw.WriteHeader(&tar.Header{
-			Typeflag: tar.TypeReg,
-			Name:     name,
-			Mode:     0o644,
-			Size:     int64(len(content)),
-		}); err != nil {
-			t.Fatalf("tar header: %v", err)
-		}
-		_, err := tw.Write([]byte(content))
-		require.NoError(t, err)
-	}
-	err := tw.Close()
-	require.NoError(t, err)
-	return &buf
-}
-
 // TestResolveScopePath 验证解析scope路径的预期行为场景。
 func TestResolveScopePath(t *testing.T) {
 	dataRoot := t.TempDir()
@@ -55,7 +32,7 @@ func TestResolveScopePath(t *testing.T) {
 		{"empty rel returns scope root", "", false},                       // 场景：空相对路径应解析到 scope 根目录
 		{"slash returns scope root", "/", false},                          // 场景：单斜杠路径应解析到 scope 根目录
 		{"clean nested file", "workspace/foo.txt", false},                 // 场景：普通嵌套文件路径应被接受
-		{"deep clean path", "knowledge/sub/dir/file.pdf", false},          // 场景：更深层级的合法知识库路径应被接受
+		{"deep clean path", "resources/sub/dir/file.pdf", false},          // 场景：更深层级的合法输入资源路径应被接受
 		{"rel with dot dot rejected", "../bbb", true},                     // 场景：显式上级目录路径应被拒绝
 		{"abs path rejected", "/etc/passwd", true},                        // 场景：绝对路径应被拒绝
 		{"hidden traversal rejected", "workspace/../../etc/passwd", true}, // 场景：隐藏在中间段的路径穿越应被拒绝
@@ -92,11 +69,11 @@ func TestScopesHandler_UnknownActionReturns404(t *testing.T) {
 	require.Equal(t, http.StatusNotFound, resp.StatusCode)
 }
 
-// TestScopesAppInit_CreatesTwoDirs 验证新挂载布局下 app init 预建
-// input/resources/knowledge/{org,app} 与 data/workspace 三层目录。
+// TestScopesAppInit_CreatesInputAndWorkspace 验证新挂载布局下 app init 预建
+// input 与 data/workspace 两类目录。
 // data/workspace 必须预建:Hermes config.yaml 把 terminal.cwd 设为 workspace,
 // 容器内首次 exec 命令前目录不存在会 cd 失败;manager workspace API 也读这个路径。
-func TestScopesAppInit_CreatesTwoDirs(t *testing.T) {
+func TestScopesAppInit_CreatesInputAndWorkspace(t *testing.T) {
 	dataRoot := t.TempDir()
 	srv := httptest.NewServer(newHandlerWithDocker(dataRoot, nil, "tok"))
 	defer srv.Close()
@@ -107,19 +84,15 @@ func TestScopesAppInit_CreatesTwoDirs(t *testing.T) {
 	require.NoError(t, err)
 	defer resp.Body.Close()
 	require.Equal(t, http.StatusOK, resp.StatusCode)
-	// 验证必须存在的 3 个子目录:input/resources/knowledge/org、
-	// input/resources/knowledge/app 与 data/workspace。
+	// 验证必须存在的 2 个子目录:input 与 data/workspace。
 	for _, sub := range []string{
-		"input/resources/knowledge/org",
-		"input/resources/knowledge/app",
+		"input",
 		"data/workspace",
 	} {
 		dir := filepath.Join(dataRoot, "apps", "app-123", sub)
 		fi, err := os.Stat(dir)
 		require.NoError(t, err, "目录 %q 应被创建", sub)
-		if !fi.IsDir() {
-			t.Fatalf("%q not a directory", sub)
-		}
+		require.True(t, fi.IsDir(), "%q 应为目录", sub)
 	}
 	// 验证旧布局的目录(OpenClaw / 老 Hermes 时代)不再被预建。
 	for _, old := range []string{".hermes", "knowledge", "openclaw-config", "weixin", "workspace", "state", "logs"} {
@@ -146,103 +119,6 @@ func TestScopesAppInit_Idempotent(t *testing.T) {
 	}
 }
 
-// TestScopesKnowledgeSync_App_ReplaceContents 验证scope 知识库同步应用替换内容的预期行为场景。
-func TestScopesKnowledgeSync_App_ReplaceContents(t *testing.T) {
-	dataRoot := t.TempDir()
-	stale := filepath.Join(dataRoot, "apps", "app-1", "knowledge", "stale.txt")
-	err := os.MkdirAll(filepath.Dir(stale), 0o755)
-	require.NoError(t, err)
-	err = os.WriteFile(stale, []byte("old"), 0o644)
-	require.NoError(t, err)
-
-	srv := httptest.NewServer(newHandlerWithDocker(dataRoot, nil, "tok"))
-	defer srv.Close()
-
-	body := makeTar(t, map[string]string{
-		"a.txt":     "hello",
-		"sub/b.pdf": "fake-pdf",
-	})
-	req, _ := http.NewRequest(http.MethodPost,
-		srv.URL+"/v1/scopes/apps/app-1/knowledge/sync", body)
-	req.Header.Set("Authorization", "Bearer tok")
-	req.Header.Set("Content-Type", "application/x-tar")
-	resp, err := http.DefaultClient.Do(req)
-	require.NoError(t, err)
-	defer resp.Body.Close()
-	require.Equal(t, http.StatusOK, resp.StatusCode)
-
-	if _, err := os.Stat(stale); !os.IsNotExist(err) {
-		t.Fatalf("stale.txt 应被替换，err=%v", err)
-	}
-	got, err := os.ReadFile(filepath.Join(dataRoot, "apps", "app-1", "knowledge", "a.txt"))
-	if err != nil || string(got) != "hello" {
-		t.Fatalf("a.txt = %q, %v", got, err)
-	}
-	got, err = os.ReadFile(filepath.Join(dataRoot, "apps", "app-1", "knowledge", "sub", "b.pdf"))
-	if err != nil || string(got) != "fake-pdf" {
-		t.Fatalf("b.pdf = %q, %v", got, err)
-	}
-}
-
-// TestScopesKnowledgeSync_Org_CreatesPath 验证scope 知识库同步组织创建路径的成功路径场景。
-func TestScopesKnowledgeSync_Org_CreatesPath(t *testing.T) {
-	dataRoot := t.TempDir()
-	srv := httptest.NewServer(newHandlerWithDocker(dataRoot, nil, "tok"))
-	defer srv.Close()
-
-	body := makeTar(t, map[string]string{"intro.md": "# org"})
-	req, _ := http.NewRequest(http.MethodPost,
-		srv.URL+"/v1/scopes/orgs/org-1/knowledge/sync", body)
-	req.Header.Set("Authorization", "Bearer tok")
-	resp, err := http.DefaultClient.Do(req)
-	require.NoError(t, err)
-	defer resp.Body.Close()
-	require.Equal(t, http.StatusOK, resp.StatusCode)
-	got, err := os.ReadFile(filepath.Join(dataRoot, "orgs", "org-1", "knowledge", "intro.md"))
-	if err != nil || string(got) != "# org" {
-		t.Fatalf("intro.md = %q, %v", got, err)
-	}
-}
-
-// TestScopesKnowledgeSync_RejectsTraversalEntry 验证scope 知识库同步拒绝路径穿越条目的异常或拒绝路径场景。
-func TestScopesKnowledgeSync_RejectsTraversalEntry(t *testing.T) {
-	dataRoot := t.TempDir()
-	srv := httptest.NewServer(newHandlerWithDocker(dataRoot, nil, "tok"))
-	defer srv.Close()
-
-	body := makeTar(t, map[string]string{"../../etc/passwd": "evil"})
-	req, _ := http.NewRequest(http.MethodPost,
-		srv.URL+"/v1/scopes/apps/app-1/knowledge/sync", body)
-	req.Header.Set("Authorization", "Bearer tok")
-	resp, err := http.DefaultClient.Do(req)
-	require.NoError(t, err)
-	defer resp.Body.Close()
-	require.Equal(t, http.StatusBadRequest, resp.StatusCode)
-	_, err = os.Stat("/etc/passwd-evil")
-	require.Error(t, err)
-}
-
-// TestScopesKnowledgeSync_EmptyTar 验证scope 知识库同步空 tar的边界条件场景。
-func TestScopesKnowledgeSync_EmptyTar(t *testing.T) {
-	dataRoot := t.TempDir()
-	srv := httptest.NewServer(newHandlerWithDocker(dataRoot, nil, "tok"))
-	defer srv.Close()
-
-	// 空 tar 流（合法 tar 末尾），sync 后 scope 目录存在但为空。
-	body := makeTar(t, map[string]string{})
-	req, _ := http.NewRequest(http.MethodPost,
-		srv.URL+"/v1/scopes/apps/app-1/knowledge/sync", body)
-	req.Header.Set("Authorization", "Bearer tok")
-	resp, err := http.DefaultClient.Do(req)
-	require.NoError(t, err)
-	defer resp.Body.Close()
-	require.Equal(t, http.StatusOK, resp.StatusCode)
-	dir := filepath.Join(dataRoot, "apps", "app-1", "knowledge")
-	entries, err := os.ReadDir(dir)
-	require.NoError(t, err)
-	require.Len(t, entries, 0)
-}
-
 // TestHandleAppInputFile_PutWritesIntoInputSandbox 验证 PUT 写到 apps/<id>/input/
 // sandbox 内部，且支持嵌套子路径、覆盖写入与幂等删除。
 func TestHandleAppInputFile_PutWritesIntoInputSandbox(t *testing.T) {
@@ -250,23 +126,23 @@ func TestHandleAppInputFile_PutWritesIntoInputSandbox(t *testing.T) {
 	srv := httptest.NewServer(newHandlerWithDocker(dataRoot, nil, "tok"))
 	defer srv.Close()
 
-	// 嵌套子路径写入:resources/knowledge/app/note.txt 应落到 input 沙箱下。
+	// 嵌套子路径写入:resources/config/note.txt 应落到 input 沙箱下。
 	put, _ := http.NewRequest(http.MethodPut,
-		srv.URL+"/v1/scopes/apps/app-1/input/file?path=resources/knowledge/app/note.txt",
+		srv.URL+"/v1/scopes/apps/app-1/input/file?path=resources/config/note.txt",
 		strings.NewReader("hello world"))
 	put.Header.Set("Authorization", "Bearer tok")
 	resp, err := http.DefaultClient.Do(put)
 	require.NoError(t, err)
 	resp.Body.Close()
 	require.Equal(t, http.StatusOK, resp.StatusCode)
-	dest := filepath.Join(dataRoot, "apps", "app-1", "input", "resources", "knowledge", "app", "note.txt")
+	dest := filepath.Join(dataRoot, "apps", "app-1", "input", "resources", "config", "note.txt")
 	got, err := os.ReadFile(dest)
 	require.NoError(t, err)
 	require.Equal(t, "hello world", string(got))
 
 	// 覆盖写入(同名):验证 PUT 语义。
 	put2, _ := http.NewRequest(http.MethodPut,
-		srv.URL+"/v1/scopes/apps/app-1/input/file?path=resources/knowledge/app/note.txt",
+		srv.URL+"/v1/scopes/apps/app-1/input/file?path=resources/config/note.txt",
 		strings.NewReader("v2"))
 	put2.Header.Set("Authorization", "Bearer tok")
 	resp, _ = http.DefaultClient.Do(put2)
@@ -276,7 +152,7 @@ func TestHandleAppInputFile_PutWritesIntoInputSandbox(t *testing.T) {
 
 	// 删除文件:验证 DELETE 真删了沙箱内文件。
 	del, _ := http.NewRequest(http.MethodDelete,
-		srv.URL+"/v1/scopes/apps/app-1/input/file?path=resources/knowledge/app/note.txt", nil)
+		srv.URL+"/v1/scopes/apps/app-1/input/file?path=resources/config/note.txt", nil)
 	del.Header.Set("Authorization", "Bearer tok")
 	resp, _ = http.DefaultClient.Do(del)
 	resp.Body.Close()

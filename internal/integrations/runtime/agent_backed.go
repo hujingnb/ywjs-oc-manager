@@ -549,12 +549,11 @@ func (a *AgentBackedAdapter) WaitContainerHealthy(ctx context.Context, nodeID, c
 }
 
 // UploadAppInputFile 把 manager 渲染的 Hermes 输入资源
-// (manifest.yaml / resources/persona.md / resources/*-rules.md / resources/knowledge/{org,app}/*)
+// (manifest.yaml / resources/* / skills/*)
 // 上传到目标节点 apps/<appID>/input/<relPath>;容器启动时 oc-entrypoint 读取该目录并
 // 完成 hermes 自有 schema 装配 (SOUL.md / config.yaml / .env / skills/<name>/SKILL.md)。
 // hermes-agent-pull 切换完成后, 这是 manager 端写应用输入文件的唯一路径——
-// 老的 runtime/file 与 knowledge/file 路由 (UploadAppRuntimeFile / UploadOrgFile /
-// UploadAppFile) 已随 agent T13 路由下线统一移除。
+// 老的 runtime/file 与 knowledge/file 路由已随 agent T13 路由下线统一移除。
 func (a *AgentBackedAdapter) UploadAppInputFile(ctx context.Context, nodeID, appID, relPath string, content io.Reader) error {
 	cli, err := a.resolveFile(ctx, nodeID)
 	if err != nil {
@@ -564,9 +563,7 @@ func (a *AgentBackedAdapter) UploadAppInputFile(ctx context.Context, nodeID, app
 }
 
 // DeleteAppInputFile 删除目标节点 apps/<appID>/input/<relPath> 下的文件 / 子目录。
-// 主要调用方:knowledge_sync_node worker handler 处理 delete_file 事件时,通过该
-// 方法把 manager 主副本里删掉的知识库文件从节点 input/resources/knowledge/{org,app}/
-// 下同步移除,避免 oc-entrypoint 重启后仍读到已废弃的 skill。
+// 当前主要用于清理 manager 渲染进 input 的 manifest/resources/skills 文件。
 //
 // 文件不存在视为成功(幂等)。
 func (a *AgentBackedAdapter) DeleteAppInputFile(ctx context.Context, nodeID, appID, relPath string) error {

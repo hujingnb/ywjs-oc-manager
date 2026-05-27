@@ -79,8 +79,6 @@ const (
 	JobTypeChannelStartLogin = "channel_start_login"
 	// JobTypeChannelCheckBinding 轮询渠道授权结果并写回绑定状态。
 	JobTypeChannelCheckBinding = "channel_check_binding"
-	// JobTypeKnowledgeSyncNode 把 manager 知识库主副本同步到指定 runtime node。
-	JobTypeKnowledgeSyncNode = "knowledge_sync_node"
 	// JobTypeRuntimeNodeHealthReconcile 根据心跳时间批量修正 runtime node 健康状态。
 	JobTypeRuntimeNodeHealthReconcile = "runtime_node_health_reconcile"
 	// JobTypeRuntimeRefreshStatus 刷新运行中应用的容器 inspect 快照。
@@ -138,7 +136,6 @@ var (
 		JobTypeAppDelete,
 		JobTypeChannelStartLogin,
 		JobTypeChannelCheckBinding,
-		JobTypeKnowledgeSyncNode,
 		JobTypeRuntimeNodeHealthReconcile,
 		JobTypeRuntimeRefreshStatus,
 		JobTypeAppHealthCheck,

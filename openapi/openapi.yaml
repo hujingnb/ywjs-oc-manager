@@ -505,13 +505,16 @@ components:
       required:
       - password
       type: object
-    handlers.RetryOrgSyncRequest:
+    handlers.RuntimeKnowledgeSearchRequest:
       properties:
-        node_id:
-          description: NodeID 是需要重试同步的 runtime 节点 ID。
+        question:
+          description: Question 是用户问题或检索语句。
           type: string
+        top_k:
+          description: TopK 是每个知识库作用域的检索 chunk 上限；0 使用 service 默认值，超过 service 上限会被截断。
+          type: integer
       required:
-      - node_id
+      - question
       type: object
     handlers.SwitchAppVersionRequest:
       properties:
@@ -760,7 +763,7 @@ components:
         target_name:
           description: |-
             TargetName 是 target_id 对应资源名称；按 target_type 走相关子查询，
-            对 newapi_call / knowledge_sync 等无对应实体的类型返回空字符串。
+            对 newapi_call 等无对应实体的类型返回空字符串。
           type: string
         target_type:
           type: string
@@ -1341,26 +1344,57 @@ components:
           description: WorkerPID 是 worker 进程 ID，0 表示未知或已退出。
           type: integer
       type: object
-    service.KnowledgeEntryResult:
+    service.KnowledgeDocumentResult:
       properties:
-        is_dir:
-          type: boolean
+        created_at:
+          type: string
+        id:
+          type: string
+        last_error:
+          type: string
+        mime_type:
+          type: string
         name:
           type: string
-        path:
+        parse_status:
           type: string
+        progress:
+          type: integer
         size:
           type: integer
+        suffix:
+          type: string
       type: object
     service.KnowledgeListResult:
       properties:
-        entries:
+        items:
           items:
-            $ref: '#/components/schemas/service.KnowledgeEntryResult'
+            $ref: '#/components/schemas/service.KnowledgeDocumentResult'
           type: array
           uniqueItems: false
-        path:
+        total:
+          type: integer
+      type: object
+    service.KnowledgeSearchHit:
+      properties:
+        content:
           type: string
+        document_id:
+          type: string
+        document_name:
+          type: string
+        scope:
+          type: string
+        similarity:
+          type: number
+      type: object
+    service.KnowledgeSearchResult:
+      properties:
+        results:
+          items:
+            $ref: '#/components/schemas/service.KnowledgeSearchHit'
+          type: array
+          uniqueItems: false
       type: object
     service.LoginResult:
       properties:
@@ -1777,21 +1811,6 @@ components:
         snapshot:
           $ref: '#/components/schemas/service.RuntimeSnapshotView'
         status:
-          type: string
-      type: object
-    service.SyncStatusResult:
-      properties:
-        last_error:
-          type: string
-        last_success_at:
-          type: string
-        node_id:
-          type: string
-        org_id:
-          type: string
-        status:
-          type: string
-        updated_at:
           type: string
       type: object
     service.TokenPair:
@@ -3781,42 +3800,141 @@ paths:
       tags:
       - runtime-operations
   /apps/{appId}/knowledge:
-    delete:
-      description: 通过 path query 参数指定目标路径，从应用知识库中删除对应文件；需同时提供 org_id/owner_user_id/path
+    get:
+      description: 以扁平 RAGFlow document 列表返回实例知识库文件
       parameters:
-      - description: 应用 ID
+      - description: 实例 ID
         in: path
         name: appId
         required: true
         schema:
           type: string
-      - description: 应用所属组织 ID
+      - description: 页码，从 1 开始
         in: query
-        name: org_id
-        required: true
+        name: page
+        schema:
+          type: integer
+      - description: 每页数量
+        in: query
+        name: page_size
+        schema:
+          type: integer
+      - description: 文件名关键词
+        in: query
+        name: keyword
         schema:
           type: string
-      - description: 应用所有者用户 ID
+      - description: 解析状态
         in: query
-        name: owner_user_id
-        required: true
-        schema:
-          type: string
-      - description: 文件相对路径
-        in: query
-        name: path
-        required: true
+        name: status
         schema:
           type: string
       responses:
-        "204":
-          description: 删除成功，无响应体
+        "200":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/service.KnowledgeListResult'
+          description: OK
+        "401":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/handlers.ErrorResponse'
+          description: Unauthorized
+        "403":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/handlers.ErrorResponse'
+          description: Forbidden
+        "503":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/handlers.ErrorResponse'
+          description: Service Unavailable
+      security:
+      - BearerAuth: []
+      summary: 列出应用级知识库文件
+      tags:
+      - knowledge
+    post:
+      description: 通过 filename query 指定文件名，上传后进入 RAGFlow 解析队列
+      parameters:
+      - description: 实例 ID
+        in: path
+        name: appId
+        required: true
+        schema:
+          type: string
+      - description: 文件名
+        in: query
+        name: filename
+        required: true
+        schema:
+          type: string
+      requestBody:
+        content:
+          application/octet-stream:
+            schema:
+              format: binary
+              type: string
+      responses:
+        "202":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/service.KnowledgeDocumentResult'
+          description: Accepted
         "400":
           content:
             application/json:
               schema:
                 $ref: '#/components/schemas/handlers.ErrorResponse'
           description: Bad Request
+        "401":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/handlers.ErrorResponse'
+          description: Unauthorized
+        "403":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/handlers.ErrorResponse'
+          description: Forbidden
+        "503":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/handlers.ErrorResponse'
+          description: Service Unavailable
+      security:
+      - BearerAuth: []
+      summary: 上传应用级知识库文件
+      tags:
+      - knowledge
+  /apps/{appId}/knowledge/{documentId}:
+    delete:
+      description: 按 documentId 删除 RAGFlow document
+      parameters:
+      - description: 实例 ID
+        in: path
+        name: appId
+        required: true
+        schema:
+          type: string
+      - description: document ID
+        in: path
+        name: documentId
+        required: true
+        schema:
+          type: string
+      responses:
+        "204":
+          description: 删除成功，无响应体
         "401":
           content:
             application/json:
@@ -3846,170 +3964,19 @@ paths:
       summary: 删除应用级知识库文件
       tags:
       - knowledge
+  /apps/{appId}/knowledge/{documentId}/file:
     get:
-      description: 按 path 参数列出应用知识库指定目录的文件；需同时提供 org_id 和 owner_user_id
+      description: 按 documentId 下载 RAGFlow 中的原始文件
       parameters:
-      - description: 应用 ID
+      - description: 实例 ID
         in: path
         name: appId
         required: true
         schema:
           type: string
-      - description: 应用所属组织 ID
-        in: query
-        name: org_id
-        required: true
-        schema:
-          type: string
-      - description: 应用所有者用户 ID
-        in: query
-        name: owner_user_id
-        required: true
-        schema:
-          type: string
-      - description: 目录路径
-        in: query
-        name: path
-        schema:
-          type: string
-      responses:
-        "200":
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/service.KnowledgeListResult'
-          description: OK
-        "400":
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/handlers.ErrorResponse'
-          description: Bad Request
-        "401":
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/handlers.ErrorResponse'
-          description: Unauthorized
-        "403":
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/handlers.ErrorResponse'
-          description: Forbidden
-        "404":
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/handlers.ErrorResponse'
-          description: Not Found
-        "503":
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/handlers.ErrorResponse'
-          description: Service Unavailable
-      security:
-      - BearerAuth: []
-      summary: 列出应用级知识库文件
-      tags:
-      - knowledge
-    post:
-      description: 通过 path query 参数指定目标路径，上传二进制内容写入应用知识库；需同时提供 org_id/owner_user_id/path
-      parameters:
-      - description: 应用 ID
+      - description: document ID
         in: path
-        name: appId
-        required: true
-        schema:
-          type: string
-      - description: 应用所属组织 ID
-        in: query
-        name: org_id
-        required: true
-        schema:
-          type: string
-      - description: 应用所有者用户 ID
-        in: query
-        name: owner_user_id
-        required: true
-        schema:
-          type: string
-      - description: 文件相对路径
-        in: query
-        name: path
-        required: true
-        schema:
-          type: string
-      requestBody:
-        content:
-          application/octet-stream:
-            schema:
-              format: binary
-              type: string
-      responses:
-        "204":
-          description: 上传成功，无响应体
-        "400":
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/handlers.ErrorResponse'
-          description: Bad Request
-        "401":
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/handlers.ErrorResponse'
-          description: Unauthorized
-        "403":
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/handlers.ErrorResponse'
-          description: Forbidden
-        "404":
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/handlers.ErrorResponse'
-          description: Not Found
-        "503":
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/handlers.ErrorResponse'
-          description: Service Unavailable
-      security:
-      - BearerAuth: []
-      summary: 上传应用级知识库文件
-      tags:
-      - knowledge
-  /apps/{appId}/knowledge/file:
-    get:
-      description: 通过 path query 参数指定目标路径，从应用知识库主副本下载单个文件；需同时提供 org_id/owner_user_id/path
-      parameters:
-      - description: 应用 ID
-        in: path
-        name: appId
-        required: true
-        schema:
-          type: string
-      - description: 应用所属组织 ID
-        in: query
-        name: org_id
-        required: true
-        schema:
-          type: string
-      - description: 应用所有者用户 ID
-        in: query
-        name: owner_user_id
-        required: true
-        schema:
-          type: string
-      - description: 文件相对路径
-        in: query
-        name: path
+        name: documentId
         required: true
         schema:
           type: string
@@ -4020,12 +3987,6 @@ paths:
               schema:
                 type: string
           description: 二进制文件流
-        "400":
-          content:
-            application/octet-stream:
-              schema:
-                $ref: '#/components/schemas/handlers.ErrorResponse'
-          description: Bad Request
         "401":
           content:
             application/octet-stream:
@@ -4053,6 +4014,58 @@ paths:
       security:
       - BearerAuth: []
       summary: 下载应用级知识库文件
+      tags:
+      - knowledge
+  /apps/{appId}/knowledge/{documentId}/reparse:
+    post:
+      description: 按 documentId 重新触发 RAGFlow parse
+      parameters:
+      - description: 实例 ID
+        in: path
+        name: appId
+        required: true
+        schema:
+          type: string
+      - description: document ID
+        in: path
+        name: documentId
+        required: true
+        schema:
+          type: string
+      responses:
+        "202":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/service.KnowledgeDocumentResult'
+          description: Accepted
+        "401":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/handlers.ErrorResponse'
+          description: Unauthorized
+        "403":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/handlers.ErrorResponse'
+          description: Forbidden
+        "404":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/handlers.ErrorResponse'
+          description: Not Found
+        "503":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/handlers.ErrorResponse'
+          description: Service Unavailable
+      security:
+      - BearerAuth: []
+      summary: 重新解析应用级知识库文件
       tags:
       - knowledge
   /apps/{appId}/resources:
@@ -6093,55 +6106,8 @@ paths:
       tags:
       - organizations
   /organizations/{orgId}/knowledge:
-    delete:
-      description: 通过 path query 参数指定目标路径，从组织知识库中删除对应文件
-      parameters:
-      - description: 组织 ID
-        in: path
-        name: orgId
-        required: true
-        schema:
-          type: string
-      - description: 文件相对路径
-        in: query
-        name: path
-        required: true
-        schema:
-          type: string
-      responses:
-        "204":
-          description: 删除成功，无响应体
-        "400":
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/handlers.ErrorResponse'
-          description: Bad Request
-        "401":
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/handlers.ErrorResponse'
-          description: Unauthorized
-        "403":
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/handlers.ErrorResponse'
-          description: Forbidden
-        "503":
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/handlers.ErrorResponse'
-          description: Service Unavailable
-      security:
-      - BearerAuth: []
-      summary: 删除组织级知识库文件
-      tags:
-      - knowledge
     get:
-      description: 按 path 参数列出组织知识库指定目录的文件列表
+      description: 以扁平 RAGFlow document 列表返回组织知识库文件
       parameters:
       - description: 组织 ID
         in: path
@@ -6149,9 +6115,24 @@ paths:
         required: true
         schema:
           type: string
-      - description: 目录路径
+      - description: 页码，从 1 开始
         in: query
-        name: path
+        name: page
+        schema:
+          type: integer
+      - description: 每页数量
+        in: query
+        name: page_size
+        schema:
+          type: integer
+      - description: 文件名关键词
+        in: query
+        name: keyword
+        schema:
+          type: string
+      - description: 解析状态
+        in: query
+        name: status
         schema:
           type: string
       responses:
@@ -6185,7 +6166,7 @@ paths:
       tags:
       - knowledge
     post:
-      description: 通过 path query 参数指定目标路径，上传二进制内容写入组织知识库；Content-Length 必须正确设置
+      description: 通过 filename query 指定文件名，上传后进入 RAGFlow 解析队列
       parameters:
       - description: 组织 ID
         in: path
@@ -6193,9 +6174,9 @@ paths:
         required: true
         schema:
           type: string
-      - description: 文件相对路径
+      - description: 文件名
         in: query
-        name: path
+        name: filename
         required: true
         schema:
           type: string
@@ -6206,8 +6187,12 @@ paths:
               format: binary
               type: string
       responses:
-        "204":
-          description: 上传成功，无响应体
+        "202":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/service.KnowledgeDocumentResult'
+          description: Accepted
         "400":
           content:
             application/json:
@@ -6237,9 +6222,9 @@ paths:
       summary: 上传组织级知识库文件
       tags:
       - knowledge
-  /organizations/{orgId}/knowledge/file:
-    get:
-      description: 通过 path query 参数指定目标路径，从组织知识库主副本下载单个文件
+  /organizations/{orgId}/knowledge/{documentId}:
+    delete:
+      description: 按 documentId 删除 RAGFlow document
       parameters:
       - description: 组织 ID
         in: path
@@ -6247,9 +6232,57 @@ paths:
         required: true
         schema:
           type: string
-      - description: 文件相对路径
-        in: query
-        name: path
+      - description: document ID
+        in: path
+        name: documentId
+        required: true
+        schema:
+          type: string
+      responses:
+        "204":
+          description: 删除成功，无响应体
+        "401":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/handlers.ErrorResponse'
+          description: Unauthorized
+        "403":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/handlers.ErrorResponse'
+          description: Forbidden
+        "404":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/handlers.ErrorResponse'
+          description: Not Found
+        "503":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/handlers.ErrorResponse'
+          description: Service Unavailable
+      security:
+      - BearerAuth: []
+      summary: 删除组织级知识库文件
+      tags:
+      - knowledge
+  /organizations/{orgId}/knowledge/{documentId}/file:
+    get:
+      description: 按 documentId 下载 RAGFlow 中的原始文件
+      parameters:
+      - description: 组织 ID
+        in: path
+        name: orgId
+        required: true
+        schema:
+          type: string
+      - description: document ID
+        in: path
+        name: documentId
         required: true
         schema:
           type: string
@@ -6260,12 +6293,6 @@ paths:
               schema:
                 type: string
           description: 二进制文件流
-        "400":
-          content:
-            application/octet-stream:
-              schema:
-                $ref: '#/components/schemas/handlers.ErrorResponse'
-          description: Bad Request
         "401":
           content:
             application/octet-stream:
@@ -6278,6 +6305,12 @@ paths:
               schema:
                 $ref: '#/components/schemas/handlers.ErrorResponse'
           description: Forbidden
+        "404":
+          content:
+            application/octet-stream:
+              schema:
+                $ref: '#/components/schemas/handlers.ErrorResponse'
+          description: Not Found
         "503":
           content:
             application/octet-stream:
@@ -6289,53 +6322,9 @@ paths:
       summary: 下载组织级知识库文件
       tags:
       - knowledge
-  /organizations/{orgId}/knowledge/sync-status:
-    get:
-      description: 列出组织知识库在所有 Runtime 节点的最近同步状态；仅组织管理员或平台管理员可调
-      parameters:
-      - description: 组织 ID
-        in: path
-        name: orgId
-        required: true
-        schema:
-          type: string
-      responses:
-        "200":
-          content:
-            application/json:
-              schema:
-                additionalProperties:
-                  items:
-                    $ref: '#/components/schemas/service.SyncStatusResult'
-                  type: array
-                type: object
-          description: OK
-        "401":
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/handlers.ErrorResponse'
-          description: Unauthorized
-        "403":
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/handlers.ErrorResponse'
-          description: Forbidden
-        "503":
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/handlers.ErrorResponse'
-          description: Service Unavailable
-      security:
-      - BearerAuth: []
-      summary: 组织知识库同步状态
-      tags:
-      - knowledge
-  /organizations/{orgId}/knowledge/sync-status/retry:
+  /organizations/{orgId}/knowledge/{documentId}/reparse:
     post:
-      description: 触发指定组织在指定 Runtime 节点上重新同步知识库
+      description: 按 documentId 重新触发 RAGFlow parse
       parameters:
       - description: 组织 ID
         in: path
@@ -6343,32 +6332,19 @@ paths:
         required: true
         schema:
           type: string
-      requestBody:
-        content:
-          application/json:
-            schema:
-              oneOf:
-              - type: object
-              - $ref: '#/components/schemas/handlers.RetryOrgSyncRequest'
-                description: 重试同步请求
-                summary: body
-        description: 重试同步请求
+      - description: document ID
+        in: path
+        name: documentId
         required: true
+        schema:
+          type: string
       responses:
         "202":
           content:
             application/json:
               schema:
-                additionalProperties:
-                  type: string
-                type: object
+                $ref: '#/components/schemas/service.KnowledgeDocumentResult'
           description: Accepted
-        "400":
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/handlers.ErrorResponse'
-          description: Bad Request
         "401":
           content:
             application/json:
@@ -6381,6 +6357,12 @@ paths:
               schema:
                 $ref: '#/components/schemas/handlers.ErrorResponse'
           description: Forbidden
+        "404":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/handlers.ErrorResponse'
+          description: Not Found
         "503":
           content:
             application/json:
@@ -6389,7 +6371,7 @@ paths:
           description: Service Unavailable
       security:
       - BearerAuth: []
-      summary: 重试组织知识库节点同步
+      summary: 重新解析组织级知识库文件
       tags:
       - knowledge
   /organizations/{orgId}/members:
@@ -7294,6 +7276,104 @@ paths:
       summary: runtime 节点资源趋势
       tags:
       - runtime-nodes
+  /runtime/knowledge/files:
+    post:
+      description: 通过 app runtime token 将 Hermes 工作目录产物上传到当前实例 RAGFlow dataset
+      parameters:
+      - description: 实例 runtime token
+        in: header
+        name: X-OC-App-Token
+        required: true
+        schema:
+          type: string
+      requestBody:
+        content:
+          application/x-www-form-urlencoded:
+            schema:
+              title: file
+              type: file
+          multipart/form-data:
+            schema:
+              type: object
+        description: 要加入实例知识库的文件
+        required: true
+      responses:
+        "202":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/service.KnowledgeDocumentResult'
+          description: Accepted
+        "400":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/handlers.ErrorResponse'
+          description: Bad Request
+        "401":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/handlers.ErrorResponse'
+          description: Unauthorized
+        "503":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/handlers.ErrorResponse'
+          description: Service Unavailable
+      summary: Hermes 添加文件到实例知识库
+      tags:
+      - runtime-knowledge
+  /runtime/knowledge/search:
+    post:
+      description: 通过 app runtime token 检索当前实例知识库和所属组织知识库，不接受 dataset ID
+      parameters:
+      - description: 实例 runtime token
+        in: header
+        name: X-OC-App-Token
+        required: true
+        schema:
+          type: string
+      requestBody:
+        content:
+          application/json:
+            schema:
+              oneOf:
+              - type: object
+              - $ref: '#/components/schemas/handlers.RuntimeKnowledgeSearchRequest'
+                description: 检索请求
+                summary: body
+        description: 检索请求
+        required: true
+      responses:
+        "200":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/service.KnowledgeSearchResult'
+          description: OK
+        "400":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/handlers.ErrorResponse'
+          description: Bad Request
+        "401":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/handlers.ErrorResponse'
+          description: Unauthorized
+        "503":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/handlers.ErrorResponse'
+          description: Service Unavailable
+      summary: Hermes 检索知识库
+      tags:
+      - runtime-knowledge
   /usage/members/{userId}:
     get:
       description: 返回指定成员名下应用的 token 调用日志（LogsPage 格式）

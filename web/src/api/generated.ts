@@ -2805,21 +2805,23 @@ export interface paths {
         };
         /**
          * 列出应用级知识库文件
-         * @description 按 path 参数列出应用知识库指定目录的文件；需同时提供 org_id 和 owner_user_id
+         * @description 以扁平 RAGFlow document 列表返回实例知识库文件
          */
         get: {
             parameters: {
-                query: {
-                    /** @description 应用所属组织 ID */
-                    org_id: string;
-                    /** @description 应用所有者用户 ID */
-                    owner_user_id: string;
-                    /** @description 目录路径 */
-                    path?: string;
+                query?: {
+                    /** @description 页码，从 1 开始 */
+                    page?: number;
+                    /** @description 每页数量 */
+                    page_size?: number;
+                    /** @description 文件名关键词 */
+                    keyword?: string;
+                    /** @description 解析状态 */
+                    status?: string;
                 };
                 header?: never;
                 path: {
-                    /** @description 应用 ID */
+                    /** @description 实例 ID */
                     appId: string;
                 };
                 cookie?: never;
@@ -2835,15 +2837,6 @@ export interface paths {
                         "application/json": components["schemas"]["service.KnowledgeListResult"];
                     };
                 };
-                /** @description Bad Request */
-                400: {
-                    headers: {
-                        [name: string]: unknown;
-                    };
-                    content: {
-                        "application/json": components["schemas"]["handlers.ErrorResponse"];
-                    };
-                };
                 /** @description Unauthorized */
                 401: {
                     headers: {
@@ -2855,15 +2848,6 @@ export interface paths {
                 };
                 /** @description Forbidden */
                 403: {
-                    headers: {
-                        [name: string]: unknown;
-                    };
-                    content: {
-                        "application/json": components["schemas"]["handlers.ErrorResponse"];
-                    };
-                };
-                /** @description Not Found */
-                404: {
                     headers: {
                         [name: string]: unknown;
                     };
@@ -2885,21 +2869,17 @@ export interface paths {
         put?: never;
         /**
          * 上传应用级知识库文件
-         * @description 通过 path query 参数指定目标路径，上传二进制内容写入应用知识库；需同时提供 org_id/owner_user_id/path
+         * @description 通过 filename query 指定文件名，上传后进入 RAGFlow 解析队列
          */
         post: {
             parameters: {
                 query: {
-                    /** @description 应用所属组织 ID */
-                    org_id: string;
-                    /** @description 应用所有者用户 ID */
-                    owner_user_id: string;
-                    /** @description 文件相对路径 */
-                    path: string;
+                    /** @description 文件名 */
+                    filename: string;
                 };
                 header?: never;
                 path: {
-                    /** @description 应用 ID */
+                    /** @description 实例 ID */
                     appId: string;
                 };
                 cookie?: never;
@@ -2910,12 +2890,14 @@ export interface paths {
                 };
             };
             responses: {
-                /** @description 上传成功，无响应体 */
-                204: {
+                /** @description Accepted */
+                202: {
                     headers: {
                         [name: string]: unknown;
                     };
-                    content?: never;
+                    content: {
+                        "application/json": components["schemas"]["service.KnowledgeDocumentResult"];
+                    };
                 };
                 /** @description Bad Request */
                 400: {
@@ -2944,15 +2926,6 @@ export interface paths {
                         "application/json": components["schemas"]["handlers.ErrorResponse"];
                     };
                 };
-                /** @description Not Found */
-                404: {
-                    headers: {
-                        [name: string]: unknown;
-                    };
-                    content: {
-                        "application/json": components["schemas"]["handlers.ErrorResponse"];
-                    };
-                };
                 /** @description Service Unavailable */
                 503: {
                     headers: {
@@ -2964,24 +2937,35 @@ export interface paths {
                 };
             };
         };
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/apps/{appId}/knowledge/{documentId}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        post?: never;
         /**
          * 删除应用级知识库文件
-         * @description 通过 path query 参数指定目标路径，从应用知识库中删除对应文件；需同时提供 org_id/owner_user_id/path
+         * @description 按 documentId 删除 RAGFlow document
          */
         delete: {
             parameters: {
-                query: {
-                    /** @description 应用所属组织 ID */
-                    org_id: string;
-                    /** @description 应用所有者用户 ID */
-                    owner_user_id: string;
-                    /** @description 文件相对路径 */
-                    path: string;
-                };
+                query?: never;
                 header?: never;
                 path: {
-                    /** @description 应用 ID */
+                    /** @description 实例 ID */
                     appId: string;
+                    /** @description document ID */
+                    documentId: string;
                 };
                 cookie?: never;
             };
@@ -2993,15 +2977,6 @@ export interface paths {
                         [name: string]: unknown;
                     };
                     content?: never;
-                };
-                /** @description Bad Request */
-                400: {
-                    headers: {
-                        [name: string]: unknown;
-                    };
-                    content: {
-                        "application/json": components["schemas"]["handlers.ErrorResponse"];
-                    };
                 };
                 /** @description Unauthorized */
                 401: {
@@ -3046,7 +3021,7 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
-    "/apps/{appId}/knowledge/file": {
+    "/apps/{appId}/knowledge/{documentId}/file": {
         parameters: {
             query?: never;
             header?: never;
@@ -3055,22 +3030,17 @@ export interface paths {
         };
         /**
          * 下载应用级知识库文件
-         * @description 通过 path query 参数指定目标路径，从应用知识库主副本下载单个文件；需同时提供 org_id/owner_user_id/path
+         * @description 按 documentId 下载 RAGFlow 中的原始文件
          */
         get: {
             parameters: {
-                query: {
-                    /** @description 应用所属组织 ID */
-                    org_id: string;
-                    /** @description 应用所有者用户 ID */
-                    owner_user_id: string;
-                    /** @description 文件相对路径 */
-                    path: string;
-                };
+                query?: never;
                 header?: never;
                 path: {
-                    /** @description 应用 ID */
+                    /** @description 实例 ID */
                     appId: string;
+                    /** @description document ID */
+                    documentId: string;
                 };
                 cookie?: never;
             };
@@ -3083,15 +3053,6 @@ export interface paths {
                     };
                     content: {
                         "application/octet-stream": string;
-                    };
-                };
-                /** @description Bad Request */
-                400: {
-                    headers: {
-                        [name: string]: unknown;
-                    };
-                    content: {
-                        "application/octet-stream": components["schemas"]["handlers.ErrorResponse"];
                     };
                 };
                 /** @description Unauthorized */
@@ -3134,6 +3095,86 @@ export interface paths {
         };
         put?: never;
         post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/apps/{appId}/knowledge/{documentId}/reparse": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * 重新解析应用级知识库文件
+         * @description 按 documentId 重新触发 RAGFlow parse
+         */
+        post: {
+            parameters: {
+                query?: never;
+                header?: never;
+                path: {
+                    /** @description 实例 ID */
+                    appId: string;
+                    /** @description document ID */
+                    documentId: string;
+                };
+                cookie?: never;
+            };
+            requestBody?: never;
+            responses: {
+                /** @description Accepted */
+                202: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["service.KnowledgeDocumentResult"];
+                    };
+                };
+                /** @description Unauthorized */
+                401: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["handlers.ErrorResponse"];
+                    };
+                };
+                /** @description Forbidden */
+                403: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["handlers.ErrorResponse"];
+                    };
+                };
+                /** @description Not Found */
+                404: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["handlers.ErrorResponse"];
+                    };
+                };
+                /** @description Service Unavailable */
+                503: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["handlers.ErrorResponse"];
+                    };
+                };
+            };
+        };
         delete?: never;
         options?: never;
         head?: never;
@@ -6251,13 +6292,19 @@ export interface paths {
         };
         /**
          * 列出组织级知识库文件
-         * @description 按 path 参数列出组织知识库指定目录的文件列表
+         * @description 以扁平 RAGFlow document 列表返回组织知识库文件
          */
         get: {
             parameters: {
                 query?: {
-                    /** @description 目录路径 */
-                    path?: string;
+                    /** @description 页码，从 1 开始 */
+                    page?: number;
+                    /** @description 每页数量 */
+                    page_size?: number;
+                    /** @description 文件名关键词 */
+                    keyword?: string;
+                    /** @description 解析状态 */
+                    status?: string;
                 };
                 header?: never;
                 path: {
@@ -6309,13 +6356,13 @@ export interface paths {
         put?: never;
         /**
          * 上传组织级知识库文件
-         * @description 通过 path query 参数指定目标路径，上传二进制内容写入组织知识库；Content-Length 必须正确设置
+         * @description 通过 filename query 指定文件名，上传后进入 RAGFlow 解析队列
          */
         post: {
             parameters: {
                 query: {
-                    /** @description 文件相对路径 */
-                    path: string;
+                    /** @description 文件名 */
+                    filename: string;
                 };
                 header?: never;
                 path: {
@@ -6330,12 +6377,14 @@ export interface paths {
                 };
             };
             responses: {
-                /** @description 上传成功，无响应体 */
-                204: {
+                /** @description Accepted */
+                202: {
                     headers: {
                         [name: string]: unknown;
                     };
-                    content?: never;
+                    content: {
+                        "application/json": components["schemas"]["service.KnowledgeDocumentResult"];
+                    };
                 };
                 /** @description Bad Request */
                 400: {
@@ -6375,20 +6424,35 @@ export interface paths {
                 };
             };
         };
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/organizations/{orgId}/knowledge/{documentId}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        post?: never;
         /**
          * 删除组织级知识库文件
-         * @description 通过 path query 参数指定目标路径，从组织知识库中删除对应文件
+         * @description 按 documentId 删除 RAGFlow document
          */
         delete: {
             parameters: {
-                query: {
-                    /** @description 文件相对路径 */
-                    path: string;
-                };
+                query?: never;
                 header?: never;
                 path: {
                     /** @description 组织 ID */
                     orgId: string;
+                    /** @description document ID */
+                    documentId: string;
                 };
                 cookie?: never;
             };
@@ -6401,15 +6465,6 @@ export interface paths {
                     };
                     content?: never;
                 };
-                /** @description Bad Request */
-                400: {
-                    headers: {
-                        [name: string]: unknown;
-                    };
-                    content: {
-                        "application/json": components["schemas"]["handlers.ErrorResponse"];
-                    };
-                };
                 /** @description Unauthorized */
                 401: {
                     headers: {
@@ -6421,6 +6476,15 @@ export interface paths {
                 };
                 /** @description Forbidden */
                 403: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["handlers.ErrorResponse"];
+                    };
+                };
+                /** @description Not Found */
+                404: {
                     headers: {
                         [name: string]: unknown;
                     };
@@ -6444,7 +6508,7 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
-    "/organizations/{orgId}/knowledge/file": {
+    "/organizations/{orgId}/knowledge/{documentId}/file": {
         parameters: {
             query?: never;
             header?: never;
@@ -6453,18 +6517,17 @@ export interface paths {
         };
         /**
          * 下载组织级知识库文件
-         * @description 通过 path query 参数指定目标路径，从组织知识库主副本下载单个文件
+         * @description 按 documentId 下载 RAGFlow 中的原始文件
          */
         get: {
             parameters: {
-                query: {
-                    /** @description 文件相对路径 */
-                    path: string;
-                };
+                query?: never;
                 header?: never;
                 path: {
                     /** @description 组织 ID */
                     orgId: string;
+                    /** @description document ID */
+                    documentId: string;
                 };
                 cookie?: never;
             };
@@ -6479,15 +6542,6 @@ export interface paths {
                         "application/octet-stream": string;
                     };
                 };
-                /** @description Bad Request */
-                400: {
-                    headers: {
-                        [name: string]: unknown;
-                    };
-                    content: {
-                        "application/octet-stream": components["schemas"]["handlers.ErrorResponse"];
-                    };
-                };
                 /** @description Unauthorized */
                 401: {
                     headers: {
@@ -6499,6 +6553,15 @@ export interface paths {
                 };
                 /** @description Forbidden */
                 403: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/octet-stream": components["schemas"]["handlers.ErrorResponse"];
+                    };
+                };
+                /** @description Not Found */
+                404: {
                     headers: {
                         [name: string]: unknown;
                     };
@@ -6525,78 +6588,7 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
-    "/organizations/{orgId}/knowledge/sync-status": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        /**
-         * 组织知识库同步状态
-         * @description 列出组织知识库在所有 Runtime 节点的最近同步状态；仅组织管理员或平台管理员可调
-         */
-        get: {
-            parameters: {
-                query?: never;
-                header?: never;
-                path: {
-                    /** @description 组织 ID */
-                    orgId: string;
-                };
-                cookie?: never;
-            };
-            requestBody?: never;
-            responses: {
-                /** @description OK */
-                200: {
-                    headers: {
-                        [name: string]: unknown;
-                    };
-                    content: {
-                        "application/json": {
-                            [key: string]: components["schemas"]["service.SyncStatusResult"][];
-                        };
-                    };
-                };
-                /** @description Unauthorized */
-                401: {
-                    headers: {
-                        [name: string]: unknown;
-                    };
-                    content: {
-                        "application/json": components["schemas"]["handlers.ErrorResponse"];
-                    };
-                };
-                /** @description Forbidden */
-                403: {
-                    headers: {
-                        [name: string]: unknown;
-                    };
-                    content: {
-                        "application/json": components["schemas"]["handlers.ErrorResponse"];
-                    };
-                };
-                /** @description Service Unavailable */
-                503: {
-                    headers: {
-                        [name: string]: unknown;
-                    };
-                    content: {
-                        "application/json": components["schemas"]["handlers.ErrorResponse"];
-                    };
-                };
-            };
-        };
-        put?: never;
-        post?: never;
-        delete?: never;
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
-    };
-    "/organizations/{orgId}/knowledge/sync-status/retry": {
+    "/organizations/{orgId}/knowledge/{documentId}/reparse": {
         parameters: {
             query?: never;
             header?: never;
@@ -6606,8 +6598,8 @@ export interface paths {
         get?: never;
         put?: never;
         /**
-         * 重试组织知识库节点同步
-         * @description 触发指定组织在指定 Runtime 节点上重新同步知识库
+         * 重新解析组织级知识库文件
+         * @description 按 documentId 重新触发 RAGFlow parse
          */
         post: {
             parameters: {
@@ -6616,15 +6608,12 @@ export interface paths {
                 path: {
                     /** @description 组织 ID */
                     orgId: string;
+                    /** @description document ID */
+                    documentId: string;
                 };
                 cookie?: never;
             };
-            /** @description 重试同步请求 */
-            requestBody: {
-                content: {
-                    "application/json": Record<string, never> | components["schemas"]["handlers.RetryOrgSyncRequest"];
-                };
-            };
+            requestBody?: never;
             responses: {
                 /** @description Accepted */
                 202: {
@@ -6632,18 +6621,7 @@ export interface paths {
                         [name: string]: unknown;
                     };
                     content: {
-                        "application/json": {
-                            [key: string]: string;
-                        };
-                    };
-                };
-                /** @description Bad Request */
-                400: {
-                    headers: {
-                        [name: string]: unknown;
-                    };
-                    content: {
-                        "application/json": components["schemas"]["handlers.ErrorResponse"];
+                        "application/json": components["schemas"]["service.KnowledgeDocumentResult"];
                     };
                 };
                 /** @description Unauthorized */
@@ -6657,6 +6635,15 @@ export interface paths {
                 };
                 /** @description Forbidden */
                 403: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["handlers.ErrorResponse"];
+                    };
+                };
+                /** @description Not Found */
+                404: {
                     headers: {
                         [name: string]: unknown;
                     };
@@ -8023,6 +8010,155 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/runtime/knowledge/files": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Hermes 添加文件到实例知识库
+         * @description 通过 app runtime token 将 Hermes 工作目录产物上传到当前实例 RAGFlow dataset
+         */
+        post: {
+            parameters: {
+                query?: never;
+                header: {
+                    /** @description 实例 runtime token */
+                    "X-OC-App-Token": string;
+                };
+                path?: never;
+                cookie?: never;
+            };
+            /** @description 要加入实例知识库的文件 */
+            requestBody: {
+                content: {
+                    "application/x-www-form-urlencoded": Record<string, never>;
+                    "multipart/form-data": Record<string, never>;
+                };
+            };
+            responses: {
+                /** @description Accepted */
+                202: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["service.KnowledgeDocumentResult"];
+                    };
+                };
+                /** @description Bad Request */
+                400: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["handlers.ErrorResponse"];
+                    };
+                };
+                /** @description Unauthorized */
+                401: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["handlers.ErrorResponse"];
+                    };
+                };
+                /** @description Service Unavailable */
+                503: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["handlers.ErrorResponse"];
+                    };
+                };
+            };
+        };
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/runtime/knowledge/search": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Hermes 检索知识库
+         * @description 通过 app runtime token 检索当前实例知识库和所属组织知识库，不接受 dataset ID
+         */
+        post: {
+            parameters: {
+                query?: never;
+                header: {
+                    /** @description 实例 runtime token */
+                    "X-OC-App-Token": string;
+                };
+                path?: never;
+                cookie?: never;
+            };
+            /** @description 检索请求 */
+            requestBody: {
+                content: {
+                    "application/json": Record<string, never> | components["schemas"]["handlers.RuntimeKnowledgeSearchRequest"];
+                };
+            };
+            responses: {
+                /** @description OK */
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["service.KnowledgeSearchResult"];
+                    };
+                };
+                /** @description Bad Request */
+                400: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["handlers.ErrorResponse"];
+                    };
+                };
+                /** @description Unauthorized */
+                401: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["handlers.ErrorResponse"];
+                    };
+                };
+                /** @description Service Unavailable */
+                503: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["handlers.ErrorResponse"];
+                    };
+                };
+            };
+        };
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/usage/members/{userId}": {
         parameters: {
             query?: never;
@@ -8607,9 +8743,11 @@ export interface components {
             /** @description Password 是新密码，service 层只保存 hash。 */
             password: string;
         };
-        "handlers.RetryOrgSyncRequest": {
-            /** @description NodeID 是需要重试同步的 runtime 节点 ID。 */
-            node_id: string;
+        "handlers.RuntimeKnowledgeSearchRequest": {
+            /** @description Question 是用户问题或检索语句。 */
+            question: string;
+            /** @description TopK 是每个知识库作用域的检索 chunk 上限；0 使用 service 默认值，超过 service 上限会被截断。 */
+            top_k?: number;
         };
         "handlers.SwitchAppVersionRequest": {
             /** @description VersionID 是目标助手版本 id，必须在实例所属组织的 allowlist 内。 */
@@ -8765,7 +8903,7 @@ export interface components {
             target_id?: string;
             /**
              * @description TargetName 是 target_id 对应资源名称；按 target_type 走相关子查询，
-             *     对 newapi_call / knowledge_sync 等无对应实体的类型返回空字符串。
+             *     对 newapi_call 等无对应实体的类型返回空字符串。
              */
             target_name?: string;
             target_type?: string;
@@ -9145,15 +9283,30 @@ export interface components {
             /** @description WorkerPID 是 worker 进程 ID，0 表示未知或已退出。 */
             worker_pid?: number;
         };
-        "service.KnowledgeEntryResult": {
-            is_dir?: boolean;
+        "service.KnowledgeDocumentResult": {
+            created_at?: string;
+            id?: string;
+            last_error?: string;
+            mime_type?: string;
             name?: string;
-            path?: string;
+            parse_status?: string;
+            progress?: number;
             size?: number;
+            suffix?: string;
         };
         "service.KnowledgeListResult": {
-            entries?: components["schemas"]["service.KnowledgeEntryResult"][];
-            path?: string;
+            items?: components["schemas"]["service.KnowledgeDocumentResult"][];
+            total?: number;
+        };
+        "service.KnowledgeSearchHit": {
+            content?: string;
+            document_id?: string;
+            document_name?: string;
+            scope?: string;
+            similarity?: number;
+        };
+        "service.KnowledgeSearchResult": {
+            results?: components["schemas"]["service.KnowledgeSearchHit"][];
         };
         "service.LoginResult": {
             tokens?: components["schemas"]["service.TokenPair"];
@@ -9411,14 +9564,6 @@ export interface components {
             container?: components["schemas"]["service.RuntimeContainerInfo"];
             snapshot?: components["schemas"]["service.RuntimeSnapshotView"];
             status?: string;
-        };
-        "service.SyncStatusResult": {
-            last_error?: string;
-            last_success_at?: string;
-            node_id?: string;
-            org_id?: string;
-            status?: string;
-            updated_at?: string;
         };
         "service.TokenPair": {
             access_token?: string;

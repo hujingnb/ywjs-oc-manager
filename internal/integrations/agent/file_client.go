@@ -202,35 +202,19 @@ func ResolveRemotePath(base string, segments ...string) string {
 }
 
 // ============================================================================
-// Sprint 1 新增：scope-aware 方法。直接对应 agent 端 /v1/scopes/* 端点。
-// service / worker 层用领域语义调（InitAppDirs / SyncAppKnowledge / ...），
+// scope-aware 方法直接对应 agent 端 /v1/scopes/* 端点。
+// service / worker 层用领域语义调（InitAppDirs / UploadAppInputFile / ...），
 // 不需要再手工拼路径。每个方法仅校验 baseURL 与 status，不在客户端做业务校验。
 // ============================================================================
 
-// InitAppDirs 让 agent 在节点上准备好 apps/{appID}/{knowledge,workspace,state,logs} 4 个目录。
+// InitAppDirs 让 agent 在节点上准备好 apps/{appID}/input 与 data/workspace 目录。
 // 操作幂等。容器创建前必须调一次。
 func (c *AgentFileClient) InitAppDirs(ctx context.Context, appID string) error {
 	return c.doScopePost(ctx, fmt.Sprintf("/v1/scopes/apps/%s/init", url.PathEscape(appID)), nil, "")
 }
 
-// SyncOrgKnowledge 把 manager 主副本里的组织级知识库 tar 流推到 agent，
-// agent 解压后原子替换本地 orgs/{orgID}/knowledge/。
-func (c *AgentFileClient) SyncOrgKnowledge(ctx context.Context, orgID string, tarStream io.Reader) error {
-	return c.doScopePost(ctx,
-		fmt.Sprintf("/v1/scopes/orgs/%s/knowledge/sync", url.PathEscape(orgID)),
-		tarStream, "application/x-tar")
-}
-
-// SyncAppKnowledge 同 SyncOrgKnowledge，但走应用级。
-func (c *AgentFileClient) SyncAppKnowledge(ctx context.Context, appID string, tarStream io.Reader) error {
-	return c.doScopePost(ctx,
-		fmt.Sprintf("/v1/scopes/apps/%s/knowledge/sync", url.PathEscape(appID)),
-		tarStream, "application/x-tar")
-}
-
 // UploadAppInputFile 把 manager 渲染的 Hermes 输入资源
-// (manifest.yaml / resources/persona.md / resources/*-rules.md /
-// resources/knowledge/{org,app}/*) 上传到节点 apps/{appID}/input/{relPath};
+// (manifest.yaml / resources/* / skills/*) 上传到节点 apps/{appID}/input/{relPath};
 // agent 端写入节点本地文件系统, 容器启动时该目录由 oc-entrypoint 读取并
 // 完成最终装配 (翻译为 hermes 自有 schema 的 SOUL.md / config.yaml / .env /
 // skills/<name>/SKILL.md)。
@@ -264,11 +248,6 @@ func (c *AgentFileClient) UploadAppInputFile(ctx context.Context, appID, relPath
 // DeleteAppInputFile 删除节点上 apps/{appID}/input/{relPath} 沙箱内的
 // 单文件或子目录。与 UploadAppInputFile 共用 /v1/scopes/apps/<id>/input/file
 // 路由 (HTTP DELETE 方法), agent T13 起同时支持 PUT/DELETE 两种 method。
-//
-// 主要调用方:knowledge_sync_node worker handler——manager 主副本删除某个知识
-// 库文件后, 把删除事件透传到目标节点的每个应用 input 目录, 让 oc-entrypoint
-// 下次启动时不再读到该 skill。relPath 已由调用方按 resources/knowledge/{org,app}/
-// 前缀拼好。
 //
 // relPath 必须为相对路径, agent 端会做沙箱校验; 文件不存在视为成功 (幂等)。
 func (c *AgentFileClient) DeleteAppInputFile(ctx context.Context, appID, relPath string) error {
@@ -474,4 +453,3 @@ func (c *AgentFileClient) doScopePost(ctx context.Context, path string, body io.
 	defer resp.Body.Close()
 	return expectSuccess(resp, "scope post "+path)
 }
-

@@ -136,10 +136,12 @@ type CreateMemberAppRequest struct {
 
 // ===== 知识库 knowledge =====
 
-// RetryOrgSyncRequest 重试组织知识库节点同步的请求体。
-type RetryOrgSyncRequest struct {
-	// NodeID 是需要重试同步的 runtime 节点 ID。
-	NodeID string `json:"node_id" binding:"required"`
+// RuntimeKnowledgeSearchRequest 是 Hermes oc-kb 检索知识库的请求体。
+type RuntimeKnowledgeSearchRequest struct {
+	// Question 是用户问题或检索语句。
+	Question string `json:"question" binding:"required"`
+	// TopK 是每个知识库作用域的检索 chunk 上限；0 使用 service 默认值，超过 service 上限会被截断。
+	TopK int32 `json:"top_k"`
 }
 
 // ===== 充值 recharge =====

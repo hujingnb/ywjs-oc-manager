@@ -16,6 +16,8 @@ type Querier interface {
 	// 版本触发镜像重建后、容器重启前渠道凭证依旧落在 bind mount 目录、无需用户
 	// 重新扫码），则直接把 status 推到 running，避免概览页长期卡在「待绑定」。
 	AppHasBoundChannelBinding(ctx context.Context, appID pgtype.UUID) (bool, error)
+	// 抢占 failed 或超时 creating 的 dataset 创建租约；只有返回行的调用方允许访问 RAGFlow 创建远端 dataset。
+	ClaimRAGFlowDatasetCreation(ctx context.Context, arg ClaimRAGFlowDatasetCreationParams) (RagflowDataset, error)
 	// transitionTo / RequestInitialize 强制清空进度字段。
 	ClearAppProgress(ctx context.Context, id pgtype.UUID) (App, error)
 	// 平台总览组织计数：剔除 soft-deleted；status='active' 与 'disabled' 都算入册组织。
@@ -41,10 +43,12 @@ type Querier interface {
 	CreateChannelBinding(ctx context.Context, arg CreateChannelBindingParams) (ChannelBinding, error)
 	CreateJob(ctx context.Context, arg CreateJobParams) (Job, error)
 	CreateOrganization(ctx context.Context, arg CreateOrganizationParams) (Organization, error)
-	// 创建 manager scope 到 RAGFlow dataset 的本地映射，远端创建失败时可先记录 failed 状态便于排障。
-	CreateRAGFlowDatasetMapping(ctx context.Context, arg CreateRAGFlowDatasetMappingParams) (RagflowDataset, error)
+	// 懒创建实例级 dataset 映射；并发首创命中部分唯一索引时不返回行，由 service 读取已有映射且不重复创建远端 dataset。
+	CreateRAGFlowAppDatasetMapping(ctx context.Context, arg CreateRAGFlowAppDatasetMappingParams) (RagflowDataset, error)
 	// 缓存 RAGFlow document 元数据，manager 不保存文件主副本。
 	CreateRAGFlowDocument(ctx context.Context, arg CreateRAGFlowDocumentParams) (RagflowDocument, error)
+	// 懒创建组织级 dataset 映射；并发首创命中部分唯一索引时不返回行，由 service 读取已有映射且不重复创建远端 dataset。
+	CreateRAGFlowOrgDatasetMapping(ctx context.Context, arg CreateRAGFlowOrgDatasetMappingParams) (RagflowDataset, error)
 	CreateRechargeRecord(ctx context.Context, arg CreateRechargeRecordParams) (RechargeRecord, error)
 	CreateRefreshToken(ctx context.Context, arg CreateRefreshTokenParams) (RefreshToken, error)
 	CreateUser(ctx context.Context, arg CreateUserParams) (User, error)
@@ -67,8 +71,6 @@ type Querier interface {
 	GetAssistantVersionByName(ctx context.Context, name string) (AssistantVersion, error)
 	GetChannelBindingByAppAndType(ctx context.Context, arg GetChannelBindingByAppAndTypeParams) (ChannelBinding, error)
 	GetJob(ctx context.Context, id pgtype.UUID) (Job, error)
-	// 查询单个 (org, node) 对的状态，主要用于幂等判断。
-	GetKnowledgeSyncStatus(ctx context.Context, arg GetKnowledgeSyncStatusParams) (KnowledgeSyncStatus, error)
 	// reaper 通过 payload_json->>'app_id' 查最近一份 app_initialize job。
 	// 用 ORDER BY created_at DESC + LIMIT 1 取最新；不存在返回 pgx.ErrNoRows。
 	// 参数显式 cast 成 text，避免 sqlc 把 `->>` 结果类型推断成 []byte。
@@ -123,8 +125,6 @@ type Querier interface {
 	ListAuditLogsByTarget(ctx context.Context, arg ListAuditLogsByTargetParams) ([]ListAuditLogsByTargetRow, error)
 	ListInstanceResourceBuckets(ctx context.Context, arg ListInstanceResourceBucketsParams) ([]ListInstanceResourceBucketsRow, error)
 	ListInstanceResourceSamples(ctx context.Context, arg ListInstanceResourceSamplesParams) ([]InstanceResourceSample, error)
-	// 列出某组织在所有节点上的最近同步状态。
-	ListKnowledgeSyncStatusByOrg(ctx context.Context, orgID pgtype.UUID) ([]KnowledgeSyncStatus, error)
 	ListLatestInstanceResourceSamplesByNode(ctx context.Context, runtimeNodeID pgtype.UUID) ([]InstanceResourceSample, error)
 	ListLatestNodeResourceSamples(ctx context.Context, runtimeNodeIds []pgtype.UUID) ([]NodeResourceSample, error)
 	ListNodeInstanceResourceBuckets(ctx context.Context, arg ListNodeInstanceResourceBucketsParams) ([]ListNodeInstanceResourceBucketsRow, error)
@@ -179,7 +179,7 @@ type Querier interface {
 	// 管理员 PATCH /apps/:appId/restart-policy 写入；mode/max_per_window/window_seconds 校验在 service 层。
 	SetAppRestartPolicy(ctx context.Context, arg SetAppRestartPolicyParams) (App, error)
 	SetAppRuntimeSnapshot(ctx context.Context, arg SetAppRuntimeSnapshotParams) (App, error)
-	// 写入 Hermes 调 manager runtime API 的 app 级 token，明文只在 manifest 渲染时短暂使用。
+	// 首次写入 Hermes 调 manager runtime API 的 app 级 token；并发重复初始化拿不到行，由 service 读取既有 token。
 	SetAppRuntimeToken(ctx context.Context, arg SetAppRuntimeTokenParams) (App, error)
 	SetAppStatus(ctx context.Context, arg SetAppStatusParams) (App, error)
 	// 切换实例绑定的助手版本，并把 applied_version_revision / applied_image_ref 清零。
@@ -221,10 +221,6 @@ type Querier interface {
 	UpdateRuntimeNodeProbeSuccess(ctx context.Context, arg UpdateRuntimeNodeProbeSuccessParams) (RuntimeNode, error)
 	UpdateUserPassword(ctx context.Context, arg UpdateUserPasswordParams) (User, error)
 	UpdateUserProfile(ctx context.Context, arg UpdateUserProfileParams) (User, error)
-	// 插入或更新 (org_id, node_id) 的最近同步状态。
-	// last_success_at 通过 sqlc.arg 显式传入，调用方在 status='synced' 时传 now()，
-	// 其它状态传 NULL 表示保留之前的成功时间（COALESCE 在 SQL 内处理）。
-	UpsertKnowledgeSyncStatus(ctx context.Context, arg UpsertKnowledgeSyncStatusParams) (KnowledgeSyncStatus, error)
 }
 
 var _ Querier = (*Queries)(nil)

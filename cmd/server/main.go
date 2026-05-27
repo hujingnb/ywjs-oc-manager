@@ -35,10 +35,10 @@ import (
 	"oc-manager/internal/auth"
 	"oc-manager/internal/config"
 	"oc-manager/internal/domain"
-	"oc-manager/internal/files"
 	"oc-manager/internal/integrations/agent"
 	"oc-manager/internal/integrations/channel"
 	"oc-manager/internal/integrations/newapi"
+	"oc-manager/internal/integrations/ragflow"
 	"oc-manager/internal/integrations/runtime"
 	managerlog "oc-manager/internal/log"
 	"oc-manager/internal/migrations"
@@ -141,32 +141,17 @@ func runManager(ctx context.Context, cfg config.Config, logOut io.Writer) error 
 	runtimeNodeStore := store.NewRuntimeNodeStore(dbStore)
 	runtimeNodeService := service.NewRuntimeNodeService(runtimeNodeStore, hashTokenSHA256)
 
-	safeRoot, err := newKnowledgeSafeRoot(cfg.App.KnowledgeRoot)
-	if err != nil {
-		return fmt.Errorf("初始化知识库主副本失败: %w", err)
+	var ragflowClient service.RAGFlowKnowledgeClient
+	if cfg.RAGFlow.BaseURL != "" || cfg.RAGFlow.APIKey != "" {
+		ragflowHTTPClient, err := ragflow.NewClient(cfg.RAGFlow.BaseURL, cfg.RAGFlow.APIKey, cfg.RAGFlow.RequestTimeout.Duration)
+		if err != nil {
+			return fmt.Errorf("初始化 RAGFlow 客户端失败: %w", err)
+		}
+		ragflowClient = ragflowHTTPClient
 	}
-	knowledgeMaster := files.NewKnowledgeMaster(safeRoot)
-	knowledgeService := service.NewKnowledgeService(knowledgeMaster)
-	// 同步状态服务：dispatcher 入队时写 pending、worker handler 完成时写 synced/failed、
-	// API 层读取按 org 列出每节点状态供前端展示「重试同步」入口。
-	knowledgeSyncStatusSvc := service.NewKnowledgeSyncStatusService(dbStore.Queries)
-	// reload 协调器:knowledge 改动后给受影响 app 入 app_restart_container job
-	// (带 in-memory debounce),使 Hermes 容器重启后真正读到新主副本。
-	// 单 manager 实例:in-memory state 够用;多实例横向扩展时换 redis SETNX。
-	knowledgeReloader := newKnowledgeReloadCoordinator(dbStore.Queries, redisQueue)
-	knowledgeDispatcher := newKnowledgeSyncDispatcher(dbStore.Queries, redisQueue)
-	knowledgeDispatcher.SetStatusMarker(knowledgeSyncStatusSvc)
-	// 注入主副本读取能力:RetryOrgNode 用它扫所有文件做真正的"全量重推",
-	// 不再是空有状态翻转的 noop。
-	knowledgeDispatcher.SetKnowledgeReader(knowledgeMaster)
-	knowledgeDispatcher.SetReloader(knowledgeReloader)
-	knowledgeService.SetAppStore(dbStore.Queries)
-	knowledgeService.SetSyncDispatcher(knowledgeDispatcher)
-	knowledgeService.SetSyncStatusSource(knowledgeSyncStatusSvc)
-	knowledgeService.SetRetryDispatcher(knowledgeDispatcher)
-	// dispatcher 入队失败时把错误写 audit_logs(target_type=knowledge_sync),
-	// 让"主副本写成功但同步未入队"这类中间态可观测。
-	knowledgeService.SetAuditor(auditService)
+	knowledgeService := service.NewKnowledgeService(dbStore.Queries, ragflowClient)
+	knowledgeService.SetDatasetChunkMethod(cfg.RAGFlow.ChunkMethod)
+	onboardingService.SetKnowledgeDatasetProvisioner(knowledgeService)
 	appService := service.NewAppService(dbStore.Queries)
 	appService.SetJobNotifier(redisQueue)
 	// 注入版本镜像解析器：AppService 计算 version_synced 时需要把版本 image_id 解析成镜像 ref。
@@ -276,6 +261,7 @@ func runManager(ctx context.Context, cfg config.Config, logOut io.Writer) error 
 		// 助手版本服务作为组织 allowlist 校验器：组织创建/编辑时校验所选版本 id 都存在。
 		organizationService.SetVersionValidator(assistantVersionService)
 	}
+	organizationService.SetKnowledgeDatasetProvisioner(knowledgeService)
 	platformOverviewService := service.NewPlatformOverviewService(dbStore.Queries)
 
 	registry := handlers.NewRegistry()
@@ -305,17 +291,14 @@ func runManager(ctx context.Context, cfg config.Config, logOut io.Writer) error 
 			ResolveRuntimeImage: func(imageID string) (string, bool) {
 				return config.ResolveRuntimeImage(cfg.Hermes.RuntimeImages, imageID)
 			},
-			SkillBlobs: service.NewFSSkillBlobStore(cfg.App.DataRoot),
+			SkillBlobs:            service.NewFSSkillBlobStore(cfg.App.DataRoot),
+			ManagerRuntimeBaseURL: cfg.Hermes.ManagerRuntimeBaseURL,
 		},
 	)
-	// runtimeAdapter 同时实现 AppInputUploader (UploadAppInputFile), 在多节点部署
-	// 下把 manifest.yaml + resources/*.md + 知识库主副本上传到目标节点 agent 的
-	// dataRoot/apps/<id>/input/, 容器内 oc-entrypoint 在启动时翻译成 hermes 自有 schema。
+	// runtimeAdapter 同时实现 AppInputUploader (UploadAppInputFile)，在多节点部署
+	// 下把 manifest.yaml + resources/*.md 上传到目标节点 agent 的
+	// dataRoot/apps/<id>/input/，容器内 oc-entrypoint 在启动时翻译成 hermes 自有 schema。
 	appInitHandler.SetAppInputUploader(runtimeAdapter)
-	// 注入主副本知识库读取能力: handler 在写完 manifest + resources 后,
-	// 遍历组织 + 应用主副本目录, 把每个文件原样推送到 input/resources/knowledge/{org,app}/<rel>,
-	// 由镜像 oc-entrypoint 按需 render 成 hermes skill, manager 不再耦合 hermes skill schema。
-	appInitHandler.SetKnowledgeReader(knowledgeMaster)
 	// 注入镜像拉取协调器：phasePullRuntimeImage 通过 imageCoord 在目标 agent 节点直接
 	// pull hermes runtime 镜像，Redis 锁 + Pub/Sub 保证集群内 single-flight + 跨实例进度广播。
 	appInitHandler.SetImagePullCoord(imageCoord)
@@ -350,9 +333,10 @@ func runManager(ctx context.Context, cfg config.Config, logOut io.Writer) error 
 		},
 		service.NewFSSkillBlobStore(cfg.App.DataRoot),
 		handlers.AppInputBuildOptions{
-			PlatformPrompt: cfg.Hermes.SystemPromptTemplate,
-			NewAPIBaseURL:  cfg.NewAPI.BaseURL,
-			DefaultModel:   cfg.Hermes.LLM.DefaultModel,
+			PlatformPrompt:        cfg.Hermes.SystemPromptTemplate,
+			NewAPIBaseURL:         cfg.NewAPI.BaseURL,
+			DefaultModel:          cfg.Hermes.LLM.DefaultModel,
+			ManagerRuntimeBaseURL: cfg.Hermes.ManagerRuntimeBaseURL,
 		},
 	))
 	// 注入 job notifier：restart 检测到镜像变更时入队 app_initialize job 后即时唤醒 worker。
@@ -360,7 +344,7 @@ func runManager(ctx context.Context, cfg config.Config, logOut io.Writer) error 
 	if err := registry.Register("app_restart_container", restartHandler.Handle); err != nil {
 		return fmt.Errorf("注册 app_restart_container handler 失败: %w", err)
 	}
-	if err := registry.Register("app_delete", handlers.NewAppDeleteHandler(dbStore.Queries, runtimeAdapter, newapiFactory, nil).Handle); err != nil {
+	if err := registry.Register("app_delete", handlers.NewAppDeleteHandler(dbStore.Queries, runtimeAdapter, newapiFactory, nil, knowledgeService).Handle); err != nil {
 		return fmt.Errorf("注册 app_delete handler 失败: %w", err)
 	}
 	if err := registry.Register(domain.JobTypeChannelStartLogin, handlers.NewChannelStartLoginHandler(dbStore.Queries, channelRegistry).Handle); err != nil {
@@ -372,18 +356,6 @@ func runManager(ctx context.Context, cfg config.Config, logOut io.Writer) error 
 	channelCheckHandler.SetRestarter(runtimeAdapter)
 	if err := registry.Register(domain.JobTypeChannelCheckBinding, channelCheckHandler.Handle); err != nil {
 		return fmt.Errorf("注册 channel_check_binding handler 失败: %w", err)
-	}
-	knowledgeSyncHandler := handlers.NewKnowledgeSyncHandler(knowledgeMaster, runtimeAdapter)
-	knowledgeSyncHandler.SetStatusWriter(knowledgeSyncStatusSvc)
-	// 注入「按组织列 app」能力:org scope 同步通过它扇出到节点上属于该 org 的每个 app
-	// input 目录(每个 app 都有自己 apps/<id>/input/ 沙箱,oc-entrypoint 仅读各自 app 的)。
-	// 不注入时 org scope 同步只翻状态、不写文件,生产装配必须注入。
-	knowledgeSyncHandler.SetAppLister(dbStore.Queries)
-	// app scope 没有 knowledge_sync_status 表;把完成/失败事件落到 audit_logs
-	// (target_type=app_knowledge_sync),前端审计页面可按 app_id 检索同步历史。
-	knowledgeSyncHandler.SetAuditor(auditService)
-	if err := registry.Register("knowledge_sync_node", knowledgeSyncHandler.Handle); err != nil {
-		return fmt.Errorf("注册 knowledge_sync_node handler 失败: %w", err)
 	}
 	runtimeRefreshHandler := handlers.NewRuntimeRefreshStatusHandler(dbStore.Queries, runtimeAdapter)
 	if err := registry.Register(domain.JobTypeRuntimeRefreshStatus, runtimeRefreshHandler.Handle); err != nil {
@@ -552,11 +524,6 @@ func hashPasswordWithDefault(password string) (string, error) {
 // hashTokenSHA256 用 SHA-256 对 agent token 做不可逆 hash 后存库。
 // runtime node 的 token 不需要密码级强度，但必须保证泄露后也无法直接调用 manager API。
 func hashTokenSHA256(token string) string { return auth.HashOpaqueToken(token) }
-
-func newKnowledgeSafeRoot(root string) (*files.SafeRoot, error) {
-	// 知识库上传上限需要与 nginx client_max_body_size 和前端本地校验保持一致。
-	return files.NewSafeRoot(root, files.KnowledgeMaxFileSize)
-}
 
 // autoMigrate 在 manager-api 启动早期把 schema 推到最新版本。
 //

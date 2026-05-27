@@ -41,12 +41,14 @@ func TestWriteAppInput_WritesManifestAndResources(t *testing.T) {
 	in := AppInputData{
 		AppID: "app-x", AppName: "X", Model: "m",
 		OpenAIAPIKey: "sk-x", OpenAIBaseURL: "http://x",
-		PersonaText:   "Hi {owner_name}",  // 版本内置提示词，含占位符
-		PlatformRule:  "PLT {org_name}",
-		Routing:       map[string]string{"fast": "gpt-4o-mini"},
-		SkillRelPaths: []string{"resources/skills/weather.tar"},
-		OrgName:       "Acme",
-		OwnerName:     "ada",
+		KnowledgeRuntimeBaseURL: "http://manager-api:8080",
+		KnowledgeAppToken:       "runtime-token",
+		PersonaText:             "Hi {owner_name}", // 版本内置提示词，含占位符
+		PlatformRule:            "PLT {org_name}",
+		Routing:                 map[string]string{"fast": "gpt-4o-mini"},
+		SkillRelPaths:           []string{"resources/skills/weather.tar"},
+		OrgName:                 "Acme",
+		OwnerName:               "ada",
 	}
 	require.NoError(t, WriteAppInput(context.Background(), w, "app-x", in))
 
@@ -76,6 +78,10 @@ func TestWriteAppInput_WritesManifestAndResources(t *testing.T) {
 	assert.Contains(t, manifestYAML, "routing:", "manifest v2 应包含 routing")
 	assert.Contains(t, manifestYAML, "skills:", "manifest v2 应包含 skills")
 	assert.Contains(t, manifestYAML, "weather.tar", "manifest skills 应包含 weather.tar")
+	assert.Contains(t, manifestYAML, "knowledge:", "manifest 应包含知识库 runtime 配置")
+	assert.Contains(t, manifestYAML, "runtime_base_url: http://manager-api:8080")
+	assert.Contains(t, manifestYAML, "app_token: runtime-token")
+	assert.NotContains(t, manifestYAML, "ragflow", "manifest 不应暴露 RAGFlow 凭证或目标")
 
 	// manifest.yaml 是最后一个写入（先 resources 后 manifest，避免中间态）
 	assert.Equal(t, "manifest.yaml", w.order[len(w.order)-1])
@@ -98,4 +104,3 @@ func TestWriteAppInput_NoRoutingOrSkills_OmitEmpty(t *testing.T) {
 	assert.NotContains(t, manifestYAML, "routing:", "空 routing 应被 omitempty 省略")
 	assert.NotContains(t, manifestYAML, "skills:", "空 skills 应被 omitempty 省略")
 }
-

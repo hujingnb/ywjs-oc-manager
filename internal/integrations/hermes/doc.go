@@ -6,6 +6,6 @@
 //     等封装（commands.go）
 //   - 微信渠道扫码命令的 docker exec 流式封装 WeixinRunner（wechat_runner.go）
 //
-// 所有 hermes 内部 schema（config.yaml / SOUL.md / skills/kb-*）的渲染
+// 所有 hermes 内部 schema（config.yaml / SOUL.md / skills/oc-kb 等）的渲染
 // 已下沉到镜像内 oc-entrypoint；manager 只写「中性输入」。
 package hermes

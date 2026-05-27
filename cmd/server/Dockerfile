@@ -73,7 +73,7 @@ ARG ALPINE_MIRROR
 # 与 builder 阶段一致, 先把 apk 仓库切到国内镜像再安装。
 RUN sed -i "s|dl-cdn.alpinelinux.org|${ALPINE_MIRROR}|g" /etc/apk/repositories && \
     apk add --no-cache ca-certificates tzdata wget && \
-    mkdir -p /var/lib/oc-manager/data /var/lib/oc-manager/knowledge /etc/manager
+    mkdir -p /var/lib/oc-manager/data /etc/manager
 
 COPY --from=builder /out/oc-manager /usr/local/bin/oc-manager
 COPY --from=builder /out/migrate    /usr/local/bin/migrate

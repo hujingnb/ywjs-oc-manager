@@ -22,9 +22,13 @@ type AppInputData struct {
 	Model         string
 	OpenAIAPIKey  string
 	OpenAIBaseURL string
+	// KnowledgeRuntimeBaseURL 是容器内访问 manager runtime knowledge API 的地址。
+	KnowledgeRuntimeBaseURL string
+	// KnowledgeAppToken 是 app 级 runtime token，只能访问当前实例/组织知识库。
+	KnowledgeAppToken string
 
 	// PersonaText 版本内置提示词（即 version.SystemPrompt），写入 resources/persona.md。
-	PersonaText  string
+	PersonaText string
 	// PlatformRule 平台层规则文本，写入 resources/platform-rules.md。
 	PlatformRule string
 
@@ -40,7 +44,7 @@ type AppInputData struct {
 
 // WriteAppInput 一次性写入 manifest.yaml + resources/persona.md + resources/platform-rules.md。
 // v2：不再写入 resources/organization-rules.md 和 resources/application-rules.md；
-// 知识库文件由 knowledge_sync 链路单独写入 resources/knowledge/{org,app}/。
+// 知识库能力通过 manifest.knowledge + oc-kb runtime skill 接入 manager runtime API。
 //
 // 上传顺序：先写 resources/* 后写 manifest.yaml，最大限度避免 oc-entrypoint
 // 读到「指向 resources 文件已不存在」的中间态。
@@ -76,6 +80,12 @@ func WriteAppInput(ctx context.Context, w AppInputWriter, appID string, in AppIn
 		},
 		Routing: in.Routing,
 	}
+	if in.KnowledgeRuntimeBaseURL != "" && in.KnowledgeAppToken != "" {
+		m.Knowledge = ManifestKnowledge{
+			RuntimeBaseURL: in.KnowledgeRuntimeBaseURL,
+			AppToken:       in.KnowledgeAppToken,
+		}
+	}
 	body, err := MarshalManifestYAML(m)
 	if err != nil {
 		return fmt.Errorf("marshal manifest: %w", err)
@@ -85,4 +95,3 @@ func WriteAppInput(ctx context.Context, w AppInputWriter, appID string, in AppIn
 	}
 	return nil
 }
-

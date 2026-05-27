@@ -50,6 +50,24 @@ func TestOnboardMemberCommitsOnSuccess(t *testing.T) {
 	require.Equal(t, "归属成员 Alice，渠道 微信", store.auditLogs[1].DetailMessage.String)
 }
 
+// TestOnboardMemberEnsuresKnowledgeDataset 验证成员引导成功创建实例后会预创建实例级 RAGFlow dataset。
+func TestOnboardMemberEnsuresKnowledgeDataset(t *testing.T) {
+	store := newOnboardingStub(t)
+	tx := &txRunnerStub{store: store}
+	kb := &knowledgeDatasetProvisionerStub{}
+	svc := NewMemberOnboardingService(tx, fakeHash, defaultTestSelector())
+	svc.SetKnowledgeDatasetProvisioner(kb)
+
+	result, err := svc.OnboardMember(context.Background(), orgOnboardingAdmin(), testOrgID, OnboardMemberInput{
+		Username: "alice", DisplayName: "Alice", Password: "pwd", AppName: "alice-bot",
+		VersionID: testVersionID,
+	})
+	require.NoError(t, err)
+
+	require.Len(t, kb.apps, 1)
+	assert.Equal(t, result.App.ID, uuidToString(kb.apps[0].ID))
+}
+
 // TestOnboardMemberRollsBackWhenAppCreationFails 验证引导成员回滚回退当应用Creation失败的预期行为场景。
 func TestOnboardMemberRollsBackWhenAppCreationFails(t *testing.T) {
 	store := newOnboardingStub(t)

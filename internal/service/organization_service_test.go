@@ -76,6 +76,29 @@ func TestOrganizationServiceCreateProvisionsNewAPIUser(t *testing.T) {
 	assert.Equal(t, prov.lastCreate.Password, creds.Password)
 }
 
+// TestOrganizationServiceCreateEnsuresKnowledgeDataset 验证组织创建成功后会预创建组织级 RAGFlow dataset。
+func TestOrganizationServiceCreateEnsuresKnowledgeDataset(t *testing.T) {
+	store := &organizationStoreStub{}
+	prov := &fakeProvisioner{user: newapi.User{ID: 42}, accessToken: "access-tok-xyz"}
+	kb := &knowledgeDatasetProvisionerStub{}
+	svc := NewOrganizationService(store, prov, mustCipher(t), nil)
+	svc.SetVersionValidator(fakeVersionValidator{known: map[string]bool{}})
+	svc.SetKnowledgeDatasetProvisioner(kb)
+	svc.hashPassword = fakeHash
+
+	result, err := svc.CreateOrganization(context.Background(), auth.Principal{Role: domain.UserRolePlatformAdmin}, OrganizationInput{
+		Name:             "测试组织",
+		Code:             "test-org",
+		AdminUsername:    "org-admin",
+		AdminDisplayName: "组织管理员",
+		AdminPassword:    "secret-password",
+	})
+	require.NoError(t, err)
+
+	require.Len(t, kb.orgs, 1)
+	assert.Equal(t, result.ID, uuidToString(kb.orgs[0].ID))
+}
+
 // TestProvisionNewAPIUserPersistsUsername 校验组织创建链路把 new-api 侧实际 username
 // 显式落到 organizations.newapi_username 字段。new-api username 是 org.Code 加随机
 // 后缀派生值、不再等于裸 code，因此下游 usage 查询必须读该列定位 new-api 账号，
@@ -228,10 +251,10 @@ func TestBuildNewAPIUsername(t *testing.T) {
 		name string // 子场景说明
 		code string // 输入组织 code
 	}{
-		{name: "短 code 完整保留为前缀", code: "acme"},                        // 4+1+6=11，未超上限
-		{name: "13 位 code 恰好用满前缀预算", code: "abcdefghijklm"},            // 13+1+6=20，等于上限
-		{name: "超长 code 前缀被截断", code: "abcdefghijklmnopqrstuvwxyz"},   // 26 位，前缀截到 13
-		{name: "截断点落在短横线上不产生双横线", code: "abc-def-ghij-klmn"}, // 截到 13 位会以 "-" 结尾
+		{name: "短 code 完整保留为前缀", code: "acme"},                      // 4+1+6=11，未超上限
+		{name: "13 位 code 恰好用满前缀预算", code: "abcdefghijklm"},         // 13+1+6=20，等于上限
+		{name: "超长 code 前缀被截断", code: "abcdefghijklmnopqrstuvwxyz"}, // 26 位，前缀截到 13
+		{name: "截断点落在短横线上不产生双横线", code: "abc-def-ghij-klmn"},        // 截到 13 位会以 "-" 结尾
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {

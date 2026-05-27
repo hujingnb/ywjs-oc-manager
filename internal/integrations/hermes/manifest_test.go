@@ -23,6 +23,7 @@ func TestMarshalManifestYAML_StableShape(t *testing.T) {
 				Platform: "resources/platform-rules.md",
 			},
 		},
+		Knowledge: ManifestKnowledge{RuntimeBaseURL: "http://manager-api:8080", AppToken: "runtime-token"},
 	}
 
 	b, err := MarshalManifestYAML(m)
@@ -35,6 +36,9 @@ func TestMarshalManifestYAML_StableShape(t *testing.T) {
 
 	// routing / skills 字段因 omitempty 不应出现在 yaml 中
 	yaml_str := string(b)
+	assert.Contains(t, yaml_str, "knowledge:", "runtime 知识库配置应输出到 manifest")
+	assert.Contains(t, yaml_str, "runtime_base_url: http://manager-api:8080", "应包含 manager runtime API 地址")
+	assert.Contains(t, yaml_str, "app_token: runtime-token", "应包含 app runtime token")
 	assert.NotContains(t, yaml_str, "routing:", "空 routing 应被 omitempty 省略")
 	assert.NotContains(t, yaml_str, "skills:", "空 skills 应被 omitempty 省略")
 }

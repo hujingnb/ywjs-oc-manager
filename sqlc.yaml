@@ -30,6 +30,7 @@ sql:
       - internal/migrations/000027_drop_apps_model_columns.up.sql
       - internal/migrations/000028_drop_organizations_model_id.up.sql
       - internal/migrations/000029_ragflow_knowledge.up.sql
+      - internal/migrations/000030_drop_local_knowledge_sync.up.sql
     queries: internal/store/queries
     gen:
       go:

@@ -1060,7 +1060,10 @@ UPDATE apps
 SET runtime_token_hash = $2,
     runtime_token_ciphertext = $3,
     updated_at = now()
-WHERE id = $1 AND deleted_at IS NULL
+WHERE id = $1
+  AND deleted_at IS NULL
+  AND runtime_token_hash IS NULL
+  AND runtime_token_ciphertext IS NULL
 RETURNING id, org_id, owner_user_id, runtime_node_id, name, description, status, container_id, container_name, newapi_key_id, newapi_key_ciphertext, api_key_status, created_at, updated_at, deleted_at, runtime_snapshot_json, runtime_snapshot_at, restart_policy_json, health_state_json, progress_current, progress_total, last_error_status, last_error_message, runtime_image_ref, runtime_image_sha256, newapi_key_name, version_id, applied_version_revision, applied_image_ref, runtime_token_hash, runtime_token_ciphertext
 `
 
@@ -1070,7 +1073,7 @@ type SetAppRuntimeTokenParams struct {
 	RuntimeTokenCiphertext pgtype.Text `db:"runtime_token_ciphertext" json:"runtime_token_ciphertext"`
 }
 
-// 写入 Hermes 调 manager runtime API 的 app 级 token，明文只在 manifest 渲染时短暂使用。
+// 首次写入 Hermes 调 manager runtime API 的 app 级 token；并发重复初始化拿不到行，由 service 读取既有 token。
 func (q *Queries) SetAppRuntimeToken(ctx context.Context, arg SetAppRuntimeTokenParams) (App, error) {
 	row := q.db.QueryRow(ctx, setAppRuntimeToken, arg.ID, arg.RuntimeTokenHash, arg.RuntimeTokenCiphertext)
 	var i App

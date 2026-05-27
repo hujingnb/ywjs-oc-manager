@@ -59,6 +59,11 @@ type AppArchiver interface {
 	ArchiveApp(ctx context.Context, nodeID, appID string) error
 }
 
+// AppKnowledgeCleaner 抽象 app_delete 对实例私有知识库的清理能力。
+type AppKnowledgeCleaner interface {
+	DeleteAppDataset(ctx context.Context, appID pgtype.UUID) error
+}
+
 // payload 描述四个 handler 共享的输入。
 type appOpPayload struct {
 	AppID string `json:"app_id"`
@@ -415,7 +420,8 @@ func (h *AppRestartContainerHandler) Handle(ctx context.Context, job sqlc.Job) e
 //  1. 停止并删除容器（缺 container_id 时跳过）；
 //  2. 禁用 new-api token（已有 newapi_key_id 时执行）；
 //  3. agent 上把应用工作目录清理（fileOps != nil 时执行；后续 task 升级为归档）；
-//  4. 软删 apps 行。
+//  4. 清理实例私有 RAGFlow dataset（knowledge != nil 时执行）；
+//  5. 软删 apps 行。
 //
 // 任意一步失败立即冒泡，由 worker 重试；重试时各步骤需自行幂等。
 type AppDeleteHandler struct {
@@ -423,11 +429,16 @@ type AppDeleteHandler struct {
 	containers ContainerLifecycle
 	factory    NewAPIClientFactory
 	fileOps    AppDeleteFileOps
+	knowledge  AppKnowledgeCleaner
 }
 
 // NewAppDeleteHandler 创建删除应用 handler，允许 new-api 与文件操作依赖按环境为空。
-func NewAppDeleteHandler(store AppRuntimeStore, containers ContainerLifecycle, factory NewAPIClientFactory, fileOps AppDeleteFileOps) *AppDeleteHandler {
-	return &AppDeleteHandler{store: store, containers: containers, factory: factory, fileOps: fileOps}
+func NewAppDeleteHandler(store AppRuntimeStore, containers ContainerLifecycle, factory NewAPIClientFactory, fileOps AppDeleteFileOps, cleaners ...AppKnowledgeCleaner) *AppDeleteHandler {
+	var knowledge AppKnowledgeCleaner
+	if len(cleaners) > 0 {
+		knowledge = cleaners[0]
+	}
+	return &AppDeleteHandler{store: store, containers: containers, factory: factory, fileOps: fileOps, knowledge: knowledge}
 }
 
 // Handle 执行 app_delete job；任一步失败都返回错误交给 worker 重试。
@@ -488,6 +499,12 @@ func (h *AppDeleteHandler) Handle(ctx context.Context, job sqlc.Job) error {
 			}
 		} else if err := h.fileOps.DeleteAppPath(ctx, nodeID, payload.AppID); err != nil {
 			return fmt.Errorf("清理应用工作目录失败: %w", err)
+		}
+	}
+
+	if h.knowledge != nil {
+		if err := h.knowledge.DeleteAppDataset(ctx, id); err != nil {
+			return fmt.Errorf("清理应用 RAGFlow dataset 失败: %w", err)
 		}
 	}
 

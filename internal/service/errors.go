@@ -72,6 +72,9 @@ var ErrKnowledgeForbidden = errors.New("无权访问该知识库")
 // ErrKnowledgeMissing 表示知识库主副本或目标节点配置缺失。
 var ErrKnowledgeMissing = errors.New("知识库主副本未配置")
 
+// ErrKnowledgeDatasetCreating 表示 RAGFlow dataset 已由并发请求占位创建，当前请求应稍后重试。
+var ErrKnowledgeDatasetCreating = errors.New("知识库正在初始化")
+
 // 充值 -------------------------------------------------------------
 // 来源：原 recharge_service.go
 
