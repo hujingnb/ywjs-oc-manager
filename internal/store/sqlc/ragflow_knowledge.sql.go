@@ -437,23 +437,48 @@ func (q *Queries) ListRAGFlowDocumentsByScope(ctx context.Context, arg ListRAGFl
 }
 
 const listRAGFlowDocumentsNeedingRefresh = `-- name: ListRAGFlowDocumentsNeedingRefresh :many
-SELECT id, dataset_id, scope_type, org_id, app_id, ragflow_document_id, name, size_bytes, mime_type, suffix, parse_status, progress, last_error, created_by, created_at, updated_at
-FROM ragflow_documents
-WHERE parse_status IN ('queued', 'running')
-ORDER BY updated_at ASC
+SELECT d.id, d.dataset_id, d.scope_type, d.org_id, d.app_id, d.ragflow_document_id, d.name, d.size_bytes, d.mime_type, d.suffix, d.parse_status, d.progress, d.last_error, d.created_by, d.created_at, d.updated_at, ds.ragflow_dataset_id::text AS remote_dataset_id
+FROM ragflow_documents d
+JOIN ragflow_datasets ds ON ds.id = d.dataset_id
+WHERE d.parse_status IN ('queued', 'running')
+  AND ds.ragflow_dataset_id IS NOT NULL
+ORDER BY d.updated_at ASC
 LIMIT $1
 `
 
-// 找出需要刷新解析状态的 document，按最久未更新优先。
-func (q *Queries) ListRAGFlowDocumentsNeedingRefresh(ctx context.Context, limit int32) ([]RagflowDocument, error) {
+type ListRAGFlowDocumentsNeedingRefreshRow struct {
+	ID                pgtype.UUID        `db:"id" json:"id"`
+	DatasetID         pgtype.UUID        `db:"dataset_id" json:"dataset_id"`
+	ScopeType         string             `db:"scope_type" json:"scope_type"`
+	OrgID             pgtype.UUID        `db:"org_id" json:"org_id"`
+	AppID             pgtype.UUID        `db:"app_id" json:"app_id"`
+	RagflowDocumentID string             `db:"ragflow_document_id" json:"ragflow_document_id"`
+	Name              string             `db:"name" json:"name"`
+	SizeBytes         int64              `db:"size_bytes" json:"size_bytes"`
+	MimeType          pgtype.Text        `db:"mime_type" json:"mime_type"`
+	Suffix            pgtype.Text        `db:"suffix" json:"suffix"`
+	ParseStatus       string             `db:"parse_status" json:"parse_status"`
+	Progress          int32              `db:"progress" json:"progress"`
+	LastError         pgtype.Text        `db:"last_error" json:"last_error"`
+	CreatedBy         string             `db:"created_by" json:"created_by"`
+	CreatedAt         pgtype.Timestamptz `db:"created_at" json:"created_at"`
+	UpdatedAt         pgtype.Timestamptz `db:"updated_at" json:"updated_at"`
+	RemoteDatasetID   string             `db:"remote_dataset_id" json:"remote_dataset_id"`
+}
+
+// 找出需要刷新解析状态的 document，按最久未更新优先；
+// 同时连出所属 RAGFlow dataset 的远端 ID，供后台刷新任务直接调 RAGFlow ListDocuments。
+// 远端 dataset 尚未创建（ragflow_dataset_id IS NULL）的文档不会出现：
+// 此类文档此时本就无法从 RAGFlow 拉取状态，等 dataset 创建完成后再轮询即可。
+func (q *Queries) ListRAGFlowDocumentsNeedingRefresh(ctx context.Context, limit int32) ([]ListRAGFlowDocumentsNeedingRefreshRow, error) {
 	rows, err := q.db.Query(ctx, listRAGFlowDocumentsNeedingRefresh, limit)
 	if err != nil {
 		return nil, err
 	}
 	defer rows.Close()
-	items := []RagflowDocument{}
+	items := []ListRAGFlowDocumentsNeedingRefreshRow{}
 	for rows.Next() {
-		var i RagflowDocument
+		var i ListRAGFlowDocumentsNeedingRefreshRow
 		if err := rows.Scan(
 			&i.ID,
 			&i.DatasetID,
@@ -471,6 +496,7 @@ func (q *Queries) ListRAGFlowDocumentsNeedingRefresh(ctx context.Context, limit 
 			&i.CreatedBy,
 			&i.CreatedAt,
 			&i.UpdatedAt,
+			&i.RemoteDatasetID,
 		); err != nil {
 			return nil, err
 		}

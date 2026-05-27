@@ -462,6 +462,15 @@ func runManager(ctx context.Context, cfg config.Config, logOut io.Writer) error 
 		return err
 	})
 
+	// ragflowParseStatusTask 周期把 RAGFlow 端的解析状态回写本地，
+	// 取代旧"列表请求时同步刷新"的策略：无人浏览列表时状态也能收敛。
+	// 仅在 RAGFlow 已配置时启用，避免 nil ragflowClient 导致 tick 空跑后还触发 panic。
+	var ragflowParseStatusTask *service.PeriodicReconciler
+	if ragflowClient != nil {
+		ragflowParseStatusRefresher := service.NewRagflowParseStatusRefresher(dbStore.Queries, ragflowClient)
+		ragflowParseStatusTask = service.NewPeriodicReconciler("ragflow_parse_status_refresh", 30*time.Second, ragflowParseStatusRefresher.Tick)
+	}
+
 	eg, gctx := errgroup.WithContext(rootCtx)
 
 	eg.Go(func() error {
@@ -492,6 +501,9 @@ func runManager(ctx context.Context, cfg config.Config, logOut io.Writer) error 
 	eg.Go(func() error { return runtimeRefreshTask.Run(gctx, logger) })
 	eg.Go(func() error { return healthCheckTask.Run(gctx, logger) })
 	eg.Go(func() error { return resourceCleanupTask.Run(gctx, logger) })
+	if ragflowParseStatusTask != nil {
+		eg.Go(func() error { return ragflowParseStatusTask.Run(gctx, logger) })
+	}
 	eg.Go(func() error {
 		<-gctx.Done()
 		shutdownCtx, shutdownCancel := context.WithTimeout(context.Background(), 30*time.Second)

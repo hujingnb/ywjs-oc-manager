@@ -325,12 +325,15 @@ Hermes 上传：
 
 ## 后台任务与错误处理
 
-新增状态刷新任务：
+新增状态刷新任务 `ragflow_parse_status_refresh`：
 
-- 扫描 `parse_status in ('queued', 'running')` 的文档；
-- 调 RAGFlow 文档列表 / 状态接口刷新进度；
-- 到达 completed / failed / stopped 后停止轮询；
-- 失败写 `last_error`，保留下一轮重试。
+- 周期 30 秒触发，批量扫描 `parse_status in ('queued', 'running')` 的文档（默认 100 条 / 轮）；
+- 按所属远端 dataset 分组，每个 dataset 只调用一次 RAGFlow `ListDocuments`，减少请求次数；
+- 远端状态归一化后回写本地 `parse_status` 与 `progress`；到达 completed / failed / stopped 后下一轮不再被选中；
+- 单 dataset 拉取失败时，组内文档保留原 `parse_status`、把失败原因写入 `last_error`，等下一轮重试，其他 dataset 不受影响；
+- 远端 ListDocuments 中找不到的文档视为外部已删除，本地标记 failed 并写入提示，避免列表永远 stuck running。
+
+列表请求只读本地缓存，不再向 RAGFlow 同步拉状态，避免列表延迟受 RAGFlow 可用性影响，也避免无人查看列表时状态永不刷新。
 
 错误策略：
 

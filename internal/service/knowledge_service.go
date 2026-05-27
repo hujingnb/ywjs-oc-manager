@@ -392,7 +392,8 @@ func (s *KnowledgeService) listDocuments(ctx context.Context, dataset sqlc.Ragfl
 	if err != nil {
 		return KnowledgeListResult{}, fmt.Errorf("查询知识库文件列表失败: %w", err)
 	}
-	items = s.refreshDocumentStatuses(ctx, dataset, items)
+	// 解析状态由后台任务 ragflow_parse_status_refresh 周期回写，
+	// 列表请求只读本地缓存，避免每次拉列表都打 RAGFlow，且不会因 RAGFlow 临时不可用让列表 500。
 	total, err := s.store.CountRAGFlowDocumentsByScope(ctx, sqlc.CountRAGFlowDocumentsByScopeParams{
 		ScopeType:   params.ScopeType,
 		OrgID:       params.OrgID,
@@ -515,47 +516,6 @@ func (s *KnowledgeService) reparseDocument(ctx context.Context, dataset sqlc.Rag
 		return KnowledgeDocumentResult{}, fmt.Errorf("更新知识库解析状态失败: %w", err)
 	}
 	return toKnowledgeDocumentResult(row), nil
-}
-
-func (s *KnowledgeService) refreshDocumentStatuses(ctx context.Context, dataset sqlc.RagflowDataset, items []sqlc.RagflowDocument) []sqlc.RagflowDocument {
-	if len(items) == 0 {
-		return items
-	}
-	remoteDatasetID, err := requireRemoteDatasetID(dataset)
-	if err != nil {
-		return items
-	}
-	remoteDocs, _, err := s.ragflowClient().ListDocuments(ctx, remoteDatasetID, 1, 1000, "", "")
-	if err != nil {
-		return items
-	}
-	remoteByID := make(map[string]ragflow.Document, len(remoteDocs))
-	for _, remote := range remoteDocs {
-		remoteByID[remote.ID] = remote
-	}
-	refreshed := append([]sqlc.RagflowDocument(nil), items...)
-	for i, item := range refreshed {
-		remote, ok := remoteByID[item.RagflowDocumentID]
-		if !ok {
-			continue
-		}
-		status := normalizeRAGFlowRun(remote.Run)
-		progress := progressForStatus(status)
-		if status == item.ParseStatus && progress == item.Progress {
-			continue
-		}
-		row, err := s.store.UpdateRAGFlowDocumentParseStatus(ctx, sqlc.UpdateRAGFlowDocumentParseStatusParams{
-			ID:          item.ID,
-			ParseStatus: status,
-			Progress:    progress,
-			LastError:   item.LastError,
-		})
-		if err != nil {
-			continue
-		}
-		refreshed[i] = row
-	}
-	return refreshed
 }
 
 func searchHitsFromChunks(scope string, chunks []ragflow.RetrievalChunk) []KnowledgeSearchHit {

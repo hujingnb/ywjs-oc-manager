@@ -133,9 +133,14 @@ DELETE FROM ragflow_documents
 WHERE id = $1;
 
 -- name: ListRAGFlowDocumentsNeedingRefresh :many
--- 找出需要刷新解析状态的 document，按最久未更新优先。
-SELECT *
-FROM ragflow_documents
-WHERE parse_status IN ('queued', 'running')
-ORDER BY updated_at ASC
+-- 找出需要刷新解析状态的 document，按最久未更新优先；
+-- 同时连出所属 RAGFlow dataset 的远端 ID，供后台刷新任务直接调 RAGFlow ListDocuments。
+-- 远端 dataset 尚未创建（ragflow_dataset_id IS NULL）的文档不会出现：
+-- 此类文档此时本就无法从 RAGFlow 拉取状态，等 dataset 创建完成后再轮询即可。
+SELECT d.*, ds.ragflow_dataset_id::text AS remote_dataset_id
+FROM ragflow_documents d
+JOIN ragflow_datasets ds ON ds.id = d.dataset_id
+WHERE d.parse_status IN ('queued', 'running')
+  AND ds.ragflow_dataset_id IS NOT NULL
+ORDER BY d.updated_at ASC
 LIMIT $1;

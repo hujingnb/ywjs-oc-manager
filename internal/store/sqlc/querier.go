@@ -134,8 +134,11 @@ type Querier interface {
 	ListOrganizations(ctx context.Context, arg ListOrganizationsParams) ([]Organization, error)
 	// 扁平列出某个组织或实例知识库文件，支持按状态和文件名过滤。
 	ListRAGFlowDocumentsByScope(ctx context.Context, arg ListRAGFlowDocumentsByScopeParams) ([]RagflowDocument, error)
-	// 找出需要刷新解析状态的 document，按最久未更新优先。
-	ListRAGFlowDocumentsNeedingRefresh(ctx context.Context, limit int32) ([]RagflowDocument, error)
+	// 找出需要刷新解析状态的 document，按最久未更新优先；
+	// 同时连出所属 RAGFlow dataset 的远端 ID，供后台刷新任务直接调 RAGFlow ListDocuments。
+	// 远端 dataset 尚未创建（ragflow_dataset_id IS NULL）的文档不会出现：
+	// 此类文档此时本就无法从 RAGFlow 拉取状态，等 dataset 创建完成后再轮询即可。
+	ListRAGFlowDocumentsNeedingRefresh(ctx context.Context, limit int32) ([]ListRAGFlowDocumentsNeedingRefreshRow, error)
 	ListReadyJobs(ctx context.Context, limit int32) ([]Job, error)
 	ListRechargeRecordsByOrg(ctx context.Context, arg ListRechargeRecordsByOrgParams) ([]RechargeRecord, error)
 	// 列出当前期望持有 runtime 容器的应用，供 scheduler 周期 dispatch

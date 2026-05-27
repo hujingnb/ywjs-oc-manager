@@ -136,22 +136,28 @@ func TestRuntimeSearchAppResultsFirst(t *testing.T) {
 	assert.Equal(t, "org-doc", result.Results[2].DocumentID)
 }
 
-// TestRAGFlowKnowledgeListRefreshesParseStatus 验证列表读取时从 RAGFlow 刷新解析状态，页面轮询才能看到异步解析进展。
-func TestRAGFlowKnowledgeListRefreshesParseStatus(t *testing.T) {
+// TestRAGFlowKnowledgeListReturnsCachedStatus 验证列表请求只读取本地缓存，不向 RAGFlow 拉取最新解析状态。
+// 解析状态推进交由独立的后台任务 RagflowParseStatusRefresher，列表此处只反映 DB 现状，
+// 避免每次拉列表都打 RAGFlow，也避免 RAGFlow 临时不可用让列表 5xx。
+func TestRAGFlowKnowledgeListReturnsCachedStatus(t *testing.T) {
 	svc, store, rf := newRAGFlowKnowledgeTestService(t)
 	doc := testDocument(t, "org", "policy.md", store.orgDataset.ID)
 	doc.ParseStatus = "running"
 	doc.Progress = 0
 	store.docs[testKnowledgeDocument] = doc
+	// 即使远端已经完成，列表仍应返回本地 running 状态，由后台任务负责后续推进。
 	rf.listDocuments = []ragflow.Document{{ID: "remote-doc-1", Name: "policy.md", Run: "DONE"}}
+	rf.listDocumentsCalls = 0
 
 	result, err := svc.ListOrg(context.Background(), orgKnowledgeAdmin(), testKnowledgeOrg, 1, 50, "", "")
 	require.NoError(t, err)
 
 	require.Len(t, result.Items, 1)
-	assert.Equal(t, "completed", result.Items[0].ParseStatus)
-	assert.Equal(t, int32(100), result.Items[0].Progress)
-	assert.Equal(t, "completed", store.docs[testKnowledgeDocument].ParseStatus)
+	assert.Equal(t, "running", result.Items[0].ParseStatus)
+	assert.Equal(t, int32(0), result.Items[0].Progress)
+	assert.Equal(t, "running", store.docs[testKnowledgeDocument].ParseStatus)
+	// 关键断言：列表流程不应触发 RAGFlow ListDocuments。
+	assert.Zero(t, rf.listDocumentsCalls, "列表请求不应调 RAGFlow ListDocuments")
 }
 
 // TestNormalizeRAGFlowRunAcceptsNumericAndObservedValues 验证 RAGFlow 文档解析状态兼容官方数字枚举
@@ -712,6 +718,7 @@ type fakeRAGFlowKnowledgeClient struct {
 	retrieveChunksByDataset map[string][]ragflow.RetrievalChunk
 	retrieveCalls           []ragflowRetrieveCall
 	listDocuments           []ragflow.Document
+	listDocumentsCalls      int
 }
 
 type ragflowCreateDatasetCall struct {
@@ -777,6 +784,7 @@ func (f *fakeRAGFlowKnowledgeClient) ParseDocuments(_ context.Context, datasetID
 }
 
 func (f *fakeRAGFlowKnowledgeClient) ListDocuments(context.Context, string, int32, int32, string, string) ([]ragflow.Document, int32, error) {
+	f.listDocumentsCalls++
 	return f.listDocuments, int32(len(f.listDocuments)), nil
 }
 
