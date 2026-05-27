@@ -6,6 +6,7 @@ import (
 	"io"
 	"net/http"
 	"net/http/httptest"
+	"strconv"
 	"testing"
 
 	"github.com/gin-gonic/gin"
@@ -23,6 +24,8 @@ type knowledgeServiceStub struct {
 	listOrgErr    error
 	saveOrgResult service.KnowledgeDocumentResult
 	saveOrgErr    error
+	saveOrgCalls  int
+	saveAppCalls  int
 	reparseOrgErr error
 	openContent   string
 	openSize      int64
@@ -36,6 +39,7 @@ func (s *knowledgeServiceStub) ListOrg(_ context.Context, _ auth.Principal, _ st
 }
 
 func (s *knowledgeServiceStub) SaveOrgFile(_ context.Context, _ auth.Principal, _, _ string, _ io.Reader, _ int64) (service.KnowledgeDocumentResult, error) {
+	s.saveOrgCalls++
 	return s.saveOrgResult, s.saveOrgErr
 }
 
@@ -59,6 +63,7 @@ func (s *knowledgeServiceStub) ListApp(context.Context, auth.Principal, string, 
 }
 
 func (s *knowledgeServiceStub) SaveAppFile(context.Context, auth.Principal, string, string, io.Reader, int64) (service.KnowledgeDocumentResult, error) {
+	s.saveAppCalls++
 	return service.KnowledgeDocumentResult{}, nil
 }
 
@@ -141,6 +146,22 @@ func TestKnowledgeUploadOrgRequiresFilename(t *testing.T) {
 	router.ServeHTTP(w, req)
 
 	assert.Equal(t, http.StatusBadRequest, w.Code)
+}
+
+// TestKnowledgeUploadOrgRejectsOversizedBody 验证后端在调用 service 前拒绝超过 100MB 的组织知识库上传。
+func TestKnowledgeUploadOrgRejectsOversizedBody(t *testing.T) {
+	stub := &knowledgeServiceStub{}
+	router := newKnowledgeTestRouter(t, stub)
+
+	w := httptest.NewRecorder()
+	req := httptest.NewRequest(http.MethodPost, "/api/v1/organizations/org-1/knowledge?filename=big.md", bytes.NewBufferString("x"))
+	req.Header.Set("Content-Length", strconv.FormatInt(maxKnowledgeUploadBytes+1, 10))
+	req = withPrincipal(req, auth.Principal{UserID: "u1", Role: domain.UserRoleOrgAdmin, OrgID: "org-1"})
+	router.ServeHTTP(w, req)
+
+	assert.Equal(t, http.StatusBadRequest, w.Code)
+	assert.Contains(t, w.Body.String(), "单文件最多支持 100MB")
+	assert.Equal(t, 0, stub.saveOrgCalls)
 }
 
 // TestKnowledgeReparseOrgRequiresDocumentID 验证重解析必须通过路由携带 documentId，未知 document 映射为 404。

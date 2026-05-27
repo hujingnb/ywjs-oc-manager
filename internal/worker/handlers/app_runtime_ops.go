@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"log/slog"
 	"strconv"
 	"time"
 
@@ -461,9 +462,7 @@ func (h *AppDeleteHandler) Handle(ctx context.Context, job sqlc.Job) error {
 		}
 		return fmt.Errorf("查询应用失败: %w", err)
 	}
-	if app.DeletedAt.Valid {
-		return nil
-	}
+	alreadyDeleted := app.DeletedAt.Valid
 
 	nodeID := uuidToString(app.RuntimeNodeID)
 	if app.ContainerID.String != "" {
@@ -504,10 +503,17 @@ func (h *AppDeleteHandler) Handle(ctx context.Context, job sqlc.Job) error {
 
 	if h.knowledge != nil {
 		if err := h.knowledge.DeleteAppDataset(ctx, id); err != nil {
-			return fmt.Errorf("清理应用 RAGFlow dataset 失败: %w", err)
+			// RAGFlow dataset 是外部派生资源，删除失败不能阻断本地应用下线；
+			// 后续可通过 ragflow_datasets 状态和运维脚本补偿清理。
+			slog.WarnContext(ctx, "清理应用 RAGFlow dataset 失败", "app_id", payload.AppID, "error", err)
 		}
 	}
 
+	if alreadyDeleted {
+		// 删除成员会先软删应用再入队 app_delete；此处仍要清理容器、key、目录和 RAGFlow dataset，
+		// 但不再重复执行 SoftDeleteApp，避免把已删除行当作错误。
+		return nil
+	}
 	if _, err := h.store.SoftDeleteApp(ctx, id); err != nil {
 		return fmt.Errorf("软删应用失败: %w", err)
 	}

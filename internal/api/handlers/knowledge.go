@@ -35,6 +35,12 @@ type knowledgeService interface {
 	ReparseAppFile(ctx context.Context, principal auth.Principal, appID, documentID string) (service.KnowledgeDocumentResult, error)
 }
 
+const (
+	// maxKnowledgeUploadBytes 是 manager 知识库上传的服务端硬上限，与前端 100MB 提示保持一致。
+	maxKnowledgeUploadBytes            int64 = 100 * 1024 * 1024
+	maxKnowledgeMultipartOverheadBytes int64 = 1 * 1024 * 1024
+)
+
 // NewKnowledgeHandler 创建 handler。
 func NewKnowledgeHandler(svc knowledgeService) *KnowledgeHandler {
 	return &KnowledgeHandler{service: svc}
@@ -105,7 +111,10 @@ func (h *KnowledgeHandler) SaveOrg(c *gin.Context) {
 		c.JSON(http.StatusBadRequest, apierror.New("BAD_REQUEST", "缺少 filename 参数"))
 		return
 	}
-	size, _ := strconv.ParseInt(c.GetHeader("Content-Length"), 10, 64)
+	size, ok := prepareKnowledgeOctetStreamUpload(c)
+	if !ok {
+		return
+	}
 	result, err := h.service.SaveOrgFile(c.Request.Context(), principalFromCtx(c), c.Param("orgId"), filename, c.Request.Body, size)
 	if err != nil {
 		writeKnowledgeError(c, err)
@@ -233,7 +242,10 @@ func (h *KnowledgeHandler) SaveApp(c *gin.Context) {
 		c.JSON(http.StatusBadRequest, apierror.New("BAD_REQUEST", "缺少 filename 参数"))
 		return
 	}
-	size, _ := strconv.ParseInt(c.GetHeader("Content-Length"), 10, 64)
+	size, ok := prepareKnowledgeOctetStreamUpload(c)
+	if !ok {
+		return
+	}
 	result, err := h.service.SaveAppFile(c.Request.Context(), principalFromCtx(c), c.Param("appId"), filename, c.Request.Body, size)
 	if err != nil {
 		writeKnowledgeError(c, err)
@@ -337,6 +349,28 @@ func queryKnowledgeInt32(c *gin.Context, key string, fallback int32) int32 {
 		return fallback
 	}
 	return int32(value)
+}
+
+func prepareKnowledgeOctetStreamUpload(c *gin.Context) (int64, bool) {
+	size := requestContentLength(c)
+	if size > maxKnowledgeUploadBytes {
+		c.JSON(http.StatusBadRequest, apierror.New("BAD_REQUEST", "单文件最多支持 100MB"))
+		return size, false
+	}
+	c.Request.Body = http.MaxBytesReader(c.Writer, c.Request.Body, maxKnowledgeUploadBytes)
+	return size, true
+}
+
+func requestContentLength(c *gin.Context) int64 {
+	if raw := c.GetHeader("Content-Length"); raw != "" {
+		if size, err := strconv.ParseInt(raw, 10, 64); err == nil {
+			return size
+		}
+	}
+	if c.Request.ContentLength > 0 {
+		return c.Request.ContentLength
+	}
+	return 0
 }
 
 func writeKnowledgeError(c *gin.Context, err error) {

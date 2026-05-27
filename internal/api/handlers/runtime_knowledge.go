@@ -88,9 +88,19 @@ func (h *RuntimeKnowledgeHandler) AddFile(c *gin.Context) {
 		c.JSON(http.StatusUnauthorized, apierror.New("INVALID_APP_TOKEN", "缺少 runtime token"))
 		return
 	}
+	maxBodyBytes := maxKnowledgeUploadBytes + maxKnowledgeMultipartOverheadBytes
+	if requestContentLength(c) > maxBodyBytes {
+		c.JSON(http.StatusBadRequest, apierror.New("BAD_REQUEST", "单文件最多支持 100MB"))
+		return
+	}
+	c.Request.Body = http.MaxBytesReader(c.Writer, c.Request.Body, maxBodyBytes)
 	file, err := c.FormFile("file")
 	if err != nil {
 		c.JSON(http.StatusBadRequest, apierror.New("BAD_REQUEST", "缺少 file 字段"))
+		return
+	}
+	if file.Size > maxKnowledgeUploadBytes {
+		c.JSON(http.StatusBadRequest, apierror.New("BAD_REQUEST", "单文件最多支持 100MB"))
 		return
 	}
 	stream, err := file.Open()

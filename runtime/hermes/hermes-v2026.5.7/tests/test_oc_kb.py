@@ -145,3 +145,30 @@ def test_oc_kb_add_rejects_path_outside_workspace(tmp_path: Path) -> None:
     assert result.returncode == 1
     assert "INVALID_PATH" in result.stderr
     assert "workspace" in result.stderr
+
+
+def test_oc_kb_add_rejects_oversized_file_before_request(tmp_path: Path) -> None:
+    # 本地文件超过 100MB 时先在 CLI 侧拒绝，避免 read_bytes 把大文件一次性载入内存。
+    script = Path(__file__).resolve().parent.parent / "oc-kb.py"
+    workspace = tmp_path / "workspace"
+    workspace.mkdir()
+    big = workspace / "big.md"
+    with big.open("wb") as f:
+        f.truncate(100 * 1024 * 1024 + 1)
+
+    env = os.environ.copy()
+    env.update({
+        "OC_KB_RUNTIME_BASE_URL": "http://127.0.0.1:9",
+        "OC_KB_APP_TOKEN": "runtime-token",
+        "OC_WORKSPACE_DIR": str(workspace),
+    })
+    result = subprocess.run(
+        [sys.executable, str(script), "add", "big.md"],
+        env=env,
+        capture_output=True,
+        text=True,
+    )
+
+    assert result.returncode == 1
+    assert "FILE_TOO_LARGE" in result.stderr
+    assert "100MB" in result.stderr

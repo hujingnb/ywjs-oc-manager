@@ -456,18 +456,17 @@ func TestAppDeleteHandler_HappyPath(t *testing.T) {
 	require.True(t, stub.softDeleted)
 }
 
-// TestAppDeleteHandler_PropagatesKnowledgeCleanupError 验证 RAGFlow app dataset 清理失败时不软删应用，
-// 让 worker 重试可以继续回收远端文件和索引。
-func TestAppDeleteHandler_PropagatesKnowledgeCleanupError(t *testing.T) {
+// TestAppDeleteHandler_TreatsKnowledgeCleanupErrorAsBestEffort 验证 RAGFlow app dataset 清理失败不阻断本地应用软删。
+func TestAppDeleteHandler_TreatsKnowledgeCleanupErrorAsBestEffort(t *testing.T) {
 	stub := runtimeStub(t)
 	knowledge := &fakeKnowledgeCleaner{err: errors.New("ragflow unavailable")}
 	handler := NewAppDeleteHandler(stub, &fakeLifecycle{}, &fakeDisabler{}, nil, knowledge)
 
 	err := handler.Handle(context.Background(), runtimeJob(domain.JobTypeAppDelete, testAppID))
 
-	require.Error(t, err)
-	assert.Contains(t, err.Error(), "清理应用 RAGFlow dataset 失败")
-	require.False(t, stub.softDeleted)
+	require.NoError(t, err)
+	require.True(t, stub.softDeleted)
+	require.Equal(t, testAppID, knowledge.cleanedAppID)
 }
 
 // TestAppDeleteHandler_PrefersArchiveOverDelete 验证应用删除处理器Prefers归档覆盖删除的预期行为场景。
@@ -534,13 +533,25 @@ func TestAppDeleteHandler_PropagatesNewAPIError(t *testing.T) {
 	require.False(t, stub.softDeleted)
 }
 
-// TestAppDeleteHandler_AlreadyDeletedShortCircuits 验证应用删除处理器已经删除态过短Circuits的边界条件场景。
-func TestAppDeleteHandler_AlreadyDeletedShortCircuits(t *testing.T) {
+// TestAppDeleteHandler_AlreadyDeletedStillCleansExternalResources 验证删除成员预先软删应用后，
+// app_delete 仍会清理容器、new-api key、节点目录和 RAGFlow dataset。
+func TestAppDeleteHandler_AlreadyDeletedStillCleansExternalResources(t *testing.T) {
 	stub := runtimeStub(t)
 	stub.app.DeletedAt = pgtype.Timestamptz{Valid: true}
-	handler := NewAppDeleteHandler(stub, &fakeLifecycle{}, &fakeDisabler{}, nil)
+	containers := &fakeLifecycle{}
+	disabler := &fakeDisabler{}
+	fileOps := &fakeFileOps{}
+	knowledge := &fakeKnowledgeCleaner{}
+	handler := NewAppDeleteHandler(stub, containers, disabler, fileOps, knowledge)
+
 	err := handler.Handle(context.Background(), runtimeJob(domain.JobTypeAppDelete, testAppID))
+
 	require.NoError(t, err)
+	require.Equal(t, 1, containers.stopCalls)
+	require.Equal(t, 1, containers.removeCalls)
+	require.Equal(t, int64(42), disabler.id)
+	require.Equal(t, testAppID, fileOps.deletedAppID)
+	require.Equal(t, testAppID, knowledge.cleanedAppID)
 	require.False(t, stub.softDeleted)
 }
 

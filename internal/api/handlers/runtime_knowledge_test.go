@@ -7,6 +7,7 @@ import (
 	"mime/multipart"
 	"net/http"
 	"net/http/httptest"
+	"strconv"
 	"testing"
 
 	"github.com/gin-gonic/gin"
@@ -112,4 +113,21 @@ func TestRuntimeKnowledgeAddAcceptsWorkspaceFileUpload(t *testing.T) {
 	assert.Equal(t, "report.md", stub.addFilename)
 	assert.Equal(t, "# report", stub.addBody)
 	assert.Contains(t, w.Body.String(), `"parse_status":"queued"`)
+}
+
+// TestRuntimeKnowledgeAddRejectsOversizedUpload 验证 runtime API 在调用 service 前拒绝超过 100MB 的上传。
+func TestRuntimeKnowledgeAddRejectsOversizedUpload(t *testing.T) {
+	stub := &runtimeKnowledgeServiceStub{}
+	router := newRuntimeKnowledgeRouter(t, stub)
+
+	w := httptest.NewRecorder()
+	req := httptest.NewRequest(http.MethodPost, "/api/v1/runtime/knowledge/files", bytes.NewBufferString("x"))
+	req.Header.Set("Content-Type", "multipart/form-data; boundary=x")
+	req.Header.Set("Content-Length", strconv.FormatInt(maxKnowledgeUploadBytes+maxKnowledgeMultipartOverheadBytes+1, 10))
+	req.Header.Set(runtimeKnowledgeTokenHeader, "app-token")
+	router.ServeHTTP(w, req)
+
+	assert.Equal(t, http.StatusBadRequest, w.Code)
+	assert.Contains(t, w.Body.String(), "单文件最多支持 100MB")
+	assert.Equal(t, 0, stub.addCalls)
 }
