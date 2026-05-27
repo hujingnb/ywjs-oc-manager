@@ -98,6 +98,63 @@ manager 不自动创建 new-api key，不自动修改 RAGFlow 模型配置，也
 
 RAGFlow 公开文档说明 API key 可从 UI 获取；第一版只需要一个 manager 后端使用的 RAGFlow API key。自动创建 RAGFlow 内部用户或 token 不再是第一版目标，也不作为本方案的权限基础。
 
+## Docker Compose 与部署形态
+
+RAGFlow 引入后，Compose 需要同时服务本地联调和生产拆分部署。两种形态共享同一套业务边界：manager 只通过 RAGFlow HTTP API 访问 RAGFlow，不加入 RAGFlow 内部依赖网络，也不直接连接 RAGFlow MySQL、Redis/Valkey、MinIO 或 Elasticsearch。
+
+### 本地调试 Compose
+
+仓库根目录 `docker-compose.yml` 继续作为本地一键联调环境，并在其中加入 RAGFlow 及其依赖：
+
+- `ragflow`：RAGFlow 主服务，暴露 Web 控制台、HTTP API 和 Admin API；
+- `ragflow-mysql`：RAGFlow 自身账号、dataset 与任务元数据；
+- `ragflow-redis`：RAGFlow 内部队列和缓存；
+- `ragflow-minio`：上传原文件与解析中间产物；
+- `ragflow-es`：默认检索与向量索引后端。
+
+本地 manager 使用 Compose service name 访问 RAGFlow：
+
+```yaml
+ragflow:
+  base_url: "http://ragflow:9380"
+```
+
+本地 `.env` 允许配置 RAGFlow 端口、镜像和依赖密码。默认密码仅用于开发联调，不能进入生产配置。RAGFlow 调用 new-api 的模型供应商仍由管理员在 RAGFlow 控制台手工配置；本地 Compose 只保证网络上同时存在 `new-api`、`ollama` 和 `ragflow`，不自动写 RAGFlow 模型配置。
+
+### 生产 Compose
+
+生产保持运行包拆分：
+
+- `deploy/ragflow/docker-compose.yml` 独立启动 RAGFlow、MySQL、Redis/Valkey、MinIO 和 Elasticsearch；
+- `deploy/manage/docker-compose.yml` 只启动 manager-api、manager-web、nginx、PostgreSQL 和 Redis；
+- manager 不加入 `ragflow-internal` 网络，只通过 `ragflow.base_url` 访问 RAGFlow HTTP API。
+
+同机部署时，`deploy/manage/config/manager.yaml` 使用宿主机端口访问独立 RAGFlow：
+
+```yaml
+ragflow:
+  base_url: "http://host.docker.internal:9380"
+```
+
+异机部署时，`base_url` 改为 RAGFlow 服务器的内网地址或 HTTPS 入口。生产必须固定 RAGFlow 和依赖镜像 tag 或 digest，RAGFlow 的 MySQL、Redis/Valkey、MinIO、Elasticsearch 数据目录由 `deploy/ragflow` 独立备份。
+
+### 端口与网络要求
+
+- RAGFlow Web 控制台只面向管理员开放，用于创建 RAGFlow API key 和配置 new-api + DeepSeek 模型供应商。
+- RAGFlow HTTP API 必须允许 manager 服务器访问。
+- RAGFlow Admin API 仅用于运维排障，不下发给 Hermes。
+- RAGFlow 内部 MySQL、Redis/Valkey、MinIO、Elasticsearch 不对 manager 或公网开放。
+- Hermes 容器只需要访问 manager runtime API 和 new-api OpenAI-compatible endpoint，不需要访问 RAGFlow HTTP API 或 RAGFlow 内部网络。
+
+### 启动顺序
+
+本地联调可以直接使用根目录 Compose 启动全套服务。生产推荐顺序为：
+
+1. 启动 Ollama 并验证模型可用；
+2. 启动 new-api，配置模型渠道并创建给 RAGFlow 使用的专用 API key；
+3. 启动 `deploy/ragflow`，在 RAGFlow 控制台配置 new-api + DeepSeek，并创建 manager 专用 RAGFlow API key；
+4. 启动 `deploy/manage`，配置 `ragflow.base_url` 与 `ragflow.api_key`；
+5. 启动 runtime-agent 节点。
 
 ## 数据模型
 
@@ -114,6 +171,14 @@ RAGFlow 公开文档说明 API key 可从 UI 获取；第一版只需要一个 m
 - `name`：RAGFlow dataset 名称。
 - `status`：`active`、`creating`、`deleting`、`failed`。
 - `last_error`：最近一次 dataset 生命周期失败原因。
+- `create_claim_token`：dataset 创建租约，避免并发创建或进程崩溃后重复写入远端 dataset。
+
+### `apps` runtime token 字段
+
+Hermes 通过 per-app runtime token 调 manager runtime API。token 明文只写入 Hermes input，不以明文保存在 manager 数据库。
+
+- `runtime_token_hash`：用于 runtime API 认证查找的 token 哈希，未删除 app 内唯一。
+- `runtime_token_ciphertext`：加密后的 token 明文，用于重建 Hermes input 或重启实例时重新写入 manifest。
 
 ### `ragflow_documents`
 
@@ -125,7 +190,7 @@ RAGFlow 公开文档说明 API key 可从 UI 获取；第一版只需要一个 m
 - `name`、`size`、`mime_type` / `suffix`。
 - `parse_status`：`queued`、`running`、`completed`、`failed`、`stopped`。
 - `progress`：解析进度。
-- `last_error`：解析或同步状态失败原因。
+- `last_error`：解析或状态刷新失败原因。
 - `created_by`：触发上传的 manager 用户或 app runtime 标识。
 
 ## Manager API 与 UI
