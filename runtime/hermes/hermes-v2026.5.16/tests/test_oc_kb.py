@@ -55,9 +55,21 @@ def _runtime_env(server: HTTPServer, **extra: str) -> dict[str, str]:
     return env
 
 
+def _oc_kb_script() -> Path:
+    """定位 oc-kb 脚本路径。
+    源码目录布局下 tests/ 与 oc-kb.py 同级；
+    镜像内 tests/ 在 /usr/local/lib/oc-entrypoint/tests/，oc-kb 被装到 /usr/local/bin/oc-kb（无 .py 后缀）。
+    与 test_entrypoint_integration 中 oc-entrypoint 的探测逻辑保持一致。
+    """
+    source_script = Path(__file__).resolve().parent.parent / "oc-kb.py"
+    if source_script.exists():
+        return source_script
+    return Path("/usr/local/bin/oc-kb")
+
+
 def test_oc_kb_search_posts_to_manager_runtime_api() -> None:
     # search 成功路径必须只调用 manager runtime API，并把后端响应包成稳定的 ok/data stdout。
-    script = Path(__file__).resolve().parent.parent / "oc-kb.py"
+    script = _oc_kb_script()
     server, thread, records = _start_runtime_server({"results": [{"content": "answer"}]})
 
     try:
@@ -80,7 +92,7 @@ def test_oc_kb_search_posts_to_manager_runtime_api() -> None:
 
 def test_oc_kb_add_posts_workspace_file_to_manager_runtime_api(tmp_path: Path) -> None:
     # add 成功路径必须上传 workspace 内文件到 manager runtime API，并携带 app token。
-    script = Path(__file__).resolve().parent.parent / "oc-kb.py"
+    script = _oc_kb_script()
     workspace = tmp_path / "workspace"
     workspace.mkdir()
     (workspace / "report.md").write_text("hello", encoding="utf-8")
@@ -110,7 +122,7 @@ def test_oc_kb_requires_runtime_config(monkeypatch) -> None:
     # 缺少 manager runtime API 配置时，oc-kb 应快速失败，避免 Hermes 误以为知识库为空。
     monkeypatch.delenv("OC_KB_RUNTIME_BASE_URL", raising=False)
     monkeypatch.delenv("OC_KB_APP_TOKEN", raising=False)
-    script = Path(__file__).resolve().parent.parent / "oc-kb.py"
+    script = _oc_kb_script()
 
     result = subprocess.run(
         [sys.executable, str(script), "search", "hello"],
@@ -125,7 +137,7 @@ def test_oc_kb_requires_runtime_config(monkeypatch) -> None:
 
 def test_oc_kb_add_rejects_path_outside_workspace(tmp_path: Path) -> None:
     # 父目录穿越不能越过 workspace 沙箱，避免 Hermes 写入任意本地文件到实例知识库。
-    script = Path(__file__).resolve().parent.parent / "oc-kb.py"
+    script = _oc_kb_script()
     workspace = tmp_path / "workspace"
     workspace.mkdir()
 
@@ -149,7 +161,7 @@ def test_oc_kb_add_rejects_path_outside_workspace(tmp_path: Path) -> None:
 
 def test_oc_kb_add_rejects_oversized_file_before_request(tmp_path: Path) -> None:
     # 本地文件超过 100MB 时先在 CLI 侧拒绝，避免 read_bytes 把大文件一次性载入内存。
-    script = Path(__file__).resolve().parent.parent / "oc-kb.py"
+    script = _oc_kb_script()
     workspace = tmp_path / "workspace"
     workspace.mkdir()
     big = workspace / "big.md"
