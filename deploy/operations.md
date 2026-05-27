@@ -10,7 +10,7 @@
 | manager 业务库 | `deploy/manage/data/postgres` | 关键 | 含组织 / 成员 / 应用 / 审计 / 任务 / refresh_tokens |
 | manager Redis | `deploy/manage/data/redis` | 可选 | scheduler 从 jobs 表重建，丢一个调度周期后自愈 |
 | manager 本地数据 | `deploy/manage/data/manager` | 关键 | manager-api 持久化业务数据（`app.data_root`） |
-| 知识库主副本 | `deploy/manage/data/knowledge` | 关键 | 对应配置字段 `app.knowledge_root`（默认 `/var/lib/oc-manager/knowledge`）；丢失后所有节点 sync-status 全部失败 |
+| RAGFlow 数据 | `deploy/ragflow/data` / `deploy/ragflow/logs` | 关键 | dataset/document 元数据、解析任务、MinIO 原文件、Elasticsearch 索引都在独立 RAGFlow 部署包内 |
 | agent 节点数据 | `deploy/runtime-agent/data/agent`（各 Runtime Node） | 关键 | 应用 workspace / state / Hermes 历史会话；含 agent-id、agent-token 和 TLS 证书 |
 | new-api 库 | `deploy/new-api/data/postgres` | 关键 | new-api 账号、渠道、令牌和用量数据 |
 | new-api Redis | `deploy/new-api/data/redis` | 可选 | 丢失按 new-api 自身恢复策略处理 |
@@ -46,12 +46,12 @@ docker compose exec -T new-api-postgres sh -c \
 find /backups -name "new-api-*.dump" -mtime +7 -delete
 ```
 
-### 知识库主副本与 manager 本地数据
+### RAGFlow 数据与 manager 本地数据
 
 ```sh
-# manager 服务器：备份知识库主副本（app.knowledge_root 对应挂载点）
-tar czf /backups/manager-knowledge-$(date +%Y%m%d).tar.gz \
-  -C deploy/manage/data knowledge
+# RAGFlow 服务器：备份 RAGFlow 数据目录
+tar czf /backups/ragflow-$(date +%Y%m%d).tar.gz \
+  -C deploy/ragflow data logs
 
 # manager 服务器：备份 manager 本地数据（app.data_root 对应挂载点）
 tar czf /backups/manager-data-$(date +%Y%m%d).tar.gz \
@@ -89,14 +89,21 @@ docker compose run --rm manager-api migrate up
 docker compose up -d
 ```
 
-### 3.2 恢复知识库主副本 / manager 本地数据
+### 3.2 恢复 RAGFlow 数据 / manager 本地数据
 
 ```sh
-cd deploy/manage
+# 先恢复独立 RAGFlow 数据
+cd deploy/ragflow
+docker compose stop ragflow ragflow-mysql ragflow-redis ragflow-minio ragflow-es
+
+tar xzf /backups/ragflow-20260601.tar.gz
+
+docker compose up -d
+
+# 再恢复 manager 本地运行数据
+cd ../manage
 docker compose stop manager-api
 
-# 解压到对应挂载目录（覆盖现有内容）
-tar xzf /backups/manager-knowledge-20260601.tar.gz -C data
 tar xzf /backups/manager-data-20260601.tar.gz -C data
 
 docker compose up -d
@@ -152,9 +159,10 @@ docker compose up -d
 ### 4.3 升级前检查
 
 1. 拉最新 release notes，确认变更范围和迁移要求。
-2. **先备份**：manager PostgreSQL dump 必做，知识库主副本 tar 必做；agent 节点数据 tar 视改动量决定。
-3. 在 staging 完整演练：拉新镜像 → 跑迁移 → 启动 → 跑 smoke 测试。
-4. 准备回滚计划：记录当前生产环境各服务的 digest，备用。
+2. **先备份**：manager PostgreSQL dump 必做，RAGFlow 数据 tar 必做；agent 节点数据 tar 视改动量决定。
+3. 若本次从本地知识库主副本切换到 RAGFlow，先导出旧知识库目录；迁移不会自动导入旧文件，升级后需通过知识库页面重新上传。
+4. 在 staging 完整演练：拉新镜像 → 跑迁移 → 启动 → 跑 smoke 测试。
+5. 准备回滚计划：记录当前生产环境各服务的 digest，备用。
 
 ### 4.4 滚动升级次序
 
@@ -238,7 +246,8 @@ docker compose logs --tail=100 manager-api
 常见原因：
 - `config/manager.yaml` 配置项缺失或值不合法（启动时 fail-fast，日志有 `FATAL` 行）。
 - PostgreSQL / Redis 未就绪：检查 `docker compose ps` 中 manager-postgres / manager-redis 的健康状态。
-- `app.knowledge_root`（默认 `/var/lib/oc-manager/knowledge`）或 `app.data_root` 挂载路径不存在，导致启动失败。
+- `app.data_root` 挂载路径不存在，导致启动失败。
+- `ragflow.base_url` 或 `ragflow.api_key` 只配置了一项；二者必须同时填写或同时留空。
 
 **manager 调 new-api 返回 401**
 
@@ -304,13 +313,15 @@ completions 报连接错误：
 3. 在节点上检查 `<nodeDataRoot>/apps/<appID>/input/manifest.yaml` 与
    `<nodeDataRoot>/apps/<appID>/data/config.yaml`，确认 input 已刷新且容器已重启渲染。
 
-**知识库在 Hermes 容器中看不到**
+**知识库在 Hermes 中检索不到**
 
-知识库主副本由 manager 同步到 runtime node 的 input 目录，容器启动时由
-`oc-entrypoint` 渲染成 Hermes skills。若对话中看不到知识库内容：
-1. 检查 manager worker 同步任务日志，确认 knowledge sync 未报错。
-2. 确认 `app.knowledge_root` 对应的 `deploy/manage/data/knowledge` 目录下有内容。
-3. 在容器内检查 `/opt/oc-input/resources/knowledge/{org,app}` 是否有源文件。
-4. 重启应用后检查 `/opt/data/skills/kb-*` 是否生成对应 `SKILL.md`。
+Hermes 不直接读取本地知识库文件，也不持有 RAGFlow key。它通过镜像内 `oc-kb`
+skill 调 manager runtime API，再由 manager 按实例 token 访问当前 app dataset 与所属
+org dataset。若对话中检索不到知识库内容：
+1. 检查 `deploy/ragflow` 服务是否正常：`cd deploy/ragflow && docker compose ps`。
+2. 检查 manager 配置中的 `ragflow.base_url`、`ragflow.api_key` 是否可用。
+3. 在 manager 知识库页面确认文档解析状态已完成；失败文件可点“重解析”。
+4. 在节点 input 的 `manifest.yaml` 中确认已写入 `knowledge.runtime_base_url` 与 app token。
+5. 在 Hermes 容器内执行 `oc-kb search "测试问题"`，确认 runtime API 可访问。
 
 更多 Hermes 容器排查细节参见 [docs/hermes-container.md](../docs/hermes-container.md)。

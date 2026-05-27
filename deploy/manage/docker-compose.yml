@@ -62,7 +62,6 @@ services:
     volumes:
       - ./config/manager.yaml:/etc/manager/config.yaml:ro
       - ./data/manager:/var/lib/oc-manager/data
-      - ./data/knowledge:/var/lib/oc-manager/knowledge
       # 宿主机 Docker daemon socket:manager-api 通过 Docker Engine HTTP API
       # 完成镜像 inspect / save / pull(走 internal/runtime/imagesync/sdk_provider.go)。
       - /var/run/docker.sock:/var/run/docker.sock

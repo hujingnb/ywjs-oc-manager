@@ -23,12 +23,6 @@ app:
   # 生产 Compose 固定挂载 ./data/manager 到该容器路径。
   data_root: "/var/lib/oc-manager/data"
 
-  # 知识库主副本根目录（manager 端"主拷贝"，由 worker 同步到各 runtime node）。
-  # 此前由 OCM_KNOWLEDGE_ROOT 环境变量提供，统一收口到 yaml。
-  # 必须显式配置；为空启动时 fail-fast。
-  # 路径下结构：orgs/<org_id>/...、apps/<app_id>/...，由 files.SafeRoot 沙箱化。
-  knowledge_root: "/var/lib/oc-manager/knowledge"
-
 database:
   # 业务 PostgreSQL 连接 DSN，形如
   #   postgres://<user>:<url-encoded-pwd>@<host>:<port>/<db>?sslmode=disable
@@ -101,6 +95,22 @@ newapi:
   # 默认账号 admin/admin123! 的 id=1。base_url 非空时必填；类型为整数。
   admin_user_id: 1
 
+ragflow:
+  # RAGFlow HTTP API base URL，manager 后端用它管理 dataset/document/retrieval。
+  # 生产 RAGFlow 使用 deploy/ragflow 独立 Compose 时，manager 通过宿主机端口访问。
+  # 如果 RAGFlow 部署在其他服务器，则改为对应内网或 HTTPS 地址。
+  base_url: "http://host.docker.internal:9380"
+
+  # RAGFlow 控制台创建的 API key，只保存在 manager 后端配置中。
+  # Hermes 和浏览器都不会接收该 key。
+  api_key: "CHANGE_ME_RAGFLOW_API_KEY"
+
+  # 单次 RAGFlow HTTP 请求超时。
+  request_timeout: "30s"
+
+  # 自动创建 dataset 时使用的默认分块方法。
+  chunk_method: "naive"
+
 hermes:
   # 助手版本可选的 Hermes 镜像列表。id 稳定、ref 为具体可拉取 tag。
   # 实例初始化 / 重启的运行时镜像严格由绑定的助手版本经 ResolveRuntimeImage 从此列表解析；
@@ -145,6 +155,10 @@ hermes:
   # 留空时 Hermes 容器使用 runtime 节点默认 bridge 出口访问远端 new-api；
   # 如 runtime 节点有专用 Docker network，则改为实际 network 名称。
   container_networks: []
+
+  # Hermes 容器内访问 manager runtime API 的地址，oc-kb skill 用它检索和写入实例知识库。
+  # 生产环境应填 runtime 节点可访问的 manager API 内网或 HTTPS 地址。
+  manager_runtime_base_url: "https://manager.example.com"
 
 agent:
   # runtime-agent 注册成功后回写并按此频率上报心跳；

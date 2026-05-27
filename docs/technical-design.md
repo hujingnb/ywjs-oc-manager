@@ -31,8 +31,8 @@
 | `app_service.go` | 应用查询与状态读取 |
 | `auth_service.go` | 登录、刷新令牌、登出 |
 | `channel_service.go` | 渠道绑定生命周期 |
-| `knowledge_service.go` | 组织 / 应用知识库 CRUD 与同步触发 |
-| `knowledge_sync_status.go` | 知识库同步状态聚合 |
+| `knowledge_service.go` | RAGFlow-backed 组织 / 应用知识库 CRUD、检索与 Hermes runtime 写入 |
+| `app_runtime_token.go` | Hermes 调 manager runtime API 使用的实例级 token 生成与加密存储 |
 | `member_service.go` | 成员 CRUD、角色、状态切换 |
 | `onboarding_service.go` | 成员 + 应用一体化创建流程 |
 | `organization_service.go` | 组织 CRUD、new-api 组织映射 |
@@ -117,12 +117,14 @@ scheduler 是 PostgreSQL→Redis 的单向补偿通道，不直接修改 job 状
 | `crypto.go` | 敏感字段对称加密（AES-GCM，master_key 来自 `config.Security`） |
 | `password.go` | bcrypt 密码 hash 与验证 |
 
-### 1.10 `internal/files`
+### 1.10 `internal/integrations/ragflow`
 
 | 文件 | 职责 |
 |---|---|
-| `safe_path.go` | `SafeRoot`：路径沙箱化，拦截 `..` 跳出、符号链接、非常规文件、大文件 |
-| `knowledge_master.go` | 知识库主副本读写（基于 `SafeRoot`） |
+| `client.go` | RAGFlow HTTP API 客户端，封装 dataset、document、parse、download 与 retrieval 调用 |
+
+知识库文件主库已迁移到 RAGFlow；manager 只保存 org/app 与 RAGFlow dataset/document 的映射，
+并通过 runtime API 向 Hermes 暴露受控检索和实例知识库写入能力。
 
 ### 1.11 `internal/migrations`
 
@@ -362,7 +364,6 @@ PostgreSQL 是 job 事实来源；Redis 信号丢失只降级为等待下次 sch
 | `app_health_check.go` | `app_health_check` | 定时 job / worker 探活 | docker inspect 健康状态写入 `apps.health_state_json`；按 restart_policy 自动拉起停掉的容器 |
 | `channel_login.go` | `channel_start_login` | channel_service | 调用渠道 adapter 生成登录二维码，写 pending_auth |
 | `channel_login.go` | `channel_check_binding` | 轮询 job（自我重新排队） | 轮询渠道授权结果，成功写 `bound`，超时写 `expired` |
-| `knowledge_sync.go` | `knowledge_sync_node` | knowledge_service | 把管理端知识库主副本同步到指定 runtime node |
 | `runtime_refresh_status.go` | `runtime_refresh_status` | 定时 job | docker inspect 容器快照写入 `apps.runtime_snapshot_json` |
 | `newapi_key_status.go` | `newapi_disable_key` | app stop / delete 流程 | 在 new-api 侧禁用对应 token |
 | `newapi_key_status.go` | `newapi_restore_key` | app start 流程 | 在 new-api 侧恢复对应 token |
@@ -444,9 +445,8 @@ handler swag 注解
 | `CanManageApp` / `CanViewApp` | 应用 | 平台管理员只读；org_admin 限本组织；成员限自身 app |
 | `CanCreateAppForOrg` / `CanCreateAppForMember` | 应用创建 | org_admin 创建；平台管理员可跨组织复建 |
 | `CanTriggerRuntimeOperation` | 运行时操作 | 等同 `CanManageApp` |
-| `CanReadOrgKnowledge` / `CanWriteOrgKnowledge` | 组织知识库 | 写只允许本组织 org_admin |
-| `CanReadAppKnowledge` / `CanWriteAppKnowledge` | 应用知识库 | 写等同 `CanManageApp` |
-| `CanViewOrgKnowledgeSyncStatus` / `CanRetryOrgKnowledgeSync` | 同步状态 | 仅本组织 org_admin |
+| `CanReadOrgKnowledge` / `CanWriteOrgKnowledge` | 组织知识库 | 写包含上传、删除、重解析，只允许本组织 org_admin |
+| `CanReadAppKnowledge` / `CanWriteAppKnowledge` | 应用知识库 | 写包含上传、删除、重解析，等同 `CanManageApp` |
 | `CanViewOrgPersona` / `CanManageOrgPersona` | 人设 | 等同组织读 / 写谓词 |
 | `CanViewOrgUsage` / `CanViewMemberUsage` | 用量 | 平台管理员 + org_admin 跨组织（平台）或本组织 |
 | `CanViewOrgAudit` / `CanViewAppAudit` / `CanViewOwnAudit` | 审计 | 组织级仅管理员；应用级等同 `CanViewApp` |
@@ -487,5 +487,6 @@ new-api 调用失败通过 `internal/audit.NewAPIAuditHelper` 统一落到
 
 ### 6.6 路径安全
 
-所有知识库主副本和工作目录读写必须经过 `internal/files.SafeRoot`，
-拦截路径跳出（`..`）、符号链接、URL 编码绕过、非常规文件和超大文件。
+工作目录读写通过 runtime-agent scope API 做路径沙箱校验，拦截路径跳出（`..`）、
+绝对路径、URL 编码绕过、非常规文件和超大文件。知识库文件不再落 manager 本地主副本，
+由 manager 校验权限后代理 RAGFlow document API。

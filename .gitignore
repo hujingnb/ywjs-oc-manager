@@ -40,6 +40,7 @@ deploy/new-api/.env
 deploy/ollama/.env
 deploy/runtime-agent/.env
 deploy/manage/.env
+deploy/ragflow/.env
 deploy/manage/config/manager.yaml
 deploy/runtime-agent/config/agent.yaml
 deploy/manage/tls/*
