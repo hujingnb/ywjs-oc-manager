@@ -2,75 +2,72 @@ package store
 
 import (
 	"context"
+	"database/sql"
 	"fmt"
+	"strings"
 
-	"github.com/jackc/pgx/v5"
-	"github.com/jackc/pgx/v5/pgxpool"
+	_ "github.com/go-sql-driver/mysql"
 
 	"oc-manager/internal/store/sqlc"
 )
 
-// Store 封装数据库连接池和 sqlc 查询入口。
+// Store 封装数据库连接和 sqlc 查询入口。
 // service 层通过 Store 获取查询对象和事务能力，不直接管理连接生命周期。
 type Store struct {
-	// pool 是全局共享的 PostgreSQL 连接池，由 Store 统一关闭。
-	pool *pgxpool.Pool
+	// db 是全局共享的 MySQL 连接池（database/sql 内部维护连接复用），由 Store 统一关闭。
+	db *sql.DB
 	// Queries 暴露 sqlc 生成的类型安全查询方法，供 service 层组合使用。
 	Queries *sqlc.Queries
 }
 
-// Open 创建 PostgreSQL 连接池，并返回可复用的 Store。
-// 连接字符串错误会在启动时直接返回，避免服务运行后才暴露数据库配置问题。
+// Open 用 MySQL DSN 创建连接池并返回可复用的 Store。
+// databaseURL 形如 "mysql://user:pass@tcp(host:3306)/ocm?parseTime=true&loc=UTC"，
+// 与 cmd/migrate 共用同一配置项。go-sql-driver/mysql 的 DSN 不接受 "mysql://" scheme
+// 前缀，故在此剥离后再交给 sql.Open；golang-migrate 那侧才需要保留该前缀。
+// ctx 暂未被惰性的 sql.Open 使用，但保留入参以兼容调用方与未来探活逻辑。
 func Open(ctx context.Context, databaseURL string) (*Store, error) {
-	cfg, err := pgxpool.ParseConfig(databaseURL)
+	dsn := strings.TrimPrefix(databaseURL, "mysql://")
+	db, err := sql.Open("mysql", dsn)
 	if err != nil {
-		return nil, fmt.Errorf("解析数据库连接配置失败: %w", err)
-	}
-
-	pool, err := pgxpool.NewWithConfig(ctx, cfg)
-	if err != nil {
-		return nil, fmt.Errorf("创建数据库连接池失败: %w", err)
+		return nil, fmt.Errorf("打开数据库连接失败: %w", err)
 	}
 	// New 只负责组合 Store，不额外 Ping；调用方按启动流程决定是否探活。
-	return New(pool), nil
+	return New(db), nil
 }
 
-// New 用已有连接池创建 Store，主要用于 server 启动组装和测试注入。
-func New(pool *pgxpool.Pool) *Store {
-	return &Store{
-		pool:    pool,
-		Queries: sqlc.New(pool),
-	}
+// New 用已有连接创建 Store，主要用于 server 启动组装和测试注入。
+func New(db *sql.DB) *Store {
+	return &Store{db: db, Queries: sqlc.New(db)}
 }
 
-// Pool 返回底层连接池，供少量需要 pgx 原语的基础设施代码使用。
-func (s *Store) Pool() *pgxpool.Pool {
-	return s.pool
+// Ping 强制建立一次真实连接以校验数据库可达；sql.Open 是惰性的，本身不会立即连接。
+func (s *Store) Ping(ctx context.Context) error {
+	return s.db.PingContext(ctx)
 }
 
 // Close 关闭数据库连接池。
 func (s *Store) Close() {
-	if s == nil || s.pool == nil {
+	if s == nil || s.db == nil {
 		return
 	}
-	s.pool.Close()
+	_ = s.db.Close()
 }
 
 // WithTx 在单个数据库事务中执行 fn。
 // fn 返回错误时回滚；提交失败时返回提交错误。业务层不得在 fn 内部自行 Commit 或 Rollback。
 func (s *Store) WithTx(ctx context.Context, fn func(*sqlc.Queries) error) error {
-	tx, err := s.pool.BeginTx(ctx, pgx.TxOptions{})
+	tx, err := s.db.BeginTx(ctx, nil)
 	if err != nil {
 		return fmt.Errorf("开启数据库事务失败: %w", err)
 	}
 
 	if err := fn(s.Queries.WithTx(tx)); err != nil {
 		// 业务错误优先返回；回滚失败通常说明连接已失效，此处不覆盖原始失败原因。
-		_ = tx.Rollback(ctx)
+		_ = tx.Rollback()
 		return err
 	}
 
-	if err := tx.Commit(ctx); err != nil {
+	if err := tx.Commit(); err != nil {
 		return fmt.Errorf("提交数据库事务失败: %w", err)
 	}
 	return nil
