@@ -4,11 +4,11 @@ import (
 	"archive/tar"
 	"bytes"
 	"context"
+	"database/sql"
 	"errors"
 	"testing"
 
-	"github.com/jackc/pgx/v5"
-	"github.com/jackc/pgx/v5/pgtype"
+	null "github.com/guregu/null/v5"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
@@ -18,6 +18,7 @@ import (
 )
 
 // fakeAVStore 是 AssistantVersionStore 的内存实现，按需在各测试里填充。
+// Create/Update/Delete 为 :exec，写入后通过 Get 读回（模拟 MySQL 写后读模式）。
 type fakeAVStore struct {
 	versions  map[string]sqlc.AssistantVersion
 	byName    map[string]sqlc.AssistantVersion
@@ -31,10 +32,10 @@ func newFakeAVStore() *fakeAVStore {
 	return &fakeAVStore{versions: map[string]sqlc.AssistantVersion{}, byName: map[string]sqlc.AssistantVersion{}}
 }
 
-func (f *fakeAVStore) GetAssistantVersion(_ context.Context, id pgtype.UUID) (sqlc.AssistantVersion, error) {
-	v, ok := f.versions[uuidToString(id)]
+func (f *fakeAVStore) GetAssistantVersion(_ context.Context, id string) (sqlc.AssistantVersion, error) {
+	v, ok := f.versions[id]
 	if !ok {
-		return sqlc.AssistantVersion{}, pgx.ErrNoRows
+		return sqlc.AssistantVersion{}, sql.ErrNoRows
 	}
 	return v, nil
 }
@@ -42,7 +43,7 @@ func (f *fakeAVStore) GetAssistantVersion(_ context.Context, id pgtype.UUID) (sq
 func (f *fakeAVStore) GetAssistantVersionByName(_ context.Context, name string) (sqlc.AssistantVersion, error) {
 	v, ok := f.byName[name]
 	if !ok {
-		return sqlc.AssistantVersion{}, pgx.ErrNoRows
+		return sqlc.AssistantVersion{}, sql.ErrNoRows
 	}
 	return v, nil
 }
@@ -55,54 +56,74 @@ func (f *fakeAVStore) ListAssistantVersions(context.Context) ([]sqlc.AssistantVe
 	return out, nil
 }
 
-func (f *fakeAVStore) CreateAssistantVersion(_ context.Context, arg sqlc.CreateAssistantVersionParams) (sqlc.AssistantVersion, error) {
+// CreateAssistantVersion 为 :exec；service 传入自生成 ID，stub 将其存入 map 供后续 Get 读回。
+func (f *fakeAVStore) CreateAssistantVersion(_ context.Context, arg sqlc.CreateAssistantVersionParams) error {
 	if f.createErr != nil {
-		return sqlc.AssistantVersion{}, f.createErr
+		return f.createErr
 	}
 	v := sqlc.AssistantVersion{
-		ID: mustParseUUID("00000000-0000-0000-0000-0000000000a1"), Name: arg.Name,
-		Description: arg.Description, SystemPrompt: arg.SystemPrompt, ImageID: arg.ImageID,
-		MainModel: arg.MainModel, RoutingJson: arg.RoutingJson, SkillsJson: arg.SkillsJson, Revision: 1,
+		ID:          arg.ID,
+		Name:        arg.Name,
+		Description: arg.Description,
+		SystemPrompt: arg.SystemPrompt,
+		ImageID:     arg.ImageID,
+		MainModel:   arg.MainModel,
+		RoutingJson: arg.RoutingJson,
+		SkillsJson:  arg.SkillsJson,
+		Revision:    1,
 	}
-	f.versions[uuidToString(v.ID)] = v
+	f.versions[v.ID] = v
 	f.byName[v.Name] = v
-	return v, nil
+	return nil
 }
 
-func (f *fakeAVStore) UpdateAssistantVersion(_ context.Context, arg sqlc.UpdateAssistantVersionParams) (sqlc.AssistantVersion, error) {
+// UpdateAssistantVersion 为 :exec；stub 直接更新内存 map，供后续 Get 读回。
+func (f *fakeAVStore) UpdateAssistantVersion(_ context.Context, arg sqlc.UpdateAssistantVersionParams) error {
 	if f.updateErr != nil {
-		return sqlc.AssistantVersion{}, f.updateErr
+		return f.updateErr
 	}
-	v := f.versions[uuidToString(arg.ID)]
+	v, ok := f.versions[arg.ID]
+	if !ok {
+		return sql.ErrNoRows
+	}
+	oldName := v.Name
 	v.Name, v.Description, v.SystemPrompt = arg.Name, arg.Description, arg.SystemPrompt
 	v.ImageID, v.MainModel = arg.ImageID, arg.MainModel
 	v.RoutingJson, v.SkillsJson, v.Revision = arg.RoutingJson, arg.SkillsJson, arg.Revision
-	f.versions[uuidToString(v.ID)] = v
-	return v, nil
+	f.versions[v.ID] = v
+	delete(f.byName, oldName)
+	f.byName[v.Name] = v
+	return nil
 }
 
-func (f *fakeAVStore) UpdateAssistantVersionSkills(_ context.Context, arg sqlc.UpdateAssistantVersionSkillsParams) (sqlc.AssistantVersion, error) {
-	v := f.versions[uuidToString(arg.ID)]
-	v.SkillsJson, v.Revision = arg.SkillsJson, arg.Revision
-	f.versions[uuidToString(v.ID)] = v
-	return v, nil
-}
-
-func (f *fakeAVStore) SoftDeleteAssistantVersion(_ context.Context, id pgtype.UUID) (sqlc.AssistantVersion, error) {
-	v, ok := f.versions[uuidToString(id)]
+// UpdateAssistantVersionSkills 为 :exec；stub 更新 skill JSON 与 revision。
+func (f *fakeAVStore) UpdateAssistantVersionSkills(_ context.Context, arg sqlc.UpdateAssistantVersionSkillsParams) error {
+	v, ok := f.versions[arg.ID]
 	if !ok {
-		return sqlc.AssistantVersion{}, pgx.ErrNoRows
+		return sql.ErrNoRows
 	}
-	delete(f.versions, uuidToString(id))
-	delete(f.byName, v.Name)
-	return v, nil
+	v.SkillsJson, v.Revision = arg.SkillsJson, arg.Revision
+	f.versions[v.ID] = v
+	f.byName[v.Name] = v
+	return nil
 }
 
-func (f *fakeAVStore) CountAppsUsingVersion(context.Context, pgtype.UUID) (int64, error) {
+// SoftDeleteAssistantVersion 为 :exec；stub 从 map 中删除，后续 Get 返回 sql.ErrNoRows。
+func (f *fakeAVStore) SoftDeleteAssistantVersion(_ context.Context, id string) error {
+	v, ok := f.versions[id]
+	if !ok {
+		return sql.ErrNoRows
+	}
+	delete(f.versions, id)
+	delete(f.byName, v.Name)
+	return nil
+}
+
+func (f *fakeAVStore) CountAppsUsingVersion(_ context.Context, _ null.String) (int64, error) {
 	return f.appCount, nil
 }
 
-func (f *fakeAVStore) CountOrgsUsingVersion(context.Context, string) (int64, error) {
+func (f *fakeAVStore) CountOrgsUsingVersion(_ context.Context, _ string) (int64, error) {
 	return f.orgCount, nil
 }
 
@@ -127,13 +148,9 @@ func TestAssistantVersionGetNotFound(t *testing.T) {
 	require.ErrorIs(t, err, ErrAssistantVersionNotFound)
 }
 
-// mustParseUUID 把字符串解析为 pgtype.UUID，失败即 panic（仅测试用）。
-func mustParseUUID(s string) pgtype.UUID {
-	var u pgtype.UUID
-	if err := u.Scan(s); err != nil {
-		panic(err)
-	}
-	return u
+// mustParseUUID 直接返回字符串 UUID（MySQL 侧 CHAR(36)，无需解析）；保留名称供调用方不变。
+func mustParseUUID(s string) string {
+	return s
 }
 
 // newTestAVService 用内存桩构造版本 service，默认模型与镜像校验全部通过。
@@ -167,7 +184,7 @@ func (fakeBlobStore) DeleteSkill(string) error { return nil }
 func TestAssistantVersionListReturnsVersions(t *testing.T) {
 	store := newFakeAVStore()
 	id := mustParseUUID("00000000-0000-0000-0000-0000000000d1")
-	store.versions[uuidToString(id)] = sqlc.AssistantVersion{
+	store.versions[id] = sqlc.AssistantVersion{
 		ID: id, Name: "标准版", Description: "默认", SystemPrompt: "p",
 		ImageID: "v2026.5.16", MainModel: "qwen",
 		RoutingJson: []byte(`{"vision":"gpt"}`), SkillsJson: []byte(`[]`), Revision: 2,
@@ -185,12 +202,12 @@ func TestAssistantVersionListReturnsVersions(t *testing.T) {
 func TestAssistantVersionGetReturnsVersion(t *testing.T) {
 	store := newFakeAVStore()
 	id := mustParseUUID("00000000-0000-0000-0000-0000000000d2")
-	store.versions[uuidToString(id)] = sqlc.AssistantVersion{
+	store.versions[id] = sqlc.AssistantVersion{
 		ID: id, Name: "高级版", SystemPrompt: "p", ImageID: "v2026.5.16",
 		MainModel: "qwen", RoutingJson: []byte(`{}`), SkillsJson: []byte(`[]`), Revision: 1,
 	}
 	svc := newTestAVService(t, store)
-	got, err := svc.Get(context.Background(), platformPrincipal(), uuidToString(id))
+	got, err := svc.Get(context.Background(), platformPrincipal(), id)
 	require.NoError(t, err)
 	assert.Equal(t, "高级版", got.Name)
 	assert.Equal(t, "qwen", got.MainModel)
@@ -290,16 +307,16 @@ func TestAssistantVersionCreateWrapsStoreError(t *testing.T) {
 	assert.Contains(t, err.Error(), "db down")
 }
 
-// seedVersion 在 fakeAVStore 内放一个已存在版本，返回其 id。
+// seedVersion 在 fakeAVStore 内放一个已存在版本，返回其 id（string）。
 func seedVersion(store *fakeAVStore, name string, revision int32) string {
 	id := mustParseUUID("00000000-0000-0000-0000-0000000000b1")
 	v := sqlc.AssistantVersion{
 		ID: id, Name: name, SystemPrompt: "p", ImageID: "v2026.5.16", MainModel: "qwen",
 		RoutingJson: []byte("{}"), SkillsJson: []byte("[]"), Revision: revision,
 	}
-	store.versions[uuidToString(id)] = v
+	store.versions[id] = v
 	store.byName[name] = v
-	return uuidToString(id)
+	return id
 }
 
 // TestAssistantVersionUpdateBumpsRevisionOnPromptChange 验证仅改提示词（其它容器相关字段不变）会 revision +1。

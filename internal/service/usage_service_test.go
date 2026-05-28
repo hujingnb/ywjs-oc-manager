@@ -2,13 +2,12 @@ package service
 
 import (
 	"context"
+	"database/sql"
 	"errors"
 	"fmt"
 	"testing"
 
-	"github.com/jackc/pgx/v5"
-	"github.com/jackc/pgx/v5/pgtype"
-
+	null "github.com/guregu/null/v5"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 	"oc-manager/internal/auth"
@@ -83,8 +82,8 @@ func TestUsageServiceMemberUsesActiveAppByOwner(t *testing.T) {
 	store := &fakeUsageStore{
 		activeApp: sqlc.App{
 			ID:            appID,
-			NewapiKeyID:   pgtype.Text{String: "77", Valid: true},
-			NewapiKeyName: pgtype.Text{String: "app-fixed-uuid-for-test", Valid: true},
+			NewapiKeyID:   null.StringFrom("77"),
+			NewapiKeyName: null.StringFrom("app-fixed-uuid-for-test"),
 		},
 	}
 	client := &fakeUsageClient{tokenLogs: newapi.LogsPage{Items: []newapi.LogEntry{{ID: 9}}, Total: 1}}
@@ -108,8 +107,8 @@ func TestUsageServiceMemberAllowsOrgMemberSelfOnly(t *testing.T) {
 	store := &fakeUsageStore{
 		activeApp: sqlc.App{
 			ID:            appID,
-			NewapiKeyID:   pgtype.Text{String: "77", Valid: true},
-			NewapiKeyName: pgtype.Text{String: "app-self-token", Valid: true},
+			NewapiKeyID:   null.StringFrom("77"),
+			NewapiKeyName: null.StringFrom("app-self-token"),
 		},
 	}
 	client := &fakeUsageClient{tokenLogs: newapi.LogsPage{Items: []newapi.LogEntry{{ID: 9}}, Total: 1}}
@@ -122,7 +121,6 @@ func TestUsageServiceMemberAllowsOrgMemberSelfOnly(t *testing.T) {
 	}, orgID, memberID, LogsQueryOptions{})
 	require.NoError(t, err)
 	require.Len(t, view.Items, 1)
-	// org_member 走 self 路径，service 同样应按 app.NewapiKeyName 透传 token_name。
 	require.Equal(t, "app-self-token", client.lastTokenLogsQuery.TokenName)
 }
 
@@ -139,15 +137,14 @@ func TestUsageServiceMemberRejectsOrgMemberOtherUsage(t *testing.T) {
 	require.ErrorIs(t, err, ErrForbidden)
 }
 
-// TestUsageServiceOrgUsesNewapiUserID 校验 org 维度查 organizations.newapi_user_id 后调
-// GetUserQuotaDates；新契约下必须同时透传 newapi_username 给 client 做客户端过滤。
+// TestUsageServiceOrgUsesNewapiUserID 校验 org 维度查 organizations.newapi_user_id 后调 GetUserQuotaDates。
 func TestUsageServiceOrgUsesNewapiUserID(t *testing.T) {
 	orgUUID := mustUUID(t, "00000000-0000-0000-0000-000000000b01")
 	store := &fakeUsageStore{
 		org: sqlc.Organization{
 			ID:             orgUUID,
-			NewapiUserID:   pgtype.Text{String: "55", Valid: true},
-			NewapiUsername: pgtype.Text{String: "org-55-user", Valid: true},
+			NewapiUserID:   null.StringFrom("55"),
+			NewapiUsername: null.StringFrom("org-55-user"),
 		},
 	}
 	client := &fakeUsageClient{userQuota: []newapi.QuotaDate{{Date: "2026-05-01", Quota: 100}}}
@@ -210,7 +207,7 @@ func TestUsageService_MemberUsageFailureRecordsAudit(t *testing.T) {
 	auditor := &fakeFailAuditor{}
 	store := &fakeUsageStore{
 		activeApp: sqlc.App{
-			NewapiKeyID: pgtype.Text{String: "77", Valid: true},
+			NewapiKeyID: null.StringFrom("77"),
 		},
 	}
 	client := &fakeUsageClient{tokenLogsError: errors.New("5xx")}
@@ -226,7 +223,6 @@ func TestUsageService_MemberUsageFailureRecordsAudit(t *testing.T) {
 }
 
 // TestUsageService_OrgUsageFailureRecordsAudit 校验 GetOrgUsage new-api 调用失败时触发审计。
-// 新契约要求 username 必须有值才会真正调上游，因此 fixture 同时填 user_id 与 username。
 func TestUsageService_OrgUsageFailureRecordsAudit(t *testing.T) {
 	auditor := &fakeFailAuditor{}
 	orgID := "00000000-0000-0000-0000-000000000b01"
@@ -234,8 +230,8 @@ func TestUsageService_OrgUsageFailureRecordsAudit(t *testing.T) {
 	store := &fakeUsageStore{
 		org: sqlc.Organization{
 			ID:             orgUUID,
-			NewapiUserID:   pgtype.Text{String: "55", Valid: true},
-			NewapiUsername: pgtype.Text{String: "org-55-user", Valid: true},
+			NewapiUserID:   null.StringFrom("55"),
+			NewapiUsername: null.StringFrom("org-55-user"),
 		},
 	}
 	client := &fakeUsageClient{userQuotaError: errors.New("5xx")}
@@ -304,39 +300,40 @@ func (c *fakeUsageClient) GetAllQuotaDates(_ context.Context, _, _ int64) ([]new
 
 // fakeUsageStore 实现 UsageStore；activeApp / org 用作 lookup 返回值。
 // appByID 用于按 ID 注入 GetApp 返回值，覆盖 service 优先读 app.NewapiKeyName
-// 的 happy path；未注入时 GetApp 仍然返回 ErrNoRows，保证现有走回退路径
+// 的 happy path；未注入时 GetApp 仍然返回 sql.ErrNoRows，保证现有走回退路径
 // 的用例行为不变。
 type fakeUsageStore struct {
 	activeApp         sqlc.App
 	activeAppCalled   bool
-	lastActiveOwner   pgtype.UUID
+	// lastActiveOwner 记录最近一次 GetActiveAppByOwner 调用传入的 ownerUserID（string）。
+	lastActiveOwner   string
 	org               sqlc.Organization
-	appByID           map[pgtype.UUID]sqlc.App
+	appByID           map[string]sqlc.App
 	allActiveOrgs     []sqlc.Organization
 }
 
-func (s *fakeUsageStore) GetApp(_ context.Context, id pgtype.UUID) (sqlc.App, error) {
-	// 仅当用例显式注入 appByID 时才返回对应记录，缺省回到 ErrNoRows
+func (s *fakeUsageStore) GetApp(_ context.Context, id string) (sqlc.App, error) {
+	// 仅当用例显式注入 appByID 时才返回对应记录，缺省回到 sql.ErrNoRows
 	// 以保持既有 fallback 用例（如 TestGetAppUsageFallsBackWhenKeyNameEmpty）的行为。
 	if s.appByID != nil {
 		if app, ok := s.appByID[id]; ok {
 			return app, nil
 		}
 	}
-	return sqlc.App{}, pgx.ErrNoRows
+	return sqlc.App{}, sql.ErrNoRows
 }
 
-func (s *fakeUsageStore) GetActiveAppByOwner(_ context.Context, ownerID pgtype.UUID) (sqlc.App, error) {
+func (s *fakeUsageStore) GetActiveAppByOwner(_ context.Context, ownerID string) (sqlc.App, error) {
 	s.activeAppCalled = true
 	s.lastActiveOwner = ownerID
 	return s.activeApp, nil
 }
 
-func (s *fakeUsageStore) GetOrganization(_ context.Context, id pgtype.UUID) (sqlc.Organization, error) {
-	if s.org.ID.Valid && s.org.ID == id {
+func (s *fakeUsageStore) GetOrganization(_ context.Context, id string) (sqlc.Organization, error) {
+	if s.org.ID != "" && s.org.ID == id {
 		return s.org, nil
 	}
-	return sqlc.Organization{}, pgx.ErrNoRows
+	return sqlc.Organization{}, sql.ErrNoRows
 }
 
 // ListAllActiveOrganizations 是 allActiveOrgs 的预置返回值，供测试注入。
@@ -344,11 +341,9 @@ func (s *fakeUsageStore) ListAllActiveOrganizations(_ context.Context) ([]sqlc.O
 	return s.allActiveOrgs, nil
 }
 
-// TestGetAppUsageFallsBackWhenKeyNameEmpty 校验 app 维度 store.GetApp 返回 ErrNoRows
+// TestGetAppUsageFallsBackWhenKeyNameEmpty 校验 app 维度 store.GetApp 返回 sql.ErrNoRows
 // 时，service 回退到 "app-"+appID 的拼装路径，确保历史/未回填数据仍然可查。
-// fakeUsageStore.GetApp 默认就返回 ErrNoRows，因此这里直接断言回退结果。
 func TestGetAppUsageFallsBackWhenKeyNameEmpty(t *testing.T) {
-	// 当 GetApp 拿不到记录时，service 不应中断查询，而是按约定拼 "app-"+UUID。
 	client := &fakeUsageClient{tokenLogs: newapi.LogsPage{Items: []newapi.LogEntry{{ID: 1}}, Total: 1}}
 	svc := NewUsageService(&fakeUsageStore{}, client, nil)
 
@@ -358,22 +353,19 @@ func TestGetAppUsageFallsBackWhenKeyNameEmpty(t *testing.T) {
 		42,
 		LogsQueryOptions{Page: 1, PageSize: 50})
 	require.NoError(t, err)
-	// 回退路径直接以传入的 appID 拼出 token_name。
 	assert.Equal(t, "app-0193ce63-4b8e-7000-a000-000000000001", client.lastTokenLogsQuery.TokenName)
 	assert.Equal(t, 50, client.lastTokenLogsQuery.PageSize)
 }
 
 // TestGetMemberUsageUsesAppNewapiKeyName 校验 member 维度走 GetActiveAppByOwner
-// 拿到 app 后用 app.NewapiKeyName 作 TokenName，确保 token 维度过滤口径
-// 与数据库中实际写入的 key_name 完全一致。
+// 拿到 app 后用 app.NewapiKeyName 作 TokenName。
 func TestGetMemberUsageUsesAppNewapiKeyName(t *testing.T) {
 	appID := mustUUID(t, "0193ce63-4b8e-7000-a000-000000000002")
 	store := &fakeUsageStore{
-		// NewapiKeyName 模拟初始化时由 app_initialize 写入的 token 名。
 		activeApp: sqlc.App{
 			ID:            appID,
-			NewapiKeyID:   pgtype.Text{String: "77", Valid: true},
-			NewapiKeyName: pgtype.Text{String: "app-0193ce63-4b8e-7000-a000-000000000002", Valid: true},
+			NewapiKeyID:   null.StringFrom("77"),
+			NewapiKeyName: null.StringFrom("app-0193ce63-4b8e-7000-a000-000000000002"),
 		},
 	}
 	client := &fakeUsageClient{tokenLogs: newapi.LogsPage{Items: []newapi.LogEntry{{ID: 9}}, Total: 1}}
@@ -387,15 +379,14 @@ func TestGetMemberUsageUsesAppNewapiKeyName(t *testing.T) {
 	assert.Equal(t, "app-0193ce63-4b8e-7000-a000-000000000002", client.lastTokenLogsQuery.TokenName)
 }
 
-// TestGetMemberUsageFallsBackWhenKeyNameEmpty 校验 app.NewapiKeyName 字段空时
-// （历史/未回填的边界）service 自行拼 "app-"+app.ID，避免该路径直接抛错。
+// TestGetMemberUsageFallsBackWhenKeyNameEmpty 校验 app.NewapiKeyName 字段空时回退到拼串路径。
 func TestGetMemberUsageFallsBackWhenKeyNameEmpty(t *testing.T) {
 	appID := mustUUID(t, "0193ce63-4b8e-7000-a000-000000000003")
 	store := &fakeUsageStore{
 		// 故意不设 NewapiKeyName 以模拟旧数据未回填的边界。
 		activeApp: sqlc.App{
 			ID:          appID,
-			NewapiKeyID: pgtype.Text{String: "78", Valid: true},
+			NewapiKeyID: null.StringFrom("78"),
 		},
 	}
 	client := &fakeUsageClient{tokenLogs: newapi.LogsPage{}}
@@ -406,65 +397,57 @@ func TestGetMemberUsageFallsBackWhenKeyNameEmpty(t *testing.T) {
 		"00000000-0000-0000-0000-000000000c01",
 		LogsQueryOptions{})
 	require.NoError(t, err)
-	// 字段空回退到 "app-"+app.ID。
 	assert.Equal(t, "app-0193ce63-4b8e-7000-a000-000000000003", client.lastTokenLogsQuery.TokenName)
 }
 
-// TestGetOrgUsagePassesUsernameToClient 校验 GetOrgUsage 把
-// organizations.newapi_username 透传给 client 做客户端过滤，
-// 避免 new-api admin /api/data/users?id= 静默忽略导致跨组织数据混淆。
+// TestGetOrgUsagePassesUsernameToClient 校验 GetOrgUsage 把 organizations.newapi_username 透传给 client。
 func TestGetOrgUsagePassesUsernameToClient(t *testing.T) {
 	orgID := mustUUID(t, "0193ce63-4b8e-7000-a000-0000000000aa")
 	store := &fakeUsageStore{
 		org: sqlc.Organization{
 			ID:             orgID,
-			NewapiUserID:   pgtype.Text{String: "14", Valid: true},
-			NewapiUsername: pgtype.Text{String: "m8-test", Valid: true},
+			NewapiUserID:   null.StringFrom("14"),
+			NewapiUsername: null.StringFrom("m8-test"),
 		},
 	}
 	client := &fakeUsageClient{userQuota: []newapi.QuotaDate{{Date: "2026-05-19", Quota: 7}}}
 	svc := NewUsageService(store, client, nil)
 
-	_, err := svc.GetOrgUsage(context.Background(), platformAdmin(), uuidToString(orgID), 0, 0)
+	_, err := svc.GetOrgUsage(context.Background(), platformAdmin(), orgID, 0, 0)
 	require.NoError(t, err)
 	assert.Equal(t, int64(14), client.lastUserQuotaUserID)
-	// service 必须把 organizations.newapi_username 原样透给 client。
 	assert.Equal(t, "m8-test", client.lastUserQuotaUsername)
 }
 
-// TestGetOrgUsageReturnsEmptyWhenUsernameEmpty 校验老数据 / 未回填边界：
-// organizations.newapi_username 为空时，service 直接返回空 series，
-// 不调 newapi（避免拿一堆其他组织的数据来污染）。
+// TestGetOrgUsageReturnsEmptyWhenUsernameEmpty 校验 organizations.newapi_username 为空时返回空 series。
 func TestGetOrgUsageReturnsEmptyWhenUsernameEmpty(t *testing.T) {
 	orgID := mustUUID(t, "0193ce63-4b8e-7000-a000-0000000000bb")
 	store := &fakeUsageStore{
-		// NewapiUsername 故意留空，模拟未回填的历史数据。
 		org: sqlc.Organization{
 			ID:           orgID,
-			NewapiUserID: pgtype.Text{String: "99", Valid: true},
+			NewapiUserID: null.StringFrom("99"),
+			// NewapiUsername 故意留空，模拟未回填的历史数据。
 		},
 	}
 	client := &fakeUsageClient{}
 	svc := NewUsageService(store, client, nil)
 
-	view, err := svc.GetOrgUsage(context.Background(), platformAdmin(), uuidToString(orgID), 0, 0)
+	view, err := svc.GetOrgUsage(context.Background(), platformAdmin(), orgID, 0, 0)
 	require.NoError(t, err)
 	assert.Empty(t, view.Items)
-	// username 缺失时绝不能调上游，否则会把别人组织的数据带回来。
 	assert.Equal(t, int64(0), client.lastUserQuotaUserID, "username 空时不应调 newapi")
 }
 
-// TestGetAppUsageUsesAppNewapiKeyName 校验 GetAppUsage 在 store 能取到 app
-// 且 app.NewapiKeyName 非空时，TokenName 使用数据库字段而非约定派生。
-// 这条 happy path 防止有人把 service 改回 "永远拼 app-+appID" 的旧约定。
+// TestGetAppUsageUsesAppNewapiKeyName 校验 GetAppUsage 在 store 能取到 app 且 app.NewapiKeyName 非空时，
+// TokenName 使用数据库字段而非约定派生。
 func TestGetAppUsageUsesAppNewapiKeyName(t *testing.T) {
 	appID := mustUUID(t, "0193ce63-4b8e-7000-a000-000000000001")
 	store := &fakeUsageStore{
-		appByID: map[pgtype.UUID]sqlc.App{
+		appByID: map[string]sqlc.App{
 			appID: {
 				ID:            appID,
-				NewapiKeyID:   pgtype.Text{String: "42", Valid: true},
-				NewapiKeyName: pgtype.Text{String: "app-database-override", Valid: true},
+				NewapiKeyID:   null.StringFrom("42"),
+				NewapiKeyName: null.StringFrom("app-database-override"),
 			},
 		},
 	}
@@ -472,7 +455,7 @@ func TestGetAppUsageUsesAppNewapiKeyName(t *testing.T) {
 	svc := NewUsageService(store, client, nil)
 
 	_, err := svc.GetAppUsage(context.Background(), platformAdmin(),
-		uuidToString(appID),
+		appID,
 		"owner-org", "owner-user",
 		42,
 		LogsQueryOptions{Page: 1, PageSize: 50})
@@ -488,20 +471,18 @@ func TestGetOrgUsageBreakdownForbidsNonPlatformAdmin(t *testing.T) {
 	require.ErrorIs(t, err, ErrForbidden)
 }
 
-// TestGetOrgUsageBreakdownSkipsOrgsWithoutNewAPIUser 校验无 newapi_user_id 或 newapi_username
-// 的组织不触发 new-api 调用、也不报错，仅在结果中静默跳过。
+// TestGetOrgUsageBreakdownSkipsOrgsWithoutNewAPIUser 校验无 newapi_user_id 或 newapi_username 的组织被静默跳过。
 func TestGetOrgUsageBreakdownSkipsOrgsWithoutNewAPIUser(t *testing.T) {
-	// org1 有 newapi 账号（user_id + username 均填写），org2 没有；期望结果只有 org1。
 	orgWithUser := sqlc.Organization{
 		ID:             mustUUID(t, "00000000-0000-0000-0000-000000000a01"),
 		Name:           "org-with-user",
-		NewapiUserID:   pgtype.Text{String: "10", Valid: true},
-		NewapiUsername: pgtype.Text{String: "org-10-user", Valid: true},
+		NewapiUserID:   null.StringFrom("10"),
+		NewapiUsername: null.StringFrom("org-10-user"),
 	}
 	orgWithout := sqlc.Organization{
 		ID:   mustUUID(t, "00000000-0000-0000-0000-000000000a02"),
 		Name: "org-without-user",
-		// NewapiUserID / NewapiUsername 均为零值（Invalid），模拟未初始化的组织
+		// NewapiUserID / NewapiUsername 均为零值（null.String{}），模拟未初始化的组织
 	}
 	store := &fakeUsageStore{allActiveOrgs: []sqlc.Organization{orgWithUser, orgWithout}}
 	client := &fakeUsageClient{userQuota: []newapi.QuotaDate{{Date: "2026-05-22", Quota: 500}}}
@@ -509,7 +490,6 @@ func TestGetOrgUsageBreakdownSkipsOrgsWithoutNewAPIUser(t *testing.T) {
 
 	result, err := svc.GetOrgUsageBreakdown(context.Background(), platformAdmin(), 0, 0)
 	require.NoError(t, err)
-	// 仅 orgWithUser 出现在结果中；orgWithout 被静默跳过。
 	require.Len(t, result.Items, 1)
 	assert.Equal(t, "org-with-user", result.Items[0].OrgName)
 	assert.Equal(t, int64(500), result.Items[0].TotalQuota)
@@ -517,21 +497,16 @@ func TestGetOrgUsageBreakdownSkipsOrgsWithoutNewAPIUser(t *testing.T) {
 
 // TestGetOrgUsageBreakdownSortsAndCapsAt10 校验结果按 TotalQuota 降序并截取前 10 条。
 func TestGetOrgUsageBreakdownSortsAndCapsAt10(t *testing.T) {
-	// 构建 12 个组织，每个组织对应的 quota 由 fakeUsageClientWithPerUserQuota 按 userID * 100 返回，
-	// 即 org-01 quota=100，org-12 quota=1200；期望排序后 top 10 且第一条 quota 最大。
 	orgs := make([]sqlc.Organization, 12)
 	for i := range orgs {
-		// 生成格式化的 UUID 字符串，使每个组织 ID 唯一。
 		idStr := fmt.Sprintf("00000000-0000-0000-0000-%012d", i+1)
 		orgs[i] = sqlc.Organization{
 			ID:             mustUUID(t, idStr),
 			Name:           fmt.Sprintf("org-%02d", i+1),
-			NewapiUserID:   pgtype.Text{String: fmt.Sprintf("%d", i+1), Valid: true},
-			NewapiUsername: pgtype.Text{String: fmt.Sprintf("user-%d", i+1), Valid: true},
+			NewapiUserID:   null.StringFrom(fmt.Sprintf("%d", i+1)),
+			NewapiUsername: null.StringFrom(fmt.Sprintf("user-%d", i+1)),
 		}
 	}
-	// fakeUsageClientWithPerUserQuota 对 userID=N 返回 quota=N*100，
-	// 因此 12 个组织的 quota 分别为 100~1200，降序 top 10 应从 1200 开始。
 	client := &fakeUsageClientWithPerUserQuota{
 		quotaByUserID: func(id int64) int64 { return id * 100 },
 	}
@@ -540,21 +515,16 @@ func TestGetOrgUsageBreakdownSortsAndCapsAt10(t *testing.T) {
 
 	result, err := svc.GetOrgUsageBreakdown(context.Background(), platformAdmin(), 0, 0)
 	require.NoError(t, err)
-	// 最多返回 10 条（12 个组织截取 top 10）。
 	require.Len(t, result.Items, 10)
-	// 第一条应是 quota 最大的（org-12，quota=1200）。
 	assert.Equal(t, int64(1200), result.Items[0].TotalQuota)
-	// 结果整体降序排列。
 	for i := 1; i < len(result.Items); i++ {
 		assert.GreaterOrEqual(t, result.Items[i-1].TotalQuota, result.Items[i].TotalQuota,
 			"结果应按 TotalQuota 降序排列")
 	}
 }
 
-// fakeUsageClientWithPerUserQuota 是支持按 userID 返回不同 quota 的 UsageNewAPIClient 实现，
-// 专用于 TestGetOrgUsageBreakdownSortsAndCapsAt10，验证多组织 quota 排序与截取逻辑。
+// fakeUsageClientWithPerUserQuota 是支持按 userID 返回不同 quota 的实现，专用于排序测试。
 type fakeUsageClientWithPerUserQuota struct {
-	// quotaByUserID 根据 userID 计算该用户应返回的 quota 值。
 	quotaByUserID func(id int64) int64
 }
 

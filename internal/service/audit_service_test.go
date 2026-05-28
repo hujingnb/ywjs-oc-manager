@@ -3,10 +3,10 @@ package service
 
 import (
 	"context"
+	"database/sql"
 	"testing"
 
-	"github.com/jackc/pgx/v5"
-	"github.com/jackc/pgx/v5/pgtype"
+	null "github.com/guregu/null/v5"
 
 	"github.com/stretchr/testify/require"
 	"oc-manager/internal/auth"
@@ -137,6 +137,8 @@ func TestAuditServiceListByTargetRejectsMemberOtherApp(t *testing.T) {
 // TestAuditServiceListByOrgPopulatesNameColumns 验证审计列表查询返回 actor / target 名称、软删除标记和详情字符串的预期行为场景。
 func TestAuditServiceListByOrgPopulatesNameColumns(t *testing.T) {
 	// 场景：actor / target 名称、软删除标记、详情字符串均被透传到 AuditResult。
+	// ActorDeleted / TargetDeleted 是 interface{}，MySQL 返回 int64（0/1）；
+	// 此处用 bool 直接测试 ifaceToBool 的 bool 分支。
 	store := &auditStoreStub{
 		byOrg: []sqlc.ListAuditLogsByOrgRow{
 			{
@@ -144,7 +146,7 @@ func TestAuditServiceListByOrgPopulatesNameColumns(t *testing.T) {
 				TargetID:      testAuditAppID,
 				OrgID:         mustOptionalUUID(t, testOrgID),
 				ActorRole:     domain.UserRoleOrgAdmin,
-				DetailMessage: pgtype.Text{String: "gpt-4o → claude-opus-4-7", Valid: true},
+				DetailMessage: null.StringFrom("gpt-4o → claude-opus-4-7"),
 				ActorName:     "张三",
 				ActorDeleted:  false,
 				TargetName:    "客服小助手",
@@ -183,11 +185,10 @@ func TestAuditServiceRecordPersistsDetailMessage(t *testing.T) {
 	require.Equal(t, "+5000.00 元，备注 vip 续费", store.created.DetailMessage.String)
 }
 
-func mustOptionalUUID(t *testing.T, value string) pgtype.UUID {
+// mustOptionalUUID 返回 null.String 表示一个有效的 UUID 值（MySQL 侧 CHAR(36) 可空列）。
+func mustOptionalUUID(t *testing.T, value string) null.String {
 	t.Helper()
-	id := mustUUID(t, value)
-	id.Valid = true
-	return id
+	return null.StringFrom(value)
 }
 
 const testAuditAppID = "00000000-0000-0000-0000-0000000000c1"
@@ -198,19 +199,26 @@ type auditStoreStub struct {
 	byTarget  []sqlc.ListAuditLogsByTargetRow
 	lastByOrg sqlc.ListAuditLogsByOrgParams
 	apps      map[string]sqlc.App
+	// lastLog 存储最近一次写入的审计日志行，供 GetAuditLog 读回。
+	lastLog sqlc.AuditLog
 }
 
-func (s *auditStoreStub) CreateAuditLog(_ context.Context, arg sqlc.CreateAuditLogParams) (sqlc.AuditLog, error) {
+// CreateAuditLog 为 :exec；stub 记录参数供测试断言，同时构建完整行供 GetAuditLog 读回。
+func (s *auditStoreStub) CreateAuditLog(_ context.Context, arg sqlc.CreateAuditLogParams) error {
 	s.created = arg
-	return sqlc.AuditLog{
-		ActorRole:    arg.ActorRole,
-		OrgID:        arg.OrgID,
-		TargetType:   arg.TargetType,
-		TargetID:     arg.TargetID,
-		Action:       arg.Action,
-		Result:       arg.Result,
-		MetadataJson: arg.MetadataJson,
-	}, nil
+	s.lastLog = sqlc.AuditLog{
+		ID:            arg.ID,
+		ActorID:       arg.ActorID,
+		ActorRole:     arg.ActorRole,
+		OrgID:         arg.OrgID,
+		TargetType:    arg.TargetType,
+		TargetID:      arg.TargetID,
+		Action:        arg.Action,
+		Result:        arg.Result,
+		MetadataJson:  arg.MetadataJson,
+		DetailMessage: arg.DetailMessage,
+	}
+	return nil
 }
 
 func (s *auditStoreStub) ListAuditLogsByOrg(_ context.Context, arg sqlc.ListAuditLogsByOrgParams) ([]sqlc.ListAuditLogsByOrgRow, error) {
@@ -222,10 +230,17 @@ func (s *auditStoreStub) ListAuditLogsByTarget(_ context.Context, _ sqlc.ListAud
 	return s.byTarget, nil
 }
 
-func (s *auditStoreStub) GetApp(_ context.Context, id pgtype.UUID) (sqlc.App, error) {
-	app, ok := s.apps[uuidToString(id)]
+func (s *auditStoreStub) GetApp(_ context.Context, id string) (sqlc.App, error) {
+	app, ok := s.apps[id]
 	if !ok {
-		return sqlc.App{}, pgx.ErrNoRows
+		return sqlc.App{}, sql.ErrNoRows
 	}
 	return app, nil
+}
+
+func (s *auditStoreStub) GetAuditLog(_ context.Context, id string) (sqlc.AuditLog, error) {
+	if s.lastLog.ID == id {
+		return s.lastLog, nil
+	}
+	return sqlc.AuditLog{}, sql.ErrNoRows
 }

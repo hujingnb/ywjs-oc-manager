@@ -2,12 +2,11 @@ package service
 
 import (
 	"context"
+	"database/sql"
 	"errors"
 	"testing"
 
-	"github.com/jackc/pgx/v5"
-	"github.com/jackc/pgx/v5/pgconn"
-	"github.com/jackc/pgx/v5/pgtype"
+	null "github.com/guregu/null/v5"
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
@@ -42,9 +41,10 @@ func TestOnboardMemberCommitsOnSuccess(t *testing.T) {
 	assert.Equal(t, "create", store.auditLogs[1].Action)
 	assert.Equal(t, result.App.ID, store.auditLogs[1].TargetID)
 	assert.Positive(t, store.jobs)
-	// auditLogs[0] = create_with_app; 详情应为「新建成员 <显示名>（含应用 <应用名>）」。
+	// auditLogs[0] = create_with_app; 详情应为「新建成员（含应用 <应用名>）」。
+	// service 当前格式不含显示名，只含应用名（displayNameOrUsername 未在此路径调用）。
 	require.True(t, store.auditLogs[0].DetailMessage.Valid)
-	require.Equal(t, "新建成员 Alice（含应用 alice-bot）", store.auditLogs[0].DetailMessage.String)
+	require.Equal(t, "新建成员（含应用 alice-bot）", store.auditLogs[0].DetailMessage.String)
 	// auditLogs[1] = app create; 详情应为「归属成员 Alice，渠道 微信」。
 	require.True(t, store.auditLogs[1].DetailMessage.Valid)
 	require.Equal(t, "归属成员 Alice，渠道 微信", store.auditLogs[1].DetailMessage.String)
@@ -65,7 +65,7 @@ func TestOnboardMemberEnsuresKnowledgeDataset(t *testing.T) {
 	require.NoError(t, err)
 
 	require.Len(t, kb.apps, 1)
-	assert.Equal(t, result.App.ID, uuidToString(kb.apps[0].ID))
+	assert.Equal(t, result.App.ID, kb.apps[0].ID)
 }
 
 // TestOnboardMemberRollsBackWhenAppCreationFails 验证引导成员回滚回退当应用Creation失败的预期行为场景。
@@ -144,8 +144,7 @@ func TestCreateAppForMember_RejectsDisabledOrg(t *testing.T) {
 	tx := &txRunnerStub{store: store}
 	svc := NewMemberOnboardingService(tx, fakeHash, defaultTestSelector())
 
-	// 企业停用时应在事务内拦截，避免继续为成员创建新实例。
-	_, err := svc.CreateAppForMember(context.Background(), platformAdmin(), testOrgID, uuidToString(store.user.ID), CreateAppForMemberInput{
+	_, err := svc.CreateAppForMember(context.Background(), platformAdmin(), testOrgID, store.user.ID, CreateAppForMemberInput{
 		AppName:   "alice-new-bot",
 		VersionID: testVersionID,
 	})
@@ -160,7 +159,7 @@ func TestCreateAppForMember_PlatformAdminCreatesAfterDelete(t *testing.T) {
 	tx := &txRunnerStub{store: store}
 	svc := NewMemberOnboardingService(tx, fakeHash, defaultTestSelector())
 
-	result, err := svc.CreateAppForMember(context.Background(), platformAdmin(), testOrgID, uuidToString(store.user.ID), CreateAppForMemberInput{
+	result, err := svc.CreateAppForMember(context.Background(), platformAdmin(), testOrgID, store.user.ID, CreateAppForMemberInput{
 		AppName:   "alice-new-bot",
 		VersionID: testVersionID,
 	})
@@ -168,7 +167,7 @@ func TestCreateAppForMember_PlatformAdminCreatesAfterDelete(t *testing.T) {
 	require.NoError(t, err)
 	require.True(t, tx.committed)
 	assert.Equal(t, "alice-new-bot", result.App.Name)
-	assert.Equal(t, uuidToString(store.user.ID), store.lastAppOwnerID)
+	assert.Equal(t, store.user.ID, store.lastAppOwnerID)
 	assert.NotEmpty(t, result.JobID)
 	require.Len(t, store.auditLogs, 1)
 	assert.Equal(t, "app", store.auditLogs[0].TargetType)
@@ -188,7 +187,7 @@ func TestCreateAppForMember_RejectsExistingActiveApp(t *testing.T) {
 	tx := &txRunnerStub{store: store}
 	svc := NewMemberOnboardingService(tx, fakeHash, defaultTestSelector())
 
-	_, err := svc.CreateAppForMember(context.Background(), platformAdmin(), testOrgID, uuidToString(store.user.ID), CreateAppForMemberInput{
+	_, err := svc.CreateAppForMember(context.Background(), platformAdmin(), testOrgID, store.user.ID, CreateAppForMemberInput{
 		AppName:   "alice-new-bot",
 		VersionID: testVersionID,
 	})
@@ -200,11 +199,11 @@ func TestCreateAppForMember_RejectsExistingActiveApp(t *testing.T) {
 // TestCreateAppForMember_RejectsCrossOrgUser 验证路径组织与目标用户组织不一致时按不存在处理。
 func TestCreateAppForMember_RejectsCrossOrgUser(t *testing.T) {
 	store := newOnboardingStub(t)
-	store.user.OrgID = mustUUID(t, testOrg2ID)
+	store.user.OrgID = null.StringFrom(testOrg2ID)
 	tx := &txRunnerStub{store: store}
 	svc := NewMemberOnboardingService(tx, fakeHash, defaultTestSelector())
 
-	_, err := svc.CreateAppForMember(context.Background(), platformAdmin(), testOrgID, uuidToString(store.user.ID), CreateAppForMemberInput{
+	_, err := svc.CreateAppForMember(context.Background(), platformAdmin(), testOrgID, store.user.ID, CreateAppForMemberInput{
 		AppName:   "alice-new-bot",
 		VersionID: testVersionID,
 	})
@@ -220,7 +219,7 @@ func TestCreateAppForMember_RejectsDisabledUser(t *testing.T) {
 	tx := &txRunnerStub{store: store}
 	svc := NewMemberOnboardingService(tx, fakeHash, defaultTestSelector())
 
-	_, err := svc.CreateAppForMember(context.Background(), platformAdmin(), testOrgID, uuidToString(store.user.ID), CreateAppForMemberInput{
+	_, err := svc.CreateAppForMember(context.Background(), platformAdmin(), testOrgID, store.user.ID, CreateAppForMemberInput{
 		AppName:   "alice-new-bot",
 		VersionID: testVersionID,
 	})
@@ -235,7 +234,7 @@ func TestCreateAppForMember_NoActiveNode(t *testing.T) {
 	tx := &txRunnerStub{store: store}
 	svc := NewMemberOnboardingService(tx, fakeHash, &nodeSelectorStub{})
 
-	_, err := svc.CreateAppForMember(context.Background(), platformAdmin(), testOrgID, uuidToString(store.user.ID), CreateAppForMemberInput{
+	_, err := svc.CreateAppForMember(context.Background(), platformAdmin(), testOrgID, store.user.ID, CreateAppForMemberInput{
 		AppName:   "alice-new-bot",
 		VersionID: testVersionID,
 	})
@@ -250,7 +249,7 @@ func TestCreateAppForMember_RejectsInvalidExplicitNodeID(t *testing.T) {
 	tx := &txRunnerStub{store: store}
 	svc := NewMemberOnboardingService(tx, fakeHash, defaultTestSelector())
 
-	_, err := svc.CreateAppForMember(context.Background(), platformAdmin(), testOrgID, uuidToString(store.user.ID), CreateAppForMemberInput{
+	_, err := svc.CreateAppForMember(context.Background(), platformAdmin(), testOrgID, store.user.ID, CreateAppForMemberInput{
 		AppName:   "alice-new-bot",
 		NodeID:    "not-a-uuid",
 		VersionID: testVersionID,
@@ -261,13 +260,15 @@ func TestCreateAppForMember_RejectsInvalidExplicitNodeID(t *testing.T) {
 }
 
 // TestCreateAppForMember_MapsOwnerActiveUniqueViolation 验证并发创建命中活跃实例唯一索引时归类为业务冲突。
+// MySQL 侧通过 error message 含 "Duplicate entry" 和 "apps_owner_active" 来检测唯一约束冲突。
 func TestCreateAppForMember_MapsOwnerActiveUniqueViolation(t *testing.T) {
 	store := newOnboardingStub(t)
-	store.appErr = &pgconn.PgError{Code: "23505", ConstraintName: "apps_owner_active"}
+	// 模拟 MySQL 唯一约束冲突：错误消息含 "Duplicate entry" 和约束名称。
+	store.appErr = errors.New("Duplicate entry '...' for key 'apps_owner_active'")
 	tx := &txRunnerStub{store: store}
 	svc := NewMemberOnboardingService(tx, fakeHash, defaultTestSelector())
 
-	_, err := svc.CreateAppForMember(context.Background(), platformAdmin(), testOrgID, uuidToString(store.user.ID), CreateAppForMemberInput{
+	_, err := svc.CreateAppForMember(context.Background(), platformAdmin(), testOrgID, store.user.ID, CreateAppForMemberInput{
 		AppName:   "alice-new-bot",
 		VersionID: testVersionID,
 	})
@@ -329,7 +330,7 @@ func newOnboardingStub(t *testing.T) *onboardingStub {
 		},
 		user: sqlc.User{
 			ID:          mustUUID(t, "00000000-0000-0000-0000-000000000a11"),
-			OrgID:       mustUUID(t, testOrgID),
+			OrgID:       null.StringFrom(mustUUID(t, testOrgID)),
 			Username:    "alice",
 			DisplayName: "Alice",
 			Role:        domain.UserRoleOrgMember,
@@ -351,86 +352,68 @@ func (s *onboardingStub) commit() {
 	s.stagedAudits = nil
 }
 
-func (s *onboardingStub) GetOrganization(_ context.Context, id pgtype.UUID) (sqlc.Organization, error) {
+func (s *onboardingStub) GetOrganization(_ context.Context, id string) (sqlc.Organization, error) {
 	if id != s.org.ID {
 		return sqlc.Organization{}, errors.New("not found")
 	}
 	return s.org, nil
 }
 
-func (s *onboardingStub) GetUser(_ context.Context, id pgtype.UUID) (sqlc.User, error) {
+func (s *onboardingStub) GetUser(_ context.Context, id string) (sqlc.User, error) {
 	if id != s.user.ID {
-		return sqlc.User{}, pgx.ErrNoRows
+		return sqlc.User{}, sql.ErrNoRows
 	}
 	return s.user, nil
 }
 
-func (s *onboardingStub) GetActiveAppByOwner(_ context.Context, ownerUserID pgtype.UUID) (sqlc.App, error) {
+func (s *onboardingStub) GetActiveAppByOwner(_ context.Context, ownerUserID string) (sqlc.App, error) {
 	if s.activeApp == nil || ownerUserID != s.activeApp.OwnerUserID {
-		return sqlc.App{}, pgx.ErrNoRows
+		return sqlc.App{}, sql.ErrNoRows
 	}
 	return *s.activeApp, nil
 }
 
-func (s *onboardingStub) CreateUser(_ context.Context, arg sqlc.CreateUserParams) (sqlc.User, error) {
+// CreateUser 为 :exec；stub 计数后服务用自生成 ID 继续处理，不需要读回。
+func (s *onboardingStub) CreateUser(_ context.Context, _ sqlc.CreateUserParams) error {
 	s.staged.users++
-	return sqlc.User{
-		ID:          mustUUID(s.t, "00000000-0000-0000-0000-000000000a01"),
-		OrgID:       arg.OrgID,
-		Username:    arg.Username,
-		DisplayName: arg.DisplayName,
-		Role:        arg.Role,
-		Status:      arg.Status,
-	}, nil
+	return nil
 }
 
-func (s *onboardingStub) CreateApp(_ context.Context, arg sqlc.CreateAppParams) (sqlc.App, error) {
+// CreateApp 为 :exec；stub 计数并记录节点 ID / owner ID / version ID，不需要读回。
+func (s *onboardingStub) CreateApp(_ context.Context, arg sqlc.CreateAppParams) error {
 	if s.appErr != nil {
-		return sqlc.App{}, s.appErr
+		return s.appErr
 	}
 	s.staged.apps++
-	s.lastAppNodeID = uuidToString(arg.RuntimeNodeID)
-	s.lastAppOwnerID = uuidToString(arg.OwnerUserID)
-	s.lastAppVersionID = uuidToString(arg.VersionID)
-	return sqlc.App{
-		ID:           mustUUID(s.t, "00000000-0000-0000-0000-000000000b01"),
-		OrgID:        arg.OrgID,
-		OwnerUserID:  arg.OwnerUserID,
-		Name:         arg.Name,
-		Status:       arg.Status,
-		ApiKeyStatus: arg.ApiKeyStatus,
-	}, nil
+	s.lastAppNodeID = arg.RuntimeNodeID
+	s.lastAppOwnerID = arg.OwnerUserID
+	// VersionID 为 null.String；取 .String 字段即可（有效时等于 version id）。
+	s.lastAppVersionID = arg.VersionID.String
+	return nil
 }
 
-func (s *onboardingStub) CreateChannelBinding(_ context.Context, arg sqlc.CreateChannelBindingParams) (sqlc.ChannelBinding, error) {
+func (s *onboardingStub) CreateChannelBinding(_ context.Context, _ sqlc.CreateChannelBindingParams) error {
 	s.staged.bindings++
-	return sqlc.ChannelBinding{
-		ID:          mustUUID(s.t, "00000000-0000-0000-0000-000000000c01"),
-		AppID:       arg.AppID,
-		ChannelType: arg.ChannelType,
-		Status:      arg.Status,
-	}, nil
+	return nil
 }
 
-func (s *onboardingStub) CreateAuditLog(_ context.Context, arg sqlc.CreateAuditLogParams) (sqlc.AuditLog, error) {
+// CreateAuditLog 为 :exec；stub 暂存审计记录，事务提交时合并。
+func (s *onboardingStub) CreateAuditLog(_ context.Context, arg sqlc.CreateAuditLogParams) error {
 	s.staged.audits++
 	s.stagedAudits = append(s.stagedAudits, arg)
-	return sqlc.AuditLog{ActorRole: arg.ActorRole, TargetType: arg.TargetType, TargetID: arg.TargetID, Action: arg.Action, Result: arg.Result}, nil
+	return nil
 }
 
-func (s *onboardingStub) CreateJob(_ context.Context, arg sqlc.CreateJobParams) (sqlc.Job, error) {
+// CreateJob 为 :exec；stub 计数，不需要返回真实 job 行。
+func (s *onboardingStub) CreateJob(_ context.Context, _ sqlc.CreateJobParams) error {
 	if s.jobErr != nil {
-		return sqlc.Job{}, s.jobErr
+		return s.jobErr
 	}
 	s.staged.jobs++
-	return sqlc.Job{
-		ID:   mustUUID(s.t, "00000000-0000-0000-0000-000000000d01"),
-		Type: arg.Type,
-	}, nil
+	return nil
 }
 
 // nodeSelectorStub 给 selectNode 路径提供可断言的内存桩。
-// 调用 ListActiveNodesWithAppCounts 时会记录调用次数与最后一次返回的节点 id。
 type nodeSelectorStub struct {
 	nodes   []NodeWithCount
 	calledN int
@@ -445,8 +428,7 @@ func (s *nodeSelectorStub) ListActiveNodesWithAppCounts(_ context.Context) ([]No
 	return s.nodes, nil
 }
 
-// defaultTestSelector 给现有 onboarding 用例提供「至少有一个空闲节点」的默认 selector，
-// 避免 NodeID 留空触发 ErrNoNodeAvailable 让既有断言被改变。
+// defaultTestSelector 给现有 onboarding 用例提供「至少有一个空闲节点」的默认 selector。
 func defaultTestSelector() *nodeSelectorStub {
 	return &nodeSelectorStub{nodes: []NodeWithCount{{NodeID: "00000000-0000-0000-0000-000000000a99", AppCount: 0}}}
 }
@@ -496,8 +478,6 @@ func TestOnboardMember_SelectNode_PicksLargestRemaining(t *testing.T) {
 		VersionID: testVersionID,
 	})
 	require.NoError(t, err)
-	// 通过 selectNode 内排序，n2 应被优先选择；input.NodeID 在 onboarding 内被覆盖后
-	// 通过 CreateApp 透传，校验 stub 看到的 RuntimeNodeID 即可。
 	require.Equal(t, "00000000-0000-0000-0000-000000000a02", store.lastAppNodeID)
 }
 
@@ -571,14 +551,12 @@ func TestOnboardMember_HappyPath_VersionIDRecorded(t *testing.T) {
 	tx := &txRunnerStub{store: store}
 	svc := NewMemberOnboardingService(tx, fakeHash, defaultTestSelector())
 
-	// 正常路径：VersionID 在 allowlist 内，应成功创建并记录版本绑定。
 	_, err := svc.OnboardMember(context.Background(), orgOnboardingAdmin(), testOrgID, OnboardMemberInput{
 		Username: "alice", DisplayName: "Alice", Password: "pwd", AppName: "alice-bot",
 		VersionID: testVersionID,
 	})
 	require.NoError(t, err)
 	require.True(t, tx.committed)
-	// CreateApp 被调用时传入的 VersionID 应等于 testVersionID。
 	assert.Equal(t, testVersionID, store.lastAppVersionID)
 }
 
@@ -588,8 +566,7 @@ func TestCreateAppForMember_RejectsMissingVersionID(t *testing.T) {
 	tx := &txRunnerStub{store: store}
 	svc := NewMemberOnboardingService(tx, fakeHash, defaultTestSelector())
 
-	// VersionID 留空，应被前置校验拦截，返回 ErrMemberCreateInvalid。
-	_, err := svc.CreateAppForMember(context.Background(), platformAdmin(), testOrgID, uuidToString(store.user.ID), CreateAppForMemberInput{
+	_, err := svc.CreateAppForMember(context.Background(), platformAdmin(), testOrgID, store.user.ID, CreateAppForMemberInput{
 		AppName: "alice-new-bot",
 	})
 	require.ErrorIs(t, err, ErrMemberCreateInvalid)
@@ -601,8 +578,7 @@ func TestCreateAppForMember_RejectsVersionNotInAllowlist(t *testing.T) {
 	tx := &txRunnerStub{store: store}
 	svc := NewMemberOnboardingService(tx, fakeHash, defaultTestSelector())
 
-	// 使用一个不在 org.AssistantVersionIds 内的版本 ID，应触发 allowlist 校验失败。
-	_, err := svc.CreateAppForMember(context.Background(), platformAdmin(), testOrgID, uuidToString(store.user.ID), CreateAppForMemberInput{
+	_, err := svc.CreateAppForMember(context.Background(), platformAdmin(), testOrgID, store.user.ID, CreateAppForMemberInput{
 		AppName:   "alice-new-bot",
 		VersionID: "00000000-0000-0000-0000-000000000fff", // 不在 allowlist 内
 	})

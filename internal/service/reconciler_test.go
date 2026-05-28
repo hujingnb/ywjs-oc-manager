@@ -6,7 +6,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/jackc/pgx/v5/pgtype"
+	null "github.com/guregu/null/v5"
 
 	"github.com/stretchr/testify/require"
 	"oc-manager/internal/domain"
@@ -33,24 +33,25 @@ func (s *reconcilerStub) ListRuntimeNodes(_ context.Context, _ sqlc.ListRuntimeN
 	return s.nodes, nil
 }
 
-func (s *reconcilerStub) SetRuntimeNodeStatus(_ context.Context, arg sqlc.SetRuntimeNodeStatusParams) (sqlc.RuntimeNode, error) {
-	s.updatedNodes = append(s.updatedNodes, uuidToString(arg.ID)+"="+arg.Status)
+// SetRuntimeNodeStatus 为 :exec；stub 记录更新并修改内存中的节点状态。
+func (s *reconcilerStub) SetRuntimeNodeStatus(_ context.Context, arg sqlc.SetRuntimeNodeStatusParams) error {
+	s.updatedNodes = append(s.updatedNodes, arg.ID+"="+arg.Status)
 	for i := range s.nodes {
 		if s.nodes[i].ID == arg.ID {
 			s.nodes[i].Status = arg.Status
-			return s.nodes[i], nil
 		}
 	}
-	return sqlc.RuntimeNode{}, nil
+	return nil
 }
 
 func (s *reconcilerStub) ListAppsByRuntimeNode(_ context.Context, arg sqlc.ListAppsByRuntimeNodeParams) ([]sqlc.App, error) {
-	return s.apps[uuidToString(arg.RuntimeNodeID)], nil
+	return s.apps[arg.RuntimeNodeID], nil
 }
 
-func (s *reconcilerStub) SetAppStatus(_ context.Context, arg sqlc.SetAppStatusParams) (sqlc.App, error) {
-	s.updatedApps[uuidToString(arg.ID)] = arg.Status
-	return sqlc.App{ID: arg.ID, Status: arg.Status}, nil
+// SetAppStatus 为 :exec；stub 记录更新后的状态。
+func (s *reconcilerStub) SetAppStatus(_ context.Context, arg sqlc.SetAppStatusParams) error {
+	s.updatedApps[arg.ID] = arg.Status
+	return nil
 }
 
 // TestNodeHealthReconciler_DemotesTimedOutNodesAndApps 验证节点健康检查ReconcilerDemotes超时超时节点并应用的预期行为场景。
@@ -61,12 +62,12 @@ func TestNodeHealthReconciler_DemotesTimedOutNodesAndApps(t *testing.T) {
 	timeoutNode := sqlc.RuntimeNode{
 		ID:              mustUUID(t, testReconcilerNodeID),
 		Status:          domain.RuntimeNodeStatusActive,
-		LastHeartbeatAt: pgtype.Timestamptz{Time: now.Add(-5 * time.Minute), Valid: true},
+		LastHeartbeatAt: null.TimeFrom(now.Add(-5 * time.Minute)), // 超时 5 分钟
 	}
 	healthyNode := sqlc.RuntimeNode{
 		ID:              mustUUID(t, "00000000-0000-0000-0000-000000005002"),
 		Status:          domain.RuntimeNodeStatusActive,
-		LastHeartbeatAt: pgtype.Timestamptz{Time: now.Add(-5 * time.Second), Valid: true},
+		LastHeartbeatAt: null.TimeFrom(now.Add(-5 * time.Second)), // 仅 5 秒前，未超时
 	}
 	stub.nodes = []sqlc.RuntimeNode{timeoutNode, healthyNode}
 	app := sqlc.App{
@@ -74,7 +75,7 @@ func TestNodeHealthReconciler_DemotesTimedOutNodesAndApps(t *testing.T) {
 		RuntimeNodeID: timeoutNode.ID,
 		Status:        domain.AppStatusRunning,
 	}
-	stub.apps[uuidToString(timeoutNode.ID)] = []sqlc.App{app}
+	stub.apps[timeoutNode.ID] = []sqlc.App{app}
 
 	rec := NewNodeHealthReconciler(stub, 90*time.Second)
 	rec.SetClock(func() time.Time { return now })
@@ -84,7 +85,7 @@ func TestNodeHealthReconciler_DemotesTimedOutNodesAndApps(t *testing.T) {
 	if len(stub.updatedNodes) != 1 || stub.updatedNodes[0] != testReconcilerNodeID+"="+domain.RuntimeNodeStatusUnreachable {
 		t.Fatalf("updatedNodes = %+v", stub.updatedNodes)
 	}
-	require.Equal(t, domain.AppStatusError, stub.updatedApps[uuidToString(app.ID)])
+	require.Equal(t, domain.AppStatusError, stub.updatedApps[app.ID])
 }
 
 // TestNodeHealthReconciler_SkipsAlreadyDisabledNodes 验证节点健康检查Reconciler跳过已经禁用节点的特殊分支或幂等场景。
@@ -95,7 +96,7 @@ func TestNodeHealthReconciler_SkipsAlreadyDisabledNodes(t *testing.T) {
 		{
 			ID:              mustUUID(t, testReconcilerNodeID),
 			Status:          domain.RuntimeNodeStatusDisabled,
-			LastHeartbeatAt: pgtype.Timestamptz{Time: now.Add(-1 * time.Hour), Valid: true},
+			LastHeartbeatAt: null.TimeFrom(now.Add(-1 * time.Hour)), // 超时但已禁用，应跳过
 		},
 	}
 	rec := NewNodeHealthReconciler(stub, 90*time.Second)
@@ -114,7 +115,7 @@ func TestNodeHealthReconciler_NeverHeartbeatedTreatedAsTimedOut(t *testing.T) {
 		{
 			ID:              mustUUID(t, testReconcilerNodeID),
 			Status:          domain.RuntimeNodeStatusActive,
-			LastHeartbeatAt: pgtype.Timestamptz{Valid: false},
+			LastHeartbeatAt: null.Time{}, // 从未心跳，视为超时
 		},
 	}
 	rec := NewNodeHealthReconciler(stub, 90*time.Second)

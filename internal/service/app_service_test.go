@@ -2,11 +2,11 @@ package service
 
 import (
 	"context"
+	"database/sql"
 	"encoding/json"
 	"testing"
 
-	"github.com/jackc/pgx/v5"
-	"github.com/jackc/pgx/v5/pgtype"
+	null "github.com/guregu/null/v5"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
@@ -56,7 +56,7 @@ func newAppServiceWithStore(t *testing.T) (*AppService, *appServiceStoreStub) {
 		},
 		user: sqlc.User{
 			ID:     mustUUID(t, testAdminUID),
-			OrgID:  mustUUID(t, testOrgID),
+			OrgID:  null.StringFrom(mustUUID(t, testOrgID)),
 			Role:   domain.UserRoleOrgAdmin,
 			Status: domain.StatusActive,
 		},
@@ -68,7 +68,7 @@ func newAppServiceWithStore(t *testing.T) (*AppService, *appServiceStoreStub) {
 func appOrgAdminPrincipal(org sqlc.Organization) auth.Principal {
 	return auth.Principal{
 		Role:   domain.UserRoleOrgAdmin,
-		OrgID:  uuidToString(org.ID),
+		OrgID:  org.ID,
 		UserID: testAdminUID,
 	}
 }
@@ -103,9 +103,10 @@ func (s *appServiceStoreStub) mustSeedApp(t *testing.T) sqlc.App {
 	return s.app
 }
 
-func (s *appServiceStoreStub) CreateApp(_ context.Context, arg sqlc.CreateAppParams) (sqlc.App, error) {
+// CreateApp 为 :exec；service 会传入自生成 ID，stub 记录后供 GetAppWithVersion 读回。
+func (s *appServiceStoreStub) CreateApp(_ context.Context, arg sqlc.CreateAppParams) error {
 	s.app = sqlc.App{
-		ID:            mustUUIDFromString(testAppServiceAppID),
+		ID:            arg.ID,
 		OrgID:         arg.OrgID,
 		OwnerUserID:   arg.OwnerUserID,
 		RuntimeNodeID: arg.RuntimeNodeID,
@@ -114,13 +115,13 @@ func (s *appServiceStoreStub) CreateApp(_ context.Context, arg sqlc.CreateAppPar
 		Status:        arg.Status,
 		ApiKeyStatus:  arg.ApiKeyStatus,
 	}
-	return s.app, nil
+	return nil
 }
 
 // GetAppWithVersion 返回 app 及版本 revision / image_id，模拟联查结果。
-func (s *appServiceStoreStub) GetAppWithVersion(_ context.Context, id pgtype.UUID) (sqlc.GetAppWithVersionRow, error) {
+func (s *appServiceStoreStub) GetAppWithVersion(_ context.Context, id string) (sqlc.GetAppWithVersionRow, error) {
 	if s.app.ID != id {
-		return sqlc.GetAppWithVersionRow{}, pgx.ErrNoRows
+		return sqlc.GetAppWithVersionRow{}, sql.ErrNoRows
 	}
 	return sqlc.GetAppWithVersionRow{
 		App:             s.app,
@@ -143,36 +144,36 @@ func (s *appServiceStoreStub) ListAppsByOrgWithVersion(_ context.Context, arg sq
 	return nil, nil
 }
 
-func (s *appServiceStoreStub) SetAppStatus(_ context.Context, arg sqlc.SetAppStatusParams) (sqlc.App, error) {
+func (s *appServiceStoreStub) SetAppStatus(_ context.Context, arg sqlc.SetAppStatusParams) error {
 	s.app.Status = arg.Status
-	return s.app, nil
+	return nil
 }
 
-func (s *appServiceStoreStub) SoftDeleteApp(_ context.Context, _ pgtype.UUID) (sqlc.App, error) {
-	s.app.DeletedAt = pgtype.Timestamptz{Valid: true}
-	return s.app, nil
+func (s *appServiceStoreStub) SoftDeleteApp(_ context.Context, _ string) error {
+	s.app.DeletedAt = null.TimeFrom(stubNow())
+	return nil
 }
 
-func (s *appServiceStoreStub) CreateJob(_ context.Context, arg sqlc.CreateJobParams) (sqlc.Job, error) {
+func (s *appServiceStoreStub) CreateJob(_ context.Context, arg sqlc.CreateJobParams) error {
 	if s.jobErr != nil {
-		return sqlc.Job{}, s.jobErr
+		return s.jobErr
 	}
 	s.jobs = append(s.jobs, arg)
-	return sqlc.Job{ID: mustUUIDFromString("00000000-0000-0000-0000-000000002101"), Type: arg.Type}, nil
+	return nil
 }
 
-func (s *appServiceStoreStub) CreateAuditLog(_ context.Context, arg sqlc.CreateAuditLogParams) (sqlc.AuditLog, error) {
+func (s *appServiceStoreStub) CreateAuditLog(_ context.Context, arg sqlc.CreateAuditLogParams) error {
 	if s.auditErr != nil {
-		return sqlc.AuditLog{}, s.auditErr
+		return s.auditErr
 	}
 	s.auditLogs = append(s.auditLogs, arg)
-	return sqlc.AuditLog{}, nil
+	return nil
 }
 
-// GetOrganization 返回 stub 预设的组织记录；id 不匹配时返回 pgx.ErrNoRows。
-func (s *appServiceStoreStub) GetOrganization(_ context.Context, id pgtype.UUID) (sqlc.Organization, error) {
+// GetOrganization 返回 stub 预设的组织记录；id 不匹配时返回 sql.ErrNoRows。
+func (s *appServiceStoreStub) GetOrganization(_ context.Context, id string) (sqlc.Organization, error) {
 	if s.organization.ID != id {
-		return sqlc.Organization{}, pgx.ErrNoRows
+		return sqlc.Organization{}, sql.ErrNoRows
 	}
 	return s.organization, nil
 }
@@ -180,18 +181,12 @@ func (s *appServiceStoreStub) GetOrganization(_ context.Context, id pgtype.UUID)
 // SetAppVersion 记录调用参数并将 app.VersionID 更新到 stub 状态，模拟数据库写入。
 // 同时把 AppliedVersionRevision 清零、AppliedImageRef 置空，与真实 SQL 行为一致：
 // 切换版本必然让实例进入需重启态，避免新旧版本 revision 相同导致 version_synced 误判。
-func (s *appServiceStoreStub) SetAppVersion(_ context.Context, arg sqlc.SetAppVersionParams) (sqlc.App, error) {
+func (s *appServiceStoreStub) SetAppVersion(_ context.Context, arg sqlc.SetAppVersionParams) error {
 	s.setVersionCalls = append(s.setVersionCalls, arg)
-	s.app.VersionID = pgtype.UUID{Bytes: arg.VersionID.Bytes, Valid: true}
+	s.app.VersionID = arg.VersionID
 	s.app.AppliedVersionRevision = 0
 	s.app.AppliedImageRef = ""
-	return s.app, nil
-}
-
-func mustUUIDFromString(value string) pgtype.UUID {
-	var id pgtype.UUID
-	_ = id.Scan(value)
-	return id
+	return nil
 }
 
 // stubImageResolver 实现 AppImageResolver 的测试桩：固定把 image_id 映射到 ref。
@@ -272,14 +267,13 @@ func TestComputeVersionSynced(t *testing.T) {
 		},
 		{
 			// resolver 非 nil 但 image_id 不在配置中（ok=false）：无法解析镜像，视为未同步。
-			// 覆盖 return ok && app.AppliedImageRef == ref 中 ok=false 的分支。
 			name: "resolver 无法解析 image_id 时为 false",
 			app: sqlc.App{
 				AppliedVersionRevision: 4,
 				AppliedImageRef:        "ghcr.io/foo/hermes:v1.0",
 			},
 			versionRevision: 4,
-			versionImageID:  "img-unknown", // 不在 resolver.refs 中，ResolveRuntimeImage 返回 ok=false
+			versionImageID:  "img-unknown", // 不在 resolver.refs 中
 			resolver:        resolver,
 			want:            false,
 		},
@@ -319,8 +313,7 @@ func TestGetVersionSynced(t *testing.T) {
 	// 修订与镜像均对齐，version_synced 应为 true。
 	assert.True(t, result.VersionSynced, "实例已同步版本，version_synced 应为 true")
 
-	// 变更场景：实例的 applied_version_revision 落后于版本最新 revision，
-	// 期望 version_synced 通过 service 层传播为 false。
+	// 变更场景：实例的 applied_version_revision 落后于版本最新 revision。
 	store.versionRevision = 3 // 版本 revision 推进到 3，实例仍停在 2
 	result2, err := svc.Get(context.Background(), platformAdmin(), testAppServiceAppID)
 	require.NoError(t, err)
@@ -328,7 +321,6 @@ func TestGetVersionSynced(t *testing.T) {
 }
 
 // mustOrgWithAllowlist 构造一个包含给定版本 id allowlist 的 Organization sqlc 记录。
-// allowlist 以 JSON 数组形式写入 AssistantVersionIds 字段，模拟数据库存储格式。
 func mustOrgWithAllowlist(t *testing.T, versionIDs ...string) sqlc.Organization {
 	t.Helper()
 	raw, err := json.Marshal(versionIDs)
@@ -341,127 +333,96 @@ func mustOrgWithAllowlist(t *testing.T, versionIDs ...string) sqlc.Organization 
 	}
 }
 
-// TestSwitchAppVersionSuccess 验证组织管理员切换到 allowlist 内的版本时成功返回更新后的实例视图，
-// 且 version_synced 为 false（applied_* 仍指向旧版本，需重启生效）。
+// TestSwitchAppVersionSuccess 验证组织管理员切换到 allowlist 内的版本时成功。
 func TestSwitchAppVersionSuccess(t *testing.T) {
 	t.Parallel()
 	svc, store := newAppServiceWithStore(t)
 
-	// 预置实例：applied_version_revision=0，模拟切换前状态。
 	app := store.mustSeedApp(t)
 	app.AppliedVersionRevision = 0
 	store.app = app
-	// 组织 allowlist 内含目标版本 testSwitchVersionID。
 	store.organization = mustOrgWithAllowlist(t, testSwitchVersionID)
-	// stub 的 versionRevision 设为 1，使切换后 version_synced=false（applied 仍为 0）。
 	store.versionRevision = 1
 
 	principal := appOrgAdminPrincipal(store.organization)
 	result, err := svc.SwitchAppVersion(context.Background(), principal, testAppServiceAppID, testSwitchVersionID)
 
-	// 切换成功：无错误，返回的实例 VersionID 为目标版本。
 	require.NoError(t, err)
 	assert.Equal(t, testSwitchVersionID, result.VersionID, "返回的实例 VersionID 应等于目标版本")
-	// applied_version_revision=0 而 versionRevision=1，version_synced 应为 false，提示需重启。
 	assert.False(t, result.VersionSynced, "切换后 applied_* 未更新，version_synced 应为 false")
-	// 验证 SetAppVersion 被实际调用一次，且参数正确。
 	require.Len(t, store.setVersionCalls, 1, "SetAppVersion 应被调用一次")
 }
 
-// TestSwitchAppVersionSuccessByOwnerMember 验证组织成员作为实例 owner 时，
-// 可通过 CanManageApp 的 owner-member 自服务路径成功切换版本。
+// TestSwitchAppVersionSuccessByOwnerMember 验证组织成员作为实例 owner 时可成功切换版本。
 func TestSwitchAppVersionSuccessByOwnerMember(t *testing.T) {
 	t.Parallel()
 	svc, store := newAppServiceWithStore(t)
 
-	// 预置实例：owner 为 testMemUID，模拟切换前状态（applied_version_revision=0）。
 	app := store.mustSeedApp(t)
 	app.AppliedVersionRevision = 0
 	store.app = app
-	// 组织 allowlist 内含目标版本 testSwitchVersionID。
 	store.organization = mustOrgWithAllowlist(t, testSwitchVersionID)
-	// stub versionRevision=1，确保切换后 version_synced=false（applied 仍为 0）。
 	store.versionRevision = 1
 
-	// 构造 owner-member principal：角色为 org_member，UserID 等于实例的 OwnerUserID（testMemUID）。
+	// 构造 owner-member principal：UserID 等于实例的 OwnerUserID（testMemUID）。
 	ownerMember := auth.Principal{
 		Role:   domain.UserRoleOrgMember,
 		OrgID:  testOrgID,
-		UserID: testMemUID, // 与 mustSeedApp 写入的 OwnerUserID 一致，满足 CanManageApp 自服务路径
+		UserID: testMemUID,
 	}
 
 	result, err := svc.SwitchAppVersion(context.Background(), ownerMember, testAppServiceAppID, testSwitchVersionID)
 
-	// owner-member 切换成功：无错误，返回的实例 VersionID 为目标版本。
 	require.NoError(t, err)
 	assert.Equal(t, testSwitchVersionID, result.VersionID, "返回的实例 VersionID 应等于目标版本")
-	// applied_version_revision=0 而 versionRevision=1，version_synced 应为 false，提示需重启。
 	assert.False(t, result.VersionSynced, "切换后 applied_* 未更新，version_synced 应为 false")
-	// 验证 SetAppVersion 被实际调用一次，确认写入路径已执行。
 	require.Len(t, store.setVersionCalls, 1, "SetAppVersion 应被调用一次")
 }
 
 // TestSwitchAppVersionSuccessByPlatformAdmin 验证平台管理员可跨组织切换任意实例的助手版本。
-// 平台管理员无 OrgID，CanSwitchAppVersion 应仍返回 true，使管理员可统一管理版本。
 func TestSwitchAppVersionSuccessByPlatformAdmin(t *testing.T) {
 	t.Parallel()
 	svc, store := newAppServiceWithStore(t)
 
-	// 预置实例：applied_version_revision=0，模拟切换前状态。
 	app := store.mustSeedApp(t)
 	app.AppliedVersionRevision = 0
 	store.app = app
-	// 组织 allowlist 内含目标版本 testSwitchVersionID。
 	store.organization = mustOrgWithAllowlist(t, testSwitchVersionID)
 	store.versionRevision = 1
 
-	// platformAdmin() 无 OrgID，应通过 CanSwitchAppVersion 的 platform_admin 分支。
 	result, err := svc.SwitchAppVersion(context.Background(), platformAdmin(), testAppServiceAppID, testSwitchVersionID)
 
-	// 平台管理员切换成功：无错误，返回的实例 VersionID 为目标版本。
 	require.NoError(t, err)
 	assert.Equal(t, testSwitchVersionID, result.VersionID, "返回的实例 VersionID 应等于目标版本")
-	// applied_version_revision=0 而 versionRevision=1，version_synced 应为 false，提示需重启。
 	assert.False(t, result.VersionSynced, "切换后 applied_* 未更新，version_synced 应为 false")
 	require.Len(t, store.setVersionCalls, 1, "SetAppVersion 应被调用一次")
 }
 
 // TestSwitchAppVersionResetsAppliedSoVersionSyncedIsFalse 是针对「同 revision 误判」bug 的回归测试。
-// 复现场景：每个 assistant_versions 行各自维护独立的 revision 计数，旧版本 A 与目标版本 B
-// 可能恰好都处于 revision=2 且镜像相同。修复前 SetAppVersion 切换时保留 applied_version_revision
-// 与 applied_image_ref，computeVersionSynced 会判定 applied_version_revision(2)==B.revision(2)
-// 且镜像 ref 相同 → version_synced=true，实例列表/详情不显示「需重启」，而实例实际仍在跑旧版本
-// A 的 manifest。修复后 SetAppVersion 切换时清零 applied_*，切换后 version_synced 必为 false。
 func TestSwitchAppVersionResetsAppliedSoVersionSyncedIsFalse(t *testing.T) {
 	t.Parallel()
 	svc, store := newAppServiceWithStore(t)
 
-	// 注入镜像解析器：目标版本的 image_id 解析为与旧版本完全相同的镜像 ref。
 	svc.SetImageResolver(&stubImageResolver{refs: map[string]string{
 		"img-v1": "ghcr.io/foo/hermes:v1.0",
 	}})
 
-	// 预置实例：模拟切换前已对齐旧版本 A —— applied_version_revision=2、applied_image_ref 与解析结果一致。
 	app := store.mustSeedApp(t)
 	app.AppliedVersionRevision = 2
 	app.AppliedImageRef = "ghcr.io/foo/hermes:v1.0"
 	store.app = app
-	// 组织 allowlist 内含目标版本 testSwitchVersionID。
 	store.organization = mustOrgWithAllowlist(t, testSwitchVersionID)
-	// 关键碰撞条件：目标版本 B 的 revision 也是 2，image_id 解析出的 ref 与旧版本完全相同。
+	// 关键碰撞条件：目标版本的 revision 也是 2，image_id 解析结果相同。
 	store.versionRevision = 2
 	store.versionImageID = "img-v1"
 
 	principal := appOrgAdminPrincipal(store.organization)
 	result, err := svc.SwitchAppVersion(context.Background(), principal, testAppServiceAppID, testSwitchVersionID)
 
-	// 切换成功：无错误，返回的实例 VersionID 指向目标版本。
 	require.NoError(t, err)
 	assert.Equal(t, testSwitchVersionID, result.VersionID, "返回的实例 VersionID 应等于目标版本")
-	// 回归断言：尽管新旧版本 revision 同为 2、镜像相同，切换后 applied_* 已被清零，
-	// version_synced 必须为 false（修复前此处会误判为 true）。
+	// 回归断言：applied_* 已被清零，version_synced 必须为 false。
 	assert.False(t, result.VersionSynced, "新旧版本 revision 相同且镜像相同时，切换后 version_synced 仍应为 false")
-	// 验证 SetAppVersion 被实际调用一次，确认走到了清零写入路径。
 	require.Len(t, store.setVersionCalls, 1, "SetAppVersion 应被调用一次")
 }
 
@@ -470,27 +431,21 @@ func TestSwitchAppVersionNotInAllowlist(t *testing.T) {
 	t.Parallel()
 	svc, store := newAppServiceWithStore(t)
 
-	// 预置实例，allowlist 只含 testSwitchVersionID，不含 testSwitchVersionID2。
 	store.mustSeedApp(t)
 	store.organization = mustOrgWithAllowlist(t, testSwitchVersionID)
 
 	principal := appOrgAdminPrincipal(store.organization)
-	// 尝试切换到 allowlist 外的 testSwitchVersionID2，期望返回 ErrVersionNotInAllowlist。
 	_, err := svc.SwitchAppVersion(context.Background(), principal, testAppServiceAppID, testSwitchVersionID2)
 	require.ErrorIs(t, err, ErrVersionNotInAllowlist, "allowlist 外的版本应返回 ErrVersionNotInAllowlist")
-	// SetAppVersion 不应被调用。
 	assert.Empty(t, store.setVersionCalls, "allowlist 校验失败时不应写入数据库")
 }
 
 // TestSwitchAppVersionForbidden 验证无权管理该实例的调用者被拒绝（返回 ErrForbidden）。
-// 测试用例：组织成员尝试管理不属于自己的实例，或错误组织的管理员。
 func TestSwitchAppVersionForbidden(t *testing.T) {
 	t.Parallel()
 
 	tests := []struct {
-		// name 是子测试场景说明。
-		name string
-		// principal 是没有该实例管理权限的调用者。
+		name      string
 		principal auth.Principal
 	}{
 		{
@@ -498,17 +453,17 @@ func TestSwitchAppVersionForbidden(t *testing.T) {
 			name: "其他组织的管理员无权管理",
 			principal: auth.Principal{
 				Role:   domain.UserRoleOrgAdmin,
-				OrgID:  "00000000-0000-0000-0000-000000009999", // 与实例所属组织不同
+				OrgID:  "00000000-0000-0000-0000-000000009999",
 				UserID: testAdminUID,
 			},
 		},
 		{
-			// 组织成员只能管理自己的实例；testMemUID2 不是实例 owner（owner 为 testMemUID）。
+			// 组织成员只能管理自己的实例；不是实例 owner 则无权。
 			name: "非 owner 组织成员无权管理",
 			principal: auth.Principal{
 				Role:   domain.UserRoleOrgMember,
 				OrgID:  testOrgID,
-				UserID: "00000000-0000-0000-0000-000000009998", // 不是实例 owner
+				UserID: "00000000-0000-0000-0000-000000009998",
 			},
 		},
 	}
@@ -521,7 +476,6 @@ func TestSwitchAppVersionForbidden(t *testing.T) {
 			store.mustSeedApp(t)
 			store.organization = mustOrgWithAllowlist(t, testSwitchVersionID)
 
-			// 无权调用者尝试切换版本，期望返回 ErrForbidden。
 			_, err := svc.SwitchAppVersion(context.Background(), tc.principal, testAppServiceAppID, testSwitchVersionID)
 			require.ErrorIs(t, err, ErrForbidden, "无权调用者应返回 ErrForbidden")
 		})
@@ -532,13 +486,12 @@ func TestSwitchAppVersionForbidden(t *testing.T) {
 func TestSwitchAppVersionAppNotFound(t *testing.T) {
 	t.Parallel()
 	svc, store := newAppServiceWithStore(t)
-	// store.app 未设置（零值 ID），传入有效但不存在的 appID 触发 pgx.ErrNoRows。
 	store.mustSeedApp(t)
 	store.organization = mustOrgWithAllowlist(t, testSwitchVersionID)
 
 	const nonExistentAppID = "00000000-0000-0000-0000-000000009001"
 	principal := appOrgAdminPrincipal(store.organization)
-	// 传入不存在的实例 id，stub 返回 pgx.ErrNoRows，期望 service 映射为 ErrNotFound。
+	// 传入不存在的实例 id，stub 返回 sql.ErrNoRows，期望 service 映射为 ErrNotFound。
 	_, err := svc.SwitchAppVersion(context.Background(), principal, nonExistentAppID, testSwitchVersionID)
 	require.ErrorIs(t, err, ErrNotFound, "实例不存在时应返回 ErrNotFound")
 }

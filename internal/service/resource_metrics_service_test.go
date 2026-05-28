@@ -3,11 +3,11 @@ package service
 
 import (
 	"context"
+	"database/sql"
 	"testing"
 	"time"
 
-	"github.com/jackc/pgx/v5"
-	"github.com/jackc/pgx/v5/pgtype"
+	null "github.com/guregu/null/v5"
 	"github.com/stretchr/testify/require"
 
 	"oc-manager/internal/auth"
@@ -83,7 +83,7 @@ func TestResourceMetricsServiceListAppResourcesRejectsDeletedApp(t *testing.T) {
 		RuntimeNodeID: mustUUID(t, testResourceRuntimeID),
 		Name:          "已删除应用",
 		Status:        domain.AppStatusDeleted,
-		DeletedAt:     pgtype.Timestamptz{Time: mustTime(t, testResourceSampleTime), Valid: true},
+		DeletedAt:     null.TimeFrom(mustTime(t, testResourceSampleTime)), // 已被删除，时间戳不为空
 	}
 	svc := NewResourceMetricsService(store)
 
@@ -105,16 +105,16 @@ func newResourceMetricsStoreStub(t *testing.T) *resourceMetricsStoreStub {
 	return &resourceMetricsStoreStub{t: t}
 }
 
-func (s *resourceMetricsStoreStub) GetRuntimeNode(_ context.Context, id pgtype.UUID) (sqlc.RuntimeNode, error) {
-	if uuidToString(id) != testResourceRuntimeID {
-		return sqlc.RuntimeNode{}, pgx.ErrNoRows
+func (s *resourceMetricsStoreStub) GetRuntimeNode(_ context.Context, id string) (sqlc.RuntimeNode, error) {
+	if id != testResourceRuntimeID {
+		return sqlc.RuntimeNode{}, sql.ErrNoRows
 	}
 	return sqlc.RuntimeNode{ID: id, Name: "资源测试节点", Status: domain.RuntimeNodeStatusActive}, nil
 }
 
-func (s *resourceMetricsStoreStub) GetApp(_ context.Context, id pgtype.UUID) (sqlc.App, error) {
-	if uuidToString(id) != uuidToString(s.app.ID) {
-		return sqlc.App{}, pgx.ErrNoRows
+func (s *resourceMetricsStoreStub) GetApp(_ context.Context, id string) (sqlc.App, error) {
+	if id != s.app.ID {
+		return sqlc.App{}, sql.ErrNoRows
 	}
 	return s.app, nil
 }
@@ -123,7 +123,7 @@ func (s *resourceMetricsStoreStub) ListAppsByRuntimeNode(context.Context, sqlc.L
 	return []sqlc.App{s.app}, nil
 }
 
-func (s *resourceMetricsStoreStub) ListLatestInstanceResourceSamplesByNode(context.Context, pgtype.UUID) ([]sqlc.InstanceResourceSample, error) {
+func (s *resourceMetricsStoreStub) ListLatestInstanceResourceSamplesByNode(_ context.Context, _ string) ([]sqlc.InstanceResourceSample, error) {
 	return nil, nil
 }
 
@@ -148,11 +148,15 @@ func (s *resourceMetricsStoreStub) ListInstanceResourceSamples(context.Context, 
 		AppID:           s.app.ID,
 		RuntimeNodeID:   s.app.RuntimeNodeID,
 		ContainerID:     testResourceContainer,
-		SampledAt:       pgtype.Timestamptz{Time: mustTime(s.t, testResourceSampleTime), Valid: true},
-		ContainerStatus: pgtype.Text{String: domain.AppStatusRunning, Valid: true},
+		SampledAt:       mustTime(s.t, testResourceSampleTime),          // time.Time（非空）
+		ContainerStatus: null.StringFrom(domain.AppStatusRunning),       // null.String
 	}}, nil
 }
 
 func (s *resourceMetricsStoreStub) ListInstanceResourceBuckets(context.Context, sqlc.ListInstanceResourceBucketsParams) ([]sqlc.ListInstanceResourceBucketsRow, error) {
+	return nil, nil
+}
+
+func (s *resourceMetricsStoreStub) ListLatestNodeResourceSamples(_ context.Context, _ []string) ([]sqlc.NodeResourceSample, error) {
 	return nil, nil
 }

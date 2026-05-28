@@ -7,7 +7,7 @@ import (
 	"log/slog"
 	"testing"
 
-	"github.com/jackc/pgx/v5/pgtype"
+	null "github.com/guregu/null/v5"
 
 	"github.com/stretchr/testify/require"
 	"oc-manager/internal/auth"
@@ -79,14 +79,11 @@ func TestRuntimeOperationSurvivesNotifierError(t *testing.T) {
 }
 
 // TestRuntimeOperationAllowsPlatformAdmin 验证 CanTriggerRuntimeOperation 扩展后平台管理员可触发 stop 等运行时操作。
-// 规格变更：平台管理员需要介入实例运维（启停/重启），故从原来的拒绝改为允许。
 func TestRuntimeOperationAllowsPlatformAdmin(t *testing.T) {
 	store := newRuntimeOperationStub(t)
-	// 使 app 处于 running 状态才允许 stop。
 	store.app.Status = domain.AppStatusRunning
 	svc := NewRuntimeOperationService(store, newDiscardLogger())
 
-	// 平台管理员调用 stop，应成功返回 job_id 而非 ErrRuntimeOperationDenied。
 	result, err := svc.Trigger(context.Background(), platformAdmin(), testRuntimeOpAppID, RuntimeOperationStop)
 	require.NoError(t, err, "CanTriggerRuntimeOperation 已扩展至 platform_admin，Trigger 应允许")
 	require.NotEmpty(t, result.JobID, "成功触发后应返回非空 job_id")
@@ -97,7 +94,7 @@ func TestRequestInitialize_HappyPathFromError(t *testing.T) {
 	store := newRuntimeOperationStub(t)
 	store.app.Status = domain.AppStatusError
 	store.app.ApiKeyStatus = domain.APIKeyStatusError
-	store.app.ContainerID = pgtype.Text{String: "old", Valid: true}
+	store.app.ContainerID = null.StringFrom("old") // 有容器 ID
 	notifier := &fakeNotifier{}
 	svc := NewRuntimeOperationService(store, newDiscardLogger(), notifier)
 
@@ -109,7 +106,7 @@ func TestRequestInitialize_HappyPathFromError(t *testing.T) {
 	require.Equal(t, domain.AppStatusPullingRuntimeImage, store.app.Status)
 	require.Equal(t, domain.APIKeyStatusPending, store.app.ApiKeyStatus)
 	require.False(t, store.app.ContainerID.Valid)
-	// 5.6 新增:ClearAppProgress 必须被调用,否则前端会看到上一次失败遗留的进度数。
+	// 5.6 新增：ClearAppProgress 必须被调用，否则前端会看到上一次失败遗留的进度数。
 	require.True(t, store.progressCleared)
 	require.Equal(t, domain.JobTypeAppInitialize, store.lastJobType)
 	require.True(t, store.auditWritten)
@@ -138,7 +135,7 @@ func TestRequestInitialize_RejectsPlatformAdminWrite(t *testing.T) {
 // TestInspectApp_NoContainerReturnsSentinel 验证检查应用无容器返回Sentinel的成功路径场景。
 func TestInspectApp_NoContainerReturnsSentinel(t *testing.T) {
 	store := newRuntimeOperationStub(t)
-	store.app.ContainerID = pgtype.Text{}
+	store.app.ContainerID = null.String{} // 无容器
 	svc := NewRuntimeOperationService(store, newDiscardLogger())
 	view, err := svc.InspectApp(context.Background(), platformAdmin(), testRuntimeOpAppID)
 	require.NoError(t, err)
@@ -149,7 +146,7 @@ func TestInspectApp_NoContainerReturnsSentinel(t *testing.T) {
 // TestInspectApp_DelegatesToInspectorWhenAvailable 验证检查应用Delegates到检查or当可用的预期行为场景。
 func TestInspectApp_DelegatesToInspectorWhenAvailable(t *testing.T) {
 	store := newRuntimeOperationStub(t)
-	store.app.ContainerID = pgtype.Text{String: "ctr-x", Valid: true}
+	store.app.ContainerID = null.StringFrom("ctr-x")
 	svc := NewRuntimeOperationService(store, newDiscardLogger())
 	svc.SetInspector(stubInspector{info: RuntimeContainerInfo{ID: "ctr-x", Status: "running"}})
 	view, err := svc.InspectApp(context.Background(), platformAdmin(), testRuntimeOpAppID)
@@ -162,7 +159,7 @@ func TestInspectApp_DelegatesToInspectorWhenAvailable(t *testing.T) {
 // TestInspectApp_FallsBackToDBStatusWithoutInspector 验证检查应用回退回退到DB状态不使用检查or的特殊分支或幂等场景。
 func TestInspectApp_FallsBackToDBStatusWithoutInspector(t *testing.T) {
 	store := newRuntimeOperationStub(t)
-	store.app.ContainerID = pgtype.Text{String: "ctr-x", Valid: true}
+	store.app.ContainerID = null.StringFrom("ctr-x")
 	store.app.Status = domain.AppStatusRunning
 	svc := NewRuntimeOperationService(store, newDiscardLogger())
 	view, err := svc.InspectApp(context.Background(), platformAdmin(), testRuntimeOpAppID)
@@ -173,7 +170,7 @@ func TestInspectApp_FallsBackToDBStatusWithoutInspector(t *testing.T) {
 // TestInspectApp_InspectorErrorMapsToErrorStatus 验证检查应用检查or错误映射到错误状态的错误映射或错误记录场景。
 func TestInspectApp_InspectorErrorMapsToErrorStatus(t *testing.T) {
 	store := newRuntimeOperationStub(t)
-	store.app.ContainerID = pgtype.Text{String: "ctr-x", Valid: true}
+	store.app.ContainerID = null.StringFrom("ctr-x")
 	svc := NewRuntimeOperationService(store, newDiscardLogger())
 	svc.SetInspector(stubInspector{err: errors.New("connection refused")})
 	view, err := svc.InspectApp(context.Background(), platformAdmin(), testRuntimeOpAppID)
@@ -230,13 +227,12 @@ type runtimeOperationStub struct {
 	userStatus   string
 	lastJobType  string
 	auditWritten bool
-	// progressCleared 标记 ClearAppProgress 被调用过,
-	// RequestInitialize 用例据此断言 5.6 的进度重置分支被走到。
+	// progressCleared 标记 ClearAppProgress 被调用过。
 	progressCleared bool
 	// channelBindingCount 控制 CountChannelBindingsByApp 返回的渠道绑定数；默认 0。
 	channelBindingCount int64
 	// lastAuditDetail 记录最近一次 CreateAuditLog 传入的 DetailMessage，供断言使用。
-	lastAuditDetail pgtype.Text
+	lastAuditDetail null.String
 }
 
 func newRuntimeOperationStub(t *testing.T) *runtimeOperationStub {
@@ -250,58 +246,62 @@ func newRuntimeOperationStub(t *testing.T) *runtimeOperationStub {
 	return &runtimeOperationStub{t: t, app: app, userStatus: domain.StatusActive}
 }
 
-func (s *runtimeOperationStub) GetApp(_ context.Context, id pgtype.UUID) (sqlc.App, error) {
+func (s *runtimeOperationStub) GetApp(_ context.Context, id string) (sqlc.App, error) {
 	if id != s.app.ID {
 		return sqlc.App{}, fakeNotFound
 	}
 	return s.app, nil
 }
 
-func (s *runtimeOperationStub) GetUser(_ context.Context, _ pgtype.UUID) (sqlc.User, error) {
+func (s *runtimeOperationStub) GetUser(_ context.Context, _ string) (sqlc.User, error) {
 	return sqlc.User{Status: s.userStatus}, nil
 }
 
-func (s *runtimeOperationStub) CreateJob(_ context.Context, arg sqlc.CreateJobParams) (sqlc.Job, error) {
+// CreateJob 为 :exec；stub 记录任务类型并生成一个固定 ID。
+func (s *runtimeOperationStub) CreateJob(_ context.Context, arg sqlc.CreateJobParams) error {
 	s.lastJobType = arg.Type
-	return sqlc.Job{ID: mustUUID(s.t, "00000000-0000-0000-0000-000000001ff1"), Type: arg.Type}, nil
+	return nil
 }
 
-func (s *runtimeOperationStub) CreateAuditLog(_ context.Context, arg sqlc.CreateAuditLogParams) (sqlc.AuditLog, error) {
+// CreateAuditLog 为 :exec；stub 记录是否写入及详情字段。
+func (s *runtimeOperationStub) CreateAuditLog(_ context.Context, arg sqlc.CreateAuditLogParams) error {
 	s.auditWritten = true
 	s.lastAuditDetail = arg.DetailMessage
-	return sqlc.AuditLog{}, nil
+	return nil
 }
 
 // CountChannelBindingsByApp 返回 channelBindingCount，模拟查询结果。
-func (s *runtimeOperationStub) CountChannelBindingsByApp(_ context.Context, _ pgtype.UUID) (int64, error) {
+func (s *runtimeOperationStub) CountChannelBindingsByApp(_ context.Context, _ string) (int64, error) {
 	return s.channelBindingCount, nil
 }
 
-func (s *runtimeOperationStub) SetAppStatus(_ context.Context, arg sqlc.SetAppStatusParams) (sqlc.App, error) {
+// SetAppStatus 为 :exec；stub 直接更新内存中的 app.Status。
+func (s *runtimeOperationStub) SetAppStatus(_ context.Context, arg sqlc.SetAppStatusParams) error {
 	s.app.Status = arg.Status
-	return s.app, nil
+	return nil
 }
 
-// ClearAppProgress 模拟 sqlc.ClearAppProgress:清空 progress_*,
-// 让 RequestInitialize 测试能跑通新增的进度重置分支。
-func (s *runtimeOperationStub) ClearAppProgress(_ context.Context, _ pgtype.UUID) (sqlc.App, error) {
-	s.app.ProgressCurrent = pgtype.Int8{}
-	s.app.ProgressTotal = pgtype.Int8{}
+// ClearAppProgress 为 :exec；stub 清空进度字段并记录调用。
+func (s *runtimeOperationStub) ClearAppProgress(_ context.Context, _ string) error {
+	s.app.ProgressCurrent = null.Int{}
+	s.app.ProgressTotal = null.Int{}
 	s.progressCleared = true
-	return s.app, nil
+	return nil
 }
 
-func (s *runtimeOperationStub) SetAppNewAPIKey(_ context.Context, arg sqlc.SetAppNewAPIKeyParams) (sqlc.App, error) {
+// SetAppNewAPIKey 为 :exec；stub 更新 api key 相关字段。
+func (s *runtimeOperationStub) SetAppNewAPIKey(_ context.Context, arg sqlc.SetAppNewAPIKeyParams) error {
 	s.app.ApiKeyStatus = arg.ApiKeyStatus
 	s.app.NewapiKeyID = arg.NewapiKeyID
 	s.app.NewapiKeyCiphertext = arg.NewapiKeyCiphertext
-	return s.app, nil
+	return nil
 }
 
-func (s *runtimeOperationStub) SetAppContainer(_ context.Context, arg sqlc.SetAppContainerParams) (sqlc.App, error) {
+// SetAppContainer 为 :exec；stub 更新容器 ID / 名称字段。
+func (s *runtimeOperationStub) SetAppContainer(_ context.Context, arg sqlc.SetAppContainerParams) error {
 	s.app.ContainerID = arg.ContainerID
 	s.app.ContainerName = arg.ContainerName
-	return s.app, nil
+	return nil
 }
 
 var fakeNotFound = errors.New("not found")
@@ -319,7 +319,6 @@ func (f *fakeNotifier) Enqueue(_ context.Context, jobID string) error {
 // TestTrigger_DisabledPrincipal_Denied 验证触发禁用PrincipalDenied的预期行为场景。
 func TestTrigger_DisabledPrincipal_Denied(t *testing.T) {
 	store := newRuntimeOperationStub(t)
-	// 将主体状态设为 disabled，模拟账号被封禁后 token 仍未过期的场景。
 	store.userStatus = domain.StatusDisabled
 	svc := NewRuntimeOperationService(store, newDiscardLogger())
 
@@ -328,10 +327,8 @@ func TestTrigger_DisabledPrincipal_Denied(t *testing.T) {
 }
 
 // TestRuntimeOperationTriggerDeleteEmitsCascadeDetail 验证 delete 操作审计详情包含级联渠道绑定数。
-// 场景：触发 delete，stub 报告该 app 下有 2 个未删除渠道绑定，detail 应展示「级联：2 个渠道绑定」。
 func TestRuntimeOperationTriggerDeleteEmitsCascadeDetail(t *testing.T) {
 	store := newRuntimeOperationStub(t)
-	// 设置 stub 返回 2 个未删除渠道绑定，模拟 app.delete 前的真实状态。
 	store.channelBindingCount = 2
 	svc := NewRuntimeOperationService(store, newDiscardLogger())
 
@@ -343,14 +340,13 @@ func TestRuntimeOperationTriggerDeleteEmitsCascadeDetail(t *testing.T) {
 }
 
 // TestRuntimeOperationTriggerStartHasNoDetail 验证非 delete 操作（如 start）的审计详情留空。
-// 场景：触发 start，actor 信息已在触发人列展示，详情列按设计文档保持 NULL。
 func TestRuntimeOperationTriggerStartHasNoDetail(t *testing.T) {
 	store := newRuntimeOperationStub(t)
 	svc := NewRuntimeOperationService(store, newDiscardLogger())
 
 	_, err := svc.Trigger(context.Background(), runtimeOrgAdminPrincipal(), testRuntimeOpAppID, RuntimeOperationStart)
 	require.NoError(t, err)
-	// 非 delete op 的 DetailMessage.Valid 必须为 false（前端展示「—」）。
+	// 非 delete op 的 DetailMessage.Valid 必须为 false。
 	require.False(t, store.lastAuditDetail.Valid, "非 delete 操作的 DetailMessage 应为 NULL")
 }
 
@@ -358,7 +354,6 @@ func TestRuntimeOperationTriggerStartHasNoDetail(t *testing.T) {
 func TestRequestInitialize_DisabledPrincipal_Denied(t *testing.T) {
 	store := newRuntimeOperationStub(t)
 	store.app.Status = domain.AppStatusError
-	// 将主体状态设为 disabled，验证 RequestInitialize 同样拒绝被禁用账号。
 	store.userStatus = domain.StatusDisabled
 	svc := NewRuntimeOperationService(store, newDiscardLogger())
 

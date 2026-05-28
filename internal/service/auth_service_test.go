@@ -2,12 +2,12 @@ package service
 
 import (
 	"context"
+	"database/sql"
 	"errors"
 	"testing"
 	"time"
 
-	"github.com/jackc/pgx/v5"
-	"github.com/jackc/pgx/v5/pgtype"
+	null "github.com/guregu/null/v5"
 
 	"github.com/stretchr/testify/require"
 	"oc-manager/internal/auth"
@@ -135,7 +135,7 @@ func TestAuthServiceLoginRejectsDisabledOrg(t *testing.T) {
 	org := store.orgsByCode["test-org"]
 	org.Status = domain.StatusDisabled
 	store.orgsByCode["test-org"] = org
-	store.orgsByID[uuidToString(org.ID)] = org
+	store.orgsByID[org.ID] = org
 	svc := newTestAuthService(t, store)
 
 	_, err := svc.Login(context.Background(), LoginInput{
@@ -177,7 +177,7 @@ func TestAuthServiceLogoutIsIdempotent(t *testing.T) {
 }
 
 // TestAuthServiceRefreshRejectsExpiredToken 校验 refresh token 在 expires_at <= now 时被拒绝；
-// stub 用 SetRefreshExpiresAt 把已签发的 record.ExpiresAt 推到过去。
+// stub 用 expireAll 把已签发的 record.ExpiresAt 推到过去。
 func TestAuthServiceRefreshRejectsExpiredToken(t *testing.T) {
 	store := newAuthStoreStub(t)
 	svc := newTestAuthService(t, store)
@@ -230,7 +230,6 @@ func newAuthStoreStub(t *testing.T) *authStoreStub {
 	platformID := mustUUID(t, authTestPlatformAdminID)
 	orgAdminID := mustUUID(t, authTestOrgAdminID)
 	orgMemberID := mustUUID(t, authTestOrgMemberID)
-	refreshID := mustUUID(t, "00000000-0000-0000-0000-000000000301")
 	hash, err := auth.HashPassword("correct-password", auth.PasswordParams{
 		Memory:      32,
 		Iterations:  1,
@@ -245,7 +244,7 @@ func newAuthStoreStub(t *testing.T) *authStoreStub {
 		Name:   "测试组织",
 		Status: domain.StatusActive,
 	}
-	platformAdmin := sqlc.User{
+	platformAdminUser := sqlc.User{
 		ID:           platformID,
 		Username:     "admin",
 		PasswordHash: hash,
@@ -255,7 +254,7 @@ func newAuthStoreStub(t *testing.T) *authStoreStub {
 	}
 	orgAdmin := sqlc.User{
 		ID:           orgAdminID,
-		OrgID:        orgID,
+		OrgID:        null.StringFrom(orgID),
 		Username:     "admin",
 		PasswordHash: hash,
 		DisplayName:  "企业管理员",
@@ -264,7 +263,7 @@ func newAuthStoreStub(t *testing.T) *authStoreStub {
 	}
 	orgMember := sqlc.User{
 		ID:           orgMemberID,
-		OrgID:        orgID,
+		OrgID:        null.StringFrom(orgID),
 		Username:     "member",
 		PasswordHash: hash,
 		DisplayName:  "企业成员",
@@ -273,25 +272,26 @@ func newAuthStoreStub(t *testing.T) *authStoreStub {
 	}
 	return &authStoreStub{
 		usersByID: map[string]sqlc.User{
-			uuidToString(platformAdmin.ID): platformAdmin,
-			uuidToString(orgAdmin.ID):      orgAdmin,
-			uuidToString(orgMember.ID):     orgMember,
+			platformAdminUser.ID: platformAdminUser,
+			orgAdmin.ID:          orgAdmin,
+			orgMember.ID:         orgMember,
 		},
 		platformByName: map[string]sqlc.User{
-			platformAdmin.Username: platformAdmin,
+			platformAdminUser.Username: platformAdminUser,
 		},
 		orgUsersByKey: map[string]sqlc.User{
 			orgUserKey(org.ID, orgAdmin.Username):  orgAdmin,
 			orgUserKey(org.ID, orgMember.Username): orgMember,
 		},
 		orgsByID: map[string]sqlc.Organization{
-			uuidToString(org.ID): org,
+			org.ID: org,
 		},
 		orgsByCode: map[string]sqlc.Organization{
 			org.Code: org,
 		},
-		nextRefreshID: refreshID,
-		refreshTokens: map[string]sqlc.RefreshToken{},
+		// 每次创建 refresh token 用递增计数器派生唯一 ID。
+		nextRefreshCounter: 0,
+		refreshTokens:      map[string]sqlc.RefreshToken{},
 	}
 }
 
@@ -301,56 +301,56 @@ type authStoreStub struct {
 	orgUsersByKey  map[string]sqlc.User
 	orgsByID       map[string]sqlc.Organization
 	orgsByCode     map[string]sqlc.Organization
-	nextRefreshID  pgtype.UUID
-	idCounter      byte
-	loggedIn       bool
-	lastIssuedRole string
-	refreshTokens  map[string]sqlc.RefreshToken
-	revoked        []pgtype.UUID
+	// nextRefreshCounter 用于生成唯一 refresh token ID 的自增计数。
+	nextRefreshCounter int
+	loggedIn           bool
+	lastIssuedRole     string
+	refreshTokens      map[string]sqlc.RefreshToken
+	revoked            []string
 }
 
-func orgUserKey(orgID pgtype.UUID, username string) string {
-	return uuidToString(orgID) + "/" + username
+// orgUserKey 拼接组织 ID（string）和用户名作为 stub map key。
+func orgUserKey(orgID string, username string) string {
+	return orgID + "/" + username
 }
 
 func (s *authStoreStub) GetUserByUsername(_ context.Context, username string) (sqlc.User, error) {
 	user, ok := s.platformByName[username]
 	if !ok {
-		return sqlc.User{}, pgx.ErrNoRows
+		return sqlc.User{}, sql.ErrNoRows
 	}
 	return user, nil
 }
 
 func (s *authStoreStub) GetUserByOrgAndUsername(_ context.Context, arg sqlc.GetUserByOrgAndUsernameParams) (sqlc.User, error) {
-	user, ok := s.orgUsersByKey[orgUserKey(arg.OrgID, arg.Username)]
+	user, ok := s.orgUsersByKey[orgUserKey(arg.OrgID.String, arg.Username)]
 	if !ok {
-		return sqlc.User{}, pgx.ErrNoRows
+		return sqlc.User{}, sql.ErrNoRows
 	}
 	return user, nil
 }
 
-func (s *authStoreStub) GetUser(_ context.Context, id pgtype.UUID) (sqlc.User, error) {
-	user, ok := s.usersByID[uuidToString(id)]
+func (s *authStoreStub) GetUser(_ context.Context, id string) (sqlc.User, error) {
+	user, ok := s.usersByID[id]
 	if !ok {
-		return sqlc.User{}, pgx.ErrNoRows
+		return sqlc.User{}, sql.ErrNoRows
 	}
 	return user, nil
 }
 
-func (s *authStoreStub) MarkUserLoggedIn(_ context.Context, id pgtype.UUID) (sqlc.User, error) {
-	user, ok := s.usersByID[uuidToString(id)]
+func (s *authStoreStub) MarkUserLoggedIn(_ context.Context, id string) error {
+	_, ok := s.usersByID[id]
 	if !ok {
-		return sqlc.User{}, pgx.ErrNoRows
+		return sql.ErrNoRows
 	}
 	s.loggedIn = true
-	s.lastIssuedRole = user.Role
-	return user, nil
+	return nil
 }
 
-func (s *authStoreStub) GetOrganization(_ context.Context, id pgtype.UUID) (sqlc.Organization, error) {
-	org, ok := s.orgsByID[uuidToString(id)]
+func (s *authStoreStub) GetOrganization(_ context.Context, id string) (sqlc.Organization, error) {
+	org, ok := s.orgsByID[id]
 	if !ok {
-		return sqlc.Organization{}, pgx.ErrNoRows
+		return sqlc.Organization{}, sql.ErrNoRows
 	}
 	return org, nil
 }
@@ -358,20 +358,18 @@ func (s *authStoreStub) GetOrganization(_ context.Context, id pgtype.UUID) (sqlc
 func (s *authStoreStub) GetOrganizationByCode(_ context.Context, code string) (sqlc.Organization, error) {
 	org, ok := s.orgsByCode[code]
 	if !ok {
-		return sqlc.Organization{}, pgx.ErrNoRows
+		return sqlc.Organization{}, sql.ErrNoRows
 	}
 	return org, nil
 }
 
-func (s *authStoreStub) CreateRefreshToken(_ context.Context, arg sqlc.CreateRefreshTokenParams) (sqlc.RefreshToken, error) {
+func (s *authStoreStub) CreateRefreshToken(_ context.Context, arg sqlc.CreateRefreshTokenParams) error {
 	if _, exists := s.refreshTokens[arg.TokenHash]; exists {
-		return sqlc.RefreshToken{}, errors.New("refresh token hash 重复")
+		return errors.New("refresh token hash 重复")
 	}
-	// 每次创建生成不同 UUID，否则 RevokeRefreshToken 用 ID 反查时会随机命中
-	// 历史 record，让"轮换后旧 token 失效"的测试断言不稳定。
-	id := s.nextRefreshID
-	id.Bytes[15] += s.idCounter
-	s.idCounter++
+	// 每次创建生成不同 ID，避免 RevokeRefreshToken 用 ID 反查时命中历史记录。
+	s.nextRefreshCounter++
+	id := "00000000-0000-0000-0000-0000000003" + string(rune('0'+s.nextRefreshCounter%10))
 	record := sqlc.RefreshToken{
 		ID:        id,
 		UserID:    arg.UserID,
@@ -379,13 +377,13 @@ func (s *authStoreStub) CreateRefreshToken(_ context.Context, arg sqlc.CreateRef
 		ExpiresAt: arg.ExpiresAt,
 	}
 	s.refreshTokens[arg.TokenHash] = record
-	return record, nil
+	return nil
 }
 
 func (s *authStoreStub) GetRefreshTokenByHash(_ context.Context, tokenHash string) (sqlc.RefreshToken, error) {
 	record, ok := s.refreshTokens[tokenHash]
 	if !ok {
-		return sqlc.RefreshToken{}, pgx.ErrNoRows
+		return sqlc.RefreshToken{}, sql.ErrNoRows
 	}
 	return record, nil
 }
@@ -393,27 +391,28 @@ func (s *authStoreStub) GetRefreshTokenByHash(_ context.Context, tokenHash strin
 // expireAll 把 stub 中所有 refresh token 的 expires_at 推到过去，模拟过期场景。
 func (s *authStoreStub) expireAll() {
 	for hash, record := range s.refreshTokens {
-		record.ExpiresAt = pgtype.Timestamptz{Time: time.Now().Add(-time.Hour), Valid: true}
+		record.ExpiresAt = time.Now().Add(-time.Hour)
 		s.refreshTokens[hash] = record
 	}
 }
 
-func (s *authStoreStub) RevokeRefreshToken(_ context.Context, id pgtype.UUID) (sqlc.RefreshToken, error) {
+func (s *authStoreStub) RevokeRefreshToken(_ context.Context, id string) error {
 	for hash, record := range s.refreshTokens {
 		if record.ID == id {
-			record.RevokedAt = pgtype.Timestamptz{Time: time.Now(), Valid: true}
+			record.RevokedAt = null.TimeFrom(time.Now())
 			s.refreshTokens[hash] = record
 			s.revoked = append(s.revoked, id)
-			return record, nil
+			return nil
 		}
 	}
-	return sqlc.RefreshToken{}, pgx.ErrNoRows
+	return sql.ErrNoRows
 }
 
-func mustUUID(t *testing.T, value string) pgtype.UUID {
+// mustUUID 返回字符串 UUID（MySQL 侧 CHAR(36)，无需解析）。
+func mustUUID(t *testing.T, value string) string {
 	t.Helper()
-	var id pgtype.UUID
-	err := id.Scan(value)
-	require.NoError(t, err)
-	return id
+	return value
 }
+
+// uuidToString 在 MySQL 侧 ID 已经是 string 后，作为向前兼容的 identity 函数保留。
+func uuidToString(id string) string { return id }

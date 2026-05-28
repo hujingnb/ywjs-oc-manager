@@ -3,10 +3,11 @@ package service
 
 import (
 	"context"
+	"database/sql"
 	"errors"
 	"testing"
 
-	"github.com/jackc/pgx/v5/pgtype"
+	null "github.com/guregu/null/v5"
 
 	"github.com/stretchr/testify/require"
 	"oc-manager/internal/auth"
@@ -71,7 +72,6 @@ func TestRecharge_OrganizationLookupErrorUsesEnterpriseCopy(t *testing.T) {
 	store.getOrgErr = errors.New("database down")
 	svc := NewRechargeService(store, &fakeNewAPIRecharge{})
 
-	// 查询企业的底层错误会经 recharge handler 安全文案透出，不能再包含旧组织文案。
 	_, err := svc.Recharge(context.Background(), platformAdmin(), testRechargeOrgID, 100, "")
 	require.ErrorContains(t, err, "查询企业失败")
 }
@@ -95,7 +95,6 @@ func TestRecharge_NewAPIErrorStillWritesFailedRecord(t *testing.T) {
 func TestListRecharges_DeniesOrgMember(t *testing.T) {
 	store := newRechargeStub(t, "1234")
 	svc := NewRechargeService(store, &fakeNewAPIRecharge{})
-	// org_member 不在 CanViewRecharges 允许范围内，返回 ErrForbidden。
 	_, err := svc.ListRecharges(context.Background(), auth.Principal{Role: domain.UserRoleOrgMember, OrgID: testRechargeOrgID}, testRechargeOrgID, 0, 0)
 	require.ErrorIs(t, err, ErrForbidden)
 }
@@ -130,7 +129,6 @@ func TestListRecharges_OrgAdminCanViewOwnOrg(t *testing.T) {
 func TestListRecharges_OrgAdminCannotViewOtherOrg(t *testing.T) {
 	store := newRechargeStub(t, "1234")
 	svc := NewRechargeService(store, &fakeNewAPIRecharge{})
-	// org_admin 尝试访问非自己组织，orgID 不匹配，应返回 ErrForbidden。
 	_, err := svc.ListRecharges(context.Background(),
 		auth.Principal{Role: domain.UserRoleOrgAdmin, OrgID: "other-org-id"}, testRechargeOrgID, 50, 0)
 	require.ErrorIs(t, err, ErrForbidden)
@@ -139,12 +137,11 @@ func TestListRecharges_OrgAdminCannotViewOtherOrg(t *testing.T) {
 // TestGetBalance_IncludesTotalRecharged 验证 GetBalance 正确聚合并返回累计充值金额。
 func TestGetBalance_IncludesTotalRecharged(t *testing.T) {
 	store := newRechargeStub(t, "1234")
-	store.totalRecharged = 3000 // 桩返回固定聚合值
+	store.totalRecharged = 3000
 	client := &fakeNewAPIRecharge{balanceResult: newapi.BalanceResult{NewAPIUserID: 1234, RemainQuota: 2000}}
 	svc := NewRechargeService(store, client)
 	view, err := svc.GetBalance(context.Background(), platformAdmin(), testRechargeOrgID)
 	require.NoError(t, err)
-	// 累计充值金额来自 recharge_records 聚合，不依赖 new-api。
 	require.Equal(t, int64(3000), view.TotalRecharged)
 	require.Equal(t, int64(2000), view.RemainQuota)
 }
@@ -180,7 +177,6 @@ func TestGetBalance_OrganizationLookupErrorUsesEnterpriseCopy(t *testing.T) {
 	store.getOrgErr = errors.New("database down")
 	svc := NewRechargeService(store, &fakeNewAPIRecharge{})
 
-	// 查询企业的底层错误会经 recharge handler 安全文案透出，不能再包含旧组织文案。
 	_, err := svc.GetBalance(context.Background(), platformAdmin(), testRechargeOrgID)
 	require.ErrorContains(t, err, "查询企业失败")
 }
@@ -212,6 +208,8 @@ type rechargeStub struct {
 	records          []sqlc.RechargeRecord
 	recordWritten    bool
 	lastRecordStatus string
+	// lastRecord 记录最近一次 CreateRechargeRecord 写入的参数，供 GetRechargeRecord 读回。
+	lastRecord      sqlc.CreateRechargeRecordParams
 	auditWritten     bool
 	getOrgErr        error
 	// lastAuditCreate 记录最近一次 CreateAuditLog 入参，便于断言 detail 等字段。
@@ -226,30 +224,45 @@ func newRechargeStub(t *testing.T, newapiUserID string) *rechargeStub {
 			ID:           mustUUID(t, testRechargeOrgID),
 			Name:         "测试组织",
 			Status:       domain.StatusActive,
-			NewapiUserID: pgtype.Text{String: newapiUserID, Valid: newapiUserID != ""},
+			NewapiUserID: func() null.String {
+				if newapiUserID == "" {
+					return null.String{}
+				}
+				return null.StringFrom(newapiUserID)
+			}(),
 		},
 	}
 }
 
-func (s *rechargeStub) GetOrganization(_ context.Context, _ pgtype.UUID) (sqlc.Organization, error) {
+func (s *rechargeStub) GetOrganization(_ context.Context, _ string) (sqlc.Organization, error) {
 	if s.getOrgErr != nil {
 		return sqlc.Organization{}, s.getOrgErr
 	}
 	return s.org, nil
 }
 
-func (s *rechargeStub) CreateRechargeRecord(_ context.Context, arg sqlc.CreateRechargeRecordParams) (sqlc.RechargeRecord, error) {
+// CreateRechargeRecord 为 :exec；stub 记录参数供后续 GetRechargeRecord 读回。
+func (s *rechargeStub) CreateRechargeRecord(_ context.Context, arg sqlc.CreateRechargeRecordParams) error {
 	s.recordWritten = true
 	s.lastRecordStatus = arg.Status
+	s.lastRecord = arg
+	return nil
+}
+
+// GetRechargeRecord 供 :exec 写入后读回记录使用。
+func (s *rechargeStub) GetRechargeRecord(_ context.Context, id string) (sqlc.RechargeRecord, error) {
+	if s.lastRecord.ID != id {
+		return sqlc.RechargeRecord{}, sql.ErrNoRows
+	}
 	return sqlc.RechargeRecord{
-		ID:           mustUUID(s.t, "00000000-0000-0000-0000-000000002301"),
-		OrgID:        arg.OrgID,
-		OperatorID:   arg.OperatorID,
-		CreditAmount: arg.CreditAmount,
-		Remark:       arg.Remark,
-		NewapiRefID:  arg.NewapiRefID,
-		Status:       arg.Status,
-		ErrorMessage: arg.ErrorMessage,
+		ID:           s.lastRecord.ID,
+		OrgID:        s.lastRecord.OrgID,
+		OperatorID:   s.lastRecord.OperatorID,
+		CreditAmount: s.lastRecord.CreditAmount,
+		Remark:       s.lastRecord.Remark,
+		NewapiRefID:  s.lastRecord.NewapiRefID,
+		Status:       s.lastRecord.Status,
+		ErrorMessage: s.lastRecord.ErrorMessage,
 	}, nil
 }
 
@@ -257,13 +270,14 @@ func (s *rechargeStub) ListRechargeRecordsByOrg(_ context.Context, _ sqlc.ListRe
 	return s.records, nil
 }
 
-func (s *rechargeStub) CreateAuditLog(_ context.Context, arg sqlc.CreateAuditLogParams) (sqlc.AuditLog, error) {
+// CreateAuditLog 为 :exec；stub 记录参数供测试断言。
+func (s *rechargeStub) CreateAuditLog(_ context.Context, arg sqlc.CreateAuditLogParams) error {
 	s.auditWritten = true
 	s.lastAuditCreate = arg
-	return sqlc.AuditLog{}, nil
+	return nil
 }
 
-func (s *rechargeStub) SumRechargeAmountByOrg(_ context.Context, _ pgtype.UUID) (int64, error) {
+func (s *rechargeStub) SumRechargeAmountByOrg(_ context.Context, _ string) (int64, error) {
 	return s.totalRecharged, nil
 }
 

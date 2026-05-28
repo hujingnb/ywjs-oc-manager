@@ -3,12 +3,12 @@ package service
 
 import (
 	"context"
+	"database/sql"
 	"errors"
 	"testing"
 	"time"
 
-	"github.com/jackc/pgx/v5"
-	"github.com/jackc/pgx/v5/pgtype"
+	null "github.com/guregu/null/v5"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
@@ -37,7 +37,8 @@ func TestRuntimeNodeServiceEnrollAgentCreatesNode(t *testing.T) {
 	require.Equal(t, fakeTokenHasher(testAgentToken), node.AgentTokenHash.String)
 	require.Equal(t, "https://node-1.example:7001", node.AgentDockerEndpoint.String)
 	require.True(t, node.MaxApps.Valid)
-	require.Equal(t, int32(3), node.MaxApps.Int32)
+	// null.Int 使用 Int64 字段；MaxApps 存 int64(3)，与 int32(3) 比较需转换。
+	require.Equal(t, int32(3), int32(node.MaxApps.Int64))
 
 	// agent_enrolled 审计详情应为「Agent 版本 <version>」。
 	require.True(t, store.auditLogs[0].DetailMessage.Valid)
@@ -68,7 +69,7 @@ func TestRuntimeNodeServiceEnrollAgentUpdatesExistingNode(t *testing.T) {
 	require.Equal(t, "https://node-1.example:7443", node.AgentFileEndpoint.String)
 	require.Equal(t, domain.RuntimeNodeStatusActive, node.Status)
 	require.True(t, node.MaxApps.Valid)
-	require.Equal(t, int32(5), node.MaxApps.Int32)
+	require.Equal(t, int32(5), int32(node.MaxApps.Int64))
 
 	// re_enroll 审计详情应反映新版本。
 	require.True(t, store.auditLogs[1].DetailMessage.Valid)
@@ -97,11 +98,13 @@ func TestRuntimeNodeServiceEnrollAgentPersistsNodeResourceSample(t *testing.T) {
 	require.NoError(t, err)
 	require.Len(t, store.nodeSamples, 1)
 	sample := store.nodeSamples[0]
-	assert.Equal(t, mustUUID(t, result.NodeID), sample.RuntimeNodeID)
-	assert.Equal(t, sampledAt, sample.SampledAt.Time)
+	assert.Equal(t, result.NodeID, sample.RuntimeNodeID)
+	// SampledAt 是 time.Time，直接比较。
+	assert.Equal(t, sampledAt, sample.SampledAt)
 	assert.Equal(t, 11.5, sample.CpuPercent.Float64)
 	assert.Equal(t, int64(2048), sample.MemoryUsedBytes.Int64)
-	assert.Equal(t, int32(2), sample.InstanceCount.Int32)
+	// InstanceCount 是 null.Int，使用 Int64。
+	assert.Equal(t, int64(2), sample.InstanceCount.Int64)
 }
 
 // TestRuntimeNodeServiceEnrollAgentRejectsInvalidInput 验证运行时节点服务注册agent拒绝非法输入的异常或拒绝路径场景。
@@ -175,11 +178,12 @@ func TestAgentHeartbeatPersistsNodeResourceSample(t *testing.T) {
 	require.NoError(t, err)
 	require.Len(t, store.nodeSamples, 1)
 	sample := store.nodeSamples[0]
-	assert.Equal(t, mustUUID(t, enrolled.NodeID), sample.RuntimeNodeID)
-	assert.Equal(t, sampledAt, sample.SampledAt.Time)
+	assert.Equal(t, enrolled.NodeID, sample.RuntimeNodeID)
+	// SampledAt 是 time.Time，直接比较。
+	assert.Equal(t, sampledAt, sample.SampledAt)
 	assert.Equal(t, 42.5, sample.CpuPercent.Float64)
 	assert.Equal(t, int64(1024), sample.MemoryUsedBytes.Int64)
-	assert.Equal(t, int32(3), sample.InstanceCount.Int32)
+	assert.Equal(t, int64(3), sample.InstanceCount.Int64)
 }
 
 // TestRuntimeNodeServiceHeartbeatKeepsDegradedStatus 验证运行时节点服务心跳保留降级状态的预期行为场景。
@@ -190,7 +194,7 @@ func TestRuntimeNodeServiceHeartbeatKeepsDegradedStatus(t *testing.T) {
 	require.NoError(t, err)
 	node := store.findByAgentID(t, validEnrollInput().AgentID)
 	node.Status = domain.RuntimeNodeStatusDegraded
-	store.nodes[uuidToString(node.ID)] = node
+	store.nodes[node.ID] = node
 
 	result, err := svc.HandleHeartbeat(context.Background(), AgentHeartbeatInput{AgentToken: enrolled.AgentToken})
 	require.NoError(t, err)
@@ -205,7 +209,7 @@ func TestRuntimeNodeServiceHeartbeatRejectsDisabledNode(t *testing.T) {
 	require.NoError(t, err)
 	node := store.findByAgentID(t, validEnrollInput().AgentID)
 	node.Status = domain.RuntimeNodeStatusDisabled
-	store.nodes[uuidToString(node.ID)] = node
+	store.nodes[node.ID] = node
 
 	_, err = svc.HandleHeartbeat(context.Background(), AgentHeartbeatInput{AgentToken: enrolled.AgentToken})
 	require.ErrorIs(t, err, ErrAgentTokenInvalid)
@@ -225,11 +229,10 @@ func TestRuntimeNodeServiceListNodesIncludesCurrentResource(t *testing.T) {
 	svc := newRuntimeNodeServiceForTest(t, store)
 	enrolled, err := svc.EnrollAgent(context.Background(), validEnrollInput())
 	require.NoError(t, err)
-	nodeID := mustUUID(t, enrolled.NodeID)
 	store.latestNodeSamples[enrolled.NodeID] = sqlc.NodeResourceSample{
-		RuntimeNodeID: nodeID,
-		SampledAt:     pgtype.Timestamptz{Time: mustTime(t, "2026-05-13T12:00:00Z"), Valid: true},
-		CpuPercent:    pgtype.Float8{Float64: 42.5, Valid: true},
+		RuntimeNodeID: enrolled.NodeID,
+		SampledAt:     mustTime(t, "2026-05-13T12:00:00Z"), // time.Time 直接赋值
+		CpuPercent:    null.FloatFrom(42.5),                 // null.Float
 	}
 
 	results, err := svc.ListNodes(context.Background(), auth.Principal{Role: domain.UserRolePlatformAdmin}, 10, 0)
@@ -277,10 +280,11 @@ type runtimeNodeStoreStub struct {
 	t                 *testing.T
 	nodes             map[string]sqlc.RuntimeNode
 	latestNodeSamples map[string]sqlc.NodeResourceSample
-	nodeSamples       []sqlc.InsertNodeResourceSampleParams
-	nextID            int
-	lastHeartbeat     sqlc.UpdateRuntimeNodeHeartbeatParams
-	auditLogs         []sqlc.CreateAuditLogParams
+	// nodeSamples 记录 InsertNodeResourceSample 调用参数，供测试断言采样字段。
+	nodeSamples   []sqlc.InsertNodeResourceSampleParams
+	nextID        int
+	lastHeartbeat sqlc.UpdateRuntimeNodeHeartbeatParams
+	auditLogs     []sqlc.CreateAuditLogParams
 }
 
 func newRuntimeNodeStoreStub(t *testing.T) *runtimeNodeStoreStub {
@@ -288,14 +292,10 @@ func newRuntimeNodeStoreStub(t *testing.T) *runtimeNodeStoreStub {
 	return &runtimeNodeStoreStub{t: t, nodes: map[string]sqlc.RuntimeNode{}, latestNodeSamples: map[string]sqlc.NodeResourceSample{}, nextID: 1}
 }
 
-func (s *runtimeNodeStoreStub) EnrollRuntimeNodeInsert(_ context.Context, arg sqlc.EnrollRuntimeNodeInsertParams) (sqlc.RuntimeNode, error) {
-	id := mustUUID(s.t, "00000000-0000-0000-0000-000000000c01")
-	if s.nextID > 1 {
-		id = mustUUID(s.t, "00000000-0000-0000-0000-000000000c02")
-	}
-	s.nextID++
+// EnrollRuntimeNodeInsert 为 :exec；stub 把节点存入 map 供后续 GetRuntimeNode 读回。
+func (s *runtimeNodeStoreStub) EnrollRuntimeNodeInsert(_ context.Context, arg sqlc.EnrollRuntimeNodeInsertParams) error {
 	node := sqlc.RuntimeNode{
-		ID:                       id,
+		ID:                       arg.ID,
 		Name:                     arg.Name,
 		Status:                   domain.RuntimeNodeStatusActive,
 		AgentID:                  arg.AgentID,
@@ -311,48 +311,50 @@ func (s *runtimeNodeStoreStub) EnrollRuntimeNodeInsert(_ context.Context, arg sq
 		MetadataJson:             arg.MetadataJson,
 		AgentTokenCiphertext:     arg.AgentTokenCiphertext,
 	}
-	s.nodes[uuidToString(id)] = node
-	return node, nil
+	s.nodes[arg.ID] = node
+	return nil
 }
 
-func (s *runtimeNodeStoreStub) EnrollRuntimeNodeUpdate(_ context.Context, arg sqlc.EnrollRuntimeNodeUpdateParams) (sqlc.RuntimeNode, error) {
-	node, err := s.GetRuntimeNodeByAgentID(context.Background(), arg.AgentID)
-	if err != nil {
-		return sqlc.RuntimeNode{}, err
+// EnrollRuntimeNodeUpdate 为 :exec；stub 更新已有节点，供后续 GetRuntimeNodeByAgentID 读回。
+func (s *runtimeNodeStoreStub) EnrollRuntimeNodeUpdate(_ context.Context, arg sqlc.EnrollRuntimeNodeUpdateParams) error {
+	for id, node := range s.nodes {
+		if node.AgentID.Valid && node.AgentID.String == arg.AgentID.String {
+			node.Status = domain.RuntimeNodeStatusActive
+			node.Name = arg.Name
+			node.MaxApps = arg.MaxApps
+			node.AgentDockerEndpoint = arg.AgentDockerEndpoint
+			node.AgentFileEndpoint = arg.AgentFileEndpoint
+			node.AgentTlsCaCert = arg.AgentTlsCaCert
+			node.AgentTokenHash = arg.AgentTokenHash
+			node.AgentVersion = arg.AgentVersion
+			node.NodeDataRoot = arg.NodeDataRoot
+			node.ResourceSnapshotJson = arg.ResourceSnapshotJson
+			node.MetadataJson = arg.MetadataJson
+			node.AgentTokenCiphertext = arg.AgentTokenCiphertext
+			node.ProbeFailureStreak = 0
+			node.ProbeSuccessStreak = 0
+			s.nodes[id] = node
+			return nil
+		}
 	}
-	node.Status = domain.RuntimeNodeStatusActive
-	node.Name = arg.Name
-	node.MaxApps = arg.MaxApps
-	node.AgentDockerEndpoint = arg.AgentDockerEndpoint
-	node.AgentFileEndpoint = arg.AgentFileEndpoint
-	node.AgentTlsCaCert = arg.AgentTlsCaCert
-	node.AgentTokenHash = arg.AgentTokenHash
-	node.AgentVersion = arg.AgentVersion
-	node.NodeDataRoot = arg.NodeDataRoot
-	node.ResourceSnapshotJson = arg.ResourceSnapshotJson
-	node.MetadataJson = arg.MetadataJson
-	node.AgentTokenCiphertext = arg.AgentTokenCiphertext
-	node.ProbeFailureStreak = 0
-	node.ProbeSuccessStreak = 0
-	s.nodes[uuidToString(node.ID)] = node
-	return node, nil
+	return sql.ErrNoRows
 }
 
-func (s *runtimeNodeStoreStub) GetRuntimeNode(_ context.Context, id pgtype.UUID) (sqlc.RuntimeNode, error) {
-	node, ok := s.nodes[uuidToString(id)]
+func (s *runtimeNodeStoreStub) GetRuntimeNode(_ context.Context, id string) (sqlc.RuntimeNode, error) {
+	node, ok := s.nodes[id]
 	if !ok {
-		return sqlc.RuntimeNode{}, pgx.ErrNoRows
+		return sqlc.RuntimeNode{}, sql.ErrNoRows
 	}
 	return node, nil
 }
 
-func (s *runtimeNodeStoreStub) GetRuntimeNodeByAgentID(_ context.Context, agentID pgtype.Text) (sqlc.RuntimeNode, error) {
+func (s *runtimeNodeStoreStub) GetRuntimeNodeByAgentID(_ context.Context, agentID null.String) (sqlc.RuntimeNode, error) {
 	for _, node := range s.nodes {
 		if node.AgentID.Valid && node.AgentID.String == agentID.String {
 			return node, nil
 		}
 	}
-	return sqlc.RuntimeNode{}, pgx.ErrNoRows
+	return sqlc.RuntimeNode{}, sql.ErrNoRows
 }
 
 func (s *runtimeNodeStoreStub) GetRuntimeNodeByName(_ context.Context, name string) (sqlc.RuntimeNode, error) {
@@ -361,7 +363,7 @@ func (s *runtimeNodeStoreStub) GetRuntimeNodeByName(_ context.Context, name stri
 			return node, nil
 		}
 	}
-	return sqlc.RuntimeNode{}, pgx.ErrNoRows
+	return sqlc.RuntimeNode{}, sql.ErrNoRows
 }
 
 func (s *runtimeNodeStoreStub) ListRuntimeNodes(_ context.Context, _ sqlc.ListRuntimeNodesParams) ([]sqlc.RuntimeNode, error) {
@@ -372,26 +374,28 @@ func (s *runtimeNodeStoreStub) ListRuntimeNodes(_ context.Context, _ sqlc.ListRu
 	return results, nil
 }
 
-func (s *runtimeNodeStoreStub) ListLatestNodeResourceSamples(_ context.Context, ids []pgtype.UUID) ([]sqlc.NodeResourceSample, error) {
+func (s *runtimeNodeStoreStub) ListLatestNodeResourceSamples(_ context.Context, ids []string) ([]sqlc.NodeResourceSample, error) {
 	results := make([]sqlc.NodeResourceSample, 0, len(ids))
 	for _, id := range ids {
-		if sample, ok := s.latestNodeSamples[uuidToString(id)]; ok {
+		if sample, ok := s.latestNodeSamples[id]; ok {
 			results = append(results, sample)
 		}
 	}
 	return results, nil
 }
 
-func (s *runtimeNodeStoreStub) InsertNodeResourceSample(_ context.Context, arg sqlc.InsertNodeResourceSampleParams) (sqlc.NodeResourceSample, error) {
+// InsertNodeResourceSample 为 :exec；stub 记录参数供测试断言。
+func (s *runtimeNodeStoreStub) InsertNodeResourceSample(_ context.Context, arg sqlc.InsertNodeResourceSampleParams) error {
 	s.nodeSamples = append(s.nodeSamples, arg)
-	return sqlc.NodeResourceSample{RuntimeNodeID: arg.RuntimeNodeID, SampledAt: arg.SampledAt}, nil
+	return nil
 }
 
-func (s *runtimeNodeStoreStub) UpdateRuntimeNodeHeartbeat(_ context.Context, arg sqlc.UpdateRuntimeNodeHeartbeatParams) (sqlc.RuntimeNode, error) {
+// UpdateRuntimeNodeHeartbeat 为 :exec；stub 更新节点，服务之后调 GetRuntimeNode 读回。
+func (s *runtimeNodeStoreStub) UpdateRuntimeNodeHeartbeat(_ context.Context, arg sqlc.UpdateRuntimeNodeHeartbeatParams) error {
 	s.lastHeartbeat = arg
-	node, ok := s.nodes[uuidToString(arg.ID)]
+	node, ok := s.nodes[arg.ID]
 	if !ok {
-		return sqlc.RuntimeNode{}, pgx.ErrNoRows
+		return sql.ErrNoRows
 	}
 	if node.Status == domain.RuntimeNodeStatusUnreachable {
 		node.Status = domain.RuntimeNodeStatusActive
@@ -399,23 +403,25 @@ func (s *runtimeNodeStoreStub) UpdateRuntimeNodeHeartbeat(_ context.Context, arg
 	node.AgentVersion = arg.AgentVersion
 	node.ResourceSnapshotJson = arg.ResourceSnapshotJson
 	node.MetadataJson = arg.MetadataJson
-	s.nodes[uuidToString(arg.ID)] = node
-	return node, nil
+	s.nodes[arg.ID] = node
+	return nil
 }
 
-func (s *runtimeNodeStoreStub) SetRuntimeNodeStatus(_ context.Context, arg sqlc.SetRuntimeNodeStatusParams) (sqlc.RuntimeNode, error) {
-	node, ok := s.nodes[uuidToString(arg.ID)]
+// SetRuntimeNodeStatus 为 :exec；stub 更新节点状态。
+func (s *runtimeNodeStoreStub) SetRuntimeNodeStatus(_ context.Context, arg sqlc.SetRuntimeNodeStatusParams) error {
+	node, ok := s.nodes[arg.ID]
 	if !ok {
-		return sqlc.RuntimeNode{}, pgx.ErrNoRows
+		return sql.ErrNoRows
 	}
 	node.Status = arg.Status
-	s.nodes[uuidToString(arg.ID)] = node
-	return node, nil
+	s.nodes[arg.ID] = node
+	return nil
 }
 
-func (s *runtimeNodeStoreStub) CreateAuditLog(_ context.Context, arg sqlc.CreateAuditLogParams) (sqlc.AuditLog, error) {
+// CreateAuditLog 为 :exec；stub 记录参数供测试断言。
+func (s *runtimeNodeStoreStub) CreateAuditLog(_ context.Context, arg sqlc.CreateAuditLogParams) error {
 	s.auditLogs = append(s.auditLogs, arg)
-	return sqlc.AuditLog{}, nil
+	return nil
 }
 
 func (s *runtimeNodeStoreStub) audited(action string) bool {
@@ -429,8 +435,8 @@ func (s *runtimeNodeStoreStub) audited(action string) bool {
 
 func (s *runtimeNodeStoreStub) findByAgentID(t *testing.T, agentID string) sqlc.RuntimeNode {
 	t.Helper()
-	node, err := s.GetRuntimeNodeByAgentID(context.Background(), pgtype.Text{String: agentID, Valid: true})
-	if errors.Is(err, pgx.ErrNoRows) {
+	node, err := s.GetRuntimeNodeByAgentID(context.Background(), null.StringFrom(agentID))
+	if errors.Is(err, sql.ErrNoRows) {
 		t.Fatalf("node agent_id=%q not found", agentID)
 	}
 	require.NoError(t, err)

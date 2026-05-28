@@ -2,15 +2,14 @@ package service
 
 import (
 	"context"
+	"database/sql"
 	"encoding/json"
 	"errors"
 	"fmt"
 	"strings"
 	"testing"
 
-	"github.com/jackc/pgx/v5"
-	"github.com/jackc/pgx/v5/pgconn"
-	"github.com/jackc/pgx/v5/pgtype"
+	null "github.com/guregu/null/v5"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 	"oc-manager/internal/auth"
@@ -96,16 +95,12 @@ func TestOrganizationServiceCreateEnsuresKnowledgeDataset(t *testing.T) {
 	require.NoError(t, err)
 
 	require.Len(t, kb.orgs, 1)
-	assert.Equal(t, result.ID, uuidToString(kb.orgs[0].ID))
+	assert.Equal(t, result.ID, kb.orgs[0].ID)
 }
 
 // TestProvisionNewAPIUserPersistsUsername 校验组织创建链路把 new-api 侧实际 username
-// 显式落到 organizations.newapi_username 字段。new-api username 是 org.Code 加随机
-// 后缀派生值、不再等于裸 code，因此下游 usage 查询必须读该列定位 new-api 账号，
-// 不能用 org.Code 反推；本用例锁定"派生 username 与落库值一致"这一约定。
+// 显式落到 organizations.newapi_username 字段。
 func TestProvisionNewAPIUserPersistsUsername(t *testing.T) {
-	// 用与 TestOrganizationServiceCreateProvisionsNewAPIUser 相同的桩件组合，
-	// 保证只额外校验 NewapiUsername 这一字段，避免与其他用例语义重叠。
 	store := &organizationStoreStub{}
 	prov := &fakeProvisioner{
 		user:        newapi.User{ID: 42, Username: "preset"},
@@ -127,8 +122,7 @@ func TestProvisionNewAPIUserPersistsUsername(t *testing.T) {
 	// 必须确实调用了 SetOrganizationNewAPIUser，否则 username 写入路径根本没被验证。
 	require.True(t, store.updateCalled)
 	require.True(t, store.updated.NewapiUsername.Valid, "NewapiUsername 必须 Valid，否则会落 NULL")
-	// 关键断言：落库的 newapi_username 与实际传给 new-api CreateUser 的 username
-	// 完全一致，且为 code 加随机后缀派生值（带 code 前缀、不等于裸 code）。
+	// 关键断言：落库的 newapi_username 与实际传给 new-api CreateUser 的 username 完全一致。
 	assert.Equal(t, prov.lastCreate.Username, store.updated.NewapiUsername.String)
 	assert.True(t, strings.HasPrefix(store.updated.NewapiUsername.String, "test-org-"))
 	assert.NotEqual(t, "test-org", store.updated.NewapiUsername.String)
@@ -152,7 +146,7 @@ func TestOrganizationServiceCreateAlsoCreatesOrgAdmin(t *testing.T) {
 	require.NoError(t, err)
 
 	require.True(t, store.createUserCalled)
-	assert.Equal(t, store.org.ID, store.createdUser.OrgID)
+	assert.Equal(t, store.org.ID, store.createdUser.OrgID.String)
 	assert.Equal(t, "org-admin", store.createdUser.Username)
 	assert.Equal(t, "企业管理员", store.createdUser.DisplayName)
 	assert.Equal(t, "hashed:secret-password", store.createdUser.PasswordHash)
@@ -225,9 +219,11 @@ func TestCreateOrganizationNormalizesCode(t *testing.T) {
 }
 
 // TestCreateOrganizationMapsUniqueViolationToConflict 验证创建组织映射UniqueViolation到冲突的异常或拒绝路径场景。
+// MySQL 侧通过 error message 含 "Duplicate entry" 来检测唯一约束冲突（替换原 pgconn.PgError Code=23505）。
 func TestCreateOrganizationMapsUniqueViolationToConflict(t *testing.T) {
 	store := &organizationStoreStub{
-		createErr: &pgconn.PgError{Code: "23505"},
+		// 模拟 MySQL 唯一约束冲突：错误消息包含 "Duplicate entry"。
+		createErr: errors.New("Duplicate entry 'test-org' for key 'organizations.org_code'"),
 	}
 	svc := NewOrganizationService(store, &fakeProvisioner{}, mustCipher(t), nil)
 	svc.SetVersionValidator(fakeVersionValidator{known: map[string]bool{}})
@@ -245,8 +241,7 @@ func TestCreateOrganizationMapsUniqueViolationToConflict(t *testing.T) {
 	require.ErrorContains(t, err, "企业名称或企业标识已存在")
 }
 
-// TestBuildNewAPIUsername 校验 new-api username 派生规则：code 前缀 + "-" + 随机后缀，
-// 整体长度不超过 new-api `validate:"max=20"` 上限，长 code 截断前缀。
+// TestBuildNewAPIUsername 校验 new-api username 派生规则。
 func TestBuildNewAPIUsername(t *testing.T) {
 	cases := []struct {
 		name string // 子场景说明
@@ -278,8 +273,7 @@ func TestBuildNewAPIUsername(t *testing.T) {
 	}
 }
 
-// TestCreateOrganizationRejectsUnknownVersionID 验证创建组织时传入不存在的助手版本 id 会被拒绝，
-// 保证 allowlist 中只能包含系统已有的版本，防止引用幽灵 id。
+// TestCreateOrganizationRejectsUnknownVersionID 验证创建组织时传入不存在的助手版本 id 会被拒绝。
 func TestCreateOrganizationRejectsUnknownVersionID(t *testing.T) {
 	store := &organizationStoreStub{}
 	svc := NewOrganizationService(store, &fakeProvisioner{}, mustCipher(t), nil)
@@ -301,8 +295,7 @@ func TestCreateOrganizationRejectsUnknownVersionID(t *testing.T) {
 	assert.False(t, store.createCalled)
 }
 
-// TestCreateOrganizationBlocksSaveWithoutVersionValidator 验证版本校验器未装配时拒绝保存组织，
-// 防止在没有可用版本目录的情况下写入无法验证的助手版本 allowlist。
+// TestCreateOrganizationBlocksSaveWithoutVersionValidator 验证版本校验器未装配时拒绝保存组织。
 func TestCreateOrganizationBlocksSaveWithoutVersionValidator(t *testing.T) {
 	store := &organizationStoreStub{}
 	svc := NewOrganizationService(store, &fakeProvisioner{}, mustCipher(t), nil)
@@ -340,15 +333,14 @@ func TestOrganizationServiceSetStatus(t *testing.T) {
 	require.Equal(t, domain.StatusDisabled, result.Status)
 }
 
-// TestOrganizationServiceListIncludesAdminUsername 验证组织列表会带出首个启用组织管理员用户名，
-// 供平台管理员复制组织登录信息时使用；管理员密码明文不会从 hash 中恢复。
+// TestOrganizationServiceListIncludesAdminUsername 验证组织列表会带出首个启用组织管理员用户名。
 func TestOrganizationServiceListIncludesAdminUsername(t *testing.T) {
 	orgID := mustUUID(t, "00000000-0000-0000-0000-000000000101")
 	store := &organizationStoreStub{
 		org: sqlc.Organization{ID: orgID, Name: "测试组织", Code: "test-org", Status: domain.StatusActive},
 		orgAdmin: sqlc.User{
 			ID:       mustUUID(t, "00000000-0000-0000-0000-000000000201"),
-			OrgID:    orgID,
+			OrgID:    null.StringFrom(orgID),
 			Username: "org-admin",
 			Role:     domain.UserRoleOrgAdmin,
 			Status:   domain.StatusActive,
@@ -374,8 +366,7 @@ func mustCipher(t *testing.T) *auth.Cipher {
 	return c
 }
 
-// fakeProvisioner 是 NewAPIUserProvisioner 的内存实现：返回预置 user 与 access_token，
-// 也支持注入失败以走回滚路径。lastCreate 记录最后一次 CreateUser 入参，断言 username 派生 / password 生成。
+// fakeProvisioner 是 NewAPIUserProvisioner 的内存实现。
 type fakeProvisioner struct {
 	user           newapi.User
 	createError    error
@@ -433,15 +424,15 @@ type organizationStoreStub struct {
 	updatedProfile      sqlc.UpdateOrganizationProfileParams
 }
 
-func (s *organizationStoreStub) CreateOrganization(_ context.Context, arg sqlc.CreateOrganizationParams) (sqlc.Organization, error) {
+func (s *organizationStoreStub) CreateOrganization(_ context.Context, arg sqlc.CreateOrganizationParams) error {
 	s.created = arg
 	s.createCalled = true
 	if s.createErr != nil {
-		return sqlc.Organization{}, s.createErr
+		return s.createErr
 	}
-	id, _ := parseUUID("00000000-0000-0000-0000-000000000101")
+	// 使用 service 传入的 arg.ID（由 service 调用 newUUID() 生成），供后续 GetOrganization(orgID) 读回。
 	created := sqlc.Organization{
-		ID:                     id,
+		ID:                     arg.ID,
 		Name:                   arg.Name,
 		Code:                   arg.Code,
 		Status:                 arg.Status,
@@ -450,68 +441,60 @@ func (s *organizationStoreStub) CreateOrganization(_ context.Context, arg sqlc.C
 		AssistantVersionIds:    arg.AssistantVersionIds,
 	}
 	s.org = created
-	return created, nil
-}
-
-func (s *organizationStoreStub) SetOrganizationNewAPIUser(_ context.Context, arg sqlc.SetOrganizationNewAPIUserParams) (sqlc.Organization, error) {
-	s.updated = arg
-	s.updateCalled = true
-	out := s.org
-	out.NewapiUserID = arg.NewapiUserID
-	out.NewapiUserCredentialsCiphertext = arg.NewapiUserCredentialsCiphertext
-	return out, nil
-}
-
-func (s *organizationStoreStub) CreateUser(_ context.Context, arg sqlc.CreateUserParams) (sqlc.User, error) {
-	s.createdUser = arg
-	s.createUserCalled = true
-	id, _ := parseUUID("00000000-0000-0000-0000-000000000201")
-	return sqlc.User{
-		ID:           id,
-		OrgID:        arg.OrgID,
-		Username:     arg.Username,
-		PasswordHash: arg.PasswordHash,
-		DisplayName:  arg.DisplayName,
-		Role:         arg.Role,
-		Status:       arg.Status,
-	}, nil
-}
-
-func (s *organizationStoreStub) HardDeleteOrganization(_ context.Context, _ pgtype.UUID) error {
-	s.hardDeleted = true
 	return nil
 }
 
-func (s *organizationStoreStub) GetOrganization(_ context.Context, id pgtype.UUID) (sqlc.Organization, error) {
-	if !s.org.ID.Valid || s.org.ID != id {
-		return sqlc.Organization{}, pgx.ErrNoRows
+// GetOrganization 创建后通过 GetOrganization 读回；写入成功后 stub 返回 org。
+func (s *organizationStoreStub) GetOrganization(_ context.Context, id string) (sqlc.Organization, error) {
+	if s.org.ID == "" || s.org.ID != id {
+		return sqlc.Organization{}, sql.ErrNoRows
 	}
 	return s.org, nil
+}
+
+func (s *organizationStoreStub) SetOrganizationNewAPIUser(_ context.Context, arg sqlc.SetOrganizationNewAPIUserParams) error {
+	s.updated = arg
+	s.updateCalled = true
+	s.org.NewapiUserID = arg.NewapiUserID
+	s.org.NewapiUserCredentialsCiphertext = arg.NewapiUserCredentialsCiphertext
+	s.org.NewapiUsername = arg.NewapiUsername
+	return nil
+}
+
+func (s *organizationStoreStub) CreateUser(_ context.Context, arg sqlc.CreateUserParams) error {
+	s.createdUser = arg
+	s.createUserCalled = true
+	return nil
+}
+
+func (s *organizationStoreStub) HardDeleteOrganization(_ context.Context, _ string) error {
+	s.hardDeleted = true
+	return nil
 }
 
 func (s *organizationStoreStub) ListOrganizations(_ context.Context, _ sqlc.ListOrganizationsParams) ([]sqlc.Organization, error) {
 	return []sqlc.Organization{s.org}, nil
 }
 
-func (s *organizationStoreStub) GetOrgAdminByOrg(_ context.Context, id pgtype.UUID) (sqlc.User, error) {
-	if !s.orgAdmin.ID.Valid || s.orgAdmin.OrgID != id {
-		return sqlc.User{}, pgx.ErrNoRows
+func (s *organizationStoreStub) GetOrgAdminByOrg(_ context.Context, id null.String) (sqlc.User, error) {
+	if s.orgAdmin.ID == "" || s.orgAdmin.OrgID.String != id.String {
+		return sqlc.User{}, sql.ErrNoRows
 	}
 	return s.orgAdmin, nil
 }
 
-func (s *organizationStoreStub) UpdateOrganizationProfile(_ context.Context, arg sqlc.UpdateOrganizationProfileParams) (sqlc.Organization, error) {
+func (s *organizationStoreStub) UpdateOrganizationProfile(_ context.Context, arg sqlc.UpdateOrganizationProfileParams) error {
 	s.updatedProfile = arg
 	s.updateProfileCalled = true
 	s.org.Name = arg.Name
 	s.org.ContactName = arg.ContactName
 	s.org.AssistantVersionIds = arg.AssistantVersionIds
-	return s.org, nil
+	return nil
 }
 
-func (s *organizationStoreStub) SetOrganizationStatus(_ context.Context, arg sqlc.SetOrganizationStatusParams) (sqlc.Organization, error) {
+func (s *organizationStoreStub) SetOrganizationStatus(_ context.Context, arg sqlc.SetOrganizationStatusParams) error {
 	s.org.Status = arg.Status
-	return s.org, nil
+	return nil
 }
 
 func (s *organizationStoreStub) mustSeedOrganization(t *testing.T, code string) sqlc.Organization {
@@ -579,16 +562,13 @@ func TestCreateOrganization_BootstrapTokenFailureTriggersDeleteUserAndAudit(t *t
 	require.True(t, prov.deleteUserCalled)
 	assert.Equal(t, int64(42), prov.deleteUserUserID)
 	assert.NotEqual(t, 0, len(auditor.events))
-	// 回滚路径写的审计事件一律不带 OrgID：组织行随后被 HardDeleteOrganization
-	// 回滚删除，审计 org_id 指向它会触发 audit_logs_org_id_fkey 外键冲突、
-	// 反过来阻止回滚（回滚外键 bug 修复）。
+	// 回滚路径写的审计事件一律不带 OrgID：组织行随后被 HardDeleteOrganization 回滚删除。
 	for i, ev := range auditor.events {
 		assert.Empty(t, ev.OrgID, "回滚路径审计事件[%d] 不应带 OrgID", i)
 	}
 }
 
-// TestCreateOrganization_CreateUserFailureNoDeleteUser 校验 CreateUser 失败时不调
-// DeleteUser（此时无 new-api 孤儿 user 需要清理）。
+// TestCreateOrganization_CreateUserFailureNoDeleteUser 校验 CreateUser 失败时不调 DeleteUser。
 func TestCreateOrganization_CreateUserFailureNoDeleteUser(t *testing.T) {
 	auditor := &fakeFailAuditor{}
 	prov := &fakeProvisioner{
@@ -608,8 +588,7 @@ func TestCreateOrganization_CreateUserFailureNoDeleteUser(t *testing.T) {
 	assert.False(t, prov.deleteUserCalled)
 }
 
-// TestCreateOrganizationWithVersionIDs 验证创建组织时传入合法的助手版本 id allowlist，
-// 成功后 OrganizationResult.AssistantVersionIDs 应反映传入的有效 id 列表。
+// TestCreateOrganizationWithVersionIDs 验证创建组织时传入合法的助手版本 id allowlist。
 func TestCreateOrganizationWithVersionIDs(t *testing.T) {
 	store := &organizationStoreStub{}
 	prov := &fakeProvisioner{user: newapi.User{ID: 42}, accessToken: "tok"}
@@ -651,7 +630,7 @@ func TestUpdateOrganizationWithVersionIDsSet(t *testing.T) {
 		"ver-new": true,
 	}})
 
-	result, err := svc.UpdateOrganization(context.Background(), auth.Principal{Role: domain.UserRolePlatformAdmin}, uuidToString(org.ID), OrganizationInput{
+	result, err := svc.UpdateOrganization(context.Background(), auth.Principal{Role: domain.UserRolePlatformAdmin}, org.ID, OrganizationInput{
 		Name:                   "测试组织改名",
 		AssistantVersionIDs:    []string{"ver-new"},
 		AssistantVersionIDsSet: true,

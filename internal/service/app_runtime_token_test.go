@@ -2,10 +2,10 @@ package service
 
 import (
 	"context"
+	"database/sql"
 	"testing"
 
-	"github.com/jackc/pgx/v5"
-	"github.com/jackc/pgx/v5/pgtype"
+	null "github.com/guregu/null/v5"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
@@ -41,8 +41,8 @@ func TestEnsureRuntimeTokenReusesExistingToken(t *testing.T) {
 	store := &fakeAppRuntimeTokenStore{}
 	app := sqlc.App{
 		ID:                     mustParseUUID(testKnowledgeApp),
-		RuntimeTokenHash:       pgtype.Text{String: HashAppRuntimeToken(token), Valid: true},
-		RuntimeTokenCiphertext: pgtype.Text{String: ciphertext, Valid: true},
+		RuntimeTokenHash:       null.StringFrom(HashAppRuntimeToken(token)),
+		RuntimeTokenCiphertext: null.StringFrom(ciphertext),
 	}
 
 	updated, got, err := EnsureAppRuntimeToken(context.Background(), store, cipher, app)
@@ -53,7 +53,9 @@ func TestEnsureRuntimeTokenReusesExistingToken(t *testing.T) {
 	assert.Equal(t, app.RuntimeTokenHash, updated.RuntimeTokenHash)
 }
 
-// TestEnsureRuntimeTokenReusesWinnerAfterCASLost 验证并发初始化 CAS 失败时重新读取获胜者 token，而不是把 ErrNoRows 暴露给调用方。
+// TestEnsureRuntimeTokenReusesWinnerAfterCASLost 验证并发初始化 CAS 失败时重新读取获胜者 token，而不是把错误暴露给调用方。
+// 新实现中 SetAppRuntimeToken 为 :exec（始终返回 nil），service 在写入后始终调用 GetApp 读回最终落库值；
+// getApp 中包含并发获胜者写入的 token 字段，模拟 CAS 丢失后读回的获胜值。
 func TestEnsureRuntimeTokenReusesWinnerAfterCASLost(t *testing.T) {
 	cipher := newRuntimeTokenTestCipher(t)
 	winnerToken := "winner-runtime-token"
@@ -61,11 +63,11 @@ func TestEnsureRuntimeTokenReusesWinnerAfterCASLost(t *testing.T) {
 	require.NoError(t, err)
 	appID := mustParseUUID(testKnowledgeApp)
 	store := &fakeAppRuntimeTokenStore{
-		setErr: pgx.ErrNoRows,
+		// :exec 写入后直接读回，getApp 模拟并发获胜者已写入的 token。
 		getApp: sqlc.App{
 			ID:                     appID,
-			RuntimeTokenHash:       pgtype.Text{String: HashAppRuntimeToken(winnerToken), Valid: true},
-			RuntimeTokenCiphertext: pgtype.Text{String: ciphertext, Valid: true},
+			RuntimeTokenHash:       null.StringFrom(HashAppRuntimeToken(winnerToken)),
+			RuntimeTokenCiphertext: null.StringFrom(ciphertext),
 		},
 	}
 
@@ -87,25 +89,32 @@ type fakeAppRuntimeTokenStore struct {
 	getErr   error
 }
 
-func (s *fakeAppRuntimeTokenStore) GetApp(context.Context, pgtype.UUID) (sqlc.App, error) {
+func (s *fakeAppRuntimeTokenStore) GetApp(_ context.Context, id string) (sqlc.App, error) {
 	s.getCalls++
 	if s.getErr != nil {
 		return sqlc.App{}, s.getErr
 	}
+	if s.getApp.ID == "" {
+		return sqlc.App{}, sql.ErrNoRows
+	}
 	return s.getApp, nil
 }
 
-func (s *fakeAppRuntimeTokenStore) SetAppRuntimeToken(_ context.Context, arg sqlc.SetAppRuntimeTokenParams) (sqlc.App, error) {
+func (s *fakeAppRuntimeTokenStore) SetAppRuntimeToken(_ context.Context, arg sqlc.SetAppRuntimeTokenParams) error {
 	s.setCalls++
 	s.lastSet = arg
 	if s.setErr != nil {
-		return sqlc.App{}, s.setErr
+		return s.setErr
 	}
-	return sqlc.App{ID: arg.ID, RuntimeTokenHash: arg.RuntimeTokenHash, RuntimeTokenCiphertext: arg.RuntimeTokenCiphertext}, nil
-}
-
-func (s *fakeAppRuntimeTokenStore) GetAppByRuntimeTokenHash(context.Context, pgtype.Text) (sqlc.App, error) {
-	return sqlc.App{}, nil
+	// 写入成功时如果 getApp 未预置，则把刚写入的字段回填，供后续 GetApp 读回。
+	if s.getApp.ID == "" {
+		s.getApp = sqlc.App{
+			ID:                     arg.ID,
+			RuntimeTokenHash:       arg.RuntimeTokenHash,
+			RuntimeTokenCiphertext: arg.RuntimeTokenCiphertext,
+		}
+	}
+	return nil
 }
 
 func newRuntimeTokenTestCipher(t *testing.T) *auth.Cipher {

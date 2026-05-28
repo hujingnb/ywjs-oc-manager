@@ -2,11 +2,12 @@ package service
 
 import (
 	"context"
+	"database/sql"
 	"errors"
 	"testing"
+	"time"
 
-	"github.com/jackc/pgx/v5"
-	"github.com/jackc/pgx/v5/pgtype"
+	null "github.com/guregu/null/v5"
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
@@ -141,7 +142,7 @@ func TestMemberServiceListAppliesDefaultPageSize(t *testing.T) {
 	store := newMemberStoreStub(t)
 	store.users[testAdminUID] = sqlc.User{
 		ID:    mustUUID(t, testAdminUID),
-		OrgID: store.orgs[testOrgID].ID,
+		OrgID: null.StringFrom(store.orgs[testOrgID].ID),
 		Role:  domain.UserRoleOrgAdmin,
 	}
 	svc := NewMemberService(store, fakeHash)
@@ -174,14 +175,14 @@ func TestMemberServiceListExposesActiveApp(t *testing.T) {
 	withAppID := mustUUID(t, "00000000-0000-0000-0000-0000000000c1")
 	noAppID := mustUUID(t, "00000000-0000-0000-0000-0000000000c2")
 	deletedID := mustUUID(t, "00000000-0000-0000-0000-0000000000c3")
-	store.users[uuidToString(withAppID)] = sqlc.User{ID: withAppID, OrgID: orgUUID, Username: "with-app", DisplayName: "有实例的成员", Role: domain.UserRoleOrgMember, Status: domain.StatusActive}
-	store.users[uuidToString(noAppID)] = sqlc.User{ID: noAppID, OrgID: orgUUID, Username: "no-app", DisplayName: "无实例的成员", Role: domain.UserRoleOrgMember, Status: domain.StatusActive}
-	store.users[uuidToString(deletedID)] = sqlc.User{ID: deletedID, OrgID: orgUUID, Username: "deleted-app", DisplayName: "实例被删的成员", Role: domain.UserRoleOrgMember, Status: domain.StatusActive}
+	store.users[withAppID] = sqlc.User{ID: withAppID, OrgID: null.StringFrom(orgUUID), Username: "with-app", DisplayName: "有实例的成员", Role: domain.UserRoleOrgMember, Status: domain.StatusActive}
+	store.users[noAppID] = sqlc.User{ID: noAppID, OrgID: null.StringFrom(orgUUID), Username: "no-app", DisplayName: "无实例的成员", Role: domain.UserRoleOrgMember, Status: domain.StatusActive}
+	store.users[deletedID] = sqlc.User{ID: deletedID, OrgID: null.StringFrom(orgUUID), Username: "deleted-app", DisplayName: "实例被删的成员", Role: domain.UserRoleOrgMember, Status: domain.StatusActive}
 
 	activeAppID := mustUUID(t, "00000000-0000-0000-0000-0000000000d1")
 	deletedAppID := mustUUID(t, "00000000-0000-0000-0000-0000000000d2")
-	store.apps[uuidToString(activeAppID)] = sqlc.App{ID: activeAppID, OrgID: orgUUID, OwnerUserID: withAppID, Name: "现役实例"}
-	store.apps[uuidToString(deletedAppID)] = sqlc.App{ID: deletedAppID, OrgID: orgUUID, OwnerUserID: deletedID, Name: "已删实例", DeletedAt: pgtype.Timestamptz{Valid: true}}
+	store.apps[activeAppID] = sqlc.App{ID: activeAppID, OrgID: orgUUID, OwnerUserID: withAppID, Name: "现役实例"}
+	store.apps[deletedAppID] = sqlc.App{ID: deletedAppID, OrgID: orgUUID, OwnerUserID: deletedID, Name: "已删实例", DeletedAt: null.TimeFrom(stubNow())}
 
 	svc := NewMemberService(store, fakeHash)
 	results, err := svc.ListMembers(context.Background(), platformAdmin(), testOrgID, 0, 0)
@@ -196,7 +197,7 @@ func TestMemberServiceListExposesActiveApp(t *testing.T) {
 	// 有活跃实例：active_app_id 指向 activeAppID 字符串，active_app_name 为应用名。
 	withAppResult := byUsername["with-app"]
 	require.NotNil(t, withAppResult.ActiveAppID)
-	assert.Equal(t, uuidToString(activeAppID), *withAppResult.ActiveAppID)
+	assert.Equal(t, activeAppID, *withAppResult.ActiveAppID)
 	require.NotNil(t, withAppResult.ActiveAppName)
 	assert.Equal(t, "现役实例", *withAppResult.ActiveAppName)
 
@@ -216,7 +217,7 @@ func TestMemberServiceGetSelfAccessibleByMember(t *testing.T) {
 	store := newMemberStoreStub(t)
 	store.users[testMemUID] = sqlc.User{
 		ID:       mustUUID(t, testMemUID),
-		OrgID:    store.orgs[testOrgID].ID,
+		OrgID:    null.StringFrom(store.orgs[testOrgID].ID),
 		Username: "bob",
 		Role:     domain.UserRoleOrgMember,
 		Status:   domain.StatusActive,
@@ -233,7 +234,7 @@ func TestMemberServiceGetMemberRejectsCrossUserAccess(t *testing.T) {
 	store := newMemberStoreStub(t)
 	store.users[testMemUID] = sqlc.User{
 		ID:    mustUUID(t, testMemUID),
-		OrgID: store.orgs[testOrgID].ID,
+		OrgID: null.StringFrom(store.orgs[testOrgID].ID),
 		Role:  domain.UserRoleOrgMember,
 	}
 	svc := NewMemberService(store, fakeHash)
@@ -247,7 +248,7 @@ func TestMemberServiceUpdateProfileSelfAllowed(t *testing.T) {
 	store := newMemberStoreStub(t)
 	store.users[testMemUID] = sqlc.User{
 		ID:          mustUUID(t, testMemUID),
-		OrgID:       store.orgs[testOrgID].ID,
+		OrgID:       null.StringFrom(store.orgs[testOrgID].ID),
 		Role:        domain.UserRoleOrgMember,
 		DisplayName: "Bob",
 	}
@@ -263,7 +264,7 @@ func TestMemberServiceUpdateRoleRequiresAdmin(t *testing.T) {
 	store := newMemberStoreStub(t)
 	store.users[testMemUID] = sqlc.User{
 		ID:    mustUUID(t, testMemUID),
-		OrgID: store.orgs[testOrgID].ID,
+		OrgID: null.StringFrom(store.orgs[testOrgID].ID),
 		Role:  domain.UserRoleOrgMember,
 	}
 	svc := NewMemberService(store, fakeHash)
@@ -279,7 +280,7 @@ func TestMemberServiceSetStatusBlocksSelfDisable(t *testing.T) {
 	store := newMemberStoreStub(t)
 	store.users[testAdminUID] = sqlc.User{
 		ID:    mustUUID(t, testAdminUID),
-		OrgID: store.orgs[testOrgID].ID,
+		OrgID: null.StringFrom(store.orgs[testOrgID].ID),
 		Role:  domain.UserRoleOrgAdmin,
 	}
 	svc := NewMemberService(store, fakeHash)
@@ -293,7 +294,7 @@ func TestMemberServiceResetPasswordRequiresAdmin(t *testing.T) {
 	store := newMemberStoreStub(t)
 	store.users[testMemUID] = sqlc.User{
 		ID:    mustUUID(t, testMemUID),
-		OrgID: store.orgs[testOrgID].ID,
+		OrgID: null.StringFrom(store.orgs[testOrgID].ID),
 		Role:  domain.UserRoleOrgMember,
 	}
 	svc := NewMemberService(store, fakeHash)
@@ -308,7 +309,7 @@ func TestMemberServiceResetPasswordSucceeds(t *testing.T) {
 	store := newMemberStoreStub(t)
 	store.users[testMemUID] = sqlc.User{
 		ID:    mustUUID(t, testMemUID),
-		OrgID: store.orgs[testOrgID].ID,
+		OrgID: null.StringFrom(store.orgs[testOrgID].ID),
 		Role:  domain.UserRoleOrgMember,
 	}
 	svc := NewMemberService(store, fakeHash)
@@ -328,24 +329,24 @@ func TestDeleteMember_SoftDeletesAndEnqueuesAppDelete(t *testing.T) {
 	stub := newMemberStoreStub(t)
 	target := sqlc.User{
 		ID:     mustUUID(t, "00000000-0000-0000-0000-0000000000aa"),
-		OrgID:  stub.orgs[testOrgID].ID,
+		OrgID:  null.StringFrom(stub.orgs[testOrgID].ID),
 		Status: domain.StatusActive,
 		Role:   domain.UserRoleOrgMember,
 	}
-	stub.users[uuidToString(target.ID)] = target
+	stub.users[target.ID] = target
 	app := sqlc.App{
 		ID:          mustUUID(t, "00000000-0000-0000-0000-0000000000bb"),
 		OrgID:       stub.orgs[testOrgID].ID,
 		OwnerUserID: target.ID,
 		Status:      domain.AppStatusRunning,
 	}
-	stub.apps[uuidToString(app.ID)] = app
+	stub.apps[app.ID] = app
 
 	notifier := &fakeNotifier{}
 	svc := NewMemberService(stub, fakeHash)
-	err := svc.DeleteMember(context.Background(), orgAdminPrincipal(), uuidToString(target.ID), notifier)
+	err := svc.DeleteMember(context.Background(), orgAdminPrincipal(), target.ID, notifier)
 	require.NoError(t, err)
-	require.Equal(t, domain.StatusDisabled, stub.users[uuidToString(target.ID)].Status)
+	require.Equal(t, domain.StatusDisabled, stub.users[target.ID].Status)
 	require.Equal(t, 1, len(stub.softDeleted))
 	if len(stub.jobs) != 1 || stub.jobs[0].Type != domain.JobTypeAppDelete {
 		t.Fatalf("jobs = %+v", stub.jobs)
@@ -362,13 +363,13 @@ func TestDeleteMember_NoAppStillSoftDeletesUser(t *testing.T) {
 	stub := newMemberStoreStub(t)
 	target := sqlc.User{
 		ID:     mustUUID(t, "00000000-0000-0000-0000-0000000000ab"),
-		OrgID:  stub.orgs[testOrgID].ID,
+		OrgID:  null.StringFrom(stub.orgs[testOrgID].ID),
 		Status: domain.StatusActive,
 		Role:   domain.UserRoleOrgMember,
 	}
-	stub.users[uuidToString(target.ID)] = target
+	stub.users[target.ID] = target
 	svc := NewMemberService(stub, fakeHash)
-	err := svc.DeleteMember(context.Background(), orgAdminPrincipal(), uuidToString(target.ID), nil)
+	err := svc.DeleteMember(context.Background(), orgAdminPrincipal(), target.ID, nil)
 	require.NoError(t, err)
 	require.Equal(t, 0, len(stub.jobs))
 	// 场景：成员名下没有应用时详情仍要明确写出「0 个」便于一致展示。
@@ -381,13 +382,13 @@ func TestDeleteMember_RejectsSelfDeletion(t *testing.T) {
 	stub := newMemberStoreStub(t)
 	target := sqlc.User{
 		ID:     mustUUID(t, testAdminUID), // 场景：组织管理员删除自己的账号应被拒绝。
-		OrgID:  stub.orgs[testOrgID].ID,
+		OrgID:  null.StringFrom(stub.orgs[testOrgID].ID),
 		Status: domain.StatusActive,
 		Role:   domain.UserRoleOrgAdmin,
 	}
-	stub.users[uuidToString(target.ID)] = target
+	stub.users[target.ID] = target
 	svc := NewMemberService(stub, fakeHash)
-	err := svc.DeleteMember(context.Background(), orgAdminPrincipal(), uuidToString(target.ID), nil)
+	err := svc.DeleteMember(context.Background(), orgAdminPrincipal(), target.ID, nil)
 	require.ErrorIs(t, err, ErrMemberCreateInvalid)
 }
 
@@ -396,14 +397,14 @@ func TestDeleteMember_OrgMemberCannotDeleteOthers(t *testing.T) {
 	stub := newMemberStoreStub(t)
 	target := sqlc.User{
 		ID:     mustUUID(t, "00000000-0000-0000-0000-0000000000ad"),
-		OrgID:  stub.orgs[testOrgID].ID,
+		OrgID:  null.StringFrom(stub.orgs[testOrgID].ID),
 		Status: domain.StatusActive,
 	}
-	stub.users[uuidToString(target.ID)] = target
+	stub.users[target.ID] = target
 	svc := NewMemberService(stub, fakeHash)
 	err := svc.DeleteMember(context.Background(),
-		auth.Principal{Role: domain.UserRoleOrgMember, OrgID: uuidToString(stub.orgs[testOrgID].ID), UserID: "other"},
-		uuidToString(target.ID), nil)
+		auth.Principal{Role: domain.UserRoleOrgMember, OrgID: stub.orgs[testOrgID].ID, UserID: "other"},
+		target.ID, nil)
 	require.ErrorIs(t, err, ErrForbidden)
 }
 
@@ -413,6 +414,11 @@ func platformAdmin() auth.Principal {
 
 func orgAdminPrincipal() auth.Principal {
 	return auth.Principal{Role: domain.UserRoleOrgAdmin, OrgID: testOrgID, UserID: testAdminUID}
+}
+
+// stubNow 返回测试用固定时间戳，用于填充 null.Time 字段。
+func stubNow() time.Time {
+	return time.Date(2026, 5, 1, 0, 0, 0, 0, time.UTC)
 }
 
 type memberStoreStub struct {
@@ -443,24 +449,23 @@ func newMemberStoreStub(t *testing.T) *memberStoreStub {
 	}
 }
 
-func (s *memberStoreStub) GetOrganization(_ context.Context, id pgtype.UUID) (sqlc.Organization, error) {
-	org, ok := s.orgs[uuidToString(id)]
+func (s *memberStoreStub) GetOrganization(_ context.Context, id string) (sqlc.Organization, error) {
+	org, ok := s.orgs[id]
 	if !ok {
-		return sqlc.Organization{}, pgx.ErrNoRows
+		return sqlc.Organization{}, sql.ErrNoRows
 	}
 	return org, nil
 }
 
-func (s *memberStoreStub) CreateUser(_ context.Context, arg sqlc.CreateUserParams) (sqlc.User, error) {
+func (s *memberStoreStub) CreateUser(_ context.Context, arg sqlc.CreateUserParams) error {
 	s.lastCreate = arg
-	key := uuidToString(arg.OrgID) + "/" + arg.Username
+	key := arg.OrgID.String + "/" + arg.Username
 	if _, exists := s.usersByOrgUsername[key]; exists {
-		return sqlc.User{}, errors.New("duplicate username in organization")
+		return errors.New("duplicate username in organization")
 	}
-	id := mustUUID(s.t, "00000000-0000-0000-0000-0000000000ff")
-	id.Bytes[15] = byte(len(s.users) + 1)
+	// 使用 service 传入的 arg.ID（由 service 调用 newUUID() 生成），供后续 GetUser(userID) 读回。
 	user := sqlc.User{
-		ID:           id,
+		ID:           arg.ID,
 		OrgID:        arg.OrgID,
 		Username:     arg.Username,
 		PasswordHash: arg.PasswordHash,
@@ -469,14 +474,14 @@ func (s *memberStoreStub) CreateUser(_ context.Context, arg sqlc.CreateUserParam
 		Status:       arg.Status,
 	}
 	s.usersByOrgUsername[key] = user
-	s.users[uuidToString(user.ID)] = user
-	return user, nil
+	s.users[user.ID] = user
+	return nil
 }
 
-func (s *memberStoreStub) GetUser(_ context.Context, id pgtype.UUID) (sqlc.User, error) {
-	user, ok := s.users[uuidToString(id)]
+func (s *memberStoreStub) GetUser(_ context.Context, id string) (sqlc.User, error) {
+	user, ok := s.users[id]
 	if !ok {
-		return sqlc.User{}, pgx.ErrNoRows
+		return sqlc.User{}, sql.ErrNoRows
 	}
 	return user, nil
 }
@@ -487,7 +492,7 @@ func (s *memberStoreStub) GetUserByUsername(_ context.Context, username string) 
 			return user, nil
 		}
 	}
-	return sqlc.User{}, pgx.ErrNoRows
+	return sqlc.User{}, sql.ErrNoRows
 }
 
 // ListUsersByOrgWithActiveApp 模拟 sqlc 的 LEFT JOIN：先取本组织全部 users，
@@ -496,7 +501,7 @@ func (s *memberStoreStub) ListUsersByOrgWithActiveApp(_ context.Context, arg sql
 	s.lastListWithApp = arg
 	rows := make([]sqlc.ListUsersByOrgWithActiveAppRow, 0, len(s.users))
 	for _, user := range s.users {
-		if user.OrgID != arg.OrgID {
+		if user.OrgID.String != arg.OrgID.String {
 			continue
 		}
 		row := sqlc.ListUsersByOrgWithActiveAppRow{
@@ -514,8 +519,8 @@ func (s *memberStoreStub) ListUsersByOrgWithActiveApp(_ context.Context, arg sql
 		}
 		for _, app := range s.apps {
 			if app.OwnerUserID == user.ID && !app.DeletedAt.Valid {
-				row.ActiveAppID = app.ID
-				row.ActiveAppName = pgtype.Text{String: app.Name, Valid: true}
+				row.ActiveAppID = null.StringFrom(app.ID)
+				row.ActiveAppName = null.StringFrom(app.Name)
 				break
 			}
 		}
@@ -524,65 +529,65 @@ func (s *memberStoreStub) ListUsersByOrgWithActiveApp(_ context.Context, arg sql
 	return rows, nil
 }
 
-func (s *memberStoreStub) UpdateUserProfile(_ context.Context, arg sqlc.UpdateUserProfileParams) (sqlc.User, error) {
-	user, ok := s.users[uuidToString(arg.ID)]
+func (s *memberStoreStub) UpdateUserProfile(_ context.Context, arg sqlc.UpdateUserProfileParams) error {
+	user, ok := s.users[arg.ID]
 	if !ok {
-		return sqlc.User{}, pgx.ErrNoRows
+		return sql.ErrNoRows
 	}
 	user.DisplayName = arg.DisplayName
 	user.Role = arg.Role
-	s.users[uuidToString(arg.ID)] = user
-	return user, nil
+	s.users[arg.ID] = user
+	return nil
 }
 
-func (s *memberStoreStub) SetUserStatus(_ context.Context, arg sqlc.SetUserStatusParams) (sqlc.User, error) {
-	user, ok := s.users[uuidToString(arg.ID)]
+func (s *memberStoreStub) SetUserStatus(_ context.Context, arg sqlc.SetUserStatusParams) error {
+	user, ok := s.users[arg.ID]
 	if !ok {
-		return sqlc.User{}, pgx.ErrNoRows
+		return sql.ErrNoRows
 	}
 	user.Status = arg.Status
-	s.users[uuidToString(arg.ID)] = user
-	return user, nil
+	s.users[arg.ID] = user
+	return nil
 }
 
-func (s *memberStoreStub) UpdateUserPassword(_ context.Context, arg sqlc.UpdateUserPasswordParams) (sqlc.User, error) {
+func (s *memberStoreStub) UpdateUserPassword(_ context.Context, arg sqlc.UpdateUserPasswordParams) error {
 	s.lastPwdUpdate = arg
-	user, ok := s.users[uuidToString(arg.ID)]
+	user, ok := s.users[arg.ID]
 	if !ok {
-		return sqlc.User{}, pgx.ErrNoRows
+		return sql.ErrNoRows
 	}
 	user.PasswordHash = arg.PasswordHash
-	s.users[uuidToString(arg.ID)] = user
-	return user, nil
+	s.users[arg.ID] = user
+	return nil
 }
 
-func (s *memberStoreStub) GetActiveAppByOwner(_ context.Context, ownerUserID pgtype.UUID) (sqlc.App, error) {
+func (s *memberStoreStub) GetActiveAppByOwner(_ context.Context, ownerUserID string) (sqlc.App, error) {
 	for _, app := range s.apps {
 		if app.OwnerUserID == ownerUserID && !app.DeletedAt.Valid {
 			return app, nil
 		}
 	}
-	return sqlc.App{}, pgx.ErrNoRows
+	return sqlc.App{}, sql.ErrNoRows
 }
 
-func (s *memberStoreStub) SoftDeleteApp(_ context.Context, id pgtype.UUID) (sqlc.App, error) {
-	app, ok := s.apps[uuidToString(id)]
+func (s *memberStoreStub) SoftDeleteApp(_ context.Context, id string) error {
+	app, ok := s.apps[id]
 	if !ok {
-		return sqlc.App{}, pgx.ErrNoRows
+		return sql.ErrNoRows
 	}
-	app.DeletedAt = pgtype.Timestamptz{Valid: true}
-	s.apps[uuidToString(id)] = app
-	s.softDeleted = append(s.softDeleted, uuidToString(id))
-	return app, nil
+	app.DeletedAt = null.TimeFrom(stubNow())
+	s.apps[id] = app
+	s.softDeleted = append(s.softDeleted, id)
+	return nil
 }
 
-func (s *memberStoreStub) CreateJob(_ context.Context, arg sqlc.CreateJobParams) (sqlc.Job, error) {
+func (s *memberStoreStub) CreateJob(_ context.Context, arg sqlc.CreateJobParams) error {
 	s.jobs = append(s.jobs, arg)
-	return sqlc.Job{ID: mustUUID(s.t, "00000000-0000-0000-0000-000000004001"), Type: arg.Type}, nil
+	return nil
 }
 
-func (s *memberStoreStub) CreateAuditLog(_ context.Context, arg sqlc.CreateAuditLogParams) (sqlc.AuditLog, error) {
+func (s *memberStoreStub) CreateAuditLog(_ context.Context, arg sqlc.CreateAuditLogParams) error {
 	s.auditWritten = true
 	s.lastAuditCreate = arg
-	return sqlc.AuditLog{}, nil
+	return nil
 }

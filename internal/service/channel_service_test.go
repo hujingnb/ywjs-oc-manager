@@ -2,11 +2,11 @@ package service
 
 import (
 	"context"
+	"database/sql"
 	"testing"
 	"time"
 
-	"github.com/jackc/pgx/v5"
-	"github.com/jackc/pgx/v5/pgtype"
+	null "github.com/guregu/null/v5"
 
 	"github.com/stretchr/testify/require"
 	"oc-manager/internal/auth"
@@ -80,8 +80,8 @@ func TestChannelServiceBeginAuthPlatformAdminForbidden(t *testing.T) {
 func TestChannelServicePollAuthMarksBound(t *testing.T) {
 	store := newChannelStub(t)
 	store.binding.Status = domain.ChannelStatusBound
-	store.binding.BoundIdentity = pgtype.Text{String: "alice", Valid: true}
-	store.binding.ChannelName = pgtype.Text{String: "alice@wechat", Valid: true}
+	store.binding.BoundIdentity = null.StringFrom("alice")
+	store.binding.ChannelName = null.StringFrom("alice@wechat")
 	store.binding.MetadataJson = []byte(`{"type":"qrcode","qrcode":"https://liteapp.weixin.qq.com/q/test","expires_at":"2026-05-03T12:00:00Z","hints":{"raw_qr":"https://liteapp.weixin.qq.com/q/test"}}`)
 	registry := channel.NewRegistry()
 	registry.MustRegister(&fakeAdapter{})
@@ -204,52 +204,52 @@ func newChannelStub(t *testing.T) *channelStub {
 	return &channelStub{t: t, app: app, binding: binding}
 }
 
-func (s *channelStub) GetApp(_ context.Context, id pgtype.UUID) (sqlc.App, error) {
+func (s *channelStub) GetApp(_ context.Context, id string) (sqlc.App, error) {
 	if id != s.app.ID {
-		return sqlc.App{}, pgx.ErrNoRows
+		return sqlc.App{}, sql.ErrNoRows
 	}
 	return s.app, nil
 }
 
 func (s *channelStub) GetChannelBindingByAppAndType(_ context.Context, arg sqlc.GetChannelBindingByAppAndTypeParams) (sqlc.ChannelBinding, error) {
 	if arg.AppID != s.binding.AppID || arg.ChannelType != s.binding.ChannelType {
-		return sqlc.ChannelBinding{}, pgx.ErrNoRows
+		return sqlc.ChannelBinding{}, sql.ErrNoRows
 	}
 	return s.binding, nil
 }
 
-func (s *channelStub) SetChannelBindingChallenge(_ context.Context, arg sqlc.SetChannelBindingChallengeParams) (sqlc.ChannelBinding, error) {
+func (s *channelStub) SetChannelBindingChallenge(_ context.Context, arg sqlc.SetChannelBindingChallengeParams) error {
 	s.binding.MetadataJson = arg.MetadataJson
-	return s.binding, nil
+	return nil
 }
 
-func (s *channelStub) SetChannelBindingStatus(_ context.Context, arg sqlc.SetChannelBindingStatusParams) (sqlc.ChannelBinding, error) {
+func (s *channelStub) SetChannelBindingStatus(_ context.Context, arg sqlc.SetChannelBindingStatusParams) error {
 	s.statusUpdated = true
 	s.lastStatus = arg.Status
 	s.binding.Status = arg.Status
 	s.binding.LastError = arg.LastError
-	return s.binding, nil
+	return nil
 }
 
-func (s *channelStub) SetAppStatus(_ context.Context, arg sqlc.SetAppStatusParams) (sqlc.App, error) {
+func (s *channelStub) SetAppStatus(_ context.Context, arg sqlc.SetAppStatusParams) error {
 	s.appStatusSet = true
 	s.lastAppStatus = arg.Status
 	if s.appStatusErr != nil {
-		return sqlc.App{}, s.appStatusErr
+		return s.appStatusErr
 	}
 	s.app.Status = arg.Status
-	return s.app, nil
+	return nil
 }
 
-func (s *channelStub) MarkChannelBindingBound(_ context.Context, arg sqlc.MarkChannelBindingBoundParams) (sqlc.ChannelBinding, error) {
+func (s *channelStub) MarkChannelBindingBound(_ context.Context, arg sqlc.MarkChannelBindingBoundParams) error {
 	s.boundCalled = true
 	s.binding.Status = domain.ChannelStatusBound
 	s.binding.BoundIdentity = arg.BoundIdentity
 	s.binding.ChannelName = arg.ChannelName
-	return s.binding, nil
+	return nil
 }
 
-func (s *channelStub) CreateJob(_ context.Context, arg sqlc.CreateJobParams) (sqlc.Job, error) {
+func (s *channelStub) CreateJob(_ context.Context, arg sqlc.CreateJobParams) error {
 	job := sqlc.Job{
 		ID:          mustUUID(s.t, "00000000-0000-0000-0000-000000000d02"),
 		Type:        arg.Type,
@@ -259,12 +259,12 @@ func (s *channelStub) CreateJob(_ context.Context, arg sqlc.CreateJobParams) (sq
 		PayloadJson: arg.PayloadJson,
 	}
 	s.jobs = append(s.jobs, job)
-	return job, nil
+	return nil
 }
 
-func (s *channelStub) CreateAuditLog(_ context.Context, arg sqlc.CreateAuditLogParams) (sqlc.AuditLog, error) {
+func (s *channelStub) CreateAuditLog(_ context.Context, arg sqlc.CreateAuditLogParams) error {
 	s.auditLogs = append(s.auditLogs, arg)
-	return sqlc.AuditLog{TargetType: arg.TargetType, TargetID: arg.TargetID, Action: arg.Action, Result: arg.Result}, nil
+	return nil
 }
 
 func channelOrgAdminPrincipal() auth.Principal {

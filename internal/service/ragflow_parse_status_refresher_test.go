@@ -2,10 +2,11 @@ package service
 
 import (
 	"context"
+	"database/sql"
 	"errors"
 	"testing"
 
-	"github.com/jackc/pgx/v5/pgtype"
+	null "github.com/guregu/null/v5"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
@@ -33,9 +34,12 @@ func (s *fakeRefresherStore) ListRAGFlowDocumentsNeedingRefresh(_ context.Contex
 	return s.listRows[:limit], nil
 }
 
-func (s *fakeRefresherStore) UpdateRAGFlowDocumentParseStatus(_ context.Context, arg sqlc.UpdateRAGFlowDocumentParseStatusParams) (sqlc.RagflowDocument, error) {
+// UpdateRAGFlowDocumentParseStatus 为 :exec；stub 记录参数供测试断言，不返回文档行。
+func (s *fakeRefresherStore) UpdateRAGFlowDocumentParseStatus(_ context.Context, arg sqlc.UpdateRAGFlowDocumentParseStatusParams) error {
 	s.updates = append(s.updates, arg)
-	return sqlc.RagflowDocument{ID: arg.ID, ParseStatus: arg.ParseStatus, Progress: arg.Progress, LastError: arg.LastError}, nil
+	// 模拟 :exec 写入成功后返回 nil；服务层如需读回会调 GetRAGFlowDocument（此处不需要）。
+	_ = sql.ErrNoRows // 仅用于表明已知语义，非真实返回路径
+	return nil
 }
 
 // fakeRefresherRAGFlow 模拟 RAGFlow ListDocuments，可按 datasetID 返回不同响应或注入错误。
@@ -54,6 +58,8 @@ func (f *fakeRefresherRAGFlow) ListDocuments(_ context.Context, datasetID string
 	return docs, int32(len(docs)), nil
 }
 
+// makeRefreshRow 构建测试用的 ListRAGFlowDocumentsNeedingRefreshRow。
+// ID / DatasetID 为字符串（MySQL CHAR(36)）；RemoteDatasetID 为 null.String。
 func makeRefreshRow(id, datasetID, remoteDatasetID, remoteDocID, status string, progress int32) sqlc.ListRAGFlowDocumentsNeedingRefreshRow {
 	return sqlc.ListRAGFlowDocumentsNeedingRefreshRow{
 		ID:                mustParseUUID(id),
@@ -61,7 +67,7 @@ func makeRefreshRow(id, datasetID, remoteDatasetID, remoteDocID, status string, 
 		RagflowDocumentID: remoteDocID,
 		ParseStatus:       status,
 		Progress:          progress,
-		RemoteDatasetID:   remoteDatasetID,
+		RemoteDatasetID:   null.StringFrom(remoteDatasetID),
 	}
 }
 
@@ -171,9 +177,10 @@ func TestRagflowParseStatusRefresher_ListErrorPreservesStatusButWritesLastError(
 	require.Error(t, err)
 	require.Len(t, store.updates, 2)
 
+	// ID 已是 string，直接作 map key，无需转换。
 	updateByID := map[string]sqlc.UpdateRAGFlowDocumentParseStatusParams{}
 	for _, u := range store.updates {
-		updateByID[uuidToString(u.ID)] = u
+		updateByID[u.ID] = u
 	}
 	failed := updateByID["00000000-0000-0000-0000-000000000a01"]
 	assert.Equal(t, "queued", failed.ParseStatus)
@@ -196,6 +203,3 @@ func TestRagflowParseStatusRefresher_StoreListErrorReturned(t *testing.T) {
 	assert.Empty(t, rf.listCallOrder)
 	assert.Empty(t, store.updates)
 }
-
-// 保留变量以便未来调试时确认 pgtype.Text 零值语义符合预期。
-var _ = pgtype.Text{}

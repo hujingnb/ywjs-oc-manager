@@ -2,14 +2,12 @@ package service
 
 import (
 	"context"
+	"database/sql"
 	"errors"
 	"io"
 	"strings"
 	"testing"
 	"time"
-
-	"github.com/jackc/pgx/v5"
-	"github.com/jackc/pgx/v5/pgtype"
 
 	"github.com/stretchr/testify/require"
 	"oc-manager/internal/auth"
@@ -43,8 +41,6 @@ func TestWorkspaceServiceListReturnsEntries(t *testing.T) {
 	if len(listing.Entries) != 1 || listing.Entries[0].Name != "alice.log" {
 		t.Fatalf("listing = %+v", listing)
 	}
-	// Sprint 2 改用 scope-aware 端点：service 直接传 appID + relative，
-	// 不再拼 /data/org/<id>/app/<id> 路径，校验 adapter 拿到的 appID/relPath。
 	if adapter.lastAppID != testWorkAppID || adapter.lastRelPath != "logs" {
 		t.Fatalf("adapter 收到 appID=%q relPath=%q", adapter.lastAppID, adapter.lastRelPath)
 	}
@@ -133,9 +129,10 @@ func TestWorkspaceServiceRejectsUnsafePaths(t *testing.T) {
 }
 
 // TestWorkspaceServiceListMissingNodeReturnsError 验证工作区服务列表缺失节点返回错误的异常或拒绝路径场景。
+// MySQL 侧 RuntimeNodeID 是 string；空字符串表示节点未分配，service 以 "" 检测缺失。
 func TestWorkspaceServiceListMissingNodeReturnsError(t *testing.T) {
 	store := newWorkspaceStub(t)
-	store.app.RuntimeNodeID = pgtype.UUID{} // 不再设置 valid=true
+	store.app.RuntimeNodeID = "" // 空字符串表示未分配节点
 	svc := NewWorkspaceService(store, &fakeWorkspaceAdapter{}, "/data")
 
 	_, err := svc.List(context.Background(), platformAdmin(), testWorkAppID, "")
@@ -144,14 +141,13 @@ func TestWorkspaceServiceListMissingNodeReturnsError(t *testing.T) {
 
 func newWorkspaceStub(t *testing.T) *workspaceStub {
 	app := sqlc.App{
-		ID:           mustUUID(t, testWorkAppID),
-		OrgID:        mustUUID(t, testWorkOrg),
-		OwnerUserID:  mustUUID(t, testWorkOwner),
-		Status:       domain.AppStatusRunning,
-		ApiKeyStatus: domain.APIKeyStatusActive,
+		ID:            mustUUID(t, testWorkAppID),
+		OrgID:         mustUUID(t, testWorkOrg),
+		OwnerUserID:   mustUUID(t, testWorkOwner),
+		RuntimeNodeID: mustUUID(t, testWorkNode), // 非空字符串，表示已分配节点
+		Status:        domain.AppStatusRunning,
+		ApiKeyStatus:  domain.APIKeyStatusActive,
 	}
-	app.RuntimeNodeID = mustUUID(t, testWorkNode)
-	app.RuntimeNodeID.Valid = true
 	return &workspaceStub{t: t, app: app}
 }
 
@@ -160,9 +156,9 @@ type workspaceStub struct {
 	app sqlc.App
 }
 
-func (s *workspaceStub) GetApp(_ context.Context, id pgtype.UUID) (sqlc.App, error) {
+func (s *workspaceStub) GetApp(_ context.Context, id string) (sqlc.App, error) {
 	if id != s.app.ID {
-		return sqlc.App{}, pgx.ErrNoRows
+		return sqlc.App{}, sql.ErrNoRows
 	}
 	return s.app, nil
 }

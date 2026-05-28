@@ -5,17 +5,17 @@ import (
 	"testing"
 	"time"
 
-	"github.com/jackc/pgx/v5/pgtype"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
 
 // resourceSampleCleanupStoreStub 记录清理器传入的 cutoff 和批大小，避免测试依赖真实数据库。
+// cutoff 现在是 time.Time（MySQL DATETIME），不再是 pgtype.Timestamptz。
 type resourceSampleCleanupStoreStub struct {
 	// nodeCutoff 记录节点资源采样删除时使用的过期时间边界。
-	nodeCutoff pgtype.Timestamptz
+	nodeCutoff time.Time
 	// nodeCutoffs 记录节点资源采样每个批次的 cutoff，验证循环清理不会改变边界。
-	nodeCutoffs []pgtype.Timestamptz
+	nodeCutoffs []time.Time
 	// nodeLimit 记录节点资源采样删除时使用的单批上限。
 	nodeLimit int32
 	// nodeLimits 记录节点资源采样每个批次的 limit，验证所有批次都使用固定上限。
@@ -23,9 +23,9 @@ type resourceSampleCleanupStoreStub struct {
 	// nodeDeletes 允许测试配置每个批次的删除行数；为空时使用默认单批返回。
 	nodeDeletes []int64
 	// instanceCutoff 记录实例资源采样删除时使用的过期时间边界。
-	instanceCutoff pgtype.Timestamptz
+	instanceCutoff time.Time
 	// instanceCutoffs 记录实例资源采样每个批次的 cutoff。
-	instanceCutoffs []pgtype.Timestamptz
+	instanceCutoffs []time.Time
 	// instanceLimit 记录实例资源采样删除时使用的单批上限。
 	instanceLimit int32
 	// instanceLimits 记录实例资源采样每个批次的 limit。
@@ -35,7 +35,8 @@ type resourceSampleCleanupStoreStub struct {
 }
 
 // DeleteOldNodeResourceSamples 模拟节点采样删除，并保存调用参数供断言使用。
-func (s *resourceSampleCleanupStoreStub) DeleteOldNodeResourceSamples(_ context.Context, cutoff pgtype.Timestamptz, limit int32) (int64, error) {
+// cutoff 为 time.Time（MySQL DATETIME），与新 ResourceSampleCleanupStore 接口一致。
+func (s *resourceSampleCleanupStoreStub) DeleteOldNodeResourceSamples(_ context.Context, cutoff time.Time, limit int32) (int64, error) {
 	s.nodeCutoff = cutoff
 	s.nodeCutoffs = append(s.nodeCutoffs, cutoff)
 	s.nodeLimit = limit
@@ -49,7 +50,7 @@ func (s *resourceSampleCleanupStoreStub) DeleteOldNodeResourceSamples(_ context.
 }
 
 // DeleteOldInstanceResourceSamples 模拟实例采样删除，并保存调用参数供断言使用。
-func (s *resourceSampleCleanupStoreStub) DeleteOldInstanceResourceSamples(_ context.Context, cutoff pgtype.Timestamptz, limit int32) (int64, error) {
+func (s *resourceSampleCleanupStoreStub) DeleteOldInstanceResourceSamples(_ context.Context, cutoff time.Time, limit int32) (int64, error) {
 	s.instanceCutoff = cutoff
 	s.instanceCutoffs = append(s.instanceCutoffs, cutoff)
 	s.instanceLimit = limit
@@ -75,10 +76,9 @@ func TestResourceSampleCleanupDeletesOldSamplesInBatches(t *testing.T) {
 	require.NoError(t, err)
 	assert.Equal(t, int64(12), nodeDeleted)
 	assert.Equal(t, int64(34), instanceDeleted)
-	assert.True(t, store.nodeCutoff.Valid)
-	assert.True(t, store.instanceCutoff.Valid)
-	assert.Equal(t, expectedCutoff, store.nodeCutoff.Time)
-	assert.Equal(t, expectedCutoff, store.instanceCutoff.Time)
+	// cutoff 是 time.Time（MySQL DATETIME），直接比较不再需要 .Valid 检查。
+	assert.Equal(t, expectedCutoff, store.nodeCutoff)
+	assert.Equal(t, expectedCutoff, store.instanceCutoff)
 	assert.Equal(t, int32(1000), store.nodeLimit)
 	assert.Equal(t, int32(1000), store.instanceLimit)
 }
@@ -101,13 +101,12 @@ func TestResourceSampleCleanupDrainsFullBatches(t *testing.T) {
 	assert.Equal(t, int64(1005), instanceDeleted)
 	assert.Len(t, store.nodeCutoffs, 3)
 	assert.Len(t, store.instanceCutoffs, 2)
+	// cutoff 是 time.Time；每批次应使用相同的保留边界。
 	for _, cutoff := range store.nodeCutoffs {
-		assert.True(t, cutoff.Valid)
-		assert.Equal(t, expectedCutoff, cutoff.Time)
+		assert.Equal(t, expectedCutoff, cutoff)
 	}
 	for _, cutoff := range store.instanceCutoffs {
-		assert.True(t, cutoff.Valid)
-		assert.Equal(t, expectedCutoff, cutoff.Time)
+		assert.Equal(t, expectedCutoff, cutoff)
 	}
 	assert.Equal(t, []int32{1000, 1000, 1000}, store.nodeLimits)
 	assert.Equal(t, []int32{1000, 1000}, store.instanceLimits)

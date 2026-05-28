@@ -6,7 +6,7 @@ import (
 	"errors"
 	"testing"
 
-	"github.com/jackc/pgx/v5/pgtype"
+	null "github.com/guregu/null/v5"
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
@@ -30,11 +30,11 @@ func TestSQLNodeSelector_AdaptsRows(t *testing.T) {
 	id := mustUUID(t, "00000000-0000-0000-0000-000000000a01")
 	store := &sqlNodeSelectorStub{rows: []sqlc.ListActiveNodesWithAppCountsRow{{
 		ID:       id,
-		MaxApps:  pgtype.Int4{Int32: 5, Valid: true},
+		MaxApps:  null.IntFrom(5), // 限制最多 5 个应用
 		AppCount: 2,
 	}, {
 		ID:       mustUUID(t, "00000000-0000-0000-0000-000000000a02"),
-		MaxApps:  pgtype.Int4{}, // NULL
+		MaxApps:  null.Int{}, // NULL，表示不限制
 		AppCount: 7,
 	}}}
 	got, err := NewSQLNodeSelector(store).ListActiveNodesWithAppCounts(context.Background())

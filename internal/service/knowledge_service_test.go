@@ -3,14 +3,14 @@ package service
 
 import (
 	"context"
+	"database/sql"
 	"errors"
 	"io"
 	"strings"
 	"testing"
 	"time"
 
-	"github.com/jackc/pgx/v5"
-	"github.com/jackc/pgx/v5/pgtype"
+	null "github.com/guregu/null/v5"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
@@ -97,8 +97,7 @@ func TestRuntimeSearchUsesOnlyCurrentAppAndOrgDatasets(t *testing.T) {
 	assert.Equal(t, int32(8), rf.retrieveCalls[0].topK)
 }
 
-// TestRuntimeSearchNormalizesTopK 验证 runtime 检索在调用 RAGFlow 前应用 manager 默认值和上限，
-// 避免 RAGFlow 使用 1024 的服务端默认值或被异常大请求放大。
+// TestRuntimeSearchNormalizesTopK 验证 runtime 检索在调用 RAGFlow 前应用 manager 默认值和上限。
 func TestRuntimeSearchNormalizesTopK(t *testing.T) {
 	svc, _, rf := newRAGFlowKnowledgeTestService(t)
 
@@ -144,21 +143,17 @@ func TestRuntimeSearchOrgRetrieveErrorUsesEnterpriseCopy(t *testing.T) {
 		testRemoteOrgDatasetID: errors.New("ragflow unavailable"),
 	}
 
-	// 企业知识库检索错误会经 knowledge handler 安全文案透出，不能再包含旧组织文案。
 	_, err := svc.RuntimeSearch(context.Background(), testRuntimeToken, "退款政策", 8)
 	require.ErrorContains(t, err, "RAGFlow 检索企业知识库失败")
 }
 
 // TestRAGFlowKnowledgeListReturnsCachedStatus 验证列表请求只读取本地缓存，不向 RAGFlow 拉取最新解析状态。
-// 解析状态推进交由独立的后台任务 RagflowParseStatusRefresher，列表此处只反映 DB 现状，
-// 避免每次拉列表都打 RAGFlow，也避免 RAGFlow 临时不可用让列表 5xx。
 func TestRAGFlowKnowledgeListReturnsCachedStatus(t *testing.T) {
 	svc, store, rf := newRAGFlowKnowledgeTestService(t)
 	doc := testDocument(t, "org", "policy.md", store.orgDataset.ID)
 	doc.ParseStatus = "running"
 	doc.Progress = 0
 	store.docs[testKnowledgeDocument] = doc
-	// 即使远端已经完成，列表仍应返回本地 running 状态，由后台任务负责后续推进。
 	rf.listDocuments = []ragflow.Document{{ID: "remote-doc-1", Name: "policy.md", Run: "DONE"}}
 	rf.listDocumentsCalls = 0
 
@@ -169,12 +164,10 @@ func TestRAGFlowKnowledgeListReturnsCachedStatus(t *testing.T) {
 	assert.Equal(t, "running", result.Items[0].ParseStatus)
 	assert.Equal(t, int32(0), result.Items[0].Progress)
 	assert.Equal(t, "running", store.docs[testKnowledgeDocument].ParseStatus)
-	// 关键断言：列表流程不应触发 RAGFlow ListDocuments。
 	assert.Zero(t, rf.listDocumentsCalls, "列表请求不应调 RAGFlow ListDocuments")
 }
 
-// TestNormalizeRAGFlowRunAcceptsNumericAndObservedValues 验证 RAGFlow 文档解析状态兼容官方数字枚举
-// 以及实际接口可能返回的小写状态，避免失败文档被误判为运行中。
+// TestNormalizeRAGFlowRunAcceptsNumericAndObservedValues 验证 RAGFlow 文档解析状态兼容官方数字枚举和实际接口可能返回的小写状态。
 func TestNormalizeRAGFlowRunAcceptsNumericAndObservedValues(t *testing.T) {
 	// 数字 0 表示尚未处理，应展示为排队状态。
 	assert.Equal(t, "queued", normalizeRAGFlowRun("0"))
@@ -192,7 +185,7 @@ func TestNormalizeRAGFlowRunAcceptsNumericAndObservedValues(t *testing.T) {
 	assert.Equal(t, "stopped", normalizeRAGFlowRun("cancel"))
 }
 
-// TestRAGFlowKnowledgeReparseOnlyFailedOrStopped 验证只有解析失败或已停止的文件允许重新解析，避免重复排队正常文档。
+// TestRAGFlowKnowledgeReparseOnlyFailedOrStopped 验证只有解析失败或已停止的文件允许重新解析。
 func TestRAGFlowKnowledgeReparseOnlyFailedOrStopped(t *testing.T) {
 	svc, store, rf := newRAGFlowKnowledgeTestService(t)
 	store.docs[testKnowledgeDocument] = testDocument(t, "org", "policy.md", store.orgDataset.ID)
@@ -225,17 +218,17 @@ func TestRuntimeAddWritesOnlyCurrentAppDataset(t *testing.T) {
 	assert.Equal(t, "app", store.createdDocs[0].ScopeType)
 }
 
-// TestDeleteAppDatasetRemovesRemoteAndLocalMapping 验证删除实例时会同步清理 RAGFlow app dataset，
-// 防止软删应用后远端文件和索引长期成为不可见孤儿数据。
+// TestDeleteAppDatasetRemovesRemoteAndLocalMapping 验证删除实例时会同步清理 RAGFlow app dataset。
 func TestDeleteAppDatasetRemovesRemoteAndLocalMapping(t *testing.T) {
 	svc, store, rf := newRAGFlowKnowledgeTestService(t)
 
+	// mustParseUUID 现在返回 string，与 DeleteAppDataset(string) 签名一致。
 	err := svc.DeleteAppDataset(context.Background(), mustParseUUID(testKnowledgeApp))
 	require.NoError(t, err)
 
 	require.Len(t, rf.deleteDatasetCalls, 1)
 	assert.Equal(t, []string{testRemoteAppDatasetID}, rf.deleteDatasetCalls[0])
-	assert.Equal(t, uuidToString(store.appDataset.ID), store.deletedDatasetID)
+	assert.Equal(t, store.appDataset.ID, store.deletedDatasetID)
 }
 
 // TestEnsureOrgDatasetCreatesRemoteDatasetMapping 验证企业知识库没有映射时会自动创建 RAGFlow dataset 并回写远端 ID。
@@ -265,7 +258,7 @@ func TestEnsureOrgDatasetCreatesRemoteDatasetMapping(t *testing.T) {
 func TestRuntimeAddRecreatesFailedAppDataset(t *testing.T) {
 	svc, store, rf := newRAGFlowKnowledgeTestService(t)
 	store.appDataset.Status = "failed"
-	store.appDataset.RagflowDatasetID = pgtype.Text{}
+	store.appDataset.RagflowDatasetID = null.String{}
 	rf.createDatasetResult = ragflow.Dataset{ID: "new-app-ds", Name: "remote-app-name"}
 
 	doc, err := svc.RuntimeAddFile(context.Background(), testRuntimeToken, "research.md", strings.NewReader("report"), 6)
@@ -278,13 +271,13 @@ func TestRuntimeAddRecreatesFailedAppDataset(t *testing.T) {
 	assert.Equal(t, "new-app-ds", rf.uploadCalls[0].datasetID)
 }
 
-// TestEnsureOrgDatasetCreateConflictDoesNotDuplicateRemoteCreate 验证并发首创 dataset 映射失败后只读取已有 creating 行，不重复创建远端 RAGFlow dataset。
+// TestEnsureOrgDatasetCreateConflictDoesNotDuplicateRemoteCreate 验证并发首创 dataset 映射失败后只读取已有 creating 行。
 func TestEnsureOrgDatasetCreateConflictDoesNotDuplicateRemoteCreate(t *testing.T) {
 	svc, store, rf := newRAGFlowKnowledgeTestService(t)
 	store.missingOrgDatasetOnce = true
-	store.createOrgDatasetErr = pgx.ErrNoRows
+	store.createOrgDatasetErr = sql.ErrNoRows
 	store.orgDataset.Status = "creating"
-	store.orgDataset.RagflowDatasetID = pgtype.Text{}
+	store.orgDataset.RagflowDatasetID = null.String{}
 
 	_, err := svc.EnsureOrgDataset(context.Background(), store.org)
 	require.ErrorIs(t, err, ErrKnowledgeDatasetCreating)
@@ -299,7 +292,6 @@ func TestGetOrgDatasetOrganizationLookupErrorUsesEnterpriseCopy(t *testing.T) {
 	store.missingOrgDataset = true
 	store.getOrganizationErr = errors.New("database down")
 
-	// 查询企业失败会经 knowledge handler 安全文案透出，不能再包含旧组织文案。
 	_, err := svc.getOrgDataset(context.Background(), mustParseUUID(testKnowledgeOrg))
 	require.ErrorContains(t, err, "查询企业失败")
 }
@@ -309,7 +301,6 @@ func TestGetOrgDatasetMappingLookupErrorUsesEnterpriseCopy(t *testing.T) {
 	svc, store, _ := newRAGFlowKnowledgeTestService(t)
 	store.getOrgDatasetErr = errors.New("database down")
 
-	// 查询企业 RAGFlow dataset 失败会经 knowledge handler 安全文案透出，不能再包含旧组织文案。
 	_, err := svc.getOrgDataset(context.Background(), mustParseUUID(testKnowledgeOrg))
 	require.ErrorContains(t, err, "查询企业 RAGFlow dataset 失败")
 }
@@ -318,8 +309,8 @@ func TestGetOrgDatasetMappingLookupErrorUsesEnterpriseCopy(t *testing.T) {
 func TestEnsureOrgDatasetFailedClaimLostDoesNotCreateRemote(t *testing.T) {
 	svc, store, rf := newRAGFlowKnowledgeTestService(t)
 	store.orgDataset.Status = "failed"
-	store.orgDataset.RagflowDatasetID = pgtype.Text{}
-	store.claimDatasetErr = pgx.ErrNoRows
+	store.orgDataset.RagflowDatasetID = null.String{}
+	store.claimDatasetErr = sql.ErrNoRows
 
 	_, err := svc.EnsureOrgDataset(context.Background(), store.org)
 	require.ErrorIs(t, err, ErrKnowledgeDatasetCreating)
@@ -328,11 +319,11 @@ func TestEnsureOrgDatasetFailedClaimLostDoesNotCreateRemote(t *testing.T) {
 	assert.Equal(t, 0, len(rf.createDatasetCalls))
 }
 
-// TestEnsureOrgDatasetFailedClaimWinnerCreatesRemote 验证 failed 映射只有抢占租约成功者会创建远端 dataset 并携带同一 token 回写。
+// TestEnsureOrgDatasetFailedClaimWinnerCreatesRemote 验证 failed 映射只有抢占租约成功者会创建远端 dataset。
 func TestEnsureOrgDatasetFailedClaimWinnerCreatesRemote(t *testing.T) {
 	svc, store, rf := newRAGFlowKnowledgeTestService(t)
 	store.orgDataset.Status = "failed"
-	store.orgDataset.RagflowDatasetID = pgtype.Text{}
+	store.orgDataset.RagflowDatasetID = null.String{}
 	rf.createDatasetResult = ragflow.Dataset{ID: "retry-org-ds", Name: "retry-org"}
 
 	dataset, err := svc.EnsureOrgDataset(context.Background(), store.org)
@@ -341,7 +332,7 @@ func TestEnsureOrgDatasetFailedClaimWinnerCreatesRemote(t *testing.T) {
 	assert.Equal(t, "retry-org-ds", dataset.RagflowDatasetID.String)
 	require.Len(t, store.claimedDatasets, 1)
 	require.Len(t, store.activatedDatasets, 1)
-	assert.Equal(t, store.claimedDatasets[0].CreateClaimToken, store.activatedDatasets[0].CreateClaimToken.String)
+	assert.Equal(t, store.claimedDatasets[0].CreateClaimToken.String, store.activatedDatasets[0].CreateClaimToken.String)
 	assert.Equal(t, 1, len(rf.createDatasetCalls))
 }
 
@@ -349,8 +340,9 @@ func TestEnsureOrgDatasetFailedClaimWinnerCreatesRemote(t *testing.T) {
 func TestEnsureOrgDatasetReclaimsStaleCreating(t *testing.T) {
 	svc, store, rf := newRAGFlowKnowledgeTestService(t)
 	store.orgDataset.Status = "creating"
-	store.orgDataset.RagflowDatasetID = pgtype.Text{}
-	store.orgDataset.UpdatedAt = pgtype.Timestamptz{Time: time.Now().Add(-ragflowDatasetCreateClaimTimeout - time.Minute), Valid: true}
+	store.orgDataset.RagflowDatasetID = null.String{}
+	// 过期时间：超过 ragflowDatasetCreateClaimTimeout 一分钟前。
+	store.orgDataset.UpdatedAt = time.Now().Add(-ragflowDatasetCreateClaimTimeout - time.Minute)
 	rf.createDatasetResult = ragflow.Dataset{ID: "reclaimed-org-ds", Name: "reclaimed-org"}
 
 	dataset, err := svc.EnsureOrgDataset(context.Background(), store.org)
@@ -361,11 +353,11 @@ func TestEnsureOrgDatasetReclaimsStaleCreating(t *testing.T) {
 	assert.Equal(t, 1, len(rf.createDatasetCalls))
 }
 
-// TestEnsureOrgDatasetLostClaimDoesNotOverwriteWinner 验证远端创建返回后若本地租约已丢失，不覆盖获胜者状态并清理本次创建出的远端 dataset。
+// TestEnsureOrgDatasetLostClaimDoesNotOverwriteWinner 验证远端创建返回后若本地租约已丢失，不覆盖获胜者状态。
 func TestEnsureOrgDatasetLostClaimDoesNotOverwriteWinner(t *testing.T) {
 	svc, store, rf := newRAGFlowKnowledgeTestService(t)
 	store.missingOrgDataset = true
-	store.setActiveErr = pgx.ErrNoRows
+	store.setActiveErr = sql.ErrNoRows
 	rf.createDatasetResult = ragflow.Dataset{ID: "loser-org-ds", Name: "loser-org"}
 
 	_, err := svc.EnsureOrgDataset(context.Background(), store.org)
@@ -400,10 +392,7 @@ func newFakeKnowledgeStore(t *testing.T) *fakeKnowledgeStore {
 		OwnerUserID: ownerID,
 		Name:        "实例",
 		Status:      domain.AppStatusRunning,
-		RuntimeTokenHash: pgtype.Text{
-			String: HashAppRuntimeToken(testRuntimeToken),
-			Valid:  true,
-		},
+		RuntimeTokenHash: null.StringFrom(HashAppRuntimeToken(testRuntimeToken)),
 	}
 	org := sqlc.Organization{
 		ID:     orgID,
@@ -415,18 +404,20 @@ func newFakeKnowledgeStore(t *testing.T) *fakeKnowledgeStore {
 		ID:               mustParseUUID("00000000-0000-0000-0000-000000000d01"),
 		ScopeType:        "org",
 		OrgID:            orgID,
-		RagflowDatasetID: pgtype.Text{String: testRemoteOrgDatasetID, Valid: true},
+		RagflowDatasetID: null.StringFrom(testRemoteOrgDatasetID),
 		Name:             "oc-org",
 		Status:           "active",
+		UpdatedAt:        time.Now(),
 	}
 	appDataset := sqlc.RagflowDataset{
 		ID:               mustParseUUID("00000000-0000-0000-0000-000000000d02"),
 		ScopeType:        "app",
 		OrgID:            orgID,
-		AppID:            appID,
-		RagflowDatasetID: pgtype.Text{String: testRemoteAppDatasetID, Valid: true},
+		AppID:            null.StringFrom(appID),
+		RagflowDatasetID: null.StringFrom(testRemoteAppDatasetID),
 		Name:             "oc-app",
 		Status:           "active",
+		UpdatedAt:        time.Now(),
 	}
 	return &fakeKnowledgeStore{
 		apps:         map[string]sqlc.App{testKnowledgeApp: app},
@@ -468,207 +459,245 @@ type fakeKnowledgeStore struct {
 	now                   time.Time
 }
 
+// createdDatasetCall 记录 CreateRAGFlowOrgDatasetMapping / CreateRAGFlowAppDatasetMapping 调用参数。
 type createdDatasetCall struct {
 	ScopeType        string
-	OrgID            pgtype.UUID
-	AppID            pgtype.UUID
-	RagflowDatasetID pgtype.Text
+	OrgID            string
+	AppID            string
+	RagflowDatasetID string
 	Name             string
 	Status           string
-	LastError        pgtype.Text
+	LastError        string
 	CreateClaimToken string
+	ID               string
 }
 
-func (s *fakeKnowledgeStore) GetApp(_ context.Context, id pgtype.UUID) (sqlc.App, error) {
-	app, ok := s.apps[uuidToString(id)]
+func (s *fakeKnowledgeStore) GetApp(_ context.Context, id string) (sqlc.App, error) {
+	app, ok := s.apps[id]
 	if !ok {
-		return sqlc.App{}, pgx.ErrNoRows
+		return sqlc.App{}, sql.ErrNoRows
 	}
 	return app, nil
 }
 
-func (s *fakeKnowledgeStore) GetOrganization(_ context.Context, id pgtype.UUID) (sqlc.Organization, error) {
+func (s *fakeKnowledgeStore) GetOrganization(_ context.Context, id string) (sqlc.Organization, error) {
 	if s.getOrganizationErr != nil {
 		return sqlc.Organization{}, s.getOrganizationErr
 	}
-	if uuidToString(id) != testKnowledgeOrg {
-		return sqlc.Organization{}, pgx.ErrNoRows
+	if id != testKnowledgeOrg {
+		return sqlc.Organization{}, sql.ErrNoRows
 	}
 	return s.org, nil
 }
 
-func (s *fakeKnowledgeStore) GetAppByRuntimeTokenHash(_ context.Context, runtimeTokenHash pgtype.Text) (sqlc.App, error) {
+func (s *fakeKnowledgeStore) GetAppByRuntimeTokenHash(_ context.Context, runtimeTokenHash null.String) (sqlc.App, error) {
 	app, ok := s.appsByToken[runtimeTokenHash.String]
 	if !ok {
-		return sqlc.App{}, pgx.ErrNoRows
+		return sqlc.App{}, sql.ErrNoRows
 	}
 	return app, nil
 }
 
-func (s *fakeKnowledgeStore) GetRAGFlowOrgDataset(_ context.Context, orgID pgtype.UUID) (sqlc.RagflowDataset, error) {
+func (s *fakeKnowledgeStore) GetRAGFlowOrgDataset(_ context.Context, orgID string) (sqlc.RagflowDataset, error) {
 	s.getOrgDatasetCalls++
 	if s.getOrgDatasetErr != nil {
 		return sqlc.RagflowDataset{}, s.getOrgDatasetErr
 	}
 	if s.missingOrgDatasetOnce && s.getOrgDatasetCalls == 1 {
-		return sqlc.RagflowDataset{}, pgx.ErrNoRows
+		return sqlc.RagflowDataset{}, sql.ErrNoRows
 	}
 	if s.missingOrgDataset {
-		return sqlc.RagflowDataset{}, pgx.ErrNoRows
+		return sqlc.RagflowDataset{}, sql.ErrNoRows
 	}
-	if uuidToString(orgID) != testKnowledgeOrg {
-		return sqlc.RagflowDataset{}, pgx.ErrNoRows
+	if orgID != testKnowledgeOrg {
+		return sqlc.RagflowDataset{}, sql.ErrNoRows
 	}
 	return s.orgDataset, nil
 }
 
-func (s *fakeKnowledgeStore) GetRAGFlowAppDataset(_ context.Context, appID pgtype.UUID) (sqlc.RagflowDataset, error) {
+func (s *fakeKnowledgeStore) GetRAGFlowAppDataset(_ context.Context, appID null.String) (sqlc.RagflowDataset, error) {
 	if s.missingAppDatasetOnce {
 		s.missingAppDatasetOnce = false
-		return sqlc.RagflowDataset{}, pgx.ErrNoRows
+		return sqlc.RagflowDataset{}, sql.ErrNoRows
 	}
 	if s.missingAppDataset {
-		return sqlc.RagflowDataset{}, pgx.ErrNoRows
+		return sqlc.RagflowDataset{}, sql.ErrNoRows
 	}
-	if uuidToString(appID) != testKnowledgeApp {
-		return sqlc.RagflowDataset{}, pgx.ErrNoRows
+	if appID.String != testKnowledgeApp {
+		return sqlc.RagflowDataset{}, sql.ErrNoRows
 	}
 	return s.appDataset, nil
 }
 
-func (s *fakeKnowledgeStore) CreateRAGFlowOrgDatasetMapping(_ context.Context, arg sqlc.CreateRAGFlowOrgDatasetMappingParams) (sqlc.RagflowDataset, error) {
-	if s.createOrgDatasetErr != nil {
-		return sqlc.RagflowDataset{}, s.createOrgDatasetErr
+// CreateRAGFlowOrgDatasetMapping 为 :exec（INSERT IGNORE）；
+// createOrgDatasetErr = sql.ErrNoRows 模拟 INSERT IGNORE 0 行（并发冲突）：返回 nil，但不存储 dataset。
+// 其他非 nil 错误直接返回给 service。
+func (s *fakeKnowledgeStore) CreateRAGFlowOrgDatasetMapping(_ context.Context, arg sqlc.CreateRAGFlowOrgDatasetMappingParams) error {
+	if s.createOrgDatasetErr != nil && s.createOrgDatasetErr != sql.ErrNoRows {
+		return s.createOrgDatasetErr
+	}
+	// sql.ErrNoRows 表示 INSERT IGNORE 0 行：返回 nil 但不存储。
+	if s.createOrgDatasetErr == sql.ErrNoRows {
+		return nil
 	}
 	call := createdDatasetCall{
 		ScopeType:        "org",
 		OrgID:            arg.OrgID,
 		Name:             arg.Name,
 		Status:           "creating",
-		CreateClaimToken: arg.CreateClaimToken,
+		CreateClaimToken: arg.CreateClaimToken.String,
+		ID:               arg.ID,
 	}
 	s.createdDatasets = append(s.createdDatasets, call)
 	row := sqlc.RagflowDataset{
-		ID:               mustParseUUID("00000000-0000-0000-0000-000000000d03"),
-		ScopeType:        call.ScopeType,
-		OrgID:            call.OrgID,
-		AppID:            call.AppID,
-		RagflowDatasetID: call.RagflowDatasetID,
-		Name:             call.Name,
-		Status:           call.Status,
-		LastError:        call.LastError,
-		CreateClaimToken: pgtype.Text{String: call.CreateClaimToken, Valid: true},
+		ID:               arg.ID,
+		ScopeType:        "org",
+		OrgID:            arg.OrgID,
+		Name:             arg.Name,
+		Status:           "creating",
+		CreateClaimToken: arg.CreateClaimToken,
+		UpdatedAt:        s.now,
 	}
 	s.orgDataset = row
 	s.missingOrgDataset = false
-	return row, nil
+	return nil
 }
 
-func (s *fakeKnowledgeStore) CreateRAGFlowAppDatasetMapping(_ context.Context, arg sqlc.CreateRAGFlowAppDatasetMappingParams) (sqlc.RagflowDataset, error) {
-	if s.createAppDatasetErr != nil {
-		return sqlc.RagflowDataset{}, s.createAppDatasetErr
+// CreateRAGFlowAppDatasetMapping 为 :exec（INSERT IGNORE）；
+// createAppDatasetErr = sql.ErrNoRows 模拟 INSERT IGNORE 0 行（并发冲突）：返回 nil，但不存储。
+func (s *fakeKnowledgeStore) CreateRAGFlowAppDatasetMapping(_ context.Context, arg sqlc.CreateRAGFlowAppDatasetMappingParams) error {
+	if s.createAppDatasetErr != nil && s.createAppDatasetErr != sql.ErrNoRows {
+		return s.createAppDatasetErr
+	}
+	if s.createAppDatasetErr == sql.ErrNoRows {
+		return nil
 	}
 	call := createdDatasetCall{
+		ScopeType:        "app",
+		OrgID:            arg.OrgID,
+		AppID:            arg.AppID.String,
+		Name:             arg.Name,
+		Status:           "creating",
+		CreateClaimToken: arg.CreateClaimToken.String,
+		ID:               arg.ID,
+	}
+	s.createdDatasets = append(s.createdDatasets, call)
+	row := sqlc.RagflowDataset{
+		ID:               arg.ID,
 		ScopeType:        "app",
 		OrgID:            arg.OrgID,
 		AppID:            arg.AppID,
 		Name:             arg.Name,
 		Status:           "creating",
 		CreateClaimToken: arg.CreateClaimToken,
-	}
-	s.createdDatasets = append(s.createdDatasets, call)
-	row := sqlc.RagflowDataset{
-		ID:               mustParseUUID("00000000-0000-0000-0000-000000000d03"),
-		ScopeType:        call.ScopeType,
-		OrgID:            call.OrgID,
-		AppID:            call.AppID,
-		RagflowDatasetID: call.RagflowDatasetID,
-		Name:             call.Name,
-		Status:           call.Status,
-		LastError:        call.LastError,
-		CreateClaimToken: pgtype.Text{String: call.CreateClaimToken, Valid: true},
+		UpdatedAt:        s.now,
 	}
 	s.appDataset = row
 	s.missingAppDataset = false
-	return row, nil
+	return nil
 }
 
-func (s *fakeKnowledgeStore) ClaimRAGFlowDatasetCreation(_ context.Context, arg sqlc.ClaimRAGFlowDatasetCreationParams) (sqlc.RagflowDataset, error) {
+// ClaimRAGFlowDatasetCreation 为 :exec；stub 根据条件更新 claim token。
+// 成功时把 orgDataset/appDataset 的 status 设为 creating，claim token 更新为新值。
+// claimDatasetErr = sql.ErrNoRows 模拟"0 行更新"（其他进程持有锁）：返回 nil（:exec 不报错）
+// 但不更新 dataset，使后续 GetRAGFlowDataset 返回旧 claim token 导致 service 判断抢占失败。
+func (s *fakeKnowledgeStore) ClaimRAGFlowDatasetCreation(_ context.Context, arg sqlc.ClaimRAGFlowDatasetCreationParams) error {
 	s.claimedDatasets = append(s.claimedDatasets, arg)
-	if s.claimDatasetErr != nil {
-		return sqlc.RagflowDataset{}, s.claimDatasetErr
+	// 非 sql.ErrNoRows 类型错误：直接返回给 service（如 DB 连接错误）。
+	if s.claimDatasetErr != nil && s.claimDatasetErr != sql.ErrNoRows {
+		return s.claimDatasetErr
 	}
-	staleBefore := arg.StaleBefore.Time
-	if uuidToString(s.orgDataset.ID) == uuidToString(arg.ID) {
-		if s.orgDataset.Status == "failed" || (s.orgDataset.Status == "creating" && s.orgDataset.UpdatedAt.Valid && s.orgDataset.UpdatedAt.Time.Before(staleBefore)) {
+	// sql.ErrNoRows 表示"0 行更新"，模拟抢占失败：:exec 返回 nil，但 dataset 不更新。
+	if s.claimDatasetErr == sql.ErrNoRows {
+		return nil
+	}
+	staleBefore := arg.StaleBefore
+	if s.orgDataset.ID == arg.ID {
+		if s.orgDataset.Status == "failed" || (s.orgDataset.Status == "creating" && s.orgDataset.UpdatedAt.Before(staleBefore)) {
 			s.orgDataset.Status = "creating"
-			s.orgDataset.LastError = pgtype.Text{}
-			s.orgDataset.CreateClaimToken = pgtype.Text{String: arg.CreateClaimToken, Valid: true}
-			s.orgDataset.UpdatedAt = pgtype.Timestamptz{Time: s.now, Valid: true}
-			return s.orgDataset, nil
+			s.orgDataset.LastError = null.String{}
+			s.orgDataset.CreateClaimToken = arg.CreateClaimToken
+			s.orgDataset.UpdatedAt = s.now
+			return nil
 		}
-		return sqlc.RagflowDataset{}, pgx.ErrNoRows
+		// 条件不满足：0 行更新，:exec 返回 nil，dataset 不变。
+		return nil
 	}
-	if s.appDataset.Status == "failed" || (s.appDataset.Status == "creating" && s.appDataset.UpdatedAt.Valid && s.appDataset.UpdatedAt.Time.Before(staleBefore)) {
+	if s.appDataset.Status == "failed" || (s.appDataset.Status == "creating" && s.appDataset.UpdatedAt.Before(staleBefore)) {
 		s.appDataset.Status = "creating"
-		s.appDataset.LastError = pgtype.Text{}
-		s.appDataset.CreateClaimToken = pgtype.Text{String: arg.CreateClaimToken, Valid: true}
-		s.appDataset.UpdatedAt = pgtype.Timestamptz{Time: s.now, Valid: true}
+		s.appDataset.LastError = null.String{}
+		s.appDataset.CreateClaimToken = arg.CreateClaimToken
+		s.appDataset.UpdatedAt = s.now
+		return nil
+	}
+	// 条件不满足：0 行更新，:exec 返回 nil，dataset 不变。
+	return nil
+}
+
+// GetRAGFlowDataset 按 ID 读取 dataset；支持 orgDataset 和 appDataset 两类。
+func (s *fakeKnowledgeStore) GetRAGFlowDataset(_ context.Context, id string) (sqlc.RagflowDataset, error) {
+	if s.orgDataset.ID == id {
+		return s.orgDataset, nil
+	}
+	if s.appDataset.ID == id {
 		return s.appDataset, nil
 	}
-	return sqlc.RagflowDataset{}, pgx.ErrNoRows
+	return sqlc.RagflowDataset{}, sql.ErrNoRows
 }
 
-func (s *fakeKnowledgeStore) SetRAGFlowDatasetActive(_ context.Context, arg sqlc.SetRAGFlowDatasetActiveParams) (sqlc.RagflowDataset, error) {
+// SetRAGFlowDatasetActive 为 :exec；stub 激活 dataset，写入远端 ID 和名称，清除 claim token。
+func (s *fakeKnowledgeStore) SetRAGFlowDatasetActive(_ context.Context, arg sqlc.SetRAGFlowDatasetActiveParams) error {
 	s.activatedDatasets = append(s.activatedDatasets, arg)
 	if s.setActiveErr != nil {
-		return sqlc.RagflowDataset{}, s.setActiveErr
+		return s.setActiveErr
 	}
-	if uuidToString(s.orgDataset.ID) == uuidToString(arg.ID) {
+	if s.orgDataset.ID == arg.ID {
 		if s.orgDataset.CreateClaimToken.String != arg.CreateClaimToken.String {
-			return sqlc.RagflowDataset{}, pgx.ErrNoRows
+			return sql.ErrNoRows
 		}
 		s.orgDataset.RagflowDatasetID = arg.RagflowDatasetID
 		s.orgDataset.Name = arg.Name
 		s.orgDataset.Status = "active"
-		s.orgDataset.CreateClaimToken = pgtype.Text{}
-		return s.orgDataset, nil
+		s.orgDataset.CreateClaimToken = null.String{}
+		return nil
 	}
 	if s.appDataset.CreateClaimToken.String != arg.CreateClaimToken.String {
-		return sqlc.RagflowDataset{}, pgx.ErrNoRows
+		return sql.ErrNoRows
 	}
 	s.appDataset.RagflowDatasetID = arg.RagflowDatasetID
 	s.appDataset.Name = arg.Name
 	s.appDataset.Status = "active"
-	s.appDataset.CreateClaimToken = pgtype.Text{}
-	return s.appDataset, nil
+	s.appDataset.CreateClaimToken = null.String{}
+	return nil
 }
 
-func (s *fakeKnowledgeStore) MarkRAGFlowDatasetFailed(_ context.Context, arg sqlc.MarkRAGFlowDatasetFailedParams) (sqlc.RagflowDataset, error) {
+// MarkRAGFlowDatasetFailed 为 :exec；stub 标记失败状态，保存错误信息。
+func (s *fakeKnowledgeStore) MarkRAGFlowDatasetFailed(_ context.Context, arg sqlc.MarkRAGFlowDatasetFailedParams) error {
 	s.failedDatasets = append(s.failedDatasets, arg)
-	if uuidToString(s.orgDataset.ID) == uuidToString(arg.ID) {
+	if s.orgDataset.ID == arg.ID {
 		if s.orgDataset.CreateClaimToken.String != arg.CreateClaimToken.String {
-			return sqlc.RagflowDataset{}, pgx.ErrNoRows
+			return sql.ErrNoRows
 		}
 		s.orgDataset.Status = "failed"
 		s.orgDataset.LastError = arg.LastError
-		s.orgDataset.CreateClaimToken = pgtype.Text{}
-		return s.orgDataset, nil
+		s.orgDataset.CreateClaimToken = null.String{}
+		return nil
 	}
 	if s.appDataset.CreateClaimToken.String != arg.CreateClaimToken.String {
-		return sqlc.RagflowDataset{}, pgx.ErrNoRows
+		return sql.ErrNoRows
 	}
 	s.appDataset.Status = "failed"
 	s.appDataset.LastError = arg.LastError
-	s.appDataset.CreateClaimToken = pgtype.Text{}
-	return s.appDataset, nil
+	s.appDataset.CreateClaimToken = null.String{}
+	return nil
 }
 
-func (s *fakeKnowledgeStore) CreateRAGFlowDocument(_ context.Context, arg sqlc.CreateRAGFlowDocumentParams) (sqlc.RagflowDocument, error) {
+// CreateRAGFlowDocument 为 :exec；stub 存入 docs map 供后续 GetRAGFlowDocument 读回。
+func (s *fakeKnowledgeStore) CreateRAGFlowDocument(_ context.Context, arg sqlc.CreateRAGFlowDocumentParams) error {
 	s.createdDocs = append(s.createdDocs, arg)
-	id := mustParseUUIDFromString(arg.RagflowDocumentID)
+	id := arg.ID
 	if arg.RagflowDocumentID == "remote-doc-1" {
-		id = mustParseUUIDFromString(s.nextDocument)
+		id = s.nextDocument
 	}
 	row := sqlc.RagflowDocument{
 		ID:                id,
@@ -685,20 +714,24 @@ func (s *fakeKnowledgeStore) CreateRAGFlowDocument(_ context.Context, arg sqlc.C
 		Progress:          arg.Progress,
 		LastError:         arg.LastError,
 		CreatedBy:         arg.CreatedBy,
-		CreatedAt:         pgtype.Timestamptz{Time: s.now, Valid: true},
-		UpdatedAt:         pgtype.Timestamptz{Time: s.now, Valid: true},
+		CreatedAt:         s.now,
+		UpdatedAt:         s.now,
 	}
-	s.docs[uuidToString(row.ID)] = row
-	return row, nil
+	// 同时在 arg.ID 和 row.ID（可能不同时用于 remote-doc-1 场景）下存入 map。
+	s.docs[arg.ID] = row
+	if id != arg.ID {
+		s.docs[id] = row
+	}
+	return nil
 }
 
 func (s *fakeKnowledgeStore) ListRAGFlowDocumentsByScope(_ context.Context, arg sqlc.ListRAGFlowDocumentsByScopeParams) ([]sqlc.RagflowDocument, error) {
 	items := make([]sqlc.RagflowDocument, 0, len(s.docs))
 	for _, doc := range s.docs {
-		if doc.ScopeType != arg.ScopeType || uuidToString(doc.OrgID) != uuidToString(arg.OrgID) {
+		if doc.ScopeType != arg.ScopeType || doc.OrgID != arg.OrgID {
 			continue
 		}
-		if arg.AppID.Valid && uuidToString(doc.AppID) != uuidToString(arg.AppID) {
+		if arg.AppID.Valid && doc.AppID.String != arg.AppID.String {
 			continue
 		}
 		items = append(items, doc)
@@ -715,33 +748,34 @@ func (s *fakeKnowledgeStore) CountRAGFlowDocumentsByScope(ctx context.Context, a
 	return int64(len(items)), err
 }
 
-func (s *fakeKnowledgeStore) GetRAGFlowDocument(_ context.Context, id pgtype.UUID) (sqlc.RagflowDocument, error) {
-	doc, ok := s.docs[uuidToString(id)]
+func (s *fakeKnowledgeStore) GetRAGFlowDocument(_ context.Context, id string) (sqlc.RagflowDocument, error) {
+	doc, ok := s.docs[id]
 	if !ok {
-		return sqlc.RagflowDocument{}, pgx.ErrNoRows
+		return sqlc.RagflowDocument{}, sql.ErrNoRows
 	}
 	return doc, nil
 }
 
-func (s *fakeKnowledgeStore) UpdateRAGFlowDocumentParseStatus(_ context.Context, arg sqlc.UpdateRAGFlowDocumentParseStatusParams) (sqlc.RagflowDocument, error) {
-	doc, ok := s.docs[uuidToString(arg.ID)]
+// UpdateRAGFlowDocumentParseStatus 为 :exec；stub 更新 docs map，服务之后调 GetRAGFlowDocument 读回。
+func (s *fakeKnowledgeStore) UpdateRAGFlowDocumentParseStatus(_ context.Context, arg sqlc.UpdateRAGFlowDocumentParseStatusParams) error {
+	doc, ok := s.docs[arg.ID]
 	if !ok {
-		return sqlc.RagflowDocument{}, pgx.ErrNoRows
+		return sql.ErrNoRows
 	}
 	doc.ParseStatus = arg.ParseStatus
 	doc.Progress = arg.Progress
 	doc.LastError = arg.LastError
-	s.docs[uuidToString(arg.ID)] = doc
-	return doc, nil
-}
-
-func (s *fakeKnowledgeStore) DeleteRAGFlowDocumentMapping(_ context.Context, id pgtype.UUID) error {
-	delete(s.docs, uuidToString(id))
+	s.docs[arg.ID] = doc
 	return nil
 }
 
-func (s *fakeKnowledgeStore) DeleteRAGFlowDatasetMapping(_ context.Context, id pgtype.UUID) error {
-	s.deletedDatasetID = uuidToString(id)
+func (s *fakeKnowledgeStore) DeleteRAGFlowDocumentMapping(_ context.Context, id string) error {
+	delete(s.docs, id)
+	return nil
+}
+
+func (s *fakeKnowledgeStore) DeleteRAGFlowDatasetMapping(_ context.Context, id string) error {
+	s.deletedDatasetID = id
 	return nil
 }
 
@@ -847,10 +881,11 @@ func (f *fakeRAGFlowKnowledgeClient) Retrieve(_ context.Context, datasetIDs []st
 	return f.retrieveChunks, nil
 }
 
-func testDocument(t *testing.T, scope, name string, datasetID pgtype.UUID) sqlc.RagflowDocument {
+// testDocument 构建测试用的 RagflowDocument 记录（string datasetID）。
+func testDocument(t *testing.T, scope, name string, datasetID string) sqlc.RagflowDocument {
 	t.Helper()
 	orgID := mustParseUUID(testKnowledgeOrg)
-	appID := pgtype.UUID{}
+	appID := ""
 	if scope == "app" {
 		appID = mustParseUUID(testKnowledgeApp)
 	}
@@ -859,15 +894,15 @@ func testDocument(t *testing.T, scope, name string, datasetID pgtype.UUID) sqlc.
 		DatasetID:         datasetID,
 		ScopeType:         scope,
 		OrgID:             orgID,
-		AppID:             appID,
+		AppID:             null.StringFromPtr(func() *string { if appID == "" { return nil }; return &appID }()),
 		RagflowDocumentID: "remote-doc-1",
 		Name:              name,
 		SizeBytes:         12,
 		ParseStatus:       "completed",
 		Progress:          100,
 		CreatedBy:         testKnowledgeOwner,
-		CreatedAt:         pgtype.Timestamptz{Time: time.Date(2026, 5, 26, 8, 0, 0, 0, time.UTC), Valid: true},
-		UpdatedAt:         pgtype.Timestamptz{Time: time.Date(2026, 5, 26, 8, 0, 0, 0, time.UTC), Valid: true},
+		CreatedAt:         time.Date(2026, 5, 26, 8, 0, 0, 0, time.UTC),
+		UpdatedAt:         time.Date(2026, 5, 26, 8, 0, 0, 0, time.UTC),
 	}
 }
 
@@ -877,9 +912,4 @@ func orgKnowledgeAdmin() auth.Principal {
 
 func appOwnerPrincipal() auth.Principal {
 	return auth.Principal{Role: domain.UserRoleOrgMember, OrgID: testKnowledgeOrg, UserID: testKnowledgeOwner}
-}
-
-func mustParseUUIDFromString(value string) pgtype.UUID {
-	id, _ := parseUUID(value)
-	return id
 }
