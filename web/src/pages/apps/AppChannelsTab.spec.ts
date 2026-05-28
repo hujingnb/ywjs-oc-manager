@@ -92,33 +92,41 @@ describe('AppChannelsTab', () => {
     observedChannelTypes.length = 0
   })
 
-  // 渠道清单：实例详情页必须一次性展示全部规划渠道，并明确哪些渠道当前不可用。
+  // 渠道清单：实例详情页必须一次性展示全部规划渠道（9 个），并明确哪些渠道当前不可用。
   it('列出全部渠道并置灰暂不支持渠道', () => {
     const wrapper = mountChannelsTab()
 
     const items = wrapper.findAll('.channel-list-item')
-    expect(items).toHaveLength(4)
+    expect(items).toHaveLength(9)
     expect(items.map(item => item.text())).toEqual([
       expect.stringContaining('微信'),
       expect.stringContaining('企业微信'),
       expect.stringContaining('飞书'),
       expect.stringContaining('钉钉'),
+      expect.stringContaining('Telegram'),
+      expect.stringContaining('WhatsApp'),
+      expect.stringContaining('Discord'),
+      expect.stringContaining('Slack'),
+      expect.stringContaining('Line'),
     ])
 
     const supported = wrapper.findAll('.channel-list-item.supported')
     expect(supported).toHaveLength(1)
     expect(supported[0].text()).toContain('已支持')
     expect(supported[0].text()).toContain('微信')
-    expect(wrapper.find('.channel-logo.wechat').exists()).toBe(true)
+    // 微信 logo 用新的 type 钩子，且为内联 SVG
+    expect(wrapper.find('.channel-logo--wechat').exists()).toBe(true)
 
     const unsupported = wrapper.findAll('.channel-list-item.unsupported')
-    expect(unsupported).toHaveLength(3)
+    expect(unsupported).toHaveLength(8)
     expect(unsupported.every(item => item.attributes('aria-disabled') === 'true')).toBe(true)
     expect(unsupported.every(item => item.attributes('disabled') !== undefined)).toBe(true)
     expect(unsupported.every(item => item.text().includes('暂不支持'))).toBe(true)
-    expect(wrapper.find('.channel-logo.work-wechat').exists()).toBe(true)
-    expect(wrapper.find('.channel-logo.feishu').exists()).toBe(true)
-    expect(wrapper.find('.channel-logo.dingtalk').exists()).toBe(true)
+    // 未支持渠道 logo 均带灰度 muted 标记（含已有 3 个 + 新增 5 个 = 8 个）
+    expect(wrapper.findAll('.channel-logo.muted')).toHaveLength(8)
+    expect(wrapper.find('.channel-logo--telegram').exists()).toBe(true)
+    expect(wrapper.find('.channel-logo--whatsapp').exists()).toBe(true)
+    expect(wrapper.find('.channel-logo--line').exists()).toBe(true)
   })
 
   // 非微信路由参数：未支持渠道只能作为灰色入口展示，详情区和接口参数仍固定使用微信。

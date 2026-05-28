@@ -25,13 +25,7 @@
           :aria-current="channel.type === activeChannel.type ? 'true' : undefined"
           @click="selectChannel(channel)"
         >
-          <span
-            class="channel-logo"
-            :class="[channel.logoClass, { muted: !channel.supported }]"
-            aria-hidden="true"
-          >
-            {{ channel.logoText }}
-          </span>
+          <ChannelLogo :type="channel.type" :muted="!channel.supported" />
           <span class="channel-copy">
             <strong>{{ channel.name }}</strong>
             <span>{{ channel.description }}</span>
@@ -43,13 +37,7 @@
       <section class="channel-detail" aria-label="微信渠道详情">
         <div class="channel-detail-head">
           <div class="channel-title">
-            <span
-              class="channel-logo large"
-              :class="activeChannel.logoClass"
-              aria-hidden="true"
-            >
-              {{ activeChannel.logoText }}
-            </span>
+            <ChannelLogo :type="activeChannel.type" large />
             <div>
               <p class="channel-title-kicker">当前渠道</p>
               <h3>{{ activeChannel.name }}</h3>
@@ -99,6 +87,7 @@ import { NButton, NCard, NSpace } from 'naive-ui'
 
 import type { AppDTO } from '@/api/hooks/useApps'
 import AuthChallengeRenderer from '@/components/AuthChallengeRenderer.vue'
+import ChannelLogo from './ChannelLogo.vue'
 import {
   useBeginChannelAuth,
   useChannelProgressQuery,
@@ -116,55 +105,35 @@ import { useAuthStore } from '@/stores/auth'
 const props = defineProps<{ appId?: string; channelType?: string }>()
 
 // ChannelDisplay 是渠道 tab 的纯前端展示模型；当前仅 wechat 接入真实绑定能力。
-// 其他渠道作为能力边界展示，不参与 API 参数或后端状态机。
+// 其他渠道作为能力边界展示，不参与 API 参数或后端状态机。logo 由 ChannelLogo 按 type 渲染。
 interface ChannelDisplay {
-  type: 'wechat' | 'work_wechat' | 'feishu' | 'dingtalk'
+  type:
+    | 'wechat'
+    | 'work_wechat'
+    | 'feishu'
+    | 'dingtalk'
+    | 'telegram'
+    | 'whatsapp'
+    | 'discord'
+    | 'slack'
+    | 'line'
   name: string
   description: string
   supported: boolean
   statusLabel: string
-  logoText: string
-  logoClass: string
 }
 
 // channels 固定列出当前产品规划中需要展示的渠道；supported=false 的渠道只做灰色预告。
 const channels: ReadonlyArray<ChannelDisplay> = [
-  {
-    type: 'wechat',
-    name: '微信',
-    description: '扫码绑定后接收助手消息',
-    supported: true,
-    statusLabel: '已支持',
-    logoText: '微',
-    logoClass: 'wechat',
-  },
-  {
-    type: 'work_wechat',
-    name: '企业微信',
-    description: '企业内部协作场景',
-    supported: false,
-    statusLabel: '暂不支持',
-    logoText: '企',
-    logoClass: 'work-wechat',
-  },
-  {
-    type: 'feishu',
-    name: '飞书',
-    description: '团队消息与工作台场景',
-    supported: false,
-    statusLabel: '暂不支持',
-    logoText: '飞',
-    logoClass: 'feishu',
-  },
-  {
-    type: 'dingtalk',
-    name: '钉钉',
-    description: '组织通讯与审批场景',
-    supported: false,
-    statusLabel: '暂不支持',
-    logoText: '钉',
-    logoClass: 'dingtalk',
-  },
+  { type: 'wechat', name: '微信', description: '扫码绑定后接收助手消息', supported: true, statusLabel: '已支持' },
+  { type: 'work_wechat', name: '企业微信', description: '企业内部协作场景', supported: false, statusLabel: '暂不支持' },
+  { type: 'feishu', name: '飞书', description: '团队消息与工作台场景', supported: false, statusLabel: '暂不支持' },
+  { type: 'dingtalk', name: '钉钉', description: '组织通讯与审批场景', supported: false, statusLabel: '暂不支持' },
+  { type: 'telegram', name: 'Telegram', description: '海外即时通讯与 Bot 接入场景', supported: false, statusLabel: '暂不支持' },
+  { type: 'whatsapp', name: 'WhatsApp', description: '海外用户触达与客服场景', supported: false, statusLabel: '暂不支持' },
+  { type: 'discord', name: 'Discord', description: '社区与游戏玩家场景', supported: false, statusLabel: '暂不支持' },
+  { type: 'slack', name: 'Slack', description: '团队协作与工作流场景', supported: false, statusLabel: '暂不支持' },
+  { type: 'line', name: 'Line', description: '日本与东南亚用户场景', supported: false, statusLabel: '暂不支持' },
 ]
 
 const auth = useAuthStore()
@@ -340,36 +309,6 @@ async function unbind() {
   opacity: 1;
 }
 
-.channel-logo {
-  display: grid;
-  width: 36px;
-  height: 36px;
-  place-items: center;
-  border-radius: 8px;
-  color: #ffffff;
-  font-size: 14px;
-  font-weight: 800;
-  line-height: 1;
-  flex-shrink: 0;
-}
-
-.channel-logo.large {
-  width: 44px;
-  height: 44px;
-  border-radius: 10px;
-  font-size: 17px;
-}
-
-.channel-logo.wechat {
-  background: #1aad19;
-}
-
-.channel-logo.work-wechat,
-.channel-logo.feishu,
-.channel-logo.dingtalk,
-.channel-logo.muted {
-  background: #c7ccd1;
-}
 
 .channel-copy {
   display: grid;
