@@ -126,7 +126,7 @@ describe('AppsPage', () => {
       global: { stubs: globalStubs },
     })
 
-    // 找到「组织实例」行，该行 version_synced 字段缺省，不应包含「需重启」。
+    // 找到「企业实例」行，该行 version_synced 字段缺省，不应包含「需重启」。
     const rows = wrapper.findAll('section > div')
     const syncedRow = rows.find(row => row.text().includes('企业实例'))
     expect(syncedRow).toBeDefined()
