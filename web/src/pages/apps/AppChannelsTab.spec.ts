@@ -140,8 +140,8 @@ describe('AppChannelsTab', () => {
     expect(observedChannelTypes).toEqual(['wechat', 'wechat', 'wechat'])
   })
 
-  // 已绑定状态：页面展示中文“已绑定”，不泄露后端原值 bound 或内部 challenge 空态。
-  it('已绑定渠道展示中文状态且不显示 challenge 空态', () => {
+  // 已绑定状态：头部以「微信 · 已绑定」呈现，已绑定身份单独成行；不泄露后端原值 bound。
+  it('已绑定渠道头部展示「渠道名 · 状态」且不显示 challenge 空态', () => {
     progress.value = {
       status: 'bound',
       bound_identity: 'alice',
@@ -152,9 +152,11 @@ describe('AppChannelsTab', () => {
     const detail = wrapper.find('.channel-detail')
 
     expect(detail.text()).toContain('微信')
-    expect(detail.text()).toContain('当前状态：已绑定')
-    expect(detail.text()).toContain('已绑定：alice')
-    expect(wrapper.text()).not.toContain('当前状态：bound')
+    expect(detail.text()).toContain('· 已绑定') // 状态并入头部同一行
+    expect(detail.text()).toContain('已绑定：alice') // 绑定身份仍单独成行
+    expect(detail.text()).not.toContain('当前渠道') // 去掉 kicker
+    expect(detail.text()).not.toContain('当前状态：') // 去掉旧状态前缀
+    expect(wrapper.text()).not.toContain('bound') // 不泄露后端原值
     expect(wrapper.text()).not.toContain('尚未发起挑战')
   })
 })

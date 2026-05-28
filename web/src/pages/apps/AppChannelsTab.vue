@@ -38,10 +38,10 @@
         <div class="channel-detail-head">
           <div class="channel-title">
             <ChannelLogo :type="activeChannel.type" large />
-            <div>
-              <p class="channel-title-kicker">当前渠道</p>
-              <h3>{{ activeChannel.name }}</h3>
-            </div>
+            <h3 class="channel-title-text">
+              {{ activeChannel.name }}
+              <span class="channel-status-inline">· {{ statusLabel }}</span>
+            </h3>
           </div>
 
           <n-space :size="8">
@@ -65,10 +65,7 @@
           </n-space>
         </div>
 
-        <p class="state-text">
-          当前状态：<strong>{{ statusLabel }}</strong>
-          <span v-if="progress?.bound_identity"> ｜ 已绑定：{{ progress.bound_identity }}</span>
-        </p>
+        <p v-if="progress?.bound_identity" class="state-text">已绑定：{{ progress.bound_identity }}</p>
         <p v-if="progress?.error_message" class="state-text danger">最近错误：{{ progress.error_message }}</p>
         <p v-if="isWaitingForChallenge" class="state-text">正在生成登录二维码…</p>
         <p v-if="challengeExpired" class="state-text danger">
@@ -363,18 +360,16 @@ async function unbind() {
   gap: 12px;
 }
 
-.channel-title h3,
-.channel-title-kicker {
+.channel-title-text {
   margin: 0;
-}
-
-.channel-title h3 {
   font-size: 16px;
 }
 
-.channel-title-kicker {
+/* 状态文字与渠道名同行，用次要色 + 常规字重以区分主次。 */
+.channel-status-inline {
   color: var(--color-text-secondary);
-  font-size: 12px;
+  font-size: 14px;
+  font-weight: 400;
 }
 
 @media (max-width: 760px) {
