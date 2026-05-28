@@ -1,6 +1,9 @@
 #!/usr/bin/env python3
 """oc-kanban —— hermes kanban CLI 的稳定适配层。
 
+命名：oc- 前缀取自项目名 oc-manager，标识注入 hermes runtime 镜像、供容器内调用的运维 CLI
+（区别于 hermes 上游自带命令）；后缀 kanban = 看板 CLI 稳定适配层。
+
 对 manager 暴露版本无关契约（见 /usr/local/lib/oc-kanban/contract/SPEC.md），
 对内 subprocess 调用本镜像的 hermes kanban 命令，把输出规整成契约结构。
 

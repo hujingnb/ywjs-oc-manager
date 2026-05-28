@@ -1,6 +1,10 @@
 #!/usr/bin/env python3
 """oc-kb：Hermes 容器内调 manager runtime 知识库 API 的 CLI 客户端。
 
+命名约定：所有 oc-* 脚本的 oc- 前缀取自项目名 oc-manager，统一表示
+「由 oc-manager 注入 hermes runtime 镜像、供容器内调用的运维 CLI」，
+以此与 hermes 上游自带命令区分；后缀 kb = knowledge base（知识库）。
+
 设计取舍：
 - Hermes 容器只通过 manager runtime API 访问知识库，不直接连接 RAGFlow，
   也不持有 RAGFlow 凭证；权限边界由 manager 通过 app runtime token 收敛。

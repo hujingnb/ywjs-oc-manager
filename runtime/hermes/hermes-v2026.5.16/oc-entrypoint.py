@@ -1,6 +1,9 @@
 #!/usr/bin/env python3
 """hermes-v2026.5.16 ENTRYPOINT。
 
+命名：oc- 前缀取自项目名 oc-manager，标识注入 hermes runtime 镜像、供容器内调用的运维 CLI
+（区别于 hermes 上游自带命令）；后缀 entrypoint = 容器入口（init 编排）。
+
 phase 1 load manifest → 2 load state → 3 migrate → 4 render → 5 commit state → 6 exec hermes。
 任何 phase 失败统一退出 1；详细错误通过 lib.logging.emit 写 stderr JSON。
 

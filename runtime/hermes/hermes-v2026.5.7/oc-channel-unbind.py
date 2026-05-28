@@ -1,6 +1,9 @@
 #!/usr/bin/env python3
 """解绑渠道。删除 hermes 自管的账号目录，触发 hermes 重新读 platforms 配置。
 
+命名：oc- 前缀取自项目名 oc-manager，标识注入 hermes runtime 镜像、供容器内调用的运维 CLI
+（区别于 hermes 上游自带命令）；后缀 channel-unbind = 渠道解绑。
+
 调用形式：oc-channel-unbind --channel weixin
 直接 rmtree /opt/data/weixin/accounts/，让 hermes 下次启动/重载 platforms
 配置时识别为未绑定状态。

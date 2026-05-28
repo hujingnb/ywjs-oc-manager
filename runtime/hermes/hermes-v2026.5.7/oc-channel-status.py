@@ -1,6 +1,9 @@
 #!/usr/bin/env python3
 """查询渠道绑定状态。stdout 单行 JSON。
 
+命名：oc- 前缀取自项目名 oc-manager，标识注入 hermes runtime 镜像、供容器内调用的运维 CLI
+（区别于 hermes 上游自带命令）；后缀 channel-status = 渠道绑定状态查询。
+
 调用形式：oc-channel-status --channel weixin
 读取 hermes 自管的账号目录（/opt/data/weixin/accounts/），存在账号文件即视为
 已绑定；不解析具体凭证字段，凭证由 hermes 自行使用。

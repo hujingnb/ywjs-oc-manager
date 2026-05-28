@@ -1,5 +1,9 @@
 #!/usr/bin/env python3
-"""oc-cron —— Hermes Cron 的稳定适配层。"""
+"""oc-cron —— Hermes Cron 的稳定适配层。
+
+命名：oc- 前缀取自项目名 oc-manager，标识注入 hermes runtime 镜像、供容器内调用的运维 CLI
+（区别于 hermes 上游自带命令）；后缀 cron = 定时任务（Hermes Cron 稳定适配层）。
+"""
 
 from __future__ import annotations
 

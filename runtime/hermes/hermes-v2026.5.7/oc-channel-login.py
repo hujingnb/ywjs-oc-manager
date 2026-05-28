@@ -1,6 +1,9 @@
 #!/usr/bin/env python3
 """触发渠道绑定。stdout 结束态 JSON；stderr 中间事件 JSON（含二维码 URL）。
 
+命名：oc- 前缀取自项目名 oc-manager，标识注入 hermes runtime 镜像、供容器内调用的运维 CLI
+（区别于 hermes 上游自带命令）；后缀 channel-login = 渠道登录 / 绑定。
+
 调用形式：oc-channel-login --channel weixin
 按 --channel 分发到具体实现；首版仅支持 weixin。
 

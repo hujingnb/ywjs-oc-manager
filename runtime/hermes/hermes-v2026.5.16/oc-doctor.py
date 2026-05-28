@@ -1,5 +1,9 @@
 #!/usr/bin/env python3
-"""输出诊断快照。stdout 单行 JSON；spec §7。"""
+"""输出诊断快照。stdout 单行 JSON；spec §7。
+
+命名：oc- 前缀取自项目名 oc-manager，标识注入 hermes runtime 镜像、供容器内调用的运维 CLI
+（区别于 hermes 上游自带命令）；后缀 doctor = 运行时诊断快照。
+"""
 
 from __future__ import annotations
 
