@@ -45,7 +45,7 @@ CREATE TABLE users (
     CONSTRAINT users_platform_org_check CHECK (
         (role = 'platform_admin' AND org_id IS NULL)
         OR (role IN ('org_admin','org_member') AND org_id IS NOT NULL)),
-    CONSTRAINT fk_users_org_id FOREIGN KEY (org_id) REFERENCES organizations(id) ON DELETE CASCADE,
+    CONSTRAINT fk_users_org_id FOREIGN KEY (org_id) REFERENCES organizations(id),
     UNIQUE KEY uk_users_org_username (org_id, username),
     UNIQUE KEY uk_users_platform_username (platform_username_key),
     KEY idx_users_org_role_status (org_id, role, status),
@@ -88,7 +88,7 @@ CREATE TABLE runtime_nodes (
 CREATE TABLE assistant_versions (
     id CHAR(36) PRIMARY KEY,
     name VARCHAR(255) NOT NULL,
-    description TEXT NOT NULL,
+    description TEXT NOT NULL DEFAULT (''),
     system_prompt TEXT NOT NULL,
     image_id VARCHAR(255) NOT NULL,
     main_model VARCHAR(255) NOT NULL,
@@ -101,7 +101,7 @@ CREATE TABLE assistant_versions (
     deleted_at DATETIME(6) NULL,
     name_active_key VARCHAR(255) GENERATED ALWAYS AS (CASE WHEN deleted_at IS NULL THEN name END) STORED,
     CONSTRAINT assistant_versions_revision_check CHECK (revision > 0),
-    CONSTRAINT fk_assistant_versions_created_by FOREIGN KEY (created_by) REFERENCES users(id) ON DELETE SET NULL,
+    CONSTRAINT fk_assistant_versions_created_by FOREIGN KEY (created_by) REFERENCES users(id),
     UNIQUE KEY uk_assistant_versions_name_active (name_active_key)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_0900_ai_ci;
 
@@ -150,10 +150,10 @@ CREATE TABLE apps (
     CONSTRAINT apps_runtime_token_pair_check CHECK (
         (runtime_token_hash IS NULL AND runtime_token_ciphertext IS NULL)
         OR (runtime_token_hash IS NOT NULL AND runtime_token_ciphertext IS NOT NULL)),
-    CONSTRAINT fk_apps_org_id FOREIGN KEY (org_id) REFERENCES organizations(id) ON DELETE CASCADE,
-    CONSTRAINT fk_apps_owner_user_id FOREIGN KEY (owner_user_id) REFERENCES users(id) ON DELETE CASCADE,
-    CONSTRAINT fk_apps_runtime_node_id FOREIGN KEY (runtime_node_id) REFERENCES runtime_nodes(id) ON DELETE CASCADE,
-    CONSTRAINT fk_apps_version_id FOREIGN KEY (version_id) REFERENCES assistant_versions(id) ON DELETE SET NULL,
+    CONSTRAINT fk_apps_org_id FOREIGN KEY (org_id) REFERENCES organizations(id),
+    CONSTRAINT fk_apps_owner_user_id FOREIGN KEY (owner_user_id) REFERENCES users(id),
+    CONSTRAINT fk_apps_runtime_node_id FOREIGN KEY (runtime_node_id) REFERENCES runtime_nodes(id),
+    CONSTRAINT fk_apps_version_id FOREIGN KEY (version_id) REFERENCES assistant_versions(id),
     UNIQUE KEY uk_apps_owner_active (owner_active_key),
     UNIQUE KEY uk_apps_runtime_token_hash_active (runtime_token_active_key),
     KEY idx_apps_org_active_created (org_id, deleted_at, created_at DESC),
@@ -180,7 +180,7 @@ CREATE TABLE channel_bindings (
     CONSTRAINT channel_bindings_status_check CHECK (status IN (
         'unbound','pending_auth','bound','failed','expired','unbound_by_user','deleted')),
     CONSTRAINT channel_bindings_channel_type_check CHECK (channel_type IN ('wechat')),
-    CONSTRAINT fk_channel_bindings_app_id FOREIGN KEY (app_id) REFERENCES apps(id) ON DELETE CASCADE,
+    CONSTRAINT fk_channel_bindings_app_id FOREIGN KEY (app_id) REFERENCES apps(id),
     UNIQUE KEY uk_channel_bindings_app_active (app_active_key),
     KEY idx_channel_bindings_app_channel_status (app_id, channel_type, status)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_0900_ai_ci;
@@ -198,8 +198,8 @@ CREATE TABLE recharge_records (
     created_at DATETIME(6) NOT NULL DEFAULT CURRENT_TIMESTAMP(6),
     CONSTRAINT recharge_records_credit_amount_check CHECK (credit_amount > 0),
     CONSTRAINT recharge_records_status_check CHECK (status IN ('succeeded','failed')),
-    CONSTRAINT fk_recharge_records_org_id FOREIGN KEY (org_id) REFERENCES organizations(id) ON DELETE CASCADE,
-    CONSTRAINT fk_recharge_records_operator_id FOREIGN KEY (operator_id) REFERENCES users(id) ON DELETE CASCADE,
+    CONSTRAINT fk_recharge_records_org_id FOREIGN KEY (org_id) REFERENCES organizations(id),
+    CONSTRAINT fk_recharge_records_operator_id FOREIGN KEY (operator_id) REFERENCES users(id),
     KEY idx_recharge_records_org_created (org_id, created_at)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_0900_ai_ci;
 
@@ -246,8 +246,8 @@ CREATE TABLE audit_logs (
     created_at DATETIME(6) NOT NULL DEFAULT CURRENT_TIMESTAMP(6),
     CONSTRAINT audit_logs_actor_role_check CHECK (actor_role IN ('system','platform_admin','org_admin','org_member')),
     CONSTRAINT audit_logs_result_check CHECK (result IN ('succeeded','failed')),
-    CONSTRAINT fk_audit_logs_actor_id FOREIGN KEY (actor_id) REFERENCES users(id) ON DELETE SET NULL,
-    CONSTRAINT fk_audit_logs_org_id FOREIGN KEY (org_id) REFERENCES organizations(id) ON DELETE CASCADE,
+    CONSTRAINT fk_audit_logs_actor_id FOREIGN KEY (actor_id) REFERENCES users(id),
+    CONSTRAINT fk_audit_logs_org_id FOREIGN KEY (org_id) REFERENCES organizations(id),
     KEY idx_audit_logs_org_created (org_id, created_at),
     KEY idx_audit_logs_target_created (target_type, target_id, created_at)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_0900_ai_ci;
@@ -260,7 +260,7 @@ CREATE TABLE refresh_tokens (
     expires_at DATETIME(6) NOT NULL,
     revoked_at DATETIME(6) NULL,
     created_at DATETIME(6) NOT NULL DEFAULT CURRENT_TIMESTAMP(6),
-    CONSTRAINT fk_refresh_tokens_user_id FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE,
+    CONSTRAINT fk_refresh_tokens_user_id FOREIGN KEY (user_id) REFERENCES users(id),
     KEY idx_refresh_tokens_user_expires (user_id, expires_at)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_0900_ai_ci;
 
@@ -283,8 +283,8 @@ CREATE TABLE ragflow_datasets (
     CONSTRAINT ragflow_datasets_status_check CHECK (status IN ('creating','active','deleting','failed')),
     CONSTRAINT ragflow_datasets_scope_app_check CHECK (
         (scope_type = 'org' AND app_id IS NULL) OR (scope_type = 'app' AND app_id IS NOT NULL)),
-    CONSTRAINT fk_ragflow_datasets_org_id FOREIGN KEY (org_id) REFERENCES organizations(id) ON DELETE CASCADE,
-    CONSTRAINT fk_ragflow_datasets_app_id FOREIGN KEY (app_id) REFERENCES apps(id) ON DELETE CASCADE,
+    CONSTRAINT fk_ragflow_datasets_org_id FOREIGN KEY (org_id) REFERENCES organizations(id),
+    CONSTRAINT fk_ragflow_datasets_app_id FOREIGN KEY (app_id) REFERENCES apps(id),
     UNIQUE KEY uk_ragflow_datasets_scope_identity (id, scope_type, org_id),
     UNIQUE KEY uk_ragflow_datasets_app_identity (id, scope_type, org_id, app_id),
     UNIQUE KEY uk_ragflow_datasets_org_unique (org_scope_key),
@@ -317,8 +317,10 @@ CREATE TABLE ragflow_documents (
         (scope_type = 'org' AND app_id IS NULL) OR (scope_type = 'app' AND app_id IS NOT NULL)),
     CONSTRAINT fk_ragflow_documents_dataset_scope FOREIGN KEY (dataset_id, scope_type, org_id)
         REFERENCES ragflow_datasets(id, scope_type, org_id) ON DELETE CASCADE,
-    CONSTRAINT fk_ragflow_documents_org_id FOREIGN KEY (org_id) REFERENCES organizations(id) ON DELETE CASCADE,
-    CONSTRAINT fk_ragflow_documents_app_id FOREIGN KEY (app_id) REFERENCES apps(id) ON DELETE CASCADE,
+    CONSTRAINT fk_ragflow_documents_dataset_app_scope FOREIGN KEY (dataset_id, scope_type, org_id, app_id)
+        REFERENCES ragflow_datasets(id, scope_type, org_id, app_id) ON DELETE CASCADE,
+    CONSTRAINT fk_ragflow_documents_org_id FOREIGN KEY (org_id) REFERENCES organizations(id),
+    CONSTRAINT fk_ragflow_documents_app_id FOREIGN KEY (app_id) REFERENCES apps(id),
     UNIQUE KEY uk_ragflow_documents_dataset_remote (dataset_id, ragflow_document_id),
     KEY idx_ragflow_documents_scope (scope_type, org_id, app_id, created_at DESC),
     KEY idx_ragflow_documents_parse_status (parse_status)
