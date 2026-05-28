@@ -102,12 +102,12 @@ const environmentLabel = computed(() => {
 // 根据当前路由计算激活的菜单项 key（前缀匹配）
 const activeKey = computed(() => {
   const p = route.path
-  if (p === '/') return isOrgMember.value ? memberAppPath.value : '/'
+  if (p === '/') return isOrgMember.value ? memberAppTabKey('overview') : '/'
   // org_member 的实例 tab 已拉平到左侧菜单，需要按子路由末段分别高亮。
   if (isOrgMember.value && p.startsWith('/apps')) {
-    if (p === '/apps/empty') return '/apps/empty'
+    if (p === '/apps/empty') return memberAppTabKey('overview')
     const tab = p.split('/')[3] as MemberAppTab | undefined
-    return tab && memberAppTabs.includes(tab) ? memberAppTabPath(tab) : memberAppPath.value
+    return tab && memberAppTabs.includes(tab) ? memberAppTabKey(tab) : memberAppTabKey('overview')
   }
   if (p.startsWith('/apps')) return memberAppPath.value
   const prefixes = [
@@ -145,6 +145,13 @@ function memberAppTabPath(tab: MemberAppTab) {
   return '/apps/empty'
 }
 
+// memberAppTabKey 是菜单项 identity；无实例时不能复用 /apps/empty，
+// 否则 Naive UI 会把多个入口视作同一个节点。
+function memberAppTabKey(tab: MemberAppTab) {
+  if (memberHasApp.value && memberAppId.value) return memberAppTabPath(tab)
+  return `member-empty-${tab}`
+}
+
 // org_member 的总览目标：有实例指向唯一实例 overview，无实例指向空状态。
 const memberAppPath = computed(() => memberAppTabPath('overview'))
 
@@ -152,12 +159,12 @@ const memberAppPath = computed(() => memberAppTabPath('overview'))
 const menuOptions = computed<MenuOption[]>(() => {
   if (isOrgMember.value) {
     return [
-      { key: memberAppTabPath('overview'), label: '总览', icon: () => h(LayoutDashboard, { size: 18 }) },
-      { key: memberAppTabPath('kanban'), label: '任务', icon: () => h(ListChecks, { size: 18 }) },
-      { key: memberAppTabPath('cron'), label: '定时任务', icon: () => h(CalendarClock, { size: 18 }) },
-      { key: memberAppTabPath('channels'), label: '渠道', icon: () => h(Radio, { size: 18 }) },
-      { key: memberAppTabPath('knowledge'), label: '个人知识库', icon: () => h(BookOpen, { size: 18 }) },
-      { key: memberAppTabPath('workspace'), label: '工作目录', icon: () => h(FolderOpen, { size: 18 }) },
+      { key: memberAppTabKey('overview'), label: '总览', icon: () => h(LayoutDashboard, { size: 18 }) },
+      { key: memberAppTabKey('kanban'), label: '任务', icon: () => h(ListChecks, { size: 18 }) },
+      { key: memberAppTabKey('cron'), label: '定时任务', icon: () => h(CalendarClock, { size: 18 }) },
+      { key: memberAppTabKey('channels'), label: '渠道', icon: () => h(Radio, { size: 18 }) },
+      { key: memberAppTabKey('knowledge'), label: '个人知识库', icon: () => h(BookOpen, { size: 18 }) },
+      { key: memberAppTabKey('workspace'), label: '工作目录', icon: () => h(FolderOpen, { size: 18 }) },
       { key: '/knowledge', label: '企业知识库', icon: () => h(BookOpen, { size: 18 }) },
       { key: '/usage', label: '用量', icon: () => h(BarChart3, { size: 18 }) },
     ]
@@ -193,9 +200,9 @@ const menuOptions = computed<MenuOption[]>(() => {
   return items
 })
 
-// onNav 由 Naive Menu 传入 key，key 与路由路径保持一致。
+// onNav 由 Naive Menu 传入 key；普通菜单 key 即路径，成员无实例的占位 key 统一跳空状态页。
 function onNav(key: string) {
-  router.push(key)
+  router.push(key.startsWith('member-empty-') ? '/apps/empty' : key)
 }
 
 // onLogout 先清理登录态再回到登录页，避免旧 token 继续驱动后台查询。

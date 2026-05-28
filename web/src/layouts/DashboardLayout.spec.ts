@@ -140,7 +140,7 @@ describe('DashboardLayout', () => {
   })
 
   // 覆盖成员无实例边界：实例能力入口统一落到空状态页，避免生成缺少 appId 的坏路由。
-  it('points member app entries to empty state when member has no app', () => {
+  it('points member app entries to empty state when member has no app', async () => {
     routeState.path = '/apps/empty'
     authState.user = { id: 'member-1', username: 'member', display_name: '成员', role: 'org_member', org_id: 'org-1' }
     authState.isPlatformAdmin = false
@@ -150,9 +150,16 @@ describe('DashboardLayout', () => {
     memberAppState.hasApp.value = false
 
     const wrapper = mountLayout()
+    const appItems = wrapper.findAll('[data-test="menu-item"]').slice(0, 6)
+    const appKeys = menuKeys(wrapper).slice(0, 6)
 
-    expect(menuKeys(wrapper).slice(0, 6)).toEqual(['/apps/empty', '/apps/empty', '/apps/empty', '/apps/empty', '/apps/empty', '/apps/empty'])
-    expect(wrapper.find('[data-test="menu"]').attributes('data-value')).toBe('/apps/empty')
+    expect(new Set(appKeys).size).toBe(6)
+    expect(wrapper.find('[data-test="menu"]').attributes('data-value')).toBe('member-empty-overview')
+
+    for (const item of appItems) {
+      await item.trigger('click')
+    }
+    expect(routerPush.mock.calls.slice(-6).map(([path]) => path)).toEqual(['/apps/empty', '/apps/empty', '/apps/empty', '/apps/empty', '/apps/empty', '/apps/empty'])
   })
 
   // 覆盖非成员菜单文案：组织级知识库统一叫「企业知识库」，但管理员仍保留「实例」入口。
