@@ -253,6 +253,7 @@ docker compose run --rm manager-api seed-admin <username> <password> [display_na
 - [产品设计](./docs/product-design.md) — 角色、对象模型、业务流程、权限
 - [技术设计](./docs/technical-design.md) — 后端模块、状态机、接口契约、job
 - [Hermes 容器运行机制](./docs/hermes-container.md) — 创建链路、挂载、注入、知识库
+- [知识库（RAG）](./docs/knowledge-base.md) — RAGFlow 主库、组织/实例双层、文档进出、检索、权限
 - [runtime-agent 工作原理](./docs/runtime-agent.md) — 注册、心跳、探测
 - [配置参考](./docs/configuration.md) — manager.yaml / agent.yaml / .env
 - [用户手册](./docs/user-manual.md) — 三类角色操作
