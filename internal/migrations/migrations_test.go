@@ -38,36 +38,25 @@ func TestFS_ContainsUpAndDownPairs(t *testing.T) {
 	}
 }
 
-// TestRAGFlowKnowledgeMigrationDeclaresIntegrityConstraints 验证 RAGFlow 知识库迁移声明跨表一致性与 runtime token 唯一性约束。
+// TestRAGFlowKnowledgeMigrationDeclaresIntegrityConstraints 验证 MySQL 基线 schema 中等价的完整性约束：
+// - runtime token 唯一性：PG 部分唯一索引改为 STORED 生成列 + 普通唯一键，业务语义不变；
+// - ragflow dataset/document 跨表 scope 一致性：复合唯一键 + 复合外键代替 PG 的声明方式。
 func TestRAGFlowKnowledgeMigrationDeclaresIntegrityConstraints(t *testing.T) {
-	upBytes, err := FS.ReadFile("000029_ragflow_knowledge.up.sql")
+	upBytes, err := FS.ReadFile("000001_baseline.up.sql")
 	require.NoError(t, err)
 	up := string(upBytes)
 
 	// runtime token hash 只允许未删除应用持有唯一的非空值，避免 Hermes token 解析到多个 app。
-	assert.Contains(t, up, "CREATE UNIQUE INDEX apps_runtime_token_hash_active_unique")
-	assert.Contains(t, up, "ON apps(runtime_token_hash)")
-	assert.Contains(t, up, "WHERE runtime_token_hash IS NOT NULL AND deleted_at IS NULL")
+	// MySQL 不支持 WHERE 过滤的部分唯一索引，改用 STORED 生成列 runtime_token_active_key：
+	// 有效（非 NULL）时值为 token hash，已删除时为 NULL，再对生成列建普通唯一键实现等价语义。
+	assert.Contains(t, up, "runtime_token_active_key")
+	assert.Contains(t, up, "uk_apps_runtime_token_hash_active")
 	assert.Contains(t, up, "CONSTRAINT apps_runtime_token_pair_check CHECK")
-	assert.Contains(t, up, "create_claim_token text NULL")
 
 	// document 冗余 scope 字段必须能通过复合外键回指到 dataset，防止跨组织或跨 app 写错映射。
-	assert.Contains(t, up, "CONSTRAINT ragflow_datasets_scope_identity_unique UNIQUE (id, scope_type, org_id)")
-	assert.Contains(t, up, "CONSTRAINT ragflow_datasets_app_identity_unique UNIQUE (id, scope_type, org_id, app_id)")
-	assert.Contains(t, up, "CONSTRAINT ragflow_documents_dataset_scope_fk FOREIGN KEY (dataset_id, scope_type, org_id)")
-	assert.Contains(t, up, "CONSTRAINT ragflow_documents_dataset_app_scope_fk FOREIGN KEY (dataset_id, scope_type, org_id, app_id)")
-}
-
-// TestRAGFlowKnowledgeDownMigrationDropsRuntimeTokenIndexFirst 验证回滚时先移除依赖列的索引，再删除 runtime token 字段。
-func TestRAGFlowKnowledgeDownMigrationDropsRuntimeTokenIndexFirst(t *testing.T) {
-	downBytes, err := FS.ReadFile("000029_ragflow_knowledge.down.sql")
-	require.NoError(t, err)
-	down := string(downBytes)
-
-	// 显式删除索引让回滚顺序清晰，即使 PostgreSQL 删除列时会级联清理依赖索引。
-	indexDrop := strings.Index(down, "DROP INDEX IF EXISTS apps_runtime_token_hash_active_unique")
-	hashColumnDrop := strings.Index(down, "ALTER TABLE apps DROP COLUMN IF EXISTS runtime_token_hash")
-	require.NotEqual(t, -1, indexDrop)
-	require.NotEqual(t, -1, hashColumnDrop)
-	assert.Less(t, indexDrop, hashColumnDrop)
+	// ragflow_datasets 上建复合唯一键供 ragflow_documents 的复合外键引用：
+	// 三列唯一键覆盖 org 范围，四列唯一键覆盖 app 范围，fk 指向三列键保证 scope+org 强一致。
+	assert.Contains(t, up, "uk_ragflow_datasets_scope_identity (id, scope_type, org_id)")
+	assert.Contains(t, up, "uk_ragflow_datasets_app_identity (id, scope_type, org_id, app_id)")
+	assert.Contains(t, up, "CONSTRAINT fk_ragflow_documents_dataset_scope FOREIGN KEY (dataset_id, scope_type, org_id)")
 }

@@ -1,0 +1,16 @@
+SET FOREIGN_KEY_CHECKS = 0;
+DROP TABLE IF EXISTS instance_resource_samples;
+DROP TABLE IF EXISTS node_resource_samples;
+DROP TABLE IF EXISTS ragflow_documents;
+DROP TABLE IF EXISTS ragflow_datasets;
+DROP TABLE IF EXISTS refresh_tokens;
+DROP TABLE IF EXISTS audit_logs;
+DROP TABLE IF EXISTS jobs;
+DROP TABLE IF EXISTS recharge_records;
+DROP TABLE IF EXISTS channel_bindings;
+DROP TABLE IF EXISTS apps;
+DROP TABLE IF EXISTS assistant_versions;
+DROP TABLE IF EXISTS runtime_nodes;
+DROP TABLE IF EXISTS users;
+DROP TABLE IF EXISTS organizations;
+SET FOREIGN_KEY_CHECKS = 1;
