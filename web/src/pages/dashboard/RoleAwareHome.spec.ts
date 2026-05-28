@@ -1,6 +1,6 @@
 import { mount } from '@vue/test-utils'
 import { nextTick } from 'vue'
-import { beforeEach, describe, expect, it, vi } from 'vitest'
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 
 import RoleAwareHome from './RoleAwareHome.vue'
 
@@ -8,11 +8,15 @@ const routerReplace = vi.hoisted(() => vi.fn())
 const authState = vi.hoisted(() => ({
   user: { id: 'member-1', username: 'member', display_name: '成员', role: 'org_member', org_id: 'org-1' },
 }))
-const memberAppState = vi.hoisted(() => ({
-  appId: { value: 'app-1' as string | undefined },
-  hasApp: { value: true },
-  isLoading: { value: false },
-}))
+const memberAppState = vi.hoisted(() => {
+  const { ref } = require('vue') as typeof import('vue')
+
+  return {
+    appId: ref('app-1' as string | undefined),
+    hasApp: ref(true),
+    isLoading: ref(false),
+  }
+})
 
 vi.mock('vue-router', () => ({
   RouterLink: { props: ['to'], template: '<a :href="to"><slot /></a>' },
@@ -27,8 +31,12 @@ vi.mock('@/composables/useMemberApp', () => ({
   useMemberApp: () => memberAppState,
 }))
 
+const mountedWrappers: { unmount: () => void }[] = []
+
 function mountHome() {
-  return mount(RoleAwareHome)
+  const wrapper = mount(RoleAwareHome)
+  mountedWrappers.push(wrapper)
+  return wrapper
 }
 
 describe('RoleAwareHome', () => {
@@ -38,6 +46,10 @@ describe('RoleAwareHome', () => {
     memberAppState.appId.value = 'app-1'
     memberAppState.hasApp.value = true
     memberAppState.isLoading.value = false
+  })
+
+  afterEach(() => {
+    mountedWrappers.splice(0).forEach((wrapper) => wrapper.unmount())
   })
 
   // 覆盖组织成员默认首页：有唯一实例时直接进入该实例的 overview。
@@ -59,14 +71,19 @@ describe('RoleAwareHome', () => {
     expect(routerReplace).toHaveBeenCalledWith('/apps/empty')
   })
 
-  // 覆盖成员实例查询加载中边界：等待 useMemberApp 完成，避免先跳空状态再闪回。
-  it('does not redirect org_member while member app query is loading', async () => {
+  // 覆盖成员实例查询加载中边界：等待 useMemberApp 完成后再跳转，避免先跳空状态再闪回。
+  it('redirects org_member after member app query finishes loading', async () => {
     memberAppState.isLoading.value = true
 
     mountHome()
     await nextTick()
 
     expect(routerReplace).not.toHaveBeenCalled()
+
+    memberAppState.isLoading.value = false
+    await nextTick()
+
+    expect(routerReplace).toHaveBeenCalledWith('/apps/app-1/overview')
   })
 
   // 覆盖组织管理员首页文案：组织级知识库入口统一使用「企业知识库」。
