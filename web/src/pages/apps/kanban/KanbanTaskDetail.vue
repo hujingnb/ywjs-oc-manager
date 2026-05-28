@@ -6,8 +6,8 @@
     </template>
     <template v-else>
       <div class="detail-head">
-        <!-- 状态条：status 缺失时显示 UNKNOWN -->
-        <div class="status-bar">● {{ (detail.task?.status ?? 'unknown').toUpperCase() }}</div>
+        <!-- 状态条：status 缺失时显示 unknown 的中文降级文案 -->
+        <div class="status-bar">● {{ taskStatusLabel }}</div>
         <h3 class="detail-title">{{ detail.task?.title ?? '（无标题）' }}</h3>
         <p class="detail-sub">task_id <code>{{ detail.task?.id ?? '—' }}</code> · board <code>{{ board }}</code></p>
       </div>
@@ -62,7 +62,7 @@
           <thead><tr><th>状态</th><th>profile</th><th>结果</th></tr></thead>
           <tbody>
             <tr v-for="(run, i) in runs" :key="i">
-              <td>{{ run.status ?? '—' }}</td>
+              <td>{{ run.status ? formatKanbanStatus(run.status).label : '—' }}</td>
               <td>{{ run.profile ?? '—' }}</td>
               <!-- error / summary 均可选，优先显示 error，再 summary，均无则显示 — -->
               <td>{{ run.error || run.summary || '—' }}</td>
@@ -84,14 +84,16 @@
 </template>
 
 <script setup lang="ts">
+import { computed } from 'vue'
 import { NCard } from 'naive-ui'
+import { formatKanbanStatus } from '@/domain/status'
 import KanbanTaskActions from './KanbanTaskActions.vue'
 import type { KanbanTaskDetail, KanbanTaskRun, KanbanStatus } from '@/api/hooks/useKanban'
 
 // KanbanTaskDetail 渲染右侧任务详情面板，包含：状态条、操作栏、元信息、body、
 // 实时执行流（running 状态）、历次执行列表、评论区。
 // 注意：prop 命名为 detail 而非 task，避免与 detail.task 子字段混淆。
-defineProps<{
+const props = defineProps<{
   // detail 为 null 时显示引导文案「从左侧选择任务」。
   // 真实结构：{ task, comments, events, parents, children, latest_summary }
   detail: KanbanTaskDetail | null
@@ -109,6 +111,9 @@ defineProps<{
 const emit = defineEmits<{
   action: [verb: string]
 }>()
+
+// taskStatusLabel 统一汉化任务状态；状态缺失时仍显示 unknown 的降级文案。
+const taskStatusLabel = computed(() => formatKanbanStatus(props.detail?.task?.status ?? 'unknown').label)
 
 // KNOWN_STATUSES 是 KanbanStatus 的所有合法值集合，用于类型守卫。
 // 当 hermes 新增状态时，此处不会自动扩展，但操作按钮不会渲染（降级策略）。

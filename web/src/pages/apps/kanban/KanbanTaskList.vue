@@ -24,6 +24,7 @@
 <script setup lang="ts">
 import { computed, ref, watch } from 'vue'
 import { NCard, NCollapse, NCollapseItem } from 'naive-ui'
+import { formatKanbanStatus } from '@/domain/status'
 import KanbanTaskRow from './KanbanTaskRow.vue'
 import type { KanbanTask, KanbanStatus } from '@/api/hooks/useKanban'
 
@@ -36,16 +37,19 @@ const props = defineProps<{
 }>()
 const emit = defineEmits<{ select: [taskId: string] }>()
 
-// 状态分组顺序与英文标签。
-const GROUP_DEFS: ReadonlyArray<{ status: KanbanStatus; label: string }> = [
-  { status: 'running', label: 'Running' },
-  { status: 'ready', label: 'Ready' },
-  { status: 'todo', label: 'Todo' },
-  { status: 'blocked', label: 'Blocked' },
-  { status: 'triage', label: 'Triage' },
-  { status: 'done', label: 'Done' },
-  { status: 'archived', label: 'Archived' },
-]
+// 状态分组顺序与看板状态流转保持一致；label 统一由状态格式化函数生成。
+const GROUP_DEFS: ReadonlyArray<{ status: KanbanStatus; label: string }> = ([
+  'running',
+  'ready',
+  'todo',
+  'blocked',
+  'triage',
+  'done',
+  'archived',
+] as const).map((status) => ({
+  status,
+  label: formatKanbanStatus(status).label,
+}))
 
 // groups 把 tasks 按状态分桶。
 const groups = computed(() =>
