@@ -84,7 +84,7 @@ import { NButton, NCard, NSpace } from 'naive-ui'
 
 import type { AppDTO } from '@/api/hooks/useApps'
 import AuthChallengeRenderer from '@/components/AuthChallengeRenderer.vue'
-import ChannelLogo from './ChannelLogo.vue'
+import ChannelLogo, { type ChannelLogoType } from './ChannelLogo.vue'
 import {
   useBeginChannelAuth,
   useChannelProgressQuery,
@@ -102,18 +102,10 @@ import { useAuthStore } from '@/stores/auth'
 const props = defineProps<{ appId?: string; channelType?: string }>()
 
 // ChannelDisplay 是渠道 tab 的纯前端展示模型；当前仅 wechat 接入真实绑定能力。
-// 其他渠道作为能力边界展示，不参与 API 参数或后端状态机。logo 由 ChannelLogo 按 type 渲染。
+// 其他渠道作为能力边界展示，不参与 API 参数或后端状态机。type 直接复用 ChannelLogo 的
+// ChannelLogoType，由类型系统强制两处渠道枚举一致，新增渠道时编译器会提示同步。
 interface ChannelDisplay {
-  type:
-    | 'wechat'
-    | 'work_wechat'
-    | 'feishu'
-    | 'dingtalk'
-    | 'telegram'
-    | 'whatsapp'
-    | 'discord'
-    | 'slack'
-    | 'line'
+  type: ChannelLogoType
   name: string
   description: string
   supported: boolean
