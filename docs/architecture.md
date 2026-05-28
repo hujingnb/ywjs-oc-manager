@@ -100,11 +100,11 @@ web/src/
 ├── pages/
 │   ├── login/          登录页
 │   ├── dashboard/      角色感知首页
-│   ├── platform/       平台总览、组织管理、充值
+│   ├── platform/       平台总览、企业管理、充值
 │   ├── org/            成员管理、创建成员、人设配置
 │   ├── apps/           应用列表 + 应用详情（概览 / 运行时 / 渠道 / 知识库 / 工作目录 / 审计 六个 tab）
 │   ├── runtime-nodes/  运行节点列表与节点详情
-│   ├── knowledge/      组织级知识库
+│   ├── knowledge/      企业级知识库
 │   ├── usage/          token 用量看板
 │   └── audit/          审计日志
 ├── api/
@@ -120,7 +120,7 @@ web/src/
 ```
 
 数据请求统一走 TanStack Query；写操作经 Naive UI confirm modal 二次确认，高风险
-操作（如删除组织）通过 `ConfirmActionModal` 要求输入名称校验。
+操作（如删除企业）通过 `ConfirmActionModal` 要求输入名称校验。
 
 ### 2.3 runtime-agent（runtime/agent/）
 
@@ -163,7 +163,7 @@ docker proxy 创建。
 
 | 存储 | 内容 | 备份策略 |
 |---|---|---|
-| PostgreSQL | 业务库（组织 / 成员 / 应用 / 节点 / RAGFlow dataset/document 映射）/ job 队列状态 / 审计日志 / 资源指标样本 | 见 `deploy/operations.md` |
+| PostgreSQL | 业务库（企业 / 成员 / 应用 / 节点 / RAGFlow dataset/document 映射）/ job 队列状态 / 审计日志 / 资源指标样本 | 见 `deploy/operations.md` |
 | Redis | job 信号队列（Stream）/ 短期锁 / 无需长期保存的状态 | 不需要长期备份；重启后 scheduler 从 PostgreSQL jobs 表重建队列 |
 | agent 文件系统 | `{data_root}/apps/<id>/input/`（挂载到 Hermes `/opt/oc-input`）/ `{data_root}/apps/<id>/data/`（挂载到 Hermes `/opt/data`） | 节点本地磁盘，建议定期快照；参考 `docs/hermes-container.md` |
 | RAGFlow | 知识库文件主库、解析状态、chunk 与检索索引 | 由 `deploy/ragflow` 独立部署和备份；manager 通过 HTTP API 访问 |
@@ -174,7 +174,7 @@ docker proxy 创建。
 ### 4.1 成员 onboarding（注册 → 容器就绪）
 
 ```text
-组织管理员 POST /api/v1/members
+企业管理员 POST /api/v1/members
        │
        ▼
 MembersHandler.Create
@@ -217,7 +217,7 @@ KnowledgeHandler → KnowledgeService.SaveOrgFile
 Hermes 检索 / 写入：
    ├─ oc-kb search/add 调 manager runtime API
    ├─ manager 用 app runtime token 解析当前实例
-   ├─ 组织知识库只读、实例知识库读写
+   ├─ 企业知识库只读、实例知识库读写
    └─ manager 代理 RAGFlow retrieval / document upload
 ```
 
@@ -247,7 +247,7 @@ UI 用量看板 GET /api/v1/usage/...
    │
    ▼
 UsageHandler → UsageService
-   └─ 直接调 new-api HTTP API（按平台 / 组织 / 应用三级聚合）
+   └─ 直接调 new-api HTTP API（按平台 / 企业 / 应用三级聚合）
       不缓存；每次查询实时透传，保证数据一致性
 ```
 

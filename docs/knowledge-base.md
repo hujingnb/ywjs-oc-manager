@@ -1,6 +1,6 @@
 # 知识库（RAG）
 
-> 本文介绍 oc-manager 基于 RAGFlow 的知识库（RAG）能力：它解决什么问题、组织 / 实例两层
+> 本文介绍 oc-manager 基于 RAGFlow 的知识库（RAG）能力：它解决什么问题、企业 / 实例两层
 > 知识库如何划分、文档怎么进（管理后台上传 + Hermes 自动加入）、Hermes 怎么检索（跨 scope、
 > 实例优先）、解析状态如何流转、各角色权限边界，以及部署前置的 RAGFlow 模型配置。
 > UI 逐步操作见 [用户手册](./user-manual.md)，容器内链路细节见 [Hermes 容器运行机制](./hermes-container.md)。
@@ -10,7 +10,7 @@
 ## 1. 设计目标与边界
 
 知识库以 **RAGFlow 作为唯一文件主库**：文件原件、解析、chunk、向量索引与检索全部在 RAGFlow。
-manager 不再保存文件主副本，只负责管理面、权限、审计、组织 / 实例边界和文件生命周期。
+manager 不再保存文件主副本，只负责管理面、权限、审计、企业 / 实例边界和文件生命周期。
 
 这样划分的结果：
 
@@ -18,7 +18,7 @@ manager 不再保存文件主副本，只负责管理面、权限、审计、组
 - **Hermes 容器**：只通过 **manager runtime API** 检索和写入知识库，**不持有 RAGFlow API key，也不知道 RAGFlow dataset ID**，更不直连 RAGFlow。
 - **RAGFlow**：作为 manager 的后端依赖，不参与 oc-manager 的业务权限判断。
 
-> 核心取舍：RAGFlow 提供文件主库、解析与检索能力；oc-manager 负责业务权限、实例隔离和可写目标控制。「组织只读、实例读写」这条权限完全由 manager runtime API 收敛，不依赖 RAGFlow 自身权限模型，也不引入 RAGFlow MCP。
+> 核心取舍：RAGFlow 提供文件主库、解析与检索能力；oc-manager 负责业务权限、实例隔离和可写目标控制。「企业只读、实例读写」这条权限完全由 manager runtime API 收敛，不依赖 RAGFlow 自身权限模型，也不引入 RAGFlow MCP。
 
 ---
 
@@ -26,11 +26,11 @@ manager 不再保存文件主副本，只负责管理面、权限、审计、组
 
 | scope | 归属 | 用途 | manager UI 入口 |
 |---|---|---|---|
-| 组织知识库（`org`）| 组织 | 组织内共享的政策 / 产品文档 / 通用资料 | `/knowledge` |
+| 企业知识库（`org`）| 企业 | 企业内共享的政策 / 产品文档 / 通用资料 | `/knowledge` |
 | 实例知识库（`app`）| 单个 Hermes 实例 | 该实例私有资料、Hermes 在对话中沉淀的工作产物 | `/apps/:appId/knowledge` |
 
-每个组织对应一个 RAGFlow org dataset，每个实例对应一个 app dataset，映射关系记录在 manager 的
-`ragflow_datasets` 表。实例知识库严格隔离：一个实例的文档不会出现在其它实例或组织的检索结果里。
+每个企业对应一个 RAGFlow org dataset，每个实例对应一个 app dataset，映射关系记录在 manager 的
+`ragflow_datasets` 表。实例知识库严格隔离：一个实例的文档不会出现在其它实例或企业的检索结果里。
 
 ---
 
@@ -66,7 +66,7 @@ manager 不再保存文件主副本，只负责管理面、权限、审计、组
 
 ### 4.1 管理后台上传（人工）
 
-- 组织知识库：`/knowledge` → 右上角「上传文件」（仅组织管理员 / 平台管理员可见）。
+- 企业知识库：`/knowledge` → 右上角「上传文件」（仅企业管理员 / 平台管理员可见）。
 - 实例知识库：`/apps/:appId/knowledge` → 「上传文件」（有实例管理权限的用户）。
 
 行为：
@@ -79,9 +79,9 @@ manager 不再保存文件主副本，只负责管理面、权限、审计、组
 
 | 操作 | 方法与路径 |
 |---|---|
-| 组织库列表 | `GET /api/v1/organizations/{orgId}/knowledge` |
-| 组织库上传 | `POST /api/v1/organizations/{orgId}/knowledge?filename=<name>`（`202 Accepted`）|
-| 组织库删除 | `DELETE /api/v1/organizations/{orgId}/knowledge/{documentId}`（`204`）|
+| 企业库列表 | `GET /api/v1/organizations/{orgId}/knowledge` |
+| 企业库上传 | `POST /api/v1/organizations/{orgId}/knowledge?filename=<name>`（`202 Accepted`）|
+| 企业库删除 | `DELETE /api/v1/organizations/{orgId}/knowledge/{documentId}`（`204`）|
 | 实例库列表 | `GET /api/v1/apps/{appId}/knowledge` |
 
 ### 4.2 Hermes 自动加入（`oc-kb add`）
@@ -96,7 +96,7 @@ oc-kb add <workspace 相对路径> [--filename <名称>]
 约束：
 
 - 路径必须位于 `/opt/data/workspace` 下，拒绝绝对路径、`..` 父目录穿越和目录上传；
-- 只写**当前实例** dataset，**不能写组织知识库或其它实例**；该通道不接受 `org_id` / `dataset_id`；
+- 只写**当前实例** dataset，**不能写企业知识库或其它实例**；该通道不接受 `org_id` / `dataset_id`；
 - 上传后 manager 写入 `ragflow_documents` 并触发解析，返回 document 名称与解析状态（`queued`）。
   上传失败会如实返回失败原因，不会伪造「已加入知识库」。
 
@@ -138,10 +138,10 @@ oc-kb search "<问题>" [--top-k 8]
 ```
 
 - manager 用 runtime token 解析出当前 app 与所属 org，**两路检索**（app dataset + org dataset），合并时
-  **保留来源 scope 并让实例（app）结果优先**，组织（org）结果作为只读参考资料追加在后。
+  **保留来源 scope 并让实例（app）结果优先**，企业（org）结果作为只读参考资料追加在后。
 - 检索结果带 `scope`（`app` / `org`）、`document_name`、`similarity` 与 chunk 内容，Hermes 据此判断信息归属。
 
-**强制优先知识库**：容器启动时渲染的 `SOUL.md` 注入了知识库指引——只要用户的问题可能依赖组织政策、
+**强制优先知识库**：容器启动时渲染的 `SOUL.md` 注入了知识库指引——只要用户的问题可能依赖企业政策、
 产品文档、应用规则或此前存入的文件，Hermes **必须先 `oc-kb search` 再作答**，不得用网络搜索 / 记忆代替；
 因此用户无需显式说「知识库」，Hermes 也会主动检索。该指引仅在实例配置了知识库（manifest 含 runtime
 endpoint + app token）时才渲染，避免未接入的实例误调不存在的 skill。
@@ -153,15 +153,15 @@ endpoint + app token）时才渲染，避免未接入的实例误调不存在的
 manager 用户侧权限统一由 [`internal/auth/authorizer.go`](../internal/auth/authorizer.go) 判断（谓词
 `CanWriteOrgKnowledge` 等），UI 控件可见性与后端校验一致。
 
-| 主体 | 组织知识库 | 实例知识库 |
+| 主体 | 企业知识库 | 实例知识库 |
 |---|---|---|
 | 平台管理员 `platform_admin` | 读 + 写（上传 / 删除 / 重解析）| 读 + 写 |
-| 组织管理员 `org_admin` | 读 + 写 | 本组织实例：读 + 写 |
-| 组织成员 `org_member` | **只读**（浏览 / 下载）| 自己的实例：读 + 写 |
+| 企业管理员 `org_admin` | 读 + 写 | 本企业实例：读 + 写 |
+| 企业成员 `org_member` | **只读**（浏览 / 下载）| 自己的实例：读 + 写 |
 | Hermes（app runtime token）| **只读检索** | 读检索 + 写当前实例（`oc-kb add`）|
 
-- 组织成员尝试写组织知识库时，UI 不显示写控件，后端也会返回 `403 KNOWLEDGE_FORBIDDEN`。
-- Hermes runtime token 只能读「当前 app + 所属 org」、只能写「当前 app」，无法写组织或其它实例。
+- 企业成员尝试写企业知识库时，UI 不显示写控件，后端也会返回 `403 KNOWLEDGE_FORBIDDEN`。
+- Hermes runtime token 只能读「当前 app + 所属 org」、只能写「当前 app」，无法写企业或其它实例。
 
 ---
 
@@ -198,14 +198,14 @@ ragflow:
 | 文件一直 `queued` / `running` | 看后台任务是否在跑、RAGFlow 解析队列与模型供应商是否正常 |
 | 上传后检索不到 | 确认该文档已 `completed`；确认 dataset 配了 embedding 模型 |
 | Hermes 不调用知识库 | 容器内跑 `oc-kb search "测试"` 验证链路；确认 `SOUL.md` 含知识库指引、manifest 含 `knowledge` 配置 |
-| Hermes 检索不到组织文档 | 确认文档在「组织」scope 且已解析完成；组织结果排在实例结果之后，但仍会返回 |
+| Hermes 检索不到企业文档 | 确认文档在「企业」scope 且已解析完成；企业结果排在实例结果之后，但仍会返回 |
 | 解析 `failed` | 列表点「重解析」重新提交；持续失败排查 RAGFlow 侧解析日志 |
 
 ---
 
 ## 相关文档
 
-- [用户手册](./user-manual.md) — 各角色在 UI 上的逐步操作（§2.5 组织级知识库、§2.3 实例知识库 tab）
+- [用户手册](./user-manual.md) — 各角色在 UI 上的逐步操作（§2.5 企业级知识库、§2.3 实例知识库 tab）
 - [Hermes 容器运行机制](./hermes-container.md) — §7 知识库链路：Hermes → manager runtime API → RAGFlow
 - [配置参考](./configuration.md) — `ragflow.*` 配置项
 - [架构总览](./architecture.md) — 模块图与数据流

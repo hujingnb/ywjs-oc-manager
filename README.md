@@ -1,19 +1,19 @@
 # Agent Runtime Manager
 
-> 面向组织的 Hermes Agent 应用管理后台。负责组织 / 成员 / 应用 / Runtime Node
+> 面向企业的 Hermes Agent 应用管理后台。负责企业 / 成员 / 应用 / Runtime Node
 > 编排，对接 new-api 网关计费，集中管控运行在多个 Runtime Node 上的
 > Hermes 容器。
 
 ## 核心能力
 
-- 平台 / 组织 / 成员三类角色的账号体系与登录。
-- 组织生命周期管理 + Token Credit 充值（实际计费由 new-api 完成）。
+- 平台 / 企业 / 成员三类角色的账号体系与登录。
+- 企业生命周期管理 + Token Credit 充值（实际计费由 new-api 完成）。
 - 创建成员账号时同步创建该成员名下唯一的 Hermes 应用，自动分配可用 Runtime Node。
 - Runtime Node 注册、心跳、健康自愈（unreachable → active），agent token 长期通信凭证。
 - 每个应用对应一个 Docker 容器（经 agent 启停）、一个 new-api api_key、最多一个渠道绑定。
-- 组织级与应用级双层知识库：manager 主副本 + agent 节点同步，同步状态可视。
+- 企业级与应用级双层知识库：manager 主副本 + agent 节点同步，同步状态可视。
 - 应用工作目录浏览、单文件下载、文件夹打包下载（经 agent 文件 API 沙箱代理）。
-- token 用量直查 new-api，按平台 / 组织 / 应用三级展示，不缓存。
+- token 用量直查 new-api，按平台 / 企业 / 应用三级展示，不缓存。
 - 容器启停 / 重启 / 日志 / 资源指标 / 健康探针 / 自动重启策略。
 - 全平台审计日志。
 
@@ -253,7 +253,7 @@ docker compose run --rm manager-api seed-admin <username> <password> [display_na
 - [产品设计](./docs/product-design.md) — 角色、对象模型、业务流程、权限
 - [技术设计](./docs/technical-design.md) — 后端模块、状态机、接口契约、job
 - [Hermes 容器运行机制](./docs/hermes-container.md) — 创建链路、挂载、注入、知识库
-- [知识库（RAG）](./docs/knowledge-base.md) — RAGFlow 主库、组织/实例双层、文档进出、检索、权限
+- [知识库（RAG）](./docs/knowledge-base.md) — RAGFlow 主库、企业/实例双层、文档进出、检索、权限
 - [runtime-agent 工作原理](./docs/runtime-agent.md) — 注册、心跳、探测
 - [配置参考](./docs/configuration.md) — manager.yaml / agent.yaml / .env
 - [用户手册](./docs/user-manual.md) — 三类角色操作

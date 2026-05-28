@@ -1,6 +1,6 @@
 # 技术设计
 
-> 后端模块边界、状态机、接口契约、job 与 worker 模型。本文回答"实现是怎么组织的"，业务规则见 [product-design.md](./product-design.md)。
+> 后端模块边界、状态机、接口契约、job 与 worker 模型。本文回答"实现结构是什么"，业务规则见 [product-design.md](./product-design.md)。
 
 ---
 
@@ -31,18 +31,18 @@
 | `app_service.go` | 应用查询与状态读取 |
 | `auth_service.go` | 登录、刷新令牌、登出 |
 | `channel_service.go` | 渠道绑定生命周期 |
-| `knowledge_service.go` | RAGFlow-backed 组织 / 应用知识库 CRUD、检索与 Hermes runtime 写入 |
+| `knowledge_service.go` | RAGFlow-backed 企业 / 应用知识库 CRUD、检索与 Hermes runtime 写入 |
 | `app_runtime_token.go` | Hermes 调 manager runtime API 使用的实例级 token 生成与加密存储 |
 | `member_service.go` | 成员 CRUD、角色、状态切换 |
 | `onboarding_service.go` | 成员 + 应用一体化创建流程 |
-| `organization_service.go` | 组织 CRUD、new-api 组织映射 |
+| `organization_service.go` | 企业 CRUD、new-api 企业映射 |
 | `runtime_node_service.go` | runtime 节点注册、心跳、探活 |
 | `runtime_operation_service.go` | 应用启 / 停 / 重启 / 删除运行时操作 |
 | `resource_metrics_service.go` | 容器与节点资源指标查询 |
 | `workspace_service.go` | 应用工作目录代理读写 |
 | `usage_service.go` | new-api 用量代理 |
-| `recharge_service.go` | 组织充值与余额查询 |
-| `persona_service.go` | 组织人设读写 |
+| `recharge_service.go` | 企业充值与余额查询 |
+| `persona_service.go` | 企业人设读写 |
 | `audit_service.go` | 审计日志写入与查询 |
 | `reconciler.go` / `probe_reconciler.go` | 节点健康对账与主动探活 |
 | `image_distribution_service.go` | 触发镜像同步 job |
@@ -68,7 +68,7 @@
 | `sqlc/` | sqlc 生成产物（不手工编辑） |
 | `app_runner.go` / `onboarding_runner.go` | 需要事务的多步 store 操作组合 |
 | `agent_token_store.go` | agent token 的加密写入与查询 |
-| `persona_store.go` | 组织人设的存取 |
+| `persona_store.go` | 企业人设的存取 |
 | `runtime_node_store.go` | 节点 store 辅助 |
 
 ### 1.5 `internal/scheduler`
@@ -277,7 +277,7 @@ failed   → pending（手工重试）
 |---|---|---|
 | `StatusActive` | `"active"` | 正常可用 |
 | `StatusDisabled` | `"disabled"` | 禁用（users 同时写 deleted_at，见 §5.3） |
-| `StatusDeleted` | `"deleted"` | 组织软删除终态 |
+| `StatusDeleted` | `"deleted"` | 企业软删除终态 |
 
 ---
 
@@ -440,16 +440,16 @@ handler swag 注解
 
 | 谓词 | 适用资源 | 说明 |
 |---|---|---|
-| `CanManageOrg` / `CanViewOrg` | 组织 | 平台管理员跨组织；org_admin 限本组织 |
-| `CanManageMember` / `CanViewMember` / `CanEditMember` | 成员 | org_admin 管本组织；成员可编辑自身 |
-| `CanManageApp` / `CanViewApp` | 应用 | 平台管理员只读；org_admin 限本组织；成员限自身 app |
-| `CanCreateAppForOrg` / `CanCreateAppForMember` | 应用创建 | org_admin 创建；平台管理员可跨组织复建 |
+| `CanManageOrg` / `CanViewOrg` | 企业 | 平台管理员跨企业；org_admin 限本企业 |
+| `CanManageMember` / `CanViewMember` / `CanEditMember` | 成员 | org_admin 管本企业；成员可编辑自身 |
+| `CanManageApp` / `CanViewApp` | 应用 | 平台管理员只读；org_admin 限本企业；成员限自身 app |
+| `CanCreateAppForOrg` / `CanCreateAppForMember` | 应用创建 | org_admin 创建；平台管理员可跨企业复建 |
 | `CanTriggerRuntimeOperation` | 运行时操作 | 等同 `CanManageApp` |
-| `CanReadOrgKnowledge` / `CanWriteOrgKnowledge` | 组织知识库 | 写包含上传、删除、重解析，只允许本组织 org_admin |
+| `CanReadOrgKnowledge` / `CanWriteOrgKnowledge` | 企业知识库 | 写包含上传、删除、重解析，只允许本企业 org_admin |
 | `CanReadAppKnowledge` / `CanWriteAppKnowledge` | 应用知识库 | 写包含上传、删除、重解析，等同 `CanManageApp` |
-| `CanViewOrgPersona` / `CanManageOrgPersona` | 人设 | 等同组织读 / 写谓词 |
-| `CanViewOrgUsage` / `CanViewMemberUsage` | 用量 | 平台管理员 + org_admin 跨组织（平台）或本组织 |
-| `CanViewOrgAudit` / `CanViewAppAudit` / `CanViewOwnAudit` | 审计 | 组织级仅管理员；应用级等同 `CanViewApp` |
+| `CanViewOrgPersona` / `CanManageOrgPersona` | 人设 | 等同企业读 / 写谓词 |
+| `CanViewOrgUsage` / `CanViewMemberUsage` | 用量 | 平台管理员 + org_admin 跨企业（平台）或本企业 |
+| `CanViewOrgAudit` / `CanViewAppAudit` / `CanViewOwnAudit` | 审计 | 企业级仅管理员；应用级等同 `CanViewApp` |
 
 新增权限规则时优先扩展现有 `Can*` 函数，不在 handler 或 service 内内联 `if principal.Role == "..."` 判断。
 
@@ -458,7 +458,7 @@ handler swag 注解
 审计写入通过 `service.AuditService.Record` 完成，字段：
 
 - `actor_id` / `actor_role`：操作者 ID 与角色；后台 worker 路径为空，回退为 `actor_role=system`。
-- `org_id`：所属组织；平台级操作可为空。
+- `org_id`：所属企业；平台级操作可为空。
 - `target_type` / `target_id`：被操作资源类型与 ID。
 - `action`：操作动词（`create` / `update` / `delete` / `start` / `stop` 等）。
 - `error_message`：操作失败时记录，成功时为空。

@@ -49,14 +49,14 @@ make seed-e2e
 
 ## 3 调试账号
 
-| 角色 | 组织标识 | 用户名 / 密码 |
+| 角色 | 企业标识 | 用户名 / 密码 |
 |---|---|---|
 | new-api 管理员 | — | `admin` / `admin123` |
 | manager 平台管理员 | 留空 | `admin` / `admin123` |
-| manager 测试组织管理员 | `test-org` | `test-org` / `test-org123` |
-| manager 组织成员 | `test-org` | `test-org-user1` / `test-org-user1` |
+| manager 测试企业管理员 | `test-org` | `test-org` / `test-org123` |
+| manager 企业成员 | `test-org` | `test-org-user1` / `test-org-user1` |
 
-> 测试组织本身的标识为 `test-org`，由 `make seed-e2e` 注入。平台管理员登录时组织标识留空即可。
+> 测试企业本身的标识为 `test-org`，由 `make seed-e2e` 注入。平台管理员登录时企业标识留空即可。
 
 ## 4 常用 Make 目标速查
 
@@ -132,7 +132,7 @@ make seed-e2e
 
 **new-api turnstile 拦截 server-to-server 登录**
 
-manager 创建组织时会对 new-api 发起 server-to-server 登录请求，若 new-api 开启了 turnstile 验证则会被拦截。通过 `curl http://localhost:3000/api/status | jq .data.turnstile_check` 确认；若返回 `true`，在 new-api 管理后台「系统设置 → 安全设置」关闭。
+manager 创建企业时会对 new-api 发起 server-to-server 登录请求，若 new-api 开启了 turnstile 验证则会被拦截。通过 `curl http://localhost:3000/api/status | jq .data.turnstile_check` 确认；若返回 `true`，在 new-api 管理后台「系统设置 → 安全设置」关闭。
 
 **Ollama 渠道不可用**
 
