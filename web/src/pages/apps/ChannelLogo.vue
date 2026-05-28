@@ -28,6 +28,9 @@ const props = defineProps<{ type: ChannelLogoType; large?: boolean; muted?: bool
 
 // channelLogos 为各渠道内联品牌 SVG。telegram/whatsapp/discord/slack 为全彩（baked fill）；
 // 其余为 currentColor 单色源，由 brandColors 着色。SVG 均来自 Iconify（见计划文件结构说明）。
+// 注意：telegram/whatsapp 的 SVG 内含 <linearGradient id="...">，id 为文档级全局；当前每个带
+// 渐变的渠道在页面只渲染一次（详情区恒为微信、无渐变），故不会冲突。若将来同一带渐变渠道在
+// 同页多处实例化，需为 id 拼入唯一前缀，否则后出现的实例会复用先定义的渐变。
 const channelLogos: Record<ChannelLogoType, string> = {
   // tdesign:logo-wechat —— currentColor 单色，由 brandColors.wechat 着微信绿
   wechat:

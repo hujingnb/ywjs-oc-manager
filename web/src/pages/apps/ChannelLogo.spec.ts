@@ -12,7 +12,8 @@ describe('ChannelLogo', () => {
     expect(wrapper.html()).toContain('<svg')
   })
 
-  // 未支持渠道：muted=true 时附加灰度 class，并仍渲染 SVG
+  // 灰度态：调用方传入 muted=true 时组件附加 muted class（灰度+降透明度），并仍渲染 SVG；
+  // muted 由父组件按渠道是否支持决定，组件本身不感知 supported 语义
   it('muted 时附加 muted class', () => {
     const wrapper = mount(ChannelLogo, { props: { type: 'telegram', muted: true } })
     expect(wrapper.classes()).toContain('muted')
