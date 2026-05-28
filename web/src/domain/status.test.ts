@@ -4,6 +4,7 @@ import { describe, expect, it } from 'vitest'
 
 import {
   formatAppStatus,
+  formatKanbanStatus,
   formatMemberRole,
   formatMemberStatus,
   formatOrgStatus,
@@ -20,6 +21,29 @@ describe('formatAppStatus', () => {
 
   it('keeps unknown statuses visible', () => {
     expect(formatAppStatus('paused_by_policy')).toEqual({
+      label: '未知状态：paused_by_policy',
+      tone: 'warning',
+    })
+  })
+})
+
+describe('formatKanbanStatus', () => {
+  // 覆盖任务看板全部已知状态：页面应展示中文文案，而不是 Hermes 原始英文状态值。
+  it.each([
+    ['running', { label: '运行中', tone: 'warning' }], // running：任务正在执行，仍属于过程态。
+    ['ready', { label: '就绪', tone: 'warning' }], // ready：任务已准备执行，等待调度。
+    ['todo', { label: '待办', tone: 'neutral' }], // todo：任务待处理。
+    ['blocked', { label: '阻塞', tone: 'danger' }], // blocked：任务被阻塞，需要人工处理。
+    ['triage', { label: '待分诊', tone: 'neutral' }], // triage：任务等待分类或确认。
+    ['done', { label: '已完成', tone: 'success' }], // done：任务已完成。
+    ['archived', { label: '已归档', tone: 'neutral' }], // archived：任务已归档。
+  ] as const)('maps %s to Chinese label', (status, expected) => {
+    expect(formatKanbanStatus(status)).toEqual(expected)
+  })
+
+  // 覆盖未知状态降级：Hermes 新增状态时仍显示原值，便于定位前端映射未同步。
+  it('falls back for unknown Kanban statuses', () => {
+    expect(formatKanbanStatus('paused_by_policy')).toEqual({
       label: '未知状态：paused_by_policy',
       tone: 'warning',
     })

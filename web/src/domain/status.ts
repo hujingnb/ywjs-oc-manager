@@ -45,6 +45,24 @@ export function formatAppStatus(status: string): StatusView {
   return appStatusViews[status] ?? { label: `未知状态：${status}`, tone: 'warning' }
 }
 
+// kanbanStatusViews 覆盖 Hermes Kanban 任务状态。
+// 状态原值仍作为前后端契约保留，页面展示统一通过 formatKanbanStatus 汉化。
+const kanbanStatusViews: Record<string, StatusView> = {
+  running: { label: '运行中', tone: 'warning' },
+  ready: { label: '就绪', tone: 'warning' },
+  todo: { label: '待办', tone: 'neutral' },
+  blocked: { label: '阻塞', tone: 'danger' },
+  triage: { label: '待分诊', tone: 'neutral' },
+  done: { label: '已完成', tone: 'success' },
+  archived: { label: '已归档', tone: 'neutral' },
+}
+
+// formatKanbanStatus 将任务看板状态映射为中文文案和视觉语义。
+// 未知状态保留原值，便于 Hermes 灰度新增状态时从页面直接发现映射缺口。
+export function formatKanbanStatus(status: string): StatusView {
+  return kanbanStatusViews[status] ?? { label: `未知状态：${status}`, tone: 'warning' }
+}
+
 // orgStatusViews 覆盖组织状态。
 const orgStatusViews: Record<string, StatusView> = {
   active: { label: '启用', tone: 'success' },
