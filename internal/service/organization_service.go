@@ -554,13 +554,13 @@ func (s *OrganizationService) UpdateOrganization(ctx context.Context, principal 
 	return s.toOrganizationResultWithAdminUsername(ctx, org), nil
 }
 
-// SetOrganizationStatus 启用或禁用组织；软删除后续由删除流程单独处理。
+// SetOrganizationStatus 启用或禁用企业；软删除后续由删除流程单独处理。
 func (s *OrganizationService) SetOrganizationStatus(ctx context.Context, principal auth.Principal, orgID, status string) (OrganizationResult, error) {
 	if principal.Role != domain.UserRolePlatformAdmin {
 		return OrganizationResult{}, ErrForbidden
 	}
 	if status != domain.StatusActive && status != domain.StatusDisabled {
-		return OrganizationResult{}, fmt.Errorf("非法组织状态: %s", status)
+		return OrganizationResult{}, fmt.Errorf("非法企业状态: %s", status)
 	}
 	id, err := parseUUID(orgID)
 	if err != nil {
@@ -571,7 +571,7 @@ func (s *OrganizationService) SetOrganizationStatus(ctx context.Context, princip
 		return OrganizationResult{}, ErrNotFound
 	}
 	if err != nil {
-		return OrganizationResult{}, fmt.Errorf("更新组织状态失败: %w", err)
+		return OrganizationResult{}, fmt.Errorf("更新企业状态失败: %w", err)
 	}
 	return s.toOrganizationResultWithAdminUsername(ctx, org), nil
 }
