@@ -106,7 +106,7 @@ func (s *AuthService) Login(ctx context.Context, input LoginInput) (LoginResult,
 }
 
 // lookupLoginUser 根据 org_code 是否为空选择平台登录或组织登录路径。
-// 账号不存在、组织标识不存在和角色不匹配统一返回 ErrInvalidCredentials，
+// 账号不存在、企业标识不存在和角色不匹配统一返回 ErrInvalidCredentials，
 // 避免登录接口泄露租户或用户名枚举信息。
 func (s *AuthService) lookupLoginUser(ctx context.Context, input LoginInput) (sqlc.User, error) {
 	if input.OrgCode == "" {
@@ -128,7 +128,7 @@ func (s *AuthService) lookupLoginUser(ctx context.Context, input LoginInput) (sq
 		if errors.Is(err, pgx.ErrNoRows) {
 			return sqlc.User{}, ErrInvalidCredentials
 		}
-		return sqlc.User{}, fmt.Errorf("查询组织标识失败: %w", err)
+		return sqlc.User{}, fmt.Errorf("查询企业标识失败: %w", err)
 	}
 	user, err := s.store.GetUserByOrgAndUsername(ctx, sqlc.GetUserByOrgAndUsernameParams{
 		OrgID:    org.ID,

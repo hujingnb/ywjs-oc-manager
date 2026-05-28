@@ -231,7 +231,7 @@ func (s *OrganizationService) CreateOrganization(ctx context.Context, principal 
 	})
 	if err != nil {
 		if isUniqueViolation(err) {
-			return OrganizationResult{}, fmt.Errorf("%w: 组织名称或组织标识已存在", ErrConflict)
+			return OrganizationResult{}, fmt.Errorf("%w: 企业名称或企业标识已存在", ErrConflict)
 		}
 		return OrganizationResult{}, fmt.Errorf("创建组织失败: %w", err)
 	}
@@ -334,7 +334,7 @@ func (s *OrganizationService) CreateOrganization(ctx context.Context, principal 
 	return result, nil
 }
 
-// normalizeOrganizationCode 统一组织标识格式，避免大小写或空白导致同一标识多种写法。
+// normalizeOrganizationCode 统一企业标识格式，避免大小写或空白导致同一标识多种写法。
 func normalizeOrganizationCode(value string) (string, error) {
 	code := strings.ToLower(strings.TrimSpace(value))
 	if !organizationCodePattern.MatchString(code) {

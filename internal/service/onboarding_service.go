@@ -192,7 +192,7 @@ func (s *MemberOnboardingService) OnboardMember(ctx context.Context, principal a
 			return fmt.Errorf("查询组织失败: %w", err)
 		}
 		if org.Status != domain.StatusActive {
-			return fmt.Errorf("%w: 组织已停用", ErrMemberCreateInvalid)
+			return fmt.Errorf("%w: 企业已停用", ErrMemberCreateInvalid)
 		}
 		// 校验所选助手版本在组织 allowlist 内，防止跨组织使用未授权版本。
 		if !versionInOrgAllowlist(org, input.VersionID) {
@@ -349,7 +349,7 @@ func (s *MemberOnboardingService) CreateAppForMember(ctx context.Context, princi
 			return fmt.Errorf("查询组织失败: %w", err)
 		}
 		if org.Status != domain.StatusActive {
-			return fmt.Errorf("%w: 组织已停用", ErrMemberCreateInvalid)
+			return fmt.Errorf("%w: 企业已停用", ErrMemberCreateInvalid)
 		}
 		// 校验所选助手版本在组织 allowlist 内，防止跨组织使用未授权版本。
 		if !versionInOrgAllowlist(org, input.VersionID) {

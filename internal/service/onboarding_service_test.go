@@ -134,6 +134,24 @@ func TestOnboardMemberRejectsDisabledOrg(t *testing.T) {
 		VersionID: testVersionID,
 	})
 	require.ErrorIs(t, err, ErrMemberCreateInvalid)
+	require.ErrorContains(t, err, "企业已停用")
+}
+
+// TestCreateAppForMember_RejectsDisabledOrg 验证已有成员补建实例时企业停用会返回可展示的业务错误。
+func TestCreateAppForMember_RejectsDisabledOrg(t *testing.T) {
+	store := newOnboardingStub(t)
+	store.org.Status = domain.StatusDisabled
+	tx := &txRunnerStub{store: store}
+	svc := NewMemberOnboardingService(tx, fakeHash, defaultTestSelector())
+
+	// 企业停用时应在事务内拦截，避免继续为成员创建新实例。
+	_, err := svc.CreateAppForMember(context.Background(), platformAdmin(), testOrgID, uuidToString(store.user.ID), CreateAppForMemberInput{
+		AppName:   "alice-new-bot",
+		VersionID: testVersionID,
+	})
+	require.ErrorIs(t, err, ErrMemberCreateInvalid)
+	require.ErrorContains(t, err, "企业已停用")
+	require.False(t, tx.committed)
 }
 
 // TestCreateAppForMember_PlatformAdminCreatesAfterDelete 验证平台管理员可为无活跃实例的已有成员创建新实例。

@@ -33,8 +33,8 @@ var ErrInvalidCredentials = errors.New("用户名或密码错误")
 // ErrUserDisabled 表示用户状态为 disabled；登录、刷新和高风险运行操作都会拒绝。
 var ErrUserDisabled = errors.New("用户已被禁用")
 
-// ErrOrgDisabled 表示用户所属组织已停用；组织成员登录和刷新会被拒绝。
-var ErrOrgDisabled = errors.New("组织已被禁用")
+// ErrOrgDisabled 表示用户所属企业已停用；企业成员登录和刷新会被拒绝。
+var ErrOrgDisabled = errors.New("企业已被禁用")
 
 // ErrInvalidToken 表示 access / refresh token 格式、签名、过期或撤销状态无效。
 var ErrInvalidToken = errors.New("登录凭证无效")

@@ -125,7 +125,7 @@ func (s *MemberService) CreateMember(ctx context.Context, principal auth.Princip
 		return MemberResult{}, fmt.Errorf("查询组织失败: %w", err)
 	}
 	if org.Status != domain.StatusActive {
-		return MemberResult{}, fmt.Errorf("%w: 组织已停用", ErrMemberCreateInvalid)
+		return MemberResult{}, fmt.Errorf("%w: 企业已停用", ErrMemberCreateInvalid)
 	}
 
 	hashed, err := s.hashPassword(input.Password)

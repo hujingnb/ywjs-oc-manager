@@ -22,7 +22,7 @@ const (
 	authTestOrgMemberID     = "00000000-0000-0000-0000-000000000202"
 )
 
-// TestAuthServiceLoginPlatformAdminWithoutOrgCode 验证认证服务登录平台管理员不使用组织标识的预期行为场景。
+// TestAuthServiceLoginPlatformAdminWithoutOrgCode 验证认证服务登录平台管理员不使用企业标识的预期行为场景。
 func TestAuthServiceLoginPlatformAdminWithoutOrgCode(t *testing.T) {
 	store := newAuthStoreStub(t)
 	svc := newTestAuthService(t, store)
@@ -38,7 +38,7 @@ func TestAuthServiceLoginPlatformAdminWithoutOrgCode(t *testing.T) {
 	require.Empty(t, result.User.OrgID)
 }
 
-// TestAuthServiceLoginRejectsPlatformAdminWithOrgCode 验证认证服务登录拒绝平台管理员使用组织标识的异常或拒绝路径场景。
+// TestAuthServiceLoginRejectsPlatformAdminWithOrgCode 验证认证服务登录拒绝平台管理员使用企业标识的异常或拒绝路径场景。
 func TestAuthServiceLoginRejectsPlatformAdminWithOrgCode(t *testing.T) {
 	store := newAuthStoreStub(t)
 	delete(store.orgUsersByKey, orgUserKey(store.orgsByCode["test-org"].ID, "admin"))
@@ -53,7 +53,7 @@ func TestAuthServiceLoginRejectsPlatformAdminWithOrgCode(t *testing.T) {
 	require.ErrorIs(t, err, ErrInvalidCredentials)
 }
 
-// TestAuthServiceLoginOrgUserWithOrgCode 验证认证服务登录组织用户使用组织标识的预期行为场景。
+// TestAuthServiceLoginOrgUserWithOrgCode 验证认证服务登录企业用户使用企业标识的预期行为场景。
 func TestAuthServiceLoginOrgUserWithOrgCode(t *testing.T) {
 	store := newAuthStoreStub(t)
 	svc := newTestAuthService(t, store)
@@ -70,7 +70,7 @@ func TestAuthServiceLoginOrgUserWithOrgCode(t *testing.T) {
 	require.Equal(t, authTestOrgID, result.User.OrgID)
 }
 
-// TestAuthServiceLoginRejectsOrgUserWithoutOrgCode 验证认证服务登录拒绝组织用户不使用组织标识的异常或拒绝路径场景。
+// TestAuthServiceLoginRejectsOrgUserWithoutOrgCode 验证认证服务登录拒绝企业用户不使用企业标识的异常或拒绝路径场景。
 func TestAuthServiceLoginRejectsOrgUserWithoutOrgCode(t *testing.T) {
 	store := newAuthStoreStub(t)
 	svc := newTestAuthService(t, store)
@@ -83,7 +83,7 @@ func TestAuthServiceLoginRejectsOrgUserWithoutOrgCode(t *testing.T) {
 	require.ErrorIs(t, err, ErrInvalidCredentials)
 }
 
-// TestAuthServiceLoginRejectsUnknownOrgCode 验证认证服务登录拒绝未知组织标识的异常或拒绝路径场景。
+// TestAuthServiceLoginRejectsUnknownOrgCode 验证认证服务登录拒绝未知企业标识的异常或拒绝路径场景。
 func TestAuthServiceLoginRejectsUnknownOrgCode(t *testing.T) {
 	store := newAuthStoreStub(t)
 	svc := newTestAuthService(t, store)
@@ -144,6 +144,7 @@ func TestAuthServiceLoginRejectsDisabledOrg(t *testing.T) {
 		Password: "correct-password",
 	})
 	require.ErrorIs(t, err, ErrOrgDisabled)
+	require.ErrorContains(t, err, "企业已被禁用")
 }
 
 // TestAuthServiceRefreshRotatesRefreshToken 验证认证服务刷新Rotates刷新令牌的预期行为场景。

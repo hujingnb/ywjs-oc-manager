@@ -57,6 +57,7 @@ func TestMemberServiceCreateRejectsDisabledOrg(t *testing.T) {
 		Username: "alice", DisplayName: "Alice", Password: "password",
 	})
 	require.ErrorIs(t, err, ErrMemberCreateInvalid)
+	require.ErrorContains(t, err, "企业已停用")
 }
 
 // TestMemberServiceCreateRejectsInvalidRole 验证成员服务创建拒绝非法角色的异常或拒绝路径场景。

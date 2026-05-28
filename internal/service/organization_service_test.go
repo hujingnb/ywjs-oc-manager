@@ -242,6 +242,7 @@ func TestCreateOrganizationMapsUniqueViolationToConflict(t *testing.T) {
 	})
 
 	require.ErrorIs(t, err, ErrConflict)
+	require.ErrorContains(t, err, "企业名称或企业标识已存在")
 }
 
 // TestBuildNewAPIUsername 校验 new-api username 派生规则：code 前缀 + "-" + 随机后缀，
