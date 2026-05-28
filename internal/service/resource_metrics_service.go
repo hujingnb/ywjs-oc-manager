@@ -158,12 +158,9 @@ func (s *ResourceMetricsService) ListNodeResources(ctx context.Context, principa
 		return nil, fmt.Errorf("查询 runtime 节点失败: %w", err)
 	}
 	if r.BucketSeconds > 0 {
-		// BucketSeconds 在 sqlc 生成为 time.Time（类型推断问题）；
-		// 以 Unix 时间戳秒数构造 time.Time，go-sql-driver 会将其转为整数秒传入 MySQL FLOOR 分桶。
-		bucketTime := time.Unix(int64(r.BucketSeconds), 0).UTC()
 		rows, err := s.store.ListNodeResourceBuckets(ctx, sqlc.ListNodeResourceBucketsParams{
 			RuntimeNodeID: nodeID,
-			BucketSeconds: bucketTime,
+			BucketSeconds: int64(r.BucketSeconds),
 			FromSampledAt: r.From,
 			ToSampledAt:   r.To,
 		})
@@ -249,11 +246,10 @@ func (s *ResourceMetricsService) ListNodeInstanceResources(ctx context.Context, 
 		return nil, ErrNotFound
 	}
 	if r.BucketSeconds > 0 {
-		bucketTime := time.Unix(int64(r.BucketSeconds), 0).UTC()
 		rows, err := s.store.ListNodeInstanceResourceBuckets(ctx, sqlc.ListNodeInstanceResourceBucketsParams{
 			RuntimeNodeID: nodeID,
 			AppID:         appID,
-			BucketSeconds: bucketTime,
+			BucketSeconds: int64(r.BucketSeconds),
 			FromSampledAt: r.From,
 			ToSampledAt:   r.To,
 		})
@@ -290,10 +286,9 @@ func (s *ResourceMetricsService) ListAppResources(ctx context.Context, principal
 		return nil, ErrForbidden
 	}
 	if r.BucketSeconds > 0 {
-		bucketTime := time.Unix(int64(r.BucketSeconds), 0).UTC()
 		rows, err := s.store.ListInstanceResourceBuckets(ctx, sqlc.ListInstanceResourceBucketsParams{
 			AppID:         appID,
-			BucketSeconds: bucketTime,
+			BucketSeconds: int64(r.BucketSeconds),
 			FromSampledAt: r.From,
 			ToSampledAt:   r.To,
 		})

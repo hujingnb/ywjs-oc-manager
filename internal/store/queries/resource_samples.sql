@@ -54,7 +54,7 @@ ORDER BY sampled_at ASC, id ASC;
 
 -- name: ListNodeResourceBuckets :many
 SELECT
-    CAST(FROM_UNIXTIME(FLOOR(UNIX_TIMESTAMP(sampled_at) / sqlc.arg(bucket_seconds)) * sqlc.arg(bucket_seconds)) AS DATETIME) AS sampled_at,
+    CAST(FROM_UNIXTIME(FLOOR(UNIX_TIMESTAMP(sampled_at) / CAST(sqlc.arg(bucket_seconds) AS SIGNED)) * CAST(sqlc.arg(bucket_seconds) AS SIGNED)) AS DATETIME) AS sampled_at,
     CAST(COALESCE(AVG(cpu_percent), 0) AS DOUBLE) AS cpu_percent,
     COUNT(cpu_percent) > 0 AS has_cpu_percent,
     CAST(COALESCE(AVG(memory_used_bytes), 0) AS SIGNED) AS memory_used_bytes,
@@ -117,7 +117,7 @@ ORDER BY sampled_at ASC, id ASC;
 
 -- name: ListInstanceResourceBuckets :many
 SELECT
-    CAST(FROM_UNIXTIME(FLOOR(UNIX_TIMESTAMP(sampled_at) / sqlc.arg(bucket_seconds)) * sqlc.arg(bucket_seconds)) AS DATETIME) AS sampled_at,
+    CAST(FROM_UNIXTIME(FLOOR(UNIX_TIMESTAMP(sampled_at) / CAST(sqlc.arg(bucket_seconds) AS SIGNED)) * CAST(sqlc.arg(bucket_seconds) AS SIGNED)) AS DATETIME) AS sampled_at,
     COALESCE(SUBSTRING_INDEX(GROUP_CONCAT(container_status ORDER BY sampled_at DESC SEPARATOR '\x1e'), '\x1e', 1), '') AS container_status,
     COUNT(container_status) > 0 AS has_container_status,
     CAST(COALESCE(AVG(cpu_percent), 0) AS DOUBLE) AS cpu_percent,
@@ -145,7 +145,7 @@ ORDER BY 1 ASC;
 
 -- name: ListNodeInstanceResourceBuckets :many
 SELECT
-    CAST(FROM_UNIXTIME(FLOOR(UNIX_TIMESTAMP(sampled_at) / sqlc.arg(bucket_seconds)) * sqlc.arg(bucket_seconds)) AS DATETIME) AS sampled_at,
+    CAST(FROM_UNIXTIME(FLOOR(UNIX_TIMESTAMP(sampled_at) / CAST(sqlc.arg(bucket_seconds) AS SIGNED)) * CAST(sqlc.arg(bucket_seconds) AS SIGNED)) AS DATETIME) AS sampled_at,
     COALESCE(SUBSTRING_INDEX(GROUP_CONCAT(container_status ORDER BY sampled_at DESC SEPARATOR '\x1e'), '\x1e', 1), '') AS container_status,
     COUNT(container_status) > 0 AS has_container_status,
     CAST(COALESCE(AVG(cpu_percent), 0) AS DOUBLE) AS cpu_percent,

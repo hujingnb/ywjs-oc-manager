@@ -231,7 +231,7 @@ func (q *Queries) InsertNodeResourceSample(ctx context.Context, arg InsertNodeRe
 
 const listInstanceResourceBuckets = `-- name: ListInstanceResourceBuckets :many
 SELECT
-    CAST(FROM_UNIXTIME(FLOOR(UNIX_TIMESTAMP(sampled_at) / ?) * ?) AS DATETIME) AS sampled_at,
+    CAST(FROM_UNIXTIME(FLOOR(UNIX_TIMESTAMP(sampled_at) / CAST(? AS SIGNED)) * CAST(? AS SIGNED)) AS DATETIME) AS sampled_at,
     COALESCE(SUBSTRING_INDEX(GROUP_CONCAT(container_status ORDER BY sampled_at DESC SEPARATOR '\x1e'), '\x1e', 1), '') AS container_status,
     COUNT(container_status) > 0 AS has_container_status,
     CAST(COALESCE(AVG(cpu_percent), 0) AS DOUBLE) AS cpu_percent,
@@ -259,10 +259,11 @@ ORDER BY 1 ASC
 `
 
 type ListInstanceResourceBucketsParams struct {
-	BucketSeconds time.Time `db:"bucket_seconds" json:"bucket_seconds"`
-	AppID         string    `db:"app_id" json:"app_id"`
-	FromSampledAt time.Time `db:"from_sampled_at" json:"from_sampled_at"`
-	ToSampledAt   time.Time `db:"to_sampled_at" json:"to_sampled_at"`
+	BucketSeconds   int64     `db:"bucket_seconds" json:"bucket_seconds"`
+	BucketSeconds_2 int64     `db:"bucket_seconds_2" json:"bucket_seconds_2"`
+	AppID           string    `db:"app_id" json:"app_id"`
+	FromSampledAt   time.Time `db:"from_sampled_at" json:"from_sampled_at"`
+	ToSampledAt     time.Time `db:"to_sampled_at" json:"to_sampled_at"`
 }
 
 type ListInstanceResourceBucketsRow struct {
@@ -290,7 +291,7 @@ type ListInstanceResourceBucketsRow struct {
 func (q *Queries) ListInstanceResourceBuckets(ctx context.Context, arg ListInstanceResourceBucketsParams) ([]ListInstanceResourceBucketsRow, error) {
 	rows, err := q.db.QueryContext(ctx, listInstanceResourceBuckets,
 		arg.BucketSeconds,
-		arg.BucketSeconds,
+		arg.BucketSeconds_2,
 		arg.AppID,
 		arg.FromSampledAt,
 		arg.ToSampledAt,
@@ -502,7 +503,7 @@ func (q *Queries) ListLatestNodeResourceSamples(ctx context.Context, runtimeNode
 
 const listNodeInstanceResourceBuckets = `-- name: ListNodeInstanceResourceBuckets :many
 SELECT
-    CAST(FROM_UNIXTIME(FLOOR(UNIX_TIMESTAMP(sampled_at) / ?) * ?) AS DATETIME) AS sampled_at,
+    CAST(FROM_UNIXTIME(FLOOR(UNIX_TIMESTAMP(sampled_at) / CAST(? AS SIGNED)) * CAST(? AS SIGNED)) AS DATETIME) AS sampled_at,
     COALESCE(SUBSTRING_INDEX(GROUP_CONCAT(container_status ORDER BY sampled_at DESC SEPARATOR '\x1e'), '\x1e', 1), '') AS container_status,
     COUNT(container_status) > 0 AS has_container_status,
     CAST(COALESCE(AVG(cpu_percent), 0) AS DOUBLE) AS cpu_percent,
@@ -531,11 +532,12 @@ ORDER BY 1 ASC
 `
 
 type ListNodeInstanceResourceBucketsParams struct {
-	BucketSeconds time.Time `db:"bucket_seconds" json:"bucket_seconds"`
-	RuntimeNodeID string    `db:"runtime_node_id" json:"runtime_node_id"`
-	AppID         string    `db:"app_id" json:"app_id"`
-	FromSampledAt time.Time `db:"from_sampled_at" json:"from_sampled_at"`
-	ToSampledAt   time.Time `db:"to_sampled_at" json:"to_sampled_at"`
+	BucketSeconds   int64     `db:"bucket_seconds" json:"bucket_seconds"`
+	BucketSeconds_2 int64     `db:"bucket_seconds_2" json:"bucket_seconds_2"`
+	RuntimeNodeID   string    `db:"runtime_node_id" json:"runtime_node_id"`
+	AppID           string    `db:"app_id" json:"app_id"`
+	FromSampledAt   time.Time `db:"from_sampled_at" json:"from_sampled_at"`
+	ToSampledAt     time.Time `db:"to_sampled_at" json:"to_sampled_at"`
 }
 
 type ListNodeInstanceResourceBucketsRow struct {
@@ -563,7 +565,7 @@ type ListNodeInstanceResourceBucketsRow struct {
 func (q *Queries) ListNodeInstanceResourceBuckets(ctx context.Context, arg ListNodeInstanceResourceBucketsParams) ([]ListNodeInstanceResourceBucketsRow, error) {
 	rows, err := q.db.QueryContext(ctx, listNodeInstanceResourceBuckets,
 		arg.BucketSeconds,
-		arg.BucketSeconds,
+		arg.BucketSeconds_2,
 		arg.RuntimeNodeID,
 		arg.AppID,
 		arg.FromSampledAt,
@@ -673,7 +675,7 @@ func (q *Queries) ListNodeInstanceResourceSamples(ctx context.Context, arg ListN
 
 const listNodeResourceBuckets = `-- name: ListNodeResourceBuckets :many
 SELECT
-    CAST(FROM_UNIXTIME(FLOOR(UNIX_TIMESTAMP(sampled_at) / ?) * ?) AS DATETIME) AS sampled_at,
+    CAST(FROM_UNIXTIME(FLOOR(UNIX_TIMESTAMP(sampled_at) / CAST(? AS SIGNED)) * CAST(? AS SIGNED)) AS DATETIME) AS sampled_at,
     CAST(COALESCE(AVG(cpu_percent), 0) AS DOUBLE) AS cpu_percent,
     COUNT(cpu_percent) > 0 AS has_cpu_percent,
     CAST(COALESCE(AVG(memory_used_bytes), 0) AS SIGNED) AS memory_used_bytes,
@@ -701,10 +703,11 @@ ORDER BY 1 ASC
 `
 
 type ListNodeResourceBucketsParams struct {
-	BucketSeconds time.Time `db:"bucket_seconds" json:"bucket_seconds"`
-	RuntimeNodeID string    `db:"runtime_node_id" json:"runtime_node_id"`
-	FromSampledAt time.Time `db:"from_sampled_at" json:"from_sampled_at"`
-	ToSampledAt   time.Time `db:"to_sampled_at" json:"to_sampled_at"`
+	BucketSeconds   int64     `db:"bucket_seconds" json:"bucket_seconds"`
+	BucketSeconds_2 int64     `db:"bucket_seconds_2" json:"bucket_seconds_2"`
+	RuntimeNodeID   string    `db:"runtime_node_id" json:"runtime_node_id"`
+	FromSampledAt   time.Time `db:"from_sampled_at" json:"from_sampled_at"`
+	ToSampledAt     time.Time `db:"to_sampled_at" json:"to_sampled_at"`
 }
 
 type ListNodeResourceBucketsRow struct {
@@ -732,7 +735,7 @@ type ListNodeResourceBucketsRow struct {
 func (q *Queries) ListNodeResourceBuckets(ctx context.Context, arg ListNodeResourceBucketsParams) ([]ListNodeResourceBucketsRow, error) {
 	rows, err := q.db.QueryContext(ctx, listNodeResourceBuckets,
 		arg.BucketSeconds,
-		arg.BucketSeconds,
+		arg.BucketSeconds_2,
 		arg.RuntimeNodeID,
 		arg.FromSampledAt,
 		arg.ToSampledAt,
