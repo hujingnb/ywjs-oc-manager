@@ -19,7 +19,7 @@
 </template>
 
 <script setup lang="ts">
-import { computed, onMounted } from 'vue'
+import { computed, watch } from 'vue'
 import { RouterLink, useRouter } from 'vue-router'
 
 import { useAuthStore } from '@/stores/auth'
@@ -29,17 +29,31 @@ import { useMemberApp } from '@/composables/useMemberApp'
 const auth = useAuthStore()
 const router = useRouter()
 
-const { appId: memberAppId, hasApp: memberHasApp } = useMemberApp()
+const { appId: memberAppId, hasApp: memberHasApp, isLoading: memberAppLoading } = useMemberApp()
 
-// platform_admin / org_admin 访问首页直接跳转到各自控制台，不展示欢迎卡片。
-// 在 mounted 后再跳转，避免当前导航事务尚未完成时的 navigation warning。
-onMounted(() => {
-  if (auth.user?.role === 'platform_admin') {
-    router.replace('/console')
-  } else if (auth.user?.role === 'org_admin') {
-    router.replace('/org-console')
-  }
-})
+// memberHomePath 复用现有实例详情路由；无实例时进入空状态页，避免生成缺少 appId 的路径。
+const memberHomePath = computed(() =>
+  memberHasApp.value && memberAppId.value ? `/apps/${memberAppId.value}/overview` : '/apps/empty',
+)
+
+// 首页只承担按角色分流的职责；成员实例查询未完成前不跳转，避免误落到空状态。
+watch(
+  () => ({
+    role: auth.user?.role,
+    memberLoading: memberAppLoading.value,
+    memberPath: memberHomePath.value,
+  }),
+  ({ role, memberLoading, memberPath }) => {
+    if (role === 'platform_admin') {
+      void router.replace('/console')
+    } else if (role === 'org_admin') {
+      void router.replace('/org-console')
+    } else if (role === 'org_member' && !memberLoading) {
+      void router.replace(memberPath)
+    }
+  },
+  { immediate: true },
+)
 
 // roleLabel 只用于欢迎区的角色展示，未知角色返回空字符串。
 const roleLabel = computed(() => {
@@ -74,7 +88,7 @@ const cards = computed<QuickCard[]>(() => {
     return [
       { path: '/members', title: '成员管理', subtitle: '创建 / 禁用 / 删除企业成员' },
       { path: '/apps', title: '实例列表', subtitle: '企业内全部实例状态' },
-      { path: '/knowledge', title: '企业知识库', subtitle: '上传共享文件' },
+      { path: '/knowledge', title: '企业知识库', subtitle: '上传企业共享文件' },
     ]
   }
   if (role === 'org_member') {
