@@ -41,11 +41,11 @@ func RegisterAppRoutes(router gin.IRouter, handler *AppsHandler) {
 // List 列出组织内的应用。
 //
 // @Summary      应用列表
-// @Description  按组织 ID 分页列出应用；org_member 只能看到自己的应用
+// @Description  按企业 ID 分页列出应用；org_member 只能看到自己的应用
 // @Tags         apps
 // @Produce      json
 // @Security     BearerAuth
-// @Param        orgId   path      string  true   "组织 ID"
+// @Param        orgId   path      string  true   "企业 ID"
 // @Param        limit   query     int     false  "每页条数（默认不限）"
 // @Param        offset  query     int     false  "分页偏移（默认 0）"
 // @Success      200     {object}  map[string][]service.AppResult
@@ -93,7 +93,7 @@ func (h *AppsHandler) Get(c *gin.Context) {
 // SwitchVersion 切换实例绑定的助手版本。
 //
 // @Summary      切换实例助手版本
-// @Description  切换实例绑定的助手版本；目标版本必须在实例所属组织的 allowlist 内。切换后需重启实例生效。
+// @Description  切换实例绑定的助手版本；目标版本必须在实例所属企业的 allowlist 内。切换后需重启实例生效。
 // @Tags         apps
 // @Accept       json
 // @Produce      json
@@ -133,7 +133,7 @@ func writeAppsError(c *gin.Context, err error) {
 	case errors.Is(err, service.ErrMemberCreateInvalid):
 		c.JSON(http.StatusBadRequest, apierror.New("MEMBER_INVALID", validationServiceMessage(err, service.ErrMemberCreateInvalid)))
 	case errors.Is(err, service.ErrVersionNotInAllowlist):
-		c.JSON(http.StatusBadRequest, apierror.New("VERSION_NOT_ALLOWED", "助手版本不在组织允许列表内"))
+		c.JSON(http.StatusBadRequest, apierror.New("VERSION_NOT_ALLOWED", "助手版本不在企业允许列表内"))
 	default:
 		c.JSON(http.StatusInternalServerError, apierror.New("INTERNAL", "服务暂时不可用"))
 	}

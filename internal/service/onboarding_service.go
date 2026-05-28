@@ -196,7 +196,7 @@ func (s *MemberOnboardingService) OnboardMember(ctx context.Context, principal a
 		}
 		// 校验所选助手版本在组织 allowlist 内，防止跨组织使用未授权版本。
 		if !versionInOrgAllowlist(org, input.VersionID) {
-			return fmt.Errorf("%w: 所选助手版本不在组织可用范围内", ErrMemberCreateInvalid)
+			return fmt.Errorf("%w: 所选助手版本不在企业可用范围内", ErrMemberCreateInvalid)
 		}
 		versionUUID, err := parseUUID(input.VersionID)
 		if err != nil {
@@ -353,7 +353,7 @@ func (s *MemberOnboardingService) CreateAppForMember(ctx context.Context, princi
 		}
 		// 校验所选助手版本在组织 allowlist 内，防止跨组织使用未授权版本。
 		if !versionInOrgAllowlist(org, input.VersionID) {
-			return fmt.Errorf("%w: 所选助手版本不在组织可用范围内", ErrMemberCreateInvalid)
+			return fmt.Errorf("%w: 所选助手版本不在企业可用范围内", ErrMemberCreateInvalid)
 		}
 		versionUUID, err := parseUUID(input.VersionID)
 		if err != nil {

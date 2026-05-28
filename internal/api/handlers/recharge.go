@@ -42,13 +42,13 @@ func RegisterRechargeRoutes(router gin.IRouter, handler *RechargeHandler) {
 
 // Create 处理充值。
 //
-// @Summary      组织充值
-// @Description  平台管理员为指定组织充值额度；组织须已关联 new-api 账户
+// @Summary      企业充值
+// @Description  平台管理员为指定企业充值额度；企业须已关联 new-api 账户
 // @Tags         recharge
 // @Accept       json
 // @Produce      json
 // @Security     BearerAuth
-// @Param        orgId  path      string          true  "组织 ID"
+// @Param        orgId  path      string          true  "企业 ID"
 // @Param        body   body      RechargeRequest true  "充值请求"
 // @Success      200    {object}  map[string]service.RechargeRecordResult
 // @Failure      400    {object}  ErrorResponse
@@ -75,12 +75,12 @@ func (h *RechargeHandler) Create(c *gin.Context) {
 
 // List 列出充值历史。
 //
-// @Summary      组织充值历史列表
-// @Description  分页查询指定组织的充值记录
+// @Summary      企业充值历史列表
+// @Description  分页查询指定企业的充值记录
 // @Tags         recharge
 // @Produce      json
 // @Security     BearerAuth
-// @Param        orgId   path      string  true   "组织 ID"
+// @Param        orgId   path      string  true   "企业 ID"
 // @Param        limit   query     int     false  "每页条数（默认 50）"
 // @Param        offset  query     int     false  "分页偏移（默认 0）"
 // @Success      200     {object}  map[string][]service.RechargeRecordResult
@@ -103,12 +103,12 @@ func (h *RechargeHandler) List(c *gin.Context) {
 
 // Balance 查询组织余额。
 //
-// @Summary      查询组织余额
-// @Description  查询指定组织在 new-api 中的当前额度余额
+// @Summary      查询企业余额
+// @Description  查询指定企业在 new-api 中的当前额度余额
 // @Tags         recharge
 // @Produce      json
 // @Security     BearerAuth
-// @Param        orgId  path      string  true  "组织 ID"
+// @Param        orgId  path      string  true  "企业 ID"
 // @Success      200    {object}  map[string]service.BalanceView
 // @Failure      401    {object}  ErrorResponse
 // @Failure      403    {object}  ErrorResponse
@@ -152,11 +152,11 @@ func writeRechargeError(c *gin.Context, err error) {
 	case errors.Is(err, service.ErrRechargeDenied), errors.Is(err, service.ErrForbidden):
 		c.JSON(http.StatusForbidden, apierror.New("RECHARGE_FORBIDDEN", "无权执行该操作"))
 	case errors.Is(err, service.ErrNotFound):
-		c.JSON(http.StatusNotFound, apierror.New("NOT_FOUND", "组织不存在"))
+		c.JSON(http.StatusNotFound, apierror.New("NOT_FOUND", "企业不存在"))
 	case errors.Is(err, service.ErrInvalidRechargeAmount):
 		c.JSON(http.StatusBadRequest, apierror.New("INVALID_RECHARGE_AMOUNT", "充值金额必须为正"))
 	case errors.Is(err, service.ErrOrgMissingNewAPIUserID):
-		c.JSON(http.StatusConflict, apierror.New("ORG_MISSING_NEWAPI_USER", "组织未关联 new-api 账户"))
+		c.JSON(http.StatusConflict, apierror.New("ORG_MISSING_NEWAPI_USER", "企业未关联 new-api 账户"))
 	default:
 		c.JSON(http.StatusBadGateway, apierror.New("INTERNAL", redactlog.SafeErrorMessage(err)))
 	}

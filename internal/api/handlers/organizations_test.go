@@ -162,7 +162,7 @@ func TestOrganizationsCreateRequiresAdminFields(t *testing.T) {
 // TestOrganizationsCreateReturnsBusinessValidationMessage 验证组织创建业务校验失败时返回具体原因的异常路径场景。
 func TestOrganizationsCreateReturnsBusinessValidationMessage(t *testing.T) {
 	svc := &organizationServiceStub{
-		createErr: fmt.Errorf("%w: 组织标识必须为 3-32 位小写字母、数字或短横线，且不能以短横线开头或结尾", service.ErrMemberCreateInvalid),
+		createErr: fmt.Errorf("%w: 企业标识必须为 3-32 位小写字母、数字或短横线，且不能以短横线开头或结尾", service.ErrMemberCreateInvalid),
 	}
 	router := newOrganizationsTestRouter(t, svc)
 
@@ -173,7 +173,7 @@ func TestOrganizationsCreateReturnsBusinessValidationMessage(t *testing.T) {
 	router.ServeHTTP(recorder, request)
 
 	require.Equal(t, http.StatusBadRequest, recorder.Code)
-	require.Contains(t, recorder.Body.String(), "组织标识必须")
+	require.Contains(t, recorder.Body.String(), "企业标识必须")
 	require.NotContains(t, recorder.Body.String(), "请求参数不完整")
 }
 

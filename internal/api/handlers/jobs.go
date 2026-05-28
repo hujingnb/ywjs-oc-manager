@@ -65,7 +65,7 @@ type jobPayloadAppRef struct {
 // Get 查询 job 详情。
 //
 // @Summary      查询异步任务详情
-// @Description  按 job 关联应用的可见性鉴权：平台管理员跨组织放行；组织管理员可查本组织 app 的 job；组织成员可查自己拥有的 app 的 job。payload 无 app_id 的 job 仅平台管理员可查。
+// @Description  按 job 关联应用的可见性鉴权：平台管理员跨企业放行；企业管理员可查本企业 app 的 job；企业成员可查自己拥有的 app 的 job。payload 无 app_id 的 job 仅平台管理员可查。
 // @Tags         jobs
 // @Produce      json
 // @Security     BearerAuth

@@ -338,7 +338,7 @@ func (s *OrganizationService) CreateOrganization(ctx context.Context, principal 
 func normalizeOrganizationCode(value string) (string, error) {
 	code := strings.ToLower(strings.TrimSpace(value))
 	if !organizationCodePattern.MatchString(code) {
-		return "", fmt.Errorf("%w: 组织标识必须为 3-32 位小写字母、数字或短横线，且不能以短横线开头或结尾", ErrMemberCreateInvalid)
+		return "", fmt.Errorf("%w: 企业标识必须为 3-32 位小写字母、数字或短横线，且不能以短横线开头或结尾", ErrMemberCreateInvalid)
 	}
 	return code, nil
 }

@@ -18,7 +18,7 @@ type ErrorResponse struct {
 
 // LoginRequest 用户名密码登录的请求体。
 type LoginRequest struct {
-	// OrgCode 是组织用户登录时填写的组织标识；平台管理员登录时留空。
+	// OrgCode 是企业用户登录时填写的企业标识；平台管理员登录时留空。
 	OrgCode string `json:"org_code"`
 	// Username 是 manager 账号名，登录失败时不区分账号不存在和密码错误。
 	Username string `json:"username" binding:"required"`
@@ -32,13 +32,13 @@ type RefreshRequest struct {
 	RefreshToken string `json:"refresh_token" binding:"required"`
 }
 
-// ===== 组织 organizations =====
+// ===== 企业 organizations =====
 
-// CreateOrganizationRequest 创建组织的请求体。
+// CreateOrganizationRequest 创建企业的请求体。
 type CreateOrganizationRequest struct {
-	// Name 是组织展示名，也是平台管理员列表中识别租户的主字段。
+	// Name 是企业展示名，也是平台管理员列表中识别租户的主字段。
 	Name string `json:"name" binding:"required"`
-	// Code 是组织登录标识，创建后不可修改。
+	// Code 是企业登录标识，创建后不可修改。
 	Code string `json:"code" binding:"required"`
 	// ContactName 是业务联系人姓名，可为空。
 	ContactName string `json:"contact_name"`
@@ -46,11 +46,11 @@ type CreateOrganizationRequest struct {
 	ContactPhone string `json:"contact_phone"`
 	// Remark 是平台管理员维护的内部备注。
 	Remark string `json:"remark"`
-	// CreditWarningThreshold 是组织余额预警阈值；nil 表示不启用余额预警或保持预警关闭。
+	// CreditWarningThreshold 是企业余额预警阈值；nil 表示不启用余额预警或保持预警关闭。
 	CreditWarningThreshold *int32 `json:"credit_warning_threshold"`
-	// AssistantVersionIDs 是该组织可用的助手版本 id 列表（allowlist）。
+	// AssistantVersionIDs 是该企业可用的助手版本 id 列表（allowlist）。
 	AssistantVersionIDs []string `json:"assistant_version_ids"`
-	// AdminUsername 是随组织创建的首个 org_admin 账号名。
+	// AdminUsername 是随企业创建的首个 org_admin 账号名。
 	AdminUsername string `json:"admin_username" binding:"required"`
 	// AdminDisplayName 是首个 org_admin 的显示名。
 	AdminDisplayName string `json:"admin_display_name" binding:"required"`
@@ -58,9 +58,9 @@ type CreateOrganizationRequest struct {
 	AdminPassword string `json:"admin_password" binding:"required"`
 }
 
-// OrganizationRequest 更新组织的请求体。
+// OrganizationRequest 更新企业的请求体。
 type OrganizationRequest struct {
-	// Name 是组织展示名；更新时仍必填，避免空名称进入前端列表。
+	// Name 是企业展示名；更新时仍必填，避免空名称进入前端列表。
 	Name string `json:"name" binding:"required"`
 	// ContactName 是业务联系人姓名，可置空。
 	ContactName string `json:"contact_name"`
@@ -68,17 +68,17 @@ type OrganizationRequest struct {
 	ContactPhone string `json:"contact_phone"`
 	// Remark 是平台管理员维护的内部备注，可置空。
 	Remark string `json:"remark"`
-	// CreditWarningThreshold 是组织余额预警阈值；nil 表示清空或未设置预警阈值。
+	// CreditWarningThreshold 是企业余额预警阈值；nil 表示清空或未设置预警阈值。
 	CreditWarningThreshold *int32 `json:"credit_warning_threshold"`
-	// AssistantVersionIDs 是该组织可用的助手版本 id 列表（allowlist）。
+	// AssistantVersionIDs 是该企业可用的助手版本 id 列表（allowlist）。
 	AssistantVersionIDs []string `json:"assistant_version_ids"`
 }
 
 // ===== 成员 members =====
 
-// CreateMemberRequest 创建组织成员的请求体。
+// CreateMemberRequest 创建企业成员的请求体。
 type CreateMemberRequest struct {
-	// Username 是组织内登录账号名，创建后不可通过成员更新接口修改。
+	// Username 是企业内登录账号名，创建后不可通过成员更新接口修改。
 	Username string `json:"username" binding:"required"`
 	// DisplayName 是前端显示名，创建与更新时都不能为空。
 	DisplayName string `json:"display_name" binding:"required"`
@@ -92,7 +92,7 @@ type CreateMemberRequest struct {
 type UpdateMemberRequest struct {
 	// DisplayName 是成员展示名，更新接口要求显式传入非空值。
 	DisplayName string `json:"display_name" binding:"required"`
-	// Role 为空表示保持原角色；非空时需要管理员权限并限制在组织角色内。
+	// Role 为空表示保持原角色；非空时需要管理员权限并限制在企业角色内。
 	Role string `json:"role"`
 }
 
@@ -118,7 +118,7 @@ type OnboardMemberRequest struct {
 	ChannelType string `json:"channel_type"`
 	// NodeID 是指定 runtime 节点；为空时 service 自动选择可用节点。
 	NodeID string `json:"runtime_node_id"`
-	// VersionID 是实例绑定的助手版本 id，必须落在组织 allowlist 内。
+	// VersionID 是实例绑定的助手版本 id，必须落在企业 allowlist 内。
 	VersionID string `json:"version_id" binding:"required"`
 }
 
@@ -130,7 +130,7 @@ type CreateMemberAppRequest struct {
 	ChannelType string `json:"channel_type"`
 	// NodeID 是指定 runtime 节点；为空时 service 自动选择可用节点。
 	NodeID string `json:"runtime_node_id"`
-	// VersionID 是实例绑定的助手版本 id，必须落在组织 allowlist 内。
+	// VersionID 是实例绑定的助手版本 id，必须落在企业 allowlist 内。
 	VersionID string `json:"version_id" binding:"required"`
 }
 
@@ -146,7 +146,7 @@ type RuntimeKnowledgeSearchRequest struct {
 
 // ===== 充值 recharge =====
 
-// RechargeRequest 组织充值的请求体。
+// RechargeRequest 企业充值的请求体。
 type RechargeRequest struct {
 	// CreditAmount 是充值额度，必须为正数，service 层会同步写入 new-api。
 	CreditAmount int64 `json:"credit_amount" binding:"required"`
@@ -356,7 +356,7 @@ type UpdateCronJobRequest struct {
 
 // SwitchAppVersionRequest 是 POST /api/v1/apps/:appId/version 的请求体。
 type SwitchAppVersionRequest struct {
-	// VersionID 是目标助手版本 id，必须在实例所属组织的 allowlist 内。
+	// VersionID 是目标助手版本 id，必须在实例所属企业的 allowlist 内。
 	VersionID string `json:"version_id" binding:"required"`
 }
 

@@ -257,7 +257,7 @@ func newAuthStoreStub(t *testing.T) *authStoreStub {
 		OrgID:        orgID,
 		Username:     "admin",
 		PasswordHash: hash,
-		DisplayName:  "组织管理员",
+		DisplayName:  "企业管理员",
 		Role:         domain.UserRoleOrgAdmin,
 		Status:       domain.StatusActive,
 	}
@@ -266,7 +266,7 @@ func newAuthStoreStub(t *testing.T) *authStoreStub {
 		OrgID:        orgID,
 		Username:     "member",
 		PasswordHash: hash,
-		DisplayName:  "组织成员",
+		DisplayName:  "企业成员",
 		Role:         domain.UserRoleOrgMember,
 		Status:       domain.StatusActive,
 	}

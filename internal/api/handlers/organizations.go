@@ -48,13 +48,13 @@ func RegisterOrganizationRoutes(router gin.IRouter, handler *OrganizationsHandle
 
 // Create 创建组织。
 //
-// @Summary      创建组织
-// @Description  平台管理员创建新组织，并同步在 new-api 侧完成账户 provisioning
+// @Summary      创建企业
+// @Description  平台管理员创建新企业，并同步在 new-api 侧完成账户 provisioning
 // @Tags         organizations
 // @Accept       json
 // @Produce      json
 // @Security     BearerAuth
-// @Param        body  body      CreateOrganizationRequest     true  "创建组织请求"
+// @Param        body  body      CreateOrganizationRequest     true  "创建企业请求"
 // @Success      201   {object}  map[string]service.OrganizationResult
 // @Failure      400   {object}  ErrorResponse
 // @Failure      401   {object}  ErrorResponse
@@ -79,8 +79,8 @@ func (h *OrganizationsHandler) Create(c *gin.Context) {
 
 // List 列出组织列表。
 //
-// @Summary      组织列表
-// @Description  平台管理员获取所有组织；org_admin 只能看到自己所属组织
+// @Summary      企业列表
+// @Description  平台管理员获取所有企业；org_admin 只能看到自己所属企业
 // @Tags         organizations
 // @Produce      json
 // @Security     BearerAuth
@@ -105,12 +105,12 @@ func (h *OrganizationsHandler) List(c *gin.Context) {
 
 // Get 获取单个组织详情。
 //
-// @Summary      组织详情
-// @Description  按 orgId 获取单个组织信息
+// @Summary      企业详情
+// @Description  按 orgId 获取单个企业信息
 // @Tags         organizations
 // @Produce      json
 // @Security     BearerAuth
-// @Param        orgId  path      string  true  "组织 ID"
+// @Param        orgId  path      string  true  "企业 ID"
 // @Success      200    {object}  map[string]service.OrganizationResult
 // @Failure      401    {object}  ErrorResponse
 // @Failure      403    {object}  ErrorResponse
@@ -129,14 +129,14 @@ func (h *OrganizationsHandler) Get(c *gin.Context) {
 
 // Update 更新组织基础信息。
 //
-// @Summary      更新组织
-// @Description  更新组织名称、联系人、备注等基础字段
+// @Summary      更新企业
+// @Description  更新企业名称、联系人、备注等基础字段
 // @Tags         organizations
 // @Accept       json
 // @Produce      json
 // @Security     BearerAuth
-// @Param        orgId  path      string               true  "组织 ID"
-// @Param        body   body      OrganizationRequest  true  "更新组织请求"
+// @Param        orgId  path      string               true  "企业 ID"
+// @Param        body   body      OrganizationRequest  true  "更新企业请求"
 // @Success      200    {object}  map[string]service.OrganizationResult
 // @Failure      400    {object}  ErrorResponse
 // @Failure      401    {object}  ErrorResponse
@@ -162,12 +162,12 @@ func (h *OrganizationsHandler) Update(c *gin.Context) {
 
 // Disable 禁用组织。
 //
-// @Summary      禁用组织
-// @Description  将组织状态设为 disabled，成员登录时将被拒绝
+// @Summary      禁用企业
+// @Description  将企业状态设为 disabled，成员登录时将被拒绝
 // @Tags         organizations
 // @Produce      json
 // @Security     BearerAuth
-// @Param        orgId  path      string  true  "组织 ID"
+// @Param        orgId  path      string  true  "企业 ID"
 // @Success      200    {object}  map[string]service.OrganizationResult
 // @Failure      401    {object}  ErrorResponse
 // @Failure      403    {object}  ErrorResponse
@@ -180,12 +180,12 @@ func (h *OrganizationsHandler) Disable(c *gin.Context) {
 
 // Enable 启用组织。
 //
-// @Summary      启用组织
-// @Description  将组织状态从 disabled 恢复为 active
+// @Summary      启用企业
+// @Description  将企业状态从 disabled 恢复为 active
 // @Tags         organizations
 // @Produce      json
 // @Security     BearerAuth
-// @Param        orgId  path      string  true  "组织 ID"
+// @Param        orgId  path      string  true  "企业 ID"
 // @Success      200    {object}  map[string]service.OrganizationResult
 // @Failure      401    {object}  ErrorResponse
 // @Failure      403    {object}  ErrorResponse

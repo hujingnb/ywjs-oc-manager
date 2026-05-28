@@ -65,12 +65,12 @@ func RegisterKnowledgeRoutes(router gin.IRouter, handler *KnowledgeHandler) {
 
 // ListOrg 列出组织级知识库文件。
 //
-// @Summary      列出组织级知识库文件
-// @Description  以扁平 RAGFlow document 列表返回组织知识库文件
+// @Summary      列出企业级知识库文件
+// @Description  以扁平 RAGFlow document 列表返回企业知识库文件
 // @Tags         knowledge
 // @Produce      json
 // @Security     BearerAuth
-// @Param        orgId       path      string  true   "组织 ID"
+// @Param        orgId       path      string  true   "企业 ID"
 // @Param        page        query     int     false  "页码，从 1 开始"
 // @Param        page_size   query     int     false  "每页数量"
 // @Param        keyword     query     string  false  "文件名关键词"
@@ -91,13 +91,13 @@ func (h *KnowledgeHandler) ListOrg(c *gin.Context) {
 
 // SaveOrg 上传组织级知识库文件。
 //
-// @Summary      上传组织级知识库文件
+// @Summary      上传企业级知识库文件
 // @Description  通过 filename query 指定文件名，上传后进入 RAGFlow 解析队列
 // @Tags         knowledge
 // @Accept       application/octet-stream
 // @Produce      json
 // @Security     BearerAuth
-// @Param        orgId     path      string  true  "组织 ID"
+// @Param        orgId     path      string  true  "企业 ID"
 // @Param        filename  query     string  true  "文件名"
 // @Success      202       {object}  service.KnowledgeDocumentResult
 // @Failure      400       {object}  ErrorResponse
@@ -125,12 +125,12 @@ func (h *KnowledgeHandler) SaveOrg(c *gin.Context) {
 
 // DownloadOrg 下载组织级知识库文件。
 //
-// @Summary      下载组织级知识库文件
+// @Summary      下载企业级知识库文件
 // @Description  按 documentId 下载 RAGFlow 中的原始文件
 // @Tags         knowledge
 // @Produce      application/octet-stream
 // @Security     BearerAuth
-// @Param        orgId       path      string  true  "组织 ID"
+// @Param        orgId       path      string  true  "企业 ID"
 // @Param        documentId  path      string  true  "document ID"
 // @Success      200         {string}  binary  "二进制文件流"
 // @Failure      401         {object}  ErrorResponse
@@ -149,12 +149,12 @@ func (h *KnowledgeHandler) DownloadOrg(c *gin.Context) {
 
 // DeleteOrg 删除组织级知识库文件。
 //
-// @Summary      删除组织级知识库文件
+// @Summary      删除企业级知识库文件
 // @Description  按 documentId 删除 RAGFlow document
 // @Tags         knowledge
 // @Produce      json
 // @Security     BearerAuth
-// @Param        orgId       path  string  true  "组织 ID"
+// @Param        orgId       path  string  true  "企业 ID"
 // @Param        documentId  path  string  true  "document ID"
 // @Success      204         "删除成功，无响应体"
 // @Failure      401         {object}  ErrorResponse
@@ -172,12 +172,12 @@ func (h *KnowledgeHandler) DeleteOrg(c *gin.Context) {
 
 // ReparseOrg 重新解析组织级知识库文件。
 //
-// @Summary      重新解析组织级知识库文件
+// @Summary      重新解析企业级知识库文件
 // @Description  按 documentId 重新触发 RAGFlow parse
 // @Tags         knowledge
 // @Produce      json
 // @Security     BearerAuth
-// @Param        orgId       path      string  true  "组织 ID"
+// @Param        orgId       path      string  true  "企业 ID"
 // @Param        documentId  path      string  true  "document ID"
 // @Success      202         {object}  service.KnowledgeDocumentResult
 // @Failure      401         {object}  ErrorResponse

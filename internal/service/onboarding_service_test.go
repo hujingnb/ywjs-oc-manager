@@ -529,7 +529,7 @@ func TestOnboardMember_RejectsMissingVersionID(t *testing.T) {
 	require.ErrorIs(t, err, ErrMemberCreateInvalid)
 }
 
-// TestOnboardMember_RejectsVersionNotInAllowlist 验证所选助手版本不在组织 allowlist 内时拒绝创建。
+// TestOnboardMember_RejectsVersionNotInAllowlist 验证所选助手版本不在企业 allowlist 内时拒绝创建。
 func TestOnboardMember_RejectsVersionNotInAllowlist(t *testing.T) {
 	store := newOnboardingStub(t)
 	tx := &txRunnerStub{store: store}
@@ -577,7 +577,7 @@ func TestCreateAppForMember_RejectsMissingVersionID(t *testing.T) {
 	require.ErrorIs(t, err, ErrMemberCreateInvalid)
 }
 
-// TestCreateAppForMember_RejectsVersionNotInAllowlist 验证所选助手版本不在组织 allowlist 内时拒绝创建。
+// TestCreateAppForMember_RejectsVersionNotInAllowlist 验证所选助手版本不在企业 allowlist 内时拒绝创建。
 func TestCreateAppForMember_RejectsVersionNotInAllowlist(t *testing.T) {
 	store := newOnboardingStub(t)
 	tx := &txRunnerStub{store: store}

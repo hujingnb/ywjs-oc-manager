@@ -57,7 +57,7 @@ func RegisterUsageRoutes(router gin.IRouter, handler *UsageHandler) {
 // @Produce      json
 // @Security     BearerAuth
 // @Param        userId     path      string  true   "成员用户 ID"
-// @Param        org_id     query     string  true   "成员所属组织 ID"
+// @Param        org_id     query     string  true   "成员所属企业 ID"
 // @Param        since      query     int     false  "起始时间（Unix 秒）"
 // @Param        until      query     int     false  "结束时间（Unix 秒）"
 // @Param        page       query     int     false  "页码"
@@ -88,12 +88,12 @@ func (h *UsageHandler) GetMember(c *gin.Context) {
 
 // GetOrg 返回组织维度的按日 quota。
 //
-// @Summary      组织用量统计
-// @Description  返回指定组织在时间窗口内的按日 quota 消耗（QuotaSeries 格式）
+// @Summary      企业用量统计
+// @Description  返回指定企业在时间窗口内的按日 quota 消耗（QuotaSeries 格式）
 // @Tags         usage
 // @Produce      json
 // @Security     BearerAuth
-// @Param        orgId  path      string  true   "组织 ID"
+// @Param        orgId  path      string  true   "企业 ID"
 // @Param        since  query     int     false  "起始时间（Unix 秒）"
 // @Param        until  query     int     false  "结束时间（Unix 秒）"
 // @Success      200    {object}  map[string]service.QuotaSeries
@@ -117,7 +117,7 @@ func (h *UsageHandler) GetOrg(c *gin.Context) {
 // GetPlatform 返回平台维度的按日 quota（跨所有组织）。仅平台管理员可调。
 //
 // @Summary      平台用量统计
-// @Description  返回平台维度在时间窗口内的按日 quota 消耗（跨所有组织），仅平台管理员可调
+// @Description  返回平台维度在时间窗口内的按日 quota 消耗（跨所有企业），仅平台管理员可调
 // @Tags         usage
 // @Produce      json
 // @Security     BearerAuth
@@ -143,8 +143,8 @@ func (h *UsageHandler) GetPlatform(c *gin.Context) {
 // GetOrgBreakdown 返回各组织近期 quota 消耗的 top 10 汇总，供平台控制台图表使用。
 // 仅 platform_admin 可调；service 层再做一次角色校验。
 //
-// @Summary      各组织用量分布
-// @Description  平台维度各组织在时间窗口内的 quota 消耗 top 10，仅平台管理员可调
+// @Summary      各企业用量分布
+// @Description  平台维度各企业在时间窗口内的 quota 消耗 top 10，仅平台管理员可调
 // @Tags         usage
 // @Produce      json
 // @Security     BearerAuth
@@ -175,7 +175,7 @@ func (h *UsageHandler) GetOrgBreakdown(c *gin.Context) {
 // @Produce      json
 // @Security     BearerAuth
 // @Param        appId         path      string  true   "应用 ID"
-// @Param        owner_org_id  query     string  true   "应用所属组织 ID"
+// @Param        owner_org_id  query     string  true   "应用所属企业 ID"
 // @Param        owner_user_id query     string  true   "应用所有者用户 ID"
 // @Param        newapi_key_id query     int     false  "new-api token key ID"
 // @Param        since         query     int     false  "起始时间（Unix 秒）"

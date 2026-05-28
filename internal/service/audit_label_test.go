@@ -15,8 +15,8 @@ func TestLabelActorRole(t *testing.T) {
 	}{
 		{"system", "系统"},                 // 系统任务
 		{"platform_admin", "平台管理员"},      // 平台管理员
-		{"org_admin", "组织管理员"},           // 组织管理员
-		{"org_member", "组织成员"},           // 普通成员
+		{"org_admin", "企业管理员"},           // 企业管理员
+		{"org_member", "企业成员"},           // 普通企业成员
 		{"unknown_role", "unknown_role"}, // 未知值 fallback
 	}
 	for _, tc := range cases {
@@ -48,7 +48,7 @@ func TestLabelTargetType(t *testing.T) {
 		{"app", "应用实例"},                // 应用实例
 		{"user", "成员用户"},               // 成员用户
 		{"member", "成员"},               // 成员
-		{"organization", "组织"},         // 组织
+		{"organization", "企业"},         // 企业资源
 		{"runtime_node", "运行节点"},       // 运行节点
 		{"newapi_call", "API 调用"},      // new-api 调用失败
 		{"future_type", "future_type"}, // 未知类型 fallback
@@ -67,7 +67,7 @@ func TestLabelAction(t *testing.T) {
 		expected   string
 	}{
 		// member 资源
-		{"member", "create_with_app", "加入组织（含应用创建）"}, // onboarding 新成员
+		{"member", "create_with_app", "加入企业（含应用创建）"}, // onboarding 新成员
 		// app 资源
 		{"app", "create", "创建应用"},                            // onboarding 创建应用
 		{"app", "create_for_existing_member", "为已有成员创建应用"},   // 已有成员新建应用
@@ -85,7 +85,7 @@ func TestLabelAction(t *testing.T) {
 		// user 资源
 		{"user", "delete_member", "移除成员"}, // 成员禁用/删除
 		// organization 资源
-		{"organization", "recharge", "组织充值"}, // 组织余额充值
+		{"organization", "recharge", "企业充值"}, // 企业余额充值
 		// runtime_node 资源
 		{"runtime_node", "initialize", "初始化节点"},            // 节点初始化（与 app.initialize 区分）
 		{"runtime_node", "node_probe_recovered", "节点恢复正常"}, // 探针恢复

@@ -17,12 +17,12 @@ func TestWriteMappedServiceErrorUsesValidationMessage(t *testing.T) {
 	gin.SetMode(gin.ReleaseMode)
 	recorder := httptest.NewRecorder()
 	c, _ := gin.CreateTestContext(recorder)
-	err := fmt.Errorf("%w: 组织标识必须为 3-32 位小写字母、数字或短横线", service.ErrMemberCreateInvalid)
+	err := fmt.Errorf("%w: 企业标识必须为 3-32 位小写字母、数字或短横线", service.ErrMemberCreateInvalid)
 
 	writeMappedServiceError(c, err, http.StatusInternalServerError, "服务暂时不可用")
 
 	require.Equal(t, http.StatusBadRequest, recorder.Code)
-	require.Contains(t, recorder.Body.String(), "组织标识必须")
+	require.Contains(t, recorder.Body.String(), "企业标识必须")
 	require.NotContains(t, recorder.Body.String(), service.ErrMemberCreateInvalid.Error())
 }
 

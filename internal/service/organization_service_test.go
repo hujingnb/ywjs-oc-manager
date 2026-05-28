@@ -46,7 +46,7 @@ func TestOrganizationServiceCreateProvisionsNewAPIUser(t *testing.T) {
 		ContactName:            "张三",
 		CreditWarningThreshold: &threshold,
 		AdminUsername:          "org-admin",
-		AdminDisplayName:       "组织管理员",
+		AdminDisplayName:       "企业管理员",
 		AdminPassword:          "secret-password",
 	})
 	require.NoError(t, err)
@@ -90,7 +90,7 @@ func TestOrganizationServiceCreateEnsuresKnowledgeDataset(t *testing.T) {
 		Name:             "测试组织",
 		Code:             "test-org",
 		AdminUsername:    "org-admin",
-		AdminDisplayName: "组织管理员",
+		AdminDisplayName: "企业管理员",
 		AdminPassword:    "secret-password",
 	})
 	require.NoError(t, err)
@@ -119,7 +119,7 @@ func TestProvisionNewAPIUserPersistsUsername(t *testing.T) {
 		Name:             "测试组织",
 		Code:             "test-org",
 		AdminUsername:    "org-admin",
-		AdminDisplayName: "组织管理员",
+		AdminDisplayName: "企业管理员",
 		AdminPassword:    "secret-password",
 	})
 	require.NoError(t, err)
@@ -146,7 +146,7 @@ func TestOrganizationServiceCreateAlsoCreatesOrgAdmin(t *testing.T) {
 		Name:             "测试组织",
 		Code:             "test-org",
 		AdminUsername:    "org-admin",
-		AdminDisplayName: "组织管理员",
+		AdminDisplayName: "企业管理员",
 		AdminPassword:    "secret-password",
 	})
 	require.NoError(t, err)
@@ -154,7 +154,7 @@ func TestOrganizationServiceCreateAlsoCreatesOrgAdmin(t *testing.T) {
 	require.True(t, store.createUserCalled)
 	assert.Equal(t, store.org.ID, store.createdUser.OrgID)
 	assert.Equal(t, "org-admin", store.createdUser.Username)
-	assert.Equal(t, "组织管理员", store.createdUser.DisplayName)
+	assert.Equal(t, "企业管理员", store.createdUser.DisplayName)
 	assert.Equal(t, "hashed:secret-password", store.createdUser.PasswordHash)
 	assert.Equal(t, domain.UserRoleOrgAdmin, store.createdUser.Role)
 	assert.Equal(t, domain.StatusActive, store.createdUser.Status)
@@ -176,7 +176,7 @@ func TestOrganizationServiceCreateRollbackOnProvisioningFailure(t *testing.T) {
 		Name:             "测试组织",
 		Code:             "test-org",
 		AdminUsername:    "org-admin",
-		AdminDisplayName: "组织管理员",
+		AdminDisplayName: "企业管理员",
 		AdminPassword:    "secret-password",
 	})
 	require.Error(t, err)
@@ -571,7 +571,7 @@ func TestCreateOrganization_BootstrapTokenFailureTriggersDeleteUserAndAudit(t *t
 		Name:             "v102-orphan-test",
 		Code:             "test-org",
 		AdminUsername:    "org-admin",
-		AdminDisplayName: "组织管理员",
+		AdminDisplayName: "企业管理员",
 		AdminPassword:    "secret-password",
 	})
 	require.Error(t, err)
@@ -601,7 +601,7 @@ func TestCreateOrganization_CreateUserFailureNoDeleteUser(t *testing.T) {
 		Name:             "v102-create-fail",
 		Code:             "test-org",
 		AdminUsername:    "org-admin",
-		AdminDisplayName: "组织管理员",
+		AdminDisplayName: "企业管理员",
 		AdminPassword:    "secret-password",
 	})
 	assert.False(t, prov.deleteUserCalled)

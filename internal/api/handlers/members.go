@@ -78,13 +78,13 @@ func RegisterMemberRoutes(router gin.IRouter, handler *MembersHandler) {
 
 // Create 创建组织成员。
 //
-// @Summary      创建组织成员
-// @Description  组织管理员在本组织下创建新成员
+// @Summary      创建企业成员
+// @Description  企业管理员在本企业下创建新成员
 // @Tags         members
 // @Accept       json
 // @Produce      json
 // @Security     BearerAuth
-// @Param        orgId  path      string               true  "组织 ID"
+// @Param        orgId  path      string               true  "企业 ID"
 // @Param        body   body      CreateMemberRequest  true  "创建成员请求"
 // @Success      201    {object}  map[string]service.MemberResult
 // @Failure      400    {object}  ErrorResponse
@@ -115,12 +115,12 @@ func (h *MembersHandler) Create(c *gin.Context) {
 
 // List 列出组织成员。
 //
-// @Summary      组织成员列表
-// @Description  按组织 ID 分页列出成员；org_member 只能看到自己
+// @Summary      企业成员列表
+// @Description  按企业 ID 分页列出成员；org_member 只能看到自己
 // @Tags         members
 // @Produce      json
 // @Security     BearerAuth
-// @Param        orgId   path      string  true   "组织 ID"
+// @Param        orgId   path      string  true   "企业 ID"
 // @Param        limit   query     int     false  "每页条数（默认不限）"
 // @Param        offset  query     int     false  "分页偏移（默认 0）"
 // @Success      200     {object}  map[string][]service.MemberResult
@@ -168,7 +168,7 @@ func (h *MembersHandler) Get(c *gin.Context) {
 // Update 更新成员信息。
 //
 // @Summary      更新成员
-// @Description  更新成员显示名或角色；org_admin 仅可更新自己组织的成员
+// @Description  更新成员显示名或角色；org_admin 仅可更新自己企业的成员
 // @Tags         members
 // @Accept       json
 // @Produce      json
@@ -255,7 +255,7 @@ func (h *MembersHandler) setStatus(c *gin.Context, status string) {
 // @Accept       json
 // @Produce      json
 // @Security     BearerAuth
-// @Param        orgId  path      string                true  "组织 ID"
+// @Param        orgId  path      string                true  "企业 ID"
 // @Param        body   body      OnboardMemberRequest  true  "onboarding 请求"
 // @Success      201    {object}  map[string]service.OnboardMemberResult
 // @Failure      400    {object}  ErrorResponse
@@ -296,12 +296,12 @@ func (h *MembersHandler) Onboard(c *gin.Context) {
 // CreateAppForMember 为已有成员创建新的应用实例。
 //
 // @Summary      为已有成员创建实例
-// @Description  平台管理员或本组织管理员为已有成员创建新的应用实例；目标成员必须没有未删除实例
+// @Description  平台管理员或本企业管理员为已有成员创建新的应用实例；目标成员必须没有未删除实例
 // @Tags         members
 // @Accept       json
 // @Produce      json
 // @Security     BearerAuth
-// @Param        orgId   path      string                  true  "组织 ID"
+// @Param        orgId   path      string                  true  "企业 ID"
 // @Param        userId  path      string                  true  "成员用户 ID"
 // @Param        body    body      CreateMemberAppRequest  true  "创建实例请求"
 // @Success      201     {object}  map[string]service.CreateAppForMemberResult
@@ -339,7 +339,7 @@ func (h *MembersHandler) CreateAppForMember(c *gin.Context) {
 // ResetPassword 由管理员重置成员密码。
 //
 // @Summary      重置成员密码
-// @Description  组织管理员强制重置本组织成员的密码
+// @Description  企业管理员强制重置本企业成员的密码
 // @Tags         members
 // @Accept       json
 // @Produce      json

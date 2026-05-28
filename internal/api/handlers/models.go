@@ -35,7 +35,7 @@ func RegisterModelRoutes(router gin.IRouter, handler *ModelsHandler) {
 // List 返回 new-api 当前可用模型列表。
 //
 // @Summary      模型列表
-// @Description  平台管理员实时查询 new-api 当前可用模型，供组织模型 allowlist 使用
+// @Description  平台管理员实时查询 new-api 当前可用模型，供企业模型 allowlist 使用
 // @Tags         models
 // @Produce      json
 // @Security     BearerAuth

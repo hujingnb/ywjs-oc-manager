@@ -14,8 +14,8 @@ const AuditActionAppRuntimeImageChanged = "runtime_image_changed"
 var actorRoleLabels = map[string]string{
 	"system":         "系统",
 	"platform_admin": "平台管理员",
-	"org_admin":      "组织管理员",
-	"org_member":     "组织成员",
+	"org_admin":      "企业管理员",
+	"org_member":     "企业成员",
 }
 
 // resultLabels 将 result 原始值映射为中文展示名。
@@ -29,7 +29,7 @@ var targetTypeLabels = map[string]string{
 	"app":          "应用实例",
 	"user":         "成员用户",
 	"member":       "成员",
-	"organization": "组织",
+	"organization": "企业",
 	"runtime_node": "运行节点",
 	"newapi_call":  "API 调用",
 }
@@ -38,7 +38,7 @@ var targetTypeLabels = map[string]string{
 // 使用二元组是因为 initialize 在 app 和 runtime_node 下含义不同，需要上下文区分。
 var actionLabels = map[[2]string]string{
 	// member 资源
-	{"member", "create_with_app"}: "加入组织（含应用创建）",
+	{"member", "create_with_app"}: "加入企业（含应用创建）",
 	// app 资源
 	{"app", "create"}:                     "创建应用",
 	{"app", "create_for_existing_member"}: "为已有成员创建应用",
@@ -58,7 +58,7 @@ var actionLabels = map[[2]string]string{
 	// user 资源
 	{"user", "delete_member"}: "移除成员",
 	// organization 资源
-	{"organization", "recharge"}: "组织充值",
+	{"organization", "recharge"}: "企业充值",
 	// runtime_node 资源
 	{"runtime_node", "initialize"}:           "初始化节点",
 	{"runtime_node", "node_probe_recovered"}: "节点恢复正常",
