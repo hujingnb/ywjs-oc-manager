@@ -44,7 +44,7 @@ manager 是控制面，通过 **runtime-agent 节点**间接管理 app：
 | D6 | app 数据持久化 | pod 零 PVC；emptyDir scratch + S3 为持久源 | pod 可任意调度、节点概念消失 |
 | D7 | app 启动信息 | 启动时回调 manager-api `bootstrap` 拉取 | api_key 不落盘/落 S3，DB 为唯一真相源 |
 | D8 | pod→manager 认证 | per-app bootstrap token（hash 存 DB，k8s Secret 注入） | 简单可携、与厂商无关 |
-| D9 | hermes 命令 | k8s exec subresource（client-go remotecommand） | 复用现有逻辑、改动最小 |
+| D9 | hermes 命令(oc-*) | 收敛为 pod 内 **oc-ops HTTP 服务**（第二容器，基于 hermes 镜像、共享 /opt/data），替代 k8s exec | 解决 watch 流式风险、去 `pods/exec` 权限、类型化契约 |
 | D10 | 命名空间 | app pod 统一放 `oc-apps` | 简单、单 ns RBAC |
 | D11 | 指标 | metrics-server（仅 CPU/内存） | 零额外组件；砍掉网络/磁盘两项 |
 | D12 | 打包 | 裸 manifest | 用户选择；环境差异隔离进少量文件 |
@@ -108,14 +108,23 @@ manager 是控制面，通过 **runtime-agent 节点**间接管理 app：
 | 重启-不换镜像 | Stop+ClearSessions+Start | 删 S3 `sessions/`+`state.db` → 重启 pod |
 | 删除 | stop→禁 new-api key→archive→清 KB→软删 | 删 Deployment/Service/Secret →禁 key→S3 prefix 搬 `archive/`→清 KB→软删 |
 
-### 4.3 Hermes 命令 → k8s exec
+### 4.3 Hermes 命令 → oc-ops HTTP 服务（D9）
 
-7 个调用点改用 client-go `remotecommand`（pods/exec 子资源），按 label selector `app=<id>` 定位 Ready pod：
+原来 manager 通过 docker/k8s exec 跑容器内 oc-* 脚本；现收敛为 pod 内一个 **oc-ops HTTP 服务**，manager 改用 HTTP 调用，**彻底取消 exec**。
 
-- 一次性：`oc-info` / `oc-doctor` / `oc-channel-status` / `oc-channel-login` / `oc-cron`(`ExecJSON`) / `oc-kanban`(`ExecJSON`)。
-- 流式：`oc-kanban watch`（`hermes_kanban.go:569` 的 `ExecStream`）→ 长连接 exec 流。**风险**：长连接经 API server 代理，需处理 idle timeout / API server 重启重连；若实测不稳，退路是给 Hermes 加 HTTP watch 端点。
+**为何需要 hermes 镜像环境**（决定部署形态）：oc-* 多数依赖 hermes 运行环境——`oc-channel-login` import hermes venv 的 weixin SDK；`oc-cron`/`oc-kanban` `subprocess` 调 hermes CLI（kanban 是本地 sqlite 读写）；仅 `oc-info`/`oc-channel-status` 是纯文件读。故 oc-ops 服务须带 hermes 的 venv+CLI。
 
-鉴权从「节点 endpoint + agent token」改为 k8s ServiceAccount + RBAC（`pods/exec` create）。
+**部署形态**：同 pod 内**第二容器** `oc-ops`，**基于 hermes 镜像构建**、共享 `/opt/data` emptyDir。它内部仍做与现脚本相同的 venv import / `subprocess hermes` 调用，只是把入口从"被 exec 的脚本"换成"HTTP handler"。无需在 hermes 容器内做进程守护。
+
+**端点映射**：
+- 一次性 verb：`/oc/info`、`/oc/doctor`、`/oc/channel/{status,login,unbind}`、`/oc/cron/*`、`/oc/kanban/*` —— 返回类型化 JSON + 状态码，取代 stdout 解析。
+- 流式：`/oc/kanban/watch` 用 **SSE/websocket**，取代长连接 exec 流，连接模型稳定。
+
+**鉴权**：manager→oc-ops 用 per-app 控制 token（与 §5.3 bootstrap token 同一把，k8s Secret 注入；oc-ops 读 env 副本校验入站请求）。manager 对 `oc-apps` 不再需要 `pods/exec`。
+
+**落地前置 spike**：确认 `oc-channel-login`/`oc-cron` 不依赖 hermes **活进程**（仅 venv/CLI + /opt/data 文件）。多进程并发读写 sqlite 由 WAL 锁保证安全（与现状"exec 独立进程"语义一致）。若发现需活进程交互，退路是 `shareProcessNamespace: true` 或改回 hermes 容器内协进程。
+
+`oc-kb` 不在此列：它是 hermes 自身当 skill 出站调 manager 的，保持原样。
 
 ### 4.4 容器规格 → pod spec
 
@@ -132,7 +141,7 @@ manager 是控制面，通过 **runtime-agent 节点**间接管理 app：
 
 ### 4.5 RBAC
 
-manager-api 用 in-cluster ServiceAccount，对 `oc-apps` ns 授予：`deployments`/`services`/`secrets`/`configmaps` 的 CRUD、`pods` get/list/watch、`pods/exec` create、`pods/log` get。
+manager-api 用 in-cluster ServiceAccount，对 `oc-apps` ns 授予：`deployments`/`services`/`secrets`/`configmaps` 的 CRUD、`pods` get/list/watch、`pods/log` get。**不再需要 `pods/exec`**（hermes 命令改走 oc-ops HTTP，见 §4.3）——manager 权限收窄、安全姿态更好。
 
 ### 4.6 删除清单（节点概念影响面）
 
@@ -168,7 +177,10 @@ sidecar "s3-sync" (独立 mc 镜像 + 脚本):
   - 每 5-10s: mc mirror /opt/data/workspace → S3（增量；排除 node_modules 等可重建大目录）
   - 每 N s: sqlite3 state.db ".backup snap.db" → 上传 snap.db 为 state.db
   - preStop: 一次全量同步 + sqlite 快照
-共享: emptyDir 挂 /opt/data 与 /opt/oc-input，三容器可见
+sidecar "oc-ops" (基于 hermes 镜像构建; 见 §4.3):
+  - 暴露 oc-* 的 HTTP 端点 + /oc/kanban/watch 流；manager 用控制 token 调用
+  - 内部仍走 hermes venv/CLI 操作 /opt/data
+共享: emptyDir 挂 /opt/data 与 /opt/oc-input，各容器可见
 凭证: sidecar 用按 app prefix 限定的临时 STS 凭证（来自 bootstrap 响应）
 ```
 
@@ -283,19 +295,20 @@ sidecar "s3-sync" (独立 mc 镜像 + 脚本):
 - `storage.s3.*`：endpoint、bucket、region、credentials、SSE。
 - MySQL DSN（替换 `database.url`）。
 
-**k8s Secret 清单**：master_key、MySQL 凭证、S3/MinIO 凭证、registry(ACR) 凭证、per-app bootstrap token、new-api/ragflow 各自 secret。
+**k8s Secret 清单**：master_key、MySQL 凭证、S3/MinIO 凭证、registry(ACR) 凭证、**per-app 控制 token**（manager↔pod 双向复用：pod→manager bootstrap 拉配置、manager→oc-ops 调命令）、new-api/ragflow 各自 secret。
 
 ---
 
 ## 9. 实现拆分与顺序
 
-拆 3 份实现 spec（各自独立 spec → plan → 实现）：
+拆 4 份实现 spec（各自独立 spec → plan → 实现）：
 
 1. **spec-C：MySQL 迁移**——独立、可先行不阻塞其他工作。
 2. **spec-A+B：编排 k8s 化 + app 数据模型**——耦合最紧、本迁移核心。
-3. **spec-D：全栈部署 + 本地 k3d**——收口，依赖 A/B/C 产物。
+3. **spec-E：oc-* 收敛为 oc-ops HTTP 服务**——Hermes 镜像侧改动，相对独立；起手做一个 spike 确认无 hermes 活进程依赖（§4.3）。被 A（manager 改调 HTTP）依赖。
+4. **spec-D：全栈部署 + 本地 k3d**——收口，依赖 A/B/C/E 产物。
 
-**建议顺序**：C →（A+B）→ D。
+**建议顺序**：C 与 E 可并行先行（互不依赖） →（A+B，A 依赖 E 的 oc-ops 契约） → D。
 
 ---
 
@@ -305,7 +318,9 @@ sidecar "s3-sync" (独立 mc 镜像 + 脚本):
 |---|---|---|
 | manager-api 启动期成为 app 硬依赖 | manager 挂则 app 起不来（§5.3） | manager-api 多副本 HA |
 | 硬 kill 丢会话尾部 | 非优雅终止丢上次快照后的增量 | preStop 覆盖优雅路径；缩短快照间隔可减小窗口；已接受 |
-| 流式 exec(kanban watch) 经 API server 长连接 | idle timeout / API server 重启 | 重连逻辑；退路加 HTTP watch 端点 |
+| oc-ops 是否依赖 hermes 活进程 | 若 channel-login/cron 需活进程而非仅 venv/CLI+文件，第二容器方案不成立 | spec-E 起手 spike 确认；退路 `shareProcessNamespace` 或容器内协进程（§4.3） |
+| oc-ops 容器须跟 hermes 版本 | 它基于 hermes 镜像构建，hermes 升级需同步 | 与 hermes 镜像同一构建链、同版本标签发布 |
+| oc-ops 端点认证 | 重新引入容器 HTTP+token（窄于原 agent） | 复用 per-app 控制 token（k8s Secret），仅 oc-* verb 范围 |
 | 唯一部分索引→生成列 | schema 形变，需逐个验证唯一语义 | 单元测试覆盖每个唯一约束的边界 |
 | workspace 大目录同步成本 | node_modules 等高频变更 | 排除可重建大目录；`mc mirror` 仅传变更 |
 | metrics 降级 | 失去网络/磁盘 I/O 指标 | 资源面板砍两项；后续需要再上 Prometheus |
