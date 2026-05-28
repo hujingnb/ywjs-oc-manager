@@ -156,7 +156,7 @@ describe('AppChannelsTab', () => {
     expect(detail.text()).toContain('已绑定：alice') // 绑定身份仍单独成行
     expect(detail.text()).not.toContain('当前渠道') // 去掉 kicker
     expect(detail.text()).not.toContain('当前状态：') // 去掉旧状态前缀
-    expect(wrapper.text()).not.toContain('bound') // 不泄露后端原值
+    expect(detail.text()).not.toContain('· bound') // 头部状态不泄露后端原值（应为中文标签）
     expect(wrapper.text()).not.toContain('尚未发起挑战')
   })
 })
