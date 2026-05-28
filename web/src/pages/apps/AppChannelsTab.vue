@@ -309,7 +309,6 @@ async function unbind() {
   opacity: 1;
 }
 
-
 .channel-copy {
   display: grid;
   gap: 3px;

@@ -122,8 +122,9 @@ describe('AppChannelsTab', () => {
     expect(unsupported.every(item => item.attributes('aria-disabled') === 'true')).toBe(true)
     expect(unsupported.every(item => item.attributes('disabled') !== undefined)).toBe(true)
     expect(unsupported.every(item => item.text().includes('暂不支持'))).toBe(true)
-    // 未支持渠道 logo 均带灰度 muted 标记（含已有 3 个 + 新增 5 个 = 8 个）
+    // 未支持渠道 logo 均带灰度 muted 标记（原有 3 个不支持 + 新增 5 个 = 8 个）
     expect(wrapper.findAll('.channel-logo.muted')).toHaveLength(8)
+    // 抽查 3 个新增渠道的 type 钩子（非全覆盖，discord/slack 由上面 muted 计数间接保障）
     expect(wrapper.find('.channel-logo--telegram').exists()).toBe(true)
     expect(wrapper.find('.channel-logo--whatsapp').exists()).toBe(true)
     expect(wrapper.find('.channel-logo--line').exists()).toBe(true)
