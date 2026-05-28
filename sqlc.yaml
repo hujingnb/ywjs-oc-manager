@@ -1,43 +1,43 @@
 version: "2"
 sql:
-  - engine: postgresql
+  - engine: mysql
     schema:
-      - internal/migrations/000001_init.up.sql
-      - internal/migrations/000002_core_schema.up.sql
-      - internal/migrations/000003_agent_token_ciphertext.up.sql
-      - internal/migrations/000004_knowledge_sync_status.up.sql
-      - internal/migrations/000005_apps_runtime_snapshot.up.sql
-      - internal/migrations/000006_apps_restart_policy.up.sql
-      - internal/migrations/000007_runtime_nodes_max_apps.up.sql
-      - internal/migrations/000008_organizations_newapi_credentials.up.sql
-      - internal/migrations/000010_apps_index_rebuild.up.sql
-      - internal/migrations/000011_users_deleted_at.up.sql
-      - internal/migrations/000012_runtime_nodes_auto_enroll.up.sql
-      - internal/migrations/000013_organization_code_login.up.sql
-      - internal/migrations/000014_resource_samples.up.sql
-      - internal/migrations/000015_app_model_governance.up.sql
-      - internal/migrations/000016_runtime_to_hermes.up.sql
-      - internal/migrations/000017_app_progress_fields.up.sql
-      - internal/migrations/000018_app_last_error_message.up.sql
-      - internal/migrations/000019_app_runtime_image.up.sql
-      - internal/migrations/000020_audit_logs_detail_message.up.sql
-      - internal/migrations/000021_organizations_apps_newapi_names.up.sql
-      - internal/migrations/000022_org_single_model.up.sql
-      - internal/migrations/000023_assistant_versions.up.sql
-      - internal/migrations/000024_apps_model_id_optional.up.sql
-      - internal/migrations/000025_drop_organization_personas.up.sql
-      - internal/migrations/000026_drop_apps_persona_columns.up.sql
-      - internal/migrations/000027_drop_apps_model_columns.up.sql
-      - internal/migrations/000028_drop_organizations_model_id.up.sql
-      - internal/migrations/000029_ragflow_knowledge.up.sql
-      - internal/migrations/000030_drop_local_knowledge_sync.up.sql
+      - internal/migrations/000001_baseline.up.sql
     queries: internal/store/queries
     gen:
       go:
         package: sqlc
         out: internal/store/sqlc
-        sql_package: pgx/v5
         emit_json_tags: true
         emit_db_tags: true
         emit_empty_slices: true
         emit_interface: true
+        overrides:
+          # UUID 列存 CHAR(36)，Go 侧用 string（应用层生成）
+          - db_type: "char"
+            go_type: "string"
+          - db_type: "char"
+            nullable: true
+            go_type: "github.com/guregu/null/v5.String"
+          # 可空文本
+          - db_type: "varchar"
+            nullable: true
+            go_type: "github.com/guregu/null/v5.String"
+          - db_type: "text"
+            nullable: true
+            go_type: "github.com/guregu/null/v5.String"
+          # 可空时间
+          - db_type: "datetime"
+            nullable: true
+            go_type: "github.com/guregu/null/v5.Time"
+          # 可空整数
+          - db_type: "bigint"
+            nullable: true
+            go_type: "github.com/guregu/null/v5.Int"
+          - db_type: "int"
+            nullable: true
+            go_type: "github.com/guregu/null/v5.Int"
+          # 可空浮点（资源采样 cpu_percent 等）
+          - db_type: "double"
+            nullable: true
+            go_type: "github.com/guregu/null/v5.Float"
