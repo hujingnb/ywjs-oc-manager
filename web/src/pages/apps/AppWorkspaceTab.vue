@@ -103,7 +103,7 @@ function entryRelativePath(entryPath: string): string {
 // columns 提供目录进入和文件下载操作，目录不展示下载按钮。
 const columns: DataTableColumns<WorkspaceEntry> = [
   {
-    title: '名称', key: 'name',
+    title: '文件名称', key: 'name',
     render: (row) => row.is_dir
       ? h('strong', { style: 'cursor: pointer; color: var(--color-info-text); text-decoration: underline dotted', onClick: () => enter(row) }, `${row.name}/`)
       : row.name,

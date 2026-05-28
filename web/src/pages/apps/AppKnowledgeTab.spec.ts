@@ -16,6 +16,7 @@ const mocks = vi.hoisted(() => ({
 
 type RenderableColumn = {
   key: string
+  title?: string
   render?: (row: unknown) => VNodeChild
 }
 
@@ -33,7 +34,10 @@ const DataTableStub = defineComponent({
     data: { type: Array as PropType<unknown[]>, default: () => [] },
   },
   setup(props) {
-    return () => h('div', props.data.flatMap((row) => props.columns.map((column) => h('div', { class: `cell-${column.key}` }, renderCellChildren(column, row)))))
+    return () => h('div', [
+      h('div', { class: 'headers' }, props.columns.map((column) => h('span', { class: `header-${column.key}` }, column.title))),
+      ...props.data.flatMap((row) => props.columns.map((column) => h('div', { class: `cell-${column.key}` }, renderCellChildren(column, row)))),
+    ])
   },
 })
 
@@ -101,6 +105,7 @@ function mountTab() {
       },
       stubs: {
         NCard: { template: '<section><slot name="header" /><slot name="header-extra" /><slot /></section>' },
+        DataTable: DataTableStub,
         NDataTable: DataTableStub,
         NButton: { template: '<button><slot /></button>' },
         NTag: { template: '<span><slot /></span>' },
@@ -123,6 +128,13 @@ describe('AppKnowledgeTab', () => {
     mocks.warning.mockReset()
     mocks.run.mockReset()
     mocks.mutateAsync.mockReset()
+  })
+
+  // 覆盖实例知识库文件列表列头文案：文件名列必须明确显示为「文件名称」。
+  it('实例知识库文件列表首列展示文件名称', () => {
+    const wrapper = mountTab()
+
+    expect(wrapper.find('.header-name').text()).toBe('文件名称')
   })
 
   // 覆盖实例知识库上传超限路径：前端提示 100MB 限制，并且不创建上传会话。

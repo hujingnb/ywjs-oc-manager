@@ -15,6 +15,7 @@ const mocks = vi.hoisted(() => ({
 
 type RenderableColumn = {
   key: string
+  title?: string
   render?: (row: unknown) => VNodeChild
 }
 
@@ -25,14 +26,24 @@ function renderCellChildren(column: RenderableColumn, row: unknown): RenderedChi
   return child == null ? [] : [child as RenderedChild]
 }
 
-// DataTableStub 渲染列 render 结果，确保单元测试能覆盖表格操作按钮。
+// DataTableStub 同时渲染列头与单元格，确保单元测试能覆盖表格文案和操作按钮。
 const DataTableStub = defineComponent({
   props: {
     columns: { type: Array as PropType<RenderableColumn[]>, default: () => [] },
     data: { type: Array as PropType<unknown[]>, default: () => [] },
   },
   setup(props) {
-    return () => h('div', props.data.flatMap((row) => props.columns.map((column) => h('div', { class: `cell-${column.key}` }, renderCellChildren(column, row)))))
+    return () =>
+      h('div', [
+        h(
+          'div',
+          { class: 'headers' },
+          props.columns.map((column) => h('span', { class: `header-${column.key}` }, column.title)),
+        ),
+        ...props.data.flatMap((row) =>
+          props.columns.map((column) => h('div', { class: `cell-${column.key}` }, renderCellChildren(column, row))),
+        ),
+      ])
   },
 })
 
@@ -101,6 +112,7 @@ function mountPage() {
         NCard: { template: '<section><slot name="header" /><slot name="header-extra" /><slot /></section>' },
         NSpace: { template: '<div><slot /></div>' },
         NSelect: { template: '<select />' },
+        DataTable: DataTableStub,
         NDataTable: DataTableStub,
         NButton: { template: '<button><slot /></button>' },
         NTag: { template: '<span><slot /></span>' },
@@ -122,6 +134,13 @@ describe('OrgKnowledgePage', () => {
     mocks.run.mockReset()
     mocks.warning.mockReset()
     mocks.mutateAsync.mockReset()
+  })
+
+  // 覆盖企业知识库文件列表列头文案：文件名列必须明确显示为「文件名称」。
+  it('企业知识库文件列表首列展示文件名称', () => {
+    const wrapper = mountPage()
+
+    expect(wrapper.find('.header-name').text()).toBe('文件名称')
   })
 
   // 覆盖组织知识库上传超限路径：前端提示 100MB 限制，并且不创建上传会话。

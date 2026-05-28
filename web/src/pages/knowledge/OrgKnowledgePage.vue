@@ -183,7 +183,7 @@ function canReparse(row: KnowledgeDocument): boolean {
 // fileColumns 展示 RAGFlow 文档；组织成员可下载，管理者额外可删除和重解析。
 const fileColumns: DataTableColumns<KnowledgeDocument> = [
   {
-    title: '名称', key: 'name',
+    title: '文件名称', key: 'name',
     render: (row) => h('strong', row.name),
   },
   { title: '大小', key: 'size', render: (row) => formatSize(row.size) },
