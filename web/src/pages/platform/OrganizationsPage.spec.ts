@@ -309,7 +309,7 @@ describe('OrganizationsPage', () => {
 
     // 表单应预填当前组织数据，首个 input 为名称字段
     const inputs = wrapper.findAll('input')
-    // 预填名称应为「测试组织」
+    // 预填名称应为「测试企业」
     const nameInput = inputs.find(i => (i.element as HTMLInputElement).value === '测试企业')
     expect(nameInput).toBeTruthy()
 

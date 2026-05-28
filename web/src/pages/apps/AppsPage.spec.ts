@@ -120,7 +120,7 @@ describe('AppsPage', () => {
   })
 
   // 验证 version_synced 为 true 或字段缺省的实例行，状态列不渲染「需重启」标签。
-  // 通过检查「组织实例」所在行不含「需重启」来保证条件是严格判断 false，而非 falsy。
+  // 通过检查「企业实例」所在行不含「需重启」来保证条件是严格判断 false，而非 falsy。
   it('version_synced 非 false 的实例不显示「需重启」标签', () => {
     const wrapper = mount(AppsPage, {
       global: { stubs: globalStubs },
