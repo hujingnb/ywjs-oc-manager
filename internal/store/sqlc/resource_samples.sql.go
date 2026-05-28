@@ -231,10 +231,10 @@ func (q *Queries) InsertNodeResourceSample(ctx context.Context, arg InsertNodeRe
 
 const listInstanceResourceBuckets = `-- name: ListInstanceResourceBuckets :many
 SELECT
-    FROM_UNIXTIME(FLOOR(UNIX_TIMESTAMP(sampled_at) / ?) * ?) AS sampled_at,
+    CAST(FROM_UNIXTIME(FLOOR(UNIX_TIMESTAMP(sampled_at) / ?) * ?) AS DATETIME) AS sampled_at,
     COALESCE(SUBSTRING_INDEX(GROUP_CONCAT(container_status ORDER BY sampled_at DESC SEPARATOR '\x1e'), '\x1e', 1), '') AS container_status,
     COUNT(container_status) > 0 AS has_container_status,
-    COALESCE(AVG(cpu_percent), 0) AS cpu_percent,
+    CAST(COALESCE(AVG(cpu_percent), 0) AS DOUBLE) AS cpu_percent,
     COUNT(cpu_percent) > 0 AS has_cpu_percent,
     CAST(COALESCE(AVG(memory_used_bytes), 0) AS SIGNED) AS memory_used_bytes,
     COUNT(memory_used_bytes) > 0 AS has_memory_used_bytes,
@@ -266,10 +266,10 @@ type ListInstanceResourceBucketsParams struct {
 }
 
 type ListInstanceResourceBucketsRow struct {
-	SampledAt           string      `db:"sampled_at" json:"sampled_at"`
+	SampledAt           time.Time   `db:"sampled_at" json:"sampled_at"`
 	ContainerStatus     interface{} `db:"container_status" json:"container_status"`
 	HasContainerStatus  bool        `db:"has_container_status" json:"has_container_status"`
-	CpuPercent          interface{} `db:"cpu_percent" json:"cpu_percent"`
+	CpuPercent          float64     `db:"cpu_percent" json:"cpu_percent"`
 	HasCpuPercent       bool        `db:"has_cpu_percent" json:"has_cpu_percent"`
 	MemoryUsedBytes     int64       `db:"memory_used_bytes" json:"memory_used_bytes"`
 	HasMemoryUsedBytes  bool        `db:"has_memory_used_bytes" json:"has_memory_used_bytes"`
@@ -502,10 +502,10 @@ func (q *Queries) ListLatestNodeResourceSamples(ctx context.Context, runtimeNode
 
 const listNodeInstanceResourceBuckets = `-- name: ListNodeInstanceResourceBuckets :many
 SELECT
-    FROM_UNIXTIME(FLOOR(UNIX_TIMESTAMP(sampled_at) / ?) * ?) AS sampled_at,
+    CAST(FROM_UNIXTIME(FLOOR(UNIX_TIMESTAMP(sampled_at) / ?) * ?) AS DATETIME) AS sampled_at,
     COALESCE(SUBSTRING_INDEX(GROUP_CONCAT(container_status ORDER BY sampled_at DESC SEPARATOR '\x1e'), '\x1e', 1), '') AS container_status,
     COUNT(container_status) > 0 AS has_container_status,
-    COALESCE(AVG(cpu_percent), 0) AS cpu_percent,
+    CAST(COALESCE(AVG(cpu_percent), 0) AS DOUBLE) AS cpu_percent,
     COUNT(cpu_percent) > 0 AS has_cpu_percent,
     CAST(COALESCE(AVG(memory_used_bytes), 0) AS SIGNED) AS memory_used_bytes,
     COUNT(memory_used_bytes) > 0 AS has_memory_used_bytes,
@@ -539,10 +539,10 @@ type ListNodeInstanceResourceBucketsParams struct {
 }
 
 type ListNodeInstanceResourceBucketsRow struct {
-	SampledAt           string      `db:"sampled_at" json:"sampled_at"`
+	SampledAt           time.Time   `db:"sampled_at" json:"sampled_at"`
 	ContainerStatus     interface{} `db:"container_status" json:"container_status"`
 	HasContainerStatus  bool        `db:"has_container_status" json:"has_container_status"`
-	CpuPercent          interface{} `db:"cpu_percent" json:"cpu_percent"`
+	CpuPercent          float64     `db:"cpu_percent" json:"cpu_percent"`
 	HasCpuPercent       bool        `db:"has_cpu_percent" json:"has_cpu_percent"`
 	MemoryUsedBytes     int64       `db:"memory_used_bytes" json:"memory_used_bytes"`
 	HasMemoryUsedBytes  bool        `db:"has_memory_used_bytes" json:"has_memory_used_bytes"`
@@ -673,8 +673,8 @@ func (q *Queries) ListNodeInstanceResourceSamples(ctx context.Context, arg ListN
 
 const listNodeResourceBuckets = `-- name: ListNodeResourceBuckets :many
 SELECT
-    FROM_UNIXTIME(FLOOR(UNIX_TIMESTAMP(sampled_at) / ?) * ?) AS sampled_at,
-    COALESCE(AVG(cpu_percent), 0) AS cpu_percent,
+    CAST(FROM_UNIXTIME(FLOOR(UNIX_TIMESTAMP(sampled_at) / ?) * ?) AS DATETIME) AS sampled_at,
+    CAST(COALESCE(AVG(cpu_percent), 0) AS DOUBLE) AS cpu_percent,
     COUNT(cpu_percent) > 0 AS has_cpu_percent,
     CAST(COALESCE(AVG(memory_used_bytes), 0) AS SIGNED) AS memory_used_bytes,
     COUNT(memory_used_bytes) > 0 AS has_memory_used_bytes,
@@ -708,8 +708,8 @@ type ListNodeResourceBucketsParams struct {
 }
 
 type ListNodeResourceBucketsRow struct {
-	SampledAt           string      `db:"sampled_at" json:"sampled_at"`
-	CpuPercent          interface{} `db:"cpu_percent" json:"cpu_percent"`
+	SampledAt           time.Time   `db:"sampled_at" json:"sampled_at"`
+	CpuPercent          float64     `db:"cpu_percent" json:"cpu_percent"`
 	HasCpuPercent       bool        `db:"has_cpu_percent" json:"has_cpu_percent"`
 	MemoryUsedBytes     int64       `db:"memory_used_bytes" json:"memory_used_bytes"`
 	HasMemoryUsedBytes  bool        `db:"has_memory_used_bytes" json:"has_memory_used_bytes"`

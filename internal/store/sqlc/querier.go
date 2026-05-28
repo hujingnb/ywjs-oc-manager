@@ -217,7 +217,7 @@ type Querier interface {
 	SoftDeleteUser(ctx context.Context, id string) error
 	// SumRechargeAmountByOrg 聚合指定组织所有成功充值记录的总额。
 	// 仅统计 status='succeeded' 的记录，failed 记录不计入累计金额。
-	SumRechargeAmountByOrg(ctx context.Context, orgID string) (interface{}, error)
+	SumRechargeAmountByOrg(ctx context.Context, orgID string) (int64, error)
 	// phasePullRuntimeImage 成功后写入镜像引用与 sha256。
 	UpdateAppRuntimeImage(ctx context.Context, arg UpdateAppRuntimeImageParams) error
 	// revision 由 service 计算后整体写入（仅容器相关字段变更才递增）。

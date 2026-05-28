@@ -308,14 +308,13 @@ WHERE id = ?
 `
 
 type SetUserStatusParams struct {
-	Status  string      `db:"status" json:"status"`
-	Column2 interface{} `db:"column_2" json:"column_2"`
-	ID      string      `db:"id" json:"id"`
+	Status string `db:"status" json:"status"`
+	ID     string `db:"id" json:"id"`
 }
 
 // disabled 时同步写 deleted_at（下线时间戳）；enabled 时清空，让重启用户能恢复。
 func (q *Queries) SetUserStatus(ctx context.Context, arg SetUserStatusParams) error {
-	_, err := q.db.ExecContext(ctx, setUserStatus, arg.Status, arg.Column2, arg.ID)
+	_, err := q.db.ExecContext(ctx, setUserStatus, arg.Status, arg.Status, arg.ID)
 	return err
 }
 

@@ -54,8 +54,8 @@ ORDER BY sampled_at ASC, id ASC;
 
 -- name: ListNodeResourceBuckets :many
 SELECT
-    FROM_UNIXTIME(FLOOR(UNIX_TIMESTAMP(sampled_at) / sqlc.arg(bucket_seconds)) * sqlc.arg(bucket_seconds)) AS sampled_at,
-    COALESCE(AVG(cpu_percent), 0) AS cpu_percent,
+    CAST(FROM_UNIXTIME(FLOOR(UNIX_TIMESTAMP(sampled_at) / sqlc.arg(bucket_seconds)) * sqlc.arg(bucket_seconds)) AS DATETIME) AS sampled_at,
+    CAST(COALESCE(AVG(cpu_percent), 0) AS DOUBLE) AS cpu_percent,
     COUNT(cpu_percent) > 0 AS has_cpu_percent,
     CAST(COALESCE(AVG(memory_used_bytes), 0) AS SIGNED) AS memory_used_bytes,
     COUNT(memory_used_bytes) > 0 AS has_memory_used_bytes,
@@ -117,10 +117,10 @@ ORDER BY sampled_at ASC, id ASC;
 
 -- name: ListInstanceResourceBuckets :many
 SELECT
-    FROM_UNIXTIME(FLOOR(UNIX_TIMESTAMP(sampled_at) / sqlc.arg(bucket_seconds)) * sqlc.arg(bucket_seconds)) AS sampled_at,
+    CAST(FROM_UNIXTIME(FLOOR(UNIX_TIMESTAMP(sampled_at) / sqlc.arg(bucket_seconds)) * sqlc.arg(bucket_seconds)) AS DATETIME) AS sampled_at,
     COALESCE(SUBSTRING_INDEX(GROUP_CONCAT(container_status ORDER BY sampled_at DESC SEPARATOR '\x1e'), '\x1e', 1), '') AS container_status,
     COUNT(container_status) > 0 AS has_container_status,
-    COALESCE(AVG(cpu_percent), 0) AS cpu_percent,
+    CAST(COALESCE(AVG(cpu_percent), 0) AS DOUBLE) AS cpu_percent,
     COUNT(cpu_percent) > 0 AS has_cpu_percent,
     CAST(COALESCE(AVG(memory_used_bytes), 0) AS SIGNED) AS memory_used_bytes,
     COUNT(memory_used_bytes) > 0 AS has_memory_used_bytes,
@@ -145,10 +145,10 @@ ORDER BY 1 ASC;
 
 -- name: ListNodeInstanceResourceBuckets :many
 SELECT
-    FROM_UNIXTIME(FLOOR(UNIX_TIMESTAMP(sampled_at) / sqlc.arg(bucket_seconds)) * sqlc.arg(bucket_seconds)) AS sampled_at,
+    CAST(FROM_UNIXTIME(FLOOR(UNIX_TIMESTAMP(sampled_at) / sqlc.arg(bucket_seconds)) * sqlc.arg(bucket_seconds)) AS DATETIME) AS sampled_at,
     COALESCE(SUBSTRING_INDEX(GROUP_CONCAT(container_status ORDER BY sampled_at DESC SEPARATOR '\x1e'), '\x1e', 1), '') AS container_status,
     COUNT(container_status) > 0 AS has_container_status,
-    COALESCE(AVG(cpu_percent), 0) AS cpu_percent,
+    CAST(COALESCE(AVG(cpu_percent), 0) AS DOUBLE) AS cpu_percent,
     COUNT(cpu_percent) > 0 AS has_cpu_percent,
     CAST(COALESCE(AVG(memory_used_bytes), 0) AS SIGNED) AS memory_used_bytes,
     COUNT(memory_used_bytes) > 0 AS has_memory_used_bytes,

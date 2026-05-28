@@ -47,10 +47,10 @@ LIMIT 1;
 -- name: SetUserStatus :exec
 -- disabled 时同步写 deleted_at（下线时间戳）；enabled 时清空，让重启用户能恢复。
 UPDATE users
-SET status = ?,
-    deleted_at = CASE WHEN ? = 'disabled' THEN NOW() ELSE NULL END,
+SET status = sqlc.arg(status),
+    deleted_at = CASE WHEN sqlc.arg(status) = 'disabled' THEN NOW() ELSE NULL END,
     updated_at = NOW()
-WHERE id = ?;
+WHERE id = sqlc.arg(id);
 
 -- name: UpdateUserProfile :exec
 UPDATE users

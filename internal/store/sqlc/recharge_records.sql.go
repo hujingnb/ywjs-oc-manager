@@ -122,16 +122,16 @@ func (q *Queries) ListRechargeRecordsByOrg(ctx context.Context, arg ListRecharge
 }
 
 const sumRechargeAmountByOrg = `-- name: SumRechargeAmountByOrg :one
-SELECT COALESCE(SUM(credit_amount), 0) AS total_recharged
+SELECT CAST(COALESCE(SUM(credit_amount), 0) AS SIGNED) AS total_recharged
 FROM recharge_records
 WHERE org_id = ? AND status = 'succeeded'
 `
 
 // SumRechargeAmountByOrg 聚合指定组织所有成功充值记录的总额。
 // 仅统计 status='succeeded' 的记录，failed 记录不计入累计金额。
-func (q *Queries) SumRechargeAmountByOrg(ctx context.Context, orgID string) (interface{}, error) {
+func (q *Queries) SumRechargeAmountByOrg(ctx context.Context, orgID string) (int64, error) {
 	row := q.db.QueryRowContext(ctx, sumRechargeAmountByOrg, orgID)
-	var total_recharged interface{}
+	var total_recharged int64
 	err := row.Scan(&total_recharged)
 	return total_recharged, err
 }
