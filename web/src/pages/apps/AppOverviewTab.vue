@@ -44,7 +44,7 @@
             {{ apiKeyLabel(app.api_key_status) }}
           </n-tag>
           <!-- 仅保留「恢复」入口：UI 不再提供主动禁用 API key 的能力，避免用户误操作把仍在使用的
-               实例 key 关停；若历史/外部流程已把 key 置为 disabled，企业管理员仍可在此恢复。 -->
+               实例 key 关停；若历史/外部流程已把 key 置为 disabled，组织管理员仍可在此恢复。 -->
           <n-button
             v-if="canToggleKey && app.api_key_status === 'disabled'"
             size="small"
