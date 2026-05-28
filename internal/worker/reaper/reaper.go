@@ -8,14 +8,14 @@ package reaper
 
 import (
 	"context"
+	"database/sql"
 	"encoding/json"
 	"errors"
 	"fmt"
 	"log/slog"
 	"time"
 
-	"github.com/jackc/pgx/v5"
-	"github.com/jackc/pgx/v5/pgtype"
+	"github.com/google/uuid"
 
 	"oc-manager/internal/domain"
 	ocredis "oc-manager/internal/redis"
@@ -26,17 +26,17 @@ import (
 // 由 sqlc 生成的 *sqlc.Queries 直接满足本接口,装配时无需 adapter。
 type Store interface {
 	// ListStaleInits 扫 5 个 init 子状态下 updated_at < 阈值的孤儿 apps。
-	ListStaleInits(ctx context.Context, updatedAt pgtype.Timestamptz) ([]sqlc.ListStaleInitsRow, error)
+	ListStaleInits(ctx context.Context, updatedAt time.Time) ([]sqlc.ListStaleInitsRow, error)
 	// SetAppStatus reaper 强制把孤儿 status 回退到 pulling_runtime_image;不走状态机校验。
-	SetAppStatus(ctx context.Context, arg sqlc.SetAppStatusParams) (sqlc.App, error)
+	SetAppStatus(ctx context.Context, arg sqlc.SetAppStatusParams) error
 	// ClearAppProgress 清空 progress_current / progress_total,避免前端继续看到旧值。
-	ClearAppProgress(ctx context.Context, id pgtype.UUID) (sqlc.App, error)
-	// GetLatestAppInitJob 取最近一份 app_initialize job;不存在返回 pgx.ErrNoRows。
-	GetLatestAppInitJob(ctx context.Context, appID string) (sqlc.Job, error)
+	ClearAppProgress(ctx context.Context, id string) error
+	// GetLatestAppInitJob 取最近一份 app_initialize job;不存在返回 sql.ErrNoRows。
+	GetLatestAppInitJob(ctx context.Context, appID json.RawMessage) (sqlc.Job, error)
 	// RequeueJob 把 running / succeeded 的 job 重置回 pending。
-	RequeueJob(ctx context.Context, id pgtype.UUID) (sqlc.Job, error)
+	RequeueJob(ctx context.Context, id string) error
 	// CreateJob 没有历史 job 时新建一份。
-	CreateJob(ctx context.Context, arg sqlc.CreateJobParams) (sqlc.Job, error)
+	CreateJob(ctx context.Context, arg sqlc.CreateJobParams) error
 }
 
 // JobNotifier 与 internal/redis ZSET queue 一致;reaper 重置 job 后通知 scheduler 立即拾取。
@@ -121,7 +121,7 @@ func (r *Reaper) tickOnce(ctx context.Context) {
 // reapOnce 单次扫描:取所有 updated_at 落后阈值的 init 子状态行,
 // 逐条重置 status 并入队 job。任意一条失败不中断剩余处理,只记日志。
 func (r *Reaper) reapOnce(ctx context.Context) error {
-	threshold := pgtype.Timestamptz{Time: time.Now().Add(-r.staleAfter), Valid: true}
+	threshold := time.Now().Add(-r.staleAfter)
 	rows, err := r.store.ListStaleInits(ctx, threshold)
 	if err != nil {
 		return fmt.Errorf("查询孤儿 apps: %w", err)
@@ -129,8 +129,8 @@ func (r *Reaper) reapOnce(ctx context.Context) error {
 	for _, row := range rows {
 		if err := r.reapApp(ctx, row); err != nil {
 			r.logger.Error("reaper 重置单个 app 失败",
-				"app_id", uuidString(row.ID),
-				"node_id", uuidString(row.RuntimeNodeID),
+				"app_id", row.ID,
+				"node_id", row.RuntimeNodeID,
 				"status", row.Status,
 				"error", err,
 			)
@@ -144,81 +144,70 @@ func (r *Reaper) reapOnce(ctx context.Context) error {
 // 不是状态机正常路径,但 reaper 是显式接管,直接强制 SET);
 // 状态机校验只针对 worker 阶段切换,reaper 是带外接管动作,与之是不同语义。
 func (r *Reaper) reapApp(ctx context.Context, row sqlc.ListStaleInitsRow) error {
-	if _, err := r.store.SetAppStatus(ctx, sqlc.SetAppStatusParams{
+	if err := r.store.SetAppStatus(ctx, sqlc.SetAppStatusParams{
 		ID:     row.ID,
 		Status: domain.AppStatusPullingRuntimeImage,
 	}); err != nil {
 		return fmt.Errorf("重置 status: %w", err)
 	}
-	if _, err := r.store.ClearAppProgress(ctx, row.ID); err != nil {
+	if err := r.store.ClearAppProgress(ctx, row.ID); err != nil {
 		return fmt.Errorf("清空 progress_*: %w", err)
 	}
 	jobID, err := r.ensureInitJob(ctx, row)
 	if err != nil {
 		return err
 	}
-	if err := r.notifier.Enqueue(ctx, uuidString(jobID)); err != nil {
+	if err := r.notifier.Enqueue(ctx, jobID); err != nil {
 		// 通知失败仅记账,scheduler 兜底扫表会拾起。
-		r.logger.Warn("reaper 入队失败,等 scheduler 兜底", "job_id", uuidString(jobID), "error", err)
+		r.logger.Warn("reaper 入队失败,等 scheduler 兜底", "job_id", jobID, "error", err)
 	}
 	return nil
 }
 
 // ensureInitJob 找最近一份 app_initialize job:不存在新建;running / succeeded 重置回 pending;
 // 已 pending 直接复用(也仍会触发一次 Enqueue,防 scheduler 漏触发)。
-func (r *Reaper) ensureInitJob(ctx context.Context, row sqlc.ListStaleInitsRow) (pgtype.UUID, error) {
-	job, err := r.store.GetLatestAppInitJob(ctx, uuidString(row.ID))
-	if err != nil && !errors.Is(err, pgx.ErrNoRows) {
-		return pgtype.UUID{}, fmt.Errorf("查 job: %w", err)
+// 返回值是 job ID 字符串,供调用方 Enqueue。
+func (r *Reaper) ensureInitJob(ctx context.Context, row sqlc.ListStaleInitsRow) (string, error) {
+	// GetLatestAppInitJob 的参数是 json.RawMessage（MySQL JSON 路径查询参数）。
+	// 按 querier 签名：appID 传应用 ID 的 JSON 字符串字面量（带双引号），MySQL 端做 JSON 比较。
+	appIDJson, _ := json.Marshal(row.ID)
+	job, err := r.store.GetLatestAppInitJob(ctx, json.RawMessage(appIDJson))
+	if err != nil && !errors.Is(err, sql.ErrNoRows) {
+		return "", fmt.Errorf("查 job: %w", err)
 	}
-	if errors.Is(err, pgx.ErrNoRows) {
+	if errors.Is(err, sql.ErrNoRows) {
 		// 历史从未建过 app_initialize job,新建一份。
 		// payload 至少含 app_id 和 runtime_node_id,与 handler 入参 schema 对齐。
 		payload, perr := json.Marshal(map[string]any{
-			"app_id":       uuidString(row.ID),
-			"runtime_node": uuidString(row.RuntimeNodeID),
+			"app_id":       row.ID,
+			"runtime_node": row.RuntimeNodeID,
 		})
 		if perr != nil {
-			return pgtype.UUID{}, fmt.Errorf("序列化 payload: %w", perr)
+			return "", fmt.Errorf("序列化 payload: %w", perr)
 		}
-		created, cerr := r.store.CreateJob(ctx, sqlc.CreateJobParams{
+		newID := uuid.NewString()
+		cerr := r.store.CreateJob(ctx, sqlc.CreateJobParams{
+			ID:          newID,
 			Type:        domain.JobTypeAppInitialize,
 			Priority:    100,
-			RunAfter:    pgtype.Timestamptz{Time: time.Now(), Valid: true},
+			RunAfter:    time.Now(),
 			MaxAttempts: 3,
 			PayloadJson: payload,
 		})
 		if cerr != nil {
-			return pgtype.UUID{}, fmt.Errorf("CreateJob: %w", cerr)
+			return "", fmt.Errorf("CreateJob: %w", cerr)
 		}
-		return created.ID, nil
+		return newID, nil
 	}
 	if job.Status == domain.JobStatusPending {
 		// 已 pending 不动 status,但仍返回 ID 让上层 Enqueue 一次。
 		return job.ID, nil
 	}
-	updated, err := r.store.RequeueJob(ctx, job.ID)
+	err = r.store.RequeueJob(ctx, job.ID)
 	if err != nil {
-		return pgtype.UUID{}, fmt.Errorf("RequeueJob: %w", err)
+		return "", fmt.Errorf("RequeueJob: %w", err)
 	}
-	return updated.ID, nil
-}
-
-// uuidString 把 pgtype.UUID 渲染成 "xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx";
-// 项目其他包(handlers / service)有同形态的实现,reaper 包内独立一份避免反向依赖。
-func uuidString(id pgtype.UUID) string {
-	if !id.Valid {
-		return ""
-	}
-	const digits = "0123456789abcdef"
-	out := make([]byte, 0, 36)
-	for i, b := range id.Bytes {
-		out = append(out, digits[b>>4], digits[b&0x0f])
-		if i == 3 || i == 5 || i == 7 || i == 9 {
-			out = append(out, '-')
-		}
-	}
-	return string(out)
+	return job.ID, nil
 }
 
 // nowToken 给 lock token 加一个时间戳后缀,避免同进程在锁过期边缘场景下

@@ -2,14 +2,13 @@ package handlers
 
 import (
 	"context"
+	"database/sql"
 	"encoding/json"
 	"errors"
 	"net/http"
 	"time"
 
 	"github.com/gin-gonic/gin"
-	"github.com/jackc/pgx/v5"
-	"github.com/jackc/pgx/v5/pgtype"
 
 	"oc-manager/internal/api/apierror"
 	"oc-manager/internal/auth"
@@ -28,8 +27,8 @@ type JobsHandler struct {
 // 暴露给 router 装配，使 cmd/server 不需要直接耦合 sqlc.Queries 类型。
 // 鉴权需要按 job.payload.app_id 反查 app 的可见性，因此除 GetJob 外还需要 GetApp。
 type JobsStore interface {
-	GetJob(ctx context.Context, id pgtype.UUID) (sqlc.Job, error)
-	GetApp(ctx context.Context, id pgtype.UUID) (sqlc.App, error)
+	GetJob(ctx context.Context, id string) (sqlc.Job, error)
+	GetApp(ctx context.Context, id string) (sqlc.App, error)
 }
 
 // NewJobsHandler 创建 jobs handler。
@@ -79,13 +78,13 @@ type jobPayloadAppRef struct {
 // @Router       /jobs/{jobId} [get]
 func (h *JobsHandler) Get(c *gin.Context) {
 	principal := principalFromCtx(c)
-	var id pgtype.UUID
-	if err := id.Scan(c.Param("jobId")); err != nil {
+	jobID := c.Param("jobId")
+	if jobID == "" {
 		c.JSON(http.StatusBadRequest, apierror.New("BAD_REQUEST", "非法 job id"))
 		return
 	}
-	job, err := h.store.GetJob(c.Request.Context(), id)
-	if errors.Is(err, pgx.ErrNoRows) {
+	job, err := h.store.GetJob(c.Request.Context(), jobID)
+	if errors.Is(err, sql.ErrNoRows) {
 		c.JSON(http.StatusNotFound, apierror.New("NOT_FOUND", "job 不存在"))
 		return
 	}
@@ -102,14 +101,8 @@ func (h *JobsHandler) Get(c *gin.Context) {
 			c.JSON(http.StatusForbidden, apierror.New("FORBIDDEN", "无权查看 job"))
 			return
 		}
-		var appID pgtype.UUID
-		if perr := appID.Scan(ref.AppID); perr != nil {
-			// payload 里的 app_id 不合法是脏数据；按未找到处理避免泄漏 payload 结构细节。
-			c.JSON(http.StatusNotFound, apierror.New("NOT_FOUND", "job 关联应用不存在"))
-			return
-		}
-		app, aerr := h.store.GetApp(c.Request.Context(), appID)
-		if errors.Is(aerr, pgx.ErrNoRows) {
+		app, aerr := h.store.GetApp(c.Request.Context(), ref.AppID)
+		if errors.Is(aerr, sql.ErrNoRows) {
 			c.JSON(http.StatusNotFound, apierror.New("NOT_FOUND", "job 关联应用不存在"))
 			return
 		}
@@ -117,7 +110,7 @@ func (h *JobsHandler) Get(c *gin.Context) {
 			c.JSON(http.StatusInternalServerError, apierror.New("INTERNAL", "查询 job 关联应用失败"))
 			return
 		}
-		if !auth.CanViewApp(principal, formatUUID(app.OrgID), formatUUID(app.OwnerUserID)) {
+		if !auth.CanViewApp(principal, app.OrgID, app.OwnerUserID) {
 			c.JSON(http.StatusForbidden, apierror.New("FORBIDDEN", "无权查看 job"))
 			return
 		}
@@ -128,7 +121,8 @@ func (h *JobsHandler) Get(c *gin.Context) {
 
 func toJobView(job sqlc.Job) JobView {
 	view := JobView{
-		ID:          formatUUID(job.ID),
+		// job.ID 现在是 string，直接使用。
+		ID:          job.ID,
 		Type:        job.Type,
 		Status:      job.Status,
 		Attempts:    job.Attempts,
@@ -137,32 +131,15 @@ func toJobView(job sqlc.Job) JobView {
 	if job.LastError.Valid {
 		view.LastError = job.LastError.String
 	}
-	if job.RunAfter.Valid {
-		t := job.RunAfter.Time
-		view.RunAfter = &t
-	}
-	if job.CreatedAt.Valid {
-		t := job.CreatedAt.Time
-		view.CreatedAt = &t
-	}
+	// job.RunAfter 现在是 time.Time（非 nullable），直接赋值。
+	t := job.RunAfter
+	view.RunAfter = &t
+	// job.CreatedAt 现在是 time.Time（非 nullable），直接赋值。
+	ct := job.CreatedAt
+	view.CreatedAt = &ct
 	if job.FinishedAt.Valid {
-		t := job.FinishedAt.Time
-		view.FinishedAt = &t
+		ft := job.FinishedAt.Time
+		view.FinishedAt = &ft
 	}
 	return view
-}
-
-// formatUUID 把 pgtype.UUID 转成 8-4-4-4-12 横线分组的小写 hex 字符串。
-// 对任意 pgtype.UUID 通用，handler 包内 job/app/org 等 UUID 输出统一走这里。
-func formatUUID(value pgtype.UUID) string {
-	bytes := value.Bytes
-	const digits = "0123456789abcdef"
-	out := make([]byte, 0, 36)
-	for i, b := range bytes[:] {
-		out = append(out, digits[b>>4], digits[b&0x0f])
-		if i == 3 || i == 5 || i == 7 || i == 9 {
-			out = append(out, '-')
-		}
-	}
-	return string(out)
 }

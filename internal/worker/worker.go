@@ -14,7 +14,7 @@ import (
 	"math"
 	"time"
 
-	"github.com/jackc/pgx/v5/pgtype"
+	null "github.com/guregu/null/v5"
 
 	"oc-manager/internal/domain"
 	"oc-manager/internal/store/sqlc"
@@ -24,11 +24,11 @@ import (
 // JobStore 抽象 worker 需要的数据访问能力。
 // 仅暴露当前实际使用的方法，便于在测试中使用内存桩。
 type JobStore interface {
-	GetJob(ctx context.Context, id pgtype.UUID) (sqlc.Job, error)
-	MarkJobRunning(ctx context.Context, arg sqlc.MarkJobRunningParams) (sqlc.Job, error)
-	MarkJobSucceeded(ctx context.Context, id pgtype.UUID) (sqlc.Job, error)
-	MarkJobFailed(ctx context.Context, arg sqlc.MarkJobFailedParams) (sqlc.Job, error)
-	RetryJob(ctx context.Context, arg sqlc.RetryJobParams) (sqlc.Job, error)
+	GetJob(ctx context.Context, id string) (sqlc.Job, error)
+	MarkJobRunning(ctx context.Context, arg sqlc.MarkJobRunningParams) error
+	MarkJobSucceeded(ctx context.Context, id string) error
+	MarkJobFailed(ctx context.Context, arg sqlc.MarkJobFailedParams) error
+	RetryJob(ctx context.Context, arg sqlc.RetryJobParams) error
 }
 
 // Queue 抽象 worker 信号源。与 internal/redis.Queue 保持一致以便复用实现。
@@ -101,12 +101,8 @@ func (w *Worker) Tick(ctx context.Context) error {
 }
 
 func (w *Worker) processJobID(ctx context.Context, id string) error {
-	// 队列只保存字符串 jobID，真正状态仍以 PostgreSQL 为准；解析失败说明队列 payload 已损坏。
-	jobUUID, err := parseUUID(id)
-	if err != nil {
-		return fmt.Errorf("非法 job id %q: %w", id, err)
-	}
-	job, err := w.store.GetJob(ctx, jobUUID)
+	// 队列只保存字符串 jobID，真正状态仍以数据库为准；id 已经是 string 可直接使用。
+	job, err := w.store.GetJob(ctx, id)
 	if err != nil {
 		return fmt.Errorf("查询 job 失败: %w", err)
 	}
@@ -116,29 +112,29 @@ func (w *Worker) processJobID(ctx context.Context, id string) error {
 	}
 	// 并发去重主要依赖队列层 Reserve 的 ZREM/内存弹出语义；MarkJobRunning 按 id 更新 locked_by，
 	// SQL 本身不再额外校验 status=pending，因此这里先读状态再推进。
-	running, err := w.store.MarkJobRunning(ctx, sqlc.MarkJobRunningParams{
+	if err := w.store.MarkJobRunning(ctx, sqlc.MarkJobRunningParams{
 		ID:       job.ID,
-		LockedBy: pgtype.Text{String: w.cfg.WorkerID, Valid: true},
-	})
-	if err != nil {
+		LockedBy: null.StringFrom(w.cfg.WorkerID),
+	}); err != nil {
 		return fmt.Errorf("锁定 job 失败: %w", err)
 	}
-	handler, err := w.registry.Lookup(running.Type)
+	// MarkJobRunning 是 :exec（不返回行），用原 job 继续处理。
+	handler, err := w.registry.Lookup(job.Type)
 	if err != nil {
 		// 未注册类型无法通过重试自愈，直接进入 failed 终态，避免 scheduler 反复重新入队。
-		_, finalErr := w.store.MarkJobFailed(ctx, sqlc.MarkJobFailedParams{
-			ID:        running.ID,
-			LastError: pgtype.Text{String: err.Error(), Valid: true},
+		finalErr := w.store.MarkJobFailed(ctx, sqlc.MarkJobFailedParams{
+			ID:        job.ID,
+			LastError: null.StringFrom(err.Error()),
 		})
 		if finalErr != nil {
 			return fmt.Errorf("标记 job 失败失败: %w", finalErr)
 		}
 		return nil
 	}
-	if err := handler(ctx, running); err != nil {
-		return w.handleHandlerError(ctx, running, err)
+	if err := handler(ctx, job); err != nil {
+		return w.handleHandlerError(ctx, job, err)
 	}
-	if _, err := w.store.MarkJobSucceeded(ctx, running.ID); err != nil {
+	if err := w.store.MarkJobSucceeded(ctx, job.ID); err != nil {
 		return fmt.Errorf("标记 job 成功失败: %w", err)
 	}
 	return nil
@@ -148,9 +144,9 @@ func (w *Worker) processJobID(ctx context.Context, id string) error {
 // handlerErr 会被持久化到 last_error，供后台任务列表和审计排障展示。
 func (w *Worker) handleHandlerError(ctx context.Context, job sqlc.Job, handlerErr error) error {
 	if job.Attempts >= job.MaxAttempts {
-		if _, err := w.store.MarkJobFailed(ctx, sqlc.MarkJobFailedParams{
+		if err := w.store.MarkJobFailed(ctx, sqlc.MarkJobFailedParams{
 			ID:        job.ID,
-			LastError: pgtype.Text{String: handlerErr.Error(), Valid: true},
+			LastError: null.StringFrom(handlerErr.Error()),
 		}); err != nil {
 			return fmt.Errorf("标记 job 失败失败: %w", err)
 		}
@@ -158,10 +154,10 @@ func (w *Worker) handleHandlerError(ctx context.Context, job sqlc.Job, handlerEr
 	}
 	delay := w.backoff(int(job.Attempts))
 	runAfter := w.now().Add(delay)
-	if _, err := w.store.RetryJob(ctx, sqlc.RetryJobParams{
+	if err := w.store.RetryJob(ctx, sqlc.RetryJobParams{
 		ID:        job.ID,
-		RunAfter:  pgtype.Timestamptz{Time: runAfter, Valid: true},
-		LastError: pgtype.Text{String: handlerErr.Error(), Valid: true},
+		RunAfter:  runAfter,
+		LastError: null.StringFrom(handlerErr.Error()),
 	}); err != nil {
 		return fmt.Errorf("重试 job 失败: %w", err)
 	}
@@ -183,13 +179,3 @@ func (w *Worker) backoff(attempt int) time.Duration {
 
 // SetClock 替换 worker 内部时钟，仅供测试使用。
 func (w *Worker) SetClock(now func() time.Time) { w.now = now }
-
-// parseUUID 把 Redis 队列里的字符串 jobID 转成 pgtype.UUID。
-// 该函数不做业务校验，调用方需要再从 jobs 表读取并确认状态。
-func parseUUID(value string) (pgtype.UUID, error) {
-	var id pgtype.UUID
-	if err := id.Scan(value); err != nil {
-		return pgtype.UUID{}, err
-	}
-	return id, nil
-}

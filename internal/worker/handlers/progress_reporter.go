@@ -1,13 +1,13 @@
 // progress_reporter.go 实现 worker handler 侧的 apps.progress_* 节流落库。
 // ImageCoordinator 在 pull / sync 过程中通过 ProgressBus 广播进度,handler 用
-// progressReporter 把高频事件合并写库,避免 hot loop 把 PG 压垮。
+// progressReporter 把高频事件合并写库,避免 hot loop 把数据库压垮。
 package handlers
 
 import (
 	"context"
 	"time"
 
-	"github.com/jackc/pgx/v5/pgtype"
+	null "github.com/guregu/null/v5"
 
 	ocredis "oc-manager/internal/redis"
 	"oc-manager/internal/store/sqlc"
@@ -16,7 +16,7 @@ import (
 // ProgressStore 是 progressReporter 写库需要的最小能力,
 // 由 sqlc 生成的 SetAppProgress query 满足。AppInitializeStore 接口也已包含同方法。
 type ProgressStore interface {
-	SetAppProgress(ctx context.Context, arg sqlc.SetAppProgressParams) (sqlc.App, error)
+	SetAppProgress(ctx context.Context, arg sqlc.SetAppProgressParams) error
 }
 
 // progressReporter 节流 ImageCoordinator 来的 ProgressEvent 落库。
@@ -26,7 +26,7 @@ type ProgressStore interface {
 // 不是线程安全:由 worker handler 在单 goroutine 顺序调用。
 type progressReporter struct {
 	// appID 对应 apps.id,所有写入都打在同一行。
-	appID pgtype.UUID
+	appID string
 	// store 是写库出口,生产由 sqlc.Queries 实现。
 	store ProgressStore
 	// lastFlush 上次真正写库的时间;零值表示尚未发生过 flush。
@@ -38,7 +38,7 @@ type progressReporter struct {
 }
 
 // newProgressReporter 创建实例。生产用 time.Now,测试可替换。
-func newProgressReporter(appID pgtype.UUID, store ProgressStore) *progressReporter {
+func newProgressReporter(appID string, store ProgressStore) *progressReporter {
 	return &progressReporter{appID: appID, store: store, now: time.Now}
 }
 
@@ -68,10 +68,10 @@ func (r *progressReporter) FlushReset(ctx context.Context) {
 	if ctx.Err() != nil {
 		return
 	}
-	_, _ = r.store.SetAppProgress(ctx, sqlc.SetAppProgressParams{
+	_ = r.store.SetAppProgress(ctx, sqlc.SetAppProgressParams{
 		ID:              r.appID,
-		ProgressCurrent: pgtype.Int8{},
-		ProgressTotal:   pgtype.Int8{},
+		ProgressCurrent: null.Int{},
+		ProgressTotal:   null.Int{},
 	})
 	r.lastFlush = time.Time{}
 	r.lastCurrent = 0
@@ -80,10 +80,10 @@ func (r *progressReporter) FlushReset(ctx context.Context) {
 // flush 真正写库,更新内部节流状态。
 // progress_current=0 / total=0 视为"不定进度"(Valid=false 让 SQL 写 NULL)。
 func (r *progressReporter) flush(ctx context.Context, ev ocredis.ProgressEvent, now time.Time) {
-	_, _ = r.store.SetAppProgress(ctx, sqlc.SetAppProgressParams{
+	_ = r.store.SetAppProgress(ctx, sqlc.SetAppProgressParams{
 		ID:              r.appID,
-		ProgressCurrent: pgtype.Int8{Int64: ev.Current, Valid: ev.Current > 0 || ev.Total > 0},
-		ProgressTotal:   pgtype.Int8{Int64: ev.Total, Valid: ev.Total > 0},
+		ProgressCurrent: null.NewInt(ev.Current, ev.Current > 0 || ev.Total > 0),
+		ProgressTotal:   null.NewInt(ev.Total, ev.Total > 0),
 	})
 	r.lastFlush = now
 	r.lastCurrent = ev.Current

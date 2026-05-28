@@ -2,6 +2,7 @@ package handlers
 
 import (
 	"context"
+	"database/sql"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -9,8 +10,8 @@ import (
 	"strconv"
 	"time"
 
-	"github.com/jackc/pgx/v5"
-	"github.com/jackc/pgx/v5/pgtype"
+	null "github.com/guregu/null/v5"
+	"github.com/google/uuid"
 
 	"oc-manager/internal/domain"
 	"oc-manager/internal/store/sqlc"
@@ -18,18 +19,18 @@ import (
 
 // AppRuntimeStore 是 start/stop/restart/delete handler 共用的最小数据访问能力。
 type AppRuntimeStore interface {
-	GetApp(ctx context.Context, id pgtype.UUID) (sqlc.App, error)
-	SetAppStatus(ctx context.Context, arg sqlc.SetAppStatusParams) (sqlc.App, error)
-	SoftDeleteApp(ctx context.Context, id pgtype.UUID) (sqlc.App, error)
+	GetApp(ctx context.Context, id string) (sqlc.App, error)
+	SetAppStatus(ctx context.Context, arg sqlc.SetAppStatusParams) error
+	SoftDeleteApp(ctx context.Context, id string) error
 	// SetAppAppliedVersion 在重启成功后记录已应用的版本修订与镜像 ref，
 	// 供前端 version_synced 检测使用。
-	SetAppAppliedVersion(ctx context.Context, arg sqlc.SetAppAppliedVersionParams) (sqlc.App, error)
+	SetAppAppliedVersion(ctx context.Context, arg sqlc.SetAppAppliedVersionParams) error
 	// SetAppContainer 在重启检测到镜像变更后清空 apps.container_id / container_name，
 	// 让后续 app_initialize job 重新创建容器（空 ContainerID/ContainerName 即清空）。
-	SetAppContainer(ctx context.Context, arg sqlc.SetAppContainerParams) (sqlc.App, error)
+	SetAppContainer(ctx context.Context, arg sqlc.SetAppContainerParams) error
 	// CreateJob 在重启检测到镜像变更后入队 app_initialize job，
 	// 复用初始化 4 阶段重拉新镜像并重建容器。
-	CreateJob(ctx context.Context, arg sqlc.CreateJobParams) (sqlc.Job, error)
+	CreateJob(ctx context.Context, arg sqlc.CreateJobParams) error
 }
 
 // ContainerLifecycle 抽象 worker 需要的容器生命周期能力。
@@ -62,7 +63,7 @@ type AppArchiver interface {
 
 // AppKnowledgeCleaner 抽象 app_delete 对实例私有知识库的清理能力。
 type AppKnowledgeCleaner interface {
-	DeleteAppDataset(ctx context.Context, appID pgtype.UUID) error
+	DeleteAppDataset(ctx context.Context, appID string) error
 }
 
 // payload 描述四个 handler 共享的输入。
@@ -86,22 +87,19 @@ func decodeAppOpPayload(raw []byte) (appOpPayload, error) {
 
 // loadApp 是四个 handler 共用的"取 app + 校验存在"流程。
 // soft-deleted 的 app 视为不存在，避免重复处理已经删除的应用。
-func loadApp(ctx context.Context, store AppRuntimeStore, payload appOpPayload) (sqlc.App, pgtype.UUID, error) {
-	id, err := parseUUID(payload.AppID)
+// 返回 app 与 appID 字符串（与旧签名兼容，第二返回值现在直接是 string）。
+func loadApp(ctx context.Context, store AppRuntimeStore, payload appOpPayload) (sqlc.App, string, error) {
+	app, err := store.GetApp(ctx, payload.AppID)
 	if err != nil {
-		return sqlc.App{}, pgtype.UUID{}, fmt.Errorf("非法 app_id: %w", err)
-	}
-	app, err := store.GetApp(ctx, id)
-	if err != nil {
-		if errors.Is(err, pgx.ErrNoRows) {
-			return sqlc.App{}, id, fmt.Errorf("应用 %s 不存在", payload.AppID)
+		if errors.Is(err, sql.ErrNoRows) {
+			return sqlc.App{}, payload.AppID, fmt.Errorf("应用 %s 不存在", payload.AppID)
 		}
-		return sqlc.App{}, id, fmt.Errorf("查询应用失败: %w", err)
+		return sqlc.App{}, payload.AppID, fmt.Errorf("查询应用失败: %w", err)
 	}
 	if app.DeletedAt.Valid {
-		return sqlc.App{}, id, fmt.Errorf("应用 %s 已删除", payload.AppID)
+		return sqlc.App{}, payload.AppID, fmt.Errorf("应用 %s 已删除", payload.AppID)
 	}
-	return app, id, nil
+	return app, payload.AppID, nil
 }
 
 // AppStartContainerHandler 拉起容器并把状态推到 running。
@@ -134,11 +132,11 @@ func (h *AppStartContainerHandler) Handle(ctx context.Context, job sqlc.Job) err
 	if app.ContainerID.String == "" {
 		return fmt.Errorf("应用 %s 尚未创建容器，无法启动", payload.AppID)
 	}
-	nodeID := uuidToString(app.RuntimeNodeID)
+	nodeID := app.RuntimeNodeID
 	if err := h.containers.StartContainer(ctx, nodeID, app.ContainerID.String); err != nil {
 		return fmt.Errorf("启动容器失败: %w", err)
 	}
-	if _, err := h.store.SetAppStatus(ctx, sqlc.SetAppStatusParams{ID: app.ID, Status: domain.AppStatusRunning}); err != nil {
+	if err := h.store.SetAppStatus(ctx, sqlc.SetAppStatusParams{ID: app.ID, Status: domain.AppStatusRunning}); err != nil {
 		return fmt.Errorf("更新应用状态失败: %w", err)
 	}
 	return nil
@@ -170,16 +168,16 @@ func (h *AppStopContainerHandler) Handle(ctx context.Context, job sqlc.Job) erro
 	}
 	if app.ContainerID.String == "" {
 		// 没容器 ID 等价于已经停止：直接推状态便于状态机收敛。
-		if _, err := h.store.SetAppStatus(ctx, sqlc.SetAppStatusParams{ID: app.ID, Status: domain.AppStatusStopped}); err != nil {
+		if err := h.store.SetAppStatus(ctx, sqlc.SetAppStatusParams{ID: app.ID, Status: domain.AppStatusStopped}); err != nil {
 			return fmt.Errorf("更新应用状态失败: %w", err)
 		}
 		return nil
 	}
-	nodeID := uuidToString(app.RuntimeNodeID)
+	nodeID := app.RuntimeNodeID
 	if err := h.containers.StopContainer(ctx, nodeID, app.ContainerID.String); err != nil {
 		return fmt.Errorf("停止容器失败: %w", err)
 	}
-	if _, err := h.store.SetAppStatus(ctx, sqlc.SetAppStatusParams{ID: app.ID, Status: domain.AppStatusStopped}); err != nil {
+	if err := h.store.SetAppStatus(ctx, sqlc.SetAppStatusParams{ID: app.ID, Status: domain.AppStatusStopped}); err != nil {
 		return fmt.Errorf("更新应用状态失败: %w", err)
 	}
 	return nil
@@ -300,7 +298,7 @@ func (h *AppRestartContainerHandler) Handle(ctx context.Context, job sqlc.Job) e
 	// 注意：「缺 container_id」的拒绝校验下移到原 stop/clear/start 路径之前。
 	// 镜像变更重建分支被 worker 重试时 container_id 可能已被上一次尝试清空，
 	// 此时仍须放行进入重建分支重新入队 app_initialize，不能在此提前报错。
-	nodeID := uuidToString(app.RuntimeNodeID)
+	nodeID := app.RuntimeNodeID
 	// 在 stop 之前先把节点上的 apps/<id>/input/ 重写成 DB 当前快照:
 	// oc-entrypoint 在下次容器启动时读取该目录,渲染出新的 config.yaml(含 model)
 	// 与 SOUL.md(三层 prompt + persona)。改 model / 改 prompt / 改 persona
@@ -339,35 +337,36 @@ func (h *AppRestartContainerHandler) Handle(ctx context.Context, job sqlc.Job) e
 			}
 		}
 		// 清空 container_id / container_name，让 app_initialize 重新创建容器。
-		if _, err := h.store.SetAppContainer(ctx, sqlc.SetAppContainerParams{ID: app.ID}); err != nil {
+		if err := h.store.SetAppContainer(ctx, sqlc.SetAppContainerParams{ID: app.ID}); err != nil {
 			return fmt.Errorf("清空容器引用失败: %w", err)
 		}
 		// raw SetAppStatus：restart 一贯不走 EnsureAppTransition，与原逻辑一致。
-		if _, err := h.store.SetAppStatus(ctx, sqlc.SetAppStatusParams{ID: app.ID, Status: domain.AppStatusPullingRuntimeImage}); err != nil {
+		if err := h.store.SetAppStatus(ctx, sqlc.SetAppStatusParams{ID: app.ID, Status: domain.AppStatusPullingRuntimeImage}); err != nil {
 			return fmt.Errorf("更新应用状态失败: %w", err)
 		}
 		// payload 与 RuntimeOperationService.RequestInitialize 入队的 app_initialize
 		// job 同形态；init handler 的 decodePayload 只读 app_id + runtime_node。
-		payload, err := json.Marshal(map[string]any{
-			"app_id":       uuidToString(app.ID),
+		initPayload, err := json.Marshal(map[string]any{
+			"app_id":       app.ID,
 			"runtime_node": nodeID,
 		})
 		if err != nil {
 			return fmt.Errorf("构造 app_initialize payload 失败: %w", err)
 		}
-		job, err := h.store.CreateJob(ctx, sqlc.CreateJobParams{
+		newJobID := uuid.NewString()
+		if err := h.store.CreateJob(ctx, sqlc.CreateJobParams{
+			ID:          newJobID,
 			Type:        domain.JobTypeAppInitialize,
 			Priority:    100,
-			RunAfter:    pgtype.Timestamptz{Time: time.Now(), Valid: true},
+			RunAfter:    time.Now(),
 			MaxAttempts: 3,
-			PayloadJson: payload,
-		})
-		if err != nil {
+			PayloadJson: initPayload,
+		}); err != nil {
 			return fmt.Errorf("入队 app_initialize job 失败: %w", err)
 		}
 		// 入队失败不阻塞：scheduler 周期轮询会兜底拾取该 job。
 		if h.notifier != nil {
-			_ = h.notifier.Enqueue(ctx, uuidToString(job.ID))
+			_ = h.notifier.Enqueue(ctx, newJobID)
 		}
 		// 直接返回：不再走后续 stop/clear/start，也不调 SetAppStatus(running) /
 		// SetAppAppliedVersion——这些由 app_initialize handler
@@ -400,13 +399,13 @@ func (h *AppRestartContainerHandler) Handle(ctx context.Context, job sqlc.Job) e
 			return fmt.Errorf("重启容器失败: %w", err)
 		}
 	}
-	if _, err := h.store.SetAppStatus(ctx, sqlc.SetAppStatusParams{ID: app.ID, Status: domain.AppStatusRunning}); err != nil {
+	if err := h.store.SetAppStatus(ctx, sqlc.SetAppStatusParams{ID: app.ID, Status: domain.AppStatusRunning}); err != nil {
 		return fmt.Errorf("更新应用状态失败: %w", err)
 	}
 	// 重启刷新已把节点 input 重写成当前版本快照，记录已应用版本修订与镜像 ref，
 	// 供前端 version_synced 检测；inputRefresher 为 nil（测试装配）时跳过。
 	if h.inputRefresher != nil {
-		if _, err := h.store.SetAppAppliedVersion(ctx, sqlc.SetAppAppliedVersionParams{
+		if err := h.store.SetAppAppliedVersion(ctx, sqlc.SetAppAppliedVersionParams{
 			ID:                     app.ID,
 			AppliedVersionRevision: refreshResult.VersionRevision,
 			AppliedImageRef:        refreshResult.ImageRef,
@@ -451,20 +450,16 @@ func (h *AppDeleteHandler) Handle(ctx context.Context, job sqlc.Job) error {
 	if err != nil {
 		return err
 	}
-	id, err := parseUUID(payload.AppID)
+	app, err := h.store.GetApp(ctx, payload.AppID)
 	if err != nil {
-		return fmt.Errorf("非法 app_id: %w", err)
-	}
-	app, err := h.store.GetApp(ctx, id)
-	if err != nil {
-		if errors.Is(err, pgx.ErrNoRows) {
+		if errors.Is(err, sql.ErrNoRows) {
 			return nil // 已经删除则直接成功
 		}
 		return fmt.Errorf("查询应用失败: %w", err)
 	}
 	alreadyDeleted := app.DeletedAt.Valid
 
-	nodeID := uuidToString(app.RuntimeNodeID)
+	nodeID := app.RuntimeNodeID
 	if app.ContainerID.String != "" {
 		if err := h.containers.StopContainer(ctx, nodeID, app.ContainerID.String); err != nil {
 			// stop 失败不阻塞 remove：force remove 可以兜底，但 stop 错误必须冒泡用于审计排障。
@@ -502,7 +497,7 @@ func (h *AppDeleteHandler) Handle(ctx context.Context, job sqlc.Job) error {
 	}
 
 	if h.knowledge != nil {
-		if err := h.knowledge.DeleteAppDataset(ctx, id); err != nil {
+		if err := h.knowledge.DeleteAppDataset(ctx, app.ID); err != nil {
 			// RAGFlow dataset 是外部派生资源，删除失败不能阻断本地应用下线；
 			// 后续可通过 ragflow_datasets 状态和运维脚本补偿清理。
 			slog.WarnContext(ctx, "清理应用 RAGFlow dataset 失败", "app_id", payload.AppID, "error", err)
@@ -514,8 +509,14 @@ func (h *AppDeleteHandler) Handle(ctx context.Context, job sqlc.Job) error {
 		// 但不再重复执行 SoftDeleteApp，避免把已删除行当作错误。
 		return nil
 	}
-	if _, err := h.store.SoftDeleteApp(ctx, id); err != nil {
+	if err := h.store.SoftDeleteApp(ctx, app.ID); err != nil {
 		return fmt.Errorf("软删应用失败: %w", err)
 	}
 	return nil
+}
+
+// nullStringFrom 把字符串转换为 null.String，空串时 Valid=false。
+// 供 channel_login、worker 等包内小工具使用。
+func nullStringFrom(s string) null.String {
+	return null.NewString(s, s != "")
 }

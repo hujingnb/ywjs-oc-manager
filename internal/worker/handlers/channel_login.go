@@ -2,14 +2,15 @@ package handlers
 
 import (
 	"context"
+	"database/sql"
 	"encoding/json"
 	"errors"
 	"fmt"
 	"log/slog"
 	"time"
 
-	"github.com/jackc/pgx/v5"
-	"github.com/jackc/pgx/v5/pgtype"
+	null "github.com/guregu/null/v5"
+	"github.com/google/uuid"
 
 	"oc-manager/internal/domain"
 	"oc-manager/internal/integrations/channel"
@@ -19,14 +20,14 @@ import (
 
 // ChannelLoginStore 是渠道登录 worker 需要的最小存储接口。
 type ChannelLoginStore interface {
-	GetApp(ctx context.Context, id pgtype.UUID) (sqlc.App, error)
+	GetApp(ctx context.Context, id string) (sqlc.App, error)
 	GetChannelBindingByAppAndType(ctx context.Context, arg sqlc.GetChannelBindingByAppAndTypeParams) (sqlc.ChannelBinding, error)
-	SetChannelBindingChallenge(ctx context.Context, arg sqlc.SetChannelBindingChallengeParams) (sqlc.ChannelBinding, error)
-	SetChannelBindingStatus(ctx context.Context, arg sqlc.SetChannelBindingStatusParams) (sqlc.ChannelBinding, error)
-	MarkChannelBindingBound(ctx context.Context, arg sqlc.MarkChannelBindingBoundParams) (sqlc.ChannelBinding, error)
-	SetAppStatus(ctx context.Context, arg sqlc.SetAppStatusParams) (sqlc.App, error)
-	CreateJob(ctx context.Context, arg sqlc.CreateJobParams) (sqlc.Job, error)
-	CreateAuditLog(ctx context.Context, arg sqlc.CreateAuditLogParams) (sqlc.AuditLog, error)
+	SetChannelBindingChallenge(ctx context.Context, arg sqlc.SetChannelBindingChallengeParams) error
+	SetChannelBindingStatus(ctx context.Context, arg sqlc.SetChannelBindingStatusParams) error
+	MarkChannelBindingBound(ctx context.Context, arg sqlc.MarkChannelBindingBoundParams) error
+	SetAppStatus(ctx context.Context, arg sqlc.SetAppStatusParams) error
+	CreateJob(ctx context.Context, arg sqlc.CreateJobParams) error
+	CreateAuditLog(ctx context.Context, arg sqlc.CreateAuditLogParams) error
 }
 
 // ChannelStartLoginHandler 执行 channel_start_login job。
@@ -58,17 +59,17 @@ func (h *ChannelStartLoginHandler) Handle(ctx context.Context, job sqlc.Job) err
 	}
 	challenge, err := adapter.BeginAuth(ctx, channel.AuthInput{
 		AppID:       payload.AppID,
-		OwnerUserID: uuidToString(app.OwnerUserID),
-		NodeID:      uuidToString(app.RuntimeNodeID),
-		ContainerID: textOrEmpty(app.ContainerID),
+		OwnerUserID: app.OwnerUserID,
+		NodeID:      app.RuntimeNodeID,
+		ContainerID: app.ContainerID.ValueOrZero(),
 	})
 	if err != nil {
 		safeMessage := redactlog.SafeErrorMessage(err)
-		_, _ = h.store.SetChannelBindingStatus(ctx, sqlc.SetChannelBindingStatusParams{
+		_ = h.store.SetChannelBindingStatus(ctx, sqlc.SetChannelBindingStatusParams{
 			AppID:       binding.AppID,
 			ChannelType: binding.ChannelType,
 			Status:      domain.ChannelStatusFailed,
-			LastError:   pgtype.Text{String: safeMessage, Valid: safeMessage != ""},
+			LastError:   null.StringFrom(safeMessage),
 		})
 		if auditErr := recordChannelAppAudit(ctx, h.store, app, "channel_auth_start", "failed", safeMessage,
 			fmt.Sprintf("渠道 %s", channelLabelWorker(payload.ChannelType)),
@@ -89,7 +90,7 @@ func (h *ChannelStartLoginHandler) Handle(ctx context.Context, job sqlc.Job) err
 	if err != nil {
 		return fmt.Errorf("序列化渠道挑战失败: %w", err)
 	}
-	if _, err := h.store.SetChannelBindingChallenge(ctx, sqlc.SetChannelBindingChallengeParams{
+	if err := h.store.SetChannelBindingChallenge(ctx, sqlc.SetChannelBindingChallengeParams{
 		AppID:        binding.AppID,
 		ChannelType:  binding.ChannelType,
 		MetadataJson: metadata,
@@ -110,13 +111,9 @@ func (h *ChannelStartLoginHandler) load(ctx context.Context, payload channelLogi
 	if err != nil {
 		return sqlc.App{}, sqlc.ChannelBinding{}, nil, err
 	}
-	appID, err := parseUUID(payload.AppID)
+	app, err := h.store.GetApp(ctx, payload.AppID)
 	if err != nil {
-		return sqlc.App{}, sqlc.ChannelBinding{}, nil, fmt.Errorf("非法 app_id: %w", err)
-	}
-	app, err := h.store.GetApp(ctx, appID)
-	if err != nil {
-		if err == pgx.ErrNoRows {
+		if errors.Is(err, sql.ErrNoRows) {
 			return sqlc.App{}, sqlc.ChannelBinding{}, nil, fmt.Errorf("应用不存在: %s", payload.AppID)
 		}
 		return sqlc.App{}, sqlc.ChannelBinding{}, nil, fmt.Errorf("查询应用失败: %w", err)
@@ -178,9 +175,9 @@ func (h *ChannelCheckBindingHandler) Handle(ctx context.Context, job sqlc.Job) e
 	}
 	progress, err := adapter.PollAuth(ctx, channel.AuthInput{
 		AppID:       payload.AppID,
-		OwnerUserID: uuidToString(app.OwnerUserID),
-		NodeID:      uuidToString(app.RuntimeNodeID),
-		ContainerID: textOrEmpty(app.ContainerID),
+		OwnerUserID: app.OwnerUserID,
+		NodeID:      app.RuntimeNodeID,
+		ContainerID: app.ContainerID.ValueOrZero(),
 	})
 	if err != nil {
 		return fmt.Errorf("查询渠道绑定状态失败: %w", err)
@@ -189,7 +186,7 @@ func (h *ChannelCheckBindingHandler) Handle(ctx context.Context, job sqlc.Job) e
 	case channel.AuthStatusBound:
 		identity := progress.BoundIdentity
 		if identity == "" && h.resolver != nil && payload.ChannelType == domain.ChannelTypeWeChat {
-			if resolved, rerr := h.resolver.ResolveWeChatBoundIdentity(ctx, uuidToString(app.RuntimeNodeID), textOrEmpty(app.ContainerID)); rerr == nil {
+			if resolved, rerr := h.resolver.ResolveWeChatBoundIdentity(ctx, app.RuntimeNodeID, app.ContainerID.ValueOrZero()); rerr == nil {
 				identity = resolved
 			}
 		}
@@ -206,11 +203,11 @@ func (h *ChannelCheckBindingHandler) Handle(ctx context.Context, job sqlc.Job) e
 		if progress.ErrorMessage != "" {
 			safeMessage = redactlog.SafeErrorMessage(errors.New(progress.ErrorMessage))
 		}
-		_, _ = h.store.SetChannelBindingStatus(ctx, sqlc.SetChannelBindingStatusParams{
+		_ = h.store.SetChannelBindingStatus(ctx, sqlc.SetChannelBindingStatusParams{
 			AppID:       binding.AppID,
 			ChannelType: binding.ChannelType,
 			Status:      status,
-			LastError:   pgtype.Text{String: safeMessage, Valid: safeMessage != ""},
+			LastError:   null.StringFrom(safeMessage),
 		})
 		if err := recordChannelAppAudit(ctx, h.store, app, "channel_bound", "failed", safeMessage,
 			fmt.Sprintf("渠道 %s", channelLabelWorker(payload.ChannelType)),
@@ -227,7 +224,7 @@ func (h *ChannelCheckBindingHandler) Handle(ctx context.Context, job sqlc.Job) e
 		// 这里直接调 resolver 看 plugin state 是否已有有效身份；
 		// 有就同样推到 bound，避免 5 分钟后被错误地 expire。
 		if h.resolver != nil && payload.ChannelType == domain.ChannelTypeWeChat {
-			if identity, rerr := h.resolver.ResolveWeChatBoundIdentity(ctx, uuidToString(app.RuntimeNodeID), textOrEmpty(app.ContainerID)); rerr == nil && identity != "" {
+			if identity, rerr := h.resolver.ResolveWeChatBoundIdentity(ctx, app.RuntimeNodeID, app.ContainerID.ValueOrZero()); rerr == nil && identity != "" {
 				metadata, _ := json.Marshal(progress.Metadata)
 				// 与 case AuthStatusBound 共用 finalizeChannelBound:cached-login
 				// fallback 同样要触发容器重启,否则绑定后 weixin 平台不会被 hermes 加载。
@@ -237,11 +234,11 @@ func (h *ChannelCheckBindingHandler) Handle(ctx context.Context, job sqlc.Job) e
 				return nil
 			}
 		}
-		_, _ = h.store.SetChannelBindingStatus(ctx, sqlc.SetChannelBindingStatusParams{
+		_ = h.store.SetChannelBindingStatus(ctx, sqlc.SetChannelBindingStatusParams{
 			AppID:       binding.AppID,
 			ChannelType: binding.ChannelType,
 			Status:      domain.ChannelStatusPendingAuth,
-			LastError:   pgtype.Text{},
+			LastError:   null.String{},
 		})
 		if err := enqueueChannelCheck(ctx, h.store, payload, 5*time.Second); err != nil {
 			return err
@@ -272,22 +269,22 @@ func (h *ChannelCheckBindingHandler) finalizeChannelBound(
 	identity, channelName string,
 	metadata []byte,
 ) error {
-	if _, err := h.store.MarkChannelBindingBound(ctx, sqlc.MarkChannelBindingBoundParams{
+	if err := h.store.MarkChannelBindingBound(ctx, sqlc.MarkChannelBindingBoundParams{
 		AppID:         binding.AppID,
 		ChannelType:   binding.ChannelType,
-		BoundIdentity: pgtype.Text{String: identity, Valid: identity != ""},
-		ChannelName:   pgtype.Text{String: channelName, Valid: channelName != ""},
+		BoundIdentity: null.NewString(identity, identity != ""),
+		ChannelName:   null.NewString(channelName, channelName != ""),
 		MetadataJson:  metadata,
 	}); err != nil {
 		return fmt.Errorf("标记渠道绑定成功失败: %w", err)
 	}
 	if h.restarter != nil && payload.ChannelType == domain.ChannelTypeWeChat {
-		if err := h.restarter.RestartContainer(ctx, uuidToString(app.RuntimeNodeID), textOrEmpty(app.ContainerID)); err != nil {
-			slog.ErrorContext(ctx, "渠道绑定后重启 hermes 容器失败", "app_id", uuidToString(app.ID), "error", err)
+		if err := h.restarter.RestartContainer(ctx, app.RuntimeNodeID, app.ContainerID.ValueOrZero()); err != nil {
+			slog.ErrorContext(ctx, "渠道绑定后重启 hermes 容器失败", "app_id", app.ID, "error", err)
 		}
 	}
 	if app.Status == domain.AppStatusBindingWaiting {
-		if _, err := h.store.SetAppStatus(ctx, sqlc.SetAppStatusParams{ID: app.ID, Status: domain.AppStatusRunning}); err != nil {
+		if err := h.store.SetAppStatus(ctx, sqlc.SetAppStatusParams{ID: app.ID, Status: domain.AppStatusRunning}); err != nil {
 			return fmt.Errorf("推进应用状态到 running 失败: %w", err)
 		}
 	}
@@ -306,22 +303,23 @@ func recordChannelAppAudit(ctx context.Context, store ChannelLoginStore, app sql
 		return fmt.Errorf("序列化渠道审计元数据失败: %w", err)
 	}
 	params := sqlc.CreateAuditLogParams{
+		ID:           uuid.NewString(),
 		ActorRole:    "system",
-		OrgID:        app.OrgID,
+		OrgID:        null.StringFrom(app.OrgID),
 		TargetType:   "app",
-		TargetID:     uuidToString(app.ID),
+		TargetID:     app.ID,
 		Action:       action,
 		Result:       result,
 		MetadataJson: raw,
 	}
 	if errorMessage != "" {
-		params.ErrorMessage = pgtype.Text{String: errorMessage, Valid: true}
+		params.ErrorMessage = null.StringFrom(errorMessage)
 	}
 	if detailMessage != "" {
-		params.DetailMessage = pgtype.Text{String: detailMessage, Valid: true}
+		params.DetailMessage = null.StringFrom(detailMessage)
 	}
-	if _, err := store.CreateAuditLog(ctx, params); err != nil {
-		slog.ErrorContext(ctx, "写渠道应用审计失败", "app_id", uuidToString(app.ID), "action", action, "error", err)
+	if err := store.CreateAuditLog(ctx, params); err != nil {
+		slog.ErrorContext(ctx, "写渠道应用审计失败", "app_id", app.ID, "action", action, "error", err)
 		return fmt.Errorf("写入渠道应用审计日志失败: %w", err)
 	}
 	return nil
@@ -359,10 +357,11 @@ func enqueueChannelCheck(ctx context.Context, store ChannelLoginStore, payload c
 	if err != nil {
 		return fmt.Errorf("序列化 channel_check_binding payload 失败: %w", err)
 	}
-	if _, err := store.CreateJob(ctx, sqlc.CreateJobParams{
+	if err := store.CreateJob(ctx, sqlc.CreateJobParams{
+		ID:          uuid.NewString(),
 		Type:        domain.JobTypeChannelCheckBinding,
 		Priority:    80,
-		RunAfter:    pgtype.Timestamptz{Time: time.Now().Add(delay), Valid: true},
+		RunAfter:    time.Now().Add(delay),
 		MaxAttempts: 20,
 		PayloadJson: raw,
 	}); err != nil {
@@ -380,4 +379,10 @@ func channelLabelWorker(channelType string) string {
 	default:
 		return channelType
 	}
+}
+
+// textOrEmpty 从 null.String 取值，nil/无效时返回空串。
+// channel_login handler 内的旧调用点通过此函数保持语义。
+func textOrEmpty(s null.String) string {
+	return s.ValueOrZero()
 }

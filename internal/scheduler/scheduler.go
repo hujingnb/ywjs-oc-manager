@@ -57,29 +57,12 @@ func (s *Scheduler) Tick(ctx context.Context) error {
 		return fmt.Errorf("列出待执行 job 失败: %w", err)
 	}
 	for _, job := range jobs {
-		id := uuidString(job)
+		// job.ID 已经是 string（UUID），直接作为队列 payload 使用。
+		id := job.ID
 		// scheduler 只补 Redis 信号，不修改 job 状态；重复入队依赖 Queue 的 member 去重语义兜底。
 		if err := s.queue.Enqueue(ctx, id); err != nil {
 			return fmt.Errorf("将 job %s 入队失败: %w", id, err)
 		}
 	}
 	return nil
-}
-
-// uuidString 将 sqlc.Job.ID 转为标准 UUID 字符串，作为 Redis queue 的 payload。
-func uuidString(job sqlc.Job) string {
-	return formatUUIDBytes(job.ID.Bytes[:])
-}
-
-// formatUUIDBytes 只处理 pgtype.UUID 的 16 字节输入；调用方保证来源是数据库 UUID。
-func formatUUIDBytes(value []byte) string {
-	const digits = "0123456789abcdef"
-	out := make([]byte, 0, 36)
-	for i, b := range value {
-		out = append(out, digits[b>>4], digits[b&0x0f])
-		if i == 3 || i == 5 || i == 7 || i == 9 {
-			out = append(out, '-')
-		}
-	}
-	return string(out)
 }

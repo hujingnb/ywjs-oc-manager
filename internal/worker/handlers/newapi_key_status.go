@@ -2,12 +2,10 @@ package handlers
 
 import (
 	"context"
+	"database/sql"
 	"errors"
 	"fmt"
 	"strconv"
-
-	"github.com/jackc/pgx/v5"
-	"github.com/jackc/pgx/v5/pgtype"
 
 	"oc-manager/internal/domain"
 	"oc-manager/internal/store/sqlc"
@@ -15,8 +13,8 @@ import (
 
 // APIKeyStatusStore 是 newapi disable/restore handler 共用的 sqlc 子集。
 type APIKeyStatusStore interface {
-	GetApp(ctx context.Context, id pgtype.UUID) (sqlc.App, error)
-	SetAppNewAPIKey(ctx context.Context, arg sqlc.SetAppNewAPIKeyParams) (sqlc.App, error)
+	GetApp(ctx context.Context, id string) (sqlc.App, error)
+	SetAppNewAPIKey(ctx context.Context, arg sqlc.SetAppNewAPIKeyParams) error
 }
 
 // NewAPIKeyStatusHandler 处理 newapi_disable_key / newapi_restore_key 两类 job。
@@ -54,13 +52,9 @@ func (h *NewAPIKeyStatusHandler) Handle(ctx context.Context, job sqlc.Job) error
 	if err != nil {
 		return err
 	}
-	id, err := parseUUID(payload.AppID)
+	app, err := h.store.GetApp(ctx, payload.AppID)
 	if err != nil {
-		return fmt.Errorf("非法 app_id: %w", err)
-	}
-	app, err := h.store.GetApp(ctx, id)
-	if err != nil {
-		if errors.Is(err, pgx.ErrNoRows) {
+		if errors.Is(err, sql.ErrNoRows) {
 			return nil
 		}
 		return fmt.Errorf("查询应用失败: %w", err)
@@ -82,7 +76,7 @@ func (h *NewAPIKeyStatusHandler) Handle(ctx context.Context, job sqlc.Job) error
 	if err := client.SetAPIKeyStatus(ctx, keyID, h.newState); err != nil {
 		return fmt.Errorf("调 new-api 切换 token 状态失败: %w", err)
 	}
-	if _, err := h.store.SetAppNewAPIKey(ctx, sqlc.SetAppNewAPIKeyParams{
+	if err := h.store.SetAppNewAPIKey(ctx, sqlc.SetAppNewAPIKeyParams{
 		ID:                  app.ID,
 		NewapiKeyID:         app.NewapiKeyID,
 		NewapiKeyCiphertext: app.NewapiKeyCiphertext,

@@ -7,8 +7,6 @@ import (
 	"strings"
 	"time"
 
-	"github.com/jackc/pgx/v5/pgtype"
-
 	"oc-manager/internal/domain"
 	"oc-manager/internal/integrations/runtime"
 	"oc-manager/internal/store/sqlc"
@@ -17,7 +15,7 @@ import (
 // AppHealthCheckStore 是 AppHealthCheckHandler 需要的 sqlc 子集。
 type AppHealthCheckStore interface {
 	AppRuntimeStore
-	SetAppHealthState(ctx context.Context, arg sqlc.SetAppHealthStateParams) (sqlc.App, error)
+	SetAppHealthState(ctx context.Context, arg sqlc.SetAppHealthStateParams) error
 }
 
 // ContainerInspector 抽象通过 docker inspect 获取容器状态（含 HEALTHCHECK）的能力。
@@ -94,14 +92,15 @@ func (h *AppHealthCheckHandler) Handle(ctx context.Context, job sqlc.Job) error 
 		// 仅对 running 状态做健康检查：binding_waiting 时容器虽起但 Hermes gateway 还没就绪，会假阳性。
 		return nil
 	}
-	if app.ContainerID.String == "" || !app.RuntimeNodeID.Valid {
+	// RuntimeNodeID 是 string，空值表示未分配节点。
+	if app.ContainerID.String == "" || app.RuntimeNodeID == "" {
 		return nil
 	}
 	policy := decodeRestartPolicy(app.RestartPolicyJson)
 	state := decodeHealthState(app.HealthStateJson)
 	now := h.now()
 
-	nodeID := uuidToString(app.RuntimeNodeID)
+	nodeID := app.RuntimeNodeID
 	// Hermes 时代用 docker inspect 同时拿 容器 Status + Health.Status。
 	// containerStopped:Status != "running" → 容器被 docker 重启 / OOM kill 等
 	// 基础设施事件意外停掉,需要 manager 自愈 (StartContainer);
@@ -123,7 +122,7 @@ func (h *AppHealthCheckHandler) Handle(ctx context.Context, job sqlc.Job) error 
 		}
 		state.Failures = appendWithinWindow(state.Failures, now, policy)
 		if exhaustedRestartBudget(policy, len(state.Failures)) {
-			if _, err := h.store.SetAppStatus(ctx, sqlc.SetAppStatusParams{ID: app.ID, Status: domain.AppStatusError}); err != nil {
+			if err := h.store.SetAppStatus(ctx, sqlc.SetAppStatusParams{ID: app.ID, Status: domain.AppStatusError}); err != nil {
 				return fmt.Errorf("更新应用状态失败: %w", err)
 			}
 		} else if containerStopped && h.lifecycle != nil {
@@ -149,8 +148,8 @@ func (h *AppHealthCheckHandler) Handle(ctx context.Context, job sqlc.Job) error 
 	if err != nil {
 		return fmt.Errorf("序列化 health state 失败: %w", err)
 	}
-	if _, err := h.store.SetAppHealthState(ctx, sqlc.SetAppHealthStateParams{
-		ID:              pgtype.UUID{Bytes: app.ID.Bytes, Valid: true},
+	if err := h.store.SetAppHealthState(ctx, sqlc.SetAppHealthStateParams{
+		ID:              app.ID,
 		HealthStateJson: encoded,
 	}); err != nil {
 		return fmt.Errorf("写入 health state 失败: %w", err)
@@ -219,6 +218,6 @@ func truncate(s string, n int) string {
 
 func sanitizeHealthStateText(s string) string {
 	// PostgreSQL jsonb 不接受 \x00；健康检查失败文本来自容器 stdout / error，
-	// 写库前需要清洗，避免“记录失败状态”本身把 job 打失败。
-	return strings.ReplaceAll(s, "\x00", "�")
+	// 写库前需要清洗，避免"记录失败状态"本身把 job 打失败。
+	return strings.ReplaceAll(s, "\x00", "")
 }

@@ -14,7 +14,7 @@ import (
 
 	dockercli "github.com/docker/docker/client"
 	"github.com/google/uuid"
-	"github.com/jackc/pgx/v5/pgtype"
+	null "github.com/guregu/null/v5"
 
 	"oc-manager/internal/auth"
 	"oc-manager/internal/domain"
@@ -31,7 +31,7 @@ import (
 // nodeQueries 是 nodeClientResolver 需要的最小查询子集。
 // 抽出接口便于测试用内存桩。
 type nodeQueries interface {
-	GetRuntimeNode(ctx context.Context, id pgtype.UUID) (sqlc.RuntimeNode, error)
+	GetRuntimeNode(ctx context.Context, id string) (sqlc.RuntimeNode, error)
 }
 
 // nodeClientResolver 把 nodeID 翻译为面向单节点的多种 client。
@@ -161,11 +161,7 @@ func (n *nodeClientResolver) lookupNode(ctx context.Context, nodeID string) (sql
 	if nodeID == "" {
 		return sqlc.RuntimeNode{}, "", fmt.Errorf("nodeID 不能为空")
 	}
-	id, err := parseUUIDForWiring(nodeID)
-	if err != nil {
-		return sqlc.RuntimeNode{}, "", fmt.Errorf("非法 nodeID %s: %w", nodeID, err)
-	}
-	node, err := n.queries.GetRuntimeNode(ctx, id)
+	node, err := n.queries.GetRuntimeNode(ctx, nodeID)
 	if err != nil {
 		return sqlc.RuntimeNode{}, "", fmt.Errorf("查询节点 %s 失败: %w", nodeID, err)
 	}
@@ -181,7 +177,7 @@ func (n *nodeClientResolver) lookupNode(ctx context.Context, nodeID string) (sql
 // 普通文件 API 传 30s，大流式上传（镜像 load）传 0。
 func (n *nodeClientResolver) agentHTTPClient(node sqlc.RuntimeNode, timeout time.Duration) (*http.Client, error) {
 	if !node.AgentTlsCaCert.Valid || strings.TrimSpace(node.AgentTlsCaCert.String) == "" {
-		return nil, fmt.Errorf("节点 %s 缺 agent_tls_ca_cert", uuidToStringWiring(node.ID))
+		return nil, fmt.Errorf("节点 %s 缺 agent_tls_ca_cert", node.ID)
 	}
 	pool, err := agent.BuildCertPool(node.AgentTlsCaCert.String)
 	if err != nil {
@@ -206,7 +202,7 @@ type appContainerLookup struct {
 }
 
 type appLookupQueries interface {
-	GetApp(ctx context.Context, id pgtype.UUID) (sqlc.App, error)
+	GetApp(ctx context.Context, id string) (sqlc.App, error)
 }
 
 func newAppContainerLookup(queries appLookupQueries) *appContainerLookup {
@@ -216,11 +212,7 @@ func newAppContainerLookup(queries appLookupQueries) *appContainerLookup {
 // LookupContainer 按 appID 取容器 ID。
 // app 不存在或 container_id 为空时返回错误，让 wechat runner 立刻冒泡。
 func (l *appContainerLookup) LookupContainer(ctx context.Context, appID string) (string, error) {
-	id, err := parseUUIDForWiring(appID)
-	if err != nil {
-		return "", fmt.Errorf("非法 appID %s: %w", appID, err)
-	}
-	app, err := l.queries.GetApp(ctx, id)
+	app, err := l.queries.GetApp(ctx, appID)
 	if err != nil {
 		return "", fmt.Errorf("查询应用 %s 失败: %w", appID, err)
 	}
@@ -230,23 +222,14 @@ func (l *appContainerLookup) LookupContainer(ctx context.Context, appID string) 
 	return app.ContainerID.String, nil
 }
 
-// parseUUIDForWiring 复用为 wiring 内部使用，避免与 service 包的 parseUUID 互引导致循环依赖。
-func parseUUIDForWiring(value string) (pgtype.UUID, error) {
-	var id pgtype.UUID
-	if err := id.Scan(value); err != nil {
-		return pgtype.UUID{}, err
-	}
-	return id, nil
-}
-
 // appInputRefresherQueries 是 appInputRefresher 需要的最小 DB 查询子集。
 // 抽接口便于单测注入内存桩, 不必引入完整 *sqlc.Queries 依赖。
 type appInputRefresherQueries interface {
-	GetApp(ctx context.Context, id pgtype.UUID) (sqlc.App, error)
-	GetOrganization(ctx context.Context, id pgtype.UUID) (sqlc.Organization, error)
-	GetUser(ctx context.Context, id pgtype.UUID) (sqlc.User, error)
-	GetAssistantVersion(ctx context.Context, id pgtype.UUID) (sqlc.AssistantVersion, error)
-	SetAppRuntimeToken(ctx context.Context, arg sqlc.SetAppRuntimeTokenParams) (sqlc.App, error)
+	GetApp(ctx context.Context, id string) (sqlc.App, error)
+	GetOrganization(ctx context.Context, id string) (sqlc.Organization, error)
+	GetUser(ctx context.Context, id string) (sqlc.User, error)
+	GetAssistantVersion(ctx context.Context, id string) (sqlc.AssistantVersion, error)
+	SetAppRuntimeToken(ctx context.Context, arg sqlc.SetAppRuntimeTokenParams) error
 }
 
 // appInputRefresher 实现 workerhandlers.AppInputRefresher,
@@ -330,7 +313,8 @@ func (r *appInputRefresher) RefreshAppInput(ctx context.Context, nodeID string, 
 	if !app.VersionID.Valid {
 		return workerhandlers.AppInputRefreshResult{}, fmt.Errorf("应用未绑定助手版本, 无法刷新 input")
 	}
-	version, err := r.queries.GetAssistantVersion(ctx, app.VersionID)
+	// VersionID 是 null.String，.String 字段即 UUID 字符串。
+	version, err := r.queries.GetAssistantVersion(ctx, app.VersionID.String)
 	if err != nil {
 		return workerhandlers.AppInputRefreshResult{}, fmt.Errorf("加载助手版本失败: %w", err)
 	}
@@ -338,6 +322,7 @@ func (r *appInputRefresher) RefreshAppInput(ctx context.Context, nodeID string, 
 	if !ok {
 		return workerhandlers.AppInputRefreshResult{}, fmt.Errorf("版本镜像 %s 未在配置中", version.ImageID)
 	}
+	// OrgID 和 OwnerUserID 现在是 plain string。
 	org, err := r.queries.GetOrganization(ctx, app.OrgID)
 	if err != nil {
 		return workerhandlers.AppInputRefreshResult{}, fmt.Errorf("查询组织失败: %w", err)
@@ -410,30 +395,13 @@ func (w *runtimeInspectorWrapper) InspectContainer(ctx context.Context, nodeID, 
 	}, nil
 }
 
-// uuidToStringWiring 把 pgtype.UUID 转 16 位标准字符串；与 service 层的 uuidToString 等价，
-// 这里复制是为了避免 wiring → service 的反向引用。
-func uuidToStringWiring(id pgtype.UUID) string {
-	if !id.Valid {
-		return ""
-	}
-	const digits = "0123456789abcdef"
-	out := make([]byte, 0, 36)
-	for i, b := range id.Bytes {
-		out = append(out, digits[b>>4], digits[b&0x0f])
-		if i == 3 || i == 5 || i == 7 || i == 9 {
-			out = append(out, '-')
-		}
-	}
-	return string(out)
-}
-
 // jsonMarshal 是 cmd/server 内部 json.Marshal 的简短封装，便于 dispatcher 复用。
 var jsonMarshal = json.Marshal
 
 // runtimeRefreshJobsQueries 是 runtimeRefreshDispatcher 用到的 sqlc 子集。
 type runtimeRefreshJobsQueries interface {
 	ListRunningApps(ctx context.Context) ([]sqlc.ListRunningAppsRow, error)
-	CreateJob(ctx context.Context, arg sqlc.CreateJobParams) (sqlc.Job, error)
+	CreateJob(ctx context.Context, arg sqlc.CreateJobParams) error
 }
 
 // runtimeRefreshDispatcher 周期扫描 status in (running, binding_waiting) 应用，
@@ -480,23 +448,25 @@ func enqueuePerRunningApp(ctx context.Context, queries runtimeRefreshJobsQueries
 		return fmt.Errorf("列出 running 应用失败: %w", err)
 	}
 	for _, row := range rows {
-		appID := uuidToStringWiring(row.ID)
+		// row.ID 现在是 string，直接使用。
+		appID := row.ID
 		payload, err := jsonMarshal(map[string]any{"app_id": appID})
 		if err != nil {
 			continue
 		}
-		job, err := queries.CreateJob(ctx, sqlc.CreateJobParams{
+		newJobID := uuid.NewString()
+		if err := queries.CreateJob(ctx, sqlc.CreateJobParams{
+			ID:          newJobID,
 			Type:        jobType,
 			Priority:    priority,
 			MaxAttempts: maxAttempts,
-			RunAfter:    pgtype.Timestamptz{Time: time.Now(), Valid: true},
+			RunAfter:    time.Now(),
 			PayloadJson: payload,
-		})
-		if err != nil {
+		}); err != nil {
 			continue
 		}
 		if notifier != nil {
-			_ = notifier.Enqueue(ctx, uuidToStringWiring(job.ID))
+			_ = notifier.Enqueue(ctx, newJobID)
 		}
 	}
 	return nil
@@ -519,11 +489,7 @@ func (l *persistentTokenLoader) LoadAgentToken(ctx context.Context, nodeID strin
 	if l.store == nil || l.cipher == nil {
 		return "", nil
 	}
-	id, err := parseUUIDForWiring(nodeID)
-	if err != nil {
-		return "", err
-	}
-	ciphertext, err := l.store.Get(ctx, id)
+	ciphertext, err := l.store.Get(ctx, nodeID)
 	if err != nil {
 		return "", fmt.Errorf("查询 agent token 密文失败: %w", err)
 	}
@@ -543,15 +509,12 @@ func persistAgentToken(ctx context.Context, s *store.AgentTokenStore, c *auth.Ci
 	if s == nil || c == nil {
 		return nil
 	}
-	id, err := parseUUIDForWiring(nodeID)
-	if err != nil {
-		return err
-	}
 	ciphertext, err := c.Encrypt([]byte(token))
 	if err != nil {
 		return fmt.Errorf("加密 agent token 失败: %w", err)
 	}
-	return s.Set(ctx, id, ciphertext)
+	// AgentTokenStore.Set 现在接收 string nodeID（已转换完毕）。
+	return s.Set(ctx, nodeID, ciphertext)
 }
 
 // appDirInitializerAdapter 把 *runtime.AgentBackedAdapter 适配成
@@ -585,8 +548,8 @@ type orgCredentialsRefresher struct {
 	cipher *auth.Cipher
 	// client 是 admin/base 视角 new-api client，用于重新换取组织用户 access_token。
 	client *newapi.Client
-	// orgID 标识当前刷新器绑定的组织，避免跨组织写回凭据。
-	orgID pgtype.UUID
+	// orgID 标识当前刷新器绑定的组织（string UUID）。
+	orgID string
 	// username/password 是组织在 new-api 中的登录凭据，只保留在内存中用于刷新 access_token。
 	username string
 	password string
@@ -594,6 +557,7 @@ type orgCredentialsRefresher struct {
 
 // RefreshAccessToken 刷新组织在 new-api 中的 access_token 并写回密文凭据。
 func (r *orgCredentialsRefresher) RefreshAccessToken(ctx context.Context) (string, error) {
+	// GetOrganizationForUpdate 现在接收 string。
 	org, err := r.store.GetOrganizationForUpdate(ctx, r.orgID)
 	if err != nil {
 		return "", fmt.Errorf("RefreshAccessToken 锁组织失败: %w", err)
@@ -614,11 +578,10 @@ func (r *orgCredentialsRefresher) RefreshAccessToken(ctx context.Context) (strin
 	if err != nil {
 		return "", err
 	}
-	_, err = r.store.UpdateOrganizationCredentialsCiphertext(ctx, sqlc.UpdateOrganizationCredentialsCiphertextParams{
+	if err := r.store.UpdateOrganizationCredentialsCiphertext(ctx, sqlc.UpdateOrganizationCredentialsCiphertextParams{
 		ID:                              org.ID,
-		NewapiUserCredentialsCiphertext: pgtype.Text{String: ciphertext, Valid: true},
-	})
-	if err != nil {
+		NewapiUserCredentialsCiphertext: null.StringFrom(ciphertext),
+	}); err != nil {
 		return "", fmt.Errorf("RefreshAccessToken 写回密文失败: %w", err)
 	}
 	return newToken, nil
@@ -647,6 +610,7 @@ func (f *orgScopedClientFactory) UserScopedFor(ctx context.Context, app sqlc.App
 	if f.cipher == nil {
 		return nil, fmt.Errorf("orgScopedClientFactory: cipher 未配置")
 	}
+	// app.OrgID 现在是 string，直接传入。
 	org, err := f.store.GetOrganization(ctx, app.OrgID)
 	if err != nil {
 		return nil, fmt.Errorf("查询组织失败: %w", err)
@@ -656,7 +620,7 @@ func (f *orgScopedClientFactory) UserScopedFor(ctx context.Context, app sqlc.App
 		return nil, err
 	}
 	if !org.NewapiUserID.Valid || org.NewapiUserID.String == "" {
-		return nil, fmt.Errorf("组织 %s 未持有 new-api 用户 id", uuidToWiringString(org.ID))
+		return nil, fmt.Errorf("组织 %s 未持有 new-api 用户 id", org.ID)
 	}
 	userID, err := parseInt64ForWiring(org.NewapiUserID.String)
 	if err != nil {
@@ -677,13 +641,4 @@ func (f *orgScopedClientFactory) UserScopedFor(ctx context.Context, app sqlc.App
 // service 包里有同语义函数，但 wiring 层不便引入服务包内部 helper，复制一份避免循环依赖。
 func parseInt64ForWiring(s string) (int64, error) {
 	return strconv.ParseInt(s, 10, 64)
-}
-
-// uuidToWiringString 把 pgtype.UUID 渲染成可读字符串供错误信息使用。
-// service 包里有同名 helper，wiring 层独立一份避免暴露 service 内部 API。
-func uuidToWiringString(id pgtype.UUID) string {
-	if !id.Valid {
-		return ""
-	}
-	return uuid.UUID(id.Bytes).String()
 }

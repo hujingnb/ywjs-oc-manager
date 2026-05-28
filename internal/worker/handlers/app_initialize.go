@@ -3,6 +3,7 @@ package handlers
 import (
 	"bytes"
 	"context"
+	"database/sql"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -11,8 +12,8 @@ import (
 	"strings"
 	"time"
 
-	"github.com/jackc/pgx/v5"
-	"github.com/jackc/pgx/v5/pgtype"
+	null "github.com/guregu/null/v5"
+	"github.com/google/uuid"
 
 	dockerclient "github.com/docker/docker/client"
 	"oc-manager/internal/audit"
@@ -29,33 +30,33 @@ import (
 
 // AppInitializeStore 是 app_initialize handler 需要的最小数据访问能力。
 type AppInitializeStore interface {
-	GetApp(ctx context.Context, id pgtype.UUID) (sqlc.App, error)
-	GetOrganization(ctx context.Context, id pgtype.UUID) (sqlc.Organization, error)
-	GetUser(ctx context.Context, id pgtype.UUID) (sqlc.User, error)
-	GetRuntimeNode(ctx context.Context, id pgtype.UUID) (sqlc.RuntimeNode, error)
-	SetAppNewAPIKey(ctx context.Context, arg sqlc.SetAppNewAPIKeyParams) (sqlc.App, error)
-	SetAppContainer(ctx context.Context, arg sqlc.SetAppContainerParams) (sqlc.App, error)
-	SetAppStatus(ctx context.Context, arg sqlc.SetAppStatusParams) (sqlc.App, error)
-	CreateAuditLog(ctx context.Context, arg sqlc.CreateAuditLogParams) (sqlc.AuditLog, error)
+	GetApp(ctx context.Context, id string) (sqlc.App, error)
+	GetOrganization(ctx context.Context, id string) (sqlc.Organization, error)
+	GetUser(ctx context.Context, id string) (sqlc.User, error)
+	GetRuntimeNode(ctx context.Context, id string) (sqlc.RuntimeNode, error)
+	SetAppNewAPIKey(ctx context.Context, arg sqlc.SetAppNewAPIKeyParams) error
+	SetAppContainer(ctx context.Context, arg sqlc.SetAppContainerParams) error
+	SetAppStatus(ctx context.Context, arg sqlc.SetAppStatusParams) error
+	CreateAuditLog(ctx context.Context, arg sqlc.CreateAuditLogParams) error
 	// 新增:5 阶段 handler 落进度与失败状态
-	SetAppProgress(ctx context.Context, arg sqlc.SetAppProgressParams) (sqlc.App, error)
-	ClearAppProgress(ctx context.Context, id pgtype.UUID) (sqlc.App, error)
-	MarkAppFailed(ctx context.Context, arg sqlc.MarkAppFailedParams) (sqlc.App, error)
+	SetAppProgress(ctx context.Context, arg sqlc.SetAppProgressParams) error
+	ClearAppProgress(ctx context.Context, id string) error
+	MarkAppFailed(ctx context.Context, arg sqlc.MarkAppFailedParams) error
 	// UpdateAppRuntimeImage 把 PullImageOnNode 返回的镜像引用和 sha256 写入 apps 表。
-	UpdateAppRuntimeImage(ctx context.Context, arg sqlc.UpdateAppRuntimeImageParams) (sqlc.App, error)
+	UpdateAppRuntimeImage(ctx context.Context, arg sqlc.UpdateAppRuntimeImageParams) error
 	// GetAssistantVersion 加载实例绑定的助手版本；初始化时必须存在否则标记失败。
-	GetAssistantVersion(ctx context.Context, id pgtype.UUID) (sqlc.AssistantVersion, error)
+	GetAssistantVersion(ctx context.Context, id string) (sqlc.AssistantVersion, error)
 	// SetAppAppliedVersion 在初始化/重启成功后记录已应用的版本修订与镜像 ref，
 	// 供前端 version_synced 检测使用。
-	SetAppAppliedVersion(ctx context.Context, arg sqlc.SetAppAppliedVersionParams) (sqlc.App, error)
+	SetAppAppliedVersion(ctx context.Context, arg sqlc.SetAppAppliedVersionParams) error
 	// AppHasBoundChannelBinding 用于 init 完成进入 binding_waiting 后做一次「渠道
 	// 已绑定」快照判定：切换助手版本触发镜像重建时，channel_bindings 行不会被
 	// 重置，凭证又落在 bind mount 持久目录，重启后 hermes 容器仍可直接加载——
 	// 此场景下 app.status 应跳过 binding_waiting 直接进入 running，避免概览页
 	// 长期显示「待绑定」而渠道页显示「bound」。
-	AppHasBoundChannelBinding(ctx context.Context, appID pgtype.UUID) (bool, error)
+	AppHasBoundChannelBinding(ctx context.Context, appID string) (bool, error)
 	// SetAppRuntimeToken 写入 Hermes 调 manager runtime API 的 app 级 token。
-	SetAppRuntimeToken(ctx context.Context, arg sqlc.SetAppRuntimeTokenParams) (sqlc.App, error)
+	SetAppRuntimeToken(ctx context.Context, arg sqlc.SetAppRuntimeTokenParams) error
 }
 
 // ContainerCreator 抽象通过 agent docker 代理创建容器的能力。
@@ -284,13 +285,9 @@ func (h *AppInitializeHandler) Handle(ctx context.Context, job sqlc.Job) error {
 	if err != nil {
 		return err
 	}
-	appUUID, err := parseUUID(payload.AppID)
+	app, err := h.store.GetApp(ctx, payload.AppID)
 	if err != nil {
-		return fmt.Errorf("非法 app_id: %w", err)
-	}
-	app, err := h.store.GetApp(ctx, appUUID)
-	if err != nil {
-		if errors.Is(err, pgx.ErrNoRows) {
+		if errors.Is(err, sql.ErrNoRows) {
 			return fmt.Errorf("应用 %s 不存在", payload.AppID)
 		}
 		return fmt.Errorf("查询应用失败: %w", err)
@@ -314,7 +311,7 @@ func (h *AppInitializeHandler) Handle(ctx context.Context, job sqlc.Job) error {
 	if !app.VersionID.Valid {
 		return h.markFailed(ctx, &app, domain.AppStatusPullingRuntimeImage, errors.New("实例未绑定助手版本，无法初始化"))
 	}
-	version, err := h.store.GetAssistantVersion(ctx, app.VersionID)
+	version, err := h.store.GetAssistantVersion(ctx, app.VersionID.String)
 	if err != nil {
 		return h.markFailed(ctx, &app, domain.AppStatusPullingRuntimeImage, fmt.Errorf("加载助手版本失败: %w", err))
 	}
@@ -370,7 +367,7 @@ func (h *AppInitializeHandler) Handle(ctx context.Context, job sqlc.Job) error {
 	// 初始化成功后记录已应用的版本修订与镜像 ref，供前端 version_synced 检测使用。
 	// 写库失败时与 Handle 其余步骤一致走 markFailed：把 app 收敛到 status=error 并
 	// 记录 last_error_status，避免行卡在 binding_waiting 而 worker 又把 job 当失败处理。
-	if _, err := h.store.SetAppAppliedVersion(ctx, sqlc.SetAppAppliedVersionParams{
+	if err := h.store.SetAppAppliedVersion(ctx, sqlc.SetAppAppliedVersionParams{
 		ID:                     app.ID,
 		AppliedVersionRevision: version.Revision,
 		AppliedImageRef:        imageRef,
@@ -413,9 +410,13 @@ func (h *AppInitializeHandler) promoteIfChannelBound(ctx context.Context, app *s
 	if err := domain.EnsureAppTransition(app.Status, domain.AppStatusRunning); err != nil {
 		return fmt.Errorf("校验状态转移失败: %w", err)
 	}
-	updated, err := h.store.SetAppStatus(ctx, sqlc.SetAppStatusParams{ID: app.ID, Status: domain.AppStatusRunning})
-	if err != nil {
+	if err := h.store.SetAppStatus(ctx, sqlc.SetAppStatusParams{ID: app.ID, Status: domain.AppStatusRunning}); err != nil {
 		return fmt.Errorf("推进应用状态到 running 失败: %w", err)
+	}
+	// SetAppStatus 是 :exec，不返回行；从 DB 重新读取最新状态。
+	updated, err := h.store.GetApp(ctx, app.ID)
+	if err != nil {
+		return fmt.Errorf("读取更新后的 app 失败: %w", err)
 	}
 	*app = updated
 	return nil
@@ -431,9 +432,13 @@ func (h *AppInitializeHandler) transitionTo(ctx context.Context, app *sqlc.App, 
 	if err := domain.EnsureAppTransition(app.Status, to); err != nil {
 		return err
 	}
-	updated, err := h.store.SetAppStatus(ctx, sqlc.SetAppStatusParams{ID: app.ID, Status: to})
-	if err != nil {
+	if err := h.store.SetAppStatus(ctx, sqlc.SetAppStatusParams{ID: app.ID, Status: to}); err != nil {
 		return fmt.Errorf("写入应用状态失败: %w", err)
+	}
+	// SetAppStatus 是 :exec；读回最新状态。
+	updated, err := h.store.GetApp(ctx, app.ID)
+	if err != nil {
+		return fmt.Errorf("读取更新后的 app 失败: %w", err)
 	}
 	*app = updated
 	reporter.FlushReset(ctx)
@@ -444,10 +449,10 @@ func (h *AppInitializeHandler) transitionTo(ctx context.Context, app *sqlc.App, 
 // 让前端能展示"在哪一步失败"和"为什么失败"两层信息。
 // 即便写库失败也返回原 cause,避免吞掉真实错误。
 func (h *AppInitializeHandler) markFailed(ctx context.Context, app *sqlc.App, phase string, cause error) error {
-	if _, err := h.store.MarkAppFailed(ctx, sqlc.MarkAppFailedParams{
+	if err := h.store.MarkAppFailed(ctx, sqlc.MarkAppFailedParams{
 		ID:               app.ID,
-		LastErrorStatus:  pgtype.Text{String: phase, Valid: true},
-		LastErrorMessage: pgtype.Text{String: cause.Error(), Valid: true},
+		LastErrorStatus:  null.StringFrom(phase),
+		LastErrorMessage: null.StringFrom(cause.Error()),
 	}); err != nil {
 		return fmt.Errorf("%w (写入失败状态也失败: %v)", cause, err)
 	}
@@ -509,13 +514,17 @@ func (h *AppInitializeHandler) phasePullRuntimeImage(ctx context.Context, app *s
 	}
 
 	// 把镜像信息写入 apps 表，供后续创建容器和前端展示使用。
-	updated, err := h.store.UpdateAppRuntimeImage(ctx, sqlc.UpdateAppRuntimeImageParams{
+	if err := h.store.UpdateAppRuntimeImage(ctx, sqlc.UpdateAppRuntimeImageParams{
 		ID:                 app.ID,
 		RuntimeImageRef:    imageRef,
 		RuntimeImageSha256: sha256,
-	})
-	if err != nil {
+	}); err != nil {
 		return fmt.Errorf("写入 runtime 镜像信息失败: %w", err)
+	}
+	// UpdateAppRuntimeImage 是 :exec；读回最新状态。
+	updated, err := h.store.GetApp(ctx, app.ID)
+	if err != nil {
+		return fmt.Errorf("读取更新后的 app 失败: %w", err)
 	}
 	*app = updated
 	return nil
@@ -599,13 +608,17 @@ func (h *AppInitializeHandler) phaseCreate(ctx context.Context, app *sqlc.App, p
 	if err != nil {
 		return fmt.Errorf("创建容器失败: %w", err)
 	}
-	updated, err := h.store.SetAppContainer(ctx, sqlc.SetAppContainerParams{
+	if err := h.store.SetAppContainer(ctx, sqlc.SetAppContainerParams{
 		ID:            app.ID,
-		ContainerID:   pgtype.Text{String: info.ID, Valid: info.ID != ""},
-		ContainerName: pgtype.Text{String: info.Name, Valid: info.Name != ""},
-	})
-	if err != nil {
+		ContainerID:   null.NewString(info.ID, info.ID != ""),
+		ContainerName: null.NewString(info.Name, info.Name != ""),
+	}); err != nil {
 		return fmt.Errorf("写入 container_id 失败: %w", err)
+	}
+	// SetAppContainer 是 :exec；读回最新状态。
+	updated, err := h.store.GetApp(ctx, app.ID)
+	if err != nil {
+		return fmt.Errorf("读取更新后的 app 失败: %w", err)
 	}
 	*app = updated
 	return nil
@@ -655,18 +668,19 @@ func (h *AppInitializeHandler) tryInspect(ctx context.Context, nodeID, container
 // 转移后调用一次。
 func (h *AppInitializeHandler) writeInitAuditLog(ctx context.Context, app sqlc.App, job sqlc.Job, payload appInitializePayload) error {
 	auditMetadata, err := json.Marshal(map[string]any{
-		"job_id":       uuidToString(job.ID),
+		"job_id":       job.ID,
 		"runtime_node": payload.RuntimeNodeID,
-		"container_id": textOrEmpty(app.ContainerID),
+		"container_id": app.ContainerID.ValueOrZero(),
 	})
 	if err != nil {
 		return fmt.Errorf("序列化应用初始化审计元数据失败: %w", err)
 	}
-	if _, err := h.store.CreateAuditLog(ctx, sqlc.CreateAuditLogParams{
+	if err := h.store.CreateAuditLog(ctx, sqlc.CreateAuditLogParams{
+		ID:           uuid.NewString(),
 		ActorRole:    "system",
-		OrgID:        app.OrgID,
+		OrgID:        null.StringFrom(app.OrgID),
 		TargetType:   "app",
-		TargetID:     uuidToString(app.ID),
+		TargetID:     app.ID,
 		Action:       "initialize",
 		Result:       "succeeded",
 		MetadataJson: auditMetadata,
@@ -690,7 +704,7 @@ func (h *AppInitializeHandler) writeAppInput(ctx context.Context, nodeID string,
 	if h.inputFiles == nil {
 		return fmt.Errorf("AppInputUploader 未注入, hermes 容器无法 bootstrap")
 	}
-	appID := uuidToString(app.ID)
+	appID := app.ID
 
 	// 通过共用的 AssembleVersionInputData 装配版本数据：推 skill tar + 解析 routing，
 	// 与 restart 链路共享同一逻辑，避免两条链路写出的 manifest 版本字段漂移。
@@ -769,7 +783,7 @@ func pushVersionSkills(ctx context.Context, skillBlobs SkillBlobReader, uploader
 // init(writeAppInput) 与 restart(appInputRefresher) 两条链路共用此函数，确保两边写出的
 // manifest 版本数据完全一致，避免「初始化看得见、restart 后字段漂移」。
 func AssembleVersionInputData(ctx context.Context, version sqlc.AssistantVersion, app sqlc.App, nodeID string, skillBlobs SkillBlobReader, uploader AppInputUploader) (AppInputVersionData, error) {
-	appID := uuidToString(app.ID)
+	appID := app.ID
 	skillRelPaths, err := pushVersionSkills(ctx, skillBlobs, uploader, nodeID, appID, version.SkillsJson)
 	if err != nil {
 		return AppInputVersionData{}, err
@@ -849,7 +863,7 @@ func BuildAppInputData(app sqlc.App, org sqlc.Organization, owner sqlc.User, con
 		baseURL = "http://new-api:3000"
 	}
 	return hermes.AppInputData{
-		AppID:                   uuidToString(app.ID),
+		AppID:                   app.ID,
 		AppName:                 app.Name,
 		Model:                   model,
 		OpenAIAPIKey:            containerAPIKey,
@@ -901,7 +915,7 @@ func NewAppInputUploadAdapter(up AppInputUploader, nodeID string) hermes.AppInpu
 func (h *AppInitializeHandler) ensureAPIKey(ctx context.Context, app *sqlc.App) (string, error) {
 	if app.ApiKeyStatus == domain.APIKeyStatusActive {
 		if !app.NewapiKeyCiphertext.Valid || app.NewapiKeyCiphertext.String == "" {
-			return "", fmt.Errorf("应用 %s 已 active 但 newapi_key_ciphertext 为空", uuidToString(app.ID))
+			return "", fmt.Errorf("应用 %s 已 active 但 newapi_key_ciphertext 为空", app.ID)
 		}
 		return decryptCiphertext(app.NewapiKeyCiphertext.String, h.cfg.Cipher)
 	}
@@ -921,7 +935,7 @@ func (h *AppInitializeHandler) ensureAPIKey(ctx context.Context, app *sqlc.App) 
 	// keyName 是 manager 与 new-api 之间反查 token 的唯一约定（"app-" + uuid），
 	// 抽局部变量后既作为 CreateAPIKey 入参，也写入 apps.newapi_key_name 落库，
 	// 让 usage 查询直接读字段而不再依赖 "token name 与 app.ID 同值" 的隐式假设。
-	keyName := fmt.Sprintf("app-%s", uuidToString(app.ID))
+	keyName := fmt.Sprintf("app-%s", app.ID)
 	key, err := client.CreateAPIKey(ctx, newapi.CreateAPIKeyInput{
 		Name:       keyName,
 		Models:     []string{},
@@ -930,7 +944,7 @@ func (h *AppInitializeHandler) ensureAPIKey(ctx context.Context, app *sqlc.App) 
 	if err != nil {
 		if h.cfg.AuditHelper != nil {
 			h.cfg.AuditHelper.RecordFailure(ctx, audit.NewAPIFailureContext{
-				OrgID:    uuidToString(app.OrgID),
+				OrgID:    app.OrgID,
 				Endpoint: "POST /api/token/",
 				Err:      err,
 			})
@@ -945,7 +959,7 @@ func (h *AppInitializeHandler) ensureAPIKey(ctx context.Context, app *sqlc.App) 
 	if err != nil {
 		if h.cfg.AuditHelper != nil {
 			h.cfg.AuditHelper.RecordFailure(ctx, audit.NewAPIFailureContext{
-				OrgID:    uuidToString(app.OrgID),
+				OrgID:    app.OrgID,
 				Endpoint: fmt.Sprintf("POST /api/token/%d/key", key.ID),
 				Err:      err,
 			})
@@ -957,17 +971,21 @@ func (h *AppInitializeHandler) ensureAPIKey(ctx context.Context, app *sqlc.App) 
 	if err != nil {
 		return "", fmt.Errorf("加密 api_key 失败: %w", err)
 	}
-	updated, err := h.store.SetAppNewAPIKey(ctx, sqlc.SetAppNewAPIKeyParams{
+	if err := h.store.SetAppNewAPIKey(ctx, sqlc.SetAppNewAPIKeyParams{
 		ID:                  app.ID,
-		NewapiKeyID:         pgtype.Text{String: fmt.Sprintf("%d", key.ID), Valid: true},
-		NewapiKeyCiphertext: pgtype.Text{String: ciphertext, Valid: true},
+		NewapiKeyID:         null.StringFrom(fmt.Sprintf("%d", key.ID)),
+		NewapiKeyCiphertext: null.StringFrom(ciphertext),
 		ApiKeyStatus:        domain.APIKeyStatusActive,
 		// 显式落 newapi_key_name：与上面 CreateAPIKey 用的 keyName 保持一致，
 		// 让后续 usage 查询不必再次拼 "app-<uuid>"，直接从 apps 表读字段即可。
-		NewapiKeyName: pgtype.Text{String: keyName, Valid: true},
-	})
-	if err != nil {
+		NewapiKeyName: null.StringFrom(keyName),
+	}); err != nil {
 		return "", fmt.Errorf("写入 api_key 失败: %w", err)
+	}
+	// SetAppNewAPIKey 是 :exec；读回最新状态。
+	updated, err := h.store.GetApp(ctx, app.ID)
+	if err != nil {
+		return "", fmt.Errorf("读取更新后的 app 失败: %w", err)
 	}
 	*app = updated
 	return fullKey, nil
@@ -986,22 +1004,6 @@ func decryptCiphertext(ciphertext string, cipher *auth.Cipher) (string, error) {
 		return "", fmt.Errorf("解密 api_key 失败: %w", err)
 	}
 	return string(plain), nil
-}
-
-// uuidToString 把 pgtype.UUID 安全转成 string，无效时返回空串。
-func uuidToString(id pgtype.UUID) string {
-	if !id.Valid {
-		return ""
-	}
-	const digits = "0123456789abcdef"
-	out := make([]byte, 0, 36)
-	for i, b := range id.Bytes {
-		out = append(out, digits[b>>4], digits[b&0x0f])
-		if i == 3 || i == 5 || i == 7 || i == 9 {
-			out = append(out, '-')
-		}
-	}
-	return string(out)
 }
 
 type appInitializePayload struct {
@@ -1023,17 +1025,7 @@ func decodePayload(raw []byte) (appInitializePayload, error) {
 	return payload, nil
 }
 
-func parseUUID(value string) (pgtype.UUID, error) {
-	var id pgtype.UUID
-	if err := id.Scan(value); err != nil {
-		return pgtype.UUID{}, err
-	}
-	return id, nil
-}
-
-func textOrEmpty(t pgtype.Text) string {
-	if !t.Valid {
-		return ""
-	}
-	return t.String
+// newUUID 生成新的 UUID 字符串，供需要新 ID 的场景使用。
+func newUUID() string {
+	return uuid.NewString()
 }

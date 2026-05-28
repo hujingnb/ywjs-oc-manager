@@ -5,7 +5,8 @@ import (
 	"fmt"
 	"time"
 
-	"github.com/jackc/pgx/v5/pgtype"
+	null "github.com/guregu/null/v5"
+	"github.com/google/uuid"
 
 	"oc-manager/internal/domain"
 	"oc-manager/internal/integrations/runtime"
@@ -15,7 +16,7 @@ import (
 // RuntimeSnapshotStore 是 RuntimeRefreshStatusHandler 需要的 sqlc 子集。
 type RuntimeSnapshotStore interface {
 	AppRuntimeStore
-	InsertInstanceResourceSample(ctx context.Context, arg sqlc.InsertInstanceResourceSampleParams) (sqlc.InstanceResourceSample, error)
+	InsertInstanceResourceSample(ctx context.Context, arg sqlc.InsertInstanceResourceSampleParams) error
 }
 
 // RuntimeInspector 抽象 worker 拉取容器实时状态 + 指标的能力，便于 fake。
@@ -53,16 +54,18 @@ func (h *RuntimeRefreshStatusHandler) Handle(ctx context.Context, job sqlc.Job) 
 	if err != nil {
 		return err
 	}
-	if app.ContainerID.String == "" || !app.RuntimeNodeID.Valid {
-		// 容器未就绪时静默成功；scheduler 会在下个 tick 重试。
+	// RuntimeNodeID 是 string，空值表示未分配节点；无节点或无容器时静默成功。
+	if app.ContainerID.String == "" || app.RuntimeNodeID == "" {
+		// 容器未就绪时静默成功；scheduler 会在下个周期重试。
 		return nil
 	}
-	nodeID := uuidToString(app.RuntimeNodeID)
+	nodeID := app.RuntimeNodeID
 	sample := sqlc.InsertInstanceResourceSampleParams{
-		AppID:         pgtype.UUID{Bytes: app.ID.Bytes, Valid: true},
-		RuntimeNodeID: pgtype.UUID{Bytes: app.RuntimeNodeID.Bytes, Valid: true},
+		ID:            uuid.NewString(),
+		AppID:         app.ID,
+		RuntimeNodeID: app.RuntimeNodeID,
 		ContainerID:   app.ContainerID.String,
-		SampledAt:     pgtype.Timestamptz{Time: time.Now().UTC(), Valid: true},
+		SampledAt:     time.Now().UTC(),
 	}
 	if info, err := h.inspector.InspectContainer(ctx, nodeID, app.ContainerID.String); err != nil {
 		sample.LastError = textOrNull(fmt.Sprintf("inspect: %v", err))
@@ -75,26 +78,21 @@ func (h *RuntimeRefreshStatusHandler) Handle(ctx context.Context, job sqlc.Job) 
 			sample.LastError = textOrNull(fmt.Sprintf("stats: %v", err))
 		}
 	} else {
-		sample.CpuPercent = pgtype.Float8{Float64: stats.CPUPercent, Valid: true}
-		sample.MemoryUsedBytes = uint64ToInt8(stats.MemoryUsage)
-		sample.MemoryLimitBytes = uint64ToInt8(stats.MemoryLimit)
-		sample.DiskReadBytes = uint64ToInt8(stats.DiskReadBytes)
-		sample.DiskWriteBytes = uint64ToInt8(stats.DiskWriteBytes)
-		sample.NetworkRxBytes = uint64ToInt8(stats.NetworkRxBytes)
-		sample.NetworkTxBytes = uint64ToInt8(stats.NetworkTxBytes)
+		sample.CpuPercent = null.FloatFrom(stats.CPUPercent)
+		sample.MemoryUsedBytes = null.IntFrom(int64(stats.MemoryUsage))
+		sample.MemoryLimitBytes = null.IntFrom(int64(stats.MemoryLimit))
+		sample.DiskReadBytes = null.IntFrom(int64(stats.DiskReadBytes))
+		sample.DiskWriteBytes = null.IntFrom(int64(stats.DiskWriteBytes))
+		sample.NetworkRxBytes = null.IntFrom(int64(stats.NetworkRxBytes))
+		sample.NetworkTxBytes = null.IntFrom(int64(stats.NetworkTxBytes))
 	}
-	if _, err := h.store.InsertInstanceResourceSample(ctx, sample); err != nil {
+	if err := h.store.InsertInstanceResourceSample(ctx, sample); err != nil {
 		return fmt.Errorf("写入实例资源采样失败: %w", err)
 	}
 	return nil
 }
 
 // textOrNull 将错误与状态字段写成 nullable text，避免空字符串污染采样表。
-func textOrNull(value string) pgtype.Text {
-	return pgtype.Text{String: value, Valid: value != ""}
-}
-
-// uint64ToInt8 将 Docker 累计字节数写入 pg int8；项目运行指标预期不会超过 int64 上限。
-func uint64ToInt8(value uint64) pgtype.Int8 {
-	return pgtype.Int8{Int64: int64(value), Valid: true}
+func textOrNull(value string) null.String {
+	return null.NewString(value, value != "")
 }
