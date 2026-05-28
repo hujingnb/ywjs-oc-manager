@@ -79,7 +79,7 @@ type LogsPage struct {
 type QuotaSeries struct {
 	// Scope 标识配额序列所属维度，当前为 organization 或 platform。
 	Scope string `json:"scope"`
-	// ScopeID 是组织维度的 manager org UUID；平台维度为空。
+	// ScopeID 是企业维度的 manager org UUID；平台维度为空。
 	ScopeID string `json:"scope_id,omitempty"`
 	// Items 透传 new-api QuotaDate 列表。
 	Items []newapi.QuotaDate `json:"items" swaggerignore:"true"`
@@ -89,9 +89,9 @@ type QuotaSeries struct {
 
 // OrgUsageItem 是单个组织在指定时间窗内的 quota 消耗汇总。
 type OrgUsageItem struct {
-	// OrgID 是组织 UUID。
+	// OrgID 是企业 UUID。
 	OrgID string `json:"org_id"`
-	// OrgName 是组织显示名。
+	// OrgName 是企业显示名。
 	OrgName string `json:"org_name"`
 	// TotalQuota 是 [since, until] 内各日 QuotaDate.Quota 的累加值。
 	TotalQuota int64 `json:"total_quota"`

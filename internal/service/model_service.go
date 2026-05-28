@@ -17,7 +17,7 @@ type ModelCatalog interface {
 
 // ModelResult 是 manager API 返回给前端的模型视图。
 type ModelResult struct {
-	// ID 是后续组织 allowlist 和实例模型字段使用的模型标识。
+	// ID 是后续企业 allowlist 和实例模型字段使用的模型标识。
 	ID string `json:"id"`
 	// Name 是前端展示名称；new-api 缺省时与 ID 一致。
 	Name string `json:"name"`

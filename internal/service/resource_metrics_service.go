@@ -103,7 +103,7 @@ type InstanceResourceSampleResult struct {
 type NodeInstanceResult struct {
 	// AppID 是实例所属应用 ID。
 	AppID string `json:"app_id"`
-	// OrgID 是应用所属组织 ID，用于后续前端跳转和权限上下文。
+	// OrgID 是应用所属企业 ID，用于后续前端跳转和权限上下文。
 	OrgID string `json:"org_id"`
 	// OwnerUserID 是应用所有者用户 ID。
 	OwnerUserID string `json:"owner_user_id"`

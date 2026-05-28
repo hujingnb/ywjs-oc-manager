@@ -2,7 +2,7 @@
 //
 // @title           Agent Runtime Manager API
 // @version         1.0
-// @description     基于 Hermes Agent runtime 的多组织管理后台 API。
+// @description     基于 Hermes Agent runtime 的多企业管理后台 API。
 // @BasePath        /api/v1
 //
 // @securityDefinitions.apikey BearerAuth

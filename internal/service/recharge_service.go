@@ -51,7 +51,7 @@ type BalanceView struct {
 	NewAPIUserID int64 `json:"newapi_user_id"`
 	RemainQuota  int64 `json:"remain_quota"`
 	UsedQuota    int64 `json:"used_quota"`
-	// TotalRecharged 是该组织历史累计充值额度之和（仅计 succeeded 记录）。
+	// TotalRecharged 是该企业历史累计充值额度之和（仅计 succeeded 记录）。
 	// 数据来源于 manager 自身 recharge_records 表，不从 new-api 获取。
 	TotalRecharged int64 `json:"total_recharged"`
 }

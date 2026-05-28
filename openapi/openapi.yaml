@@ -230,7 +230,7 @@ components:
           description: NodeID 是指定 runtime 节点；为空时 service 自动选择可用节点。
           type: string
         version_id:
-          description: VersionID 是实例绑定的助手版本 id，必须落在组织 allowlist 内。
+          description: VersionID 是实例绑定的助手版本 id，必须落在企业 allowlist 内。
           type: string
       required:
       - app_name
@@ -248,7 +248,7 @@ components:
           description: Role 允许 org_admin / org_member；空值由 service 层补默认 org_member。
           type: string
         username:
-          description: Username 是组织内登录账号名，创建后不可通过成员更新接口修改。
+          description: Username 是企业内登录账号名，创建后不可通过成员更新接口修改。
           type: string
       required:
       - display_name
@@ -264,16 +264,16 @@ components:
           description: AdminPassword 是首个 org_admin 的初始密码，service 层立即 hash 后写库。
           type: string
         admin_username:
-          description: AdminUsername 是随组织创建的首个 org_admin 账号名。
+          description: AdminUsername 是随企业创建的首个 org_admin 账号名。
           type: string
         assistant_version_ids:
-          description: AssistantVersionIDs 是该组织可用的助手版本 id 列表（allowlist）。
+          description: AssistantVersionIDs 是该企业可用的助手版本 id 列表（allowlist）。
           items:
             type: string
           type: array
           uniqueItems: false
         code:
-          description: Code 是组织登录标识，创建后不可修改。
+          description: Code 是企业登录标识，创建后不可修改。
           type: string
         contact_name:
           description: ContactName 是业务联系人姓名，可为空。
@@ -282,10 +282,10 @@ components:
           description: ContactPhone 是业务联系人电话，可为空；不参与权限或登录校验。
           type: string
         credit_warning_threshold:
-          description: CreditWarningThreshold 是组织余额预警阈值；nil 表示不启用余额预警或保持预警关闭。
+          description: CreditWarningThreshold 是企业余额预警阈值；nil 表示不启用余额预警或保持预警关闭。
           type: integer
         name:
-          description: Name 是组织展示名，也是平台管理员列表中识别租户的主字段。
+          description: Name 是企业展示名，也是平台管理员列表中识别租户的主字段。
           type: string
         remark:
           description: Remark 是平台管理员维护的内部备注。
@@ -389,7 +389,7 @@ components:
     handlers.LoginRequest:
       properties:
         org_code:
-          description: OrgCode 是组织用户登录时填写的组织标识；平台管理员登录时留空。
+          description: OrgCode 是企业用户登录时填写的企业标识；平台管理员登录时留空。
           type: string
         password:
           description: Password 是明文登录密码，仅用于本次校验，handler 不写日志。
@@ -443,7 +443,7 @@ components:
           description: Username 是新成员账号名，与普通创建成员保持同一约束。
           type: string
         version_id:
-          description: VersionID 是实例绑定的助手版本 id，必须落在组织 allowlist 内。
+          description: VersionID 是实例绑定的助手版本 id，必须落在企业 allowlist 内。
           type: string
       required:
       - app_name
@@ -455,7 +455,7 @@ components:
     handlers.OrganizationRequest:
       properties:
         assistant_version_ids:
-          description: AssistantVersionIDs 是该组织可用的助手版本 id 列表（allowlist）。
+          description: AssistantVersionIDs 是该企业可用的助手版本 id 列表（allowlist）。
           items:
             type: string
           type: array
@@ -467,10 +467,10 @@ components:
           description: ContactPhone 是业务联系人电话，可置空。
           type: string
         credit_warning_threshold:
-          description: CreditWarningThreshold 是组织余额预警阈值；nil 表示清空或未设置预警阈值。
+          description: CreditWarningThreshold 是企业余额预警阈值；nil 表示清空或未设置预警阈值。
           type: integer
         name:
-          description: Name 是组织展示名；更新时仍必填，避免空名称进入前端列表。
+          description: Name 是企业展示名；更新时仍必填，避免空名称进入前端列表。
           type: string
         remark:
           description: Remark 是平台管理员维护的内部备注，可置空。
@@ -519,7 +519,7 @@ components:
     handlers.SwitchAppVersionRequest:
       properties:
         version_id:
-          description: VersionID 是目标助手版本 id，必须在实例所属组织的 allowlist 内。
+          description: VersionID 是目标助手版本 id，必须在实例所属企业的 allowlist 内。
           type: string
       required:
       - version_id
@@ -599,7 +599,7 @@ components:
           description: DisplayName 是成员展示名，更新接口要求显式传入非空值。
           type: string
         role:
-          description: Role 为空表示保持原角色；非空时需要管理员权限并限制在组织角色内。
+          description: Role 为空表示保持原角色；非空时需要管理员权限并限制在企业角色内。
           type: string
       required:
       - display_name
@@ -793,7 +793,7 @@ components:
           type: integer
         total_recharged:
           description: |-
-            TotalRecharged 是该组织历史累计充值额度之和（仅计 succeeded 记录）。
+            TotalRecharged 是该企业历史累计充值额度之和（仅计 succeeded 记录）。
             数据来源于 manager 自身 recharge_records 表，不从 new-api 获取。
           type: integer
         used_quota:
@@ -1435,7 +1435,7 @@ components:
           description: ID 是成员用户 UUID。
           type: string
         org_id:
-          description: OrgID 是成员所属组织 UUID；platform_admin 可能为空。
+          description: OrgID 是成员所属企业 UUID；platform_admin 可能为空。
           type: string
         role:
           description: Role 是成员角色，限定为 org_admin 或 org_member。
@@ -1450,7 +1450,7 @@ components:
     service.ModelResult:
       properties:
         id:
-          description: ID 是后续组织 allowlist 和实例模型字段使用的模型标识。
+          description: ID 是后续企业 allowlist 和实例模型字段使用的模型标识。
           type: string
         name:
           description: Name 是前端展示名称；new-api 缺省时与 ID 一致。
@@ -1498,7 +1498,7 @@ components:
           description: Name 是应用名称。
           type: string
         org_id:
-          description: OrgID 是应用所属组织 ID，用于后续前端跳转和权限上下文。
+          description: OrgID 是应用所属企业 ID，用于后续前端跳转和权限上下文。
           type: string
         owner_user_id:
           description: OwnerUserID 是应用所有者用户 ID。
@@ -1567,10 +1567,10 @@ components:
     service.OrgUsageItem:
       properties:
         org_id:
-          description: OrgID 是组织 UUID。
+          description: OrgID 是企业 UUID。
           type: string
         org_name:
-          description: OrgName 是组织显示名。
+          description: OrgName 是企业显示名。
           type: string
         total_quota:
           description: TotalQuota 是 [since, until] 内各日 QuotaDate.Quota 的累加值。
@@ -1579,16 +1579,16 @@ components:
     service.OrganizationResult:
       properties:
         admin_username:
-          description: AdminUsername 是组织首个可用管理员账号名，用于平台管理员复制登录信息。
+          description: AdminUsername 是企业首个可用管理员账号名，用于平台管理员复制登录信息。
           type: string
         assistant_version_ids:
-          description: AssistantVersionIDs 是该组织可用的助手版本 id 列表（allowlist）。
+          description: AssistantVersionIDs 是该企业可用的助手版本 id 列表（allowlist）。
           items:
             type: string
           type: array
           uniqueItems: false
         code:
-          description: Code 是组织登录标识，用于组织用户登录时定位租户。
+          description: Code 是企业登录标识，用于企业用户登录时定位企业。
           type: string
         contact_name:
           description: ContactName 是业务联系人姓名。
@@ -1597,22 +1597,22 @@ components:
           description: ContactPhone 是业务联系人电话。
           type: string
         credit_warning_threshold:
-          description: CreditWarningThreshold 是组织余额预警阈值。
+          description: CreditWarningThreshold 是企业余额预警阈值。
           type: integer
         id:
-          description: ID 是 manager 组织 UUID。
+          description: ID 是 manager 企业 UUID。
           type: string
         name:
-          description: Name 是组织展示名。
+          description: Name 是企业展示名。
           type: string
         newapi_user_id:
-          description: NewAPIUserID 是组织在 new-api 侧的用户 ID，缺失时充值和用量接口不可用。
+          description: NewAPIUserID 是企业在 new-api 侧的用户 ID，缺失时充值和用量接口不可用。
           type: string
         remark:
           description: Remark 是平台管理员维护的内部备注。
           type: string
         status:
-          description: Status 是组织状态，active / disabled 决定成员是否可登录。
+          description: Status 是企业状态，active / disabled 决定成员是否可登录。
           type: string
       type: object
     service.PlatformOverview:
@@ -1661,7 +1661,7 @@ components:
           description: Scope 标识配额序列所属维度，当前为 organization 或 platform。
           type: string
         scope_id:
-          description: ScopeID 是组织维度的 manager org UUID；平台维度为空。
+          description: ScopeID 是企业维度的 manager org UUID；平台维度为空。
           type: string
         updated_at:
           description: UpdatedAt 是 manager 代理完成时刻，不代表 new-api 内部采集时间。
@@ -1851,7 +1851,7 @@ externalDocs:
   description: ""
   url: ""
 info:
-  description: 基于 Hermes Agent runtime 的多组织管理后台 API。
+  description: 基于 Hermes Agent runtime 的多企业管理后台 API。
   title: Agent Runtime Manager API
   version: "1.0"
 openapi: 3.1.0
@@ -1999,7 +1999,7 @@ paths:
       - apps
   /apps/{appId}/api-key/disable:
     post:
-      description: 异步触发禁用应用关联的 new-api token，仅应用所属组织管理员可操作
+      description: 异步触发禁用应用关联的 new-api token，仅应用所属企业管理员可操作
       parameters:
       - description: 应用 ID
         in: path
@@ -2047,7 +2047,7 @@ paths:
       - runtime-operations
   /apps/{appId}/api-key/restore:
     post:
-      description: 异步触发恢复应用关联的 new-api token，仅应用所属组织管理员可操作
+      description: 异步触发恢复应用关联的 new-api token，仅应用所属企业管理员可操作
       parameters:
       - description: 应用 ID
         in: path
@@ -4385,7 +4385,7 @@ paths:
         required: true
         schema:
           type: string
-      - description: 应用所属组织 ID
+      - description: 应用所属企业 ID
         in: query
         name: owner_org_id
         required: true
@@ -4479,7 +4479,7 @@ paths:
       - usage
   /apps/{appId}/version:
     post:
-      description: 切换实例绑定的助手版本；目标版本必须在实例所属组织的 allowlist 内。切换后需重启实例生效。
+      description: 切换实例绑定的助手版本；目标版本必须在实例所属企业的 allowlist 内。切换后需重启实例生效。
       parameters:
       - description: 应用 ID
         in: path
@@ -4997,7 +4997,7 @@ paths:
       - assistant-versions
   /audit-logs:
     get:
-      description: 通过 target_type 和 target_id query 参数查询指定资源的审计日志；组织成员仅可查询自己拥有的 app
+      description: 通过 target_type 和 target_id query 参数查询指定资源的审计日志；企业成员仅可查询自己拥有的 app
         审计
       parameters:
       - description: 资源类型（如 app / member）
@@ -5232,7 +5232,7 @@ paths:
       - recharge
   /jobs/{jobId}:
     get:
-      description: 按 job 关联应用的可见性鉴权：平台管理员跨组织放行；组织管理员可查本组织 app 的 job；组织成员可查自己拥有的 app
+      description: 按 job 关联应用的可见性鉴权：平台管理员跨企业放行；企业管理员可查本企业 app 的 job；企业成员可查自己拥有的 app
         的 job。payload 无 app_id 的 job 仅平台管理员可查。
       parameters:
       - description: job UUID
@@ -5375,7 +5375,7 @@ paths:
       tags:
       - members
     patch:
-      description: 更新成员显示名或角色；org_admin 仅可更新自己组织的成员
+      description: 更新成员显示名或角色；org_admin 仅可更新自己企业的成员
       parameters:
       - description: 成员用户 ID
         in: path
@@ -5536,7 +5536,7 @@ paths:
       - members
   /members/{userId}/password:
     post:
-      description: 组织管理员强制重置本组织成员的密码
+      description: 企业管理员强制重置本企业成员的密码
       parameters:
       - description: 成员用户 ID
         in: path
@@ -5595,7 +5595,7 @@ paths:
       - members
   /models:
     get:
-      description: 平台管理员实时查询 new-api 当前可用模型，供组织模型 allowlist 使用
+      description: 平台管理员实时查询 new-api 当前可用模型，供企业模型 allowlist 使用
       responses:
         "200":
           content:
@@ -5632,7 +5632,7 @@ paths:
       - models
   /organizations:
     get:
-      description: 平台管理员获取所有组织；org_admin 只能看到自己所属组织
+      description: 平台管理员获取所有企业；org_admin 只能看到自己所属企业
       parameters:
       - description: 每页条数（默认 50）
         in: query
@@ -5675,11 +5675,11 @@ paths:
           description: Internal Server Error
       security:
       - BearerAuth: []
-      summary: 组织列表
+      summary: 企业列表
       tags:
       - organizations
     post:
-      description: 平台管理员创建新组织，并同步在 new-api 侧完成账户 provisioning
+      description: 平台管理员创建新企业，并同步在 new-api 侧完成账户 provisioning
       requestBody:
         content:
           application/json:
@@ -5687,9 +5687,9 @@ paths:
               oneOf:
               - type: object
               - $ref: '#/components/schemas/handlers.CreateOrganizationRequest'
-                description: 创建组织请求
+                description: 创建企业请求
                 summary: body
-        description: 创建组织请求
+        description: 创建企业请求
         required: true
       responses:
         "201":
@@ -5726,14 +5726,14 @@ paths:
           description: Internal Server Error
       security:
       - BearerAuth: []
-      summary: 创建组织
+      summary: 创建企业
       tags:
       - organizations
   /organizations/{orgId}:
     get:
-      description: 按 orgId 获取单个组织信息
+      description: 按 orgId 获取单个企业信息
       parameters:
-      - description: 组织 ID
+      - description: 企业 ID
         in: path
         name: orgId
         required: true
@@ -5774,13 +5774,13 @@ paths:
           description: Internal Server Error
       security:
       - BearerAuth: []
-      summary: 组织详情
+      summary: 企业详情
       tags:
       - organizations
     patch:
-      description: 更新组织名称、联系人、备注等基础字段
+      description: 更新企业名称、联系人、备注等基础字段
       parameters:
-      - description: 组织 ID
+      - description: 企业 ID
         in: path
         name: orgId
         required: true
@@ -5793,9 +5793,9 @@ paths:
               oneOf:
               - type: object
               - $ref: '#/components/schemas/handlers.OrganizationRequest'
-                description: 更新组织请求
+                description: 更新企业请求
                 summary: body
-        description: 更新组织请求
+        description: 更新企业请求
         required: true
       responses:
         "200":
@@ -5838,14 +5838,14 @@ paths:
           description: Internal Server Error
       security:
       - BearerAuth: []
-      summary: 更新组织
+      summary: 更新企业
       tags:
       - organizations
   /organizations/{orgId}/apps:
     get:
-      description: 按组织 ID 分页列出应用；org_member 只能看到自己的应用
+      description: 按企业 ID 分页列出应用；org_member 只能看到自己的应用
       parameters:
-      - description: 组织 ID
+      - description: 企业 ID
         in: path
         name: orgId
         required: true
@@ -5903,9 +5903,9 @@ paths:
       - apps
   /organizations/{orgId}/audit-logs:
     get:
-      description: 分页列出指定组织的审计日志；仅组织管理员或平台管理员可调
+      description: 分页列出指定企业的审计日志；仅企业管理员或平台管理员可调
       parameters:
-      - description: 组织 ID
+      - description: 企业 ID
         in: path
         name: orgId
         required: true
@@ -5958,14 +5958,14 @@ paths:
           description: Internal Server Error
       security:
       - BearerAuth: []
-      summary: 组织审计日志列表
+      summary: 企业审计日志列表
       tags:
       - audit-logs
   /organizations/{orgId}/balance:
     get:
-      description: 查询指定组织在 new-api 中的当前额度余额
+      description: 查询指定企业在 new-api 中的当前额度余额
       parameters:
-      - description: 组织 ID
+      - description: 企业 ID
         in: path
         name: orgId
         required: true
@@ -6006,14 +6006,14 @@ paths:
           description: Bad Gateway
       security:
       - BearerAuth: []
-      summary: 查询组织余额
+      summary: 查询企业余额
       tags:
       - recharge
   /organizations/{orgId}/disable:
     post:
-      description: 将组织状态设为 disabled，成员登录时将被拒绝
+      description: 将企业状态设为 disabled，成员登录时将被拒绝
       parameters:
-      - description: 组织 ID
+      - description: 企业 ID
         in: path
         name: orgId
         required: true
@@ -6054,14 +6054,14 @@ paths:
           description: Internal Server Error
       security:
       - BearerAuth: []
-      summary: 禁用组织
+      summary: 禁用企业
       tags:
       - organizations
   /organizations/{orgId}/enable:
     post:
-      description: 将组织状态从 disabled 恢复为 active
+      description: 将企业状态从 disabled 恢复为 active
       parameters:
-      - description: 组织 ID
+      - description: 企业 ID
         in: path
         name: orgId
         required: true
@@ -6102,14 +6102,14 @@ paths:
           description: Internal Server Error
       security:
       - BearerAuth: []
-      summary: 启用组织
+      summary: 启用企业
       tags:
       - organizations
   /organizations/{orgId}/knowledge:
     get:
-      description: 以扁平 RAGFlow document 列表返回组织知识库文件
+      description: 以扁平 RAGFlow document 列表返回企业知识库文件
       parameters:
-      - description: 组织 ID
+      - description: 企业 ID
         in: path
         name: orgId
         required: true
@@ -6162,13 +6162,13 @@ paths:
           description: Service Unavailable
       security:
       - BearerAuth: []
-      summary: 列出组织级知识库文件
+      summary: 列出企业级知识库文件
       tags:
       - knowledge
     post:
       description: 通过 filename query 指定文件名，上传后进入 RAGFlow 解析队列
       parameters:
-      - description: 组织 ID
+      - description: 企业 ID
         in: path
         name: orgId
         required: true
@@ -6219,14 +6219,14 @@ paths:
           description: Service Unavailable
       security:
       - BearerAuth: []
-      summary: 上传组织级知识库文件
+      summary: 上传企业级知识库文件
       tags:
       - knowledge
   /organizations/{orgId}/knowledge/{documentId}:
     delete:
       description: 按 documentId 删除 RAGFlow document
       parameters:
-      - description: 组织 ID
+      - description: 企业 ID
         in: path
         name: orgId
         required: true
@@ -6267,14 +6267,14 @@ paths:
           description: Service Unavailable
       security:
       - BearerAuth: []
-      summary: 删除组织级知识库文件
+      summary: 删除企业级知识库文件
       tags:
       - knowledge
   /organizations/{orgId}/knowledge/{documentId}/file:
     get:
       description: 按 documentId 下载 RAGFlow 中的原始文件
       parameters:
-      - description: 组织 ID
+      - description: 企业 ID
         in: path
         name: orgId
         required: true
@@ -6319,14 +6319,14 @@ paths:
           description: Service Unavailable
       security:
       - BearerAuth: []
-      summary: 下载组织级知识库文件
+      summary: 下载企业级知识库文件
       tags:
       - knowledge
   /organizations/{orgId}/knowledge/{documentId}/reparse:
     post:
       description: 按 documentId 重新触发 RAGFlow parse
       parameters:
-      - description: 组织 ID
+      - description: 企业 ID
         in: path
         name: orgId
         required: true
@@ -6371,14 +6371,14 @@ paths:
           description: Service Unavailable
       security:
       - BearerAuth: []
-      summary: 重新解析组织级知识库文件
+      summary: 重新解析企业级知识库文件
       tags:
       - knowledge
   /organizations/{orgId}/members:
     get:
-      description: 按组织 ID 分页列出成员；org_member 只能看到自己
+      description: 按企业 ID 分页列出成员；org_member 只能看到自己
       parameters:
-      - description: 组织 ID
+      - description: 企业 ID
         in: path
         name: orgId
         required: true
@@ -6431,13 +6431,13 @@ paths:
           description: Internal Server Error
       security:
       - BearerAuth: []
-      summary: 组织成员列表
+      summary: 企业成员列表
       tags:
       - members
     post:
-      description: 组织管理员在本组织下创建新成员
+      description: 企业管理员在本企业下创建新成员
       parameters:
-      - description: 组织 ID
+      - description: 企业 ID
         in: path
         name: orgId
         required: true
@@ -6495,14 +6495,14 @@ paths:
           description: Internal Server Error
       security:
       - BearerAuth: []
-      summary: 创建组织成员
+      summary: 创建企业成员
       tags:
       - members
   /organizations/{orgId}/members/{userId}/apps:
     post:
-      description: 平台管理员或本组织管理员为已有成员创建新的应用实例；目标成员必须没有未删除实例
+      description: 平台管理员或本企业管理员为已有成员创建新的应用实例；目标成员必须没有未删除实例
       parameters:
-      - description: 组织 ID
+      - description: 企业 ID
         in: path
         name: orgId
         required: true
@@ -6579,7 +6579,7 @@ paths:
     post:
       description: 在单个事务内创建成员并联动初始化应用、渠道绑定和 newapi 凭证；onboarding service 未配置时返回 503
       parameters:
-      - description: 组织 ID
+      - description: 企业 ID
         in: path
         name: orgId
         required: true
@@ -6648,9 +6648,9 @@ paths:
       - members
   /organizations/{orgId}/recharge:
     post:
-      description: 平台管理员为指定组织充值额度；组织须已关联 new-api 账户
+      description: 平台管理员为指定企业充值额度；企业须已关联 new-api 账户
       parameters:
-      - description: 组织 ID
+      - description: 企业 ID
         in: path
         name: orgId
         required: true
@@ -6714,14 +6714,14 @@ paths:
           description: Bad Gateway
       security:
       - BearerAuth: []
-      summary: 组织充值
+      summary: 企业充值
       tags:
       - recharge
   /organizations/{orgId}/recharges:
     get:
-      description: 分页查询指定组织的充值记录
+      description: 分页查询指定企业的充值记录
       parameters:
-      - description: 组织 ID
+      - description: 企业 ID
         in: path
         name: orgId
         required: true
@@ -6774,12 +6774,12 @@ paths:
           description: Bad Gateway
       security:
       - BearerAuth: []
-      summary: 组织充值历史列表
+      summary: 企业充值历史列表
       tags:
       - recharge
   /platform/overview:
     get:
-      description: 平台管理员查询全平台的组织、成员、应用数量汇总
+      description: 平台管理员查询全平台的企业、成员、应用数量汇总
       responses:
         "200":
           content:
@@ -6814,7 +6814,7 @@ paths:
       - platform
   /platform/usage/org-breakdown:
     get:
-      description: 平台维度各组织在时间窗口内的 quota 消耗 top 10，仅平台管理员可调
+      description: 平台维度各企业在时间窗口内的 quota 消耗 top 10，仅平台管理员可调
       parameters:
       - description: 起始时间（Unix 秒）
         in: query
@@ -6861,7 +6861,7 @@ paths:
           description: Service Unavailable
       security:
       - BearerAuth: []
-      summary: 各组织用量分布
+      summary: 各企业用量分布
       tags:
       - usage
   /runtime-images:
@@ -7327,7 +7327,7 @@ paths:
       - runtime-knowledge
   /runtime/knowledge/search:
     post:
-      description: 通过 app runtime token 检索当前实例知识库和所属组织知识库，不接受 dataset ID
+      description: 通过 app runtime token 检索当前实例知识库和所属企业知识库，不接受 dataset ID
       parameters:
       - description: 实例 runtime token
         in: header
@@ -7384,7 +7384,7 @@ paths:
         required: true
         schema:
           type: string
-      - description: 成员所属组织 ID
+      - description: 成员所属企业 ID
         in: query
         name: org_id
         required: true
@@ -7467,9 +7467,9 @@ paths:
       - usage
   /usage/organizations/{orgId}:
     get:
-      description: 返回指定组织在时间窗口内的按日 quota 消耗（QuotaSeries 格式）
+      description: 返回指定企业在时间窗口内的按日 quota 消耗（QuotaSeries 格式）
       parameters:
-      - description: 组织 ID
+      - description: 企业 ID
         in: path
         name: orgId
         required: true
@@ -7526,12 +7526,12 @@ paths:
           description: Service Unavailable
       security:
       - BearerAuth: []
-      summary: 组织用量统计
+      summary: 企业用量统计
       tags:
       - usage
   /usage/platform:
     get:
-      description: 返回平台维度在时间窗口内的按日 quota 消耗（跨所有组织），仅平台管理员可调
+      description: 返回平台维度在时间窗口内的按日 quota 消耗（跨所有企业），仅平台管理员可调
       parameters:
       - description: 起始时间（Unix 秒）
         in: query

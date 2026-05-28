@@ -242,7 +242,7 @@ export interface paths {
         put?: never;
         /**
          * 禁用应用 API Key
-         * @description 异步触发禁用应用关联的 new-api token，仅应用所属组织管理员可操作
+         * @description 异步触发禁用应用关联的 new-api token，仅应用所属企业管理员可操作
          */
         post: {
             parameters: {
@@ -322,7 +322,7 @@ export interface paths {
         put?: never;
         /**
          * 恢复应用 API Key
-         * @description 异步触发恢复应用关联的 new-api token，仅应用所属组织管理员可操作
+         * @description 异步触发恢复应用关联的 new-api token，仅应用所属企业管理员可操作
          */
         post: {
             parameters: {
@@ -3689,7 +3689,7 @@ export interface paths {
         get: {
             parameters: {
                 query: {
-                    /** @description 应用所属组织 ID */
+                    /** @description 应用所属企业 ID */
                     owner_org_id: string;
                     /** @description 应用所有者用户 ID */
                     owner_user_id: string;
@@ -3801,7 +3801,7 @@ export interface paths {
         put?: never;
         /**
          * 切换实例助手版本
-         * @description 切换实例绑定的助手版本；目标版本必须在实例所属组织的 allowlist 内。切换后需重启实例生效。
+         * @description 切换实例绑定的助手版本；目标版本必须在实例所属企业的 allowlist 内。切换后需重启实例生效。
          */
         post: {
             parameters: {
@@ -4563,7 +4563,7 @@ export interface paths {
         };
         /**
          * 资源维度审计日志列表
-         * @description 通过 target_type 和 target_id query 参数查询指定资源的审计日志；组织成员仅可查询自己拥有的 app 审计
+         * @description 通过 target_type 和 target_id query 参数查询指定资源的审计日志；企业成员仅可查询自己拥有的 app 审计
          */
         get: {
             parameters: {
@@ -4960,7 +4960,7 @@ export interface paths {
         };
         /**
          * 查询异步任务详情
-         * @description 按 job 关联应用的可见性鉴权：平台管理员跨组织放行；组织管理员可查本组织 app 的 job；组织成员可查自己拥有的 app 的 job。payload 无 app_id 的 job 仅平台管理员可查。
+         * @description 按 job 关联应用的可见性鉴权：平台管理员跨企业放行；企业管理员可查本企业 app 的 job；企业成员可查自己拥有的 app 的 job。payload 无 app_id 的 job 仅平台管理员可查。
          */
         get: {
             parameters: {
@@ -5179,7 +5179,7 @@ export interface paths {
         head?: never;
         /**
          * 更新成员
-         * @description 更新成员显示名或角色；org_admin 仅可更新自己组织的成员
+         * @description 更新成员显示名或角色；org_admin 仅可更新自己企业的成员
          */
         patch: {
             parameters: {
@@ -5429,7 +5429,7 @@ export interface paths {
         put?: never;
         /**
          * 重置成员密码
-         * @description 组织管理员强制重置本组织成员的密码
+         * @description 企业管理员强制重置本企业成员的密码
          */
         post: {
             parameters: {
@@ -5517,7 +5517,7 @@ export interface paths {
         };
         /**
          * 模型列表
-         * @description 平台管理员实时查询 new-api 当前可用模型，供组织模型 allowlist 使用
+         * @description 平台管理员实时查询 new-api 当前可用模型，供企业模型 allowlist 使用
          */
         get: {
             parameters: {
@@ -5584,8 +5584,8 @@ export interface paths {
             cookie?: never;
         };
         /**
-         * 组织列表
-         * @description 平台管理员获取所有组织；org_admin 只能看到自己所属组织
+         * 企业列表
+         * @description 平台管理员获取所有企业；org_admin 只能看到自己所属企业
          */
         get: {
             parameters: {
@@ -5643,8 +5643,8 @@ export interface paths {
         };
         put?: never;
         /**
-         * 创建组织
-         * @description 平台管理员创建新组织，并同步在 new-api 侧完成账户 provisioning
+         * 创建企业
+         * @description 平台管理员创建新企业，并同步在 new-api 侧完成账户 provisioning
          */
         post: {
             parameters: {
@@ -5653,7 +5653,7 @@ export interface paths {
                 path?: never;
                 cookie?: never;
             };
-            /** @description 创建组织请求 */
+            /** @description 创建企业请求 */
             requestBody: {
                 content: {
                     "application/json": Record<string, never> | components["schemas"]["handlers.CreateOrganizationRequest"];
@@ -5723,15 +5723,15 @@ export interface paths {
             cookie?: never;
         };
         /**
-         * 组织详情
-         * @description 按 orgId 获取单个组织信息
+         * 企业详情
+         * @description 按 orgId 获取单个企业信息
          */
         get: {
             parameters: {
                 query?: never;
                 header?: never;
                 path: {
-                    /** @description 组织 ID */
+                    /** @description 企业 ID */
                     orgId: string;
                 };
                 cookie?: never;
@@ -5793,20 +5793,20 @@ export interface paths {
         options?: never;
         head?: never;
         /**
-         * 更新组织
-         * @description 更新组织名称、联系人、备注等基础字段
+         * 更新企业
+         * @description 更新企业名称、联系人、备注等基础字段
          */
         patch: {
             parameters: {
                 query?: never;
                 header?: never;
                 path: {
-                    /** @description 组织 ID */
+                    /** @description 企业 ID */
                     orgId: string;
                 };
                 cookie?: never;
             };
-            /** @description 更新组织请求 */
+            /** @description 更新企业请求 */
             requestBody: {
                 content: {
                     "application/json": Record<string, never> | components["schemas"]["handlers.OrganizationRequest"];
@@ -5882,7 +5882,7 @@ export interface paths {
         };
         /**
          * 应用列表
-         * @description 按组织 ID 分页列出应用；org_member 只能看到自己的应用
+         * @description 按企业 ID 分页列出应用；org_member 只能看到自己的应用
          */
         get: {
             parameters: {
@@ -5894,7 +5894,7 @@ export interface paths {
                 };
                 header?: never;
                 path: {
-                    /** @description 组织 ID */
+                    /** @description 企业 ID */
                     orgId: string;
                 };
                 cookie?: never;
@@ -5966,8 +5966,8 @@ export interface paths {
             cookie?: never;
         };
         /**
-         * 组织审计日志列表
-         * @description 分页列出指定组织的审计日志；仅组织管理员或平台管理员可调
+         * 企业审计日志列表
+         * @description 分页列出指定企业的审计日志；仅企业管理员或平台管理员可调
          */
         get: {
             parameters: {
@@ -5979,7 +5979,7 @@ export interface paths {
                 };
                 header?: never;
                 path: {
-                    /** @description 组织 ID */
+                    /** @description 企业 ID */
                     orgId: string;
                 };
                 cookie?: never;
@@ -6051,15 +6051,15 @@ export interface paths {
             cookie?: never;
         };
         /**
-         * 查询组织余额
-         * @description 查询指定组织在 new-api 中的当前额度余额
+         * 查询企业余额
+         * @description 查询指定企业在 new-api 中的当前额度余额
          */
         get: {
             parameters: {
                 query?: never;
                 header?: never;
                 path: {
-                    /** @description 组织 ID */
+                    /** @description 企业 ID */
                     orgId: string;
                 };
                 cookie?: never;
@@ -6133,15 +6133,15 @@ export interface paths {
         get?: never;
         put?: never;
         /**
-         * 禁用组织
-         * @description 将组织状态设为 disabled，成员登录时将被拒绝
+         * 禁用企业
+         * @description 将企业状态设为 disabled，成员登录时将被拒绝
          */
         post: {
             parameters: {
                 query?: never;
                 header?: never;
                 path: {
-                    /** @description 组织 ID */
+                    /** @description 企业 ID */
                     orgId: string;
                 };
                 cookie?: never;
@@ -6213,15 +6213,15 @@ export interface paths {
         get?: never;
         put?: never;
         /**
-         * 启用组织
-         * @description 将组织状态从 disabled 恢复为 active
+         * 启用企业
+         * @description 将企业状态从 disabled 恢复为 active
          */
         post: {
             parameters: {
                 query?: never;
                 header?: never;
                 path: {
-                    /** @description 组织 ID */
+                    /** @description 企业 ID */
                     orgId: string;
                 };
                 cookie?: never;
@@ -6291,8 +6291,8 @@ export interface paths {
             cookie?: never;
         };
         /**
-         * 列出组织级知识库文件
-         * @description 以扁平 RAGFlow document 列表返回组织知识库文件
+         * 列出企业级知识库文件
+         * @description 以扁平 RAGFlow document 列表返回企业知识库文件
          */
         get: {
             parameters: {
@@ -6308,7 +6308,7 @@ export interface paths {
                 };
                 header?: never;
                 path: {
-                    /** @description 组织 ID */
+                    /** @description 企业 ID */
                     orgId: string;
                 };
                 cookie?: never;
@@ -6355,7 +6355,7 @@ export interface paths {
         };
         put?: never;
         /**
-         * 上传组织级知识库文件
+         * 上传企业级知识库文件
          * @description 通过 filename query 指定文件名，上传后进入 RAGFlow 解析队列
          */
         post: {
@@ -6366,7 +6366,7 @@ export interface paths {
                 };
                 header?: never;
                 path: {
-                    /** @description 组织 ID */
+                    /** @description 企业 ID */
                     orgId: string;
                 };
                 cookie?: never;
@@ -6441,7 +6441,7 @@ export interface paths {
         put?: never;
         post?: never;
         /**
-         * 删除组织级知识库文件
+         * 删除企业级知识库文件
          * @description 按 documentId 删除 RAGFlow document
          */
         delete: {
@@ -6449,7 +6449,7 @@ export interface paths {
                 query?: never;
                 header?: never;
                 path: {
-                    /** @description 组织 ID */
+                    /** @description 企业 ID */
                     orgId: string;
                     /** @description document ID */
                     documentId: string;
@@ -6516,7 +6516,7 @@ export interface paths {
             cookie?: never;
         };
         /**
-         * 下载组织级知识库文件
+         * 下载企业级知识库文件
          * @description 按 documentId 下载 RAGFlow 中的原始文件
          */
         get: {
@@ -6524,7 +6524,7 @@ export interface paths {
                 query?: never;
                 header?: never;
                 path: {
-                    /** @description 组织 ID */
+                    /** @description 企业 ID */
                     orgId: string;
                     /** @description document ID */
                     documentId: string;
@@ -6598,7 +6598,7 @@ export interface paths {
         get?: never;
         put?: never;
         /**
-         * 重新解析组织级知识库文件
+         * 重新解析企业级知识库文件
          * @description 按 documentId 重新触发 RAGFlow parse
          */
         post: {
@@ -6606,7 +6606,7 @@ export interface paths {
                 query?: never;
                 header?: never;
                 path: {
-                    /** @description 组织 ID */
+                    /** @description 企业 ID */
                     orgId: string;
                     /** @description document ID */
                     documentId: string;
@@ -6676,8 +6676,8 @@ export interface paths {
             cookie?: never;
         };
         /**
-         * 组织成员列表
-         * @description 按组织 ID 分页列出成员；org_member 只能看到自己
+         * 企业成员列表
+         * @description 按企业 ID 分页列出成员；org_member 只能看到自己
          */
         get: {
             parameters: {
@@ -6689,7 +6689,7 @@ export interface paths {
                 };
                 header?: never;
                 path: {
-                    /** @description 组织 ID */
+                    /** @description 企业 ID */
                     orgId: string;
                 };
                 cookie?: never;
@@ -6747,15 +6747,15 @@ export interface paths {
         };
         put?: never;
         /**
-         * 创建组织成员
-         * @description 组织管理员在本组织下创建新成员
+         * 创建企业成员
+         * @description 企业管理员在本企业下创建新成员
          */
         post: {
             parameters: {
                 query?: never;
                 header?: never;
                 path: {
-                    /** @description 组织 ID */
+                    /** @description 企业 ID */
                     orgId: string;
                 };
                 cookie?: never;
@@ -6842,14 +6842,14 @@ export interface paths {
         put?: never;
         /**
          * 为已有成员创建实例
-         * @description 平台管理员或本组织管理员为已有成员创建新的应用实例；目标成员必须没有未删除实例
+         * @description 平台管理员或本企业管理员为已有成员创建新的应用实例；目标成员必须没有未删除实例
          */
         post: {
             parameters: {
                 query?: never;
                 header?: never;
                 path: {
-                    /** @description 组织 ID */
+                    /** @description 企业 ID */
                     orgId: string;
                     /** @description 成员用户 ID */
                     userId: string;
@@ -6954,7 +6954,7 @@ export interface paths {
                 query?: never;
                 header?: never;
                 path: {
-                    /** @description 组织 ID */
+                    /** @description 企业 ID */
                     orgId: string;
                 };
                 cookie?: never;
@@ -7049,15 +7049,15 @@ export interface paths {
         get?: never;
         put?: never;
         /**
-         * 组织充值
-         * @description 平台管理员为指定组织充值额度；组织须已关联 new-api 账户
+         * 企业充值
+         * @description 平台管理员为指定企业充值额度；企业须已关联 new-api 账户
          */
         post: {
             parameters: {
                 query?: never;
                 header?: never;
                 path: {
-                    /** @description 组织 ID */
+                    /** @description 企业 ID */
                     orgId: string;
                 };
                 cookie?: never;
@@ -7150,8 +7150,8 @@ export interface paths {
             cookie?: never;
         };
         /**
-         * 组织充值历史列表
-         * @description 分页查询指定组织的充值记录
+         * 企业充值历史列表
+         * @description 分页查询指定企业的充值记录
          */
         get: {
             parameters: {
@@ -7163,7 +7163,7 @@ export interface paths {
                 };
                 header?: never;
                 path: {
-                    /** @description 组织 ID */
+                    /** @description 企业 ID */
                     orgId: string;
                 };
                 cookie?: never;
@@ -7236,7 +7236,7 @@ export interface paths {
         };
         /**
          * 平台总览
-         * @description 平台管理员查询全平台的组织、成员、应用数量汇总
+         * @description 平台管理员查询全平台的企业、成员、应用数量汇总
          */
         get: {
             parameters: {
@@ -7303,8 +7303,8 @@ export interface paths {
             cookie?: never;
         };
         /**
-         * 各组织用量分布
-         * @description 平台维度各组织在时间窗口内的 quota 消耗 top 10，仅平台管理员可调
+         * 各企业用量分布
+         * @description 平台维度各企业在时间窗口内的 quota 消耗 top 10，仅平台管理员可调
          */
         get: {
             parameters: {
@@ -8096,7 +8096,7 @@ export interface paths {
         put?: never;
         /**
          * Hermes 检索知识库
-         * @description 通过 app runtime token 检索当前实例知识库和所属组织知识库，不接受 dataset ID
+         * @description 通过 app runtime token 检索当前实例知识库和所属企业知识库，不接受 dataset ID
          */
         post: {
             parameters: {
@@ -8173,7 +8173,7 @@ export interface paths {
         get: {
             parameters: {
                 query: {
-                    /** @description 成员所属组织 ID */
+                    /** @description 成员所属企业 ID */
                     org_id: string;
                     /** @description 起始时间（Unix 秒） */
                     since?: number;
@@ -8278,8 +8278,8 @@ export interface paths {
             cookie?: never;
         };
         /**
-         * 组织用量统计
-         * @description 返回指定组织在时间窗口内的按日 quota 消耗（QuotaSeries 格式）
+         * 企业用量统计
+         * @description 返回指定企业在时间窗口内的按日 quota 消耗（QuotaSeries 格式）
          */
         get: {
             parameters: {
@@ -8291,7 +8291,7 @@ export interface paths {
                 };
                 header?: never;
                 path: {
-                    /** @description 组织 ID */
+                    /** @description 企业 ID */
                     orgId: string;
                 };
                 cookie?: never;
@@ -8373,7 +8373,7 @@ export interface paths {
         };
         /**
          * 平台用量统计
-         * @description 返回平台维度在时间窗口内的按日 quota 消耗（跨所有组织），仅平台管理员可调
+         * @description 返回平台维度在时间窗口内的按日 quota 消耗（跨所有企业），仅平台管理员可调
          */
         get: {
             parameters: {
@@ -8591,7 +8591,7 @@ export interface components {
             channel_type?: string;
             /** @description NodeID 是指定 runtime 节点；为空时 service 自动选择可用节点。 */
             runtime_node_id?: string;
-            /** @description VersionID 是实例绑定的助手版本 id，必须落在组织 allowlist 内。 */
+            /** @description VersionID 是实例绑定的助手版本 id，必须落在企业 allowlist 内。 */
             version_id: string;
         };
         "handlers.CreateMemberRequest": {
@@ -8601,7 +8601,7 @@ export interface components {
             password: string;
             /** @description Role 允许 org_admin / org_member；空值由 service 层补默认 org_member。 */
             role?: string;
-            /** @description Username 是组织内登录账号名，创建后不可通过成员更新接口修改。 */
+            /** @description Username 是企业内登录账号名，创建后不可通过成员更新接口修改。 */
             username: string;
         };
         "handlers.CreateOrganizationRequest": {
@@ -8609,19 +8609,19 @@ export interface components {
             admin_display_name: string;
             /** @description AdminPassword 是首个 org_admin 的初始密码，service 层立即 hash 后写库。 */
             admin_password: string;
-            /** @description AdminUsername 是随组织创建的首个 org_admin 账号名。 */
+            /** @description AdminUsername 是随企业创建的首个 org_admin 账号名。 */
             admin_username: string;
-            /** @description AssistantVersionIDs 是该组织可用的助手版本 id 列表（allowlist）。 */
+            /** @description AssistantVersionIDs 是该企业可用的助手版本 id 列表（allowlist）。 */
             assistant_version_ids?: string[];
-            /** @description Code 是组织登录标识，创建后不可修改。 */
+            /** @description Code 是企业登录标识，创建后不可修改。 */
             code: string;
             /** @description ContactName 是业务联系人姓名，可为空。 */
             contact_name?: string;
             /** @description ContactPhone 是业务联系人电话，可为空；不参与权限或登录校验。 */
             contact_phone?: string;
-            /** @description CreditWarningThreshold 是组织余额预警阈值；nil 表示不启用余额预警或保持预警关闭。 */
+            /** @description CreditWarningThreshold 是企业余额预警阈值；nil 表示不启用余额预警或保持预警关闭。 */
             credit_warning_threshold?: number;
-            /** @description Name 是组织展示名，也是平台管理员列表中识别租户的主字段。 */
+            /** @description Name 是企业展示名，也是平台管理员列表中识别租户的主字段。 */
             name: string;
             /** @description Remark 是平台管理员维护的内部备注。 */
             remark?: string;
@@ -8682,7 +8682,7 @@ export interface components {
             to: string;
         };
         "handlers.LoginRequest": {
-            /** @description OrgCode 是组织用户登录时填写的组织标识；平台管理员登录时留空。 */
+            /** @description OrgCode 是企业用户登录时填写的企业标识；平台管理员登录时留空。 */
             org_code?: string;
             /** @description Password 是明文登录密码，仅用于本次校验，handler 不写日志。 */
             password: string;
@@ -8712,19 +8712,19 @@ export interface components {
             runtime_node_id?: string;
             /** @description Username 是新成员账号名，与普通创建成员保持同一约束。 */
             username: string;
-            /** @description VersionID 是实例绑定的助手版本 id，必须落在组织 allowlist 内。 */
+            /** @description VersionID 是实例绑定的助手版本 id，必须落在企业 allowlist 内。 */
             version_id: string;
         };
         "handlers.OrganizationRequest": {
-            /** @description AssistantVersionIDs 是该组织可用的助手版本 id 列表（allowlist）。 */
+            /** @description AssistantVersionIDs 是该企业可用的助手版本 id 列表（allowlist）。 */
             assistant_version_ids?: string[];
             /** @description ContactName 是业务联系人姓名，可置空。 */
             contact_name?: string;
             /** @description ContactPhone 是业务联系人电话，可置空。 */
             contact_phone?: string;
-            /** @description CreditWarningThreshold 是组织余额预警阈值；nil 表示清空或未设置预警阈值。 */
+            /** @description CreditWarningThreshold 是企业余额预警阈值；nil 表示清空或未设置预警阈值。 */
             credit_warning_threshold?: number;
-            /** @description Name 是组织展示名；更新时仍必填，避免空名称进入前端列表。 */
+            /** @description Name 是企业展示名；更新时仍必填，避免空名称进入前端列表。 */
             name: string;
             /** @description Remark 是平台管理员维护的内部备注，可置空。 */
             remark?: string;
@@ -8750,7 +8750,7 @@ export interface components {
             top_k?: number;
         };
         "handlers.SwitchAppVersionRequest": {
-            /** @description VersionID 是目标助手版本 id，必须在实例所属组织的 allowlist 内。 */
+            /** @description VersionID 是目标助手版本 id，必须在实例所属企业的 allowlist 内。 */
             version_id: string;
         };
         "handlers.UpdateAssistantVersionRequest": {
@@ -8794,7 +8794,7 @@ export interface components {
         "handlers.UpdateMemberRequest": {
             /** @description DisplayName 是成员展示名，更新接口要求显式传入非空值。 */
             display_name: string;
-            /** @description Role 为空表示保持原角色；非空时需要管理员权限并限制在组织角色内。 */
+            /** @description Role 为空表示保持原角色；非空时需要管理员权限并限制在企业角色内。 */
             role?: string;
         };
         "service.AgentEnrollResult": {
@@ -8921,7 +8921,7 @@ export interface components {
             newapi_user_id?: number;
             remain_quota?: number;
             /**
-             * @description TotalRecharged 是该组织历史累计充值额度之和（仅计 succeeded 记录）。
+             * @description TotalRecharged 是该企业历史累计充值额度之和（仅计 succeeded 记录）。
              *     数据来源于 manager 自身 recharge_records 表，不从 new-api 获取。
              */
             total_recharged?: number;
@@ -9334,7 +9334,7 @@ export interface components {
             display_name?: string;
             /** @description ID 是成员用户 UUID。 */
             id?: string;
-            /** @description OrgID 是成员所属组织 UUID；platform_admin 可能为空。 */
+            /** @description OrgID 是成员所属企业 UUID；platform_admin 可能为空。 */
             org_id?: string;
             /** @description Role 是成员角色，限定为 org_admin 或 org_member。 */
             role?: string;
@@ -9344,7 +9344,7 @@ export interface components {
             username?: string;
         };
         "service.ModelResult": {
-            /** @description ID 是后续组织 allowlist 和实例模型字段使用的模型标识。 */
+            /** @description ID 是后续企业 allowlist 和实例模型字段使用的模型标识。 */
             id?: string;
             /** @description Name 是前端展示名称；new-api 缺省时与 ID 一致。 */
             name?: string;
@@ -9376,7 +9376,7 @@ export interface components {
             current_resource?: components["schemas"]["service.InstanceResourceSampleResult"];
             /** @description Name 是应用名称。 */
             name?: string;
-            /** @description OrgID 是应用所属组织 ID，用于后续前端跳转和权限上下文。 */
+            /** @description OrgID 是应用所属企业 ID，用于后续前端跳转和权限上下文。 */
             org_id?: string;
             /** @description OwnerUserID 是应用所有者用户 ID。 */
             owner_user_id?: string;
@@ -9419,35 +9419,35 @@ export interface components {
             updated_at?: string;
         };
         "service.OrgUsageItem": {
-            /** @description OrgID 是组织 UUID。 */
+            /** @description OrgID 是企业 UUID。 */
             org_id?: string;
-            /** @description OrgName 是组织显示名。 */
+            /** @description OrgName 是企业显示名。 */
             org_name?: string;
             /** @description TotalQuota 是 [since, until] 内各日 QuotaDate.Quota 的累加值。 */
             total_quota?: number;
         };
         "service.OrganizationResult": {
-            /** @description AdminUsername 是组织首个可用管理员账号名，用于平台管理员复制登录信息。 */
+            /** @description AdminUsername 是企业首个可用管理员账号名，用于平台管理员复制登录信息。 */
             admin_username?: string;
-            /** @description AssistantVersionIDs 是该组织可用的助手版本 id 列表（allowlist）。 */
+            /** @description AssistantVersionIDs 是该企业可用的助手版本 id 列表（allowlist）。 */
             assistant_version_ids?: string[];
-            /** @description Code 是组织登录标识，用于组织用户登录时定位租户。 */
+            /** @description Code 是企业登录标识，用于企业用户登录时定位企业。 */
             code?: string;
             /** @description ContactName 是业务联系人姓名。 */
             contact_name?: string;
             /** @description ContactPhone 是业务联系人电话。 */
             contact_phone?: string;
-            /** @description CreditWarningThreshold 是组织余额预警阈值。 */
+            /** @description CreditWarningThreshold 是企业余额预警阈值。 */
             credit_warning_threshold?: number;
-            /** @description ID 是 manager 组织 UUID。 */
+            /** @description ID 是 manager 企业 UUID。 */
             id?: string;
-            /** @description Name 是组织展示名。 */
+            /** @description Name 是企业展示名。 */
             name?: string;
-            /** @description NewAPIUserID 是组织在 new-api 侧的用户 ID，缺失时充值和用量接口不可用。 */
+            /** @description NewAPIUserID 是企业在 new-api 侧的用户 ID，缺失时充值和用量接口不可用。 */
             newapi_user_id?: string;
             /** @description Remark 是平台管理员维护的内部备注。 */
             remark?: string;
-            /** @description Status 是组织状态，active / disabled 决定成员是否可登录。 */
+            /** @description Status 是企业状态，active / disabled 决定成员是否可登录。 */
             status?: string;
         };
         "service.PlatformOverview": {
@@ -9478,7 +9478,7 @@ export interface components {
         "service.QuotaSeries": {
             /** @description Scope 标识配额序列所属维度，当前为 organization 或 platform。 */
             scope?: string;
-            /** @description ScopeID 是组织维度的 manager org UUID；平台维度为空。 */
+            /** @description ScopeID 是企业维度的 manager org UUID；平台维度为空。 */
             scope_id?: string;
             /** @description UpdatedAt 是 manager 代理完成时刻，不代表 new-api 内部采集时间。 */
             updated_at?: string;

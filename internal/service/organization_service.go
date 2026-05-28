@@ -127,12 +127,12 @@ func (s *OrganizationService) SetKnowledgeDatasetProvisioner(p KnowledgeDatasetP
 	s.knowledgeDatasets = p
 }
 
-// OrganizationInput 是组织创建和更新的统一入参。
-// Admin* 字段仅 CreateOrganization 使用，更新组织资料时会被忽略。
+// OrganizationInput 是企业创建和更新的统一入参。
+// Admin* 字段仅 CreateOrganization 使用，更新企业资料时会被忽略。
 type OrganizationInput struct {
-	// Name 是组织展示名。
+	// Name 是企业展示名。
 	Name string
-	// Code 是组织登录标识，创建后不可修改；仅允许小写字母、数字和短横线。
+	// Code 是企业登录标识，创建后不可修改；仅允许小写字母、数字和短横线。
 	Code string
 	// ContactName 是业务联系人姓名。
 	ContactName string
@@ -140,13 +140,13 @@ type OrganizationInput struct {
 	ContactPhone string
 	// Remark 是平台管理员维护的内部备注。
 	Remark string
-	// CreditWarningThreshold 是组织余额预警阈值；nil 会写入 NULL，表示不设置预警阈值。
+	// CreditWarningThreshold 是企业余额预警阈值；nil 会写入 NULL，表示不设置预警阈值。
 	CreditWarningThreshold *int32
-	// AssistantVersionIDs 是该组织可用的助手版本 id 列表（allowlist）。
+	// AssistantVersionIDs 是该企业可用的助手版本 id 列表（allowlist）。
 	AssistantVersionIDs []string
 	// AssistantVersionIDsSet 标记更新请求是否显式传入了 allowlist。
 	AssistantVersionIDsSet bool
-	// AdminUsername 是创建组织时初始化的 org_admin 账号名。
+	// AdminUsername 是创建企业时初始化的 org_admin 账号名。
 	AdminUsername string
 	// AdminDisplayName 是初始化 org_admin 的显示名。
 	AdminDisplayName string
@@ -154,15 +154,15 @@ type OrganizationInput struct {
 	AdminPassword string
 }
 
-// OrganizationResult 是组织对外响应视图，包含必要的 new-api 绑定状态。
+// OrganizationResult 是企业对外响应视图，包含必要的 new-api 绑定状态。
 type OrganizationResult struct {
-	// ID 是 manager 组织 UUID。
+	// ID 是 manager 企业 UUID。
 	ID string `json:"id"`
-	// Name 是组织展示名。
+	// Name 是企业展示名。
 	Name string `json:"name"`
-	// Code 是组织登录标识，用于组织用户登录时定位租户。
+	// Code 是企业登录标识，用于企业用户登录时定位企业。
 	Code string `json:"code"`
-	// Status 是组织状态，active / disabled 决定成员是否可登录。
+	// Status 是企业状态，active / disabled 决定成员是否可登录。
 	Status string `json:"status"`
 	// ContactName 是业务联系人姓名。
 	ContactName string `json:"contact_name,omitempty"`
@@ -170,13 +170,13 @@ type OrganizationResult struct {
 	ContactPhone string `json:"contact_phone,omitempty"`
 	// Remark 是平台管理员维护的内部备注。
 	Remark string `json:"remark,omitempty"`
-	// NewAPIUserID 是组织在 new-api 侧的用户 ID，缺失时充值和用量接口不可用。
+	// NewAPIUserID 是企业在 new-api 侧的用户 ID，缺失时充值和用量接口不可用。
 	NewAPIUserID string `json:"newapi_user_id,omitempty"`
-	// CreditWarningThreshold 是组织余额预警阈值。
+	// CreditWarningThreshold 是企业余额预警阈值。
 	CreditWarningThreshold *int32 `json:"credit_warning_threshold,omitempty"`
-	// AdminUsername 是组织首个可用管理员账号名，用于平台管理员复制登录信息。
+	// AdminUsername 是企业首个可用管理员账号名，用于平台管理员复制登录信息。
 	AdminUsername string `json:"admin_username,omitempty"`
-	// AssistantVersionIDs 是该组织可用的助手版本 id 列表（allowlist）。
+	// AssistantVersionIDs 是该企业可用的助手版本 id 列表（allowlist）。
 	AssistantVersionIDs []string `json:"assistant_version_ids"`
 }
 

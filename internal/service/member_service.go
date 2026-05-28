@@ -78,7 +78,7 @@ type MemberInput struct {
 type MemberResult struct {
 	// ID 是成员用户 UUID。
 	ID string `json:"id"`
-	// OrgID 是成员所属组织 UUID；platform_admin 可能为空。
+	// OrgID 是成员所属企业 UUID；platform_admin 可能为空。
 	OrgID string `json:"org_id,omitempty"`
 	// Username 是登录账号名。
 	Username string `json:"username"`
