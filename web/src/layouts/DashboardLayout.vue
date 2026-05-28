@@ -80,8 +80,9 @@ import {
   type MenuOption,
 } from 'naive-ui'
 import {
-  BarChart3, BookOpen, Bot, Boxes, Building2, FileSearch, Gauge,
-  LayoutDashboard, LogOut, RefreshCw, Server, ShieldCheck, Users, Wallet,
+  BarChart3, BookOpen, Bot, Boxes, Building2, CalendarClock, FileSearch,
+  FolderOpen, Gauge, LayoutDashboard, ListChecks, LogOut, Radio, RefreshCw,
+  Server, ShieldCheck, Users, Wallet,
 } from 'lucide-vue-next'
 
 import { useAuthStore } from '@/stores/auth'
@@ -101,8 +102,13 @@ const environmentLabel = computed(() => {
 // 根据当前路由计算激活的菜单项 key（前缀匹配）
 const activeKey = computed(() => {
   const p = route.path
-  if (p === '/') return '/'
-  // org_member 的实例菜单 key 是动态路径，需要特殊匹配。
+  if (p === '/') return isOrgMember.value ? memberAppPath.value : '/'
+  // org_member 的实例 tab 已拉平到左侧菜单，需要按子路由末段分别高亮。
+  if (isOrgMember.value && p.startsWith('/apps')) {
+    if (p === '/apps/empty') return '/apps/empty'
+    const tab = p.split('/')[3] as MemberAppTab | undefined
+    return tab && memberAppTabs.includes(tab) ? memberAppTabPath(tab) : memberAppPath.value
+  }
   if (p.startsWith('/apps')) return memberAppPath.value
   const prefixes = [
     '/console',
@@ -126,15 +132,36 @@ const isOrgAdmin = computed(() => auth.isOrgAdmin)
 
 const { appId: memberAppId, hasApp: memberHasApp } = useMemberApp()
 
-// org_member 的实例菜单目标：有实例指向详情，无实例指向空状态。
-const memberAppPath = computed(() => {
+// MemberAppTab 是组织成员左侧菜单可直达的实例业务分区；值必须与 /apps/:appId/:tab 子路由末段一致。
+type MemberAppTab = 'overview' | 'kanban' | 'cron' | 'channels' | 'knowledge' | 'workspace'
+
+// memberAppTabs 用于从当前路由末段反查成员菜单高亮项，避免所有 /apps 路径都落到同一个「实例」入口。
+const memberAppTabs: readonly MemberAppTab[] = ['overview', 'kanban', 'cron', 'channels', 'knowledge', 'workspace']
+
+// memberAppTabPath 根据成员唯一实例生成现有详情页路由；无实例时统一落到空状态页。
+function memberAppTabPath(tab: MemberAppTab) {
   if (!isOrgMember.value) return '/apps'
-  if (memberHasApp.value && memberAppId.value) return `/apps/${memberAppId.value}/overview`
+  if (memberHasApp.value && memberAppId.value) return `/apps/${memberAppId.value}/${tab}`
   return '/apps/empty'
-})
+}
+
+// org_member 的总览目标：有实例指向唯一实例 overview，无实例指向空状态。
+const memberAppPath = computed(() => memberAppTabPath('overview'))
 
 // menuOptions 根据角色裁剪入口：普通成员不显示组织管理和审计，平台管理员仅显示控制台单一入口。
 const menuOptions = computed<MenuOption[]>(() => {
+  if (isOrgMember.value) {
+    return [
+      { key: memberAppTabPath('overview'), label: '总览', icon: () => h(LayoutDashboard, { size: 18 }) },
+      { key: memberAppTabPath('kanban'), label: '任务', icon: () => h(ListChecks, { size: 18 }) },
+      { key: memberAppTabPath('cron'), label: '定时任务', icon: () => h(CalendarClock, { size: 18 }) },
+      { key: memberAppTabPath('channels'), label: '渠道', icon: () => h(Radio, { size: 18 }) },
+      { key: memberAppTabPath('knowledge'), label: '个人知识库', icon: () => h(BookOpen, { size: 18 }) },
+      { key: memberAppTabPath('workspace'), label: '工作目录', icon: () => h(FolderOpen, { size: 18 }) },
+      { key: '/knowledge', label: '企业知识库', icon: () => h(BookOpen, { size: 18 }) },
+      { key: '/usage', label: '用量', icon: () => h(BarChart3, { size: 18 }) },
+    ]
+  }
   // platform_admin 使用单一「控制台」入口，替代原来「总览+平台」两个菜单项。
   const items: MenuOption[] = isPlatformAdmin.value
     ? [{ key: '/console', label: '控制台', icon: () => h(Gauge, { size: 18 }) }]
@@ -149,7 +176,7 @@ const menuOptions = computed<MenuOption[]>(() => {
   }
   items.push(
     { key: memberAppPath.value, label: '实例', icon: () => h(Bot, { size: 18 }) },
-    { key: '/knowledge', label: '知识库', icon: () => h(BookOpen, { size: 18 }) },
+    { key: '/knowledge', label: '企业知识库', icon: () => h(BookOpen, { size: 18 }) },
     { key: '/usage', label: '用量', icon: () => h(BarChart3, { size: 18 }) },
   )
   // 账户余额仅对 org_admin 显示；org_member 和 platform_admin 无此入口。
