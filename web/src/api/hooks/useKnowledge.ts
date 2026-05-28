@@ -1,4 +1,4 @@
-// 知识库 API hooks 负责企业级与实例级 RAGFlow 文件列表、上传、下载、删除和重解析。
+// 知识库 API hooks 负责组织级与实例级 RAGFlow 文件列表、上传、下载、删除和重解析。
 // 上传走 xhrUpload 支持进度反馈与取消；其余 JSON 接口统一走 apiRequest。
 import { useMutation, useQuery, useQueryClient } from '@tanstack/vue-query'
 import { computed } from 'vue'

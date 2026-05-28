@@ -71,7 +71,7 @@ describe('UsagePage role query refs', () => {
       },
     })
 
-    // 普通成员不能查询企业统计，但成员用量接口仍必须携带 org_id 做权限边界。
+    // 普通成员不能查询组织统计，但成员用量接口仍必须携带 org_id 做权限边界。
     expect(usageRefs.orgRef?.value).toBeUndefined()
     expect(usageRefs.memberOrgRef?.value).toBe('org-1')
     expect(usageRefs.memberRef?.value).toBe('user-1')
@@ -111,8 +111,8 @@ describe('UsagePage effective ID 消除跨企业残留', () => {
   })
 
   // effectiveMemberId 把"成员 ID 必须落在当前 members 列表里"作为硬约束，
-  // 避免切换企业瞬间 vue-query 还以旧 memberId + 新 orgId 发查询。
-  // 验证三个阶段：初始 auto-select → 列表清空（切企业瞬间）回退 undefined →
+  // 避免切换组织瞬间 vue-query 还以旧 memberId + 新 orgId 发查询。
+  // 验证三个阶段：初始 auto-select → 列表清空（切组织瞬间）回退 undefined →
   // 新列表到位后重新 auto-select。
   it('memberRef 在选中成员不在当前 members 列表时解析为 undefined', async () => {
     const auth = useAuthStore()
@@ -135,7 +135,7 @@ describe('UsagePage effective ID 消除跨企业残留', () => {
     await new Promise((r) => setTimeout(r, 0))
     expect(usageRefs.memberRef?.value).toBe('mem-A')
 
-    // 阶段 2：切换企业瞬间，旧 members 列表被替换为空数组
+    // 阶段 2：切换组织瞬间，旧 members 列表被替换为空数组
     membersRef.value = []
     await new Promise((r) => setTimeout(r, 0))
     expect(usageRefs.memberRef?.value).toBeUndefined()

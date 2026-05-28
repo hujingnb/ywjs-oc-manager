@@ -57,7 +57,7 @@ async function fillByPlaceholder(wrapper: ReturnType<typeof mountFormModal>, pla
 }
 
 describe('CronJobFormModal', () => {
-  // 覆盖企业成员字段显隐：基础执行字段可见，高级模型字段不可见。
+  // 覆盖组织成员字段显隐：基础执行字段可见，高级模型字段不可见。
   it('org member sees script/no_agent/workdir but not model/provider/base_url/skills', () => {
     const wrapper = mountFormModal(false)
     const text = wrapper.text()

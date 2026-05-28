@@ -35,7 +35,7 @@ import PermissionsPage from '@/pages/platform/PermissionsPage.vue'
 import { useAuthStore } from '@/stores/auth'
 
 // allowedRoles 表示可访问该路由的角色集合；undefined 表示对所有已登录用户开放。
-// 平台专属：仅 platform_admin；企业管理视角（成员/审计）：禁止 org_member。
+// 平台专属：仅 platform_admin；组织管理视角（成员/审计）：禁止 org_member。
 const PLATFORM_ONLY = ['platform_admin'] as const
 const ORG_ADMIN_ABOVE = ['platform_admin', 'org_admin'] as const
 const ORG_ADMIN_ONLY = ['org_admin'] as const

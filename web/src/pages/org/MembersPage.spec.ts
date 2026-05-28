@@ -206,7 +206,7 @@ describe('MembersPage', () => {
     },
   })
 
-  // 企业管理员管理本企业成员时，自己的行不能出现删除入口，避免误删当前登录账号。
+  // 组织管理员管理本组织成员时，自己的行不能出现删除入口，避免误删当前登录账号。
   it('企业管理员不可删除自身', () => {
     authUser.current = { id: 'admin-1', role: 'org_admin', org_id: 'org-1' }
 
@@ -237,7 +237,7 @@ describe('MembersPage', () => {
     expect(createAppButtons).toHaveLength(1)
   })
 
-  // 企业管理员可以看到「为该成员创建实例」入口，但只对没有活跃实例的成员行显示。
+  // 组织管理员可以看到「为该成员创建实例」入口，但只对没有活跃实例的成员行显示。
   it('企业管理员可见无实例成员的补建入口', () => {
     authUser.current = { id: 'admin-1', role: 'org_admin', org_id: 'org-1' }
 
@@ -248,7 +248,7 @@ describe('MembersPage', () => {
   })
 
   // 平台管理员提交实例表单后展示新实例与初始化任务结果。
-  // 补建实例必须选择助手版本，version_id 通过企业 allowlist 过滤后呈现可选项。
+  // 补建实例必须选择助手版本，version_id 通过组织 allowlist 过滤后呈现可选项。
   it('平台管理员提交创建新实例时包含 version_id 并展示结果', async () => {
     authUser.current = { id: 'admin-1', role: 'platform_admin' }
     createMemberAppMock.mutateAsync.mockClear()
@@ -280,7 +280,7 @@ describe('MembersPage', () => {
     expect(wrapper.text()).toContain('job-1')
   })
 
-  // 平台管理员切换企业时关闭已打开的复建实例表单，避免旧成员和新企业模型混用。
+  // 平台管理员切换组织时关闭已打开的复建实例表单，避免旧成员和新组织模型混用。
   it('平台管理员切换企业时关闭创建新实例表单', async () => {
     authUser.current = { id: 'admin-1', role: 'platform_admin' }
     createMemberAppMock.mutateAsync.mockClear()

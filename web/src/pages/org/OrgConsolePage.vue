@@ -57,7 +57,7 @@ import { formatQuotaValue } from '@/pages/usage/usageFormatting'
 
 use([CanvasRenderer, LineChart, PieChart, GridComponent, TooltipComponent, LegendComponent])
 
-// OrgConsolePage 是企业管理员专属的控制台首页：统计条 + 用量趋势/实例状态两图。
+// OrgConsolePage 是组织管理员专属的控制台首页：统计条 + 用量趋势/实例状态两图。
 // 图表颜色与全局浅色主题保持一致，避免 ECharts 默认色回到深色控制台残留。
 const CHART_TEXT_COLOR = '#6b7280'
 const CHART_AXIS_COLOR = '#d9dde5'
@@ -79,7 +79,7 @@ const { data: apps, isLoading: appsLoading, error: appsError } = useAppsByOrgQue
 const { data: balance } = useOrgBalanceQuery(orgId)
 const { data: billingStatus } = useBillingStatusQuery()
 
-// 近 7 天企业维度用量序列：用于用量趋势折线图和「今日 Token」统计卡片。
+// 近 7 天组织维度用量序列：用于用量趋势折线图和「今日 Token」统计卡片。
 const { data: usageItems, isLoading: usageLoading, error: usageError } = useQuery<
   { date: string; quota: number }[]
 >({

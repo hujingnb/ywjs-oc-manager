@@ -5,7 +5,7 @@ import { describe, expect, it, vi } from 'vitest'
 import AppOverviewTab from './AppOverviewTab.vue'
 
 const organizationName = ref<string | undefined>('测试企业')
-// orgAssistantVersionIds 控制企业 allowlist，用于版本切换测试中验证交集逻辑。
+// orgAssistantVersionIds 控制组织 allowlist，用于版本切换测试中验证交集逻辑。
 const orgAssistantVersionIds = ref<string[]>(['version-001', 'version-002'])
 
 vi.mock('@/stores/auth', () => ({
@@ -69,11 +69,11 @@ vi.mock('@/api/hooks/useApps', () => ({
 
 // assistantVersionsData 控制版本目录 mock 数据，用于 versionOptions 计算与版本名展示。
 const assistantVersionsData = ref([
-  // version-001：在企业 allowlist 中，名称用于断言版本名展示正确。
+  // version-001：在组织 allowlist 中，名称用于断言版本名展示正确。
   { id: 'version-001', name: '稳定版 v1', description: '', system_prompt: '', image_id: '', main_model: '', routing: {}, skills: [], revision: 1 },
-  // version-002：在企业 allowlist 中，供切换测试使用。
+  // version-002：在组织 allowlist 中，供切换测试使用。
   { id: 'version-002', name: '测试版 v2', description: '', system_prompt: '', image_id: '', main_model: '', routing: {}, skills: [], revision: 2 },
-  // version-003：不在企业 allowlist 中，应被过滤掉。
+  // version-003：不在组织 allowlist 中，应被过滤掉。
   { id: 'version-003', name: '禁用版 v3', description: '', system_prompt: '', image_id: '', main_model: '', routing: {}, skills: [], revision: 3 },
 ])
 
@@ -189,7 +189,7 @@ describe('AppOverviewTab', () => {
 
 // AppOverviewTab 助手版本覆盖版本名展示、需重启标签、切换按钮与 mutation 调用四条场景。
 describe('AppOverviewTab 助手版本', () => {
-  // 版本目录与企业 allowlist 均有效时，应展示解析后的版本名而不是原始 id。
+  // 版本目录与组织 allowlist 均有效时，应展示解析后的版本名而不是原始 id。
   it('展示已绑定的助手版本名称', () => {
     const wrapper = mountOverview()
     // 断言版本名「稳定版 v1」出现在页面；version_id=version-001 已在 mock 中对应该名称。
@@ -210,7 +210,7 @@ describe('AppOverviewTab 助手版本', () => {
     expect(wrapper.text()).not.toContain('需重启')
   })
 
-  // 企业管理员（role=org_admin 且 canManageApp 为 true）应看到「切换」按钮。
+  // 组织管理员（role=org_admin 且 canManageApp 为 true）应看到「切换」按钮。
   it('企业管理员看到切换按钮', () => {
     const wrapper = mountOverview()
     const buttons = wrapper.findAll('button')

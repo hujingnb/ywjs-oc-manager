@@ -124,7 +124,7 @@ describe('OrgKnowledgePage', () => {
     mocks.mutateAsync.mockReset()
   })
 
-  // 覆盖企业知识库上传超限路径：前端提示 100MB 限制，并且不创建上传会话。
+  // 覆盖组织知识库上传超限路径：前端提示 100MB 限制，并且不创建上传会话。
   it('拒绝超过 100MB 的企业知识库文件', async () => {
     const wrapper = mountPage()
     const input = wrapper.find('input[type="file"]')
@@ -137,7 +137,7 @@ describe('OrgKnowledgePage', () => {
     expect(mocks.mutateAsync).not.toHaveBeenCalled()
   })
 
-  // 覆盖企业成员只读场景：可下载企业知识库文件，且下载按 RAGFlow document ID 定位。
+  // 覆盖组织成员只读场景：可下载组织知识库文件，且下载按 RAGFlow document ID 定位。
   it('企业成员可下载企业知识库文件但不可删除', async () => {
     mocks.canManage.mockReturnValue(false)
     const wrapper = mountPage()

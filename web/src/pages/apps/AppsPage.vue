@@ -50,13 +50,13 @@ import { usePlatformOrgSelection } from '@/composables/usePlatformOrgSelection'
 import { canCreateAppForOrg, canManageApp } from '@/domain/permissions'
 import { useAuthStore } from '@/stores/auth'
 
-// AppsPage 展示当前企业的应用列表，并提供运行时快捷操作和删除确认。
+// AppsPage 展示当前组织的应用列表，并提供运行时快捷操作和删除确认。
 const props = defineProps<{ orgId?: string }>()
 const auth = useAuthStore()
 const router = useRouter()
 const client = useQueryClient()
 
-// 平台管理员通过企业选择器切换观察范围，企业用户则落到当前登录企业。
+// 平台管理员通过组织选择器切换观察范围，组织用户则落到当前登录组织。
 const {
   isPlatformAdmin,
   selectedOrgId,
@@ -65,7 +65,7 @@ const {
   organizationsLoading,
   organizationsError,
 } = usePlatformOrgSelection(computed(() => auth.user), computed(() => props.orgId))
-// canCreateApp 控制创建入口，后端仍按企业边界校验创建权限。
+// canCreateApp 控制创建入口，后端仍按组织边界校验创建权限。
 const canCreateApp = computed(() => canCreateAppForOrg(auth.user, effectiveOrgId.value))
 const { data: apps, isLoading } = useAppsByOrgQuery(effectiveOrgId)
 
@@ -78,7 +78,7 @@ const visibleApps = computed(() => {
   return apps.value
 })
 
-// errorMessage 区分平台管理员未选企业和企业用户无归属，避免平台读页面误报“未关联企业”。
+// errorMessage 区分平台管理员未选组织和组织用户无归属，避免平台读页面误报“未关联组织”。
 const errorMessage = computed(() => {
   if (organizationsError.value) return String(organizationsError.value)
   if (!effectiveOrgId.value) return isPlatformAdmin.value ? '暂无可查看企业' : '当前账号未关联企业'
@@ -133,7 +133,7 @@ async function onConfirmDelete() {
   finally { deleting.value = false; toDelete.value = null }
 }
 
-// trigger 调用运行时操作接口；成功后失效当前企业应用列表，不做前端乐观改状态。
+// trigger 调用运行时操作接口；成功后失效当前组织应用列表，不做前端乐观改状态。
 async function trigger(app: AppDTO, op: 'start' | 'stop' | 'restart' | 'delete') {
   await apiRequest<{ runtime_operation: { job_id: string } }>(
     `/api/v1/apps/${app.id}/runtime/${op}`, { method: 'POST' },

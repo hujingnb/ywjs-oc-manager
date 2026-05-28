@@ -10,7 +10,7 @@ import type { Organization } from '@/api'
 const createOrganization = vi.hoisted(() => vi.fn())
 const updateOrganization = vi.hoisted(() => vi.fn())
 
-// versionsState 模拟助手版本列表查询状态，供创建企业表单多选使用。
+// versionsState 模拟助手版本列表查询状态，供创建组织表单多选使用。
 const versionsState = vi.hoisted(() => ({
   data: { value: [
     { id: 'v-1', name: '版本 A' },
@@ -20,7 +20,7 @@ const versionsState = vi.hoisted(() => ({
   isError: { value: false },
 }))
 
-// 企业列表页测试只 mock 列表和充值 hooks，验证充值留在弹框内完成而不跳转旧页面。
+// 组织列表页测试只 mock 列表和充值 hooks，验证充值留在弹框内完成而不跳转旧页面。
 vi.mock('@/api/hooks/useOrganizations', () => ({
   useOrganizationsQuery: () => ({
     data: ref([{
@@ -41,7 +41,7 @@ vi.mock('@/api/hooks/useOrganizations', () => ({
   // useModelsQuery 保留 mock：其他页面（如版本编辑页）仍依赖此导出，避免影响其他测试。
   useModelsQuery: () => ({ data: ref([]), isLoading: ref(false), isError: ref(false) }),
   useCreateOrganization: () => ({ mutateAsync: createOrganization, isPending: ref(false) }),
-  // useUpdateOrganization mock 供编辑企业场景使用。
+  // useUpdateOrganization mock 供编辑组织场景使用。
   useUpdateOrganization: () => ({ mutateAsync: updateOrganization, isPending: ref(false) }),
   useUpdateOrganizationStatus: () => ({ mutate: vi.fn() }),
 }))
@@ -252,7 +252,7 @@ describe('OrganizationsPage', () => {
     ].join('\n'))
   })
 
-  // 创建企业时选择助手版本，验证提交载荷包含 assistant_version_ids 而不再有 model_id。
+  // 创建组织时选择助手版本，验证提交载荷包含 assistant_version_ids 而不再有 model_id。
   it('创建企业时提交企业标识和助手版本', async () => {
     createOrganization.mockResolvedValue({ id: 'org-2', name: '新企业', code: 'new-org', status: 'active' })
     const wrapper = mountPage()
@@ -263,7 +263,7 @@ describe('OrganizationsPage', () => {
     await nextTick()
 
     const inputs = wrapper.findAll('input')
-    // 按表单字段顺序填写：名称、企业标识、管理员用户名、管理员姓名、管理员密码
+    // 按表单字段顺序填写：名称、组织标识、管理员用户名、管理员姓名、管理员密码
     await inputs[0].setValue('新企业')
     await inputs[1].setValue('new-org')
     await inputs[2].setValue('org-admin')
@@ -291,7 +291,7 @@ describe('OrganizationsPage', () => {
     expect(createOrganization).not.toHaveBeenCalledWith(expect.objectContaining({ model_id: expect.anything() }))
   })
 
-  // 编辑企业：点击「编辑」打开表单，验证预填数据正确且提交时携带 id 与 assistant_version_ids。
+  // 编辑组织：点击「编辑」打开表单，验证预填数据正确且提交时携带 id 与 assistant_version_ids。
   it('编辑企业时预填现有数据并提交 update mutation', async () => {
     updateOrganization.mockResolvedValue({
       id: 'org-1',
@@ -307,9 +307,9 @@ describe('OrganizationsPage', () => {
     await editButton!.trigger('click')
     await nextTick()
 
-    // 表单应预填当前企业数据，首个 input 为名称字段
+    // 表单应预填当前组织数据，首个 input 为名称字段
     const inputs = wrapper.findAll('input')
-    // 预填名称应为「测试企业」
+    // 预填名称应为「测试组织」
     const nameInput = inputs.find(i => (i.element as HTMLInputElement).value === '测试企业')
     expect(nameInput).toBeTruthy()
 

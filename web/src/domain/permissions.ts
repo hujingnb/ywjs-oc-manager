@@ -6,7 +6,7 @@ export type Role = 'platform_admin' | 'org_admin' | 'org_member'
 export interface PermissionUser {
   // 用户 ID，用于成员判断自有应用。
   id?: string
-  // 所属企业 ID，用于企业管理员边界判断。
+  // 所属组织 ID，用于组织管理员边界判断。
   org_id?: string
   // 角色允许 string 是为了兼容后端新增角色时前端降级为无写权限。
   role?: Role | string
@@ -14,25 +14,25 @@ export interface PermissionUser {
 
 // PermissionApp 是权限判断需要的最小应用视图。
 export interface PermissionApp {
-  // 应用所属企业。
+  // 应用所属组织。
   org_id?: string
   // 应用拥有者用户。
   owner_user_id?: string
 }
 
-// 企业侧创建应用必须经企业管理员入口；平台管理员只保留跨企业观察能力。
+// 组织侧创建应用必须经组织管理员入口；平台管理员只保留跨组织观察能力。
 export function canCreateAppForOrg(user: PermissionUser | null | undefined, orgId?: string): boolean {
   return user?.role === 'org_admin' && Boolean(orgId) && user.org_id === orgId
 }
 
-// 企业知识库写入：企业管理员管本企业、平台管理员可跨企业维护
+// 组织知识库写入：组织管理员管本组织、平台管理员可跨组织维护
 // （上传公共制度文档、运维补充资料等场景需要平台侧介入，与后端 CanWriteOrgKnowledge 保持一致）。
-// orgId 省略时回退到用户自身的 org_id，避免页面未显式传入企业上下文时按钮消失。
+// orgId 省略时回退到用户自身的 org_id，避免页面未显式传入组织上下文时按钮消失。
 export function canManageOrgKnowledge(user: PermissionUser | null | undefined, orgId?: string): boolean {
   if (!user) return false
   if (user.role === 'platform_admin') return true
   if (user.role !== 'org_admin') return false
-  // target 优先使用调用方传入的 orgId；未传时回退用户自身 org_id（org_admin 只有一个归属企业）。
+  // target 优先使用调用方传入的 orgId；未传时回退用户自身 org_id（org_admin 只有一个归属组织）。
   const target = orgId ?? user.org_id
   return Boolean(target) && user.org_id === target
 }
@@ -45,13 +45,13 @@ export function canManageApp(user: PermissionUser | null | undefined, app: Permi
   return false
 }
 
-// 企业级审计是管理视角；普通成员只能进入自己的应用审计。
+// 组织级审计是管理视角；普通成员只能进入自己的应用审计。
 export function canViewOrgAudit(user: PermissionUser | null | undefined, orgId?: string): boolean {
   if (!user || !orgId) return false
   return user.role === 'platform_admin' || (user.role === 'org_admin' && user.org_id === orgId)
 }
 
-// 应用审计是 target 视角：平台管理员可观察全部，企业管理员限本企业，成员限 owner。
+// 应用审计是 target 视角：平台管理员可观察全部，组织管理员限本组织，成员限 owner。
 export function canViewOwnAppAudit(user: PermissionUser | null | undefined, app: PermissionApp | null | undefined): boolean {
   if (!user || !app) return false
   if (user.role === 'platform_admin') return true

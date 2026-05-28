@@ -70,7 +70,7 @@
       </n-form>
     </n-card>
 
-    <!-- 为已有成员补建实例：platform_admin 跨企业 / org_admin 本企业共用此表单 -->
+    <!-- 为已有成员补建实例：platform_admin 跨组织 / org_admin 本组织共用此表单 -->
     <n-card v-if="createAppTarget" :bordered="true">
       <template #header>
         <div style="display: flex; align-items: center; justify-content: space-between">
@@ -86,7 +86,7 @@
             </n-form-item>
           </n-grid-item>
           <n-grid-item>
-            <!-- 助手版本从企业 allowlist 过滤，必选；与 CreateMemberPage 保持一致 -->
+            <!-- 助手版本从组织 allowlist 过滤，必选；与 CreateMemberPage 保持一致 -->
             <n-form-item label="助手版本 *">
               <n-select
                 v-model:value="createAppForm.version_id"
@@ -166,11 +166,11 @@ import type { Member } from '@/api'
 import { useAuthStore } from '@/stores/auth'
 import { useOrganizationQuery } from '@/api/hooks/useOrganizations'
 
-// MembersPage 管理企业成员列表，支持创建、启停、删除和重置密码。
+// MembersPage 管理组织成员列表，支持创建、启停、删除和重置密码。
 const props = defineProps<{ orgId?: string }>()
 const auth = useAuthStore()
 const router = useRouter()
-// 平台管理员通过企业选择器查看成员，企业管理员默认管理自身企业。
+// 平台管理员通过组织选择器查看成员，组织管理员默认管理自身组织。
 const {
   isPlatformAdmin,
   selectedOrgId,
@@ -180,12 +180,12 @@ const {
   organizationsError,
 } = usePlatformOrgSelection(computed(() => auth.user), computed(() => props.orgId))
 const orgEyebrow = computed(() => auth.user?.role === 'platform_admin' ? 'Platform · 企业成员' : '我的企业')
-// 一键开户会同步创建应用，按后端 CanCreateAppForOrg 规则仅开放给本企业管理员。
+// 一键开户会同步创建应用，按后端 CanCreateAppForOrg 规则仅开放给本组织管理员。
 const canOnboardMember = computed(() => auth.user?.role === 'org_admin' && Boolean(effectiveOrgId.value))
-// 成员写操作只允许本企业管理员；平台管理员在本页仅查看成员信息。
+// 成员写操作只允许本组织管理员；平台管理员在本页仅查看成员信息。
 const canManageMembers = computed(() => auth.user?.role === 'org_admin' && auth.user?.org_id === effectiveOrgId.value)
 // canCreateAppForMember 与后端 auth.CanCreateAppForMember 对齐：
-// platform_admin 跨企业可补建；org_admin 仅在本企业可补建；普通成员不可。
+// platform_admin 跨组织可补建；org_admin 仅在本组织可补建；普通成员不可。
 const canCreateAppForMember = computed(() =>
   auth.user?.role === 'platform_admin' ||
   (auth.user?.role === 'org_admin' && auth.user?.org_id === effectiveOrgId.value))
@@ -194,9 +194,9 @@ const currentUserId = computed(() => auth.user?.id)
 
 const { data: members, isLoading } = useMembersQuery(effectiveOrgId)
 const organizationQuery = useOrganizationQuery(effectiveOrgId)
-// 查询全部助手版本目录，与企业 allowlist 取交集供补建表单选择。
+// 查询全部助手版本目录，与组织 allowlist 取交集供补建表单选择。
 const { data: versionsData, isLoading: versionsLoading } = useAssistantVersionsQuery()
-// versionOptions 由企业 allowlist 与全量版本目录取交集，仅展示允许使用的版本。
+// versionOptions 由组织 allowlist 与全量版本目录取交集，仅展示允许使用的版本。
 const versionOptions = computed<SelectOption[]>(() => {
   const org = organizationQuery.data.value
   const versions = versionsData.value
@@ -228,14 +228,14 @@ const createAppForm = ref<CreateMemberAppPayload>({
   version_id: '',
   channel_type: 'wechat',
 })
-// 切换企业时关闭补建表单，防止旧成员和新企业 ID 组合成跨企业提交。
+// 切换组织时关闭补建表单，防止旧成员和新组织 ID 组合成跨组织提交。
 watch(effectiveOrgId, () => {
   createAppTarget.value = null
   createAppResult.value = null
   createAppError.value = ''
 })
 
-// errorMessage 区分平台管理员无可选企业和企业用户无归属。
+// errorMessage 区分平台管理员无可选组织和组织用户无归属。
 const errorMessage = computed(() => {
   if (organizationsError.value) return String(organizationsError.value)
   if (!effectiveOrgId.value) return isPlatformAdmin.value ? '暂无可查看企业' : '当前账号未关联企业'
@@ -303,7 +303,7 @@ function openResetForm(member: Member) {
 }
 
 // openCreateAppForm 打开补建实例表单，默认 app_name 取「{显示名} 的实例」。
-// version_id 需用户从企业 allowlist 中选择，与 CreateMemberPage 保持一致。
+// version_id 需用户从组织 allowlist 中选择，与 CreateMemberPage 保持一致。
 function openCreateAppForm(member: Member) {
   createAppTarget.value = member
   createAppResult.value = null

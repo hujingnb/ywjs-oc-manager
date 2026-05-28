@@ -37,7 +37,7 @@ vi.mock('vue-router', async () => {
 })
 
 describe('AppDetailPage', () => {
-  // 覆盖实例详情页业务 tab 导航，确保 Task 6 新增的定时任务入口对企业用户可见。
+  // 覆盖实例详情页业务 tab 导航，确保 Task 6 新增的定时任务入口对组织用户可见。
   it('渲染定时任务 tab 入口', () => {
     const wrapper = mount(AppDetailPage, {
       global: {

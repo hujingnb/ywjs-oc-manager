@@ -33,7 +33,7 @@ vi.mock('@/api/hooks/useMembers', () => ({
   useOnboardMember: () => ({ mutateAsync: onboardMock, isPending: ref(false) }),
 }))
 
-// mock 企业查询，返回包含测试版本 id 的 allowlist。
+// mock 组织查询，返回包含测试版本 id 的 allowlist。
 vi.mock('@/api/hooks/useOrganizations', () => ({
   useOrganizationQuery: () => ({
     data: ref({
@@ -172,7 +172,7 @@ describe('CreateMemberPage', () => {
       app_name: '测试实例',
       version_id: 'version-1',
     }))
-    // 模型由企业统一配置，前端不再传 model_id
+    // 模型由组织统一配置，前端不再传 model_id
     expect(onboardMock).toHaveBeenCalledWith(expect.not.objectContaining({
       model_id: expect.anything(),
     }))

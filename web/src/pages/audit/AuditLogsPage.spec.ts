@@ -10,7 +10,7 @@ vi.mock('@/api/hooks/useAuditLogs', () => ({
   useOrgAuditLogsQuery: () => ({
     data: ref([
       {
-        // 普通行：企业管理员对应用做 update_model；资源已删除。
+        // 普通行：组织管理员对应用做 update_model；资源已删除。
         id: 'a1',
         actor_id: '06258106-7b34-49b0-9a2b-ed13b8ba1524',
         actor_role: 'org_admin',

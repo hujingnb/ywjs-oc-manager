@@ -60,7 +60,7 @@ describe('知识库上传大小限制', () => {
 })
 
 describe('知识库文件下载', () => {
-  // 覆盖企业知识库下载工具：document ID 进入路径，且受保护接口必须携带 Bearer token。
+  // 覆盖组织知识库下载工具：document ID 进入路径，且受保护接口必须携带 Bearer token。
   it('请求企业知识库下载接口并触发浏览器下载', async () => {
     const fetchMock = vi.fn().mockResolvedValue(new Response(new Blob(['hello']), { status: 200 }))
     vi.stubGlobal('fetch', fetchMock)
