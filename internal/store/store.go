@@ -6,7 +6,7 @@ import (
 	"fmt"
 	"strings"
 
-	_ "github.com/go-sql-driver/mysql"
+	"github.com/go-sql-driver/mysql"
 
 	"oc-manager/internal/store/sqlc"
 )
@@ -27,6 +27,11 @@ type Store struct {
 // ctx 暂未被惰性的 sql.Open 使用，但保留入参以兼容调用方与未来探活逻辑。
 func Open(ctx context.Context, databaseURL string) (*Store, error) {
 	dsn := strings.TrimPrefix(databaseURL, "mysql://")
+	// sql.Open 是惰性的、不校验 DSN；启动阶段先用 mysql.ParseDSN 显式校验，
+	// 让非法连接配置在启动时即失败，而非延迟到首次查询（与原 pgxpool.ParseConfig 行为一致）。
+	if _, err := mysql.ParseDSN(dsn); err != nil {
+		return nil, fmt.Errorf("解析数据库连接配置失败: %w", err)
+	}
 	db, err := sql.Open("mysql", dsn)
 	if err != nil {
 		return nil, fmt.Errorf("打开数据库连接失败: %w", err)

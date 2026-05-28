@@ -9,6 +9,7 @@ import (
 	"time"
 
 	"github.com/gin-gonic/gin"
+	"github.com/google/uuid"
 
 	"oc-manager/internal/api/apierror"
 	"oc-manager/internal/auth"
@@ -79,7 +80,8 @@ type jobPayloadAppRef struct {
 func (h *JobsHandler) Get(c *gin.Context) {
 	principal := principalFromCtx(c)
 	jobID := c.Param("jobId")
-	if jobID == "" {
+	// 旧实现用 pgtype.UUID 解析路径参数，非法格式（含空串）直接 400；迁移到 string 后显式校验保持该行为。
+	if _, err := uuid.Parse(jobID); err != nil {
 		c.JSON(http.StatusBadRequest, apierror.New("BAD_REQUEST", "非法 job id"))
 		return
 	}
@@ -99,6 +101,12 @@ func (h *JobsHandler) Get(c *gin.Context) {
 		var ref jobPayloadAppRef
 		if uerr := json.Unmarshal(job.PayloadJson, &ref); uerr != nil || ref.AppID == "" {
 			c.JSON(http.StatusForbidden, apierror.New("FORBIDDEN", "无权查看 job"))
+			return
+		}
+		// payload.app_id 非合法 UUID：按「关联应用不存在」处理（404），与旧 pgtype.UUID 解析失败路径一致，
+		// 避免脏 payload 走到 GetApp 并因鉴权分支暴露 payload 结构细节给探测者。
+		if _, perr := uuid.Parse(ref.AppID); perr != nil {
+			c.JSON(http.StatusNotFound, apierror.New("NOT_FOUND", "job 关联应用不存在"))
 			return
 		}
 		app, aerr := h.store.GetApp(c.Request.Context(), ref.AppID)

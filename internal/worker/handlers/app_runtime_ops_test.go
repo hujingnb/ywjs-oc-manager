@@ -373,9 +373,10 @@ func TestAppRestartContainerHandler_ImageChangeRecreatesViaInitJob(t *testing.T)
 	var payload map[string]any
 	require.NoError(t, json.Unmarshal(stub.createdJobs[0].PayloadJson, &payload))
 	assert.Equal(t, testAppID, payload["app_id"])
-	// notifier 收到 CreateJob 桩返回的固定 job ID。
+	// notifier 入队的 jobID 应与本次创建的 app_initialize job ID 一致：
+	// handler 生成单个 UUID 同时用于 CreateJob 与即时入队，二者必须指向同一条 job。
 	require.Equal(t, 1, notifier.calls)
-	assert.Equal(t, testRestartInitJobID, notifier.enqueuedJobID)
+	assert.Equal(t, stub.createdJobs[0].ID, notifier.enqueuedJobID)
 	// 镜像变更分支不应记录 applied 版本，交由 init handler 在初始化完成时写入。
 	require.False(t, stub.appliedVersionSet, "镜像变更重建分支不应调用 SetAppAppliedVersion")
 }
@@ -621,15 +622,12 @@ func (s *runtimeOpStub) SetAppContainer(_ context.Context, arg sqlc.SetAppContai
 	return nil
 }
 
-// CreateJob 实现 AppRuntimeStore 接口；记录入参并通知，notifier 用 testRestartInitJobID 断言入队。
-// :exec 语义仅返回 error；job ID 由 reaper/source 自己生成（此处用固定值供 notifier 断言）。
+// CreateJob 实现 AppRuntimeStore 接口；记录入参供断言。:exec 语义仅返回 error，
+// job ID 由 handler 用 uuid 自生成并写入 arg.ID，故入队断言改为比对 createdJobs[0].ID。
 func (s *runtimeOpStub) CreateJob(_ context.Context, arg sqlc.CreateJobParams) error {
 	s.createdJobs = append(s.createdJobs, arg)
 	return nil
 }
-
-// testRestartInitJobID 是 CreateJob 桩返回的固定 job ID，供 notifier 入队断言。
-const testRestartInitJobID = "00000000-0000-0000-0000-0000000a0b01"
 
 // fakeRestartNotifier 是 RestartJobNotifier 测试桩，记录被即时推送的 jobID。
 type fakeRestartNotifier struct {

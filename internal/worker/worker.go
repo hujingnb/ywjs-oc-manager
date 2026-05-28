@@ -118,7 +118,10 @@ func (w *Worker) processJobID(ctx context.Context, id string) error {
 	}); err != nil {
 		return fmt.Errorf("锁定 job 失败: %w", err)
 	}
-	// MarkJobRunning 是 :exec（不返回行），用原 job 继续处理。
+	// MarkJobRunning 是 :exec（不返回行）；它在 DB 内执行 attempts+1，故这里在内存中同步自增，
+	// 让后续 handler 与 handleHandlerError/backoff 看到与原 PG RETURNING 行一致的尝试次数，
+	// 否则 max_attempts 判定会比应有次数少一次。
+	job.Attempts++
 	handler, err := w.registry.Lookup(job.Type)
 	if err != nil {
 		// 未注册类型无法通过重试自愈，直接进入 failed 终态，避免 scheduler 反复重新入队。
