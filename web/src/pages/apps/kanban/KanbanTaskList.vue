@@ -51,13 +51,37 @@ const GROUP_DEFS: ReadonlyArray<{ status: KanbanStatus; label: string }> = ([
   label: formatKanbanStatus(status).label,
 }))
 
-// groups 把 tasks 按状态分桶。
-const groups = computed(() =>
-  GROUP_DEFS.map((def) => ({
+// KNOWN_STATUS_SET 用于识别 Hermes 约定状态；未知状态会追加为降级分组，避免任务被隐藏。
+const KNOWN_STATUS_SET = new Set<string>(GROUP_DEFS.map((def) => def.status))
+
+// taskStatusKey 统一处理任务状态缺失的边界，确保列表里没有任务因为 status 为空而丢失。
+function taskStatusKey(task: KanbanTask): string {
+  return task.status || 'unknown'
+}
+
+// groups 把 tasks 按状态分桶；已知状态保持固定顺序，未知状态按接口返回的首次出现顺序追加。
+const groups = computed(() => {
+  const knownGroups = GROUP_DEFS.map((def) => ({
     ...def,
-    tasks: props.tasks.filter((t) => t.status === def.status),
-  })),
-)
+    tasks: props.tasks.filter((task) => taskStatusKey(task) === def.status),
+  }))
+  const unknownGroups = new Map<string, KanbanTask[]>()
+  for (const task of props.tasks) {
+    const status = taskStatusKey(task)
+    if (KNOWN_STATUS_SET.has(status)) continue
+    const tasks = unknownGroups.get(status) ?? []
+    tasks.push(task)
+    unknownGroups.set(status, tasks)
+  }
+  return [
+    ...knownGroups,
+    ...Array.from(unknownGroups, ([status, tasks]) => ({
+      status,
+      label: formatKanbanStatus(status).label,
+      tasks,
+    })),
+  ]
+})
 
 // readExpanded 从 localStorage 读某 appId 的分组折叠态，无记录则给默认展开集。
 function readExpanded(appId: string): string[] {
