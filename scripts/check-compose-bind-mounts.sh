@@ -25,7 +25,7 @@ bad_mounts="$(
       source=parts[1]
       gsub(/^"|"$/, "", source)
       gsub(/^[[:space:]]+|[[:space:]]+$/, "", source)
-      if (source !~ /^\.\/.*/ && source !~ /^\// && source !~ /^\$\{PWD\}/) {
+      if (source !~ /^\.\/.*/ && source !~ /^\// && source !~ /^\$\{PWD\}/ && source !~ /^\$\{HOME\}/) {
         print $0
       }
     }
