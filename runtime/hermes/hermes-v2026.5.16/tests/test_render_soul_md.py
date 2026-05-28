@@ -66,6 +66,41 @@ def test_legacy_knowledge_files_are_ignored(tmp_input: Path, tmp_data: Path) -> 
     assert "skills/kb-" not in soul
 
 
+def _manifest_with_knowledge() -> Manifest:
+    # 构造带 manifest.knowledge 配置的 Manifest，用于验证知识库指引渲染。
+    return Manifest(
+        app_id="x", app_name="X", app_model="m",
+        openai_api_key="sk", openai_base_url="http://x",
+        persona_rel="resources/persona.md",
+        rule_platform_rel="resources/platform-rules.md",
+        rule_organization_rel="resources/organization-rules.md",
+        rule_application_rel="resources/application-rules.md",
+        knowledge_runtime_base_url="http://manager-api:8080",
+        knowledge_app_token="tok",
+    )
+
+
+def test_knowledge_guide_rendered_when_configured(tmp_input: Path, tmp_data: Path) -> None:
+    # 配了 manifest.knowledge 时，SOUL.md 必须给出"强制优先知识库"的指引：
+    # 既要包含 oc-kb search / add 两个命令，也要明确"先检索知识库、别用网络搜索代替"。
+    _setup(tmp_input, persona="P body", platform="PLT")
+    render(_manifest_with_knowledge(), tmp_input, tmp_data)
+    soul = (tmp_data / "SOUL.md").read_text()
+    assert "oc-kb search" in soul  # 检索主入口必须出现
+    assert "oc-kb add" in soul  # 写入命令必须出现
+    assert "知识库" in soul  # 指引以中文呈现
+    # 强制优先语气：必须告知不要用网络搜索 / 记忆代替知识库检索
+    assert "网络搜索" in soul
+
+
+def test_knowledge_guide_absent_when_not_configured(tmp_input: Path, tmp_data: Path) -> None:
+    # 未配 manifest.knowledge 时不得渲染知识库指引，避免误导模型调用不存在的 oc-kb skill。
+    _setup(tmp_input, persona="P body", platform="PLT")
+    render(make_manifest(), tmp_input, tmp_data)  # make_manifest 默认不含 knowledge
+    soul = (tmp_data / "SOUL.md").read_text()
+    assert "oc-kb" not in soul
+
+
 def test_render_drops_org_and_app_layers(tmp_input: Path, tmp_data: Path) -> None:
     # manifest v2：即使 input 里仍有组织层 / 应用层 rule 文件，SOUL.md 也只渲染平台层。
     res = tmp_input / "resources"
