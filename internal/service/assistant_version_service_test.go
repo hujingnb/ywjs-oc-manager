@@ -391,7 +391,7 @@ func TestAssistantVersionDeleteRejectsAppInUse(t *testing.T) {
 	require.ErrorIs(t, err, ErrAssistantVersionInUse)
 }
 
-// TestAssistantVersionDeleteRejectsOrgInUse 验证出现在组织 allowlist 时拒绝删除。
+// TestAssistantVersionDeleteRejectsOrgInUse 验证出现在企业 allowlist 时拒绝删除。
 func TestAssistantVersionDeleteRejectsOrgInUse(t *testing.T) {
 	store := newFakeAVStore()
 	id := seedVersion(store, "标准版", 1)
@@ -399,6 +399,7 @@ func TestAssistantVersionDeleteRejectsOrgInUse(t *testing.T) {
 	svc := newTestAVService(t, store)
 	err := svc.Delete(context.Background(), platformPrincipal(), id)
 	require.ErrorIs(t, err, ErrAssistantVersionInUse)
+	require.ErrorContains(t, err, "企业 allowlist")
 }
 
 // TestAssistantVersionDeleteDeniesOrgAdmin 验证组织管理员不能删除版本。

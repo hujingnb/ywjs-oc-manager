@@ -375,10 +375,10 @@ func (s *AssistantVersionService) Delete(ctx context.Context, principal auth.Pri
 	// jsonb_exists 的参数是裸字符串 id。
 	orgCount, err := s.store.CountOrgsUsingVersion(ctx, uuidToString(row.ID))
 	if err != nil {
-		return fmt.Errorf("统计引用组织失败: %w", err)
+		return fmt.Errorf("统计引用企业失败: %w", err)
 	}
 	if orgCount > 0 {
-		return fmt.Errorf("%w: 仍有 %d 个组织 allowlist 包含", ErrAssistantVersionInUse, orgCount)
+		return fmt.Errorf("%w: 仍有 %d 个企业 allowlist 包含", ErrAssistantVersionInUse, orgCount)
 	}
 	if _, err := s.store.SoftDeleteAssistantVersion(ctx, row.ID); err != nil {
 		return fmt.Errorf("删除版本失败: %w", err)

@@ -122,7 +122,7 @@ func (s *MemberService) CreateMember(ctx context.Context, principal auth.Princip
 		return MemberResult{}, ErrNotFound
 	}
 	if err != nil {
-		return MemberResult{}, fmt.Errorf("查询组织失败: %w", err)
+		return MemberResult{}, fmt.Errorf("查询企业失败: %w", err)
 	}
 	if org.Status != domain.StatusActive {
 		return MemberResult{}, fmt.Errorf("%w: 企业已停用", ErrMemberCreateInvalid)

@@ -125,7 +125,7 @@ type KnowledgeSearchHit struct {
 	Similarity   float64 `json:"similarity"`
 }
 
-// ListOrg 列出组织知识库文件。组织成员只读，组织管理员可写。
+// ListOrg 列出企业知识库文件。企业成员只读，企业管理员可写。
 func (s *KnowledgeService) ListOrg(ctx context.Context, principal auth.Principal, orgID string, page, pageSize int32, keyword, status string) (KnowledgeListResult, error) {
 	if !auth.CanReadOrgKnowledge(principal, orgID) {
 		return KnowledgeListResult{}, ErrKnowledgeForbidden
@@ -141,7 +141,7 @@ func (s *KnowledgeService) ListOrg(ctx context.Context, principal auth.Principal
 	return s.listDocuments(ctx, dataset, "org", dataset.OrgID, pgtype.UUID{}, page, pageSize, keyword, status)
 }
 
-// SaveOrgFile 上传组织知识库文件并触发解析。
+// SaveOrgFile 上传企业知识库文件并触发解析。
 func (s *KnowledgeService) SaveOrgFile(ctx context.Context, principal auth.Principal, orgID, filename string, content io.Reader, size int64) (KnowledgeDocumentResult, error) {
 	if !auth.CanWriteOrgKnowledge(principal, orgID) {
 		return KnowledgeDocumentResult{}, ErrKnowledgeForbidden
@@ -157,7 +157,7 @@ func (s *KnowledgeService) SaveOrgFile(ctx context.Context, principal auth.Princ
 	return s.uploadToDataset(ctx, dataset, "", principal.UserID, filename, content, size)
 }
 
-// OpenOrgFile 打开组织知识库文件流供下载。
+// OpenOrgFile 打开企业知识库文件流供下载。
 func (s *KnowledgeService) OpenOrgFile(ctx context.Context, principal auth.Principal, orgID, documentID string) (io.ReadCloser, int64, string, error) {
 	if !auth.CanReadOrgKnowledge(principal, orgID) {
 		return nil, 0, "", ErrKnowledgeForbidden
@@ -173,7 +173,7 @@ func (s *KnowledgeService) OpenOrgFile(ctx context.Context, principal auth.Princ
 	return s.openDocument(ctx, dataset, document)
 }
 
-// DeleteOrgFile 删除组织知识库文件。
+// DeleteOrgFile 删除企业知识库文件。
 func (s *KnowledgeService) DeleteOrgFile(ctx context.Context, principal auth.Principal, orgID, documentID string) error {
 	if !auth.CanWriteOrgKnowledge(principal, orgID) {
 		return ErrKnowledgeForbidden
@@ -189,7 +189,7 @@ func (s *KnowledgeService) DeleteOrgFile(ctx context.Context, principal auth.Pri
 	return s.deleteDocument(ctx, dataset, document)
 }
 
-// ReparseOrgFile 重新触发组织知识库文件解析。
+// ReparseOrgFile 重新触发企业知识库文件解析。
 func (s *KnowledgeService) ReparseOrgFile(ctx context.Context, principal auth.Principal, orgID, documentID string) (KnowledgeDocumentResult, error) {
 	if !auth.CanWriteOrgKnowledge(principal, orgID) {
 		return KnowledgeDocumentResult{}, ErrKnowledgeForbidden
@@ -285,7 +285,7 @@ func (s *KnowledgeService) ReparseAppFile(ctx context.Context, principal auth.Pr
 	return s.reparseDocument(ctx, dataset, document)
 }
 
-// RuntimeSearch 供 Hermes 以 app runtime token 检索当前实例与所属组织知识库。
+// RuntimeSearch 供 Hermes 以 app runtime token 检索当前实例与所属企业知识库。
 // 请求体中的任何 dataset / org / app 意图都不会传入本方法，dataset 只由 token 解析出的 app 决定。
 func (s *KnowledgeService) RuntimeSearch(ctx context.Context, appToken, question string, topK int32) (KnowledgeSearchResult, error) {
 	if strings.TrimSpace(question) == "" {
@@ -312,14 +312,14 @@ func (s *KnowledgeService) RuntimeSearch(ctx context.Context, appToken, question
 		return KnowledgeSearchResult{}, err
 	}
 	topK = normalizeRuntimeTopK(topK)
-	// 两路检索避免 RAGFlow 在 top_k 截断时让组织知识库命中挤占实例知识库命中。
+	// 两路检索避免 RAGFlow 在 top_k 截断时让企业知识库命中挤占实例知识库命中。
 	appChunks, err := s.ragflowClient().Retrieve(ctx, []string{appRemoteID}, question, topK)
 	if err != nil {
 		return KnowledgeSearchResult{}, fmt.Errorf("RAGFlow 检索实例知识库失败: %w", err)
 	}
 	orgChunks, err := s.ragflowClient().Retrieve(ctx, []string{orgRemoteID}, question, topK)
 	if err != nil {
-		return KnowledgeSearchResult{}, fmt.Errorf("RAGFlow 检索组织知识库失败: %w", err)
+		return KnowledgeSearchResult{}, fmt.Errorf("RAGFlow 检索企业知识库失败: %w", err)
 	}
 	hits := make([]KnowledgeSearchHit, 0, len(appChunks)+len(orgChunks))
 	hits = append(hits, searchHitsFromChunks("app", appChunks)...)
@@ -341,7 +341,7 @@ func (s *KnowledgeService) RuntimeAddFile(ctx context.Context, appToken, filenam
 	return s.uploadToDataset(ctx, dataset, uuidToString(app.ID), "runtime:"+uuidToString(app.ID), filename, content, size)
 }
 
-// EnsureOrgDataset 确保组织知识库存在可用的 RAGFlow dataset。
+// EnsureOrgDataset 确保企业知识库存在可用的 RAGFlow dataset。
 func (s *KnowledgeService) EnsureOrgDataset(ctx context.Context, org sqlc.Organization) (sqlc.RagflowDataset, error) {
 	name := buildRAGFlowDatasetName("org", org.Code, org.Name, org.ID)
 	return s.ensureDataset(ctx, "org", org.ID, pgtype.UUID{}, name)
@@ -615,12 +615,12 @@ func (s *KnowledgeService) getOrgDataset(ctx context.Context, orgID pgtype.UUID)
 			return sqlc.RagflowDataset{}, ErrNotFound
 		}
 		if orgErr != nil {
-			return sqlc.RagflowDataset{}, fmt.Errorf("查询组织失败: %w", orgErr)
+			return sqlc.RagflowDataset{}, fmt.Errorf("查询企业失败: %w", orgErr)
 		}
 		return s.EnsureOrgDataset(ctx, org)
 	}
 	if err != nil {
-		return sqlc.RagflowDataset{}, fmt.Errorf("查询组织 RAGFlow dataset 失败: %w", err)
+		return sqlc.RagflowDataset{}, fmt.Errorf("查询企业 RAGFlow dataset 失败: %w", err)
 	}
 	if dataset.Status != "active" || !dataset.RagflowDatasetID.Valid || strings.TrimSpace(dataset.RagflowDatasetID.String) == "" {
 		return s.ensureExistingDataset(ctx, dataset)

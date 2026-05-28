@@ -35,7 +35,7 @@ func RegisterRuntimeKnowledgeRoutes(router gin.IRouter, handler *RuntimeKnowledg
 	group.POST("/files", handler.AddFile)
 }
 
-// Search 执行当前实例 + 所属组织知识库检索。
+// Search 执行当前实例 + 所属企业知识库检索。
 //
 // @Summary      Hermes 检索知识库
 // @Description  通过 app runtime token 检索当前实例知识库和所属企业知识库，不接受 dataset ID

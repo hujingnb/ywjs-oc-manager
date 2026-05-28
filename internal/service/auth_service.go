@@ -138,7 +138,7 @@ func (s *AuthService) lookupLoginUser(ctx context.Context, input LoginInput) (sq
 		if errors.Is(err, pgx.ErrNoRows) {
 			return sqlc.User{}, ErrInvalidCredentials
 		}
-		return sqlc.User{}, fmt.Errorf("查询组织用户失败: %w", err)
+		return sqlc.User{}, fmt.Errorf("查询企业用户失败: %w", err)
 	}
 	if user.Role == domain.UserRolePlatformAdmin || !user.OrgID.Valid {
 		return sqlc.User{}, ErrInvalidCredentials
@@ -255,7 +255,7 @@ func (s *AuthService) ensureUserEnabled(ctx context.Context, user sqlc.User) err
 	if user.OrgID.Valid {
 		org, err := s.store.GetOrganization(ctx, user.OrgID)
 		if err != nil {
-			return fmt.Errorf("查询用户组织失败: %w", err)
+			return fmt.Errorf("查询用户所属企业失败: %w", err)
 		}
 		if org.Status != domain.StatusActive {
 			return ErrOrgDisabled

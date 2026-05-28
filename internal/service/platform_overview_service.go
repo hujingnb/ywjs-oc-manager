@@ -52,7 +52,7 @@ func (s *PlatformOverviewService) Get(ctx context.Context, principal auth.Princi
 	out := PlatformOverview{}
 	orgs, err := s.store.CountActiveOrganizations(ctx)
 	if err != nil {
-		return PlatformOverview{}, fmt.Errorf("查询组织计数失败: %w", err)
+		return PlatformOverview{}, fmt.Errorf("查询企业计数失败: %w", err)
 	}
 	out.OrganizationCount = orgs
 	members, err := s.store.CountActiveUsers(ctx)

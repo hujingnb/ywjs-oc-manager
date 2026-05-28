@@ -3,6 +3,7 @@ package service
 
 import (
 	"context"
+	"errors"
 	"io"
 	"strings"
 	"testing"
@@ -31,7 +32,7 @@ const (
 	testRemoteAppDatasetID = "app-ds"
 )
 
-// TestRAGFlowKnowledgeListOrgUsesManagerPermission 验证组织知识库读取只由 manager principal 判权，RAGFlow 不参与授权。
+// TestRAGFlowKnowledgeListOrgUsesManagerPermission 验证企业知识库读取只由 manager principal 判权，RAGFlow 不参与授权。
 func TestRAGFlowKnowledgeListOrgUsesManagerPermission(t *testing.T) {
 	svc, store, rf := newRAGFlowKnowledgeTestService(t)
 	store.docs[testKnowledgeDocument] = testDocument(t, "org", "policy.md", store.orgDataset.ID)
@@ -113,7 +114,7 @@ func TestRuntimeSearchNormalizesTopK(t *testing.T) {
 	assert.Equal(t, int32(50), rf.retrieveCalls[0].topK)
 }
 
-// TestRuntimeSearchAppResultsFirst 验证 runtime 检索结果先返回实例知识库命中，再返回组织知识库命中。
+// TestRuntimeSearchAppResultsFirst 验证 runtime 检索结果先返回实例知识库命中，再返回企业知识库命中。
 func TestRuntimeSearchAppResultsFirst(t *testing.T) {
 	svc, _, rf := newRAGFlowKnowledgeTestService(t)
 	rf.retrieveChunksByDataset = map[string][]ragflow.RetrievalChunk{
@@ -134,6 +135,18 @@ func TestRuntimeSearchAppResultsFirst(t *testing.T) {
 	assert.Equal(t, "app-high", result.Results[0].DocumentID)
 	assert.Equal(t, "app-low", result.Results[1].DocumentID)
 	assert.Equal(t, "org-doc", result.Results[2].DocumentID)
+}
+
+// TestRuntimeSearchOrgRetrieveErrorUsesEnterpriseCopy 验证 runtime 检索企业知识库失败时返回企业文案。
+func TestRuntimeSearchOrgRetrieveErrorUsesEnterpriseCopy(t *testing.T) {
+	svc, _, rf := newRAGFlowKnowledgeTestService(t)
+	rf.retrieveErrorsByDataset = map[string]error{
+		testRemoteOrgDatasetID: errors.New("ragflow unavailable"),
+	}
+
+	// 企业知识库检索错误会经 knowledge handler 安全文案透出，不能再包含旧组织文案。
+	_, err := svc.RuntimeSearch(context.Background(), testRuntimeToken, "退款政策", 8)
+	require.ErrorContains(t, err, "RAGFlow 检索企业知识库失败")
 }
 
 // TestRAGFlowKnowledgeListReturnsCachedStatus 验证列表请求只读取本地缓存，不向 RAGFlow 拉取最新解析状态。
@@ -225,7 +238,7 @@ func TestDeleteAppDatasetRemovesRemoteAndLocalMapping(t *testing.T) {
 	assert.Equal(t, uuidToString(store.appDataset.ID), store.deletedDatasetID)
 }
 
-// TestEnsureOrgDatasetCreatesRemoteDatasetMapping 验证组织知识库没有映射时会自动创建 RAGFlow dataset 并回写远端 ID。
+// TestEnsureOrgDatasetCreatesRemoteDatasetMapping 验证企业知识库没有映射时会自动创建 RAGFlow dataset 并回写远端 ID。
 func TestEnsureOrgDatasetCreatesRemoteDatasetMapping(t *testing.T) {
 	svc, store, rf := newRAGFlowKnowledgeTestService(t)
 	svc.SetDatasetChunkMethod("manual")
@@ -278,6 +291,27 @@ func TestEnsureOrgDatasetCreateConflictDoesNotDuplicateRemoteCreate(t *testing.T
 
 	assert.Equal(t, 0, len(rf.createDatasetCalls))
 	assert.Equal(t, 2, store.getOrgDatasetCalls)
+}
+
+// TestGetOrgDatasetOrganizationLookupErrorUsesEnterpriseCopy 验证企业记录查询失败时返回企业文案。
+func TestGetOrgDatasetOrganizationLookupErrorUsesEnterpriseCopy(t *testing.T) {
+	svc, store, _ := newRAGFlowKnowledgeTestService(t)
+	store.missingOrgDataset = true
+	store.getOrganizationErr = errors.New("database down")
+
+	// 查询企业失败会经 knowledge handler 安全文案透出，不能再包含旧组织文案。
+	_, err := svc.getOrgDataset(context.Background(), mustParseUUID(testKnowledgeOrg))
+	require.ErrorContains(t, err, "查询企业失败")
+}
+
+// TestGetOrgDatasetMappingLookupErrorUsesEnterpriseCopy 验证企业 RAGFlow dataset 查询失败时返回企业文案。
+func TestGetOrgDatasetMappingLookupErrorUsesEnterpriseCopy(t *testing.T) {
+	svc, store, _ := newRAGFlowKnowledgeTestService(t)
+	store.getOrgDatasetErr = errors.New("database down")
+
+	// 查询企业 RAGFlow dataset 失败会经 knowledge handler 安全文案透出，不能再包含旧组织文案。
+	_, err := svc.getOrgDataset(context.Background(), mustParseUUID(testKnowledgeOrg))
+	require.ErrorContains(t, err, "查询企业 RAGFlow dataset 失败")
 }
 
 // TestEnsureOrgDatasetFailedClaimLostDoesNotCreateRemote 验证 failed 映射被其它 worker 抢占后，当前调用不重复创建远端 dataset。
@@ -416,6 +450,8 @@ type fakeKnowledgeStore struct {
 	missingAppDataset     bool
 	missingOrgDatasetOnce bool
 	missingAppDatasetOnce bool
+	getOrganizationErr    error
+	getOrgDatasetErr      error
 	createOrgDatasetErr   error
 	createAppDatasetErr   error
 	claimDatasetErr       error
@@ -452,6 +488,9 @@ func (s *fakeKnowledgeStore) GetApp(_ context.Context, id pgtype.UUID) (sqlc.App
 }
 
 func (s *fakeKnowledgeStore) GetOrganization(_ context.Context, id pgtype.UUID) (sqlc.Organization, error) {
+	if s.getOrganizationErr != nil {
+		return sqlc.Organization{}, s.getOrganizationErr
+	}
 	if uuidToString(id) != testKnowledgeOrg {
 		return sqlc.Organization{}, pgx.ErrNoRows
 	}
@@ -468,6 +507,9 @@ func (s *fakeKnowledgeStore) GetAppByRuntimeTokenHash(_ context.Context, runtime
 
 func (s *fakeKnowledgeStore) GetRAGFlowOrgDataset(_ context.Context, orgID pgtype.UUID) (sqlc.RagflowDataset, error) {
 	s.getOrgDatasetCalls++
+	if s.getOrgDatasetErr != nil {
+		return sqlc.RagflowDataset{}, s.getOrgDatasetErr
+	}
 	if s.missingOrgDatasetOnce && s.getOrgDatasetCalls == 1 {
 		return sqlc.RagflowDataset{}, pgx.ErrNoRows
 	}
@@ -716,6 +758,7 @@ type fakeRAGFlowKnowledgeClient struct {
 	retrieveTopK            int32
 	retrieveChunks          []ragflow.RetrievalChunk
 	retrieveChunksByDataset map[string][]ragflow.RetrievalChunk
+	retrieveErrorsByDataset map[string]error
 	retrieveCalls           []ragflowRetrieveCall
 	listDocuments           []ragflow.Document
 	listDocumentsCalls      int
@@ -793,6 +836,11 @@ func (f *fakeRAGFlowKnowledgeClient) Retrieve(_ context.Context, datasetIDs []st
 	f.retrieveQuestion = question
 	f.retrieveTopK = topK
 	f.retrieveCalls = append(f.retrieveCalls, ragflowRetrieveCall{datasetIDs: append([]string(nil), datasetIDs...), question: question, topK: topK})
+	if len(datasetIDs) == 1 && f.retrieveErrorsByDataset != nil {
+		if err := f.retrieveErrorsByDataset[datasetIDs[0]]; err != nil {
+			return nil, err
+		}
+	}
 	if len(datasetIDs) == 1 && len(f.retrieveChunksByDataset) > 0 {
 		return f.retrieveChunksByDataset[datasetIDs[0]], nil
 	}

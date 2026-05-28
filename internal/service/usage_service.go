@@ -235,7 +235,7 @@ func (s *UsageService) GetOrgUsage(ctx context.Context, principal auth.Principal
 		return QuotaSeries{}, ErrNotFound
 	}
 	if err != nil {
-		return QuotaSeries{}, fmt.Errorf("查询组织失败: %w", err)
+		return QuotaSeries{}, fmt.Errorf("查询企业失败: %w", err)
 	}
 	if !org.NewapiUserID.Valid || org.NewapiUserID.String == "" {
 		return QuotaSeries{Scope: "organization", ScopeID: orgID, Items: []newapi.QuotaDate{}, UpdatedAt: time.Now()}, nil
@@ -304,7 +304,7 @@ func (s *UsageService) GetOrgUsageBreakdown(ctx context.Context, principal auth.
 
 	orgs, err := s.store.ListAllActiveOrganizations(ctx)
 	if err != nil {
-		return OrgUsageBreakdown{}, fmt.Errorf("查询组织列表失败: %w", err)
+		return OrgUsageBreakdown{}, fmt.Errorf("查询企业列表失败: %w", err)
 	}
 
 	// 并发收集各组织用量；mu 保护 items 切片。
@@ -337,7 +337,7 @@ func (s *UsageService) GetOrgUsageBreakdown(ctx context.Context, principal auth.
 						Err:       err,
 					})
 				}
-				return fmt.Errorf("查询组织 %s 用量失败: %w", uuidToString(org.ID), err)
+				return fmt.Errorf("查询企业 %s 用量失败: %w", uuidToString(org.ID), err)
 			}
 			var total int64
 			for _, d := range dates {

@@ -233,7 +233,7 @@ func (s *OrganizationService) CreateOrganization(ctx context.Context, principal 
 		if isUniqueViolation(err) {
 			return OrganizationResult{}, fmt.Errorf("%w: 企业名称或企业标识已存在", ErrConflict)
 		}
-		return OrganizationResult{}, fmt.Errorf("创建组织失败: %w", err)
+		return OrganizationResult{}, fmt.Errorf("创建企业失败: %w", err)
 	}
 
 	// 失败时回滚刚刚 INSERT 的 manager 行；rollback 自身失败只记入返回错误，不掩盖原因。
@@ -478,7 +478,7 @@ func (s *OrganizationService) ListOrganizations(ctx context.Context, principal a
 	}
 	orgs, err := s.store.ListOrganizations(ctx, sqlc.ListOrganizationsParams{Limit: limit, Offset: offset})
 	if err != nil {
-		return nil, fmt.Errorf("查询组织列表失败: %w", err)
+		return nil, fmt.Errorf("查询企业列表失败: %w", err)
 	}
 	return s.toOrganizationResultsWithAdminUsernames(ctx, orgs), nil
 }
@@ -497,7 +497,7 @@ func (s *OrganizationService) GetOrganization(ctx context.Context, principal aut
 		return OrganizationResult{}, ErrNotFound
 	}
 	if err != nil {
-		return OrganizationResult{}, fmt.Errorf("查询组织失败: %w", err)
+		return OrganizationResult{}, fmt.Errorf("查询企业失败: %w", err)
 	}
 	return s.toOrganizationResultWithAdminUsername(ctx, org), nil
 }
@@ -516,7 +516,7 @@ func (s *OrganizationService) UpdateOrganization(ctx context.Context, principal 
 		return OrganizationResult{}, ErrNotFound
 	}
 	if err != nil {
-		return OrganizationResult{}, fmt.Errorf("查询组织失败: %w", err)
+		return OrganizationResult{}, fmt.Errorf("查询企业失败: %w", err)
 	}
 	// 处理助手版本 allowlist：显式传入时校验并更新，否则保留原有值。
 	var versionIDsJSON []byte
@@ -549,7 +549,7 @@ func (s *OrganizationService) UpdateOrganization(ctx context.Context, principal 
 		return OrganizationResult{}, ErrNotFound
 	}
 	if err != nil {
-		return OrganizationResult{}, fmt.Errorf("更新组织失败: %w", err)
+		return OrganizationResult{}, fmt.Errorf("更新企业失败: %w", err)
 	}
 	return s.toOrganizationResultWithAdminUsername(ctx, org), nil
 }
@@ -627,7 +627,7 @@ func (s *OrganizationService) toOrganizationResultWithAdminUsername(ctx context.
 	return result
 }
 
-// getOrgAdminUsername 查询组织下最早创建且未下线的 org_admin。
+// getOrgAdminUsername 查询企业下最早创建且未下线的 org_admin。
 // pgx.ErrNoRows 表示组织尚无可用管理员，返回空字符串即可由前端显示提示。
 func (s *OrganizationService) getOrgAdminUsername(ctx context.Context, orgID pgtype.UUID) string {
 	user, err := s.store.GetOrgAdminByOrg(ctx, orgID)
@@ -635,7 +635,7 @@ func (s *OrganizationService) getOrgAdminUsername(ctx context.Context, orgID pgt
 		return ""
 	}
 	if err != nil {
-		slog.WarnContext(ctx, "查询组织管理员用户名失败", "org_id", uuidToString(orgID), "error", err)
+		slog.WarnContext(ctx, "查询企业管理员用户名失败", "org_id", uuidToString(orgID), "error", err)
 		return ""
 	}
 	return user.Username

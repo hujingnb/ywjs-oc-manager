@@ -237,7 +237,7 @@ func (s *AppService) SwitchAppVersion(ctx context.Context, principal auth.Princi
 		return AppResult{}, ErrNotFound
 	}
 	if err != nil {
-		return AppResult{}, fmt.Errorf("查询组织失败: %w", err)
+		return AppResult{}, fmt.Errorf("查询企业失败: %w", err)
 	}
 	// 目标版本必须在组织 allowlist 内，否则拒绝切换。
 	if !versionInOrgAllowlist(org, versionID) {

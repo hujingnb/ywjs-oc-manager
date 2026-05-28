@@ -101,7 +101,7 @@ func (h *RechargeHandler) List(c *gin.Context) {
 	c.JSON(http.StatusOK, gin.H{"recharges": results})
 }
 
-// Balance 查询组织余额。
+// Balance 查询企业余额。
 //
 // @Summary      查询企业余额
 // @Description  查询指定企业在 new-api 中的当前额度余额

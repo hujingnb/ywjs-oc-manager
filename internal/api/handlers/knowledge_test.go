@@ -148,7 +148,7 @@ func TestKnowledgeUploadOrgRequiresFilename(t *testing.T) {
 	assert.Equal(t, http.StatusBadRequest, w.Code)
 }
 
-// TestKnowledgeUploadOrgRejectsOversizedBody 验证后端在调用 service 前拒绝超过 100MB 的组织知识库上传。
+// TestKnowledgeUploadOrgRejectsOversizedBody 验证后端在调用 service 前拒绝超过 100MB 的企业知识库上传。
 func TestKnowledgeUploadOrgRejectsOversizedBody(t *testing.T) {
 	stub := &knowledgeServiceStub{}
 	router := newKnowledgeTestRouter(t, stub)

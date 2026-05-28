@@ -65,6 +65,17 @@ func TestRecharge_RejectsMissingNewAPIUserID(t *testing.T) {
 	require.ErrorIs(t, err, ErrOrgMissingNewAPIUserID)
 }
 
+// TestRecharge_OrganizationLookupErrorUsesEnterpriseCopy 验证充值查询企业失败时返回企业文案。
+func TestRecharge_OrganizationLookupErrorUsesEnterpriseCopy(t *testing.T) {
+	store := newRechargeStub(t, "1234")
+	store.getOrgErr = errors.New("database down")
+	svc := NewRechargeService(store, &fakeNewAPIRecharge{})
+
+	// 查询企业的底层错误会经 recharge handler 安全文案透出，不能再包含旧组织文案。
+	_, err := svc.Recharge(context.Background(), platformAdmin(), testRechargeOrgID, 100, "")
+	require.ErrorContains(t, err, "查询企业失败")
+}
+
 // TestRecharge_NewAPIErrorStillWritesFailedRecord 验证充值new-api错误仍然写入失败记录的成功路径场景。
 func TestRecharge_NewAPIErrorStillWritesFailedRecord(t *testing.T) {
 	store := newRechargeStub(t, "1234")
@@ -163,6 +174,17 @@ func TestGetBalance_OrgAdminMustMatchOrg(t *testing.T) {
 	}
 }
 
+// TestGetBalance_OrganizationLookupErrorUsesEnterpriseCopy 验证余额查询企业失败时返回企业文案。
+func TestGetBalance_OrganizationLookupErrorUsesEnterpriseCopy(t *testing.T) {
+	store := newRechargeStub(t, "1234")
+	store.getOrgErr = errors.New("database down")
+	svc := NewRechargeService(store, &fakeNewAPIRecharge{})
+
+	// 查询企业的底层错误会经 recharge handler 安全文案透出，不能再包含旧组织文案。
+	_, err := svc.GetBalance(context.Background(), platformAdmin(), testRechargeOrgID)
+	require.ErrorContains(t, err, "查询企业失败")
+}
+
 // TestRechargeServiceGetBillingStatusProxiesNewAPIStatus 验证 billing status 直接透传 new-api 展示配置。
 func TestRechargeServiceGetBillingStatusProxiesNewAPIStatus(t *testing.T) {
 	client := &fakeNewAPIRecharge{statusResult: newapi.StatusView{
@@ -191,6 +213,7 @@ type rechargeStub struct {
 	recordWritten    bool
 	lastRecordStatus string
 	auditWritten     bool
+	getOrgErr        error
 	// lastAuditCreate 记录最近一次 CreateAuditLog 入参，便于断言 detail 等字段。
 	lastAuditCreate sqlc.CreateAuditLogParams
 	totalRecharged  int64 // SumRechargeAmountByOrg 的桩返回值
@@ -209,6 +232,9 @@ func newRechargeStub(t *testing.T, newapiUserID string) *rechargeStub {
 }
 
 func (s *rechargeStub) GetOrganization(_ context.Context, _ pgtype.UUID) (sqlc.Organization, error) {
+	if s.getOrgErr != nil {
+		return sqlc.Organization{}, s.getOrgErr
+	}
 	return s.org, nil
 }
 

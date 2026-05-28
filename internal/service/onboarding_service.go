@@ -189,7 +189,7 @@ func (s *MemberOnboardingService) OnboardMember(ctx context.Context, principal a
 	txErr := s.tx.WithTx(ctx, func(store OnboardingStore) error {
 		org, err := store.GetOrganization(ctx, orgUUID)
 		if err != nil {
-			return fmt.Errorf("查询组织失败: %w", err)
+			return fmt.Errorf("查询企业失败: %w", err)
 		}
 		if org.Status != domain.StatusActive {
 			return fmt.Errorf("%w: 企业已停用", ErrMemberCreateInvalid)
@@ -346,7 +346,7 @@ func (s *MemberOnboardingService) CreateAppForMember(ctx context.Context, princi
 	txErr := s.tx.WithTx(ctx, func(store OnboardingStore) error {
 		org, err := store.GetOrganization(ctx, orgUUID)
 		if err != nil {
-			return fmt.Errorf("查询组织失败: %w", err)
+			return fmt.Errorf("查询企业失败: %w", err)
 		}
 		if org.Status != domain.StatusActive {
 			return fmt.Errorf("%w: 企业已停用", ErrMemberCreateInvalid)

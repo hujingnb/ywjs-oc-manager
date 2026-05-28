@@ -110,7 +110,7 @@ func (s *RechargeService) Recharge(ctx context.Context, principal auth.Principal
 		return RechargeRecordResult{}, ErrNotFound
 	}
 	if err != nil {
-		return RechargeRecordResult{}, fmt.Errorf("查询组织失败: %w", err)
+		return RechargeRecordResult{}, fmt.Errorf("查询企业失败: %w", err)
 	}
 	if !org.NewapiUserID.Valid || org.NewapiUserID.String == "" {
 		return RechargeRecordResult{}, ErrOrgMissingNewAPIUserID
@@ -202,7 +202,7 @@ func (s *RechargeService) ListRecharges(ctx context.Context, principal auth.Prin
 	return results, nil
 }
 
-// GetBalance 查询组织当前余额（透传 new-api）及累计充值金额（本地聚合）。
+// GetBalance 查询企业当前余额（透传 new-api）及累计充值金额（本地聚合）。
 // 两个数据源并发查询：① new-api 取 RemainQuota/UsedQuota；② 本地 DB 聚合 TotalRecharged。
 func (s *RechargeService) GetBalance(ctx context.Context, principal auth.Principal, orgID string) (BalanceView, error) {
 	if principal.Role != domain.UserRolePlatformAdmin && principal.Role != domain.UserRoleOrgAdmin {
@@ -217,7 +217,7 @@ func (s *RechargeService) GetBalance(ctx context.Context, principal auth.Princip
 		return BalanceView{}, ErrNotFound
 	}
 	if err != nil {
-		return BalanceView{}, fmt.Errorf("查询组织失败: %w", err)
+		return BalanceView{}, fmt.Errorf("查询企业失败: %w", err)
 	}
 	if principal.Role == domain.UserRoleOrgAdmin && principal.OrgID != uuidToString(org.ID) {
 		return BalanceView{}, ErrForbidden
