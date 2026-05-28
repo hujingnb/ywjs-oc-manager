@@ -122,7 +122,7 @@ CREATE TABLE apps (
     runtime_snapshot_json JSON NULL,
     runtime_snapshot_at DATETIME(6) NULL,
     restart_policy_json JSON NOT NULL
-        DEFAULT (CAST('{"mode":"on_failure","max_per_window":5,"window_seconds":600}' AS JSON)),
+        DEFAULT (JSON_OBJECT('mode', 'on_failure', 'max_per_window', 5, 'window_seconds', 600)),
     health_state_json JSON NULL,
     progress_current BIGINT NULL,
     progress_total BIGINT NULL,
