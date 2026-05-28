@@ -6,14 +6,14 @@
         <div style="display: flex; align-items: center; justify-content: space-between">
           <div>
             <p class="eyebrow">Platform · Billing</p>
-            <h2 style="margin: 0">组织充值</h2>
-            <p v-if="orgId" class="state-text" style="margin: 4px 0 0">组织 {{ orgId }}</p>
+            <h2 style="margin: 0">企业充值</h2>
+            <p v-if="orgId" class="state-text" style="margin: 4px 0 0">企业 {{ orgId }}</p>
           </div>
-          <RouterLink class="secondary-button" to="/organizations">返回组织列表</RouterLink>
+          <RouterLink class="secondary-button" to="/organizations">返回企业列表</RouterLink>
         </div>
       </template>
 
-      <div v-if="!orgId" class="state-text">URL 缺少组织 ID</div>
+      <div v-if="!orgId" class="state-text">URL 缺少企业 ID</div>
       <div v-else>
         <p class="state-text" style="margin-bottom: 12px">
           当前余额：
@@ -55,8 +55,8 @@
 
     <ConfirmActionModal
       :visible="confirmRecharge"
-      title="确认组织充值"
-      :message="pendingPayload ? `将给当前组织充值 ${formatDisplayAmount(pendingPayload.credit_amount, billingStatus)}。该操作会调用 new-api 修改余额。` : ''"
+      title="确认企业充值"
+      :message="pendingPayload ? `将给当前企业充值 ${formatDisplayAmount(pendingPayload.credit_amount, billingStatus)}。该操作会调用 new-api 修改余额。` : ''"
       confirm-label="确认充值"
       :busy="mutation.isPending.value"
       :verify-value="orgName"
@@ -95,7 +95,7 @@ import { useOrganizationQuery } from '@/api/hooks/useOrganizations'
 import ConfirmActionModal from '@/components/ConfirmActionModal.vue'
 import { formatDisplayAmount, formatQuotaValue } from '@/pages/usage/usageFormatting'
 
-// RechargePage 是独立组织充值页，保留余额查询、充值确认和历史记录展示。
+// RechargePage 是独立企业充值页，保留余额查询、充值确认和历史记录展示。
 const route = useRoute()
 // orgId 来自路由参数，缺失时页面展示 URL 错误且相关查询不会具备有效目标。
 const orgId = computed<string | undefined>(() => route.params.orgId as string | undefined)
@@ -108,9 +108,9 @@ const recordsQuery = useRechargesQuery(orgId)
 const mutation = useRechargeMutation(orgId)
 
 const orgQuery = useOrganizationQuery(orgId)
-// orgName 用于二次确认输入，组织尚未加载时降级为组织 ID。
-const orgName = computed(() => orgQuery.data.value?.name ?? (orgId.value ? `组织 ${orgId.value}` : ''))
-const confirmHint = computed(() => `输入组织名称 "${orgName.value}" 以确认充值`)
+// orgName 用于二次确认输入，企业尚未加载时降级为企业 ID。
+const orgName = computed(() => orgQuery.data.value?.name ?? (orgId.value ? `企业 ${orgId.value}` : ''))
+const confirmHint = computed(() => `输入企业名称 "${orgName.value}" 以确认充值`)
 
 const amount = ref<number | null>(null)
 const remark = ref('')
@@ -121,7 +121,7 @@ const confirmRecharge = ref(false)
 // pendingPayload 暂存通过基础校验的充值请求，只有二次确认后才提交。
 const pendingPayload = ref<{ credit_amount: number; remark?: string } | null>(null)
 
-// canSubmit 表示金额和组织 ID 都满足提交充值的最小条件。
+// canSubmit 表示金额和企业 ID 都满足提交充值的最小条件。
 const canSubmit = computed(() => Boolean(orgId.value && (amount.value ?? 0) > 0))
 
 // onSubmit 只打开二次确认弹框，不直接调用充值接口。

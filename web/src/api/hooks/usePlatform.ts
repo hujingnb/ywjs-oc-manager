@@ -7,7 +7,7 @@ import { apiRequest } from '@/api/client'
 
 // PlatformOverview 与后端 service.PlatformOverview 字段一一对应。
 export interface PlatformOverview {
-  // 组织总数。
+  // 企业总数。
   organization_count: number
   // 成员总数。
   member_count: number
@@ -39,15 +39,15 @@ export function usePlatformOverviewQuery(enabled: Ref<boolean>) {
 
 // OrgUsageBreakdownItem 与后端 service.OrgUsageItem 字段一一对应。
 export interface OrgUsageBreakdownItem {
-  // 组织 UUID。
+  // 企业 UUID。
   org_id: string
-  // 组织显示名。
+  // 企业显示名。
   org_name: string
   // [since, until] 内各日 quota 累计值（new-api 原始单位）。
   total_quota: number
 }
 
-// usePlatformOrgBreakdownQuery 拉各组织近 7 天 quota 消耗汇总，仅 platform_admin 可调。
+// usePlatformOrgBreakdownQuery 拉各企业近 7 天 quota 消耗汇总，仅 platform_admin 可调。
 // 60 秒刷新，图表数据变化频率低于统计卡片。
 export function usePlatformOrgBreakdownQuery(enabled: Ref<boolean>) {
   return useQuery<OrgUsageBreakdownItem[]>({

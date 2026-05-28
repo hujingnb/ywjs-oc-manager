@@ -13,7 +13,7 @@ vi.mock('@/api/hooks/useAuditLogs', () => ({
         id: 'b1',
         actor_id: '00000000-0000-0000-0000-000000000201',
         actor_role: 'org_member',
-        actor_role_label: '组织成员',
+        actor_role_label: '企业成员',
         actor_name: '李四',
         actor_deleted: false,
         target_id: '00000000-0000-0000-0000-000000000001',
@@ -33,7 +33,7 @@ vi.mock('@/api/hooks/useAuditLogs', () => ({
         id: 'b2',
         actor_id: '00000000-0000-0000-0000-000000000202',
         actor_role: 'org_member',
-        actor_role_label: '组织成员',
+        actor_role_label: '企业成员',
         actor_name: '已下线成员',
         actor_deleted: true,
         target_id: '00000000-0000-0000-0000-000000000001',
@@ -74,7 +74,7 @@ describe('AppAuditTab', () => {
     const wrapper = mount(AppAuditTab, { props: { appId: '00000000-0000-0000-0000-000000000001' } })
     const text = wrapper.text()
     expect(text).toContain('李四')
-    expect(text).toContain('组织成员')
+    expect(text).toContain('企业成员')
     expect(text).toContain('渠道 微信，身份 18601000000')
   })
 

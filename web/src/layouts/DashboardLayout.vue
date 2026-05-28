@@ -121,7 +121,7 @@ const activeKey = computed(() => {
 
 const isPlatformAdmin = computed(() => auth.isPlatformAdmin)
 const isOrgMember = computed(() => auth.isOrgMember)
-// isOrgAdmin 用于控制账户余额菜单项的可见性，仅组织管理员需要此入口。
+// isOrgAdmin 用于控制账户余额菜单项的可见性，仅企业管理员需要此入口。
 const isOrgAdmin = computed(() => auth.isOrgAdmin)
 
 const { appId: memberAppId, hasApp: memberHasApp } = useMemberApp()
@@ -133,17 +133,17 @@ const memberAppPath = computed(() => {
   return '/apps/empty'
 })
 
-// menuOptions 根据角色裁剪入口：普通成员不显示组织管理和审计，平台管理员仅显示控制台单一入口。
+// menuOptions 根据角色裁剪入口：普通成员不显示企业管理和审计，平台管理员仅显示控制台单一入口。
 const menuOptions = computed<MenuOption[]>(() => {
   // platform_admin 使用单一「控制台」入口，替代原来「总览+平台」两个菜单项。
   const items: MenuOption[] = isPlatformAdmin.value
     ? [{ key: '/console', label: '控制台', icon: () => h(Gauge, { size: 18 }) }]
     : [{ key: '/', label: '总览', icon: () => h(LayoutDashboard, { size: 18 }) }]
   if (isPlatformAdmin.value) {
-    items.push({ key: '/organizations', label: '组织', icon: () => h(Building2, { size: 18 }) })
+    items.push({ key: '/organizations', label: '企业', icon: () => h(Building2, { size: 18 }) })
     items.push({ key: '/assistant-versions', label: '助手版本', icon: () => h(Boxes, { size: 18 }) })
   }
-  // 成员/审计 是组织管理视角，普通成员不展示。
+  // 成员/审计 是企业管理视角，普通成员不展示。
   if (!isOrgMember.value) {
     items.push({ key: '/members', label: '成员', icon: () => h(Users, { size: 18 }) })
   }

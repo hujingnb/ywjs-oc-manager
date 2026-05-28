@@ -182,7 +182,7 @@ const canStop = computed(() => {
   const status = app?.value?.status
   return canManage.value && (status === 'running' || status === 'binding_waiting')
 })
-// canDelete 仅限应用管理者（不含平台管理员），删除操作不可逆，不向跨组织角色开放。
+// canDelete 仅限应用管理者（不含平台管理员），删除操作不可逆，不向跨企业角色开放。
 const canDelete = computed(() => canManageApp(auth.user, app?.value) && app?.value?.status !== 'deleted')
 
 // onAction 对 stop/delete 先弹二次确认，其他操作直接提交运行时任务。

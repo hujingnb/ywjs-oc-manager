@@ -5,7 +5,7 @@
       <template #header>
         <div>
           <p class="eyebrow">{{ eyebrow }}</p>
-          <h2 style="margin: 0">组织知识库</h2>
+          <h2 style="margin: 0">企业知识库</h2>
         </div>
       </template>
       <template #header-extra>
@@ -23,7 +23,7 @@
           v-model:value="selectedOrgId"
           :options="orgOptions"
           style="width: 220px"
-          placeholder="选择组织"
+          placeholder="选择企业"
         />
       </n-space>
 
@@ -61,12 +61,12 @@ import { canManageOrgKnowledge } from '@/domain/permissions'
 import { useAuthStore } from '@/stores/auth'
 import { useUploadProgressStore } from '@/stores/uploadProgress'
 
-// OrgKnowledgePage 管理组织级共享知识库；文件主库由 RAGFlow 承担，页面只展示扁平 document 列表。
+// OrgKnowledgePage 管理企业级共享知识库；文件主库由 RAGFlow 承担，页面只展示扁平 document 列表。
 const props = defineProps<{ orgId?: string }>()
 const auth = useAuthStore()
 const uploadProgress = useUploadProgressStore()
 const message = useMessage()
-// 平台管理员通过组织选择器查看组织知识库，组织用户默认使用自身组织。
+// 平台管理员通过企业选择器查看企业知识库，企业用户默认使用自身企业。
 const {
   isPlatformAdmin,
   selectedOrgId,
@@ -75,10 +75,10 @@ const {
   organizationsLoading,
 } = usePlatformOrgSelection(computed(() => auth.user), computed(() => props.orgId))
 
-const eyebrow = computed(() => (auth.user?.role === 'platform_admin' ? 'Platform · 知识库' : '组织 · 知识库'))
+const eyebrow = computed(() => (auth.user?.role === 'platform_admin' ? 'Platform · 知识库' : '企业 · 知识库'))
 // canManage 决定上传、删除和重解析入口是否可见，接口层仍执行最终权限校验。
 const canManage = computed(() => canManageOrgKnowledge(auth.user, effectiveOrgId.value))
-const emptyOrgMessage = computed(() => isPlatformAdmin.value ? '暂无可查看组织' : '当前账号未关联组织')
+const emptyOrgMessage = computed(() => isPlatformAdmin.value ? '暂无可查看企业' : '当前账号未关联企业')
 
 const { data: listing, isLoading, error } = useOrgKnowledgeQuery(effectiveOrgId)
 const uploadMutation = useUploadOrgKnowledge(effectiveOrgId)
@@ -125,7 +125,7 @@ function formatSize(value: number): string {
   return `${(value / 1024 / 1024).toFixed(2)} MB`
 }
 
-// onUpload 将文件上传到 RAGFlow 组织 dataset；上传进度统一由全局 UploadProgressModal 展示。
+// onUpload 将文件上传到 RAGFlow 企业 dataset；上传进度统一由全局 UploadProgressModal 展示。
 // 互斥规则：会话进行中 store.run 抛错，业务侧用 n-message 提示用户。
 async function onUpload(event: Event) {
   const input = event.target as HTMLInputElement
@@ -180,7 +180,7 @@ function canReparse(row: KnowledgeDocument): boolean {
   return row.parse_status === 'failed' || row.parse_status === 'stopped'
 }
 
-// fileColumns 展示 RAGFlow 文档；组织成员可下载，管理者额外可删除和重解析。
+// fileColumns 展示 RAGFlow 文档；企业成员可下载，管理者额外可删除和重解析。
 const fileColumns: DataTableColumns<KnowledgeDocument> = [
   {
     title: '名称', key: 'name',

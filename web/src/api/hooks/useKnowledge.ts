@@ -1,4 +1,4 @@
-// 知识库 API hooks 负责组织级与实例级 RAGFlow 文件列表、上传、下载、删除和重解析。
+// 知识库 API hooks 负责企业级与实例级 RAGFlow 文件列表、上传、下载、删除和重解析。
 // 上传走 xhrUpload 支持进度反馈与取消；其余 JSON 接口统一走 apiRequest。
 import { useMutation, useQuery, useQueryClient } from '@tanstack/vue-query'
 import { computed } from 'vue'
@@ -107,7 +107,7 @@ export function useUploadOrgKnowledge(orgId: Ref<string | undefined>) {
       onProgress?: (loaded: number, total: number) => void
       signal?: AbortSignal
     }) => {
-      if (!orgId.value) throw new Error('缺少组织 ID')
+      if (!orgId.value) throw new Error('缺少企业 ID')
       const params = new URLSearchParams({ filename: input.file.name })
       await xhrUpload(`/api/v1/organizations/${orgId.value}/knowledge?${params.toString()}`, {
         method: 'POST',
@@ -151,7 +151,7 @@ export function useDeleteOrgKnowledge(orgId: Ref<string | undefined>) {
   const client = useQueryClient()
   return useMutation({
     mutationFn: async (documentId: string) => {
-      if (!orgId.value) throw new Error('缺少组织 ID')
+      if (!orgId.value) throw new Error('缺少企业 ID')
       await apiRequest<void>(`/api/v1/organizations/${orgId.value}/knowledge/${documentId}`, { method: 'DELETE' })
     },
     onSuccess: () => {
@@ -177,7 +177,7 @@ export function useReparseOrgKnowledge(orgId: Ref<string | undefined>) {
   const client = useQueryClient()
   return useMutation({
     mutationFn: async (documentId: string) => {
-      if (!orgId.value) throw new Error('缺少组织 ID')
+      if (!orgId.value) throw new Error('缺少企业 ID')
       await apiRequest<KnowledgeDocument>(`/api/v1/organizations/${orgId.value}/knowledge/${documentId}/reparse`, { method: 'POST' })
     },
     onSuccess: () => {

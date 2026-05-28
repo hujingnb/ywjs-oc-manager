@@ -26,8 +26,8 @@
           <div v-else ref="tokenChartEl" class="chart-container" />
         </n-tab-pane>
 
-        <!-- Tab 2：各组织用量 -->
-        <n-tab-pane name="orgs" tab="各组织用量">
+        <!-- Tab 2：各企业用量 -->
+        <n-tab-pane name="orgs" tab="各企业用量">
           <div v-if="orgBreakdownLoading" class="chart-state">加载中…</div>
           <div v-else-if="orgBreakdownError" class="chart-state danger">用量服务不可用</div>
           <div v-else-if="!orgBreakdownData?.length" class="chart-state">暂无数据</div>
@@ -63,7 +63,7 @@ import { useQuery } from '@tanstack/vue-query'
 
 use([CanvasRenderer, LineChart, BarChart, PieChart, GridComponent, TooltipComponent, LegendComponent])
 
-// ConsolePage 是平台管理员专属的控制台首页：统计条 + Token 趋势/组织用量/实例状态三图。
+// ConsolePage 是平台管理员专属的控制台首页：统计条 + Token 趋势/企业用量/实例状态三图。
 // 图表颜色与全局浅色主题保持一致，避免 ECharts 默认色回到深色控制台残留。
 const CHART_TEXT_COLOR = '#6b7280'
 const CHART_AXIS_COLOR = '#d9dde5'
@@ -114,7 +114,7 @@ const todayTokenTotal = computed(() => {
 const stats = computed(() => {
   const o = overview.value
   return [
-    { label: '组织数', value: String(o?.organization_count ?? '—'), note: '', noteColor: undefined, suffix: undefined },
+    { label: '企业数', value: String(o?.organization_count ?? '—'), note: '', noteColor: undefined, suffix: undefined },
     { label: '成员数', value: String(o?.member_count ?? '—'), note: '不含平台管理员', noteColor: undefined, suffix: undefined },
     { label: '实例数', value: String(o?.app_count ?? '—'), note: '', noteColor: undefined, suffix: undefined },
     { label: '运行中', value: String(o?.running_app_count ?? '—'), note: '', noteColor: 'var(--color-success)', suffix: undefined },
@@ -190,7 +190,7 @@ function buildTokenChart() {
   })
 }
 
-// ── 各组织用量图（横向柱状） ──
+// ── 各企业用量图（横向柱状） ──
 function buildOrgChart() {
   if (!orgChartEl.value || !orgBreakdownData.value?.length) return
   if (!orgChart) orgChart = init(orgChartEl.value)

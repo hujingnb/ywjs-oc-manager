@@ -8,15 +8,15 @@
     </template>
 
     <n-tabs v-model:value="activeTab" type="line">
-      <n-tab-pane v-if="!isOrgMember" name="organization" tab="组织">
+      <n-tab-pane v-if="!isOrgMember" name="organization" tab="企业">
         <n-space v-if="isPlatformAdmin" align="center" style="margin-bottom: 12px">
-          <span>组织：</span>
+          <span>企业：</span>
           <n-select
             v-model:value="selectedOrgId"
             :options="orgOptions"
             filterable
             style="width: 220px"
-            placeholder="选择组织"
+            placeholder="选择企业"
           />
         </n-space>
         <div v-if="orgLoading" class="state-text">加载中…</div>
@@ -25,20 +25,20 @@
           v-else
           :view="orgView ?? undefined"
           :billing-status="billingStatus ?? undefined"
-          empty-text="该组织暂无实例用量记录"
+          empty-text="该企业暂无实例用量记录"
         />
       </n-tab-pane>
 
       <n-tab-pane name="member" :tab="isOrgMember ? '我的用量' : '成员'">
         <n-space v-if="!isOrgMember" align="center" style="margin-bottom: 12px" :wrap="false">
           <n-space v-if="isPlatformAdmin" align="center">
-            <span>组织：</span>
+            <span>企业：</span>
             <n-select
               v-model:value="selectedOrgId"
               :options="orgOptions"
               filterable
               style="width: 220px"
-              placeholder="选择组织"
+              placeholder="选择企业"
             />
           </n-space>
           <n-space align="center">
@@ -66,13 +66,13 @@
       <n-tab-pane name="app" tab="实例">
         <n-space align="center" style="margin-bottom: 12px" :wrap="false">
           <n-space v-if="isPlatformAdmin" align="center">
-            <span>组织：</span>
+            <span>企业：</span>
             <n-select
               v-model:value="selectedOrgId"
               :options="orgOptions"
               filterable
               style="width: 220px"
-              placeholder="选择组织"
+              placeholder="选择企业"
             />
           </n-space>
           <span>实例：</span>
@@ -129,7 +129,7 @@ import { useAuthStore } from '@/stores/auth'
 
 import UsageSummary from './UsageSummary.vue'
 
-// UsagePage 聚合组织、成员、应用和平台四类用量入口，并按角色裁剪可见查询。
+// UsagePage 聚合企业、成员、应用和平台四类用量入口，并按角色裁剪可见查询。
 type TabKey = 'organization' | 'member' | 'app' | 'platform'
 
 const auth = useAuthStore()
@@ -143,13 +143,13 @@ const activeTab = ref<TabKey>(
 )
 
 const { data: organizations } = useOrganizationsQuery(() => isPlatformAdmin.value)
-// orgOptions 仅平台管理员使用，用于切换查看不同组织的用量。
+// orgOptions 仅平台管理员使用，用于切换查看不同企业的用量。
 const orgOptions = computed(() =>
   (organizations.value ?? []).map((o) => ({ label: `${o.name} · ${o.status}`, value: o.id })),
 )
 
 const selectedOrgId = ref<string | undefined>(auth.user?.org_id)
-// 平台管理员首次拿到组织列表时默认选中第一个组织，避免组织维度空查询。
+// 平台管理员首次拿到企业列表时默认选中第一个企业，避免企业维度空查询。
 watch(organizations, (orgs) => {
   if (isPlatformAdmin.value && !selectedOrgId.value && orgs && orgs.length > 0) {
     selectedOrgId.value = orgs[0].id
@@ -160,7 +160,7 @@ const effectiveOrgId = computed(() =>
 )
 const { data: billingStatus } = useBillingStatusQuery()
 
-// 组织维度用量对普通成员不开放，前端不发起查询避免无谓 403。
+// 企业维度用量对普通成员不开放，前端不发起查询避免无谓 403。
 // 成员维度仍需要 org_id 作为权限边界，因此单独保留 memberOrgRef。
 const orgUsageRef = computed(() => (isOrgMember.value ? undefined : effectiveOrgId.value))
 const memberOrgRef = computed(() => effectiveOrgId.value)
@@ -172,7 +172,7 @@ const memberListOrgRef = computed(() => (isOrgMember.value ? undefined : effecti
 const { data: members } = useMembersQuery(memberListOrgRef)
 
 // effectiveMemberId 把"成员 ID 必须落在当前 members 列表里"作为硬约束，
-// 避免切换组织瞬间 vue-query 还以旧 memberId + 新 orgId 发查询。
+// 避免切换企业瞬间 vue-query 还以旧 memberId + 新 orgId 发查询。
 // members 列表未加载时回退到 undefined，让 watch(members) auto-select 接管。
 const effectiveMemberId = computed<string | undefined>(() => {
   if (isOrgMember.value) return auth.user?.id
@@ -194,7 +194,7 @@ const memberOptions = computed(() =>
 const selectedAppId = ref<string | undefined>()
 const { data: apps } = useAppsByOrgQuery(effectiveOrgId)
 
-// effectiveAppId 同 effectiveMemberId，消除跨组织残留。
+// effectiveAppId 同 effectiveMemberId，消除跨企业残留。
 const effectiveAppId = computed<string | undefined>(() => {
   const id = selectedAppId.value
   if (!id) return undefined
@@ -221,7 +221,7 @@ const { data: appView, isLoading: appLoading, error: appError } = useAppUsageQue
 
 // 列表加载后，如果 effective ID 还没解析出来（要么没选过、要么旧选中
 // 不在新列表里），自动选第一项。条件用 effective.value 而非
-// selectedXxx.value，确保跨组织时也能正确 auto-select。immediate 保证
+// selectedXxx.value，确保跨企业时也能正确 auto-select。immediate 保证
 // 列表已经在 setup 阶段拿到时也能立即选中。
 watch(
   members,

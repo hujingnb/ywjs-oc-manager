@@ -41,7 +41,8 @@ describe('formatMemberStatus', () => {
 
 describe('formatMemberRole', () => {
   it('translates roles into Chinese labels', () => {
-    expect(formatMemberRole('org_admin')).toBe('组织管理员')
+    expect(formatMemberRole('org_admin')).toBe('企业管理员')
+    expect(formatMemberRole('org_member')).toBe('企业成员')
     expect(formatMemberRole('platform_admin')).toBe('平台管理员')
   })
 

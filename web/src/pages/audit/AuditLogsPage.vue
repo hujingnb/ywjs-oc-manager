@@ -14,7 +14,7 @@
         v-model:value="selectedOrgId"
         :options="orgOptions"
         style="width: 220px"
-        placeholder="选择组织"
+        placeholder="选择企业"
       />
     </template>
   </DataTableList>
@@ -31,10 +31,10 @@ import { useAuthStore } from '@/stores/auth'
 import DataTableList from '@/components/DataTableList.vue'
 import { timeColumn } from '@/components/columns'
 
-// AuditLogsPage 展示组织级审计日志，平台和组织管理员可看，普通成员需去应用详情查看自己的应用审计。
+// AuditLogsPage 展示企业级审计日志，平台和企业管理员可看，普通成员需去应用详情查看自己的应用审计。
 const props = defineProps<{ orgId?: string }>()
 const auth = useAuthStore()
-// 平台管理员通过组织选择器查看不同组织审计，组织用户默认使用自身组织。
+// 平台管理员通过企业选择器查看不同企业审计，企业用户默认使用自身企业。
 const {
   isPlatformAdmin,
   selectedOrgId,
@@ -43,18 +43,18 @@ const {
   organizationsLoading,
   organizationsError,
 } = usePlatformOrgSelection(computed(() => auth.user), computed(() => props.orgId))
-const orgEyebrow = computed(() => auth.user?.role === 'platform_admin' ? 'Platform · 审计' : '组织 · 审计')
+const orgEyebrow = computed(() => auth.user?.role === 'platform_admin' ? 'Platform · 审计' : '企业 · 审计')
 const canView = computed(() => canViewOrgAudit(auth.user, effectiveOrgId.value))
 
 // queryOrgId 为 undefined 时不发起查询，前端先拦截无权限场景减少 403。
 const queryOrgId = computed(() => canView.value ? effectiveOrgId.value : undefined)
 const { data: logs, isLoading, error } = useOrgAuditLogsQuery(queryOrgId)
 
-// 无关联组织时展示提示；有 API 错误时展示错误信息
+// 无关联企业时展示提示；有 API 错误时展示错误信息
 const errorMessage = computed(() => {
   if (organizationsError.value) return String(organizationsError.value)
-  if (!effectiveOrgId.value) return isPlatformAdmin.value ? '暂无可查看组织' : '当前账号未关联组织，无法查看审计日志。'
-  if (!canView.value) return '当前账号无权查看组织级审计，请在自己的实例详情中查看实例审计。'
+  if (!effectiveOrgId.value) return isPlatformAdmin.value ? '暂无可查看企业' : '当前账号未关联企业，无法查看审计日志。'
+  if (!canView.value) return '当前账号无权查看企业级审计，请在自己的实例详情中查看实例审计。'
   if (error.value) return String(error.value)
   return undefined
 })

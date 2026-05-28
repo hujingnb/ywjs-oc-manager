@@ -117,7 +117,7 @@ const channels: ReadonlyArray<ChannelDisplay> = [
   { type: 'wechat', name: '微信', description: '扫码绑定后接收助手消息', supported: true, statusLabel: '已支持' },
   { type: 'work_wechat', name: '企业微信', description: '企业内部协作场景', supported: false, statusLabel: '暂不支持' },
   { type: 'feishu', name: '飞书', description: '团队消息与工作台场景', supported: false, statusLabel: '暂不支持' },
-  { type: 'dingtalk', name: '钉钉', description: '组织通讯与审批场景', supported: false, statusLabel: '暂不支持' },
+  { type: 'dingtalk', name: '钉钉', description: '企业通讯与审批场景', supported: false, statusLabel: '暂不支持' },
   { type: 'telegram', name: 'Telegram', description: '海外即时通讯与 Bot 接入场景', supported: false, statusLabel: '暂不支持' },
   { type: 'whatsapp', name: 'WhatsApp', description: '海外用户触达与客服场景', supported: false, statusLabel: '暂不支持' },
   { type: 'discord', name: 'Discord', description: '社区与游戏玩家场景', supported: false, statusLabel: '暂不支持' },

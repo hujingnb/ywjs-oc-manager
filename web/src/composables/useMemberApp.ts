@@ -12,7 +12,7 @@ export function useMemberApp() {
   const orgId = computed(() => auth.isOrgMember ? auth.user?.org_id : undefined)
   const { data: apps, isLoading } = useAppsByOrgQuery(orgId)
 
-  // 从组织实例列表中筛选当前用户拥有的实例（数据库保证最多一个）。
+  // 从企业实例列表中筛选当前用户拥有的实例（数据库保证最多一个）。
   const memberApp = computed(() =>
     apps.value?.find(app => app.owner_user_id === auth.user?.id),
   )

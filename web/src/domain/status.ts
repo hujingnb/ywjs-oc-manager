@@ -45,7 +45,7 @@ export function formatAppStatus(status: string): StatusView {
   return appStatusViews[status] ?? { label: `未知状态：${status}`, tone: 'warning' }
 }
 
-// orgStatusViews 覆盖组织状态。
+// orgStatusViews 覆盖企业状态。
 const orgStatusViews: Record<string, StatusView> = {
   active: { label: '启用', tone: 'success' },
   disabled: { label: '禁用', tone: 'warning' },
@@ -61,11 +61,11 @@ const memberStatusViews: Record<string, StatusView> = {
 // memberRoleLabels 是角色展示降级表，未知角色保留原值。
 const memberRoleLabels: Record<string, string> = {
   platform_admin: '平台管理员',
-  org_admin: '组织管理员',
-  org_member: '组织成员',
+  org_admin: '企业管理员',
+  org_member: '企业成员',
 }
 
-// formatOrgStatus 将组织状态映射为标签和视觉语义。
+// formatOrgStatus 将企业状态映射为标签和视觉语义。
 export function formatOrgStatus(status: string): StatusView {
   return orgStatusViews[status] ?? { label: `未知状态：${status}`, tone: 'warning' }
 }

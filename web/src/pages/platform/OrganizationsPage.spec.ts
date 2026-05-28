@@ -10,7 +10,7 @@ import type { Organization } from '@/api'
 const createOrganization = vi.hoisted(() => vi.fn())
 const updateOrganization = vi.hoisted(() => vi.fn())
 
-// versionsState 模拟助手版本列表查询状态，供创建组织表单多选使用。
+// versionsState 模拟助手版本列表查询状态，供创建企业表单多选使用。
 const versionsState = vi.hoisted(() => ({
   data: { value: [
     { id: 'v-1', name: '版本 A' },
@@ -20,12 +20,12 @@ const versionsState = vi.hoisted(() => ({
   isError: { value: false },
 }))
 
-// 组织列表页测试只 mock 列表和充值 hooks，验证充值留在弹框内完成而不跳转旧页面。
+// 企业列表页测试只 mock 列表和充值 hooks，验证充值留在弹框内完成而不跳转旧页面。
 vi.mock('@/api/hooks/useOrganizations', () => ({
   useOrganizationsQuery: () => ({
     data: ref([{
       id: 'org-1',
-      name: '测试组织',
+      name: '测试企业',
       code: 'test-org',
       status: 'active',
       credit_warning_threshold: 20,
@@ -41,7 +41,7 @@ vi.mock('@/api/hooks/useOrganizations', () => ({
   // useModelsQuery 保留 mock：其他页面（如版本编辑页）仍依赖此导出，避免影响其他测试。
   useModelsQuery: () => ({ data: ref([]), isLoading: ref(false), isError: ref(false) }),
   useCreateOrganization: () => ({ mutateAsync: createOrganization, isPending: ref(false) }),
-  // useUpdateOrganization mock 供编辑组织场景使用。
+  // useUpdateOrganization mock 供编辑企业场景使用。
   useUpdateOrganization: () => ({ mutateAsync: updateOrganization, isPending: ref(false) }),
   useUpdateOrganizationStatus: () => ({ mutate: vi.fn() }),
 }))
@@ -218,21 +218,21 @@ describe('OrganizationsPage', () => {
     },
   })
 
-  it('在组织列表中提供弹框充值入口', () => {
+  it('在企业列表中提供弹框充值入口', () => {
     const wrapper = mountPage()
 
     expect(wrapper.text()).toContain('充值')
-    expect(wrapper.text()).not.toContain('返回组织列表')
+    expect(wrapper.text()).not.toContain('返回企业列表')
   })
 
-  it('在组织列表中展示组织标识', () => {
+  it('在企业列表中展示企业标识', () => {
     const wrapper = mountPage()
 
-    expect(wrapper.text()).toContain('组织标识')
+    expect(wrapper.text()).toContain('企业标识')
     expect(wrapper.text()).toContain('test-org')
   })
 
-  it('复制组织信息时写入指定格式的管理员登录信息', async () => {
+  it('复制企业信息时写入指定格式的管理员登录信息', async () => {
     Object.defineProperty(navigator, 'clipboard', {
       configurable: true,
       value: { writeText: clipboardMock },
@@ -246,28 +246,28 @@ describe('OrganizationsPage', () => {
 
     expect(clipboardMock).toHaveBeenCalledWith([
       '标识： test-org',
-      '名称： 测试组织',
+      '名称： 测试企业',
       '管理员用户名： org-admin',
       '管理员密码： <创建时设置，系统不保存明文；如忘记请重置密码>',
     ].join('\n'))
   })
 
-  // 创建组织时选择助手版本，验证提交载荷包含 assistant_version_ids 而不再有 model_id。
-  it('创建组织时提交组织标识和助手版本', async () => {
-    createOrganization.mockResolvedValue({ id: 'org-2', name: '新组织', code: 'new-org', status: 'active' })
+  // 创建企业时选择助手版本，验证提交载荷包含 assistant_version_ids 而不再有 model_id。
+  it('创建企业时提交企业标识和助手版本', async () => {
+    createOrganization.mockResolvedValue({ id: 'org-2', name: '新企业', code: 'new-org', status: 'active' })
     const wrapper = mountPage()
 
-    const openButton = wrapper.findAll('button').find(button => button.text().includes('新增组织'))
+    const openButton = wrapper.findAll('button').find(button => button.text().includes('新增企业'))
     expect(openButton).toBeTruthy()
     await openButton!.trigger('click')
     await nextTick()
 
     const inputs = wrapper.findAll('input')
-    // 按表单字段顺序填写：名称、组织标识、管理员用户名、管理员姓名、管理员密码
-    await inputs[0].setValue('新组织')
+    // 按表单字段顺序填写：名称、企业标识、管理员用户名、管理员姓名、管理员密码
+    await inputs[0].setValue('新企业')
     await inputs[1].setValue('new-org')
     await inputs[2].setValue('org-admin')
-    await inputs[3].setValue('组织管理员')
+    await inputs[3].setValue('企业管理员')
     await inputs[4].setValue('secret-password')
 
     // 选择助手版本（版本 A），通过直接设置 option selected 状态并触发 change 事件来模拟多选。
@@ -280,10 +280,10 @@ describe('OrganizationsPage', () => {
     await wrapper.find('form').trigger('submit')
 
     expect(createOrganization).toHaveBeenCalledWith(expect.objectContaining({
-      name: '新组织',
+      name: '新企业',
       code: 'new-org',
       admin_username: 'org-admin',
-      admin_display_name: '组织管理员',
+      admin_display_name: '企业管理员',
       admin_password: 'secret-password',
       assistant_version_ids: expect.any(Array),
     }))
@@ -291,11 +291,11 @@ describe('OrganizationsPage', () => {
     expect(createOrganization).not.toHaveBeenCalledWith(expect.objectContaining({ model_id: expect.anything() }))
   })
 
-  // 编辑组织：点击「编辑」打开表单，验证预填数据正确且提交时携带 id 与 assistant_version_ids。
-  it('编辑组织时预填现有数据并提交 update mutation', async () => {
+  // 编辑企业：点击「编辑」打开表单，验证预填数据正确且提交时携带 id 与 assistant_version_ids。
+  it('编辑企业时预填现有数据并提交 update mutation', async () => {
     updateOrganization.mockResolvedValue({
       id: 'org-1',
-      name: '测试组织（已修改）',
+      name: '测试企业（已修改）',
       code: 'test-org',
       status: 'active',
     })
@@ -307,14 +307,14 @@ describe('OrganizationsPage', () => {
     await editButton!.trigger('click')
     await nextTick()
 
-    // 表单应预填当前组织数据，首个 input 为名称字段
+    // 表单应预填当前企业数据，首个 input 为名称字段
     const inputs = wrapper.findAll('input')
-    // 预填名称应为「测试组织」
-    const nameInput = inputs.find(i => (i.element as HTMLInputElement).value === '测试组织')
+    // 预填名称应为「测试企业」
+    const nameInput = inputs.find(i => (i.element as HTMLInputElement).value === '测试企业')
     expect(nameInput).toBeTruthy()
 
     // 修改名称字段
-    await nameInput!.setValue('测试组织（已修改）')
+    await nameInput!.setValue('测试企业（已修改）')
 
     // 编辑模式下不应存在管理员用户名输入项（create-only 字段）
     const labels = wrapper.findAll('label span')
@@ -327,7 +327,7 @@ describe('OrganizationsPage', () => {
     expect(updateOrganization).toHaveBeenCalledWith(expect.objectContaining({
       id: 'org-1',
       payload: expect.objectContaining({
-        name: '测试组织（已修改）',
+        name: '测试企业（已修改）',
         assistant_version_ids: ['v-1'],
       }),
     }))
@@ -335,17 +335,17 @@ describe('OrganizationsPage', () => {
 
   // 助手版本为可选项，留空时表单仍可正常提交。
   it('不选助手版本时表单仍可提交', async () => {
-    createOrganization.mockResolvedValue({ id: 'org-3', name: '空版本组织', code: 'empty-org', status: 'active' })
+    createOrganization.mockResolvedValue({ id: 'org-3', name: '空版本企业', code: 'empty-org', status: 'active' })
     const wrapper = mountPage()
 
-    const openButton = wrapper.findAll('button').find(button => button.text().includes('新增组织'))
+    const openButton = wrapper.findAll('button').find(button => button.text().includes('新增企业'))
     expect(openButton).toBeTruthy()
     await openButton!.trigger('click')
     await nextTick()
 
     const inputs = wrapper.findAll('input')
     // 仅填写必填字段，不选助手版本，验证可以正常提交。
-    await inputs[0].setValue('空版本组织')
+    await inputs[0].setValue('空版本企业')
     await inputs[1].setValue('empty-org')
     await inputs[2].setValue('admin2')
     await inputs[3].setValue('管理员2')
@@ -354,7 +354,7 @@ describe('OrganizationsPage', () => {
     await wrapper.find('form').trigger('submit')
 
     expect(createOrganization).toHaveBeenCalledWith(expect.objectContaining({
-      name: '空版本组织',
+      name: '空版本企业',
       assistant_version_ids: [],
     }))
   })

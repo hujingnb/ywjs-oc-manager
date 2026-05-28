@@ -65,16 +65,16 @@ const cards = computed<QuickCard[]>(() => {
   const role = auth.user?.role
   if (role === 'platform_admin') {
     return [
-      { path: '/organizations', title: '组织管理', subtitle: '查看 / 创建 / 充值组织' },
+      { path: '/organizations', title: '企业管理', subtitle: '查看 / 创建 / 充值企业' },
       { path: '/runtime-nodes', title: 'Runtime Node', subtitle: '注册和监控节点' },
       { path: '/audit-logs', title: '审计日志', subtitle: '高风险操作回溯' },
     ]
   }
   if (role === 'org_admin') {
     return [
-      { path: '/members', title: '成员管理', subtitle: '创建 / 禁用 / 删除组织成员' },
-      { path: '/apps', title: '实例列表', subtitle: '组织内全部实例状态' },
-      { path: '/knowledge', title: '组织知识库', subtitle: '上传共享文件' },
+      { path: '/members', title: '成员管理', subtitle: '创建 / 禁用 / 删除企业成员' },
+      { path: '/apps', title: '实例列表', subtitle: '企业内全部实例状态' },
+      { path: '/knowledge', title: '企业知识库', subtitle: '上传共享文件' },
     ]
   }
   if (role === 'org_member') {
@@ -85,7 +85,7 @@ const cards = computed<QuickCard[]>(() => {
     return [
       { path: appPath, title: '我的实例', subtitle: '查看状态、用量与实例审计' },
       { path: '/usage', title: '我的用量', subtitle: '查看自己实例的调用记录' },
-      { path: '/knowledge', title: '组织知识库', subtitle: '可读资料' },
+      { path: '/knowledge', title: '企业知识库', subtitle: '可读资料' },
     ]
   }
   return []

@@ -1,5 +1,5 @@
 // useMemberApp composable 单元测试
-// 验证 org_member 能从组织实例列表中找到自己拥有的实例 ID。
+// 验证 org_member 能从企业实例列表中找到自己拥有的实例 ID。
 import { ref } from 'vue'
 import { describe, expect, it, vi } from 'vitest'
 

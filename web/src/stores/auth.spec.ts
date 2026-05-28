@@ -32,7 +32,7 @@ describe('auth store', () => {
     })
   })
 
-  it('组织登录提交组织标识', async () => {
+  it('企业登录提交企业标识', async () => {
     const auth = useAuthStore()
 
     await auth.login('admin', 'secret-password', ' test-org ')
@@ -44,7 +44,7 @@ describe('auth store', () => {
     })
   })
 
-  it('平台登录保留空组织标识', async () => {
+  it('平台登录保留空企业标识', async () => {
     const auth = useAuthStore()
 
     await auth.login('admin', 'secret-password')

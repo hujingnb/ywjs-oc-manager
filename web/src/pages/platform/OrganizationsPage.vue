@@ -1,8 +1,8 @@
 <template>
   <div style="display: grid; gap: 18px">
-    <!-- 组织列表 -->
+    <!-- 企业列表 -->
     <DataTableList
-      title="组织列表"
+      title="企业列表"
       eyebrow="Platform"
       :columns="columns"
       :data="organizations ?? []"
@@ -13,19 +13,19 @@
       <template #toolbar>
         <n-button type="primary" @click="openForm">
           <template #icon><Plus :size="16" /></template>
-          新增组织
+          新增企业
         </n-button>
       </template>
     </DataTableList>
     <p v-if="copyFeedback" class="state-text" :class="{ danger: copyFeedbackError }">{{ copyFeedback }}</p>
 
-    <!-- 创建 / 编辑组织表单（modalMode 区分两种模式） -->
+    <!-- 创建 / 编辑企业表单（modalMode 区分两种模式） -->
     <n-card v-if="formVisible || editFormVisible" :bordered="true">
       <template #header>
         <div style="display: flex; align-items: center; justify-content: space-between">
           <div>
             <p class="eyebrow">{{ modalMode === 'create' ? 'New' : 'Edit' }}</p>
-            <h2 style="margin: 0">{{ modalMode === 'create' ? '创建组织' : '编辑组织' }}</h2>
+            <h2 style="margin: 0">{{ modalMode === 'create' ? '创建企业' : '编辑企业' }}</h2>
           </div>
           <n-button quaternary circle @click="closeAnyForm">
             <template #icon><X :size="18" /></template>
@@ -40,23 +40,23 @@
               <n-input
                 v-if="modalMode === 'create'"
                 v-model:value="form.name"
-                placeholder="组织名称"
+                placeholder="企业名称"
               />
               <n-input
                 v-else
                 v-model:value="editForm.name"
-                placeholder="组织名称"
+                placeholder="企业名称"
               />
             </n-form-item>
           </n-grid-item>
-          <!-- 组织标识：创建时必填，编辑时只读展示 -->
+          <!-- 企业标识：创建时必填，编辑时只读展示 -->
           <n-grid-item v-if="modalMode === 'create'">
-            <n-form-item label="组织标识 *">
+            <n-form-item label="企业标识 *">
               <n-input v-model:value="form.code" placeholder="test-org" />
             </n-form-item>
           </n-grid-item>
           <n-grid-item v-else>
-            <n-form-item label="组织标识（不可修改）">
+            <n-form-item label="企业标识（不可修改）">
               <n-input :value="editingOrg?.code ?? ''" disabled />
             </n-form-item>
           </n-grid-item>
@@ -144,7 +144,7 @@
                 multiple
                 :loading="versionsQuery.isLoading.value"
                 :options="versionOptions"
-                placeholder="选择该组织可用的助手版本（可多选，可留空）"
+                placeholder="选择该企业可用的助手版本（可多选，可留空）"
               />
               <n-select
                 v-else
@@ -152,7 +152,7 @@
                 multiple
                 :loading="versionsQuery.isLoading.value"
                 :options="versionOptions"
-                placeholder="选择该组织可用的助手版本（可多选，可留空）"
+                placeholder="选择该企业可用的助手版本（可多选，可留空）"
               />
             </n-form-item>
           </n-grid-item>
@@ -174,8 +174,8 @@
       </n-form>
     </n-card>
 
-    <!-- 组织充值弹框 -->
-    <n-modal v-model:show="rechargeVisible" preset="card" style="max-width: 560px" title="组织充值">
+    <!-- 企业充值弹框 -->
+    <n-modal v-model:show="rechargeVisible" preset="card" style="max-width: 560px" title="企业充值">
       <div v-if="selectedOrg" class="recharge-dialog">
         <div>
           <p class="eyebrow">Billing</p>
@@ -280,7 +280,7 @@ import { statusColumn, actionColumn } from '@/components/columns'
 import { useFormModal } from '@/composables/useFormModal'
 import { formatDisplayAmount, formatQuotaValue } from '@/pages/usage/usageFormatting'
 
-// OrganizationsPage 是平台组织管理页，负责创建组织、编辑组织、启停组织和给组织充值。
+// OrganizationsPage 是平台企业管理页，负责创建企业、编辑企业、启停企业和给企业充值。
 const { data: organizations, isLoading, error } = useOrganizationsQuery()
 const createMutation = useCreateOrganization()
 const updateMutation = useUpdateOrganization()
@@ -288,11 +288,11 @@ const statusMutation = useUpdateOrganizationStatus()
 
 // modalMode 区分当前表单是创建模式还是编辑模式，控制字段显隐和提交目标。
 const modalMode = ref<'create' | 'edit'>('create')
-// editingOrg 保存正在编辑的组织对象，用于只读展示 code 和预填编辑表单。
+// editingOrg 保存正在编辑的企业对象，用于只读展示 code 和预填编辑表单。
 const editingOrg = ref<Organization | null>(null)
 // editFormVisible 控制编辑模式下表单的显隐（与 formVisible 分离以避免状态混用）。
 const editFormVisible = ref(false)
-// editForm 是编辑模式的响应式表单对象，由 openEditForm 按当前组织数据预填。
+// editForm 是编辑模式的响应式表单对象，由 openEditForm 按当前企业数据预填。
 const editForm = reactive({
   name: '',
   contact_name: '',
@@ -306,7 +306,7 @@ const editSubmitting = ref(false)
 // editError 保存编辑提交的错误信息。
 const editError = ref<string | null>(null)
 
-// openEditForm 打开编辑模式，将当前组织的资料预填到 editForm。
+// openEditForm 打开编辑模式，将当前企业的资料预填到 editForm。
 function openEditForm(org: Organization) {
   editingOrg.value = org
   modalMode.value = 'edit'
@@ -363,14 +363,14 @@ async function submitEditOrganization() {
     editSubmitting.value = false
   }
 }
-// selectedOrg 保存当前充值弹框的目标组织，关闭弹框不会修改列表数据。
+// selectedOrg 保存当前充值弹框的目标企业，关闭弹框不会修改列表数据。
 const selectedOrg = ref<Organization | null>(null)
 const selectedOrgId = computed(() => selectedOrg.value?.id)
 const balanceQuery = useOrgBalanceQuery(selectedOrgId)
 const balance = computed(() => balanceQuery.data.value ?? null)
 const { data: billingStatus } = useBillingStatusQuery()
 
-// orgBalanceQueries 对列表中每个组织并发查询余额，orgId 变化时自动重建查询集合。
+// orgBalanceQueries 对列表中每个企业并发查询余额，orgId 变化时自动重建查询集合。
 const orgBalanceQueries = useQueries({
   queries: computed(() =>
     (organizations.value ?? []).map(org => ({
@@ -416,7 +416,7 @@ const rechargeFeedbackError = ref(false)
 const copyFeedback = ref('')
 const copyFeedbackError = ref(false)
 const adminPasswordCopyHint = '<创建时设置，系统不保存明文；如忘记请重置密码>'
-// 创建组织表单状态聚合到 useFormModal；toPayload 处理可选字段的 || undefined 过滤
+// 创建企业表单状态聚合到 useFormModal；toPayload 处理可选字段的 || undefined 过滤
 const { form, formVisible, creating, submitError, openForm: _openForm, submit: submitForm } = useFormModal({
   initial: {
     name: '',
@@ -464,7 +464,7 @@ async function submitOrganization() {
   await submitForm()
 }
 
-// columns 展示组织基础信息、状态、余额和操作；改为 computed 以引用响应式的 balanceByOrgId。
+// columns 展示企业基础信息、状态、余额和操作；改为 computed 以引用响应式的 balanceByOrgId。
 const columns = computed(() => [
   // 名称列：含 remark 副标题
   {
@@ -477,7 +477,7 @@ const columns = computed(() => [
         : null,
     ],
   },
-  { title: '组织标识', key: 'code', render: (row: Organization) => row.code || '—' },
+  { title: '企业标识', key: 'code', render: (row: Organization) => row.code || '—' },
   statusColumn<Organization>('状态', r => formatOrgStatus(r.status)),
   // 联系人/电话/预警阈值列
   { title: '联系人', key: 'contact_name', render: (row: Organization) => row.contact_name || '—' },
@@ -513,7 +513,7 @@ function optionalAdminUsername(org: Organization) {
   return org.admin_username ?? ''
 }
 
-// formatOrganizationCopyInfo 固定对外复制格式，便于平台管理员直接发送给组织管理员。
+// formatOrganizationCopyInfo 固定对外复制格式，便于平台管理员直接发送给企业管理员。
 function formatOrganizationCopyInfo(org: Organization) {
   return [
     `标识： ${org.code || ''}`,
@@ -523,25 +523,25 @@ function formatOrganizationCopyInfo(org: Organization) {
   ].join('\n')
 }
 
-// copyOrganizationInfo 使用浏览器剪贴板写入组织登录信息，并在页面内暴露结果。
+// copyOrganizationInfo 使用浏览器剪贴板写入企业登录信息，并在页面内暴露结果。
 async function copyOrganizationInfo(org: Organization) {
   copyFeedback.value = ''
   copyFeedbackError.value = false
   try {
     await navigator.clipboard.writeText(formatOrganizationCopyInfo(org))
-    copyFeedback.value = `已复制 ${org.name} 的组织信息`
+    copyFeedback.value = `已复制 ${org.name} 的企业信息`
   } catch {
     copyFeedbackError.value = true
     copyFeedback.value = '复制失败，请检查浏览器剪贴板权限'
   }
 }
 
-// onToggle 调用组织状态切换接口，状态刷新由 mutation hook 的缓存失效策略处理。
+// onToggle 调用企业状态切换接口，状态刷新由 mutation hook 的缓存失效策略处理。
 function onToggle(org: Organization, action: 'enable' | 'disable') {
   statusMutation.mutate({ orgId: org.id, action })
 }
 
-// openRecharge 初始化充值弹框状态，并加载当前组织余额。
+// openRecharge 初始化充值弹框状态，并加载当前企业余额。
 function openRecharge(org: Organization) {
   selectedOrg.value = org
   rechargeAmount.value = null

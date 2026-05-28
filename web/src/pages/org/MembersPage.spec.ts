@@ -43,8 +43,8 @@ vi.mock('vue-router', async () => {
 vi.mock('@/api/hooks/useOrganizations', () => ({
   useOrganizationsQuery: () => ({
     data: ref([
-      { id: 'org-1', name: '测试组织', status: 'active' },
-      { id: 'org-2', name: '第二组织', status: 'active' },
+      { id: 'org-1', name: '测试企业', status: 'active' },
+      { id: 'org-2', name: '第二企业', status: 'active' },
     ]),
     isLoading: ref(false),
     error: ref(null),
@@ -53,9 +53,9 @@ vi.mock('@/api/hooks/useOrganizations', () => ({
   useOrganizationQuery: (orgId: { value?: string }) => ({
     data: computed(() => {
       if (orgId.value === 'org-2') {
-        return { id: 'org-2', name: '第二组织', status: 'active', assistant_version_ids: [] }
+        return { id: 'org-2', name: '第二企业', status: 'active', assistant_version_ids: [] }
       }
-      return { id: 'org-1', name: '测试组织', status: 'active', assistant_version_ids: ['version-1'] }
+      return { id: 'org-1', name: '测试企业', status: 'active', assistant_version_ids: ['version-1'] }
     }),
     isLoading: ref(false),
     isError: ref(false),
@@ -81,7 +81,7 @@ vi.mock('@/api/hooks/useMembers', () => ({
         id: 'admin-1',
         org_id: 'org-1',
         username: 'org-admin',
-        display_name: '组织管理员',
+        display_name: '企业管理员',
         role: 'org_admin',
         status: 'active',
         active_app_id: 'app-admin-1',
@@ -91,7 +91,7 @@ vi.mock('@/api/hooks/useMembers', () => ({
         id: 'member-1',
         org_id: 'org-1',
         username: 'member',
-        display_name: '组织成员',
+        display_name: '企业成员',
         role: 'org_member',
         status: 'active',
       },
@@ -206,8 +206,8 @@ describe('MembersPage', () => {
     },
   })
 
-  // 组织管理员管理本组织成员时，自己的行不能出现删除入口，避免误删当前登录账号。
-  it('组织管理员不可删除自身', () => {
+  // 企业管理员管理本企业成员时，自己的行不能出现删除入口，避免误删当前登录账号。
+  it('企业管理员不可删除自身', () => {
     authUser.current = { id: 'admin-1', role: 'org_admin', org_id: 'org-1' }
 
     const wrapper = mountPage()
@@ -237,8 +237,8 @@ describe('MembersPage', () => {
     expect(createAppButtons).toHaveLength(1)
   })
 
-  // 组织管理员可以看到「为该成员创建实例」入口，但只对没有活跃实例的成员行显示。
-  it('组织管理员可见无实例成员的补建入口', () => {
+  // 企业管理员可以看到「为该成员创建实例」入口，但只对没有活跃实例的成员行显示。
+  it('企业管理员可见无实例成员的补建入口', () => {
     authUser.current = { id: 'admin-1', role: 'org_admin', org_id: 'org-1' }
 
     const wrapper = mountPage()
@@ -248,7 +248,7 @@ describe('MembersPage', () => {
   })
 
   // 平台管理员提交实例表单后展示新实例与初始化任务结果。
-  // 补建实例必须选择助手版本，version_id 通过组织 allowlist 过滤后呈现可选项。
+  // 补建实例必须选择助手版本，version_id 通过企业 allowlist 过滤后呈现可选项。
   it('平台管理员提交创建新实例时包含 version_id 并展示结果', async () => {
     authUser.current = { id: 'admin-1', role: 'platform_admin' }
     createMemberAppMock.mutateAsync.mockClear()
@@ -258,7 +258,7 @@ describe('MembersPage', () => {
     await nextTick()
     // 默认 app_name 预填为「{显示名} 的实例」，测试覆盖默认值后再改名走表单提交。
     const appNameInput = wrapper.find('input')
-    expect((appNameInput.element as HTMLInputElement).value).toBe('组织成员 的实例')
+    expect((appNameInput.element as HTMLInputElement).value).toBe('企业成员 的实例')
     await appNameInput.setValue('新实例')
     // 选择助手版本：补建表单中第一个 <select> 是助手版本下拉（只有版本选择，无角色/人设）。
     const selects = wrapper.findAll('select')
@@ -280,8 +280,8 @@ describe('MembersPage', () => {
     expect(wrapper.text()).toContain('job-1')
   })
 
-  // 平台管理员切换组织时关闭已打开的复建实例表单，避免旧成员和新组织模型混用。
-  it('平台管理员切换组织时关闭创建新实例表单', async () => {
+  // 平台管理员切换企业时关闭已打开的复建实例表单，避免旧成员和新企业模型混用。
+  it('平台管理员切换企业时关闭创建新实例表单', async () => {
     authUser.current = { id: 'admin-1', role: 'platform_admin' }
     createMemberAppMock.mutateAsync.mockClear()
     const wrapper = mountPage()

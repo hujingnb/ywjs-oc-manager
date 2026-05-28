@@ -1,5 +1,5 @@
 <template>
-  <!-- 账户余额页：org_admin 查看自己组织的余额和充值流水，只读，无充值入口。 -->
+  <!-- 账户余额页：org_admin 查看自己企业的余额和充值流水，只读，无充值入口。 -->
   <n-card :bordered="true">
     <template #header>
       <div>
@@ -53,13 +53,13 @@ import type { RechargeRecordDTO } from '@/api/hooks/useRecharge'
 import { useAuthStore } from '@/stores/auth'
 import { formatDisplayAmount, formatQuotaValue } from '@/pages/usage/usageFormatting'
 
-// OrgBalancePage 是 org_admin 的账户余额页，展示自己组织的累计充值和当前余额，不提供充值入口。
+// OrgBalancePage 是 org_admin 的账户余额页，展示自己企业的累计充值和当前余额，不提供充值入口。
 const auth = useAuthStore()
 
 // orgId 来自当前登录用户；org_admin 的 org_id 必然存在，缺失时 query 自动禁用。
 const orgId = computed(() => auth.user?.org_id)
 
-// balanceQuery 查询当前组织余额，orgId 为空时自动禁用。
+// balanceQuery 查询当前企业余额，orgId 为空时自动禁用。
 const balanceQuery = useOrgBalanceQuery(orgId)
 // balance 是余额快照，含累计充值和剩余额度。
 const balance = computed(() => balanceQuery.data.value ?? null)
@@ -67,7 +67,7 @@ const balance = computed(() => balanceQuery.data.value ?? null)
 // billingStatus 提供 new-api 的计费展示配置（货币单位、换算比例等），用于格式化金额。
 const { data: billingStatus } = useBillingStatusQuery()
 
-// rechargesQuery 列出该组织的充值流水，orgId 为空时自动禁用。
+// rechargesQuery 列出该企业的充值流水，orgId 为空时自动禁用。
 const {
   data: rechargeRecords,
   isLoading: rechargesLoading,

@@ -60,7 +60,7 @@ const allTabs: ReadonlyArray<{ path: string; label: string }> = [
   { path: 'audit', label: '审计' },
 ]
 
-// 运行时 tab 仅对平台管理员可见，属基础设施层信息不向组织用户暴露。
+// 运行时 tab 仅对平台管理员可见，属基础设施层信息不向企业用户暴露。
 const tabs = computed(() =>
   auth.isPlatformAdmin ? allTabs : allTabs.filter(t => t.path !== 'runtime')
 )

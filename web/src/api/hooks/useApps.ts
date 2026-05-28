@@ -12,7 +12,7 @@ import { rangeQuery, type InstanceResourceSample, type ResourceRange } from '@/a
 export interface AppDTO {
   // 应用主键，用于详情、运行时和渠道等子资源路由。
   id: string
-  // 应用所属组织，权限判断必须和当前用户 org_id 一起使用。
+  // 应用所属企业，权限判断必须和当前用户 org_id 一起使用。
   org_id: string
   // 应用拥有者用户，普通成员只能管理自己拥有的应用。
   owner_user_id: string
@@ -126,8 +126,8 @@ const runtimeKey = (appId: string | undefined) => ['app-runtime', appId] as cons
 const appResourcesKey = (appId: string | undefined) => ['app-resources', appId] as const
 const jobKey = (jobId: string | undefined) => ['job', jobId] as const
 
-// useAppsByOrgQuery 列出组织内的应用。
-// orgId 为空时暂停请求；列表缓存按组织隔离，避免切换组织时复用旧数据。
+// useAppsByOrgQuery 列出企业内的应用。
+// orgId 为空时暂停请求；列表缓存按企业隔离，避免切换企业时复用旧数据。
 export function useAppsByOrgQuery(orgId: Ref<string | undefined>) {
   return useQuery<AppDTO[]>({
     queryKey: ['apps', 'org', orgId],
@@ -227,7 +227,7 @@ export function useTriggerRuntimeOperation(appId: Ref<string | undefined>) {
 }
 
 // useToggleAppAPIKey 触发禁用 / 恢复应用绑定的 new-api token。
-// 后端只允许应用所属组织管理员；平台管理员和普通成员调用会 403。
+// 后端只允许应用所属企业管理员；平台管理员和普通成员调用会 403。
 // 操作只影响应用详情中的 api_key_status，不需要刷新运行时快照。
 export function useToggleAppAPIKey(appId: Ref<string | undefined>) {
   const client = useQueryClient()

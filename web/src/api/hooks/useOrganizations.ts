@@ -1,5 +1,5 @@
-// 组织 API hooks 负责平台管理员视角下的组织列表、详情、创建和状态变更。
-// 组织写操作只失效组织列表；详情页如需最新数据会通过自身 query 重新拉取。
+// 企业 API hooks 负责平台管理员视角下的企业列表、详情、创建和状态变更。
+// 企业写操作只失效企业列表；详情页如需最新数据会通过自身 query 重新拉取。
 import { useMutation, useQuery, useQueryClient } from '@tanstack/vue-query'
 import type { Ref } from 'vue'
 
@@ -10,17 +10,17 @@ const ORG_LIST_KEY = ['organizations'] as const
 
 // ModelOptionDTO 是 new-api 实时模型目录在前端使用的最小视图。
 export interface ModelOptionDTO {
-  // 模型 ID 会写入组织 allowlist 和实例 model_id。
+  // 模型 ID 会写入企业 allowlist 和实例 model_id。
   id: string
   // 模型名称用于下拉展示；当前后端通常与 id 相同。
   name: string
 }
 
-// OrganizationFormPayload 是创建组织及首个组织管理员的提交体。
+// OrganizationFormPayload 是创建企业及首个企业管理员的提交体。
 export interface OrganizationFormPayload {
-  // 组织登录标识，创建后不可修改。
+  // 企业登录标识，创建后不可修改。
   code: string
-  // 组织名称。
+  // 企业名称。
   name: string
   // 联系人姓名。
   contact_name?: string
@@ -30,18 +30,18 @@ export interface OrganizationFormPayload {
   remark?: string
   // 余额预警阈值；null 表示清空或使用后端默认。
   credit_warning_threshold?: number | null
-  // 组织可用的助手版本 id 列表。
+  // 企业可用的助手版本 id 列表。
   assistant_version_ids: string[]
-  // 首个组织管理员用户名。
+  // 首个企业管理员用户名。
   admin_username: string
-  // 首个组织管理员展示名。
+  // 首个企业管理员展示名。
   admin_display_name: string
-  // 首个组织管理员初始密码。
+  // 首个企业管理员初始密码。
   admin_password: string
 }
 
 // useModelsQuery 获取 new-api 当前可用模型目录。
-// enabled 用于只在组织表单等需要模型选择的场景发起请求。
+// enabled 用于只在企业表单等需要模型选择的场景发起请求。
 export function useModelsQuery(enabled?: () => boolean) {
   return useQuery<ModelOptionDTO[]>({
     queryKey: ['models'],
@@ -53,7 +53,7 @@ export function useModelsQuery(enabled?: () => boolean) {
   })
 }
 
-// useOrganizationsQuery 提供平台维度的组织列表。
+// useOrganizationsQuery 提供平台维度的企业列表。
 // 仅平台管理员调用；后端会拒绝非平台管理员的访问。
 // enabled 让调用方可以在非平台管理员视角下显式禁用，避免无谓 403。
 export function useOrganizationsQuery(enabled?: () => boolean) {
@@ -69,7 +69,7 @@ export function useOrganizationsQuery(enabled?: () => boolean) {
   })
 }
 
-// useOrganizationQuery 查询单个组织信息。
+// useOrganizationQuery 查询单个企业信息。
 // orgId 为响应式引用，未填写时 query 暂停执行。
 export function useOrganizationQuery(orgId: Ref<string | undefined>) {
   return useQuery<Organization | null>({
@@ -83,8 +83,8 @@ export function useOrganizationQuery(orgId: Ref<string | undefined>) {
   })
 }
 
-// useCreateOrganization 创建组织，自动失效列表缓存。
-// 后端会同时创建组织管理员；前端不保存初始密码。
+// useCreateOrganization 创建企业，自动失效列表缓存。
+// 后端会同时创建企业管理员；前端不保存初始密码。
 export function useCreateOrganization() {
   const client = useQueryClient()
   return useMutation({
@@ -101,9 +101,9 @@ export function useCreateOrganization() {
   })
 }
 
-// OrganizationUpdatePayload 是更新组织资料的提交体；不含 code（不可修改）和管理员账号字段（创建时专用）。
+// OrganizationUpdatePayload 是更新企业资料的提交体；不含 code（不可修改）和管理员账号字段（创建时专用）。
 export interface OrganizationUpdatePayload {
-  // 组织名称，必填。
+  // 企业名称，必填。
   name: string
   // 联系人姓名。
   contact_name?: string
@@ -113,12 +113,12 @@ export interface OrganizationUpdatePayload {
   remark?: string
   // 余额预警阈值；null 表示清空或使用后端默认。
   credit_warning_threshold?: number | null
-  // 组织可用的助手版本 id 列表。
+  // 企业可用的助手版本 id 列表。
   assistant_version_ids: string[]
 }
 
-// useUpdateOrganization 更新组织资料与助手版本 allowlist，自动失效列表缓存。
-// 传入 id（组织 id）与 payload（OrganizationUpdatePayload），调用 PATCH /api/v1/organizations/:id。
+// useUpdateOrganization 更新企业资料与助手版本 allowlist，自动失效列表缓存。
+// 传入 id（企业 id）与 payload（OrganizationUpdatePayload），调用 PATCH /api/v1/organizations/:id。
 export function useUpdateOrganization() {
   const client = useQueryClient()
   return useMutation({
@@ -135,7 +135,7 @@ export function useUpdateOrganization() {
   })
 }
 
-// useUpdateOrganizationStatus 启用或禁用组织。
+// useUpdateOrganizationStatus 启用或禁用企业。
 // 状态变更只影响列表可见字段，因此失效 ORG_LIST_KEY 即可。
 export function useUpdateOrganizationStatus() {
   const client = useQueryClient()

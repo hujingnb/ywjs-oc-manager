@@ -19,57 +19,57 @@ interface PermSection {
 // sections 包含全量权限矩阵，按功能模块分组。
 const sections: PermSection[] = [
   {
-    title: '组织管理',
+    title: '企业管理',
     rows: [
-      { op: '创建组织', admin: '✅', orgAdmin: '❌', member: '❌' },
-      { op: '组织列表', admin: '✅', orgAdmin: '❌', member: '❌' },
-      { op: '查看组织详情', admin: '✅', orgAdmin: '🟡 本组织', member: '🟡 本组织' },
-      { op: '修改组织信息', admin: '✅', orgAdmin: '❌', member: '❌' },
-      { op: '启用 / 禁用组织', admin: '✅', orgAdmin: '❌', member: '❌' },
+      { op: '创建企业', admin: '✅', orgAdmin: '❌', member: '❌' },
+      { op: '企业列表', admin: '✅', orgAdmin: '❌', member: '❌' },
+      { op: '查看企业详情', admin: '✅', orgAdmin: '🟡 本企业', member: '🟡 本企业' },
+      { op: '修改企业信息', admin: '✅', orgAdmin: '❌', member: '❌' },
+      { op: '启用 / 禁用企业', admin: '✅', orgAdmin: '❌', member: '❌' },
     ],
   },
   {
     title: '成员管理',
     rows: [
-      { op: '成员列表', admin: '✅', orgAdmin: '🟡 本组织', member: '❌' },
-      { op: '查看成员详情', admin: '✅', orgAdmin: '🟡 本组织', member: '🟡 仅自己' },
-      { op: '创建成员', admin: '❌', orgAdmin: '🟡 本组织', member: '❌' },
-      { op: '修改成员资料', admin: '🟡 仅自己', orgAdmin: '🟡 本组织', member: '🟡 仅自己' },
-      { op: '启用 / 禁用成员', admin: '❌', orgAdmin: '🟡 本组织', member: '❌' },
-      { op: '删除成员', admin: '❌', orgAdmin: '🟡 本组织', member: '❌' },
-      { op: '重置成员密码', admin: '❌', orgAdmin: '🟡 本组织', member: '❌' },
-      { op: 'Onboard（初始建实例）', admin: '❌', orgAdmin: '🟡 本组织', member: '❌' },
-      { op: '为成员复建实例', admin: '✅', orgAdmin: '🟡 本组织', member: '❌' },
+      { op: '成员列表', admin: '✅', orgAdmin: '🟡 本企业', member: '❌' },
+      { op: '查看成员详情', admin: '✅', orgAdmin: '🟡 本企业', member: '🟡 仅自己' },
+      { op: '创建成员', admin: '❌', orgAdmin: '🟡 本企业', member: '❌' },
+      { op: '修改成员资料', admin: '🟡 仅自己', orgAdmin: '🟡 本企业', member: '🟡 仅自己' },
+      { op: '启用 / 禁用成员', admin: '❌', orgAdmin: '🟡 本企业', member: '❌' },
+      { op: '删除成员', admin: '❌', orgAdmin: '🟡 本企业', member: '❌' },
+      { op: '重置成员密码', admin: '❌', orgAdmin: '🟡 本企业', member: '❌' },
+      { op: 'Onboard（初始建实例）', admin: '❌', orgAdmin: '🟡 本企业', member: '❌' },
+      { op: '为成员复建实例', admin: '✅', orgAdmin: '🟡 本企业', member: '❌' },
     ],
   },
   {
     title: '应用实例',
     rows: [
-      { op: '应用列表', admin: '✅', orgAdmin: '🟡 本组织全部', member: '🟡 仅自己' },
-      { op: '查看应用详情', admin: '✅', orgAdmin: '🟡 本组织', member: '🟡 仅自己' },
-      { op: '切换助手版本', admin: '✅', orgAdmin: '🟡 本组织', member: '🟡 仅自己' },
+      { op: '应用列表', admin: '✅', orgAdmin: '🟡 本企业全部', member: '🟡 仅自己' },
+      { op: '查看应用详情', admin: '✅', orgAdmin: '🟡 本企业', member: '🟡 仅自己' },
+      { op: '切换助手版本', admin: '✅', orgAdmin: '🟡 本企业', member: '🟡 仅自己' },
     ],
   },
   {
     title: '运行时操作',
     rows: [
-      { op: '启动 / 停止 / 重启', admin: '✅', orgAdmin: '🟡 本组织', member: '🟡 仅自己' },
+      { op: '启动 / 停止 / 重启', admin: '✅', orgAdmin: '🟡 本企业', member: '🟡 仅自己' },
     ],
   },
   {
     title: '渠道（Channel）',
     rows: [
-      { op: '查看渠道信息', admin: '✅', orgAdmin: '🟡 本组织', member: '🟡 仅自己' },
-      { op: '绑定渠道', admin: '❌', orgAdmin: '🟡 本组织', member: '🟡 仅自己' },
+      { op: '查看渠道信息', admin: '✅', orgAdmin: '🟡 本企业', member: '🟡 仅自己' },
+      { op: '绑定渠道', admin: '❌', orgAdmin: '🟡 本企业', member: '🟡 仅自己' },
     ],
   },
   {
     title: '知识库',
     rows: [
-      { op: '读取组织知识库', admin: '✅', orgAdmin: '🟡 本组织', member: '🟡 本组织' },
-      { op: '写入 / 重解析组织知识库', admin: '❌', orgAdmin: '🟡 本组织', member: '❌' },
-      { op: '读取应用知识库', admin: '✅', orgAdmin: '🟡 本组织', member: '🟡 仅自己' },
-      { op: '写入 / 重解析应用知识库', admin: '❌', orgAdmin: '🟡 本组织', member: '🟡 仅自己' },
+      { op: '读取企业知识库', admin: '✅', orgAdmin: '🟡 本企业', member: '🟡 本企业' },
+      { op: '写入 / 重解析企业知识库', admin: '❌', orgAdmin: '🟡 本企业', member: '❌' },
+      { op: '读取应用知识库', admin: '✅', orgAdmin: '🟡 本企业', member: '🟡 仅自己' },
+      { op: '写入 / 重解析应用知识库', admin: '❌', orgAdmin: '🟡 本企业', member: '🟡 仅自己' },
     ],
   },
   {
@@ -83,38 +83,38 @@ const sections: PermSection[] = [
   {
     title: '任务看板（Kanban）',
     rows: [
-      { op: '查看任务看板', admin: '✅', orgAdmin: '🟡 本组织', member: '🟡 仅自己' },
-      { op: '写操作（评论 / 完成 / 阻塞）', admin: '✅', orgAdmin: '🟡 本组织', member: '🟡 仅自己' },
+      { op: '查看任务看板', admin: '✅', orgAdmin: '🟡 本企业', member: '🟡 仅自己' },
+      { op: '写操作（评论 / 完成 / 阻塞）', admin: '✅', orgAdmin: '🟡 本企业', member: '🟡 仅自己' },
     ],
   },
   {
     title: 'Cron 任务',
     rows: [
-      { op: '查看 Cron 列表 / 详情', admin: '✅', orgAdmin: '🟡 本组织', member: '🟡 仅自己' },
-      { op: '创建 / 修改 / 启停 / 删除 Cron', admin: '✅', orgAdmin: '🟡 本组织', member: '🟡 仅自己' },
+      { op: '查看 Cron 列表 / 详情', admin: '✅', orgAdmin: '🟡 本企业', member: '🟡 仅自己' },
+      { op: '创建 / 修改 / 启停 / 删除 Cron', admin: '✅', orgAdmin: '🟡 本企业', member: '🟡 仅自己' },
     ],
   },
   {
     title: '用量',
     rows: [
-      { op: '查看组织聚合用量', admin: '✅', orgAdmin: '🟡 本组织', member: '❌' },
-      { op: '查看成员用量', admin: '✅', orgAdmin: '🟡 本组织', member: '🟡 仅自己' },
-      { op: '查看应用用量', admin: '✅', orgAdmin: '🟡 本组织', member: '🟡 仅自己' },
+      { op: '查看企业聚合用量', admin: '✅', orgAdmin: '🟡 本企业', member: '❌' },
+      { op: '查看成员用量', admin: '✅', orgAdmin: '🟡 本企业', member: '🟡 仅自己' },
+      { op: '查看应用用量', admin: '✅', orgAdmin: '🟡 本企业', member: '🟡 仅自己' },
     ],
   },
   {
     title: '审计日志',
     rows: [
-      { op: '查看组织审计', admin: '✅', orgAdmin: '🟡 本组织', member: '❌' },
-      { op: '查看应用审计', admin: '✅', orgAdmin: '🟡 本组织', member: '🟡 仅自己' },
+      { op: '查看企业审计', admin: '✅', orgAdmin: '🟡 本企业', member: '❌' },
+      { op: '查看应用审计', admin: '✅', orgAdmin: '🟡 本企业', member: '🟡 仅自己' },
       { op: '查看"我的审计"', admin: '✅', orgAdmin: '✅', member: '✅' },
     ],
   },
   {
     title: '充值记录',
     rows: [
-      { op: '查看充值记录', admin: '✅', orgAdmin: '🟡 本组织', member: '❌' },
-      { op: '查看余额', admin: '✅', orgAdmin: '🟡 本组织', member: '❌' },
+      { op: '查看充值记录', admin: '✅', orgAdmin: '🟡 本企业', member: '❌' },
+      { op: '查看余额', admin: '✅', orgAdmin: '🟡 本企业', member: '❌' },
     ],
   },
   {
@@ -145,13 +145,13 @@ const sections: PermSection[] = [
   {
     title: '工作区',
     rows: [
-      { op: '查看 / 下载 / 打包工作区文件', admin: '✅', orgAdmin: '🟡 本组织', member: '🟡 仅自己' },
+      { op: '查看 / 下载 / 打包工作区文件', admin: '✅', orgAdmin: '🟡 本企业', member: '🟡 仅自己' },
     ],
   },
   {
     title: '资源指标',
     rows: [
-      { op: '查看应用资源指标', admin: '✅', orgAdmin: '🟡 本组织', member: '🟡 仅自己' },
+      { op: '查看应用资源指标', admin: '✅', orgAdmin: '🟡 本企业', member: '🟡 仅自己' },
     ],
   },
 ]
@@ -166,7 +166,7 @@ const sections: PermSection[] = [
     <n-space style="margin-bottom: 24px;">
       <n-tag type="success" :bordered="false">✅ 可操作（无条件）</n-tag>
       <n-tag type="error" :bordered="false">❌ 无权限</n-tag>
-      <n-tag type="warning" :bordered="false">🟡 有条件（本组织 / 仅自己）</n-tag>
+      <n-tag type="warning" :bordered="false">🟡 有条件（本企业 / 仅自己）</n-tag>
     </n-space>
 
     <!-- 每个功能模块一个表格 -->
@@ -181,8 +181,8 @@ const sections: PermSection[] = [
           <tr>
             <th style="width: 40%;">操作</th>
             <th style="width: 20%; text-align: center;">平台管理员</th>
-            <th style="width: 20%; text-align: center;">组织管理员</th>
-            <th style="width: 20%; text-align: center;">组织成员</th>
+            <th style="width: 20%; text-align: center;">企业管理员</th>
+            <th style="width: 20%; text-align: center;">企业成员</th>
           </tr>
         </thead>
         <tbody>

@@ -1,5 +1,5 @@
-// 成员 API hooks 负责组织成员列表、创建、删除、状态变更、密码重置和一键开户。
-// 缓存边界以组织成员列表为主，涉及应用初始化的副作用由后端 job 和页面跳转处理。
+// 成员 API hooks 负责企业成员列表、创建、删除、状态变更、密码重置和一键开户。
+// 缓存边界以企业成员列表为主，涉及应用初始化的副作用由后端 job 和页面跳转处理。
 import { useMutation, useQuery, useQueryClient } from '@tanstack/vue-query'
 import type { Ref } from 'vue'
 
@@ -8,17 +8,17 @@ import type { App, Member } from '@/api'
 
 // OnboardMemberPayload 是”一键创建成员和应用”表单提交体。
 export interface OnboardMemberPayload {
-  // 登录用户名，后端会校验组织内唯一性。
+  // 登录用户名，后端会校验企业内唯一性。
   username: string
   // 页面展示名。
   display_name: string
   // 初始密码，仅提交给后端，不在前端持久化。
   password: string
-  // 新成员角色；缺省由后端按组织成员处理。
+  // 新成员角色；缺省由后端按企业成员处理。
   role?: 'org_admin' | 'org_member'
   // 同步创建的应用名称。
   app_name: string
-  // 实例绑定的助手版本 id，必须在组织 allowlist 内；后端做最终校验。
+  // 实例绑定的助手版本 id，必须在企业 allowlist 内；后端做最终校验。
   version_id: string
   // 首次绑定的渠道类型，目前仅支持 wechat。
   channel_type?: 'wechat'
@@ -49,7 +49,7 @@ export interface OnboardMemberResult {
 export interface CreateMemberAppPayload {
   // 新实例名称。
   app_name: string
-  // 实例绑定的助手版本 id，必须在组织 allowlist 内；后端做最终校验。
+  // 实例绑定的助手版本 id，必须在企业 allowlist 内；后端做最终校验。
   version_id: string
   // 首次绑定的渠道类型，目前仅支持 wechat。
   channel_type?: 'wechat'
@@ -75,13 +75,13 @@ export interface MemberFormPayload {
   display_name: string
   // 初始密码。
   password: string
-  // 成员角色，组织管理员页面可选择。
+  // 成员角色，企业管理员页面可选择。
   role?: 'org_admin' | 'org_member'
 }
 
-// useMembersQuery 列出指定组织的成员。
-// orgId 为响应式引用，便于在组织详情/切换场景下自动重查。
-// orgId 为空时暂停请求，避免成员页初始化时打到无效组织路径。
+// useMembersQuery 列出指定企业的成员。
+// orgId 为响应式引用，便于在企业详情/切换场景下自动重查。
+// orgId 为空时暂停请求，避免成员页初始化时打到无效企业路径。
 export function useMembersQuery(orgId: Ref<string | undefined>) {
   return useQuery<Member[]>({
     queryKey: ['members', orgId],
@@ -97,14 +97,14 @@ export function useMembersQuery(orgId: Ref<string | undefined>) {
   })
 }
 
-// useCreateMember 创建组织成员。
-// 成功后只失效当前组织成员列表；新成员详情没有单独缓存。
+// useCreateMember 创建企业成员。
+// 成功后只失效当前企业成员列表；新成员详情没有单独缓存。
 export function useCreateMember(orgId: Ref<string | undefined>) {
   const client = useQueryClient()
   return useMutation({
     mutationFn: async (payload: MemberFormPayload) => {
       if (!orgId.value) {
-        throw new Error('缺少组织 ID')
+        throw new Error('缺少企业 ID')
       }
       const response = await apiRequest<{ member: Member }>(
         `/api/v1/organizations/${orgId.value}/members`,
@@ -155,7 +155,7 @@ export function useOnboardMember(orgId: Ref<string | undefined>) {
   const client = useQueryClient()
   return useMutation({
     mutationFn: async (payload: OnboardMemberPayload) => {
-      if (!orgId.value) throw new Error('缺少组织 ID')
+      if (!orgId.value) throw new Error('缺少企业 ID')
       const response = await apiRequest<{ onboarding: { member: Member; app: OnboardMemberResult['app']; job_id: string } }>(
         `/api/v1/organizations/${orgId.value}/members/onboard`,
         { method: 'POST', body: payload },
@@ -174,7 +174,7 @@ export function useCreateMemberApp(orgId: Ref<string | undefined>) {
   const client = useQueryClient()
   return useMutation({
     mutationFn: async ({ userId, payload }: { userId: string; payload: CreateMemberAppPayload }) => {
-      if (!orgId.value) throw new Error('缺少组织 ID')
+      if (!orgId.value) throw new Error('缺少企业 ID')
       const response = await apiRequest<{ member_app: CreateMemberAppResult }>(
         `/api/v1/organizations/${orgId.value}/members/${userId}/apps`,
         { method: 'POST', body: payload },

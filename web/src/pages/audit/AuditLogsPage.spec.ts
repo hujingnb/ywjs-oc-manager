@@ -10,11 +10,11 @@ vi.mock('@/api/hooks/useAuditLogs', () => ({
   useOrgAuditLogsQuery: () => ({
     data: ref([
       {
-        // 普通行：组织管理员对应用做 update_model；资源已删除。
+        // 普通行：企业管理员对应用做 update_model；资源已删除。
         id: 'a1',
         actor_id: '06258106-7b34-49b0-9a2b-ed13b8ba1524',
         actor_role: 'org_admin',
-        actor_role_label: '组织管理员',
+        actor_role_label: '企业管理员',
         actor_name: '张三',
         actor_deleted: false,
         target_id: '4eee1d51-c4c7-427c-addc-cb4a51848e4e',
@@ -87,7 +87,7 @@ describe('AuditLogsPage', () => {
     const wrapper = mount(AuditLogsPage)
     const text = wrapper.text()
     expect(text).toContain('张三')
-    expect(text).toContain('组织管理员')
+    expect(text).toContain('企业管理员')
     expect(text).toContain('客服小助手')
     expect(text).toContain('已删除')
   })

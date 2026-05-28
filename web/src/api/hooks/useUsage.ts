@@ -1,4 +1,4 @@
-// 用量 API hooks 负责组织、成员和平台维度的 new-api 用量薄代理查询。
+// 用量 API hooks 负责企业、成员和平台维度的 new-api 用量薄代理查询。
 // 各 query 使用轮询刷新，页面层根据 scope 决定 items 的具体展示方式。
 import { useQuery } from '@tanstack/vue-query'
 import type { Ref } from 'vue'
@@ -26,8 +26,8 @@ export interface AggregatedUsage {
   updated_at: string
 }
 
-// useOrgUsageQuery 拉某组织维度的用量聚合。
-// platform_admin 可传任意 orgId 切换组织视角。
+// useOrgUsageQuery 拉某企业维度的用量聚合。
+// platform_admin 可传任意 orgId 切换企业视角。
 export function useOrgUsageQuery(orgId: Ref<string | undefined>) {
   return useQuery<AggregatedUsage | null>({
     queryKey: ['usage', 'org', orgId],
@@ -61,8 +61,8 @@ export function useMemberUsageQuery(orgId: Ref<string | undefined>, memberId: Re
   })
 }
 
-// usePlatformUsageQuery 拉平台维度（跨所有组织）聚合，仅 platform_admin 可见。
-// enabled=false 时不发请求，避免普通组织角色进入页面时产生 403。
+// usePlatformUsageQuery 拉平台维度（跨所有企业）聚合，仅 platform_admin 可见。
+// enabled=false 时不发请求，避免普通企业角色进入页面时产生 403。
 export function usePlatformUsageQuery(enabled: Ref<boolean>) {
   return useQuery<AggregatedUsage | null>({
     queryKey: ['usage', 'platform'],

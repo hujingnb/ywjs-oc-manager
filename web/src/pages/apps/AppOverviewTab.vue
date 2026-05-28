@@ -44,7 +44,7 @@
             {{ apiKeyLabel(app.api_key_status) }}
           </n-tag>
           <!-- 仅保留「恢复」入口：UI 不再提供主动禁用 API key 的能力，避免用户误操作把仍在使用的
-               实例 key 关停；若历史/外部流程已把 key 置为 disabled，组织管理员仍可在此恢复。 -->
+               实例 key 关停；若历史/外部流程已把 key 置为 disabled，企业管理员仍可在此恢复。 -->
           <n-button
             v-if="canToggleKey && app.api_key_status === 'disabled'"
             size="small"
@@ -61,7 +61,7 @@
       <n-descriptions-item label="Runtime Node">
         <code>{{ app.runtime_node_id || '—' }}</code>
       </n-descriptions-item>
-      <!-- 助手版本：展示绑定的版本名，version_synced=false 时附加需重启标签，组织管理员可切换 -->
+      <!-- 助手版本：展示绑定的版本名，version_synced=false 时附加需重启标签，企业管理员可切换 -->
       <n-descriptions-item label="助手版本">
         <n-space align="center" :size="8">
           <span>{{ versionName }}</span>
@@ -90,7 +90,7 @@
           </n-button>
         </n-space>
       </n-descriptions-item>
-      <n-descriptions-item label="所属组织">
+      <n-descriptions-item label="所属企业">
         {{ organizationName }}
       </n-descriptions-item>
       <n-descriptions-item v-if="app.description" label="描述" :span="2">
@@ -119,7 +119,7 @@
       style="margin-top: 12px"
     />
 
-    <!-- 切换助手版本弹窗：从组织 allowlist 与版本目录交集中选择目标版本 -->
+    <!-- 切换助手版本弹窗：从企业 allowlist 与版本目录交集中选择目标版本 -->
     <n-modal v-model:show="showSwitchVersionModal" preset="card" title="切换助手版本" style="width: 420px">
       <n-select
         v-model:value="selectedVersionId"
@@ -169,10 +169,10 @@ const appId = computed<string | undefined>(() => props.appId)
 
 const app = inject<Ref<AppDTO | null>>('app')
 const auth = useAuthStore()
-// orgId 只用于展示组织名称；权限和业务 API 仍继续使用 app.org_id。
+// orgId 只用于展示企业名称；权限和业务 API 仍继续使用 app.org_id。
 const orgId = computed<string | undefined>(() => app?.value?.org_id)
 const organizationQuery = useOrganizationQuery(orgId)
-const organizationName = computed(() => organizationQuery.data.value?.name || '未知组织')
+const organizationName = computed(() => organizationQuery.data.value?.name || '未知企业')
 
 // canViewVersions：三角色均可查看助手版本目录（CanViewAssistantVersion 已扩展至 org_member）。
 const canViewVersions = computed(() => !!auth.user)
@@ -180,7 +180,7 @@ const canViewVersions = computed(() => !!auth.user)
 // 仅在有权限时拉取助手版本目录，避免普通成员触发 403。
 const versionsQuery = useAssistantVersionsQuery(() => canViewVersions.value)
 
-// versionOptions 取组织 allowlist 与全量版本目录的交集，仅展示本组织允许使用的版本。
+// versionOptions 取企业 allowlist 与全量版本目录的交集，仅展示本企业允许使用的版本。
 const versionOptions = computed<SelectOption[]>(() => {
   const org = organizationQuery.data.value
   const versions = versionsQuery.data.value

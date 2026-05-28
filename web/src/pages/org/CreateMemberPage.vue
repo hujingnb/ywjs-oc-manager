@@ -11,7 +11,7 @@
         </div>
       </template>
 
-      <div v-if="!effectiveOrgId" class="state-text">当前账号未关联组织，无法创建成员。</div>
+      <div v-if="!effectiveOrgId" class="state-text">当前账号未关联企业，无法创建成员。</div>
       <n-form v-else label-placement="top" @submit.prevent="onSubmit">
         <!-- 账号信息 -->
         <p class="form-section-label">账号信息</p>
@@ -47,7 +47,7 @@
             </n-form-item>
           </n-grid-item>
           <n-grid-item>
-            <!-- 助手版本从组织 allowlist 过滤，必选 -->
+            <!-- 助手版本从企业 allowlist 过滤，必选 -->
             <n-form-item label="助手版本 *">
               <n-select
                 v-model:value="form.version_id"
@@ -111,23 +111,23 @@ import { useAssistantVersionsQuery } from '@/api/hooks/useAssistantVersions'
 import { useOrganizationQuery } from '@/api/hooks/useOrganizations'
 import { useAuthStore } from '@/stores/auth'
 
-// CreateMemberPage 是组织成员一站式开通页，同时创建成员、初始应用和渠道配置。
-// 助手版本从当前组织 allowlist 过滤，开通时必须选择。
+// CreateMemberPage 是企业成员一站式开通页，同时创建成员、初始应用和渠道配置。
+// 助手版本从当前企业 allowlist 过滤，开通时必须选择。
 const props = defineProps<{ orgId?: string }>()
 const auth = useAuthStore()
-// effectiveOrgId 支持平台管理员指定组织，组织管理员则默认使用自身组织。
+// effectiveOrgId 支持平台管理员指定企业，企业管理员则默认使用自身企业。
 const effectiveOrgId = computed(() => props.orgId ?? auth.user?.org_id)
-const orgEyebrow = computed(() => (auth.user?.role === 'platform_admin' ? 'Platform · 创建成员' : '组织 · 创建成员'))
+const orgEyebrow = computed(() => (auth.user?.role === 'platform_admin' ? 'Platform · 创建成员' : '企业 · 创建成员'))
 
 // orgIdRef 转为 Ref<string | undefined> 供 vue-query hook 订阅。
 const orgIdRef = computed(() => effectiveOrgId.value)
 
-// 查询当前组织以获取 assistant_version_ids allowlist。
+// 查询当前企业以获取 assistant_version_ids allowlist。
 const { data: orgData, isLoading: orgLoading } = useOrganizationQuery(orgIdRef)
 // 查询全部助手版本目录，与 allowlist 做交集。
 const { data: versionsData, isLoading: versionsLoading } = useAssistantVersionsQuery()
 
-// versionOptions 由组织 allowlist 与全量版本目录取交集，仅展示允许使用的版本。
+// versionOptions 由企业 allowlist 与全量版本目录取交集，仅展示允许使用的版本。
 const versionOptions = computed<SelectOption[]>(() => {
   const org = orgData.value
   const versions = versionsData.value
@@ -157,8 +157,8 @@ const form = reactive<OnboardMemberPayload>({
 })
 
 const roleOptions: SelectOption[] = [
-  { label: '组织成员', value: 'org_member' },
-  { label: '组织管理员', value: 'org_admin' },
+  { label: '企业成员', value: 'org_member' },
+  { label: '企业管理员', value: 'org_admin' },
 ]
 
 // versionValidationError 在用户尝试提交但未选择版本时给出明确提示。

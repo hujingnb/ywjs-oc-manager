@@ -4,7 +4,7 @@ import { describe, expect, it, vi } from 'vitest'
 
 import AppsPage from './AppsPage.vue'
 
-// 平台管理员没有 auth.user.org_id，页面需要先从组织列表选择一个组织再拉实例列表。
+// 平台管理员没有 auth.user.org_id，页面需要先从企业列表选择一个企业再拉实例列表。
 vi.mock('@/stores/auth', () => ({
   useAuthStore: () => ({
     user: { id: 'admin-1', role: 'platform_admin' },
@@ -21,7 +21,7 @@ vi.mock('@tanstack/vue-query', () => ({
 
 vi.mock('@/api/hooks/useOrganizations', () => ({
   useOrganizationsQuery: () => ({
-    data: ref([{ id: 'org-1', name: '测试组织', status: 'active' }]),
+    data: ref([{ id: 'org-1', name: '测试企业', status: 'active' }]),
     isLoading: ref(false),
     error: ref(null),
   }),
@@ -37,7 +37,7 @@ vi.mock('@/api/hooks/useApps', () => ({
             id: 'app-1',
             org_id: 'org-1',
             owner_user_id: 'member-1',
-            name: '组织实例',
+            name: '企业实例',
             status: 'running',
             api_key_status: 'active',
           },
@@ -65,7 +65,7 @@ const DataTableListStub = defineComponent({
     const rows = (this.data ?? []) as Record<string, unknown>[]
     const columns = (this.columns ?? []) as Array<{ key?: string; render?: (r: Record<string, unknown>) => unknown }>
     return h('section', [
-      // 渲染 errorMessage，供"未关联组织"等断言使用。
+      // 渲染 errorMessage，供"未关联企业"等断言使用。
       h('p', String(this.errorMessage ?? '')),
       ...rows.map(row =>
         h('div', { key: row.id as string }, [
@@ -100,14 +100,14 @@ const globalStubs = {
 }
 
 describe('AppsPage', () => {
-  // 验证平台管理员在不传 orgId prop 时，页面默认使用组织列表中第一个组织加载实例列表。
-  it('平台管理员默认使用第一个组织加载实例列表', () => {
+  // 验证平台管理员在不传 orgId prop 时，页面默认使用企业列表中第一个企业加载实例列表。
+  it('平台管理员默认使用第一个企业加载实例列表', () => {
     const wrapper = mount(AppsPage, {
       global: { stubs: globalStubs },
     })
 
-    expect(wrapper.text()).toContain('组织实例')
-    expect(wrapper.text()).not.toContain('当前账号未关联组织')
+    expect(wrapper.text()).toContain('企业实例')
+    expect(wrapper.text()).not.toContain('当前账号未关联企业')
   })
 
   // 验证 version_synced=false 的实例行，状态列渲染「需重启」警告标签。
@@ -120,15 +120,15 @@ describe('AppsPage', () => {
   })
 
   // 验证 version_synced 为 true 或字段缺省的实例行，状态列不渲染「需重启」标签。
-  // 通过检查「组织实例」所在行不含「需重启」来保证条件是严格判断 false，而非 falsy。
+  // 通过检查「企业实例」所在行不含「需重启」来保证条件是严格判断 false，而非 falsy。
   it('version_synced 非 false 的实例不显示「需重启」标签', () => {
     const wrapper = mount(AppsPage, {
       global: { stubs: globalStubs },
     })
 
-    // 找到「组织实例」行，该行 version_synced 字段缺省，不应包含「需重启」。
+    // 找到「企业实例」行，该行 version_synced 字段缺省，不应包含「需重启」。
     const rows = wrapper.findAll('section > div')
-    const syncedRow = rows.find(row => row.text().includes('组织实例'))
+    const syncedRow = rows.find(row => row.text().includes('企业实例'))
     expect(syncedRow).toBeDefined()
     expect(syncedRow!.text()).not.toContain('需重启')
 
