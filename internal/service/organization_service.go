@@ -192,7 +192,7 @@ func (s *OrganizationService) CreateOrganization(ctx context.Context, principal 
 		return OrganizationResult{}, ErrForbidden
 	}
 	if s.provisioner == nil || s.cipher == nil {
-		return OrganizationResult{}, fmt.Errorf("organization service 未装配 newapi provisioner / cipher，无法创建组织")
+		return OrganizationResult{}, fmt.Errorf("organization service 未装配 newapi provisioner / cipher，无法创建企业")
 	}
 	if input.AdminUsername == "" || input.AdminDisplayName == "" || input.AdminPassword == "" {
 		return OrganizationResult{}, fmt.Errorf("%w: 管理员用户名、显示名和密码不能为空", ErrMemberCreateInvalid)
@@ -204,7 +204,7 @@ func (s *OrganizationService) CreateOrganization(ctx context.Context, principal 
 	// 校验助手版本 allowlist 中的每个 id 都存在且未删除。
 	// versionValidator 未装配时直接拒绝，避免写入未经版本目录确认的 id。
 	if s.versionValidator == nil {
-		return OrganizationResult{}, fmt.Errorf("版本校验器未配置，无法保存组织可用版本")
+		return OrganizationResult{}, fmt.Errorf("版本校验器未配置，无法保存企业可用版本")
 	}
 	cleanVersionIDs, err := s.versionValidator.ValidateAssistantVersionIDs(ctx, input.AssistantVersionIDs)
 	if err != nil {
@@ -212,7 +212,7 @@ func (s *OrganizationService) CreateOrganization(ctx context.Context, principal 
 	}
 	versionIDsJSON, err := json.Marshal(cleanVersionIDs)
 	if err != nil {
-		return OrganizationResult{}, fmt.Errorf("序列化组织可用版本失败: %w", err)
+		return OrganizationResult{}, fmt.Errorf("序列化企业可用版本失败: %w", err)
 	}
 	adminPasswordHash, err := s.hashPassword(input.AdminPassword)
 	if err != nil {
@@ -276,7 +276,7 @@ func (s *OrganizationService) CreateOrganization(ctx context.Context, principal 
 		}
 		// manager 端回滚保留
 		if rollbackErr := s.store.HardDeleteOrganization(ctx, org.ID); rollbackErr != nil {
-			return OrganizationResult{}, fmt.Errorf("%w；回滚组织行失败: %v", err, rollbackErr)
+			return OrganizationResult{}, fmt.Errorf("%w；回滚企业行失败: %v", err, rollbackErr)
 		}
 		return OrganizationResult{}, err
 	}
@@ -309,7 +309,7 @@ func (s *OrganizationService) CreateOrganization(ctx context.Context, principal 
 				}
 			}
 		}
-		wrappedErr := fmt.Errorf("创建组织管理员失败: %w", err)
+		wrappedErr := fmt.Errorf("创建企业管理员失败: %w", err)
 		// 不带 OrgID：同上，避免审计记录阻止后续组织行回滚。
 		if s.failAuditor != nil {
 			s.failAuditor.RecordNewAPIFailure(ctx, NewAPIFailureContext{
@@ -320,7 +320,7 @@ func (s *OrganizationService) CreateOrganization(ctx context.Context, principal 
 			})
 		}
 		if rollbackErr := s.store.HardDeleteOrganization(ctx, org.ID); rollbackErr != nil {
-			return OrganizationResult{}, fmt.Errorf("%w；回滚组织行失败: %v", wrappedErr, rollbackErr)
+			return OrganizationResult{}, fmt.Errorf("%w；回滚企业行失败: %v", wrappedErr, rollbackErr)
 		}
 		return OrganizationResult{}, wrappedErr
 	}
@@ -328,7 +328,7 @@ func (s *OrganizationService) CreateOrganization(ctx context.Context, principal 
 	result.AdminUsername = input.AdminUsername
 	if s.knowledgeDatasets != nil {
 		if _, err := s.knowledgeDatasets.EnsureOrgDataset(ctx, org); err != nil {
-			slog.WarnContext(ctx, "预创建组织 RAGFlow dataset 失败", "org_id", uuidToString(org.ID), "error", err)
+			slog.WarnContext(ctx, "预创建企业 RAGFlow dataset 失败", "org_id", uuidToString(org.ID), "error", err)
 		}
 	}
 	return result, nil
@@ -522,7 +522,7 @@ func (s *OrganizationService) UpdateOrganization(ctx context.Context, principal 
 	var versionIDsJSON []byte
 	if input.AssistantVersionIDsSet {
 		if s.versionValidator == nil {
-			return OrganizationResult{}, fmt.Errorf("版本校验器未配置，无法保存组织可用版本")
+			return OrganizationResult{}, fmt.Errorf("版本校验器未配置，无法保存企业可用版本")
 		}
 		cleanVersionIDs, err := s.versionValidator.ValidateAssistantVersionIDs(ctx, input.AssistantVersionIDs)
 		if err != nil {
@@ -530,7 +530,7 @@ func (s *OrganizationService) UpdateOrganization(ctx context.Context, principal 
 		}
 		versionIDsJSON, err = json.Marshal(cleanVersionIDs)
 		if err != nil {
-			return OrganizationResult{}, fmt.Errorf("序列化组织可用版本失败: %w", err)
+			return OrganizationResult{}, fmt.Errorf("序列化企业可用版本失败: %w", err)
 		}
 	} else {
 		// 未显式传入时原样保留数据库中已有的版本 allowlist。
@@ -585,7 +585,7 @@ func DecryptOrganizationCredentials(org sqlc.Organization, cipher *auth.Cipher) 
 		return OrganizationCredentials{}, fmt.Errorf("cipher 未配置，无法解密 new-api 凭据")
 	}
 	if !org.NewapiUserCredentialsCiphertext.Valid || org.NewapiUserCredentialsCiphertext.String == "" {
-		return OrganizationCredentials{}, fmt.Errorf("组织 %s 未持有 new-api 凭据密文", uuidToString(org.ID))
+		return OrganizationCredentials{}, fmt.Errorf("企业 %s 未持有 new-api 凭据密文", uuidToString(org.ID))
 	}
 	plain, err := cipher.Decrypt(org.NewapiUserCredentialsCiphertext.String)
 	if err != nil {
@@ -596,7 +596,7 @@ func DecryptOrganizationCredentials(org sqlc.Organization, cipher *auth.Cipher) 
 		return OrganizationCredentials{}, fmt.Errorf("解析 new-api 凭据失败: %w", err)
 	}
 	if creds.Username == "" || creds.Password == "" || creds.AccessToken == "" {
-		return OrganizationCredentials{}, fmt.Errorf("组织 %s 的 new-api 凭据三件套不完整", uuidToString(org.ID))
+		return OrganizationCredentials{}, fmt.Errorf("企业 %s 的 new-api 凭据三件套不完整", uuidToString(org.ID))
 	}
 	return creds, nil
 }
@@ -648,7 +648,7 @@ func toOrganizationResult(org sqlc.Organization) OrganizationResult {
 		if err := json.Unmarshal(org.AssistantVersionIds, &versionIDs); err != nil {
 			// 组织 assistant_version_ids 列由本服务统一以 JSON 数组写入，理论上不会损坏；
 			// 真出现损坏时记日志而不是静默吞掉，避免组织列表/详情无声降级。
-			slog.Warn("解析组织 assistant_version_ids 失败", "org_id", uuidToString(org.ID), "error", err)
+			slog.Warn("解析企业 assistant_version_ids 失败", "org_id", uuidToString(org.ID), "error", err)
 			versionIDs = []string{}
 		}
 	}

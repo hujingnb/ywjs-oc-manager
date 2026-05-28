@@ -81,8 +81,8 @@ var ErrKnowledgeDatasetCreating = errors.New("知识库正在初始化")
 // ErrRechargeDenied 表示当前主体不能为目标组织充值。
 var ErrRechargeDenied = errors.New("无权执行充值")
 
-// ErrOrgMissingNewAPIUserID 表示组织尚未绑定 new-api 用户，无法充值或查余额。
-var ErrOrgMissingNewAPIUserID = errors.New("组织缺少 new-api 用户 ID")
+// ErrOrgMissingNewAPIUserID 表示企业尚未绑定 new-api 用户，无法充值或查余额。
+var ErrOrgMissingNewAPIUserID = errors.New("企业缺少 new-api 用户 ID")
 
 // ErrInvalidRechargeAmount 表示充值额度小于等于 0。
 var ErrInvalidRechargeAmount = errors.New("充值金额必须为正")
