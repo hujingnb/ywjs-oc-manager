@@ -2,14 +2,13 @@ package handlers
 
 import (
 	"context"
+	"database/sql"
 	"errors"
 	"net/http"
 	"net/http/httptest"
 	"testing"
 
 	"github.com/gin-gonic/gin"
-	"github.com/jackc/pgx/v5"
-	"github.com/jackc/pgx/v5/pgtype"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
@@ -19,6 +18,7 @@ import (
 )
 
 // jobsStoreStub 实现 JobsStore 接口，仅 stub 测试用到的方法。
+// ID 字段迁移为 string（MySQL uuid），GetJob/GetApp 均接受 string 参数。
 type jobsStoreStub struct {
 	job    sqlc.Job
 	jobErr error
@@ -26,13 +26,14 @@ type jobsStoreStub struct {
 	appErr error
 }
 
-func (s *jobsStoreStub) GetJob(_ context.Context, _ pgtype.UUID) (sqlc.Job, error) {
+func (s *jobsStoreStub) GetJob(_ context.Context, _ string) (sqlc.Job, error) {
 	return s.job, s.jobErr
 }
 
-func (s *jobsStoreStub) GetApp(_ context.Context, _ pgtype.UUID) (sqlc.App, error) {
+func (s *jobsStoreStub) GetApp(_ context.Context, _ string) (sqlc.App, error) {
 	return s.app, s.appErr
 }
+
 
 // newJobsTestRouter 构建用于测试的 gin router。
 func newJobsTestRouter(t *testing.T, store JobsStore) *gin.Engine {
@@ -43,14 +44,13 @@ func newJobsTestRouter(t *testing.T, store JobsStore) *gin.Engine {
 	return router
 }
 
-// makeTestUUID 构建一个有效的 UUID 字符串（全零）。
+// testJobUUID 构建一个有效的 UUID 字符串（全零）。
 const testJobUUID = "00000000-0000-0000-0000-000000000001"
 
+// makeTestJob 返回一个测试用 sqlc.Job，ID 为 string（MySQL uuid）。
 func makeTestJob() sqlc.Job {
-	var id pgtype.UUID
-	_ = id.Scan(testJobUUID)
 	return sqlc.Job{
-		ID:          id,
+		ID:          testJobUUID,
 		Type:        "delete_member",
 		Status:      "pending",
 		Attempts:    0,
@@ -74,7 +74,7 @@ func TestJobsGetHappy(t *testing.T) {
 
 // TestJobsGetNotFound 验证任务获取未找到的异常或拒绝路径场景。
 func TestJobsGetNotFound(t *testing.T) {
-	stub := &jobsStoreStub{jobErr: pgx.ErrNoRows}
+	stub := &jobsStoreStub{jobErr: sql.ErrNoRows}
 	router := newJobsTestRouter(t, stub)
 
 	w := httptest.NewRecorder()
@@ -99,11 +99,9 @@ func TestJobsGetInvalidUUID(t *testing.T) {
 }
 
 // makeAppOwnedBy 构造一个测试用 sqlc.App，组织和 owner 由参数指定。
+// OrgID / OwnerUserID 现为 string（MySQL uuid）。
 func makeAppOwnedBy(orgID, ownerID string) sqlc.App {
-	var oid, uid pgtype.UUID
-	_ = oid.Scan(orgID)
-	_ = uid.Scan(ownerID)
-	return sqlc.App{OrgID: oid, OwnerUserID: uid}
+	return sqlc.App{OrgID: orgID, OwnerUserID: ownerID}
 }
 
 // makeJobWithAppID 构造一个 payload.app_id 已写入的 sqlc.Job。
@@ -253,7 +251,7 @@ func TestJobsGetAppNotFound(t *testing.T) {
 	const appUUID = "11111111-1111-1111-1111-111111111111"
 	stub := &jobsStoreStub{
 		job:    makeJobWithAppID(appUUID),
-		appErr: pgx.ErrNoRows,
+		appErr: sql.ErrNoRows,
 	}
 	router := newJobsTestRouter(t, stub)
 

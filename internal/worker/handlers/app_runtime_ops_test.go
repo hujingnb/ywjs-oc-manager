@@ -7,9 +7,9 @@ import (
 	"fmt"
 	"strings"
 	"testing"
+	"time"
 
-	"github.com/jackc/pgx/v5/pgtype"
-
+	"github.com/guregu/null/v5"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 	"oc-manager/internal/domain"
@@ -19,18 +19,19 @@ import (
 
 const testRuntimeNodeID = "00000000-0000-0000-0000-000000000d01"
 
+// runtimeStub 构建测试用 runtimeOpStub；ID 字段迁移为 string（MySQL uuid）。
 func runtimeStub(t *testing.T) *runtimeOpStub {
 	t.Helper()
 	return &runtimeOpStub{
 		app: sqlc.App{
-			ID:            mustUUIDForTest(t, testAppID),
-			OrgID:         mustUUIDForTest(t, testOrgID),
-			OwnerUserID:   mustUUIDForTest(t, testUsrID),
-			RuntimeNodeID: mustUUIDForTest(t, testRuntimeNodeID),
+			ID:            testAppID,
+			OrgID:         testOrgID,
+			OwnerUserID:   testUsrID,
+			RuntimeNodeID: testRuntimeNodeID,
 			Status:        domain.AppStatusRunning,
-			ContainerID:   pgtype.Text{String: "ctr-existing", Valid: true},
-			ContainerName: pgtype.Text{String: "ocm-app", Valid: true},
-			NewapiKeyID:   pgtype.Text{String: "42", Valid: true},
+			ContainerID:   null.StringFrom("ctr-existing"),
+			ContainerName: null.StringFrom("ocm-app"),
+			NewapiKeyID:   null.StringFrom("42"),
 		},
 	}
 }
@@ -54,7 +55,8 @@ func TestAppStartContainerHandler_HappyPath(t *testing.T) {
 // TestAppStartContainerHandler_RejectsWithoutContainerID 验证应用启动容器处理器拒绝不使用容器ID的异常或拒绝路径场景。
 func TestAppStartContainerHandler_RejectsWithoutContainerID(t *testing.T) {
 	stub := runtimeStub(t)
-	stub.app.ContainerID = pgtype.Text{}
+	// ContainerID 迁移为 null.String；零值表示 NULL（无容器）。
+	stub.app.ContainerID = null.String{}
 	handler := NewAppStartContainerHandler(stub, &fakeLifecycle{})
 	err := handler.Handle(context.Background(), runtimeJob(domain.JobTypeAppStartContainer, testAppID))
 	require.Error(t, err)
@@ -84,7 +86,7 @@ func TestAppStopContainerHandler_HappyPath(t *testing.T) {
 // TestAppStopContainerHandler_NoContainerStillUpdatesStatus 验证应用停止容器处理器无容器仍然Updates状态的预期行为场景。
 func TestAppStopContainerHandler_NoContainerStillUpdatesStatus(t *testing.T) {
 	stub := runtimeStub(t)
-	stub.app.ContainerID = pgtype.Text{}
+	stub.app.ContainerID = null.String{}
 	containers := &fakeLifecycle{}
 	handler := NewAppStopContainerHandler(stub, containers)
 	err := handler.Handle(context.Background(), runtimeJob(domain.JobTypeAppStopContainer, testAppID))
@@ -188,10 +190,11 @@ type fakeInputRefresher struct {
 	orderTracker *[]string
 }
 
+// RefreshAppInput 记录调用入参；app.ID 迁移为 string，直接赋值即可。
 func (f *fakeInputRefresher) RefreshAppInput(_ context.Context, nodeID string, app sqlc.App) (AppInputRefreshResult, error) {
 	f.calls++
 	f.lastNodeID = nodeID
-	f.lastAppID = uuidToString(app.ID)
+	f.lastAppID = app.ID
 	if f.orderTracker != nil {
 		*f.orderTracker = append(*f.orderTracker, "refresh")
 	}
@@ -310,7 +313,8 @@ func TestAppRestartContainerHandler_RecordsAppliedVersionAfterRefresh(t *testing
 	require.Equal(t, 1, refresher.calls)
 	// SetAppAppliedVersion 必须被调用，入参与 refresher 返回值一致。
 	require.True(t, stub.appliedVersionSet, "重启后应调用 SetAppAppliedVersion 记录已应用版本")
-	assert.Equal(t, mustUUIDForTest(t, testAppID), stub.lastAppliedVersion.ID)
+	// ID 迁移为 string（MySQL uuid）。
+	assert.Equal(t, testAppID, stub.lastAppliedVersion.ID)
 	require.Equal(t, int32(5), stub.lastAppliedVersion.AppliedVersionRevision)
 	require.Equal(t, "hermes-v2:sha256-abc", stub.lastAppliedVersion.AppliedImageRef)
 }
@@ -413,8 +417,8 @@ func TestAppRestartContainerHandler_ImageUnchangedKeepsRestart(t *testing.T) {
 func TestAppRestartContainerHandler_ImageChangeRetryAfterContainerCleared(t *testing.T) {
 	stub := runtimeStub(t)
 	stub.app.RuntimeImageRef = "hermes-v1:old"
-	// 模拟重试：container_id 已被上一次尝试清空。
-	stub.app.ContainerID = pgtype.Text{}
+	// 模拟重试：container_id 已被上一次尝试清空（null.String{} = NULL）。
+	stub.app.ContainerID = null.String{}
 	containers := &fakeLifecycle{}
 	refresher := &fakeInputRefresher{
 		returnResult: AppInputRefreshResult{VersionRevision: 7, ImageRef: "hermes-v2:new"},
@@ -500,7 +504,7 @@ func TestAppDeleteHandler_PropagatesArchiveError(t *testing.T) {
 // TestAppDeleteHandler_SkipsContainerStepWithoutID 验证应用删除处理器跳过容器Step不使用ID的特殊分支或幂等场景。
 func TestAppDeleteHandler_SkipsContainerStepWithoutID(t *testing.T) {
 	stub := runtimeStub(t)
-	stub.app.ContainerID = pgtype.Text{}
+	stub.app.ContainerID = null.String{}
 	containers := &fakeLifecycle{}
 	disabler := &fakeDisabler{}
 	handler := NewAppDeleteHandler(stub, containers, disabler, nil)
@@ -515,7 +519,7 @@ func TestAppDeleteHandler_SkipsContainerStepWithoutID(t *testing.T) {
 // TestAppDeleteHandler_SkipsNewAPIWhenNoKey 验证应用删除处理器跳过new-api当无Key的特殊分支或幂等场景。
 func TestAppDeleteHandler_SkipsNewAPIWhenNoKey(t *testing.T) {
 	stub := runtimeStub(t)
-	stub.app.NewapiKeyID = pgtype.Text{}
+	stub.app.NewapiKeyID = null.String{}
 	disabler := &fakeDisabler{}
 	handler := NewAppDeleteHandler(stub, &fakeLifecycle{}, disabler, nil)
 	err := handler.Handle(context.Background(), runtimeJob(domain.JobTypeAppDelete, testAppID))
@@ -537,7 +541,8 @@ func TestAppDeleteHandler_PropagatesNewAPIError(t *testing.T) {
 // app_delete 仍会清理容器、new-api key、节点目录和 RAGFlow dataset。
 func TestAppDeleteHandler_AlreadyDeletedStillCleansExternalResources(t *testing.T) {
 	stub := runtimeStub(t)
-	stub.app.DeletedAt = pgtype.Timestamptz{Valid: true}
+	// DeletedAt 迁移为 null.Time；null.TimeFrom(time.Now()) 模拟已软删除。
+	stub.app.DeletedAt = null.TimeFrom(time.Now())
 	containers := &fakeLifecycle{}
 	disabler := &fakeDisabler{}
 	fileOps := &fakeFileOps{}
@@ -585,44 +590,42 @@ type runtimeOpStub struct {
 	createdJobs []sqlc.CreateJobParams
 }
 
-func (s *runtimeOpStub) GetApp(_ context.Context, _ pgtype.UUID) (sqlc.App, error) { return s.app, nil }
+func (s *runtimeOpStub) GetApp(_ context.Context, _ string) (sqlc.App, error) { return s.app, nil }
 
-func (s *runtimeOpStub) SetAppStatus(_ context.Context, arg sqlc.SetAppStatusParams) (sqlc.App, error) {
+func (s *runtimeOpStub) SetAppStatus(_ context.Context, arg sqlc.SetAppStatusParams) error {
 	s.statusUpdates = append(s.statusUpdates, arg.Status)
 	s.app.Status = arg.Status
-	return s.app, nil
+	return nil
 }
 
-func (s *runtimeOpStub) SoftDeleteApp(_ context.Context, _ pgtype.UUID) (sqlc.App, error) {
+func (s *runtimeOpStub) SoftDeleteApp(_ context.Context, _ string) error {
 	s.softDeleted = true
-	s.app.DeletedAt = pgtype.Timestamptz{Valid: true}
-	return s.app, nil
+	s.app.DeletedAt = null.TimeFrom(time.Now())
+	return nil
 }
 
-// SetAppAppliedVersion 实现 AppRuntimeStore 接口；记录已应用的版本修订与镜像 ref。
-func (s *runtimeOpStub) SetAppAppliedVersion(_ context.Context, arg sqlc.SetAppAppliedVersionParams) (sqlc.App, error) {
+// SetAppAppliedVersion 实现 AppRuntimeStore 接口；记录已应用的版本修订与镜像 ref；:exec 语义仅返回 error。
+func (s *runtimeOpStub) SetAppAppliedVersion(_ context.Context, arg sqlc.SetAppAppliedVersionParams) error {
 	s.appliedVersionSet = true
 	s.lastAppliedVersion = arg
 	s.app.AppliedVersionRevision = arg.AppliedVersionRevision
 	s.app.AppliedImageRef = arg.AppliedImageRef
-	return s.app, nil
+	return nil
 }
 
-// SetAppContainer 实现 AppRuntimeStore 接口；镜像变更重建时清空 container_id / container_name。
-func (s *runtimeOpStub) SetAppContainer(_ context.Context, arg sqlc.SetAppContainerParams) (sqlc.App, error) {
+// SetAppContainer 实现 AppRuntimeStore 接口；镜像变更重建时清空 container_id / container_name；:exec 语义仅返回 error。
+func (s *runtimeOpStub) SetAppContainer(_ context.Context, arg sqlc.SetAppContainerParams) error {
 	s.containerCleared = true
 	s.app.ContainerID = arg.ContainerID
 	s.app.ContainerName = arg.ContainerName
-	return s.app, nil
+	return nil
 }
 
-// CreateJob 实现 AppRuntimeStore 接口；记录入参并返回带固定 ID 的 job，供断言入队。
-func (s *runtimeOpStub) CreateJob(_ context.Context, arg sqlc.CreateJobParams) (sqlc.Job, error) {
+// CreateJob 实现 AppRuntimeStore 接口；记录入参并通知，notifier 用 testRestartInitJobID 断言入队。
+// :exec 语义仅返回 error；job ID 由 reaper/source 自己生成（此处用固定值供 notifier 断言）。
+func (s *runtimeOpStub) CreateJob(_ context.Context, arg sqlc.CreateJobParams) error {
 	s.createdJobs = append(s.createdJobs, arg)
-	var id pgtype.UUID
-	// 忽略 Scan 错误：testRestartInitJobID 是固定合法 UUID 字面量。
-	_ = id.Scan(testRestartInitJobID)
-	return sqlc.Job{ID: id, Type: arg.Type}, nil
+	return nil
 }
 
 // testRestartInitJobID 是 CreateJob 桩返回的固定 job ID，供 notifier 入队断言。
@@ -655,8 +658,9 @@ type fakeKnowledgeCleaner struct {
 	err          error
 }
 
-func (f *fakeKnowledgeCleaner) DeleteAppDataset(_ context.Context, appID pgtype.UUID) error {
-	f.cleanedAppID = uuidToString(appID)
+// DeleteAppDataset 实现 KnowledgeCleaner 接口；appID 迁移为 string（MySQL uuid）。
+func (f *fakeKnowledgeCleaner) DeleteAppDataset(_ context.Context, appID string) error {
+	f.cleanedAppID = appID
 	return f.err
 }
 

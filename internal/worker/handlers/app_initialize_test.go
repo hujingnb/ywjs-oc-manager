@@ -2,6 +2,7 @@ package handlers
 
 import (
 	"context"
+	"database/sql"
 	"errors"
 	"fmt"
 	"io"
@@ -10,9 +11,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/jackc/pgx/v5"
-	"github.com/jackc/pgx/v5/pgtype"
-
+	"github.com/guregu/null/v5"
 	dockerclient "github.com/docker/docker/client"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
@@ -248,7 +247,8 @@ func TestAppInitializeSkipsAPIKeyWhenAlreadyActive(t *testing.T) {
 	encrypted, err := cipher.Encrypt([]byte("sk-old-cached"))
 	require.NoError(t, err)
 	store.app.ApiKeyStatus = domain.APIKeyStatusActive
-	store.app.NewapiKeyCiphertext = pgtype.Text{String: encrypted, Valid: true}
+	// NewapiKeyCiphertext 迁移为 null.String。
+	store.app.NewapiKeyCiphertext = null.StringFrom(encrypted)
 	client := &fakeNewAPI{}
 	containers := &fakeContainers{result: runtimepkg.ContainerInfo{ID: "c", Name: "n"}}
 
@@ -308,7 +308,8 @@ func TestAppInitializeRejectsInvalidPayload(t *testing.T) {
 // TestAppInitializeContainerStepSkippedWhenContainerExists 验证应用初始化容器步骤跳过当容器存在的预期行为场景。
 func TestAppInitializeContainerStepSkippedWhenContainerExists(t *testing.T) {
 	store := newAppInitStub(t)
-	store.app.ContainerID = pgtype.Text{String: "already-there", Valid: true}
+	// ContainerID 迁移为 null.String。
+	store.app.ContainerID = null.StringFrom("already-there")
 	containers := &fakeContainers{}
 	client := &fakeNewAPI{result: newapi.APIKey{ID: 1, Key: "k"}}
 
@@ -380,14 +381,15 @@ func buildJob(t *testing.T, appID, nodeID string) sqlc.Job {
 	return sqlc.Job{Type: domain.JobTypeAppInitialize, PayloadJson: payload}
 }
 
+// appInitStub 实现 AppInitializeStore 接口；迁移后 ID 字段均为 string。
 type appInitStub struct {
 	t    *testing.T
 	app  sqlc.App
 	org  sqlc.Organization
 	user sqlc.User
 	node sqlc.RuntimeNode
-	// versions 按 UUID 存放助手版本；GetAssistantVersion 从此 map 查找。
-	versions     map[pgtype.UUID]sqlc.AssistantVersion
+	// versions 按 string UUID 存放助手版本；GetAssistantVersion 从此 map 查找。
+	versions     map[string]sqlc.AssistantVersion
 	apiKeySet    bool
 	statusSet    bool
 	containerSet bool
@@ -416,12 +418,12 @@ type appInitStub struct {
 	hasBoundCalls int
 }
 
+// newAppInitStub 构造 appInitStub；ID 字段迁移为 string（MySQL uuid）。
 func newAppInitStub(t *testing.T) *appInitStub {
 	t.Helper()
-	versionUUID := mustUUIDForTest(t, testVersionID)
 	// 默认助手版本：主模型 gpt-4o，含路由与 persona，供 happy path 测试使用。
 	defaultVersion := sqlc.AssistantVersion{
-		ID:           versionUUID,
+		ID:           testVersionID,
 		Name:         "v1",
 		MainModel:    "gpt-4o",
 		SystemPrompt: "你是 {org_name} 的专属助手",
@@ -433,68 +435,71 @@ func newAppInitStub(t *testing.T) *appInitStub {
 	return &appInitStub{
 		t: t,
 		app: sqlc.App{
-			ID:          mustUUIDForTest(t, testAppID),
-			OrgID:       mustUUIDForTest(t, testOrgID),
-			OwnerUserID: mustUUIDForTest(t, testUsrID),
+			ID:          testAppID,
+			OrgID:       testOrgID,
+			OwnerUserID: testUsrID,
 			// Phase 4：实例必须绑定助手版本，否则 Handle 直接标记失败。
-			VersionID:    versionUUID,
+			// VersionID 迁移为 null.String；StringFrom 表示 Valid=true。
+			VersionID:    null.StringFrom(testVersionID),
 			Name:         "alice-bot",
 			Status:       domain.AppStatusDraft,
 			ApiKeyStatus: domain.APIKeyStatusPending,
 		},
 		org:  sqlc.Organization{Name: "测试组织", Status: domain.StatusActive},
 		user: sqlc.User{DisplayName: "Alice"},
-		node: sqlc.RuntimeNode{NodeDataRoot: pgtype.Text{String: "/var/lib/oc-agent", Valid: true}},
-		versions: map[pgtype.UUID]sqlc.AssistantVersion{
-			versionUUID: defaultVersion,
+		node: sqlc.RuntimeNode{NodeDataRoot: null.StringFrom("/var/lib/oc-agent")},
+		versions: map[string]sqlc.AssistantVersion{
+			testVersionID: defaultVersion,
 		},
 	}
 }
 
-func (s *appInitStub) GetApp(_ context.Context, _ pgtype.UUID) (sqlc.App, error) { return s.app, nil }
-func (s *appInitStub) GetOrganization(_ context.Context, _ pgtype.UUID) (sqlc.Organization, error) {
+func (s *appInitStub) GetApp(_ context.Context, _ string) (sqlc.App, error) { return s.app, nil }
+func (s *appInitStub) GetOrganization(_ context.Context, _ string) (sqlc.Organization, error) {
 	if s.getOrganizationErr != nil {
 		return sqlc.Organization{}, s.getOrganizationErr
 	}
 	return s.org, nil
 }
-func (s *appInitStub) GetUser(_ context.Context, _ pgtype.UUID) (sqlc.User, error) {
+func (s *appInitStub) GetUser(_ context.Context, _ string) (sqlc.User, error) {
 	return s.user, nil
 }
 
-func (s *appInitStub) GetRuntimeNode(_ context.Context, _ pgtype.UUID) (sqlc.RuntimeNode, error) {
+func (s *appInitStub) GetRuntimeNode(_ context.Context, _ string) (sqlc.RuntimeNode, error) {
 	return s.node, nil
 }
 
-func (s *appInitStub) SetAppNewAPIKey(_ context.Context, arg sqlc.SetAppNewAPIKeyParams) (sqlc.App, error) {
+// SetAppNewAPIKey :exec 语义仅返回 error；留存入参供断言 newapi_key_name 等字段。
+func (s *appInitStub) SetAppNewAPIKey(_ context.Context, arg sqlc.SetAppNewAPIKeyParams) error {
 	s.apiKeySet = true
-	// 留存最近一次入参, 允许用例断言 newapi_key_name 等字段是否被显式落库。
 	s.lastSetAPIKey = arg
 	s.app.ApiKeyStatus = arg.ApiKeyStatus
 	s.app.NewapiKeyID = arg.NewapiKeyID
 	s.app.NewapiKeyCiphertext = arg.NewapiKeyCiphertext
 	s.app.NewapiKeyName = arg.NewapiKeyName
-	return s.app, nil
+	return nil
 }
 
-func (s *appInitStub) SetAppContainer(_ context.Context, arg sqlc.SetAppContainerParams) (sqlc.App, error) {
+// SetAppContainer :exec 语义仅返回 error；记录 container_id / container_name。
+func (s *appInitStub) SetAppContainer(_ context.Context, arg sqlc.SetAppContainerParams) error {
 	s.containerSet = true
 	s.app.ContainerID = arg.ContainerID
 	s.app.ContainerName = arg.ContainerName
-	return s.app, nil
+	return nil
 }
 
-func (s *appInitStub) SetAppStatus(_ context.Context, arg sqlc.SetAppStatusParams) (sqlc.App, error) {
+// SetAppStatus :exec 语义仅返回 error；按调用顺序记录状态切换，便于断言阶段推进序列。
+func (s *appInitStub) SetAppStatus(_ context.Context, arg sqlc.SetAppStatusParams) error {
 	s.statusSet = true
-	// 按调用顺序记录每次状态切换, 便于断言 5 阶段推进序列。
 	s.statusCalls = append(s.statusCalls, arg)
 	s.app.Status = arg.Status
-	return s.app, nil
+	return nil
 }
 
-func (s *appInitStub) CreateAuditLog(_ context.Context, arg sqlc.CreateAuditLogParams) (sqlc.AuditLog, error) {
+// CreateAuditLog :exec 语义仅返回 error；存档入参供断言。
+func (s *appInitStub) CreateAuditLog(_ context.Context, arg sqlc.CreateAuditLogParams) error {
 	s.auditLogs = append(s.auditLogs, arg)
-	return sqlc.AuditLog{TargetType: arg.TargetType, TargetID: arg.TargetID, Action: arg.Action, Result: arg.Result}, nil
+	return nil
 }
 
 // 以下 3 个 stub 覆盖 AppInitializeStore 中的进度与失败语义:
@@ -502,59 +507,57 @@ func (s *appInitStub) CreateAuditLog(_ context.Context, arg sqlc.CreateAuditLogP
 //     测试不关心字段值, 仅需让 transitionTo → FlushReset 不报错。
 //   - MarkAppFailed:阶段失败时被调用, 通过 failedSet / lastFailed 让用例
 //     断言"是否进入失败路径"以及 last_error_status 写入值。
-func (s *appInitStub) SetAppProgress(_ context.Context, _ sqlc.SetAppProgressParams) (sqlc.App, error) {
-	return sqlc.App{}, nil
+func (s *appInitStub) SetAppProgress(_ context.Context, _ sqlc.SetAppProgressParams) error {
+	return nil
 }
-func (s *appInitStub) ClearAppProgress(_ context.Context, _ pgtype.UUID) (sqlc.App, error) {
-	return sqlc.App{}, nil
+func (s *appInitStub) ClearAppProgress(_ context.Context, _ string) error {
+	return nil
 }
-func (s *appInitStub) MarkAppFailed(_ context.Context, p sqlc.MarkAppFailedParams) (sqlc.App, error) {
+func (s *appInitStub) MarkAppFailed(_ context.Context, p sqlc.MarkAppFailedParams) error {
 	// 模拟真实 SQL:status 推到 error, last_error_status 记录来源 phase;
 	// 同时记录 failedSet / lastFailed, 供失败路径断言使用。
 	s.failedSet = true
 	s.lastFailed = p
 	s.app.Status = domain.AppStatusError
 	s.app.LastErrorStatus = p.LastErrorStatus
-	return s.app, nil
+	return nil
 }
 
 // UpdateAppRuntimeImage 更新 app 的镜像引用与 sha256, 模拟 phasePullRuntimeImage 写库。
-func (s *appInitStub) UpdateAppRuntimeImage(_ context.Context, arg sqlc.UpdateAppRuntimeImageParams) (sqlc.App, error) {
+func (s *appInitStub) UpdateAppRuntimeImage(_ context.Context, arg sqlc.UpdateAppRuntimeImageParams) error {
 	s.app.RuntimeImageRef = arg.RuntimeImageRef
 	s.app.RuntimeImageSha256 = arg.RuntimeImageSha256
-	return s.app, nil
+	return nil
 }
 
 // GetAssistantVersion 从内存 versions map 返回版本，模拟 DB 查询。
-// 版本不存在时返回 pgx.ErrNoRows（与真实 DB 行为一致）。
-func (s *appInitStub) GetAssistantVersion(_ context.Context, id pgtype.UUID) (sqlc.AssistantVersion, error) {
+// ID 迁移为 string；版本不存在时返回 sql.ErrNoRows（与真实 DB 行为一致）。
+func (s *appInitStub) GetAssistantVersion(_ context.Context, id string) (sqlc.AssistantVersion, error) {
 	if v, ok := s.versions[id]; ok {
 		return v, nil
 	}
-	return sqlc.AssistantVersion{}, pgx.ErrNoRows
+	return sqlc.AssistantVersion{}, sql.ErrNoRows
 }
 
-// SetAppAppliedVersion 记录 applied_version_revision / applied_image_ref 写库，
-// 供 Handle 成功收尾时调用；通过 appliedVersionSet / lastAppliedVersion 供断言使用。
-func (s *appInitStub) SetAppAppliedVersion(_ context.Context, arg sqlc.SetAppAppliedVersionParams) (sqlc.App, error) {
+// SetAppAppliedVersion :exec 语义仅返回 error；记录 applied 版本，供断言使用。
+func (s *appInitStub) SetAppAppliedVersion(_ context.Context, arg sqlc.SetAppAppliedVersionParams) error {
 	s.appliedVersionSet = true
 	s.lastAppliedVersion = arg
 	s.app.AppliedVersionRevision = arg.AppliedVersionRevision
 	s.app.AppliedImageRef = arg.AppliedImageRef
-	return s.app, nil
+	return nil
 }
 
-// SetAppRuntimeToken 记录 runtime API token 字段，模拟初始化写 manifest 前的密文落库。
-func (s *appInitStub) SetAppRuntimeToken(_ context.Context, arg sqlc.SetAppRuntimeTokenParams) (sqlc.App, error) {
+// SetAppRuntimeToken :exec 语义仅返回 error；记录 runtime API token 字段。
+func (s *appInitStub) SetAppRuntimeToken(_ context.Context, arg sqlc.SetAppRuntimeTokenParams) error {
 	s.app.RuntimeTokenHash = arg.RuntimeTokenHash
 	s.app.RuntimeTokenCiphertext = arg.RuntimeTokenCiphertext
-	return s.app, nil
+	return nil
 }
 
-// AppHasBoundChannelBinding 返回 channelBound 字段值，模拟「该 app 是否存在
-// status='bound' 的渠道行」DB 查询；hasBoundCalls 计数供断言「init 完成 /
-// 幂等分支 都正确触发自愈探测」。
-func (s *appInitStub) AppHasBoundChannelBinding(_ context.Context, _ pgtype.UUID) (bool, error) {
+// AppHasBoundChannelBinding 返回 channelBound 字段值；ID 迁移为 string（MySQL uuid）。
+// hasBoundCalls 计数供断言「init 完成 / 幂等分支 都正确触发自愈探测」。
+func (s *appInitStub) AppHasBoundChannelBinding(_ context.Context, _ string) (bool, error) {
 	s.hasBoundCalls++
 	return s.channelBound, nil
 }
@@ -704,12 +707,10 @@ func testResolveRuntimeImage(imageID string) (string, bool) {
 	return "", false
 }
 
-func mustUUIDForTest(t *testing.T, value string) pgtype.UUID {
-	t.Helper()
-	var id pgtype.UUID
-	err := id.Scan(value)
-	require.NoError(t, err)
-	return id
+// mustUUIDForTest 在迁移后直接返回字符串 UUID（原来返回 pgtype.UUID）。
+// 保留函数签名便于全文搜索；调用方断言逻辑不需要改动。
+func mustUUIDForTest(_ *testing.T, value string) string {
+	return value
 }
 
 // fakeAppInputUploader 实现 AppInputUploader, 记录每次 UploadAppInputFile 调用。
@@ -996,7 +997,8 @@ func TestAppInitializeHandler_IdempotentReentry(t *testing.T) {
 	store := newAppInitStub(t)
 	// app 起始 draft + container_id 已存在, 模拟 reaper 重置 status 但保留 container_id。
 	store.app.Status = domain.AppStatusDraft
-	store.app.ContainerID = pgtype.Text{String: "cid-1", Valid: true}
+	// ContainerID 迁移为 null.String。
+	store.app.ContainerID = null.StringFrom("cid-1")
 
 	containers := &fakeContainers{result: runtimepkg.ContainerInfo{ID: "ctr-1", Name: "hermes-" + testAppID}}
 	client := &fakeNewAPI{result: newapi.APIKey{ID: 1, Key: "k"}}
@@ -1023,8 +1025,8 @@ func TestAppInitializeHandler_IdempotentReentry(t *testing.T) {
 // 覆盖场景：app.VersionID.Valid == false → markFailed 被调用，错误含"未绑定助手版本"。
 func TestAppInitialize_NullVersionIDFails(t *testing.T) {
 	store := newAppInitStub(t)
-	// 清空 VersionID，模拟未绑定版本的实例。
-	store.app.VersionID = pgtype.UUID{}
+	// 清空 VersionID，模拟未绑定版本的实例。VersionID 迁移为 null.String；零值表示 NULL。
+	store.app.VersionID = null.String{}
 
 	handler := NewAppInitializeHandler(store, &fakeDirs{}, &fakeContainers{}, &fakeContainers{}, &fakeNewAPI{}, AppInitializeConfig{Cipher: testCipher(t), ResolveRuntimeImage: testResolveRuntimeImage})
 	handler.SetAppInputUploader(&fakeAppInputUploader{})
@@ -1044,8 +1046,9 @@ func TestAppInitialize_NullVersionIDFails(t *testing.T) {
 // last_error_status 记为 pulling_runtime_image，错误信息含"加载助手版本失败"。
 func TestAppInitialize_GetAssistantVersionErrorFails(t *testing.T) {
 	store := newAppInitStub(t)
-	// 清空 versions map，使 GetAssistantVersion 对有效 VersionID 返回 pgx.ErrNoRows。
-	store.versions = map[pgtype.UUID]sqlc.AssistantVersion{}
+	// 清空 versions map，使 GetAssistantVersion 对有效 VersionID 返回 sql.ErrNoRows。
+	// map 迁移为 map[string]sqlc.AssistantVersion。
+	store.versions = map[string]sqlc.AssistantVersion{}
 
 	handler := NewAppInitializeHandler(store, &fakeDirs{}, &fakeContainers{}, &fakeContainers{}, &fakeNewAPI{}, AppInitializeConfig{Cipher: testCipher(t), ResolveRuntimeImage: testResolveRuntimeImage})
 	handler.SetAppInputUploader(&fakeAppInputUploader{})
@@ -1195,8 +1198,9 @@ func TestAppInitialize_IdempotentBindingWaitingPromotesWhenChannelBound(t *testi
 // → BuildAppInputData 优先采用版本 MainModel。
 func TestAppInitialize_VersionModelWrittenToManifest(t *testing.T) {
 	// 仅测试 BuildAppInputData 纯函数，不走完整 Handle 流程。
+	// ID 迁移为 string。
 	app := sqlc.App{
-		ID:   mustUUIDForTest(t, testAppID),
+		ID:   testAppID,
 		Name: "test-app",
 	}
 	org := sqlc.Organization{Name: "TestOrg"}
@@ -1223,8 +1227,8 @@ func TestAppInitialize_VersionModelWrittenToManifest(t *testing.T) {
 // 通过 BuildAppInputData 原样传递到 hermes.AppInputData。
 // 覆盖场景：version.Routing 与 version.SystemPrompt 直接映射到输出字段。
 func TestAppInitialize_VersionRoutingAndPersonaPassedThrough(t *testing.T) {
-	// 仅测试 BuildAppInputData 纯函数。
-	app := sqlc.App{ID: mustUUIDForTest(t, testAppID), Name: "r-app"}
+	// 仅测试 BuildAppInputData 纯函数。ID 迁移为 string。
+	app := sqlc.App{ID: testAppID, Name: "r-app"}
 	org := sqlc.Organization{Name: "O"}
 	owner := sqlc.User{DisplayName: "U"}
 	routing := map[string]string{"aux1": "claude-3-haiku", "aux2": "gpt-3.5-turbo"}
@@ -1272,10 +1276,9 @@ func (f *fakeSkillBlobReader) OpenSkill(relPath string) (io.ReadCloser, error) {
 // 覆盖场景：两个 skill → 上传两份文件 + manifest SkillRelPaths 包含对应路径。
 func TestAppInitialize_SkillsUploadedToInput(t *testing.T) {
 	store := newAppInitStub(t)
-	// 更新版本 stub：添加两个 skill。
-	versionUUID := mustUUIDForTest(t, testVersionID)
-	store.versions[versionUUID] = sqlc.AssistantVersion{
-		ID:           versionUUID,
+	// 更新版本 stub：添加两个 skill。版本 map 迁移为 map[string]sqlc.AssistantVersion。
+	store.versions[testVersionID] = sqlc.AssistantVersion{
+		ID:           testVersionID,
 		Name:         "v1-with-skills",
 		MainModel:    "gpt-4o",
 		SystemPrompt: "你是助手",
@@ -1317,10 +1320,9 @@ func TestAppInitialize_SkillsUploadedToInput(t *testing.T) {
 // writeSkillsIntoInput 跳过推送，Handle 正常完成（向后兼容无 skill 的装配）。
 func TestAppInitialize_SkillBlobsNilSkipsSkills(t *testing.T) {
 	store := newAppInitStub(t)
-	// 版本含 skill，但 SkillBlobs 未注入，应安全跳过。
-	versionUUID := mustUUIDForTest(t, testVersionID)
-	store.versions[versionUUID] = sqlc.AssistantVersion{
-		ID:          versionUUID,
+	// 版本含 skill，但 SkillBlobs 未注入，应安全跳过。版本 map 迁移为 map[string]sqlc.AssistantVersion。
+	store.versions[testVersionID] = sqlc.AssistantVersion{
+		ID:          testVersionID,
 		MainModel:   "gpt-4o",
 		ImageID:     "hermes-v1",
 		Revision:    1,

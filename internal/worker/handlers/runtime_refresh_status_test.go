@@ -5,14 +5,15 @@ import (
 	"errors"
 	"testing"
 
-	"github.com/jackc/pgx/v5/pgtype"
-
+	"github.com/guregu/null/v5"
 	"github.com/stretchr/testify/require"
 	"oc-manager/internal/domain"
 	"oc-manager/internal/integrations/runtime"
 	"oc-manager/internal/store/sqlc"
 )
 
+// fakeRuntimeSnapshotStore 实现 AppRuntimeStore + InsertInstanceResourceSample 接口。
+// 迁移后方法签名均使用 string/null.* 类型，:exec 方法仅返回 error。
 type fakeRuntimeSnapshotStore struct {
 	app          sqlc.App
 	getErr       error
@@ -21,50 +22,51 @@ type fakeRuntimeSnapshotStore struct {
 	samples      []sqlc.InsertInstanceResourceSampleParams
 }
 
-func (s *fakeRuntimeSnapshotStore) GetApp(_ context.Context, _ pgtype.UUID) (sqlc.App, error) {
+func (s *fakeRuntimeSnapshotStore) GetApp(_ context.Context, _ string) (sqlc.App, error) {
 	if s.getErr != nil {
 		return sqlc.App{}, s.getErr
 	}
 	return s.app, nil
 }
 
-func (s *fakeRuntimeSnapshotStore) SetAppStatus(_ context.Context, _ sqlc.SetAppStatusParams) (sqlc.App, error) {
-	return s.app, nil
+func (s *fakeRuntimeSnapshotStore) SetAppStatus(_ context.Context, _ sqlc.SetAppStatusParams) error {
+	return nil
 }
 
-func (s *fakeRuntimeSnapshotStore) SoftDeleteApp(_ context.Context, _ pgtype.UUID) (sqlc.App, error) {
-	return s.app, nil
+func (s *fakeRuntimeSnapshotStore) SoftDeleteApp(_ context.Context, _ string) error {
+	return nil
 }
 
-func (s *fakeRuntimeSnapshotStore) SetAppRuntimeSnapshot(_ context.Context, arg sqlc.SetAppRuntimeSnapshotParams) (sqlc.App, error) {
+func (s *fakeRuntimeSnapshotStore) SetAppRuntimeSnapshot(_ context.Context, arg sqlc.SetAppRuntimeSnapshotParams) error {
 	if s.saveErr != nil {
-		return sqlc.App{}, s.saveErr
+		return s.saveErr
 	}
 	s.savedPayload = arg.RuntimeSnapshotJson
-	return s.app, nil
+	return nil
 }
 
-func (s *fakeRuntimeSnapshotStore) InsertInstanceResourceSample(_ context.Context, arg sqlc.InsertInstanceResourceSampleParams) (sqlc.InstanceResourceSample, error) {
+// InsertInstanceResourceSample 存档采样参数；:exec 语义仅返回 error。
+func (s *fakeRuntimeSnapshotStore) InsertInstanceResourceSample(_ context.Context, arg sqlc.InsertInstanceResourceSampleParams) error {
 	if s.saveErr != nil {
-		return sqlc.InstanceResourceSample{}, s.saveErr
+		return s.saveErr
 	}
 	s.samples = append(s.samples, arg)
-	return sqlc.InstanceResourceSample{}, nil
+	return nil
 }
 
 // SetAppAppliedVersion 实现 AppRuntimeStore 接口；刷新状态流程不写版本已应用信息，此处仅满足接口约束。
-func (s *fakeRuntimeSnapshotStore) SetAppAppliedVersion(_ context.Context, _ sqlc.SetAppAppliedVersionParams) (sqlc.App, error) {
-	return s.app, nil
+func (s *fakeRuntimeSnapshotStore) SetAppAppliedVersion(_ context.Context, _ sqlc.SetAppAppliedVersionParams) error {
+	return nil
 }
 
 // SetAppContainer 实现 AppRuntimeStore 接口；刷新状态流程不重建容器，此处仅满足接口约束。
-func (s *fakeRuntimeSnapshotStore) SetAppContainer(_ context.Context, _ sqlc.SetAppContainerParams) (sqlc.App, error) {
-	return s.app, nil
+func (s *fakeRuntimeSnapshotStore) SetAppContainer(_ context.Context, _ sqlc.SetAppContainerParams) error {
+	return nil
 }
 
 // CreateJob 实现 AppRuntimeStore 接口；刷新状态流程不入队 job，此处仅满足接口约束。
-func (s *fakeRuntimeSnapshotStore) CreateJob(_ context.Context, _ sqlc.CreateJobParams) (sqlc.Job, error) {
-	return sqlc.Job{}, nil
+func (s *fakeRuntimeSnapshotStore) CreateJob(_ context.Context, _ sqlc.CreateJobParams) error {
+	return nil
 }
 
 type fakeRuntimeInspector struct {
@@ -82,28 +84,19 @@ func (i *fakeRuntimeInspector) ContainerStats(_ context.Context, _, _ string) (r
 	return i.stats, i.statsErr
 }
 
+// makeAppForRefresh 构造一个运行中的 app，ID 现为 string（MySQL uuid）。
 func makeAppForRefresh(t *testing.T) sqlc.App {
 	t.Helper()
-	id, err := pgUUIDFromString("11111111-1111-1111-1111-111111111111")
-	require.NoError(t, err)
-	node, err := pgUUIDFromString("22222222-2222-2222-2222-222222222222")
-	require.NoError(t, err)
 	return sqlc.App{
-		ID:            id,
-		RuntimeNodeID: node,
-		ContainerID:   pgtype.Text{String: "ctr-abc", Valid: true},
+		ID:            "11111111-1111-1111-1111-111111111111",
+		RuntimeNodeID: "22222222-2222-2222-2222-222222222222",
+		ContainerID:   null.StringFrom("ctr-abc"),
 		Status:        domain.AppStatusRunning,
 	}
 }
 
-// pgUUIDFromString 把标准 uuid 字符串解码成 pgtype.UUID；测试本地用，避免依赖 service 包。
-func pgUUIDFromString(s string) (pgtype.UUID, error) {
-	var out pgtype.UUID
-	if err := out.Scan(s); err != nil {
-		return pgtype.UUID{}, err
-	}
-	return out, nil
-}
+// 确保 null 包导入被使用。
+var _ = null.String{}
 
 // TestRuntimeRefreshStatusHappyPath 验证运行时刷新状态成功路径的成功路径场景。
 func TestRuntimeRefreshStatusHappyPath(t *testing.T) {
@@ -165,7 +158,8 @@ func TestRuntimeRefreshStatusInspectErrorRecorded(t *testing.T) {
 // TestRuntimeRefreshStatusSkipsNoContainer 验证运行时刷新状态跳过无容器的特殊分支或幂等场景。
 func TestRuntimeRefreshStatusSkipsNoContainer(t *testing.T) {
 	app := makeAppForRefresh(t)
-	app.ContainerID = pgtype.Text{}
+	// ContainerID 迁移为 null.String；零值 null.String{} 表示 NULL（无容器）。
+	app.ContainerID = null.String{}
 	store := &fakeRuntimeSnapshotStore{app: app}
 	h := NewRuntimeRefreshStatusHandler(store, &fakeRuntimeInspector{})
 	job := sqlc.Job{Type: domain.JobTypeRuntimeRefreshStatus, PayloadJson: []byte(`{"app_id":"11111111-1111-1111-1111-111111111111"}`)}

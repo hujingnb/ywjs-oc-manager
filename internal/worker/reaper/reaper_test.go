@@ -3,13 +3,13 @@ package reaper
 
 import (
 	"context"
+	"database/sql"
+	"encoding/json"
 	"errors"
 	"log/slog"
 	"testing"
 	"time"
 
-	"github.com/jackc/pgx/v5"
-	"github.com/jackc/pgx/v5/pgtype"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
@@ -18,38 +18,38 @@ import (
 )
 
 // fakeStore 收集 reaper 的所有写库调用,供断言。
-// 各方法均实现 reaper.Store 接口语义,但不做任何真实存储。
+// 各方法均实现 reaper.Store 接口语义（迁移后 string 参数、:exec 返回 error）。
 type fakeStore struct {
 	stale          []sqlc.ListStaleInitsRow
 	statusCalls    []sqlc.SetAppStatusParams
-	clearCalls     []pgtype.UUID
+	clearCalls     []string // ClearAppProgress 入参（string uuid）
 	latestJob      sqlc.Job
 	latestJobErr   error
-	requeueCalls   []pgtype.UUID
+	requeueCalls   []string // RequeueJob 入参（string uuid）
 	createJobCalls []sqlc.CreateJobParams
 }
 
-func (s *fakeStore) ListStaleInits(_ context.Context, _ pgtype.Timestamptz) ([]sqlc.ListStaleInitsRow, error) {
+func (s *fakeStore) ListStaleInits(_ context.Context, _ time.Time) ([]sqlc.ListStaleInitsRow, error) {
 	return s.stale, nil
 }
-func (s *fakeStore) SetAppStatus(_ context.Context, p sqlc.SetAppStatusParams) (sqlc.App, error) {
+func (s *fakeStore) SetAppStatus(_ context.Context, p sqlc.SetAppStatusParams) error {
 	s.statusCalls = append(s.statusCalls, p)
-	return sqlc.App{}, nil
+	return nil
 }
-func (s *fakeStore) ClearAppProgress(_ context.Context, id pgtype.UUID) (sqlc.App, error) {
+func (s *fakeStore) ClearAppProgress(_ context.Context, id string) error {
 	s.clearCalls = append(s.clearCalls, id)
-	return sqlc.App{}, nil
+	return nil
 }
-func (s *fakeStore) GetLatestAppInitJob(_ context.Context, _ string) (sqlc.Job, error) {
+func (s *fakeStore) GetLatestAppInitJob(_ context.Context, _ json.RawMessage) (sqlc.Job, error) {
 	return s.latestJob, s.latestJobErr
 }
-func (s *fakeStore) RequeueJob(_ context.Context, id pgtype.UUID) (sqlc.Job, error) {
+func (s *fakeStore) RequeueJob(_ context.Context, id string) error {
 	s.requeueCalls = append(s.requeueCalls, id)
-	return sqlc.Job{ID: id, Status: domain.JobStatusPending}, nil
+	return nil
 }
-func (s *fakeStore) CreateJob(_ context.Context, p sqlc.CreateJobParams) (sqlc.Job, error) {
+func (s *fakeStore) CreateJob(_ context.Context, p sqlc.CreateJobParams) error {
 	s.createJobCalls = append(s.createJobCalls, p)
-	return sqlc.Job{ID: testJobID, Status: domain.JobStatusPending}, nil
+	return nil
 }
 
 // fakeNotifier 捕获 reaper 对 redis queue 的 Enqueue 调用。
@@ -74,10 +74,13 @@ func (l *fakeLocker) Release(_ context.Context, _, _ string) error              
 func (l *fakeLocker) Exists(_ context.Context, _ string) (bool, error)            { return true, nil }
 
 var (
-	// testJobID / testAppID 仅取一个非零 UUID 用于断言相等;字节内容无业务含义。
-	testJobID = pgtype.UUID{Bytes: [16]byte{0xaa}, Valid: true}
-	testAppID = pgtype.UUID{Bytes: [16]byte{0xbb}, Valid: true}
+	// testJobID / testAppID 迁移为 string uuid；字节内容无业务含义，仅用于断言相等。
+	testJobID = "aaaaaaaa-0000-0000-0000-000000000000"
+	testAppID = "bbbbbbbb-0000-0000-0000-000000000000"
 )
+
+// 确保 database/sql 包导入被使用（sql.ErrNoRows 替代原 pgx.ErrNoRows）。
+var _ = sql.ErrNoRows
 
 // TestReaper_LockUnavailable_Skip 锁被别人持着时 reapOnce 不应被调用。
 // 场景:多 manager 副本同 tick,只有一个能拿锁,其他实例必须安静放弃。
@@ -105,6 +108,7 @@ func TestReaper_ReapOrphanReset(t *testing.T) {
 	}
 	for _, c := range cases {
 		t.Run(c.name, func(t *testing.T) {
+			// ID 迁移为 string；testAppID / testJobID 均为字符串 UUID。
 			store := &fakeStore{
 				stale:     []sqlc.ListStaleInitsRow{{ID: testAppID, Status: c.startStatus}},
 				latestJob: sqlc.Job{ID: testJobID, Status: domain.JobStatusRunning},
@@ -131,9 +135,10 @@ func TestReaper_ReapOrphanReset(t *testing.T) {
 // TestReaper_NoExistingJob_CreateNew 没有历史 job 时 reaper 新建一份。
 // 场景:app 由 reaper 之外的路径创建(如手工 INSERT),从未生成过 init job。
 func TestReaper_NoExistingJob_CreateNew(t *testing.T) {
+	// sql.ErrNoRows 替代原 pgx.ErrNoRows，语义相同：查不到行。
 	store := &fakeStore{
 		stale:        []sqlc.ListStaleInitsRow{{ID: testAppID, Status: domain.AppStatusStarting}},
-		latestJobErr: pgx.ErrNoRows,
+		latestJobErr: sql.ErrNoRows,
 	}
 	notifier := &fakeNotifier{}
 	r := New(store, notifier, &fakeLocker{acquireOK: true}, "test", slog.Default())

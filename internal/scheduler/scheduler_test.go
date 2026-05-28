@@ -6,15 +6,13 @@ import (
 	"errors"
 	"testing"
 
-	"github.com/jackc/pgx/v5/pgtype"
-
 	"github.com/stretchr/testify/require"
 	"oc-manager/internal/store/sqlc"
 )
 
 // TestSchedulerTickReenqueuesReadyJobs 验证调度器TickReenqueuesReady任务的预期行为场景。
 func TestSchedulerTickReenqueuesReadyJobs(t *testing.T) {
-	store := &storeStub{ready: makeJobs(t, "00000000-0000-0000-0000-0000000001a1", "00000000-0000-0000-0000-0000000001a2")}
+	store := &storeStub{ready: makeJobs("00000000-0000-0000-0000-0000000001a1", "00000000-0000-0000-0000-0000000001a2")}
 	queue := &queueStub{}
 
 	s := New(store, queue, Config{})
@@ -25,7 +23,7 @@ func TestSchedulerTickReenqueuesReadyJobs(t *testing.T) {
 
 // TestSchedulerTickPropagatesEnqueueError 验证调度器Tick透传Enqueue错误的错误映射或错误记录场景。
 func TestSchedulerTickPropagatesEnqueueError(t *testing.T) {
-	store := &storeStub{ready: makeJobs(t, "00000000-0000-0000-0000-0000000001a1")}
+	store := &storeStub{ready: makeJobs("00000000-0000-0000-0000-0000000001a1")}
 	queue := &queueStub{err: errors.New("redis down")}
 	s := New(store, queue, Config{})
 	err := s.Tick(context.Background())
@@ -41,13 +39,11 @@ func TestSchedulerTickAppliesDefaultBatchSize(t *testing.T) {
 	require.Equal(t, int32(100), store.lastLimit)
 }
 
-func makeJobs(t *testing.T, ids ...string) []sqlc.Job {
+// makeJobs 根据 id 字符串列表构造 sqlc.Job 切片; ID 现为 string。
+func makeJobs(ids ...string) []sqlc.Job {
 	jobs := make([]sqlc.Job, 0, len(ids))
 	for _, id := range ids {
-		var uuid pgtype.UUID
-		err := uuid.Scan(id)
-		require.NoError(t, err)
-		jobs = append(jobs, sqlc.Job{ID: uuid})
+		jobs = append(jobs, sqlc.Job{ID: id})
 	}
 	return jobs
 }

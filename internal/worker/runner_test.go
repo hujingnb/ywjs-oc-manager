@@ -10,8 +10,6 @@ import (
 	"testing"
 	"time"
 
-	"github.com/jackc/pgx/v5/pgtype"
-
 	"github.com/stretchr/testify/require"
 	"oc-manager/internal/store/sqlc"
 	"oc-manager/internal/worker/handlers"
@@ -19,22 +17,23 @@ import (
 
 // countingStore 在 Tick 调用 Reserve 后立刻返回空，确保 Tick 快速跑完。
 // 同时统计调用次数，方便断言并发执行情况。
+// JobStore 迁移为 MySQL/string 接口：所有方法仅返回 error（:exec 语义）。
 type countingStore struct{}
 
-func (countingStore) GetJob(_ context.Context, _ pgtype.UUID) (sqlc.Job, error) {
+func (countingStore) GetJob(_ context.Context, _ string) (sqlc.Job, error) {
 	return sqlc.Job{}, errors.New("unused")
 }
-func (countingStore) MarkJobRunning(_ context.Context, _ sqlc.MarkJobRunningParams) (sqlc.Job, error) {
-	return sqlc.Job{}, nil
+func (countingStore) MarkJobRunning(_ context.Context, _ sqlc.MarkJobRunningParams) error {
+	return nil
 }
-func (countingStore) MarkJobSucceeded(_ context.Context, _ pgtype.UUID) (sqlc.Job, error) {
-	return sqlc.Job{}, nil
+func (countingStore) MarkJobSucceeded(_ context.Context, _ string) error {
+	return nil
 }
-func (countingStore) MarkJobFailed(_ context.Context, _ sqlc.MarkJobFailedParams) (sqlc.Job, error) {
-	return sqlc.Job{}, nil
+func (countingStore) MarkJobFailed(_ context.Context, _ sqlc.MarkJobFailedParams) error {
+	return nil
 }
-func (countingStore) RetryJob(_ context.Context, _ sqlc.RetryJobParams) (sqlc.Job, error) {
-	return sqlc.Job{}, nil
+func (countingStore) RetryJob(_ context.Context, _ sqlc.RetryJobParams) error {
+	return nil
 }
 
 type countingQueue struct {

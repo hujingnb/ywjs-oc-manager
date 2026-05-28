@@ -7,7 +7,6 @@ import (
 	"testing"
 	"time"
 
-	"github.com/jackc/pgx/v5/pgtype"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
@@ -17,19 +16,21 @@ import (
 
 // fakeProgressStore 记录每次写库参数,供断言。
 // 实现 ProgressStore 接口,worker handler 的 AppInitializeStore 也满足同方法。
+// SetAppProgress 迁移后仅返回 error（:exec 语义）。
 type fakeProgressStore struct {
 	calls []sqlc.SetAppProgressParams
 }
 
-// SetAppProgress 仅把调用参数追加到切片,不真实写库;返回空 App 足够测试使用。
-func (f *fakeProgressStore) SetAppProgress(_ context.Context, p sqlc.SetAppProgressParams) (sqlc.App, error) {
+// SetAppProgress 仅把调用参数追加到切片,不真实写库；:exec 语义仅返回 error。
+func (f *fakeProgressStore) SetAppProgress(_ context.Context, p sqlc.SetAppProgressParams) error {
 	f.calls = append(f.calls, p)
-	return sqlc.App{}, nil
+	return nil
 }
 
 // newReporter 创建一个带固定时钟的 reporter,供测试控制节流边界。
+// appID 迁移为 string（MySQL uuid），此处用空字符串表示测试用的零值 ID。
 func newReporter(store *fakeProgressStore, now func() time.Time) *progressReporter {
-	r := newProgressReporter(pgtype.UUID{}, store)
+	r := newProgressReporter("", store)
 	r.now = now
 	return r
 }

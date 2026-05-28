@@ -8,14 +8,14 @@ import (
 	"testing"
 	"time"
 
-	"github.com/jackc/pgx/v5/pgtype"
-
 	"github.com/stretchr/testify/require"
 	"oc-manager/internal/domain"
 	"oc-manager/internal/integrations/runtime"
 	"oc-manager/internal/store/sqlc"
 )
 
+// fakeHealthStore 实现 AppHealthCheckStore 接口；迁移后方法签名均使用 string/null.* 类型，
+// SetAppStatus / SoftDeleteApp / SetAppHealthState / CreateJob 均为 :exec（仅返回 error）。
 type fakeHealthStore struct {
 	app           sqlc.App
 	statusUpdates []string
@@ -23,38 +23,39 @@ type fakeHealthStore struct {
 	jobs          []sqlc.CreateJobParams
 }
 
-func (s *fakeHealthStore) GetApp(_ context.Context, _ pgtype.UUID) (sqlc.App, error) {
+func (s *fakeHealthStore) GetApp(_ context.Context, _ string) (sqlc.App, error) {
 	return s.app, nil
 }
 
-func (s *fakeHealthStore) SetAppStatus(_ context.Context, p sqlc.SetAppStatusParams) (sqlc.App, error) {
+func (s *fakeHealthStore) SetAppStatus(_ context.Context, p sqlc.SetAppStatusParams) error {
 	s.statusUpdates = append(s.statusUpdates, p.Status)
 	s.app.Status = p.Status
-	return s.app, nil
+	return nil
 }
 
-func (s *fakeHealthStore) SoftDeleteApp(_ context.Context, _ pgtype.UUID) (sqlc.App, error) {
-	return s.app, nil
+func (s *fakeHealthStore) SoftDeleteApp(_ context.Context, _ string) error {
+	return nil
 }
 
 // SetAppAppliedVersion 实现 AppRuntimeStore 接口；健康检查流程不写版本已应用信息，此处仅满足接口约束。
-func (s *fakeHealthStore) SetAppAppliedVersion(_ context.Context, _ sqlc.SetAppAppliedVersionParams) (sqlc.App, error) {
-	return s.app, nil
+func (s *fakeHealthStore) SetAppAppliedVersion(_ context.Context, _ sqlc.SetAppAppliedVersionParams) error {
+	return nil
 }
 
 // SetAppContainer 实现 AppRuntimeStore 接口；健康检查流程不重建容器，此处仅满足接口约束。
-func (s *fakeHealthStore) SetAppContainer(_ context.Context, _ sqlc.SetAppContainerParams) (sqlc.App, error) {
-	return s.app, nil
+func (s *fakeHealthStore) SetAppContainer(_ context.Context, _ sqlc.SetAppContainerParams) error {
+	return nil
 }
 
-func (s *fakeHealthStore) SetAppHealthState(_ context.Context, p sqlc.SetAppHealthStateParams) (sqlc.App, error) {
+func (s *fakeHealthStore) SetAppHealthState(_ context.Context, p sqlc.SetAppHealthStateParams) error {
 	s.healthState = p.HealthStateJson
-	return s.app, nil
+	return nil
 }
 
-func (s *fakeHealthStore) CreateJob(_ context.Context, p sqlc.CreateJobParams) (sqlc.Job, error) {
+// CreateJob 迁移为 :exec；存档入参，返回 nil 错误。
+func (s *fakeHealthStore) CreateJob(_ context.Context, p sqlc.CreateJobParams) error {
 	s.jobs = append(s.jobs, p)
-	return sqlc.Job{ID: pgtype.UUID{Valid: true}}, nil
+	return nil
 }
 
 // fakeInspector 实现 ContainerInspector，返回预设的 docker inspect 结果。

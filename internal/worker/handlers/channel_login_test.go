@@ -2,13 +2,12 @@ package handlers
 
 import (
 	"context"
+	"database/sql"
 	"errors"
 	"testing"
 	"time"
 
-	"github.com/jackc/pgx/v5"
-	"github.com/jackc/pgx/v5/pgtype"
-
+	"github.com/guregu/null/v5"
 	"github.com/stretchr/testify/require"
 	"oc-manager/internal/domain"
 	"oc-manager/internal/integrations/channel"
@@ -283,71 +282,80 @@ type channelWorkerStore struct {
 	appStatusSet bool
 }
 
+// newChannelWorkerStore 构造 channelWorkerStore；ID 字段迁移为 string（MySQL uuid）。
 func newChannelWorkerStore(t *testing.T) *channelWorkerStore {
-	appID := mustWorkerUUID(t, testChannelWorkerAppID)
 	app := sqlc.App{
-		ID:            appID,
-		OrgID:         mustWorkerUUID(t, testChannelWorkerOrgID),
-		OwnerUserID:   mustWorkerUUID(t, testChannelWorkerOwnerID),
-		RuntimeNodeID: mustWorkerUUID(t, testChannelWorkerNodeID),
+		ID:            testChannelWorkerAppID,
+		OrgID:         testChannelWorkerOrgID,
+		OwnerUserID:   testChannelWorkerOwnerID,
+		RuntimeNodeID: testChannelWorkerNodeID,
 		Status:        domain.AppStatusBindingWaiting,
-		ContainerID:   pgtype.Text{String: "ctr-1", Valid: true},
+		ContainerID:   null.StringFrom("ctr-1"),
 	}
 	return &channelWorkerStore{
 		t:   t,
 		app: app,
 		binding: sqlc.ChannelBinding{
-			ID:          mustWorkerUUID(t, "00000000-0000-0000-0000-00000000c105"),
-			AppID:       appID,
+			ID:          "00000000-0000-0000-0000-00000000c105",
+			AppID:       testChannelWorkerAppID,
 			ChannelType: domain.ChannelTypeWeChat,
 			Status:      domain.ChannelStatusUnbound,
 		},
 	}
 }
 
-func (s *channelWorkerStore) GetApp(_ context.Context, id pgtype.UUID) (sqlc.App, error) {
+// GetApp 按字符串 UUID 查 app；id 迁移为 string。
+func (s *channelWorkerStore) GetApp(_ context.Context, id string) (sqlc.App, error) {
 	if id != s.app.ID {
-		return sqlc.App{}, pgx.ErrNoRows
+		return sqlc.App{}, sql.ErrNoRows
 	}
 	return s.app, nil
 }
 
+// GetChannelBindingByAppAndType 按 AppID（string）和 ChannelType 查渠道绑定。
 func (s *channelWorkerStore) GetChannelBindingByAppAndType(_ context.Context, arg sqlc.GetChannelBindingByAppAndTypeParams) (sqlc.ChannelBinding, error) {
 	if arg.AppID != s.binding.AppID || arg.ChannelType != s.binding.ChannelType {
-		return sqlc.ChannelBinding{}, pgx.ErrNoRows
+		return sqlc.ChannelBinding{}, sql.ErrNoRows
 	}
 	return s.binding, nil
 }
 
-func (s *channelWorkerStore) SetChannelBindingChallenge(_ context.Context, arg sqlc.SetChannelBindingChallengeParams) (sqlc.ChannelBinding, error) {
+// SetChannelBindingChallenge :exec 语义仅返回 error；更新内存 binding 状态。
+func (s *channelWorkerStore) SetChannelBindingChallenge(_ context.Context, arg sqlc.SetChannelBindingChallengeParams) error {
 	s.binding.Status = domain.ChannelStatusPendingAuth
 	s.binding.MetadataJson = arg.MetadataJson
-	return s.binding, nil
+	return nil
 }
 
-func (s *channelWorkerStore) SetChannelBindingStatus(_ context.Context, arg sqlc.SetChannelBindingStatusParams) (sqlc.ChannelBinding, error) {
+// SetChannelBindingStatus :exec 语义仅返回 error；更新 binding 状态与错误信息。
+func (s *channelWorkerStore) SetChannelBindingStatus(_ context.Context, arg sqlc.SetChannelBindingStatusParams) error {
 	s.binding.Status = arg.Status
 	s.binding.LastError = arg.LastError
-	return s.binding, nil
+	return nil
 }
 
-func (s *channelWorkerStore) MarkChannelBindingBound(_ context.Context, arg sqlc.MarkChannelBindingBoundParams) (sqlc.ChannelBinding, error) {
+// MarkChannelBindingBound :exec 语义仅返回 error；标记绑定为 bound，写入身份与渠道名。
+func (s *channelWorkerStore) MarkChannelBindingBound(_ context.Context, arg sqlc.MarkChannelBindingBoundParams) error {
 	s.binding.Status = domain.ChannelStatusBound
 	s.binding.BoundIdentity = arg.BoundIdentity
 	s.binding.ChannelName = arg.ChannelName
 	s.binding.MetadataJson = arg.MetadataJson
-	return s.binding, nil
+	return nil
 }
 
-func (s *channelWorkerStore) SetAppStatus(_ context.Context, arg sqlc.SetAppStatusParams) (sqlc.App, error) {
+// SetAppStatus :exec 语义仅返回 error；记录状态更新。
+func (s *channelWorkerStore) SetAppStatus(_ context.Context, arg sqlc.SetAppStatusParams) error {
 	s.appStatusSet = true
 	s.app.Status = arg.Status
-	return s.app, nil
+	return nil
 }
 
-func (s *channelWorkerStore) CreateJob(_ context.Context, arg sqlc.CreateJobParams) (sqlc.Job, error) {
+// CreateJob :exec 语义仅返回 error；记录入参（供断言 job type 等），不返回 job 对象。
+// jobs 切片存档；测试只需检查 jobs 的 Type 字段，不依赖返回的 job ID。
+func (s *channelWorkerStore) CreateJob(_ context.Context, arg sqlc.CreateJobParams) error {
+	// ID 由调用方（source）自行生成，这里用 arg.ID 保留便于排查。
 	job := sqlc.Job{
-		ID:          mustWorkerUUID(s.t, "00000000-0000-0000-0000-00000000c200"),
+		ID:          arg.ID,
 		Type:        arg.Type,
 		Status:      domain.JobStatusPending,
 		RunAfter:    arg.RunAfter,
@@ -355,18 +363,11 @@ func (s *channelWorkerStore) CreateJob(_ context.Context, arg sqlc.CreateJobPara
 		PayloadJson: arg.PayloadJson,
 	}
 	s.jobs = append(s.jobs, job)
-	return job, nil
+	return nil
 }
 
-func (s *channelWorkerStore) CreateAuditLog(_ context.Context, arg sqlc.CreateAuditLogParams) (sqlc.AuditLog, error) {
+// CreateAuditLog :exec 语义仅返回 error；存档入参供断言。
+func (s *channelWorkerStore) CreateAuditLog(_ context.Context, arg sqlc.CreateAuditLogParams) error {
 	s.auditLogs = append(s.auditLogs, arg)
-	return sqlc.AuditLog{TargetType: arg.TargetType, TargetID: arg.TargetID, Action: arg.Action, Result: arg.Result, ErrorMessage: arg.ErrorMessage}, nil
-}
-
-func mustWorkerUUID(t *testing.T, value string) pgtype.UUID {
-	t.Helper()
-	var id pgtype.UUID
-	err := id.Scan(value)
-	require.NoError(t, err)
-	return id
+	return nil
 }
