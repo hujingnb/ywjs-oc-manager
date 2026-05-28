@@ -174,7 +174,7 @@ func (h *AuthHandler) Me(c *gin.Context) {
 func writeAuthError(c *gin.Context, err error) {
 	switch {
 	case errors.Is(err, service.ErrInvalidCredentials):
-		c.JSON(http.StatusUnauthorized, apierror.New("INVALID_CREDENTIALS", "用户名或密码错误"))
+		c.JSON(http.StatusUnauthorized, apierror.New("INVALID_CREDENTIALS", "用户名或密码错误，也可能是未填写组织标识"))
 	case errors.Is(err, service.ErrInvalidToken):
 		c.JSON(http.StatusUnauthorized, apierror.New("INVALID_TOKEN", "登录凭证无效"))
 	case errors.Is(err, service.ErrUserDisabled), errors.Is(err, service.ErrOrgDisabled):

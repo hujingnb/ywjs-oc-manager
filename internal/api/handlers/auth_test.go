@@ -57,6 +57,20 @@ func TestAuthLoginRejectsInvalidBody(t *testing.T) {
 	require.Contains(t, recorder.Body.String(), "password")
 }
 
+// TestAuthLoginInvalidCredentialsMentionsOrgCode 验证登录凭证错误时提示组织标识遗漏这一常见误填路径。
+func TestAuthLoginInvalidCredentialsMentionsOrgCode(t *testing.T) {
+	router := newAuthTestRouter(t, &authServiceStub{loginErr: service.ErrInvalidCredentials})
+
+	recorder := httptest.NewRecorder()
+	request := httptest.NewRequest(http.MethodPost, "/api/v1/auth/login", bytes.NewBufferString(`{"username":"member@example.com","password":"wrong"}`))
+	request.Header.Set("Content-Type", "application/json")
+	router.ServeHTTP(recorder, request)
+
+	require.Equal(t, http.StatusUnauthorized, recorder.Code)
+	require.Contains(t, recorder.Body.String(), "用户名或密码错误")
+	require.Contains(t, recorder.Body.String(), "组织标识")
+}
+
 // TestAuthMeReturnsCurrentUser 验证认证当前用户接口返回当前用户的成功路径场景。
 func TestAuthMeReturnsCurrentUser(t *testing.T) {
 	svc := &authServiceStub{meResult: service.AuthUser{ID: "user-1", Username: "member@example.com"}}
@@ -83,6 +97,7 @@ func newAuthTestRouter(t *testing.T, svc *authServiceStub) *gin.Engine {
 
 type authServiceStub struct {
 	loginResult    service.LoginResult
+	loginErr       error
 	meResult       service.AuthUser
 	lastLoginInput service.LoginInput
 	lastPrincipal  auth.Principal
@@ -90,7 +105,7 @@ type authServiceStub struct {
 
 func (s *authServiceStub) Login(_ context.Context, input service.LoginInput) (service.LoginResult, error) {
 	s.lastLoginInput = input
-	return s.loginResult, nil
+	return s.loginResult, s.loginErr
 }
 
 func (s *authServiceStub) Refresh(_ context.Context, _ string) (service.LoginResult, error) {
