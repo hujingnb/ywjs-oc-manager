@@ -7,12 +7,15 @@ package sqlc
 
 import (
 	"context"
+	"encoding/json"
+	"time"
 
-	"github.com/jackc/pgx/v5/pgtype"
+	null "github.com/guregu/null/v5"
 )
 
-const enrollRuntimeNodeInsert = `-- name: EnrollRuntimeNodeInsert :one
+const enrollRuntimeNodeInsert = `-- name: EnrollRuntimeNodeInsert :exec
 INSERT INTO runtime_nodes (
+    id,
     agent_id,
     name,
     status,
@@ -30,29 +33,30 @@ INSERT INTO runtime_nodes (
     metadata_json,
     agent_token_ciphertext
 ) VALUES (
-    $1, $2, 'active', $3, $4, $5, $6, $7, $8, $9, $10, now(), now(), $11, $12, $13
+    ?, ?, ?, 'active', ?, ?, ?, ?, ?, ?, ?, ?, now(), now(), ?, ?, ?
 )
-RETURNING id, name, status, agent_docker_endpoint, agent_file_endpoint, agent_tls_ca_cert, agent_token_hash, agent_version, heartbeat_interval_seconds, last_heartbeat_at, resource_snapshot_json, metadata_json, node_data_root, registered_at, created_at, updated_at, agent_token_ciphertext, max_apps, agent_id, last_probe_attempted_at, last_probe_ok_at, last_probe_failed_at, last_probe_error, probe_failure_streak, probe_success_streak
 `
 
 type EnrollRuntimeNodeInsertParams struct {
-	AgentID                  pgtype.Text `db:"agent_id" json:"agent_id"`
-	Name                     string      `db:"name" json:"name"`
-	MaxApps                  pgtype.Int4 `db:"max_apps" json:"max_apps"`
-	AgentDockerEndpoint      pgtype.Text `db:"agent_docker_endpoint" json:"agent_docker_endpoint"`
-	AgentFileEndpoint        pgtype.Text `db:"agent_file_endpoint" json:"agent_file_endpoint"`
-	AgentTlsCaCert           pgtype.Text `db:"agent_tls_ca_cert" json:"agent_tls_ca_cert"`
-	AgentTokenHash           pgtype.Text `db:"agent_token_hash" json:"agent_token_hash"`
-	HeartbeatIntervalSeconds int32       `db:"heartbeat_interval_seconds" json:"heartbeat_interval_seconds"`
-	AgentVersion             pgtype.Text `db:"agent_version" json:"agent_version"`
-	NodeDataRoot             pgtype.Text `db:"node_data_root" json:"node_data_root"`
-	ResourceSnapshotJson     []byte      `db:"resource_snapshot_json" json:"resource_snapshot_json"`
-	MetadataJson             []byte      `db:"metadata_json" json:"metadata_json"`
-	AgentTokenCiphertext     pgtype.Text `db:"agent_token_ciphertext" json:"agent_token_ciphertext"`
+	ID                       string          `db:"id" json:"id"`
+	AgentID                  null.String     `db:"agent_id" json:"agent_id"`
+	Name                     string          `db:"name" json:"name"`
+	MaxApps                  null.Int        `db:"max_apps" json:"max_apps"`
+	AgentDockerEndpoint      null.String     `db:"agent_docker_endpoint" json:"agent_docker_endpoint"`
+	AgentFileEndpoint        null.String     `db:"agent_file_endpoint" json:"agent_file_endpoint"`
+	AgentTlsCaCert           null.String     `db:"agent_tls_ca_cert" json:"agent_tls_ca_cert"`
+	AgentTokenHash           null.String     `db:"agent_token_hash" json:"agent_token_hash"`
+	HeartbeatIntervalSeconds int32           `db:"heartbeat_interval_seconds" json:"heartbeat_interval_seconds"`
+	AgentVersion             null.String     `db:"agent_version" json:"agent_version"`
+	NodeDataRoot             null.String     `db:"node_data_root" json:"node_data_root"`
+	ResourceSnapshotJson     json.RawMessage `db:"resource_snapshot_json" json:"resource_snapshot_json"`
+	MetadataJson             json.RawMessage `db:"metadata_json" json:"metadata_json"`
+	AgentTokenCiphertext     null.String     `db:"agent_token_ciphertext" json:"agent_token_ciphertext"`
 }
 
-func (q *Queries) EnrollRuntimeNodeInsert(ctx context.Context, arg EnrollRuntimeNodeInsertParams) (RuntimeNode, error) {
-	row := q.db.QueryRow(ctx, enrollRuntimeNodeInsert,
+func (q *Queries) EnrollRuntimeNodeInsert(ctx context.Context, arg EnrollRuntimeNodeInsertParams) error {
+	_, err := q.db.ExecContext(ctx, enrollRuntimeNodeInsert,
+		arg.ID,
 		arg.AgentID,
 		arg.Name,
 		arg.MaxApps,
@@ -67,78 +71,48 @@ func (q *Queries) EnrollRuntimeNodeInsert(ctx context.Context, arg EnrollRuntime
 		arg.MetadataJson,
 		arg.AgentTokenCiphertext,
 	)
-	var i RuntimeNode
-	err := row.Scan(
-		&i.ID,
-		&i.Name,
-		&i.Status,
-		&i.AgentDockerEndpoint,
-		&i.AgentFileEndpoint,
-		&i.AgentTlsCaCert,
-		&i.AgentTokenHash,
-		&i.AgentVersion,
-		&i.HeartbeatIntervalSeconds,
-		&i.LastHeartbeatAt,
-		&i.ResourceSnapshotJson,
-		&i.MetadataJson,
-		&i.NodeDataRoot,
-		&i.RegisteredAt,
-		&i.CreatedAt,
-		&i.UpdatedAt,
-		&i.AgentTokenCiphertext,
-		&i.MaxApps,
-		&i.AgentID,
-		&i.LastProbeAttemptedAt,
-		&i.LastProbeOkAt,
-		&i.LastProbeFailedAt,
-		&i.LastProbeError,
-		&i.ProbeFailureStreak,
-		&i.ProbeSuccessStreak,
-	)
-	return i, err
+	return err
 }
 
-const enrollRuntimeNodeUpdate = `-- name: EnrollRuntimeNodeUpdate :one
+const enrollRuntimeNodeUpdate = `-- name: EnrollRuntimeNodeUpdate :exec
 UPDATE runtime_nodes
 SET
-    name = $2,
+    name = ?,
     status = 'active',
-    max_apps = $3,
-    agent_docker_endpoint = $4,
-    agent_file_endpoint = $5,
-    agent_tls_ca_cert = $6,
-    agent_token_hash = $7,
-    agent_version = $8,
-    node_data_root = $9,
+    max_apps = ?,
+    agent_docker_endpoint = ?,
+    agent_file_endpoint = ?,
+    agent_tls_ca_cert = ?,
+    agent_token_hash = ?,
+    agent_version = ?,
+    node_data_root = ?,
     last_heartbeat_at = now(),
-    resource_snapshot_json = $10,
-    metadata_json = $11,
-    agent_token_ciphertext = $12,
+    resource_snapshot_json = ?,
+    metadata_json = ?,
+    agent_token_ciphertext = ?,
     probe_failure_streak = 0,
     probe_success_streak = 0,
     updated_at = now()
-WHERE agent_id = $1
-RETURNING id, name, status, agent_docker_endpoint, agent_file_endpoint, agent_tls_ca_cert, agent_token_hash, agent_version, heartbeat_interval_seconds, last_heartbeat_at, resource_snapshot_json, metadata_json, node_data_root, registered_at, created_at, updated_at, agent_token_ciphertext, max_apps, agent_id, last_probe_attempted_at, last_probe_ok_at, last_probe_failed_at, last_probe_error, probe_failure_streak, probe_success_streak
+WHERE agent_id = ?
 `
 
 type EnrollRuntimeNodeUpdateParams struct {
-	AgentID              pgtype.Text `db:"agent_id" json:"agent_id"`
-	Name                 string      `db:"name" json:"name"`
-	MaxApps              pgtype.Int4 `db:"max_apps" json:"max_apps"`
-	AgentDockerEndpoint  pgtype.Text `db:"agent_docker_endpoint" json:"agent_docker_endpoint"`
-	AgentFileEndpoint    pgtype.Text `db:"agent_file_endpoint" json:"agent_file_endpoint"`
-	AgentTlsCaCert       pgtype.Text `db:"agent_tls_ca_cert" json:"agent_tls_ca_cert"`
-	AgentTokenHash       pgtype.Text `db:"agent_token_hash" json:"agent_token_hash"`
-	AgentVersion         pgtype.Text `db:"agent_version" json:"agent_version"`
-	NodeDataRoot         pgtype.Text `db:"node_data_root" json:"node_data_root"`
-	ResourceSnapshotJson []byte      `db:"resource_snapshot_json" json:"resource_snapshot_json"`
-	MetadataJson         []byte      `db:"metadata_json" json:"metadata_json"`
-	AgentTokenCiphertext pgtype.Text `db:"agent_token_ciphertext" json:"agent_token_ciphertext"`
+	Name                 string          `db:"name" json:"name"`
+	MaxApps              null.Int        `db:"max_apps" json:"max_apps"`
+	AgentDockerEndpoint  null.String     `db:"agent_docker_endpoint" json:"agent_docker_endpoint"`
+	AgentFileEndpoint    null.String     `db:"agent_file_endpoint" json:"agent_file_endpoint"`
+	AgentTlsCaCert       null.String     `db:"agent_tls_ca_cert" json:"agent_tls_ca_cert"`
+	AgentTokenHash       null.String     `db:"agent_token_hash" json:"agent_token_hash"`
+	AgentVersion         null.String     `db:"agent_version" json:"agent_version"`
+	NodeDataRoot         null.String     `db:"node_data_root" json:"node_data_root"`
+	ResourceSnapshotJson json.RawMessage `db:"resource_snapshot_json" json:"resource_snapshot_json"`
+	MetadataJson         json.RawMessage `db:"metadata_json" json:"metadata_json"`
+	AgentTokenCiphertext null.String     `db:"agent_token_ciphertext" json:"agent_token_ciphertext"`
+	AgentID              null.String     `db:"agent_id" json:"agent_id"`
 }
 
-func (q *Queries) EnrollRuntimeNodeUpdate(ctx context.Context, arg EnrollRuntimeNodeUpdateParams) (RuntimeNode, error) {
-	row := q.db.QueryRow(ctx, enrollRuntimeNodeUpdate,
-		arg.AgentID,
+func (q *Queries) EnrollRuntimeNodeUpdate(ctx context.Context, arg EnrollRuntimeNodeUpdateParams) error {
+	_, err := q.db.ExecContext(ctx, enrollRuntimeNodeUpdate,
 		arg.Name,
 		arg.MaxApps,
 		arg.AgentDockerEndpoint,
@@ -150,46 +124,19 @@ func (q *Queries) EnrollRuntimeNodeUpdate(ctx context.Context, arg EnrollRuntime
 		arg.ResourceSnapshotJson,
 		arg.MetadataJson,
 		arg.AgentTokenCiphertext,
+		arg.AgentID,
 	)
-	var i RuntimeNode
-	err := row.Scan(
-		&i.ID,
-		&i.Name,
-		&i.Status,
-		&i.AgentDockerEndpoint,
-		&i.AgentFileEndpoint,
-		&i.AgentTlsCaCert,
-		&i.AgentTokenHash,
-		&i.AgentVersion,
-		&i.HeartbeatIntervalSeconds,
-		&i.LastHeartbeatAt,
-		&i.ResourceSnapshotJson,
-		&i.MetadataJson,
-		&i.NodeDataRoot,
-		&i.RegisteredAt,
-		&i.CreatedAt,
-		&i.UpdatedAt,
-		&i.AgentTokenCiphertext,
-		&i.MaxApps,
-		&i.AgentID,
-		&i.LastProbeAttemptedAt,
-		&i.LastProbeOkAt,
-		&i.LastProbeFailedAt,
-		&i.LastProbeError,
-		&i.ProbeFailureStreak,
-		&i.ProbeSuccessStreak,
-	)
-	return i, err
+	return err
 }
 
 const getRuntimeNode = `-- name: GetRuntimeNode :one
-SELECT id, name, status, agent_docker_endpoint, agent_file_endpoint, agent_tls_ca_cert, agent_token_hash, agent_version, heartbeat_interval_seconds, last_heartbeat_at, resource_snapshot_json, metadata_json, node_data_root, registered_at, created_at, updated_at, agent_token_ciphertext, max_apps, agent_id, last_probe_attempted_at, last_probe_ok_at, last_probe_failed_at, last_probe_error, probe_failure_streak, probe_success_streak
+SELECT id, name, status, agent_docker_endpoint, agent_file_endpoint, agent_tls_ca_cert, agent_token_hash, agent_token_ciphertext, agent_version, heartbeat_interval_seconds, last_heartbeat_at, resource_snapshot_json, metadata_json, node_data_root, registered_at, max_apps, agent_id, last_probe_attempted_at, last_probe_ok_at, last_probe_failed_at, last_probe_error, probe_failure_streak, probe_success_streak, created_at, updated_at
 FROM runtime_nodes
-WHERE id = $1
+WHERE id = ?
 `
 
-func (q *Queries) GetRuntimeNode(ctx context.Context, id pgtype.UUID) (RuntimeNode, error) {
-	row := q.db.QueryRow(ctx, getRuntimeNode, id)
+func (q *Queries) GetRuntimeNode(ctx context.Context, id string) (RuntimeNode, error) {
+	row := q.db.QueryRowContext(ctx, getRuntimeNode, id)
 	var i RuntimeNode
 	err := row.Scan(
 		&i.ID,
@@ -199,6 +146,7 @@ func (q *Queries) GetRuntimeNode(ctx context.Context, id pgtype.UUID) (RuntimeNo
 		&i.AgentFileEndpoint,
 		&i.AgentTlsCaCert,
 		&i.AgentTokenHash,
+		&i.AgentTokenCiphertext,
 		&i.AgentVersion,
 		&i.HeartbeatIntervalSeconds,
 		&i.LastHeartbeatAt,
@@ -206,9 +154,6 @@ func (q *Queries) GetRuntimeNode(ctx context.Context, id pgtype.UUID) (RuntimeNo
 		&i.MetadataJson,
 		&i.NodeDataRoot,
 		&i.RegisteredAt,
-		&i.CreatedAt,
-		&i.UpdatedAt,
-		&i.AgentTokenCiphertext,
 		&i.MaxApps,
 		&i.AgentID,
 		&i.LastProbeAttemptedAt,
@@ -217,18 +162,20 @@ func (q *Queries) GetRuntimeNode(ctx context.Context, id pgtype.UUID) (RuntimeNo
 		&i.LastProbeError,
 		&i.ProbeFailureStreak,
 		&i.ProbeSuccessStreak,
+		&i.CreatedAt,
+		&i.UpdatedAt,
 	)
 	return i, err
 }
 
 const getRuntimeNodeByAgentID = `-- name: GetRuntimeNodeByAgentID :one
-SELECT id, name, status, agent_docker_endpoint, agent_file_endpoint, agent_tls_ca_cert, agent_token_hash, agent_version, heartbeat_interval_seconds, last_heartbeat_at, resource_snapshot_json, metadata_json, node_data_root, registered_at, created_at, updated_at, agent_token_ciphertext, max_apps, agent_id, last_probe_attempted_at, last_probe_ok_at, last_probe_failed_at, last_probe_error, probe_failure_streak, probe_success_streak
+SELECT id, name, status, agent_docker_endpoint, agent_file_endpoint, agent_tls_ca_cert, agent_token_hash, agent_token_ciphertext, agent_version, heartbeat_interval_seconds, last_heartbeat_at, resource_snapshot_json, metadata_json, node_data_root, registered_at, max_apps, agent_id, last_probe_attempted_at, last_probe_ok_at, last_probe_failed_at, last_probe_error, probe_failure_streak, probe_success_streak, created_at, updated_at
 FROM runtime_nodes
-WHERE agent_id = $1
+WHERE agent_id = ?
 `
 
-func (q *Queries) GetRuntimeNodeByAgentID(ctx context.Context, agentID pgtype.Text) (RuntimeNode, error) {
-	row := q.db.QueryRow(ctx, getRuntimeNodeByAgentID, agentID)
+func (q *Queries) GetRuntimeNodeByAgentID(ctx context.Context, agentID null.String) (RuntimeNode, error) {
+	row := q.db.QueryRowContext(ctx, getRuntimeNodeByAgentID, agentID)
 	var i RuntimeNode
 	err := row.Scan(
 		&i.ID,
@@ -238,6 +185,7 @@ func (q *Queries) GetRuntimeNodeByAgentID(ctx context.Context, agentID pgtype.Te
 		&i.AgentFileEndpoint,
 		&i.AgentTlsCaCert,
 		&i.AgentTokenHash,
+		&i.AgentTokenCiphertext,
 		&i.AgentVersion,
 		&i.HeartbeatIntervalSeconds,
 		&i.LastHeartbeatAt,
@@ -245,9 +193,6 @@ func (q *Queries) GetRuntimeNodeByAgentID(ctx context.Context, agentID pgtype.Te
 		&i.MetadataJson,
 		&i.NodeDataRoot,
 		&i.RegisteredAt,
-		&i.CreatedAt,
-		&i.UpdatedAt,
-		&i.AgentTokenCiphertext,
 		&i.MaxApps,
 		&i.AgentID,
 		&i.LastProbeAttemptedAt,
@@ -256,18 +201,20 @@ func (q *Queries) GetRuntimeNodeByAgentID(ctx context.Context, agentID pgtype.Te
 		&i.LastProbeError,
 		&i.ProbeFailureStreak,
 		&i.ProbeSuccessStreak,
+		&i.CreatedAt,
+		&i.UpdatedAt,
 	)
 	return i, err
 }
 
 const getRuntimeNodeByName = `-- name: GetRuntimeNodeByName :one
-SELECT id, name, status, agent_docker_endpoint, agent_file_endpoint, agent_tls_ca_cert, agent_token_hash, agent_version, heartbeat_interval_seconds, last_heartbeat_at, resource_snapshot_json, metadata_json, node_data_root, registered_at, created_at, updated_at, agent_token_ciphertext, max_apps, agent_id, last_probe_attempted_at, last_probe_ok_at, last_probe_failed_at, last_probe_error, probe_failure_streak, probe_success_streak
+SELECT id, name, status, agent_docker_endpoint, agent_file_endpoint, agent_tls_ca_cert, agent_token_hash, agent_token_ciphertext, agent_version, heartbeat_interval_seconds, last_heartbeat_at, resource_snapshot_json, metadata_json, node_data_root, registered_at, max_apps, agent_id, last_probe_attempted_at, last_probe_ok_at, last_probe_failed_at, last_probe_error, probe_failure_streak, probe_success_streak, created_at, updated_at
 FROM runtime_nodes
-WHERE name = $1
+WHERE name = ?
 `
 
 func (q *Queries) GetRuntimeNodeByName(ctx context.Context, name string) (RuntimeNode, error) {
-	row := q.db.QueryRow(ctx, getRuntimeNodeByName, name)
+	row := q.db.QueryRowContext(ctx, getRuntimeNodeByName, name)
 	var i RuntimeNode
 	err := row.Scan(
 		&i.ID,
@@ -277,6 +224,7 @@ func (q *Queries) GetRuntimeNodeByName(ctx context.Context, name string) (Runtim
 		&i.AgentFileEndpoint,
 		&i.AgentTlsCaCert,
 		&i.AgentTokenHash,
+		&i.AgentTokenCiphertext,
 		&i.AgentVersion,
 		&i.HeartbeatIntervalSeconds,
 		&i.LastHeartbeatAt,
@@ -284,9 +232,6 @@ func (q *Queries) GetRuntimeNodeByName(ctx context.Context, name string) (Runtim
 		&i.MetadataJson,
 		&i.NodeDataRoot,
 		&i.RegisteredAt,
-		&i.CreatedAt,
-		&i.UpdatedAt,
-		&i.AgentTokenCiphertext,
 		&i.MaxApps,
 		&i.AgentID,
 		&i.LastProbeAttemptedAt,
@@ -295,13 +240,15 @@ func (q *Queries) GetRuntimeNodeByName(ctx context.Context, name string) (Runtim
 		&i.LastProbeError,
 		&i.ProbeFailureStreak,
 		&i.ProbeSuccessStreak,
+		&i.CreatedAt,
+		&i.UpdatedAt,
 	)
 	return i, err
 }
 
 const listActiveNodesWithAppCounts = `-- name: ListActiveNodesWithAppCounts :many
-SELECT n.id, n.name, n.status, n.agent_docker_endpoint, n.agent_file_endpoint, n.agent_tls_ca_cert, n.agent_token_hash, n.agent_version, n.heartbeat_interval_seconds, n.last_heartbeat_at, n.resource_snapshot_json, n.metadata_json, n.node_data_root, n.registered_at, n.created_at, n.updated_at, n.agent_token_ciphertext, n.max_apps, n.agent_id, n.last_probe_attempted_at, n.last_probe_ok_at, n.last_probe_failed_at, n.last_probe_error, n.probe_failure_streak, n.probe_success_streak,
-       COALESCE(c.app_count, 0)::bigint AS app_count
+SELECT n.id, n.name, n.status, n.agent_docker_endpoint, n.agent_file_endpoint, n.agent_tls_ca_cert, n.agent_token_hash, n.agent_token_ciphertext, n.agent_version, n.heartbeat_interval_seconds, n.last_heartbeat_at, n.resource_snapshot_json, n.metadata_json, n.node_data_root, n.registered_at, n.max_apps, n.agent_id, n.last_probe_attempted_at, n.last_probe_ok_at, n.last_probe_failed_at, n.last_probe_error, n.probe_failure_streak, n.probe_success_streak, n.created_at, n.updated_at,
+       COALESCE(c.app_count, 0) AS app_count
 FROM runtime_nodes n
 LEFT JOIN (
     SELECT runtime_node_id, COUNT(*) AS app_count
@@ -314,39 +261,39 @@ ORDER BY n.name ASC
 `
 
 type ListActiveNodesWithAppCountsRow struct {
-	ID                       pgtype.UUID        `db:"id" json:"id"`
-	Name                     string             `db:"name" json:"name"`
-	Status                   string             `db:"status" json:"status"`
-	AgentDockerEndpoint      pgtype.Text        `db:"agent_docker_endpoint" json:"agent_docker_endpoint"`
-	AgentFileEndpoint        pgtype.Text        `db:"agent_file_endpoint" json:"agent_file_endpoint"`
-	AgentTlsCaCert           pgtype.Text        `db:"agent_tls_ca_cert" json:"agent_tls_ca_cert"`
-	AgentTokenHash           pgtype.Text        `db:"agent_token_hash" json:"agent_token_hash"`
-	AgentVersion             pgtype.Text        `db:"agent_version" json:"agent_version"`
-	HeartbeatIntervalSeconds int32              `db:"heartbeat_interval_seconds" json:"heartbeat_interval_seconds"`
-	LastHeartbeatAt          pgtype.Timestamptz `db:"last_heartbeat_at" json:"last_heartbeat_at"`
-	ResourceSnapshotJson     []byte             `db:"resource_snapshot_json" json:"resource_snapshot_json"`
-	MetadataJson             []byte             `db:"metadata_json" json:"metadata_json"`
-	NodeDataRoot             pgtype.Text        `db:"node_data_root" json:"node_data_root"`
-	RegisteredAt             pgtype.Timestamptz `db:"registered_at" json:"registered_at"`
-	CreatedAt                pgtype.Timestamptz `db:"created_at" json:"created_at"`
-	UpdatedAt                pgtype.Timestamptz `db:"updated_at" json:"updated_at"`
-	AgentTokenCiphertext     pgtype.Text        `db:"agent_token_ciphertext" json:"agent_token_ciphertext"`
-	MaxApps                  pgtype.Int4        `db:"max_apps" json:"max_apps"`
-	AgentID                  pgtype.Text        `db:"agent_id" json:"agent_id"`
-	LastProbeAttemptedAt     pgtype.Timestamptz `db:"last_probe_attempted_at" json:"last_probe_attempted_at"`
-	LastProbeOkAt            pgtype.Timestamptz `db:"last_probe_ok_at" json:"last_probe_ok_at"`
-	LastProbeFailedAt        pgtype.Timestamptz `db:"last_probe_failed_at" json:"last_probe_failed_at"`
-	LastProbeError           pgtype.Text        `db:"last_probe_error" json:"last_probe_error"`
-	ProbeFailureStreak       int32              `db:"probe_failure_streak" json:"probe_failure_streak"`
-	ProbeSuccessStreak       int32              `db:"probe_success_streak" json:"probe_success_streak"`
-	AppCount                 int64              `db:"app_count" json:"app_count"`
+	ID                       string          `db:"id" json:"id"`
+	Name                     string          `db:"name" json:"name"`
+	Status                   string          `db:"status" json:"status"`
+	AgentDockerEndpoint      null.String     `db:"agent_docker_endpoint" json:"agent_docker_endpoint"`
+	AgentFileEndpoint        null.String     `db:"agent_file_endpoint" json:"agent_file_endpoint"`
+	AgentTlsCaCert           null.String     `db:"agent_tls_ca_cert" json:"agent_tls_ca_cert"`
+	AgentTokenHash           null.String     `db:"agent_token_hash" json:"agent_token_hash"`
+	AgentTokenCiphertext     null.String     `db:"agent_token_ciphertext" json:"agent_token_ciphertext"`
+	AgentVersion             null.String     `db:"agent_version" json:"agent_version"`
+	HeartbeatIntervalSeconds int32           `db:"heartbeat_interval_seconds" json:"heartbeat_interval_seconds"`
+	LastHeartbeatAt          null.Time       `db:"last_heartbeat_at" json:"last_heartbeat_at"`
+	ResourceSnapshotJson     json.RawMessage `db:"resource_snapshot_json" json:"resource_snapshot_json"`
+	MetadataJson             json.RawMessage `db:"metadata_json" json:"metadata_json"`
+	NodeDataRoot             null.String     `db:"node_data_root" json:"node_data_root"`
+	RegisteredAt             null.Time       `db:"registered_at" json:"registered_at"`
+	MaxApps                  null.Int        `db:"max_apps" json:"max_apps"`
+	AgentID                  null.String     `db:"agent_id" json:"agent_id"`
+	LastProbeAttemptedAt     null.Time       `db:"last_probe_attempted_at" json:"last_probe_attempted_at"`
+	LastProbeOkAt            null.Time       `db:"last_probe_ok_at" json:"last_probe_ok_at"`
+	LastProbeFailedAt        null.Time       `db:"last_probe_failed_at" json:"last_probe_failed_at"`
+	LastProbeError           null.String     `db:"last_probe_error" json:"last_probe_error"`
+	ProbeFailureStreak       int32           `db:"probe_failure_streak" json:"probe_failure_streak"`
+	ProbeSuccessStreak       int32           `db:"probe_success_streak" json:"probe_success_streak"`
+	CreatedAt                time.Time       `db:"created_at" json:"created_at"`
+	UpdatedAt                time.Time       `db:"updated_at" json:"updated_at"`
+	AppCount                 int64           `db:"app_count" json:"app_count"`
 }
 
 // ListActiveNodesWithAppCounts 列出所有 active 节点并附带其当前未删除应用数量。
 // OnboardingService 自动选节点时按剩余容量过滤；剩余容量 = max_apps - app_count，
 // max_apps NULL 表示不限。degraded / unreachable / disabled 均不参与新应用调度。
 func (q *Queries) ListActiveNodesWithAppCounts(ctx context.Context) ([]ListActiveNodesWithAppCountsRow, error) {
-	rows, err := q.db.Query(ctx, listActiveNodesWithAppCounts)
+	rows, err := q.db.QueryContext(ctx, listActiveNodesWithAppCounts)
 	if err != nil {
 		return nil, err
 	}
@@ -362,6 +309,7 @@ func (q *Queries) ListActiveNodesWithAppCounts(ctx context.Context) ([]ListActiv
 			&i.AgentFileEndpoint,
 			&i.AgentTlsCaCert,
 			&i.AgentTokenHash,
+			&i.AgentTokenCiphertext,
 			&i.AgentVersion,
 			&i.HeartbeatIntervalSeconds,
 			&i.LastHeartbeatAt,
@@ -369,9 +317,6 @@ func (q *Queries) ListActiveNodesWithAppCounts(ctx context.Context) ([]ListActiv
 			&i.MetadataJson,
 			&i.NodeDataRoot,
 			&i.RegisteredAt,
-			&i.CreatedAt,
-			&i.UpdatedAt,
-			&i.AgentTokenCiphertext,
 			&i.MaxApps,
 			&i.AgentID,
 			&i.LastProbeAttemptedAt,
@@ -380,11 +325,16 @@ func (q *Queries) ListActiveNodesWithAppCounts(ctx context.Context) ([]ListActiv
 			&i.LastProbeError,
 			&i.ProbeFailureStreak,
 			&i.ProbeSuccessStreak,
+			&i.CreatedAt,
+			&i.UpdatedAt,
 			&i.AppCount,
 		); err != nil {
 			return nil, err
 		}
 		items = append(items, i)
+	}
+	if err := rows.Close(); err != nil {
+		return nil, err
 	}
 	if err := rows.Err(); err != nil {
 		return nil, err
@@ -393,10 +343,10 @@ func (q *Queries) ListActiveNodesWithAppCounts(ctx context.Context) ([]ListActiv
 }
 
 const listRuntimeNodes = `-- name: ListRuntimeNodes :many
-SELECT id, name, status, agent_docker_endpoint, agent_file_endpoint, agent_tls_ca_cert, agent_token_hash, agent_version, heartbeat_interval_seconds, last_heartbeat_at, resource_snapshot_json, metadata_json, node_data_root, registered_at, created_at, updated_at, agent_token_ciphertext, max_apps, agent_id, last_probe_attempted_at, last_probe_ok_at, last_probe_failed_at, last_probe_error, probe_failure_streak, probe_success_streak
+SELECT id, name, status, agent_docker_endpoint, agent_file_endpoint, agent_tls_ca_cert, agent_token_hash, agent_token_ciphertext, agent_version, heartbeat_interval_seconds, last_heartbeat_at, resource_snapshot_json, metadata_json, node_data_root, registered_at, max_apps, agent_id, last_probe_attempted_at, last_probe_ok_at, last_probe_failed_at, last_probe_error, probe_failure_streak, probe_success_streak, created_at, updated_at
 FROM runtime_nodes
 ORDER BY created_at DESC, id DESC
-LIMIT $1 OFFSET $2
+LIMIT ? OFFSET ?
 `
 
 type ListRuntimeNodesParams struct {
@@ -405,7 +355,7 @@ type ListRuntimeNodesParams struct {
 }
 
 func (q *Queries) ListRuntimeNodes(ctx context.Context, arg ListRuntimeNodesParams) ([]RuntimeNode, error) {
-	rows, err := q.db.Query(ctx, listRuntimeNodes, arg.Limit, arg.Offset)
+	rows, err := q.db.QueryContext(ctx, listRuntimeNodes, arg.Limit, arg.Offset)
 	if err != nil {
 		return nil, err
 	}
@@ -421,6 +371,7 @@ func (q *Queries) ListRuntimeNodes(ctx context.Context, arg ListRuntimeNodesPara
 			&i.AgentFileEndpoint,
 			&i.AgentTlsCaCert,
 			&i.AgentTokenHash,
+			&i.AgentTokenCiphertext,
 			&i.AgentVersion,
 			&i.HeartbeatIntervalSeconds,
 			&i.LastHeartbeatAt,
@@ -428,9 +379,6 @@ func (q *Queries) ListRuntimeNodes(ctx context.Context, arg ListRuntimeNodesPara
 			&i.MetadataJson,
 			&i.NodeDataRoot,
 			&i.RegisteredAt,
-			&i.CreatedAt,
-			&i.UpdatedAt,
-			&i.AgentTokenCiphertext,
 			&i.MaxApps,
 			&i.AgentID,
 			&i.LastProbeAttemptedAt,
@@ -439,10 +387,15 @@ func (q *Queries) ListRuntimeNodes(ctx context.Context, arg ListRuntimeNodesPara
 			&i.LastProbeError,
 			&i.ProbeFailureStreak,
 			&i.ProbeSuccessStreak,
+			&i.CreatedAt,
+			&i.UpdatedAt,
 		); err != nil {
 			return nil, err
 		}
 		items = append(items, i)
+	}
+	if err := rows.Close(); err != nil {
+		return nil, err
 	}
 	if err := rows.Err(); err != nil {
 		return nil, err
@@ -450,173 +403,86 @@ func (q *Queries) ListRuntimeNodes(ctx context.Context, arg ListRuntimeNodesPara
 	return items, nil
 }
 
-const setRuntimeNodeStatus = `-- name: SetRuntimeNodeStatus :one
+const setRuntimeNodeStatus = `-- name: SetRuntimeNodeStatus :exec
 UPDATE runtime_nodes
-SET status = $2, updated_at = now()
-WHERE id = $1
-RETURNING id, name, status, agent_docker_endpoint, agent_file_endpoint, agent_tls_ca_cert, agent_token_hash, agent_version, heartbeat_interval_seconds, last_heartbeat_at, resource_snapshot_json, metadata_json, node_data_root, registered_at, created_at, updated_at, agent_token_ciphertext, max_apps, agent_id, last_probe_attempted_at, last_probe_ok_at, last_probe_failed_at, last_probe_error, probe_failure_streak, probe_success_streak
+SET status = ?, updated_at = now()
+WHERE id = ?
 `
 
 type SetRuntimeNodeStatusParams struct {
-	ID     pgtype.UUID `db:"id" json:"id"`
-	Status string      `db:"status" json:"status"`
+	Status string `db:"status" json:"status"`
+	ID     string `db:"id" json:"id"`
 }
 
-func (q *Queries) SetRuntimeNodeStatus(ctx context.Context, arg SetRuntimeNodeStatusParams) (RuntimeNode, error) {
-	row := q.db.QueryRow(ctx, setRuntimeNodeStatus, arg.ID, arg.Status)
-	var i RuntimeNode
-	err := row.Scan(
-		&i.ID,
-		&i.Name,
-		&i.Status,
-		&i.AgentDockerEndpoint,
-		&i.AgentFileEndpoint,
-		&i.AgentTlsCaCert,
-		&i.AgentTokenHash,
-		&i.AgentVersion,
-		&i.HeartbeatIntervalSeconds,
-		&i.LastHeartbeatAt,
-		&i.ResourceSnapshotJson,
-		&i.MetadataJson,
-		&i.NodeDataRoot,
-		&i.RegisteredAt,
-		&i.CreatedAt,
-		&i.UpdatedAt,
-		&i.AgentTokenCiphertext,
-		&i.MaxApps,
-		&i.AgentID,
-		&i.LastProbeAttemptedAt,
-		&i.LastProbeOkAt,
-		&i.LastProbeFailedAt,
-		&i.LastProbeError,
-		&i.ProbeFailureStreak,
-		&i.ProbeSuccessStreak,
-	)
-	return i, err
+func (q *Queries) SetRuntimeNodeStatus(ctx context.Context, arg SetRuntimeNodeStatusParams) error {
+	_, err := q.db.ExecContext(ctx, setRuntimeNodeStatus, arg.Status, arg.ID)
+	return err
 }
 
-const updateRuntimeNodeHeartbeat = `-- name: UpdateRuntimeNodeHeartbeat :one
+const updateRuntimeNodeHeartbeat = `-- name: UpdateRuntimeNodeHeartbeat :exec
 UPDATE runtime_nodes
 SET
     status = CASE
         WHEN status = 'unreachable' THEN 'active'
         ELSE status
     END,
-    agent_version = $2,
+    agent_version = ?,
     last_heartbeat_at = now(),
-    resource_snapshot_json = $3,
-    metadata_json = $4,
+    resource_snapshot_json = ?,
+    metadata_json = ?,
     updated_at = now()
-WHERE id = $1
-RETURNING id, name, status, agent_docker_endpoint, agent_file_endpoint, agent_tls_ca_cert, agent_token_hash, agent_version, heartbeat_interval_seconds, last_heartbeat_at, resource_snapshot_json, metadata_json, node_data_root, registered_at, created_at, updated_at, agent_token_ciphertext, max_apps, agent_id, last_probe_attempted_at, last_probe_ok_at, last_probe_failed_at, last_probe_error, probe_failure_streak, probe_success_streak
+WHERE id = ?
 `
 
 type UpdateRuntimeNodeHeartbeatParams struct {
-	ID                   pgtype.UUID `db:"id" json:"id"`
-	AgentVersion         pgtype.Text `db:"agent_version" json:"agent_version"`
-	ResourceSnapshotJson []byte      `db:"resource_snapshot_json" json:"resource_snapshot_json"`
-	MetadataJson         []byte      `db:"metadata_json" json:"metadata_json"`
+	AgentVersion         null.String     `db:"agent_version" json:"agent_version"`
+	ResourceSnapshotJson json.RawMessage `db:"resource_snapshot_json" json:"resource_snapshot_json"`
+	MetadataJson         json.RawMessage `db:"metadata_json" json:"metadata_json"`
+	ID                   string          `db:"id" json:"id"`
 }
 
-func (q *Queries) UpdateRuntimeNodeHeartbeat(ctx context.Context, arg UpdateRuntimeNodeHeartbeatParams) (RuntimeNode, error) {
-	row := q.db.QueryRow(ctx, updateRuntimeNodeHeartbeat,
-		arg.ID,
+func (q *Queries) UpdateRuntimeNodeHeartbeat(ctx context.Context, arg UpdateRuntimeNodeHeartbeatParams) error {
+	_, err := q.db.ExecContext(ctx, updateRuntimeNodeHeartbeat,
 		arg.AgentVersion,
 		arg.ResourceSnapshotJson,
 		arg.MetadataJson,
+		arg.ID,
 	)
-	var i RuntimeNode
-	err := row.Scan(
-		&i.ID,
-		&i.Name,
-		&i.Status,
-		&i.AgentDockerEndpoint,
-		&i.AgentFileEndpoint,
-		&i.AgentTlsCaCert,
-		&i.AgentTokenHash,
-		&i.AgentVersion,
-		&i.HeartbeatIntervalSeconds,
-		&i.LastHeartbeatAt,
-		&i.ResourceSnapshotJson,
-		&i.MetadataJson,
-		&i.NodeDataRoot,
-		&i.RegisteredAt,
-		&i.CreatedAt,
-		&i.UpdatedAt,
-		&i.AgentTokenCiphertext,
-		&i.MaxApps,
-		&i.AgentID,
-		&i.LastProbeAttemptedAt,
-		&i.LastProbeOkAt,
-		&i.LastProbeFailedAt,
-		&i.LastProbeError,
-		&i.ProbeFailureStreak,
-		&i.ProbeSuccessStreak,
-	)
-	return i, err
+	return err
 }
 
-const updateRuntimeNodeProbeFailure = `-- name: UpdateRuntimeNodeProbeFailure :one
+const updateRuntimeNodeProbeFailure = `-- name: UpdateRuntimeNodeProbeFailure :exec
 UPDATE runtime_nodes
 SET
     status = CASE
-        WHEN status = 'active' AND probe_failure_streak + 1 >= $2 THEN 'degraded'
+        WHEN status = 'active' AND probe_failure_streak + 1 >= ? THEN 'degraded'
         ELSE status
     END,
     last_probe_attempted_at = now(),
     last_probe_failed_at = now(),
-    last_probe_error = $3,
+    last_probe_error = ?,
     probe_failure_streak = probe_failure_streak + 1,
     probe_success_streak = 0,
     updated_at = now()
-WHERE id = $1
-RETURNING id, name, status, agent_docker_endpoint, agent_file_endpoint, agent_tls_ca_cert, agent_token_hash, agent_version, heartbeat_interval_seconds, last_heartbeat_at, resource_snapshot_json, metadata_json, node_data_root, registered_at, created_at, updated_at, agent_token_ciphertext, max_apps, agent_id, last_probe_attempted_at, last_probe_ok_at, last_probe_failed_at, last_probe_error, probe_failure_streak, probe_success_streak
+WHERE id = ?
 `
 
 type UpdateRuntimeNodeProbeFailureParams struct {
-	ID                 pgtype.UUID `db:"id" json:"id"`
 	ProbeFailureStreak int32       `db:"probe_failure_streak" json:"probe_failure_streak"`
-	LastProbeError     pgtype.Text `db:"last_probe_error" json:"last_probe_error"`
+	LastProbeError     null.String `db:"last_probe_error" json:"last_probe_error"`
+	ID                 string      `db:"id" json:"id"`
 }
 
-func (q *Queries) UpdateRuntimeNodeProbeFailure(ctx context.Context, arg UpdateRuntimeNodeProbeFailureParams) (RuntimeNode, error) {
-	row := q.db.QueryRow(ctx, updateRuntimeNodeProbeFailure, arg.ID, arg.ProbeFailureStreak, arg.LastProbeError)
-	var i RuntimeNode
-	err := row.Scan(
-		&i.ID,
-		&i.Name,
-		&i.Status,
-		&i.AgentDockerEndpoint,
-		&i.AgentFileEndpoint,
-		&i.AgentTlsCaCert,
-		&i.AgentTokenHash,
-		&i.AgentVersion,
-		&i.HeartbeatIntervalSeconds,
-		&i.LastHeartbeatAt,
-		&i.ResourceSnapshotJson,
-		&i.MetadataJson,
-		&i.NodeDataRoot,
-		&i.RegisteredAt,
-		&i.CreatedAt,
-		&i.UpdatedAt,
-		&i.AgentTokenCiphertext,
-		&i.MaxApps,
-		&i.AgentID,
-		&i.LastProbeAttemptedAt,
-		&i.LastProbeOkAt,
-		&i.LastProbeFailedAt,
-		&i.LastProbeError,
-		&i.ProbeFailureStreak,
-		&i.ProbeSuccessStreak,
-	)
-	return i, err
+func (q *Queries) UpdateRuntimeNodeProbeFailure(ctx context.Context, arg UpdateRuntimeNodeProbeFailureParams) error {
+	_, err := q.db.ExecContext(ctx, updateRuntimeNodeProbeFailure, arg.ProbeFailureStreak, arg.LastProbeError, arg.ID)
+	return err
 }
 
-const updateRuntimeNodeProbeSuccess = `-- name: UpdateRuntimeNodeProbeSuccess :one
+const updateRuntimeNodeProbeSuccess = `-- name: UpdateRuntimeNodeProbeSuccess :exec
 UPDATE runtime_nodes
 SET
     status = CASE
-        WHEN status = 'degraded' AND probe_success_streak + 1 >= $2 THEN 'active'
+        WHEN status = 'degraded' AND probe_success_streak + 1 >= ? THEN 'active'
         ELSE status
     END,
     last_probe_attempted_at = now(),
@@ -625,44 +491,15 @@ SET
     probe_success_streak = probe_success_streak + 1,
     probe_failure_streak = 0,
     updated_at = now()
-WHERE id = $1
-RETURNING id, name, status, agent_docker_endpoint, agent_file_endpoint, agent_tls_ca_cert, agent_token_hash, agent_version, heartbeat_interval_seconds, last_heartbeat_at, resource_snapshot_json, metadata_json, node_data_root, registered_at, created_at, updated_at, agent_token_ciphertext, max_apps, agent_id, last_probe_attempted_at, last_probe_ok_at, last_probe_failed_at, last_probe_error, probe_failure_streak, probe_success_streak
+WHERE id = ?
 `
 
 type UpdateRuntimeNodeProbeSuccessParams struct {
-	ID                 pgtype.UUID `db:"id" json:"id"`
-	ProbeSuccessStreak int32       `db:"probe_success_streak" json:"probe_success_streak"`
+	ProbeSuccessStreak int32  `db:"probe_success_streak" json:"probe_success_streak"`
+	ID                 string `db:"id" json:"id"`
 }
 
-func (q *Queries) UpdateRuntimeNodeProbeSuccess(ctx context.Context, arg UpdateRuntimeNodeProbeSuccessParams) (RuntimeNode, error) {
-	row := q.db.QueryRow(ctx, updateRuntimeNodeProbeSuccess, arg.ID, arg.ProbeSuccessStreak)
-	var i RuntimeNode
-	err := row.Scan(
-		&i.ID,
-		&i.Name,
-		&i.Status,
-		&i.AgentDockerEndpoint,
-		&i.AgentFileEndpoint,
-		&i.AgentTlsCaCert,
-		&i.AgentTokenHash,
-		&i.AgentVersion,
-		&i.HeartbeatIntervalSeconds,
-		&i.LastHeartbeatAt,
-		&i.ResourceSnapshotJson,
-		&i.MetadataJson,
-		&i.NodeDataRoot,
-		&i.RegisteredAt,
-		&i.CreatedAt,
-		&i.UpdatedAt,
-		&i.AgentTokenCiphertext,
-		&i.MaxApps,
-		&i.AgentID,
-		&i.LastProbeAttemptedAt,
-		&i.LastProbeOkAt,
-		&i.LastProbeFailedAt,
-		&i.LastProbeError,
-		&i.ProbeFailureStreak,
-		&i.ProbeSuccessStreak,
-	)
-	return i, err
+func (q *Queries) UpdateRuntimeNodeProbeSuccess(ctx context.Context, arg UpdateRuntimeNodeProbeSuccessParams) error {
+	_, err := q.db.ExecContext(ctx, updateRuntimeNodeProbeSuccess, arg.ProbeSuccessStreak, arg.ID)
+	return err
 }

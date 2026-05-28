@@ -7,18 +7,19 @@ package sqlc
 
 import (
 	"context"
+	"encoding/json"
 
-	"github.com/jackc/pgx/v5/pgtype"
+	null "github.com/guregu/null/v5"
 )
 
 const countAppsUsingVersion = `-- name: CountAppsUsingVersion :one
 SELECT count(*) FROM apps
-WHERE version_id = $1 AND deleted_at IS NULL
+WHERE version_id = ? AND deleted_at IS NULL
 `
 
 // 严格保护：版本被未删除实例引用时不可删除。
-func (q *Queries) CountAppsUsingVersion(ctx context.Context, versionID pgtype.UUID) (int64, error) {
-	row := q.db.QueryRow(ctx, countAppsUsingVersion, versionID)
+func (q *Queries) CountAppsUsingVersion(ctx context.Context, versionID null.String) (int64, error) {
+	row := q.db.QueryRowContext(ctx, countAppsUsingVersion, versionID)
 	var count int64
 	err := row.Scan(&count)
 	return count, err
@@ -26,40 +27,41 @@ func (q *Queries) CountAppsUsingVersion(ctx context.Context, versionID pgtype.UU
 
 const countOrgsUsingVersion = `-- name: CountOrgsUsingVersion :one
 SELECT count(*) FROM organizations
-WHERE deleted_at IS NULL AND jsonb_exists(assistant_version_ids, $1)
+WHERE deleted_at IS NULL AND JSON_CONTAINS(assistant_version_ids, JSON_QUOTE(?))
 `
 
 // 严格保护：版本出现在任意未删除组织 allowlist 时不可删除。
-func (q *Queries) CountOrgsUsingVersion(ctx context.Context, jsonbExists string) (int64, error) {
-	row := q.db.QueryRow(ctx, countOrgsUsingVersion, jsonbExists)
+func (q *Queries) CountOrgsUsingVersion(ctx context.Context, jsonQUOTE string) (int64, error) {
+	row := q.db.QueryRowContext(ctx, countOrgsUsingVersion, jsonQUOTE)
 	var count int64
 	err := row.Scan(&count)
 	return count, err
 }
 
-const createAssistantVersion = `-- name: CreateAssistantVersion :one
+const createAssistantVersion = `-- name: CreateAssistantVersion :exec
 INSERT INTO assistant_versions (
-    name, description, system_prompt, image_id, main_model,
+    id, name, description, system_prompt, image_id, main_model,
     routing_json, skills_json, created_by
 ) VALUES (
-    $1, $2, $3, $4, $5, $6, $7, $8
+    ?, ?, ?, ?, ?, ?, ?, ?, ?
 )
-RETURNING id, name, description, system_prompt, image_id, main_model, routing_json, skills_json, revision, created_by, created_at, updated_at, deleted_at
 `
 
 type CreateAssistantVersionParams struct {
-	Name         string      `db:"name" json:"name"`
-	Description  string      `db:"description" json:"description"`
-	SystemPrompt string      `db:"system_prompt" json:"system_prompt"`
-	ImageID      string      `db:"image_id" json:"image_id"`
-	MainModel    string      `db:"main_model" json:"main_model"`
-	RoutingJson  []byte      `db:"routing_json" json:"routing_json"`
-	SkillsJson   []byte      `db:"skills_json" json:"skills_json"`
-	CreatedBy    pgtype.UUID `db:"created_by" json:"created_by"`
+	ID           string          `db:"id" json:"id"`
+	Name         string          `db:"name" json:"name"`
+	Description  string          `db:"description" json:"description"`
+	SystemPrompt string          `db:"system_prompt" json:"system_prompt"`
+	ImageID      string          `db:"image_id" json:"image_id"`
+	MainModel    string          `db:"main_model" json:"main_model"`
+	RoutingJson  json.RawMessage `db:"routing_json" json:"routing_json"`
+	SkillsJson   json.RawMessage `db:"skills_json" json:"skills_json"`
+	CreatedBy    null.String     `db:"created_by" json:"created_by"`
 }
 
-func (q *Queries) CreateAssistantVersion(ctx context.Context, arg CreateAssistantVersionParams) (AssistantVersion, error) {
-	row := q.db.QueryRow(ctx, createAssistantVersion,
+func (q *Queries) CreateAssistantVersion(ctx context.Context, arg CreateAssistantVersionParams) error {
+	_, err := q.db.ExecContext(ctx, createAssistantVersion,
+		arg.ID,
 		arg.Name,
 		arg.Description,
 		arg.SystemPrompt,
@@ -69,32 +71,16 @@ func (q *Queries) CreateAssistantVersion(ctx context.Context, arg CreateAssistan
 		arg.SkillsJson,
 		arg.CreatedBy,
 	)
-	var i AssistantVersion
-	err := row.Scan(
-		&i.ID,
-		&i.Name,
-		&i.Description,
-		&i.SystemPrompt,
-		&i.ImageID,
-		&i.MainModel,
-		&i.RoutingJson,
-		&i.SkillsJson,
-		&i.Revision,
-		&i.CreatedBy,
-		&i.CreatedAt,
-		&i.UpdatedAt,
-		&i.DeletedAt,
-	)
-	return i, err
+	return err
 }
 
 const getAssistantVersion = `-- name: GetAssistantVersion :one
-SELECT id, name, description, system_prompt, image_id, main_model, routing_json, skills_json, revision, created_by, created_at, updated_at, deleted_at FROM assistant_versions
-WHERE id = $1 AND deleted_at IS NULL
+SELECT id, name, description, system_prompt, image_id, main_model, routing_json, skills_json, revision, created_by, created_at, updated_at, deleted_at, name_active_key FROM assistant_versions
+WHERE id = ? AND deleted_at IS NULL
 `
 
-func (q *Queries) GetAssistantVersion(ctx context.Context, id pgtype.UUID) (AssistantVersion, error) {
-	row := q.db.QueryRow(ctx, getAssistantVersion, id)
+func (q *Queries) GetAssistantVersion(ctx context.Context, id string) (AssistantVersion, error) {
+	row := q.db.QueryRowContext(ctx, getAssistantVersion, id)
 	var i AssistantVersion
 	err := row.Scan(
 		&i.ID,
@@ -110,17 +96,18 @@ func (q *Queries) GetAssistantVersion(ctx context.Context, id pgtype.UUID) (Assi
 		&i.CreatedAt,
 		&i.UpdatedAt,
 		&i.DeletedAt,
+		&i.NameActiveKey,
 	)
 	return i, err
 }
 
 const getAssistantVersionByName = `-- name: GetAssistantVersionByName :one
-SELECT id, name, description, system_prompt, image_id, main_model, routing_json, skills_json, revision, created_by, created_at, updated_at, deleted_at FROM assistant_versions
-WHERE name = $1 AND deleted_at IS NULL
+SELECT id, name, description, system_prompt, image_id, main_model, routing_json, skills_json, revision, created_by, created_at, updated_at, deleted_at, name_active_key FROM assistant_versions
+WHERE name = ? AND deleted_at IS NULL
 `
 
 func (q *Queries) GetAssistantVersionByName(ctx context.Context, name string) (AssistantVersion, error) {
-	row := q.db.QueryRow(ctx, getAssistantVersionByName, name)
+	row := q.db.QueryRowContext(ctx, getAssistantVersionByName, name)
 	var i AssistantVersion
 	err := row.Scan(
 		&i.ID,
@@ -136,18 +123,19 @@ func (q *Queries) GetAssistantVersionByName(ctx context.Context, name string) (A
 		&i.CreatedAt,
 		&i.UpdatedAt,
 		&i.DeletedAt,
+		&i.NameActiveKey,
 	)
 	return i, err
 }
 
 const listAssistantVersions = `-- name: ListAssistantVersions :many
-SELECT id, name, description, system_prompt, image_id, main_model, routing_json, skills_json, revision, created_by, created_at, updated_at, deleted_at FROM assistant_versions
+SELECT id, name, description, system_prompt, image_id, main_model, routing_json, skills_json, revision, created_by, created_at, updated_at, deleted_at, name_active_key FROM assistant_versions
 WHERE deleted_at IS NULL
 ORDER BY created_at DESC, id DESC
 `
 
 func (q *Queries) ListAssistantVersions(ctx context.Context) ([]AssistantVersion, error) {
-	rows, err := q.db.Query(ctx, listAssistantVersions)
+	rows, err := q.db.QueryContext(ctx, listAssistantVersions)
 	if err != nil {
 		return nil, err
 	}
@@ -169,10 +157,14 @@ func (q *Queries) ListAssistantVersions(ctx context.Context) ([]AssistantVersion
 			&i.CreatedAt,
 			&i.UpdatedAt,
 			&i.DeletedAt,
+			&i.NameActiveKey,
 		); err != nil {
 			return nil, err
 		}
 		items = append(items, i)
+	}
+	if err := rows.Close(); err != nil {
+		return nil, err
 	}
 	if err := rows.Err(); err != nil {
 		return nil, err
@@ -180,65 +172,46 @@ func (q *Queries) ListAssistantVersions(ctx context.Context) ([]AssistantVersion
 	return items, nil
 }
 
-const softDeleteAssistantVersion = `-- name: SoftDeleteAssistantVersion :one
+const softDeleteAssistantVersion = `-- name: SoftDeleteAssistantVersion :exec
 UPDATE assistant_versions
 SET deleted_at = now(), updated_at = now()
-WHERE id = $1 AND deleted_at IS NULL
-RETURNING id, name, description, system_prompt, image_id, main_model, routing_json, skills_json, revision, created_by, created_at, updated_at, deleted_at
+WHERE id = ? AND deleted_at IS NULL
 `
 
-func (q *Queries) SoftDeleteAssistantVersion(ctx context.Context, id pgtype.UUID) (AssistantVersion, error) {
-	row := q.db.QueryRow(ctx, softDeleteAssistantVersion, id)
-	var i AssistantVersion
-	err := row.Scan(
-		&i.ID,
-		&i.Name,
-		&i.Description,
-		&i.SystemPrompt,
-		&i.ImageID,
-		&i.MainModel,
-		&i.RoutingJson,
-		&i.SkillsJson,
-		&i.Revision,
-		&i.CreatedBy,
-		&i.CreatedAt,
-		&i.UpdatedAt,
-		&i.DeletedAt,
-	)
-	return i, err
+func (q *Queries) SoftDeleteAssistantVersion(ctx context.Context, id string) error {
+	_, err := q.db.ExecContext(ctx, softDeleteAssistantVersion, id)
+	return err
 }
 
-const updateAssistantVersion = `-- name: UpdateAssistantVersion :one
+const updateAssistantVersion = `-- name: UpdateAssistantVersion :exec
 UPDATE assistant_versions
-SET name = $2,
-    description = $3,
-    system_prompt = $4,
-    image_id = $5,
-    main_model = $6,
-    routing_json = $7,
-    skills_json = $8,
-    revision = $9,
+SET name = ?,
+    description = ?,
+    system_prompt = ?,
+    image_id = ?,
+    main_model = ?,
+    routing_json = ?,
+    skills_json = ?,
+    revision = ?,
     updated_at = now()
-WHERE id = $1 AND deleted_at IS NULL
-RETURNING id, name, description, system_prompt, image_id, main_model, routing_json, skills_json, revision, created_by, created_at, updated_at, deleted_at
+WHERE id = ? AND deleted_at IS NULL
 `
 
 type UpdateAssistantVersionParams struct {
-	ID           pgtype.UUID `db:"id" json:"id"`
-	Name         string      `db:"name" json:"name"`
-	Description  string      `db:"description" json:"description"`
-	SystemPrompt string      `db:"system_prompt" json:"system_prompt"`
-	ImageID      string      `db:"image_id" json:"image_id"`
-	MainModel    string      `db:"main_model" json:"main_model"`
-	RoutingJson  []byte      `db:"routing_json" json:"routing_json"`
-	SkillsJson   []byte      `db:"skills_json" json:"skills_json"`
-	Revision     int32       `db:"revision" json:"revision"`
+	Name         string          `db:"name" json:"name"`
+	Description  string          `db:"description" json:"description"`
+	SystemPrompt string          `db:"system_prompt" json:"system_prompt"`
+	ImageID      string          `db:"image_id" json:"image_id"`
+	MainModel    string          `db:"main_model" json:"main_model"`
+	RoutingJson  json.RawMessage `db:"routing_json" json:"routing_json"`
+	SkillsJson   json.RawMessage `db:"skills_json" json:"skills_json"`
+	Revision     int32           `db:"revision" json:"revision"`
+	ID           string          `db:"id" json:"id"`
 }
 
 // revision 由 service 计算后整体写入（仅容器相关字段变更才递增）。
-func (q *Queries) UpdateAssistantVersion(ctx context.Context, arg UpdateAssistantVersionParams) (AssistantVersion, error) {
-	row := q.db.QueryRow(ctx, updateAssistantVersion,
-		arg.ID,
+func (q *Queries) UpdateAssistantVersion(ctx context.Context, arg UpdateAssistantVersionParams) error {
+	_, err := q.db.ExecContext(ctx, updateAssistantVersion,
 		arg.Name,
 		arg.Description,
 		arg.SystemPrompt,
@@ -247,59 +220,27 @@ func (q *Queries) UpdateAssistantVersion(ctx context.Context, arg UpdateAssistan
 		arg.RoutingJson,
 		arg.SkillsJson,
 		arg.Revision,
+		arg.ID,
 	)
-	var i AssistantVersion
-	err := row.Scan(
-		&i.ID,
-		&i.Name,
-		&i.Description,
-		&i.SystemPrompt,
-		&i.ImageID,
-		&i.MainModel,
-		&i.RoutingJson,
-		&i.SkillsJson,
-		&i.Revision,
-		&i.CreatedBy,
-		&i.CreatedAt,
-		&i.UpdatedAt,
-		&i.DeletedAt,
-	)
-	return i, err
+	return err
 }
 
-const updateAssistantVersionSkills = `-- name: UpdateAssistantVersionSkills :one
+const updateAssistantVersionSkills = `-- name: UpdateAssistantVersionSkills :exec
 UPDATE assistant_versions
-SET skills_json = $2,
-    revision = $3,
+SET skills_json = ?,
+    revision = ?,
     updated_at = now()
-WHERE id = $1 AND deleted_at IS NULL
-RETURNING id, name, description, system_prompt, image_id, main_model, routing_json, skills_json, revision, created_by, created_at, updated_at, deleted_at
+WHERE id = ? AND deleted_at IS NULL
 `
 
 type UpdateAssistantVersionSkillsParams struct {
-	ID         pgtype.UUID `db:"id" json:"id"`
-	SkillsJson []byte      `db:"skills_json" json:"skills_json"`
-	Revision   int32       `db:"revision" json:"revision"`
+	SkillsJson json.RawMessage `db:"skills_json" json:"skills_json"`
+	Revision   int32           `db:"revision" json:"revision"`
+	ID         string          `db:"id" json:"id"`
 }
 
 // skill 上传/删除单独走此查询：只改 skills_json 与 revision，避免覆盖其它字段。
-func (q *Queries) UpdateAssistantVersionSkills(ctx context.Context, arg UpdateAssistantVersionSkillsParams) (AssistantVersion, error) {
-	row := q.db.QueryRow(ctx, updateAssistantVersionSkills, arg.ID, arg.SkillsJson, arg.Revision)
-	var i AssistantVersion
-	err := row.Scan(
-		&i.ID,
-		&i.Name,
-		&i.Description,
-		&i.SystemPrompt,
-		&i.ImageID,
-		&i.MainModel,
-		&i.RoutingJson,
-		&i.SkillsJson,
-		&i.Revision,
-		&i.CreatedBy,
-		&i.CreatedAt,
-		&i.UpdatedAt,
-		&i.DeletedAt,
-	)
-	return i, err
+func (q *Queries) UpdateAssistantVersionSkills(ctx context.Context, arg UpdateAssistantVersionSkillsParams) error {
+	_, err := q.db.ExecContext(ctx, updateAssistantVersionSkills, arg.SkillsJson, arg.Revision, arg.ID)
+	return err
 }

@@ -5,327 +5,268 @@
 package sqlc
 
 import (
-	"net/netip"
+	"encoding/json"
+	"time"
 
-	"github.com/jackc/pgx/v5/pgtype"
+	null "github.com/guregu/null/v5"
 )
 
-// 成员客户端应用表；第一版每个未删除成员账号最多拥有一个未删除应用。
 type App struct {
-	ID          pgtype.UUID `db:"id" json:"id"`
-	OrgID       pgtype.UUID `db:"org_id" json:"org_id"`
-	OwnerUserID pgtype.UUID `db:"owner_user_id" json:"owner_user_id"`
-	// 应用所在运行节点，第一版创建应用前必须已有可用节点。
-	RuntimeNodeID pgtype.UUID `db:"runtime_node_id" json:"runtime_node_id"`
-	Name          string      `db:"name" json:"name"`
-	Description   pgtype.Text `db:"description" json:"description"`
-	Status        string      `db:"status" json:"status"`
-	ContainerID   pgtype.Text `db:"container_id" json:"container_id"`
-	ContainerName pgtype.Text `db:"container_name" json:"container_name"`
-	NewapiKeyID   pgtype.Text `db:"newapi_key_id" json:"newapi_key_id"`
-	// new-api key 密文，使用 manager 的 security.master_key 加密。
-	NewapiKeyCiphertext pgtype.Text        `db:"newapi_key_ciphertext" json:"newapi_key_ciphertext"`
-	ApiKeyStatus        string             `db:"api_key_status" json:"api_key_status"`
-	CreatedAt           pgtype.Timestamptz `db:"created_at" json:"created_at"`
-	UpdatedAt           pgtype.Timestamptz `db:"updated_at" json:"updated_at"`
-	// 软删除时间；业务记录不做物理删除。
-	DeletedAt           pgtype.Timestamptz `db:"deleted_at" json:"deleted_at"`
-	RuntimeSnapshotJson []byte             `db:"runtime_snapshot_json" json:"runtime_snapshot_json"`
-	RuntimeSnapshotAt   pgtype.Timestamptz `db:"runtime_snapshot_at" json:"runtime_snapshot_at"`
-	RestartPolicyJson   []byte             `db:"restart_policy_json" json:"restart_policy_json"`
-	HealthStateJson     []byte             `db:"health_state_json" json:"health_state_json"`
-	// 当前 status 对应阶段的已完成量;语义随 status 变化(字节 / 秒 / count),不可知时为 NULL。
-	ProgressCurrent pgtype.Int8 `db:"progress_current" json:"progress_current"`
-	// 当前 status 对应阶段的总量;不可知时为 NULL(前端展示为不定进度)。
-	ProgressTotal pgtype.Int8 `db:"progress_total" json:"progress_total"`
-	// 上次进入 error 时所在的状态值;进入 error 时写入,重新发起对应转移时清空。不加 CHECK,靠应用层在写入时校验。
-	LastErrorStatus pgtype.Text `db:"last_error_status" json:"last_error_status"`
-	// 上次进入 error 时的错误消息；进入 error 时写入，重新发起对应转移时清空。
-	LastErrorMessage pgtype.Text `db:"last_error_message" json:"last_error_message"`
-	// 部署时实际使用的镜像引用（含 tag）；phasePullRuntimeImage 写入，之后不变。
-	RuntimeImageRef string `db:"runtime_image_ref" json:"runtime_image_ref"`
-	// 拉取后 docker inspect 返回的镜像 ID（sha256:…）；供展示和排查使用。
-	RuntimeImageSha256 string `db:"runtime_image_sha256" json:"runtime_image_sha256"`
-	// new-api 侧的 token.name，用于按 token_name 过滤用量日志
-	NewapiKeyName pgtype.Text `db:"newapi_key_name" json:"newapi_key_name"`
-	// 实例绑定的助手版本。
-	VersionID pgtype.UUID `db:"version_id" json:"version_id"`
-	// 上次初始化/重启时使用的版本 revision；与版本当前 revision 比较得出 version_synced。
-	AppliedVersionRevision int32 `db:"applied_version_revision" json:"applied_version_revision"`
-	// 上次实际拉取的镜像 ref；与配置解析出的 ref 比较得出 version_synced。
-	AppliedImageRef string `db:"applied_image_ref" json:"applied_image_ref"`
-	// Hermes 调 manager runtime API 的 app 级 token hash。
-	RuntimeTokenHash pgtype.Text `db:"runtime_token_hash" json:"runtime_token_hash"`
-	// Hermes 调 manager runtime API 的 app 级 token 密文，使用 manager master key 加密。
-	RuntimeTokenCiphertext pgtype.Text `db:"runtime_token_ciphertext" json:"runtime_token_ciphertext"`
+	ID                     string          `db:"id" json:"id"`
+	OrgID                  string          `db:"org_id" json:"org_id"`
+	OwnerUserID            string          `db:"owner_user_id" json:"owner_user_id"`
+	RuntimeNodeID          string          `db:"runtime_node_id" json:"runtime_node_id"`
+	Name                   string          `db:"name" json:"name"`
+	Description            null.String     `db:"description" json:"description"`
+	Status                 string          `db:"status" json:"status"`
+	ContainerID            null.String     `db:"container_id" json:"container_id"`
+	ContainerName          null.String     `db:"container_name" json:"container_name"`
+	NewapiKeyID            null.String     `db:"newapi_key_id" json:"newapi_key_id"`
+	NewapiKeyCiphertext    null.String     `db:"newapi_key_ciphertext" json:"newapi_key_ciphertext"`
+	ApiKeyStatus           string          `db:"api_key_status" json:"api_key_status"`
+	RuntimeSnapshotJson    json.RawMessage `db:"runtime_snapshot_json" json:"runtime_snapshot_json"`
+	RuntimeSnapshotAt      null.Time       `db:"runtime_snapshot_at" json:"runtime_snapshot_at"`
+	RestartPolicyJson      json.RawMessage `db:"restart_policy_json" json:"restart_policy_json"`
+	HealthStateJson        json.RawMessage `db:"health_state_json" json:"health_state_json"`
+	ProgressCurrent        null.Int        `db:"progress_current" json:"progress_current"`
+	ProgressTotal          null.Int        `db:"progress_total" json:"progress_total"`
+	LastErrorStatus        null.String     `db:"last_error_status" json:"last_error_status"`
+	LastErrorMessage       null.String     `db:"last_error_message" json:"last_error_message"`
+	RuntimeImageRef        string          `db:"runtime_image_ref" json:"runtime_image_ref"`
+	RuntimeImageSha256     string          `db:"runtime_image_sha256" json:"runtime_image_sha256"`
+	NewapiKeyName          null.String     `db:"newapi_key_name" json:"newapi_key_name"`
+	VersionID              null.String     `db:"version_id" json:"version_id"`
+	AppliedVersionRevision int32           `db:"applied_version_revision" json:"applied_version_revision"`
+	AppliedImageRef        string          `db:"applied_image_ref" json:"applied_image_ref"`
+	RuntimeTokenHash       null.String     `db:"runtime_token_hash" json:"runtime_token_hash"`
+	RuntimeTokenCiphertext null.String     `db:"runtime_token_ciphertext" json:"runtime_token_ciphertext"`
+	CreatedAt              time.Time       `db:"created_at" json:"created_at"`
+	UpdatedAt              time.Time       `db:"updated_at" json:"updated_at"`
+	DeletedAt              null.Time       `db:"deleted_at" json:"deleted_at"`
+	OwnerActiveKey         null.String     `db:"owner_active_key" json:"owner_active_key"`
+	RuntimeTokenActiveKey  null.String     `db:"runtime_token_active_key" json:"runtime_token_active_key"`
 }
 
-// 助手版本目录：把智能路由、skill、内置提示词、镜像打包成可复用的命名版本。
 type AssistantVersion struct {
-	ID          pgtype.UUID `db:"id" json:"id"`
-	Name        string      `db:"name" json:"name"`
-	Description string      `db:"description" json:"description"`
-	// 版本内置提示词，渲染进容器 SOUL.md 的版本层；字段语义泛化，可填写人设、行为规则等。
-	SystemPrompt string `db:"system_prompt" json:"system_prompt"`
-	// 引用配置文件 hermes.runtime_images[].id。
-	ImageID   string `db:"image_id" json:"image_id"`
-	MainModel string `db:"main_model" json:"main_model"`
-	// 智能路由：8 个 auxiliary 槽位到模型名的映射，空槽位省略。
-	RoutingJson []byte `db:"routing_json" json:"routing_json"`
-	// skill 元信息数组，每项 {name,file_path,file_size,file_sha256}；tar 字节存文件系统主副本。
-	SkillsJson []byte `db:"skills_json" json:"skills_json"`
-	// 内容修订号，影响容器的字段变更时 +1，供实例 version_synced 检测使用。
-	Revision  int32              `db:"revision" json:"revision"`
-	CreatedBy pgtype.UUID        `db:"created_by" json:"created_by"`
-	CreatedAt pgtype.Timestamptz `db:"created_at" json:"created_at"`
-	UpdatedAt pgtype.Timestamptz `db:"updated_at" json:"updated_at"`
-	DeletedAt pgtype.Timestamptz `db:"deleted_at" json:"deleted_at"`
+	ID            string          `db:"id" json:"id"`
+	Name          string          `db:"name" json:"name"`
+	Description   string          `db:"description" json:"description"`
+	SystemPrompt  string          `db:"system_prompt" json:"system_prompt"`
+	ImageID       string          `db:"image_id" json:"image_id"`
+	MainModel     string          `db:"main_model" json:"main_model"`
+	RoutingJson   json.RawMessage `db:"routing_json" json:"routing_json"`
+	SkillsJson    json.RawMessage `db:"skills_json" json:"skills_json"`
+	Revision      int32           `db:"revision" json:"revision"`
+	CreatedBy     null.String     `db:"created_by" json:"created_by"`
+	CreatedAt     time.Time       `db:"created_at" json:"created_at"`
+	UpdatedAt     time.Time       `db:"updated_at" json:"updated_at"`
+	DeletedAt     null.Time       `db:"deleted_at" json:"deleted_at"`
+	NameActiveKey null.String     `db:"name_active_key" json:"name_active_key"`
 }
 
-// 审计日志表，记录关键操作、结果和错误信息；普通业务 API 不允许修改或删除。
 type AuditLog struct {
-	ID pgtype.UUID `db:"id" json:"id"`
-	// 操作者用户 ID；系统任务产生的审计可为空。
-	ActorID    pgtype.UUID `db:"actor_id" json:"actor_id"`
-	ActorRole  string      `db:"actor_role" json:"actor_role"`
-	OrgID      pgtype.UUID `db:"org_id" json:"org_id"`
-	TargetType string      `db:"target_type" json:"target_type"`
-	// 目标资源 ID；知识库文件可使用 org:{id}:filename 或 app:{id}:filename 编码。
-	TargetID     string      `db:"target_id" json:"target_id"`
-	Action       string      `db:"action" json:"action"`
-	Result       string      `db:"result" json:"result"`
-	ErrorMessage pgtype.Text `db:"error_message" json:"error_message"`
-	IpAddress    *netip.Addr `db:"ip_address" json:"ip_address"`
-	// 审计扩展元数据，例如文件大小、MIME、上传者等。
-	MetadataJson []byte             `db:"metadata_json" json:"metadata_json"`
-	CreatedAt    pgtype.Timestamptz `db:"created_at" json:"created_at"`
-	// 事件详情快照，由写入端拼装。NULL 表示无详情或老数据。
-	DetailMessage pgtype.Text `db:"detail_message" json:"detail_message"`
+	ID            string          `db:"id" json:"id"`
+	ActorID       null.String     `db:"actor_id" json:"actor_id"`
+	ActorRole     string          `db:"actor_role" json:"actor_role"`
+	OrgID         null.String     `db:"org_id" json:"org_id"`
+	TargetType    string          `db:"target_type" json:"target_type"`
+	TargetID      string          `db:"target_id" json:"target_id"`
+	Action        string          `db:"action" json:"action"`
+	Result        string          `db:"result" json:"result"`
+	ErrorMessage  null.String     `db:"error_message" json:"error_message"`
+	IpAddress     null.String     `db:"ip_address" json:"ip_address"`
+	MetadataJson  json.RawMessage `db:"metadata_json" json:"metadata_json"`
+	DetailMessage null.String     `db:"detail_message" json:"detail_message"`
+	CreatedAt     time.Time       `db:"created_at" json:"created_at"`
 }
 
-// 应用渠道绑定表，第一版仅支持 wechat，后续可扩展其他渠道。
 type ChannelBinding struct {
-	ID          pgtype.UUID `db:"id" json:"id"`
-	AppID       pgtype.UUID `db:"app_id" json:"app_id"`
-	ChannelType string      `db:"channel_type" json:"channel_type"`
-	Status      string      `db:"status" json:"status"`
-	// 微信渠道 iLink Bot 身份,格式 <hex>@im.bot(Hermes runtime 时代)。历史:OpenClaw runtime 时代为 <wxid>@im.wechat。
-	BoundIdentity pgtype.Text `db:"bound_identity" json:"bound_identity"`
-	ChannelName   pgtype.Text `db:"channel_name" json:"channel_name"`
-	// 渠道特有元数据，例如二维码 payload、过期时间和登录 challenge。
-	MetadataJson []byte             `db:"metadata_json" json:"metadata_json"`
-	BoundAt      pgtype.Timestamptz `db:"bound_at" json:"bound_at"`
-	LastOnlineAt pgtype.Timestamptz `db:"last_online_at" json:"last_online_at"`
-	LastError    pgtype.Text        `db:"last_error" json:"last_error"`
-	CreatedAt    pgtype.Timestamptz `db:"created_at" json:"created_at"`
-	UpdatedAt    pgtype.Timestamptz `db:"updated_at" json:"updated_at"`
+	ID            string          `db:"id" json:"id"`
+	AppID         string          `db:"app_id" json:"app_id"`
+	ChannelType   string          `db:"channel_type" json:"channel_type"`
+	Status        string          `db:"status" json:"status"`
+	BoundIdentity null.String     `db:"bound_identity" json:"bound_identity"`
+	ChannelName   null.String     `db:"channel_name" json:"channel_name"`
+	MetadataJson  json.RawMessage `db:"metadata_json" json:"metadata_json"`
+	BoundAt       null.Time       `db:"bound_at" json:"bound_at"`
+	LastOnlineAt  null.Time       `db:"last_online_at" json:"last_online_at"`
+	LastError     null.String     `db:"last_error" json:"last_error"`
+	CreatedAt     time.Time       `db:"created_at" json:"created_at"`
+	UpdatedAt     time.Time       `db:"updated_at" json:"updated_at"`
+	AppActiveKey  null.String     `db:"app_active_key" json:"app_active_key"`
 }
 
-// 实例容器资源原始采样，保留 30 天供节点抽屉和实例运行页查询。
 type InstanceResourceSample struct {
-	ID               pgtype.UUID        `db:"id" json:"id"`
-	AppID            pgtype.UUID        `db:"app_id" json:"app_id"`
-	RuntimeNodeID    pgtype.UUID        `db:"runtime_node_id" json:"runtime_node_id"`
-	ContainerID      string             `db:"container_id" json:"container_id"`
-	SampledAt        pgtype.Timestamptz `db:"sampled_at" json:"sampled_at"`
-	ContainerStatus  pgtype.Text        `db:"container_status" json:"container_status"`
-	CpuPercent       pgtype.Float8      `db:"cpu_percent" json:"cpu_percent"`
-	MemoryUsedBytes  pgtype.Int8        `db:"memory_used_bytes" json:"memory_used_bytes"`
-	MemoryLimitBytes pgtype.Int8        `db:"memory_limit_bytes" json:"memory_limit_bytes"`
-	DiskReadBytes    pgtype.Int8        `db:"disk_read_bytes" json:"disk_read_bytes"`
-	DiskWriteBytes   pgtype.Int8        `db:"disk_write_bytes" json:"disk_write_bytes"`
-	NetworkRxBytes   pgtype.Int8        `db:"network_rx_bytes" json:"network_rx_bytes"`
-	NetworkTxBytes   pgtype.Int8        `db:"network_tx_bytes" json:"network_tx_bytes"`
-	LastError        pgtype.Text        `db:"last_error" json:"last_error"`
-	CreatedAt        pgtype.Timestamptz `db:"created_at" json:"created_at"`
+	ID               string      `db:"id" json:"id"`
+	AppID            string      `db:"app_id" json:"app_id"`
+	RuntimeNodeID    string      `db:"runtime_node_id" json:"runtime_node_id"`
+	ContainerID      string      `db:"container_id" json:"container_id"`
+	SampledAt        time.Time   `db:"sampled_at" json:"sampled_at"`
+	ContainerStatus  null.String `db:"container_status" json:"container_status"`
+	CpuPercent       null.Float  `db:"cpu_percent" json:"cpu_percent"`
+	MemoryUsedBytes  null.Int    `db:"memory_used_bytes" json:"memory_used_bytes"`
+	MemoryLimitBytes null.Int    `db:"memory_limit_bytes" json:"memory_limit_bytes"`
+	DiskReadBytes    null.Int    `db:"disk_read_bytes" json:"disk_read_bytes"`
+	DiskWriteBytes   null.Int    `db:"disk_write_bytes" json:"disk_write_bytes"`
+	NetworkRxBytes   null.Int    `db:"network_rx_bytes" json:"network_rx_bytes"`
+	NetworkTxBytes   null.Int    `db:"network_tx_bytes" json:"network_tx_bytes"`
+	LastError        null.String `db:"last_error" json:"last_error"`
+	CreatedAt        time.Time   `db:"created_at" json:"created_at"`
 }
 
-// 异步任务事实表；Redis 只负责分发，任务状态以本表为准。
 type Job struct {
-	ID       pgtype.UUID `db:"id" json:"id"`
-	Type     string      `db:"type" json:"type"`
-	Status   string      `db:"status" json:"status"`
-	Priority int32       `db:"priority" json:"priority"`
-	// 任务最早可执行时间，用于失败重试和延迟调度。
-	RunAfter    pgtype.Timestamptz `db:"run_after" json:"run_after"`
-	Attempts    int32              `db:"attempts" json:"attempts"`
-	MaxAttempts int32              `db:"max_attempts" json:"max_attempts"`
-	// 任务载荷，handler 必须按类型做结构化校验。
-	PayloadJson []byte `db:"payload_json" json:"payload_json"`
-	// 当前领取任务的 worker 实例 ID。
-	LockedBy   pgtype.Text        `db:"locked_by" json:"locked_by"`
-	LockedAt   pgtype.Timestamptz `db:"locked_at" json:"locked_at"`
-	LastError  pgtype.Text        `db:"last_error" json:"last_error"`
-	CreatedAt  pgtype.Timestamptz `db:"created_at" json:"created_at"`
-	UpdatedAt  pgtype.Timestamptz `db:"updated_at" json:"updated_at"`
-	FinishedAt pgtype.Timestamptz `db:"finished_at" json:"finished_at"`
+	ID          string          `db:"id" json:"id"`
+	Type        string          `db:"type" json:"type"`
+	Status      string          `db:"status" json:"status"`
+	Priority    int32           `db:"priority" json:"priority"`
+	RunAfter    time.Time       `db:"run_after" json:"run_after"`
+	Attempts    int32           `db:"attempts" json:"attempts"`
+	MaxAttempts int32           `db:"max_attempts" json:"max_attempts"`
+	PayloadJson json.RawMessage `db:"payload_json" json:"payload_json"`
+	LockedBy    null.String     `db:"locked_by" json:"locked_by"`
+	LockedAt    null.Time       `db:"locked_at" json:"locked_at"`
+	LastError   null.String     `db:"last_error" json:"last_error"`
+	CreatedAt   time.Time       `db:"created_at" json:"created_at"`
+	UpdatedAt   time.Time       `db:"updated_at" json:"updated_at"`
+	FinishedAt  null.Time       `db:"finished_at" json:"finished_at"`
 }
 
-// 运行节点资源原始采样，保留 30 天供趋势图查询。
 type NodeResourceSample struct {
-	ID               pgtype.UUID        `db:"id" json:"id"`
-	RuntimeNodeID    pgtype.UUID        `db:"runtime_node_id" json:"runtime_node_id"`
-	SampledAt        pgtype.Timestamptz `db:"sampled_at" json:"sampled_at"`
-	CpuPercent       pgtype.Float8      `db:"cpu_percent" json:"cpu_percent"`
-	MemoryUsedBytes  pgtype.Int8        `db:"memory_used_bytes" json:"memory_used_bytes"`
-	MemoryTotalBytes pgtype.Int8        `db:"memory_total_bytes" json:"memory_total_bytes"`
-	DiskUsedBytes    pgtype.Int8        `db:"disk_used_bytes" json:"disk_used_bytes"`
-	DiskTotalBytes   pgtype.Int8        `db:"disk_total_bytes" json:"disk_total_bytes"`
-	NetworkRxBytes   pgtype.Int8        `db:"network_rx_bytes" json:"network_rx_bytes"`
-	NetworkTxBytes   pgtype.Int8        `db:"network_tx_bytes" json:"network_tx_bytes"`
-	InstanceCount    pgtype.Int4        `db:"instance_count" json:"instance_count"`
-	LastError        pgtype.Text        `db:"last_error" json:"last_error"`
-	CreatedAt        pgtype.Timestamptz `db:"created_at" json:"created_at"`
+	ID               string      `db:"id" json:"id"`
+	RuntimeNodeID    string      `db:"runtime_node_id" json:"runtime_node_id"`
+	SampledAt        time.Time   `db:"sampled_at" json:"sampled_at"`
+	CpuPercent       null.Float  `db:"cpu_percent" json:"cpu_percent"`
+	MemoryUsedBytes  null.Int    `db:"memory_used_bytes" json:"memory_used_bytes"`
+	MemoryTotalBytes null.Int    `db:"memory_total_bytes" json:"memory_total_bytes"`
+	DiskUsedBytes    null.Int    `db:"disk_used_bytes" json:"disk_used_bytes"`
+	DiskTotalBytes   null.Int    `db:"disk_total_bytes" json:"disk_total_bytes"`
+	NetworkRxBytes   null.Int    `db:"network_rx_bytes" json:"network_rx_bytes"`
+	NetworkTxBytes   null.Int    `db:"network_tx_bytes" json:"network_tx_bytes"`
+	InstanceCount    null.Int    `db:"instance_count" json:"instance_count"`
+	LastError        null.String `db:"last_error" json:"last_error"`
+	CreatedAt        time.Time   `db:"created_at" json:"created_at"`
 }
 
-// 组织租户表，保存组织基础信息、new-api 账号映射和余额预警阈值。
 type Organization struct {
-	ID   pgtype.UUID `db:"id" json:"id"`
-	Name string      `db:"name" json:"name"`
-	// 组织状态：active 表示可用，disabled 表示禁用，deleted 表示软删除。
-	Status       string      `db:"status" json:"status"`
-	ContactName  pgtype.Text `db:"contact_name" json:"contact_name"`
-	ContactPhone pgtype.Text `db:"contact_phone" json:"contact_phone"`
-	Remark       pgtype.Text `db:"remark" json:"remark"`
-	NewapiUserID pgtype.Text `db:"newapi_user_id" json:"newapi_user_id"`
-	// 组织余额预警百分比阈值，空值表示不启用预警。
-	CreditWarningThreshold pgtype.Int4        `db:"credit_warning_threshold" json:"credit_warning_threshold"`
-	CreatedAt              pgtype.Timestamptz `db:"created_at" json:"created_at"`
-	UpdatedAt              pgtype.Timestamptz `db:"updated_at" json:"updated_at"`
-	DeletedAt              pgtype.Timestamptz `db:"deleted_at" json:"deleted_at"`
-	// new-api 业务用户凭据密文，明文为 JSON {username, password, access_token}，使用 manager 的 security.master_key AES-256-GCM 加密。
-	NewapiUserCredentialsCiphertext pgtype.Text `db:"newapi_user_credentials_ciphertext" json:"newapi_user_credentials_ciphertext"`
-	Code                            string      `db:"code" json:"code"`
-	// new-api 侧的 user.username，用于按 username 过滤用量响应
-	NewapiUsername pgtype.Text `db:"newapi_username" json:"newapi_username"`
-	// 该组织可用的助手版本 id 数组（allowlist）。
-	AssistantVersionIds []byte `db:"assistant_version_ids" json:"assistant_version_ids"`
+	// 组织 ID
+	ID string `db:"id" json:"id"`
+	// 组织名称
+	Name string `db:"name" json:"name"`
+	// 组织状态
+	Status                          string      `db:"status" json:"status"`
+	ContactName                     null.String `db:"contact_name" json:"contact_name"`
+	ContactPhone                    null.String `db:"contact_phone" json:"contact_phone"`
+	Remark                          null.String `db:"remark" json:"remark"`
+	NewapiUserID                    null.String `db:"newapi_user_id" json:"newapi_user_id"`
+	CreditWarningThreshold          null.Int    `db:"credit_warning_threshold" json:"credit_warning_threshold"`
+	NewapiUserCredentialsCiphertext null.String `db:"newapi_user_credentials_ciphertext" json:"newapi_user_credentials_ciphertext"`
+	// 组织代码，登录命名空间
+	Code           string      `db:"code" json:"code"`
+	NewapiUsername null.String `db:"newapi_username" json:"newapi_username"`
+	// 可用助手版本 ID allowlist
+	AssistantVersionIds json.RawMessage `db:"assistant_version_ids" json:"assistant_version_ids"`
+	CreatedAt           time.Time       `db:"created_at" json:"created_at"`
+	UpdatedAt           time.Time       `db:"updated_at" json:"updated_at"`
+	DeletedAt           null.Time       `db:"deleted_at" json:"deleted_at"`
 }
 
-// oc-manager 组织/实例知识库到 RAGFlow dataset 的映射。
 type RagflowDataset struct {
-	ID pgtype.UUID `db:"id" json:"id"`
-	// 映射归属范围：org 表示组织知识库，app 表示实例知识库。
-	ScopeType string      `db:"scope_type" json:"scope_type"`
-	OrgID     pgtype.UUID `db:"org_id" json:"org_id"`
-	AppID     pgtype.UUID `db:"app_id" json:"app_id"`
-	// RAGFlow 返回的 dataset ID，创建中或失败时可为空。
-	RagflowDatasetID pgtype.Text `db:"ragflow_dataset_id" json:"ragflow_dataset_id"`
+	ID               string      `db:"id" json:"id"`
+	ScopeType        string      `db:"scope_type" json:"scope_type"`
+	OrgID            string      `db:"org_id" json:"org_id"`
+	AppID            null.String `db:"app_id" json:"app_id"`
+	RagflowDatasetID null.String `db:"ragflow_dataset_id" json:"ragflow_dataset_id"`
 	Name             string      `db:"name" json:"name"`
-	// dataset 生命周期状态：creating、active、deleting、failed。
-	Status    string      `db:"status" json:"status"`
-	LastError pgtype.Text `db:"last_error" json:"last_error"`
-	// dataset 创建租约 token，仅持有该 token 的进程可回写 active 或 failed，避免并发远端创建互相覆盖。
-	CreateClaimToken pgtype.Text        `db:"create_claim_token" json:"create_claim_token"`
-	CreatedAt        pgtype.Timestamptz `db:"created_at" json:"created_at"`
-	UpdatedAt        pgtype.Timestamptz `db:"updated_at" json:"updated_at"`
+	Status           string      `db:"status" json:"status"`
+	LastError        null.String `db:"last_error" json:"last_error"`
+	CreateClaimToken null.String `db:"create_claim_token" json:"create_claim_token"`
+	CreatedAt        time.Time   `db:"created_at" json:"created_at"`
+	UpdatedAt        time.Time   `db:"updated_at" json:"updated_at"`
+	OrgScopeKey      null.String `db:"org_scope_key" json:"org_scope_key"`
+	AppScopeKey      null.String `db:"app_scope_key" json:"app_scope_key"`
 }
 
-// manager 展示文件列表所需的 RAGFlow document 元数据缓存。
 type RagflowDocument struct {
-	ID        pgtype.UUID `db:"id" json:"id"`
-	DatasetID pgtype.UUID `db:"dataset_id" json:"dataset_id"`
-	ScopeType string      `db:"scope_type" json:"scope_type"`
-	OrgID     pgtype.UUID `db:"org_id" json:"org_id"`
-	AppID     pgtype.UUID `db:"app_id" json:"app_id"`
-	// RAGFlow 返回的 document ID。
+	ID                string      `db:"id" json:"id"`
+	DatasetID         string      `db:"dataset_id" json:"dataset_id"`
+	ScopeType         string      `db:"scope_type" json:"scope_type"`
+	OrgID             string      `db:"org_id" json:"org_id"`
+	AppID             null.String `db:"app_id" json:"app_id"`
 	RagflowDocumentID string      `db:"ragflow_document_id" json:"ragflow_document_id"`
 	Name              string      `db:"name" json:"name"`
 	SizeBytes         int64       `db:"size_bytes" json:"size_bytes"`
-	MimeType          pgtype.Text `db:"mime_type" json:"mime_type"`
-	Suffix            pgtype.Text `db:"suffix" json:"suffix"`
-	// manager 归一化后的解析状态：queued、running、completed、failed、stopped。
-	ParseStatus string      `db:"parse_status" json:"parse_status"`
-	Progress    int32       `db:"progress" json:"progress"`
-	LastError   pgtype.Text `db:"last_error" json:"last_error"`
-	// 创建来源标识，可为用户 ID 或 runtime app ID。
-	CreatedBy string             `db:"created_by" json:"created_by"`
-	CreatedAt pgtype.Timestamptz `db:"created_at" json:"created_at"`
-	UpdatedAt pgtype.Timestamptz `db:"updated_at" json:"updated_at"`
+	MimeType          null.String `db:"mime_type" json:"mime_type"`
+	Suffix            null.String `db:"suffix" json:"suffix"`
+	ParseStatus       string      `db:"parse_status" json:"parse_status"`
+	Progress          int32       `db:"progress" json:"progress"`
+	LastError         null.String `db:"last_error" json:"last_error"`
+	CreatedBy         string      `db:"created_by" json:"created_by"`
+	CreatedAt         time.Time   `db:"created_at" json:"created_at"`
+	UpdatedAt         time.Time   `db:"updated_at" json:"updated_at"`
 }
 
-// 组织点数充值记录，计费事实仍以 new-api 为准。
 type RechargeRecord struct {
-	ID         pgtype.UUID `db:"id" json:"id"`
-	OrgID      pgtype.UUID `db:"org_id" json:"org_id"`
-	OperatorID pgtype.UUID `db:"operator_id" json:"operator_id"`
-	// 充值点数，使用整数避免浮点误差。
+	ID           string      `db:"id" json:"id"`
+	OrgID        string      `db:"org_id" json:"org_id"`
+	OperatorID   string      `db:"operator_id" json:"operator_id"`
 	CreditAmount int64       `db:"credit_amount" json:"credit_amount"`
-	Remark       pgtype.Text `db:"remark" json:"remark"`
-	// new-api 侧充值或余额调整引用 ID。
-	NewapiRefID  pgtype.Text        `db:"newapi_ref_id" json:"newapi_ref_id"`
-	Status       string             `db:"status" json:"status"`
-	ErrorMessage pgtype.Text        `db:"error_message" json:"error_message"`
-	CreatedAt    pgtype.Timestamptz `db:"created_at" json:"created_at"`
+	Remark       null.String `db:"remark" json:"remark"`
+	NewapiRefID  null.String `db:"newapi_ref_id" json:"newapi_ref_id"`
+	Status       string      `db:"status" json:"status"`
+	ErrorMessage null.String `db:"error_message" json:"error_message"`
+	CreatedAt    time.Time   `db:"created_at" json:"created_at"`
 }
 
-// 登录刷新令牌表，只保存 token hash，不保存明文令牌。
 type RefreshToken struct {
-	ID        pgtype.UUID        `db:"id" json:"id"`
-	UserID    pgtype.UUID        `db:"user_id" json:"user_id"`
-	TokenHash string             `db:"token_hash" json:"token_hash"`
-	ExpiresAt pgtype.Timestamptz `db:"expires_at" json:"expires_at"`
-	// 令牌撤销时间；为空且未过期时可用于刷新登录态。
-	RevokedAt pgtype.Timestamptz `db:"revoked_at" json:"revoked_at"`
-	CreatedAt pgtype.Timestamptz `db:"created_at" json:"created_at"`
+	ID        string    `db:"id" json:"id"`
+	UserID    string    `db:"user_id" json:"user_id"`
+	TokenHash string    `db:"token_hash" json:"token_hash"`
+	ExpiresAt time.Time `db:"expires_at" json:"expires_at"`
+	RevokedAt null.Time `db:"revoked_at" json:"revoked_at"`
+	CreatedAt time.Time `db:"created_at" json:"created_at"`
 }
 
-// 运行节点注册表，manager 通过节点 agent 执行 Docker 与文件操作。
 type RuntimeNode struct {
-	ID     pgtype.UUID `db:"id" json:"id"`
-	Name   string      `db:"name" json:"name"`
-	Status string      `db:"status" json:"status"`
-	// agent Docker 代理地址，manager 通过该地址访问节点 Docker 能力。
-	AgentDockerEndpoint pgtype.Text `db:"agent_docker_endpoint" json:"agent_docker_endpoint"`
-	// agent 文件 API 地址，manager 通过该地址访问节点工作目录和知识库目录。
-	AgentFileEndpoint pgtype.Text `db:"agent_file_endpoint" json:"agent_file_endpoint"`
-	AgentTlsCaCert    pgtype.Text `db:"agent_tls_ca_cert" json:"agent_tls_ca_cert"`
-	// 长期通信令牌 hash，明文令牌只保存在 agent 侧。
-	AgentTokenHash           pgtype.Text        `db:"agent_token_hash" json:"agent_token_hash"`
-	AgentVersion             pgtype.Text        `db:"agent_version" json:"agent_version"`
-	HeartbeatIntervalSeconds int32              `db:"heartbeat_interval_seconds" json:"heartbeat_interval_seconds"`
-	LastHeartbeatAt          pgtype.Timestamptz `db:"last_heartbeat_at" json:"last_heartbeat_at"`
-	// agent 上报的 CPU、内存、磁盘、容器数量等资源快照。
-	ResourceSnapshotJson []byte             `db:"resource_snapshot_json" json:"resource_snapshot_json"`
-	MetadataJson         []byte             `db:"metadata_json" json:"metadata_json"`
-	NodeDataRoot         pgtype.Text        `db:"node_data_root" json:"node_data_root"`
-	RegisteredAt         pgtype.Timestamptz `db:"registered_at" json:"registered_at"`
-	CreatedAt            pgtype.Timestamptz `db:"created_at" json:"created_at"`
-	UpdatedAt            pgtype.Timestamptz `db:"updated_at" json:"updated_at"`
-	// agent token 的 AES-256-GCM 密文，base64 编码；nullable 兼容 A 阶段已注册节点。
-	AgentTokenCiphertext pgtype.Text `db:"agent_token_ciphertext" json:"agent_token_ciphertext"`
-	// 节点最大未删除应用数；NULL 表示不限。OnboardingService 在自动选节点时按剩余容量过滤。
-	MaxApps pgtype.Int4 `db:"max_apps" json:"max_apps"`
-	// agent 自身持久化的 UUID（state_dir/agent-id），全表唯一；enroll 幂等键。
-	AgentID pgtype.Text `db:"agent_id" json:"agent_id"`
-	// manager 最近一次主动探测该 agent 双端口的发起时间；无论请求是否到达 agent 都更新。
-	LastProbeAttemptedAt pgtype.Timestamptz `db:"last_probe_attempted_at" json:"last_probe_attempted_at"`
-	// manager 最近一次对 agent 双端口探测全部通过的时间。
-	LastProbeOkAt pgtype.Timestamptz `db:"last_probe_ok_at" json:"last_probe_ok_at"`
-	// manager 最近一次对 agent 双端口探测任一失败的时间。
-	LastProbeFailedAt pgtype.Timestamptz `db:"last_probe_failed_at" json:"last_probe_failed_at"`
-	// manager 最近一次 probe 失败的简短错误分类。
-	LastProbeError pgtype.Text `db:"last_probe_error" json:"last_probe_error"`
-	// manager 主动探测连续失败次数，用于 active 到 degraded 的阈值判断。
-	ProbeFailureStreak int32 `db:"probe_failure_streak" json:"probe_failure_streak"`
-	// manager 主动探测连续成功次数，用于 degraded 到 active 的阈值判断。
-	ProbeSuccessStreak int32 `db:"probe_success_streak" json:"probe_success_streak"`
+	ID                       string          `db:"id" json:"id"`
+	Name                     string          `db:"name" json:"name"`
+	Status                   string          `db:"status" json:"status"`
+	AgentDockerEndpoint      null.String     `db:"agent_docker_endpoint" json:"agent_docker_endpoint"`
+	AgentFileEndpoint        null.String     `db:"agent_file_endpoint" json:"agent_file_endpoint"`
+	AgentTlsCaCert           null.String     `db:"agent_tls_ca_cert" json:"agent_tls_ca_cert"`
+	AgentTokenHash           null.String     `db:"agent_token_hash" json:"agent_token_hash"`
+	AgentTokenCiphertext     null.String     `db:"agent_token_ciphertext" json:"agent_token_ciphertext"`
+	AgentVersion             null.String     `db:"agent_version" json:"agent_version"`
+	HeartbeatIntervalSeconds int32           `db:"heartbeat_interval_seconds" json:"heartbeat_interval_seconds"`
+	LastHeartbeatAt          null.Time       `db:"last_heartbeat_at" json:"last_heartbeat_at"`
+	ResourceSnapshotJson     json.RawMessage `db:"resource_snapshot_json" json:"resource_snapshot_json"`
+	MetadataJson             json.RawMessage `db:"metadata_json" json:"metadata_json"`
+	NodeDataRoot             null.String     `db:"node_data_root" json:"node_data_root"`
+	RegisteredAt             null.Time       `db:"registered_at" json:"registered_at"`
+	MaxApps                  null.Int        `db:"max_apps" json:"max_apps"`
+	AgentID                  null.String     `db:"agent_id" json:"agent_id"`
+	LastProbeAttemptedAt     null.Time       `db:"last_probe_attempted_at" json:"last_probe_attempted_at"`
+	LastProbeOkAt            null.Time       `db:"last_probe_ok_at" json:"last_probe_ok_at"`
+	LastProbeFailedAt        null.Time       `db:"last_probe_failed_at" json:"last_probe_failed_at"`
+	LastProbeError           null.String     `db:"last_probe_error" json:"last_probe_error"`
+	ProbeFailureStreak       int32           `db:"probe_failure_streak" json:"probe_failure_streak"`
+	ProbeSuccessStreak       int32           `db:"probe_success_streak" json:"probe_success_streak"`
+	CreatedAt                time.Time       `db:"created_at" json:"created_at"`
+	UpdatedAt                time.Time       `db:"updated_at" json:"updated_at"`
 }
 
-// 平台管理员、组织管理员和组织成员账号。
 type User struct {
-	ID pgtype.UUID `db:"id" json:"id"`
-	// 平台管理员为空，组织管理员和组织成员必须归属一个组织。
-	OrgID    pgtype.UUID `db:"org_id" json:"org_id"`
-	Username string      `db:"username" json:"username"`
-	// 密码 hash，不保存明文密码。
-	PasswordHash string `db:"password_hash" json:"password_hash"`
-	DisplayName  string `db:"display_name" json:"display_name"`
-	// 账号角色：platform_admin、org_admin、org_member。
-	Role        string             `db:"role" json:"role"`
-	Status      string             `db:"status" json:"status"`
-	LastLoginAt pgtype.Timestamptz `db:"last_login_at" json:"last_login_at"`
-	CreatedAt   pgtype.Timestamptz `db:"created_at" json:"created_at"`
-	UpdatedAt   pgtype.Timestamptz `db:"updated_at" json:"updated_at"`
-	DeletedAt   pgtype.Timestamptz `db:"deleted_at" json:"deleted_at"`
+	ID string `db:"id" json:"id"`
+	// 所属组织（平台管理员为空）
+	OrgID        null.String `db:"org_id" json:"org_id"`
+	Username     string      `db:"username" json:"username"`
+	PasswordHash string      `db:"password_hash" json:"password_hash"`
+	DisplayName  string      `db:"display_name" json:"display_name"`
+	Role         string      `db:"role" json:"role"`
+	Status       string      `db:"status" json:"status"`
+	LastLoginAt  null.Time   `db:"last_login_at" json:"last_login_at"`
+	CreatedAt    time.Time   `db:"created_at" json:"created_at"`
+	UpdatedAt    time.Time   `db:"updated_at" json:"updated_at"`
+	// 下线时间
+	DeletedAt           null.Time   `db:"deleted_at" json:"deleted_at"`
+	PlatformUsernameKey null.String `db:"platform_username_key" json:"platform_username_key"`
 }

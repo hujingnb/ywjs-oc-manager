@@ -7,12 +7,14 @@ package sqlc
 
 import (
 	"context"
+	"encoding/json"
 
-	"github.com/jackc/pgx/v5/pgtype"
+	null "github.com/guregu/null/v5"
 )
 
-const createOrganization = `-- name: CreateOrganization :one
+const createOrganization = `-- name: CreateOrganization :exec
 INSERT INTO organizations (
+    id,
     name,
     code,
     status,
@@ -22,24 +24,25 @@ INSERT INTO organizations (
     credit_warning_threshold,
     assistant_version_ids
 ) VALUES (
-    $1, $2, $3, $4, $5, $6, $7, $8
+    ?, ?, ?, ?, ?, ?, ?, ?, ?
 )
-RETURNING id, name, status, contact_name, contact_phone, remark, newapi_user_id, credit_warning_threshold, created_at, updated_at, deleted_at, newapi_user_credentials_ciphertext, code, newapi_username, assistant_version_ids
 `
 
 type CreateOrganizationParams struct {
-	Name                   string      `db:"name" json:"name"`
-	Code                   string      `db:"code" json:"code"`
-	Status                 string      `db:"status" json:"status"`
-	ContactName            pgtype.Text `db:"contact_name" json:"contact_name"`
-	ContactPhone           pgtype.Text `db:"contact_phone" json:"contact_phone"`
-	Remark                 pgtype.Text `db:"remark" json:"remark"`
-	CreditWarningThreshold pgtype.Int4 `db:"credit_warning_threshold" json:"credit_warning_threshold"`
-	AssistantVersionIds    []byte      `db:"assistant_version_ids" json:"assistant_version_ids"`
+	ID                     string          `db:"id" json:"id"`
+	Name                   string          `db:"name" json:"name"`
+	Code                   string          `db:"code" json:"code"`
+	Status                 string          `db:"status" json:"status"`
+	ContactName            null.String     `db:"contact_name" json:"contact_name"`
+	ContactPhone           null.String     `db:"contact_phone" json:"contact_phone"`
+	Remark                 null.String     `db:"remark" json:"remark"`
+	CreditWarningThreshold null.Int        `db:"credit_warning_threshold" json:"credit_warning_threshold"`
+	AssistantVersionIds    json.RawMessage `db:"assistant_version_ids" json:"assistant_version_ids"`
 }
 
-func (q *Queries) CreateOrganization(ctx context.Context, arg CreateOrganizationParams) (Organization, error) {
-	row := q.db.QueryRow(ctx, createOrganization,
+func (q *Queries) CreateOrganization(ctx context.Context, arg CreateOrganizationParams) error {
+	_, err := q.db.ExecContext(ctx, createOrganization,
+		arg.ID,
 		arg.Name,
 		arg.Code,
 		arg.Status,
@@ -49,35 +52,17 @@ func (q *Queries) CreateOrganization(ctx context.Context, arg CreateOrganization
 		arg.CreditWarningThreshold,
 		arg.AssistantVersionIds,
 	)
-	var i Organization
-	err := row.Scan(
-		&i.ID,
-		&i.Name,
-		&i.Status,
-		&i.ContactName,
-		&i.ContactPhone,
-		&i.Remark,
-		&i.NewapiUserID,
-		&i.CreditWarningThreshold,
-		&i.CreatedAt,
-		&i.UpdatedAt,
-		&i.DeletedAt,
-		&i.NewapiUserCredentialsCiphertext,
-		&i.Code,
-		&i.NewapiUsername,
-		&i.AssistantVersionIds,
-	)
-	return i, err
+	return err
 }
 
 const getOrganization = `-- name: GetOrganization :one
-SELECT id, name, status, contact_name, contact_phone, remark, newapi_user_id, credit_warning_threshold, created_at, updated_at, deleted_at, newapi_user_credentials_ciphertext, code, newapi_username, assistant_version_ids
+SELECT id, name, status, contact_name, contact_phone, remark, newapi_user_id, credit_warning_threshold, newapi_user_credentials_ciphertext, code, newapi_username, assistant_version_ids, created_at, updated_at, deleted_at
 FROM organizations
-WHERE id = $1
+WHERE id = ?
 `
 
-func (q *Queries) GetOrganization(ctx context.Context, id pgtype.UUID) (Organization, error) {
-	row := q.db.QueryRow(ctx, getOrganization, id)
+func (q *Queries) GetOrganization(ctx context.Context, id string) (Organization, error) {
+	row := q.db.QueryRowContext(ctx, getOrganization, id)
 	var i Organization
 	err := row.Scan(
 		&i.ID,
@@ -88,25 +73,25 @@ func (q *Queries) GetOrganization(ctx context.Context, id pgtype.UUID) (Organiza
 		&i.Remark,
 		&i.NewapiUserID,
 		&i.CreditWarningThreshold,
-		&i.CreatedAt,
-		&i.UpdatedAt,
-		&i.DeletedAt,
 		&i.NewapiUserCredentialsCiphertext,
 		&i.Code,
 		&i.NewapiUsername,
 		&i.AssistantVersionIds,
+		&i.CreatedAt,
+		&i.UpdatedAt,
+		&i.DeletedAt,
 	)
 	return i, err
 }
 
 const getOrganizationByCode = `-- name: GetOrganizationByCode :one
-SELECT id, name, status, contact_name, contact_phone, remark, newapi_user_id, credit_warning_threshold, created_at, updated_at, deleted_at, newapi_user_credentials_ciphertext, code, newapi_username, assistant_version_ids
+SELECT id, name, status, contact_name, contact_phone, remark, newapi_user_id, credit_warning_threshold, newapi_user_credentials_ciphertext, code, newapi_username, assistant_version_ids, created_at, updated_at, deleted_at
 FROM organizations
-WHERE code = $1
+WHERE code = ?
 `
 
 func (q *Queries) GetOrganizationByCode(ctx context.Context, code string) (Organization, error) {
-	row := q.db.QueryRow(ctx, getOrganizationByCode, code)
+	row := q.db.QueryRowContext(ctx, getOrganizationByCode, code)
 	var i Organization
 	err := row.Scan(
 		&i.ID,
@@ -117,25 +102,25 @@ func (q *Queries) GetOrganizationByCode(ctx context.Context, code string) (Organ
 		&i.Remark,
 		&i.NewapiUserID,
 		&i.CreditWarningThreshold,
-		&i.CreatedAt,
-		&i.UpdatedAt,
-		&i.DeletedAt,
 		&i.NewapiUserCredentialsCiphertext,
 		&i.Code,
 		&i.NewapiUsername,
 		&i.AssistantVersionIds,
+		&i.CreatedAt,
+		&i.UpdatedAt,
+		&i.DeletedAt,
 	)
 	return i, err
 }
 
 const getOrganizationByName = `-- name: GetOrganizationByName :one
-SELECT id, name, status, contact_name, contact_phone, remark, newapi_user_id, credit_warning_threshold, created_at, updated_at, deleted_at, newapi_user_credentials_ciphertext, code, newapi_username, assistant_version_ids
+SELECT id, name, status, contact_name, contact_phone, remark, newapi_user_id, credit_warning_threshold, newapi_user_credentials_ciphertext, code, newapi_username, assistant_version_ids, created_at, updated_at, deleted_at
 FROM organizations
-WHERE name = $1
+WHERE name = ?
 `
 
 func (q *Queries) GetOrganizationByName(ctx context.Context, name string) (Organization, error) {
-	row := q.db.QueryRow(ctx, getOrganizationByName, name)
+	row := q.db.QueryRowContext(ctx, getOrganizationByName, name)
 	var i Organization
 	err := row.Scan(
 		&i.ID,
@@ -146,27 +131,27 @@ func (q *Queries) GetOrganizationByName(ctx context.Context, name string) (Organ
 		&i.Remark,
 		&i.NewapiUserID,
 		&i.CreditWarningThreshold,
-		&i.CreatedAt,
-		&i.UpdatedAt,
-		&i.DeletedAt,
 		&i.NewapiUserCredentialsCiphertext,
 		&i.Code,
 		&i.NewapiUsername,
 		&i.AssistantVersionIds,
+		&i.CreatedAt,
+		&i.UpdatedAt,
+		&i.DeletedAt,
 	)
 	return i, err
 }
 
 const getOrganizationForUpdate = `-- name: GetOrganizationForUpdate :one
-SELECT id, name, status, contact_name, contact_phone, remark, newapi_user_id, credit_warning_threshold, created_at, updated_at, deleted_at, newapi_user_credentials_ciphertext, code, newapi_username, assistant_version_ids
+SELECT id, name, status, contact_name, contact_phone, remark, newapi_user_id, credit_warning_threshold, newapi_user_credentials_ciphertext, code, newapi_username, assistant_version_ids, created_at, updated_at, deleted_at
 FROM organizations
-WHERE id = $1
+WHERE id = ?
 FOR UPDATE
 `
 
 // OOS-2 access_token 自愈用：以行锁查询组织，避免并发更新密文时出现写丢失。
-func (q *Queries) GetOrganizationForUpdate(ctx context.Context, id pgtype.UUID) (Organization, error) {
-	row := q.db.QueryRow(ctx, getOrganizationForUpdate, id)
+func (q *Queries) GetOrganizationForUpdate(ctx context.Context, id string) (Organization, error) {
+	row := q.db.QueryRowContext(ctx, getOrganizationForUpdate, id)
 	var i Organization
 	err := row.Scan(
 		&i.ID,
@@ -177,30 +162,30 @@ func (q *Queries) GetOrganizationForUpdate(ctx context.Context, id pgtype.UUID) 
 		&i.Remark,
 		&i.NewapiUserID,
 		&i.CreditWarningThreshold,
-		&i.CreatedAt,
-		&i.UpdatedAt,
-		&i.DeletedAt,
 		&i.NewapiUserCredentialsCiphertext,
 		&i.Code,
 		&i.NewapiUsername,
 		&i.AssistantVersionIds,
+		&i.CreatedAt,
+		&i.UpdatedAt,
+		&i.DeletedAt,
 	)
 	return i, err
 }
 
 const hardDeleteOrganization = `-- name: HardDeleteOrganization :exec
-DELETE FROM organizations WHERE id = $1
+DELETE FROM organizations WHERE id = ?
 `
 
 // 用于组织创建链路失败时回滚刚刚 INSERT 的孤儿记录。
 // 正常生命周期不可见此查询；普通"删除"必须走 SoftDeleteOrganization。
-func (q *Queries) HardDeleteOrganization(ctx context.Context, id pgtype.UUID) error {
-	_, err := q.db.Exec(ctx, hardDeleteOrganization, id)
+func (q *Queries) HardDeleteOrganization(ctx context.Context, id string) error {
+	_, err := q.db.ExecContext(ctx, hardDeleteOrganization, id)
 	return err
 }
 
 const listAllActiveOrganizations = `-- name: ListAllActiveOrganizations :many
-SELECT id, name, status, contact_name, contact_phone, remark, newapi_user_id, credit_warning_threshold, created_at, updated_at, deleted_at, newapi_user_credentials_ciphertext, code, newapi_username, assistant_version_ids
+SELECT id, name, status, contact_name, contact_phone, remark, newapi_user_id, credit_warning_threshold, newapi_user_credentials_ciphertext, code, newapi_username, assistant_version_ids, created_at, updated_at, deleted_at
 FROM organizations
 WHERE deleted_at IS NULL
 ORDER BY created_at DESC, id DESC
@@ -209,7 +194,7 @@ ORDER BY created_at DESC, id DESC
 // 全量返回活跃组织（deleted_at IS NULL），不分页；
 // 仅供平台内部聚合使用（如 GetOrgUsageBreakdown），请勿用于用户可见的列表接口。
 func (q *Queries) ListAllActiveOrganizations(ctx context.Context) ([]Organization, error) {
-	rows, err := q.db.Query(ctx, listAllActiveOrganizations)
+	rows, err := q.db.QueryContext(ctx, listAllActiveOrganizations)
 	if err != nil {
 		return nil, err
 	}
@@ -226,17 +211,20 @@ func (q *Queries) ListAllActiveOrganizations(ctx context.Context) ([]Organizatio
 			&i.Remark,
 			&i.NewapiUserID,
 			&i.CreditWarningThreshold,
-			&i.CreatedAt,
-			&i.UpdatedAt,
-			&i.DeletedAt,
 			&i.NewapiUserCredentialsCiphertext,
 			&i.Code,
 			&i.NewapiUsername,
 			&i.AssistantVersionIds,
+			&i.CreatedAt,
+			&i.UpdatedAt,
+			&i.DeletedAt,
 		); err != nil {
 			return nil, err
 		}
 		items = append(items, i)
+	}
+	if err := rows.Close(); err != nil {
+		return nil, err
 	}
 	if err := rows.Err(); err != nil {
 		return nil, err
@@ -245,11 +233,11 @@ func (q *Queries) ListAllActiveOrganizations(ctx context.Context) ([]Organizatio
 }
 
 const listOrganizations = `-- name: ListOrganizations :many
-SELECT id, name, status, contact_name, contact_phone, remark, newapi_user_id, credit_warning_threshold, created_at, updated_at, deleted_at, newapi_user_credentials_ciphertext, code, newapi_username, assistant_version_ids
+SELECT id, name, status, contact_name, contact_phone, remark, newapi_user_id, credit_warning_threshold, newapi_user_credentials_ciphertext, code, newapi_username, assistant_version_ids, created_at, updated_at, deleted_at
 FROM organizations
 WHERE deleted_at IS NULL
 ORDER BY created_at DESC, id DESC
-LIMIT $1 OFFSET $2
+LIMIT ? OFFSET ?
 `
 
 type ListOrganizationsParams struct {
@@ -258,7 +246,7 @@ type ListOrganizationsParams struct {
 }
 
 func (q *Queries) ListOrganizations(ctx context.Context, arg ListOrganizationsParams) ([]Organization, error) {
-	rows, err := q.db.Query(ctx, listOrganizations, arg.Limit, arg.Offset)
+	rows, err := q.db.QueryContext(ctx, listOrganizations, arg.Limit, arg.Offset)
 	if err != nil {
 		return nil, err
 	}
@@ -275,17 +263,20 @@ func (q *Queries) ListOrganizations(ctx context.Context, arg ListOrganizationsPa
 			&i.Remark,
 			&i.NewapiUserID,
 			&i.CreditWarningThreshold,
-			&i.CreatedAt,
-			&i.UpdatedAt,
-			&i.DeletedAt,
 			&i.NewapiUserCredentialsCiphertext,
 			&i.Code,
 			&i.NewapiUsername,
 			&i.AssistantVersionIds,
+			&i.CreatedAt,
+			&i.UpdatedAt,
+			&i.DeletedAt,
 		); err != nil {
 			return nil, err
 		}
 		items = append(items, i)
+	}
+	if err := rows.Close(); err != nil {
+		return nil, err
 	}
 	if err := rows.Err(); err != nil {
 		return nil, err
@@ -293,205 +284,110 @@ func (q *Queries) ListOrganizations(ctx context.Context, arg ListOrganizationsPa
 	return items, nil
 }
 
-const setOrganizationNewAPIUser = `-- name: SetOrganizationNewAPIUser :one
+const setOrganizationNewAPIUser = `-- name: SetOrganizationNewAPIUser :exec
 UPDATE organizations
 SET
-    newapi_user_id = $2,
-    newapi_user_credentials_ciphertext = $3,
-    newapi_username = $4,
+    newapi_user_id = ?,
+    newapi_user_credentials_ciphertext = ?,
+    newapi_username = ?,
     updated_at = now()
-WHERE id = $1
-RETURNING id, name, status, contact_name, contact_phone, remark, newapi_user_id, credit_warning_threshold, created_at, updated_at, deleted_at, newapi_user_credentials_ciphertext, code, newapi_username, assistant_version_ids
+WHERE id = ?
 `
 
 type SetOrganizationNewAPIUserParams struct {
-	ID                              pgtype.UUID `db:"id" json:"id"`
-	NewapiUserID                    pgtype.Text `db:"newapi_user_id" json:"newapi_user_id"`
-	NewapiUserCredentialsCiphertext pgtype.Text `db:"newapi_user_credentials_ciphertext" json:"newapi_user_credentials_ciphertext"`
-	NewapiUsername                  pgtype.Text `db:"newapi_username" json:"newapi_username"`
+	NewapiUserID                    null.String `db:"newapi_user_id" json:"newapi_user_id"`
+	NewapiUserCredentialsCiphertext null.String `db:"newapi_user_credentials_ciphertext" json:"newapi_user_credentials_ciphertext"`
+	NewapiUsername                  null.String `db:"newapi_username" json:"newapi_username"`
+	ID                              string      `db:"id" json:"id"`
 }
 
-func (q *Queries) SetOrganizationNewAPIUser(ctx context.Context, arg SetOrganizationNewAPIUserParams) (Organization, error) {
-	row := q.db.QueryRow(ctx, setOrganizationNewAPIUser,
-		arg.ID,
+func (q *Queries) SetOrganizationNewAPIUser(ctx context.Context, arg SetOrganizationNewAPIUserParams) error {
+	_, err := q.db.ExecContext(ctx, setOrganizationNewAPIUser,
 		arg.NewapiUserID,
 		arg.NewapiUserCredentialsCiphertext,
 		arg.NewapiUsername,
+		arg.ID,
 	)
-	var i Organization
-	err := row.Scan(
-		&i.ID,
-		&i.Name,
-		&i.Status,
-		&i.ContactName,
-		&i.ContactPhone,
-		&i.Remark,
-		&i.NewapiUserID,
-		&i.CreditWarningThreshold,
-		&i.CreatedAt,
-		&i.UpdatedAt,
-		&i.DeletedAt,
-		&i.NewapiUserCredentialsCiphertext,
-		&i.Code,
-		&i.NewapiUsername,
-		&i.AssistantVersionIds,
-	)
-	return i, err
+	return err
 }
 
-const setOrganizationStatus = `-- name: SetOrganizationStatus :one
+const setOrganizationStatus = `-- name: SetOrganizationStatus :exec
 UPDATE organizations
-SET status = $2, updated_at = now()
-WHERE id = $1
-RETURNING id, name, status, contact_name, contact_phone, remark, newapi_user_id, credit_warning_threshold, created_at, updated_at, deleted_at, newapi_user_credentials_ciphertext, code, newapi_username, assistant_version_ids
+SET status = ?, updated_at = now()
+WHERE id = ?
 `
 
 type SetOrganizationStatusParams struct {
-	ID     pgtype.UUID `db:"id" json:"id"`
-	Status string      `db:"status" json:"status"`
+	Status string `db:"status" json:"status"`
+	ID     string `db:"id" json:"id"`
 }
 
-func (q *Queries) SetOrganizationStatus(ctx context.Context, arg SetOrganizationStatusParams) (Organization, error) {
-	row := q.db.QueryRow(ctx, setOrganizationStatus, arg.ID, arg.Status)
-	var i Organization
-	err := row.Scan(
-		&i.ID,
-		&i.Name,
-		&i.Status,
-		&i.ContactName,
-		&i.ContactPhone,
-		&i.Remark,
-		&i.NewapiUserID,
-		&i.CreditWarningThreshold,
-		&i.CreatedAt,
-		&i.UpdatedAt,
-		&i.DeletedAt,
-		&i.NewapiUserCredentialsCiphertext,
-		&i.Code,
-		&i.NewapiUsername,
-		&i.AssistantVersionIds,
-	)
-	return i, err
+func (q *Queries) SetOrganizationStatus(ctx context.Context, arg SetOrganizationStatusParams) error {
+	_, err := q.db.ExecContext(ctx, setOrganizationStatus, arg.Status, arg.ID)
+	return err
 }
 
-const softDeleteOrganization = `-- name: SoftDeleteOrganization :one
+const softDeleteOrganization = `-- name: SoftDeleteOrganization :exec
 UPDATE organizations
 SET status = 'deleted', deleted_at = now(), updated_at = now()
-WHERE id = $1 AND deleted_at IS NULL
-RETURNING id, name, status, contact_name, contact_phone, remark, newapi_user_id, credit_warning_threshold, created_at, updated_at, deleted_at, newapi_user_credentials_ciphertext, code, newapi_username, assistant_version_ids
+WHERE id = ? AND deleted_at IS NULL
 `
 
-func (q *Queries) SoftDeleteOrganization(ctx context.Context, id pgtype.UUID) (Organization, error) {
-	row := q.db.QueryRow(ctx, softDeleteOrganization, id)
-	var i Organization
-	err := row.Scan(
-		&i.ID,
-		&i.Name,
-		&i.Status,
-		&i.ContactName,
-		&i.ContactPhone,
-		&i.Remark,
-		&i.NewapiUserID,
-		&i.CreditWarningThreshold,
-		&i.CreatedAt,
-		&i.UpdatedAt,
-		&i.DeletedAt,
-		&i.NewapiUserCredentialsCiphertext,
-		&i.Code,
-		&i.NewapiUsername,
-		&i.AssistantVersionIds,
-	)
-	return i, err
+func (q *Queries) SoftDeleteOrganization(ctx context.Context, id string) error {
+	_, err := q.db.ExecContext(ctx, softDeleteOrganization, id)
+	return err
 }
 
-const updateOrganizationCredentialsCiphertext = `-- name: UpdateOrganizationCredentialsCiphertext :one
+const updateOrganizationCredentialsCiphertext = `-- name: UpdateOrganizationCredentialsCiphertext :exec
 UPDATE organizations
-SET newapi_user_credentials_ciphertext = $2,
+SET newapi_user_credentials_ciphertext = ?,
     updated_at = now()
-WHERE id = $1
-RETURNING id, name, status, contact_name, contact_phone, remark, newapi_user_id, credit_warning_threshold, created_at, updated_at, deleted_at, newapi_user_credentials_ciphertext, code, newapi_username, assistant_version_ids
+WHERE id = ?
 `
 
 type UpdateOrganizationCredentialsCiphertextParams struct {
-	ID                              pgtype.UUID `db:"id" json:"id"`
-	NewapiUserCredentialsCiphertext pgtype.Text `db:"newapi_user_credentials_ciphertext" json:"newapi_user_credentials_ciphertext"`
+	NewapiUserCredentialsCiphertext null.String `db:"newapi_user_credentials_ciphertext" json:"newapi_user_credentials_ciphertext"`
+	ID                              string      `db:"id" json:"id"`
 }
 
 // OOS-2 access_token 自愈用：仅更新 newapi_user_credentials_ciphertext，不动 newapi_user_id。
-func (q *Queries) UpdateOrganizationCredentialsCiphertext(ctx context.Context, arg UpdateOrganizationCredentialsCiphertextParams) (Organization, error) {
-	row := q.db.QueryRow(ctx, updateOrganizationCredentialsCiphertext, arg.ID, arg.NewapiUserCredentialsCiphertext)
-	var i Organization
-	err := row.Scan(
-		&i.ID,
-		&i.Name,
-		&i.Status,
-		&i.ContactName,
-		&i.ContactPhone,
-		&i.Remark,
-		&i.NewapiUserID,
-		&i.CreditWarningThreshold,
-		&i.CreatedAt,
-		&i.UpdatedAt,
-		&i.DeletedAt,
-		&i.NewapiUserCredentialsCiphertext,
-		&i.Code,
-		&i.NewapiUsername,
-		&i.AssistantVersionIds,
-	)
-	return i, err
+func (q *Queries) UpdateOrganizationCredentialsCiphertext(ctx context.Context, arg UpdateOrganizationCredentialsCiphertextParams) error {
+	_, err := q.db.ExecContext(ctx, updateOrganizationCredentialsCiphertext, arg.NewapiUserCredentialsCiphertext, arg.ID)
+	return err
 }
 
-const updateOrganizationProfile = `-- name: UpdateOrganizationProfile :one
+const updateOrganizationProfile = `-- name: UpdateOrganizationProfile :exec
 UPDATE organizations
 SET
-    name = $2,
-    contact_name = $3,
-    contact_phone = $4,
-    remark = $5,
-    credit_warning_threshold = $6,
-    assistant_version_ids = $7,
+    name = ?,
+    contact_name = ?,
+    contact_phone = ?,
+    remark = ?,
+    credit_warning_threshold = ?,
+    assistant_version_ids = ?,
     updated_at = now()
-WHERE id = $1
-RETURNING id, name, status, contact_name, contact_phone, remark, newapi_user_id, credit_warning_threshold, created_at, updated_at, deleted_at, newapi_user_credentials_ciphertext, code, newapi_username, assistant_version_ids
+WHERE id = ?
 `
 
 type UpdateOrganizationProfileParams struct {
-	ID                     pgtype.UUID `db:"id" json:"id"`
-	Name                   string      `db:"name" json:"name"`
-	ContactName            pgtype.Text `db:"contact_name" json:"contact_name"`
-	ContactPhone           pgtype.Text `db:"contact_phone" json:"contact_phone"`
-	Remark                 pgtype.Text `db:"remark" json:"remark"`
-	CreditWarningThreshold pgtype.Int4 `db:"credit_warning_threshold" json:"credit_warning_threshold"`
-	AssistantVersionIds    []byte      `db:"assistant_version_ids" json:"assistant_version_ids"`
+	Name                   string          `db:"name" json:"name"`
+	ContactName            null.String     `db:"contact_name" json:"contact_name"`
+	ContactPhone           null.String     `db:"contact_phone" json:"contact_phone"`
+	Remark                 null.String     `db:"remark" json:"remark"`
+	CreditWarningThreshold null.Int        `db:"credit_warning_threshold" json:"credit_warning_threshold"`
+	AssistantVersionIds    json.RawMessage `db:"assistant_version_ids" json:"assistant_version_ids"`
+	ID                     string          `db:"id" json:"id"`
 }
 
-func (q *Queries) UpdateOrganizationProfile(ctx context.Context, arg UpdateOrganizationProfileParams) (Organization, error) {
-	row := q.db.QueryRow(ctx, updateOrganizationProfile,
-		arg.ID,
+func (q *Queries) UpdateOrganizationProfile(ctx context.Context, arg UpdateOrganizationProfileParams) error {
+	_, err := q.db.ExecContext(ctx, updateOrganizationProfile,
 		arg.Name,
 		arg.ContactName,
 		arg.ContactPhone,
 		arg.Remark,
 		arg.CreditWarningThreshold,
 		arg.AssistantVersionIds,
+		arg.ID,
 	)
-	var i Organization
-	err := row.Scan(
-		&i.ID,
-		&i.Name,
-		&i.Status,
-		&i.ContactName,
-		&i.ContactPhone,
-		&i.Remark,
-		&i.NewapiUserID,
-		&i.CreditWarningThreshold,
-		&i.CreatedAt,
-		&i.UpdatedAt,
-		&i.DeletedAt,
-		&i.NewapiUserCredentialsCiphertext,
-		&i.Code,
-		&i.NewapiUsername,
-		&i.AssistantVersionIds,
-	)
-	return i, err
+	return err
 }

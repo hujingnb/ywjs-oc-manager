@@ -1,5 +1,6 @@
--- name: CreateApp :one
+-- name: CreateApp :exec
 INSERT INTO apps (
+    id,
     org_id,
     owner_user_id,
     runtime_node_id,
@@ -9,80 +10,74 @@ INSERT INTO apps (
     api_key_status,
     version_id
 ) VALUES (
-    $1, $2, $3, $4, $5, $6, $7, $8
-)
-RETURNING *;
+    ?, ?, ?, ?, ?, ?, ?, ?, ?
+);
 
 -- name: GetApp :one
 SELECT *
 FROM apps
-WHERE id = $1;
+WHERE id = ?;
 
 -- name: GetActiveAppByOwner :one
 SELECT *
 FROM apps
-WHERE owner_user_id = $1 AND deleted_at IS NULL;
+WHERE owner_user_id = ? AND deleted_at IS NULL;
 
 -- name: ListAppsByOrg :many
 SELECT *
 FROM apps
-WHERE org_id = $1 AND deleted_at IS NULL
+WHERE org_id = ? AND deleted_at IS NULL
 ORDER BY created_at DESC, id DESC
-LIMIT $2 OFFSET $3;
+LIMIT ? OFFSET ?;
 
 -- name: ListAppsByRuntimeNode :many
 SELECT *
 FROM apps
-WHERE runtime_node_id = $1 AND deleted_at IS NULL
+WHERE runtime_node_id = ? AND deleted_at IS NULL
 ORDER BY created_at DESC, id DESC
-LIMIT $2 OFFSET $3;
+LIMIT ? OFFSET ?;
 
--- name: SetAppStatus :one
+-- name: SetAppStatus :exec
 UPDATE apps
-SET status = $2, updated_at = now()
-WHERE id = $1
-RETURNING *;
+SET status = ?, updated_at = now()
+WHERE id = ?;
 
--- name: SetAppContainer :one
+-- name: SetAppContainer :exec
 UPDATE apps
-SET container_id = $2, container_name = $3, updated_at = now()
-WHERE id = $1
-RETURNING *;
+SET container_id = ?, container_name = ?, updated_at = now()
+WHERE id = ?;
 
--- name: SetAppNewAPIKey :one
+-- name: SetAppNewAPIKey :exec
 UPDATE apps
 SET
-    newapi_key_id = $2,
-    newapi_key_ciphertext = $3,
-    api_key_status = $4,
-    newapi_key_name = $5,
+    newapi_key_id = ?,
+    newapi_key_ciphertext = ?,
+    api_key_status = ?,
+    newapi_key_name = ?,
     updated_at = now()
-WHERE id = $1
-RETURNING *;
+WHERE id = ?;
 
--- name: SetAppRuntimeToken :one
+-- name: SetAppRuntimeToken :exec
 -- 首次写入 Hermes 调 manager runtime API 的 app 级 token；并发重复初始化拿不到行，由 service 读取既有 token。
 UPDATE apps
-SET runtime_token_hash = $2,
-    runtime_token_ciphertext = $3,
+SET runtime_token_hash = ?,
+    runtime_token_ciphertext = ?,
     updated_at = now()
-WHERE id = $1
+WHERE id = ?
   AND deleted_at IS NULL
   AND runtime_token_hash IS NULL
-  AND runtime_token_ciphertext IS NULL
-RETURNING *;
+  AND runtime_token_ciphertext IS NULL;
 
 -- name: GetAppByRuntimeTokenHash :one
 -- runtime API 只接受 token hash 解析出的当前 app，不允许请求方传入目标 app/dataset。
 SELECT *
 FROM apps
-WHERE runtime_token_hash = $1 AND deleted_at IS NULL;
+WHERE runtime_token_hash = ? AND deleted_at IS NULL;
 
--- name: SoftDeleteApp :one
+-- name: SoftDeleteApp :exec
 UPDATE apps
 SET status = 'deleted', deleted_at = now(), updated_at = now()
-WHERE id = $1 AND deleted_at IS NULL
-RETURNING *;
+WHERE id = ? AND deleted_at IS NULL;
 
 -- name: ListRunningApps :many
 -- 列出当前期望持有 runtime 容器的应用，供 scheduler 周期 dispatch
@@ -96,60 +91,54 @@ WHERE deleted_at IS NULL
   AND container_id IS NOT NULL
 ORDER BY id;
 
--- name: SetAppRuntimeSnapshot :one
+-- name: SetAppRuntimeSnapshot :exec
 UPDATE apps
-SET runtime_snapshot_json = $2,
+SET runtime_snapshot_json = ?,
     runtime_snapshot_at = now(),
     updated_at = now()
-WHERE id = $1
-RETURNING *;
+WHERE id = ?;
 
--- name: SetAppRestartPolicy :one
+-- name: SetAppRestartPolicy :exec
 -- 管理员 PATCH /apps/:appId/restart-policy 写入；mode/max_per_window/window_seconds 校验在 service 层。
 UPDATE apps
-SET restart_policy_json = $2,
+SET restart_policy_json = ?,
     updated_at = now()
-WHERE id = $1
-RETURNING *;
+WHERE id = ?;
 
--- name: SetAppHealthState :one
+-- name: SetAppHealthState :exec
 -- worker app_health_check handler 写最近一次健康检查结果；用于自动重启窗口计数。
 UPDATE apps
-SET health_state_json = $2,
+SET health_state_json = ?,
     updated_at = now()
-WHERE id = $1
-RETURNING *;
+WHERE id = ?;
 
--- name: SetAppProgress :one
+-- name: SetAppProgress :exec
 -- progressReporter 节流后写入；NULL/NULL 表示阶段切换或未知。
 UPDATE apps
-SET progress_current = $2,
-    progress_total = $3,
+SET progress_current = ?,
+    progress_total = ?,
     updated_at = now()
-WHERE id = $1
-RETURNING *;
+WHERE id = ?;
 
--- name: ClearAppProgress :one
+-- name: ClearAppProgress :exec
 -- transitionTo / RequestInitialize 强制清空进度字段。
 UPDATE apps
 SET progress_current = NULL,
     progress_total = NULL,
     updated_at = now()
-WHERE id = $1
-RETURNING *;
+WHERE id = ?;
 
--- name: MarkAppFailed :one
--- 任意状态 → error 时同时写入来源状态与错误文本，保留”在哪一步失败”与”为什么失败”语义。
+-- name: MarkAppFailed :exec
+-- 任意状态 → error 时同时写入来源状态与错误文本，保留"在哪一步失败"与"为什么失败"语义。
 -- last_error_status 不加 CHECK 约束，值由调用方在 Go 层负责合法性。
 UPDATE apps
 SET status = 'error',
-    last_error_status = $2,
-    last_error_message = $3,
+    last_error_status = ?,
+    last_error_message = ?,
     progress_current = NULL,
     progress_total = NULL,
     updated_at = now()
-WHERE id = $1
-RETURNING *;
+WHERE id = ?;
 
 -- name: ListStaleInits :many
 -- reaper 扫描 init 子状态下连续 90s 无更新的孤儿；阈值由调用方传入。
@@ -158,54 +147,51 @@ SELECT id, runtime_node_id, status
 FROM apps
 WHERE deleted_at IS NULL
   AND status IN ('pulling_runtime_image','preparing_runtime','creating_container','starting')
-  AND updated_at < $1
+  AND updated_at < ?
 ORDER BY id;
 
--- name: UpdateAppRuntimeImage :one
+-- name: UpdateAppRuntimeImage :exec
 -- phasePullRuntimeImage 成功后写入镜像引用与 sha256。
 UPDATE apps
 SET
-    runtime_image_ref    = $2,
-    runtime_image_sha256 = $3,
+    runtime_image_ref    = ?,
+    runtime_image_sha256 = ?,
     updated_at = now()
-WHERE id = $1
-RETURNING *;
+WHERE id = ?;
 
--- name: SetAppAppliedVersion :one
+-- name: SetAppAppliedVersion :exec
 -- 初始化/重启成功后记录已应用的版本修订与镜像 ref，用于 version_synced 检测。
 UPDATE apps
-SET applied_version_revision = $2,
-    applied_image_ref = $3,
+SET applied_version_revision = ?,
+    applied_image_ref = ?,
     updated_at = now()
-WHERE id = $1
-RETURNING *;
+WHERE id = ?;
 
--- name: SetAppVersion :one
+-- name: SetAppVersion :exec
 -- 切换实例绑定的助手版本，并把 applied_version_revision / applied_image_ref 清零。
 -- 不同版本各自维护独立的 revision 计数，若切换后保留旧 applied_*，当新旧版本
 -- 的 revision 数字恰好相同（且镜像相同）时 version_synced 会误判为已同步。
 -- 清零后 applied_version_revision=0 永远不等于任何真实版本 revision（从 1 起），
 -- 实例切换后必然进入需重启态，直到重启重新写入 applied_*。
 UPDATE apps
-SET version_id = $2,
+SET version_id = ?,
     applied_version_revision = 0,
     applied_image_ref = '',
     updated_at = now()
-WHERE id = $1 AND deleted_at IS NULL
-RETURNING *;
+WHERE id = ? AND deleted_at IS NULL;
 
 -- name: GetAppWithVersion :one
 -- 取实例及其绑定版本的 revision / image_id，供 version_synced 计算。
 SELECT sqlc.embed(apps), av.revision AS version_revision, av.image_id AS version_image_id
 FROM apps
 JOIN assistant_versions av ON av.id = apps.version_id
-WHERE apps.id = $1;
+WHERE apps.id = ?;
 
 -- name: ListAppsByOrgWithVersion :many
 -- 组织实例列表联查版本 revision / image_id，供 version_synced 批量计算。
 SELECT sqlc.embed(apps), av.revision AS version_revision, av.image_id AS version_image_id
 FROM apps
 JOIN assistant_versions av ON av.id = apps.version_id
-WHERE apps.org_id = $1 AND apps.deleted_at IS NULL
+WHERE apps.org_id = ? AND apps.deleted_at IS NULL
 ORDER BY apps.created_at DESC, apps.id DESC
-LIMIT $2 OFFSET $3;
+LIMIT ? OFFSET ?;

@@ -1,49 +1,46 @@
--- name: CreateChannelBinding :one
+-- name: CreateChannelBinding :exec
 INSERT INTO channel_bindings (
+    id,
     app_id,
     channel_type,
     status
 ) VALUES (
-    $1, $2, $3
-)
-RETURNING *;
+    ?, ?, ?, ?
+);
 
 -- name: GetChannelBindingByAppAndType :one
 SELECT *
 FROM channel_bindings
-WHERE app_id = $1 AND channel_type = $2 AND status <> 'deleted';
+WHERE app_id = ? AND channel_type = ? AND status <> 'deleted';
 
--- name: SetChannelBindingStatus :one
+-- name: SetChannelBindingStatus :exec
 UPDATE channel_bindings
-SET status = $3, last_error = $4, updated_at = now()
-WHERE app_id = $1 AND channel_type = $2 AND status <> 'deleted'
-RETURNING *;
+SET status = ?, last_error = ?, updated_at = now()
+WHERE app_id = ? AND channel_type = ? AND status <> 'deleted';
 
--- name: SetChannelBindingChallenge :one
+-- name: SetChannelBindingChallenge :exec
 UPDATE channel_bindings
-SET status = 'pending_auth', metadata_json = $3, last_error = NULL, updated_at = now()
-WHERE app_id = $1 AND channel_type = $2 AND status <> 'deleted'
-RETURNING *;
+SET status = 'pending_auth', metadata_json = ?, last_error = NULL, updated_at = now()
+WHERE app_id = ? AND channel_type = ? AND status <> 'deleted';
 
--- name: MarkChannelBindingBound :one
+-- name: MarkChannelBindingBound :exec
 UPDATE channel_bindings
 SET
     status = 'bound',
-    bound_identity = $3,
-    channel_name = $4,
-    metadata_json = $5,
+    bound_identity = ?,
+    channel_name = ?,
+    metadata_json = ?,
     bound_at = now(),
     last_error = NULL,
     updated_at = now()
-WHERE app_id = $1 AND channel_type = $2 AND status <> 'deleted'
-RETURNING *;
+WHERE app_id = ? AND channel_type = ? AND status <> 'deleted';
 
 -- name: CountChannelBindingsByApp :one
 -- 统计指定应用下未被标记为 deleted 的渠道绑定数。
 -- RuntimeOperationService.Trigger 在写 delete 审计前调用，把数量塞进 detail_message。
-SELECT COUNT(*)::bigint AS count
+SELECT COUNT(*) AS count
 FROM channel_bindings
-WHERE app_id = $1 AND status <> 'deleted';
+WHERE app_id = ? AND status <> 'deleted';
 
 -- name: AppHasBoundChannelBinding :one
 -- 判断指定应用下是否存在 status='bound' 的渠道绑定。
@@ -53,5 +50,5 @@ WHERE app_id = $1 AND status <> 'deleted';
 SELECT EXISTS (
     SELECT 1
     FROM channel_bindings
-    WHERE app_id = $1 AND status = 'bound'
-)::bool AS has_bound;
+    WHERE app_id = ? AND status = 'bound'
+) AS has_bound;

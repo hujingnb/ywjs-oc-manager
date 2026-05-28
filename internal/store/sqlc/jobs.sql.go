@@ -7,12 +7,15 @@ package sqlc
 
 import (
 	"context"
+	"encoding/json"
+	"time"
 
-	"github.com/jackc/pgx/v5/pgtype"
+	null "github.com/guregu/null/v5"
 )
 
-const createJob = `-- name: CreateJob :one
+const createJob = `-- name: CreateJob :exec
 INSERT INTO jobs (
+    id,
     type,
     status,
     priority,
@@ -20,55 +23,39 @@ INSERT INTO jobs (
     max_attempts,
     payload_json
 ) VALUES (
-    $1, 'pending', $2, $3, $4, $5
+    ?, ?, 'pending', ?, ?, ?, ?
 )
-RETURNING id, type, status, priority, run_after, attempts, max_attempts, payload_json, locked_by, locked_at, last_error, created_at, updated_at, finished_at
 `
 
 type CreateJobParams struct {
-	Type        string             `db:"type" json:"type"`
-	Priority    int32              `db:"priority" json:"priority"`
-	RunAfter    pgtype.Timestamptz `db:"run_after" json:"run_after"`
-	MaxAttempts int32              `db:"max_attempts" json:"max_attempts"`
-	PayloadJson []byte             `db:"payload_json" json:"payload_json"`
+	ID          string          `db:"id" json:"id"`
+	Type        string          `db:"type" json:"type"`
+	Priority    int32           `db:"priority" json:"priority"`
+	RunAfter    time.Time       `db:"run_after" json:"run_after"`
+	MaxAttempts int32           `db:"max_attempts" json:"max_attempts"`
+	PayloadJson json.RawMessage `db:"payload_json" json:"payload_json"`
 }
 
-func (q *Queries) CreateJob(ctx context.Context, arg CreateJobParams) (Job, error) {
-	row := q.db.QueryRow(ctx, createJob,
+func (q *Queries) CreateJob(ctx context.Context, arg CreateJobParams) error {
+	_, err := q.db.ExecContext(ctx, createJob,
+		arg.ID,
 		arg.Type,
 		arg.Priority,
 		arg.RunAfter,
 		arg.MaxAttempts,
 		arg.PayloadJson,
 	)
-	var i Job
-	err := row.Scan(
-		&i.ID,
-		&i.Type,
-		&i.Status,
-		&i.Priority,
-		&i.RunAfter,
-		&i.Attempts,
-		&i.MaxAttempts,
-		&i.PayloadJson,
-		&i.LockedBy,
-		&i.LockedAt,
-		&i.LastError,
-		&i.CreatedAt,
-		&i.UpdatedAt,
-		&i.FinishedAt,
-	)
-	return i, err
+	return err
 }
 
 const getJob = `-- name: GetJob :one
 SELECT id, type, status, priority, run_after, attempts, max_attempts, payload_json, locked_by, locked_at, last_error, created_at, updated_at, finished_at
 FROM jobs
-WHERE id = $1
+WHERE id = ?
 `
 
-func (q *Queries) GetJob(ctx context.Context, id pgtype.UUID) (Job, error) {
-	row := q.db.QueryRow(ctx, getJob, id)
+func (q *Queries) GetJob(ctx context.Context, id string) (Job, error) {
+	row := q.db.QueryRowContext(ctx, getJob, id)
 	var i Job
 	err := row.Scan(
 		&i.ID,
@@ -93,16 +80,15 @@ const getLatestAppInitJob = `-- name: GetLatestAppInitJob :one
 SELECT id, type, status, priority, run_after, attempts, max_attempts, payload_json, locked_by, locked_at, last_error, created_at, updated_at, finished_at
 FROM jobs
 WHERE type = 'app_initialize'
-  AND payload_json->>'app_id' = $1::text
+  AND payload_json->>'$.app_id' = ?
 ORDER BY created_at DESC
 LIMIT 1
 `
 
-// reaper 通过 payload_json->>'app_id' 查最近一份 app_initialize job。
-// 用 ORDER BY created_at DESC + LIMIT 1 取最新；不存在返回 pgx.ErrNoRows。
-// 参数显式 cast 成 text，避免 sqlc 把 `->>` 结果类型推断成 []byte。
-func (q *Queries) GetLatestAppInitJob(ctx context.Context, appID string) (Job, error) {
-	row := q.db.QueryRow(ctx, getLatestAppInitJob, appID)
+// reaper 通过 payload_json->>'$.app_id' 查最近一份 app_initialize job。
+// 用 ORDER BY created_at DESC + LIMIT 1 取最新；不存在返回 sql.ErrNoRows。
+func (q *Queries) GetLatestAppInitJob(ctx context.Context, appID json.RawMessage) (Job, error) {
+	row := q.db.QueryRowContext(ctx, getLatestAppInitJob, appID)
 	var i Job
 	err := row.Scan(
 		&i.ID,
@@ -129,11 +115,11 @@ FROM jobs
 WHERE status = 'pending'
   AND run_after <= now()
 ORDER BY priority DESC, created_at ASC
-LIMIT $1
+LIMIT ?
 `
 
 func (q *Queries) ListReadyJobs(ctx context.Context, limit int32) ([]Job, error) {
-	rows, err := q.db.Query(ctx, listReadyJobs, limit)
+	rows, err := q.db.QueryContext(ctx, listReadyJobs, limit)
 	if err != nil {
 		return nil, err
 	}
@@ -161,6 +147,9 @@ func (q *Queries) ListReadyJobs(ctx context.Context, limit int32) ([]Job, error)
 		}
 		items = append(items, i)
 	}
+	if err := rows.Close(); err != nil {
+		return nil, err
+	}
 	if err := rows.Err(); err != nil {
 		return nil, err
 	}
@@ -170,12 +159,12 @@ func (q *Queries) ListReadyJobs(ctx context.Context, limit int32) ([]Job, error)
 const lockJobForUpdate = `-- name: LockJobForUpdate :one
 SELECT id, type, status, priority, run_after, attempts, max_attempts, payload_json, locked_by, locked_at, last_error, created_at, updated_at, finished_at
 FROM jobs
-WHERE id = $1
+WHERE id = ?
 FOR UPDATE
 `
 
-func (q *Queries) LockJobForUpdate(ctx context.Context, id pgtype.UUID) (Job, error) {
-	row := q.db.QueryRow(ctx, lockJobForUpdate, id)
+func (q *Queries) LockJobForUpdate(ctx context.Context, id string) (Job, error) {
+	row := q.db.QueryRowContext(ctx, lockJobForUpdate, id)
 	var i Job
 	err := row.Scan(
 		&i.ID,
@@ -196,86 +185,50 @@ func (q *Queries) LockJobForUpdate(ctx context.Context, id pgtype.UUID) (Job, er
 	return i, err
 }
 
-const markJobFailed = `-- name: MarkJobFailed :one
+const markJobFailed = `-- name: MarkJobFailed :exec
 UPDATE jobs
 SET
     status = 'failed',
-    last_error = $2,
+    last_error = ?,
     finished_at = now(),
     locked_by = NULL,
     locked_at = NULL,
     updated_at = now()
-WHERE id = $1
-RETURNING id, type, status, priority, run_after, attempts, max_attempts, payload_json, locked_by, locked_at, last_error, created_at, updated_at, finished_at
+WHERE id = ?
 `
 
 type MarkJobFailedParams struct {
-	ID        pgtype.UUID `db:"id" json:"id"`
-	LastError pgtype.Text `db:"last_error" json:"last_error"`
+	LastError null.String `db:"last_error" json:"last_error"`
+	ID        string      `db:"id" json:"id"`
 }
 
-func (q *Queries) MarkJobFailed(ctx context.Context, arg MarkJobFailedParams) (Job, error) {
-	row := q.db.QueryRow(ctx, markJobFailed, arg.ID, arg.LastError)
-	var i Job
-	err := row.Scan(
-		&i.ID,
-		&i.Type,
-		&i.Status,
-		&i.Priority,
-		&i.RunAfter,
-		&i.Attempts,
-		&i.MaxAttempts,
-		&i.PayloadJson,
-		&i.LockedBy,
-		&i.LockedAt,
-		&i.LastError,
-		&i.CreatedAt,
-		&i.UpdatedAt,
-		&i.FinishedAt,
-	)
-	return i, err
+func (q *Queries) MarkJobFailed(ctx context.Context, arg MarkJobFailedParams) error {
+	_, err := q.db.ExecContext(ctx, markJobFailed, arg.LastError, arg.ID)
+	return err
 }
 
-const markJobRunning = `-- name: MarkJobRunning :one
+const markJobRunning = `-- name: MarkJobRunning :exec
 UPDATE jobs
 SET
     status = 'running',
-    locked_by = $2,
+    locked_by = ?,
     locked_at = now(),
     attempts = attempts + 1,
     updated_at = now()
-WHERE id = $1
-RETURNING id, type, status, priority, run_after, attempts, max_attempts, payload_json, locked_by, locked_at, last_error, created_at, updated_at, finished_at
+WHERE id = ?
 `
 
 type MarkJobRunningParams struct {
-	ID       pgtype.UUID `db:"id" json:"id"`
-	LockedBy pgtype.Text `db:"locked_by" json:"locked_by"`
+	LockedBy null.String `db:"locked_by" json:"locked_by"`
+	ID       string      `db:"id" json:"id"`
 }
 
-func (q *Queries) MarkJobRunning(ctx context.Context, arg MarkJobRunningParams) (Job, error) {
-	row := q.db.QueryRow(ctx, markJobRunning, arg.ID, arg.LockedBy)
-	var i Job
-	err := row.Scan(
-		&i.ID,
-		&i.Type,
-		&i.Status,
-		&i.Priority,
-		&i.RunAfter,
-		&i.Attempts,
-		&i.MaxAttempts,
-		&i.PayloadJson,
-		&i.LockedBy,
-		&i.LockedAt,
-		&i.LastError,
-		&i.CreatedAt,
-		&i.UpdatedAt,
-		&i.FinishedAt,
-	)
-	return i, err
+func (q *Queries) MarkJobRunning(ctx context.Context, arg MarkJobRunningParams) error {
+	_, err := q.db.ExecContext(ctx, markJobRunning, arg.LockedBy, arg.ID)
+	return err
 }
 
-const markJobSucceeded = `-- name: MarkJobSucceeded :one
+const markJobSucceeded = `-- name: MarkJobSucceeded :exec
 UPDATE jobs
 SET
     status = 'succeeded',
@@ -283,105 +236,51 @@ SET
     locked_by = NULL,
     locked_at = NULL,
     updated_at = now()
-WHERE id = $1
-RETURNING id, type, status, priority, run_after, attempts, max_attempts, payload_json, locked_by, locked_at, last_error, created_at, updated_at, finished_at
+WHERE id = ?
 `
 
-func (q *Queries) MarkJobSucceeded(ctx context.Context, id pgtype.UUID) (Job, error) {
-	row := q.db.QueryRow(ctx, markJobSucceeded, id)
-	var i Job
-	err := row.Scan(
-		&i.ID,
-		&i.Type,
-		&i.Status,
-		&i.Priority,
-		&i.RunAfter,
-		&i.Attempts,
-		&i.MaxAttempts,
-		&i.PayloadJson,
-		&i.LockedBy,
-		&i.LockedAt,
-		&i.LastError,
-		&i.CreatedAt,
-		&i.UpdatedAt,
-		&i.FinishedAt,
-	)
-	return i, err
+func (q *Queries) MarkJobSucceeded(ctx context.Context, id string) error {
+	_, err := q.db.ExecContext(ctx, markJobSucceeded, id)
+	return err
 }
 
-const requeueJob = `-- name: RequeueJob :one
+const requeueJob = `-- name: RequeueJob :exec
 UPDATE jobs
 SET status = 'pending',
     locked_by = NULL,
     locked_at = NULL,
     last_error = NULL,
     updated_at = now()
-WHERE id = $1
-RETURNING id, type, status, priority, run_after, attempts, max_attempts, payload_json, locked_by, locked_at, last_error, created_at, updated_at, finished_at
+WHERE id = ?
 `
 
 // reaper 把已 running / succeeded 的 job 重置为 pending。
 // locked_by / locked_at 一并清空避免被旧 worker 误识别为本机持有。
 // 注意：jobs 表无 started_at 列，仅清 locked_* / last_error / 状态。
-func (q *Queries) RequeueJob(ctx context.Context, id pgtype.UUID) (Job, error) {
-	row := q.db.QueryRow(ctx, requeueJob, id)
-	var i Job
-	err := row.Scan(
-		&i.ID,
-		&i.Type,
-		&i.Status,
-		&i.Priority,
-		&i.RunAfter,
-		&i.Attempts,
-		&i.MaxAttempts,
-		&i.PayloadJson,
-		&i.LockedBy,
-		&i.LockedAt,
-		&i.LastError,
-		&i.CreatedAt,
-		&i.UpdatedAt,
-		&i.FinishedAt,
-	)
-	return i, err
+func (q *Queries) RequeueJob(ctx context.Context, id string) error {
+	_, err := q.db.ExecContext(ctx, requeueJob, id)
+	return err
 }
 
-const retryJob = `-- name: RetryJob :one
+const retryJob = `-- name: RetryJob :exec
 UPDATE jobs
 SET
     status = 'pending',
-    run_after = $2,
-    last_error = $3,
+    run_after = ?,
+    last_error = ?,
     locked_by = NULL,
     locked_at = NULL,
     updated_at = now()
-WHERE id = $1
-RETURNING id, type, status, priority, run_after, attempts, max_attempts, payload_json, locked_by, locked_at, last_error, created_at, updated_at, finished_at
+WHERE id = ?
 `
 
 type RetryJobParams struct {
-	ID        pgtype.UUID        `db:"id" json:"id"`
-	RunAfter  pgtype.Timestamptz `db:"run_after" json:"run_after"`
-	LastError pgtype.Text        `db:"last_error" json:"last_error"`
+	RunAfter  time.Time   `db:"run_after" json:"run_after"`
+	LastError null.String `db:"last_error" json:"last_error"`
+	ID        string      `db:"id" json:"id"`
 }
 
-func (q *Queries) RetryJob(ctx context.Context, arg RetryJobParams) (Job, error) {
-	row := q.db.QueryRow(ctx, retryJob, arg.ID, arg.RunAfter, arg.LastError)
-	var i Job
-	err := row.Scan(
-		&i.ID,
-		&i.Type,
-		&i.Status,
-		&i.Priority,
-		&i.RunAfter,
-		&i.Attempts,
-		&i.MaxAttempts,
-		&i.PayloadJson,
-		&i.LockedBy,
-		&i.LockedAt,
-		&i.LastError,
-		&i.CreatedAt,
-		&i.UpdatedAt,
-		&i.FinishedAt,
-	)
-	return i, err
+func (q *Queries) RetryJob(ctx context.Context, arg RetryJobParams) error {
+	_, err := q.db.ExecContext(ctx, retryJob, arg.RunAfter, arg.LastError, arg.ID)
+	return err
 }

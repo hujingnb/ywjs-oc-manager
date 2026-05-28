@@ -7,12 +7,14 @@ package sqlc
 
 import (
 	"context"
+	"time"
 
-	"github.com/jackc/pgx/v5/pgtype"
+	null "github.com/guregu/null/v5"
 )
 
-const createUser = `-- name: CreateUser :one
+const createUser = `-- name: CreateUser :exec
 INSERT INTO users (
+    id,
     org_id,
     username,
     password_hash,
@@ -20,13 +22,13 @@ INSERT INTO users (
     role,
     status
 ) VALUES (
-    $1, $2, $3, $4, $5, $6
+    ?, ?, ?, ?, ?, ?, ?
 )
-RETURNING id, org_id, username, password_hash, display_name, role, status, last_login_at, created_at, updated_at, deleted_at
 `
 
 type CreateUserParams struct {
-	OrgID        pgtype.UUID `db:"org_id" json:"org_id"`
+	ID           string      `db:"id" json:"id"`
+	OrgID        null.String `db:"org_id" json:"org_id"`
 	Username     string      `db:"username" json:"username"`
 	PasswordHash string      `db:"password_hash" json:"password_hash"`
 	DisplayName  string      `db:"display_name" json:"display_name"`
@@ -34,8 +36,9 @@ type CreateUserParams struct {
 	Status       string      `db:"status" json:"status"`
 }
 
-func (q *Queries) CreateUser(ctx context.Context, arg CreateUserParams) (User, error) {
-	row := q.db.QueryRow(ctx, createUser,
+func (q *Queries) CreateUser(ctx context.Context, arg CreateUserParams) error {
+	_, err := q.db.ExecContext(ctx, createUser,
+		arg.ID,
 		arg.OrgID,
 		arg.Username,
 		arg.PasswordHash,
@@ -43,27 +46,13 @@ func (q *Queries) CreateUser(ctx context.Context, arg CreateUserParams) (User, e
 		arg.Role,
 		arg.Status,
 	)
-	var i User
-	err := row.Scan(
-		&i.ID,
-		&i.OrgID,
-		&i.Username,
-		&i.PasswordHash,
-		&i.DisplayName,
-		&i.Role,
-		&i.Status,
-		&i.LastLoginAt,
-		&i.CreatedAt,
-		&i.UpdatedAt,
-		&i.DeletedAt,
-	)
-	return i, err
+	return err
 }
 
 const getOrgAdminByOrg = `-- name: GetOrgAdminByOrg :one
-SELECT id, org_id, username, password_hash, display_name, role, status, last_login_at, created_at, updated_at, deleted_at
+SELECT id, org_id, username, password_hash, display_name, role, status, last_login_at, created_at, updated_at, deleted_at, platform_username_key
 FROM users
-WHERE org_id = $1
+WHERE org_id = ?
   AND role = 'org_admin'
   AND deleted_at IS NULL
 ORDER BY created_at ASC, id ASC
@@ -72,8 +61,8 @@ LIMIT 1
 
 // 组织列表复制登录信息时只需要一个可登录的组织管理员用户名。
 // 密码明文不落库，因此这里只返回账号名，密码提示由调用方生成。
-func (q *Queries) GetOrgAdminByOrg(ctx context.Context, orgID pgtype.UUID) (User, error) {
-	row := q.db.QueryRow(ctx, getOrgAdminByOrg, orgID)
+func (q *Queries) GetOrgAdminByOrg(ctx context.Context, orgID null.String) (User, error) {
+	row := q.db.QueryRowContext(ctx, getOrgAdminByOrg, orgID)
 	var i User
 	err := row.Scan(
 		&i.ID,
@@ -87,18 +76,19 @@ func (q *Queries) GetOrgAdminByOrg(ctx context.Context, orgID pgtype.UUID) (User
 		&i.CreatedAt,
 		&i.UpdatedAt,
 		&i.DeletedAt,
+		&i.PlatformUsernameKey,
 	)
 	return i, err
 }
 
 const getUser = `-- name: GetUser :one
-SELECT id, org_id, username, password_hash, display_name, role, status, last_login_at, created_at, updated_at, deleted_at
+SELECT id, org_id, username, password_hash, display_name, role, status, last_login_at, created_at, updated_at, deleted_at, platform_username_key
 FROM users
-WHERE id = $1
+WHERE id = ?
 `
 
-func (q *Queries) GetUser(ctx context.Context, id pgtype.UUID) (User, error) {
-	row := q.db.QueryRow(ctx, getUser, id)
+func (q *Queries) GetUser(ctx context.Context, id string) (User, error) {
+	row := q.db.QueryRowContext(ctx, getUser, id)
 	var i User
 	err := row.Scan(
 		&i.ID,
@@ -112,23 +102,24 @@ func (q *Queries) GetUser(ctx context.Context, id pgtype.UUID) (User, error) {
 		&i.CreatedAt,
 		&i.UpdatedAt,
 		&i.DeletedAt,
+		&i.PlatformUsernameKey,
 	)
 	return i, err
 }
 
 const getUserByOrgAndUsername = `-- name: GetUserByOrgAndUsername :one
-SELECT id, org_id, username, password_hash, display_name, role, status, last_login_at, created_at, updated_at, deleted_at
+SELECT id, org_id, username, password_hash, display_name, role, status, last_login_at, created_at, updated_at, deleted_at, platform_username_key
 FROM users
-WHERE org_id = $1 AND username = $2
+WHERE org_id = ? AND username = ?
 `
 
 type GetUserByOrgAndUsernameParams struct {
-	OrgID    pgtype.UUID `db:"org_id" json:"org_id"`
+	OrgID    null.String `db:"org_id" json:"org_id"`
 	Username string      `db:"username" json:"username"`
 }
 
 func (q *Queries) GetUserByOrgAndUsername(ctx context.Context, arg GetUserByOrgAndUsernameParams) (User, error) {
-	row := q.db.QueryRow(ctx, getUserByOrgAndUsername, arg.OrgID, arg.Username)
+	row := q.db.QueryRowContext(ctx, getUserByOrgAndUsername, arg.OrgID, arg.Username)
 	var i User
 	err := row.Scan(
 		&i.ID,
@@ -142,18 +133,19 @@ func (q *Queries) GetUserByOrgAndUsername(ctx context.Context, arg GetUserByOrgA
 		&i.CreatedAt,
 		&i.UpdatedAt,
 		&i.DeletedAt,
+		&i.PlatformUsernameKey,
 	)
 	return i, err
 }
 
 const getUserByUsername = `-- name: GetUserByUsername :one
-SELECT id, org_id, username, password_hash, display_name, role, status, last_login_at, created_at, updated_at, deleted_at
+SELECT id, org_id, username, password_hash, display_name, role, status, last_login_at, created_at, updated_at, deleted_at, platform_username_key
 FROM users
-WHERE org_id IS NULL AND username = $1
+WHERE org_id IS NULL AND username = ?
 `
 
 func (q *Queries) GetUserByUsername(ctx context.Context, username string) (User, error) {
-	row := q.db.QueryRow(ctx, getUserByUsername, username)
+	row := q.db.QueryRowContext(ctx, getUserByUsername, username)
 	var i User
 	err := row.Scan(
 		&i.ID,
@@ -167,26 +159,27 @@ func (q *Queries) GetUserByUsername(ctx context.Context, username string) (User,
 		&i.CreatedAt,
 		&i.UpdatedAt,
 		&i.DeletedAt,
+		&i.PlatformUsernameKey,
 	)
 	return i, err
 }
 
 const listUsersByOrg = `-- name: ListUsersByOrg :many
-SELECT id, org_id, username, password_hash, display_name, role, status, last_login_at, created_at, updated_at, deleted_at
+SELECT id, org_id, username, password_hash, display_name, role, status, last_login_at, created_at, updated_at, deleted_at, platform_username_key
 FROM users
-WHERE org_id = $1
+WHERE org_id = ?
 ORDER BY created_at DESC, id DESC
-LIMIT $2 OFFSET $3
+LIMIT ? OFFSET ?
 `
 
 type ListUsersByOrgParams struct {
-	OrgID  pgtype.UUID `db:"org_id" json:"org_id"`
+	OrgID  null.String `db:"org_id" json:"org_id"`
 	Limit  int32       `db:"limit" json:"limit"`
 	Offset int32       `db:"offset" json:"offset"`
 }
 
 func (q *Queries) ListUsersByOrg(ctx context.Context, arg ListUsersByOrgParams) ([]User, error) {
-	rows, err := q.db.Query(ctx, listUsersByOrg, arg.OrgID, arg.Limit, arg.Offset)
+	rows, err := q.db.QueryContext(ctx, listUsersByOrg, arg.OrgID, arg.Limit, arg.Offset)
 	if err != nil {
 		return nil, err
 	}
@@ -206,10 +199,14 @@ func (q *Queries) ListUsersByOrg(ctx context.Context, arg ListUsersByOrgParams) 
 			&i.CreatedAt,
 			&i.UpdatedAt,
 			&i.DeletedAt,
+			&i.PlatformUsernameKey,
 		); err != nil {
 			return nil, err
 		}
 		items = append(items, i)
+	}
+	if err := rows.Close(); err != nil {
+		return nil, err
 	}
 	if err := rows.Err(); err != nil {
 		return nil, err
@@ -218,42 +215,43 @@ func (q *Queries) ListUsersByOrg(ctx context.Context, arg ListUsersByOrgParams) 
 }
 
 const listUsersByOrgWithActiveApp = `-- name: ListUsersByOrgWithActiveApp :many
-SELECT u.id, u.org_id, u.username, u.password_hash, u.display_name, u.role, u.status, u.last_login_at, u.created_at, u.updated_at, u.deleted_at, a.id AS active_app_id, a.name AS active_app_name
+SELECT u.id, u.org_id, u.username, u.password_hash, u.display_name, u.role, u.status, u.last_login_at, u.created_at, u.updated_at, u.deleted_at, u.platform_username_key, a.id AS active_app_id, a.name AS active_app_name
 FROM users u
 LEFT JOIN apps a
   ON a.owner_user_id = u.id AND a.deleted_at IS NULL
-WHERE u.org_id = $1
+WHERE u.org_id = ?
 ORDER BY u.created_at DESC, u.id DESC
-LIMIT $2 OFFSET $3
+LIMIT ? OFFSET ?
 `
 
 type ListUsersByOrgWithActiveAppParams struct {
-	OrgID  pgtype.UUID `db:"org_id" json:"org_id"`
+	OrgID  null.String `db:"org_id" json:"org_id"`
 	Limit  int32       `db:"limit" json:"limit"`
 	Offset int32       `db:"offset" json:"offset"`
 }
 
 type ListUsersByOrgWithActiveAppRow struct {
-	ID            pgtype.UUID        `db:"id" json:"id"`
-	OrgID         pgtype.UUID        `db:"org_id" json:"org_id"`
-	Username      string             `db:"username" json:"username"`
-	PasswordHash  string             `db:"password_hash" json:"password_hash"`
-	DisplayName   string             `db:"display_name" json:"display_name"`
-	Role          string             `db:"role" json:"role"`
-	Status        string             `db:"status" json:"status"`
-	LastLoginAt   pgtype.Timestamptz `db:"last_login_at" json:"last_login_at"`
-	CreatedAt     pgtype.Timestamptz `db:"created_at" json:"created_at"`
-	UpdatedAt     pgtype.Timestamptz `db:"updated_at" json:"updated_at"`
-	DeletedAt     pgtype.Timestamptz `db:"deleted_at" json:"deleted_at"`
-	ActiveAppID   pgtype.UUID        `db:"active_app_id" json:"active_app_id"`
-	ActiveAppName pgtype.Text        `db:"active_app_name" json:"active_app_name"`
+	ID                  string      `db:"id" json:"id"`
+	OrgID               null.String `db:"org_id" json:"org_id"`
+	Username            string      `db:"username" json:"username"`
+	PasswordHash        string      `db:"password_hash" json:"password_hash"`
+	DisplayName         string      `db:"display_name" json:"display_name"`
+	Role                string      `db:"role" json:"role"`
+	Status              string      `db:"status" json:"status"`
+	LastLoginAt         null.Time   `db:"last_login_at" json:"last_login_at"`
+	CreatedAt           time.Time   `db:"created_at" json:"created_at"`
+	UpdatedAt           time.Time   `db:"updated_at" json:"updated_at"`
+	DeletedAt           null.Time   `db:"deleted_at" json:"deleted_at"`
+	PlatformUsernameKey null.String `db:"platform_username_key" json:"platform_username_key"`
+	ActiveAppID         null.String `db:"active_app_id" json:"active_app_id"`
+	ActiveAppName       null.String `db:"active_app_name" json:"active_app_name"`
 }
 
 // 列出组织内成员及其当前关联的活跃实例（LEFT JOIN，无实例的成员仍返回）。
 // apps 表上 apps_owner_active 唯一约束保证每个 owner 最多一个未软删实例，
 // LEFT JOIN 不会产生重复行；ORDER BY 保持与 ListUsersByOrg 一致。
 func (q *Queries) ListUsersByOrgWithActiveApp(ctx context.Context, arg ListUsersByOrgWithActiveAppParams) ([]ListUsersByOrgWithActiveAppRow, error) {
-	rows, err := q.db.Query(ctx, listUsersByOrgWithActiveApp, arg.OrgID, arg.Limit, arg.Offset)
+	rows, err := q.db.QueryContext(ctx, listUsersByOrgWithActiveApp, arg.OrgID, arg.Limit, arg.Offset)
 	if err != nil {
 		return nil, err
 	}
@@ -273,6 +271,7 @@ func (q *Queries) ListUsersByOrgWithActiveApp(ctx context.Context, arg ListUsers
 			&i.CreatedAt,
 			&i.UpdatedAt,
 			&i.DeletedAt,
+			&i.PlatformUsernameKey,
 			&i.ActiveAppID,
 			&i.ActiveAppName,
 		); err != nil {
@@ -280,142 +279,86 @@ func (q *Queries) ListUsersByOrgWithActiveApp(ctx context.Context, arg ListUsers
 		}
 		items = append(items, i)
 	}
+	if err := rows.Close(); err != nil {
+		return nil, err
+	}
 	if err := rows.Err(); err != nil {
 		return nil, err
 	}
 	return items, nil
 }
 
-const markUserLoggedIn = `-- name: MarkUserLoggedIn :one
+const markUserLoggedIn = `-- name: MarkUserLoggedIn :exec
 UPDATE users
 SET last_login_at = now(), updated_at = now()
-WHERE id = $1
-RETURNING id, org_id, username, password_hash, display_name, role, status, last_login_at, created_at, updated_at, deleted_at
+WHERE id = ?
 `
 
-func (q *Queries) MarkUserLoggedIn(ctx context.Context, id pgtype.UUID) (User, error) {
-	row := q.db.QueryRow(ctx, markUserLoggedIn, id)
-	var i User
-	err := row.Scan(
-		&i.ID,
-		&i.OrgID,
-		&i.Username,
-		&i.PasswordHash,
-		&i.DisplayName,
-		&i.Role,
-		&i.Status,
-		&i.LastLoginAt,
-		&i.CreatedAt,
-		&i.UpdatedAt,
-		&i.DeletedAt,
-	)
-	return i, err
+func (q *Queries) MarkUserLoggedIn(ctx context.Context, id string) error {
+	_, err := q.db.ExecContext(ctx, markUserLoggedIn, id)
+	return err
 }
 
-const setUserStatus = `-- name: SetUserStatus :one
+const setUserStatus = `-- name: SetUserStatus :exec
 UPDATE users
-SET status = $2,
-    deleted_at = CASE WHEN $2 = 'disabled' THEN NOW() ELSE NULL END,
+SET status = ?,
+    deleted_at = CASE WHEN ? = 'disabled' THEN NOW() ELSE NULL END,
     updated_at = NOW()
-WHERE id = $1
-RETURNING id, org_id, username, password_hash, display_name, role, status, last_login_at, created_at, updated_at, deleted_at
+WHERE id = ?
 `
 
 type SetUserStatusParams struct {
-	ID     pgtype.UUID `db:"id" json:"id"`
-	Status string      `db:"status" json:"status"`
+	Status  string      `db:"status" json:"status"`
+	Column2 interface{} `db:"column_2" json:"column_2"`
+	ID      string      `db:"id" json:"id"`
 }
 
 // disabled 时同步写 deleted_at（下线时间戳）；enabled 时清空，让重启用户能恢复。
-func (q *Queries) SetUserStatus(ctx context.Context, arg SetUserStatusParams) (User, error) {
-	row := q.db.QueryRow(ctx, setUserStatus, arg.ID, arg.Status)
-	var i User
-	err := row.Scan(
-		&i.ID,
-		&i.OrgID,
-		&i.Username,
-		&i.PasswordHash,
-		&i.DisplayName,
-		&i.Role,
-		&i.Status,
-		&i.LastLoginAt,
-		&i.CreatedAt,
-		&i.UpdatedAt,
-		&i.DeletedAt,
-	)
-	return i, err
+func (q *Queries) SetUserStatus(ctx context.Context, arg SetUserStatusParams) error {
+	_, err := q.db.ExecContext(ctx, setUserStatus, arg.Status, arg.Column2, arg.ID)
+	return err
 }
 
 const softDeleteUser = `-- name: SoftDeleteUser :exec
 UPDATE users SET deleted_at = NOW(), updated_at = NOW()
-WHERE id = $1 AND deleted_at IS NULL
+WHERE id = ? AND deleted_at IS NULL
 `
 
 // 真软删除：仅设置 deleted_at（不动 status）；status 与 deleted_at 语义独立。
-func (q *Queries) SoftDeleteUser(ctx context.Context, id pgtype.UUID) error {
-	_, err := q.db.Exec(ctx, softDeleteUser, id)
+func (q *Queries) SoftDeleteUser(ctx context.Context, id string) error {
+	_, err := q.db.ExecContext(ctx, softDeleteUser, id)
 	return err
 }
 
-const updateUserPassword = `-- name: UpdateUserPassword :one
+const updateUserPassword = `-- name: UpdateUserPassword :exec
 UPDATE users
-SET password_hash = $2, updated_at = now()
-WHERE id = $1
-RETURNING id, org_id, username, password_hash, display_name, role, status, last_login_at, created_at, updated_at, deleted_at
+SET password_hash = ?, updated_at = now()
+WHERE id = ?
 `
 
 type UpdateUserPasswordParams struct {
-	ID           pgtype.UUID `db:"id" json:"id"`
-	PasswordHash string      `db:"password_hash" json:"password_hash"`
+	PasswordHash string `db:"password_hash" json:"password_hash"`
+	ID           string `db:"id" json:"id"`
 }
 
-func (q *Queries) UpdateUserPassword(ctx context.Context, arg UpdateUserPasswordParams) (User, error) {
-	row := q.db.QueryRow(ctx, updateUserPassword, arg.ID, arg.PasswordHash)
-	var i User
-	err := row.Scan(
-		&i.ID,
-		&i.OrgID,
-		&i.Username,
-		&i.PasswordHash,
-		&i.DisplayName,
-		&i.Role,
-		&i.Status,
-		&i.LastLoginAt,
-		&i.CreatedAt,
-		&i.UpdatedAt,
-		&i.DeletedAt,
-	)
-	return i, err
+func (q *Queries) UpdateUserPassword(ctx context.Context, arg UpdateUserPasswordParams) error {
+	_, err := q.db.ExecContext(ctx, updateUserPassword, arg.PasswordHash, arg.ID)
+	return err
 }
 
-const updateUserProfile = `-- name: UpdateUserProfile :one
+const updateUserProfile = `-- name: UpdateUserProfile :exec
 UPDATE users
-SET display_name = $2, role = $3, updated_at = now()
-WHERE id = $1
-RETURNING id, org_id, username, password_hash, display_name, role, status, last_login_at, created_at, updated_at, deleted_at
+SET display_name = ?, role = ?, updated_at = now()
+WHERE id = ?
 `
 
 type UpdateUserProfileParams struct {
-	ID          pgtype.UUID `db:"id" json:"id"`
-	DisplayName string      `db:"display_name" json:"display_name"`
-	Role        string      `db:"role" json:"role"`
+	DisplayName string `db:"display_name" json:"display_name"`
+	Role        string `db:"role" json:"role"`
+	ID          string `db:"id" json:"id"`
 }
 
-func (q *Queries) UpdateUserProfile(ctx context.Context, arg UpdateUserProfileParams) (User, error) {
-	row := q.db.QueryRow(ctx, updateUserProfile, arg.ID, arg.DisplayName, arg.Role)
-	var i User
-	err := row.Scan(
-		&i.ID,
-		&i.OrgID,
-		&i.Username,
-		&i.PasswordHash,
-		&i.DisplayName,
-		&i.Role,
-		&i.Status,
-		&i.LastLoginAt,
-		&i.CreatedAt,
-		&i.UpdatedAt,
-		&i.DeletedAt,
-	)
-	return i, err
+func (q *Queries) UpdateUserProfile(ctx context.Context, arg UpdateUserProfileParams) error {
+	_, err := q.db.ExecContext(ctx, updateUserProfile, arg.DisplayName, arg.Role, arg.ID)
+	return err
 }

@@ -18,26 +18,47 @@ sql:
             go_type: "string"
           - db_type: "char"
             nullable: true
-            go_type: "github.com/guregu/null/v5.String"
+            go_type:
+              import: "github.com/guregu/null/v5"
+              package: "null"
+              type: "String"
           # 可空文本
           - db_type: "varchar"
             nullable: true
-            go_type: "github.com/guregu/null/v5.String"
+            go_type:
+              import: "github.com/guregu/null/v5"
+              package: "null"
+              type: "String"
           - db_type: "text"
             nullable: true
-            go_type: "github.com/guregu/null/v5.String"
+            go_type:
+              import: "github.com/guregu/null/v5"
+              package: "null"
+              type: "String"
           # 可空时间
           - db_type: "datetime"
             nullable: true
-            go_type: "github.com/guregu/null/v5.Time"
+            go_type:
+              import: "github.com/guregu/null/v5"
+              package: "null"
+              type: "Time"
           # 可空整数
           - db_type: "bigint"
             nullable: true
-            go_type: "github.com/guregu/null/v5.Int"
+            go_type:
+              import: "github.com/guregu/null/v5"
+              package: "null"
+              type: "Int"
           - db_type: "int"
             nullable: true
-            go_type: "github.com/guregu/null/v5.Int"
+            go_type:
+              import: "github.com/guregu/null/v5"
+              package: "null"
+              type: "Int"
           # 可空浮点（资源采样 cpu_percent 等）
           - db_type: "double"
             nullable: true
-            go_type: "github.com/guregu/null/v5.Float"
+            go_type:
+              import: "github.com/guregu/null/v5"
+              package: "null"
+              type: "Float"

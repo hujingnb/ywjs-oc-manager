@@ -8,11 +8,12 @@ package sqlc
 import (
 	"context"
 
-	"github.com/jackc/pgx/v5/pgtype"
+	null "github.com/guregu/null/v5"
 )
 
-const createRechargeRecord = `-- name: CreateRechargeRecord :one
+const createRechargeRecord = `-- name: CreateRechargeRecord :exec
 INSERT INTO recharge_records (
+    id,
     org_id,
     operator_id,
     credit_amount,
@@ -21,23 +22,24 @@ INSERT INTO recharge_records (
     status,
     error_message
 ) VALUES (
-    $1, $2, $3, $4, $5, $6, $7
+    ?, ?, ?, ?, ?, ?, ?, ?
 )
-RETURNING id, org_id, operator_id, credit_amount, remark, newapi_ref_id, status, error_message, created_at
 `
 
 type CreateRechargeRecordParams struct {
-	OrgID        pgtype.UUID `db:"org_id" json:"org_id"`
-	OperatorID   pgtype.UUID `db:"operator_id" json:"operator_id"`
+	ID           string      `db:"id" json:"id"`
+	OrgID        string      `db:"org_id" json:"org_id"`
+	OperatorID   string      `db:"operator_id" json:"operator_id"`
 	CreditAmount int64       `db:"credit_amount" json:"credit_amount"`
-	Remark       pgtype.Text `db:"remark" json:"remark"`
-	NewapiRefID  pgtype.Text `db:"newapi_ref_id" json:"newapi_ref_id"`
+	Remark       null.String `db:"remark" json:"remark"`
+	NewapiRefID  null.String `db:"newapi_ref_id" json:"newapi_ref_id"`
 	Status       string      `db:"status" json:"status"`
-	ErrorMessage pgtype.Text `db:"error_message" json:"error_message"`
+	ErrorMessage null.String `db:"error_message" json:"error_message"`
 }
 
-func (q *Queries) CreateRechargeRecord(ctx context.Context, arg CreateRechargeRecordParams) (RechargeRecord, error) {
-	row := q.db.QueryRow(ctx, createRechargeRecord,
+func (q *Queries) CreateRechargeRecord(ctx context.Context, arg CreateRechargeRecordParams) error {
+	_, err := q.db.ExecContext(ctx, createRechargeRecord,
+		arg.ID,
 		arg.OrgID,
 		arg.OperatorID,
 		arg.CreditAmount,
@@ -46,6 +48,17 @@ func (q *Queries) CreateRechargeRecord(ctx context.Context, arg CreateRechargeRe
 		arg.Status,
 		arg.ErrorMessage,
 	)
+	return err
+}
+
+const getRechargeRecord = `-- name: GetRechargeRecord :one
+SELECT id, org_id, operator_id, credit_amount, remark, newapi_ref_id, status, error_message, created_at
+FROM recharge_records
+WHERE id = ?
+`
+
+func (q *Queries) GetRechargeRecord(ctx context.Context, id string) (RechargeRecord, error) {
+	row := q.db.QueryRowContext(ctx, getRechargeRecord, id)
 	var i RechargeRecord
 	err := row.Scan(
 		&i.ID,
@@ -64,19 +77,19 @@ func (q *Queries) CreateRechargeRecord(ctx context.Context, arg CreateRechargeRe
 const listRechargeRecordsByOrg = `-- name: ListRechargeRecordsByOrg :many
 SELECT id, org_id, operator_id, credit_amount, remark, newapi_ref_id, status, error_message, created_at
 FROM recharge_records
-WHERE org_id = $1
+WHERE org_id = ?
 ORDER BY created_at DESC, id DESC
-LIMIT $2 OFFSET $3
+LIMIT ? OFFSET ?
 `
 
 type ListRechargeRecordsByOrgParams struct {
-	OrgID  pgtype.UUID `db:"org_id" json:"org_id"`
-	Limit  int32       `db:"limit" json:"limit"`
-	Offset int32       `db:"offset" json:"offset"`
+	OrgID  string `db:"org_id" json:"org_id"`
+	Limit  int32  `db:"limit" json:"limit"`
+	Offset int32  `db:"offset" json:"offset"`
 }
 
 func (q *Queries) ListRechargeRecordsByOrg(ctx context.Context, arg ListRechargeRecordsByOrgParams) ([]RechargeRecord, error) {
-	rows, err := q.db.Query(ctx, listRechargeRecordsByOrg, arg.OrgID, arg.Limit, arg.Offset)
+	rows, err := q.db.QueryContext(ctx, listRechargeRecordsByOrg, arg.OrgID, arg.Limit, arg.Offset)
 	if err != nil {
 		return nil, err
 	}
@@ -99,6 +112,9 @@ func (q *Queries) ListRechargeRecordsByOrg(ctx context.Context, arg ListRecharge
 		}
 		items = append(items, i)
 	}
+	if err := rows.Close(); err != nil {
+		return nil, err
+	}
 	if err := rows.Err(); err != nil {
 		return nil, err
 	}
@@ -106,16 +122,16 @@ func (q *Queries) ListRechargeRecordsByOrg(ctx context.Context, arg ListRecharge
 }
 
 const sumRechargeAmountByOrg = `-- name: SumRechargeAmountByOrg :one
-SELECT COALESCE(SUM(credit_amount), 0)::bigint AS total_recharged
+SELECT COALESCE(SUM(credit_amount), 0) AS total_recharged
 FROM recharge_records
-WHERE org_id = $1 AND status = 'succeeded'
+WHERE org_id = ? AND status = 'succeeded'
 `
 
 // SumRechargeAmountByOrg 聚合指定组织所有成功充值记录的总额。
 // 仅统计 status='succeeded' 的记录，failed 记录不计入累计金额。
-func (q *Queries) SumRechargeAmountByOrg(ctx context.Context, orgID pgtype.UUID) (int64, error) {
-	row := q.db.QueryRow(ctx, sumRechargeAmountByOrg, orgID)
-	var total_recharged int64
+func (q *Queries) SumRechargeAmountByOrg(ctx context.Context, orgID string) (interface{}, error) {
+	row := q.db.QueryRowContext(ctx, sumRechargeAmountByOrg, orgID)
+	var total_recharged interface{}
 	err := row.Scan(&total_recharged)
 	return total_recharged, err
 }

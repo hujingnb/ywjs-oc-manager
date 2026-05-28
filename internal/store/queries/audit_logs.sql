@@ -1,5 +1,6 @@
--- name: CreateAuditLog :one
+-- name: CreateAuditLog :exec
 INSERT INTO audit_logs (
+    id,
     actor_id,
     actor_role,
     org_id,
@@ -12,9 +13,13 @@ INSERT INTO audit_logs (
     metadata_json,
     detail_message
 ) VALUES (
-    $1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11
-)
-RETURNING *;
+    ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?
+);
+
+-- name: GetAuditLog :one
+SELECT *
+FROM audit_logs
+WHERE id = ?;
 
 -- name: ListAuditLogsByOrg :many
 -- 返回审计行 + actor 实时名称 + target 实时名称（按 target_type 走子查询）。
@@ -38,28 +43,28 @@ SELECT
     COALESCE(au.deleted_at IS NOT NULL, false)                       AS actor_deleted,
     COALESCE(
         (SELECT a.name FROM apps a
-            WHERE al.target_type = 'app' AND a.id::text = al.target_id),
+            WHERE al.target_type = 'app' AND a.id = al.target_id),
         (SELECT o.name FROM organizations o
-            WHERE al.target_type = 'organization' AND o.id::text = al.target_id),
+            WHERE al.target_type = 'organization' AND o.id = al.target_id),
         (SELECT COALESCE(NULLIF(tu.display_name, ''), tu.username) FROM users tu
-            WHERE al.target_type IN ('user', 'member') AND tu.id::text = al.target_id),
+            WHERE al.target_type IN ('user', 'member') AND tu.id = al.target_id),
         (SELECT n.name FROM runtime_nodes n
-            WHERE al.target_type = 'runtime_node' AND n.id::text = al.target_id)
+            WHERE al.target_type = 'runtime_node' AND n.id = al.target_id)
     ) AS target_name,
     COALESCE(
         (SELECT a.deleted_at IS NOT NULL FROM apps a
-            WHERE al.target_type = 'app' AND a.id::text = al.target_id),
+            WHERE al.target_type = 'app' AND a.id = al.target_id),
         (SELECT o.deleted_at IS NOT NULL FROM organizations o
-            WHERE al.target_type = 'organization' AND o.id::text = al.target_id),
+            WHERE al.target_type = 'organization' AND o.id = al.target_id),
         (SELECT tu.deleted_at IS NOT NULL FROM users tu
-            WHERE al.target_type IN ('user', 'member') AND tu.id::text = al.target_id),
+            WHERE al.target_type IN ('user', 'member') AND tu.id = al.target_id),
         false
     ) AS target_deleted
 FROM audit_logs al
 LEFT JOIN users au ON au.id = al.actor_id
-WHERE al.org_id = $1
+WHERE al.org_id = ?
 ORDER BY al.created_at DESC, al.id DESC
-LIMIT $2 OFFSET $3;
+LIMIT ? OFFSET ?;
 
 -- name: ListAuditLogsByTarget :many
 -- 同 ListAuditLogsByOrg，按 target_type + target_id 过滤。
@@ -81,25 +86,25 @@ SELECT
     COALESCE(au.deleted_at IS NOT NULL, false)                       AS actor_deleted,
     COALESCE(
         (SELECT a.name FROM apps a
-            WHERE al.target_type = 'app' AND a.id::text = al.target_id),
+            WHERE al.target_type = 'app' AND a.id = al.target_id),
         (SELECT o.name FROM organizations o
-            WHERE al.target_type = 'organization' AND o.id::text = al.target_id),
+            WHERE al.target_type = 'organization' AND o.id = al.target_id),
         (SELECT COALESCE(NULLIF(tu.display_name, ''), tu.username) FROM users tu
-            WHERE al.target_type IN ('user', 'member') AND tu.id::text = al.target_id),
+            WHERE al.target_type IN ('user', 'member') AND tu.id = al.target_id),
         (SELECT n.name FROM runtime_nodes n
-            WHERE al.target_type = 'runtime_node' AND n.id::text = al.target_id)
+            WHERE al.target_type = 'runtime_node' AND n.id = al.target_id)
     ) AS target_name,
     COALESCE(
         (SELECT a.deleted_at IS NOT NULL FROM apps a
-            WHERE al.target_type = 'app' AND a.id::text = al.target_id),
+            WHERE al.target_type = 'app' AND a.id = al.target_id),
         (SELECT o.deleted_at IS NOT NULL FROM organizations o
-            WHERE al.target_type = 'organization' AND o.id::text = al.target_id),
+            WHERE al.target_type = 'organization' AND o.id = al.target_id),
         (SELECT tu.deleted_at IS NOT NULL FROM users tu
-            WHERE al.target_type IN ('user', 'member') AND tu.id::text = al.target_id),
+            WHERE al.target_type IN ('user', 'member') AND tu.id = al.target_id),
         false
     ) AS target_deleted
 FROM audit_logs al
 LEFT JOIN users au ON au.id = al.actor_id
-WHERE al.target_type = $1 AND al.target_id = $2
+WHERE al.target_type = ? AND al.target_id = ?
 ORDER BY al.created_at DESC, al.id DESC
-LIMIT $3 OFFSET $4;
+LIMIT ? OFFSET ?;

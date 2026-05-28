@@ -7,75 +7,64 @@ package sqlc
 
 import (
 	"context"
+	"time"
 
-	"github.com/jackc/pgx/v5/pgtype"
+	null "github.com/guregu/null/v5"
 )
 
-const claimRAGFlowDatasetCreation = `-- name: ClaimRAGFlowDatasetCreation :one
+const claimRAGFlowDatasetCreation = `-- name: ClaimRAGFlowDatasetCreation :exec
 UPDATE ragflow_datasets
 SET status = 'creating',
     last_error = NULL,
-    create_claim_token = $1::text,
+    create_claim_token = ?,
     updated_at = now()
-WHERE id = $2
+WHERE id = ?
   AND (
     status = 'failed'
-    OR (status = 'creating' AND updated_at < $3::timestamptz)
+    OR (status = 'creating' AND updated_at < ?)
   )
-RETURNING id, scope_type, org_id, app_id, ragflow_dataset_id, name, status, last_error, create_claim_token, created_at, updated_at
 `
 
 type ClaimRAGFlowDatasetCreationParams struct {
-	CreateClaimToken string             `db:"create_claim_token" json:"create_claim_token"`
-	ID               pgtype.UUID        `db:"id" json:"id"`
-	StaleBefore      pgtype.Timestamptz `db:"stale_before" json:"stale_before"`
+	CreateClaimToken null.String `db:"create_claim_token" json:"create_claim_token"`
+	ID               string      `db:"id" json:"id"`
+	StaleBefore      time.Time   `db:"stale_before" json:"stale_before"`
 }
 
-// 抢占 failed 或超时 creating 的 dataset 创建租约；只有返回行的调用方允许访问 RAGFlow 创建远端 dataset。
-func (q *Queries) ClaimRAGFlowDatasetCreation(ctx context.Context, arg ClaimRAGFlowDatasetCreationParams) (RagflowDataset, error) {
-	row := q.db.QueryRow(ctx, claimRAGFlowDatasetCreation, arg.CreateClaimToken, arg.ID, arg.StaleBefore)
-	var i RagflowDataset
-	err := row.Scan(
-		&i.ID,
-		&i.ScopeType,
-		&i.OrgID,
-		&i.AppID,
-		&i.RagflowDatasetID,
-		&i.Name,
-		&i.Status,
-		&i.LastError,
-		&i.CreateClaimToken,
-		&i.CreatedAt,
-		&i.UpdatedAt,
-	)
-	return i, err
+// 抢占 failed 或超时 creating 的 dataset 创建租约；只有成功更新行的调用方允许访问 RAGFlow 创建远端 dataset。
+func (q *Queries) ClaimRAGFlowDatasetCreation(ctx context.Context, arg ClaimRAGFlowDatasetCreationParams) error {
+	_, err := q.db.ExecContext(ctx, claimRAGFlowDatasetCreation, arg.CreateClaimToken, arg.ID, arg.StaleBefore)
+	return err
 }
 
 const countRAGFlowDocumentsByScope = `-- name: CountRAGFlowDocumentsByScope :one
 SELECT count(*)
 FROM ragflow_documents
-WHERE scope_type = $1
-  AND org_id = $2
-  AND ($3::uuid IS NULL OR app_id = $3::uuid)
-  AND ($4::text IS NULL OR parse_status = $4::text)
-  AND ($5::text IS NULL OR name ILIKE '%' || $5::text || '%')
+WHERE scope_type = ?
+  AND org_id = ?
+  AND (? IS NULL OR app_id = ?)
+  AND (? IS NULL OR parse_status = ?)
+  AND (? IS NULL OR name LIKE CONCAT('%', ?, '%'))
 `
 
 type CountRAGFlowDocumentsByScopeParams struct {
 	ScopeType   string      `db:"scope_type" json:"scope_type"`
-	OrgID       pgtype.UUID `db:"org_id" json:"org_id"`
-	AppID       pgtype.UUID `db:"app_id" json:"app_id"`
-	ParseStatus pgtype.Text `db:"parse_status" json:"parse_status"`
-	Keywords    pgtype.Text `db:"keywords" json:"keywords"`
+	OrgID       string      `db:"org_id" json:"org_id"`
+	AppID       null.String `db:"app_id" json:"app_id"`
+	ParseStatus null.String `db:"parse_status" json:"parse_status"`
+	Keywords    interface{} `db:"keywords" json:"keywords"`
 }
 
 // 统计扁平文件列表总数，过滤条件必须与 ListRAGFlowDocumentsByScope 保持一致。
 func (q *Queries) CountRAGFlowDocumentsByScope(ctx context.Context, arg CountRAGFlowDocumentsByScopeParams) (int64, error) {
-	row := q.db.QueryRow(ctx, countRAGFlowDocumentsByScope,
+	row := q.db.QueryRowContext(ctx, countRAGFlowDocumentsByScope,
 		arg.ScopeType,
 		arg.OrgID,
 		arg.AppID,
+		arg.AppID,
 		arg.ParseStatus,
+		arg.ParseStatus,
+		arg.Keywords,
 		arg.Keywords,
 	)
 	var count int64
@@ -83,78 +72,65 @@ func (q *Queries) CountRAGFlowDocumentsByScope(ctx context.Context, arg CountRAG
 	return count, err
 }
 
-const createRAGFlowAppDatasetMapping = `-- name: CreateRAGFlowAppDatasetMapping :one
-INSERT INTO ragflow_datasets (
-    scope_type, org_id, app_id, ragflow_dataset_id, name, status, last_error, create_claim_token
+const createRAGFlowAppDatasetMapping = `-- name: CreateRAGFlowAppDatasetMapping :exec
+INSERT IGNORE INTO ragflow_datasets (
+    id, scope_type, org_id, app_id, ragflow_dataset_id, name, status, last_error, create_claim_token
 ) VALUES (
-    'app', $1, $2, NULL, $3, 'creating', NULL, $4::text
+    ?, 'app', ?, ?, NULL, ?, 'creating', NULL, ?
 )
-ON CONFLICT (app_id) WHERE scope_type = 'app' DO NOTHING
-RETURNING id, scope_type, org_id, app_id, ragflow_dataset_id, name, status, last_error, create_claim_token, created_at, updated_at
 `
 
 type CreateRAGFlowAppDatasetMappingParams struct {
-	OrgID            pgtype.UUID `db:"org_id" json:"org_id"`
-	AppID            pgtype.UUID `db:"app_id" json:"app_id"`
+	ID               string      `db:"id" json:"id"`
+	OrgID            string      `db:"org_id" json:"org_id"`
+	AppID            null.String `db:"app_id" json:"app_id"`
 	Name             string      `db:"name" json:"name"`
-	CreateClaimToken string      `db:"create_claim_token" json:"create_claim_token"`
+	CreateClaimToken null.String `db:"create_claim_token" json:"create_claim_token"`
 }
 
-// 懒创建实例级 dataset 映射；并发首创命中部分唯一索引时不返回行，由 service 读取已有映射且不重复创建远端 dataset。
-func (q *Queries) CreateRAGFlowAppDatasetMapping(ctx context.Context, arg CreateRAGFlowAppDatasetMappingParams) (RagflowDataset, error) {
-	row := q.db.QueryRow(ctx, createRAGFlowAppDatasetMapping,
+// 懒创建实例级 dataset 映射；并发首创命中唯一索引时忽略，由 service 读取已有映射且不重复创建远端 dataset。
+func (q *Queries) CreateRAGFlowAppDatasetMapping(ctx context.Context, arg CreateRAGFlowAppDatasetMappingParams) error {
+	_, err := q.db.ExecContext(ctx, createRAGFlowAppDatasetMapping,
+		arg.ID,
 		arg.OrgID,
 		arg.AppID,
 		arg.Name,
 		arg.CreateClaimToken,
 	)
-	var i RagflowDataset
-	err := row.Scan(
-		&i.ID,
-		&i.ScopeType,
-		&i.OrgID,
-		&i.AppID,
-		&i.RagflowDatasetID,
-		&i.Name,
-		&i.Status,
-		&i.LastError,
-		&i.CreateClaimToken,
-		&i.CreatedAt,
-		&i.UpdatedAt,
-	)
-	return i, err
+	return err
 }
 
-const createRAGFlowDocument = `-- name: CreateRAGFlowDocument :one
+const createRAGFlowDocument = `-- name: CreateRAGFlowDocument :exec
 INSERT INTO ragflow_documents (
-    dataset_id, scope_type, org_id, app_id, ragflow_document_id, name,
+    id, dataset_id, scope_type, org_id, app_id, ragflow_document_id, name,
     size_bytes, mime_type, suffix, parse_status, progress, last_error, created_by
 ) VALUES (
-    $1, $2, $3, $4, $5, $6,
-    $7, $8, $9, $10, $11, $12, $13
+    ?, ?, ?, ?, ?, ?, ?,
+    ?, ?, ?, ?, ?, ?, ?
 )
-RETURNING id, dataset_id, scope_type, org_id, app_id, ragflow_document_id, name, size_bytes, mime_type, suffix, parse_status, progress, last_error, created_by, created_at, updated_at
 `
 
 type CreateRAGFlowDocumentParams struct {
-	DatasetID         pgtype.UUID `db:"dataset_id" json:"dataset_id"`
+	ID                string      `db:"id" json:"id"`
+	DatasetID         string      `db:"dataset_id" json:"dataset_id"`
 	ScopeType         string      `db:"scope_type" json:"scope_type"`
-	OrgID             pgtype.UUID `db:"org_id" json:"org_id"`
-	AppID             pgtype.UUID `db:"app_id" json:"app_id"`
+	OrgID             string      `db:"org_id" json:"org_id"`
+	AppID             null.String `db:"app_id" json:"app_id"`
 	RagflowDocumentID string      `db:"ragflow_document_id" json:"ragflow_document_id"`
 	Name              string      `db:"name" json:"name"`
 	SizeBytes         int64       `db:"size_bytes" json:"size_bytes"`
-	MimeType          pgtype.Text `db:"mime_type" json:"mime_type"`
-	Suffix            pgtype.Text `db:"suffix" json:"suffix"`
+	MimeType          null.String `db:"mime_type" json:"mime_type"`
+	Suffix            null.String `db:"suffix" json:"suffix"`
 	ParseStatus       string      `db:"parse_status" json:"parse_status"`
 	Progress          int32       `db:"progress" json:"progress"`
-	LastError         pgtype.Text `db:"last_error" json:"last_error"`
+	LastError         null.String `db:"last_error" json:"last_error"`
 	CreatedBy         string      `db:"created_by" json:"created_by"`
 }
 
 // 缓存 RAGFlow document 元数据，manager 不保存文件主副本。
-func (q *Queries) CreateRAGFlowDocument(ctx context.Context, arg CreateRAGFlowDocumentParams) (RagflowDocument, error) {
-	row := q.db.QueryRow(ctx, createRAGFlowDocument,
+func (q *Queries) CreateRAGFlowDocument(ctx context.Context, arg CreateRAGFlowDocumentParams) error {
+	_, err := q.db.ExecContext(ctx, createRAGFlowDocument,
+		arg.ID,
 		arg.DatasetID,
 		arg.ScopeType,
 		arg.OrgID,
@@ -169,95 +145,66 @@ func (q *Queries) CreateRAGFlowDocument(ctx context.Context, arg CreateRAGFlowDo
 		arg.LastError,
 		arg.CreatedBy,
 	)
-	var i RagflowDocument
-	err := row.Scan(
-		&i.ID,
-		&i.DatasetID,
-		&i.ScopeType,
-		&i.OrgID,
-		&i.AppID,
-		&i.RagflowDocumentID,
-		&i.Name,
-		&i.SizeBytes,
-		&i.MimeType,
-		&i.Suffix,
-		&i.ParseStatus,
-		&i.Progress,
-		&i.LastError,
-		&i.CreatedBy,
-		&i.CreatedAt,
-		&i.UpdatedAt,
-	)
-	return i, err
+	return err
 }
 
-const createRAGFlowOrgDatasetMapping = `-- name: CreateRAGFlowOrgDatasetMapping :one
-INSERT INTO ragflow_datasets (
-    scope_type, org_id, app_id, ragflow_dataset_id, name, status, last_error, create_claim_token
+const createRAGFlowOrgDatasetMapping = `-- name: CreateRAGFlowOrgDatasetMapping :exec
+INSERT IGNORE INTO ragflow_datasets (
+    id, scope_type, org_id, app_id, ragflow_dataset_id, name, status, last_error, create_claim_token
 ) VALUES (
-    'org', $1, NULL, NULL, $2, 'creating', NULL, $3::text
+    ?, 'org', ?, NULL, NULL, ?, 'creating', NULL, ?
 )
-ON CONFLICT (org_id) WHERE scope_type = 'org' DO NOTHING
-RETURNING id, scope_type, org_id, app_id, ragflow_dataset_id, name, status, last_error, create_claim_token, created_at, updated_at
 `
 
 type CreateRAGFlowOrgDatasetMappingParams struct {
-	OrgID            pgtype.UUID `db:"org_id" json:"org_id"`
+	ID               string      `db:"id" json:"id"`
+	OrgID            string      `db:"org_id" json:"org_id"`
 	Name             string      `db:"name" json:"name"`
-	CreateClaimToken string      `db:"create_claim_token" json:"create_claim_token"`
+	CreateClaimToken null.String `db:"create_claim_token" json:"create_claim_token"`
 }
 
-// 懒创建组织级 dataset 映射；并发首创命中部分唯一索引时不返回行，由 service 读取已有映射且不重复创建远端 dataset。
-func (q *Queries) CreateRAGFlowOrgDatasetMapping(ctx context.Context, arg CreateRAGFlowOrgDatasetMappingParams) (RagflowDataset, error) {
-	row := q.db.QueryRow(ctx, createRAGFlowOrgDatasetMapping, arg.OrgID, arg.Name, arg.CreateClaimToken)
-	var i RagflowDataset
-	err := row.Scan(
-		&i.ID,
-		&i.ScopeType,
-		&i.OrgID,
-		&i.AppID,
-		&i.RagflowDatasetID,
-		&i.Name,
-		&i.Status,
-		&i.LastError,
-		&i.CreateClaimToken,
-		&i.CreatedAt,
-		&i.UpdatedAt,
+// 懒创建组织级 dataset 映射；并发首创命中唯一索引时忽略，由 service 读取已有映射且不重复创建远端 dataset。
+func (q *Queries) CreateRAGFlowOrgDatasetMapping(ctx context.Context, arg CreateRAGFlowOrgDatasetMappingParams) error {
+	_, err := q.db.ExecContext(ctx, createRAGFlowOrgDatasetMapping,
+		arg.ID,
+		arg.OrgID,
+		arg.Name,
+		arg.CreateClaimToken,
 	)
-	return i, err
+	return err
 }
 
 const deleteRAGFlowDatasetMapping = `-- name: DeleteRAGFlowDatasetMapping :exec
 DELETE FROM ragflow_datasets
-WHERE id = $1
+WHERE id = ?
 `
 
 // 删除本地 dataset 映射；document 缓存通过外键级联清理。
-func (q *Queries) DeleteRAGFlowDatasetMapping(ctx context.Context, id pgtype.UUID) error {
-	_, err := q.db.Exec(ctx, deleteRAGFlowDatasetMapping, id)
+func (q *Queries) DeleteRAGFlowDatasetMapping(ctx context.Context, id string) error {
+	_, err := q.db.ExecContext(ctx, deleteRAGFlowDatasetMapping, id)
 	return err
 }
 
 const deleteRAGFlowDocumentMapping = `-- name: DeleteRAGFlowDocumentMapping :exec
 DELETE FROM ragflow_documents
-WHERE id = $1
+WHERE id = ?
 `
 
 // 删除本地 document 缓存；RAGFlow 远端删除由 service 在同一业务流程中处理。
-func (q *Queries) DeleteRAGFlowDocumentMapping(ctx context.Context, id pgtype.UUID) error {
-	_, err := q.db.Exec(ctx, deleteRAGFlowDocumentMapping, id)
+func (q *Queries) DeleteRAGFlowDocumentMapping(ctx context.Context, id string) error {
+	_, err := q.db.ExecContext(ctx, deleteRAGFlowDocumentMapping, id)
 	return err
 }
 
 const getRAGFlowAppDataset = `-- name: GetRAGFlowAppDataset :one
-SELECT id, scope_type, org_id, app_id, ragflow_dataset_id, name, status, last_error, create_claim_token, created_at, updated_at
+SELECT id, scope_type, org_id, app_id, ragflow_dataset_id, name, status, last_error, create_claim_token, created_at, updated_at, org_scope_key, app_scope_key
 FROM ragflow_datasets
-WHERE scope_type = 'app' AND app_id = $1
+WHERE scope_type = 'app' AND app_id = ?
 `
 
 // 读取实例知识库 dataset 映射，runtime 写入只能落到该 dataset。
-func (q *Queries) GetRAGFlowAppDataset(ctx context.Context, appID pgtype.UUID) (RagflowDataset, error) {
-	row := q.db.QueryRow(ctx, getRAGFlowAppDataset, appID)
+func (q *Queries) GetRAGFlowAppDataset(ctx context.Context, appID null.String) (RagflowDataset, error) {
+	row := q.db.QueryRowContext(ctx, getRAGFlowAppDataset, appID)
 	var i RagflowDataset
 	err := row.Scan(
 		&i.ID,
@@ -271,6 +218,36 @@ func (q *Queries) GetRAGFlowAppDataset(ctx context.Context, appID pgtype.UUID) (
 		&i.CreateClaimToken,
 		&i.CreatedAt,
 		&i.UpdatedAt,
+		&i.OrgScopeKey,
+		&i.AppScopeKey,
+	)
+	return i, err
+}
+
+const getRAGFlowDataset = `-- name: GetRAGFlowDataset :one
+SELECT id, scope_type, org_id, app_id, ragflow_dataset_id, name, status, last_error, create_claim_token, created_at, updated_at, org_scope_key, app_scope_key
+FROM ragflow_datasets
+WHERE id = ?
+`
+
+// 按 ID 读取 dataset 记录，供 ClaimRAGFlowDatasetCreation 后的读回。
+func (q *Queries) GetRAGFlowDataset(ctx context.Context, id string) (RagflowDataset, error) {
+	row := q.db.QueryRowContext(ctx, getRAGFlowDataset, id)
+	var i RagflowDataset
+	err := row.Scan(
+		&i.ID,
+		&i.ScopeType,
+		&i.OrgID,
+		&i.AppID,
+		&i.RagflowDatasetID,
+		&i.Name,
+		&i.Status,
+		&i.LastError,
+		&i.CreateClaimToken,
+		&i.CreatedAt,
+		&i.UpdatedAt,
+		&i.OrgScopeKey,
+		&i.AppScopeKey,
 	)
 	return i, err
 }
@@ -278,12 +255,12 @@ func (q *Queries) GetRAGFlowAppDataset(ctx context.Context, appID pgtype.UUID) (
 const getRAGFlowDocument = `-- name: GetRAGFlowDocument :one
 SELECT id, dataset_id, scope_type, org_id, app_id, ragflow_document_id, name, size_bytes, mime_type, suffix, parse_status, progress, last_error, created_by, created_at, updated_at
 FROM ragflow_documents
-WHERE id = $1
+WHERE id = ?
 `
 
 // 按 manager 本地 ID 读取 document 缓存，供下载和删除前做权限校验。
-func (q *Queries) GetRAGFlowDocument(ctx context.Context, id pgtype.UUID) (RagflowDocument, error) {
-	row := q.db.QueryRow(ctx, getRAGFlowDocument, id)
+func (q *Queries) GetRAGFlowDocument(ctx context.Context, id string) (RagflowDocument, error) {
+	row := q.db.QueryRowContext(ctx, getRAGFlowDocument, id)
 	var i RagflowDocument
 	err := row.Scan(
 		&i.ID,
@@ -309,17 +286,17 @@ func (q *Queries) GetRAGFlowDocument(ctx context.Context, id pgtype.UUID) (Ragfl
 const getRAGFlowDocumentByRemoteID = `-- name: GetRAGFlowDocumentByRemoteID :one
 SELECT id, dataset_id, scope_type, org_id, app_id, ragflow_document_id, name, size_bytes, mime_type, suffix, parse_status, progress, last_error, created_by, created_at, updated_at
 FROM ragflow_documents
-WHERE dataset_id = $1 AND ragflow_document_id = $2
+WHERE dataset_id = ? AND ragflow_document_id = ?
 `
 
 type GetRAGFlowDocumentByRemoteIDParams struct {
-	DatasetID         pgtype.UUID `db:"dataset_id" json:"dataset_id"`
-	RagflowDocumentID string      `db:"ragflow_document_id" json:"ragflow_document_id"`
+	DatasetID         string `db:"dataset_id" json:"dataset_id"`
+	RagflowDocumentID string `db:"ragflow_document_id" json:"ragflow_document_id"`
 }
 
 // 按 RAGFlow document ID 读取缓存，用于解析状态回刷和幂等处理。
 func (q *Queries) GetRAGFlowDocumentByRemoteID(ctx context.Context, arg GetRAGFlowDocumentByRemoteIDParams) (RagflowDocument, error) {
-	row := q.db.QueryRow(ctx, getRAGFlowDocumentByRemoteID, arg.DatasetID, arg.RagflowDocumentID)
+	row := q.db.QueryRowContext(ctx, getRAGFlowDocumentByRemoteID, arg.DatasetID, arg.RagflowDocumentID)
 	var i RagflowDocument
 	err := row.Scan(
 		&i.ID,
@@ -343,14 +320,14 @@ func (q *Queries) GetRAGFlowDocumentByRemoteID(ctx context.Context, arg GetRAGFl
 }
 
 const getRAGFlowOrgDataset = `-- name: GetRAGFlowOrgDataset :one
-SELECT id, scope_type, org_id, app_id, ragflow_dataset_id, name, status, last_error, create_claim_token, created_at, updated_at
+SELECT id, scope_type, org_id, app_id, ragflow_dataset_id, name, status, last_error, create_claim_token, created_at, updated_at, org_scope_key, app_scope_key
 FROM ragflow_datasets
-WHERE scope_type = 'org' AND org_id = $1
+WHERE scope_type = 'org' AND org_id = ?
 `
 
 // 读取组织知识库 dataset 映射，供管理面列表和 runtime 检索使用。
-func (q *Queries) GetRAGFlowOrgDataset(ctx context.Context, orgID pgtype.UUID) (RagflowDataset, error) {
-	row := q.db.QueryRow(ctx, getRAGFlowOrgDataset, orgID)
+func (q *Queries) GetRAGFlowOrgDataset(ctx context.Context, orgID string) (RagflowDataset, error) {
+	row := q.db.QueryRowContext(ctx, getRAGFlowOrgDataset, orgID)
 	var i RagflowDataset
 	err := row.Scan(
 		&i.ID,
@@ -364,6 +341,8 @@ func (q *Queries) GetRAGFlowOrgDataset(ctx context.Context, orgID pgtype.UUID) (
 		&i.CreateClaimToken,
 		&i.CreatedAt,
 		&i.UpdatedAt,
+		&i.OrgScopeKey,
+		&i.AppScopeKey,
 	)
 	return i, err
 }
@@ -371,35 +350,38 @@ func (q *Queries) GetRAGFlowOrgDataset(ctx context.Context, orgID pgtype.UUID) (
 const listRAGFlowDocumentsByScope = `-- name: ListRAGFlowDocumentsByScope :many
 SELECT id, dataset_id, scope_type, org_id, app_id, ragflow_document_id, name, size_bytes, mime_type, suffix, parse_status, progress, last_error, created_by, created_at, updated_at
 FROM ragflow_documents
-WHERE scope_type = $1
-  AND org_id = $2
-  AND ($5::uuid IS NULL OR app_id = $5::uuid)
-  AND ($6::text IS NULL OR parse_status = $6::text)
-  AND ($7::text IS NULL OR name ILIKE '%' || $7::text || '%')
+WHERE scope_type = ?
+  AND org_id = ?
+  AND (? IS NULL OR app_id = ?)
+  AND (? IS NULL OR parse_status = ?)
+  AND (? IS NULL OR name LIKE CONCAT('%', ?, '%'))
 ORDER BY created_at DESC, id DESC
-LIMIT $3 OFFSET $4
+LIMIT ? OFFSET ?
 `
 
 type ListRAGFlowDocumentsByScopeParams struct {
 	ScopeType   string      `db:"scope_type" json:"scope_type"`
-	OrgID       pgtype.UUID `db:"org_id" json:"org_id"`
+	OrgID       string      `db:"org_id" json:"org_id"`
+	AppID       null.String `db:"app_id" json:"app_id"`
+	ParseStatus null.String `db:"parse_status" json:"parse_status"`
+	Keywords    interface{} `db:"keywords" json:"keywords"`
 	Limit       int32       `db:"limit" json:"limit"`
 	Offset      int32       `db:"offset" json:"offset"`
-	AppID       pgtype.UUID `db:"app_id" json:"app_id"`
-	ParseStatus pgtype.Text `db:"parse_status" json:"parse_status"`
-	Keywords    pgtype.Text `db:"keywords" json:"keywords"`
 }
 
 // 扁平列出某个组织或实例知识库文件，支持按状态和文件名过滤。
 func (q *Queries) ListRAGFlowDocumentsByScope(ctx context.Context, arg ListRAGFlowDocumentsByScopeParams) ([]RagflowDocument, error) {
-	rows, err := q.db.Query(ctx, listRAGFlowDocumentsByScope,
+	rows, err := q.db.QueryContext(ctx, listRAGFlowDocumentsByScope,
 		arg.ScopeType,
 		arg.OrgID,
-		arg.Limit,
-		arg.Offset,
+		arg.AppID,
 		arg.AppID,
 		arg.ParseStatus,
+		arg.ParseStatus,
 		arg.Keywords,
+		arg.Keywords,
+		arg.Limit,
+		arg.Offset,
 	)
 	if err != nil {
 		return nil, err
@@ -430,6 +412,9 @@ func (q *Queries) ListRAGFlowDocumentsByScope(ctx context.Context, arg ListRAGFl
 		}
 		items = append(items, i)
 	}
+	if err := rows.Close(); err != nil {
+		return nil, err
+	}
 	if err := rows.Err(); err != nil {
 		return nil, err
 	}
@@ -437,33 +422,33 @@ func (q *Queries) ListRAGFlowDocumentsByScope(ctx context.Context, arg ListRAGFl
 }
 
 const listRAGFlowDocumentsNeedingRefresh = `-- name: ListRAGFlowDocumentsNeedingRefresh :many
-SELECT d.id, d.dataset_id, d.scope_type, d.org_id, d.app_id, d.ragflow_document_id, d.name, d.size_bytes, d.mime_type, d.suffix, d.parse_status, d.progress, d.last_error, d.created_by, d.created_at, d.updated_at, ds.ragflow_dataset_id::text AS remote_dataset_id
+SELECT d.id, d.dataset_id, d.scope_type, d.org_id, d.app_id, d.ragflow_document_id, d.name, d.size_bytes, d.mime_type, d.suffix, d.parse_status, d.progress, d.last_error, d.created_by, d.created_at, d.updated_at, ds.ragflow_dataset_id AS remote_dataset_id
 FROM ragflow_documents d
 JOIN ragflow_datasets ds ON ds.id = d.dataset_id
 WHERE d.parse_status IN ('queued', 'running')
   AND ds.ragflow_dataset_id IS NOT NULL
 ORDER BY d.updated_at ASC
-LIMIT $1
+LIMIT ?
 `
 
 type ListRAGFlowDocumentsNeedingRefreshRow struct {
-	ID                pgtype.UUID        `db:"id" json:"id"`
-	DatasetID         pgtype.UUID        `db:"dataset_id" json:"dataset_id"`
-	ScopeType         string             `db:"scope_type" json:"scope_type"`
-	OrgID             pgtype.UUID        `db:"org_id" json:"org_id"`
-	AppID             pgtype.UUID        `db:"app_id" json:"app_id"`
-	RagflowDocumentID string             `db:"ragflow_document_id" json:"ragflow_document_id"`
-	Name              string             `db:"name" json:"name"`
-	SizeBytes         int64              `db:"size_bytes" json:"size_bytes"`
-	MimeType          pgtype.Text        `db:"mime_type" json:"mime_type"`
-	Suffix            pgtype.Text        `db:"suffix" json:"suffix"`
-	ParseStatus       string             `db:"parse_status" json:"parse_status"`
-	Progress          int32              `db:"progress" json:"progress"`
-	LastError         pgtype.Text        `db:"last_error" json:"last_error"`
-	CreatedBy         string             `db:"created_by" json:"created_by"`
-	CreatedAt         pgtype.Timestamptz `db:"created_at" json:"created_at"`
-	UpdatedAt         pgtype.Timestamptz `db:"updated_at" json:"updated_at"`
-	RemoteDatasetID   string             `db:"remote_dataset_id" json:"remote_dataset_id"`
+	ID                string      `db:"id" json:"id"`
+	DatasetID         string      `db:"dataset_id" json:"dataset_id"`
+	ScopeType         string      `db:"scope_type" json:"scope_type"`
+	OrgID             string      `db:"org_id" json:"org_id"`
+	AppID             null.String `db:"app_id" json:"app_id"`
+	RagflowDocumentID string      `db:"ragflow_document_id" json:"ragflow_document_id"`
+	Name              string      `db:"name" json:"name"`
+	SizeBytes         int64       `db:"size_bytes" json:"size_bytes"`
+	MimeType          null.String `db:"mime_type" json:"mime_type"`
+	Suffix            null.String `db:"suffix" json:"suffix"`
+	ParseStatus       string      `db:"parse_status" json:"parse_status"`
+	Progress          int32       `db:"progress" json:"progress"`
+	LastError         null.String `db:"last_error" json:"last_error"`
+	CreatedBy         string      `db:"created_by" json:"created_by"`
+	CreatedAt         time.Time   `db:"created_at" json:"created_at"`
+	UpdatedAt         time.Time   `db:"updated_at" json:"updated_at"`
+	RemoteDatasetID   null.String `db:"remote_dataset_id" json:"remote_dataset_id"`
 }
 
 // 找出需要刷新解析状态的 document，按最久未更新优先；
@@ -471,7 +456,7 @@ type ListRAGFlowDocumentsNeedingRefreshRow struct {
 // 远端 dataset 尚未创建（ragflow_dataset_id IS NULL）的文档不会出现：
 // 此类文档此时本就无法从 RAGFlow 拉取状态，等 dataset 创建完成后再轮询即可。
 func (q *Queries) ListRAGFlowDocumentsNeedingRefresh(ctx context.Context, limit int32) ([]ListRAGFlowDocumentsNeedingRefreshRow, error) {
-	rows, err := q.db.Query(ctx, listRAGFlowDocumentsNeedingRefresh, limit)
+	rows, err := q.db.QueryContext(ctx, listRAGFlowDocumentsNeedingRefresh, limit)
 	if err != nil {
 		return nil, err
 	}
@@ -502,136 +487,89 @@ func (q *Queries) ListRAGFlowDocumentsNeedingRefresh(ctx context.Context, limit 
 		}
 		items = append(items, i)
 	}
+	if err := rows.Close(); err != nil {
+		return nil, err
+	}
 	if err := rows.Err(); err != nil {
 		return nil, err
 	}
 	return items, nil
 }
 
-const markRAGFlowDatasetFailed = `-- name: MarkRAGFlowDatasetFailed :one
+const markRAGFlowDatasetFailed = `-- name: MarkRAGFlowDatasetFailed :exec
 UPDATE ragflow_datasets
 SET status = 'failed',
-    last_error = $2,
+    last_error = ?,
     create_claim_token = NULL,
     updated_at = now()
-WHERE id = $1
+WHERE id = ?
   AND status = 'creating'
-  AND create_claim_token = $3
-RETURNING id, scope_type, org_id, app_id, ragflow_dataset_id, name, status, last_error, create_claim_token, created_at, updated_at
+  AND create_claim_token = ?
 `
 
 type MarkRAGFlowDatasetFailedParams struct {
-	ID               pgtype.UUID `db:"id" json:"id"`
-	LastError        pgtype.Text `db:"last_error" json:"last_error"`
-	CreateClaimToken pgtype.Text `db:"create_claim_token" json:"create_claim_token"`
+	LastError        null.String `db:"last_error" json:"last_error"`
+	ID               string      `db:"id" json:"id"`
+	CreateClaimToken null.String `db:"create_claim_token" json:"create_claim_token"`
 }
 
 // 标记 dataset 生命周期失败，保留错误文本用于管理面排障。
-func (q *Queries) MarkRAGFlowDatasetFailed(ctx context.Context, arg MarkRAGFlowDatasetFailedParams) (RagflowDataset, error) {
-	row := q.db.QueryRow(ctx, markRAGFlowDatasetFailed, arg.ID, arg.LastError, arg.CreateClaimToken)
-	var i RagflowDataset
-	err := row.Scan(
-		&i.ID,
-		&i.ScopeType,
-		&i.OrgID,
-		&i.AppID,
-		&i.RagflowDatasetID,
-		&i.Name,
-		&i.Status,
-		&i.LastError,
-		&i.CreateClaimToken,
-		&i.CreatedAt,
-		&i.UpdatedAt,
-	)
-	return i, err
+func (q *Queries) MarkRAGFlowDatasetFailed(ctx context.Context, arg MarkRAGFlowDatasetFailedParams) error {
+	_, err := q.db.ExecContext(ctx, markRAGFlowDatasetFailed, arg.LastError, arg.ID, arg.CreateClaimToken)
+	return err
 }
 
-const setRAGFlowDatasetActive = `-- name: SetRAGFlowDatasetActive :one
+const setRAGFlowDatasetActive = `-- name: SetRAGFlowDatasetActive :exec
 UPDATE ragflow_datasets
-SET ragflow_dataset_id = $2,
-    name = $3,
+SET ragflow_dataset_id = ?,
+    name = ?,
     status = 'active',
     last_error = NULL,
     create_claim_token = NULL,
     updated_at = now()
-WHERE id = $1
+WHERE id = ?
   AND status = 'creating'
-  AND create_claim_token = $4
-RETURNING id, scope_type, org_id, app_id, ragflow_dataset_id, name, status, last_error, create_claim_token, created_at, updated_at
+  AND create_claim_token = ?
 `
 
 type SetRAGFlowDatasetActiveParams struct {
-	ID               pgtype.UUID `db:"id" json:"id"`
-	RagflowDatasetID pgtype.Text `db:"ragflow_dataset_id" json:"ragflow_dataset_id"`
+	RagflowDatasetID null.String `db:"ragflow_dataset_id" json:"ragflow_dataset_id"`
 	Name             string      `db:"name" json:"name"`
-	CreateClaimToken pgtype.Text `db:"create_claim_token" json:"create_claim_token"`
+	ID               string      `db:"id" json:"id"`
+	CreateClaimToken null.String `db:"create_claim_token" json:"create_claim_token"`
 }
 
 // 远端 dataset 创建成功后写入 RAGFlow ID，并清理上一轮生命周期错误。
-func (q *Queries) SetRAGFlowDatasetActive(ctx context.Context, arg SetRAGFlowDatasetActiveParams) (RagflowDataset, error) {
-	row := q.db.QueryRow(ctx, setRAGFlowDatasetActive,
-		arg.ID,
+func (q *Queries) SetRAGFlowDatasetActive(ctx context.Context, arg SetRAGFlowDatasetActiveParams) error {
+	_, err := q.db.ExecContext(ctx, setRAGFlowDatasetActive,
 		arg.RagflowDatasetID,
 		arg.Name,
+		arg.ID,
 		arg.CreateClaimToken,
 	)
-	var i RagflowDataset
-	err := row.Scan(
-		&i.ID,
-		&i.ScopeType,
-		&i.OrgID,
-		&i.AppID,
-		&i.RagflowDatasetID,
-		&i.Name,
-		&i.Status,
-		&i.LastError,
-		&i.CreateClaimToken,
-		&i.CreatedAt,
-		&i.UpdatedAt,
-	)
-	return i, err
+	return err
 }
 
-const updateRAGFlowDocumentParseStatus = `-- name: UpdateRAGFlowDocumentParseStatus :one
+const updateRAGFlowDocumentParseStatus = `-- name: UpdateRAGFlowDocumentParseStatus :exec
 UPDATE ragflow_documents
-SET parse_status = $2, progress = $3, last_error = $4, updated_at = now()
-WHERE id = $1
-RETURNING id, dataset_id, scope_type, org_id, app_id, ragflow_document_id, name, size_bytes, mime_type, suffix, parse_status, progress, last_error, created_by, created_at, updated_at
+SET parse_status = ?, progress = ?, last_error = ?, updated_at = now()
+WHERE id = ?
 `
 
 type UpdateRAGFlowDocumentParseStatusParams struct {
-	ID          pgtype.UUID `db:"id" json:"id"`
 	ParseStatus string      `db:"parse_status" json:"parse_status"`
 	Progress    int32       `db:"progress" json:"progress"`
-	LastError   pgtype.Text `db:"last_error" json:"last_error"`
+	LastError   null.String `db:"last_error" json:"last_error"`
+	ID          string      `db:"id" json:"id"`
 }
 
 // 回写解析状态、进度和错误；状态值由 service 层从 RAGFlow run 值归一化。
-func (q *Queries) UpdateRAGFlowDocumentParseStatus(ctx context.Context, arg UpdateRAGFlowDocumentParseStatusParams) (RagflowDocument, error) {
-	row := q.db.QueryRow(ctx, updateRAGFlowDocumentParseStatus,
-		arg.ID,
+func (q *Queries) UpdateRAGFlowDocumentParseStatus(ctx context.Context, arg UpdateRAGFlowDocumentParseStatusParams) error {
+	_, err := q.db.ExecContext(ctx, updateRAGFlowDocumentParseStatus,
 		arg.ParseStatus,
 		arg.Progress,
 		arg.LastError,
+		arg.ID,
 	)
-	var i RagflowDocument
-	err := row.Scan(
-		&i.ID,
-		&i.DatasetID,
-		&i.ScopeType,
-		&i.OrgID,
-		&i.AppID,
-		&i.RagflowDocumentID,
-		&i.Name,
-		&i.SizeBytes,
-		&i.MimeType,
-		&i.Suffix,
-		&i.ParseStatus,
-		&i.Progress,
-		&i.LastError,
-		&i.CreatedBy,
-		&i.CreatedAt,
-		&i.UpdatedAt,
-	)
-	return i, err
+	return err
 }

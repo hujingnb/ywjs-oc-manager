@@ -1,5 +1,6 @@
--- name: CreateOrganization :one
+-- name: CreateOrganization :exec
 INSERT INTO organizations (
+    id,
     name,
     code,
     status,
@@ -9,86 +10,80 @@ INSERT INTO organizations (
     credit_warning_threshold,
     assistant_version_ids
 ) VALUES (
-    $1, $2, $3, $4, $5, $6, $7, $8
-)
-RETURNING *;
+    ?, ?, ?, ?, ?, ?, ?, ?, ?
+);
 
--- name: SetOrganizationNewAPIUser :one
+-- name: SetOrganizationNewAPIUser :exec
 UPDATE organizations
 SET
-    newapi_user_id = $2,
-    newapi_user_credentials_ciphertext = $3,
-    newapi_username = $4,
+    newapi_user_id = ?,
+    newapi_user_credentials_ciphertext = ?,
+    newapi_username = ?,
     updated_at = now()
-WHERE id = $1
-RETURNING *;
+WHERE id = ?;
 
 -- name: GetOrganization :one
 SELECT *
 FROM organizations
-WHERE id = $1;
+WHERE id = ?;
 
 -- name: GetOrganizationByName :one
 SELECT *
 FROM organizations
-WHERE name = $1;
+WHERE name = ?;
 
 -- name: GetOrganizationByCode :one
 SELECT *
 FROM organizations
-WHERE code = $1;
+WHERE code = ?;
 
 -- name: ListOrganizations :many
 SELECT *
 FROM organizations
 WHERE deleted_at IS NULL
 ORDER BY created_at DESC, id DESC
-LIMIT $1 OFFSET $2;
+LIMIT ? OFFSET ?;
 
--- name: UpdateOrganizationProfile :one
+-- name: UpdateOrganizationProfile :exec
 UPDATE organizations
 SET
-    name = $2,
-    contact_name = $3,
-    contact_phone = $4,
-    remark = $5,
-    credit_warning_threshold = $6,
-    assistant_version_ids = $7,
+    name = ?,
+    contact_name = ?,
+    contact_phone = ?,
+    remark = ?,
+    credit_warning_threshold = ?,
+    assistant_version_ids = ?,
     updated_at = now()
-WHERE id = $1
-RETURNING *;
+WHERE id = ?;
 
--- name: SetOrganizationStatus :one
+-- name: SetOrganizationStatus :exec
 UPDATE organizations
-SET status = $2, updated_at = now()
-WHERE id = $1
-RETURNING *;
+SET status = ?, updated_at = now()
+WHERE id = ?;
 
--- name: SoftDeleteOrganization :one
+-- name: SoftDeleteOrganization :exec
 UPDATE organizations
 SET status = 'deleted', deleted_at = now(), updated_at = now()
-WHERE id = $1 AND deleted_at IS NULL
-RETURNING *;
+WHERE id = ? AND deleted_at IS NULL;
 
 -- name: HardDeleteOrganization :exec
 -- 用于组织创建链路失败时回滚刚刚 INSERT 的孤儿记录。
 -- 正常生命周期不可见此查询；普通"删除"必须走 SoftDeleteOrganization。
-DELETE FROM organizations WHERE id = $1;
+DELETE FROM organizations WHERE id = ?;
 
 -- name: GetOrganizationForUpdate :one
 -- OOS-2 access_token 自愈用：以行锁查询组织，避免并发更新密文时出现写丢失。
 SELECT *
 FROM organizations
-WHERE id = $1
+WHERE id = ?
 FOR UPDATE;
 
--- name: UpdateOrganizationCredentialsCiphertext :one
+-- name: UpdateOrganizationCredentialsCiphertext :exec
 -- OOS-2 access_token 自愈用：仅更新 newapi_user_credentials_ciphertext，不动 newapi_user_id。
 UPDATE organizations
-SET newapi_user_credentials_ciphertext = $2,
+SET newapi_user_credentials_ciphertext = ?,
     updated_at = now()
-WHERE id = $1
-RETURNING *;
+WHERE id = ?;
 
 -- name: ListAllActiveOrganizations :many
 -- 全量返回活跃组织（deleted_at IS NULL），不分页；

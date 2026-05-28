@@ -7,214 +7,86 @@ package sqlc
 
 import (
 	"context"
+	"encoding/json"
 
-	"github.com/jackc/pgx/v5/pgtype"
+	null "github.com/guregu/null/v5"
 )
 
 const appHasBoundChannelBinding = `-- name: AppHasBoundChannelBinding :one
 SELECT EXISTS (
     SELECT 1
     FROM channel_bindings
-    WHERE app_id = $1 AND status = 'bound'
-)::bool AS has_bound
+    WHERE app_id = ? AND status = 'bound'
+) AS has_bound
 `
 
 // 判断指定应用下是否存在 status='bound' 的渠道绑定。
 // app_initialize 在推进到 binding_waiting 之后调用：若发现已 bound（如切换助手
 // 版本触发镜像重建后、容器重启前渠道凭证依旧落在 bind mount 目录、无需用户
 // 重新扫码），则直接把 status 推到 running，避免概览页长期卡在「待绑定」。
-func (q *Queries) AppHasBoundChannelBinding(ctx context.Context, appID pgtype.UUID) (bool, error) {
-	row := q.db.QueryRow(ctx, appHasBoundChannelBinding, appID)
+func (q *Queries) AppHasBoundChannelBinding(ctx context.Context, appID string) (bool, error) {
+	row := q.db.QueryRowContext(ctx, appHasBoundChannelBinding, appID)
 	var has_bound bool
 	err := row.Scan(&has_bound)
 	return has_bound, err
 }
 
 const countChannelBindingsByApp = `-- name: CountChannelBindingsByApp :one
-SELECT COUNT(*)::bigint AS count
+SELECT COUNT(*) AS count
 FROM channel_bindings
-WHERE app_id = $1 AND status <> 'deleted'
+WHERE app_id = ? AND status <> 'deleted'
 `
 
 // 统计指定应用下未被标记为 deleted 的渠道绑定数。
 // RuntimeOperationService.Trigger 在写 delete 审计前调用，把数量塞进 detail_message。
-func (q *Queries) CountChannelBindingsByApp(ctx context.Context, appID pgtype.UUID) (int64, error) {
-	row := q.db.QueryRow(ctx, countChannelBindingsByApp, appID)
+func (q *Queries) CountChannelBindingsByApp(ctx context.Context, appID string) (int64, error) {
+	row := q.db.QueryRowContext(ctx, countChannelBindingsByApp, appID)
 	var count int64
 	err := row.Scan(&count)
 	return count, err
 }
 
-const createChannelBinding = `-- name: CreateChannelBinding :one
+const createChannelBinding = `-- name: CreateChannelBinding :exec
 INSERT INTO channel_bindings (
+    id,
     app_id,
     channel_type,
     status
 ) VALUES (
-    $1, $2, $3
+    ?, ?, ?, ?
 )
-RETURNING id, app_id, channel_type, status, bound_identity, channel_name, metadata_json, bound_at, last_online_at, last_error, created_at, updated_at
 `
 
 type CreateChannelBindingParams struct {
-	AppID       pgtype.UUID `db:"app_id" json:"app_id"`
-	ChannelType string      `db:"channel_type" json:"channel_type"`
-	Status      string      `db:"status" json:"status"`
+	ID          string `db:"id" json:"id"`
+	AppID       string `db:"app_id" json:"app_id"`
+	ChannelType string `db:"channel_type" json:"channel_type"`
+	Status      string `db:"status" json:"status"`
 }
 
-func (q *Queries) CreateChannelBinding(ctx context.Context, arg CreateChannelBindingParams) (ChannelBinding, error) {
-	row := q.db.QueryRow(ctx, createChannelBinding, arg.AppID, arg.ChannelType, arg.Status)
-	var i ChannelBinding
-	err := row.Scan(
-		&i.ID,
-		&i.AppID,
-		&i.ChannelType,
-		&i.Status,
-		&i.BoundIdentity,
-		&i.ChannelName,
-		&i.MetadataJson,
-		&i.BoundAt,
-		&i.LastOnlineAt,
-		&i.LastError,
-		&i.CreatedAt,
-		&i.UpdatedAt,
-	)
-	return i, err
-}
-
-const getChannelBindingByAppAndType = `-- name: GetChannelBindingByAppAndType :one
-SELECT id, app_id, channel_type, status, bound_identity, channel_name, metadata_json, bound_at, last_online_at, last_error, created_at, updated_at
-FROM channel_bindings
-WHERE app_id = $1 AND channel_type = $2 AND status <> 'deleted'
-`
-
-type GetChannelBindingByAppAndTypeParams struct {
-	AppID       pgtype.UUID `db:"app_id" json:"app_id"`
-	ChannelType string      `db:"channel_type" json:"channel_type"`
-}
-
-func (q *Queries) GetChannelBindingByAppAndType(ctx context.Context, arg GetChannelBindingByAppAndTypeParams) (ChannelBinding, error) {
-	row := q.db.QueryRow(ctx, getChannelBindingByAppAndType, arg.AppID, arg.ChannelType)
-	var i ChannelBinding
-	err := row.Scan(
-		&i.ID,
-		&i.AppID,
-		&i.ChannelType,
-		&i.Status,
-		&i.BoundIdentity,
-		&i.ChannelName,
-		&i.MetadataJson,
-		&i.BoundAt,
-		&i.LastOnlineAt,
-		&i.LastError,
-		&i.CreatedAt,
-		&i.UpdatedAt,
-	)
-	return i, err
-}
-
-const markChannelBindingBound = `-- name: MarkChannelBindingBound :one
-UPDATE channel_bindings
-SET
-    status = 'bound',
-    bound_identity = $3,
-    channel_name = $4,
-    metadata_json = $5,
-    bound_at = now(),
-    last_error = NULL,
-    updated_at = now()
-WHERE app_id = $1 AND channel_type = $2 AND status <> 'deleted'
-RETURNING id, app_id, channel_type, status, bound_identity, channel_name, metadata_json, bound_at, last_online_at, last_error, created_at, updated_at
-`
-
-type MarkChannelBindingBoundParams struct {
-	AppID         pgtype.UUID `db:"app_id" json:"app_id"`
-	ChannelType   string      `db:"channel_type" json:"channel_type"`
-	BoundIdentity pgtype.Text `db:"bound_identity" json:"bound_identity"`
-	ChannelName   pgtype.Text `db:"channel_name" json:"channel_name"`
-	MetadataJson  []byte      `db:"metadata_json" json:"metadata_json"`
-}
-
-func (q *Queries) MarkChannelBindingBound(ctx context.Context, arg MarkChannelBindingBoundParams) (ChannelBinding, error) {
-	row := q.db.QueryRow(ctx, markChannelBindingBound,
-		arg.AppID,
-		arg.ChannelType,
-		arg.BoundIdentity,
-		arg.ChannelName,
-		arg.MetadataJson,
-	)
-	var i ChannelBinding
-	err := row.Scan(
-		&i.ID,
-		&i.AppID,
-		&i.ChannelType,
-		&i.Status,
-		&i.BoundIdentity,
-		&i.ChannelName,
-		&i.MetadataJson,
-		&i.BoundAt,
-		&i.LastOnlineAt,
-		&i.LastError,
-		&i.CreatedAt,
-		&i.UpdatedAt,
-	)
-	return i, err
-}
-
-const setChannelBindingChallenge = `-- name: SetChannelBindingChallenge :one
-UPDATE channel_bindings
-SET status = 'pending_auth', metadata_json = $3, last_error = NULL, updated_at = now()
-WHERE app_id = $1 AND channel_type = $2 AND status <> 'deleted'
-RETURNING id, app_id, channel_type, status, bound_identity, channel_name, metadata_json, bound_at, last_online_at, last_error, created_at, updated_at
-`
-
-type SetChannelBindingChallengeParams struct {
-	AppID        pgtype.UUID `db:"app_id" json:"app_id"`
-	ChannelType  string      `db:"channel_type" json:"channel_type"`
-	MetadataJson []byte      `db:"metadata_json" json:"metadata_json"`
-}
-
-func (q *Queries) SetChannelBindingChallenge(ctx context.Context, arg SetChannelBindingChallengeParams) (ChannelBinding, error) {
-	row := q.db.QueryRow(ctx, setChannelBindingChallenge, arg.AppID, arg.ChannelType, arg.MetadataJson)
-	var i ChannelBinding
-	err := row.Scan(
-		&i.ID,
-		&i.AppID,
-		&i.ChannelType,
-		&i.Status,
-		&i.BoundIdentity,
-		&i.ChannelName,
-		&i.MetadataJson,
-		&i.BoundAt,
-		&i.LastOnlineAt,
-		&i.LastError,
-		&i.CreatedAt,
-		&i.UpdatedAt,
-	)
-	return i, err
-}
-
-const setChannelBindingStatus = `-- name: SetChannelBindingStatus :one
-UPDATE channel_bindings
-SET status = $3, last_error = $4, updated_at = now()
-WHERE app_id = $1 AND channel_type = $2 AND status <> 'deleted'
-RETURNING id, app_id, channel_type, status, bound_identity, channel_name, metadata_json, bound_at, last_online_at, last_error, created_at, updated_at
-`
-
-type SetChannelBindingStatusParams struct {
-	AppID       pgtype.UUID `db:"app_id" json:"app_id"`
-	ChannelType string      `db:"channel_type" json:"channel_type"`
-	Status      string      `db:"status" json:"status"`
-	LastError   pgtype.Text `db:"last_error" json:"last_error"`
-}
-
-func (q *Queries) SetChannelBindingStatus(ctx context.Context, arg SetChannelBindingStatusParams) (ChannelBinding, error) {
-	row := q.db.QueryRow(ctx, setChannelBindingStatus,
+func (q *Queries) CreateChannelBinding(ctx context.Context, arg CreateChannelBindingParams) error {
+	_, err := q.db.ExecContext(ctx, createChannelBinding,
+		arg.ID,
 		arg.AppID,
 		arg.ChannelType,
 		arg.Status,
-		arg.LastError,
 	)
+	return err
+}
+
+const getChannelBindingByAppAndType = `-- name: GetChannelBindingByAppAndType :one
+SELECT id, app_id, channel_type, status, bound_identity, channel_name, metadata_json, bound_at, last_online_at, last_error, created_at, updated_at, app_active_key
+FROM channel_bindings
+WHERE app_id = ? AND channel_type = ? AND status <> 'deleted'
+`
+
+type GetChannelBindingByAppAndTypeParams struct {
+	AppID       string `db:"app_id" json:"app_id"`
+	ChannelType string `db:"channel_type" json:"channel_type"`
+}
+
+func (q *Queries) GetChannelBindingByAppAndType(ctx context.Context, arg GetChannelBindingByAppAndTypeParams) (ChannelBinding, error) {
+	row := q.db.QueryRowContext(ctx, getChannelBindingByAppAndType, arg.AppID, arg.ChannelType)
 	var i ChannelBinding
 	err := row.Scan(
 		&i.ID,
@@ -229,6 +101,79 @@ func (q *Queries) SetChannelBindingStatus(ctx context.Context, arg SetChannelBin
 		&i.LastError,
 		&i.CreatedAt,
 		&i.UpdatedAt,
+		&i.AppActiveKey,
 	)
 	return i, err
+}
+
+const markChannelBindingBound = `-- name: MarkChannelBindingBound :exec
+UPDATE channel_bindings
+SET
+    status = 'bound',
+    bound_identity = ?,
+    channel_name = ?,
+    metadata_json = ?,
+    bound_at = now(),
+    last_error = NULL,
+    updated_at = now()
+WHERE app_id = ? AND channel_type = ? AND status <> 'deleted'
+`
+
+type MarkChannelBindingBoundParams struct {
+	BoundIdentity null.String     `db:"bound_identity" json:"bound_identity"`
+	ChannelName   null.String     `db:"channel_name" json:"channel_name"`
+	MetadataJson  json.RawMessage `db:"metadata_json" json:"metadata_json"`
+	AppID         string          `db:"app_id" json:"app_id"`
+	ChannelType   string          `db:"channel_type" json:"channel_type"`
+}
+
+func (q *Queries) MarkChannelBindingBound(ctx context.Context, arg MarkChannelBindingBoundParams) error {
+	_, err := q.db.ExecContext(ctx, markChannelBindingBound,
+		arg.BoundIdentity,
+		arg.ChannelName,
+		arg.MetadataJson,
+		arg.AppID,
+		arg.ChannelType,
+	)
+	return err
+}
+
+const setChannelBindingChallenge = `-- name: SetChannelBindingChallenge :exec
+UPDATE channel_bindings
+SET status = 'pending_auth', metadata_json = ?, last_error = NULL, updated_at = now()
+WHERE app_id = ? AND channel_type = ? AND status <> 'deleted'
+`
+
+type SetChannelBindingChallengeParams struct {
+	MetadataJson json.RawMessage `db:"metadata_json" json:"metadata_json"`
+	AppID        string          `db:"app_id" json:"app_id"`
+	ChannelType  string          `db:"channel_type" json:"channel_type"`
+}
+
+func (q *Queries) SetChannelBindingChallenge(ctx context.Context, arg SetChannelBindingChallengeParams) error {
+	_, err := q.db.ExecContext(ctx, setChannelBindingChallenge, arg.MetadataJson, arg.AppID, arg.ChannelType)
+	return err
+}
+
+const setChannelBindingStatus = `-- name: SetChannelBindingStatus :exec
+UPDATE channel_bindings
+SET status = ?, last_error = ?, updated_at = now()
+WHERE app_id = ? AND channel_type = ? AND status <> 'deleted'
+`
+
+type SetChannelBindingStatusParams struct {
+	Status      string      `db:"status" json:"status"`
+	LastError   null.String `db:"last_error" json:"last_error"`
+	AppID       string      `db:"app_id" json:"app_id"`
+	ChannelType string      `db:"channel_type" json:"channel_type"`
+}
+
+func (q *Queries) SetChannelBindingStatus(ctx context.Context, arg SetChannelBindingStatusParams) error {
+	_, err := q.db.ExecContext(ctx, setChannelBindingStatus,
+		arg.Status,
+		arg.LastError,
+		arg.AppID,
+		arg.ChannelType,
+	)
+	return err
 }
