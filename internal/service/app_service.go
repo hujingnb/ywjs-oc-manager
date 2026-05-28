@@ -2,12 +2,12 @@ package service
 
 import (
 	"context"
+	"database/sql"
 	"errors"
 	"fmt"
 	"strconv"
 
-	"github.com/jackc/pgx/v5"
-	"github.com/jackc/pgx/v5/pgtype"
+	"github.com/guregu/null/v5"
 
 	"oc-manager/internal/auth"
 	"oc-manager/internal/domain"
@@ -16,19 +16,19 @@ import (
 
 // AppStore 抽象 app 服务的数据访问能力。
 type AppStore interface {
-	CreateApp(ctx context.Context, arg sqlc.CreateAppParams) (sqlc.App, error)
+	CreateApp(ctx context.Context, arg sqlc.CreateAppParams) error
 	// GetAppWithVersion 联查实例与绑定版本的 revision / image_id，用于计算 version_synced。
-	GetAppWithVersion(ctx context.Context, id pgtype.UUID) (sqlc.GetAppWithVersionRow, error)
+	GetAppWithVersion(ctx context.Context, id string) (sqlc.GetAppWithVersionRow, error)
 	// ListAppsByOrgWithVersion 批量联查组织实例及绑定版本信息，用于 version_synced 批量计算。
 	ListAppsByOrgWithVersion(ctx context.Context, arg sqlc.ListAppsByOrgWithVersionParams) ([]sqlc.ListAppsByOrgWithVersionRow, error)
-	SetAppStatus(ctx context.Context, arg sqlc.SetAppStatusParams) (sqlc.App, error)
-	SoftDeleteApp(ctx context.Context, id pgtype.UUID) (sqlc.App, error)
-	CreateJob(ctx context.Context, arg sqlc.CreateJobParams) (sqlc.Job, error)
-	CreateAuditLog(ctx context.Context, arg sqlc.CreateAuditLogParams) (sqlc.AuditLog, error)
+	SetAppStatus(ctx context.Context, arg sqlc.SetAppStatusParams) error
+	SoftDeleteApp(ctx context.Context, id string) error
+	CreateJob(ctx context.Context, arg sqlc.CreateJobParams) error
+	CreateAuditLog(ctx context.Context, arg sqlc.CreateAuditLogParams) error
 	// GetOrganization 按 id 加载组织记录，用于 allowlist 校验等场景。
-	GetOrganization(ctx context.Context, id pgtype.UUID) (sqlc.Organization, error)
+	GetOrganization(ctx context.Context, id string) (sqlc.Organization, error)
 	// SetAppVersion 更新实例绑定的助手版本 id，返回更新后的实例记录。
-	SetAppVersion(ctx context.Context, arg sqlc.SetAppVersionParams) (sqlc.App, error)
+	SetAppVersion(ctx context.Context, arg sqlc.SetAppVersionParams) error
 }
 
 // AppImageResolver 把版本 image_id 解析成镜像 ref，用于计算 version_synced 的镜像维度。
@@ -96,18 +96,15 @@ type AppResult struct {
 
 // Get 查询应用。
 func (s *AppService) Get(ctx context.Context, principal auth.Principal, appID string) (AppResult, error) {
-	id, err := parseUUID(appID)
-	if err != nil {
-		return AppResult{}, ErrNotFound
-	}
-	row, err := s.store.GetAppWithVersion(ctx, id)
-	if errors.Is(err, pgx.ErrNoRows) {
+	// appID 直接作为字符串传入；格式非法（不存在）时 store 返回 sql.ErrNoRows。
+	row, err := s.store.GetAppWithVersion(ctx, appID)
+	if errors.Is(err, sql.ErrNoRows) {
 		return AppResult{}, ErrNotFound
 	}
 	if err != nil {
 		return AppResult{}, fmt.Errorf("查询应用失败: %w", err)
 	}
-	if !auth.CanViewApp(principal, uuidToString(row.App.OrgID), uuidToString(row.App.OwnerUserID)) {
+	if !auth.CanViewApp(principal, row.App.OrgID, row.App.OwnerUserID) {
 		return AppResult{}, ErrForbidden
 	}
 	result := toAppResult(row.App)
@@ -126,10 +123,6 @@ func (s *AppService) ListByOrg(ctx context.Context, principal auth.Principal, or
 	if !auth.CanViewOrg(principal, orgID) {
 		return nil, ErrForbidden
 	}
-	id, err := parseUUID(orgID)
-	if err != nil {
-		return nil, ErrNotFound
-	}
 	if limit <= 0 {
 		limit = 50
 	}
@@ -139,7 +132,7 @@ func (s *AppService) ListByOrg(ctx context.Context, principal auth.Principal, or
 	if offset < 0 {
 		offset = 0
 	}
-	rows, err := s.store.ListAppsByOrgWithVersion(ctx, sqlc.ListAppsByOrgWithVersionParams{OrgID: id, Limit: limit, Offset: offset})
+	rows, err := s.store.ListAppsByOrgWithVersion(ctx, sqlc.ListAppsByOrgWithVersionParams{OrgID: orgID, Limit: limit, Offset: offset})
 	if err != nil {
 		return nil, fmt.Errorf("查询应用列表失败: %w", err)
 	}
@@ -147,7 +140,7 @@ func (s *AppService) ListByOrg(ctx context.Context, principal auth.Principal, or
 	for _, row := range rows {
 		// 组织成员只能在列表中看到自己拥有的应用。
 		// schema 上每个用户最多一个活跃应用，分页含义对该角色无影响。
-		if principal.Role == domain.UserRoleOrgMember && principal.UserID != uuidToString(row.App.OwnerUserID) {
+		if principal.Role == domain.UserRoleOrgMember && principal.UserID != row.App.OwnerUserID {
 			continue
 		}
 		r := toAppResult(row.App)
@@ -160,15 +153,14 @@ func (s *AppService) ListByOrg(ctx context.Context, principal auth.Principal, or
 
 func toAppResult(app sqlc.App) AppResult {
 	result := AppResult{
-		ID:           uuidToString(app.ID),
-		OrgID:        uuidToString(app.OrgID),
-		OwnerUserID:  uuidToString(app.OwnerUserID),
+		ID:           app.ID,
+		OrgID:        app.OrgID,
+		OwnerUserID:  app.OwnerUserID,
 		Name:         app.Name,
 		Status:       app.Status,
 		APIKeyStatus: app.ApiKeyStatus,
-	}
-	if app.RuntimeNodeID.Valid {
-		result.RuntimeNodeID = uuidToOptionalString(app.RuntimeNodeID)
+		// RuntimeNodeID 是非空字符串列；空字符串表示未分配节点（历史或异常数据）。
+		RuntimeNodeID: app.RuntimeNodeID,
 	}
 	if app.Description.Valid {
 		result.Description = app.Description.String
@@ -183,15 +175,15 @@ func toAppResult(app sqlc.App) AppResult {
 			result.NewapiKeyID = id
 		}
 	}
-	// 进度三字段：pgtype Valid=false 时 .Int64/.String 为零值，正好与 omitempty 对齐。
+	// 进度三字段：null.Int Valid=false 时 .Int64 为零值，正好与 omitempty 对齐。
 	// 单位由 status 决定（拉取镜像走字节，启动容器走秒），service 层不做语义换算。
-	result.ProgressCurrent = app.ProgressCurrent.Int64
-	result.ProgressTotal = app.ProgressTotal.Int64
-	result.LastErrorStatus = app.LastErrorStatus.String
-	result.LastErrorMessage = app.LastErrorMessage.String
+	result.ProgressCurrent = intOrZero(app.ProgressCurrent)
+	result.ProgressTotal = intOrZero(app.ProgressTotal)
+	result.LastErrorStatus = strOrEmpty(app.LastErrorStatus)
+	result.LastErrorMessage = strOrEmpty(app.LastErrorMessage)
 	// VersionID：Valid=false 时跳过（历史数据无版本绑定）。
 	if app.VersionID.Valid {
-		result.VersionID = uuidToString(app.VersionID)
+		result.VersionID = app.VersionID.String
 	}
 	return result
 }
@@ -214,26 +206,21 @@ func computeVersionSynced(app sqlc.App, versionRevision int32, versionImageID st
 // 校验调用者可通过 CanSwitchAppVersion（平台管理员、本组织管理员或实例 owner）、目标版本在实例所属组织的 allowlist 内，
 // 写入新 version_id 后返回最新实例视图——SetAppVersion 切换时清零 applied_*，切换后 version_synced 必为 false，提示需重启。
 func (s *AppService) SwitchAppVersion(ctx context.Context, principal auth.Principal, appID, versionID string) (AppResult, error) {
-	// 解析实例 id；格式非法时等同于资源不存在。
-	id, err := parseUUID(appID)
-	if err != nil {
-		return AppResult{}, ErrNotFound
-	}
 	// 加载实例及绑定版本信息，用于权限校验和 version_synced 计算。
-	row, err := s.store.GetAppWithVersion(ctx, id)
-	if errors.Is(err, pgx.ErrNoRows) {
+	row, err := s.store.GetAppWithVersion(ctx, appID)
+	if errors.Is(err, sql.ErrNoRows) {
 		return AppResult{}, ErrNotFound
 	}
 	if err != nil {
 		return AppResult{}, fmt.Errorf("查询应用失败: %w", err)
 	}
 	// 权限校验：平台管理员、本组织管理员或实例 owner 成员可切换版本。
-	if !auth.CanSwitchAppVersion(principal, uuidToString(row.App.OrgID), uuidToString(row.App.OwnerUserID)) {
+	if !auth.CanSwitchAppVersion(principal, row.App.OrgID, row.App.OwnerUserID) {
 		return AppResult{}, ErrForbidden
 	}
 	// 加载组织记录，用于 allowlist 校验。
 	org, err := s.store.GetOrganization(ctx, row.App.OrgID)
-	if errors.Is(err, pgx.ErrNoRows) {
+	if errors.Is(err, sql.ErrNoRows) {
 		return AppResult{}, ErrNotFound
 	}
 	if err != nil {
@@ -243,18 +230,13 @@ func (s *AppService) SwitchAppVersion(ctx context.Context, principal auth.Princi
 	if !versionInOrgAllowlist(org, versionID) {
 		return AppResult{}, ErrVersionNotInAllowlist
 	}
-	// allowlist 内的 id 必然是合法 UUID；解析失败视为输入非法，同样拒绝。
-	versionUUID, err := parseUUID(versionID)
-	if err != nil {
-		return AppResult{}, ErrVersionNotInAllowlist
-	}
-	// 写入新 version_id，并由 SetAppVersion 同步清零 applied_*，确保切换后必然进入需重启态。
-	if _, err := s.store.SetAppVersion(ctx, sqlc.SetAppVersionParams{ID: row.App.ID, VersionID: versionUUID}); err != nil {
+	// 写入新 version_id，SetAppVersion 同步清零 applied_*，确保切换后必然进入需重启态。
+	if err := s.store.SetAppVersion(ctx, sqlc.SetAppVersionParams{ID: row.App.ID, VersionID: null.StringFrom(versionID)}); err != nil {
 		return AppResult{}, fmt.Errorf("切换助手版本失败: %w", err)
 	}
 	// 重新加载而非复用写前行：新 version_id 绑定的版本可能在并发写入时已推进 revision / image_id，
 	// 重读可获取最新版本数据，确保 version_synced 基于新版本的真实状态计算。
-	newRow, err := s.store.GetAppWithVersion(ctx, id)
+	newRow, err := s.store.GetAppWithVersion(ctx, appID)
 	if err != nil {
 		return AppResult{}, fmt.Errorf("重新查询应用失败: %w", err)
 	}

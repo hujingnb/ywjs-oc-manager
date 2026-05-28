@@ -5,8 +5,6 @@ import (
 	"fmt"
 	"time"
 
-	"github.com/jackc/pgx/v5/pgtype"
-
 	"oc-manager/internal/store/sqlc"
 )
 
@@ -21,9 +19,10 @@ const (
 // service 层只关心 cutoff 和批大小，避免把 sqlc 参数结构体泄漏到清理逻辑里。
 type ResourceSampleCleanupStore interface {
 	// DeleteOldNodeResourceSamples 按 cutoff 和批大小删除过期节点资源采样。
-	DeleteOldNodeResourceSamples(ctx context.Context, cutoff pgtype.Timestamptz, limit int32) (int64, error)
+	// cutoff 是 time.Time（MySQL DATETIME），limit 是每批最大行数。
+	DeleteOldNodeResourceSamples(ctx context.Context, cutoff time.Time, limit int32) (int64, error)
 	// DeleteOldInstanceResourceSamples 按 cutoff 和批大小删除过期实例资源采样。
-	DeleteOldInstanceResourceSamples(ctx context.Context, cutoff pgtype.Timestamptz, limit int32) (int64, error)
+	DeleteOldInstanceResourceSamples(ctx context.Context, cutoff time.Time, limit int32) (int64, error)
 }
 
 // resourceSampleCleanupSQLCStore 描述 sqlc 生成代码当前暴露的删除方法形状。
@@ -58,7 +57,8 @@ func (c *ResourceSampleCleanup) SetClock(now func() time.Time) {
 // RunOnce 执行一次采样清理。
 // 返回值分别是 node_resource_samples 和 instance_resource_samples 删除的行数。
 func (c *ResourceSampleCleanup) RunOnce(ctx context.Context) (int64, int64, error) {
-	cutoff := pgtype.Timestamptz{Time: c.now().Add(-resourceSampleRetention).UTC(), Valid: true}
+	// cutoff 是 time.Time（MySQL DATETIME）。
+	cutoff := c.now().Add(-resourceSampleRetention).UTC()
 	nodeDeleted, err := drainResourceSampleBatches(ctx, func(ctx context.Context) (int64, error) {
 		return c.store.DeleteOldNodeResourceSamples(ctx, cutoff, resourceSampleBatchSize)
 	})
@@ -110,17 +110,18 @@ type resourceSampleCleanupSQLCAdapter struct {
 }
 
 // DeleteOldNodeResourceSamples 把 service 层的简化参数映射到 sqlc 生成参数。
-func (a resourceSampleCleanupSQLCAdapter) DeleteOldNodeResourceSamples(ctx context.Context, cutoff pgtype.Timestamptz, limit int32) (int64, error) {
+// CutoffSampledAt 是 time.Time；Limit 对应 sqlc 参数的 Limit 字段（非 BatchSize）。
+func (a resourceSampleCleanupSQLCAdapter) DeleteOldNodeResourceSamples(ctx context.Context, cutoff time.Time, limit int32) (int64, error) {
 	return a.store.DeleteOldNodeResourceSamples(ctx, sqlc.DeleteOldNodeResourceSamplesParams{
 		CutoffSampledAt: cutoff,
-		BatchSize:       limit,
+		Limit:           limit,
 	})
 }
 
 // DeleteOldInstanceResourceSamples 把 service 层的简化参数映射到 sqlc 生成参数。
-func (a resourceSampleCleanupSQLCAdapter) DeleteOldInstanceResourceSamples(ctx context.Context, cutoff pgtype.Timestamptz, limit int32) (int64, error) {
+func (a resourceSampleCleanupSQLCAdapter) DeleteOldInstanceResourceSamples(ctx context.Context, cutoff time.Time, limit int32) (int64, error) {
 	return a.store.DeleteOldInstanceResourceSamples(ctx, sqlc.DeleteOldInstanceResourceSamplesParams{
 		CutoffSampledAt: cutoff,
-		BatchSize:       limit,
+		Limit:           limit,
 	})
 }

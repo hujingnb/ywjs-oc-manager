@@ -3,6 +3,7 @@ package service
 import (
 	"context"
 	"crypto/rand"
+	"database/sql"
 	"encoding/base32"
 	"encoding/json"
 	"errors"
@@ -13,9 +14,7 @@ import (
 	"strings"
 	"time"
 
-	"github.com/jackc/pgx/v5"
-	"github.com/jackc/pgx/v5/pgconn"
-	"github.com/jackc/pgx/v5/pgtype"
+	"github.com/guregu/null/v5"
 
 	"oc-manager/internal/auth"
 	"oc-manager/internal/domain"
@@ -54,15 +53,20 @@ type OrganizationVersionValidator interface {
 
 // OrganizationStore 抽象组织管理所需的数据访问能力。
 type OrganizationStore interface {
-	CreateOrganization(ctx context.Context, arg sqlc.CreateOrganizationParams) (sqlc.Organization, error)
-	SetOrganizationNewAPIUser(ctx context.Context, arg sqlc.SetOrganizationNewAPIUserParams) (sqlc.Organization, error)
-	CreateUser(ctx context.Context, arg sqlc.CreateUserParams) (sqlc.User, error)
-	HardDeleteOrganization(ctx context.Context, id pgtype.UUID) error
-	GetOrganization(ctx context.Context, id pgtype.UUID) (sqlc.Organization, error)
+	// CreateOrganization 创建组织（:exec），写入后通过 GetOrganization 读回。
+	CreateOrganization(ctx context.Context, arg sqlc.CreateOrganizationParams) error
+	// SetOrganizationNewAPIUser 更新 new-api 用户信息（:exec），写入后通过 GetOrganization 读回。
+	SetOrganizationNewAPIUser(ctx context.Context, arg sqlc.SetOrganizationNewAPIUserParams) error
+	// CreateUser 创建用户（:exec）。
+	CreateUser(ctx context.Context, arg sqlc.CreateUserParams) error
+	HardDeleteOrganization(ctx context.Context, id string) error
+	GetOrganization(ctx context.Context, id string) (sqlc.Organization, error)
 	ListOrganizations(ctx context.Context, arg sqlc.ListOrganizationsParams) ([]sqlc.Organization, error)
-	GetOrgAdminByOrg(ctx context.Context, id pgtype.UUID) (sqlc.User, error)
-	UpdateOrganizationProfile(ctx context.Context, arg sqlc.UpdateOrganizationProfileParams) (sqlc.Organization, error)
-	SetOrganizationStatus(ctx context.Context, arg sqlc.SetOrganizationStatusParams) (sqlc.Organization, error)
+	GetOrgAdminByOrg(ctx context.Context, id null.String) (sqlc.User, error)
+	// UpdateOrganizationProfile 更新组织资料（:exec），写入后通过 GetOrganization 读回。
+	UpdateOrganizationProfile(ctx context.Context, arg sqlc.UpdateOrganizationProfileParams) error
+	// SetOrganizationStatus 更新组织状态（:exec），写入后通过 GetOrganization 读回。
+	SetOrganizationStatus(ctx context.Context, arg sqlc.SetOrganizationStatusParams) error
 }
 
 // NewAPIUserProvisioner 抽象组织创建链路所需的 new-api 调用集合，便于测试中替换为 fake。
@@ -94,7 +98,7 @@ type OrganizationService struct {
 	// cipher 加密 organizations.newapi_user_credentials_ciphertext 中的 new-api 明文凭据。
 	cipher *auth.Cipher
 	// failAuditor 记录 new-api 失败；nil 时跳过审计，主要用于单元测试或最小装配。
-	failAuditor NewAPIFailureAuditor // 新增；nil 时跳过 new-api 失败审计写入
+	failAuditor NewAPIFailureAuditor
 	// versionValidator 校验一组助手版本 id 都存在且未删除；未配置时禁止保存版本 allowlist。
 	versionValidator OrganizationVersionValidator
 	// knowledgeDatasets 在组织创建成功后预创建组织级 RAGFlow dataset；失败不回滚组织。
@@ -219,21 +223,27 @@ func (s *OrganizationService) CreateOrganization(ctx context.Context, principal 
 		return OrganizationResult{}, fmt.Errorf("生成管理员密码 hash 失败: %w", err)
 	}
 
-	org, err := s.store.CreateOrganization(ctx, sqlc.CreateOrganizationParams{
+	// CreateOrganization 为 :exec；预先生成 ID，写入后通过 GetOrganization 读回。
+	orgID := newUUID()
+	if err := s.store.CreateOrganization(ctx, sqlc.CreateOrganizationParams{
+		ID:                     orgID,
 		Name:                   input.Name,
 		Code:                   code,
 		Status:                 domain.StatusActive,
-		ContactName:            textValue(input.ContactName),
-		ContactPhone:           textValue(input.ContactPhone),
-		Remark:                 textValue(input.Remark),
-		CreditWarningThreshold: int4Ptr(input.CreditWarningThreshold),
+		ContactName:            nullStr(input.ContactName),
+		ContactPhone:           nullStr(input.ContactPhone),
+		Remark:                 nullStr(input.Remark),
+		CreditWarningThreshold: nullIntFromInt32Ptr(input.CreditWarningThreshold),
 		AssistantVersionIds:    versionIDsJSON,
-	})
-	if err != nil {
-		if isUniqueViolation(err) {
+	}); err != nil {
+		if isMySQLUniqueViolation(err) {
 			return OrganizationResult{}, fmt.Errorf("%w: 企业名称或企业标识已存在", ErrConflict)
 		}
 		return OrganizationResult{}, fmt.Errorf("创建企业失败: %w", err)
+	}
+	org, err := s.store.GetOrganization(ctx, orgID)
+	if err != nil {
+		return OrganizationResult{}, fmt.Errorf("读取新建企业失败: %w", err)
 	}
 
 	// 失败时回滚刚刚 INSERT 的 manager 行；rollback 自身失败只记入返回错误，不掩盖原因。
@@ -281,8 +291,11 @@ func (s *OrganizationService) CreateOrganization(ctx context.Context, principal 
 		return OrganizationResult{}, err
 	}
 	org = commit
-	if _, err := s.store.CreateUser(ctx, sqlc.CreateUserParams{
-		OrgID:        org.ID,
+	// CreateUser 为 :exec；管理员 OrgID 是组织 ID（null.String）。
+	adminUserID := newUUID()
+	if err := s.store.CreateUser(ctx, sqlc.CreateUserParams{
+		ID:           adminUserID,
+		OrgID:        null.StringFrom(org.ID),
 		Username:     input.AdminUsername,
 		PasswordHash: adminPasswordHash,
 		DisplayName:  input.AdminDisplayName,
@@ -328,7 +341,7 @@ func (s *OrganizationService) CreateOrganization(ctx context.Context, principal 
 	result.AdminUsername = input.AdminUsername
 	if s.knowledgeDatasets != nil {
 		if _, err := s.knowledgeDatasets.EnsureOrgDataset(ctx, org); err != nil {
-			slog.WarnContext(ctx, "预创建企业 RAGFlow dataset 失败", "org_id", uuidToString(org.ID), "error", err)
+			slog.WarnContext(ctx, "预创建企业 RAGFlow dataset 失败", "org_id", org.ID, "error", err)
 		}
 	}
 	return result, nil
@@ -343,10 +356,12 @@ func normalizeOrganizationCode(value string) (string, error) {
 	return code, nil
 }
 
-// isUniqueViolation 判断底层 PostgreSQL 错误是否为唯一约束冲突。
-func isUniqueViolation(err error) bool {
-	var pgErr *pgconn.PgError
-	return errors.As(err, &pgErr) && pgErr.Code == "23505"
+// isMySQLUniqueViolation 判断底层 MySQL 错误是否为唯一约束冲突（error 1062）。
+func isMySQLUniqueViolation(err error) bool {
+	if err == nil {
+		return false
+	}
+	return strings.Contains(err.Error(), "Duplicate entry") || strings.Contains(err.Error(), "duplicate key")
 }
 
 // provisionNewAPIUser 在 new-api 创建对应业务 user，登录拿 access_token，加密落库。
@@ -397,17 +412,21 @@ func (s *OrganizationService) provisionNewAPIUser(ctx context.Context, org *sqlc
 		return sqlc.Organization{}, &createdUserID, fmt.Errorf("加密 new-api 凭据失败: %w", err)
 	}
 
-	updated, err := s.store.SetOrganizationNewAPIUser(ctx, sqlc.SetOrganizationNewAPIUserParams{
+	// SetOrganizationNewAPIUser 为 :exec；写入后通过 GetOrganization 读回。
+	if err := s.store.SetOrganizationNewAPIUser(ctx, sqlc.SetOrganizationNewAPIUserParams{
 		ID:                              org.ID,
-		NewapiUserID:                    pgtype.Text{String: strconv.FormatInt(user.ID, 10), Valid: true},
-		NewapiUserCredentialsCiphertext: pgtype.Text{String: ciphertext, Valid: true},
+		NewapiUserID:                    null.StringFrom(strconv.FormatInt(user.ID, 10)),
+		NewapiUserCredentialsCiphertext: null.StringFrom(ciphertext),
 		// 同步落 new-api 侧 username（org.Code 派生 + 随机后缀），供 usage service
 		// 直接读 organizations.newapi_username 定位 new-api 账号，避免运行时反查或
 		// 解密凭据；该列是 user-scoped 调用定位 new-api 账号的唯一权威来源。
-		NewapiUsername: pgtype.Text{String: username, Valid: true},
-	})
-	if err != nil {
+		NewapiUsername: null.StringFrom(username),
+	}); err != nil {
 		return sqlc.Organization{}, &createdUserID, fmt.Errorf("写入 new-api user 信息失败: %w", err)
+	}
+	updated, err := s.store.GetOrganization(ctx, org.ID)
+	if err != nil {
+		return sqlc.Organization{}, &createdUserID, fmt.Errorf("读取 new-api 信息写入后的企业记录失败: %w", err)
 	}
 	return updated, &createdUserID, nil
 }
@@ -488,12 +507,8 @@ func (s *OrganizationService) GetOrganization(ctx context.Context, principal aut
 	if principal.Role != domain.UserRolePlatformAdmin && principal.OrgID != orgID {
 		return OrganizationResult{}, ErrForbidden
 	}
-	id, err := parseUUID(orgID)
-	if err != nil {
-		return OrganizationResult{}, ErrNotFound
-	}
-	org, err := s.store.GetOrganization(ctx, id)
-	if errors.Is(err, pgx.ErrNoRows) {
+	org, err := s.store.GetOrganization(ctx, orgID)
+	if errors.Is(err, sql.ErrNoRows) {
 		return OrganizationResult{}, ErrNotFound
 	}
 	if err != nil {
@@ -507,12 +522,8 @@ func (s *OrganizationService) UpdateOrganization(ctx context.Context, principal 
 	if principal.Role != domain.UserRolePlatformAdmin {
 		return OrganizationResult{}, ErrForbidden
 	}
-	id, err := parseUUID(orgID)
-	if err != nil {
-		return OrganizationResult{}, ErrNotFound
-	}
-	current, err := s.store.GetOrganization(ctx, id)
-	if errors.Is(err, pgx.ErrNoRows) {
+	current, err := s.store.GetOrganization(ctx, orgID)
+	if errors.Is(err, sql.ErrNoRows) {
 		return OrganizationResult{}, ErrNotFound
 	}
 	if err != nil {
@@ -536,20 +547,24 @@ func (s *OrganizationService) UpdateOrganization(ctx context.Context, principal 
 		// 未显式传入时原样保留数据库中已有的版本 allowlist。
 		versionIDsJSON = current.AssistantVersionIds
 	}
-	org, err := s.store.UpdateOrganizationProfile(ctx, sqlc.UpdateOrganizationProfileParams{
-		ID:                     id,
+	// UpdateOrganizationProfile 为 :exec；写入后通过 GetOrganization 读回。
+	if err := s.store.UpdateOrganizationProfile(ctx, sqlc.UpdateOrganizationProfileParams{
+		ID:                     orgID,
 		Name:                   input.Name,
-		ContactName:            textValue(input.ContactName),
-		ContactPhone:           textValue(input.ContactPhone),
-		Remark:                 textValue(input.Remark),
-		CreditWarningThreshold: int4Ptr(input.CreditWarningThreshold),
+		ContactName:            nullStr(input.ContactName),
+		ContactPhone:           nullStr(input.ContactPhone),
+		Remark:                 nullStr(input.Remark),
+		CreditWarningThreshold: nullIntFromInt32Ptr(input.CreditWarningThreshold),
 		AssistantVersionIds:    versionIDsJSON,
-	})
-	if errors.Is(err, pgx.ErrNoRows) {
+	}); err != nil {
+		return OrganizationResult{}, fmt.Errorf("更新企业失败: %w", err)
+	}
+	org, err := s.store.GetOrganization(ctx, orgID)
+	if errors.Is(err, sql.ErrNoRows) {
 		return OrganizationResult{}, ErrNotFound
 	}
 	if err != nil {
-		return OrganizationResult{}, fmt.Errorf("更新企业失败: %w", err)
+		return OrganizationResult{}, fmt.Errorf("读取更新后企业失败: %w", err)
 	}
 	return s.toOrganizationResultWithAdminUsername(ctx, org), nil
 }
@@ -562,16 +577,16 @@ func (s *OrganizationService) SetOrganizationStatus(ctx context.Context, princip
 	if status != domain.StatusActive && status != domain.StatusDisabled {
 		return OrganizationResult{}, fmt.Errorf("非法企业状态: %s", status)
 	}
-	id, err := parseUUID(orgID)
-	if err != nil {
-		return OrganizationResult{}, ErrNotFound
-	}
-	org, err := s.store.SetOrganizationStatus(ctx, sqlc.SetOrganizationStatusParams{ID: id, Status: status})
-	if errors.Is(err, pgx.ErrNoRows) {
-		return OrganizationResult{}, ErrNotFound
-	}
-	if err != nil {
+	// SetOrganizationStatus 为 :exec；写入后通过 GetOrganization 读回。
+	if err := s.store.SetOrganizationStatus(ctx, sqlc.SetOrganizationStatusParams{ID: orgID, Status: status}); err != nil {
 		return OrganizationResult{}, fmt.Errorf("更新企业状态失败: %w", err)
+	}
+	org, err := s.store.GetOrganization(ctx, orgID)
+	if errors.Is(err, sql.ErrNoRows) {
+		return OrganizationResult{}, ErrNotFound
+	}
+	if err != nil {
+		return OrganizationResult{}, fmt.Errorf("读取状态更新后企业失败: %w", err)
 	}
 	return s.toOrganizationResultWithAdminUsername(ctx, org), nil
 }
@@ -585,7 +600,7 @@ func DecryptOrganizationCredentials(org sqlc.Organization, cipher *auth.Cipher) 
 		return OrganizationCredentials{}, fmt.Errorf("cipher 未配置，无法解密 new-api 凭据")
 	}
 	if !org.NewapiUserCredentialsCiphertext.Valid || org.NewapiUserCredentialsCiphertext.String == "" {
-		return OrganizationCredentials{}, fmt.Errorf("企业 %s 未持有 new-api 凭据密文", uuidToString(org.ID))
+		return OrganizationCredentials{}, fmt.Errorf("企业 %s 未持有 new-api 凭据密文", org.ID)
 	}
 	plain, err := cipher.Decrypt(org.NewapiUserCredentialsCiphertext.String)
 	if err != nil {
@@ -596,7 +611,7 @@ func DecryptOrganizationCredentials(org sqlc.Organization, cipher *auth.Cipher) 
 		return OrganizationCredentials{}, fmt.Errorf("解析 new-api 凭据失败: %w", err)
 	}
 	if creds.Username == "" || creds.Password == "" || creds.AccessToken == "" {
-		return OrganizationCredentials{}, fmt.Errorf("企业 %s 的 new-api 凭据三件套不完整", uuidToString(org.ID))
+		return OrganizationCredentials{}, fmt.Errorf("企业 %s 的 new-api 凭据三件套不完整", org.ID)
 	}
 	return creds, nil
 }
@@ -628,14 +643,14 @@ func (s *OrganizationService) toOrganizationResultWithAdminUsername(ctx context.
 }
 
 // getOrgAdminUsername 查询企业下最早创建且未下线的 org_admin。
-// pgx.ErrNoRows 表示组织尚无可用管理员，返回空字符串即可由前端显示提示。
-func (s *OrganizationService) getOrgAdminUsername(ctx context.Context, orgID pgtype.UUID) string {
-	user, err := s.store.GetOrgAdminByOrg(ctx, orgID)
-	if errors.Is(err, pgx.ErrNoRows) {
+// sql.ErrNoRows 表示组织尚无可用管理员，返回空字符串即可由前端显示提示。
+func (s *OrganizationService) getOrgAdminUsername(ctx context.Context, orgID string) string {
+	user, err := s.store.GetOrgAdminByOrg(ctx, null.StringFrom(orgID))
+	if errors.Is(err, sql.ErrNoRows) {
 		return ""
 	}
 	if err != nil {
-		slog.WarnContext(ctx, "查询企业管理员用户名失败", "org_id", uuidToString(orgID), "error", err)
+		slog.WarnContext(ctx, "查询企业管理员用户名失败", "org_id", orgID, "error", err)
 		return ""
 	}
 	return user.Username
@@ -648,46 +663,39 @@ func toOrganizationResult(org sqlc.Organization) OrganizationResult {
 		if err := json.Unmarshal(org.AssistantVersionIds, &versionIDs); err != nil {
 			// 组织 assistant_version_ids 列由本服务统一以 JSON 数组写入，理论上不会损坏；
 			// 真出现损坏时记日志而不是静默吞掉，避免组织列表/详情无声降级。
-			slog.Warn("解析企业 assistant_version_ids 失败", "org_id", uuidToString(org.ID), "error", err)
+			slog.Warn("解析企业 assistant_version_ids 失败", "org_id", org.ID, "error", err)
 			versionIDs = []string{}
 		}
 	}
 	return OrganizationResult{
-		ID:                     uuidToString(org.ID),
+		ID:                     org.ID,
 		Name:                   org.Name,
 		Code:                   org.Code,
 		Status:                 org.Status,
-		ContactName:            textString(org.ContactName),
-		ContactPhone:           textString(org.ContactPhone),
-		Remark:                 textString(org.Remark),
-		NewAPIUserID:           textString(org.NewapiUserID),
-		CreditWarningThreshold: int4Pointer(org.CreditWarningThreshold),
+		ContactName:            strOrEmpty(org.ContactName),
+		ContactPhone:           strOrEmpty(org.ContactPhone),
+		Remark:                 strOrEmpty(org.Remark),
+		NewAPIUserID:           strOrEmpty(org.NewapiUserID),
+		CreditWarningThreshold: int32PtrFromNullInt(org.CreditWarningThreshold),
 		AssistantVersionIDs:    versionIDs,
 	}
 }
 
-func textValue(value string) pgtype.Text {
-	return pgtype.Text{String: value, Valid: value != ""}
-}
-
-func textString(value pgtype.Text) string {
-	if !value.Valid {
-		return ""
-	}
-	return value.String
-}
-
-func int4Ptr(value *int32) pgtype.Int4 {
+// nullIntFromInt32Ptr 把可选 int32 指针转换为 null.Int（用于 CreditWarningThreshold）。
+// nil 表示未设置阈值，写 NULL；非 nil 时写入值。
+func nullIntFromInt32Ptr(value *int32) null.Int {
 	if value == nil {
-		return pgtype.Int4{}
+		return null.Int{}
 	}
-	return pgtype.Int4{Int32: *value, Valid: true}
+	return null.IntFrom(int64(*value))
 }
 
-func int4Pointer(value pgtype.Int4) *int32 {
+// int32PtrFromNullInt 把 null.Int 读取为 *int32 指针（用于 API 响应）。
+// NULL 返回 nil；有效值截断为 int32。
+func int32PtrFromNullInt(value null.Int) *int32 {
 	if !value.Valid {
 		return nil
 	}
-	result := value.Int32
+	result := int32(value.Int64)
 	return &result
 }

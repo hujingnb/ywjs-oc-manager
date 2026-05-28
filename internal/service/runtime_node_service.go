@@ -3,6 +3,7 @@ package service
 import (
 	"context"
 	"crypto/rand"
+	"database/sql"
 	"encoding/hex"
 	"encoding/pem"
 	"errors"
@@ -11,8 +12,7 @@ import (
 	"strings"
 	"time"
 
-	"github.com/jackc/pgx/v5"
-	"github.com/jackc/pgx/v5/pgtype"
+	"github.com/guregu/null/v5"
 
 	"oc-manager/internal/auth"
 	"oc-manager/internal/domain"
@@ -27,17 +27,22 @@ const (
 
 // RuntimeNodeStore 抽象 runtime node 服务所需的数据访问能力。
 type RuntimeNodeStore interface {
-	EnrollRuntimeNodeInsert(ctx context.Context, arg sqlc.EnrollRuntimeNodeInsertParams) (sqlc.RuntimeNode, error)
-	EnrollRuntimeNodeUpdate(ctx context.Context, arg sqlc.EnrollRuntimeNodeUpdateParams) (sqlc.RuntimeNode, error)
-	GetRuntimeNode(ctx context.Context, id pgtype.UUID) (sqlc.RuntimeNode, error)
-	GetRuntimeNodeByAgentID(ctx context.Context, agentID pgtype.Text) (sqlc.RuntimeNode, error)
+	// EnrollRuntimeNodeInsert 新节点注册（:exec），写入后通过 GetRuntimeNode 读回。
+	EnrollRuntimeNodeInsert(ctx context.Context, arg sqlc.EnrollRuntimeNodeInsertParams) error
+	// EnrollRuntimeNodeUpdate 已有节点重注册（:exec），写入后通过 GetRuntimeNodeByAgentID 读回。
+	EnrollRuntimeNodeUpdate(ctx context.Context, arg sqlc.EnrollRuntimeNodeUpdateParams) error
+	GetRuntimeNode(ctx context.Context, id string) (sqlc.RuntimeNode, error)
+	GetRuntimeNodeByAgentID(ctx context.Context, agentID null.String) (sqlc.RuntimeNode, error)
 	GetRuntimeNodeByName(ctx context.Context, name string) (sqlc.RuntimeNode, error)
 	ListRuntimeNodes(ctx context.Context, arg sqlc.ListRuntimeNodesParams) ([]sqlc.RuntimeNode, error)
-	InsertNodeResourceSample(ctx context.Context, arg sqlc.InsertNodeResourceSampleParams) (sqlc.NodeResourceSample, error)
-	ListLatestNodeResourceSamples(ctx context.Context, runtimeNodeIds []pgtype.UUID) ([]sqlc.NodeResourceSample, error)
-	UpdateRuntimeNodeHeartbeat(ctx context.Context, arg sqlc.UpdateRuntimeNodeHeartbeatParams) (sqlc.RuntimeNode, error)
-	SetRuntimeNodeStatus(ctx context.Context, arg sqlc.SetRuntimeNodeStatusParams) (sqlc.RuntimeNode, error)
-	CreateAuditLog(ctx context.Context, arg sqlc.CreateAuditLogParams) (sqlc.AuditLog, error)
+	// InsertNodeResourceSample 插入资源采样（:exec）。
+	InsertNodeResourceSample(ctx context.Context, arg sqlc.InsertNodeResourceSampleParams) error
+	ListLatestNodeResourceSamples(ctx context.Context, runtimeNodeIds []string) ([]sqlc.NodeResourceSample, error)
+	// UpdateRuntimeNodeHeartbeat 更新心跳（:exec），写入后通过 GetRuntimeNode 读回。
+	UpdateRuntimeNodeHeartbeat(ctx context.Context, arg sqlc.UpdateRuntimeNodeHeartbeatParams) error
+	// SetRuntimeNodeStatus 更新节点状态（:exec），写入后通过 GetRuntimeNode 读回。
+	SetRuntimeNodeStatus(ctx context.Context, arg sqlc.SetRuntimeNodeStatusParams) error
+	CreateAuditLog(ctx context.Context, arg sqlc.CreateAuditLogParams) error
 }
 
 // TokenHasher 将 agent token 单向 hash 后存库。
@@ -216,22 +221,26 @@ func (s *RuntimeNodeService) EnrollAgent(ctx context.Context, input AgentEnrollI
 	if err != nil {
 		return AgentEnrollResult{}, fmt.Errorf("生成 agent token 失败: %w", err)
 	}
-	tokenHash := pgtype.Text{String: s.hashToken(agentToken), Valid: true}
-	agentID := pgtype.Text{String: strings.TrimSpace(input.AgentID), Valid: true}
+	tokenHash := null.StringFrom(s.hashToken(agentToken))
+	agentID := null.StringFrom(strings.TrimSpace(input.AgentID))
 	name := strings.TrimSpace(input.Name)
 	if name == "" {
 		name = "Runtime Node " + shortAgentID(input.AgentID)
 	}
 
+	// 预生成节点 ID 用于 INSERT 路径；UPDATE 路径不需要（复用已有行 ID）。
+	nodeID := newUUID()
+
 	_, findErr := s.store.GetRuntimeNodeByAgentID(ctx, agentID)
-	var node sqlc.RuntimeNode
 	action := "agent_re_enrolled"
-	if errors.Is(findErr, pgx.ErrNoRows) {
+	if errors.Is(findErr, sql.ErrNoRows) {
 		action = "agent_enrolled"
-		node, err = s.store.EnrollRuntimeNodeInsert(ctx, sqlc.EnrollRuntimeNodeInsertParams{
+		// EnrollRuntimeNodeInsert 为 :exec；写入后通过 GetRuntimeNode 读回。
+		if err := s.store.EnrollRuntimeNodeInsert(ctx, sqlc.EnrollRuntimeNodeInsertParams{
+			ID:                       nodeID,
 			AgentID:                  agentID,
 			Name:                     name,
-			MaxApps:                  int32OrNull(input.MaxApps),
+			MaxApps:                  int32PtrToNullInt(input.MaxApps),
 			AgentDockerEndpoint:      textOrNull(input.AgentDockerEndpoint),
 			AgentFileEndpoint:        textOrNull(input.AgentFileEndpoint),
 			AgentTlsCaCert:           textOrNull(input.AgentTLSCACert),
@@ -241,15 +250,18 @@ func (s *RuntimeNodeService) EnrollAgent(ctx context.Context, input AgentEnrollI
 			NodeDataRoot:             textOrNull(input.NodeDataRoot),
 			ResourceSnapshotJson:     input.ResourceSnapshot,
 			MetadataJson:             input.Metadata,
-			AgentTokenCiphertext:     pgtype.Text{},
-		})
+			AgentTokenCiphertext:     null.String{},
+		}); err != nil {
+			return AgentEnrollResult{}, fmt.Errorf("写入 runtime 节点失败: %w", err)
+		}
 	} else if findErr != nil {
 		return AgentEnrollResult{}, fmt.Errorf("查询 runtime 节点失败: %w", findErr)
 	} else {
-		node, err = s.store.EnrollRuntimeNodeUpdate(ctx, sqlc.EnrollRuntimeNodeUpdateParams{
+		// EnrollRuntimeNodeUpdate 为 :exec；写入后通过 GetRuntimeNodeByAgentID 读回节点 ID。
+		if err := s.store.EnrollRuntimeNodeUpdate(ctx, sqlc.EnrollRuntimeNodeUpdateParams{
 			AgentID:              agentID,
 			Name:                 name,
-			MaxApps:              int32OrNull(input.MaxApps),
+			MaxApps:              int32PtrToNullInt(input.MaxApps),
 			AgentDockerEndpoint:  textOrNull(input.AgentDockerEndpoint),
 			AgentFileEndpoint:    textOrNull(input.AgentFileEndpoint),
 			AgentTlsCaCert:       textOrNull(input.AgentTLSCACert),
@@ -258,28 +270,38 @@ func (s *RuntimeNodeService) EnrollAgent(ctx context.Context, input AgentEnrollI
 			NodeDataRoot:         textOrNull(input.NodeDataRoot),
 			ResourceSnapshotJson: input.ResourceSnapshot,
 			MetadataJson:         input.Metadata,
-			AgentTokenCiphertext: pgtype.Text{},
-		})
+			AgentTokenCiphertext: null.String{},
+		}); err != nil {
+			return AgentEnrollResult{}, fmt.Errorf("写入 runtime 节点失败: %w", err)
+		}
+	}
+	// 读回节点行（INSERT 路径用 GetRuntimeNode，UPDATE 路径用 GetRuntimeNodeByAgentID）。
+	var node sqlc.RuntimeNode
+	if action == "agent_enrolled" {
+		node, err = s.store.GetRuntimeNode(ctx, nodeID)
+	} else {
+		node, err = s.store.GetRuntimeNodeByAgentID(ctx, agentID)
 	}
 	if err != nil {
-		return AgentEnrollResult{}, fmt.Errorf("写入 runtime 节点失败: %w", err)
+		return AgentEnrollResult{}, fmt.Errorf("读取注册后节点失败: %w", err)
 	}
 	if input.NodeResource != nil {
 		// enroll 首次采样同样使用数据库返回的节点 ID，避免把 agent 自报信息当作主键来源。
-		if _, err := s.store.InsertNodeResourceSample(ctx, nodeResourceSampleParams(node.ID, input.SampledAt, input.NodeResource)); err != nil {
+		if err := s.store.InsertNodeResourceSample(ctx, nodeResourceSampleParams(node.ID, input.SampledAt, input.NodeResource)); err != nil {
 			return AgentEnrollResult{}, fmt.Errorf("写入节点资源采样失败: %w", err)
 		}
 	}
 	// 详情字段记录 agent 版本，方便审计列表识别是哪个版本上线 / 重连。
 	// 版本未上报时落空字符串（落库为 NULL），与 spec 设计一致。
-	auditDetail := pgtype.Text{}
+	var auditDetail null.String
 	if v := strings.TrimSpace(input.AgentVersion); v != "" {
-		auditDetail = pgtype.Text{String: "Agent 版本 " + v, Valid: true}
+		auditDetail = null.StringFrom("Agent 版本 " + v)
 	}
-	if _, err := s.store.CreateAuditLog(ctx, sqlc.CreateAuditLogParams{
+	if err := s.store.CreateAuditLog(ctx, sqlc.CreateAuditLogParams{
+		ID:            newUUID(),
 		ActorRole:     "system",
 		TargetType:    "runtime_node",
-		TargetID:      uuidToString(node.ID),
+		TargetID:      node.ID,
 		Action:        action,
 		Result:        "succeeded",
 		DetailMessage: auditDetail,
@@ -287,7 +309,7 @@ func (s *RuntimeNodeService) EnrollAgent(ctx context.Context, input AgentEnrollI
 		return AgentEnrollResult{}, fmt.Errorf("写审计失败: %w", err)
 	}
 	return AgentEnrollResult{
-		NodeID:                   uuidToString(node.ID),
+		NodeID:                   node.ID,
 		AgentToken:               agentToken,
 		HeartbeatIntervalSeconds: node.HeartbeatIntervalSeconds,
 	}, nil
@@ -311,7 +333,8 @@ func (s *RuntimeNodeService) ListNodes(ctx context.Context, principal auth.Princ
 	if err != nil {
 		return nil, fmt.Errorf("查询 runtime 节点失败: %w", err)
 	}
-	nodeIDs := make([]pgtype.UUID, 0, len(nodes))
+	// ListLatestNodeResourceSamples 取 []string；从 nodes 中收集 ID。
+	nodeIDs := make([]string, 0, len(nodes))
 	for _, node := range nodes {
 		nodeIDs = append(nodeIDs, node.ID)
 	}
@@ -322,13 +345,14 @@ func (s *RuntimeNodeService) ListNodes(ctx context.Context, principal auth.Princ
 			return nil, fmt.Errorf("查询 runtime 节点最近资源采样失败: %w", err)
 		}
 		for _, sample := range samples {
-			latestByNode[uuidToString(sample.RuntimeNodeID)] = sample
+			// sample.RuntimeNodeID 是 string。
+			latestByNode[sample.RuntimeNodeID] = sample
 		}
 	}
 	results := make([]RuntimeNodeResult, 0, len(nodes))
 	for _, node := range nodes {
 		result := toRuntimeNodeResult(node)
-		if sample, ok := latestByNode[uuidToString(node.ID)]; ok {
+		if sample, ok := latestByNode[node.ID]; ok {
 			current := toNodeCurrentResourceResult(sample)
 			result.CurrentResource = &current
 		}
@@ -342,12 +366,8 @@ func (s *RuntimeNodeService) GetNode(ctx context.Context, principal auth.Princip
 	if principal.Role != domain.UserRolePlatformAdmin {
 		return RuntimeNodeResult{}, ErrForbidden
 	}
-	id, err := parseUUID(nodeID)
-	if err != nil {
-		return RuntimeNodeResult{}, ErrNotFound
-	}
-	node, err := s.store.GetRuntimeNode(ctx, id)
-	if errors.Is(err, pgx.ErrNoRows) {
+	node, err := s.store.GetRuntimeNode(ctx, nodeID)
+	if errors.Is(err, sql.ErrNoRows) {
 		return RuntimeNodeResult{}, ErrNotFound
 	}
 	if err != nil {
@@ -364,16 +384,16 @@ func (s *RuntimeNodeService) SetNodeStatus(ctx context.Context, principal auth.P
 	if status != domain.RuntimeNodeStatusActive && status != domain.RuntimeNodeStatusDisabled {
 		return RuntimeNodeResult{}, fmt.Errorf("非法节点状态: %s", status)
 	}
-	id, err := parseUUID(nodeID)
-	if err != nil {
-		return RuntimeNodeResult{}, ErrNotFound
-	}
-	node, err := s.store.SetRuntimeNodeStatus(ctx, sqlc.SetRuntimeNodeStatusParams{ID: id, Status: status})
-	if errors.Is(err, pgx.ErrNoRows) {
-		return RuntimeNodeResult{}, ErrNotFound
-	}
-	if err != nil {
+	// SetRuntimeNodeStatus 为 :exec；写入后通过 GetRuntimeNode 读回。
+	if err := s.store.SetRuntimeNodeStatus(ctx, sqlc.SetRuntimeNodeStatusParams{ID: nodeID, Status: status}); err != nil {
 		return RuntimeNodeResult{}, fmt.Errorf("更新节点状态失败: %w", err)
+	}
+	node, err := s.store.GetRuntimeNode(ctx, nodeID)
+	if errors.Is(err, sql.ErrNoRows) {
+		return RuntimeNodeResult{}, ErrNotFound
+	}
+	if err != nil {
+		return RuntimeNodeResult{}, fmt.Errorf("读取状态更新后节点失败: %w", err)
 	}
 	return toRuntimeNodeResult(node), nil
 }
@@ -390,18 +410,22 @@ func (s *RuntimeNodeService) HandleHeartbeat(ctx context.Context, input AgentHea
 	if node.Status == domain.RuntimeNodeStatusDisabled {
 		return RuntimeNodeResult{}, ErrAgentTokenInvalid
 	}
-	updated, err := s.store.UpdateRuntimeNodeHeartbeat(ctx, sqlc.UpdateRuntimeNodeHeartbeatParams{
+	// UpdateRuntimeNodeHeartbeat 为 :exec；写入后通过 GetRuntimeNode 读回。
+	if err := s.store.UpdateRuntimeNodeHeartbeat(ctx, sqlc.UpdateRuntimeNodeHeartbeatParams{
 		ID:                   node.ID,
 		AgentVersion:         textOrNull(input.AgentVersion),
 		ResourceSnapshotJson: input.ResourceSnapshot,
 		MetadataJson:         input.Metadata,
-	})
-	if err != nil {
+	}); err != nil {
 		return RuntimeNodeResult{}, fmt.Errorf("更新心跳失败: %w", err)
+	}
+	updated, err := s.store.GetRuntimeNode(ctx, node.ID)
+	if err != nil {
+		return RuntimeNodeResult{}, fmt.Errorf("读取心跳更新后节点失败: %w", err)
 	}
 	if input.NodeResource != nil {
 		// 资源采样必须绑定数据库更新后的节点 ID，避免信任 agent 请求体里的任何节点身份字段。
-		if _, err := s.store.InsertNodeResourceSample(ctx, nodeResourceSampleParams(updated.ID, input.SampledAt, input.NodeResource)); err != nil {
+		if err := s.store.InsertNodeResourceSample(ctx, nodeResourceSampleParams(updated.ID, input.SampledAt, input.NodeResource)); err != nil {
 			return RuntimeNodeResult{}, fmt.Errorf("写入节点资源采样失败: %w", err)
 		}
 	}
@@ -426,7 +450,9 @@ func (s *RuntimeNodeService) findNodeByAgentToken(ctx context.Context, hash stri
 // validateEnrollInput 校验 agent enroll 的外部 ID、代理地址和 TLS CA。
 // AgentID 必须是 UUID，两个 endpoint 必须是 HTTPS URL，CA 必须是 PEM，避免写入不可连接节点。
 func validateEnrollInput(input AgentEnrollInput) error {
-	if _, err := parseUUID(strings.TrimSpace(input.AgentID)); err != nil {
+	// AgentID 格式校验：必须是合法 UUID 字符串（标准格式 xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx，36 字符）。
+	agentIDTrimmed := strings.TrimSpace(input.AgentID)
+	if len(agentIDTrimmed) != 36 {
 		return ErrEnrollInputInvalid
 	}
 	if err := validateHTTPSURL(input.AgentDockerEndpoint); err != nil {
@@ -455,10 +481,10 @@ func validateHTTPSURL(value string) error {
 }
 
 // toRuntimeNodeResult 将 sqlc 节点行转成 API 视图。
-// pgtype 空值会被归一化为空字符串或 nil，探测时间统一输出 UTC RFC3339。
+// null 空值会被归一化为空字符串或 nil，探测时间统一输出 UTC RFC3339。
 func toRuntimeNodeResult(node sqlc.RuntimeNode) RuntimeNodeResult {
 	result := RuntimeNodeResult{
-		ID:                       uuidToString(node.ID),
+		ID:                       node.ID,
 		Name:                     node.Name,
 		Status:                   node.Status,
 		HeartbeatIntervalSeconds: node.HeartbeatIntervalSeconds,
@@ -482,7 +508,7 @@ func toRuntimeNodeResult(node sqlc.RuntimeNode) RuntimeNodeResult {
 		result.NodeDataRoot = node.NodeDataRoot.String
 	}
 	if node.MaxApps.Valid {
-		v := node.MaxApps.Int32
+		v := int32(node.MaxApps.Int64)
 		result.MaxApps = &v
 	}
 	if node.LastProbeAttemptedAt.Valid {
@@ -503,6 +529,7 @@ func toRuntimeNodeResult(node sqlc.RuntimeNode) RuntimeNodeResult {
 // toNodeCurrentResourceResult 将最近一次节点资源采样转成列表摘要。
 // nullable 指标保持 nil，避免把采集缺失误展示为 0。
 func toNodeCurrentResourceResult(sample sqlc.NodeResourceSample) NodeCurrentResourceResult {
+	// SampledAt 是 time.Time（非空）。
 	result := NodeCurrentResourceResult{SampledAt: formatSampledAt(sample.SampledAt)}
 	if sample.CpuPercent.Valid {
 		result.CPUPercent = float64Ptr(sample.CpuPercent.Float64)
@@ -520,7 +547,7 @@ func toNodeCurrentResourceResult(sample sqlc.NodeResourceSample) NodeCurrentReso
 		result.DiskTotalBytes = int64Ptr(sample.DiskTotalBytes.Int64)
 	}
 	if sample.InstanceCount.Valid {
-		result.InstanceCount = int32Ptr(sample.InstanceCount.Int32)
+		result.InstanceCount = int32Ptr(int32(sample.InstanceCount.Int64))
 	}
 	if sample.LastError.Valid {
 		result.LastError = sample.LastError.String
@@ -528,56 +555,58 @@ func toNodeCurrentResourceResult(sample sqlc.NodeResourceSample) NodeCurrentReso
 	return result
 }
 
-// textOrNull 将外部输入去首尾空白后写入 pgtype.Text。
+// textOrNull 将外部输入去首尾空白后转换为 null.String。
 // 空字符串写成 NULL，避免把未配置 endpoint / 版本误展示为空值字段。
-func textOrNull(value string) pgtype.Text {
+func textOrNull(value string) null.String {
 	trimmed := strings.TrimSpace(value)
-	return pgtype.Text{String: trimmed, Valid: trimmed != ""}
+	return nullStr(trimmed)
 }
 
-// int32OrNull 将可选容量上限转换为 pgtype.Int4。
+// int32PtrToNullInt 将可选容量上限转换为 null.Int。
 // nil 表示 agent 未声明上限，调用方已在 EnrollAgent 中拒绝负数。
-func int32OrNull(value *int32) pgtype.Int4 {
+func int32PtrToNullInt(value *int32) null.Int {
 	if value == nil {
-		return pgtype.Int4{}
+		return null.Int{}
 	}
-	return pgtype.Int4{Int32: *value, Valid: true}
+	return null.IntFrom(int64(*value))
 }
 
 // nodeResourceSampleParams 将可选资源指标转换为 sqlc 参数；nil 指标保留为数据库 NULL。
-func nodeResourceSampleParams(nodeID pgtype.UUID, sampledAt time.Time, resource *NodeResourceInput) sqlc.InsertNodeResourceSampleParams {
+// nodeID 已是 string；SampledAt 是 time.Time。
+func nodeResourceSampleParams(nodeID string, sampledAt time.Time, resource *NodeResourceInput) sqlc.InsertNodeResourceSampleParams {
 	if sampledAt.IsZero() {
 		sampledAt = time.Now().UTC()
 	}
 	return sqlc.InsertNodeResourceSampleParams{
+		ID:               newUUID(),
 		RuntimeNodeID:    nodeID,
-		SampledAt:        pgtype.Timestamptz{Time: sampledAt.UTC(), Valid: true},
-		CpuPercent:       float8OrNull(resource.CPUPercent),
-		MemoryUsedBytes:  int8OrNull(resource.MemoryUsedBytes),
-		MemoryTotalBytes: int8OrNull(resource.MemoryTotalBytes),
-		DiskUsedBytes:    int8OrNull(resource.DiskUsedBytes),
-		DiskTotalBytes:   int8OrNull(resource.DiskTotalBytes),
-		NetworkRxBytes:   int8OrNull(resource.NetworkRxBytes),
-		NetworkTxBytes:   int8OrNull(resource.NetworkTxBytes),
-		InstanceCount:    int32OrNull(resource.InstanceCount),
+		SampledAt:        sampledAt.UTC(),
+		CpuPercent:       float64PtrToNullFloat(resource.CPUPercent),
+		MemoryUsedBytes:  int64PtrToNullInt(resource.MemoryUsedBytes),
+		MemoryTotalBytes: int64PtrToNullInt(resource.MemoryTotalBytes),
+		DiskUsedBytes:    int64PtrToNullInt(resource.DiskUsedBytes),
+		DiskTotalBytes:   int64PtrToNullInt(resource.DiskTotalBytes),
+		NetworkRxBytes:   int64PtrToNullInt(resource.NetworkRxBytes),
+		NetworkTxBytes:   int64PtrToNullInt(resource.NetworkTxBytes),
+		InstanceCount:    int32PtrToNullInt(resource.InstanceCount),
 		LastError:        textOrNull(resource.LastError),
 	}
 }
 
-// float8OrNull 将可选浮点指标转换为 pgtype.Float8，保留 0 作为有效采样值。
-func float8OrNull(value *float64) pgtype.Float8 {
+// float64PtrToNullFloat 将可选浮点指标转换为 null.Float，保留 0 作为有效采样值。
+func float64PtrToNullFloat(value *float64) null.Float {
 	if value == nil {
-		return pgtype.Float8{}
+		return null.Float{}
 	}
-	return pgtype.Float8{Float64: *value, Valid: true}
+	return null.FloatFrom(*value)
 }
 
-// int8OrNull 将可选整型指标转换为 pgtype.Int8，保留 0 作为有效采样值。
-func int8OrNull(value *int64) pgtype.Int8 {
+// int64PtrToNullInt 将可选整型指标转换为 null.Int，保留 0 作为有效采样值。
+func int64PtrToNullInt(value *int64) null.Int {
 	if value == nil {
-		return pgtype.Int8{}
+		return null.Int{}
 	}
-	return pgtype.Int8{Int64: *value, Valid: true}
+	return null.IntFrom(*value)
 }
 
 // shortAgentID 生成默认节点名使用的短外部 ID。

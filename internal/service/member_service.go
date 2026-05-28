@@ -2,13 +2,13 @@ package service
 
 import (
 	"context"
+	"database/sql"
 	"errors"
 	"fmt"
 	"strings"
 	"time"
 
-	"github.com/jackc/pgx/v5"
-	"github.com/jackc/pgx/v5/pgtype"
+	"github.com/guregu/null/v5"
 
 	"oc-manager/internal/auth"
 	"oc-manager/internal/domain"
@@ -18,22 +18,22 @@ import (
 // MemberStore 抽象成员服务所需的数据访问能力。
 // 仅暴露当前实现需要的方法，便于在单元测试中使用内存桩，避免引入完整 sqlc 依赖。
 type MemberStore interface {
-	GetOrganization(ctx context.Context, id pgtype.UUID) (sqlc.Organization, error)
-	CreateUser(ctx context.Context, arg sqlc.CreateUserParams) (sqlc.User, error)
-	GetUser(ctx context.Context, id pgtype.UUID) (sqlc.User, error)
+	GetOrganization(ctx context.Context, id string) (sqlc.Organization, error)
+	CreateUser(ctx context.Context, arg sqlc.CreateUserParams) error
+	GetUser(ctx context.Context, id string) (sqlc.User, error)
 	GetUserByUsername(ctx context.Context, username string) (sqlc.User, error)
 	// ListUsersByOrgWithActiveApp 列出成员及其当前未软删实例的 id/name，
 	// 用于成员列表上区分「需要补建」与「已绑定」两种状态。
 	ListUsersByOrgWithActiveApp(ctx context.Context, arg sqlc.ListUsersByOrgWithActiveAppParams) ([]sqlc.ListUsersByOrgWithActiveAppRow, error)
-	UpdateUserProfile(ctx context.Context, arg sqlc.UpdateUserProfileParams) (sqlc.User, error)
-	SetUserStatus(ctx context.Context, arg sqlc.SetUserStatusParams) (sqlc.User, error)
-	UpdateUserPassword(ctx context.Context, arg sqlc.UpdateUserPasswordParams) (sqlc.User, error)
+	UpdateUserProfile(ctx context.Context, arg sqlc.UpdateUserProfileParams) error
+	SetUserStatus(ctx context.Context, arg sqlc.SetUserStatusParams) error
+	UpdateUserPassword(ctx context.Context, arg sqlc.UpdateUserPasswordParams) error
 
 	// 以下方法用于成员删除联动应用软删；store 实现已经具备这些查询。
-	GetActiveAppByOwner(ctx context.Context, ownerUserID pgtype.UUID) (sqlc.App, error)
-	SoftDeleteApp(ctx context.Context, id pgtype.UUID) (sqlc.App, error)
-	CreateJob(ctx context.Context, arg sqlc.CreateJobParams) (sqlc.Job, error)
-	CreateAuditLog(ctx context.Context, arg sqlc.CreateAuditLogParams) (sqlc.AuditLog, error)
+	GetActiveAppByOwner(ctx context.Context, ownerUserID string) (sqlc.App, error)
+	SoftDeleteApp(ctx context.Context, id string) error
+	CreateJob(ctx context.Context, arg sqlc.CreateJobParams) error
+	CreateAuditLog(ctx context.Context, arg sqlc.CreateAuditLogParams) error
 }
 
 // PasswordHasher 抽象密码 hash 函数，便于测试中替换为快路径。
@@ -113,12 +113,8 @@ func (s *MemberService) CreateMember(ctx context.Context, principal auth.Princip
 		return MemberResult{}, fmt.Errorf("%w: 用户名、密码和显示名不能为空", ErrMemberCreateInvalid)
 	}
 
-	orgUUID, err := parseUUID(orgID)
-	if err != nil {
-		return MemberResult{}, ErrNotFound
-	}
-	org, err := s.store.GetOrganization(ctx, orgUUID)
-	if errors.Is(err, pgx.ErrNoRows) {
+	org, err := s.store.GetOrganization(ctx, orgID)
+	if errors.Is(err, sql.ErrNoRows) {
 		return MemberResult{}, ErrNotFound
 	}
 	if err != nil {
@@ -132,16 +128,22 @@ func (s *MemberService) CreateMember(ctx context.Context, principal auth.Princip
 	if err != nil {
 		return MemberResult{}, fmt.Errorf("生成密码 hash 失败: %w", err)
 	}
-	user, err := s.store.CreateUser(ctx, sqlc.CreateUserParams{
-		OrgID:        org.ID,
+	// CreateUser 为 :exec；预先生成 ID，写入后通过 GetUser 读回。
+	userID := newUUID()
+	if err := s.store.CreateUser(ctx, sqlc.CreateUserParams{
+		ID:           userID,
+		OrgID:        null.StringFrom(org.ID),
 		Username:     input.Username,
 		PasswordHash: hashed,
 		DisplayName:  input.DisplayName,
 		Role:         role,
 		Status:       domain.StatusActive,
-	})
-	if err != nil {
+	}); err != nil {
 		return MemberResult{}, fmt.Errorf("创建成员失败: %w", err)
+	}
+	user, err := s.store.GetUser(ctx, userID)
+	if err != nil {
+		return MemberResult{}, fmt.Errorf("读取新建成员失败: %w", err)
 	}
 	return toMemberResult(user), nil
 }
@@ -151,10 +153,6 @@ func (s *MemberService) CreateMember(ctx context.Context, principal auth.Princip
 func (s *MemberService) ListMembers(ctx context.Context, principal auth.Principal, orgID string, limit, offset int32) ([]MemberResult, error) {
 	if !auth.CanListMembers(principal, orgID) {
 		return nil, ErrForbidden
-	}
-	id, err := parseUUID(orgID)
-	if err != nil {
-		return nil, ErrNotFound
 	}
 	if limit <= 0 {
 		limit = s.defaultPageNum
@@ -166,7 +164,7 @@ func (s *MemberService) ListMembers(ctx context.Context, principal auth.Principa
 		offset = 0
 	}
 	rows, err := s.store.ListUsersByOrgWithActiveApp(ctx, sqlc.ListUsersByOrgWithActiveAppParams{
-		OrgID:  id,
+		OrgID:  null.StringFrom(orgID),
 		Limit:  limit,
 		Offset: offset,
 	})
@@ -179,18 +177,14 @@ func (s *MemberService) ListMembers(ctx context.Context, principal auth.Principa
 // GetMember 查询单个成员。
 // 平台管理员可查任意成员；组织角色仅能查询本组织成员，普通成员只能查询自己。
 func (s *MemberService) GetMember(ctx context.Context, principal auth.Principal, userID string) (MemberResult, error) {
-	id, err := parseUUID(userID)
-	if err != nil {
-		return MemberResult{}, ErrNotFound
-	}
-	user, err := s.store.GetUser(ctx, id)
-	if errors.Is(err, pgx.ErrNoRows) {
+	user, err := s.store.GetUser(ctx, userID)
+	if errors.Is(err, sql.ErrNoRows) {
 		return MemberResult{}, ErrNotFound
 	}
 	if err != nil {
 		return MemberResult{}, fmt.Errorf("查询成员失败: %w", err)
 	}
-	if !auth.CanViewMember(principal, uuidToOptionalString(user.OrgID), uuidToString(user.ID)) {
+	if !auth.CanViewMember(principal, strOrEmpty(user.OrgID), user.ID) {
 		return MemberResult{}, ErrForbidden
 	}
 	return toMemberResult(user), nil
@@ -199,12 +193,8 @@ func (s *MemberService) GetMember(ctx context.Context, principal auth.Principal,
 // UpdateMemberProfile 更新成员显示名和角色。
 // 普通成员仅能修改自己的显示名；调整角色需要本组织管理员权限。
 func (s *MemberService) UpdateMemberProfile(ctx context.Context, principal auth.Principal, userID string, input MemberInput) (MemberResult, error) {
-	id, err := parseUUID(userID)
-	if err != nil {
-		return MemberResult{}, ErrNotFound
-	}
-	user, err := s.store.GetUser(ctx, id)
-	if errors.Is(err, pgx.ErrNoRows) {
+	user, err := s.store.GetUser(ctx, userID)
+	if errors.Is(err, sql.ErrNoRows) {
 		return MemberResult{}, ErrNotFound
 	}
 	if err != nil {
@@ -216,27 +206,31 @@ func (s *MemberService) UpdateMemberProfile(ctx context.Context, principal auth.
 	}
 	roleChanging := role != user.Role
 	if roleChanging {
-		if !auth.CanManageMember(principal, uuidToOptionalString(user.OrgID)) {
+		if !auth.CanManageMember(principal, strOrEmpty(user.OrgID)) {
 			return MemberResult{}, ErrForbidden
 		}
 		if role != domain.UserRoleOrgAdmin && role != domain.UserRoleOrgMember {
 			return MemberResult{}, fmt.Errorf("%w: 不支持的角色", ErrMemberCreateInvalid)
 		}
 	} else {
-		if !auth.CanEditMember(principal, uuidToOptionalString(user.OrgID), uuidToString(user.ID)) {
+		if !auth.CanEditMember(principal, strOrEmpty(user.OrgID), user.ID) {
 			return MemberResult{}, ErrForbidden
 		}
 	}
 	if input.DisplayName == "" {
 		return MemberResult{}, fmt.Errorf("%w: 显示名不能为空", ErrMemberCreateInvalid)
 	}
-	updated, err := s.store.UpdateUserProfile(ctx, sqlc.UpdateUserProfileParams{
+	// UpdateUserProfile 为 :exec；写入后重新读取最新数据。
+	if err := s.store.UpdateUserProfile(ctx, sqlc.UpdateUserProfileParams{
 		ID:          user.ID,
 		DisplayName: input.DisplayName,
 		Role:        role,
-	})
-	if err != nil {
+	}); err != nil {
 		return MemberResult{}, fmt.Errorf("更新成员失败: %w", err)
+	}
+	updated, err := s.store.GetUser(ctx, user.ID)
+	if err != nil {
+		return MemberResult{}, fmt.Errorf("读取更新后成员失败: %w", err)
 	}
 	return toMemberResult(updated), nil
 }
@@ -247,27 +241,27 @@ func (s *MemberService) SetMemberStatus(ctx context.Context, principal auth.Prin
 	if status != domain.StatusActive && status != domain.StatusDisabled {
 		return MemberResult{}, fmt.Errorf("非法成员状态: %s", status)
 	}
-	id, err := parseUUID(userID)
-	if err != nil {
-		return MemberResult{}, ErrNotFound
-	}
-	user, err := s.store.GetUser(ctx, id)
-	if errors.Is(err, pgx.ErrNoRows) {
+	user, err := s.store.GetUser(ctx, userID)
+	if errors.Is(err, sql.ErrNoRows) {
 		return MemberResult{}, ErrNotFound
 	}
 	if err != nil {
 		return MemberResult{}, fmt.Errorf("查询成员失败: %w", err)
 	}
-	if !auth.CanManageMember(principal, uuidToOptionalString(user.OrgID)) {
+	if !auth.CanManageMember(principal, strOrEmpty(user.OrgID)) {
 		return MemberResult{}, ErrForbidden
 	}
-	if principal.UserID == uuidToString(user.ID) && status == domain.StatusDisabled {
+	if principal.UserID == user.ID && status == domain.StatusDisabled {
 		return MemberResult{}, fmt.Errorf("%w: 不能禁用自己", ErrMemberCreateInvalid)
 	}
 	// users.deleted_at 在本项目中表示下线时间戳，由 SetUserStatus 随 status 自动维护。
-	updated, err := s.store.SetUserStatus(ctx, sqlc.SetUserStatusParams{ID: user.ID, Status: status})
-	if err != nil {
+	// SetUserStatus 为 :exec；写入后重新读取最新数据。
+	if err := s.store.SetUserStatus(ctx, sqlc.SetUserStatusParams{ID: user.ID, Status: status}); err != nil {
 		return MemberResult{}, fmt.Errorf("更新成员状态失败: %w", err)
+	}
+	updated, err := s.store.GetUser(ctx, user.ID)
+	if err != nil {
+		return MemberResult{}, fmt.Errorf("读取状态更新后成员失败: %w", err)
 	}
 	return toMemberResult(updated), nil
 }
@@ -281,31 +275,27 @@ func (s *MemberService) SetMemberStatus(ctx context.Context, principal auth.Prin
 //
 // 操作限制：管理员不能删除自己，避免误锁定；普通成员无权删除。
 func (s *MemberService) DeleteMember(ctx context.Context, principal auth.Principal, userID string, notifier JobNotifier) error {
-	id, err := parseUUID(userID)
-	if err != nil {
-		return ErrNotFound
-	}
-	user, err := s.store.GetUser(ctx, id)
-	if errors.Is(err, pgx.ErrNoRows) {
+	user, err := s.store.GetUser(ctx, userID)
+	if errors.Is(err, sql.ErrNoRows) {
 		return ErrNotFound
 	}
 	if err != nil {
 		return fmt.Errorf("查询成员失败: %w", err)
 	}
-	if !auth.CanManageMember(principal, uuidToOptionalString(user.OrgID)) {
+	if !auth.CanManageMember(principal, strOrEmpty(user.OrgID)) {
 		return ErrForbidden
 	}
-	if principal.UserID == uuidToString(user.ID) {
+	if principal.UserID == user.ID {
 		return fmt.Errorf("%w: 不能删除自己", ErrMemberCreateInvalid)
 	}
-	if _, err := s.store.SetUserStatus(ctx, sqlc.SetUserStatusParams{ID: user.ID, Status: domain.StatusDisabled}); err != nil {
+	if err := s.store.SetUserStatus(ctx, sqlc.SetUserStatusParams{ID: user.ID, Status: domain.StatusDisabled}); err != nil {
 		return fmt.Errorf("禁用成员失败: %w", err)
 	}
 
 	// 查找该成员名下未删除的应用；找不到时跳过应用删除。
 	app, err := s.store.GetActiveAppByOwner(ctx, user.ID)
 	hasApp := err == nil
-	if err != nil && !errors.Is(err, pgx.ErrNoRows) {
+	if err != nil && !errors.Is(err, sql.ErrNoRows) {
 		return fmt.Errorf("查询成员应用失败: %w", err)
 	}
 	// 第一版每个未删除成员账号最多拥有一个未删除应用，因此 cascadeCount 仅为 0 / 1；
@@ -313,36 +303,38 @@ func (s *MemberService) DeleteMember(ctx context.Context, principal auth.Princip
 	cascadeCount := 0
 	if hasApp {
 		cascadeCount = 1
-		if _, err := s.store.SoftDeleteApp(ctx, app.ID); err != nil {
+		if err := s.store.SoftDeleteApp(ctx, app.ID); err != nil {
 			return fmt.Errorf("软删应用失败: %w", err)
 		}
 		// 入队 app_delete worker job 处理容器/api_key 回收。
-		payload := []byte(`{"app_id":"` + uuidToString(app.ID) + `"}`)
-		job, err := s.store.CreateJob(ctx, sqlc.CreateJobParams{
+		payload := []byte(`{"app_id":"` + app.ID + `"}`)
+		jobID := newUUID()
+		if err := s.store.CreateJob(ctx, sqlc.CreateJobParams{
+			ID:          jobID,
 			Type:        domain.JobTypeAppDelete,
 			Priority:    100,
-			RunAfter:    pgtype.Timestamptz{Time: time.Now(), Valid: true},
+			RunAfter:    time.Now(),
 			MaxAttempts: 3,
 			PayloadJson: payload,
-		})
-		if err != nil {
+		}); err != nil {
 			return fmt.Errorf("创建 app_delete job 失败: %w", err)
 		}
 		if notifier != nil {
-			_ = notifier.Enqueue(ctx, uuidToString(job.ID))
+			_ = notifier.Enqueue(ctx, jobID)
 		}
 	}
 
-	actorUUID, _ := optionalUUID(principal.UserID)
-	if _, err := s.store.CreateAuditLog(ctx, sqlc.CreateAuditLogParams{
-		ActorID:       actorUUID,
+	// ActorID、OrgID 由字符串直接转 null.String。
+	if err := s.store.CreateAuditLog(ctx, sqlc.CreateAuditLogParams{
+		ID:            newUUID(),
+		ActorID:       null.StringFrom(principal.UserID),
 		ActorRole:     principal.Role,
 		OrgID:         user.OrgID,
 		TargetType:    "user",
-		TargetID:      uuidToString(user.ID),
+		TargetID:      user.ID,
 		Action:        "delete_member",
 		Result:        "succeeded",
-		DetailMessage: pgtype.Text{String: fmt.Sprintf("级联删除 %d 个应用", cascadeCount), Valid: true},
+		DetailMessage: null.StringFrom(fmt.Sprintf("级联删除 %d 个应用", cascadeCount)),
 	}); err != nil {
 		return fmt.Errorf("写入审计日志失败: %w", err)
 	}
@@ -355,25 +347,21 @@ func (s *MemberService) ResetMemberPassword(ctx context.Context, principal auth.
 	if newPassword == "" {
 		return fmt.Errorf("%w: 新密码不能为空", ErrMemberCreateInvalid)
 	}
-	id, err := parseUUID(userID)
-	if err != nil {
-		return ErrNotFound
-	}
-	user, err := s.store.GetUser(ctx, id)
-	if errors.Is(err, pgx.ErrNoRows) {
+	user, err := s.store.GetUser(ctx, userID)
+	if errors.Is(err, sql.ErrNoRows) {
 		return ErrNotFound
 	}
 	if err != nil {
 		return fmt.Errorf("查询成员失败: %w", err)
 	}
-	if !auth.CanManageMember(principal, uuidToOptionalString(user.OrgID)) {
+	if !auth.CanManageMember(principal, strOrEmpty(user.OrgID)) {
 		return ErrForbidden
 	}
 	hashed, err := s.hashPassword(newPassword)
 	if err != nil {
 		return fmt.Errorf("生成密码 hash 失败: %w", err)
 	}
-	if _, err := s.store.UpdateUserPassword(ctx, sqlc.UpdateUserPasswordParams{ID: user.ID, PasswordHash: hashed}); err != nil {
+	if err := s.store.UpdateUserPassword(ctx, sqlc.UpdateUserPasswordParams{ID: user.ID, PasswordHash: hashed}); err != nil {
 		return fmt.Errorf("更新成员密码失败: %w", err)
 	}
 	return nil
@@ -381,8 +369,8 @@ func (s *MemberService) ResetMemberPassword(ctx context.Context, principal auth.
 
 func toMemberResult(user sqlc.User) MemberResult {
 	return MemberResult{
-		ID:          uuidToString(user.ID),
-		OrgID:       uuidToOptionalString(user.OrgID),
+		ID:          user.ID,
+		OrgID:       strOrEmpty(user.OrgID),
 		Username:    user.Username,
 		DisplayName: user.DisplayName,
 		Role:        user.Role,
@@ -396,15 +384,15 @@ func toMemberResultsWithApp(rows []sqlc.ListUsersByOrgWithActiveAppRow) []Member
 	results := make([]MemberResult, 0, len(rows))
 	for _, row := range rows {
 		result := MemberResult{
-			ID:          uuidToString(row.ID),
-			OrgID:       uuidToOptionalString(row.OrgID),
+			ID:          row.ID,
+			OrgID:       strOrEmpty(row.OrgID),
 			Username:    row.Username,
 			DisplayName: row.DisplayName,
 			Role:        row.Role,
 			Status:      row.Status,
 		}
 		if row.ActiveAppID.Valid {
-			id := uuidToString(row.ActiveAppID)
+			id := row.ActiveAppID.String
 			result.ActiveAppID = &id
 		}
 		if row.ActiveAppName.Valid {

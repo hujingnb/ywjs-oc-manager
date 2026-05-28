@@ -2,13 +2,13 @@ package service
 
 import (
 	"context"
+	"database/sql"
 	"encoding/json"
 	"errors"
 	"fmt"
 	"time"
 
-	"github.com/jackc/pgx/v5"
-	"github.com/jackc/pgx/v5/pgtype"
+	"github.com/guregu/null/v5"
 
 	"oc-manager/internal/auth"
 	"oc-manager/internal/domain"
@@ -18,11 +18,11 @@ import (
 
 // ChannelStore 抽象渠道服务的数据访问能力。
 type ChannelStore interface {
-	GetApp(ctx context.Context, id pgtype.UUID) (sqlc.App, error)
+	GetApp(ctx context.Context, id string) (sqlc.App, error)
 	GetChannelBindingByAppAndType(ctx context.Context, arg sqlc.GetChannelBindingByAppAndTypeParams) (sqlc.ChannelBinding, error)
-	SetChannelBindingStatus(ctx context.Context, arg sqlc.SetChannelBindingStatusParams) (sqlc.ChannelBinding, error)
-	CreateJob(ctx context.Context, arg sqlc.CreateJobParams) (sqlc.Job, error)
-	CreateAuditLog(ctx context.Context, arg sqlc.CreateAuditLogParams) (sqlc.AuditLog, error)
+	SetChannelBindingStatus(ctx context.Context, arg sqlc.SetChannelBindingStatusParams) error
+	CreateJob(ctx context.Context, arg sqlc.CreateJobParams) error
+	CreateAuditLog(ctx context.Context, arg sqlc.CreateAuditLogParams) error
 }
 
 // ChannelService 协调 channel adapter 与 channel_bindings 表。
@@ -94,7 +94,7 @@ func (s *ChannelService) BeginAuth(ctx context.Context, principal auth.Principal
 	}
 	binding, err := s.store.GetChannelBindingByAppAndType(ctx, sqlc.GetChannelBindingByAppAndTypeParams{AppID: app.ID, ChannelType: channelType})
 	if err != nil {
-		if errors.Is(err, pgx.ErrNoRows) {
+		if errors.Is(err, sql.ErrNoRows) {
 			return ChallengeResult{}, ErrNotFound
 		}
 		return ChallengeResult{}, fmt.Errorf("查询渠道绑定失败: %w", err)
@@ -102,61 +102,65 @@ func (s *ChannelService) BeginAuth(ctx context.Context, principal auth.Principal
 	if binding.Status == domain.ChannelStatusBound {
 		return ChallengeResult{Status: domain.ChannelStatusBound, ChannelType: channelType}, nil
 	}
-	if _, err := s.store.SetChannelBindingStatus(ctx, sqlc.SetChannelBindingStatusParams{
+	// SetChannelBindingStatus 为 :exec；LastError 清空写 null.String{}。
+	if err := s.store.SetChannelBindingStatus(ctx, sqlc.SetChannelBindingStatusParams{
 		AppID:       binding.AppID,
 		ChannelType: binding.ChannelType,
 		Status:      domain.ChannelStatusPendingAuth,
-		LastError:   pgtype.Text{},
+		LastError:   null.String{},
 	}); err != nil {
 		return ChallengeResult{}, fmt.Errorf("更新渠道状态失败: %w", err)
 	}
 	payload, err := json.Marshal(map[string]any{
-		"app_id":       uuidToString(app.ID),
+		"app_id":       app.ID,
 		"channel_type": channelType,
 		"requested_by": principal.UserID,
 	})
 	if err != nil {
 		return ChallengeResult{}, fmt.Errorf("序列化渠道登录任务失败: %w", err)
 	}
-	job, err := s.store.CreateJob(ctx, sqlc.CreateJobParams{
+	// CreateJob 为 :exec；预先生成 job ID 以便后续 notifier 入队和审计元数据记录。
+	jobID := newUUID()
+	if err := s.store.CreateJob(ctx, sqlc.CreateJobParams{
+		ID:          jobID,
 		Type:        domain.JobTypeChannelStartLogin,
 		Priority:    90,
-		RunAfter:    pgtype.Timestamptz{Time: time.Now(), Valid: true},
+		RunAfter:    time.Now(),
 		MaxAttempts: 3,
 		PayloadJson: payload,
-	})
-	if err != nil {
+	}); err != nil {
 		return ChallengeResult{}, fmt.Errorf("创建渠道登录任务失败: %w", err)
 	}
 	auditMetadata, err := json.Marshal(map[string]any{
 		"channel_type": channelType,
-		"job_id":       uuidToString(job.ID),
+		"job_id":       jobID,
 		"requested_by": principal.UserID,
 	})
 	if err != nil {
 		return ChallengeResult{}, fmt.Errorf("序列化渠道发起审计元数据失败: %w", err)
 	}
-	actorUUID, _ := optionalUUID(principal.UserID)
-	if _, err := s.store.CreateAuditLog(ctx, sqlc.CreateAuditLogParams{
-		ActorID:       actorUUID,
+	// ActorID / OrgID 由字符串直接转 null.String。
+	if err := s.store.CreateAuditLog(ctx, sqlc.CreateAuditLogParams{
+		ID:            newUUID(),
+		ActorID:       null.StringFrom(principal.UserID),
 		ActorRole:     principal.Role,
-		OrgID:         app.OrgID,
+		OrgID:         null.StringFrom(app.OrgID),
 		TargetType:    "app",
-		TargetID:      uuidToString(app.ID),
+		TargetID:      app.ID,
 		Action:        "channel_auth_start",
 		Result:        "succeeded",
 		MetadataJson:  auditMetadata,
-		DetailMessage: pgtype.Text{String: fmt.Sprintf("渠道 %s", channelLabel(channelType)), Valid: true},
+		DetailMessage: null.StringFrom(fmt.Sprintf("渠道 %s", channelLabel(channelType))),
 	}); err != nil {
 		return ChallengeResult{}, fmt.Errorf("写入渠道发起审计日志失败: %w", err)
 	}
 	if s.notifier != nil {
-		_ = s.notifier.Enqueue(ctx, uuidToString(job.ID))
+		_ = s.notifier.Enqueue(ctx, jobID)
 	}
 	return ChallengeResult{
 		Status:      domain.ChannelStatusPendingAuth,
 		ChannelType: channelType,
-		JobID:       uuidToString(job.ID),
+		JobID:       jobID,
 	}, nil
 }
 
@@ -169,7 +173,7 @@ func (s *ChannelService) PollAuth(ctx context.Context, principal auth.Principal,
 	}
 	binding, err := s.store.GetChannelBindingByAppAndType(ctx, sqlc.GetChannelBindingByAppAndTypeParams{AppID: app.ID, ChannelType: channelType})
 	if err != nil {
-		if errors.Is(err, pgx.ErrNoRows) {
+		if errors.Is(err, sql.ErrNoRows) {
 			return ProgressResult{}, ErrNotFound
 		}
 		return ProgressResult{}, fmt.Errorf("查询渠道绑定失败: %w", err)
@@ -178,9 +182,10 @@ func (s *ChannelService) PollAuth(ctx context.Context, principal auth.Principal,
 	if len(binding.MetadataJson) > 0 {
 		metadata = channelBindingMetadata(binding.MetadataJson)
 	}
+	// UpdatedAt 是 time.Time（MySQL DATETIME），直接使用。
 	updatedAt := time.Now()
-	if binding.UpdatedAt.Valid {
-		updatedAt = binding.UpdatedAt.Time
+	if binding.UpdatedAt != (time.Time{}) {
+		updatedAt = binding.UpdatedAt
 	}
 	errorMessage := ""
 	if binding.LastError.Valid {
@@ -212,16 +217,16 @@ func (s *ChannelService) Unbind(ctx context.Context, principal auth.Principal, a
 	}
 	binding, err := s.store.GetChannelBindingByAppAndType(ctx, sqlc.GetChannelBindingByAppAndTypeParams{AppID: app.ID, ChannelType: channelType})
 	if err != nil {
-		if errors.Is(err, pgx.ErrNoRows) {
+		if errors.Is(err, sql.ErrNoRows) {
 			return ErrNotFound
 		}
 		return fmt.Errorf("查询渠道绑定失败: %w", err)
 	}
-	if _, err := s.store.SetChannelBindingStatus(ctx, sqlc.SetChannelBindingStatusParams{
+	if err := s.store.SetChannelBindingStatus(ctx, sqlc.SetChannelBindingStatusParams{
 		AppID:       binding.AppID,
 		ChannelType: binding.ChannelType,
 		Status:      domain.ChannelStatusUnboundByUser,
-		LastError:   pgtype.Text{},
+		LastError:   null.String{},
 	}); err != nil {
 		return fmt.Errorf("解绑渠道失败: %w", err)
 	}
@@ -231,18 +236,14 @@ func (s *ChannelService) Unbind(ctx context.Context, principal auth.Principal, a
 // loadViewableApp 校验主体是否可读取应用渠道进度。
 // 渠道轮询属于只读视图，平台管理员保留跨组织观察能力。
 func (s *ChannelService) loadViewableApp(ctx context.Context, principal auth.Principal, appID string) (sqlc.App, error) {
-	id, err := parseUUID(appID)
-	if err != nil {
-		return sqlc.App{}, ErrNotFound
-	}
-	app, err := s.store.GetApp(ctx, id)
-	if errors.Is(err, pgx.ErrNoRows) {
+	app, err := s.store.GetApp(ctx, appID)
+	if errors.Is(err, sql.ErrNoRows) {
 		return sqlc.App{}, ErrNotFound
 	}
 	if err != nil {
 		return sqlc.App{}, fmt.Errorf("查询应用失败: %w", err)
 	}
-	if !auth.CanViewApp(principal, uuidToString(app.OrgID), uuidToString(app.OwnerUserID)) {
+	if !auth.CanViewApp(principal, app.OrgID, app.OwnerUserID) {
 		return sqlc.App{}, ErrForbidden
 	}
 	return app, nil
@@ -255,7 +256,7 @@ func (s *ChannelService) loadManageableApp(ctx context.Context, principal auth.P
 	if err != nil {
 		return sqlc.App{}, err
 	}
-	if !auth.CanManageApp(principal, uuidToString(app.OrgID), uuidToString(app.OwnerUserID)) {
+	if !auth.CanManageApp(principal, app.OrgID, app.OwnerUserID) {
 		return sqlc.App{}, ErrForbidden
 	}
 	return app, nil

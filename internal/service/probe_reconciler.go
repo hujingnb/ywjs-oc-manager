@@ -4,7 +4,7 @@ import (
 	"context"
 	"fmt"
 
-	"github.com/jackc/pgx/v5/pgtype"
+	"github.com/guregu/null/v5"
 
 	"oc-manager/internal/domain"
 	agentint "oc-manager/internal/integrations/agent"
@@ -14,9 +14,10 @@ import (
 // RuntimeNodeProbeStore 抽象主动探测需要的节点查询和状态更新能力。
 type RuntimeNodeProbeStore interface {
 	ListRuntimeNodes(ctx context.Context, arg sqlc.ListRuntimeNodesParams) ([]sqlc.RuntimeNode, error)
-	UpdateRuntimeNodeProbeSuccess(ctx context.Context, arg sqlc.UpdateRuntimeNodeProbeSuccessParams) (sqlc.RuntimeNode, error)
-	UpdateRuntimeNodeProbeFailure(ctx context.Context, arg sqlc.UpdateRuntimeNodeProbeFailureParams) (sqlc.RuntimeNode, error)
-	CreateAuditLog(ctx context.Context, arg sqlc.CreateAuditLogParams) (sqlc.AuditLog, error)
+	UpdateRuntimeNodeProbeSuccess(ctx context.Context, arg sqlc.UpdateRuntimeNodeProbeSuccessParams) error
+	UpdateRuntimeNodeProbeFailure(ctx context.Context, arg sqlc.UpdateRuntimeNodeProbeFailureParams) error
+	GetRuntimeNode(ctx context.Context, id string) (sqlc.RuntimeNode, error)
+	CreateAuditLog(ctx context.Context, arg sqlc.CreateAuditLogParams) error
 }
 
 // RuntimeNodeTokenResolver 抽象按 nodeID 读取 agent token 的能力。
@@ -74,7 +75,8 @@ func (r *RuntimeNodeProbeReconciler) Reconcile(ctx context.Context) (int, error)
 }
 
 func (r *RuntimeNodeProbeReconciler) probeNode(ctx context.Context, node sqlc.RuntimeNode) error {
-	nodeID := uuidToString(node.ID)
+	// node.ID 已是 string；直接使用。
+	nodeID := node.ID
 	token, err := r.tokens.Get(nodeID)
 	if err != nil {
 		return r.recordFailure(ctx, node, "agent_token_missing: "+err.Error())
@@ -93,12 +95,16 @@ func (r *RuntimeNodeProbeReconciler) probeNode(ctx context.Context, node sqlc.Ru
 
 func (r *RuntimeNodeProbeReconciler) recordSuccess(ctx context.Context, node sqlc.RuntimeNode) error {
 	before := node.Status
-	updated, err := r.store.UpdateRuntimeNodeProbeSuccess(ctx, sqlc.UpdateRuntimeNodeProbeSuccessParams{
+	// UpdateRuntimeNodeProbeSuccess 为 :exec；写入后通过 GetRuntimeNode 读回以获取最新 status。
+	if err := r.store.UpdateRuntimeNodeProbeSuccess(ctx, sqlc.UpdateRuntimeNodeProbeSuccessParams{
 		ID:                 node.ID,
 		ProbeSuccessStreak: r.cfg.RecoveryThreshold,
-	})
+	}); err != nil {
+		return fmt.Errorf("更新节点 %s probe 成功状态失败: %w", node.ID, err)
+	}
+	updated, err := r.store.GetRuntimeNode(ctx, node.ID)
 	if err != nil {
-		return fmt.Errorf("更新节点 %s probe 成功状态失败: %w", uuidToString(node.ID), err)
+		return fmt.Errorf("读取 probe 成功后节点 %s 失败: %w", node.ID, err)
 	}
 	if before == domain.RuntimeNodeStatusDegraded && updated.Status == domain.RuntimeNodeStatusActive {
 		return r.audit(ctx, updated.ID, "node_probe_recovered", before, updated.Status)
@@ -108,13 +114,17 @@ func (r *RuntimeNodeProbeReconciler) recordSuccess(ctx context.Context, node sql
 
 func (r *RuntimeNodeProbeReconciler) recordFailure(ctx context.Context, node sqlc.RuntimeNode, message string) error {
 	before := node.Status
-	updated, err := r.store.UpdateRuntimeNodeProbeFailure(ctx, sqlc.UpdateRuntimeNodeProbeFailureParams{
+	// UpdateRuntimeNodeProbeFailure 为 :exec；LastProbeError 是 null.String。
+	if err := r.store.UpdateRuntimeNodeProbeFailure(ctx, sqlc.UpdateRuntimeNodeProbeFailureParams{
 		ID:                 node.ID,
 		ProbeFailureStreak: r.cfg.FailureThreshold,
-		LastProbeError:     pgtype.Text{String: message, Valid: message != ""},
-	})
+		LastProbeError:     null.StringFrom(message),
+	}); err != nil {
+		return fmt.Errorf("更新节点 %s probe 失败状态失败: %w", node.ID, err)
+	}
+	updated, err := r.store.GetRuntimeNode(ctx, node.ID)
 	if err != nil {
-		return fmt.Errorf("更新节点 %s probe 失败状态失败: %w", uuidToString(node.ID), err)
+		return fmt.Errorf("读取 probe 失败后节点 %s 失败: %w", node.ID, err)
 	}
 	if before == domain.RuntimeNodeStatusActive && updated.Status == domain.RuntimeNodeStatusDegraded {
 		return r.audit(ctx, updated.ID, "node_probe_degraded", before, updated.Status)
@@ -124,14 +134,16 @@ func (r *RuntimeNodeProbeReconciler) recordFailure(ctx context.Context, node sql
 
 // audit 写一条节点 probe 审计。before / after 是切换前后的节点状态，
 // 拼成详情字符串「状态：X → Y」，便于审计列表识别状态变化方向。
-func (r *RuntimeNodeProbeReconciler) audit(ctx context.Context, nodeID pgtype.UUID, action, before, after string) error {
-	if _, err := r.store.CreateAuditLog(ctx, sqlc.CreateAuditLogParams{
+// nodeID 已是 string，直接使用。
+func (r *RuntimeNodeProbeReconciler) audit(ctx context.Context, nodeID string, action, before, after string) error {
+	if err := r.store.CreateAuditLog(ctx, sqlc.CreateAuditLogParams{
+		ID:            newUUID(),
 		ActorRole:     "system",
 		TargetType:    "runtime_node",
-		TargetID:      uuidToString(nodeID),
+		TargetID:      nodeID,
 		Action:        action,
 		Result:        "succeeded",
-		DetailMessage: pgtype.Text{String: fmt.Sprintf("状态：%s → %s", before, after), Valid: true},
+		DetailMessage: null.StringFrom(fmt.Sprintf("状态：%s → %s", before, after)),
 	}); err != nil {
 		return fmt.Errorf("写节点 probe 审计失败: %w", err)
 	}

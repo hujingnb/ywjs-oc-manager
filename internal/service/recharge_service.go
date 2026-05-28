@@ -2,11 +2,11 @@ package service
 
 import (
 	"context"
+	"database/sql"
 	"errors"
 	"fmt"
 
-	"github.com/jackc/pgx/v5"
-	"github.com/jackc/pgx/v5/pgtype"
+	"github.com/guregu/null/v5"
 	"golang.org/x/sync/errgroup"
 
 	"oc-manager/internal/auth"
@@ -17,12 +17,14 @@ import (
 
 // RechargeStore 抽象 service 需要的存储能力。
 type RechargeStore interface {
-	GetOrganization(ctx context.Context, id pgtype.UUID) (sqlc.Organization, error)
-	CreateRechargeRecord(ctx context.Context, arg sqlc.CreateRechargeRecordParams) (sqlc.RechargeRecord, error)
+	GetOrganization(ctx context.Context, id string) (sqlc.Organization, error)
+	// CreateRechargeRecord 创建充值记录（:exec），写入后通过 GetRechargeRecord 读回。
+	CreateRechargeRecord(ctx context.Context, arg sqlc.CreateRechargeRecordParams) error
+	GetRechargeRecord(ctx context.Context, id string) (sqlc.RechargeRecord, error)
 	ListRechargeRecordsByOrg(ctx context.Context, arg sqlc.ListRechargeRecordsByOrgParams) ([]sqlc.RechargeRecord, error)
-	CreateAuditLog(ctx context.Context, arg sqlc.CreateAuditLogParams) (sqlc.AuditLog, error)
+	CreateAuditLog(ctx context.Context, arg sqlc.CreateAuditLogParams) error
 	// SumRechargeAmountByOrg 聚合指定组织 succeeded 充值记录总额；无记录时返回 0。
-	SumRechargeAmountByOrg(ctx context.Context, orgID pgtype.UUID) (int64, error)
+	SumRechargeAmountByOrg(ctx context.Context, orgID string) (int64, error)
 }
 
 // NewAPIRechargeClient 是 service 与 new-api 充值相关的最小接口形态。
@@ -33,7 +35,7 @@ type NewAPIRechargeClient interface {
 }
 
 // RechargeRecordResult 是面向 handler/前端的充值记录视图。
-// 不直接复用 sqlc.RechargeRecord 是为了把 pgtype 字段转成易序列化的标量。
+// 不直接复用 sqlc.RechargeRecord 是为了把 null.* 字段转成易序列化的标量。
 type RechargeRecordResult struct {
 	ID           string `json:"id"`
 	OrgID        string `json:"org_id"`
@@ -101,12 +103,8 @@ func (s *RechargeService) Recharge(ctx context.Context, principal auth.Principal
 	if amount <= 0 {
 		return RechargeRecordResult{}, ErrInvalidRechargeAmount
 	}
-	id, err := parseUUID(orgID)
-	if err != nil {
-		return RechargeRecordResult{}, ErrNotFound
-	}
-	org, err := s.store.GetOrganization(ctx, id)
-	if errors.Is(err, pgx.ErrNoRows) {
+	org, err := s.store.GetOrganization(ctx, orgID)
+	if errors.Is(err, sql.ErrNoRows) {
 		return RechargeRecordResult{}, ErrNotFound
 	}
 	if err != nil {
@@ -120,32 +118,38 @@ func (s *RechargeService) Recharge(ctx context.Context, principal auth.Principal
 		return RechargeRecordResult{}, fmt.Errorf("非法 newapi_user_id: %w", err)
 	}
 
-	operatorUUID, _ := optionalUUID(principal.UserID)
 	result, callErr := s.client.RechargeUser(ctx, newapi.RechargeInput{
 		NewAPIUserID: newapiUserID,
 		CreditAmount: amount,
 		Remark:       remark,
 	})
 	status := "succeeded"
-	errMsg := pgtype.Text{}
-	refID := pgtype.Text{}
+	var errMsg null.String
+	var refID null.String
 	if callErr != nil {
 		status = "failed"
-		errMsg = pgtype.Text{String: callErr.Error(), Valid: true}
+		errMsg = null.StringFrom(callErr.Error())
 	} else if result.RefID != "" {
-		refID = pgtype.Text{String: result.RefID, Valid: true}
+		refID = null.StringFrom(result.RefID)
 	}
-	record, err := s.store.CreateRechargeRecord(ctx, sqlc.CreateRechargeRecordParams{
-		OrgID:        id,
-		OperatorID:   operatorUUID,
+	// CreateRechargeRecord 为 :exec；预先生成 ID，写入后通过 GetRechargeRecord 读回。
+	recordID := newUUID()
+	// OperatorID 为 string（非空，对应平台管理员 UserID）。
+	if err := s.store.CreateRechargeRecord(ctx, sqlc.CreateRechargeRecordParams{
+		ID:           recordID,
+		OrgID:        orgID,
+		OperatorID:   principal.UserID,
 		CreditAmount: amount,
-		Remark:       pgtype.Text{String: remark, Valid: remark != ""},
+		Remark:       nullStr(remark),
 		NewapiRefID:  refID,
 		Status:       status,
 		ErrorMessage: errMsg,
-	})
-	if err != nil {
+	}); err != nil {
 		return RechargeRecordResult{}, fmt.Errorf("写入充值记录失败: %w", err)
+	}
+	record, err := s.store.GetRechargeRecord(ctx, recordID)
+	if err != nil {
+		return RechargeRecordResult{}, fmt.Errorf("读取充值记录失败: %w", err)
 	}
 	// 详情字段把「+金额 点」与可选「备注 ...」拼接，让审计列表一眼看出充值动作的关键参数。
 	// 金额单位与 recharge_records.credit_amount 一致（点，整数避免浮点误差）。
@@ -153,15 +157,16 @@ func (s *RechargeService) Recharge(ctx context.Context, principal auth.Principal
 	if remark != "" {
 		detail = fmt.Sprintf("%s，备注 %s", detail, remark)
 	}
-	if _, err := s.store.CreateAuditLog(ctx, sqlc.CreateAuditLogParams{
-		ActorID:       operatorUUID,
+	if err := s.store.CreateAuditLog(ctx, sqlc.CreateAuditLogParams{
+		ID:            newUUID(),
+		ActorID:       null.StringFrom(principal.UserID),
 		ActorRole:     principal.Role,
-		OrgID:         id,
+		OrgID:         null.StringFrom(orgID),
 		TargetType:    "organization",
-		TargetID:      uuidToString(id),
+		TargetID:      orgID,
 		Action:        "recharge",
 		Result:        status,
-		DetailMessage: pgtype.Text{String: detail, Valid: true},
+		DetailMessage: null.StringFrom(detail),
 	}); err != nil {
 		return RechargeRecordResult{}, fmt.Errorf("写入审计日志失败: %w", err)
 	}
@@ -176,10 +181,6 @@ func (s *RechargeService) ListRecharges(ctx context.Context, principal auth.Prin
 	if !auth.CanViewRecharges(principal, orgID) {
 		return nil, ErrForbidden
 	}
-	id, err := parseUUID(orgID)
-	if err != nil {
-		return nil, ErrNotFound
-	}
 	if limit <= 0 {
 		limit = 50
 	}
@@ -190,7 +191,7 @@ func (s *RechargeService) ListRecharges(ctx context.Context, principal auth.Prin
 		offset = 0
 	}
 	records, err := s.store.ListRechargeRecordsByOrg(ctx, sqlc.ListRechargeRecordsByOrgParams{
-		OrgID: id, Limit: limit, Offset: offset,
+		OrgID: orgID, Limit: limit, Offset: offset,
 	})
 	if err != nil {
 		return nil, fmt.Errorf("查询充值记录失败: %w", err)
@@ -208,18 +209,14 @@ func (s *RechargeService) GetBalance(ctx context.Context, principal auth.Princip
 	if principal.Role != domain.UserRolePlatformAdmin && principal.Role != domain.UserRoleOrgAdmin {
 		return BalanceView{}, ErrForbidden
 	}
-	id, err := parseUUID(orgID)
-	if err != nil {
-		return BalanceView{}, ErrNotFound
-	}
-	org, err := s.store.GetOrganization(ctx, id)
-	if errors.Is(err, pgx.ErrNoRows) {
+	org, err := s.store.GetOrganization(ctx, orgID)
+	if errors.Is(err, sql.ErrNoRows) {
 		return BalanceView{}, ErrNotFound
 	}
 	if err != nil {
 		return BalanceView{}, fmt.Errorf("查询企业失败: %w", err)
 	}
-	if principal.Role == domain.UserRoleOrgAdmin && principal.OrgID != uuidToString(org.ID) {
+	if principal.Role == domain.UserRoleOrgAdmin && principal.OrgID != org.ID {
 		return BalanceView{}, ErrForbidden
 	}
 	if !org.NewapiUserID.Valid || org.NewapiUserID.String == "" {
@@ -241,7 +238,7 @@ func (s *RechargeService) GetBalance(ctx context.Context, principal auth.Princip
 	})
 	g.Go(func() error {
 		var e error
-		totalRecharged, e = s.store.SumRechargeAmountByOrg(gctx, id)
+		totalRecharged, e = s.store.SumRechargeAmountByOrg(gctx, orgID)
 		return e
 	})
 	if err := g.Wait(); err != nil {
@@ -279,9 +276,10 @@ func (s *RechargeService) GetBillingStatus(ctx context.Context, principal auth.P
 
 func toRechargeResult(r sqlc.RechargeRecord) RechargeRecordResult {
 	out := RechargeRecordResult{
-		ID:           uuidToString(r.ID),
-		OrgID:        uuidToString(r.OrgID),
-		OperatorID:   uuidToOptionalString(r.OperatorID),
+		ID:           r.ID,
+		OrgID:        r.OrgID,
+		// OperatorID 现在是 string（非空），直接使用。
+		OperatorID:   r.OperatorID,
 		CreditAmount: r.CreditAmount,
 		Status:       r.Status,
 	}
@@ -294,9 +292,8 @@ func toRechargeResult(r sqlc.RechargeRecord) RechargeRecordResult {
 	if r.ErrorMessage.Valid {
 		out.ErrorMessage = r.ErrorMessage.String
 	}
-	if r.CreatedAt.Valid {
-		out.CreatedAt = r.CreatedAt.Time.Format("2006-01-02T15:04:05Z07:00")
-	}
+	// CreatedAt 是 time.Time（MySQL DATETIME），直接格式化。
+	out.CreatedAt = r.CreatedAt.Format("2006-01-02T15:04:05Z07:00")
 	return out
 }
 

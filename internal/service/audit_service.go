@@ -2,13 +2,14 @@ package service
 
 import (
 	"context"
+	"database/sql"
 	"encoding/json"
 	"errors"
 	"fmt"
 	"net/netip"
+	"time"
 
-	"github.com/jackc/pgx/v5"
-	"github.com/jackc/pgx/v5/pgtype"
+	"github.com/guregu/null/v5"
 
 	"oc-manager/internal/auth"
 	"oc-manager/internal/domain"
@@ -17,29 +18,30 @@ import (
 
 // AuditStore 抽象审计日志的数据访问能力。
 // ListAuditLogsByOrg / ListAuditLogsByTarget 由于 SELECT 含计算列，
-// sqlc 为它们生成独立的 *Row 结构体；CreateAuditLog 仍然返回 sqlc.AuditLog。
+// sqlc 为它们生成独立的 *Row 结构体；CreateAuditLog 现在仅返回 error（:exec）。
 type AuditStore interface {
-	CreateAuditLog(ctx context.Context, arg sqlc.CreateAuditLogParams) (sqlc.AuditLog, error)
-	GetApp(ctx context.Context, id pgtype.UUID) (sqlc.App, error)
+	CreateAuditLog(ctx context.Context, arg sqlc.CreateAuditLogParams) error
+	GetApp(ctx context.Context, id string) (sqlc.App, error)
 	ListAuditLogsByOrg(ctx context.Context, arg sqlc.ListAuditLogsByOrgParams) ([]sqlc.ListAuditLogsByOrgRow, error)
 	ListAuditLogsByTarget(ctx context.Context, arg sqlc.ListAuditLogsByTargetParams) ([]sqlc.ListAuditLogsByTargetRow, error)
+	GetAuditLog(ctx context.Context, id string) (sqlc.AuditLog, error)
 }
 
 // AuditResult 表示对外返回的审计日志记录。
-// IP 与元数据以字符串形式输出，避免暴露内部 pgtype 结构。
+// IP 与元数据以字符串形式输出，避免暴露内部类型结构。
 type AuditResult struct {
-	ID           string             `json:"id"`
-	ActorID      string             `json:"actor_id,omitempty"`
-	ActorRole    string             `json:"actor_role"`
-	OrgID        string             `json:"org_id,omitempty"`
-	TargetType   string             `json:"target_type"`
-	TargetID     string             `json:"target_id"`
-	Action       string             `json:"action"`
-	Result       string             `json:"result"`
-	ErrorMessage string             `json:"error_message,omitempty"`
-	IPAddress    string             `json:"ip_address,omitempty"`
-	Metadata     map[string]any     `json:"metadata,omitempty"`
-	CreatedAt    pgtype.Timestamptz `json:"created_at" swaggertype:"string" format:"date-time"`
+	ID           string    `json:"id"`
+	ActorID      string    `json:"actor_id,omitempty"`
+	ActorRole    string    `json:"actor_role"`
+	OrgID        string    `json:"org_id,omitempty"`
+	TargetType   string    `json:"target_type"`
+	TargetID     string    `json:"target_id"`
+	Action       string    `json:"action"`
+	Result       string    `json:"result"`
+	ErrorMessage string    `json:"error_message,omitempty"`
+	IPAddress    string    `json:"ip_address,omitempty"`
+	Metadata     map[string]any `json:"metadata,omitempty"`
+	CreatedAt    time.Time `json:"created_at" swaggertype:"string" format:"date-time"`
 	// 以下为展示用翻译字段，由 toAuditResult() 填充，未知值 fallback 到原始字符串。
 	ActionLabel     string `json:"action_label"`
 	TargetTypeLabel string `json:"target_type_label"`
@@ -91,39 +93,36 @@ func NewAuditService(store AuditStore) *AuditService {
 }
 
 // Record 异步写入审计记录由调用方决定，service 内部目前同步落库。
-// 当前实现忽略反序列化失败的 metadata，但会在错误中携带原因，避免日志写失败影响主流程。
+// CreateAuditLog 现在为 :exec（只返回 error），写入后由 GetAuditLog 读回完整行。
 func (s *AuditService) Record(ctx context.Context, event AuditEvent) (AuditResult, error) {
 	if event.ActorRole == "" || event.TargetType == "" || event.Action == "" || event.Result == "" {
 		return AuditResult{}, fmt.Errorf("审计事件缺少必填字段")
 	}
+	logID := newUUID()
 	params := sqlc.CreateAuditLogParams{
+		ID:         logID,
 		ActorRole:  event.ActorRole,
 		TargetType: event.TargetType,
 		TargetID:   event.TargetID,
 		Action:     event.Action,
 		Result:     event.Result,
 	}
+	// ActorID 非空时填充 null.String；空时留 NULL，表示系统触发操作。
 	if event.ActorID != "" {
-		actorID, err := parseUUID(event.ActorID)
-		if err != nil {
-			return AuditResult{}, fmt.Errorf("审计 actor_id 非法: %w", err)
-		}
-		params.ActorID = actorID
+		params.ActorID = null.StringFrom(event.ActorID)
 	}
+	// OrgID 非空时填充。
 	if event.OrgID != "" {
-		orgID, err := parseUUID(event.OrgID)
-		if err != nil {
-			return AuditResult{}, fmt.Errorf("审计 org_id 非法: %w", err)
-		}
-		params.OrgID = orgID
+		params.OrgID = null.StringFrom(event.OrgID)
 	}
 	if event.ErrorMessage != "" {
-		params.ErrorMessage = pgtype.Text{String: event.ErrorMessage, Valid: true}
+		params.ErrorMessage = null.StringFrom(event.ErrorMessage)
 	}
+	// IP 地址解析后以字符串形式写入 null.String（MySQL 侧存储为 VARCHAR）。
 	if event.IPAddress != "" {
 		addr, err := netip.ParseAddr(event.IPAddress)
 		if err == nil {
-			params.IpAddress = &addr
+			params.IpAddress = null.StringFrom(addr.String())
 		}
 	}
 	if len(event.Metadata) > 0 {
@@ -134,11 +133,16 @@ func (s *AuditService) Record(ctx context.Context, event AuditEvent) (AuditResul
 		params.MetadataJson = raw
 	}
 	if event.DetailMessage != "" {
-		params.DetailMessage = pgtype.Text{String: event.DetailMessage, Valid: true}
+		params.DetailMessage = null.StringFrom(event.DetailMessage)
 	}
-	row, err := s.store.CreateAuditLog(ctx, params)
-	if err != nil {
+	// 写入审计日志（:exec 不返回行）。
+	if err := s.store.CreateAuditLog(ctx, params); err != nil {
 		return AuditResult{}, fmt.Errorf("写入审计日志失败: %w", err)
+	}
+	// 写入后读回以获取数据库填充的 created_at 等字段。
+	row, err := s.store.GetAuditLog(ctx, logID)
+	if err != nil {
+		return AuditResult{}, fmt.Errorf("读取审计日志失败: %w", err)
 	}
 	return toAuditResult(row), nil
 }
@@ -152,13 +156,10 @@ func (s *AuditService) ListByOrg(ctx context.Context, principal auth.Principal, 
 	if !auth.CanViewOrg(principal, orgID) {
 		return nil, ErrForbidden
 	}
-	id, err := parseUUID(orgID)
-	if err != nil {
-		return nil, ErrNotFound
-	}
 	limit, offset = s.normalizePagination(limit, offset)
+	// OrgID 是 null.String；用 null.StringFrom 保证非空匹配。
 	rows, err := s.store.ListAuditLogsByOrg(ctx, sqlc.ListAuditLogsByOrgParams{
-		OrgID:  id,
+		OrgID:  null.StringFrom(orgID),
 		Limit:  limit,
 		Offset: offset,
 	})
@@ -205,18 +206,15 @@ func (s *AuditService) ListByTarget(ctx context.Context, principal auth.Principa
 }
 
 func (s *AuditService) authorizeAppTarget(ctx context.Context, principal auth.Principal, targetID string) error {
-	id, err := parseUUID(targetID)
+	// targetID 直接作为字符串传入；不存在时 store 返回 sql.ErrNoRows。
+	app, err := s.store.GetApp(ctx, targetID)
 	if err != nil {
-		return ErrNotFound
-	}
-	app, err := s.store.GetApp(ctx, id)
-	if err != nil {
-		if errors.Is(err, pgx.ErrNoRows) {
+		if errors.Is(err, sql.ErrNoRows) {
 			return ErrNotFound
 		}
 		return fmt.Errorf("查询应用失败: %w", err)
 	}
-	if !auth.CanViewAppAudit(principal, uuidToString(app.OrgID), uuidToString(app.OwnerUserID)) {
+	if !auth.CanViewAppAudit(principal, app.OrgID, app.OwnerUserID) {
 		return ErrForbidden
 	}
 	return nil
@@ -240,14 +238,15 @@ func (s *AuditService) normalizePagination(limit, offset int32) (int32, int32) {
 // ActionDetail 直接读 detail_message。
 func toAuditResult(row sqlc.AuditLog) AuditResult {
 	result := AuditResult{
-		ID:              uuidToString(row.ID),
-		ActorID:         uuidToOptionalString(row.ActorID),
+		ID:              row.ID,
+		ActorID:         strOrEmpty(row.ActorID),
 		ActorRole:       row.ActorRole,
-		OrgID:           uuidToOptionalString(row.OrgID),
+		OrgID:           strOrEmpty(row.OrgID),
 		TargetType:      row.TargetType,
 		TargetID:        row.TargetID,
 		Action:          row.Action,
 		Result:          row.Result,
+		// CreatedAt 是 time.Time（MySQL 侧为 DATETIME/TIMESTAMP）。
 		CreatedAt:       row.CreatedAt,
 		ActionLabel:     labelAction(row.TargetType, row.Action),
 		TargetTypeLabel: labelTargetType(row.TargetType),
@@ -257,8 +256,9 @@ func toAuditResult(row sqlc.AuditLog) AuditResult {
 	if row.ErrorMessage.Valid {
 		result.ErrorMessage = row.ErrorMessage.String
 	}
-	if row.IpAddress != nil {
-		result.IPAddress = row.IpAddress.String()
+	// IpAddress 现在是 null.String（MySQL 侧存储为 VARCHAR）。
+	if row.IpAddress.Valid && row.IpAddress.String != "" {
+		result.IPAddress = row.IpAddress.String
 	}
 	if len(row.MetadataJson) > 0 {
 		metadata := map[string]any{}
@@ -336,49 +336,43 @@ func toAuditResultFromTargetRow(row sqlc.ListAuditLogsByTargetRow) AuditResult {
 }
 
 // applyNameColumns 将 List 查询行的名称 / 软删除标记字段写入 AuditResult。
-// sqlc 对 actor_name 推断为 string、其余三列推断为 interface{}（因为 COALESCE 表达式跨类型）；
-// 这里用 string / bool 适配 helper 屏蔽差异。
+// sqlc 对 actor_name 推断为 string；ActorDeleted / TargetDeleted / TargetName 推断为 interface{}
+// （MySQL CASE/COALESCE 跨类型表达式）；这里用类型开关屏蔽差异。
 func applyNameColumns(r *AuditResult, actorName string, actorDeleted any, targetName any, targetDeleted any) {
 	r.ActorName = actorName
-	r.ActorDeleted = boolFromColumn(actorDeleted)
-	r.TargetName = stringFromColumn(targetName)
-	r.TargetDeleted = boolFromColumn(targetDeleted)
+	r.ActorDeleted = ifaceToBool(actorDeleted)
+	r.TargetName = ifaceToString(targetName)
+	r.TargetDeleted = ifaceToBool(targetDeleted)
 }
 
-// stringFromColumn 把 sqlc 推断为 interface{} 的文本列适配为 string。
-// 兼容 nil、string、*string、pgtype.Text 几种实际承载形式。
-func stringFromColumn(v any) string {
+// ifaceToString 把 sqlc 推断为 interface{} 的文本列适配为 string。
+// MySQL driver 通常返回 []byte 或 string；nil 返回空字符串。
+func ifaceToString(v interface{}) string {
 	switch t := v.(type) {
 	case nil:
 		return ""
+	case []byte:
+		return string(t)
 	case string:
 		return t
-	case *string:
-		if t == nil {
-			return ""
-		}
-		return *t
-	case pgtype.Text:
-		if t.Valid {
-			return t.String
-		}
-		return ""
+	default:
+		return fmt.Sprint(t)
 	}
-	return ""
 }
 
-// boolFromColumn 把 sqlc 推断为 interface{} 的布尔列适配为 bool。
-func boolFromColumn(v any) bool {
+// ifaceToBool 把 sqlc 推断为 interface{} 的布尔列适配为 bool。
+// MySQL 对 deleted_at IS NOT NULL 等布尔表达式返回 int64（0/1）；
+// 纯 bool 与 []byte "1"/"0" 形式也兼容处理。
+func ifaceToBool(v interface{}) bool {
 	switch t := v.(type) {
 	case nil:
 		return false
 	case bool:
 		return t
-	case *bool:
-		if t == nil {
-			return false
-		}
-		return *t
+	case int64:
+		return t != 0
+	case []byte:
+		return len(t) > 0 && t[0] == '1'
 	}
 	return false
 }

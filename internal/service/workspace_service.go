@@ -2,14 +2,12 @@ package service
 
 import (
 	"context"
+	"database/sql"
 	"errors"
 	"fmt"
 	"io"
 	"path"
 	"strings"
-
-	"github.com/jackc/pgx/v5"
-	"github.com/jackc/pgx/v5/pgtype"
 
 	"oc-manager/internal/auth"
 	"oc-manager/internal/integrations/runtime"
@@ -18,7 +16,7 @@ import (
 
 // WorkspaceStore 抽象 workspace service 需要的查询能力。
 type WorkspaceStore interface {
-	GetApp(ctx context.Context, id pgtype.UUID) (sqlc.App, error)
+	GetApp(ctx context.Context, id string) (sqlc.App, error)
 }
 
 // WorkspaceService 把 manager 的工作目录访问代理到 runtime agent。
@@ -67,11 +65,12 @@ func (s *WorkspaceService) List(ctx context.Context, principal auth.Principal, a
 	if err != nil {
 		return WorkspaceListing{}, err
 	}
-	if s.adapter == nil || !app.RuntimeNodeID.Valid {
+	// app.RuntimeNodeID 是 string（非空）；空字符串视为未分配节点。
+	if s.adapter == nil || app.RuntimeNodeID == "" {
 		return WorkspaceListing{}, ErrWorkspaceMissing
 	}
 	listing, err := s.adapter.ListWorkspace(ctx,
-		uuidToString(app.RuntimeNodeID), uuidToString(app.ID), relPath)
+		app.RuntimeNodeID, app.ID, relPath)
 	if err != nil {
 		return WorkspaceListing{}, fmt.Errorf("查询工作目录失败: %w", err)
 	}
@@ -97,11 +96,11 @@ func (s *WorkspaceService) Download(ctx context.Context, principal auth.Principa
 	if err != nil {
 		return nil, err
 	}
-	if s.adapter == nil || !app.RuntimeNodeID.Valid {
+	if s.adapter == nil || app.RuntimeNodeID == "" {
 		return nil, ErrWorkspaceMissing
 	}
 	return s.adapter.DownloadWorkspaceFile(ctx,
-		uuidToString(app.RuntimeNodeID), uuidToString(app.ID), relPath)
+		app.RuntimeNodeID, app.ID, relPath)
 }
 
 // Archive 把工作目录打包为 zip 流写到 w。Sprint 2 改用 scope-aware 端点输出 zip
@@ -115,26 +114,24 @@ func (s *WorkspaceService) Archive(ctx context.Context, principal auth.Principal
 	if err != nil {
 		return err
 	}
-	if s.adapter == nil || !app.RuntimeNodeID.Valid {
+	if s.adapter == nil || app.RuntimeNodeID == "" {
 		return ErrWorkspaceMissing
 	}
 	return s.adapter.StreamWorkspaceArchive(ctx,
-		uuidToString(app.RuntimeNodeID), uuidToString(app.ID), relPath, w)
+		app.RuntimeNodeID, app.ID, relPath, w)
 }
 
 func (s *WorkspaceService) loadAuthorizedApp(ctx context.Context, principal auth.Principal, appID string) (sqlc.App, error) {
-	id, err := parseUUID(appID)
-	if err != nil {
-		return sqlc.App{}, ErrNotFound
-	}
-	app, err := s.store.GetApp(ctx, id)
-	if errors.Is(err, pgx.ErrNoRows) {
+	// appID 直接作为字符串传入；不存在时 store 返回 sql.ErrNoRows。
+	app, err := s.store.GetApp(ctx, appID)
+	if errors.Is(err, sql.ErrNoRows) {
 		return sqlc.App{}, ErrNotFound
 	}
 	if err != nil {
 		return sqlc.App{}, fmt.Errorf("查询应用失败: %w", err)
 	}
-	if !auth.CanViewApp(principal, uuidToString(app.OrgID), uuidToString(app.OwnerUserID)) {
+	// app.OrgID / app.OwnerUserID 已是 string，直接传入权限校验。
+	if !auth.CanViewApp(principal, app.OrgID, app.OwnerUserID) {
 		return sqlc.App{}, ErrWorkspaceForbidden
 	}
 	return app, nil

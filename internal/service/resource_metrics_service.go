@@ -3,13 +3,11 @@ package service
 
 import (
 	"context"
+	"database/sql"
 	"errors"
 	"fmt"
 	"strings"
 	"time"
-
-	"github.com/jackc/pgx/v5"
-	"github.com/jackc/pgx/v5/pgtype"
 
 	"oc-manager/internal/auth"
 	"oc-manager/internal/domain"
@@ -18,16 +16,17 @@ import (
 
 // ResourceMetricsStore 抽象资源趋势服务需要的 sqlc 查询能力。
 type ResourceMetricsStore interface {
-	GetRuntimeNode(ctx context.Context, id pgtype.UUID) (sqlc.RuntimeNode, error)
-	GetApp(ctx context.Context, id pgtype.UUID) (sqlc.App, error)
+	GetRuntimeNode(ctx context.Context, id string) (sqlc.RuntimeNode, error)
+	GetApp(ctx context.Context, id string) (sqlc.App, error)
 	ListAppsByRuntimeNode(ctx context.Context, arg sqlc.ListAppsByRuntimeNodeParams) ([]sqlc.App, error)
-	ListLatestInstanceResourceSamplesByNode(ctx context.Context, runtimeNodeID pgtype.UUID) ([]sqlc.InstanceResourceSample, error)
+	ListLatestInstanceResourceSamplesByNode(ctx context.Context, runtimeNodeID string) ([]sqlc.InstanceResourceSample, error)
 	ListNodeResourceSamples(ctx context.Context, arg sqlc.ListNodeResourceSamplesParams) ([]sqlc.NodeResourceSample, error)
 	ListNodeResourceBuckets(ctx context.Context, arg sqlc.ListNodeResourceBucketsParams) ([]sqlc.ListNodeResourceBucketsRow, error)
 	ListNodeInstanceResourceSamples(ctx context.Context, arg sqlc.ListNodeInstanceResourceSamplesParams) ([]sqlc.InstanceResourceSample, error)
 	ListNodeInstanceResourceBuckets(ctx context.Context, arg sqlc.ListNodeInstanceResourceBucketsParams) ([]sqlc.ListNodeInstanceResourceBucketsRow, error)
 	ListInstanceResourceSamples(ctx context.Context, arg sqlc.ListInstanceResourceSamplesParams) ([]sqlc.InstanceResourceSample, error)
 	ListInstanceResourceBuckets(ctx context.Context, arg sqlc.ListInstanceResourceBucketsParams) ([]sqlc.ListInstanceResourceBucketsRow, error)
+	ListLatestNodeResourceSamples(ctx context.Context, runtimeNodeIds []string) ([]sqlc.NodeResourceSample, error)
 }
 
 // ResourceMetricsService 查询 runtime 节点与应用实例资源指标。
@@ -153,21 +152,20 @@ func (s *ResourceMetricsService) ListNodeResources(ctx context.Context, principa
 	if principal.Role != domain.UserRolePlatformAdmin {
 		return nil, ErrForbidden
 	}
-	nodeUUID, err := parseUUID(nodeID)
-	if err != nil {
-		return nil, ErrNotFound
-	}
-	if _, err := s.store.GetRuntimeNode(ctx, nodeUUID); errors.Is(err, pgx.ErrNoRows) {
+	if _, err := s.store.GetRuntimeNode(ctx, nodeID); errors.Is(err, sql.ErrNoRows) {
 		return nil, ErrNotFound
 	} else if err != nil {
 		return nil, fmt.Errorf("查询 runtime 节点失败: %w", err)
 	}
 	if r.BucketSeconds > 0 {
+		// BucketSeconds 在 sqlc 生成为 time.Time（类型推断问题）；
+		// 以 Unix 时间戳秒数构造 time.Time，go-sql-driver 会将其转为整数秒传入 MySQL FLOOR 分桶。
+		bucketTime := time.Unix(int64(r.BucketSeconds), 0).UTC()
 		rows, err := s.store.ListNodeResourceBuckets(ctx, sqlc.ListNodeResourceBucketsParams{
-			RuntimeNodeID: nodeUUID,
-			BucketSeconds: r.BucketSeconds,
-			FromSampledAt: timestamptz(r.From),
-			ToSampledAt:   timestamptz(r.To),
+			RuntimeNodeID: nodeID,
+			BucketSeconds: bucketTime,
+			FromSampledAt: r.From,
+			ToSampledAt:   r.To,
 		})
 		if err != nil {
 			return nil, fmt.Errorf("查询节点资源聚合失败: %w", err)
@@ -175,9 +173,9 @@ func (s *ResourceMetricsService) ListNodeResources(ctx context.Context, principa
 		return nodeBucketResults(rows), nil
 	}
 	rows, err := s.store.ListNodeResourceSamples(ctx, sqlc.ListNodeResourceSamplesParams{
-		RuntimeNodeID: nodeUUID,
-		FromSampledAt: timestamptz(r.From),
-		ToSampledAt:   timestamptz(r.To),
+		RuntimeNodeID: nodeID,
+		FromSampledAt: r.From,
+		ToSampledAt:   r.To,
 	})
 	if err != nil {
 		return nil, fmt.Errorf("查询节点资源采样失败: %w", err)
@@ -190,11 +188,7 @@ func (s *ResourceMetricsService) ListNodeInstances(ctx context.Context, principa
 	if principal.Role != domain.UserRolePlatformAdmin {
 		return nil, ErrForbidden
 	}
-	nodeUUID, err := parseUUID(nodeID)
-	if err != nil {
-		return nil, ErrNotFound
-	}
-	if _, err := s.store.GetRuntimeNode(ctx, nodeUUID); errors.Is(err, pgx.ErrNoRows) {
+	if _, err := s.store.GetRuntimeNode(ctx, nodeID); errors.Is(err, sql.ErrNoRows) {
 		return nil, ErrNotFound
 	} else if err != nil {
 		return nil, fmt.Errorf("查询 runtime 节点失败: %w", err)
@@ -208,22 +202,23 @@ func (s *ResourceMetricsService) ListNodeInstances(ctx context.Context, principa
 	if offset < 0 {
 		offset = 0
 	}
-	apps, err := s.store.ListAppsByRuntimeNode(ctx, sqlc.ListAppsByRuntimeNodeParams{RuntimeNodeID: nodeUUID, Limit: limit, Offset: offset})
+	apps, err := s.store.ListAppsByRuntimeNode(ctx, sqlc.ListAppsByRuntimeNodeParams{RuntimeNodeID: nodeID, Limit: limit, Offset: offset})
 	if err != nil {
 		return nil, fmt.Errorf("查询节点实例失败: %w", err)
 	}
-	samples, err := s.store.ListLatestInstanceResourceSamplesByNode(ctx, nodeUUID)
+	samples, err := s.store.ListLatestInstanceResourceSamplesByNode(ctx, nodeID)
 	if err != nil {
 		return nil, fmt.Errorf("查询实例最近资源采样失败: %w", err)
 	}
+	// 按 AppID（string）建索引，便于 O(1) 查找。
 	latest := make(map[string]sqlc.InstanceResourceSample, len(samples))
 	for _, sample := range samples {
-		latest[uuidToString(sample.AppID)] = sample
+		latest[sample.AppID] = sample
 	}
 	results := make([]NodeInstanceResult, 0, len(apps))
 	for _, app := range apps {
 		result := nodeInstanceResult(app)
-		if sample, ok := latest[uuidToString(app.ID)]; ok {
+		if sample, ok := latest[app.ID]; ok {
 			current := instanceSampleResult(sample)
 			result.CurrentResource = &current
 		}
@@ -237,36 +232,30 @@ func (s *ResourceMetricsService) ListNodeInstanceResources(ctx context.Context, 
 	if principal.Role != domain.UserRolePlatformAdmin {
 		return nil, ErrForbidden
 	}
-	nodeUUID, err := parseUUID(nodeID)
-	if err != nil {
-		return nil, ErrNotFound
-	}
-	appUUID, err := parseUUID(appID)
-	if err != nil {
-		return nil, ErrNotFound
-	}
-	if _, err := s.store.GetRuntimeNode(ctx, nodeUUID); errors.Is(err, pgx.ErrNoRows) {
+	if _, err := s.store.GetRuntimeNode(ctx, nodeID); errors.Is(err, sql.ErrNoRows) {
 		return nil, ErrNotFound
 	} else if err != nil {
 		return nil, fmt.Errorf("查询 runtime 节点失败: %w", err)
 	}
-	app, err := s.store.GetApp(ctx, appUUID)
-	if errors.Is(err, pgx.ErrNoRows) {
+	app, err := s.store.GetApp(ctx, appID)
+	if errors.Is(err, sql.ErrNoRows) {
 		return nil, ErrNotFound
 	}
 	if err != nil {
 		return nil, fmt.Errorf("查询应用失败: %w", err)
 	}
-	if app.DeletedAt.Valid || !app.RuntimeNodeID.Valid || uuidToString(app.RuntimeNodeID) != uuidToString(nodeUUID) {
+	// app.RuntimeNodeID 是 string；与 nodeID 直接比较。
+	if app.DeletedAt.Valid || app.RuntimeNodeID != nodeID {
 		return nil, ErrNotFound
 	}
 	if r.BucketSeconds > 0 {
+		bucketTime := time.Unix(int64(r.BucketSeconds), 0).UTC()
 		rows, err := s.store.ListNodeInstanceResourceBuckets(ctx, sqlc.ListNodeInstanceResourceBucketsParams{
-			RuntimeNodeID: nodeUUID,
-			AppID:         appUUID,
-			BucketSeconds: r.BucketSeconds,
-			FromSampledAt: timestamptz(r.From),
-			ToSampledAt:   timestamptz(r.To),
+			RuntimeNodeID: nodeID,
+			AppID:         appID,
+			BucketSeconds: bucketTime,
+			FromSampledAt: r.From,
+			ToSampledAt:   r.To,
 		})
 		if err != nil {
 			return nil, fmt.Errorf("查询节点实例资源聚合失败: %w", err)
@@ -274,10 +263,10 @@ func (s *ResourceMetricsService) ListNodeInstanceResources(ctx context.Context, 
 		return nodeInstanceBucketResults(rows), nil
 	}
 	rows, err := s.store.ListNodeInstanceResourceSamples(ctx, sqlc.ListNodeInstanceResourceSamplesParams{
-		RuntimeNodeID: nodeUUID,
-		AppID:         appUUID,
-		FromSampledAt: timestamptz(r.From),
-		ToSampledAt:   timestamptz(r.To),
+		RuntimeNodeID: nodeID,
+		AppID:         appID,
+		FromSampledAt: r.From,
+		ToSampledAt:   r.To,
 	})
 	if err != nil {
 		return nil, fmt.Errorf("查询节点实例资源采样失败: %w", err)
@@ -287,12 +276,8 @@ func (s *ResourceMetricsService) ListNodeInstanceResources(ctx context.Context, 
 
 // ListAppResources 查询应用实例资源趋势；权限沿用应用读权限。
 func (s *ResourceMetricsService) ListAppResources(ctx context.Context, principal auth.Principal, appID string, r ResourceTimeRange) ([]InstanceResourceSampleResult, error) {
-	appUUID, err := parseUUID(appID)
-	if err != nil {
-		return nil, ErrNotFound
-	}
-	app, err := s.store.GetApp(ctx, appUUID)
-	if errors.Is(err, pgx.ErrNoRows) {
+	app, err := s.store.GetApp(ctx, appID)
+	if errors.Is(err, sql.ErrNoRows) {
 		return nil, ErrNotFound
 	}
 	if err != nil {
@@ -301,15 +286,16 @@ func (s *ResourceMetricsService) ListAppResources(ctx context.Context, principal
 	if app.DeletedAt.Valid {
 		return nil, ErrNotFound
 	}
-	if !auth.CanViewApp(principal, uuidToString(app.OrgID), uuidToString(app.OwnerUserID)) {
+	if !auth.CanViewApp(principal, app.OrgID, app.OwnerUserID) {
 		return nil, ErrForbidden
 	}
 	if r.BucketSeconds > 0 {
+		bucketTime := time.Unix(int64(r.BucketSeconds), 0).UTC()
 		rows, err := s.store.ListInstanceResourceBuckets(ctx, sqlc.ListInstanceResourceBucketsParams{
-			AppID:         appUUID,
-			BucketSeconds: r.BucketSeconds,
-			FromSampledAt: timestamptz(r.From),
-			ToSampledAt:   timestamptz(r.To),
+			AppID:         appID,
+			BucketSeconds: bucketTime,
+			FromSampledAt: r.From,
+			ToSampledAt:   r.To,
 		})
 		if err != nil {
 			return nil, fmt.Errorf("查询应用资源聚合失败: %w", err)
@@ -317,9 +303,9 @@ func (s *ResourceMetricsService) ListAppResources(ctx context.Context, principal
 		return instanceBucketResults(rows), nil
 	}
 	rows, err := s.store.ListInstanceResourceSamples(ctx, sqlc.ListInstanceResourceSamplesParams{
-		AppID:         appUUID,
-		FromSampledAt: timestamptz(r.From),
-		ToSampledAt:   timestamptz(r.To),
+		AppID:         appID,
+		FromSampledAt: r.From,
+		ToSampledAt:   r.To,
 	})
 	if err != nil {
 		return nil, fmt.Errorf("查询应用资源采样失败: %w", err)
@@ -340,17 +326,12 @@ func normalizeResourceBucket(bucketRaw string) (int32, error) {
 	}
 }
 
-// timestamptz 将已归一化的 UTC 时间转换为 sqlc 查询参数。
-func timestamptz(value time.Time) pgtype.Timestamptz {
-	return pgtype.Timestamptz{Time: value.UTC(), Valid: true}
-}
-
-// formatSampledAt 统一采样时间输出格式；无效时间返回空串以兼容 omitempty 语义之外的固定字段。
-func formatSampledAt(value pgtype.Timestamptz) string {
-	if !value.Valid {
+// formatSampledAt 统一采样时间输出格式；time.Time 零值返回空串以兼容固定字段。
+func formatSampledAt(value time.Time) string {
+	if value.IsZero() {
 		return ""
 	}
-	return value.Time.UTC().Format(time.RFC3339)
+	return value.UTC().Format(time.RFC3339)
 }
 
 // nodeSampleResults 将节点原始采样行批量映射为 DTO。
@@ -364,6 +345,7 @@ func nodeSampleResults(rows []sqlc.NodeResourceSample) []NodeResourceSampleResul
 
 // nodeSampleResult 保留原始采样中的 NULL 语义，缺失指标映射为 nil 指针。
 func nodeSampleResult(row sqlc.NodeResourceSample) NodeResourceSampleResult {
+	// SampledAt 是 time.Time（非空）。
 	result := NodeResourceSampleResult{SampledAt: formatSampledAt(row.SampledAt)}
 	if row.CpuPercent.Valid {
 		result.CPUPercent = float64Ptr(row.CpuPercent.Float64)
@@ -387,7 +369,8 @@ func nodeSampleResult(row sqlc.NodeResourceSample) NodeResourceSampleResult {
 		result.NetworkTxBytes = int64Ptr(row.NetworkTxBytes.Int64)
 	}
 	if row.InstanceCount.Valid {
-		result.InstanceCount = int32Ptr(row.InstanceCount.Int32)
+		// null.Int 内部是 int64；InstanceCount DTO 字段是 *int32。
+		result.InstanceCount = int32Ptr(int32(row.InstanceCount.Int64))
 	}
 	if row.LastError.Valid {
 		result.LastError = row.LastError.String
@@ -396,6 +379,7 @@ func nodeSampleResult(row sqlc.NodeResourceSample) NodeResourceSampleResult {
 }
 
 // nodeBucketResults 将节点聚合桶行映射为 DTO，并使用 Has* 字段区分 0 值和缺失值。
+// SampledAt 是 time.Time（MySQL FROM_UNIXTIME 结果）；LastError 是 interface{}。
 func nodeBucketResults(rows []sqlc.ListNodeResourceBucketsRow) []NodeResourceSampleResult {
 	results := make([]NodeResourceSampleResult, 0, len(rows))
 	for _, row := range rows {
@@ -422,10 +406,12 @@ func nodeBucketResults(rows []sqlc.ListNodeResourceBucketsRow) []NodeResourceSam
 			result.NetworkTxBytes = int64Ptr(row.NetworkTxBytes)
 		}
 		if row.HasInstanceCount {
-			result.InstanceCount = int32Ptr(row.InstanceCount)
+			// InstanceCount 在 bucket row 是 int64（SIGNED 聚合结果），转为 int32 DTO。
+			result.InstanceCount = int32Ptr(int32(row.InstanceCount))
 		}
 		if row.HasLastError {
-			result.LastError = row.LastError
+			// LastError 在 bucket row 是 interface{}（MySQL COALESCE 字符串结果）。
+			result.LastError = ifaceToString(row.LastError)
 		}
 		results = append(results, result)
 	}
@@ -533,9 +519,11 @@ func nodeInstanceBucketResults(rows []sqlc.ListNodeInstanceResourceBucketsRow) [
 }
 
 // instanceBucketValues 统一承接两类实例 bucket sqlc 行，避免用长参数列表丢失 Has* 语义。
+// SampledAt 是 time.Time（MySQL FROM_UNIXTIME 结果，非空）。
+// ContainerStatus / LastError 是 interface{}（MySQL COALESCE 跨类型表达式）。
 type instanceBucketValues struct {
-	SampledAt           pgtype.Timestamptz
-	ContainerStatus     string
+	SampledAt           time.Time
+	ContainerStatus     interface{}
 	HasContainerStatus  bool
 	CPUPercent          float64
 	HasCPUPercent       bool
@@ -551,15 +539,16 @@ type instanceBucketValues struct {
 	HasNetworkRxBytes   bool
 	NetworkTxBytes      int64
 	HasNetworkTxBytes   bool
-	LastError           string
+	LastError           interface{}
 	HasLastError        bool
 }
 
 // instanceBucketResult 根据 Has* 字段决定是否输出指标指针，保留 0 值作为有效采样值。
+// ContainerStatus / LastError 为 interface{}，通过 ifaceToString 转换。
 func instanceBucketResult(row instanceBucketValues) InstanceResourceSampleResult {
 	result := InstanceResourceSampleResult{SampledAt: formatSampledAt(row.SampledAt)}
 	if row.HasContainerStatus {
-		result.ContainerStatus = row.ContainerStatus
+		result.ContainerStatus = ifaceToString(row.ContainerStatus)
 	}
 	if row.HasCPUPercent {
 		result.CPUPercent = float64Ptr(row.CPUPercent)
@@ -583,7 +572,7 @@ func instanceBucketResult(row instanceBucketValues) InstanceResourceSampleResult
 		result.NetworkTxBytes = int64Ptr(row.NetworkTxBytes)
 	}
 	if row.HasLastError {
-		result.LastError = row.LastError
+		result.LastError = ifaceToString(row.LastError)
 	}
 	return result
 }
@@ -591,12 +580,13 @@ func instanceBucketResult(row instanceBucketValues) InstanceResourceSampleResult
 // nodeInstanceResult 将应用行映射为节点实例摘要，不暴露密钥、prompt 等无关字段。
 func nodeInstanceResult(app sqlc.App) NodeInstanceResult {
 	result := NodeInstanceResult{
-		AppID:         uuidToString(app.ID),
-		OrgID:         uuidToString(app.OrgID),
-		OwnerUserID:   uuidToString(app.OwnerUserID),
+		AppID:         app.ID,
+		OrgID:         app.OrgID,
+		OwnerUserID:   app.OwnerUserID,
 		Name:          app.Name,
 		Status:        app.Status,
-		RuntimeNodeID: uuidToOptionalString(app.RuntimeNodeID),
+		// RuntimeNodeID 是 string（非空）。
+		RuntimeNodeID: app.RuntimeNodeID,
 	}
 	if app.ContainerID.Valid {
 		result.ContainerID = app.ContainerID.String

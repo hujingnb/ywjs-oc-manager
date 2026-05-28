@@ -4,14 +4,14 @@ import (
 	"bytes"
 	"context"
 	"crypto/sha256"
+	"database/sql"
 	"encoding/hex"
 	"encoding/json"
 	"errors"
 	"fmt"
 	"strings"
 
-	"github.com/jackc/pgx/v5"
-	"github.com/jackc/pgx/v5/pgtype"
+	"github.com/guregu/null/v5"
 
 	"oc-manager/internal/auth"
 	"oc-manager/internal/integrations/hermes"
@@ -26,14 +26,17 @@ var auxiliarySlots = []string{
 
 // AssistantVersionStore 抽象版本 service 需要的数据访问能力。
 type AssistantVersionStore interface {
-	GetAssistantVersion(ctx context.Context, id pgtype.UUID) (sqlc.AssistantVersion, error)
+	GetAssistantVersion(ctx context.Context, id string) (sqlc.AssistantVersion, error)
 	GetAssistantVersionByName(ctx context.Context, name string) (sqlc.AssistantVersion, error)
 	ListAssistantVersions(ctx context.Context) ([]sqlc.AssistantVersion, error)
-	CreateAssistantVersion(ctx context.Context, arg sqlc.CreateAssistantVersionParams) (sqlc.AssistantVersion, error)
-	UpdateAssistantVersion(ctx context.Context, arg sqlc.UpdateAssistantVersionParams) (sqlc.AssistantVersion, error)
-	UpdateAssistantVersionSkills(ctx context.Context, arg sqlc.UpdateAssistantVersionSkillsParams) (sqlc.AssistantVersion, error)
-	SoftDeleteAssistantVersion(ctx context.Context, id pgtype.UUID) (sqlc.AssistantVersion, error)
-	CountAppsUsingVersion(ctx context.Context, id pgtype.UUID) (int64, error)
+	// CreateAssistantVersion 创建版本（:exec），service 调用前需自行生成 ID 并在写入后 GetAssistantVersion 读回。
+	CreateAssistantVersion(ctx context.Context, arg sqlc.CreateAssistantVersionParams) error
+	// UpdateAssistantVersion 更新版本（:exec），service 写入后按 ID 重新读回。
+	UpdateAssistantVersion(ctx context.Context, arg sqlc.UpdateAssistantVersionParams) error
+	// UpdateAssistantVersionSkills 更新版本 skill 列表（:exec），service 写入后按 ID 重新读回。
+	UpdateAssistantVersionSkills(ctx context.Context, arg sqlc.UpdateAssistantVersionSkillsParams) error
+	SoftDeleteAssistantVersion(ctx context.Context, id string) error
+	CountAppsUsingVersion(ctx context.Context, versionID null.String) (int64, error)
 	CountOrgsUsingVersion(ctx context.Context, id string) (int64, error)
 }
 
@@ -151,12 +154,9 @@ func (s *AssistantVersionService) Get(ctx context.Context, principal auth.Princi
 
 // loadVersion 按 id 取版本，未找到统一映射为 ErrAssistantVersionNotFound。
 func (s *AssistantVersionService) loadVersion(ctx context.Context, id string) (sqlc.AssistantVersion, error) {
-	uid, err := parseUUID(id)
-	if err != nil {
-		return sqlc.AssistantVersion{}, ErrAssistantVersionNotFound
-	}
-	row, err := s.store.GetAssistantVersion(ctx, uid)
-	if errors.Is(err, pgx.ErrNoRows) {
+	// id 直接作为字符串传入，不再需要解析为 UUID 类型；不存在时 store 返回 sql.ErrNoRows。
+	row, err := s.store.GetAssistantVersion(ctx, id)
+	if errors.Is(err, sql.ErrNoRows) {
 		return sqlc.AssistantVersion{}, ErrAssistantVersionNotFound
 	}
 	if err != nil {
@@ -178,7 +178,7 @@ func toAssistantVersionResult(row sqlc.AssistantVersion) (AssistantVersionResult
 		return AssistantVersionResult{}, err
 	}
 	return AssistantVersionResult{
-		ID:           uuidToString(row.ID),
+		ID:           row.ID,
 		Name:         row.Name,
 		Description:  row.Description,
 		SystemPrompt: row.SystemPrompt,
@@ -280,10 +280,10 @@ func (s *AssistantVersionService) Update(ctx context.Context, principal auth.Pri
 	newName := trimSpace(in.Name)
 	if newName != current.Name {
 		if existing, err := s.store.GetAssistantVersionByName(ctx, newName); err == nil {
-			if uuidToString(existing.ID) != uuidToString(current.ID) {
+			if existing.ID != current.ID {
 				return AssistantVersionResult{}, ErrAssistantVersionNameTaken
 			}
-		} else if !errors.Is(err, pgx.ErrNoRows) {
+		} else if !errors.Is(err, sql.ErrNoRows) {
 			return AssistantVersionResult{}, fmt.Errorf("查询版本名称失败: %w", err)
 		}
 	}
@@ -295,7 +295,8 @@ func (s *AssistantVersionService) Update(ctx context.Context, principal auth.Pri
 	if containerAffectingChanged(current, in, routingJSON) {
 		revision++
 	}
-	row, err := s.store.UpdateAssistantVersion(ctx, sqlc.UpdateAssistantVersionParams{
+	// UpdateAssistantVersion 为 :exec，不返回行；写入后重新按 ID 读取最新数据。
+	if err := s.store.UpdateAssistantVersion(ctx, sqlc.UpdateAssistantVersionParams{
 		ID:           current.ID,
 		Name:         newName,
 		Description:  trimSpace(in.Description),
@@ -305,9 +306,12 @@ func (s *AssistantVersionService) Update(ctx context.Context, principal auth.Pri
 		RoutingJson:  routingJSON,
 		SkillsJson:   current.SkillsJson,
 		Revision:     revision,
-	})
-	if err != nil {
+	}); err != nil {
 		return AssistantVersionResult{}, fmt.Errorf("更新版本失败: %w", err)
+	}
+	row, err := s.store.GetAssistantVersion(ctx, current.ID)
+	if err != nil {
+		return AssistantVersionResult{}, fmt.Errorf("重新查询更新后版本失败: %w", err)
 	}
 	return toAssistantVersionResult(row)
 }
@@ -365,22 +369,23 @@ func (s *AssistantVersionService) Delete(ctx context.Context, principal auth.Pri
 	if err != nil {
 		return err
 	}
-	appCount, err := s.store.CountAppsUsingVersion(ctx, row.ID)
+	// CountAppsUsingVersion 参数为 null.String（version_id 可空列用于 JSON 搜索）。
+	appCount, err := s.store.CountAppsUsingVersion(ctx, null.StringFrom(row.ID))
 	if err != nil {
 		return fmt.Errorf("统计引用实例失败: %w", err)
 	}
 	if appCount > 0 {
 		return fmt.Errorf("%w: 仍有 %d 个实例使用", ErrAssistantVersionInUse, appCount)
 	}
-	// jsonb_exists 的参数是裸字符串 id。
-	orgCount, err := s.store.CountOrgsUsingVersion(ctx, uuidToString(row.ID))
+	// CountOrgsUsingVersion 的参数是裸字符串 id（JSON 搜索）。
+	orgCount, err := s.store.CountOrgsUsingVersion(ctx, row.ID)
 	if err != nil {
 		return fmt.Errorf("统计引用企业失败: %w", err)
 	}
 	if orgCount > 0 {
 		return fmt.Errorf("%w: 仍有 %d 个企业 allowlist 包含", ErrAssistantVersionInUse, orgCount)
 	}
-	if _, err := s.store.SoftDeleteAssistantVersion(ctx, row.ID); err != nil {
+	if err := s.store.SoftDeleteAssistantVersion(ctx, row.ID); err != nil {
 		return fmt.Errorf("删除版本失败: %w", err)
 	}
 	return nil
@@ -413,7 +418,7 @@ func (s *AssistantVersionService) UploadSkill(ctx context.Context, principal aut
 		}
 	}
 	// 先写 blob 再写库：persistSkills 失败时最多留下一个无引用的 tar（可由清理任务回收），不会出现 DB 指向缺失文件。
-	relPath, err := s.blobs.PutSkill(uuidToString(row.ID), info.Name, data)
+	relPath, err := s.blobs.PutSkill(row.ID, info.Name, data)
 	if err != nil {
 		return AssistantVersionResult{}, fmt.Errorf("写入 skill tar 失败: %w", err)
 	}
@@ -468,13 +473,17 @@ func (s *AssistantVersionService) persistSkills(ctx context.Context, row sqlc.As
 	if err != nil {
 		return AssistantVersionResult{}, fmt.Errorf("序列化 skills 失败: %w", err)
 	}
-	updated, err := s.store.UpdateAssistantVersionSkills(ctx, sqlc.UpdateAssistantVersionSkillsParams{
+	// UpdateAssistantVersionSkills 为 :exec，不返回行；写入后重新读取最新数据。
+	if err := s.store.UpdateAssistantVersionSkills(ctx, sqlc.UpdateAssistantVersionSkillsParams{
 		ID:         row.ID,
 		SkillsJson: skillsJSON,
 		Revision:   row.Revision + 1,
-	})
-	if err != nil {
+	}); err != nil {
 		return AssistantVersionResult{}, fmt.Errorf("更新版本 skill 失败: %w", err)
+	}
+	updated, err := s.store.GetAssistantVersion(ctx, row.ID)
+	if err != nil {
+		return AssistantVersionResult{}, fmt.Errorf("重新查询版本 skill 更新后数据失败: %w", err)
 	}
 	return toAssistantVersionResult(updated)
 }
@@ -523,15 +532,22 @@ func (s *AssistantVersionService) Create(ctx context.Context, principal auth.Pri
 	}
 	if _, err := s.store.GetAssistantVersionByName(ctx, trimSpace(in.Name)); err == nil {
 		return AssistantVersionResult{}, ErrAssistantVersionNameTaken
-	} else if !errors.Is(err, pgx.ErrNoRows) {
+	} else if !errors.Is(err, sql.ErrNoRows) {
 		return AssistantVersionResult{}, fmt.Errorf("查询版本名称失败: %w", err)
 	}
 	routingJSON, err := json.Marshal(normalizeRouting(in.Routing))
 	if err != nil {
 		return AssistantVersionResult{}, fmt.Errorf("序列化 routing 失败: %w", err)
 	}
-	creator, _ := optionalUUID(principal.UserID)
-	row, err := s.store.CreateAssistantVersion(ctx, sqlc.CreateAssistantVersionParams{
+	// CreateAssistantVersion 为 :exec，预先生成 ID 后写入，再读回获取完整行。
+	// CreatedBy 为可空 null.String；principal.UserID 非空时填充，否则留 NULL。
+	newID := newUUID()
+	createdBy := null.String{}
+	if principal.UserID != "" {
+		createdBy = null.StringFrom(principal.UserID)
+	}
+	if err := s.store.CreateAssistantVersion(ctx, sqlc.CreateAssistantVersionParams{
+		ID:           newID,
 		Name:         trimSpace(in.Name),
 		Description:  trimSpace(in.Description),
 		SystemPrompt: in.SystemPrompt,
@@ -539,10 +555,13 @@ func (s *AssistantVersionService) Create(ctx context.Context, principal auth.Pri
 		MainModel:    trimSpace(in.MainModel),
 		RoutingJson:  routingJSON,
 		SkillsJson:   []byte("[]"),
-		CreatedBy:    creator,
-	})
-	if err != nil {
+		CreatedBy:    createdBy,
+	}); err != nil {
 		return AssistantVersionResult{}, fmt.Errorf("写入版本失败: %w", err)
+	}
+	row, err := s.store.GetAssistantVersion(ctx, newID)
+	if err != nil {
+		return AssistantVersionResult{}, fmt.Errorf("读取新建版本失败: %w", err)
 	}
 	return toAssistantVersionResult(row)
 }

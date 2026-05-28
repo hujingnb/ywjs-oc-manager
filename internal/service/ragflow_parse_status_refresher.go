@@ -4,7 +4,7 @@ import (
 	"context"
 	"fmt"
 
-	"github.com/jackc/pgx/v5/pgtype"
+	"github.com/guregu/null/v5"
 
 	"oc-manager/internal/integrations/ragflow"
 	"oc-manager/internal/store/sqlc"
@@ -15,8 +15,8 @@ import (
 type RagflowParseStatusRefresherStore interface {
 	// ListRAGFlowDocumentsNeedingRefresh 找出 queued / running 状态、且远端 dataset 已创建的文档。
 	ListRAGFlowDocumentsNeedingRefresh(ctx context.Context, limit int32) ([]sqlc.ListRAGFlowDocumentsNeedingRefreshRow, error)
-	// UpdateRAGFlowDocumentParseStatus 回写最新的 parse_status / progress / last_error。
-	UpdateRAGFlowDocumentParseStatus(ctx context.Context, arg sqlc.UpdateRAGFlowDocumentParseStatusParams) (sqlc.RagflowDocument, error)
+	// UpdateRAGFlowDocumentParseStatus 回写最新的 parse_status / progress / last_error（:exec）。
+	UpdateRAGFlowDocumentParseStatus(ctx context.Context, arg sqlc.UpdateRAGFlowDocumentParseStatusParams) error
 }
 
 // RagflowParseStatusRefreshClient 是任务所需的 RAGFlow 子集；
@@ -77,13 +77,15 @@ func (r *RagflowParseStatusRefresher) Tick(ctx context.Context) error {
 		return nil
 	}
 	// 按远端 dataset 分组，避免对同一 dataset 重复调用 RAGFlow ListDocuments。
+	// RemoteDatasetID 是 null.String，取其字符串值用于分组（查询已过滤 NULL）。
 	byDataset := make(map[string][]sqlc.ListRAGFlowDocumentsNeedingRefreshRow, len(rows))
 	order := make([]string, 0, len(rows))
 	for _, row := range rows {
-		if _, ok := byDataset[row.RemoteDatasetID]; !ok {
-			order = append(order, row.RemoteDatasetID)
+		remoteID := row.RemoteDatasetID.String
+		if _, ok := byDataset[remoteID]; !ok {
+			order = append(order, remoteID)
 		}
-		byDataset[row.RemoteDatasetID] = append(byDataset[row.RemoteDatasetID], row)
+		byDataset[remoteID] = append(byDataset[remoteID], row)
 	}
 
 	var firstErr error
@@ -112,11 +114,11 @@ func (r *RagflowParseStatusRefresher) Tick(ctx context.Context) error {
 // 但保留原 parse_status / progress，下一轮 tick 会重试。
 func (r *RagflowParseStatusRefresher) markGroupListFailure(ctx context.Context, group []sqlc.ListRAGFlowDocumentsNeedingRefreshRow, listErr error) {
 	for _, row := range group {
-		_, _ = r.store.UpdateRAGFlowDocumentParseStatus(ctx, sqlc.UpdateRAGFlowDocumentParseStatusParams{
+		_ = r.store.UpdateRAGFlowDocumentParseStatus(ctx, sqlc.UpdateRAGFlowDocumentParseStatusParams{
 			ID:          row.ID,
 			ParseStatus: row.ParseStatus,
 			Progress:    row.Progress,
-			LastError:   pgtype.Text{String: listErr.Error(), Valid: true},
+			LastError:   null.StringFrom(listErr.Error()),
 		})
 	}
 }
@@ -126,11 +128,11 @@ func (r *RagflowParseStatusRefresher) markGroupListFailure(ctx context.Context, 
 func (r *RagflowParseStatusRefresher) applyRemoteStatus(ctx context.Context, row sqlc.ListRAGFlowDocumentsNeedingRefreshRow, remoteByID map[string]ragflow.Document) {
 	remote, ok := remoteByID[row.RagflowDocumentID]
 	if !ok {
-		_, _ = r.store.UpdateRAGFlowDocumentParseStatus(ctx, sqlc.UpdateRAGFlowDocumentParseStatusParams{
+		_ = r.store.UpdateRAGFlowDocumentParseStatus(ctx, sqlc.UpdateRAGFlowDocumentParseStatusParams{
 			ID:          row.ID,
 			ParseStatus: "failed",
 			Progress:    row.Progress,
-			LastError:   pgtype.Text{String: "RAGFlow 未找到对应 document，可能在远端已被删除", Valid: true},
+			LastError:   null.StringFrom("RAGFlow 未找到对应 document，可能在远端已被删除"),
 		})
 		return
 	}
@@ -140,10 +142,10 @@ func (r *RagflowParseStatusRefresher) applyRemoteStatus(ctx context.Context, row
 	if status == row.ParseStatus && progress == row.Progress {
 		return
 	}
-	_, _ = r.store.UpdateRAGFlowDocumentParseStatus(ctx, sqlc.UpdateRAGFlowDocumentParseStatusParams{
+	_ = r.store.UpdateRAGFlowDocumentParseStatus(ctx, sqlc.UpdateRAGFlowDocumentParseStatusParams{
 		ID:          row.ID,
 		ParseStatus: status,
 		Progress:    progress,
-		LastError:   pgtype.Text{},
+		LastError:   null.String{},
 	})
 }

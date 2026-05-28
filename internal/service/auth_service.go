@@ -2,13 +2,13 @@ package service
 
 import (
 	"context"
+	"database/sql"
 	"errors"
 	"fmt"
 	"strings"
 	"time"
 
-	"github.com/jackc/pgx/v5"
-	"github.com/jackc/pgx/v5/pgtype"
+	"github.com/guregu/null/v5"
 
 	"oc-manager/internal/auth"
 	"oc-manager/internal/domain"
@@ -19,13 +19,14 @@ import (
 type AuthStore interface {
 	GetUserByUsername(ctx context.Context, username string) (sqlc.User, error)
 	GetUserByOrgAndUsername(ctx context.Context, arg sqlc.GetUserByOrgAndUsernameParams) (sqlc.User, error)
-	GetUser(ctx context.Context, id pgtype.UUID) (sqlc.User, error)
-	MarkUserLoggedIn(ctx context.Context, id pgtype.UUID) (sqlc.User, error)
-	GetOrganization(ctx context.Context, id pgtype.UUID) (sqlc.Organization, error)
+	GetUser(ctx context.Context, id string) (sqlc.User, error)
+	MarkUserLoggedIn(ctx context.Context, id string) error
+	GetOrganization(ctx context.Context, id string) (sqlc.Organization, error)
 	GetOrganizationByCode(ctx context.Context, code string) (sqlc.Organization, error)
-	CreateRefreshToken(ctx context.Context, arg sqlc.CreateRefreshTokenParams) (sqlc.RefreshToken, error)
+	// CreateRefreshToken 写入 refresh token（:exec），service 写入后通过 GetRefreshTokenByHash 读回。
+	CreateRefreshToken(ctx context.Context, arg sqlc.CreateRefreshTokenParams) error
 	GetRefreshTokenByHash(ctx context.Context, tokenHash string) (sqlc.RefreshToken, error)
-	RevokeRefreshToken(ctx context.Context, id pgtype.UUID) (sqlc.RefreshToken, error)
+	RevokeRefreshToken(ctx context.Context, id string) error
 }
 
 // AuthService 处理登录、刷新和注销等认证业务。
@@ -99,7 +100,7 @@ func (s *AuthService) Login(ctx context.Context, input LoginInput) (LoginResult,
 		return LoginResult{}, err
 	}
 
-	if _, err := s.store.MarkUserLoggedIn(ctx, user.ID); err != nil {
+	if err := s.store.MarkUserLoggedIn(ctx, user.ID); err != nil {
 		return LoginResult{}, fmt.Errorf("更新登录时间失败: %w", err)
 	}
 	return s.issueTokenPair(ctx, user)
@@ -112,7 +113,7 @@ func (s *AuthService) lookupLoginUser(ctx context.Context, input LoginInput) (sq
 	if input.OrgCode == "" {
 		user, err := s.store.GetUserByUsername(ctx, input.Username)
 		if err != nil {
-			if errors.Is(err, pgx.ErrNoRows) {
+			if errors.Is(err, sql.ErrNoRows) {
 				return sqlc.User{}, ErrInvalidCredentials
 			}
 			return sqlc.User{}, fmt.Errorf("查询用户失败: %w", err)
@@ -125,17 +126,17 @@ func (s *AuthService) lookupLoginUser(ctx context.Context, input LoginInput) (sq
 
 	org, err := s.store.GetOrganizationByCode(ctx, input.OrgCode)
 	if err != nil {
-		if errors.Is(err, pgx.ErrNoRows) {
+		if errors.Is(err, sql.ErrNoRows) {
 			return sqlc.User{}, ErrInvalidCredentials
 		}
 		return sqlc.User{}, fmt.Errorf("查询企业标识失败: %w", err)
 	}
 	user, err := s.store.GetUserByOrgAndUsername(ctx, sqlc.GetUserByOrgAndUsernameParams{
-		OrgID:    org.ID,
+		OrgID:    null.StringFrom(org.ID),
 		Username: input.Username,
 	})
 	if err != nil {
-		if errors.Is(err, pgx.ErrNoRows) {
+		if errors.Is(err, sql.ErrNoRows) {
 			return sqlc.User{}, ErrInvalidCredentials
 		}
 		return sqlc.User{}, fmt.Errorf("查询企业用户失败: %w", err)
@@ -148,12 +149,11 @@ func (s *AuthService) lookupLoginUser(ctx context.Context, input LoginInput) (sq
 
 // Me 根据 access token 中的主体加载最新用户状态。
 func (s *AuthService) Me(ctx context.Context, principal auth.Principal) (AuthUser, error) {
-	userID, err := parseUUID(principal.UserID)
+	user, err := s.store.GetUser(ctx, principal.UserID)
 	if err != nil {
-		return AuthUser{}, ErrInvalidToken
-	}
-	user, err := s.store.GetUser(ctx, userID)
-	if err != nil {
+		if errors.Is(err, sql.ErrNoRows) {
+			return AuthUser{}, ErrInvalidToken
+		}
 		return AuthUser{}, fmt.Errorf("查询当前用户失败: %w", err)
 	}
 	if err := s.ensureUserEnabled(ctx, user); err != nil {
@@ -173,15 +173,12 @@ func (s *AuthService) Refresh(ctx context.Context, refreshToken string) (LoginRe
 	if err != nil {
 		return LoginResult{}, ErrInvalidToken
 	}
-	if record.RevokedAt.Valid || !record.ExpiresAt.Valid || !record.ExpiresAt.Time.After(s.now()) {
+	// RevokedAt / ExpiresAt 现为 null.Time；valid+not-expired 才允许刷新。
+	if record.RevokedAt.Valid || !record.ExpiresAt.After(s.now()) {
 		return LoginResult{}, ErrInvalidToken
 	}
 
-	userID, err := parseUUID(principal.UserID)
-	if err != nil {
-		return LoginResult{}, ErrInvalidToken
-	}
-	user, err := s.store.GetUser(ctx, userID)
+	user, err := s.store.GetUser(ctx, principal.UserID)
 	if err != nil {
 		return LoginResult{}, fmt.Errorf("查询刷新用户失败: %w", err)
 	}
@@ -189,7 +186,7 @@ func (s *AuthService) Refresh(ctx context.Context, refreshToken string) (LoginRe
 		return LoginResult{}, err
 	}
 	// refresh token 采用轮换策略：先撤销旧记录，再签发并持久化新 token pair。
-	if _, err := s.store.RevokeRefreshToken(ctx, record.ID); err != nil {
+	if err := s.store.RevokeRefreshToken(ctx, record.ID); err != nil {
 		return LoginResult{}, fmt.Errorf("撤销旧 refresh token 失败: %w", err)
 	}
 	return s.issueTokenPair(ctx, user)
@@ -199,7 +196,7 @@ func (s *AuthService) Refresh(ctx context.Context, refreshToken string) (LoginRe
 func (s *AuthService) Logout(ctx context.Context, refreshToken string) error {
 	record, err := s.store.GetRefreshTokenByHash(ctx, auth.HashOpaqueToken(refreshToken))
 	if err != nil {
-		if errors.Is(err, pgx.ErrNoRows) {
+		if errors.Is(err, sql.ErrNoRows) {
 			return nil
 		}
 		return fmt.Errorf("查询 refresh token 失败: %w", err)
@@ -207,7 +204,7 @@ func (s *AuthService) Logout(ctx context.Context, refreshToken string) error {
 	if record.RevokedAt.Valid {
 		return nil
 	}
-	if _, err := s.store.RevokeRefreshToken(ctx, record.ID); err != nil {
+	if err := s.store.RevokeRefreshToken(ctx, record.ID); err != nil {
 		return fmt.Errorf("撤销 refresh token 失败: %w", err)
 	}
 	return nil
@@ -216,8 +213,8 @@ func (s *AuthService) Logout(ctx context.Context, refreshToken string) error {
 func (s *AuthService) issueTokenPair(ctx context.Context, user sqlc.User) (LoginResult, error) {
 	// principal 只放最小授权上下文；角色权限的最终判断仍由 authorizer.go 完成。
 	principal := auth.Principal{
-		UserID: uuidToString(user.ID),
-		OrgID:  uuidToOptionalString(user.OrgID),
+		UserID: user.ID,
+		OrgID:  strOrEmpty(user.OrgID),
 		Role:   user.Role,
 	}
 	accessToken, err := s.tokens.SignAccessToken(principal)
@@ -228,14 +225,13 @@ func (s *AuthService) issueTokenPair(ctx context.Context, user sqlc.User) (Login
 	if err != nil {
 		return LoginResult{}, fmt.Errorf("签发 refresh token 失败: %w", err)
 	}
-	if _, err := s.store.CreateRefreshToken(ctx, sqlc.CreateRefreshTokenParams{
-		UserID: user.ID,
-		// 数据库存 hash，明文 refresh token 只返回给客户端一次。
+	// CreateRefreshToken 为 :exec；数据库存 hash，明文 refresh token 只返回给客户端一次。
+	// ExpiresAt 现为 time.Time（MySQL DATETIME）。
+	if err := s.store.CreateRefreshToken(ctx, sqlc.CreateRefreshTokenParams{
+		ID:        newUUID(),
+		UserID:    user.ID,
 		TokenHash: auth.HashOpaqueToken(refreshToken),
-		ExpiresAt: pgtype.Timestamptz{
-			Time:  s.now().Add(s.tokens.RefreshTTL()),
-			Valid: true,
-		},
+		ExpiresAt: s.now().Add(s.tokens.RefreshTTL()),
 	}); err != nil {
 		return LoginResult{}, fmt.Errorf("保存 refresh token 失败: %w", err)
 	}
@@ -253,7 +249,7 @@ func (s *AuthService) ensureUserEnabled(ctx context.Context, user sqlc.User) err
 		return ErrUserDisabled
 	}
 	if user.OrgID.Valid {
-		org, err := s.store.GetOrganization(ctx, user.OrgID)
+		org, err := s.store.GetOrganization(ctx, user.OrgID.String)
 		if err != nil {
 			return fmt.Errorf("查询用户所属企业失败: %w", err)
 		}
@@ -266,8 +262,8 @@ func (s *AuthService) ensureUserEnabled(ctx context.Context, user sqlc.User) err
 
 func toAuthUser(user sqlc.User) AuthUser {
 	return AuthUser{
-		ID:          uuidToString(user.ID),
-		OrgID:       uuidToOptionalString(user.OrgID),
+		ID:          user.ID,
+		OrgID:       strOrEmpty(user.OrgID),
 		Username:    user.Username,
 		DisplayName: user.DisplayName,
 		Role:        user.Role,

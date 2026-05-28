@@ -4,11 +4,9 @@ import (
 	"context"
 	"crypto/rand"
 	"encoding/base64"
-	"errors"
 	"fmt"
 
-	"github.com/jackc/pgx/v5"
-	"github.com/jackc/pgx/v5/pgtype"
+	"github.com/guregu/null/v5"
 
 	"oc-manager/internal/auth"
 	"oc-manager/internal/store/sqlc"
@@ -16,8 +14,8 @@ import (
 
 // AppRuntimeTokenStore 是实例 runtime token 生成和复用所需的最小数据库能力。
 type AppRuntimeTokenStore interface {
-	GetApp(ctx context.Context, id pgtype.UUID) (sqlc.App, error)
-	SetAppRuntimeToken(ctx context.Context, arg sqlc.SetAppRuntimeTokenParams) (sqlc.App, error)
+	GetApp(ctx context.Context, id string) (sqlc.App, error)
+	SetAppRuntimeToken(ctx context.Context, arg sqlc.SetAppRuntimeTokenParams) error
 }
 
 // EnsureAppRuntimeToken 确保实例拥有可写入 Hermes manifest 的 manager runtime API token。
@@ -42,33 +40,34 @@ func EnsureAppRuntimeToken(ctx context.Context, store AppRuntimeTokenStore, ciph
 	if err != nil {
 		return sqlc.App{}, "", fmt.Errorf("加密 runtime token 失败: %w", err)
 	}
-	updated, err := store.SetAppRuntimeToken(ctx, sqlc.SetAppRuntimeTokenParams{
+	// SetAppRuntimeToken 使用条件更新（仅在 runtime_token_hash 为 NULL 时写入），
+	// 并发竞争时零行更新表示其它 worker 已抢先写入；直接读回已有 token 复用。
+	err = store.SetAppRuntimeToken(ctx, sqlc.SetAppRuntimeTokenParams{
 		ID:                     app.ID,
-		RuntimeTokenHash:       pgtype.Text{String: HashAppRuntimeToken(token), Valid: true},
-		RuntimeTokenCiphertext: pgtype.Text{String: ciphertext, Valid: true},
+		RuntimeTokenHash:       null.StringFrom(HashAppRuntimeToken(token)),
+		RuntimeTokenCiphertext: null.StringFrom(ciphertext),
 	})
 	if err != nil {
-		if errors.Is(err, pgx.ErrNoRows) {
-			// 并发初始化中其它 worker 已成功写入 token，本 worker 复用获胜者的密文，避免 manifest 写入失效 token。
-			winner, getErr := store.GetApp(ctx, app.ID)
-			if getErr != nil {
-				return sqlc.App{}, "", fmt.Errorf("读取并发写入的 runtime token 失败: %w", getErr)
-			}
-			winnerToken, ok, decryptErr := decryptAppRuntimeToken(cipher, winner)
-			if decryptErr != nil {
-				return sqlc.App{}, "", decryptErr
-			}
-			if !ok {
-				return sqlc.App{}, "", fmt.Errorf("并发写入的 runtime token 不完整")
-			}
-			return winner, winnerToken, nil
-		}
 		return sqlc.App{}, "", fmt.Errorf("保存 runtime token 失败: %w", err)
 	}
-	return updated, token, nil
+	// 重新读取最新行：并发时其它 worker 可能已写入不同 token，读回确保返回实际落库的值。
+	updated, getErr := store.GetApp(ctx, app.ID)
+	if getErr != nil {
+		return sqlc.App{}, "", fmt.Errorf("读取写入后的 runtime token 失败: %w", getErr)
+	}
+	// 解密读回的 token（可能是本次写入的，也可能是并发写入的）。
+	winnerToken, ok, decryptErr := decryptAppRuntimeToken(cipher, updated)
+	if decryptErr != nil {
+		return sqlc.App{}, "", decryptErr
+	}
+	if !ok {
+		return sqlc.App{}, "", fmt.Errorf("写入后 runtime token 不完整")
+	}
+	return updated, winnerToken, nil
 }
 
 func decryptAppRuntimeToken(cipher *auth.Cipher, app sqlc.App) (string, bool, error) {
+	// RuntimeTokenCiphertext 和 RuntimeTokenHash 均为 null.String；两者均有效时才尝试解密。
 	if !app.RuntimeTokenCiphertext.Valid || !app.RuntimeTokenHash.Valid {
 		return "", false, nil
 	}

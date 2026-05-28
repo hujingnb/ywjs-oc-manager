@@ -32,11 +32,13 @@ func (s *SQLNodeSelector) ListActiveNodesWithAppCounts(ctx context.Context) ([]N
 	out := make([]NodeWithCount, 0, len(rows))
 	for _, r := range rows {
 		nc := NodeWithCount{
-			NodeID:   uuidToString(r.ID),
+			// ID 已是 string，直接使用。
+			NodeID:   r.ID,
 			AppCount: r.AppCount,
 		}
 		if r.MaxApps.Valid {
-			v := r.MaxApps.Int32
+			// null.Int 内部是 int64；NodeWithCount.MaxApps 是 *int32。
+			v := int32(r.MaxApps.Int64)
 			nc.MaxApps = &v
 		}
 		out = append(out, nc)

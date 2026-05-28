@@ -5,14 +5,12 @@ package service
 
 import (
 	"context"
+	"database/sql"
 	"encoding/json"
 	"errors"
 	"fmt"
 	"regexp"
 	"strings"
-
-	"github.com/jackc/pgx/v5"
-	"github.com/jackc/pgx/v5/pgtype"
 
 	"oc-manager/internal/auth"
 	"oc-manager/internal/integrations/runtime"
@@ -595,7 +593,7 @@ func (s *HermesKanbanService) StreamEvents(ctx context.Context, principal auth.P
 // kanbanAppStore 是 KanbanAppLocatorFromStore 依赖的最小 app 查询能力。
 // 只声明 GetApp，避免依赖整个 Querier 接口，便于单测注入假实现。
 type kanbanAppStore interface {
-	GetApp(ctx context.Context, id pgtype.UUID) (sqlc.App, error)
+	GetApp(ctx context.Context, id string) (sqlc.App, error)
 }
 
 // KanbanAppLocatorFromStore 基于 app store 把 appID（UUID 字符串）解析为
@@ -610,31 +608,25 @@ func NewKanbanAppLocatorFromStore(store kanbanAppStore) *KanbanAppLocatorFromSto
 }
 
 // LocateApp 查询 app 行并组装 KanbanAppLocation。
-// appID 必须是有效的 UUID 字符串，否则返回 ErrKanbanBadRequest。
-// app 不存在返回 ErrNotFound。
+// appID 直接作为字符串传入；app 不存在时 store 返回 sql.ErrNoRows。
 func (l *KanbanAppLocatorFromStore) LocateApp(ctx context.Context, appID string) (KanbanAppLocation, error) {
-	// parseUUID 是 service 包已有的 string→pgtype.UUID 辅助函数（pgtype.go）。
-	id, err := parseUUID(appID)
+	app, err := l.store.GetApp(ctx, appID)
 	if err != nil {
-		return KanbanAppLocation{}, fmt.Errorf("%w: 非法 app id", ErrKanbanBadRequest)
-	}
-	app, err := l.store.GetApp(ctx, id)
-	if err != nil {
-		// pgx.ErrNoRows 表示 app 记录真实不存在，映射为 ErrNotFound（404）。
+		// sql.ErrNoRows 表示 app 记录真实不存在，映射为 ErrNotFound（404）。
 		// 其他错误（网络、超时、约束异常等）属于 DB 故障，透传原始错误，
 		// 由上层兜底映射为 500，避免将 DB 故障误报为资源不存在。
-		if errors.Is(err, pgx.ErrNoRows) {
+		if errors.Is(err, sql.ErrNoRows) {
 			return KanbanAppLocation{}, ErrNotFound
 		}
 		return KanbanAppLocation{}, fmt.Errorf("查询 app 失败: %w", err)
 	}
 	loc := KanbanAppLocation{
-		// uuidToString 是 service 包已有的 pgtype.UUID→string 辅助函数（pgtype.go）。
-		OrgID:       uuidToString(app.OrgID),
-		OwnerUserID: uuidToString(app.OwnerUserID),
-		NodeID:      uuidToString(app.RuntimeNodeID),
+		// ID 已经是 string，直接使用。
+		OrgID:       app.OrgID,
+		OwnerUserID: app.OwnerUserID,
+		NodeID:      app.RuntimeNodeID,
 	}
-	// ContainerID 是可空字段（pgtype.Text），仅在有效时填充。
+	// ContainerID 是可空字段（null.String），仅在有效时填充。
 	if app.ContainerID.Valid {
 		loc.ContainerID = app.ContainerID.String
 	}

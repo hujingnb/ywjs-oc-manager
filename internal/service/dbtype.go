@@ -6,8 +6,12 @@ package service
 import (
 	"time"
 
+	"github.com/google/uuid"
 	"github.com/guregu/null/v5"
 )
+
+// newUUID 生成新的 UUID 字符串（CHAR(36)），用于 :exec 写入场景下的主键自生成。
+func newUUID() string { return uuid.NewString() }
 
 // strOrEmpty 把可空字符串列读成 API 友好的普通 string（NULL → ""）。
 func strOrEmpty(v null.String) string {

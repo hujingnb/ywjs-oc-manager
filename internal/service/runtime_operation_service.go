@@ -2,14 +2,14 @@ package service
 
 import (
 	"context"
+	"database/sql"
 	"encoding/json"
 	"errors"
 	"fmt"
 	"log/slog"
 	"time"
 
-	"github.com/jackc/pgx/v5"
-	"github.com/jackc/pgx/v5/pgtype"
+	"github.com/guregu/null/v5"
 
 	"oc-manager/internal/auth"
 	"oc-manager/internal/domain"
@@ -18,18 +18,18 @@ import (
 
 // RuntimeOperationStore 抽象 service 需要的查询能力。
 type RuntimeOperationStore interface {
-	GetApp(ctx context.Context, id pgtype.UUID) (sqlc.App, error)
-	GetUser(ctx context.Context, id pgtype.UUID) (sqlc.User, error)
-	SetAppStatus(ctx context.Context, arg sqlc.SetAppStatusParams) (sqlc.App, error)
-	SetAppNewAPIKey(ctx context.Context, arg sqlc.SetAppNewAPIKeyParams) (sqlc.App, error)
-	SetAppContainer(ctx context.Context, arg sqlc.SetAppContainerParams) (sqlc.App, error)
+	GetApp(ctx context.Context, id string) (sqlc.App, error)
+	GetUser(ctx context.Context, id string) (sqlc.User, error)
+	SetAppStatus(ctx context.Context, arg sqlc.SetAppStatusParams) error
+	SetAppNewAPIKey(ctx context.Context, arg sqlc.SetAppNewAPIKeyParams) error
+	SetAppContainer(ctx context.Context, arg sqlc.SetAppContainerParams) error
 	// ClearAppProgress 把 apps.progress_current / progress_total 重置为 NULL,
 	// RequestInitialize 重试时调用,避免前端看到上一次失败遗留的进度数。
-	ClearAppProgress(ctx context.Context, id pgtype.UUID) (sqlc.App, error)
-	CreateJob(ctx context.Context, arg sqlc.CreateJobParams) (sqlc.Job, error)
-	CreateAuditLog(ctx context.Context, arg sqlc.CreateAuditLogParams) (sqlc.AuditLog, error)
+	ClearAppProgress(ctx context.Context, id string) error
+	CreateJob(ctx context.Context, arg sqlc.CreateJobParams) error
+	CreateAuditLog(ctx context.Context, arg sqlc.CreateAuditLogParams) error
 	// CountChannelBindingsByApp 统计应用下未删除的渠道绑定数；Trigger 在 delete 审计详情中展示这个数。
-	CountChannelBindingsByApp(ctx context.Context, appID pgtype.UUID) (int64, error)
+	CountChannelBindingsByApp(ctx context.Context, appID string) (int64, error)
 }
 
 // JobNotifier 抽象向 Redis 队列推送 jobID 的能力。
@@ -116,18 +116,14 @@ func (s *RuntimeOperationService) SetInspector(inspector RuntimeInspector) {
 //   - inspector 未配置 → 返回 RuntimeView{Status: app.Status}（库内状态兜底）；
 //   - inspector 错误 → 返回 RuntimeView{Status:"error", Container:nil}，让前端展示"无法连接节点"。
 func (s *RuntimeOperationService) InspectApp(ctx context.Context, principal auth.Principal, appID string) (RuntimeView, error) {
-	id, err := parseUUID(appID)
-	if err != nil {
-		return RuntimeView{}, ErrNotFound
-	}
-	app, err := s.store.GetApp(ctx, id)
-	if errors.Is(err, pgx.ErrNoRows) {
+	app, err := s.store.GetApp(ctx, appID)
+	if errors.Is(err, sql.ErrNoRows) {
 		return RuntimeView{}, ErrNotFound
 	}
 	if err != nil {
 		return RuntimeView{}, fmt.Errorf("查询应用失败: %w", err)
 	}
-	if !auth.CanViewApp(principal, uuidToString(app.OrgID), uuidToString(app.OwnerUserID)) {
+	if !auth.CanViewApp(principal, app.OrgID, app.OwnerUserID) {
 		return RuntimeView{}, ErrForbidden
 	}
 	if !app.ContainerID.Valid || app.ContainerID.String == "" {
@@ -136,7 +132,8 @@ func (s *RuntimeOperationService) InspectApp(ctx context.Context, principal auth
 	if s.inspector == nil {
 		return RuntimeView{Status: app.Status}, nil
 	}
-	info, err := s.inspector.InspectContainer(ctx, uuidToString(app.RuntimeNodeID), app.ContainerID.String)
+	// app.RuntimeNodeID 是 string（非空）。
+	info, err := s.inspector.InspectContainer(ctx, app.RuntimeNodeID, app.ContainerID.String)
 	if err != nil {
 		return RuntimeView{Status: "error", Snapshot: snapshotFromApp(app)}, nil
 	}
@@ -171,6 +168,7 @@ func snapshotFromApp(app sqlc.App) *RuntimeSnapshotView {
 		NetworkTxBytes: raw.NetworkTxBytes,
 		LastError:      raw.LastError,
 	}
+	// RuntimeSnapshotAt 是 null.Time。
 	if app.RuntimeSnapshotAt.Valid {
 		out.CollectedAt = app.RuntimeSnapshotAt.Time
 	}
@@ -209,12 +207,8 @@ func (s *RuntimeOperationService) Trigger(ctx context.Context, principal auth.Pr
 	if !isSupportedOperation(op) {
 		return RuntimeOperationResult{}, fmt.Errorf("不支持的运行操作: %s", op)
 	}
-	id, err := parseUUID(appID)
-	if err != nil {
-		return RuntimeOperationResult{}, ErrNotFound
-	}
-	app, err := s.store.GetApp(ctx, id)
-	if errors.Is(err, pgx.ErrNoRows) {
+	app, err := s.store.GetApp(ctx, appID)
+	if errors.Is(err, sql.ErrNoRows) {
 		return RuntimeOperationResult{}, ErrNotFound
 	}
 	if err != nil {
@@ -223,7 +217,7 @@ func (s *RuntimeOperationService) Trigger(ctx context.Context, principal auth.Pr
 	if err := s.ensurePrincipalActive(ctx, principal); err != nil {
 		return RuntimeOperationResult{}, err
 	}
-	if !auth.CanTriggerRuntimeOperation(principal, uuidToString(app.OrgID), uuidToString(app.OwnerUserID)) {
+	if !auth.CanTriggerRuntimeOperation(principal, app.OrgID, app.OwnerUserID) {
 		return RuntimeOperationResult{}, ErrRuntimeOperationDenied
 	}
 	// disable/restore api_key 走风控路径，禁止普通成员触发。
@@ -233,41 +227,43 @@ func (s *RuntimeOperationService) Trigger(ctx context.Context, principal auth.Pr
 	}
 	jobType := jobTypeFor(op)
 	payload, err := json.Marshal(map[string]any{
-		"app_id":       uuidToString(app.ID),
+		"app_id":       app.ID,
 		"operation":    string(op),
-		"runtime_node": uuidToOptionalString(app.RuntimeNodeID),
+		"runtime_node": app.RuntimeNodeID,
 		"requested_by": principal.UserID,
 	})
 	if err != nil {
 		return RuntimeOperationResult{}, fmt.Errorf("序列化 payload 失败: %w", err)
 	}
-	job, err := s.store.CreateJob(ctx, sqlc.CreateJobParams{
+	// CreateJob 为 :exec；RunAfter 是 time.Time（MySQL DATETIME）。
+	jobID := newUUID()
+	if err := s.store.CreateJob(ctx, sqlc.CreateJobParams{
+		ID:          jobID,
 		Type:        jobType,
 		Priority:    100,
-		RunAfter:    pgtype.Timestamptz{Time: time.Now(), Valid: true},
+		RunAfter:    time.Now(),
 		MaxAttempts: 3,
 		PayloadJson: payload,
-	})
-	if err != nil {
+	}); err != nil {
 		return RuntimeOperationResult{}, fmt.Errorf("创建运行操作任务失败: %w", err)
 	}
-	actorUUID, _ := optionalUUID(principal.UserID)
 	// app.delete 详情附带级联渠道绑定数，便于审计列表识别本次删除会清理掉多少渠道。
 	// 其他 op (start/stop/restart/disable_api_key/restore_api_key) 与 actor 列重复，留空。
-	detail := pgtype.Text{}
+	var detail null.String
 	if op == RuntimeOperationDelete {
 		cascadeCount, err := s.store.CountChannelBindingsByApp(ctx, app.ID)
 		if err != nil {
 			return RuntimeOperationResult{}, fmt.Errorf("统计渠道绑定数失败: %w", err)
 		}
-		detail = pgtype.Text{String: fmt.Sprintf("级联：%d 个渠道绑定", cascadeCount), Valid: true}
+		detail = null.StringFrom(fmt.Sprintf("级联：%d 个渠道绑定", cascadeCount))
 	}
-	if _, err := s.store.CreateAuditLog(ctx, sqlc.CreateAuditLogParams{
-		ActorID:    actorUUID,
-		ActorRole:  principal.Role,
-		OrgID:      app.OrgID,
+	if err := s.store.CreateAuditLog(ctx, sqlc.CreateAuditLogParams{
+		ID:        newUUID(),
+		ActorID:   null.StringFrom(principal.UserID),
+		ActorRole: principal.Role,
+		OrgID:     null.StringFrom(app.OrgID),
 		TargetType: "app",
-		TargetID:   uuidToString(app.ID),
+		TargetID:   app.ID,
 		Action:     string(op),
 		// audit_logs.result CHECK 仅允许 succeeded/failed；
 		// 这里 audit 的语义是「操作已成功提交入队」，与其他 service 写 audit 的写法保持一致。
@@ -281,9 +277,9 @@ func (s *RuntimeOperationService) Trigger(ctx context.Context, principal auth.Pr
 	if s.notifier != nil {
 		// notifier 失败不阻塞响应：scheduler 最终会扫到 pending job 重新入队，
 		// 但仍把错误冒泡到日志，便于运维识别 Redis 抖动。
-		_ = s.notifier.Enqueue(ctx, uuidToString(job.ID))
+		_ = s.notifier.Enqueue(ctx, jobID)
 	}
-	return RuntimeOperationResult{JobID: uuidToString(job.ID), Operation: op}, nil
+	return RuntimeOperationResult{JobID: jobID, Operation: op}, nil
 }
 
 // RequestInitialize 触发应用初始化重试。
@@ -300,12 +296,8 @@ func (s *RuntimeOperationService) Trigger(ctx context.Context, principal auth.Pr
 // 重置不在事务中——worker 自身有状态机校验和幂等处理；即便重置过程中崩溃，
 // 下次调用仍能完成或者由人工介入。审计日志记录触发人，便于追溯。
 func (s *RuntimeOperationService) RequestInitialize(ctx context.Context, principal auth.Principal, appID string) (RuntimeOperationResult, error) {
-	id, err := parseUUID(appID)
-	if err != nil {
-		return RuntimeOperationResult{}, ErrNotFound
-	}
-	app, err := s.store.GetApp(ctx, id)
-	if errors.Is(err, pgx.ErrNoRows) {
+	app, err := s.store.GetApp(ctx, appID)
+	if errors.Is(err, sql.ErrNoRows) {
 		return RuntimeOperationResult{}, ErrNotFound
 	}
 	if err != nil {
@@ -315,7 +307,7 @@ func (s *RuntimeOperationService) RequestInitialize(ctx context.Context, princip
 		return RuntimeOperationResult{}, err
 	}
 	// RequestInitialize 对应"重新初始化"操作，不属于常规启停运维；平台管理员不开放此入口。
-	if !auth.CanManageApp(principal, uuidToString(app.OrgID), uuidToString(app.OwnerUserID)) {
+	if !auth.CanManageApp(principal, app.OrgID, app.OwnerUserID) {
 		return RuntimeOperationResult{}, ErrRuntimeOperationDenied
 	}
 	if app.Status != domain.AppStatusError && app.Status != domain.AppStatusDraft {
@@ -323,56 +315,60 @@ func (s *RuntimeOperationService) RequestInitialize(ctx context.Context, princip
 	}
 	// 重置目标为 pulling_runtime_image：worker 直接从第一阶段开始重跑，
 	// 不再回到 draft 等待 onboarding 拾取。状态机已允许 error / draft → pulling_runtime_image。
-	if _, err := s.store.SetAppStatus(ctx, sqlc.SetAppStatusParams{ID: app.ID, Status: domain.AppStatusPullingRuntimeImage}); err != nil {
+	if err := s.store.SetAppStatus(ctx, sqlc.SetAppStatusParams{ID: app.ID, Status: domain.AppStatusPullingRuntimeImage}); err != nil {
 		return RuntimeOperationResult{}, fmt.Errorf("重置应用状态失败: %w", err)
 	}
 	// 清空 progress_*,避免前端看到上一次失败遗留的进度数;ClearAppProgress
 	// 当前只清进度字段,last_error_status 留作历史可查(下一次状态机推进时由
 	// transitionTo 自然覆盖)。
-	if _, err := s.store.ClearAppProgress(ctx, app.ID); err != nil {
+	if err := s.store.ClearAppProgress(ctx, app.ID); err != nil {
 		return RuntimeOperationResult{}, fmt.Errorf("清空应用进度字段失败: %w", err)
 	}
-	if _, err := s.store.SetAppNewAPIKey(ctx, sqlc.SetAppNewAPIKeyParams{
+	// SetAppNewAPIKey 为 :exec；清空 api_key 字段，ApiKeyStatus = pending。
+	if err := s.store.SetAppNewAPIKey(ctx, sqlc.SetAppNewAPIKeyParams{
 		ID:                  app.ID,
-		NewapiKeyID:         pgtype.Text{},
-		NewapiKeyCiphertext: pgtype.Text{},
+		NewapiKeyID:         null.String{},
+		NewapiKeyCiphertext: null.String{},
 		ApiKeyStatus:        domain.APIKeyStatusPending,
+		NewapiKeyName:       null.String{},
 	}); err != nil {
 		return RuntimeOperationResult{}, fmt.Errorf("重置 api_key 状态失败: %w", err)
 	}
-	if _, err := s.store.SetAppContainer(ctx, sqlc.SetAppContainerParams{
+	// SetAppContainer 为 :exec；清空 container_id / container_name。
+	if err := s.store.SetAppContainer(ctx, sqlc.SetAppContainerParams{
 		ID:            app.ID,
-		ContainerID:   pgtype.Text{},
-		ContainerName: pgtype.Text{},
+		ContainerID:   null.String{},
+		ContainerName: null.String{},
 	}); err != nil {
 		return RuntimeOperationResult{}, fmt.Errorf("清空 container_id 失败: %w", err)
 	}
 
 	payload, err := json.Marshal(map[string]any{
-		"app_id":       uuidToString(app.ID),
-		"runtime_node": uuidToOptionalString(app.RuntimeNodeID),
+		"app_id":       app.ID,
+		"runtime_node": app.RuntimeNodeID,
 		"requested_by": principal.UserID,
 	})
 	if err != nil {
 		return RuntimeOperationResult{}, fmt.Errorf("序列化 payload 失败: %w", err)
 	}
-	job, err := s.store.CreateJob(ctx, sqlc.CreateJobParams{
+	jobID := newUUID()
+	if err := s.store.CreateJob(ctx, sqlc.CreateJobParams{
+		ID:          jobID,
 		Type:        domain.JobTypeAppInitialize,
 		Priority:    100,
-		RunAfter:    pgtype.Timestamptz{Time: time.Now(), Valid: true},
+		RunAfter:    time.Now(),
 		MaxAttempts: 3,
 		PayloadJson: payload,
-	})
-	if err != nil {
+	}); err != nil {
 		return RuntimeOperationResult{}, fmt.Errorf("创建初始化任务失败: %w", err)
 	}
-	actorUUID, _ := optionalUUID(principal.UserID)
-	if _, err := s.store.CreateAuditLog(ctx, sqlc.CreateAuditLogParams{
-		ActorID:    actorUUID,
-		ActorRole:  principal.Role,
-		OrgID:      app.OrgID,
+	if err := s.store.CreateAuditLog(ctx, sqlc.CreateAuditLogParams{
+		ID:        newUUID(),
+		ActorID:   null.StringFrom(principal.UserID),
+		ActorRole: principal.Role,
+		OrgID:     null.StringFrom(app.OrgID),
 		TargetType: "app",
-		TargetID:   uuidToString(app.ID),
+		TargetID:   app.ID,
 		Action:     "initialize",
 		// audit_logs.result CHECK 仅允许 succeeded/failed；
 		// 这里 audit 的语义是「操作已成功提交入队」，与其他 service 写 audit 的写法保持一致。
@@ -382,21 +378,17 @@ func (s *RuntimeOperationService) RequestInitialize(ctx context.Context, princip
 		return RuntimeOperationResult{}, fmt.Errorf("写入审计日志失败: %w", err)
 	}
 	if s.notifier != nil {
-		_ = s.notifier.Enqueue(ctx, uuidToString(job.ID))
+		_ = s.notifier.Enqueue(ctx, jobID)
 	}
-	return RuntimeOperationResult{JobID: uuidToString(job.ID), Operation: "initialize"}, nil
+	return RuntimeOperationResult{JobID: jobID, Operation: "initialize"}, nil
 }
 
 // ensurePrincipalActive 校验主体当前未被禁用。
 // runtime 操作风险高，被禁用账号即使 token 未过期也不得触发；
 // disabled 检查与角色/归属判断分离，便于未来对其他高风险操作复用。
 func (s *RuntimeOperationService) ensurePrincipalActive(ctx context.Context, principal auth.Principal) error {
-	id, err := parseUUID(principal.UserID)
-	if err != nil {
-		return ErrRuntimeOperationDenied
-	}
-	user, err := s.store.GetUser(ctx, id)
-	if errors.Is(err, pgx.ErrNoRows) {
+	user, err := s.store.GetUser(ctx, principal.UserID)
+	if errors.Is(err, sql.ErrNoRows) {
 		return ErrRuntimeOperationDenied
 	}
 	if err != nil {

@@ -6,14 +6,12 @@ package service
 import (
 	"bytes"
 	"context"
+	"database/sql"
 	"encoding/json"
 	"errors"
 	"fmt"
 	"regexp"
 	"strings"
-
-	"github.com/jackc/pgx/v5"
-	"github.com/jackc/pgx/v5/pgtype"
 
 	"oc-manager/internal/auth"
 	"oc-manager/internal/integrations/runtime"
@@ -741,7 +739,7 @@ func (s *HermesCronService) Output(ctx context.Context, principal auth.Principal
 // cronAppStore 是 CronAppLocatorFromStore 依赖的最小 app 查询能力。
 // 只声明 GetApp，避免依赖整个 Querier 接口，便于单测注入假实现。
 type cronAppStore interface {
-	GetApp(ctx context.Context, id pgtype.UUID) (sqlc.App, error)
+	GetApp(ctx context.Context, id string) (sqlc.App, error)
 }
 
 // CronAppLocatorFromStore 基于 app store 把 appID 解析为 Cron 执行坐标。
@@ -755,23 +753,19 @@ func NewCronAppLocatorFromStore(store cronAppStore) *CronAppLocatorFromStore {
 }
 
 // LocateApp 查询 app 行并组装 CronAppLocation。
-// appID 必须是有效 UUID 字符串；app 不存在返回 ErrNotFound。
+// appID 直接作为字符串传入；app 不存在时 store 返回 sql.ErrNoRows。
 func (l *CronAppLocatorFromStore) LocateApp(ctx context.Context, appID string) (CronAppLocation, error) {
-	id, err := parseUUID(appID)
+	app, err := l.store.GetApp(ctx, appID)
 	if err != nil {
-		return CronAppLocation{}, fmt.Errorf("%w: 非法 app id", ErrCronBadRequest)
-	}
-	app, err := l.store.GetApp(ctx, id)
-	if err != nil {
-		if errors.Is(err, pgx.ErrNoRows) {
+		if errors.Is(err, sql.ErrNoRows) {
 			return CronAppLocation{}, ErrNotFound
 		}
 		return CronAppLocation{}, fmt.Errorf("查询 app 失败: %w", err)
 	}
 	loc := CronAppLocation{
-		OrgID:       uuidToString(app.OrgID),
-		OwnerUserID: uuidToString(app.OwnerUserID),
-		NodeID:      uuidToString(app.RuntimeNodeID),
+		OrgID:       app.OrgID,
+		OwnerUserID: app.OwnerUserID,
+		NodeID:      app.RuntimeNodeID,
 	}
 	if app.ContainerID.Valid {
 		loc.ContainerID = app.ContainerID.String

@@ -2,6 +2,7 @@ package service
 
 import (
 	"context"
+	"database/sql"
 	"errors"
 	"fmt"
 	"sort"
@@ -9,8 +10,6 @@ import (
 	"sync"
 	"time"
 
-	"github.com/jackc/pgx/v5"
-	"github.com/jackc/pgx/v5/pgtype"
 	"golang.org/x/sync/errgroup"
 
 	"oc-manager/internal/auth"
@@ -33,9 +32,9 @@ type UsageNewAPIClient interface {
 
 // UsageStore 是 service 把 manager UUID 转 new-api 数字 id 用到的最小数据访问能力。
 type UsageStore interface {
-	GetApp(ctx context.Context, id pgtype.UUID) (sqlc.App, error)
-	GetActiveAppByOwner(ctx context.Context, ownerUserID pgtype.UUID) (sqlc.App, error)
-	GetOrganization(ctx context.Context, id pgtype.UUID) (sqlc.Organization, error)
+	GetApp(ctx context.Context, id string) (sqlc.App, error)
+	GetActiveAppByOwner(ctx context.Context, ownerUserID string) (sqlc.App, error)
+	GetOrganization(ctx context.Context, id string) (sqlc.Organization, error)
 	// ListAllActiveOrganizations 全量返回未软删除的组织，供 GetOrgUsageBreakdown 批量查询用量。
 	ListAllActiveOrganizations(ctx context.Context) ([]sqlc.Organization, error)
 }
@@ -136,11 +135,9 @@ func (s *UsageService) GetAppUsage(ctx context.Context, principal auth.Principal
 	// 该值与 app_initialize 注册 token 时使用的名字保持一致。
 	keyName := "app-" + appID
 	if s.store != nil {
-		appUUID, parseErr := parseUUID(appID)
-		if parseErr == nil {
-			if app, getErr := s.store.GetApp(ctx, appUUID); getErr == nil && app.NewapiKeyName.Valid && app.NewapiKeyName.String != "" {
-				keyName = app.NewapiKeyName.String
-			}
+		// appID 直接作为字符串传入，不再需要解析为 UUID 类型。
+		if app, getErr := s.store.GetApp(ctx, appID); getErr == nil && app.NewapiKeyName.Valid && app.NewapiKeyName.String != "" {
+			keyName = app.NewapiKeyName.String
 		}
 	}
 	page, err := s.client.GetTokenLogs(ctx, newapi.LogsQuery{
@@ -174,13 +171,10 @@ func (s *UsageService) GetMemberUsage(ctx context.Context, principal auth.Princi
 	if !auth.CanViewMemberUsage(principal, orgID, memberID) {
 		return LogsPage{}, ErrForbidden
 	}
-	memberUUID, err := parseUUID(memberID)
+	// memberID 直接作为字符串传入。
+	app, err := s.store.GetActiveAppByOwner(ctx, memberID)
 	if err != nil {
-		return LogsPage{}, ErrNotFound
-	}
-	app, err := s.store.GetActiveAppByOwner(ctx, memberUUID)
-	if err != nil {
-		if errors.Is(err, pgx.ErrNoRows) {
+		if errors.Is(err, sql.ErrNoRows) {
 			return LogsPage{Scope: "member", ScopeID: memberID, Items: []newapi.LogEntry{}, UpdatedAt: time.Now()}, nil
 		}
 		return LogsPage{}, fmt.Errorf("查询成员应用失败: %w", err)
@@ -193,7 +187,8 @@ func (s *UsageService) GetMemberUsage(ctx context.Context, principal auth.Princi
 	// 优先读 apps.newapi_key_name；字段空（历史 / 未回填数据）时回退到 "app-"+app.ID。
 	keyName := app.NewapiKeyName.String
 	if keyName == "" {
-		keyName = "app-" + uuidToString(app.ID)
+		// app.ID 已是 string，直接使用。
+		keyName = "app-" + app.ID
 	}
 	page, err := s.client.GetTokenLogs(ctx, newapi.LogsQuery{
 		TokenName: keyName,
@@ -226,12 +221,9 @@ func (s *UsageService) GetOrgUsage(ctx context.Context, principal auth.Principal
 	if !auth.CanViewOrgUsage(principal, orgID) {
 		return QuotaSeries{}, ErrForbidden
 	}
-	id, err := parseUUID(orgID)
-	if err != nil {
-		return QuotaSeries{}, ErrNotFound
-	}
-	org, err := s.store.GetOrganization(ctx, id)
-	if errors.Is(err, pgx.ErrNoRows) {
+	// orgID 直接作为字符串传入。
+	org, err := s.store.GetOrganization(ctx, orgID)
+	if errors.Is(err, sql.ErrNoRows) {
 		return QuotaSeries{}, ErrNotFound
 	}
 	if err != nil {
@@ -332,12 +324,12 @@ func (s *UsageService) GetOrgUsageBreakdown(ctx context.Context, principal auth.
 					s.failAuditor.RecordNewAPIFailure(gctx, NewAPIFailureContext{
 						ActorID:   principal.UserID,
 						ActorRole: principal.Role,
-						OrgID:     uuidToString(org.ID),
+						OrgID:     org.ID,
 						Endpoint:  "GET /api/data/users?id=...",
 						Err:       err,
 					})
 				}
-				return fmt.Errorf("查询企业 %s 用量失败: %w", uuidToString(org.ID), err)
+				return fmt.Errorf("查询企业 %s 用量失败: %w", org.ID, err)
 			}
 			var total int64
 			for _, d := range dates {
@@ -345,7 +337,7 @@ func (s *UsageService) GetOrgUsageBreakdown(ctx context.Context, principal auth.
 			}
 			mu.Lock()
 			items = append(items, OrgUsageItem{
-				OrgID:      uuidToString(org.ID),
+				OrgID:      org.ID,
 				OrgName:    org.Name,
 				TotalQuota: total,
 			})
