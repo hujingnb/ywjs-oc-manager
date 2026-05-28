@@ -1,8 +1,13 @@
 import { mount } from '@vue/test-utils'
 import { ref } from 'vue'
-import { describe, expect, it, vi } from 'vitest'
+import { beforeEach, describe, expect, it, vi } from 'vitest'
 
 import AppDetailPage from './AppDetailPage.vue'
+
+const authState = vi.hoisted(() => ({
+  isPlatformAdmin: false,
+  isOrgMember: false,
+}))
 
 // 实例详情标题只展示业务可读名称，不把实例 UUID 作为主视觉信息展示给用户。
 vi.mock('@/api/hooks/useApps', () => ({
@@ -21,9 +26,7 @@ vi.mock('@/api/hooks/useApps', () => ({
 }))
 
 vi.mock('@/stores/auth', () => ({
-  useAuthStore: () => ({
-    isPlatformAdmin: false,
-  }),
+  useAuthStore: () => authState,
 }))
 
 vi.mock('vue-router', async () => {
@@ -36,35 +39,44 @@ vi.mock('vue-router', async () => {
   }
 })
 
-describe('AppDetailPage', () => {
-  // 覆盖实例详情页业务 tab 导航，确保 Task 6 新增的定时任务入口对组织用户可见。
-  it('渲染定时任务 tab 入口', () => {
-    const wrapper = mount(AppDetailPage, {
-      global: {
-        stubs: {
-          AppStatusTag: { template: '<span />' },
-          NCard: { template: '<section><slot name="header" /><slot /></section>' },
-          NTabs: { template: '<nav><slot /></nav>' },
-          NTabPane: true,
-        },
+function mountDetail() {
+  return mount(AppDetailPage, {
+    global: {
+      stubs: {
+        AppStatusTag: { template: '<span />' },
+        NCard: { template: '<section><slot name="header" /><slot /></section>' },
       },
-    })
+    },
+  })
+}
 
+describe('AppDetailPage', () => {
+  beforeEach(() => {
+    authState.isPlatformAdmin = false
+    authState.isOrgMember = false
+  })
+
+  // 覆盖管理员/组织管理员视角：实例详情页仍保留业务 tab 导航。
+  it('非组织成员保留实例详情 tab 入口', () => {
+    const wrapper = mountDetail()
+
+    expect(wrapper.find('.tab-nav').exists()).toBe(true)
     expect(wrapper.text()).toContain('定时任务')
+  })
+
+  // 覆盖组织成员视角：实例能力已拉平到左侧菜单，详情页顶部不再重复显示 tab。
+  it('组织成员隐藏实例详情 tab 入口', () => {
+    authState.isOrgMember = true
+
+    const wrapper = mountDetail()
+
+    expect(wrapper.find('.tab-nav').exists()).toBe(false)
+    expect(wrapper.text()).not.toContain('定时任务')
   })
 
   // 覆盖实例详情标题展示规则，避免 UUID 泄露到主视觉标题。
   it('标题展示实例名称且不展示实例 UUID', () => {
-    const wrapper = mount(AppDetailPage, {
-      global: {
-        stubs: {
-          AppStatusTag: { template: '<span />' },
-          NCard: { template: '<section><slot name="header" /><slot /></section>' },
-          NTabs: { template: '<nav><slot /></nav>' },
-          NTabPane: true,
-        },
-      },
-    })
+    const wrapper = mountDetail()
 
     expect(wrapper.text()).toContain('测试实例')
     expect(wrapper.text()).not.toContain('00000000-0000-0000-0000-000000000001')

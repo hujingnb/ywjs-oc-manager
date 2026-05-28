@@ -11,7 +11,7 @@
         </div>
         <p v-if="appQuery.isLoading.value" class="state-text" style="padding: 12px 0 0">加载中…</p>
         <p v-else-if="appQuery.error.value" class="state-text danger" style="padding: 12px 0 0">查询失败：{{ appQuery.error.value?.message }}</p>
-        <div v-if="app" class="tab-nav">
+        <div v-if="app && showTabNav" class="tab-nav">
           <button
             v-for="tab in tabs"
             :key="tab.path"
@@ -44,6 +44,8 @@ const router = useRouter()
 const appIdRef = computed(() => route.params.appId as string | undefined)
 const appQuery = useAppQuery(appIdRef)
 const app = computed<AppDTO | null>(() => appQuery.data.value ?? null)
+// showTabNav 控制详情页顶部 tab 是否展示；组织成员已通过左侧菜单直达实例能力，隐藏可避免重复导航。
+const showTabNav = computed(() => !auth.isOrgMember)
 
 // 子 tab 共享 app，避免每个 tab 重复查询并保持权限判断基于同一份应用数据。
 provide<typeof app>('app', app)
