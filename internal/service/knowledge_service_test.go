@@ -356,8 +356,12 @@ func TestEnsureOrgDatasetReclaimsStaleCreating(t *testing.T) {
 // TestEnsureOrgDatasetLostClaimDoesNotOverwriteWinner 验证远端创建返回后若本地租约已丢失，不覆盖获胜者状态。
 func TestEnsureOrgDatasetLostClaimDoesNotOverwriteWinner(t *testing.T) {
 	svc, store, rf := newRAGFlowKnowledgeTestService(t)
-	store.missingOrgDataset = true
-	store.setActiveErr = sql.ErrNoRows
+	// 起始为 stale creating，使本进程先抢到租约并创建远端 dataset。
+	store.orgDataset.Status = "creating"
+	store.orgDataset.RagflowDatasetID = null.String{}
+	store.orgDataset.UpdatedAt = time.Now().Add(-ragflowDatasetCreateClaimTimeout - time.Minute)
+	// 激活时租约已被其他进程抢占（命中 0 行），本进程应为败者。
+	store.setActiveLosesClaim = true
 	rf.createDatasetResult = ragflow.Dataset{ID: "loser-org-ds", Name: "loser-org"}
 
 	_, err := svc.EnsureOrgDataset(context.Background(), store.org)
@@ -447,6 +451,7 @@ type fakeKnowledgeStore struct {
 	createAppDatasetErr   error
 	claimDatasetErr       error
 	setActiveErr          error
+	setActiveLosesClaim   bool
 	docs                  map[string]sqlc.RagflowDocument
 	createdDatasets       []createdDatasetCall
 	claimedDatasets       []sqlc.ClaimRAGFlowDatasetCreationParams
@@ -650,6 +655,20 @@ func (s *fakeKnowledgeStore) SetRAGFlowDatasetActive(_ context.Context, arg sqlc
 	s.activatedDatasets = append(s.activatedDatasets, arg)
 	if s.setActiveErr != nil {
 		return s.setActiveErr
+	}
+	// setActiveLosesClaim 模拟「远端创建期间租约被其他进程抢占激活」：激活 UPDATE 命中 0 行
+	// （MySQL :exec 对 0 行返回 nil），dataset 保持 creating、换成获胜者 claim token 且刷新时间
+	// （非 stale），remote id 仍为空。service 读回时发现 ragflow_dataset_id 不是本次写入值，判定为败者。
+	if s.setActiveLosesClaim {
+		target := &s.orgDataset
+		if s.orgDataset.ID != arg.ID {
+			target = &s.appDataset
+		}
+		target.Status = "creating"
+		target.CreateClaimToken = null.StringFrom("winner-claim-token")
+		target.RagflowDatasetID = null.String{}
+		target.UpdatedAt = time.Now()
+		return nil
 	}
 	if s.orgDataset.ID == arg.ID {
 		if s.orgDataset.CreateClaimToken.String != arg.CreateClaimToken.String {

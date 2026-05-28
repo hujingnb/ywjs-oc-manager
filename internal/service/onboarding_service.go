@@ -12,6 +12,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/google/uuid"
 	"github.com/guregu/null/v5"
 
 	"oc-manager/internal/auth"
@@ -178,6 +179,10 @@ func (s *MemberOnboardingService) OnboardMember(ctx context.Context, principal a
 			return OnboardMemberResult{}, err
 		}
 		input.NodeID = chosen
+	} else if _, err := uuid.Parse(input.NodeID); err != nil {
+		// 旧实现把 NodeID 赋给 pgtype.UUID 时会隐式拒绝非法格式；迁移到 string 后显式校验，
+		// 保持「显式指定的 runtime 节点 ID 非法 → 归类为成员创建参数错误」的行为。
+		return OnboardMemberResult{}, fmt.Errorf("%w: 指定的 runtime 节点 ID 非法", ErrMemberCreateInvalid)
 	}
 
 	// 预先生成各行 ID，在事务内使用。
@@ -248,7 +253,7 @@ func (s *MemberOnboardingService) OnboardMember(ctx context.Context, principal a
 			TargetID:      userID,
 			Action:        "create_with_app",
 			Result:        "succeeded",
-			DetailMessage: null.StringFrom(fmt.Sprintf("新建成员（含应用 %s）", input.AppName)),
+			DetailMessage: null.StringFrom(fmt.Sprintf("新建成员 %s（含应用 %s）", displayNameOrUsername(sqlc.User{DisplayName: input.DisplayName, Username: input.Username}), input.AppName)),
 		}); err != nil {
 			return fmt.Errorf("写入审计日志失败: %w", err)
 		}
@@ -352,6 +357,9 @@ func (s *MemberOnboardingService) CreateAppForMember(ctx context.Context, princi
 			return CreateAppForMemberResult{}, err
 		}
 		input.NodeID = chosen
+	} else if _, err := uuid.Parse(input.NodeID); err != nil {
+		// 同 OnboardMember：显式节点 ID 非法时还原为成员创建参数错误（旧 pgtype.UUID 解析的隐式校验）。
+		return CreateAppForMemberResult{}, fmt.Errorf("%w: 指定的 runtime 节点 ID 非法", ErrMemberCreateInvalid)
 	}
 
 	// 预先生成 ID。

@@ -813,7 +813,8 @@ func (s *KnowledgeService) createRemoteDataset(ctx context.Context, dataset sqlc
 	if name == "" {
 		name = dataset.Name
 	}
-	// SetRAGFlowDatasetActive 为 :exec；写入后通过 GetRAGFlowDataset 读回。
+	// SetRAGFlowDatasetActive 为 :exec（条件 UPDATE：WHERE status='creating' AND create_claim_token=?）；
+	// MySQL :exec 对 0 行更新返回 nil，故不能靠错误判断是否命中，写入后通过 GetRAGFlowDataset 读回比对。
 	if err := s.store.SetRAGFlowDatasetActive(ctx, sqlc.SetRAGFlowDatasetActiveParams{
 		ID:               dataset.ID,
 		RagflowDatasetID: null.StringFrom(remote.ID),
@@ -826,7 +827,13 @@ func (s *KnowledgeService) createRemoteDataset(ctx context.Context, dataset sqlc
 	if err != nil {
 		return sqlc.RagflowDataset{}, fmt.Errorf("读取激活后 RAGFlow dataset 失败: %w", err)
 	}
-	// 若 ragflow_dataset_id 不是本次写入值，说明并发激活了不同 dataset；读回当前值继续使用。
+	// 读回的 ragflow_dataset_id 若不是本次创建的 remote.ID，说明激活 UPDATE 命中 0 行——
+	// 租约在远端创建期间已被其他进程抢占并激活，本进程为败者：删除本次创建的孤儿远端 dataset，
+	// 再读回获胜者映射（或返回"创建中"），避免用本进程的 remote.ID 覆盖获胜者状态。
+	if !active.RagflowDatasetID.Valid || active.RagflowDatasetID.String != remote.ID {
+		_ = s.ragflowClient().DeleteDatasets(ctx, []string{remote.ID})
+		return s.datasetAfterCreateConflict(ctx, dataset.ScopeType, dataset.OrgID, dataset.AppID.String)
+	}
 	return active, nil
 }
 

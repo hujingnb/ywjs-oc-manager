@@ -41,10 +41,9 @@ func TestOnboardMemberCommitsOnSuccess(t *testing.T) {
 	assert.Equal(t, "create", store.auditLogs[1].Action)
 	assert.Equal(t, result.App.ID, store.auditLogs[1].TargetID)
 	assert.Positive(t, store.jobs)
-	// auditLogs[0] = create_with_app; 详情应为「新建成员（含应用 <应用名>）」。
-	// service 当前格式不含显示名，只含应用名（displayNameOrUsername 未在此路径调用）。
+	// auditLogs[0] = create_with_app; 详情应为「新建成员 <显示名>（含应用 <应用名>）」。
 	require.True(t, store.auditLogs[0].DetailMessage.Valid)
-	require.Equal(t, "新建成员（含应用 alice-bot）", store.auditLogs[0].DetailMessage.String)
+	require.Equal(t, "新建成员 Alice（含应用 alice-bot）", store.auditLogs[0].DetailMessage.String)
 	// auditLogs[1] = app create; 详情应为「归属成员 Alice，渠道 微信」。
 	require.True(t, store.auditLogs[1].DetailMessage.Valid)
 	require.Equal(t, "归属成员 Alice，渠道 微信", store.auditLogs[1].DetailMessage.String)
