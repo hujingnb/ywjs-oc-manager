@@ -56,10 +56,16 @@ func (c *ProbeClient) httpClient(caCertPEM string) (*http.Client, error) {
 	}
 	return &http.Client{
 		Timeout: c.Timeout,
-		Transport: &http.Transport{TLSClientConfig: &tls.Config{
-			RootCAs:    pool,
-			MinVersion: tls.VersionTLS12,
-		}},
+		// 探测每个节点都临时构造 client，套用 IdleConnTimeout 收敛空闲连接，
+		// 避免探测自身在节点配置各异时残留连接。
+		Transport: &http.Transport{
+			TLSClientConfig: &tls.Config{
+				RootCAs:    pool,
+				MinVersion: tls.VersionTLS12,
+			},
+			IdleConnTimeout:     IdleConnTimeout,
+			MaxIdleConnsPerHost: MaxIdleConnsPerHost,
+		},
 	}, nil
 }
 

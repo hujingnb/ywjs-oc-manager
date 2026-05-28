@@ -23,6 +23,18 @@ const DockerProxyPathPrefix = "/v1/docker"
 // 这里设置 30s 避免 API 调用 hang 死整个 worker。
 const dockerClientTimeout = 30 * time.Second
 
+// IdleConnTimeout 限制空闲 keep-alive 连接的存活时长，是连接泄漏的兜底。
+// 关键：*http.Transport 默认 IdleConnTimeout=0（空闲连接永不回收），一旦某个 client 被遗弃
+// 又没 Close，其空闲连接会无限堆积、占满本机临时端口（出现
+// "connect: cannot assign requested address"）。设为 90s 后，即使 client 被遗弃，其空闲连接
+// 也会自行关闭、释放端口，对应的 transport 随之能被 GC。manager 访问 agent 的所有 transport
+// 都应套用此值。
+const IdleConnTimeout = 90 * time.Second
+
+// MaxIdleConnsPerHost 限制每个目标 host 的空闲连接上限，进一步约束复用场景下的连接占用。
+// 默认值仅 2；agent 端口同时承载多种并发操作，放宽到 4 兼顾复用与连接数收敛。
+const MaxIdleConnsPerHost = 4
+
 // NewDockerClientForNode 构造一个面向单个 runtime node 的 docker SDK client。
 //
 // 关键点：
@@ -60,6 +72,8 @@ func NewDockerClientForNode(endpoint, agentToken, caCertPEM string, opts ...clie
 		TLSClientConfig:       tlsConfig,
 		TLSHandshakeTimeout:   10 * time.Second,
 		ResponseHeaderTimeout: dockerClientTimeout,
+		IdleConnTimeout:       IdleConnTimeout,
+		MaxIdleConnsPerHost:   MaxIdleConnsPerHost,
 	}
 	httpClient := &http.Client{Transport: transport, Timeout: dockerClientTimeout}
 
@@ -111,6 +125,8 @@ func NewStreamingDockerClientForNode(endpoint, agentToken, caCertPEM string, opt
 	transport := &http.Transport{
 		TLSClientConfig:     tlsConfig,
 		TLSHandshakeTimeout: 10 * time.Second,
+		IdleConnTimeout:     IdleConnTimeout,
+		MaxIdleConnsPerHost: MaxIdleConnsPerHost,
 	}
 	httpClient := &http.Client{Transport: transport}
 

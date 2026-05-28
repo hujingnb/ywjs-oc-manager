@@ -45,12 +45,28 @@ type nodeQueries interface {
 type nodeClientResolver struct {
 	queries nodeQueries
 	tokens  *agent.TokenResolver
+	// dockerCache / fileCache 按 nodeID 缓存并复用按节点构造的 client，避免每次操作新建
+	// transport 导致空闲连接泄漏、临时端口耗尽（参见 agent.ClientCache 说明）。
+	dockerCache *agent.ClientCache[*dockercli.Client]
+	fileCache   *agent.ClientCache[*agent.AgentFileClient]
 }
 
 func newNodeClientResolver(queries nodeQueries, tokens *agent.TokenResolver) *nodeClientResolver {
 	return &nodeClientResolver{
 		queries: queries,
 		tokens:  tokens,
+		// docker client 被替换时调用 Close() 关闭其连接池。
+		dockerCache: agent.NewClientCache(func(c *dockercli.Client) {
+			if c != nil {
+				_ = c.Close()
+			}
+		}),
+		// file client 自身无 Close；替换时关闭其底层 http.Client 的空闲连接。
+		fileCache: agent.NewClientCache(func(c *agent.AgentFileClient) {
+			if c != nil && c.HTTPClient != nil {
+				c.HTTPClient.CloseIdleConnections()
+			}
+		}),
 	}
 }
 
@@ -63,13 +79,17 @@ func (n *nodeClientResolver) FileClient(ctx context.Context, nodeID string) (*ag
 	if !node.AgentFileEndpoint.Valid || strings.TrimSpace(node.AgentFileEndpoint.String) == "" {
 		return nil, fmt.Errorf("节点 %s 未注册 agent_file_endpoint", nodeID)
 	}
-	httpClient, err := n.agentHTTPClient(node, 30*time.Second)
-	if err != nil {
-		return nil, err
-	}
-	client := agent.NewFileClient(node.AgentFileEndpoint.String, token)
-	client.SetHTTPClient(httpClient)
-	return client, nil
+	// 指纹覆盖 endpoint/token/CA：任一变更（节点 re-register、token 轮换、CA 重签）即重建并回收旧 client。
+	fp := agent.Fingerprint(node.AgentFileEndpoint.String, token, node.AgentTlsCaCert.String)
+	return n.fileCache.Get(nodeID, fp, func() (*agent.AgentFileClient, error) {
+		httpClient, err := n.agentHTTPClient(node, 30*time.Second)
+		if err != nil {
+			return nil, err
+		}
+		client := agent.NewFileClient(node.AgentFileEndpoint.String, token)
+		client.SetHTTPClient(httpClient)
+		return client, nil
+	})
 }
 
 // DockerClient 取面向单节点的 docker SDK client（HTTPS + Bearer）。
@@ -84,7 +104,11 @@ func (n *nodeClientResolver) DockerClient(ctx context.Context, nodeID string) (*
 	if !node.AgentTlsCaCert.Valid || strings.TrimSpace(node.AgentTlsCaCert.String) == "" {
 		return nil, fmt.Errorf("节点 %s 缺 agent_tls_ca_cert", nodeID)
 	}
-	return agent.NewDockerClientForNode(node.AgentDockerEndpoint.String, token, node.AgentTlsCaCert.String)
+	// 指纹覆盖 endpoint/token/CA：任一变更即重建并 Close 旧 docker client。
+	fp := agent.Fingerprint(node.AgentDockerEndpoint.String, token, node.AgentTlsCaCert.String)
+	return n.dockerCache.Get(nodeID, fp, func() (*dockercli.Client, error) {
+		return agent.NewDockerClientForNode(node.AgentDockerEndpoint.String, token, node.AgentTlsCaCert.String)
+	})
 }
 
 // streamingDockerResolver 适配 channel.DockerClientResolver,返回无 timeout 的 docker client,
@@ -97,10 +121,20 @@ func (n *nodeClientResolver) DockerClient(ctx context.Context, nodeID string) (*
 // 让 attach 流可以持续到 oc-weixin-login.py 主动退出(用户扫码完成或超时)。
 type streamingDockerResolver struct {
 	inner *nodeClientResolver
+	// streamCache 独立于 inner.dockerCache：流式 client 不设 http.Client.Timeout，
+	// transport 配置不同，必须分开缓存。
+	streamCache *agent.ClientCache[*dockercli.Client]
 }
 
 func newStreamingDockerResolver(inner *nodeClientResolver) *streamingDockerResolver {
-	return &streamingDockerResolver{inner: inner}
+	return &streamingDockerResolver{
+		inner: inner,
+		streamCache: agent.NewClientCache(func(c *dockercli.Client) {
+			if c != nil {
+				_ = c.Close()
+			}
+		}),
+	}
 }
 
 // DockerClient 实现 channel.DockerClientResolver,返回禁用 timeout 的长连接 docker client。
@@ -115,7 +149,11 @@ func (s *streamingDockerResolver) DockerClient(ctx context.Context, nodeID strin
 	if !node.AgentTlsCaCert.Valid || strings.TrimSpace(node.AgentTlsCaCert.String) == "" {
 		return nil, fmt.Errorf("节点 %s 缺 agent_tls_ca_cert", nodeID)
 	}
-	return agent.NewStreamingDockerClientForNode(node.AgentDockerEndpoint.String, token, node.AgentTlsCaCert.String)
+	// 指纹覆盖 endpoint/token/CA：任一变更即重建并 Close 旧流式 docker client。
+	fp := agent.Fingerprint(node.AgentDockerEndpoint.String, token, node.AgentTlsCaCert.String)
+	return s.streamCache.Get(nodeID, fp, func() (*dockercli.Client, error) {
+		return agent.NewStreamingDockerClientForNode(node.AgentDockerEndpoint.String, token, node.AgentTlsCaCert.String)
+	})
 }
 
 // lookupNode 同时返回节点行与 agent token；任何字段缺失立即报错让上层快速失败。
@@ -151,10 +189,14 @@ func (n *nodeClientResolver) agentHTTPClient(node sqlc.RuntimeNode, timeout time
 	}
 	return &http.Client{
 		Timeout: timeout,
-		Transport: &http.Transport{TLSClientConfig: &tls.Config{
-			RootCAs:    pool,
-			MinVersion: tls.VersionTLS12,
-		}},
+		Transport: &http.Transport{
+			TLSClientConfig: &tls.Config{
+				RootCAs:    pool,
+				MinVersion: tls.VersionTLS12,
+			},
+			IdleConnTimeout:     agent.IdleConnTimeout,
+			MaxIdleConnsPerHost: agent.MaxIdleConnsPerHost,
+		},
 	}, nil
 }
 
