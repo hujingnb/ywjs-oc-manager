@@ -13,16 +13,16 @@
 
 ## 本地调试账号
 
-> 仅本地 docker-compose 联调环境使用，不得用于任何线上 / 共享环境，也不要复用到生产。
+> 仅本地 k3d 联调环境使用，不得用于任何线上 / 共享环境，也不要复用到生产。
 
 | 服务 | 本地地址 | 账号 | 密码 |
 |---|---|---|---|
-| manager 后台 | http://localhost:5173 | `admin`（组织标识留空，即平台管理员）| `admin123` |
-| new-api 后台 | http://localhost:3000 | `admin` | `admin123!` |
-| RAGFlow 控制台 | http://localhost:8088 | `admin@ragflow.io`（超级管理员）| `admin` |
+| manager 后台 | http://ocm.localhost | `admin`（组织标识留空，即平台管理员）| `admin123` |
+| new-api 后台 | http://newapi.localhost | `admin` | `admin123!` |
+| RAGFlow 控制台 | http://ragflow.localhost | `admin@ragflow.io`（超级管理员）| `admin` |
 
 - RAGFlow HTTP API 端口 9380、Admin API 端口 9381；控制台默认禁用注册（`RAGFLOW_REGISTER_ENABLED=0`），需新建账号时临时打开再关闭。
-- 以上端口为默认值，可通过 `.env` 的 `NEWAPI_PORT` / `RAGFLOW_WEB_HTTP_PORT` 等覆盖。
+- 以上地址经 k3d traefik Ingress 暴露（*.localhost → 127.0.0.1:80），见 docs/local-development.md。
 
 ## 权限校验
 
