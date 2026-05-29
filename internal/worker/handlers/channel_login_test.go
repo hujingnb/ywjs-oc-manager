@@ -11,8 +11,19 @@ import (
 	"github.com/stretchr/testify/require"
 	"oc-manager/internal/domain"
 	"oc-manager/internal/integrations/channel"
+	"oc-manager/internal/integrations/ocops"
 	"oc-manager/internal/store/sqlc"
 )
+
+// fakeEndpointResolver 实现 ChannelEndpointResolver，返回预设 Endpoint 或 error。
+type fakeEndpointResolver struct {
+	ep  ocops.Endpoint
+	err error
+}
+
+func (r fakeEndpointResolver) ResolveEndpoint(_ context.Context, _ string) (ocops.Endpoint, error) {
+	return r.ep, r.err
+}
 
 const (
 	testChannelWorkerAppID   = "00000000-0000-0000-0000-00000000c101"
@@ -33,7 +44,8 @@ func TestChannelStartLoginHandlerWritesChallenge(t *testing.T) {
 			Hints:     map[string]string{"raw_qr": "https://liteapp.weixin.qq.com/q/test"},
 		},
 	})
-	handler := NewChannelStartLoginHandler(store, registry)
+	// resolver 传 nil：成功路径不依赖 oc-ops 坐标解析，Endpoint 留零值即可。
+	handler := NewChannelStartLoginHandler(store, registry, nil)
 
 	err := handler.Handle(context.Background(), sqlc.Job{
 		Type:        domain.JobTypeChannelStartLogin,
@@ -47,6 +59,48 @@ func TestChannelStartLoginHandlerWritesChallenge(t *testing.T) {
 	if len(store.jobs) != 1 || store.jobs[0].Type != domain.JobTypeChannelCheckBinding {
 		t.Fatalf("应入队 channel_check_binding，jobs=%+v", store.jobs)
 	}
+}
+
+// TestChannelStartLoginHandlerInjectsEndpoint 验证 BeginAuth 前 handler 经 resolver
+// 解析 oc-ops 坐标并注入 AuthInput.Endpoint，确保微信扫码登录 SSE 路由到正确实例。
+func TestChannelStartLoginHandlerInjectsEndpoint(t *testing.T) {
+	store := newChannelWorkerStore(t)
+	registry := channel.NewRegistry()
+	adapter := &workerFakeChannelAdapter{
+		challenge: channel.AuthChallenge{Type: "qrcode", QRCode: "data:image/png;base64,qr"},
+	}
+	registry.MustRegister(adapter)
+	// fakeEndpointResolver 返回固定坐标，断言其原样透传到 adapter。
+	wantEp := ocops.Endpoint{BaseURL: "http://app-x.ocops:8080", Token: "tok-x"}
+	handler := NewChannelStartLoginHandler(store, registry, fakeEndpointResolver{ep: wantEp})
+
+	err := handler.Handle(context.Background(), sqlc.Job{
+		Type:        domain.JobTypeChannelStartLogin,
+		PayloadJson: []byte(`{"app_id":"` + testChannelWorkerAppID + `","channel_type":"wechat"}`),
+	})
+	require.NoError(t, err)
+	require.Equal(t, wantEp, adapter.gotBeginInput.Endpoint)
+}
+
+// TestChannelStartLoginHandlerEndpointResolveFailsSoft 验证 resolver 解析失败时
+// handler 不阻断登录：Endpoint 留零值继续走 BeginAuth（由下游在不可达时报错）。
+func TestChannelStartLoginHandlerEndpointResolveFailsSoft(t *testing.T) {
+	store := newChannelWorkerStore(t)
+	registry := channel.NewRegistry()
+	adapter := &workerFakeChannelAdapter{
+		challenge: channel.AuthChallenge{Type: "qrcode", QRCode: "data:image/png;base64,qr"},
+	}
+	registry.MustRegister(adapter)
+	// resolver 返回 error：handler 应吞掉错误、Endpoint 留零值，登录流程照常推进。
+	handler := NewChannelStartLoginHandler(store, registry, fakeEndpointResolver{err: errors.New("resolve boom")})
+
+	err := handler.Handle(context.Background(), sqlc.Job{
+		Type:        domain.JobTypeChannelStartLogin,
+		PayloadJson: []byte(`{"app_id":"` + testChannelWorkerAppID + `","channel_type":"wechat"}`),
+	})
+	require.NoError(t, err)
+	require.Equal(t, ocops.Endpoint{}, adapter.gotBeginInput.Endpoint)
+	require.Equal(t, domain.ChannelStatusPendingAuth, store.binding.Status)
 }
 
 // TestChannelCheckBindingHandlerMarksBoundAndRunsApp 验证渠道Check绑定处理器Marks已绑定并Runs应用的预期行为场景。
@@ -96,7 +150,8 @@ func TestChannelStartLoginHandlerRecordsFailedAudit(t *testing.T) {
 	store := newChannelWorkerStore(t)
 	registry := channel.NewRegistry()
 	registry.MustRegister(&workerFakeChannelAdapter{beginErr: errors.New("weixin qrcode failed")})
-	handler := NewChannelStartLoginHandler(store, registry)
+	// resolver 传 nil：失败路径同样不依赖 oc-ops 坐标解析。
+	handler := NewChannelStartLoginHandler(store, registry, nil)
 
 	err := handler.Handle(context.Background(), sqlc.Job{
 		Type:        domain.JobTypeChannelStartLogin,
@@ -234,10 +289,13 @@ type workerFakeChannelAdapter struct {
 	challenge channel.AuthChallenge
 	progress  channel.AuthProgress
 	beginErr  error
+	// gotBeginInput 记录最近一次 BeginAuth 收到的入参，供断言 Endpoint 注入。
+	gotBeginInput channel.AuthInput
 }
 
 func (a *workerFakeChannelAdapter) Type() string { return domain.ChannelTypeWeChat }
-func (a *workerFakeChannelAdapter) BeginAuth(_ context.Context, _ channel.AuthInput) (channel.AuthChallenge, error) {
+func (a *workerFakeChannelAdapter) BeginAuth(_ context.Context, input channel.AuthInput) (channel.AuthChallenge, error) {
+	a.gotBeginInput = input
 	if a.beginErr != nil {
 		return channel.AuthChallenge{}, a.beginErr
 	}

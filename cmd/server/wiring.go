@@ -21,6 +21,7 @@ import (
 	"oc-manager/internal/integrations/agent"
 	"oc-manager/internal/integrations/hermes"
 	"oc-manager/internal/integrations/newapi"
+	"oc-manager/internal/integrations/ocops"
 	"oc-manager/internal/integrations/runtime"
 	"oc-manager/internal/service"
 	"oc-manager/internal/store"
@@ -196,30 +197,19 @@ func (n *nodeClientResolver) agentHTTPClient(node sqlc.RuntimeNode, timeout time
 	}, nil
 }
 
-// appContainerLookup 实现 channel.AppContainerLookup，通过 sqlc.Queries 取容器 ID。
-type appContainerLookup struct {
-	queries appLookupQueries
+// ocopsEndpointResolver 把 service.OcOpsResolver 适配为 workerhandlers.ChannelEndpointResolver：
+// 仅取出 OcOpsAppLocation.Endpoint，让 channel_start_login worker 不直接依赖 service 类型。
+type ocopsEndpointResolver struct {
+	resolver service.OcOpsResolver
 }
 
-type appLookupQueries interface {
-	GetApp(ctx context.Context, id string) (sqlc.App, error)
-}
-
-func newAppContainerLookup(queries appLookupQueries) *appContainerLookup {
-	return &appContainerLookup{queries: queries}
-}
-
-// LookupContainer 按 appID 取容器 ID。
-// app 不存在或 container_id 为空时返回错误，让 wechat runner 立刻冒泡。
-func (l *appContainerLookup) LookupContainer(ctx context.Context, appID string) (string, error) {
-	app, err := l.queries.GetApp(ctx, appID)
+// ResolveEndpoint 解析 appID 对应的 oc-ops 调用坐标。
+func (r ocopsEndpointResolver) ResolveEndpoint(ctx context.Context, appID string) (ocops.Endpoint, error) {
+	loc, err := r.resolver.Resolve(ctx, appID)
 	if err != nil {
-		return "", fmt.Errorf("查询应用 %s 失败: %w", appID, err)
+		return ocops.Endpoint{}, err
 	}
-	if !app.ContainerID.Valid || app.ContainerID.String == "" {
-		return "", fmt.Errorf("应用 %s 尚未创建容器", appID)
-	}
-	return app.ContainerID.String, nil
+	return loc.Endpoint, nil
 }
 
 // appInputRefresherQueries 是 appInputRefresher 需要的最小 DB 查询子集。

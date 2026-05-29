@@ -9,14 +9,24 @@ import (
 	"log/slog"
 	"time"
 
-	null "github.com/guregu/null/v5"
 	"github.com/google/uuid"
+	null "github.com/guregu/null/v5"
 
 	"oc-manager/internal/domain"
 	"oc-manager/internal/integrations/channel"
+	"oc-manager/internal/integrations/ocops"
 	redactlog "oc-manager/internal/log"
 	"oc-manager/internal/store/sqlc"
 )
+
+// ChannelEndpointResolver 把 appID 解析为 oc-ops 调用坐标（基址 + per-app token）。
+// 微信扫码登录走 oc-ops HTTP SSE，BeginAuth 时需要把目标 app 实例的 Endpoint 注入
+// channel.AuthInput，runner 据此把登录请求路由到正确的 oc-ops 实例。
+// 生产实现为 *service.OcOpsResolverFromStore；为避免引入 service 包依赖、保持 worker
+// 可独立单测，这里只声明返回 ocops.Endpoint 的窄接口，由装配侧用闭包适配。
+type ChannelEndpointResolver interface {
+	ResolveEndpoint(ctx context.Context, appID string) (ocops.Endpoint, error)
+}
 
 // ChannelLoginStore 是渠道登录 worker 需要的最小存储接口。
 type ChannelLoginStore interface {
@@ -34,11 +44,15 @@ type ChannelLoginStore interface {
 type ChannelStartLoginHandler struct {
 	store    ChannelLoginStore
 	registry *channel.Registry
+	// endpoints 把 appID 解析为 oc-ops 坐标，供 BeginAuth 填充 AuthInput.Endpoint。
+	// nil 时降级为零值 Endpoint（向后兼容旧 docker exec 装配 / 单测无需 oc-ops 寻址的场景）。
+	endpoints ChannelEndpointResolver
 }
 
 // NewChannelStartLoginHandler 创建 channel_start_login handler。
-func NewChannelStartLoginHandler(store ChannelLoginStore, registry *channel.Registry) *ChannelStartLoginHandler {
-	return &ChannelStartLoginHandler{store: store, registry: registry}
+// resolver 用于把目标 app 解析为 oc-ops 调用坐标；传 nil 时 Endpoint 留零值。
+func NewChannelStartLoginHandler(store ChannelLoginStore, registry *channel.Registry, resolver ChannelEndpointResolver) *ChannelStartLoginHandler {
+	return &ChannelStartLoginHandler{store: store, registry: registry, endpoints: resolver}
 }
 
 // Handle 在容器内触发渠道登录，保存二维码 challenge，并排队轮询绑定状态。
@@ -57,11 +71,23 @@ func (h *ChannelStartLoginHandler) Handle(ctx context.Context, job sqlc.Job) err
 	if binding.Status == domain.ChannelStatusBound {
 		return nil
 	}
+	// 解析目标 app 的 oc-ops 坐标，注入 AuthInput.Endpoint：微信扫码登录走 oc-ops SSE，
+	// runner 据此路由到正确实例。解析失败仅告警不阻断（Endpoint 留零值，由下游 BeginAuth
+	// 在不可达时报错），避免 resolver 抖动直接吞掉登录请求。
+	var endpoint ocops.Endpoint
+	if h.endpoints != nil {
+		if ep, rerr := h.endpoints.ResolveEndpoint(ctx, payload.AppID); rerr != nil {
+			slog.WarnContext(ctx, "解析 oc-ops 坐标失败，Endpoint 留空", "app_id", payload.AppID, "error", rerr)
+		} else {
+			endpoint = ep
+		}
+	}
 	challenge, err := adapter.BeginAuth(ctx, channel.AuthInput{
 		AppID:       payload.AppID,
 		OwnerUserID: app.OwnerUserID,
 		NodeID:      app.RuntimeNodeID,
 		ContainerID: app.ContainerID.ValueOrZero(),
+		Endpoint:    endpoint,
 	})
 	if err != nil {
 		safeMessage := redactlog.SafeErrorMessage(err)

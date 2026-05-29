@@ -38,6 +38,7 @@ import (
 	"oc-manager/internal/integrations/agent"
 	"oc-manager/internal/integrations/channel"
 	"oc-manager/internal/integrations/newapi"
+	"oc-manager/internal/integrations/ocops"
 	"oc-manager/internal/integrations/ragflow"
 	"oc-manager/internal/integrations/runtime"
 	managerlog "oc-manager/internal/log"
@@ -55,6 +56,13 @@ import (
 	_ "github.com/golang-migrate/migrate/v4/database/mysql"
 	"github.com/golang-migrate/migrate/v4/source/iofs"
 )
+
+// ocopsBaseURLTemplate 是 oc-ops 服务基址的约定占位模板，含一个 %s 占位符（以 appID 替换）。
+//
+// TODO(spec-A): spec-E 不做真实 k8s 寻址，此模板仅为 service.OcOpsResolverFromStore 提供
+// 可拼装的占位基址；spec-A 将由 client-go 解析的真实 Service DNS 取代，并注入 per-app
+// OC_OPS_TOKEN（当前 Endpoint.Token 留空）。
+const ocopsBaseURLTemplate = "http://app-%s-ocops.oc-apps.svc:8080"
 
 func main() {
 	configPath := os.Getenv("OCM_CONFIG")
@@ -202,6 +210,16 @@ func runManager(ctx context.Context, cfg config.Config, logOut io.Writer) error 
 	runtimeOpService.SetInspector(newRuntimeInspectorWrapper(runtimeAdapter))
 	workspaceService := service.NewWorkspaceService(dbStore.Queries, runtimeAdapter, cfg.App.DataRoot)
 
+	// oc-ops HTTP 客户端 + app 坐标解析器：cron / kanban / 微信扫码登录均改走
+	// oc-ops 类型化 REST / SSE，不再经 runtimeAdapter docker exec。
+	// 30s 超时覆盖普通请求；SSE 长连接由调用方自带可取消 ctx 控制，不受此 Timeout 限制
+	// （net/http.Client.Timeout 仅约束完整请求-响应，流式订阅在 Body 读取阶段不计入）。
+	ocopsClient := ocops.NewClient(&http.Client{Timeout: 30 * time.Second})
+	// ocopsResolver 把 appID 解析为 oc-ops 调用坐标。
+	// TODO(spec-A): ocopsBaseURLTemplate 当前为约定占位模板，spec-E 不做真实 k8s 寻址；
+	// spec-A 将替换为 client-go 解析的真实 Service DNS，并注入 per-app OC_OPS_TOKEN。
+	ocopsResolver := service.NewOcOpsResolverFromStore(dbStore.Queries, ocopsBaseURLTemplate)
+
 	channelRegistry := channel.NewRegistry()
 	channelService := service.NewChannelService(dbStore.Queries, channelRegistry, redisQueue)
 	// channel 微信扫码 ExecAttach 是长连接(等用户扫码可达数分钟),
@@ -209,7 +227,11 @@ func runManager(ctx context.Context, cfg config.Config, logOut io.Writer) error 
 	// 否则 http.Client.Timeout=30s 会强制关闭 hijack 后的底层连接,
 	// 导致 stream EOF + JSON 解析失败 + 容器内 oc-weixin-login.py 进程 orphan。
 	wechatExecutor := channel.NewDockerExecutor(streamingResolver)
-	wechatRunner := channel.NewDockerCommandRunner(wechatExecutor, newAppContainerLookup(dbStore.Queries))
+	// 微信扫码登录走 oc-ops HTTP SSE：runner 持 ocopsClient（满足 hermes.ChannelLoginStreamer），
+	// 每次登录按 AuthInput.Endpoint（worker 经 ocopsResolver 解析后注入）路由到目标实例。
+	wechatRunner := channel.NewDockerCommandRunner(ocopsClient)
+	// DockerBindingResolver 仍走 docker exec 读容器内 plugin state（spec-A 再改造），
+	// 因此 wechatExecutor / streamingResolver 装配保留。
 	wechatResolver := channel.NewDockerBindingResolver(wechatExecutor)
 	if err := channelRegistry.Register(channel.NewWeChatAdapter(wechatRunner)); err != nil {
 		return fmt.Errorf("注册微信渠道失败: %w", err)
@@ -347,7 +369,7 @@ func runManager(ctx context.Context, cfg config.Config, logOut io.Writer) error 
 	if err := registry.Register("app_delete", handlers.NewAppDeleteHandler(dbStore.Queries, runtimeAdapter, newapiFactory, nil, knowledgeService).Handle); err != nil {
 		return fmt.Errorf("注册 app_delete handler 失败: %w", err)
 	}
-	if err := registry.Register(domain.JobTypeChannelStartLogin, handlers.NewChannelStartLoginHandler(dbStore.Queries, channelRegistry).Handle); err != nil {
+	if err := registry.Register(domain.JobTypeChannelStartLogin, handlers.NewChannelStartLoginHandler(dbStore.Queries, channelRegistry, ocopsEndpointResolver{resolver: ocopsResolver}).Handle); err != nil {
 		return fmt.Errorf("注册 channel_start_login handler 失败: %w", err)
 	}
 	channelCheckHandler := handlers.NewChannelCheckBindingHandler(dbStore.Queries, channelRegistry, wechatResolver)
@@ -383,16 +405,12 @@ func runManager(ctx context.Context, cfg config.Config, logOut io.Writer) error 
 	jobWorker := worker.New(dbStore.Queries, redisQueue, registry, worker.Config{WorkerID: cfg.App.HTTPAddr})
 	jobScheduler := scheduler.New(dbStore.Queries, redisQueue, scheduler.Config{})
 
-	// HermesKanbanService：通过容器内 hermes kanban CLI 提供任务看板能力。
-	// runtimeAdapter 已同时实现 ContainerExecJSON（一次性 exec）和 ContainerExecStream
-	// （流式 exec，用于 hermes kanban watch）；kanbanLocator 通过 app store 解析 app
-	// 的归属组织、拥有者和运行时坐标。
-	kanbanLocator := service.NewKanbanAppLocatorFromStore(dbStore.Queries)
-	hermesKanbanService := service.NewHermesKanbanService(runtimeAdapter, kanbanLocator)
-	// HermesCronService：通过容器内 oc-cron 代理 Hermes Cron 管理能力。
-	// cronLocator 只解析 app 运行时坐标；读写权限和 stub/runtime 可用性由 service 层统一校验。
-	cronLocator := service.NewCronAppLocatorFromStore(dbStore.Queries)
-	hermesCronService := service.NewHermesCronService(runtimeAdapter, cronLocator)
+	// HermesKanbanService / HermesCronService：通过 oc-ops 类型化 REST / SSE 提供看板与
+	// Cron 管理能力，不再经 runtimeAdapter docker exec。两者共用 ocopsClient + ocopsResolver，
+	// resolver 负责把 appID 解析为 oc-ops 坐标并判定 Supported（dev stub → UNSUPPORTED），
+	// 读写权限由 service 层统一校验。
+	hermesKanbanService := service.NewHermesKanbanService(ocopsClient, ocopsResolver)
+	hermesCronService := service.NewHermesCronService(ocopsClient, ocopsResolver)
 
 	server := &http.Server{
 		Addr: cfg.App.HTTPAddr,
