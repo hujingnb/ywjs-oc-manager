@@ -201,7 +201,7 @@ func runManager(ctx context.Context, cfg config.Config, logOut io.Writer) error 
 	// Coordinator 按 (nodeID, imageRef) 粒度加锁，让 agent 直接从公网 registry 拉取镜像。
 	imageCoord := imagecoord.NewCoordinator(distLocker, progressBus, uuid.NewString())
 	runtimeAdapter := runtime.NewAgentBackedAdapter(nodeResolver, nodeResolver)
-	// streamingResolver 构造一次复用：ContainerExecStream（hermes kanban watch 长连接）
+	// streamingResolver 构造一次复用：runtimeAdapter.DockerClientForNode（镜像拉取流式 NDJSON）
 	// 和 channel 微信扫码 ExecAttach 均属于长连接场景，都必须用无 timeout 的 docker client。
 	// nodeClientResolver.DockerClient 带 30s Timeout，长连接会在 30s 后被强制掐断，
 	// newStreamingDockerResolver 使用 agent.NewStreamingDockerClientForNode 不设 Timeout。

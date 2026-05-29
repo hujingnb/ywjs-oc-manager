@@ -1,8 +1,6 @@
 package runtime
 
 import (
-	"bufio"
-	"bytes"
 	"context"
 	"encoding/json"
 	"fmt"
@@ -15,7 +13,6 @@ import (
 	"github.com/docker/docker/api/types/container"
 	"github.com/docker/docker/api/types/network"
 	"github.com/docker/docker/client"
-	"github.com/docker/docker/pkg/stdcopy"
 
 	"oc-manager/internal/integrations/agent"
 )
@@ -46,13 +43,13 @@ type ContainerInspector interface {
 // 三个核心依赖：
 //   - files：缺失时文件接口返回 ErrUnimplemented；
 //   - docker：缺失时容器接口返回 ErrUnimplemented，避免未装配 docker proxy 时静默 panic；
-//   - streamingDocker：可选，用于长连接 ExecAttach 场景（ContainerExecStream）；
+//   - streamingDocker：可选，用于无 timeout 长连接场景（如 DockerClientForNode 的镜像拉取流）；
 //     nil 时回退到 docker，调用方需确保 docker resolver 返回无 timeout 的 client；
 //   - inspector：nil 时 WaitContainerHealthy 使用自身的 InspectContainer，非 nil 时用于测试覆盖。
 type AgentBackedAdapter struct {
 	files  AgentResolver
 	docker DockerClientResolver
-	// streamingDocker 专供 ContainerExecStream 使用；nil 时回退到 docker。
+	// streamingDocker 专供无 timeout 长连接（如 DockerClientForNode 镜像拉取）使用；nil 时回退到 docker。
 	// 生产装配时注入 streamingDockerResolver（无 timeout），避免长连接被 30s 截断。
 	streamingDocker DockerClientResolver
 	// inspector 仅用于测试注入；nil 时 WaitContainerHealthy 使用自身的 InspectContainer 方法。
@@ -64,9 +61,9 @@ func NewAgentBackedAdapter(files AgentResolver, docker DockerClientResolver) *Ag
 	return &AgentBackedAdapter{files: files, docker: docker}
 }
 
-// SetStreamingDocker 注入专供流式长连接（ContainerExecStream）使用的 docker client resolver。
-// 该 resolver 应返回无 http.Client.Timeout 的 client，防止 hermes kanban watch 长连接被截断。
-// 不调时 ContainerExecStream 回退到普通 docker resolver，调用方需自行保证超时配置兼容。
+// SetStreamingDocker 注入专供流式长连接使用的 docker client resolver。
+// 该 resolver 应返回无 http.Client.Timeout 的 client，防止镜像拉取等长连接被截断。
+// 不调时 DockerClientForNode 回退到普通 docker resolver，调用方需自行保证超时配置兼容。
 // 命名与项目现有 Set* setter（SetInspector、SetJobNotifier 等）保持一致，void 返回。
 func (a *AgentBackedAdapter) SetStreamingDocker(streaming DockerClientResolver) {
 	a.streamingDocker = streaming
@@ -80,7 +77,7 @@ func (a *AgentBackedAdapter) SetStreamingDocker(streaming DockerClientResolver) 
 // http.Client.Timeout。该 Timeout 是「含响应 body 读取」的整请求硬上限，请求 ctx
 // 只能让它更短、无法延长；若走带 timeout 的客户端，拉取会在 30s 后被强制断流，
 // 报 "context deadline exceeded (Client.Timeout ... while reading body)"。
-// 与 ContainerExecStream 复用同一 streaming resolver；未注入时回退到普通 resolver。
+// 复用注入的 streaming resolver；未注入时回退到普通 resolver。
 func (a *AgentBackedAdapter) DockerClientForNode(ctx context.Context, nodeID string) (*client.Client, error) {
 	return a.streamingDockerClient(ctx, nodeID)
 }
@@ -246,124 +243,6 @@ func (a *AgentBackedAdapter) ContainerExec(ctx context.Context, nodeID, containe
 		}
 	}
 	return ExecResult{}, fmt.Errorf("exec 超时")
-}
-
-// ContainerExecJSON 在容器内执行一次性命令，返回完整 stdout/stderr。
-// 与 ContainerExec 区别：用 stdcopy 分离 stdout/stderr，stdout 不截断，
-// 便于上层对 hermes kanban --json 输出做 JSON 解析。
-func (a *AgentBackedAdapter) ContainerExecJSON(ctx context.Context, nodeID, containerID string, cmd []string) (ExecJSONResult, error) {
-	cli, err := a.dockerClient(ctx, nodeID)
-	if err != nil {
-		return ExecJSONResult{}, err
-	}
-	resp, err := cli.ContainerExecCreate(ctx, containerID, container.ExecOptions{
-		Cmd:          cmd,
-		AttachStdout: true,
-		AttachStderr: true,
-	})
-	if err != nil {
-		return ExecJSONResult{}, fmt.Errorf("创建 exec 失败: %w", err)
-	}
-	att, err := cli.ContainerExecAttach(ctx, resp.ID, container.ExecStartOptions{})
-	if err != nil {
-		return ExecJSONResult{}, fmt.Errorf("附加 exec 失败: %w", err)
-	}
-	defer att.Close()
-	// docker multiplexed 流：用 stdcopy 拆成干净的 stdout / stderr 两段。
-	var stdout, stderr bytes.Buffer
-	if _, err := stdcopy.StdCopy(&stdout, &stderr, att.Reader); err != nil {
-		return ExecJSONResult{}, fmt.Errorf("读取 exec 输出失败: %w", err)
-	}
-	// exec 结束后 inspect 拿退出码；attach 已读到 EOF，命令通常已退出，仍轮询保险。
-	const inspectPollMax = 50
-	for i := 0; i < inspectPollMax; i++ {
-		insp, err := cli.ContainerExecInspect(ctx, resp.ID)
-		if err != nil {
-			return ExecJSONResult{}, fmt.Errorf("inspect exec 失败: %w", err)
-		}
-		if !insp.Running {
-			return ExecJSONResult{
-				ExitCode: insp.ExitCode,
-				Stdout:   stdout.String(),
-				Stderr:   stderr.String(),
-			}, nil
-		}
-		select {
-		case <-ctx.Done():
-			return ExecJSONResult{}, ctx.Err()
-		case <-time.After(100 * time.Millisecond):
-		}
-	}
-	// 超时返回时带上已读数据，便于排障时看到部分输出。
-	return ExecJSONResult{Stdout: stdout.String(), Stderr: stderr.String()}, fmt.Errorf("exec 超时（已读 stdout %dB / stderr %dB）", stdout.Len(), stderr.Len())
-}
-
-// ContainerExecStream 在容器内执行流式命令，逐行投递 stdout。
-// 用无 timeout 的 streaming docker client，避免 hermes kanban watch 长连接被掐断。
-func (a *AgentBackedAdapter) ContainerExecStream(ctx context.Context, nodeID, containerID string, cmd []string) (ExecStreamHandle, error) {
-	cli, err := a.streamingDockerClient(ctx, nodeID)
-	if err != nil {
-		return ExecStreamHandle{}, err
-	}
-	resp, err := cli.ContainerExecCreate(ctx, containerID, container.ExecOptions{
-		Cmd:          cmd,
-		AttachStdout: true,
-		AttachStderr: true,
-	})
-	if err != nil {
-		return ExecStreamHandle{}, fmt.Errorf("创建 exec 失败: %w", err)
-	}
-	att, err := cli.ContainerExecAttach(ctx, resp.ID, container.ExecStartOptions{})
-	if err != nil {
-		return ExecStreamHandle{}, fmt.Errorf("附加 exec 失败: %w", err)
-	}
-
-	lines := make(chan string, 64)
-	// errCh 带缓冲容量 1，goroutine 在 scanner 自然结束后写入一次；
-	// 调用方通过 Err() 的 select default 无阻塞读取，消除 streamErr 裸变量的数据竞争。
-	errCh := make(chan error, 1)
-	streamCtx, cancel := context.WithCancel(ctx)
-
-	go func() {
-		defer close(lines)
-		defer att.Close()
-		// stdcopy 把 multiplexed 流拆出 stdout 写进 pipe，再按行扫描。
-		pr, pw := io.Pipe()
-		defer pr.Close()
-		go func() {
-			_, copyErr := stdcopy.StdCopy(pw, io.Discard, att.Reader)
-			pw.CloseWithError(copyErr)
-		}()
-		scanner := bufio.NewScanner(pr)
-		scanner.Buffer(make([]byte, 0, 64*1024), 1024*1024)
-		for scanner.Scan() {
-			select {
-			case <-streamCtx.Done():
-				// 主动取消路径：不发 errCh，取消不算错误。
-				return
-			case lines <- scanner.Text():
-			}
-		}
-		// scanner 自然结束路径：计算结果错误后写入 errCh（缓冲容量 1，不会阻塞）。
-		var resultErr error
-		if err := scanner.Err(); err != nil && streamCtx.Err() == nil {
-			resultErr = err
-		}
-		errCh <- resultErr
-	}()
-
-	return ExecStreamHandle{
-		Lines: lines,
-		Err: func() error {
-			select {
-			case e := <-errCh:
-				return e
-			default:
-				return nil
-			}
-		},
-		Close: cancel,
-	}, nil
 }
 
 // statsResponseToContainerStats 把 docker 原始 stats 响应转换为前端可直接展示的累计指标。
@@ -602,14 +481,14 @@ func (a *AgentBackedAdapter) dockerClient(ctx context.Context, nodeID string) (*
 	return a.docker.DockerClient(ctx, nodeID)
 }
 
-// streamingDockerClient 返回用于长连接 ExecAttach 的 docker client。
+// streamingDockerClient 返回用于无 timeout 长连接（如镜像拉取流）的 docker client。
 // 若已通过 SetStreamingDocker 注入专用 resolver 则优先使用（无 timeout），
 // 否则回退到普通 docker resolver（调用方需自行保证超时配置兼容）。
 func (a *AgentBackedAdapter) streamingDockerClient(ctx context.Context, nodeID string) (*client.Client, error) {
 	if a.streamingDocker != nil {
 		return a.streamingDocker.DockerClient(ctx, nodeID)
 	}
-	// 回退到普通 docker resolver；ContainerExecStream 建议通过 SetStreamingDocker 注入。
+	// 回退到普通 docker resolver；长连接场景建议通过 SetStreamingDocker 注入。
 	return a.dockerClient(ctx, nodeID)
 }
 
