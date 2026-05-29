@@ -129,6 +129,64 @@ local-build: ## 构建 manager-api/web 镜像推 k3d registry 并滚动重启（
 	-$(KUBECTL) -n $(K8S_NS) rollout restart deploy/manager-api deploy/manager-web
 	@echo "✅ 镜像已推送并触发滚动重启"
 
+local-up: cluster-create local-build ## 一键拉起本地全栈（建集群→构建镜像→部署→建桶→种子管理员）
+	# 1) namespace + secret 先行
+	$(KUBECTL) apply -f $(K8S_LOCAL_DIR)/00-namespace.yaml
+	$(KUBECTL) apply -f $(SECRET_FILE)
+	# 2) 有状态后端，等就绪
+	$(KUBECTL) apply -f $(K8S_LOCAL_DIR)/mysql.yaml \
+		-f $(K8S_LOCAL_DIR)/redis.yaml \
+		-f $(K8S_LOCAL_DIR)/elasticsearch.yaml \
+		-f $(K8S_LOCAL_DIR)/minio.yaml
+	$(KUBECTL) -n $(K8S_NS) rollout status statefulset/mysql --timeout=300s
+	$(KUBECTL) -n $(K8S_NS) rollout status statefulset/redis --timeout=120s
+	$(KUBECTL) -n $(K8S_NS) rollout status statefulset/minio --timeout=120s
+	$(KUBECTL) -n $(K8S_NS) rollout status statefulset/elasticsearch --timeout=300s
+	# 3) 建 MinIO bucket
+	$(MAKE) local-mc-init
+	# 4) 控制面 / 业务 + RBAC + Ingress
+	$(KUBECTL) apply -f $(K8S_LOCAL_DIR)/manager-rbac.yaml \
+		-f $(K8S_LOCAL_DIR)/manager-api.yaml \
+		-f $(K8S_LOCAL_DIR)/manager-web.yaml \
+		-f $(K8S_LOCAL_DIR)/new-api.yaml \
+		-f $(K8S_LOCAL_DIR)/ragflow.yaml \
+		-f $(K8S_LOCAL_DIR)/ingress.yaml
+	$(KUBECTL) -n $(K8S_NS) rollout status deploy/manager-api --timeout=180s
+	$(KUBECTL) -n $(K8S_NS) rollout status deploy/manager-web --timeout=120s
+	# 5) 种子平台管理员（幂等）
+	$(MAKE) local-seed
+	@echo "✅ 本地全栈就绪："
+	@echo "   manager 控制台 http://ocm.localhost"
+	@echo "   new-api 后台    http://newapi.localhost"
+	@echo "   ragflow 控制台  http://ragflow.localhost"
+
+local-mc-init: ## 在 minio 容器内建 app/ragflow bucket（幂等）
+	$(KUBECTL) -n $(K8S_NS) exec statefulset/minio -- sh -c '\
+		mc alias set local http://127.0.0.1:9000 "$$MINIO_ROOT_USER" "$$MINIO_ROOT_PASSWORD" >/dev/null 2>&1; \
+		mc mb -p local/oc-apps; mc mb -p local/ragflow; mc ls local'
+
+local-migrate: ## kubectl exec manager-api 跑迁移（默认 up；DOWN=1 则回滚一次）
+	@if [ "$(DOWN)" = "1" ]; then \
+		$(KUBECTL) -n $(K8S_NS) exec deploy/manager-api -- migrate down; \
+	else \
+		$(KUBECTL) -n $(K8S_NS) exec deploy/manager-api -- migrate up; \
+	fi
+
+local-seed: ## kubectl exec manager-api 种子平台管理员 admin/admin123（幂等）
+	$(KUBECTL) -n $(K8S_NS) exec deploy/manager-api -- seed-admin admin admin123
+
+local-seed-e2e: ## kubectl exec manager-api 注入 Playwright e2e fixture（OCM_E2E=1 守门），打印 fixture JSON
+	@$(KUBECTL) -n $(K8S_NS) exec deploy/manager-api -- env OCM_E2E=1 seed-e2e
+
+local-status: ## 查看本地集群 pod / ingress 状态
+	$(KUBECTL) -n $(K8S_NS) get pods,svc,ingress
+
+local-logs: ## tail 指定服务日志（用法：make local-logs svc=manager-api）
+	$(KUBECTL) -n $(K8S_NS) logs -f deploy/$(svc)
+
+local-shell: ## 进入指定服务容器（用法：make local-shell svc=manager-api）
+	$(KUBECTL) -n $(K8S_NS) exec -it deploy/$(svc) -- sh
+
 ##@ 测试 / 静态检查
 
 test: ## 在 manager-api 容器内跑 Go 单元测试 (go test ./...)
