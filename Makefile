@@ -1,4 +1,4 @@
-.PHONY: test vet build sqlc-generate migrate-up migrate-down logs web-test web-typecheck web-build build-hermes-runtime hermes-inject-contract debug-ollama debug-newapi newapi-probe seed-e2e smoke-v102 openapi-gen web-types-gen openapi-check ssh-manager ssh-agent1 ssh-newapi logs-api logs-agent1 psql-manager redis-manager bh-logs local-up local-down local-reset local-build local-migrate local-seed local-seed-e2e local-mc-init local-status local-logs local-shell cluster-create .guard-k3d-hosts
+.PHONY: test vet build sqlc-generate migrate-up migrate-down logs web-test web-typecheck web-build build-hermes-runtime hermes-inject-contract debug-ollama debug-newapi newapi-probe seed-e2e smoke-v102 openapi-gen web-types-gen openapi-check ssh-manager ssh-agent1 ssh-newapi logs-api logs-agent1 psql-manager redis-manager bh-logs local-up local-down local-reset local-stop local-start local-build local-migrate local-seed local-seed-e2e local-mc-init local-status local-logs local-shell cluster-create .guard-k3d-hosts
 
 # 加载 .env（-include 在文件不存在时静默跳过，不报错）。
 # docker compose 会自动读取 .env，Makefile 显式 include 是为了让 SSH 等 target 也能访问其中变量。
@@ -114,9 +114,18 @@ cluster-create: .guard-k3d-hosts ## 创建 k3d 集群（带 registry + 宿主数
 		--wait
 	@echo "✅ 集群 $(K3D_CLUSTER) 就绪。registry=$(K3D_REGISTRY_HOST)，数据卷=$(K3D_DATA_DIR)"
 
-local-down: ## 删除 k3d 集群（宿主 .k3d-data 数据保留，下次 up 复用）
+local-stop: ## 停止 k3d 集群但不删除（保留数据与镜像，data 不丢；用 local-start 恢复）
+	k3d cluster stop $(K3D_CLUSTER)
+	@echo "ℹ️  集群已停止；跑 make local-start 原样恢复（PVC/数据/镜像均保留）"
+
+local-start: ## 启动已停止的 k3d 集群（数据与已部署对象原样恢复）
+	k3d cluster start $(K3D_CLUSTER)
+	@echo "✅ 集群已启动；稍候各 pod 自恢复，可用 make local-status 查看"
+
+local-down: ## 删除 k3d 集群（注意：删集群会重建 PVC，业务数据不保留；保数据请用 local-stop）
 	-k3d cluster delete $(K3D_CLUSTER)
-	@echo "ℹ️  集群已删除；数据仍在 $(K3D_DATA_DIR)（如需清空跑 make local-reset）"
+	@echo "ℹ️  集群已删除。.k3d-data 旧目录仍在磁盘但不会被下次 up 复用（local-path 按新 PVC uid 建目录）；"
+	@echo "    如需保数据重启请改用 make local-stop / make local-start；如需彻底清空跑 make local-reset"
 
 local-reset: local-down ## 删集群并清空 .k3d-data，干净重建（不自动 up）
 	# .k3d-data 内是集群内 root 进程写入的 PVC 数据（如 redis appendonly），宿主用户

@@ -19,7 +19,9 @@
 ```bash
 make local-up      # 建集群→构建镜像→部署全栈→建桶→种子管理员
 make local-status  # 查看 pod / ingress
-make local-down    # 删集群（.k3d-data 数据保留）
+make local-stop    # 停止集群但不删除（保数据/镜像，重启不丢）
+make local-start   # 启动已停止的集群（数据与已部署对象原样恢复）
+make local-down    # 删除集群（删 PVC，业务数据不保留；保数据请用 local-stop）
 make local-reset   # 删集群并清空 .k3d-data，干净重建（随后再 make local-up）
 ```
 
@@ -45,8 +47,13 @@ make local-reset   # 删集群并清空 .k3d-data，干净重建（随后再 mak
 
 ## 数据持久化
 
-- 有状态件（MySQL/Redis/ES/MinIO）的 PVC 数据落在宿主 `<repo>/.k3d-data`，
-  跨 `make local-down`/`local-up` 持久；`make local-reset` 才清空。
+- 有状态件（MySQL/Redis/ES/MinIO）的 PVC 数据落在宿主 `<repo>/.k3d-data`。
+- **保数据重启用 `make local-stop` / `make local-start`**：集群只停不删，PVC 与
+  其 local-path 目录映射不变，数据原样恢复（实测 stop→start 后业务数据仍在）。
+- **`make local-down` 会删除集群（含 PVC 对象）**：再 `make local-up` 时 local-path
+  会按新的 PVC uid 新建目录，旧 `.k3d-data` 目录被孤立、不会自动复用，相当于业务
+  数据重置。需要保留数据时不要用 down/up，改用 stop/start。
+- `make local-reset` 显式清空 `.k3d-data`（含孤立的旧 PVC 目录），用于彻底干净重建。
 - 旧 compose 的 `.local/` 数据已不再使用，但暂时保留未删（过渡期安全网）。
 - `scripts/check-compose-bind-mounts.sh` 是 compose 时代遗留校验脚本，已失效。
 
