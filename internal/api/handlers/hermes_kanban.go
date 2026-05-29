@@ -5,6 +5,7 @@ package handlers
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"io"
 	"net/http"
@@ -28,8 +29,8 @@ type hermesKanbanService interface {
 	TaskRuns(ctx context.Context, p auth.Principal, appID, board, taskID string) ([]ocops.KanbanTaskRun, error)
 	Stats(ctx context.Context, p auth.Principal, appID, board string) (ocops.KanbanStats, error)
 	Capabilities(ctx context.Context, p auth.Principal, appID string) (ocops.KanbanCapabilities, error)
-	// 流方法
-	StreamEvents(ctx context.Context, p auth.Principal, appID, board string, onLine func(string)) error
+	// 流方法：先 resolve+鉴权，再返回 oc-ops 的 KanbanEvent 事件 channel，由 handler 转 SSE。
+	WatchEvents(ctx context.Context, p auth.Principal, appID, board string) (<-chan ocops.KanbanEvent, error)
 	// 写方法
 	CreateTask(ctx context.Context, p auth.Principal, appID string, in service.CreateKanbanTaskInput) (ocops.KanbanTaskDetail, error)
 	Comment(ctx context.Context, p auth.Principal, appID, board, taskID, body string) (ocops.KanbanTaskDetail, error)
@@ -258,12 +259,6 @@ func (h *HermesKanbanHandler) Capabilities(c *gin.Context) {
 // @Success      200
 // @Router       /apps/{appId}/hermes/kanban/events [get]
 func (h *HermesKanbanHandler) StreamEvents(c *gin.Context) {
-	// 设置 SSE 所需响应头：禁止缓存、保持长连接、禁止反代缓冲。
-	c.Header("Content-Type", "text/event-stream")
-	c.Header("Cache-Control", "no-cache")
-	c.Header("Connection", "keep-alive")
-	c.Header("X-Accel-Buffering", "no")
-
 	// 检查 ResponseWriter 是否支持 Flusher；不支持时无法做流式推送。
 	flusher, ok := c.Writer.(http.Flusher)
 	if !ok {
@@ -271,16 +266,29 @@ func (h *HermesKanbanHandler) StreamEvents(c *gin.Context) {
 		return
 	}
 
-	err := h.service.StreamEvents(c.Request.Context(), principalFromCtx(c), c.Param("appId"), c.Query("board"), func(line string) {
-		// 每行 NDJSON 包成一个 SSE data 事件推给客户端。
-		_, _ = c.Writer.WriteString("data: " + line + "\n\n")
-		flusher.Flush()
-	})
-	if err != nil && !errors.Is(err, context.Canceled) {
-		// 流已开始（响应头已发送），无法再改 HTTP 状态码，
-		// 写一个固定结构的 error 事件让客户端感知异常后关闭连接；
-		// 不暴露 err.Error() 内部细节（可能含容器路径等敏感信息）。
-		_, _ = c.Writer.WriteString("event: error\ndata: {\"code\":\"KANBAN_STREAM_ERROR\"}\n\n")
+	// WatchEvents 先做 resolve + 鉴权 + board 校验，再返回事件 channel。
+	// 此时尚未写任何响应头，故 resolve 阶段的错误仍可映射为正常 HTTP 状态码。
+	events, err := h.service.WatchEvents(c.Request.Context(), principalFromCtx(c), c.Param("appId"), c.Query("board"))
+	if err != nil {
+		writeKanbanError(c, err)
+		return
+	}
+
+	// 鉴权通过、流已建立，再写 SSE 响应头：禁止缓存、保持长连接、禁止反代缓冲。
+	c.Header("Content-Type", "text/event-stream")
+	c.Header("Cache-Control", "no-cache")
+	c.Header("Connection", "keep-alive")
+	c.Header("X-Accel-Buffering", "no")
+	flusher.Flush()
+
+	// 逐条消费 oc-ops 的 KanbanEvent，序列化为 JSON 后包成 SSE data 事件推给客户端。
+	// channel 关闭（流正常结束或底层出错）时退出；事件序列化失败仅跳过该条，不中断流。
+	for ev := range events {
+		payload, mErr := json.Marshal(ev)
+		if mErr != nil {
+			continue
+		}
+		_, _ = c.Writer.WriteString("data: " + string(payload) + "\n\n")
 		flusher.Flush()
 	}
 }

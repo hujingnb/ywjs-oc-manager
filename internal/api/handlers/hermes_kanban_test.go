@@ -26,8 +26,9 @@ type kanbanServiceStub struct {
 	runs     []ocops.KanbanTaskRun
 	stats    ocops.KanbanStats
 	caps     ocops.KanbanCapabilities
-	createIn service.CreateKanbanTaskInput // 记录最后一次 CreateTask 入参
-	err      error
+	createIn    service.CreateKanbanTaskInput // 记录最后一次 CreateTask 入参
+	watchEvents []ocops.KanbanEvent           // WatchEvents 事件 channel 预填的事件
+	err         error
 }
 
 // ListBoards 返回预设 boards 列表或错误。
@@ -60,9 +61,17 @@ func (s *kanbanServiceStub) Capabilities(_ context.Context, _ auth.Principal, _ 
 	return s.caps, s.err
 }
 
-// StreamEvents 返回预设错误，不推送任何行。
-func (s *kanbanServiceStub) StreamEvents(_ context.Context, _ auth.Principal, _, _ string, _ func(string)) error {
-	return s.err
+// WatchEvents 返回预设错误或一个预填 watchEvents 后关闭的事件 channel。
+func (s *kanbanServiceStub) WatchEvents(_ context.Context, _ auth.Principal, _, _ string) (<-chan ocops.KanbanEvent, error) {
+	if s.err != nil {
+		return nil, s.err
+	}
+	ch := make(chan ocops.KanbanEvent, len(s.watchEvents))
+	for _, ev := range s.watchEvents {
+		ch <- ev
+	}
+	close(ch)
+	return ch, nil
 }
 
 // CreateTask 记录入参并返回预设详情或错误。
