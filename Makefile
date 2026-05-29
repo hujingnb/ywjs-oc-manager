@@ -16,8 +16,8 @@ K3D_DATA_DIR      := $(CURDIR)/.k3d-data
 K8S_NS            ?= ocm
 K8S_LOCAL_DIR     := deploy/k8s/local
 KUBECTL           ?= kubectl
-# local Secret 文件：默认用入仓的 example；存在真值 secret.yaml 时优先用真值。
-SECRET_FILE       := $(if $(wildcard $(K8S_LOCAL_DIR)/secret.yaml),$(K8S_LOCAL_DIR)/secret.yaml,$(K8S_LOCAL_DIR)/secret.example.yaml)
+# local Secret 文件：固定开发凭证，直接入库（deploy/k8s/local/secret.yaml）。
+SECRET_FILE       := $(K8S_LOCAL_DIR)/secret.yaml
 
 # 统一镜像 tag：取 make 调用时的本地时间，格式 YYYY-MM-DD-HH-MM-SS。
 # 同一次 make 调用中所有生产镜像共享同一时间戳，避免同批镜像 tag 不一致。

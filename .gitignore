@@ -68,6 +68,6 @@ deploy/manage/data/**
 !deploy/manage/data/**/
 !deploy/manage/data/**/.gitkeep
 
-# 本地 k8s 真值 Secret（从 secret.example.yaml 复制后填好的实际文件）
-deploy/k8s/local/secret.yaml
+# 生产真值 Secret（从 prod/secret.example.yaml 复制后填好的实际凭据，禁止入库）
+# 本地 secret.yaml 为固定开发凭证，直接入库（见 deploy/k8s/local/secret.yaml）
 deploy/k8s/prod/secret.yaml
