@@ -1,0 +1,18 @@
+# k3s/containerd 镜像源配置（本地 k3d 专用）。
+#
+# 背景：本地网络无法直连 docker.io，导致 k3s 自带系统镜像
+#（rancher/local-path-provisioner、mirrored-coredns、klipper-helm、
+# mirrored-metrics-server、klipper-lb 等）拉取卡死；进而 local-path-provisioner
+# 长时间未就绪，有状态件（MySQL/Redis/ES/MinIO）的 PVC 因 WaitForFirstConsumer
+# 无法绑定，pod 一直 Pending，最终 make local-up 的 rollout status 超时失败。
+#
+# 这里把 docker.io 的拉取统一改走可达的公共镜像站；应用镜像走 ACR
+#（crpi-*.cn-beijing.personal.cr.aliyuncs.com）不经此处、直连不受影响，
+# k3d 本地 registry（k3d-ocm-registry.localhost:5000）由 --registry-create 单独注入。
+#
+# 由 Makefile 的 cluster-create 通过 `k3d cluster create --registry-config` 注入
+# 到 k3s 节点的 containerd。
+mirrors:
+  docker.io:
+    endpoint:
+      - "https://docker.m.daocloud.io"

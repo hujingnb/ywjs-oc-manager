@@ -108,6 +108,7 @@ cluster-create: .guard-k3d-hosts ## 创建 k3d 集群（带 registry + 宿主数
 	@mkdir -p $(K3D_DATA_DIR)
 	k3d cluster create $(K3D_CLUSTER) \
 		--registry-create $(K3D_REGISTRY):0.0.0.0:$(K3D_REGISTRY_PORT) \
+		--registry-config $(K8S_LOCAL_DIR)/registries.yaml \
 		--volume $(K3D_DATA_DIR):/var/lib/rancher/k3s/storage@all \
 		--port "80:80@loadbalancer" \
 		--wait

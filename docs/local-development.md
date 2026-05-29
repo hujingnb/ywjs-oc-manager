@@ -10,6 +10,9 @@
   ```bash
   echo '127.0.0.1 k3d-ocm-registry.localhost' | sudo tee -a /etc/hosts
   ```
+- 集群创建会通过 `deploy/k8s/local/registries.yaml` 把 docker.io 拉取走公共镜像站
+  （本地网络直连 docker.io 受限时，k3s 系统镜像 rancher/* 才能拉下来）。网络可直连
+  docker.io 时该镜像源同样可用，无需改动；若该镜像站不可用，改其中 endpoint。
 
 ## 一键起停
 
