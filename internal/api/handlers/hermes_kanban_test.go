@@ -13,49 +13,50 @@ import (
 
 	"oc-manager/internal/auth"
 	"oc-manager/internal/domain"
+	"oc-manager/internal/integrations/ocops"
 	"oc-manager/internal/service"
 )
 
 // kanbanServiceStub 是 hermesKanbanService 的可控 stub，用于 handler 单测。
 // err 字段控制所有方法是否返回错误；tasks / detail / boards / runs / stats / caps 控制读方法的成功返回值。
 type kanbanServiceStub struct {
-	tasks    []service.KanbanTask
-	detail   service.KanbanTaskDetail
-	boards   []service.KanbanBoard
-	runs     []service.KanbanTaskRun
-	stats    service.KanbanStats
-	caps     service.KanbanCapabilities
+	tasks    []ocops.KanbanTask
+	detail   ocops.KanbanTaskDetail
+	boards   []ocops.KanbanBoard
+	runs     []ocops.KanbanTaskRun
+	stats    ocops.KanbanStats
+	caps     ocops.KanbanCapabilities
 	createIn service.CreateKanbanTaskInput // 记录最后一次 CreateTask 入参
 	err      error
 }
 
 // ListBoards 返回预设 boards 列表或错误。
-func (s *kanbanServiceStub) ListBoards(_ context.Context, _ auth.Principal, _ string) ([]service.KanbanBoard, error) {
+func (s *kanbanServiceStub) ListBoards(_ context.Context, _ auth.Principal, _ string) ([]ocops.KanbanBoard, error) {
 	return s.boards, s.err
 }
 
 // ListTasks 返回预设任务列表或错误。
-func (s *kanbanServiceStub) ListTasks(_ context.Context, _ auth.Principal, _ string, _ service.KanbanTaskFilter) ([]service.KanbanTask, error) {
+func (s *kanbanServiceStub) ListTasks(_ context.Context, _ auth.Principal, _ string, _ service.KanbanTaskFilter) ([]ocops.KanbanTask, error) {
 	return s.tasks, s.err
 }
 
 // ShowTask 返回预设任务详情或错误。
-func (s *kanbanServiceStub) ShowTask(_ context.Context, _ auth.Principal, _, _, _ string) (service.KanbanTaskDetail, error) {
+func (s *kanbanServiceStub) ShowTask(_ context.Context, _ auth.Principal, _, _, _ string) (ocops.KanbanTaskDetail, error) {
 	return s.detail, s.err
 }
 
 // TaskRuns 返回预设任务执行历史列表或错误。
-func (s *kanbanServiceStub) TaskRuns(_ context.Context, _ auth.Principal, _, _, _ string) ([]service.KanbanTaskRun, error) {
+func (s *kanbanServiceStub) TaskRuns(_ context.Context, _ auth.Principal, _, _, _ string) ([]ocops.KanbanTaskRun, error) {
 	return s.runs, s.err
 }
 
 // Stats 返回预设统计数据或错误。
-func (s *kanbanServiceStub) Stats(_ context.Context, _ auth.Principal, _, _ string) (service.KanbanStats, error) {
+func (s *kanbanServiceStub) Stats(_ context.Context, _ auth.Principal, _, _ string) (ocops.KanbanStats, error) {
 	return s.stats, s.err
 }
 
 // Capabilities 返回预设能力数据或错误。
-func (s *kanbanServiceStub) Capabilities(_ context.Context, _ auth.Principal, _ string) (service.KanbanCapabilities, error) {
+func (s *kanbanServiceStub) Capabilities(_ context.Context, _ auth.Principal, _ string) (ocops.KanbanCapabilities, error) {
 	return s.caps, s.err
 }
 
@@ -65,43 +66,43 @@ func (s *kanbanServiceStub) StreamEvents(_ context.Context, _ auth.Principal, _,
 }
 
 // CreateTask 记录入参并返回预设详情或错误。
-func (s *kanbanServiceStub) CreateTask(_ context.Context, _ auth.Principal, _ string, in service.CreateKanbanTaskInput) (service.KanbanTaskDetail, error) {
+func (s *kanbanServiceStub) CreateTask(_ context.Context, _ auth.Principal, _ string, in service.CreateKanbanTaskInput) (ocops.KanbanTaskDetail, error) {
 	s.createIn = in
 	return s.detail, s.err
 }
 
 // Comment 返回预设详情或错误（oc-kanban 写 verb 统一返回 TaskDetail）。
-func (s *kanbanServiceStub) Comment(_ context.Context, _ auth.Principal, _, _, _, _ string) (service.KanbanTaskDetail, error) {
+func (s *kanbanServiceStub) Comment(_ context.Context, _ auth.Principal, _, _, _, _ string) (ocops.KanbanTaskDetail, error) {
 	return s.detail, s.err
 }
 
 // Complete 返回预设详情或错误。
-func (s *kanbanServiceStub) Complete(_ context.Context, _ auth.Principal, _, _, _, _ string) (service.KanbanTaskDetail, error) {
+func (s *kanbanServiceStub) Complete(_ context.Context, _ auth.Principal, _, _, _, _ string) (ocops.KanbanTaskDetail, error) {
 	return s.detail, s.err
 }
 
 // Block 返回预设详情或错误。
-func (s *kanbanServiceStub) Block(_ context.Context, _ auth.Principal, _, _, _, _ string) (service.KanbanTaskDetail, error) {
+func (s *kanbanServiceStub) Block(_ context.Context, _ auth.Principal, _, _, _, _ string) (ocops.KanbanTaskDetail, error) {
 	return s.detail, s.err
 }
 
 // Unblock 返回预设详情或错误。
-func (s *kanbanServiceStub) Unblock(_ context.Context, _ auth.Principal, _, _, _ string) (service.KanbanTaskDetail, error) {
+func (s *kanbanServiceStub) Unblock(_ context.Context, _ auth.Principal, _, _, _ string) (ocops.KanbanTaskDetail, error) {
 	return s.detail, s.err
 }
 
 // Archive 返回预设详情或错误。
-func (s *kanbanServiceStub) Archive(_ context.Context, _ auth.Principal, _, _, _ string) (service.KanbanTaskDetail, error) {
+func (s *kanbanServiceStub) Archive(_ context.Context, _ auth.Principal, _, _, _ string) (ocops.KanbanTaskDetail, error) {
 	return s.detail, s.err
 }
 
 // Reassign 返回预设详情或错误。
-func (s *kanbanServiceStub) Reassign(_ context.Context, _ auth.Principal, _, _, _, _ string) (service.KanbanTaskDetail, error) {
+func (s *kanbanServiceStub) Reassign(_ context.Context, _ auth.Principal, _, _, _, _ string) (ocops.KanbanTaskDetail, error) {
 	return s.detail, s.err
 }
 
 // Reclaim 返回预设详情或错误。
-func (s *kanbanServiceStub) Reclaim(_ context.Context, _ auth.Principal, _, _, _ string) (service.KanbanTaskDetail, error) {
+func (s *kanbanServiceStub) Reclaim(_ context.Context, _ auth.Principal, _, _, _ string) (ocops.KanbanTaskDetail, error) {
 	return s.detail, s.err
 }
 
@@ -117,7 +118,7 @@ func newKanbanTestRouter(t *testing.T, svc hermesKanbanService) *gin.Engine {
 // TestKanbanListTasksHappy 验证：列任务端点正常返回时，HTTP 状态 200 且响应体含 tasks 字段与任务 ID。
 func TestKanbanListTasksHappy(t *testing.T) {
 	// stub 返回一个预设任务列表
-	stub := &kanbanServiceStub{tasks: []service.KanbanTask{{ID: "t_1", Title: "任务一"}}}
+	stub := &kanbanServiceStub{tasks: []ocops.KanbanTask{{ID: "t_1", Title: "任务一"}}}
 	r := newKanbanTestRouter(t, stub)
 
 	w := httptest.NewRecorder()
@@ -170,7 +171,7 @@ func TestKanbanStubReturns503(t *testing.T) {
 // HTTP 状态 200 且响应体含顶层 boards key。
 func TestKanbanListBoardsHappy(t *testing.T) {
 	// stub 预设一个 board，验证正常路径下响应结构正确
-	stub := &kanbanServiceStub{boards: []service.KanbanBoard{{Slug: "default", Name: "默认看板"}}}
+	stub := &kanbanServiceStub{boards: []ocops.KanbanBoard{{Slug: "default", Name: "默认看板"}}}
 	r := newKanbanTestRouter(t, stub)
 
 	w := httptest.NewRecorder()
@@ -188,7 +189,7 @@ func TestKanbanListBoardsHappy(t *testing.T) {
 // HTTP 状态 200 且响应体含顶层 task key。
 func TestKanbanShowTaskHappy(t *testing.T) {
 	// stub 预设任务详情（ID=t_1），验证单任务查询正常路径
-	stub := &kanbanServiceStub{detail: service.KanbanTaskDetail{Task: service.KanbanTask{ID: "t_1", Title: "测试任务"}}}
+	stub := &kanbanServiceStub{detail: ocops.KanbanTaskDetail{Task: ocops.KanbanTask{ID: "t_1", Title: "测试任务"}}}
 	r := newKanbanTestRouter(t, stub)
 
 	w := httptest.NewRecorder()
@@ -206,7 +207,7 @@ func TestKanbanShowTaskHappy(t *testing.T) {
 // HTTP 状态 200 且响应体含顶层 runs key。
 func TestKanbanTaskRunsHappy(t *testing.T) {
 	// stub 预设一条执行历史，验证任务执行历史查询正常路径
-	stub := &kanbanServiceStub{runs: []service.KanbanTaskRun{{Profile: "default", Status: "done"}}}
+	stub := &kanbanServiceStub{runs: []ocops.KanbanTaskRun{{Profile: "default", Status: "done"}}}
 	r := newKanbanTestRouter(t, stub)
 
 	w := httptest.NewRecorder()
@@ -225,7 +226,7 @@ func TestKanbanTaskRunsHappy(t *testing.T) {
 func TestKanbanStatsHappy(t *testing.T) {
 	// stub 预设统计数据，验证统计查询正常路径
 	// 使用真实字段名 ByStatus（原 StatusCounts 已按 hermes v0.14.0 契约校准）
-	stub := &kanbanServiceStub{stats: service.KanbanStats{ByStatus: map[string]int{"todo": 3, "done": 5}}}
+	stub := &kanbanServiceStub{stats: ocops.KanbanStats{ByStatus: map[string]int{"todo": 3, "done": 5}}}
 	r := newKanbanTestRouter(t, stub)
 
 	w := httptest.NewRecorder()
@@ -244,7 +245,7 @@ func TestKanbanStatsHappy(t *testing.T) {
 // handler 层按 principal.Role 将其静默丢弃，不透传给 service。
 func TestKanbanCreateStripsAdvancedFieldsForOrgAdmin(t *testing.T) {
 	// stub 预设成功返回，detail.ID 用于验证正常路径通过
-	stub := &kanbanServiceStub{detail: service.KanbanTaskDetail{Task: service.KanbanTask{ID: "t_new"}}}
+	stub := &kanbanServiceStub{detail: ocops.KanbanTaskDetail{Task: ocops.KanbanTask{ID: "t_new"}}}
 	r := newKanbanTestRouter(t, stub)
 
 	// skills 现为数组，workspace 合并为单一字段
@@ -267,7 +268,7 @@ func TestKanbanCreateStripsAdvancedFieldsForOrgAdmin(t *testing.T) {
 // 平台管理员提交高级字段时，handler 层原样透传给 service，不做 strip。
 func TestKanbanCreateKeepsAdvancedFieldsForPlatformAdmin(t *testing.T) {
 	// stub 预设成功返回
-	stub := &kanbanServiceStub{detail: service.KanbanTaskDetail{Task: service.KanbanTask{ID: "t_new"}}}
+	stub := &kanbanServiceStub{detail: ocops.KanbanTaskDetail{Task: ocops.KanbanTask{ID: "t_new"}}}
 	r := newKanbanTestRouter(t, stub)
 
 	// skills 为数组，workspace 为单一参数
@@ -289,7 +290,7 @@ func TestKanbanCreateKeepsAdvancedFieldsForPlatformAdmin(t *testing.T) {
 // TestKanbanCommentHappy 验证：评论端点在 service 成功时返回 200 并含 task 字段。
 func TestKanbanCommentHappy(t *testing.T) {
 	// stub 无错误，模拟评论成功，返回预设 TaskDetail
-	stub := &kanbanServiceStub{detail: service.KanbanTaskDetail{Task: service.KanbanTask{ID: "t_1"}}}
+	stub := &kanbanServiceStub{detail: ocops.KanbanTaskDetail{Task: ocops.KanbanTask{ID: "t_1"}}}
 	r := newKanbanTestRouter(t, stub)
 
 	body := `{"board":"default","body":"一条评论"}`
@@ -308,7 +309,7 @@ func TestKanbanCommentHappy(t *testing.T) {
 // body 为可选（KanbanBoardRequest 无必填字段），空请求体不应被误判为绑定错误。
 func TestKanbanUnblockEmptyBody(t *testing.T) {
 	// stub 无错误，模拟 unblock 成功，返回预设 TaskDetail
-	stub := &kanbanServiceStub{detail: service.KanbanTaskDetail{Task: service.KanbanTask{ID: "t_1"}}}
+	stub := &kanbanServiceStub{detail: ocops.KanbanTaskDetail{Task: ocops.KanbanTask{ID: "t_1"}}}
 	r := newKanbanTestRouter(t, stub)
 
 	w := httptest.NewRecorder()
@@ -326,7 +327,7 @@ func TestKanbanUnblockEmptyBody(t *testing.T) {
 // body 为可选（KanbanBoardRequest 无必填字段），空请求体不应被误判为绑定错误。
 func TestKanbanArchiveEmptyBody(t *testing.T) {
 	// stub 无错误，模拟 archive 成功，返回预设 TaskDetail
-	stub := &kanbanServiceStub{detail: service.KanbanTaskDetail{Task: service.KanbanTask{ID: "t_1"}}}
+	stub := &kanbanServiceStub{detail: ocops.KanbanTaskDetail{Task: ocops.KanbanTask{ID: "t_1"}}}
 	r := newKanbanTestRouter(t, stub)
 
 	w := httptest.NewRecorder()
@@ -344,7 +345,7 @@ func TestKanbanArchiveEmptyBody(t *testing.T) {
 // body 为可选（KanbanBoardRequest 无必填字段），空请求体不应被误判为绑定错误。
 func TestKanbanReclaimEmptyBody(t *testing.T) {
 	// stub 无错误，模拟 reclaim 成功，返回预设 TaskDetail
-	stub := &kanbanServiceStub{detail: service.KanbanTaskDetail{Task: service.KanbanTask{ID: "t_1"}}}
+	stub := &kanbanServiceStub{detail: ocops.KanbanTaskDetail{Task: ocops.KanbanTask{ID: "t_1"}}}
 	r := newKanbanTestRouter(t, stub)
 
 	w := httptest.NewRecorder()
@@ -363,12 +364,12 @@ func TestKanbanReclaimEmptyBody(t *testing.T) {
 func TestKanbanCapabilitiesHappy(t *testing.T) {
 	// stub 预设能力数据，验证 capabilities 查询正常路径：
 	// ContractVersion / Features.Write / Verbs 均能通过响应体正确透传。
-	stub := &kanbanServiceStub{caps: service.KanbanCapabilities{
+	stub := &kanbanServiceStub{caps: ocops.KanbanCapabilities{
 		ContractVersion: "1.0",
 		OCKanbanVersion: "1",
 		Variant:         "hermes-v2026.5.16",
 		Verbs:           []string{"list", "show", "create"},
-		Features:        service.KanbanFeatures{Write: true},
+		Features:        ocops.KanbanFeatures{Write: true},
 	}}
 	r := newKanbanTestRouter(t, stub)
 
@@ -389,7 +390,7 @@ func TestKanbanCapabilitiesHappy(t *testing.T) {
 // body 为可选（KanbanCompleteRequest 无必填字段），空请求体不应被误判为绑定错误。
 func TestKanbanCompleteEmptyBody(t *testing.T) {
 	// stub 无错误，模拟 complete 成功，返回预设 TaskDetail
-	stub := &kanbanServiceStub{detail: service.KanbanTaskDetail{Task: service.KanbanTask{ID: "t_1"}}}
+	stub := &kanbanServiceStub{detail: ocops.KanbanTaskDetail{Task: ocops.KanbanTask{ID: "t_1"}}}
 	r := newKanbanTestRouter(t, stub)
 
 	w := httptest.NewRecorder()

@@ -14,6 +14,7 @@ import (
 	"oc-manager/internal/api/apierror"
 	"oc-manager/internal/auth"
 	"oc-manager/internal/domain"
+	"oc-manager/internal/integrations/ocops"
 	"oc-manager/internal/service"
 )
 
@@ -21,23 +22,23 @@ import (
 // 包含全部读/写/流方法。
 type hermesKanbanService interface {
 	// 读方法
-	ListBoards(ctx context.Context, p auth.Principal, appID string) ([]service.KanbanBoard, error)
-	ListTasks(ctx context.Context, p auth.Principal, appID string, f service.KanbanTaskFilter) ([]service.KanbanTask, error)
-	ShowTask(ctx context.Context, p auth.Principal, appID, board, taskID string) (service.KanbanTaskDetail, error)
-	TaskRuns(ctx context.Context, p auth.Principal, appID, board, taskID string) ([]service.KanbanTaskRun, error)
-	Stats(ctx context.Context, p auth.Principal, appID, board string) (service.KanbanStats, error)
-	Capabilities(ctx context.Context, p auth.Principal, appID string) (service.KanbanCapabilities, error)
+	ListBoards(ctx context.Context, p auth.Principal, appID string) ([]ocops.KanbanBoard, error)
+	ListTasks(ctx context.Context, p auth.Principal, appID string, f service.KanbanTaskFilter) ([]ocops.KanbanTask, error)
+	ShowTask(ctx context.Context, p auth.Principal, appID, board, taskID string) (ocops.KanbanTaskDetail, error)
+	TaskRuns(ctx context.Context, p auth.Principal, appID, board, taskID string) ([]ocops.KanbanTaskRun, error)
+	Stats(ctx context.Context, p auth.Principal, appID, board string) (ocops.KanbanStats, error)
+	Capabilities(ctx context.Context, p auth.Principal, appID string) (ocops.KanbanCapabilities, error)
 	// 流方法
 	StreamEvents(ctx context.Context, p auth.Principal, appID, board string, onLine func(string)) error
 	// 写方法
-	CreateTask(ctx context.Context, p auth.Principal, appID string, in service.CreateKanbanTaskInput) (service.KanbanTaskDetail, error)
-	Comment(ctx context.Context, p auth.Principal, appID, board, taskID, body string) (service.KanbanTaskDetail, error)
-	Complete(ctx context.Context, p auth.Principal, appID, board, taskID, result string) (service.KanbanTaskDetail, error)
-	Block(ctx context.Context, p auth.Principal, appID, board, taskID, reason string) (service.KanbanTaskDetail, error)
-	Unblock(ctx context.Context, p auth.Principal, appID, board, taskID string) (service.KanbanTaskDetail, error)
-	Archive(ctx context.Context, p auth.Principal, appID, board, taskID string) (service.KanbanTaskDetail, error)
-	Reassign(ctx context.Context, p auth.Principal, appID, board, taskID, profile string) (service.KanbanTaskDetail, error)
-	Reclaim(ctx context.Context, p auth.Principal, appID, board, taskID string) (service.KanbanTaskDetail, error)
+	CreateTask(ctx context.Context, p auth.Principal, appID string, in service.CreateKanbanTaskInput) (ocops.KanbanTaskDetail, error)
+	Comment(ctx context.Context, p auth.Principal, appID, board, taskID, body string) (ocops.KanbanTaskDetail, error)
+	Complete(ctx context.Context, p auth.Principal, appID, board, taskID, result string) (ocops.KanbanTaskDetail, error)
+	Block(ctx context.Context, p auth.Principal, appID, board, taskID, reason string) (ocops.KanbanTaskDetail, error)
+	Unblock(ctx context.Context, p auth.Principal, appID, board, taskID string) (ocops.KanbanTaskDetail, error)
+	Archive(ctx context.Context, p auth.Principal, appID, board, taskID string) (ocops.KanbanTaskDetail, error)
+	Reassign(ctx context.Context, p auth.Principal, appID, board, taskID, profile string) (ocops.KanbanTaskDetail, error)
+	Reclaim(ctx context.Context, p auth.Principal, appID, board, taskID string) (ocops.KanbanTaskDetail, error)
 }
 
 // HermesKanbanHandler 处理 /api/v1/apps/:appId/hermes/kanban/* 路由。
@@ -105,7 +106,7 @@ func bindOptionalJSON(c *gin.Context, req any) error {
 // @Produce      json
 // @Security     BearerAuth
 // @Param        appId  path      string  true  "应用 ID"
-// @Success      200    {object}  map[string][]service.KanbanBoard
+// @Success      200    {object}  map[string][]ocops.KanbanBoard
 // @Failure      403    {object}  ErrorResponse
 // @Failure      503    {object}  ErrorResponse
 // @Router       /apps/{appId}/hermes/kanban/boards [get]
@@ -128,7 +129,7 @@ func (h *HermesKanbanHandler) ListBoards(c *gin.Context) {
 // @Param        board     query     string  false  "board slug，缺省 default"
 // @Param        status    query     string  false  "按状态过滤"
 // @Param        assignee  query     string  false  "按 assignee 过滤"
-// @Success      200       {object}  map[string][]service.KanbanTask
+// @Success      200       {object}  map[string][]ocops.KanbanTask
 // @Failure      403       {object}  ErrorResponse
 // @Failure      502       {object}  ErrorResponse
 // @Failure      503       {object}  ErrorResponse
@@ -156,7 +157,7 @@ func (h *HermesKanbanHandler) ListTasks(c *gin.Context) {
 // @Param        appId   path      string  true   "应用 ID"
 // @Param        taskId  path      string  true   "任务 ID"
 // @Param        board   query     string  false  "board slug"
-// @Success      200     {object}  map[string]service.KanbanTaskDetail
+// @Success      200     {object}  map[string]ocops.KanbanTaskDetail
 // @Failure      403     {object}  ErrorResponse
 // @Failure      502     {object}  ErrorResponse
 // @Failure      503     {object}  ErrorResponse
@@ -180,7 +181,7 @@ func (h *HermesKanbanHandler) ShowTask(c *gin.Context) {
 // @Param        appId   path      string  true   "应用 ID"
 // @Param        taskId  path      string  true   "任务 ID"
 // @Param        board   query     string  false  "board slug"
-// @Success      200     {object}  map[string][]service.KanbanTaskRun
+// @Success      200     {object}  map[string][]ocops.KanbanTaskRun
 // @Failure      403     {object}  ErrorResponse
 // @Failure      502     {object}  ErrorResponse
 // @Failure      503     {object}  ErrorResponse
@@ -203,7 +204,7 @@ func (h *HermesKanbanHandler) TaskRuns(c *gin.Context) {
 // @Security     BearerAuth
 // @Param        appId  path      string  true   "应用 ID"
 // @Param        board  query     string  false  "board slug"
-// @Success      200    {object}  map[string]service.KanbanStats
+// @Success      200    {object}  map[string]ocops.KanbanStats
 // @Failure      403    {object}  ErrorResponse
 // @Failure      502    {object}  ErrorResponse
 // @Failure      503    {object}  ErrorResponse
@@ -226,7 +227,7 @@ func (h *HermesKanbanHandler) Stats(c *gin.Context) {
 // @Produce      json
 // @Security     BearerAuth
 // @Param        appId  path      string  true  "应用 ID"
-// @Success      200    {object}  map[string]service.KanbanCapabilities
+// @Success      200    {object}  map[string]ocops.KanbanCapabilities
 // @Failure      403    {object}  ErrorResponse
 // @Failure      502    {object}  ErrorResponse
 // @Failure      503    {object}  ErrorResponse
@@ -298,7 +299,7 @@ func (h *HermesKanbanHandler) StreamEvents(c *gin.Context) {
 // @Security     BearerAuth
 // @Param        appId  path      string                   true  "应用 ID"
 // @Param        body   body      CreateKanbanTaskRequest  true  "新建任务请求"
-// @Success      201    {object}  map[string]service.KanbanTaskDetail
+// @Success      201    {object}  map[string]ocops.KanbanTaskDetail
 // @Failure      400    {object}  ErrorResponse
 // @Failure      403    {object}  ErrorResponse
 // @Router       /apps/{appId}/hermes/kanban/tasks [post]
@@ -343,7 +344,7 @@ func (h *HermesKanbanHandler) CreateTask(c *gin.Context) {
 // @Param        appId   path      string                true  "应用 ID"
 // @Param        taskId  path      string                true  "任务 ID"
 // @Param        body    body      KanbanCommentRequest  true  "评论请求"
-// @Success      200    {object}  map[string]service.KanbanTaskDetail
+// @Success      200    {object}  map[string]ocops.KanbanTaskDetail
 // @Failure      400    {object}  ErrorResponse
 // @Failure      403    {object}  ErrorResponse
 // @Router       /apps/{appId}/hermes/kanban/tasks/{taskId}/comment [post]
@@ -371,7 +372,7 @@ func (h *HermesKanbanHandler) Comment(c *gin.Context) {
 // @Param        appId   path      string                  true  "应用 ID"
 // @Param        taskId  path      string                  true  "任务 ID"
 // @Param        body    body      KanbanCompleteRequest   false  "完成请求"
-// @Success      200    {object}  map[string]service.KanbanTaskDetail
+// @Success      200    {object}  map[string]ocops.KanbanTaskDetail
 // @Failure      400    {object}  ErrorResponse
 // @Failure      403    {object}  ErrorResponse
 // @Router       /apps/{appId}/hermes/kanban/tasks/{taskId}/complete [post]
@@ -399,7 +400,7 @@ func (h *HermesKanbanHandler) Complete(c *gin.Context) {
 // @Param        appId   path      string              true  "应用 ID"
 // @Param        taskId  path      string              true  "任务 ID"
 // @Param        body    body      KanbanBlockRequest  true  "阻塞请求"
-// @Success      200    {object}  map[string]service.KanbanTaskDetail
+// @Success      200    {object}  map[string]ocops.KanbanTaskDetail
 // @Failure      400    {object}  ErrorResponse
 // @Failure      403    {object}  ErrorResponse
 // @Router       /apps/{appId}/hermes/kanban/tasks/{taskId}/block [post]
@@ -427,7 +428,7 @@ func (h *HermesKanbanHandler) Block(c *gin.Context) {
 // @Param        appId   path      string              true   "应用 ID"
 // @Param        taskId  path      string              true   "任务 ID"
 // @Param        body    body      KanbanBoardRequest  false  "board 请求"
-// @Success      200    {object}  map[string]service.KanbanTaskDetail
+// @Success      200    {object}  map[string]ocops.KanbanTaskDetail
 // @Failure      403    {object}  ErrorResponse
 // @Router       /apps/{appId}/hermes/kanban/tasks/{taskId}/unblock [post]
 func (h *HermesKanbanHandler) Unblock(c *gin.Context) {
@@ -454,7 +455,7 @@ func (h *HermesKanbanHandler) Unblock(c *gin.Context) {
 // @Param        appId   path      string              true   "应用 ID"
 // @Param        taskId  path      string              true   "任务 ID"
 // @Param        body    body      KanbanBoardRequest  false  "board 请求"
-// @Success      200    {object}  map[string]service.KanbanTaskDetail
+// @Success      200    {object}  map[string]ocops.KanbanTaskDetail
 // @Failure      403    {object}  ErrorResponse
 // @Router       /apps/{appId}/hermes/kanban/tasks/{taskId}/archive [post]
 func (h *HermesKanbanHandler) Archive(c *gin.Context) {
@@ -481,7 +482,7 @@ func (h *HermesKanbanHandler) Archive(c *gin.Context) {
 // @Param        appId   path      string                  true  "应用 ID"
 // @Param        taskId  path      string                  true  "任务 ID"
 // @Param        body    body      KanbanReassignRequest   true  "重分配请求"
-// @Success      200    {object}  map[string]service.KanbanTaskDetail
+// @Success      200    {object}  map[string]ocops.KanbanTaskDetail
 // @Failure      400    {object}  ErrorResponse
 // @Failure      403    {object}  ErrorResponse
 // @Router       /apps/{appId}/hermes/kanban/tasks/{taskId}/reassign [post]
@@ -509,7 +510,7 @@ func (h *HermesKanbanHandler) Reassign(c *gin.Context) {
 // @Param        appId   path      string              true   "应用 ID"
 // @Param        taskId  path      string              true   "任务 ID"
 // @Param        body    body      KanbanBoardRequest  false  "board 请求"
-// @Success      200    {object}  map[string]service.KanbanTaskDetail
+// @Success      200    {object}  map[string]ocops.KanbanTaskDetail
 // @Failure      403    {object}  ErrorResponse
 // @Router       /apps/{appId}/hermes/kanban/tasks/{taskId}/reclaim [post]
 func (h *HermesKanbanHandler) Reclaim(c *gin.Context) {

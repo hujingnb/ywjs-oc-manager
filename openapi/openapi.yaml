@@ -604,6 +604,457 @@ components:
       required:
       - display_name
       type: object
+    ocops.CronCapabilities:
+      properties:
+        contract_version:
+          description: ContractVersion 是 oc-cron 契约版本号。
+          type: string
+        features:
+          $ref: '#/components/schemas/ocops.CronFeatures'
+        hermes_version:
+          description: HermesVersion 是底层 hermes 版本或构建 ref，可为空。
+          type: string
+        oc_cron_version:
+          description: OCCronVersion 是 oc-cron 适配层版本。
+          type: string
+        variant:
+          description: Variant 是镜像变体标识。
+          type: string
+        verbs:
+          description: Verbs 是本镜像支持的 manager-facing verb 清单。
+          items:
+            type: string
+          type: array
+          uniqueItems: false
+      type: object
+    ocops.CronFeatures:
+      description: Features 是细粒度能力开关。
+      properties:
+        advanced_fields:
+          description: AdvancedFields 表示支持 workdir/skills/model/provider/base_url
+            等高级字段。
+          type: boolean
+        history:
+          description: History 表示支持查询运行输出历史。
+          type: boolean
+        output:
+          description: Output 表示支持读取单次运行输出。
+          type: boolean
+        script:
+          description: Script 表示支持 script 字段。
+          type: boolean
+        status:
+          description: Status 表示支持调度器状态查询。
+          type: boolean
+        write:
+          description: Write 表示支持写操作（create/update/delete/toggle/run）。
+          type: boolean
+      type: object
+    ocops.CronJob:
+      properties:
+        base_url:
+          description: BaseURL 是任务指定 provider base URL；平台管理员高级字段。
+          type: string
+        created_at:
+          description: CreatedAt 是任务创建时间，保持 oc-cron 输出字符串以避免时区二次解释。
+          type: string
+        deliver:
+          description: Deliver 是任务输出投递目标，例如 wechat；为空表示不投递。
+          type: string
+        enabled:
+          description: Enabled 表示调度器是否会自动触发该任务。
+          type: boolean
+        id:
+          description: ID 是 Cron 任务唯一标识，最多 64 个安全字符。
+          type: string
+        last_delivery_error:
+          description: LastDeliveryError 是最近一次投递错误摘要，可为空。
+          type: string
+        last_error:
+          description: LastError 是最近一次执行错误摘要，可为空。
+          type: string
+        last_run_at:
+          description: LastRunAt 是最近一次运行时间，可为空。
+          type: string
+        last_status:
+          description: LastStatus 是最近一次运行状态，可为空。
+          type: string
+        model:
+          description: Model 是任务指定模型；平台管理员高级字段。
+          type: string
+        name:
+          description: Name 是任务显示名称。
+          type: string
+        next_run_at:
+          description: NextRunAt 是下一次计划运行时间，可为空。
+          type: string
+        no_agent:
+          description: NoAgent 表示任务是否跳过 agent 执行路径。
+          type: boolean
+        prompt:
+          description: Prompt 是任务运行时交给 Hermes 的提示词，可为空。
+          type: string
+        provider:
+          description: Provider 是任务指定模型提供方；平台管理员高级字段。
+          type: string
+        repeat:
+          $ref: '#/components/schemas/ocops.CronRepeat'
+        schedule:
+          $ref: '#/components/schemas/ocops.CronSchedule'
+        script:
+          description: Script 是任务使用的仓库内脚本文件名，可为空。
+          type: string
+        skills:
+          description: Skills 是任务声明需要的技能列表；平台管理员高级字段。
+          items:
+            type: string
+          type: array
+          uniqueItems: false
+        state:
+          description: State 是调度状态，如 scheduled / paused / disabled / removed。
+          type: string
+        workdir:
+          description: Workdir 是任务运行目录；平台管理员高级字段，handler 层可按角色过滤。
+          type: string
+      type: object
+    ocops.CronRepeat:
+      description: Repeat 描述重复次数和完成次数。
+      properties:
+        completed:
+          description: Completed 是已完成的调度次数。
+          type: integer
+        times:
+          description: Times 是总重复次数，nil 表示不限制次数。
+          type: integer
+      type: object
+    ocops.CronRunEntry:
+      properties:
+        error:
+          description: Error 是运行错误摘要，可为空。
+          type: string
+        file_name:
+          description: FileName 是输出 markdown 文件名，或 synthetic 元数据文件名。
+          type: string
+        has_output:
+          description: HasOutput 表示是否存在真实 markdown 输出文件。
+          type: boolean
+        job_id:
+          description: JobID 是所属 Cron 任务 ID。
+          type: string
+        run_time:
+          description: RunTime 是本次运行时间字符串。
+          type: string
+        size:
+          description: Size 是输出文件字节数。
+          type: integer
+        status:
+          description: Status 是运行状态，可为空。
+          type: string
+        synthetic:
+          description: Synthetic 表示该记录是否由调度元数据合成。
+          type: boolean
+      type: object
+    ocops.CronRunOutput:
+      properties:
+        content:
+          description: Content 是 markdown 文本内容，oc-cron 限制最大 1 MiB。
+          type: string
+        file_name:
+          description: FileName 是输出 markdown 文件名。
+          type: string
+        job_id:
+          description: JobID 是所属 Cron 任务 ID。
+          type: string
+        run_time:
+          description: RunTime 是本次运行时间字符串。
+          type: string
+      type: object
+    ocops.CronSchedule:
+      description: Schedule 是规整后的调度表达式。
+      properties:
+        display:
+          description: Display 是面向用户展示的调度描述。
+          type: string
+        expr:
+          description: Expr 是机器可读表达式；oc-cron 可返回 null，service 层用空字符串承接。
+          type: string
+        kind:
+          description: Kind 是调度表达式类别，例如 cron / every / at；旧数据可能为空。
+          type: string
+      type: object
+    ocops.CronStatus:
+      properties:
+        active_jobs:
+          description: ActiveJobs 是启用且未移除的任务数量。
+          type: integer
+        available:
+          description: Available 表示 oc-cron 能读取 Cron 状态。
+          type: boolean
+        gateway_running:
+          description: GatewayRunning 表示 hermes cron status 命令当前是否成功。
+          type: boolean
+        last_error:
+          description: LastError 是最近的调度错误摘要，可为空。
+          type: string
+        last_error_job_id:
+          description: LastErrorJobID 是最近错误对应的任务 ID，可为空。
+          type: string
+        message:
+          description: Message 是底层 hermes cron status 的人类可读摘要。
+          type: string
+        next_job_id:
+          description: NextJobID 是最近计划运行的任务 ID，可为空。
+          type: string
+        next_run_at:
+          description: NextRunAt 是最近一次计划运行时间，可为空。
+          type: string
+        pid:
+          description: PID 是调度器进程 ID；nil 表示当前镜像未暴露。
+          type: integer
+        tick_seconds:
+          description: TickSeconds 是调度器 tick 间隔；nil 表示当前镜像未暴露。
+          type: integer
+      type: object
+    ocops.KanbanBoard:
+      properties:
+        archived:
+          description: Archived 标记 board 是否已归档。
+          type: boolean
+        color:
+          description: Color 是 board 颜色标识，可为空。
+          type: string
+        counts:
+          additionalProperties:
+            type: integer
+          description: Counts 是 board 内各状态的任务计数，key 为状态名，value 为数量。
+          type: object
+        description:
+          description: Description 是 board 描述，可为空。
+          type: string
+        icon:
+          description: Icon 是 board 图标字符串，可为空。
+          type: string
+        is_current:
+          description: IsCurrent 标记是否为当前活动 board。
+          type: boolean
+        name:
+          description: Name 是 board 显示名称。
+          type: string
+        slug:
+          description: Slug 是 board 唯一标识，形如 "default"。
+          type: string
+        total:
+          description: Total 是 board 内任务总数。
+          type: integer
+      type: object
+    ocops.KanbanCapabilities:
+      properties:
+        contract_version:
+          description: ContractVersion 是 oc-kanban 契约版本号（MAJOR.MINOR）。
+          type: string
+        features:
+          $ref: '#/components/schemas/ocops.KanbanFeatures'
+        hermes_version:
+          description: HermesVersion 是底层 hermes 版本（信息性，可能为空）。
+          type: string
+        oc_kanban_version:
+          description: OCKanbanVersion 是 oc-kanban 实现版本。
+          type: string
+        variant:
+          description: Variant 是镜像变体标识。
+          type: string
+        verbs:
+          description: Verbs 是本镜像实际支持的功能 verb 清单。
+          items:
+            type: string
+          type: array
+          uniqueItems: false
+      type: object
+    ocops.KanbanComment:
+      properties:
+        author:
+          description: Author 是评论作者（hermes profile 名）。
+          type: string
+        body:
+          description: Body 是评论内容。
+          type: string
+        created_at:
+          description: CreatedAt 是评论创建时间戳（Unix 秒）。
+          type: integer
+      type: object
+    ocops.KanbanEvent:
+      properties:
+        created_at:
+          description: CreatedAt 是事件创建时间戳（Unix 秒）。
+          type: integer
+        kind:
+          description: Kind 是事件类型，如 "created"、"status_changed" 等。
+          type: string
+        payload:
+          description: |-
+            Payload 是事件附加数据，结构随 Kind 变化（任意对象）。
+            用 any 类型（swag 可正确解析为 object），json.Unmarshal 会把 JSON 对象解为 map[string]any。
+        run_id:
+          description: |-
+            RunID 是关联的执行 ID，可为 null。真实环境多为 null，类型未经实测确定，
+            用 any 容忍 hermes 任意输出（整数 / 字符串 / null），manager 仅透传不解析。
+        task_id:
+          description: |-
+            TaskID 是事件所属任务 ID。watch 流的事件必带（前端按 task 分组依赖它）；
+            TaskDetail.events 单任务上下文里可为空，故 omitempty。
+          type: string
+      type: object
+    ocops.KanbanFeatures:
+      description: Features 是细粒度能力开关。
+      properties:
+        runs:
+          description: Runs 表示是否支持查询执行历史。
+          type: boolean
+        stats:
+          description: Stats 表示是否支持统计。
+          type: boolean
+        watch:
+          description: Watch 表示是否支持实时事件流。
+          type: boolean
+        write:
+          description: Write 表示是否支持写操作（create/comment/...）。
+          type: boolean
+      type: object
+    ocops.KanbanStats:
+      properties:
+        by_assignee:
+          additionalProperties:
+            additionalProperties:
+              type: integer
+            type: object
+          description: ByAssignee 是各 assignee 下各状态的任务计数，外层 key 为 assignee，内层 key 为状态名。
+          type: object
+        by_status:
+          additionalProperties:
+            type: integer
+          description: ByStatus 是各状态的任务计数，key 为状态名，value 为任务数量。
+          type: object
+        now:
+          description: Now 是 stats 生成时的 Unix 时间戳（秒），用于客户端计算相对时间。
+          type: integer
+        oldest_ready_age_seconds:
+          description: OldestReadyAgeSeconds 是最老的 ready 状态任务已等待的秒数。
+          type: integer
+      type: object
+    ocops.KanbanTask:
+      description: Task 是任务核心字段，对应 show 输出的顶层 "task" 子对象。
+      properties:
+        assignee:
+          description: Assignee 是当前分配的 hermes profile 名称。
+          type: string
+        body:
+          description: Body 是任务描述，可为 null（零值为空字符串）。
+          type: string
+        completed_at:
+          description: CompletedAt 是任务完成时间戳（Unix 秒），可为 null（零值为 0）。
+          type: integer
+        created_at:
+          description: CreatedAt 是任务创建时间戳（Unix 秒）。
+          type: integer
+        created_by:
+          description: CreatedBy 是任务创建方（"user" 或 profile 名）。
+          type: string
+        id:
+          description: ID 是任务唯一标识，形如 "t_85620ed7"。
+          type: string
+        max_retries:
+          description: MaxRetries 是最大重试次数，可为 null（零值为 0）。
+          type: integer
+        priority:
+          description: Priority 是任务优先级（0-9）。
+          type: integer
+        result:
+          description: Result 是任务完成结果摘要，可为 null（零值为空字符串）。
+          type: string
+        skills:
+          description: Skills 是任务所需技能列表，为字符串数组（空任务时为 []）。
+          items:
+            type: string
+          type: array
+          uniqueItems: false
+        started_at:
+          description: StartedAt 是任务开始执行时间戳（Unix 秒），可为 null（零值为 0）。
+          type: integer
+        status:
+          description: Status 是任务状态（triage|todo|ready|running|blocked|done|archived）。
+          type: string
+        tenant:
+          description: Tenant 是多租户标识，可为 null（零值为空字符串）。
+          type: string
+        title:
+          description: Title 是任务标题。
+          type: string
+        workspace_kind:
+          description: WorkspaceKind 是 workspace 类型（scratch|dir|worktree）。
+          type: string
+        workspace_path:
+          description: WorkspacePath 是 workspace 路径，可为 null（零值为空字符串）。
+          type: string
+      type: object
+    ocops.KanbanTaskDetail:
+      properties:
+        children:
+          description: Children 是子任务 ID 列表（task id 字符串数组）。
+          items:
+            type: string
+          type: array
+          uniqueItems: false
+        comments:
+          description: Comments 是任务评论列表。
+          items:
+            $ref: '#/components/schemas/ocops.KanbanComment'
+          type: array
+          uniqueItems: false
+        events:
+          description: Events 是任务事件流列表。
+          items:
+            $ref: '#/components/schemas/ocops.KanbanEvent'
+          type: array
+          uniqueItems: false
+        latest_summary:
+          description: LatestSummary 是最新执行摘要，可为 null（零值为空字符串）。
+          type: string
+        parents:
+          description: Parents 是父任务 ID 列表（task id 字符串数组）。
+          items:
+            type: string
+          type: array
+          uniqueItems: false
+        task:
+          $ref: '#/components/schemas/ocops.KanbanTask'
+      type: object
+    ocops.KanbanTaskRun:
+      properties:
+        ended_at:
+          description: EndedAt 是执行结束时间戳（Unix 秒），0 表示尚未结束。
+          type: integer
+        error:
+          description: Error 是执行失败时的错误信息。
+          type: string
+        outcome:
+          description: Outcome 是执行结果（如 "success"/"failure"）。
+          type: string
+        profile:
+          description: Profile 是执行该任务的 hermes profile 名称。
+          type: string
+        started_at:
+          description: StartedAt 是执行开始时间戳（Unix 秒）。
+          type: integer
+        status:
+          description: Status 是本次执行状态。
+          type: string
+        summary:
+          description: Summary 是执行摘要文本。
+          type: string
+        worker_pid:
+          description: WorkerPID 是 worker 进程 ID，0 表示未知或已退出。
+          type: integer
+      type: object
     service.AgentEnrollResult:
       properties:
         agent_token:
@@ -859,217 +1310,6 @@ components:
         job_id:
           type: string
       type: object
-    service.CronCapabilities:
-      properties:
-        contract_version:
-          description: ContractVersion 是 oc-cron 契约版本号。
-          type: string
-        features:
-          $ref: '#/components/schemas/service.CronFeatures'
-        hermes_version:
-          description: HermesVersion 是底层 hermes 版本或构建 ref，可为空。
-          type: string
-        oc_cron_version:
-          description: OCCronVersion 是 oc-cron 适配层版本。
-          type: string
-        variant:
-          description: Variant 是镜像变体标识。
-          type: string
-        verbs:
-          description: Verbs 是本镜像支持的 manager-facing verb 清单。
-          items:
-            type: string
-          type: array
-          uniqueItems: false
-      type: object
-    service.CronFeatures:
-      description: Features 是细粒度能力开关。
-      properties:
-        advanced_fields:
-          description: AdvancedFields 表示支持 workdir/skills/model/provider/base_url
-            等高级字段。
-          type: boolean
-        history:
-          description: History 表示支持查询运行输出历史。
-          type: boolean
-        output:
-          description: Output 表示支持读取单次运行输出。
-          type: boolean
-        script:
-          description: Script 表示支持 script 字段。
-          type: boolean
-        status:
-          description: Status 表示支持调度器状态查询。
-          type: boolean
-        write:
-          description: Write 表示支持写操作（create/update/delete/toggle/run）。
-          type: boolean
-      type: object
-    service.CronJob:
-      properties:
-        base_url:
-          description: BaseURL 是任务指定 provider base URL；平台管理员高级字段。
-          type: string
-        created_at:
-          description: CreatedAt 是任务创建时间，保持 oc-cron 输出字符串以避免时区二次解释。
-          type: string
-        deliver:
-          description: Deliver 是任务输出投递目标，例如 wechat；为空表示不投递。
-          type: string
-        enabled:
-          description: Enabled 表示调度器是否会自动触发该任务。
-          type: boolean
-        id:
-          description: ID 是 Cron 任务唯一标识，最多 64 个安全字符。
-          type: string
-        last_delivery_error:
-          description: LastDeliveryError 是最近一次投递错误摘要，可为空。
-          type: string
-        last_error:
-          description: LastError 是最近一次执行错误摘要，可为空。
-          type: string
-        last_run_at:
-          description: LastRunAt 是最近一次运行时间，可为空。
-          type: string
-        last_status:
-          description: LastStatus 是最近一次运行状态，可为空。
-          type: string
-        model:
-          description: Model 是任务指定模型；平台管理员高级字段。
-          type: string
-        name:
-          description: Name 是任务显示名称。
-          type: string
-        next_run_at:
-          description: NextRunAt 是下一次计划运行时间，可为空。
-          type: string
-        no_agent:
-          description: NoAgent 表示任务是否跳过 agent 执行路径。
-          type: boolean
-        prompt:
-          description: Prompt 是任务运行时交给 Hermes 的提示词，可为空。
-          type: string
-        provider:
-          description: Provider 是任务指定模型提供方；平台管理员高级字段。
-          type: string
-        repeat:
-          $ref: '#/components/schemas/service.CronRepeat'
-        schedule:
-          $ref: '#/components/schemas/service.CronSchedule'
-        script:
-          description: Script 是任务使用的仓库内脚本文件名，可为空。
-          type: string
-        skills:
-          description: Skills 是任务声明需要的技能列表；平台管理员高级字段。
-          items:
-            type: string
-          type: array
-          uniqueItems: false
-        state:
-          description: State 是调度状态，如 scheduled / paused / disabled / removed。
-          type: string
-        workdir:
-          description: Workdir 是任务运行目录；平台管理员高级字段，handler 层可按角色过滤。
-          type: string
-      type: object
-    service.CronRepeat:
-      description: Repeat 描述重复次数和完成次数。
-      properties:
-        completed:
-          description: Completed 是已完成的调度次数。
-          type: integer
-        times:
-          description: Times 是总重复次数，nil 表示不限制次数。
-          type: integer
-      type: object
-    service.CronRunEntry:
-      properties:
-        error:
-          description: Error 是运行错误摘要，可为空。
-          type: string
-        file_name:
-          description: FileName 是输出 markdown 文件名，或 synthetic 元数据文件名。
-          type: string
-        has_output:
-          description: HasOutput 表示是否存在真实 markdown 输出文件。
-          type: boolean
-        job_id:
-          description: JobID 是所属 Cron 任务 ID。
-          type: string
-        run_time:
-          description: RunTime 是本次运行时间字符串。
-          type: string
-        size:
-          description: Size 是输出文件字节数。
-          type: integer
-        status:
-          description: Status 是运行状态，可为空。
-          type: string
-        synthetic:
-          description: Synthetic 表示该记录是否由调度元数据合成。
-          type: boolean
-      type: object
-    service.CronRunOutput:
-      properties:
-        content:
-          description: Content 是 markdown 文本内容，oc-cron 限制最大 1 MiB。
-          type: string
-        file_name:
-          description: FileName 是输出 markdown 文件名。
-          type: string
-        job_id:
-          description: JobID 是所属 Cron 任务 ID。
-          type: string
-        run_time:
-          description: RunTime 是本次运行时间字符串。
-          type: string
-      type: object
-    service.CronSchedule:
-      description: Schedule 是规整后的调度表达式。
-      properties:
-        display:
-          description: Display 是面向用户展示的调度描述。
-          type: string
-        expr:
-          description: Expr 是机器可读表达式；oc-cron 可返回 null，service 层用空字符串承接。
-          type: string
-        kind:
-          description: Kind 是调度表达式类别，例如 cron / every / at；旧数据可能为空。
-          type: string
-      type: object
-    service.CronStatus:
-      properties:
-        active_jobs:
-          description: ActiveJobs 是启用且未移除的任务数量。
-          type: integer
-        available:
-          description: Available 表示 oc-cron 能读取 Cron 状态。
-          type: boolean
-        gateway_running:
-          description: GatewayRunning 表示 hermes cron status 命令当前是否成功。
-          type: boolean
-        last_error:
-          description: LastError 是最近的调度错误摘要，可为空。
-          type: string
-        last_error_job_id:
-          description: LastErrorJobID 是最近错误对应的任务 ID，可为空。
-          type: string
-        message:
-          description: Message 是底层 hermes cron status 的人类可读摘要。
-          type: string
-        next_job_id:
-          description: NextJobID 是最近计划运行的任务 ID，可为空。
-          type: string
-        next_run_at:
-          description: NextRunAt 是最近一次计划运行时间，可为空。
-          type: string
-        pid:
-          description: PID 是调度器进程 ID；nil 表示当前镜像未暴露。
-          type: integer
-        tick_seconds:
-          description: TickSeconds 是调度器 tick 间隔；nil 表示当前镜像未暴露。
-          type: integer
-      type: object
     service.InstanceResourceSampleResult:
       description: CurrentResource 是该应用在节点上的最近一次实例资源采样。
       properties:
@@ -1103,246 +1343,6 @@ components:
         sampled_at:
           description: SampledAt 是采样或聚合桶时间，统一输出 UTC RFC3339。
           type: string
-      type: object
-    service.KanbanBoard:
-      properties:
-        archived:
-          description: Archived 标记 board 是否已归档。
-          type: boolean
-        color:
-          description: Color 是 board 颜色标识，可为空。
-          type: string
-        counts:
-          additionalProperties:
-            type: integer
-          description: Counts 是 board 内各状态的任务计数，key 为状态名，value 为数量。
-          type: object
-        description:
-          description: Description 是 board 描述，可为空。
-          type: string
-        icon:
-          description: Icon 是 board 图标字符串，可为空。
-          type: string
-        is_current:
-          description: IsCurrent 标记是否为当前活动 board。
-          type: boolean
-        name:
-          description: Name 是 board 显示名称。
-          type: string
-        slug:
-          description: Slug 是 board 唯一标识，形如 "default"。
-          type: string
-        total:
-          description: Total 是 board 内任务总数。
-          type: integer
-      type: object
-    service.KanbanCapabilities:
-      properties:
-        contract_version:
-          description: ContractVersion 是 oc-kanban 契约版本号（MAJOR.MINOR）。
-          type: string
-        features:
-          $ref: '#/components/schemas/service.KanbanFeatures'
-        hermes_version:
-          description: HermesVersion 是底层 hermes 版本（信息性，可能为空）。
-          type: string
-        oc_kanban_version:
-          description: OCKanbanVersion 是 oc-kanban 实现版本。
-          type: string
-        variant:
-          description: Variant 是镜像变体标识。
-          type: string
-        verbs:
-          description: Verbs 是本镜像实际支持的功能 verb 清单。
-          items:
-            type: string
-          type: array
-          uniqueItems: false
-      type: object
-    service.KanbanComment:
-      properties:
-        author:
-          description: Author 是评论作者（hermes profile 名）。
-          type: string
-        body:
-          description: Body 是评论内容。
-          type: string
-        created_at:
-          description: CreatedAt 是评论创建时间戳（Unix 秒）。
-          type: integer
-      type: object
-    service.KanbanEvent:
-      properties:
-        created_at:
-          description: CreatedAt 是事件创建时间戳（Unix 秒）。
-          type: integer
-        kind:
-          description: Kind 是事件类型，如 "created"、"status_changed" 等。
-          type: string
-        payload:
-          description: |-
-            Payload 是事件附加数据，结构随 Kind 变化（任意对象）。
-            用 any 类型（swag 可正确解析为 object），json.Unmarshal 会把 JSON 对象解为 map[string]any。
-        run_id:
-          description: |-
-            RunID 是关联的执行 ID，可为 null。真实环境多为 null，类型未经实测确定，
-            用 any 容忍 hermes 任意输出（整数 / 字符串 / null），manager 仅透传不解析。
-        task_id:
-          description: |-
-            TaskID 是事件所属任务 ID。watch 流的事件必带（前端按 task 分组依赖它）；
-            TaskDetail.events 单任务上下文里可为空，故 omitempty。
-          type: string
-      type: object
-    service.KanbanFeatures:
-      description: Features 是细粒度能力开关。
-      properties:
-        runs:
-          description: Runs 表示是否支持查询执行历史。
-          type: boolean
-        stats:
-          description: Stats 表示是否支持统计。
-          type: boolean
-        watch:
-          description: Watch 表示是否支持实时事件流。
-          type: boolean
-        write:
-          description: Write 表示是否支持写操作（create/comment/...）。
-          type: boolean
-      type: object
-    service.KanbanStats:
-      properties:
-        by_assignee:
-          additionalProperties:
-            additionalProperties:
-              type: integer
-            type: object
-          description: ByAssignee 是各 assignee 下各状态的任务计数，外层 key 为 assignee，内层 key 为状态名。
-          type: object
-        by_status:
-          additionalProperties:
-            type: integer
-          description: ByStatus 是各状态的任务计数，key 为状态名，value 为任务数量。
-          type: object
-        now:
-          description: Now 是 stats 生成时的 Unix 时间戳（秒），用于客户端计算相对时间。
-          type: integer
-        oldest_ready_age_seconds:
-          description: OldestReadyAgeSeconds 是最老的 ready 状态任务已等待的秒数。
-          type: integer
-      type: object
-    service.KanbanTask:
-      description: Task 是任务核心字段，对应 show 输出的顶层 "task" 子对象。
-      properties:
-        assignee:
-          description: Assignee 是当前分配的 hermes profile 名称。
-          type: string
-        body:
-          description: Body 是任务描述，可为 null（零值为空字符串）。
-          type: string
-        completed_at:
-          description: CompletedAt 是任务完成时间戳（Unix 秒），可为 null（零值为 0）。
-          type: integer
-        created_at:
-          description: CreatedAt 是任务创建时间戳（Unix 秒）。
-          type: integer
-        created_by:
-          description: CreatedBy 是任务创建方（"user" 或 profile 名）。
-          type: string
-        id:
-          description: ID 是任务唯一标识，形如 "t_85620ed7"。
-          type: string
-        max_retries:
-          description: MaxRetries 是最大重试次数，可为 null（零值为 0）。
-          type: integer
-        priority:
-          description: Priority 是任务优先级（0-9）。
-          type: integer
-        result:
-          description: Result 是任务完成结果摘要，可为 null（零值为空字符串）。
-          type: string
-        skills:
-          description: Skills 是任务所需技能列表，为字符串数组（空任务时为 []）。
-          items:
-            type: string
-          type: array
-          uniqueItems: false
-        started_at:
-          description: StartedAt 是任务开始执行时间戳（Unix 秒），可为 null（零值为 0）。
-          type: integer
-        status:
-          description: Status 是任务状态（triage|todo|ready|running|blocked|done|archived）。
-          type: string
-        tenant:
-          description: Tenant 是多租户标识，可为 null（零值为空字符串）。
-          type: string
-        title:
-          description: Title 是任务标题。
-          type: string
-        workspace_kind:
-          description: WorkspaceKind 是 workspace 类型（scratch|dir|worktree）。
-          type: string
-        workspace_path:
-          description: WorkspacePath 是 workspace 路径，可为 null（零值为空字符串）。
-          type: string
-      type: object
-    service.KanbanTaskDetail:
-      properties:
-        children:
-          description: Children 是子任务 ID 列表（task id 字符串数组）。
-          items:
-            type: string
-          type: array
-          uniqueItems: false
-        comments:
-          description: Comments 是任务评论列表。
-          items:
-            $ref: '#/components/schemas/service.KanbanComment'
-          type: array
-          uniqueItems: false
-        events:
-          description: Events 是任务事件流列表。
-          items:
-            $ref: '#/components/schemas/service.KanbanEvent'
-          type: array
-          uniqueItems: false
-        latest_summary:
-          description: LatestSummary 是最新执行摘要，可为 null（零值为空字符串）。
-          type: string
-        parents:
-          description: Parents 是父任务 ID 列表（task id 字符串数组）。
-          items:
-            type: string
-          type: array
-          uniqueItems: false
-        task:
-          $ref: '#/components/schemas/service.KanbanTask'
-      type: object
-    service.KanbanTaskRun:
-      properties:
-        ended_at:
-          description: EndedAt 是执行结束时间戳（Unix 秒），0 表示尚未结束。
-          type: integer
-        error:
-          description: Error 是执行失败时的错误信息。
-          type: string
-        outcome:
-          description: Outcome 是执行结果（如 "success"/"failure"）。
-          type: string
-        profile:
-          description: Profile 是执行该任务的 hermes profile 名称。
-          type: string
-        started_at:
-          description: StartedAt 是执行开始时间戳（Unix 秒）。
-          type: integer
-        status:
-          description: Status 是本次执行状态。
-          type: string
-        summary:
-          description: Summary 是执行摘要文本。
-          type: string
-        worker_pid:
-          description: WorkerPID 是 worker 进程 ID，0 表示未知或已退出。
-          type: integer
       type: object
     service.KnowledgeDocumentResult:
       properties:
@@ -2282,7 +2282,7 @@ paths:
             application/json:
               schema:
                 additionalProperties:
-                  $ref: '#/components/schemas/service.CronCapabilities'
+                  $ref: '#/components/schemas/ocops.CronCapabilities'
                 type: object
           description: OK
         "403":
@@ -2335,7 +2335,7 @@ paths:
               schema:
                 additionalProperties:
                   items:
-                    $ref: '#/components/schemas/service.CronJob'
+                    $ref: '#/components/schemas/ocops.CronJob'
                   type: array
                 type: object
           description: OK
@@ -2394,7 +2394,7 @@ paths:
             application/json:
               schema:
                 additionalProperties:
-                  $ref: '#/components/schemas/service.CronJob'
+                  $ref: '#/components/schemas/ocops.CronJob'
                 type: object
           description: Created
         "400":
@@ -2511,7 +2511,7 @@ paths:
             application/json:
               schema:
                 additionalProperties:
-                  $ref: '#/components/schemas/service.CronJob'
+                  $ref: '#/components/schemas/ocops.CronJob'
                 type: object
           description: OK
         "400":
@@ -2587,7 +2587,7 @@ paths:
             application/json:
               schema:
                 additionalProperties:
-                  $ref: '#/components/schemas/service.CronJob'
+                  $ref: '#/components/schemas/ocops.CronJob'
                 type: object
           description: OK
         "400":
@@ -2653,7 +2653,7 @@ paths:
               schema:
                 additionalProperties:
                   items:
-                    $ref: '#/components/schemas/service.CronRunEntry'
+                    $ref: '#/components/schemas/ocops.CronRunEntry'
                   type: array
                 type: object
           description: OK
@@ -2725,7 +2725,7 @@ paths:
             application/json:
               schema:
                 additionalProperties:
-                  $ref: '#/components/schemas/service.CronRunOutput'
+                  $ref: '#/components/schemas/ocops.CronRunOutput'
                 type: object
           description: OK
         "400":
@@ -2790,7 +2790,7 @@ paths:
             application/json:
               schema:
                 additionalProperties:
-                  $ref: '#/components/schemas/service.CronJob'
+                  $ref: '#/components/schemas/ocops.CronJob'
                 type: object
           description: OK
         "400":
@@ -2855,7 +2855,7 @@ paths:
             application/json:
               schema:
                 additionalProperties:
-                  $ref: '#/components/schemas/service.CronJob'
+                  $ref: '#/components/schemas/ocops.CronJob'
                 type: object
           description: OK
         "400":
@@ -2920,7 +2920,7 @@ paths:
             application/json:
               schema:
                 additionalProperties:
-                  $ref: '#/components/schemas/service.CronJob'
+                  $ref: '#/components/schemas/ocops.CronJob'
                 type: object
           description: OK
         "400":
@@ -2979,7 +2979,7 @@ paths:
             application/json:
               schema:
                 additionalProperties:
-                  $ref: '#/components/schemas/service.CronStatus'
+                  $ref: '#/components/schemas/ocops.CronStatus'
                 type: object
           description: OK
         "403":
@@ -3027,7 +3027,7 @@ paths:
               schema:
                 additionalProperties:
                   items:
-                    $ref: '#/components/schemas/service.KanbanBoard'
+                    $ref: '#/components/schemas/ocops.KanbanBoard'
                   type: array
                 type: object
           description: OK
@@ -3064,7 +3064,7 @@ paths:
             application/json:
               schema:
                 additionalProperties:
-                  $ref: '#/components/schemas/service.KanbanCapabilities'
+                  $ref: '#/components/schemas/ocops.KanbanCapabilities'
                 type: object
           description: OK
         "403":
@@ -3143,7 +3143,7 @@ paths:
             application/json:
               schema:
                 additionalProperties:
-                  $ref: '#/components/schemas/service.KanbanStats'
+                  $ref: '#/components/schemas/ocops.KanbanStats'
                 type: object
           description: OK
         "403":
@@ -3206,7 +3206,7 @@ paths:
               schema:
                 additionalProperties:
                   items:
-                    $ref: '#/components/schemas/service.KanbanTask'
+                    $ref: '#/components/schemas/ocops.KanbanTask'
                   type: array
                 type: object
           description: OK
@@ -3265,7 +3265,7 @@ paths:
             application/json:
               schema:
                 additionalProperties:
-                  $ref: '#/components/schemas/service.KanbanTaskDetail'
+                  $ref: '#/components/schemas/ocops.KanbanTaskDetail'
                 type: object
           description: Created
         "400":
@@ -3311,7 +3311,7 @@ paths:
             application/json:
               schema:
                 additionalProperties:
-                  $ref: '#/components/schemas/service.KanbanTaskDetail'
+                  $ref: '#/components/schemas/ocops.KanbanTaskDetail'
                 type: object
           description: OK
         "403":
@@ -3374,7 +3374,7 @@ paths:
             application/json:
               schema:
                 additionalProperties:
-                  $ref: '#/components/schemas/service.KanbanTaskDetail'
+                  $ref: '#/components/schemas/ocops.KanbanTaskDetail'
                 type: object
           description: OK
         "403":
@@ -3420,7 +3420,7 @@ paths:
             application/json:
               schema:
                 additionalProperties:
-                  $ref: '#/components/schemas/service.KanbanTaskDetail'
+                  $ref: '#/components/schemas/ocops.KanbanTaskDetail'
                 type: object
           description: OK
         "400":
@@ -3472,7 +3472,7 @@ paths:
             application/json:
               schema:
                 additionalProperties:
-                  $ref: '#/components/schemas/service.KanbanTaskDetail'
+                  $ref: '#/components/schemas/ocops.KanbanTaskDetail'
                 type: object
           description: OK
         "400":
@@ -3523,7 +3523,7 @@ paths:
             application/json:
               schema:
                 additionalProperties:
-                  $ref: '#/components/schemas/service.KanbanTaskDetail'
+                  $ref: '#/components/schemas/ocops.KanbanTaskDetail'
                 type: object
           description: OK
         "400":
@@ -3575,7 +3575,7 @@ paths:
             application/json:
               schema:
                 additionalProperties:
-                  $ref: '#/components/schemas/service.KanbanTaskDetail'
+                  $ref: '#/components/schemas/ocops.KanbanTaskDetail'
                 type: object
           description: OK
         "400":
@@ -3626,7 +3626,7 @@ paths:
             application/json:
               schema:
                 additionalProperties:
-                  $ref: '#/components/schemas/service.KanbanTaskDetail'
+                  $ref: '#/components/schemas/ocops.KanbanTaskDetail'
                 type: object
           description: OK
         "403":
@@ -3667,7 +3667,7 @@ paths:
               schema:
                 additionalProperties:
                   items:
-                    $ref: '#/components/schemas/service.KanbanTaskRun'
+                    $ref: '#/components/schemas/ocops.KanbanTaskRun'
                   type: array
                 type: object
           description: OK
@@ -3731,7 +3731,7 @@ paths:
             application/json:
               schema:
                 additionalProperties:
-                  $ref: '#/components/schemas/service.KanbanTaskDetail'
+                  $ref: '#/components/schemas/ocops.KanbanTaskDetail'
                 type: object
           description: OK
         "403":

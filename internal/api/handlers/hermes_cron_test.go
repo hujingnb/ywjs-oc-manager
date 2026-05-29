@@ -14,18 +14,19 @@ import (
 
 	"oc-manager/internal/auth"
 	"oc-manager/internal/domain"
+	"oc-manager/internal/integrations/ocops"
 	"oc-manager/internal/service"
 )
 
 // cronServiceStub 是 hermesCronService 的可控 stub，用于验证 handler 的 HTTP 绑定、
 // 角色过滤和稳定响应结构，不依赖真实 runtime 容器。
 type cronServiceStub struct {
-	job      service.CronJob
-	jobs     []service.CronJob
-	status   service.CronStatus
-	caps     service.CronCapabilities
-	runs     []service.CronRunEntry
-	output   service.CronRunOutput
+	job      ocops.CronJob
+	jobs     []ocops.CronJob
+	status   ocops.CronStatus
+	caps     ocops.CronCapabilities
+	runs     []ocops.CronRunEntry
+	output   ocops.CronRunOutput
 	createIn service.CreateCronJobInput // 记录 CreateJob 最后一次入参，验证 handler 过滤逻辑。
 	updateIn service.UpdateCronJobInput // 记录 UpdateJob 最后一次入参，便于后续扩展更新端点测试。
 	updated  bool                       // 记录 UpdateJob 是否被调用，验证 handler 层前置拒绝逻辑。
@@ -33,33 +34,33 @@ type cronServiceStub struct {
 }
 
 // Capabilities 返回预设能力或错误。
-func (s *cronServiceStub) Capabilities(_ context.Context, _ auth.Principal, _ string) (service.CronCapabilities, error) {
+func (s *cronServiceStub) Capabilities(_ context.Context, _ auth.Principal, _ string) (ocops.CronCapabilities, error) {
 	return s.caps, s.err
 }
 
 // Status 返回预设调度器状态或错误。
-func (s *cronServiceStub) Status(_ context.Context, _ auth.Principal, _ string) (service.CronStatus, error) {
+func (s *cronServiceStub) Status(_ context.Context, _ auth.Principal, _ string) (ocops.CronStatus, error) {
 	return s.status, s.err
 }
 
 // ListJobs 返回预设任务列表或错误。
-func (s *cronServiceStub) ListJobs(_ context.Context, _ auth.Principal, _ string, _ service.CronJobFilter) ([]service.CronJob, error) {
+func (s *cronServiceStub) ListJobs(_ context.Context, _ auth.Principal, _ string, _ service.CronJobFilter) ([]ocops.CronJob, error) {
 	return s.jobs, s.err
 }
 
 // ShowJob 返回预设任务或错误。
-func (s *cronServiceStub) ShowJob(_ context.Context, _ auth.Principal, _, _ string) (service.CronJob, error) {
+func (s *cronServiceStub) ShowJob(_ context.Context, _ auth.Principal, _, _ string) (ocops.CronJob, error) {
 	return s.job, s.err
 }
 
 // CreateJob 记录入参并返回预设任务或错误。
-func (s *cronServiceStub) CreateJob(_ context.Context, _ auth.Principal, _ string, in service.CreateCronJobInput) (service.CronJob, error) {
+func (s *cronServiceStub) CreateJob(_ context.Context, _ auth.Principal, _ string, in service.CreateCronJobInput) (ocops.CronJob, error) {
 	s.createIn = in
 	return s.job, s.err
 }
 
 // UpdateJob 记录入参并返回预设任务或错误。
-func (s *cronServiceStub) UpdateJob(_ context.Context, _ auth.Principal, _, _ string, in service.UpdateCronJobInput) (service.CronJob, error) {
+func (s *cronServiceStub) UpdateJob(_ context.Context, _ auth.Principal, _, _ string, in service.UpdateCronJobInput) (ocops.CronJob, error) {
 	s.updated = true
 	s.updateIn = in
 	return s.job, s.err
@@ -71,27 +72,27 @@ func (s *cronServiceStub) DeleteJob(_ context.Context, _ auth.Principal, _, _ st
 }
 
 // PauseJob 返回预设任务或错误。
-func (s *cronServiceStub) PauseJob(_ context.Context, _ auth.Principal, _, _ string) (service.CronJob, error) {
+func (s *cronServiceStub) PauseJob(_ context.Context, _ auth.Principal, _, _ string) (ocops.CronJob, error) {
 	return s.job, s.err
 }
 
 // ResumeJob 返回预设任务或错误。
-func (s *cronServiceStub) ResumeJob(_ context.Context, _ auth.Principal, _, _ string) (service.CronJob, error) {
+func (s *cronServiceStub) ResumeJob(_ context.Context, _ auth.Principal, _, _ string) (ocops.CronJob, error) {
 	return s.job, s.err
 }
 
 // RunJob 返回预设任务或错误。
-func (s *cronServiceStub) RunJob(_ context.Context, _ auth.Principal, _, _ string) (service.CronJob, error) {
+func (s *cronServiceStub) RunJob(_ context.Context, _ auth.Principal, _, _ string) (ocops.CronJob, error) {
 	return s.job, s.err
 }
 
 // History 返回预设执行历史或错误。
-func (s *cronServiceStub) History(_ context.Context, _ auth.Principal, _, _ string) ([]service.CronRunEntry, error) {
+func (s *cronServiceStub) History(_ context.Context, _ auth.Principal, _, _ string) ([]ocops.CronRunEntry, error) {
 	return s.runs, s.err
 }
 
 // Output 返回预设输出内容或错误。
-func (s *cronServiceStub) Output(_ context.Context, _ auth.Principal, _, _, _ string) (service.CronRunOutput, error) {
+func (s *cronServiceStub) Output(_ context.Context, _ auth.Principal, _, _, _ string) (ocops.CronRunOutput, error) {
 	return s.output, s.err
 }
 
@@ -108,7 +109,7 @@ func newCronTestRouter(t *testing.T, svc hermesCronService) *gin.Engine {
 // 非平台管理员提交高级字段时，handler 会在调用 service 前丢弃 Skills/Model/Provider/BaseURL。
 func TestHermesCronCreateStripsAdvancedFieldsForOrgAdmin(t *testing.T) {
 	// stub 返回新建后的任务，确保请求走到 service 并可检查记录的入参。
-	stub := &cronServiceStub{job: service.CronJob{ID: "job_1", Name: "日报"}}
+	stub := &cronServiceStub{job: ocops.CronJob{ID: "job_1", Name: "日报"}}
 	r := newCronTestRouter(t, stub)
 
 	body := `{"name":"日报","schedule":"0 9 * * *","prompt":"生成日报","skills":["bash"],"model":"gpt-5","provider":"openai","base_url":"https://example.test","workdir":"scratch"}`
@@ -130,7 +131,7 @@ func TestHermesCronCreateStripsAdvancedFieldsForOrgAdmin(t *testing.T) {
 // 平台管理员提交高级字段时，handler 原样透传给 service。
 func TestHermesCronCreateKeepsAdvancedFieldsForPlatformAdmin(t *testing.T) {
 	// stub 返回新建后的任务，平台管理员路径需要保留所有高级字段。
-	stub := &cronServiceStub{job: service.CronJob{ID: "job_1", Name: "日报"}}
+	stub := &cronServiceStub{job: ocops.CronJob{ID: "job_1", Name: "日报"}}
 	r := newCronTestRouter(t, stub)
 
 	body := `{"name":"日报","schedule":"0 9 * * *","prompt":"生成日报","skills":["bash","grep"],"model":"gpt-5","provider":"openai","base_url":"https://example.test"}`
@@ -168,7 +169,7 @@ func TestHermesCronNotSupportedErrorCode(t *testing.T) {
 // GET /jobs/:jobId/history 成功时返回顶层 runs 数组，保持前端消费契约稳定。
 func TestHermesCronHistoryReturnsRuns(t *testing.T) {
 	// stub 预设一条运行历史，用于验证响应结构和字段内容。
-	stub := &cronServiceStub{runs: []service.CronRunEntry{{
+	stub := &cronServiceStub{runs: []ocops.CronRunEntry{{
 		JobID:     "job_1",
 		FileName:  "2026-05-21T090000.md",
 		Size:      42,
@@ -184,7 +185,7 @@ func TestHermesCronHistoryReturnsRuns(t *testing.T) {
 
 	require.Equal(t, http.StatusOK, w.Code)
 	var got struct {
-		Runs []service.CronRunEntry `json:"runs"`
+		Runs []ocops.CronRunEntry `json:"runs"`
 	}
 	require.NoError(t, json.Unmarshal(w.Body.Bytes(), &got))
 	require.Len(t, got.Runs, 1)
@@ -196,7 +197,7 @@ func TestHermesCronHistoryReturnsRuns(t *testing.T) {
 // 当前 runtime 没有稳定的 repeat 清空语义，handler 必须返回明确 400，不能静默透传成 no-op。
 func TestHermesCronUpdateClearRepeatReturnsBadRequest(t *testing.T) {
 	// stub 若被调用会记录 updated=true；该场景应在 handler 层直接拒绝。
-	stub := &cronServiceStub{job: service.CronJob{ID: "job_1", Name: "日报"}}
+	stub := &cronServiceStub{job: ocops.CronJob{ID: "job_1", Name: "日报"}}
 	r := newCronTestRouter(t, stub)
 
 	body := `{"clear_repeat":true}`

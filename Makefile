@@ -419,7 +419,7 @@ smoke-v102:  ## 跑 v1.0.2 干净环境 smoke（前置：阶段 0 完成）
 openapi-gen: ## 后端注解扫描，覆盖 openapi/openapi.yaml
 	go run github.com/swaggo/swag/v2/cmd/swag@$(SWAG_VERSION) init \
 		--generalInfo main.go \
-		--dir cmd/server,internal/api/handlers,internal/service,internal/domain \
+		--dir cmd/server,internal/api/handlers,internal/service,internal/domain,internal/integrations/ocops \
 		--output openapi \
 		--outputTypes yaml \
 		--v3.1

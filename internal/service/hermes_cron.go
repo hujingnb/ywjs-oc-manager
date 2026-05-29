@@ -14,6 +14,7 @@ import (
 	"strings"
 
 	"oc-manager/internal/auth"
+	"oc-manager/internal/integrations/ocops"
 	"oc-manager/internal/integrations/runtime"
 	"oc-manager/internal/store/sqlc"
 )
@@ -260,7 +261,7 @@ func isCronOutputFileName(fileName string) bool {
 }
 
 // validateCronJobData 校验 oc-cron 返回的任务对象是否包含稳定标识。
-func validateCronJobData(job CronJob) error {
+func validateCronJobData(job ocops.CronJob) error {
 	if !cronJobIDRe.MatchString(job.ID) {
 		return fmt.Errorf("%w: 任务缺少合法 id", ErrCronOutputInvalid)
 	}
@@ -268,7 +269,7 @@ func validateCronJobData(job CronJob) error {
 }
 
 // validateCronJobsData 校验任务数组里的每个任务对象；空数组合法。
-func validateCronJobsData(jobs []CronJob) error {
+func validateCronJobsData(jobs []ocops.CronJob) error {
 	for _, job := range jobs {
 		if err := validateCronJobData(job); err != nil {
 			return err
@@ -278,7 +279,7 @@ func validateCronJobsData(jobs []CronJob) error {
 }
 
 // validateCronStatusData 校验 status 输出里的可选任务标识，避免把坏 ID 透传给上层。
-func validateCronStatusData(status CronStatus) error {
+func validateCronStatusData(status ocops.CronStatus) error {
 	if status.ActiveJobs < 0 {
 		return fmt.Errorf("%w: active_jobs 不能为负数", ErrCronOutputInvalid)
 	}
@@ -291,7 +292,7 @@ func validateCronStatusData(status CronStatus) error {
 }
 
 // validateCronRunEntriesData 校验 history 输出中的任务 ID 与输出文件名。
-func validateCronRunEntriesData(entries []CronRunEntry) error {
+func validateCronRunEntriesData(entries []ocops.CronRunEntry) error {
 	for _, entry := range entries {
 		if !cronJobIDRe.MatchString(entry.JobID) {
 			return fmt.Errorf("%w: history 缺少合法 job id", ErrCronOutputInvalid)
@@ -307,7 +308,7 @@ func validateCronRunEntriesData(entries []CronRunEntry) error {
 }
 
 // validateCronRunOutputData 校验 output 输出中的任务 ID 与文件名。
-func validateCronRunOutputData(out CronRunOutput) error {
+func validateCronRunOutputData(out ocops.CronRunOutput) error {
 	if !cronJobIDRe.MatchString(out.JobID) {
 		return fmt.Errorf("%w: output 缺少合法 job id", ErrCronOutputInvalid)
 	}
@@ -318,7 +319,7 @@ func validateCronRunOutputData(out CronRunOutput) error {
 }
 
 // validateCronCapabilitiesData 校验 capabilities 必须携带契约版本标识。
-func validateCronCapabilitiesData(caps CronCapabilities) error {
+func validateCronCapabilitiesData(caps ocops.CronCapabilities) error {
 	if strings.TrimSpace(caps.ContractVersion) == "" || strings.TrimSpace(caps.OCCronVersion) == "" {
 		return fmt.Errorf("%w: capabilities 缺少契约版本", ErrCronOutputInvalid)
 	}
@@ -481,47 +482,47 @@ func appendUpdateArgs(args []string, in UpdateCronJobInput) ([]string, error) {
 }
 
 // Capabilities 探测实例 oc-cron 的契约版本与可用能力。
-func (s *HermesCronService) Capabilities(ctx context.Context, principal auth.Principal, appID string) (CronCapabilities, error) {
+func (s *HermesCronService) Capabilities(ctx context.Context, principal auth.Principal, appID string) (ocops.CronCapabilities, error) {
 	loc, err := s.resolve(ctx, principal, appID)
 	if err != nil {
-		return CronCapabilities{}, err
+		return ocops.CronCapabilities{}, err
 	}
 	data, err := s.runOCCron(ctx, loc, []string{"capabilities"})
 	if err != nil {
-		return CronCapabilities{}, err
+		return ocops.CronCapabilities{}, err
 	}
-	var caps CronCapabilities
+	var caps ocops.CronCapabilities
 	if err := decodeCronData(data, &caps); err != nil {
-		return CronCapabilities{}, err
+		return ocops.CronCapabilities{}, err
 	}
 	if err := validateCronCapabilitiesData(caps); err != nil {
-		return CronCapabilities{}, err
+		return ocops.CronCapabilities{}, err
 	}
 	return caps, nil
 }
 
 // Status 返回实例内 Hermes Cron 调度器状态摘要。
-func (s *HermesCronService) Status(ctx context.Context, principal auth.Principal, appID string) (CronStatus, error) {
+func (s *HermesCronService) Status(ctx context.Context, principal auth.Principal, appID string) (ocops.CronStatus, error) {
 	loc, err := s.resolve(ctx, principal, appID)
 	if err != nil {
-		return CronStatus{}, err
+		return ocops.CronStatus{}, err
 	}
 	data, err := s.runOCCron(ctx, loc, []string{"status"})
 	if err != nil {
-		return CronStatus{}, err
+		return ocops.CronStatus{}, err
 	}
-	var status CronStatus
+	var status ocops.CronStatus
 	if err := decodeCronData(data, &status); err != nil {
-		return CronStatus{}, err
+		return ocops.CronStatus{}, err
 	}
 	if err := validateCronStatusData(status); err != nil {
-		return CronStatus{}, err
+		return ocops.CronStatus{}, err
 	}
 	return status, nil
 }
 
 // ListJobs 返回实例内 Cron 任务列表。
-func (s *HermesCronService) ListJobs(ctx context.Context, principal auth.Principal, appID string, f CronJobFilter) ([]CronJob, error) {
+func (s *HermesCronService) ListJobs(ctx context.Context, principal auth.Principal, appID string, f CronJobFilter) ([]ocops.CronJob, error) {
 	loc, err := s.resolve(ctx, principal, appID)
 	if err != nil {
 		return nil, err
@@ -534,7 +535,7 @@ func (s *HermesCronService) ListJobs(ctx context.Context, principal auth.Princip
 	if err != nil {
 		return nil, err
 	}
-	var jobs []CronJob
+	var jobs []ocops.CronJob
 	if err := decodeCronData(data, &jobs); err != nil {
 		return nil, err
 	}
@@ -545,131 +546,131 @@ func (s *HermesCronService) ListJobs(ctx context.Context, principal auth.Princip
 }
 
 // ShowJob 返回单个 Cron 任务详情。
-func (s *HermesCronService) ShowJob(ctx context.Context, principal auth.Principal, appID, jobID string) (CronJob, error) {
+func (s *HermesCronService) ShowJob(ctx context.Context, principal auth.Principal, appID, jobID string) (ocops.CronJob, error) {
 	loc, err := s.resolve(ctx, principal, appID)
 	if err != nil {
-		return CronJob{}, err
+		return ocops.CronJob{}, err
 	}
 	if err := validateCronJobID(jobID); err != nil {
-		return CronJob{}, err
+		return ocops.CronJob{}, err
 	}
 	data, err := s.runOCCron(ctx, loc, []string{"show", "--id", jobID})
 	if err != nil {
-		return CronJob{}, err
+		return ocops.CronJob{}, err
 	}
-	var job CronJob
+	var job ocops.CronJob
 	if err := decodeCronData(data, &job); err != nil {
-		return CronJob{}, err
+		return ocops.CronJob{}, err
 	}
 	if err := validateCronJobData(job); err != nil {
-		return CronJob{}, err
+		return ocops.CronJob{}, err
 	}
 	return job, nil
 }
 
 // CreateJob 创建 Cron 任务并返回 oc-cron 重读后的稳定任务对象。
-func (s *HermesCronService) CreateJob(ctx context.Context, principal auth.Principal, appID string, in CreateCronJobInput) (CronJob, error) {
+func (s *HermesCronService) CreateJob(ctx context.Context, principal auth.Principal, appID string, in CreateCronJobInput) (ocops.CronJob, error) {
 	loc, err := s.resolveManage(ctx, principal, appID)
 	if err != nil {
-		return CronJob{}, err
+		return ocops.CronJob{}, err
 	}
 	args, err := appendCreateArgs([]string{"create"}, in)
 	if err != nil {
-		return CronJob{}, err
+		return ocops.CronJob{}, err
 	}
 	data, err := s.runOCCron(ctx, loc, args)
 	if err != nil {
-		return CronJob{}, err
+		return ocops.CronJob{}, err
 	}
-	var job CronJob
+	var job ocops.CronJob
 	if err := decodeCronData(data, &job); err != nil {
-		return CronJob{}, err
+		return ocops.CronJob{}, err
 	}
 	if err := validateCronJobData(job); err != nil {
-		return CronJob{}, err
+		return ocops.CronJob{}, err
 	}
 	return job, nil
 }
 
 // UpdateJob 更新 Cron 任务并返回更新后的稳定任务对象。
-func (s *HermesCronService) UpdateJob(ctx context.Context, principal auth.Principal, appID, jobID string, in UpdateCronJobInput) (CronJob, error) {
+func (s *HermesCronService) UpdateJob(ctx context.Context, principal auth.Principal, appID, jobID string, in UpdateCronJobInput) (ocops.CronJob, error) {
 	loc, err := s.resolveManage(ctx, principal, appID)
 	if err != nil {
-		return CronJob{}, err
+		return ocops.CronJob{}, err
 	}
 	if err := validateCronJobID(jobID); err != nil {
-		return CronJob{}, err
+		return ocops.CronJob{}, err
 	}
 	args, err := appendUpdateArgs([]string{"update", "--id", jobID}, in)
 	if err != nil {
-		return CronJob{}, err
+		return ocops.CronJob{}, err
 	}
 	data, err := s.runOCCron(ctx, loc, args)
 	if err != nil {
-		return CronJob{}, err
+		return ocops.CronJob{}, err
 	}
-	var job CronJob
+	var job ocops.CronJob
 	if err := decodeCronData(data, &job); err != nil {
-		return CronJob{}, err
+		return ocops.CronJob{}, err
 	}
 	if err := validateCronJobData(job); err != nil {
-		return CronJob{}, err
+		return ocops.CronJob{}, err
 	}
 	return job, nil
 }
 
 // PauseJob 暂停 Cron 任务，对应 oc-cron toggle --enabled false。
-func (s *HermesCronService) PauseJob(ctx context.Context, principal auth.Principal, appID, jobID string) (CronJob, error) {
+func (s *HermesCronService) PauseJob(ctx context.Context, principal auth.Principal, appID, jobID string) (ocops.CronJob, error) {
 	return s.toggleJob(ctx, principal, appID, jobID, false)
 }
 
 // ResumeJob 恢复 Cron 任务，对应 oc-cron toggle --enabled true。
-func (s *HermesCronService) ResumeJob(ctx context.Context, principal auth.Principal, appID, jobID string) (CronJob, error) {
+func (s *HermesCronService) ResumeJob(ctx context.Context, principal auth.Principal, appID, jobID string) (ocops.CronJob, error) {
 	return s.toggleJob(ctx, principal, appID, jobID, true)
 }
 
 // toggleJob 执行启停切换，并返回切换后的任务对象。
-func (s *HermesCronService) toggleJob(ctx context.Context, principal auth.Principal, appID, jobID string, enabled bool) (CronJob, error) {
+func (s *HermesCronService) toggleJob(ctx context.Context, principal auth.Principal, appID, jobID string, enabled bool) (ocops.CronJob, error) {
 	loc, err := s.resolveManage(ctx, principal, appID)
 	if err != nil {
-		return CronJob{}, err
+		return ocops.CronJob{}, err
 	}
 	if err := validateCronJobID(jobID); err != nil {
-		return CronJob{}, err
+		return ocops.CronJob{}, err
 	}
 	data, err := s.runOCCron(ctx, loc, []string{"toggle", "--id", jobID, "--enabled", fmt.Sprintf("%t", enabled)})
 	if err != nil {
-		return CronJob{}, err
+		return ocops.CronJob{}, err
 	}
-	var job CronJob
+	var job ocops.CronJob
 	if err := decodeCronData(data, &job); err != nil {
-		return CronJob{}, err
+		return ocops.CronJob{}, err
 	}
 	if err := validateCronJobData(job); err != nil {
-		return CronJob{}, err
+		return ocops.CronJob{}, err
 	}
 	return job, nil
 }
 
 // RunJob 立即触发 Cron 任务并返回触发后的任务对象。
-func (s *HermesCronService) RunJob(ctx context.Context, principal auth.Principal, appID, jobID string) (CronJob, error) {
+func (s *HermesCronService) RunJob(ctx context.Context, principal auth.Principal, appID, jobID string) (ocops.CronJob, error) {
 	loc, err := s.resolveManage(ctx, principal, appID)
 	if err != nil {
-		return CronJob{}, err
+		return ocops.CronJob{}, err
 	}
 	if err := validateCronJobID(jobID); err != nil {
-		return CronJob{}, err
+		return ocops.CronJob{}, err
 	}
 	data, err := s.runOCCron(ctx, loc, []string{"run", "--id", jobID})
 	if err != nil {
-		return CronJob{}, err
+		return ocops.CronJob{}, err
 	}
-	var job CronJob
+	var job ocops.CronJob
 	if err := decodeCronData(data, &job); err != nil {
-		return CronJob{}, err
+		return ocops.CronJob{}, err
 	}
 	if err := validateCronJobData(job); err != nil {
-		return CronJob{}, err
+		return ocops.CronJob{}, err
 	}
 	return job, nil
 }
@@ -688,7 +689,7 @@ func (s *HermesCronService) DeleteJob(ctx context.Context, principal auth.Princi
 }
 
 // History 返回某个 Cron 任务的运行输出历史。
-func (s *HermesCronService) History(ctx context.Context, principal auth.Principal, appID, jobID string) ([]CronRunEntry, error) {
+func (s *HermesCronService) History(ctx context.Context, principal auth.Principal, appID, jobID string) ([]ocops.CronRunEntry, error) {
 	loc, err := s.resolve(ctx, principal, appID)
 	if err != nil {
 		return nil, err
@@ -700,7 +701,7 @@ func (s *HermesCronService) History(ctx context.Context, principal auth.Principa
 	if err != nil {
 		return nil, err
 	}
-	var entries []CronRunEntry
+	var entries []ocops.CronRunEntry
 	if err := decodeCronData(data, &entries); err != nil {
 		return nil, err
 	}
@@ -711,27 +712,27 @@ func (s *HermesCronService) History(ctx context.Context, principal auth.Principa
 }
 
 // Output 读取某次 Cron 运行的 markdown 输出。
-func (s *HermesCronService) Output(ctx context.Context, principal auth.Principal, appID, jobID, fileName string) (CronRunOutput, error) {
+func (s *HermesCronService) Output(ctx context.Context, principal auth.Principal, appID, jobID, fileName string) (ocops.CronRunOutput, error) {
 	loc, err := s.resolve(ctx, principal, appID)
 	if err != nil {
-		return CronRunOutput{}, err
+		return ocops.CronRunOutput{}, err
 	}
 	if err := validateCronJobID(jobID); err != nil {
-		return CronRunOutput{}, err
+		return ocops.CronRunOutput{}, err
 	}
 	if err := validateCronOutputFile(fileName); err != nil {
-		return CronRunOutput{}, err
+		return ocops.CronRunOutput{}, err
 	}
 	data, err := s.runOCCron(ctx, loc, []string{"output", "--id", jobID, "--file", fileName})
 	if err != nil {
-		return CronRunOutput{}, err
+		return ocops.CronRunOutput{}, err
 	}
-	var out CronRunOutput
+	var out ocops.CronRunOutput
 	if err := decodeCronData(data, &out); err != nil {
-		return CronRunOutput{}, err
+		return ocops.CronRunOutput{}, err
 	}
 	if err := validateCronRunOutputData(out); err != nil {
-		return CronRunOutput{}, err
+		return ocops.CronRunOutput{}, err
 	}
 	return out, nil
 }

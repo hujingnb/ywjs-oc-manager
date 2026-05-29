@@ -11,24 +11,25 @@ import (
 
 	"oc-manager/internal/auth"
 	"oc-manager/internal/domain"
+	"oc-manager/internal/integrations/ocops"
 	"oc-manager/internal/service"
 )
 
 // hermesCronService 抽象 handler 依赖的 Cron 业务能力，便于单测注入 stub。
 // 方法列表与 service.HermesCronService 对外 HTTP 所需能力保持一致。
 type hermesCronService interface {
-	Capabilities(ctx context.Context, p auth.Principal, appID string) (service.CronCapabilities, error)
-	Status(ctx context.Context, p auth.Principal, appID string) (service.CronStatus, error)
-	ListJobs(ctx context.Context, p auth.Principal, appID string, f service.CronJobFilter) ([]service.CronJob, error)
-	ShowJob(ctx context.Context, p auth.Principal, appID, jobID string) (service.CronJob, error)
-	CreateJob(ctx context.Context, p auth.Principal, appID string, in service.CreateCronJobInput) (service.CronJob, error)
-	UpdateJob(ctx context.Context, p auth.Principal, appID, jobID string, in service.UpdateCronJobInput) (service.CronJob, error)
+	Capabilities(ctx context.Context, p auth.Principal, appID string) (ocops.CronCapabilities, error)
+	Status(ctx context.Context, p auth.Principal, appID string) (ocops.CronStatus, error)
+	ListJobs(ctx context.Context, p auth.Principal, appID string, f service.CronJobFilter) ([]ocops.CronJob, error)
+	ShowJob(ctx context.Context, p auth.Principal, appID, jobID string) (ocops.CronJob, error)
+	CreateJob(ctx context.Context, p auth.Principal, appID string, in service.CreateCronJobInput) (ocops.CronJob, error)
+	UpdateJob(ctx context.Context, p auth.Principal, appID, jobID string, in service.UpdateCronJobInput) (ocops.CronJob, error)
 	DeleteJob(ctx context.Context, p auth.Principal, appID, jobID string) error
-	PauseJob(ctx context.Context, p auth.Principal, appID, jobID string) (service.CronJob, error)
-	ResumeJob(ctx context.Context, p auth.Principal, appID, jobID string) (service.CronJob, error)
-	RunJob(ctx context.Context, p auth.Principal, appID, jobID string) (service.CronJob, error)
-	History(ctx context.Context, p auth.Principal, appID, jobID string) ([]service.CronRunEntry, error)
-	Output(ctx context.Context, p auth.Principal, appID, jobID, fileName string) (service.CronRunOutput, error)
+	PauseJob(ctx context.Context, p auth.Principal, appID, jobID string) (ocops.CronJob, error)
+	ResumeJob(ctx context.Context, p auth.Principal, appID, jobID string) (ocops.CronJob, error)
+	RunJob(ctx context.Context, p auth.Principal, appID, jobID string) (ocops.CronJob, error)
+	History(ctx context.Context, p auth.Principal, appID, jobID string) ([]ocops.CronRunEntry, error)
+	Output(ctx context.Context, p auth.Principal, appID, jobID, fileName string) (ocops.CronRunOutput, error)
 }
 
 // HermesCronHandler 处理 /api/v1/apps/:appId/hermes/cron/* 路由。
@@ -107,7 +108,7 @@ func cronAllQuery(c *gin.Context) bool {
 // @Produce      json
 // @Security     BearerAuth
 // @Param        appId  path      string  true  "应用 ID"
-// @Success      200    {object}  map[string]service.CronCapabilities
+// @Success      200    {object}  map[string]ocops.CronCapabilities
 // @Failure      403    {object}  ErrorResponse
 // @Failure      502    {object}  ErrorResponse
 // @Failure      503    {object}  ErrorResponse
@@ -129,7 +130,7 @@ func (h *HermesCronHandler) Capabilities(c *gin.Context) {
 // @Produce      json
 // @Security     BearerAuth
 // @Param        appId  path      string  true  "应用 ID"
-// @Success      200    {object}  map[string]service.CronStatus
+// @Success      200    {object}  map[string]ocops.CronStatus
 // @Failure      403    {object}  ErrorResponse
 // @Failure      502    {object}  ErrorResponse
 // @Failure      503    {object}  ErrorResponse
@@ -152,7 +153,7 @@ func (h *HermesCronHandler) Status(c *gin.Context) {
 // @Security     BearerAuth
 // @Param        appId  path      string  true   "应用 ID"
 // @Param        all    query     bool    false  "是否包含 disabled/removed 等非活动任务"
-// @Success      200    {object}  map[string][]service.CronJob
+// @Success      200    {object}  map[string][]ocops.CronJob
 // @Failure      403    {object}  ErrorResponse
 // @Failure      502    {object}  ErrorResponse
 // @Failure      503    {object}  ErrorResponse
@@ -177,7 +178,7 @@ func (h *HermesCronHandler) ListJobs(c *gin.Context) {
 // @Security     BearerAuth
 // @Param        appId  path      string  true  "应用 ID"
 // @Param        jobId  path      string  true  "Cron 任务 ID"
-// @Success      200    {object}  map[string]service.CronJob
+// @Success      200    {object}  map[string]ocops.CronJob
 // @Failure      400    {object}  ErrorResponse
 // @Failure      403    {object}  ErrorResponse
 // @Failure      404    {object}  ErrorResponse
@@ -202,7 +203,7 @@ func (h *HermesCronHandler) ShowJob(c *gin.Context) {
 // @Security     BearerAuth
 // @Param        appId  path      string  true  "应用 ID"
 // @Param        jobId  path      string  true  "Cron 任务 ID"
-// @Success      200    {object}  map[string][]service.CronRunEntry
+// @Success      200    {object}  map[string][]ocops.CronRunEntry
 // @Failure      400    {object}  ErrorResponse
 // @Failure      403    {object}  ErrorResponse
 // @Failure      404    {object}  ErrorResponse
@@ -228,7 +229,7 @@ func (h *HermesCronHandler) History(c *gin.Context) {
 // @Param        appId     path      string  true  "应用 ID"
 // @Param        jobId     path      string  true  "Cron 任务 ID"
 // @Param        fileName  path      string  true  "输出文件名"
-// @Success      200       {object}  map[string]service.CronRunOutput
+// @Success      200       {object}  map[string]ocops.CronRunOutput
 // @Failure      400       {object}  ErrorResponse
 // @Failure      403       {object}  ErrorResponse
 // @Failure      404       {object}  ErrorResponse
@@ -259,7 +260,7 @@ func (h *HermesCronHandler) Output(c *gin.Context) {
 // @Security     BearerAuth
 // @Param        appId  path      string                true  "应用 ID"
 // @Param        body   body      CreateCronJobRequest  true  "新建 Cron 任务请求"
-// @Success      201    {object}  map[string]service.CronJob
+// @Success      201    {object}  map[string]ocops.CronJob
 // @Failure      400    {object}  ErrorResponse
 // @Failure      403    {object}  ErrorResponse
 // @Failure      502    {object}  ErrorResponse
@@ -307,7 +308,7 @@ func (h *HermesCronHandler) CreateJob(c *gin.Context) {
 // @Param        appId  path      string                true  "应用 ID"
 // @Param        jobId  path      string                true  "Cron 任务 ID"
 // @Param        body   body      UpdateCronJobRequest  true  "更新 Cron 任务请求"
-// @Success      200    {object}  map[string]service.CronJob
+// @Success      200    {object}  map[string]ocops.CronJob
 // @Failure      400    {object}  ErrorResponse
 // @Failure      403    {object}  ErrorResponse
 // @Failure      404    {object}  ErrorResponse
@@ -391,7 +392,7 @@ func (h *HermesCronHandler) DeleteJob(c *gin.Context) {
 // @Security     BearerAuth
 // @Param        appId  path      string  true  "应用 ID"
 // @Param        jobId  path      string  true  "Cron 任务 ID"
-// @Success      200    {object}  map[string]service.CronJob
+// @Success      200    {object}  map[string]ocops.CronJob
 // @Failure      400    {object}  ErrorResponse
 // @Failure      403    {object}  ErrorResponse
 // @Failure      404    {object}  ErrorResponse
@@ -416,7 +417,7 @@ func (h *HermesCronHandler) PauseJob(c *gin.Context) {
 // @Security     BearerAuth
 // @Param        appId  path      string  true  "应用 ID"
 // @Param        jobId  path      string  true  "Cron 任务 ID"
-// @Success      200    {object}  map[string]service.CronJob
+// @Success      200    {object}  map[string]ocops.CronJob
 // @Failure      400    {object}  ErrorResponse
 // @Failure      403    {object}  ErrorResponse
 // @Failure      404    {object}  ErrorResponse
@@ -441,7 +442,7 @@ func (h *HermesCronHandler) ResumeJob(c *gin.Context) {
 // @Security     BearerAuth
 // @Param        appId  path      string  true  "应用 ID"
 // @Param        jobId  path      string  true  "Cron 任务 ID"
-// @Success      200    {object}  map[string]service.CronJob
+// @Success      200    {object}  map[string]ocops.CronJob
 // @Failure      400    {object}  ErrorResponse
 // @Failure      403    {object}  ErrorResponse
 // @Failure      404    {object}  ErrorResponse

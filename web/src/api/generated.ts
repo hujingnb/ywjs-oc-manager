@@ -674,7 +674,7 @@ export interface paths {
                     };
                     content: {
                         "application/json": {
-                            [key: string]: components["schemas"]["service.CronCapabilities"];
+                            [key: string]: components["schemas"]["ocops.CronCapabilities"];
                         };
                     };
                 };
@@ -754,7 +754,7 @@ export interface paths {
                     };
                     content: {
                         "application/json": {
-                            [key: string]: components["schemas"]["service.CronJob"][];
+                            [key: string]: components["schemas"]["ocops.CronJob"][];
                         };
                     };
                 };
@@ -825,7 +825,7 @@ export interface paths {
                     };
                     content: {
                         "application/json": {
-                            [key: string]: components["schemas"]["service.CronJob"];
+                            [key: string]: components["schemas"]["ocops.CronJob"];
                         };
                     };
                 };
@@ -911,7 +911,7 @@ export interface paths {
                     };
                     content: {
                         "application/json": {
-                            [key: string]: components["schemas"]["service.CronJob"];
+                            [key: string]: components["schemas"]["ocops.CronJob"];
                         };
                     };
                 };
@@ -1083,7 +1083,7 @@ export interface paths {
                     };
                     content: {
                         "application/json": {
-                            [key: string]: components["schemas"]["service.CronJob"];
+                            [key: string]: components["schemas"]["ocops.CronJob"];
                         };
                     };
                 };
@@ -1174,7 +1174,7 @@ export interface paths {
                     };
                     content: {
                         "application/json": {
-                            [key: string]: components["schemas"]["service.CronRunEntry"][];
+                            [key: string]: components["schemas"]["ocops.CronRunEntry"][];
                         };
                     };
                 };
@@ -1273,7 +1273,7 @@ export interface paths {
                     };
                     content: {
                         "application/json": {
-                            [key: string]: components["schemas"]["service.CronRunOutput"];
+                            [key: string]: components["schemas"]["ocops.CronRunOutput"];
                         };
                     };
                 };
@@ -1372,7 +1372,7 @@ export interface paths {
                     };
                     content: {
                         "application/json": {
-                            [key: string]: components["schemas"]["service.CronJob"];
+                            [key: string]: components["schemas"]["ocops.CronJob"];
                         };
                     };
                 };
@@ -1469,7 +1469,7 @@ export interface paths {
                     };
                     content: {
                         "application/json": {
-                            [key: string]: components["schemas"]["service.CronJob"];
+                            [key: string]: components["schemas"]["ocops.CronJob"];
                         };
                     };
                 };
@@ -1566,7 +1566,7 @@ export interface paths {
                     };
                     content: {
                         "application/json": {
-                            [key: string]: components["schemas"]["service.CronJob"];
+                            [key: string]: components["schemas"]["ocops.CronJob"];
                         };
                     };
                 };
@@ -1659,7 +1659,7 @@ export interface paths {
                     };
                     content: {
                         "application/json": {
-                            [key: string]: components["schemas"]["service.CronStatus"];
+                            [key: string]: components["schemas"]["ocops.CronStatus"];
                         };
                     };
                 };
@@ -1736,7 +1736,7 @@ export interface paths {
                     };
                     content: {
                         "application/json": {
-                            [key: string]: components["schemas"]["service.KanbanBoard"][];
+                            [key: string]: components["schemas"]["ocops.KanbanBoard"][];
                         };
                     };
                 };
@@ -1798,7 +1798,7 @@ export interface paths {
                     };
                     content: {
                         "application/json": {
-                            [key: string]: components["schemas"]["service.KanbanCapabilities"];
+                            [key: string]: components["schemas"]["ocops.KanbanCapabilities"];
                         };
                     };
                 };
@@ -1923,7 +1923,7 @@ export interface paths {
                     };
                     content: {
                         "application/json": {
-                            [key: string]: components["schemas"]["service.KanbanStats"];
+                            [key: string]: components["schemas"]["ocops.KanbanStats"];
                         };
                     };
                 };
@@ -2007,7 +2007,7 @@ export interface paths {
                     };
                     content: {
                         "application/json": {
-                            [key: string]: components["schemas"]["service.KanbanTask"][];
+                            [key: string]: components["schemas"]["ocops.KanbanTask"][];
                         };
                     };
                 };
@@ -2078,7 +2078,7 @@ export interface paths {
                     };
                     content: {
                         "application/json": {
-                            [key: string]: components["schemas"]["service.KanbanTaskDetail"];
+                            [key: string]: components["schemas"]["ocops.KanbanTaskDetail"];
                         };
                     };
                 };
@@ -2140,7 +2140,7 @@ export interface paths {
                     };
                     content: {
                         "application/json": {
-                            [key: string]: components["schemas"]["service.KanbanTaskDetail"];
+                            [key: string]: components["schemas"]["ocops.KanbanTaskDetail"];
                         };
                     };
                 };
@@ -2226,7 +2226,7 @@ export interface paths {
                     };
                     content: {
                         "application/json": {
-                            [key: string]: components["schemas"]["service.KanbanTaskDetail"];
+                            [key: string]: components["schemas"]["ocops.KanbanTaskDetail"];
                         };
                     };
                 };
@@ -2283,7 +2283,7 @@ export interface paths {
                     };
                     content: {
                         "application/json": {
-                            [key: string]: components["schemas"]["service.KanbanTaskDetail"];
+                            [key: string]: components["schemas"]["ocops.KanbanTaskDetail"];
                         };
                     };
                 };
@@ -2349,7 +2349,7 @@ export interface paths {
                     };
                     content: {
                         "application/json": {
-                            [key: string]: components["schemas"]["service.KanbanTaskDetail"];
+                            [key: string]: components["schemas"]["ocops.KanbanTaskDetail"];
                         };
                     };
                 };
@@ -2415,7 +2415,7 @@ export interface paths {
                     };
                     content: {
                         "application/json": {
-                            [key: string]: components["schemas"]["service.KanbanTaskDetail"];
+                            [key: string]: components["schemas"]["ocops.KanbanTaskDetail"];
                         };
                     };
                 };
@@ -2481,7 +2481,7 @@ export interface paths {
                     };
                     content: {
                         "application/json": {
-                            [key: string]: components["schemas"]["service.KanbanTaskDetail"];
+                            [key: string]: components["schemas"]["ocops.KanbanTaskDetail"];
                         };
                     };
                 };
@@ -2547,7 +2547,7 @@ export interface paths {
                     };
                     content: {
                         "application/json": {
-                            [key: string]: components["schemas"]["service.KanbanTaskDetail"];
+                            [key: string]: components["schemas"]["ocops.KanbanTaskDetail"];
                         };
                     };
                 };
@@ -2600,7 +2600,7 @@ export interface paths {
                     };
                     content: {
                         "application/json": {
-                            [key: string]: components["schemas"]["service.KanbanTaskRun"][];
+                            [key: string]: components["schemas"]["ocops.KanbanTaskRun"][];
                         };
                     };
                 };
@@ -2686,7 +2686,7 @@ export interface paths {
                     };
                     content: {
                         "application/json": {
-                            [key: string]: components["schemas"]["service.KanbanTaskDetail"];
+                            [key: string]: components["schemas"]["ocops.KanbanTaskDetail"];
                         };
                     };
                 };
@@ -8797,6 +8797,299 @@ export interface components {
             /** @description Role 为空表示保持原角色；非空时需要管理员权限并限制在企业角色内。 */
             role?: string;
         };
+        "ocops.CronCapabilities": {
+            /** @description ContractVersion 是 oc-cron 契约版本号。 */
+            contract_version?: string;
+            features?: components["schemas"]["ocops.CronFeatures"];
+            /** @description HermesVersion 是底层 hermes 版本或构建 ref，可为空。 */
+            hermes_version?: string;
+            /** @description OCCronVersion 是 oc-cron 适配层版本。 */
+            oc_cron_version?: string;
+            /** @description Variant 是镜像变体标识。 */
+            variant?: string;
+            /** @description Verbs 是本镜像支持的 manager-facing verb 清单。 */
+            verbs?: string[];
+        };
+        /** @description Features 是细粒度能力开关。 */
+        "ocops.CronFeatures": {
+            /** @description AdvancedFields 表示支持 workdir/skills/model/provider/base_url 等高级字段。 */
+            advanced_fields?: boolean;
+            /** @description History 表示支持查询运行输出历史。 */
+            history?: boolean;
+            /** @description Output 表示支持读取单次运行输出。 */
+            output?: boolean;
+            /** @description Script 表示支持 script 字段。 */
+            script?: boolean;
+            /** @description Status 表示支持调度器状态查询。 */
+            status?: boolean;
+            /** @description Write 表示支持写操作（create/update/delete/toggle/run）。 */
+            write?: boolean;
+        };
+        "ocops.CronJob": {
+            /** @description BaseURL 是任务指定 provider base URL；平台管理员高级字段。 */
+            base_url?: string;
+            /** @description CreatedAt 是任务创建时间，保持 oc-cron 输出字符串以避免时区二次解释。 */
+            created_at?: string;
+            /** @description Deliver 是任务输出投递目标，例如 wechat；为空表示不投递。 */
+            deliver?: string;
+            /** @description Enabled 表示调度器是否会自动触发该任务。 */
+            enabled?: boolean;
+            /** @description ID 是 Cron 任务唯一标识，最多 64 个安全字符。 */
+            id?: string;
+            /** @description LastDeliveryError 是最近一次投递错误摘要，可为空。 */
+            last_delivery_error?: string;
+            /** @description LastError 是最近一次执行错误摘要，可为空。 */
+            last_error?: string;
+            /** @description LastRunAt 是最近一次运行时间，可为空。 */
+            last_run_at?: string;
+            /** @description LastStatus 是最近一次运行状态，可为空。 */
+            last_status?: string;
+            /** @description Model 是任务指定模型；平台管理员高级字段。 */
+            model?: string;
+            /** @description Name 是任务显示名称。 */
+            name?: string;
+            /** @description NextRunAt 是下一次计划运行时间，可为空。 */
+            next_run_at?: string;
+            /** @description NoAgent 表示任务是否跳过 agent 执行路径。 */
+            no_agent?: boolean;
+            /** @description Prompt 是任务运行时交给 Hermes 的提示词，可为空。 */
+            prompt?: string;
+            /** @description Provider 是任务指定模型提供方；平台管理员高级字段。 */
+            provider?: string;
+            repeat?: components["schemas"]["ocops.CronRepeat"];
+            schedule?: components["schemas"]["ocops.CronSchedule"];
+            /** @description Script 是任务使用的仓库内脚本文件名，可为空。 */
+            script?: string;
+            /** @description Skills 是任务声明需要的技能列表；平台管理员高级字段。 */
+            skills?: string[];
+            /** @description State 是调度状态，如 scheduled / paused / disabled / removed。 */
+            state?: string;
+            /** @description Workdir 是任务运行目录；平台管理员高级字段，handler 层可按角色过滤。 */
+            workdir?: string;
+        };
+        /** @description Repeat 描述重复次数和完成次数。 */
+        "ocops.CronRepeat": {
+            /** @description Completed 是已完成的调度次数。 */
+            completed?: number;
+            /** @description Times 是总重复次数，nil 表示不限制次数。 */
+            times?: number;
+        };
+        "ocops.CronRunEntry": {
+            /** @description Error 是运行错误摘要，可为空。 */
+            error?: string;
+            /** @description FileName 是输出 markdown 文件名，或 synthetic 元数据文件名。 */
+            file_name?: string;
+            /** @description HasOutput 表示是否存在真实 markdown 输出文件。 */
+            has_output?: boolean;
+            /** @description JobID 是所属 Cron 任务 ID。 */
+            job_id?: string;
+            /** @description RunTime 是本次运行时间字符串。 */
+            run_time?: string;
+            /** @description Size 是输出文件字节数。 */
+            size?: number;
+            /** @description Status 是运行状态，可为空。 */
+            status?: string;
+            /** @description Synthetic 表示该记录是否由调度元数据合成。 */
+            synthetic?: boolean;
+        };
+        "ocops.CronRunOutput": {
+            /** @description Content 是 markdown 文本内容，oc-cron 限制最大 1 MiB。 */
+            content?: string;
+            /** @description FileName 是输出 markdown 文件名。 */
+            file_name?: string;
+            /** @description JobID 是所属 Cron 任务 ID。 */
+            job_id?: string;
+            /** @description RunTime 是本次运行时间字符串。 */
+            run_time?: string;
+        };
+        /** @description Schedule 是规整后的调度表达式。 */
+        "ocops.CronSchedule": {
+            /** @description Display 是面向用户展示的调度描述。 */
+            display?: string;
+            /** @description Expr 是机器可读表达式；oc-cron 可返回 null，service 层用空字符串承接。 */
+            expr?: string;
+            /** @description Kind 是调度表达式类别，例如 cron / every / at；旧数据可能为空。 */
+            kind?: string;
+        };
+        "ocops.CronStatus": {
+            /** @description ActiveJobs 是启用且未移除的任务数量。 */
+            active_jobs?: number;
+            /** @description Available 表示 oc-cron 能读取 Cron 状态。 */
+            available?: boolean;
+            /** @description GatewayRunning 表示 hermes cron status 命令当前是否成功。 */
+            gateway_running?: boolean;
+            /** @description LastError 是最近的调度错误摘要，可为空。 */
+            last_error?: string;
+            /** @description LastErrorJobID 是最近错误对应的任务 ID，可为空。 */
+            last_error_job_id?: string;
+            /** @description Message 是底层 hermes cron status 的人类可读摘要。 */
+            message?: string;
+            /** @description NextJobID 是最近计划运行的任务 ID，可为空。 */
+            next_job_id?: string;
+            /** @description NextRunAt 是最近一次计划运行时间，可为空。 */
+            next_run_at?: string;
+            /** @description PID 是调度器进程 ID；nil 表示当前镜像未暴露。 */
+            pid?: number;
+            /** @description TickSeconds 是调度器 tick 间隔；nil 表示当前镜像未暴露。 */
+            tick_seconds?: number;
+        };
+        "ocops.KanbanBoard": {
+            /** @description Archived 标记 board 是否已归档。 */
+            archived?: boolean;
+            /** @description Color 是 board 颜色标识，可为空。 */
+            color?: string;
+            /** @description Counts 是 board 内各状态的任务计数，key 为状态名，value 为数量。 */
+            counts?: {
+                [key: string]: number;
+            };
+            /** @description Description 是 board 描述，可为空。 */
+            description?: string;
+            /** @description Icon 是 board 图标字符串，可为空。 */
+            icon?: string;
+            /** @description IsCurrent 标记是否为当前活动 board。 */
+            is_current?: boolean;
+            /** @description Name 是 board 显示名称。 */
+            name?: string;
+            /** @description Slug 是 board 唯一标识，形如 "default"。 */
+            slug?: string;
+            /** @description Total 是 board 内任务总数。 */
+            total?: number;
+        };
+        "ocops.KanbanCapabilities": {
+            /** @description ContractVersion 是 oc-kanban 契约版本号（MAJOR.MINOR）。 */
+            contract_version?: string;
+            features?: components["schemas"]["ocops.KanbanFeatures"];
+            /** @description HermesVersion 是底层 hermes 版本（信息性，可能为空）。 */
+            hermes_version?: string;
+            /** @description OCKanbanVersion 是 oc-kanban 实现版本。 */
+            oc_kanban_version?: string;
+            /** @description Variant 是镜像变体标识。 */
+            variant?: string;
+            /** @description Verbs 是本镜像实际支持的功能 verb 清单。 */
+            verbs?: string[];
+        };
+        "ocops.KanbanComment": {
+            /** @description Author 是评论作者（hermes profile 名）。 */
+            author?: string;
+            /** @description Body 是评论内容。 */
+            body?: string;
+            /** @description CreatedAt 是评论创建时间戳（Unix 秒）。 */
+            created_at?: number;
+        };
+        "ocops.KanbanEvent": {
+            /** @description CreatedAt 是事件创建时间戳（Unix 秒）。 */
+            created_at?: number;
+            /** @description Kind 是事件类型，如 "created"、"status_changed" 等。 */
+            kind?: string;
+            /**
+             * @description Payload 是事件附加数据，结构随 Kind 变化（任意对象）。
+             *     用 any 类型（swag 可正确解析为 object），json.Unmarshal 会把 JSON 对象解为 map[string]any。
+             */
+            payload?: unknown;
+            /**
+             * @description RunID 是关联的执行 ID，可为 null。真实环境多为 null，类型未经实测确定，
+             *     用 any 容忍 hermes 任意输出（整数 / 字符串 / null），manager 仅透传不解析。
+             */
+            run_id?: unknown;
+            /**
+             * @description TaskID 是事件所属任务 ID。watch 流的事件必带（前端按 task 分组依赖它）；
+             *     TaskDetail.events 单任务上下文里可为空，故 omitempty。
+             */
+            task_id?: string;
+        };
+        /** @description Features 是细粒度能力开关。 */
+        "ocops.KanbanFeatures": {
+            /** @description Runs 表示是否支持查询执行历史。 */
+            runs?: boolean;
+            /** @description Stats 表示是否支持统计。 */
+            stats?: boolean;
+            /** @description Watch 表示是否支持实时事件流。 */
+            watch?: boolean;
+            /** @description Write 表示是否支持写操作（create/comment/...）。 */
+            write?: boolean;
+        };
+        "ocops.KanbanStats": {
+            /** @description ByAssignee 是各 assignee 下各状态的任务计数，外层 key 为 assignee，内层 key 为状态名。 */
+            by_assignee?: {
+                [key: string]: {
+                    [key: string]: number;
+                };
+            };
+            /** @description ByStatus 是各状态的任务计数，key 为状态名，value 为任务数量。 */
+            by_status?: {
+                [key: string]: number;
+            };
+            /** @description Now 是 stats 生成时的 Unix 时间戳（秒），用于客户端计算相对时间。 */
+            now?: number;
+            /** @description OldestReadyAgeSeconds 是最老的 ready 状态任务已等待的秒数。 */
+            oldest_ready_age_seconds?: number;
+        };
+        /** @description Task 是任务核心字段，对应 show 输出的顶层 "task" 子对象。 */
+        "ocops.KanbanTask": {
+            /** @description Assignee 是当前分配的 hermes profile 名称。 */
+            assignee?: string;
+            /** @description Body 是任务描述，可为 null（零值为空字符串）。 */
+            body?: string;
+            /** @description CompletedAt 是任务完成时间戳（Unix 秒），可为 null（零值为 0）。 */
+            completed_at?: number;
+            /** @description CreatedAt 是任务创建时间戳（Unix 秒）。 */
+            created_at?: number;
+            /** @description CreatedBy 是任务创建方（"user" 或 profile 名）。 */
+            created_by?: string;
+            /** @description ID 是任务唯一标识，形如 "t_85620ed7"。 */
+            id?: string;
+            /** @description MaxRetries 是最大重试次数，可为 null（零值为 0）。 */
+            max_retries?: number;
+            /** @description Priority 是任务优先级（0-9）。 */
+            priority?: number;
+            /** @description Result 是任务完成结果摘要，可为 null（零值为空字符串）。 */
+            result?: string;
+            /** @description Skills 是任务所需技能列表，为字符串数组（空任务时为 []）。 */
+            skills?: string[];
+            /** @description StartedAt 是任务开始执行时间戳（Unix 秒），可为 null（零值为 0）。 */
+            started_at?: number;
+            /** @description Status 是任务状态（triage|todo|ready|running|blocked|done|archived）。 */
+            status?: string;
+            /** @description Tenant 是多租户标识，可为 null（零值为空字符串）。 */
+            tenant?: string;
+            /** @description Title 是任务标题。 */
+            title?: string;
+            /** @description WorkspaceKind 是 workspace 类型（scratch|dir|worktree）。 */
+            workspace_kind?: string;
+            /** @description WorkspacePath 是 workspace 路径，可为 null（零值为空字符串）。 */
+            workspace_path?: string;
+        };
+        "ocops.KanbanTaskDetail": {
+            /** @description Children 是子任务 ID 列表（task id 字符串数组）。 */
+            children?: string[];
+            /** @description Comments 是任务评论列表。 */
+            comments?: components["schemas"]["ocops.KanbanComment"][];
+            /** @description Events 是任务事件流列表。 */
+            events?: components["schemas"]["ocops.KanbanEvent"][];
+            /** @description LatestSummary 是最新执行摘要，可为 null（零值为空字符串）。 */
+            latest_summary?: string;
+            /** @description Parents 是父任务 ID 列表（task id 字符串数组）。 */
+            parents?: string[];
+            task?: components["schemas"]["ocops.KanbanTask"];
+        };
+        "ocops.KanbanTaskRun": {
+            /** @description EndedAt 是执行结束时间戳（Unix 秒），0 表示尚未结束。 */
+            ended_at?: number;
+            /** @description Error 是执行失败时的错误信息。 */
+            error?: string;
+            /** @description Outcome 是执行结果（如 "success"/"failure"）。 */
+            outcome?: string;
+            /** @description Profile 是执行该任务的 hermes profile 名称。 */
+            profile?: string;
+            /** @description StartedAt 是执行开始时间戳（Unix 秒）。 */
+            started_at?: number;
+            /** @description Status 是本次执行状态。 */
+            status?: string;
+            /** @description Summary 是执行摘要文本。 */
+            summary?: string;
+            /** @description WorkerPID 是 worker 进程 ID，0 表示未知或已退出。 */
+            worker_pid?: number;
+        };
         "service.AgentEnrollResult": {
             /** @description AgentToken 是新签发的 agent 明文 token，仅在 enroll 响应中返回一次。 */
             agent_token?: string;
@@ -8967,142 +9260,6 @@ export interface components {
             app?: components["schemas"]["service.AppResult"];
             job_id?: string;
         };
-        "service.CronCapabilities": {
-            /** @description ContractVersion 是 oc-cron 契约版本号。 */
-            contract_version?: string;
-            features?: components["schemas"]["service.CronFeatures"];
-            /** @description HermesVersion 是底层 hermes 版本或构建 ref，可为空。 */
-            hermes_version?: string;
-            /** @description OCCronVersion 是 oc-cron 适配层版本。 */
-            oc_cron_version?: string;
-            /** @description Variant 是镜像变体标识。 */
-            variant?: string;
-            /** @description Verbs 是本镜像支持的 manager-facing verb 清单。 */
-            verbs?: string[];
-        };
-        /** @description Features 是细粒度能力开关。 */
-        "service.CronFeatures": {
-            /** @description AdvancedFields 表示支持 workdir/skills/model/provider/base_url 等高级字段。 */
-            advanced_fields?: boolean;
-            /** @description History 表示支持查询运行输出历史。 */
-            history?: boolean;
-            /** @description Output 表示支持读取单次运行输出。 */
-            output?: boolean;
-            /** @description Script 表示支持 script 字段。 */
-            script?: boolean;
-            /** @description Status 表示支持调度器状态查询。 */
-            status?: boolean;
-            /** @description Write 表示支持写操作（create/update/delete/toggle/run）。 */
-            write?: boolean;
-        };
-        "service.CronJob": {
-            /** @description BaseURL 是任务指定 provider base URL；平台管理员高级字段。 */
-            base_url?: string;
-            /** @description CreatedAt 是任务创建时间，保持 oc-cron 输出字符串以避免时区二次解释。 */
-            created_at?: string;
-            /** @description Deliver 是任务输出投递目标，例如 wechat；为空表示不投递。 */
-            deliver?: string;
-            /** @description Enabled 表示调度器是否会自动触发该任务。 */
-            enabled?: boolean;
-            /** @description ID 是 Cron 任务唯一标识，最多 64 个安全字符。 */
-            id?: string;
-            /** @description LastDeliveryError 是最近一次投递错误摘要，可为空。 */
-            last_delivery_error?: string;
-            /** @description LastError 是最近一次执行错误摘要，可为空。 */
-            last_error?: string;
-            /** @description LastRunAt 是最近一次运行时间，可为空。 */
-            last_run_at?: string;
-            /** @description LastStatus 是最近一次运行状态，可为空。 */
-            last_status?: string;
-            /** @description Model 是任务指定模型；平台管理员高级字段。 */
-            model?: string;
-            /** @description Name 是任务显示名称。 */
-            name?: string;
-            /** @description NextRunAt 是下一次计划运行时间，可为空。 */
-            next_run_at?: string;
-            /** @description NoAgent 表示任务是否跳过 agent 执行路径。 */
-            no_agent?: boolean;
-            /** @description Prompt 是任务运行时交给 Hermes 的提示词，可为空。 */
-            prompt?: string;
-            /** @description Provider 是任务指定模型提供方；平台管理员高级字段。 */
-            provider?: string;
-            repeat?: components["schemas"]["service.CronRepeat"];
-            schedule?: components["schemas"]["service.CronSchedule"];
-            /** @description Script 是任务使用的仓库内脚本文件名，可为空。 */
-            script?: string;
-            /** @description Skills 是任务声明需要的技能列表；平台管理员高级字段。 */
-            skills?: string[];
-            /** @description State 是调度状态，如 scheduled / paused / disabled / removed。 */
-            state?: string;
-            /** @description Workdir 是任务运行目录；平台管理员高级字段，handler 层可按角色过滤。 */
-            workdir?: string;
-        };
-        /** @description Repeat 描述重复次数和完成次数。 */
-        "service.CronRepeat": {
-            /** @description Completed 是已完成的调度次数。 */
-            completed?: number;
-            /** @description Times 是总重复次数，nil 表示不限制次数。 */
-            times?: number;
-        };
-        "service.CronRunEntry": {
-            /** @description Error 是运行错误摘要，可为空。 */
-            error?: string;
-            /** @description FileName 是输出 markdown 文件名，或 synthetic 元数据文件名。 */
-            file_name?: string;
-            /** @description HasOutput 表示是否存在真实 markdown 输出文件。 */
-            has_output?: boolean;
-            /** @description JobID 是所属 Cron 任务 ID。 */
-            job_id?: string;
-            /** @description RunTime 是本次运行时间字符串。 */
-            run_time?: string;
-            /** @description Size 是输出文件字节数。 */
-            size?: number;
-            /** @description Status 是运行状态，可为空。 */
-            status?: string;
-            /** @description Synthetic 表示该记录是否由调度元数据合成。 */
-            synthetic?: boolean;
-        };
-        "service.CronRunOutput": {
-            /** @description Content 是 markdown 文本内容，oc-cron 限制最大 1 MiB。 */
-            content?: string;
-            /** @description FileName 是输出 markdown 文件名。 */
-            file_name?: string;
-            /** @description JobID 是所属 Cron 任务 ID。 */
-            job_id?: string;
-            /** @description RunTime 是本次运行时间字符串。 */
-            run_time?: string;
-        };
-        /** @description Schedule 是规整后的调度表达式。 */
-        "service.CronSchedule": {
-            /** @description Display 是面向用户展示的调度描述。 */
-            display?: string;
-            /** @description Expr 是机器可读表达式；oc-cron 可返回 null，service 层用空字符串承接。 */
-            expr?: string;
-            /** @description Kind 是调度表达式类别，例如 cron / every / at；旧数据可能为空。 */
-            kind?: string;
-        };
-        "service.CronStatus": {
-            /** @description ActiveJobs 是启用且未移除的任务数量。 */
-            active_jobs?: number;
-            /** @description Available 表示 oc-cron 能读取 Cron 状态。 */
-            available?: boolean;
-            /** @description GatewayRunning 表示 hermes cron status 命令当前是否成功。 */
-            gateway_running?: boolean;
-            /** @description LastError 是最近的调度错误摘要，可为空。 */
-            last_error?: string;
-            /** @description LastErrorJobID 是最近错误对应的任务 ID，可为空。 */
-            last_error_job_id?: string;
-            /** @description Message 是底层 hermes cron status 的人类可读摘要。 */
-            message?: string;
-            /** @description NextJobID 是最近计划运行的任务 ID，可为空。 */
-            next_job_id?: string;
-            /** @description NextRunAt 是最近一次计划运行时间，可为空。 */
-            next_run_at?: string;
-            /** @description PID 是调度器进程 ID；nil 表示当前镜像未暴露。 */
-            pid?: number;
-            /** @description TickSeconds 是调度器 tick 间隔；nil 表示当前镜像未暴露。 */
-            tick_seconds?: number;
-        };
         /** @description CurrentResource 是该应用在节点上的最近一次实例资源采样。 */
         "service.InstanceResourceSampleResult": {
             /** @description ContainerStatus 是容器采样时状态；bucket 查询取桶内最新非空状态。 */
@@ -9125,163 +9282,6 @@ export interface components {
             network_tx_bytes?: number;
             /** @description SampledAt 是采样或聚合桶时间，统一输出 UTC RFC3339。 */
             sampled_at?: string;
-        };
-        "service.KanbanBoard": {
-            /** @description Archived 标记 board 是否已归档。 */
-            archived?: boolean;
-            /** @description Color 是 board 颜色标识，可为空。 */
-            color?: string;
-            /** @description Counts 是 board 内各状态的任务计数，key 为状态名，value 为数量。 */
-            counts?: {
-                [key: string]: number;
-            };
-            /** @description Description 是 board 描述，可为空。 */
-            description?: string;
-            /** @description Icon 是 board 图标字符串，可为空。 */
-            icon?: string;
-            /** @description IsCurrent 标记是否为当前活动 board。 */
-            is_current?: boolean;
-            /** @description Name 是 board 显示名称。 */
-            name?: string;
-            /** @description Slug 是 board 唯一标识，形如 "default"。 */
-            slug?: string;
-            /** @description Total 是 board 内任务总数。 */
-            total?: number;
-        };
-        "service.KanbanCapabilities": {
-            /** @description ContractVersion 是 oc-kanban 契约版本号（MAJOR.MINOR）。 */
-            contract_version?: string;
-            features?: components["schemas"]["service.KanbanFeatures"];
-            /** @description HermesVersion 是底层 hermes 版本（信息性，可能为空）。 */
-            hermes_version?: string;
-            /** @description OCKanbanVersion 是 oc-kanban 实现版本。 */
-            oc_kanban_version?: string;
-            /** @description Variant 是镜像变体标识。 */
-            variant?: string;
-            /** @description Verbs 是本镜像实际支持的功能 verb 清单。 */
-            verbs?: string[];
-        };
-        "service.KanbanComment": {
-            /** @description Author 是评论作者（hermes profile 名）。 */
-            author?: string;
-            /** @description Body 是评论内容。 */
-            body?: string;
-            /** @description CreatedAt 是评论创建时间戳（Unix 秒）。 */
-            created_at?: number;
-        };
-        "service.KanbanEvent": {
-            /** @description CreatedAt 是事件创建时间戳（Unix 秒）。 */
-            created_at?: number;
-            /** @description Kind 是事件类型，如 "created"、"status_changed" 等。 */
-            kind?: string;
-            /**
-             * @description Payload 是事件附加数据，结构随 Kind 变化（任意对象）。
-             *     用 any 类型（swag 可正确解析为 object），json.Unmarshal 会把 JSON 对象解为 map[string]any。
-             */
-            payload?: unknown;
-            /**
-             * @description RunID 是关联的执行 ID，可为 null。真实环境多为 null，类型未经实测确定，
-             *     用 any 容忍 hermes 任意输出（整数 / 字符串 / null），manager 仅透传不解析。
-             */
-            run_id?: unknown;
-            /**
-             * @description TaskID 是事件所属任务 ID。watch 流的事件必带（前端按 task 分组依赖它）；
-             *     TaskDetail.events 单任务上下文里可为空，故 omitempty。
-             */
-            task_id?: string;
-        };
-        /** @description Features 是细粒度能力开关。 */
-        "service.KanbanFeatures": {
-            /** @description Runs 表示是否支持查询执行历史。 */
-            runs?: boolean;
-            /** @description Stats 表示是否支持统计。 */
-            stats?: boolean;
-            /** @description Watch 表示是否支持实时事件流。 */
-            watch?: boolean;
-            /** @description Write 表示是否支持写操作（create/comment/...）。 */
-            write?: boolean;
-        };
-        "service.KanbanStats": {
-            /** @description ByAssignee 是各 assignee 下各状态的任务计数，外层 key 为 assignee，内层 key 为状态名。 */
-            by_assignee?: {
-                [key: string]: {
-                    [key: string]: number;
-                };
-            };
-            /** @description ByStatus 是各状态的任务计数，key 为状态名，value 为任务数量。 */
-            by_status?: {
-                [key: string]: number;
-            };
-            /** @description Now 是 stats 生成时的 Unix 时间戳（秒），用于客户端计算相对时间。 */
-            now?: number;
-            /** @description OldestReadyAgeSeconds 是最老的 ready 状态任务已等待的秒数。 */
-            oldest_ready_age_seconds?: number;
-        };
-        /** @description Task 是任务核心字段，对应 show 输出的顶层 "task" 子对象。 */
-        "service.KanbanTask": {
-            /** @description Assignee 是当前分配的 hermes profile 名称。 */
-            assignee?: string;
-            /** @description Body 是任务描述，可为 null（零值为空字符串）。 */
-            body?: string;
-            /** @description CompletedAt 是任务完成时间戳（Unix 秒），可为 null（零值为 0）。 */
-            completed_at?: number;
-            /** @description CreatedAt 是任务创建时间戳（Unix 秒）。 */
-            created_at?: number;
-            /** @description CreatedBy 是任务创建方（"user" 或 profile 名）。 */
-            created_by?: string;
-            /** @description ID 是任务唯一标识，形如 "t_85620ed7"。 */
-            id?: string;
-            /** @description MaxRetries 是最大重试次数，可为 null（零值为 0）。 */
-            max_retries?: number;
-            /** @description Priority 是任务优先级（0-9）。 */
-            priority?: number;
-            /** @description Result 是任务完成结果摘要，可为 null（零值为空字符串）。 */
-            result?: string;
-            /** @description Skills 是任务所需技能列表，为字符串数组（空任务时为 []）。 */
-            skills?: string[];
-            /** @description StartedAt 是任务开始执行时间戳（Unix 秒），可为 null（零值为 0）。 */
-            started_at?: number;
-            /** @description Status 是任务状态（triage|todo|ready|running|blocked|done|archived）。 */
-            status?: string;
-            /** @description Tenant 是多租户标识，可为 null（零值为空字符串）。 */
-            tenant?: string;
-            /** @description Title 是任务标题。 */
-            title?: string;
-            /** @description WorkspaceKind 是 workspace 类型（scratch|dir|worktree）。 */
-            workspace_kind?: string;
-            /** @description WorkspacePath 是 workspace 路径，可为 null（零值为空字符串）。 */
-            workspace_path?: string;
-        };
-        "service.KanbanTaskDetail": {
-            /** @description Children 是子任务 ID 列表（task id 字符串数组）。 */
-            children?: string[];
-            /** @description Comments 是任务评论列表。 */
-            comments?: components["schemas"]["service.KanbanComment"][];
-            /** @description Events 是任务事件流列表。 */
-            events?: components["schemas"]["service.KanbanEvent"][];
-            /** @description LatestSummary 是最新执行摘要，可为 null（零值为空字符串）。 */
-            latest_summary?: string;
-            /** @description Parents 是父任务 ID 列表（task id 字符串数组）。 */
-            parents?: string[];
-            task?: components["schemas"]["service.KanbanTask"];
-        };
-        "service.KanbanTaskRun": {
-            /** @description EndedAt 是执行结束时间戳（Unix 秒），0 表示尚未结束。 */
-            ended_at?: number;
-            /** @description Error 是执行失败时的错误信息。 */
-            error?: string;
-            /** @description Outcome 是执行结果（如 "success"/"failure"）。 */
-            outcome?: string;
-            /** @description Profile 是执行该任务的 hermes profile 名称。 */
-            profile?: string;
-            /** @description StartedAt 是执行开始时间戳（Unix 秒）。 */
-            started_at?: number;
-            /** @description Status 是本次执行状态。 */
-            status?: string;
-            /** @description Summary 是执行摘要文本。 */
-            summary?: string;
-            /** @description WorkerPID 是 worker 进程 ID，0 表示未知或已退出。 */
-            worker_pid?: number;
         };
         "service.KnowledgeDocumentResult": {
             created_at?: string;
