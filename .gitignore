@@ -70,3 +70,4 @@ deploy/manage/data/**
 
 # 本地 k8s 真值 Secret（从 secret.example.yaml 复制后填好的实际文件）
 deploy/k8s/local/secret.yaml
+deploy/k8s/prod/secret.yaml

@@ -1,0 +1,54 @@
+# 生产 Ingress 占位。ingressClassName 视生产网关而定（traefik 或 nginx），
+# 这里给 nginx 注释提示；域名与 TLS secret 填真实值后再 apply。
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: ocm
+  namespace: ocm
+  annotations:
+    ingress.kubernetes.io/ssl-redirect: "true"
+spec:
+  ingressClassName: traefik   # 生产若用 nginx ingress controller，改为 nginx
+  tls:
+    - hosts: [ "REPLACE_WITH_DOMAIN" ]
+      secretName: ocm-tls
+  rules:
+    - host: REPLACE_WITH_DOMAIN
+      http:
+        paths:
+          - path: /api
+            pathType: Prefix
+            backend:
+              service:
+                name: manager-api
+                port: { number: 8080 }
+          - path: /healthz
+            pathType: Prefix
+            backend:
+              service:
+                name: manager-api
+                port: { number: 8080 }
+          - path: /
+            pathType: Prefix
+            backend:
+              service:
+                name: manager-web
+                port: { number: 80 }
+    - host: REPLACE_WITH_NEWAPI_DOMAIN
+      http:
+        paths:
+          - path: /
+            pathType: Prefix
+            backend:
+              service:
+                name: new-api
+                port: { number: 3000 }
+    - host: REPLACE_WITH_RAGFLOW_DOMAIN
+      http:
+        paths:
+          - path: /
+            pathType: Prefix
+            backend:
+              service:
+                name: ragflow
+                port: { number: 80 }

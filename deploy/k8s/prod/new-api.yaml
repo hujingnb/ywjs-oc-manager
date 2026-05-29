@@ -1,0 +1,52 @@
+apiVersion: v1
+kind: Service
+metadata:
+  name: new-api
+  namespace: ocm
+spec:
+  selector: { app: new-api }
+  ports:
+    - port: 3000
+      targetPort: 3000
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: new-api
+  namespace: ocm
+spec:
+  replicas: 1
+  selector: { matchLabels: { app: new-api } }
+  template:
+    metadata:
+      labels: { app: new-api }
+    spec:
+      imagePullSecrets:
+        - name: acr-pull
+      containers:
+        - name: new-api
+          image: crpi-nu3ibz4f07feyghi.cn-beijing.personal.cr.aliyuncs.com/ywjs_public/new-api:latest
+          args: ["--log-dir", "/app/logs"]
+          env:
+            # new-api 的 MySQL DSN 格式：user:pass@tcp(host:port)/dbname
+            - name: SQL_DSN
+              value: "USER:PASS@tcp(EXTERNAL_MYSQL_HOST:3306)/new-api"
+            - name: REDIS_CONN_STRING
+              value: "redis://:PASS@EXTERNAL_REDIS_HOST:6379"
+            - name: TZ
+              value: Asia/Shanghai
+            - name: ERROR_LOG_ENABLED
+              value: "true"
+            - name: BATCH_UPDATE_ENABLED
+              value: "true"
+            - name: NODE_NAME
+              value: new-api-node-1
+            - name: STREAMING_TIMEOUT
+              value: "600"
+          ports:
+            - containerPort: 3000
+          readinessProbe:
+            httpGet: { path: /api/status, port: 3000 }
+            initialDelaySeconds: 10
+            periodSeconds: 5
+            failureThreshold: 30
