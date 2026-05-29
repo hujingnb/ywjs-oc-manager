@@ -1,0 +1,66 @@
+apiVersion: v1
+kind: Service
+metadata:
+  name: elasticsearch
+  namespace: ocm
+spec:
+  selector: { app: elasticsearch }
+  ports:
+    - port: 9200
+      targetPort: 9200
+---
+apiVersion: apps/v1
+kind: StatefulSet
+metadata:
+  name: elasticsearch
+  namespace: ocm
+spec:
+  serviceName: elasticsearch
+  replicas: 1
+  selector: { matchLabels: { app: elasticsearch } }
+  template:
+    metadata:
+      labels: { app: elasticsearch }
+    spec:
+      containers:
+        - name: elasticsearch
+          image: crpi-nu3ibz4f07feyghi.cn-beijing.personal.cr.aliyuncs.com/ywjs_public/elasticsearch:8.11.3
+          env:
+            - name: node.name
+              value: elasticsearch
+            - name: ELASTIC_PASSWORD
+              valueFrom: { secretKeyRef: { name: ocm-secrets, key: elastic-password } }
+            - name: discovery.type
+              value: single-node
+            - name: xpack.security.enabled
+              value: "true"
+            - name: xpack.security.http.ssl.enabled
+              value: "false"
+            - name: xpack.security.transport.ssl.enabled
+              value: "false"
+            - name: bootstrap.memory_lock
+              value: "false"
+            - name: cluster.routing.allocation.disk.watermark.low
+              value: 5gb
+            - name: cluster.routing.allocation.disk.watermark.high
+              value: 3gb
+            - name: cluster.routing.allocation.disk.watermark.flood_stage
+              value: 2gb
+            - name: ES_JAVA_OPTS
+              value: "-Xms1g -Xmx1g"
+            - name: TZ
+              value: Asia/Shanghai
+          ports:
+            - containerPort: 9200
+          volumeMounts:
+            - { name: data, mountPath: /usr/share/elasticsearch/data }
+          readinessProbe:
+            httpGet: { path: /, port: 9200 }
+            initialDelaySeconds: 20
+            periodSeconds: 10
+            failureThreshold: 30
+  volumeClaimTemplates:
+    - metadata: { name: data }
+      spec:
+        accessModes: ["ReadWriteOnce"]
+        resources: { requests: { storage: 5Gi } }
