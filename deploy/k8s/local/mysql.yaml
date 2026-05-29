@@ -1,0 +1,71 @@
+# MySQL 8 初始化脚本：建 ocm/new-api/rag_flow 三库，并给 manager 的 ocm 用户授权。
+# 通过挂载到 /docker-entrypoint-initdb.d/ 在首次初始化（数据目录为空）时执行一次。
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: mysql-init
+  namespace: ocm
+data:
+  init.sql: |
+    CREATE DATABASE IF NOT EXISTS `ocm` CHARACTER SET utf8mb4 COLLATE utf8mb4_0900_ai_ci;
+    CREATE DATABASE IF NOT EXISTS `new-api` CHARACTER SET utf8mb4 COLLATE utf8mb4_0900_ai_ci;
+    CREATE DATABASE IF NOT EXISTS `rag_flow` CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci;
+    CREATE USER IF NOT EXISTS 'ocm'@'%' IDENTIFIED BY 'ocm';
+    GRANT ALL PRIVILEGES ON `ocm`.* TO 'ocm'@'%';
+    FLUSH PRIVILEGES;
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: mysql
+  namespace: ocm
+spec:
+  selector: { app: mysql }
+  ports:
+    - port: 3306
+      targetPort: 3306
+---
+apiVersion: apps/v1
+kind: StatefulSet
+metadata:
+  name: mysql
+  namespace: ocm
+spec:
+  serviceName: mysql
+  replicas: 1
+  selector: { matchLabels: { app: mysql } }
+  template:
+    metadata:
+      labels: { app: mysql }
+    spec:
+      containers:
+        - name: mysql
+          image: crpi-nu3ibz4f07feyghi.cn-beijing.personal.cr.aliyuncs.com/ywjs_public/mysql:8.0
+          args:
+            - "--character-set-server=utf8mb4"
+            - "--collation-server=utf8mb4_0900_ai_ci"
+            - "--default-authentication-plugin=mysql_native_password"
+          env:
+            - name: MYSQL_ROOT_PASSWORD
+              valueFrom: { secretKeyRef: { name: ocm-secrets, key: mysql-root-password } }
+            - name: TZ
+              value: Asia/Shanghai
+          ports:
+            - containerPort: 3306
+          volumeMounts:
+            - { name: data, mountPath: /var/lib/mysql }
+            - { name: init, mountPath: /docker-entrypoint-initdb.d }
+          readinessProbe:
+            exec:
+              command: ["sh", "-c", "mysqladmin ping -h127.0.0.1 -uroot -p\"$MYSQL_ROOT_PASSWORD\" --silent"]
+            initialDelaySeconds: 10
+            periodSeconds: 5
+            failureThreshold: 30
+      volumes:
+        - name: init
+          configMap: { name: mysql-init }
+  volumeClaimTemplates:
+    - metadata: { name: data }
+      spec:
+        accessModes: ["ReadWriteOnce"]
+        resources: { requests: { storage: 5Gi } }
