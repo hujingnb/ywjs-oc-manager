@@ -280,6 +280,8 @@ POST/PATCH、删除→DELETE），返回各自类型化对象；`watch` →
 
 ## 8. 待 spec-A（契约就绪，本 spec 不做）
 
+> 契约文档已落地：见 [`docs/ocops-http-contract.md`](../../ocops-http-contract.md)（端点表 / 错误码映射 / SSE 事件形态 / spec-A 对齐点）。
+
 - app pod 渲染：两容器同 image ref、oc-ops 覆盖 command、port 8080、`OC_OPS_TOKEN`
   Secret 注入。
 - manager client-go 编排 + `OcOpsResolver` 真实实现（Service DNS 寻址 + per-app
