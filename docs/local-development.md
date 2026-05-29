@@ -31,6 +31,10 @@ make local-reset   # 删集群并清空 .k3d-data，干净重建（随后再 mak
 | new-api 后台 | http://newapi.localhost | `admin` | `admin123!` |
 | ragflow 控制台 | http://ragflow.localhost | `admin@ragflow.io` | `admin` |
 
+> 若本机设置了 `http_proxy` / `https_proxy`（如 Clash），访问 `*.localhost` 需让代理直连：
+> 命令行用 `curl --noproxy '*' http://ocm.localhost/...` 或 `export NO_PROXY=.localhost,127.0.0.1`；
+> 浏览器（Chrome）默认对 `*.localhost` 直连，无需额外配置。
+
 ## 改代码后
 
 - 改 Go / 前端代码：`make local-build`（重建 :dev 镜像 + 推 registry + 滚动重启）。
