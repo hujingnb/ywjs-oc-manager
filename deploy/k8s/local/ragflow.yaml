@@ -1,0 +1,132 @@
+# ragflow 的 service_conf 模板，挂到容器内由 ragflow 启动脚本用环境变量插值。
+# 内容取自 deploy/ragflow/service_conf.yaml.template；本地指向集群内共享后端。
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: ragflow-conf
+  namespace: ocm
+data:
+  service_conf.yaml.template: |
+    ragflow:
+      host: ${RAGFLOW_HOST:-0.0.0.0}
+      http_port: 9380
+    admin:
+      host: ${RAGFLOW_HOST:-0.0.0.0}
+      http_port: 9381
+    mysql:
+      name: '${MYSQL_DBNAME:-rag_flow}'
+      user: '${MYSQL_USER:-root}'
+      password: '${MYSQL_PASSWORD:-infini_rag_flow}'
+      host: '${MYSQL_HOST:-mysql}'
+      port: ${MYSQL_PORT:-3306}
+      max_connections: 900
+      stale_timeout: 300
+      max_allowed_packet: ${MYSQL_MAX_PACKET:-1073741824}
+    minio:
+      user: '${MINIO_USER:-ocm}'
+      password: '${MINIO_PASSWORD:-ocmsecret123}'
+      host: '${MINIO_HOST:-minio}:9000'
+      bucket: '${MINIO_BUCKET:-}'
+      prefix_path: '${MINIO_PREFIX_PATH:-}'
+    es:
+      hosts: 'http://${ES_HOST:-elasticsearch}:9200'
+      username: '${ES_USER:-elastic}'
+      password: '${ELASTIC_PASSWORD:-infini_rag_flow}'
+    redis:
+      db: 1
+      username: '${REDIS_USERNAME:-}'
+      password: '${REDIS_PASSWORD:-infini_rag_flow}'
+      host: '${REDIS_HOST:-redis}:6379'
+    user_default_llm:
+      default_models:
+        embedding_model:
+          api_key: 'xxx'
+          base_url: 'http://${TEI_HOST:-tei}:80'
+    permission:
+      switch: false
+      component: false
+      dataset: false
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: ragflow
+  namespace: ocm
+spec:
+  selector: { app: ragflow }
+  ports:
+    - { name: web, port: 80, targetPort: 80 }
+    - { name: http-api, port: 9380, targetPort: 9380 }
+    - { name: admin-api, port: 9381, targetPort: 9381 }
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: ragflow
+  namespace: ocm
+spec:
+  replicas: 1
+  selector: { matchLabels: { app: ragflow } }
+  strategy: { type: Recreate }
+  template:
+    metadata:
+      labels: { app: ragflow }
+    spec:
+      containers:
+        - name: ragflow
+          image: crpi-nu3ibz4f07feyghi.cn-beijing.personal.cr.aliyuncs.com/ywjs_public/ragflow:v0.25.6
+          args: ["--enable-adminserver"]
+          env:
+            - name: DOC_ENGINE
+              value: elasticsearch
+            - name: DEVICE
+              value: cpu
+            - name: ES_HOST
+              value: elasticsearch
+            - name: ELASTIC_PASSWORD
+              valueFrom: { secretKeyRef: { name: ocm-secrets, key: elastic-password } }
+            - name: MYSQL_HOST
+              value: mysql
+            - name: MYSQL_PORT
+              value: "3306"
+            - name: MYSQL_DBNAME
+              value: rag_flow
+            - name: MYSQL_USER
+              value: root
+            - name: MYSQL_PASSWORD
+              valueFrom: { secretKeyRef: { name: ocm-secrets, key: mysql-root-password } }
+            - name: MYSQL_MAX_PACKET
+              value: "1073741824"
+            - name: MINIO_HOST
+              value: minio
+            - name: MINIO_USER
+              valueFrom: { secretKeyRef: { name: ocm-secrets, key: minio-root-user } }
+            - name: MINIO_PASSWORD
+              valueFrom: { secretKeyRef: { name: ocm-secrets, key: minio-root-password } }
+            - name: REDIS_HOST
+              value: redis
+            - name: REDIS_PASSWORD
+              valueFrom: { secretKeyRef: { name: ocm-secrets, key: redis-password } }
+            - name: API_PROXY_SCHEME
+              value: python
+            - name: REGISTER_ENABLED
+              value: "1"
+            - name: TZ
+              value: Asia/Shanghai
+          ports:
+            - containerPort: 80
+            - containerPort: 9380
+            - containerPort: 9381
+          volumeMounts:
+            - name: conf
+              mountPath: /ragflow/conf/service_conf.yaml.template
+              subPath: service_conf.yaml.template
+              readOnly: true
+          readinessProbe:
+            httpGet: { path: /, port: 80 }
+            initialDelaySeconds: 30
+            periodSeconds: 10
+            failureThreshold: 60
+      volumes:
+        - name: conf
+          configMap: { name: ragflow-conf }
