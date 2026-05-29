@@ -1,66 +1,54 @@
 package hermes
 
 import (
-	"bytes"
 	"context"
-	"encoding/binary"
 	"errors"
-	"io"
 	"testing"
 
 	"github.com/stretchr/testify/require"
+
+	"oc-manager/internal/integrations/ocops"
 )
 
-// fakeExecutor 模拟 ContainerExecutor 接口,允许测试驱动 stdout/stderr/exit code。
-type fakeExecutor struct {
-	stdoutFrames [][]byte
-	stderrFrames [][]byte
-	exitCode     int
-	err          error
+// fakeStreamer 模拟 ChannelLoginStreamer：按预设序列投递 ocops.ChannelLoginEvent，
+// 或在 ChannelLogin 调用阶段直接返回错误（模拟 oc-ops 不可达）。
+type fakeStreamer struct {
+	events  []ocops.ChannelLoginEvent
+	err     error
+	gotEp   ocops.Endpoint
+	gotChan string
 }
 
-func (f *fakeExecutor) ExecAttach(ctx context.Context, containerID string, cmd []string) (io.ReadCloser, error) {
+func (f *fakeStreamer) ChannelLogin(_ context.Context, ep ocops.Endpoint, channel string) (<-chan ocops.ChannelLoginEvent, error) {
 	if f.err != nil {
 		return nil, f.err
 	}
-	// stdcopy multiplex 格式:首字节 stream type (1=stdout/2=stderr), 1-3 字节保留, 4-7 字节 BE length。
-	buf := &bytes.Buffer{}
-	writeFrame := func(stream byte, payload []byte) {
-		header := make([]byte, 8)
-		header[0] = stream
-		binary.BigEndian.PutUint32(header[4:], uint32(len(payload)))
-		buf.Write(header)
-		buf.Write(payload)
+	f.gotEp = ep
+	f.gotChan = channel
+	ch := make(chan ocops.ChannelLoginEvent, len(f.events))
+	for _, ev := range f.events {
+		ch <- ev
 	}
-	for _, p := range f.stderrFrames {
-		writeFrame(2, p)
-	}
-	for _, p := range f.stdoutFrames {
-		writeFrame(1, p)
-	}
-	return io.NopCloser(buf), nil
+	close(ch)
+	return ch, nil
 }
 
-func (f *fakeExecutor) ExecExitCode(ctx context.Context) (int, error) {
-	return f.exitCode, nil
-}
-
-// 覆盖正常路径:扫码 → 收 QR 事件 → 收 bound 事件。
-// Hermes 时代 oc-channel-login 不再透传 token / base_url 等凭证字段,
-// stdout 仅返回 {"status":"bound"},凭证由容器内自管。
+// 覆盖正常路径：oc-ops 先推 qrcode 再推 bound → runner 翻译为 QRCode + Bound 事件。
+// 同时校验 runner 把注入的 Endpoint 和固定 channel="weixin" 透传给 streamer。
 func TestStreamWeChatLogin_SuccessYieldsQRThenBound(t *testing.T) {
-	exec := &fakeExecutor{
-		stderrFrames: [][]byte{[]byte("https://liteapp.weixin.qq.com/q/abc?qrcode=tok&bot_type=3\n")},
-		stdoutFrames: [][]byte{[]byte(`{"status":"bound"}` + "\n")},
-		exitCode:     0,
-	}
-	runner := NewWeixinRunner(exec)
+	streamer := &fakeStreamer{events: []ocops.ChannelLoginEvent{
+		{Event: "qrcode", URL: "https://liteapp.weixin.qq.com/q/abc?qrcode=tok&bot_type=3"},
+		{Event: "bound"},
+	}}
+	ep := ocops.Endpoint{BaseURL: "http://app-1.ocops:8080", Token: "tok-1"}
+	runner := NewWeixinRunner(streamer, ep)
 
-	events, err := runner.StreamWeChatLogin(context.Background(), "hermes-app-1")
+	events, err := runner.StreamWeChatLogin(context.Background())
 	require.NoError(t, err)
 
 	var qr, bound *WeixinEvent
 	for ev := range events {
+		ev := ev
 		switch ev.Type {
 		case WeixinEventQRCode:
 			qr = &ev
@@ -71,20 +59,23 @@ func TestStreamWeChatLogin_SuccessYieldsQRThenBound(t *testing.T) {
 	require.NotNil(t, qr, "应收到 qrcode 事件")
 	require.Equal(t, "https://liteapp.weixin.qq.com/q/abc?qrcode=tok&bot_type=3", qr.QRCodeURL)
 	require.NotNil(t, bound, "应收到 bound 事件")
+	// runner 必须把注入坐标与固定渠道名透传给 oc-ops 客户端。
+	require.Equal(t, ep, streamer.gotEp)
+	require.Equal(t, "weixin", streamer.gotChan)
 }
 
-// 覆盖失败路径:exit != 0 时发 failed 事件,不带 bound。
-func TestStreamWeChatLogin_NonZeroExitYieldsFailedEvent(t *testing.T) {
-	exec := &fakeExecutor{
-		stderrFrames: [][]byte{[]byte("LOGIN_FAILED_OR_TIMEOUT\n")},
-		exitCode:     2,
-	}
-	runner := NewWeixinRunner(exec)
-	events, err := runner.StreamWeChatLogin(context.Background(), "hermes-app-1")
+// 覆盖失败路径：oc-ops 推 failed 事件（带 reason）→ runner 翻译为 Failed，reason 写入 Error。
+func TestStreamWeChatLogin_FailedEventYieldsFailed(t *testing.T) {
+	streamer := &fakeStreamer{events: []ocops.ChannelLoginEvent{
+		{Event: "failed", Reason: "LOGIN_FAILED_OR_TIMEOUT"},
+	}}
+	runner := NewWeixinRunner(streamer, ocops.Endpoint{})
+	events, err := runner.StreamWeChatLogin(context.Background())
 	require.NoError(t, err)
 
 	var failed *WeixinEvent
 	for ev := range events {
+		ev := ev
 		if ev.Type == WeixinEventFailed {
 			failed = &ev
 		}
@@ -93,19 +84,19 @@ func TestStreamWeChatLogin_NonZeroExitYieldsFailedEvent(t *testing.T) {
 	require.Contains(t, failed.Error, "LOGIN_FAILED_OR_TIMEOUT")
 }
 
-// 覆盖 status!=bound 路径:stdout 返回 timeout/failed 也应转化为 Failed 事件,
-// reason 字段写入 Error 供上层审计记录。
-func TestStreamWeChatLogin_StatusNotBoundYieldsFailed(t *testing.T) {
-	exec := &fakeExecutor{
-		stdoutFrames: [][]byte{[]byte(`{"status":"timeout","reason":"qr expired"}` + "\n")},
-		exitCode:     0,
-	}
-	runner := NewWeixinRunner(exec)
-	events, err := runner.StreamWeChatLogin(context.Background(), "hermes-app-1")
+// 覆盖 timeout 路径：oc-ops 推 timeout 事件也应转化为 Failed 事件，
+// reason 字段（这里携带）写入 Error 供上层审计记录。
+func TestStreamWeChatLogin_TimeoutYieldsFailed(t *testing.T) {
+	streamer := &fakeStreamer{events: []ocops.ChannelLoginEvent{
+		{Event: "timeout", Reason: "qr expired"},
+	}}
+	runner := NewWeixinRunner(streamer, ocops.Endpoint{})
+	events, err := runner.StreamWeChatLogin(context.Background())
 	require.NoError(t, err)
 
 	var failed *WeixinEvent
 	for ev := range events {
+		ev := ev
 		if ev.Type == WeixinEventFailed {
 			failed = &ev
 		}
@@ -114,11 +105,31 @@ func TestStreamWeChatLogin_StatusNotBoundYieldsFailed(t *testing.T) {
 	require.Equal(t, "qr expired", failed.Error)
 }
 
-// 覆盖 docker exec 启动就失败的场景。
-func TestStreamWeChatLogin_ExecAttachError(t *testing.T) {
-	exec := &fakeExecutor{err: errors.New("docker daemon down")}
-	runner := NewWeixinRunner(exec)
-	_, err := runner.StreamWeChatLogin(context.Background(), "hermes-app-1")
+// 覆盖 timeout 无 reason：应以事件名 "timeout" 兜底作为 Error。
+func TestStreamWeChatLogin_TimeoutNoReasonFallsBackToEventName(t *testing.T) {
+	streamer := &fakeStreamer{events: []ocops.ChannelLoginEvent{
+		{Event: "timeout"},
+	}}
+	runner := NewWeixinRunner(streamer, ocops.Endpoint{})
+	events, err := runner.StreamWeChatLogin(context.Background())
+	require.NoError(t, err)
+
+	var failed *WeixinEvent
+	for ev := range events {
+		ev := ev
+		if ev.Type == WeixinEventFailed {
+			failed = &ev
+		}
+	}
+	require.NotNil(t, failed)
+	require.Equal(t, "timeout", failed.Error)
+}
+
+// 覆盖 oc-ops 触发登录就失败的场景（如服务不可达）。
+func TestStreamWeChatLogin_StreamerError(t *testing.T) {
+	streamer := &fakeStreamer{err: errors.New("oc-ops unreachable")}
+	runner := NewWeixinRunner(streamer, ocops.Endpoint{})
+	_, err := runner.StreamWeChatLogin(context.Background())
 	require.Error(t, err)
-	require.Contains(t, err.Error(), "docker daemon down")
+	require.Contains(t, err.Error(), "oc-ops unreachable")
 }

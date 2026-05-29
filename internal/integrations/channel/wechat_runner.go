@@ -1,6 +1,7 @@
 // Package channel 是渠道适配层，把 worker handler 与具体 runtime 实现解耦。
-// 当前（Hermes 时代）内部委托给 internal/integrations/hermes/wechat_runner.go，
-// 保持向后兼容的 type 名 DockerCommandRunner 和 method StreamWeChatLogin。
+// 微信扫码登录当前委托给 internal/integrations/hermes/wechat_runner.go 的
+// WeixinRunner，后者经 oc-ops HTTP SSE 触发登录并翻译事件；保持向后兼容的
+// type 名 DockerCommandRunner 和 method StreamWeChatLogin。
 package channel
 
 import (
@@ -16,95 +17,59 @@ import (
 // DockerClientResolver 与 runtime 包同名接口形态保持一致：根据 nodeID 取出 docker SDK client。
 // 这里不直接 import runtime 包是为了避免 channel ↔ runtime 的循环依赖；
 // cmd/server 装配阶段同时把 manager 端的 docker resolver 实现传给两侧。
+//
+// 当前仅 BindingResolver（wechat_identity.go 读 plugin state）这一条 docker exec
+// 链路还依赖它；微信扫码登录已改走 oc-ops HTTP SSE，不再经过 docker exec。
 type DockerClientResolver interface {
 	DockerClient(ctx context.Context, nodeID string) (*client.Client, error)
 }
 
 // ContainerExecutor 抽象"在指定节点 + 容器内 exec 命令并返回 multiplexed stdout/stderr 流"的能力。
-// wechat_identity.go（execCat）依赖此接口，Hermes 时代继续保留。
+// wechat_identity.go（execCat）依赖此接口读容器内 plugin state 文件；
 // nodeID 参数让 executor 在多节点部署时按节点取对应 docker client。
+//
+// NOTE：本接口是仍存活的最后一条 docker exec 链路。微信扫码登录已迁到
+// oc-ops HTTP SSE（见 DockerCommandRunner），唯独 DockerBindingResolver 仍需
+// 在容器内 cat plugin state JSON 解析 userId；该链路语义与 oc-ops ChannelStatus
+// 不完全等价，留待 spec-A（k8s 编排）一并改造，详见 wechat_identity.go。
 type ContainerExecutor interface {
 	Exec(ctx context.Context, nodeID, containerID string, cmd []string) (reader io.Reader, close func(), err error)
 }
 
 // AppContainerLookup 把 appID 映射为目标节点上的 container_id。
-// Hermes 时代 DockerCommandRunner 直接从 AuthInput.ContainerID 取，不再回查；
+// Hermes 时代 DockerCommandRunner 直接从 AuthInput 取，不再回查；
 // 保留类型声明维持向后兼容。
 type AppContainerLookup interface {
 	LookupContainer(ctx context.Context, appID string) (string, error)
 }
 
-// execToHermesAdapter 把 channel.ContainerExecutor（带 nodeID 的旧接口）适配成
-// hermes.ContainerExecutor（只有 containerID 的新接口）。
-// Hermes 运行器只需要 containerID；nodeID 在 wiring 阶段已经固定到 DockerClientResolver。
-type execToHermesAdapter struct {
-	nodeID   string
-	executor ContainerExecutor
-	// execClose 记录最近一次 Exec 返回的 closer，供 ExecExitCode 使用。
-	execClose func()
-}
-
-// ExecAttach 实现 hermes.ContainerExecutor，把 Exec 结果包装成 io.ReadCloser。
-func (a *execToHermesAdapter) ExecAttach(ctx context.Context, containerID string, cmd []string) (io.ReadCloser, error) {
-	reader, closer, err := a.executor.Exec(ctx, a.nodeID, containerID, cmd)
-	if err != nil {
-		return nil, err
-	}
-	a.execClose = closer
-	return &readCloserAdapter{Reader: reader, closeFunc: closer}, nil
-}
-
-// ExecExitCode hermes.ContainerExecutor 要求的方法，等待上一次 exec 结束并返回 exit code。
-// channel.ContainerExecutor（Exec 接口）不直接暴露 exit code，这里返回 0 并依赖 stdout 协议判断。
-// Hermes 时代 oc-weixin-login 在失败时 exit!=0，但通过 stdcopy 可在 bound event 判断，
-// 此方法仅作兼容占位。
-func (a *execToHermesAdapter) ExecExitCode(_ context.Context) (int, error) {
-	// channel.ContainerExecutor 的 Exec 接口不暴露 exit code；
-	// hermes.WeixinRunner 在 goroutine 里调用此方法，此处返回 0 让 bound 路径由 stdout 驱动。
-	return 0, nil
-}
-
-// readCloserAdapter 把 io.Reader + closer 函数包成 io.ReadCloser。
-type readCloserAdapter struct {
-	io.Reader
-	closeFunc func()
-}
-
-func (r *readCloserAdapter) Close() error {
-	if r.closeFunc != nil {
-		r.closeFunc()
-	}
-	return nil
-}
-
 // DockerCommandRunner 是渠道适配层对外暴露的类型，委托给 hermes.WeixinRunner。
-// 保持 type 名避免修改所有 caller。
+// 保持 type 名避免修改所有 caller；登录传输已从 docker exec 切换为 oc-ops HTTP SSE。
 type DockerCommandRunner struct {
-	executor ContainerExecutor
+	// streamer 触发 oc-ops 渠道登录并订阅 SSE 事件流，生产实现为 *ocops.Client。
+	streamer hermes.ChannelLoginStreamer
 }
 
 // NewDockerCommandRunner 工厂。
-// lookup 参数保留签名兼容，Hermes 时代直接从 AuthInput.ContainerID 取，不再回查。
-// 每次 StreamWeChatLogin 调用时按 AuthInput.NodeID 创建临时 hermes.WeixinRunner,
-// 把 nodeID 注入到 execToHermesAdapter,确保 docker exec 路由到正确节点。
-func NewDockerCommandRunner(executor ContainerExecutor, _ AppContainerLookup) *DockerCommandRunner {
-	return &DockerCommandRunner{executor: executor}
+// streamer 满足 oc-ops SSE 登录能力（*ocops.Client）；每次 StreamWeChatLogin
+// 调用时按 AuthInput.Endpoint 构造临时 hermes.WeixinRunner，把目标 app 实例坐标
+// 注入，确保登录请求打到正确的 oc-ops 实例。
+func NewDockerCommandRunner(streamer hermes.ChannelLoginStreamer) *DockerCommandRunner {
+	return &DockerCommandRunner{streamer: streamer}
 }
 
-// StreamWeChatLogin 委托给 hermes.WeixinRunner。
-// 返回类型升级为 <-chan hermes.WeixinEvent（legacy OpenClaw 时代是 <-chan string）。
-// 上游 caller（wechat.go WeChatAdapter）在 Task 3.5 同步升级为消费 hermes.WeixinEvent。
+// StreamWeChatLogin 委托给 hermes.WeixinRunner，经 oc-ops HTTP SSE 触发微信登录。
+// 返回 <-chan hermes.WeixinEvent，由上游 WeChatAdapter 消费。
 func (r *DockerCommandRunner) StreamWeChatLogin(ctx context.Context, input AuthInput) (<-chan hermes.WeixinEvent, error) {
-	// hermes.WeixinRunner 的 ContainerExecutor 接口不携带 nodeID,
-	// 这里 per-call 创建 execToHermesAdapter,把 input.NodeID 注入,
-	// 确保 dockerExecutor.Exec 能拿到正确节点的 docker client。
-	adapter := &execToHermesAdapter{nodeID: input.NodeID, executor: r.executor}
-	runner := hermes.NewWeixinRunner(adapter)
-	return runner.StreamWeChatLogin(ctx, input.ContainerID)
+	// per-call 构造 runner，把 input.Endpoint（目标 app 实例的 oc-ops 坐标）注入，
+	// 确保多 app 部署下登录请求路由到正确实例。
+	runner := hermes.NewWeixinRunner(r.streamer, input.Endpoint)
+	return runner.StreamWeChatLogin(ctx)
 }
 
 // NewDockerExecutor 包装一个 DockerClientResolver 提供生产可用的 ContainerExecutor。
 // 实现按 nodeID 实时取 docker client，让同一个 executor 实例可被多个节点共享。
+// 当前仅供 DockerBindingResolver（读 plugin state）使用。
 func NewDockerExecutor(resolver DockerClientResolver) ContainerExecutor {
 	return &dockerExecutor{resolver: resolver}
 }
@@ -130,17 +95,12 @@ func (d *dockerExecutor) Exec(ctx context.Context, nodeID, containerID string, c
 	if err != nil {
 		return nil, nil, err
 	}
-	// Attach 用 background ctx,解绑 handler ctx:微信扫码场景下 handler 拿到 QR 事件后立即
-	// return(job 完成),ctx 取消;但 oc-weixin-login.py 还在 polling 等用户扫码,
-	// 此时 docker attach stream 必须保持开启,后台 consumeStream goroutine 接收 bound 事件。
-	// 用 caller ctx 会让 stream 立刻关闭 → 后台读到空 stdout → "解析凭证 JSON 失败"。
-	// closer 函数主动 close attach 释放 stream。
-	attach, err := cli.ContainerExecAttach(context.Background(), exec.ID, container.ExecStartOptions{})
+	attach, err := cli.ContainerExecAttach(ctx, exec.ID, container.ExecStartOptions{})
 	if err != nil {
 		return nil, nil, err
 	}
 	return attach.Reader, attach.Close, nil
 }
 
-// 保留 docker client 引用，避免 module-level import 未使用警告（Phase 6 cleanup 可酌情删）。
+// 保留 docker client 引用，避免 module-level import 未使用警告。
 var _ = client.NewClientWithOpts

@@ -9,6 +9,8 @@ import (
 	"errors"
 	"fmt"
 	"time"
+
+	"oc-manager/internal/integrations/ocops"
 )
 
 // ErrAdapterNotFound 表示 Registry 中未注册指定渠道类型的 adapter。
@@ -51,13 +53,20 @@ type AuthProgress struct {
 	Metadata      map[string]string `json:"metadata,omitempty"`
 }
 
-// AuthInput 在 BeginAuth 时携带用户上下文，供 adapter 调用 runtime 容器。
+// AuthInput 在 BeginAuth 时携带用户上下文，供 adapter 调用 runtime 实例。
+//
+// NodeID/ContainerID 是 docker exec 时代的寻址字段，当前仍被 BindingResolver
+// （读 plugin state 解析绑定身份）使用；微信扫码登录已改走 oc-ops HTTP SSE，
+// 由 Endpoint 寻址。Endpoint 由 worker 经 OcOpsResolver 解析后注入。
 type AuthInput struct {
 	NodeID      string
 	ContainerID string
 	AppID       string
 	OwnerUserID string
 	ChannelName string
+	// Endpoint 是目标 app 实例的 oc-ops 调用坐标（基址 + per-app token），
+	// 微信扫码登录走 oc-ops SSE 时由此寻址。
+	Endpoint ocops.Endpoint
 }
 
 // ChannelAdapter 是渠道协议的统一接口。
