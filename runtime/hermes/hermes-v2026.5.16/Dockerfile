@@ -53,8 +53,23 @@ RUN mv /opt/data/node /opt/hermes-node && \
 RUN uv pip install --python /usr/local/lib/hermes-agent/venv/bin/python --no-cache-dir \
       aiohttp cryptography qrcode
 
-# oc-entrypoint Python 依赖：pyyaml 用于 manifest 解析；pytest 用于镜像构建期自检。
-RUN uv pip install --system --no-cache-dir pyyaml pytest jsonschema
+# oc-entrypoint Python 依赖：pyyaml 用于 manifest 解析；pytest 用于镜像构建期自检；
+# jsonschema 校验 manifest/契约。
+# 末尾的构建期自检（python -m pytest）用 system python 跑，因此 ocops server/SSE
+# 测试（test_ocops_server_*.py、test_ocops_server_sse.py）需要的 starlette + anyio
+# 与 starlette.testclient 依赖的 httpx2（starlette 1.x 的 TestClient 优先 httpx2，
+# 退而用 httpx 会告 deprecation，故直接装 httpx2 避免告警与未来失效）也必须装到
+# system python，否则自检收集 server 测试即 ImportError，docker build 失败。
+# uvicorn 是运行时进程入口（见下方 venv 安装），自检不需要，故不进 system python。
+RUN uv pip install --system --no-cache-dir \
+      pyyaml pytest jsonschema starlette anyio httpx2
+
+# oc-ops HTTP 服务运行时依赖：装进 hermes venv。oc-ops 容器最终用
+# `python -m uvicorn ocops.server:app` 启动，且与 oc-channel-login 同进程环境
+# （需 venv 内的 weixin SDK），因此 server 必须能跑在 hermes venv —— starlette
+# 提供 ASGI、uvicorn 提供 ASGI server、anyio 是 starlette 运行时依赖。
+RUN uv pip install --python /usr/local/lib/hermes-agent/venv/bin/python --no-cache-dir \
+      starlette uvicorn anyio
 
 # 本目录内 COPY（build context = 本 variant 目录）
 COPY oc-entrypoint.py     /usr/local/bin/oc-entrypoint
@@ -73,6 +88,11 @@ COPY lib/                 /usr/local/lib/oc-entrypoint/lib/
 COPY renderer/            /usr/local/lib/oc-entrypoint/renderer/
 COPY migrator/            /usr/local/lib/oc-entrypoint/migrator/
 COPY tests/               /usr/local/lib/oc-entrypoint/tests/
+# oc-ops 核心包：oc-* CLI shim 与 HTTP server（ocops.server:app）共用同一份逻辑。
+# 落点 /usr/local/lib/ocops 与各 oc-* shim 内 `sys.path.insert(0, "/usr/local/lib")`
+# 对齐，使 `import ocops` 在 system python（构建期自检）与 hermes venv（运行时
+# uvicorn / oc-channel-login re-exec）下均可解析。
+COPY ocops/               /usr/local/lib/ocops/
 
 RUN chmod +x /usr/local/bin/oc-entrypoint /usr/local/bin/oc-doctor \
             /usr/local/bin/oc-info /usr/local/bin/oc-channel-login \
@@ -90,7 +110,11 @@ RUN printf '{"variant":"%s","hermes_upstream_ref":"%s","built_at":"%s"}\n' \
 ENV OC_IMAGE_VARIANT=${OC_IMAGE_VARIANT}
 
 # 镜像构建期即执行 runtime 自检；任一单元测试失败都会让 docker build 失败。
-RUN PYTHONDONTWRITEBYTECODE=1 python -m pytest /usr/local/lib/oc-entrypoint/tests/ -v -p no:cacheprovider
+# PYTHONPATH=/usr/local/lib 让自检 python（system python）能 import ocops，
+# 从而收集并运行 tests/ 下的 ocops 测试（含 server/SSE，依赖上面装到 system
+# python 的 starlette/anyio/httpx2）。
+RUN PYTHONDONTWRITEBYTECODE=1 PYTHONPATH=/usr/local/lib \
+      python -m pytest /usr/local/lib/oc-entrypoint/tests/ -v -p no:cacheprovider
 
 HEALTHCHECK --interval=30s --timeout=10s --start-period=60s --retries=3 \
   CMD ["/usr/local/bin/oc-healthcheck"]

@@ -10,3 +10,8 @@
 - oc-channel-login / oc-channel-status / oc-channel-unbind
 - oc-kanban
 - ENTRYPOINT: tini -g -- /usr/local/bin/oc-entrypoint
+
+# oc-ops HTTP 服务（spec-E）
+- 同镜像第二用途：覆盖 CMD 启动 `python -m uvicorn ocops.server:app --host 0.0.0.0 --port 8080`
+- Bearer OC_OPS_TOKEN 鉴权；端点见 docs（cron/kanban/channel 类型化 REST + SSE）
+- oc-* CLI 保留为薄 shim，逻辑与 ocops 包共用
