@@ -9,13 +9,14 @@
 kanban/login 端点在 Task 10/11 追加。"""
 from __future__ import annotations
 
+import json
 import os
 from pathlib import Path
 
 from starlette.applications import Starlette
 from starlette.middleware import Middleware
 from starlette.middleware.base import BaseHTTPMiddleware
-from starlette.responses import JSONResponse, Response
+from starlette.responses import JSONResponse, Response, StreamingResponse
 from starlette.routing import Route
 
 from ocops import channel, cron, doctor, info, kanban
@@ -422,6 +423,65 @@ async def kanban_reclaim(request):
         return _err(e)
 
 
+# ---------------------------------------------------------------------------
+# SSE 端点（Task 11）：手写 `data: <json>\n\n` 帧，media_type=text/event-stream，
+# 不引入 sse-starlette 等额外依赖。
+# ---------------------------------------------------------------------------
+
+# 线程池迭代同步 generator 的哨兵：anyio.to_thread.run_sync(next, it, _SENTINEL)
+# 在迭代耗尽时返回此对象（而非抛 StopIteration 穿透线程边界），据此判断结束。
+_SENTINEL = object()
+
+
+async def kanban_watch(request):
+    """GET /oc/kanban/watch?board=：把 watch_events 同步 generator 转 SSE data 帧。
+
+    watch_events 内部用 subprocess 阻塞读 hermes watch 输出，是同步 generator；
+    若直接在 asyncio 协程里迭代会堵住事件循环，故用 anyio.to_thread.run_sync
+    把「取迭代器」和「取下一条」都放线程池执行，逐条 yield 成 SSE data 帧。
+
+    OpsError（含启动失败的 KanbanError）→ 发 `event: error` 帧携带 {code,message}，
+    让前端能读到结构化错误体而非看到连接被静默切断。
+    """
+    board = request.query_params.get("board", "default")
+
+    async def gen():
+        # 延迟 import anyio：仅 SSE 路径需要，避免无谓拉高模块导入成本。
+        import anyio
+
+        try:
+            # watch_events 是同步 generator（subprocess 阻塞读）；先在线程池取迭代器，
+            # 再逐条 next。run_sync(next, it, _SENTINEL) 把 StopIteration 转成哨兵返回，
+            # 不让 StopIteration 穿透线程边界。
+            it = await anyio.to_thread.run_sync(lambda: iter(kanban.watch_events(board)))
+            while True:
+                ev = await anyio.to_thread.run_sync(next, it, _SENTINEL)
+                if ev is _SENTINEL:
+                    break
+                yield f"data: {json.dumps(ev, ensure_ascii=False)}\n\n"
+        except OpsError as e:
+            # 业务错误（含 KanbanError 启动失败）转 SSE error 帧，不向上抛中断流。
+            yield f"event: error\ndata: {json.dumps({'code': e.code, 'message': e.message}, ensure_ascii=False)}\n\n"
+
+    return StreamingResponse(gen(), media_type="text/event-stream")
+
+
+async def channel_login(request):
+    """POST /oc/channels/{channel}/login：把 channel_login async generator 转 SSE。
+
+    channel_login 已是 async generator（内部并发处理 qr_login 与二维码事件、
+    所有失败降级为 failed 事件不抛异常），直接 async for 逐条转 SSE data 帧。
+    """
+    ch = request.path_params["channel"]
+
+    async def gen():
+        # channel_login 自身保证优雅结束（终态为 bound/timeout/failed），逐条转帧即可。
+        async for ev in channel.channel_login(ch):
+            yield f"data: {json.dumps(ev, ensure_ascii=False)}\n\n"
+
+    return StreamingResponse(gen(), media_type="text/event-stream")
+
+
 # 路由表：按 REST 语义定义 HTTP 方法，无方法限制的路由接受所有方法。
 # kanban / login 路由在 Task 10/11 追加。
 routes = [
@@ -457,6 +517,9 @@ routes = [
     Route("/oc/kanban/tasks/{id}/archive", kanban_archive, methods=["POST"]),
     Route("/oc/kanban/tasks/{id}/reassign", kanban_reassign, methods=["POST"]),
     Route("/oc/kanban/tasks/{id}/reclaim", kanban_reclaim, methods=["POST"]),
+    # SSE 端点（Task 11）：kanban 事件流（GET）与 channel 扫码登录流（POST）。
+    Route("/oc/kanban/watch", kanban_watch),
+    Route("/oc/channels/{channel}/login", channel_login, methods=["POST"]),
 ]
 
 # Starlette app：路由 + AuthMiddleware 中间件栈。
