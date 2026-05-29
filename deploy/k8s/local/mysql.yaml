@@ -12,6 +12,7 @@ data:
     CREATE DATABASE IF NOT EXISTS `rag_flow` CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci;
     CREATE USER IF NOT EXISTS 'ocm'@'%' IDENTIFIED BY 'ocm';
     GRANT ALL PRIVILEGES ON `ocm`.* TO 'ocm'@'%';
+    GRANT ALL PRIVILEGES ON `new-api`.* TO 'ocm'@'%';
     FLUSH PRIVILEGES;
 ---
 apiVersion: v1
