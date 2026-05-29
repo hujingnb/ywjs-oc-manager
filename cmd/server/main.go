@@ -279,6 +279,9 @@ func runManager(ctx context.Context, cfg config.Config, logOut io.Writer) error 
 		DeleteSkill(relPath string) error
 		OpenSkill(relPath string) (io.ReadCloser, error)
 	}
+	// bootstrapSvc 仅在 S3 启用时赋值（bootstrap 依赖对象存储 + STS + skill 预签名）；
+	// nil 时 router 不注册 /internal 路由，符合最小模式预期。
+	var bootstrapSvc *service.BootstrapService
 	if cfg.Storage.S3.Enabled {
 		s3cfg := storage.S3Config{
 			Endpoint:        cfg.Storage.S3.Endpoint,
@@ -290,7 +293,28 @@ func runManager(ctx context.Context, cfg config.Config, logOut io.Writer) error 
 			STSRoleARN:      cfg.Storage.S3.STSRoleARN,
 		}
 		objStore := storage.NewS3ObjectStore(s3cfg)
-		skillBlobStore = service.NewS3SkillBlobStore(objStore, cfg.Storage.S3.PresignTTL.Duration)
+		// s3Skills 同时承担两个角色：skillBlobStore（供 AssistantVersionService 存取 tar）
+		// 与 bootstrapSkillSource（供 BootstrapService 预签名读 URL）。
+		s3Skills := service.NewS3SkillBlobStore(objStore, cfg.Storage.S3.PresignTTL.Duration)
+		skillBlobStore = s3Skills
+		// bootstrap 服务依赖对象存储（restore 预签名）+ STS（写凭证）+ skill 预签名。
+		stsIssuer := storage.NewSTSCredentialIssuer(s3cfg)
+		bootstrapSvc = service.NewBootstrapService(
+			dbStore.Queries,
+			cipher,
+			objStore,
+			stsIssuer,
+			s3Skills,
+			service.BootstrapConfig{
+				Endpoint:         cfg.Storage.S3.Endpoint,
+				Region:           cfg.Storage.S3.Region,
+				Bucket:           cfg.Storage.S3.Bucket,
+				NewAPIBaseURL:    cfg.NewAPI.BaseURL,
+				KnowledgeBaseURL: cfg.Hermes.ManagerRuntimeBaseURL,
+				PlatformPrompt:   cfg.Hermes.SystemPromptTemplate,
+				PresignTTL:       cfg.Storage.S3.PresignTTL.Duration,
+			},
+		)
 	} else {
 		skillBlobStore = service.NewFSSkillBlobStore(cfg.App.DataRoot)
 	}
@@ -460,6 +484,7 @@ func runManager(ctx context.Context, cfg config.Config, logOut io.Writer) error 
 			AssistantVersionService: assistantVersionService,
 			HermesKanbanService:     hermesKanbanService,
 			HermesCronService:       hermesCronService,
+			BootstrapService:        bootstrapSvc,
 			JobsStore:               dbStore.Queries,
 			TokenManager:            tokenManager,
 			AgentTokenSink:          agentTokenSink,

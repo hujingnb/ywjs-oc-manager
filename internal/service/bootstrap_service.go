@@ -177,6 +177,13 @@ func NewBootstrapService(
 // 尚不能 bootstrap（应由创建流程先 ensure）。
 var ErrAppNotReady = errors.New("app 未就绪：缺少 api_key、control token 或发布版本")
 
+// ResolveByControlToken 用 control token hash 反查 app（鉴权即定位）。
+// tokenHash 是调用方已对 plain token 做过 HashAppRuntimeToken 后的 hex 字符串；
+// 内部转换为 null.String 以匹配 sqlc 生成的查询参数类型。
+func (s *BootstrapService) ResolveByControlToken(ctx context.Context, tokenHash string) (sqlc.App, error) {
+	return s.store.GetAppByRuntimeTokenHash(ctx, null.StringFrom(tokenHash))
+}
+
 // Build 按 appID 组装 bootstrap 响应。
 // 调用方已通过 control token 鉴权并确认 token 属于该 app，此处不再重复鉴权。
 // 整体只读：不写库、不创建 key，所有 new-api key 与 control token 已由创建流程 ensure。

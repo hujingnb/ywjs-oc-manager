@@ -52,6 +52,9 @@ type Dependencies struct {
 	HermesKanbanService *service.HermesKanbanService
 	// HermesCronService 提供实例定时任务能力；nil 时不注册 cron 路由。
 	HermesCronService *service.HermesCronService
+	// BootstrapService 提供 pod 启动回调（/internal/apps/:id/bootstrap）；nil 时不注册。
+	// /internal 组不挂用户鉴权中间件，由 handler 内联校验 control token。
+	BootstrapService handlers.BootstrapAppService
 	// JobsStore 提供按 job ID 查询异步任务状态的 handler 依赖。
 	JobsStore handlers.JobsStore
 	// TokenManager 供 RequireUserAuth 中间件验证 access token 并注入 principal。
@@ -112,6 +115,10 @@ func NewRouter(deps ...Dependencies) http.Handler {
 	}
 	if dep.KnowledgeService != nil {
 		handlers.RegisterRuntimeKnowledgeRoutes(router, handlers.NewRuntimeKnowledgeHandler(dep.KnowledgeService))
+	}
+	// /internal 组：pod 启动回调，不挂用户鉴权中间件，由 handler 内联校验 control token。
+	if dep.BootstrapService != nil {
+		handlers.RegisterBootstrapRoutes(router, handlers.NewBootstrapHandler(dep.BootstrapService))
 	}
 
 	// ── user：RequireUserAuth 注入 principal，所有业务路由挂载在此组 ──
