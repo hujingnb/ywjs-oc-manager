@@ -41,6 +41,7 @@ import (
 	"oc-manager/internal/integrations/ocops"
 	"oc-manager/internal/integrations/ragflow"
 	"oc-manager/internal/integrations/runtime"
+	"oc-manager/internal/integrations/storage"
 	managerlog "oc-manager/internal/log"
 	"oc-manager/internal/migrations"
 	"oc-manager/internal/redis"
@@ -271,6 +272,29 @@ func runManager(ctx context.Context, cfg config.Config, logOut io.Writer) error 
 		usageService = service.NewUsageService(nil, nil, nil)
 		organizationService = service.NewOrganizationService(dbStore.Queries, nil, nil, nil)
 	}
+	// 按配置选择 skill 主副本存储实现；两种实现都同时满足 SkillBlobStore 与 worker 的 SkillBlobReader。
+	// S3 启用时走对象存储（需 MinIO / 云 OSS），否则退回本地 FS（无 MinIO 的最小开发仍可用）。
+	var skillBlobStore interface {
+		PutSkill(versionID, skillName string, data []byte) (string, error)
+		DeleteSkill(relPath string) error
+		OpenSkill(relPath string) (io.ReadCloser, error)
+	}
+	if cfg.Storage.S3.Enabled {
+		s3cfg := storage.S3Config{
+			Endpoint:        cfg.Storage.S3.Endpoint,
+			Region:          cfg.Storage.S3.Region,
+			Bucket:          cfg.Storage.S3.Bucket,
+			AccessKeyID:     cfg.Storage.S3.AccessKeyID,
+			SecretAccessKey: cfg.Storage.S3.SecretAccessKey,
+			UsePathStyle:    cfg.Storage.S3.UsePathStyle,
+			STSRoleARN:      cfg.Storage.S3.STSRoleARN,
+		}
+		objStore := storage.NewS3ObjectStore(s3cfg)
+		skillBlobStore = service.NewS3SkillBlobStore(objStore, cfg.Storage.S3.PresignTTL.Duration)
+	} else {
+		skillBlobStore = service.NewFSSkillBlobStore(cfg.App.DataRoot)
+	}
+
 	// 助手版本 service：镜像来自配置、模型校验走 new-api 目录、skill tar 存数据根目录。
 	// modelCatalogService 为 nil 时（未配 newapi）跳过构造，路由自动不注册。
 	var assistantVersionService *service.AssistantVersionService
@@ -279,7 +303,7 @@ func runManager(ctx context.Context, cfg config.Config, logOut io.Writer) error 
 			store.NewAssistantVersionStore(dbStore),
 			runtimeImageAdapter{images: cfg.Hermes.RuntimeImages},
 			modelValidatorAdapter{catalog: modelCatalogService},
-			service.NewFSSkillBlobStore(cfg.App.DataRoot),
+			skillBlobStore,
 			0,
 		)
 		// 助手版本服务作为组织 allowlist 校验器：组织创建/编辑时校验所选版本 id 都存在。
@@ -315,7 +339,7 @@ func runManager(ctx context.Context, cfg config.Config, logOut io.Writer) error 
 			ResolveRuntimeImage: func(imageID string) (string, bool) {
 				return config.ResolveRuntimeImage(cfg.Hermes.RuntimeImages, imageID)
 			},
-			SkillBlobs:            service.NewFSSkillBlobStore(cfg.App.DataRoot),
+			SkillBlobs:            skillBlobStore,
 			ManagerRuntimeBaseURL: cfg.Hermes.ManagerRuntimeBaseURL,
 		},
 	)
@@ -355,7 +379,7 @@ func runManager(ctx context.Context, cfg config.Config, logOut io.Writer) error 
 		func(imageID string) (string, bool) {
 			return config.ResolveRuntimeImage(cfg.Hermes.RuntimeImages, imageID)
 		},
-		service.NewFSSkillBlobStore(cfg.App.DataRoot),
+		skillBlobStore,
 		handlers.AppInputBuildOptions{
 			PlatformPrompt:        cfg.Hermes.SystemPromptTemplate,
 			NewAPIBaseURL:         cfg.NewAPI.BaseURL,
