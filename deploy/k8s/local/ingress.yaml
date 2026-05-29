@@ -1,0 +1,52 @@
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: ocm
+  namespace: ocm
+  annotations:
+    ingress.kubernetes.io/ssl-redirect: "false"
+spec:
+  ingressClassName: traefik
+  rules:
+    # 控制台主域：/api 与 /healthz 走后端，其余走前端 SPA。
+    - host: ocm.localhost
+      http:
+        paths:
+          - path: /api
+            pathType: Prefix
+            backend:
+              service:
+                name: manager-api
+                port: { number: 8080 }
+          - path: /healthz
+            pathType: Prefix
+            backend:
+              service:
+                name: manager-api
+                port: { number: 8080 }
+          - path: /
+            pathType: Prefix
+            backend:
+              service:
+                name: manager-web
+                port: { number: 80 }
+    # new-api 后台
+    - host: newapi.localhost
+      http:
+        paths:
+          - path: /
+            pathType: Prefix
+            backend:
+              service:
+                name: new-api
+                port: { number: 3000 }
+    # ragflow 控制台
+    - host: ragflow.localhost
+      http:
+        paths:
+          - path: /
+            pathType: Prefix
+            backend:
+              service:
+                name: ragflow
+                port: { number: 80 }
