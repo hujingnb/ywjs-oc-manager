@@ -34,14 +34,14 @@
 |---|---|---|
 | 1 | 生产用标准 k8s（vendor-neutral），有状态后端**外置** | MySQL/Redis/ES/MinIO(S3) 生产不部署，只填外部连接；registry 沿用阿里云 ACR（`crpi-…cn-beijing.personal.cr.aliyuncs.com`，`ywjs_app` 自建 / `ywjs_public` 上游）|
 | 2 | 本地 k3d **内部署**全部有状态件 | MySQL/Redis/ES/MinIO 用 StatefulSet + PVC（local-path）|
-| 3 | 本地 PVC 数据**跨重建持久** | `k3d cluster create --volume <repo>/.k3d-data:/var/lib/rancher/k3s/storage@all`，落宿主磁盘，`cluster delete` 也不丢；`.k3d-data` 进 `.gitignore` |
+| 3 | 本地 PVC 数据**跨重建持久**，挂载用**专用新目录** | `k3d cluster create --volume <repo>/.k3d-data:/var/lib/rancher/k3s/storage@all`，落宿主磁盘，`cluster delete` 也不丢；`.k3d-data` 是新建的独立目录（与旧 compose 的 `.local` 无关），进 `.gitignore` |
 | 4 | 业务服务本地 + 生产都进 k8s | manager-api/web、new-api、ragflow 均 Deployment；指向本地/外部 DB |
 | 5 | **裸 YAML，不用 kustomize** | 差异全部外化进各自 Secret/ConfigMap/StorageClass/Ingress |
 | 6 | **无 base 目录**，local/ 与 prod/ **各一套完整 manifest** | 修订上层 §7.3「一套 base + 差异文件」；改为两套独立完整集合 |
 | 7 | 本地 manager-api **默认跑集群内** | client-go 用 `InClusterConfig`；bootstrap 回调走集群内 Service DNS |
 | 8 | 任务**不建 Job**，一律 `kubectl exec` 进容器执行 | migrate/seed/建 bucket 均 exec；与现有 `migrate-up`/`seed-e2e` 习惯一致（`docker compose exec`→`kubectl exec`）|
 | 9 | Makefile **只做本地 k3d 操作**；生产**只生成 YAML** | 不做生产 SSH/apply 自动化、不做 cutover |
-| 10 | 删根 `docker-compose.yml` + `dev-up`/`dev-down`，删 `.local` | 本地开发统一走 k3d local-up；连带影响见 §9 |
+| 10 | 删根 `docker-compose.yml` + `dev-up`/`dev-down`；**`.local` 暂时保留** | 本地开发统一走 k3d local-up；`.local`（旧 compose 数据）本 spec 不删，留作过渡期安全网，compose 文件删除后它即成孤儿数据；连带影响见 §9 |
 
 ---
 
@@ -168,7 +168,7 @@ deploy/k8s/
 
 | 受影响项 | 现状 | 迁移方向 |
 |---|---|---|
-| `.local/` 数据 | compose dev 栈 bind-mount（已 gitignore）| 实现阶段 `rm -rf .local` |
+| `.local/` 数据 | compose dev 栈 bind-mount（已 gitignore）| **暂时保留不删**；compose 文件删除后成孤儿数据，留作过渡期安全网，后续确认无需再手动清理。k3d 数据另用新目录 `.k3d-data`（独立，不复用 `.local`）|
 | `make build` / `web-build` / `build-hermes-runtime` | 在 compose 的 manager-api/web 容器内编译到 `tmp/build/` | 改为本地工具链编译，或 `local-build` 在 k3d/构建容器内完成；生产镜像 `build-*-image` 走 `docker build` 不受影响 |
 | Playwright e2e | globalSetup 走 `make seed-e2e`（compose exec）| 改指 k3d：`kubectl exec` manager-api 跑 seed-e2e，baseURL 指向 `*.localhost` Ingress |
 | `docs/local-development.md` | docker-compose 联调说明 | 重写为 k3d local-up 流程 |
