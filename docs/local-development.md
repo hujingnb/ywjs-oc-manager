@@ -30,7 +30,7 @@ make local-reset   # 删集群并清空 .k3d-data，干净重建（随后再 mak
 | 服务 | 地址 | 账号 | 密码 |
 |---|---|---|---|
 | manager 后台 | http://ocm.localhost | `admin`（组织标识留空）| `admin123` |
-| new-api 后台 | http://newapi.localhost | `admin` | `admin123!` |
+| new-api 后台 | http://newapi.localhost | `admin` | `admin123` |
 | ragflow 控制台 | http://ragflow.localhost | `admin@ragflow.io` | `admin` |
 
 > 若本机设置了 `http_proxy` / `https_proxy`（如 Clash），访问 `*.localhost` 需让代理直连：
