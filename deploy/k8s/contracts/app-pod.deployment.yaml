@@ -1,0 +1,56 @@
+# 契约样例（不 apply）：spec-A/B 运行时由 manager 渲染并 apply 到 oc-apps ns。
+# 展示 app pod 的目标形态：单副本 + Recreate + hermes 主容器 + oc-ops 第二容器
+#（spec-E）+ 共享 emptyDir + bootstrap/控制 token Secret。<APP_ID> 等为占位。
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: app-<APP_ID>
+  namespace: oc-apps
+  labels:
+    app: "<APP_ID>"
+    app.kubernetes.io/part-of: oc-manager
+spec:
+  replicas: 1
+  strategy:
+    type: Recreate          # 先停旧再起新，保证同一 app 至多一个写者（避免 S3 脑裂）
+  selector: { matchLabels: { app: "<APP_ID>" } }
+  template:
+    metadata:
+      labels: { app: "<APP_ID>" }
+    spec:
+      imagePullSecrets:
+        - name: acr-pull
+      containers:
+        # 主容器：Hermes runtime。镜像由助手版本 image_id 解析。
+        - name: hermes
+          image: "<HERMES_IMAGE_REF>"
+          env:
+            - name: HERMES_HOME
+              value: /opt/data
+          volumeMounts:
+            - { name: data, mountPath: /opt/data }
+        # 第二容器：oc-ops HTTP 服务（spec-E），基于 hermes 镜像构建、同版本标签。
+        # manager 通过 per-app 控制 token 调它执行 oc-* 命令；替代旧 agent 的 pods/exec。
+        - name: oc-ops
+          image: "<OC_OPS_IMAGE_REF>"
+          ports:
+            - containerPort: 8080
+          env:
+            - name: OC_OPS_TOKEN
+              valueFrom: { secretKeyRef: { name: app-<APP_ID>-token, key: control-token } }
+          volumeMounts:
+            - { name: data, mountPath: /opt/data }
+      volumes:
+        - name: data
+          emptyDir: {}          # 零 PVC：工作区落 S3，pod 本地仅 emptyDir
+---
+# per-app 控制 token（manager↔pod 双向复用）。manifest(含 api_key) 不进此处，
+# 由 manager bootstrap 端点内存渲染经认证通道交付，见设计 §7。
+apiVersion: v1
+kind: Secret
+metadata:
+  name: app-<APP_ID>-token
+  namespace: oc-apps
+type: Opaque
+stringData:
+  control-token: "<RANDOM_PER_APP_TOKEN>"
