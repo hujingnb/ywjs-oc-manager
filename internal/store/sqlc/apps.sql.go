@@ -170,7 +170,8 @@ FROM apps
 WHERE runtime_token_hash = ? AND deleted_at IS NULL
 `
 
-// runtime API 只接受 token hash 解析出的当前 app，不允许请求方传入目标 app/dataset。
+// 按 control token（per-app 三用：bootstrap / oc-kb / oc-ops）的 hash 反查当前 app；
+// 不允许请求方传入目标 app/dataset，鉴权即定位。
 func (q *Queries) GetAppByRuntimeTokenHash(ctx context.Context, runtimeTokenHash null.String) (App, error) {
 	row := q.db.QueryRowContext(ctx, getAppByRuntimeTokenHash, runtimeTokenHash)
 	var i App
@@ -756,7 +757,7 @@ type SetAppRuntimeTokenParams struct {
 	ID                     string      `db:"id" json:"id"`
 }
 
-// 首次写入 Hermes 调 manager runtime API 的 app 级 token；并发重复初始化拿不到行，由 service 读取既有 token。
+// 首次写入 per-app control token（三用：bootstrap / oc-kb / oc-ops）；并发重复初始化拿不到行，由 service 读取既有 token。
 func (q *Queries) SetAppRuntimeToken(ctx context.Context, arg SetAppRuntimeTokenParams) error {
 	_, err := q.db.ExecContext(ctx, setAppRuntimeToken, arg.RuntimeTokenHash, arg.RuntimeTokenCiphertext, arg.ID)
 	return err

@@ -18,8 +18,14 @@ type AppRuntimeTokenStore interface {
 	SetAppRuntimeToken(ctx context.Context, arg sqlc.SetAppRuntimeTokenParams) error
 }
 
-// EnsureAppRuntimeToken 确保实例拥有可写入 Hermes manifest 的 manager runtime API token。
-// 已存在 token 密文时优先解密复用，避免每次重启都让旧容器内 token 失效。
+// EnsureAppRuntimeToken 确保实例拥有 per-app control token（hash + 加密密文存 apps 表）。
+// 该 token 三用（k8s 迁移后统一为一把，spec-B B5）：
+//
+//  1. pod→manager bootstrap 拉配置（/internal/apps/{id}/bootstrap 鉴权）；
+//  2. pod→manager oc-kb 调 knowledge API（manifest.knowledge.app_token）；
+//  3. manager→pod oc-ops 调命令（k8s Secret 的 control-token 键，由 spec-A 注入）。
+//
+// 已存在密文时优先解密复用，避免重启使旧容器内 token 失效。物理列名沿用 runtime_token_*（不重命名）。
 func EnsureAppRuntimeToken(ctx context.Context, store AppRuntimeTokenStore, cipher *auth.Cipher, app sqlc.App) (sqlc.App, string, error) {
 	if store == nil {
 		return sqlc.App{}, "", fmt.Errorf("app runtime token store 未配置")

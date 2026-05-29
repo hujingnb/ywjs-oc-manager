@@ -69,7 +69,8 @@ type Querier interface {
 	EnrollRuntimeNodeUpdate(ctx context.Context, arg EnrollRuntimeNodeUpdateParams) error
 	GetActiveAppByOwner(ctx context.Context, ownerUserID string) (App, error)
 	GetApp(ctx context.Context, id string) (App, error)
-	// runtime API 只接受 token hash 解析出的当前 app，不允许请求方传入目标 app/dataset。
+	// 按 control token（per-app 三用：bootstrap / oc-kb / oc-ops）的 hash 反查当前 app；
+	// 不允许请求方传入目标 app/dataset，鉴权即定位。
 	GetAppByRuntimeTokenHash(ctx context.Context, runtimeTokenHash null.String) (App, error)
 	// 取实例及其绑定版本的 revision / image_id，供 version_synced 计算。
 	GetAppWithVersion(ctx context.Context, id string) (GetAppWithVersionRow, error)
@@ -192,7 +193,7 @@ type Querier interface {
 	// 管理员 PATCH /apps/:appId/restart-policy 写入；mode/max_per_window/window_seconds 校验在 service 层。
 	SetAppRestartPolicy(ctx context.Context, arg SetAppRestartPolicyParams) error
 	SetAppRuntimeSnapshot(ctx context.Context, arg SetAppRuntimeSnapshotParams) error
-	// 首次写入 Hermes 调 manager runtime API 的 app 级 token；并发重复初始化拿不到行，由 service 读取既有 token。
+	// 首次写入 per-app control token（三用：bootstrap / oc-kb / oc-ops）；并发重复初始化拿不到行，由 service 读取既有 token。
 	SetAppRuntimeToken(ctx context.Context, arg SetAppRuntimeTokenParams) error
 	SetAppStatus(ctx context.Context, arg SetAppStatusParams) error
 	// 切换实例绑定的助手版本，并把 applied_version_revision / applied_image_ref 清零。
