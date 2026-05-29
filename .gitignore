@@ -9,6 +9,7 @@ skills-lock.json
 .gstack
 data/
 .local/
+.k3d-data/
 tmp/
 .env
 web/node_modules/
