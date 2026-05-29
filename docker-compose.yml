@@ -8,23 +8,25 @@ x-host-gateway: &host-gateway
 
 services:
   # manager 本地 PostgreSQL，端口映射用于本机数据库工具调试。
-  manager-postgres:
-    image: postgres:17-alpine
-    container_name: manager-postgres
+  manager-mysql:
+    image: mysql:8.0
+    container_name: manager-mysql
     extra_hosts: *host-gateway
     environment:
-      POSTGRES_USER: ocm
-      POSTGRES_PASSWORD: ocm
-      POSTGRES_DB: ocm
+      MYSQL_ROOT_PASSWORD: ocm
+      MYSQL_DATABASE: ocm
+      MYSQL_USER: ocm
+      MYSQL_PASSWORD: ocm
       TZ: Asia/Shanghai
+    command: ["--character-set-server=utf8mb4", "--collation-server=utf8mb4_0900_ai_ci"]
     ports:
-      - "${MANAGER_POSTGRES_PORT:-15432}:5432"
+      - "${MANAGER_MYSQL_PORT:-13307}:3306"
     volumes:
-      - ./.local/data/manager-postgres:/var/lib/postgresql/data
+      - ./.local/data/manager-mysql:/var/lib/mysql
     healthcheck:
-      test: ["CMD-SHELL", "pg_isready -U ocm -d ocm"]
+      test: ["CMD-SHELL", "mysqladmin ping -h localhost -uroot -p$$MYSQL_ROOT_PASSWORD --silent"]
       interval: 5s
-      timeout: 3s
+      timeout: 5s
       retries: 20
 
   # manager 本地 Redis，使用固定开发密码，数据写入 ./.local。
@@ -286,7 +288,7 @@ services:
     ports:
       - "${MANAGER_API_PORT:-8080}:8080"
     depends_on:
-      manager-postgres:
+      manager-mysql:
         condition: service_healthy
       manager-redis:
         condition: service_healthy

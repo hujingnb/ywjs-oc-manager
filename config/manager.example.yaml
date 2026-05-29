@@ -23,11 +23,13 @@ app:
   data_root: "./data/manager"
 
 database:
-  # 业务 PostgreSQL 连接 DSN，形如
-  #   postgres://<user>:<pwd>@<host>:<port>/<db>?sslmode=disable
+  # 业务 MySQL 8 连接 DSN（go-sql-driver/mysql 形式），形如
+  #   mysql://<user>:<pwd>@tcp(<host>:<port>)/<db>?parseTime=true&loc=UTC&charset=utf8mb4&multiStatements=true
+  # store.Open 会剥离 mysql:// 前缀交给 sql.Open；cmd/migrate 的 golang-migrate mysql driver 需保留该前缀。
+  # parseTime=true 让 DATETIME 扫成 time.Time；loc=UTC 统一时区；multiStatements=true 供单基线多语句迁移。
   # 含明文密码，必须落到 gitignored 的 manager.yaml；example 文件保持脱敏占位。
   # 必填；为空启动 fail-fast。
-  url: "postgres://ocm:CHANGE_ME@manager-postgres:5432/ocm?sslmode=disable"
+  url: "mysql://ocm:CHANGE_ME@tcp(manager-mysql:3306)/ocm?parseTime=true&loc=UTC&charset=utf8mb4&multiStatements=true"
 
 redis:
   # Redis 连接地址，形如 "host:port"。必填；为空启动 fail-fast。

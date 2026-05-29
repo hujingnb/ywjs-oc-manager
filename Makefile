@@ -99,7 +99,7 @@ test: ## 在 manager-api 容器内跑 Go 单元测试 (go test ./...)
 
 integration-test: ## 在 manager-api 容器内跑集成测试 (go test -tags=integration ./...)
 	docker compose run --rm \
-		-e INTEGRATION_DATABASE_URL=$${INTEGRATION_DATABASE_URL:-postgres://ocm:ocm@manager-postgres:5432/ocm?sslmode=disable} \
+		-e INTEGRATION_DATABASE_URL=$${INTEGRATION_DATABASE_URL:-mysql://ocm:ocm@tcp(manager-mysql:3306)/ocm?parseTime=true&loc=UTC&multiStatements=true} \
 		-e INTEGRATION_REDIS_ADDR=$${INTEGRATION_REDIS_ADDR:-manager-redis:6379} \
 		manager-api go test -tags=integration ./...
 
