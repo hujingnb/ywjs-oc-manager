@@ -10,18 +10,20 @@
 // 操作：
 //   - 加载 manager YAML 并校验 database.url 已设置；
 //   - 用 auth.HashPassword(Argon2id) 生成 password_hash；
-//   - INSERT 一条 role=platform_admin / status=active 的用户行；
-//   - 用户名冲突时退出 0 不报错（幂等），便于重复执行。
+//   - INSERT 一条 role=platform_admin / status=active 的用户行（应用层生成 CHAR(36) 主键）；
+//   - 用户名冲突（命中平台管理员用户名唯一索引）时退出 0 不报错（幂等），便于重复执行。
 package main
 
 import (
 	"context"
+	"database/sql"
 	"fmt"
 	"log"
 	"os"
 	"strings"
 
-	"github.com/jackc/pgx/v5"
+	_ "github.com/go-sql-driver/mysql"
+	"github.com/google/uuid"
 
 	"oc-manager/internal/auth"
 	"oc-manager/internal/config"
@@ -46,35 +48,35 @@ func main() {
 	if err != nil {
 		log.Fatalf("加载配置失败: %v", err)
 	}
-	dsn := cfg.Database.URL
-	if dsn == "" {
+	if cfg.Database.URL == "" {
 		log.Fatalf("配置文件 %s 缺少 database.url", configPath)
 	}
+	// go-sql-driver 的 DSN 不接受 mysql:// scheme 前缀，剥离后再交给 sql.Open。
+	dsn := strings.TrimPrefix(cfg.Database.URL, "mysql://")
 	ctx := context.Background()
-	conn, err := pgx.Connect(ctx, dsn)
+	db, err := sql.Open("mysql", dsn)
 	if err != nil {
 		log.Fatalf("连接数据库失败: %v", err)
 	}
-	defer conn.Close(ctx)
+	defer db.Close()
 
 	hash, err := auth.HashPassword(password, auth.DefaultPasswordParams)
 	if err != nil {
 		log.Fatalf("生成 hash 失败: %v", err)
 	}
 
-	const insertSQL = `
-INSERT INTO users (username, password_hash, display_name, role, status)
-VALUES ($1, $2, $3, 'platform_admin', 'active')
-ON CONFLICT (username) WHERE org_id IS NULL DO NOTHING
-RETURNING id`
-	var id string
-	err = conn.QueryRow(ctx, insertSQL, username, hash, displayName).Scan(&id)
-	if err == pgx.ErrNoRows {
-		fmt.Printf("用户名 %s 已存在，跳过创建\n", username)
-		return
-	}
+	// 平台管理员 org_id 为 NULL，命中 uk_users_platform_username 生成列唯一索引时 INSERT IGNORE 静默跳过，
+	// 等价于原 PG 的 ON CONFLICT DO NOTHING（幂等）。MySQL :exec 无 RETURNING，用 RowsAffected 判断是否真正插入。
+	id := uuid.NewString()
+	const insertSQL = `INSERT IGNORE INTO users (id, username, password_hash, display_name, role, status)
+VALUES (?, ?, ?, ?, 'platform_admin', 'active')`
+	res, err := db.ExecContext(ctx, insertSQL, id, username, hash, displayName)
 	if err != nil {
 		log.Fatalf("写入用户失败: %v", err)
 	}
-	fmt.Printf("已创建 platform_admin: id=%s username=%s\n", strings.TrimSpace(id), username)
+	if n, _ := res.RowsAffected(); n == 0 {
+		fmt.Printf("用户名 %s 已存在，跳过创建\n", username)
+		return
+	}
+	fmt.Printf("已创建 platform_admin: id=%s username=%s\n", id, username)
 }
