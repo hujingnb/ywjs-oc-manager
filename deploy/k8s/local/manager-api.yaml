@@ -1,0 +1,54 @@
+apiVersion: v1
+kind: Service
+metadata:
+  name: manager-api
+  namespace: ocm
+spec:
+  selector: { app: manager-api }
+  ports:
+    - port: 8080
+      targetPort: 8080
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: manager-api
+  namespace: ocm
+spec:
+  replicas: 1
+  selector: { matchLabels: { app: manager-api } }
+  template:
+    metadata:
+      labels: { app: manager-api }
+    spec:
+      serviceAccountName: manager-api
+      containers:
+        - name: manager-api
+          image: k3d-ocm-registry.localhost:5000/oc-manager-api:dev
+          imagePullPolicy: Always
+          env:
+            - name: OCM_CONFIG
+              value: /etc/manager/config.yaml
+            - name: TZ
+              value: Asia/Shanghai
+          ports:
+            - containerPort: 8080
+          volumeMounts:
+            - name: config
+              mountPath: /etc/manager
+              readOnly: true
+          readinessProbe:
+            httpGet: { path: /healthz, port: 8080 }
+            initialDelaySeconds: 5
+            periodSeconds: 5
+            failureThreshold: 30
+          livenessProbe:
+            httpGet: { path: /healthz, port: 8080 }
+            initialDelaySeconds: 30
+            periodSeconds: 15
+      volumes:
+        - name: config
+          secret:
+            secretName: ocm-secrets
+            items:
+              - { key: manager.yaml, path: config.yaml }
