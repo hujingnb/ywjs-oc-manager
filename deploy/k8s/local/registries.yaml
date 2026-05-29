@@ -16,3 +16,10 @@ mirrors:
   docker.io:
     endpoint:
       - "https://docker.m.daocloud.io"
+  # 让节点 containerd 把 manifest/推送所用的 k3d-ocm-registry.localhost:5000 解析到
+  # k3d 本地 registry 容器（容器网络内名 ocm-registry）。k3d 自身只会为内部名
+  # ocm-registry:5000 注入 mirror，与 manifest 里的 .localhost 引用不一致，故在此补一条，
+  # 使「宿主 push」与「集群内 pull」用同一镜像引用。
+  "k3d-ocm-registry.localhost:5000":
+    endpoint:
+      - "http://ocm-registry:5000"
