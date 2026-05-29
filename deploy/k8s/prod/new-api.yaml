@@ -27,7 +27,8 @@ spec:
         - name: new-api
           # 上游 new-api 镜像（ywjs_public 未镜像）；生产如需可改指自有 registry
           image: calciumion/new-api:latest
-          args: ["--log-dir", "/app/logs"]
+          # 镜像 WORKDIR=/data 且无 /app；日志目录用 /data/logs（父目录存在）避免 mkdir 失败
+          args: ["--log-dir", "/data/logs"]
           env:
             # new-api 的 MySQL DSN 格式：user:pass@tcp(host:port)/dbname
             - name: SQL_DSN
