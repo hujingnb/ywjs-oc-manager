@@ -25,7 +25,8 @@ spec:
         - name: acr-pull
       containers:
         - name: new-api
-          image: crpi-nu3ibz4f07feyghi.cn-beijing.personal.cr.aliyuncs.com/ywjs_public/new-api:latest
+          # 上游 new-api 镜像（ywjs_public 未镜像）；生产如需可改指自有 registry
+          image: calciumion/new-api:latest
           args: ["--log-dir", "/app/logs"]
           env:
             # new-api 的 MySQL DSN 格式：user:pass@tcp(host:port)/dbname

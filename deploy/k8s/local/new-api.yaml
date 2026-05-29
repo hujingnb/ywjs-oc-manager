@@ -23,7 +23,8 @@ spec:
     spec:
       containers:
         - name: new-api
-          image: crpi-nu3ibz4f07feyghi.cn-beijing.personal.cr.aliyuncs.com/ywjs_public/new-api:latest
+          # ywjs_public 未镜像 new-api，走 docker.io 的 calciumion/new-api（同 compose，cluster 已配 daocloud 镜像源）
+          image: calciumion/new-api:latest
           args: ["--log-dir", "/app/logs"]
           env:
             # new-api 的 MySQL DSN 格式：user:pass@tcp(host:port)/dbname

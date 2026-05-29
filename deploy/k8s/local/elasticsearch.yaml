@@ -24,7 +24,8 @@ spec:
     spec:
       containers:
         - name: elasticsearch
-          image: crpi-nu3ibz4f07feyghi.cn-beijing.personal.cr.aliyuncs.com/ywjs_public/elasticsearch:8.11.3
+          # ywjs_public 未镜像 elasticsearch，走 docker.io（cluster 已配 daocloud 镜像源）
+          image: elasticsearch:8.11.3
           env:
             - name: node.name
               value: elasticsearch

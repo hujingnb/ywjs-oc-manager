@@ -76,7 +76,8 @@ spec:
         - name: acr-pull
       containers:
         - name: ragflow
-          image: crpi-nu3ibz4f07feyghi.cn-beijing.personal.cr.aliyuncs.com/ywjs_public/ragflow:v0.25.6
+          # 上游 ragflow 镜像（ywjs_public 未镜像）；生产如需可改指自有 registry
+          image: infiniflow/ragflow:v0.25.6
           args: ["--enable-adminserver"]
           env:
             - name: DOC_ENGINE
