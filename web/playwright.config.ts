@@ -3,7 +3,7 @@ import { defineConfig, devices } from '@playwright/test'
 // Playwright 配置：覆盖 v1.0 RC spec §5.4 Task 15 列出的 6 个核心场景。
 //
 // 运行：
-//   1. 启动后端：docker compose up -d
+//   1. 启动后端：make local-up（k3d 全栈，已取代 docker compose）
 //   2. 启动前端：npm run dev（webServer 段会自动跑）
 //   3. 装浏览器：npx playwright install chromium
 //   4. 跑用例：npm run test:e2e
@@ -20,7 +20,7 @@ export default defineConfig({
   // globalSetup：跑 make seed-e2e，把 fixture JSON 注入 process.env.OCM_E2E_FIXTURE。
   globalSetup: './tests/e2e/global-setup.ts',
   use: {
-    baseURL: process.env.PLAYWRIGHT_BASE_URL ?? 'http://localhost:5173',
+    baseURL: process.env.PLAYWRIGHT_BASE_URL ?? 'http://ocm.localhost',
     trace: 'retain-on-failure',
     screenshot: 'only-on-failure',
   },

@@ -3,7 +3,8 @@ import { dirname, resolve } from 'node:path'
 import { fileURLToPath } from 'node:url'
 
 // Playwright globalSetup：在所有 spec 跑之前先执行：
-// 1. 在仓库根跑 `make seed-e2e`，把 truncate 业务表 + 重新构造 fixture 一并完成；
+// 1. 在仓库根跑 `make seed-e2e`（k3d 下委托 kubectl exec manager-api -- seed-e2e），
+//    把 truncate 业务表 + 重新构造 fixture 一并完成；
 // 2. 解析 stdout 末行的 fixture JSON，写到 process.env.OCM_E2E_FIXTURE，
 //    供单条 spec 通过 fixtures.ts 的 loadE2EFixture() 读取；
 // 3. JSON 不合法直接抛错，避免 spec 拿到半截脏数据。
