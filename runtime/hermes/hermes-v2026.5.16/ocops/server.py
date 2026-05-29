@@ -18,9 +18,10 @@ from starlette.middleware.base import BaseHTTPMiddleware
 from starlette.responses import JSONResponse, Response
 from starlette.routing import Route
 
-from ocops import channel, cron, doctor, info
+from ocops import channel, cron, doctor, info, kanban
 from ocops.auth import token_matches
 from ocops.errors import OpsError, code_to_http
+from ocops.kanban import KanbanError
 
 # ---------------------------------------------------------------------------
 # cron body 字段白名单：防止未知键透传给 run_create / run_update，
@@ -234,6 +235,193 @@ async def cron_output(request):
         return _err(e)
 
 
+# ---------------------------------------------------------------------------
+# kanban 守卫辅助：stub 镜像抛 UNSUPPORTED（409）。
+# ---------------------------------------------------------------------------
+
+def _require_real_hermes() -> None:
+    """检查是否存在真实 hermes CLI；stub 镜像（has_real_hermes()→False）时抛 KanbanError。
+
+    每个需要守卫的 kanban handler 在执行业务逻辑前先调用此函数。
+    KanbanError 是 OpsError 子类，会被 handler 的 except OpsError 统一捕获，
+    code_to_http("UNSUPPORTED") → 409。
+    """
+    if not kanban.has_real_hermes():
+        raise KanbanError("UNSUPPORTED", "此镜像不含真实 hermes，kanban 操作不可用")
+
+
+# ---------------------------------------------------------------------------
+# kanban 端点（14 个）：按契约表实现，统一 try/except OpsError。
+# ---------------------------------------------------------------------------
+
+async def kanban_capabilities(request):
+    """GET /oc/kanban/capabilities：返回 kanban 能力自描述；不做 hermes 守卫，任何环境可用。"""
+    try:
+        return _ok(kanban.run_capabilities())
+    except OpsError as e:
+        return _err(e)
+
+
+async def kanban_boards(request):
+    """GET /oc/kanban/boards：列出所有 board；stub 镜像→ 409 UNSUPPORTED。"""
+    try:
+        _require_real_hermes()
+        return _ok(kanban.run_boards())
+    except OpsError as e:
+        return _err(e)
+
+
+async def kanban_list(request):
+    """GET /oc/kanban/tasks：列出任务；query 支持 board（默认 default）/status/assignee 过滤。"""
+    board = request.query_params.get("board", "default")
+    status = request.query_params.get("status") or None
+    assignee = request.query_params.get("assignee") or None
+    try:
+        _require_real_hermes()
+        return _ok(kanban.run_list(board, status=status, assignee=assignee))
+    except OpsError as e:
+        return _err(e)
+
+
+async def kanban_show(request):
+    """GET /oc/kanban/tasks/{id}：返回单个任务详情；board 来自 query（默认 default）。"""
+    board = request.query_params.get("board", "default")
+    task_id = request.path_params["id"]
+    try:
+        _require_real_hermes()
+        return _ok(kanban.run_show(board, task_id))
+    except OpsError as e:
+        return _err(e)
+
+
+async def kanban_runs(request):
+    """GET /oc/kanban/tasks/{id}/runs：返回任务历次执行记录；board 来自 query（默认 default）。"""
+    board = request.query_params.get("board", "default")
+    task_id = request.path_params["id"]
+    try:
+        _require_real_hermes()
+        return _ok(kanban.run_runs(board, task_id))
+    except OpsError as e:
+        return _err(e)
+
+
+async def kanban_stats(request):
+    """GET /oc/kanban/stats：返回 board 统计；board 来自 query（默认 default）。"""
+    board = request.query_params.get("board", "default")
+    try:
+        _require_real_hermes()
+        return _ok(kanban.run_stats(board))
+    except OpsError as e:
+        return _err(e)
+
+
+async def kanban_create(request):
+    """POST /oc/kanban/tasks：创建任务；body 字段直接透传给 run_create（board/title/assignee 必填）。
+
+    写字段（board/title/assignee/priority/body/skills/workspace/parent/max_retries）来自 JSON body；
+    多余字段静默忽略，必填项缺失由 run_create 内部校验。
+    """
+    body = await request.json()
+    try:
+        _require_real_hermes()
+        # 从 body 提取 run_create 认识的参数，防止未知键污染
+        kwargs = {k: body[k] for k in (
+            "board", "title", "assignee", "priority",
+            "body", "skills", "workspace", "parent", "max_retries",
+        ) if k in body}
+        return _ok(kanban.run_create(**kwargs))
+    except OpsError as e:
+        return _err(e)
+
+
+async def kanban_comment(request):
+    """POST /oc/kanban/tasks/{id}/comment：给任务添加评论；body 字段 board/body 来自 JSON body。"""
+    task_id = request.path_params["id"]
+    body = await request.json()
+    board = body.get("board", "default")
+    body_text = body.get("body", "")
+    try:
+        _require_real_hermes()
+        return _ok(kanban.run_comment(board, task_id, body_text))
+    except OpsError as e:
+        return _err(e)
+
+
+async def kanban_complete(request):
+    """POST /oc/kanban/tasks/{id}/complete：标记任务完成；board/result 来自 JSON body（result 可选）。"""
+    task_id = request.path_params["id"]
+    body = await request.json()
+    board = body.get("board", "default")
+    result = body.get("result") or None
+    try:
+        _require_real_hermes()
+        return _ok(kanban.run_complete(board, task_id, result=result))
+    except OpsError as e:
+        return _err(e)
+
+
+async def kanban_block(request):
+    """POST /oc/kanban/tasks/{id}/block：阻塞任务；board/reason 来自 JSON body。"""
+    task_id = request.path_params["id"]
+    body = await request.json()
+    board = body.get("board", "default")
+    reason = body.get("reason", "")
+    try:
+        _require_real_hermes()
+        return _ok(kanban.run_block(board, task_id, reason))
+    except OpsError as e:
+        return _err(e)
+
+
+async def kanban_unblock(request):
+    """POST /oc/kanban/tasks/{id}/unblock：解除阻塞；board 来自 JSON body（默认 default）。"""
+    task_id = request.path_params["id"]
+    body = await request.json()
+    board = body.get("board", "default")
+    try:
+        _require_real_hermes()
+        return _ok(kanban.run_unblock(board, task_id))
+    except OpsError as e:
+        return _err(e)
+
+
+async def kanban_archive(request):
+    """POST /oc/kanban/tasks/{id}/archive：归档任务；board 来自 JSON body（默认 default）。"""
+    task_id = request.path_params["id"]
+    body = await request.json()
+    board = body.get("board", "default")
+    try:
+        _require_real_hermes()
+        return _ok(kanban.run_archive(board, task_id))
+    except OpsError as e:
+        return _err(e)
+
+
+async def kanban_reassign(request):
+    """POST /oc/kanban/tasks/{id}/reassign：重新分配任务；board/to 来自 JSON body。"""
+    task_id = request.path_params["id"]
+    body = await request.json()
+    board = body.get("board", "default")
+    to = body.get("to", "")
+    try:
+        _require_real_hermes()
+        return _ok(kanban.run_reassign(board, task_id, to))
+    except OpsError as e:
+        return _err(e)
+
+
+async def kanban_reclaim(request):
+    """POST /oc/kanban/tasks/{id}/reclaim：撤销任务认领；board 来自 JSON body（默认 default）。"""
+    task_id = request.path_params["id"]
+    body = await request.json()
+    board = body.get("board", "default")
+    try:
+        _require_real_hermes()
+        return _ok(kanban.run_reclaim(board, task_id))
+    except OpsError as e:
+        return _err(e)
+
+
 # 路由表：按 REST 语义定义 HTTP 方法，无方法限制的路由接受所有方法。
 # kanban / login 路由在 Task 10/11 追加。
 routes = [
@@ -254,6 +442,21 @@ routes = [
     Route("/oc/cron/jobs/{id}", cron_delete, methods=["DELETE"]),
     Route("/oc/cron/jobs/{id}/history", cron_history),
     Route("/oc/cron/jobs/{id}/output", cron_output),
+    # kanban 端点（Task 10）：非流式 REST；watch SSE 在 Task 11 追加。
+    Route("/oc/kanban/capabilities", kanban_capabilities),
+    Route("/oc/kanban/boards", kanban_boards),
+    Route("/oc/kanban/tasks", kanban_list, methods=["GET"]),
+    Route("/oc/kanban/tasks", kanban_create, methods=["POST"]),
+    Route("/oc/kanban/tasks/{id}", kanban_show, methods=["GET"]),
+    Route("/oc/kanban/tasks/{id}/runs", kanban_runs),
+    Route("/oc/kanban/stats", kanban_stats),
+    Route("/oc/kanban/tasks/{id}/comment", kanban_comment, methods=["POST"]),
+    Route("/oc/kanban/tasks/{id}/complete", kanban_complete, methods=["POST"]),
+    Route("/oc/kanban/tasks/{id}/block", kanban_block, methods=["POST"]),
+    Route("/oc/kanban/tasks/{id}/unblock", kanban_unblock, methods=["POST"]),
+    Route("/oc/kanban/tasks/{id}/archive", kanban_archive, methods=["POST"]),
+    Route("/oc/kanban/tasks/{id}/reassign", kanban_reassign, methods=["POST"]),
+    Route("/oc/kanban/tasks/{id}/reclaim", kanban_reclaim, methods=["POST"]),
 ]
 
 # Starlette app：路由 + AuthMiddleware 中间件栈。
