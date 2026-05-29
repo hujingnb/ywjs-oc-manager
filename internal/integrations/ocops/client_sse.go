@@ -118,7 +118,9 @@ func (c *Client) openStream(ctx context.Context, ep Endpoint, method, path strin
 	// 显式声明期望 SSE，便于服务端选择正确的响应内容类型
 	req.Header.Set("Accept", "text/event-stream")
 
-	resp, err := c.httpClient.Do(req)
+	// 用无 Timeout 的 streamHTTP：普通 httpClient 的 Timeout 会中断流式 Body 读取，
+	// 掐断 kanban watch / 微信扫码长连接；流的截止由 ctx 控制。
+	resp, err := c.streamHTTP.Do(req)
 	if err != nil {
 		// 网络级错误与 DoJSON 保持一致归入 ErrCLI（上游不可达）
 		return nil, ErrCLI

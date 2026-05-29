@@ -179,3 +179,38 @@ func requireClosed[T any](t *testing.T, ch <-chan T) {
 		require.FailNow(t, "等待 channel 关闭超时")
 	}
 }
+
+// TestWatchKanbanRPCTimeoutDoesNotKillStream 回归：RPC 用的 http.Client.Timeout
+// 不能掐断 SSE 长连接（streamHTTP 无 Timeout，流由 ctx 控制）。
+// 构造 RPC 超时仅 100ms 的 Client，服务端在首帧后 sleep 200ms（> RPC 超时）再发第二帧；
+// 若 SSE 错用了带 Timeout 的 client，第二帧到达前连接就会被 Timeout 中断、漏掉事件。
+func TestWatchKanbanRPCTimeoutDoesNotKillStream(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "text/event-stream")
+		w.WriteHeader(http.StatusOK)
+		flusher := w.(http.Flusher)
+		// 首帧立即推送
+		writeSSE(w, flusher, `{"task_id":"t1","kind":"created","created_at":100}`)
+		// 故意停顿超过 RPC 超时（100ms）后再推第二帧
+		time.Sleep(200 * time.Millisecond)
+		writeSSE(w, flusher, `{"task_id":"t2","kind":"status_changed","created_at":200}`)
+	}))
+	defer srv.Close()
+
+	ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
+	defer cancel()
+
+	// RPC 超时仅 100ms：用于 DoJSON 普通请求，但绝不能影响 SSE 流
+	c := ocops.NewClient(&http.Client{Timeout: 100 * time.Millisecond})
+	ep := ocops.Endpoint{BaseURL: srv.URL, Token: "test-token"}
+	ch, err := c.WatchKanban(ctx, ep, "b1")
+	require.NoError(t, err)
+
+	// 第一帧应正常收到
+	ev1 := recvEvent(t, ch)
+	assert.Equal(t, "t1", ev1.TaskID)
+	// 关键断言：200ms 停顿（超过 RPC 100ms 超时）后第二帧仍能到达，证明流不受 RPC 超时影响
+	ev2 := recvEvent(t, ch)
+	assert.Equal(t, "t2", ev2.TaskID)
+	assert.Equal(t, "status_changed", ev2.Kind)
+}

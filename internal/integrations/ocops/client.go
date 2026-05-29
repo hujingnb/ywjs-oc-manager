@@ -26,16 +26,25 @@ type Endpoint struct {
 // Client 是 oc-ops 的类型化 HTTP 客户端。
 // 通过 NewClient 构造，支持注入自定义 http.Client（便于测试与超时配置）。
 type Client struct {
-	// httpClient 是底层 HTTP 执行器；nil 时使用 http.DefaultClient。
+	// httpClient 执行普通 RPC（DoJSON）；可带 Timeout 约束整次请求-响应。
 	httpClient *http.Client
+	// streamHTTP 专用于 SSE 长连接（openStream）。**不能带 Timeout**：
+	// http.Client.Timeout 会一并中断 Response.Body 的读取，30s 后会掐断
+	// kanban watch / 微信扫码（qr_login 超时 480s）等长连接流；流的生命周期
+	// 由调用方传入的 ctx 控制。复用 httpClient 的 Transport 以共享连接池/TLS 配置。
+	streamHTTP *http.Client
 }
 
 // NewClient 构造客户端；h 为 nil 时使用 http.DefaultClient。
+// SSE 用的 streamHTTP 复用 h 的 Transport 但去掉 Timeout（见 Client.streamHTTP 说明）。
 func NewClient(h *http.Client) *Client {
 	if h == nil {
 		h = http.DefaultClient
 	}
-	return &Client{httpClient: h}
+	return &Client{
+		httpClient: h,
+		streamHTTP: &http.Client{Transport: h.Transport},
+	}
 }
 
 // DoJSON 发一次 JSON 请求并处理响应：
