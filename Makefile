@@ -119,6 +119,9 @@ local-down: ## 删除 k3d 集群（宿主 .k3d-data 数据保留，下次 up 复
 	@echo "ℹ️  集群已删除；数据仍在 $(K3D_DATA_DIR)（如需清空跑 make local-reset）"
 
 local-reset: local-down ## 删集群并清空 .k3d-data，干净重建（不自动 up）
+	# .k3d-data 内是集群内 root 进程写入的 PVC 数据（如 redis appendonly），宿主用户
+	# 无权直接 rm；先用一次性 root 容器清空目录内容（镜像走可达的 ACR alpine），再删空目录。
+	-docker run --rm -v $(K3D_DATA_DIR):/data crpi-nu3ibz4f07feyghi.cn-beijing.personal.cr.aliyuncs.com/ywjs_public/alpine:3.22 sh -c 'rm -rf /data/* /data/.[!.]* 2>/dev/null'
 	rm -rf $(K3D_DATA_DIR)
 	@echo "✅ 已清空 $(K3D_DATA_DIR)；跑 make local-up 干净重建"
 
