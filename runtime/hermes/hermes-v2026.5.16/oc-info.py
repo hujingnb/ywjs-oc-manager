@@ -4,27 +4,28 @@
 命名：oc- 前缀取自项目名 oc-manager，标识注入 hermes runtime 镜像、供容器内调用的运维 CLI
 （区别于 hermes 上游自带命令）；后缀 info = 镜像身份信息。
 
-读取 build 阶段写入的 /etc/oc-image.json。
+薄 shim：读取逻辑已下沉至 ocops.info.collect_info，本文件仅负责 stdout 输出与退出码。
 """
 
 from __future__ import annotations
 
-import json
-import os
 import sys
 from pathlib import Path
 
 
 def main() -> int:
-    info_path = Path(os.environ.get("OC_INFO_FILE", "/etc/oc-image.json"))
+    # CLI shim：复用 ocops.info 核心逻辑，保留 stdout 单行 JSON 的对外命令契约。
+    import json
+    sys.path.insert(0, "/usr/local/lib")  # 镜像内 ocops 装在 /usr/local/lib/ocops
+    sys.path.insert(0, str(Path(__file__).resolve().parent))  # 本地自检 fallback
+    from ocops.info import collect_info
+    from ocops.errors import OpsError
     try:
-        raw = json.loads(info_path.read_text())
-    except (OSError, json.JSONDecodeError) as e:
-        sys.stderr.write(json.dumps({"phase": "oc-info", "level": "error", "msg": str(e)}) + "\n")
+        sys.stdout.write(json.dumps(collect_info(), ensure_ascii=False) + "\n")
+        return 0
+    except OpsError as e:
+        sys.stderr.write(json.dumps({"phase": "oc-info", "level": "error", "msg": e.message}) + "\n")
         return 1
-    raw["oc_entrypoint_version"] = "1"
-    sys.stdout.write(json.dumps(raw, ensure_ascii=False) + "\n")
-    return 0
 
 
 if __name__ == "__main__":
