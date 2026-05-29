@@ -18,7 +18,7 @@
 | 服务 | 本地地址 | 账号 | 密码 |
 |---|---|---|---|
 | manager 后台 | http://ocm.localhost | `admin`（组织标识留空，即平台管理员）| `admin123` |
-| new-api 后台 | http://newapi.localhost | `admin` | `admin123!` |
+| new-api 后台 | http://newapi.localhost | `admin` | `admin123` |
 | RAGFlow 控制台 | http://ragflow.localhost | `admin@ragflow.io`（超级管理员）| `admin` |
 
 - RAGFlow HTTP API 端口 9380、Admin API 端口 9381；控制台默认禁用注册（`RAGFLOW_REGISTER_ENABLED=0`），需新建账号时临时打开再关闭。
