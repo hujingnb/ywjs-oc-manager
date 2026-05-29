@@ -1,4 +1,4 @@
-.PHONY: test vet build sqlc-generate migrate-up migrate-down check-compose logs web-test web-typecheck web-build build-hermes-runtime hermes-inject-contract debug-ollama debug-newapi newapi-probe seed-e2e smoke-v102 openapi-gen web-types-gen openapi-check ssh-manager ssh-agent1 ssh-newapi logs-api logs-agent1 psql-manager redis-manager bh-logs local-up local-down local-reset local-build local-migrate local-seed local-seed-e2e local-mc-init local-status local-logs local-shell cluster-create .guard-k3d-hosts
+.PHONY: test vet build sqlc-generate migrate-up migrate-down logs web-test web-typecheck web-build build-hermes-runtime hermes-inject-contract debug-ollama debug-newapi newapi-probe seed-e2e smoke-v102 openapi-gen web-types-gen openapi-check ssh-manager ssh-agent1 ssh-newapi logs-api logs-agent1 psql-manager redis-manager bh-logs local-up local-down local-reset local-build local-migrate local-seed local-seed-e2e local-mc-init local-status local-logs local-shell cluster-create .guard-k3d-hosts
 
 # 加载 .env（-include 在文件不存在时静默跳过，不报错）。
 # docker compose 会自动读取 .env，Makefile 显式 include 是为了让 SSH 等 target 也能访问其中变量。
@@ -189,40 +189,39 @@ local-shell: ## 进入指定服务容器（用法：make local-shell svc=manager
 
 ##@ 测试 / 静态检查
 
-test: ## 在 manager-api 容器内跑 Go 单元测试 (go test ./...)
-	docker compose run --rm --no-deps manager-api go test ./...
+test: ## 跑 Go 单元测试 (go test ./...)
+	go test ./...
 
-integration-test: ## 在 manager-api 容器内跑集成测试 (go test -tags=integration ./...)
-	docker compose run --rm \
-		-e INTEGRATION_DATABASE_URL=$${INTEGRATION_DATABASE_URL:-mysql://ocm:ocm@tcp(manager-mysql:3306)/ocm?parseTime=true&loc=UTC&multiStatements=true} \
-		-e INTEGRATION_REDIS_ADDR=$${INTEGRATION_REDIS_ADDR:-manager-redis:6379} \
-		manager-api go test -tags=integration ./...
+integration-test: ## 跑集成测试（需本地 k3d MySQL/Redis 经端口转发或外部实例，见 docs/local-development.md）
+	INTEGRATION_DATABASE_URL="$${INTEGRATION_DATABASE_URL:?需指向可达的 MySQL，如经 kubectl port-forward}" \
+	INTEGRATION_REDIS_ADDR="$${INTEGRATION_REDIS_ADDR:?需指向可达的 Redis}" \
+	go test -tags=integration ./...
 
-vet: ## 在 manager-api 容器内跑 go vet ./...
-	docker compose run --rm --no-deps manager-api go vet ./...
+vet: ## 跑 go vet ./...
+	go vet ./...
 
 ##@ 构建
 
-build: ## 在 manager-api 容器内编译 server / migrate / oc-runtime-agent 三个二进制到 tmp/build/
-	docker compose run --rm --no-deps manager-api go build -o ./tmp/build/server ./cmd/server
-	docker compose run --rm --no-deps manager-api go build -o ./tmp/build/migrate ./cmd/migrate
-	docker compose run --rm --no-deps manager-api go build -o ./tmp/build/oc-runtime-agent ./runtime/agent
+build: ## 编译 server / migrate / oc-runtime-agent 到 tmp/build/
+	go build -o ./tmp/build/server ./cmd/server
+	go build -o ./tmp/build/migrate ./cmd/migrate
+	go build -o ./tmp/build/oc-runtime-agent ./runtime/agent
 
 ##@ 代码生成 (sqlc / OpenAPI / 前端类型)
 
 sqlc-generate: ## 跑 sqlc generate, 覆盖 internal/store 生成代码
-	docker compose run --rm --no-deps manager-api go run github.com/sqlc-dev/sqlc/cmd/sqlc@v1.30.0 generate
+	go run github.com/sqlc-dev/sqlc/cmd/sqlc@v1.30.0 generate
 
 ##@ 前端开发
 
-web-test: ## 在 manager-web 容器内跑 vitest 单测
-	docker compose run --rm --no-deps manager-web sh -c "npm install && npm test -- --run"
+web-test: ## 在 web/ 跑 vitest 单测
+	cd web && npm install && npm test -- --run
 
-web-typecheck: ## 在 manager-web 容器内跑 vue-tsc --noEmit
-	docker compose run --rm --no-deps manager-web sh -c "npm install && npm run typecheck"
+web-typecheck: ## 在 web/ 跑 vue-tsc --noEmit
+	cd web && npm install && npm run typecheck
 
-web-build: ## 在 manager-web 容器内跑 vite build
-	docker compose run --rm --no-deps manager-web sh -c "npm install && npm run build"
+web-build: ## 在 web/ 跑 vite build
+	cd web && npm install && npm run build
 
 ##@ Hermes runtime 镜像
 
@@ -383,23 +382,20 @@ newapi-probe: ## 跑 newapi-probe.sh, 用最小请求探测 new-api 渠道
 
 ##@ 数据库迁移
 
-migrate-up: ## 在 manager-api 容器内对生产数据库执行 up 迁移
-	docker compose run --rm manager-api go run ./cmd/migrate up
+migrate-up: ## 对本地 k3d 数据库执行 up 迁移（= local-migrate）
+	$(MAKE) local-migrate
 
-migrate-down: ## 在 manager-api 容器内回滚最近一次迁移
-	docker compose run --rm manager-api go run ./cmd/migrate down
+migrate-down: ## 回滚本地 k3d 最近一次迁移（= local-migrate DOWN=1）
+	$(MAKE) local-migrate DOWN=1
 
 ##@ 部署 / 运维 / Smoke
 
-check-compose: ## 跑 check-compose-bind-mounts.sh, 校验 compose 挂载是否合法
-	./scripts/check-compose-bind-mounts.sh
-
-logs: ## 持续 tail 所有 compose 服务日志 (最近 200 行)
-	docker compose logs
+logs: ## 提示用 local-logs（compose 已移除）
+	@echo "compose 已移除，请用：make local-logs svc=<服务名>（如 manager-api）"
 # seed-e2e：在 manager-api 容器里跑 cmd/seed-e2e，OCM_E2E=1 守门。
 # 会 TRUNCATE e2e 业务表后重建 fixture，stdout 末行是 fixture JSON 供 Playwright 解析。
-seed-e2e: ## 在 manager-api 容器内注入 Playwright e2e fixture (OCM_E2E=1 守门)
-	docker compose run --rm -e OCM_E2E=1 manager-api go run ./cmd/seed-e2e
+seed-e2e: ## 注入 Playwright e2e fixture（= local-seed-e2e）
+	$(MAKE) local-seed-e2e
 
 smoke-v102:  ## 跑 v1.0.2 干净环境 smoke（前置：阶段 0 完成）
 	@bash scripts/v102-smoke.sh
