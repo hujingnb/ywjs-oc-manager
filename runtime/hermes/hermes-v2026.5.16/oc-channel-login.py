@@ -17,7 +17,6 @@ from __future__ import annotations
 
 import argparse
 import asyncio
-import contextlib
 import json
 import os
 import sys
@@ -39,50 +38,45 @@ def main() -> int:
     p = argparse.ArgumentParser()
     p.add_argument("--channel", required=True)
     args = p.parse_args()
-
-    if args.channel == "weixin":
-        return asyncio.run(_weixin_login())
-    # 未知 channel：以 failed 状态返回，避免 manager 端阻塞。
-    sys.stdout.write(json.dumps({"status": "failed", "reason": f"unknown channel: {args.channel}"}) + "\n")
-    return 1
+    return asyncio.run(_run(args.channel))
 
 
-async def _weixin_login() -> int:
-    """微信扫码登录。
+async def _run(channel: str) -> int:
+    """消费 ocops.channel.channel_login 事件流，落回原 CLI 对外协议。
 
-    调用 hermes 上游 gateway.platforms.weixin.qr_login，传入 /opt/data
-    作为凭证落盘根。qr_login 内部会：
-    - print 二维码 URL（同步阶段）到 stdout —— 我们 redirect 到 stderr
-    - 进入 polling loop 等用户扫码 + confirm（可达 8 分钟）
-    - 成功返回 cred dict + 自动把账号目录写到 /opt/data/weixin/accounts/
-    - 失败/超时返回 None
-
-    新方案下 manager 不再解析 cred，凭证完全由 hermes 自管；本脚本 stdout
-    只输出最终态 {"status":"bound"|"failed"|"timeout"}。
+    核心登录逻辑已下沉到 ocops.channel.channel_login（async generator），
+    本 shim 只负责把事件流翻译成原命令的输出契约（保持逐字不变）：
+    - qrcode 事件 → 把 url 行写 stderr（沿用原 redirect_stdout(sys.stderr) 时代
+      的「二维码 URL 打到 stderr」协议，manager 端按行抓取）
+    - bound 终态  → stdout 单行 {"status":"bound"}，退出 0
+    - timeout 终态→ stdout 单行 {"status":"timeout"}，退出 1
+    - failed 终态 → stdout 单行 {"status":"failed","reason":...}，退出 1
     """
-    try:
-        # 上游 SDK 仅在 hermes 容器内安装；本地开发/CI 环境通常不可用。
-        from gateway.platforms.weixin import qr_login
-    except ImportError as e:
-        # 本地开发/测试环境没装 hermes 上游 SDK；退化为 failed 并给出原因。
-        sys.stdout.write(json.dumps({"status": "failed", "reason": f"hermes SDK not available: {e}"}) + "\n")
-        return 1
+    from ocops.channel import channel_login
 
-    # qr_login 内部 print 二维码 URL 到 stdout，redirect 到 stderr 让 manager
-    # 可以流式获取。stderr 文本不是 JSON 包装的（依赖上游格式），manager 端
-    # 仍可按行抓取并转发给前端。
-    with contextlib.redirect_stdout(sys.stderr):
-        cred = await qr_login("/opt/data", bot_type="3", timeout_seconds=480)
+    async for event in channel_login(channel):
+        kind = event.get("event")
+        if kind == "qrcode":
+            # 二维码 URL 写 stderr（manager 端流式抓取，转发给前端展示）。
+            sys.stderr.write(event["url"] + "\n")
+            sys.stderr.flush()
+        elif kind == "bound":
+            # 成功终态：凭证已由 qr_login 落盘到 /opt/data/weixin/accounts/。
+            sys.stdout.write(json.dumps({"status": "bound"}) + "\n")
+            return 0
+        elif kind == "timeout":
+            # 失败/超时终态：统一标记 timeout，manager 端按非 bound 处理。
+            sys.stdout.write(json.dumps({"status": "timeout"}) + "\n")
+            return 1
+        elif kind == "failed":
+            # 失败终态：附带原因（未知 channel / SDK 不可用 / 登录异常）。
+            sys.stdout.write(json.dumps({"status": "failed", "reason": event.get("reason", "")}) + "\n")
+            return 1
 
-    if not cred:
-        # 上游返回 None 表示失败或超时；当前协议统一标记为 timeout，
-        # manager 端按非 bound 处理。
-        sys.stdout.write(json.dumps({"status": "timeout"}) + "\n")
-        return 1
-
-    # 成功：凭证已由 qr_login 自动落盘到 /opt/data/weixin/accounts/。
-    sys.stdout.write(json.dumps({"status": "bound"}) + "\n")
-    return 0
+    # 事件流意外结束（理论上不会发生：generator 必以终态收尾）；
+    # 兜底为 failed，避免 manager 端因无 stdout 输出而阻塞。
+    sys.stdout.write(json.dumps({"status": "failed", "reason": "no terminal event"}) + "\n")
+    return 1
 
 
 if __name__ == "__main__":
