@@ -18,6 +18,8 @@ skills-lock.json
 
 # 本地 dev 数据 / 编译缓存 / 临时输出
 .local
+# k3d 本地集群 PVC 数据（含集群内 root 写入的文件，构建上下文无权读取且与镜像无关）
+.k3d-data
 tmp
 data
 agent
