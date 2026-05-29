@@ -20,7 +20,7 @@ type ObjectStore interface {
 	PresignGet(ctx context.Context, key string, ttl time.Duration) (string, error)
 	// ObjectExists 判断对象是否存在（bootstrap 决定是否给出 restore URL）。
 	ObjectExists(ctx context.Context, key string) (bool, error)
-	// MovePrefix 把 srcPrefix 下所有对象复制到 dstPrefix 再删除源（删除归档用）。
+	// MovePrefix 把 srcPrefix 下所有对象复制到 dstPrefix 再删除源（移至归档前缀用（删除前归档））。
 	MovePrefix(ctx context.Context, srcPrefix, dstPrefix string) error
 	// DeletePrefix 删除 prefix 下所有对象。
 	DeletePrefix(ctx context.Context, prefix string) error

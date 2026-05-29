@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"net/url"
 	"time"
 
 	"github.com/aws/aws-sdk-go-v2/aws"
@@ -20,7 +21,7 @@ type S3Config struct {
 	Region          string // 区域，MinIO 任意填（如 us-east-1）
 	Bucket          string // app 数据 bucket
 	AccessKeyID     string // manager 持有的长期凭证（用于 Put/Presign/STS 调用方）
-	SecretAccessKey string
+	SecretAccessKey string // 与 AccessKeyID 配对的长期密钥
 	UsePathStyle    bool // MinIO 必须 path-style 寻址
 	// STSRoleARN 是 AssumeRole 的目标 role ARN；MinIO 下可为占位（策略由内联 policy 决定）。
 	STSRoleARN string
@@ -45,7 +46,6 @@ func NewS3ObjectStore(cfg S3Config) *S3ObjectStore {
 }
 
 // 编译时断言：S3ObjectStore 实现 ObjectStore 接口。
-// MovePrefix/DeletePrefix 留待 Task 3 实现，此处先用 panic 占位。
 var _ ObjectStore = (*S3ObjectStore)(nil)
 
 // PutObject 上传对象；size>=0 时填 ContentLength，<0 时交由 SDK 处理（会缓冲）。
@@ -98,14 +98,85 @@ func (s *S3ObjectStore) ObjectExists(ctx context.Context, key string) (bool, err
 	return false, fmt.Errorf("storage: HeadObject %s 失败: %w", key, err)
 }
 
-// MovePrefix 把 srcPrefix 下所有对象复制到 dstPrefix 再删除源（删除归档用）。
-// 留待 Task 3 实现。
-func (s *S3ObjectStore) MovePrefix(_ context.Context, _, _ string) error {
-	panic("storage: MovePrefix 未实现，留待 Task 3")
+// listKeys 列出 prefix 下全部对象 key（分页直到取完）。
+func (s *S3ObjectStore) listKeys(ctx context.Context, prefix string) ([]string, error) {
+	var keys []string
+	var token *string
+	for {
+		out, err := s.client.ListObjectsV2(ctx, &s3.ListObjectsV2Input{
+			Bucket:            aws.String(s.bucket),
+			Prefix:            aws.String(prefix),
+			ContinuationToken: token,
+		})
+		if err != nil {
+			return nil, fmt.Errorf("storage: 列举 %s 失败: %w", prefix, err)
+		}
+		for _, obj := range out.Contents {
+			keys = append(keys, aws.ToString(obj.Key))
+		}
+		if aws.ToBool(out.IsTruncated) && out.NextContinuationToken != nil {
+			token = out.NextContinuationToken
+			continue
+		}
+		break
+	}
+	return keys, nil
 }
 
-// DeletePrefix 删除 prefix 下所有对象。
-// 留待 Task 3 实现。
-func (s *S3ObjectStore) DeletePrefix(_ context.Context, _ string) error {
-	panic("storage: DeletePrefix 未实现，留待 Task 3")
+// DeletePrefix 删除 prefix 下全部对象；空前缀视为非法（防误删整桶）。
+func (s *S3ObjectStore) DeletePrefix(ctx context.Context, prefix string) error {
+	if prefix == "" {
+		return fmt.Errorf("storage: DeletePrefix 拒绝空前缀")
+	}
+	keys, err := s.listKeys(ctx, prefix)
+	if err != nil {
+		return err
+	}
+	// excludePrefix 为空表示不跳过任何对象，直接全量删除
+	return s.deleteKeysExcluding(ctx, keys, "")
+}
+
+// MovePrefix 把 srcPrefix 下对象逐个 CopyObject 到 dstPrefix 对应相对路径，再删除源。
+// 用于删除 app 前把数据移入归档前缀（apps/<id>/* → apps/<id>/archive/*）。空前缀视为非法。
+func (s *S3ObjectStore) MovePrefix(ctx context.Context, srcPrefix, dstPrefix string) error {
+	if srcPrefix == "" || dstPrefix == "" {
+		return fmt.Errorf("storage: MovePrefix 拒绝空前缀")
+	}
+	keys, err := s.listKeys(ctx, srcPrefix)
+	if err != nil {
+		return err
+	}
+	for _, k := range keys {
+		rel := k[len(srcPrefix):] // 去掉源前缀，保留相对路径
+		dstKey := dstPrefix + rel
+		// CopySource 需 URL 编码（key 可能含空格/非 ASCII 的用户文件名），保留 / 分隔符
+		copySource := (&url.URL{Path: s.bucket + "/" + k}).EscapedPath()
+		if _, err := s.client.CopyObject(ctx, &s3.CopyObjectInput{
+			Bucket:     aws.String(s.bucket),
+			CopySource: aws.String(copySource),
+			Key:        aws.String(dstKey),
+		}); err != nil {
+			return fmt.Errorf("storage: 复制 %s→%s 失败: %w", k, dstKey, err)
+		}
+	}
+	// 复制完成后删源；复用 copy 阶段取到的 keys，避免二次 list（消除 TOCTOU 窗口）。
+	// 若 dstPrefix 是 srcPrefix 的子目录（归档场景），删源时排除已归档目标
+	return s.deleteKeysExcluding(ctx, keys, dstPrefix)
+}
+
+// deleteKeysExcluding 删除传入的 keys，但跳过落在 excludePrefix 内的（避免删掉刚归档的目标）。
+// excludePrefix 为空时不跳过任何对象。直接复用调用方已取到的 keys，不再二次 list。
+func (s *S3ObjectStore) deleteKeysExcluding(ctx context.Context, keys []string, excludePrefix string) error {
+	for _, k := range keys {
+		if excludePrefix != "" && len(k) >= len(excludePrefix) && k[:len(excludePrefix)] == excludePrefix {
+			continue // 跳过归档目标自身
+		}
+		if _, err := s.client.DeleteObject(ctx, &s3.DeleteObjectInput{
+			Bucket: aws.String(s.bucket),
+			Key:    aws.String(k),
+		}); err != nil {
+			return fmt.Errorf("storage: 删除对象 %s 失败: %w", k, err)
+		}
+	}
+	return nil
 }
