@@ -66,26 +66,7 @@ func WriteAppInput(ctx context.Context, w AppInputWriter, appID string, in AppIn
 		return fmt.Errorf("upload platform rules: %w", err)
 	}
 
-	m := Manifest{
-		App: ManifestApp{ID: in.AppID, Name: in.AppName, Model: in.Model},
-		Credentials: ManifestCredentials{
-			OpenAI: ManifestOpenAI{APIKey: in.OpenAIAPIKey, BaseURL: in.OpenAIBaseURL},
-		},
-		Resources: ManifestResources{
-			Persona: "resources/persona.md",
-			Rules: ManifestRules{
-				Platform: "resources/platform-rules.md",
-			},
-			Skills: in.SkillRelPaths,
-		},
-		Routing: in.Routing,
-	}
-	if in.KnowledgeRuntimeBaseURL != "" && in.KnowledgeAppToken != "" {
-		m.Knowledge = ManifestKnowledge{
-			RuntimeBaseURL: in.KnowledgeRuntimeBaseURL,
-			AppToken:       in.KnowledgeAppToken,
-		}
-	}
+	m := BuildManifest(in)
 	body, err := MarshalManifestYAML(m)
 	if err != nil {
 		return fmt.Errorf("marshal manifest: %w", err)
