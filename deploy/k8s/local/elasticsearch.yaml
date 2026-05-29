@@ -55,8 +55,10 @@ spec:
             - containerPort: 9200
           volumeMounts:
             - { name: data, mountPath: /usr/share/elasticsearch/data }
+          # security 开启时 ES 对 / 返回 401，无认证 httpGet 探针会永远失败；
+          # 改用 tcpSocket 探针（HTTP 端口可连即视为就绪，ragflow 用凭证连接）。
           readinessProbe:
-            httpGet: { path: /, port: 9200 }
+            tcpSocket: { port: 9200 }
             initialDelaySeconds: 20
             periodSeconds: 10
             failureThreshold: 30
