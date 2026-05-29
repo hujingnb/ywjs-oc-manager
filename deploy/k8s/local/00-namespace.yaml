@@ -1,0 +1,17 @@
+# 控制面与基础设施 namespace：manager-api/web、new-api、ragflow、
+# MySQL/Redis/ES/MinIO 全部部署于此。
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: ocm
+  labels:
+    app.kubernetes.io/part-of: oc-manager
+---
+# app pod（Hermes 实例）所在 namespace。本 spec 不在此部署任何对象，
+# 仅预建给 manager RBAC 授权（manager-rbac.yaml）与 spec-A/B 运行时渲染使用。
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: oc-apps
+  labels:
+    app.kubernetes.io/part-of: oc-manager
