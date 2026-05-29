@@ -7,7 +7,6 @@ package sqlc
 
 import (
 	"context"
-	"encoding/json"
 	"time"
 
 	null "github.com/guregu/null/v5"
@@ -33,18 +32,18 @@ INSERT INTO audit_logs (
 `
 
 type CreateAuditLogParams struct {
-	ID            string          `db:"id" json:"id"`
-	ActorID       null.String     `db:"actor_id" json:"actor_id"`
-	ActorRole     string          `db:"actor_role" json:"actor_role"`
-	OrgID         null.String     `db:"org_id" json:"org_id"`
-	TargetType    string          `db:"target_type" json:"target_type"`
-	TargetID      string          `db:"target_id" json:"target_id"`
-	Action        string          `db:"action" json:"action"`
-	Result        string          `db:"result" json:"result"`
-	ErrorMessage  null.String     `db:"error_message" json:"error_message"`
-	IpAddress     null.String     `db:"ip_address" json:"ip_address"`
-	MetadataJson  json.RawMessage `db:"metadata_json" json:"metadata_json"`
-	DetailMessage null.String     `db:"detail_message" json:"detail_message"`
+	ID            string      `db:"id" json:"id"`
+	ActorID       null.String `db:"actor_id" json:"actor_id"`
+	ActorRole     string      `db:"actor_role" json:"actor_role"`
+	OrgID         null.String `db:"org_id" json:"org_id"`
+	TargetType    string      `db:"target_type" json:"target_type"`
+	TargetID      string      `db:"target_id" json:"target_id"`
+	Action        string      `db:"action" json:"action"`
+	Result        string      `db:"result" json:"result"`
+	ErrorMessage  null.String `db:"error_message" json:"error_message"`
+	IpAddress     null.String `db:"ip_address" json:"ip_address"`
+	MetadataJson  []byte      `db:"metadata_json" json:"metadata_json"`
+	DetailMessage null.String `db:"detail_message" json:"detail_message"`
 }
 
 func (q *Queries) CreateAuditLog(ctx context.Context, arg CreateAuditLogParams) error {
@@ -142,23 +141,23 @@ type ListAuditLogsByOrgParams struct {
 }
 
 type ListAuditLogsByOrgRow struct {
-	ID            string          `db:"id" json:"id"`
-	ActorID       null.String     `db:"actor_id" json:"actor_id"`
-	ActorRole     string          `db:"actor_role" json:"actor_role"`
-	OrgID         null.String     `db:"org_id" json:"org_id"`
-	TargetType    string          `db:"target_type" json:"target_type"`
-	TargetID      string          `db:"target_id" json:"target_id"`
-	Action        string          `db:"action" json:"action"`
-	Result        string          `db:"result" json:"result"`
-	ErrorMessage  null.String     `db:"error_message" json:"error_message"`
-	IpAddress     null.String     `db:"ip_address" json:"ip_address"`
-	MetadataJson  json.RawMessage `db:"metadata_json" json:"metadata_json"`
-	CreatedAt     time.Time       `db:"created_at" json:"created_at"`
-	DetailMessage null.String     `db:"detail_message" json:"detail_message"`
-	ActorName     string          `db:"actor_name" json:"actor_name"`
-	ActorDeleted  interface{}     `db:"actor_deleted" json:"actor_deleted"`
-	TargetName    interface{}     `db:"target_name" json:"target_name"`
-	TargetDeleted interface{}     `db:"target_deleted" json:"target_deleted"`
+	ID            string      `db:"id" json:"id"`
+	ActorID       null.String `db:"actor_id" json:"actor_id"`
+	ActorRole     string      `db:"actor_role" json:"actor_role"`
+	OrgID         null.String `db:"org_id" json:"org_id"`
+	TargetType    string      `db:"target_type" json:"target_type"`
+	TargetID      string      `db:"target_id" json:"target_id"`
+	Action        string      `db:"action" json:"action"`
+	Result        string      `db:"result" json:"result"`
+	ErrorMessage  null.String `db:"error_message" json:"error_message"`
+	IpAddress     null.String `db:"ip_address" json:"ip_address"`
+	MetadataJson  []byte      `db:"metadata_json" json:"metadata_json"`
+	CreatedAt     time.Time   `db:"created_at" json:"created_at"`
+	DetailMessage null.String `db:"detail_message" json:"detail_message"`
+	ActorName     string      `db:"actor_name" json:"actor_name"`
+	ActorDeleted  interface{} `db:"actor_deleted" json:"actor_deleted"`
+	TargetName    interface{} `db:"target_name" json:"target_name"`
+	TargetDeleted interface{} `db:"target_deleted" json:"target_deleted"`
 }
 
 // 返回审计行 + actor 实时名称 + target 实时名称（按 target_type 走子查询）。
@@ -256,23 +255,23 @@ type ListAuditLogsByTargetParams struct {
 }
 
 type ListAuditLogsByTargetRow struct {
-	ID            string          `db:"id" json:"id"`
-	ActorID       null.String     `db:"actor_id" json:"actor_id"`
-	ActorRole     string          `db:"actor_role" json:"actor_role"`
-	OrgID         null.String     `db:"org_id" json:"org_id"`
-	TargetType    string          `db:"target_type" json:"target_type"`
-	TargetID      string          `db:"target_id" json:"target_id"`
-	Action        string          `db:"action" json:"action"`
-	Result        string          `db:"result" json:"result"`
-	ErrorMessage  null.String     `db:"error_message" json:"error_message"`
-	IpAddress     null.String     `db:"ip_address" json:"ip_address"`
-	MetadataJson  json.RawMessage `db:"metadata_json" json:"metadata_json"`
-	CreatedAt     time.Time       `db:"created_at" json:"created_at"`
-	DetailMessage null.String     `db:"detail_message" json:"detail_message"`
-	ActorName     string          `db:"actor_name" json:"actor_name"`
-	ActorDeleted  interface{}     `db:"actor_deleted" json:"actor_deleted"`
-	TargetName    interface{}     `db:"target_name" json:"target_name"`
-	TargetDeleted interface{}     `db:"target_deleted" json:"target_deleted"`
+	ID            string      `db:"id" json:"id"`
+	ActorID       null.String `db:"actor_id" json:"actor_id"`
+	ActorRole     string      `db:"actor_role" json:"actor_role"`
+	OrgID         null.String `db:"org_id" json:"org_id"`
+	TargetType    string      `db:"target_type" json:"target_type"`
+	TargetID      string      `db:"target_id" json:"target_id"`
+	Action        string      `db:"action" json:"action"`
+	Result        string      `db:"result" json:"result"`
+	ErrorMessage  null.String `db:"error_message" json:"error_message"`
+	IpAddress     null.String `db:"ip_address" json:"ip_address"`
+	MetadataJson  []byte      `db:"metadata_json" json:"metadata_json"`
+	CreatedAt     time.Time   `db:"created_at" json:"created_at"`
+	DetailMessage null.String `db:"detail_message" json:"detail_message"`
+	ActorName     string      `db:"actor_name" json:"actor_name"`
+	ActorDeleted  interface{} `db:"actor_deleted" json:"actor_deleted"`
+	TargetName    interface{} `db:"target_name" json:"target_name"`
+	TargetDeleted interface{} `db:"target_deleted" json:"target_deleted"`
 }
 
 // 同 ListAuditLogsByOrg，按 target_type + target_id 过滤。

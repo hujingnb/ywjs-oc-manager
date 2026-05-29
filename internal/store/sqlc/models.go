@@ -24,10 +24,10 @@ type App struct {
 	NewapiKeyID            null.String     `db:"newapi_key_id" json:"newapi_key_id"`
 	NewapiKeyCiphertext    null.String     `db:"newapi_key_ciphertext" json:"newapi_key_ciphertext"`
 	ApiKeyStatus           string          `db:"api_key_status" json:"api_key_status"`
-	RuntimeSnapshotJson    json.RawMessage `db:"runtime_snapshot_json" json:"runtime_snapshot_json"`
+	RuntimeSnapshotJson    []byte          `db:"runtime_snapshot_json" json:"runtime_snapshot_json"`
 	RuntimeSnapshotAt      null.Time       `db:"runtime_snapshot_at" json:"runtime_snapshot_at"`
 	RestartPolicyJson      json.RawMessage `db:"restart_policy_json" json:"restart_policy_json"`
-	HealthStateJson        json.RawMessage `db:"health_state_json" json:"health_state_json"`
+	HealthStateJson        []byte          `db:"health_state_json" json:"health_state_json"`
 	ProgressCurrent        null.Int        `db:"progress_current" json:"progress_current"`
 	ProgressTotal          null.Int        `db:"progress_total" json:"progress_total"`
 	LastErrorStatus        null.String     `db:"last_error_status" json:"last_error_status"`
@@ -65,35 +65,35 @@ type AssistantVersion struct {
 }
 
 type AuditLog struct {
-	ID            string          `db:"id" json:"id"`
-	ActorID       null.String     `db:"actor_id" json:"actor_id"`
-	ActorRole     string          `db:"actor_role" json:"actor_role"`
-	OrgID         null.String     `db:"org_id" json:"org_id"`
-	TargetType    string          `db:"target_type" json:"target_type"`
-	TargetID      string          `db:"target_id" json:"target_id"`
-	Action        string          `db:"action" json:"action"`
-	Result        string          `db:"result" json:"result"`
-	ErrorMessage  null.String     `db:"error_message" json:"error_message"`
-	IpAddress     null.String     `db:"ip_address" json:"ip_address"`
-	MetadataJson  json.RawMessage `db:"metadata_json" json:"metadata_json"`
-	DetailMessage null.String     `db:"detail_message" json:"detail_message"`
-	CreatedAt     time.Time       `db:"created_at" json:"created_at"`
+	ID            string      `db:"id" json:"id"`
+	ActorID       null.String `db:"actor_id" json:"actor_id"`
+	ActorRole     string      `db:"actor_role" json:"actor_role"`
+	OrgID         null.String `db:"org_id" json:"org_id"`
+	TargetType    string      `db:"target_type" json:"target_type"`
+	TargetID      string      `db:"target_id" json:"target_id"`
+	Action        string      `db:"action" json:"action"`
+	Result        string      `db:"result" json:"result"`
+	ErrorMessage  null.String `db:"error_message" json:"error_message"`
+	IpAddress     null.String `db:"ip_address" json:"ip_address"`
+	MetadataJson  []byte      `db:"metadata_json" json:"metadata_json"`
+	DetailMessage null.String `db:"detail_message" json:"detail_message"`
+	CreatedAt     time.Time   `db:"created_at" json:"created_at"`
 }
 
 type ChannelBinding struct {
-	ID            string          `db:"id" json:"id"`
-	AppID         string          `db:"app_id" json:"app_id"`
-	ChannelType   string          `db:"channel_type" json:"channel_type"`
-	Status        string          `db:"status" json:"status"`
-	BoundIdentity null.String     `db:"bound_identity" json:"bound_identity"`
-	ChannelName   null.String     `db:"channel_name" json:"channel_name"`
-	MetadataJson  json.RawMessage `db:"metadata_json" json:"metadata_json"`
-	BoundAt       null.Time       `db:"bound_at" json:"bound_at"`
-	LastOnlineAt  null.Time       `db:"last_online_at" json:"last_online_at"`
-	LastError     null.String     `db:"last_error" json:"last_error"`
-	CreatedAt     time.Time       `db:"created_at" json:"created_at"`
-	UpdatedAt     time.Time       `db:"updated_at" json:"updated_at"`
-	AppActiveKey  null.String     `db:"app_active_key" json:"app_active_key"`
+	ID            string      `db:"id" json:"id"`
+	AppID         string      `db:"app_id" json:"app_id"`
+	ChannelType   string      `db:"channel_type" json:"channel_type"`
+	Status        string      `db:"status" json:"status"`
+	BoundIdentity null.String `db:"bound_identity" json:"bound_identity"`
+	ChannelName   null.String `db:"channel_name" json:"channel_name"`
+	MetadataJson  []byte      `db:"metadata_json" json:"metadata_json"`
+	BoundAt       null.Time   `db:"bound_at" json:"bound_at"`
+	LastOnlineAt  null.Time   `db:"last_online_at" json:"last_online_at"`
+	LastError     null.String `db:"last_error" json:"last_error"`
+	CreatedAt     time.Time   `db:"created_at" json:"created_at"`
+	UpdatedAt     time.Time   `db:"updated_at" json:"updated_at"`
+	AppActiveKey  null.String `db:"app_active_key" json:"app_active_key"`
 }
 
 type InstanceResourceSample struct {
@@ -227,31 +227,31 @@ type RefreshToken struct {
 }
 
 type RuntimeNode struct {
-	ID                       string          `db:"id" json:"id"`
-	Name                     string          `db:"name" json:"name"`
-	Status                   string          `db:"status" json:"status"`
-	AgentDockerEndpoint      null.String     `db:"agent_docker_endpoint" json:"agent_docker_endpoint"`
-	AgentFileEndpoint        null.String     `db:"agent_file_endpoint" json:"agent_file_endpoint"`
-	AgentTlsCaCert           null.String     `db:"agent_tls_ca_cert" json:"agent_tls_ca_cert"`
-	AgentTokenHash           null.String     `db:"agent_token_hash" json:"agent_token_hash"`
-	AgentTokenCiphertext     null.String     `db:"agent_token_ciphertext" json:"agent_token_ciphertext"`
-	AgentVersion             null.String     `db:"agent_version" json:"agent_version"`
-	HeartbeatIntervalSeconds int32           `db:"heartbeat_interval_seconds" json:"heartbeat_interval_seconds"`
-	LastHeartbeatAt          null.Time       `db:"last_heartbeat_at" json:"last_heartbeat_at"`
-	ResourceSnapshotJson     json.RawMessage `db:"resource_snapshot_json" json:"resource_snapshot_json"`
-	MetadataJson             json.RawMessage `db:"metadata_json" json:"metadata_json"`
-	NodeDataRoot             null.String     `db:"node_data_root" json:"node_data_root"`
-	RegisteredAt             null.Time       `db:"registered_at" json:"registered_at"`
-	MaxApps                  null.Int        `db:"max_apps" json:"max_apps"`
-	AgentID                  null.String     `db:"agent_id" json:"agent_id"`
-	LastProbeAttemptedAt     null.Time       `db:"last_probe_attempted_at" json:"last_probe_attempted_at"`
-	LastProbeOkAt            null.Time       `db:"last_probe_ok_at" json:"last_probe_ok_at"`
-	LastProbeFailedAt        null.Time       `db:"last_probe_failed_at" json:"last_probe_failed_at"`
-	LastProbeError           null.String     `db:"last_probe_error" json:"last_probe_error"`
-	ProbeFailureStreak       int32           `db:"probe_failure_streak" json:"probe_failure_streak"`
-	ProbeSuccessStreak       int32           `db:"probe_success_streak" json:"probe_success_streak"`
-	CreatedAt                time.Time       `db:"created_at" json:"created_at"`
-	UpdatedAt                time.Time       `db:"updated_at" json:"updated_at"`
+	ID                       string      `db:"id" json:"id"`
+	Name                     string      `db:"name" json:"name"`
+	Status                   string      `db:"status" json:"status"`
+	AgentDockerEndpoint      null.String `db:"agent_docker_endpoint" json:"agent_docker_endpoint"`
+	AgentFileEndpoint        null.String `db:"agent_file_endpoint" json:"agent_file_endpoint"`
+	AgentTlsCaCert           null.String `db:"agent_tls_ca_cert" json:"agent_tls_ca_cert"`
+	AgentTokenHash           null.String `db:"agent_token_hash" json:"agent_token_hash"`
+	AgentTokenCiphertext     null.String `db:"agent_token_ciphertext" json:"agent_token_ciphertext"`
+	AgentVersion             null.String `db:"agent_version" json:"agent_version"`
+	HeartbeatIntervalSeconds int32       `db:"heartbeat_interval_seconds" json:"heartbeat_interval_seconds"`
+	LastHeartbeatAt          null.Time   `db:"last_heartbeat_at" json:"last_heartbeat_at"`
+	ResourceSnapshotJson     []byte      `db:"resource_snapshot_json" json:"resource_snapshot_json"`
+	MetadataJson             []byte      `db:"metadata_json" json:"metadata_json"`
+	NodeDataRoot             null.String `db:"node_data_root" json:"node_data_root"`
+	RegisteredAt             null.Time   `db:"registered_at" json:"registered_at"`
+	MaxApps                  null.Int    `db:"max_apps" json:"max_apps"`
+	AgentID                  null.String `db:"agent_id" json:"agent_id"`
+	LastProbeAttemptedAt     null.Time   `db:"last_probe_attempted_at" json:"last_probe_attempted_at"`
+	LastProbeOkAt            null.Time   `db:"last_probe_ok_at" json:"last_probe_ok_at"`
+	LastProbeFailedAt        null.Time   `db:"last_probe_failed_at" json:"last_probe_failed_at"`
+	LastProbeError           null.String `db:"last_probe_error" json:"last_probe_error"`
+	ProbeFailureStreak       int32       `db:"probe_failure_streak" json:"probe_failure_streak"`
+	ProbeSuccessStreak       int32       `db:"probe_success_streak" json:"probe_success_streak"`
+	CreatedAt                time.Time   `db:"created_at" json:"created_at"`
+	UpdatedAt                time.Time   `db:"updated_at" json:"updated_at"`
 }
 
 type User struct {

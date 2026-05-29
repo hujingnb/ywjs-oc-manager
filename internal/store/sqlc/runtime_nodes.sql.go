@@ -7,7 +7,6 @@ package sqlc
 
 import (
 	"context"
-	"encoding/json"
 	"time"
 
 	null "github.com/guregu/null/v5"
@@ -38,20 +37,20 @@ INSERT INTO runtime_nodes (
 `
 
 type EnrollRuntimeNodeInsertParams struct {
-	ID                       string          `db:"id" json:"id"`
-	AgentID                  null.String     `db:"agent_id" json:"agent_id"`
-	Name                     string          `db:"name" json:"name"`
-	MaxApps                  null.Int        `db:"max_apps" json:"max_apps"`
-	AgentDockerEndpoint      null.String     `db:"agent_docker_endpoint" json:"agent_docker_endpoint"`
-	AgentFileEndpoint        null.String     `db:"agent_file_endpoint" json:"agent_file_endpoint"`
-	AgentTlsCaCert           null.String     `db:"agent_tls_ca_cert" json:"agent_tls_ca_cert"`
-	AgentTokenHash           null.String     `db:"agent_token_hash" json:"agent_token_hash"`
-	HeartbeatIntervalSeconds int32           `db:"heartbeat_interval_seconds" json:"heartbeat_interval_seconds"`
-	AgentVersion             null.String     `db:"agent_version" json:"agent_version"`
-	NodeDataRoot             null.String     `db:"node_data_root" json:"node_data_root"`
-	ResourceSnapshotJson     json.RawMessage `db:"resource_snapshot_json" json:"resource_snapshot_json"`
-	MetadataJson             json.RawMessage `db:"metadata_json" json:"metadata_json"`
-	AgentTokenCiphertext     null.String     `db:"agent_token_ciphertext" json:"agent_token_ciphertext"`
+	ID                       string      `db:"id" json:"id"`
+	AgentID                  null.String `db:"agent_id" json:"agent_id"`
+	Name                     string      `db:"name" json:"name"`
+	MaxApps                  null.Int    `db:"max_apps" json:"max_apps"`
+	AgentDockerEndpoint      null.String `db:"agent_docker_endpoint" json:"agent_docker_endpoint"`
+	AgentFileEndpoint        null.String `db:"agent_file_endpoint" json:"agent_file_endpoint"`
+	AgentTlsCaCert           null.String `db:"agent_tls_ca_cert" json:"agent_tls_ca_cert"`
+	AgentTokenHash           null.String `db:"agent_token_hash" json:"agent_token_hash"`
+	HeartbeatIntervalSeconds int32       `db:"heartbeat_interval_seconds" json:"heartbeat_interval_seconds"`
+	AgentVersion             null.String `db:"agent_version" json:"agent_version"`
+	NodeDataRoot             null.String `db:"node_data_root" json:"node_data_root"`
+	ResourceSnapshotJson     []byte      `db:"resource_snapshot_json" json:"resource_snapshot_json"`
+	MetadataJson             []byte      `db:"metadata_json" json:"metadata_json"`
+	AgentTokenCiphertext     null.String `db:"agent_token_ciphertext" json:"agent_token_ciphertext"`
 }
 
 func (q *Queries) EnrollRuntimeNodeInsert(ctx context.Context, arg EnrollRuntimeNodeInsertParams) error {
@@ -97,18 +96,18 @@ WHERE agent_id = ?
 `
 
 type EnrollRuntimeNodeUpdateParams struct {
-	Name                 string          `db:"name" json:"name"`
-	MaxApps              null.Int        `db:"max_apps" json:"max_apps"`
-	AgentDockerEndpoint  null.String     `db:"agent_docker_endpoint" json:"agent_docker_endpoint"`
-	AgentFileEndpoint    null.String     `db:"agent_file_endpoint" json:"agent_file_endpoint"`
-	AgentTlsCaCert       null.String     `db:"agent_tls_ca_cert" json:"agent_tls_ca_cert"`
-	AgentTokenHash       null.String     `db:"agent_token_hash" json:"agent_token_hash"`
-	AgentVersion         null.String     `db:"agent_version" json:"agent_version"`
-	NodeDataRoot         null.String     `db:"node_data_root" json:"node_data_root"`
-	ResourceSnapshotJson json.RawMessage `db:"resource_snapshot_json" json:"resource_snapshot_json"`
-	MetadataJson         json.RawMessage `db:"metadata_json" json:"metadata_json"`
-	AgentTokenCiphertext null.String     `db:"agent_token_ciphertext" json:"agent_token_ciphertext"`
-	AgentID              null.String     `db:"agent_id" json:"agent_id"`
+	Name                 string      `db:"name" json:"name"`
+	MaxApps              null.Int    `db:"max_apps" json:"max_apps"`
+	AgentDockerEndpoint  null.String `db:"agent_docker_endpoint" json:"agent_docker_endpoint"`
+	AgentFileEndpoint    null.String `db:"agent_file_endpoint" json:"agent_file_endpoint"`
+	AgentTlsCaCert       null.String `db:"agent_tls_ca_cert" json:"agent_tls_ca_cert"`
+	AgentTokenHash       null.String `db:"agent_token_hash" json:"agent_token_hash"`
+	AgentVersion         null.String `db:"agent_version" json:"agent_version"`
+	NodeDataRoot         null.String `db:"node_data_root" json:"node_data_root"`
+	ResourceSnapshotJson []byte      `db:"resource_snapshot_json" json:"resource_snapshot_json"`
+	MetadataJson         []byte      `db:"metadata_json" json:"metadata_json"`
+	AgentTokenCiphertext null.String `db:"agent_token_ciphertext" json:"agent_token_ciphertext"`
+	AgentID              null.String `db:"agent_id" json:"agent_id"`
 }
 
 func (q *Queries) EnrollRuntimeNodeUpdate(ctx context.Context, arg EnrollRuntimeNodeUpdateParams) error {
@@ -261,32 +260,32 @@ ORDER BY n.name ASC
 `
 
 type ListActiveNodesWithAppCountsRow struct {
-	ID                       string          `db:"id" json:"id"`
-	Name                     string          `db:"name" json:"name"`
-	Status                   string          `db:"status" json:"status"`
-	AgentDockerEndpoint      null.String     `db:"agent_docker_endpoint" json:"agent_docker_endpoint"`
-	AgentFileEndpoint        null.String     `db:"agent_file_endpoint" json:"agent_file_endpoint"`
-	AgentTlsCaCert           null.String     `db:"agent_tls_ca_cert" json:"agent_tls_ca_cert"`
-	AgentTokenHash           null.String     `db:"agent_token_hash" json:"agent_token_hash"`
-	AgentTokenCiphertext     null.String     `db:"agent_token_ciphertext" json:"agent_token_ciphertext"`
-	AgentVersion             null.String     `db:"agent_version" json:"agent_version"`
-	HeartbeatIntervalSeconds int32           `db:"heartbeat_interval_seconds" json:"heartbeat_interval_seconds"`
-	LastHeartbeatAt          null.Time       `db:"last_heartbeat_at" json:"last_heartbeat_at"`
-	ResourceSnapshotJson     json.RawMessage `db:"resource_snapshot_json" json:"resource_snapshot_json"`
-	MetadataJson             json.RawMessage `db:"metadata_json" json:"metadata_json"`
-	NodeDataRoot             null.String     `db:"node_data_root" json:"node_data_root"`
-	RegisteredAt             null.Time       `db:"registered_at" json:"registered_at"`
-	MaxApps                  null.Int        `db:"max_apps" json:"max_apps"`
-	AgentID                  null.String     `db:"agent_id" json:"agent_id"`
-	LastProbeAttemptedAt     null.Time       `db:"last_probe_attempted_at" json:"last_probe_attempted_at"`
-	LastProbeOkAt            null.Time       `db:"last_probe_ok_at" json:"last_probe_ok_at"`
-	LastProbeFailedAt        null.Time       `db:"last_probe_failed_at" json:"last_probe_failed_at"`
-	LastProbeError           null.String     `db:"last_probe_error" json:"last_probe_error"`
-	ProbeFailureStreak       int32           `db:"probe_failure_streak" json:"probe_failure_streak"`
-	ProbeSuccessStreak       int32           `db:"probe_success_streak" json:"probe_success_streak"`
-	CreatedAt                time.Time       `db:"created_at" json:"created_at"`
-	UpdatedAt                time.Time       `db:"updated_at" json:"updated_at"`
-	AppCount                 int64           `db:"app_count" json:"app_count"`
+	ID                       string      `db:"id" json:"id"`
+	Name                     string      `db:"name" json:"name"`
+	Status                   string      `db:"status" json:"status"`
+	AgentDockerEndpoint      null.String `db:"agent_docker_endpoint" json:"agent_docker_endpoint"`
+	AgentFileEndpoint        null.String `db:"agent_file_endpoint" json:"agent_file_endpoint"`
+	AgentTlsCaCert           null.String `db:"agent_tls_ca_cert" json:"agent_tls_ca_cert"`
+	AgentTokenHash           null.String `db:"agent_token_hash" json:"agent_token_hash"`
+	AgentTokenCiphertext     null.String `db:"agent_token_ciphertext" json:"agent_token_ciphertext"`
+	AgentVersion             null.String `db:"agent_version" json:"agent_version"`
+	HeartbeatIntervalSeconds int32       `db:"heartbeat_interval_seconds" json:"heartbeat_interval_seconds"`
+	LastHeartbeatAt          null.Time   `db:"last_heartbeat_at" json:"last_heartbeat_at"`
+	ResourceSnapshotJson     []byte      `db:"resource_snapshot_json" json:"resource_snapshot_json"`
+	MetadataJson             []byte      `db:"metadata_json" json:"metadata_json"`
+	NodeDataRoot             null.String `db:"node_data_root" json:"node_data_root"`
+	RegisteredAt             null.Time   `db:"registered_at" json:"registered_at"`
+	MaxApps                  null.Int    `db:"max_apps" json:"max_apps"`
+	AgentID                  null.String `db:"agent_id" json:"agent_id"`
+	LastProbeAttemptedAt     null.Time   `db:"last_probe_attempted_at" json:"last_probe_attempted_at"`
+	LastProbeOkAt            null.Time   `db:"last_probe_ok_at" json:"last_probe_ok_at"`
+	LastProbeFailedAt        null.Time   `db:"last_probe_failed_at" json:"last_probe_failed_at"`
+	LastProbeError           null.String `db:"last_probe_error" json:"last_probe_error"`
+	ProbeFailureStreak       int32       `db:"probe_failure_streak" json:"probe_failure_streak"`
+	ProbeSuccessStreak       int32       `db:"probe_success_streak" json:"probe_success_streak"`
+	CreatedAt                time.Time   `db:"created_at" json:"created_at"`
+	UpdatedAt                time.Time   `db:"updated_at" json:"updated_at"`
+	AppCount                 int64       `db:"app_count" json:"app_count"`
 }
 
 // ListActiveNodesWithAppCounts 列出所有 active 节点并附带其当前未删除应用数量。
@@ -435,10 +434,10 @@ WHERE id = ?
 `
 
 type UpdateRuntimeNodeHeartbeatParams struct {
-	AgentVersion         null.String     `db:"agent_version" json:"agent_version"`
-	ResourceSnapshotJson json.RawMessage `db:"resource_snapshot_json" json:"resource_snapshot_json"`
-	MetadataJson         json.RawMessage `db:"metadata_json" json:"metadata_json"`
-	ID                   string          `db:"id" json:"id"`
+	AgentVersion         null.String `db:"agent_version" json:"agent_version"`
+	ResourceSnapshotJson []byte      `db:"resource_snapshot_json" json:"resource_snapshot_json"`
+	MetadataJson         []byte      `db:"metadata_json" json:"metadata_json"`
+	ID                   string      `db:"id" json:"id"`
 }
 
 func (q *Queries) UpdateRuntimeNodeHeartbeat(ctx context.Context, arg UpdateRuntimeNodeHeartbeatParams) error {

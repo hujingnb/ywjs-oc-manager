@@ -62,3 +62,10 @@ sql:
               import: "github.com/guregu/null/v5"
               package: "null"
               type: "Float"
+          # 可空 JSON：json.RawMessage（默认）无法扫描 SQL NULL，可空列改用 []byte
+          #（NULL→nil 切片，写 nil→NULL），与 json.RawMessage 互相可赋值，不影响 service 用法。
+          - db_type: "json"
+            nullable: true
+            go_type:
+              type: "byte"
+              slice: true

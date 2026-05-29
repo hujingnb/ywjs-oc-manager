@@ -643,8 +643,8 @@ WHERE id = ?
 `
 
 type SetAppHealthStateParams struct {
-	HealthStateJson json.RawMessage `db:"health_state_json" json:"health_state_json"`
-	ID              string          `db:"id" json:"id"`
+	HealthStateJson []byte `db:"health_state_json" json:"health_state_json"`
+	ID              string `db:"id" json:"id"`
 }
 
 // worker app_health_check handler 写最近一次健康检查结果；用于自动重启窗口计数。
@@ -730,8 +730,8 @@ WHERE id = ?
 `
 
 type SetAppRuntimeSnapshotParams struct {
-	RuntimeSnapshotJson json.RawMessage `db:"runtime_snapshot_json" json:"runtime_snapshot_json"`
-	ID                  string          `db:"id" json:"id"`
+	RuntimeSnapshotJson []byte `db:"runtime_snapshot_json" json:"runtime_snapshot_json"`
+	ID                  string `db:"id" json:"id"`
 }
 
 func (q *Queries) SetAppRuntimeSnapshot(ctx context.Context, arg SetAppRuntimeSnapshotParams) error {

@@ -7,7 +7,6 @@ package sqlc
 
 import (
 	"context"
-	"encoding/json"
 
 	null "github.com/guregu/null/v5"
 )
@@ -120,11 +119,11 @@ WHERE app_id = ? AND channel_type = ? AND status <> 'deleted'
 `
 
 type MarkChannelBindingBoundParams struct {
-	BoundIdentity null.String     `db:"bound_identity" json:"bound_identity"`
-	ChannelName   null.String     `db:"channel_name" json:"channel_name"`
-	MetadataJson  json.RawMessage `db:"metadata_json" json:"metadata_json"`
-	AppID         string          `db:"app_id" json:"app_id"`
-	ChannelType   string          `db:"channel_type" json:"channel_type"`
+	BoundIdentity null.String `db:"bound_identity" json:"bound_identity"`
+	ChannelName   null.String `db:"channel_name" json:"channel_name"`
+	MetadataJson  []byte      `db:"metadata_json" json:"metadata_json"`
+	AppID         string      `db:"app_id" json:"app_id"`
+	ChannelType   string      `db:"channel_type" json:"channel_type"`
 }
 
 func (q *Queries) MarkChannelBindingBound(ctx context.Context, arg MarkChannelBindingBoundParams) error {
@@ -145,9 +144,9 @@ WHERE app_id = ? AND channel_type = ? AND status <> 'deleted'
 `
 
 type SetChannelBindingChallengeParams struct {
-	MetadataJson json.RawMessage `db:"metadata_json" json:"metadata_json"`
-	AppID        string          `db:"app_id" json:"app_id"`
-	ChannelType  string          `db:"channel_type" json:"channel_type"`
+	MetadataJson []byte `db:"metadata_json" json:"metadata_json"`
+	AppID        string `db:"app_id" json:"app_id"`
+	ChannelType  string `db:"channel_type" json:"channel_type"`
 }
 
 func (q *Queries) SetChannelBindingChallenge(ctx context.Context, arg SetChannelBindingChallengeParams) error {

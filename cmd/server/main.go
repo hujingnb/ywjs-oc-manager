@@ -52,7 +52,7 @@ import (
 	"oc-manager/internal/worker/reaper"
 
 	migrate "github.com/golang-migrate/migrate/v4"
-	_ "github.com/golang-migrate/migrate/v4/database/postgres"
+	_ "github.com/golang-migrate/migrate/v4/database/mysql"
 	"github.com/golang-migrate/migrate/v4/source/iofs"
 )
 
