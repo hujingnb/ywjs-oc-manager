@@ -30,6 +30,8 @@ type Config struct {
 	Runtime RuntimeConfig `yaml:"runtime"`
 	// NewAPI 描述 manager 调用 new-api 管理接口所需的凭据。
 	NewAPI NewAPIConfig `yaml:"newapi"`
+	// Storage 是对象存储（S3）配置；整段可选，配置则要求关键字段齐全（见 loader 校验）。
+	Storage StorageConfig `yaml:"storage"`
 }
 
 // AppConfig 描述 manager API 进程自身的运行参数。
@@ -223,4 +225,32 @@ func (d *Duration) UnmarshalYAML(value *yaml.Node) error {
 	}
 	d.Duration = parsed
 	return nil
+}
+
+// StorageConfig 是对象存储配置容器；当前仅 S3。
+type StorageConfig struct {
+	S3 S3StorageConfig `yaml:"s3"`
+}
+
+// S3StorageConfig 是标准 S3 接入参数（本地指向 MinIO，生产指向云 OSS）。
+// 仅用标准 S3 协议，不绑定 MinIO 私有扩展。
+type S3StorageConfig struct {
+	// Enabled 是否启用 S3（false 时 skill 仍走本地 FS，便于无 MinIO 的最小开发）。
+	Enabled bool `yaml:"enabled"`
+	// Endpoint 是 S3 端点 URL。
+	Endpoint string `yaml:"endpoint"`
+	// Region 是区域（MinIO 任意）。
+	Region string `yaml:"region"`
+	// Bucket 是 app 数据 bucket。
+	Bucket string `yaml:"bucket"`
+	// AccessKeyID 是 manager 长期凭证。
+	AccessKeyID string `yaml:"access_key_id"`
+	// SecretAccessKey 与 AccessKeyID 配对的长期密钥。
+	SecretAccessKey string `yaml:"secret_access_key"`
+	// UsePathStyle 是否使用 path-style 寻址（MinIO 必须 true）。
+	UsePathStyle bool `yaml:"use_path_style"`
+	// STSRoleARN 是 AssumeRole 目标 role ARN。
+	STSRoleARN string `yaml:"sts_role_arn"`
+	// PresignTTL 是预签名 URL / STS 凭证默认有效期；空时由 applyDefaults 填默认。
+	PresignTTL Duration `yaml:"presign_ttl"`
 }

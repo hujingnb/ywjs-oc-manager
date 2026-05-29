@@ -58,6 +58,13 @@ func (c *Config) applyDefaults() {
 	if strings.TrimSpace(c.RAGFlow.ChunkMethod) == "" {
 		c.RAGFlow.ChunkMethod = "naive"
 	}
+	// S3 启用时填预签名默认有效期 15m（pod 拉取 / 续期窗口足够，又不过长）。
+	if c.Storage.S3.Enabled && c.Storage.S3.PresignTTL.Duration == 0 {
+		c.Storage.S3.PresignTTL = Duration{Duration: 15 * time.Minute}
+	}
+	if c.Storage.S3.Enabled && strings.TrimSpace(c.Storage.S3.Region) == "" {
+		c.Storage.S3.Region = "us-east-1"
+	}
 }
 
 // Validate 校验启动必需配置。
@@ -117,6 +124,16 @@ func (c Config) Validate() error {
 	}
 	if err := c.RAGFlow.validate(); err != nil {
 		return err
+	}
+	// S3 启用时关键字段必须齐全，缺失 fail-fast（避免运行期才暴露配置缺漏）。
+	if c.Storage.S3.Enabled {
+		if strings.TrimSpace(c.Storage.S3.Endpoint) == "" || strings.TrimSpace(c.Storage.S3.Bucket) == "" ||
+			strings.TrimSpace(c.Storage.S3.AccessKeyID) == "" || strings.TrimSpace(c.Storage.S3.SecretAccessKey) == "" {
+			return fmt.Errorf("storage.s3 已启用但 endpoint/bucket/access_key_id/secret_access_key 不完整")
+		}
+		if strings.TrimSpace(c.Storage.S3.STSRoleARN) == "" {
+			return fmt.Errorf("storage.s3 已启用但缺少 sts_role_arn")
+		}
 	}
 	// Hermes 时代模板不再需要 {{workspace_dir}} 等 legacy OpenClaw 专属占位符，
 	// 仅需非空即可（上方 missing 检查已覆盖）。

@@ -235,6 +235,63 @@ ragflow:
 	assert.Equal(t, "naive", cfg.RAGFlow.ChunkMethod)
 }
 
+// TestStorageS3ValidationRequiresFields 验证启用 S3 但字段不全时加载报错（fail-fast）。
+func TestStorageS3ValidationRequiresFields(t *testing.T) {
+	// 启用 S3 却缺 endpoint/bucket/access_key_id/secret_access_key 等，Validate 必须 fail-fast。
+	// 使用完整合法的基础配置拼接 storage.s3.enabled=true 触发 S3 专属校验路径。
+	yaml := fullValidYAML() + "\nstorage:\n  s3:\n    enabled: true\n"
+	_, err := loadConfigFromStringErr(t, yaml)
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "storage.s3")
+}
+
+// TestStorageS3ValidationRequiresSTSRoleARN 验证启用 S3 且主字段齐全但缺 sts_role_arn 时报错。
+func TestStorageS3ValidationRequiresSTSRoleARN(t *testing.T) {
+	// S3 已启用且 endpoint/bucket/凭证均完整，但缺少 sts_role_arn 时仍应 fail-fast。
+	yaml := fullValidYAML() + `
+storage:
+  s3:
+    enabled: true
+    endpoint: "http://minio:9000"
+    region: "us-east-1"
+    bucket: "oc-manager"
+    access_key_id: "minioadmin"
+    secret_access_key: "minioadmin"
+    use_path_style: true
+`
+	_, err := loadConfigFromStringErr(t, yaml)
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "storage.s3")
+}
+
+// TestStorageS3DefaultsApplied 验证 S3 启用且未配置 region/presign_ttl 时默认值被正确填充。
+func TestStorageS3DefaultsApplied(t *testing.T) {
+	// S3 启用且字段完整但未指定 region/presign_ttl，applyDefaults 应填充稳定默认值。
+	yaml := fullValidYAML() + `
+storage:
+  s3:
+    enabled: true
+    endpoint: "http://minio:9000"
+    bucket: "oc-manager"
+    access_key_id: "minioadmin"
+    secret_access_key: "minioadmin"
+    use_path_style: true
+    sts_role_arn: "arn:aws:iam::000000000000:role/manager"
+`
+	cfg := loadConfigFromString(t, yaml)
+	// region 未配置时应填入默认值 us-east-1。
+	assert.Equal(t, "us-east-1", cfg.Storage.S3.Region)
+	// presign_ttl 未配置时应填入默认值 15m。
+	assert.Equal(t, "15m0s", cfg.Storage.S3.PresignTTL.Duration.String())
+}
+
+// TestStorageS3DisabledByDefaultAllowsMissingFields 验证 S3 未启用时缺少字段不会报错。
+func TestStorageS3DisabledByDefaultAllowsMissingFields(t *testing.T) {
+	// storage 段完全不配置时，Validate 不应因 S3 字段缺失而失败。
+	cfg := loadConfigFromString(t, fullValidYAML())
+	assert.False(t, cfg.Storage.S3.Enabled)
+}
+
 func writeTempConfig(t *testing.T, content string) string {
 	t.Helper()
 	path := filepath.Join(t.TempDir(), "config.yaml")
