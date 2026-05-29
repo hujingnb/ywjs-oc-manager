@@ -1,56 +1,29 @@
 // Package service —— hermes_cron.go 实现 Hermes Cron 管理能力。
-// manager 不持久化 Cron 任务，所有读写都通过在 Hermes 容器内执行 `oc-cron`
-// 并解析统一 JSON 信封获得。
+// manager 不持久化 Cron 任务，所有读写都通过 oc-ops HTTP 客户端调用 app 实例内
+// 的 cron 端点（类型化请求/响应），manager 仅做权限判断与输入/输出校验。
 package service
 
 import (
-	"bytes"
 	"context"
-	"database/sql"
-	"encoding/json"
-	"errors"
 	"fmt"
 	"regexp"
 	"strings"
 
 	"oc-manager/internal/auth"
 	"oc-manager/internal/integrations/ocops"
-	"oc-manager/internal/integrations/runtime"
-	"oc-manager/internal/store/sqlc"
 )
 
-// cronExecer 抽象容器内执行 JSON 命令的能力，runtime.Adapter 可直接满足该接口。
-type cronExecer interface {
-	ContainerExecJSON(ctx context.Context, nodeID, containerID string, cmd []string) (runtime.ExecJSONResult, error)
-}
-
-// cronAppLocator 把 appID 解析为执行 oc-cron 所需的运行时坐标。
-type cronAppLocator interface {
-	// LocateApp 返回 app 的归属信息与运行时坐标。
-	// Stub 表示该 app 运行 dev stub 镜像；ContainerID 为空表示容器未运行。
-	LocateApp(ctx context.Context, appID string) (CronAppLocation, error)
-}
-
-// CronAppLocation 是执行 oc-cron 所需的全部 app 运行时信息。
-type CronAppLocation struct {
-	OrgID       string // app 归属组织，用于权限判断
-	OwnerUserID string // app 拥有者，用于 org_member 权限判断
-	NodeID      string // app 所在 runtime node
-	ContainerID string // Hermes 容器 ID，空表示未运行
-	Stub        bool   // 是否 dev stub 镜像
-}
-
 var (
-	// cronJobIDRe 是 manager 允许透传给 oc-cron 的任务 ID 白名单，避免路径/argv 注入。
+	// cronJobIDRe 是 manager 允许透传给 oc-ops 的任务 ID 白名单，避免路径/请求注入。
 	cronJobIDRe = regexp.MustCompile(`^[A-Za-z0-9_-]{1,64}$`)
 	// cronScriptRe 限制 script 为单个相对文件名；不允许绝对路径、目录层级或反斜杠。
 	cronScriptRe = regexp.MustCompile(`^[^/\\][^/\\]*$`)
-	// cronSkillRe 限制高级 skills 字段为稳定文件名风格标识，避免把任意文本透传给 CLI。
+	// cronSkillRe 限制高级 skills 字段为稳定文件名风格标识，避免把任意文本透传给上游。
 	cronSkillRe = regexp.MustCompile(`^[A-Za-z0-9_-]{1,64}$`)
 )
 
 const (
-	// 自由文本限制与 oc-cron 适配层保持同量级，避免 manager 向容器传入过大的 argv。
+	// 自由文本限制与 oc-cron 适配层保持同量级，避免 manager 向实例传入过大的请求体。
 	cronNameMaxRunes      = 200
 	cronScheduleMaxRunes  = 200
 	cronPromptMaxRunes    = 5000
@@ -61,139 +34,49 @@ const (
 
 // HermesCronService 暴露 Hermes Cron 的读写能力。
 type HermesCronService struct {
-	execer  cronExecer
-	locator cronAppLocator
+	ops      cronOps       // oc-ops 的类型化 cron 客户端窄接口
+	resolver OcOpsResolver // 把 appID 解析为 oc-ops 调用坐标
 }
 
 // NewHermesCronService 构造 service。
-func NewHermesCronService(execer cronExecer, locator cronAppLocator) *HermesCronService {
-	return &HermesCronService{execer: execer, locator: locator}
+func NewHermesCronService(ops cronOps, resolver OcOpsResolver) *HermesCronService {
+	return &HermesCronService{ops: ops, resolver: resolver}
 }
 
-// resolve 解析 appID、校验读权限，并确保实例可执行 oc-cron。
-func (s *HermesCronService) resolve(ctx context.Context, principal auth.Principal, appID string) (CronAppLocation, error) {
-	loc, err := s.locator.LocateApp(ctx, appID)
+// resolve 解析 appID、校验读权限，并确保实例可调用 oc-ops。
+func (s *HermesCronService) resolve(ctx context.Context, principal auth.Principal, appID string) (OcOpsAppLocation, error) {
+	loc, err := s.resolver.Resolve(ctx, appID)
 	if err != nil {
-		return CronAppLocation{}, err
+		return OcOpsAppLocation{}, err
 	}
 	if !auth.CanViewAppCron(principal, loc.OrgID, loc.OwnerUserID) {
-		return CronAppLocation{}, ErrCronForbidden
+		return OcOpsAppLocation{}, ErrCronForbidden
 	}
-	if loc.Stub {
-		return CronAppLocation{}, ErrCronNotSupported
+	// dev stub 实例不含真实 hermes cron 能力，按不支持处理。
+	if !loc.Supported {
+		return OcOpsAppLocation{}, ErrCronNotSupported
 	}
-	if strings.TrimSpace(loc.ContainerID) == "" {
-		return CronAppLocation{}, ErrCronRuntimeUnavailable
+	// 没有可用的 oc-ops 基址说明实例运行时尚未就绪。
+	if strings.TrimSpace(loc.Endpoint.BaseURL) == "" {
+		return OcOpsAppLocation{}, ErrCronRuntimeUnavailable
 	}
 	return loc, nil
 }
 
 // resolveManage 解析 appID 并校验 Cron 写权限。
 // 当前 CanManageAppCron 与 CanViewAppCron 等价，仍单独调用以便未来权限收紧。
-func (s *HermesCronService) resolveManage(ctx context.Context, principal auth.Principal, appID string) (CronAppLocation, error) {
+func (s *HermesCronService) resolveManage(ctx context.Context, principal auth.Principal, appID string) (OcOpsAppLocation, error) {
 	loc, err := s.resolve(ctx, principal, appID)
 	if err != nil {
-		return CronAppLocation{}, err
+		return OcOpsAppLocation{}, err
 	}
 	if !auth.CanManageAppCron(principal, loc.OrgID, loc.OwnerUserID) {
-		return CronAppLocation{}, ErrCronForbidden
+		return OcOpsAppLocation{}, ErrCronForbidden
 	}
 	return loc, nil
 }
 
-// cronEnvelope 是 oc-cron 输出的统一信封。
-type cronEnvelope struct {
-	OK    bool               `json:"ok"`
-	Data  json.RawMessage    `json:"data"`
-	Error *cronEnvelopeError `json:"error"`
-}
-
-// cronEnvelopeError 是失败信封里的错误对象。
-type cronEnvelopeError struct {
-	Code    string `json:"code"`
-	Message string `json:"message"`
-}
-
-// mapCronErrorCode 把 oc-cron 契约错误码映射成 service 哨兵错误。
-func mapCronErrorCode(e *cronEnvelopeError) error {
-	if e == nil {
-		return ErrCronCLI
-	}
-	switch e.Code {
-	case "BAD_REQUEST":
-		return fmt.Errorf("%w: %s", ErrCronBadRequest, e.Message)
-	case "NOT_FOUND":
-		return ErrNotFound
-	case "UNSUPPORTED":
-		return ErrCronNotSupported
-	case "INTERNAL":
-		return fmt.Errorf("%w: %s", ErrCronOutputInvalid, e.Message)
-	default:
-		return fmt.Errorf("%w: %s", ErrCronCLI, e.Message)
-	}
-}
-
-// runOCCron 在 Hermes 容器内执行一条 oc-cron 命令并解析统一信封。
-// args 是 oc-cron 的 verb 与 flag，不含 "oc-cron" 前缀。
-func (s *HermesCronService) runOCCron(ctx context.Context, loc CronAppLocation, args []string) (json.RawMessage, error) {
-	cmd := append([]string{"oc-cron"}, args...)
-	res, err := s.execer.ContainerExecJSON(ctx, loc.NodeID, loc.ContainerID, cmd)
-	if err != nil {
-		return nil, fmt.Errorf("%w: %v", ErrCronCLI, err)
-	}
-	var env cronEnvelope
-	if err := json.Unmarshal([]byte(res.Stdout), &env); err != nil {
-		if res.ExitCode != 0 {
-			return nil, cronExitError(res, "stdout 不是合法信封 JSON")
-		}
-		return nil, fmt.Errorf("%w: 信封解析失败: %v (stderr: %s)", ErrCronOutputInvalid, err, truncateCronDiagnostic(res.Stderr))
-	}
-	if !env.OK {
-		return nil, mapCronErrorCode(env.Error)
-	}
-	if res.ExitCode != 0 {
-		return nil, cronExitError(res, "ok:true 但进程非零退出")
-	}
-	return env.Data, nil
-}
-
-// cronExitError 统一包装容器内命令非零退出，保留 exit code 与 stderr/stdout 摘要。
-func cronExitError(res runtime.ExecJSONResult, reason string) error {
-	stderr := truncateCronDiagnostic(res.Stderr)
-	stdout := truncateCronDiagnostic(res.Stdout)
-	if stderr == "" && stdout == "" {
-		return fmt.Errorf("%w: %s: exit %d", ErrCronCLI, reason, res.ExitCode)
-	}
-	if stderr == "" {
-		return fmt.Errorf("%w: %s: exit %d (stdout: %s)", ErrCronCLI, reason, res.ExitCode, stdout)
-	}
-	if stdout == "" {
-		return fmt.Errorf("%w: %s: exit %d (stderr: %s)", ErrCronCLI, reason, res.ExitCode, stderr)
-	}
-	return fmt.Errorf("%w: %s: exit %d (stderr: %s; stdout: %s)", ErrCronCLI, reason, res.ExitCode, stderr, stdout)
-}
-
-// truncateCronDiagnostic 按 rune 截断诊断文本，避免错误消息携带过大 stdout/stderr。
-func truncateCronDiagnostic(value string) string {
-	value = strings.TrimSpace(value)
-	if runes := []rune(value); len(runes) > 1024 {
-		return string(runes[:1024])
-	}
-	return value
-}
-
-// decodeCronData 把成功信封 data 解析到目标 DTO，统一包裹输出格式错误。
-func decodeCronData(data json.RawMessage, out any) error {
-	if len(data) == 0 || string(bytes.TrimSpace(data)) == "null" {
-		return fmt.Errorf("%w: data 为空", ErrCronOutputInvalid)
-	}
-	if err := json.Unmarshal(data, out); err != nil {
-		return fmt.Errorf("%w: %v", ErrCronOutputInvalid, err)
-	}
-	return nil
-}
-
-// validateCronJobID 校验任务 ID，所有按任务 ID 定位的 verb 共用。
+// validateCronJobID 校验任务 ID，所有按任务 ID 定位的方法共用。
 func validateCronJobID(jobID string) error {
 	if !cronJobIDRe.MatchString(jobID) {
 		return fmt.Errorf("%w: 非法 job id", ErrCronBadRequest)
@@ -260,7 +143,7 @@ func isCronOutputFileName(fileName string) bool {
 	return fileName == cronSyntheticFile || strings.HasSuffix(fileName, ".md")
 }
 
-// validateCronJobData 校验 oc-cron 返回的任务对象是否包含稳定标识。
+// validateCronJobData 校验 oc-ops 返回的任务对象是否包含稳定标识。
 func validateCronJobData(job ocops.CronJob) error {
 	if !cronJobIDRe.MatchString(job.ID) {
 		return fmt.Errorf("%w: 任务缺少合法 id", ErrCronOutputInvalid)
@@ -326,159 +209,160 @@ func validateCronCapabilitiesData(caps ocops.CronCapabilities) error {
 	return nil
 }
 
-// appendCreateArgs 把 CreateCronJobInput 转成 oc-cron create argv。
-func appendCreateArgs(args []string, in CreateCronJobInput) ([]string, error) {
+// buildCronCreateReq 把 CreateCronJobInput 校验并转成类型化的 ocops.CronCreateReq。
+// 复用原 appendCreateArgs 的全部校验逻辑（长度/正则/repeat>0/script 等），
+// 只是把「拼 argv」改为「填请求体」。
+func buildCronCreateReq(in CreateCronJobInput) (ocops.CronCreateReq, error) {
 	if err := validateCronText("name", in.Name, cronNameMaxRunes, true); err != nil {
-		return nil, err
+		return ocops.CronCreateReq{}, err
 	}
 	if err := validateCronText("schedule", in.Schedule, cronScheduleMaxRunes, true); err != nil {
-		return nil, err
+		return ocops.CronCreateReq{}, err
 	}
-	args = append(args, "--name", in.Name, "--schedule", in.Schedule)
+	req := ocops.CronCreateReq{Name: in.Name, Schedule: in.Schedule}
 	if in.Prompt != "" {
 		if err := validateCronText("prompt", in.Prompt, cronPromptMaxRunes, false); err != nil {
-			return nil, err
+			return ocops.CronCreateReq{}, err
 		}
-		args = append(args, "--prompt", in.Prompt)
+		req.Prompt = in.Prompt
 	}
 	if in.Deliver != "" {
 		if err := validateCronText("deliver", in.Deliver, cronSmallTextMaxRunes, false); err != nil {
-			return nil, err
+			return ocops.CronCreateReq{}, err
 		}
-		args = append(args, "--deliver", in.Deliver)
+		req.Deliver = in.Deliver
 	}
 	if err := validateCronRepeat(in.Repeat); err != nil {
-		return nil, err
+		return ocops.CronCreateReq{}, err
 	}
 	if in.Repeat != nil {
-		args = append(args, "--repeat", fmt.Sprintf("%d", *in.Repeat))
+		// server 端 _normalize_repeat 接受裸整数（times=raw），与旧 --repeat N 语义等价。
+		req.Repeat = *in.Repeat
 	}
 	if err := validateCronScript(in.Script); err != nil {
-		return nil, err
+		return ocops.CronCreateReq{}, err
 	}
 	if in.Script != "" {
-		args = append(args, "--script", in.Script)
+		req.Script = in.Script
 	}
 	if in.NoAgent {
-		args = append(args, "--no-agent")
+		req.NoAgent = true
 	}
-	return appendCronAdvancedArgs(args, cronAdvancedArgs{
-		Workdir:  stringPtrIfNotEmpty(in.Workdir),
-		Skills:   in.Skills,
-		Model:    stringPtrIfNotEmpty(in.Model),
-		Provider: stringPtrIfNotEmpty(in.Provider),
-		BaseURL:  stringPtrIfNotEmpty(in.BaseURL),
-	})
-}
-
-// cronAdvancedArgs 承载 create/update 共用高级字段。
-type cronAdvancedArgs struct {
-	Workdir     *string
-	Skills      []string
-	ClearSkills bool
-	Model       *string
-	Provider    *string
-	BaseURL     *string
-}
-
-// appendCronAdvancedArgs 追加平台管理员高级字段对应的 argv；service 只做格式校验。
-func appendCronAdvancedArgs(args []string, in cronAdvancedArgs) ([]string, error) {
-	if in.Workdir != nil {
-		if err := validateCronText("workdir", *in.Workdir, cronSmallTextMaxRunes, false); err != nil {
-			return nil, err
+	// 高级字段（平台管理员）：workdir/skills/model/provider/base_url。
+	if in.Workdir != "" {
+		if err := validateCronText("workdir", in.Workdir, cronSmallTextMaxRunes, false); err != nil {
+			return ocops.CronCreateReq{}, err
 		}
-		args = append(args, "--workdir", *in.Workdir)
-	}
-	if in.ClearSkills {
-		args = append(args, "--clear-skills")
+		req.Workdir = in.Workdir
 	}
 	if err := validateCronSkills(in.Skills); err != nil {
-		return nil, err
+		return ocops.CronCreateReq{}, err
 	}
-	for _, skill := range in.Skills {
-		args = append(args, "--skill", skill)
-	}
-	if in.Model != nil {
-		if err := validateCronText("model", *in.Model, cronSmallTextMaxRunes, false); err != nil {
-			return nil, err
+	req.Skills = in.Skills
+	if in.Model != "" {
+		if err := validateCronText("model", in.Model, cronSmallTextMaxRunes, false); err != nil {
+			return ocops.CronCreateReq{}, err
 		}
-		args = append(args, "--model", *in.Model)
+		req.Model = in.Model
 	}
-	if in.Provider != nil {
-		if err := validateCronText("provider", *in.Provider, cronSmallTextMaxRunes, false); err != nil {
-			return nil, err
+	if in.Provider != "" {
+		if err := validateCronText("provider", in.Provider, cronSmallTextMaxRunes, false); err != nil {
+			return ocops.CronCreateReq{}, err
 		}
-		args = append(args, "--provider", *in.Provider)
+		req.Provider = in.Provider
 	}
-	if in.BaseURL != nil {
-		if err := validateCronText("base_url", *in.BaseURL, cronSmallTextMaxRunes, false); err != nil {
-			return nil, err
+	if in.BaseURL != "" {
+		if err := validateCronText("base_url", in.BaseURL, cronSmallTextMaxRunes, false); err != nil {
+			return ocops.CronCreateReq{}, err
 		}
-		args = append(args, "--base-url", *in.BaseURL)
+		req.BaseURL = in.BaseURL
 	}
-	return args, nil
+	return req, nil
 }
 
-// stringPtrIfNotEmpty 用于 create 输入：空字符串表示不传对应 flag。
-func stringPtrIfNotEmpty(value string) *string {
-	if value == "" {
-		return nil
-	}
-	return &value
-}
-
-// appendUpdateArgs 把 UpdateCronJobInput 转成 oc-cron update argv。
-func appendUpdateArgs(args []string, in UpdateCronJobInput) ([]string, error) {
+// buildCronUpdateReq 把 UpdateCronJobInput 校验并转成类型化的 ocops.CronUpdateReq。
+// 复用原 appendUpdateArgs 的校验逻辑；指针字段保留「未提交 = nil」的 partial update 语义。
+func buildCronUpdateReq(in UpdateCronJobInput) (ocops.CronUpdateReq, error) {
+	var req ocops.CronUpdateReq
 	if in.Name != nil {
 		if err := validateCronText("name", *in.Name, cronNameMaxRunes, false); err != nil {
-			return nil, err
+			return ocops.CronUpdateReq{}, err
 		}
-		args = append(args, "--name", *in.Name)
+		req.Name = in.Name
 	}
 	if in.Schedule != nil {
 		if err := validateCronText("schedule", *in.Schedule, cronScheduleMaxRunes, false); err != nil {
-			return nil, err
+			return ocops.CronUpdateReq{}, err
 		}
-		args = append(args, "--schedule", *in.Schedule)
+		req.Schedule = in.Schedule
 	}
 	if in.Prompt != nil {
 		if err := validateCronText("prompt", *in.Prompt, cronPromptMaxRunes, false); err != nil {
-			return nil, err
+			return ocops.CronUpdateReq{}, err
 		}
-		args = append(args, "--prompt", *in.Prompt)
+		req.Prompt = in.Prompt
 	}
 	if in.Deliver != nil {
 		if err := validateCronText("deliver", *in.Deliver, cronSmallTextMaxRunes, false); err != nil {
-			return nil, err
+			return ocops.CronUpdateReq{}, err
 		}
-		args = append(args, "--deliver", *in.Deliver)
+		req.Deliver = in.Deliver
 	}
 	if err := validateCronRepeat(in.Repeat); err != nil {
-		return nil, err
+		return ocops.CronUpdateReq{}, err
 	}
 	if in.Repeat != nil {
-		args = append(args, "--repeat", fmt.Sprintf("%d", *in.Repeat))
+		// 同 create：server 接受裸整数 repeat，等价旧 --repeat N。
+		req.Repeat = *in.Repeat
 	}
 	if in.Script != nil {
 		if err := validateCronScript(*in.Script); err != nil {
-			return nil, err
+			return ocops.CronUpdateReq{}, err
 		}
-		args = append(args, "--script", *in.Script)
+		req.Script = in.Script
 	}
 	if in.NoAgent {
-		args = append(args, "--no-agent")
+		v := true
+		req.NoAgent = &v
 	}
 	if in.Agent {
-		args = append(args, "--agent")
+		v := true
+		req.Agent = &v
 	}
-	return appendCronAdvancedArgs(args, cronAdvancedArgs{
-		Workdir:     in.Workdir,
-		Skills:      in.Skills,
-		ClearSkills: in.ClearSkills,
-		Model:       in.Model,
-		Provider:    in.Provider,
-		BaseURL:     in.BaseURL,
-	})
+	// 高级字段：workdir/clear_skills/skills/model/provider/base_url。
+	if in.Workdir != nil {
+		if err := validateCronText("workdir", *in.Workdir, cronSmallTextMaxRunes, false); err != nil {
+			return ocops.CronUpdateReq{}, err
+		}
+		req.Workdir = in.Workdir
+	}
+	if in.ClearSkills {
+		v := true
+		req.ClearSkills = &v
+	}
+	if err := validateCronSkills(in.Skills); err != nil {
+		return ocops.CronUpdateReq{}, err
+	}
+	req.Skills = in.Skills
+	if in.Model != nil {
+		if err := validateCronText("model", *in.Model, cronSmallTextMaxRunes, false); err != nil {
+			return ocops.CronUpdateReq{}, err
+		}
+		req.Model = in.Model
+	}
+	if in.Provider != nil {
+		if err := validateCronText("provider", *in.Provider, cronSmallTextMaxRunes, false); err != nil {
+			return ocops.CronUpdateReq{}, err
+		}
+		req.Provider = in.Provider
+	}
+	if in.BaseURL != nil {
+		if err := validateCronText("base_url", *in.BaseURL, cronSmallTextMaxRunes, false); err != nil {
+			return ocops.CronUpdateReq{}, err
+		}
+		req.BaseURL = in.BaseURL
+	}
+	return req, nil
 }
 
 // Capabilities 探测实例 oc-cron 的契约版本与可用能力。
@@ -487,13 +371,9 @@ func (s *HermesCronService) Capabilities(ctx context.Context, principal auth.Pri
 	if err != nil {
 		return ocops.CronCapabilities{}, err
 	}
-	data, err := s.runOCCron(ctx, loc, []string{"capabilities"})
+	caps, err := s.ops.CronCapabilities(ctx, loc.Endpoint)
 	if err != nil {
-		return ocops.CronCapabilities{}, err
-	}
-	var caps ocops.CronCapabilities
-	if err := decodeCronData(data, &caps); err != nil {
-		return ocops.CronCapabilities{}, err
+		return ocops.CronCapabilities{}, mapOcOpsCronErr(err)
 	}
 	if err := validateCronCapabilitiesData(caps); err != nil {
 		return ocops.CronCapabilities{}, err
@@ -507,13 +387,9 @@ func (s *HermesCronService) Status(ctx context.Context, principal auth.Principal
 	if err != nil {
 		return ocops.CronStatus{}, err
 	}
-	data, err := s.runOCCron(ctx, loc, []string{"status"})
+	status, err := s.ops.CronStatus(ctx, loc.Endpoint)
 	if err != nil {
-		return ocops.CronStatus{}, err
-	}
-	var status ocops.CronStatus
-	if err := decodeCronData(data, &status); err != nil {
-		return ocops.CronStatus{}, err
+		return ocops.CronStatus{}, mapOcOpsCronErr(err)
 	}
 	if err := validateCronStatusData(status); err != nil {
 		return ocops.CronStatus{}, err
@@ -527,17 +403,9 @@ func (s *HermesCronService) ListJobs(ctx context.Context, principal auth.Princip
 	if err != nil {
 		return nil, err
 	}
-	args := []string{"list"}
-	if f.All {
-		args = append(args, "--all")
-	}
-	data, err := s.runOCCron(ctx, loc, args)
+	jobs, err := s.ops.CronList(ctx, loc.Endpoint, f.All)
 	if err != nil {
-		return nil, err
-	}
-	var jobs []ocops.CronJob
-	if err := decodeCronData(data, &jobs); err != nil {
-		return nil, err
+		return nil, mapOcOpsCronErr(err)
 	}
 	if err := validateCronJobsData(jobs); err != nil {
 		return nil, err
@@ -554,13 +422,9 @@ func (s *HermesCronService) ShowJob(ctx context.Context, principal auth.Principa
 	if err := validateCronJobID(jobID); err != nil {
 		return ocops.CronJob{}, err
 	}
-	data, err := s.runOCCron(ctx, loc, []string{"show", "--id", jobID})
+	job, err := s.ops.CronShow(ctx, loc.Endpoint, jobID)
 	if err != nil {
-		return ocops.CronJob{}, err
-	}
-	var job ocops.CronJob
-	if err := decodeCronData(data, &job); err != nil {
-		return ocops.CronJob{}, err
+		return ocops.CronJob{}, mapOcOpsCronErr(err)
 	}
 	if err := validateCronJobData(job); err != nil {
 		return ocops.CronJob{}, err
@@ -568,23 +432,19 @@ func (s *HermesCronService) ShowJob(ctx context.Context, principal auth.Principa
 	return job, nil
 }
 
-// CreateJob 创建 Cron 任务并返回 oc-cron 重读后的稳定任务对象。
+// CreateJob 创建 Cron 任务并返回 oc-ops 重读后的稳定任务对象。
 func (s *HermesCronService) CreateJob(ctx context.Context, principal auth.Principal, appID string, in CreateCronJobInput) (ocops.CronJob, error) {
 	loc, err := s.resolveManage(ctx, principal, appID)
 	if err != nil {
 		return ocops.CronJob{}, err
 	}
-	args, err := appendCreateArgs([]string{"create"}, in)
+	req, err := buildCronCreateReq(in)
 	if err != nil {
 		return ocops.CronJob{}, err
 	}
-	data, err := s.runOCCron(ctx, loc, args)
+	job, err := s.ops.CronCreate(ctx, loc.Endpoint, req)
 	if err != nil {
-		return ocops.CronJob{}, err
-	}
-	var job ocops.CronJob
-	if err := decodeCronData(data, &job); err != nil {
-		return ocops.CronJob{}, err
+		return ocops.CronJob{}, mapOcOpsCronErr(err)
 	}
 	if err := validateCronJobData(job); err != nil {
 		return ocops.CronJob{}, err
@@ -601,17 +461,13 @@ func (s *HermesCronService) UpdateJob(ctx context.Context, principal auth.Princi
 	if err := validateCronJobID(jobID); err != nil {
 		return ocops.CronJob{}, err
 	}
-	args, err := appendUpdateArgs([]string{"update", "--id", jobID}, in)
+	req, err := buildCronUpdateReq(in)
 	if err != nil {
 		return ocops.CronJob{}, err
 	}
-	data, err := s.runOCCron(ctx, loc, args)
+	job, err := s.ops.CronUpdate(ctx, loc.Endpoint, jobID, req)
 	if err != nil {
-		return ocops.CronJob{}, err
-	}
-	var job ocops.CronJob
-	if err := decodeCronData(data, &job); err != nil {
-		return ocops.CronJob{}, err
+		return ocops.CronJob{}, mapOcOpsCronErr(err)
 	}
 	if err := validateCronJobData(job); err != nil {
 		return ocops.CronJob{}, err
@@ -619,12 +475,12 @@ func (s *HermesCronService) UpdateJob(ctx context.Context, principal auth.Princi
 	return job, nil
 }
 
-// PauseJob 暂停 Cron 任务，对应 oc-cron toggle --enabled false。
+// PauseJob 暂停 Cron 任务，对应 oc-ops toggle enabled=false。
 func (s *HermesCronService) PauseJob(ctx context.Context, principal auth.Principal, appID, jobID string) (ocops.CronJob, error) {
 	return s.toggleJob(ctx, principal, appID, jobID, false)
 }
 
-// ResumeJob 恢复 Cron 任务，对应 oc-cron toggle --enabled true。
+// ResumeJob 恢复 Cron 任务，对应 oc-ops toggle enabled=true。
 func (s *HermesCronService) ResumeJob(ctx context.Context, principal auth.Principal, appID, jobID string) (ocops.CronJob, error) {
 	return s.toggleJob(ctx, principal, appID, jobID, true)
 }
@@ -638,13 +494,9 @@ func (s *HermesCronService) toggleJob(ctx context.Context, principal auth.Princi
 	if err := validateCronJobID(jobID); err != nil {
 		return ocops.CronJob{}, err
 	}
-	data, err := s.runOCCron(ctx, loc, []string{"toggle", "--id", jobID, "--enabled", fmt.Sprintf("%t", enabled)})
+	job, err := s.ops.CronToggle(ctx, loc.Endpoint, jobID, enabled)
 	if err != nil {
-		return ocops.CronJob{}, err
-	}
-	var job ocops.CronJob
-	if err := decodeCronData(data, &job); err != nil {
-		return ocops.CronJob{}, err
+		return ocops.CronJob{}, mapOcOpsCronErr(err)
 	}
 	if err := validateCronJobData(job); err != nil {
 		return ocops.CronJob{}, err
@@ -661,13 +513,9 @@ func (s *HermesCronService) RunJob(ctx context.Context, principal auth.Principal
 	if err := validateCronJobID(jobID); err != nil {
 		return ocops.CronJob{}, err
 	}
-	data, err := s.runOCCron(ctx, loc, []string{"run", "--id", jobID})
+	job, err := s.ops.CronRun(ctx, loc.Endpoint, jobID)
 	if err != nil {
-		return ocops.CronJob{}, err
-	}
-	var job ocops.CronJob
-	if err := decodeCronData(data, &job); err != nil {
-		return ocops.CronJob{}, err
+		return ocops.CronJob{}, mapOcOpsCronErr(err)
 	}
 	if err := validateCronJobData(job); err != nil {
 		return ocops.CronJob{}, err
@@ -675,7 +523,7 @@ func (s *HermesCronService) RunJob(ctx context.Context, principal auth.Principal
 	return job, nil
 }
 
-// DeleteJob 删除 Cron 任务。oc-cron 成功时 data 仅表示执行成功，service 层不暴露额外 DTO。
+// DeleteJob 删除 Cron 任务。oc-ops 成功时返回 204，service 层不暴露额外 DTO。
 func (s *HermesCronService) DeleteJob(ctx context.Context, principal auth.Principal, appID, jobID string) error {
 	loc, err := s.resolveManage(ctx, principal, appID)
 	if err != nil {
@@ -684,8 +532,10 @@ func (s *HermesCronService) DeleteJob(ctx context.Context, principal auth.Princi
 	if err := validateCronJobID(jobID); err != nil {
 		return err
 	}
-	_, err = s.runOCCron(ctx, loc, []string{"delete", "--id", jobID})
-	return err
+	if err := s.ops.CronDelete(ctx, loc.Endpoint, jobID); err != nil {
+		return mapOcOpsCronErr(err)
+	}
+	return nil
 }
 
 // History 返回某个 Cron 任务的运行输出历史。
@@ -697,13 +547,9 @@ func (s *HermesCronService) History(ctx context.Context, principal auth.Principa
 	if err := validateCronJobID(jobID); err != nil {
 		return nil, err
 	}
-	data, err := s.runOCCron(ctx, loc, []string{"history", "--id", jobID})
+	entries, err := s.ops.CronHistory(ctx, loc.Endpoint, jobID)
 	if err != nil {
-		return nil, err
-	}
-	var entries []ocops.CronRunEntry
-	if err := decodeCronData(data, &entries); err != nil {
-		return nil, err
+		return nil, mapOcOpsCronErr(err)
 	}
 	if err := validateCronRunEntriesData(entries); err != nil {
 		return nil, err
@@ -723,55 +569,12 @@ func (s *HermesCronService) Output(ctx context.Context, principal auth.Principal
 	if err := validateCronOutputFile(fileName); err != nil {
 		return ocops.CronRunOutput{}, err
 	}
-	data, err := s.runOCCron(ctx, loc, []string{"output", "--id", jobID, "--file", fileName})
+	out, err := s.ops.CronOutput(ctx, loc.Endpoint, jobID, fileName)
 	if err != nil {
-		return ocops.CronRunOutput{}, err
-	}
-	var out ocops.CronRunOutput
-	if err := decodeCronData(data, &out); err != nil {
-		return ocops.CronRunOutput{}, err
+		return ocops.CronRunOutput{}, mapOcOpsCronErr(err)
 	}
 	if err := validateCronRunOutputData(out); err != nil {
 		return ocops.CronRunOutput{}, err
 	}
 	return out, nil
-}
-
-// cronAppStore 是 CronAppLocatorFromStore 依赖的最小 app 查询能力。
-// 只声明 GetApp，避免依赖整个 Querier 接口，便于单测注入假实现。
-type cronAppStore interface {
-	GetApp(ctx context.Context, id string) (sqlc.App, error)
-}
-
-// CronAppLocatorFromStore 基于 app store 把 appID 解析为 Cron 执行坐标。
-type CronAppLocatorFromStore struct {
-	store cronAppStore
-}
-
-// NewCronAppLocatorFromStore 构造 locator。
-func NewCronAppLocatorFromStore(store cronAppStore) *CronAppLocatorFromStore {
-	return &CronAppLocatorFromStore{store: store}
-}
-
-// LocateApp 查询 app 行并组装 CronAppLocation。
-// appID 直接作为字符串传入；app 不存在时 store 返回 sql.ErrNoRows。
-func (l *CronAppLocatorFromStore) LocateApp(ctx context.Context, appID string) (CronAppLocation, error) {
-	app, err := l.store.GetApp(ctx, appID)
-	if err != nil {
-		if errors.Is(err, sql.ErrNoRows) {
-			return CronAppLocation{}, ErrNotFound
-		}
-		return CronAppLocation{}, fmt.Errorf("查询 app 失败: %w", err)
-	}
-	loc := CronAppLocation{
-		OrgID:       app.OrgID,
-		OwnerUserID: app.OwnerUserID,
-		NodeID:      app.RuntimeNodeID,
-	}
-	if app.ContainerID.Valid {
-		loc.ContainerID = app.ContainerID.String
-	}
-	// dev stub 镜像约定以 -dev 结尾；真实能力探测仍通过 capabilities 完成。
-	loc.Stub = strings.HasSuffix(app.RuntimeImageRef, "-dev")
-	return loc, nil
 }

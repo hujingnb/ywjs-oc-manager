@@ -10,44 +10,112 @@ import (
 
 	"oc-manager/internal/auth"
 	"oc-manager/internal/domain"
-	"oc-manager/internal/integrations/runtime"
+	"oc-manager/internal/integrations/ocops"
 )
 
-// cronOKEnvelope 把 data JSON 包成 oc-cron 成功信封，模拟 runtime 容器 stdout。
-func cronOKEnvelope(dataJSON string) string {
-	return `{"ok":true,"data":` + dataJSON + `}`
-}
+// fakeCronOps 是 cronOps 的假实现：记录最后一次调用的入参，返回预设桩值/错误。
+// 每个方法只关心被测路径需要的字段，未用到的留零值。
+type fakeCronOps struct {
+	// lastEndpoint 记录最近一次被调用方法收到的 endpoint，便于断言坐标透传。
+	lastEndpoint ocops.Endpoint
+	// lastJobID 记录按任务 ID 定位的方法收到的 id。
+	lastJobID string
+	// lastAll 记录 CronList 收到的 all 参数。
+	lastAll bool
+	// lastEnabled 记录 CronToggle 收到的 enabled 参数。
+	lastEnabled bool
+	// lastFile 记录 CronOutput 收到的文件名。
+	lastFile string
+	// lastCreateReq / lastUpdateReq 记录写方法构造出的类型化请求体。
+	lastCreateReq ocops.CronCreateReq
+	lastUpdateReq ocops.CronUpdateReq
+	// called 记录最近一次被调用的方法名，断言「未触达上游」时用。
+	called string
 
-// cronErrEnvelope 把错误码包成 oc-cron 失败信封，模拟适配层契约错误。
-func cronErrEnvelope(code, message string) string {
-	return `{"ok":false,"error":{"code":"` + code + `","message":"` + message + `"}}`
-}
-
-// fakeCronExecer 记录最后一次容器命令，并返回预设 JSON 执行结果。
-type fakeCronExecer struct {
-	lastCmd []string
-	result  runtime.ExecJSONResult
-	err     error
-}
-
-func (f *fakeCronExecer) ContainerExecJSON(_ context.Context, _, _ string, cmd []string) (runtime.ExecJSONResult, error) {
-	f.lastCmd = cmd
-	return f.result, f.err
-}
-
-// fakeCronLocator 返回预设 app 坐标，覆盖权限、stub 和容器状态分支。
-type fakeCronLocator struct {
-	loc CronAppLocation
+	// 各方法的桩返回值。
+	caps    ocops.CronCapabilities
+	status  ocops.CronStatus
+	jobs    []ocops.CronJob
+	job     ocops.CronJob
+	history []ocops.CronRunEntry
+	output  ocops.CronRunOutput
+	// err 为非 nil 时所有方法直接返回它，用于覆盖 mapOcOpsCronErr 路径。
 	err error
 }
 
-func (f *fakeCronLocator) LocateApp(_ context.Context, _ string) (CronAppLocation, error) {
+func (f *fakeCronOps) CronCapabilities(_ context.Context, ep ocops.Endpoint) (ocops.CronCapabilities, error) {
+	f.called, f.lastEndpoint = "capabilities", ep
+	return f.caps, f.err
+}
+
+func (f *fakeCronOps) CronStatus(_ context.Context, ep ocops.Endpoint) (ocops.CronStatus, error) {
+	f.called, f.lastEndpoint = "status", ep
+	return f.status, f.err
+}
+
+func (f *fakeCronOps) CronList(_ context.Context, ep ocops.Endpoint, all bool) ([]ocops.CronJob, error) {
+	f.called, f.lastEndpoint, f.lastAll = "list", ep, all
+	return f.jobs, f.err
+}
+
+func (f *fakeCronOps) CronShow(_ context.Context, ep ocops.Endpoint, id string) (ocops.CronJob, error) {
+	f.called, f.lastEndpoint, f.lastJobID = "show", ep, id
+	return f.job, f.err
+}
+
+func (f *fakeCronOps) CronCreate(_ context.Context, ep ocops.Endpoint, req ocops.CronCreateReq) (ocops.CronJob, error) {
+	f.called, f.lastEndpoint, f.lastCreateReq = "create", ep, req
+	return f.job, f.err
+}
+
+func (f *fakeCronOps) CronUpdate(_ context.Context, ep ocops.Endpoint, id string, req ocops.CronUpdateReq) (ocops.CronJob, error) {
+	f.called, f.lastEndpoint, f.lastJobID, f.lastUpdateReq = "update", ep, id, req
+	return f.job, f.err
+}
+
+func (f *fakeCronOps) CronToggle(_ context.Context, ep ocops.Endpoint, id string, enabled bool) (ocops.CronJob, error) {
+	f.called, f.lastEndpoint, f.lastJobID, f.lastEnabled = "toggle", ep, id, enabled
+	return f.job, f.err
+}
+
+func (f *fakeCronOps) CronRun(_ context.Context, ep ocops.Endpoint, id string) (ocops.CronJob, error) {
+	f.called, f.lastEndpoint, f.lastJobID = "run", ep, id
+	return f.job, f.err
+}
+
+func (f *fakeCronOps) CronDelete(_ context.Context, ep ocops.Endpoint, id string) error {
+	f.called, f.lastEndpoint, f.lastJobID = "delete", ep, id
+	return f.err
+}
+
+func (f *fakeCronOps) CronHistory(_ context.Context, ep ocops.Endpoint, id string) ([]ocops.CronRunEntry, error) {
+	f.called, f.lastEndpoint, f.lastJobID = "history", ep, id
+	return f.history, f.err
+}
+
+func (f *fakeCronOps) CronOutput(_ context.Context, ep ocops.Endpoint, id, file string) (ocops.CronRunOutput, error) {
+	f.called, f.lastEndpoint, f.lastJobID, f.lastFile = "output", ep, id, file
+	return f.output, f.err
+}
+
+// fakeOcOpsResolver 返回预设的 app 坐标，覆盖权限、Supported 和 BaseURL 分支。
+type fakeOcOpsResolver struct {
+	loc OcOpsAppLocation
+	err error
+}
+
+func (f *fakeOcOpsResolver) Resolve(_ context.Context, _ string) (OcOpsAppLocation, error) {
 	return f.loc, f.err
 }
 
-// healthyCronLoc 返回一个可执行 oc-cron 的正常 app 坐标。
-func healthyCronLoc() CronAppLocation {
-	return CronAppLocation{OrgID: "org-1", OwnerUserID: "u-1", NodeID: "n-1", ContainerID: "c-1"}
+// healthyCronLoc 返回一个可调用 oc-ops 的正常 app 坐标（Supported 且 BaseURL 非空）。
+func healthyCronLoc() OcOpsAppLocation {
+	return OcOpsAppLocation{
+		OrgID:       "org-1",
+		OwnerUserID: "u-1",
+		Endpoint:    ocops.Endpoint{BaseURL: "http://app-1-ocops:8080"},
+		Supported:   true,
+	}
 }
 
 // cronOrgAdmin 返回 org-1 的组织管理员 principal。
@@ -55,77 +123,99 @@ func cronOrgAdmin() auth.Principal {
 	return auth.Principal{UserID: "admin-1", OrgID: "org-1", Role: domain.UserRoleOrgAdmin}
 }
 
-// TestCronListJobsHappy 验证：ListJobs 解析 oc-cron list 成功信封并保留 schedule/repeat 字段。
-func TestCronListJobsHappy(t *testing.T) {
-	execer := &fakeCronExecer{result: runtime.ExecJSONResult{
-		ExitCode: 0,
-		Stdout: cronOKEnvelope(`[{"id":"job_1","name":"日报","prompt":"生成日报",` +
-			`"schedule":{"kind":"cron","expr":"0 9 * * *","display":"每天 09:00"},` +
-			`"repeat":{"times":3,"completed":1},"enabled":true,"state":"scheduled","skills":["daily"]}]`),
-	}}
-	svc := NewHermesCronService(execer, &fakeCronLocator{loc: healthyCronLoc()})
+// newCronSvc 构造注入假 ops / resolver 的 service。
+func newCronSvc(ops cronOps, loc OcOpsAppLocation) *HermesCronService {
+	return NewHermesCronService(ops, &fakeOcOpsResolver{loc: loc})
+}
 
-	jobs, err := svc.ListJobs(context.Background(), cronOrgAdmin(), "app-1", CronJobFilter{})
+// TestCronListJobsHappy 验证：ListJobs 透传 all 标志、回传类型化任务并保留 schedule/repeat 字段。
+func TestCronListJobsHappy(t *testing.T) {
+	times := 3
+	ops := &fakeCronOps{jobs: []ocops.CronJob{{
+		ID:       "job_1",
+		Name:     "日报",
+		Prompt:   "生成日报",
+		Schedule: ocops.CronSchedule{Kind: "cron", Expr: "0 9 * * *", Display: "每天 09:00"},
+		Repeat:   ocops.CronRepeat{Times: &times, Completed: 1},
+		Enabled:  true,
+		State:    "scheduled",
+		Skills:   []string{"daily"},
+	}}}
+	svc := newCronSvc(ops, healthyCronLoc())
+
+	jobs, err := svc.ListJobs(context.Background(), cronOrgAdmin(), "app-1", CronJobFilter{All: true})
 	require.NoError(t, err)
 	require.Len(t, jobs, 1)
 	assert.Equal(t, "job_1", jobs[0].ID)
 	assert.Equal(t, "每天 09:00", jobs[0].Schedule.Display)
 	require.NotNil(t, jobs[0].Repeat.Times)
 	assert.Equal(t, 3, *jobs[0].Repeat.Times)
-	assert.Equal(t, []string{"oc-cron", "list"}, execer.lastCmd)
+	// all=true 必须透传给 ops，endpoint 必须来自 resolver 坐标。
+	assert.True(t, ops.lastAll)
+	assert.Equal(t, "http://app-1-ocops:8080", ops.lastEndpoint.BaseURL)
 }
 
-// TestCronResolveForbidden 验证：非本组织管理员不能访问应用 Cron。
+// TestCronResolveForbidden 验证：非本组织管理员不能访问应用 Cron，且不触达上游。
 func TestCronResolveForbidden(t *testing.T) {
-	svc := NewHermesCronService(&fakeCronExecer{}, &fakeCronLocator{loc: healthyCronLoc()})
+	ops := &fakeCronOps{}
+	svc := newCronSvc(ops, healthyCronLoc())
 	outsider := auth.Principal{UserID: "x", OrgID: "org-2", Role: domain.UserRoleOrgAdmin}
 
 	_, err := svc.ListJobs(context.Background(), outsider, "app-1", CronJobFilter{})
 	require.ErrorIs(t, err, ErrCronForbidden)
+	assert.Empty(t, ops.called)
 }
 
-// TestCronResolveStubUnsupported 验证：dev stub 镜像实例返回 Cron 不支持错误。
-func TestCronResolveStubUnsupported(t *testing.T) {
+// TestCronResolveUnsupported 验证：Supported=false（dev stub）实例返回 Cron 不支持错误。
+func TestCronResolveUnsupported(t *testing.T) {
 	loc := healthyCronLoc()
-	loc.Stub = true
-	svc := NewHermesCronService(&fakeCronExecer{}, &fakeCronLocator{loc: loc})
+	loc.Supported = false
+	ops := &fakeCronOps{}
+	svc := newCronSvc(ops, loc)
 
 	_, err := svc.ListJobs(context.Background(), cronOrgAdmin(), "app-1", CronJobFilter{})
 	require.ErrorIs(t, err, ErrCronNotSupported)
+	assert.Empty(t, ops.called)
 }
 
-// TestCronResolveRuntimeUnavailable 验证：容器未运行时拒绝执行 oc-cron。
+// TestCronResolveRuntimeUnavailable 验证：Endpoint.BaseURL 为空白时拒绝调用 oc-ops。
 func TestCronResolveRuntimeUnavailable(t *testing.T) {
 	loc := healthyCronLoc()
-	loc.ContainerID = " "
-	svc := NewHermesCronService(&fakeCronExecer{}, &fakeCronLocator{loc: loc})
+	loc.Endpoint.BaseURL = "  "
+	ops := &fakeCronOps{}
+	svc := newCronSvc(ops, loc)
 
 	_, err := svc.ListJobs(context.Background(), cronOrgAdmin(), "app-1", CronJobFilter{})
 	require.ErrorIs(t, err, ErrCronRuntimeUnavailable)
+	assert.Empty(t, ops.called)
 }
 
-// TestCronErrorCodeMapping 验证：oc-cron 失败信封错误码映射到 service 哨兵错误。
-func TestCronErrorCodeMapping(t *testing.T) {
+// TestCronResolverError 验证：resolver 返回 ErrNotFound（app 不存在）原样透出。
+func TestCronResolverError(t *testing.T) {
+	svc := NewHermesCronService(&fakeCronOps{}, &fakeOcOpsResolver{err: ErrNotFound})
+
+	_, err := svc.ListJobs(context.Background(), cronOrgAdmin(), "app-1", CronJobFilter{})
+	require.ErrorIs(t, err, ErrNotFound)
+}
+
+// TestCronErrorMapping 验证：ops 返回的 ocops 哨兵错误经 mapOcOpsCronErr 翻译为 service 哨兵错误。
+func TestCronErrorMapping(t *testing.T) {
 	cases := []struct {
 		name    string
-		code    string
+		opsErr  error
 		wantErr error
 	}{
-		{"参数非法映射为 BadRequest", "BAD_REQUEST", ErrCronBadRequest},      // 场景：适配层参数校验失败
-		{"资源不存在映射为 NotFound", "NOT_FOUND", ErrNotFound},               // 场景：任务或输出文件不存在
-		{"能力不支持映射为 NotSupported", "UNSUPPORTED", ErrCronNotSupported}, // 场景：镜像内缺失 hermes cron 能力
-		{"hermes 执行失败映射为 CLI 错误", "HERMES_CLI_FAILED", ErrCronCLI},    // 场景：底层 hermes cron 非零退出
-		{"内部错误映射为输出非法", "INTERNAL", ErrCronOutputInvalid},             // 场景：适配层内部数据结构异常
-		{"未知错误码兜底为 CLI 错误", "UNKNOWN_CODE", ErrCronCLI},               // 场景：未来错误码未被当前 manager 识别
+		{"400 映射为 BadRequest", ocops.ErrBadRequest, ErrCronBadRequest},     // 场景：上游参数校验失败
+		{"404 映射为 NotFound", ocops.ErrNotFound, ErrNotFound},               // 场景：任务不存在
+		{"409 映射为 NotSupported", ocops.ErrUnsupported, ErrCronNotSupported}, // 场景：实例缺失 cron 能力
+		{"500 映射为输出非法", ocops.ErrOutputInvalid, ErrCronOutputInvalid},     // 场景：上游内部错误
+		{"未知错误兜底为 CLI 错误", errors.New("boom"), ErrCronCLI},               // 场景：传输/未知上游错误
 	}
 	for _, c := range cases {
-		// 当前子测试覆盖单个 oc-cron 错误码的映射路径。
+		// 当前子测试覆盖单个 ocops 错误到 service 哨兵错误的翻译路径。
 		t.Run(c.name, func(t *testing.T) {
-			execer := &fakeCronExecer{result: runtime.ExecJSONResult{
-				ExitCode: 1,
-				Stdout:   cronErrEnvelope(c.code, "失败详情"),
-			}}
-			svc := NewHermesCronService(execer, &fakeCronLocator{loc: healthyCronLoc()})
+			ops := &fakeCronOps{err: c.opsErr}
+			svc := newCronSvc(ops, healthyCronLoc())
 
 			_, err := svc.ListJobs(context.Background(), cronOrgAdmin(), "app-1", CronJobFilter{})
 			require.ErrorIs(t, err, c.wantErr)
@@ -133,24 +223,21 @@ func TestCronErrorCodeMapping(t *testing.T) {
 	}
 }
 
-// TestCronRejectsBadJobID 验证：非法 job id 在 service 层被拒绝，不触达容器 exec。
+// TestCronRejectsBadJobID 验证：非法 job id 在 service 层被拒绝，不触达上游。
 func TestCronRejectsBadJobID(t *testing.T) {
-	execer := &fakeCronExecer{}
-	svc := NewHermesCronService(execer, &fakeCronLocator{loc: healthyCronLoc()})
+	ops := &fakeCronOps{}
+	svc := newCronSvc(ops, healthyCronLoc())
 
 	_, err := svc.ShowJob(context.Background(), cronOrgAdmin(), "app-1", "job; rm -rf /")
 	require.ErrorIs(t, err, ErrCronBadRequest)
-	assert.Nil(t, execer.lastCmd)
+	assert.Empty(t, ops.called)
 }
 
-// TestCronCreateBuildsArgv 验证：CreateJob 将基础字段和高级字段转换为稳定 oc-cron argv。
-func TestCronCreateBuildsArgv(t *testing.T) {
+// TestCronCreateBuildsReq 验证：CreateJob 把基础字段和高级字段转换为类型化 CronCreateReq。
+func TestCronCreateBuildsReq(t *testing.T) {
 	repeat := 3
-	execer := &fakeCronExecer{result: runtime.ExecJSONResult{
-		ExitCode: 0,
-		Stdout:   cronOKEnvelope(`{"id":"job_1","name":"日报","schedule":{"display":"每天 09:00"},"repeat":{"times":3,"completed":0},"enabled":true,"state":"scheduled"}`),
-	}}
-	svc := NewHermesCronService(execer, &fakeCronLocator{loc: healthyCronLoc()})
+	ops := &fakeCronOps{job: ocops.CronJob{ID: "job_1", Name: "日报", Enabled: true, State: "scheduled"}}
+	svc := newCronSvc(ops, healthyCronLoc())
 
 	job, err := svc.CreateJob(context.Background(), cronOrgAdmin(), "app-1", CreateCronJobInput{
 		Name:     "日报",
@@ -168,31 +255,84 @@ func TestCronCreateBuildsArgv(t *testing.T) {
 	})
 	require.NoError(t, err)
 	assert.Equal(t, "job_1", job.ID)
-	assert.Equal(t, []string{
-		"oc-cron", "create",
-		"--name", "日报",
-		"--schedule", "0 9 * * *",
-		"--prompt", "生成日报",
-		"--deliver", "wechat",
-		"--repeat", "3",
-		"--script", "daily.py",
-		"--no-agent",
-		"--workdir", "/opt/data",
-		"--skill", "daily",
-		"--skill", "summary",
-		"--model", "gpt-5",
-		"--provider", "openai",
-		"--base-url", "https://api.example.test",
-	}, execer.lastCmd)
+	// 断言构造出的类型化请求体逐字段正确。
+	req := ops.lastCreateReq
+	assert.Equal(t, "日报", req.Name)
+	assert.Equal(t, "0 9 * * *", req.Schedule)
+	assert.Equal(t, "生成日报", req.Prompt)
+	assert.Equal(t, "wechat", req.Deliver)
+	assert.Equal(t, 3, req.Repeat) // repeat 以裸整数透传，等价旧 --repeat 3
+	assert.Equal(t, "daily.py", req.Script)
+	assert.True(t, req.NoAgent)
+	assert.Equal(t, "/opt/data", req.Workdir)
+	assert.Equal(t, []string{"daily", "summary"}, req.Skills)
+	assert.Equal(t, "gpt-5", req.Model)
+	assert.Equal(t, "openai", req.Provider)
+	assert.Equal(t, "https://api.example.test", req.BaseURL)
 }
 
-// TestCronCapabilitiesParsesEnvelope 验证：Capabilities 解析契约版本、verb 清单与 feature 开关。
-func TestCronCapabilitiesParsesEnvelope(t *testing.T) {
-	capsJSON := `{"contract_version":"1.0","oc_cron_version":"1","hermes_version":"v0.14.0",` +
-		`"variant":"hermes-v2026.5.16","verbs":["status","list","create"],` +
-		`"features":{"status":true,"history":true,"output":true,"write":true,"script":true,"advanced_fields":true}}`
-	execer := &fakeCronExecer{result: runtime.ExecJSONResult{ExitCode: 0, Stdout: cronOKEnvelope(capsJSON)}}
-	svc := NewHermesCronService(execer, &fakeCronLocator{loc: healthyCronLoc()})
+// TestCronCreateRejectsEmptyName 验证：缺少必填 name 时在 service 层校验失败，不触达上游。
+func TestCronCreateRejectsEmptyName(t *testing.T) {
+	ops := &fakeCronOps{}
+	svc := newCronSvc(ops, healthyCronLoc())
+
+	_, err := svc.CreateJob(context.Background(), cronOrgAdmin(), "app-1", CreateCronJobInput{
+		Name:     "  ",
+		Schedule: "0 9 * * *",
+	})
+	require.ErrorIs(t, err, ErrCronBadRequest)
+	assert.Empty(t, ops.called)
+}
+
+// TestCronCreateRejectsBadScript 验证：含路径分隔的 script 被拒绝（防目录逃逸），不触达上游。
+func TestCronCreateRejectsBadScript(t *testing.T) {
+	ops := &fakeCronOps{}
+	svc := newCronSvc(ops, healthyCronLoc())
+
+	_, err := svc.CreateJob(context.Background(), cronOrgAdmin(), "app-1", CreateCronJobInput{
+		Name:     "日报",
+		Schedule: "0 9 * * *",
+		Script:   "../etc/passwd",
+	})
+	require.ErrorIs(t, err, ErrCronBadRequest)
+	assert.Empty(t, ops.called)
+}
+
+// TestCronUpdateBuildsReq 验证：UpdateJob 把指针字段转换为 partial CronUpdateReq，未提交字段保持 nil。
+func TestCronUpdateBuildsReq(t *testing.T) {
+	name := "新名"
+	ops := &fakeCronOps{job: ocops.CronJob{ID: "job_1", Enabled: true, State: "scheduled"}}
+	svc := newCronSvc(ops, healthyCronLoc())
+
+	_, err := svc.UpdateJob(context.Background(), cronOrgAdmin(), "app-1", "job_1", UpdateCronJobInput{
+		Name:        &name,
+		ClearSkills: true,
+		Agent:       true,
+	})
+	require.NoError(t, err)
+	assert.Equal(t, "job_1", ops.lastJobID)
+	req := ops.lastUpdateReq
+	// 提交了的字段非 nil。
+	require.NotNil(t, req.Name)
+	assert.Equal(t, "新名", *req.Name)
+	require.NotNil(t, req.ClearSkills)
+	assert.True(t, *req.ClearSkills)
+	require.NotNil(t, req.Agent)
+	assert.True(t, *req.Agent)
+	// 未提交字段保持 nil，体现 partial update 语义。
+	assert.Nil(t, req.Schedule)
+	assert.Nil(t, req.Prompt)
+}
+
+// TestCronCapabilitiesValidates 验证：Capabilities 回传类型化能力并校验契约版本存在。
+func TestCronCapabilitiesParses(t *testing.T) {
+	ops := &fakeCronOps{caps: ocops.CronCapabilities{
+		ContractVersion: "1.0",
+		OCCronVersion:   "1",
+		Verbs:           []string{"status", "list", "create"},
+		Features:        ocops.CronFeatures{AdvancedFields: true},
+	}}
+	svc := newCronSvc(ops, healthyCronLoc())
 
 	caps, err := svc.Capabilities(context.Background(), cronOrgAdmin(), "app-1")
 	require.NoError(t, err)
@@ -200,167 +340,125 @@ func TestCronCapabilitiesParsesEnvelope(t *testing.T) {
 	assert.Equal(t, "1", caps.OCCronVersion)
 	assert.True(t, caps.Features.AdvancedFields)
 	assert.Contains(t, caps.Verbs, "create")
-	assert.Equal(t, []string{"oc-cron", "capabilities"}, execer.lastCmd)
 }
 
-// TestCronRejectsNonzeroExitWithOKEnvelope 验证：非零退出码即使返回 ok:true 也按 CLI 失败处理。
-func TestCronRejectsNonzeroExitWithOKEnvelope(t *testing.T) {
-	execer := &fakeCronExecer{result: runtime.ExecJSONResult{
-		ExitCode: 2,
-		Stdout:   cronOKEnvelope(`{"available":true,"gateway_running":true,"active_jobs":1}`),
-		Stderr:   "permission denied",
-	}}
-	svc := NewHermesCronService(execer, &fakeCronLocator{loc: healthyCronLoc()})
+// TestCronCapabilitiesRejectsMissingVersion 验证：缺少契约版本的 capabilities 被判定为输出非法。
+func TestCronCapabilitiesRejectsMissingVersion(t *testing.T) {
+	ops := &fakeCronOps{caps: ocops.CronCapabilities{OCCronVersion: "1"}} // 缺 contract_version
+	svc := newCronSvc(ops, healthyCronLoc())
 
-	_, err := svc.Status(context.Background(), cronOrgAdmin(), "app-1")
-	require.ErrorIs(t, err, ErrCronCLI)
-	assert.ErrorContains(t, err, "exit 2")
-	assert.ErrorContains(t, err, "permission denied")
+	_, err := svc.Capabilities(context.Background(), cronOrgAdmin(), "app-1")
+	require.ErrorIs(t, err, ErrCronOutputInvalid)
 }
 
-// TestCronNonzeroExitMalformedStdoutIsCLI 验证：非零退出码且 stdout 非信封时稳定归类为 CLI 失败。
-func TestCronNonzeroExitMalformedStdoutIsCLI(t *testing.T) {
-	execer := &fakeCronExecer{result: runtime.ExecJSONResult{
-		ExitCode: 127,
-		Stdout:   "oc-cron: not found",
-		Stderr:   "executable file not found",
-	}}
-	svc := NewHermesCronService(execer, &fakeCronLocator{loc: healthyCronLoc()})
-
-	_, err := svc.Status(context.Background(), cronOrgAdmin(), "app-1")
-	require.ErrorIs(t, err, ErrCronCLI)
-	require.NotErrorIs(t, err, ErrCronOutputInvalid)
-	assert.ErrorContains(t, err, "exit 127")
-}
-
-// TestCronRejectsNullData 验证：成功信封的 data:null 在结构和切片路径都按输出非法处理。
-func TestCronRejectsNullData(t *testing.T) {
+// TestCronToggleRunDelete 验证：Pause/Resume/Run/Delete 调对应 ops 方法并透传 enabled / job id。
+func TestCronToggleRunDelete(t *testing.T) {
 	cases := []struct {
-		name string
-		call func(*HermesCronService) error
+		name        string
+		call        func(*HermesCronService) error
+		wantCalled  string
+		wantEnabled bool // 仅对 toggle 有意义
+		checkToggle bool
 	}{
 		{
-			name: "struct 路径拒绝 null data", // 场景：Status 需要结构化对象，null 不能被当成零值状态
-			call: func(svc *HermesCronService) error {
-				_, err := svc.Status(context.Background(), cronOrgAdmin(), "app-1")
-				return err
-			},
-		},
-		{
-			name: "slice 路径拒绝 null data", // 场景：ListJobs 需要数组，null 不能被当成空列表
-			call: func(svc *HermesCronService) error {
-				_, err := svc.ListJobs(context.Background(), cronOrgAdmin(), "app-1", CronJobFilter{})
-				return err
-			},
-		},
-	}
-	for _, c := range cases {
-		// 当前子测试覆盖一种成功信封 data:null 被拒绝的解析路径。
-		t.Run(c.name, func(t *testing.T) {
-			execer := &fakeCronExecer{result: runtime.ExecJSONResult{
-				ExitCode: 0,
-				Stdout:   cronOKEnvelope(`null`),
-			}}
-			svc := NewHermesCronService(execer, &fakeCronLocator{loc: healthyCronLoc()})
-
-			err := c.call(svc)
-			require.ErrorIs(t, err, ErrCronOutputInvalid)
-		})
-	}
-}
-
-// TestCronToggleRunAndDeleteBuildArgv 验证：Pause/Resume/Run/Delete 使用稳定 oc-cron verbs。
-func TestCronToggleRunAndDeleteBuildArgv(t *testing.T) {
-	cases := []struct {
-		name    string
-		call    func(*HermesCronService) error
-		wantCmd []string
-	}{
-		{
-			name: "暂停任务映射为 toggle false", // 场景：PauseJob 必须调用稳定 toggle verb 并显式关闭
+			name: "暂停任务调 toggle false", // 场景：PauseJob 调 CronToggle 并显式关闭
 			call: func(svc *HermesCronService) error {
 				_, err := svc.PauseJob(context.Background(), cronOrgAdmin(), "app-1", "job_1")
 				return err
 			},
-			wantCmd: []string{"oc-cron", "toggle", "--id", "job_1", "--enabled", "false"},
+			wantCalled: "toggle", wantEnabled: false, checkToggle: true,
 		},
 		{
-			name: "恢复任务映射为 toggle true", // 场景：ResumeJob 必须调用稳定 toggle verb 并显式开启
+			name: "恢复任务调 toggle true", // 场景：ResumeJob 调 CronToggle 并显式开启
 			call: func(svc *HermesCronService) error {
 				_, err := svc.ResumeJob(context.Background(), cronOrgAdmin(), "app-1", "job_1")
 				return err
 			},
-			wantCmd: []string{"oc-cron", "toggle", "--id", "job_1", "--enabled", "true"},
+			wantCalled: "toggle", wantEnabled: true, checkToggle: true,
 		},
 		{
-			name: "立即运行任务调用 run", // 场景：RunJob 透传稳定 run verb
+			name: "立即运行任务调 run", // 场景：RunJob 调 CronRun
 			call: func(svc *HermesCronService) error {
 				_, err := svc.RunJob(context.Background(), cronOrgAdmin(), "app-1", "job_1")
 				return err
 			},
-			wantCmd: []string{"oc-cron", "run", "--id", "job_1"},
+			wantCalled: "run",
 		},
 		{
-			name: "删除任务调用 delete", // 场景：DeleteJob 透传稳定 delete verb 并忽略成功 data
+			name: "删除任务调 delete", // 场景：DeleteJob 调 CronDelete
 			call: func(svc *HermesCronService) error {
 				return svc.DeleteJob(context.Background(), cronOrgAdmin(), "app-1", "job_1")
 			},
-			wantCmd: []string{"oc-cron", "delete", "--id", "job_1"},
+			wantCalled: "delete",
 		},
 	}
 	for _, c := range cases {
-		// 当前子测试覆盖一个写 verb 到 oc-cron argv 的稳定映射。
+		// 当前子测试覆盖一个写方法到对应 ops 方法的稳定映射。
 		t.Run(c.name, func(t *testing.T) {
-			execer := &fakeCronExecer{result: runtime.ExecJSONResult{
-				ExitCode: 0,
-				Stdout:   cronOKEnvelope(`{"id":"job_1","name":"日报","schedule":{"display":"每天"},"repeat":{"completed":0},"enabled":true,"state":"scheduled"}`),
-			}}
-			svc := NewHermesCronService(execer, &fakeCronLocator{loc: healthyCronLoc()})
+			ops := &fakeCronOps{job: ocops.CronJob{ID: "job_1", Enabled: true, State: "scheduled"}}
+			svc := newCronSvc(ops, healthyCronLoc())
 
 			err := c.call(svc)
 			require.NoError(t, err)
-			assert.Equal(t, c.wantCmd, execer.lastCmd)
+			assert.Equal(t, c.wantCalled, ops.called)
+			assert.Equal(t, "job_1", ops.lastJobID)
+			if c.checkToggle {
+				assert.Equal(t, c.wantEnabled, ops.lastEnabled)
+			}
 		})
 	}
 }
 
-// TestCronHistoryAndOutputParse 验证：History/Output 解析输出历史列表与 markdown 内容。
-func TestCronHistoryAndOutputParse(t *testing.T) {
-	t.Run("history 解析输出列表", func(t *testing.T) {
+// TestCronHistoryAndOutput 验证：History/Output 回传类型化结果并透传 job id / 文件名。
+func TestCronHistoryAndOutput(t *testing.T) {
+	t.Run("history 返回输出列表", func(t *testing.T) {
 		// 场景：history 返回一次真实 markdown 输出记录。
-		execer := &fakeCronExecer{result: runtime.ExecJSONResult{
-			ExitCode: 0,
-			Stdout:   cronOKEnvelope(`[{"job_id":"job_1","file_name":"2026-05-20.md","run_time":"2026-05-20T09:00:00Z","size":12,"has_output":true,"synthetic":false}]`),
-		}}
-		svc := NewHermesCronService(execer, &fakeCronLocator{loc: healthyCronLoc()})
+		ops := &fakeCronOps{history: []ocops.CronRunEntry{{
+			JobID:    "job_1",
+			FileName: "2026-05-20.md",
+			RunTime:  "2026-05-20T09:00:00Z",
+			Size:     12,
+		}}}
+		svc := newCronSvc(ops, healthyCronLoc())
 
 		entries, err := svc.History(context.Background(), cronOrgAdmin(), "app-1", "job_1")
 		require.NoError(t, err)
 		require.Len(t, entries, 1)
 		assert.Equal(t, "2026-05-20.md", entries[0].FileName)
-		assert.Equal(t, []string{"oc-cron", "history", "--id", "job_1"}, execer.lastCmd)
+		assert.Equal(t, "job_1", ops.lastJobID)
 	})
 
-	t.Run("output 解析 markdown 内容", func(t *testing.T) {
+	t.Run("output 返回 markdown 内容", func(t *testing.T) {
 		// 场景：output 返回指定 markdown 文件内容。
-		execer := &fakeCronExecer{result: runtime.ExecJSONResult{
-			ExitCode: 0,
-			Stdout:   cronOKEnvelope(`{"job_id":"job_1","file_name":"2026-05-20.md","run_time":"2026-05-20T09:00:00Z","content":"# 日报\n"}`),
+		ops := &fakeCronOps{output: ocops.CronRunOutput{
+			JobID:    "job_1",
+			FileName: "2026-05-20.md",
+			Content:  "# 日报\n",
 		}}
-		svc := NewHermesCronService(execer, &fakeCronLocator{loc: healthyCronLoc()})
+		svc := newCronSvc(ops, healthyCronLoc())
 
 		out, err := svc.Output(context.Background(), cronOrgAdmin(), "app-1", "job_1", "2026-05-20.md")
 		require.NoError(t, err)
 		assert.Equal(t, "# 日报\n", out.Content)
-		assert.Equal(t, []string{"oc-cron", "output", "--id", "job_1", "--file", "2026-05-20.md"}, execer.lastCmd)
+		assert.Equal(t, "2026-05-20.md", ops.lastFile)
 	})
 }
 
-// TestCronExecErrorWrapped 验证：runtime exec 失败时统一包成 ErrCronCLI。
-func TestCronExecErrorWrapped(t *testing.T) {
-	execer := &fakeCronExecer{err: errors.New("agent offline")}
-	svc := NewHermesCronService(execer, &fakeCronLocator{loc: healthyCronLoc()})
+// TestCronOutputRejectsPathEscape 验证：含路径分隔的 output 文件名被拒绝（防目录逃逸），不触达上游。
+func TestCronOutputRejectsPathEscape(t *testing.T) {
+	ops := &fakeCronOps{}
+	svc := newCronSvc(ops, healthyCronLoc())
 
-	_, err := svc.Status(context.Background(), cronOrgAdmin(), "app-1")
-	require.ErrorIs(t, err, ErrCronCLI)
+	_, err := svc.Output(context.Background(), cronOrgAdmin(), "app-1", "job_1", "../secret.md")
+	require.ErrorIs(t, err, ErrCronBadRequest)
+	assert.Empty(t, ops.called)
+}
+
+// TestCronRejectsInvalidJobIDInResult 验证：上游返回缺少合法 id 的任务对象时判定为输出非法。
+func TestCronRejectsInvalidJobIDInResult(t *testing.T) {
+	ops := &fakeCronOps{job: ocops.CronJob{ID: ""}} // 上游回传空 id
+	svc := newCronSvc(ops, healthyCronLoc())
+
+	_, err := svc.ShowJob(context.Background(), cronOrgAdmin(), "app-1", "job_1")
+	require.ErrorIs(t, err, ErrCronOutputInvalid)
 }
