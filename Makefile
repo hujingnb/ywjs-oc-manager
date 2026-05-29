@@ -1,4 +1,4 @@
-.PHONY: dev-up dev-down test vet build sqlc-generate migrate-up migrate-down check-compose logs web-test web-typecheck web-build build-hermes-runtime hermes-inject-contract debug-ollama debug-newapi newapi-probe seed-e2e smoke-v102 openapi-gen web-types-gen openapi-check ssh-manager ssh-agent1 ssh-newapi logs-api logs-agent1 psql-manager redis-manager bh-logs
+.PHONY: test vet build sqlc-generate migrate-up migrate-down check-compose logs web-test web-typecheck web-build build-hermes-runtime hermes-inject-contract debug-ollama debug-newapi newapi-probe seed-e2e smoke-v102 openapi-gen web-types-gen openapi-check ssh-manager ssh-agent1 ssh-newapi logs-api logs-agent1 psql-manager redis-manager bh-logs local-up local-down local-reset local-build local-migrate local-seed local-seed-e2e local-mc-init local-status local-logs local-shell cluster-create .guard-k3d-hosts
 
 # 加载 .env（-include 在文件不存在时静默跳过，不报错）。
 # docker compose 会自动读取 .env，Makefile 显式 include 是为了让 SSH 等 target 也能访问其中变量。
@@ -6,6 +6,18 @@
 
 SWAG_VERSION := v2.0.0-rc5
 OPENAPI_TS_VERSION := 7.13.0
+
+# —— 本地 k3d 集群参数（spec-D）——
+K3D_CLUSTER       ?= ocm
+K3D_REGISTRY      ?= ocm-registry
+K3D_REGISTRY_PORT ?= 5000
+K3D_REGISTRY_HOST := k3d-$(K3D_REGISTRY).localhost:$(K3D_REGISTRY_PORT)
+K3D_DATA_DIR      := $(CURDIR)/.k3d-data
+K8S_NS            ?= ocm
+K8S_LOCAL_DIR     := deploy/k8s/local
+KUBECTL           ?= kubectl
+# local Secret 文件：默认用入仓的 example；存在真值 secret.yaml 时优先用真值。
+SECRET_FILE       := $(if $(wildcard $(K8S_LOCAL_DIR)/secret.yaml),$(K8S_LOCAL_DIR)/secret.yaml,$(K8S_LOCAL_DIR)/secret.example.yaml)
 
 # 统一镜像 tag：取 make 调用时的本地时间，格式 YYYY-MM-DD-HH-MM-SS。
 # 同一次 make 调用中所有生产镜像共享同一时间戳，避免同批镜像 tag 不一致。
@@ -84,13 +96,30 @@ help: ## 显示本帮助文档(make 默认 target)
 	@test -n "$(GIT_COMMIT_SHORT)" || { echo "无法读取当前 git commit id" >&2; exit 1; }
 	@test -z "$(GIT_DIRTY_SUFFIX)" || echo "⚠️  工作区存在未提交的 tracked 改动，镜像 tag 将追加 -dirty 标记: $(IMAGE_TAG)" >&2
 
-##@ 本地开发
+##@ 本地开发 (k3d)
 
-dev-up: ## 启动本地 dev compose (manager + agent + 依赖)
-	docker compose up -d
+.guard-k3d-hosts: ## 校验 /etc/hosts 已把 k3d registry 主机名指向 127.0.0.1
+	@grep -q "k3d-$(K3D_REGISTRY).localhost" /etc/hosts || { \
+		echo "❌ 缺少 hosts 记录。请执行（需 sudo）："; \
+		echo "   echo '127.0.0.1 k3d-$(K3D_REGISTRY).localhost' | sudo tee -a /etc/hosts"; \
+		exit 1; }
 
-dev-down: ## 停止本地 dev compose 全部容器
-	docker compose down
+cluster-create: .guard-k3d-hosts ## 创建 k3d 集群（带 registry + 宿主数据卷 + 80 端口映射）
+	@mkdir -p $(K3D_DATA_DIR)
+	k3d cluster create $(K3D_CLUSTER) \
+		--registry-create $(K3D_REGISTRY):0.0.0.0:$(K3D_REGISTRY_PORT) \
+		--volume $(K3D_DATA_DIR):/var/lib/rancher/k3s/storage@all \
+		--port "80:80@loadbalancer" \
+		--wait
+	@echo "✅ 集群 $(K3D_CLUSTER) 就绪。registry=$(K3D_REGISTRY_HOST)，数据卷=$(K3D_DATA_DIR)"
+
+local-down: ## 删除 k3d 集群（宿主 .k3d-data 数据保留，下次 up 复用）
+	-k3d cluster delete $(K3D_CLUSTER)
+	@echo "ℹ️  集群已删除；数据仍在 $(K3D_DATA_DIR)（如需清空跑 make local-reset）"
+
+local-reset: local-down ## 删集群并清空 .k3d-data，干净重建（不自动 up）
+	rm -rf $(K3D_DATA_DIR)
+	@echo "✅ 已清空 $(K3D_DATA_DIR)；跑 make local-up 干净重建"
 
 ##@ 测试 / 静态检查
 
