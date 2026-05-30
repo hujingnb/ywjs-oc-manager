@@ -406,19 +406,12 @@ func runManager(ctx context.Context, cfg config.Config, logOut io.Writer) error 
 	restartHandler := handlers.NewAppRestartContainerHandler(dbStore.Queries, orch, workspaceObjStore)
 	// 注入 input refresher：restart 刷新版本配置并检测镜像变更，bootstrap 接管 pod 启动配置后
 	// refresher 的节点文件写入逻辑保留兼容，镜像 ref 比较由 refresher 返回值驱动。
+	// k8s 下 pod 配置由 bootstrap 在启动时交付，restart 不再向节点写 manifest；
+	// refresher 只解析绑定版本的镜像 ref 与 revision，供镜像变更检测使用。
 	restartHandler.SetInputRefresher(newAppInputRefresher(
 		dbStore.Queries,
-		runtimeAdapter,
-		cipher,
 		func(imageID string) (string, bool) {
 			return config.ResolveRuntimeImage(cfg.Hermes.RuntimeImages, imageID)
-		},
-		skillBlobStore,
-		handlers.AppInputBuildOptions{
-			PlatformPrompt:        cfg.Hermes.SystemPromptTemplate,
-			NewAPIBaseURL:         cfg.NewAPI.BaseURL,
-			DefaultModel:          cfg.Hermes.LLM.DefaultModel,
-			ManagerRuntimeBaseURL: cfg.Hermes.ManagerRuntimeBaseURL,
 		},
 	))
 	// 注入 job notifier：restart 检测到镜像变更时入队 app_initialize job 后即时唤醒 worker。
