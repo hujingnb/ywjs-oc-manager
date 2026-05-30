@@ -22,9 +22,10 @@ import (
 // appStatusStore 是 AppStatusReconciler 所需最小 DB 能力。
 // 接口最小化原则：只声明本 reconciler 实际调用的方法，避免与其他 store 接口耦合。
 type appStatusStore interface {
-	// ListRunningApps 返回 status IN ('running','binding_waiting') 且已绑定 runtime 的 app 列表。
-	// 注意：返回行不含 status 字段，需通过 GetApp 读取当前状态做守卫。
-	ListRunningApps(ctx context.Context) ([]sqlc.ListRunningAppsRow, error)
+	// ListRunningApps 返回 status IN ('running','binding_waiting') 的 app id 列表。
+	// spec-A2b：不再含 runtime_node_id / container_id，消费方仅用 id。
+	// 注意：返回列表不含 status 字段，需通过 GetApp 读取当前状态做守卫。
+	ListRunningApps(ctx context.Context) ([]string, error)
 	// GetApp 按 ID 读取 app 完整记录，用于在写状态前确认当前 status。
 	GetApp(ctx context.Context, id string) (sqlc.App, error)
 	// SetAppStatus 裸 UPDATE status 字段，无状态机守卫；守卫由调用方在 Go 层负责。
@@ -56,14 +57,15 @@ func NewAppStatusReconciler(store appStatusStore, orch k8sorch.Orchestrator) *Ap
 // 最终返回 nil（等待下一轮重试）。
 func (r *AppStatusReconciler) Tick(ctx context.Context) error {
 	// 整轮失败时直接返回，让调度器记录错误。
-	rows, err := r.store.ListRunningApps(ctx)
+	// spec-A2b：ListRunningApps 返回 []string（app id），不再含节点/容器信息。
+	ids, err := r.store.ListRunningApps(ctx)
 	if err != nil {
 		return err
 	}
 
-	for _, row := range rows {
+	for _, appID := range ids {
 		// 单个 app 的 orch 调用失败不阻塞整轮，直接跳过；下一轮重试。
-		st, serr := r.orch.Status(ctx, row.ID)
+		st, serr := r.orch.Status(ctx, appID)
 		if serr != nil {
 			continue
 		}
@@ -74,7 +76,7 @@ func (r *AppStatusReconciler) Tick(ctx context.Context) error {
 		if len(st.Raw) > 0 {
 			_ = r.store.SetAppRuntimeSnapshot(ctx, sqlc.SetAppRuntimeSnapshotParams{
 				RuntimeSnapshotJson: st.Raw,
-				ID:                  row.ID,
+				ID:                  appID,
 			})
 		}
 
@@ -84,7 +86,7 @@ func (r *AppStatusReconciler) Tick(ctx context.Context) error {
 			// pod 处于正常或瞬态状态，无需变更 DB status。
 			continue
 		}
-		app, gerr := r.store.GetApp(ctx, row.ID)
+		app, gerr := r.store.GetApp(ctx, appID)
 		if gerr != nil {
 			// 读取失败跳过，下一轮重试。
 			continue
@@ -96,7 +98,7 @@ func (r *AppStatusReconciler) Tick(ctx context.Context) error {
 		// 忽略 SetAppStatus 写失败，下一轮重试。
 		_ = r.store.SetAppStatus(ctx, sqlc.SetAppStatusParams{
 			Status: domain.AppStatusError,
-			ID:     row.ID,
+			ID:     appID,
 		})
 	}
 	return nil

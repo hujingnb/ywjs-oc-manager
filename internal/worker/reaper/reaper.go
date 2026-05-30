@@ -130,7 +130,6 @@ func (r *Reaper) reapOnce(ctx context.Context) error {
 		if err := r.reapApp(ctx, row); err != nil {
 			r.logger.Error("reaper 重置单个 app 失败",
 				"app_id", row.ID,
-				"node_id", row.RuntimeNodeID,
 				"status", row.Status,
 				"error", err,
 			)
@@ -176,11 +175,10 @@ func (r *Reaper) ensureInitJob(ctx context.Context, row sqlc.ListStaleInitsRow) 
 		return "", fmt.Errorf("查 job: %w", err)
 	}
 	if errors.Is(err, sql.ErrNoRows) {
-		// 历史从未建过 app_initialize job,新建一份。
-		// payload 至少含 app_id 和 runtime_node_id,与 handler 入参 schema 对齐。
+		// 历史从未建过 app_initialize job，新建一份。
+		// spec-A2b：payload 只含 app_id，不再携带 runtime_node（k8s 路径按 appID 寻址）。
 		payload, perr := json.Marshal(map[string]any{
-			"app_id":       row.ID,
-			"runtime_node": row.RuntimeNodeID,
+			"app_id": row.ID,
 		})
 		if perr != nil {
 			return "", fmt.Errorf("序列化 payload: %w", perr)

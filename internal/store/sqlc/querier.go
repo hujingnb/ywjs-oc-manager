@@ -127,7 +127,6 @@ type Querier interface {
 	ListAppsByOrg(ctx context.Context, arg ListAppsByOrgParams) ([]App, error)
 	// 组织实例列表联查版本 revision / image_id，供 version_synced 批量计算。
 	ListAppsByOrgWithVersion(ctx context.Context, arg ListAppsByOrgWithVersionParams) ([]ListAppsByOrgWithVersionRow, error)
-	ListAppsByRuntimeNode(ctx context.Context, arg ListAppsByRuntimeNodeParams) ([]App, error)
 	ListAssistantVersions(ctx context.Context) ([]AssistantVersion, error)
 	// 返回审计行 + actor 实时名称 + target 实时名称（按 target_type 走子查询）。
 	// 子查询里 WHERE al.target_type = X 保证 newapi_call 的 endpoint 字符串
@@ -153,13 +152,14 @@ type Querier interface {
 	ListRAGFlowDocumentsNeedingRefresh(ctx context.Context, limit int32) ([]ListRAGFlowDocumentsNeedingRefreshRow, error)
 	ListReadyJobs(ctx context.Context, limit int32) ([]Job, error)
 	ListRechargeRecordsByOrg(ctx context.Context, arg ListRechargeRecordsByOrgParams) ([]RechargeRecord, error)
-	// 列出当前期望持有 runtime 容器的应用，供 scheduler 周期 dispatch
-	// runtime_refresh_status 与 app_health_check job。
-	// running 是常态；binding_waiting 表示容器已起但渠道还在登录中，依然要刷指标。
-	ListRunningApps(ctx context.Context) ([]ListRunningAppsRow, error)
+	// 列出当前期望运行（k8s Deployment 已创建）的应用，供 app_status_reconciler 周期 poll pod 状态。
+	// running 是常态；binding_waiting 表示 pod 已起但渠道还在登录中，也需要 reconcile。
+	// spec-A2b：去掉 runtime_node_id / container_id（k8s 路径不再写这两列），消费方仅用 id。
+	ListRunningApps(ctx context.Context) ([]string, error)
 	ListRuntimeNodes(ctx context.Context, arg ListRuntimeNodesParams) ([]RuntimeNode, error)
 	// reaper 扫描 init 子状态下连续 90s 无更新的孤儿；阈值由调用方传入。
 	// 包含新旧两套 init 状态，确保历史孤儿也能被正确清理。
+	// spec-A2b：去掉 runtime_node_id（k8s 路径不再写该列），reaper 仅需 id / status 重置孤儿。
 	ListStaleInits(ctx context.Context, updatedAt time.Time) ([]ListStaleInitsRow, error)
 	ListUsersByOrg(ctx context.Context, arg ListUsersByOrgParams) ([]User, error)
 	// 列出组织内成员及其当前关联的活跃实例（LEFT JOIN，无实例的成员仍返回）。
@@ -185,7 +185,6 @@ type Querier interface {
 	RevokeRefreshToken(ctx context.Context, id string) error
 	// 初始化/重启成功后记录已应用的版本修订与镜像 ref，用于 version_synced 检测。
 	SetAppAppliedVersion(ctx context.Context, arg SetAppAppliedVersionParams) error
-	SetAppContainer(ctx context.Context, arg SetAppContainerParams) error
 	// worker app_health_check handler 写最近一次健康检查结果；用于自动重启窗口计数。
 	SetAppHealthState(ctx context.Context, arg SetAppHealthStateParams) error
 	SetAppNewAPIKey(ctx context.Context, arg SetAppNewAPIKeyParams) error

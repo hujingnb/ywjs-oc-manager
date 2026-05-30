@@ -90,11 +90,13 @@ func TestRuntimeOperationAllowsPlatformAdmin(t *testing.T) {
 }
 
 // TestRequestInitialize_HappyPathFromError 验证请求初始化成功路径来自错误的成功路径场景。
+// spec-A2b：RequestInitialize 不再调用 SetAppContainer 清空 container_id，
+// k8s 路径 container_id 由 Deployment 控制器管理，manager 不感知也不写入。
 func TestRequestInitialize_HappyPathFromError(t *testing.T) {
 	store := newRuntimeOperationStub(t)
 	store.app.Status = domain.AppStatusError
 	store.app.ApiKeyStatus = domain.APIKeyStatusError
-	store.app.ContainerID = null.StringFrom("old") // 有容器 ID
+	store.app.ContainerID = null.StringFrom("old") // 有容器 ID（k8s 路径此列可能有历史值）
 	notifier := &fakeNotifier{}
 	svc := NewRuntimeOperationService(store, newDiscardLogger(), notifier)
 
@@ -105,7 +107,8 @@ func TestRequestInitialize_HappyPathFromError(t *testing.T) {
 	// 重置目标为 pulling_runtime_image，worker 直接从第一阶段开始重跑。
 	require.Equal(t, domain.AppStatusPullingRuntimeImage, store.app.Status)
 	require.Equal(t, domain.APIKeyStatusPending, store.app.ApiKeyStatus)
-	require.False(t, store.app.ContainerID.Valid)
+	// spec-A2b：container_id 不再由 manager 清空，k8s 路径由 Deployment 控制器管理。
+	// ContainerID 值不变（仍为 "old"）——此处仅确认 manager 不写入，不做值断言。
 	// 5.6 新增：ClearAppProgress 必须被调用，否则前端会看到上一次失败遗留的进度数。
 	require.True(t, store.progressCleared)
 	require.Equal(t, domain.JobTypeAppInitialize, store.lastJobType)
@@ -297,12 +300,7 @@ func (s *runtimeOperationStub) SetAppNewAPIKey(_ context.Context, arg sqlc.SetAp
 	return nil
 }
 
-// SetAppContainer 为 :exec；stub 更新容器 ID / 名称字段。
-func (s *runtimeOperationStub) SetAppContainer(_ context.Context, arg sqlc.SetAppContainerParams) error {
-	s.app.ContainerID = arg.ContainerID
-	s.app.ContainerName = arg.ContainerName
-	return nil
-}
+// spec-A2b：SetAppContainer 已从 RuntimeOperationStore 接口移除，stub 不再实现。
 
 var fakeNotFound = errors.New("not found")
 

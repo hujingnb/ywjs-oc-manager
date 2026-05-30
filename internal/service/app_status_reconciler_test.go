@@ -21,8 +21,8 @@ import (
 
 // fakeAppStatusStore 是 appStatusStore 的内存 fake，记录所有调用供断言使用。
 type fakeAppStatusStore struct {
-	// rows 是 ListRunningApps 返回的固定数据。
-	rows []sqlc.ListRunningAppsRow
+	// rows 是 ListRunningApps 返回的 app id 列表（spec-A2b：只含 id）。
+	rows []string
 	// apps 按 ID 存储 GetApp 返回的 app 数据。
 	apps map[string]sqlc.App
 
@@ -43,7 +43,8 @@ func newFakeAppStatusStore() *fakeAppStatusStore {
 	}
 }
 
-func (f *fakeAppStatusStore) ListRunningApps(_ context.Context) ([]sqlc.ListRunningAppsRow, error) {
+// ListRunningApps 返回 []string（spec-A2b：只含 id，不含节点/容器字段）。
+func (f *fakeAppStatusStore) ListRunningApps(_ context.Context) ([]string, error) {
 	if f.listErr != nil {
 		return nil, f.listErr
 	}
@@ -111,13 +112,8 @@ func (f *fakeOrch) Delete(_ context.Context, _ string) error                    
 func (f *fakeOrch) RolloutRestart(_ context.Context, _ string) error                 { panic("not used") }
 
 // ============================================================
-// 辅助：构造常用 ListRunningAppsRow 和 App
+// 辅助：构造常用 app id 字符串和 App
 // ============================================================
-
-// runningRow 构造 ListRunningApps 返回的行（status 字段不含，由 GetApp 返回）。
-func runningRow(id string) sqlc.ListRunningAppsRow {
-	return sqlc.ListRunningAppsRow{ID: id}
-}
 
 // appWithStatus 构造 GetApp 返回的 App，只设置 ID 和 Status。
 func appWithStatus(id, status string) sqlc.App {
@@ -138,7 +134,8 @@ const (
 // → 写 snapshot、不调 SetAppStatus（正常运行态，无需变更 DB status）。
 func TestAppStatusReconciler_RunningReadyPod(t *testing.T) {
 	store := newFakeAppStatusStore()
-	store.rows = []sqlc.ListRunningAppsRow{runningRow(appID1)}
+	// spec-A2b：ListRunningApps 返回 []string（只含 app id）。
+	store.rows = []string{appID1}
 	store.apps[appID1] = appWithStatus(appID1, domain.AppStatusRunning)
 
 	orch := newFakeOrch()
@@ -165,7 +162,8 @@ func TestAppStatusReconciler_RunningReadyPod(t *testing.T) {
 // → 写 snapshot + SetAppStatus(error)（pod 被带外删除，确定性坏态）。
 func TestAppStatusReconciler_RunningNotFoundPod(t *testing.T) {
 	store := newFakeAppStatusStore()
-	store.rows = []sqlc.ListRunningAppsRow{runningRow(appID1)}
+	// spec-A2b：ListRunningApps 返回 []string（只含 app id）。
+	store.rows = []string{appID1}
 	store.apps[appID1] = appWithStatus(appID1, domain.AppStatusRunning)
 
 	orch := newFakeOrch()
@@ -193,7 +191,8 @@ func TestAppStatusReconciler_RunningNotFoundPod(t *testing.T) {
 // → 写 snapshot + SetAppStatus(error)（容器反复崩溃，确定性坏态）。
 func TestAppStatusReconciler_RunningCrashLoopBackOff(t *testing.T) {
 	store := newFakeAppStatusStore()
-	store.rows = []sqlc.ListRunningAppsRow{runningRow(appID1)}
+	// spec-A2b：ListRunningApps 返回 []string（只含 app id）。
+	store.rows = []string{appID1}
 	store.apps[appID1] = appWithStatus(appID1, domain.AppStatusRunning)
 
 	orch := newFakeOrch()
@@ -221,7 +220,8 @@ func TestAppStatusReconciler_RunningCrashLoopBackOff(t *testing.T) {
 // → 写 snapshot + SetAppStatus(error)（pod 已进入 Failed 相位，确定性失败）。
 func TestAppStatusReconciler_RunningFailedPod(t *testing.T) {
 	store := newFakeAppStatusStore()
-	store.rows = []sqlc.ListRunningAppsRow{runningRow(appID1)}
+	// spec-A2b：ListRunningApps 返回 []string（只含 app id）。
+	store.rows = []string{appID1}
 	store.apps[appID1] = appWithStatus(appID1, domain.AppStatusRunning)
 
 	orch := newFakeOrch()
@@ -249,7 +249,8 @@ func TestAppStatusReconciler_RunningFailedPod(t *testing.T) {
 // → 只写 snapshot，不推 error（Pending 属于正常启动/重启流程中的瞬态，Deployment 自管）。
 func TestAppStatusReconciler_RunningPendingPod(t *testing.T) {
 	store := newFakeAppStatusStore()
-	store.rows = []sqlc.ListRunningAppsRow{runningRow(appID1)}
+	// spec-A2b：ListRunningApps 返回 []string（只含 app id）。
+	store.rows = []string{appID1}
 	store.apps[appID1] = appWithStatus(appID1, domain.AppStatusRunning)
 
 	orch := newFakeOrch()
@@ -276,7 +277,8 @@ func TestAppStatusReconciler_RunningPendingPod(t *testing.T) {
 // binding_waiting → running 由渠道绑定流程负责，reconciler 不越权迁移任何非 running 状态。
 func TestAppStatusReconciler_BindingWaitingNotFound(t *testing.T) {
 	store := newFakeAppStatusStore()
-	store.rows = []sqlc.ListRunningAppsRow{runningRow(appID1)}
+	// spec-A2b：ListRunningApps 返回 []string（只含 app id）。
+	store.rows = []string{appID1}
 	// GetApp 返回 binding_waiting，模拟渠道正在登录中的 app。
 	store.apps[appID1] = appWithStatus(appID1, domain.AppStatusBindingWaiting)
 
@@ -304,9 +306,10 @@ func TestAppStatusReconciler_BindingWaitingNotFound(t *testing.T) {
 // 构造两个 app：appID1 orch 返回 error，appID2 正常 NotFound → error。
 func TestAppStatusReconciler_OrchErrorSkipsApp(t *testing.T) {
 	store := newFakeAppStatusStore()
-	store.rows = []sqlc.ListRunningAppsRow{
-		runningRow(appID1), // orch 会返回错误，应跳过
-		runningRow(appID2), // orch 正常，pod NotFound → 推 error
+	// spec-A2b：ListRunningApps 返回 []string（只含 app id）。
+	store.rows = []string{
+		appID1, // orch 会返回错误，应跳过
+		appID2, // orch 正常，pod NotFound → 推 error
 	}
 	store.apps[appID1] = appWithStatus(appID1, domain.AppStatusRunning)
 	store.apps[appID2] = appWithStatus(appID2, domain.AppStatusRunning)
@@ -346,7 +349,8 @@ func TestAppStatusReconciler_OrchErrorSkipsApp(t *testing.T) {
 // 若快照为空（如 NotFound 时可能无 pod 数据），跳过 snapshot 写入；状态守卫仍正常执行。
 func TestAppStatusReconciler_EmptyRawSkipsSnapshot(t *testing.T) {
 	store := newFakeAppStatusStore()
-	store.rows = []sqlc.ListRunningAppsRow{runningRow(appID1)}
+	// spec-A2b：ListRunningApps 返回 []string（只含 app id）。
+	store.rows = []string{appID1}
 	store.apps[appID1] = appWithStatus(appID1, domain.AppStatusRunning)
 
 	orch := newFakeOrch()
@@ -372,7 +376,8 @@ func TestAppStatusReconciler_EmptyRawSkipsSnapshot(t *testing.T) {
 // 这是 Critical 修复的直接覆盖：确保快照写失败不再 continue 跳过守卫逻辑。
 func TestAppStatusReconciler_SnapshotWriteErrorDoesNotBlockGuard(t *testing.T) {
 	store := newFakeAppStatusStore()
-	store.rows = []sqlc.ListRunningAppsRow{runningRow(appID1)}
+	// spec-A2b：ListRunningApps 返回 []string（只含 app id）。
+	store.rows = []string{appID1}
 	store.apps[appID1] = appWithStatus(appID1, domain.AppStatusRunning)
 	// 模拟 DB 抖动：SetAppRuntimeSnapshot 返回错误。
 	store.snapshotErr = errors.New("db write error: connection reset")

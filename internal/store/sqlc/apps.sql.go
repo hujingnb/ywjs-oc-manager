@@ -420,109 +420,30 @@ func (q *Queries) ListAppsByOrgWithVersion(ctx context.Context, arg ListAppsByOr
 	return items, nil
 }
 
-const listAppsByRuntimeNode = `-- name: ListAppsByRuntimeNode :many
-SELECT id, org_id, owner_user_id, name, description, status, container_id, container_name, newapi_key_id, newapi_key_ciphertext, api_key_status, runtime_snapshot_json, runtime_snapshot_at, restart_policy_json, health_state_json, progress_current, progress_total, last_error_status, last_error_message, runtime_image_ref, runtime_image_sha256, newapi_key_name, version_id, applied_version_revision, applied_image_ref, runtime_token_hash, runtime_token_ciphertext, created_at, updated_at, deleted_at, owner_active_key, runtime_token_active_key, runtime_node_id
-FROM apps
-WHERE runtime_node_id = ? AND deleted_at IS NULL
-ORDER BY created_at DESC, id DESC
-LIMIT ? OFFSET ?
-`
-
-type ListAppsByRuntimeNodeParams struct {
-	RuntimeNodeID null.String `db:"runtime_node_id" json:"runtime_node_id"`
-	Limit         int32       `db:"limit" json:"limit"`
-	Offset        int32       `db:"offset" json:"offset"`
-}
-
-func (q *Queries) ListAppsByRuntimeNode(ctx context.Context, arg ListAppsByRuntimeNodeParams) ([]App, error) {
-	rows, err := q.db.QueryContext(ctx, listAppsByRuntimeNode, arg.RuntimeNodeID, arg.Limit, arg.Offset)
-	if err != nil {
-		return nil, err
-	}
-	defer rows.Close()
-	items := []App{}
-	for rows.Next() {
-		var i App
-		if err := rows.Scan(
-			&i.ID,
-			&i.OrgID,
-			&i.OwnerUserID,
-			&i.Name,
-			&i.Description,
-			&i.Status,
-			&i.ContainerID,
-			&i.ContainerName,
-			&i.NewapiKeyID,
-			&i.NewapiKeyCiphertext,
-			&i.ApiKeyStatus,
-			&i.RuntimeSnapshotJson,
-			&i.RuntimeSnapshotAt,
-			&i.RestartPolicyJson,
-			&i.HealthStateJson,
-			&i.ProgressCurrent,
-			&i.ProgressTotal,
-			&i.LastErrorStatus,
-			&i.LastErrorMessage,
-			&i.RuntimeImageRef,
-			&i.RuntimeImageSha256,
-			&i.NewapiKeyName,
-			&i.VersionID,
-			&i.AppliedVersionRevision,
-			&i.AppliedImageRef,
-			&i.RuntimeTokenHash,
-			&i.RuntimeTokenCiphertext,
-			&i.CreatedAt,
-			&i.UpdatedAt,
-			&i.DeletedAt,
-			&i.OwnerActiveKey,
-			&i.RuntimeTokenActiveKey,
-			&i.RuntimeNodeID,
-		); err != nil {
-			return nil, err
-		}
-		items = append(items, i)
-	}
-	if err := rows.Close(); err != nil {
-		return nil, err
-	}
-	if err := rows.Err(); err != nil {
-		return nil, err
-	}
-	return items, nil
-}
-
 const listRunningApps = `-- name: ListRunningApps :many
-SELECT id, runtime_node_id, container_id
+SELECT id
 FROM apps
 WHERE deleted_at IS NULL
   AND status IN ('running', 'binding_waiting')
-  AND runtime_node_id IS NOT NULL
-  AND container_id IS NOT NULL
 ORDER BY id
 `
 
-type ListRunningAppsRow struct {
-	ID            string      `db:"id" json:"id"`
-	RuntimeNodeID null.String `db:"runtime_node_id" json:"runtime_node_id"`
-	ContainerID   null.String `db:"container_id" json:"container_id"`
-}
-
-// 列出当前期望持有 runtime 容器的应用，供 scheduler 周期 dispatch
-// runtime_refresh_status 与 app_health_check job。
-// running 是常态；binding_waiting 表示容器已起但渠道还在登录中，依然要刷指标。
-func (q *Queries) ListRunningApps(ctx context.Context) ([]ListRunningAppsRow, error) {
+// 列出当前期望运行（k8s Deployment 已创建）的应用，供 app_status_reconciler 周期 poll pod 状态。
+// running 是常态；binding_waiting 表示 pod 已起但渠道还在登录中，也需要 reconcile。
+// spec-A2b：去掉 runtime_node_id / container_id（k8s 路径不再写这两列），消费方仅用 id。
+func (q *Queries) ListRunningApps(ctx context.Context) ([]string, error) {
 	rows, err := q.db.QueryContext(ctx, listRunningApps)
 	if err != nil {
 		return nil, err
 	}
 	defer rows.Close()
-	items := []ListRunningAppsRow{}
+	items := []string{}
 	for rows.Next() {
-		var i ListRunningAppsRow
-		if err := rows.Scan(&i.ID, &i.RuntimeNodeID, &i.ContainerID); err != nil {
+		var id string
+		if err := rows.Scan(&id); err != nil {
 			return nil, err
 		}
-		items = append(items, i)
+		items = append(items, id)
 	}
 	if err := rows.Close(); err != nil {
 		return nil, err
@@ -534,7 +455,7 @@ func (q *Queries) ListRunningApps(ctx context.Context) ([]ListRunningAppsRow, er
 }
 
 const listStaleInits = `-- name: ListStaleInits :many
-SELECT id, runtime_node_id, status
+SELECT id, status
 FROM apps
 WHERE deleted_at IS NULL
   AND status IN ('pulling_runtime_image','preparing_runtime','creating_container','starting')
@@ -543,13 +464,13 @@ ORDER BY id
 `
 
 type ListStaleInitsRow struct {
-	ID            string      `db:"id" json:"id"`
-	RuntimeNodeID null.String `db:"runtime_node_id" json:"runtime_node_id"`
-	Status        string      `db:"status" json:"status"`
+	ID     string `db:"id" json:"id"`
+	Status string `db:"status" json:"status"`
 }
 
 // reaper 扫描 init 子状态下连续 90s 无更新的孤儿；阈值由调用方传入。
 // 包含新旧两套 init 状态，确保历史孤儿也能被正确清理。
+// spec-A2b：去掉 runtime_node_id（k8s 路径不再写该列），reaper 仅需 id / status 重置孤儿。
 func (q *Queries) ListStaleInits(ctx context.Context, updatedAt time.Time) ([]ListStaleInitsRow, error) {
 	rows, err := q.db.QueryContext(ctx, listStaleInits, updatedAt)
 	if err != nil {
@@ -559,7 +480,7 @@ func (q *Queries) ListStaleInits(ctx context.Context, updatedAt time.Time) ([]Li
 	items := []ListStaleInitsRow{}
 	for rows.Next() {
 		var i ListStaleInitsRow
-		if err := rows.Scan(&i.ID, &i.RuntimeNodeID, &i.Status); err != nil {
+		if err := rows.Scan(&i.ID, &i.Status); err != nil {
 			return nil, err
 		}
 		items = append(items, i)
@@ -614,23 +535,6 @@ type SetAppAppliedVersionParams struct {
 // 初始化/重启成功后记录已应用的版本修订与镜像 ref，用于 version_synced 检测。
 func (q *Queries) SetAppAppliedVersion(ctx context.Context, arg SetAppAppliedVersionParams) error {
 	_, err := q.db.ExecContext(ctx, setAppAppliedVersion, arg.AppliedVersionRevision, arg.AppliedImageRef, arg.ID)
-	return err
-}
-
-const setAppContainer = `-- name: SetAppContainer :exec
-UPDATE apps
-SET container_id = ?, container_name = ?, updated_at = now()
-WHERE id = ?
-`
-
-type SetAppContainerParams struct {
-	ContainerID   null.String `db:"container_id" json:"container_id"`
-	ContainerName null.String `db:"container_name" json:"container_name"`
-	ID            string      `db:"id" json:"id"`
-}
-
-func (q *Queries) SetAppContainer(ctx context.Context, arg SetAppContainerParams) error {
-	_, err := q.db.ExecContext(ctx, setAppContainer, arg.ContainerID, arg.ContainerName, arg.ID)
 	return err
 }
 

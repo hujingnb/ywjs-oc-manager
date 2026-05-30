@@ -17,12 +17,13 @@ import (
 )
 
 // RuntimeOperationStore 抽象 service 需要的查询能力。
+// spec-A2b：删除 SetAppContainer（apps.container_id/container_name 不再由 manager 写入，
+// k8s 路径 pod/container 由 Deployment 控制器管理，manager 不感知容器 ID）。
 type RuntimeOperationStore interface {
 	GetApp(ctx context.Context, id string) (sqlc.App, error)
 	GetUser(ctx context.Context, id string) (sqlc.User, error)
 	SetAppStatus(ctx context.Context, arg sqlc.SetAppStatusParams) error
 	SetAppNewAPIKey(ctx context.Context, arg sqlc.SetAppNewAPIKeyParams) error
-	SetAppContainer(ctx context.Context, arg sqlc.SetAppContainerParams) error
 	// ClearAppProgress 把 apps.progress_current / progress_total 重置为 NULL,
 	// RequestInitialize 重试时调用,避免前端看到上一次失败遗留的进度数。
 	ClearAppProgress(ctx context.Context, id string) error
@@ -334,14 +335,8 @@ func (s *RuntimeOperationService) RequestInitialize(ctx context.Context, princip
 	}); err != nil {
 		return RuntimeOperationResult{}, fmt.Errorf("重置 api_key 状态失败: %w", err)
 	}
-	// SetAppContainer 为 :exec；清空 container_id / container_name。
-	if err := s.store.SetAppContainer(ctx, sqlc.SetAppContainerParams{
-		ID:            app.ID,
-		ContainerID:   null.String{},
-		ContainerName: null.String{},
-	}); err != nil {
-		return RuntimeOperationResult{}, fmt.Errorf("清空 container_id 失败: %w", err)
-	}
+	// spec-A2b：container_id / container_name 由 k8s Deployment 管理，manager 不写入，
+	// RequestInitialize 不再调用 SetAppContainer 清空这两列。
 
 	payload, err := json.Marshal(map[string]any{
 		"app_id":       app.ID,

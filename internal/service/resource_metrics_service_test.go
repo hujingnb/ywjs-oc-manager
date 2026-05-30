@@ -119,10 +119,6 @@ func (s *resourceMetricsStoreStub) GetApp(_ context.Context, id string) (sqlc.Ap
 	return s.app, nil
 }
 
-func (s *resourceMetricsStoreStub) ListAppsByRuntimeNode(context.Context, sqlc.ListAppsByRuntimeNodeParams) ([]sqlc.App, error) {
-	return []sqlc.App{s.app}, nil
-}
-
 func (s *resourceMetricsStoreStub) ListLatestInstanceResourceSamplesByNode(_ context.Context, _ string) ([]sqlc.InstanceResourceSample, error) {
 	return nil, nil
 }

@@ -6,18 +6,16 @@ import (
 	"log/slog"
 	"time"
 
-	null "github.com/guregu/null/v5"
-
 	"oc-manager/internal/domain"
 	"oc-manager/internal/store/sqlc"
 )
 
 // ReconcilerStore 抽象 reconciler 需要的数据访问能力。
 // 与 RuntimeOperationStore 部分重叠，但单独定义避免不相关接口被强行扩展。
+// spec-A2b：删除 ListAppsByRuntimeNode（apps.runtime_node_id 列概念已去除）。
 type ReconcilerStore interface {
 	ListRuntimeNodes(ctx context.Context, arg sqlc.ListRuntimeNodesParams) ([]sqlc.RuntimeNode, error)
 	SetRuntimeNodeStatus(ctx context.Context, arg sqlc.SetRuntimeNodeStatusParams) error
-	ListAppsByRuntimeNode(ctx context.Context, arg sqlc.ListAppsByRuntimeNodeParams) ([]sqlc.App, error)
 	SetAppStatus(ctx context.Context, arg sqlc.SetAppStatusParams) error
 }
 
@@ -58,7 +56,7 @@ func (r *NodeHealthReconciler) Reconcile(ctx context.Context) (int, error) {
 		if node.Status != domain.RuntimeNodeStatusActive {
 			continue
 		}
-		// LastHeartbeatAt 是 null.Time；有值且在阈值之后则跳过。
+		// LastHeartbeatAt 是 null.Time（guregu/null）；有值且在阈值之后则跳过。
 		if node.LastHeartbeatAt.Valid && node.LastHeartbeatAt.Time.After(threshold) {
 			continue
 		}
@@ -77,30 +75,11 @@ func (r *NodeHealthReconciler) Reconcile(ctx context.Context) (int, error) {
 	return demoted, nil
 }
 
-// markRunningAppsAsError 把节点上所有 running 应用推到 error 状态。
-// 取节点应用列表时分页拉取以避免一次性返回过多记录；这里上限 500，超过则下次循环再处理。
-func (r *NodeHealthReconciler) markRunningAppsAsError(ctx context.Context, nodeID string) error {
-	apps, err := r.store.ListAppsByRuntimeNode(ctx, sqlc.ListAppsByRuntimeNodeParams{
-		// RuntimeNodeID nullable（spec-A2a）：按节点 ID 精确过滤，传非空字符串。
-		RuntimeNodeID: null.StringFrom(nodeID),
-		Limit:         500,
-		Offset:        0,
-	})
-	if err != nil {
-		return fmt.Errorf("列出节点应用失败: %w", err)
-	}
-	for _, app := range apps {
-		if app.Status != domain.AppStatusRunning {
-			continue
-		}
-		// SetAppStatus 为 :exec；app.ID 已是 string。
-		if err := r.store.SetAppStatus(ctx, sqlc.SetAppStatusParams{
-			ID:     app.ID,
-			Status: domain.AppStatusError,
-		}); err != nil {
-			return fmt.Errorf("更新应用 %s 状态失败: %w", app.ID, err)
-		}
-	}
+// markRunningAppsAsError 原本通过 apps.runtime_node_id 列出节点上的 running 应用并推 error。
+// spec-A2b：apps 不再记录 runtime_node_id（k8s 路径 pod 落点由调度器决定，app 无节点归属），
+// 此函数暂为 no-op，直到 Phase 3 完整删除节点感知链路后移除本函数。
+// k8s 路径下 pod 崩溃由 AppStatusReconciler 通过 orch.Status 感知，不依赖节点维度。
+func (r *NodeHealthReconciler) markRunningAppsAsError(_ context.Context, _ string) error {
 	return nil
 }
 

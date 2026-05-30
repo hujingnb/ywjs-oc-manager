@@ -151,6 +151,11 @@ func TestReaper_NoExistingJob_CreateNew(t *testing.T) {
 	assert.Equal(t, domain.JobTypeAppInitialize, store.createJobCalls[0].Type)
 	assert.Equal(t, int32(100), store.createJobCalls[0].Priority)
 	assert.Equal(t, int32(3), store.createJobCalls[0].MaxAttempts)
+	// spec-A2b：payload 只含 app_id，不再携带 runtime_node（k8s 路径按 appID 寻址）
+	var payload map[string]any
+	require.NoError(t, json.Unmarshal(store.createJobCalls[0].PayloadJson, &payload))
+	assert.Equal(t, testAppID, payload["app_id"], "payload 必须含 app_id")
+	assert.NotContains(t, payload, "runtime_node", "spec-A2b：payload 不应含 runtime_node")
 	// 新建后也要通知队列
 	assert.NotEmpty(t, notifier.enqueued)
 }

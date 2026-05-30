@@ -306,8 +306,9 @@ func (w *runtimeInspectorWrapper) InspectContainer(ctx context.Context, nodeID, 
 var jsonMarshal = json.Marshal
 
 // runtimeRefreshJobsQueries 是 runtimeRefreshDispatcher 用到的 sqlc 子集。
+// spec-A2b：ListRunningApps 返回 []string（只含 app id），不再含节点/容器字段。
 type runtimeRefreshJobsQueries interface {
-	ListRunningApps(ctx context.Context) ([]sqlc.ListRunningAppsRow, error)
+	ListRunningApps(ctx context.Context) ([]string, error)
 	CreateJob(ctx context.Context, arg sqlc.CreateJobParams) error
 }
 
@@ -349,14 +350,13 @@ func (d *healthCheckDispatcher) Tick(ctx context.Context) error {
 
 // enqueuePerRunningApp 是 runtime_refresh_status 与 app_health_check 共用的扫描入队逻辑。
 // 任一应用 CreateJob 失败 continue 不阻断；返回错误仅在 ListRunningApps 失败时。
+// spec-A2b：ListRunningApps 返回 []string，直接遍历 app id 字符串。
 func enqueuePerRunningApp(ctx context.Context, queries runtimeRefreshJobsQueries, notifier service.JobNotifier, jobType string, priority int32, maxAttempts int32) error {
-	rows, err := queries.ListRunningApps(ctx)
+	appIDs, err := queries.ListRunningApps(ctx)
 	if err != nil {
 		return fmt.Errorf("列出 running 应用失败: %w", err)
 	}
-	for _, row := range rows {
-		// row.ID 现在是 string，直接使用。
-		appID := row.ID
+	for _, appID := range appIDs {
 		payload, err := jsonMarshal(map[string]any{"app_id": appID})
 		if err != nil {
 			continue

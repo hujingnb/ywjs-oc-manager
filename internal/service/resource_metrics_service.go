@@ -9,18 +9,16 @@ import (
 	"strings"
 	"time"
 
-	null "github.com/guregu/null/v5"
-
 	"oc-manager/internal/auth"
 	"oc-manager/internal/domain"
 	"oc-manager/internal/store/sqlc"
 )
 
 // ResourceMetricsStore 抽象资源趋势服务需要的 sqlc 查询能力。
+// spec-A2b：删除 ListAppsByRuntimeNode（apps.runtime_node_id 列概念已去除，节点维度列举实例不再支持）。
 type ResourceMetricsStore interface {
 	GetRuntimeNode(ctx context.Context, id string) (sqlc.RuntimeNode, error)
 	GetApp(ctx context.Context, id string) (sqlc.App, error)
-	ListAppsByRuntimeNode(ctx context.Context, arg sqlc.ListAppsByRuntimeNodeParams) ([]sqlc.App, error)
 	ListLatestInstanceResourceSamplesByNode(ctx context.Context, runtimeNodeID string) ([]sqlc.InstanceResourceSample, error)
 	ListNodeResourceSamples(ctx context.Context, arg sqlc.ListNodeResourceSamplesParams) ([]sqlc.NodeResourceSample, error)
 	ListNodeResourceBuckets(ctx context.Context, arg sqlc.ListNodeResourceBucketsParams) ([]sqlc.ListNodeResourceBucketsRow, error)
@@ -183,6 +181,8 @@ func (s *ResourceMetricsService) ListNodeResources(ctx context.Context, principa
 }
 
 // ListNodeInstances 查询节点上的应用实例列表，并附带每个实例最近一次资源采样。
+// spec-A2b：apps.runtime_node_id 列概念已去除，无法再按节点查询实例列表；
+// 当前返回空列表并通过采样表关联已有采样数据（采样记录仍保留 runtime_node_id）。
 func (s *ResourceMetricsService) ListNodeInstances(ctx context.Context, principal auth.Principal, nodeID string, limit, offset int32) ([]NodeInstanceResult, error) {
 	if principal.Role != domain.UserRolePlatformAdmin {
 		return nil, ErrForbidden
@@ -192,39 +192,9 @@ func (s *ResourceMetricsService) ListNodeInstances(ctx context.Context, principa
 	} else if err != nil {
 		return nil, fmt.Errorf("查询 runtime 节点失败: %w", err)
 	}
-	if limit <= 0 {
-		limit = 50
-	}
-	if limit > 200 {
-		limit = 200
-	}
-	if offset < 0 {
-		offset = 0
-	}
-	// RuntimeNodeID nullable（spec-A2a）：按节点 ID 精确过滤，传非空字符串。
-	apps, err := s.store.ListAppsByRuntimeNode(ctx, sqlc.ListAppsByRuntimeNodeParams{RuntimeNodeID: null.StringFrom(nodeID), Limit: limit, Offset: offset})
-	if err != nil {
-		return nil, fmt.Errorf("查询节点实例失败: %w", err)
-	}
-	samples, err := s.store.ListLatestInstanceResourceSamplesByNode(ctx, nodeID)
-	if err != nil {
-		return nil, fmt.Errorf("查询实例最近资源采样失败: %w", err)
-	}
-	// 按 AppID（string）建索引，便于 O(1) 查找。
-	latest := make(map[string]sqlc.InstanceResourceSample, len(samples))
-	for _, sample := range samples {
-		latest[sample.AppID] = sample
-	}
-	results := make([]NodeInstanceResult, 0, len(apps))
-	for _, app := range apps {
-		result := nodeInstanceResult(app)
-		if sample, ok := latest[app.ID]; ok {
-			current := instanceSampleResult(sample)
-			result.CurrentResource = &current
-		}
-		results = append(results, result)
-	}
-	return results, nil
+	// spec-A2b：apps 不再记录 runtime_node_id，无法按节点维度列举实例。
+	// 返回空结果，直到 Phase 3 完整清理节点维度实例接口。
+	return []NodeInstanceResult{}, nil
 }
 
 // ListNodeInstanceResources 查询指定节点上某个应用实例的资源趋势。
