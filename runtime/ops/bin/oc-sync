@@ -1,5 +1,59 @@
 #!/usr/bin/env bash
-# 占位：实体见 Task 3/4/5。
+# oc-sync — sidecar 入口：循环把 /opt/data 产物增量同步回 S3。
+# 用 bootstrap 的 s3_write STS 凭证写 apps/<id>/ 前缀；凭证临近过期自调 bootstrap 续期。
+# workspace 增量同步（无 --delete）每 OC_SYNC_INTERVAL 秒一次；sqlite 一致性快照每
+# OC_SQLITE_INTERVAL 秒一次。OC_SYNC_ONCE=1 时只跑一轮（含一次 sqlite 备份）后退出，供测试。
 set -euo pipefail
-echo "oc-* 入口尚未实现" >&2
-exit 1
+# shellcheck source=/usr/local/bin/oc-lib.sh
+# shellcheck disable=SC1091
+source /usr/local/bin/oc-lib.sh
+
+require_env OC_CONTROL_TOKEN OC_BOOTSTRAP_URL
+DATA_DIR=${OC_DATA_DIR:-/opt/data}
+WS_INTERVAL=${OC_SYNC_INTERVAL:-8}
+DB_INTERVAL=${OC_SQLITE_INTERVAL:-30}
+SKEW=${OC_CRED_SKEW:-300}
+
+bs=$(mktemp)
+trap 'rm -f "$bs"' EXIT
+expiry=0
+last_db=0
+
+# ensure_creds 首次或临近过期时拉 bootstrap、写 STS 凭证、解析 S3 参数、刷新过期时间。
+# expiry 与 last_db 是有意的脚本级状态，函数内赋值为预期行为。
+ensure_creds() {
+  if [ "$expiry" -eq 0 ] || needs_refresh "$expiry" "$SKEW"; then
+    fetch_bootstrap "$bs"
+    write_aws_credentials "$bs"
+    export_s3_env "$bs"
+    expiry=$(creds_expiry_epoch "$bs")
+    log "STS 凭证已刷新，过期 $(date -u -d "@$expiry" +%FT%TZ)"
+  fi
+}
+
+# run_once 跑一轮：确保凭证新鲜 → 同步 workspace → 到点则备份 sqlite。
+run_once() {
+  ensure_creds
+  sync_workspace_up "$DATA_DIR"
+  local now
+  now=$(date -u +%s)
+  if [ $((now - last_db)) -ge "$DB_INTERVAL" ]; then
+    backup_sqlite_up "$DATA_DIR"
+    last_db=$now
+  fi
+}
+
+if [ "${OC_SYNC_ONCE:-0}" = "1" ]; then
+  # 测试模式：跑一轮并强制做一次 sqlite 备份，便于断言。
+  ensure_creds
+  sync_workspace_up "$DATA_DIR"
+  backup_sqlite_up "$DATA_DIR"
+  log "oc-sync 单轮完成（OC_SYNC_ONCE）"
+  exit 0
+fi
+
+log "oc-sync 启动：workspace 每 ${WS_INTERVAL}s，sqlite 每 ${DB_INTERVAL}s，凭证提前 ${SKEW}s 续期"
+while :; do
+  run_once
+  sleep "$WS_INTERVAL"
+done
