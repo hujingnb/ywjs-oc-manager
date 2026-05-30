@@ -27,7 +27,7 @@ func runtimeStub(t *testing.T) *runtimeOpStub {
 			ID:            testAppID,
 			OrgID:         testOrgID,
 			OwnerUserID:   testUsrID,
-			RuntimeNodeID: testRuntimeNodeID,
+			RuntimeNodeID: null.StringFrom(testRuntimeNodeID), // RuntimeNodeID nullable（spec-A2a）
 			Status:        domain.AppStatusRunning,
 			ContainerID:   null.StringFrom("ctr-existing"),
 			ContainerName: null.StringFrom("ocm-app"),

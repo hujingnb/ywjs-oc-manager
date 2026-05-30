@@ -9,6 +9,8 @@ import (
 	"strings"
 	"time"
 
+	null "github.com/guregu/null/v5"
+
 	"oc-manager/internal/auth"
 	"oc-manager/internal/domain"
 	"oc-manager/internal/store/sqlc"
@@ -199,7 +201,8 @@ func (s *ResourceMetricsService) ListNodeInstances(ctx context.Context, principa
 	if offset < 0 {
 		offset = 0
 	}
-	apps, err := s.store.ListAppsByRuntimeNode(ctx, sqlc.ListAppsByRuntimeNodeParams{RuntimeNodeID: nodeID, Limit: limit, Offset: offset})
+	// RuntimeNodeID nullable（spec-A2a）：按节点 ID 精确过滤，传非空字符串。
+	apps, err := s.store.ListAppsByRuntimeNode(ctx, sqlc.ListAppsByRuntimeNodeParams{RuntimeNodeID: null.StringFrom(nodeID), Limit: limit, Offset: offset})
 	if err != nil {
 		return nil, fmt.Errorf("查询节点实例失败: %w", err)
 	}
@@ -241,8 +244,8 @@ func (s *ResourceMetricsService) ListNodeInstanceResources(ctx context.Context, 
 	if err != nil {
 		return nil, fmt.Errorf("查询应用失败: %w", err)
 	}
-	// app.RuntimeNodeID 是 string；与 nodeID 直接比较。
-	if app.DeletedAt.Valid || app.RuntimeNodeID != nodeID {
+	// app.RuntimeNodeID nullable（spec-A2a）：.String 取 Go string 值，NULL 时为空字符串。
+	if app.DeletedAt.Valid || app.RuntimeNodeID.String != nodeID {
 		return nil, ErrNotFound
 	}
 	if r.BucketSeconds > 0 {
@@ -580,8 +583,8 @@ func nodeInstanceResult(app sqlc.App) NodeInstanceResult {
 		OwnerUserID:   app.OwnerUserID,
 		Name:          app.Name,
 		Status:        app.Status,
-		// RuntimeNodeID 是 string（非空）。
-		RuntimeNodeID: app.RuntimeNodeID,
+			// RuntimeNodeID nullable（spec-A2a）：Valid=false 时为空字符串，表示 k8s app 未绑定节点。
+		RuntimeNodeID: app.RuntimeNodeID.String,
 	}
 	if app.ContainerID.Valid {
 		result.ContainerID = app.ContainerID.String

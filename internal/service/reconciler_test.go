@@ -45,7 +45,8 @@ func (s *reconcilerStub) SetRuntimeNodeStatus(_ context.Context, arg sqlc.SetRun
 }
 
 func (s *reconcilerStub) ListAppsByRuntimeNode(_ context.Context, arg sqlc.ListAppsByRuntimeNodeParams) ([]sqlc.App, error) {
-	return s.apps[arg.RuntimeNodeID], nil
+	// RuntimeNodeID nullable（spec-A2a）：.String 取 Go string 值，对应 map 字符串键。
+	return s.apps[arg.RuntimeNodeID.String], nil
 }
 
 // SetAppStatus 为 :exec；stub 记录更新后的状态。
@@ -72,7 +73,7 @@ func TestNodeHealthReconciler_DemotesTimedOutNodesAndApps(t *testing.T) {
 	stub.nodes = []sqlc.RuntimeNode{timeoutNode, healthyNode}
 	app := sqlc.App{
 		ID:            mustUUID(t, "00000000-0000-0000-0000-000000005003"),
-		RuntimeNodeID: timeoutNode.ID,
+		RuntimeNodeID: null.StringFrom(timeoutNode.ID), // RuntimeNodeID nullable（spec-A2a）
 		Status:        domain.AppStatusRunning,
 	}
 	stub.apps[timeoutNode.ID] = []sqlc.App{app}

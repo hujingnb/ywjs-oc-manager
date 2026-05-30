@@ -159,8 +159,8 @@ func toAppResult(app sqlc.App) AppResult {
 		Name:         app.Name,
 		Status:       app.Status,
 		APIKeyStatus: app.ApiKeyStatus,
-		// RuntimeNodeID 是非空字符串列；空字符串表示未分配节点（历史或异常数据）。
-		RuntimeNodeID: app.RuntimeNodeID,
+		// RuntimeNodeID nullable（spec-A2a）：Valid=false 时为空字符串，表示 k8s app 未绑定节点。
+		RuntimeNodeID: app.RuntimeNodeID.String,
 	}
 	if app.Description.Valid {
 		result.Description = app.Description.String

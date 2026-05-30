@@ -15,7 +15,6 @@ type App struct {
 	ID                     string          `db:"id" json:"id"`
 	OrgID                  string          `db:"org_id" json:"org_id"`
 	OwnerUserID            string          `db:"owner_user_id" json:"owner_user_id"`
-	RuntimeNodeID          string          `db:"runtime_node_id" json:"runtime_node_id"`
 	Name                   string          `db:"name" json:"name"`
 	Description            null.String     `db:"description" json:"description"`
 	Status                 string          `db:"status" json:"status"`
@@ -45,6 +44,7 @@ type App struct {
 	DeletedAt              null.Time       `db:"deleted_at" json:"deleted_at"`
 	OwnerActiveKey         null.String     `db:"owner_active_key" json:"owner_active_key"`
 	RuntimeTokenActiveKey  null.String     `db:"runtime_token_active_key" json:"runtime_token_active_key"`
+	RuntimeNodeID          null.String     `db:"runtime_node_id" json:"runtime_node_id"`
 }
 
 type AssistantVersion struct {

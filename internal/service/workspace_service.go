@@ -65,12 +65,12 @@ func (s *WorkspaceService) List(ctx context.Context, principal auth.Principal, a
 	if err != nil {
 		return WorkspaceListing{}, err
 	}
-	// app.RuntimeNodeID 是 string（非空）；空字符串视为未分配节点。
-	if s.adapter == nil || app.RuntimeNodeID == "" {
+	// app.RuntimeNodeID nullable（spec-A2a）：Valid=false 或空字符串视为未分配节点。
+	if s.adapter == nil || !app.RuntimeNodeID.Valid || app.RuntimeNodeID.String == "" {
 		return WorkspaceListing{}, ErrWorkspaceMissing
 	}
 	listing, err := s.adapter.ListWorkspace(ctx,
-		app.RuntimeNodeID, app.ID, relPath)
+		app.RuntimeNodeID.String, app.ID, relPath)
 	if err != nil {
 		return WorkspaceListing{}, fmt.Errorf("查询工作目录失败: %w", err)
 	}
@@ -96,11 +96,11 @@ func (s *WorkspaceService) Download(ctx context.Context, principal auth.Principa
 	if err != nil {
 		return nil, err
 	}
-	if s.adapter == nil || app.RuntimeNodeID == "" {
+	if s.adapter == nil || !app.RuntimeNodeID.Valid || app.RuntimeNodeID.String == "" {
 		return nil, ErrWorkspaceMissing
 	}
 	return s.adapter.DownloadWorkspaceFile(ctx,
-		app.RuntimeNodeID, app.ID, relPath)
+		app.RuntimeNodeID.String, app.ID, relPath)
 }
 
 // Archive 把工作目录打包为 zip 流写到 w。Sprint 2 改用 scope-aware 端点输出 zip
@@ -114,11 +114,11 @@ func (s *WorkspaceService) Archive(ctx context.Context, principal auth.Principal
 	if err != nil {
 		return err
 	}
-	if s.adapter == nil || app.RuntimeNodeID == "" {
+	if s.adapter == nil || !app.RuntimeNodeID.Valid || app.RuntimeNodeID.String == "" {
 		return ErrWorkspaceMissing
 	}
 	return s.adapter.StreamWorkspaceArchive(ctx,
-		app.RuntimeNodeID, app.ID, relPath, w)
+		app.RuntimeNodeID.String, app.ID, relPath, w)
 }
 
 func (s *WorkspaceService) loadAuthorizedApp(ctx context.Context, principal auth.Principal, appID string) (sqlc.App, error) {

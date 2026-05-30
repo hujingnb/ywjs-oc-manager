@@ -54,16 +54,16 @@ func (h *RuntimeRefreshStatusHandler) Handle(ctx context.Context, job sqlc.Job) 
 	if err != nil {
 		return err
 	}
-	// RuntimeNodeID 是 string，空值表示未分配节点；无节点或无容器时静默成功。
-	if app.ContainerID.String == "" || app.RuntimeNodeID == "" {
+	// RuntimeNodeID nullable（spec-A2a）：Valid=false 或空字符串视为未分配节点；无节点或无容器时静默成功。
+	if app.ContainerID.String == "" || !app.RuntimeNodeID.Valid || app.RuntimeNodeID.String == "" {
 		// 容器未就绪时静默成功；scheduler 会在下个周期重试。
 		return nil
 	}
-	nodeID := app.RuntimeNodeID
+	nodeID := app.RuntimeNodeID.String
 	sample := sqlc.InsertInstanceResourceSampleParams{
 		ID:            uuid.NewString(),
 		AppID:         app.ID,
-		RuntimeNodeID: app.RuntimeNodeID,
+		RuntimeNodeID: app.RuntimeNodeID.String,
 		ContainerID:   app.ContainerID.String,
 		SampledAt:     time.Now().UTC(),
 	}

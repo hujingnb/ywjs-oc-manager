@@ -92,15 +92,15 @@ func (h *AppHealthCheckHandler) Handle(ctx context.Context, job sqlc.Job) error 
 		// 仅对 running 状态做健康检查：binding_waiting 时容器虽起但 Hermes gateway 还没就绪，会假阳性。
 		return nil
 	}
-	// RuntimeNodeID 是 string，空值表示未分配节点。
-	if app.ContainerID.String == "" || app.RuntimeNodeID == "" {
+	// RuntimeNodeID nullable（spec-A2a）：Valid=false 或空字符串视为未分配节点。
+	if app.ContainerID.String == "" || !app.RuntimeNodeID.Valid || app.RuntimeNodeID.String == "" {
 		return nil
 	}
 	policy := decodeRestartPolicy(app.RestartPolicyJson)
 	state := decodeHealthState(app.HealthStateJson)
 	now := h.now()
 
-	nodeID := app.RuntimeNodeID
+	nodeID := app.RuntimeNodeID.String
 	// Hermes 时代用 docker inspect 同时拿 容器 Status + Health.Status。
 	// containerStopped:Status != "running" → 容器被 docker 重启 / OOM kill 等
 	// 基础设施事件意外停掉,需要 manager 自愈 (StartContainer);

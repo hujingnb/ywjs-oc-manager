@@ -9,6 +9,7 @@ import (
 	"testing"
 	"time"
 
+	null "github.com/guregu/null/v5"
 	"github.com/stretchr/testify/require"
 	"oc-manager/internal/auth"
 	"oc-manager/internal/domain"
@@ -129,10 +130,10 @@ func TestWorkspaceServiceRejectsUnsafePaths(t *testing.T) {
 }
 
 // TestWorkspaceServiceListMissingNodeReturnsError 验证工作区服务列表缺失节点返回错误的异常或拒绝路径场景。
-// MySQL 侧 RuntimeNodeID 是 string；空字符串表示节点未分配，service 以 "" 检测缺失。
+// spec-A2a 后 RuntimeNodeID 为 null.String；Valid=false 表示 k8s app 未分配节点，service 以此检测缺失。
 func TestWorkspaceServiceListMissingNodeReturnsError(t *testing.T) {
 	store := newWorkspaceStub(t)
-	store.app.RuntimeNodeID = "" // 空字符串表示未分配节点
+	store.app.RuntimeNodeID = null.String{} // Valid=false 表示未分配节点（spec-A2a）
 	svc := NewWorkspaceService(store, &fakeWorkspaceAdapter{}, "/data")
 
 	_, err := svc.List(context.Background(), platformAdmin(), testWorkAppID, "")
@@ -144,7 +145,7 @@ func newWorkspaceStub(t *testing.T) *workspaceStub {
 		ID:            mustUUID(t, testWorkAppID),
 		OrgID:         mustUUID(t, testWorkOrg),
 		OwnerUserID:   mustUUID(t, testWorkOwner),
-		RuntimeNodeID: mustUUID(t, testWorkNode), // 非空字符串，表示已分配节点
+		RuntimeNodeID: null.StringFrom(mustUUID(t, testWorkNode)), // RuntimeNodeID nullable（spec-A2a），Valid=true 表示已分配节点
 		Status:        domain.AppStatusRunning,
 		ApiKeyStatus:  domain.APIKeyStatusActive,
 	}

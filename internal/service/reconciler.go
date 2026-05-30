@@ -6,6 +6,8 @@ import (
 	"log/slog"
 	"time"
 
+	null "github.com/guregu/null/v5"
+
 	"oc-manager/internal/domain"
 	"oc-manager/internal/store/sqlc"
 )
@@ -79,7 +81,8 @@ func (r *NodeHealthReconciler) Reconcile(ctx context.Context) (int, error) {
 // 取节点应用列表时分页拉取以避免一次性返回过多记录；这里上限 500，超过则下次循环再处理。
 func (r *NodeHealthReconciler) markRunningAppsAsError(ctx context.Context, nodeID string) error {
 	apps, err := r.store.ListAppsByRuntimeNode(ctx, sqlc.ListAppsByRuntimeNodeParams{
-		RuntimeNodeID: nodeID,
+		// RuntimeNodeID nullable（spec-A2a）：按节点 ID 精确过滤，传非空字符串。
+		RuntimeNodeID: null.StringFrom(nodeID),
 		Limit:         500,
 		Offset:        0,
 	})

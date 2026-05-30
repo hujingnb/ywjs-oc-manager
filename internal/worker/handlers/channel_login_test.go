@@ -346,7 +346,7 @@ func newChannelWorkerStore(t *testing.T) *channelWorkerStore {
 		ID:            testChannelWorkerAppID,
 		OrgID:         testChannelWorkerOrgID,
 		OwnerUserID:   testChannelWorkerOwnerID,
-		RuntimeNodeID: testChannelWorkerNodeID,
+		RuntimeNodeID: null.StringFrom(testChannelWorkerNodeID), // RuntimeNodeID nullable（spec-A2a）
 		Status:        domain.AppStatusBindingWaiting,
 		ContainerID:   null.StringFrom("ctr-1"),
 	}

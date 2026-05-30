@@ -89,7 +89,7 @@ func makeAppForRefresh(t *testing.T) sqlc.App {
 	t.Helper()
 	return sqlc.App{
 		ID:            "11111111-1111-1111-1111-111111111111",
-		RuntimeNodeID: "22222222-2222-2222-2222-222222222222",
+		RuntimeNodeID: null.StringFrom("22222222-2222-2222-2222-222222222222"), // RuntimeNodeID nullable（spec-A2a）
 		ContainerID:   null.StringFrom("ctr-abc"),
 		Status:        domain.AppStatusRunning,
 	}
@@ -134,7 +134,8 @@ func TestRuntimeRefreshStatusWritesInstanceSample(t *testing.T) {
 	require.Len(t, store.samples, 1)
 	got := store.samples[0]
 	require.Equal(t, makeAppForRefresh(t).ID, got.AppID)
-	require.Equal(t, makeAppForRefresh(t).RuntimeNodeID, got.RuntimeNodeID)
+	// RuntimeNodeID nullable（spec-A2a）：app.RuntimeNodeID 是 null.String，采样记录中是 string，取 .String 比较。
+	require.Equal(t, makeAppForRefresh(t).RuntimeNodeID.String, got.RuntimeNodeID)
 	require.Equal(t, "ctr-abc", got.ContainerID)
 	require.Equal(t, "running", got.ContainerStatus.String)
 	require.Equal(t, 12.5, got.CpuPercent.Float64)

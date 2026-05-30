@@ -219,12 +219,12 @@ func (s *MemberOnboardingService) OnboardMember(ctx context.Context, principal a
 		}); err != nil {
 			return fmt.Errorf("创建成员失败: %w", err)
 		}
-		// CreateApp 为 :exec；RuntimeNodeID 为 string（非空）。
+		// CreateApp 为 :exec；RuntimeNodeID nullable（spec-A2a），NodeID 为空字符串时写 NULL。
 		if err := store.CreateApp(ctx, sqlc.CreateAppParams{
 			ID:            appID,
 			OrgID:         org.ID,
 			OwnerUserID:   userID,
-			RuntimeNodeID: input.NodeID,
+			RuntimeNodeID: null.NewString(input.NodeID, input.NodeID != ""),
 			Name:          input.AppName,
 			Description:   null.String{},
 			Status:        domain.AppStatusDraft,
@@ -404,7 +404,7 @@ func (s *MemberOnboardingService) CreateAppForMember(ctx context.Context, princi
 			ID:            appID,
 			OrgID:         org.ID,
 			OwnerUserID:   user.ID,
-			RuntimeNodeID: input.NodeID,
+			RuntimeNodeID: null.NewString(input.NodeID, input.NodeID != ""),
 			Name:          input.AppName,
 			Description:   null.String{},
 			Status:        domain.AppStatusDraft,

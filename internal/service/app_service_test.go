@@ -95,7 +95,7 @@ func (s *appServiceStoreStub) mustSeedApp(t *testing.T) sqlc.App {
 		ID:            mustUUID(t, testAppServiceAppID),
 		OrgID:         s.organization.ID,
 		OwnerUserID:   mustUUID(t, testMemUID),
-		RuntimeNodeID: mustUUID(t, "00000000-0000-0000-0000-000000002002"),
+		RuntimeNodeID: null.StringFrom(mustUUID(t, "00000000-0000-0000-0000-000000002002")),
 		Name:          "测试实例",
 		Status:        domain.AppStatusRunning,
 		ApiKeyStatus:  domain.APIKeyStatusActive,

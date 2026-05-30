@@ -132,8 +132,8 @@ func (s *RuntimeOperationService) InspectApp(ctx context.Context, principal auth
 	if s.inspector == nil {
 		return RuntimeView{Status: app.Status}, nil
 	}
-	// app.RuntimeNodeID 是 string（非空）。
-	info, err := s.inspector.InspectContainer(ctx, app.RuntimeNodeID, app.ContainerID.String)
+	// app.RuntimeNodeID nullable（spec-A2a）：.String 取 Go string 值。
+	info, err := s.inspector.InspectContainer(ctx, app.RuntimeNodeID.String, app.ContainerID.String)
 	if err != nil {
 		return RuntimeView{Status: "error", Snapshot: snapshotFromApp(app)}, nil
 	}

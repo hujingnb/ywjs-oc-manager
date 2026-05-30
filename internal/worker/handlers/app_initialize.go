@@ -571,7 +571,8 @@ func (h *AppInitializeHandler) phaseCreate(ctx context.Context, app *sqlc.App, p
 	if h.containers == nil || payload.RuntimeNodeID == "" {
 		return nil
 	}
-	node, err := h.store.GetRuntimeNode(ctx, app.RuntimeNodeID)
+	// app.RuntimeNodeID nullable（spec-A2a）：.String 取 Go string 值。
+	node, err := h.store.GetRuntimeNode(ctx, app.RuntimeNodeID.String)
 	if err != nil {
 		return fmt.Errorf("查询 runtime node 失败: %w", err)
 	}

@@ -384,7 +384,8 @@ func (s *onboardingStub) CreateApp(_ context.Context, arg sqlc.CreateAppParams) 
 		return s.appErr
 	}
 	s.staged.apps++
-	s.lastAppNodeID = arg.RuntimeNodeID
+	// RuntimeNodeID nullable（spec-A2a）：.String 取 Go string 值。
+	s.lastAppNodeID = arg.RuntimeNodeID.String
 	s.lastAppOwnerID = arg.OwnerUserID
 	// VersionID 为 null.String；取 .String 字段即可（有效时等于 version id）。
 	s.lastAppVersionID = arg.VersionID.String

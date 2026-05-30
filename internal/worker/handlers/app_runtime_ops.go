@@ -132,7 +132,8 @@ func (h *AppStartContainerHandler) Handle(ctx context.Context, job sqlc.Job) err
 	if app.ContainerID.String == "" {
 		return fmt.Errorf("应用 %s 尚未创建容器，无法启动", payload.AppID)
 	}
-	nodeID := app.RuntimeNodeID
+	// RuntimeNodeID nullable（spec-A2a）：.String 取 Go string 值。
+	nodeID := app.RuntimeNodeID.String
 	if err := h.containers.StartContainer(ctx, nodeID, app.ContainerID.String); err != nil {
 		return fmt.Errorf("启动容器失败: %w", err)
 	}
@@ -173,7 +174,8 @@ func (h *AppStopContainerHandler) Handle(ctx context.Context, job sqlc.Job) erro
 		}
 		return nil
 	}
-	nodeID := app.RuntimeNodeID
+	// RuntimeNodeID nullable（spec-A2a）：.String 取 Go string 值。
+	nodeID := app.RuntimeNodeID.String
 	if err := h.containers.StopContainer(ctx, nodeID, app.ContainerID.String); err != nil {
 		return fmt.Errorf("停止容器失败: %w", err)
 	}
@@ -298,7 +300,8 @@ func (h *AppRestartContainerHandler) Handle(ctx context.Context, job sqlc.Job) e
 	// 注意：「缺 container_id」的拒绝校验下移到原 stop/clear/start 路径之前。
 	// 镜像变更重建分支被 worker 重试时 container_id 可能已被上一次尝试清空，
 	// 此时仍须放行进入重建分支重新入队 app_initialize，不能在此提前报错。
-	nodeID := app.RuntimeNodeID
+	// RuntimeNodeID nullable（spec-A2a）：.String 取 Go string 值。
+	nodeID := app.RuntimeNodeID.String
 	// 在 stop 之前先把节点上的 apps/<id>/input/ 重写成 DB 当前快照:
 	// oc-entrypoint 在下次容器启动时读取该目录,渲染出新的 config.yaml(含 model)
 	// 与 SOUL.md(三层 prompt + persona)。改 model / 改 prompt / 改 persona
@@ -459,7 +462,8 @@ func (h *AppDeleteHandler) Handle(ctx context.Context, job sqlc.Job) error {
 	}
 	alreadyDeleted := app.DeletedAt.Valid
 
-	nodeID := app.RuntimeNodeID
+	// RuntimeNodeID nullable（spec-A2a）：.String 取 Go string 值。
+	nodeID := app.RuntimeNodeID.String
 	if app.ContainerID.String != "" {
 		if err := h.containers.StopContainer(ctx, nodeID, app.ContainerID.String); err != nil {
 			// stop 失败不阻塞 remove：force remove 可以兜底，但 stop 错误必须冒泡用于审计排障。

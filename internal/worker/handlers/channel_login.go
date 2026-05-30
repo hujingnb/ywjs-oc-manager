@@ -85,7 +85,7 @@ func (h *ChannelStartLoginHandler) Handle(ctx context.Context, job sqlc.Job) err
 	challenge, err := adapter.BeginAuth(ctx, channel.AuthInput{
 		AppID:       payload.AppID,
 		OwnerUserID: app.OwnerUserID,
-		NodeID:      app.RuntimeNodeID,
+		NodeID:      app.RuntimeNodeID.String,
 		ContainerID: app.ContainerID.ValueOrZero(),
 		Endpoint:    endpoint,
 	})
@@ -202,7 +202,7 @@ func (h *ChannelCheckBindingHandler) Handle(ctx context.Context, job sqlc.Job) e
 	progress, err := adapter.PollAuth(ctx, channel.AuthInput{
 		AppID:       payload.AppID,
 		OwnerUserID: app.OwnerUserID,
-		NodeID:      app.RuntimeNodeID,
+		NodeID:      app.RuntimeNodeID.String,
 		ContainerID: app.ContainerID.ValueOrZero(),
 	})
 	if err != nil {
@@ -212,7 +212,7 @@ func (h *ChannelCheckBindingHandler) Handle(ctx context.Context, job sqlc.Job) e
 	case channel.AuthStatusBound:
 		identity := progress.BoundIdentity
 		if identity == "" && h.resolver != nil && payload.ChannelType == domain.ChannelTypeWeChat {
-			if resolved, rerr := h.resolver.ResolveWeChatBoundIdentity(ctx, app.RuntimeNodeID, app.ContainerID.ValueOrZero()); rerr == nil {
+			if resolved, rerr := h.resolver.ResolveWeChatBoundIdentity(ctx, app.RuntimeNodeID.String, app.ContainerID.ValueOrZero()); rerr == nil {
 				identity = resolved
 			}
 		}
@@ -250,7 +250,7 @@ func (h *ChannelCheckBindingHandler) Handle(ctx context.Context, job sqlc.Job) e
 		// 这里直接调 resolver 看 plugin state 是否已有有效身份；
 		// 有就同样推到 bound，避免 5 分钟后被错误地 expire。
 		if h.resolver != nil && payload.ChannelType == domain.ChannelTypeWeChat {
-			if identity, rerr := h.resolver.ResolveWeChatBoundIdentity(ctx, app.RuntimeNodeID, app.ContainerID.ValueOrZero()); rerr == nil && identity != "" {
+			if identity, rerr := h.resolver.ResolveWeChatBoundIdentity(ctx, app.RuntimeNodeID.String, app.ContainerID.ValueOrZero()); rerr == nil && identity != "" {
 				metadata, _ := json.Marshal(progress.Metadata)
 				// 与 case AuthStatusBound 共用 finalizeChannelBound:cached-login
 				// fallback 同样要触发容器重启,否则绑定后 weixin 平台不会被 hermes 加载。
@@ -305,7 +305,7 @@ func (h *ChannelCheckBindingHandler) finalizeChannelBound(
 		return fmt.Errorf("标记渠道绑定成功失败: %w", err)
 	}
 	if h.restarter != nil && payload.ChannelType == domain.ChannelTypeWeChat {
-		if err := h.restarter.RestartContainer(ctx, app.RuntimeNodeID, app.ContainerID.ValueOrZero()); err != nil {
+		if err := h.restarter.RestartContainer(ctx, app.RuntimeNodeID.String, app.ContainerID.ValueOrZero()); err != nil {
 			slog.ErrorContext(ctx, "渠道绑定后重启 hermes 容器失败", "app_id", app.ID, "error", err)
 		}
 	}

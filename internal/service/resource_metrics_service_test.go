@@ -32,7 +32,7 @@ func TestResourceMetricsServiceListAppResourcesRequiresViewPermission(t *testing
 		ID:            mustUUID(t, testResourceAppID),
 		OrgID:         mustUUID(t, testResourceOrgID),
 		OwnerUserID:   mustUUID(t, testResourceOwnerID),
-		RuntimeNodeID: mustUUID(t, testResourceRuntimeID),
+		RuntimeNodeID: null.StringFrom(mustUUID(t, testResourceRuntimeID)), // RuntimeNodeID nullable（spec-A2a）
 		Name:          "测试应用",
 		Status:        domain.AppStatusRunning,
 	}
@@ -61,7 +61,7 @@ func TestResourceMetricsServiceListNodeInstanceResourcesRequiresNodeBinding(t *t
 		ID:            mustUUID(t, testResourceAppID),
 		OrgID:         mustUUID(t, testResourceOrgID),
 		OwnerUserID:   mustUUID(t, testResourceOwnerID),
-		RuntimeNodeID: mustUUID(t, "00000000-0000-0000-0000-00000000e006"),
+		RuntimeNodeID: null.StringFrom(mustUUID(t, "00000000-0000-0000-0000-00000000e006")), // RuntimeNodeID nullable（spec-A2a）：不同节点，期望 ErrNotFound
 		Name:          "其他节点应用",
 		Status:        domain.AppStatusRunning,
 	}
@@ -80,7 +80,7 @@ func TestResourceMetricsServiceListAppResourcesRejectsDeletedApp(t *testing.T) {
 		ID:            mustUUID(t, testResourceAppID),
 		OrgID:         mustUUID(t, testResourceOrgID),
 		OwnerUserID:   mustUUID(t, testResourceOwnerID),
-		RuntimeNodeID: mustUUID(t, testResourceRuntimeID),
+		RuntimeNodeID: null.StringFrom(mustUUID(t, testResourceRuntimeID)), // RuntimeNodeID nullable（spec-A2a）
 		Name:          "已删除应用",
 		Status:        domain.AppStatusDeleted,
 		DeletedAt:     null.TimeFrom(mustTime(t, testResourceSampleTime)), // 已被删除，时间戳不为空
@@ -146,7 +146,7 @@ func (s *resourceMetricsStoreStub) ListNodeInstanceResourceBuckets(context.Conte
 func (s *resourceMetricsStoreStub) ListInstanceResourceSamples(context.Context, sqlc.ListInstanceResourceSamplesParams) ([]sqlc.InstanceResourceSample, error) {
 	return []sqlc.InstanceResourceSample{{
 		AppID:           s.app.ID,
-		RuntimeNodeID:   s.app.RuntimeNodeID,
+		RuntimeNodeID:   s.app.RuntimeNodeID.String, // InstanceResourceSample.RuntimeNodeID 是 string，取 .String
 		ContainerID:     testResourceContainer,
 		SampledAt:       mustTime(s.t, testResourceSampleTime),          // time.Time（非空）
 		ContainerStatus: null.StringFrom(domain.AppStatusRunning),       // null.String
