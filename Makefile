@@ -1,4 +1,4 @@
-.PHONY: test vet build sqlc-generate migrate-up migrate-down logs web-test web-typecheck web-build build-hermes-runtime hermes-inject-contract debug-ollama debug-newapi newapi-probe seed-e2e smoke-v102 openapi-gen web-types-gen openapi-check ssh-manager ssh-agent1 ssh-newapi logs-api logs-agent1 psql-manager redis-manager bh-logs local-up local-down local-reset local-stop local-start local-build local-migrate local-seed local-seed-e2e local-mc-init local-status local-logs local-shell cluster-create .guard-k3d-hosts
+.PHONY: test vet build sqlc-generate migrate-up migrate-down logs web-test web-typecheck web-build build-hermes-runtime hermes-inject-contract debug-ollama debug-newapi newapi-probe seed-e2e smoke-v102 openapi-gen web-types-gen openapi-check ssh-manager ssh-agent1 ssh-newapi logs-api logs-agent1 psql-manager redis-manager bh-logs local-up local-down local-reset local-stop local-start local-build local-migrate local-seed local-seed-e2e local-mc-init local-status local-logs local-shell cluster-create .guard-k3d-hosts build-ops-runtime local-build-ops
 
 # 加载 .env（-include 在文件不存在时静默跳过，不报错）。
 # docker compose 会自动读取 .env，Makefile 显式 include 是为了让 SSH 等 target 也能访问其中变量。
@@ -54,6 +54,10 @@ override HERMES_VERSION := $(strip $(shell if [ -f "$(HERMES_VARIANT_DIR)/versio
 HERMES_IMAGE_REPO    ?= crpi-nu3ibz4f07feyghi.cn-beijing.personal.cr.aliyuncs.com/ywjs_app/oc-manager-hermes
 # hermes tag 形如 v2026.5.16-2026-05-21-12-00-00-be70e40a，便于从镜像引用直接看出上游版本和源码提交。
 override HERMES_IMAGE := $(HERMES_IMAGE_REPO):$(HERMES_VERSION)-$(IMAGE_TAG)
+
+# ops runtime 镜像仓库（pod initContainer/sidecar 搬运脚本），与其余服务保持一致命名风格。
+# 生产发布用 IMAGE_TAG（时间戳 + commit），本地联调固定 :dev。
+OPS_IMAGE_REPO ?= crpi-nu3ibz4f07feyghi.cn-beijing.personal.cr.aliyuncs.com/ywjs_app/oc-manager-ops
 
 # 输入 make 不带参数时, 显式跳到 help target, 输出按分组的可用 target 列表。
 .DEFAULT_GOAL := help
@@ -141,6 +145,10 @@ local-build: ## 构建 manager-api/web 镜像推 k3d registry 并滚动重启（
 	docker push $(K3D_REGISTRY_HOST)/oc-manager-web:dev
 	-$(KUBECTL) -n $(K8S_NS) rollout restart deploy/manager-api deploy/manager-web
 	@echo "✅ 镜像已推送并触发滚动重启"
+
+local-build-ops: ## 构建 ops 镜像推 k3d registry（本地联调用）
+	docker build -t $(K3D_REGISTRY_HOST)/oc-manager-ops:dev runtime/ops/
+	docker push $(K3D_REGISTRY_HOST)/oc-manager-ops:dev
 
 local-up: cluster-create local-build ## 一键拉起本地全栈（建集群→构建镜像→部署→建桶→种子管理员）
 	# 1) namespace + secret 先行
@@ -323,6 +331,14 @@ push-hermes-image: .guard-hermes-version
 .PHONY: release-hermes-image
 release-hermes-image: build-hermes-image push-hermes-image ## 构建并推送 hermes runtime 生产镜像（需 HERMES_VARIANT 指定变体）
 	@echo "✅ hermes 镜像 $(HERMES_IMAGE) 已构建并推送"
+
+# build-ops-runtime 构建 ops runtime 镜像并推生产 registry。
+# runtime/ops/ 是自包含 build context（含 Dockerfile 与脚本），无需额外前置依赖。
+# 镜像 tag 复用 IMAGE_TAG（时间戳 + commit + 可选 -dirty），与其他服务保持一致可追溯性。
+build-ops-runtime: .guard-image-git-state ## 构建 ops 运行时镜像并推生产 registry
+	docker build -t $(OPS_IMAGE_REPO):$(IMAGE_TAG) runtime/ops/
+	docker push $(OPS_IMAGE_REPO):$(IMAGE_TAG)
+	@echo "✅ ops 镜像 $(OPS_IMAGE_REPO):$(IMAGE_TAG) 已构建并推送"
 
 # deploy-api / deploy-web / deploy-agent：一键完成本地构建推送 + 远程更新部署。
 # 远程步骤：sed 原地更新 .env 中的镜像变量 → docker compose pull → docker compose up -d。
