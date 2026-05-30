@@ -1,5 +1,51 @@
 #!/usr/bin/env bash
-# 占位：实体见 Task 3/4/5。
+# oc-restore — initContainer 入口：调 bootstrap 拉配置并恢复 app 数据。
+# 机制：manifest/resources 直接落 emptyDir；skills（version 级、跨前缀）用预签名 URL 下载；
+# workspace/sessions/state.db（apps/<id>/ 前缀内）用 s3_write STS 凭证 aws s3 sync/cp 下载。
+# 首启时 apps/<id>/ 前缀为空 → sync 空操作、state.db 不存在则跳过。幂等：pod 重启重跑行为一致。
 set -euo pipefail
-echo "oc-* 入口尚未实现" >&2
-exit 1
+# shellcheck source=/usr/local/bin/oc-lib.sh
+# shellcheck disable=SC1091
+source /usr/local/bin/oc-lib.sh
+
+require_env OC_CONTROL_TOKEN OC_BOOTSTRAP_URL
+INPUT_DIR=${OC_INPUT_DIR:-/opt/oc-input}
+DATA_DIR=${OC_DATA_DIR:-/opt/data}
+
+bs=$(mktemp)
+trap 'rm -f "$bs"' EXIT
+fetch_bootstrap "$bs"
+
+# 1. manifest + resources 写入 emptyDir（api_key 随 manifest 落本地临时盘，不进 S3）。
+mkdir -p "$INPUT_DIR/resources/skills" "$DATA_DIR/workspace" "$DATA_DIR/sessions"
+jq -r '.manifest_yaml'  "$bs" > "$INPUT_DIR/manifest.yaml"
+jq -r '.persona'        "$bs" > "$INPUT_DIR/resources/persona.md"
+jq -r '.platform_rule'  "$bs" > "$INPUT_DIR/resources/platform-rules.md"
+log "manifest/resources 已写入 $INPUT_DIR"
+
+# 2. skills：预签名 URL 下载（version 级，STS 读不到，只能预签名）。
+while IFS=$'\t' read -r rel url; do
+  [ -n "$rel" ] || continue
+  mkdir -p "$INPUT_DIR/$(dirname "$rel")"
+  curl -fsS "$url" -o "$INPUT_DIR/$rel"
+  log "skill 下载: $rel"
+done < <(jq -r '.skills[]? | [.rel_path, .url] | @tsv' "$bs")
+
+# 3. app 数据恢复：写 STS 凭证 + 解析 S3 参数，用 aws s3 sync/cp 从 apps/<id>/ 前缀拉取。
+write_aws_credentials "$bs"
+export_s3_env "$bs"
+
+# workspace/sessions 前缀镜像同步下来；首启时前缀为空，aws s3 sync 返回 0 不报错。
+aws_s3 sync "s3://${AWS_S3_BUCKET}/${AWS_S3_PREFIX}workspace/" "$DATA_DIR/workspace"
+aws_s3 sync "s3://${AWS_S3_BUCKET}/${AWS_S3_PREFIX}sessions/"  "$DATA_DIR/sessions"
+log "workspace/sessions 已恢复"
+
+# state.db 单对象：存在才拉，并清 WAL 边车（绝不分别拉 -wal/-shm）保证干净重开。
+if aws_s3 ls "s3://${AWS_S3_BUCKET}/${AWS_S3_PREFIX}state.db" >/dev/null 2>&1; then
+  aws_s3 cp "s3://${AWS_S3_BUCKET}/${AWS_S3_PREFIX}state.db" "$DATA_DIR/state.db"
+  rm -f "$DATA_DIR/state.db-wal" "$DATA_DIR/state.db-shm"
+  log "state.db 已恢复并清理 WAL 边车"
+else
+  log "无 state.db 快照（首启），跳过"
+fi
+log "oc-restore 完成"
