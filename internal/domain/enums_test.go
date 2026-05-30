@@ -15,9 +15,8 @@ func TestEnumValidatorsAcceptKnownValues(t *testing.T) {
 		check func(string) bool
 	}{
 		{name: "用户角色", value: UserRoleOrgMember, check: IsUserRole},                       // 场景：用户角色
-		{name: "应用状态", value: AppStatusBindingWaiting, check: IsAppStatus},                // 场景：应用状态
-		{name: "运行节点状态", value: RuntimeNodeStatusUnreachable, check: IsRuntimeNodeStatus}, // 场景：运行节点状态
-		{name: "渠道状态", value: ChannelStatusPendingAuth, check: IsChannelStatus},           // 场景：渠道状态
+		{name: "应用状态", value: AppStatusBindingWaiting, check: IsAppStatus},      // 场景：应用状态
+		{name: "渠道状态", value: ChannelStatusPendingAuth, check: IsChannelStatus}, // 场景：渠道状态
 		{name: "任务类型", value: JobTypeWorkspaceArchiveCleanup, check: IsJobType},           // 场景：任务类型
 	}
 
@@ -37,9 +36,8 @@ func TestEnumValidatorsRejectUnknownValues(t *testing.T) {
 		check func(string) bool
 	}{
 		{name: "空用户角色", value: "", check: IsUserRole},                    // 场景：空用户角色
-		{name: "未知应用状态", value: "ready", check: IsAppStatus},             // 场景：未知应用状态
-		{name: "未知运行节点状态", value: "local", check: IsRuntimeNodeStatus},   // 场景：未知运行节点状态
-		{name: "未知渠道状态", value: "waiting", check: IsChannelStatus},       // 场景：未知渠道状态
+		{name: "未知应用状态", value: "ready", check: IsAppStatus},         // 场景：未知应用状态
+		{name: "未知渠道状态", value: "waiting", check: IsChannelStatus},   // 场景：未知渠道状态
 		{name: "已删除的旧任务类型", value: "knowledge_import", check: IsJobType}, // 场景：已删除的旧任务类型
 	}
 

@@ -429,18 +429,6 @@ func runManager(ctx context.Context, cfg config.Config, logOut io.Writer) error 
 	if err := registry.Register(domain.JobTypeChannelCheckBinding, channelCheckHandler.Handle); err != nil {
 		return fmt.Errorf("注册 channel_check_binding handler 失败: %w", err)
 	}
-	runtimeRefreshHandler := handlers.NewRuntimeRefreshStatusHandler(dbStore.Queries, runtimeAdapter)
-	if err := registry.Register(domain.JobTypeRuntimeRefreshStatus, runtimeRefreshHandler.Handle); err != nil {
-		return fmt.Errorf("注册 runtime_refresh_status handler 失败: %w", err)
-	}
-	healthCheckHandler := handlers.NewAppHealthCheckHandler(dbStore.Queries, runtimeAdapter)
-	// 注入 container lifecycle:health check 发现容器已停(基础设施事件 / OOM /
-	// docker daemon 重启等)时,在 restart budget 内主动 StartContainer 自愈,
-	// 不再依赖用户手动重启或外部脚本拉起。
-	healthCheckHandler.SetLifecycle(runtimeAdapter)
-	if err := registry.Register(domain.JobTypeAppHealthCheck, healthCheckHandler.Handle); err != nil {
-		return fmt.Errorf("注册 app_health_check handler 失败: %w", err)
-	}
 	if newapiFactory != nil {
 		disableHandler := handlers.NewDisableAPIKeyHandler(dbStore.Queries, newapiFactory)
 		if err := registry.Register(domain.JobTypeNewAPIDisableKey, disableHandler.Handle); err != nil {

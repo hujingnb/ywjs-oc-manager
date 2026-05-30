@@ -13,11 +13,9 @@ import (
 	"time"
 
 	dockercli "github.com/docker/docker/client"
-	"github.com/google/uuid"
 	null "github.com/guregu/null/v5"
 
 	"oc-manager/internal/auth"
-	"oc-manager/internal/domain"
 	"oc-manager/internal/integrations/agent"
 	"oc-manager/internal/integrations/newapi"
 	"oc-manager/internal/integrations/ocops"
@@ -269,83 +267,6 @@ func (r *appInputRefresher) RefreshAppInput(ctx context.Context, _ string, app s
 		return workerhandlers.AppInputRefreshResult{}, fmt.Errorf("版本镜像 %s 未在配置中", version.ImageID)
 	}
 	return workerhandlers.AppInputRefreshResult{VersionRevision: version.Revision, ImageRef: imageRef}, nil
-}
-
-// jsonMarshal 是 cmd/server 内部 json.Marshal 的简短封装，便于 dispatcher 复用。
-var jsonMarshal = json.Marshal
-
-// runtimeRefreshJobsQueries 是 runtimeRefreshDispatcher 用到的 sqlc 子集。
-// spec-A2b：ListRunningApps 返回 []string（只含 app id），不再含节点/容器字段。
-type runtimeRefreshJobsQueries interface {
-	ListRunningApps(ctx context.Context) ([]string, error)
-	CreateJob(ctx context.Context, arg sqlc.CreateJobParams) error
-}
-
-// runtimeRefreshDispatcher 周期扫描 status in (running, binding_waiting) 应用，
-// 对每个入队一条 runtime_refresh_status job。worker handler 写 apps.runtime_snapshot_json，
-// 前端 AppRuntimeTab 拉这一列展示资源占用。
-//
-// 间隔由 main.go PeriodicReconciler 的 30s 控制；ListRunningApps 自身只读，
-// 重复入队相同 job 是幂等的（worker 拿到的是最新 inspect 结果）。
-type runtimeRefreshDispatcher struct {
-	queries  runtimeRefreshJobsQueries
-	notifier service.JobNotifier
-}
-
-func newRuntimeRefreshDispatcher(queries runtimeRefreshJobsQueries, notifier service.JobNotifier) *runtimeRefreshDispatcher {
-	return &runtimeRefreshDispatcher{queries: queries, notifier: notifier}
-}
-
-// Tick 列出待刷新应用并入队 runtime_refresh_status job；任一应用失败不阻断其他应用。
-func (d *runtimeRefreshDispatcher) Tick(ctx context.Context) error {
-	return enqueuePerRunningApp(ctx, d.queries, d.notifier, domain.JobTypeRuntimeRefreshStatus, 20, 1)
-}
-
-// healthCheckDispatcher 周期入队 app_health_check job：复用 runtimeRefreshJobsQueries
-// 与 enqueuePerRunningApp helper，差异只在 job 类型与优先级。
-type healthCheckDispatcher struct {
-	queries  runtimeRefreshJobsQueries
-	notifier service.JobNotifier
-}
-
-func newHealthCheckDispatcher(queries runtimeRefreshJobsQueries, notifier service.JobNotifier) *healthCheckDispatcher {
-	return &healthCheckDispatcher{queries: queries, notifier: notifier}
-}
-
-// Tick 列出需要探活的应用并入队 app_health_check job。
-func (d *healthCheckDispatcher) Tick(ctx context.Context) error {
-	return enqueuePerRunningApp(ctx, d.queries, d.notifier, domain.JobTypeAppHealthCheck, 30, 1)
-}
-
-// enqueuePerRunningApp 是 runtime_refresh_status 与 app_health_check 共用的扫描入队逻辑。
-// 任一应用 CreateJob 失败 continue 不阻断；返回错误仅在 ListRunningApps 失败时。
-// spec-A2b：ListRunningApps 返回 []string，直接遍历 app id 字符串。
-func enqueuePerRunningApp(ctx context.Context, queries runtimeRefreshJobsQueries, notifier service.JobNotifier, jobType string, priority int32, maxAttempts int32) error {
-	appIDs, err := queries.ListRunningApps(ctx)
-	if err != nil {
-		return fmt.Errorf("列出 running 应用失败: %w", err)
-	}
-	for _, appID := range appIDs {
-		payload, err := jsonMarshal(map[string]any{"app_id": appID})
-		if err != nil {
-			continue
-		}
-		newJobID := uuid.NewString()
-		if err := queries.CreateJob(ctx, sqlc.CreateJobParams{
-			ID:          newJobID,
-			Type:        jobType,
-			Priority:    priority,
-			MaxAttempts: maxAttempts,
-			RunAfter:    time.Now(),
-			PayloadJson: payload,
-		}); err != nil {
-			continue
-		}
-		if notifier != nil {
-			_ = notifier.Enqueue(ctx, newJobID)
-		}
-	}
-	return nil
 }
 
 // persistentTokenLoader 适配 store.AgentTokenStore 实现 agent.PersistentTokenLoader。

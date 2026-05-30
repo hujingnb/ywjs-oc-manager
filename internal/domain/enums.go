@@ -37,13 +37,6 @@ const (
 	APIKeyStatusDisabled = "disabled"
 	APIKeyStatusError    = "error"
 
-	// RuntimeNodeStatus* 描述 runtime agent 注册、心跳和主动探测后的节点状态。
-	RuntimeNodeStatusPending     = "pending"
-	RuntimeNodeStatusActive      = "active"
-	RuntimeNodeStatusUnreachable = "unreachable"
-	RuntimeNodeStatusDisabled    = "disabled"
-	RuntimeNodeStatusDegraded    = "degraded"
-
 	// ChannelTypeWeChat 是当前唯一落地的渠道类型。
 	ChannelTypeWeChat = "wechat"
 
@@ -79,12 +72,6 @@ const (
 	JobTypeChannelStartLogin = "channel_start_login"
 	// JobTypeChannelCheckBinding 轮询渠道授权结果并写回绑定状态。
 	JobTypeChannelCheckBinding = "channel_check_binding"
-	// JobTypeRuntimeNodeHealthReconcile 根据心跳时间批量修正 runtime node 健康状态。
-	JobTypeRuntimeNodeHealthReconcile = "runtime_node_health_reconcile"
-	// JobTypeRuntimeRefreshStatus 刷新运行中应用的容器 inspect 快照。
-	JobTypeRuntimeRefreshStatus = "runtime_refresh_status"
-	// JobTypeAppHealthCheck 对运行中应用执行健康检查并更新状态。
-	JobTypeAppHealthCheck = "app_health_check"
 	// JobTypeNewAPIDisableKey 在应用停用或删除时禁用对应 new-api token。
 	JobTypeNewAPIDisableKey = "newapi_disable_key"
 	// JobTypeNewAPIRestoreKey 在应用恢复时重新启用对应 new-api token。
@@ -110,14 +97,6 @@ var (
 		AppStatusDeleted,
 	)
 
-	validRuntimeNodeStatuses = set(
-		RuntimeNodeStatusPending,
-		RuntimeNodeStatusActive,
-		RuntimeNodeStatusUnreachable,
-		RuntimeNodeStatusDisabled,
-		RuntimeNodeStatusDegraded,
-	)
-
 	validChannelStatuses = set(
 		ChannelStatusUnbound,
 		ChannelStatusPendingAuth,
@@ -136,9 +115,6 @@ var (
 		JobTypeAppDelete,
 		JobTypeChannelStartLogin,
 		JobTypeChannelCheckBinding,
-		JobTypeRuntimeNodeHealthReconcile,
-		JobTypeRuntimeRefreshStatus,
-		JobTypeAppHealthCheck,
 		JobTypeNewAPIDisableKey,
 		JobTypeNewAPIRestoreKey,
 		JobTypeWorkspaceArchiveCleanup,
@@ -162,12 +138,6 @@ func IsUserRole(value string) bool {
 // IsAppStatus 校验应用状态是否属于应用状态机允许的状态集合。
 func IsAppStatus(value string) bool {
 	_, ok := validAppStatuses[value]
-	return ok
-}
-
-// IsRuntimeNodeStatus 校验运行节点状态是否属于节点注册和心跳流程允许的状态集合。
-func IsRuntimeNodeStatus(value string) bool {
-	_, ok := validRuntimeNodeStatuses[value]
 	return ok
 }
 
