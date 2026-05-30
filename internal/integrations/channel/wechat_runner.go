@@ -18,20 +18,17 @@ import (
 // 这里不直接 import runtime 包是为了避免 channel ↔ runtime 的循环依赖；
 // cmd/server 装配阶段同时把 manager 端的 docker resolver 实现传给两侧。
 //
-// 当前仅 BindingResolver（wechat_identity.go 读 plugin state）这一条 docker exec
-// 链路还依赖它；微信扫码登录已改走 oc-ops HTTP SSE，不再经过 docker exec。
+// 微信扫码绑定身份已改走 oc-ops ChannelStatus（spec-A2a），不再依赖 docker exec 链路；
+// 当前 docker exec 通道无生产消费者，待 spec-A2b 节点摘除时统一清理。
 type DockerClientResolver interface {
 	DockerClient(ctx context.Context, nodeID string) (*client.Client, error)
 }
 
 // ContainerExecutor 抽象"在指定节点 + 容器内 exec 命令并返回 multiplexed stdout/stderr 流"的能力。
-// wechat_identity.go（execCat）依赖此接口读容器内 plugin state 文件；
 // nodeID 参数让 executor 在多节点部署时按节点取对应 docker client。
 //
-// NOTE：本接口是仍存活的最后一条 docker exec 链路。微信扫码登录已迁到
-// oc-ops HTTP SSE（见 DockerCommandRunner），唯独 DockerBindingResolver 仍需
-// 在容器内 cat plugin state JSON 解析 userId；该链路语义与 oc-ops ChannelStatus
-// 不完全等价，留待 spec-A（k8s 编排）一并改造，详见 wechat_identity.go。
+// NOTE：spec-A2a 后微信绑定身份已改走 oc-ops ChannelStatus，此 docker exec 通道
+// 当前无生产消费者，保留待 spec-A2b 节点摘除时统一清理。
 type ContainerExecutor interface {
 	Exec(ctx context.Context, nodeID, containerID string, cmd []string) (reader io.Reader, close func(), err error)
 }
@@ -69,7 +66,7 @@ func (r *DockerCommandRunner) StreamWeChatLogin(ctx context.Context, input AuthI
 
 // NewDockerExecutor 包装一个 DockerClientResolver 提供生产可用的 ContainerExecutor。
 // 实现按 nodeID 实时取 docker client，让同一个 executor 实例可被多个节点共享。
-// 当前仅供 DockerBindingResolver（读 plugin state）使用。
+// spec-A2a 后微信绑定身份改走 oc-ops，此通道当前无生产消费者，待 spec-A2b 统一清理。
 func NewDockerExecutor(resolver DockerClientResolver) ContainerExecutor {
 	return &dockerExecutor{resolver: resolver}
 }

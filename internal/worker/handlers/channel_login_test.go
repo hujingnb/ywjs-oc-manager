@@ -310,7 +310,8 @@ type workerFakeBindingResolver struct {
 	calls    int
 }
 
-func (r *workerFakeBindingResolver) ResolveWeChatBoundIdentity(_ context.Context, _, _ string) (string, error) {
+// ResolveWeChatBoundIdentity 实现 channel.BindingResolver，接收 appID（新签名，已去掉 nodeID/containerID）。
+func (r *workerFakeBindingResolver) ResolveWeChatBoundIdentity(_ context.Context, _ string) (string, error) {
 	r.calls++
 	return r.identity, nil
 }

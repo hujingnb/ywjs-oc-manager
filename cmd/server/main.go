@@ -202,10 +202,11 @@ func runManager(ctx context.Context, cfg config.Config, logOut io.Writer) error 
 	// Coordinator 按 (nodeID, imageRef) 粒度加锁，让 agent 直接从公网 registry 拉取镜像。
 	imageCoord := imagecoord.NewCoordinator(distLocker, progressBus, uuid.NewString())
 	runtimeAdapter := runtime.NewAgentBackedAdapter(nodeResolver, nodeResolver)
-	// streamingResolver 构造一次复用：runtimeAdapter.DockerClientForNode（镜像拉取流式 NDJSON）
-	// 和 channel 微信扫码 ExecAttach 均属于长连接场景，都必须用无 timeout 的 docker client。
+	// streamingResolver 构造一次复用：runtimeAdapter.DockerClientForNode 供镜像拉取流式
+	// NDJSON（长连接场景），必须用无 timeout 的 docker client。
 	// nodeClientResolver.DockerClient 带 30s Timeout，长连接会在 30s 后被强制掐断，
 	// newStreamingDockerResolver 使用 agent.NewStreamingDockerClientForNode 不设 Timeout。
+	// 微信扫码登录已改走 oc-ops HTTP SSE（见 wechatRunner），不再经 docker ExecAttach。
 	streamingResolver := newStreamingDockerResolver(nodeResolver)
 	runtimeAdapter.SetStreamingDocker(streamingResolver)
 	runtimeOpService.SetInspector(newRuntimeInspectorWrapper(runtimeAdapter))
@@ -224,17 +225,14 @@ func runManager(ctx context.Context, cfg config.Config, logOut io.Writer) error 
 
 	channelRegistry := channel.NewRegistry()
 	channelService := service.NewChannelService(dbStore.Queries, channelRegistry, redisQueue)
-	// channel 微信扫码 ExecAttach 是长连接(等用户扫码可达数分钟),
-	// 必须用 streamingDockerResolver 拿无 timeout 的 docker client,
-	// 否则 http.Client.Timeout=30s 会强制关闭 hijack 后的底层连接,
-	// 导致 stream EOF + JSON 解析失败 + 容器内 oc-weixin-login.py 进程 orphan。
-	wechatExecutor := channel.NewDockerExecutor(streamingResolver)
 	// 微信扫码登录走 oc-ops HTTP SSE：runner 持 ocopsClient（满足 hermes.ChannelLoginStreamer），
 	// 每次登录按 AuthInput.Endpoint（worker 经 ocopsResolver 解析后注入）路由到目标实例。
 	wechatRunner := channel.NewDockerCommandRunner(ocopsClient)
-	// DockerBindingResolver 仍走 docker exec 读容器内 plugin state（spec-A 再改造），
-	// 因此 wechatExecutor / streamingResolver 装配保留。
-	wechatResolver := channel.NewDockerBindingResolver(wechatExecutor)
+	// OcOpsBindingResolver 通过 oc-ops ChannelStatus 查询微信绑定身份（AccountID），
+	// 取代旧 DockerBindingResolver（docker exec 读 plugin state 文件），spec-A 改造点。
+	// ocopsBindingLocationResolver 在 main 包适配 service.OcOpsResolver→channel.OcOpsLocationResolver，
+	// 避免 channel 包直接依赖 service 包（循环依赖）。
+	wechatResolver := channel.NewOcOpsBindingResolver(ocopsClient, ocopsBindingLocationResolver{inner: ocopsResolver})
 	if err := channelRegistry.Register(channel.NewWeChatAdapter(wechatRunner)); err != nil {
 		return fmt.Errorf("注册微信渠道失败: %w", err)
 	}

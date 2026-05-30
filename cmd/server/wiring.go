@@ -212,6 +212,22 @@ func (r ocopsEndpointResolver) ResolveEndpoint(ctx context.Context, appID string
 	return loc.Endpoint, nil
 }
 
+// ocopsBindingLocationResolver 把 service.OcOpsResolver 适配为 channel.OcOpsLocationResolver：
+// 仅取出 OcOpsAppLocation.Endpoint 和 Supported，隔离 channel 包对 service 包的直接依赖
+// （channel→service 会形成循环依赖，因此在 main 包做适配）。
+type ocopsBindingLocationResolver struct {
+	inner service.OcOpsResolver
+}
+
+// Resolve 实现 channel.OcOpsLocationResolver，把 OcOpsAppLocation 拆成 Endpoint+Supported 返回。
+func (a ocopsBindingLocationResolver) Resolve(ctx context.Context, appID string) (ocops.Endpoint, bool, error) {
+	loc, err := a.inner.Resolve(ctx, appID)
+	if err != nil {
+		return ocops.Endpoint{}, false, err
+	}
+	return loc.Endpoint, loc.Supported, nil
+}
+
 // appInputRefresherQueries 是 appInputRefresher 需要的最小 DB 查询子集。
 // 抽接口便于单测注入内存桩, 不必引入完整 *sqlc.Queries 依赖。
 type appInputRefresherQueries interface {

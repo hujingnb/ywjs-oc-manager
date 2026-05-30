@@ -1,131 +1,85 @@
 package channel
 
 import (
-	"bufio"
 	"context"
-	"encoding/json"
 	"errors"
 	"fmt"
-	"io"
-	"strings"
-	"sync"
 
-	"github.com/docker/docker/pkg/stdcopy"
+	"oc-manager/internal/integrations/ocops"
 )
 
-// BindingResolver 抽象在 runtime 容器内取出真实账号标识的能力。
+// BindingResolver 抽象从 oc-ops 取出真实账号标识的能力。
 //
-// 实测：Hermes weixin plugin 与 legacy OpenClaw weixin plugin 共用相同的 state 文件
-// 路径（/root/.openclaw/openclaw-weixin/accounts/...）；Hermes 容器通过 bind mount
-// apps/<id>/weixin → /root/.openclaw/openclaw-weixin/ 持久化 plugin state，含字段：
-//
-//	{"token":"<sensitive>","userId":"<openid>@im.wechat","baseUrl":"...","savedAt":"..."}
-//
-// manager 收到 bound 事件后必须再调一次本接口从 plugin state 取 userId 补到
-// channel_bindings.bound_identity。
+// 微信扫码绑定完成后，manager 须调用本接口从 oc-ops ChannelStatus 取出 AccountID，
+// 写入 channel_bindings.bound_identity。
+// 签名由 (nodeID,containerID) 改为 appID：spec-A 改走 oc-ops HTTP，不再依赖 docker exec。
 type BindingResolver interface {
-	ResolveWeChatBoundIdentity(ctx context.Context, nodeID, containerID string) (string, error)
+	ResolveWeChatBoundIdentity(ctx context.Context, appID string) (string, error)
 }
 
-// DockerBindingResolver 用既有 ContainerExecutor 通过 docker exec 读容器内 plugin state 文件。
-type DockerBindingResolver struct {
-	executor ContainerExecutor
+// channelStatusClient 窄接口：查询 oc-ops 渠道绑定状态（仅取 AccountID）。
+// 由 *ocops.Client 满足；channel 包对 ocops 包的依赖仅止于此接口，避免过度耦合。
+type channelStatusClient interface {
+	ChannelStatus(ctx context.Context, ep ocops.Endpoint, channel string) (ocops.ChannelStatus, error)
 }
 
-// NewDockerBindingResolver 构造 resolver。executor 必须非 nil；
-// 复用 wechat_runner.go 的 ContainerExecutor，避免再启一条 docker SDK 链路。
-func NewDockerBindingResolver(executor ContainerExecutor) *DockerBindingResolver {
-	return &DockerBindingResolver{executor: executor}
+// OcOpsLocationResolver 由 appID 解析 oc-ops Endpoint 与是否支持（Supported=false 代表 dev stub）。
+// main 包用 service.OcOpsResolver 适配注入，隔离 channel→service 循环依赖。
+type OcOpsLocationResolver interface {
+	Resolve(ctx context.Context, appID string) (ep ocops.Endpoint, supported bool, err error)
 }
 
-// ResolveWeChatBoundIdentity 在容器内 cat 出 accounts.json + accounts/<name>.json 取 userId。
+// OcOpsBindingResolver 通过 oc-ops ChannelStatus 接口解析微信绑定身份（AccountID）。
+// 取代旧 DockerBindingResolver（docker exec 读容器内 plugin state 文件）。
+type OcOpsBindingResolver struct {
+	// ops 调用 oc-ops ChannelStatus RPC 查询渠道绑定状态。
+	ops channelStatusClient
+	// resolver 把 appID 解析为 oc-ops 调用坐标及 dev stub 标志。
+	resolver OcOpsLocationResolver
+}
+
+// NewOcOpsBindingResolver 构造 OcOpsBindingResolver；ops 与 resolver 均不得为 nil。
+func NewOcOpsBindingResolver(ops channelStatusClient, resolver OcOpsLocationResolver) *OcOpsBindingResolver {
+	return &OcOpsBindingResolver{ops: ops, resolver: resolver}
+}
+
+// ResolveWeChatBoundIdentity 向 oc-ops 查询微信渠道绑定状态，返回 AccountID。
 //
-// 步骤（路径沿用 legacy OpenClaw weixin plugin 约定，Hermes 容器通过 bind mount 保持相同路径）：
-//  1. cat /root/.openclaw/openclaw-weixin/accounts.json → ["account-name"] JSON 数组
-//  2. cat /root/.openclaw/openclaw-weixin/accounts/<account-name>.json → 含 userId 的 JSON
-//  3. 返回 userId 字段（OpenID 形态）
-//
-// 任一步骤失败返回原始错误；空数组 / 缺 userId 返回 ErrIdentityUnavailable。
-// 调用方在收到 ErrIdentityUnavailable 时不应把 binding 标记 failed，仅留 BoundIdentity 为空，
-// 等下次 PollAuth 重试（plugin 写文件可能慢于 stdout 报告 bound）。
-func (r *DockerBindingResolver) ResolveWeChatBoundIdentity(ctx context.Context, nodeID, containerID string) (string, error) {
-	if r.executor == nil {
-		return "", errors.New("container executor 未配置")
-	}
-	if containerID == "" {
-		return "", errors.New("containerID 不能为空")
-	}
-
-	// Step 1：拿 account 名列表。
-	accountsRaw, err := r.execCat(ctx, nodeID, containerID,
-		"/root/.openclaw/openclaw-weixin/accounts.json")
+// 业务逻辑：
+//  1. 由 resolver 解析 appID 对应的 oc-ops 坐标；resolver 报错直接透出（基础设施故障）。
+//  2. supported=false（dev stub 镜像，无真实 hermes）→ 返回 ErrIdentityUnavailable，
+//     语义与旧实现一致：调用方不应把 binding 标记 failed，等下次 polling 重试。
+//  3. 向 oc-ops 查 ChannelStatus（weixin 是 hermes 侧的渠道名，区别于 manager 侧的 "wechat"）。
+//  4. Bound=false 或 AccountID 为空 → 绑定尚未完成/账号尚未落定，返回 ErrIdentityUnavailable。
+//  5. 否则返回 AccountID。
+func (r *OcOpsBindingResolver) ResolveWeChatBoundIdentity(ctx context.Context, appID string) (string, error) {
+	// Step 1：解析 oc-ops 坐标。
+	ep, supported, err := r.resolver.Resolve(ctx, appID)
 	if err != nil {
-		return "", fmt.Errorf("读 accounts.json 失败: %w", err)
+		return "", fmt.Errorf("解析 oc-ops 坐标失败: %w", err)
 	}
-	var accounts []string
-	if err := json.Unmarshal([]byte(strings.TrimSpace(accountsRaw)), &accounts); err != nil {
-		return "", fmt.Errorf("accounts.json 不是 JSON 数组: %w", err)
-	}
-	if len(accounts) == 0 {
+
+	// Step 2：dev stub 实例没有真实 hermes，无法取得身份，等下次 poll。
+	if !supported {
 		return "", ErrIdentityUnavailable
 	}
 
-	// 取第一个账号；v1 假设单 binding 单账号。
-	name := accounts[0]
-	if name == "" || strings.ContainsAny(name, "/\\") {
-		return "", fmt.Errorf("非法 account 名: %q", name)
+	// Step 3：查询 oc-ops weixin 渠道状态。
+	// "weixin" 是 hermes/oc-ops 侧的渠道名（见 hermes/wechat_runner.go:68）；
+	// manager 侧枚举值 domain.ChannelTypeWeChat="wechat" 是另一套命名，不要混用。
+	st, err := r.ops.ChannelStatus(ctx, ep, "weixin")
+	if err != nil {
+		return "", fmt.Errorf("查询 oc-ops 微信渠道状态失败: %w", err)
 	}
 
-	// Step 2：读对应 account JSON 取 userId。
-	accountRaw, err := r.execCat(ctx, nodeID, containerID,
-		fmt.Sprintf("/root/.openclaw/openclaw-weixin/accounts/%s.json", name))
-	if err != nil {
-		return "", fmt.Errorf("读 accounts/%s.json 失败: %w", name, err)
-	}
-	var account struct {
-		UserID string `json:"userId"`
-	}
-	if err := json.Unmarshal([]byte(accountRaw), &account); err != nil {
-		return "", fmt.Errorf("解析 account JSON 失败: %w", err)
-	}
-	if account.UserID == "" {
+	// Step 4：绑定未完成或账号尚未落定，等下次 poll 重试。
+	if !st.Bound || st.AccountID == "" {
 		return "", ErrIdentityUnavailable
 	}
-	return account.UserID, nil
+
+	return st.AccountID, nil
 }
 
-// ErrIdentityUnavailable 表示 plugin state 中尚无可用 userId（accounts 为空或缺字段）。
+// ErrIdentityUnavailable 表示微信身份暂不可得（绑定未完成、dev stub 或 oc-ops 尚未返回绑定账号）。
 // 调用方应等下次 polling 重试，不应把 binding 推到 failed。
-var ErrIdentityUnavailable = errors.New("plugin state userId 暂不可用")
-
-// execCat 通过 docker exec 跑 cat 拿文件内容（multiplexed stdout 流）。
-func (r *DockerBindingResolver) execCat(ctx context.Context, nodeID, containerID, path string) (string, error) {
-	reader, closer, err := r.executor.Exec(ctx, nodeID, containerID, []string{"cat", path})
-	if err != nil {
-		return "", err
-	}
-	var closeOnce sync.Once
-	defer closeOnce.Do(func() {
-		if closer != nil {
-			closer()
-		}
-	})
-
-	stdout, stdoutW := io.Pipe()
-	demuxDone := make(chan error, 1)
-	go func() {
-		_, err := stdcopy.StdCopy(stdoutW, io.Discard, reader)
-		_ = stdoutW.Close()
-		demuxDone <- err
-	}()
-
-	var sb strings.Builder
-	sc := bufio.NewScanner(stdout)
-	sc.Buffer(make([]byte, 64*1024), 1024*1024)
-	for sc.Scan() {
-		sb.Write(sc.Bytes())
-		sb.WriteByte('\n')
-	}
-	<-demuxDone
-	return strings.TrimSpace(sb.String()), nil
-}
+var ErrIdentityUnavailable = errors.New("微信账号身份暂不可用")

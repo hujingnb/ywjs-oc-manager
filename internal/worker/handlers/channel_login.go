@@ -212,7 +212,7 @@ func (h *ChannelCheckBindingHandler) Handle(ctx context.Context, job sqlc.Job) e
 	case channel.AuthStatusBound:
 		identity := progress.BoundIdentity
 		if identity == "" && h.resolver != nil && payload.ChannelType == domain.ChannelTypeWeChat {
-			if resolved, rerr := h.resolver.ResolveWeChatBoundIdentity(ctx, app.RuntimeNodeID.String, app.ContainerID.ValueOrZero()); rerr == nil {
+			if resolved, rerr := h.resolver.ResolveWeChatBoundIdentity(ctx, payload.AppID); rerr == nil {
 				identity = resolved
 			}
 		}
@@ -245,12 +245,11 @@ func (h *ChannelCheckBindingHandler) Handle(ctx context.Context, job sqlc.Job) e
 		}
 	default:
 		// Fallback：weixin plugin 在 cached login（同微信账号已授权过）场景下
-		// 不再 emit "bound" 事件，但 plugin state 文件（/root/.openclaw/openclaw-weixin/accounts/*.json，
-		// legacy 路径，Hermes 容器通过 bind mount 保持相同路径）真实存在 session。
-		// 这里直接调 resolver 看 plugin state 是否已有有效身份；
+		// 不再 emit "bound" 事件，但 oc-ops ChannelStatus 仍能反映已绑定的真实状态。
+		// 这里直接调 resolver 查 oc-ops 是否已有有效身份；
 		// 有就同样推到 bound，避免 5 分钟后被错误地 expire。
 		if h.resolver != nil && payload.ChannelType == domain.ChannelTypeWeChat {
-			if identity, rerr := h.resolver.ResolveWeChatBoundIdentity(ctx, app.RuntimeNodeID.String, app.ContainerID.ValueOrZero()); rerr == nil && identity != "" {
+			if identity, rerr := h.resolver.ResolveWeChatBoundIdentity(ctx, payload.AppID); rerr == nil && identity != "" {
 				metadata, _ := json.Marshal(progress.Metadata)
 				// 与 case AuthStatusBound 共用 finalizeChannelBound:cached-login
 				// fallback 同样要触发容器重启,否则绑定后 weixin 平台不会被 hermes 加载。
