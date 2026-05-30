@@ -1,0 +1,16 @@
+metadata:
+  creationTimestamp: null
+  labels:
+    app: a1
+    app.kubernetes.io/part-of: oc-manager
+  name: app-a1-ocops
+  namespace: oc-apps
+spec:
+  ports:
+  - name: oc-ops
+    port: 8080
+    targetPort: 8080
+  selector:
+    app: a1
+status:
+  loadBalancer: {}

@@ -1,0 +1,163 @@
+package k8sorch
+
+import (
+	appsv1 "k8s.io/api/apps/v1"
+	corev1 "k8s.io/api/core/v1"
+	"k8s.io/apimachinery/pkg/api/resource"
+	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"k8s.io/apimachinery/pkg/util/intstr"
+)
+
+// 资源命名约定（manager 按 appID 确定性寻址，无需存 pod 标识）。
+func deploymentName(appID string) string { return "app-" + appID }
+func serviceName(appID string) string    { return "app-" + appID + "-ocops" }
+func secretName(appID string) string     { return "app-" + appID + "-token" }
+
+// appLabels 是资源 ObjectMeta 与 pod template 的完整 label（含分组维度 part-of）。
+func appLabels(appID string) map[string]string {
+	return map[string]string{"app": appID, "app.kubernetes.io/part-of": "oc-manager"}
+}
+
+// selectorLabels 是 Deployment/Service 的 selector：仅 app=<id>，最小且稳定
+// （Deployment selector 不可变；分组用的 part-of 不进 selector，避免过度约束/漏选）。
+func selectorLabels(appID string) map[string]string {
+	return map[string]string{"app": appID}
+}
+
+// RenderSecret 渲染 per-app 控制 token Secret（control-token 键）。
+func RenderSecret(spec AppSpec, namespace string) *corev1.Secret {
+	return &corev1.Secret{
+		ObjectMeta: metav1.ObjectMeta{Name: secretName(spec.AppID), Namespace: namespace, Labels: appLabels(spec.AppID)},
+		Type:       corev1.SecretTypeOpaque,
+		StringData: map[string]string{"control-token": spec.ControlToken},
+	}
+}
+
+// RenderService 渲染 oc-ops Service（OcOpsResolver 寻址目标，port 8080）。
+func RenderService(spec AppSpec, namespace string) *corev1.Service {
+	return &corev1.Service{
+		ObjectMeta: metav1.ObjectMeta{Name: serviceName(spec.AppID), Namespace: namespace, Labels: appLabels(spec.AppID)},
+		Spec: corev1.ServiceSpec{
+			Selector: selectorLabels(spec.AppID),
+			Ports:    []corev1.ServicePort{{Name: "oc-ops", Port: 8080, TargetPort: intstr.FromInt32(8080)}},
+		},
+	}
+}
+
+// RenderDeployment 渲染 app Deployment（replicas=1, Recreate, initContainer restore +
+// hermes + oc-ops + sidecar s3-sync，emptyDir oc-input + data）。
+func RenderDeployment(spec AppSpec, namespace string) *appsv1.Deployment {
+	replicas := int32(1)
+	// ctrlTokenEnv 从 Secret 挂载 per-app control token，供多个容器复用。
+	ctrlTokenEnv := corev1.EnvVar{Name: "OC_CONTROL_TOKEN", ValueFrom: &corev1.EnvVarSource{
+		SecretKeyRef: &corev1.SecretKeySelector{
+			LocalObjectReference: corev1.LocalObjectReference{Name: secretName(spec.AppID)},
+			Key:                  "control-token",
+		},
+	}}
+	// bootstrapEnv 指向 manager bootstrap 端点，供 initContainer restore 和 sidecar s3-sync 使用。
+	bootstrapEnv := corev1.EnvVar{Name: "OC_BOOTSTRAP_URL", Value: spec.BootstrapURL}
+	// dataMount 是 hermes 主目录（app 数据卷）挂载点。
+	dataMount := corev1.VolumeMount{Name: "data", MountPath: "/opt/data"}
+	// inputMount 是 initContainer restore 写运行时配置的可写挂载点。
+	inputMount := corev1.VolumeMount{Name: "oc-input", MountPath: "/opt/oc-input"}
+	// inputMountRO 是 hermes 只读消费 oc-input（防止主容器误写共享配置卷）。
+	inputMountRO := corev1.VolumeMount{Name: "oc-input", MountPath: "/opt/oc-input", ReadOnly: true}
+	// reqs/lims 从 ResourceLimits 字符串解析为 k8s resource.Quantity。
+	reqs := corev1.ResourceList{
+		corev1.ResourceCPU:    resource.MustParse(spec.Resources.RequestsCPU),
+		corev1.ResourceMemory: resource.MustParse(spec.Resources.RequestsMemory),
+	}
+	lims := corev1.ResourceList{
+		corev1.ResourceCPU:    resource.MustParse(spec.Resources.LimitsCPU),
+		corev1.ResourceMemory: resource.MustParse(spec.Resources.LimitsMemory),
+	}
+	dep := &appsv1.Deployment{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:      deploymentName(spec.AppID),
+			Namespace: namespace,
+			Labels:    appLabels(spec.AppID),
+		},
+		Spec: appsv1.DeploymentSpec{
+			Replicas: &replicas,
+			// Recreate 策略：旧 pod 先完全停止再启新 pod，避免数据卷冲突。
+			Strategy: appsv1.DeploymentStrategy{Type: appsv1.RecreateDeploymentStrategyType},
+			Selector: &metav1.LabelSelector{MatchLabels: selectorLabels(spec.AppID)},
+			Template: corev1.PodTemplateSpec{
+				ObjectMeta: metav1.ObjectMeta{Labels: appLabels(spec.AppID)},
+				Spec: corev1.PodSpec{
+					// imagePullSecrets 用于拉取私有镜像仓库。
+					ImagePullSecrets: []corev1.LocalObjectReference{{Name: spec.ImagePullSecret}},
+					// initContainer restore：从 manager bootstrap 拉取运行时配置写入 oc-input。
+					InitContainers: []corev1.Container{{
+						Name:    "restore",
+						Image:   spec.OpsImage,
+						Command: []string{"oc-restore"},
+						Env:     []corev1.EnvVar{ctrlTokenEnv, bootstrapEnv},
+						VolumeMounts: []corev1.VolumeMount{inputMount, dataMount},
+					}},
+					Containers: []corev1.Container{
+						{
+							// hermes：主业务容器，负责 AI 网关逻辑，资源配额受限。
+							Name:         "hermes",
+							Image:        spec.HermesImage,
+							Env:          []corev1.EnvVar{{Name: "HERMES_HOME", Value: "/opt/data"}},
+							VolumeMounts: []corev1.VolumeMount{inputMountRO, dataMount},
+							Resources:    corev1.ResourceRequirements{Requests: reqs, Limits: lims},
+							// readinessProbe：exec hermes gateway status，验证网关真正就绪。
+							ReadinessProbe: &corev1.Probe{
+								ProbeHandler: corev1.ProbeHandler{
+									Exec: &corev1.ExecAction{Command: []string{"hermes", "gateway", "status"}},
+								},
+								InitialDelaySeconds: 10,
+								PeriodSeconds:       10,
+								FailureThreshold:    6,
+							},
+						},
+						{
+							// oc-ops：控制平面 API sidecar，复用 hermes 镜像，覆盖 CMD 启动 uvicorn。
+							Name:  "oc-ops",
+							Image: spec.HermesImage,
+							Command: []string{
+								"/usr/local/lib/hermes-agent/venv/bin/python",
+								"-m", "uvicorn",
+								"ocops.server:app",
+								"--host", "0.0.0.0",
+								"--port", "8080",
+							},
+							// OC_OPS_TOKEN 复用 ctrlTokenEnv 的 SecretKeyRef 来源。
+							Env:          []corev1.EnvVar{{Name: "OC_OPS_TOKEN", ValueFrom: ctrlTokenEnv.ValueFrom}},
+							Ports:        []corev1.ContainerPort{{ContainerPort: 8080}},
+							VolumeMounts: []corev1.VolumeMount{dataMount},
+						},
+						{
+							// s3-sync：数据持久化 sidecar，preStop 执行最终同步防止数据丢失。
+							Name:         "s3-sync",
+							Image:        spec.OpsImage,
+							Command:      []string{"oc-sync"},
+							Env:          []corev1.EnvVar{ctrlTokenEnv, bootstrapEnv},
+							VolumeMounts: []corev1.VolumeMount{dataMount},
+							Lifecycle: &corev1.Lifecycle{
+								PreStop: &corev1.LifecycleHandler{
+									Exec: &corev1.ExecAction{Command: []string{"oc-presync"}},
+								},
+							},
+						},
+					},
+					Volumes: []corev1.Volume{
+						// oc-input：initContainer restore 输出 → hermes/oc-ops 消费，生命周期与 pod 同步。
+						{Name: "oc-input", VolumeSource: corev1.VolumeSource{EmptyDir: &corev1.EmptyDirVolumeSource{}}},
+						// data：hermes 运行时数据目录，s3-sync 负责持久化到 S3。
+						{Name: "data", VolumeSource: corev1.VolumeSource{EmptyDir: &corev1.EmptyDirVolumeSource{}}},
+					},
+				},
+			},
+		},
+	}
+	// 将 AppSpec.Labels 合并到 Deployment 与 pod template 的 label，支持外部选择器扩展。
+	for k, v := range spec.Labels {
+		dep.Labels[k] = v
+		dep.Spec.Template.Labels[k] = v
+	}
+	return dep
+}
