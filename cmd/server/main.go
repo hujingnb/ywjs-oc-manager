@@ -139,8 +139,6 @@ func runManager(ctx context.Context, cfg config.Config, logOut io.Writer) error 
 	// k8s 模型下不再需要选节点，pod 落点由调度器决定；直接构造 onboarding 服务。
 	onboardingService := service.NewMemberOnboardingService(store.NewOnboardingRunner(dbStore), hashPasswordWithDefault)
 	auditService := service.NewAuditService(dbStore.Queries)
-	runtimeNodeStore := store.NewRuntimeNodeStore(dbStore)
-	runtimeNodeService := service.NewRuntimeNodeService(runtimeNodeStore, hashTokenSHA256)
 
 	var ragflowClient service.RAGFlowKnowledgeClient
 	if cfg.RAGFlow.BaseURL != "" || cfg.RAGFlow.APIKey != "" {
@@ -158,7 +156,6 @@ func runManager(ctx context.Context, cfg config.Config, logOut io.Writer) error 
 	// 注入版本镜像解析器：AppService 计算 version_synced 时需要把版本 image_id 解析成镜像 ref。
 	appService.SetImageResolver(runtimeImageAdapter{images: cfg.Hermes.RuntimeImages})
 	runtimeOpService := service.NewRuntimeOperationService(dbStore.Queries, logger, redisQueue)
-	resourceMetricsService := service.NewResourceMetricsService(dbStore.Queries)
 	// usage / organization service 在装配 newapi client 之后再实例化（见下方）；
 	// 这里仅声明变量，真实赋值发生在 newapi wiring 段。
 	var usageService *service.UsageService
@@ -474,12 +471,10 @@ func runManager(ctx context.Context, cfg config.Config, logOut io.Writer) error 
 			MemberService:           memberService,
 			OnboardingService:       onboardingService,
 			AuditService:            auditService,
-			RuntimeNodeService:      runtimeNodeService,
 			ChannelService:          channelService,
 			KnowledgeService:        knowledgeService,
 			WorkspaceService:        workspaceService,
 			RuntimeOpService:        runtimeOpService,
-			ResourceMetricsService:  resourceMetricsService,
 			AppService:              appService,
 			UsageService:            usageService,
 			RechargeService:         rechargeService,
@@ -491,7 +486,6 @@ func runManager(ctx context.Context, cfg config.Config, logOut io.Writer) error 
 			JobsStore:               dbStore.Queries,
 			TokenManager:            tokenManager,
 			AgentTokenSink:          agentTokenSink,
-			EnrollmentSecret:        cfg.Runtime.EnrollmentSecret,
 			JobNotifier:             redisQueue,
 			AllowedOrigins:          allowedOriginsFromConfig(cfg),
 		}),
@@ -506,24 +500,6 @@ func runManager(ctx context.Context, cfg config.Config, logOut io.Writer) error 
 	loop := scheduler.NewLoop(jobScheduler, 5*time.Second)
 	loop.SetLogger(logger)
 
-	nodeHealth := service.NewNodeHealthReconciler(dbStore.Queries, 90*time.Second)
-	nodeHealthTask := service.NewPeriodicReconciler("runtime_node_health_reconcile", 30*time.Second, func(ctx context.Context) error {
-		_, err := nodeHealth.Reconcile(ctx)
-		return err
-	})
-	nodeProbe := service.NewRuntimeNodeProbeReconciler(
-		dbStore.Queries,
-		agentTokenResolver,
-		agent.NewProbeClient(time.Duration(cfg.Runtime.Probe.TimeoutSeconds)*time.Second),
-		service.RuntimeNodeProbeConfig{
-			FailureThreshold:  int32(cfg.Runtime.Probe.FailureThreshold),
-			RecoveryThreshold: int32(cfg.Runtime.Probe.RecoveryThreshold),
-		},
-	)
-	nodeProbeTask := service.NewPeriodicReconciler("runtime_node_probe_reconcile", time.Duration(cfg.Runtime.Probe.IntervalSeconds)*time.Second, func(ctx context.Context) error {
-		_, err := nodeProbe.Reconcile(ctx)
-		return err
-	})
 	// app 状态 poll reconciler：周期对运行中 app 调 Orchestrator.Status 同步 pod 状态到 DB，
 	// 取代 docker inspect 健康自愈（manager 不自愈，崩溃重启交 Deployment 控制器）。
 	// 仅在启用 k8s（orch != nil）时挂载；未启用时不跑空 tick。
@@ -572,8 +548,6 @@ func runManager(ctx context.Context, cfg config.Config, logOut io.Writer) error 
 		logger,
 	)
 	reaperInstance.Start(gctx)
-	eg.Go(func() error { return nodeHealthTask.Run(gctx, logger) })
-	eg.Go(func() error { return nodeProbeTask.Run(gctx, logger) })
 	if appStatusTask != nil {
 		eg.Go(func() error { return appStatusTask.Run(gctx, logger) })
 	}

@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"net/http"
+	"strings"
 
 	"github.com/gin-gonic/gin"
 
@@ -11,6 +12,13 @@ import (
 	"oc-manager/internal/service"
 	"oc-manager/internal/store/sqlc"
 )
+
+// bearerToken 从 Authorization header 中提取 Bearer token。
+// header 格式必须为 "Bearer <token>"，scheme 大小写不敏感；token 为空时返回 false。
+func bearerToken(header string) (string, bool) {
+	scheme, token, ok := strings.Cut(header, " ")
+	return token, ok && strings.EqualFold(scheme, "Bearer") && token != ""
+}
 
 // BootstrapAppService 是 bootstrap handler 所需的服务能力（窄接口，便于测试注入）。
 type BootstrapAppService interface {
@@ -41,13 +49,13 @@ func RegisterBootstrapRoutes(router gin.IRouter, handler *BootstrapHandler) {
 // Bootstrap 校验 control token 并返回组装后的 bootstrap 响应。
 //
 // 鉴权流程：
-//  1. 从 Authorization header 取 Bearer token（复用包内 bearerToken 辅助）。
+//  1. 从 Authorization header 取 Bearer token（调用包内 bearerToken 辅助）。
 //  2. 对 token 做 hash，调用 service.ResolveByControlToken 反查 app（hash 不匹配即报 401）。
 //  3. 校验 path :id 与 token 所属 app.ID 一致，防止持 A 的 token 拉 B 的配置。
 //
 // 错误映射：缺/无效 token → 401；path id 不一致 → 401；app 未就绪 → 409；其他 → 500。
 func (h *BootstrapHandler) Bootstrap(c *gin.Context) {
-	// 取 Bearer token；复用 agent.go 中的 bearerToken，避免重复定义。
+	// 取 Bearer token；bearerToken 辅助函数定义于本文件。
 	token, ok := bearerToken(c.GetHeader("Authorization"))
 	if !ok {
 		c.JSON(http.StatusUnauthorized, apierror.New("UNAUTHORIZED", "缺少 control token"))

@@ -26,8 +26,6 @@ type Dependencies struct {
 	OnboardingService *service.MemberOnboardingService
 	// AuditService 提供审计日志查询路由。
 	AuditService *service.AuditService
-	// RuntimeNodeService 提供 runtime 节点管理和 agent enroll / heartbeat 路由。
-	RuntimeNodeService *service.RuntimeNodeService
 	// ChannelService 提供渠道绑定与同步路由。
 	ChannelService *service.ChannelService
 	// KnowledgeService 提供组织和应用知识库路由。
@@ -36,8 +34,6 @@ type Dependencies struct {
 	WorkspaceService *service.WorkspaceService
 	// UsageService 提供 new-api 用量代理路由。
 	UsageService *service.UsageService
-	// ResourceMetricsService 提供 runtime 节点和应用实例资源指标查询路由。
-	ResourceMetricsService *service.ResourceMetricsService
 	// RuntimeOpService 提供应用运行时操作和 inspect 路由。
 	RuntimeOpService *service.RuntimeOperationService
 	// AppService 提供应用只读列表和详情路由。
@@ -62,8 +58,6 @@ type Dependencies struct {
 	// AgentTokenSink 在 agent enroll 成功时由 manager 进程缓存 (nodeID, agentToken)。
 	// nil 时跳过缓存（仅供测试或未启用 docker proxy 的最小装配使用）。
 	AgentTokenSink func(nodeID, agentToken string)
-	// EnrollmentSecret 是 runtime-agent 自动注册使用的共享密钥。
-	EnrollmentSecret string
 	// JobNotifier 让 DeleteMember / 其它入队操作即时通知 Redis；nil 时退化到 scheduler 兜底。
 	JobNotifier service.JobNotifier
 	// AllowedOrigins 是 CORS 白名单。空切片代表同源部署不开 CORS。
@@ -103,16 +97,7 @@ func NewRouter(deps ...Dependencies) http.Handler {
 		return router
 	}
 
-	// ── agent：runtime-agent 专用，使用 enrollment_secret / agent_token 自身鉴权 ──
-	if dep.RuntimeNodeService != nil {
-		var agentHandler *handlers.AgentEndpointsHandler
-		if dep.AgentTokenSink != nil {
-			agentHandler = handlers.NewAgentEndpointsHandler(dep.RuntimeNodeService, dep.EnrollmentSecret, dep.AgentTokenSink)
-		} else {
-			agentHandler = handlers.NewAgentEndpointsHandler(dep.RuntimeNodeService, dep.EnrollmentSecret)
-		}
-		handlers.RegisterAgentRoutes(router, agentHandler)
-	}
+	// ── agent：runtime-agent 专用，agent enroll / heartbeat 路由已随节点服务移除 ──
 	if dep.KnowledgeService != nil {
 		handlers.RegisterRuntimeKnowledgeRoutes(router, handlers.NewRuntimeKnowledgeHandler(dep.KnowledgeService))
 	}
@@ -151,9 +136,6 @@ func NewRouter(deps ...Dependencies) http.Handler {
 	if dep.AuditService != nil {
 		handlers.RegisterAuditRoutes(user, handlers.NewAuditHandler(dep.AuditService))
 	}
-	if dep.RuntimeNodeService != nil {
-		handlers.RegisterRuntimeNodeRoutes(user, handlers.NewRuntimeNodesHandler(dep.RuntimeNodeService))
-	}
 	if dep.JobsStore != nil {
 		handlers.RegisterJobsRoutes(user, handlers.NewJobsHandler(dep.JobsStore))
 	}
@@ -168,9 +150,6 @@ func NewRouter(deps ...Dependencies) http.Handler {
 	}
 	if dep.UsageService != nil {
 		handlers.RegisterUsageRoutes(user, handlers.NewUsageHandler(dep.UsageService))
-	}
-	if dep.ResourceMetricsService != nil {
-		handlers.RegisterResourceMetricsRoutes(user, handlers.NewResourceMetricsHandler(dep.ResourceMetricsService))
 	}
 	if dep.RuntimeOpService != nil {
 		handlers.RegisterAppRuntimeRoutes(user, handlers.NewAppRuntimeHandler(dep.RuntimeOpService))
