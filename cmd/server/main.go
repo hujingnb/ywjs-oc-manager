@@ -37,6 +37,7 @@ import (
 	"oc-manager/internal/domain"
 	"oc-manager/internal/integrations/agent"
 	"oc-manager/internal/integrations/channel"
+	"oc-manager/internal/integrations/k8sorch"
 	"oc-manager/internal/integrations/newapi"
 	"oc-manager/internal/integrations/ocops"
 	"oc-manager/internal/integrations/ragflow"
@@ -45,7 +46,6 @@ import (
 	managerlog "oc-manager/internal/log"
 	"oc-manager/internal/migrations"
 	"oc-manager/internal/redis"
-	"oc-manager/internal/runtime/imagecoord"
 	"oc-manager/internal/scheduler"
 	"oc-manager/internal/service"
 	"oc-manager/internal/store"
@@ -57,13 +57,6 @@ import (
 	_ "github.com/golang-migrate/migrate/v4/database/mysql"
 	"github.com/golang-migrate/migrate/v4/source/iofs"
 )
-
-// ocopsBaseURLTemplate 是 oc-ops 服务基址的约定占位模板，含一个 %s 占位符（以 appID 替换）。
-//
-// TODO(spec-A): spec-E 不做真实 k8s 寻址，此模板仅为 service.OcOpsResolverFromStore 提供
-// 可拼装的占位基址；spec-A 将由 client-go 解析的真实 Service DNS 取代，并注入 per-app
-// OC_OPS_TOKEN（当前 Endpoint.Token 留空）。
-const ocopsBaseURLTemplate = "http://app-%s-ocops.oc-apps.svc:8080"
 
 func main() {
 	configPath := os.Getenv("OCM_CONFIG")
@@ -187,10 +180,8 @@ func runManager(ctx context.Context, cfg config.Config, logOut io.Writer) error 
 	}
 	nodeResolver := newNodeClientResolver(dbStore.Queries, agentTokenResolver)
 
-	// imagecoord.Coordinator 跨 manager 实例对 pull / sync 做 single-flight
-	// 并通过 Redis Pub/Sub 广播进度。这里单独开一个 go-redis client 给 DistLocker /
-	// ProgressBus 使用,与 redisQueue 共享同一 Redis 物理实例但连接池分离,
-	// 避免长时间 Subscribe 占用 queue 用到的连接。
+	// distLocker 使用独立的 go-redis client，与 redisQueue 共享同一 Redis 物理实例但连接池分离；
+	// 供 reaper 做跨实例分布式锁，防止多 manager 副本并发触发同一 reap 任务。
 	imagecoordRedis := goredis.NewClient(&goredis.Options{
 		Addr:     cfg.Redis.Addr,
 		Password: cfg.Redis.Password,
@@ -198,9 +189,6 @@ func runManager(ctx context.Context, cfg config.Config, logOut io.Writer) error 
 	})
 	defer imagecoordRedis.Close()
 	distLocker := redis.NewRedisDistLocker(imagecoordRedis)
-	progressBus := redis.NewRedisProgressBus(imagecoordRedis)
-	// Coordinator 按 (nodeID, imageRef) 粒度加锁，让 agent 直接从公网 registry 拉取镜像。
-	imageCoord := imagecoord.NewCoordinator(distLocker, progressBus, uuid.NewString())
 	runtimeAdapter := runtime.NewAgentBackedAdapter(nodeResolver, nodeResolver)
 	// streamingResolver 构造一次复用：runtimeAdapter.DockerClientForNode 供镜像拉取流式
 	// NDJSON（长连接场景），必须用无 timeout 的 docker client。
@@ -211,6 +199,27 @@ func runManager(ctx context.Context, cfg config.Config, logOut io.Writer) error 
 	runtimeAdapter.SetStreamingDocker(streamingResolver)
 	runtimeOpService.SetInspector(newRuntimeInspectorWrapper(runtimeAdapter))
 
+	// k8s 编排器：启用 k8s 时构造 client-go clientset + KubernetesAdapter，取代 docker 编排。
+	// 未启用时 orch 为 nil，生命周期/init handler 已做 nil 守卫（降级：无法管理 app，仅最小运行）。
+	var orch k8sorch.Orchestrator
+	if cfg.Kubernetes.Enabled {
+		cs, err := k8sorch.NewClientset(cfg.Kubernetes.Kubeconfig)
+		if err != nil {
+			return fmt.Errorf("初始化 k8s clientset 失败: %w", err)
+		}
+		orch = k8sorch.NewKubernetesAdapter(cs, cfg.Kubernetes.Namespace)
+	}
+	// k8sInitCfg 供 app_initialize 渲染 AppSpec 使用，从 cfg.Kubernetes 提取最小子集。
+	k8sInitCfg := handlers.AppInitializeK8sConfig{
+		OpsImage:         cfg.Kubernetes.OpsImage,
+		BootstrapBaseURL: cfg.Kubernetes.BootstrapBaseURL,
+		ImagePullSecret:  cfg.Kubernetes.ImagePullSecret,
+		Resources: handlers.AppInitializeK8sResources{
+			Requests: handlers.AppInitializeK8sResourceSpec{CPU: cfg.Kubernetes.Resources.Requests.CPU, Memory: cfg.Kubernetes.Resources.Requests.Memory},
+			Limits:   handlers.AppInitializeK8sResourceSpec{CPU: cfg.Kubernetes.Resources.Limits.CPU, Memory: cfg.Kubernetes.Resources.Limits.Memory},
+		},
+	}
+
 	// oc-ops HTTP 客户端 + app 坐标解析器：cron / kanban / 微信扫码登录均改走
 	// oc-ops 类型化 REST / SSE，不再经 runtimeAdapter docker exec。
 	// 30s 超时仅约束普通 RPC（DoJSON）；SSE 长连接（kanban watch / 微信扫码，
@@ -219,9 +228,16 @@ func runManager(ctx context.Context, cfg config.Config, logOut io.Writer) error 
 	// 流式订阅（与下方 streamingResolver 对 docker ExecAttach 的处理同理）。
 	ocopsClient := ocops.NewClient(&http.Client{Timeout: 30 * time.Second})
 	// ocopsResolver 把 appID 解析为 oc-ops 调用坐标。
-	// TODO(spec-A): ocopsBaseURLTemplate 当前为约定占位模板，spec-E 不做真实 k8s 寻址；
-	// spec-A 将替换为 client-go 解析的真实 Service DNS，并注入 per-app OC_OPS_TOKEN。
-	ocopsResolver := service.NewOcOpsResolverFromStore(dbStore.Queries, cipher, ocopsBaseURLTemplate)
+	// spec-A 已落地真实 k8s 寻址：基址即 render.go 渲染的 oc-ops Service DNS
+	// （serviceName=app-<id>-ocops），namespace 跟随 cfg.Kubernetes.Namespace 参数化
+	// （为空回退 oc-apps）；per-app OC_OPS_TOKEN 由 resolver 从 runtime_token_ciphertext
+	// 经 cipher 解密注入，不再是占位。
+	ocopsNamespace := cfg.Kubernetes.Namespace
+	if ocopsNamespace == "" {
+		ocopsNamespace = "oc-apps"
+	}
+	ocopsBaseURLTpl := fmt.Sprintf("http://app-%%s-ocops.%s.svc:8080", ocopsNamespace)
+	ocopsResolver := service.NewOcOpsResolverFromStore(dbStore.Queries, cipher, ocopsBaseURLTpl)
 
 	channelRegistry := channel.NewRegistry()
 	channelService := service.NewChannelService(dbStore.Queries, channelRegistry, redisQueue)
@@ -343,13 +359,10 @@ func runManager(ctx context.Context, cfg config.Config, logOut io.Writer) error 
 	platformOverviewService := service.NewPlatformOverviewService(dbStore.Queries)
 
 	registry := handlers.NewRegistry()
-	// runtimeAdapter 同时实现 AgentDirInitializer / ContainerCreator / ContainerLifecycle
-	// 三个接口（前者经 InitAppDirs 调用 agent file API，后两者经 docker proxy）。
+	// app 初始化 handler 走 k8s 路径：编排能力经 SetOrchestrator 注入（见下方），
+	// 构造期只需 store / newapiFactory / 渲染配置。
 	appInitHandler := handlers.NewAppInitializeHandler(
 		dbStore.Queries,
-		appDirInitializerAdapter{adapter: runtimeAdapter},
-		runtimeAdapter,
-		runtimeAdapter,
 		newapiFactory,
 		handlers.AppInitializeConfig{
 			SystemPromptTemplate: cfg.Hermes.SystemPromptTemplate,
@@ -373,30 +386,24 @@ func runManager(ctx context.Context, cfg config.Config, logOut io.Writer) error 
 			ManagerRuntimeBaseURL: cfg.Hermes.ManagerRuntimeBaseURL,
 		},
 	)
-	// runtimeAdapter 同时实现 AppInputUploader (UploadAppInputFile)，在多节点部署
-	// 下把 manifest.yaml + resources/*.md 上传到目标节点 agent 的
-	// dataRoot/apps/<id>/input/，容器内 oc-entrypoint 在启动时翻译成 hermes 自有 schema。
-	appInitHandler.SetAppInputUploader(runtimeAdapter)
-	// 注入镜像拉取协调器：phasePullRuntimeImage 通过 imageCoord 在目标 agent 节点直接
-	// pull hermes runtime 镜像，Redis 锁 + Pub/Sub 保证集群内 single-flight + 跨实例进度广播。
-	appInitHandler.SetImagePullCoord(imageCoord)
-	// 注入 per-node Docker 客户端工厂：runtimeAdapter 已实现 DockerClientForNode，
-	// 返回指向目标节点 agent docker proxy 的 Docker SDK client。
-	appInitHandler.SetNodeDockerProvider(runtimeAdapter)
+	// 注入真实 k8s 编排器与渲染配置：phaseCreate/phaseStart 据此 EnsureApp + WaitReady，
+	// 把 app 渲染成 Deployment + Service + Secret 并等待 pod Ready。orch 为 nil（未启用 k8s）
+	// 时 handler 内部跳过这两阶段。
+	appInitHandler.SetOrchestrator(orch, k8sInitCfg)
 	if err := registry.Register("app_initialize", appInitHandler.Handle); err != nil {
 		return fmt.Errorf("注册 app_initialize handler 失败: %w", err)
 	}
-	// TODO(Task 14): 生命周期 handler 已迁移至 k8s 编排（appOrchestrator + ObjectStore），
-	// 此处暂时传 nil（真实 k8sorch.Adapter 将在 Task 14 装配）。
+	// 生命周期 handler 走 k8s 编排（appOrchestrator + ObjectStore）：传入上方构造的真实 orch
+	// （未启用 k8s 时为 nil，handler 内部已做守卫）。
 	// workspaceObjStore 在 S3 启用时已有值（供 workspace + bootstrap），复用给 lifecycle handler。
-	if err := registry.Register("app_start_container", handlers.NewAppStartContainerHandler(dbStore.Queries, nil).Handle); err != nil {
+	if err := registry.Register("app_start_container", handlers.NewAppStartContainerHandler(dbStore.Queries, orch).Handle); err != nil {
 		return fmt.Errorf("注册 app_start_container handler 失败: %w", err)
 	}
-	if err := registry.Register("app_stop_container", handlers.NewAppStopContainerHandler(dbStore.Queries, nil).Handle); err != nil {
+	if err := registry.Register("app_stop_container", handlers.NewAppStopContainerHandler(dbStore.Queries, orch).Handle); err != nil {
 		return fmt.Errorf("注册 app_stop_container handler 失败: %w", err)
 	}
-	// TODO(Task 14): 传入真实 k8s orchestrator；暂时传 nil 让编译通过。
-	restartHandler := handlers.NewAppRestartContainerHandler(dbStore.Queries, nil, workspaceObjStore)
+	// restart 走 k8s 编排：传入真实 orch，workspaceObjStore 供 S3 归档/恢复。
+	restartHandler := handlers.NewAppRestartContainerHandler(dbStore.Queries, orch, workspaceObjStore)
 	// 注入 input refresher：restart 刷新版本配置并检测镜像变更，bootstrap 接管 pod 启动配置后
 	// refresher 的节点文件写入逻辑保留兼容，镜像 ref 比较由 refresher 返回值驱动。
 	restartHandler.SetInputRefresher(newAppInputRefresher(
@@ -419,8 +426,9 @@ func runManager(ctx context.Context, cfg config.Config, logOut io.Writer) error 
 	if err := registry.Register("app_restart_container", restartHandler.Handle); err != nil {
 		return fmt.Errorf("注册 app_restart_container handler 失败: %w", err)
 	}
-	// TODO(Task 14): 传入真实 k8s orchestrator；workspaceObjStore 供 S3 归档；暂时传 nil orch。
-	if err := registry.Register("app_delete", handlers.NewAppDeleteHandler(dbStore.Queries, nil, newapiFactory, workspaceObjStore, knowledgeService).Handle); err != nil {
+	// app_delete 走 k8s 编排：传入真实 orch 删除 Deployment/Service/Secret，
+	// workspaceObjStore 供删除前 S3 归档，knowledgeService 清理 RAGFlow 数据集。
+	if err := registry.Register("app_delete", handlers.NewAppDeleteHandler(dbStore.Queries, orch, newapiFactory, workspaceObjStore, knowledgeService).Handle); err != nil {
 		return fmt.Errorf("注册 app_delete handler 失败: %w", err)
 	}
 	if err := registry.Register(domain.JobTypeChannelStartLogin, handlers.NewChannelStartLoginHandler(dbStore.Queries, channelRegistry, ocopsEndpointResolver{resolver: ocopsResolver}).Handle); err != nil {
@@ -525,10 +533,14 @@ func runManager(ctx context.Context, cfg config.Config, logOut io.Writer) error 
 		_, err := nodeProbe.Reconcile(ctx)
 		return err
 	})
-	runtimeRefresh := newRuntimeRefreshDispatcher(dbStore.Queries, redisQueue)
-	runtimeRefreshTask := service.NewPeriodicReconciler("runtime_refresh_status_dispatch", 30*time.Second, runtimeRefresh.Tick)
-	healthCheckDisp := newHealthCheckDispatcher(dbStore.Queries, redisQueue)
-	healthCheckTask := service.NewPeriodicReconciler("app_health_check_dispatch", 60*time.Second, healthCheckDisp.Tick)
+	// app 状态 poll reconciler：周期对运行中 app 调 Orchestrator.Status 同步 pod 状态到 DB，
+	// 取代 docker inspect 健康自愈（manager 不自愈，崩溃重启交 Deployment 控制器）。
+	// 仅在启用 k8s（orch != nil）时挂载；未启用时不跑空 tick。
+	var appStatusTask *service.PeriodicReconciler
+	if orch != nil {
+		appStatusReconciler := service.NewAppStatusReconciler(dbStore.Queries, orch)
+		appStatusTask = service.NewPeriodicReconciler("app_status_reconcile", 15*time.Second, appStatusReconciler.Tick)
+	}
 	resourceCleanup := service.NewResourceSampleCleanup(dbStore.Queries)
 	resourceCleanupTask := service.NewPeriodicReconciler("resource_sample_cleanup", time.Hour, func(ctx context.Context) error {
 		_, _, err := resourceCleanup.RunOnce(ctx)
@@ -571,8 +583,9 @@ func runManager(ctx context.Context, cfg config.Config, logOut io.Writer) error 
 	reaperInstance.Start(gctx)
 	eg.Go(func() error { return nodeHealthTask.Run(gctx, logger) })
 	eg.Go(func() error { return nodeProbeTask.Run(gctx, logger) })
-	eg.Go(func() error { return runtimeRefreshTask.Run(gctx, logger) })
-	eg.Go(func() error { return healthCheckTask.Run(gctx, logger) })
+	if appStatusTask != nil {
+		eg.Go(func() error { return appStatusTask.Run(gctx, logger) })
+	}
 	eg.Go(func() error { return resourceCleanupTask.Run(gctx, logger) })
 	if ragflowParseStatusTask != nil {
 		eg.Go(func() error { return ragflowParseStatusTask.Run(gctx, logger) })

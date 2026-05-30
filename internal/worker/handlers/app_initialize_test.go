@@ -87,7 +87,7 @@ func TestAppInitializeHandlesHappyPath(t *testing.T) {
 		Cipher:              cipher,
 		ResolveRuntimeImage: testResolveRuntimeImage,
 	}
-	handler := NewAppInitializeHandler(store, nil, nil, nil, client, cfg)
+	handler := NewAppInitializeHandler(store, client, cfg)
 
 	// 注入 fake orchestrator 与 k8s 配置。
 	orch := &fakeOrchestrator{}
@@ -151,7 +151,7 @@ func TestAppInitializeK8s_OrchestratorNilSkipsCreateAndWait(t *testing.T) {
 	// orch 不注入，Handle 仍应走完，不崩溃。
 	store := newAppInitStub(t)
 	client := &fakeNewAPI{result: newapi.APIKey{ID: 1, Key: "sk-x"}}
-	handler := NewAppInitializeHandler(store, nil, nil, nil, client, AppInitializeConfig{
+	handler := NewAppInitializeHandler(store, client, AppInitializeConfig{
 		Cipher:              testCipher(t),
 		ResolveRuntimeImage: testResolveRuntimeImage,
 	})
@@ -167,7 +167,7 @@ func TestAppInitializeK8s_EnsureAppError(t *testing.T) {
 	// EnsureApp 失败应触发 markFailed，last_error_status 记为 creating_container。
 	store := newAppInitStub(t)
 	client := &fakeNewAPI{result: newapi.APIKey{ID: 1, Key: "k"}}
-	handler := NewAppInitializeHandler(store, nil, nil, nil, client, AppInitializeConfig{
+	handler := NewAppInitializeHandler(store, client, AppInitializeConfig{
 		Cipher:              testCipher(t),
 		ResolveRuntimeImage: testResolveRuntimeImage,
 	})
@@ -190,7 +190,7 @@ func TestAppInitializeK8s_WaitReadyError(t *testing.T) {
 	// WaitReady 超时/失败应触发 markFailed，last_error_status 记为 starting。
 	store := newAppInitStub(t)
 	client := &fakeNewAPI{result: newapi.APIKey{ID: 1, Key: "k"}}
-	handler := NewAppInitializeHandler(store, nil, nil, nil, client, AppInitializeConfig{
+	handler := NewAppInitializeHandler(store, client, AppInitializeConfig{
 		Cipher:              testCipher(t),
 		ResolveRuntimeImage: testResolveRuntimeImage,
 	})
@@ -213,7 +213,7 @@ func TestAppInitializeK8s_BootstrapURLTrailingSlash(t *testing.T) {
 	// BootstrapBaseURL 末尾带 "/" → trimRight 后拼接，不应出现双斜线。
 	store := newAppInitStub(t)
 	client := &fakeNewAPI{result: newapi.APIKey{ID: 1, Key: "k"}}
-	handler := NewAppInitializeHandler(store, nil, nil, nil, client, AppInitializeConfig{
+	handler := NewAppInitializeHandler(store, client, AppInitializeConfig{
 		Cipher:              testCipher(t),
 		ResolveRuntimeImage: testResolveRuntimeImage,
 	})
@@ -241,7 +241,7 @@ func TestAppInitializeIsIdempotentForBindingWaiting(t *testing.T) {
 	store.app.ApiKeyStatus = domain.APIKeyStatusActive
 	client := &fakeNewAPI{}
 
-	handler := NewAppInitializeHandler(store, nil, nil, nil, client, AppInitializeConfig{})
+	handler := NewAppInitializeHandler(store, client, AppInitializeConfig{})
 	err := handler.Handle(context.Background(), buildJob(t, testAppID, "node-1"))
 	require.NoError(t, err)
 	require.Equal(t, 0, client.calls)
@@ -259,7 +259,7 @@ func TestAppInitializeSkipsAPIKeyWhenAlreadyActive(t *testing.T) {
 	store.app.NewapiKeyCiphertext = null.StringFrom(encrypted)
 	client := &fakeNewAPI{}
 
-	handler := NewAppInitializeHandler(store, nil, nil, nil, client, AppInitializeConfig{Cipher: cipher, ResolveRuntimeImage: testResolveRuntimeImage})
+	handler := NewAppInitializeHandler(store, client, AppInitializeConfig{Cipher: cipher, ResolveRuntimeImage: testResolveRuntimeImage})
 	err = handler.Handle(context.Background(), buildJob(t, testAppID, ""))
 	require.NoError(t, err)
 	require.Equal(t, 0, client.calls)
@@ -271,7 +271,7 @@ func TestAppInitializePropagatesNewAPIError(t *testing.T) {
 	store := newAppInitStub(t)
 	client := &fakeNewAPI{err: newapi.ErrUpstream}
 
-	handler := NewAppInitializeHandler(store, nil, nil, nil, client, AppInitializeConfig{Cipher: testCipher(t), ResolveRuntimeImage: testResolveRuntimeImage})
+	handler := NewAppInitializeHandler(store, client, AppInitializeConfig{Cipher: testCipher(t), ResolveRuntimeImage: testResolveRuntimeImage})
 	err := handler.Handle(context.Background(), buildJob(t, testAppID, ""))
 	require.ErrorIs(t, err, newapi.ErrUpstream)
 	// new-api 调用在 phasePrepare 内 ensureAPIKey 阶段失败：MarkAppFailed 被调用，
@@ -285,7 +285,7 @@ func TestAppInitializePropagatesNewAPIError(t *testing.T) {
 // TestAppInitializeRejectsInvalidPayload 验证应用初始化拒绝非法载荷的异常或拒绝路径场景。
 func TestAppInitializeRejectsInvalidPayload(t *testing.T) {
 	store := newAppInitStub(t)
-	handler := NewAppInitializeHandler(store, nil, nil, nil, &fakeNewAPI{}, AppInitializeConfig{})
+	handler := NewAppInitializeHandler(store, &fakeNewAPI{}, AppInitializeConfig{})
 
 	job := sqlc.Job{Type: domain.JobTypeAppInitialize, PayloadJson: []byte(`{"runtime_node":"node-1"}`)}
 	err := handler.Handle(context.Background(), job)
@@ -300,7 +300,7 @@ func TestAppInitializeContainerStepSkippedWhenContainerExists(t *testing.T) {
 	store.app.ContainerID = null.StringFrom("already-there")
 	client := &fakeNewAPI{result: newapi.APIKey{ID: 1, Key: "k"}}
 
-	handler := NewAppInitializeHandler(store, nil, nil, nil, client, AppInitializeConfig{Cipher: testCipher(t), ResolveRuntimeImage: testResolveRuntimeImage})
+	handler := NewAppInitializeHandler(store, client, AppInitializeConfig{Cipher: testCipher(t), ResolveRuntimeImage: testResolveRuntimeImage})
 	// k8s 路径不需要 AppInputUploader，直接调用。
 	err := handler.Handle(context.Background(), buildJob(t, testAppID, ""))
 	require.NoError(t, err)
@@ -312,7 +312,7 @@ func TestAppInitializeContainerStepSkippedWhenContainerExists(t *testing.T) {
 func TestEnsureAPIKeyKeepsNewAPITokenModelsUnrestricted(t *testing.T) {
 	store := newAppInitStub(t)
 	api := &fakeNewAPI{result: newapi.APIKey{ID: 99, Key: "sk-test"}}
-	handler := NewAppInitializeHandler(store, nil, nil, nil, api, AppInitializeConfig{
+	handler := NewAppInitializeHandler(store, api, AppInitializeConfig{
 		Cipher: testCipher(t),
 	})
 
@@ -327,7 +327,7 @@ func TestEnsureAPIKeyKeepsNewAPITokenModelsUnrestricted(t *testing.T) {
 func TestProvisionAPIKeyPersistsKeyName(t *testing.T) {
 	store := newAppInitStub(t)
 	api := &fakeNewAPI{result: newapi.APIKey{ID: 42, Key: "sk-test"}}
-	handler := NewAppInitializeHandler(store, nil, nil, nil, api, AppInitializeConfig{
+	handler := NewAppInitializeHandler(store, api, AppInitializeConfig{
 		Cipher: testCipher(t),
 	})
 
@@ -690,7 +690,7 @@ func TestEnsureAPIKey_CreateAPIKeyFailureRecordsAudit(t *testing.T) {
 		AuditHelper:         helper,
 		ResolveRuntimeImage: testResolveRuntimeImage,
 	}
-	handler := NewAppInitializeHandler(store, nil, nil, nil, client, cfg)
+	handler := NewAppInitializeHandler(store, client, cfg)
 
 	err := handler.Handle(context.Background(), buildJob(t, testAppID, ""))
 	require.ErrorIs(t, err, newapi.ErrUpstream)
@@ -717,7 +717,7 @@ func TestEnsureAPIKey_GetTokenFullKeyFailureRecordsAudit(t *testing.T) {
 		AuditHelper:         helper,
 		ResolveRuntimeImage: testResolveRuntimeImage,
 	}
-	handler := NewAppInitializeHandler(store, nil, nil, nil, client, cfg)
+	handler := NewAppInitializeHandler(store, client, cfg)
 
 	err := handler.Handle(context.Background(), buildJob(t, testAppID, ""))
 	if err == nil || !strings.Contains(err.Error(), "取完整 sk-") {
@@ -737,7 +737,7 @@ func TestAppInitializeHandler_Phases_Progress(t *testing.T) {
 	store.app.Status = domain.AppStatusDraft
 
 	client := &fakeNewAPI{result: newapi.APIKey{ID: 1, Key: "sk-test"}}
-	handler := NewAppInitializeHandler(store, nil, nil, nil, client, AppInitializeConfig{
+	handler := NewAppInitializeHandler(store, client, AppInitializeConfig{
 		Cipher:              testCipher(t),
 		ResolveRuntimeImage: testResolveRuntimeImage,
 	})
@@ -788,7 +788,7 @@ func TestAppInitializeHandler_Phases_FailureWritesLastError(t *testing.T) {
 				s := newAppInitStub(t)
 				s.app.Status = domain.AppStatusDraft
 				client := &fakeNewAPI{err: errors.New("new-api down")}
-				h := NewAppInitializeHandler(s, nil, nil, nil, client, AppInitializeConfig{
+				h := NewAppInitializeHandler(s, client, AppInitializeConfig{
 					Cipher:              testCipher(t),
 					ResolveRuntimeImage: testResolveRuntimeImage,
 				})
@@ -803,7 +803,7 @@ func TestAppInitializeHandler_Phases_FailureWritesLastError(t *testing.T) {
 				s := newAppInitStub(t)
 				s.app.Status = domain.AppStatusDraft
 				client := &fakeNewAPI{result: newapi.APIKey{ID: 1, Key: "k"}}
-				h := NewAppInitializeHandler(s, nil, nil, nil, client, AppInitializeConfig{
+				h := NewAppInitializeHandler(s, client, AppInitializeConfig{
 					Cipher:              testCipher(t),
 					ResolveRuntimeImage: testResolveRuntimeImage,
 				})
@@ -820,7 +820,7 @@ func TestAppInitializeHandler_Phases_FailureWritesLastError(t *testing.T) {
 				s := newAppInitStub(t)
 				s.app.Status = domain.AppStatusDraft
 				client := &fakeNewAPI{result: newapi.APIKey{ID: 1, Key: "k"}}
-				h := NewAppInitializeHandler(s, nil, nil, nil, client, AppInitializeConfig{
+				h := NewAppInitializeHandler(s, client, AppInitializeConfig{
 					Cipher:              testCipher(t),
 					ResolveRuntimeImage: testResolveRuntimeImage,
 				})
@@ -854,7 +854,7 @@ func TestAppInitializeHandler_IdempotentReentry(t *testing.T) {
 	store.app.Status = domain.AppStatusDraft
 
 	client := &fakeNewAPI{result: newapi.APIKey{ID: 1, Key: "k"}}
-	handler := NewAppInitializeHandler(store, nil, nil, nil, client, AppInitializeConfig{
+	handler := NewAppInitializeHandler(store, client, AppInitializeConfig{
 		Cipher:              testCipher(t),
 		ResolveRuntimeImage: testResolveRuntimeImage,
 	})
@@ -883,7 +883,7 @@ func TestAppInitialize_NullVersionIDFails(t *testing.T) {
 	// 清空 VersionID，模拟未绑定版本的实例。VersionID 迁移为 null.String；零值表示 NULL。
 	store.app.VersionID = null.String{}
 
-	handler := NewAppInitializeHandler(store, nil, nil, nil, &fakeNewAPI{}, AppInitializeConfig{Cipher: testCipher(t), ResolveRuntimeImage: testResolveRuntimeImage})
+	handler := NewAppInitializeHandler(store, &fakeNewAPI{}, AppInitializeConfig{Cipher: testCipher(t), ResolveRuntimeImage: testResolveRuntimeImage})
 
 	err := handler.Handle(context.Background(), buildJob(t, testAppID, "node-1"))
 	// 未绑定版本应立即失败，错误信息应含"未绑定助手版本"。
@@ -903,7 +903,7 @@ func TestAppInitialize_GetAssistantVersionErrorFails(t *testing.T) {
 	// 清空 versions map，使 GetAssistantVersion 对有效 VersionID 返回 sql.ErrNoRows。
 	store.versions = map[string]sqlc.AssistantVersion{}
 
-	handler := NewAppInitializeHandler(store, nil, nil, nil, &fakeNewAPI{}, AppInitializeConfig{Cipher: testCipher(t), ResolveRuntimeImage: testResolveRuntimeImage})
+	handler := NewAppInitializeHandler(store, &fakeNewAPI{}, AppInitializeConfig{Cipher: testCipher(t), ResolveRuntimeImage: testResolveRuntimeImage})
 
 	err := handler.Handle(context.Background(), buildJob(t, testAppID, "node-1"))
 	// 版本加载失败应立即返回错误，错误信息应含"加载助手版本失败"。
@@ -929,7 +929,7 @@ func TestAppInitialize_AppliedVersionRecorded(t *testing.T) {
 
 	// 注入 ResolveRuntimeImage：版本 image_id "hermes-v1" → "hermes:v2026-test"。
 	resolvedRef := "hermes:v2026-test"
-	handler := NewAppInitializeHandler(store, nil, nil, nil, client, AppInitializeConfig{
+	handler := NewAppInitializeHandler(store, client, AppInitializeConfig{
 		Cipher: testCipher(t),
 		ResolveRuntimeImage: func(imageID string) (string, bool) {
 			if imageID == "hermes-v1" {
@@ -960,7 +960,7 @@ func TestAppInitialize_PromotesToRunningWhenChannelAlreadyBound(t *testing.T) {
 	store.channelBound = true
 
 	client := &fakeNewAPI{result: newapi.APIKey{ID: 1, Key: "sk-test"}}
-	handler := NewAppInitializeHandler(store, nil, nil, nil, client, AppInitializeConfig{
+	handler := NewAppInitializeHandler(store, client, AppInitializeConfig{
 		Cipher:              testCipher(t),
 		ResolveRuntimeImage: testResolveRuntimeImage,
 	})
@@ -996,7 +996,7 @@ func TestAppInitialize_StaysBindingWaitingWhenNoChannelBound(t *testing.T) {
 	store.channelBound = false
 
 	client := &fakeNewAPI{result: newapi.APIKey{ID: 1, Key: "sk-test"}}
-	handler := NewAppInitializeHandler(store, nil, nil, nil, client, AppInitializeConfig{
+	handler := NewAppInitializeHandler(store, client, AppInitializeConfig{
 		Cipher:              testCipher(t),
 		ResolveRuntimeImage: testResolveRuntimeImage,
 	})
@@ -1022,7 +1022,7 @@ func TestAppInitialize_IdempotentBindingWaitingPromotesWhenChannelBound(t *testi
 	store.channelBound = true
 	client := &fakeNewAPI{}
 
-	handler := NewAppInitializeHandler(store, nil, nil, nil, client, AppInitializeConfig{})
+	handler := NewAppInitializeHandler(store, client, AppInitializeConfig{})
 	require.NoError(t, handler.Handle(context.Background(), buildJob(t, testAppID, "node-1")))
 
 	// 幂等分支不会走 k8s 编排，但应触发一次自愈推进。

@@ -165,13 +165,10 @@ type AppInitializeHandler struct {
 }
 
 // NewAppInitializeHandler 创建 handler。
-// 参数保持向后兼容：dirs/containers/starter 参数被接受但不再使用（k8s 路径已移除 docker 阶段）；
-// 此设计避免 Task14 之前 main.go 装配报编译错误。
+// k8s 编排器经 SetOrchestrator 单独注入（orch + 渲染 AppSpec 所需的 k8sCfg），
+// 不在构造期传入：未注入时 phaseCreate/phaseStart 直接跳过，便于单测装配最小 handler。
 func NewAppInitializeHandler(
 	store AppInitializeStore,
-	_ interface{}, // 原 dirs AgentDirInitializer，k8s 路径不再使用
-	_ interface{}, // 原 containers ContainerCreator，k8s 路径不再使用
-	_ interface{}, // 原 starter ContainerStarter，k8s 路径不再使用
 	factory NewAPIClientFactory,
 	cfg AppInitializeConfig,
 ) *AppInitializeHandler {
@@ -183,23 +180,12 @@ func NewAppInitializeHandler(
 }
 
 // SetOrchestrator 注入 k8s 编排器与配置。
-// 生产环境必须注入（Task14 接入）；nil 时 phaseCreate/phaseStart 直接跳过（测试/早期装配兼容）。
+// 生产环境由 cmd/server 装配时注入真实 KubernetesAdapter + k8sCfg；
+// nil 时 phaseCreate/phaseStart 直接跳过（测试/早期装配兼容）。
 func (h *AppInitializeHandler) SetOrchestrator(orch k8sorch.Orchestrator, k8sCfg AppInitializeK8sConfig) {
 	h.orch = orch
 	h.k8sCfg = k8sCfg
 }
-
-// SetAppInputUploader 保留为空方法，避免 main.go 中调用报编译错误（Task14 前临时保留）。
-// k8s 路径不再使用 AppInputUploader，bootstrap 由 pod 调 manager bootstrap API 完成。
-func (h *AppInitializeHandler) SetAppInputUploader(_ interface{}) {}
-
-// SetImagePullCoord 保留为空方法，避免 main.go 中调用报编译错误（Task14 前临时保留）。
-// k8s 路径不再使用 imagePullCoord，镜像拉取由 k8s imagePullPolicy 接管。
-func (h *AppInitializeHandler) SetImagePullCoord(_ interface{}) {}
-
-// SetNodeDockerProvider 保留为空方法，避免 main.go 中调用报编译错误（Task14 前临时保留）。
-// k8s 路径不再需要 per-node Docker SDK 客户端。
-func (h *AppInitializeHandler) SetNodeDockerProvider(_ interface{}) {}
 
 // readyTimeout 是 WaitReady 等待 pod Ready 的总时长上限。
 // k8s 镜像拉取 + 容器启动通常在分钟级；5 分钟足以覆盖慢网络拉取场景，
