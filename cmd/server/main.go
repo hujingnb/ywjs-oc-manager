@@ -221,7 +221,7 @@ func runManager(ctx context.Context, cfg config.Config, logOut io.Writer) error 
 	// ocopsResolver 把 appID 解析为 oc-ops 调用坐标。
 	// TODO(spec-A): ocopsBaseURLTemplate 当前为约定占位模板，spec-E 不做真实 k8s 寻址；
 	// spec-A 将替换为 client-go 解析的真实 Service DNS，并注入 per-app OC_OPS_TOKEN。
-	ocopsResolver := service.NewOcOpsResolverFromStore(dbStore.Queries, ocopsBaseURLTemplate)
+	ocopsResolver := service.NewOcOpsResolverFromStore(dbStore.Queries, cipher, ocopsBaseURLTemplate)
 
 	channelRegistry := channel.NewRegistry()
 	channelService := service.NewChannelService(dbStore.Queries, channelRegistry, redisQueue)

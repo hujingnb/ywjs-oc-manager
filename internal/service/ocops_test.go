@@ -7,9 +7,11 @@ import (
 	"errors"
 	"testing"
 
+	null "github.com/guregu/null/v5"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
+	"oc-manager/internal/auth"
 	"oc-manager/internal/integrations/ocops"
 	"oc-manager/internal/store/sqlc"
 )
@@ -90,7 +92,7 @@ func (f *fakeOcOpsAppStore) GetApp(_ context.Context, _ string) (sqlc.App, error
 func TestOcOpsResolverFromStoreNotFound(t *testing.T) {
 	// app 不存在：store 返回 sql.ErrNoRows，resolver 应翻译为 ErrNotFound
 	store := &fakeOcOpsAppStore{returnErr: sql.ErrNoRows}
-	r := NewOcOpsResolverFromStore(store, "http://app-%s-ocops.oc-apps.svc:8080")
+	r := NewOcOpsResolverFromStore(store, nil, "http://app-%s-ocops.oc-apps.svc:8080")
 
 	_, err := r.Resolve(context.Background(), "app-1")
 	require.ErrorIs(t, err, ErrNotFound)
@@ -105,7 +107,7 @@ func TestOcOpsResolverFromStoreSupported(t *testing.T) {
 		OwnerUserID:     "user-1",
 		RuntimeImageRef: "registry/hermes:v2026.5.16",
 	}}
-	r := NewOcOpsResolverFromStore(store, "http://app-%s-ocops.oc-apps.svc:8080")
+	r := NewOcOpsResolverFromStore(store, nil, "http://app-%s-ocops.oc-apps.svc:8080")
 
 	loc, err := r.Resolve(context.Background(), "app-1")
 	require.NoError(t, err)
@@ -113,7 +115,7 @@ func TestOcOpsResolverFromStoreSupported(t *testing.T) {
 	assert.Equal(t, "user-1", loc.OwnerUserID)
 	assert.True(t, loc.Supported)
 	assert.Equal(t, "http://app-app-1-ocops.oc-apps.svc:8080", loc.Endpoint.BaseURL)
-	// Token 在 spec-E 留空占位（spec-A 注入）
+	// cipher 为 nil，Token 应为空
 	assert.Empty(t, loc.Endpoint.Token)
 }
 
@@ -125,9 +127,39 @@ func TestOcOpsResolverFromStoreUnsupported(t *testing.T) {
 		OwnerUserID:     "user-1",
 		RuntimeImageRef: "registry/hermes:v2026.5.16-dev",
 	}}
-	r := NewOcOpsResolverFromStore(store, "http://app-%s-ocops.oc-apps.svc:8080")
+	r := NewOcOpsResolverFromStore(store, nil, "http://app-%s-ocops.oc-apps.svc:8080")
 
 	loc, err := r.Resolve(context.Background(), "app-2")
 	require.NoError(t, err)
 	assert.False(t, loc.Supported)
+}
+
+// TestOcOpsResolverInjectsToken 验证 Resolve 解密 control token 填入 Endpoint.Token。
+// 覆盖场景：cipher 与有效密文均存在时，Token 应解密为原始明文；
+// BaseURL 按模板拼装正确；非 -dev 镜像 Supported=true。
+func TestOcOpsResolverInjectsToken(t *testing.T) {
+	// 构造 cipher 并加密明文 token
+	cipher, err := auth.NewCipher(make([]byte, 32))
+	require.NoError(t, err)
+	ct, err := cipher.Encrypt([]byte("control-tok"))
+	require.NoError(t, err)
+
+	// store 返回含密文 token 的 app
+	store := &fakeOcOpsAppStore{app: sqlc.App{
+		ID:                     "a1",
+		OrgID:                  "o1",
+		OwnerUserID:            "u1",
+		RuntimeTokenCiphertext: null.StringFrom(ct), // 有效密文
+		RuntimeImageRef:        "registry/hermes:v1", // 非 -dev，Supported=true
+	}}
+	r := NewOcOpsResolverFromStore(store, cipher, "http://app-%s-ocops.oc-apps.svc:8080")
+
+	loc, err := r.Resolve(context.Background(), "a1")
+	require.NoError(t, err)
+	// Token 应解密为原始明文
+	assert.Equal(t, "control-tok", loc.Endpoint.Token)
+	// BaseURL 按模板以 appID 拼装
+	assert.Equal(t, "http://app-a1-ocops.oc-apps.svc:8080", loc.Endpoint.BaseURL)
+	// 非 -dev 镜像应标记为支持
+	assert.True(t, loc.Supported)
 }

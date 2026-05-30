@@ -19,6 +19,7 @@ import (
 	"fmt"
 	"strings"
 
+	"oc-manager/internal/auth"
 	"oc-manager/internal/integrations/ocops"
 	"oc-manager/internal/store/sqlc"
 )
@@ -99,23 +100,24 @@ type ocOpsAppStore interface {
 }
 
 // OcOpsResolverFromStore 从 app store 解析 oc-ops 坐标。
-// BaseURL 按约定模板拼装、Token 在 spec-E 留空占位；spec-A 会替换为 client-go
-// 真实寻址 + per-app bootstrap token 注入。Supported 由镜像 ref 是否 -dev 判定
-// （沿用旧 Stub 语义）。
+// BaseURL 按约定模板拼装；cipher 用于解密 app.runtime_token_ciphertext 注入 Endpoint.Token
+// （spec-A 落地；cipher 为 nil 或密文为空时 Token 留空）。
+// Supported 由镜像 ref 是否 -dev 判定（沿用旧 Stub 语义）。
 type OcOpsResolverFromStore struct {
 	store      ocOpsAppStore // 复用最小 GetApp 接口
-	baseURLTpl string        // 如 "http://app-%s-ocops.oc-apps.svc:8080"（spec-A 调整）
+	cipher     *auth.Cipher  // 解密 per-app control token；nil 时 Token 留空
+	baseURLTpl string        // 如 "http://app-%s-ocops.oc-apps.svc:8080"
 }
 
 // NewOcOpsResolverFromStore 构造从 store 解析坐标的 resolver。
-// baseURLTpl 必须含一个 %s 占位符，Resolve 时以 appID 替换。
-func NewOcOpsResolverFromStore(store ocOpsAppStore, baseURLTpl string) *OcOpsResolverFromStore {
-	return &OcOpsResolverFromStore{store: store, baseURLTpl: baseURLTpl}
+// cipher 用于解密 app.runtime_token_ciphertext 注入 Endpoint.Token；baseURLTpl 必须含一个 %s（appID 替换）。
+func NewOcOpsResolverFromStore(store ocOpsAppStore, cipher *auth.Cipher, baseURLTpl string) *OcOpsResolverFromStore {
+	return &OcOpsResolverFromStore{store: store, cipher: cipher, baseURLTpl: baseURLTpl}
 }
 
 // Resolve 查询 app 并组装 oc-ops 调用坐标。
 // app 不存在（sql.ErrNoRows）映射为 ErrNotFound；其它查询错误包装返回。
-// Token 在 spec-E 留空（spec-A 注入 per-app token）。
+// Token 由 cipher 解密 app.runtime_token_ciphertext 填入；cipher 为 nil 或密文为空时留空。
 func (r *OcOpsResolverFromStore) Resolve(ctx context.Context, appID string) (OcOpsAppLocation, error) {
 	app, err := r.store.GetApp(ctx, appID)
 	if err != nil {
@@ -124,12 +126,22 @@ func (r *OcOpsResolverFromStore) Resolve(ctx context.Context, appID string) (OcO
 		}
 		return OcOpsAppLocation{}, fmt.Errorf("查询 app 失败: %w", err)
 	}
+	// 解密 per-app control token：仅当密文字段有效且 cipher 已注入时才解密；
+	// 任一条件不满足时 Token 留空（兼容旧数据或 cipher 未配置场景）。
+	token := ""
+	if app.RuntimeTokenCiphertext.Valid && r.cipher != nil {
+		plain, derr := r.cipher.Decrypt(app.RuntimeTokenCiphertext.String)
+		if derr != nil {
+			return OcOpsAppLocation{}, fmt.Errorf("解密 control token 失败: %w", derr)
+		}
+		token = string(plain)
+	}
 	return OcOpsAppLocation{
 		OrgID:       app.OrgID,
 		OwnerUserID: app.OwnerUserID,
 		Endpoint: ocops.Endpoint{
 			BaseURL: fmt.Sprintf(r.baseURLTpl, appID),
-			// Token: spec-A 注入 per-app token，spec-E 留空占位
+			Token:   token,
 		},
 		// dev stub 镜像（-dev 后缀）不含真实 hermes，标记为不支持
 		Supported: !strings.HasSuffix(app.RuntimeImageRef, "-dev"),
