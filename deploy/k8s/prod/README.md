@@ -19,7 +19,6 @@ manager-api/web、new-api、ragflow 与 RBAC 与本地一致，差异仅镜像 r
    - `acr-pull`：阿里云 ACR 拉取凭证（见下）。
 2. 各工作负载 YAML 的镜像 `REPLACE_TAG` → 实际发布 tag（Makefile release-*-image 产出）。
 3. `ingress.yaml` 的 `REPLACE_WITH_*_DOMAIN` 与 TLS secret。
-4. 业务若需 PVC，按云厂商改 `storageclass.example.yaml` 的 provisioner。
 
 > 连接配置（MySQL/Redis/ES/MinIO 的 host/port/库名/账号口令）只在 `secret.yaml` 填一处即可，
 > 工作负载 YAML 里已无 `EXTERNAL_*` 占位符；剩余的文件级改动仅镜像 tag（2）和域名/TLS（3）。
@@ -38,7 +37,6 @@ kubectl create secret docker-registry acr-pull -n ocm \
 ```bash
 kubectl apply -f 00-namespace.yaml
 kubectl apply -f secret.yaml            # 你填好的真值
-kubectl apply -f storageclass.example.yaml   # 按需
 kubectl apply -f manager-rbac.yaml
 kubectl apply -f manager-api.yaml -f manager-web.yaml -f new-api.yaml -f ragflow.yaml
 kubectl apply -f ingress.yaml
