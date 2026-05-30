@@ -113,6 +113,23 @@ func (a *KubernetesAdapter) UpdateImage(ctx context.Context, appID, hermesImage 
 	return wrapK8s("更新镜像", uerr)
 }
 
+// RolloutRestart 给 Deployment 的 pod template 注解写入当前时间戳，触发 Deployment 按
+// Recreate 策略重建 pod（等价 kubectl rollout restart）。用于渠道绑定后重载 hermes platform。
+func (a *KubernetesAdapter) RolloutRestart(ctx context.Context, appID string) error {
+	api := a.client.AppsV1().Deployments(a.namespace)
+	d, err := api.Get(ctx, deploymentName(appID), metav1.GetOptions{})
+	if err != nil {
+		return wrapK8s("查询 Deployment", err)
+	}
+	if d.Spec.Template.Annotations == nil {
+		d.Spec.Template.Annotations = map[string]string{}
+	}
+	// 写入 restartedAt 注解触发 Deployment 重建 pod，与 kubectl rollout restart 等价。
+	d.Spec.Template.Annotations["kubectl.kubernetes.io/restartedAt"] = time.Now().UTC().Format(time.RFC3339)
+	_, uerr := api.Update(ctx, d, metav1.UpdateOptions{})
+	return wrapK8s("滚动重启 Deployment", uerr)
+}
+
 // Delete 删除三资源（NotFound 视为成功）。
 func (a *KubernetesAdapter) Delete(ctx context.Context, appID string) error {
 	del := metav1.DeleteOptions{}

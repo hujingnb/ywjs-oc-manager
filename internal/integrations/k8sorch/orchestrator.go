@@ -22,6 +22,9 @@ type Orchestrator interface {
 	Delete(ctx context.Context, appID string) error
 	// Status 读 app 的 pod 状态。
 	Status(ctx context.Context, appID string) (AppStatus, error)
+	// RolloutRestart 触发 Deployment 滚动重启（patch pod template 注解），
+	// 不改镜像/副本数，按 Recreate 策略重建 pod。渠道绑定后重载 hermes platform 用。
+	RolloutRestart(ctx context.Context, appID string) error
 }
 
 // AppSpec 是渲染 app pod 资源所需的全部输入（k8s 形状，非 docker ContainerSpec）。

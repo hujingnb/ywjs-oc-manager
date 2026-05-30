@@ -71,6 +71,11 @@ func (f *fakeOrchestrator) Status(_ context.Context, _ string) (k8sorch.AppStatu
 	return k8sorch.AppStatus{}, nil
 }
 
+// RolloutRestart 空实现：满足 k8sorch.Orchestrator 接口，测试中无需断言滚动重启调用。
+func (f *fakeOrchestrator) RolloutRestart(_ context.Context, _ string) error {
+	return nil
+}
+
 // TestAppInitializeHandlesHappyPath 验证 k8s 路径应用初始化成功：
 // version 校验 + ensureAPIKey + EnsureAppRuntimeToken → EnsureApp（AppSpec 字段正确）
 // → WaitReady → binding_waiting。

@@ -47,6 +47,8 @@ type appOrchestrator interface {
 	// Status 读取 app 的 pod 状态归一视图，用于判定 Deployment 是否已建立
 	// （Phase=="NotFound" 严格表示 Deployment 不存在；replicas=0 的已停止态返回 "Pending"）。
 	Status(ctx context.Context, appID string) (k8sorch.AppStatus, error)
+	// RolloutRestart 触发 Deployment 滚动重启（渠道绑定后重载 hermes platform）。
+	RolloutRestart(ctx context.Context, appID string) error
 }
 
 // AppDelete 用 NewAPIClientFactory 拿 user-scoped client 调 SetAPIKeyStatus 禁用 token，

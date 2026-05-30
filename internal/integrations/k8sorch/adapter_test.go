@@ -136,3 +136,21 @@ func TestWaitReadyTimeout(t *testing.T) {
 	err := a.WaitReady(context.Background(), "a1", 100*time.Millisecond)
 	require.Error(t, err)
 }
+
+// TestRolloutRestartPatchesAnnotation 验证 RolloutRestart 给 pod template 写入 restartedAt 注解、不动镜像/副本。
+// 渠道绑定后重载 hermes platform 的等价 kubectl rollout restart 路径。
+func TestRolloutRestartPatchesAnnotation(t *testing.T) {
+	cs := fake.NewSimpleClientset()
+	a := NewKubernetesAdapter(cs, "oc-apps")
+	// 先建立 Deployment（replicas=1）
+	require.NoError(t, a.EnsureApp(context.Background(), testSpec()))
+	// 执行滚动重启
+	require.NoError(t, a.RolloutRestart(context.Background(), "a1"))
+	d, err := cs.AppsV1().Deployments("oc-apps").Get(context.Background(), "app-a1", metav1.GetOptions{})
+	require.NoError(t, err)
+	// pod template 注解应含 restartedAt，触发 Deployment 重建 pod
+	assert.NotEmpty(t, d.Spec.Template.Annotations["kubectl.kubernetes.io/restartedAt"])
+	// 副本数不变（仍为 1），RolloutRestart 不改 replicas
+	require.NotNil(t, d.Spec.Replicas)
+	assert.Equal(t, int32(1), *d.Spec.Replicas)
+}

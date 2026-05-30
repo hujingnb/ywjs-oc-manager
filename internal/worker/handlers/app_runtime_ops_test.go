@@ -644,6 +644,11 @@ func (f *fakeAppOrchestrator) Status(_ context.Context, _ string) (k8sorch.AppSt
 	return k8sorch.AppStatus{Phase: phase}, nil
 }
 
+// RolloutRestart 空实现：满足 appOrchestrator 接口，测试中暂无需断言滚动重启调用。
+func (f *fakeAppOrchestrator) RolloutRestart(_ context.Context, _ string) error {
+	return nil
+}
+
 // fakeObjectStore 是 storage.ObjectStore 的最小测试桩，仅实现 MovePrefix / DeletePrefix。
 type fakeObjectStore struct {
 	// MovePrefix 调用记录

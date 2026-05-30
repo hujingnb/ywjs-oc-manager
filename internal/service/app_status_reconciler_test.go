@@ -107,6 +107,8 @@ func (f *fakeOrch) WaitReady(_ context.Context, _ string, _ time.Duration) error
 func (f *fakeOrch) Scale(_ context.Context, _ string, _ int32) error                 { panic("not used") }
 func (f *fakeOrch) UpdateImage(_ context.Context, _, _ string) error                 { panic("not used") }
 func (f *fakeOrch) Delete(_ context.Context, _ string) error                         { panic("not used") }
+// RolloutRestart 在 reconciler 测试中不被调用，stub 防御性 panic（与其它未用方法一致）。
+func (f *fakeOrch) RolloutRestart(_ context.Context, _ string) error                 { panic("not used") }
 
 // ============================================================
 // 辅助：构造常用 ListRunningAppsRow 和 App
