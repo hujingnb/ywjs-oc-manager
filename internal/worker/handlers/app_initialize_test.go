@@ -6,9 +6,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
-	"io"
 	"strings"
-	"sync"
 	"testing"
 	"time"
 
@@ -612,57 +610,6 @@ func mustUUIDForTest(_ *testing.T, value string) string {
 	return value
 }
 
-// fakeAppInputUploader 实现 AppInputUploader，记录每次 UploadAppInputFile 调用。
-// 保留供 restart 链路（AssembleVersionInputData）测试使用；app_initialize k8s 路径不再调用。
-type fakeAppInputUploader struct {
-	// mu 保护 calls 切片；handler 单 goroutine 跑，但桩做并发安全更稳妥。
-	mu sync.Mutex
-	// calls 按调用顺序记录每次上传的参数（nodeID / appID / relPath）。
-	calls []fakeAppInputUploadCall
-	// err 非 nil 时所有调用返回该错误。
-	err error
-}
-
-// fakeAppInputUploadCall 记录单次 UploadAppInputFile 调用的参数。
-type fakeAppInputUploadCall struct {
-	nodeID  string
-	appID   string
-	relPath string
-}
-
-func (f *fakeAppInputUploader) UploadAppInputFile(_ context.Context, nodeID, appID, relPath string, content io.Reader) error {
-	// 消耗 content，避免调用方 strings.NewReader 被留在半读状态。
-	_, _ = io.ReadAll(content)
-	f.mu.Lock()
-	defer f.mu.Unlock()
-	f.calls = append(f.calls, fakeAppInputUploadCall{nodeID: nodeID, appID: appID, relPath: relPath})
-	return f.err
-}
-
-// hasUpload 检查是否存在针对给定 appID + relPath 的上传记录。
-func (f *fakeAppInputUploader) hasUpload(appID, relPath string) bool {
-	f.mu.Lock()
-	defer f.mu.Unlock()
-	for _, c := range f.calls {
-		if c.appID == appID && c.relPath == relPath {
-			return true
-		}
-	}
-	return false
-}
-
-// relPathsForApp 返回给定 appID 下所有上传的 relPath，顺序与调用顺序一致。
-func (f *fakeAppInputUploader) relPathsForApp(appID string) []string {
-	f.mu.Lock()
-	defer f.mu.Unlock()
-	out := make([]string, 0, len(f.calls))
-	for _, c := range f.calls {
-		if c.appID == appID {
-			out = append(out, c.relPath)
-		}
-	}
-	return out
-}
 
 // fakeAuditRecorder 实现 audit.AuditRecorder，用于断言审计事件被写入。
 type fakeAuditRecorder struct {
@@ -1029,79 +976,3 @@ func TestAppInitialize_IdempotentBindingWaitingPromotesWhenChannelBound(t *testi
 	assert.Equal(t, domain.AppStatusRunning, store.app.Status)
 }
 
-// TestAppInitialize_VersionModelWrittenToManifest 验证版本 MainModel 通过 BuildAppInputData
-// 正确写入 manifest，而非使用默认值。
-// 覆盖场景：版本 MainModel="gpt-4o"，opts.DefaultModel="default-model"
-// → BuildAppInputData 优先采用版本 MainModel。
-func TestAppInitialize_VersionModelWrittenToManifest(t *testing.T) {
-	// 仅测试 BuildAppInputData 纯函数，不走完整 Handle 流程。
-	app := sqlc.App{
-		ID:   testAppID,
-		Name: "test-app",
-	}
-	org := sqlc.Organization{Name: "TestOrg"}
-	owner := sqlc.User{DisplayName: "Bob"}
-
-	// 版本 MainModel 非空时，model 字段必须使用版本值，不受默认值影响。
-	in := BuildAppInputData(app, org, owner, "sk-x", AppInputVersionData{
-		MainModel: "gpt-4o",
-	}, AppInputBuildOptions{DefaultModel: "default-model"})
-	assert.Equal(t, "gpt-4o", in.Model, "版本 MainModel 非空时应优先于 DefaultModel")
-
-	// 版本 MainModel 为空时，退回 opts.DefaultModel。
-	inFallback := BuildAppInputData(app, org, owner, "sk-x", AppInputVersionData{
-		MainModel: "",
-	}, AppInputBuildOptions{DefaultModel: "default-model"})
-	assert.Equal(t, "default-model", inFallback.Model, "版本 MainModel 为空时应退回 DefaultModel")
-
-	// 版本 MainModel 和 DefaultModel 都为空时，写 "default" 占位。
-	inDouble := BuildAppInputData(app, org, owner, "sk-x", AppInputVersionData{}, AppInputBuildOptions{})
-	assert.Equal(t, "default", inDouble.Model, "两者都为空时应写 default 占位")
-}
-
-// TestAppInitialize_VersionRoutingAndPersonaPassedThrough 验证版本 Routing 和 SystemPrompt
-// 通过 BuildAppInputData 原样传递到 hermes.AppInputData。
-func TestAppInitialize_VersionRoutingAndPersonaPassedThrough(t *testing.T) {
-	// 仅测试 BuildAppInputData 纯函数。
-	app := sqlc.App{ID: testAppID, Name: "r-app"}
-	org := sqlc.Organization{Name: "O"}
-	owner := sqlc.User{DisplayName: "U"}
-	routing := map[string]string{"aux1": "claude-3-haiku", "aux2": "gpt-3.5-turbo"}
-	persona := "你是 {org_name} 的路由助手，优先使用 aux1 做摘要。"
-
-	in := BuildAppInputData(app, org, owner, "sk-y", AppInputVersionData{
-		MainModel:     "gpt-4o",
-		Routing:       routing,
-		SystemPrompt:  persona,
-		SkillRelPaths: []string{"resources/skills/search.tar"},
-	}, AppInputBuildOptions{PlatformPrompt: "平台规则"})
-
-	// Routing 原样透传到 AppInputData。
-	assert.Equal(t, routing, in.Routing, "版本 Routing 应原样写入 AppInputData.Routing")
-	// SystemPrompt 映射到 PersonaText。
-	assert.Equal(t, persona, in.PersonaText, "版本 SystemPrompt 应映射到 AppInputData.PersonaText")
-	// SkillRelPaths 原样透传。
-	assert.Equal(t, []string{"resources/skills/search.tar"}, in.SkillRelPaths, "版本 SkillRelPaths 应原样写入 AppInputData.SkillRelPaths")
-	// PlatformPrompt 来自 opts，原样透传。
-	assert.Equal(t, "平台规则", in.PlatformRule, "opts.PlatformPrompt 应写入 AppInputData.PlatformRule")
-}
-
-// fakeSkillBlobReader 实现 SkillBlobReader，内存存储 skill tar 内容。
-// 保留供 restart 链路（AssembleVersionInputData）测试使用。
-type fakeSkillBlobReader struct {
-	// blobs 以 relPath 为 key，存储伪 tar 内容。
-	blobs map[string]string
-	// errOnPath 若非空，当 relPath 等于此值时返回错误。
-	errOnPath string
-}
-
-func (f *fakeSkillBlobReader) OpenSkill(relPath string) (io.ReadCloser, error) {
-	if f.errOnPath != "" && relPath == f.errOnPath {
-		return nil, fmt.Errorf("mock open skill error: %s", relPath)
-	}
-	content, ok := f.blobs[relPath]
-	if !ok {
-		return nil, fmt.Errorf("skill not found: %s", relPath)
-	}
-	return io.NopCloser(strings.NewReader(content)), nil
-}

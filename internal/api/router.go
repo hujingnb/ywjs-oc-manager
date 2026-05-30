@@ -55,9 +55,6 @@ type Dependencies struct {
 	JobsStore handlers.JobsStore
 	// TokenManager 供 RequireUserAuth 中间件验证 access token 并注入 principal。
 	TokenManager *auth.TokenManager
-	// AgentTokenSink 在 agent enroll 成功时由 manager 进程缓存 (nodeID, agentToken)。
-	// nil 时跳过缓存（仅供测试或未启用 docker proxy 的最小装配使用）。
-	AgentTokenSink func(nodeID, agentToken string)
 	// JobNotifier 让 DeleteMember / 其它入队操作即时通知 Redis；nil 时退化到 scheduler 兜底。
 	JobNotifier service.JobNotifier
 	// AllowedOrigins 是 CORS 白名单。空切片代表同源部署不开 CORS。

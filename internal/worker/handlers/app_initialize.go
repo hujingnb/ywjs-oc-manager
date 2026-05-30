@@ -1,13 +1,11 @@
 package handlers
 
 import (
-	"bytes"
 	"context"
 	"database/sql"
 	"encoding/json"
 	"errors"
 	"fmt"
-	"io"
 	"strings"
 	"time"
 
@@ -17,7 +15,6 @@ import (
 	"oc-manager/internal/audit"
 	"oc-manager/internal/auth"
 	"oc-manager/internal/domain"
-	"oc-manager/internal/integrations/hermes"
 	"oc-manager/internal/integrations/k8sorch"
 	"oc-manager/internal/integrations/newapi"
 	"oc-manager/internal/service"
@@ -100,8 +97,6 @@ type AppInitializeConfig struct {
 	// 完整 imageRef（含 tag），是运行时镜像的唯一来源。必需依赖：未注入时
 	// Handle 直接 markFailed，不再有单值字段兜底。
 	ResolveRuntimeImage func(imageID string) (ref string, ok bool)
-	// SkillBlobs 保留供 restart 链路复用，app_initialize 不再直接使用。
-	SkillBlobs SkillBlobReader
 	// ManagerRuntimeBaseURL 保留供 restart 链路复用，app_initialize 不再直接使用。
 	ManagerRuntimeBaseURL string
 }
@@ -592,14 +587,6 @@ func decryptCiphertext(ciphertext string, cipher *auth.Cipher) (string, error) {
 	return string(plain), nil
 }
 
-// SkillBlobReader 抽象「读取 manager 文件系统上版本 skill tar 主副本」的能力。
-// relPath 是版本 skills_json 中存储的 file_path（相对 manager 数据根目录）。
-// 保留此接口供 restart 链路（AppInputRefresher）和 BuildAppInputData 继续使用；
-// app_initialize k8s 路径本身不再调用 skill 上传逻辑。
-type SkillBlobReader interface {
-	OpenSkill(relPath string) (io.ReadCloser, error)
-}
-
 // appInitializePayload 是 app_initialize job 的 JSON 载荷。
 // k8s 路径已无节点概念，不再需要 runtime_node 字段；
 // payload 只传 app_id，handler 通过 GetApp 拿到完整 app 行。
@@ -626,179 +613,3 @@ func newUUID() string {
 	return uuid.NewString()
 }
 
-// ---- 以下为 restart 链路与 wiring 层共享的数据类型与工具函数（保留供其他文件使用）----
-
-// AppInputVersionData 是 BuildAppInputData 所需的「实例绑定版本」业务数据。
-// 由 Handle 从 DB 加载 AssistantVersion 后解析，再传给 BuildAppInputData。
-type AppInputVersionData struct {
-	// MainModel 版本主模型 → manifest.app.model；空时退回 opts.DefaultModel，再退回 "default"。
-	MainModel string
-	// Routing 版本智能路由 → manifest.routing；空 map 时 omitempty 省略。
-	Routing map[string]string
-	// SystemPrompt 版本内置提示词 → resources/persona.md。
-	SystemPrompt string
-	// SkillRelPaths 已推送到 input/ 的版本 skill tar 相对路径 → manifest.resources.skills。
-	SkillRelPaths []string
-}
-
-// AppInputBuildOptions 是 BuildAppInputData 的非 DB / 非版本来源参数集合。
-//
-// 单独抽成结构体而不是逐个传，让 init handler 与 restart 阶段的 wiring 端
-// refresher 都能从同一份 AppInitializeConfig 里取出对应字段，避免漏传一个
-// 参数导致两边语义偏移。
-type AppInputBuildOptions struct {
-	// PlatformPrompt 写入 resources/platform-rules.md，由配置文件
-	// hermes.system_prompt_template 提供，容器内 hermes 按需引用。
-	PlatformPrompt string
-	// NewAPIBaseURL 写入 manifest.credentials.openai.base_url；
-	// 容器内 hermes 会再拼 "/v1" 后调 new-api。空串时回退到默认值
-	// "http://new-api:3000"（与老 config.yaml 兜底一致）。
-	NewAPIBaseURL string
-	// DefaultModel 是 version.MainModel 为空时的兜底模型名。两者都为空时
-	// 写入 "default" 占位，避免 manifest.app.model 落空串。
-	DefaultModel string
-	// ManagerRuntimeBaseURL 写入 manifest.knowledge.runtime_base_url，供 Hermes 调 manager runtime API。
-	ManagerRuntimeBaseURL string
-}
-
-// BuildAppInputData 把 DB 行 + 版本数据 + 解密后的 api key 装配成 hermes.AppInputData。
-//
-// init 与 restart 两条链路共享同一份字段映射，确保「初始化写入的 manifest」
-// 与「restart 前重写的 manifest」字段语义完全一致——这是 hermes-image-self-init
-// 流程的核心约束：oc-entrypoint 每次启动都重渲染 config.yaml / SOUL.md，
-// 输入字段语义偏移会直接表现为线上"改模型不生效"或"老 prompt 残留"。
-//
-// containerAPIKey 必须是真实 sk- 明文；调用方负责从 ciphertext 解密。
-// 该函数纯装配，不做 IO，因此无 ctx 参数，也不返回 error。
-func BuildAppInputData(app sqlc.App, org sqlc.Organization, owner sqlc.User, containerAPIKey string, version AppInputVersionData, opts AppInputBuildOptions) hermes.AppInputData {
-	model := version.MainModel
-	if model == "" {
-		model = opts.DefaultModel
-	}
-	if model == "" {
-		model = "default"
-	}
-	baseURL := opts.NewAPIBaseURL
-	if baseURL == "" {
-		baseURL = "http://new-api:3000"
-	}
-	return hermes.AppInputData{
-		AppID:                   app.ID,
-		AppName:                 app.Name,
-		Model:                   model,
-		OpenAIAPIKey:            containerAPIKey,
-		OpenAIBaseURL:           baseURL,
-		KnowledgeRuntimeBaseURL: opts.ManagerRuntimeBaseURL,
-		PersonaText:             version.SystemPrompt,
-		PlatformRule:            opts.PlatformPrompt,
-		Routing:                 version.Routing,
-		SkillRelPaths:           version.SkillRelPaths,
-		OrgName:                 org.Name,
-		OwnerName:               owner.DisplayName,
-	}
-}
-
-// AssembleVersionInputData 把 AssistantVersion 装配成 BuildAppInputData 所需的 AppInputVersionData：
-// 解析 routing_json，并把版本 skill tar 经 uploader 推送到节点 input/resources/skills/。
-// init(writeAppInput) 与 restart(appInputRefresher) 两条链路共用此函数，确保两边写出的
-// manifest 版本数据完全一致，避免「初始化看得见、restart 后字段漂移」。
-func AssembleVersionInputData(ctx context.Context, version sqlc.AssistantVersion, app sqlc.App, nodeID string, skillBlobs SkillBlobReader, uploader AppInputUploader) (AppInputVersionData, error) {
-	appID := app.ID
-	skillRelPaths, err := pushVersionSkills(ctx, skillBlobs, uploader, nodeID, appID, version.SkillsJson)
-	if err != nil {
-		return AppInputVersionData{}, err
-	}
-	var routing map[string]string
-	if len(version.RoutingJson) > 0 {
-		if err := json.Unmarshal(version.RoutingJson, &routing); err != nil {
-			return AppInputVersionData{}, fmt.Errorf("解析版本 routing_json 失败: %w", err)
-		}
-	}
-	return AppInputVersionData{
-		MainModel:     version.MainModel,
-		Routing:       routing,
-		SystemPrompt:  version.SystemPrompt,
-		SkillRelPaths: skillRelPaths,
-	}, nil
-}
-
-// AppInputUploader 抽象在节点 agent 上写应用输入文件 (apps/<id>/input/) 的能力。
-// 保留供 restart 链路（AssembleVersionInputData / appInputUploadAdapter）继续使用；
-// app_initialize k8s 路径不再直接调用此接口。
-type AppInputUploader interface {
-	UploadAppInputFile(ctx context.Context, nodeID, appID, relPath string, content io.Reader) error
-}
-
-// versionSkillMeta 是解析 skills_json 时使用的局部结构，只取 pushVersionSkills 所需字段。
-// 与 service.AssistantVersionSkill 语义相同，局部定义避免 handlers 包反向依赖 service 包。
-type versionSkillMeta struct {
-	Name     string `json:"name"`
-	FilePath string `json:"file_path"`
-}
-
-// pushVersionSkills 把版本 skill tar 推送到节点 apps/<appID>/input/resources/skills/<name>.tar，
-// 返回写入 manifest.resources.skills 的相对路径列表。
-// skillBlobs 或 uploader 为 nil（测试装配/无 skill 配置）时跳过推送，返回空列表。
-func pushVersionSkills(ctx context.Context, skillBlobs SkillBlobReader, uploader AppInputUploader, nodeID, appID string, skillsJson []byte) ([]string, error) {
-	if skillBlobs == nil || uploader == nil || len(skillsJson) == 0 {
-		return nil, nil
-	}
-	var skills []versionSkillMeta
-	if err := json.Unmarshal(skillsJson, &skills); err != nil {
-		return nil, fmt.Errorf("解析版本 skills_json 失败: %w", err)
-	}
-	relPaths := make([]string, 0, len(skills))
-	for _, skill := range skills {
-		// skill.Name 来自版本 skills_json，会被拼进上传相对路径；为防路径穿越，
-		// 拒绝空名或含 '/'、'\\'、'..' 的名称。
-		if skill.Name == "" || strings.ContainsAny(skill.Name, "/\\") || strings.Contains(skill.Name, "..") {
-			return nil, fmt.Errorf("非法 skill 名称 %q", skill.Name)
-		}
-		rc, err := skillBlobs.OpenSkill(skill.FilePath)
-		if err != nil {
-			return nil, fmt.Errorf("打开 skill %s 主副本失败: %w", skill.Name, err)
-		}
-		body, readErr := io.ReadAll(rc)
-		_ = rc.Close()
-		if readErr != nil {
-			return nil, fmt.Errorf("读取 skill %s 主副本失败: %w", skill.Name, readErr)
-		}
-		relPath := "resources/skills/" + skill.Name + ".tar"
-		if err := uploader.UploadAppInputFile(ctx, nodeID, appID, relPath, bytes.NewReader(body)); err != nil {
-			return nil, fmt.Errorf("上传 skill %s 失败: %w", skill.Name, err)
-		}
-		relPaths = append(relPaths, relPath)
-	}
-	return relPaths, nil
-}
-
-// appInputUploadAdapter 把 handler 持有的 AppInputUploader（带 nodeID 的 3+1 参数
-// 上传方法）适配成 hermes.AppInputWriter（固定 appID 维度的 WriteAppInputFile）。
-//
-// hermes 包面向单 app 维度做编排，不关心 nodeID；manager 这边一个 handler 可能
-// 同时服务多节点，因此 wiring 注入的是按 nodeID 分发的 uploader。adapter 在
-// handler 内部为每个 app 实例化一次，绑定 nodeID 后即满足 hermes 接口形态。
-// k8s 路径传空 nodeID（无节点概念），restart 链路仍可用于 docker 兼容路径。
-type appInputUploadAdapter struct {
-	// up 是底层按 nodeID 路由的上传能力（生产实现：AgentBackedAdapter.UploadAppInputFile）。
-	up AppInputUploader
-	// nodeID 由调用方在实例化时绑定；整个 WriteAppInput 调用期间不变，
-	// 保证多文件上传都落到同一节点（k8s 路径传空串）。
-	nodeID string
-}
-
-// WriteAppInputFile 实现 hermes.AppInputWriter。
-// 参数顺序与 hermes 包接口对齐（ctx, appID, relPath, body）；内部追加 nodeID 后转发，
-// 不附加业务校验（路径越界 / 沙箱由 agent 端统一拒绝）。
-func (a *appInputUploadAdapter) WriteAppInputFile(ctx context.Context, appID, relPath string, body io.Reader) error {
-	return a.up.UploadAppInputFile(ctx, a.nodeID, appID, relPath, body)
-}
-
-// NewAppInputUploadAdapter 把 nodeID 与 AppInputUploader 绑定成
-// hermes.AppInputWriter，供 wiring 层（cmd/server）在 restart 链路装配
-// AppInputRefresher 时复用；init handler 内部仍用未导出的 appInputUploadAdapter。
-// 暴露这个构造器避免在 wiring 处重复定义同样的两参数 wrapper 类型，
-// 也保证 init 与 restart 两条链路走同一适配实现。
-func NewAppInputUploadAdapter(up AppInputUploader, nodeID string) hermes.AppInputWriter {
-	return &appInputUploadAdapter{up: up, nodeID: nodeID}
-}

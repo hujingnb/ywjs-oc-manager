@@ -35,13 +35,11 @@ import (
 	"oc-manager/internal/auth"
 	"oc-manager/internal/config"
 	"oc-manager/internal/domain"
-	"oc-manager/internal/integrations/agent"
 	"oc-manager/internal/integrations/channel"
 	"oc-manager/internal/integrations/k8sorch"
 	"oc-manager/internal/integrations/newapi"
 	"oc-manager/internal/integrations/ocops"
 	"oc-manager/internal/integrations/ragflow"
-	"oc-manager/internal/integrations/runtime"
 	"oc-manager/internal/integrations/storage"
 	managerlog "oc-manager/internal/log"
 	"oc-manager/internal/migrations"
@@ -162,20 +160,6 @@ func runManager(ctx context.Context, cfg config.Config, logOut io.Writer) error 
 	var organizationService *service.OrganizationService
 	var rechargeService *service.RechargeService
 	var modelCatalogService *service.ModelCatalogService
-	// runtime inspector 在 runtimeAdapter 构造之后注入；这里先声明字段，后面赋值。
-
-	agentTokenResolver := agent.NewTokenResolver()
-	agentTokenStore := store.NewAgentTokenStore(dbStore)
-	agentTokenResolver.SetPersistentLoader(newPersistentTokenLoader(agentTokenStore, cipher))
-	agentTokenSink := func(nodeID, token string) {
-		agentTokenResolver.Set(nodeID, token)
-		// 加密入库；任何错误只走日志，不阻断 enroll 响应。
-		if err := persistAgentToken(context.Background(), agentTokenStore, cipher, nodeID, token); err != nil {
-			logger.Error("持久化 agent token 失败", "node_id", nodeID, "error", err)
-		}
-	}
-	nodeResolver := newNodeClientResolver(dbStore.Queries, agentTokenResolver)
-
 	// distLocker 使用独立的 go-redis client，与 redisQueue 共享同一 Redis 物理实例但连接池分离；
 	// 供 reaper 做跨实例分布式锁，防止多 manager 副本并发触发同一 reap 任务。
 	imagecoordRedis := goredis.NewClient(&goredis.Options{
@@ -185,15 +169,6 @@ func runManager(ctx context.Context, cfg config.Config, logOut io.Writer) error 
 	})
 	defer imagecoordRedis.Close()
 	distLocker := redis.NewRedisDistLocker(imagecoordRedis)
-	runtimeAdapter := runtime.NewAgentBackedAdapter(nodeResolver, nodeResolver)
-	// streamingResolver 构造一次复用：runtimeAdapter.DockerClientForNode 供镜像拉取流式
-	// NDJSON（长连接场景），必须用无 timeout 的 docker client。
-	// nodeClientResolver.DockerClient 带 30s Timeout，长连接会在 30s 后被强制掐断，
-	// newStreamingDockerResolver 使用 agent.NewStreamingDockerClientForNode 不设 Timeout。
-	// 微信扫码登录已改走 oc-ops HTTP SSE（见 wechatRunner），不再经 docker ExecAttach。
-	streamingResolver := newStreamingDockerResolver(nodeResolver)
-	runtimeAdapter.SetStreamingDocker(streamingResolver)
-	// spec-A2b：SetInspector 已删除，InspectApp 退回读库内状态，不再经 docker inspect。
 
 	// k8s 编排器：启用 k8s 时构造 client-go clientset + KubernetesAdapter，取代 docker 编排。
 	// 未启用时 orch 为 nil，生命周期/init handler 已做 nil 守卫（降级：无法管理 app，仅最小运行）。
@@ -378,7 +353,6 @@ func runManager(ctx context.Context, cfg config.Config, logOut io.Writer) error 
 			ResolveRuntimeImage: func(imageID string) (string, bool) {
 				return config.ResolveRuntimeImage(cfg.Hermes.RuntimeImages, imageID)
 			},
-			SkillBlobs:            skillBlobStore,
 			ManagerRuntimeBaseURL: cfg.Hermes.ManagerRuntimeBaseURL,
 		},
 	)
@@ -473,7 +447,6 @@ func runManager(ctx context.Context, cfg config.Config, logOut io.Writer) error 
 			BootstrapService:        bootstrapSvc,
 			JobsStore:               dbStore.Queries,
 			TokenManager:            tokenManager,
-			AgentTokenSink:          agentTokenSink,
 			JobNotifier:             redisQueue,
 			AllowedOrigins:          allowedOriginsFromConfig(cfg),
 		}),
