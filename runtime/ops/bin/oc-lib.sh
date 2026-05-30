@@ -97,7 +97,11 @@ sync_workspace_up() {
 backup_sqlite_up() {
   local data_dir="$1"
   [ -f "$data_dir/state.db" ] || return 0
-  sqlite3 "$data_dir/state.db" ".backup /tmp/oc-snap.db"
-  aws_s3 cp /tmp/oc-snap.db "s3://${AWS_S3_BUCKET}/${AWS_S3_PREFIX}state.db"
-  rm -f /tmp/oc-snap.db
+  # 用唯一临时文件：preStop（oc-presync）触发时 sidecar 的 oc-sync 主循环仍在运行，
+  # 两者可能并发调用本函数；固定路径会相互覆盖/删除导致上传半写的损坏快照。
+  local snap
+  snap=$(mktemp /tmp/oc-snap.XXXXXX.db)
+  sqlite3 "$data_dir/state.db" ".backup $snap"
+  aws_s3 cp "$snap" "s3://${AWS_S3_BUCKET}/${AWS_S3_PREFIX}state.db"
+  rm -f "$snap"
 }
