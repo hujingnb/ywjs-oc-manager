@@ -209,7 +209,6 @@ func runManager(ctx context.Context, cfg config.Config, logOut io.Writer) error 
 	streamingResolver := newStreamingDockerResolver(nodeResolver)
 	runtimeAdapter.SetStreamingDocker(streamingResolver)
 	runtimeOpService.SetInspector(newRuntimeInspectorWrapper(runtimeAdapter))
-	workspaceService := service.NewWorkspaceService(dbStore.Queries, runtimeAdapter, cfg.App.DataRoot)
 
 	// oc-ops HTTP 客户端 + app 坐标解析器：cron / kanban / 微信扫码登录均改走
 	// oc-ops 类型化 REST / SSE，不再经 runtimeAdapter docker exec。
@@ -282,6 +281,11 @@ func runManager(ctx context.Context, cfg config.Config, logOut io.Writer) error 
 	// bootstrapSvc 仅在 S3 启用时赋值（bootstrap 依赖对象存储 + STS + skill 预签名）；
 	// nil 时 router 不注册 /internal 路由，符合最小模式预期。
 	var bootstrapSvc *service.BootstrapService
+	// workspaceObjStore 供 WorkspaceService 浏览 app workspace；S3 未启用时为 nil，
+	// Task 14 将完整接入；此处 nil 时 service 层返回 ErrWorkspaceMissing。
+	var workspaceObjStore storage.ObjectStore
+	// workspacePresignTTL 为 workspace 文件下载预签名 URL 有效期；S3 启用时从配置读取。
+	workspacePresignTTL := 15 * time.Minute
 	if cfg.Storage.S3.Enabled {
 		s3cfg := storage.S3Config{
 			Endpoint:        cfg.Storage.S3.Endpoint,
@@ -315,9 +319,13 @@ func runManager(ctx context.Context, cfg config.Config, logOut io.Writer) error 
 				PresignTTL:       cfg.Storage.S3.PresignTTL.Duration,
 			},
 		)
+		// workspace 数据读 S3（spec-A2a），与 bootstrap 共用同一 objStore 实例
+		workspaceObjStore = objStore
+		workspacePresignTTL = cfg.Storage.S3.PresignTTL.Duration
 	} else {
 		skillBlobStore = service.NewFSSkillBlobStore(cfg.App.DataRoot)
 	}
+	workspaceService := service.NewWorkspaceService(dbStore.Queries, workspaceObjStore, workspacePresignTTL)
 
 	// 助手版本 service：镜像来自配置、模型校验走 new-api 目录、skill tar 存数据根目录。
 	// modelCatalogService 为 nil 时（未配 newapi）跳过构造，路由自动不注册。

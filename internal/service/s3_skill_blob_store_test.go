@@ -9,6 +9,7 @@ import (
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
+	"oc-manager/internal/integrations/storage"
 )
 
 // fakeObjectStore 是 storage.ObjectStore 的内存假实现，记录写入并支持预签名→内容回放。
@@ -31,6 +32,9 @@ func (f *fakeObjectStore) PresignGet(_ context.Context, key string, _ time.Durat
 func (f *fakeObjectStore) ObjectExists(_ context.Context, key string) (bool, error) {
 	_, ok := f.put[key]
 	return ok, nil
+}
+func (f *fakeObjectStore) ListObjects(_ context.Context, _ string) ([]storage.ObjectInfo, error) {
+	return nil, nil
 }
 func (f *fakeObjectStore) MovePrefix(_ context.Context, _, _ string) error { return nil }
 

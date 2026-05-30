@@ -98,6 +98,39 @@ func (s *S3ObjectStore) ObjectExists(ctx context.Context, key string) (bool, err
 	return false, fmt.Errorf("storage: HeadObject %s 失败: %w", key, err)
 }
 
+// ListObjects 列出 prefix 下全部对象的相对 key（去掉 prefix）与大小（分页直到取完）。
+// 相对 key = 完整对象 key 去掉传入的 prefix 前缀，调用方可据此还原文件层级。
+func (s *S3ObjectStore) ListObjects(ctx context.Context, prefix string) ([]ObjectInfo, error) {
+	var items []ObjectInfo
+	var token *string
+	for {
+		out, err := s.client.ListObjectsV2(ctx, &s3.ListObjectsV2Input{
+			Bucket:            aws.String(s.bucket),
+			Prefix:            aws.String(prefix),
+			ContinuationToken: token,
+		})
+		if err != nil {
+			return nil, fmt.Errorf("storage: 列举 %s 失败: %w", prefix, err)
+		}
+		for _, obj := range out.Contents {
+			fullKey := aws.ToString(obj.Key)
+			// 去掉前缀，保留相对路径
+			relKey := fullKey[len(prefix):]
+			size := int64(0)
+			if obj.Size != nil {
+				size = *obj.Size
+			}
+			items = append(items, ObjectInfo{Key: relKey, Size: size})
+		}
+		if aws.ToBool(out.IsTruncated) && out.NextContinuationToken != nil {
+			token = out.NextContinuationToken
+			continue
+		}
+		break
+	}
+	return items, nil
+}
+
 // listKeys 列出 prefix 下全部对象 key（分页直到取完）。
 func (s *S3ObjectStore) listKeys(ctx context.Context, prefix string) ([]string, error) {
 	var keys []string

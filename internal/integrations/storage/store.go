@@ -10,6 +10,12 @@ import (
 	"time"
 )
 
+// ObjectInfo 是列举操作返回的单个对象元信息。
+type ObjectInfo struct {
+	Key  string // 相对调用方传入 prefix 的 key（已去掉 prefix 前缀）
+	Size int64  // 对象字节数
+}
+
 // ObjectStore 是标准 S3 对象读写抽象。实现见 s3.go（aws-sdk-go-v2）。
 // 所有 key 均为 bucket 内的对象键（不含 bucket 名）。
 type ObjectStore interface {
@@ -20,6 +26,9 @@ type ObjectStore interface {
 	PresignGet(ctx context.Context, key string, ttl time.Duration) (string, error)
 	// ObjectExists 判断对象是否存在（bootstrap 决定是否给出 restore URL）。
 	ObjectExists(ctx context.Context, key string) (bool, error)
+	// ListObjects 列出 prefix 下所有对象的相对 key（已去掉 prefix）与大小，供 workspace 浏览。
+	// prefix 末尾应带 "/"，返回结果中相对 key 同样以 "/" 分隔，直接反映 S3 对象层级。
+	ListObjects(ctx context.Context, prefix string) ([]ObjectInfo, error)
 	// MovePrefix 把 srcPrefix 下所有对象复制到 dstPrefix 再删除源（移至归档前缀用（删除前归档））。
 	MovePrefix(ctx context.Context, srcPrefix, dstPrefix string) error
 	// DeletePrefix 删除 prefix 下所有对象。

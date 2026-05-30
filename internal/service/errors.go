@@ -57,7 +57,8 @@ var ErrChannelAdapterMissing = errors.New("当前渠道未启用")
 // ErrWorkspaceForbidden 表示当前主体不能访问目标应用工作目录。
 var ErrWorkspaceForbidden = errors.New("无权访问工作目录")
 
-// ErrWorkspaceMissing 表示应用缺少节点绑定或 runtime adapter，文件代理无法定位目录。
+// ErrWorkspaceMissing 表示 workspace 数据源不可用（app 数据 object store 未配置，
+// k8s 编排下即 storage.s3 未启用）。
 var ErrWorkspaceMissing = errors.New("应用未关联节点或 adapter 未配置")
 
 // ErrWorkspaceBadPath 表示请求路径越界或包含非法清理后的相对路径。

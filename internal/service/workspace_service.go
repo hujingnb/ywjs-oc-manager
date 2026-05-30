@@ -1,16 +1,19 @@
 package service
 
 import (
+	"archive/tar"
 	"context"
 	"database/sql"
 	"errors"
 	"fmt"
 	"io"
+	"net/http"
 	"path"
 	"strings"
+	"time"
 
 	"oc-manager/internal/auth"
-	"oc-manager/internal/integrations/runtime"
+	"oc-manager/internal/integrations/storage"
 	"oc-manager/internal/store/sqlc"
 )
 
@@ -19,23 +22,23 @@ type WorkspaceStore interface {
 	GetApp(ctx context.Context, id string) (sqlc.App, error)
 }
 
-// WorkspaceService 把 manager 的工作目录访问代理到 runtime agent。
+// WorkspaceService 把 manager 的工作目录访问代理到 S3（spec-A2a）。
 //
 // 当前接口都是只读：列表、下载、归档；删除/写入由 worker handler 在专门的运维任务里完成，
 // 避免 manager 直接对运行中的容器写入工作目录引发并发问题。
 type WorkspaceService struct {
-	store    WorkspaceStore
-	adapter  runtime.Adapter
-	dataRoot string
+	store      WorkspaceStore
+	objects    storage.ObjectStore
+	presignTTL time.Duration
 }
 
 // NewWorkspaceService 创建 workspace 服务。
-// dataRoot 为 agent 上工作目录的相对前缀，所有路径都会拼到该前缀下。
-func NewWorkspaceService(store WorkspaceStore, adapter runtime.Adapter, dataRoot string) *WorkspaceService {
-	if dataRoot == "" {
-		dataRoot = "/var/lib/oc-agent/workspace"
+// objects 为 S3 对象存储，presignTTL 为预签名 URL 有效期。
+func NewWorkspaceService(store WorkspaceStore, objects storage.ObjectStore, presignTTL time.Duration) *WorkspaceService {
+	if presignTTL <= 0 {
+		presignTTL = 15 * time.Minute
 	}
-	return &WorkspaceService{store: store, adapter: adapter, dataRoot: dataRoot}
+	return &WorkspaceService{store: store, objects: objects, presignTTL: presignTTL}
 }
 
 // WorkspaceListing 是列表接口的返回值。
@@ -54,10 +57,10 @@ type WorkspaceEntryResult struct {
 
 // List 列出指定应用工作目录下的文件。
 //
-// Sprint 2 切换到 scope-aware 端点：直接传 appID + relPath 给 adapter，由 agent 端
-// 拼成 apps/<appID>/workspace/<rel>，避免 service 层计算业务路径与 agent 端不一致。
+// 数据源改为 S3：列举 apps/<appID>/workspace/<relative>/ 下的对象，
+// 仅返回当前层级的直接子条目（文件或目录）。目录通过相对 key 中包含 "/" 推断。
 func (s *WorkspaceService) List(ctx context.Context, principal auth.Principal, appID, relative string) (WorkspaceListing, error) {
-	app, err := s.loadAuthorizedApp(ctx, principal, appID)
+	_, err := s.loadAuthorizedApp(ctx, principal, appID)
 	if err != nil {
 		return WorkspaceListing{}, err
 	}
@@ -65,30 +68,77 @@ func (s *WorkspaceService) List(ctx context.Context, principal auth.Principal, a
 	if err != nil {
 		return WorkspaceListing{}, err
 	}
-	// app.RuntimeNodeID nullable（spec-A2a）：Valid=false 或空字符串视为未分配节点。
-	if s.adapter == nil || !app.RuntimeNodeID.Valid || app.RuntimeNodeID.String == "" {
+	if s.objects == nil {
 		return WorkspaceListing{}, ErrWorkspaceMissing
 	}
-	listing, err := s.adapter.ListWorkspace(ctx,
-		app.RuntimeNodeID.String, app.ID, relPath)
+
+	// 构造 S3 列举前缀：apps/<appID>/workspace/<relPath>/
+	// relPath 为空时直接列 workspace/ 根目录
+	wsPrefix := storage.AppPrefix(appID) + "workspace/"
+	listPrefix := wsPrefix
+	if relPath != "" {
+		listPrefix = wsPrefix + relPath + "/"
+	}
+
+	infos, err := s.objects.ListObjects(ctx, listPrefix)
 	if err != nil {
 		return WorkspaceListing{}, fmt.Errorf("查询工作目录失败: %w", err)
 	}
-	out := make([]WorkspaceEntryResult, 0, len(listing.Entries))
-	for _, entry := range listing.Entries {
-		out = append(out, WorkspaceEntryResult{
-			Path:  joinSlash(listing.Path, entry.Name),
-			Name:  entry.Name,
-			Size:  entry.Size,
-			IsDir: entry.Type == "dir",
-		})
+
+	// 从 S3 对象平铺列表中提取当前层级的直接子条目。
+	// 相对 key（已去 listPrefix）若含 "/" 则属于子目录，取第一个 "/" 前的路径段作为目录名；
+	// 否则为文件，直接用相对 key 作文件名。
+	// 用 map 对目录去重（同一目录下可能有多个对象）。
+	seen := make(map[string]bool)
+	var entries []WorkspaceEntryResult
+	for _, info := range infos {
+		if info.Key == "" {
+			// 跳过与 listPrefix 完全相同的"目录占位"对象（key 去掉前缀后为空）
+			continue
+		}
+		idx := strings.Index(info.Key, "/")
+		if idx >= 0 {
+			// 路径中含 "/"：说明此条目属于某个子目录，取第一段作为目录名
+			dirName := info.Key[:idx]
+			if dirName == "" || seen[dirName] {
+				continue
+			}
+			seen[dirName] = true
+			entryPath := joinSlash(relPath, dirName)
+			entries = append(entries, WorkspaceEntryResult{
+				Path:  entryPath,
+				Name:  dirName,
+				Size:  0, // 目录无大小
+				IsDir: true,
+			})
+		} else {
+			// 无 "/"：直接文件
+			fileName := info.Key
+			if seen[fileName] {
+				continue
+			}
+			seen[fileName] = true
+			entryPath := joinSlash(relPath, fileName)
+			entries = append(entries, WorkspaceEntryResult{
+				Path:  entryPath,
+				Name:  fileName,
+				Size:  info.Size,
+				IsDir: false,
+			})
+		}
 	}
-	return WorkspaceListing{Path: listing.Path, Entries: out}, nil
+
+	// 对外路径与 relPath 对齐；根目录返回 "/"，子目录返回 relPath 本身
+	displayPath := relPath
+	if displayPath == "" {
+		displayPath = "/"
+	}
+	return WorkspaceListing{Path: displayPath, Entries: entries}, nil
 }
 
-// Download 下载工作目录中的文件，调用方负责关闭返回流。
+// Download 下载工作目录中的文件，通过预签名 URL 获取内容后以流返回，调用方负责关闭。
 func (s *WorkspaceService) Download(ctx context.Context, principal auth.Principal, appID, relative string) (io.ReadCloser, error) {
-	app, err := s.loadAuthorizedApp(ctx, principal, appID)
+	_, err := s.loadAuthorizedApp(ctx, principal, appID)
 	if err != nil {
 		return nil, err
 	}
@@ -96,17 +146,35 @@ func (s *WorkspaceService) Download(ctx context.Context, principal auth.Principa
 	if err != nil {
 		return nil, err
 	}
-	if s.adapter == nil || !app.RuntimeNodeID.Valid || app.RuntimeNodeID.String == "" {
+	if s.objects == nil {
 		return nil, ErrWorkspaceMissing
 	}
-	return s.adapter.DownloadWorkspaceFile(ctx,
-		app.RuntimeNodeID.String, app.ID, relPath)
+
+	// 构造 S3 对象 key：apps/<appID>/workspace/<relPath>
+	key := storage.AppPrefix(appID) + "workspace/" + relPath
+	url, err := s.objects.PresignGet(ctx, key, s.presignTTL)
+	if err != nil {
+		return nil, fmt.Errorf("生成下载链接失败: %w", err)
+	}
+
+	// 通过预签名 URL 发起 HTTP GET 获取对象内容流
+	resp, err := http.Get(url) //nolint:noctx // presign URL 已包含鉴权信息，ctx 传递无效
+	if err != nil {
+		return nil, fmt.Errorf("下载工作区文件失败: %w", err)
+	}
+	if resp.StatusCode != http.StatusOK {
+		_ = resp.Body.Close()
+		return nil, fmt.Errorf("下载工作区文件失败: HTTP %d", resp.StatusCode)
+	}
+	return resp.Body, nil
 }
 
-// Archive 把工作目录打包为 zip 流写到 w。Sprint 2 改用 scope-aware 端点输出 zip
-// （Sprint 1 agent 实现的格式），不再使用 generic tar.gz。
-func (s *WorkspaceService) Archive(ctx context.Context, principal auth.Principal, appID, relative string, w io.Writer) error {
-	app, err := s.loadAuthorizedApp(ctx, principal, appID)
+// Archive 把工作目录打包为 tar 流写到 w。
+// 逐一列举 apps/<appID>/workspace/<relative>/ 下对象，预签名下载后写入 tar。
+// 返回值使用具名返回以便 defer 捕获 tar.Close 错误：tar.Writer.Close 写入 EOF 块，
+// 丢弃该错误会导致截断的 tar 被误当完整包处理。
+func (s *WorkspaceService) Archive(ctx context.Context, principal auth.Principal, appID, relative string, w io.Writer) (err error) {
+	_, err = s.loadAuthorizedApp(ctx, principal, appID)
 	if err != nil {
 		return err
 	}
@@ -114,11 +182,69 @@ func (s *WorkspaceService) Archive(ctx context.Context, principal auth.Principal
 	if err != nil {
 		return err
 	}
-	if s.adapter == nil || !app.RuntimeNodeID.Valid || app.RuntimeNodeID.String == "" {
+	if s.objects == nil {
 		return ErrWorkspaceMissing
 	}
-	return s.adapter.StreamWorkspaceArchive(ctx,
-		app.RuntimeNodeID.String, app.ID, relPath, w)
+
+	// 构造 S3 列举前缀
+	wsPrefix := storage.AppPrefix(appID) + "workspace/"
+	listPrefix := wsPrefix
+	if relPath != "" {
+		listPrefix = wsPrefix + relPath + "/"
+	}
+
+	infos, err := s.objects.ListObjects(ctx, listPrefix)
+	if err != nil {
+		return fmt.Errorf("列举工作区对象失败: %w", err)
+	}
+
+	tw := tar.NewWriter(w)
+	defer func() {
+		// tar.Close 写入 EOF 终止块；仅当函数本身未出错时才把 Close 错误作为最终错误
+		// 传播，避免覆盖循环内更具体的失败原因。
+		if cerr := tw.Close(); cerr != nil && err == nil {
+			err = fmt.Errorf("关闭 tar 流失败: %w", cerr)
+		}
+	}()
+
+	for _, info := range infos {
+		if info.Key == "" {
+			continue
+		}
+		// 完整 S3 key = listPrefix + info.Key
+		fullKey := listPrefix + info.Key
+
+		// 预签名 URL 逐个下载
+		dlURL, err := s.objects.PresignGet(ctx, fullKey, s.presignTTL)
+		if err != nil {
+			return fmt.Errorf("生成下载链接失败（%s）: %w", info.Key, err)
+		}
+		resp, err := http.Get(dlURL) //nolint:noctx
+		if err != nil {
+			return fmt.Errorf("下载工作区文件失败（%s）: %w", info.Key, err)
+		}
+		if resp.StatusCode != http.StatusOK {
+			_ = resp.Body.Close()
+			return fmt.Errorf("下载工作区文件失败（%s）: HTTP %d", info.Key, resp.StatusCode)
+		}
+
+		// 写入 tar：header 使用相对于 relPath 的路径，保留目录结构
+		hdr := &tar.Header{
+			Name: info.Key,
+			Mode: 0644,
+			Size: info.Size,
+		}
+		if err := tw.WriteHeader(hdr); err != nil {
+			_ = resp.Body.Close()
+			return fmt.Errorf("写入 tar header 失败（%s）: %w", info.Key, err)
+		}
+		if _, err := io.Copy(tw, resp.Body); err != nil {
+			_ = resp.Body.Close()
+			return fmt.Errorf("写入 tar 内容失败（%s）: %w", info.Key, err)
+		}
+		_ = resp.Body.Close()
+	}
+	return nil
 }
 
 func (s *WorkspaceService) loadAuthorizedApp(ctx context.Context, principal auth.Principal, appID string) (sqlc.App, error) {
