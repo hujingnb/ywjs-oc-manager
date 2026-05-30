@@ -95,6 +95,9 @@ func runOpsContainer(t *testing.T, env opsTestEnv, command, bootstrapURL, dataDi
 	t.Helper()
 	args := []string{
 		"run", "--rm", "--network", "host",
+		// 以主机当前 uid:gid 运行，使容器写入挂载 tempdir 的文件归主机用户所有，
+		// 否则 root 创建的文件导致 t.TempDir() 的 RemoveAll 清理 permission denied。
+		"--user", fmt.Sprintf("%d:%d", os.Getuid(), os.Getgid()),
 		"-e", "OC_CONTROL_TOKEN=test-token",
 		"-e", "OC_BOOTSTRAP_URL=" + bootstrapURL,
 		"-e", "OC_DATA_DIR=/data",
@@ -232,7 +235,9 @@ func TestOcSyncOnce(t *testing.T) {
 	require.NoError(t, os.MkdirAll(filepath.Join(dataDir, "workspace"), 0o755))
 	require.NoError(t, os.WriteFile(filepath.Join(dataDir, "workspace/out.txt"), []byte("SYNCED"), 0o644))
 	// 用 ops 容器内的 sqlite3 建一个最小 DB，确保 .backup 命令可用
-	mk := exec.Command("docker", "run", "--rm", "-v", dataDir+":/data", env.image,
+	mk := exec.Command("docker", "run", "--rm",
+		"--user", fmt.Sprintf("%d:%d", os.Getuid(), os.Getgid()),
+		"-v", dataDir+":/data", env.image,
 		"sqlite3", "/data/state.db", "CREATE TABLE t(x); INSERT INTO t VALUES(1);")
 	mkOut, mkErr := mk.CombinedOutput()
 	require.NoError(t, mkErr, "建测试 sqlite 失败:\n%s", string(mkOut))
