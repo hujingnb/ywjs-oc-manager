@@ -30,11 +30,11 @@ spec:
           # 镜像 WORKDIR=/data 且无 /app；日志目录用 /data/logs（父目录存在）避免 mkdir 失败
           args: ["--log-dir", "/data/logs"]
           env:
-            # new-api 的 MySQL DSN 格式：user:pass@tcp(host:port)/dbname
+            # MySQL DSN / Redis 连接串统一来自 ocm-secrets，部署时只改 secret，无需改本文件。
             - name: SQL_DSN
-              value: "USER:PASS@tcp(EXTERNAL_MYSQL_HOST:3306)/new-api"
+              valueFrom: { secretKeyRef: { name: ocm-secrets, key: new-api-sql-dsn } }
             - name: REDIS_CONN_STRING
-              value: "redis://:PASS@EXTERNAL_REDIS_HOST:6379"
+              valueFrom: { secretKeyRef: { name: ocm-secrets, key: new-api-redis-conn } }
             - name: TZ
               value: Asia/Shanghai
             - name: ERROR_LOG_ENABLED

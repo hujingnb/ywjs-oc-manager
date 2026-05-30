@@ -15,7 +15,7 @@ data:
       http_port: 9381
     mysql:
       name: '${MYSQL_DBNAME:-rag_flow}'
-      user: '${MYSQL_USER:-root}'
+      user: '${MYSQL_USER:-ragflow}'
       password: '${MYSQL_PASSWORD:-infini_rag_flow}'
       host: '${MYSQL_HOST:-mysql}'
       port: ${MYSQL_PORT:-3306}
@@ -84,30 +84,33 @@ spec:
               value: elasticsearch
             - name: DEVICE
               value: cpu
+            # 所有外部后端连接信息（host/port/dbname/账号口令）统一来自 ocm-secrets，
+            # 部署时只改 secret，无需改本文件。
             - name: ES_HOST
-              value: EXTERNAL_ES_HOST
+              valueFrom: { secretKeyRef: { name: ocm-secrets, key: ragflow-es-host } }
             - name: ELASTIC_PASSWORD
               valueFrom: { secretKeyRef: { name: ocm-secrets, key: elastic-password } }
             - name: MYSQL_HOST
-              value: EXTERNAL_MYSQL_HOST
+              valueFrom: { secretKeyRef: { name: ocm-secrets, key: ragflow-mysql-host } }
             - name: MYSQL_PORT
-              value: "3306"
+              valueFrom: { secretKeyRef: { name: ocm-secrets, key: ragflow-mysql-port } }
             - name: MYSQL_DBNAME
-              value: rag_flow
+              valueFrom: { secretKeyRef: { name: ocm-secrets, key: ragflow-mysql-dbname } }
             - name: MYSQL_USER
-              value: root
+              # ragflow 专用普通账号，对 rag_flow 库有全部权限即可，不用 root。
+              valueFrom: { secretKeyRef: { name: ocm-secrets, key: ragflow-mysql-user } }
             - name: MYSQL_PASSWORD
-              valueFrom: { secretKeyRef: { name: ocm-secrets, key: mysql-root-password } }
+              valueFrom: { secretKeyRef: { name: ocm-secrets, key: ragflow-mysql-password } }
             - name: MYSQL_MAX_PACKET
               value: "1073741824"
             - name: MINIO_HOST
-              value: EXTERNAL_MINIO_HOST
+              valueFrom: { secretKeyRef: { name: ocm-secrets, key: ragflow-minio-host } }
             - name: MINIO_USER
-              valueFrom: { secretKeyRef: { name: ocm-secrets, key: minio-root-user } }
+              valueFrom: { secretKeyRef: { name: ocm-secrets, key: ragflow-minio-user } }
             - name: MINIO_PASSWORD
-              valueFrom: { secretKeyRef: { name: ocm-secrets, key: minio-root-password } }
+              valueFrom: { secretKeyRef: { name: ocm-secrets, key: ragflow-minio-password } }
             - name: REDIS_HOST
-              value: EXTERNAL_REDIS_HOST
+              valueFrom: { secretKeyRef: { name: ocm-secrets, key: ragflow-redis-host } }
             - name: REDIS_PASSWORD
               valueFrom: { secretKeyRef: { name: ocm-secrets, key: redis-password } }
             - name: API_PROXY_SCHEME
