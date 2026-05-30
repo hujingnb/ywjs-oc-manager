@@ -207,3 +207,45 @@ func assertFileContains(t *testing.T, path, want string) {
 	require.NoError(t, err, "读文件 %s", path)
 	assert.Contains(t, string(b), want)
 }
+
+// TestOcSyncOnce 验证 oc-sync（OC_SYNC_ONCE=1）把本地 workspace 与 sqlite 快照上传到 apps/<id>/ 前缀。
+// 预置 workspace 文件与最小 sqlite DB，oc-sync 跑一轮后断言 MinIO 出现对应对象，
+// 证明 STS 凭证解析、aws s3 sync 上传、sqlite .backup 路径真实可用。
+func TestOcSyncOnce(t *testing.T) {
+	env := loadOpsTestEnv(t)
+	store := storage.NewS3ObjectStore(env.cfg)
+	ctx := context.Background()
+	// 每次测试生成唯一 id，避免并发污染
+	id := fmt.Sprintf("it-sync-%d", time.Now().UnixNano())
+	appPrefix := storage.AppPrefix(id)
+	// 测试结束后清理 S3 上的 app 数据
+	t.Cleanup(func() { _ = store.DeletePrefix(context.Background(), appPrefix) })
+
+	// mock bootstrap 不需要 skill 对象（sync 不下载 skills）；给一个占位 URL
+	body := bootstrapJSON(t, env, appPrefix, "http://unused.example/skill")
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) { _, _ = w.Write(body) }))
+	defer srv.Close()
+
+	// 预置本地 /data：workspace 文件 + 一个最小 sqlite DB
+	dataDir := t.TempDir()
+	inputDir := t.TempDir()
+	require.NoError(t, os.MkdirAll(filepath.Join(dataDir, "workspace"), 0o755))
+	require.NoError(t, os.WriteFile(filepath.Join(dataDir, "workspace/out.txt"), []byte("SYNCED"), 0o644))
+	// 用 ops 容器内的 sqlite3 建一个最小 DB，确保 .backup 命令可用
+	mk := exec.Command("docker", "run", "--rm", "-v", dataDir+":/data", env.image,
+		"sqlite3", "/data/state.db", "CREATE TABLE t(x); INSERT INTO t VALUES(1);")
+	mkOut, mkErr := mk.CombinedOutput()
+	require.NoError(t, mkErr, "建测试 sqlite 失败:\n%s", string(mkOut))
+
+	out, runErr := runOpsContainer(t, env, "oc-sync", srv.URL+"/internal/apps/"+id+"/bootstrap",
+		dataDir, inputDir, "OC_SYNC_ONCE=1")
+	require.NoError(t, runErr, "oc-sync 容器执行失败:\n%s", out)
+
+	// 断言：MinIO apps/<id>/ 前缀出现 workspace 对象与 state.db 快照
+	exists, err := store.ObjectExists(ctx, appPrefix+"workspace/out.txt")
+	require.NoError(t, err)
+	assert.True(t, exists, "workspace 对象应已上传")
+	dbExists, err := store.ObjectExists(ctx, storage.StateDBKey(id))
+	require.NoError(t, err)
+	assert.True(t, dbExists, "state.db 快照应已上传")
+}
