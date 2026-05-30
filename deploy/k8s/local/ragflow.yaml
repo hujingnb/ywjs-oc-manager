@@ -114,6 +114,15 @@ spec:
               value: "1"
             - name: TZ
               value: Asia/Shanghai
+            # ragflow 启动期需出站下载 tiktoken bpe / HF 模型；本地无直连外网，
+            # 经宿主 clash 代理（绑 0.0.0.0:7890，k3d 网关 172.19.0.1 即宿主）。
+            # NO_PROXY 排除集群内服务，避免内部流量绕代理。
+            - name: HTTP_PROXY
+              value: "http://172.19.0.1:7890"
+            - name: HTTPS_PROXY
+              value: "http://172.19.0.1:7890"
+            - name: NO_PROXY
+              value: "localhost,127.0.0.1,mysql,redis,minio,elasticsearch,new-api,manager-api,.svc,.svc.cluster.local,.cluster.local,10.0.0.0/8,172.16.0.0/12"
           ports:
             - containerPort: 80
             - containerPort: 9380

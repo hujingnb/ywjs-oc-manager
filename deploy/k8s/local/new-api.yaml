@@ -24,7 +24,9 @@ spec:
       containers:
         - name: new-api
           # ywjs_public 未镜像 new-api，走 docker.io 的 calciumion/new-api（同 compose，cluster 已配 daocloud 镜像源）
+          # 本地镜像源拉 :latest 不稳：改宿主经代理 docker pull + k3d image import 注入，policy 用 IfNotPresent 直接用本地镜像
           image: calciumion/new-api:latest
+          imagePullPolicy: IfNotPresent
           # 镜像 WORKDIR=/data 且无 /app；日志目录用 /data/logs（父目录存在）避免 mkdir 失败
           args: ["--log-dir", "/data/logs"]
           env:
@@ -43,6 +45,14 @@ spec:
               value: new-api-node-1
             - name: STREAMING_TIMEOUT
               value: "600"
+            # pod 无法解析外网 DNS（同 ragflow），调上游 LLM（api.deepseek.com 等）须经宿主 clash 代理
+            # （绑 0.0.0.0:7890，k3d 网关 172.19.0.1 即宿主）。NO_PROXY 排除集群内服务，内部流量直连。
+            - name: HTTP_PROXY
+              value: "http://172.19.0.1:7890"
+            - name: HTTPS_PROXY
+              value: "http://172.19.0.1:7890"
+            - name: NO_PROXY
+              value: "localhost,127.0.0.1,mysql,redis,minio,elasticsearch,ragflow,manager-api,.svc,.svc.cluster.local,.cluster.local,10.0.0.0/8,172.16.0.0/12"
           ports:
             - containerPort: 3000
           readinessProbe:
