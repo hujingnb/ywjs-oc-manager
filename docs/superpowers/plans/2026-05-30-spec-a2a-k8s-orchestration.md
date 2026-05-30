@@ -1462,4 +1462,7 @@ A2a 把 manager 编排切到 k8s：KubernetesAdapter 用 fake clientset 单测 +
 - 删除节点概念全部代码与表（runtime_nodes/service/probe/enroll-heartbeat/agent 二进制/deploy/router agent 路由/main 节点装配与周期任务/imagecoord 孤儿）。
 - 破坏性 DB migration：删 `apps.runtime_node_id`/`container_id`/`container_name` 列与 `runtime_nodes` 表。
 - AgentBackedAdapter / runtime.Adapter / agent file client 等孤儿删除。
+- 渠道绑定后 hermes 重载（platform reload）的 k8s 化：`channelCheckHandler` 的
+  `ChannelRestarter` 仍走 docker（k8s 下 nodeID/containerID 恒空，调用失败被日志吞、
+  不阻断绑定状态闭环）；A2b 改为 orch 驱动的 pod 重启（Scale(0)→Scale(1) 或删 pod）。
 - 完整 A/B/D/E 合并端到端 + 三角色真实浏览器验证（吸收 A2a.4 推迟项）。
