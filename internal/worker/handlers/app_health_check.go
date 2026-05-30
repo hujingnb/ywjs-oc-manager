@@ -25,6 +25,13 @@ type ContainerInspector interface {
 	InspectContainer(ctx context.Context, nodeID, containerID string) (runtime.ContainerInfo, error)
 }
 
+// ContainerLifecycle 抽象 health check 需要的容器生命周期能力（StartContainer）。
+// 与 runtime.AgentBackedAdapter 兼容；测试中可替换为内存桩。
+// 仅 AppHealthCheckHandler 使用（app_start/stop/restart/delete 已迁移至 k8s 编排接口）。
+type ContainerLifecycle interface {
+	StartContainer(ctx context.Context, nodeID, containerID string) error
+}
+
 // restartPolicy 与 migration 0006 默认值一一对应；从 apps.restart_policy_json 解析。
 type restartPolicy struct {
 	Mode          string `json:"mode"`

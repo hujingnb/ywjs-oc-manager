@@ -4,8 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
-	"fmt"
-	"strings"
+	"io"
 	"testing"
 	"time"
 
@@ -14,6 +13,7 @@ import (
 	"github.com/stretchr/testify/require"
 	"oc-manager/internal/domain"
 	"oc-manager/internal/integrations/newapi"
+	"oc-manager/internal/integrations/storage"
 	"oc-manager/internal/store/sqlc"
 )
 
@@ -29,7 +29,7 @@ func runtimeStub(t *testing.T) *runtimeOpStub {
 			OwnerUserID:   testUsrID,
 			RuntimeNodeID: null.StringFrom(testRuntimeNodeID), // RuntimeNodeID nullable（spec-A2a）
 			Status:        domain.AppStatusRunning,
-			ContainerID:   null.StringFrom("ctr-existing"),
+			ContainerID:   null.StringFrom("ctr-existing"), // k8s 路径用 ContainerID 判断 Deployment 是否已建立
 			ContainerName: null.StringFrom("ocm-app"),
 			NewapiKeyID:   null.StringFrom("42"),
 		},
@@ -40,543 +40,405 @@ func runtimeJob(jobType, appID string) sqlc.Job {
 	return sqlc.Job{Type: jobType, PayloadJson: []byte(`{"app_id":"` + appID + `"}`)}
 }
 
-// TestAppStartContainerHandler_HappyPath 验证应用启动容器处理器成功路径的成功路径场景。
+// ─────────────────────────────────────────────
+// AppStartContainerHandler 单测
+// ─────────────────────────────────────────────
+
+// TestAppStartContainerHandler_HappyPath 验证 Scale(1) 被调用且状态更新为 running 的成功路径。
 func TestAppStartContainerHandler_HappyPath(t *testing.T) {
 	stub := runtimeStub(t)
-	containers := &fakeLifecycle{}
-	handler := NewAppStartContainerHandler(stub, containers)
+	orch := &fakeAppOrchestrator{}
+	handler := NewAppStartContainerHandler(stub, orch)
 
 	err := handler.Handle(context.Background(), runtimeJob(domain.JobTypeAppStartContainer, testAppID))
 	require.NoError(t, err)
-	require.Equal(t, 1, containers.startCalls)
+	// Scale(1) 必须被调用一次。
+	require.Equal(t, 1, orch.scaleCalls)
+	require.Equal(t, int32(1), orch.lastScaleReplicas)
+	// 状态更新为 running。
 	require.Equal(t, domain.AppStatusRunning, stub.statusUpdates[len(stub.statusUpdates)-1])
 }
 
-// TestAppStartContainerHandler_RejectsWithoutContainerID 验证应用启动容器处理器拒绝不使用容器ID的异常或拒绝路径场景。
+// TestAppStartContainerHandler_RejectsWithoutContainerID 验证未完成 init 时（ContainerID 空）拒绝启动。
+// k8s Deployment 未建立时不能发 Scale，避免产生孤儿资源。
 func TestAppStartContainerHandler_RejectsWithoutContainerID(t *testing.T) {
 	stub := runtimeStub(t)
-	// ContainerID 迁移为 null.String；零值表示 NULL（无容器）。
 	stub.app.ContainerID = null.String{}
-	handler := NewAppStartContainerHandler(stub, &fakeLifecycle{})
+	handler := NewAppStartContainerHandler(stub, &fakeAppOrchestrator{})
 	err := handler.Handle(context.Background(), runtimeJob(domain.JobTypeAppStartContainer, testAppID))
 	require.Error(t, err)
 }
 
-// TestAppStartContainerHandler_PropagatesAdapterError 验证应用启动容器处理器透传适配器错误的错误映射或错误记录场景。
-func TestAppStartContainerHandler_PropagatesAdapterError(t *testing.T) {
+// TestAppStartContainerHandler_PropagatesOrchestratorError 验证 Scale 失败时错误冒泡、状态不更新。
+func TestAppStartContainerHandler_PropagatesOrchestratorError(t *testing.T) {
 	stub := runtimeStub(t)
-	containers := &fakeLifecycle{startErr: errors.New("docker boom")}
-	handler := NewAppStartContainerHandler(stub, containers)
+	orch := &fakeAppOrchestrator{scaleErr: errors.New("k8s boom")}
+	handler := NewAppStartContainerHandler(stub, orch)
 	err := handler.Handle(context.Background(), runtimeJob(domain.JobTypeAppStartContainer, testAppID))
 	require.Error(t, err)
+	// Scale 失败时不应更新状态。
 	require.Equal(t, 0, len(stub.statusUpdates))
 }
 
-// TestAppStopContainerHandler_HappyPath 验证应用停止容器处理器成功路径的成功路径场景。
+// ─────────────────────────────────────────────
+// AppStopContainerHandler 单测
+// ─────────────────────────────────────────────
+
+// TestAppStopContainerHandler_HappyPath 验证 Scale(0) 被调用且状态更新为 stopped 的成功路径。
 func TestAppStopContainerHandler_HappyPath(t *testing.T) {
 	stub := runtimeStub(t)
-	containers := &fakeLifecycle{}
-	handler := NewAppStopContainerHandler(stub, containers)
+	orch := &fakeAppOrchestrator{}
+	handler := NewAppStopContainerHandler(stub, orch)
 	err := handler.Handle(context.Background(), runtimeJob(domain.JobTypeAppStopContainer, testAppID))
 	require.NoError(t, err)
-	require.Equal(t, 1, containers.stopCalls)
+	// Scale(0) 必须被调用一次。
+	require.Equal(t, 1, orch.scaleCalls)
+	require.Equal(t, int32(0), orch.lastScaleReplicas)
 	require.Equal(t, domain.AppStatusStopped, stub.statusUpdates[len(stub.statusUpdates)-1])
 }
 
-// TestAppStopContainerHandler_NoContainerStillUpdatesStatus 验证应用停止容器处理器无容器仍然Updates状态的预期行为场景。
+// TestAppStopContainerHandler_NoContainerStillUpdatesStatus 验证 ContainerID 为空时跳过 Scale
+// 直接推 stopped 状态（Deployment 未建立时等价于已停止）。
 func TestAppStopContainerHandler_NoContainerStillUpdatesStatus(t *testing.T) {
 	stub := runtimeStub(t)
 	stub.app.ContainerID = null.String{}
-	containers := &fakeLifecycle{}
-	handler := NewAppStopContainerHandler(stub, containers)
+	orch := &fakeAppOrchestrator{}
+	handler := NewAppStopContainerHandler(stub, orch)
 	err := handler.Handle(context.Background(), runtimeJob(domain.JobTypeAppStopContainer, testAppID))
 	require.NoError(t, err)
-	require.Equal(t, 0, containers.stopCalls)
+	// Deployment 未建立时不调 Scale，直接推状态收敛状态机。
+	require.Equal(t, 0, orch.scaleCalls)
 	require.Equal(t, domain.AppStatusStopped, stub.statusUpdates[len(stub.statusUpdates)-1])
 }
 
-// TestAppRestartContainerHandler_HappyPath 验证应用重启容器处理器成功路径的成功路径场景。
-func TestAppRestartContainerHandler_HappyPath(t *testing.T) {
+// ─────────────────────────────────────────────
+// AppRestartContainerHandler 单测
+// ─────────────────────────────────────────────
+
+// TestAppRestartContainerHandler_ImageUnchanged_DeletesSessionsThenScales 验证镜像不变时：
+// 删 S3 sessions + state.db → Scale(0) → Scale(1) → status=running → SetAppAppliedVersion。
+// hermes 重新启动后从 bootstrap 获取最新配置，sessions 被清除后 snapshot 最新 SOUL.md。
+func TestAppRestartContainerHandler_ImageUnchanged_DeletesSessionsThenScales(t *testing.T) {
 	stub := runtimeStub(t)
-	containers := &fakeLifecycle{}
-	handler := NewAppRestartContainerHandler(stub, containers)
-	err := handler.Handle(context.Background(), runtimeJob(domain.JobTypeAppRestartContainer, testAppID))
-	require.NoError(t, err)
-	require.Equal(t, 1, containers.restartCalls)
-	require.Equal(t, domain.AppStatusRunning, stub.statusUpdates[len(stub.statusUpdates)-1])
-}
-
-// fakeSessionCleaner 是 SessionCleaner 测试桩。
-type fakeSessionCleaner struct {
-	calls       int
-	lastNodeID  string
-	lastAppID   string
-	returnError error
-}
-
-func (f *fakeSessionCleaner) ClearAppSessions(_ context.Context, nodeID, appID string) error {
-	f.calls++
-	f.lastNodeID = nodeID
-	f.lastAppID = appID
-	return f.returnError
-}
-
-// TestAppRestartContainerHandler_SessionCleanerCalledBeforeRestart 验证 SetSessionCleaner
-// 注入后,Handle 走 stop → clear sessions → start 三步,不走原子 RestartContainer。
-// state.db (SQLite) 持有文件锁,运行中删会损坏数据库,所以必须先停容器再清。
-// Hermes 在 session 启动时把 system_prompt 冻结进 SQLite,清掉旧 session
-// 才能让最新 SOUL.md(含改后的 model / persona / 知识库)进入新对话。
-func TestAppRestartContainerHandler_SessionCleanerCalledBeforeRestart(t *testing.T) {
-	stub := runtimeStub(t)
-	containers := &fakeLifecycle{}
-	cleaner := &fakeSessionCleaner{}
-	handler := NewAppRestartContainerHandler(stub, containers)
-	handler.SetSessionCleaner(cleaner)
-	err := handler.Handle(context.Background(), runtimeJob(domain.JobTypeAppRestartContainer, testAppID))
-	require.NoError(t, err)
-	// stop + clear + start 各调一次,RestartContainer 不被调用。
-	require.Equal(t, 1, containers.stopCalls)
-	require.Equal(t, 1, cleaner.calls)
-	require.Equal(t, 1, containers.startCalls)
-	require.Equal(t, 0, containers.restartCalls)
-	// cleaner 接收正确的 appID(透传校验)。
-	require.Equal(t, testAppID, cleaner.lastAppID)
-}
-
-// TestAppRestartContainerHandler_SessionCleanerErrorAbortsRestart 验证清 session 失败时
-// 容器不会被 start,job 返回错误让 worker 重试——清 session 是配置变更进入对话的必经路径,
-// 失败时让重试比"用旧 session 跑起来"更安全。
-func TestAppRestartContainerHandler_SessionCleanerErrorAbortsRestart(t *testing.T) {
-	stub := runtimeStub(t)
-	containers := &fakeLifecycle{}
-	cleaner := &fakeSessionCleaner{returnError: fmt.Errorf("agent 清 session 失败")}
-	handler := NewAppRestartContainerHandler(stub, containers)
-	handler.SetSessionCleaner(cleaner)
-	err := handler.Handle(context.Background(), runtimeJob(domain.JobTypeAppRestartContainer, testAppID))
-	require.Error(t, err)
-	// 容器虽然被 stop 了(SQLite 必须容器停才能清),但 cleaner 失败后不再 start——
-	// 让用户感知 restart 失败,而非用旧 session 静默成功启动。
-	require.Equal(t, 1, containers.stopCalls)
-	require.Equal(t, 0, containers.startCalls)
-	require.Equal(t, 0, containers.restartCalls)
-}
-
-// TestAppRestartContainerHandler_NoSessionCleanerFallsBackToAtomicRestart 验证 SessionCleaner
-// 未注入(旧装配 / 测试装配)时,Handle 退回到原 docker restart 行为,保持向后兼容。
-func TestAppRestartContainerHandler_NoSessionCleanerFallsBackToAtomicRestart(t *testing.T) {
-	stub := runtimeStub(t)
-	containers := &fakeLifecycle{}
-	handler := NewAppRestartContainerHandler(stub, containers)
-	// 不调 SetSessionCleaner。
-	err := handler.Handle(context.Background(), runtimeJob(domain.JobTypeAppRestartContainer, testAppID))
-	require.NoError(t, err)
-	require.Equal(t, 1, containers.restartCalls)
-	require.Equal(t, 0, containers.stopCalls)
-	require.Equal(t, 0, containers.startCalls)
-}
-
-// fakeInputRefresher 是 AppInputRefresher 的测试桩。
-// orderTracker 用来断言「refresher 在 stop 之前被调用」: stop / refresh 都把
-// 自己的 sequence 追加到 tracker, 由测试比较顺序。
-type fakeInputRefresher struct {
-	calls       int
-	lastNodeID  string
-	lastAppID   string
-	returnError error
-	// returnResult 是 RefreshAppInput 成功时返回的版本信息，供测试断言 SetAppAppliedVersion 入参。
-	returnResult AppInputRefreshResult
-	// orderTracker 由测试注入, refresh 时 append "refresh", 与 fakeLifecycle 共享同一 slice
-	// 即可断言事件先后。
-	orderTracker *[]string
-}
-
-// RefreshAppInput 记录调用入参；app.ID 迁移为 string，直接赋值即可。
-func (f *fakeInputRefresher) RefreshAppInput(_ context.Context, nodeID string, app sqlc.App) (AppInputRefreshResult, error) {
-	f.calls++
-	f.lastNodeID = nodeID
-	f.lastAppID = app.ID
-	if f.orderTracker != nil {
-		*f.orderTracker = append(*f.orderTracker, "refresh")
-	}
-	return f.returnResult, f.returnError
-}
-
-// orderedLifecycle 在 fakeLifecycle 基础上把每次 stop / start / restart 调用
-// 也写到 orderTracker 上, 便于测试断言"refresh 在 stop 前发生"。
-type orderedLifecycle struct {
-	fakeLifecycle
-	orderTracker *[]string
-}
-
-func (f *orderedLifecycle) StopContainer(ctx context.Context, nodeID, containerID string) error {
-	if f.orderTracker != nil {
-		*f.orderTracker = append(*f.orderTracker, "stop")
-	}
-	return f.fakeLifecycle.StopContainer(ctx, nodeID, containerID)
-}
-
-func (f *orderedLifecycle) StartContainer(ctx context.Context, nodeID, containerID string) error {
-	if f.orderTracker != nil {
-		*f.orderTracker = append(*f.orderTracker, "start")
-	}
-	return f.fakeLifecycle.StartContainer(ctx, nodeID, containerID)
-}
-
-func (f *orderedLifecycle) RestartContainer(ctx context.Context, nodeID, containerID string) error {
-	if f.orderTracker != nil {
-		*f.orderTracker = append(*f.orderTracker, "restart")
-	}
-	return f.fakeLifecycle.RestartContainer(ctx, nodeID, containerID)
-}
-
-// TestAppRestartContainerHandler_RefreshesInputBeforeRestart 验证注入 AppInputRefresher
-// 后, Handle 会在容器实际 stop 之前调用 refresher.RefreshAppInput。
-// 这是 hermes 镜像自包含 (oc-entrypoint 启动时根据 input/ 重渲染) 流程下
-// 「改 model / 改 prompt / 改 persona 后 restart 真正生效」的关键: input 必须
-// 先被刷新到节点, 后续 stop → start 才能让容器读到最新数据。
-func TestAppRestartContainerHandler_RefreshesInputBeforeRestart(t *testing.T) {
-	stub := runtimeStub(t)
-	order := make([]string, 0, 4)
-	containers := &orderedLifecycle{orderTracker: &order}
-	cleaner := &fakeSessionCleaner{}
-	refresher := &fakeInputRefresher{orderTracker: &order}
-	handler := NewAppRestartContainerHandler(stub, containers)
-	handler.SetInputRefresher(refresher)
-	handler.SetSessionCleaner(cleaner)
-	err := handler.Handle(context.Background(), runtimeJob(domain.JobTypeAppRestartContainer, testAppID))
-	require.NoError(t, err)
-	// refresher 被调用一次, 透传到正确的 appID。
-	require.Equal(t, 1, refresher.calls)
-	require.Equal(t, testAppID, refresher.lastAppID)
-	// 顺序必须是 refresh → stop → start (cleaner 调用插在 stop 与 start 之间);
-	// refresh 不能出现在 stop 之后, 否则 oc-entrypoint 仍会读到旧 manifest。
-	require.Equal(t, []string{"refresh", "stop", "start"}, order)
-}
-
-// TestAppRestartContainerHandler_RefresherErrorAbortsRestart 验证 refresher 失败时
-// 容器不会被 stop, 错误冒泡让 worker 重试。
-// 不允许出现"先 stop 再失败"的中间态: 那会让容器陷入 stopped 状态而 input 未刷新,
-// 用户感知不到, 后续就算手动 start 也是用旧配置。
-func TestAppRestartContainerHandler_RefresherErrorAbortsRestart(t *testing.T) {
-	stub := runtimeStub(t)
-	containers := &fakeLifecycle{}
-	refresher := &fakeInputRefresher{returnError: fmt.Errorf("agent 写 manifest 失败")}
-	handler := NewAppRestartContainerHandler(stub, containers)
-	handler.SetInputRefresher(refresher)
-	err := handler.Handle(context.Background(), runtimeJob(domain.JobTypeAppRestartContainer, testAppID))
-	require.Error(t, err)
-	// refresher 调用过一次, 但任何容器生命周期方法都不应触发。
-	require.Equal(t, 1, refresher.calls)
-	require.Equal(t, 0, containers.stopCalls)
-	require.Equal(t, 0, containers.startCalls)
-	require.Equal(t, 0, containers.restartCalls)
-}
-
-// TestAppRestartContainerHandler_NoInputRefresherSkipsRefresh 验证未注入 InputRefresher
-// (测试装配 / 旧 wiring) 时, Handle 跳过 input 刷新但 stop/start 仍能正常执行,
-// 保持与原 restart 链路的向后兼容(不影响那些只测试容器生命周期的测试装配)。
-func TestAppRestartContainerHandler_NoInputRefresherSkipsRefresh(t *testing.T) {
-	stub := runtimeStub(t)
-	containers := &fakeLifecycle{}
-	handler := NewAppRestartContainerHandler(stub, containers)
-	// 注入 session cleaner 走 stop/start 路径, 不注入 input refresher。
-	handler.SetSessionCleaner(&fakeSessionCleaner{})
-	err := handler.Handle(context.Background(), runtimeJob(domain.JobTypeAppRestartContainer, testAppID))
-	require.NoError(t, err)
-	// stop/start 仍能照常调用, 不应因为 refresher 缺失而失败。
-	require.Equal(t, 1, containers.stopCalls)
-	require.Equal(t, 1, containers.startCalls)
-}
-
-// TestAppRestartContainerHandler_RecordsAppliedVersionAfterRefresh 验证注入 inputRefresher
-// 后，Handle 在成功重启完成后调用 SetAppAppliedVersion，把 refresher 返回的
-// VersionRevision / ImageRef 写入 DB，供前端 version_synced 检测使用。
-func TestAppRestartContainerHandler_RecordsAppliedVersionAfterRefresh(t *testing.T) {
-	stub := runtimeStub(t)
-	// 容器当前镜像与 refresher 返回镜像同值：本用例验证镜像未变时的常规重启路径，
-	// 必须让 RuntimeImageRef 与 refresher.ImageRef 一致，避免触发镜像变更重建分支。
-	stub.app.RuntimeImageRef = "hermes-v2:sha256-abc"
-	containers := &fakeLifecycle{}
-	// refresher 返回版本修订=5，镜像 ref="hermes-v2:sha256-abc"。
+	stub.app.RuntimeImageRef = "hermes-v1:same"
+	orch := &fakeAppOrchestrator{}
+	objects := &fakeObjectStore{}
+	// refresher 返回与当前一致的镜像，触发镜像不变路径。
 	refresher := &fakeInputRefresher{
-		returnResult: AppInputRefreshResult{
-			VersionRevision: 5,
-			ImageRef:        "hermes-v2:sha256-abc",
-		},
+		returnResult: AppInputRefreshResult{VersionRevision: 3, ImageRef: "hermes-v1:same"},
 	}
-	handler := NewAppRestartContainerHandler(stub, containers)
+	handler := NewAppRestartContainerHandler(stub, orch, objects)
 	handler.SetInputRefresher(refresher)
 
 	err := handler.Handle(context.Background(), runtimeJob(domain.JobTypeAppRestartContainer, testAppID))
 	require.NoError(t, err)
-	// refresher 被调用一次。
-	require.Equal(t, 1, refresher.calls)
-	// SetAppAppliedVersion 必须被调用，入参与 refresher 返回值一致。
-	require.True(t, stub.appliedVersionSet, "重启后应调用 SetAppAppliedVersion 记录已应用版本")
-	// ID 迁移为 string（MySQL uuid）。
-	assert.Equal(t, testAppID, stub.lastAppliedVersion.ID)
-	require.Equal(t, int32(5), stub.lastAppliedVersion.AppliedVersionRevision)
-	require.Equal(t, "hermes-v2:sha256-abc", stub.lastAppliedVersion.AppliedImageRef)
+	// S3 sessions 和 state.db 被删除。
+	require.True(t, objects.deletedSessionsPrefix, "重启时必须清除 S3 sessions")
+	require.True(t, objects.deletedStateDB, "重启时必须清除 S3 state.db")
+	// Scale(0) 然后 Scale(1)：重建 pod。
+	require.Equal(t, 2, orch.scaleCalls)
+	require.Equal(t, int32(0), orch.scaleHistory[0])
+	require.Equal(t, int32(1), orch.scaleHistory[1])
+	// 状态更新为 running。
+	require.Equal(t, domain.AppStatusRunning, stub.statusUpdates[len(stub.statusUpdates)-1])
+	// SetAppAppliedVersion 被调用，记录版本信息。
+	require.True(t, stub.appliedVersionSet, "镜像不变重启后应调用 SetAppAppliedVersion")
+	assert.Equal(t, "hermes-v1:same", stub.lastAppliedVersion.AppliedImageRef)
+	assert.Equal(t, int32(3), stub.lastAppliedVersion.AppliedVersionRevision)
 }
 
-// TestAppRestartContainerHandler_NilRefresherSkipsAppliedVersion 验证 inputRefresher 为 nil
-// （测试装配）时，Handle 完成重启但不调用 SetAppAppliedVersion——未刷新版本数据，
-// 不应声称 applied，避免前端 version_synced 误置位。
-func TestAppRestartContainerHandler_NilRefresherSkipsAppliedVersion(t *testing.T) {
+// TestAppRestartContainerHandler_ImageChanged_CallsUpdateImage 验证镜像变更时：
+// UpdateImage → status=pulling_runtime_image → 入队 app_initialize job → 即时通知 notifier。
+// k8s UpdateImage 触发 Deployment Recreate，不需要 manager 手动 Scale。
+func TestAppRestartContainerHandler_ImageChanged_CallsUpdateImage(t *testing.T) {
 	stub := runtimeStub(t)
-	containers := &fakeLifecycle{}
-	handler := NewAppRestartContainerHandler(stub, containers)
-	// 不注入 inputRefresher，走 nil 路径。
-
-	err := handler.Handle(context.Background(), runtimeJob(domain.JobTypeAppRestartContainer, testAppID))
-	require.NoError(t, err)
-	// SetAppAppliedVersion 不应被调用：没有刷新版本数据，无法确认 applied。
-	require.False(t, stub.appliedVersionSet, "inputRefresher 为 nil 时不应调用 SetAppAppliedVersion")
-}
-
-// TestAppRestartContainerHandler_ImageChangeRecreatesViaInitJob 验证 restart 检测到
-// 绑定版本解析镜像与 apps.runtime_image_ref 不一致时进入重建分支：
-// stop + remove 旧容器、清空 container_id、置 status=pulling_runtime_image、入队
-// app_initialize job 复用初始化 4 阶段重拉新镜像并重建容器，不再走原 restart 三步，
-// 也不调 SetAppAppliedVersion（由 init handler 负责）。
-func TestAppRestartContainerHandler_ImageChangeRecreatesViaInitJob(t *testing.T) {
-	stub := runtimeStub(t)
-	// 容器当前镜像为旧 ref，模拟绑定版本镜像已升级。
 	stub.app.RuntimeImageRef = "hermes-v1:old"
-	containers := &fakeLifecycle{}
-	cleaner := &fakeSessionCleaner{}
-	// refresher 返回新镜像 ref，触发镜像变更重建分支。
+	orch := &fakeAppOrchestrator{}
+	objects := &fakeObjectStore{}
+	// refresher 返回新镜像 ref，触发镜像变更分支。
 	refresher := &fakeInputRefresher{
 		returnResult: AppInputRefreshResult{VersionRevision: 7, ImageRef: "hermes-v2:new"},
 	}
 	notifier := &fakeRestartNotifier{}
-	handler := NewAppRestartContainerHandler(stub, containers)
-	handler.SetSessionCleaner(cleaner)
+	handler := NewAppRestartContainerHandler(stub, orch, objects)
 	handler.SetInputRefresher(refresher)
 	handler.SetJobNotifier(notifier)
 
 	err := handler.Handle(context.Background(), runtimeJob(domain.JobTypeAppRestartContainer, testAppID))
 	require.NoError(t, err)
-	// 旧容器 stop + remove 各一次，原 restart 路径的 start 不应被调用。
-	require.Equal(t, 1, containers.stopCalls)
-	require.Equal(t, 1, containers.removeCalls)
-	require.Equal(t, 0, containers.startCalls)
-	require.Equal(t, 0, containers.restartCalls)
-	// container_id 已被清空，便于 app_initialize 重新创建容器。
-	require.True(t, stub.containerCleared)
-	// 状态被推到 pulling_runtime_image，交还初始化 4 阶段。
+	// UpdateImage 被调用一次，传入新镜像 ref。
+	require.Equal(t, 1, orch.updateImageCalls)
+	require.Equal(t, "hermes-v2:new", orch.lastUpdateImage)
+	// Scale 不应被调用（UpdateImage 触发 Recreate，k8s 自行处理）。
+	require.Equal(t, 0, orch.scaleCalls)
+	// S3 sessions 不应被清除（镜像变更路径不清 sessions）。
+	require.False(t, objects.deletedSessionsPrefix, "镜像变更路径不清 S3 sessions")
+	// 状态被推到 pulling_runtime_image。
 	require.Contains(t, stub.statusUpdates, domain.AppStatusPullingRuntimeImage)
 	// 恰好入队一条 app_initialize job。
 	require.Len(t, stub.createdJobs, 1)
 	assert.Equal(t, domain.JobTypeAppInitialize, stub.createdJobs[0].Type)
-	// payload 中 app_id 必须指向当前应用。
-	var payload map[string]any
-	require.NoError(t, json.Unmarshal(stub.createdJobs[0].PayloadJson, &payload))
-	assert.Equal(t, testAppID, payload["app_id"])
-	// notifier 入队的 jobID 应与本次创建的 app_initialize job ID 一致：
-	// handler 生成单个 UUID 同时用于 CreateJob 与即时入队，二者必须指向同一条 job。
+	var jobPayload map[string]any
+	require.NoError(t, json.Unmarshal(stub.createdJobs[0].PayloadJson, &jobPayload))
+	assert.Equal(t, testAppID, jobPayload["app_id"])
+	// notifier 被即时通知。
 	require.Equal(t, 1, notifier.calls)
 	assert.Equal(t, stub.createdJobs[0].ID, notifier.enqueuedJobID)
-	// 镜像变更分支不应记录 applied 版本，交由 init handler 在初始化完成时写入。
-	require.False(t, stub.appliedVersionSet, "镜像变更重建分支不应调用 SetAppAppliedVersion")
+	// 镜像变更分支不记录 applied 版本（交由 init handler 负责）。
+	require.False(t, stub.appliedVersionSet, "镜像变更分支不应调用 SetAppAppliedVersion")
 }
 
-// TestAppRestartContainerHandler_ImageUnchangedKeepsRestart 验证 restart 解析镜像与
-// apps.runtime_image_ref 一致时保持原 stop → clear sessions → start 行为，
-// 不重建容器、不入队 app_initialize，并正常记录 applied 版本。
-func TestAppRestartContainerHandler_ImageUnchangedKeepsRestart(t *testing.T) {
+// TestAppRestartContainerHandler_NoRefresher_ScalesDirectly 验证 inputRefresher 为 nil 时
+// 直接走 Scale(0)→Scale(1) 路径，跳过 S3 清除和 applied 版本记录（测试装配兼容）。
+func TestAppRestartContainerHandler_NoRefresher_ScalesDirectly(t *testing.T) {
 	stub := runtimeStub(t)
-	// 容器当前镜像与 refresher 返回镜像同值，镜像未变。
-	stub.app.RuntimeImageRef = "hermes-v1:same"
-	containers := &fakeLifecycle{}
-	cleaner := &fakeSessionCleaner{}
-	refresher := &fakeInputRefresher{
-		returnResult: AppInputRefreshResult{VersionRevision: 3, ImageRef: "hermes-v1:same"},
-	}
-	notifier := &fakeRestartNotifier{}
-	handler := NewAppRestartContainerHandler(stub, containers)
-	handler.SetSessionCleaner(cleaner)
-	handler.SetInputRefresher(refresher)
-	handler.SetJobNotifier(notifier)
+	orch := &fakeAppOrchestrator{}
+	objects := &fakeObjectStore{}
+	handler := NewAppRestartContainerHandler(stub, orch, objects)
+	// 不注入 inputRefresher。
 
 	err := handler.Handle(context.Background(), runtimeJob(domain.JobTypeAppRestartContainer, testAppID))
 	require.NoError(t, err)
-	// 走原 stop → clear sessions → start 三步，不 remove 容器、不入队 job。
-	require.Equal(t, 1, containers.stopCalls)
-	require.Equal(t, 1, containers.startCalls)
-	require.Equal(t, 0, containers.removeCalls)
-	require.Len(t, stub.createdJobs, 0)
-	require.Equal(t, 0, notifier.calls)
-	// 镜像未变，原路径应正常记录 applied 版本。
-	require.True(t, stub.appliedVersionSet, "镜像未变时仍应调用 SetAppAppliedVersion")
-	assert.Equal(t, "hermes-v1:same", stub.lastAppliedVersion.AppliedImageRef)
+	// 无 refresher 时仍执行 Scale(0→1)。
+	require.Equal(t, 2, orch.scaleCalls)
+	// UpdateImage 不被调用。
+	require.Equal(t, 0, orch.updateImageCalls)
+	// S3 objects 被清除（objects != nil 时总执行）。
+	require.True(t, objects.deletedSessionsPrefix)
+	require.True(t, objects.deletedStateDB)
+	// 状态更新为 running。
+	require.Equal(t, domain.AppStatusRunning, stub.statusUpdates[len(stub.statusUpdates)-1])
+	// 无 refresher 时不记录 applied 版本。
+	require.False(t, stub.appliedVersionSet, "无 refresher 时不应调用 SetAppAppliedVersion")
 }
 
-// TestAppRestartContainerHandler_ImageChangeRetryAfterContainerCleared 验证镜像变更
-// 重建分支被 worker 重试时的幂等性：上一次尝试已清空 container_id，重入时跳过
-// stop/remove，仍重新建 app_initialize job 并即时入队。
-func TestAppRestartContainerHandler_ImageChangeRetryAfterContainerCleared(t *testing.T) {
+// TestAppRestartContainerHandler_NoObjectStore_SkipsS3Cleanup 验证 objects 为 nil 时
+// 跳过 S3 清除步骤，Scale(0→1) 仍正常执行（无 S3 时的兼容路径）。
+func TestAppRestartContainerHandler_NoObjectStore_SkipsS3Cleanup(t *testing.T) {
 	stub := runtimeStub(t)
-	stub.app.RuntimeImageRef = "hermes-v1:old"
-	// 模拟重试：container_id 已被上一次尝试清空（null.String{} = NULL）。
-	stub.app.ContainerID = null.String{}
-	containers := &fakeLifecycle{}
-	refresher := &fakeInputRefresher{
-		returnResult: AppInputRefreshResult{VersionRevision: 7, ImageRef: "hermes-v2:new"},
-	}
-	notifier := &fakeRestartNotifier{}
-	handler := NewAppRestartContainerHandler(stub, containers)
-	handler.SetInputRefresher(refresher)
-	handler.SetJobNotifier(notifier)
+	orch := &fakeAppOrchestrator{}
+	handler := NewAppRestartContainerHandler(stub, orch, nil) // objects=nil
 
 	err := handler.Handle(context.Background(), runtimeJob(domain.JobTypeAppRestartContainer, testAppID))
 	require.NoError(t, err)
-	// container_id 已空，不应再 stop/remove 容器。
-	require.Equal(t, 0, containers.stopCalls)
-	require.Equal(t, 0, containers.removeCalls)
-	// 仍应重新建恰好一条 app_initialize job 并入队。
-	require.Len(t, stub.createdJobs, 1)
-	assert.Equal(t, domain.JobTypeAppInitialize, stub.createdJobs[0].Type)
-	require.Equal(t, 1, notifier.calls)
+	// Scale(0→1) 仍正常执行。
+	require.Equal(t, 2, orch.scaleCalls)
+	require.Equal(t, domain.AppStatusRunning, stub.statusUpdates[len(stub.statusUpdates)-1])
 }
 
-// TestAppDeleteHandler_HappyPath 验证应用删除处理器成功路径的成功路径场景。
+// TestAppRestartContainerHandler_RefresherError_AbortsRestart 验证 refresher 失败时
+// 错误冒泡、Scale 和 S3 操作不被触发。
+func TestAppRestartContainerHandler_RefresherError_AbortsRestart(t *testing.T) {
+	stub := runtimeStub(t)
+	orch := &fakeAppOrchestrator{}
+	objects := &fakeObjectStore{}
+	refresher := &fakeInputRefresher{returnError: errors.New("刷新配置失败")}
+	handler := NewAppRestartContainerHandler(stub, orch, objects)
+	handler.SetInputRefresher(refresher)
+
+	err := handler.Handle(context.Background(), runtimeJob(domain.JobTypeAppRestartContainer, testAppID))
+	require.Error(t, err)
+	// refresher 失败后不应触发任何运行时操作。
+	require.Equal(t, 0, orch.scaleCalls)
+	require.Equal(t, 0, orch.updateImageCalls)
+	require.False(t, objects.deletedSessionsPrefix)
+}
+
+// ─────────────────────────────────────────────
+// AppDeleteHandler 单测
+// ─────────────────────────────────────────────
+
+// TestAppDeleteHandler_HappyPath 验证完整删除路径：
+// Delete k8s → 禁 new-api key → 归档 S3 → 清 KB → 软删。
 func TestAppDeleteHandler_HappyPath(t *testing.T) {
 	stub := runtimeStub(t)
-	containers := &fakeLifecycle{}
+	orch := &fakeAppOrchestrator{}
 	disabler := &fakeDisabler{}
-	fileOps := &fakeFileOps{}
+	objects := &fakeObjectStore{}
 	knowledge := &fakeKnowledgeCleaner{}
-	handler := NewAppDeleteHandler(stub, containers, disabler, fileOps, knowledge)
+	handler := NewAppDeleteHandler(stub, orch, disabler, objects, knowledge)
+
 	err := handler.Handle(context.Background(), runtimeJob(domain.JobTypeAppDelete, testAppID))
 	require.NoError(t, err)
-	if containers.stopCalls != 1 || containers.removeCalls != 1 {
-		t.Fatalf("stop=%d remove=%d, want 1/1", containers.stopCalls, containers.removeCalls)
-	}
-	if disabler.id != 42 || disabler.status != 2 {
-		t.Fatalf("disabler 调用 = (%d,%d), want (42,2)", disabler.id, disabler.status)
-	}
-	require.Equal(t, testAppID, fileOps.deletedAppID)
+	// k8s Delete 被调用一次。
+	require.Equal(t, 1, orch.deleteCalls)
+	// new-api key 被禁用（keyID=42, status=2）。
+	assert.Equal(t, int64(42), disabler.id)
+	assert.Equal(t, 2, disabler.status)
+	// S3 应用目录被归档（MovePrefix 被调用）。
+	require.True(t, objects.movedPrefix, "删除时必须归档 S3 应用目录")
+	assert.Equal(t, "apps/"+testAppID+"/", objects.moveSrc)
+	assert.Equal(t, "apps/"+testAppID+"/archive/", objects.moveDst)
+	// KB 被清理。
 	require.Equal(t, testAppID, knowledge.cleanedAppID)
+	// 应用被软删。
 	require.True(t, stub.softDeleted)
 }
 
-// TestAppDeleteHandler_TreatsKnowledgeCleanupErrorAsBestEffort 验证 RAGFlow app dataset 清理失败不阻断本地应用软删。
+// TestAppDeleteHandler_TreatsKnowledgeCleanupErrorAsBestEffort 验证 RAGFlow dataset 清理失败
+// 不阻断本地应用软删（外部派生资源，best-effort 清理）。
 func TestAppDeleteHandler_TreatsKnowledgeCleanupErrorAsBestEffort(t *testing.T) {
 	stub := runtimeStub(t)
 	knowledge := &fakeKnowledgeCleaner{err: errors.New("ragflow unavailable")}
-	handler := NewAppDeleteHandler(stub, &fakeLifecycle{}, &fakeDisabler{}, nil, knowledge)
+	handler := NewAppDeleteHandler(stub, &fakeAppOrchestrator{}, &fakeDisabler{}, nil, knowledge)
 
 	err := handler.Handle(context.Background(), runtimeJob(domain.JobTypeAppDelete, testAppID))
-
 	require.NoError(t, err)
 	require.True(t, stub.softDeleted)
 	require.Equal(t, testAppID, knowledge.cleanedAppID)
 }
 
-// TestAppDeleteHandler_PrefersArchiveOverDelete 验证应用删除处理器Prefers归档覆盖删除的预期行为场景。
-func TestAppDeleteHandler_PrefersArchiveOverDelete(t *testing.T) {
-	// Sprint 2：fileOps 实现 AppArchiver 时应优先归档而非直接删除，保留节点目录。
-	stub := runtimeStub(t)
-	containers := &fakeLifecycle{}
-	disabler := &fakeDisabler{}
-	fileOps := &fakeArchivingFileOps{}
-	handler := NewAppDeleteHandler(stub, containers, disabler, fileOps)
-	err := handler.Handle(context.Background(), runtimeJob(domain.JobTypeAppDelete, testAppID))
-	require.NoError(t, err)
-	require.Equal(t, testAppID, fileOps.archivedAppID)
-	require.Equal(t, "", fileOps.deletedAppID)
-}
-
-// TestAppDeleteHandler_PropagatesArchiveError 验证应用删除处理器透传归档错误的错误映射或错误记录场景。
-func TestAppDeleteHandler_PropagatesArchiveError(t *testing.T) {
-	stub := runtimeStub(t)
-	containers := &fakeLifecycle{}
-	disabler := &fakeDisabler{}
-	fileOps := &fakeArchivingFileOps{archiveErr: errors.New("disk full")}
-	handler := NewAppDeleteHandler(stub, containers, disabler, fileOps)
-	err := handler.Handle(context.Background(), runtimeJob(domain.JobTypeAppDelete, testAppID))
-	if err == nil || !strings.Contains(err.Error(), "归档应用工作目录失败") {
-		t.Fatalf("err=%v", err)
-	}
-	require.False(t, stub.softDeleted)
-}
-
-// TestAppDeleteHandler_SkipsContainerStepWithoutID 验证应用删除处理器跳过容器Step不使用ID的特殊分支或幂等场景。
-func TestAppDeleteHandler_SkipsContainerStepWithoutID(t *testing.T) {
-	stub := runtimeStub(t)
-	stub.app.ContainerID = null.String{}
-	containers := &fakeLifecycle{}
-	disabler := &fakeDisabler{}
-	handler := NewAppDeleteHandler(stub, containers, disabler, nil)
-	err := handler.Handle(context.Background(), runtimeJob(domain.JobTypeAppDelete, testAppID))
-	require.NoError(t, err)
-	if containers.stopCalls != 0 || containers.removeCalls != 0 {
-		t.Fatal("没 container_id 时不应调 docker")
-	}
-	require.True(t, stub.softDeleted)
-}
-
-// TestAppDeleteHandler_SkipsNewAPIWhenNoKey 验证应用删除处理器跳过new-api当无Key的特殊分支或幂等场景。
+// TestAppDeleteHandler_SkipsNewAPIWhenNoKey 验证 NewapiKeyID 为空时跳过禁 key 步骤。
 func TestAppDeleteHandler_SkipsNewAPIWhenNoKey(t *testing.T) {
 	stub := runtimeStub(t)
 	stub.app.NewapiKeyID = null.String{}
 	disabler := &fakeDisabler{}
-	handler := NewAppDeleteHandler(stub, &fakeLifecycle{}, disabler, nil)
+	handler := NewAppDeleteHandler(stub, &fakeAppOrchestrator{}, disabler, nil)
 	err := handler.Handle(context.Background(), runtimeJob(domain.JobTypeAppDelete, testAppID))
 	require.NoError(t, err)
+	// 无 key_id 时不调 SetAPIKeyStatus。
 	require.Equal(t, int64(0), disabler.id)
 }
 
-// TestAppDeleteHandler_PropagatesNewAPIError 验证应用删除处理器透传new-api错误的错误映射或错误记录场景。
+// TestAppDeleteHandler_PropagatesNewAPIError 验证禁 key 失败时错误冒泡，应用不被软删。
 func TestAppDeleteHandler_PropagatesNewAPIError(t *testing.T) {
 	stub := runtimeStub(t)
 	disabler := &fakeDisabler{err: errors.New("upstream")}
-	handler := NewAppDeleteHandler(stub, &fakeLifecycle{}, disabler, nil)
+	handler := NewAppDeleteHandler(stub, &fakeAppOrchestrator{}, disabler, nil)
 	err := handler.Handle(context.Background(), runtimeJob(domain.JobTypeAppDelete, testAppID))
 	require.Error(t, err)
 	require.False(t, stub.softDeleted)
 }
 
+// TestAppDeleteHandler_SkipsS3WhenNoObjectStore 验证 objects 为 nil 时跳过 S3 归档，
+// 其他步骤正常执行（无 S3 时的兼容路径）。
+func TestAppDeleteHandler_SkipsS3WhenNoObjectStore(t *testing.T) {
+	stub := runtimeStub(t)
+	handler := NewAppDeleteHandler(stub, &fakeAppOrchestrator{}, &fakeDisabler{}, nil) // objects=nil
+	err := handler.Handle(context.Background(), runtimeJob(domain.JobTypeAppDelete, testAppID))
+	require.NoError(t, err)
+	require.True(t, stub.softDeleted)
+}
+
 // TestAppDeleteHandler_AlreadyDeletedStillCleansExternalResources 验证删除成员预先软删应用后，
-// app_delete 仍会清理容器、new-api key、节点目录和 RAGFlow dataset。
+// app_delete 仍会清理 k8s 资源、new-api key、S3 目录和 RAGFlow dataset，但不重复软删。
 func TestAppDeleteHandler_AlreadyDeletedStillCleansExternalResources(t *testing.T) {
 	stub := runtimeStub(t)
-	// DeletedAt 迁移为 null.Time；null.TimeFrom(time.Now()) 模拟已软删除。
-	stub.app.DeletedAt = null.TimeFrom(time.Now())
-	containers := &fakeLifecycle{}
+	stub.app.DeletedAt = null.TimeFrom(time.Now()) // 模拟已软删除
+	orch := &fakeAppOrchestrator{}
 	disabler := &fakeDisabler{}
-	fileOps := &fakeFileOps{}
+	objects := &fakeObjectStore{}
 	knowledge := &fakeKnowledgeCleaner{}
-	handler := NewAppDeleteHandler(stub, containers, disabler, fileOps, knowledge)
+	handler := NewAppDeleteHandler(stub, orch, disabler, objects, knowledge)
 
 	err := handler.Handle(context.Background(), runtimeJob(domain.JobTypeAppDelete, testAppID))
-
 	require.NoError(t, err)
-	require.Equal(t, 1, containers.stopCalls)
-	require.Equal(t, 1, containers.removeCalls)
-	require.Equal(t, int64(42), disabler.id)
-	require.Equal(t, testAppID, fileOps.deletedAppID)
+	// k8s Delete 被调用。
+	require.Equal(t, 1, orch.deleteCalls)
+	// new-api key 被禁用。
+	assert.Equal(t, int64(42), disabler.id)
+	// S3 被归档。
+	require.True(t, objects.movedPrefix)
+	// KB 被清理。
 	require.Equal(t, testAppID, knowledge.cleanedAppID)
+	// 不重复软删。
 	require.False(t, stub.softDeleted)
 }
 
-// TestAppRuntimeHandlers_RejectMismatchedJobType 验证应用运行时HandlersReject不匹配任务类型的预期行为场景。
+// ─────────────────────────────────────────────
+// orch=nil 保护：编排器未配置时返回错误而非 panic
+// ─────────────────────────────────────────────
+
+// TestAppStartContainerHandler_NilOrch_ReturnsError 验证编排器未配置时
+// AppStartContainerHandler.Handle 返回可诊断错误，而非 nil-panic 崩 worker。
+func TestAppStartContainerHandler_NilOrch_ReturnsError(t *testing.T) {
+	stub := runtimeStub(t)
+	// 注入 nil orch，模拟 k8s 未配置场景（misconfiguration）。
+	handler := NewAppStartContainerHandler(stub, nil)
+
+	err := handler.Handle(context.Background(), runtimeJob(domain.JobTypeAppStartContainer, testAppID))
+	// 必须返回错误，不能 panic。
+	require.Error(t, err, "orch=nil 时应返回错误而非 panic")
+	// 状态不应被更新（操作未执行）。
+	require.Empty(t, stub.statusUpdates, "orch=nil 时不应更新 app 状态")
+}
+
+// TestAppStopContainerHandler_NilOrch_ReturnsError 验证编排器未配置时
+// AppStopContainerHandler.Handle 返回可诊断错误，而非 nil-panic 崩 worker。
+func TestAppStopContainerHandler_NilOrch_ReturnsError(t *testing.T) {
+	stub := runtimeStub(t)
+	// 注入 nil orch，模拟 k8s 未配置场景（misconfiguration）。
+	handler := NewAppStopContainerHandler(stub, nil)
+
+	err := handler.Handle(context.Background(), runtimeJob(domain.JobTypeAppStopContainer, testAppID))
+	// 必须返回错误，不能 panic。
+	require.Error(t, err, "orch=nil 时应返回错误而非 panic")
+	// 状态不应被更新（操作未执行）。
+	require.Empty(t, stub.statusUpdates, "orch=nil 时不应更新 app 状态")
+}
+
+// TestAppRestartContainerHandler_NilOrch_ReturnsError 验证编排器未配置时
+// AppRestartContainerHandler.Handle 返回可诊断错误，而非 nil-panic 崩 worker。
+// 两个分支（镜像变更 UpdateImage 和镜像不变 Scale）均依赖 orch，nil-guard 应在两者之前生效。
+func TestAppRestartContainerHandler_NilOrch_ReturnsError(t *testing.T) {
+	// 子测试 1：镜像不变路径（无 refresher），orch=nil 应在 Scale 前返回错误。
+	t.Run("无_refresher_镜像不变路径", func(t *testing.T) {
+		stub := runtimeStub(t)
+		// 注入 nil orch，objects 非 nil 验证 S3 清除不会先于 nil-guard 触发。
+		handler := NewAppRestartContainerHandler(stub, nil, &fakeObjectStore{})
+
+		err := handler.Handle(context.Background(), runtimeJob(domain.JobTypeAppRestartContainer, testAppID))
+		// 必须返回错误，不能 panic。
+		require.Error(t, err, "orch=nil 时应返回错误而非 panic")
+		require.Empty(t, stub.statusUpdates, "orch=nil 时不应更新 app 状态")
+	})
+
+	// 子测试 2：镜像变更路径（refresher 返回新镜像），orch=nil 应在 UpdateImage 前返回错误。
+	t.Run("有_refresher_镜像变更路径", func(t *testing.T) {
+		stub := runtimeStub(t)
+		stub.app.RuntimeImageRef = "hermes-v1:old"
+		refresher := &fakeInputRefresher{
+			returnResult: AppInputRefreshResult{VersionRevision: 5, ImageRef: "hermes-v2:new"},
+		}
+		// 注入 nil orch，验证镜像变更分支同样受 nil-guard 保护。
+		handler := NewAppRestartContainerHandler(stub, nil, nil)
+		handler.SetInputRefresher(refresher)
+
+		err := handler.Handle(context.Background(), runtimeJob(domain.JobTypeAppRestartContainer, testAppID))
+		// 必须返回错误，不能 panic。
+		require.Error(t, err, "orch=nil 时应返回错误而非 panic（镜像变更分支）")
+		require.Empty(t, stub.statusUpdates, "orch=nil 时不应更新 app 状态")
+		// app_initialize job 不应入队。
+		require.Empty(t, stub.createdJobs, "orch=nil 时不应入队 app_initialize job")
+	})
+}
+
+// ─────────────────────────────────────────────
+// 通用校验
+// ─────────────────────────────────────────────
+
+// TestAppRuntimeHandlers_RejectMismatchedJobType 验证四个 handler 在收到错误 job 类型时拒绝处理。
 func TestAppRuntimeHandlers_RejectMismatchedJobType(t *testing.T) {
 	stub := runtimeStub(t)
 	bad := runtimeJob("unknown", testAppID)
-	handlers := []func(context.Context, sqlc.Job) error{
-		NewAppStartContainerHandler(stub, &fakeLifecycle{}).Handle,
-		NewAppStopContainerHandler(stub, &fakeLifecycle{}).Handle,
-		NewAppRestartContainerHandler(stub, &fakeLifecycle{}).Handle,
-		NewAppDeleteHandler(stub, &fakeLifecycle{}, &fakeDisabler{}, nil).Handle,
+	orch := &fakeAppOrchestrator{}
+	testHandlers := []func(context.Context, sqlc.Job) error{
+		NewAppStartContainerHandler(stub, orch).Handle,
+		NewAppStopContainerHandler(stub, orch).Handle,
+		NewAppRestartContainerHandler(stub, orch, nil).Handle,
+		NewAppDeleteHandler(stub, orch, &fakeDisabler{}, nil).Handle,
 	}
-	for _, h := range handlers {
+	for _, h := range testHandlers {
 		err := h(context.Background(), bad)
 		require.Error(t, err)
 	}
 }
 
+// ─────────────────────────────────────────────
+// 测试桩实现
+// ─────────────────────────────────────────────
+
+// runtimeOpStub 是 AppRuntimeStore 的内存桩，记录各方法调用供断言使用。
 type runtimeOpStub struct {
 	app           sqlc.App
 	statusUpdates []string
@@ -605,7 +467,7 @@ func (s *runtimeOpStub) SoftDeleteApp(_ context.Context, _ string) error {
 	return nil
 }
 
-// SetAppAppliedVersion 实现 AppRuntimeStore 接口；记录已应用的版本修订与镜像 ref；:exec 语义仅返回 error。
+// SetAppAppliedVersion 实现 AppRuntimeStore 接口；记录已应用的版本修订与镜像 ref。
 func (s *runtimeOpStub) SetAppAppliedVersion(_ context.Context, arg sqlc.SetAppAppliedVersionParams) error {
 	s.appliedVersionSet = true
 	s.lastAppliedVersion = arg
@@ -614,7 +476,7 @@ func (s *runtimeOpStub) SetAppAppliedVersion(_ context.Context, arg sqlc.SetAppA
 	return nil
 }
 
-// SetAppContainer 实现 AppRuntimeStore 接口；镜像变更重建时清空 container_id / container_name；:exec 语义仅返回 error。
+// SetAppContainer 实现 AppRuntimeStore 接口；k8s 路径在镜像变更时可选清空 container_id。
 func (s *runtimeOpStub) SetAppContainer(_ context.Context, arg sqlc.SetAppContainerParams) error {
 	s.containerCleared = true
 	s.app.ContainerID = arg.ContainerID
@@ -622,11 +484,96 @@ func (s *runtimeOpStub) SetAppContainer(_ context.Context, arg sqlc.SetAppContai
 	return nil
 }
 
-// CreateJob 实现 AppRuntimeStore 接口；记录入参供断言。:exec 语义仅返回 error，
-// job ID 由 handler 用 uuid 自生成并写入 arg.ID，故入队断言改为比对 createdJobs[0].ID。
+// CreateJob 实现 AppRuntimeStore 接口；记录入参供断言。
 func (s *runtimeOpStub) CreateJob(_ context.Context, arg sqlc.CreateJobParams) error {
 	s.createdJobs = append(s.createdJobs, arg)
 	return nil
+}
+
+// fakeAppOrchestrator 是 appOrchestrator 接口的测试桩，记录各方法调用。
+type fakeAppOrchestrator struct {
+	// Scale 相关
+	scaleCalls        int
+	lastScaleReplicas int32
+	scaleHistory      []int32 // 按调用顺序记录 replicas，供 Scale(0)→Scale(1) 顺序断言
+	scaleErr          error
+	// UpdateImage 相关
+	updateImageCalls int
+	lastUpdateImage  string
+	updateImageErr   error
+	// Delete 相关
+	deleteCalls int
+	deleteErr   error
+}
+
+func (f *fakeAppOrchestrator) Scale(_ context.Context, _ string, replicas int32) error {
+	f.scaleCalls++
+	f.lastScaleReplicas = replicas
+	f.scaleHistory = append(f.scaleHistory, replicas)
+	return f.scaleErr
+}
+
+func (f *fakeAppOrchestrator) UpdateImage(_ context.Context, _ string, hermesImage string) error {
+	f.updateImageCalls++
+	f.lastUpdateImage = hermesImage
+	return f.updateImageErr
+}
+
+func (f *fakeAppOrchestrator) Delete(_ context.Context, _ string) error {
+	f.deleteCalls++
+	return f.deleteErr
+}
+
+// fakeObjectStore 是 storage.ObjectStore 的最小测试桩，仅实现 MovePrefix / DeletePrefix。
+type fakeObjectStore struct {
+	// MovePrefix 调用记录
+	movedPrefix bool
+	moveSrc     string
+	moveDst     string
+	movePrefixErr error
+	// DeletePrefix 调用记录（按 key 细化）
+	deletedSessionsPrefix bool
+	deletedStateDB        bool
+	deletePrefixErr       error
+	// 记录所有 DeletePrefix 的 key，供细化断言
+	deletedPrefixes []string
+}
+
+func (f *fakeObjectStore) MovePrefix(_ context.Context, src, dst string) error {
+	f.movedPrefix = true
+	f.moveSrc = src
+	f.moveDst = dst
+	return f.movePrefixErr
+}
+
+func (f *fakeObjectStore) DeletePrefix(_ context.Context, prefix string) error {
+	f.deletedPrefixes = append(f.deletedPrefixes, prefix)
+	// 按 key 内容区分 sessions 与 state.db 的删除。
+	if len(prefix) > 0 {
+		// sessions/ 前缀末尾含 "sessions/"。
+		if len(prefix) >= 9 && prefix[len(prefix)-9:] == "sessions/" {
+			f.deletedSessionsPrefix = true
+		}
+		// state.db key 以 "state.db" 结尾。
+		if len(prefix) >= 8 && prefix[len(prefix)-8:] == "state.db" {
+			f.deletedStateDB = true
+		}
+	}
+	return f.deletePrefixErr
+}
+
+// storage.ObjectStore 剩余方法不在删除路径使用，留空实现满足接口编译要求。
+func (f *fakeObjectStore) PutObject(_ context.Context, _ string, _ io.Reader, _ int64) error {
+	return nil
+}
+func (f *fakeObjectStore) PresignGet(_ context.Context, _ string, _ time.Duration) (string, error) {
+	return "", nil
+}
+func (f *fakeObjectStore) ObjectExists(_ context.Context, _ string) (bool, error) {
+	return false, nil
+}
+func (f *fakeObjectStore) ListObjects(_ context.Context, _ string) ([]storage.ObjectInfo, error) {
+	return nil, nil
 }
 
 // fakeRestartNotifier 是 RestartJobNotifier 测试桩，记录被即时推送的 jobID。
@@ -641,14 +588,21 @@ func (f *fakeRestartNotifier) Enqueue(_ context.Context, jobID string) error {
 	return nil
 }
 
-type fakeLifecycle struct {
-	startCalls   int
-	stopCalls    int
-	restartCalls int
-	removeCalls  int
-	startErr     error
-	stopErr      error
-	removeErr    error
+// fakeInputRefresher 是 AppInputRefresher 的测试桩。
+type fakeInputRefresher struct {
+	calls        int
+	lastNodeID   string
+	lastAppID    string
+	returnError  error
+	// returnResult 是 RefreshAppInput 成功时返回的版本信息。
+	returnResult AppInputRefreshResult
+}
+
+func (f *fakeInputRefresher) RefreshAppInput(_ context.Context, nodeID string, app sqlc.App) (AppInputRefreshResult, error) {
+	f.calls++
+	f.lastNodeID = nodeID
+	f.lastAppID = app.ID
+	return f.returnResult, f.returnError
 }
 
 type fakeKnowledgeCleaner struct {
@@ -662,26 +616,8 @@ func (f *fakeKnowledgeCleaner) DeleteAppDataset(_ context.Context, appID string)
 	return f.err
 }
 
-func (f *fakeLifecycle) StartContainer(_ context.Context, _, _ string) error {
-	f.startCalls++
-	return f.startErr
-}
-func (f *fakeLifecycle) StopContainer(_ context.Context, _, _ string) error {
-	f.stopCalls++
-	return f.stopErr
-}
-func (f *fakeLifecycle) RestartContainer(_ context.Context, _, _ string) error {
-	f.restartCalls++
-	return nil
-}
-func (f *fakeLifecycle) RemoveContainer(_ context.Context, _, _ string) error {
-	f.removeCalls++
-	return f.removeErr
-}
-
 // fakeDisabler 同时实现 NewAPIClientFactory + APIKeyClient：UserScopedFor 直接返回自身，
-// 把"工厂派生 user-scoped client"的两层抽象在测试里压平。CreateAPIKey / GetTokenFullKey
-// 在 app_delete 流程里不会被调到，留空实现。
+// 把"工厂派生 user-scoped client"的两层抽象在测试里压平。
 type fakeDisabler struct {
 	id     int64
 	status int
@@ -707,33 +643,4 @@ func (f *fakeDisabler) SetAPIKeyStatus(_ context.Context, id int64, status int) 
 	f.id = id
 	f.status = status
 	return f.err
-}
-
-type fakeFileOps struct {
-	deletedAppID string
-	err          error
-}
-
-func (f *fakeFileOps) DeleteAppPath(_ context.Context, _, appID string) error {
-	f.deletedAppID = appID
-	return f.err
-}
-
-// fakeArchivingFileOps 同时实现 AppDeleteFileOps + AppArchiver。用于断言
-// app_delete handler 优先走 ArchiveApp（保留节点目录用于审计 / 误删恢复），
-// 不再调 DeleteAppPath。
-type fakeArchivingFileOps struct {
-	archivedAppID string
-	deletedAppID  string
-	archiveErr    error
-}
-
-func (f *fakeArchivingFileOps) DeleteAppPath(_ context.Context, _, appID string) error {
-	f.deletedAppID = appID
-	return nil
-}
-
-func (f *fakeArchivingFileOps) ArchiveApp(_ context.Context, _, appID string) error {
-	f.archivedAppID = appID
-	return f.archiveErr
 }

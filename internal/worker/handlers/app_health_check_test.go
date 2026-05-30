@@ -246,3 +246,15 @@ func TestAppHealthCheckNoneModeSkipsRestart(t *testing.T) {
 	require.Equal(t, 0, len(store.jobs))
 	require.Equal(t, 0, len(store.statusUpdates))
 }
+
+// fakeLifecycle 是 ContainerLifecycle（仅 StartContainer）的测试桩，
+// 供 AppHealthCheckHandler.SetLifecycle 测试自愈逻辑时注入。
+type fakeLifecycle struct {
+	startCalls int
+	startErr   error
+}
+
+func (f *fakeLifecycle) StartContainer(_ context.Context, _, _ string) error {
+	f.startCalls++
+	return f.startErr
+}

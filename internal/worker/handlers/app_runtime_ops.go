@@ -14,6 +14,7 @@ import (
 	"github.com/google/uuid"
 
 	"oc-manager/internal/domain"
+	"oc-manager/internal/integrations/storage"
 	"oc-manager/internal/store/sqlc"
 )
 
@@ -26,40 +27,27 @@ type AppRuntimeStore interface {
 	// 供前端 version_synced 检测使用。
 	SetAppAppliedVersion(ctx context.Context, arg sqlc.SetAppAppliedVersionParams) error
 	// SetAppContainer 在重启检测到镜像变更后清空 apps.container_id / container_name，
-	// 让后续 app_initialize job 重新创建容器（空 ContainerID/ContainerName 即清空）。
+	// 兼容旧 docker 路径遗留字段（k8s 路径不再使用 container_id，但接口保留向后兼容）。
 	SetAppContainer(ctx context.Context, arg sqlc.SetAppContainerParams) error
 	// CreateJob 在重启检测到镜像变更后入队 app_initialize job，
-	// 复用初始化 4 阶段重拉新镜像并重建容器。
+	// 复用初始化阶段重建 k8s 资源并拉取新镜像。
 	CreateJob(ctx context.Context, arg sqlc.CreateJobParams) error
 }
 
-// ContainerLifecycle 抽象 worker 需要的容器生命周期能力。
-// 与 runtime.AgentBackedAdapter 兼容；测试中可替换为内存桩。
-type ContainerLifecycle interface {
-	StartContainer(ctx context.Context, nodeID, containerID string) error
-	StopContainer(ctx context.Context, nodeID, containerID string) error
-	RestartContainer(ctx context.Context, nodeID, containerID string) error
-	RemoveContainer(ctx context.Context, nodeID, containerID string) error
+// appOrchestrator 是 k8s 生命周期 handler 消费的窄接口，仅包含运行时操作所需方法。
+// 便于单测注入 fake，不引入整个 k8sorch.Orchestrator 实现。
+type appOrchestrator interface {
+	// Scale 伸缩 pod replicas（0=停止，1=启动）。
+	Scale(ctx context.Context, appID string, replicas int32) error
+	// UpdateImage patch Deployment 主容器镜像，触发 Recreate 重启（镜像变更时使用）。
+	UpdateImage(ctx context.Context, appID, hermesImage string) error
+	// Delete 删除 Deployment + Service + Secret（幂等，NotFound 视为成功）。
+	Delete(ctx context.Context, appID string) error
 }
 
 // AppDelete 用 NewAPIClientFactory 拿 user-scoped client 调 SetAPIKeyStatus 禁用 token，
 // status=2 表示禁用。原来的 APIKeyDisabler 单方法接口已下线（admin token 拿不到别 user 的
 // token 完整 key，token 操作必须以业务 user 身份调）。
-
-// AppDeleteFileOps 抽象 app_delete 需要的 agent 文件 API 子集。
-//
-// Sprint 2 起优先调 ArchiveApp 把节点上 apps/<id>/ 整目录 mv 到 archived/，
-// 不再粗暴删除。manager 端调用方通过类型断言探测 ArchiveApp 是否实现，
-// 未实现的旧实现仍走 DeleteAppPath 兼容路径。
-type AppDeleteFileOps interface {
-	DeleteAppPath(ctx context.Context, nodeID, appID string) error
-}
-
-// AppArchiver 是 AppDeleteFileOps 的扩展：实现该接口的 fileOps 会优先走 ArchiveApp。
-// AgentBackedAdapter 已实现此接口（Sprint 1 加的 ArchiveApp 方法）。
-type AppArchiver interface {
-	ArchiveApp(ctx context.Context, nodeID, appID string) error
-}
 
 // AppKnowledgeCleaner 抽象 app_delete 对实例私有知识库的清理能力。
 type AppKnowledgeCleaner interface {
@@ -102,21 +90,20 @@ func loadApp(ctx context.Context, store AppRuntimeStore, payload appOpPayload) (
 	return app, payload.AppID, nil
 }
 
-// AppStartContainerHandler 拉起容器并把状态推到 running。
+// AppStartContainerHandler 通过 k8s Scale(1) 拉起 pod 并把状态推到 running。
 //
-// 幂等说明：worker 不在 handler 内 inspect 容器状态——docker 端 ContainerStart
-// 对 already running 会返 304，由调用方 SetAppStatus 兜底语义。
+// k8s 语义：Scale(1) 是幂等操作，已经 Running 的 Deployment 设 replicas=1 不会重建 pod。
 type AppStartContainerHandler struct {
-	store      AppRuntimeStore
-	containers ContainerLifecycle
+	store AppRuntimeStore
+	orch  appOrchestrator
 }
 
-// NewAppStartContainerHandler 构造 handler。
-func NewAppStartContainerHandler(store AppRuntimeStore, containers ContainerLifecycle) *AppStartContainerHandler {
-	return &AppStartContainerHandler{store: store, containers: containers}
+// NewAppStartContainerHandler 构造 handler，注入 k8s 编排器。
+func NewAppStartContainerHandler(store AppRuntimeStore, orch appOrchestrator) *AppStartContainerHandler {
+	return &AppStartContainerHandler{store: store, orch: orch}
 }
 
-// Handle 执行 app_start_container job。
+// Handle 执行 app_start_container job：Scale(1) 后推 running 状态。
 func (h *AppStartContainerHandler) Handle(ctx context.Context, job sqlc.Job) error {
 	if job.Type != domain.JobTypeAppStartContainer {
 		return fmt.Errorf("非 app_start_container 任务: %s", job.Type)
@@ -129,13 +116,19 @@ func (h *AppStartContainerHandler) Handle(ctx context.Context, job sqlc.Job) err
 	if err != nil {
 		return err
 	}
-	if app.ContainerID.String == "" {
-		return fmt.Errorf("应用 %s 尚未创建容器，无法启动", payload.AppID)
+	// 编排器未配置时（k8s.enabled 未启用或 misconfiguration），无法执行核心操作，
+	// 立即返回可诊断错误，让 job 失败重试并暴露配置问题，避免 nil-panic 崩 worker。
+	if h.orch == nil {
+		return fmt.Errorf("编排器未配置（k8s.enabled 未启用？），无法启动应用 %s", payload.AppID)
 	}
-	// RuntimeNodeID nullable（spec-A2a）：.String 取 Go string 值。
-	nodeID := app.RuntimeNodeID.String
-	if err := h.containers.StartContainer(ctx, nodeID, app.ContainerID.String); err != nil {
-		return fmt.Errorf("启动容器失败: %w", err)
+	// k8s 路径不依赖 ContainerID，直接按 appID 寻址 Deployment。
+	// 但保留对 ContainerID 的检查保持与旧接口语义兼容，避免向未完成 init 的应用发 Scale。
+	if app.ContainerID.String == "" {
+		return fmt.Errorf("应用 %s 尚未完成初始化，无法启动（k8s Deployment 尚未建立）", payload.AppID)
+	}
+	// Scale(1) 等价于"起 pod"，幂等：Deployment 已有 replicas=1 时 k8s 不重建 pod。
+	if err := h.orch.Scale(ctx, payload.AppID, 1); err != nil {
+		return fmt.Errorf("启动应用失败（Scale replicas=1）: %w", err)
 	}
 	if err := h.store.SetAppStatus(ctx, sqlc.SetAppStatusParams{ID: app.ID, Status: domain.AppStatusRunning}); err != nil {
 		return fmt.Errorf("更新应用状态失败: %w", err)
@@ -143,18 +136,22 @@ func (h *AppStartContainerHandler) Handle(ctx context.Context, job sqlc.Job) err
 	return nil
 }
 
-// AppStopContainerHandler 停止容器并把状态推到 stopped。
+// AppStopContainerHandler 通过 k8s Scale(0) 停止 pod 并把状态推到 stopped。
+//
+// k8s 语义：Scale(0) 删除所有 pod 但保留 Deployment，preStop hook 触发 sidecar oc-presync
+// 同步数据到 S3，无需 manager 额外操作。
 type AppStopContainerHandler struct {
-	store      AppRuntimeStore
-	containers ContainerLifecycle
+	store AppRuntimeStore
+	orch  appOrchestrator
 }
 
-// NewAppStopContainerHandler 创建停止容器 handler，依赖由 worker 装配层注入。
-func NewAppStopContainerHandler(store AppRuntimeStore, containers ContainerLifecycle) *AppStopContainerHandler {
-	return &AppStopContainerHandler{store: store, containers: containers}
+// NewAppStopContainerHandler 创建停止 handler，依赖由 worker 装配层注入。
+func NewAppStopContainerHandler(store AppRuntimeStore, orch appOrchestrator) *AppStopContainerHandler {
+	return &AppStopContainerHandler{store: store, orch: orch}
 }
 
-// Handle 执行 app_stop_container job，并把无容器场景收敛为 stopped。
+// Handle 执行 app_stop_container job，并把无 ContainerID 场景收敛为 stopped。
+// preStop hook 由 k8s 在 pod 终止前触发，sidecar oc-presync 负责同步数据，manager 不介入。
 func (h *AppStopContainerHandler) Handle(ctx context.Context, job sqlc.Job) error {
 	if job.Type != domain.JobTypeAppStopContainer {
 		return fmt.Errorf("非 app_stop_container 任务: %s", job.Type)
@@ -167,33 +164,26 @@ func (h *AppStopContainerHandler) Handle(ctx context.Context, job sqlc.Job) erro
 	if err != nil {
 		return err
 	}
+	// 编排器未配置时（k8s.enabled 未启用或 misconfiguration），无法执行核心操作，
+	// 立即返回可诊断错误，让 job 失败重试并暴露配置问题，避免 nil-panic 崩 worker。
+	if h.orch == nil {
+		return fmt.Errorf("编排器未配置（k8s.enabled 未启用？），无法停止应用 %s", payload.AppID)
+	}
 	if app.ContainerID.String == "" {
-		// 没容器 ID 等价于已经停止：直接推状态便于状态机收敛。
+		// k8s Deployment 尚未建立（未完成 init），等价于已停止，直接推状态收敛状态机。
 		if err := h.store.SetAppStatus(ctx, sqlc.SetAppStatusParams{ID: app.ID, Status: domain.AppStatusStopped}); err != nil {
 			return fmt.Errorf("更新应用状态失败: %w", err)
 		}
 		return nil
 	}
-	// RuntimeNodeID nullable（spec-A2a）：.String 取 Go string 值。
-	nodeID := app.RuntimeNodeID.String
-	if err := h.containers.StopContainer(ctx, nodeID, app.ContainerID.String); err != nil {
-		return fmt.Errorf("停止容器失败: %w", err)
+	// Scale(0) = 停止所有 pod；Deployment 保留，下次 Scale(1) 可以恢复。
+	if err := h.orch.Scale(ctx, payload.AppID, 0); err != nil {
+		return fmt.Errorf("停止应用失败（Scale replicas=0）: %w", err)
 	}
 	if err := h.store.SetAppStatus(ctx, sqlc.SetAppStatusParams{ID: app.ID, Status: domain.AppStatusStopped}); err != nil {
 		return fmt.Errorf("更新应用状态失败: %w", err)
 	}
 	return nil
-}
-
-// SessionCleaner 抽象"清空 app 会话"能力,使 restart 后开新 session 时
-// 重新 snapshot SOUL.md。Hermes 在 session 启动时把 system_prompt 冻结
-// 存进 SQLite,后续 SOUL.md 改动对老 session 不生效——所以配置变更类
-// 操作(改 model / persona / 知识库 / 重启)必须配合清 session 才能让
-// 最新配置进入对话。
-//
-// runtime.AgentBackedAdapter.ClearAppSessions 实现此接口。
-type SessionCleaner interface {
-	ClearAppSessions(ctx context.Context, nodeID, appID string) error
 }
 
 // AppInputRefreshResult 是 RefreshAppInput 成功后返回的「已应用版本」信息，
@@ -206,19 +196,10 @@ type AppInputRefreshResult struct {
 	ImageRef string
 }
 
-// AppInputRefresher 抽象「restart 前重写 input/manifest.yaml + resources/*.md」的能力。
+// AppInputRefresher 抽象「restart 前刷新版本配置」的能力（bootstrap 接管 pod 启动配置后
+// 实现层逻辑简化，但接口保留供旧 wiring 兼容）。
 // 成功后返回 AppInputRefreshResult，包含版本修订与镜像 ref，供 restart handler
 // 写入 apps.applied_version_revision / applied_image_ref。
-//
-// 改三层 prompt / persona 都会落到 apps 表及相关联表, 之后通过
-// app_restart_container job 触发本 handler。镜像 oc-entrypoint
-// 每次容器启动会幂等地把 input/ 翻译成 hermes 自有 schema(config.yaml / SOUL.md /
-// skills 等), 因此只要 restart 前把节点 apps/<id>/input/ 重写成最新数据,
-// 下次 start 后容器内 hermes 自然加载到改后的版本配置与 prompt。
-//
-// 实现方负责: 取 DB 当前 app / org / owner 上下文 + 解密 api key, 装配
-// hermes.AppInputData 并通过 hermes.WriteAppInput 写到目标节点的 input/ 目录。
-// 实现见 cmd/server 装配层 appInputRefresher。
 type AppInputRefresher interface {
 	RefreshAppInput(ctx context.Context, nodeID string, app sqlc.App) (AppInputRefreshResult, error)
 }
@@ -229,62 +210,47 @@ type RestartJobNotifier interface {
 	Enqueue(ctx context.Context, jobID string) error
 }
 
-// AppRestartContainerHandler 触发应用容器重启,由可选的 SessionCleaner 决定走
-// stop → clear sessions → start 三步还是退回到原子 docker restart。
+// AppRestartContainerHandler 触发应用重启，根据是否有镜像变更走不同分支：
 //
-// 容器内部 hermes schema(config.yaml / SOUL.md / skills)由镜像 oc-entrypoint
-// 在每次启动时根据 apps/<id>/input/ 自动重渲染, manager 端只负责:
-//  1. 在 stop 前通过 inputRefresher 把节点上 input/manifest.yaml + resources/*.md
-//     重写成最新 DB 快照(改 model / 三层 prompt / persona 都靠这一步生效);
-//  2. 容器 stop → clear sessions → start, 让 hermes 启动新 session 时 snapshot
-//     最新 SOUL.md(覆盖 system_prompt 冻结在 SQLite 的语义)。
+//   - 镜像变更：UpdateImage 触发 Recreate（k8s 自动停旧 pod 起新 pod），
+//     由 app_initialize 路径写回 applied 版本。
+//   - 镜像不变：删除 S3 sessions 与 state.db（清会话数据让 hermes 启动新 session），
+//     然后 Scale(0) → Scale(1) 重建 pod，最后记录 applied 版本。
 //
-// 单独把 input 重写抽成接口而不是写死, 是因为生产装配需要持有 DB / cipher /
-// nodeID-aware uploader, 这些依赖只存在于 wiring 层; 测试装配可以传 nil 让 restart
-// 仍能跑(适合不关心 input 刷新语义的容器生命周期测试)。
+// k8s 语义说明：
+//   - preStop hook 由 k8s 控制，oc-presync 在 pod 终止前同步数据到 S3，无需 manager 介入。
+//   - sessions 清除操作在 Scale(0) 之前完成（S3 侧操作，与 pod 状态无关，不存在文件锁问题）。
 type AppRestartContainerHandler struct {
 	store          AppRuntimeStore
-	containers     ContainerLifecycle
-	sessionCleaner SessionCleaner
+	orch           appOrchestrator
+	objects        storage.ObjectStore
 	inputRefresher AppInputRefresher
 	// notifier 在重启检测到镜像变更、入队 app_initialize job 后即时推送 jobID，
 	// 让 worker 不必等 scheduler 轮询即可拾取；nil 时由 scheduler 兜底入队。
 	notifier RestartJobNotifier
 }
 
-// NewAppRestartContainerHandler 创建重启容器 handler，复用容器生命周期接口。
-func NewAppRestartContainerHandler(store AppRuntimeStore, containers ContainerLifecycle) *AppRestartContainerHandler {
-	return &AppRestartContainerHandler{store: store, containers: containers}
+// NewAppRestartContainerHandler 创建重启 handler，注入 k8s 编排器与对象存储。
+// objects 用于镜像不变时清理 S3 sessions + state.db；nil 时跳过（仅用于不关心会话清除的测试）。
+func NewAppRestartContainerHandler(store AppRuntimeStore, orch appOrchestrator, objects storage.ObjectStore) *AppRestartContainerHandler {
+	return &AppRestartContainerHandler{store: store, orch: orch, objects: objects}
 }
 
-// SetSessionCleaner 注入"清空 app 会话"能力。
-// 注入后 restart 会在容器实际 restart 前清空 .hermes/sessions/,
-// 让新 session snapshot 最新 SOUL.md(含最新模型 / persona / 知识库)。
-// nil 时 restart 不清 session,等价于旧行为。
-func (h *AppRestartContainerHandler) SetSessionCleaner(cleaner SessionCleaner) {
-	h.sessionCleaner = cleaner
-}
-
-// SetInputRefresher 注入「restart 前重写 input/ 目录」的能力。
-//
-// 生产环境必须注入: 没有这一步, 改 model / 三层 prompt / persona 后 restart,
-// oc-entrypoint 仍会读到旧 manifest.yaml, 容器内 hermes 模型 / SOUL.md
-// 永远停留在初始化时的值。
-// nil 时跳过 input 重写(保持原 restart 行为, 仅适合不关心 input 刷新的测试装配)。
+// SetInputRefresher 注入「restart 前刷新版本配置」能力。
+// nil 时跳过刷新（测试装配 / 旧 wiring 兼容）。
 func (h *AppRestartContainerHandler) SetInputRefresher(r AppInputRefresher) {
 	h.inputRefresher = r
 }
 
 // SetJobNotifier 注入「向 Redis 队列即时推送 jobID」的能力。
-//
 // 仅在重启检测到镜像变更、入队 app_initialize job 后用于即时唤醒 worker；
-// nil 时入队的 job 由 scheduler 周期轮询兜底拾取（与现有 SetSessionCleaner /
-// SetInputRefresher 一致，为可选的 nil 安全注入）。
+// nil 时由 scheduler 周期轮询兜底拾取。
 func (h *AppRestartContainerHandler) SetJobNotifier(n RestartJobNotifier) {
 	h.notifier = n
 }
 
-// Handle 执行 app_restart_container job，并在成功后把应用状态推回 running。
+// Handle 执行 app_restart_container job。
+// 镜像变更时走 UpdateImage 重建路径；镜像不变时清 S3 会话后 Scale(0)→Scale(1) 重启。
 func (h *AppRestartContainerHandler) Handle(ctx context.Context, job sqlc.Job) error {
 	if job.Type != domain.JobTypeAppRestartContainer {
 		return fmt.Errorf("非 app_restart_container 任务: %s", job.Type)
@@ -297,58 +263,42 @@ func (h *AppRestartContainerHandler) Handle(ctx context.Context, job sqlc.Job) e
 	if err != nil {
 		return err
 	}
-	// 注意：「缺 container_id」的拒绝校验下移到原 stop/clear/start 路径之前。
-	// 镜像变更重建分支被 worker 重试时 container_id 可能已被上一次尝试清空，
-	// 此时仍须放行进入重建分支重新入队 app_initialize，不能在此提前报错。
-	// RuntimeNodeID nullable（spec-A2a）：.String 取 Go string 值。
+	// nodeID 仅供 inputRefresher（兼容旧接口签名），k8s 路径不按 nodeID 路由。
 	nodeID := app.RuntimeNodeID.String
-	// 在 stop 之前先把节点上的 apps/<id>/input/ 重写成 DB 当前快照:
-	// oc-entrypoint 在下次容器启动时读取该目录,渲染出新的 config.yaml(含 model)
-	// 与 SOUL.md(三层 prompt + persona)。改 model / 改 prompt / 改 persona
-	// 之所以需要 restart 生效,就是因为镜像内部只在启动期渲染一次,所以这里
-	// 必须先把输入数据更新到节点,再进入容器停 → 启循环。
-	//
-	// 失败时直接冒泡让 worker 重试: 没刷新就 restart 等于"重启后还是老配置",
-	// 比让容器先 stop 再失败更糟(用户感知不到, version_synced 还会被错误置位)。
+
+	// 可选：调 refresher 刷新版本配置并获取当前版本镜像 ref。
+	// 失败时立即冒泡让 worker 重试：没刷新就 restart 等于"重启后还是老配置"，
+	// 比让 pod 先停再失败更糟（用户感知不到，version_synced 还会被错误置位）。
 	var refreshResult AppInputRefreshResult
 	if h.inputRefresher != nil {
 		refreshResult, err = h.inputRefresher.RefreshAppInput(ctx, nodeID, app)
 		if err != nil {
-			return fmt.Errorf("刷新应用 input 失败: %w", err)
+			return fmt.Errorf("刷新应用版本配置失败: %w", err)
 		}
 	}
-	// 镜像变更重建分支：容器镜像在创建时即固定，restart 只是 stop → start 同一个
-	// 容器，绑定版本换了运行时镜像后 restart 永远拉不到新镜像。检测到 refresher
-	// 解析出的镜像 ref 与 apps.runtime_image_ref(容器当前镜像)不一致时，必须重建
-	// 容器：stop + remove 旧容器 → 清空 container_id → 置 status=pulling_runtime_image
-	// → 入队 app_initialize job，复用已测的初始化 4 阶段(pull → prepare → create →
-	// start → binding_waiting)重拉新镜像并重建容器，避免 restart 对镜像维度谎报
-	// version_synced。
-	//
-	// 委托给 re-initialize 而非在此重新装配 ContainerSpec / 拉镜像逻辑，是因为这些
-	// 逻辑已由 AppInitializeHandler 完整实现并测试覆盖，复制一份只会引入重复依赖。
-	//
-	// 幂等：本分支若被 worker 重试(job MaxAttempts=3)，重入时 container_id 可能已被
-	// 上一次尝试清空——此时跳过 stop/remove，仅重新建 job 并入队即可。
+
+	// 编排器未配置时（k8s.enabled 未启用或 misconfiguration），无法执行核心操作，
+	// 立即返回可诊断错误，让 job 失败重试并暴露配置问题，避免 nil-panic 崩 worker。
+	if h.orch == nil {
+		return fmt.Errorf("编排器未配置（k8s.enabled 未启用？），无法重启应用 %s", payload.AppID)
+	}
+
+	// 镜像变更重建分支：refresher 解析出的镜像 ref 与当前 apps.runtime_image_ref 不一致时，
+	// 调 UpdateImage 触发 Deployment Recreate——k8s 自动停旧 pod 起新 pod，拉取新镜像。
+	// 委托给 app_initialize 路径写回 applied 版本（避免复制初始化逻辑）。
 	if h.inputRefresher != nil && refreshResult.ImageRef != "" && refreshResult.ImageRef != app.RuntimeImageRef {
-		if app.ContainerID.String != "" {
-			if err := h.containers.StopContainer(ctx, nodeID, app.ContainerID.String); err != nil {
-				return fmt.Errorf("镜像变更重建前停止旧容器失败: %w", err)
-			}
-			if err := h.containers.RemoveContainer(ctx, nodeID, app.ContainerID.String); err != nil {
-				return fmt.Errorf("镜像变更重建前删除旧容器失败: %w", err)
-			}
+		// UpdateImage patch Deployment 镜像，触发 Recreate 策略：k8s 自动停旧 pod 起新 pod。
+		// 幂等：若上一次 UpdateImage 成功但 handler 在 SetAppStatus 前崩溃，重入时再次
+		// UpdateImage 是幂等的（已是新镜像，Deployment 不会重建）。
+		if err := h.orch.UpdateImage(ctx, payload.AppID, refreshResult.ImageRef); err != nil {
+			return fmt.Errorf("更新应用镜像失败（UpdateImage）: %w", err)
 		}
-		// 清空 container_id / container_name，让 app_initialize 重新创建容器。
-		if err := h.store.SetAppContainer(ctx, sqlc.SetAppContainerParams{ID: app.ID}); err != nil {
-			return fmt.Errorf("清空容器引用失败: %w", err)
-		}
-		// raw SetAppStatus：restart 一贯不走 EnsureAppTransition，与原逻辑一致。
+		// 置 status=pulling_runtime_image，交由 app_initialize / status reconciler 跟踪。
 		if err := h.store.SetAppStatus(ctx, sqlc.SetAppStatusParams{ID: app.ID, Status: domain.AppStatusPullingRuntimeImage}); err != nil {
 			return fmt.Errorf("更新应用状态失败: %w", err)
 		}
-		// payload 与 RuntimeOperationService.RequestInitialize 入队的 app_initialize
-		// job 同形态；init handler 的 decodePayload 只读 app_id + runtime_node。
+		// 入队 app_initialize job，复用已测的初始化阶段（WaitReady → binding_waiting）
+		// 让 init handler 在 pod Ready 后写回 applied 版本，避免镜像维度谎报 version_synced。
 		initPayload, err := json.Marshal(map[string]any{
 			"app_id":       app.ID,
 			"runtime_node": nodeID,
@@ -367,46 +317,46 @@ func (h *AppRestartContainerHandler) Handle(ctx context.Context, job sqlc.Job) e
 		}); err != nil {
 			return fmt.Errorf("入队 app_initialize job 失败: %w", err)
 		}
-		// 入队失败不阻塞：scheduler 周期轮询会兜底拾取该 job。
+		// 即时唤醒 worker 拾取 job；nil notifier 时由 scheduler 轮询兜底。
 		if h.notifier != nil {
 			_ = h.notifier.Enqueue(ctx, newJobID)
 		}
-		// 直接返回：不再走后续 stop/clear/start，也不调 SetAppStatus(running) /
-		// SetAppAppliedVersion——这些由 app_initialize handler
-		// 在到达 binding_waiting 时负责，避免对镜像维度谎报 synced。
+		// 直接返回：不走后续 Scale(0→1)，也不调 SetAppAppliedVersion。
 		return nil
 	}
-	// 走原 stop/clear/start 重启路径前必须有容器：镜像未变时 restart 操作的就是
-	// 当前容器，缺 container_id 说明实例尚未初始化，无法重启。
-	// （镜像变更重建分支已在上方处理并 return，不受此校验影响。）
-	if app.ContainerID.String == "" {
-		return fmt.Errorf("应用 %s 尚未创建容器，无法重启", payload.AppID)
+
+	// 镜像不变路径：清 S3 会话数据后 Scale(0) → Scale(1) 重建 pod。
+	// S3 侧操作在 Scale(0) 之前完成，无文件锁问题（与 docker 路径需等容器 stop 不同）。
+	// sessions 目录：apps/<appID>/sessions/（hermes 会话归档）
+	// state.db：apps/<appID>/state.db（hermes SQLite 快照）
+	// 清除后新 pod 启动时 hermes 会重新初始化 session，snapshot 最新 SOUL.md（含
+	// 改后的 model / persona / 知识库），确保配置变更进入对话。
+	if h.objects != nil {
+		sessionsPrefix := storage.AppPrefix(payload.AppID) + "sessions/"
+		if err := h.objects.DeletePrefix(ctx, sessionsPrefix); err != nil {
+			return fmt.Errorf("清除 S3 sessions 失败: %w", err)
+		}
+		// 用 DeletePrefix 清 state.db 前缀，连带清理可能残留的 -wal/-shm 衍生对象，
+		// 保证下次干净重开（hermes 启动时会重建 state.db，不会读到旧快照）。
+		stateDBKey := storage.StateDBKey(payload.AppID)
+		if err := h.objects.DeletePrefix(ctx, stateDBKey); err != nil {
+			return fmt.Errorf("清除 S3 state.db 失败: %w", err)
+		}
 	}
-	// session 真正存储是 .hermes/state.db (SQLite),需要在容器 stop 后才能删
-	// (运行中 SQLite 持有文件锁)。所以这里把 docker restart 拆成
-	// stop → clear sessions → start 三步,而不是用原子 RestartContainer。
-	// 失败时立即冒泡让 worker 重试,避免半重启状态(容器跑着但 state.db 被清的不一致)。
-	if h.sessionCleaner != nil {
-		if err := h.containers.StopContainer(ctx, nodeID, app.ContainerID.String); err != nil {
-			return fmt.Errorf("停止容器失败: %w", err)
-		}
-		if err := h.sessionCleaner.ClearAppSessions(ctx, nodeID, payload.AppID); err != nil {
-			return fmt.Errorf("清空 sessions 失败: %w", err)
-		}
-		if err := h.containers.StartContainer(ctx, nodeID, app.ContainerID.String); err != nil {
-			return fmt.Errorf("启动容器失败: %w", err)
-		}
-	} else {
-		// 没注入 sessionCleaner 时退回到原 docker restart 行为(向后兼容)。
-		if err := h.containers.RestartContainer(ctx, nodeID, app.ContainerID.String); err != nil {
-			return fmt.Errorf("重启容器失败: %w", err)
-		}
+
+	// Scale(0) 停止 pod（k8s preStop 触发 oc-presync 同步 workspace）。
+	if err := h.orch.Scale(ctx, payload.AppID, 0); err != nil {
+		return fmt.Errorf("重启前停止应用失败（Scale replicas=0）: %w", err)
+	}
+	// Scale(1) 重新起 pod，hermes 启动时从 bootstrap 获取配置（含最新版本数据）。
+	if err := h.orch.Scale(ctx, payload.AppID, 1); err != nil {
+		return fmt.Errorf("重启应用失败（Scale replicas=1）: %w", err)
 	}
 	if err := h.store.SetAppStatus(ctx, sqlc.SetAppStatusParams{ID: app.ID, Status: domain.AppStatusRunning}); err != nil {
 		return fmt.Errorf("更新应用状态失败: %w", err)
 	}
-	// 重启刷新已把节点 input 重写成当前版本快照，记录已应用版本修订与镜像 ref，
-	// 供前端 version_synced 检测；inputRefresher 为 nil（测试装配）时跳过。
+	// 记录已应用版本修订与镜像 ref，供前端 version_synced 检测；
+	// inputRefresher 为 nil（测试装配）时跳过，避免写入零值误置位。
 	if h.inputRefresher != nil {
 		if err := h.store.SetAppAppliedVersion(ctx, sqlc.SetAppAppliedVersionParams{
 			ID:                     app.ID,
@@ -420,28 +370,30 @@ func (h *AppRestartContainerHandler) Handle(ctx context.Context, job sqlc.Job) e
 }
 
 // AppDeleteHandler 串起删除流程：
-//  1. 停止并删除容器（缺 container_id 时跳过）；
+//  1. 删除 k8s 资源（Deployment + Service + Secret），幂等；
 //  2. 禁用 new-api token（已有 newapi_key_id 时执行）；
-//  3. agent 上把应用工作目录清理（fileOps != nil 时执行；后续 task 升级为归档）；
-//  4. 清理实例私有 RAGFlow dataset（knowledge != nil 时执行）；
+//  3. 归档 S3 应用目录（MovePrefix apps/<id>/ → apps/<id>/archive/）；
+//  4. 清理实例私有 RAGFlow dataset（knowledge != nil 时执行，失败不阻断）；
 //  5. 软删 apps 行。
 //
-// 任意一步失败立即冒泡，由 worker 重试；重试时各步骤需自行幂等。
+// 任意步骤失败立即冒泡，由 worker 重试；重试时各步骤需自行幂等。
 type AppDeleteHandler struct {
-	store      AppRuntimeStore
-	containers ContainerLifecycle
-	factory    NewAPIClientFactory
-	fileOps    AppDeleteFileOps
-	knowledge  AppKnowledgeCleaner
+	store     AppRuntimeStore
+	orch      appOrchestrator
+	factory   NewAPIClientFactory
+	objects   storage.ObjectStore
+	knowledge AppKnowledgeCleaner
 }
 
-// NewAppDeleteHandler 创建删除应用 handler，允许 new-api 与文件操作依赖按环境为空。
-func NewAppDeleteHandler(store AppRuntimeStore, containers ContainerLifecycle, factory NewAPIClientFactory, fileOps AppDeleteFileOps, cleaners ...AppKnowledgeCleaner) *AppDeleteHandler {
+// NewAppDeleteHandler 创建删除应用 handler。
+// objects 不为 nil 时在 k8s 资源删除后归档 S3 应用目录；nil 时跳过归档（无 S3 时兼容）。
+// cleaners 为可选的 KB 清理器，最多取第一个。
+func NewAppDeleteHandler(store AppRuntimeStore, orch appOrchestrator, factory NewAPIClientFactory, objects storage.ObjectStore, cleaners ...AppKnowledgeCleaner) *AppDeleteHandler {
 	var knowledge AppKnowledgeCleaner
 	if len(cleaners) > 0 {
 		knowledge = cleaners[0]
 	}
-	return &AppDeleteHandler{store: store, containers: containers, factory: factory, fileOps: fileOps, knowledge: knowledge}
+	return &AppDeleteHandler{store: store, orch: orch, factory: factory, objects: objects, knowledge: knowledge}
 }
 
 // Handle 执行 app_delete job；任一步失败都返回错误交给 worker 重试。
@@ -462,18 +414,15 @@ func (h *AppDeleteHandler) Handle(ctx context.Context, job sqlc.Job) error {
 	}
 	alreadyDeleted := app.DeletedAt.Valid
 
-	// RuntimeNodeID nullable（spec-A2a）：.String 取 Go string 值。
-	nodeID := app.RuntimeNodeID.String
-	if app.ContainerID.String != "" {
-		if err := h.containers.StopContainer(ctx, nodeID, app.ContainerID.String); err != nil {
-			// stop 失败不阻塞 remove：force remove 可以兜底，但 stop 错误必须冒泡用于审计排障。
-			return fmt.Errorf("停止容器失败: %w", err)
-		}
-		if err := h.containers.RemoveContainer(ctx, nodeID, app.ContainerID.String); err != nil {
-			return fmt.Errorf("删除容器失败: %w", err)
+	// Step 1: 删除 k8s Deployment + Service + Secret（幂等，NotFound 视为成功）。
+	// 不判断 ContainerID：k8s 路径按 appID 寻址资源，无论是否完成 init 都可安全调用 Delete。
+	if h.orch != nil {
+		if err := h.orch.Delete(ctx, payload.AppID); err != nil {
+			return fmt.Errorf("删除 k8s 资源失败: %w", err)
 		}
 	}
 
+	// Step 2: 禁用 new-api token（status=2 表示禁用）。
 	if h.factory != nil && app.NewapiKeyID.Valid && app.NewapiKeyID.String != "" {
 		keyID, parseErr := strconv.ParseInt(app.NewapiKeyID.String, 10, 64)
 		if parseErr == nil {
@@ -481,25 +430,23 @@ func (h *AppDeleteHandler) Handle(ctx context.Context, job sqlc.Job) error {
 			if err != nil {
 				return fmt.Errorf("构造 user-scoped client 失败: %w", err)
 			}
-			// status=2 表示禁用
 			if err := client.SetAPIKeyStatus(ctx, keyID, 2); err != nil {
 				return fmt.Errorf("禁用 new-api token 失败: %w", err)
 			}
 		}
 	}
 
-	if h.fileOps != nil && nodeID != "" {
-		// Sprint 2：fileOps 实现了 AppArchiver 时优先归档（保留节点目录用于审计 / 误删恢复），
-		// 否则回退到原 DeleteAppPath 直接删除。归档目录由 agent 周期性 cleanup-archives 清理。
-		if archiver, ok := h.fileOps.(AppArchiver); ok {
-			if err := archiver.ArchiveApp(ctx, nodeID, payload.AppID); err != nil {
-				return fmt.Errorf("归档应用工作目录失败: %w", err)
-			}
-		} else if err := h.fileOps.DeleteAppPath(ctx, nodeID, payload.AppID); err != nil {
-			return fmt.Errorf("清理应用工作目录失败: %w", err)
+	// Step 3: 把 S3 应用目录整体归档（apps/<id>/ → apps/<id>/archive/）。
+	// MovePrefix 幂等：若归档后 src 已空，再次调用只是空操作。
+	if h.objects != nil {
+		src := storage.AppPrefix(payload.AppID)
+		dst := storage.AppArchivePrefix(payload.AppID)
+		if err := h.objects.MovePrefix(ctx, src, dst); err != nil {
+			return fmt.Errorf("归档 S3 应用目录失败: %w", err)
 		}
 	}
 
+	// Step 4: 清理实例私有 RAGFlow dataset（外部派生资源，失败不阻断本地应用下线）。
 	if h.knowledge != nil {
 		if err := h.knowledge.DeleteAppDataset(ctx, app.ID); err != nil {
 			// RAGFlow dataset 是外部派生资源，删除失败不能阻断本地应用下线；
@@ -509,10 +456,11 @@ func (h *AppDeleteHandler) Handle(ctx context.Context, job sqlc.Job) error {
 	}
 
 	if alreadyDeleted {
-		// 删除成员会先软删应用再入队 app_delete；此处仍要清理容器、key、目录和 RAGFlow dataset，
+		// 删除成员会先软删应用再入队 app_delete；此处仍要清理 k8s、key、S3 和 RAGFlow dataset，
 		// 但不再重复执行 SoftDeleteApp，避免把已删除行当作错误。
 		return nil
 	}
+	// Step 5: 软删 apps 行。
 	if err := h.store.SoftDeleteApp(ctx, app.ID); err != nil {
 		return fmt.Errorf("软删应用失败: %w", err)
 	}

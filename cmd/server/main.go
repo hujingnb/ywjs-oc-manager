@@ -388,22 +388,19 @@ func runManager(ctx context.Context, cfg config.Config, logOut io.Writer) error 
 	if err := registry.Register("app_initialize", appInitHandler.Handle); err != nil {
 		return fmt.Errorf("注册 app_initialize handler 失败: %w", err)
 	}
-	if err := registry.Register("app_start_container", handlers.NewAppStartContainerHandler(dbStore.Queries, runtimeAdapter).Handle); err != nil {
+	// TODO(Task 14): 生命周期 handler 已迁移至 k8s 编排（appOrchestrator + ObjectStore），
+	// 此处暂时传 nil（真实 k8sorch.Adapter 将在 Task 14 装配）。
+	// workspaceObjStore 在 S3 启用时已有值（供 workspace + bootstrap），复用给 lifecycle handler。
+	if err := registry.Register("app_start_container", handlers.NewAppStartContainerHandler(dbStore.Queries, nil).Handle); err != nil {
 		return fmt.Errorf("注册 app_start_container handler 失败: %w", err)
 	}
-	if err := registry.Register("app_stop_container", handlers.NewAppStopContainerHandler(dbStore.Queries, runtimeAdapter).Handle); err != nil {
+	if err := registry.Register("app_stop_container", handlers.NewAppStopContainerHandler(dbStore.Queries, nil).Handle); err != nil {
 		return fmt.Errorf("注册 app_stop_container handler 失败: %w", err)
 	}
-	restartHandler := handlers.NewAppRestartContainerHandler(dbStore.Queries, runtimeAdapter)
-	// 注入 session cleaner:restart 在容器实际重启前清 .hermes/sessions/,
-	// 让 Hermes 启动新 session 时 snapshot 最新 SOUL.md(含改后的 model / persona /
-	// 知识库等)。覆盖所有触发 restart 的入口(改 model / 重启 / persona 更新 / 未来其他)。
-	restartHandler.SetSessionCleaner(runtimeAdapter)
-	// 注入 input refresher: restart 在容器 stop 之前先把节点上的 apps/<id>/input/
-	// manifest.yaml + resources/*.md 重写成 DB 当前快照。镜像 oc-entrypoint 在容器
-	// 启动时根据该目录幂等重渲染 config.yaml / SOUL.md / skills, 所以只要 input
-	// 文件是新的, restart 后容器内 hermes 自然加载到改后的 model / 三层 prompt / persona。
-	// 字段取值复用 BuildAppInputData, 与 AppInitializeHandler.writeAppInput 严格等价。
+	// TODO(Task 14): 传入真实 k8s orchestrator；暂时传 nil 让编译通过。
+	restartHandler := handlers.NewAppRestartContainerHandler(dbStore.Queries, nil, workspaceObjStore)
+	// 注入 input refresher：restart 刷新版本配置并检测镜像变更，bootstrap 接管 pod 启动配置后
+	// refresher 的节点文件写入逻辑保留兼容，镜像 ref 比较由 refresher 返回值驱动。
 	restartHandler.SetInputRefresher(newAppInputRefresher(
 		dbStore.Queries,
 		runtimeAdapter,
@@ -424,7 +421,8 @@ func runManager(ctx context.Context, cfg config.Config, logOut io.Writer) error 
 	if err := registry.Register("app_restart_container", restartHandler.Handle); err != nil {
 		return fmt.Errorf("注册 app_restart_container handler 失败: %w", err)
 	}
-	if err := registry.Register("app_delete", handlers.NewAppDeleteHandler(dbStore.Queries, runtimeAdapter, newapiFactory, nil, knowledgeService).Handle); err != nil {
+	// TODO(Task 14): 传入真实 k8s orchestrator；workspaceObjStore 供 S3 归档；暂时传 nil orch。
+	if err := registry.Register("app_delete", handlers.NewAppDeleteHandler(dbStore.Queries, nil, newapiFactory, workspaceObjStore, knowledgeService).Handle); err != nil {
 		return fmt.Errorf("注册 app_delete handler 失败: %w", err)
 	}
 	if err := registry.Register(domain.JobTypeChannelStartLogin, handlers.NewChannelStartLoginHandler(dbStore.Queries, channelRegistry, ocopsEndpointResolver{resolver: ocopsResolver}).Handle); err != nil {
