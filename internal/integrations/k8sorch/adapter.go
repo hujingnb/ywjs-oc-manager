@@ -135,7 +135,19 @@ func (a *KubernetesAdapter) Status(ctx context.Context, appID string) (AppStatus
 		return AppStatus{}, wrapK8s("列举 pod", err)
 	}
 	if len(pods.Items) == 0 {
-		return AppStatus{Phase: "NotFound"}, nil
+		// 无 pod：需区分「Deployment 不存在（app 真消失）」与「Deployment 在但 pod 尚未创建
+		// （刚 EnsureApp 调度中 / Recreate 过渡）」。后者是瞬态正常，绝不能让 reconciler 误判崩溃。
+		_, derr := a.client.AppsV1().Deployments(a.namespace).Get(ctx, deploymentName(appID), metav1.GetOptions{})
+		if apierrors.IsNotFound(derr) {
+			// Deployment 真不存在：app 已被删除 / 带外消失，下游据此判异常。
+			return AppStatus{Phase: "NotFound"}, nil
+		}
+		if derr != nil {
+			return AppStatus{}, wrapK8s("查询 Deployment", derr)
+		}
+		// Deployment 存在但暂无 pod：视为 Pending（pod 调度中或 Recreate 过渡 / 或被 Scale 到 0），
+		// 避免 reconciler 把过渡窗口误判为崩溃。
+		return AppStatus{Phase: "Pending", Message: "pod 尚未创建（调度中或 Recreate 过渡）"}, nil
 	}
 	// Recreate 过渡期可能短暂有 2 个 pod；取第一个（旧 Terminating 或新 Pending），状态最终一致由 reconciler 周期收敛。
 	p := pods.Items[0]

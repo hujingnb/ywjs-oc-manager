@@ -65,13 +65,36 @@ func TestDeleteIdempotent(t *testing.T) {
 	require.NoError(t, a.Delete(context.Background(), "nonexist"))
 }
 
-// TestStatusNotFound 验证无 pod 时 Status 返回 NotFound。
+// TestStatusNotFound 验证 Deployment 和 pod 均不存在时 Status 返回 NotFound。
+// 覆盖「app 已被带外删除 / 真消失」路径：fake 集群中既无 Deployment 也无 pod，
+// 期望 Phase=="NotFound"，让 reconciler 据此判断异常。
 func TestStatusNotFound(t *testing.T) {
+	// 空集群：Deployment 和 pod 都不存在，模拟 app 真消失的场景。
 	cs := fake.NewSimpleClientset()
 	a := NewKubernetesAdapter(cs, "oc-apps")
 	st, err := a.Status(context.Background(), "a1")
 	require.NoError(t, err)
+	// Deployment 不存在 + 无 pod → 真消失，应返回 NotFound。
 	assert.Equal(t, "NotFound", st.Phase)
+}
+
+// TestStatusPendingWhenDeploymentExistsNoPod 验证 Deployment 存在但 pod 尚未创建时
+// Status 返回 Pending 而非 NotFound，防止 reconciler 在 Recreate 过渡窗口误判崩溃。
+// 回归保护场景：EnsureApp 刚完成 / UpdateImage 触发 Recreate 过渡期，
+// 旧 pod 已停而新 pod 尚未被 ReplicaSet 调度起来——这是瞬态正常，绝不能误标 error。
+func TestStatusPendingWhenDeploymentExistsNoPod(t *testing.T) {
+	cs := fake.NewSimpleClientset()
+	a := NewKubernetesAdapter(cs, "oc-apps")
+	// EnsureApp 建出 Deployment，但 fake 集群不会自动创建 pod（无控制器模拟）。
+	require.NoError(t, a.EnsureApp(context.Background(), testSpec()))
+
+	st, err := a.Status(context.Background(), "a1")
+	require.NoError(t, err)
+	// Deployment 存在 + 无 pod → 调度过渡中，应返回 Pending 而非 NotFound，
+	// 确保 reconciler 的 podIsBad("Pending")==false，不会误把过渡窗口标为崩溃。
+	assert.Equal(t, "Pending", st.Phase, "Deployment 存在但无 pod 时应返回 Pending，而非 NotFound")
+	assert.NotEqual(t, "NotFound", st.Phase, "过渡窗口不得被误判为 app 消失")
+	assert.False(t, st.Ready, "pod 未起时 Ready 应为 false")
 }
 
 // TestStatusReadyFromPod 验证有 Ready hermes 容器的 pod 归一为 Ready。
