@@ -1,5 +1,21 @@
 #!/usr/bin/env bash
-# 占位：实体见 Task 3/4/5。
+# oc-presync — pod preStop hook 入口：优雅终止前做一次全量同步 + sqlite 快照，零丢失（父设计 D17）。
+# 复用 oc-lib.sh 的同步/备份函数，与 oc-sync 单轮等价但不循环。
 set -euo pipefail
-echo "oc-* 入口尚未实现" >&2
-exit 1
+# shellcheck source=/usr/local/bin/oc-lib.sh
+# shellcheck disable=SC1091
+source /usr/local/bin/oc-lib.sh
+
+require_env OC_CONTROL_TOKEN OC_BOOTSTRAP_URL
+DATA_DIR=${OC_DATA_DIR:-/opt/data}
+
+bs=$(mktemp)
+trap 'rm -f "$bs"' EXIT
+fetch_bootstrap "$bs"
+write_aws_credentials "$bs"
+export_s3_env "$bs"
+
+log "preStop：全量同步 workspace + sqlite 快照"
+sync_workspace_up "$DATA_DIR"
+backup_sqlite_up "$DATA_DIR"
+log "oc-presync 完成"
