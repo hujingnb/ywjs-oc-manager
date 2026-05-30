@@ -18,12 +18,6 @@ var ErrConflict = errors.New("资源冲突")
 // ErrInvalidResourceRange 表示资源趋势查询的时间范围或聚合粒度非法，handler 层应映射为 400。
 var ErrInvalidResourceRange = errors.New("资源查询范围不合法")
 
-// 节点 -------------------------------------------------------------
-
-// ErrNoNodeAvailable 表示当前没有「active 且剩余容量 > 0」的节点可分配新应用。
-// 由 OnboardingService 在自动选节点失败时返回；handler 层映射为 503 + NO_NODE_AVAILABLE。
-var ErrNoNodeAvailable = errors.New("当前无可用 runtime 节点")
-
 // 认证 -------------------------------------------------------------
 // 来源：原 auth_service.go
 

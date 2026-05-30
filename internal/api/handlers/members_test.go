@@ -116,23 +116,6 @@ func newMembersTestRouterWithOnboarding(t *testing.T, svc memberService, onboard
 	return router
 }
 
-// TestMembersOnboardMapsNoNodeAvailableTo503 验证成员引导映射无节点可用到503的错误映射或错误记录场景。
-func TestMembersOnboardMapsNoNodeAvailableTo503(t *testing.T) {
-	onboarding := &onboardingServiceStub{err: service.ErrNoNodeAvailable}
-	router := newMembersTestRouterWithOnboarding(t, &memberServiceStub{}, onboarding)
-
-	recorder := httptest.NewRecorder()
-	// version_id 为必填字段，需包含在请求体中。
-	body := bytes.NewBufferString(`{"username":"alice","display_name":"Alice","password":"pwd","app_name":"alice-bot","version_id":"v-id-1"}`)
-	request := httptest.NewRequest(http.MethodPost, "/api/v1/organizations/00000000-0000-0000-0000-000000000101/members/onboard", body)
-	request.Header.Set("Content-Type", "application/json")
-	request = withPrincipal(request, auth.Principal{UserID: "p1", Role: domain.UserRolePlatformAdmin})
-	router.ServeHTTP(recorder, request)
-
-	require.Equal(t, http.StatusServiceUnavailable, recorder.Code)
-	require.Contains(t, recorder.Body.String(), "NO_NODE_AVAILABLE")
-}
-
 // TestMembersOnboardForwardsRequest 验证成员开户路由会把应用名和助手版本 id 等字段传给 service。
 func TestMembersOnboardForwardsRequest(t *testing.T) {
 	onboarding := &onboardingServiceStub{
@@ -183,23 +166,6 @@ func TestMembersCreateAppForMemberForwardsRequest(t *testing.T) {
 	require.Contains(t, recorder.Body.String(), `"job_id":"job-1"`)
 	// 确认助手版本 id 被透传到 service 入参，供 service 层校验 allowlist。
 	require.Equal(t, "v-id-create-app", onboarding.lastCreateInput.VersionID)
-}
-
-// TestMembersCreateAppForMemberMapsNoNodeAvailable 验证已有成员创建实例无可用节点时映射为 503。
-func TestMembersCreateAppForMemberMapsNoNodeAvailable(t *testing.T) {
-	onboarding := &onboardingServiceStub{err: service.ErrNoNodeAvailable}
-	router := newMembersTestRouterWithOnboarding(t, &memberServiceStub{}, onboarding)
-
-	recorder := httptest.NewRecorder()
-	// version_id 为必填字段，需包含在请求体中以通过 binding 校验。
-	body := bytes.NewBufferString(`{"app_name":"alice-new-bot","version_id":"v-id-1"}`)
-	request := httptest.NewRequest(http.MethodPost, "/api/v1/organizations/org-1/members/user-1/apps", body)
-	request.Header.Set("Content-Type", "application/json")
-	request = withPrincipal(request, auth.Principal{UserID: "p1", Role: domain.UserRolePlatformAdmin})
-	router.ServeHTTP(recorder, request)
-
-	require.Equal(t, http.StatusServiceUnavailable, recorder.Code)
-	require.Contains(t, recorder.Body.String(), "NO_NODE_AVAILABLE")
 }
 
 type memberServiceStub struct {

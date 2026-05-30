@@ -396,9 +396,6 @@ func writeMemberError(c *gin.Context, err error) {
 		c.JSON(http.StatusNotFound, apierror.New("NOT_FOUND", "资源不存在"))
 	case errors.Is(err, service.ErrMemberCreateInvalid):
 		c.JSON(http.StatusBadRequest, apierror.New("MEMBER_INVALID", validationServiceMessage(err, service.ErrMemberCreateInvalid)))
-	case errors.Is(err, service.ErrNoNodeAvailable):
-		// 自动选节点失败：当前没有 active 且剩余容量 > 0 的节点；前端需要展示明确文案让 ops 加节点或解禁。
-		c.JSON(http.StatusServiceUnavailable, apierror.New("NO_NODE_AVAILABLE", "暂无可用 Runtime Node，请联系平台管理员调整节点容量或新增节点"))
 	default:
 		// 未知错误冒泡到日志，便于运维定位；响应仍保持脱敏。
 		slog.ErrorContext(c.Request.Context(), "member handler 未识别错误", "error", err)
