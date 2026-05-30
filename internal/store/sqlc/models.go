@@ -18,8 +18,6 @@ type App struct {
 	Name                   string          `db:"name" json:"name"`
 	Description            null.String     `db:"description" json:"description"`
 	Status                 string          `db:"status" json:"status"`
-	ContainerID            null.String     `db:"container_id" json:"container_id"`
-	ContainerName          null.String     `db:"container_name" json:"container_name"`
 	NewapiKeyID            null.String     `db:"newapi_key_id" json:"newapi_key_id"`
 	NewapiKeyCiphertext    null.String     `db:"newapi_key_ciphertext" json:"newapi_key_ciphertext"`
 	ApiKeyStatus           string          `db:"api_key_status" json:"api_key_status"`
@@ -44,7 +42,6 @@ type App struct {
 	DeletedAt              null.Time       `db:"deleted_at" json:"deleted_at"`
 	OwnerActiveKey         null.String     `db:"owner_active_key" json:"owner_active_key"`
 	RuntimeTokenActiveKey  null.String     `db:"runtime_token_active_key" json:"runtime_token_active_key"`
-	RuntimeNodeID          null.String     `db:"runtime_node_id" json:"runtime_node_id"`
 }
 
 type AssistantVersion struct {
@@ -96,24 +93,6 @@ type ChannelBinding struct {
 	AppActiveKey  null.String `db:"app_active_key" json:"app_active_key"`
 }
 
-type InstanceResourceSample struct {
-	ID               string      `db:"id" json:"id"`
-	AppID            string      `db:"app_id" json:"app_id"`
-	RuntimeNodeID    string      `db:"runtime_node_id" json:"runtime_node_id"`
-	ContainerID      string      `db:"container_id" json:"container_id"`
-	SampledAt        time.Time   `db:"sampled_at" json:"sampled_at"`
-	ContainerStatus  null.String `db:"container_status" json:"container_status"`
-	CpuPercent       null.Float  `db:"cpu_percent" json:"cpu_percent"`
-	MemoryUsedBytes  null.Int    `db:"memory_used_bytes" json:"memory_used_bytes"`
-	MemoryLimitBytes null.Int    `db:"memory_limit_bytes" json:"memory_limit_bytes"`
-	DiskReadBytes    null.Int    `db:"disk_read_bytes" json:"disk_read_bytes"`
-	DiskWriteBytes   null.Int    `db:"disk_write_bytes" json:"disk_write_bytes"`
-	NetworkRxBytes   null.Int    `db:"network_rx_bytes" json:"network_rx_bytes"`
-	NetworkTxBytes   null.Int    `db:"network_tx_bytes" json:"network_tx_bytes"`
-	LastError        null.String `db:"last_error" json:"last_error"`
-	CreatedAt        time.Time   `db:"created_at" json:"created_at"`
-}
-
 type Job struct {
 	ID          string          `db:"id" json:"id"`
 	Type        string          `db:"type" json:"type"`
@@ -129,22 +108,6 @@ type Job struct {
 	CreatedAt   time.Time       `db:"created_at" json:"created_at"`
 	UpdatedAt   time.Time       `db:"updated_at" json:"updated_at"`
 	FinishedAt  null.Time       `db:"finished_at" json:"finished_at"`
-}
-
-type NodeResourceSample struct {
-	ID               string      `db:"id" json:"id"`
-	RuntimeNodeID    string      `db:"runtime_node_id" json:"runtime_node_id"`
-	SampledAt        time.Time   `db:"sampled_at" json:"sampled_at"`
-	CpuPercent       null.Float  `db:"cpu_percent" json:"cpu_percent"`
-	MemoryUsedBytes  null.Int    `db:"memory_used_bytes" json:"memory_used_bytes"`
-	MemoryTotalBytes null.Int    `db:"memory_total_bytes" json:"memory_total_bytes"`
-	DiskUsedBytes    null.Int    `db:"disk_used_bytes" json:"disk_used_bytes"`
-	DiskTotalBytes   null.Int    `db:"disk_total_bytes" json:"disk_total_bytes"`
-	NetworkRxBytes   null.Int    `db:"network_rx_bytes" json:"network_rx_bytes"`
-	NetworkTxBytes   null.Int    `db:"network_tx_bytes" json:"network_tx_bytes"`
-	InstanceCount    null.Int    `db:"instance_count" json:"instance_count"`
-	LastError        null.String `db:"last_error" json:"last_error"`
-	CreatedAt        time.Time   `db:"created_at" json:"created_at"`
 }
 
 type Organization struct {
@@ -224,34 +187,6 @@ type RefreshToken struct {
 	ExpiresAt time.Time `db:"expires_at" json:"expires_at"`
 	RevokedAt null.Time `db:"revoked_at" json:"revoked_at"`
 	CreatedAt time.Time `db:"created_at" json:"created_at"`
-}
-
-type RuntimeNode struct {
-	ID                       string      `db:"id" json:"id"`
-	Name                     string      `db:"name" json:"name"`
-	Status                   string      `db:"status" json:"status"`
-	AgentDockerEndpoint      null.String `db:"agent_docker_endpoint" json:"agent_docker_endpoint"`
-	AgentFileEndpoint        null.String `db:"agent_file_endpoint" json:"agent_file_endpoint"`
-	AgentTlsCaCert           null.String `db:"agent_tls_ca_cert" json:"agent_tls_ca_cert"`
-	AgentTokenHash           null.String `db:"agent_token_hash" json:"agent_token_hash"`
-	AgentTokenCiphertext     null.String `db:"agent_token_ciphertext" json:"agent_token_ciphertext"`
-	AgentVersion             null.String `db:"agent_version" json:"agent_version"`
-	HeartbeatIntervalSeconds int32       `db:"heartbeat_interval_seconds" json:"heartbeat_interval_seconds"`
-	LastHeartbeatAt          null.Time   `db:"last_heartbeat_at" json:"last_heartbeat_at"`
-	ResourceSnapshotJson     []byte      `db:"resource_snapshot_json" json:"resource_snapshot_json"`
-	MetadataJson             []byte      `db:"metadata_json" json:"metadata_json"`
-	NodeDataRoot             null.String `db:"node_data_root" json:"node_data_root"`
-	RegisteredAt             null.Time   `db:"registered_at" json:"registered_at"`
-	MaxApps                  null.Int    `db:"max_apps" json:"max_apps"`
-	AgentID                  null.String `db:"agent_id" json:"agent_id"`
-	LastProbeAttemptedAt     null.Time   `db:"last_probe_attempted_at" json:"last_probe_attempted_at"`
-	LastProbeOkAt            null.Time   `db:"last_probe_ok_at" json:"last_probe_ok_at"`
-	LastProbeFailedAt        null.Time   `db:"last_probe_failed_at" json:"last_probe_failed_at"`
-	LastProbeError           null.String `db:"last_probe_error" json:"last_probe_error"`
-	ProbeFailureStreak       int32       `db:"probe_failure_streak" json:"probe_failure_streak"`
-	ProbeSuccessStreak       int32       `db:"probe_success_streak" json:"probe_success_streak"`
-	CreatedAt                time.Time   `db:"created_at" json:"created_at"`
-	UpdatedAt                time.Time   `db:"updated_at" json:"updated_at"`
 }
 
 type User struct {

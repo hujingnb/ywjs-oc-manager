@@ -2,7 +2,7 @@
 //
 // 与 cmd/seed-admin 区别：
 //   - seed-admin 创建一个 platform_admin 行，幂等且只追加；
-//   - seed-e2e 会 TRUNCATE 大量业务表，然后从裸 SQL 重建组织 / 节点 / 成员 / 应用 fixture。
+//   - seed-e2e 会 TRUNCATE 大量业务表，然后从裸 SQL 重建组织 / 成员 / 应用 fixture。
 //
 // 安全守门：
 //   - 必须设置 OCM_E2E=1 才会执行 truncate；否则直接退出非零，避免误在生产环境跑。
@@ -31,7 +31,9 @@ import (
 // fixture 是 stdout 末行写出的 JSON 结构；字段名与 web/tests/e2e/fixtures.ts 一致。
 //
 // 注意：
-//   - OrgID / NodeID / AppID 在数据库 schema 中是 CHAR(36) UUID（应用层生成），故用 string。
+//   - OrgID / AppID 在数据库 schema 中是 CHAR(36) UUID（应用层生成），故用 string。
+//   - migration 000003 已删除 runtime_nodes 表及 apps.runtime_node_id 列，
+//     fixture 不再携带 NodeID / NodeName，k8s 调度器负责 pod 落点，应用层无节点绑定。
 type fixture struct {
 	// PlatformAdminLogin/Password 是 Playwright 全局登录用的固定平台管理员账密。
 	PlatformAdminLogin    string `json:"platform_admin_login"`
@@ -40,9 +42,6 @@ type fixture struct {
 	OrgID   string `json:"org_id"`
 	OrgName string `json:"org_name"`
 	OrgCode string `json:"org_code"`
-	// NodeID/NodeName 标识占位 runtime node，e2e 不真实连接 agent。
-	NodeID   string `json:"node_id"`
-	NodeName string `json:"node_name"`
 	// OrgAdminLogin/Password 是组织管理员固定账密，用于覆盖组织级管理能力。
 	OrgAdminLogin    string `json:"org_admin_login"`
 	OrgAdminPassword string `json:"org_admin_password"`
@@ -107,22 +106,20 @@ func main() {
 //   - 无 PG 的 TRUNCATE … RESTART IDENTITY CASCADE；用 SET FOREIGN_KEY_CHECKS=0 包裹整批，
 //     绕过外键约束后逐表 TRUNCATE/DELETE，结束再恢复 FK 检查。
 //   - users 需保留 platform_admin，故用 DELETE WHERE role<>'platform_admin' 而非整表 TRUNCATE。
-//   - 同时清掉 ragflow_* 与 *_resource_samples 等下游表，replicate 原 PG CASCADE 的清空范围，避免遗留孤儿。
+//   - migration 000003 已删除 runtime_nodes / instance_resource_samples / node_resource_samples 三张表，
+//     此处不再 TRUNCATE 它们；apps.runtime_node_id / container_id / container_name 列同样已删。
 func truncate(ctx context.Context, db *sql.DB) error {
 	stmts := []string{
 		`SET FOREIGN_KEY_CHECKS = 0`,
 		`TRUNCATE TABLE channel_bindings`,
 		`TRUNCATE TABLE ragflow_documents`,
 		`TRUNCATE TABLE ragflow_datasets`,
-		`TRUNCATE TABLE instance_resource_samples`,
-		`TRUNCATE TABLE node_resource_samples`,
 		`TRUNCATE TABLE apps`,
 		`TRUNCATE TABLE recharge_records`,
 		`TRUNCATE TABLE jobs`,
 		`TRUNCATE TABLE audit_logs`,
 		`TRUNCATE TABLE refresh_tokens`,
 		`TRUNCATE TABLE assistant_versions`,
-		`TRUNCATE TABLE runtime_nodes`,
 		`DELETE FROM users WHERE role <> 'platform_admin'`,
 		`TRUNCATE TABLE organizations`,
 		`SET FOREIGN_KEY_CHECKS = 1`,
@@ -160,8 +157,10 @@ func ensurePlatformAdmin(ctx context.Context, db *sql.DB, username, password str
 	return nil
 }
 
-// buildFixture 以裸 SQL 写入组织 / 节点 / 两个普通账号 / 一个应用 / 一个未绑定渠道。
+// buildFixture 以裸 SQL 写入组织 / 两个普通账号 / 一个应用 / 一个未绑定渠道。
 // 所有主键由应用层 uuid.NewString() 生成（CHAR(36)）；MySQL :exec 无 RETURNING，直接复用生成的 id。
+// migration 000003 已删除 runtime_nodes 表及 apps.runtime_node_id / container_id / container_name 列，
+// 因此不再插入节点行，apps INSERT 也不含上述列。
 func buildFixture(ctx context.Context, db *sql.DB) (fixture, error) {
 	var fx fixture
 	fx.PlatformAdminLogin = "admin"
@@ -183,21 +182,9 @@ func buildFixture(ctx context.Context, db *sql.DB) (fixture, error) {
 		return fx, fmt.Errorf("create org: %w", err)
 	}
 
-	// 2) 创建 runtime_node：dummy endpoint，e2e 不真连 agent；status 直接置 active 跳过注册流程。
-	fx.NodeName = "e2e-node"
-	fx.NodeID = uuid.NewString()
-	if _, err := db.ExecContext(ctx, `
-		INSERT INTO runtime_nodes
-			(id, name, status, agent_docker_endpoint, agent_file_endpoint,
-			 agent_token_hash, node_data_root, heartbeat_interval_seconds)
-		VALUES (?, ?, 'active', 'http://127.0.0.1:9999', 'http://127.0.0.1:9999',
-			 'placeholder', '/tmp/e2e-node', 60)`,
-		fx.NodeID, fx.NodeName,
-	); err != nil {
-		return fx, fmt.Errorf("create node: %w", err)
-	}
-
-	// 3) 创建 org_admin / org_member 两个账号；后续 app.owner_user_id 用 admin id。
+	// 2) 创建 org_admin / org_member 两个账号；后续 app.owner_user_id 用 admin id。
+	// 注：migration 000003 已删除 runtime_nodes 表，不再插入节点行；
+	// k8s 场景下 pod 落点由调度器决定，应用层无需节点绑定。
 	fx.OrgAdminLogin = "e2e-org-admin"
 	fx.OrgAdminPassword = "e2e-pass-123"
 	fx.OrgMemberLogin = "e2e-org-member"
@@ -226,19 +213,21 @@ func buildFixture(ctx context.Context, db *sql.DB) (fixture, error) {
 		}
 	}
 
-	// 4) 创建 fixture app（status=running，跳过实际容器路径）。owner_user_id 用 org_admin。
+	// 3) 创建 fixture app（status=running）。owner_user_id 用 org_admin。
+	// migration 000003 已删除 apps.runtime_node_id / container_id / container_name 列，
+	// INSERT 不含上述列；k8s 下应用无节点绑定，pod 落点由调度器决定。
 	fx.AppName = "e2e-app"
 	fx.AppID = uuid.NewString()
 	if _, err := db.ExecContext(ctx, `
 		INSERT INTO apps
-			(id, org_id, owner_user_id, runtime_node_id, name, status, api_key_status)
-		VALUES (?, ?, ?, ?, ?, 'running', 'active')`,
-		fx.AppID, fx.OrgID, orgAdminID, fx.NodeID, fx.AppName,
+			(id, org_id, owner_user_id, name, status, api_key_status)
+		VALUES (?, ?, ?, ?, 'running', 'active')`,
+		fx.AppID, fx.OrgID, orgAdminID, fx.AppName,
 	); err != nil {
 		return fx, fmt.Errorf("create app: %w", err)
 	}
 
-	// 5) 创建对应 channel_binding（unbound 占位，留给 e2e 走绑定流程）。
+	// 4) 创建对应 channel_binding（unbound 占位，留给 e2e 走绑定流程）。
 	if _, err := db.ExecContext(ctx, `
 		INSERT INTO channel_bindings (id, app_id, channel_type, status)
 		VALUES (?, ?, 'wechat', 'unbound')

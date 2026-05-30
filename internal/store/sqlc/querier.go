@@ -56,18 +56,10 @@ type Querier interface {
 	CreateRefreshToken(ctx context.Context, arg CreateRefreshTokenParams) error
 	CreateUser(ctx context.Context, arg CreateUserParams) error
 	DeleteExpiredRefreshTokens(ctx context.Context) error
-	// 批量清理过期实例采样，避免全表 DELETE 锁争用；
-	// MySQL 不支持 LIMIT 直接用于 IN 子查询，故用双层派生表绕过限制。
-	DeleteOldInstanceResourceSamples(ctx context.Context, arg DeleteOldInstanceResourceSamplesParams) (int64, error)
-	// 批量清理过期节点采样，避免全表 DELETE 锁争用；
-	// MySQL 不支持 LIMIT 直接用于 IN 子查询，故用双层派生表绕过限制。
-	DeleteOldNodeResourceSamples(ctx context.Context, arg DeleteOldNodeResourceSamplesParams) (int64, error)
 	// 删除本地 dataset 映射；document 缓存通过外键级联清理。
 	DeleteRAGFlowDatasetMapping(ctx context.Context, id string) error
 	// 删除本地 document 缓存；RAGFlow 远端删除由 service 在同一业务流程中处理。
 	DeleteRAGFlowDocumentMapping(ctx context.Context, id string) error
-	EnrollRuntimeNodeInsert(ctx context.Context, arg EnrollRuntimeNodeInsertParams) error
-	EnrollRuntimeNodeUpdate(ctx context.Context, arg EnrollRuntimeNodeUpdateParams) error
 	GetActiveAppByOwner(ctx context.Context, ownerUserID string) (App, error)
 	GetApp(ctx context.Context, id string) (App, error)
 	// 按 control token（per-app 三用：bootstrap / oc-kb / oc-ops）的 hash 反查当前 app；
@@ -83,8 +75,6 @@ type Querier interface {
 	// reaper 通过 payload_json->>'$.app_id' 查最近一份 app_initialize job。
 	// 用 ORDER BY created_at DESC + LIMIT 1 取最新；不存在返回 sql.ErrNoRows。
 	GetLatestAppInitJob(ctx context.Context, appID json.RawMessage) (Job, error)
-	GetLatestInstanceResourceSample(ctx context.Context, appID string) (InstanceResourceSample, error)
-	GetLatestNodeResourceSample(ctx context.Context, runtimeNodeID string) (NodeResourceSample, error)
 	// 组织列表复制登录信息时只需要一个可登录的组织管理员用户名。
 	// 密码明文不落库，因此这里只返回账号名，密码提示由调用方生成。
 	GetOrgAdminByOrg(ctx context.Context, orgID null.String) (User, error)
@@ -106,21 +96,12 @@ type Querier interface {
 	GetRechargeRecord(ctx context.Context, id string) (RechargeRecord, error)
 	GetRefreshToken(ctx context.Context, id string) (RefreshToken, error)
 	GetRefreshTokenByHash(ctx context.Context, tokenHash string) (RefreshToken, error)
-	GetRuntimeNode(ctx context.Context, id string) (RuntimeNode, error)
-	GetRuntimeNodeByAgentID(ctx context.Context, agentID null.String) (RuntimeNode, error)
-	GetRuntimeNodeByName(ctx context.Context, name string) (RuntimeNode, error)
 	GetUser(ctx context.Context, id string) (User, error)
 	GetUserByOrgAndUsername(ctx context.Context, arg GetUserByOrgAndUsernameParams) (User, error)
 	GetUserByUsername(ctx context.Context, username string) (User, error)
 	// 用于组织创建链路失败时回滚刚刚 INSERT 的孤儿记录。
 	// 正常生命周期不可见此查询；普通"删除"必须走 SoftDeleteOrganization。
 	HardDeleteOrganization(ctx context.Context, id string) error
-	InsertInstanceResourceSample(ctx context.Context, arg InsertInstanceResourceSampleParams) error
-	InsertNodeResourceSample(ctx context.Context, arg InsertNodeResourceSampleParams) error
-	// ListActiveNodesWithAppCounts 列出所有 active 节点并附带其当前未删除应用数量。
-	// OnboardingService 自动选节点时按剩余容量过滤；剩余容量 = max_apps - app_count，
-	// max_apps NULL 表示不限。degraded / unreachable / disabled 均不参与新应用调度。
-	ListActiveNodesWithAppCounts(ctx context.Context) ([]ListActiveNodesWithAppCountsRow, error)
 	// 全量返回活跃组织（deleted_at IS NULL），不分页；
 	// 仅供平台内部聚合使用（如 GetOrgUsageBreakdown），请勿用于用户可见的列表接口。
 	ListAllActiveOrganizations(ctx context.Context) ([]Organization, error)
@@ -134,14 +115,6 @@ type Querier interface {
 	ListAuditLogsByOrg(ctx context.Context, arg ListAuditLogsByOrgParams) ([]ListAuditLogsByOrgRow, error)
 	// 同 ListAuditLogsByOrg，按 target_type + target_id 过滤。
 	ListAuditLogsByTarget(ctx context.Context, arg ListAuditLogsByTargetParams) ([]ListAuditLogsByTargetRow, error)
-	ListInstanceResourceBuckets(ctx context.Context, arg ListInstanceResourceBucketsParams) ([]ListInstanceResourceBucketsRow, error)
-	ListInstanceResourceSamples(ctx context.Context, arg ListInstanceResourceSamplesParams) ([]InstanceResourceSample, error)
-	ListLatestInstanceResourceSamplesByNode(ctx context.Context, runtimeNodeID string) ([]InstanceResourceSample, error)
-	ListLatestNodeResourceSamples(ctx context.Context, runtimeNodeIds []string) ([]NodeResourceSample, error)
-	ListNodeInstanceResourceBuckets(ctx context.Context, arg ListNodeInstanceResourceBucketsParams) ([]ListNodeInstanceResourceBucketsRow, error)
-	ListNodeInstanceResourceSamples(ctx context.Context, arg ListNodeInstanceResourceSamplesParams) ([]InstanceResourceSample, error)
-	ListNodeResourceBuckets(ctx context.Context, arg ListNodeResourceBucketsParams) ([]ListNodeResourceBucketsRow, error)
-	ListNodeResourceSamples(ctx context.Context, arg ListNodeResourceSamplesParams) ([]NodeResourceSample, error)
 	ListOrganizations(ctx context.Context, arg ListOrganizationsParams) ([]Organization, error)
 	// 扁平列出某个组织或实例知识库文件，支持按状态和文件名过滤。
 	ListRAGFlowDocumentsByScope(ctx context.Context, arg ListRAGFlowDocumentsByScopeParams) ([]RagflowDocument, error)
@@ -156,7 +129,6 @@ type Querier interface {
 	// running 是常态；binding_waiting 表示 pod 已起但渠道还在登录中，也需要 reconcile。
 	// spec-A2b：去掉 runtime_node_id / container_id（k8s 路径不再写这两列），消费方仅用 id。
 	ListRunningApps(ctx context.Context) ([]string, error)
-	ListRuntimeNodes(ctx context.Context, arg ListRuntimeNodesParams) ([]RuntimeNode, error)
 	// reaper 扫描 init 子状态下连续 90s 无更新的孤儿；阈值由调用方传入。
 	// 包含新旧两套 init 状态，确保历史孤儿也能被正确清理。
 	// spec-A2b：去掉 runtime_node_id（k8s 路径不再写该列），reaper 仅需 id / status 重置孤儿。
@@ -208,7 +180,6 @@ type Querier interface {
 	SetOrganizationStatus(ctx context.Context, arg SetOrganizationStatusParams) error
 	// 远端 dataset 创建成功后写入 RAGFlow ID，并清理上一轮生命周期错误。
 	SetRAGFlowDatasetActive(ctx context.Context, arg SetRAGFlowDatasetActiveParams) error
-	SetRuntimeNodeStatus(ctx context.Context, arg SetRuntimeNodeStatusParams) error
 	// disabled 时同步写 deleted_at（下线时间戳）；enabled 时清空，让重启用户能恢复。
 	SetUserStatus(ctx context.Context, arg SetUserStatusParams) error
 	SoftDeleteApp(ctx context.Context, id string) error
@@ -230,9 +201,6 @@ type Querier interface {
 	UpdateOrganizationProfile(ctx context.Context, arg UpdateOrganizationProfileParams) error
 	// 回写解析状态、进度和错误；状态值由 service 层从 RAGFlow run 值归一化。
 	UpdateRAGFlowDocumentParseStatus(ctx context.Context, arg UpdateRAGFlowDocumentParseStatusParams) error
-	UpdateRuntimeNodeHeartbeat(ctx context.Context, arg UpdateRuntimeNodeHeartbeatParams) error
-	UpdateRuntimeNodeProbeFailure(ctx context.Context, arg UpdateRuntimeNodeProbeFailureParams) error
-	UpdateRuntimeNodeProbeSuccess(ctx context.Context, arg UpdateRuntimeNodeProbeSuccessParams) error
 	UpdateUserPassword(ctx context.Context, arg UpdateUserPasswordParams) error
 	UpdateUserProfile(ctx context.Context, arg UpdateUserProfileParams) error
 }

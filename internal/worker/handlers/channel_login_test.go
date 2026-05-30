@@ -7,7 +7,6 @@ import (
 	"testing"
 	"time"
 
-	"github.com/guregu/null/v5"
 	"github.com/stretchr/testify/require"
 	"oc-manager/internal/domain"
 	"oc-manager/internal/integrations/channel"
@@ -29,7 +28,6 @@ const (
 	testChannelWorkerAppID   = "00000000-0000-0000-0000-00000000c101"
 	testChannelWorkerOrgID   = "00000000-0000-0000-0000-00000000c102"
 	testChannelWorkerOwnerID = "00000000-0000-0000-0000-00000000c103"
-	testChannelWorkerNodeID  = "00000000-0000-0000-0000-00000000c104"
 )
 
 // TestChannelStartLoginHandlerWritesChallenge 验证渠道启动登录处理器写入Challenge的成功路径场景。
@@ -340,14 +338,13 @@ type channelWorkerStore struct {
 }
 
 // newChannelWorkerStore 构造 channelWorkerStore；ID 字段迁移为 string（MySQL uuid）。
+// spec-A2b：runtime_node_id / container_id 已从 schema 删除，不再填充。
 func newChannelWorkerStore(t *testing.T) *channelWorkerStore {
 	app := sqlc.App{
-		ID:            testChannelWorkerAppID,
-		OrgID:         testChannelWorkerOrgID,
-		OwnerUserID:   testChannelWorkerOwnerID,
-		RuntimeNodeID: null.StringFrom(testChannelWorkerNodeID), // RuntimeNodeID nullable（spec-A2a）
-		Status:        domain.AppStatusBindingWaiting,
-		ContainerID:   null.StringFrom("ctr-1"),
+		ID:          testChannelWorkerAppID,
+		OrgID:       testChannelWorkerOrgID,
+		OwnerUserID: testChannelWorkerOwnerID,
+		Status:      domain.AppStatusBindingWaiting,
 	}
 	return &channelWorkerStore{
 		t:   t,

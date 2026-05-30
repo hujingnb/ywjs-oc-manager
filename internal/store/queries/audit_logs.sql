@@ -47,9 +47,8 @@ SELECT
         (SELECT o.name FROM organizations o
             WHERE al.target_type = 'organization' AND o.id = al.target_id),
         (SELECT COALESCE(NULLIF(tu.display_name, ''), tu.username) FROM users tu
-            WHERE al.target_type IN ('user', 'member') AND tu.id = al.target_id),
-        (SELECT n.name FROM runtime_nodes n
-            WHERE al.target_type = 'runtime_node' AND n.id = al.target_id)
+            WHERE al.target_type IN ('user', 'member') AND tu.id = al.target_id)
+        -- runtime_node target_type 已随节点概念删除（spec-A2b），不再提供名称解析
     ) AS target_name,
     COALESCE(
         (SELECT a.deleted_at IS NOT NULL FROM apps a
@@ -90,9 +89,8 @@ SELECT
         (SELECT o.name FROM organizations o
             WHERE al.target_type = 'organization' AND o.id = al.target_id),
         (SELECT COALESCE(NULLIF(tu.display_name, ''), tu.username) FROM users tu
-            WHERE al.target_type IN ('user', 'member') AND tu.id = al.target_id),
-        (SELECT n.name FROM runtime_nodes n
-            WHERE al.target_type = 'runtime_node' AND n.id = al.target_id)
+            WHERE al.target_type IN ('user', 'member') AND tu.id = al.target_id)
+        -- runtime_node target_type 已随节点概念删除（spec-A2b），不再提供名称解析
     ) AS target_name,
     COALESCE(
         (SELECT a.deleted_at IS NOT NULL FROM apps a

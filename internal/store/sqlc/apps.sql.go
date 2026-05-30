@@ -69,7 +69,7 @@ func (q *Queries) CreateApp(ctx context.Context, arg CreateAppParams) error {
 }
 
 const getActiveAppByOwner = `-- name: GetActiveAppByOwner :one
-SELECT id, org_id, owner_user_id, name, description, status, container_id, container_name, newapi_key_id, newapi_key_ciphertext, api_key_status, runtime_snapshot_json, runtime_snapshot_at, restart_policy_json, health_state_json, progress_current, progress_total, last_error_status, last_error_message, runtime_image_ref, runtime_image_sha256, newapi_key_name, version_id, applied_version_revision, applied_image_ref, runtime_token_hash, runtime_token_ciphertext, created_at, updated_at, deleted_at, owner_active_key, runtime_token_active_key, runtime_node_id
+SELECT id, org_id, owner_user_id, name, description, status, newapi_key_id, newapi_key_ciphertext, api_key_status, runtime_snapshot_json, runtime_snapshot_at, restart_policy_json, health_state_json, progress_current, progress_total, last_error_status, last_error_message, runtime_image_ref, runtime_image_sha256, newapi_key_name, version_id, applied_version_revision, applied_image_ref, runtime_token_hash, runtime_token_ciphertext, created_at, updated_at, deleted_at, owner_active_key, runtime_token_active_key
 FROM apps
 WHERE owner_user_id = ? AND deleted_at IS NULL
 `
@@ -84,8 +84,6 @@ func (q *Queries) GetActiveAppByOwner(ctx context.Context, ownerUserID string) (
 		&i.Name,
 		&i.Description,
 		&i.Status,
-		&i.ContainerID,
-		&i.ContainerName,
 		&i.NewapiKeyID,
 		&i.NewapiKeyCiphertext,
 		&i.ApiKeyStatus,
@@ -110,13 +108,12 @@ func (q *Queries) GetActiveAppByOwner(ctx context.Context, ownerUserID string) (
 		&i.DeletedAt,
 		&i.OwnerActiveKey,
 		&i.RuntimeTokenActiveKey,
-		&i.RuntimeNodeID,
 	)
 	return i, err
 }
 
 const getApp = `-- name: GetApp :one
-SELECT id, org_id, owner_user_id, name, description, status, container_id, container_name, newapi_key_id, newapi_key_ciphertext, api_key_status, runtime_snapshot_json, runtime_snapshot_at, restart_policy_json, health_state_json, progress_current, progress_total, last_error_status, last_error_message, runtime_image_ref, runtime_image_sha256, newapi_key_name, version_id, applied_version_revision, applied_image_ref, runtime_token_hash, runtime_token_ciphertext, created_at, updated_at, deleted_at, owner_active_key, runtime_token_active_key, runtime_node_id
+SELECT id, org_id, owner_user_id, name, description, status, newapi_key_id, newapi_key_ciphertext, api_key_status, runtime_snapshot_json, runtime_snapshot_at, restart_policy_json, health_state_json, progress_current, progress_total, last_error_status, last_error_message, runtime_image_ref, runtime_image_sha256, newapi_key_name, version_id, applied_version_revision, applied_image_ref, runtime_token_hash, runtime_token_ciphertext, created_at, updated_at, deleted_at, owner_active_key, runtime_token_active_key
 FROM apps
 WHERE id = ?
 `
@@ -131,8 +128,6 @@ func (q *Queries) GetApp(ctx context.Context, id string) (App, error) {
 		&i.Name,
 		&i.Description,
 		&i.Status,
-		&i.ContainerID,
-		&i.ContainerName,
 		&i.NewapiKeyID,
 		&i.NewapiKeyCiphertext,
 		&i.ApiKeyStatus,
@@ -157,13 +152,12 @@ func (q *Queries) GetApp(ctx context.Context, id string) (App, error) {
 		&i.DeletedAt,
 		&i.OwnerActiveKey,
 		&i.RuntimeTokenActiveKey,
-		&i.RuntimeNodeID,
 	)
 	return i, err
 }
 
 const getAppByRuntimeTokenHash = `-- name: GetAppByRuntimeTokenHash :one
-SELECT id, org_id, owner_user_id, name, description, status, container_id, container_name, newapi_key_id, newapi_key_ciphertext, api_key_status, runtime_snapshot_json, runtime_snapshot_at, restart_policy_json, health_state_json, progress_current, progress_total, last_error_status, last_error_message, runtime_image_ref, runtime_image_sha256, newapi_key_name, version_id, applied_version_revision, applied_image_ref, runtime_token_hash, runtime_token_ciphertext, created_at, updated_at, deleted_at, owner_active_key, runtime_token_active_key, runtime_node_id
+SELECT id, org_id, owner_user_id, name, description, status, newapi_key_id, newapi_key_ciphertext, api_key_status, runtime_snapshot_json, runtime_snapshot_at, restart_policy_json, health_state_json, progress_current, progress_total, last_error_status, last_error_message, runtime_image_ref, runtime_image_sha256, newapi_key_name, version_id, applied_version_revision, applied_image_ref, runtime_token_hash, runtime_token_ciphertext, created_at, updated_at, deleted_at, owner_active_key, runtime_token_active_key
 FROM apps
 WHERE runtime_token_hash = ? AND deleted_at IS NULL
 `
@@ -180,8 +174,6 @@ func (q *Queries) GetAppByRuntimeTokenHash(ctx context.Context, runtimeTokenHash
 		&i.Name,
 		&i.Description,
 		&i.Status,
-		&i.ContainerID,
-		&i.ContainerName,
 		&i.NewapiKeyID,
 		&i.NewapiKeyCiphertext,
 		&i.ApiKeyStatus,
@@ -206,13 +198,12 @@ func (q *Queries) GetAppByRuntimeTokenHash(ctx context.Context, runtimeTokenHash
 		&i.DeletedAt,
 		&i.OwnerActiveKey,
 		&i.RuntimeTokenActiveKey,
-		&i.RuntimeNodeID,
 	)
 	return i, err
 }
 
 const getAppWithVersion = `-- name: GetAppWithVersion :one
-SELECT apps.id, apps.org_id, apps.owner_user_id, apps.name, apps.description, apps.status, apps.container_id, apps.container_name, apps.newapi_key_id, apps.newapi_key_ciphertext, apps.api_key_status, apps.runtime_snapshot_json, apps.runtime_snapshot_at, apps.restart_policy_json, apps.health_state_json, apps.progress_current, apps.progress_total, apps.last_error_status, apps.last_error_message, apps.runtime_image_ref, apps.runtime_image_sha256, apps.newapi_key_name, apps.version_id, apps.applied_version_revision, apps.applied_image_ref, apps.runtime_token_hash, apps.runtime_token_ciphertext, apps.created_at, apps.updated_at, apps.deleted_at, apps.owner_active_key, apps.runtime_token_active_key, apps.runtime_node_id, av.revision AS version_revision, av.image_id AS version_image_id
+SELECT apps.id, apps.org_id, apps.owner_user_id, apps.name, apps.description, apps.status, apps.newapi_key_id, apps.newapi_key_ciphertext, apps.api_key_status, apps.runtime_snapshot_json, apps.runtime_snapshot_at, apps.restart_policy_json, apps.health_state_json, apps.progress_current, apps.progress_total, apps.last_error_status, apps.last_error_message, apps.runtime_image_ref, apps.runtime_image_sha256, apps.newapi_key_name, apps.version_id, apps.applied_version_revision, apps.applied_image_ref, apps.runtime_token_hash, apps.runtime_token_ciphertext, apps.created_at, apps.updated_at, apps.deleted_at, apps.owner_active_key, apps.runtime_token_active_key, av.revision AS version_revision, av.image_id AS version_image_id
 FROM apps
 JOIN assistant_versions av ON av.id = apps.version_id
 WHERE apps.id = ?
@@ -235,8 +226,6 @@ func (q *Queries) GetAppWithVersion(ctx context.Context, id string) (GetAppWithV
 		&i.App.Name,
 		&i.App.Description,
 		&i.App.Status,
-		&i.App.ContainerID,
-		&i.App.ContainerName,
 		&i.App.NewapiKeyID,
 		&i.App.NewapiKeyCiphertext,
 		&i.App.ApiKeyStatus,
@@ -261,7 +250,6 @@ func (q *Queries) GetAppWithVersion(ctx context.Context, id string) (GetAppWithV
 		&i.App.DeletedAt,
 		&i.App.OwnerActiveKey,
 		&i.App.RuntimeTokenActiveKey,
-		&i.App.RuntimeNodeID,
 		&i.VersionRevision,
 		&i.VersionImageID,
 	)
@@ -269,7 +257,7 @@ func (q *Queries) GetAppWithVersion(ctx context.Context, id string) (GetAppWithV
 }
 
 const listAppsByOrg = `-- name: ListAppsByOrg :many
-SELECT id, org_id, owner_user_id, name, description, status, container_id, container_name, newapi_key_id, newapi_key_ciphertext, api_key_status, runtime_snapshot_json, runtime_snapshot_at, restart_policy_json, health_state_json, progress_current, progress_total, last_error_status, last_error_message, runtime_image_ref, runtime_image_sha256, newapi_key_name, version_id, applied_version_revision, applied_image_ref, runtime_token_hash, runtime_token_ciphertext, created_at, updated_at, deleted_at, owner_active_key, runtime_token_active_key, runtime_node_id
+SELECT id, org_id, owner_user_id, name, description, status, newapi_key_id, newapi_key_ciphertext, api_key_status, runtime_snapshot_json, runtime_snapshot_at, restart_policy_json, health_state_json, progress_current, progress_total, last_error_status, last_error_message, runtime_image_ref, runtime_image_sha256, newapi_key_name, version_id, applied_version_revision, applied_image_ref, runtime_token_hash, runtime_token_ciphertext, created_at, updated_at, deleted_at, owner_active_key, runtime_token_active_key
 FROM apps
 WHERE org_id = ? AND deleted_at IS NULL
 ORDER BY created_at DESC, id DESC
@@ -298,8 +286,6 @@ func (q *Queries) ListAppsByOrg(ctx context.Context, arg ListAppsByOrgParams) ([
 			&i.Name,
 			&i.Description,
 			&i.Status,
-			&i.ContainerID,
-			&i.ContainerName,
 			&i.NewapiKeyID,
 			&i.NewapiKeyCiphertext,
 			&i.ApiKeyStatus,
@@ -324,7 +310,6 @@ func (q *Queries) ListAppsByOrg(ctx context.Context, arg ListAppsByOrgParams) ([
 			&i.DeletedAt,
 			&i.OwnerActiveKey,
 			&i.RuntimeTokenActiveKey,
-			&i.RuntimeNodeID,
 		); err != nil {
 			return nil, err
 		}
@@ -340,7 +325,7 @@ func (q *Queries) ListAppsByOrg(ctx context.Context, arg ListAppsByOrgParams) ([
 }
 
 const listAppsByOrgWithVersion = `-- name: ListAppsByOrgWithVersion :many
-SELECT apps.id, apps.org_id, apps.owner_user_id, apps.name, apps.description, apps.status, apps.container_id, apps.container_name, apps.newapi_key_id, apps.newapi_key_ciphertext, apps.api_key_status, apps.runtime_snapshot_json, apps.runtime_snapshot_at, apps.restart_policy_json, apps.health_state_json, apps.progress_current, apps.progress_total, apps.last_error_status, apps.last_error_message, apps.runtime_image_ref, apps.runtime_image_sha256, apps.newapi_key_name, apps.version_id, apps.applied_version_revision, apps.applied_image_ref, apps.runtime_token_hash, apps.runtime_token_ciphertext, apps.created_at, apps.updated_at, apps.deleted_at, apps.owner_active_key, apps.runtime_token_active_key, apps.runtime_node_id, av.revision AS version_revision, av.image_id AS version_image_id
+SELECT apps.id, apps.org_id, apps.owner_user_id, apps.name, apps.description, apps.status, apps.newapi_key_id, apps.newapi_key_ciphertext, apps.api_key_status, apps.runtime_snapshot_json, apps.runtime_snapshot_at, apps.restart_policy_json, apps.health_state_json, apps.progress_current, apps.progress_total, apps.last_error_status, apps.last_error_message, apps.runtime_image_ref, apps.runtime_image_sha256, apps.newapi_key_name, apps.version_id, apps.applied_version_revision, apps.applied_image_ref, apps.runtime_token_hash, apps.runtime_token_ciphertext, apps.created_at, apps.updated_at, apps.deleted_at, apps.owner_active_key, apps.runtime_token_active_key, av.revision AS version_revision, av.image_id AS version_image_id
 FROM apps
 JOIN assistant_versions av ON av.id = apps.version_id
 WHERE apps.org_id = ? AND apps.deleted_at IS NULL
@@ -377,8 +362,6 @@ func (q *Queries) ListAppsByOrgWithVersion(ctx context.Context, arg ListAppsByOr
 			&i.App.Name,
 			&i.App.Description,
 			&i.App.Status,
-			&i.App.ContainerID,
-			&i.App.ContainerName,
 			&i.App.NewapiKeyID,
 			&i.App.NewapiKeyCiphertext,
 			&i.App.ApiKeyStatus,
@@ -403,7 +386,6 @@ func (q *Queries) ListAppsByOrgWithVersion(ctx context.Context, arg ListAppsByOr
 			&i.App.DeletedAt,
 			&i.App.OwnerActiveKey,
 			&i.App.RuntimeTokenActiveKey,
-			&i.App.RuntimeNodeID,
 			&i.VersionRevision,
 			&i.VersionImageID,
 		); err != nil {

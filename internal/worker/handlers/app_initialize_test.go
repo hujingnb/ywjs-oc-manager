@@ -301,21 +301,6 @@ func TestAppInitializeRejectsInvalidPayload(t *testing.T) {
 	require.Error(t, err)
 }
 
-// TestAppInitializeContainerStepSkippedWhenContainerExists 验证 ContainerID 已存在时
-// 旧字段保留不影响 k8s 路径（k8s 不再使用 ContainerID）。
-func TestAppInitializeContainerStepSkippedWhenContainerExists(t *testing.T) {
-	store := newAppInitStub(t)
-	// ContainerID 迁移为 null.String；k8s 路径忽略此字段，不触发写 container 操作。
-	store.app.ContainerID = null.StringFrom("already-there")
-	client := &fakeNewAPI{result: newapi.APIKey{ID: 1, Key: "k"}}
-
-	handler := NewAppInitializeHandler(store, client, AppInitializeConfig{Cipher: testCipher(t), ResolveRuntimeImage: testResolveRuntimeImage})
-	// k8s 路径不需要 AppInputUploader，直接调用，ContainerID 字段不应影响结果。
-	err := handler.Handle(context.Background(), buildJob(t, testAppID, ""))
-	require.NoError(t, err)
-	// 终态应到达 binding_waiting，ContainerID 字段不影响 k8s 路径。
-	assert.Equal(t, domain.AppStatusBindingWaiting, store.app.Status, "k8s 路径 ContainerID 已存在不影响初始化流程")
-}
 
 // TestEnsureAPIKeyKeepsNewAPITokenModelsUnrestricted 验证 new-api token 创建不限制模型。
 func TestEnsureAPIKeyKeepsNewAPITokenModelsUnrestricted(t *testing.T) {

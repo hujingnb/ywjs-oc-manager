@@ -8182,7 +8182,6 @@ export interface components {
         };
         "service.AppResult": {
             api_key_status?: string;
-            container_id?: string;
             description?: string;
             id?: string;
             /** @description LastErrorMessage 上次进入 error 时的错误原始文本;供前端直接展示给用户。 */
@@ -8214,7 +8213,6 @@ export interface components {
              *     仅平台管理员可见；与 RuntimeImageRef 共同标识节点上运行的精确镜像版本。
              */
             runtime_image_sha256?: string;
-            runtime_node_id?: string;
             status?: string;
             /** @description VersionID 是实例绑定的助手版本 id；空表示未绑定（仅历史数据）。 */
             version_id?: string;

@@ -199,10 +199,10 @@ func (s *RuntimeOperationService) Trigger(ctx context.Context, principal auth.Pr
 		return RuntimeOperationResult{}, ErrRuntimeOperationDenied
 	}
 	jobType := jobTypeFor(op)
+	// spec-A2b：runtime_node 字段已随节点概念删除，payload 不再携带。
 	payload, err := json.Marshal(map[string]any{
 		"app_id":       app.ID,
 		"operation":    string(op),
-		"runtime_node": app.RuntimeNodeID,
 		"requested_by": principal.UserID,
 	})
 	if err != nil {
@@ -310,9 +310,9 @@ func (s *RuntimeOperationService) RequestInitialize(ctx context.Context, princip
 	// spec-A2b：container_id / container_name 由 k8s Deployment 管理，manager 不写入，
 	// RequestInitialize 不再调用 SetAppContainer 清空这两列。
 
+	// spec-A2b：runtime_node 字段已随节点概念删除，payload 不再携带。
 	payload, err := json.Marshal(map[string]any{
 		"app_id":       app.ID,
-		"runtime_node": app.RuntimeNodeID,
 		"requested_by": principal.UserID,
 	})
 	if err != nil {

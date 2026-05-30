@@ -9,7 +9,6 @@ import (
 	"testing"
 	"time"
 
-	null "github.com/guregu/null/v5"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 	"oc-manager/internal/auth"
@@ -22,8 +21,6 @@ const (
 	testWorkAppID = "00000000-0000-0000-0000-000000000f01"
 	testWorkOrg   = "00000000-0000-0000-0000-000000000f02"
 	testWorkOwner = "00000000-0000-0000-0000-000000000f03"
-	// testWorkNode 仅保留常量以维持字段语义一致性，S3 版本不再检查 RuntimeNodeID
-	testWorkNode = "00000000-0000-0000-0000-000000000f04"
 )
 
 // fakeWorkspaceObjectStore 实现 storage.ObjectStore 接口，用于 workspace 服务单元测试。
@@ -89,15 +86,14 @@ func (f *fakeWorkspaceObjectStore) MovePrefix(_ context.Context, _, _ string) er
 func (f *fakeWorkspaceObjectStore) DeletePrefix(_ context.Context, _ string) error   { return nil }
 
 // newWorkspaceStub 构造带有合法 App 记录的存储桩。
-// S3 版本保留 RuntimeNodeID 字段（其 Valid 不影响 S3 分支的工作，仅供鉴权路径判断）。
+// spec-A2b：runtime_node_id 列已从 schema 删除，不再填充。
 func newWorkspaceStub(t *testing.T) *workspaceStub {
 	app := sqlc.App{
-		ID:            mustUUID(t, testWorkAppID),
-		OrgID:         mustUUID(t, testWorkOrg),
-		OwnerUserID:   mustUUID(t, testWorkOwner),
-		RuntimeNodeID: null.StringFrom(mustUUID(t, testWorkNode)), // 保留以确保字段初始化完整
-		Status:        domain.AppStatusRunning,
-		ApiKeyStatus:  domain.APIKeyStatusActive,
+		ID:           mustUUID(t, testWorkAppID),
+		OrgID:        mustUUID(t, testWorkOrg),
+		OwnerUserID:  mustUUID(t, testWorkOwner),
+		Status:       domain.AppStatusRunning,
+		ApiKeyStatus: domain.APIKeyStatusActive,
 	}
 	return &workspaceStub{t: t, app: app}
 }

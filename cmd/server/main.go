@@ -469,11 +469,7 @@ func runManager(ctx context.Context, cfg config.Config, logOut io.Writer) error 
 		appStatusReconciler := service.NewAppStatusReconciler(dbStore.Queries, orch)
 		appStatusTask = service.NewPeriodicReconciler("app_status_reconcile", 15*time.Second, appStatusReconciler.Tick)
 	}
-	resourceCleanup := service.NewResourceSampleCleanup(dbStore.Queries)
-	resourceCleanupTask := service.NewPeriodicReconciler("resource_sample_cleanup", time.Hour, func(ctx context.Context) error {
-		_, _, err := resourceCleanup.RunOnce(ctx)
-		return err
-	})
+	// spec-A2b：node_resource_samples / instance_resource_samples 已删，ResourceSampleCleanup 不再装配。
 
 	// ragflowParseStatusTask 周期把 RAGFlow 端的解析状态回写本地，
 	// 取代旧"列表请求时同步刷新"的策略：无人浏览列表时状态也能收敛。
@@ -512,7 +508,6 @@ func runManager(ctx context.Context, cfg config.Config, logOut io.Writer) error 
 	if appStatusTask != nil {
 		eg.Go(func() error { return appStatusTask.Run(gctx, logger) })
 	}
-	eg.Go(func() error { return resourceCleanupTask.Run(gctx, logger) })
 	if ragflowParseStatusTask != nil {
 		eg.Go(func() error { return ragflowParseStatusTask.Run(gctx, logger) })
 	}

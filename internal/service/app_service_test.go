@@ -91,14 +91,14 @@ type appServiceStoreStub struct {
 
 func (s *appServiceStoreStub) mustSeedApp(t *testing.T) sqlc.App {
 	t.Helper()
+	// spec-A2b：runtime_node_id / container_id / container_name 已从 schema 删除，不再填充。
 	s.app = sqlc.App{
-		ID:            mustUUID(t, testAppServiceAppID),
-		OrgID:         s.organization.ID,
-		OwnerUserID:   mustUUID(t, testMemUID),
-		RuntimeNodeID: null.StringFrom(mustUUID(t, "00000000-0000-0000-0000-000000002002")),
-		Name:          "测试实例",
-		Status:        domain.AppStatusRunning,
-		ApiKeyStatus:  domain.APIKeyStatusActive,
+		ID:           mustUUID(t, testAppServiceAppID),
+		OrgID:        s.organization.ID,
+		OwnerUserID:  mustUUID(t, testMemUID),
+		Name:         "测试实例",
+		Status:       domain.AppStatusRunning,
+		ApiKeyStatus: domain.APIKeyStatusActive,
 	}
 	return s.app
 }

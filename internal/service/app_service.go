@@ -59,16 +59,15 @@ func (s *AppService) SetJobNotifier(notifier JobNotifier) {
 func (s *AppService) SetImageResolver(resolver AppImageResolver) { s.imageResolver = resolver }
 
 // AppResult 是对外的应用视图。
+// spec-A2b：runtime_node_id / container_id / container_name 已从 schema 删除，本结构体亦不再携带。
 type AppResult struct {
-	ID            string `json:"id"`
-	OrgID         string `json:"org_id"`
-	OwnerUserID   string `json:"owner_user_id"`
-	RuntimeNodeID string `json:"runtime_node_id,omitempty"`
-	Name          string `json:"name"`
-	Description   string `json:"description,omitempty"`
-	Status        string `json:"status"`
-	ContainerID   string `json:"container_id,omitempty"`
-	APIKeyStatus  string `json:"api_key_status"`
+	ID          string `json:"id"`
+	OrgID       string `json:"org_id"`
+	OwnerUserID string `json:"owner_user_id"`
+	Name        string `json:"name"`
+	Description string `json:"description,omitempty"`
+	Status      string `json:"status"`
+	APIKeyStatus string `json:"api_key_status"`
 	// NewapiKeyID 是 new-api 中 token 的数值 id；schema 上是 text 列存的字符串，
 	// 这里解析成 int64 方便 usage service 直接调 GetAPIKey。0 表示未绑定。
 	NewapiKeyID int64 `json:"newapi_key_id,omitempty"`
@@ -152,6 +151,7 @@ func (s *AppService) ListByOrg(ctx context.Context, principal auth.Principal, or
 }
 
 func toAppResult(app sqlc.App) AppResult {
+	// spec-A2b：runtime_node_id / container_id / container_name 已从 schema 删除，不再映射。
 	result := AppResult{
 		ID:           app.ID,
 		OrgID:        app.OrgID,
@@ -159,14 +159,9 @@ func toAppResult(app sqlc.App) AppResult {
 		Name:         app.Name,
 		Status:       app.Status,
 		APIKeyStatus: app.ApiKeyStatus,
-		// RuntimeNodeID nullable（spec-A2a）：Valid=false 时为空字符串，表示 k8s app 未绑定节点。
-		RuntimeNodeID: app.RuntimeNodeID.String,
 	}
 	if app.Description.Valid {
 		result.Description = app.Description.String
-	}
-	if app.ContainerID.Valid {
-		result.ContainerID = app.ContainerID.String
 	}
 	if app.NewapiKeyID.Valid {
 		// schema 上 newapi_key_id 是 text，但 manager 写入的恒是 int64 字符串。

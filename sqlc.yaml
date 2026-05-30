@@ -4,6 +4,7 @@ sql:
     schema:
       - internal/migrations/000001_baseline.up.sql
       - internal/migrations/000002_apps_runtime_node_nullable.up.sql
+      - internal/migrations/000003_drop_node_concept.up.sql
     queries: internal/store/queries
     gen:
       go:
