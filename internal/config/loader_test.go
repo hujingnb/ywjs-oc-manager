@@ -16,7 +16,7 @@ import (
 const validBase64MasterKey = "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA="
 
 // fullValidYAML 返回一份带新字段的合法配置文本，便于多个用例共用。
-// 任何 security/hermes/agent 校验路径都应基于此文本派生最小修改。
+// 任何 security/hermes 校验路径都应基于此文本派生最小修改。
 func fullValidYAML() string {
 	return `
 app:
@@ -45,8 +45,6 @@ hermes:
     你是 Hermes 智能助手。
   workspace:
     archive_retention_days: 14
-agent:
-  heartbeat_interval_seconds: 30
 `
 }
 
@@ -65,7 +63,6 @@ func TestLoad_DoesNotExpandEnvPlaceholders(t *testing.T) {
 	require.Equal(t, "15m0s", cfg.Auth.AccessTokenTTL.Duration.String())
 	require.Equal(t, validBase64MasterKey, cfg.Security.MasterKey)
 	require.Equal(t, 14, cfg.Hermes.Workspace.ArchiveRetentionDays)
-	require.Equal(t, 30, cfg.Agent.HeartbeatIntervalSeconds)
 }
 
 // TestLoad_RejectsUnknownFields 校验 yaml 字段拼写错误会 fail-fast，避免可选配置因 typo 被静默忽略。

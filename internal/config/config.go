@@ -24,8 +24,6 @@ type Config struct {
 	Hermes HermesConfig `yaml:"hermes"`
 	// RAGFlow 描述 manager 后端访问 RAGFlow HTTP API 所需配置。
 	RAGFlow RAGFlowConfig `yaml:"ragflow"`
-	// Agent 描述 manager 与 runtime agent 之间的心跳协议参数。
-	Agent AgentConfig `yaml:"agent"`
 	// NewAPI 描述 manager 调用 new-api 管理接口所需的凭据。
 	NewAPI NewAPIConfig `yaml:"newapi"`
 	// Storage 是对象存储（S3）配置；整段可选，配置则要求关键字段齐全（见 loader 校验）。
@@ -159,12 +157,6 @@ type HermesLLMConfig struct {
 // ArchiveRetentionDays 控制 agent 端归档目录保留天数，0 表示不清理（仅本地调试场景使用）。
 type WorkspaceConfig struct {
 	ArchiveRetentionDays int `yaml:"archive_retention_days"`
-}
-
-// AgentConfig 描述 manager 与 runtime agent 的协议参数。
-// HeartbeatIntervalSeconds 是约定值，agent 注册成功后回写并按此频率上报心跳。
-type AgentConfig struct {
-	HeartbeatIntervalSeconds int `yaml:"heartbeat_interval_seconds"`
 }
 
 // NewAPIConfig 描述 manager 与 new-api 网关的连接参数。

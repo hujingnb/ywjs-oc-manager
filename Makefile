@@ -1,4 +1,4 @@
-.PHONY: test vet build sqlc-generate migrate-up migrate-down logs web-test web-typecheck web-build build-hermes-runtime hermes-inject-contract debug-ollama debug-newapi newapi-probe seed-e2e smoke-v102 openapi-gen web-types-gen openapi-check ssh-manager ssh-agent1 ssh-newapi logs-api logs-agent1 psql-manager redis-manager bh-logs local-up local-down local-reset local-stop local-start local-build local-migrate local-seed local-seed-e2e local-mc-init local-status local-logs local-shell cluster-create .guard-k3d-hosts build-ops-runtime local-build-ops
+.PHONY: test vet build sqlc-generate migrate-up migrate-down logs web-test web-typecheck web-build build-hermes-runtime hermes-inject-contract debug-ollama debug-newapi newapi-probe seed-e2e smoke-v102 openapi-gen web-types-gen openapi-check ssh-manager ssh-newapi logs-api psql-manager redis-manager bh-logs local-up local-down local-reset local-stop local-start local-build local-migrate local-seed local-seed-e2e local-mc-init local-status local-logs local-shell cluster-create .guard-k3d-hosts build-ops-runtime local-build-ops
 
 # 加载 .env（-include 在文件不存在时静默跳过，不报错）。
 # docker compose 会自动读取 .env，Makefile 显式 include 是为了让 SSH 等 target 也能访问其中变量。
@@ -41,7 +41,6 @@ override IMAGE_TAG := $(IMAGE_TIMESTAMP)-$(GIT_COMMIT_SHORT)$(GIT_DIRTY_SUFFIX)
 # 各服务生产镜像仓库（统一走 aliyun 私有 ACR ywjs_app 命名空间）。
 # 走其他 registry 时在命令行覆盖对应变量即可。
 API_IMAGE_REPO   ?= crpi-nu3ibz4f07feyghi.cn-beijing.personal.cr.aliyuncs.com/ywjs_app/oc-manager-api
-AGENT_IMAGE_REPO ?= crpi-nu3ibz4f07feyghi.cn-beijing.personal.cr.aliyuncs.com/ywjs_app/oc-manager-agent
 WEB_IMAGE_REPO   ?= crpi-nu3ibz4f07feyghi.cn-beijing.personal.cr.aliyuncs.com/ywjs_app/oc-manager-web
 
 # hermes runtime 生产镜像仓库，与上方三个服务保持一致命名风格。
@@ -223,10 +222,9 @@ vet: ## 跑 go vet ./...
 
 ##@ 构建
 
-build: ## 编译 server / migrate / oc-runtime-agent 到 tmp/build/
+build: ## 编译 server / migrate 到 tmp/build/
 	go build -o ./tmp/build/server ./cmd/server
 	go build -o ./tmp/build/migrate ./cmd/migrate
-	go build -o ./tmp/build/oc-runtime-agent ./runtime/agent
 
 ##@ 代码生成 (sqlc / OpenAPI / 前端类型)
 
@@ -265,9 +263,9 @@ build-hermes-runtime: hermes-inject-contract ## 本地 dev 构建 hermes runtime
 
 ##@ 镜像构建发布
 
-# api / agent 构建上下文为仓库根目录（需访问 go.mod / internal/ 等源码），
+# api 构建上下文为仓库根目录（需访问 go.mod / internal/ 等源码），
 # web 构建上下文为 web/ 子目录（前端工程相对自包含，无需整个仓库）。
-# 同一次 make 调用中四个服务共享 IMAGE_TAG，保证同批镜像 tag 一致且可追溯到同一源码提交。
+# 同一次 make 调用中多个服务共享 IMAGE_TAG，保证同批镜像 tag 一致且可追溯到同一源码提交。
 
 .PHONY: build-api-image
 build-api-image: .guard-image-git-state ## 本地构建 manager-api 生产镜像，tag 取当前时间戳和 git commit 前 8 位
@@ -280,18 +278,6 @@ push-api-image:
 .PHONY: release-api-image
 release-api-image: build-api-image push-api-image ## 构建并推送 manager-api 生产镜像
 	@echo "✅ manager-api 镜像 $(API_IMAGE_REPO):$(IMAGE_TAG) 已构建并推送"
-
-.PHONY: build-agent-image
-build-agent-image: .guard-image-git-state ## 本地构建 runtime-agent 生产镜像，tag 取当前时间戳和 git commit 前 8 位
-	docker build -t $(AGENT_IMAGE_REPO):$(IMAGE_TAG) -f runtime/agent/Dockerfile .
-
-.PHONY: push-agent-image
-push-agent-image:
-	docker push $(AGENT_IMAGE_REPO):$(IMAGE_TAG)
-
-.PHONY: release-agent-image
-release-agent-image: build-agent-image push-agent-image ## 构建并推送 runtime-agent 生产镜像
-	@echo "✅ runtime-agent 镜像 $(AGENT_IMAGE_REPO):$(IMAGE_TAG) 已构建并推送"
 
 .PHONY: build-web-image
 build-web-image: .guard-image-git-state ## 本地构建 manager-web 生产镜像，tag 取当前时间戳和 git commit 前 8 位
@@ -340,13 +326,12 @@ build-ops-runtime: .guard-image-git-state ## 构建 ops 运行时镜像并推生
 	docker push $(OPS_IMAGE_REPO):$(IMAGE_TAG)
 	@echo "✅ ops 镜像 $(OPS_IMAGE_REPO):$(IMAGE_TAG) 已构建并推送"
 
-# deploy-api / deploy-web / deploy-agent：一键完成本地构建推送 + 远程更新部署。
+# deploy-api / deploy-web：一键完成本地构建推送 + 远程更新部署。
 # 远程步骤：sed 原地更新 .env 中的镜像变量 → docker compose pull → docker compose up -d。
-# SSH 凭据复用 PROD_MANAGER_SSH_* / PROD_AGENT1_SSH_* 变量（从 .env 加载）。
-# deploy-agent 无法直接访问 agent 服务器，经由 manager 内网跳转，与 ssh-agent1 相同。
+# SSH 凭据复用 PROD_MANAGER_SSH_* 变量（从 .env 加载）。
 
 .PHONY: deploy-all
-deploy-all: deploy-api deploy-web deploy-agent ## 构建推送全部服务镜像并部署（api + web + agent）
+deploy-all: deploy-api deploy-web ## 构建推送全部服务镜像并部署（api + web）
 
 .PHONY: deploy-api
 deploy-api: release-api-image ## 构建推送 manager-api 并部署到 manage 服务器（更新 .env + compose up）
@@ -383,18 +368,6 @@ deploy-manager: release-api-image release-web-image ## 构建推送 manager-api 
 		"cd /opt/oc-manage \
 		 && sed -i 's|OCM_MANAGER_IMAGE=.*|OCM_MANAGER_IMAGE=$(API_IMAGE_REPO):$(IMAGE_TAG)|' .env \
 		 && sed -i 's|OCM_WEB_IMAGE=.*|OCM_WEB_IMAGE=$(WEB_IMAGE_REPO):$(IMAGE_TAG)|' .env \
-		 && docker compose pull \
-		 && docker compose up -d"
-
-.PHONY: deploy-agent
-deploy-agent: release-agent-image ## 构建推送 runtime-agent 并部署到 agent 服务器（经 manager 跳转，更新 .env + compose up）
-	sshpass -p "$(PROD_AGENT1_SSH_PASS)" ssh \
-		-p $(PROD_AGENT1_SSH_PORT) \
-		-o StrictHostKeyChecking=no \
-		-o "ProxyCommand=sshpass -p '$(PROD_MANAGER_SSH_PASS)' ssh -W %h:%p -p $(PROD_MANAGER_SSH_PORT) -o StrictHostKeyChecking=no $(PROD_MANAGER_SSH_USER)@$(PROD_MANAGER_SSH_HOST)" \
-		$(PROD_AGENT1_SSH_USER)@$(PROD_AGENT1_SSH_HOST) \
-		"cd /opt/runtime-agent \
-		 && sed -i 's|OC_RUNTIME_AGENT_IMAGE=.*|OC_RUNTIME_AGENT_IMAGE=$(AGENT_IMAGE_REPO):$(IMAGE_TAG)|' .env \
 		 && docker compose pull \
 		 && docker compose up -d"
 
@@ -461,16 +434,6 @@ ssh-manager: ## SSH 连接线上 manager 服务器（需 .env 中配置 PROD_MAN
 		-t $(PROD_MANAGER_SSH_USER)@$(PROD_MANAGER_SSH_HOST) \
 		"cd /opt/oc-manage && exec bash -l"
 
-# ssh-agent1 无法直接访问，先以 manager 为跳板通过内网连接 agent-1。
-# ProxyCommand 负责建立到 manager 的 SSH 隧道，外层 sshpass 再认证 agent-1。
-ssh-agent1: ## SSH 连接线上 agent-1（经由 manager 内网跳转，需 .env 中配置 PROD_MANAGER_SSH_* 和 PROD_AGENT1_SSH_* 变量）
-	sshpass -p "$(PROD_AGENT1_SSH_PASS)" ssh \
-		-p $(PROD_AGENT1_SSH_PORT) \
-		-o StrictHostKeyChecking=no \
-		-o "ProxyCommand=sshpass -p '$(PROD_MANAGER_SSH_PASS)' ssh -W %h:%p -p $(PROD_MANAGER_SSH_PORT) -o StrictHostKeyChecking=no $(PROD_MANAGER_SSH_USER)@$(PROD_MANAGER_SSH_HOST)" \
-		-t $(PROD_AGENT1_SSH_USER)@$(PROD_AGENT1_SSH_HOST) \
-		"cd /opt/runtime-agent && exec bash -l"
-
 # ssh-newapi 直接 SSH 到线上 new-api 服务器（独立公网 IP，与 manager 不同台），无需经过 manager 跳转。
 ssh-newapi: ## SSH 连接线上 new-api 服务器（需 .env 中配置 PROD_NEWAPI_SSH_* 变量）
 	sshpass -p "$(PROD_NEWAPI_SSH_PASS)" ssh \
@@ -499,7 +462,7 @@ redis-manager: ## SSH 进入线上 Redis 交互式 redis-cli
 		-t $(PROD_MANAGER_SSH_USER)@$(PROD_MANAGER_SSH_HOST) \
 		"cd /opt/oc-manage && docker compose exec manager-redis redis-cli"
 
-# bh-logs 抓取 manager-api 和 runtime-agent 两个容器中的 [hujingnb] 调试日志。
+# bh-logs 抓取 manager-api 容器中的 [hujingnb] 调试日志。
 # 配合 bug-hunting skill 使用：加完调试日志并部署后，用此命令一次性拿回全部标记行，
 # 再将输出粘贴给 bug-hunting skill 做阶段 B 分析。
 # tee 同时输出到终端和 /tmp/oc-debug-logs.txt，再用 xclip 复制到剪切板。
@@ -512,13 +475,6 @@ bh-logs: ## 抓取线上 [hujingnb] 调试日志并复制到剪切板（用于 b
 			-o StrictHostKeyChecking=no \
 			$(PROD_MANAGER_SSH_USER)@$(PROD_MANAGER_SSH_HOST) \
 			"cd /opt/oc-manage && docker compose logs manager-api 2>&1 | grep hujingnb"; \
-		echo "===== agent-1 ====="; \
-		sshpass -p "$(PROD_AGENT1_SSH_PASS)" ssh \
-			-p $(PROD_AGENT1_SSH_PORT) \
-			-o StrictHostKeyChecking=no \
-			-o "ProxyCommand=sshpass -p '$(PROD_MANAGER_SSH_PASS)' ssh -W %h:%p -p $(PROD_MANAGER_SSH_PORT) -o StrictHostKeyChecking=no $(PROD_MANAGER_SSH_USER)@$(PROD_MANAGER_SSH_HOST)" \
-			$(PROD_AGENT1_SSH_USER)@$(PROD_AGENT1_SSH_HOST) \
-			"cd /opt/runtime-agent && docker compose logs 2>&1 | grep hujingnb"; \
 	} | tee /tmp/oc-debug-logs.txt
 	@xclip -selection clipboard < /tmp/oc-debug-logs.txt && echo "✅ 已复制到剪切板"
 
@@ -531,11 +487,3 @@ logs-api: ## 查看线上 manager-api 容器日志（持续 tail，Ctrl+C 退出
 		-t $(PROD_MANAGER_SSH_USER)@$(PROD_MANAGER_SSH_HOST) \
 		"cd /opt/oc-manage && docker compose logs manager-api"
 
-# logs-agent1 经由 manager 内网跳转到 agent-1，持续 tail runtime-agent 容器日志。
-logs-agent1: ## 查看线上 agent-1 容器日志（经 manager 跳转，持续 tail，Ctrl+C 退出）
-	sshpass -p "$(PROD_AGENT1_SSH_PASS)" ssh \
-		-p $(PROD_AGENT1_SSH_PORT) \
-		-o StrictHostKeyChecking=no \
-		-o "ProxyCommand=sshpass -p '$(PROD_MANAGER_SSH_PASS)' ssh -W %h:%p -p $(PROD_MANAGER_SSH_PORT) -o StrictHostKeyChecking=no $(PROD_MANAGER_SSH_USER)@$(PROD_MANAGER_SSH_HOST)" \
-		-t $(PROD_AGENT1_SSH_USER)@$(PROD_AGENT1_SSH_HOST) \
-		"cd /opt/runtime-agent && docker compose logs"

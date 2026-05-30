@@ -159,8 +159,3 @@ hermes:
   # Hermes 容器内访问 manager runtime API 的地址，oc-kb skill 用它检索和写入实例知识库。
   # 生产环境应填 runtime 节点可访问的 manager API 内网或 HTTPS 地址。
   manager_runtime_base_url: "https://manager.example.com"
-
-agent:
-  # runtime-agent 注册成功后回写并按此频率上报心跳；
-  # manager 用 90s 阈值判定节点离线（NodeHealthReconciler）。
-  heartbeat_interval_seconds: 30
