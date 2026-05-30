@@ -27,9 +27,6 @@ type AppRuntimeStore interface {
 	// SetAppAppliedVersion 在重启成功后记录已应用的版本修订与镜像 ref，
 	// 供前端 version_synced 检测使用。
 	SetAppAppliedVersion(ctx context.Context, arg sqlc.SetAppAppliedVersionParams) error
-	// SetAppContainer 在重启检测到镜像变更后清空 apps.container_id / container_name，
-	// 兼容旧 docker 路径遗留字段（k8s 路径不再使用 container_id，但接口保留向后兼容）。
-	SetAppContainer(ctx context.Context, arg sqlc.SetAppContainerParams) error
 	// CreateJob 在重启检测到镜像变更后入队 app_initialize job，
 	// 复用初始化阶段重建 k8s 资源并拉取新镜像。
 	CreateJob(ctx context.Context, arg sqlc.CreateJobParams) error
@@ -284,15 +281,14 @@ func (h *AppRestartContainerHandler) Handle(ctx context.Context, job sqlc.Job) e
 	if err != nil {
 		return err
 	}
-	// nodeID 仅供 inputRefresher（兼容旧接口签名），k8s 路径不按 nodeID 路由。
-	nodeID := app.RuntimeNodeID.String
 
 	// 可选：调 refresher 刷新版本配置并获取当前版本镜像 ref。
 	// 失败时立即冒泡让 worker 重试：没刷新就 restart 等于"重启后还是老配置"，
 	// 比让 pod 先停再失败更糟（用户感知不到，version_synced 还会被错误置位）。
+	// k8s 路径无节点概念，nodeID 传空串（RefreshAppInput 接口签名兼容旧 docker 链路）。
 	var refreshResult AppInputRefreshResult
 	if h.inputRefresher != nil {
-		refreshResult, err = h.inputRefresher.RefreshAppInput(ctx, nodeID, app)
+		refreshResult, err = h.inputRefresher.RefreshAppInput(ctx, "", app)
 		if err != nil {
 			return fmt.Errorf("刷新应用版本配置失败: %w", err)
 		}
@@ -320,9 +316,9 @@ func (h *AppRestartContainerHandler) Handle(ctx context.Context, job sqlc.Job) e
 		}
 		// 入队 app_initialize job，复用已测的初始化阶段（WaitReady → binding_waiting）
 		// 让 init handler 在 pod Ready 后写回 applied 版本，避免镜像维度谎报 version_synced。
+		// k8s 路径无节点概念，payload 只含 app_id。
 		initPayload, err := json.Marshal(map[string]any{
-			"app_id":       app.ID,
-			"runtime_node": nodeID,
+			"app_id": app.ID,
 		})
 		if err != nil {
 			return fmt.Errorf("构造 app_initialize payload 失败: %w", err)

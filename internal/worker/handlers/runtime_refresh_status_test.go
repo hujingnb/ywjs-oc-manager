@@ -59,11 +59,6 @@ func (s *fakeRuntimeSnapshotStore) SetAppAppliedVersion(_ context.Context, _ sql
 	return nil
 }
 
-// SetAppContainer 实现 AppRuntimeStore 接口；刷新状态流程不重建容器，此处仅满足接口约束。
-func (s *fakeRuntimeSnapshotStore) SetAppContainer(_ context.Context, _ sqlc.SetAppContainerParams) error {
-	return nil
-}
-
 // CreateJob 实现 AppRuntimeStore 接口；刷新状态流程不入队 job，此处仅满足接口约束。
 func (s *fakeRuntimeSnapshotStore) CreateJob(_ context.Context, _ sqlc.CreateJobParams) error {
 	return nil

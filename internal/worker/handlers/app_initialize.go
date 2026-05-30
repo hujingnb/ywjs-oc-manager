@@ -29,9 +29,7 @@ type AppInitializeStore interface {
 	GetApp(ctx context.Context, id string) (sqlc.App, error)
 	GetOrganization(ctx context.Context, id string) (sqlc.Organization, error)
 	GetUser(ctx context.Context, id string) (sqlc.User, error)
-	GetRuntimeNode(ctx context.Context, id string) (sqlc.RuntimeNode, error)
 	SetAppNewAPIKey(ctx context.Context, arg sqlc.SetAppNewAPIKeyParams) error
-	SetAppContainer(ctx context.Context, arg sqlc.SetAppContainerParams) error
 	SetAppStatus(ctx context.Context, arg sqlc.SetAppStatusParams) error
 	CreateAuditLog(ctx context.Context, arg sqlc.CreateAuditLogParams) error
 	// 新增:5 阶段 handler 落进度与失败状态
@@ -473,9 +471,9 @@ func (h *AppInitializeHandler) markFailed(ctx context.Context, app *sqlc.App, ph
 // writeInitAuditLog 把 Handle 末尾的审计日志逻辑独立出来，Handle 完成 binding_waiting
 // 转移后调用一次。
 func (h *AppInitializeHandler) writeInitAuditLog(ctx context.Context, app sqlc.App, job sqlc.Job, payload appInitializePayload) error {
+	// k8s 路径无节点概念，audit metadata 只保留 job_id。
 	auditMetadata, err := json.Marshal(map[string]any{
-		"job_id":       job.ID,
-		"runtime_node": payload.RuntimeNodeID,
+		"job_id": job.ID,
 	})
 	if err != nil {
 		return fmt.Errorf("序列化应用初始化审计元数据失败: %w", err)
@@ -602,9 +600,11 @@ type SkillBlobReader interface {
 	OpenSkill(relPath string) (io.ReadCloser, error)
 }
 
+// appInitializePayload 是 app_initialize job 的 JSON 载荷。
+// k8s 路径已无节点概念，不再需要 runtime_node 字段；
+// payload 只传 app_id，handler 通过 GetApp 拿到完整 app 行。
 type appInitializePayload struct {
-	AppID         string `json:"app_id"`
-	RuntimeNodeID string `json:"runtime_node"`
+	AppID string `json:"app_id"`
 }
 
 func decodePayload(raw []byte) (appInitializePayload, error) {
@@ -777,12 +777,13 @@ func pushVersionSkills(ctx context.Context, skillBlobs SkillBlobReader, uploader
 //
 // hermes 包面向单 app 维度做编排，不关心 nodeID；manager 这边一个 handler 可能
 // 同时服务多节点，因此 wiring 注入的是按 nodeID 分发的 uploader。adapter 在
-// handler 内部为每个 app 实例化一次，绑定其 RuntimeNodeID 后即满足 hermes 接口形态。
+// handler 内部为每个 app 实例化一次，绑定 nodeID 后即满足 hermes 接口形态。
+// k8s 路径传空 nodeID（无节点概念），restart 链路仍可用于 docker 兼容路径。
 type appInputUploadAdapter struct {
 	// up 是底层按 nodeID 路由的上传能力（生产实现：AgentBackedAdapter.UploadAppInputFile）。
 	up AppInputUploader
-	// nodeID 在 handler 取出 payload.RuntimeNodeID 后绑定；整个 WriteAppInput 调用
-	// 期间不变，保证多文件上传都落到同一节点。
+	// nodeID 由调用方在实例化时绑定；整个 WriteAppInput 调用期间不变，
+	// 保证多文件上传都落到同一节点（k8s 路径传空串）。
 	nodeID string
 }
 

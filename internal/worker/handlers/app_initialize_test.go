@@ -3,6 +3,7 @@ package handlers
 import (
 	"context"
 	"database/sql"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"io"
@@ -148,6 +149,11 @@ func TestAppInitializeHandlesHappyPath(t *testing.T) {
 	assert.Equal(t, testAppID, store.auditLogs[0].TargetID)
 	assert.Equal(t, "initialize", store.auditLogs[0].Action)
 	assert.Equal(t, "succeeded", store.auditLogs[0].Result)
+	// k8s 路径 audit metadata 只含 job_id，不应有 runtime_node 残留。
+	var auditMeta map[string]any
+	require.NoError(t, json.Unmarshal(store.auditLogs[0].MetadataJson, &auditMeta))
+	assert.Contains(t, auditMeta, "job_id", "audit metadata 应含 job_id")
+	assert.NotContains(t, auditMeta, "runtime_node", "audit metadata 不应含 runtime_node")
 }
 
 // TestAppInitializeK8s_OrchestratorNilSkipsCreateAndWait 验证 orch 未注入时
@@ -298,19 +304,19 @@ func TestAppInitializeRejectsInvalidPayload(t *testing.T) {
 }
 
 // TestAppInitializeContainerStepSkippedWhenContainerExists 验证 ContainerID 已存在时
-// 旧字段保留不报错（k8s 路径不再使用 ContainerID，但字段保留兼容性）。
+// 旧字段保留不影响 k8s 路径（k8s 不再使用 ContainerID）。
 func TestAppInitializeContainerStepSkippedWhenContainerExists(t *testing.T) {
 	store := newAppInitStub(t)
-	// ContainerID 迁移为 null.String；k8s 路径忽略此字段。
+	// ContainerID 迁移为 null.String；k8s 路径忽略此字段，不触发写 container 操作。
 	store.app.ContainerID = null.StringFrom("already-there")
 	client := &fakeNewAPI{result: newapi.APIKey{ID: 1, Key: "k"}}
 
 	handler := NewAppInitializeHandler(store, client, AppInitializeConfig{Cipher: testCipher(t), ResolveRuntimeImage: testResolveRuntimeImage})
-	// k8s 路径不需要 AppInputUploader，直接调用。
+	// k8s 路径不需要 AppInputUploader，直接调用，ContainerID 字段不应影响结果。
 	err := handler.Handle(context.Background(), buildJob(t, testAppID, ""))
 	require.NoError(t, err)
-	// ContainerID 字段本身不影响 k8s 路径，不应触发写 container 操作。
-	require.False(t, store.containerSet, "k8s 路径不应写 container_id")
+	// 终态应到达 binding_waiting，ContainerID 字段不影响 k8s 路径。
+	assert.Equal(t, domain.AppStatusBindingWaiting, store.app.Status, "k8s 路径 ContainerID 已存在不影响初始化流程")
 }
 
 // TestEnsureAPIKeyKeepsNewAPITokenModelsUnrestricted 验证 new-api token 创建不限制模型。
@@ -347,9 +353,11 @@ func TestProvisionAPIKeyPersistsKeyName(t *testing.T) {
 	assert.Equal(t, expectedName, api.lastCreateInput.Name, "new-api 侧 token name 也应使用同一字符串, 保持双向一致")
 }
 
-func buildJob(t *testing.T, appID, nodeID string) sqlc.Job {
+// buildJob 构造 app_initialize job；k8s 路径 payload 只含 app_id，nodeID 参数保留但不写入 payload
+// （供测试调用方保持兼容，传空串即可）。
+func buildJob(t *testing.T, appID, _ string) sqlc.Job {
 	t.Helper()
-	payload := []byte(`{"app_id":"` + appID + `","runtime_node":"` + nodeID + `"}`)
+	payload := []byte(`{"app_id":"` + appID + `"}`)
 	return sqlc.Job{Type: domain.JobTypeAppInitialize, PayloadJson: payload}
 }
 
@@ -359,12 +367,10 @@ type appInitStub struct {
 	app  sqlc.App
 	org  sqlc.Organization
 	user sqlc.User
-	node sqlc.RuntimeNode
 	// versions 按 string UUID 存放助手版本；GetAssistantVersion 从此 map 查找。
-	versions     map[string]sqlc.AssistantVersion
-	apiKeySet    bool
-	statusSet    bool
-	containerSet bool
+	versions  map[string]sqlc.AssistantVersion
+	apiKeySet bool
+	statusSet bool
 	// lastSetAPIKey 记录最近一次 SetAppNewAPIKey 调用的入参, 用于断言落库字段
 	// (特别是 newapi_key_name 是否与 new-api CreateAPIKey 用的 token name 一致)。
 	lastSetAPIKey sqlc.SetAppNewAPIKeyParams
@@ -419,7 +425,6 @@ func newAppInitStub(t *testing.T) *appInitStub {
 		},
 		org:  sqlc.Organization{Name: "测试组织", Status: domain.StatusActive},
 		user: sqlc.User{DisplayName: "Alice"},
-		node: sqlc.RuntimeNode{NodeDataRoot: null.StringFrom("/var/lib/oc-agent")},
 		versions: map[string]sqlc.AssistantVersion{
 			testVersionID: defaultVersion,
 		},
@@ -437,10 +442,6 @@ func (s *appInitStub) GetUser(_ context.Context, _ string) (sqlc.User, error) {
 	return s.user, nil
 }
 
-func (s *appInitStub) GetRuntimeNode(_ context.Context, _ string) (sqlc.RuntimeNode, error) {
-	return s.node, nil
-}
-
 // SetAppNewAPIKey :exec 语义仅返回 error；留存入参供断言 newapi_key_name 等字段。
 func (s *appInitStub) SetAppNewAPIKey(_ context.Context, arg sqlc.SetAppNewAPIKeyParams) error {
 	s.apiKeySet = true
@@ -449,15 +450,6 @@ func (s *appInitStub) SetAppNewAPIKey(_ context.Context, arg sqlc.SetAppNewAPIKe
 	s.app.NewapiKeyID = arg.NewapiKeyID
 	s.app.NewapiKeyCiphertext = arg.NewapiKeyCiphertext
 	s.app.NewapiKeyName = arg.NewapiKeyName
-	return nil
-}
-
-// SetAppContainer :exec 语义仅返回 error；记录 container_id / container_name。
-// k8s 路径不再写 container_id，保留供接口兼容。
-func (s *appInitStub) SetAppContainer(_ context.Context, arg sqlc.SetAppContainerParams) error {
-	s.containerSet = true
-	s.app.ContainerID = arg.ContainerID
-	s.app.ContainerName = arg.ContainerName
 	return nil
 }
 

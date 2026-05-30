@@ -283,6 +283,8 @@ func TestAppRestartContainerHandler_ImageChanged_CallsUpdateImage(t *testing.T) 
 	var jobPayload map[string]any
 	require.NoError(t, json.Unmarshal(stub.createdJobs[0].PayloadJson, &jobPayload))
 	assert.Equal(t, testAppID, jobPayload["app_id"])
+	// k8s 路径无节点概念，入队 payload 不应含 runtime_node 键。
+	assert.NotContains(t, jobPayload, "runtime_node", "k8s 路径 init payload 不应含 runtime_node")
 	// notifier 被即时通知。
 	require.Equal(t, 1, notifier.calls)
 	assert.Equal(t, stub.createdJobs[0].ID, notifier.enqueuedJobID)
@@ -549,8 +551,6 @@ type runtimeOpStub struct {
 	appliedVersionSet bool
 	// lastAppliedVersion 记录最近一次 SetAppAppliedVersion 的入参，供断言 applied 字段。
 	lastAppliedVersion sqlc.SetAppAppliedVersionParams
-	// containerCleared 标记 SetAppContainer 是否被调用（镜像变更重建时清空 container_id）。
-	containerCleared bool
 	// createdJobs 记录所有 CreateJob 入参，供断言 restart 镜像变更后入队 app_initialize。
 	createdJobs []sqlc.CreateJobParams
 }
@@ -575,14 +575,6 @@ func (s *runtimeOpStub) SetAppAppliedVersion(_ context.Context, arg sqlc.SetAppA
 	s.lastAppliedVersion = arg
 	s.app.AppliedVersionRevision = arg.AppliedVersionRevision
 	s.app.AppliedImageRef = arg.AppliedImageRef
-	return nil
-}
-
-// SetAppContainer 实现 AppRuntimeStore 接口；k8s 路径在镜像变更时可选清空 container_id。
-func (s *runtimeOpStub) SetAppContainer(_ context.Context, arg sqlc.SetAppContainerParams) error {
-	s.containerCleared = true
-	s.app.ContainerID = arg.ContainerID
-	s.app.ContainerName = arg.ContainerName
 	return nil
 }
 
