@@ -3,6 +3,7 @@ package service
 import (
 	"context"
 	"database/sql"
+	"encoding/json"
 	"errors"
 	"testing"
 
@@ -15,11 +16,11 @@ import (
 	"oc-manager/internal/store/sqlc"
 )
 
-// TestOnboardMemberCommitsOnSuccess 验证引导成员提交On成功的成功路径场景。
+// TestOnboardMemberCommitsOnSuccess 验证引导成员提交成功的完整事务路径，包括用户、应用、审计、任务均落库。
 func TestOnboardMemberCommitsOnSuccess(t *testing.T) {
 	store := newOnboardingStub(t)
 	tx := &txRunnerStub{store: store}
-	svc := NewMemberOnboardingService(tx, fakeHash, defaultTestSelector())
+	svc := NewMemberOnboardingService(tx, fakeHash)
 
 	result, err := svc.OnboardMember(context.Background(), orgOnboardingAdmin(), testOrgID, OnboardMemberInput{
 		Username: "alice", DisplayName: "Alice", Password: "pwd", AppName: "alice-bot",
@@ -54,7 +55,7 @@ func TestOnboardMemberEnsuresKnowledgeDataset(t *testing.T) {
 	store := newOnboardingStub(t)
 	tx := &txRunnerStub{store: store}
 	kb := &knowledgeDatasetProvisionerStub{}
-	svc := NewMemberOnboardingService(tx, fakeHash, defaultTestSelector())
+	svc := NewMemberOnboardingService(tx, fakeHash)
 	svc.SetKnowledgeDatasetProvisioner(kb)
 
 	result, err := svc.OnboardMember(context.Background(), orgOnboardingAdmin(), testOrgID, OnboardMemberInput{
@@ -67,12 +68,12 @@ func TestOnboardMemberEnsuresKnowledgeDataset(t *testing.T) {
 	assert.Equal(t, result.App.ID, kb.apps[0].ID)
 }
 
-// TestOnboardMemberRollsBackWhenAppCreationFails 验证引导成员回滚回退当应用Creation失败的预期行为场景。
+// TestOnboardMemberRollsBackWhenAppCreationFails 验证应用创建失败时整个事务回滚，不留悬挂状态。
 func TestOnboardMemberRollsBackWhenAppCreationFails(t *testing.T) {
 	store := newOnboardingStub(t)
 	store.appErr = errors.New("duplicate app for owner")
 	tx := &txRunnerStub{store: store}
-	svc := NewMemberOnboardingService(tx, fakeHash, defaultTestSelector())
+	svc := NewMemberOnboardingService(tx, fakeHash)
 
 	_, err := svc.OnboardMember(context.Background(), orgOnboardingAdmin(), testOrgID, OnboardMemberInput{
 		Username: "alice", DisplayName: "Alice", Password: "pwd", AppName: "alice-bot",
@@ -82,12 +83,12 @@ func TestOnboardMemberRollsBackWhenAppCreationFails(t *testing.T) {
 	require.False(t, tx.committed)
 }
 
-// TestOnboardMemberRollsBackWhenJobCreationFails 验证引导成员回滚回退当任务Creation失败的预期行为场景。
+// TestOnboardMemberRollsBackWhenJobCreationFails 验证任务创建失败时整个事务回滚，不留悬挂用户/应用。
 func TestOnboardMemberRollsBackWhenJobCreationFails(t *testing.T) {
 	store := newOnboardingStub(t)
 	store.jobErr = errors.New("redis blocked")
 	tx := &txRunnerStub{store: store}
-	svc := NewMemberOnboardingService(tx, fakeHash, defaultTestSelector())
+	svc := NewMemberOnboardingService(tx, fakeHash)
 
 	_, err := svc.OnboardMember(context.Background(), orgOnboardingAdmin(), testOrgID, OnboardMemberInput{
 		Username: "alice", DisplayName: "Alice", Password: "pwd", AppName: "alice-bot",
@@ -97,10 +98,10 @@ func TestOnboardMemberRollsBackWhenJobCreationFails(t *testing.T) {
 	require.False(t, tx.committed)
 }
 
-// TestOnboardMemberRequiresOrgManagement 验证引导成员要求组织Management的预期行为场景。
+// TestOnboardMemberRequiresOrgManagement 验证跨组织管理员无法引导其他组织成员（权限拒绝）。
 func TestOnboardMemberRequiresOrgManagement(t *testing.T) {
 	tx := &txRunnerStub{store: newOnboardingStub(t)}
-	svc := NewMemberOnboardingService(tx, fakeHash, defaultTestSelector())
+	svc := NewMemberOnboardingService(tx, fakeHash)
 
 	_, err := svc.OnboardMember(context.Background(), auth.Principal{Role: domain.UserRoleOrgAdmin, OrgID: testOrg2ID}, testOrgID, OnboardMemberInput{
 		Username: "alice", DisplayName: "Alice", Password: "pwd", AppName: "alice-bot",
@@ -109,10 +110,10 @@ func TestOnboardMemberRequiresOrgManagement(t *testing.T) {
 	require.ErrorIs(t, err, ErrForbidden)
 }
 
-// TestOnboardMemberPlatformAdminForbidden 验证引导成员平台管理员禁止访问的异常或拒绝路径场景。
+// TestOnboardMemberPlatformAdminForbidden 验证平台管理员不能直接引导成员（必须由组织管理员发起）。
 func TestOnboardMemberPlatformAdminForbidden(t *testing.T) {
 	tx := &txRunnerStub{store: newOnboardingStub(t)}
-	svc := NewMemberOnboardingService(tx, fakeHash, defaultTestSelector())
+	svc := NewMemberOnboardingService(tx, fakeHash)
 
 	_, err := svc.OnboardMember(context.Background(), platformAdmin(), testOrgID, OnboardMemberInput{
 		Username: "alice", DisplayName: "Alice", Password: "pwd", AppName: "alice-bot",
@@ -121,12 +122,12 @@ func TestOnboardMemberPlatformAdminForbidden(t *testing.T) {
 	require.ErrorIs(t, err, ErrForbidden)
 }
 
-// TestOnboardMemberRejectsDisabledOrg 验证引导成员拒绝禁用组织的异常或拒绝路径场景。
+// TestOnboardMemberRejectsDisabledOrg 验证引导成员时企业已停用返回业务错误，不写入任何数据。
 func TestOnboardMemberRejectsDisabledOrg(t *testing.T) {
 	store := newOnboardingStub(t)
 	store.org.Status = domain.StatusDisabled
 	tx := &txRunnerStub{store: store}
-	svc := NewMemberOnboardingService(tx, fakeHash, defaultTestSelector())
+	svc := NewMemberOnboardingService(tx, fakeHash)
 
 	_, err := svc.OnboardMember(context.Background(), orgOnboardingAdmin(), testOrgID, OnboardMemberInput{
 		Username: "alice", DisplayName: "Alice", Password: "pwd", AppName: "alice-bot",
@@ -141,7 +142,7 @@ func TestCreateAppForMember_RejectsDisabledOrg(t *testing.T) {
 	store := newOnboardingStub(t)
 	store.org.Status = domain.StatusDisabled
 	tx := &txRunnerStub{store: store}
-	svc := NewMemberOnboardingService(tx, fakeHash, defaultTestSelector())
+	svc := NewMemberOnboardingService(tx, fakeHash)
 
 	_, err := svc.CreateAppForMember(context.Background(), platformAdmin(), testOrgID, store.user.ID, CreateAppForMemberInput{
 		AppName:   "alice-new-bot",
@@ -156,7 +157,7 @@ func TestCreateAppForMember_RejectsDisabledOrg(t *testing.T) {
 func TestCreateAppForMember_PlatformAdminCreatesAfterDelete(t *testing.T) {
 	store := newOnboardingStub(t)
 	tx := &txRunnerStub{store: store}
-	svc := NewMemberOnboardingService(tx, fakeHash, defaultTestSelector())
+	svc := NewMemberOnboardingService(tx, fakeHash)
 
 	result, err := svc.CreateAppForMember(context.Background(), platformAdmin(), testOrgID, store.user.ID, CreateAppForMemberInput{
 		AppName:   "alice-new-bot",
@@ -184,7 +185,7 @@ func TestCreateAppForMember_RejectsExistingActiveApp(t *testing.T) {
 	existing := sqlc.App{ID: mustUUID(t, "00000000-0000-0000-0000-000000000b99"), OwnerUserID: store.user.ID}
 	store.activeApp = &existing
 	tx := &txRunnerStub{store: store}
-	svc := NewMemberOnboardingService(tx, fakeHash, defaultTestSelector())
+	svc := NewMemberOnboardingService(tx, fakeHash)
 
 	_, err := svc.CreateAppForMember(context.Background(), platformAdmin(), testOrgID, store.user.ID, CreateAppForMemberInput{
 		AppName:   "alice-new-bot",
@@ -200,7 +201,7 @@ func TestCreateAppForMember_RejectsCrossOrgUser(t *testing.T) {
 	store := newOnboardingStub(t)
 	store.user.OrgID = null.StringFrom(testOrg2ID)
 	tx := &txRunnerStub{store: store}
-	svc := NewMemberOnboardingService(tx, fakeHash, defaultTestSelector())
+	svc := NewMemberOnboardingService(tx, fakeHash)
 
 	_, err := svc.CreateAppForMember(context.Background(), platformAdmin(), testOrgID, store.user.ID, CreateAppForMemberInput{
 		AppName:   "alice-new-bot",
@@ -216,41 +217,10 @@ func TestCreateAppForMember_RejectsDisabledUser(t *testing.T) {
 	store := newOnboardingStub(t)
 	store.user.Status = domain.StatusDisabled
 	tx := &txRunnerStub{store: store}
-	svc := NewMemberOnboardingService(tx, fakeHash, defaultTestSelector())
+	svc := NewMemberOnboardingService(tx, fakeHash)
 
 	_, err := svc.CreateAppForMember(context.Background(), platformAdmin(), testOrgID, store.user.ID, CreateAppForMemberInput{
 		AppName:   "alice-new-bot",
-		VersionID: testVersionID,
-	})
-
-	require.ErrorIs(t, err, ErrMemberCreateInvalid)
-	require.False(t, tx.committed)
-}
-
-// TestCreateAppForMember_NoActiveNode 验证自动选节点无容量时返回无可用节点。
-func TestCreateAppForMember_NoActiveNode(t *testing.T) {
-	store := newOnboardingStub(t)
-	tx := &txRunnerStub{store: store}
-	svc := NewMemberOnboardingService(tx, fakeHash, &nodeSelectorStub{})
-
-	_, err := svc.CreateAppForMember(context.Background(), platformAdmin(), testOrgID, store.user.ID, CreateAppForMemberInput{
-		AppName:   "alice-new-bot",
-		VersionID: testVersionID,
-	})
-
-	require.ErrorIs(t, err, ErrNoNodeAvailable)
-	require.False(t, tx.committed)
-}
-
-// TestCreateAppForMember_RejectsInvalidExplicitNodeID 验证显式节点 ID 非法时归类为成员创建参数错误。
-func TestCreateAppForMember_RejectsInvalidExplicitNodeID(t *testing.T) {
-	store := newOnboardingStub(t)
-	tx := &txRunnerStub{store: store}
-	svc := NewMemberOnboardingService(tx, fakeHash, defaultTestSelector())
-
-	_, err := svc.CreateAppForMember(context.Background(), platformAdmin(), testOrgID, store.user.ID, CreateAppForMemberInput{
-		AppName:   "alice-new-bot",
-		NodeID:    "not-a-uuid",
 		VersionID: testVersionID,
 	})
 
@@ -265,7 +235,7 @@ func TestCreateAppForMember_MapsOwnerActiveUniqueViolation(t *testing.T) {
 	// 模拟 MySQL 唯一约束冲突：错误消息含 "Duplicate entry" 和约束名称。
 	store.appErr = errors.New("Duplicate entry '...' for key 'apps_owner_active'")
 	tx := &txRunnerStub{store: store}
-	svc := NewMemberOnboardingService(tx, fakeHash, defaultTestSelector())
+	svc := NewMemberOnboardingService(tx, fakeHash)
 
 	_, err := svc.CreateAppForMember(context.Background(), platformAdmin(), testOrgID, store.user.ID, CreateAppForMemberInput{
 		AppName:   "alice-new-bot",
@@ -305,9 +275,10 @@ type onboardingStub struct {
 	jobs             int
 	staged           counters
 	stagedAudits     []sqlc.CreateAuditLogParams
+	stagedJobs       []sqlc.CreateJobParams // 暂存 job 参数，事务提交后可检查 payload。
+	committedJobs    []sqlc.CreateJobParams // 已提交的 job，供测试断言 payload 内容。
 	appErr           error
 	jobErr           error
-	lastAppNodeID    string
 	lastAppOwnerID   string
 	lastAppVersionID string // 记录最近一次 CreateApp 使用的 VersionID，供断言校验。
 }
@@ -338,7 +309,10 @@ func newOnboardingStub(t *testing.T) *onboardingStub {
 	}
 }
 
-func (s *onboardingStub) reset() { s.staged = counters{} }
+func (s *onboardingStub) reset() {
+	s.staged = counters{}
+	s.stagedJobs = nil
+}
 
 func (s *onboardingStub) commit() {
 	s.users += s.staged.users
@@ -347,8 +321,10 @@ func (s *onboardingStub) commit() {
 	s.audits += s.staged.audits
 	s.auditLogs = append(s.auditLogs, s.stagedAudits...)
 	s.jobs += s.staged.jobs
+	s.committedJobs = append(s.committedJobs, s.stagedJobs...)
 	s.staged = counters{}
 	s.stagedAudits = nil
+	s.stagedJobs = nil
 }
 
 func (s *onboardingStub) GetOrganization(_ context.Context, id string) (sqlc.Organization, error) {
@@ -378,14 +354,13 @@ func (s *onboardingStub) CreateUser(_ context.Context, _ sqlc.CreateUserParams) 
 	return nil
 }
 
-// CreateApp 为 :exec；stub 计数并记录节点 ID / owner ID / version ID，不需要读回。
+// CreateApp 为 :exec；stub 计数并记录 owner ID / version ID，不需要读回。
+// k8s 模型下 CreateAppParams 不含 RuntimeNodeID，验证字段无需断言节点。
 func (s *onboardingStub) CreateApp(_ context.Context, arg sqlc.CreateAppParams) error {
 	if s.appErr != nil {
 		return s.appErr
 	}
 	s.staged.apps++
-	// RuntimeNodeID nullable（spec-A2a）：.String 取 Go string 值。
-	s.lastAppNodeID = arg.RuntimeNodeID.String
 	s.lastAppOwnerID = arg.OwnerUserID
 	// VersionID 为 null.String；取 .String 字段即可（有效时等于 version id）。
 	s.lastAppVersionID = arg.VersionID.String
@@ -404,121 +379,20 @@ func (s *onboardingStub) CreateAuditLog(_ context.Context, arg sqlc.CreateAuditL
 	return nil
 }
 
-// CreateJob 为 :exec；stub 计数，不需要返回真实 job 行。
-func (s *onboardingStub) CreateJob(_ context.Context, _ sqlc.CreateJobParams) error {
+// CreateJob 为 :exec；stub 计数并暂存 job 参数，供测试断言 payload。
+func (s *onboardingStub) CreateJob(_ context.Context, arg sqlc.CreateJobParams) error {
 	if s.jobErr != nil {
 		return s.jobErr
 	}
 	s.staged.jobs++
+	s.stagedJobs = append(s.stagedJobs, arg)
 	return nil
-}
-
-// nodeSelectorStub 给 selectNode 路径提供可断言的内存桩。
-type nodeSelectorStub struct {
-	nodes   []NodeWithCount
-	calledN int
-	listErr error
-}
-
-func (s *nodeSelectorStub) ListActiveNodesWithAppCounts(_ context.Context) ([]NodeWithCount, error) {
-	s.calledN++
-	if s.listErr != nil {
-		return nil, s.listErr
-	}
-	return s.nodes, nil
-}
-
-// defaultTestSelector 给现有 onboarding 用例提供「至少有一个空闲节点」的默认 selector。
-func defaultTestSelector() *nodeSelectorStub {
-	return &nodeSelectorStub{nodes: []NodeWithCount{{NodeID: "00000000-0000-0000-0000-000000000a99", AppCount: 0}}}
-}
-
-func ptrInt32(v int32) *int32 { return &v }
-
-// TestOnboardMember_SelectNode_NoActiveNode 验证引导成员Select节点无启用节点的预期行为场景。
-func TestOnboardMember_SelectNode_NoActiveNode(t *testing.T) {
-	tx := &txRunnerStub{store: newOnboardingStub(t)}
-	selector := &nodeSelectorStub{nodes: nil}
-	svc := NewMemberOnboardingService(tx, fakeHash, selector)
-
-	_, err := svc.OnboardMember(context.Background(), orgOnboardingAdmin(), testOrgID, OnboardMemberInput{
-		Username: "alice", DisplayName: "Alice", Password: "pwd", AppName: "alice-bot",
-		VersionID: testVersionID,
-	})
-	require.ErrorIs(t, err, ErrNoNodeAvailable)
-}
-
-// TestOnboardMember_SelectNode_OnlyNodeAtCapacity 验证引导成员Select节点仅节点At容量的预期行为场景。
-func TestOnboardMember_SelectNode_OnlyNodeAtCapacity(t *testing.T) {
-	tx := &txRunnerStub{store: newOnboardingStub(t)}
-	selector := &nodeSelectorStub{nodes: []NodeWithCount{
-		{NodeID: "00000000-0000-0000-0000-000000000a01", MaxApps: ptrInt32(1), AppCount: 1}, // 场景：唯一节点已达容量时选择器应返回无可用节点。
-	}}
-	svc := NewMemberOnboardingService(tx, fakeHash, selector)
-
-	_, err := svc.OnboardMember(context.Background(), orgOnboardingAdmin(), testOrgID, OnboardMemberInput{
-		Username: "alice", DisplayName: "Alice", Password: "pwd", AppName: "alice-bot",
-		VersionID: testVersionID,
-	})
-	require.ErrorIs(t, err, ErrNoNodeAvailable)
-}
-
-// TestOnboardMember_SelectNode_PicksLargestRemaining 验证引导成员Select节点PicksLargestRemaining的预期行为场景。
-func TestOnboardMember_SelectNode_PicksLargestRemaining(t *testing.T) {
-	store := newOnboardingStub(t)
-	tx := &txRunnerStub{store: store}
-	selector := &nodeSelectorStub{nodes: []NodeWithCount{
-		{NodeID: "00000000-0000-0000-0000-000000000a01", MaxApps: ptrInt32(5), AppCount: 4},  // 剩 1
-		{NodeID: "00000000-0000-0000-0000-000000000a02", MaxApps: ptrInt32(10), AppCount: 3}, // 剩 7
-	}}
-	svc := NewMemberOnboardingService(tx, fakeHash, selector)
-
-	_, err := svc.OnboardMember(context.Background(), orgOnboardingAdmin(), testOrgID, OnboardMemberInput{
-		Username: "alice", DisplayName: "Alice", Password: "pwd", AppName: "alice-bot",
-		VersionID: testVersionID,
-	})
-	require.NoError(t, err)
-	require.Equal(t, "00000000-0000-0000-0000-000000000a02", store.lastAppNodeID)
-}
-
-// TestOnboardMember_SelectNode_NULLMaxAppsTreatedAsInfinity 验证引导成员Select节点NULL最大应用Treated作为Infinity的边界条件场景。
-func TestOnboardMember_SelectNode_NULLMaxAppsTreatedAsInfinity(t *testing.T) {
-	store := newOnboardingStub(t)
-	tx := &txRunnerStub{store: store}
-	selector := &nodeSelectorStub{nodes: []NodeWithCount{
-		{NodeID: "00000000-0000-0000-0000-000000000a01", MaxApps: nil, AppCount: 100},        // 不限
-		{NodeID: "00000000-0000-0000-0000-000000000a02", MaxApps: ptrInt32(10), AppCount: 0}, // 剩 10
-	}}
-	svc := NewMemberOnboardingService(tx, fakeHash, selector)
-
-	_, err := svc.OnboardMember(context.Background(), orgOnboardingAdmin(), testOrgID, OnboardMemberInput{
-		Username: "alice", DisplayName: "Alice", Password: "pwd", AppName: "alice-bot",
-		VersionID: testVersionID,
-	})
-	require.NoError(t, err)
-	require.Equal(t, "00000000-0000-0000-0000-000000000a01", store.lastAppNodeID)
-}
-
-// TestOnboardMember_ExplicitNodeID_BypassesSelector 验证引导成员显式节点ID绕过选择器的特殊分支或幂等场景。
-func TestOnboardMember_ExplicitNodeID_BypassesSelector(t *testing.T) {
-	store := newOnboardingStub(t)
-	tx := &txRunnerStub{store: store}
-	selector := &nodeSelectorStub{} // 故意空
-	svc := NewMemberOnboardingService(tx, fakeHash, selector)
-
-	_, err := svc.OnboardMember(context.Background(), orgOnboardingAdmin(), testOrgID, OnboardMemberInput{
-		Username: "alice", DisplayName: "Alice", Password: "pwd", AppName: "alice-bot",
-		NodeID:    "00000000-0000-0000-0000-000000000099",
-		VersionID: testVersionID,
-	})
-	require.NoError(t, err)
-	assert.Zero(t, selector.calledN)
 }
 
 // TestOnboardMember_RejectsMissingVersionID 验证 VersionID 为空时 OnboardMember 返回参数错误。
 func TestOnboardMember_RejectsMissingVersionID(t *testing.T) {
 	tx := &txRunnerStub{store: newOnboardingStub(t)}
-	svc := NewMemberOnboardingService(tx, fakeHash, defaultTestSelector())
+	svc := NewMemberOnboardingService(tx, fakeHash)
 
 	// VersionID 留空，应被前置校验拦截，返回 ErrMemberCreateInvalid。
 	_, err := svc.OnboardMember(context.Background(), orgOnboardingAdmin(), testOrgID, OnboardMemberInput{
@@ -531,7 +405,7 @@ func TestOnboardMember_RejectsMissingVersionID(t *testing.T) {
 func TestOnboardMember_RejectsVersionNotInAllowlist(t *testing.T) {
 	store := newOnboardingStub(t)
 	tx := &txRunnerStub{store: store}
-	svc := NewMemberOnboardingService(tx, fakeHash, defaultTestSelector())
+	svc := NewMemberOnboardingService(tx, fakeHash)
 
 	// 使用一个不在 org.AssistantVersionIds 内的版本 ID，应触发 allowlist 校验失败。
 	_, err := svc.OnboardMember(context.Background(), orgOnboardingAdmin(), testOrgID, OnboardMemberInput{
@@ -549,7 +423,7 @@ func TestOnboardMember_RejectsVersionNotInAllowlist(t *testing.T) {
 func TestOnboardMember_HappyPath_VersionIDRecorded(t *testing.T) {
 	store := newOnboardingStub(t)
 	tx := &txRunnerStub{store: store}
-	svc := NewMemberOnboardingService(tx, fakeHash, defaultTestSelector())
+	svc := NewMemberOnboardingService(tx, fakeHash)
 
 	_, err := svc.OnboardMember(context.Background(), orgOnboardingAdmin(), testOrgID, OnboardMemberInput{
 		Username: "alice", DisplayName: "Alice", Password: "pwd", AppName: "alice-bot",
@@ -564,7 +438,7 @@ func TestOnboardMember_HappyPath_VersionIDRecorded(t *testing.T) {
 func TestCreateAppForMember_RejectsMissingVersionID(t *testing.T) {
 	store := newOnboardingStub(t)
 	tx := &txRunnerStub{store: store}
-	svc := NewMemberOnboardingService(tx, fakeHash, defaultTestSelector())
+	svc := NewMemberOnboardingService(tx, fakeHash)
 
 	_, err := svc.CreateAppForMember(context.Background(), platformAdmin(), testOrgID, store.user.ID, CreateAppForMemberInput{
 		AppName: "alice-new-bot",
@@ -576,7 +450,7 @@ func TestCreateAppForMember_RejectsMissingVersionID(t *testing.T) {
 func TestCreateAppForMember_RejectsVersionNotInAllowlist(t *testing.T) {
 	store := newOnboardingStub(t)
 	tx := &txRunnerStub{store: store}
-	svc := NewMemberOnboardingService(tx, fakeHash, defaultTestSelector())
+	svc := NewMemberOnboardingService(tx, fakeHash)
 
 	_, err := svc.CreateAppForMember(context.Background(), platformAdmin(), testOrgID, store.user.ID, CreateAppForMemberInput{
 		AppName:   "alice-new-bot",
@@ -584,6 +458,46 @@ func TestCreateAppForMember_RejectsVersionNotInAllowlist(t *testing.T) {
 	})
 	require.ErrorIs(t, err, ErrMemberCreateInvalid)
 	require.False(t, tx.committed)
+}
+
+// TestOnboardMember_JobPayloadOnlyContainsAppID 验证 k8s 模型下入队 payload 只含 app_id，不含 runtime_node。
+func TestOnboardMember_JobPayloadOnlyContainsAppID(t *testing.T) {
+	store := newOnboardingStub(t)
+	tx := &txRunnerStub{store: store}
+	svc := NewMemberOnboardingService(tx, fakeHash)
+
+	result, err := svc.OnboardMember(context.Background(), orgOnboardingAdmin(), testOrgID, OnboardMemberInput{
+		Username: "alice", DisplayName: "Alice", Password: "pwd", AppName: "alice-bot",
+		VersionID: testVersionID,
+	})
+	require.NoError(t, err)
+	require.Len(t, store.committedJobs, 1)
+
+	// payload 应只含 app_id，不含 runtime_node；k8s 调度器负责落点。
+	var payload map[string]any
+	require.NoError(t, json.Unmarshal(store.committedJobs[0].PayloadJson, &payload))
+	assert.Equal(t, result.App.ID, payload["app_id"])
+	assert.NotContains(t, payload, "runtime_node", "k8s 模型下 payload 不应包含 runtime_node")
+}
+
+// TestCreateAppForMember_JobPayloadOnlyContainsAppID 验证 k8s 模型下补建实例入队 payload 只含 app_id，不含 runtime_node。
+func TestCreateAppForMember_JobPayloadOnlyContainsAppID(t *testing.T) {
+	store := newOnboardingStub(t)
+	tx := &txRunnerStub{store: store}
+	svc := NewMemberOnboardingService(tx, fakeHash)
+
+	result, err := svc.CreateAppForMember(context.Background(), platformAdmin(), testOrgID, store.user.ID, CreateAppForMemberInput{
+		AppName:   "alice-new-bot",
+		VersionID: testVersionID,
+	})
+	require.NoError(t, err)
+	require.Len(t, store.committedJobs, 1)
+
+	// payload 应只含 app_id，不含 runtime_node；k8s 调度器负责落点。
+	var payload map[string]any
+	require.NoError(t, json.Unmarshal(store.committedJobs[0].PayloadJson, &payload))
+	assert.Equal(t, result.App.ID, payload["app_id"])
+	assert.NotContains(t, payload, "runtime_node", "k8s 模型下 payload 不应包含 runtime_node")
 }
 
 func orgOnboardingAdmin() auth.Principal {

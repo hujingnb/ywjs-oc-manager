@@ -7,32 +7,15 @@ import (
 	"errors"
 	"fmt"
 	"log/slog"
-	"math"
-	"sort"
 	"strings"
 	"time"
 
-	"github.com/google/uuid"
 	"github.com/guregu/null/v5"
 
 	"oc-manager/internal/auth"
 	"oc-manager/internal/domain"
 	"oc-manager/internal/store/sqlc"
 )
-
-// NodeSelector 抽象「列出活跃节点 + 当前应用数」的能力。
-// 解耦 onboarding 与 runtime_node_service / sqlc 之间的依赖，让 service 单测可注入内存桩。
-type NodeSelector interface {
-	ListActiveNodesWithAppCounts(ctx context.Context) ([]NodeWithCount, error)
-}
-
-// NodeWithCount 描述一个活跃节点的容量上限与当前应用数。
-// MaxApps 为 nil 表示不限；剩余容量 = MaxApps - AppCount，nil 视为 +∞。
-type NodeWithCount struct {
-	NodeID   string
-	MaxApps  *int32
-	AppCount int64
-}
 
 // OnboardingStore 在单一事务里覆盖创建成员、应用、渠道绑定、审计和任务所需的所有写入。
 // service 不直接依赖 sqlc.Queries 是为了让 cmd/server 在事务函数中传入 *sqlc.Queries，
@@ -56,17 +39,16 @@ type TxRunner interface {
 
 // MemberOnboardingService 把成员-应用-渠道绑定-审计-任务放在同一个事务里完成。
 // 任意一步失败都要让整个事务回滚，避免"成员创建成功但应用没创建"这种悬挂状态。
+// k8s 模型下不再需要选节点，pod 落点由调度器决定。
 type MemberOnboardingService struct {
 	tx                TxRunner
 	hashPassword      PasswordHasher
-	selector          NodeSelector
 	knowledgeDatasets KnowledgeDatasetProvisioner
 }
 
-// NewMemberOnboardingService 创建 onboarding 服务。selector 可以为 nil；
-// 此时 input.NodeID 为空会直接返 ErrNoNodeAvailable（生产部署应注入 SQLNodeSelector）。
-func NewMemberOnboardingService(tx TxRunner, hash PasswordHasher, selector NodeSelector) *MemberOnboardingService {
-	return &MemberOnboardingService{tx: tx, hashPassword: hash, selector: selector}
+// NewMemberOnboardingService 创建 onboarding 服务。
+func NewMemberOnboardingService(tx TxRunner, hash PasswordHasher) *MemberOnboardingService {
+	return &MemberOnboardingService{tx: tx, hashPassword: hash}
 }
 
 // SetKnowledgeDatasetProvisioner 注入实例创建后的知识库 dataset 预创建能力。
@@ -74,46 +56,8 @@ func (s *MemberOnboardingService) SetKnowledgeDatasetProvisioner(p KnowledgeData
 	s.knowledgeDatasets = p
 }
 
-// selectNode 在显式 NodeID 为空时按剩余容量自动选。
-// 排序规则：剩余容量降序优先（NULL = +∞ 排最前）；同剩余容量按当前应用数升序，
-// 防止同一节点连续被选导致 over-commit。
-func (s *MemberOnboardingService) selectNode(ctx context.Context) (string, error) {
-	if s.selector == nil {
-		return "", ErrNoNodeAvailable
-	}
-	nodes, err := s.selector.ListActiveNodesWithAppCounts(ctx)
-	if err != nil {
-		return "", fmt.Errorf("查询节点列表失败: %w", err)
-	}
-	type cand struct {
-		id     string
-		remain int64
-		count  int64
-	}
-	cands := make([]cand, 0, len(nodes))
-	for _, n := range nodes {
-		if n.MaxApps == nil {
-			cands = append(cands, cand{id: n.NodeID, remain: math.MaxInt64, count: n.AppCount})
-			continue
-		}
-		remain := int64(*n.MaxApps) - n.AppCount
-		if remain > 0 {
-			cands = append(cands, cand{id: n.NodeID, remain: remain, count: n.AppCount})
-		}
-	}
-	if len(cands) == 0 {
-		return "", ErrNoNodeAvailable
-	}
-	sort.Slice(cands, func(i, j int) bool {
-		if cands[i].remain != cands[j].remain {
-			return cands[i].remain > cands[j].remain
-		}
-		return cands[i].count < cands[j].count
-	})
-	return cands[0].id, nil
-}
-
 // OnboardMemberInput 描述创建一个成员并联动初始化应用所需要的字段。
+// k8s 模型下不需要指定节点，pod 落点由调度器决定。
 type OnboardMemberInput struct {
 	Username    string
 	DisplayName string
@@ -121,7 +65,6 @@ type OnboardMemberInput struct {
 	Role        string
 	AppName     string
 	ChannelType string
-	NodeID      string // 可选：指定要部署的 runtime 节点 ID。
 	VersionID   string // 必填：实例绑定的助手版本 ID，必须在组织的 assistant_version_ids 允许列表内。
 }
 
@@ -133,10 +76,10 @@ type OnboardMemberResult struct {
 }
 
 // CreateAppForMemberInput 描述为已有成员重建实例时需要的应用初始化字段。
+// k8s 模型下不需要指定节点，pod 落点由调度器决定。
 type CreateAppForMemberInput struct {
 	AppName     string
 	ChannelType string
-	NodeID      string
 	VersionID   string // 必填：实例绑定的助手版本 ID，必须在组织的 assistant_version_ids 允许列表内。
 }
 
@@ -169,20 +112,6 @@ func (s *MemberOnboardingService) OnboardMember(ctx context.Context, principal a
 	hashedPassword, err := s.hashPassword(input.Password)
 	if err != nil {
 		return OnboardMemberResult{}, fmt.Errorf("生成密码 hash 失败: %w", err)
-	}
-
-	// 显式 NodeID 走原校验路径（ops 手工指派）；为空则自动选节点。
-	// 自动选在事务之外完成：节点列表读不需要事务隔离，且短路失败更高效。
-	if input.NodeID == "" {
-		chosen, err := s.selectNode(ctx)
-		if err != nil {
-			return OnboardMemberResult{}, err
-		}
-		input.NodeID = chosen
-	} else if _, err := uuid.Parse(input.NodeID); err != nil {
-		// 旧实现把 NodeID 赋给 pgtype.UUID 时会隐式拒绝非法格式；迁移到 string 后显式校验，
-		// 保持「显式指定的 runtime 节点 ID 非法 → 归类为成员创建参数错误」的行为。
-		return OnboardMemberResult{}, fmt.Errorf("%w: 指定的 runtime 节点 ID 非法", ErrMemberCreateInvalid)
 	}
 
 	// 预先生成各行 ID，在事务内使用。
@@ -219,17 +148,16 @@ func (s *MemberOnboardingService) OnboardMember(ctx context.Context, principal a
 		}); err != nil {
 			return fmt.Errorf("创建成员失败: %w", err)
 		}
-		// CreateApp 为 :exec；RuntimeNodeID nullable（spec-A2a），NodeID 为空字符串时写 NULL。
+		// CreateApp 为 :exec；k8s 模型下不写 runtime_node_id，由调度器决定落点。
 		if err := store.CreateApp(ctx, sqlc.CreateAppParams{
-			ID:            appID,
-			OrgID:         org.ID,
-			OwnerUserID:   userID,
-			RuntimeNodeID: null.NewString(input.NodeID, input.NodeID != ""),
-			Name:          input.AppName,
-			Description:   null.String{},
-			Status:        domain.AppStatusDraft,
-			ApiKeyStatus:  domain.APIKeyStatusPending,
-			VersionID:     null.StringFrom(input.VersionID),
+			ID:           appID,
+			OrgID:        org.ID,
+			OwnerUserID:  userID,
+			Name:         input.AppName,
+			Description:  null.String{},
+			Status:       domain.AppStatusDraft,
+			ApiKeyStatus: domain.APIKeyStatusPending,
+			VersionID:    null.StringFrom(input.VersionID),
 		}); err != nil {
 			return fmt.Errorf("创建应用失败: %w", err)
 		}
@@ -258,9 +186,8 @@ func (s *MemberOnboardingService) OnboardMember(ctx context.Context, principal a
 			return fmt.Errorf("写入审计日志失败: %w", err)
 		}
 		appAuditMetadata, err := json.Marshal(map[string]any{
-			"owner_user_id":   userID,
-			"channel_type":    channelType,
-			"runtime_node_id": input.NodeID,
+			"owner_user_id": userID,
+			"channel_type":  channelType,
 		})
 		if err != nil {
 			return fmt.Errorf("序列化应用创建审计元数据失败: %w", err)
@@ -280,9 +207,9 @@ func (s *MemberOnboardingService) OnboardMember(ctx context.Context, principal a
 		}); err != nil {
 			return fmt.Errorf("写入应用创建审计日志失败: %w", err)
 		}
+		// app_initialize payload 只需 app_id；k8s 模型下不需要 runtime_node。
 		payload, err := json.Marshal(map[string]any{
-			"app_id":       appID,
-			"runtime_node": input.NodeID,
+			"app_id": appID,
 		})
 		if err != nil {
 			return fmt.Errorf("序列化 job payload 失败: %w", err)
@@ -312,7 +239,6 @@ func (s *MemberOnboardingService) OnboardMember(ctx context.Context, principal a
 				ID:           appID,
 				OrgID:        org.ID,
 				OwnerUserID:  userID,
-				RuntimeNodeID: input.NodeID,
 				Name:         input.AppName,
 				Status:       domain.AppStatusDraft,
 				APIKeyStatus: domain.APIKeyStatusPending,
@@ -348,18 +274,6 @@ func (s *MemberOnboardingService) CreateAppForMember(ctx context.Context, princi
 	channelType := input.ChannelType
 	if channelType == "" {
 		channelType = domain.ChannelTypeWeChat
-	}
-
-	// 显式 NodeID 保留给运维指定节点；为空时复用 onboarding 的容量优先选择规则。
-	if input.NodeID == "" {
-		chosen, err := s.selectNode(ctx)
-		if err != nil {
-			return CreateAppForMemberResult{}, err
-		}
-		input.NodeID = chosen
-	} else if _, err := uuid.Parse(input.NodeID); err != nil {
-		// 同 OnboardMember：显式节点 ID 非法时还原为成员创建参数错误（旧 pgtype.UUID 解析的隐式校验）。
-		return CreateAppForMemberResult{}, fmt.Errorf("%w: 指定的 runtime 节点 ID 非法", ErrMemberCreateInvalid)
 	}
 
 	// 预先生成 ID。
@@ -400,16 +314,16 @@ func (s *MemberOnboardingService) CreateAppForMember(ctx context.Context, princi
 		} else if !errors.Is(err, sql.ErrNoRows) {
 			return fmt.Errorf("查询成员应用失败: %w", err)
 		}
+		// k8s 模型下不写 runtime_node_id，由调度器决定落点。
 		if err := store.CreateApp(ctx, sqlc.CreateAppParams{
-			ID:            appID,
-			OrgID:         org.ID,
-			OwnerUserID:   user.ID,
-			RuntimeNodeID: null.NewString(input.NodeID, input.NodeID != ""),
-			Name:          input.AppName,
-			Description:   null.String{},
-			Status:        domain.AppStatusDraft,
-			ApiKeyStatus:  domain.APIKeyStatusPending,
-			VersionID:     null.StringFrom(input.VersionID),
+			ID:           appID,
+			OrgID:        org.ID,
+			OwnerUserID:  user.ID,
+			Name:         input.AppName,
+			Description:  null.String{},
+			Status:       domain.AppStatusDraft,
+			ApiKeyStatus: domain.APIKeyStatusPending,
+			VersionID:    null.StringFrom(input.VersionID),
 		}); err != nil {
 			if isAppsOwnerActiveUniqueViolation(err) {
 				return fmt.Errorf("%w: 成员已有未删除实例", ErrMemberCreateInvalid)
@@ -426,9 +340,8 @@ func (s *MemberOnboardingService) CreateAppForMember(ctx context.Context, princi
 			return fmt.Errorf("创建渠道绑定失败: %w", err)
 		}
 		metadata, err := json.Marshal(map[string]any{
-			"owner_user_id":   user.ID,
-			"channel_type":    channelType,
-			"runtime_node_id": input.NodeID,
+			"owner_user_id": user.ID,
+			"channel_type":  channelType,
 		})
 		if err != nil {
 			return fmt.Errorf("序列化应用创建审计元数据失败: %w", err)
@@ -447,9 +360,9 @@ func (s *MemberOnboardingService) CreateAppForMember(ctx context.Context, princi
 		}); err != nil {
 			return fmt.Errorf("写入应用创建审计日志失败: %w", err)
 		}
+		// app_initialize payload 只需 app_id；k8s 模型下不需要 runtime_node。
 		payload, err := json.Marshal(map[string]any{
-			"app_id":       appID,
-			"runtime_node": input.NodeID,
+			"app_id": appID,
 		})
 		if err != nil {
 			return fmt.Errorf("序列化 job payload 失败: %w", err)
@@ -466,14 +379,13 @@ func (s *MemberOnboardingService) CreateAppForMember(ctx context.Context, princi
 		}
 		result = CreateAppForMemberResult{
 			App: AppResult{
-				ID:            appID,
-				OrgID:         org.ID,
-				OwnerUserID:   user.ID,
-				RuntimeNodeID: input.NodeID,
-				Name:          input.AppName,
-				Status:        domain.AppStatusDraft,
-				APIKeyStatus:  domain.APIKeyStatusPending,
-				VersionID:     input.VersionID,
+				ID:           appID,
+				OrgID:        org.ID,
+				OwnerUserID:  user.ID,
+				Name:         input.AppName,
+				Status:       domain.AppStatusDraft,
+				APIKeyStatus: domain.APIKeyStatusPending,
+				VersionID:    input.VersionID,
 			},
 			JobID: jobID,
 		}

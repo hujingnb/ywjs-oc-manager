@@ -104,16 +104,16 @@ func (s *appServiceStoreStub) mustSeedApp(t *testing.T) sqlc.App {
 }
 
 // CreateApp 为 :exec；service 会传入自生成 ID，stub 记录后供 GetAppWithVersion 读回。
+// k8s 模型下 CreateAppParams 不含 RuntimeNodeID，apps 表列在 Phase 3 前仍保留。
 func (s *appServiceStoreStub) CreateApp(_ context.Context, arg sqlc.CreateAppParams) error {
 	s.app = sqlc.App{
-		ID:            arg.ID,
-		OrgID:         arg.OrgID,
-		OwnerUserID:   arg.OwnerUserID,
-		RuntimeNodeID: arg.RuntimeNodeID,
-		Name:          arg.Name,
-		Description:   arg.Description,
-		Status:        arg.Status,
-		ApiKeyStatus:  arg.ApiKeyStatus,
+		ID:           arg.ID,
+		OrgID:        arg.OrgID,
+		OwnerUserID:  arg.OwnerUserID,
+		Name:         arg.Name,
+		Description:  arg.Description,
+		Status:       arg.Status,
+		ApiKeyStatus: arg.ApiKeyStatus,
 	}
 	return nil
 }

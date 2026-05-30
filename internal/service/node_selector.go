@@ -6,6 +6,21 @@ import (
 	"oc-manager/internal/store/sqlc"
 )
 
+// NodeSelector 抽象「列出活跃节点 + 当前应用数」的能力。
+// 已无生产消费方（spec-A2b Task 4 删除 onboarding 注入），由 Task 9 整体删除本文件。
+type NodeSelector interface {
+	ListActiveNodesWithAppCounts(ctx context.Context) ([]NodeWithCount, error)
+}
+
+// NodeWithCount 描述一个活跃节点的容量上限与当前应用数。
+// MaxApps 为 nil 表示不限；剩余容量 = MaxApps - AppCount，nil 视为 +∞。
+// 已无生产消费方，由 Task 9 随文件一起删除。
+type NodeWithCount struct {
+	NodeID   string
+	MaxApps  *int32
+	AppCount int64
+}
+
 // SQLNodeSelectorStore 是 SQLNodeSelector 的最小依赖；对应 sqlc 生成的查询方法。
 // 把 store 接口与 NodeSelector 接口拆开，让 service 层只在 wiring 时绑定 sqlc，
 // 其它单测可继续注入内存桩 NodeSelector。

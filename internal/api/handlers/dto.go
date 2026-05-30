@@ -103,6 +103,7 @@ type ResetPasswordRequest struct {
 }
 
 // OnboardMemberRequest 在事务中创建成员并联动初始化应用的请求体。
+// k8s 模型下不需要指定节点，pod 落点由调度器决定。
 type OnboardMemberRequest struct {
 	// Username 是新成员账号名，与普通创建成员保持同一约束。
 	Username string `json:"username" binding:"required"`
@@ -116,20 +117,17 @@ type OnboardMemberRequest struct {
 	AppName string `json:"app_name" binding:"required"`
 	// ChannelType 是初始化渠道绑定的渠道标识。
 	ChannelType string `json:"channel_type"`
-	// NodeID 是指定 runtime 节点；为空时 service 自动选择可用节点。
-	NodeID string `json:"runtime_node_id"`
 	// VersionID 是实例绑定的助手版本 id，必须落在企业 allowlist 内。
 	VersionID string `json:"version_id" binding:"required"`
 }
 
 // CreateMemberAppRequest 为已有成员创建新实例的请求体。
+// k8s 模型下不需要指定节点，pod 落点由调度器决定。
 type CreateMemberAppRequest struct {
 	// AppName 是新实例名称，创建时必填。
 	AppName string `json:"app_name" binding:"required"`
 	// ChannelType 是初始化渠道绑定的渠道标识。
 	ChannelType string `json:"channel_type"`
-	// NodeID 是指定 runtime 节点；为空时 service 自动选择可用节点。
-	NodeID string `json:"runtime_node_id"`
 	// VersionID 是实例绑定的助手版本 id，必须落在企业 allowlist 内。
 	VersionID string `json:"version_id" binding:"required"`
 }

@@ -136,9 +136,8 @@ func runManager(ctx context.Context, cfg config.Config, logOut io.Writer) error 
 
 	authService := service.NewAuthService(dbStore.Queries, tokenManager)
 	memberService := service.NewMemberService(dbStore.Queries, hashPasswordWithDefault)
-	// nodeSelector 复用 sqlc 生成的 ListActiveNodesWithAppCounts，给 OnboardingService 自动选节点用。
-	nodeSelector := service.NewSQLNodeSelector(dbStore.Queries)
-	onboardingService := service.NewMemberOnboardingService(store.NewOnboardingRunner(dbStore), hashPasswordWithDefault, nodeSelector)
+	// k8s 模型下不再需要选节点，pod 落点由调度器决定；直接构造 onboarding 服务。
+	onboardingService := service.NewMemberOnboardingService(store.NewOnboardingRunner(dbStore), hashPasswordWithDefault)
 	auditService := service.NewAuditService(dbStore.Queries)
 	runtimeNodeStore := store.NewRuntimeNodeStore(dbStore)
 	runtimeNodeService := service.NewRuntimeNodeService(runtimeNodeStore, hashTokenSHA256)

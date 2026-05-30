@@ -8589,8 +8589,6 @@ export interface components {
             app_name: string;
             /** @description ChannelType 是初始化渠道绑定的渠道标识。 */
             channel_type?: string;
-            /** @description NodeID 是指定 runtime 节点；为空时 service 自动选择可用节点。 */
-            runtime_node_id?: string;
             /** @description VersionID 是实例绑定的助手版本 id，必须落在企业 allowlist 内。 */
             version_id: string;
         };
@@ -8708,8 +8706,6 @@ export interface components {
             password: string;
             /** @description Role 为空时默认为 org_member；不允许创建 platform_admin。 */
             role?: string;
-            /** @description NodeID 是指定 runtime 节点；为空时 service 自动选择可用节点。 */
-            runtime_node_id?: string;
             /** @description Username 是新成员账号名，与普通创建成员保持同一约束。 */
             username: string;
             /** @description VersionID 是实例绑定的助手版本 id，必须落在企业 allowlist 内。 */

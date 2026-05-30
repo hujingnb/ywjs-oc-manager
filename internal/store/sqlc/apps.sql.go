@@ -32,35 +32,33 @@ INSERT INTO apps (
     id,
     org_id,
     owner_user_id,
-    runtime_node_id,
     name,
     description,
     status,
     api_key_status,
     version_id
 ) VALUES (
-    ?, ?, ?, ?, ?, ?, ?, ?, ?
+    ?, ?, ?, ?, ?, ?, ?, ?
 )
 `
 
 type CreateAppParams struct {
-	ID            string      `db:"id" json:"id"`
-	OrgID         string      `db:"org_id" json:"org_id"`
-	OwnerUserID   string      `db:"owner_user_id" json:"owner_user_id"`
-	RuntimeNodeID null.String `db:"runtime_node_id" json:"runtime_node_id"`
-	Name          string      `db:"name" json:"name"`
-	Description   null.String `db:"description" json:"description"`
-	Status        string      `db:"status" json:"status"`
-	ApiKeyStatus  string      `db:"api_key_status" json:"api_key_status"`
-	VersionID     null.String `db:"version_id" json:"version_id"`
+	ID           string      `db:"id" json:"id"`
+	OrgID        string      `db:"org_id" json:"org_id"`
+	OwnerUserID  string      `db:"owner_user_id" json:"owner_user_id"`
+	Name         string      `db:"name" json:"name"`
+	Description  null.String `db:"description" json:"description"`
+	Status       string      `db:"status" json:"status"`
+	ApiKeyStatus string      `db:"api_key_status" json:"api_key_status"`
+	VersionID    null.String `db:"version_id" json:"version_id"`
 }
 
+// k8s 模型下 app 对应 Deployment，pod 落点由调度器决定，不再写 runtime_node_id。
 func (q *Queries) CreateApp(ctx context.Context, arg CreateAppParams) error {
 	_, err := q.db.ExecContext(ctx, createApp,
 		arg.ID,
 		arg.OrgID,
 		arg.OwnerUserID,
-		arg.RuntimeNodeID,
 		arg.Name,
 		arg.Description,
 		arg.Status,

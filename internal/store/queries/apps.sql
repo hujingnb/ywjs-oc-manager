@@ -1,16 +1,16 @@
 -- name: CreateApp :exec
+-- k8s 模型下 app 对应 Deployment，pod 落点由调度器决定，不再写 runtime_node_id。
 INSERT INTO apps (
     id,
     org_id,
     owner_user_id,
-    runtime_node_id,
     name,
     description,
     status,
     api_key_status,
     version_id
 ) VALUES (
-    ?, ?, ?, ?, ?, ?, ?, ?, ?
+    ?, ?, ?, ?, ?, ?, ?, ?
 );
 
 -- name: GetApp :one
