@@ -229,11 +229,14 @@ func TestOcSyncOnce(t *testing.T) {
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) { _, _ = w.Write(body) }))
 	defer srv.Close()
 
-	// 预置本地 /data：workspace 文件 + 一个最小 sqlite DB
+	// 预置本地 /data：workspace 文件 + sessions 文件 + 一个最小 sqlite DB
 	dataDir := t.TempDir()
 	inputDir := t.TempDir()
 	require.NoError(t, os.MkdirAll(filepath.Join(dataDir, "workspace"), 0o755))
 	require.NoError(t, os.WriteFile(filepath.Join(dataDir, "workspace/out.txt"), []byte("SYNCED"), 0o644))
+	// 预置 sessions 文件：验证 sync_sessions_up 会把会话附属文件上传（父设计 §5.4）
+	require.NoError(t, os.MkdirAll(filepath.Join(dataDir, "sessions"), 0o755))
+	require.NoError(t, os.WriteFile(filepath.Join(dataDir, "sessions/req.json"), []byte("SESS"), 0o644))
 	// 用 ops 容器内的 sqlite3 建一个最小 DB，确保 .backup 命令可用
 	mk := exec.Command("docker", "run", "--rm",
 		"--user", fmt.Sprintf("%d:%d", os.Getuid(), os.Getgid()),
@@ -246,10 +249,14 @@ func TestOcSyncOnce(t *testing.T) {
 		dataDir, inputDir, "OC_SYNC_ONCE=1")
 	require.NoError(t, runErr, "oc-sync 容器执行失败:\n%s", out)
 
-	// 断言：MinIO apps/<id>/ 前缀出现 workspace 对象与 state.db 快照
+	// 断言：MinIO apps/<id>/ 前缀出现 workspace 对象、sessions 对象与 state.db 快照
 	exists, err := store.ObjectExists(ctx, appPrefix+"workspace/out.txt")
 	require.NoError(t, err)
 	assert.True(t, exists, "workspace 对象应已上传")
+	// 断言 sessions 上行：验证 sync_sessions_up 正确把会话附属文件上传到 S3
+	sessExists, err := store.ObjectExists(ctx, appPrefix+"sessions/req.json")
+	require.NoError(t, err)
+	assert.True(t, sessExists, "sessions 对象应已上传")
 	dbExists, err := store.ObjectExists(ctx, storage.StateDBKey(id))
 	require.NoError(t, err)
 	assert.True(t, dbExists, "state.db 快照应已上传")

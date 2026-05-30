@@ -28,7 +28,7 @@ ops 镜像仅包含标准搬运工具（`aws-cli`、`sqlite3`、`jq`、`curl`、
 | `make build-ops-runtime` | 生产构建 | prod registry |
 | `make local-build-ops` | 本地联调构建 | k3d 本地 registry |
 
-> **注**：以上两个 target 由 **Task 9** 加入 Makefile，当前版本尚未提交。
+> **注**：以上两个 target 已由 `make build-ops-runtime` / `make local-build-ops` 提供。
 
 ### 2.2 镜像引用占位
 
@@ -144,10 +144,10 @@ containers:
 
 **oc-sync 行为**（主循环）：
 - 启动时立即调 bootstrap 拿 STS 凭证（`ensure_creds`）。
-- 每 `OC_SYNC_INTERVAL`（默认 8s）循环：先 `ensure_creds`（凭证临近过期时自动续期），然后 `sync_workspace_up`（workspace 增量上传），每 `OC_SQLITE_INTERVAL`（默认 30s）触发一次 `backup_sqlite_up`（sqlite 一致性快照上传）。
+- 每 `OC_SYNC_INTERVAL`（默认 8s）循环：先 `ensure_creds`（凭证临近过期时自动续期），然后 `sync_workspace_up`（workspace 增量上传）+ `sync_sessions_up`（sessions 增量上传），每 `OC_SQLITE_INTERVAL`（默认 30s）触发一次 `backup_sqlite_up`（sqlite 一致性快照上传）。
 
 **oc-presync 行为**（preStop hook，exec 模式）：
-- 调 bootstrap 取最新凭证 → 做一次 `sync_workspace_up` + `backup_sqlite_up`，完成后退出。
+- 调 bootstrap 取最新凭证 → 做一次 `sync_workspace_up` + `sync_sessions_up` + `backup_sqlite_up`，完成后退出。
 - 与 oc-sync 主循环**并发安全**：`backup_sqlite_up` 使用 `mktemp` 唯一临时文件，两者同时调用不会相互覆盖。
 
 ---
@@ -196,6 +196,7 @@ for skill in response.skills[]:
 | 数据 | S3 路径 | 本地路径 | 方式 |
 |---|---|---|---|
 | workspace 目录树 | `apps/<id>/workspace/` | `/opt/data/workspace/` | `aws s3 sync`，排除 `node_modules/*`、`.git/*`、`*.tmp` |
+| sessions 目录树 | `apps/<id>/sessions/` | `/opt/data/sessions/` | `aws s3 sync`，无 `--delete`，无额外排除 |
 | sqlite 状态库 | `apps/<id>/state.db` | 临时文件（`mktemp`）→ 上传后删除 | `sqlite3 .backup`（一致性快照）+ `aws s3 cp` |
 
 > **无 `--delete`**：workspace 同步**故意不加** `--delete`，避免将本地临时删除传播到 S3 持久存储，防止误删历史数据。

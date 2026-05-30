@@ -1,8 +1,8 @@
 #!/usr/bin/env bash
 # oc-sync — sidecar 入口：循环把 /opt/data 产物增量同步回 S3。
 # 用 bootstrap 的 s3_write STS 凭证写 apps/<id>/ 前缀；凭证临近过期自调 bootstrap 续期。
-# workspace 增量同步（无 --delete）每 OC_SYNC_INTERVAL 秒一次；sqlite 一致性快照每
-# OC_SQLITE_INTERVAL 秒一次。OC_SYNC_ONCE=1 时只跑一轮（含一次 sqlite 备份）后退出，供测试。
+# workspace 与 sessions 增量同步（无 --delete）每 OC_SYNC_INTERVAL 秒一次；sqlite 一致性快照每
+# OC_SQLITE_INTERVAL 秒一次。OC_SYNC_ONCE=1 时只跑一轮（含 sessions 同步与 sqlite 备份）后退出，供测试。
 set -euo pipefail
 # shellcheck source=/usr/local/bin/oc-lib.sh
 # shellcheck disable=SC1091
@@ -31,10 +31,11 @@ ensure_creds() {
   fi
 }
 
-# run_once 跑一轮：确保凭证新鲜 → 同步 workspace → 到点则备份 sqlite。
+# run_once 跑一轮：确保凭证新鲜 → 同步 workspace → 同步 sessions → 到点则备份 sqlite。
 run_once() {
   ensure_creds
   sync_workspace_up "$DATA_DIR"
+  sync_sessions_up "$DATA_DIR"
   local now
   now=$(date -u +%s)
   if [ $((now - last_db)) -ge "$DB_INTERVAL" ]; then
@@ -44,9 +45,10 @@ run_once() {
 }
 
 if [ "${OC_SYNC_ONCE:-0}" = "1" ]; then
-  # 测试模式：跑一轮并强制做一次 sqlite 备份，便于断言。
+  # 测试模式：跑一轮并强制做一次 sessions 同步与 sqlite 备份，便于断言。
   ensure_creds
   sync_workspace_up "$DATA_DIR"
+  sync_sessions_up "$DATA_DIR"
   backup_sqlite_up "$DATA_DIR"
   log "oc-sync 单轮完成（OC_SYNC_ONCE）"
   exit 0

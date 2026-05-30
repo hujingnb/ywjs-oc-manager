@@ -92,6 +92,14 @@ sync_workspace_up() {
     --exclude "node_modules/*" --exclude ".git/*" --exclude "*.tmp"
 }
 
+# sync_sessions_up 把本地 sessions 目录增量同步到 S3（无 --delete）。
+# 会话附属文件（request_dump / sessions.json 等），与 workspace 并列的 app 级持久数据
+# （父设计 §5.4）；不排除任何目录（sessions 无可重建大目录）。
+sync_sessions_up() {
+  local data_dir="$1"
+  aws_s3 sync "$data_dir/sessions" "s3://${AWS_S3_BUCKET}/${AWS_S3_PREFIX}sessions/"
+}
+
 # backup_sqlite_up 用 sqlite .backup 出 live DB 的一致性快照并上传为 state.db（绝不分别传 -wal/-shm）。
 # 本地无 state.db（首启未建库）时静默跳过。
 backup_sqlite_up() {
