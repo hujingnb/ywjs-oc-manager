@@ -12,6 +12,7 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 	"oc-manager/internal/domain"
+	"oc-manager/internal/integrations/k8sorch"
 	"oc-manager/internal/integrations/newapi"
 	"oc-manager/internal/integrations/storage"
 	"oc-manager/internal/store/sqlc"
@@ -20,6 +21,8 @@ import (
 const testRuntimeNodeID = "00000000-0000-0000-0000-000000000d01"
 
 // runtimeStub 构建测试用 runtimeOpStub；ID 字段迁移为 string（MySQL uuid）。
+// ContainerID 仅供 Delete 等未改造路径使用；Start/Stop 已改为经 orch.Status.Phase 判定
+// Deployment 是否存在，ContainerID 不再是 Start/Stop 的守卫依据。
 func runtimeStub(t *testing.T) *runtimeOpStub {
 	t.Helper()
 	return &runtimeOpStub{
@@ -29,7 +32,7 @@ func runtimeStub(t *testing.T) *runtimeOpStub {
 			OwnerUserID:   testUsrID,
 			RuntimeNodeID: null.StringFrom(testRuntimeNodeID), // RuntimeNodeID nullable（spec-A2a）
 			Status:        domain.AppStatusRunning,
-			ContainerID:   null.StringFrom("ctr-existing"), // k8s 路径用 ContainerID 判断 Deployment 是否已建立
+			ContainerID:   null.StringFrom("ctr-existing"), // k8s 路径不再依赖此字段判定 Start/Stop
 			ContainerName: null.StringFrom("ocm-app"),
 			NewapiKeyID:   null.StringFrom("42"),
 		},
@@ -45,9 +48,11 @@ func runtimeJob(jobType, appID string) sqlc.Job {
 // ─────────────────────────────────────────────
 
 // TestAppStartContainerHandler_HappyPath 验证 Scale(1) 被调用且状态更新为 running 的成功路径。
+// orch.Status 返回 "Running"（Deployment 已建立，pod 在跑），应正常 Scale(1)。
 func TestAppStartContainerHandler_HappyPath(t *testing.T) {
 	stub := runtimeStub(t)
-	orch := &fakeAppOrchestrator{}
+	// statusPhase="Running"：Deployment 存在，Scale(1) 应被调用（ContainerID 不再是判定依据）。
+	orch := &fakeAppOrchestrator{statusPhase: "Running"}
 	handler := NewAppStartContainerHandler(stub, orch)
 
 	err := handler.Handle(context.Background(), runtimeJob(domain.JobTypeAppStartContainer, testAppID))
@@ -59,20 +64,70 @@ func TestAppStartContainerHandler_HappyPath(t *testing.T) {
 	require.Equal(t, domain.AppStatusRunning, stub.statusUpdates[len(stub.statusUpdates)-1])
 }
 
-// TestAppStartContainerHandler_RejectsWithoutContainerID 验证未完成 init 时（ContainerID 空）拒绝启动。
-// k8s Deployment 未建立时不能发 Scale，避免产生孤儿资源。
-func TestAppStartContainerHandler_RejectsWithoutContainerID(t *testing.T) {
+// TestAppStartContainerHandler_ContainerIDEmptyButDeploymentExists_Succeeds 验证
+// k8s 真实场景：ContainerID 恒空（app_initialize 从不写），但 Deployment 已建立
+// （orch.Status 返回 Phase="Pending"，replicas=0 的已停止态）时，Start 应正常 Scale(1)。
+// 这是修复前的 Critical bug 回归测试：旧守卫以 ContainerID 为空拒绝启动，导致 k8s 下
+// 用户永远无法重新拉起已停止的 app。
+func TestAppStartContainerHandler_ContainerIDEmptyButDeploymentExists_Succeeds(t *testing.T) {
+	stub := runtimeStub(t)
+	// k8s 真实场景：ContainerID 恒为空（app_initialize 不写此字段）。
+	stub.app.ContainerID = null.String{}
+	// Status Phase="Pending"：Deployment 存在但 replicas=0（已停止态）。
+	orch := &fakeAppOrchestrator{statusPhase: "Pending"}
+	handler := NewAppStartContainerHandler(stub, orch)
+
+	err := handler.Handle(context.Background(), runtimeJob(domain.JobTypeAppStartContainer, testAppID))
+	// ContainerID 为空不再是拒绝条件，Deployment 存在则应正常启动。
+	require.NoError(t, err, "k8s 下 ContainerID 恒空但 Deployment 已建立，Start 不应被拒绝")
+	// Scale(1) 必须被调用。
+	require.Equal(t, 1, orch.scaleCalls)
+	require.Equal(t, int32(1), orch.lastScaleReplicas)
+	// 状态更新为 running。
+	require.Equal(t, domain.AppStatusRunning, stub.statusUpdates[len(stub.statusUpdates)-1])
+}
+
+// TestAppStartContainerHandler_NotFound_RejectsStart 验证 Deployment 尚未建立
+// （orch.Status Phase=="NotFound"）时拒绝 Scale(1)，保护未完成初始化的 app。
+func TestAppStartContainerHandler_NotFound_RejectsStart(t *testing.T) {
 	stub := runtimeStub(t)
 	stub.app.ContainerID = null.String{}
-	handler := NewAppStartContainerHandler(stub, &fakeAppOrchestrator{})
+	// Status Phase="NotFound"：Deployment 真不存在（app_initialize 尚未完成）。
+	orch := &fakeAppOrchestrator{statusPhase: "NotFound"}
+	handler := NewAppStartContainerHandler(stub, orch)
+
 	err := handler.Handle(context.Background(), runtimeJob(domain.JobTypeAppStartContainer, testAppID))
-	require.Error(t, err)
+	// Deployment 不存在时应拒绝 Scale，返回可诊断错误。
+	require.Error(t, err, "Deployment NotFound 时应拒绝启动")
+	// Scale 不应被调用。
+	require.Equal(t, 0, orch.scaleCalls, "Deployment NotFound 时不应调 Scale")
+	// 状态不应被更新。
+	require.Empty(t, stub.statusUpdates, "Deployment NotFound 时不应更新 app 状态")
+}
+
+// TestAppStartContainerHandler_StatusError_PropagatesError 验证 orch.Status 返回错误时
+// Start 透出错误，不调 Scale 也不更新状态。
+func TestAppStartContainerHandler_StatusError_PropagatesError(t *testing.T) {
+	stub := runtimeStub(t)
+	// Status 返回错误，模拟 k8s 连通性问题。
+	orch := &fakeAppOrchestrator{statusErr: errors.New("k8s apiserver unreachable")}
+	handler := NewAppStartContainerHandler(stub, orch)
+
+	err := handler.Handle(context.Background(), runtimeJob(domain.JobTypeAppStartContainer, testAppID))
+	// orch.Status 错误应透出。
+	require.Error(t, err, "orch.Status 错误应透出")
+	// Scale 不应被调用。
+	require.Equal(t, 0, orch.scaleCalls, "Status 错误时不应调 Scale")
+	// 状态不应被更新。
+	require.Empty(t, stub.statusUpdates, "Status 错误时不应更新 app 状态")
 }
 
 // TestAppStartContainerHandler_PropagatesOrchestratorError 验证 Scale 失败时错误冒泡、状态不更新。
+// orch.Status 返回 "Running"（Deployment 存在），Scale(1) 返回错误。
 func TestAppStartContainerHandler_PropagatesOrchestratorError(t *testing.T) {
 	stub := runtimeStub(t)
-	orch := &fakeAppOrchestrator{scaleErr: errors.New("k8s boom")}
+	// statusPhase="Running"：通过 Status 守卫，Scale(1) 再返回错误。
+	orch := &fakeAppOrchestrator{statusPhase: "Running", scaleErr: errors.New("k8s boom")}
 	handler := NewAppStartContainerHandler(stub, orch)
 	err := handler.Handle(context.Background(), runtimeJob(domain.JobTypeAppStartContainer, testAppID))
 	require.Error(t, err)
@@ -85,9 +140,11 @@ func TestAppStartContainerHandler_PropagatesOrchestratorError(t *testing.T) {
 // ─────────────────────────────────────────────
 
 // TestAppStopContainerHandler_HappyPath 验证 Scale(0) 被调用且状态更新为 stopped 的成功路径。
+// orch.Status 返回 "Running"（Deployment 已建立），应正常 Scale(0)。
 func TestAppStopContainerHandler_HappyPath(t *testing.T) {
 	stub := runtimeStub(t)
-	orch := &fakeAppOrchestrator{}
+	// statusPhase="Running"：Deployment 存在，Scale(0) 应被调用（ContainerID 不再是判定依据）。
+	orch := &fakeAppOrchestrator{statusPhase: "Running"}
 	handler := NewAppStopContainerHandler(stub, orch)
 	err := handler.Handle(context.Background(), runtimeJob(domain.JobTypeAppStopContainer, testAppID))
 	require.NoError(t, err)
@@ -97,18 +154,63 @@ func TestAppStopContainerHandler_HappyPath(t *testing.T) {
 	require.Equal(t, domain.AppStatusStopped, stub.statusUpdates[len(stub.statusUpdates)-1])
 }
 
-// TestAppStopContainerHandler_NoContainerStillUpdatesStatus 验证 ContainerID 为空时跳过 Scale
-// 直接推 stopped 状态（Deployment 未建立时等价于已停止）。
-func TestAppStopContainerHandler_NoContainerStillUpdatesStatus(t *testing.T) {
+// TestAppStopContainerHandler_ContainerIDEmptyAndDeploymentExists_ScalesZero 验证
+// k8s 真实场景：ContainerID 恒空（app_initialize 从不写），但 Deployment 已建立
+// （orch.Status 返回 Phase="Pending"，即 replicas=0 或 pod 启动中）时，
+// Stop 必须调 Scale(0) 而非直接跳到 SetAppStatus(stopped)。
+// 这是修复前的 Critical bug 回归测试：旧守卫以 ContainerID 为空绕过 Scale(0)，
+// 导致 pod 仍在跑但 DB 谎报 stopped（状态机与实态脱钩）。
+func TestAppStopContainerHandler_ContainerIDEmptyAndDeploymentExists_ScalesZero(t *testing.T) {
 	stub := runtimeStub(t)
+	// k8s 真实场景：ContainerID 恒为空（app_initialize 不写此字段）。
 	stub.app.ContainerID = null.String{}
-	orch := &fakeAppOrchestrator{}
+	// Status Phase="Pending"：Deployment 存在（replicas=1 但 pod 还在启动中，或 running）。
+	orch := &fakeAppOrchestrator{statusPhase: "Pending"}
 	handler := NewAppStopContainerHandler(stub, orch)
+
 	err := handler.Handle(context.Background(), runtimeJob(domain.JobTypeAppStopContainer, testAppID))
-	require.NoError(t, err)
-	// Deployment 未建立时不调 Scale，直接推状态收敛状态机。
-	require.Equal(t, 0, orch.scaleCalls)
+	// ContainerID 为空不再是跳过 Scale 的条件，Deployment 存在则必须 Scale(0)。
+	require.NoError(t, err, "k8s 下 ContainerID 恒空但 Deployment 已建立，Stop 应正常 Scale(0)")
+	// Scale(0) 必须被调用（修复前 bug：此处为 0 次）。
+	require.Equal(t, 1, orch.scaleCalls, "ContainerID 空但 Deployment 存在，应调 Scale(0) 而非绕过")
+	require.Equal(t, int32(0), orch.lastScaleReplicas, "Scale 参数必须是 0（停止）")
+	// 状态更新为 stopped。
 	require.Equal(t, domain.AppStatusStopped, stub.statusUpdates[len(stub.statusUpdates)-1])
+}
+
+// TestAppStopContainerHandler_NotFound_SkipsScaleAndUpdatesStatus 验证
+// Deployment 不存在（orch.Status Phase=="NotFound"）时跳过 Scale(0)，
+// 直接推 stopped 收敛状态机（无 Deployment 可 Scale）。
+func TestAppStopContainerHandler_NotFound_SkipsScaleAndUpdatesStatus(t *testing.T) {
+	stub := runtimeStub(t)
+	// Status Phase="NotFound"：Deployment 真不存在（app_initialize 尚未完成或已删除）。
+	orch := &fakeAppOrchestrator{statusPhase: "NotFound"}
+	handler := NewAppStopContainerHandler(stub, orch)
+
+	err := handler.Handle(context.Background(), runtimeJob(domain.JobTypeAppStopContainer, testAppID))
+	// Deployment 不存在等价于已停止，应直接推状态，不返回错误。
+	require.NoError(t, err, "Deployment NotFound 时应直接推 stopped 状态，不返回错误")
+	// Scale 不应被调用（无 Deployment 可 Scale）。
+	require.Equal(t, 0, orch.scaleCalls, "Deployment NotFound 时不应调 Scale")
+	// 状态更新为 stopped。
+	require.Equal(t, domain.AppStatusStopped, stub.statusUpdates[len(stub.statusUpdates)-1])
+}
+
+// TestAppStopContainerHandler_StatusError_PropagatesError 验证 orch.Status 返回错误时
+// Stop 透出错误，不调 Scale 也不更新状态。
+func TestAppStopContainerHandler_StatusError_PropagatesError(t *testing.T) {
+	stub := runtimeStub(t)
+	// Status 返回错误，模拟 k8s 连通性问题。
+	orch := &fakeAppOrchestrator{statusErr: errors.New("k8s apiserver unreachable")}
+	handler := NewAppStopContainerHandler(stub, orch)
+
+	err := handler.Handle(context.Background(), runtimeJob(domain.JobTypeAppStopContainer, testAppID))
+	// orch.Status 错误应透出。
+	require.Error(t, err, "orch.Status 错误应透出")
+	// Scale 不应被调用。
+	require.Equal(t, 0, orch.scaleCalls, "Status 错误时不应调 Scale")
+	// 状态不应被更新。
+	require.Empty(t, stub.statusUpdates, "Status 错误时不应更新 app 状态")
 }
 
 // ─────────────────────────────────────────────
@@ -504,6 +606,10 @@ type fakeAppOrchestrator struct {
 	// Delete 相关
 	deleteCalls int
 	deleteErr   error
+	// Status 相关：statusPhase 控制返回的 Phase（空串时默认 "Running"，非 NotFound）；
+	// statusErr 控制是否返回错误（模拟 k8s apiserver 不可达）。
+	statusPhase string
+	statusErr   error
 }
 
 func (f *fakeAppOrchestrator) Scale(_ context.Context, _ string, replicas int32) error {
@@ -522,6 +628,20 @@ func (f *fakeAppOrchestrator) UpdateImage(_ context.Context, _ string, hermesIma
 func (f *fakeAppOrchestrator) Delete(_ context.Context, _ string) error {
 	f.deleteCalls++
 	return f.deleteErr
+}
+
+// Status 返回可配置的 Phase，供 Start/Stop 的 Deployment 存在性判定测试。
+// statusErr 非 nil 时直接返回错误；statusPhase 为空时默认 "Running"（Deployment 已建立）。
+func (f *fakeAppOrchestrator) Status(_ context.Context, _ string) (k8sorch.AppStatus, error) {
+	if f.statusErr != nil {
+		return k8sorch.AppStatus{}, f.statusErr
+	}
+	phase := f.statusPhase
+	if phase == "" {
+		// 默认 "Running"：表示 Deployment 已建立，通过 NotFound 守卫，与旧测试语义兼容。
+		phase = "Running"
+	}
+	return k8sorch.AppStatus{Phase: phase}, nil
 }
 
 // fakeObjectStore 是 storage.ObjectStore 的最小测试桩，仅实现 MovePrefix / DeletePrefix。

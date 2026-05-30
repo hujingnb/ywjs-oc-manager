@@ -14,6 +14,7 @@ import (
 	"github.com/google/uuid"
 
 	"oc-manager/internal/domain"
+	"oc-manager/internal/integrations/k8sorch"
 	"oc-manager/internal/integrations/storage"
 	"oc-manager/internal/store/sqlc"
 )
@@ -43,6 +44,9 @@ type appOrchestrator interface {
 	UpdateImage(ctx context.Context, appID, hermesImage string) error
 	// Delete 删除 Deployment + Service + Secret（幂等，NotFound 视为成功）。
 	Delete(ctx context.Context, appID string) error
+	// Status 读取 app 的 pod 状态归一视图，用于判定 Deployment 是否已建立
+	// （Phase=="NotFound" 严格表示 Deployment 不存在；replicas=0 的已停止态返回 "Pending"）。
+	Status(ctx context.Context, appID string) (k8sorch.AppStatus, error)
 }
 
 // AppDelete 用 NewAPIClientFactory 拿 user-scoped client 调 SetAPIKeyStatus 禁用 token，
@@ -121,9 +125,15 @@ func (h *AppStartContainerHandler) Handle(ctx context.Context, job sqlc.Job) err
 	if h.orch == nil {
 		return fmt.Errorf("编排器未配置（k8s.enabled 未启用？），无法启动应用 %s", payload.AppID)
 	}
-	// k8s 路径不依赖 ContainerID，直接按 appID 寻址 Deployment。
-	// 但保留对 ContainerID 的检查保持与旧接口语义兼容，避免向未完成 init 的应用发 Scale。
-	if app.ContainerID.String == "" {
+	// k8s 创建流程（app_initialize）不写 apps.container_id，ContainerID 字段恒为空/null，
+	// 不能用于判定 Deployment 是否已建立。改为经 orch.Status 的 Phase 精确判定：
+	// Phase=="NotFound" 严格表示 Deployment 尚不存在（真未初始化或已删除）；
+	// Deployment 存在但 replicas=0（已停止态）返回 Phase=="Pending"，允许继续 Scale(1)。
+	st, serr := h.orch.Status(ctx, payload.AppID)
+	if serr != nil {
+		return fmt.Errorf("查询应用状态失败: %w", serr)
+	}
+	if st.Phase == "NotFound" {
 		return fmt.Errorf("应用 %s 尚未完成初始化，无法启动（k8s Deployment 尚未建立）", payload.AppID)
 	}
 	// Scale(1) 等价于"起 pod"，幂等：Deployment 已有 replicas=1 时 k8s 不重建 pod。
@@ -169,8 +179,17 @@ func (h *AppStopContainerHandler) Handle(ctx context.Context, job sqlc.Job) erro
 	if h.orch == nil {
 		return fmt.Errorf("编排器未配置（k8s.enabled 未启用？），无法停止应用 %s", payload.AppID)
 	}
-	if app.ContainerID.String == "" {
-		// k8s Deployment 尚未建立（未完成 init），等价于已停止，直接推状态收敛状态机。
+	// k8s 创建流程（app_initialize）不写 apps.container_id，ContainerID 字段恒为空/null，
+	// 旧以 ContainerID 为空判定「Deployment 未建立」会导致：ContainerID 恒空 → 永远跳过
+	// Scale(0) → pod 仍在跑但 DB 谎报 stopped（状态机与实态脱钩）。
+	// 改为经 orch.Status 的 Phase 精确判定：Phase=="NotFound" 才表示 Deployment 真不存在，
+	// 此时等价于已停止，直接收敛状态机；其余 Phase（含 replicas=0 的 Pending）仍调 Scale(0)。
+	st, serr := h.orch.Status(ctx, payload.AppID)
+	if serr != nil {
+		return fmt.Errorf("查询应用状态失败: %w", serr)
+	}
+	if st.Phase == "NotFound" {
+		// Deployment 尚未建立 / 已删除，等价于已停止，直接收敛状态机（无 Deployment 可 Scale）。
 		if err := h.store.SetAppStatus(ctx, sqlc.SetAppStatusParams{ID: app.ID, Status: domain.AppStatusStopped}); err != nil {
 			return fmt.Errorf("更新应用状态失败: %w", err)
 		}
