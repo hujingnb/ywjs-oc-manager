@@ -7,6 +7,7 @@ import (
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
+	corev1 "k8s.io/api/core/v1"
 	"sigs.k8s.io/yaml"
 )
 
@@ -47,6 +48,29 @@ func assertGolden(t *testing.T, name string, obj any) {
 // TestRenderDeployment 验证 Deployment 渲染与 golden 一致（含 initContainer/三容器/卷/probe）。
 func TestRenderDeployment(t *testing.T) {
 	assertGolden(t, "deployment.golden.yaml", RenderDeployment(testSpec(), "oc-apps"))
+}
+
+// TestRenderDeploymentOcOpsPythonPath 断言 oc-ops sidecar 显式注入
+// PYTHONPATH=/usr/local/lib。oc-ops 用 `python -m uvicorn ocops.server:app`
+// 直启、不经 oc-* shim 的 sys.path 注入，缺此 env 会 ModuleNotFoundError: ocops
+// 导致 sidecar CrashLoopBackOff，pod 永远到不了 3/3 Ready。
+func TestRenderDeploymentOcOpsPythonPath(t *testing.T) {
+	dep := RenderDeployment(testSpec(), "oc-apps")
+	// 从三容器里定位 oc-ops 容器
+	var ocOps *corev1.Container
+	for i := range dep.Spec.Template.Spec.Containers {
+		if dep.Spec.Template.Spec.Containers[i].Name == "oc-ops" {
+			ocOps = &dep.Spec.Template.Spec.Containers[i]
+			break
+		}
+	}
+	require.NotNil(t, ocOps, "渲染结果必须包含名为 oc-ops 的容器")
+	// 收集 env 为 map 便于断言
+	envs := map[string]string{}
+	for _, e := range ocOps.Env {
+		envs[e.Name] = e.Value
+	}
+	assert.Equal(t, "/usr/local/lib", envs["PYTHONPATH"], "oc-ops 必须置 PYTHONPATH=/usr/local/lib 才能 import ocops")
 }
 
 // TestRenderService 验证 oc-ops Service 渲染（selector + 8080）。

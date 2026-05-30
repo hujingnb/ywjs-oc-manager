@@ -126,7 +126,14 @@ func RenderDeployment(spec AppSpec, namespace string) *appsv1.Deployment {
 								"--port", "8080",
 							},
 							// OC_OPS_TOKEN 复用 ctrlTokenEnv 的 SecretKeyRef 来源。
-							Env:          []corev1.EnvVar{{Name: "OC_OPS_TOKEN", ValueFrom: ctrlTokenEnv.ValueFrom}},
+							// PYTHONPATH=/usr/local/lib：ocops 包在镜像内落点 /usr/local/lib/ocops，
+							// 但 uvicorn 直接 `python -m uvicorn ocops.server:app` 启动、不经 oc-* shim
+							// 的 sys.path.insert("/usr/local/lib")，故须显式置 PYTHONPATH 让 venv python
+							// 能解析 `import ocops`，否则 sidecar 起不来（ModuleNotFoundError: ocops）。
+							Env: []corev1.EnvVar{
+								{Name: "OC_OPS_TOKEN", ValueFrom: ctrlTokenEnv.ValueFrom},
+								{Name: "PYTHONPATH", Value: "/usr/local/lib"},
+							},
 							Ports:        []corev1.ContainerPort{{ContainerPort: 8080}},
 							VolumeMounts: []corev1.VolumeMount{dataMount},
 						},

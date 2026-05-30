@@ -62,6 +62,8 @@ spec:
             secretKeyRef:
               key: control-token
               name: app-a1-token
+        - name: PYTHONPATH
+          value: /usr/local/lib
         image: registry/hermes:v1
         name: oc-ops
         ports:
