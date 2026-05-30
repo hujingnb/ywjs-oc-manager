@@ -51,8 +51,6 @@ auth:
   csrf_secret: "csrf-secret"
 security:
   master_key: "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA="
-runtime:
-  enrollment_secret: "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA="
 hermes:
   system_prompt_template: |
     你是 {org_name} 的助手

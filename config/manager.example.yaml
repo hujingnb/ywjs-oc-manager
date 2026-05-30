@@ -154,18 +154,3 @@ agent:
   # runtime-agent 注册成功后回写并按此频率上报心跳；
   # manager 用 90s 阈值判定节点离线（NodeHealthReconciler）。
   heartbeat_interval_seconds: 30
-
-runtime:
-  # runtime-agent 自动注册共享密钥；manager 与所有 agent 必须一致。
-  # 必须是 base64 编码的 32 字节随机数，生成示例：openssl rand -base64 32
-  enrollment_secret: "CHANGE_ME_BASE64_32_BYTES"
-
-  probe:
-    # manager 主动探测 runtime-agent docker/file 两个 TLS 端口的间隔。
-    interval_seconds: 60
-    # 单次 HTTP 探测超时秒数。
-    timeout_seconds: 3
-    # active 节点连续失败达到该次数后进入 degraded。
-    failure_threshold: 3
-    # degraded 节点连续成功达到该次数后恢复 active。
-    recovery_threshold: 2

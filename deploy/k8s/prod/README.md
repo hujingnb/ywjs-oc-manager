@@ -10,7 +10,7 @@ manager-api/web、new-api、ragflow 与 RBAC 与本地一致，差异仅镜像 r
    new-api.yaml / ragflow.yaml 不用改**）：
    - manager.yaml：外部 MySQL DSN、Redis、master_key（base64 32B）、
      jwt/csrf secrets、public_base_url/cookie_domain（真实域名）、
-     runtime.enrollment_secret（base64 32B）、ragflow.api_key。
+     ragflow.api_key。
    - new-api：`new-api-sql-dsn` / `new-api-redis-conn` 完整连接串。
    - ragflow：`ragflow-mysql-*`（host/port/dbname/user/password）、`ragflow-minio-*`、
      `ragflow-es-host` + `elastic-password`、`ragflow-redis-host` + `redis-password`。

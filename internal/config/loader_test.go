@@ -47,8 +47,6 @@ hermes:
     archive_retention_days: 14
 agent:
   heartbeat_interval_seconds: 30
-runtime:
-  enrollment_secret: "` + validBase64MasterKey + `"
 `
 }
 
@@ -88,7 +86,7 @@ func TestValidateReportsRequiredFields(t *testing.T) {
 		"app.http_addr", "app.data_root", "database.url", "redis.addr",
 		"auth.access_token_ttl", "auth.refresh_token_ttl",
 		"auth.jwt_access_secret", "auth.jwt_refresh_secret", "auth.csrf_secret",
-		"security.master_key", "runtime.enrollment_secret", "hermes.system_prompt_template",
+		"security.master_key", "hermes.system_prompt_template",
 	}
 	for _, field := range required {
 		require.True(t, strings.Contains(err.Error(), field))

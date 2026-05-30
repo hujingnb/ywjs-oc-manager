@@ -37,18 +37,6 @@ func LoadFile(path string) (Config, error) {
 
 // applyDefaults 填充可选配置的默认值；所有必需配置仍由 Validate 统一校验。
 func (c *Config) applyDefaults() {
-	if c.Runtime.Probe.IntervalSeconds == 0 {
-		c.Runtime.Probe.IntervalSeconds = 60
-	}
-	if c.Runtime.Probe.TimeoutSeconds == 0 {
-		c.Runtime.Probe.TimeoutSeconds = 3
-	}
-	if c.Runtime.Probe.FailureThreshold == 0 {
-		c.Runtime.Probe.FailureThreshold = 3
-	}
-	if c.Runtime.Probe.RecoveryThreshold == 0 {
-		c.Runtime.Probe.RecoveryThreshold = 2
-	}
 	if strings.TrimSpace(c.Hermes.ManagerRuntimeBaseURL) == "" {
 		c.Hermes.ManagerRuntimeBaseURL = "http://manager-api:8080"
 	}
@@ -119,9 +107,6 @@ func (c Config) Validate() error {
 	if strings.TrimSpace(c.Security.MasterKey) == "" {
 		missing = append(missing, "security.master_key")
 	}
-	if strings.TrimSpace(c.Runtime.EnrollmentSecret) == "" {
-		missing = append(missing, "runtime.enrollment_secret")
-	}
 	if strings.TrimSpace(c.Hermes.SystemPromptTemplate) == "" {
 		missing = append(missing, "hermes.system_prompt_template")
 	}
@@ -131,13 +116,7 @@ func (c Config) Validate() error {
 	if err := validateMasterKey(c.Security.MasterKey); err != nil {
 		return err
 	}
-	if err := validateEnrollmentSecret(c.Runtime.EnrollmentSecret); err != nil {
-		return err
-	}
 	if err := ValidateRuntimeImages(c.Hermes.RuntimeImages); err != nil {
-		return err
-	}
-	if err := c.Runtime.Probe.validate(); err != nil {
 		return err
 	}
 	if err := c.RAGFlow.validate(); err != nil {
@@ -173,26 +152,6 @@ func validateMasterKey(value string) error {
 	}
 	if len(raw) != 32 {
 		return fmt.Errorf("security.master_key 解码后必须是 32 字节，实际 %d", len(raw))
-	}
-	return nil
-}
-
-// validateEnrollmentSecret 校验自动注册共享密钥，要求与 master_key 一样是 32 字节随机值。
-func validateEnrollmentSecret(value string) error {
-	raw, err := base64.StdEncoding.DecodeString(value)
-	if err != nil {
-		return fmt.Errorf("runtime.enrollment_secret 必须是合法 base64: %w", err)
-	}
-	if len(raw) != 32 {
-		return fmt.Errorf("runtime.enrollment_secret 解码后必须是 32 字节，实际 %d", len(raw))
-	}
-	return nil
-}
-
-// validate 校验 probe 配置；0 表示使用默认值，负数或缺失阈值会 fail-fast。
-func (p RuntimeProbeConfig) validate() error {
-	if p.IntervalSeconds <= 0 || p.TimeoutSeconds <= 0 || p.FailureThreshold <= 0 || p.RecoveryThreshold <= 0 {
-		return fmt.Errorf("runtime.probe.* 必须为正整数")
 	}
 	return nil
 }

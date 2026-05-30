@@ -26,8 +26,6 @@ type Config struct {
 	RAGFlow RAGFlowConfig `yaml:"ragflow"`
 	// Agent 描述 manager 与 runtime agent 之间的心跳协议参数。
 	Agent AgentConfig `yaml:"agent"`
-	// Runtime 描述节点自动注册密钥和主动探测阈值。
-	Runtime RuntimeConfig `yaml:"runtime"`
 	// NewAPI 描述 manager 调用 new-api 管理接口所需的凭据。
 	NewAPI NewAPIConfig `yaml:"newapi"`
 	// Storage 是对象存储（S3）配置；整段可选，配置则要求关键字段齐全（见 loader 校验）。
@@ -167,26 +165,6 @@ type WorkspaceConfig struct {
 // HeartbeatIntervalSeconds 是约定值，agent 注册成功后回写并按此频率上报心跳。
 type AgentConfig struct {
 	HeartbeatIntervalSeconds int `yaml:"heartbeat_interval_seconds"`
-}
-
-// RuntimeConfig 描述 runtime node 自动注册和 manager 主动探测参数。
-type RuntimeConfig struct {
-	// EnrollmentSecret 是 runtime agent 自动注册时使用的共享密钥，必须是 32 字节随机值。
-	EnrollmentSecret string `yaml:"enrollment_secret"`
-	// Probe 控制 manager 主动探测节点双端口的周期、超时和状态切换阈值。
-	Probe RuntimeProbeConfig `yaml:"probe"`
-}
-
-// RuntimeProbeConfig 控制 manager 主动探测 agent 双端口的节奏和状态阈值。
-type RuntimeProbeConfig struct {
-	// IntervalSeconds 是探测循环间隔，0 会在 applyDefaults 中填入默认值。
-	IntervalSeconds int `yaml:"interval_seconds"`
-	// TimeoutSeconds 是单次 agent 探测超时；如需避免探测堆积，应按 IntervalSeconds 保守配置。
-	TimeoutSeconds int `yaml:"timeout_seconds"`
-	// FailureThreshold 是主动探测连续失败多少次后把节点标记为 degraded；unreachable 由心跳超时路径负责。
-	FailureThreshold int `yaml:"failure_threshold"`
-	// RecoveryThreshold 是连续成功多少次后把节点恢复为 active。
-	RecoveryThreshold int `yaml:"recovery_threshold"`
 }
 
 // NewAPIConfig 描述 manager 与 new-api 网关的连接参数。
