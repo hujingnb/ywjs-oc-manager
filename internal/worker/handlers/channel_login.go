@@ -85,8 +85,6 @@ func (h *ChannelStartLoginHandler) Handle(ctx context.Context, job sqlc.Job) err
 	challenge, err := adapter.BeginAuth(ctx, channel.AuthInput{
 		AppID:       payload.AppID,
 		OwnerUserID: app.OwnerUserID,
-		NodeID:      app.RuntimeNodeID.String,
-		ContainerID: app.ContainerID.ValueOrZero(),
 		Endpoint:    endpoint,
 	})
 	if err != nil {
@@ -158,11 +156,10 @@ func (h *ChannelStartLoginHandler) enqueueCheck(ctx context.Context, payload cha
 	return enqueueChannelCheck(ctx, h.store, payload, delay)
 }
 
-// ChannelRestarter 抽象重启 hermes 容器的能力。
-// 渠道扫码完成后,容器内 oc-channel-login 已把凭证落盘到 hermes 自管目录,
-// 重启 hermes 容器是为了让其重新读取 platforms 配置,加载新绑定的微信账号。
+// ChannelRestarter 抽象重启 app 运行时（hermes）让其重载渠道 platform 配置的能力。
+// k8s 下由 Orchestrator.RolloutRestart 实现（按 appID 重建 pod）。
 type ChannelRestarter interface {
-	RestartContainer(ctx context.Context, nodeID, containerID string) error
+	RestartApp(ctx context.Context, appID string) error
 }
 
 // ChannelCheckBindingHandler 执行 channel_check_binding job。
@@ -202,8 +199,6 @@ func (h *ChannelCheckBindingHandler) Handle(ctx context.Context, job sqlc.Job) e
 	progress, err := adapter.PollAuth(ctx, channel.AuthInput{
 		AppID:       payload.AppID,
 		OwnerUserID: app.OwnerUserID,
-		NodeID:      app.RuntimeNodeID.String,
-		ContainerID: app.ContainerID.ValueOrZero(),
 	})
 	if err != nil {
 		return fmt.Errorf("查询渠道绑定状态失败: %w", err)
@@ -304,7 +299,7 @@ func (h *ChannelCheckBindingHandler) finalizeChannelBound(
 		return fmt.Errorf("标记渠道绑定成功失败: %w", err)
 	}
 	if h.restarter != nil && payload.ChannelType == domain.ChannelTypeWeChat {
-		if err := h.restarter.RestartContainer(ctx, app.RuntimeNodeID.String, app.ContainerID.ValueOrZero()); err != nil {
+		if err := h.restarter.RestartApp(ctx, app.ID); err != nil {
 			slog.ErrorContext(ctx, "渠道绑定后重启 hermes 容器失败", "app_id", app.ID, "error", err)
 		}
 	}

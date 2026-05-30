@@ -435,16 +435,8 @@ func runManager(ctx context.Context, cfg config.Config, logOut io.Writer) error 
 		return fmt.Errorf("注册 channel_start_login handler 失败: %w", err)
 	}
 	channelCheckHandler := handlers.NewChannelCheckBindingHandler(dbStore.Queries, channelRegistry, wechatResolver)
-	// Hermes 时代凭证由容器内 oc-channel-login 自管,manager 不再渲染 .env;
-	// bound 后仅触发容器重启让 hermes 重新读 platforms 配置,因此只注入 restarter。
-	//
-	// spec-A2b 静默盲点（显式标注）：此处注入的 runtimeAdapter 是 docker restarter，
-	// k8s 下 nodeID/containerID 恒为空，finalizeChannelBound 调 RestartContainer 失败
-	// 但被日志吞（不阻断绑定），绑定状态闭环（status→running）不受影响。
-	// 渠道绑定后的 hermes 重载（platform reload）在 k8s 下暂无可用路径——需改为
-	// orch 驱动的 pod 重启（Scale(0)→Scale(1) 或删 pod 触发 Deployment 重建）。
-	// 该能力属 spec-A2b，届时替换此处注入实现；本 spec（A2a）仅保证绑定状态闭环。
-	channelCheckHandler.SetRestarter(runtimeAdapter)
+	// 渠道绑定后重载 hermes platform：经 Orchestrator.RolloutRestart 重建 pod（spec-A2b 落地）。
+	channelCheckHandler.SetRestarter(orchChannelRestarter{orch: orch})
 	if err := registry.Register(domain.JobTypeChannelCheckBinding, channelCheckHandler.Handle); err != nil {
 		return fmt.Errorf("注册 channel_check_binding handler 失败: %w", err)
 	}

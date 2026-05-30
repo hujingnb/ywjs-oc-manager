@@ -55,12 +55,9 @@ type AuthProgress struct {
 
 // AuthInput 在 BeginAuth 时携带用户上下文，供 adapter 调用 runtime 实例。
 //
-// NodeID/ContainerID 是 docker exec 时代的寻址字段，当前仍被 BindingResolver
-// （读 plugin state 解析绑定身份）使用；微信扫码登录已改走 oc-ops HTTP SSE，
-// 由 Endpoint 寻址。Endpoint 由 worker 经 OcOpsResolver 解析后注入。
+// k8s 下 oc-ops 经 Endpoint 寻址（基址 = app-<id>-ocops Service DNS），
+// 不再需要 docker exec 时代的 NodeID/ContainerID。
 type AuthInput struct {
-	NodeID      string
-	ContainerID string
 	AppID       string
 	OwnerUserID string
 	ChannelName string
