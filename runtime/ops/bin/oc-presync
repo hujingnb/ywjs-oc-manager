@@ -1,0 +1,5 @@
+#!/usr/bin/env bash
+# 占位：实体见 Task 3/4/5。
+set -euo pipefail
+echo "oc-* 入口尚未实现" >&2
+exit 1
