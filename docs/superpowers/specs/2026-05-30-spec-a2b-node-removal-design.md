@@ -129,6 +129,13 @@ migration），避免任何阶段编译断裂。
   `SetAppContainer`。
 - `RuntimeOperationService` 去 docker inspector（§3.3）：main 不再 `SetInspector(runtimeAdapter)`，
   删 `RuntimeInspector` / `InspectApp` 的 docker 分支 / `newRuntimeInspectorWrapper`。
+- **restart inputRefresher 简化为版本镜像解析**：`appInputRefresher.RefreshAppInput`（cmd/server/wiring.go）
+  是 docker 时代「把 manifest.yaml + resources 经 uploader 写到节点」的机器，k8s 下已由 bootstrap 在 pod
+  启动时交付配置，整条 node-upload 路径是死的；restart handler 只需其返回的 `{ImageRef, VersionRevision}`
+  做镜像变更检测。改为只 `GetAssistantVersion` + `resolveImage` 返回镜像 ref 与 revision，去掉 uploader /
+  skillBlobs / nodeID / manifest 写入。由此 `AppInputUploader` / `BuildAppInputData` /
+  `AssembleVersionInputData` / `pushVersionSkills` / `NewAppInputUploadAdapter` / `appInputUploadAdapter`
+  整条 node-upload 机器失去消费方，在 Phase 2 一并删除（它们是节点耦合的 docker 配置投递机制，已被 bootstrap 取代）。
 - `ListRunningApps` / `ListStaleInits` / `CreateApp` query 去节点列（reconciler 等消费方随之改）。
 
 ### Phase 2 — 删死代码（孤岛，无外部消费）
