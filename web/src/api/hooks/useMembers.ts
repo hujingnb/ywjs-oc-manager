@@ -7,6 +7,7 @@ import { apiRequest } from '@/api/client'
 import type { App, Member } from '@/api'
 
 // OnboardMemberPayload 是”一键创建成员和应用”表单提交体。
+// spec-A2b：runtime_node_id 字段已随节点概念删除（migration 000003 对应后端去字段），前端 DTO 同步去掉。
 export interface OnboardMemberPayload {
   // 登录用户名，后端会校验组织内唯一性。
   username: string
@@ -22,8 +23,6 @@ export interface OnboardMemberPayload {
   version_id: string
   // 首次绑定的渠道类型，目前仅支持 wechat。
   channel_type?: 'wechat'
-  // 指定 runtime 节点；为空时后端按调度策略选择。
-  runtime_node_id?: string
 }
 
 // OnboardMemberResult 是一键开户的业务结果。
@@ -46,6 +45,7 @@ export interface OnboardMemberResult {
 }
 
 // CreateMemberAppPayload 是平台管理员为已有成员创建新实例的表单提交体。
+// spec-A2b：runtime_node_id 字段已随节点概念删除，前端 DTO 同步去掉。
 export interface CreateMemberAppPayload {
   // 新实例名称。
   app_name: string
@@ -53,8 +53,6 @@ export interface CreateMemberAppPayload {
   version_id: string
   // 首次绑定的渠道类型，目前仅支持 wechat。
   channel_type?: 'wechat'
-  // 指定 runtime 节点；为空时后端按调度策略选择。
-  runtime_node_id?: string
 }
 
 // CreateMemberAppResult 是已有成员实例创建结果。

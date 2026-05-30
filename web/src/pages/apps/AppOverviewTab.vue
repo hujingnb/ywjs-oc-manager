@@ -55,12 +55,6 @@
           </n-button>
         </n-space>
       </n-descriptions-item>
-      <n-descriptions-item label="容器 ID">
-        <code>{{ app.container_id || '—' }}</code>
-      </n-descriptions-item>
-      <n-descriptions-item label="Runtime Node">
-        <code>{{ app.runtime_node_id || '—' }}</code>
-      </n-descriptions-item>
       <!-- 助手版本：展示绑定的版本名，version_synced=false 时附加需重启标签，组织管理员可切换 -->
       <n-descriptions-item label="助手版本">
         <n-space align="center" :size="8">

@@ -82,7 +82,7 @@ import {
 import {
   BarChart3, BookOpen, Bot, Boxes, Building2, CalendarClock, FileSearch,
   FolderOpen, Gauge, LayoutDashboard, ListChecks, LogOut, Radio, RefreshCw,
-  Server, ShieldCheck, Users, Wallet,
+  ShieldCheck, Users, Wallet,
 } from 'lucide-vue-next'
 
 import { useAuthStore } from '@/stores/auth'
@@ -119,7 +119,6 @@ const activeKey = computed(() => {
     '/usage',
     '/balance',
     '/audit-logs',
-    '/runtime-nodes',
     '/platform/permissions',
   ]
   return prefixes.find(k => p.startsWith(k)) ?? '/'
@@ -194,7 +193,6 @@ const menuOptions = computed<MenuOption[]>(() => {
     items.push({ key: '/audit-logs', label: '审计', icon: () => h(FileSearch, { size: 18 }) })
   }
   if (isPlatformAdmin.value) {
-    items.push({ key: '/runtime-nodes', label: '运行节点', icon: () => h(Server, { size: 18 }) })
     items.push({ key: '/platform/permissions', label: '权限说明', icon: () => h(ShieldCheck, { size: 18 }) })
   }
   return items

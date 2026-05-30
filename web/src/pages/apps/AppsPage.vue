@@ -114,7 +114,6 @@ const columns = [
     },
   },
   { title: 'API key', key: 'api_key_status' },
-  { title: '容器', key: 'container_id', render: (r: AppDTO) => r.container_id ?? '—' },
   actionColumn<AppDTO>([
     { label: '重启', hidden: r => !canManageApp(auth.user, r), onClick: r => trigger(r, 'restart') },
     { label: '停止', hidden: r => !canManageApp(auth.user, r), onClick: r => trigger(r, 'stop') },

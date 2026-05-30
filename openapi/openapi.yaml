@@ -1421,17 +1421,6 @@ components:
         status:
           type: string
       type: object
-    service.RuntimeContainerInfo:
-      properties:
-        id:
-          type: string
-        image:
-          type: string
-        name:
-          type: string
-        status:
-          type: string
-      type: object
     service.RuntimeImageOption:
       properties:
         id:
@@ -1483,11 +1472,10 @@ components:
       type: object
     service.RuntimeView:
       properties:
-        container:
-          $ref: '#/components/schemas/service.RuntimeContainerInfo'
         snapshot:
           $ref: '#/components/schemas/service.RuntimeSnapshotView'
         status:
+          description: k8s 路径的运行状态直接来自 apps.status；no_container 表示容器尚未创建。
           type: string
       type: object
     service.TokenPair:
@@ -3654,7 +3642,7 @@ paths:
       - knowledge
   /apps/{appId}/runtime:
     get:
-      description: 返回应用容器的 inspect 视图；container_id 为空时返回 status="no_container"
+      description: 返回应用 k8s 运行时状态与最近快照；status=no_container 表示容器尚未创建
       parameters:
       - description: 应用 ID
         in: path

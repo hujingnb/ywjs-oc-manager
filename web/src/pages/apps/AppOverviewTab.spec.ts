@@ -84,6 +84,7 @@ vi.mock('@/api/hooks/useAssistantVersions', () => ({
   }),
 }))
 
+// spec-A2b：container_id 字段已随节点概念删除，mock 数据同步去掉。
 const appRef = ref({
   id: '00000000-0000-0000-0000-000000000001',
   org_id: '00000000-0000-0000-0000-000000000101',
@@ -91,7 +92,6 @@ const appRef = ref({
   name: '测试实例',
   status: 'running',
   api_key_status: 'active',
-  container_id: 'container-1',
   // version_id 默认绑定 version-001，供助手版本展示与切换测试使用。
   version_id: 'version-001',
   version_synced: true,

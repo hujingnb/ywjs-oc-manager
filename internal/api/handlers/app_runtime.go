@@ -143,11 +143,11 @@ func (h *AppRuntimeHandler) RestoreAPIKey(c *gin.Context) {
 	h.trigger(c, service.RuntimeOperationRestoreAPIKey)
 }
 
-// GetRuntime 返回应用容器的 inspect 视图。
-// container_id 为空时直接返回 status="no_container"，避免无谓的 docker 调用。
+// GetRuntime 返回应用 k8s 运行时视图。
+// spec-A2b：Container 字段已删除，返回 status + snapshot。
 //
 // @Summary      查询应用运行时状态
-// @Description  返回应用容器的 inspect 视图；container_id 为空时返回 status="no_container"
+// @Description  返回应用 k8s 运行时状态与最近快照；status=no_container 表示容器尚未创建
 // @Tags         runtime-operations
 // @Produce      json
 // @Security     BearerAuth

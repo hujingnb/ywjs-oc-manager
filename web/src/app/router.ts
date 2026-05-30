@@ -26,8 +26,6 @@ import OrganizationsPage from '@/pages/platform/OrganizationsPage.vue'
 import ConsolePage from '@/pages/platform/ConsolePage.vue'
 import RechargePage from '@/pages/platform/RechargePage.vue'
 import OrgKnowledgePage from '@/pages/knowledge/OrgKnowledgePage.vue'
-import RuntimeNodeDetailPage from '@/pages/runtime-nodes/RuntimeNodeDetailPage.vue'
-import RuntimeNodesPage from '@/pages/runtime-nodes/RuntimeNodesPage.vue'
 import UsagePage from '@/pages/usage/UsagePage.vue'
 import OrgConsolePage from '@/pages/org/OrgConsolePage.vue'
 import OrgBalancePage from '@/pages/org/OrgBalancePage.vue'
@@ -65,8 +63,6 @@ export const router = createRouter({
         { path: 'members', component: MembersPage, meta: { allowedRoles: ORG_ADMIN_ABOVE } },
         { path: 'members/new', component: CreateMemberPage, meta: { allowedRoles: ORG_ADMIN_ONLY } },
         { path: 'audit-logs', component: AuditLogsPage, meta: { allowedRoles: ORG_ADMIN_ABOVE } },
-        { path: 'runtime-nodes', component: RuntimeNodesPage, meta: { allowedRoles: PLATFORM_ONLY } },
-        { path: 'runtime-nodes/:nodeId', component: RuntimeNodeDetailPage, meta: { allowedRoles: PLATFORM_ONLY } },
         { path: 'knowledge', component: OrgKnowledgePage },
         { path: 'usage', component: UsagePage },
         { path: 'balance', component: OrgBalancePage, meta: { allowedRoles: ORG_ADMIN_ONLY } },

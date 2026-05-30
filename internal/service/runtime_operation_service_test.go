@@ -144,8 +144,8 @@ func TestInspectApp_ReturnsDBStatus(t *testing.T) {
 	require.NoError(t, err)
 	// 应返回库内 status，不依赖 docker inspect。
 	require.Equal(t, domain.AppStatusRunning, view.Status)
-	// spec-A2b：Container 字段不再填充，恒 nil。
-	require.Nil(t, view.Container)
+	// spec-A2b：Container 字段已彻底删除，RuntimeView 仅含 Status + Snapshot。
+	require.Nil(t, view.Snapshot)
 }
 
 // TestInspectApp_ReturnsSnapshotFromDB 验证 InspectApp 返回 runtime_snapshot_json 中的快照数据。

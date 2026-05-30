@@ -80,7 +80,6 @@ const cards = computed<QuickCard[]>(() => {
   if (role === 'platform_admin') {
     return [
       { path: '/organizations', title: '企业管理', subtitle: '查看 / 创建 / 充值企业' },
-      { path: '/runtime-nodes', title: 'Runtime Node', subtitle: '注册和监控节点' },
       { path: '/audit-logs', title: '审计日志', subtitle: '高风险操作回溯' },
     ]
   }

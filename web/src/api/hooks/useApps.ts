@@ -5,10 +5,11 @@ import type { Ref } from 'vue'
 
 import { apiRequest, type ApiError } from '@/api/client'
 import type { AggregatedUsage } from '@/api/hooks/useUsage'
-import { rangeQuery, type InstanceResourceSample, type ResourceRange } from '@/api/hooks/useRuntimeNodes'
 
 // AppDTO 是应用详情与列表接口共用的前端视图。
 // 字段名保持后端 JSON snake_case，避免在 hook 层做额外映射。
+// spec-A2b：runtime_node_id / container_id 字段已随节点概念删除（migration 000003 对应后端去字段），
+// 前端 DTO 同步去掉，避免读取恒为空的字段误导页面逻辑。
 export interface AppDTO {
   // 应用主键，用于详情、运行时和渠道等子资源路由。
   id: string
@@ -16,16 +17,12 @@ export interface AppDTO {
   org_id: string
   // 应用拥有者用户，普通成员只能管理自己拥有的应用。
   owner_user_id: string
-  // 运行节点为空表示尚未分配或初始化失败。
-  runtime_node_id?: string
   // 页面展示名称。
   name: string
   // 可选说明文案，空值由页面层决定是否展示占位。
   description?: string
   // 后端应用状态机原值，由 domain/status.ts 统一格式化。
   status: string
-  // runtime 容器 ID，容器尚未创建或已删除时为空。
-  container_id?: string
   // new-api token 绑定状态，用于控制 API key 操作按钮。
   api_key_status: string
   // new-api key ID 用于应用维度用量查询；未初始化成功时为空。
@@ -56,26 +53,12 @@ export interface RuntimeOperationResult {
   operation: string
 }
 
-// RuntimeContainerInfo 与后端 service.RuntimeContainerInfo 字段一致。
-export interface RuntimeContainerInfo {
-  // Docker 容器 ID。
-  id: string
-  // Docker 容器名称。
-  name: string
-  // 容器镜像名。
-  image: string
-  // Docker 返回的运行状态原值。
-  status: string
-}
-
 // RuntimeView 是 GET /apps/:appId/runtime 的响应视图。
-// container 在 status=no_container/error 时为空。
+// spec-A2b：container 字段已随节点概念删除（后端 InspectApp 恒不填充 Container，彻底去除）。
 // snapshot 由 scheduler 30s 周期 runtime_refresh_status job 写入；首次未采集时为空。
 export interface RuntimeView {
   // 前端展示用的运行时状态，包含 no_container / error 等 sentinel。
   status: string
-  // status 指向真实容器时才存在。
-  container?: RuntimeContainerInfo
   // 最近一次采样快照；首次采集前可能为空。
   snapshot?: RuntimeSnapshotView
 }
@@ -120,10 +103,10 @@ export interface JobDTO {
 }
 
 // 缓存键 helper 统一 mutation 的失效范围，避免散落字符串导致局部页面不刷新。
+// spec-A2b：appResourcesKey 随资源采样 API 一起删除（节点概念已去，资源趋势图不再展示）。
 const orgKey = (orgId: string | undefined) => ['apps', 'org', orgId] as const
 const appKey = (appId: string | undefined) => ['app', appId] as const
 const runtimeKey = (appId: string | undefined) => ['app-runtime', appId] as const
-const appResourcesKey = (appId: string | undefined) => ['app-resources', appId] as const
 const jobKey = (jobId: string | undefined) => ['job', jobId] as const
 
 // useAppsByOrgQuery 列出组织内的应用。
@@ -187,24 +170,6 @@ export function useAppRuntimeQuery(appId: Ref<string | undefined>) {
   })
 }
 
-// useAppResourcesQuery 查询单个应用实例的资源趋势。
-// 权限沿用应用读取权限，调用方只需要传入当前时间范围即可复用同一套趋势图。
-export function useAppResourcesQuery(appId: Ref<string | undefined>, range: Ref<ResourceRange>) {
-  return useQuery<InstanceResourceSample[]>({
-    queryKey: ['app-resources', appId, range],
-    enabled: () => Boolean(appId.value),
-    refetchInterval: 30_000,
-    queryFn: async () => {
-      if (!appId.value) return []
-      const response = await apiRequest<{ samples?: InstanceResourceSample[] }>(
-        `/api/v1/apps/${appId.value}/resources`,
-        { query: rangeQuery(range.value) },
-      )
-      return response.samples ?? []
-    },
-  })
-}
-
 // useTriggerRuntimeOperation 触发启动/停止/重启/删除任务。
 // mutation 成功只代表 job 已入队，因此同时失效应用详情与运行时视图，后续由轮询呈现终态。
 export function useTriggerRuntimeOperation(appId: Ref<string | undefined>) {
@@ -221,7 +186,6 @@ export function useTriggerRuntimeOperation(appId: Ref<string | undefined>) {
     onSuccess: () => {
       void client.invalidateQueries({ queryKey: appKey(appId.value) })
       void client.invalidateQueries({ queryKey: runtimeKey(appId.value) })
-      void client.invalidateQueries({ queryKey: appResourcesKey(appId.value) })
     },
   })
 }

@@ -18,54 +18,19 @@
     <p v-if="runtimeQuery.isLoading.value" class="state-text">加载中…</p>
     <p v-else-if="runtimeQuery.error.value" class="state-text danger">查询失败：{{ runtimeQuery.error.value?.message }}</p>
     <div v-else>
+      <!-- 运行时状态：no_container 转为业务文案，其余状态展示原值 -->
       <p class="state-text" style="margin-bottom: 12px">
         当前状态：
         <strong>{{ runtimeStatusLabel }}</strong>
-        <span v-if="runtime?.container">｜容器：<code>{{ runtime.container.id }}</code></span>
       </p>
-      <p v-if="runtime?.container?.image" class="state-text">
-        镜像：<code>{{ runtime.container.image }}</code>
+      <!-- 最近一次快照：展示采集时间与采集错误，首次采集前提示等待 -->
+      <p class="state-text" style="margin-top: 12px">
+        <template v-if="runtime?.snapshot">
+          最新采样：{{ formatTime(runtime.snapshot.collected_at) }}
+          <span v-if="runtime.snapshot.last_error" class="danger"> ｜ 采样错误：{{ runtime.snapshot.last_error }}</span>
+        </template>
+        <template v-else>资源指标尚未采集（首次采集需 30s 内完成）。</template>
       </p>
-
-      <n-space :size="8" style="margin-top: 12px">
-        <n-button
-          v-for="option in rangeOptions"
-          :key="option"
-          size="small"
-          :type="resourceRange === option ? 'primary' : 'default'"
-          @click="resourceRange = option"
-        >
-          {{ option }}
-        </n-button>
-      </n-space>
-
-      <p v-if="resourcesQuery.isLoading.value" class="state-text" style="margin-top: 12px">资源趋势加载中…</p>
-      <p v-else-if="resourcesQuery.error.value" class="state-text danger" style="margin-top: 12px">
-        资源趋势查询失败：{{ resourcesQuery.error.value?.message }}
-      </p>
-      <n-grid v-else :cols="2" :x-gap="12" :y-gap="12" style="margin-top: 12px">
-        <n-grid-item>
-          <ResourceTrendChart title="实例 CPU" :samples="cpuTrendSamples" unit="percent" />
-        </n-grid-item>
-        <n-grid-item>
-          <ResourceTrendChart title="实例内存 used/limit" :samples="memoryTrendSamples" unit="bytes" />
-        </n-grid-item>
-        <n-grid-item>
-          <ResourceTrendChart title="实例磁盘读写" :samples="diskTrendSamples" unit="bytes" />
-        </n-grid-item>
-        <n-grid-item>
-          <ResourceTrendChart title="实例网络 RX/TX" :samples="networkTrendSamples" unit="bytes" />
-        </n-grid-item>
-        <n-grid-item :span="2">
-          <p class="state-text" style="margin: 0">
-            <template v-if="latestSample">
-              最新采样：{{ latestSample.container_status ?? '未知状态' }} ｜ {{ formatTime(latestSample.sampled_at) }}
-              <span v-if="latestSample.last_error" class="danger"> ｜ 采样错误：{{ latestSample.last_error }}</span>
-            </template>
-            <template v-else>资源指标尚未采集（首次采集需 30s 内完成）。</template>
-          </p>
-        </n-grid-item>
-      </n-grid>
     </div>
 
     <p v-if="actionFeedback" class="state-text" :class="{ danger: actionError }" style="margin-top: 8px">{{ actionFeedback }}</p>
@@ -106,23 +71,22 @@
 
 <script setup lang="ts">
 import { computed, inject, ref, type Ref } from 'vue'
-import { NButton, NCard, NGrid, NGridItem, NSpace } from 'naive-ui'
+import { NButton, NCard, NSpace } from 'naive-ui'
 
 import {
-  useAppResourcesQuery,
   useAppRuntimeQuery,
   useJobQuery,
   useTriggerRuntimeOperation,
   type AppDTO,
 } from '@/api/hooks/useApps'
-import type { InstanceResourceSample, ResourceRange } from '@/api/hooks/useRuntimeNodes'
 import ConfirmActionModal from '@/components/ConfirmActionModal.vue'
 import JobProgressPanel from '@/components/JobProgressPanel.vue'
-import ResourceTrendChart from '@/components/ResourceTrendChart.vue'
 import { canManageApp, canTriggerRuntimeOperation } from '@/domain/permissions'
 import { useAuthStore } from '@/stores/auth'
 
-// AppRuntimeTab 展示应用容器运行时信息，并触发 start/stop/restart/delete 操作。
+// AppRuntimeTab 展示应用 k8s 运行时状态，并触发 start/stop/restart/delete 操作。
+// spec-A2b：删除节点信息、ResourceTrendChart 资源趋势图与 container 详情展示；
+// 保留启停/重启/删除触发按钮（useTriggerRuntimeOperation）与 k8s 运行状态/快照时间展示。
 const props = defineProps<{ appId: string }>()
 const appId = computed<string | undefined>(() => props.appId)
 
@@ -131,28 +95,6 @@ const auth = useAuthStore()
 
 const runtimeQuery = useAppRuntimeQuery(appId)
 const runtime = computed(() => runtimeQuery.data.value ?? null)
-const rangeOptions: ResourceRange[] = ['1h', '24h', '7d', '30d']
-// resourceRange 与资源趋势 query 绑定，默认展示最近 1 小时，便于打开页面后直接查看最新资源波动。
-const resourceRange = ref<ResourceRange>('1h')
-const resourcesQuery = useAppResourcesQuery(appId, resourceRange)
-const resourceSamples = computed(() => resourcesQuery.data.value ?? [])
-const latestSample = computed(() => resourceSamples.value.at(-1) ?? null)
-const cpuTrendSamples = computed(() => resourceSamples.value.map((sample) => trendSample(sample, 'cpu_percent')))
-const memoryTrendSamples = computed(() => resourceSamples.value.map((sample) => ({
-  sampled_at: sample.sampled_at,
-  value: sample.memory_used_bytes,
-  secondary: sample.memory_limit_bytes,
-})))
-const diskTrendSamples = computed(() => resourceSamples.value.map((sample) => ({
-  sampled_at: sample.sampled_at,
-  value: sample.disk_read_bytes,
-  secondary: sample.disk_write_bytes,
-})))
-const networkTrendSamples = computed(() => resourceSamples.value.map((sample) => ({
-  sampled_at: sample.sampled_at,
-  value: sample.network_rx_bytes,
-  secondary: sample.network_tx_bytes,
-})))
 
 const mutation = useTriggerRuntimeOperation(appId)
 // trackingJobId 保存最近一次运行时操作的任务 ID，用于轮询异步执行进度。
@@ -194,14 +136,6 @@ async function onAction(op: 'start' | 'stop' | 'restart' | 'delete') {
 
 async function onConfirmDelete() { confirmDelete.value = false; await runMutation('delete') }
 async function onConfirmStop() { confirmStop.value = false; await runMutation('stop') }
-
-// trendSample 只做字段挑选，缺失指标交给 ResourceTrendChart 保持空点，不在页面层补 0。
-function trendSample(sample: InstanceResourceSample, field: 'cpu_percent') {
-  return {
-    sampled_at: sample.sampled_at,
-    value: sample[field],
-  }
-}
 
 // formatTime 使用中文本地化格式展示后端 ISO 时间。
 function formatTime(iso: string): string {

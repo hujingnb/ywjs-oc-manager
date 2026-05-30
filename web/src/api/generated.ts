@@ -3043,7 +3043,7 @@ export interface paths {
         };
         /**
          * 查询应用运行时状态
-         * @description 返回应用容器的 inspect 视图；container_id 为空时返回 status="no_container"
+         * @description 返回应用 k8s 运行时状态与最近快照；status=no_container 表示容器尚未创建
          */
         get: {
             parameters: {
@@ -8493,12 +8493,6 @@ export interface components {
             remark?: string;
             status?: string;
         };
-        "service.RuntimeContainerInfo": {
-            id?: string;
-            image?: string;
-            name?: string;
-            status?: string;
-        };
         "service.RuntimeImageOption": {
             id?: string;
             label?: string;
@@ -8523,8 +8517,8 @@ export interface components {
             network_tx_bytes?: number;
         };
         "service.RuntimeView": {
-            container?: components["schemas"]["service.RuntimeContainerInfo"];
             snapshot?: components["schemas"]["service.RuntimeSnapshotView"];
+            /** @description k8s 路径的运行状态直接来自 apps.status；no_container 表示容器尚未创建。 */
             status?: string;
         };
         "service.TokenPair": {

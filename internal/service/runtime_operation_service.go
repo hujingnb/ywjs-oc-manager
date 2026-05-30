@@ -40,23 +40,13 @@ type JobNotifier interface {
 	Enqueue(ctx context.Context, jobID string) error
 }
 
-// RuntimeContainerInfo 是面向 service/handler 的最小容器视图。
-// spec-A2b：InspectApp 不再经 docker inspect 填充此结构体；Container 字段恒 nil，
-// 彻底删除留 Task 14/15 与前端联动时统一清理。
-type RuntimeContainerInfo struct {
-	ID     string `json:"id"`
-	Name   string `json:"name"`
-	Image  string `json:"image"`
-	Status string `json:"status"`
-}
-
 // RuntimeView 是 GET /apps/:appId/runtime 接口的响应视图。
-// container_id 为空时只返回 status="no_container"，前端据此切换"未创建容器"提示。
+// spec-A2b：Container 字段已彻底删除（节点概念去除，InspectApp 不再经 docker inspect 填充）。
 // Snapshot 来自 apps.runtime_snapshot_json（scheduler 30s 周期采样）；为空表示尚未采集。
 type RuntimeView struct {
-	Status    string                `json:"status"`
-	Container *RuntimeContainerInfo `json:"container,omitempty"`
-	Snapshot  *RuntimeSnapshotView  `json:"snapshot,omitempty"`
+	// k8s 路径的运行状态直接来自 apps.status；no_container 表示容器尚未创建。
+	Status   string               `json:"status"`
+	Snapshot *RuntimeSnapshotView `json:"snapshot,omitempty"`
 }
 
 // RuntimeSnapshotView 是 apps.runtime_snapshot_json 的对外视图。
@@ -98,10 +88,9 @@ func NewRuntimeOperationService(store RuntimeOperationStore, logger *slog.Logger
 }
 
 // InspectApp 返回应用运行时视图：k8s 下运行态由 status reconciler 写入 apps.status /
-// runtime_snapshot_json，直接读库返回，不再经 docker inspect。
+// runtime_snapshot_json，直接读库返回，不经 docker inspect。
 //
-// spec-A2b：删除 docker inspector 路径，统一以库内状态作为权威来源。
-// RuntimeView.Container 字段恒 nil（彻底删除留 Task 14/15 与前端联动时统一清理）。
+// spec-A2b：Container 字段已彻底删除，返回 RuntimeView{Status, Snapshot}。
 func (s *RuntimeOperationService) InspectApp(ctx context.Context, principal auth.Principal, appID string) (RuntimeView, error) {
 	app, err := s.store.GetApp(ctx, appID)
 	if errors.Is(err, sql.ErrNoRows) {
