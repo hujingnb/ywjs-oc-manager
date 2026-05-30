@@ -11,6 +11,7 @@ import (
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/client-go/kubernetes"
+	"k8s.io/client-go/util/retry"
 )
 
 // KubernetesAdapter 用 client-go 实现 Orchestrator。
@@ -115,19 +116,24 @@ func (a *KubernetesAdapter) UpdateImage(ctx context.Context, appID, hermesImage 
 
 // RolloutRestart 给 Deployment 的 pod template 注解写入当前时间戳，触发 Deployment 按
 // Recreate 策略重建 pod（等价 kubectl rollout restart）。用于渠道绑定后重载 hermes platform。
+// 使用 retry.RetryOnConflict 处理 Get→Update 之间控制器并发修改导致的乐观锁冲突（409 Conflict），
+// 每次重试重新 Get 最新版本再写入注解，避免 EnsureApp 后立即调用时 resourceVersion 不一致。
 func (a *KubernetesAdapter) RolloutRestart(ctx context.Context, appID string) error {
 	api := a.client.AppsV1().Deployments(a.namespace)
-	d, err := api.Get(ctx, deploymentName(appID), metav1.GetOptions{})
-	if err != nil {
-		return wrapK8s("查询 Deployment", err)
-	}
-	if d.Spec.Template.Annotations == nil {
-		d.Spec.Template.Annotations = map[string]string{}
-	}
-	// 写入 restartedAt 注解触发 Deployment 重建 pod，与 kubectl rollout restart 等价。
-	d.Spec.Template.Annotations["kubectl.kubernetes.io/restartedAt"] = time.Now().UTC().Format(time.RFC3339)
-	_, uerr := api.Update(ctx, d, metav1.UpdateOptions{})
-	return wrapK8s("滚动重启 Deployment", uerr)
+	err := retry.RetryOnConflict(retry.DefaultRetry, func() error {
+		d, err := api.Get(ctx, deploymentName(appID), metav1.GetOptions{})
+		if err != nil {
+			return err
+		}
+		if d.Spec.Template.Annotations == nil {
+			d.Spec.Template.Annotations = map[string]string{}
+		}
+		// 写入 restartedAt 注解触发 Deployment 重建 pod，与 kubectl rollout restart 等价。
+		d.Spec.Template.Annotations["kubectl.kubernetes.io/restartedAt"] = time.Now().UTC().Format(time.RFC3339)
+		_, uerr := api.Update(ctx, d, metav1.UpdateOptions{})
+		return uerr
+	})
+	return wrapK8s("滚动重启 Deployment", err)
 }
 
 // Delete 删除三资源（NotFound 视为成功）。

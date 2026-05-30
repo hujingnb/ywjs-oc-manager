@@ -49,7 +49,6 @@ func TestLabelTargetType(t *testing.T) {
 		{"user", "成员用户"},               // 成员用户
 		{"member", "成员"},               // 成员
 		{"organization", "企业"},         // 企业资源
-		{"runtime_node", "运行节点"},       // 运行节点
 		{"newapi_call", "API 调用"},      // new-api 调用失败
 		{"future_type", "future_type"}, // 未知类型 fallback
 	}
@@ -59,7 +58,7 @@ func TestLabelTargetType(t *testing.T) {
 }
 
 // TestLabelAction 验证动作字段的中文翻译：key 为 (target_type, action) 二元组，
-// 因 initialize 在 app 和 runtime_node 下含义不同，需要上下文区分。
+// 同名 action（如 initialize）在不同 target_type 下含义不同，需要上下文区分。
 func TestLabelAction(t *testing.T) {
 	cases := []struct {
 		targetType string
@@ -86,12 +85,6 @@ func TestLabelAction(t *testing.T) {
 		{"user", "delete_member", "移除成员"}, // 成员禁用/删除
 		// organization 资源
 		{"organization", "recharge", "企业充值"}, // 企业余额充值
-		// runtime_node 资源
-		{"runtime_node", "initialize", "初始化节点"},            // 节点初始化（与 app.initialize 区分）
-		{"runtime_node", "node_probe_recovered", "节点恢复正常"}, // 探针恢复
-		{"runtime_node", "node_probe_degraded", "节点状态降级"},  // 探针降级
-		{"runtime_node", "agent_enrolled", "节点注册"},         // 首次注册
-		{"runtime_node", "agent_re_enrolled", "节点重新注册"},    // 重复注册（更新）
 		// newapi_call 资源：action 是 HTTP endpoint，无固定枚举，fallback 到原始值
 		{"newapi_call", "POST /api/user/", "POST /api/user/"}, // HTTP endpoint fallback
 		// 未知二元组 fallback

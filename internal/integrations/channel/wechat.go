@@ -11,8 +11,8 @@ import (
 	"oc-manager/internal/integrations/hermes"
 )
 
-// CommandRunner 抽象通过 agent docker exec 拉起 Hermes 扫码命令并返回事件 channel 的能力。
-// Hermes 时代事件类型升级为 hermes.WeixinEvent（legacy OpenClaw 时代是 <-chan string）。
+// CommandRunner 抽象通过 oc-ops HTTP SSE 触发 Hermes 扫码命令并返回事件 channel 的能力。
+// 事件类型为 hermes.WeixinEvent，由 oc-ops 端点解析 Hermes 日志流后推送。
 type CommandRunner interface {
 	StreamWeChatLogin(ctx context.Context, input AuthInput) (<-chan hermes.WeixinEvent, error)
 }

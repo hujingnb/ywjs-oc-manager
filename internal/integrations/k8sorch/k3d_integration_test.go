@@ -180,6 +180,54 @@ func TestK3dEnsureAppCreatesResources(t *testing.T) {
 	}
 }
 
+// TestK3dRolloutRestartRecreatesPod 验证 RolloutRestart 在真实 k3d 集群中给 Deployment
+// pod template 写入 kubectl.kubernetes.io/restartedAt 注解，触发 Deployment 滚动重建。
+// 测试流程：EnsureApp 创建资源 → RolloutRestart → 断言注解已写入且非空。
+func TestK3dRolloutRestartRecreatesPod(t *testing.T) {
+	// 构造 adapter 与 clientset，缺少 OC_K8S_TEST_KUBECONFIG 则 Skip
+	adapter, cs, ns := k3dEnv(t)
+	ctx := context.Background()
+
+	hermesImage, opsImage := testImages()
+	id := testAppID("it-a2b-rr-")
+
+	spec := k8sorch.AppSpec{
+		AppID:           id,
+		HermesImage:     hermesImage,
+		OpsImage:        opsImage,
+		ControlToken:    "test-control-token",
+		BootstrapURL:    "http://ocm.localhost/api/v1/bootstrap",
+		ImagePullSecret: "acr-pull",
+		Resources: k8sorch.ResourceLimits{
+			RequestsCPU:    "100m",
+			RequestsMemory: "256Mi",
+			LimitsCPU:      "1",
+			LimitsMemory:   "1Gi",
+		},
+	}
+
+	// 先注册 Cleanup，确保无论测试成功或失败都清理资源，防止污染 k3d 集群。
+	t.Cleanup(func() {
+		_ = adapter.Delete(context.Background(), id)
+	})
+
+	// EnsureApp 先建好 Deployment，RolloutRestart 才有资源可 patch
+	require.NoError(t, adapter.EnsureApp(ctx, spec), "EnsureApp 应成功，RolloutRestart 测试前提")
+
+	// RolloutRestart 给 pod template 写入 restartedAt 注解，触发 Deployment 滚动重建
+	require.NoError(t, adapter.RolloutRestart(ctx, id), "RolloutRestart 应成功 patch restartedAt 注解")
+
+	// 读回 Deployment，断言注解已写入且非空（注解存在即证明 patch 生效）
+	depName := "app-" + id
+	d, err := cs.AppsV1().Deployments(ns).Get(ctx, depName, metav1.GetOptions{})
+	require.NoError(t, err, "RolloutRestart 后 Deployment %s 应存在", depName)
+
+	// kubectl.kubernetes.io/restartedAt 注解是 kubectl rollout restart 的标准触发机制，
+	// 非空说明 patch 已正确写入 pod template annotations，Deployment 控制器会触发滚动重建。
+	restartedAt := d.Spec.Template.Annotations["kubectl.kubernetes.io/restartedAt"]
+	assert.NotEmpty(t, restartedAt, "pod template annotations 应包含非空的 kubectl.kubernetes.io/restartedAt")
+}
+
 // TestK3dDeleteRemovesResources 验证 Delete 后 Deployment/Service/Secret 均从 k8s 集群中移除。
 // Delete 后资源删除为异步操作，使用 require.Eventually 轮询断言最终 NotFound，避免偶发 flake。
 func TestK3dDeleteRemovesResources(t *testing.T) {

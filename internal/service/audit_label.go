@@ -30,12 +30,11 @@ var targetTypeLabels = map[string]string{
 	"user":         "成员用户",
 	"member":       "成员",
 	"organization": "企业",
-	"runtime_node": "运行节点",
 	"newapi_call":  "API 调用",
 }
 
 // actionLabels 以 (target_type, action) 二元组为 key 映射中文展示名。
-// 使用二元组是因为 initialize 在 app 和 runtime_node 下含义不同，需要上下文区分。
+// 使用二元组是因为同名 action（如 initialize）在不同 target_type 下含义不同，需要上下文区分。
 var actionLabels = map[[2]string]string{
 	// member 资源
 	{"member", "create_with_app"}: "加入企业（含应用创建）",
@@ -59,12 +58,6 @@ var actionLabels = map[[2]string]string{
 	{"user", "delete_member"}: "移除成员",
 	// organization 资源
 	{"organization", "recharge"}: "企业充值",
-	// runtime_node 资源
-	{"runtime_node", "initialize"}:           "初始化节点",
-	{"runtime_node", "node_probe_recovered"}: "节点恢复正常",
-	{"runtime_node", "node_probe_degraded"}:  "节点状态降级",
-	{"runtime_node", "agent_enrolled"}:       "节点注册",
-	{"runtime_node", "agent_re_enrolled"}:    "节点重新注册",
 }
 
 // labelActorRole 返回 actor_role 的中文展示名，未知值返回原始字符串。

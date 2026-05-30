@@ -25,7 +25,7 @@ import (
 //     在前以便后续日志携带 trace_id；CSRF 必须在 auth 前完成双 submit cookie
 //     校验，避免 token 校验通过但 CSRF 漏拦的写请求。
 //   - 仅 user 路由组使用本中间件。public 组（健康检查、登录、刷新）与
-//     agent 组（enrollment_secret / agent_token 自校验）不挂载。
+//     internal 组（pod bootstrap 回调，由 handler 内联校验 control token）不挂载。
 func RequireUserAuth(tokens *auth.TokenManager) gin.HandlerFunc {
 	return func(c *gin.Context) {
 		token, ok := parseBearer(c.GetHeader("Authorization"))

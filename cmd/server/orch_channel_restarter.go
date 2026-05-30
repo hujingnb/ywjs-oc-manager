@@ -7,7 +7,7 @@ import (
 )
 
 // orchChannelRestarter 用 Orchestrator.RolloutRestart 实现 handlers.ChannelRestarter，
-// 把渠道绑定后的 hermes 重载落到 k8s pod 重建（取代 docker AgentBackedAdapter.RestartContainer）。
+// 把渠道绑定后的 hermes platform 重载落到 k8s pod 滚动重建（patch restartedAt 注解）。
 type orchChannelRestarter struct{ orch k8sorch.Orchestrator }
 
 func (r orchChannelRestarter) RestartApp(ctx context.Context, appID string) error {

@@ -8,7 +8,8 @@ import (
 )
 
 // AppInputWriter 上传单个 input/ 子文件的能力。
-// 实现由 internal/integrations/agent.RuntimeFileClient.UploadAppInputFile 提供。
+// 在 k8s 路径，pod 配置由 initContainer 调 manager bootstrap 端点交付，
+// app_initialize 不直接注入此接口；接口保留供潜在的非 k8s 场景或后续演进。
 type AppInputWriter interface {
 	WriteAppInputFile(ctx context.Context, appID, relPath string, body io.Reader) error
 }

@@ -64,7 +64,7 @@ type Dependencies struct {
 // NewRouter 创建 Manager API 的 HTTP 路由。
 // 路由分三组：
 //   - public：无需认证（health + auth login/refresh/logout）
-//   - agent：runtime-agent 自注册专用，使用 enrollment_secret / agent_token 自身鉴权
+//   - internal：pod 启动回调专用（/internal/apps/:id/bootstrap），由 handler 内联校验 control token
 //   - user：受 RequireUserAuth 中间件保护，所有业务 API
 //
 // handler 只负责 HTTP 协议层，业务权限、事务和外部系统副作用必须下沉到 service 层。
