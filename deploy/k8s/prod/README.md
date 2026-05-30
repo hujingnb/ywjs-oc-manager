@@ -17,6 +17,9 @@ manager-api/web、new-api、ragflow 与 RBAC 与本地一致，差异仅镜像 r
      账号均为专用普通账号，非 root；ragflow 用 rag_flow 库，需预建库并对该库授权，
      详见 secret.example.yaml 注释。
    - `acr-pull`：阿里云 ACR 拉取凭证（见下）。
+
+   > 所有待填值统一用 `__FILL_*__` 前缀标记。复制后跑 `grep -n '__FILL_' secret.yaml`
+   > 列出全部待填项，替换完到 grep 无输出即填写完整。
 2. 各工作负载 YAML 的镜像 `REPLACE_TAG` → 实际发布 tag（Makefile release-*-image 产出）。
 3. `ingress.yaml` 的 `REPLACE_WITH_*_DOMAIN` 与 TLS secret。
 
