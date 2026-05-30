@@ -40,14 +40,9 @@ type JobNotifier interface {
 	Enqueue(ctx context.Context, jobID string) error
 }
 
-// RuntimeInspector 抽象 manager 通过 agent docker 代理 inspect 节点容器的能力。
-// 与 runtime.Adapter.InspectContainer 兼容；service 层只关心结构化结果。
-type RuntimeInspector interface {
-	InspectContainer(ctx context.Context, nodeID, containerID string) (RuntimeContainerInfo, error)
-}
-
 // RuntimeContainerInfo 是面向 service/handler 的最小容器视图。
-// 与 runtime.ContainerInfo 字段一致，单独定义是为了让上层不依赖 runtime 包。
+// spec-A2b：InspectApp 不再经 docker inspect 填充此结构体；Container 字段恒 nil，
+// 彻底删除留 Task 14/15 与前端联动时统一清理。
 type RuntimeContainerInfo struct {
 	ID     string `json:"id"`
 	Name   string `json:"name"`
@@ -85,9 +80,8 @@ type RuntimeSnapshotView struct {
 //
 // JobNotifier 可不传：未注入时只写库，由 scheduler 兜底入队（吞吐降级，延迟最长一个 scheduler 周期）。
 type RuntimeOperationService struct {
-	store     RuntimeOperationStore
-	notifier  JobNotifier
-	inspector RuntimeInspector
+	store    RuntimeOperationStore
+	notifier JobNotifier
 	// logger 仅用于错误诊断（如 ensurePrincipalActive DB 错误），不替代审计日志
 	logger *slog.Logger
 }
@@ -103,19 +97,11 @@ func NewRuntimeOperationService(store RuntimeOperationStore, logger *slog.Logger
 	return &RuntimeOperationService{store: store, logger: logger, notifier: n}
 }
 
-// SetInspector 注入 runtime inspector（cmd/server 装配时可选）。
-// inspector 为 nil 时 InspectApp 仅返回库内 status，不调 docker。
-func (s *RuntimeOperationService) SetInspector(inspector RuntimeInspector) {
-	s.inspector = inspector
-}
-
-// InspectApp 透传应用容器的 docker inspect 状态。
+// InspectApp 返回应用运行时视图：k8s 下运行态由 status reconciler 写入 apps.status /
+// runtime_snapshot_json，直接读库返回，不再经 docker inspect。
 //
-// 行为：
-//   - 校验权限、加载 app；
-//   - container_id 为空 → 返回 RuntimeView{Status:"no_container"}；
-//   - inspector 未配置 → 返回 RuntimeView{Status: app.Status}（库内状态兜底）；
-//   - inspector 错误 → 返回 RuntimeView{Status:"error", Container:nil}，让前端展示"无法连接节点"。
+// spec-A2b：删除 docker inspector 路径，统一以库内状态作为权威来源。
+// RuntimeView.Container 字段恒 nil（彻底删除留 Task 14/15 与前端联动时统一清理）。
 func (s *RuntimeOperationService) InspectApp(ctx context.Context, principal auth.Principal, appID string) (RuntimeView, error) {
 	app, err := s.store.GetApp(ctx, appID)
 	if errors.Is(err, sql.ErrNoRows) {
@@ -127,22 +113,8 @@ func (s *RuntimeOperationService) InspectApp(ctx context.Context, principal auth
 	if !auth.CanViewApp(principal, app.OrgID, app.OwnerUserID) {
 		return RuntimeView{}, ErrForbidden
 	}
-	if !app.ContainerID.Valid || app.ContainerID.String == "" {
-		return RuntimeView{Status: "no_container"}, nil
-	}
-	if s.inspector == nil {
-		return RuntimeView{Status: app.Status}, nil
-	}
-	// app.RuntimeNodeID nullable（spec-A2a）：.String 取 Go string 值。
-	info, err := s.inspector.InspectContainer(ctx, app.RuntimeNodeID.String, app.ContainerID.String)
-	if err != nil {
-		return RuntimeView{Status: "error", Snapshot: snapshotFromApp(app)}, nil
-	}
-	return RuntimeView{
-		Status:    info.Status,
-		Container: &info,
-		Snapshot:  snapshotFromApp(app),
-	}, nil
+	// 直接返回库内 status + snapshot；Container 字段不再填充（docker inspect 路径已删）。
+	return RuntimeView{Status: app.Status, Snapshot: snapshotFromApp(app)}, nil
 }
 
 // snapshotFromApp 解析 apps.runtime_snapshot_json；解析失败一律返回 nil，避免暴露内部错误。

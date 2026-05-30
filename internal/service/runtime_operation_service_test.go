@@ -2,6 +2,7 @@ package service
 
 import (
 	"context"
+	"database/sql"
 	"errors"
 	"io"
 	"log/slog"
@@ -135,62 +136,60 @@ func TestRequestInitialize_RejectsPlatformAdminWrite(t *testing.T) {
 	require.ErrorIs(t, err, ErrRuntimeOperationDenied)
 }
 
-// TestInspectApp_NoContainerReturnsSentinel 验证检查应用无容器返回Sentinel的成功路径场景。
-func TestInspectApp_NoContainerReturnsSentinel(t *testing.T) {
+// TestInspectApp_ReturnsDBStatus 验证 InspectApp 直接返回库内 apps.status，不经 docker inspect。
+// spec-A2b：k8s 下运行态由 status reconciler 写入，InspectApp 以库内状态为权威来源。
+func TestInspectApp_ReturnsDBStatus(t *testing.T) {
+	// 构造 status=running 的应用，验证 InspectApp 直接透传库内状态。
 	store := newRuntimeOperationStub(t)
-	store.app.ContainerID = null.String{} // 无容器
+	store.app.Status = domain.AppStatusRunning
 	svc := NewRuntimeOperationService(store, newDiscardLogger())
+
 	view, err := svc.InspectApp(context.Background(), platformAdmin(), testRuntimeOpAppID)
 	require.NoError(t, err)
-	require.Equal(t, "no_container", view.Status)
+	// 应返回库内 status，不依赖 docker inspect。
+	require.Equal(t, domain.AppStatusRunning, view.Status)
+	// spec-A2b：Container 字段不再填充，恒 nil。
 	require.Nil(t, view.Container)
 }
 
-// TestInspectApp_DelegatesToInspectorWhenAvailable 验证检查应用Delegates到检查or当可用的预期行为场景。
-func TestInspectApp_DelegatesToInspectorWhenAvailable(t *testing.T) {
+// TestInspectApp_ReturnsSnapshotFromDB 验证 InspectApp 返回 runtime_snapshot_json 中的快照数据。
+// k8s 下快照由 status reconciler 周期写入 apps.runtime_snapshot_json，InspectApp 直接解析返回。
+func TestInspectApp_ReturnsSnapshotFromDB(t *testing.T) {
 	store := newRuntimeOperationStub(t)
-	store.app.ContainerID = null.StringFrom("ctr-x")
-	svc := NewRuntimeOperationService(store, newDiscardLogger())
-	svc.SetInspector(stubInspector{info: RuntimeContainerInfo{ID: "ctr-x", Status: "running"}})
-	view, err := svc.InspectApp(context.Background(), platformAdmin(), testRuntimeOpAppID)
-	require.NoError(t, err)
-	if view.Status != "running" || view.Container == nil || view.Container.ID != "ctr-x" {
-		t.Fatalf("view = %+v", view)
-	}
-}
-
-// TestInspectApp_FallsBackToDBStatusWithoutInspector 验证检查应用回退回退到DB状态不使用检查or的特殊分支或幂等场景。
-func TestInspectApp_FallsBackToDBStatusWithoutInspector(t *testing.T) {
-	store := newRuntimeOperationStub(t)
-	store.app.ContainerID = null.StringFrom("ctr-x")
 	store.app.Status = domain.AppStatusRunning
+	// 构造合法的 runtime_snapshot_json，验证 snapshotFromApp 能正确解析并返回。
+	store.app.RuntimeSnapshotJson = []byte(`{"cpu_percent":12.5,"memory_usage_bytes":1048576,"memory_limit_bytes":2097152,"network_rx_bytes":100,"network_tx_bytes":200}`)
 	svc := NewRuntimeOperationService(store, newDiscardLogger())
+
 	view, err := svc.InspectApp(context.Background(), platformAdmin(), testRuntimeOpAppID)
 	require.NoError(t, err)
 	require.Equal(t, domain.AppStatusRunning, view.Status)
+	// 快照应被解析并返回，CPU/内存字段应与 JSON 一致。
+	require.NotNil(t, view.Snapshot, "runtime_snapshot_json 非空时应返回 Snapshot")
+	require.InDelta(t, 12.5, view.Snapshot.CPUPercent, 0.001)
+	require.Equal(t, uint64(1048576), view.Snapshot.MemoryUsage)
 }
 
-// TestInspectApp_InspectorErrorMapsToErrorStatus 验证检查应用检查or错误映射到错误状态的错误映射或错误记录场景。
-func TestInspectApp_InspectorErrorMapsToErrorStatus(t *testing.T) {
+// TestInspectApp_ForbiddenForOtherOrg 验证 InspectApp 对非本组织主体拒绝访问。
+// 权限判断依赖 auth.CanViewApp，非本组织 admin 不得查看他组织的应用运行时视图。
+func TestInspectApp_ForbiddenForOtherOrg(t *testing.T) {
 	store := newRuntimeOperationStub(t)
-	store.app.ContainerID = null.StringFrom("ctr-x")
 	svc := NewRuntimeOperationService(store, newDiscardLogger())
-	svc.SetInspector(stubInspector{err: errors.New("connection refused")})
-	view, err := svc.InspectApp(context.Background(), platformAdmin(), testRuntimeOpAppID)
-	require.NoError(t, err)
-	require.Equal(t, "error", view.Status)
+
+	// 用其他组织的 admin 身份发起请求，应返回 ErrForbidden。
+	otherPrincipal := auth.Principal{Role: domain.UserRoleOrgAdmin, OrgID: "other-org"}
+	_, err := svc.InspectApp(context.Background(), otherPrincipal, testRuntimeOpAppID)
+	require.ErrorIs(t, err, ErrForbidden)
 }
 
-type stubInspector struct {
-	info RuntimeContainerInfo
-	err  error
-}
+// TestInspectApp_NotFoundForMissingApp 验证 InspectApp 对不存在的 appID 返回 ErrNotFound。
+func TestInspectApp_NotFoundForMissingApp(t *testing.T) {
+	store := newRuntimeOperationStub(t)
+	svc := NewRuntimeOperationService(store, newDiscardLogger())
 
-func (s stubInspector) InspectContainer(_ context.Context, _, _ string) (RuntimeContainerInfo, error) {
-	if s.err != nil {
-		return RuntimeContainerInfo{}, s.err
-	}
-	return s.info, nil
+	// 传入不存在的 appID，store.GetApp 返回 sql.ErrNoRows，应映射为 ErrNotFound。
+	_, err := svc.InspectApp(context.Background(), platformAdmin(), "00000000-0000-0000-0000-000000000000")
+	require.ErrorIs(t, err, ErrNotFound)
 }
 
 // TestRequestInitialize_DeniesOtherOrg 验证请求初始化Denies其他组织的预期行为场景。
@@ -302,7 +301,9 @@ func (s *runtimeOperationStub) SetAppNewAPIKey(_ context.Context, arg sqlc.SetAp
 
 // spec-A2b：SetAppContainer 已从 RuntimeOperationStore 接口移除，stub 不再实现。
 
-var fakeNotFound = errors.New("not found")
+// fakeNotFound 模拟记录不存在时 store 返回的错误；使用 sql.ErrNoRows 以匹配
+// service 层 errors.Is(err, sql.ErrNoRows) 的映射逻辑，确保 ErrNotFound 正确触发。
+var fakeNotFound = sql.ErrNoRows
 
 type fakeNotifier struct {
 	lastJobID string

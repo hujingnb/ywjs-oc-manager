@@ -21,7 +21,6 @@ import (
 	"oc-manager/internal/integrations/agent"
 	"oc-manager/internal/integrations/newapi"
 	"oc-manager/internal/integrations/ocops"
-	"oc-manager/internal/integrations/runtime"
 	"oc-manager/internal/service"
 	"oc-manager/internal/store"
 	"oc-manager/internal/store/sqlc"
@@ -270,36 +269,6 @@ func (r *appInputRefresher) RefreshAppInput(ctx context.Context, _ string, app s
 		return workerhandlers.AppInputRefreshResult{}, fmt.Errorf("版本镜像 %s 未在配置中", version.ImageID)
 	}
 	return workerhandlers.AppInputRefreshResult{VersionRevision: version.Revision, ImageRef: imageRef}, nil
-}
-
-// runtimeInspectorWrapper 把 runtime.Adapter.InspectContainer 适配成 service.RuntimeInspector。
-// service 层只声明最小接口形态，wrapper 在 cmd/server 把 runtime 包的具体类型翻译过去。
-type runtimeInspectorWrapper struct {
-	adapter inspectingAdapter
-}
-
-// inspectingAdapter 描述 runtime.Adapter 中我们用到的 InspectContainer 子集。
-type inspectingAdapter interface {
-	InspectContainer(ctx context.Context, nodeID, containerID string) (runtime.ContainerInfo, error)
-}
-
-func newRuntimeInspectorWrapper(adapter inspectingAdapter) *runtimeInspectorWrapper {
-	return &runtimeInspectorWrapper{adapter: adapter}
-}
-
-// InspectContainer 实现 service.RuntimeInspector，把 runtime.ContainerInfo 转换为
-// service 层的视图字段。
-func (w *runtimeInspectorWrapper) InspectContainer(ctx context.Context, nodeID, containerID string) (service.RuntimeContainerInfo, error) {
-	info, err := w.adapter.InspectContainer(ctx, nodeID, containerID)
-	if err != nil {
-		return service.RuntimeContainerInfo{}, err
-	}
-	return service.RuntimeContainerInfo{
-		ID:     info.ID,
-		Name:   info.Name,
-		Image:  info.Image,
-		Status: info.Status,
-	}, nil
 }
 
 // jsonMarshal 是 cmd/server 内部 json.Marshal 的简短封装，便于 dispatcher 复用。

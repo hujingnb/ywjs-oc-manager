@@ -196,7 +196,7 @@ func runManager(ctx context.Context, cfg config.Config, logOut io.Writer) error 
 	// 微信扫码登录已改走 oc-ops HTTP SSE（见 wechatRunner），不再经 docker ExecAttach。
 	streamingResolver := newStreamingDockerResolver(nodeResolver)
 	runtimeAdapter.SetStreamingDocker(streamingResolver)
-	runtimeOpService.SetInspector(newRuntimeInspectorWrapper(runtimeAdapter))
+	// spec-A2b：SetInspector 已删除，InspectApp 退回读库内状态，不再经 docker inspect。
 
 	// k8s 编排器：启用 k8s 时构造 client-go clientset + KubernetesAdapter，取代 docker 编排。
 	// 未启用时 orch 为 nil，生命周期/init handler 已做 nil 守卫（降级：无法管理 app，仅最小运行）。
