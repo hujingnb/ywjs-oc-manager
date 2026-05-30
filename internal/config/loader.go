@@ -65,6 +65,24 @@ func (c *Config) applyDefaults() {
 	if c.Storage.S3.Enabled && strings.TrimSpace(c.Storage.S3.Region) == "" {
 		c.Storage.S3.Region = "us-east-1"
 	}
+	// k8s 启用时填默认 namespace 与资源配额（与父设计/本地 k3d 一致）。
+	if c.Kubernetes.Enabled {
+		if strings.TrimSpace(c.Kubernetes.Namespace) == "" {
+			c.Kubernetes.Namespace = "oc-apps"
+		}
+		if c.Kubernetes.Resources.Requests.CPU == "" {
+			c.Kubernetes.Resources.Requests.CPU = "250m"
+		}
+		if c.Kubernetes.Resources.Requests.Memory == "" {
+			c.Kubernetes.Resources.Requests.Memory = "512Mi"
+		}
+		if c.Kubernetes.Resources.Limits.CPU == "" {
+			c.Kubernetes.Resources.Limits.CPU = "1"
+		}
+		if c.Kubernetes.Resources.Limits.Memory == "" {
+			c.Kubernetes.Resources.Limits.Memory = "2Gi"
+		}
+	}
 }
 
 // Validate 校验启动必需配置。
@@ -133,6 +151,12 @@ func (c Config) Validate() error {
 		}
 		if strings.TrimSpace(c.Storage.S3.STSRoleARN) == "" {
 			return fmt.Errorf("storage.s3 已启用但缺少 sts_role_arn")
+		}
+	}
+	// k8s 启用时关键字段必须齐全，缺失 fail-fast。
+	if c.Kubernetes.Enabled {
+		if strings.TrimSpace(c.Kubernetes.OpsImage) == "" || strings.TrimSpace(c.Kubernetes.BootstrapBaseURL) == "" {
+			return fmt.Errorf("k8s 已启用但 ops_image / bootstrap_base_url 不完整")
 		}
 	}
 	// Hermes 时代模板不再需要 {{workspace_dir}} 等 legacy OpenClaw 专属占位符，

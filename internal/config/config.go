@@ -32,6 +32,8 @@ type Config struct {
 	NewAPI NewAPIConfig `yaml:"newapi"`
 	// Storage 是对象存储（S3）配置；整段可选，配置则要求关键字段齐全（见 loader 校验）。
 	Storage StorageConfig `yaml:"storage"`
+	// Kubernetes 是 app pod 编排（client-go）配置；整段可选，启用编排时要求关键字段齐全。
+	Kubernetes KubernetesConfig `yaml:"k8s"`
 }
 
 // AppConfig 描述 manager API 进程自身的运行参数。
@@ -225,6 +227,36 @@ func (d *Duration) UnmarshalYAML(value *yaml.Node) error {
 	}
 	d.Duration = parsed
 	return nil
+}
+
+// KubernetesConfig 是 app pod 编排所需的 k8s 接入参数。
+type KubernetesConfig struct {
+	// Enabled 为 true 时 manager 用 KubernetesAdapter 编排 app（生产/本地 k3d）。
+	Enabled bool `yaml:"enabled"`
+	// Namespace 是 app pod 所在命名空间。
+	Namespace string `yaml:"namespace"`
+	// Kubeconfig 为空时用 in-cluster config；非空时用该 kubeconfig（本地 go run 指向 k3d）。
+	Kubeconfig string `yaml:"kubeconfig"`
+	// ImagePullSecret 是拉取私有镜像的 Secret 名（如 acr-pull）。
+	ImagePullSecret string `yaml:"image_pull_secret"`
+	// OpsImage 是 spec-A1 ops 镜像 ref（initContainer/sidecar）。
+	OpsImage string `yaml:"ops_image"`
+	// BootstrapBaseURL 是 pod 调 bootstrap 的基址（拼 /internal/apps/<id>/bootstrap）。
+	BootstrapBaseURL string `yaml:"bootstrap_base_url"`
+	// Resources 是 app pod 的资源 requests/limits。
+	Resources K8sResources `yaml:"resources"`
+}
+
+// K8sResources 描述 pod 资源请求/上限（CPU/内存的 k8s quantity 字符串）。
+type K8sResources struct {
+	Requests K8sResourceSpec `yaml:"requests"`
+	Limits   K8sResourceSpec `yaml:"limits"`
+}
+
+// K8sResourceSpec 是单组 CPU/内存配额。
+type K8sResourceSpec struct {
+	CPU    string `yaml:"cpu"`
+	Memory string `yaml:"memory"`
 }
 
 // StorageConfig 是对象存储配置容器；当前仅 S3。

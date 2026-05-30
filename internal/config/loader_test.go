@@ -292,6 +292,17 @@ func TestStorageS3DisabledByDefaultAllowsMissingFields(t *testing.T) {
 	assert.False(t, cfg.Storage.S3.Enabled)
 }
 
+// TestKubernetesValidationRequiresFields 验证启用 k8s 但缺关键字段时 Validate 报错。
+func TestKubernetesValidationRequiresFields(t *testing.T) {
+	// 启用 k8s 却缺 ops_image/bootstrap_base_url，Validate 必须 fail-fast。
+	// 使用完整合法的基础配置拼接 k8s.enabled=true 触发 k8s 专属校验路径，
+	// 确保错误来自 k8s 分支而非其他必填项缺失。
+	yaml := fullValidYAML() + "\nk8s:\n  enabled: true\n"
+	_, err := loadConfigFromStringErr(t, yaml)
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "k8s")
+}
+
 func writeTempConfig(t *testing.T, content string) string {
 	t.Helper()
 	path := filepath.Join(t.TempDir(), "config.yaml")
