@@ -22,12 +22,18 @@ data:
       max_connections: 900
       stale_timeout: 300
       max_allowed_packet: ${MYSQL_MAX_PACKET:-1073741824}
-    minio:
-      user: '${MINIO_USER:-ocm}'
-      password: '${MINIO_PASSWORD:-ocmsecret123}'
-      host: '${MINIO_HOST:-minio}:9000'
-      bucket: '${MINIO_BUCKET:-}'
-      prefix_path: '${MINIO_PREFIX_PATH:-}'
+    # 对象存储用标准 S3（本地指向集群内 MinIO，MinIO 即标准 S3 协议）：
+    # STORAGE_IMPL=AWS_S3（见 Deployment env）选用本块；bucket 设值即走单一固定桶 +
+    # 每个 KB id 作 key 前缀（rag/utils/s3_conn.py），与生产保持同一套配置路径。
+    s3:
+      access_key: '${S3_ACCESS_KEY}'
+      secret_key: '${S3_SECRET_KEY}'
+      region: '${S3_REGION:-us-east-1}'
+      endpoint_url: '${S3_ENDPOINT_URL}'
+      bucket: '${S3_BUCKET}'
+      prefix_path: '${S3_PREFIX_PATH:-}'
+      signature_version: 'v4'
+      addressing_style: 'path'
     es:
       hosts: 'http://${ES_HOST:-elasticsearch}:9200'
       username: '${ES_USER:-elastic}'
@@ -98,11 +104,19 @@ spec:
               valueFrom: { secretKeyRef: { name: ocm-secrets, key: mysql-root-password } }
             - name: MYSQL_MAX_PACKET
               value: "1073741824"
-            - name: MINIO_HOST
-              value: minio
-            - name: MINIO_USER
+            # 对象存储用标准 S3：本地指向集群内 MinIO（同 namespace，短名 minio:9000），
+            # 独立 bucket=ragflow（local-mc-init 已建）+ path 寻址；凭证复用 minio root。
+            - name: STORAGE_IMPL
+              value: AWS_S3
+            - name: S3_ENDPOINT_URL
+              value: http://minio:9000
+            - name: S3_REGION
+              value: us-east-1
+            - name: S3_BUCKET
+              value: ragflow
+            - name: S3_ACCESS_KEY
               valueFrom: { secretKeyRef: { name: ocm-secrets, key: minio-root-user } }
-            - name: MINIO_PASSWORD
+            - name: S3_SECRET_KEY
               valueFrom: { secretKeyRef: { name: ocm-secrets, key: minio-root-password } }
             - name: REDIS_HOST
               value: redis
