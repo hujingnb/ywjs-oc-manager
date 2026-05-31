@@ -12,8 +12,10 @@ manager-api/web、new-api、ragflow 与 RBAC 与本地一致，差异仅镜像 r
      jwt/csrf secrets、public_base_url/cookie_domain（真实域名）、
      ragflow.api_key。
    - new-api：`new-api-sql-dsn` / `new-api-redis-conn` 完整连接串。
-   - ragflow：`ragflow-mysql-*`（host/port/dbname/user/password）、`ragflow-minio-*`、
-     `ragflow-es-host` + `elastic-password`、`ragflow-redis-host` + `redis-password`。
+   - ragflow：`ragflow-mysql-*`（host/port/dbname/user/password）、
+     `ragflow-minio-*`（host/port/user/password）、`ragflow-es-*`（host/port/user）+
+     `elastic-password`、`ragflow-redis-*`（host/port/db/username）+ `redis-password`。
+     连接参数（host/port/db/库名/账号）全部拆字段进 secret，ragflow.yaml 不含任何硬编码连接值。
      账号均为专用普通账号，非 root；ragflow 用 rag_flow 库，需预建库并对该库授权，
      详见 secret.example.yaml 注释。
    - `acr-pull`：阿里云 ACR 拉取凭证（见下）。

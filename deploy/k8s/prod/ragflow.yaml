@@ -25,18 +25,18 @@ data:
     minio:
       user: '${MINIO_USER:-ocm}'
       password: '${MINIO_PASSWORD:-ocmsecret123}'
-      host: '${MINIO_HOST:-minio}:9000'
+      host: '${MINIO_HOST:-minio}:${MINIO_PORT:-9000}'
       bucket: '${MINIO_BUCKET:-}'
       prefix_path: '${MINIO_PREFIX_PATH:-}'
     es:
-      hosts: 'http://${ES_HOST:-elasticsearch}:9200'
+      hosts: 'http://${ES_HOST:-elasticsearch}:${ES_PORT:-9200}'
       username: '${ES_USER:-elastic}'
       password: '${ELASTIC_PASSWORD:-infini_rag_flow}'
     redis:
-      db: 1
+      db: ${REDIS_DB:-1}
       username: '${REDIS_USERNAME:-}'
       password: '${REDIS_PASSWORD:-infini_rag_flow}'
-      host: '${REDIS_HOST:-redis}:6379'
+      host: '${REDIS_HOST:-redis}:${REDIS_PORT:-6379}'
     user_default_llm:
       default_models:
         embedding_model:
@@ -88,6 +88,10 @@ spec:
             # 部署时只改 secret，无需改本文件。
             - name: ES_HOST
               valueFrom: { secretKeyRef: { name: ocm-secrets, key: ragflow-es-host } }
+            - name: ES_PORT
+              valueFrom: { secretKeyRef: { name: ocm-secrets, key: ragflow-es-port } }
+            - name: ES_USER
+              valueFrom: { secretKeyRef: { name: ocm-secrets, key: ragflow-es-user } }
             - name: ELASTIC_PASSWORD
               valueFrom: { secretKeyRef: { name: ocm-secrets, key: elastic-password } }
             - name: MYSQL_HOST
@@ -107,10 +111,18 @@ spec:
               valueFrom: { secretKeyRef: { name: ocm-secrets, key: ragflow-minio-host } }
             - name: MINIO_USER
               valueFrom: { secretKeyRef: { name: ocm-secrets, key: ragflow-minio-user } }
+            - name: MINIO_PORT
+              valueFrom: { secretKeyRef: { name: ocm-secrets, key: ragflow-minio-port } }
             - name: MINIO_PASSWORD
               valueFrom: { secretKeyRef: { name: ocm-secrets, key: ragflow-minio-password } }
             - name: REDIS_HOST
               valueFrom: { secretKeyRef: { name: ocm-secrets, key: ragflow-redis-host } }
+            - name: REDIS_PORT
+              valueFrom: { secretKeyRef: { name: ocm-secrets, key: ragflow-redis-port } }
+            - name: REDIS_DB
+              valueFrom: { secretKeyRef: { name: ocm-secrets, key: ragflow-redis-db } }
+            - name: REDIS_USERNAME
+              valueFrom: { secretKeyRef: { name: ocm-secrets, key: ragflow-redis-username } }
             - name: REDIS_PASSWORD
               valueFrom: { secretKeyRef: { name: ocm-secrets, key: redis-password } }
             - name: API_PROXY_SCHEME
