@@ -1,8 +1,9 @@
 # 生产部署清单（spec-D，只生成不自动部署）
 
-本目录是标准 k8s YAML，不含有状态后端（MySQL/Redis/ES/对象存储外置）。
+本目录是标准 k8s YAML，不含有状态后端（MySQL/Redis/ES/对象存储外置），
+也不含集群外部入口（Ingress / LoadBalancer / TLS 由生产网关自行提供）。
 manager-api/web、new-api、ragflow 与 RBAC 与本地一致，差异仅镜像 ref、
-外部连接、imagePullSecrets、域名/TLS。
+外部连接、imagePullSecrets、域名。
 
 ## 必填清单
 
@@ -31,11 +32,10 @@ manager-api/web、new-api、ragflow 与 RBAC 与本地一致，差异仅镜像 r
 
    > 所有待填值统一用 `__FILL_*__` 前缀标记。复制后跑 `grep -n '__FILL_' secret.yaml`
    > 列出全部待填项，替换完到 grep 无输出即填写完整。
-2. 各工作负载 YAML 的镜像 `REPLACE_TAG` → 实际发布 tag（Makefile release-*-image 产出）。
-3. `ingress.yaml` 的 `REPLACE_WITH_*_DOMAIN` 与 TLS secret。
+2. manager-api.yaml / manager-web.yaml 的镜像 tag → 实际发布 tag（Makefile release-*-image 产出）。
 
 > 连接配置（MySQL/Redis/ES/MinIO 的 host/port/库名/账号口令）只在 `secret.yaml` 填一处即可，
-> 工作负载 YAML 里已无 `EXTERNAL_*` 占位符；剩余的文件级改动仅镜像 tag（2）和域名/TLS（3）。
+> 工作负载 YAML 里无其它占位符；剩余的文件级改动仅镜像 tag（2）。
 
 ## 生成 ACR imagePullSecret
 
@@ -58,10 +58,13 @@ kubectl apply -f 00-namespace.yaml
 kubectl apply -f secret.yaml            # 你填好的真值
 kubectl apply -f manager-rbac.yaml
 kubectl apply -f manager-api.yaml -f manager-web.yaml -f new-api.yaml -f ragflow.yaml
-kubectl apply -f ingress.yaml
 ```
+
+> 本目录不含 Ingress：manager-web（:80）、manager-api（`/api`、`/healthz` @ :8080）、
+> new-api（:3000）、ragflow（:80/:9380）的对外暴露、域名路由与 TLS 由生产网关
+> （云 LoadBalancer / 自建 Ingress Controller）按真实域名自行配置。
 
 ## 范围外
 
-生产集群创建、从 docker-compose 的 cutover、外部托管 DB/OSS 的实际接入与
-数据迁移不在本 spec 内（依赖 spec-A/B/E）。
+生产集群创建、集群外部入口（Ingress/LB/TLS）、外部托管 DB/OSS 的实际接入与
+数据迁移不在本目录范围内。
