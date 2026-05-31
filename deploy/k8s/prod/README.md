@@ -20,9 +20,12 @@ manager-api/web、new-api、ragflow 与 RBAC 与本地一致，差异仅镜像 r
      > app pod 在 oc-apps、后端 Service 在 ocm，短名跨 namespace 解析不到，勿改回短名。
    - new-api：`new-api-sql-dsn` / `new-api-redis-conn` 完整连接串。
    - ragflow：`ragflow-mysql-*`（host/port/dbname/user/password）、
-     `ragflow-minio-*`（host/port/user/password）、`ragflow-es-*`（host/port/user）+
-     `elastic-password`、`ragflow-redis-*`（host/port/db/username）+ `redis-password`。
+     `ragflow-s3-*`（endpoint-url/region/bucket/access-key/secret-key）、
+     `ragflow-es-*`（host/port/user）+ `elastic-password`、
+     `ragflow-redis-*`（host/port/db/username）+ `redis-password`。
      连接参数（host/port/db/库名/账号）全部拆字段进 secret，ragflow.yaml 不含任何硬编码连接值。
+     **对象存储用标准 S3（非 MinIO）**：ragflow.yaml 注入 `STORAGE_IMPL=AWS_S3`、path 寻址，
+     用一个独立 bucket（须预先建好，access key 仅对该 bucket 授权）；endpoint-url 要带 scheme。
      账号均为专用普通账号，非 root；ragflow 用 rag_flow 库，需预建库并对该库授权，
      详见 secret.example.yaml 注释。
    - `acr-pull`：阿里云 ACR 拉取凭证（见下）。secret.example.yaml 已在 **ocm 与 oc-apps
