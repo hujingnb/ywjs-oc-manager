@@ -10,7 +10,13 @@ manager-api/web、new-api、ragflow 与 RBAC 与本地一致，差异仅镜像 r
    new-api.yaml / ragflow.yaml 不用改**）：
    - manager.yaml：外部 MySQL DSN、Redis、master_key（base64 32B）、
      jwt/csrf secrets、public_base_url/cookie_domain（真实域名）、
-     ragflow.api_key。
+     ragflow.api_key；**k8s 编排**段的 `ops_image` tag（make build-ops-runtime 发布的实际
+     tag）；**storage.s3** 段的 `endpoint/region/bucket/access_key_id/secret_access_key/
+     sts_role_arn`（app pod 的 workspace/数据走标准 S3+STS AssumeRole 同步，必填齐全否则
+     manager 启动即 fail-fast）。
+     > 集群内地址（`newapi.base_url`、`hermes.manager_runtime_base_url`、
+     > `k8s.bootstrap_base_url`）已用跨 namespace FQDN（`*.ocm.svc.cluster.local`）写死——
+     > app pod 在 oc-apps、后端 Service 在 ocm，短名跨 namespace 解析不到，勿改回短名。
    - new-api：`new-api-sql-dsn` / `new-api-redis-conn` 完整连接串。
    - ragflow：`ragflow-mysql-*`（host/port/dbname/user/password）、
      `ragflow-minio-*`（host/port/user/password）、`ragflow-es-*`（host/port/user）+
@@ -18,7 +24,10 @@ manager-api/web、new-api、ragflow 与 RBAC 与本地一致，差异仅镜像 r
      连接参数（host/port/db/库名/账号）全部拆字段进 secret，ragflow.yaml 不含任何硬编码连接值。
      账号均为专用普通账号，非 root；ragflow 用 rag_flow 库，需预建库并对该库授权，
      详见 secret.example.yaml 注释。
-   - `acr-pull`：阿里云 ACR 拉取凭证（见下）。
+   - `acr-pull`：阿里云 ACR 拉取凭证（见下）。secret.example.yaml 已在 **ocm 与 oc-apps
+     两个 namespace 各建一份**——ocm 供 manager-api/web/new-api/ragflow 拉镜像，oc-apps
+     供 app pod（Hermes 实例）拉 hermes/ops 镜像（imagePullSecrets 是 namespace 级，缺则
+     app pod ImagePullBackOff）。两份填同一份 ACR 凭证。
 
    > 所有待填值统一用 `__FILL_*__` 前缀标记。复制后跑 `grep -n '__FILL_' secret.yaml`
    > 列出全部待填项，替换完到 grep 无输出即填写完整。
@@ -30,11 +39,16 @@ manager-api/web、new-api、ragflow 与 RBAC 与本地一致，差异仅镜像 r
 
 ## 生成 ACR imagePullSecret
 
+直接填好 secret.yaml 里 ocm + oc-apps 两份 acr-pull 的 `.dockerconfigjson` 即可；
+若想用 kubectl 生成，注意**两个 namespace 各生成一份**：
+
 ```bash
-kubectl create secret docker-registry acr-pull -n ocm \
-  --docker-server=crpi-nu3ibz4f07feyghi.cn-beijing.personal.cr.aliyuncs.com \
-  --docker-username='<ACR 用户名>' --docker-password='<ACR 密码>' \
-  --dry-run=client -o yaml
+for ns in ocm oc-apps; do
+  kubectl create secret docker-registry acr-pull -n $ns \
+    --docker-server=crpi-nu3ibz4f07feyghi.cn-beijing.personal.cr.aliyuncs.com \
+    --docker-username='<ACR 用户名>' --docker-password='<ACR 密码>' \
+    --dry-run=client -o yaml
+done
 ```
 
 ## apply 顺序
