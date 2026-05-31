@@ -12,9 +12,9 @@ manager-api/web、new-api、ragflow 与 RBAC 与本地一致，差异仅镜像 r
    - manager.yaml：外部 MySQL DSN、Redis、master_key（base64 32B）、
      jwt/csrf secrets、public_base_url/cookie_domain（真实域名）、
      ragflow.api_key；**k8s 编排**段的 `ops_image` tag（make build-ops-runtime 发布的实际
-     tag）；**storage.s3** 段的 `endpoint/region/bucket/access_key_id/secret_access_key/
-     sts_role_arn`（app pod 的 workspace/数据走标准 S3+STS AssumeRole 同步，必填齐全否则
-     manager 启动即 fail-fast）。
+     tag）；**storage.s3** 段的 `endpoint/region/bucket/access_key_id/secret_access_key`
+     （app pod 的 workspace/数据走标准 S3 同步，必填齐全否则 manager 启动即 fail-fast；
+     目标存储无需支持 STS，sidecar 写回直接复用这对长期凭证，详见 secret.example.yaml 注释）。
      > 集群内地址（`newapi.base_url`、`hermes.manager_runtime_base_url`、
      > `k8s.bootstrap_base_url`）已用跨 namespace FQDN（`*.ocm.svc.cluster.local`）写死——
      > app pod 在 oc-apps、后端 Service 在 ocm，短名跨 namespace 解析不到，勿改回短名。

@@ -15,16 +15,14 @@ import (
 	smithyhttp "github.com/aws/smithy-go/transport/http"
 )
 
-// S3Config 是构造 S3ObjectStore / STSCredentialIssuer 所需的标准 S3 接入参数。
+// S3Config 是构造 S3ObjectStore 所需的标准 S3 接入参数。
 type S3Config struct {
 	Endpoint        string // S3 端点，如 http://minio.oc-system.svc:9000；指向 MinIO 或云 OSS
 	Region          string // 区域，MinIO 任意填（如 us-east-1）
 	Bucket          string // app 数据 bucket
-	AccessKeyID     string // manager 持有的长期凭证（用于 Put/Presign/STS 调用方）
+	AccessKeyID     string // manager 持有的长期凭证（用于 Put/Presign，并直发给 sidecar 写回）
 	SecretAccessKey string // 与 AccessKeyID 配对的长期密钥
-	UsePathStyle    bool // MinIO 必须 path-style 寻址
-	// STSRoleARN 是 AssumeRole 的目标 role ARN；MinIO 下可为占位（策略由内联 policy 决定）。
-	STSRoleARN string
+	UsePathStyle    bool   // MinIO 必须 path-style 寻址
 }
 
 // S3ObjectStore 用 aws-sdk-go-v2 标准 S3 客户端实现 ObjectStore。

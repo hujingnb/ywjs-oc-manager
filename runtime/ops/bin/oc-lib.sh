@@ -48,8 +48,8 @@ export_s3_env() {
   export AWS_S3_ENDPOINT AWS_S3_REGION AWS_S3_BUCKET AWS_S3_PREFIX
 }
 
-# write_aws_credentials <json> 从 s3_write 把 STS 临时凭证写入 ~/.aws/credentials 的 ocsync profile
-# （含 session token），供 aws_s3 用 --profile ocsync 调用。权限 0600。
+# write_aws_credentials <json> 从 s3_write 把凭证写入 ~/.aws/credentials 的 ocsync profile，
+# 供 aws_s3 用 --profile ocsync 调用。权限 0600。
 write_aws_credentials() {
   local json="$1" ak sk st
   ak=$(jq -r '.s3_write.access_key_id' "$json")
@@ -57,12 +57,19 @@ write_aws_credentials() {
   st=$(jq -r '.s3_write.session_token' "$json")
   [ -n "$ak" ] && [ "$ak" != "null" ] || { log "s3_write.access_key_id 缺失"; return 1; }
   # mkdir 与文件写入同在 umask 077 子 shell 内，保证 ~/.aws 目录 0700、credentials 文件 0600。
-  ( umask 077; mkdir -p "$HOME/.aws"; cat > "$HOME/.aws/credentials" <<EOF
-[ocsync]
-aws_access_key_id = ${ak}
-aws_secret_access_key = ${sk}
-aws_session_token = ${st}
-EOF
+  # session_token 仅 STS 临时凭证才有；目标存储不支持 STS 时 manager 直发长期凭证，
+  # s3_write.session_token 为空/null，此时绝不能写 aws_session_token 行——空值会被 AWS CLI
+  # 当作非法 token 而拒绝所有请求。
+  ( umask 077
+    mkdir -p "$HOME/.aws"
+    {
+      printf '[ocsync]\n'
+      printf 'aws_access_key_id = %s\n' "$ak"
+      printf 'aws_secret_access_key = %s\n' "$sk"
+      if [ -n "$st" ] && [ "$st" != "null" ]; then
+        printf 'aws_session_token = %s\n' "$st"
+      fi
+    } > "$HOME/.aws/credentials"
   )
 }
 

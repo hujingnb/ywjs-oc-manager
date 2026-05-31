@@ -128,9 +128,6 @@ func (c Config) Validate() error {
 			strings.TrimSpace(c.Storage.S3.AccessKeyID) == "" || strings.TrimSpace(c.Storage.S3.SecretAccessKey) == "" {
 			return fmt.Errorf("storage.s3 已启用但 endpoint/bucket/access_key_id/secret_access_key 不完整")
 		}
-		if strings.TrimSpace(c.Storage.S3.STSRoleARN) == "" {
-			return fmt.Errorf("storage.s3 已启用但缺少 sts_role_arn")
-		}
 	}
 	// k8s 启用时关键字段必须齐全，缺失 fail-fast。
 	if c.Kubernetes.Enabled {

@@ -10,7 +10,6 @@ import (
 	"github.com/stretchr/testify/require"
 
 	"oc-manager/internal/auth"
-	"oc-manager/internal/integrations/storage"
 	"oc-manager/internal/store/sqlc"
 )
 
@@ -47,23 +46,6 @@ func (f *fakeBootstrapStore) GetAssistantVersion(_ context.Context, _ string) (s
 	return f.version, nil
 }
 
-// fakeSTS 实现 storage.STSIssuer，返回固定临时凭证，并记录被限定的 prefix 以便断言。
-type fakeSTS struct {
-	// gotPrefix 记录最近一次 AssumeAppRole 传入的 prefix，用于验证前缀限定正确。
-	gotPrefix string
-}
-
-// AssumeAppRole 记录 prefix 并返回固定 STS 临时凭证。
-func (f *fakeSTS) AssumeAppRole(_ context.Context, prefix string, _ time.Duration) (storage.TempCredentials, error) {
-	f.gotPrefix = prefix
-	return storage.TempCredentials{
-		AccessKeyID:     "AK",
-		SecretAccessKey: "SK",
-		SessionToken:    "ST",
-		ExpiresAt:       time.Unix(1000, 0),
-	}, nil
-}
-
 // fakeSkills 实现 bootstrapSkillSource，为任意 relPath 返回固定格式的预签名 URL。
 type fakeSkills struct{}
 
@@ -96,7 +78,7 @@ func newBootstrapApp(t *testing.T, cipher *auth.Cipher) sqlc.App {
 
 // TestBootstrapBuildHappyPath 验证正常组装路径：
 //   - manifest YAML 含解密后的 api_key 明文（"sk-test"）
-//   - STS 调用时 prefix 限定到 "apps/a1/"
+//   - s3_write 下发 manager 长期凭证、Prefix 限定到 "apps/a1/"、SessionToken 为空、过期时间在未来
 //   - 首启场景（fakeObjectStore 无任何对象）restore 字段全部为空
 func TestBootstrapBuildHappyPath(t *testing.T) {
 	// 复用 app_runtime_token_test.go 的 helper，构造全零密钥 cipher
@@ -109,12 +91,13 @@ func TestBootstrapBuildHappyPath(t *testing.T) {
 		owner:   sqlc.User{ID: "u1", DisplayName: "Owner"},
 		version: sqlc.AssistantVersion{ID: "v1", MainModel: "gpt-x", SystemPrompt: "you are bot"},
 	}
-	sts := &fakeSTS{}
 	// 复用 s3_skill_blob_store_test.go 的 fakeObjectStore，默认无对象（ObjectExists 全返回 false）
-	svc := NewBootstrapService(store, cipher, newFakeObjectStore(), sts, fakeSkills{}, BootstrapConfig{
+	svc := NewBootstrapService(store, cipher, newFakeObjectStore(), fakeSkills{}, BootstrapConfig{
 		Endpoint:         "http://minio:9000",
 		Region:           "us-east-1",
 		Bucket:           "oc-apps",
+		AccessKeyID:      "manager-ak",
+		SecretAccessKey:  "manager-sk",
 		NewAPIBaseURL:    "http://new-api:3000",
 		KnowledgeBaseURL: "http://manager/runtime",
 		PlatformPrompt:   "platform rule",
@@ -128,13 +111,15 @@ func TestBootstrapBuildHappyPath(t *testing.T) {
 	assert.Contains(t, res.ManifestYAML, "sk-test")
 	// manifest 还须包含解密后的 control token（写入 knowledge.app_token），验证 token 统一链路透传
 	assert.Contains(t, res.ManifestYAML, "control-tok")
-	// STS 限定前缀必须为 apps/<appID>/，sidecar 不得越界写入
-	assert.Equal(t, "apps/a1/", sts.gotPrefix)
+	// 约定写入前缀必须为 apps/<appID>/，sidecar 据此只写自身前缀
 	assert.Equal(t, "apps/a1/", res.S3Write.Prefix)
-	// STS 凭证三字段必须完整透传到响应，缺任一都会让 sidecar 无法写 S3
-	assert.Equal(t, "AK", res.S3Write.AccessKeyID)
-	assert.Equal(t, "SK", res.S3Write.SecretAccessKey)
-	assert.Equal(t, "ST", res.S3Write.SessionToken)
+	// 长期凭证须原样透传到响应，缺任一都会让 sidecar 无法写 S3
+	assert.Equal(t, "manager-ak", res.S3Write.AccessKeyID)
+	assert.Equal(t, "manager-sk", res.S3Write.SecretAccessKey)
+	// 长期凭证下 SessionToken 必须为空（非临时凭证），sidecar 据此不写 aws_session_token
+	assert.Empty(t, res.S3Write.SessionToken)
+	// 过期时间须为远未来，避免 sidecar 因「临近过期」反复回源续期
+	assert.True(t, res.S3Write.ExpiresAt.After(time.Now()))
 	// 首启：fakeObjectStore 无任何对象，三个 restore 字段全部为空
 	assert.Empty(t, res.Restore.WorkspaceURL)
 	assert.Empty(t, res.Restore.StateDBURL)
@@ -151,7 +136,6 @@ func TestBootstrapBuildAppNotReady(t *testing.T) {
 		&fakeBootstrapStore{app: app},
 		cipher,
 		newFakeObjectStore(),
-		&fakeSTS{},
 		fakeSkills{},
 		BootstrapConfig{PresignTTL: time.Minute},
 	)

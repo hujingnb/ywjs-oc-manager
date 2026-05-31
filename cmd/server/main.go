@@ -284,25 +284,25 @@ func runManager(ctx context.Context, cfg config.Config, logOut io.Writer) error 
 			AccessKeyID:     cfg.Storage.S3.AccessKeyID,
 			SecretAccessKey: cfg.Storage.S3.SecretAccessKey,
 			UsePathStyle:    cfg.Storage.S3.UsePathStyle,
-			STSRoleARN:      cfg.Storage.S3.STSRoleARN,
 		}
 		objStore := storage.NewS3ObjectStore(s3cfg)
 		// s3Skills 同时承担两个角色：skillBlobStore（供 AssistantVersionService 存取 tar）
 		// 与 bootstrapSkillSource（供 BootstrapService 预签名读 URL）。
 		s3Skills := service.NewS3SkillBlobStore(objStore, cfg.Storage.S3.PresignTTL.Duration)
 		skillBlobStore = s3Skills
-		// bootstrap 服务依赖对象存储（restore 预签名）+ STS（写凭证）+ skill 预签名。
-		stsIssuer := storage.NewSTSCredentialIssuer(s3cfg)
+		// bootstrap 服务依赖对象存储（restore 预签名）+ skill 预签名 + 长期写凭证。
+		// 目标对象存储不支持标准 STS AssumeRole，故 sidecar 写回直接复用 manager 长期凭证。
 		bootstrapSvc = service.NewBootstrapService(
 			dbStore.Queries,
 			cipher,
 			objStore,
-			stsIssuer,
 			s3Skills,
 			service.BootstrapConfig{
 				Endpoint:         cfg.Storage.S3.Endpoint,
 				Region:           cfg.Storage.S3.Region,
 				Bucket:           cfg.Storage.S3.Bucket,
+				AccessKeyID:      cfg.Storage.S3.AccessKeyID,
+				SecretAccessKey:  cfg.Storage.S3.SecretAccessKey,
 				NewAPIBaseURL:    cfg.NewAPI.BaseURL,
 				KnowledgeBaseURL: cfg.Hermes.ManagerRuntimeBaseURL,
 				PlatformPrompt:   cfg.Hermes.SystemPromptTemplate,

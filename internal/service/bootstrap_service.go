@@ -28,7 +28,7 @@ type BootstrapResult struct {
 	Skills []BootstrapSkill `json:"skills"`
 	// Restore 是会话/工作区恢复的预签名读 URL；首启时各字段为空。
 	Restore BootstrapRestore `json:"restore"`
-	// S3Write 是 prefix 限定的 STS 临时写凭证（sidecar mirror 用）。
+	// S3Write 是 sidecar mirror 写回 S3 用的凭证 + 寻址信息（长期凭证直发，见 BootstrapS3Write）。
 	S3Write BootstrapS3Write `json:"s3_write"`
 }
 
@@ -52,7 +52,8 @@ type BootstrapRestore struct {
 	SessionsURL string `json:"sessions_url,omitempty"`
 }
 
-// BootstrapS3Write 标准 STS 临时写凭证 + 寻址信息。
+// BootstrapS3Write 是 sidecar 写回 S3 所需的凭证与寻址信息。
+// 目标对象存储不支持标准 STS AssumeRole，故下发 manager 长期凭证（SessionToken 为空）。
 type BootstrapS3Write struct {
 	// Endpoint 是 S3 兼容存储的访问地址。
 	Endpoint string `json:"endpoint"`
@@ -60,15 +61,15 @@ type BootstrapS3Write struct {
 	Region string `json:"region"`
 	// Bucket 是存储桶名称。
 	Bucket string `json:"bucket"`
-	// Prefix 是限定前缀，格式为 apps/<id>/，sidecar 写入时不得越界。
+	// Prefix 是约定写入前缀，格式为 apps/<id>/；sidecar 只主动写该前缀（凭证本身不强制限定）。
 	Prefix string `json:"prefix"`
-	// AccessKeyID 是 STS 颁发的临时访问 Key ID。
+	// AccessKeyID 是 manager 长期访问 Key ID。
 	AccessKeyID string `json:"access_key_id"`
-	// SecretAccessKey 是 STS 颁发的临时访问密钥。
+	// SecretAccessKey 是 manager 长期访问密钥。
 	SecretAccessKey string `json:"secret_access_key"`
-	// SessionToken 是 STS 颁发的会话令牌。
+	// SessionToken 长期凭证下为空；保留字段以兼容 sidecar JSON 解析（为空时 sidecar 不写该项）。
 	SessionToken string `json:"session_token"`
-	// ExpiresAt 是临时凭证的过期时间。
+	// ExpiresAt 长期凭证下为远未来时间，使 sidecar 不会因临近过期反复回源续期。
 	ExpiresAt time.Time `json:"expires_at"`
 }
 
@@ -129,24 +130,28 @@ type BootstrapConfig struct {
 	Region string
 	// Bucket 是存储桶名称。
 	Bucket string
+	// AccessKeyID / SecretAccessKey 是 manager 的长期 S3 凭证。目标对象存储不支持标准
+	// STS AssumeRole，故 sidecar 写回数据直接复用这对长期凭证（透传到 s3_write），
+	// 不再签发 prefix 限定的临时凭证；隔离取舍见 Build 第 8 步注释与 secret 配置说明。
+	AccessKeyID     string
+	SecretAccessKey string
 	// NewAPIBaseURL 是 manifest.credentials.openai.base_url，指向 new-api 代理地址。
 	NewAPIBaseURL string
 	// KnowledgeBaseURL 是 manifest.knowledge.runtime_base_url，pod 内访问 manager runtime 知识库 API 的地址。
 	KnowledgeBaseURL string
 	// PlatformPrompt 是平台层规则模板（platform-rules.md 内容），可含 {var} 占位符。
 	PlatformPrompt string
-	// PresignTTL 是预签名 URL 与 STS 临时凭证的有效期。
+	// PresignTTL 是预签名读 URL 的有效期。
 	PresignTTL time.Duration
 }
 
-// BootstrapService 组装 pod 启动回调所需的 manifest + 预签名 URL + STS 写凭证。
+// BootstrapService 组装 pod 启动回调所需的 manifest + 预签名读 URL + S3 写凭证。
 // 只读：不创建 new-api key、不生成 token；缺失视为 app 未就绪（ErrAppNotReady）。
 // api_key 与 control token 由 spec-A 创建流程预先 ensure，bootstrap 只负责解密复用。
 type BootstrapService struct {
 	store    bootstrapStore
 	cipher   *auth.Cipher
 	objects  storage.ObjectStore
-	sts      storage.STSIssuer
 	skills   bootstrapSkillSource
 	renderer bootstrapManifestRenderer
 	cfg      BootstrapConfig
@@ -158,7 +163,6 @@ func NewBootstrapService(
 	store bootstrapStore,
 	cipher *auth.Cipher,
 	objects storage.ObjectStore,
-	sts storage.STSIssuer,
 	skills bootstrapSkillSource,
 	cfg BootstrapConfig,
 ) *BootstrapService {
@@ -166,7 +170,6 @@ func NewBootstrapService(
 		store:    store,
 		cipher:   cipher,
 		objects:  objects,
-		sts:      sts,
 		skills:   skills,
 		renderer: defaultManifestRenderer{},
 		cfg:      cfg,
@@ -264,13 +267,12 @@ func (s *BootstrapService) Build(ctx context.Context, app sqlc.App) (BootstrapRe
 		return BootstrapResult{}, err
 	}
 
-	// 8. 签发 STS 临时写凭证，限定到 apps/<id>/ 前缀，供 sidecar mirror 使用。
+	// 8. 下发 S3 写凭证。目标对象存储不支持标准 STS AssumeRole，无法签发 prefix 限定的
+	//    临时凭证，故直接下发 manager 的长期凭证（取舍：sidecar 凭证拥有整个 bucket 的
+	//    读写权限，per-app 前缀隔离退化为 sidecar 只主动写自身 Prefix 的「善意行为」，不再
+	//    由凭证策略强制；详见 secret 配置 storage.s3 注释）。SessionToken 留空表示这是长期
+	//    凭证而非临时凭证；ExpiresAt 给远未来，使 sidecar 不会因「临近过期」反复回源续期。
 	prefix := storage.AppPrefix(app.ID)
-	creds, err := s.sts.AssumeAppRole(ctx, prefix, s.cfg.PresignTTL)
-	if err != nil {
-		return BootstrapResult{}, fmt.Errorf("签发 STS 凭证失败: %w", err)
-	}
-
 	return BootstrapResult{
 		ManifestYAML: manifestYAML,
 		Persona:      persona,
@@ -282,10 +284,10 @@ func (s *BootstrapService) Build(ctx context.Context, app sqlc.App) (BootstrapRe
 			Region:          s.cfg.Region,
 			Bucket:          s.cfg.Bucket,
 			Prefix:          prefix,
-			AccessKeyID:     creds.AccessKeyID,
-			SecretAccessKey: creds.SecretAccessKey,
-			SessionToken:    creds.SessionToken,
-			ExpiresAt:       creds.ExpiresAt,
+			AccessKeyID:     s.cfg.AccessKeyID,
+			SecretAccessKey: s.cfg.SecretAccessKey,
+			SessionToken:    "",
+			ExpiresAt:       time.Now().AddDate(10, 0, 0),
 		},
 	}, nil
 }

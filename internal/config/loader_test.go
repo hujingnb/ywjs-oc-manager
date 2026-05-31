@@ -240,25 +240,6 @@ func TestStorageS3ValidationRequiresFields(t *testing.T) {
 	assert.Contains(t, err.Error(), "storage.s3")
 }
 
-// TestStorageS3ValidationRequiresSTSRoleARN 验证启用 S3 且主字段齐全但缺 sts_role_arn 时报错。
-func TestStorageS3ValidationRequiresSTSRoleARN(t *testing.T) {
-	// S3 已启用且 endpoint/bucket/凭证均完整，但缺少 sts_role_arn 时仍应 fail-fast。
-	yaml := fullValidYAML() + `
-storage:
-  s3:
-    enabled: true
-    endpoint: "http://minio:9000"
-    region: "us-east-1"
-    bucket: "oc-manager"
-    access_key_id: "minioadmin"
-    secret_access_key: "minioadmin"
-    use_path_style: true
-`
-	_, err := loadConfigFromStringErr(t, yaml)
-	require.Error(t, err)
-	assert.Contains(t, err.Error(), "storage.s3")
-}
-
 // TestStorageS3DefaultsApplied 验证 S3 启用且未配置 region/presign_ttl 时默认值被正确填充。
 func TestStorageS3DefaultsApplied(t *testing.T) {
 	// S3 启用且字段完整但未指定 region/presign_ttl，applyDefaults 应填充稳定默认值。
@@ -271,7 +252,6 @@ storage:
     access_key_id: "minioadmin"
     secret_access_key: "minioadmin"
     use_path_style: true
-    sts_role_arn: "arn:aws:iam::000000000000:role/manager"
 `
 	cfg := loadConfigFromString(t, yaml)
 	// region 未配置时应填入默认值 us-east-1。

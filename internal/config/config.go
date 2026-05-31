@@ -241,8 +241,6 @@ type S3StorageConfig struct {
 	SecretAccessKey string `yaml:"secret_access_key"`
 	// UsePathStyle 是否使用 path-style 寻址（MinIO 必须 true）。
 	UsePathStyle bool `yaml:"use_path_style"`
-	// STSRoleARN 是 AssumeRole 目标 role ARN。
-	STSRoleARN string `yaml:"sts_role_arn"`
-	// PresignTTL 是预签名 URL / STS 凭证默认有效期；空时由 applyDefaults 填默认。
+	// PresignTTL 是预签名读 URL 默认有效期；空时由 applyDefaults 填默认。
 	PresignTTL Duration `yaml:"presign_ttl"`
 }

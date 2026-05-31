@@ -33,11 +33,6 @@ func loadOpsTestEnv(t *testing.T) opsTestEnv {
 	if ep == "" {
 		t.Skip("未设置 OC_S3_TEST_ENDPOINT，跳过 ops 集成测")
 	}
-	// STS role ARN 缺省给 MinIO 兼容占位值
-	role := os.Getenv("OC_S3_TEST_STS_ROLE")
-	if role == "" {
-		role = "arn:aws:iam:::role/dev"
-	}
 	// ops 镜像缺省使用本地构建 tag
 	img := os.Getenv("OC_OPS_TEST_IMAGE")
 	if img == "" {
@@ -51,20 +46,16 @@ func loadOpsTestEnv(t *testing.T) opsTestEnv {
 			AccessKeyID:     os.Getenv("OC_S3_TEST_AK"),
 			SecretAccessKey: os.Getenv("OC_S3_TEST_SK"),
 			UsePathStyle:    true,
-			STSRoleARN:      role,
 		},
 		image: img,
 	}
 }
 
-// bootstrapJSON 构造 mock bootstrap 返回的 canned 响应（含 skills 预签名 URL + 真实 STS s3_write 凭证）。
-// 调用真实 STS 签发仅限于 appPrefix 范围内的临时写凭证，确保 oc-restore 可用 STS 凭证同步 workspace。
+// bootstrapJSON 构造 mock bootstrap 返回的 canned 响应（含 skills 预签名 URL + s3_write 长期写凭证）。
+// 目标存储不支持 STS，故 s3_write 直接下发 manager 长期凭证（session_token 为空、过期时间为远未来），
+// 与生产 bootstrap 行为一致，确保 oc-restore/oc-sync 可用长期凭证同步 workspace。
 func bootstrapJSON(t *testing.T, env opsTestEnv, appPrefix, skillURL string) []byte {
 	t.Helper()
-	issuer := storage.NewSTSCredentialIssuer(env.cfg)
-	// 签发 15 分钟的临时写凭证，覆盖测试运行周期
-	creds, err := issuer.AssumeAppRole(context.Background(), appPrefix, 15*time.Minute)
-	require.NoError(t, err)
 	resp := map[string]any{
 		"manifest_yaml": "version: \"2\"\napp:\n  id: it\n",
 		"persona":       "测试 persona",
@@ -72,16 +63,16 @@ func bootstrapJSON(t *testing.T, env opsTestEnv, appPrefix, skillURL string) []b
 		"skills": []map[string]string{
 			{"name": "weather", "rel_path": "resources/skills/weather.tar", "url": skillURL},
 		},
-		// s3_write 字段为 oc-restore 的 workspace sync 凭证（STS 临时凭证，限定 appPrefix）
+		// s3_write 为 oc-restore/oc-sync 的 workspace 同步凭证：长期凭证直发，session_token 留空。
 		"s3_write": map[string]any{
 			"endpoint":          env.cfg.Endpoint,
 			"region":            env.cfg.Region,
 			"bucket":            env.cfg.Bucket,
 			"prefix":            appPrefix,
-			"access_key_id":     creds.AccessKeyID,
-			"secret_access_key": creds.SecretAccessKey,
-			"session_token":     creds.SessionToken,
-			"expires_at":        creds.ExpiresAt.UTC().Format(time.RFC3339),
+			"access_key_id":     env.cfg.AccessKeyID,
+			"secret_access_key": env.cfg.SecretAccessKey,
+			"session_token":     "",
+			"expires_at":        "2099-01-01T00:00:00Z",
 		},
 	}
 	b, err := json.Marshal(resp)
@@ -119,7 +110,7 @@ func runOpsContainer(t *testing.T, env opsTestEnv, command, bootstrapURL, dataDi
 }
 
 // TestOcRestore 验证 oc-restore 在已有 app 数据场景下的完整恢复流程：
-// 写 manifest/persona/skills 到 input 目录、用 STS 凭证 sync workspace、
+// 写 manifest/persona/skills 到 input 目录、用 s3_write 长期凭证 sync workspace、
 // 恢复 state.db 且清理 -wal/-shm 文件。
 func TestOcRestore(t *testing.T) {
 	env := loadOpsTestEnv(t)
@@ -213,7 +204,7 @@ func assertFileContains(t *testing.T, path, want string) {
 
 // TestOcSyncOnce 验证 oc-sync（OC_SYNC_ONCE=1）把本地 workspace 与 sqlite 快照上传到 apps/<id>/ 前缀。
 // 预置 workspace 文件与最小 sqlite DB，oc-sync 跑一轮后断言 MinIO 出现对应对象，
-// 证明 STS 凭证解析、aws s3 sync 上传、sqlite .backup 路径真实可用。
+// 证明 s3_write 长期凭证解析、aws s3 sync 上传、sqlite .backup 路径真实可用。
 func TestOcSyncOnce(t *testing.T) {
 	env := loadOpsTestEnv(t)
 	store := storage.NewS3ObjectStore(env.cfg)
