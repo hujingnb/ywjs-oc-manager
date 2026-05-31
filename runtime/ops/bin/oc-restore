@@ -17,7 +17,7 @@ trap 'rm -f "$bs"' EXIT
 fetch_bootstrap "$bs"
 
 # 1. manifest + resources 写入 emptyDir（api_key 随 manifest 落本地临时盘，不进 S3）。
-mkdir -p "$INPUT_DIR/resources/skills" "$DATA_DIR/workspace" "$DATA_DIR/sessions"
+mkdir -p "$INPUT_DIR/resources/skills" "$DATA_DIR/workspace" "$DATA_DIR/sessions" "$DATA_DIR/weixin"
 jq -r '.manifest_yaml'  "$bs" > "$INPUT_DIR/manifest.yaml"
 jq -r '.persona'        "$bs" > "$INPUT_DIR/resources/persona.md"
 jq -r '.platform_rule'  "$bs" > "$INPUT_DIR/resources/platform-rules.md"
@@ -35,10 +35,13 @@ done < <(jq -r '.skills[]? | [.rel_path, .url] | @tsv' "$bs")
 write_aws_credentials "$bs"
 export_s3_env "$bs"
 
-# workspace/sessions 前缀镜像同步下来；首启时前缀为空，aws s3 sync 返回 0 不报错。
+# workspace/sessions/weixin 前缀镜像同步下来；首启时前缀为空，aws s3 sync 返回 0 不报错。
+# weixin/ 是微信渠道扫码登录凭证（qr_login 落盘 /opt/data/weixin/accounts/），
+# 必须随 pod 重启恢复，否则绑定后的渠道重载 RolloutRestart 会丢登录态、网关失活。
 aws_s3 sync "s3://${AWS_S3_BUCKET}/${AWS_S3_PREFIX}workspace/" "$DATA_DIR/workspace"
 aws_s3 sync "s3://${AWS_S3_BUCKET}/${AWS_S3_PREFIX}sessions/"  "$DATA_DIR/sessions"
-log "workspace/sessions 已恢复"
+aws_s3 sync "s3://${AWS_S3_BUCKET}/${AWS_S3_PREFIX}weixin/"    "$DATA_DIR/weixin"
+log "workspace/sessions/weixin 已恢复"
 
 # state.db 单对象：存在才拉，并清 WAL 边车（绝不分别拉 -wal/-shm）保证干净重开。
 if aws_s3 ls "s3://${AWS_S3_BUCKET}/${AWS_S3_PREFIX}state.db" >/dev/null 2>&1; then

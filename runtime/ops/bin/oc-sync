@@ -36,6 +36,7 @@ run_once() {
   ensure_creds
   sync_workspace_up "$DATA_DIR"
   sync_sessions_up "$DATA_DIR"
+  sync_weixin_up "$DATA_DIR"
   local now
   now=$(date -u +%s)
   if [ $((now - last_db)) -ge "$DB_INTERVAL" ]; then
@@ -49,6 +50,7 @@ if [ "${OC_SYNC_ONCE:-0}" = "1" ]; then
   ensure_creds
   sync_workspace_up "$DATA_DIR"
   sync_sessions_up "$DATA_DIR"
+  sync_weixin_up "$DATA_DIR"
   backup_sqlite_up "$DATA_DIR"
   log "oc-sync 单轮完成（OC_SYNC_ONCE）"
   exit 0

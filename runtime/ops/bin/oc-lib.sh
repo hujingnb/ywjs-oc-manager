@@ -100,6 +100,17 @@ sync_sessions_up() {
   aws_s3 sync "$data_dir/sessions" "s3://${AWS_S3_BUCKET}/${AWS_S3_PREFIX}sessions/"
 }
 
+# sync_weixin_up 把本地 weixin 渠道凭证目录增量同步到 S3（无 --delete）。
+# qr_login 扫码绑定后凭证落盘到 /opt/data/weixin/accounts/<id>.json（含同步缓冲
+# <id>.sync.json）；这是 app 级持久数据，必须随 workspace/sessions 一起持久化，
+# 否则 pod 重启（尤其绑定后触发的渠道重载 RolloutRestart）会丢失登录态，网关重启后
+# 报 "No messaging platforms enabled"、已绑定渠道失活。目录不存在时 aws s3 sync 空操作。
+sync_weixin_up() {
+  local data_dir="$1"
+  [ -d "$data_dir/weixin" ] || return 0
+  aws_s3 sync "$data_dir/weixin" "s3://${AWS_S3_BUCKET}/${AWS_S3_PREFIX}weixin/"
+}
+
 # backup_sqlite_up 用 sqlite .backup 出 live DB 的一致性快照并上传为 state.db（绝不分别传 -wal/-shm）。
 # 本地无 state.db（首启未建库）时静默跳过。
 backup_sqlite_up() {
