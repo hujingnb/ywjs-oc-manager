@@ -325,6 +325,52 @@ update-config: ## apply 线上 secret.yaml 并重启 manager-api 使新配置生
 	$(PROD_KUBECTL) rollout status deploy/manager-api --timeout=120s
 	@echo "✅ 线上 secret 已更新，manager-api 已重启加载新配置"
 
+# prod-deploy-api / prod-deploy-web：构建推送对应镜像后，用 kubectl set image
+# 滚动更新线上 Deployment。set image 只改容器镜像引用、不动 deploy/k8s/prod 的
+# yaml 与 secret，发版纯靠镜像 tag 滚动，避免手工改 manifest。
+# build-* 与 set image 在同一次 make 调用内共享同一 IMAGE_TAG，保证推送的镜像
+# 和滚动更新引用的 tag 完全一致。Deployment 名与容器名一致（manager-api/manager-web）。
+.PHONY: prod-deploy-api
+prod-deploy-api: build-api-image ## 构建推送 manager-api 并滚动更新线上 deploy/manager-api
+	$(PROD_KUBECTL) set image deploy/manager-api manager-api=$(API_IMAGE_REPO):$(IMAGE_TAG)
+	$(PROD_KUBECTL) rollout status deploy/manager-api --timeout=180s
+	@echo "✅ 线上 manager-api 已更新为 $(API_IMAGE_REPO):$(IMAGE_TAG)"
+
+.PHONY: prod-deploy-web
+prod-deploy-web: build-web-image ## 构建推送 manager-web 并滚动更新线上 deploy/manager-web
+	$(PROD_KUBECTL) set image deploy/manager-web manager-web=$(WEB_IMAGE_REPO):$(IMAGE_TAG)
+	$(PROD_KUBECTL) rollout status deploy/manager-web --timeout=180s
+	@echo "✅ 线上 manager-web 已更新为 $(WEB_IMAGE_REPO):$(IMAGE_TAG)"
+
+# prod-deploy-manager 一次性发布 api + web：先完成两镜像的构建推送（共享同一
+# IMAGE_TAG，保证同源），再连续 set image 两个 Deployment，最后各自等滚动完成，
+# 避免分两次调用导致 tag 不一致或多轮无谓重启。
+.PHONY: prod-deploy-manager
+prod-deploy-manager: build-api-image build-web-image ## 构建推送 api+web 并一次性滚动更新线上 manager
+	$(PROD_KUBECTL) set image deploy/manager-api manager-api=$(API_IMAGE_REPO):$(IMAGE_TAG)
+	$(PROD_KUBECTL) set image deploy/manager-web manager-web=$(WEB_IMAGE_REPO):$(IMAGE_TAG)
+	$(PROD_KUBECTL) rollout status deploy/manager-api --timeout=180s
+	$(PROD_KUBECTL) rollout status deploy/manager-web --timeout=180s
+	@echo "✅ 线上 manager 已更新：api=$(API_IMAGE_REPO):$(IMAGE_TAG) web=$(WEB_IMAGE_REPO):$(IMAGE_TAG)"
+
+# prod-deploy-hermes / prod-deploy-ops：hermes/ops 镜像不是独立 Deployment（由 manager
+# 渲染 app pod 时引用），故发版方式与 api/web 不同——不能 set image，而是把新镜像 ref 写回
+# 本地 secret.yaml 的对应字段（hermes→hermes.runtime_images[].ref，ops→k8s.ops_image），
+# 再走 update-config（apply secret + 重启 manager-api）让新镜像在后续渲染的 app pod 生效。
+# sed 只替换引号内含对应镜像名的整段值，不动凭证等其它字段；secret.yaml 已 gitignore。
+# update-config 不依赖 IMAGE_TAG，经 $(MAKE) 子调用重算 tag 也不影响已写入 secret 的值。
+.PHONY: prod-deploy-hermes
+prod-deploy-hermes: build-hermes-image ## 构建推送 hermes 镜像→写回 secret.yaml→update-config 生效
+	sed -i -E 's#ref: "[^"]*oc-manager-hermes:[^"]*"#ref: "$(HERMES_IMAGE)"#' deploy/k8s/prod/secret.yaml
+	@echo "✅ secret.yaml 的 hermes 镜像已更新为 $(HERMES_IMAGE)"
+	$(MAKE) update-config
+
+.PHONY: prod-deploy-ops
+prod-deploy-ops: build-ops-runtime ## 构建推送 ops 镜像→写回 secret.yaml→update-config 生效
+	sed -i -E 's#ops_image: "[^"]*oc-manager-ops:[^"]*"#ops_image: "$(OPS_IMAGE_REPO):$(IMAGE_TAG)"#' deploy/k8s/prod/secret.yaml
+	@echo "✅ secret.yaml 的 ops 镜像已更新为 $(OPS_IMAGE_REPO):$(IMAGE_TAG)"
+	$(MAKE) update-config
+
 ##@ 调试脚本
 
 debug-ollama: ## 跑 debug-ollama.sh, 探测 ollama 状态
