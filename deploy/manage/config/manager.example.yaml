@@ -120,9 +120,6 @@ hermes:
     - id: "v2026.5.16"
       label: "Hermes v2026.5.16（当前）"
       ref: "crpi-nu3ibz4f07feyghi.cn-beijing.personal.cr.aliyuncs.com/ywjs_app/oc-manager-hermes:v2026.5.16-2026-05-21-12-00-00"
-    - id: "v2026.5.7"
-      label: "Hermes v2026.5.7（旧版）"
-      ref: "crpi-nu3ibz4f07feyghi.cn-beijing.personal.cr.aliyuncs.com/ywjs_app/oc-manager-hermes:v2026.5.7-2026-05-21-12-00-00"
 
   # Hermes 容器平台级系统人设模板（SOUL.md PlatformPrompt 层）。
   # 模板内可写任意中文 / 英文 prompt。

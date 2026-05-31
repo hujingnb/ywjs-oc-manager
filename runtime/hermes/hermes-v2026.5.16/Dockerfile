@@ -65,22 +65,19 @@ RUN uv pip install --system --no-cache-dir \
       pyyaml pytest jsonschema starlette anyio httpx2
 
 # oc-ops HTTP 服务运行时依赖：装进 hermes venv。oc-ops 容器最终用
-# `python -m uvicorn ocops.server:app` 启动，且与 oc-channel-login 同进程环境
-# （需 venv 内的 weixin SDK），因此 server 必须能跑在 hermes venv —— starlette
-# 提供 ASGI、uvicorn 提供 ASGI server、anyio 是 starlette 运行时依赖。
+# `python -m uvicorn ocops.server:app` 启动；channel 登录复用 venv 内的 weixin SDK，
+# 因此 server 必须能跑在 hermes venv —— starlette 提供 ASGI、uvicorn 提供 ASGI
+# server、anyio 是 starlette 运行时依赖。
 RUN uv pip install --python /usr/local/lib/hermes-agent/venv/bin/python --no-cache-dir \
       starlette uvicorn anyio
 
 # 本目录内 COPY（build context = 本 variant 目录）
+# 运维能力（channel/cron/kanban/info/doctor）统一由 oc-ops HTTP 服务（ocops.server:app）
+# 对外，manager 走 HTTP 调用，不再装独立 oc-* CLI shim；故镜像内只保留容器生命周期
+# 必需的 oc-entrypoint、oc-healthcheck，以及容器内 agent 检索知识库用的 oc-kb。
+# cron/kanban 契约（schema + SPEC）仍由 ocops 包与构建期契约测试引用，保留 COPY。
 COPY oc-entrypoint.py     /usr/local/bin/oc-entrypoint
-COPY oc-doctor.py         /usr/local/bin/oc-doctor
-COPY oc-info.py           /usr/local/bin/oc-info
-COPY oc-channel-login.py  /usr/local/bin/oc-channel-login
-COPY oc-channel-status.py /usr/local/bin/oc-channel-status
-COPY oc-channel-unbind.py /usr/local/bin/oc-channel-unbind
-COPY oc-kanban.py         /usr/local/bin/oc-kanban
 COPY kanban-contract/     /usr/local/lib/oc-kanban/contract/
-COPY oc-cron.py           /usr/local/bin/oc-cron
 COPY cron-contract/       /usr/local/lib/oc-cron/contract/
 COPY oc-kb.py             /usr/local/bin/oc-kb
 COPY healthcheck.sh       /usr/local/bin/oc-healthcheck
@@ -88,16 +85,12 @@ COPY lib/                 /usr/local/lib/oc-entrypoint/lib/
 COPY renderer/            /usr/local/lib/oc-entrypoint/renderer/
 COPY migrator/            /usr/local/lib/oc-entrypoint/migrator/
 COPY tests/               /usr/local/lib/oc-entrypoint/tests/
-# oc-ops 核心包：oc-* CLI shim 与 HTTP server（ocops.server:app）共用同一份逻辑。
-# 落点 /usr/local/lib/ocops 与各 oc-* shim 内 `sys.path.insert(0, "/usr/local/lib")`
-# 对齐，使 `import ocops` 在 system python（构建期自检）与 hermes venv（运行时
-# uvicorn / oc-channel-login re-exec）下均可解析。
+# oc-ops 核心包：HTTP server（ocops.server:app）承载全部运维逻辑。
+# 落点 /usr/local/lib/ocops 使 `import ocops` 在 system python（构建期自检，
+# PYTHONPATH=/usr/local/lib）与 hermes venv（运行时 uvicorn）下均可解析。
 COPY ocops/               /usr/local/lib/ocops/
 
-RUN chmod +x /usr/local/bin/oc-entrypoint /usr/local/bin/oc-doctor \
-            /usr/local/bin/oc-info /usr/local/bin/oc-channel-login \
-            /usr/local/bin/oc-channel-status /usr/local/bin/oc-channel-unbind \
-            /usr/local/bin/oc-kanban /usr/local/bin/oc-cron /usr/local/bin/oc-kb \
+RUN chmod +x /usr/local/bin/oc-entrypoint /usr/local/bin/oc-kb \
             /usr/local/bin/oc-healthcheck
 
 # 镜像身份信息写到固定位置，供 oc-info 读取

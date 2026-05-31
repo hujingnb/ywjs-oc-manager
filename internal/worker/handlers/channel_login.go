@@ -270,7 +270,7 @@ func (h *ChannelCheckBindingHandler) Handle(ctx context.Context, job sqlc.Job) e
 // finalizeChannelBound 把「渠道绑定成功」的统一收尾动作集中到一处:
 //  1. MarkChannelBindingBound 写 channel_bindings.status=bound;
 //  2. 触发 hermes 容器重启,让其重新读 platforms 配置加载新绑定账号
-//     (微信凭证由容器内 oc-channel-login 落盘到 /opt/data/weixin/accounts/,
+//     (微信凭证由容器内 oc-ops channel 登录端点落盘到 /opt/data/weixin/accounts/,
 //     hermes gateway 只在启动期扫描该目录决定启用哪些 messaging platform);
 //  3. app 从 binding_waiting 推进到 running;
 //  4. 写 channel_bound:succeeded 审计日志。

@@ -32,7 +32,8 @@
    `hermes gateway run`。
 9. starter 实现 `HermesHealthChecker` 时，worker 等 docker HEALTHCHECK 报
    healthy，再把应用状态推进到 `binding_waiting` 并写 audit log。
-10. 后续渠道扫码由容器内 `oc-channel-login --channel weixin` 完成；凭证落在
+10. 后续渠道扫码由 oc-ops HTTP 服务的 channel 登录端点
+    （`POST /oc/channels/weixin/login`，SSE）完成；凭证落在
     Hermes 自管的 `/opt/data/weixin/accounts/`。绑定成功后 manager 只重启容器，
     让下一次 `oc-entrypoint` 从 Hermes 自管数据重新渲染 `.env`。
 
@@ -271,7 +272,7 @@ manager runtime endpoint 或 app token 变更时需要，用于刷新 `manifest.
 | `/opt/data/memories/` | Hermes | Hermes 进程 | 不动，长期偏好与稳定事实保留 |
 | `/opt/data/logs/` | Hermes | Hermes 进程 | 不动 |
 | `/opt/data/kanban.db` | Hermes | Hermes 进程 | 不动 |
-| `/opt/data/weixin/accounts/` | Hermes | `oc-channel-login` / Hermes 微信平台 | 不动，`oc-entrypoint` 下次启动转译为 `.env` |
+| `/opt/data/weixin/accounts/` | Hermes | oc-ops channel 登录端点 / Hermes 微信平台 | 不动，`oc-entrypoint` 下次启动转译为 `.env` |
 
 ## 9. 生命周期事件
 
@@ -332,7 +333,7 @@ SQLite。配置变更类操作（改 model / persona / runtime endpoint / 重启
 |---|---|---|---|
 | 模型变更 | `PATCH /apps/<id>/model` | 入队 restart；restart 前刷新 input | `oc-entrypoint` 重新渲染 `config.yaml` 与 `SOUL.md` |
 | prompt / persona 变更 | 对应业务写 DB 后 restart | restart 前刷新 input resources | `oc-entrypoint` 重新渲染 `SOUL.md` |
-| 渠道绑定成功 | channel login / check binding job | 标记 binding，重启容器 | `oc-channel-login` 已落盘账号；`oc-entrypoint` 下次启动渲染 `.env` |
+| 渠道绑定成功 | channel login / check binding job | 标记 binding，重启容器 | oc-ops channel 登录端点已落盘账号；`oc-entrypoint` 下次启动渲染 `.env` |
 | 知识库变更 | `KnowledgeService.Save*` / `Delete*` | 代理 RAGFlow document 并刷新 manager 元数据 | RAGFlow parse 完成后即可被 `oc-kb search` 检索 |
 | Hermes runtime 镜像升级 | manager 本地 build / push 后下次初始化 | `imagesync.SyncRuntimeImage` 分发新镜像 | recreate / start 时由新镜像入口自渲染 |
 

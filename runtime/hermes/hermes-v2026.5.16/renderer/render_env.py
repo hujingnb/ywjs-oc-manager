@@ -5,8 +5,9 @@
 1. 固定「行为开关」：hermes 进程从 .env 读这些 ENV。
    manifest.credentials.openai 通过 config.yaml 落地，不重复进 .env。
 
-2. 微信渠道凭证转译：微信扫码由容器内 oc-channel-login 完成，hermes 上游
-   qr_login 把账号凭证落盘到 /opt/data/weixin/accounts/<account_id>.json。
+2. 微信渠道凭证转译：微信扫码由 oc-ops HTTP 服务的 channel 登录端点
+   （ocops.channel.channel_login）完成，hermes 上游 qr_login 把账号凭证
+   落盘到 /opt/data/weixin/accounts/<account_id>.json。
    但 hermes gateway 启动时**是否启用 weixin 平台**取决于环境变量
    WEIXIN_TOKEN / WEIXIN_ACCOUNT_ID（见上游 gateway/config.py），不是
    扫描 accounts 目录。因此 oc-entrypoint 每次启动都把 accounts 里 hermes
