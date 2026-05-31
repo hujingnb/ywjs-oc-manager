@@ -1,0 +1,65 @@
+# 本地 k3d embedding 服务：Ollama 暴露 OpenAI 兼容 /v1/embeddings，供 new-api 作为
+# embedding 渠道上游 → RAGFlow 知识库文档向量化。deepseek 仅提供对话模型、无 embedding
+# 端点，故本地自托管一个 embedding 模型（bge-m3，多语言、中文效果好）。
+# 线上不部署本服务——改在 new-api 接入 embedding 厂商渠道，见 docs/deployment-embedding.md。
+apiVersion: v1
+kind: Service
+metadata:
+  name: ollama
+  namespace: ocm
+spec:
+  selector: { app: ollama }
+  ports:
+    - { port: 11434, targetPort: 11434 }
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: ollama
+  namespace: ocm
+spec:
+  replicas: 1
+  selector: { matchLabels: { app: ollama } }
+  strategy: { type: Recreate }
+  template:
+    metadata:
+      labels: { app: ollama }
+    spec:
+      containers:
+        - name: ollama
+          # ollama/ollama 是多架构镜像，daocloud 镜像源 DNS 在 k3d 节点解析不到、
+          # 且 `k3d image import --all-platforms` 对多架构 tar 会失败；故走 k3d 内置
+          # registry：宿主经代理 docker pull 后 `docker push k3d-ocm-registry.localhost:5000/ollama:latest`
+          # （registry 推送会自动提取单平台），节点从 registry 拉。见 docs/deployment-embedding.md。
+          image: k3d-ocm-registry.localhost:5000/ollama:latest
+          imagePullPolicy: IfNotPresent
+          env:
+            # 监听全网卡，供集群内 new-api 访问
+            - name: OLLAMA_HOST
+              value: "0.0.0.0:11434"
+            # 拉取 embedding 模型需出站，pod 无法解析外网 DNS，经宿主 clash 代理
+            # （绑 0.0.0.0:7890，k3d 网关 172.19.0.1 即宿主）。NO_PROXY 排除集群内服务。
+            - name: HTTP_PROXY
+              value: "http://172.19.0.1:7890"
+            - name: HTTPS_PROXY
+              value: "http://172.19.0.1:7890"
+            - name: NO_PROXY
+              value: "localhost,127.0.0.1,mysql,redis,minio,elasticsearch,new-api,ragflow,manager-api,.svc,.svc.cluster.local,.cluster.local,10.0.0.0/8,172.16.0.0/12"
+          ports:
+            - containerPort: 11434
+          # CPU 推理 embedding，给足内存（bge-m3 约需 2-3Gi）
+          resources:
+            requests: { cpu: "250m", memory: "1Gi" }
+            limits: { cpu: "2", memory: "4Gi" }
+          readinessProbe:
+            httpGet: { path: /, port: 11434 }
+            initialDelaySeconds: 5
+            periodSeconds: 5
+            failureThreshold: 30
+          volumeMounts:
+            - name: models
+              mountPath: /root/.ollama
+      volumes:
+        # 本地联调用 emptyDir：pod 重建会重拉模型（bge-m3 约 1.2GB），可接受
+        - name: models
+          emptyDir: {}

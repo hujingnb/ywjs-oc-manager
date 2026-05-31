@@ -51,8 +51,10 @@ spec:
               value: "http://172.19.0.1:7890"
             - name: HTTPS_PROXY
               value: "http://172.19.0.1:7890"
+            # ollama 必须排除代理：embedding 渠道上游是集群内 http://ollama:11434，
+            # 不加会走 clash 代理（外网出口）导致 502。
             - name: NO_PROXY
-              value: "localhost,127.0.0.1,mysql,redis,minio,elasticsearch,ragflow,manager-api,.svc,.svc.cluster.local,.cluster.local,10.0.0.0/8,172.16.0.0/12"
+              value: "localhost,127.0.0.1,mysql,redis,minio,elasticsearch,ragflow,ollama,manager-api,.svc,.svc.cluster.local,.cluster.local,10.0.0.0/8,172.16.0.0/12"
           ports:
             - containerPort: 3000
           readinessProbe:
