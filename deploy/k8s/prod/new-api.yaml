@@ -26,7 +26,7 @@ spec:
       containers:
         - name: new-api
           # 上游 new-api 镜像（ywjs_public 未镜像）；生产如需可改指自有 registry
-          image: calciumion/new-api:v1.0.0-rc.10
+          image: crpi-nu3ibz4f07feyghi.cn-beijing.personal.cr.aliyuncs.com/ywjs_public/new-api:v1.0.0-rc.10
           # 镜像 WORKDIR=/data 且无 /app；日志目录用 /data/logs（父目录存在）避免 mkdir 失败
           args: ["--log-dir", "/data/logs"]
           # 资源配额（起步值）：Go 服务 + LLM 代理转发。

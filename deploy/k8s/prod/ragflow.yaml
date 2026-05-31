@@ -83,7 +83,7 @@ spec:
       containers:
         - name: ragflow
           # 上游 ragflow 镜像（ywjs_public 未镜像）；生产如需可改指自有 registry
-          image: infiniflow/ragflow:v0.25.6
+          image: crpi-nu3ibz4f07feyghi.cn-beijing.personal.cr.aliyuncs.com/ywjs_public/ragflow:v0.25.6
           args: ["--enable-adminserver"]
           # 资源配额（起步值）：RAGFlow 含 server + task_executor + DeepDOC 解析，较重，按文档量与并发调整。
           resources:
