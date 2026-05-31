@@ -29,6 +29,14 @@ spec:
           image: calciumion/new-api:latest
           # 镜像 WORKDIR=/data 且无 /app；日志目录用 /data/logs（父目录存在）避免 mkdir 失败
           args: ["--log-dir", "/data/logs"]
+          # 资源配额（起步值）：Go 服务 + LLM 代理转发。
+          resources:
+            requests:
+              cpu: "100m"
+              memory: "256Mi"
+            limits:
+              cpu: "1"
+              memory: "1Gi"
           env:
             # MySQL DSN / Redis 连接串统一来自 ocm-secrets，部署时只改 secret，无需改本文件。
             - name: SQL_DSN

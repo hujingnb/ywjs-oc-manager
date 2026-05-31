@@ -25,8 +25,16 @@ spec:
         - name: acr-pull
       containers:
         - name: manager-web
-          image: crpi-nu3ibz4f07feyghi.cn-beijing.personal.cr.aliyuncs.com/ywjs_app/oc-manager-web:REPLACE_TAG
+          image: crpi-nu3ibz4f07feyghi.cn-beijing.personal.cr.aliyuncs.com/ywjs_app/oc-manager-web:2026-05-31-16-21-11-e0ba7dcc-dirty
           imagePullPolicy: IfNotPresent
+          # 资源配额（起步值）：nginx 提供静态资源，极轻量。
+          resources:
+            requests:
+              cpu: "25m"
+              memory: "32Mi"
+            limits:
+              cpu: "200m"
+              memory: "128Mi"
           ports:
             - containerPort: 80
           readinessProbe:

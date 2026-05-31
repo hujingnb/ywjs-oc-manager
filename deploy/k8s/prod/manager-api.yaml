@@ -26,8 +26,16 @@ spec:
         - name: acr-pull
       containers:
         - name: manager-api
-          image: crpi-nu3ibz4f07feyghi.cn-beijing.personal.cr.aliyuncs.com/ywjs_app/oc-manager-api:REPLACE_TAG
+          image: crpi-nu3ibz4f07feyghi.cn-beijing.personal.cr.aliyuncs.com/ywjs_app/oc-manager-api:2026-05-31-16-20-15-e0ba7dcc
           imagePullPolicy: IfNotPresent
+          # 资源配额（起步值，按实际负载调整）：Go API 服务，较轻量。
+          resources:
+            requests:
+              cpu: "100m"
+              memory: "256Mi"
+            limits:
+              cpu: "1"
+              memory: "512Mi"
           env:
             - name: OCM_CONFIG
               value: /etc/manager/config.yaml
