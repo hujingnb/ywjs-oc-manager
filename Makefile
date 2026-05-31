@@ -54,6 +54,14 @@ override HERMES_IMAGE := $(HERMES_IMAGE_REPO):$(HERMES_VERSION)-$(IMAGE_TAG)
 # 生产发布用 IMAGE_TAG（时间戳 + commit），本地联调固定 :dev。
 OPS_IMAGE_REPO ?= crpi-nu3ibz4f07feyghi.cn-beijing.personal.cr.aliyuncs.com/ywjs_app/oc-manager-ops
 
+# —— 线上 k8s 集群（区别于本地 k3d 的默认 context）——
+# 线上集群不在默认 kubeconfig 的 context 里，须用独立 kubeconfig 连接；
+# 命名空间与工作负载、容器名以 deploy/k8s/prod 为准（ns=ocm，Deployment 名=容器名）。
+# 走其他 kubeconfig / 命名空间时在命令行覆盖 PROD_KUBECONFIG / PROD_NS 即可。
+PROD_KUBECONFIG ?= $(HOME)/dir/ywjs/kube/kubeconfig.json
+PROD_NS         ?= ocm
+override PROD_KUBECTL := kubectl --kubeconfig $(PROD_KUBECONFIG) -n $(PROD_NS)
+
 # 输入 make 不带参数时, 显式跳到 help target, 输出按分组的可用 target 列表。
 .DEFAULT_GOAL := help
 
@@ -322,6 +330,36 @@ build-ops-runtime: .guard-image-git-state ## 构建 ops 运行时镜像并推生
 	docker build -t $(OPS_IMAGE_REPO):$(IMAGE_TAG) runtime/ops/
 	docker push $(OPS_IMAGE_REPO):$(IMAGE_TAG)
 	@echo "✅ ops 镜像 $(OPS_IMAGE_REPO):$(IMAGE_TAG) 已构建并推送"
+
+##@ 生产部署 (k8s)
+
+# prod-deploy-api / prod-deploy-web：构建推送对应镜像后，用 kubectl set image
+# 滚动更新线上 Deployment。set image 只改容器镜像引用、不动 deploy/k8s/prod 的
+# yaml 与 secret，发版纯靠镜像 tag 滚动，避免手工改 manifest。
+# release-* 与 set image 在同一次 make 调用内共享同一 IMAGE_TAG，保证推送的镜像
+# 和滚动更新引用的 tag 完全一致。Deployment 名与容器名一致（manager-api/manager-web）。
+.PHONY: prod-deploy-api
+prod-deploy-api: release-api-image ## 构建推送 manager-api 并滚动更新线上 deploy/manager-api
+	$(PROD_KUBECTL) set image deploy/manager-api manager-api=$(API_IMAGE_REPO):$(IMAGE_TAG)
+	$(PROD_KUBECTL) rollout status deploy/manager-api --timeout=180s
+	@echo "✅ 线上 manager-api 已更新为 $(API_IMAGE_REPO):$(IMAGE_TAG)"
+
+.PHONY: prod-deploy-web
+prod-deploy-web: release-web-image ## 构建推送 manager-web 并滚动更新线上 deploy/manager-web
+	$(PROD_KUBECTL) set image deploy/manager-web manager-web=$(WEB_IMAGE_REPO):$(IMAGE_TAG)
+	$(PROD_KUBECTL) rollout status deploy/manager-web --timeout=180s
+	@echo "✅ 线上 manager-web 已更新为 $(WEB_IMAGE_REPO):$(IMAGE_TAG)"
+
+# prod-deploy-manager 一次性发布 api + web：先并行完成两镜像的构建推送（共享同一
+# IMAGE_TAG，保证同源），再连续 set image 两个 Deployment，最后各自等滚动完成，
+# 避免分两次调用导致 tag 不一致或多轮无谓重启。
+.PHONY: prod-deploy-manager
+prod-deploy-manager: release-api-image release-web-image ## 构建推送 api+web 并一次性滚动更新线上 manager
+	$(PROD_KUBECTL) set image deploy/manager-api manager-api=$(API_IMAGE_REPO):$(IMAGE_TAG)
+	$(PROD_KUBECTL) set image deploy/manager-web manager-web=$(WEB_IMAGE_REPO):$(IMAGE_TAG)
+	$(PROD_KUBECTL) rollout status deploy/manager-api --timeout=180s
+	$(PROD_KUBECTL) rollout status deploy/manager-web --timeout=180s
+	@echo "✅ 线上 manager 已更新：api=$(API_IMAGE_REPO):$(IMAGE_TAG) web=$(WEB_IMAGE_REPO):$(IMAGE_TAG)"
 
 ##@ 调试脚本
 
