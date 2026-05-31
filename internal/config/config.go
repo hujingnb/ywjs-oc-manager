@@ -100,8 +100,6 @@ type HermesConfig struct {
 	SystemPromptTemplate string `yaml:"system_prompt_template"`
 	// Workspace 仅保留同名段（WorkspaceConfig 是通用类型，不绑 Hermes）。
 	Workspace WorkspaceConfig `yaml:"workspace"`
-	// LLM 是 manager 写入 manifest.app.model 时的默认值兜底，在 app 未指定模型时使用。
-	LLM HermesLLMConfig `yaml:"llm"`
 	// ContainerNetworks 是 hermes 容器接入的 docker network 清单。
 	// 必须包含 new-api 所在的 network（默认 docker compose project name 派生的
 	// "<project>_default"，如 oc-manager_default），否则 Hermes 容器无法解析
@@ -132,25 +130,6 @@ type RuntimeImageConfig struct {
 	ID    string `yaml:"id"`
 	Label string `yaml:"label"`
 	Ref   string `yaml:"ref"`
-}
-
-// HermesLLMConfig 仅保留兜底默认值字段（具体每 app 的模型由绑定的助手版本 main_model 决定）。
-//
-//   - BaseURL：OpenAI 兼容 endpoint，Hermes 容器从 docker network 看到的 new-api 地址，
-//     必须含 /v1 路径后缀；作为 manifest.credentials.openai.base_url 写入
-//     input/manifest.yaml；镜像内 oc-entrypoint 渲染为 hermes config.yaml 的
-//     model.base_url。
-//   - DefaultProvider / DefaultModel：写入容器内 config.yaml，Hermes 用作默认 provider/model；
-//     缺失时 Hermes 默认去拨上游，无法路由到本地 new-api。
-//
-// 容器实际用的 api_key 由 manager 替每个应用通过 new-api `POST /api/token/:id/key`
-// 拉到完整 sk-，加密落 apps.newapi_key_ciphertext 后在 ensureAPIKey 阶段写入
-// manifest.credentials.openai.api_key，镜像内 oc-entrypoint 渲染为 config.yaml
-// 的 model.api_key；不再有"全局共享 sk-"的配置项。
-type HermesLLMConfig struct {
-	BaseURL         string `yaml:"base_url"`
-	DefaultProvider string `yaml:"default_provider"`
-	DefaultModel    string `yaml:"default_model"`
 }
 
 // WorkspaceConfig 描述应用工作目录归档相关参数。

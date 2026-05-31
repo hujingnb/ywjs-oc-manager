@@ -9,8 +9,8 @@ import (
 	"strings"
 	"time"
 
-	null "github.com/guregu/null/v5"
 	"github.com/google/uuid"
+	null "github.com/guregu/null/v5"
 
 	"oc-manager/internal/audit"
 	"oc-manager/internal/auth"
@@ -88,8 +88,6 @@ type AppInitializeConfig struct {
 	NewAPIBaseURL string
 	// ContainerNetworks 保留 docker 时代字段，k8s 路径不使用。
 	ContainerNetworks []string
-	// LLM 保留供 restart 链路复用，app_initialize 不再直接使用。
-	LLM AppInitializeLLMConfig
 	// AuditHelper 在 new-api 调用失败时写 audit_logs.target_type=newapi_call。
 	// nil 时跳过审计，不影响主流程；生产装配应注入。
 	AuditHelper *audit.NewAPIAuditHelper
@@ -99,14 +97,6 @@ type AppInitializeConfig struct {
 	ResolveRuntimeImage func(imageID string) (ref string, ok bool)
 	// ManagerRuntimeBaseURL 保留供 restart 链路复用，app_initialize 不再直接使用。
 	ManagerRuntimeBaseURL string
-}
-
-// AppInitializeLLMConfig 是 AppInitializeConfig.LLM 的类型，与 internal/config 的
-// HermesLLMConfig 同语义；handler 包独立定义避免反向依赖 internal/config 包。
-type AppInitializeLLMConfig struct {
-	BaseURL         string
-	DefaultProvider string
-	DefaultModel    string
 }
 
 // AppInitializeK8sConfig 是 k8s 路径需要的最小配置子集。
@@ -627,4 +617,3 @@ func decodePayload(raw []byte) (appInitializePayload, error) {
 func newUUID() string {
 	return uuid.NewString()
 }
-

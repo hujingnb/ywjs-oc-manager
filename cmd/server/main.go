@@ -349,12 +349,7 @@ func runManager(ctx context.Context, cfg config.Config, logOut io.Writer) error 
 			DataDir:           cfg.App.DataRoot,
 			NewAPIBaseURL:     cfg.NewAPI.BaseURL,
 			ContainerNetworks: cfg.Hermes.ContainerNetworks,
-			LLM: handlers.AppInitializeLLMConfig{
-				BaseURL:         cfg.Hermes.LLM.BaseURL,
-				DefaultProvider: cfg.Hermes.LLM.DefaultProvider,
-				DefaultModel:    cfg.Hermes.LLM.DefaultModel,
-			},
-			AuditHelper: appInitAuditHelper,
+			AuditHelper:       appInitAuditHelper,
 			ResolveRuntimeImage: func(imageID string) (string, bool) {
 				return config.ResolveRuntimeImage(cfg.Hermes.RuntimeImages, imageID)
 			},
