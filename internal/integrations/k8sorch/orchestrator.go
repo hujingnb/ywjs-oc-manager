@@ -45,6 +45,16 @@ type AppSpec struct {
 	Resources ResourceLimits
 	// Labels 是附加 label。
 	Labels map[string]string
+	// Proxy 为需直连外网的容器（hermes 微信平台 / oc-ops 渠道登录）注入代理 env；
+	// 各字段留空则不注入对应项（生产 pod 有外网出口时全空）。
+	Proxy ProxyEnv
+}
+
+// ProxyEnv 是注入容器的代理环境变量（HTTP(S)_PROXY/NO_PROXY），留空不注入。
+type ProxyEnv struct {
+	HTTPProxy  string
+	HTTPSProxy string
+	NoProxy    string
 }
 
 // ResourceLimits 是 pod 资源 requests/limits（CPU/内存 quantity 字符串）。

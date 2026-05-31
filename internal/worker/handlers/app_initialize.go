@@ -121,6 +121,16 @@ type AppInitializeK8sConfig struct {
 	ImagePullSecret string
 	// Resources 是 app pod 的资源 requests/limits。
 	Resources AppInitializeK8sResources
+	// Proxy 为需直连外网的 hermes/oc-ops 容器注入代理 env（本地 k3d 无外网出口时用；
+	// 生产留空不注入）。
+	Proxy AppInitializeK8sProxy
+}
+
+// AppInitializeK8sProxy 是注入 app pod 容器的代理环境变量（留空不注入对应项）。
+type AppInitializeK8sProxy struct {
+	HTTPProxy  string
+	HTTPSProxy string
+	NoProxy    string
 }
 
 // AppInitializeK8sResources 是 pod 资源 requests/limits 配置。
@@ -370,6 +380,11 @@ func (h *AppInitializeHandler) buildAppSpec(app sqlc.App, hermesImage, controlTo
 			RequestsMemory: h.k8sCfg.Resources.Requests.Memory,
 			LimitsCPU:      h.k8sCfg.Resources.Limits.CPU,
 			LimitsMemory:   h.k8sCfg.Resources.Limits.Memory,
+		},
+		Proxy: k8sorch.ProxyEnv{
+			HTTPProxy:  h.k8sCfg.Proxy.HTTPProxy,
+			HTTPSProxy: h.k8sCfg.Proxy.HTTPSProxy,
+			NoProxy:    h.k8sCfg.Proxy.NoProxy,
 		},
 	}
 }

@@ -57,6 +57,9 @@ func RenderDeployment(spec AppSpec, namespace string) *appsv1.Deployment {
 	}}
 	// bootstrapEnv 指向 manager bootstrap 端点，供 initContainer restore 和 sidecar s3-sync 使用。
 	bootstrapEnv := corev1.EnvVar{Name: "OC_BOOTSTRAP_URL", Value: spec.BootstrapURL}
+	// proxyEnv 为需直连外网的 hermes（微信平台）/ oc-ops（渠道登录）注入代理 env；
+	// 留空字段不注入，生产 pod 有外网出口时整组为空。
+	proxyEnv := buildProxyEnv(spec.Proxy)
 	// dataMount 是 hermes 主目录（app 数据卷）挂载点。
 	dataMount := corev1.VolumeMount{Name: "data", MountPath: "/opt/data"}
 	// inputMount 是 initContainer restore 写运行时配置的可写挂载点。
@@ -101,7 +104,7 @@ func RenderDeployment(spec AppSpec, namespace string) *appsv1.Deployment {
 							// hermes：主业务容器，负责 AI 网关逻辑，资源配额受限。
 							Name:         "hermes",
 							Image:        spec.HermesImage,
-							Env:          []corev1.EnvVar{{Name: "HERMES_HOME", Value: "/opt/data"}},
+							Env:          append([]corev1.EnvVar{{Name: "HERMES_HOME", Value: "/opt/data"}}, proxyEnv...),
 							VolumeMounts: []corev1.VolumeMount{inputMountRO, dataMount},
 							Resources:    corev1.ResourceRequirements{Requests: reqs, Limits: lims},
 							// readinessProbe：exec hermes gateway status，验证网关真正就绪。
@@ -130,10 +133,10 @@ func RenderDeployment(spec AppSpec, namespace string) *appsv1.Deployment {
 							// 但 uvicorn 直接 `python -m uvicorn ocops.server:app` 启动、不经 oc-* shim
 							// 的 sys.path.insert("/usr/local/lib")，故须显式置 PYTHONPATH 让 venv python
 							// 能解析 `import ocops`，否则 sidecar 起不来（ModuleNotFoundError: ocops）。
-							Env: []corev1.EnvVar{
+							Env: append([]corev1.EnvVar{
 								{Name: "OC_OPS_TOKEN", ValueFrom: ctrlTokenEnv.ValueFrom},
 								{Name: "PYTHONPATH", Value: "/usr/local/lib"},
-							},
+							}, proxyEnv...),
 							Ports:        []corev1.ContainerPort{{ContainerPort: 8080}},
 							VolumeMounts: []corev1.VolumeMount{dataMount},
 						},
@@ -167,4 +170,20 @@ func RenderDeployment(spec AppSpec, namespace string) *appsv1.Deployment {
 		dep.Spec.Template.Labels[k] = v
 	}
 	return dep
+}
+
+// buildProxyEnv 把 ProxyEnv 转成容器 env 列表；空字段不产生 env（保持 pod 干净，
+// 生产无代理时整组为空）。NO_PROXY 只在配了任一代理时才有意义，故也仅非空时注入。
+func buildProxyEnv(p ProxyEnv) []corev1.EnvVar {
+	var envs []corev1.EnvVar
+	if p.HTTPProxy != "" {
+		envs = append(envs, corev1.EnvVar{Name: "HTTP_PROXY", Value: p.HTTPProxy})
+	}
+	if p.HTTPSProxy != "" {
+		envs = append(envs, corev1.EnvVar{Name: "HTTPS_PROXY", Value: p.HTTPSProxy})
+	}
+	if p.NoProxy != "" {
+		envs = append(envs, corev1.EnvVar{Name: "NO_PROXY", Value: p.NoProxy})
+	}
+	return envs
 }

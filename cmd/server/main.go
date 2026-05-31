@@ -189,6 +189,11 @@ func runManager(ctx context.Context, cfg config.Config, logOut io.Writer) error 
 			Requests: handlers.AppInitializeK8sResourceSpec{CPU: cfg.Kubernetes.Resources.Requests.CPU, Memory: cfg.Kubernetes.Resources.Requests.Memory},
 			Limits:   handlers.AppInitializeK8sResourceSpec{CPU: cfg.Kubernetes.Resources.Limits.CPU, Memory: cfg.Kubernetes.Resources.Limits.Memory},
 		},
+		Proxy: handlers.AppInitializeK8sProxy{
+			HTTPProxy:  cfg.Kubernetes.PodProxy.HTTPProxy,
+			HTTPSProxy: cfg.Kubernetes.PodProxy.HTTPSProxy,
+			NoProxy:    cfg.Kubernetes.PodProxy.NoProxy,
+		},
 	}
 
 	// oc-ops HTTP 客户端 + app 坐标解析器：cron / kanban / 微信扫码登录均走

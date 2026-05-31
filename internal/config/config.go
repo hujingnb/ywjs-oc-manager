@@ -215,6 +215,17 @@ type KubernetesConfig struct {
 	BootstrapBaseURL string `yaml:"bootstrap_base_url"`
 	// Resources 是 app pod 的资源 requests/limits。
 	Resources K8sResources `yaml:"resources"`
+	// PodProxy 为 app pod 内需直连外网的进程（如 hermes 微信平台连
+	// ilinkai.weixin.qq.com）注入 HTTP(S)_PROXY/NO_PROXY。本地 k3d 无外网出口、
+	// 须经宿主代理；生产 pod 有正常出口则全部留空、不注入任何代理 env。
+	PodProxy K8sPodProxy `yaml:"pod_proxy"`
+}
+
+// K8sPodProxy 是注入 app pod 容器的代理环境变量（留空则不注入对应项）。
+type K8sPodProxy struct {
+	HTTPProxy  string `yaml:"http_proxy"`
+	HTTPSProxy string `yaml:"https_proxy"`
+	NoProxy    string `yaml:"no_proxy"`
 }
 
 // K8sResources 描述 pod 资源请求/上限（CPU/内存的 k8s quantity 字符串）。

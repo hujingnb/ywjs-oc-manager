@@ -7,6 +7,7 @@ import (
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
+	appsv1 "k8s.io/api/apps/v1"
 	corev1 "k8s.io/api/core/v1"
 	"sigs.k8s.io/yaml"
 )
@@ -48,6 +49,43 @@ func assertGolden(t *testing.T, name string, obj any) {
 // TestRenderDeployment 验证 Deployment 渲染与 golden 一致（含 initContainer/三容器/卷/probe）。
 func TestRenderDeployment(t *testing.T) {
 	assertGolden(t, "deployment.golden.yaml", RenderDeployment(testSpec(), "oc-apps"))
+}
+
+// TestRenderDeploymentProxy 断言：配了 Proxy 时 hermes 与 oc-ops 容器都注入
+// HTTP_PROXY/HTTPS_PROXY/NO_PROXY（hermes 微信平台 / oc-ops 渠道登录直连外网需要）；
+// 空 Proxy（生产默认）时两容器都不出现任何代理 env，保持 pod 干净。
+func TestRenderDeploymentProxy(t *testing.T) {
+	// 取容器 env 为 map 的小工具
+	envsOf := func(dep *appsv1.Deployment, name string) map[string]string {
+		m := map[string]string{}
+		for _, c := range dep.Spec.Template.Spec.Containers {
+			if c.Name == name {
+				for _, e := range c.Env {
+					m[e.Name] = e.Value
+				}
+			}
+		}
+		return m
+	}
+	// 配了代理：hermes 与 oc-ops 都应注入三个代理 env
+	spec := testSpec()
+	spec.Proxy = ProxyEnv{HTTPProxy: "http://p:7890", HTTPSProxy: "http://p:7890", NoProxy: "localhost,.svc"}
+	dep := RenderDeployment(spec, "oc-apps")
+	for _, cname := range []string{"hermes", "oc-ops"} {
+		envs := envsOf(dep, cname)
+		assert.Equal(t, "http://p:7890", envs["HTTP_PROXY"], cname+" 应注入 HTTP_PROXY")
+		assert.Equal(t, "http://p:7890", envs["HTTPS_PROXY"], cname+" 应注入 HTTPS_PROXY")
+		assert.Equal(t, "localhost,.svc", envs["NO_PROXY"], cname+" 应注入 NO_PROXY")
+	}
+	// 空代理（生产默认）：两容器都不应出现任何代理 env
+	depNoProxy := RenderDeployment(testSpec(), "oc-apps")
+	for _, cname := range []string{"hermes", "oc-ops"} {
+		envs := envsOf(depNoProxy, cname)
+		_, hasHTTP := envs["HTTP_PROXY"]
+		_, hasHTTPS := envs["HTTPS_PROXY"]
+		_, hasNo := envs["NO_PROXY"]
+		assert.False(t, hasHTTP || hasHTTPS || hasNo, cname+" 空 Proxy 时不应注入任何代理 env")
+	}
 }
 
 // TestRenderDeploymentOcOpsPythonPath 断言 oc-ops sidecar 显式注入
