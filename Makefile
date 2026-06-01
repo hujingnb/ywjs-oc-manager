@@ -379,6 +379,29 @@ prod-deploy-ops: build-ops-runtime ## 构建推送 ops 镜像→写回 secret.ya
 	@echo "✅ secret.yaml 的 ops 镜像已更新为 $(OPS_IMAGE_REPO):$(IMAGE_TAG)"
 	$(MAKE) update-config
 
+##@ 生产数据库 (k8s)
+
+# prod-db 起一个连到线上 manager MySQL 的交互式 mysql 会话。线上 MySQL 由外部托管、
+# 不在 ocm 集群内，util namespace 的 mysql 客户端 pod 自带 mysql 客户端，作为跳板连到
+# 托管实例（与手敲 `kubectl exec -it -n util deploy/mysql -- mysql ...` 等价）。
+# 连接凭证（host/port/user/password/库名）是生产敏感信息，绝不写进入库的 Makefile——
+# 一律从 gitignored 的根 .env 读取（占位见 .env.example 的 PROD_DB_* 段）。
+# 注意：这是交互式会话、可执行写 SQL；请自行确认每条语句后再回车。
+# util 不属于本项目的 ocm/oc-apps，仅借其 mysql 客户端做跳板；可命令行覆盖 PROD_DB_NS。
+PROD_DB_NS ?= util
+.PHONY: prod-db
+prod-db: ## 连接线上 manager MySQL（凭证读自 .env 的 PROD_DB_*，交互式 mysql 会话）
+	@test -f .env || { echo "缺少 .env，请从 .env.example 复制并填好 PROD_DB_* 段"; exit 1; }
+	@set -a; . ./.env; set +a; \
+	: "$${PROD_DB_HOST:?请在 .env 设置 PROD_DB_HOST}"; \
+	: "$${PROD_DB_USER:?请在 .env 设置 PROD_DB_USER}"; \
+	: "$${PROD_DB_PASS:?请在 .env 设置 PROD_DB_PASS}"; \
+	kubectl --kubeconfig $(PROD_KUBECONFIG) -n $(PROD_DB_NS) exec -it deploy/mysql -- \
+	  env LANG=C.UTF-8 mysql \
+	    --host="$$PROD_DB_HOST" --port="$${PROD_DB_PORT:-3306}" \
+	    --user="$$PROD_DB_USER" -p"$$PROD_DB_PASS" \
+	    --database="$${PROD_DB_NAME:-manager}"
+
 ##@ 调试脚本
 
 debug-ollama: ## 跑 debug-ollama.sh, 探测 ollama 状态
