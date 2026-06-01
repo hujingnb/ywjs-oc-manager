@@ -260,6 +260,26 @@ storage:
 	assert.Equal(t, "15m0s", cfg.Storage.S3.PresignTTL.Duration.String())
 }
 
+// TestStorageS3RejectsEndpointWithoutScheme 验证 S3 endpoint 缺 http(s):// scheme 时启动期报错。
+func TestStorageS3RejectsEndpointWithoutScheme(t *testing.T) {
+	// endpoint 写成无 scheme 的裸主机名（如云 OSS 域名漏写 https://）：字段非空能过上一道
+	// 检查，但 S3 client 运行期才会报 unsupported protocol scheme，进而让 bootstrap 在用户
+	// 建应用时返回 500。本用例确保这类错误在 Validate 阶段就 fail-fast，而非拖到运行期。
+	yaml := fullValidYAML() + `
+storage:
+  s3:
+    enabled: true
+    endpoint: "eos-beijing-2-internal.cmecloud.cn"
+    bucket: "oc-manager"
+    access_key_id: "ak"
+    secret_access_key: "sk"
+`
+	_, err := loadConfigFromStringErr(t, yaml)
+	require.Error(t, err)
+	// 错误须明确指向 endpoint，便于部署者快速定位是缺了 scheme。
+	assert.Contains(t, err.Error(), "storage.s3.endpoint")
+}
+
 // TestStorageS3DisabledByDefaultAllowsMissingFields 验证 S3 未启用时缺少字段不会报错。
 func TestStorageS3DisabledByDefaultAllowsMissingFields(t *testing.T) {
 	// storage 段完全不配置时，Validate 不应因 S3 字段缺失而失败。

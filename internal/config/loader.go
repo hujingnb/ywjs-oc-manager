@@ -128,6 +128,14 @@ func (c Config) Validate() error {
 			strings.TrimSpace(c.Storage.S3.AccessKeyID) == "" || strings.TrimSpace(c.Storage.S3.SecretAccessKey) == "" {
 			return fmt.Errorf("storage.s3 已启用但 endpoint/bucket/access_key_id/secret_access_key 不完整")
 		}
+		// endpoint 必须带 http(s):// scheme：S3 client 以它作 BaseEndpoint 直接拼请求 URL，
+		// 缺 scheme 时 HTTP client 在运行期（如 bootstrap 的 HeadObject）才报 unsupported
+		// protocol scheme，会拖到用户建应用时以 500 暴露。故在启动期 fail-fast，把这类
+		// 配置错误拦在部署阶段，而非运行期才发现。
+		if u, err := url.Parse(strings.TrimSpace(c.Storage.S3.Endpoint)); err != nil ||
+			(u.Scheme != "http" && u.Scheme != "https") || u.Host == "" {
+			return fmt.Errorf("storage.s3.endpoint 必须是带 http(s):// scheme 的完整 URL，当前为 %q", c.Storage.S3.Endpoint)
+		}
 	}
 	// k8s 启用时关键字段必须齐全，缺失 fail-fast。
 	if c.Kubernetes.Enabled {
