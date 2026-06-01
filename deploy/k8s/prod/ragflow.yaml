@@ -134,6 +134,13 @@ spec:
               valueFrom: { secretKeyRef: { name: ocm-secrets, key: ragflow-s3-access-key } }
             - name: S3_SECRET_KEY
               valueFrom: { secretKeyRef: { name: ocm-secrets, key: ragflow-s3-secret-key } }
+            # botocore≥1.36 默认对 PutObject 走 aws-chunked 流式 + CRC32 校验和 trailer、不带
+            # Content-Length；移动云 EOS 不支持该方式，会返回 MissingContentLength 导致写对象失败
+            # （表现为上传后 EOS 无文件、解析读不到）。改回 when_required 让普通写恢复 Content-Length。
+            - name: AWS_REQUEST_CHECKSUM_CALCULATION
+              value: when_required
+            - name: AWS_RESPONSE_CHECKSUM_VALIDATION
+              value: when_required
             - name: REDIS_HOST
               valueFrom: { secretKeyRef: { name: ocm-secrets, key: ragflow-redis-host } }
             - name: REDIS_PORT
