@@ -146,6 +146,8 @@ type OrganizationInput struct {
 	Remark string
 	// CreditWarningThreshold 是企业余额预警阈值；nil 会写入 NULL，表示不设置预警阈值。
 	CreditWarningThreshold *int32
+	// MaxInstanceCount 是企业最多可创建的实例（应用）数；nil 写入 NULL，表示不限制。
+	MaxInstanceCount *int32
 	// AssistantVersionIDs 是该企业可用的助手版本 id 列表（allowlist）。
 	AssistantVersionIDs []string
 	// AssistantVersionIDsSet 标记更新请求是否显式传入了 allowlist。
@@ -178,6 +180,8 @@ type OrganizationResult struct {
 	NewAPIUserID string `json:"newapi_user_id,omitempty"`
 	// CreditWarningThreshold 是企业余额预警阈值。
 	CreditWarningThreshold *int32 `json:"credit_warning_threshold,omitempty"`
+	// MaxInstanceCount 是企业实例数量上限；nil 表示不限制。
+	MaxInstanceCount *int32 `json:"max_instance_count,omitempty"`
 	// AdminUsername 是企业首个可用管理员账号名，用于平台管理员复制登录信息。
 	AdminUsername string `json:"admin_username,omitempty"`
 	// AssistantVersionIDs 是该企业可用的助手版本 id 列表（allowlist）。
@@ -234,6 +238,7 @@ func (s *OrganizationService) CreateOrganization(ctx context.Context, principal 
 		ContactPhone:           nullStr(input.ContactPhone),
 		Remark:                 nullStr(input.Remark),
 		CreditWarningThreshold: nullIntFromInt32Ptr(input.CreditWarningThreshold),
+		MaxInstanceCount:       nullIntFromInt32Ptr(input.MaxInstanceCount),
 		AssistantVersionIds:    versionIDsJSON,
 	}); err != nil {
 		if isMySQLUniqueViolation(err) {
@@ -555,6 +560,7 @@ func (s *OrganizationService) UpdateOrganization(ctx context.Context, principal 
 		ContactPhone:           nullStr(input.ContactPhone),
 		Remark:                 nullStr(input.Remark),
 		CreditWarningThreshold: nullIntFromInt32Ptr(input.CreditWarningThreshold),
+		MaxInstanceCount:       nullIntFromInt32Ptr(input.MaxInstanceCount),
 		AssistantVersionIds:    versionIDsJSON,
 	}); err != nil {
 		return OrganizationResult{}, fmt.Errorf("更新企业失败: %w", err)
@@ -677,6 +683,7 @@ func toOrganizationResult(org sqlc.Organization) OrganizationResult {
 		Remark:                 strOrEmpty(org.Remark),
 		NewAPIUserID:           strOrEmpty(org.NewapiUserID),
 		CreditWarningThreshold: int32PtrFromNullInt(org.CreditWarningThreshold),
+		MaxInstanceCount:       int32PtrFromNullInt(org.MaxInstanceCount),
 		AssistantVersionIDs:    versionIDs,
 	}
 }

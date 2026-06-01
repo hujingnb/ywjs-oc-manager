@@ -644,3 +644,43 @@ func TestUpdateOrganizationWithVersionIDsSet(t *testing.T) {
 	require.NoError(t, json.Unmarshal(store.updatedProfile.AssistantVersionIds, &stored))
 	assert.Equal(t, []string{"ver-new"}, stored)
 }
+
+// TestCreateOrganization_PersistsMaxInstanceCount 验证创建企业时实例上限透传到 CreateOrganizationParams。
+// 覆盖正常路径：平台管理员传入正整数上限，service 应原样写库。
+func TestCreateOrganization_PersistsMaxInstanceCount(t *testing.T) {
+	store := &organizationStoreStub{}
+	// new-api provisioner 需返回有效 user_id，否则创建链路在派生 new-api 用户时报错。
+	prov := &fakeProvisioner{user: newapi.User{ID: 42}, accessToken: "access-tok-xyz"}
+	svc := NewOrganizationService(store, prov, mustCipher(t), nil)
+	svc.SetVersionValidator(fakeVersionValidator{known: map[string]bool{}})
+	svc.hashPassword = fakeHash
+
+	limit := int32(5)
+	_, err := svc.CreateOrganization(context.Background(), auth.Principal{Role: domain.UserRolePlatformAdmin}, OrganizationInput{
+		Name: "限额企业", Code: "limited-org",
+		AdminUsername: "admin", AdminDisplayName: "管理员", AdminPassword: "secret-123",
+		MaxInstanceCount: &limit,
+	})
+
+	require.NoError(t, err)
+	require.True(t, store.created.MaxInstanceCount.Valid) // 上限有效值应写库
+	assert.Equal(t, int64(5), store.created.MaxInstanceCount.Int64)
+}
+
+// TestUpdateOrganization_PersistsMaxInstanceCount 验证编辑企业时实例上限透传到 UpdateOrganizationProfileParams。
+// 同时覆盖「上限可低于当前实例数」语义：service 编辑路径不校验当前实例数，原样保存。
+func TestUpdateOrganization_PersistsMaxInstanceCount(t *testing.T) {
+	store := &organizationStoreStub{}
+	store.mustSeedOrganization(t, "limited-org")
+	prov := &fakeProvisioner{}
+	svc := NewOrganizationService(store, prov, mustCipher(t), nil)
+
+	limit := int32(3)
+	_, err := svc.UpdateOrganization(context.Background(), auth.Principal{Role: domain.UserRolePlatformAdmin}, store.org.ID, OrganizationInput{
+		Name: "限额企业", MaxInstanceCount: &limit,
+	})
+
+	require.NoError(t, err)
+	require.True(t, store.updatedProfile.MaxInstanceCount.Valid)
+	assert.Equal(t, int64(3), store.updatedProfile.MaxInstanceCount.Int64)
+}

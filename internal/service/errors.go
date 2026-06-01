@@ -39,6 +39,10 @@ var ErrInvalidToken = errors.New("登录凭证无效")
 // ErrMemberCreateInvalid 在创建成员的输入未通过业务校验时返回，handler 据此映射为 400。
 var ErrMemberCreateInvalid = errors.New("成员资料不合法")
 
+// ErrInstanceLimitReached 表示企业已达实例数量上限（organizations.max_instance_count），
+// 不能再新建实例（app）。handler 层据此映射为 409 Conflict。
+var ErrInstanceLimitReached = errors.New("已达企业实例数量上限")
+
 // 渠道 -------------------------------------------------------------
 // 来源：原 channel_service.go
 
