@@ -22,8 +22,9 @@ import (
 // Store 是 reaper 需要的最小数据访问能力。
 // 由 sqlc 生成的 *sqlc.Queries 直接满足本接口,装配时无需 adapter。
 type Store interface {
-	// ListStaleInits 扫 5 个 init 子状态下 updated_at < 阈值的孤儿 apps。
-	ListStaleInits(ctx context.Context, updatedAt time.Time) ([]sqlc.ListStaleInitsRow, error)
+	// ListStaleInits 扫 init 子状态下「连续 staleSeconds 秒无更新」的孤儿 apps。
+	// 阈值由 SQL 侧 now()-INTERVAL 计算（见 query 注释），参数为秒数；sqlc 推断为 interface{}。
+	ListStaleInits(ctx context.Context, staleSeconds interface{}) ([]sqlc.ListStaleInitsRow, error)
 	// SetAppStatus reaper 强制把孤儿 status 回退到 pulling_runtime_image;不走状态机校验。
 	SetAppStatus(ctx context.Context, arg sqlc.SetAppStatusParams) error
 	// ClearAppProgress 清空 progress_current / progress_total,避免前端继续看到旧值。
@@ -117,9 +118,11 @@ func (r *Reaper) tickOnce(ctx context.Context) {
 
 // reapOnce 单次扫描:取所有 updated_at 落后阈值的 init 子状态行,
 // 逐条重置 status 并入队 job。任意一条失败不中断剩余处理,只记日志。
+// 阈值改为按秒传给 SQL 侧 now()-INTERVAL 计算（不再用 Go 侧 time.Now()），
+// 让「当前时间」与 updated_at（now() 写入）同源同时区，避免跨时区比较错位。
 func (r *Reaper) reapOnce(ctx context.Context) error {
-	threshold := time.Now().Add(-r.staleAfter)
-	rows, err := r.store.ListStaleInits(ctx, threshold)
+	staleSeconds := int64(r.staleAfter / time.Second)
+	rows, err := r.store.ListStaleInits(ctx, staleSeconds)
 	if err != nil {
 		return fmt.Errorf("查询孤儿 apps: %w", err)
 	}

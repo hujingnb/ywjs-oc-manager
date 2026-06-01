@@ -6,9 +6,47 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/go-sql-driver/mysql"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
+
+// TestNormalizeDSNForcesUTCTimeZone 验证 normalizeDSN 把时区相关参数强制规整为 UTC：
+// 这是「时区错位」类 bug 的源头根治——服务器 time_zone 为 +08:00 而 DSN loc=UTC 时，
+// now() 写入的裸 datetime 会被当成 UTC 读回（凭空 +8h），导致 Go 时间与 now() 列比较错位。
+func TestNormalizeDSNForcesUTCTimeZone(t *testing.T) {
+	// 起始 DSN 故意不带 parseTime / loc / time_zone，模拟仅填了最小连接串的部署配置。
+	out, err := normalizeDSN("oc_manager:pw@tcp(127.0.0.1:3306)/manager")
+	require.NoError(t, err)
+
+	// 用驱动自身解析回结构体逐项断言，避免依赖参数在 DSN 字符串里的拼接顺序。
+	cfg, err := mysql.ParseDSN(out)
+	require.NoError(t, err)
+	// parseTime=true：时间列扫描为 time.Time 而非 []byte。
+	assert.True(t, cfg.ParseTime, "应强制 parseTime=true")
+	// loc=UTC：Go 侧按 UTC 解释/发送时间。
+	assert.Equal(t, "UTC", cfg.Loc.String(), "应强制 loc=UTC")
+	// 会话变量 time_zone='+00:00'：让 now()/CURRENT_TIMESTAMP 返回 UTC，与 loc=UTC 对齐。
+	assert.Equal(t, "'+00:00'", cfg.Params["time_zone"], "应强制会话 time_zone='+00:00'")
+}
+
+// TestNormalizeDSNOverridesConflictingTimeZone 验证即使配置里写了相反的时区，也会被强制覆盖为 UTC：
+// 根治不依赖每份部署配置手填正确——只要走 Open，时区一定落到 UTC。
+func TestNormalizeDSNOverridesConflictingTimeZone(t *testing.T) {
+	// 配置里故意写 loc=Local 与 time_zone='+08:00'，应被 normalizeDSN 覆盖。
+	out, err := normalizeDSN("oc_manager:pw@tcp(127.0.0.1:3306)/manager?parseTime=true&loc=Local&time_zone=%27%2B08%3A00%27")
+	require.NoError(t, err)
+	cfg, err := mysql.ParseDSN(out)
+	require.NoError(t, err)
+	assert.Equal(t, "UTC", cfg.Loc.String(), "冲突的 loc=Local 应被覆盖为 UTC")
+	assert.Equal(t, "'+00:00'", cfg.Params["time_zone"], "冲突的 time_zone=+08:00 应被覆盖为 +00:00")
+}
+
+// TestNormalizeDSNRejectsInvalid 非法 DSN 必须返回错误，让启动期 fail-fast。
+func TestNormalizeDSNRejectsInvalid(t *testing.T) {
+	_, err := normalizeDSN("not-a-valid-dsn-without-at-sign")
+	require.Error(t, err)
+}
 
 // TestOpenRejectsInvalidDatabaseURL 覆盖启动阶段数据库 DSN 解析失败的错误包装。
 func TestOpenRejectsInvalidDatabaseURL(t *testing.T) {

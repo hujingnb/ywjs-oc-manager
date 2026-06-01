@@ -21,6 +21,7 @@ import (
 // 各方法均实现 reaper.Store 接口语义（迁移后 string 参数、:exec 返回 error）。
 type fakeStore struct {
 	stale          []sqlc.ListStaleInitsRow
+	staleArg       interface{} // 捕获 ListStaleInits 入参，断言传的是秒数而非 Go time
 	statusCalls    []sqlc.SetAppStatusParams
 	clearCalls     []string // ClearAppProgress 入参（string uuid）
 	latestJob      sqlc.Job
@@ -29,7 +30,10 @@ type fakeStore struct {
 	createJobCalls []sqlc.CreateJobParams
 }
 
-func (s *fakeStore) ListStaleInits(_ context.Context, _ time.Time) ([]sqlc.ListStaleInitsRow, error) {
+// 迁移后 ListStaleInits 入参为「陈旧秒数」（sqlc 推断 interface{}），不再是 Go time.Time：
+// 阈值由 SQL 侧 now()-INTERVAL 计算，避免「Go 时间 vs now() 列」跨时区比较错位。
+func (s *fakeStore) ListStaleInits(_ context.Context, staleSeconds interface{}) ([]sqlc.ListStaleInitsRow, error) {
+	s.staleArg = staleSeconds
 	return s.stale, nil
 }
 func (s *fakeStore) SetAppStatus(_ context.Context, p sqlc.SetAppStatusParams) error {
@@ -117,6 +121,9 @@ func TestReaper_ReapOrphanReset(t *testing.T) {
 			r := New(store, notifier, &fakeLocker{acquireOK: true}, "test", slog.Default())
 			r.tickOnce(context.Background())
 
+			// ListStaleInits 必须收到「秒数」（默认 staleAfter=90s），交由 SQL now()-INTERVAL 计算阈值；
+			// 这是时区错位修复的关键：不再把 Go 侧 time.Now() 阈值传进去与 now() 写入的列比较。
+			assert.Equal(t, int64(90), store.staleArg)
 			// status 被强制回退为 pulling_runtime_image,无论起始子状态是哪一类
 			require.Len(t, store.statusCalls, 1)
 			assert.Equal(t, domain.AppStatusPullingRuntimeImage, store.statusCalls[0].Status)

@@ -8,7 +8,6 @@ package sqlc
 import (
 	"context"
 	"encoding/json"
-	"time"
 
 	null "github.com/guregu/null/v5"
 )
@@ -476,7 +475,7 @@ SELECT id, status
 FROM apps
 WHERE deleted_at IS NULL
   AND status IN ('pulling_runtime_image','preparing_runtime','creating_container','starting')
-  AND updated_at < ?
+  AND updated_at < now() - INTERVAL ? SECOND
 ORDER BY id
 `
 
@@ -485,11 +484,14 @@ type ListStaleInitsRow struct {
 	Status string `db:"status" json:"status"`
 }
 
-// reaper 扫描 init 子状态下连续 90s 无更新的孤儿；阈值由调用方传入。
+// reaper 扫描 init 子状态下「连续 N 秒无更新」的孤儿；N 由调用方按秒传入。
 // 包含新旧两套 init 状态，确保历史孤儿也能被正确清理。
 // spec-A2b：去掉 runtime_node_id（k8s 路径不再写该列），reaper 仅需 id / status 重置孤儿。
-func (q *Queries) ListStaleInits(ctx context.Context, updatedAt time.Time) ([]ListStaleInitsRow, error) {
-	rows, err := q.db.QueryContext(ctx, listStaleInits, updatedAt)
+// 关键：阈值用 SQL 侧 now() - INTERVAL 计算，而非接收 Go 侧 time.Now() 阈值。
+// updated_at 由 now() 写入，二者同处服务器时钟与会话时区，根除「Go 时间 vs now() 列」
+// 跨时区比较错位（曾因 DSN loc=UTC 与服务器 +08:00 不匹配导致本查询恒返回 0，孤儿永不回收）。
+func (q *Queries) ListStaleInits(ctx context.Context, dateSUB interface{}) ([]ListStaleInitsRow, error) {
+	rows, err := q.db.QueryContext(ctx, listStaleInits, dateSUB)
 	if err != nil {
 		return nil, err
 	}
