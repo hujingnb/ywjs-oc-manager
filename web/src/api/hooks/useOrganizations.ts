@@ -30,6 +30,8 @@ export interface OrganizationFormPayload {
   remark?: string
   // 余额预警阈值；null 表示清空或使用后端默认。
   credit_warning_threshold?: number | null
+  // 实例数量上限；null/undefined 表示不限制。
+  max_instance_count?: number | null
   // 组织可用的助手版本 id 列表。
   assistant_version_ids: string[]
   // 首个组织管理员用户名。
@@ -113,6 +115,8 @@ export interface OrganizationUpdatePayload {
   remark?: string
   // 余额预警阈值；null 表示清空或使用后端默认。
   credit_warning_threshold?: number | null
+  // 实例数量上限；null/undefined 表示不限制。
+  max_instance_count?: number | null
   // 组织可用的助手版本 id 列表。
   assistant_version_ids: string[]
 }

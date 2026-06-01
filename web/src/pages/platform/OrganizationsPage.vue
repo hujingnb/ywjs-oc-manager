@@ -120,6 +120,22 @@
               />
             </n-form-item>
           </n-grid-item>
+          <n-grid-item>
+            <n-form-item label="实例数量上限（留空 = 不限制）">
+              <n-input-number
+                v-if="modalMode === 'create'"
+                v-model:value="form.max_instance_count"
+                :min="1" :precision="0" clearable style="width: 100%"
+                placeholder="留空表示不限制"
+              />
+              <n-input-number
+                v-else
+                v-model:value="editForm.max_instance_count"
+                :min="1" :precision="0" clearable style="width: 100%"
+                placeholder="留空表示不限制"
+              />
+            </n-form-item>
+          </n-grid-item>
           <n-grid-item :span="2">
             <n-form-item label="备注">
               <n-input
@@ -299,6 +315,7 @@ const editForm = reactive({
   contact_phone: '',
   remark: '',
   credit_warning_threshold: undefined as number | undefined,
+  max_instance_count: undefined as number | undefined,
   assistant_version_ids: [] as string[],
 })
 // editSubmitting 控制编辑提交中的 loading 状态。
@@ -316,6 +333,8 @@ function openEditForm(org: Organization) {
   editForm.remark = org.remark ?? ''
   editForm.credit_warning_threshold = typeof org.credit_warning_threshold === 'number'
     ? org.credit_warning_threshold : undefined
+  editForm.max_instance_count = typeof org.max_instance_count === 'number'
+    ? org.max_instance_count : undefined
   editForm.assistant_version_ids = org.assistant_version_ids ? [...org.assistant_version_ids] : []
   editError.value = null
   editFormVisible.value = true
@@ -352,6 +371,8 @@ async function submitEditOrganization() {
         remark: editForm.remark || undefined,
         credit_warning_threshold: typeof editForm.credit_warning_threshold === 'number'
           ? editForm.credit_warning_threshold : undefined,
+        max_instance_count: typeof editForm.max_instance_count === 'number'
+          ? editForm.max_instance_count : undefined,
         assistant_version_ids: editForm.assistant_version_ids,
       },
     })
@@ -425,6 +446,7 @@ const { form, formVisible, creating, submitError, openForm: _openForm, submit: s
     contact_phone: '',
     remark: '',
     credit_warning_threshold: undefined as number | undefined,
+    max_instance_count: undefined as number | undefined,
     admin_username: '',
     admin_display_name: '',
     admin_password: '',
@@ -439,6 +461,7 @@ const { form, formVisible, creating, submitError, openForm: _openForm, submit: s
     remark: f.remark || undefined,
     credit_warning_threshold: typeof f.credit_warning_threshold === 'number'
       ? f.credit_warning_threshold : undefined,
+    max_instance_count: typeof f.max_instance_count === 'number' ? f.max_instance_count : undefined,
     admin_username: f.admin_username,
     admin_display_name: f.admin_display_name,
     admin_password: f.admin_password,
@@ -487,6 +510,12 @@ const columns = computed(() => [
     key: 'credit_warning_threshold',
     render: (row: Organization) => typeof row.credit_warning_threshold === 'number'
       ? `${row.credit_warning_threshold}%` : '—',
+  },
+  {
+    title: '实例上限',
+    key: 'max_instance_count',
+    render: (row: Organization) => typeof row.max_instance_count === 'number'
+      ? String(row.max_instance_count) : '不限',
   },
   // 当前余额列：从并发查询结果映射到对应行，未加载时显示省略号。
   {
