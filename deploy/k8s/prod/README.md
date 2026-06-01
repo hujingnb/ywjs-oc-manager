@@ -28,10 +28,11 @@ manager-api/web、new-api、ragflow 与 RBAC 与本地一致，差异仅镜像 r
      用一个独立 bucket（须预先建好，access key 仅对该 bucket 授权）；endpoint-url 要带 scheme。
      账号均为专用普通账号，非 root；ragflow 用 rag_flow 库，需预建库并对该库授权，
      详见 secret.example.yaml 注释。
-   - `acr-pull`：阿里云 ACR 拉取凭证（见下）。secret.example.yaml 已在 **ocm 与 oc-apps
-     两个 namespace 各建一份**——ocm 供 manager-api/web/new-api/ragflow 拉镜像，oc-apps
-     供 app pod（Hermes 实例）拉 hermes/ops 镜像（imagePullSecrets 是 namespace 级，缺则
-     app pod ImagePullBackOff）。两份填同一份 ACR 凭证。
+   - 镜像拉取 Secret `secret-registry-ywjs-cc41758e.ecis.huabei-3.cmecloud.cn`：移动云
+     仓库拉取凭证，由集群侧预先创建，**已存在于 ocm 与 oc-apps 两个 namespace**——ocm 供
+     manager-api/web/new-api/ragflow 拉镜像，oc-apps 供 app pod（Hermes 实例）拉
+     hermes/ops 镜像（imagePullSecrets 是 namespace 级，缺则对应 namespace 的 pod
+     ImagePullBackOff）。不在本仓库 secret.yaml 管理。
 
    > 所有待填值统一用 `__FILL_*__` 前缀标记。复制后跑 `grep -n '__FILL_' secret.yaml`
    > 列出全部待填项，替换完到 grep 无输出即填写完整。
@@ -40,19 +41,13 @@ manager-api/web、new-api、ragflow 与 RBAC 与本地一致，差异仅镜像 r
 > 连接配置（MySQL/Redis/ES/MinIO 的 host/port/库名/账号口令）只在 `secret.yaml` 填一处即可，
 > 工作负载 YAML 里无其它占位符；剩余的文件级改动仅镜像 tag（2）。
 
-## 生成 ACR imagePullSecret
+## 镜像拉取 Secret（外部托管）
 
-直接填好 secret.yaml 里 ocm + oc-apps 两份 acr-pull 的 `.dockerconfigjson` 即可；
-若想用 kubectl 生成，注意**两个 namespace 各生成一份**：
+镜像仓库为移动云 `ywjs-cc41758e.ecis.huabei-3.cmecloud.cn`（自有走 `app`、上游与构建期
+基础镜像走 `public`）。拉取 Secret `secret-registry-ywjs-cc41758e.ecis.huabei-3.cmecloud.cn`
+由集群侧预先创建并已存在于 ocm 与 oc-apps，本仓库只按名引用、不再内嵌凭证。
 
-```bash
-for ns in ocm oc-apps; do
-  kubectl create secret docker-registry acr-pull -n $ns \
-    --docker-server=crpi-nu3ibz4f07feyghi.cn-beijing.personal.cr.aliyuncs.com \
-    --docker-username='<ACR 用户名>' --docker-password='<ACR 密码>' \
-    --dry-run=client -o yaml
-done
-```
+镜像首次迁移到该仓库见 `scripts/migrate-images-to-ecloud.sh`（从 ACR retag 转推）。
 
 ## apply 顺序
 
