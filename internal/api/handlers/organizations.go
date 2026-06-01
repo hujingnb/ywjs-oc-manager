@@ -217,6 +217,7 @@ func toOrganizationInput(req OrganizationRequest) service.OrganizationInput {
 		ContactPhone:           req.ContactPhone,
 		Remark:                 req.Remark,
 		CreditWarningThreshold: req.CreditWarningThreshold,
+		MaxInstanceCount:       req.MaxInstanceCount,
 		AssistantVersionIDs:    req.AssistantVersionIDs,
 		AssistantVersionIDsSet: true,
 	}
@@ -232,6 +233,7 @@ func toCreateOrganizationInput(req CreateOrganizationRequest) service.Organizati
 		ContactPhone:           req.ContactPhone,
 		Remark:                 req.Remark,
 		CreditWarningThreshold: req.CreditWarningThreshold,
+		MaxInstanceCount:       req.MaxInstanceCount,
 		AdminUsername:          req.AdminUsername,
 		AdminDisplayName:       req.AdminDisplayName,
 		AdminPassword:          req.AdminPassword,

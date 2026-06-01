@@ -48,6 +48,8 @@ type CreateOrganizationRequest struct {
 	Remark string `json:"remark"`
 	// CreditWarningThreshold 是企业余额预警阈值；nil 表示不启用余额预警或保持预警关闭。
 	CreditWarningThreshold *int32 `json:"credit_warning_threshold"`
+	// MaxInstanceCount 是企业最多可创建的实例（应用）数；nil 表示不限制。
+	MaxInstanceCount *int32 `json:"max_instance_count"`
 	// AssistantVersionIDs 是该企业可用的助手版本 id 列表（allowlist）。
 	AssistantVersionIDs []string `json:"assistant_version_ids"`
 	// AdminUsername 是随企业创建的首个 org_admin 账号名。
@@ -70,6 +72,8 @@ type OrganizationRequest struct {
 	Remark string `json:"remark"`
 	// CreditWarningThreshold 是企业余额预警阈值；nil 表示清空或未设置预警阈值。
 	CreditWarningThreshold *int32 `json:"credit_warning_threshold"`
+	// MaxInstanceCount 是企业最多可创建的实例（应用）数；nil 表示不限制。
+	MaxInstanceCount *int32 `json:"max_instance_count"`
 	// AssistantVersionIDs 是该企业可用的助手版本 id 列表（allowlist）。
 	AssistantVersionIDs []string `json:"assistant_version_ids"`
 }

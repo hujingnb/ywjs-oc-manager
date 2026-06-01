@@ -394,6 +394,8 @@ func writeMemberError(c *gin.Context, err error) {
 		c.JSON(http.StatusForbidden, apierror.New("FORBIDDEN", "无权执行该操作"))
 	case errors.Is(err, service.ErrNotFound):
 		c.JSON(http.StatusNotFound, apierror.New("NOT_FOUND", "资源不存在"))
+	case errors.Is(err, service.ErrInstanceLimitReached):
+		c.JSON(http.StatusConflict, apierror.New("INSTANCE_LIMIT_REACHED", validationServiceMessage(err, service.ErrInstanceLimitReached)))
 	case errors.Is(err, service.ErrMemberCreateInvalid):
 		c.JSON(http.StatusBadRequest, apierror.New("MEMBER_INVALID", validationServiceMessage(err, service.ErrMemberCreateInvalid)))
 	default:

@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"fmt"
 	"net/http"
 	"net/http/httptest"
 	"testing"
@@ -139,6 +140,35 @@ func TestMembersOnboardForwardsRequest(t *testing.T) {
 	assert.Equal(t, "alice-bot", onboarding.lastOnboardInput.AppName)
 	// 确认助手版本 id 被透传到 service 入参，供 service 层校验 allowlist。
 	assert.Equal(t, "v-id-onboard", onboarding.lastOnboardInput.VersionID)
+}
+
+// TestMembersOnboardMapsInstanceLimitToConflict 验证 onboard 入口在 service 返回
+// ErrInstanceLimitReached（企业实例数已达上限）时，handler 将其映射为 409 INSTANCE_LIMIT_REACHED，
+// 且响应文案携带 service 拼入的企业上限数字，便于前端直接展示。
+func TestMembersOnboardMapsInstanceLimitToConflict(t *testing.T) {
+	// 用 %w 包装 sentinel 并附带上限数字，模拟 service 真实返回（fmt.Errorf("%w (%d)", ...)）。
+	onboarding := &onboardingServiceStub{
+		err: fmt.Errorf("%w (%d)", service.ErrInstanceLimitReached, 3),
+	}
+	router := newMembersTestRouterWithOnboarding(t, &memberServiceStub{}, onboarding)
+
+	recorder := httptest.NewRecorder()
+	body := bytes.NewBufferString(`{"username":"alice","display_name":"Alice","password":"pwd","app_name":"alice-bot","version_id":"v-id-onboard"}`)
+	request := httptest.NewRequest(http.MethodPost, "/api/v1/organizations/org-1/members/onboard", body)
+	request.Header.Set("Content-Type", "application/json")
+	request = withPrincipal(request, auth.Principal{UserID: "p1", Role: domain.UserRoleOrgAdmin, OrgID: "org-1"})
+	router.ServeHTTP(recorder, request)
+
+	// 超限应返回 409，而非落到 default 的 500。
+	require.Equal(t, http.StatusConflict, recorder.Code)
+	var resp struct {
+		Code    string `json:"code"`
+		Message string `json:"message"`
+	}
+	require.NoError(t, json.Unmarshal(recorder.Body.Bytes(), &resp))
+	assert.Equal(t, "INSTANCE_LIMIT_REACHED", resp.Code)
+	// 文案应保留 sentinel 原文（含上限数字），供前端直接展示。
+	assert.Contains(t, resp.Message, "已达企业实例数量上限")
 }
 
 // TestMembersCreateAppForMemberForwardsRequest 验证已有成员创建实例路由转发组织、成员、应用和助手版本字段。
