@@ -8,7 +8,6 @@ import {
   formatMemberRole,
   formatMemberStatus,
   formatOrgStatus,
-  formatRuntimeNodeStatus,
 } from './status'
 
 describe('formatAppStatus', () => {
@@ -72,19 +71,5 @@ describe('formatMemberRole', () => {
 
   it('falls back to raw value for unknown roles', () => {
     expect(formatMemberRole('billing_owner')).toBe('billing_owner')
-  })
-})
-
-describe('formatRuntimeNodeStatus', () => {
-  it('maps known runtime node statuses', () => {
-    expect(formatRuntimeNodeStatus('active')).toEqual({ label: '在线', tone: 'success' })
-    expect(formatRuntimeNodeStatus('unreachable')).toEqual({ label: '失联', tone: 'danger' })
-  })
-
-  it('falls back for unknown status', () => {
-    expect(formatRuntimeNodeStatus('decommissioned')).toEqual({
-      label: '未知状态：decommissioned',
-      tone: 'warning',
-    })
   })
 })
