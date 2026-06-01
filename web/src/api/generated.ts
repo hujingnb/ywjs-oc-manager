@@ -7725,6 +7725,8 @@ export interface components {
             contact_phone?: string;
             /** @description CreditWarningThreshold 是企业余额预警阈值；nil 表示不启用余额预警或保持预警关闭。 */
             credit_warning_threshold?: number;
+            /** @description MaxInstanceCount 是企业最多可创建的实例（应用）数；nil 表示不限制。 */
+            max_instance_count?: number;
             /** @description Name 是企业展示名，也是平台管理员列表中识别租户的主字段。 */
             name: string;
             /** @description Remark 是平台管理员维护的内部备注。 */
@@ -7814,6 +7816,8 @@ export interface components {
             contact_phone?: string;
             /** @description CreditWarningThreshold 是企业余额预警阈值；nil 表示清空或未设置预警阈值。 */
             credit_warning_threshold?: number;
+            /** @description MaxInstanceCount 是企业最多可创建的实例（应用）数；nil 表示不限制。 */
+            max_instance_count?: number;
             /** @description Name 是企业展示名；更新时仍必填，避免空名称进入前端列表。 */
             name: string;
             /** @description Remark 是平台管理员维护的内部备注，可置空。 */
@@ -8440,6 +8444,8 @@ export interface components {
             credit_warning_threshold?: number;
             /** @description ID 是 manager 企业 UUID。 */
             id?: string;
+            /** @description MaxInstanceCount 是企业实例数量上限；nil 表示不限制。 */
+            max_instance_count?: number;
             /** @description Name 是企业展示名。 */
             name?: string;
             /** @description NewAPIUserID 是企业在 new-api 侧的用户 ID，缺失时充值和用量接口不可用。 */
