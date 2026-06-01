@@ -267,6 +267,7 @@ type onboardingStub struct {
 	org              sqlc.Organization
 	user             sqlc.User
 	activeApp        *sqlc.App
+	activeAppCount   int64 // 模拟 CountActiveAppsByOrg 返回的企业未删除实例数。
 	users            int
 	apps             int
 	bindings         int
@@ -346,6 +347,11 @@ func (s *onboardingStub) GetActiveAppByOwner(_ context.Context, ownerUserID stri
 		return sqlc.App{}, sql.ErrNoRows
 	}
 	return *s.activeApp, nil
+}
+
+// CountActiveAppsByOrg 返回 stub 预置的企业未删除实例数，供实例上限校验测试。
+func (s *onboardingStub) CountActiveAppsByOrg(_ context.Context, _ string) (int64, error) {
+	return s.activeAppCount, nil
 }
 
 // CreateUser 为 :exec；stub 计数后服务用自生成 ID 继续处理，不需要读回。
@@ -506,4 +512,72 @@ func orgOnboardingAdmin() auth.Principal {
 		OrgID:  testOrgID,
 		UserID: "00000000-0000-0000-0000-0000000000aa",
 	}
+}
+
+// TestCreateAppForMember_RejectsWhenInstanceLimitReached 验证企业已达实例上限时补建实例被拒。
+// 边界：当前未删除实例数 == 上限（3），应返回 ErrInstanceLimitReached 且事务回滚。
+func TestCreateAppForMember_RejectsWhenInstanceLimitReached(t *testing.T) {
+	store := newOnboardingStub(t)
+	store.org.MaxInstanceCount = null.IntFrom(3) // 企业上限 3
+	store.activeAppCount = 3                      // 当前已 3 个未删除实例，达到上限
+	tx := &txRunnerStub{store: store}
+	svc := NewMemberOnboardingService(tx, fakeHash)
+
+	_, err := svc.CreateAppForMember(context.Background(), platformAdmin(), testOrgID, store.user.ID, CreateAppForMemberInput{
+		AppName: "alice-new-bot", VersionID: testVersionID,
+	})
+
+	require.ErrorIs(t, err, ErrInstanceLimitReached)
+	require.False(t, tx.committed)
+}
+
+// TestCreateAppForMember_AllowsBelowInstanceLimit 验证未达上限时可正常补建实例。
+// 边界：当前 2 个 < 上限 3，应创建成功。
+func TestCreateAppForMember_AllowsBelowInstanceLimit(t *testing.T) {
+	store := newOnboardingStub(t)
+	store.org.MaxInstanceCount = null.IntFrom(3)
+	store.activeAppCount = 2
+	tx := &txRunnerStub{store: store}
+	svc := NewMemberOnboardingService(tx, fakeHash)
+
+	result, err := svc.CreateAppForMember(context.Background(), platformAdmin(), testOrgID, store.user.ID, CreateAppForMemberInput{
+		AppName: "alice-new-bot", VersionID: testVersionID,
+	})
+
+	require.NoError(t, err)
+	require.True(t, tx.committed)
+	assert.Equal(t, "alice-new-bot", result.App.Name)
+}
+
+// TestCreateAppForMember_AllowsWhenLimitUnset 验证上限为 NULL（不限制）时即便实例数很大也可创建。
+func TestCreateAppForMember_AllowsWhenLimitUnset(t *testing.T) {
+	store := newOnboardingStub(t)
+	store.org.MaxInstanceCount = null.Int{} // NULL = 不限制
+	store.activeAppCount = 999
+	tx := &txRunnerStub{store: store}
+	svc := NewMemberOnboardingService(tx, fakeHash)
+
+	_, err := svc.CreateAppForMember(context.Background(), platformAdmin(), testOrgID, store.user.ID, CreateAppForMemberInput{
+		AppName: "alice-new-bot", VersionID: testVersionID,
+	})
+
+	require.NoError(t, err)
+	require.True(t, tx.committed)
+}
+
+// TestOnboardMember_RejectsWhenInstanceLimitReached 验证 onboard 成员（建成员+实例）入口同样受上限约束。
+func TestOnboardMember_RejectsWhenInstanceLimitReached(t *testing.T) {
+	store := newOnboardingStub(t)
+	store.org.MaxInstanceCount = null.IntFrom(2)
+	store.activeAppCount = 2
+	tx := &txRunnerStub{store: store}
+	svc := NewMemberOnboardingService(tx, fakeHash)
+
+	_, err := svc.OnboardMember(context.Background(), orgOnboardingAdmin(), testOrgID, OnboardMemberInput{
+		Username: "bob", DisplayName: "Bob", Password: "secret-123",
+		AppName: "bob-bot", VersionID: testVersionID,
+	})
+
+	require.ErrorIs(t, err, ErrInstanceLimitReached)
+	require.False(t, tx.committed)
 }

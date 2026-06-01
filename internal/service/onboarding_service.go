@@ -24,6 +24,8 @@ type OnboardingStore interface {
 	GetOrganization(ctx context.Context, id string) (sqlc.Organization, error)
 	GetUser(ctx context.Context, id string) (sqlc.User, error)
 	GetActiveAppByOwner(ctx context.Context, ownerUserID string) (sqlc.App, error)
+	// CountActiveAppsByOrg 统计企业当前未删除实例数（apps.deleted_at IS NULL），用于实例上限校验。
+	CountActiveAppsByOrg(ctx context.Context, orgID string) (int64, error)
 	CreateUser(ctx context.Context, arg sqlc.CreateUserParams) error
 	CreateApp(ctx context.Context, arg sqlc.CreateAppParams) error
 	CreateChannelBinding(ctx context.Context, arg sqlc.CreateChannelBindingParams) error
@@ -135,6 +137,10 @@ func (s *MemberOnboardingService) OnboardMember(ctx context.Context, principal a
 		// 校验所选助手版本在组织 allowlist 内，防止跨组织使用未授权版本。
 		if !versionInOrgAllowlist(org, input.VersionID) {
 			return fmt.Errorf("%w: 所选助手版本不在企业可用范围内", ErrMemberCreateInvalid)
+		}
+		// 校验企业未达实例数量上限（max_instance_count）。
+		if err := ensureInstanceQuota(ctx, store, org); err != nil {
+			return err
 		}
 		// CreateUser 为 :exec；事务内直接使用预生成 ID，事务外读回。
 		if err := store.CreateUser(ctx, sqlc.CreateUserParams{
@@ -296,6 +302,10 @@ func (s *MemberOnboardingService) CreateAppForMember(ctx context.Context, princi
 		if !versionInOrgAllowlist(org, input.VersionID) {
 			return fmt.Errorf("%w: 所选助手版本不在企业可用范围内", ErrMemberCreateInvalid)
 		}
+		// 校验企业未达实例数量上限（max_instance_count）。
+		if err := ensureInstanceQuota(ctx, store, org); err != nil {
+			return err
+		}
 		user, err := store.GetUser(ctx, userID)
 		if errors.Is(err, sql.ErrNoRows) {
 			return ErrNotFound
@@ -400,6 +410,27 @@ func (s *MemberOnboardingService) CreateAppForMember(ctx context.Context, princi
 		}
 	}
 	return result, nil
+}
+
+// ensureInstanceQuota 校验企业未达实例数量上限。
+// org.MaxInstanceCount 无效（NULL）表示不限制，直接放行；否则统计企业未删除实例数，
+// 达到或超过上限即返回 ErrInstanceLimitReached。
+//
+// 并发说明：计数与随后的 CreateApp 在同一事务内但不加行锁，两个并发事务理论上可能
+// 都读到相同计数而各插一条、轻微越限。鉴于建实例是平台/企业管理员的手动低频操作，
+// 此 race 可接受（见设计文档「语义决策」）。
+func ensureInstanceQuota(ctx context.Context, store OnboardingStore, org sqlc.Organization) error {
+	if !org.MaxInstanceCount.Valid {
+		return nil
+	}
+	count, err := store.CountActiveAppsByOrg(ctx, org.ID)
+	if err != nil {
+		return fmt.Errorf("统计企业实例数失败: %w", err)
+	}
+	if count >= org.MaxInstanceCount.Int64 {
+		return fmt.Errorf("%w (%d)", ErrInstanceLimitReached, org.MaxInstanceCount.Int64)
+	}
+	return nil
 }
 
 // versionInOrgAllowlist 判断 version_id 是否在组织 assistant_version_ids allowlist 内。
