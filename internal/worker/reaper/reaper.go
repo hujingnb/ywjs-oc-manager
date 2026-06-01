@@ -8,18 +8,15 @@ package reaper
 
 import (
 	"context"
-	"database/sql"
 	"encoding/json"
-	"errors"
 	"fmt"
 	"log/slog"
 	"time"
 
-	"github.com/google/uuid"
-
 	"oc-manager/internal/domain"
 	ocredis "oc-manager/internal/redis"
 	"oc-manager/internal/store/sqlc"
+	"oc-manager/internal/worker/jobutil"
 )
 
 // Store 是 reaper 需要的最小数据访问能力。
@@ -152,7 +149,8 @@ func (r *Reaper) reapApp(ctx context.Context, row sqlc.ListStaleInitsRow) error 
 	if err := r.store.ClearAppProgress(ctx, row.ID); err != nil {
 		return fmt.Errorf("清空 progress_*: %w", err)
 	}
-	jobID, err := r.ensureInitJob(ctx, row)
+	// 复用共享 helper 入队 app_initialize job（与 reconciler 兜底同一逻辑，单点维护）。
+	jobID, err := jobutil.EnsureInitJob(ctx, r.store, row.ID)
 	if err != nil {
 		return err
 	}
@@ -161,51 +159,6 @@ func (r *Reaper) reapApp(ctx context.Context, row sqlc.ListStaleInitsRow) error 
 		r.logger.Warn("reaper 入队失败,等 scheduler 兜底", "job_id", jobID, "error", err)
 	}
 	return nil
-}
-
-// ensureInitJob 找最近一份 app_initialize job:不存在新建;running / succeeded 重置回 pending;
-// 已 pending 直接复用(也仍会触发一次 Enqueue,防 scheduler 漏触发)。
-// 返回值是 job ID 字符串,供调用方 Enqueue。
-func (r *Reaper) ensureInitJob(ctx context.Context, row sqlc.ListStaleInitsRow) (string, error) {
-	// GetLatestAppInitJob 的参数是 json.RawMessage（MySQL JSON 路径查询参数）。
-	// 按 querier 签名：appID 传应用 ID 的 JSON 字符串字面量（带双引号），MySQL 端做 JSON 比较。
-	appIDJson, _ := json.Marshal(row.ID)
-	job, err := r.store.GetLatestAppInitJob(ctx, json.RawMessage(appIDJson))
-	if err != nil && !errors.Is(err, sql.ErrNoRows) {
-		return "", fmt.Errorf("查 job: %w", err)
-	}
-	if errors.Is(err, sql.ErrNoRows) {
-		// 历史从未建过 app_initialize job，新建一份。
-		// spec-A2b：payload 只含 app_id，不再携带 runtime_node（k8s 路径按 appID 寻址）。
-		payload, perr := json.Marshal(map[string]any{
-			"app_id": row.ID,
-		})
-		if perr != nil {
-			return "", fmt.Errorf("序列化 payload: %w", perr)
-		}
-		newID := uuid.NewString()
-		cerr := r.store.CreateJob(ctx, sqlc.CreateJobParams{
-			ID:          newID,
-			Type:        domain.JobTypeAppInitialize,
-			Priority:    100,
-			RunAfter:    time.Now(),
-			MaxAttempts: 3,
-			PayloadJson: payload,
-		})
-		if cerr != nil {
-			return "", fmt.Errorf("CreateJob: %w", cerr)
-		}
-		return newID, nil
-	}
-	if job.Status == domain.JobStatusPending {
-		// 已 pending 不动 status,但仍返回 ID 让上层 Enqueue 一次。
-		return job.ID, nil
-	}
-	err = r.store.RequeueJob(ctx, job.ID)
-	if err != nil {
-		return "", fmt.Errorf("RequeueJob: %w", err)
-	}
-	return job.ID, nil
 }
 
 // nowToken 给 lock token 加一个时间戳后缀,避免同进程在锁过期边缘场景下

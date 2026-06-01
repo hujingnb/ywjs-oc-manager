@@ -466,7 +466,8 @@ func runManager(ctx context.Context, cfg config.Config, logOut io.Writer) error 
 	// 仅在启用 k8s（orch != nil）时挂载；未启用时不跑空 tick。
 	var appStatusTask *service.PeriodicReconciler
 	if orch != nil {
-		appStatusReconciler := service.NewAppStatusReconciler(dbStore.Queries, orch)
+		// redisQueue 作 jobEnqueuer：reconciler 兜底恢复（error 但 pod 已 Ready）重新入队 init job 后通知 scheduler。
+		appStatusReconciler := service.NewAppStatusReconciler(dbStore.Queries, orch, redisQueue)
 		appStatusTask = service.NewPeriodicReconciler("app_status_reconcile", 15*time.Second, appStatusReconciler.Tick)
 	}
 	// spec-A2b：node_resource_samples / instance_resource_samples 已删，ResourceSampleCleanup 不再装配。

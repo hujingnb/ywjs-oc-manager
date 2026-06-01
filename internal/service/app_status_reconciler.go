@@ -12,11 +12,12 @@ package service
 
 import (
 	"context"
-	"strings"
+	"encoding/json"
 
 	"oc-manager/internal/domain"
 	"oc-manager/internal/integrations/k8sorch"
 	"oc-manager/internal/store/sqlc"
+	"oc-manager/internal/worker/jobutil"
 )
 
 // appStatusStore 是 AppStatusReconciler 所需最小 DB 能力。
@@ -32,22 +33,36 @@ type appStatusStore interface {
 	SetAppStatus(ctx context.Context, arg sqlc.SetAppStatusParams) error
 	// SetAppRuntimeSnapshot 更新 runtime_snapshot_json 与 runtime_snapshot_at。
 	SetAppRuntimeSnapshot(ctx context.Context, arg sqlc.SetAppRuntimeSnapshotParams) error
+	// ListErrorApps 返回 status=error 的 app id，供兜底恢复「pod 已 Ready 但卡 error」。
+	ListErrorApps(ctx context.Context) ([]string, error)
+	// 以下三个方法供 jobutil.EnsureInitJob 重新入队 app_initialize job（兜底恢复用）。
+	GetLatestAppInitJob(ctx context.Context, appID json.RawMessage) (sqlc.Job, error)
+	RequeueJob(ctx context.Context, id string) error
+	CreateJob(ctx context.Context, arg sqlc.CreateJobParams) error
 }
 
-// AppStatusReconciler 周期读「期望运行」app 的 pod 状态同步 DB。
+// jobEnqueuer 通知 scheduler 立即拾取被重新入队的 job（与 internal/redis ZSET queue 一致）；
+// 通知失败仅记日志，scheduler 兜底扫表会拾起。
+type jobEnqueuer interface {
+	Enqueue(ctx context.Context, jobID string) error
+}
+
+// AppStatusReconciler 周期读 app 的 pod 状态并双向收敛 DB：
+//   - 运行中(running) 且 pod 已崩溃/消失（IsTerminalBad）→ 推 error。
+//   - 卡在 error 但 pod 实际已 Ready（如 WaitReady 曾误超时但 pod 后来起来了，或 manager
+//     重启等导致状态没收敛）→ 重新入队 init job 让 worker 推进回 running。这是兜底，补上
+//     「init 失败成 error 后无法自愈」的洞；守卫为仅当 pod 真 Ready 才恢复，pod 真坏保持 error。
 //
-// 设计约束：reconciler 是单向的——只把【运行中(running)】且 pod 已崩溃/消失的 app
-// 推到 error；不做任何 promotion（binding_waiting→running 由渠道绑定流程负责，
-// error→running 由 re-init 负责）。
-// 所有写入都落在 app 状态机允许的 running→error 这一条迁移上，不越权改状态。
+// binding_waiting→running 仍由渠道绑定流程负责，不在此 promote。
 type AppStatusReconciler struct {
-	store appStatusStore
-	orch  k8sorch.Orchestrator
+	store    appStatusStore
+	orch     k8sorch.Orchestrator
+	notifier jobEnqueuer
 }
 
 // NewAppStatusReconciler 创建 app 状态 poll reconciler。
-func NewAppStatusReconciler(store appStatusStore, orch k8sorch.Orchestrator) *AppStatusReconciler {
-	return &AppStatusReconciler{store: store, orch: orch}
+func NewAppStatusReconciler(store appStatusStore, orch k8sorch.Orchestrator, notifier jobEnqueuer) *AppStatusReconciler {
+	return &AppStatusReconciler{store: store, orch: orch, notifier: notifier}
 }
 
 // Tick 处理一轮 pod 状态同步。
@@ -101,38 +116,41 @@ func (r *AppStatusReconciler) Tick(ctx context.Context) error {
 			ID:     appID,
 		})
 	}
+
+	// 兜底恢复：error 态但 pod 实际已 Ready 的 app，重新入队 init job 推进回 running。
+	r.recoverReadyButError(ctx)
 	return nil
 }
 
-// podIsBad 判断 pod 是否处于确定性坏态（应推 error），而非瞬态（让 Deployment 自管）。
+// recoverReadyButError 扫 status=error 的 app，对其中 pod 实际已 Ready 的重新入队 init job，
+// 让 worker 重跑初始化推进到 running。这补上「init 失败成 error 后无法自愈」的洞：
+// WaitReady 曾误超时、manager 重启打断 worker 等都会留下 error 行，但 pod 后来其实起来了。
 //
-// 只认以下三种确定性坏态，原因：
-//   - Phase=="NotFound"：Deployment/pod 被带外删除，manager 已感知不到该 pod，
-//     继续保持 running 状态会让用户误认为服务正常，必须推 error。
-//   - Phase=="Failed"：pod 已进入 Failed 相位，k8s 不会自动重启（OOMKilled restartPolicy=Never 等），
-//     Deployment 会创建新 pod，但当前 pod 已确认失败，需告知业务层。
-//   - Message 含 "CrashLoopBackOff"：容器反复崩溃，k8s 正在退避重启；
-//     虽然 Deployment 会继续尝试，但这已是业务可见的持续异常态，需推 error。
-//
-// 以下情况不推 error（瞬态，Deployment 控制器自管）：
-//   - Phase=="Pending"：pod 正在调度/拉镜像，属于正常启动流程中的瞬态。
-//   - Phase=="Running" 但 Ready==false：容器已起但健康检查未通过，可能是刚重启的短暂抖动。
-//   - Phase=="Unknown"：网络分区导致无法获取状态，保守不推 error。
-//   - Ready==true：显然正常，无需任何操作。
-//
-// 已知取舍：ImagePullBackOff / ErrImagePull 等 Waiting reason 属于镜像拉取瞬态，
-// 当前归为「Pending 类瞬态」由 Deployment 自管，本 reconciler 不推 error。
-// 长期镜像拉取失败（如镜像不存在）理论上应推 error，但 spec 约定短期抖动与长期
-// 失败难以在 reconciler 层区分，故暂不处理，留待后续迭代补充超时判定逻辑。
+// 守卫：仅当 st.Ready==true（hermes 容器真就绪）才恢复——pod 真坏（不 Ready）保持 error 不动，
+// 避免对真失败的 app 无限重试。整段尽力而为：任一步失败 continue，等下一轮再试。
+func (r *AppStatusReconciler) recoverReadyButError(ctx context.Context) {
+	ids, err := r.store.ListErrorApps(ctx)
+	if err != nil {
+		return
+	}
+	for _, appID := range ids {
+		st, serr := r.orch.Status(ctx, appID)
+		if serr != nil || !st.Ready {
+			continue
+		}
+		// 复用与 reaper 同一份「确保 init job 回 pending」逻辑，再通知 scheduler 立即拾取。
+		jobID, eerr := jobutil.EnsureInitJob(ctx, r.store, appID)
+		if eerr != nil {
+			continue
+		}
+		_ = r.notifier.Enqueue(ctx, jobID)
+	}
+}
+
+// podIsBad 判断 pod 是否处于确定性坏态（reconciler 据此把 running→error），口径统一委托给
+// k8sorch.IsTerminalBad —— 与 WaitReady 启动期「确定坏态快速失败」用同一份判定，避免两处
+// 漂移（一处认为坏、另一处认为正常）。具体判定（NotFound/Failed/CrashLoopBackOff/反复重启）
+// 与「拉镜像/调度等瞬态不算坏」的取舍见 IsTerminalBad 的注释。
 func podIsBad(st k8sorch.AppStatus) bool {
-	if st.Phase == "NotFound" {
-		return true
-	}
-	if st.Phase == "Failed" {
-		return true
-	}
-	if strings.Contains(st.Message, "CrashLoopBackOff") {
-		return true
-	}
-	return false
+	return k8sorch.IsTerminalBad(st)
 }

@@ -115,6 +115,11 @@ type Querier interface {
 	ListAuditLogsByOrg(ctx context.Context, arg ListAuditLogsByOrgParams) ([]ListAuditLogsByOrgRow, error)
 	// 同 ListAuditLogsByOrg，按 target_type + target_id 过滤。
 	ListAuditLogsByTarget(ctx context.Context, arg ListAuditLogsByTargetParams) ([]ListAuditLogsByTargetRow, error)
+	// reconciler 兜底用：列出 status=error 的 app。reconciler 查其 pod，若 hermes 实际 Ready
+	// （说明并非真失败，只是状态没收敛，如 WaitReady 曾误超时但 pod 后来起来了），就重新入队
+	// init job 推进到 running；pod 真坏则保持 error 不动。reaper 只扫 init 子状态、不管 error，
+	// 此查询补上「init 失败成 error 后无法自愈」的洞。
+	ListErrorApps(ctx context.Context) ([]string, error)
 	ListOrganizations(ctx context.Context, arg ListOrganizationsParams) ([]Organization, error)
 	// 扁平列出某个组织或实例知识库文件，支持按状态和文件名过滤。
 	ListRAGFlowDocumentsByScope(ctx context.Context, arg ListRAGFlowDocumentsByScopeParams) ([]RagflowDocument, error)
@@ -190,6 +195,10 @@ type Querier interface {
 	// SumRechargeAmountByOrg 聚合指定组织所有成功充值记录的总额。
 	// 仅统计 status='succeeded' 的记录，failed 记录不计入累计金额。
 	SumRechargeAmountByOrg(ctx context.Context, orgID string) (int64, error)
+	// 仅刷新 updated_at：worker 等待 pod Ready 期间的心跳。让 reaper 凭 updated_at 区分
+	// 「worker 仍在等待（拉镜像可能数十分钟）」与「worker 已死的孤儿」，避免误回收正在处理的 job。
+	// 不改 status 或其它字段。
+	TouchApp(ctx context.Context, id string) error
 	// phasePullRuntimeImage 成功后写入镜像引用与 sha256。
 	UpdateAppRuntimeImage(ctx context.Context, arg UpdateAppRuntimeImageParams) error
 	// revision 由 service 计算后整体写入（仅容器相关字段变更才递增）。

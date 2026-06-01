@@ -193,10 +193,14 @@ func (a *KubernetesAdapter) Status(ctx context.Context, appID string) (AppStatus
 // waitReadyPollInterval 是 WaitReady 轮询 pod 状态的间隔。
 var waitReadyPollInterval = 2 * time.Second
 
-// WaitReady 轮询 Status 直到 hermes 容器 Ready 或 timeout/ctx 取消。
-// 用 timeout 派生 tctx 控制整体超时，ticker 控制轮询节奏；
+// WaitReady 轮询 Status 直到 hermes 容器 Ready、pod 进入确定性坏态、或 timeout/ctx 取消。
+// 用 timeout 派生 tctx 控制硬上限，ticker 控制轮询节奏；
 // Status 查询使用原始 ctx，避免 tctx 提前取消导致查询失败无法区分超时与查询错误。
-func (a *KubernetesAdapter) WaitReady(ctx context.Context, appID string, timeout time.Duration) error {
+//
+// 关键语义：pod 在调度 / 拉镜像 / PodInitializing 等正常启动过程中**持续等待**，不因耗时
+// 长而失败（镜像首拉可能数十分钟）；只有 IsTerminalBad 判定的确定坏态才提前失败。timeout
+// 仅作防永久挂起的宽松硬上限。onPoll 非 nil 时每轮回调当前状态供调用方做心跳。
+func (a *KubernetesAdapter) WaitReady(ctx context.Context, appID string, timeout time.Duration, onPoll func(AppStatus)) error {
 	tctx, cancel := context.WithTimeout(ctx, timeout)
 	defer cancel()
 	ticker := time.NewTicker(waitReadyPollInterval)
@@ -207,8 +211,17 @@ func (a *KubernetesAdapter) WaitReady(ctx context.Context, appID string, timeout
 		if err != nil {
 			return err
 		}
+		// 心跳：每轮把当前状态回调给调用方（如 worker 刷新 app.updated_at，
+		// 让 reaper 凭 updated_at 区分「worker 仍在等待」与「孤儿」）。
+		if onPoll != nil {
+			onPoll(st)
+		}
 		if st.Ready {
 			return nil
+		}
+		// 确定性坏态立即失败，不傻等到硬上限：pod 已不可能自行恢复成 Ready。
+		if IsTerminalBad(st) {
+			return fmt.Errorf("等待 app %s pod Ready 失败：pod 进入坏态（phase=%s msg=%s restarts=%d）", appID, st.Phase, st.Message, st.RestartCount)
 		}
 		phase, msg = st.Phase, st.Message
 		select {
@@ -216,6 +229,8 @@ func (a *KubernetesAdapter) WaitReady(ctx context.Context, appID string, timeout
 			if ctx.Err() != nil {
 				return ctx.Err() // 父 ctx 取消
 			}
+			// 正常启动过程耗时超过宽松硬上限才到这里（放宽后极少触发）；返回超时让上层
+			// markFailed，再由 reconciler 在 pod 实际 Ready 后兜底收敛。
 			return fmt.Errorf("等待 app %s pod Ready 超时（phase=%s msg=%s）", appID, phase, msg)
 		case <-ticker.C:
 		}

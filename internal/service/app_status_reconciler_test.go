@@ -3,6 +3,8 @@ package service
 
 import (
 	"context"
+	"database/sql"
+	"encoding/json"
 	"errors"
 	"testing"
 	"time"
@@ -35,6 +37,14 @@ type fakeAppStatusStore struct {
 	listErr error
 	// snapshotErr 若非 nil，SetAppRuntimeSnapshot 返回该错误（模拟 DB 抖动写快照失败）。
 	snapshotErr error
+
+	// errorRows 是 ListErrorApps 返回的 error 态 app id 列表（兜底恢复路径用）。
+	errorRows []string
+	// latestInitJob 是 GetLatestAppInitJob 返回的 job；ID 为空时模拟 sql.ErrNoRows（无历史 job）。
+	latestInitJob sqlc.Job
+	// requeuedJobs 记录被 RequeueJob 的 job id；createdJobs 记录被 CreateJob 的新建 job，供兜底断言。
+	requeuedJobs []string
+	createdJobs  []sqlc.CreateJobParams
 }
 
 func newFakeAppStatusStore() *fakeAppStatusStore {
@@ -68,6 +78,29 @@ func (f *fakeAppStatusStore) SetAppRuntimeSnapshot(_ context.Context, arg sqlc.S
 	f.snapshotCalls = append(f.snapshotCalls, arg)
 	// 若设置了 snapshotErr，模拟 DB 抖动写快照失败。
 	return f.snapshotErr
+}
+
+// ListErrorApps 返回预设的 error 态 app id 列表（兜底恢复路径）。
+func (f *fakeAppStatusStore) ListErrorApps(_ context.Context) ([]string, error) {
+	return f.errorRows, nil
+}
+
+// GetLatestAppInitJob：latestInitJob.ID 为空时模拟无历史 job（sql.ErrNoRows），否则返回它。
+func (f *fakeAppStatusStore) GetLatestAppInitJob(_ context.Context, _ json.RawMessage) (sqlc.Job, error) {
+	if f.latestInitJob.ID == "" {
+		return sqlc.Job{}, sql.ErrNoRows
+	}
+	return f.latestInitJob, nil
+}
+
+func (f *fakeAppStatusStore) RequeueJob(_ context.Context, id string) error {
+	f.requeuedJobs = append(f.requeuedJobs, id)
+	return nil
+}
+
+func (f *fakeAppStatusStore) CreateJob(_ context.Context, arg sqlc.CreateJobParams) error {
+	f.createdJobs = append(f.createdJobs, arg)
+	return nil
 }
 
 // ============================================================
@@ -104,7 +137,9 @@ func (f *fakeOrch) Status(_ context.Context, appID string) (k8sorch.AppStatus, e
 
 // 以下方法仅为实现 k8sorch.Orchestrator 接口，reconciler 测试不会调用。
 func (f *fakeOrch) EnsureApp(_ context.Context, _ k8sorch.AppSpec) error             { panic("not used") }
-func (f *fakeOrch) WaitReady(_ context.Context, _ string, _ time.Duration) error     { panic("not used") }
+func (f *fakeOrch) WaitReady(_ context.Context, _ string, _ time.Duration, _ func(k8sorch.AppStatus)) error {
+	panic("not used")
+}
 func (f *fakeOrch) Scale(_ context.Context, _ string, _ int32) error                 { panic("not used") }
 func (f *fakeOrch) UpdateImage(_ context.Context, _, _ string) error                 { panic("not used") }
 func (f *fakeOrch) Delete(_ context.Context, _ string) error                         { panic("not used") }
@@ -147,7 +182,7 @@ func TestAppStatusReconciler_RunningReadyPod(t *testing.T) {
 		Message: "",
 	}, nil)
 
-	rec := NewAppStatusReconciler(store, orch)
+	rec := NewAppStatusReconciler(store, orch, &fakeNotifier{})
 	require.NoError(t, rec.Tick(context.Background()))
 
 	// 写了 snapshot。
@@ -175,7 +210,7 @@ func TestAppStatusReconciler_RunningNotFoundPod(t *testing.T) {
 		Message: "",
 	}, nil)
 
-	rec := NewAppStatusReconciler(store, orch)
+	rec := NewAppStatusReconciler(store, orch, &fakeNotifier{})
 	require.NoError(t, rec.Tick(context.Background()))
 
 	// 写了 snapshot（观测记录）。
@@ -204,7 +239,7 @@ func TestAppStatusReconciler_RunningCrashLoopBackOff(t *testing.T) {
 		Message: "Back-off restarting failed container: CrashLoopBackOff",
 	}, nil)
 
-	rec := NewAppStatusReconciler(store, orch)
+	rec := NewAppStatusReconciler(store, orch, &fakeNotifier{})
 	require.NoError(t, rec.Tick(context.Background()))
 
 	// 写了 snapshot。
@@ -233,7 +268,7 @@ func TestAppStatusReconciler_RunningFailedPod(t *testing.T) {
 		Message: "OOMKilled",
 	}, nil)
 
-	rec := NewAppStatusReconciler(store, orch)
+	rec := NewAppStatusReconciler(store, orch, &fakeNotifier{})
 	require.NoError(t, rec.Tick(context.Background()))
 
 	// 写了 snapshot。
@@ -262,7 +297,7 @@ func TestAppStatusReconciler_RunningPendingPod(t *testing.T) {
 		Message: "",
 	}, nil)
 
-	rec := NewAppStatusReconciler(store, orch)
+	rec := NewAppStatusReconciler(store, orch, &fakeNotifier{})
 	require.NoError(t, rec.Tick(context.Background()))
 
 	// 写了 snapshot（观测记录）。
@@ -291,7 +326,7 @@ func TestAppStatusReconciler_BindingWaitingNotFound(t *testing.T) {
 		Message: "",
 	}, nil)
 
-	rec := NewAppStatusReconciler(store, orch)
+	rec := NewAppStatusReconciler(store, orch, &fakeNotifier{})
 	require.NoError(t, rec.Tick(context.Background()))
 
 	// 写了 snapshot（观测记录依然写入）。
@@ -323,7 +358,7 @@ func TestAppStatusReconciler_OrchErrorSkipsApp(t *testing.T) {
 		Raw:   []byte(`{"phase":"NotFound"}`),
 	}, nil)
 
-	rec := NewAppStatusReconciler(store, orch)
+	rec := NewAppStatusReconciler(store, orch, &fakeNotifier{})
 	// 整轮应返回 nil（尽力而为，不因单个 app 失败阻断整轮）。
 	require.NoError(t, rec.Tick(context.Background()))
 
@@ -361,7 +396,7 @@ func TestAppStatusReconciler_EmptyRawSkipsSnapshot(t *testing.T) {
 		Raw:   nil, // 空 Raw，不应写 snapshot
 	}, nil)
 
-	rec := NewAppStatusReconciler(store, orch)
+	rec := NewAppStatusReconciler(store, orch, &fakeNotifier{})
 	require.NoError(t, rec.Tick(context.Background()))
 
 	// Raw 为空，不应调用 SetAppRuntimeSnapshot。
@@ -391,7 +426,7 @@ func TestAppStatusReconciler_SnapshotWriteErrorDoesNotBlockGuard(t *testing.T) {
 		Message: "",
 	}, nil)
 
-	rec := NewAppStatusReconciler(store, orch)
+	rec := NewAppStatusReconciler(store, orch, &fakeNotifier{})
 	require.NoError(t, rec.Tick(context.Background()))
 
 	// 快照写入被尝试了（snapshotCalls 有记录，只是返回了错误）。
@@ -413,13 +448,50 @@ func TestAppStatusReconciler_ListRunningAppsError(t *testing.T) {
 
 	orch := newFakeOrch()
 
-	rec := NewAppStatusReconciler(store, orch)
+	rec := NewAppStatusReconciler(store, orch, &fakeNotifier{})
 	err := rec.Tick(context.Background())
 
 	// 整轮失败应返回错误，让调度器记录并等待下轮重试。
 	require.Error(t, err, "ListRunningApps 失败应返回错误")
 	assert.Empty(t, store.snapshotCalls, "整轮失败不应写 snapshot")
 	assert.Empty(t, store.statusCalls, "整轮失败不应写 status")
+}
+
+// ============================================================
+// 兜底恢复：error 但 pod 已 Ready → 重新入队 init job
+// ============================================================
+
+// TestReconcile_RecoverErrorWhenPodReady 验证 error 态但 pod 实际 Ready 的 app 被重新入队恢复。
+func TestReconcile_RecoverErrorWhenPodReady(t *testing.T) {
+	// 场景：app 卡在 error（如 WaitReady 曾误超时、manager 重启打断），但 pod 现已 Ready。
+	// 兜底应把其 running 的 init job requeue 回 pending 并通知 scheduler，让 worker 推进回 running。
+	store := newFakeAppStatusStore()
+	store.errorRows = []string{"app-err-ready"}
+	store.latestInitJob = sqlc.Job{ID: "job-1", Status: domain.JobStatusRunning} // 有历史 running job
+	orch := newFakeOrch()
+	orch.set("app-err-ready", k8sorch.AppStatus{Phase: "Running", Ready: true}, nil) // pod 真就绪
+	notifier := &fakeNotifier{}
+	rec := NewAppStatusReconciler(store, orch, notifier)
+
+	require.NoError(t, rec.Tick(context.Background()))
+	assert.Equal(t, []string{"job-1"}, store.requeuedJobs, "running 的 init job 应被 requeue 回 pending")
+	assert.Equal(t, "job-1", notifier.lastJobID, "requeue 后应通知 scheduler 立即拾取")
+}
+
+// TestReconcile_KeepErrorWhenPodNotReady 验证 error 态且 pod 仍不 Ready 时保持 error、不重新入队。
+func TestReconcile_KeepErrorWhenPodNotReady(t *testing.T) {
+	// 场景：pod 真坏（CrashLoopBackOff、未 Ready）。兜底守卫应避免对真失败 app 无限重试，
+	// 不 requeue、不通知，保持 error 不动。
+	store := newFakeAppStatusStore()
+	store.errorRows = []string{"app-err-bad"}
+	orch := newFakeOrch()
+	orch.set("app-err-bad", k8sorch.AppStatus{Phase: "Running", Ready: false, Message: "CrashLoopBackOff"}, nil)
+	notifier := &fakeNotifier{}
+	rec := NewAppStatusReconciler(store, orch, notifier)
+
+	require.NoError(t, rec.Tick(context.Background()))
+	assert.Empty(t, store.requeuedJobs, "pod 未 Ready 不应 requeue init job")
+	assert.Empty(t, notifier.lastJobID, "pod 未 Ready 不应通知 scheduler")
 }
 
 // ============================================================

@@ -402,6 +402,41 @@ func (q *Queries) ListAppsByOrgWithVersion(ctx context.Context, arg ListAppsByOr
 	return items, nil
 }
 
+const listErrorApps = `-- name: ListErrorApps :many
+SELECT id
+FROM apps
+WHERE deleted_at IS NULL
+  AND status = 'error'
+ORDER BY id
+`
+
+// reconciler 兜底用：列出 status=error 的 app。reconciler 查其 pod，若 hermes 实际 Ready
+// （说明并非真失败，只是状态没收敛，如 WaitReady 曾误超时但 pod 后来起来了），就重新入队
+// init job 推进到 running；pod 真坏则保持 error 不动。reaper 只扫 init 子状态、不管 error，
+// 此查询补上「init 失败成 error 后无法自愈」的洞。
+func (q *Queries) ListErrorApps(ctx context.Context) ([]string, error) {
+	rows, err := q.db.QueryContext(ctx, listErrorApps)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []string{}
+	for rows.Next() {
+		var id string
+		if err := rows.Scan(&id); err != nil {
+			return nil, err
+		}
+		items = append(items, id)
+	}
+	if err := rows.Close(); err != nil {
+		return nil, err
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
 const listRunningApps = `-- name: ListRunningApps :many
 SELECT id
 FROM apps
@@ -695,6 +730,20 @@ WHERE id = ? AND deleted_at IS NULL
 
 func (q *Queries) SoftDeleteApp(ctx context.Context, id string) error {
 	_, err := q.db.ExecContext(ctx, softDeleteApp, id)
+	return err
+}
+
+const touchApp = `-- name: TouchApp :exec
+UPDATE apps
+SET updated_at = now()
+WHERE id = ?
+`
+
+// 仅刷新 updated_at：worker 等待 pod Ready 期间的心跳。让 reaper 凭 updated_at 区分
+// 「worker 仍在等待（拉镜像可能数十分钟）」与「worker 已死的孤儿」，避免误回收正在处理的 job。
+// 不改 status 或其它字段。
+func (q *Queries) TouchApp(ctx context.Context, id string) error {
+	_, err := q.db.ExecContext(ctx, touchApp, id)
 	return err
 }
 

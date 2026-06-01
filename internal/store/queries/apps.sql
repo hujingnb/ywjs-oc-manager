@@ -35,6 +35,14 @@ UPDATE apps
 SET status = ?, updated_at = now()
 WHERE id = ?;
 
+-- name: TouchApp :exec
+-- 仅刷新 updated_at：worker 等待 pod Ready 期间的心跳。让 reaper 凭 updated_at 区分
+-- 「worker 仍在等待（拉镜像可能数十分钟）」与「worker 已死的孤儿」，避免误回收正在处理的 job。
+-- 不改 status 或其它字段。
+UPDATE apps
+SET updated_at = now()
+WHERE id = ?;
+
 -- name: SetAppNewAPIKey :exec
 UPDATE apps
 SET
@@ -136,6 +144,17 @@ FROM apps
 WHERE deleted_at IS NULL
   AND status IN ('pulling_runtime_image','preparing_runtime','creating_container','starting')
   AND updated_at < ?
+ORDER BY id;
+
+-- name: ListErrorApps :many
+-- reconciler 兜底用：列出 status=error 的 app。reconciler 查其 pod，若 hermes 实际 Ready
+-- （说明并非真失败，只是状态没收敛，如 WaitReady 曾误超时但 pod 后来起来了），就重新入队
+-- init job 推进到 running；pod 真坏则保持 error 不动。reaper 只扫 init 子状态、不管 error，
+-- 此查询补上「init 失败成 error 后无法自愈」的洞。
+SELECT id
+FROM apps
+WHERE deleted_at IS NULL
+  AND status = 'error'
 ORDER BY id;
 
 -- name: UpdateAppRuntimeImage :exec

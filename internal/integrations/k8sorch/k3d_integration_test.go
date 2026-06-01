@@ -174,7 +174,7 @@ func TestK3dEnsureAppCreatesResources(t *testing.T) {
 	// ---- WaitReady 软断言 ----
 	// pod Ready 依赖完整 bootstrap 闭环 + 真实镜像，属 A2b 合并验证范围；
 	// 此处仅记录未达 Ready 的原因，不 fail。
-	werr := adapter.WaitReady(ctx, id, 90*time.Second)
+	werr := adapter.WaitReady(ctx, id, 90*time.Second, nil)
 	if werr != nil {
 		t.Logf("WaitReady 未达 Ready（pod Ready 依赖完整 bootstrap 闭环 + 真实镜像，属 A2b 合并验证范围）：%v", werr)
 	}

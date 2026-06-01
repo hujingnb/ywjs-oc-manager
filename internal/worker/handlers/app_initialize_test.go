@@ -49,8 +49,12 @@ func (f *fakeOrchestrator) EnsureApp(_ context.Context, spec k8sorch.AppSpec) er
 	return f.ensureAppErr
 }
 
-func (f *fakeOrchestrator) WaitReady(_ context.Context, appID string, _ time.Duration) error {
+func (f *fakeOrchestrator) WaitReady(_ context.Context, appID string, _ time.Duration, onPoll func(k8sorch.AppStatus)) error {
 	f.waitReadyCalls = append(f.waitReadyCalls, appID)
+	// 模拟真实 WaitReady 的一轮轮询回调，触发调用方心跳（phaseStart 的 TouchApp）。
+	if onPoll != nil {
+		onPoll(k8sorch.AppStatus{})
+	}
 	return f.waitReadyErr
 }
 
@@ -137,6 +141,9 @@ func TestAppInitializeHandlesHappyPath(t *testing.T) {
 	// WaitReady 必须被调用一次。
 	require.Len(t, orch.waitReadyCalls, 1, "WaitReady 应被调用 1 次")
 	assert.Equal(t, testAppID, orch.waitReadyCalls[0], "WaitReady 应传入 app.ID")
+
+	// 心跳：phaseStart 等待期间每轮 WaitReady 回调都刷新 updated_at，避免 reaper 误判孤儿。
+	assert.GreaterOrEqual(t, store.touchCount, 1, "phaseStart 应经 WaitReady 回调触发至少一次心跳 TouchApp")
 
 	// 终态应为 binding_waiting。
 	assert.Equal(t, domain.AppStatusBindingWaiting, store.app.Status)
@@ -361,6 +368,8 @@ type appInitStub struct {
 	// statusCalls 按顺序记录每次 SetAppStatus 调用参数, 用于断言 4 阶段推进序列
 	// (draft → pulling_runtime_image → ... → binding_waiting)。
 	statusCalls []sqlc.SetAppStatusParams
+	// touchCount 记录 TouchApp(心跳)被调用次数, 用于断言 phaseStart 等待期心跳生效。
+	touchCount int
 	// failedSet 标记 MarkAppFailed 是否被调用, 用于失败路径精确断言。
 	failedSet bool
 	// lastFailed 记录最近一次 MarkAppFailed 参数, 用于断言 last_error_status 写入值。
@@ -433,6 +442,12 @@ func (s *appInitStub) SetAppNewAPIKey(_ context.Context, arg sqlc.SetAppNewAPIKe
 	s.app.NewapiKeyID = arg.NewapiKeyID
 	s.app.NewapiKeyCiphertext = arg.NewapiKeyCiphertext
 	s.app.NewapiKeyName = arg.NewapiKeyName
+	return nil
+}
+
+// TouchApp 记录心跳调用次数；phaseStart 等待期间每轮 WaitReady 回调都会触发一次。
+func (s *appInitStub) TouchApp(_ context.Context, _ string) error {
+	s.touchCount++
 	return nil
 }
 

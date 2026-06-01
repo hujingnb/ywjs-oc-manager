@@ -28,6 +28,9 @@ type AppInitializeStore interface {
 	GetUser(ctx context.Context, id string) (sqlc.User, error)
 	SetAppNewAPIKey(ctx context.Context, arg sqlc.SetAppNewAPIKeyParams) error
 	SetAppStatus(ctx context.Context, arg sqlc.SetAppStatusParams) error
+	// TouchApp 仅刷新 updated_at：phaseStart 等待 pod Ready 期间的心跳，
+	// 让 reaper 凭 updated_at 区分「worker 仍在处理」与「孤儿」，避免误回收。
+	TouchApp(ctx context.Context, id string) error
 	CreateAuditLog(ctx context.Context, arg sqlc.CreateAuditLogParams) error
 	// 新增:5 阶段 handler 落进度与失败状态
 	SetAppProgress(ctx context.Context, arg sqlc.SetAppProgressParams) error
@@ -180,10 +183,11 @@ func (h *AppInitializeHandler) SetOrchestrator(orch k8sorch.Orchestrator, k8sCfg
 	h.k8sCfg = k8sCfg
 }
 
-// readyTimeout 是 WaitReady 等待 pod Ready 的总时长上限。
-// k8s 镜像拉取 + 容器启动通常在分钟级；5 分钟足以覆盖慢网络拉取场景，
-// 同时能在 pod 卡死时将实例收敛到 error 等待重试。
-const readyTimeout = 5 * time.Minute
+// readyTimeout 是 WaitReady 的宽松硬上限（仅防永久挂起，不是「正常该在此内就绪」的预期）。
+// WaitReady 已对 pod 拉镜像/调度等正常启动过程持续等待、只对确定坏态快速失败，故这里放宽到
+// 30min 容忍大镜像首次冷启动（节点无缓存时可能数十分钟）；正常远小于此，配合镜像预热更快。
+// 真超过它才返回超时 → markFailed，再由 reconciler 在 pod 实际 Ready 后兜底收敛。
+const readyTimeout = 30 * time.Minute
 
 // Handle 是 worker 调用入口。
 // 4 阶段串行推进（k8s 路径）：版本校验 + ensureAPIKey/token → EnsureApp → WaitReady → binding_waiting。
@@ -342,13 +346,20 @@ func (h *AppInitializeHandler) phaseCreate(ctx context.Context, app *sqlc.App, i
 	return nil
 }
 
-// phaseStart：WaitReady 等待 pod Ready（带 readyTimeout）。
+// phaseStart：WaitReady 等待 pod Ready（带 readyTimeout 宽松硬上限）。
 // orch 未注入时直接跳过（测试装配 / Task14 前）。
 func (h *AppInitializeHandler) phaseStart(ctx context.Context, app *sqlc.App) error {
 	if h.orch == nil {
 		return nil
 	}
-	if err := h.orch.WaitReady(ctx, app.ID, readyTimeout); err != nil {
+	// 心跳：WaitReady 每轮回调时刷新 app.updated_at。等待 pod Ready 期间（拉镜像可能数十分钟）
+	// app 行不会有其它写入，若不心跳，reaper 会因 updated_at 落后阈值误判为孤儿、requeue 正在
+	// 运行的本 job 造成竞争。持续心跳让 reaper 只在 worker 真死（心跳停）时才回收。
+	heartbeat := func(_ k8sorch.AppStatus) {
+		// 心跳失败不影响等待主流程（下一轮还会再刷），静默忽略。
+		_ = h.store.TouchApp(ctx, app.ID)
+	}
+	if err := h.orch.WaitReady(ctx, app.ID, readyTimeout, heartbeat); err != nil {
 		return fmt.Errorf("等待 k8s pod Ready 失败: %w", err)
 	}
 	return nil

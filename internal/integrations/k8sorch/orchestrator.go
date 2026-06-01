@@ -5,6 +5,7 @@ package k8sorch
 
 import (
 	"context"
+	"strings"
 	"time"
 )
 
@@ -12,8 +13,11 @@ import (
 type Orchestrator interface {
 	// EnsureApp 渲染并幂等 apply Deployment + Service + Secret（create-or-update）。
 	EnsureApp(ctx context.Context, spec AppSpec) error
-	// WaitReady 等待 app 的 pod Ready（带 timeout）。
-	WaitReady(ctx context.Context, appID string, timeout time.Duration) error
+	// WaitReady 等待 app 的 pod Ready（timeout 仅作防永久挂起的宽松硬上限）。pod 在调度 /
+	// 拉镜像 / PodInitializing 等正常启动过程中持续等待，不因耗时长而失败；仅当 pod 进入
+	// 确定性坏态（见 IsTerminalBad）才快速失败返回 error。onPoll 非 nil 时每轮轮询回调当前
+	// 状态，供调用方做心跳（如刷新 app.updated_at，让 reaper 区分"在等"与"孤儿"）；可为 nil。
+	WaitReady(ctx context.Context, appID string, timeout time.Duration, onPoll func(AppStatus)) error
 	// Scale 伸缩 replicas（0=停，1=起）。
 	Scale(ctx context.Context, appID string, replicas int32) error
 	// UpdateImage patch Deployment 主容器（hermes/oc-ops 同镜像）镜像，触发 Recreate 重启。
@@ -79,4 +83,28 @@ type AppStatus struct {
 	Message string
 	// Raw 是 pod.Status 序列化，存入 runtime_snapshot_json。
 	Raw []byte
+}
+
+// terminalRestartThreshold 是判定 hermes 容器「反复崩溃」的重启次数阈值。
+// 启动过程中的偶发单次重启不算坏态，累计达到该次数才视为确定性失败。
+const terminalRestartThreshold = 3
+
+// IsTerminalBad 判断 pod 是否处于确定性坏态——即 k8s 不会自动让它恢复成 Ready 的状态，
+// 应快速失败 / 推 error；而非启动过程中的正常瞬态（调度中、拉镜像、PodInitializing）。
+// WaitReady 用它决定是否提前失败，AppStatusReconciler 用它决定 running→error，
+// 两处共用同一口径，避免「一处认为坏、另一处认为正常」的判定漂移。
+func IsTerminalBad(st AppStatus) bool {
+	// Deployment/pod 真消失或 pod 进入 Failed 终相：k8s 不会再把它拉回 Ready。
+	if st.Phase == "NotFound" || st.Phase == "Failed" {
+		return true
+	}
+	// 容器反复崩溃退避：业务可见的持续异常，不是启动瞬态。
+	if strings.Contains(st.Message, "CrashLoopBackOff") {
+		return true
+	}
+	// hermes 容器重启次数达阈值：同样是反复崩溃的确定信号。
+	if st.RestartCount >= terminalRestartThreshold {
+		return true
+	}
+	return false
 }
