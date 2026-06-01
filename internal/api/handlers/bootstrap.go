@@ -3,6 +3,7 @@ package handlers
 import (
 	"context"
 	"errors"
+	"log/slog"
 	"net/http"
 	"strings"
 
@@ -83,6 +84,9 @@ func (h *BootstrapHandler) Bootstrap(c *gin.Context) {
 			c.JSON(http.StatusConflict, apierror.New("APP_NOT_READY", "app 未就绪"))
 			return
 		}
+		// 记录具体内部错误便于运维定位（如 S3 endpoint 缺 scheme、依赖不可达）：对外仍只回
+		// 泛化 message 不泄露细节，但日志带上 app id 与底层 err，免去再复现 bootstrap 的麻烦。
+		slog.ErrorContext(c.Request.Context(), "bootstrap 组装失败", "app_id", app.ID, "error", err)
 		c.JSON(http.StatusInternalServerError, apierror.New("INTERNAL", "bootstrap 组装失败"))
 		return
 	}
