@@ -20,15 +20,12 @@
     <n-descriptions v-else :column="2" bordered size="small">
       <n-descriptions-item label="状态">
         <AppStatusTag :status="app.status" />
-        <!-- 初始化 5 个子状态时额外展示进度条:total>0 走百分比,total=0 走不定进度条 -->
-        <div v-if="isInitPhase(app.status)" class="init-progress">
-          <n-progress
-            type="line"
-            :percentage="initPercentage"
-            indicator-placement="inside"
-            :processing="initIndeterminate"
-          />
-          <span v-if="!initIndeterminate" class="init-progress-bytes">
+        <!-- 仅当处于初始化子状态且拿到了可量化进度(total>0)才显示进度条；拉镜像 / 起容器
+             这类底层不暴露细粒度进度的阶段(total=0)不显示进度条，避免 0% / 不定进度条让用户
+             误以为卡死，此时只保留上方的状态文案（如「启动容器」）。 -->
+        <div v-if="isInitPhase(app.status) && !initIndeterminate" class="init-progress">
+          <n-progress type="line" :percentage="initPercentage" indicator-placement="inside" />
+          <span class="init-progress-bytes">
             {{ formatBytes(app.progress_current) }} / {{ formatBytes(app.progress_total) }}
           </span>
         </div>
