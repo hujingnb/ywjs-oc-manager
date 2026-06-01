@@ -1,0 +1,82 @@
+# 生产自建 Elasticsearch（替代外部 7.10.2，ragflow v0.25.6 要求 ES 8.x）。
+# single-node + 密码认证 + 关 TLS（ragflow 用 http + 凭证连接），与本地一致。
+# 持久化引用「预先手动创建」的 PVC elasticsearch-data（集群无 StorageClass，
+# 由移动云 csi.ecloud.com 云盘静态供给）；故用 Deployment + Recreate 引用现成 PVC，
+# 而非 StatefulSet 的 volumeClaimTemplates（动态供给会 Pending）。
+apiVersion: v1
+kind: Service
+metadata:
+  name: elasticsearch
+  namespace: ocm
+spec:
+  selector: { app: elasticsearch }
+  ports:
+    - port: 9200
+      targetPort: 9200
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: elasticsearch
+  namespace: ocm
+spec:
+  replicas: 1
+  # Recreate：单副本独占 RWO 云盘，滚动更新时若新旧 pod 并存会抢盘挂载失败。
+  strategy: { type: Recreate }
+  selector: { matchLabels: { app: elasticsearch } }
+  template:
+    metadata:
+      labels: { app: elasticsearch }
+    spec:
+      imagePullSecrets:
+        - name: acr-pull
+      containers:
+        - name: elasticsearch
+          # prod 集群拉不到 docker.io，走私有 ACR ywjs_public（与 new-api/ragflow 一致）。
+          # 若 ACR 暂无该镜像，需先把 elasticsearch:8.11.3 推到该仓库（见交付说明）。
+          image: crpi-nu3ibz4f07feyghi.cn-beijing.personal.cr.aliyuncs.com/ywjs_public/elasticsearch:8.11.3
+          env:
+            - name: node.name
+              value: elasticsearch
+            - name: ELASTIC_PASSWORD
+              valueFrom: { secretKeyRef: { name: ocm-secrets, key: elastic-password } }
+            - name: discovery.type
+              value: single-node
+            - name: xpack.security.enabled
+              value: "true"
+            # ragflow 用 http 连接，关闭 http/transport 层 TLS（与本地一致）。
+            - name: xpack.security.http.ssl.enabled
+              value: "false"
+            - name: xpack.security.transport.ssl.enabled
+              value: "false"
+            - name: bootstrap.memory_lock
+              value: "false"
+            # 堆设 4g（容器内存上限 8Gi 的一半，另一半留给 Lucene page cache /
+            # 向量 HNSW / direct buffer）；负载增大可调，并同步调整 resources。
+            - name: ES_JAVA_OPTS
+              value: "-Xms4g -Xmx4g"
+            - name: TZ
+              value: Asia/Shanghai
+          ports:
+            - containerPort: 9200
+          resources:
+            requests:
+              cpu: "1"
+              memory: "4Gi"
+            limits:
+              cpu: "4"
+              memory: "8Gi"
+          volumeMounts:
+            - { name: data, mountPath: /usr/share/elasticsearch/data }
+          # security 开启时 ES 对 / 返回 401，无认证 httpGet 探针会永远失败；
+          # 改用 tcpSocket 探针（端口可连即就绪，ragflow 用凭证连接）。
+          readinessProbe:
+            tcpSocket: { port: 9200 }
+            initialDelaySeconds: 20
+            periodSeconds: 10
+            failureThreshold: 30
+      volumes:
+        # 引用预先手动创建的 PVC（移动云云盘静态供给）；务必先建好同名 PVC 再 apply。
+        - name: data
+          persistentVolumeClaim:
+            claimName: elasticsearch-data
