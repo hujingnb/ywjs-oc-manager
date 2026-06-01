@@ -361,26 +361,18 @@ prod-deploy-manager: build-api-image build-web-image ## 构建推送 api+web 并
 # 渲染 app pod 时引用），故发版方式与 api/web 不同——不能 set image，而是把新镜像 ref 写回
 # 本地 secret.yaml 的对应字段（hermes→hermes.runtime_images[].ref，ops→k8s.ops_image），
 # 再走 update-config（apply secret + 重启 manager-api）让新镜像在后续渲染的 app pod 生效。
-# 同时把镜像预热 DaemonSet（image-prepuller.yaml）里的 image 同步成新 tag 并重新 apply，
-# 否则各节点预热的还是旧镜像、新 app pod 仍要现拉新镜像、冷启动慢。
-# secret.yaml 用引号包裹值（ref:"..."/ops_image:"..."），预热 DaemonSet 用 YAML 裸值
-# （image: ...），故两处 sed 锚点不同。apply 预热 DaemonSet 不带 -n：对象自带 oc-apps ns，
-# 带 -n ocm 会与其声明的 namespace 冲突（与 update-config apply secret 同理）。
+# 镜像仓库迁到同区移动云后节点拉取快，不再需要预热 DaemonSet。
 .PHONY: prod-deploy-hermes
-prod-deploy-hermes: build-hermes-image ## 构建推送 hermes 镜像→写回 secret.yaml 与预热 DaemonSet→update-config 生效
+prod-deploy-hermes: build-hermes-image ## 构建推送 hermes 镜像→写回 secret.yaml→update-config 生效
 	sed -i -E 's#ref: "[^"]*oc-manager-hermes:[^"]*"#ref: "$(HERMES_IMAGE)"#' deploy/k8s/prod/secret.yaml
-	sed -i -E 's#image: [^[:space:]]*oc-manager-hermes:[^[:space:]]*#image: $(HERMES_IMAGE)#' deploy/k8s/prod/image-prepuller.yaml
-	@echo "✅ secret.yaml 与 image-prepuller.yaml 的 hermes 镜像已更新为 $(HERMES_IMAGE)"
+	@echo "✅ secret.yaml 的 hermes 镜像已更新为 $(HERMES_IMAGE)"
 	$(MAKE) update-config
-	kubectl --kubeconfig $(PROD_KUBECONFIG) apply -f deploy/k8s/prod/image-prepuller.yaml
 
 .PHONY: prod-deploy-ops
-prod-deploy-ops: build-ops-runtime ## 构建推送 ops 镜像→写回 secret.yaml 与预热 DaemonSet→update-config 生效
+prod-deploy-ops: build-ops-runtime ## 构建推送 ops 镜像→写回 secret.yaml→update-config 生效
 	sed -i -E 's#ops_image: "[^"]*oc-manager-ops:[^"]*"#ops_image: "$(OPS_IMAGE_REPO):$(IMAGE_TAG)"#' deploy/k8s/prod/secret.yaml
-	sed -i -E 's#image: [^[:space:]]*oc-manager-ops:[^[:space:]]*#image: $(OPS_IMAGE_REPO):$(IMAGE_TAG)#' deploy/k8s/prod/image-prepuller.yaml
-	@echo "✅ secret.yaml 与 image-prepuller.yaml 的 ops 镜像已更新为 $(OPS_IMAGE_REPO):$(IMAGE_TAG)"
+	@echo "✅ secret.yaml 的 ops 镜像已更新为 $(OPS_IMAGE_REPO):$(IMAGE_TAG)"
 	$(MAKE) update-config
-	kubectl --kubeconfig $(PROD_KUBECONFIG) apply -f deploy/k8s/prod/image-prepuller.yaml
 
 ##@ 调试脚本
 
