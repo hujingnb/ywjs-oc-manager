@@ -134,6 +134,11 @@ spec:
               valueFrom: { secretKeyRef: { name: ocm-secrets, key: ragflow-s3-access-key } }
             - name: S3_SECRET_KEY
               valueFrom: { secretKeyRef: { name: ocm-secrets, key: ragflow-s3-secret-key } }
+            # 单一固定桶下用 prefix 隔离对象 key：s3_conn.py 把 key 拼成
+            # {prefix}/{kb_id}/{文件名}。不设则 key 仅为纯文件名、堆在桶根目录且不同知识库
+            # 同名文件互相覆盖。设为 ragflow 后，各组织/应用知识库按 kb_id 自动分目录隔离。
+            - name: S3_PREFIX_PATH
+              value: ragflow
             # botocore≥1.36 默认对 PutObject 走 aws-chunked 流式 + CRC32 校验和 trailer、不带
             # Content-Length；移动云 EOS 不支持该方式，会返回 MissingContentLength 导致写对象失败
             # （表现为上传后 EOS 无文件、解析读不到）。改回 when_required 让普通写恢复 Content-Length。
