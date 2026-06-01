@@ -34,10 +34,14 @@ override GIT_DIRTY_SUFFIX := $(strip $(shell git diff --quiet 2>/dev/null && git
 # 使用 override 防止命令行 IMAGE_TAG=latest 绕过 tag 规则。
 override IMAGE_TAG := $(IMAGE_TIMESTAMP)-$(GIT_COMMIT_SHORT)$(GIT_DIRTY_SUFFIX)
 
-# 各服务生产镜像仓库（统一走 aliyun 私有 ACR ywjs_app 命名空间）。
+# 各服务生产镜像仓库（统一走移动云私有仓库 app 命名空间，与集群同区拉取快）。
 # 走其他 registry 时在命令行覆盖对应变量即可。
-API_IMAGE_REPO   ?= crpi-nu3ibz4f07feyghi.cn-beijing.personal.cr.aliyuncs.com/ywjs_app/oc-manager-api
-WEB_IMAGE_REPO   ?= crpi-nu3ibz4f07feyghi.cn-beijing.personal.cr.aliyuncs.com/ywjs_app/oc-manager-web
+PROD_REGISTRY    ?= ywjs-cc41758e.ecis.huabei-3.cmecloud.cn
+PROD_APP_NS      ?= app
+# 构建期基础镜像（golang/node/nginx/alpine/python）走的 public 命名空间，作为 DOCKER_HUB_MIRROR。
+PROD_PUBLIC_REPO ?= $(PROD_REGISTRY)/public
+API_IMAGE_REPO   ?= $(PROD_REGISTRY)/$(PROD_APP_NS)/oc-manager-api
+WEB_IMAGE_REPO   ?= $(PROD_REGISTRY)/$(PROD_APP_NS)/oc-manager-web
 
 # hermes runtime 生产镜像仓库，与上方三个服务保持一致命名风格。
 # HERMES_VARIANT 选择 runtime/hermes/ 下的 versioned variant 子目录（自包含 Dockerfile + 资产）。
@@ -46,13 +50,13 @@ HERMES_VARIANT       ?= hermes-v2026.5.16
 # HERMES_VARIANT_DIR 只能由 HERMES_VARIANT 派生，避免命令行直接指向任意目录绕过版本校验。
 override HERMES_VARIANT_DIR := runtime/hermes/$(HERMES_VARIANT)
 override HERMES_VERSION := $(strip $(shell if [ -f "$(HERMES_VARIANT_DIR)/version.txt" ]; then cat "$(HERMES_VARIANT_DIR)/version.txt"; fi))
-HERMES_IMAGE_REPO    ?= crpi-nu3ibz4f07feyghi.cn-beijing.personal.cr.aliyuncs.com/ywjs_app/oc-manager-hermes
+HERMES_IMAGE_REPO    ?= $(PROD_REGISTRY)/$(PROD_APP_NS)/oc-manager-hermes
 # hermes tag 形如 v2026.5.16-2026-05-21-12-00-00-be70e40a，便于从镜像引用直接看出上游版本和源码提交。
 override HERMES_IMAGE := $(HERMES_IMAGE_REPO):$(HERMES_VERSION)-$(IMAGE_TAG)
 
 # ops runtime 镜像仓库（pod initContainer/sidecar 搬运脚本），与其余服务保持一致命名风格。
 # 生产发布用 IMAGE_TAG（时间戳 + commit），本地联调固定 :dev。
-OPS_IMAGE_REPO ?= crpi-nu3ibz4f07feyghi.cn-beijing.personal.cr.aliyuncs.com/ywjs_app/oc-manager-ops
+OPS_IMAGE_REPO ?= $(PROD_REGISTRY)/$(PROD_APP_NS)/oc-manager-ops
 
 # —— 线上 k8s 集群（区别于本地 k3d 的默认 context）——
 # 线上集群不在默认 kubeconfig 的 context 里，须用独立 kubeconfig 连接；
@@ -278,17 +282,17 @@ build-hermes-runtime: hermes-inject-contract ## 本地 dev 构建 hermes runtime
 
 .PHONY: build-api-image
 build-api-image: .guard-image-git-state ## 构建并推送 manager-api 生产镜像，tag 取时间戳 + git commit
-	docker build -t $(API_IMAGE_REPO):$(IMAGE_TAG) -f cmd/server/Dockerfile .
+	docker build --build-arg DOCKER_HUB_MIRROR=$(PROD_PUBLIC_REPO) -t $(API_IMAGE_REPO):$(IMAGE_TAG) -f cmd/server/Dockerfile .
 	docker push $(API_IMAGE_REPO):$(IMAGE_TAG)
 	@echo "✅ manager-api 镜像 $(API_IMAGE_REPO):$(IMAGE_TAG) 已构建并推送"
 
 .PHONY: build-web-image
 build-web-image: .guard-image-git-state ## 构建并推送 manager-web 生产镜像，tag 取时间戳 + git commit
-	docker build -t $(WEB_IMAGE_REPO):$(IMAGE_TAG) -f web/Dockerfile ./web
+	docker build --build-arg DOCKER_HUB_MIRROR=$(PROD_PUBLIC_REPO) -t $(WEB_IMAGE_REPO):$(IMAGE_TAG) -f web/Dockerfile ./web
 	docker push $(WEB_IMAGE_REPO):$(IMAGE_TAG)
 	@echo "✅ manager-web 镜像 $(WEB_IMAGE_REPO):$(IMAGE_TAG) 已构建并推送"
 
-# build-hermes-image 构建并推送 hermes runtime 生产镜像，直接打上 aliyun ACR 完整 tag。
+# build-hermes-image 构建并推送 hermes runtime 生产镜像，直接打上移动云仓库完整 tag。
 # build context 取自 HERMES_VARIANT 指向的子目录（自包含 Dockerfile + 资产）。
 # build 与 push 在同一 shell 块内执行：先 build，无论成败都清理注入的 contract 目录，
 # build 成功才 push（失败则带原始退出码中止）。推送完成后输出最终镜像引用，
@@ -298,6 +302,7 @@ build-hermes-image: .guard-image-git-state .guard-hermes-version hermes-inject-c
 	status=0; \
 	docker build \
 	  -t "$(HERMES_IMAGE)" \
+	  --build-arg DOCKER_HUB_MIRROR=$(PROD_PUBLIC_REPO) \
 	  --build-arg "HERMES_REF=$(HERMES_VERSION)" \
 	  --build-arg "OC_IMAGE_VARIANT=$(HERMES_VARIANT)" \
 	  --build-arg OC_BUILD_TS=$(IMAGE_TIMESTAMP) \
@@ -311,7 +316,7 @@ build-hermes-image: .guard-image-git-state .guard-hermes-version hermes-inject-c
 # runtime/ops/ 是自包含 build context（含 Dockerfile 与脚本），无需额外前置依赖。
 # 镜像 tag 复用 IMAGE_TAG（时间戳 + commit + 可选 -dirty），与其他服务保持一致可追溯性。
 build-ops-runtime: .guard-image-git-state ## 构建 ops 运行时镜像并推生产 registry
-	docker build -t $(OPS_IMAGE_REPO):$(IMAGE_TAG) runtime/ops/
+	docker build --build-arg ALPINE_MIRROR=$(PROD_PUBLIC_REPO) -t $(OPS_IMAGE_REPO):$(IMAGE_TAG) runtime/ops/
 	docker push $(OPS_IMAGE_REPO):$(IMAGE_TAG)
 	@echo "✅ ops 镜像 $(OPS_IMAGE_REPO):$(IMAGE_TAG) 已构建并推送"
 
