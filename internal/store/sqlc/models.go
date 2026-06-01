@@ -131,6 +131,7 @@ type Organization struct {
 	CreatedAt           time.Time       `db:"created_at" json:"created_at"`
 	UpdatedAt           time.Time       `db:"updated_at" json:"updated_at"`
 	DeletedAt           null.Time       `db:"deleted_at" json:"deleted_at"`
+	MaxInstanceCount    null.Int        `db:"max_instance_count" json:"max_instance_count"`
 }
 
 type RagflowDataset struct {

@@ -26,6 +26,18 @@ func (q *Queries) ClearAppProgress(ctx context.Context, id string) error {
 	return err
 }
 
+const countActiveAppsByOrg = `-- name: CountActiveAppsByOrg :one
+SELECT COUNT(*) FROM apps WHERE org_id = ? AND deleted_at IS NULL
+`
+
+// 统计企业当前未删除实例数（apps.deleted_at IS NULL），用于企业实例数量上限校验。
+func (q *Queries) CountActiveAppsByOrg(ctx context.Context, orgID string) (int64, error) {
+	row := q.db.QueryRowContext(ctx, countActiveAppsByOrg, orgID)
+	var count int64
+	err := row.Scan(&count)
+	return count, err
+}
+
 const createApp = `-- name: CreateApp :exec
 INSERT INTO apps (
     id,

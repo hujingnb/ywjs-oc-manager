@@ -21,6 +21,8 @@ type Querier interface {
 	ClaimRAGFlowDatasetCreation(ctx context.Context, arg ClaimRAGFlowDatasetCreationParams) error
 	// transitionTo / RequestInitialize 强制清空进度字段。
 	ClearAppProgress(ctx context.Context, id string) error
+	// 统计企业当前未删除实例数（apps.deleted_at IS NULL），用于企业实例数量上限校验。
+	CountActiveAppsByOrg(ctx context.Context, orgID string) (int64, error)
 	// 平台总览组织计数：剔除 soft-deleted；status='active' 与 'disabled' 都算入册组织。
 	CountActiveOrganizations(ctx context.Context) (int64, error)
 	// 平台总览成员计数：仅 active 状态、非 platform_admin。

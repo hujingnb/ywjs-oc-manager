@@ -22,9 +22,10 @@ INSERT INTO organizations (
     contact_phone,
     remark,
     credit_warning_threshold,
+    max_instance_count,
     assistant_version_ids
 ) VALUES (
-    ?, ?, ?, ?, ?, ?, ?, ?, ?
+    ?, ?, ?, ?, ?, ?, ?, ?, ?, ?
 )
 `
 
@@ -37,6 +38,7 @@ type CreateOrganizationParams struct {
 	ContactPhone           null.String     `db:"contact_phone" json:"contact_phone"`
 	Remark                 null.String     `db:"remark" json:"remark"`
 	CreditWarningThreshold null.Int        `db:"credit_warning_threshold" json:"credit_warning_threshold"`
+	MaxInstanceCount       null.Int        `db:"max_instance_count" json:"max_instance_count"`
 	AssistantVersionIds    json.RawMessage `db:"assistant_version_ids" json:"assistant_version_ids"`
 }
 
@@ -50,13 +52,14 @@ func (q *Queries) CreateOrganization(ctx context.Context, arg CreateOrganization
 		arg.ContactPhone,
 		arg.Remark,
 		arg.CreditWarningThreshold,
+		arg.MaxInstanceCount,
 		arg.AssistantVersionIds,
 	)
 	return err
 }
 
 const getOrganization = `-- name: GetOrganization :one
-SELECT id, name, status, contact_name, contact_phone, remark, newapi_user_id, credit_warning_threshold, newapi_user_credentials_ciphertext, code, newapi_username, assistant_version_ids, created_at, updated_at, deleted_at
+SELECT id, name, status, contact_name, contact_phone, remark, newapi_user_id, credit_warning_threshold, newapi_user_credentials_ciphertext, code, newapi_username, assistant_version_ids, created_at, updated_at, deleted_at, max_instance_count
 FROM organizations
 WHERE id = ?
 `
@@ -80,12 +83,13 @@ func (q *Queries) GetOrganization(ctx context.Context, id string) (Organization,
 		&i.CreatedAt,
 		&i.UpdatedAt,
 		&i.DeletedAt,
+		&i.MaxInstanceCount,
 	)
 	return i, err
 }
 
 const getOrganizationByCode = `-- name: GetOrganizationByCode :one
-SELECT id, name, status, contact_name, contact_phone, remark, newapi_user_id, credit_warning_threshold, newapi_user_credentials_ciphertext, code, newapi_username, assistant_version_ids, created_at, updated_at, deleted_at
+SELECT id, name, status, contact_name, contact_phone, remark, newapi_user_id, credit_warning_threshold, newapi_user_credentials_ciphertext, code, newapi_username, assistant_version_ids, created_at, updated_at, deleted_at, max_instance_count
 FROM organizations
 WHERE code = ?
 `
@@ -109,12 +113,13 @@ func (q *Queries) GetOrganizationByCode(ctx context.Context, code string) (Organ
 		&i.CreatedAt,
 		&i.UpdatedAt,
 		&i.DeletedAt,
+		&i.MaxInstanceCount,
 	)
 	return i, err
 }
 
 const getOrganizationByName = `-- name: GetOrganizationByName :one
-SELECT id, name, status, contact_name, contact_phone, remark, newapi_user_id, credit_warning_threshold, newapi_user_credentials_ciphertext, code, newapi_username, assistant_version_ids, created_at, updated_at, deleted_at
+SELECT id, name, status, contact_name, contact_phone, remark, newapi_user_id, credit_warning_threshold, newapi_user_credentials_ciphertext, code, newapi_username, assistant_version_ids, created_at, updated_at, deleted_at, max_instance_count
 FROM organizations
 WHERE name = ?
 `
@@ -138,12 +143,13 @@ func (q *Queries) GetOrganizationByName(ctx context.Context, name string) (Organ
 		&i.CreatedAt,
 		&i.UpdatedAt,
 		&i.DeletedAt,
+		&i.MaxInstanceCount,
 	)
 	return i, err
 }
 
 const getOrganizationForUpdate = `-- name: GetOrganizationForUpdate :one
-SELECT id, name, status, contact_name, contact_phone, remark, newapi_user_id, credit_warning_threshold, newapi_user_credentials_ciphertext, code, newapi_username, assistant_version_ids, created_at, updated_at, deleted_at
+SELECT id, name, status, contact_name, contact_phone, remark, newapi_user_id, credit_warning_threshold, newapi_user_credentials_ciphertext, code, newapi_username, assistant_version_ids, created_at, updated_at, deleted_at, max_instance_count
 FROM organizations
 WHERE id = ?
 FOR UPDATE
@@ -169,6 +175,7 @@ func (q *Queries) GetOrganizationForUpdate(ctx context.Context, id string) (Orga
 		&i.CreatedAt,
 		&i.UpdatedAt,
 		&i.DeletedAt,
+		&i.MaxInstanceCount,
 	)
 	return i, err
 }
@@ -185,7 +192,7 @@ func (q *Queries) HardDeleteOrganization(ctx context.Context, id string) error {
 }
 
 const listAllActiveOrganizations = `-- name: ListAllActiveOrganizations :many
-SELECT id, name, status, contact_name, contact_phone, remark, newapi_user_id, credit_warning_threshold, newapi_user_credentials_ciphertext, code, newapi_username, assistant_version_ids, created_at, updated_at, deleted_at
+SELECT id, name, status, contact_name, contact_phone, remark, newapi_user_id, credit_warning_threshold, newapi_user_credentials_ciphertext, code, newapi_username, assistant_version_ids, created_at, updated_at, deleted_at, max_instance_count
 FROM organizations
 WHERE deleted_at IS NULL
 ORDER BY created_at DESC, id DESC
@@ -218,6 +225,7 @@ func (q *Queries) ListAllActiveOrganizations(ctx context.Context) ([]Organizatio
 			&i.CreatedAt,
 			&i.UpdatedAt,
 			&i.DeletedAt,
+			&i.MaxInstanceCount,
 		); err != nil {
 			return nil, err
 		}
@@ -233,7 +241,7 @@ func (q *Queries) ListAllActiveOrganizations(ctx context.Context) ([]Organizatio
 }
 
 const listOrganizations = `-- name: ListOrganizations :many
-SELECT id, name, status, contact_name, contact_phone, remark, newapi_user_id, credit_warning_threshold, newapi_user_credentials_ciphertext, code, newapi_username, assistant_version_ids, created_at, updated_at, deleted_at
+SELECT id, name, status, contact_name, contact_phone, remark, newapi_user_id, credit_warning_threshold, newapi_user_credentials_ciphertext, code, newapi_username, assistant_version_ids, created_at, updated_at, deleted_at, max_instance_count
 FROM organizations
 WHERE deleted_at IS NULL
 ORDER BY created_at DESC, id DESC
@@ -270,6 +278,7 @@ func (q *Queries) ListOrganizations(ctx context.Context, arg ListOrganizationsPa
 			&i.CreatedAt,
 			&i.UpdatedAt,
 			&i.DeletedAt,
+			&i.MaxInstanceCount,
 		); err != nil {
 			return nil, err
 		}
@@ -364,6 +373,7 @@ SET
     contact_phone = ?,
     remark = ?,
     credit_warning_threshold = ?,
+    max_instance_count = ?,
     assistant_version_ids = ?,
     updated_at = now()
 WHERE id = ?
@@ -375,6 +385,7 @@ type UpdateOrganizationProfileParams struct {
 	ContactPhone           null.String     `db:"contact_phone" json:"contact_phone"`
 	Remark                 null.String     `db:"remark" json:"remark"`
 	CreditWarningThreshold null.Int        `db:"credit_warning_threshold" json:"credit_warning_threshold"`
+	MaxInstanceCount       null.Int        `db:"max_instance_count" json:"max_instance_count"`
 	AssistantVersionIds    json.RawMessage `db:"assistant_version_ids" json:"assistant_version_ids"`
 	ID                     string          `db:"id" json:"id"`
 }
@@ -386,6 +397,7 @@ func (q *Queries) UpdateOrganizationProfile(ctx context.Context, arg UpdateOrgan
 		arg.ContactPhone,
 		arg.Remark,
 		arg.CreditWarningThreshold,
+		arg.MaxInstanceCount,
 		arg.AssistantVersionIds,
 		arg.ID,
 	)

@@ -205,3 +205,7 @@ JOIN assistant_versions av ON av.id = apps.version_id
 WHERE apps.org_id = ? AND apps.deleted_at IS NULL
 ORDER BY apps.created_at DESC, apps.id DESC
 LIMIT ? OFFSET ?;
+
+-- name: CountActiveAppsByOrg :one
+-- 统计企业当前未删除实例数（apps.deleted_at IS NULL），用于企业实例数量上限校验。
+SELECT COUNT(*) FROM apps WHERE org_id = ? AND deleted_at IS NULL;
