@@ -29,12 +29,12 @@ spec:
       labels: { app: elasticsearch }
     spec:
       imagePullSecrets:
-        - name: acr-pull
+        - name: secret-registry-ywjs-cc41758e.ecis.huabei-3.cmecloud.cn
       containers:
         - name: elasticsearch
-          # prod 集群拉不到 docker.io，走私有 ACR ywjs_public（与 new-api/ragflow 一致）。
-          # 若 ACR 暂无该镜像，需先把 elasticsearch:8.11.3 推到该仓库（见交付说明）。
-          image: crpi-nu3ibz4f07feyghi.cn-beijing.personal.cr.aliyuncs.com/ywjs_public/elasticsearch:8.11.3
+          # 走移动云私有仓库 public 命名空间（与 new-api/ragflow 一致），与集群同区拉取快。
+          # 若仓库暂无该镜像，需先把 elasticsearch:8.11.3 推到该仓库（见 scripts/migrate-images-to-ecloud.sh）。
+          image: ywjs-cc41758e.ecis.huabei-3.cmecloud.cn/public/elasticsearch:8.11.3
           env:
             - name: node.name
               value: elasticsearch

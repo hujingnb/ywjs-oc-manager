@@ -22,10 +22,10 @@ spec:
       labels: { app: manager-web }
     spec:
       imagePullSecrets:
-        - name: acr-pull
+        - name: secret-registry-ywjs-cc41758e.ecis.huabei-3.cmecloud.cn
       containers:
         - name: manager-web
-          image: crpi-nu3ibz4f07feyghi.cn-beijing.personal.cr.aliyuncs.com/ywjs_app/oc-manager-web:2026-05-31-16-21-11-e0ba7dcc-dirty
+          image: ywjs-cc41758e.ecis.huabei-3.cmecloud.cn/app/oc-manager-web:2026-06-01-18-35-24-97893d0a
           imagePullPolicy: IfNotPresent
           # 资源配额（起步值）：nginx 提供静态资源，极轻量。
           resources:
