@@ -135,7 +135,7 @@
 </template>
 
 <script setup lang="ts">
-import { computed, inject, ref, type Ref } from 'vue'
+import { computed, inject, ref, watch, type Ref } from 'vue'
 import { NButton, NCard, NDescriptions, NDescriptionsItem, NModal, NProgress, NSelect, NSpace, NTag, type SelectOption } from 'naive-ui'
 
 import {
@@ -144,6 +144,7 @@ import {
   useSwitchAppVersion,
   useToggleAppAPIKey,
   useTriggerRuntimeOperation,
+  useInvalidateAppData,
   type AppDTO,
 } from '@/api/hooks/useApps'
 import { useAssistantVersionsQuery } from '@/api/hooks/useAssistantVersions'
@@ -263,6 +264,24 @@ const trackingJobTitle = ref('后台任务')
 const jobIdRef = computed<string | undefined>(() => trackingJobId.value)
 const jobQuery = useJobQuery(jobIdRef)
 const trackedJob = computed(() => jobQuery.data.value ?? null)
+
+// invalidateAppData 在后台任务到达终态后刷新实例详情与运行时视图。
+const invalidateAppData = useInvalidateAppData(appId)
+
+// 监听后台任务（重启 / 初始化 / 恢复 key）状态：当 job 由非终态切换到终态（succeeded /
+// failed / canceled）的那一刻，主动失效实例详情与运行时缓存，让概览页的「需重启」标签、
+// 状态 tag、助手版本同步状态及运行时快照无需用户手动刷新即可对齐最新结果。
+// 只在「非终态 → 终态」的边沿触发一次：终态会停止 job 轮询，因此 status 不会反复进入终态；
+// prev 为 undefined（页面初次进入即拿到终态，理论上不会发生）时不触发，避免无意义失效。
+const terminalJobStatuses = new Set(['succeeded', 'failed', 'canceled'])
+watch(
+  () => trackedJob.value?.status,
+  (status, prev) => {
+    if (status && terminalJobStatuses.has(status) && prev && !terminalJobStatuses.has(prev)) {
+      invalidateAppData()
+    }
+  },
+)
 
 // canRetryInit 仅允许可管理用户在草稿或错误状态重新提交初始化任务。
 const canRetryInit = computed(() => {

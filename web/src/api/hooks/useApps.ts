@@ -264,6 +264,20 @@ export function useJobQuery(jobId: Ref<string | undefined>) {
   })
 }
 
+// useInvalidateAppData 返回一个失效函数，供页面在后台任务（重启 / 初始化 / 恢复 key 等）
+// 到达终态时主动刷新实例详情与运行时视图。
+// 触发 mutation 时的 onSuccess 只在「任务入队」那一刻失效一次，无法反映任务真正执行完成后的
+// 结果（如 version_synced 由 false 变 true、「需重启」标签消失、运行时快照更新）；对于
+// restart 镜像不变分支，status 全程保持 running，useAppQuery 的过渡态轮询不会触发，
+// 因此必须在 job 终态时再失效一次，让 UI 无需用户手动刷新即可对齐最新状态。
+export function useInvalidateAppData(appId: Ref<string | undefined>) {
+  const client = useQueryClient()
+  return () => {
+    void client.invalidateQueries({ queryKey: appKey(appId.value) })
+    void client.invalidateQueries({ queryKey: runtimeKey(appId.value) })
+  }
+}
+
 // useAppUsageQuery 查询应用维度的 token 用量。
 // context 来自应用拥有者和 new-api key 信息；缺任何一项都不能调用后端薄代理。
 export function useAppUsageQuery(

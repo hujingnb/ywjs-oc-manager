@@ -1,8 +1,12 @@
-import { mount } from '@vue/test-utils'
+import { enableAutoUnmount, mount } from '@vue/test-utils'
 import { computed, defineComponent, h, nextTick, ref } from 'vue'
-import { describe, expect, it, vi } from 'vitest'
+import { afterEach, describe, expect, it, vi } from 'vitest'
 
 import AppOverviewTab from './AppOverviewTab.vue'
+
+// 每个用例结束后自动卸载已挂载组件，停止其内部 watch；否则残留组件的 watch 仍监听共享的
+// jobStatusRef，会在「任务完成刷新」用例改写 job 状态时被一并触发，污染 invalidateAppDataSpy 计数。
+enableAutoUnmount(afterEach)
 
 const organizationName = ref<string | undefined>('测试企业')
 // orgAssistantVersionIds 控制组织 allowlist，用于版本切换测试中验证交集逻辑。
@@ -43,14 +47,20 @@ const triggerRuntimeMutateAsync = vi.fn()
 // triggerRuntimeIsPending 暴露给用例切换以模拟按钮 loading 文案。
 const triggerRuntimeIsPending = ref(false)
 
+// jobStatusRef 模拟 useJobQuery 轮询返回的 job 详情，用例通过改写它模拟后台任务状态推进。
+const jobStatusRef = ref<{ status: string } | null>(null)
+// invalidateAppDataSpy 断言任务到达终态后概览页是否主动失效实例详情/运行时缓存。
+const invalidateAppDataSpy = vi.fn()
+
 vi.mock('@/api/hooks/useApps', () => ({
   useInitializeAppMutation: () => ({
     isPending: ref(false),
     mutateAsync: vi.fn(),
   }),
   useJobQuery: () => ({
-    data: ref(null),
+    data: jobStatusRef,
   }),
+  useInvalidateAppData: () => invalidateAppDataSpy,
   useToggleAppAPIKey: () => ({
     isPending: ref(false),
     mutateAsync: vi.fn(),
@@ -297,6 +307,54 @@ describe('AppOverviewTab 助手版本', () => {
     await nextTick()
     // mutation 的入参类型固定为四个枚举值之一，这里只验证 'restart' 被传入。
     expect(triggerRuntimeMutateAsync).toHaveBeenCalledWith('restart')
+  })
+})
+
+// AppOverviewTab 任务完成刷新覆盖：后台任务（重启等）到达终态后，概览页自动失效实例详情与
+// 运行时缓存，使「需重启」标签、状态 tag 与运行时快照无需用户手动刷新即可对齐最新结果。
+describe('AppOverviewTab 任务完成刷新', () => {
+  // 任务由非终态（running）推进到 succeeded 的边沿，应触发且仅触发一次缓存失效。
+  it('任务由 running 变为 succeeded 时刷新实例数据', async () => {
+    jobStatusRef.value = { status: 'running' }
+    invalidateAppDataSpy.mockClear()
+    mountOverview()
+    // 模拟 useJobQuery 轮询拿到终态：running → succeeded。
+    jobStatusRef.value = { status: 'succeeded' }
+    await nextTick()
+    expect(invalidateAppDataSpy).toHaveBeenCalledTimes(1)
+  })
+
+  // 任务失败（failed）同样视为终态，应刷新数据让 error 状态及失败原因即时呈现。
+  it('任务由 running 变为 failed 时刷新实例数据', async () => {
+    jobStatusRef.value = { status: 'running' }
+    invalidateAppDataSpy.mockClear()
+    mountOverview()
+    jobStatusRef.value = { status: 'failed' }
+    await nextTick()
+    expect(invalidateAppDataSpy).toHaveBeenCalledTimes(1)
+  })
+
+  // 终态会停止 job 轮询，status 不应再次进入终态；即便重复赋值相同终态也不应重复失效。
+  it('已处于终态后重复赋值不重复刷新', async () => {
+    jobStatusRef.value = { status: 'running' }
+    invalidateAppDataSpy.mockClear()
+    mountOverview()
+    jobStatusRef.value = { status: 'succeeded' }
+    await nextTick()
+    // 再次赋同一终态：watch getter 返回的 status 字符串未变，不触发。
+    jobStatusRef.value = { status: 'succeeded' }
+    await nextTick()
+    expect(invalidateAppDataSpy).toHaveBeenCalledTimes(1)
+  })
+
+  // 页面初次进入即拿到终态（prev 为 undefined）属于理论边界；watch 非 immediate，挂载不触发，
+  // 验证不会因初始即终态而误刷新。
+  it('挂载时即为终态不触发刷新', async () => {
+    jobStatusRef.value = { status: 'succeeded' }
+    invalidateAppDataSpy.mockClear()
+    mountOverview()
+    await nextTick()
+    expect(invalidateAppDataSpy).not.toHaveBeenCalled()
   })
 })
 
