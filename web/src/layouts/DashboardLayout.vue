@@ -57,6 +57,10 @@
         </div>
         <div class="topbar-actions">
           <n-tag type="success" size="small" :bordered="false">API 正常</n-tag>
+          <!-- 使用手册入口：右上角帮助按钮，点开右侧抽屉按当前角色展示对应手册 -->
+          <n-button quaternary circle title="使用手册" @click="helpOpen = true">
+            <template #icon><HelpCircle :size="17" /></template>
+          </n-button>
           <n-button quaternary circle @click="reload">
             <template #icon><RefreshCw :size="17" /></template>
           </n-button>
@@ -69,11 +73,14 @@
         </div>
       </n-layout-content>
     </n-layout>
+
+    <!-- 使用手册抽屉：内容随当前登录角色切换，由 helpOpen 控制显隐 -->
+    <HelpDrawer v-model:show="helpOpen" :role="auth.user?.role" />
   </n-layout>
 </template>
 
 <script setup lang="ts">
-import { computed, h } from 'vue'
+import { computed, h, ref } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import {
   NButton, NLayout, NLayoutContent, NLayoutHeader, NLayoutSider, NMenu, NTag,
@@ -81,10 +88,11 @@ import {
 } from 'naive-ui'
 import {
   BarChart3, BookOpen, Bot, Boxes, Building2, CalendarClock, FileSearch,
-  FolderOpen, Gauge, LayoutDashboard, ListChecks, LogOut, Radio, RefreshCw,
+  FolderOpen, Gauge, HelpCircle, LayoutDashboard, ListChecks, LogOut, Radio, RefreshCw,
   ShieldCheck, Users, Wallet,
 } from 'lucide-vue-next'
 
+import HelpDrawer from '@/components/HelpDrawer.vue'
 import { useAuthStore } from '@/stores/auth'
 import { useMemberApp } from '@/composables/useMemberApp'
 
@@ -93,6 +101,9 @@ import { useMemberApp } from '@/composables/useMemberApp'
 const auth = useAuthStore()
 const route = useRoute()
 const router = useRouter()
+
+// helpOpen 控制右上角「使用手册」抽屉的显隐；抽屉内容由 HelpDrawer 按当前角色渲染。
+const helpOpen = ref(false)
 
 const environmentLabel = computed(() => {
   if (!auth.user) return '本地调试环境'
