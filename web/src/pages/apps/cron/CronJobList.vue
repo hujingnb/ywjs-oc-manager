@@ -132,6 +132,8 @@ function onSelect(job: CronJob) {
 }
 .card-row .v {
   color: var(--color-text-primary, #1f2329);
-  word-break: break-all;
+  /* 用 break-word 而非 break-all：避免把 ISO 时间戳等连续 ASCII 串在字符中间断开。 */
+  overflow-wrap: break-word;
+  word-break: break-word;
 }
 </style>
