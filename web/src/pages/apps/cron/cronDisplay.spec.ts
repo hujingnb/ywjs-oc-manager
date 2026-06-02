@@ -77,6 +77,8 @@ describe('translateCronExpr', () => {
     expect(translateCronExpr('every', 'every 10m')).toBe('每 10 分钟')
     expect(translateCronExpr('every', '10m')).toBe('每 10 分钟')
     expect(translateCronExpr('every', 'every 2h')).toBe('每 2 小时')
+    // 秒级间隔（interval 任务可能出现）
+    expect(translateCronExpr('interval', 'every 30s')).toBe('每 30 秒')
   })
   // at 格式：一次性绝对时间，保留原始时间串
   it('at 格式保留原始时间', () => {
@@ -94,13 +96,25 @@ describe('translateCronExpr', () => {
 })
 
 describe('scheduleDisplay', () => {
-  // display 非空时优先使用上游文案，不触发前端翻译
-  it('优先使用上游 display', () => {
-    expect(scheduleDisplay({ kind: 'cron', expr: '0 9 * * *', display: '上游文案' })).toBe('上游文案')
+  // 关键回归：实测 cron 任务 oc-cron 的 display 只是回显原始 expr，必须走前端翻译
+  it('cron 任务 display 回显 expr 时翻译为中文', () => {
+    expect(scheduleDisplay({ kind: 'cron', expr: '0 9 * * *', display: '0 9 * * *' })).toBe('每天 09:00')
   })
-  // display 缺失时走前端兜底翻译
-  it('display 缺失走兜底翻译', () => {
+  // 关键回归：实测 interval 任务没有 expr，表达式以英文放在 display，需取 display 翻译
+  it('interval 任务表达式在 display 时翻译为中文', () => {
+    expect(scheduleDisplay({ kind: 'interval', display: 'every 10m' })).toBe('每 10 分钟')
+  })
+  // 仅 expr、无 display 时翻译为中文
+  it('仅 expr 时翻译为中文', () => {
     expect(scheduleDisplay({ kind: 'cron', expr: '0 9 * * *' })).toBe('每天 09:00')
+  })
+  // 翻不动的复杂表达式：保留上游 display 作为更友好的描述
+  it('无法翻译时保留上游 display', () => {
+    expect(scheduleDisplay({ kind: 'cron', expr: '0 9 * * 1-5', display: '工作日早九点' })).toBe('工作日早九点')
+  })
+  // 翻不动且无 display：退回原始表达式，不显示空白
+  it('无法翻译且无 display 时退回原始表达式', () => {
+    expect(scheduleDisplay({ kind: 'cron', expr: '0 9 1-5 * 1,3,5' })).toBe('0 9 1-5 * 1,3,5')
   })
   // 全部缺失返回占位符
   it('全部缺失返回 —', () => {

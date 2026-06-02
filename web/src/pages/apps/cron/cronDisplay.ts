@@ -46,11 +46,14 @@ export function translateCronExpr(kind?: string, expr?: string): string {
   const raw = (expr ?? '').trim()
   if (!raw) return ''
 
-  // every 格式：'every 10m' / '10m' / 'every 2h'，kind 可能是 every 也可能为空。
-  const everyMatch = raw.match(/^(?:every\s+)?(\d+)\s*([mh])$/i)
+  // every / interval 格式：'every 10m' / '10m' / 'every 2h' / 'every 30s'，
+  // kind 可能是 every / interval 也可能为空。实测 interval 任务的表达式只放在 display。
+  const everyMatch = raw.match(/^(?:every\s+)?(\d+)\s*([smh])$/i)
   if (everyMatch) {
     const value = everyMatch[1]
-    return everyMatch[2].toLowerCase() === 'h' ? `每 ${value} 小时` : `每 ${value} 分钟`
+    const unit = everyMatch[2].toLowerCase()
+    const label = unit === 'h' ? '小时' : unit === 's' ? '秒' : '分钟'
+    return `每 ${value} ${label}`
   }
 
   // at 格式：一次性绝对时间，保留原始时间串，仅加中文前缀。
@@ -89,9 +92,20 @@ export function translateCronExpr(kind?: string, expr?: string): string {
   return raw
 }
 
-// scheduleDisplay 是页面统一入口：优先上游 display，其次前端兜底翻译，再退原文，最后占位符。
+// scheduleDisplay 是页面统一入口，目标是「尽量给用户可读的中文」，采用「翻译优先」策略。
+// 关键约束（实测 oc-cron 行为）：display 并不可靠——cron 任务的 display 只是回显原始
+// expr（如 "0 9 * * *"）；interval 任务则没有 expr，表达式以英文形式（如 "every 10m"）
+// 放在 display 里。两种情况 display 都不是人类可读中文。因此：先把真实表达式（expr 优先，
+// 否则取 display）交给前端翻译器；只要翻出了与原串不同的中文就用它，翻不动时才回退到
+// 上游 display（可能是更友好的描述）或原始表达式，最后才是占位符。
 export function scheduleDisplay(schedule?: CronSchedule): string {
-  if (schedule?.display) return schedule.display
-  const translated = translateCronExpr(schedule?.kind, schedule?.expr)
-  return translated || '—'
+  if (!schedule) return '—'
+  const { kind, expr, display } = schedule
+  // 真实表达式可能在 expr，也可能（interval 类型）只放在 display 里，取第一个非空。
+  const rawExpr = expr || display || ''
+  const translated = translateCronExpr(kind, rawExpr)
+  // 翻译确有产出（与原始串不同）就用翻译结果——这是用户可读的关键。
+  if (translated && translated !== rawExpr) return translated
+  // 翻不动：上游 display 若是更友好的描述就用它，否则退原始表达式，最后占位符。
+  return display || rawExpr || '—'
 }
