@@ -90,7 +90,7 @@ func (h *RuntimeKnowledgeHandler) AddFile(c *gin.Context) {
 	}
 	maxBodyBytes := maxKnowledgeUploadBytes + maxKnowledgeMultipartOverheadBytes
 	if requestContentLength(c) > maxBodyBytes {
-		c.JSON(http.StatusBadRequest, apierror.New("BAD_REQUEST", "单文件最多支持 100MB"))
+		c.JSON(http.StatusBadRequest, apierror.New("BAD_REQUEST", maxKnowledgeUploadMessage))
 		return
 	}
 	c.Request.Body = http.MaxBytesReader(c.Writer, c.Request.Body, maxBodyBytes)
@@ -100,7 +100,7 @@ func (h *RuntimeKnowledgeHandler) AddFile(c *gin.Context) {
 		return
 	}
 	if file.Size > maxKnowledgeUploadBytes {
-		c.JSON(http.StatusBadRequest, apierror.New("BAD_REQUEST", "单文件最多支持 100MB"))
+		c.JSON(http.StatusBadRequest, apierror.New("BAD_REQUEST", maxKnowledgeUploadMessage))
 		return
 	}
 	stream, err := file.Open()

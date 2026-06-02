@@ -3,6 +3,7 @@ package handlers
 import (
 	"context"
 	"errors"
+	"fmt"
 	"io"
 	"mime"
 	"net/http"
@@ -36,10 +37,14 @@ type knowledgeService interface {
 }
 
 const (
-	// maxKnowledgeUploadBytes 是 manager 知识库上传的服务端硬上限，与前端 100MB 提示保持一致。
-	maxKnowledgeUploadBytes            int64 = 100 * 1024 * 1024
+	// maxKnowledgeUploadBytes 是 manager 知识库上传的服务端硬上限，前端 / 后端提示文案均由此推导。
+	maxKnowledgeUploadBytes            int64 = 1024 * 1024 * 1024
 	maxKnowledgeMultipartOverheadBytes int64 = 1 * 1024 * 1024
 )
+
+// maxKnowledgeUploadMessage 是超出上限时返回给客户端的统一提示，以 MB 为单位由
+// maxKnowledgeUploadBytes 直接换算，避免修改上限后文案与实际限制漂移。
+var maxKnowledgeUploadMessage = fmt.Sprintf("单文件最多支持 %dMB", maxKnowledgeUploadBytes/(1024*1024))
 
 // NewKnowledgeHandler 创建 handler。
 func NewKnowledgeHandler(svc knowledgeService) *KnowledgeHandler {
@@ -354,7 +359,7 @@ func queryKnowledgeInt32(c *gin.Context, key string, fallback int32) int32 {
 func prepareKnowledgeOctetStreamUpload(c *gin.Context) (int64, bool) {
 	size := requestContentLength(c)
 	if size > maxKnowledgeUploadBytes {
-		c.JSON(http.StatusBadRequest, apierror.New("BAD_REQUEST", "单文件最多支持 100MB"))
+		c.JSON(http.StatusBadRequest, apierror.New("BAD_REQUEST", maxKnowledgeUploadMessage))
 		return size, false
 	}
 	c.Request.Body = http.MaxBytesReader(c.Writer, c.Request.Body, maxKnowledgeUploadBytes)

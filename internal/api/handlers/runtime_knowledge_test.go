@@ -115,7 +115,7 @@ func TestRuntimeKnowledgeAddAcceptsWorkspaceFileUpload(t *testing.T) {
 	assert.Contains(t, w.Body.String(), `"parse_status":"queued"`)
 }
 
-// TestRuntimeKnowledgeAddRejectsOversizedUpload 验证 runtime API 在调用 service 前拒绝超过 100MB 的上传。
+// TestRuntimeKnowledgeAddRejectsOversizedUpload 验证 runtime API 在调用 service 前拒绝超过上限的上传。
 func TestRuntimeKnowledgeAddRejectsOversizedUpload(t *testing.T) {
 	stub := &runtimeKnowledgeServiceStub{}
 	router := newRuntimeKnowledgeRouter(t, stub)
@@ -128,6 +128,6 @@ func TestRuntimeKnowledgeAddRejectsOversizedUpload(t *testing.T) {
 	router.ServeHTTP(w, req)
 
 	assert.Equal(t, http.StatusBadRequest, w.Code)
-	assert.Contains(t, w.Body.String(), "单文件最多支持 100MB")
+	assert.Contains(t, w.Body.String(), maxKnowledgeUploadMessage)
 	assert.Equal(t, 0, stub.addCalls)
 }

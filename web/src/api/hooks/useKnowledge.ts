@@ -29,9 +29,10 @@ export interface KnowledgeListing {
 const orgKey = (orgId: string | undefined) => ['knowledge', 'org', orgId] as const
 const appKey = (appId: string | undefined) => ['knowledge', 'app', appId] as const
 
-// RAGFlow 文件上传仍保留 100MB 前端拦截，避免大文件进入无意义上传会话。
-export const KNOWLEDGE_UPLOAD_MAX_BYTES = 100 * 1024 * 1024
-export const KNOWLEDGE_UPLOAD_MAX_LABEL = '100MB'
+// RAGFlow 文件上传保留前端拦截，避免大文件进入无意义上传会话。
+export const KNOWLEDGE_UPLOAD_MAX_BYTES = 1024 * 1024 * 1024
+// 提示文案的 MB 数值由上限字节数直接换算，修改上限后文案自动跟随，避免漂移。
+export const KNOWLEDGE_UPLOAD_MAX_LABEL = `${KNOWLEDGE_UPLOAD_MAX_BYTES / (1024 * 1024)}MB`
 export const KNOWLEDGE_UPLOAD_MAX_MESSAGE = `单文件最多支持 ${KNOWLEDGE_UPLOAD_MAX_LABEL}`
 
 // isKnowledgeUploadTooLarge 在页面发起上传会话前做本地拦截。

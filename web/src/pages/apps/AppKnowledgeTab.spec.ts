@@ -2,7 +2,7 @@ import { mount } from '@vue/test-utils'
 import { defineComponent, h, ref, type PropType, type VNodeChild } from 'vue'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 
-import { KNOWLEDGE_UPLOAD_MAX_BYTES } from '@/api/hooks/useKnowledge'
+import { KNOWLEDGE_UPLOAD_MAX_BYTES, KNOWLEDGE_UPLOAD_MAX_MESSAGE } from '@/api/hooks/useKnowledge'
 import AppKnowledgeTab from './AppKnowledgeTab.vue'
 
 const mocks = vi.hoisted(() => ({
@@ -137,15 +137,15 @@ describe('AppKnowledgeTab', () => {
     expect(wrapper.find('.header-name').text()).toBe('文件名称')
   })
 
-  // 覆盖实例知识库上传超限路径：前端提示 100MB 限制，并且不创建上传会话。
-  it('拒绝超过 100MB 的实例知识库文件', async () => {
+  // 覆盖实例知识库上传超限路径：前端提示上限并且不创建上传会话。
+  it('拒绝超过上限的实例知识库文件', async () => {
     const wrapper = mountTab()
     const input = wrapper.find('input[type="file"]')
 
     Object.defineProperty(input.element, 'files', { value: [oversizedFile()], configurable: true })
     await input.trigger('change')
 
-    expect(mocks.warning).toHaveBeenCalledWith('单文件最多支持 100MB')
+    expect(mocks.warning).toHaveBeenCalledWith(KNOWLEDGE_UPLOAD_MAX_MESSAGE)
     expect(mocks.run).not.toHaveBeenCalled()
     expect(mocks.mutateAsync).not.toHaveBeenCalled()
   })

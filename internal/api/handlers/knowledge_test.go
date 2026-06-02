@@ -148,7 +148,7 @@ func TestKnowledgeUploadOrgRequiresFilename(t *testing.T) {
 	assert.Equal(t, http.StatusBadRequest, w.Code)
 }
 
-// TestKnowledgeUploadOrgRejectsOversizedBody 验证后端在调用 service 前拒绝超过 100MB 的企业知识库上传。
+// TestKnowledgeUploadOrgRejectsOversizedBody 验证后端在调用 service 前拒绝超过上限的企业知识库上传。
 func TestKnowledgeUploadOrgRejectsOversizedBody(t *testing.T) {
 	stub := &knowledgeServiceStub{}
 	router := newKnowledgeTestRouter(t, stub)
@@ -160,7 +160,7 @@ func TestKnowledgeUploadOrgRejectsOversizedBody(t *testing.T) {
 	router.ServeHTTP(w, req)
 
 	assert.Equal(t, http.StatusBadRequest, w.Code)
-	assert.Contains(t, w.Body.String(), "单文件最多支持 100MB")
+	assert.Contains(t, w.Body.String(), maxKnowledgeUploadMessage)
 	assert.Equal(t, 0, stub.saveOrgCalls)
 }
 
