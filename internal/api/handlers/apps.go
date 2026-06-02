@@ -12,7 +12,7 @@ import (
 	"oc-manager/internal/service"
 )
 
-// AppsHandler 暴露应用读取接口；写操作位于 onboarding 与 runtime operation handler。
+// AppsHandler 暴露应用读取和轻量配置接口；实例创建仍位于 onboarding handler。
 //
 // 路由挂在 user 组上，token 校验由 RequireUserAuth 中间件统一完成。
 type AppsHandler struct {
@@ -23,6 +23,7 @@ type appService interface {
 	Get(ctx context.Context, principal auth.Principal, appID string) (service.AppResult, error)
 	ListByOrg(ctx context.Context, principal auth.Principal, orgID string, limit, offset int32) ([]service.AppResult, error)
 	SwitchAppVersion(ctx context.Context, principal auth.Principal, appID, versionID string) (service.AppResult, error)
+	UpdateAppKnowledgeQuota(ctx context.Context, principal auth.Principal, appID string, quotaBytes int64) (service.AppResult, error)
 }
 
 // NewAppsHandler 创建 handler。
@@ -31,11 +32,12 @@ func NewAppsHandler(svc appService) *AppsHandler {
 }
 
 // RegisterAppRoutes 注册应用路由。
-// 列表挂在组织维度 /organizations/:orgId/apps；详情挂在 /apps/:appId。
+// 列表挂在组织维度 /organizations/:orgId/apps；详情、版本切换和容量配置挂在 /apps/:appId。
 func RegisterAppRoutes(router gin.IRouter, handler *AppsHandler) {
 	router.GET("/api/v1/organizations/:orgId/apps", handler.List)
 	router.GET("/api/v1/apps/:appId", handler.Get)
 	router.POST("/api/v1/apps/:appId/version", handler.SwitchVersion)
+	router.PATCH("/api/v1/apps/:appId/knowledge/quota", handler.UpdateKnowledgeQuota)
 }
 
 // List 列出组织内的应用。
@@ -115,6 +117,38 @@ func (h *AppsHandler) SwitchVersion(c *gin.Context) {
 	}
 	principal := principalFromCtx(c)
 	result, err := h.service.SwitchAppVersion(c.Request.Context(), principal, c.Param("appId"), req.VersionID)
+	if err != nil {
+		writeAppsError(c, err)
+		return
+	}
+	c.JSON(http.StatusOK, gin.H{"app": result})
+}
+
+// UpdateKnowledgeQuota 更新实例知识库容量上限。
+//
+// @Summary      更新实例知识库容量
+// @Description  更新单个实例知识库累计容量上限，允许低于当前已用，后续上传会被拦截
+// @Tags         apps
+// @Accept       json
+// @Produce      json
+// @Security     BearerAuth
+// @Param        appId  path      string                         true  "应用 ID"
+// @Param        body   body      UpdateAppKnowledgeQuotaRequest true  "容量上限"
+// @Success      200    {object}  map[string]service.AppResult
+// @Failure      400    {object}  ErrorResponse
+// @Failure      401    {object}  ErrorResponse
+// @Failure      403    {object}  ErrorResponse
+// @Failure      404    {object}  ErrorResponse
+// @Failure      500    {object}  ErrorResponse
+// @Router       /apps/{appId}/knowledge/quota [patch]
+func (h *AppsHandler) UpdateKnowledgeQuota(c *gin.Context) {
+	var req UpdateAppKnowledgeQuotaRequest
+	if err := c.ShouldBindJSON(&req); err != nil {
+		c.JSON(http.StatusBadRequest, apierror.New("INVALID_REQUEST", "请求体格式错误"))
+		return
+	}
+	principal := principalFromCtx(c)
+	result, err := h.service.UpdateAppKnowledgeQuota(c.Request.Context(), principal, c.Param("appId"), req.QuotaBytes)
 	if err != nil {
 		writeAppsError(c, err)
 		return

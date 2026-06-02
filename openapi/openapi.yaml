@@ -406,6 +406,14 @@ components:
       required:
       - version_id
       type: object
+    handlers.UpdateAppKnowledgeQuotaRequest:
+      properties:
+        quota_bytes:
+          description: QuotaBytes 是实例知识库累计容量上限，单位字节，必须大于 0。
+          type: integer
+      required:
+      - quota_bytes
+      type: object
     handlers.UpdateAssistantVersionRequest:
       properties:
         description:
@@ -945,6 +953,9 @@ components:
           type: string
         id:
           type: string
+        knowledge_quota_bytes:
+          description: KnowledgeQuotaBytes 是实例知识库累计容量上限，单位字节。
+          type: integer
         last_error_message:
           description: LastErrorMessage 上次进入 error 时的错误原始文本;供前端直接展示给用户。
           type: string
@@ -3658,6 +3669,71 @@ paths:
       summary: 重新解析应用级知识库文件
       tags:
       - knowledge
+  /apps/{appId}/knowledge/quota:
+    patch:
+      description: 更新单个实例知识库累计容量上限，允许低于当前已用，后续上传会被拦截
+      parameters:
+      - description: 应用 ID
+        in: path
+        name: appId
+        required: true
+        schema:
+          type: string
+      requestBody:
+        content:
+          application/json:
+            schema:
+              oneOf:
+              - type: object
+              - $ref: '#/components/schemas/handlers.UpdateAppKnowledgeQuotaRequest'
+                description: 容量上限
+                summary: body
+        description: 容量上限
+        required: true
+      responses:
+        "200":
+          content:
+            application/json:
+              schema:
+                additionalProperties:
+                  $ref: '#/components/schemas/service.AppResult'
+                type: object
+          description: OK
+        "400":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/handlers.ErrorResponse'
+          description: Bad Request
+        "401":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/handlers.ErrorResponse'
+          description: Unauthorized
+        "403":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/handlers.ErrorResponse'
+          description: Forbidden
+        "404":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/handlers.ErrorResponse'
+          description: Not Found
+        "500":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/handlers.ErrorResponse'
+          description: Internal Server Error
+      security:
+      - BearerAuth: []
+      summary: 更新实例知识库容量
+      tags:
+      - apps
   /apps/{appId}/runtime:
     get:
       description: 返回应用 k8s 运行时状态与最近快照；status=no_container 表示容器尚未创建

@@ -18,12 +18,15 @@ import (
 
 // appsStub 实现 appService 接口，仅 stub 测试用到的方法。
 type appsStub struct {
-	getResult           service.AppResult
-	getErr              error
-	listResult          []service.AppResult
-	listErr             error
-	switchVersionResult service.AppResult
-	switchVersionErr    error
+	getResult                  service.AppResult
+	getErr                     error
+	listResult                 []service.AppResult
+	listErr                    error
+	switchVersionResult        service.AppResult
+	switchVersionErr           error
+	updateKnowledgeQuotaResult service.AppResult
+	updateKnowledgeQuotaErr    error
+	lastQuotaBytes             int64
 }
 
 func (s *appsStub) Get(_ context.Context, _ auth.Principal, _ string) (service.AppResult, error) {
@@ -37,6 +40,15 @@ func (s *appsStub) ListByOrg(_ context.Context, _ auth.Principal, _ string, _, _
 // SwitchAppVersion 实现 appService 接口的切换版本方法，返回预设结果。
 func (s *appsStub) SwitchAppVersion(_ context.Context, _ auth.Principal, _, _ string) (service.AppResult, error) {
 	return s.switchVersionResult, s.switchVersionErr
+}
+
+// UpdateAppKnowledgeQuota 实现 appService 接口的实例知识库容量更新方法，记录请求容量便于断言。
+func (s *appsStub) UpdateAppKnowledgeQuota(_ context.Context, _ auth.Principal, _ string, quotaBytes int64) (service.AppResult, error) {
+	s.lastQuotaBytes = quotaBytes
+	if s.updateKnowledgeQuotaErr != nil {
+		return service.AppResult{}, s.updateKnowledgeQuotaErr
+	}
+	return s.updateKnowledgeQuotaResult, nil
 }
 
 // newAppsTestRouter 构建用于测试的 gin router。
@@ -87,6 +99,38 @@ func TestAppsGetHappy(t *testing.T) {
 
 	require.Equal(t, http.StatusOK, w.Code)
 	assert.Contains(t, w.Body.String(), "app-1")
+}
+
+// TestUpdateKnowledgeQuotaHappy 验证实例知识库容量更新接口返回更新后的 app。
+func TestUpdateKnowledgeQuotaHappy(t *testing.T) {
+	stub := &appsStub{updateKnowledgeQuotaResult: service.AppResult{ID: "app-1", KnowledgeQuotaBytes: 2147483648}}
+	router := newAppsTestRouter(t, stub)
+
+	body := strings.NewReader(`{"quota_bytes":2147483648}`)
+	w := httptest.NewRecorder()
+	req := httptest.NewRequest(http.MethodPatch, "/api/v1/apps/app-1/knowledge/quota", body)
+	req.Header.Set("Content-Type", "application/json")
+	req = withPrincipal(req, auth.Principal{UserID: "u1", Role: domain.UserRoleOrgAdmin, OrgID: "org-1"})
+	router.ServeHTTP(w, req)
+
+	require.Equal(t, http.StatusOK, w.Code)
+	assert.Contains(t, w.Body.String(), `"knowledge_quota_bytes":2147483648`)
+	assert.Equal(t, int64(2147483648), stub.lastQuotaBytes)
+}
+
+// TestUpdateKnowledgeQuotaBadRequest 验证缺少 quota_bytes 时返回 400。
+func TestUpdateKnowledgeQuotaBadRequest(t *testing.T) {
+	stub := &appsStub{}
+	router := newAppsTestRouter(t, stub)
+
+	w := httptest.NewRecorder()
+	req := httptest.NewRequest(http.MethodPatch, "/api/v1/apps/app-1/knowledge/quota", strings.NewReader(`{}`))
+	req.Header.Set("Content-Type", "application/json")
+	req = withPrincipal(req, auth.Principal{UserID: "u1", Role: domain.UserRoleOrgAdmin, OrgID: "org-1"})
+	router.ServeHTTP(w, req)
+
+	require.Equal(t, http.StatusBadRequest, w.Code)
+	assert.Contains(t, w.Body.String(), "INVALID_REQUEST")
 }
 
 // TestAppsGetNotFound 验证应用获取未找到的异常或拒绝路径场景。

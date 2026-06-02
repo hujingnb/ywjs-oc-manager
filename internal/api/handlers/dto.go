@@ -297,6 +297,12 @@ type SwitchAppVersionRequest struct {
 	VersionID string `json:"version_id" binding:"required"`
 }
 
+// UpdateAppKnowledgeQuotaRequest 更新实例知识库累计容量上限的请求体。
+type UpdateAppKnowledgeQuotaRequest struct {
+	// QuotaBytes 是实例知识库累计容量上限，单位字节，必须大于 0。
+	QuotaBytes int64 `json:"quota_bytes" binding:"required"`
+}
+
 // ===== 助手版本 assistant-versions =====
 
 // AssistantVersionRoutingDTO 是智能路由 8 槽位的请求结构；空字符串表示走主模型。

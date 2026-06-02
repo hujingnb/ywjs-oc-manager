@@ -22,6 +22,8 @@ type AppStore interface {
 	// ListAppsByOrgWithVersion 批量联查组织实例及绑定版本信息，用于 version_synced 批量计算。
 	ListAppsByOrgWithVersion(ctx context.Context, arg sqlc.ListAppsByOrgWithVersionParams) ([]sqlc.ListAppsByOrgWithVersionRow, error)
 	SetAppStatus(ctx context.Context, arg sqlc.SetAppStatusParams) error
+	// SetAppKnowledgeQuota 更新单个实例知识库容量上限。
+	SetAppKnowledgeQuota(ctx context.Context, arg sqlc.SetAppKnowledgeQuotaParams) error
 	SoftDeleteApp(ctx context.Context, id string) error
 	CreateJob(ctx context.Context, arg sqlc.CreateJobParams) error
 	CreateAuditLog(ctx context.Context, arg sqlc.CreateAuditLogParams) error
@@ -37,7 +39,7 @@ type AppImageResolver interface {
 	ResolveRuntimeImage(id string) (ref string, ok bool)
 }
 
-// AppService 维护应用的查询和状态读取。
+// AppService 维护应用的查询、状态读取和轻量配置更新。
 // 创建应用必须经过 onboarding 事务，因为应用的初始化需要联动 channel binding、audit、job。
 type AppService struct {
 	store    AppStore
@@ -61,13 +63,15 @@ func (s *AppService) SetImageResolver(resolver AppImageResolver) { s.imageResolv
 // AppResult 是对外的应用视图。
 // spec-A2b：runtime_node_id / container_id / container_name 已从 schema 删除，本结构体亦不再携带。
 type AppResult struct {
-	ID          string `json:"id"`
-	OrgID       string `json:"org_id"`
-	OwnerUserID string `json:"owner_user_id"`
-	Name        string `json:"name"`
-	Description string `json:"description,omitempty"`
-	Status      string `json:"status"`
+	ID           string `json:"id"`
+	OrgID        string `json:"org_id"`
+	OwnerUserID  string `json:"owner_user_id"`
+	Name         string `json:"name"`
+	Description  string `json:"description,omitempty"`
+	Status       string `json:"status"`
 	APIKeyStatus string `json:"api_key_status"`
+	// KnowledgeQuotaBytes 是实例知识库累计容量上限，单位字节。
+	KnowledgeQuotaBytes int64 `json:"knowledge_quota_bytes"`
 	// NewapiKeyID 是 new-api 中 token 的数值 id；schema 上是 text 列存的字符串，
 	// 这里解析成 int64 方便 usage service 直接调 GetAPIKey。0 表示未绑定。
 	NewapiKeyID int64 `json:"newapi_key_id,omitempty"`
@@ -153,12 +157,13 @@ func (s *AppService) ListByOrg(ctx context.Context, principal auth.Principal, or
 func toAppResult(app sqlc.App) AppResult {
 	// spec-A2b：runtime_node_id / container_id / container_name 已从 schema 删除，不再映射。
 	result := AppResult{
-		ID:           app.ID,
-		OrgID:        app.OrgID,
-		OwnerUserID:  app.OwnerUserID,
-		Name:         app.Name,
-		Status:       app.Status,
-		APIKeyStatus: app.ApiKeyStatus,
+		ID:                  app.ID,
+		OrgID:               app.OrgID,
+		OwnerUserID:         app.OwnerUserID,
+		Name:                app.Name,
+		Status:              app.Status,
+		APIKeyStatus:        app.ApiKeyStatus,
+		KnowledgeQuotaBytes: app.KnowledgeQuotaBytes,
 	}
 	if app.Description.Valid {
 		result.Description = app.Description.String
@@ -237,5 +242,43 @@ func (s *AppService) SwitchAppVersion(ctx context.Context, principal auth.Princi
 	}
 	result := toAppResult(newRow.App)
 	result.VersionSynced = computeVersionSynced(newRow.App, newRow.VersionRevision, newRow.VersionImageID, s.imageResolver)
+	return result, nil
+}
+
+// UpdateAppKnowledgeQuota 更新单个实例的知识库累计容量上限。
+func (s *AppService) UpdateAppKnowledgeQuota(ctx context.Context, principal auth.Principal, appID string, quotaBytes int64) (AppResult, error) {
+	// 容量上限必须为正数；允许低于当前已用，后续上传路径负责拦截超额写入。
+	if err := validateKnowledgeQuotaBytes(quotaBytes); err != nil {
+		return AppResult{}, err
+	}
+	// 先读取实例所属组织，用于容量编辑权限校验和更新后的版本同步计算。
+	row, err := s.store.GetAppWithVersion(ctx, appID)
+	if errors.Is(err, sql.ErrNoRows) {
+		return AppResult{}, ErrNotFound
+	}
+	if err != nil {
+		return AppResult{}, fmt.Errorf("查询应用失败: %w", err)
+	}
+	if !auth.CanUpdateAppKnowledgeQuota(principal, row.App.OrgID) {
+		return AppResult{}, ErrForbidden
+	}
+	if err := s.store.SetAppKnowledgeQuota(ctx, sqlc.SetAppKnowledgeQuotaParams{
+		ID:                  row.App.ID,
+		KnowledgeQuotaBytes: quotaBytes,
+	}); err != nil {
+		return AppResult{}, fmt.Errorf("更新实例知识库容量失败: %w", err)
+	}
+	// 重新读取数据库结果，确保返回值包含数据库触发器或并发更新后的最新实例状态。
+	newRow, err := s.store.GetAppWithVersion(ctx, appID)
+	if err != nil {
+		return AppResult{}, fmt.Errorf("重新查询应用失败: %w", err)
+	}
+	result := toAppResult(newRow.App)
+	result.VersionSynced = computeVersionSynced(newRow.App, newRow.VersionRevision, newRow.VersionImageID, s.imageResolver)
+	// runtime image 信息只暴露给平台管理员，用于运维排障；企业管理员不能看到节点内部镜像细节。
+	if principal.Role == domain.UserRolePlatformAdmin {
+		result.RuntimeImageRef = newRow.App.RuntimeImageRef
+		result.RuntimeImageSha256 = newRow.App.RuntimeImageSha256
+	}
 	return result, nil
 }

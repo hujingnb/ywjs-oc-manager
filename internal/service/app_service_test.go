@@ -46,6 +46,45 @@ func TestGetAppExposeRuntimeImageOnlyToPlatformAdmin(t *testing.T) {
 	assert.Empty(t, orgResult.RuntimeImageSha256)
 }
 
+// TestUpdateAppKnowledgeQuotaAllowsOrgAdmin 验证企业管理员可修改本企业实例知识库容量。
+func TestUpdateAppKnowledgeQuotaAllowsOrgAdmin(t *testing.T) {
+	svc, store := newAppServiceWithStore(t)
+	app := store.mustSeedApp(t)
+	app.KnowledgeQuotaBytes = KnowledgeQuotaDefaultBytes
+	store.app = app
+
+	result, err := svc.UpdateAppKnowledgeQuota(context.Background(), appOrgAdminPrincipal(store.organization), testAppServiceAppID, 2*1024*1024*1024)
+	require.NoError(t, err)
+
+	assert.Equal(t, int64(2*1024*1024*1024), store.app.KnowledgeQuotaBytes)
+	assert.Equal(t, int64(2*1024*1024*1024), result.KnowledgeQuotaBytes)
+}
+
+// TestUpdateAppKnowledgeQuotaRejectsMember 验证普通成员不能修改实例知识库容量。
+func TestUpdateAppKnowledgeQuotaRejectsMember(t *testing.T) {
+	svc, store := newAppServiceWithStore(t)
+	store.mustSeedApp(t)
+
+	_, err := svc.UpdateAppKnowledgeQuota(context.Background(), auth.Principal{
+		Role:   domain.UserRoleOrgMember,
+		OrgID:  store.organization.ID,
+		UserID: testMemUID,
+	}, testAppServiceAppID, 2*1024*1024*1024)
+
+	require.ErrorIs(t, err, ErrForbidden)
+	assert.Equal(t, int64(0), store.app.KnowledgeQuotaBytes)
+}
+
+// TestUpdateAppKnowledgeQuotaRejectsInvalidQuota 验证实例知识库容量必须为正数。
+func TestUpdateAppKnowledgeQuotaRejectsInvalidQuota(t *testing.T) {
+	svc, store := newAppServiceWithStore(t)
+	store.mustSeedApp(t)
+
+	_, err := svc.UpdateAppKnowledgeQuota(context.Background(), appOrgAdminPrincipal(store.organization), testAppServiceAppID, 0)
+
+	require.ErrorIs(t, err, ErrMemberCreateInvalid)
+}
+
 func newAppServiceWithStore(t *testing.T) (*AppService, *appServiceStoreStub) {
 	t.Helper()
 	store := &appServiceStoreStub{
@@ -146,6 +185,15 @@ func (s *appServiceStoreStub) ListAppsByOrgWithVersion(_ context.Context, arg sq
 
 func (s *appServiceStoreStub) SetAppStatus(_ context.Context, arg sqlc.SetAppStatusParams) error {
 	s.app.Status = arg.Status
+	return nil
+}
+
+// SetAppKnowledgeQuota 按实例 id 写入容量上限，模拟 sqlc :exec 更新行为。
+func (s *appServiceStoreStub) SetAppKnowledgeQuota(_ context.Context, arg sqlc.SetAppKnowledgeQuotaParams) error {
+	if s.app.ID != arg.ID {
+		return sql.ErrNoRows
+	}
+	s.app.KnowledgeQuotaBytes = arg.KnowledgeQuotaBytes
 	return nil
 }
 
