@@ -45,6 +45,18 @@ export function canManageApp(user: PermissionUser | null | undefined, app: Permi
   return false
 }
 
+// canUpdateAppKnowledgeQuota：实例知识库容量由企业管理员设置，平台管理员可运维兜底。
+// 普通成员不能编辑容量，即使该实例属于自己。
+export function canUpdateAppKnowledgeQuota(
+  user: PermissionUser | null | undefined,
+  app: PermissionApp | null | undefined,
+): boolean {
+  if (!user || !app) return false
+  if (user.role === 'platform_admin') return true
+  if (user.role === 'org_admin') return user.org_id === app.org_id
+  return false
+}
+
 // 组织级审计是管理视角；普通成员只能进入自己的应用审计。
 export function canViewOrgAudit(user: PermissionUser | null | undefined, orgId?: string): boolean {
   if (!user || !orgId) return false

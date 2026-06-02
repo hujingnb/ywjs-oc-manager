@@ -20,10 +20,13 @@ export interface KnowledgeDocument {
   created_at: string
 }
 
-// KnowledgeListing 是扁平文件列表响应。
+// KnowledgeListing 是扁平文件列表响应，附带当前知识库容量信息。
 export interface KnowledgeListing {
   items: KnowledgeDocument[]
   total: number
+  used_bytes: number
+  quota_bytes: number
+  remaining_bytes: number
 }
 
 const orgKey = (orgId: string | undefined) => ['knowledge', 'org', orgId] as const
@@ -34,6 +37,23 @@ export const KNOWLEDGE_UPLOAD_MAX_BYTES = 1024 * 1024 * 1024
 // 提示文案的 MB 数值由上限字节数直接换算，修改上限后文案自动跟随，避免漂移。
 export const KNOWLEDGE_UPLOAD_MAX_LABEL = `${KNOWLEDGE_UPLOAD_MAX_BYTES / (1024 * 1024)}MB`
 export const KNOWLEDGE_UPLOAD_MAX_MESSAGE = `单文件最多支持 ${KNOWLEDGE_UPLOAD_MAX_LABEL}`
+
+// formatKnowledgeBytes 统一前端知识库容量展示。
+export function formatKnowledgeBytes(value: number): string {
+  if (value < 1024) return `${value} B`
+  if (value < 1024 * 1024) return `${(value / 1024).toFixed(1)} KB`
+  if (value < 1024 * 1024 * 1024) return `${(value / 1024 / 1024).toFixed(1)} MB`
+  return `${(value / 1024 / 1024 / 1024).toFixed(2)} GB`
+}
+
+// isKnowledgeUploadOverRemaining 判断文件是否超过知识库当前剩余容量。
+export function isKnowledgeUploadOverRemaining(
+  file: Pick<File, 'size'>,
+  listing: Pick<KnowledgeListing, 'remaining_bytes'> | null | undefined,
+): boolean {
+  if (!listing) return false
+  return file.size > listing.remaining_bytes
+}
 
 // isKnowledgeUploadTooLarge 在页面发起上传会话前做本地拦截。
 export function isKnowledgeUploadTooLarge(file: Pick<File, 'size'>): boolean {

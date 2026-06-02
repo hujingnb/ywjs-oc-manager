@@ -39,6 +39,8 @@ export interface AppDTO {
   version_synced?: boolean
   // version_id 是实例绑定的助手版本 id；空表示未绑定（仅历史数据）。
   version_id?: string
+  // knowledge_quota_bytes 是实例知识库累计容量上限，单位字节。
+  knowledge_quota_bytes: number
   // runtime_image_ref 是 phasePullRuntimeImage 拉取的镜像引用；仅平台管理员可见。
   runtime_image_ref?: string
   // runtime_image_sha256 是 docker inspect 返回的镜像 config digest；仅平台管理员可见。
@@ -315,6 +317,25 @@ export function useSwitchAppVersion(appId: Ref<string | undefined>) {
       return response.app
     },
     onSuccess: () => { void client.invalidateQueries({ queryKey: appKey(appId.value) }) },
+  })
+}
+
+// useUpdateAppKnowledgeQuota 更新单个实例知识库容量，并刷新实例详情与知识库列表。
+export function useUpdateAppKnowledgeQuota(appId: Ref<string | undefined>) {
+  const client = useQueryClient()
+  return useMutation({
+    mutationFn: async (quotaBytes: number) => {
+      if (!appId.value) throw new Error('缺少实例 ID')
+      const response = await apiRequest<{ app: AppDTO }>(
+        `/api/v1/apps/${appId.value}/knowledge/quota`,
+        { method: 'PATCH', body: { quota_bytes: quotaBytes } },
+      )
+      return response.app
+    },
+    onSuccess: () => {
+      void client.invalidateQueries({ queryKey: appKey(appId.value) })
+      void client.invalidateQueries({ queryKey: ['knowledge', 'app', appId.value] })
+    },
   })
 }
 

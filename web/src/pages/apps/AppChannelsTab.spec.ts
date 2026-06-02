@@ -73,6 +73,8 @@ const app = ref<AppDTO>({
   name: '测试实例',
   status: 'running',
   api_key_status: 'succeeded',
+  // 实例知识库容量字段为 AppDTO 必填字段；渠道页本身不读取该值。
+  knowledge_quota_bytes: 1024 * 1024 * 1024,
 })
 
 function mountChannelsTab(channelType?: string) {

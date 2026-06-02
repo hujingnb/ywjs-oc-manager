@@ -32,6 +32,8 @@ export interface OrganizationFormPayload {
   credit_warning_threshold?: number | null
   // 实例数量上限；null/undefined 表示不限制。
   max_instance_count?: number | null
+  // 企业知识库累计容量上限，单位字节；未传时后端创建默认 1GB、更新保留旧值。
+  knowledge_quota_bytes?: number
   // 组织可用的助手版本 id 列表。
   assistant_version_ids: string[]
   // 首个组织管理员用户名。
@@ -117,6 +119,8 @@ export interface OrganizationUpdatePayload {
   credit_warning_threshold?: number | null
   // 实例数量上限；null/undefined 表示不限制。
   max_instance_count?: number | null
+  // 企业知识库累计容量上限，单位字节；未传时后端创建默认 1GB、更新保留旧值。
+  knowledge_quota_bytes?: number
   // 组织可用的助手版本 id 列表。
   assistant_version_ids: string[]
 }

@@ -7,6 +7,8 @@ import {
   KNOWLEDGE_UPLOAD_MAX_MESSAGE,
   downloadAppKnowledgeFile,
   downloadOrgKnowledgeFile,
+  formatKnowledgeBytes,
+  isKnowledgeUploadOverRemaining,
   isKnowledgeUploadTooLarge,
 } from './useKnowledge'
 
@@ -56,6 +58,22 @@ describe('知识库上传大小限制', () => {
   it('允许达到上限的文件并拒绝超过 1 字节的文件', () => {
     expect(isKnowledgeUploadTooLarge({ size: KNOWLEDGE_UPLOAD_MAX_BYTES })).toBe(false)
     expect(isKnowledgeUploadTooLarge({ size: KNOWLEDGE_UPLOAD_MAX_BYTES + 1 })).toBe(true)
+  })
+})
+
+describe('知识库累计容量展示', () => {
+  // 覆盖容量格式化：GB、MB 和字节按固定精度展示。
+  it('格式化知识库容量字节数', () => {
+    expect(formatKnowledgeBytes(1024 * 1024 * 1024)).toBe('1.00 GB')
+    expect(formatKnowledgeBytes(512 * 1024 * 1024)).toBe('512.0 MB')
+    expect(formatKnowledgeBytes(512)).toBe('512 B')
+  })
+
+  // 覆盖剩余空间本地拦截：超过 remaining_bytes 时阻止上传。
+  it('判断文件是否超过剩余空间', () => {
+    expect(isKnowledgeUploadOverRemaining({ size: 11 }, { remaining_bytes: 10 })).toBe(true)
+    expect(isKnowledgeUploadOverRemaining({ size: 10 }, { remaining_bytes: 10 })).toBe(false)
+    expect(isKnowledgeUploadOverRemaining({ size: 10 }, null)).toBe(false)
   })
 })
 

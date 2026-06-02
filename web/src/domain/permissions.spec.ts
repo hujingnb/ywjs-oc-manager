@@ -2,7 +2,7 @@
 // 重点验证 org_admin 在 orgId 省略和显式传入两种场景下均可管理自身组织知识库。
 import { describe, expect, it } from 'vitest'
 
-import { canManageOrgKnowledge, canManageApp, canCreateAppForOrg } from './permissions'
+import { canManageOrgKnowledge, canManageApp, canCreateAppForOrg, canUpdateAppKnowledgeQuota } from './permissions'
 
 describe('canManageOrgKnowledge', () => {
   // 覆盖 ORG_ADMIN 显式传入自身 orgId 时可管理知识库（基准路径）。
@@ -106,5 +106,26 @@ describe('canCreateAppForOrg', () => {
   // 覆盖 platform_admin 不可通过组织管理员入口创建应用。
   it('platform_admin 返回 false', () => {
     expect(canCreateAppForOrg({ role: 'platform_admin' }, 'org-1')).toBe(false)
+  })
+})
+
+describe('canUpdateAppKnowledgeQuota', () => {
+  // 覆盖平台管理员可作为运维兜底编辑任意实例知识库容量。
+  it('allows platform admin', () => {
+    expect(canUpdateAppKnowledgeQuota({ role: 'platform_admin' }, { org_id: 'org-1' })).toBe(true)
+  })
+
+  // 覆盖企业管理员只能编辑本企业实例知识库容量。
+  it('allows only same-org org admin', () => {
+    expect(canUpdateAppKnowledgeQuota({ role: 'org_admin', org_id: 'org-1' }, { org_id: 'org-1' })).toBe(true)
+    expect(canUpdateAppKnowledgeQuota({ role: 'org_admin', org_id: 'org-2' }, { org_id: 'org-1' })).toBe(false)
+  })
+
+  // 覆盖普通成员不可编辑容量，即使是自己的实例也不允许。
+  it('rejects org member', () => {
+    expect(canUpdateAppKnowledgeQuota(
+      { role: 'org_member', id: 'u1', org_id: 'org-1' },
+      { org_id: 'org-1', owner_user_id: 'u1' },
+    )).toBe(false)
   })
 })
