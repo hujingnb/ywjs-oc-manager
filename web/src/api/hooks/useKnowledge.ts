@@ -34,16 +34,51 @@ const appKey = (appId: string | undefined) => ['knowledge', 'app', appId] as con
 
 // RAGFlow 文件上传保留前端拦截，避免大文件进入无意义上传会话。
 export const KNOWLEDGE_UPLOAD_MAX_BYTES = 1024 * 1024 * 1024
+// KNOWLEDGE_DEFAULT_QUOTA_BYTES 对齐后端迁移默认值；旧接口缺少配额字段时前端也不能回退为无限制。
+export const KNOWLEDGE_DEFAULT_QUOTA_BYTES = 1024 * 1024 * 1024
 // 提示文案的 MB 数值由上限字节数直接换算，修改上限后文案自动跟随，避免漂移。
 export const KNOWLEDGE_UPLOAD_MAX_LABEL = `${KNOWLEDGE_UPLOAD_MAX_BYTES / (1024 * 1024)}MB`
 export const KNOWLEDGE_UPLOAD_MAX_MESSAGE = `单文件最多支持 ${KNOWLEDGE_UPLOAD_MAX_LABEL}`
 
+// normalizeKnowledgeNumber 把旧接口缺字段、NaN 或负数统一转成明确业务默认值，避免页面展示坏值。
+function normalizeKnowledgeNumber(value: unknown, fallback: number): number {
+  return typeof value === 'number' && Number.isFinite(value) && value >= 0 ? value : fallback
+}
+
+// normalizeKnowledgeListing 兼容旧列表响应，同时保持新接口的累计容量字段在前端始终可用。
+export function normalizeKnowledgeListing(
+  listing: Partial<KnowledgeListing> | null | undefined,
+): KnowledgeListing {
+  const items = Array.isArray(listing?.items) ? listing.items : []
+  const total = normalizeKnowledgeNumber(listing?.total, items.length)
+  const itemSizeTotal = items.reduce(
+    (total, item) => total + normalizeKnowledgeNumber((item as Partial<KnowledgeDocument>).size, 0),
+    0,
+  )
+  const hasReliableUsedBytes = typeof listing?.used_bytes === 'number'
+    && Number.isFinite(listing.used_bytes)
+    && listing.used_bytes >= 0
+  const usedBytes = normalizeKnowledgeNumber(listing?.used_bytes, itemSizeTotal)
+  const quotaBytes = normalizeKnowledgeNumber(listing?.quota_bytes, KNOWLEDGE_DEFAULT_QUOTA_BYTES)
+  // 旧接口若返回分页列表且缺少 used_bytes，当前页大小不能代表全量已用容量，必须保守禁止继续上传。
+  const remainingLimit = !hasReliableUsedBytes && total > items.length ? 0 : Math.max(0, quotaBytes - usedBytes)
+  const remainingBytes = normalizeKnowledgeNumber(listing?.remaining_bytes, remainingLimit)
+  return {
+    items,
+    total,
+    used_bytes: usedBytes,
+    quota_bytes: quotaBytes,
+    remaining_bytes: Math.min(remainingBytes, remainingLimit),
+  }
+}
+
 // formatKnowledgeBytes 统一前端知识库容量展示。
-export function formatKnowledgeBytes(value: number): string {
-  if (value < 1024) return `${value} B`
-  if (value < 1024 * 1024) return `${(value / 1024).toFixed(1)} KB`
-  if (value < 1024 * 1024 * 1024) return `${(value / 1024 / 1024).toFixed(1)} MB`
-  return `${(value / 1024 / 1024 / 1024).toFixed(2)} GB`
+export function formatKnowledgeBytes(value: number | null | undefined): string {
+  const bytes = normalizeKnowledgeNumber(value, 0)
+  if (bytes < 1024) return `${bytes} B`
+  if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(1)} KB`
+  if (bytes < 1024 * 1024 * 1024) return `${(bytes / 1024 / 1024).toFixed(1)} MB`
+  return `${(bytes / 1024 / 1024 / 1024).toFixed(2)} GB`
 }
 
 // isKnowledgeUploadOverRemaining 判断文件是否超过知识库当前剩余容量。
@@ -51,8 +86,8 @@ export function isKnowledgeUploadOverRemaining(
   file: Pick<File, 'size'>,
   listing: Pick<KnowledgeListing, 'remaining_bytes'> | null | undefined,
 ): boolean {
-  if (!listing) return false
-  return file.size > listing.remaining_bytes
+  if (!listing) return true
+  return file.size > normalizeKnowledgeNumber(listing.remaining_bytes, KNOWLEDGE_DEFAULT_QUOTA_BYTES)
 }
 
 // isKnowledgeUploadTooLarge 在页面发起上传会话前做本地拦截。
@@ -103,7 +138,7 @@ export function useOrgKnowledgeQuery(orgId: Ref<string | undefined>) {
     refetchInterval: (query) => shouldPollKnowledge(query.state.data) ? 5000 : false,
     queryFn: async () => {
       if (!orgId.value) return null
-      return apiRequest<KnowledgeListing>(`/api/v1/organizations/${orgId.value}/knowledge`)
+      return normalizeKnowledgeListing(await apiRequest<KnowledgeListing>(`/api/v1/organizations/${orgId.value}/knowledge`))
     },
   })
 }
@@ -115,7 +150,7 @@ export function useAppKnowledgeQuery(appId: Ref<string | undefined>) {
     refetchInterval: (query) => shouldPollKnowledge(query.state.data) ? 5000 : false,
     queryFn: async () => {
       if (!appId.value) return null
-      return apiRequest<KnowledgeListing>(`/api/v1/apps/${appId.value}/knowledge`)
+      return normalizeKnowledgeListing(await apiRequest<KnowledgeListing>(`/api/v1/apps/${appId.value}/knowledge`))
     },
   })
 }

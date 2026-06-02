@@ -2,6 +2,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 
 import { clearStoredTokens, setStoredTokens } from '@/api/client'
 import {
+  KNOWLEDGE_DEFAULT_QUOTA_BYTES,
   KNOWLEDGE_UPLOAD_MAX_BYTES,
   KNOWLEDGE_UPLOAD_MAX_LABEL,
   KNOWLEDGE_UPLOAD_MAX_MESSAGE,
@@ -10,6 +11,7 @@ import {
   formatKnowledgeBytes,
   isKnowledgeUploadOverRemaining,
   isKnowledgeUploadTooLarge,
+  normalizeKnowledgeListing,
 } from './useKnowledge'
 
 let clickSpy: ReturnType<typeof vi.spyOn>
@@ -69,11 +71,81 @@ describe('知识库累计容量展示', () => {
     expect(formatKnowledgeBytes(512)).toBe('512 B')
   })
 
+  // 覆盖旧接口兼容：列表缺少配额字段时使用 1GB 默认上限，不能展示 NaN 或退化为无限容量。
+  it('归一化缺少累计容量字段的旧知识库列表响应', () => {
+    expect(normalizeKnowledgeListing({ items: [], total: 0 })).toEqual({
+      items: [],
+      total: 0,
+      used_bytes: 0,
+      quota_bytes: KNOWLEDGE_DEFAULT_QUOTA_BYTES,
+      remaining_bytes: KNOWLEDGE_DEFAULT_QUOTA_BYTES,
+    })
+  })
+
+  // 覆盖异常数值兼容：后端或旧缓存返回 NaN、负数时前端展示使用明确默认值。
+  it('归一化异常容量数字并避免 NaN 展示', () => {
+    const listing = normalizeKnowledgeListing({
+      items: [],
+      total: Number.NaN,
+      used_bytes: Number.NaN,
+      quota_bytes: -1,
+      remaining_bytes: undefined,
+    })
+
+    expect(listing.total).toBe(0)
+    expect(listing.quota_bytes).toBe(KNOWLEDGE_DEFAULT_QUOTA_BYTES)
+    expect(formatKnowledgeBytes(Number.NaN)).toBe('0 B')
+  })
+
+  // 覆盖旧接口非空列表：缺少 used_bytes 时必须从文件大小推导已用容量，避免误当成空知识库。
+  it('旧知识库列表响应缺少已用容量时按文件大小汇总', () => {
+    const listing = normalizeKnowledgeListing({
+      items: [
+        // 第一条覆盖普通文件大小计入累计容量。
+        { id: 'doc-1', name: 'a.md', size: 60, parse_status: 'completed', progress: 100, created_at: '2026-06-02T00:00:00Z' },
+        // 第二条覆盖失败文件仍计入容量，直到用户删除。
+        { id: 'doc-2', name: 'b.md', size: 50, parse_status: 'failed', progress: 0, created_at: '2026-06-02T00:00:00Z' },
+      ],
+      quota_bytes: 100,
+    })
+
+    expect(listing.used_bytes).toBe(110)
+    expect(listing.remaining_bytes).toBe(0)
+  })
+
+  // 覆盖异常剩余容量：后端返回的 remaining_bytes 不能大于 quota-used，避免前端放大可上传空间。
+  it('将剩余容量钳制到配额减已用容量', () => {
+    const listing = normalizeKnowledgeListing({
+      items: [],
+      used_bytes: 60,
+      quota_bytes: 100,
+      remaining_bytes: 90,
+    })
+
+    expect(listing.remaining_bytes).toBe(40)
+  })
+
+  // 覆盖旧接口分页边界：缺少 used_bytes 且 total 大于当前 items 时，当前页大小不足以判断全量剩余。
+  it('旧分页响应缺少已用容量时保守禁止上传', () => {
+    const listing = normalizeKnowledgeListing({
+      items: [
+        // 当前页只有一条文件，但 total 表示还有未返回文件，不能用当前页大小估算可用空间。
+        { id: 'doc-1', name: 'a.md', size: 10, parse_status: 'completed', progress: 100, created_at: '2026-06-02T00:00:00Z' },
+      ],
+      total: 2,
+      quota_bytes: 100,
+    })
+
+    expect(listing.used_bytes).toBe(10)
+    expect(listing.remaining_bytes).toBe(0)
+    expect(isKnowledgeUploadOverRemaining({ size: 1 }, listing)).toBe(true)
+  })
+
   // 覆盖剩余空间本地拦截：超过 remaining_bytes 时阻止上传。
   it('判断文件是否超过剩余空间', () => {
     expect(isKnowledgeUploadOverRemaining({ size: 11 }, { remaining_bytes: 10 })).toBe(true)
     expect(isKnowledgeUploadOverRemaining({ size: 10 }, { remaining_bytes: 10 })).toBe(false)
-    expect(isKnowledgeUploadOverRemaining({ size: 10 }, null)).toBe(false)
+    expect(isKnowledgeUploadOverRemaining({ size: 10 }, null)).toBe(true)
   })
 })
 
