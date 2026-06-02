@@ -75,37 +75,20 @@
         </n-grid>
       </n-form>
     </n-card>
-
-    <n-card v-if="lastResult" :bordered="true">
-      <template #header>
-        <div style="display: flex; align-items: center; justify-content: space-between">
-          <div>
-            <p class="eyebrow">已创建</p>
-            <h2 style="margin: 0">{{ lastResult.member.display_name }} · {{ lastResult.app.name }}</h2>
-          </div>
-          <n-tag type="success" size="small" :bordered="false">事务提交</n-tag>
-        </div>
-      </template>
-      <p class="state-text">
-        Job ID：{{ lastResult.job_id }} ｜ App 状态：{{ lastResult.app.status }} ｜ API key：{{ lastResult.app.api_key_status }}。
-        当前实例尚未初始化容器，worker 会按 app_initialize 任务推进。
-      </p>
-    </n-card>
   </div>
 </template>
 
 <script setup lang="ts">
 import { computed, reactive, ref } from 'vue'
-import { RouterLink } from 'vue-router'
+import { RouterLink, useRouter } from 'vue-router'
 import {
   NButton, NCard, NForm, NFormItem, NGrid, NGridItem,
-  NInput, NSelect, NSpace, NTag, type SelectOption,
+  NInput, NSelect, NSpace, useMessage, type SelectOption,
 } from 'naive-ui'
 
 import {
   useOnboardMember,
   type OnboardMemberPayload,
-  type OnboardMemberResult,
 } from '@/api/hooks/useMembers'
 import { useAssistantVersionsQuery } from '@/api/hooks/useAssistantVersions'
 import { useOrganizationQuery } from '@/api/hooks/useOrganizations'
@@ -115,6 +98,8 @@ import { useAuthStore } from '@/stores/auth'
 // 助手版本从当前组织 allowlist 过滤，开通时必须选择。
 const props = defineProps<{ orgId?: string }>()
 const auth = useAuthStore()
+const router = useRouter()
+const message = useMessage()
 // effectiveOrgId 支持平台管理员指定组织，组织管理员则默认使用自身组织。
 const effectiveOrgId = computed(() => props.orgId ?? auth.user?.org_id)
 const orgEyebrow = computed(() => (auth.user?.role === 'platform_admin' ? 'Platform · 创建成员' : '企业 · 创建成员'))
@@ -142,8 +127,6 @@ const onboardMutation = useOnboardMember(effectiveOrgId)
 // creating 是页面本地提交态，用于覆盖 mutation 返回前的按钮禁用和文案。
 const creating = ref(false)
 const errorMessage = ref<string | null>(null)
-// lastResult 保存最近一次开通结果，供页面展示生成的成员和应用信息。
-const lastResult = ref<OnboardMemberResult | null>(null)
 
 // form 对齐 onboard API 请求体；version_id 必填，channel_type 固定 wechat。
 const form = reactive<OnboardMemberPayload>({
@@ -164,7 +147,7 @@ const roleOptions: SelectOption[] = [
 // versionValidationError 在用户尝试提交但未选择版本时给出明确提示。
 const versionValidationError = ref<string | null>(null)
 
-// onSubmit 提交完整开通流程；成功后清空敏感密码和文本输入，失败时保留表单便于修正。
+// onSubmit 提交完整开通流程；成功后提示并跳转回成员列表，失败时保留表单便于修正。
 async function onSubmit() {
   // version_id 必填校验：未选择时阻断提交并给出提示。
   if (!form.version_id) {
@@ -176,12 +159,10 @@ async function onSubmit() {
   creating.value = true
   try {
     const result = await onboardMutation.mutateAsync({ ...form })
-    lastResult.value = result as OnboardMemberResult
-    form.username = ''
-    form.password = ''
-    form.display_name = ''
-    form.app_name = ''
-    form.version_id = ''
+    // 开通成功后给出明确反馈，并跳转到成员列表查看新成员；
+    // 实例初始化由 worker 后台异步推进，列表页可继续观察进度。
+    message.success(`已创建成员 ${result.member.display_name} 并提交实例初始化`)
+    router.push('/members')
   } catch (err) {
     errorMessage.value = err instanceof Error ? err.message : '创建失败'
   } finally {
