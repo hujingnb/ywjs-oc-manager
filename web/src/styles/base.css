@@ -334,50 +334,6 @@ th {
   letter-spacing: 0.3px;
 }
 
-/* ===== 登录页 ===== */
-.auth-shell {
-  display: grid;
-  min-height: 100vh;
-  place-items: center;
-  padding: 24px;
-  background:
-    linear-gradient(180deg, rgba(255, 106, 0, 0.05), transparent 220px),
-    var(--color-page);
-}
-
-.auth-panel {
-  width: min(420px, 100%);
-}
-
-.login-form {
-  display: grid;
-  gap: 18px;
-  padding: 32px;
-  border: 1px solid var(--color-border);
-  border-radius: 8px;
-  background: var(--color-surface);
-  backdrop-filter: none;
-  box-shadow: 0 12px 32px rgba(15, 23, 42, 0.08);
-}
-
-.login-form label {
-  display: grid;
-  gap: 8px;
-  color: var(--color-text-secondary);
-  font-weight: 600;
-  font-size: 13px;
-}
-
-.login-form input {
-  width: 100%;
-  min-height: 42px;
-  padding: 0 12px;
-  border: 1px solid var(--color-border);
-  border-radius: 4px;
-  background: var(--color-surface);
-  color: var(--color-text-primary);
-}
-
 /* ===== 按钮 ===== */
 .primary-button {
   display: inline-flex;
