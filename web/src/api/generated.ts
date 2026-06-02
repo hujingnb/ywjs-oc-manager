@@ -7725,6 +7725,8 @@ export interface components {
             contact_phone?: string;
             /** @description CreditWarningThreshold 是企业余额预警阈值；nil 表示不启用余额预警或保持预警关闭。 */
             credit_warning_threshold?: number;
+            /** @description KnowledgeQuotaBytes 是企业知识库累计容量上限，单位字节；nil 表示创建时使用默认值、更新时保留旧值。 */
+            knowledge_quota_bytes?: number;
             /** @description MaxInstanceCount 是企业最多可创建的实例（应用）数；nil 表示不限制。 */
             max_instance_count?: number;
             /** @description Name 是企业展示名，也是平台管理员列表中识别租户的主字段。 */
@@ -7816,6 +7818,8 @@ export interface components {
             contact_phone?: string;
             /** @description CreditWarningThreshold 是企业余额预警阈值；nil 表示清空或未设置预警阈值。 */
             credit_warning_threshold?: number;
+            /** @description KnowledgeQuotaBytes 是企业知识库累计容量上限，单位字节；nil 表示创建时使用默认值、更新时保留旧值。 */
+            knowledge_quota_bytes?: number;
             /** @description MaxInstanceCount 是企业最多可创建的实例（应用）数；nil 表示不限制。 */
             max_instance_count?: number;
             /** @description Name 是企业展示名；更新时仍必填，避免空名称进入前端列表。 */
@@ -8444,6 +8448,8 @@ export interface components {
             credit_warning_threshold?: number;
             /** @description ID 是 manager 企业 UUID。 */
             id?: string;
+            /** @description KnowledgeQuotaBytes 是企业知识库累计容量上限，单位字节。 */
+            knowledge_quota_bytes?: number;
             /** @description MaxInstanceCount 是企业实例数量上限；nil 表示不限制。 */
             max_instance_count?: number;
             /** @description Name 是企业展示名。 */

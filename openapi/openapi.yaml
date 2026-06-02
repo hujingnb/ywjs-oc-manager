@@ -184,6 +184,9 @@ components:
         credit_warning_threshold:
           description: CreditWarningThreshold 是企业余额预警阈值；nil 表示不启用余额预警或保持预警关闭。
           type: integer
+        knowledge_quota_bytes:
+          description: KnowledgeQuotaBytes 是企业知识库累计容量上限，单位字节；nil 表示创建时使用默认值、更新时保留旧值。
+          type: integer
         max_instance_count:
           description: MaxInstanceCount 是企业最多可创建的实例（应用）数；nil 表示不限制。
           type: integer
@@ -341,6 +344,9 @@ components:
           type: string
         credit_warning_threshold:
           description: CreditWarningThreshold 是企业余额预警阈值；nil 表示清空或未设置预警阈值。
+          type: integer
+        knowledge_quota_bytes:
+          description: KnowledgeQuotaBytes 是企业知识库累计容量上限，单位字节；nil 表示创建时使用默认值、更新时保留旧值。
           type: integer
         max_instance_count:
           description: MaxInstanceCount 是企业最多可创建的实例（应用）数；nil 表示不限制。
@@ -1341,6 +1347,9 @@ components:
         id:
           description: ID 是 manager 企业 UUID。
           type: string
+        knowledge_quota_bytes:
+          description: KnowledgeQuotaBytes 是企业知识库累计容量上限，单位字节。
+          type: integer
         max_instance_count:
           description: MaxInstanceCount 是企业实例数量上限；nil 表示不限制。
           type: integer
