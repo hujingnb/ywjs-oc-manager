@@ -8,7 +8,7 @@
     <template v-else>
       <div class="detail-head">
         <div>
-          <p class="status-line">● {{ job.state || 'unknown' }}</p>
+          <p class="status-line">● {{ translateState(job.state) }}</p>
           <h3>{{ job.name || '未命名任务' }}</h3>
           <p class="detail-sub">job_id <code>{{ job.id || '—' }}</code></p>
         </div>
@@ -80,6 +80,7 @@ import { NButton, NCard, NSpace } from 'naive-ui'
 
 import type { CronJob, CronRunEntry, CronRunOutput } from '@/api/hooks/useCron'
 import CronRunHistory from './CronRunHistory.vue'
+import { scheduleDisplay, translateState } from './cronDisplay'
 
 type CronActionVerb = 'run' | 'pause' | 'resume' | 'delete'
 
@@ -116,8 +117,8 @@ const pauseVerb = computed<CronActionVerb>(() =>
   props.job?.enabled === false || props.job?.state === 'paused' ? 'resume' : 'pause',
 )
 
-// scheduleText 优先用后端面向人的 display，缺失时退回表达式。
-const scheduleText = computed(() => props.job?.schedule?.display || props.job?.schedule?.expr || '—')
+// scheduleText 走统一展示入口：上游 display 优先，缺失时前端兜底翻译，再退原文。
+const scheduleText = computed(() => scheduleDisplay(props.job?.schedule))
 
 // repeatText 同时展示重复上限和已完成次数，便于排查有限重复任务进度。
 const repeatText = computed(() => {
