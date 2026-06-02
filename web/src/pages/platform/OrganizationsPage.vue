@@ -323,7 +323,9 @@ const modalMode = ref<'create' | 'edit'>('create')
 const editingOrg = ref<Organization | null>(null)
 // editFormVisible 控制编辑模式下表单的显隐（与 formVisible 分离以避免状态混用）。
 const editFormVisible = ref(false)
+// knowledgeQuotaGBDefault 是企业表单默认展示的知识库空间，固定为 1GB。
 const knowledgeQuotaGBDefault = 1
+// bytesPerGB 用于将表单中的 GB 输入换算成后端接收的 bytes。
 const bytesPerGB = 1024 * 1024 * 1024
 
 // quotaBytesToGB 将后端字节容量转为企业表单中的 GB 数字。
