@@ -50,6 +50,8 @@ type CreateOrganizationRequest struct {
 	CreditWarningThreshold *int32 `json:"credit_warning_threshold"`
 	// MaxInstanceCount 是企业最多可创建的实例（应用）数；nil 表示不限制。
 	MaxInstanceCount *int32 `json:"max_instance_count"`
+	// KnowledgeQuotaBytes 是企业知识库累计容量上限，单位字节；nil 表示创建时使用默认值、更新时保留旧值。
+	KnowledgeQuotaBytes *int64 `json:"knowledge_quota_bytes"`
 	// AssistantVersionIDs 是该企业可用的助手版本 id 列表（allowlist）。
 	AssistantVersionIDs []string `json:"assistant_version_ids"`
 	// AdminUsername 是随企业创建的首个 org_admin 账号名。
@@ -74,6 +76,8 @@ type OrganizationRequest struct {
 	CreditWarningThreshold *int32 `json:"credit_warning_threshold"`
 	// MaxInstanceCount 是企业最多可创建的实例（应用）数；nil 表示不限制。
 	MaxInstanceCount *int32 `json:"max_instance_count"`
+	// KnowledgeQuotaBytes 是企业知识库累计容量上限，单位字节；nil 表示创建时使用默认值、更新时保留旧值。
+	KnowledgeQuotaBytes *int64 `json:"knowledge_quota_bytes"`
 	// AssistantVersionIDs 是该企业可用的助手版本 id 列表（allowlist）。
 	AssistantVersionIDs []string `json:"assistant_version_ids"`
 }

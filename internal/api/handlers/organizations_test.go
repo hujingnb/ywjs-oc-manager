@@ -106,6 +106,46 @@ func TestOrganizationsUpdateForwardsAssistantVersionIDs(t *testing.T) {
 	require.True(t, svc.lastUpdateInput.AssistantVersionIDsSet)
 }
 
+// TestOrganizationsCreateForwardsKnowledgeQuotaBytes 验证创建企业时透传企业知识库容量上限。
+func TestOrganizationsCreateForwardsKnowledgeQuotaBytes(t *testing.T) {
+	svc := &organizationServiceStub{
+		createResult: service.OrganizationResult{ID: "org-1", Name: "测试组织", Status: domain.StatusActive},
+	}
+	router := newOrganizationsTestRouter(t, svc)
+
+	recorder := httptest.NewRecorder()
+	// 创建请求显式提交 knowledge_quota_bytes，handler 需要保留指针语义并交给 service 做默认值与合法性校验。
+	body := `{"name":"测试组织","code":"test-org","knowledge_quota_bytes":2147483648,"admin_username":"admin","admin_display_name":"管理员","admin_password":"secret-password"}`
+	request := httptest.NewRequest(http.MethodPost, "/api/v1/organizations", bytes.NewBufferString(body))
+	request.Header.Set("Content-Type", "application/json")
+	request = withPrincipal(request, auth.Principal{UserID: "user-1", Role: domain.UserRolePlatformAdmin})
+	router.ServeHTTP(recorder, request)
+
+	require.Equal(t, http.StatusCreated, recorder.Code)
+	require.NotNil(t, svc.lastCreateInput.KnowledgeQuotaBytes)
+	assert.Equal(t, int64(2147483648), *svc.lastCreateInput.KnowledgeQuotaBytes)
+}
+
+// TestOrganizationsUpdateForwardsKnowledgeQuotaBytes 验证编辑企业时透传企业知识库容量上限。
+func TestOrganizationsUpdateForwardsKnowledgeQuotaBytes(t *testing.T) {
+	svc := &organizationServiceStub{
+		createResult: service.OrganizationResult{ID: "org-1", Name: "测试组织", Status: domain.StatusActive},
+	}
+	router := newOrganizationsTestRouter(t, svc)
+
+	recorder := httptest.NewRecorder()
+	// 更新请求显式提交 knowledge_quota_bytes，nil 与非 nil 的差异由 service 决定是否保留旧值。
+	body := `{"name":"测试组织","knowledge_quota_bytes":3221225472}`
+	request := httptest.NewRequest(http.MethodPatch, "/api/v1/organizations/org-1", bytes.NewBufferString(body))
+	request.Header.Set("Content-Type", "application/json")
+	request = withPrincipal(request, auth.Principal{UserID: "user-1", Role: domain.UserRolePlatformAdmin})
+	router.ServeHTTP(recorder, request)
+
+	require.Equal(t, http.StatusOK, recorder.Code)
+	require.NotNil(t, svc.lastUpdateInput.KnowledgeQuotaBytes)
+	assert.Equal(t, int64(3221225472), *svc.lastUpdateInput.KnowledgeQuotaBytes)
+}
+
 // TestOrganizationsUpdateKeepsModelWhenOmitted 验证更新请求缺省模型字段时不会要求重写模型。
 func TestOrganizationsUpdateKeepsModelWhenOmitted(t *testing.T) {
 	svc := &organizationServiceStub{

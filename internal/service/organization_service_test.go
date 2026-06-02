@@ -438,6 +438,7 @@ func (s *organizationStoreStub) CreateOrganization(_ context.Context, arg sqlc.C
 		Status:                 arg.Status,
 		ContactName:            arg.ContactName,
 		CreditWarningThreshold: arg.CreditWarningThreshold,
+		KnowledgeQuotaBytes:    arg.KnowledgeQuotaBytes,
 		AssistantVersionIds:    arg.AssistantVersionIds,
 	}
 	s.org = created
@@ -488,6 +489,7 @@ func (s *organizationStoreStub) UpdateOrganizationProfile(_ context.Context, arg
 	s.updateProfileCalled = true
 	s.org.Name = arg.Name
 	s.org.ContactName = arg.ContactName
+	s.org.KnowledgeQuotaBytes = arg.KnowledgeQuotaBytes
 	s.org.AssistantVersionIds = arg.AssistantVersionIds
 	return nil
 }
@@ -643,6 +645,62 @@ func TestUpdateOrganizationWithVersionIDsSet(t *testing.T) {
 	var stored []string
 	require.NoError(t, json.Unmarshal(store.updatedProfile.AssistantVersionIds, &stored))
 	assert.Equal(t, []string{"ver-new"}, stored)
+}
+
+// TestCreateOrganization_PersistsKnowledgeQuotaBytes 验证创建企业时知识库容量写入 CreateOrganizationParams。
+func TestCreateOrganization_PersistsKnowledgeQuotaBytes(t *testing.T) {
+	store := &organizationStoreStub{}
+	prov := &fakeProvisioner{user: newapi.User{ID: 42}, accessToken: "access-tok-xyz"}
+	svc := NewOrganizationService(store, prov, mustCipher(t), nil)
+	svc.SetVersionValidator(fakeVersionValidator{known: map[string]bool{}})
+	svc.hashPassword = fakeHash
+	quota := int64(2 * 1024 * 1024 * 1024)
+
+	_, err := svc.CreateOrganization(context.Background(), auth.Principal{Role: domain.UserRolePlatformAdmin}, OrganizationInput{
+		Name:                "测试组织",
+		Code:                "test-org",
+		KnowledgeQuotaBytes: &quota,
+		AdminUsername:       "org-admin",
+		AdminDisplayName:    "企业管理员",
+		AdminPassword:       "secret-password",
+	})
+	require.NoError(t, err)
+	assert.Equal(t, quota, store.created.KnowledgeQuotaBytes)
+}
+
+// TestCreateOrganization_DefaultsKnowledgeQuotaBytes 验证创建企业未传容量时默认 1GB。
+func TestCreateOrganization_DefaultsKnowledgeQuotaBytes(t *testing.T) {
+	store := &organizationStoreStub{}
+	prov := &fakeProvisioner{user: newapi.User{ID: 42}, accessToken: "access-tok-xyz"}
+	svc := NewOrganizationService(store, prov, mustCipher(t), nil)
+	svc.SetVersionValidator(fakeVersionValidator{known: map[string]bool{}})
+	svc.hashPassword = fakeHash
+
+	_, err := svc.CreateOrganization(context.Background(), auth.Principal{Role: domain.UserRolePlatformAdmin}, OrganizationInput{
+		Name:             "测试组织",
+		Code:             "test-org",
+		AdminUsername:    "org-admin",
+		AdminDisplayName: "企业管理员",
+		AdminPassword:    "secret-password",
+	})
+	require.NoError(t, err)
+	assert.Equal(t, KnowledgeQuotaDefaultBytes, store.created.KnowledgeQuotaBytes)
+}
+
+// TestUpdateOrganization_PreservesKnowledgeQuotaWhenOmitted 验证编辑企业未传容量时保留原值。
+func TestUpdateOrganization_PreservesKnowledgeQuotaWhenOmitted(t *testing.T) {
+	store := &organizationStoreStub{}
+	org := store.mustSeedOrganization(t, "test-org")
+	store.org.KnowledgeQuotaBytes = 3 * 1024 * 1024 * 1024
+	svc := NewOrganizationService(store, &fakeProvisioner{}, mustCipher(t), nil)
+	svc.SetVersionValidator(fakeVersionValidator{known: map[string]bool{}})
+
+	_, err := svc.UpdateOrganization(context.Background(), auth.Principal{Role: domain.UserRolePlatformAdmin}, org.ID, OrganizationInput{
+		Name:                   store.org.Name,
+		AssistantVersionIDsSet: false,
+	})
+	require.NoError(t, err)
+	assert.Equal(t, int64(3*1024*1024*1024), store.updatedProfile.KnowledgeQuotaBytes)
 }
 
 // TestCreateOrganization_PersistsMaxInstanceCount 验证创建企业时实例上限透传到 CreateOrganizationParams。

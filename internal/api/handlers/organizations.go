@@ -218,6 +218,7 @@ func toOrganizationInput(req OrganizationRequest) service.OrganizationInput {
 		Remark:                 req.Remark,
 		CreditWarningThreshold: req.CreditWarningThreshold,
 		MaxInstanceCount:       req.MaxInstanceCount,
+		KnowledgeQuotaBytes:    req.KnowledgeQuotaBytes,
 		AssistantVersionIDs:    req.AssistantVersionIDs,
 		AssistantVersionIDsSet: true,
 	}
@@ -234,6 +235,7 @@ func toCreateOrganizationInput(req CreateOrganizationRequest) service.Organizati
 		Remark:                 req.Remark,
 		CreditWarningThreshold: req.CreditWarningThreshold,
 		MaxInstanceCount:       req.MaxInstanceCount,
+		KnowledgeQuotaBytes:    req.KnowledgeQuotaBytes,
 		AdminUsername:          req.AdminUsername,
 		AdminDisplayName:       req.AdminDisplayName,
 		AdminPassword:          req.AdminPassword,
