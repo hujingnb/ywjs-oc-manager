@@ -141,3 +141,11 @@ WHERE d.parse_status IN ('queued', 'running')
   AND ds.ragflow_dataset_id IS NOT NULL
 ORDER BY d.updated_at ASC
 LIMIT ?;
+
+-- name: SumRAGFlowDocumentsSizeByScope :one
+-- 汇总知识库当前累计占用；失败/停止文件仍占用 RAGFlow 原文件存储，因此全部状态都计入。
+SELECT COALESCE(SUM(size_bytes), 0)
+FROM ragflow_documents
+WHERE scope_type = ?
+  AND org_id = ?
+  AND (sqlc.narg(app_id) IS NULL OR app_id = sqlc.narg(app_id));

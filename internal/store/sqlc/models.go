@@ -42,6 +42,7 @@ type App struct {
 	DeletedAt              null.Time       `db:"deleted_at" json:"deleted_at"`
 	OwnerActiveKey         null.String     `db:"owner_active_key" json:"owner_active_key"`
 	RuntimeTokenActiveKey  null.String     `db:"runtime_token_active_key" json:"runtime_token_active_key"`
+	KnowledgeQuotaBytes    int64           `db:"knowledge_quota_bytes" json:"knowledge_quota_bytes"`
 }
 
 type AssistantVersion struct {
@@ -132,6 +133,7 @@ type Organization struct {
 	UpdatedAt           time.Time       `db:"updated_at" json:"updated_at"`
 	DeletedAt           null.Time       `db:"deleted_at" json:"deleted_at"`
 	MaxInstanceCount    null.Int        `db:"max_instance_count" json:"max_instance_count"`
+	KnowledgeQuotaBytes int64           `db:"knowledge_quota_bytes" json:"knowledge_quota_bytes"`
 }
 
 type RagflowDataset struct {

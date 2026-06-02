@@ -9,9 +9,10 @@ INSERT INTO organizations (
     remark,
     credit_warning_threshold,
     max_instance_count,
+    knowledge_quota_bytes,
     assistant_version_ids
 ) VALUES (
-    ?, ?, ?, ?, ?, ?, ?, ?, ?, ?
+    ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?
 );
 
 -- name: SetOrganizationNewAPIUser :exec
@@ -54,6 +55,7 @@ SET
     remark = ?,
     credit_warning_threshold = ?,
     max_instance_count = ?,
+    knowledge_quota_bytes = ?,
     assistant_version_ids = ?,
     updated_at = now()
 WHERE id = ?;

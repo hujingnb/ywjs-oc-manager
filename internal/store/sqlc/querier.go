@@ -168,6 +168,8 @@ type Querier interface {
 	SetAppAppliedVersion(ctx context.Context, arg SetAppAppliedVersionParams) error
 	// worker app_health_check handler 写最近一次健康检查结果；用于自动重启窗口计数。
 	SetAppHealthState(ctx context.Context, arg SetAppHealthStateParams) error
+	// 更新单个实例知识库累计容量上限；允许低于当前已用，后续上传由 KnowledgeService 拒绝。
+	SetAppKnowledgeQuota(ctx context.Context, arg SetAppKnowledgeQuotaParams) error
 	SetAppNewAPIKey(ctx context.Context, arg SetAppNewAPIKeyParams) error
 	// progressReporter 节流后写入；NULL/NULL 表示阶段切换或未知。
 	SetAppProgress(ctx context.Context, arg SetAppProgressParams) error
@@ -196,6 +198,8 @@ type Querier interface {
 	SoftDeleteOrganization(ctx context.Context, id string) error
 	// 真软删除：仅设置 deleted_at（不动 status）；status 与 deleted_at 语义独立。
 	SoftDeleteUser(ctx context.Context, id string) error
+	// 汇总知识库当前累计占用；失败/停止文件仍占用 RAGFlow 原文件存储，因此全部状态都计入。
+	SumRAGFlowDocumentsSizeByScope(ctx context.Context, arg SumRAGFlowDocumentsSizeByScopeParams) (interface{}, error)
 	// SumRechargeAmountByOrg 聚合指定组织所有成功充值记录的总额。
 	// 仅统计 status='succeeded' 的记录，failed 记录不计入累计金额。
 	SumRechargeAmountByOrg(ctx context.Context, orgID string) (int64, error)

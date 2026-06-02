@@ -209,3 +209,10 @@ LIMIT ? OFFSET ?;
 -- name: CountActiveAppsByOrg :one
 -- 统计企业当前未删除实例数（apps.deleted_at IS NULL），用于企业实例数量上限校验。
 SELECT COUNT(*) FROM apps WHERE org_id = ? AND deleted_at IS NULL;
+
+-- name: SetAppKnowledgeQuota :exec
+-- 更新单个实例知识库累计容量上限；允许低于当前已用，后续上传由 KnowledgeService 拒绝。
+UPDATE apps
+SET knowledge_quota_bytes = ?,
+    updated_at = now()
+WHERE id = ? AND deleted_at IS NULL;
