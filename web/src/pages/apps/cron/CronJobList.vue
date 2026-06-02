@@ -113,6 +113,8 @@ function onSelect(job: CronJob) {
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
+  /* flex 子项默认 min-width: auto，会阻止 overflow:hidden 生效，长名称会挤掉状态标签 */
+  min-width: 0;
 }
 .job-id {
   color: var(--color-text-secondary, #6b7280);
