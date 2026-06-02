@@ -35,7 +35,7 @@
         <p v-else-if="jobsQuery.error.value" class="state-text danger">{{ errorText }}</p>
         <CronJobList
           v-else
-          :jobs="jobsQuery.data.value ?? []"
+          :jobs="visibleJobs"
           :selected-id="selectedJobId"
           @select="onSelectJob"
         />
@@ -91,6 +91,7 @@ import {
 } from '@/api/hooks/useCron'
 import type { ApiError } from '@/api/client'
 import { useAuthStore } from '@/stores/auth'
+import { filterCronJobs } from './cron/cronDisplay'
 import CronJobDetail from './cron/CronJobDetail.vue'
 import CronJobFormModal from './cron/CronJobFormModal.vue'
 import CronJobList from './cron/CronJobList.vue'
@@ -126,12 +127,10 @@ function normalizeQueryValue(value: unknown): string | undefined {
 const selectedJobId = computed(() => normalizeQueryValue(route.query.job))
 const selectedOutputFile = computed(() => normalizeQueryValue(route.query.file))
 
-// filters 是 useCronJobsQuery 的响应式筛选条件；all=true 保留暂停/禁用等非活跃任务。
-const filters = computed<CronJobFilters>(() => ({
-  q: search.value.trim(),
-  status: statusFilter.value,
-  all: true,
-}))
+// filters 始终全量拉取（all=true）。后端列表接口只认 all、不实现 status/q 过滤
+// （handler 仅读 all 参数），因此搜索与状态筛选都在前端用 filterCronJobs 完成；
+// 不把 q/status 放进 query，既避免每次输入都打无效请求，也让缓存稳定可即时筛选。
+const filters = computed<CronJobFilters>(() => ({ all: true }))
 
 const capabilitiesQuery = useCronCapabilitiesQuery(appId)
 const statusQuery = useCronStatusQuery(appId)
@@ -142,6 +141,12 @@ const outputQuery = useCronOutputQuery(appId, selectedJobId, selectedOutputFile)
 const createMutation = useCreateCronJob(appId)
 const updateMutation = useUpdateCronJob(appId)
 const actionMutation = useCronJobAction(appId)
+
+// visibleJobs 在前端按搜索词与状态筛选过滤全量列表，结果传给左侧列表。
+// 详情联动仍用 jobsQuery 全量数据兜底，避免选中任务被筛掉后右侧空白。
+const visibleJobs = computed(() =>
+  filterCronJobs(jobsQuery.data.value ?? [], search.value, statusFilter.value),
+)
 
 // cronFeatures 为 undefined 表示能力未知，只有明确 false 才隐藏对应 UI。
 const cronFeatures = computed(() => capabilitiesQuery.data.value?.features)

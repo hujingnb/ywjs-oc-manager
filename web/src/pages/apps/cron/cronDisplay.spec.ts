@@ -2,7 +2,10 @@
 // 覆盖：状态/投递中文映射与兜底、cron/every/at 翻译、display 优先级与原文回退。
 import { describe, expect, it } from 'vitest'
 
+import type { CronJob } from '@/api/hooks/useCron'
+
 import {
+  filterCronJobs,
   scheduleDisplay,
   translateCronExpr,
   translateDeliver,
@@ -120,5 +123,44 @@ describe('scheduleDisplay', () => {
   it('全部缺失返回 —', () => {
     expect(scheduleDisplay(undefined)).toBe('—')
     expect(scheduleDisplay({})).toBe('—')
+  })
+})
+
+describe('filterCronJobs', () => {
+  // 构造一组覆盖不同状态与名称/prompt 的任务
+  const jobs: CronJob[] = [
+    { id: '1', name: '晨间周报', prompt: '生成晨间周报', state: 'scheduled' },
+    { id: '2', name: '夜间巡检', prompt: '巡检并上报', state: 'paused' },
+    { id: '3', name: '月度结算', prompt: '结算账单', state: 'error' },
+  ]
+
+  // 无搜索无状态：返回全部
+  it('无筛选返回全部', () => {
+    expect(filterCronJobs(jobs, '', '').map((j) => j.id)).toEqual(['1', '2', '3'])
+  })
+  // 状态筛选按 job.state 精确匹配：已暂停只剩夜间巡检
+  it('按状态精确筛选', () => {
+    expect(filterCronJobs(jobs, '', 'paused').map((j) => j.id)).toEqual(['2'])
+  })
+  // 搜索按名称子串匹配：巡检命中夜间巡检
+  it('按名称子串搜索', () => {
+    expect(filterCronJobs(jobs, '巡检', '').map((j) => j.id)).toEqual(['2'])
+  })
+  // 搜索也匹配 prompt：结算命中月度结算（prompt 含“结算”）
+  it('搜索同时匹配 prompt', () => {
+    expect(filterCronJobs(jobs, '结算', '').map((j) => j.id)).toEqual(['3'])
+  })
+  // 搜索与状态并存为 AND：状态 scheduled 且名称含“报”只剩晨间周报
+  it('搜索与状态为 AND 关系', () => {
+    expect(filterCronJobs(jobs, '报', 'scheduled').map((j) => j.id)).toEqual(['1'])
+  })
+  // 搜索不区分大小写并 trim 首尾空白
+  it('搜索 trim 且不区分大小写', () => {
+    const mixed: CronJob[] = [{ id: 'a', name: 'Daily-Report', state: 'scheduled' }]
+    expect(filterCronJobs(mixed, '  daily  ', '').map((j) => j.id)).toEqual(['a'])
+  })
+  // 无匹配返回空数组
+  it('无匹配返回空', () => {
+    expect(filterCronJobs(jobs, '不存在XYZ', '')).toEqual([])
   })
 })

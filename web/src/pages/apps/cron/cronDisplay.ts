@@ -1,7 +1,7 @@
 // cronDisplay.ts —— 定时任务页面共享展示工具：状态/投递中文化与调度兜底翻译。
 // 收口所有面向用户的文案转换，供列表、详情、筛选下拉复用，避免文案散落多处。
 // 翻译原则：尽力翻译，识别不了一律回退原文或占位符，绝不抛错或显示空白。
-import type { CronSchedule } from '@/api/hooks/useCron'
+import type { CronJob, CronSchedule } from '@/api/hooks/useCron'
 
 // STATE_LABELS 把 oc-cron 状态机的英文状态映射到中文标签；未列出状态走原样兜底。
 const STATE_LABELS: Record<string, string> = {
@@ -108,4 +108,22 @@ export function scheduleDisplay(schedule?: CronSchedule): string {
   if (translated && translated !== rawExpr) return translated
   // 翻不动：上游 display 若是更友好的描述就用它，否则退原始表达式，最后占位符。
   return display || rawExpr || '—'
+}
+
+// filterCronJobs 在前端对已拉取的任务列表做筛选。
+// 关键约束（实测后端行为）：列表接口 handler 只读 all 参数，既不实现 status 状态筛选
+// 也不实现 q 文本搜索，故两者都必须在前端完成：
+// - status 非空时按 job.state 精确匹配（已调度/已暂停/运行中/已禁用/错误）；
+// - q 非空时按任务名 + prompt 子串不区分大小写匹配；
+// 两个条件是 AND 关系，均满足才保留。
+export function filterCronJobs(jobs: CronJob[], q: string, status: string): CronJob[] {
+  const keyword = q.trim().toLowerCase()
+  return jobs.filter((job) => {
+    if (status && job.state !== status) return false
+    if (keyword) {
+      const haystack = `${job.name ?? ''} ${job.prompt ?? ''}`.toLowerCase()
+      if (!haystack.includes(keyword)) return false
+    }
+    return true
+  })
 }
