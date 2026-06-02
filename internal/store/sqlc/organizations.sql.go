@@ -26,7 +26,9 @@ INSERT INTO organizations (
     knowledge_quota_bytes,
     assistant_version_ids
 ) VALUES (
-    ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?
+    ?, ?, ?, ?, ?, ?, ?, ?, ?,
+    COALESCE(NULLIF(CAST(? AS SIGNED), 0), 1073741824),
+    ?
 )
 `
 
@@ -383,7 +385,7 @@ SET
     remark = ?,
     credit_warning_threshold = ?,
     max_instance_count = ?,
-    knowledge_quota_bytes = ?,
+    knowledge_quota_bytes = COALESCE(NULLIF(CAST(? AS SIGNED), 0), knowledge_quota_bytes),
     assistant_version_ids = ?,
     updated_at = now()
 WHERE id = ?

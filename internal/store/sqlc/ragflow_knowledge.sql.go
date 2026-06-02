@@ -551,7 +551,7 @@ func (q *Queries) SetRAGFlowDatasetActive(ctx context.Context, arg SetRAGFlowDat
 }
 
 const sumRAGFlowDocumentsSizeByScope = `-- name: SumRAGFlowDocumentsSizeByScope :one
-SELECT COALESCE(SUM(size_bytes), 0)
+SELECT CAST(COALESCE(SUM(size_bytes), 0) AS SIGNED) AS total_size_bytes
 FROM ragflow_documents
 WHERE scope_type = ?
   AND org_id = ?
@@ -565,16 +565,16 @@ type SumRAGFlowDocumentsSizeByScopeParams struct {
 }
 
 // 汇总知识库当前累计占用；失败/停止文件仍占用 RAGFlow 原文件存储，因此全部状态都计入。
-func (q *Queries) SumRAGFlowDocumentsSizeByScope(ctx context.Context, arg SumRAGFlowDocumentsSizeByScopeParams) (interface{}, error) {
+func (q *Queries) SumRAGFlowDocumentsSizeByScope(ctx context.Context, arg SumRAGFlowDocumentsSizeByScopeParams) (int64, error) {
 	row := q.db.QueryRowContext(ctx, sumRAGFlowDocumentsSizeByScope,
 		arg.ScopeType,
 		arg.OrgID,
 		arg.AppID,
 		arg.AppID,
 	)
-	var coalesce interface{}
-	err := row.Scan(&coalesce)
-	return coalesce, err
+	var total_size_bytes int64
+	err := row.Scan(&total_size_bytes)
+	return total_size_bytes, err
 }
 
 const updateRAGFlowDocumentParseStatus = `-- name: UpdateRAGFlowDocumentParseStatus :exec

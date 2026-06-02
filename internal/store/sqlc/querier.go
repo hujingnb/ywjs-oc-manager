@@ -199,7 +199,7 @@ type Querier interface {
 	// 真软删除：仅设置 deleted_at（不动 status）；status 与 deleted_at 语义独立。
 	SoftDeleteUser(ctx context.Context, id string) error
 	// 汇总知识库当前累计占用；失败/停止文件仍占用 RAGFlow 原文件存储，因此全部状态都计入。
-	SumRAGFlowDocumentsSizeByScope(ctx context.Context, arg SumRAGFlowDocumentsSizeByScopeParams) (interface{}, error)
+	SumRAGFlowDocumentsSizeByScope(ctx context.Context, arg SumRAGFlowDocumentsSizeByScopeParams) (int64, error)
 	// SumRechargeAmountByOrg 聚合指定组织所有成功充值记录的总额。
 	// 仅统计 status='succeeded' 的记录，failed 记录不计入累计金额。
 	SumRechargeAmountByOrg(ctx context.Context, orgID string) (int64, error)

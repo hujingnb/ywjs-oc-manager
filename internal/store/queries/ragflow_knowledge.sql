@@ -144,7 +144,7 @@ LIMIT ?;
 
 -- name: SumRAGFlowDocumentsSizeByScope :one
 -- 汇总知识库当前累计占用；失败/停止文件仍占用 RAGFlow 原文件存储，因此全部状态都计入。
-SELECT COALESCE(SUM(size_bytes), 0)
+SELECT CAST(COALESCE(SUM(size_bytes), 0) AS SIGNED) AS total_size_bytes
 FROM ragflow_documents
 WHERE scope_type = ?
   AND org_id = ?
