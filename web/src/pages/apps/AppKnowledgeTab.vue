@@ -7,15 +7,19 @@
       </div>
     </template>
     <template #header-extra>
-      <div v-if="canManage" class="upload-actions">
-        <span class="upload-limit">{{ KNOWLEDGE_UPLOAD_MAX_MESSAGE }}</span>
-        <label class="secondary-button file-picker" :class="{ disabled: uploading }">
-          上传文件
-          <input type="file" :disabled="uploading" @change="onUploadFile" />
-        </label>
+      <div v-if="canManage || canEditQuota" class="upload-actions">
+        <n-button v-if="canEditQuota" size="small" @click="openQuotaModal">编辑空间</n-button>
+        <template v-if="canManage">
+          <span class="upload-limit">{{ KNOWLEDGE_UPLOAD_MAX_MESSAGE }}</span>
+          <label class="secondary-button file-picker" :class="{ disabled: uploading }">
+            上传文件
+            <input type="file" :disabled="uploading" @change="onUploadFile" />
+          </label>
+        </template>
       </div>
     </template>
 
+    <p v-if="quotaSummary" class="state-text">{{ quotaSummary }}</p>
     <p v-if="!app" class="state-text">尚未加载实例信息</p>
     <p v-else-if="errorMessage" class="state-text danger">{{ errorMessage }}</p>
     <div v-else-if="listing.isLoading.value" class="state-text">加载中…</div>
@@ -28,17 +32,32 @@
       :bordered="false"
       :row-key="(row) => row.id"
     />
+
+    <n-modal v-model:show="showQuotaModal" preset="card" title="编辑实例知识库空间" style="width: 420px">
+      <n-form label-placement="top" @submit.prevent="submitQuota">
+        <n-form-item label="空间大小 (GB)">
+          <n-input-number v-model:value="quotaGB" :min="1" :precision="0" style="width: 100%" />
+        </n-form-item>
+        <n-space justify="end">
+          <n-button @click="showQuotaModal = false">取消</n-button>
+          <n-button type="primary" attr-type="submit" :loading="updateQuotaMutation.isPending.value">保存</n-button>
+        </n-space>
+        <p v-if="quotaFeedback" class="state-text" :class="{ danger: quotaError }">{{ quotaFeedback }}</p>
+      </n-form>
+    </n-modal>
   </n-card>
 </template>
 
 <script setup lang="ts">
 import { computed, h, inject, ref, type Ref } from 'vue'
-import { NButton, NCard, NDataTable, NTag, useMessage, type DataTableColumns } from 'naive-ui'
+import { NButton, NCard, NDataTable, NForm, NFormItem, NInputNumber, NModal, NSpace, NTag, useMessage, type DataTableColumns } from 'naive-ui'
 
-import type { AppDTO } from '@/api/hooks/useApps'
+import { useUpdateAppKnowledgeQuota, type AppDTO } from '@/api/hooks/useApps'
 import {
   KNOWLEDGE_UPLOAD_MAX_MESSAGE,
   downloadAppKnowledgeFile,
+  formatKnowledgeBytes,
+  isKnowledgeUploadOverRemaining,
   isKnowledgeUploadTooLarge,
   useAppKnowledgeQuery,
   useDeleteAppKnowledge,
@@ -46,12 +65,13 @@ import {
   useUploadAppKnowledge,
   type KnowledgeDocument,
 } from '@/api/hooks/useKnowledge'
-import { canManageApp } from '@/domain/permissions'
+import { canManageApp, canUpdateAppKnowledgeQuota } from '@/domain/permissions'
 import { useAuthStore } from '@/stores/auth'
 import { useUploadProgressStore } from '@/stores/uploadProgress'
 
 // AppKnowledgeTab 管理单个应用的 RAGFlow 知识库文件，权限来自应用详情注入。
 const props = defineProps<{ appId: string }>()
+const bytesPerGB = 1024 * 1024 * 1024
 const appIdRef = computed<string | undefined>(() => props.appId)
 const auth = useAuthStore()
 
@@ -61,14 +81,24 @@ const listing = useAppKnowledgeQuery(appIdRef)
 const uploadMutation = useUploadAppKnowledge(appIdRef)
 const deleteMutation = useDeleteAppKnowledge(appIdRef)
 const reparseMutation = useReparseAppKnowledge(appIdRef)
+const updateQuotaMutation = useUpdateAppKnowledgeQuota(appIdRef)
 const errorMessage = ref<string>('')
+const showQuotaModal = ref(false)
+const quotaGB = ref<number>(1)
+const quotaFeedback = ref('')
+const quotaError = ref(false)
 const uploadProgress = useUploadProgressStore()
 const message = useMessage()
 
 // canManage 控制上传和删除入口，后端仍会基于应用归属做最终权限校验。
 const canManage = computed(() => canManageApp(auth.user, app?.value))
+// canEditQuota 单独控制容量入口，平台管理员可编辑容量但不一定拥有应用写操作入口。
+const canEditQuota = computed(() => canUpdateAppKnowledgeQuota(auth.user, app?.value))
 const uploading = computed(() => uploadMutation.isPending.value)
 const deleting = computed(() => deleteMutation.isPending.value)
+const quotaSummary = computed(() => listing.data.value
+  ? `已用 ${formatKnowledgeBytes(listing.data.value.used_bytes)} / 上限 ${formatKnowledgeBytes(listing.data.value.quota_bytes)}，剩余 ${formatKnowledgeBytes(listing.data.value.remaining_bytes)}`
+  : '')
 // downloading 标记当前页面正在触发浏览器下载，避免重复点击生成多次下载请求。
 const downloading = ref(false)
 
@@ -124,6 +154,11 @@ async function onUploadFile(event: Event) {
     message.warning(KNOWLEDGE_UPLOAD_MAX_MESSAGE)
     return
   }
+  // 剩余容量依赖后端返回的实时统计，超出时直接提示，避免创建无法完成的上传任务。
+  if (isKnowledgeUploadOverRemaining(file, listing.data.value)) {
+    message.warning(`知识库空间不足，剩余 ${formatKnowledgeBytes(listing.data.value?.remaining_bytes ?? 0)}`)
+    return
+  }
   try {
     await uploadProgress.run([{ file, label: file.name }], async (_item, f, ctx) => {
       await uploadMutation.mutateAsync({
@@ -134,6 +169,27 @@ async function onUploadFile(event: Event) {
     })
   } catch (err) {
     message.warning(err instanceof Error ? err.message : '已有上传任务正在进行')
+  }
+}
+
+// openQuotaModal 将后端 bytes 上限转换成管理员可编辑的 GB 单位，并重置上次提交反馈。
+function openQuotaModal() {
+  quotaGB.value = Math.max(1, Math.round((app?.value?.knowledge_quota_bytes ?? bytesPerGB) / bytesPerGB))
+  quotaFeedback.value = ''
+  quotaError.value = false
+  showQuotaModal.value = true
+}
+
+// submitQuota 提交前把 GB 转回 bytes；失败时保留弹窗并展示后端错误。
+async function submitQuota() {
+  quotaFeedback.value = ''
+  quotaError.value = false
+  try {
+    await updateQuotaMutation.mutateAsync(Math.max(1, Math.round(quotaGB.value)) * bytesPerGB)
+    showQuotaModal.value = false
+  } catch (err) {
+    quotaError.value = true
+    quotaFeedback.value = err instanceof Error ? err.message : '更新空间失败'
   }
 }
 

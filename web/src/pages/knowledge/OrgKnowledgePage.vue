@@ -27,6 +27,7 @@
         />
       </n-space>
 
+      <p v-if="quotaSummary" class="state-text">{{ quotaSummary }}</p>
       <div v-if="!effectiveOrgId" class="state-text">{{ emptyOrgMessage }}</div>
       <div v-else-if="isLoading || organizationsLoading" class="state-text">加载中…</div>
       <div v-else-if="error" class="state-text danger">查询失败：{{ error.message }}</div>
@@ -49,6 +50,8 @@ import { NButton, NCard, NDataTable, NSelect, NSpace, NTag, useMessage, type Dat
 import {
   KNOWLEDGE_UPLOAD_MAX_MESSAGE,
   downloadOrgKnowledgeFile,
+  formatKnowledgeBytes,
+  isKnowledgeUploadOverRemaining,
   isKnowledgeUploadTooLarge,
   useDeleteOrgKnowledge,
   useOrgKnowledgeQuery,
@@ -84,6 +87,9 @@ const { data: listing, isLoading, error } = useOrgKnowledgeQuery(effectiveOrgId)
 const uploadMutation = useUploadOrgKnowledge(effectiveOrgId)
 const deleteMutation = useDeleteOrgKnowledge(effectiveOrgId)
 const reparseMutation = useReparseOrgKnowledge(effectiveOrgId)
+const quotaSummary = computed(() => listing.value
+  ? `已用 ${formatKnowledgeBytes(listing.value.used_bytes)} / 上限 ${formatKnowledgeBytes(listing.value.quota_bytes)}，剩余 ${formatKnowledgeBytes(listing.value.remaining_bytes)}`
+  : '')
 // downloading 标记当前页面正在触发浏览器下载，防止同一页面重复点击下载按钮。
 const downloading = ref(false)
 
@@ -136,6 +142,11 @@ async function onUpload(event: Event) {
   // 前端先拦截超过知识库业务上限的文件，避免创建进度会话后再被网关或后端拒绝。
   if (isKnowledgeUploadTooLarge(file)) {
     message.warning(KNOWLEDGE_UPLOAD_MAX_MESSAGE)
+    return
+  }
+  // 剩余容量来自后端实时列表响应；前端拦截可避免创建必然失败的上传会话。
+  if (isKnowledgeUploadOverRemaining(file, listing.value)) {
+    message.warning(`知识库空间不足，剩余 ${formatKnowledgeBytes(listing.value?.remaining_bytes ?? 0)}`)
     return
   }
   try {

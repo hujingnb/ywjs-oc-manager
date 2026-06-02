@@ -10,7 +10,9 @@ const mocks = vi.hoisted(() => ({
   error: vi.fn(),
   warning: vi.fn(),
   mutateAsync: vi.fn(),
+  updateQuotaMutateAsync: vi.fn(),
   canManage: vi.fn(() => true),
+  authUser: { id: 'user-1', role: 'org_member', org_id: 'org-1' },
   downloadAppKnowledgeFile: vi.fn(),
 }))
 
@@ -42,16 +44,31 @@ const DataTableStub = defineComponent({
 })
 
 vi.mock('@/stores/auth', () => ({
-  useAuthStore: () => ({ user: { id: 'user-1', role: 'org_member', org_id: 'org-1' } }),
+  useAuthStore: () => ({ user: mocks.authUser }),
 }))
 
 vi.mock('@/stores/uploadProgress', () => ({
   useUploadProgressStore: () => ({ run: mocks.run }),
 }))
 
-vi.mock('@/domain/permissions', () => ({
-  canManageApp: mocks.canManage,
-}))
+vi.mock('@/domain/permissions', async () => {
+  const actual = await vi.importActual<typeof import('@/domain/permissions')>('@/domain/permissions')
+  return {
+    ...actual,
+    canManageApp: mocks.canManage,
+  }
+})
+
+vi.mock('@/api/hooks/useApps', async () => {
+  const actual = await vi.importActual<typeof import('@/api/hooks/useApps')>('@/api/hooks/useApps')
+  return {
+    ...actual,
+    useUpdateAppKnowledgeQuota: () => ({
+      mutateAsync: mocks.updateQuotaMutateAsync,
+      isPending: ref(false),
+    }),
+  }
+})
 
 vi.mock('naive-ui', async () => {
   const actual = await vi.importActual<typeof import('naive-ui')>('naive-ui')
@@ -69,6 +86,9 @@ vi.mock('@/api/hooks/useKnowledge', async () => {
       data: ref({
         items: [{ id: 'doc-app-1', name: 'readme.md', size: 5, parse_status: 'completed', progress: 100, created_at: '2026-05-27T00:00:00Z' }],
         total: 1,
+        used_bytes: 5,
+        quota_bytes: 100,
+        remaining_bytes: 95,
       }),
       isLoading: ref(false),
       error: ref(null),
@@ -101,6 +121,7 @@ function mountTab() {
           name: '测试实例',
           status: 'running',
           api_key_status: 'active',
+          knowledge_quota_bytes: 100,
         }),
       },
       stubs: {
@@ -122,12 +143,14 @@ function oversizedFile(): File {
 
 describe('AppKnowledgeTab', () => {
   beforeEach(() => {
+    mocks.authUser = { id: 'user-1', role: 'org_member', org_id: 'org-1' }
     mocks.canManage.mockReturnValue(true)
     mocks.downloadAppKnowledgeFile.mockReset()
     mocks.error.mockReset()
     mocks.warning.mockReset()
     mocks.run.mockReset()
     mocks.mutateAsync.mockReset()
+    mocks.updateQuotaMutateAsync.mockReset()
   })
 
   // 覆盖实例知识库文件列表列头文案：文件名列必须明确显示为「文件名称」。
@@ -135,6 +158,14 @@ describe('AppKnowledgeTab', () => {
     const wrapper = mountTab()
 
     expect(wrapper.find('.header-name').text()).toBe('文件名称')
+  })
+
+  // 覆盖实例知识库容量编辑入口：企业管理员可看到编辑空间按钮。
+  it('企业管理员可看到实例知识库空间编辑入口', () => {
+    mocks.authUser = { id: 'admin-1', role: 'org_admin', org_id: 'org-1' }
+    const wrapper = mountTab()
+
+    expect(wrapper.text()).toContain('编辑空间')
   })
 
   // 覆盖实例知识库上传超限路径：前端提示上限并且不创建上传会话。
@@ -148,6 +179,20 @@ describe('AppKnowledgeTab', () => {
     expect(mocks.warning).toHaveBeenCalledWith(KNOWLEDGE_UPLOAD_MAX_MESSAGE)
     expect(mocks.run).not.toHaveBeenCalled()
     expect(mocks.mutateAsync).not.toHaveBeenCalled()
+  })
+
+  // 覆盖实例知识库剩余容量拦截：超过 remaining_bytes 时不创建上传会话。
+  it('拒绝超过实例知识库剩余空间的文件', async () => {
+    const wrapper = mountTab()
+    const input = wrapper.find('input[type="file"]')
+    const file = new File(['x'], 'too-large.md')
+    Object.defineProperty(file, 'size', { value: 96 })
+
+    Object.defineProperty(input.element, 'files', { value: [file], configurable: true })
+    await input.trigger('change')
+
+    expect(mocks.warning).toHaveBeenCalledWith(expect.stringContaining('知识库空间不足'))
+    expect(mocks.run).not.toHaveBeenCalled()
   })
 
   // 覆盖实例知识库只读场景：可读用户可以下载文件，且下载按 RAGFlow document ID 定位。

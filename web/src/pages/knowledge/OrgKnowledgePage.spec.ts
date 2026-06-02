@@ -85,6 +85,9 @@ vi.mock('@/api/hooks/useKnowledge', async () => {
       data: ref({
         items: [{ id: 'doc-1', name: 'readme.md', size: 5, parse_status: 'completed', progress: 100, created_at: '2026-05-27T00:00:00Z' }],
         total: 1,
+        used_bytes: 5,
+        quota_bytes: 100,
+        remaining_bytes: 95,
       }),
       isLoading: ref(false),
       error: ref(null),
@@ -143,6 +146,14 @@ describe('OrgKnowledgePage', () => {
     expect(wrapper.find('.header-name').text()).toBe('文件名称')
   })
 
+  // 覆盖企业知识库容量展示：页面应显示已用和上限。
+  it('展示企业知识库容量信息', () => {
+    const wrapper = mountPage()
+
+    expect(wrapper.text()).toContain('已用')
+    expect(wrapper.text()).toContain('剩余')
+  })
+
   // 覆盖组织知识库上传超限路径：前端提示上限并且不创建上传会话。
   it('拒绝超过上限的企业知识库文件', async () => {
     const wrapper = mountPage()
@@ -154,6 +165,20 @@ describe('OrgKnowledgePage', () => {
     expect(mocks.warning).toHaveBeenCalledWith(KNOWLEDGE_UPLOAD_MAX_MESSAGE)
     expect(mocks.run).not.toHaveBeenCalled()
     expect(mocks.mutateAsync).not.toHaveBeenCalled()
+  })
+
+  // 覆盖企业知识库剩余容量拦截：超过 remaining_bytes 时不创建上传会话。
+  it('拒绝超过企业知识库剩余空间的文件', async () => {
+    const wrapper = mountPage()
+    const input = wrapper.find('input[type="file"]')
+    const file = new File(['x'], 'too-large.md')
+    Object.defineProperty(file, 'size', { value: 96 })
+
+    Object.defineProperty(input.element, 'files', { value: [file], configurable: true })
+    await input.trigger('change')
+
+    expect(mocks.warning).toHaveBeenCalledWith(expect.stringContaining('知识库空间不足'))
+    expect(mocks.run).not.toHaveBeenCalled()
   })
 
   // 覆盖组织成员只读场景：可下载组织知识库文件，且下载按 RAGFlow document ID 定位。
