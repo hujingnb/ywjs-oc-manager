@@ -2779,6 +2779,15 @@ export interface paths {
                         "application/json": components["schemas"]["handlers.ErrorResponse"];
                     };
                 };
+                /** @description Conflict */
+                409: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["handlers.ErrorResponse"];
+                    };
+                };
                 /** @description Service Unavailable */
                 503: {
                     headers: {
@@ -6266,6 +6275,15 @@ export interface paths {
                         "application/json": components["schemas"]["handlers.ErrorResponse"];
                     };
                 };
+                /** @description Conflict */
+                409: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["handlers.ErrorResponse"];
+                    };
+                };
                 /** @description Service Unavailable */
                 503: {
                     headers: {
@@ -7328,6 +7346,15 @@ export interface paths {
                 };
                 /** @description Unauthorized */
                 401: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["handlers.ErrorResponse"];
+                    };
+                };
+                /** @description Conflict */
+                409: {
                     headers: {
                         [name: string]: unknown;
                     };
@@ -8461,7 +8488,13 @@ export interface components {
         };
         "service.KnowledgeListResult": {
             items?: components["schemas"]["service.KnowledgeDocumentResult"][];
+            /** @description QuotaBytes 是当前知识库累计容量上限，单位字节。 */
+            quota_bytes?: number;
+            /** @description RemainingBytes 是展示用剩余空间，超用时按 0 返回。 */
+            remaining_bytes?: number;
             total?: number;
+            /** @description UsedBytes 是当前知识库本地记录的累计文件大小，包含失败/停止解析文件。 */
+            used_bytes?: number;
         };
         "service.KnowledgeSearchHit": {
             content?: string;

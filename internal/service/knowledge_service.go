@@ -68,6 +68,8 @@ type KnowledgeStore interface {
 	CreateRAGFlowDocument(ctx context.Context, arg sqlc.CreateRAGFlowDocumentParams) error
 	ListRAGFlowDocumentsByScope(ctx context.Context, arg sqlc.ListRAGFlowDocumentsByScopeParams) ([]sqlc.RagflowDocument, error)
 	CountRAGFlowDocumentsByScope(ctx context.Context, arg sqlc.CountRAGFlowDocumentsByScopeParams) (int64, error)
+	// SumRAGFlowDocumentsSizeByScope 统计当前知识库累计占用，包含所有解析状态。
+	SumRAGFlowDocumentsSizeByScope(ctx context.Context, arg sqlc.SumRAGFlowDocumentsSizeByScopeParams) (int64, error)
 	GetRAGFlowDocument(ctx context.Context, id string) (sqlc.RagflowDocument, error)
 	// UpdateRAGFlowDocumentParseStatus 更新解析状态（:exec），写入后通过 GetRAGFlowDocument 读回。
 	UpdateRAGFlowDocumentParseStatus(ctx context.Context, arg sqlc.UpdateRAGFlowDocumentParseStatusParams) error
@@ -106,6 +108,12 @@ func (s *KnowledgeService) SetDatasetChunkMethod(method string) {
 type KnowledgeListResult struct {
 	Items []KnowledgeDocumentResult `json:"items"`
 	Total int64                     `json:"total"`
+	// UsedBytes 是当前知识库本地记录的累计文件大小，包含失败/停止解析文件。
+	UsedBytes int64 `json:"used_bytes"`
+	// QuotaBytes 是当前知识库累计容量上限，单位字节。
+	QuotaBytes int64 `json:"quota_bytes"`
+	// RemainingBytes 是展示用剩余空间，超用时按 0 返回。
+	RemainingBytes int64 `json:"remaining_bytes"`
 }
 
 // KnowledgeDocumentResult 是 manager 对 RAGFlow document 元数据的用户侧视图。
@@ -140,12 +148,16 @@ func (s *KnowledgeService) ListOrg(ctx context.Context, principal auth.Principal
 	if !auth.CanReadOrgKnowledge(principal, orgID) {
 		return KnowledgeListResult{}, ErrKnowledgeForbidden
 	}
-	// orgID 直接作为字符串传入，不再解析为 UUID 类型。
-	dataset, err := s.getOrgDataset(ctx, orgID)
+	org, err := s.getOrg(ctx, orgID)
 	if err != nil {
 		return KnowledgeListResult{}, err
 	}
-	return s.listDocuments(ctx, dataset, "org", dataset.OrgID, "", page, pageSize, keyword, status)
+	// orgID 直接作为字符串传入，不再解析为 UUID 类型。
+	dataset, err := s.getOrgDataset(ctx, org.ID)
+	if err != nil {
+		return KnowledgeListResult{}, err
+	}
+	return s.listDocuments(ctx, dataset, "org", dataset.OrgID, "", page, pageSize, keyword, status, org.KnowledgeQuotaBytes)
 }
 
 // SaveOrgFile 上传企业知识库文件并触发解析。
@@ -153,7 +165,14 @@ func (s *KnowledgeService) SaveOrgFile(ctx context.Context, principal auth.Princ
 	if !auth.CanWriteOrgKnowledge(principal, orgID) {
 		return KnowledgeDocumentResult{}, ErrKnowledgeForbidden
 	}
-	dataset, err := s.getOrgDataset(ctx, orgID)
+	org, err := s.getOrg(ctx, orgID)
+	if err != nil {
+		return KnowledgeDocumentResult{}, err
+	}
+	if err := s.ensureKnowledgeQuotaAvailable(ctx, "org", org.ID, "", org.KnowledgeQuotaBytes, size); err != nil {
+		return KnowledgeDocumentResult{}, err
+	}
+	dataset, err := s.getOrgDataset(ctx, org.ID)
 	if err != nil {
 		return KnowledgeDocumentResult{}, err
 	}
@@ -211,7 +230,7 @@ func (s *KnowledgeService) ListApp(ctx context.Context, principal auth.Principal
 		return KnowledgeListResult{}, err
 	}
 	// dataset.AppID 是 null.String；取其字符串值（如 NULL 则传空字符串）。
-	return s.listDocuments(ctx, dataset, "app", app.OrgID, strOrEmpty(dataset.AppID), page, pageSize, keyword, status)
+	return s.listDocuments(ctx, dataset, "app", app.OrgID, strOrEmpty(dataset.AppID), page, pageSize, keyword, status, app.KnowledgeQuotaBytes)
 }
 
 // SaveAppFile 上传实例知识库文件并触发解析。
@@ -222,6 +241,9 @@ func (s *KnowledgeService) SaveAppFile(ctx context.Context, principal auth.Princ
 	}
 	if !auth.CanWriteAppKnowledge(principal, app.OrgID, app.OwnerUserID) {
 		return KnowledgeDocumentResult{}, ErrKnowledgeForbidden
+	}
+	if err := s.ensureKnowledgeQuotaAvailable(ctx, "app", app.OrgID, app.ID, app.KnowledgeQuotaBytes, size); err != nil {
+		return KnowledgeDocumentResult{}, err
 	}
 	dataset, err := s.getAppDataset(ctx, app.ID)
 	if err != nil {
@@ -327,6 +349,9 @@ func (s *KnowledgeService) RuntimeAddFile(ctx context.Context, appToken, filenam
 	if err != nil {
 		return KnowledgeDocumentResult{}, err
 	}
+	if err := s.ensureKnowledgeQuotaAvailable(ctx, "app", app.OrgID, app.ID, app.KnowledgeQuotaBytes, size); err != nil {
+		return KnowledgeDocumentResult{}, err
+	}
 	dataset, err := s.getAppDataset(ctx, app.ID)
 	if err != nil {
 		return KnowledgeDocumentResult{}, err
@@ -371,7 +396,7 @@ func (s *KnowledgeService) DeleteAppDataset(ctx context.Context, appID string) e
 	return nil
 }
 
-func (s *KnowledgeService) listDocuments(ctx context.Context, dataset sqlc.RagflowDataset, scope string, orgID, appID string, page, pageSize int32, keyword, status string) (KnowledgeListResult, error) {
+func (s *KnowledgeService) listDocuments(ctx context.Context, dataset sqlc.RagflowDataset, scope string, orgID, appID string, page, pageSize int32, keyword, status string, quotaBytes int64) (KnowledgeListResult, error) {
 	page, pageSize = normalizePage(page, pageSize)
 	// OrgID 为 string；AppID 为 null.String（空字符串表示组织级别查询，传 null.String{}）。
 	appIDNull := null.String{}
@@ -409,11 +434,73 @@ func (s *KnowledgeService) listDocuments(ctx context.Context, dataset sqlc.Ragfl
 	if err != nil {
 		return KnowledgeListResult{}, fmt.Errorf("统计知识库文件失败: %w", err)
 	}
+	usedBytes, err := s.knowledgeUsedBytes(ctx, scope, orgID, appID)
+	if err != nil {
+		return KnowledgeListResult{}, err
+	}
 	results := make([]KnowledgeDocumentResult, 0, len(items))
 	for _, item := range items {
 		results = append(results, toKnowledgeDocumentResult(item))
 	}
-	return KnowledgeListResult{Items: results, Total: total}, nil
+	return KnowledgeListResult{
+		Items:          results,
+		Total:          total,
+		UsedBytes:      usedBytes,
+		QuotaBytes:     quotaBytes,
+		RemainingBytes: knowledgeQuotaRemainingBytes(quotaBytes, usedBytes),
+	}, nil
+}
+
+// knowledgeUsedBytes 汇总指定作用域的本地 document 大小，用于列表展示和上传前容量校验。
+// 失败、停止或排队中的文件都仍占用 RAGFlow 原文件存储，因此不按解析状态过滤。
+func (s *KnowledgeService) knowledgeUsedBytes(ctx context.Context, scope, orgID, appID string) (int64, error) {
+	if s.store == nil {
+		return 0, ErrKnowledgeMissing
+	}
+	appIDNull := null.String{}
+	if appID != "" {
+		appIDNull = null.StringFrom(appID)
+	}
+	used, err := s.store.SumRAGFlowDocumentsSizeByScope(ctx, sqlc.SumRAGFlowDocumentsSizeByScopeParams{
+		ScopeType: scope,
+		OrgID:     orgID,
+		AppID:     appIDNull,
+	})
+	if err != nil {
+		return 0, fmt.Errorf("统计知识库空间失败: %w", err)
+	}
+	return used, nil
+}
+
+// ensureKnowledgeQuotaAvailable 在上传到 RAGFlow 前检查累计容量，避免远端已写入后本地才发现超限。
+// uploadBytes 允许等于剩余容量；只有剩余容量严格小于上传大小时才拒绝。
+func (s *KnowledgeService) ensureKnowledgeQuotaAvailable(ctx context.Context, scope, orgID, appID string, quotaBytes, uploadBytes int64) error {
+	if uploadBytes < 0 {
+		return fmt.Errorf("知识库文件大小不能为负数")
+	}
+	used, err := s.knowledgeUsedBytes(ctx, scope, orgID, appID)
+	if err != nil {
+		return err
+	}
+	remaining := quotaBytes - used
+	if remaining < uploadBytes {
+		return fmt.Errorf("%w: 知识库空间不足，剩余 %s", ErrKnowledgeQuotaExceeded, formatKnowledgeBytes(knowledgeQuotaRemainingBytes(quotaBytes, used)))
+	}
+	return nil
+}
+
+// formatKnowledgeBytes 将字节数转成面向错误提示的短文案，优先展示整 GB，其次展示 MB。
+// 不足 1MB 或无法整除 GB 的值保持字节/向下取整 MB，避免在错误信息中出现过长小数。
+func formatKnowledgeBytes(value int64) string {
+	const mb = 1024 * 1024
+	const gb = 1024 * mb
+	if value >= gb && value%gb == 0 {
+		return fmt.Sprintf("%dGB", value/gb)
+	}
+	if value >= mb {
+		return fmt.Sprintf("%dMB", value/mb)
+	}
+	return fmt.Sprintf("%dB", value)
 }
 
 func (s *KnowledgeService) uploadToDataset(ctx context.Context, dataset sqlc.RagflowDataset, appID, createdBy, filename string, content io.Reader, size int64) (KnowledgeDocumentResult, error) {
@@ -602,6 +689,21 @@ func (s *KnowledgeService) getApp(ctx context.Context, appID string) (sqlc.App, 
 		return sqlc.App{}, fmt.Errorf("查询应用失败: %w", err)
 	}
 	return app, nil
+}
+
+func (s *KnowledgeService) getOrg(ctx context.Context, orgID string) (sqlc.Organization, error) {
+	if s.store == nil {
+		return sqlc.Organization{}, ErrKnowledgeMissing
+	}
+	// orgID 直接按字符串查询；不存在或已软删除时对调用方统一表现为资源不存在。
+	org, err := s.store.GetOrganization(ctx, orgID)
+	if errors.Is(err, sql.ErrNoRows) || org.DeletedAt.Valid {
+		return sqlc.Organization{}, ErrNotFound
+	}
+	if err != nil {
+		return sqlc.Organization{}, fmt.Errorf("查询企业失败: %w", err)
+	}
+	return org, nil
 }
 
 func (s *KnowledgeService) appByRuntimeToken(ctx context.Context, token string) (sqlc.App, error) {

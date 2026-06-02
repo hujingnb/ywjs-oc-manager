@@ -80,6 +80,7 @@ func (h *RuntimeKnowledgeHandler) Search(c *gin.Context) {
 // @Success      202             {object}  service.KnowledgeDocumentResult
 // @Failure      400             {object}  ErrorResponse
 // @Failure      401             {object}  ErrorResponse
+// @Failure      409             {object}  ErrorResponse
 // @Failure      503             {object}  ErrorResponse
 // @Router       /runtime/knowledge/files [post]
 func (h *RuntimeKnowledgeHandler) AddFile(c *gin.Context) {
@@ -89,7 +90,8 @@ func (h *RuntimeKnowledgeHandler) AddFile(c *gin.Context) {
 		return
 	}
 	maxBodyBytes := maxKnowledgeUploadBytes + maxKnowledgeMultipartOverheadBytes
-	if requestContentLength(c) > maxBodyBytes {
+	// multipart 会在解析后提供 file.Size；请求总大小未知时仍可依赖后续文件大小校验。
+	if size, ok := requestContentLength(c); ok && size > maxBodyBytes {
 		c.JSON(http.StatusBadRequest, apierror.New("BAD_REQUEST", maxKnowledgeUploadMessage))
 		return
 	}

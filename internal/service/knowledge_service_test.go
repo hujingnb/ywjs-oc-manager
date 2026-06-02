@@ -67,6 +67,56 @@ func TestRAGFlowKnowledgeUploadOrgTriggersParse(t *testing.T) {
 	assert.Equal(t, "remote-doc-1", store.createdDocs[0].RagflowDocumentID)
 }
 
+// TestRAGFlowKnowledgeListOrgIncludesQuota 验证企业知识库列表返回已用、上限和剩余空间。
+func TestRAGFlowKnowledgeListOrgIncludesQuota(t *testing.T) {
+	svc, store, _ := newRAGFlowKnowledgeTestService(t)
+	store.org.KnowledgeQuotaBytes = 100
+	store.docs["doc-a"] = testDocument(t, "org", "a.md", store.orgDataset.ID)
+	doc := store.docs["doc-a"]
+	doc.SizeBytes = 40
+	store.docs["doc-a"] = doc
+
+	result, err := svc.ListOrg(context.Background(), orgKnowledgeAdmin(), testKnowledgeOrg, 1, 50, "", "")
+	require.NoError(t, err)
+
+	assert.Equal(t, int64(40), result.UsedBytes)
+	assert.Equal(t, int64(100), result.QuotaBytes)
+	assert.Equal(t, int64(60), result.RemainingBytes)
+}
+
+// TestRAGFlowKnowledgeUploadOrgRejectsQuotaExceeded 验证企业知识库累计空间不足时不调用 RAGFlow 上传。
+func TestRAGFlowKnowledgeUploadOrgRejectsQuotaExceeded(t *testing.T) {
+	svc, store, rf := newRAGFlowKnowledgeTestService(t)
+	store.org.KnowledgeQuotaBytes = 10
+	store.docs["doc-a"] = testDocument(t, "org", "a.md", store.orgDataset.ID)
+	doc := store.docs["doc-a"]
+	doc.SizeBytes = 8
+	store.docs["doc-a"] = doc
+
+	_, err := svc.SaveOrgFile(context.Background(), orgKnowledgeAdmin(), testKnowledgeOrg, "b.md", strings.NewReader("bbb"), 3)
+
+	require.ErrorIs(t, err, ErrKnowledgeQuotaExceeded)
+	assert.Empty(t, rf.uploadCalls)
+}
+
+// TestRAGFlowKnowledgeUploadAppAllowsExactQuota 验证实例知识库刚好达到容量上限时允许上传。
+func TestRAGFlowKnowledgeUploadAppAllowsExactQuota(t *testing.T) {
+	svc, store, rf := newRAGFlowKnowledgeTestService(t)
+	app := store.apps[testKnowledgeApp]
+	app.KnowledgeQuotaBytes = 10
+	store.apps[testKnowledgeApp] = app
+	store.docs["doc-a"] = testDocument(t, "app", "a.md", store.appDataset.ID)
+	doc := store.docs["doc-a"]
+	doc.AppID = null.StringFrom(testKnowledgeApp)
+	doc.SizeBytes = 8
+	store.docs["doc-a"] = doc
+
+	_, err := svc.SaveAppFile(context.Background(), appOwnerPrincipal(), testKnowledgeApp, "b.md", strings.NewReader("bb"), 2)
+
+	require.NoError(t, err)
+	require.Len(t, rf.uploadCalls, 1)
+}
+
 // TestRAGFlowKnowledgeDeleteAppRejectsOtherOwner 验证实例知识库删除先按 manager app owner 判权，禁止路径不会调用 RAGFlow。
 func TestRAGFlowKnowledgeDeleteAppRejectsOtherOwner(t *testing.T) {
 	svc, store, rf := newRAGFlowKnowledgeTestService(t)
@@ -216,6 +266,20 @@ func TestRuntimeAddWritesOnlyCurrentAppDataset(t *testing.T) {
 	require.Len(t, store.createdDocs, 1)
 	assert.Equal(t, "runtime:"+testKnowledgeApp, store.createdDocs[0].CreatedBy)
 	assert.Equal(t, "app", store.createdDocs[0].ScopeType)
+}
+
+// TestRuntimeAddRejectsQuotaExceeded 验证 runtime token 写入实例知识库也不能绕过容量限制。
+func TestRuntimeAddRejectsQuotaExceeded(t *testing.T) {
+	svc, store, rf := newRAGFlowKnowledgeTestService(t)
+	app := store.apps[testKnowledgeApp]
+	app.KnowledgeQuotaBytes = 5
+	store.apps[testKnowledgeApp] = app
+	store.appsByToken[HashAppRuntimeToken(testRuntimeToken)] = app
+
+	_, err := svc.RuntimeAddFile(context.Background(), testRuntimeToken, "research.md", strings.NewReader("report"), 6)
+
+	require.ErrorIs(t, err, ErrKnowledgeQuotaExceeded)
+	assert.Empty(t, rf.uploadCalls)
 }
 
 // TestDeleteAppDatasetRemovesRemoteAndLocalMapping 验证删除实例时会同步清理 RAGFlow app dataset。
@@ -391,18 +455,20 @@ func newFakeKnowledgeStore(t *testing.T) *fakeKnowledgeStore {
 	appID := mustParseUUID(testKnowledgeApp)
 	ownerID := mustParseUUID(testKnowledgeOwner)
 	app := sqlc.App{
-		ID:          appID,
-		OrgID:       orgID,
-		OwnerUserID: ownerID,
-		Name:        "实例",
-		Status:      domain.AppStatusRunning,
-		RuntimeTokenHash: null.StringFrom(HashAppRuntimeToken(testRuntimeToken)),
+		ID:                  appID,
+		OrgID:               orgID,
+		OwnerUserID:         ownerID,
+		Name:                "实例",
+		Status:              domain.AppStatusRunning,
+		KnowledgeQuotaBytes: KnowledgeQuotaDefaultBytes,
+		RuntimeTokenHash:    null.StringFrom(HashAppRuntimeToken(testRuntimeToken)),
 	}
 	org := sqlc.Organization{
-		ID:     orgID,
-		Name:   "测试组织",
-		Code:   "test-org",
-		Status: domain.StatusActive,
+		ID:                  orgID,
+		Name:                "测试组织",
+		Code:                "test-org",
+		Status:              domain.StatusActive,
+		KnowledgeQuotaBytes: KnowledgeQuotaDefaultBytes,
 	}
 	orgDataset := sqlc.RagflowDataset{
 		ID:               mustParseUUID("00000000-0000-0000-0000-000000000d01"),
@@ -767,6 +833,24 @@ func (s *fakeKnowledgeStore) CountRAGFlowDocumentsByScope(ctx context.Context, a
 	return int64(len(items)), err
 }
 
+// SumRAGFlowDocumentsSizeByScope 汇总本地 document 大小，模拟数据库按 scope/org/app 聚合容量。
+func (s *fakeKnowledgeStore) SumRAGFlowDocumentsSizeByScope(_ context.Context, arg sqlc.SumRAGFlowDocumentsSizeByScopeParams) (int64, error) {
+	var total int64
+	for _, doc := range s.docs {
+		if doc.ScopeType != arg.ScopeType || doc.OrgID != arg.OrgID {
+			continue
+		}
+		if arg.AppID.Valid && doc.AppID.String != arg.AppID.String {
+			continue
+		}
+		if !arg.AppID.Valid && doc.AppID.Valid {
+			continue
+		}
+		total += doc.SizeBytes
+	}
+	return total, nil
+}
+
 func (s *fakeKnowledgeStore) GetRAGFlowDocument(_ context.Context, id string) (sqlc.RagflowDocument, error) {
 	doc, ok := s.docs[id]
 	if !ok {
@@ -909,11 +993,16 @@ func testDocument(t *testing.T, scope, name string, datasetID string) sqlc.Ragfl
 		appID = mustParseUUID(testKnowledgeApp)
 	}
 	return sqlc.RagflowDocument{
-		ID:                mustParseUUID(testKnowledgeDocument),
-		DatasetID:         datasetID,
-		ScopeType:         scope,
-		OrgID:             orgID,
-		AppID:             null.StringFromPtr(func() *string { if appID == "" { return nil }; return &appID }()),
+		ID:        mustParseUUID(testKnowledgeDocument),
+		DatasetID: datasetID,
+		ScopeType: scope,
+		OrgID:     orgID,
+		AppID: null.StringFromPtr(func() *string {
+			if appID == "" {
+				return nil
+			}
+			return &appID
+		}()),
 		RagflowDocumentID: "remote-doc-1",
 		Name:              name,
 		SizeBytes:         12,

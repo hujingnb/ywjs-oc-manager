@@ -3,6 +3,7 @@ package handlers
 import (
 	"bytes"
 	"context"
+	"fmt"
 	"io"
 	"net/http"
 	"net/http/httptest"
@@ -162,6 +163,36 @@ func TestKnowledgeUploadOrgRejectsOversizedBody(t *testing.T) {
 	assert.Equal(t, http.StatusBadRequest, w.Code)
 	assert.Contains(t, w.Body.String(), maxKnowledgeUploadMessage)
 	assert.Equal(t, 0, stub.saveOrgCalls)
+}
+
+// TestKnowledgeUploadOrgRejectsUnknownContentLength 验证未知请求体大小时不允许上传，避免 RAGFlow 上传后才发现超限。
+func TestKnowledgeUploadOrgRejectsUnknownContentLength(t *testing.T) {
+	stub := &knowledgeServiceStub{}
+	router := newKnowledgeTestRouter(t, stub)
+
+	w := httptest.NewRecorder()
+	req := httptest.NewRequest(http.MethodPost, "/api/v1/organizations/org-1/knowledge?filename=stream.md", io.NopCloser(bytes.NewBufferString("content")))
+	req.ContentLength = -1
+	req = withPrincipal(req, auth.Principal{UserID: "u1", Role: domain.UserRoleOrgAdmin, OrgID: "org-1"})
+	router.ServeHTTP(w, req)
+
+	assert.Equal(t, http.StatusBadRequest, w.Code)
+	assert.Equal(t, 0, stub.saveOrgCalls)
+}
+
+// TestKnowledgeUploadOrgMapsQuotaExceeded 验证知识库空间不足映射为 409。
+func TestKnowledgeUploadOrgMapsQuotaExceeded(t *testing.T) {
+	stub := &knowledgeServiceStub{saveOrgErr: fmt.Errorf("%w: 知识库空间不足，剩余 1MB", service.ErrKnowledgeQuotaExceeded)}
+	router := newKnowledgeTestRouter(t, stub)
+
+	w := httptest.NewRecorder()
+	req := httptest.NewRequest(http.MethodPost, "/api/v1/organizations/org-1/knowledge?filename=big.md", bytes.NewBufferString("content"))
+	req = withPrincipal(req, auth.Principal{UserID: "u1", Role: domain.UserRoleOrgAdmin, OrgID: "org-1"})
+	router.ServeHTTP(w, req)
+
+	assert.Equal(t, http.StatusConflict, w.Code)
+	assert.Contains(t, w.Body.String(), "KNOWLEDGE_QUOTA_EXCEEDED")
+	assert.Contains(t, w.Body.String(), "剩余 1MB")
 }
 
 // TestKnowledgeReparseOrgRequiresDocumentID 验证重解析必须通过路由携带 documentId，未知 document 映射为 404。

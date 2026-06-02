@@ -1215,7 +1215,16 @@ components:
             $ref: '#/components/schemas/service.KnowledgeDocumentResult'
           type: array
           uniqueItems: false
+        quota_bytes:
+          description: QuotaBytes 是当前知识库累计容量上限，单位字节。
+          type: integer
+        remaining_bytes:
+          description: RemainingBytes 是展示用剩余空间，超用时按 0 返回。
+          type: integer
         total:
+          type: integer
+        used_bytes:
+          description: UsedBytes 是当前知识库本地记录的累计文件大小，包含失败/停止解析文件。
           type: integer
       type: object
     service.KnowledgeSearchHit:
@@ -3506,6 +3515,12 @@ paths:
               schema:
                 $ref: '#/components/schemas/handlers.ErrorResponse'
           description: Forbidden
+        "409":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/handlers.ErrorResponse'
+          description: Conflict
         "503":
           content:
             application/json:
@@ -5810,6 +5825,12 @@ paths:
               schema:
                 $ref: '#/components/schemas/handlers.ErrorResponse'
           description: Forbidden
+        "409":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/handlers.ErrorResponse'
+          description: Conflict
         "503":
           content:
             application/json:
@@ -6527,6 +6548,12 @@ paths:
               schema:
                 $ref: '#/components/schemas/handlers.ErrorResponse'
           description: Unauthorized
+        "409":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/handlers.ErrorResponse'
+          description: Conflict
         "503":
           content:
             application/json:

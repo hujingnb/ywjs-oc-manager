@@ -108,6 +108,7 @@ func (h *KnowledgeHandler) ListOrg(c *gin.Context) {
 // @Failure      400       {object}  ErrorResponse
 // @Failure      401       {object}  ErrorResponse
 // @Failure      403       {object}  ErrorResponse
+// @Failure      409       {object}  ErrorResponse
 // @Failure      503       {object}  ErrorResponse
 // @Router       /organizations/{orgId}/knowledge [post]
 func (h *KnowledgeHandler) SaveOrg(c *gin.Context) {
@@ -239,6 +240,7 @@ func (h *KnowledgeHandler) ListApp(c *gin.Context) {
 // @Failure      400       {object}  ErrorResponse
 // @Failure      401       {object}  ErrorResponse
 // @Failure      403       {object}  ErrorResponse
+// @Failure      409       {object}  ErrorResponse
 // @Failure      503       {object}  ErrorResponse
 // @Router       /apps/{appId}/knowledge [post]
 func (h *KnowledgeHandler) SaveApp(c *gin.Context) {
@@ -357,7 +359,12 @@ func queryKnowledgeInt32(c *gin.Context, key string, fallback int32) int32 {
 }
 
 func prepareKnowledgeOctetStreamUpload(c *gin.Context) (int64, bool) {
-	size := requestContentLength(c)
+	// 知识库上传必须在进入 RAGFlow 前知道文件大小，否则无法做累计容量预校验。
+	size, ok := requestContentLength(c)
+	if !ok {
+		c.JSON(http.StatusBadRequest, apierror.New("BAD_REQUEST", "缺少有效的文件大小信息"))
+		return 0, false
+	}
 	if size > maxKnowledgeUploadBytes {
 		c.JSON(http.StatusBadRequest, apierror.New("BAD_REQUEST", maxKnowledgeUploadMessage))
 		return size, false
@@ -366,16 +373,16 @@ func prepareKnowledgeOctetStreamUpload(c *gin.Context) (int64, bool) {
 	return size, true
 }
 
-func requestContentLength(c *gin.Context) int64 {
+// requestContentLength 读取客户端声明的请求体大小；只有非负整数才可用于上传前容量校验。
+func requestContentLength(c *gin.Context) (int64, bool) {
 	if raw := c.GetHeader("Content-Length"); raw != "" {
-		if size, err := strconv.ParseInt(raw, 10, 64); err == nil {
-			return size
-		}
+		size, err := strconv.ParseInt(raw, 10, 64)
+		return size, err == nil && size >= 0
 	}
-	if c.Request.ContentLength > 0 {
-		return c.Request.ContentLength
+	if c.Request.ContentLength >= 0 {
+		return c.Request.ContentLength, true
 	}
-	return 0
+	return 0, false
 }
 
 func writeKnowledgeError(c *gin.Context, err error) {
@@ -390,6 +397,8 @@ func writeKnowledgeError(c *gin.Context, err error) {
 		c.JSON(http.StatusServiceUnavailable, apierror.New("KNOWLEDGE_DATASET_CREATING", "知识库正在初始化，请稍后重试"))
 	case errors.Is(err, service.ErrKnowledgeMissing):
 		c.JSON(http.StatusServiceUnavailable, apierror.New("KNOWLEDGE_NOT_CONFIGURED", "知识库未配置"))
+	case errors.Is(err, service.ErrKnowledgeQuotaExceeded):
+		c.JSON(http.StatusConflict, apierror.New("KNOWLEDGE_QUOTA_EXCEEDED", validationServiceMessage(err, service.ErrKnowledgeQuotaExceeded)))
 	default:
 		c.JSON(http.StatusBadRequest, apierror.New("BAD_REQUEST", redactlog.SafeErrorMessage(err)))
 	}
