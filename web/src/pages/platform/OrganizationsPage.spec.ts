@@ -29,6 +29,7 @@ vi.mock('@/api/hooks/useOrganizations', () => ({
       code: 'test-org',
       status: 'active',
       credit_warning_threshold: 20,
+      knowledge_quota_bytes: 1073741824,
       admin_username: 'org-admin',
       contact_name: '张三',
       contact_phone: '13800138000',
@@ -289,6 +290,34 @@ describe('OrganizationsPage', () => {
     }))
     // 确认不再有 model_id 字段
     expect(createOrganization).not.toHaveBeenCalledWith(expect.objectContaining({ model_id: expect.anything() }))
+  })
+
+  // 企业知识库容量由平台管理员在企业表单中设置，提交给后端时使用 bytes。
+  it('创建企业时提交企业知识库容量 bytes', async () => {
+    createOrganization.mockResolvedValue({ id: 'org-2', name: '新企业', code: 'new-org', status: 'active' })
+    const wrapper = mountPage()
+
+    const openButton = wrapper.findAll('button').find(button => button.text().includes('新增企业'))
+    expect(openButton).toBeTruthy()
+    await openButton!.trigger('click')
+    await nextTick()
+
+    const inputs = wrapper.findAll('input')
+    await inputs[0].setValue('新企业')
+    await inputs[1].setValue('new-org')
+    await inputs[2].setValue('org-admin')
+    await inputs[3].setValue('企业管理员')
+    await inputs[4].setValue('secret-password')
+
+    const quotaInput = wrapper.findAll('input').find(input => (input.element as HTMLInputElement).value === '1')
+    expect(quotaInput).toBeTruthy()
+    await quotaInput!.setValue('2')
+    await quotaInput!.trigger('blur')
+    await wrapper.find('form').trigger('submit')
+
+    expect(createOrganization).toHaveBeenCalledWith(expect.objectContaining({
+      knowledge_quota_bytes: 2 * 1024 * 1024 * 1024,
+    }))
   })
 
   // 编辑组织：点击「编辑」打开表单，验证预填数据正确且提交时携带 id 与 assistant_version_ids。

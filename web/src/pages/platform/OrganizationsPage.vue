@@ -136,6 +136,20 @@
               />
             </n-form-item>
           </n-grid-item>
+          <n-grid-item>
+            <n-form-item label="企业知识库空间 (GB)">
+              <n-input-number
+                v-if="modalMode === 'create'"
+                v-model:value="form.knowledge_quota_gb"
+                :min="1" :precision="0" style="width: 100%"
+              />
+              <n-input-number
+                v-else
+                v-model:value="editForm.knowledge_quota_gb"
+                :min="1" :precision="0" style="width: 100%"
+              />
+            </n-form-item>
+          </n-grid-item>
           <n-grid-item :span="2">
             <n-form-item label="备注">
               <n-input
@@ -275,7 +289,7 @@
 
 <script setup lang="ts">
 import { computed, h, reactive, ref } from 'vue'
-import { useQueries } from '@tanstack/vue-query'
+import { useQueries, type UseMutationReturnType } from '@tanstack/vue-query'
 import { Plus, X } from 'lucide-vue-next'
 import {
   NButton, NCard, NDataTable, NForm, NFormItem, NGrid, NGridItem,
@@ -286,6 +300,7 @@ import { formatOrgStatus } from '@/domain/status'
 import {
   useCreateOrganization, useOrganizationsQuery, useUpdateOrganization, useUpdateOrganizationStatus,
 } from '@/api/hooks/useOrganizations'
+import type { OrganizationFormPayload } from '@/api/hooks/useOrganizations'
 import { useAssistantVersionsQuery } from '@/api/hooks/useAssistantVersions'
 import { apiRequest } from '@/api/client'
 import { useBillingStatusQuery, useOrgBalanceQuery, useRechargeMutation, useRechargesQuery } from '@/api/hooks/useRecharge'
@@ -308,6 +323,26 @@ const modalMode = ref<'create' | 'edit'>('create')
 const editingOrg = ref<Organization | null>(null)
 // editFormVisible 控制编辑模式下表单的显隐（与 formVisible 分离以避免状态混用）。
 const editFormVisible = ref(false)
+const knowledgeQuotaGBDefault = 1
+const bytesPerGB = 1024 * 1024 * 1024
+
+// quotaBytesToGB 将后端字节容量转为企业表单中的 GB 数字。
+function quotaBytesToGB(bytes?: number): number {
+  if (!bytes || bytes <= 0) return knowledgeQuotaGBDefault
+  return Math.round(bytes / bytesPerGB)
+}
+
+// quotaGBToBytes 将企业表单中的 GB 数字转为后端 bytes；空值回落为 1GB。
+function quotaGBToBytes(gb?: number): number {
+  return Math.max(1, Math.round(gb ?? knowledgeQuotaGBDefault)) * bytesPerGB
+}
+
+// OrganizationCreateForm 在后端创建 payload 外追加 GB 输入字段，仅用于页面表单展示。
+interface OrganizationCreateForm extends OrganizationFormPayload {
+  // knowledge_quota_gb 是平台管理员看到的 GB 单位，提交前转换为后端 bytes。
+  knowledge_quota_gb: number
+}
+
 // editForm 是编辑模式的响应式表单对象，由 openEditForm 按当前组织数据预填。
 const editForm = reactive({
   name: '',
@@ -316,6 +351,7 @@ const editForm = reactive({
   remark: '',
   credit_warning_threshold: undefined as number | undefined,
   max_instance_count: undefined as number | undefined,
+  knowledge_quota_gb: knowledgeQuotaGBDefault,
   assistant_version_ids: [] as string[],
 })
 // editSubmitting 控制编辑提交中的 loading 状态。
@@ -335,6 +371,7 @@ function openEditForm(org: Organization) {
     ? org.credit_warning_threshold : undefined
   editForm.max_instance_count = typeof org.max_instance_count === 'number'
     ? org.max_instance_count : undefined
+  editForm.knowledge_quota_gb = quotaBytesToGB(org.knowledge_quota_bytes)
   editForm.assistant_version_ids = org.assistant_version_ids ? [...org.assistant_version_ids] : []
   editError.value = null
   editFormVisible.value = true
@@ -373,6 +410,7 @@ async function submitEditOrganization() {
           ? editForm.credit_warning_threshold : undefined,
         max_instance_count: typeof editForm.max_instance_count === 'number'
           ? editForm.max_instance_count : undefined,
+        knowledge_quota_bytes: quotaGBToBytes(editForm.knowledge_quota_gb),
         assistant_version_ids: editForm.assistant_version_ids,
       },
     })
@@ -437,6 +475,24 @@ const rechargeFeedbackError = ref(false)
 const copyFeedback = ref('')
 const copyFeedbackError = ref(false)
 const adminPasswordCopyHint = '<创建时设置，系统不保存明文；如忘记请重置密码>'
+// createFormMutation 适配 useFormModal 的同型表单/提交泛型，调用真实 API 前去掉 UI-only GB 字段。
+const createFormMutation = {
+  ...createMutation,
+  mutateAsync: async (payload: OrganizationCreateForm) => createMutation.mutateAsync({
+    name: payload.name,
+    code: payload.code,
+    contact_name: payload.contact_name,
+    contact_phone: payload.contact_phone,
+    remark: payload.remark,
+    credit_warning_threshold: payload.credit_warning_threshold,
+    max_instance_count: payload.max_instance_count,
+    knowledge_quota_bytes: payload.knowledge_quota_bytes,
+    assistant_version_ids: payload.assistant_version_ids,
+    admin_username: payload.admin_username,
+    admin_display_name: payload.admin_display_name,
+    admin_password: payload.admin_password,
+  }),
+} as unknown as UseMutationReturnType<Organization, Error, OrganizationCreateForm, unknown>
 // 创建组织表单状态聚合到 useFormModal；toPayload 处理可选字段的 || undefined 过滤
 const { form, formVisible, creating, submitError, openForm: _openForm, submit: submitForm } = useFormModal({
   initial: {
@@ -447,13 +503,14 @@ const { form, formVisible, creating, submitError, openForm: _openForm, submit: s
     remark: '',
     credit_warning_threshold: undefined as number | undefined,
     max_instance_count: undefined as number | undefined,
+    knowledge_quota_gb: knowledgeQuotaGBDefault,
     admin_username: '',
     admin_display_name: '',
     admin_password: '',
     assistant_version_ids: [] as string[],
-  },
-  mutation: createMutation,
-  toPayload: (f) => ({
+  } satisfies OrganizationCreateForm,
+  mutation: createFormMutation,
+  toPayload: (f): OrganizationCreateForm => ({
     name: f.name,
     code: f.code,
     contact_name: f.contact_name || undefined,
@@ -462,6 +519,8 @@ const { form, formVisible, creating, submitError, openForm: _openForm, submit: s
     credit_warning_threshold: typeof f.credit_warning_threshold === 'number'
       ? f.credit_warning_threshold : undefined,
     max_instance_count: typeof f.max_instance_count === 'number' ? f.max_instance_count : undefined,
+    knowledge_quota_gb: f.knowledge_quota_gb,
+    knowledge_quota_bytes: quotaGBToBytes(f.knowledge_quota_gb),
     admin_username: f.admin_username,
     admin_display_name: f.admin_display_name,
     admin_password: f.admin_password,
@@ -516,6 +575,12 @@ const columns = computed(() => [
     key: 'max_instance_count',
     render: (row: Organization) => typeof row.max_instance_count === 'number'
       ? String(row.max_instance_count) : '不限',
+  },
+  {
+    title: '知识库空间',
+    key: 'knowledge_quota_bytes',
+    render: (row: Organization) => typeof row.knowledge_quota_bytes === 'number'
+      ? `${Math.round(row.knowledge_quota_bytes / bytesPerGB)}GB` : '1GB',
   },
   // 当前余额列：从并发查询结果映射到对应行，未加载时显示省略号。
   {
