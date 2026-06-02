@@ -160,13 +160,14 @@ const selectedJob = computed<CronJob | null>(() => {
     ?? null
 })
 
+// statusOptions 的 label 中文化便于用户识别，value 仍为后端识别的英文枚举。
 const statusOptions = [
   { label: '全部状态', value: '' },
-  { label: 'scheduled', value: 'scheduled' },
-  { label: 'paused', value: 'paused' },
-  { label: 'running', value: 'running' },
-  { label: 'disabled', value: 'disabled' },
-  { label: 'error', value: 'error' },
+  { label: '已调度', value: 'scheduled' },
+  { label: '已暂停', value: 'paused' },
+  { label: '运行中', value: 'running' },
+  { label: '已禁用', value: 'disabled' },
+  { label: '错误', value: 'error' },
 ]
 
 // statusSummary 按产品要求保留英文 Gateway cron running 文案，后接关键运行指标。
