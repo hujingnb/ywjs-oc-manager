@@ -2,40 +2,32 @@
   <n-card :bordered="true" content-style="padding: 0">
     <!-- 空列表保留最小高度，避免加载完成后左右分屏高度明显跳动。 -->
     <n-empty v-if="jobs.length === 0" class="list-empty" description="暂无定时任务" />
-    <div v-else class="table-wrap">
-      <table class="job-table">
-        <thead>
-          <tr>
-            <th>名称</th>
-            <th>调度</th>
-            <th>状态</th>
-            <th>投递</th>
-            <th>下次执行</th>
-          </tr>
-        </thead>
-        <tbody>
-          <tr
-            v-for="job in jobs"
-            :key="job.id ?? job.name"
-            class="job-row"
-            :class="{ selected: job.id === selectedId }"
-            @click="onSelect(job)"
-          >
-            <td class="name-cell">
-              <span class="job-name">{{ job.name || '未命名任务' }}</span>
-              <code>{{ job.id || '—' }}</code>
-            </td>
-            <td>{{ scheduleText(job) }}</td>
-            <td>
-              <n-tag size="small" :type="stateTagType(job.state)">
-                {{ job.state || 'unknown' }}
-              </n-tag>
-            </td>
-            <td>{{ job.deliver || '—' }}</td>
-            <td>{{ formatTime(job.next_run_at) }}</td>
-          </tr>
-        </tbody>
-      </table>
+    <div v-else class="card-list">
+      <div
+        v-for="job in jobs"
+        :key="job.id ?? job.name"
+        class="job-card"
+        :class="{ selected: job.id === selectedId }"
+        @click="onSelect(job)"
+      >
+        <!-- 第一行：任务名称 + 中文状态标签，名称过长才省略，状态始终完整。 -->
+        <div class="card-head">
+          <span class="job-name">{{ job.name || '未命名任务' }}</span>
+          <n-tag size="small" :type="stateTagType(job.state)">{{ translateState(job.state) }}</n-tag>
+        </div>
+        <!-- 次要灰色小字展示 job_id，便于排查。 -->
+        <code class="job-id">{{ job.id || '—' }}</code>
+        <!-- 调度走统一展示入口：上游 display 优先，缺失时前端兜底翻译。 -->
+        <div class="card-row">
+          <span class="k">调度</span>
+          <span class="v">{{ scheduleDisplay(job.schedule) }}</span>
+        </div>
+        <!-- 下次执行与投递渠道同行展示，投递中文化。 -->
+        <div class="card-row">
+          <span class="k">下次</span>
+          <span class="v">{{ formatTime(job.next_run_at) }} · {{ translateDeliver(job.deliver) }}</span>
+        </div>
+      </div>
     </div>
   </n-card>
 </template>
@@ -44,8 +36,9 @@
 import { NCard, NEmpty, NTag } from 'naive-ui'
 
 import type { CronJob } from '@/api/hooks/useCron'
+import { scheduleDisplay, translateDeliver, translateState } from './cronDisplay'
 
-// CronJobList 渲染 Cron 任务左侧紧凑列表；选择态只改变背景和阴影，不改变行高。
+// CronJobList 渲染 Cron 任务左侧卡片列表；选择态只改变背景和左侧色条，不改变卡片结构。
 const props = defineProps<{
   // jobs 是父组件已按搜索 / 状态筛选后的列表。
   jobs: CronJob[]
@@ -57,11 +50,6 @@ const emit = defineEmits<{
   // select 只向上传递后端任务 ID；缺少 ID 的异常行不可选。
   select: [jobId: string]
 }>()
-
-// scheduleText 优先展示后端规整的 display，缺失时退回机器表达式。
-function scheduleText(job: CronJob): string {
-  return job.schedule?.display || job.schedule?.expr || '—'
-}
 
 // formatTime 仅负责 UI 兜底；后端保留原始 ISO 字符串，页面不做时区转换。
 function formatTime(value: string | undefined): string {
@@ -90,65 +78,58 @@ function onSelect(job: CronJob) {
   align-items: center;
   justify-content: center;
 }
-.table-wrap {
-  overflow-x: auto;
+.card-list {
+  display: flex;
+  flex-direction: column;
 }
-.job-table {
-  width: 100%;
-  border-collapse: collapse;
-  table-layout: fixed;
-  font-size: 12px;
-}
-.job-table th {
-  color: var(--color-text-secondary, #6b7280);
-  font-weight: 500;
-  text-align: left;
-  padding: 8px 10px;
+.job-card {
+  display: grid;
+  gap: 4px;
+  padding: 12px 14px;
   border-bottom: 1px solid var(--color-border, #e5e7eb);
+  cursor: pointer;
+  border-left: 3px solid transparent;
+  transition: background 0.15s, border-color 0.15s;
 }
-.job-table td {
-  padding: 9px 10px;
-  border-bottom: 1px solid var(--color-border, #e5e7eb);
-  min-height: 48px;
-  vertical-align: middle;
+.job-card:last-child {
+  border-bottom: none;
+}
+.job-card:hover {
+  background: var(--color-surface-muted, #fbfcfd);
+}
+.job-card.selected {
+  background: var(--color-brand-soft);
+  border-left-color: var(--color-brand);
+}
+.card-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+}
+.job-name {
+  font-weight: 600;
+  font-size: 13px;
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
 }
-.job-table th:nth-child(1),
-.job-table td:nth-child(1) { width: 32%; }
-.job-table th:nth-child(2),
-.job-table td:nth-child(2) { width: 24%; }
-.job-table th:nth-child(3),
-.job-table td:nth-child(3) { width: 14%; }
-.job-table th:nth-child(4),
-.job-table td:nth-child(4) { width: 12%; }
-.job-table th:nth-child(5),
-.job-table td:nth-child(5) { width: 18%; }
-.job-row {
-  cursor: pointer;
-  transition: background 0.15s, box-shadow 0.15s;
-}
-.job-row:hover {
-  background: var(--color-surface-muted, #fbfcfd);
-}
-.job-row.selected {
-  background: var(--color-brand-soft);
-  box-shadow: inset 3px 0 0 var(--color-brand);
-}
-.name-cell {
-  display: grid;
-  gap: 3px;
-}
-.job-name {
-  font-weight: 600;
-  overflow: hidden;
-  text-overflow: ellipsis;
-}
-.name-cell code {
+.job-id {
   color: var(--color-text-secondary, #6b7280);
-  font-size: 10px;
-  overflow: hidden;
-  text-overflow: ellipsis;
+  font-size: 11px;
+}
+.card-row {
+  display: flex;
+  gap: 8px;
+  font-size: 12px;
+  line-height: 1.5;
+}
+.card-row .k {
+  color: var(--color-text-secondary, #6b7280);
+  flex: 0 0 28px;
+}
+.card-row .v {
+  color: var(--color-text-primary, #1f2329);
+  word-break: break-all;
 }
 </style>
