@@ -52,13 +52,17 @@
     - `m h D * *`（D 为日单值）→ `每月D日 HH:MM`
     - `0 * * * *` → `每小时`
     - `*/N * * * *` → `每 N 分钟`
-  - `every` 格式（`every 10m` / `10m` / `every 1h`）→ `每 N 分钟` / `每 N 小时`。
+  - `every` / `interval` 格式（`every 10m` / `10m` / `every 1h` / `every 30s`）→ `每 N 分钟` / `每 N 小时` / `每 N 秒`。
   - `at` 格式 → `指定时间 <原值>`（无法进一步解析时保留原始时间串）。
   - **不可识别的复杂表达式：直接返回原始 `expr`，绝不抛错。**
-- `scheduleDisplay(schedule?: CronSchedule): string`
-  - 优先返回非空 `schedule.display`。
-  - 否则调用 `translateCronExpr(kind, expr)`。
-  - 翻译器若回退到原文，则结果即原始 `expr`；`expr` 也为空时返回 `—`。
+- `scheduleDisplay(schedule?: CronSchedule): string` —— **翻译优先**策略。
+  - > 实测修正（真实浏览器验证发现）：`schedule.display` 并不可靠。cron 任务的
+    > `display` 只是回显原始 `expr`（如 `0 9 * * *`）；interval 任务则**没有 `expr`**，
+    > 表达式以英文形式（如 `every 10m`，`kind=interval`）只放在 `display` 里。两种情况
+    > `display` 都不是人类可读中文，因此不能「优先采用 display」。
+  - 取真实表达式 `expr || display`，调用 `translateCronExpr(kind, 真实表达式)`。
+  - 翻译器产出了与原串不同的中文即采用（用户可读的关键）。
+  - 翻不动时回退：上游 `display`（可能是更友好的描述）→ 原始表达式 → `—`。
 
 > 设计取舍：翻译器以「尽力翻译 + 原文兜底」为原则（用户确认），保证任何上游格式都不会让页面报错或显示空白。
 
