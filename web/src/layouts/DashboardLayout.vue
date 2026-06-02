@@ -10,7 +10,7 @@
       <div class="brand-block">
         <div class="brand-mark">OC</div>
         <div class="logo-text">
-          <strong>Hermes</strong>
+          <strong>FlashAI</strong>
           <span>Manager</span>
         </div>
       </div>
