@@ -337,6 +337,17 @@ function quotaGBToBytes(gb?: number): number {
   return Math.max(1, Math.round(gb ?? knowledgeQuotaGBDefault)) * bytesPerGB
 }
 
+// editQuotaBytesForPayload 在编辑表单未改动 GB 输入时保留后端原始 bytes，避免整 GB 展示导致非整 GB 容量被静默舍入。
+function editQuotaBytesForPayload(): number {
+  if (
+    editForm.knowledge_quota_gb === editForm.knowledge_quota_original_gb
+    && typeof editForm.knowledge_quota_original_bytes === 'number'
+  ) {
+    return editForm.knowledge_quota_original_bytes
+  }
+  return quotaGBToBytes(editForm.knowledge_quota_gb)
+}
+
 // OrganizationCreateForm 在后端创建 payload 外追加 GB 输入字段，仅用于页面表单展示。
 interface OrganizationCreateForm extends OrganizationFormPayload {
   // knowledge_quota_gb 是平台管理员看到的 GB 单位，提交前转换为后端 bytes。
@@ -352,6 +363,8 @@ const editForm = reactive({
   credit_warning_threshold: undefined as number | undefined,
   max_instance_count: undefined as number | undefined,
   knowledge_quota_gb: knowledgeQuotaGBDefault,
+  knowledge_quota_original_gb: knowledgeQuotaGBDefault,
+  knowledge_quota_original_bytes: undefined as number | undefined,
   assistant_version_ids: [] as string[],
 })
 // editSubmitting 控制编辑提交中的 loading 状态。
@@ -371,7 +384,11 @@ function openEditForm(org: Organization) {
     ? org.credit_warning_threshold : undefined
   editForm.max_instance_count = typeof org.max_instance_count === 'number'
     ? org.max_instance_count : undefined
-  editForm.knowledge_quota_gb = quotaBytesToGB(org.knowledge_quota_bytes)
+  const knowledgeQuotaGB = quotaBytesToGB(org.knowledge_quota_bytes)
+  editForm.knowledge_quota_gb = knowledgeQuotaGB
+  editForm.knowledge_quota_original_gb = knowledgeQuotaGB
+  editForm.knowledge_quota_original_bytes = typeof org.knowledge_quota_bytes === 'number'
+    ? org.knowledge_quota_bytes : undefined
   editForm.assistant_version_ids = org.assistant_version_ids ? [...org.assistant_version_ids] : []
   editError.value = null
   editFormVisible.value = true
@@ -410,7 +427,7 @@ async function submitEditOrganization() {
           ? editForm.credit_warning_threshold : undefined,
         max_instance_count: typeof editForm.max_instance_count === 'number'
           ? editForm.max_instance_count : undefined,
-        knowledge_quota_bytes: quotaGBToBytes(editForm.knowledge_quota_gb),
+        knowledge_quota_bytes: editQuotaBytesForPayload(),
         assistant_version_ids: editForm.assistant_version_ids,
       },
     })

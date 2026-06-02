@@ -1,6 +1,6 @@
 import { mount } from '@vue/test-utils'
 import { defineComponent, h, nextTick, ref, type PropType } from 'vue'
-import { describe, expect, it, vi } from 'vitest'
+import { beforeEach, describe, expect, it, vi } from 'vitest'
 import { QueryClient, VueQueryPlugin } from '@tanstack/vue-query'
 import type { DataTableColumn } from 'naive-ui'
 
@@ -9,6 +9,28 @@ import type { Organization } from '@/api'
 
 const createOrganization = vi.hoisted(() => vi.fn())
 const updateOrganization = vi.hoisted(() => vi.fn())
+const bytesPerGB = 1024 * 1024 * 1024
+
+// organizationsState 允许单个测试覆盖组织容量，验证编辑表单不会丢失非整 GB bytes。
+const organizationsState = vi.hoisted(() => {
+  const defaultOrg = {
+    id: 'org-1',
+    name: '测试企业',
+    code: 'test-org',
+    status: 'active',
+    credit_warning_threshold: 20,
+    knowledge_quota_bytes: 1073741824,
+    admin_username: 'org-admin',
+    contact_name: '张三',
+    contact_phone: '13800138000',
+    remark: '测试备注',
+    assistant_version_ids: ['v-1'],
+  }
+  return {
+    defaultOrg,
+    items: [{ ...defaultOrg }],
+  }
+})
 
 // versionsState 模拟助手版本列表查询状态，供创建组织表单多选使用。
 const versionsState = vi.hoisted(() => ({
@@ -23,19 +45,7 @@ const versionsState = vi.hoisted(() => ({
 // 组织列表页测试只 mock 列表和充值 hooks，验证充值留在弹框内完成而不跳转旧页面。
 vi.mock('@/api/hooks/useOrganizations', () => ({
   useOrganizationsQuery: () => ({
-    data: ref([{
-      id: 'org-1',
-      name: '测试企业',
-      code: 'test-org',
-      status: 'active',
-      credit_warning_threshold: 20,
-      knowledge_quota_bytes: 1073741824,
-      admin_username: 'org-admin',
-      contact_name: '张三',
-      contact_phone: '13800138000',
-      remark: '测试备注',
-      assistant_version_ids: ['v-1'],
-    }]),
+    data: ref(organizationsState.items),
     isLoading: ref(false),
     error: ref(null),
   }),
@@ -66,6 +76,13 @@ vi.mock('@/api/hooks/useRecharge', () => ({
 describe('OrganizationsPage', () => {
   // clipboardMock 捕获复制信息动作，避免测试依赖真实浏览器剪贴板权限。
   const clipboardMock = vi.fn()
+
+  beforeEach(() => {
+    createOrganization.mockReset()
+    updateOrganization.mockReset()
+    clipboardMock.mockReset()
+    organizationsState.items = [{ ...organizationsState.defaultOrg }]
+  })
 
   const mountPage = () => mount(OrganizationsPage, {
     global: {
@@ -318,9 +335,11 @@ describe('OrganizationsPage', () => {
     expect(createOrganization).toHaveBeenCalledWith(expect.objectContaining({
       knowledge_quota_bytes: 2 * 1024 * 1024 * 1024,
     }))
+    // knowledge_quota_gb 是页面内部展示字段，提交给后端时不应泄漏。
+    expect(createOrganization.mock.calls.at(-1)?.[0]).not.toHaveProperty('knowledge_quota_gb')
   })
 
-  // 编辑组织：点击「编辑」打开表单，验证预填数据正确且提交时携带 id 与 assistant_version_ids。
+  // 编辑组织：点击「编辑」打开表单，验证预填数据正确且提交时携带 id、容量 bytes 与 assistant_version_ids。
   it('编辑企业时预填现有数据并提交 update mutation', async () => {
     updateOrganization.mockResolvedValue({
       id: 'org-1',
@@ -341,9 +360,15 @@ describe('OrganizationsPage', () => {
     // 预填名称应为「测试企业」
     const nameInput = inputs.find(i => (i.element as HTMLInputElement).value === '测试企业')
     expect(nameInput).toBeTruthy()
+    const quotaInput = wrapper.findAll('input').find(input => (input.element as HTMLInputElement).value === '1')
+    expect(quotaInput).toBeTruthy()
+    expect((quotaInput!.element as HTMLInputElement).value).toBe('1')
 
     // 修改名称字段
     await nameInput!.setValue('测试企业（已修改）')
+    // 修改知识库容量时，编辑提交应按 GB 转换为后端 bytes。
+    await quotaInput!.setValue('3')
+    await quotaInput!.trigger('blur')
 
     // 编辑模式下不应存在管理员用户名输入项（create-only 字段）
     const labels = wrapper.findAll('label span')
@@ -357,9 +382,50 @@ describe('OrganizationsPage', () => {
       id: 'org-1',
       payload: expect.objectContaining({
         name: '测试企业（已修改）',
+        knowledge_quota_bytes: 3 * bytesPerGB,
         assistant_version_ids: ['v-1'],
       }),
     }))
+    expect(updateOrganization.mock.calls.at(-1)?.[0].payload).not.toHaveProperty('knowledge_quota_gb')
+  })
+
+  // 编辑其他字段但未改动知识库容量时，保留后端原始 bytes，避免整 GB 展示造成静默舍入。
+  it('编辑企业未修改知识库容量时保留原始 bytes', async () => {
+    const originalBytes = bytesPerGB + 512
+    organizationsState.items = [{
+      ...organizationsState.defaultOrg,
+      knowledge_quota_bytes: originalBytes,
+    }]
+    updateOrganization.mockResolvedValue({
+      id: 'org-1',
+      name: '测试企业（已修改）',
+      code: 'test-org',
+      status: 'active',
+    })
+    const wrapper = mountPage()
+
+    const editButton = wrapper.findAll('button').find(button => button.text().includes('编辑'))
+    expect(editButton).toBeTruthy()
+    await editButton!.trigger('click')
+    await nextTick()
+
+    const quotaInput = wrapper.findAll('input').find(input => (input.element as HTMLInputElement).value === '1')
+    expect(quotaInput).toBeTruthy()
+    expect((quotaInput!.element as HTMLInputElement).value).toBe('1')
+
+    const nameInput = wrapper.findAll('input').find(i => (i.element as HTMLInputElement).value === '测试企业')
+    expect(nameInput).toBeTruthy()
+    await nameInput!.setValue('测试企业（已修改）')
+    await wrapper.find('form').trigger('submit')
+
+    expect(updateOrganization).toHaveBeenCalledWith(expect.objectContaining({
+      id: 'org-1',
+      payload: expect.objectContaining({
+        name: '测试企业（已修改）',
+        knowledge_quota_bytes: originalBytes,
+      }),
+    }))
+    expect(updateOrganization.mock.calls.at(-1)?.[0].payload).not.toHaveProperty('knowledge_quota_gb')
   })
 
   // 助手版本为可选项，留空时表单仍可正常提交。
