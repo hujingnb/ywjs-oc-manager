@@ -170,12 +170,12 @@ const menuOptions = computed<MenuOption[]>(() => {
   if (isOrgMember.value) {
     return [
       { key: memberAppTabKey('overview'), label: '总览', icon: () => h(LayoutDashboard, { size: 18 }) },
+      { key: memberAppTabKey('channels'), label: '渠道', icon: () => h(Radio, { size: 18 }) },
+      { key: memberAppTabKey('workspace'), label: '工作目录', icon: () => h(FolderOpen, { size: 18 }) },
+      { key: memberAppTabKey('knowledge'), label: '个人知识库', icon: () => h(BookOpen, { size: 18 }) },
+      { key: '/knowledge', label: '企业知识库', icon: () => h(BookOpen, { size: 18 }) },
       { key: memberAppTabKey('kanban'), label: '任务', icon: () => h(ListChecks, { size: 18 }) },
       { key: memberAppTabKey('cron'), label: '定时任务', icon: () => h(CalendarClock, { size: 18 }) },
-      { key: memberAppTabKey('channels'), label: '渠道', icon: () => h(Radio, { size: 18 }) },
-      { key: memberAppTabKey('knowledge'), label: '个人知识库', icon: () => h(BookOpen, { size: 18 }) },
-      { key: memberAppTabKey('workspace'), label: '工作目录', icon: () => h(FolderOpen, { size: 18 }) },
-      { key: '/knowledge', label: '企业知识库', icon: () => h(BookOpen, { size: 18 }) },
       { key: '/usage', label: '用量', icon: () => h(BarChart3, { size: 18 }) },
     ]
   }
@@ -194,7 +194,6 @@ const menuOptions = computed<MenuOption[]>(() => {
   items.push(
     { key: memberAppPath.value, label: '实例', icon: () => h(Bot, { size: 18 }) },
     { key: '/knowledge', label: '企业知识库', icon: () => h(BookOpen, { size: 18 }) },
-    { key: '/usage', label: '用量', icon: () => h(BarChart3, { size: 18 }) },
   )
   // 账户余额仅对 org_admin 显示；org_member 和 platform_admin 无此入口。
   if (isOrgAdmin.value) {
@@ -206,6 +205,8 @@ const menuOptions = computed<MenuOption[]>(() => {
   if (isPlatformAdmin.value) {
     items.push({ key: '/platform/permissions', label: '权限说明', icon: () => h(ShieldCheck, { size: 18 }) })
   }
+  // 用量统一落到所有管理员菜单末尾，与成员视角保持一致的收尾位置。
+  items.push({ key: '/usage', label: '用量', icon: () => h(BarChart3, { size: 18 }) })
   return items
 })
 
