@@ -74,6 +74,9 @@ var ErrKnowledgeMissing = errors.New("知识库主副本未配置")
 // ErrKnowledgeDatasetCreating 表示 RAGFlow dataset 已由并发请求占位创建，当前请求应稍后重试。
 var ErrKnowledgeDatasetCreating = errors.New("知识库正在初始化")
 
+// ErrKnowledgeQuotaExceeded 表示知识库累计空间不足，handler 层据此映射为 409 Conflict。
+var ErrKnowledgeQuotaExceeded = errors.New("知识库空间不足")
+
 // 充值 -------------------------------------------------------------
 // 来源：原 recharge_service.go
 

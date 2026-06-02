@@ -158,6 +158,25 @@ func CanWriteOrgKnowledge(p Principal, orgID string) bool {
 	return p.Role == domain.UserRoleOrgAdmin && p.OrgID == orgID
 }
 
+// CanUpdateOrgKnowledgeQuota 判断主体是否可编辑企业知识库容量。
+// 容量属于平台侧租户配置，只允许平台管理员修改。
+func CanUpdateOrgKnowledgeQuota(p Principal) bool {
+	return p.Role == domain.UserRolePlatformAdmin
+}
+
+// CanUpdateAppKnowledgeQuota 判断主体是否可编辑实例知识库容量。
+// 平台管理员可运维兜底；企业管理员仅能调整本企业实例；普通成员不可修改容量。
+func CanUpdateAppKnowledgeQuota(p Principal, appOrgID string) bool {
+	switch p.Role {
+	case domain.UserRolePlatformAdmin:
+		return true
+	case domain.UserRoleOrgAdmin:
+		return p.OrgID == appOrgID
+	default:
+		return false
+	}
+}
+
 // CanWriteAppKnowledge 判断主体是否可写入指定应用的知识库。
 // 应用知识库写入属于应用写操作，沿用应用管理权限；
 // 平台管理员仍可读，但不能直接写入任意组织应用的知识库。
