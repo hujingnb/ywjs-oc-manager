@@ -82,6 +82,10 @@ describe('translateCronExpr', () => {
   it('at 格式保留原始时间', () => {
     expect(translateCronExpr('at', 'at 2026-06-03 09:00')).toBe('指定时间 2026-06-03 09:00')
   })
+  // at 类型但 expr 无 'at ' 前缀（kind 已携带类型，expr 为裸时间串）
+  it('at 类型无前缀时直接加中文前缀', () => {
+    expect(translateCronExpr('at', '2026-06-03 09:00')).toBe('指定时间 2026-06-03 09:00')
+  })
   // 不可识别的复杂表达式回退原文，且不抛错
   it('无法识别时回退原文', () => {
     expect(translateCronExpr('cron', '0 9 1-5 * 1,3,5')).toBe('0 9 1-5 * 1,3,5')
