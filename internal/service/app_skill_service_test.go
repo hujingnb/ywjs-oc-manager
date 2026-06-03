@@ -1,0 +1,483 @@
+package service
+
+import (
+	"archive/tar"
+	"bytes"
+	"context"
+	"database/sql"
+	"errors"
+	"fmt"
+	"testing"
+
+	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
+
+	"oc-manager/internal/auth"
+	"oc-manager/internal/domain"
+	"oc-manager/internal/integrations/ocops"
+	"oc-manager/internal/store/sqlc"
+)
+
+// =========================================================
+// Fake 实现
+// =========================================================
+
+// fakeAppSkillStore 是 AppSkillStore 的内存实现，供 AppSkillService 单测使用。
+type fakeAppSkillStore struct {
+	// rows 存储已安装的 skill，key 为 "appID|name"
+	rows map[string]sqlc.AppSkill
+}
+
+func newFakeAppSkillStore() *fakeAppSkillStore {
+	return &fakeAppSkillStore{rows: map[string]sqlc.AppSkill{}}
+}
+
+// key 生成唯一存储键。
+func (f *fakeAppSkillStore) key(appID, name string) string { return appID + "|" + name }
+
+// get 取出某 app 下某 skill 的行（供测试直接断言）。
+func (f *fakeAppSkillStore) get(appID, name string) (sqlc.AppSkill, bool) {
+	r, ok := f.rows[f.key(appID, name)]
+	return r, ok
+}
+
+// put 预置一条 app_skills 行（供测试构造重复场景）。
+func (f *fakeAppSkillStore) put(appID, name, source string) {
+	f.rows[f.key(appID, name)] = sqlc.AppSkill{AppID: appID, Name: name, Source: source}
+}
+
+func (f *fakeAppSkillStore) ListAppSkillsByApp(_ context.Context, appID string) ([]sqlc.AppSkill, error) {
+	out := []sqlc.AppSkill{}
+	for _, r := range f.rows {
+		if r.AppID == appID {
+			out = append(out, r)
+		}
+	}
+	return out, nil
+}
+
+func (f *fakeAppSkillStore) GetAppSkillByAppAndName(_ context.Context, arg sqlc.GetAppSkillByAppAndNameParams) (sqlc.AppSkill, error) {
+	r, ok := f.rows[f.key(arg.AppID, arg.Name)]
+	if !ok {
+		return sqlc.AppSkill{}, sql.ErrNoRows
+	}
+	return r, nil
+}
+
+func (f *fakeAppSkillStore) CreateAppSkill(_ context.Context, arg sqlc.CreateAppSkillParams) error {
+	f.rows[f.key(arg.AppID, arg.Name)] = sqlc.AppSkill{
+		ID:             arg.ID,
+		AppID:          arg.AppID,
+		Name:           arg.Name,
+		Source:         arg.Source,
+		SourceRef:      arg.SourceRef,
+		Version:        arg.Version,
+		CachedTarPath:  arg.CachedTarPath,
+		SourceMetadata: arg.SourceMetadata,
+		FileSize:       arg.FileSize,
+		FileSha256:     arg.FileSha256,
+		InstalledBy:    arg.InstalledBy,
+	}
+	return nil
+}
+
+func (f *fakeAppSkillStore) DeleteAppSkillByAppAndName(_ context.Context, arg sqlc.DeleteAppSkillByAppAndNameParams) error {
+	delete(f.rows, f.key(arg.AppID, arg.Name))
+	return nil
+}
+
+func (f *fakeAppSkillStore) UpdateAppSkillVersion(_ context.Context, arg sqlc.UpdateAppSkillVersionParams) error {
+	k := f.key(arg.AppID, arg.Name)
+	if r, ok := f.rows[k]; ok {
+		r.Version = arg.Version
+		r.CachedTarPath = arg.CachedTarPath
+		r.FileSize = arg.FileSize
+		r.FileSha256 = arg.FileSha256
+		f.rows[k] = r
+	}
+	return nil
+}
+
+// fakeAppLocator 是 AppLocator 的内存实现，记录各 appID 对应的位置信息。
+type fakeAppLocator struct {
+	// locations 存储各 app 的定位信息，key 为 appID
+	locations map[string]AppSkillLocation
+}
+
+func newFakeAppLocator() *fakeAppLocator {
+	return &fakeAppLocator{locations: map[string]AppSkillLocation{}}
+}
+
+// setApp 预置一个 app 的位置信息。
+func (f *fakeAppLocator) setApp(appID, orgID, ownerUserID string, supported bool) {
+	f.locations[appID] = AppSkillLocation{
+		OrgID:       orgID,
+		OwnerUserID: ownerUserID,
+		Endpoint:    ocops.Endpoint{BaseURL: "http://fake-ocops"},
+		Supported:   supported,
+	}
+}
+
+func (f *fakeAppLocator) LocateApp(_ context.Context, appID string) (AppSkillLocation, error) {
+	loc, ok := f.locations[appID]
+	if !ok {
+		return AppSkillLocation{}, ErrNotFound
+	}
+	return loc, nil
+}
+
+// fakePlatformInstaller 是 PlatformInstaller 的内存实现。
+type fakePlatformInstaller struct {
+	// archives 存储已预置的归档，key 为 "name|version"
+	archives map[string][]byte
+}
+
+func newFakePlatformInstaller() *fakePlatformInstaller {
+	return &fakePlatformInstaller{archives: map[string][]byte{}}
+}
+
+// put 预置一个平台库 skill 归档。
+func (f *fakePlatformInstaller) put(name, version string, data []byte) {
+	f.archives[name+"|"+version] = data
+}
+
+func (f *fakePlatformInstaller) GetForInstall(_ context.Context, name, version string) ([]byte, string, error) {
+	data, ok := f.archives[name+"|"+version]
+	if !ok {
+		return nil, "", ErrPlatformSkillNotFound
+	}
+	return data, "fakeshaxxx", nil
+}
+
+// fakeClawHubDownloader 是 ClawHubDownloader 的内存实现。
+type fakeClawHubDownloader struct {
+	archives map[string][]byte
+	err      error
+}
+
+func (f *fakeClawHubDownloader) Download(_ context.Context, slug, version string) ([]byte, error) {
+	if f.err != nil {
+		return nil, f.err
+	}
+	data, ok := f.archives[slug+"|"+version]
+	if !ok {
+		return nil, errors.New("clawhub: not found")
+	}
+	return data, nil
+}
+
+// fakeOcOpsSkillClient 是 OcOpsSkillClient 的内存实现，记录调用状态。
+type fakeOcOpsSkillClient struct {
+	// installed 记录已热装的 skill name
+	installed map[string]bool
+	// deleted 记录已热删的 skill name
+	deleted map[string]bool
+	// reloaded 记录是否调用了 reload
+	reloaded bool
+	// installErr 预置 SkillInstall 返回的错误（测试热装失败场景）
+	installErr error
+	// reloadErr 预置 SkillReload 返回的错误
+	reloadErr error
+}
+
+func newFakeOcOpsSkillClient() *fakeOcOpsSkillClient {
+	return &fakeOcOpsSkillClient{
+		installed: map[string]bool{},
+		deleted:   map[string]bool{},
+	}
+}
+
+func (f *fakeOcOpsSkillClient) SkillInstall(_ context.Context, _ ocops.Endpoint, name string, _ []byte) error {
+	if f.installErr != nil {
+		return f.installErr
+	}
+	f.installed[name] = true
+	return nil
+}
+
+func (f *fakeOcOpsSkillClient) SkillDelete(_ context.Context, _ ocops.Endpoint, name string) error {
+	f.deleted[name] = true
+	return nil
+}
+
+func (f *fakeOcOpsSkillClient) SkillReload(_ context.Context, _ ocops.Endpoint) error {
+	if f.reloadErr != nil {
+		return f.reloadErr
+	}
+	f.reloaded = true
+	return nil
+}
+
+func (f *fakeOcOpsSkillClient) SkillList(_ context.Context, _ ocops.Endpoint) ([]ocops.SkillInfo, error) {
+	return nil, nil
+}
+
+// fakeAssistantVersionLoader 是 AssistantVersionLoader 的内存实现。
+type fakeAssistantVersionLoader struct {
+	// skillNames 存储各 versionID 对应的 skill name 集，key 为 versionID
+	skillNames map[string][]string
+}
+
+func newFakeAssistantVersionLoader() *fakeAssistantVersionLoader {
+	return &fakeAssistantVersionLoader{skillNames: map[string][]string{}}
+}
+
+// setSkills 预置某版本的 skill names（供卸载保护测试使用）。
+func (f *fakeAssistantVersionLoader) setSkills(versionID string, names []string) {
+	f.skillNames[versionID] = names
+}
+
+func (f *fakeAssistantVersionLoader) SkillNames(_ context.Context, versionID string) ([]string, error) {
+	names, ok := f.skillNames[versionID]
+	if !ok {
+		return nil, nil
+	}
+	return names, nil
+}
+
+// fakeAuditRecorder 是 AuditRecorder 的内存实现，记录审计事件。
+type fakeAuditRecorder struct {
+	events []AuditEvent
+}
+
+func (f *fakeAuditRecorder) Record(_ context.Context, event AuditEvent) (AuditResult, error) {
+	f.events = append(f.events, event)
+	return AuditResult{}, nil
+}
+
+// =========================================================
+// 测试依赖容器
+// =========================================================
+
+// appSkillTestDeps 封装 AppSkillService 单测所需的全部依赖与 fake 对象。
+type appSkillTestDeps struct {
+	appSkills *fakeAppSkillStore
+	apps      *fakeAppLocator
+	platform  *fakePlatformInstaller
+	clawhub   *fakeClawHubDownloader
+	blobs     *fakeLibraryBlob
+	ocops     *fakeOcOpsSkillClient
+	versions  *fakeAssistantVersionLoader
+	audit     *fakeAuditRecorder
+}
+
+// newAppSkillTestDeps 初始化测试依赖并预置默认的 app-1 位置（owner=u-owner，org=org-1，支持 oc-ops）。
+func newAppSkillTestDeps(_ *testing.T) *appSkillTestDeps {
+	apps := newFakeAppLocator()
+	// 预置默认 app-1：归属 org-1，所有者 u-owner，oc-ops 支持
+	apps.setApp("app-1", "org-1", "u-owner", true)
+	return &appSkillTestDeps{
+		appSkills: newFakeAppSkillStore(),
+		apps:      apps,
+		platform:  newFakePlatformInstaller(),
+		clawhub:   &fakeClawHubDownloader{archives: map[string][]byte{}},
+		blobs:     &fakeLibraryBlob{},
+		ocops:     newFakeOcOpsSkillClient(),
+		versions:  newFakeAssistantVersionLoader(),
+		audit:     &fakeAuditRecorder{},
+	}
+}
+
+// service 构造 AppSkillService 注入所有 fake 依赖。
+func (d *appSkillTestDeps) service() *AppSkillService {
+	return NewAppSkillService(AppSkillServiceDeps{
+		Store:    d.appSkills,
+		Apps:     d.apps,
+		Versions: d.versions,
+		Platform: d.platform,
+		ClawHub:  d.clawhub,
+		Blobs:    d.blobs,
+		OcOps:    d.ocops,
+		Audit:    d.audit,
+	})
+}
+
+// ownerPrincipal 返回 app-1 的 owner principal（org-1 的普通成员，同时是 app 拥有者）。
+func (d *appSkillTestDeps) ownerPrincipal() auth.Principal {
+	return auth.Principal{UserID: "u-owner", Role: domain.UserRoleOrgMember, OrgID: "org-1"}
+}
+
+// otherMemberPrincipal 返回同 org 但非 owner 的普通成员（无权管理 app-1 的 skill）。
+func (d *appSkillTestDeps) otherMemberPrincipal() auth.Principal {
+	return auth.Principal{UserID: "u-other", Role: domain.UserRoleOrgMember, OrgID: "org-1"}
+}
+
+// =========================================================
+// Install 测试
+// =========================================================
+
+// TestAppSkillService_Install_Platform 从平台来源安装 skill：
+// 期望落 app_skills + 缓存归档 + 调用 oc-ops 热装与 reload，状态返回 active。
+func TestAppSkillService_Install_Platform(t *testing.T) {
+	deps := newAppSkillTestDeps(t)
+	// 预置平台库 skill weather 1.0 的归档
+	deps.platform.put("weather", "1.0", []byte("PK\x03\x04tar"))
+	svc := deps.service()
+
+	res, err := svc.Install(context.Background(), deps.ownerPrincipal(), "app-1", InstallSkillInput{
+		Source:    "platform",
+		SourceRef: "weather",
+		Name:      "weather",
+		Version:   "1.0",
+	})
+	require.NoError(t, err)
+	// 返回字段校验：name 正确、状态 active（热装+reload 成功）
+	assert.Equal(t, "weather", res.Name)
+	assert.Equal(t, "active", res.Status)
+	// oc-ops 热装与 reload 均被调用
+	assert.True(t, deps.ocops.installed["weather"])
+	assert.True(t, deps.ocops.reloaded)
+	// app_skills 表已落库
+	row, ok := deps.appSkills.get("app-1", "weather")
+	require.True(t, ok)
+	assert.Equal(t, "platform", row.Source)
+}
+
+// TestAppSkillService_Install_Denied 非 owner/管理员安装被拒，返回 ErrAppSkillDenied。
+func TestAppSkillService_Install_Denied(t *testing.T) {
+	deps := newAppSkillTestDeps(t)
+	deps.platform.put("weather", "1.0", []byte("data"))
+	svc := deps.service()
+
+	// 使用非 owner 的成员（无权）
+	_, err := svc.Install(context.Background(), deps.otherMemberPrincipal(), "app-1", InstallSkillInput{
+		Source:    "platform",
+		SourceRef: "weather",
+		Name:      "weather",
+		Version:   "1.0",
+	})
+	require.ErrorIs(t, err, ErrAppSkillDenied)
+}
+
+// TestAppSkillService_Install_Duplicate 同名 skill 已安装，再次安装返回 ErrAppSkillNameConflict。
+func TestAppSkillService_Install_Duplicate(t *testing.T) {
+	deps := newAppSkillTestDeps(t)
+	deps.platform.put("weather", "1.0", []byte("data"))
+	// 预置同名已安装的 skill
+	deps.appSkills.put("app-1", "weather", "platform")
+	svc := deps.service()
+
+	_, err := svc.Install(context.Background(), deps.ownerPrincipal(), "app-1", InstallSkillInput{
+		Source:    "platform",
+		SourceRef: "weather",
+		Name:      "weather",
+		Version:   "1.0",
+	})
+	require.ErrorIs(t, err, ErrAppSkillNameConflict)
+}
+
+// TestAppSkillService_Install_OcOpsFail_Pending oc-ops 热装失败时：
+// app_skills 已落库（不回滚），状态为 pending（可重试），不返回错误。
+func TestAppSkillService_Install_OcOpsFail_Pending(t *testing.T) {
+	deps := newAppSkillTestDeps(t)
+	// 预置热装错误
+	deps.ocops.installErr = errors.New("pod not ready")
+	deps.platform.put("weather", "1.0", []byte("x"))
+	svc := deps.service()
+
+	res, err := svc.Install(context.Background(), deps.ownerPrincipal(), "app-1", InstallSkillInput{
+		Source:    "platform",
+		SourceRef: "weather",
+		Name:      "weather",
+		Version:   "1.0",
+	})
+	require.NoError(t, err)
+	// 热装失败 → 状态 pending
+	assert.Equal(t, "pending", res.Status)
+	// app_skills 仍然落库（不因 oc-ops 失败回滚）
+	_, ok := deps.appSkills.get("app-1", "weather")
+	assert.True(t, ok)
+}
+
+// =========================================================
+// validateArchiveSafety 单测
+// =========================================================
+
+// TestValidateArchiveSafety_OK 正常 tar 归档（小文件数+小总字节）通过检验。
+func TestValidateArchiveSafety_OK(t *testing.T) {
+	// 构造一个最小合法 tar（空归档：只有 EOF 块）
+	// tar 格式：两个 512 字节全零块代表 EOF
+	emptyTar := make([]byte, 1024)
+	err := validateArchiveSafety(emptyTar, "tar")
+	require.NoError(t, err)
+}
+
+// TestValidateArchiveSafety_TooManyFiles tar 归档解压后文件数超过上限，返回错误。
+func TestValidateArchiveSafety_TooManyFiles(t *testing.T) {
+	// 构造包含超过 maxArchiveFiles 个文件的 tar
+	data := buildTarWithNFiles(t, maxArchiveFiles+1, 1)
+	err := validateArchiveSafety(data, "tar")
+	require.Error(t, err)
+}
+
+// TestValidateArchiveSafety_TooLarge tar 归档解压后总字节超过上限，返回错误。
+func TestValidateArchiveSafety_TooLarge(t *testing.T) {
+	// 构造一个文件内容超过 maxArchiveBytes 的 tar
+	data := buildTarWithNFiles(t, 1, maxArchiveBytes+1)
+	err := validateArchiveSafety(data, "tar")
+	require.Error(t, err)
+}
+
+// =========================================================
+// 测试辅助函数
+// =========================================================
+
+// buildTarWithNFiles 构造一个包含 n 个文件的 tar 归档，每个文件 header 声明大小为 fileSize 字节。
+// 实际 body 写入 min(fileSize, 1) 字节（避免分配超大内存），
+// validateTarSafety 读的是 header.Size，不实际读取文件 body。
+// 注意：tar.Writer.Close 会校验 body 写入量与 header.Size 是否一致，
+// 因此对 TooLarge（fileSize 远超内存）场景用 buildTarHeaderOnly 手动构造 raw header。
+func buildTarWithNFiles(t *testing.T, n int, fileSize int64) []byte {
+	t.Helper()
+	// 对超大 fileSize（TooLarge 场景），使用 raw header 构造避免分配大内存
+	if fileSize > 1024 {
+		return buildRawTarHeaders(t, n, fileSize)
+	}
+	var buf bytes.Buffer
+	tw := tar.NewWriter(&buf)
+	for i := 0; i < n; i++ {
+		hdr := &tar.Header{
+			Typeflag: tar.TypeReg,
+			Name:     fmt.Sprintf("file%d.txt", i),
+			Size:     fileSize,
+		}
+		if err := tw.WriteHeader(hdr); err != nil {
+			t.Fatalf("写 tar header 失败: %v", err)
+		}
+		// 写入实际 body（fileSize <= 1024，安全）
+		if fileSize > 0 {
+			if _, err := tw.Write(make([]byte, fileSize)); err != nil {
+				t.Fatalf("写 tar body 失败: %v", err)
+			}
+		}
+	}
+	if err := tw.Close(); err != nil {
+		t.Fatalf("关闭 tar writer 失败: %v", err)
+	}
+	return buf.Bytes()
+}
+
+// buildRawTarHeaders 手动构造 tar 归档 raw 字节：
+// 仅写 n 个 header（每个 512 字节），body 全零（不足 header.Size 声明量）。
+// validateTarSafety 读 header.Size 字段统计，不需要实际 body，因此可正确触发超限检测。
+// tar.Reader.Next 只解析 header，不校验 body 完整性；实际读取 body 时才会出错（测试不读）。
+func buildRawTarHeaders(t *testing.T, n int, fileSize int64) []byte {
+	t.Helper()
+	var buf bytes.Buffer
+	tw := tar.NewWriter(&buf)
+	for i := 0; i < n; i++ {
+		hdr := &tar.Header{
+			Typeflag: tar.TypeReg,
+			Name:     fmt.Sprintf("file%d.txt", i),
+			Size:     fileSize,
+		}
+		if err := tw.WriteHeader(hdr); err != nil {
+			t.Fatalf("写 raw tar header 失败: %v", err)
+		}
+		// 不写 body（body 写入量 = 0 != fileSize），tw.Close 会报错，
+		// 但我们直接用底层 bytes.Buffer，不调 tw.Close
+	}
+	// 手动追加 tar EOF（两个全零 512 字节块）
+	buf.Write(make([]byte, 1024))
+	return buf.Bytes()
+}
