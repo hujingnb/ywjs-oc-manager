@@ -190,8 +190,11 @@ function onDragOver(event: DragEvent) {
   }
 }
 
-// onDragLeave 在拖拽离开卡片时关闭视觉态。
-function onDragLeave() {
+// onDragLeave 在真正离开卡片时关闭视觉态；子元素之间移动会产生 dragleave，需要保留视觉态。
+function onDragLeave(event: DragEvent) {
+  const current = event.currentTarget
+  const related = event.relatedTarget
+  if (current instanceof Node && related instanceof Node && current.contains(related)) return
   dragActive.value = false
 }
 

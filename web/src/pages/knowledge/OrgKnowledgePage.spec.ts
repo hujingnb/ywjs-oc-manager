@@ -13,6 +13,11 @@ const mocks = vi.hoisted(() => ({
   downloadOrgKnowledgeFile: vi.fn(),
 }))
 
+type UploadRunItem = { file: File; label: string }
+type UploadRunContext = { onProgress: (percent: number) => void; signal: AbortSignal }
+
+const uploadRunContexts: UploadRunContext[] = []
+
 type RenderableColumn = {
   key: string
   title?: string
@@ -131,11 +136,27 @@ function oversizedFile(): File {
   return file
 }
 
+function fileDragTransfer(dropEffect = 'none') {
+  return {
+    items: [{ kind: 'file' }],
+    files: [],
+    dropEffect,
+  }
+}
+
 describe('OrgKnowledgePage', () => {
   beforeEach(() => {
     mocks.canManage.mockReturnValue(true)
     mocks.downloadOrgKnowledgeFile.mockReset()
     mocks.run.mockReset()
+    uploadRunContexts.splice(0, uploadRunContexts.length)
+    mocks.run.mockImplementation(async (items: UploadRunItem[], runner: (item: UploadRunItem, file: File, ctx: UploadRunContext) => Promise<void>) => {
+      for (const item of items) {
+        const ctx = { onProgress: vi.fn(), signal: new AbortController().signal }
+        uploadRunContexts.push(ctx)
+        await runner(item, item.file, ctx)
+      }
+    })
     mocks.warning.mockReset()
     mocks.mutateAsync.mockReset()
   })
@@ -153,6 +174,13 @@ describe('OrgKnowledgePage', () => {
 
     expect(wrapper.text()).toContain('已用')
     expect(wrapper.text()).toContain('剩余')
+  })
+
+  // 覆盖企业知识库上传入口：文件选择框必须允许一次选择多个文件。
+  it('企业知识库文件选择框允许多选', () => {
+    const wrapper = mountPage()
+
+    expect(wrapper.find('input[type="file"]').attributes('multiple')).toBeDefined()
   })
 
   // 覆盖组织知识库上传超限路径：前端提示上限并且不创建上传会话。
@@ -184,6 +212,16 @@ describe('OrgKnowledgePage', () => {
       { file: first, label: 'a.md' },
       { file: second, label: 'b.md' },
     ])
+    expect(mocks.mutateAsync).toHaveBeenNthCalledWith(1, {
+      file: first,
+      onProgress: uploadRunContexts[0].onProgress,
+      signal: uploadRunContexts[0].signal,
+    })
+    expect(mocks.mutateAsync).toHaveBeenNthCalledWith(2, {
+      file: second,
+      onProgress: uploadRunContexts[1].onProgress,
+      signal: uploadRunContexts[1].signal,
+    })
   })
 
   // 覆盖企业知识库拖拽上传：拖入多个文件时复用同一批量上传流程。
@@ -205,6 +243,56 @@ describe('OrgKnowledgePage', () => {
       { file: first, label: 'a.md' },
       { file: second, label: 'b.md' },
     ])
+    expect(mocks.mutateAsync).toHaveBeenNthCalledWith(1, {
+      file: first,
+      onProgress: uploadRunContexts[0].onProgress,
+      signal: uploadRunContexts[0].signal,
+    })
+    expect(mocks.mutateAsync).toHaveBeenNthCalledWith(2, {
+      file: second,
+      onProgress: uploadRunContexts[1].onProgress,
+      signal: uploadRunContexts[1].signal,
+    })
+  })
+
+  // 覆盖企业知识库拖拽态：文件拖入时显示视觉态，内部移动不清空，真正离开卡片才清空。
+  it('企业知识库文件拖拽态仅在离开卡片时清空', async () => {
+    const wrapper = mountPage()
+    const section = wrapper.find('section')
+    const inner = section.find('.headers')
+    const dataTransfer = fileDragTransfer()
+
+    await section.trigger('dragenter', { dataTransfer })
+    expect(section.classes()).toContain('drag-active')
+
+    await section.trigger('dragover', { dataTransfer })
+    expect(dataTransfer.dropEffect).toBe('copy')
+
+    await section.trigger('dragleave', { relatedTarget: inner.element })
+    expect(section.classes()).toContain('drag-active')
+
+    await section.trigger('dragleave', { relatedTarget: document.body })
+    expect(section.classes()).not.toContain('drag-active')
+  })
+
+  // 覆盖企业知识库只读拖拽：无写权限时拖拽和 drop 都不会创建上传会话。
+  it('只读企业知识库拖拽文件不会上传', async () => {
+    mocks.canManage.mockReturnValue(false)
+    const wrapper = mountPage()
+    const first = new File(['a'], 'a.md')
+    const section = wrapper.find('section')
+
+    await section.trigger('dragenter', { dataTransfer: fileDragTransfer() })
+    await section.trigger('drop', {
+      dataTransfer: {
+        items: [],
+        files: [first],
+      },
+    })
+
+    expect(section.classes()).not.toContain('drag-active')
+    expect(mocks.run).not.toHaveBeenCalled()
+    expect(mocks.mutateAsync).not.toHaveBeenCalled()
   })
 
   // 覆盖企业知识库容量动态失败：超过 remaining_bytes 的文件仍进入队列，由后端逐个返回失败。
