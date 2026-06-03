@@ -28,7 +28,7 @@ manager-api/web、new-api、ragflow 与 RBAC 与本地一致，差异仅镜像 r
      用一个独立 bucket（须预先建好，access key 仅对该 bucket 授权）；endpoint-url 要带 scheme。
      账号均为专用普通账号，非 root；ragflow 用 rag_flow 库，需预建库并对该库授权，
      详见 secret.example.yaml 注释。
-   - 镜像拉取 Secret `secret-registry-ywjs-cc41758e.ecis.huabei-3.cmecloud.cn`：移动云
+   - 镜像拉取 Secret `secret-registry-ywjs-26257ea5.ecis.huabei-3.cmecloud.cn`：移动云
      仓库拉取凭证，由集群侧预先创建，**已存在于 ocm 与 oc-apps 两个 namespace**——ocm 供
      manager-api/web/new-api/ragflow 拉镜像，oc-apps 供 app pod（Hermes 实例）拉
      hermes/ops 镜像（imagePullSecrets 是 namespace 级，缺则对应 namespace 的 pod
@@ -43,11 +43,11 @@ manager-api/web、new-api、ragflow 与 RBAC 与本地一致，差异仅镜像 r
 
 ## 镜像拉取 Secret（外部托管）
 
-镜像仓库为移动云 `ywjs-cc41758e.ecis.huabei-3.cmecloud.cn`（自有走 `app`、上游与构建期
-基础镜像走 `public`）。拉取 Secret `secret-registry-ywjs-cc41758e.ecis.huabei-3.cmecloud.cn`
+镜像仓库为移动云 `ywjs-26257ea5.ecis.huabei-3.cmecloud.cn`（自有走 `app`、上游与构建期
+基础镜像走 `public`）。拉取 Secret `secret-registry-ywjs-26257ea5.ecis.huabei-3.cmecloud.cn`
 由集群侧预先创建并已存在于 ocm 与 oc-apps，本仓库只按名引用、不再内嵌凭证。
 
-镜像首次迁移到该仓库见 `scripts/migrate-images-to-ecloud.sh`（从 ACR retag 转推）。
+镜像迁移到该仓库见 `scripts/migrate-images-to-ecloud.sh`（从旧移动云仓库 retag 转推）。
 
 ## apply 顺序
 

@@ -79,11 +79,11 @@ spec:
       labels: { app: ragflow }
     spec:
       imagePullSecrets:
-        - name: secret-registry-ywjs-cc41758e.ecis.huabei-3.cmecloud.cn
+        - name: secret-registry-ywjs-26257ea5.ecis.huabei-3.cmecloud.cn
       containers:
         - name: ragflow
           # 上游 ragflow 镜像，转推到移动云私有仓库 public 命名空间
-          image: ywjs-cc41758e.ecis.huabei-3.cmecloud.cn/public/ragflow:v0.25.6
+          image: ywjs-26257ea5.ecis.huabei-3.cmecloud.cn/public/ragflow:v0.25.6
           args: ["--enable-adminserver"]
           # 资源配额（起步值）：RAGFlow 含 server + task_executor + DeepDOC 解析，较重，按文档量与并发调整。
           resources:

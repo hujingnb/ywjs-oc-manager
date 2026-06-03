@@ -56,7 +56,7 @@
 
 构建产物为 `hermes-runtime:v2026.5.16-dev`（本地 dev tag），由仓库内
 `runtime/hermes/hermes-v2026.5.16/Dockerfile` 构建。生产发布 tag 形如
-`crpi-nu3ibz4f07feyghi.cn-beijing.personal.cr.aliyuncs.com/ywjs_app/oc-manager-hermes:v2026.5.16-2026-05-21-12-00-00`
+`ywjs-26257ea5.ecis.huabei-3.cmecloud.cn/app/oc-manager-hermes:v2026.5.16-2026-05-21-12-00-00`
 这种时间戳 tag。镜像版本锁通过
 `runtime/hermes/hermes-v2026.5.16/version.txt` 与 Dockerfile `HERMES_REF`
 ARG 传入，Makefile 会拒绝 `main`、`master`、`latest` 等浮动 ref。

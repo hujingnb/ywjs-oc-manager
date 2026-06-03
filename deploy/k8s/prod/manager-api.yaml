@@ -23,10 +23,10 @@ spec:
     spec:
       serviceAccountName: manager-api
       imagePullSecrets:
-        - name: secret-registry-ywjs-cc41758e.ecis.huabei-3.cmecloud.cn
+        - name: secret-registry-ywjs-26257ea5.ecis.huabei-3.cmecloud.cn
       containers:
         - name: manager-api
-          image: ywjs-cc41758e.ecis.huabei-3.cmecloud.cn/app/oc-manager-api:2026-06-01-19-17-02-97893d0a
+          image: ywjs-26257ea5.ecis.huabei-3.cmecloud.cn/app/oc-manager-api:2026-06-03-18-35-28-0fd95da6
           imagePullPolicy: IfNotPresent
           # 资源配额（起步值，按实际负载调整）：Go API 服务，较轻量。
           resources:

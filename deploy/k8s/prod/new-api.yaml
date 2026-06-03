@@ -22,11 +22,11 @@ spec:
       labels: { app: new-api }
     spec:
       imagePullSecrets:
-        - name: secret-registry-ywjs-cc41758e.ecis.huabei-3.cmecloud.cn
+        - name: secret-registry-ywjs-26257ea5.ecis.huabei-3.cmecloud.cn
       containers:
         - name: new-api
           # 上游 new-api 镜像，转推到移动云私有仓库 public 命名空间
-          image: ywjs-cc41758e.ecis.huabei-3.cmecloud.cn/public/new-api:v1.0.0-rc.10
+          image: ywjs-26257ea5.ecis.huabei-3.cmecloud.cn/public/new-api:v1.0.0-rc.10
           # 镜像 WORKDIR=/data 且无 /app；日志目录用 /data/logs（父目录存在）避免 mkdir 失败
           args: ["--log-dir", "/data/logs"]
           # 资源配额（起步值）：Go 服务 + LLM 代理转发。

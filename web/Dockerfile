@@ -8,13 +8,13 @@
 ARG NODE_VERSION=22
 ARG NGINX_VERSION=1.27
 
-# 公网基础镜像统一走 aliyun 私有 ACR 的 ywjs_public 命名空间, 该命名空间内
+# 公网基础镜像统一走移动云私有仓库的 public 命名空间, 该命名空间内
 # 已预先镜像同步好下方使用的全部 Docker Hub 原始镜像。
 # 切回公网原始仓库可 --build-arg DOCKER_HUB_MIRROR=docker.io/library。
-ARG DOCKER_HUB_MIRROR=crpi-nu3ibz4f07feyghi.cn-beijing.personal.cr.aliyuncs.com/ywjs_public
+ARG DOCKER_HUB_MIRROR=ywjs-26257ea5.ecis.huabei-3.cmecloud.cn/public
 
 # ---- 构建阶段 -------------------------------------------------------------
-# 原 docker.io/library/node:22-alpine → 现 crpi-nu3ibz4f07feyghi.cn-beijing.personal.cr.aliyuncs.com/ywjs_public/node:22-alpine
+# 原 docker.io/library/node:22-alpine → 现 ywjs-26257ea5.ecis.huabei-3.cmecloud.cn/public/node:22-alpine
 FROM ${DOCKER_HUB_MIRROR}/node:${NODE_VERSION}-alpine AS builder
 
 WORKDIR /src
@@ -37,7 +37,7 @@ COPY . .
 RUN npm run build
 
 # ---- 运行阶段 -------------------------------------------------------------
-# 原 docker.io/library/nginx:1.27-alpine → 现 crpi-nu3ibz4f07feyghi.cn-beijing.personal.cr.aliyuncs.com/ywjs_public/nginx:1.27-alpine
+# 原 docker.io/library/nginx:1.27-alpine → 现 ywjs-26257ea5.ecis.huabei-3.cmecloud.cn/public/nginx:1.27-alpine
 FROM ${DOCKER_HUB_MIRROR}/nginx:${NGINX_VERSION}-alpine
 
 # 替换默认 server: 开启 HTML5 history 兜底、关闭目录索引、为 vite 产物配置缓存策略
