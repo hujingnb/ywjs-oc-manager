@@ -89,9 +89,16 @@ COPY tests/               /usr/local/lib/oc-entrypoint/tests/
 # 落点 /usr/local/lib/ocops 使 `import ocops` 在 system python（构建期自检，
 # PYTHONPATH=/usr/local/lib）与 hermes venv（运行时 uvicorn）下均可解析。
 COPY ocops/               /usr/local/lib/ocops/
+# patches/：构建期补丁脚本，给上游 hermes-agent 包注入 oc-manager 扩展端点。
+# 落点 /usr/local/lib/oc-entrypoint/patches 与 tests/ 同级，供构建期自检 import。
+COPY patches/             /usr/local/lib/oc-entrypoint/patches/
 
 RUN chmod +x /usr/local/bin/oc-entrypoint /usr/local/bin/oc-kb \
             /usr/local/bin/oc-healthcheck
+
+# 给 hermes api_server 注入 POST /oc/skills/reload 端点（与 gateway 同进程）；
+# 成功后 oc-ops 可 POST http://127.0.0.1:8642/oc/skills/reload 触发免重启 skill 热加载。
+RUN python3 /usr/local/lib/oc-entrypoint/patches/patch_api_server_reload.py
 
 # 镜像身份信息写到固定位置，供 oc-info 读取
 ARG OC_IMAGE_VARIANT
