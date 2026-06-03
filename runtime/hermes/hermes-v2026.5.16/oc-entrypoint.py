@@ -30,6 +30,7 @@ from lib.manifest import load as load_manifest, ManifestError
 from lib.state import OcState, read_state, write_state
 from renderer import render_config_yaml, render_env, render_skills, render_soul_md
 from migrator import run as run_migration
+from oc_entrypoint import ensure_builtin_manifest
 
 
 def main() -> int:
@@ -57,6 +58,12 @@ def main() -> int:
     except Exception as e:  # noqa: BLE001
         oclog.emit("migrate", "error", str(e), prev_variant=prev_variant, curr_variant=curr_variant)
         return 1
+
+    # render 前：首次启动时抓镜像内置 skill 基线（render 会写 .oc-managed，必须在此之前）。
+    # OC_BUILTIN_MANIFEST 允许测试/开发覆盖默认路径 /opt/skills-builtin.json。
+    # 文件已存在时不动，保护基线不被后续启动覆盖。
+    builtin_manifest_path = Path(os.environ.get("OC_BUILTIN_MANIFEST", "/opt/skills-builtin.json"))
+    ensure_builtin_manifest(data_root, builtin_manifest_path)
 
     # phase 4 render（每次都跑、幂等）
     outputs: list[str] = []
