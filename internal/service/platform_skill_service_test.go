@@ -163,3 +163,24 @@ func TestPlatformSkillService_Upload_RollbackOnDBError(t *testing.T) {
 	require.Error(t, err)
 	assert.Equal(t, []string{"library/platform/w/1.tar"}, blob.deleted) // 回滚删除了刚写入的归档
 }
+
+// List 成功：平台管理员获取全部平台库 skill。
+func TestPlatformSkillService_List_OK(t *testing.T) {
+	store := newFakePlatformSkillStore()
+	svc := NewPlatformSkillService(store, &fakeLibraryBlob{})
+	_, err := svc.Upload(context.Background(), psvcPlatformPrincipal(), PlatformSkillUploadInput{Name: "a", Version: "1", Data: []byte("x")})
+	require.NoError(t, err)
+	_, err = svc.Upload(context.Background(), psvcPlatformPrincipal(), PlatformSkillUploadInput{Name: "b", Version: "1", Data: []byte("y")})
+	require.NoError(t, err)
+
+	out, err := svc.List(context.Background(), psvcPlatformPrincipal())
+	require.NoError(t, err)
+	assert.Len(t, out, 2)
+}
+
+// List 非平台管理员被拒。
+func TestPlatformSkillService_List_Denied(t *testing.T) {
+	svc := NewPlatformSkillService(newFakePlatformSkillStore(), &fakeLibraryBlob{})
+	_, err := svc.List(context.Background(), psvcOrgMemberPrincipal())
+	require.ErrorIs(t, err, ErrPlatformSkillDenied)
+}
