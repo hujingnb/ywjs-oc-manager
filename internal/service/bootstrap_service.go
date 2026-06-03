@@ -297,8 +297,8 @@ func (s *BootstrapService) Build(ctx context.Context, app sqlc.App) (BootstrapRe
 type skillEntry struct {
 	// Name 是 skill 名，用于 manifest 路径与预签名 URL 日志。
 	Name string `json:"name"`
-	// FilePath 是 S3 对象 key（迁移后语义，与 storage.SkillKey 输出格式一致）。
-	FilePath string `json:"file_path"`
+	// CachedPath 是 S3 对象 key（P4-T1 由 file_path 改名为 cached_path，与 AssistantVersionSkill 字段对齐）。
+	CachedPath string `json:"cached_path"`
 }
 
 // presignSkills 解析 version.SkillsJson，为每个 skill 生成预签名下载 URL 与 manifest 相对路径。
@@ -315,8 +315,8 @@ func (s *BootstrapService) presignSkills(ctx context.Context, version sqlc.Assis
 	var out []BootstrapSkill
 	var relPaths []string
 	for _, e := range entries {
-		// FilePath 字段存储 S3 key，直接用于预签名；pod 按 RelPath 写入 emptyDir。
-		url, err := s.skills.PresignSkill(ctx, e.FilePath, s.cfg.PresignTTL)
+		// CachedPath 字段存储 S3 key，直接用于预签名；pod 按 RelPath 写入 emptyDir。
+		url, err := s.skills.PresignSkill(ctx, e.CachedPath, s.cfg.PresignTTL)
 		if err != nil {
 			return nil, nil, fmt.Errorf("预签名 skill %s 失败: %w", e.Name, err)
 		}
