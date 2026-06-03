@@ -1415,6 +1415,21 @@ components:
         usage_available:
           type: boolean
       type: object
+    service.PlatformSkillResult:
+      properties:
+        description:
+          type: string
+        file_sha256:
+          type: string
+        file_size:
+          type: integer
+        id:
+          type: string
+        name:
+          type: string
+        version:
+          type: string
+      type: object
     service.ProgressResult:
       properties:
         bound_identity:
@@ -6455,6 +6470,110 @@ paths:
       summary: 企业充值历史列表
       tags:
       - recharge
+  /platform-skills:
+    get:
+      responses:
+        "200":
+          content:
+            application/json:
+              schema:
+                additionalProperties:
+                  items:
+                    $ref: '#/components/schemas/service.PlatformSkillResult'
+                  type: array
+                type: object
+          description: OK
+        "403":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/handlers.ErrorResponse'
+          description: Forbidden
+      security:
+      - BearerAuth: []
+      summary: 列出平台库 skill
+      tags:
+      - platform-skills
+    post:
+      requestBody:
+        content:
+          application/x-www-form-urlencoded:
+            schema:
+              oneOf:
+              - title: name
+                type: string
+              - title: version
+                type: string
+              - title: description
+                type: string
+              - title: file
+                type: file
+          multipart/form-data:
+            schema:
+              type: object
+        description: skill 名 | 版本 | 描述 | skill tar 归档
+        required: true
+      responses:
+        "201":
+          content:
+            application/json:
+              schema:
+                additionalProperties:
+                  $ref: '#/components/schemas/service.PlatformSkillResult'
+                type: object
+          description: Created
+        "400":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/handlers.ErrorResponse'
+          description: Bad Request
+        "403":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/handlers.ErrorResponse'
+          description: Forbidden
+        "409":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/handlers.ErrorResponse'
+          description: Conflict
+      security:
+      - BearerAuth: []
+      summary: 上传平台库 skill
+      tags:
+      - platform-skills
+  /platform-skills/{id}:
+    delete:
+      parameters:
+      - description: skill id
+        in: path
+        name: id
+        required: true
+        schema:
+          type: string
+      responses:
+        "204":
+          description: No Content
+        "403":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/handlers.ErrorResponse'
+          description: Forbidden
+        "404":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/handlers.ErrorResponse'
+          description: Not Found
+      security:
+      - BearerAuth: []
+      summary: 删除平台库 skill
+      tags:
+      - platform-skills
   /platform/overview:
     get:
       description: 平台管理员查询全平台的企业、成员、应用数量汇总
