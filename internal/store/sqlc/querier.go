@@ -47,6 +47,7 @@ type Querier interface {
 	CreateChannelBinding(ctx context.Context, arg CreateChannelBindingParams) error
 	CreateJob(ctx context.Context, arg CreateJobParams) error
 	CreateOrganization(ctx context.Context, arg CreateOrganizationParams) error
+	CreatePlatformSkill(ctx context.Context, arg CreatePlatformSkillParams) error
 	// 懒创建实例级 dataset 映射；并发首创命中唯一索引时忽略，由 service 读取已有映射且不重复创建远端 dataset。
 	CreateRAGFlowAppDatasetMapping(ctx context.Context, arg CreateRAGFlowAppDatasetMappingParams) error
 	// 缓存 RAGFlow document 元数据，manager 不保存文件主副本。
@@ -57,6 +58,7 @@ type Querier interface {
 	CreateRefreshToken(ctx context.Context, arg CreateRefreshTokenParams) error
 	CreateUser(ctx context.Context, arg CreateUserParams) error
 	DeleteExpiredRefreshTokens(ctx context.Context) error
+	DeletePlatformSkill(ctx context.Context, id string) error
 	// 删除本地 dataset 映射；document 缓存通过外键级联清理。
 	DeleteRAGFlowDatasetMapping(ctx context.Context, id string) error
 	// 删除本地 document 缓存；RAGFlow 远端删除由 service 在同一业务流程中处理。
@@ -84,6 +86,8 @@ type Querier interface {
 	GetOrganizationByName(ctx context.Context, name string) (Organization, error)
 	// OOS-2 access_token 自愈用：以行锁查询组织，避免并发更新密文时出现写丢失。
 	GetOrganizationForUpdate(ctx context.Context, id string) (Organization, error)
+	GetPlatformSkill(ctx context.Context, id string) (PlatformSkill, error)
+	GetPlatformSkillByNameVersion(ctx context.Context, arg GetPlatformSkillByNameVersionParams) (PlatformSkill, error)
 	// 读取实例知识库 dataset 映射，runtime 写入只能落到该 dataset。
 	GetRAGFlowAppDataset(ctx context.Context, appID null.String) (RagflowDataset, error)
 	// 按 ID 读取 dataset 记录，供 ClaimRAGFlowDatasetCreation 后的读回。
@@ -122,6 +126,7 @@ type Querier interface {
 	// 此查询补上「init 失败成 error 后无法自愈」的洞。
 	ListErrorApps(ctx context.Context) ([]string, error)
 	ListOrganizations(ctx context.Context, arg ListOrganizationsParams) ([]Organization, error)
+	ListPlatformSkills(ctx context.Context) ([]PlatformSkill, error)
 	// 扁平列出某个组织或实例知识库文件，支持按状态和文件名过滤。
 	ListRAGFlowDocumentsByScope(ctx context.Context, arg ListRAGFlowDocumentsByScopeParams) ([]RagflowDocument, error)
 	// 找出需要刷新解析状态的 document，按最久未更新优先；

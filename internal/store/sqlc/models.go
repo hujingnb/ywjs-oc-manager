@@ -45,6 +45,38 @@ type App struct {
 	KnowledgeQuotaBytes    int64           `db:"knowledge_quota_bytes" json:"knowledge_quota_bytes"`
 }
 
+// 实例级 skill 安装清单，自包含快照，运行时唯一来源
+type AppSkill struct {
+	// 主键 UUID
+	ID string `db:"id" json:"id"`
+	// 所属实例 app id
+	AppID string `db:"app_id" json:"app_id"`
+	// 解压目录名，实例内唯一，去重键
+	Name string `db:"name" json:"name"`
+	// 来源：platform | clawhub
+	Source string `db:"source" json:"source"`
+	// 来源内精准标识：platform=name、clawhub=slug，回源查更新用
+	SourceRef string `db:"source_ref" json:"source_ref"`
+	// 锁定的当前安装版本
+	Version string `db:"version" json:"version"`
+	// 定时任务回源所得最高版本，大于 version 即有更新
+	LatestVersion null.String `db:"latest_version" json:"latest_version"`
+	// 对象存储缓存路径，恢复走它（确定性 + 抗下架）
+	CachedTarPath string `db:"cached_tar_path" json:"cached_tar_path"`
+	// 安装时来源完整元数据快照，后台展示用（抗下架）
+	SourceMetadata json.RawMessage `db:"source_metadata" json:"source_metadata"`
+	// 归档字节大小
+	FileSize int64 `db:"file_size" json:"file_size"`
+	// 归档内容 SHA256
+	FileSha256 string `db:"file_sha256" json:"file_sha256"`
+	// 安装者 user id
+	InstalledBy null.String `db:"installed_by" json:"installed_by"`
+	// 安装时间
+	InstalledAt time.Time `db:"installed_at" json:"installed_at"`
+	// 定时任务上次回源检查时间
+	LastCheckedAt null.Time `db:"last_checked_at" json:"last_checked_at"`
+}
+
 type AssistantVersion struct {
 	ID            string          `db:"id" json:"id"`
 	Name          string          `db:"name" json:"name"`
@@ -134,6 +166,30 @@ type Organization struct {
 	DeletedAt           null.Time       `db:"deleted_at" json:"deleted_at"`
 	MaxInstanceCount    null.Int        `db:"max_instance_count" json:"max_instance_count"`
 	KnowledgeQuotaBytes int64           `db:"knowledge_quota_bytes" json:"knowledge_quota_bytes"`
+}
+
+// 平台库 skill，平台管理员维护，多版本共存
+type PlatformSkill struct {
+	// 主键 UUID
+	ID string `db:"id" json:"id"`
+	// skill 名，等于容器内解压目录名
+	Name string `db:"name" json:"name"`
+	// skill 描述，市场展示用
+	Description string `db:"description" json:"description"`
+	// 语义版本号
+	Version string `db:"version" json:"version"`
+	// 对象存储相对路径 library/platform/<name>/<version>.tar
+	TarPath string `db:"tar_path" json:"tar_path"`
+	// tar 字节大小
+	FileSize int64 `db:"file_size" json:"file_size"`
+	// tar 内容 SHA256，完整性校验
+	FileSha256 string `db:"file_sha256" json:"file_sha256"`
+	// 附加元数据（作者、标签等）
+	MetadataJson json.RawMessage `db:"metadata_json" json:"metadata_json"`
+	// 上传者 user id（平台管理员）
+	UploadedBy null.String `db:"uploaded_by" json:"uploaded_by"`
+	// 创建时间
+	CreatedAt time.Time `db:"created_at" json:"created_at"`
 }
 
 type RagflowDataset struct {
