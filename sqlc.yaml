@@ -7,6 +7,7 @@ sql:
       - internal/migrations/000003_drop_node_concept.up.sql
       - internal/migrations/000004_org_max_instance_count.up.sql
       - internal/migrations/000005_knowledge_quota.up.sql
+      - internal/migrations/000006_skill_library.up.sql
     queries: internal/store/queries
     gen:
       go:
