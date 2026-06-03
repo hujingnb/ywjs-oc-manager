@@ -226,6 +226,26 @@ components:
           example: 应用不存在
           type: string
       type: object
+    handlers.InstallAppSkillRequest:
+      properties:
+        name:
+          description: Name 是 skill 在实例内的目录名（唯一键），不同 app 间可重名。
+          type: string
+        source:
+          description: Source 是 skill 来源类型：platform（平台库）或 clawhub（ClawHub 市场）。
+          type: string
+        source_ref:
+          description: SourceRef 是来源内精准标识：platform=name，clawhub=slug。
+          type: string
+        version:
+          description: Version 是要安装的版本号，由来源方定义（如 semver 或日期戳）。
+          type: string
+      required:
+      - name
+      - source
+      - source_ref
+      - version
+      type: object
     handlers.JobView:
       properties:
         attempts:
@@ -425,6 +445,14 @@ components:
           type: integer
       required:
       - quota_bytes
+      type: object
+    handlers.UpdateAppSkillRequest:
+      properties:
+        version:
+          description: Version 是目标版本号，必须与 source 端已发布的版本对应。
+          type: string
+      required:
+      - version
       type: object
     handlers.UpdateAssistantVersionRequest:
       properties:
@@ -1013,6 +1041,28 @@ components:
             VersionSynced 标记实例运行时是否已与绑定版本对齐（修订 + 镜像都一致）；
             false 表示版本被编辑过，需重启实例生效。
           type: boolean
+      type: object
+    service.AppSkillResult:
+      properties:
+        category:
+          type: string
+        latest_version:
+          description: Latest 非空时表示有更新版本（大于 Version），前端可展示更新提示。
+          type: string
+        name:
+          type: string
+        protected:
+          description: Protected 为 true 时表示该 skill 是当前助手版本必需的，不可删除。
+          type: boolean
+        source:
+          type: string
+        source_ref:
+          type: string
+        status:
+          description: Status 对账状态：active | pending | builtin | self_created | unknown
+          type: string
+        version:
+          type: string
       type: object
     service.AssistantVersionResult:
       properties:
@@ -4016,6 +4066,227 @@ paths:
       summary: 停止应用容器
       tags:
       - runtime-operations
+  /apps/{appId}/skills:
+    get:
+      description: 返回指定实例的 skill 列表，每条包含 name/source/version/status/protected 等字段
+      parameters:
+      - description: 实例 ID
+        in: path
+        name: appId
+        required: true
+        schema:
+          type: string
+      responses:
+        "200":
+          content:
+            application/json:
+              schema:
+                items:
+                  $ref: '#/components/schemas/service.AppSkillResult'
+                type: array
+          description: OK
+        "401":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/handlers.ErrorResponse'
+          description: Unauthorized
+        "403":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/handlers.ErrorResponse'
+          description: Forbidden
+        "500":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/handlers.ErrorResponse'
+          description: Internal Server Error
+      security:
+      - BearerAuth: []
+      summary: 列出实例 skill
+      tags:
+      - app-skills
+    post:
+      description: 从指定来源（platform / clawhub）安装 skill 到实例；成功返回 201 及安装结果
+      parameters:
+      - description: 实例 ID
+        in: path
+        name: appId
+        required: true
+        schema:
+          type: string
+      requestBody:
+        content:
+          application/json:
+            schema:
+              oneOf:
+              - type: object
+              - $ref: '#/components/schemas/handlers.InstallAppSkillRequest'
+                description: 安装参数
+                summary: body
+        description: 安装参数
+        required: true
+      responses:
+        "201":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/service.AppSkillResult'
+          description: Created
+        "400":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/handlers.ErrorResponse'
+          description: Bad Request
+        "401":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/handlers.ErrorResponse'
+          description: Unauthorized
+        "403":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/handlers.ErrorResponse'
+          description: Forbidden
+        "409":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/handlers.ErrorResponse'
+          description: Conflict
+        "500":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/handlers.ErrorResponse'
+          description: Internal Server Error
+      security:
+      - BearerAuth: []
+      summary: 安装实例 skill
+      tags:
+      - app-skills
+  /apps/{appId}/skills/{skillName}:
+    delete:
+      description: 按 skillName 卸载实例 skill；受版本保护的 skill 返回 403
+      parameters:
+      - description: 实例 ID
+        in: path
+        name: appId
+        required: true
+        schema:
+          type: string
+      - description: skill 目录名
+        in: path
+        name: skillName
+        required: true
+        schema:
+          type: string
+      responses:
+        "204":
+          description: 卸载成功，无响应体
+        "401":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/handlers.ErrorResponse'
+          description: Unauthorized
+        "403":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/handlers.ErrorResponse'
+          description: Forbidden
+        "404":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/handlers.ErrorResponse'
+          description: Not Found
+        "500":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/handlers.ErrorResponse'
+          description: Internal Server Error
+      security:
+      - BearerAuth: []
+      summary: 卸载实例 skill
+      tags:
+      - app-skills
+  /apps/{appId}/skills/{skillName}/update:
+    post:
+      description: 按 skillName 将已安装的 skill 更新到指定版本；成功返回 200 及更新后的结果
+      parameters:
+      - description: 实例 ID
+        in: path
+        name: appId
+        required: true
+        schema:
+          type: string
+      - description: skill 目录名
+        in: path
+        name: skillName
+        required: true
+        schema:
+          type: string
+      requestBody:
+        content:
+          application/json:
+            schema:
+              oneOf:
+              - type: object
+              - $ref: '#/components/schemas/handlers.UpdateAppSkillRequest'
+                description: 目标版本
+                summary: body
+        description: 目标版本
+        required: true
+      responses:
+        "200":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/service.AppSkillResult'
+          description: OK
+        "400":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/handlers.ErrorResponse'
+          description: Bad Request
+        "401":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/handlers.ErrorResponse'
+          description: Unauthorized
+        "403":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/handlers.ErrorResponse'
+          description: Forbidden
+        "404":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/handlers.ErrorResponse'
+          description: Not Found
+        "500":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/handlers.ErrorResponse'
+          description: Internal Server Error
+      security:
+      - BearerAuth: []
+      summary: 更新实例 skill 版本
+      tags:
+      - app-skills
   /apps/{appId}/usage:
     get:
       description: 返回指定应用的 token 调用日志（LogsPage 格式）；需同时提供 owner_org_id 和 owner_user_id

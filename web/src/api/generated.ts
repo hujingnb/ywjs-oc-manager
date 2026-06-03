@@ -3537,6 +3537,323 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/apps/{appId}/skills": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * 列出实例 skill
+         * @description 返回指定实例的 skill 列表，每条包含 name/source/version/status/protected 等字段
+         */
+        get: {
+            parameters: {
+                query?: never;
+                header?: never;
+                path: {
+                    /** @description 实例 ID */
+                    appId: string;
+                };
+                cookie?: never;
+            };
+            requestBody?: never;
+            responses: {
+                /** @description OK */
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["service.AppSkillResult"][];
+                    };
+                };
+                /** @description Unauthorized */
+                401: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["handlers.ErrorResponse"];
+                    };
+                };
+                /** @description Forbidden */
+                403: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["handlers.ErrorResponse"];
+                    };
+                };
+                /** @description Internal Server Error */
+                500: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["handlers.ErrorResponse"];
+                    };
+                };
+            };
+        };
+        put?: never;
+        /**
+         * 安装实例 skill
+         * @description 从指定来源（platform / clawhub）安装 skill 到实例；成功返回 201 及安装结果
+         */
+        post: {
+            parameters: {
+                query?: never;
+                header?: never;
+                path: {
+                    /** @description 实例 ID */
+                    appId: string;
+                };
+                cookie?: never;
+            };
+            /** @description 安装参数 */
+            requestBody: {
+                content: {
+                    "application/json": Record<string, never> | components["schemas"]["handlers.InstallAppSkillRequest"];
+                };
+            };
+            responses: {
+                /** @description Created */
+                201: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["service.AppSkillResult"];
+                    };
+                };
+                /** @description Bad Request */
+                400: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["handlers.ErrorResponse"];
+                    };
+                };
+                /** @description Unauthorized */
+                401: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["handlers.ErrorResponse"];
+                    };
+                };
+                /** @description Forbidden */
+                403: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["handlers.ErrorResponse"];
+                    };
+                };
+                /** @description Conflict */
+                409: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["handlers.ErrorResponse"];
+                    };
+                };
+                /** @description Internal Server Error */
+                500: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["handlers.ErrorResponse"];
+                    };
+                };
+            };
+        };
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/apps/{appId}/skills/{skillName}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        post?: never;
+        /**
+         * 卸载实例 skill
+         * @description 按 skillName 卸载实例 skill；受版本保护的 skill 返回 403
+         */
+        delete: {
+            parameters: {
+                query?: never;
+                header?: never;
+                path: {
+                    /** @description 实例 ID */
+                    appId: string;
+                    /** @description skill 目录名 */
+                    skillName: string;
+                };
+                cookie?: never;
+            };
+            requestBody?: never;
+            responses: {
+                /** @description 卸载成功，无响应体 */
+                204: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content?: never;
+                };
+                /** @description Unauthorized */
+                401: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["handlers.ErrorResponse"];
+                    };
+                };
+                /** @description Forbidden */
+                403: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["handlers.ErrorResponse"];
+                    };
+                };
+                /** @description Not Found */
+                404: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["handlers.ErrorResponse"];
+                    };
+                };
+                /** @description Internal Server Error */
+                500: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["handlers.ErrorResponse"];
+                    };
+                };
+            };
+        };
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/apps/{appId}/skills/{skillName}/update": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * 更新实例 skill 版本
+         * @description 按 skillName 将已安装的 skill 更新到指定版本；成功返回 200 及更新后的结果
+         */
+        post: {
+            parameters: {
+                query?: never;
+                header?: never;
+                path: {
+                    /** @description 实例 ID */
+                    appId: string;
+                    /** @description skill 目录名 */
+                    skillName: string;
+                };
+                cookie?: never;
+            };
+            /** @description 目标版本 */
+            requestBody: {
+                content: {
+                    "application/json": Record<string, never> | components["schemas"]["handlers.UpdateAppSkillRequest"];
+                };
+            };
+            responses: {
+                /** @description OK */
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["service.AppSkillResult"];
+                    };
+                };
+                /** @description Bad Request */
+                400: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["handlers.ErrorResponse"];
+                    };
+                };
+                /** @description Unauthorized */
+                401: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["handlers.ErrorResponse"];
+                    };
+                };
+                /** @description Forbidden */
+                403: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["handlers.ErrorResponse"];
+                    };
+                };
+                /** @description Not Found */
+                404: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["handlers.ErrorResponse"];
+                    };
+                };
+                /** @description Internal Server Error */
+                500: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["handlers.ErrorResponse"];
+                    };
+                };
+            };
+        };
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/apps/{appId}/usage": {
         parameters: {
             query?: never;
@@ -8108,6 +8425,16 @@ export interface components {
              */
             message?: string;
         };
+        "handlers.InstallAppSkillRequest": {
+            /** @description Name 是 skill 在实例内的目录名（唯一键），不同 app 间可重名。 */
+            name: string;
+            /** @description Source 是 skill 来源类型：platform（平台库）或 clawhub（ClawHub 市场）。 */
+            source: string;
+            /** @description SourceRef 是来源内精准标识：platform=name，clawhub=slug。 */
+            source_ref: string;
+            /** @description Version 是要安装的版本号，由来源方定义（如 semver 或日期戳）。 */
+            version: string;
+        };
         "handlers.JobView": {
             attempts?: number;
             created_at?: string;
@@ -8216,6 +8543,10 @@ export interface components {
         "handlers.UpdateAppKnowledgeQuotaRequest": {
             /** @description QuotaBytes 是实例知识库累计容量上限，单位字节，必须大于 0。 */
             quota_bytes: number;
+        };
+        "handlers.UpdateAppSkillRequest": {
+            /** @description Version 是目标版本号，必须与 source 端已发布的版本对应。 */
+            version: string;
         };
         "handlers.UpdateAssistantVersionRequest": {
             description?: string;
@@ -8597,6 +8928,19 @@ export interface components {
              *     false 表示版本被编辑过，需重启实例生效。
              */
             version_synced?: boolean;
+        };
+        "service.AppSkillResult": {
+            category?: string;
+            /** @description Latest 非空时表示有更新版本（大于 Version），前端可展示更新提示。 */
+            latest_version?: string;
+            name?: string;
+            /** @description Protected 为 true 时表示该 skill 是当前助手版本必需的，不可删除。 */
+            protected?: boolean;
+            source?: string;
+            source_ref?: string;
+            /** @description Status 对账状态：active | pending | builtin | self_created | unknown */
+            status?: string;
+            version?: string;
         };
         "service.AssistantVersionResult": {
             description?: string;
