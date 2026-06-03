@@ -4616,7 +4616,7 @@ export interface paths {
         };
         get?: never;
         put?: never;
-        /** 上传版本 skill */
+        /** 从库选 skill 配进版本 */
         post: {
             parameters: {
                 query?: never;
@@ -4627,11 +4627,10 @@ export interface paths {
                 };
                 cookie?: never;
             };
-            /** @description skill tar 包 */
+            /** @description 库选 skill 入参 */
             requestBody: {
                 content: {
-                    "application/x-www-form-urlencoded": Record<string, never>;
-                    "multipart/form-data": Record<string, never>;
+                    "application/json": Record<string, never> | components["schemas"]["handlers.AddSkillFromLibraryRequest"];
                 };
             };
             responses: {
@@ -4655,8 +4654,26 @@ export interface paths {
                         "application/json": components["schemas"]["handlers.ErrorResponse"];
                     };
                 };
-                /** @description Request Entity Too Large */
-                413: {
+                /** @description Forbidden */
+                403: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["handlers.ErrorResponse"];
+                    };
+                };
+                /** @description Not Found */
+                404: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["handlers.ErrorResponse"];
+                    };
+                };
+                /** @description Conflict */
+                409: {
                     headers: {
                         [name: string]: unknown;
                     };
@@ -8359,6 +8376,14 @@ export interface paths {
 export type webhooks = Record<string, never>;
 export interface components {
     schemas: {
+        "handlers.AddSkillFromLibraryRequest": {
+            /** @description Source 是 skill 来源类型，首版仅接受 "platform"。 */
+            source: string;
+            /** @description SourceRef 是来源内精准标识；platform 来源时等于 skill name。 */
+            source_ref: string;
+            /** @description Version 是要配进版本的 skill 版本号，必须与平台库中已发布的版本对应。 */
+            version: string;
+        };
         "handlers.AssistantVersionRoutingDTO": {
             approval?: string;
             compression?: string;
@@ -9019,10 +9044,20 @@ export interface components {
             system_prompt?: string;
         };
         "service.AssistantVersionSkill": {
-            file_path?: string;
+            /** @description CachedPath 是对象存储中归档的相对路径，如 library/platform/<name>/<version>.tar。 */
+            cached_path?: string;
+            /** @description FileSha256 是归档内容的 sha256，供完整性校验。 */
             file_sha256?: string;
+            /** @description FileSize 是归档字节大小，供下载前预估流量。 */
             file_size?: number;
+            /** @description Name 是 skill 在版本内的唯一目录名。 */
             name?: string;
+            /** @description Source 是 skill 来源类型，当前仅 "platform"。 */
+            source?: string;
+            /** @description SourceRef 是来源内精准标识；platform 来源时等于 skill name。 */
+            source_ref?: string;
+            /** @description Version 是 skill 版本号，由来源方定义。 */
+            version?: string;
         };
         "service.AuditResult": {
             action?: string;

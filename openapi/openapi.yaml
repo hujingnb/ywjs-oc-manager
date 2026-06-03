@@ -1,5 +1,21 @@
 components:
   schemas:
+    handlers.AddSkillFromLibraryRequest:
+      properties:
+        source:
+          description: Source 是 skill 来源类型，首版仅接受 "platform"。
+          type: string
+        source_ref:
+          description: SourceRef 是来源内精准标识；platform 来源时等于 skill name。
+          type: string
+        version:
+          description: Version 是要配进版本的 skill 版本号，必须与平台库中已发布的版本对应。
+          type: string
+      required:
+      - source
+      - source_ref
+      - version
+      type: object
     handlers.AssistantVersionRoutingDTO:
       properties:
         approval:
@@ -1092,13 +1108,26 @@ components:
       type: object
     service.AssistantVersionSkill:
       properties:
-        file_path:
+        cached_path:
+          description: CachedPath 是对象存储中归档的相对路径，如 library/platform/<name>/<version>.tar。
           type: string
         file_sha256:
+          description: FileSha256 是归档内容的 sha256，供完整性校验。
           type: string
         file_size:
+          description: FileSize 是归档字节大小，供下载前预估流量。
           type: integer
         name:
+          description: Name 是 skill 在版本内的唯一目录名。
+          type: string
+        source:
+          description: Source 是 skill 来源类型，当前仅 "platform"。
+          type: string
+        source_ref:
+          description: SourceRef 是来源内精准标识；platform 来源时等于 skill name。
+          type: string
+        version:
+          description: Version 是 skill 版本号，由来源方定义。
           type: string
       type: object
     service.AuditResult:
@@ -4864,14 +4893,14 @@ paths:
           type: string
       requestBody:
         content:
-          application/x-www-form-urlencoded:
+          application/json:
             schema:
-              title: file
-              type: file
-          multipart/form-data:
-            schema:
-              type: object
-        description: skill tar 包
+              oneOf:
+              - type: object
+              - $ref: '#/components/schemas/handlers.AddSkillFromLibraryRequest'
+                description: 库选 skill 入参
+                summary: body
+        description: 库选 skill 入参
         required: true
       responses:
         "200":
@@ -4888,15 +4917,27 @@ paths:
               schema:
                 $ref: '#/components/schemas/handlers.ErrorResponse'
           description: Bad Request
-        "413":
+        "403":
           content:
             application/json:
               schema:
                 $ref: '#/components/schemas/handlers.ErrorResponse'
-          description: Request Entity Too Large
+          description: Forbidden
+        "404":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/handlers.ErrorResponse'
+          description: Not Found
+        "409":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/handlers.ErrorResponse'
+          description: Conflict
       security:
       - BearerAuth: []
-      summary: 上传版本 skill
+      summary: 从库选 skill 配进版本
       tags:
       - assistant-versions
   /assistant-versions/{id}/skills/{skill}:
