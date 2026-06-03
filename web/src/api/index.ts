@@ -113,5 +113,15 @@ export type LogsPage = RawLogsPage & { items: LogEntry[] }
 // QuotaSeries 是 org / platform 维度用量查询的响应类型（items 为 QuotaDate 数组）。
 export type QuotaSeries = RawQuotaSeries & { items: QuotaDate[] }
 
+// ===== Skill 相关 =====
+// PlatformSkill：平台库 skill，id/name/version 必须存在（删除/更新依赖 id，列表展示依赖 name/version）。
+export type PlatformSkill = WithRequired<Schemas['service.PlatformSkillResult'], 'id' | 'name' | 'version'>
+
+// AppSkill：实例已安装 skill，name/status 必须存在（唯一键为 name，对账状态为 status）。
+export type AppSkill = WithRequired<Schemas['service.AppSkillResult'], 'name' | 'status'>
+
+// SkillEntry：市场条目，source/source_ref/name 必须存在（安装时三字段全部必传）。
+export type SkillEntry = WithRequired<Schemas['service.SkillEntry'], 'source' | 'source_ref' | 'name'>
+
 // 重导出 generated.ts（hook 直接用 paths 类型时引用）
 export type { paths, components } from './generated'
