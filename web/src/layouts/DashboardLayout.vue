@@ -36,6 +36,17 @@
           v-if="auth.user"
           size="small"
           quaternary
+          class="password-button"
+          style="width: 100%; justify-content: flex-start"
+          @click="openPasswordModal"
+        >
+          <template #icon><KeyRound :size="15" /></template>
+          修改密码
+        </n-button>
+        <n-button
+          v-if="auth.user"
+          size="small"
+          quaternary
           class="logout-button"
           style="width: 100%; justify-content: flex-start"
           @click="onLogout"
@@ -74,7 +85,53 @@
       </n-layout-content>
     </n-layout>
 
-    <!-- 使用手册抽屉：内容随当前登录角色切换，由 helpOpen 控制显隐 -->
+    <n-modal
+      :show="passwordModalOpen"
+      preset="card"
+      title="修改密码"
+      class="password-modal"
+      data-test="password-modal"
+      :style="{ width: '420px', maxWidth: 'calc(100vw - 32px)' }"
+      :mask-closable="!passwordChanging"
+      :closable="!passwordChanging"
+      @update:show="onPasswordModalShowUpdate"
+    >
+      <n-form data-test="password-form" :model="passwordForm" @submit.prevent="onChangePassword">
+        <n-form-item label="当前密码">
+          <n-input
+            v-model:value="passwordForm.oldPassword"
+            type="password"
+            autocomplete="current-password"
+            placeholder="请输入当前密码"
+          />
+        </n-form-item>
+        <n-form-item label="新密码">
+          <n-input
+            v-model:value="passwordForm.newPassword"
+            type="password"
+            autocomplete="new-password"
+            placeholder="至少 8 位"
+          />
+        </n-form-item>
+        <n-form-item label="确认新密码">
+          <n-input
+            v-model:value="passwordForm.confirmPassword"
+            type="password"
+            autocomplete="new-password"
+            placeholder="再次输入新密码"
+          />
+        </n-form-item>
+        <n-alert v-if="passwordError" type="error" :bordered="false" style="margin-bottom: 12px">
+          {{ passwordError }}
+        </n-alert>
+        <n-space justify="end">
+          <n-button attr-type="button" :disabled="passwordChanging" @click="closePasswordModal">取消</n-button>
+          <n-button type="primary" attr-type="submit" :loading="passwordChanging">确认修改</n-button>
+        </n-space>
+      </n-form>
+    </n-modal>
+
+    <!-- 使用手册抽屉：内容随当前登录角色切换，由 helpOpen 控制显隐。 -->
     <HelpDrawer v-model:show="helpOpen" :role="auth.user?.role" />
   </n-layout>
 </template>
@@ -83,12 +140,13 @@
 import { computed, h, ref } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import {
-  NButton, NLayout, NLayoutContent, NLayoutHeader, NLayoutSider, NMenu, NTag,
+  NAlert, NButton, NForm, NFormItem, NInput, NLayout, NLayoutContent, NLayoutHeader, NLayoutSider, NMenu, NModal,
+  NSpace, NTag,
   type MenuOption,
 } from 'naive-ui'
 import {
   BarChart3, BookOpen, Bot, Boxes, Building2, CalendarClock, FileSearch,
-  FolderOpen, Gauge, LayoutDashboard, ListChecks, LogOut, Radio, RefreshCw,
+  FolderOpen, Gauge, KeyRound, LayoutDashboard, ListChecks, LogOut, Radio, RefreshCw,
   ShieldCheck, Users, Wallet,
 } from 'lucide-vue-next'
 
@@ -104,6 +162,11 @@ const router = useRouter()
 
 // helpOpen 控制右上角「使用手册」抽屉的显隐；抽屉内容由 HelpDrawer 按当前角色渲染。
 const helpOpen = ref(false)
+// 改密弹窗的密码字段只保存在组件内存中；打开和关闭都会清空，避免密码残留在布局状态里。
+const passwordModalOpen = ref(false)
+const passwordChanging = ref(false)
+const passwordError = ref('')
+const passwordForm = ref({ oldPassword: '', newPassword: '', confirmPassword: '' })
 
 const environmentLabel = computed(() => {
   if (!auth.user) return '本地调试环境'
@@ -221,6 +284,66 @@ async function onLogout() {
   await router.replace('/login')
 }
 
+// resetPasswordForm 只重置内存中的表单字段和错误提示，不触碰 auth store，避免把密码写入共享状态。
+function resetPasswordForm() {
+  passwordForm.value = { oldPassword: '', newPassword: '', confirmPassword: '' }
+  passwordError.value = ''
+}
+
+// openPasswordModal 每次打开前都清空旧输入，防止用户上一次未提交的密码仍显示在弹窗内。
+function openPasswordModal() {
+  resetPasswordForm()
+  passwordModalOpen.value = true
+}
+
+// closePasswordModal 在非提交中关闭并清空密码；提交期间禁止关闭，避免请求中途被打断后状态不一致。
+function closePasswordModal() {
+  if (passwordChanging.value) return
+  passwordModalOpen.value = false
+  resetPasswordForm()
+}
+
+// onPasswordModalShowUpdate 统一处理遮罩和右上角关闭事件，保证关闭路径都会清理密码字段。
+function onPasswordModalShowUpdate(show: boolean) {
+  if (show) {
+    passwordModalOpen.value = true
+    return
+  }
+  closePasswordModal()
+}
+
+// validatePasswordForm 做提交前的本地校验，减少无效请求并给用户明确的中文错误原因。
+function validatePasswordForm() {
+  const { oldPassword, newPassword, confirmPassword } = passwordForm.value
+  if (!oldPassword || !newPassword || !confirmPassword) return '请填写当前密码、新密码和确认新密码'
+  if (newPassword.length < 8) return '新密码至少 8 位'
+  if (newPassword === oldPassword) return '新密码不能与当前密码相同'
+  if (newPassword !== confirmPassword) return '两次输入的新密码不一致'
+  return null
+}
+
+// onChangePassword 只调用 auth store 暴露的改密动作；成功后 store 会清理登录态，这里负责跳回登录页。
+async function onChangePassword() {
+  const validationError = validatePasswordForm()
+  if (validationError) {
+    passwordError.value = validationError
+    return
+  }
+  const { oldPassword, newPassword } = passwordForm.value
+  passwordChanging.value = true
+  passwordError.value = ''
+  try {
+    await auth.changePassword(oldPassword, newPassword)
+    passwordModalOpen.value = false
+    resetPasswordForm()
+    await router.replace('/login')
+  } catch (err) {
+    passwordError.value = err instanceof Error && err.message ? err.message : '修改密码失败'
+  } finally {
+    passwordChanging.value = false
+  }
+}
+
 // reload 用于调试环境快速刷新当前后台状态。
 function reload() {
   window.location.reload()
@@ -260,11 +383,13 @@ function reload() {
   background: var(--color-surface);
 }
 
-.logout-button {
+.logout-button,
+.password-button {
   color: var(--color-text-secondary);
 }
 
-.logout-button:hover {
+.logout-button:hover,
+.password-button:hover {
   color: var(--color-brand-text);
 }
 

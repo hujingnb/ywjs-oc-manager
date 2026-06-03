@@ -1,4 +1,5 @@
-import { mount } from '@vue/test-utils'
+import { flushPromises, mount } from '@vue/test-utils'
+import { defineComponent, h } from 'vue'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 import { NLayoutContent } from 'naive-ui'
 
@@ -8,12 +9,14 @@ const routerPush = vi.hoisted(() => vi.fn())
 const routerReplace = vi.hoisted(() => vi.fn())
 const routeState = vi.hoisted(() => ({ path: '/runtime-nodes' }))
 const logout = vi.hoisted(() => vi.fn())
+const changePassword = vi.hoisted(() => vi.fn())
 const authState = vi.hoisted(() => ({
   user: { id: 'admin-1', username: 'admin', display_name: 'admin', role: 'platform_admin', org_id: 'org-1' },
   isPlatformAdmin: true,
   isOrgAdmin: false,
   isOrgMember: false,
   logout,
+  changePassword,
 }))
 const memberAppState = vi.hoisted(() => ({
   appId: { value: undefined as string | undefined },
@@ -59,15 +62,102 @@ const MenuStub = {
   `,
 }
 
+const ButtonStub = defineComponent({
+  props: ['disabled', 'loading'],
+  emits: ['click'],
+  setup(props, { slots, emit }) {
+    return () => h('button', {
+      disabled: props.disabled || props.loading,
+      onClick: () => emit('click'),
+    }, [slots.icon?.(), slots.default?.()])
+  },
+})
+
+const ModalStub = defineComponent({
+  inheritAttrs: false,
+  props: ['show'],
+  setup(props, { attrs, slots }) {
+    return () => props.show
+      ? h('section', { ...attrs, 'data-show': String(props.show) }, slots.default?.())
+      : null
+  },
+})
+
+const FormStub = defineComponent({
+  inheritAttrs: false,
+  emits: ['submit'],
+  setup(_, { attrs, slots, emit }) {
+    return () => h('form', {
+      ...attrs,
+      onSubmit: (event: Event) => {
+        event.preventDefault()
+        emit('submit', event)
+      },
+    }, slots.default?.())
+  },
+})
+
+const FormItemStub = defineComponent({
+  props: ['label'],
+  setup(props, { slots }) {
+    return () => h('label', [h('span', props.label), slots.default?.()])
+  },
+})
+
+const InputStub = defineComponent({
+  props: ['value', 'type'],
+  emits: ['update:value'],
+  setup(props, { emit }) {
+    return () => h('input', {
+      type: props.type ?? 'text',
+      value: props.value,
+      onInput: (event: Event) => emit('update:value', (event.target as HTMLInputElement).value),
+    })
+  },
+})
+
+const SpaceStub = defineComponent({
+  setup(_, { slots }) {
+    return () => h('div', slots.default?.())
+  },
+})
+
+const AlertStub = defineComponent({
+  setup(_, { slots }) {
+    return () => h('p', { role: 'alert' }, slots.default?.())
+  },
+})
+
 function mountLayout() {
   return mount(DashboardLayout, {
     global: {
       stubs: {
         RouterView: { template: '<section class="route-page">页面内容</section>' },
         HelpDrawer: HelpDrawerStub,
+        NAlert: AlertStub,
+        NButton: ButtonStub,
+        NForm: FormStub,
+        NFormItem: FormItemStub,
+        NInput: InputStub,
+        NModal: ModalStub,
         NMenu: MenuStub,
+        NSpace: SpaceStub,
+        Alert: AlertStub,
+        Button: ButtonStub,
+        Form: FormStub,
+        FormItem: FormItemStub,
+        Input: InputStub,
+        Modal: ModalStub,
+        'n-alert': AlertStub,
+        'n-button': ButtonStub,
+        'n-form': FormStub,
+        'n-form-item': FormItemStub,
+        'n-input': InputStub,
+        'n-modal': ModalStub,
         Menu: MenuStub,
         'n-menu': MenuStub,
+        Space: SpaceStub,
+        'n-space': SpaceStub,
       },
     },
   })
@@ -87,6 +177,8 @@ describe('DashboardLayout', () => {
     routerPush.mockClear()
     routerReplace.mockClear()
     logout.mockClear()
+    changePassword.mockClear()
+    changePassword.mockResolvedValue(undefined)
     authState.user = { id: 'admin-1', username: 'admin', display_name: 'admin', role: 'platform_admin', org_id: 'org-1' }
     authState.isPlatformAdmin = true
     authState.isOrgAdmin = false
@@ -196,5 +288,50 @@ describe('DashboardLayout', () => {
     expect(menuLabels(wrapper)).toContain('实例')
     expect(menuLabels(wrapper)).toContain('企业知识库')
     expect(menuLabels(wrapper)).not.toContain('知识库')
+  })
+
+  // 覆盖侧边栏用户区改密入口：已登录用户点击「修改密码」后应打开弹窗表单。
+  it('opens the password modal from sidebar footer', async () => {
+    const wrapper = mountLayout()
+    const passwordButton = wrapper.findAll('button').find(button => button.text().includes('修改密码'))
+
+    expect(passwordButton).toBeTruthy()
+
+    await passwordButton!.trigger('click')
+
+    expect(wrapper.find('[data-test="password-modal"]').exists()).toBe(true)
+  })
+
+  // 覆盖客户端确认密码校验：两次新密码不一致时不应调用后端改密接口。
+  it('rejects mismatched confirmation before submitting', async () => {
+    const wrapper = mountLayout()
+    const passwordButton = wrapper.findAll('button').find(button => button.text().includes('修改密码'))
+
+    await passwordButton!.trigger('click')
+    const inputs = wrapper.findAll('input')
+    await inputs[0].setValue('old-password')
+    await inputs[1].setValue('new-password-123')
+    await inputs[2].setValue('different-password')
+    await wrapper.find('[data-test="password-form"]').trigger('submit')
+
+    expect(changePassword).not.toHaveBeenCalled()
+    expect(wrapper.text()).toContain('两次输入的新密码不一致')
+  })
+
+  // 覆盖改密成功流程：提交匹配的新密码后调用 auth store，并跳转登录页重新登录。
+  it('submits password change and redirects to login on success', async () => {
+    const wrapper = mountLayout()
+    const passwordButton = wrapper.findAll('button').find(button => button.text().includes('修改密码'))
+
+    await passwordButton!.trigger('click')
+    const inputs = wrapper.findAll('input')
+    await inputs[0].setValue('old-password')
+    await inputs[1].setValue('new-password-123')
+    await inputs[2].setValue('new-password-123')
+    await wrapper.find('[data-test="password-form"]').trigger('submit')
+    await flushPromises()
+
+    expect(changePassword).toHaveBeenCalledWith('old-password', 'new-password-123')
+    expect(routerReplace).toHaveBeenCalledWith('/login')
   })
 })
