@@ -69,6 +69,16 @@ export const useAuthStore = defineStore('auth', () => {
     }
   }
 
+  // 自助改密成功后旧 token 不再继续信任，清理本地会话并要求用户重新登录。
+  async function changePassword(oldPassword: string, newPassword: string): Promise<void> {
+    await apiRequest<void>('/api/v1/auth/password', {
+      method: 'POST',
+      body: { old_password: oldPassword, new_password: newPassword },
+    })
+    clearStoredTokens()
+    user.value = null
+  }
+
   // logout 尽力通知后端失效 refresh token，然后无条件清理本地会话。
   async function logout(): Promise<void> {
     const refreshToken = getStoredRefreshToken()
@@ -97,5 +107,6 @@ export const useAuthStore = defineStore('auth', () => {
     login,
     logout,
     fetchCurrentUser,
+    changePassword,
   }
 })

@@ -55,4 +55,33 @@ describe('auth store', () => {
       password: 'secret-password',
     })
   })
+
+  // 覆盖自助修改密码时提交当前密码和新密码的请求契约。
+  it('修改密码提交当前密码和新密码', async () => {
+    const auth = useAuthStore()
+
+    await auth.changePassword('old-password', 'new-password-123')
+
+    expect(clientMocks.apiRequest).toHaveBeenCalledWith('/api/v1/auth/password', {
+      method: 'POST',
+      body: { old_password: 'old-password', new_password: 'new-password-123' },
+    })
+  })
+
+  // 覆盖自助修改密码成功后必须清理前端本地会话，避免旧 token 继续使用。
+  it('修改密码成功后清理本地会话', async () => {
+    const auth = useAuthStore()
+    auth.user = {
+      id: 'user-1',
+      username: 'admin',
+      display_name: '管理员',
+      role: 'platform_admin',
+      status: 'active',
+    }
+
+    await auth.changePassword('old-password', 'new-password-123')
+
+    expect(clientMocks.clearStoredTokens).toHaveBeenCalledTimes(1)
+    expect(auth.user).toBeNull()
+  })
 })
