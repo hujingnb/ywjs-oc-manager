@@ -9,6 +9,7 @@ import (
 
 	null "github.com/guregu/null/v5"
 
+	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 	"oc-manager/internal/auth"
 	"oc-manager/internal/domain"
@@ -215,6 +216,126 @@ func TestAuthServiceRefreshRejectsRotatedToken(t *testing.T) {
 	}
 }
 
+// TestAuthServiceChangePasswordUpdatesHash 验证登录用户输入正确旧密码后可更新自己的密码 hash。
+func TestAuthServiceChangePasswordUpdatesHash(t *testing.T) {
+	store := newAuthStoreStub(t)
+	svc := newTestAuthService(t, store)
+	svc.hashPassword = fakeAuthHash
+
+	err := svc.ChangePassword(context.Background(), auth.Principal{
+		UserID: authTestOrgMemberID,
+		OrgID:  authTestOrgID,
+		Role:   domain.UserRoleOrgMember,
+	}, ChangePasswordInput{
+		OldPassword: "correct-password",
+		NewPassword: "new-password-123",
+	})
+
+	require.NoError(t, err)
+	assert.Equal(t, 1, store.updatePasswordCalls)
+	assert.Equal(t, authTestOrgMemberID, store.lastPasswordUpdate.ID)
+	assert.Equal(t, "hashed:new-password-123", store.lastPasswordUpdate.PasswordHash)
+	assert.NotEqual(t, "new-password-123", store.usersByID[authTestOrgMemberID].PasswordHash)
+}
+
+// TestAuthServiceChangePasswordRejectsWrongOldPassword 验证旧密码不匹配时拒绝修改并且不写库。
+func TestAuthServiceChangePasswordRejectsWrongOldPassword(t *testing.T) {
+	store := newAuthStoreStub(t)
+	svc := newTestAuthService(t, store)
+	svc.hashPassword = fakeAuthHash
+
+	err := svc.ChangePassword(context.Background(), auth.Principal{
+		UserID: authTestOrgMemberID,
+		OrgID:  authTestOrgID,
+		Role:   domain.UserRoleOrgMember,
+	}, ChangePasswordInput{
+		OldPassword: "wrong-password",
+		NewPassword: "new-password-123",
+	})
+
+	require.ErrorIs(t, err, ErrInvalidCredentials)
+	assert.Equal(t, 0, store.updatePasswordCalls)
+}
+
+// TestAuthServiceChangePasswordRejectsInvalidNewPassword 验证新密码未通过基础规则时拒绝修改。
+func TestAuthServiceChangePasswordRejectsInvalidNewPassword(t *testing.T) {
+	tests := []struct {
+		name        string
+		oldPassword string
+		newPassword string
+	}{
+		{name: "empty", oldPassword: "correct-password", newPassword: ""},                       // 覆盖新密码为空的输入校验。
+		{name: "short", oldPassword: "correct-password", newPassword: "short"},                  // 覆盖新密码长度不足 8 位的边界。
+		{name: "same_as_old", oldPassword: "correct-password", newPassword: "correct-password"}, // 覆盖新密码与当前密码相同的拒绝路径。
+	}
+	for _, tt := range tests {
+		tt := tt
+		t.Run(tt.name, func(t *testing.T) {
+			store := newAuthStoreStub(t)
+			svc := newTestAuthService(t, store)
+			svc.hashPassword = fakeAuthHash
+
+			err := svc.ChangePassword(context.Background(), auth.Principal{
+				UserID: authTestOrgMemberID,
+				OrgID:  authTestOrgID,
+				Role:   domain.UserRoleOrgMember,
+			}, ChangePasswordInput{
+				OldPassword: tt.oldPassword,
+				NewPassword: tt.newPassword,
+			})
+
+			require.ErrorIs(t, err, ErrMemberCreateInvalid)
+			assert.Equal(t, 0, store.updatePasswordCalls)
+		})
+	}
+}
+
+// TestAuthServiceChangePasswordRejectsDisabledUser 验证禁用用户不能自助修改密码。
+func TestAuthServiceChangePasswordRejectsDisabledUser(t *testing.T) {
+	store := newAuthStoreStub(t)
+	user := store.usersByID[authTestOrgMemberID]
+	user.Status = domain.StatusDisabled
+	store.usersByID[authTestOrgMemberID] = user
+	store.orgUsersByKey[orgUserKey(authTestOrgID, user.Username)] = user
+	svc := newTestAuthService(t, store)
+	svc.hashPassword = fakeAuthHash
+
+	err := svc.ChangePassword(context.Background(), auth.Principal{
+		UserID: authTestOrgMemberID,
+		OrgID:  authTestOrgID,
+		Role:   domain.UserRoleOrgMember,
+	}, ChangePasswordInput{
+		OldPassword: "correct-password",
+		NewPassword: "new-password-123",
+	})
+
+	require.ErrorIs(t, err, ErrUserDisabled)
+	assert.Equal(t, 0, store.updatePasswordCalls)
+}
+
+// TestAuthServiceChangePasswordRejectsDisabledOrg 验证所属企业禁用时组织用户不能自助修改密码。
+func TestAuthServiceChangePasswordRejectsDisabledOrg(t *testing.T) {
+	store := newAuthStoreStub(t)
+	org := store.orgsByID[authTestOrgID]
+	org.Status = domain.StatusDisabled
+	store.orgsByID[authTestOrgID] = org
+	store.orgsByCode[org.Code] = org
+	svc := newTestAuthService(t, store)
+	svc.hashPassword = fakeAuthHash
+
+	err := svc.ChangePassword(context.Background(), auth.Principal{
+		UserID: authTestOrgMemberID,
+		OrgID:  authTestOrgID,
+		Role:   domain.UserRoleOrgMember,
+	}, ChangePasswordInput{
+		OldPassword: "correct-password",
+		NewPassword: "new-password-123",
+	})
+
+	require.ErrorIs(t, err, ErrOrgDisabled)
+	assert.Equal(t, 0, store.updatePasswordCalls)
+}
+
 func newTestAuthService(t *testing.T, store *authStoreStub) *AuthService {
 	t.Helper()
 	tokens, err := auth.NewTokenManager("access-secret", "refresh-secret", time.Minute, time.Hour)
@@ -307,6 +428,9 @@ type authStoreStub struct {
 	lastIssuedRole     string
 	refreshTokens      map[string]sqlc.RefreshToken
 	revoked            []string
+	// lastPasswordUpdate 和 updatePasswordCalls 记录改密写库入参与调用次数，便于断言失败路径不落库。
+	lastPasswordUpdate  sqlc.UpdateUserPasswordParams
+	updatePasswordCalls int
 }
 
 // orgUserKey 拼接组织 ID（string）和用户名作为 stub map key。
@@ -344,6 +468,24 @@ func (s *authStoreStub) MarkUserLoggedIn(_ context.Context, id string) error {
 		return sql.ErrNoRows
 	}
 	s.loggedIn = true
+	return nil
+}
+
+// UpdateUserPassword 模拟 users.password_hash 写入，并同步维护按用户名查询的索引。
+func (s *authStoreStub) UpdateUserPassword(_ context.Context, arg sqlc.UpdateUserPasswordParams) error {
+	s.lastPasswordUpdate = arg
+	user, ok := s.usersByID[arg.ID]
+	if !ok {
+		return sql.ErrNoRows
+	}
+	s.updatePasswordCalls++
+	user.PasswordHash = arg.PasswordHash
+	s.usersByID[arg.ID] = user
+	if user.OrgID.Valid {
+		s.orgUsersByKey[orgUserKey(user.OrgID.String, user.Username)] = user
+	} else {
+		s.platformByName[user.Username] = user
+	}
 	return nil
 }
 
@@ -416,3 +558,8 @@ func mustUUID(t *testing.T, value string) string {
 
 // uuidToString 在 MySQL 侧 ID 已经是 string 后，作为向前兼容的 identity 函数保留。
 func uuidToString(id string) string { return id }
+
+// fakeAuthHash 为修改密码测试提供确定性的 hash 结果，避免引入 Argon2 成本。
+func fakeAuthHash(password string) (string, error) {
+	return "hashed:" + password, nil
+}

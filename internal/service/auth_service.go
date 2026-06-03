@@ -20,6 +20,7 @@ type AuthStore interface {
 	GetUserByUsername(ctx context.Context, username string) (sqlc.User, error)
 	GetUserByOrgAndUsername(ctx context.Context, arg sqlc.GetUserByOrgAndUsernameParams) (sqlc.User, error)
 	GetUser(ctx context.Context, id string) (sqlc.User, error)
+	UpdateUserPassword(ctx context.Context, arg sqlc.UpdateUserPasswordParams) error
 	MarkUserLoggedIn(ctx context.Context, id string) error
 	GetOrganization(ctx context.Context, id string) (sqlc.Organization, error)
 	GetOrganizationByCode(ctx context.Context, code string) (sqlc.Organization, error)
@@ -35,8 +36,10 @@ type AuthService struct {
 	store AuthStore
 	// tokens 负责签发和校验 access / refresh token。
 	tokens *auth.TokenManager
-	// passwordHash 在测试中可替换，生产使用 auth.VerifyPassword。
-	passwordHash func(string, string) bool
+	// verifyPassword 在测试中可替换，生产使用 auth.VerifyPassword 校验 PHC hash。
+	verifyPassword func(string, string) bool
+	// hashPassword 在修改密码时生成 PHC hash，测试可替换为确定性快路径。
+	hashPassword PasswordHasher
 	// now 在测试中可固定时间，确保 refresh token 过期判断可重复。
 	now func() time.Time
 }
@@ -44,10 +47,13 @@ type AuthService struct {
 // NewAuthService 创建认证服务。
 func NewAuthService(store AuthStore, tokens *auth.TokenManager) *AuthService {
 	return &AuthService{
-		store:        store,
-		tokens:       tokens,
-		passwordHash: auth.VerifyPassword,
-		now:          time.Now,
+		store:          store,
+		tokens:         tokens,
+		verifyPassword: auth.VerifyPassword,
+		hashPassword: func(password string) (string, error) {
+			return auth.HashPassword(password, auth.DefaultPasswordParams)
+		},
+		now: time.Now,
 	}
 }
 
@@ -57,6 +63,14 @@ type LoginInput struct {
 	OrgCode  string
 	Username string
 	Password string
+}
+
+// ChangePasswordInput 是已登录用户自助修改密码的 service 入参。
+type ChangePasswordInput struct {
+	// OldPassword 是当前密码，用于证明调用方仍持有账号凭据。
+	OldPassword string
+	// NewPassword 是待写入的新密码明文，service 校验后只保存 hash。
+	NewPassword string
 }
 
 // TokenPair 是登录和刷新接口返回的双令牌。
@@ -92,7 +106,7 @@ func (s *AuthService) Login(ctx context.Context, input LoginInput) (LoginResult,
 	if err != nil {
 		return LoginResult{}, err
 	}
-	if !s.passwordHash(input.Password, user.PasswordHash) {
+	if !s.verifyPassword(input.Password, user.PasswordHash) {
 		return LoginResult{}, ErrInvalidCredentials
 	}
 	// 登录前重新检查用户和组织状态，避免已禁用账号继续拿到新令牌。
@@ -160,6 +174,43 @@ func (s *AuthService) Me(ctx context.Context, principal auth.Principal) (AuthUse
 		return AuthUser{}, err
 	}
 	return toAuthUser(user), nil
+}
+
+// ChangePassword 允许已登录用户在验证旧密码后修改自己的 manager 登录密码。
+func (s *AuthService) ChangePassword(ctx context.Context, principal auth.Principal, input ChangePasswordInput) error {
+	user, err := s.store.GetUser(ctx, principal.UserID)
+	if err != nil {
+		if errors.Is(err, sql.ErrNoRows) {
+			return ErrInvalidToken
+		}
+		return fmt.Errorf("查询当前用户失败: %w", err)
+	}
+	// 修改密码同样要求当前用户和所属企业仍处于 active 状态，避免禁用账号绕过登录限制。
+	if err := s.ensureUserEnabled(ctx, user); err != nil {
+		return err
+	}
+	if !s.verifyPassword(input.OldPassword, user.PasswordHash) {
+		return ErrInvalidCredentials
+	}
+	// 新密码规则保持在认证服务内，管理员重置密码不复用此流程。
+	if input.NewPassword == "" {
+		return fmt.Errorf("%w: 新密码不能为空", ErrMemberCreateInvalid)
+	}
+	if len(input.NewPassword) < 8 {
+		return fmt.Errorf("%w: 新密码至少 8 位", ErrMemberCreateInvalid)
+	}
+	if input.NewPassword == input.OldPassword {
+		return fmt.Errorf("%w: 新密码不能与当前密码相同", ErrMemberCreateInvalid)
+	}
+	hashed, err := s.hashPassword(input.NewPassword)
+	if err != nil {
+		return fmt.Errorf("生成密码 hash 失败: %w", err)
+	}
+	// UpdateUserPassword 只写 password_hash，避免自助改密影响账号资料、角色或状态字段。
+	if err := s.store.UpdateUserPassword(ctx, sqlc.UpdateUserPasswordParams{ID: user.ID, PasswordHash: hashed}); err != nil {
+		return fmt.Errorf("更新当前用户密码失败: %w", err)
+	}
+	return nil
 }
 
 // Refresh 校验 refresh token，撤销旧 token，再签发新的 token pair。
