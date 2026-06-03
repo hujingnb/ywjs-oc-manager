@@ -35,6 +35,12 @@ vi.mock('@/composables/useMemberApp', () => ({
   useMemberApp: () => memberAppState,
 }))
 
+// HelpDrawerStub 暴露 show/role 到 DOM，便于测试父布局点击入口后是否正确打开手册抽屉。
+const HelpDrawerStub = {
+  props: ['show', 'role'],
+  template: '<aside data-test="help-drawer" :data-show="String(show)" :data-role="role" />',
+}
+
 const MenuStub = {
   props: ['options', 'value'],
   emits: ['update:value'],
@@ -58,6 +64,7 @@ function mountLayout() {
     global: {
       stubs: {
         RouterView: { template: '<section class="route-page">页面内容</section>' },
+        HelpDrawer: HelpDrawerStub,
         NMenu: MenuStub,
         Menu: MenuStub,
         'n-menu': MenuStub,
@@ -99,6 +106,19 @@ describe('DashboardLayout', () => {
     expect(wrapper.find('.dashboard-page-frame').exists()).toBe(true)
   })
 
+  // 覆盖右上角使用手册入口：必须显示明确文案，点击后仍打开按角色渲染的手册抽屉。
+  it('renders the help manual entry as text and opens the drawer', async () => {
+    const wrapper = mountLayout()
+    const helpButton = wrapper.findAll('button').find(button => button.text().trim() === '使用手册')
+
+    expect(helpButton).toBeTruthy()
+
+    await helpButton!.trigger('click')
+
+    expect(wrapper.find('[data-test="help-drawer"]').attributes('data-show')).toBe('true')
+    expect(wrapper.find('[data-test="help-drawer"]').attributes('data-role')).toBe('platform_admin')
+  })
+
   // 覆盖组织成员菜单：唯一实例的各个业务 tab 被拉平到左侧菜单。
   it('renders flattened app entries for org_member', () => {
     routeState.path = '/apps/app-1/overview'
@@ -111,15 +131,15 @@ describe('DashboardLayout', () => {
 
     const wrapper = mountLayout()
 
-    expect(menuLabels(wrapper)).toEqual(['总览', '任务', '定时任务', '渠道', '个人知识库', '工作目录', '企业知识库', '用量'])
+    expect(menuLabels(wrapper)).toEqual(['总览', '渠道', '工作目录', '个人知识库', '企业知识库', '任务', '定时任务', '用量'])
     expect(menuKeys(wrapper)).toEqual([
       '/apps/app-1/overview',
+      '/apps/app-1/channels',
+      '/apps/app-1/workspace',
+      '/apps/app-1/knowledge',
+      '/knowledge',
       '/apps/app-1/kanban',
       '/apps/app-1/cron',
-      '/apps/app-1/channels',
-      '/apps/app-1/knowledge',
-      '/apps/app-1/workspace',
-      '/knowledge',
       '/usage',
     ])
   })
@@ -150,8 +170,9 @@ describe('DashboardLayout', () => {
     memberAppState.hasApp.value = false
 
     const wrapper = mountLayout()
-    const appItems = wrapper.findAll('[data-test="menu-item"]').slice(0, 6)
-    const appKeys = menuKeys(wrapper).slice(0, 6)
+    const appItems = wrapper.findAll('[data-test="menu-item"]')
+      .filter(item => item.attributes('data-key')?.startsWith('member-empty-'))
+    const appKeys = appItems.map(item => item.attributes('data-key'))
 
     expect(new Set(appKeys).size).toBe(6)
     expect(wrapper.find('[data-test="menu"]').attributes('data-value')).toBe('member-empty-overview')
