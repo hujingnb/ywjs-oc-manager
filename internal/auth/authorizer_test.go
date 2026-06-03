@@ -432,3 +432,13 @@ func TestCanSwitchAppVersion(t *testing.T) {
 	}
 	runAppCases(t, CanSwitchAppVersion, cases)
 }
+
+// TestCanManagePlatformSkill 验证平台库 skill 管理权限：仅平台管理员可管理，org_admin / org_member 一律拒绝。
+func TestCanManagePlatformSkill(t *testing.T) {
+	// platform_admin 有权管理平台库 skill
+	assert.True(t, CanManagePlatformSkill(Principal{Role: domain.UserRolePlatformAdmin}))
+	// org_admin 无权管理平台库 skill
+	assert.False(t, CanManagePlatformSkill(Principal{Role: domain.UserRoleOrgAdmin}))
+	// org_member 无权管理平台库 skill
+	assert.False(t, CanManagePlatformSkill(Principal{Role: domain.UserRoleOrgMember}))
+}

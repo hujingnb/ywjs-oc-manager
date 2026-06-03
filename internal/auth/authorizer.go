@@ -331,3 +331,10 @@ func CanViewAssistantVersion(p Principal) bool {
 		return false
 	}
 }
+
+// 平台库 skill -----------------------------------------------------------
+
+// CanManagePlatformSkill 判断是否可上传/删除平台库 skill：仅平台管理员。
+func CanManagePlatformSkill(p Principal) bool {
+	return p.Role == domain.UserRolePlatformAdmin
+}

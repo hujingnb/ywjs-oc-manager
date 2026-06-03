@@ -175,3 +175,17 @@ var ErrSkillTooLarge = errors.New("skill tar 超过大小上限")
 
 // ErrVersionNotInAllowlist 表示目标助手版本不在该实例所属企业的允许列表内，handler 映射为 400。
 var ErrVersionNotInAllowlist = errors.New("助手版本不在企业允许列表内")
+
+// ===== 平台库 skill =====
+
+// ErrPlatformSkillNotFound 表示按 id 找不到平台库 skill。
+var ErrPlatformSkillNotFound = errors.New("平台库 skill 不存在")
+
+// ErrPlatformSkillDenied 表示当前主体无权管理平台库 skill。
+var ErrPlatformSkillDenied = errors.New("无权管理平台库 skill")
+
+// ErrPlatformSkillInvalid 表示上传入参非法（name/version/内容为空或路径段非法）。
+var ErrPlatformSkillInvalid = errors.New("平台库 skill 入参非法")
+
+// ErrPlatformSkillNameVersionTaken 表示同名同版本的平台库 skill 已存在。
+var ErrPlatformSkillNameVersionTaken = errors.New("同名同版本的平台库 skill 已存在")
