@@ -315,6 +315,23 @@ func runManager(ctx context.Context, cfg config.Config, logOut io.Writer) error 
 	} else {
 		skillBlobStore = service.NewFSSkillBlobStore(cfg.App.DataRoot)
 	}
+	// libraryBlobs 是平台库 skill 归档的存储后端：
+	// S3 启用时复用同一 objStore（与 skillBlobStore 共桶），否则退回本地 FS（与 skillBlobStore 同根）。
+	var libraryBlobs service.LibraryBlobStore
+	if cfg.Storage.S3.Enabled {
+		s3cfg := storage.S3Config{
+			Endpoint:        cfg.Storage.S3.Endpoint,
+			Region:          cfg.Storage.S3.Region,
+			Bucket:          cfg.Storage.S3.Bucket,
+			AccessKeyID:     cfg.Storage.S3.AccessKeyID,
+			SecretAccessKey: cfg.Storage.S3.SecretAccessKey,
+			UsePathStyle:    cfg.Storage.S3.UsePathStyle,
+		}
+		libraryBlobs = service.NewS3LibraryBlobStore(storage.NewS3ObjectStore(s3cfg))
+	} else {
+		libraryBlobs = service.NewFSLibraryBlobStore(cfg.App.DataRoot)
+	}
+	platformSkillService := service.NewPlatformSkillService(dbStore.Queries, libraryBlobs)
 	workspaceService := service.NewWorkspaceService(dbStore.Queries, workspaceObjStore, workspacePresignTTL)
 
 	// 助手版本 service：镜像来自配置、模型校验走 new-api 目录、skill tar 存数据根目录。
@@ -442,6 +459,7 @@ func runManager(ctx context.Context, cfg config.Config, logOut io.Writer) error 
 			RechargeService:         rechargeService,
 			PlatformOverview:        platformOverviewService,
 			AssistantVersionService: assistantVersionService,
+			PlatformSkillService:    platformSkillService,
 			HermesKanbanService:     hermesKanbanService,
 			HermesCronService:       hermesCronService,
 			BootstrapService:        bootstrapSvc,

@@ -42,6 +42,8 @@ type Dependencies struct {
 	RechargeService *service.RechargeService
 	// AssistantVersionService 提供助手版本目录管理路由。
 	AssistantVersionService *service.AssistantVersionService
+	// PlatformSkillService 提供平台库 skill 管理路由；nil 时不注册。
+	PlatformSkillService *service.PlatformSkillService
 	// PlatformOverview 提供平台总览路由。
 	PlatformOverview *service.PlatformOverviewService
 	// HermesKanbanService 提供实例任务看板能力；nil 时不注册 kanban 路由。
@@ -159,6 +161,9 @@ func NewRouter(deps ...Dependencies) http.Handler {
 	}
 	if dep.AssistantVersionService != nil {
 		handlers.RegisterAssistantVersionRoutes(user, handlers.NewAssistantVersionsHandler(dep.AssistantVersionService))
+	}
+	if dep.PlatformSkillService != nil {
+		handlers.RegisterPlatformSkillRoutes(user, handlers.NewPlatformSkillsHandler(dep.PlatformSkillService))
 	}
 	if dep.PlatformOverview != nil {
 		handlers.RegisterPlatformOverviewRoutes(user, handlers.NewPlatformOverviewHandler(dep.PlatformOverview))
