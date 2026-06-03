@@ -60,9 +60,11 @@ RUN uv pip install --python /usr/local/lib/hermes-agent/venv/bin/python --no-cac
 # 与 starlette.testclient 依赖的 httpx2（starlette 1.x 的 TestClient 优先 httpx2，
 # 退而用 httpx 会告 deprecation，故直接装 httpx2 避免告警与未来失效）也必须装到
 # system python，否则自检收集 server 测试即 ImportError，docker build 失败。
+# python-multipart：starlette 解析 multipart/form-data（skills install 端点上传 zip 用到）
+# 的运行时与测试必需包；缺少则 request.form() 抛 AssertionError 导致 skills_install 组测试失败。
 # uvicorn 是运行时进程入口（见下方 venv 安装），自检不需要，故不进 system python。
 RUN uv pip install --system --no-cache-dir \
-      pyyaml pytest jsonschema starlette anyio httpx2
+      pyyaml pytest jsonschema starlette anyio httpx2 python-multipart
 
 # oc-ops HTTP 服务运行时依赖：装进 hermes venv。oc-ops 容器最终用
 # `python -m uvicorn ocops.server:app` 启动；channel 登录复用 venv 内的 weixin SDK，
@@ -77,6 +79,9 @@ RUN uv pip install --python /usr/local/lib/hermes-agent/venv/bin/python --no-cac
 # 必需的 oc-entrypoint、oc-healthcheck，以及容器内 agent 检索知识库用的 oc-kb。
 # cron/kanban 契约（schema + SPEC）仍由 ocops 包与构建期契约测试引用，保留 COPY。
 COPY oc-entrypoint.py     /usr/local/bin/oc-entrypoint
+# oc_entrypoint.py 是可 import 的辅助函数模块（oc-entrypoint.py 连字符命名无法 import），
+# 落点 /usr/local/lib/ 使构建期自检 PYTHONPATH=/usr/local/lib 下 import oc_entrypoint 可解析。
+COPY oc_entrypoint.py     /usr/local/lib/oc_entrypoint.py
 COPY kanban-contract/     /usr/local/lib/oc-kanban/contract/
 COPY cron-contract/       /usr/local/lib/oc-cron/contract/
 COPY oc-kb.py             /usr/local/bin/oc-kb
