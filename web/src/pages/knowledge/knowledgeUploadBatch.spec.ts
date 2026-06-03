@@ -77,6 +77,18 @@ describe('knowledgeUploadBatch', () => {
     expect(warning).toHaveBeenCalledWith(KNOWLEDGE_UPLOAD_MAX_MESSAGE)
   })
 
+  // 覆盖多个文件超过上限：多文件批量过滤只提示一次，并在文案里说明跳过数量。
+  it('过滤多个超过单文件上限的文件时只提示一次跳过数量', () => {
+    const warning = vi.fn()
+    const ok = fileWithSize('ok.md', KNOWLEDGE_UPLOAD_MAX_BYTES)
+    const firstTooLarge = fileWithSize('too-large-1.md', KNOWLEDGE_UPLOAD_MAX_BYTES + 1)
+    const secondTooLarge = fileWithSize('too-large-2.md', KNOWLEDGE_UPLOAD_MAX_BYTES + 2)
+
+    expect(filterKnowledgeUploadFiles([firstTooLarge, ok, secondTooLarge], warning)).toEqual([ok])
+    expect(warning).toHaveBeenCalledTimes(1)
+    expect(warning).toHaveBeenCalledWith(`已跳过 2 个超过上限的文件，${KNOWLEDGE_UPLOAD_MAX_MESSAGE}`)
+  })
+
   // 覆盖批量 items：上传队列 label 使用文件名，File 对象必须原样传递给 XHR 上传。
   it('把文件转换为 uploadProgress items', () => {
     const first = new File(['a'], 'a.md')
