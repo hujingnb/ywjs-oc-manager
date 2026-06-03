@@ -1,9 +1,11 @@
 package service
 
 import (
+	"bytes"
 	"context"
 	"database/sql"
 	"errors"
+	"fmt"
 	"io"
 	"testing"
 
@@ -72,14 +74,37 @@ func (f *fakePlatformSkillStore) DeletePlatformSkill(_ context.Context, id strin
 	return nil
 }
 
-// fakeLibraryBlob 记录 Put/Delete 调用，Put 返回确定性相对路径。
-type fakeLibraryBlob struct{ deleted []string }
-
-func (f *fakeLibraryBlob) PutLibrarySkill(source, ref, version, ext string, _ []byte) (string, error) {
-	return "library/" + source + "/" + ref + "/" + version + "." + ext, nil
+// fakeLibraryBlob 记录 Put/Delete 调用，Put 返回确定性相对路径，并按 relPath 保存字节以供 OpenLibrarySkill 返回。
+type fakeLibraryBlob struct {
+	deleted []string
+	// stored 保存 PutLibrarySkill 写入的字节，key 为 relPath，供 OpenLibrarySkill 按路径返回。
+	stored map[string][]byte
 }
-func (f *fakeLibraryBlob) DeleteLibrarySkill(rel string) error { f.deleted = append(f.deleted, rel); return nil }
-func (f *fakeLibraryBlob) OpenLibrarySkill(string) (io.ReadCloser, error) { return nil, nil }
+
+func (f *fakeLibraryBlob) PutLibrarySkill(source, ref, version, ext string, data []byte) (string, error) {
+	rel := "library/" + source + "/" + ref + "/" + version + "." + ext
+	if f.stored == nil {
+		f.stored = map[string][]byte{}
+	}
+	f.stored[rel] = data
+	return rel, nil
+}
+func (f *fakeLibraryBlob) DeleteLibrarySkill(rel string) error {
+	f.deleted = append(f.deleted, rel)
+	return nil
+}
+
+// OpenLibrarySkill 按 relPath 返回之前 Put 存入的字节；路径不存在则返回 os.ErrNotExist。
+func (f *fakeLibraryBlob) OpenLibrarySkill(rel string) (io.ReadCloser, error) {
+	if f.stored == nil {
+		return nil, fmt.Errorf("blob not found: %s", rel)
+	}
+	data, ok := f.stored[rel]
+	if !ok {
+		return nil, fmt.Errorf("blob not found: %s", rel)
+	}
+	return io.NopCloser(bytes.NewReader(data)), nil
+}
 
 func psvcPlatformPrincipal() auth.Principal {
 	return auth.Principal{UserID: "u-admin", Role: domain.UserRolePlatformAdmin}
@@ -183,4 +208,34 @@ func TestPlatformSkillService_List_Denied(t *testing.T) {
 	svc := NewPlatformSkillService(newFakePlatformSkillStore(), &fakeLibraryBlob{})
 	_, err := svc.List(context.Background(), psvcOrgMemberPrincipal())
 	require.ErrorIs(t, err, ErrPlatformSkillDenied)
+}
+
+// GetForInstall_OK 验证上传后可通过 name+version 取回完整归档字节与 sha256。
+func TestPlatformSkillService_GetForInstall_OK(t *testing.T) {
+	store := newFakePlatformSkillStore()
+	blob := &fakeLibraryBlob{}
+	svc := NewPlatformSkillService(store, blob)
+	data := []byte("skill-archive-content-for-install")
+
+	// 先上传平台库 skill
+	res, err := svc.Upload(context.Background(), psvcPlatformPrincipal(), PlatformSkillUploadInput{
+		Name: "translate", Version: "2.0", Description: "翻译 skill", Data: data,
+	})
+	require.NoError(t, err)
+
+	// 通过 GetForInstall 取回归档字节与 sha256
+	archive, sha, err := svc.GetForInstall(context.Background(), "translate", "2.0")
+	require.NoError(t, err)
+	// 归档字节与原始上传内容一致
+	assert.Equal(t, data, archive)
+	// sha256 与 Upload 返回的摘要一致
+	assert.Equal(t, res.FileSha256, sha)
+}
+
+// GetForInstall_NotFound 验证不存在的 name/version 返回 ErrPlatformSkillNotFound。
+func TestPlatformSkillService_GetForInstall_NotFound(t *testing.T) {
+	svc := NewPlatformSkillService(newFakePlatformSkillStore(), &fakeLibraryBlob{})
+	// 查询从未上传的 skill，应返回 ErrPlatformSkillNotFound
+	_, _, err := svc.GetForInstall(context.Background(), "nonexistent", "99.9")
+	require.ErrorIs(t, err, ErrPlatformSkillNotFound)
 }

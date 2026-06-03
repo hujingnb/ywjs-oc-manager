@@ -189,3 +189,23 @@ var ErrPlatformSkillInvalid = errors.New("平台库 skill 入参非法")
 
 // ErrPlatformSkillNameVersionTaken 表示同名同版本的平台库 skill 已存在。
 var ErrPlatformSkillNameVersionTaken = errors.New("同名同版本的平台库 skill 已存在")
+
+// ===== 实例 skill =====
+
+// ErrAppSkillDenied 表示当前主体无权管理该实例的 skill。
+var ErrAppSkillDenied = errors.New("无权管理该实例的 skill")
+
+// ErrAppSkillNotFound 表示指定实例 skill 不存在。
+var ErrAppSkillNotFound = errors.New("实例 skill 不存在")
+
+// ErrAppSkillNameConflict 表示该实例下已有同名 skill，不允许重复安装。
+var ErrAppSkillNameConflict = errors.New("已有同名 skill")
+
+// ErrAppSkillProtected 表示该 skill 是当前助手版本必需的内置 skill，不可删除。
+var ErrAppSkillProtected = errors.New("当前助手版本必需的 skill 不可删除")
+
+// ErrAppSkillSourceUnknown 表示 skill 来源字段取值不在已知枚举范围内。
+var ErrAppSkillSourceUnknown = errors.New("未知的 skill 来源")
+
+// ErrAppSkillArchiveTooDangerous 表示 skill 归档解压校验失败（如路径穿越、内容篡改等）。
+var ErrAppSkillArchiveTooDangerous = errors.New("skill 归档解压校验失败")

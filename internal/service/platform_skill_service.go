@@ -8,6 +8,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"io"
 	"strings"
 
 	"github.com/guregu/null/v5"
@@ -144,4 +145,26 @@ func (s *PlatformSkillService) Delete(ctx context.Context, principal auth.Princi
 		return fmt.Errorf("删除平台库 skill 归档失败: %w", err)
 	}
 	return nil
+}
+
+// GetForInstall 取平台库 skill 指定版本的归档字节与 sha256，供安装到实例使用。
+// name/version 不存在时返回 ErrPlatformSkillNotFound；归档读取失败时透传底层错误。
+func (s *PlatformSkillService) GetForInstall(ctx context.Context, name, version string) (archive []byte, sha string, err error) {
+	row, err := s.store.GetPlatformSkillByNameVersion(ctx, sqlc.GetPlatformSkillByNameVersionParams{Name: name, Version: version})
+	if err != nil {
+		if errors.Is(err, sql.ErrNoRows) {
+			return nil, "", ErrPlatformSkillNotFound
+		}
+		return nil, "", fmt.Errorf("查询平台库 skill 失败: %w", err)
+	}
+	rc, err := s.blobs.OpenLibrarySkill(row.TarPath)
+	if err != nil {
+		return nil, "", err
+	}
+	defer rc.Close()
+	data, err := io.ReadAll(rc)
+	if err != nil {
+		return nil, "", fmt.Errorf("读取平台库归档失败: %w", err)
+	}
+	return data, row.FileSha256, nil
 }

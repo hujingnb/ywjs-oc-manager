@@ -338,3 +338,9 @@ func CanViewAssistantVersion(p Principal) bool {
 func CanManagePlatformSkill(p Principal) bool {
 	return p.Role == domain.UserRolePlatformAdmin
 }
+
+// CanManageAppSkill 判断是否可管理某 app 的 skill：与应用写权限同款（owner 本人 / 本 org 的 org_admin）。
+// platform_admin 不继承应用写权限，不可管理实例 skill。
+func CanManageAppSkill(p Principal, appOrgID, appOwnerUserID string) bool {
+	return CanManageApp(p, appOrgID, appOwnerUserID)
+}
