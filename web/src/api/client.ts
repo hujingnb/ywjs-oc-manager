@@ -22,6 +22,8 @@ export interface RequestOptions {
   query?: Record<string, string | number | undefined>
   /** 关闭时不附加 Authorization，例如登录接口 */
   withAuth?: boolean
+  // 少数已认证请求会把 401 作为业务校验失败（如当前密码错误），此时不应触发全局清会话。
+  suppressUnauthorizedHandler?: boolean
 }
 
 // AuthTokens 是前端持久化的访问令牌和刷新令牌组合。
@@ -142,10 +144,10 @@ export async function apiRequest<T>(path: string, options: RequestOptions = {}):
       status: response.status,
       body: payload,
     })
-    // 401 一律清 token 并触发跳 login：避免按钮点击后悄悄失败（mutation 错误被
-    // 业务组件的 catch 吞掉，用户以为没操作）。仅在带 auth 的请求上触发，避免
-    // 登录接口本身的 401 也跳。
-    if (response.status === 401 && options.withAuth !== false) {
+    // 401 默认清 token 并触发跳 login：避免按钮点击后悄悄失败（mutation 错误被
+    // 业务组件的 catch 吞掉，用户以为没操作）。显式抑制时说明该接口把 401 当业务
+    // 校验结果处理，应保留本地会话并把错误交给调用方展示。
+    if (response.status === 401 && options.withAuth !== false && !options.suppressUnauthorizedHandler) {
       clearStoredTokens()
       if (unauthorizedHandler) {
         unauthorizedHandler(path)

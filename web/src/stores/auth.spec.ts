@@ -65,6 +65,7 @@ describe('auth store', () => {
     expect(clientMocks.apiRequest).toHaveBeenCalledWith('/api/v1/auth/password', {
       method: 'POST',
       body: { old_password: 'old-password', new_password: 'new-password-123' },
+      suppressUnauthorizedHandler: true,
     })
   })
 
@@ -83,5 +84,24 @@ describe('auth store', () => {
 
     expect(clientMocks.clearStoredTokens).toHaveBeenCalledTimes(1)
     expect(auth.user).toBeNull()
+  })
+
+  // 覆盖当前密码错误时后端 401 作为业务校验失败返回，前端不能清理现有会话。
+  it('修改密码失败时保留本地会话', async () => {
+    const auth = useAuthStore()
+    const currentUser = {
+      id: 'user-1',
+      username: 'admin',
+      display_name: '管理员',
+      role: 'platform_admin',
+      status: 'active',
+    } as const
+    auth.user = currentUser
+    clientMocks.apiRequest.mockRejectedValueOnce(new Error('当前密码错误'))
+
+    await expect(auth.changePassword('wrong-password', 'new-password-123')).rejects.toThrow('当前密码错误')
+
+    expect(clientMocks.clearStoredTokens).not.toHaveBeenCalled()
+    expect(auth.user).toEqual(currentUser)
   })
 })

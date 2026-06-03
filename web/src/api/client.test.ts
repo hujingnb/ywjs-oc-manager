@@ -2,13 +2,23 @@
 // 测试只 mock fetch 响应，不触发真实网络或 token 存储。
 import { afterEach, describe, expect, it, vi } from 'vitest'
 
-import { apiRequest } from './client'
+import {
+  apiRequest,
+  clearStoredTokens,
+  getStoredAccessToken,
+  getStoredRefreshToken,
+  setStoredTokens,
+  setUnauthorizedHandler,
+} from './client'
 
 describe('apiRequest', () => {
   afterEach(() => {
     vi.restoreAllMocks()
+    setUnauthorizedHandler(null)
+    clearStoredTokens()
   })
 
+  // 覆盖后端错误体带 message 时，HTTP 客户端应优先透出业务可读文案。
   it('错误响应包含 message 字段时使用后端业务文案', async () => {
     vi.spyOn(globalThis, 'fetch').mockResolvedValue(new Response(JSON.stringify({
       code: 'NO_NODE_AVAILABLE',
@@ -22,5 +32,34 @@ describe('apiRequest', () => {
       method: 'POST',
       body: {},
     })).rejects.toThrow('暂无可用 Runtime Node，请联系平台管理员调整节点容量或新增节点')
+  })
+
+  // 覆盖认证接口把 401 用作业务校验失败时，可抑制全局未授权处理并保留本地 token。
+  it('抑制全局 401 处理时保留本地 token 并继续抛出业务错误', async () => {
+    const unauthorizedHandler = vi.fn()
+    setStoredTokens({
+      accessToken: 'access-token',
+      refreshToken: 'refresh-token',
+    })
+    setUnauthorizedHandler(unauthorizedHandler)
+    vi.spyOn(globalThis, 'fetch').mockResolvedValue(new Response(JSON.stringify({
+      message: '当前密码错误',
+    }), {
+      status: 401,
+      headers: { 'content-type': 'application/json' },
+    }))
+
+    await expect(apiRequest('/api/v1/auth/password', {
+      method: 'POST',
+      body: { old_password: 'wrong-password', new_password: 'new-password-123' },
+      suppressUnauthorizedHandler: true,
+    })).rejects.toMatchObject({
+      message: '当前密码错误',
+      status: 401,
+    })
+
+    expect(getStoredAccessToken()).toBe('access-token')
+    expect(getStoredRefreshToken()).toBe('refresh-token')
+    expect(unauthorizedHandler).not.toHaveBeenCalled()
   })
 })
