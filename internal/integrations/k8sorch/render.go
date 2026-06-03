@@ -102,9 +102,14 @@ func RenderDeployment(spec AppSpec, namespace string) *appsv1.Deployment {
 					Containers: []corev1.Container{
 						{
 							// hermes：主业务容器，负责 AI 网关逻辑，资源配额受限。
-							Name:         "hermes",
-							Image:        spec.HermesImage,
-							Env:          append([]corev1.EnvVar{{Name: "HERMES_HOME", Value: "/opt/data"}}, proxyEnv...),
+							Name:  "hermes",
+							Image: spec.HermesImage,
+							// API_SERVER_ENABLED=true：启动 hermes 内置 api_server（127.0.0.1:8642，与 gateway 同进程），
+							// 供 oc-ops 触发 POST /oc/skills/reload 免重启热加载 skill。
+							Env: append([]corev1.EnvVar{
+								{Name: "HERMES_HOME", Value: "/opt/data"},
+								{Name: "API_SERVER_ENABLED", Value: "true"},
+							}, proxyEnv...),
 							VolumeMounts: []corev1.VolumeMount{inputMountRO, dataMount},
 							Resources:    corev1.ResourceRequirements{Requests: reqs, Limits: lims},
 							// readinessProbe：exec hermes gateway status，验证网关真正就绪。

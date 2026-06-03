@@ -111,6 +111,28 @@ func TestRenderDeploymentOcOpsPythonPath(t *testing.T) {
 	assert.Equal(t, "/usr/local/lib", envs["PYTHONPATH"], "oc-ops 必须置 PYTHONPATH=/usr/local/lib 才能 import ocops")
 }
 
+// TestRenderDeploymentHermesAPIServer 断言 hermes 容器注入 API_SERVER_ENABLED=true。
+// hermes 内置 api_server 监听 127.0.0.1:8642，与 gateway 同进程，
+// 供 oc-ops 触发 POST /oc/skills/reload 实现免重启热加载 skill。
+func TestRenderDeploymentHermesAPIServer(t *testing.T) {
+	dep := RenderDeployment(testSpec(), "oc-apps")
+	// 从三容器中定位 hermes 容器
+	var hermes *corev1.Container
+	for i := range dep.Spec.Template.Spec.Containers {
+		if dep.Spec.Template.Spec.Containers[i].Name == "hermes" {
+			hermes = &dep.Spec.Template.Spec.Containers[i]
+			break
+		}
+	}
+	require.NotNil(t, hermes, "渲染结果必须包含名为 hermes 的容器")
+	// 收集 env 为 map 便于断言
+	envs := map[string]string{}
+	for _, e := range hermes.Env {
+		envs[e.Name] = e.Value
+	}
+	assert.Equal(t, "true", envs["API_SERVER_ENABLED"], "hermes 容器必须置 API_SERVER_ENABLED=true 以启动内置 api_server")
+}
+
 // TestRenderService 验证 oc-ops Service 渲染（selector + 8080）。
 func TestRenderService(t *testing.T) {
 	assertGolden(t, "service.golden.yaml", RenderService(testSpec(), "oc-apps"))

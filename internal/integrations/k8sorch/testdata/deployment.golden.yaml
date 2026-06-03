@@ -23,6 +23,8 @@ spec:
       - env:
         - name: HERMES_HOME
           value: /opt/data
+        - name: API_SERVER_ENABLED
+          value: "true"
         image: registry/hermes:v1
         name: hermes
         readinessProbe:
