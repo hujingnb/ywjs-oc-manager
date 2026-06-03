@@ -1,5 +1,13 @@
 <template>
-  <n-card :bordered="true">
+  <n-card
+    :bordered="true"
+    class="knowledge-drop-zone"
+    :class="{ 'drag-active': dragActive && canManage }"
+    @dragenter.prevent="onDragEnter"
+    @dragover.prevent="onDragOver"
+    @dragleave.prevent="onDragLeave"
+    @drop.prevent="onDropUpload"
+  >
     <template #header>
       <div>
         <p class="eyebrow">Instance · Knowledge</p>
@@ -13,7 +21,7 @@
           <span class="upload-limit">{{ KNOWLEDGE_UPLOAD_MAX_MESSAGE }}</span>
           <label class="secondary-button file-picker" :class="{ disabled: uploading }">
             上传文件
-            <input type="file" :disabled="uploading" @change="onUploadFile" />
+            <input type="file" multiple :disabled="uploading" @change="onUploadFile" />
           </label>
         </template>
       </div>
@@ -57,8 +65,6 @@ import {
   KNOWLEDGE_UPLOAD_MAX_MESSAGE,
   downloadAppKnowledgeFile,
   formatKnowledgeBytes,
-  isKnowledgeUploadOverRemaining,
-  isKnowledgeUploadTooLarge,
   useAppKnowledgeQuery,
   useDeleteAppKnowledge,
   useReparseAppKnowledge,
@@ -68,6 +74,13 @@ import {
 import { canManageApp, canUpdateAppKnowledgeQuota } from '@/domain/permissions'
 import { useAuthStore } from '@/stores/auth'
 import { useUploadProgressStore } from '@/stores/uploadProgress'
+import {
+  filterKnowledgeUploadFiles,
+  hasKnowledgeFilesInDrag,
+  knowledgeFilesFromDrop,
+  knowledgeFilesFromInput,
+  toKnowledgeUploadItems,
+} from '@/pages/knowledge/knowledgeUploadBatch'
 
 // AppKnowledgeTab 管理单个应用的 RAGFlow 知识库文件，权限来自应用详情注入。
 const props = defineProps<{ appId: string }>()
@@ -101,6 +114,8 @@ const quotaSummary = computed(() => listing.data.value
   : '')
 // downloading 标记当前页面正在触发浏览器下载，避免重复点击生成多次下载请求。
 const downloading = ref(false)
+// dragActive 标记当前卡片是否处于可上传拖拽态，仅有写权限时才会置 true。
+const dragActive = ref(false)
 
 // formatBytes 仅用于文件大小展示，RAGFlow 未返回大小时由后端归一化为 0。
 function formatBytes(value: number) {
@@ -140,27 +155,12 @@ function parseStatusLabel(status: string): string {
   return labels[status] ?? status
 }
 
-// onUploadFile 处理原生 file input 事件；上传进度统一由全局 UploadProgressModal 展示。
-// 失败 / 取消的视觉反馈也来自 Modal 汇总区，本页只承担互斥提示。
-async function onUploadFile(event: Event) {
-  errorMessage.value = ''
-  const input = event.target as HTMLInputElement
-  const file = input.files?.[0]
-  input.value = ''
-  if (!canManage.value) return
-  if (!file) return
-  // 前端先拦截超过知识库业务上限的文件，避免创建进度会话后再被网关或后端拒绝。
-  if (isKnowledgeUploadTooLarge(file)) {
-    message.warning(KNOWLEDGE_UPLOAD_MAX_MESSAGE)
-    return
-  }
-  // 剩余容量依赖后端返回的实时统计，超出时直接提示，避免创建无法完成的上传任务。
-  if (isKnowledgeUploadOverRemaining(file, listing.data.value)) {
-    message.warning(`知识库空间不足，剩余 ${formatKnowledgeBytes(listing.data.value?.remaining_bytes ?? 0)}`)
-    return
-  }
+// uploadFiles 把多选或拖拽得到的文件交给全局上传队列；容量不足等动态失败由后端逐个返回。
+async function uploadFiles(files: File[]) {
+  const uploadableFiles = filterKnowledgeUploadFiles(files, message.warning)
+  if (uploadableFiles.length === 0) return
   try {
-    await uploadProgress.run([{ file, label: file.name }], async (_item, f, ctx) => {
+    await uploadProgress.run(toKnowledgeUploadItems(uploadableFiles), async (_item, f, ctx) => {
       await uploadMutation.mutateAsync({
         file: f,
         onProgress: ctx.onProgress,
@@ -170,6 +170,48 @@ async function onUploadFile(event: Event) {
   } catch (err) {
     message.warning(err instanceof Error ? err.message : '已有上传任务正在进行')
   }
+}
+
+// onUploadFile 处理原生 file input 事件；上传进度统一由全局 UploadProgressModal 展示。
+// 失败 / 取消的视觉反馈也来自 Modal 汇总区，本页只承担互斥提示。
+async function onUploadFile(event: Event) {
+  errorMessage.value = ''
+  const input = event.target as HTMLInputElement
+  const files = knowledgeFilesFromInput(input)
+  input.value = ''
+  if (!canManage.value) return
+  await uploadFiles(files)
+}
+
+// onDragEnter 在拖入文件时打开视觉态；纯文本拖拽不影响知识库卡片。
+function onDragEnter(event: DragEvent) {
+  if (!canManage.value || !hasKnowledgeFilesInDrag(event)) return
+  dragActive.value = true
+}
+
+// onDragOver 持续维持可上传视觉态，并让浏览器显示 copy dropEffect。
+function onDragOver(event: DragEvent) {
+  if (!canManage.value || !hasKnowledgeFilesInDrag(event)) return
+  dragActive.value = true
+  if (event.dataTransfer) {
+    event.dataTransfer.dropEffect = 'copy'
+  }
+}
+
+// onDragLeave 在真正离开卡片时关闭视觉态；子元素之间移动会产生 dragleave，需要保留视觉态。
+function onDragLeave(event: DragEvent) {
+  const current = event.currentTarget
+  const related = event.relatedTarget
+  if (current instanceof Node && related instanceof Node && current.contains(related)) return
+  dragActive.value = false
+}
+
+// onDropUpload 处理拖拽文件上传；目录或非文件项会在 helper 中被过滤。
+async function onDropUpload(event: DragEvent) {
+  errorMessage.value = ''
+  dragActive.value = false
+  if (!canManage.value) return
+  await uploadFiles(knowledgeFilesFromDrop(event))
 }
 
 // openQuotaModal 将后端 bytes 上限转换成管理员可编辑的 GB 单位，并重置上次提交反馈。
@@ -289,6 +331,15 @@ const columns: DataTableColumns<KnowledgeDocument> = [
 .upload-limit {
   color: var(--color-text-secondary);
   font-size: 12px;
+}
+
+.knowledge-drop-zone {
+  transition: border-color 0.15s ease, box-shadow 0.15s ease;
+}
+
+.knowledge-drop-zone.drag-active {
+  border-color: var(--color-brand);
+  box-shadow: 0 0 0 2px rgba(255, 106, 0, 0.14);
 }
 
 .file-picker {

@@ -22,6 +22,11 @@ type RenderableColumn = {
   render?: (row: unknown) => VNodeChild
 }
 
+type UploadRunItem = { file: File; label: string }
+type UploadRunContext = { onProgress: (percent: number) => void; signal: AbortSignal }
+
+const uploadRunContexts: UploadRunContext[] = []
+
 type RenderedChild = NonNullable<VNodeChild>
 
 function renderCellChildren(column: RenderableColumn, row: unknown): RenderedChild[] {
@@ -42,6 +47,9 @@ const DataTableStub = defineComponent({
     ])
   },
 })
+
+// CardStub 承接 n-card 根节点上的 class 和拖拽监听，便于验证 drop zone 行为。
+const CardStub = { template: '<section v-bind="$attrs"><slot name="header" /><slot name="header-extra" /><slot /></section>' }
 
 vi.mock('@/stores/auth', () => ({
   useAuthStore: () => ({ user: mocks.authUser }),
@@ -125,7 +133,8 @@ function mountTab() {
         }),
       },
       stubs: {
-        NCard: { template: '<section><slot name="header" /><slot name="header-extra" /><slot /></section>' },
+        NCard: CardStub,
+        'n-card': CardStub,
         DataTable: DataTableStub,
         NDataTable: DataTableStub,
         NButton: { template: '<button><slot /></button>' },
@@ -141,6 +150,14 @@ function oversizedFile(): File {
   return file
 }
 
+function fileDragTransfer(dropEffect = 'none') {
+  return {
+    items: [{ kind: 'file' }],
+    files: [],
+    dropEffect,
+  }
+}
+
 describe('AppKnowledgeTab', () => {
   beforeEach(() => {
     mocks.authUser = { id: 'user-1', role: 'org_member', org_id: 'org-1' }
@@ -149,6 +166,14 @@ describe('AppKnowledgeTab', () => {
     mocks.error.mockReset()
     mocks.warning.mockReset()
     mocks.run.mockReset()
+    uploadRunContexts.splice(0, uploadRunContexts.length)
+    mocks.run.mockImplementation(async (items: UploadRunItem[], runner: (item: UploadRunItem, file: File, ctx: UploadRunContext) => Promise<void>) => {
+      for (const item of items) {
+        const ctx = { onProgress: vi.fn(), signal: new AbortController().signal }
+        uploadRunContexts.push(ctx)
+        await runner(item, item.file, ctx)
+      }
+    })
     mocks.mutateAsync.mockReset()
     mocks.updateQuotaMutateAsync.mockReset()
   })
@@ -168,6 +193,13 @@ describe('AppKnowledgeTab', () => {
     expect(wrapper.text()).toContain('编辑空间')
   })
 
+  // 覆盖实例知识库上传入口：文件选择框必须允许一次选择多个文件。
+  it('实例知识库文件选择框允许多选', () => {
+    const wrapper = mountTab()
+
+    expect(wrapper.find('input[type="file"]').attributes('multiple')).toBeDefined()
+  })
+
   // 覆盖实例知识库上传超限路径：前端提示上限并且不创建上传会话。
   it('拒绝超过上限的实例知识库文件', async () => {
     const wrapper = mountTab()
@@ -181,8 +213,8 @@ describe('AppKnowledgeTab', () => {
     expect(mocks.mutateAsync).not.toHaveBeenCalled()
   })
 
-  // 覆盖实例知识库剩余容量拦截：超过 remaining_bytes 时不创建上传会话。
-  it('拒绝超过实例知识库剩余空间的文件', async () => {
+  // 覆盖实例知识库容量动态失败：超过 remaining_bytes 的文件仍进入队列，由后端逐个返回失败。
+  it('超过实例知识库剩余空间的文件仍交给上传队列', async () => {
     const wrapper = mountTab()
     const input = wrapper.find('input[type="file"]')
     const file = new File(['x'], 'too-large.md')
@@ -191,8 +223,108 @@ describe('AppKnowledgeTab', () => {
     Object.defineProperty(input.element, 'files', { value: [file], configurable: true })
     await input.trigger('change')
 
-    expect(mocks.warning).toHaveBeenCalledWith(expect.stringContaining('知识库空间不足'))
+    expect(mocks.warning).not.toHaveBeenCalled()
+    expect(mocks.run).toHaveBeenCalledTimes(1)
+    expect(mocks.run.mock.calls[0][0]).toEqual([{ file, label: 'too-large.md' }])
+  })
+
+  // 覆盖实例知识库多选上传：多个文件应按选择顺序交给全局上传队列。
+  it('支持一次选择多个实例知识库文件上传', async () => {
+    const wrapper = mountTab()
+    const input = wrapper.find('input[type="file"]')
+    const first = new File(['a'], 'a.md')
+    const second = new File(['b'], 'b.md')
+
+    Object.defineProperty(input.element, 'files', { value: [first, second], configurable: true })
+    await input.trigger('change')
+
+    expect(mocks.run).toHaveBeenCalledTimes(1)
+    const runItems = mocks.run.mock.calls[0][0] as Array<{ file: File; label: string }>
+    expect(runItems).toEqual([
+      { file: first, label: 'a.md' },
+      { file: second, label: 'b.md' },
+    ])
+    expect(mocks.mutateAsync).toHaveBeenNthCalledWith(1, {
+      file: first,
+      onProgress: uploadRunContexts[0].onProgress,
+      signal: uploadRunContexts[0].signal,
+    })
+    expect(mocks.mutateAsync).toHaveBeenNthCalledWith(2, {
+      file: second,
+      onProgress: uploadRunContexts[1].onProgress,
+      signal: uploadRunContexts[1].signal,
+    })
+  })
+
+  // 覆盖实例知识库拖拽上传：拖入多个文件时复用同一批量上传流程。
+  it('支持拖拽多个实例知识库文件上传', async () => {
+    const wrapper = mountTab()
+    const first = new File(['a'], 'a.md')
+    const second = new File(['b'], 'b.md')
+
+    await wrapper.find('.knowledge-drop-zone').trigger('drop', {
+      dataTransfer: {
+        items: [],
+        files: [first, second],
+      },
+    })
+
+    expect(mocks.run).toHaveBeenCalledTimes(1)
+    const runItems = mocks.run.mock.calls[0][0] as Array<{ file: File; label: string }>
+    expect(runItems).toEqual([
+      { file: first, label: 'a.md' },
+      { file: second, label: 'b.md' },
+    ])
+    expect(mocks.mutateAsync).toHaveBeenNthCalledWith(1, {
+      file: first,
+      onProgress: uploadRunContexts[0].onProgress,
+      signal: uploadRunContexts[0].signal,
+    })
+    expect(mocks.mutateAsync).toHaveBeenNthCalledWith(2, {
+      file: second,
+      onProgress: uploadRunContexts[1].onProgress,
+      signal: uploadRunContexts[1].signal,
+    })
+  })
+
+  // 覆盖实例知识库拖拽态：文件拖入时显示视觉态，内部移动不清空，真正离开卡片才清空。
+  it('实例知识库文件拖拽态仅在离开卡片时清空', async () => {
+    const wrapper = mountTab()
+    const section = wrapper.find('.knowledge-drop-zone')
+    const inner = section.find('.headers')
+    const dataTransfer = fileDragTransfer()
+
+    await section.trigger('dragenter', { dataTransfer })
+    expect(section.classes()).toContain('drag-active')
+
+    await section.trigger('dragover', { dataTransfer })
+    expect(dataTransfer.dropEffect).toBe('copy')
+
+    await section.trigger('dragleave', { relatedTarget: inner.element })
+    expect(section.classes()).toContain('drag-active')
+
+    await section.trigger('dragleave', { relatedTarget: document.body })
+    expect(section.classes()).not.toContain('drag-active')
+  })
+
+  // 覆盖实例知识库只读拖拽：无写权限时拖拽和 drop 都不会创建上传会话。
+  it('只读实例知识库拖拽文件不会上传', async () => {
+    mocks.canManage.mockReturnValue(false)
+    const wrapper = mountTab()
+    const first = new File(['a'], 'a.md')
+    const section = wrapper.find('.knowledge-drop-zone')
+
+    await section.trigger('dragenter', { dataTransfer: fileDragTransfer() })
+    await section.trigger('drop', {
+      dataTransfer: {
+        items: [],
+        files: [first],
+      },
+    })
+
+    expect(section.classes()).not.toContain('drag-active')
     expect(mocks.run).not.toHaveBeenCalled()
+    expect(mocks.mutateAsync).not.toHaveBeenCalled()
   })
 
   // 覆盖实例知识库只读场景：可读用户可以下载文件，且下载按 RAGFlow document ID 定位。
