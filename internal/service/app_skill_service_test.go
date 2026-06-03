@@ -118,6 +118,13 @@ func (f *fakeAppLocator) setApp(appID, orgID, ownerUserID string, supported bool
 	}
 }
 
+// setVersion 更新某 app 当前绑定的助手版本 ID（供删除保护测试使用）。
+func (f *fakeAppLocator) setVersion(appID, versionID string) {
+	loc := f.locations[appID]
+	loc.VersionID = versionID
+	f.locations[appID] = loc
+}
+
 func (f *fakeAppLocator) LocateApp(_ context.Context, appID string) (AppSkillLocation, error) {
 	loc, ok := f.locations[appID]
 	if !ok {
@@ -455,6 +462,60 @@ func buildTarWithNFiles(t *testing.T, n int, fileSize int64) []byte {
 		t.Fatalf("关闭 tar writer 失败: %v", err)
 	}
 	return buf.Bytes()
+}
+
+// =========================================================
+// Uninstall 测试
+// =========================================================
+
+// TestAppSkillService_Uninstall_OK 卸载已安装的 skill：
+// 期望 app_skills 行被删除 + oc-ops 热删 + reload 均被调用。
+func TestAppSkillService_Uninstall_OK(t *testing.T) {
+	deps := newAppSkillTestDeps(t)
+	// 预置 app-1 已安装 mytool（非当前版本必需 skill）
+	deps.appSkills.put("app-1", "mytool", "platform")
+	// app-1 绑定版本 v1，v1 的 skills_json 不含 mytool（不受保护）
+	deps.versions.setSkills("v1", []string{"weather"})
+	deps.apps.setVersion("app-1", "v1")
+	svc := deps.service()
+
+	// 执行卸载
+	err := svc.Uninstall(context.Background(), deps.ownerPrincipal(), "app-1", "mytool")
+	require.NoError(t, err)
+	// app_skills 行已删除
+	_, ok := deps.appSkills.get("app-1", "mytool")
+	assert.False(t, ok, "app_skills 行应已删除")
+	// oc-ops 热删与 reload 均被调用
+	assert.True(t, deps.ocops.deleted["mytool"], "SkillDelete 应被调用")
+	assert.True(t, deps.ocops.reloaded, "SkillReload 应被调用")
+}
+
+// TestAppSkillService_Uninstall_Protected 卸载当前版本必需的 skill 被拒：
+// 版本 v1 的 skills_json 含 weather，卸载 weather → ErrAppSkillProtected。
+func TestAppSkillService_Uninstall_Protected(t *testing.T) {
+	deps := newAppSkillTestDeps(t)
+	// 当前版本含 weather（受保护）
+	deps.versions.setSkills("v1", []string{"weather"})
+	deps.apps.setVersion("app-1", "v1")
+	// 实例已装 weather
+	deps.appSkills.put("app-1", "weather", "platform")
+	svc := deps.service()
+
+	err := svc.Uninstall(context.Background(), deps.ownerPrincipal(), "app-1", "weather")
+	require.ErrorIs(t, err, ErrAppSkillProtected)
+	// app_skills 行不应被删除
+	_, ok := deps.appSkills.get("app-1", "weather")
+	assert.True(t, ok, "受保护的 skill 不应被删除")
+}
+
+// TestAppSkillService_Uninstall_NotFound 卸载不存在的 skill 返回 ErrAppSkillNotFound。
+func TestAppSkillService_Uninstall_NotFound(t *testing.T) {
+	deps := newAppSkillTestDeps(t)
+	// app_skills 中没有 unknown-skill
+	svc := deps.service()
+
+	err := svc.Uninstall(context.Background(), deps.ownerPrincipal(), "app-1", "unknown-skill")
+	require.ErrorIs(t, err, ErrAppSkillNotFound)
 }
 
 // buildRawTarHeaders 手动构造 tar 归档 raw 字节：

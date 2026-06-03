@@ -296,6 +296,91 @@ func (s *AppSkillService) Install(ctx context.Context, principal auth.Principal,
 	}, nil
 }
 
+// =========================================================
+// Uninstall
+// =========================================================
+
+// Uninstall 卸载指定实例的 skill：
+//  1. 权限（CanManageAppSkill）
+//  2. 查 app_skills 行（不存在 → ErrAppSkillNotFound）
+//  3. 删除保护：若该 skill 属于当前绑定版本的 skills_json → ErrAppSkillProtected
+//  4. 删 app_skills
+//  5. 写审计
+//  6. oc-ops 热删（SkillDelete）+ reload（SkillReload）；失败静默忽略（对账可识别 pending）
+func (s *AppSkillService) Uninstall(ctx context.Context, principal auth.Principal, appID, name string) error {
+	// 解析 app 定位信息（org/owner/oc-ops 地址/是否支持热删）
+	loc, err := s.apps.LocateApp(ctx, appID)
+	if err != nil {
+		return err
+	}
+	// 权限判断：owner 本人或本 org 的 org_admin 方可卸载实例 skill
+	if !auth.CanManageAppSkill(principal, loc.OrgID, loc.OwnerUserID) {
+		return ErrAppSkillDenied
+	}
+	// 查 app_skills 行，不存在则返回 NotFound
+	if _, err := s.store.GetAppSkillByAppAndName(ctx, sqlc.GetAppSkillByAppAndNameParams{
+		AppID: appID,
+		Name:  name,
+	}); err != nil {
+		if errors.Is(err, sql.ErrNoRows) {
+			return ErrAppSkillNotFound
+		}
+		return fmt.Errorf("查询实例 skill 失败: %w", err)
+	}
+	// 删除保护：若该 skill 属于 app 当前绑定版本的 skills_json，拒绝卸载
+	protected, err := s.isCurrentVersionSkill(ctx, loc.VersionID, name)
+	if err != nil {
+		return err
+	}
+	if protected {
+		return ErrAppSkillProtected
+	}
+	// 从 app_skills 表删除记录
+	if err := s.store.DeleteAppSkillByAppAndName(ctx, sqlc.DeleteAppSkillByAppAndNameParams{
+		AppID: appID,
+		Name:  name,
+	}); err != nil {
+		return fmt.Errorf("删除实例 skill 失败: %w", err)
+	}
+	// 写审计日志（记录卸载操作，target_type=app_skill，action=skill.uninstall）
+	_, _ = s.audit.Record(ctx, AuditEvent{
+		ActorID:       principal.UserID,
+		ActorRole:     string(principal.Role),
+		OrgID:         loc.OrgID,
+		TargetType:    "app_skill",
+		TargetID:      appID + "/" + name,
+		Action:        "skill.uninstall",
+		Result:        "succeeded",
+		DetailMessage: fmt.Sprintf("从实例 %s 卸载 skill %s", appID, name),
+	})
+	// oc-ops 热删 + reload（失败静默忽略：app_skills 已删，对账可识别并清理容器侧残留）
+	if loc.Supported {
+		_ = s.ocops.SkillDelete(ctx, loc.Endpoint, name)
+		_ = s.ocops.SkillReload(ctx, loc.Endpoint)
+	}
+	return nil
+}
+
+// isCurrentVersionSkill 判断 name 是否属于 app 当前绑定版本的 skills_json（删除保护）。
+// versionID 为空（app 未绑定版本）时直接返回 false（无需保护）。
+func (s *AppSkillService) isCurrentVersionSkill(ctx context.Context, versionID, name string) (bool, error) {
+	if versionID == "" {
+		// app 未绑定任何助手版本，无删除保护
+		return false, nil
+	}
+	// 取当前版本的 skills_json 中所有 skill name
+	names, err := s.versions.SkillNames(ctx, versionID)
+	if err != nil {
+		return false, fmt.Errorf("查询版本 skill 列表失败: %w", err)
+	}
+	for _, n := range names {
+		if n == name {
+			return true, nil
+		}
+	}
+	return false, nil
+}
+
 // fetchArchive 按来源取归档字节、sha256（可能为空）、原始元数据快照、扩展名。
 // 返回的 sha 为空时调用方须自行计算（clawhub 来源不提供 sha）。
 func (s *AppSkillService) fetchArchive(ctx context.Context, in InstallSkillInput) (data []byte, sha string, meta map[string]any, ext string, err error) {
@@ -329,7 +414,7 @@ func (s *AppSkillService) fetchArchive(ctx context.Context, in InstallSkillInput
 
 // validateArchiveSafety 对归档字节做解压炸弹防护：
 // 统计 tar/zip 解压后总字节与文件数，任意超过阈值则返回错误。
-// 同时隐式检测 zip-slip（路径穿越：含 ../），超过文件数/大小时提前退出。
+// 路径穿越（zip-slip）由容器侧 render_skills 负责校验；本函数只防解压炸弹（总字节/文件数超限）。
 // ext 目前支持 "tar" 与 "zip"；未知扩展名视为合法（宽松策略，避免误拒未知格式）。
 func validateArchiveSafety(archive []byte, ext string) error {
 	switch ext {
