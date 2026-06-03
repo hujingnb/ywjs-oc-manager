@@ -192,6 +192,12 @@ func toAssistantVersionResult(row sqlc.AssistantVersion) (AssistantVersionResult
 
 // decodeSkills 把 skills_json 解为切片，供 Update/skill 操作复用。
 func decodeSkills(raw []byte) ([]AssistantVersionSkill, error) {
+	return DecodeVersionSkills(raw)
+}
+
+// DecodeVersionSkills 是 decodeSkills 的导出版本，供 worker 包等跨包场景复用，
+// 避免在多处重复 JSON 解码逻辑。
+func DecodeVersionSkills(raw []byte) ([]AssistantVersionSkill, error) {
 	skills := []AssistantVersionSkill{}
 	if len(raw) == 0 {
 		return skills, nil
