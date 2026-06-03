@@ -36,6 +36,7 @@ import (
 	"oc-manager/internal/config"
 	"oc-manager/internal/domain"
 	"oc-manager/internal/integrations/channel"
+	"oc-manager/internal/integrations/clawhub"
 	"oc-manager/internal/integrations/k8sorch"
 	"oc-manager/internal/integrations/newapi"
 	"oc-manager/internal/integrations/ocops"
@@ -335,6 +336,15 @@ func runManager(ctx context.Context, cfg config.Config, logOut io.Writer) error 
 	platformSkillService := service.NewPlatformSkillService(dbStore.Queries, libraryBlobs)
 	workspaceService := service.NewWorkspaceService(dbStore.Queries, workspaceObjStore, workspacePresignTTL)
 
+	// ClawHub 公共库客户端：BaseURL 为空则保持 nil，不接入 ClawHub（市场仅平台库，
+	// per-app 安装与更新检测仅走平台来源）。
+	// 使用局部变量 *clawhub.ClawHubClient（具体指针类型），避免赋值给接口类型产生
+	// "nil 指针包装成非 nil interface"的陷阱；各处注入均通过条件判断确保仅在非 nil 时赋值。
+	var clawhubClient *clawhub.ClawHubClient
+	if cfg.ClawHub.BaseURL != "" {
+		clawhubClient = clawhub.NewClient(cfg.ClawHub.BaseURL, cfg.ClawHub.RequestTimeout.Duration)
+	}
+
 	// 助手版本 service：镜像来自配置、模型校验走 new-api 目录、skill tar 存数据根目录。
 	// modelCatalogService 为 nil 时（未配 newapi）跳过构造，路由自动不注册。
 	var assistantVersionService *service.AssistantVersionService
@@ -445,27 +455,52 @@ func runManager(ctx context.Context, cfg config.Config, logOut io.Writer) error 
 	// AppSkillService：实例级 skill 安装/卸载/更新与对账。
 	// - AppLocator 由 ocopsResolver.LocateApp 满足（已在 ocops.go 实现，含 VersionID 字段）。
 	// - AssistantVersionLoader 由 assistantVersionSkillLoader 适配（GetAssistantVersion + decodeSkills）。
-	// - ClawHub downloader 传 nil（Plan 2 clawhub 包未执行，spec 允许 clawhub 可选）。
-	//   Plan 2 就绪后注入真实 ClawHub client。
+	// - ClawHub downloader 注入真实 clawhubClient（BaseURL 为空时为 nil，service 层对 nil 有守卫）。
+	//   注意 nil interface 陷阱：ClawHub 字段类型为 ClawHubDownloader（接口），直接传 nil *Client
+	//   会产生"非 nil interface 包装 nil 指针"的错误；通过条件赋值确保仅在指针非 nil 时赋值给接口。
 	// - audit 由 auditService 直接满足（*AuditService.Record 签名与 AuditRecorder 接口对齐）。
 	avSkillLoader := service.NewAssistantVersionSkillLoader(dbStore.Queries)
-	appSkillService := service.NewAppSkillService(service.AppSkillServiceDeps{
+	appSkillDeps := service.AppSkillServiceDeps{
 		Store:    dbStore.Queries,
 		Apps:     ocopsResolver,
 		Versions: avSkillLoader,
 		Platform: platformSkillService,
-		ClawHub:  nil, // Plan 2 就绪后注入 clawhubClient
-		Blobs:    libraryBlobs,
-		OcOps:    ocopsClient,
-		Audit:    auditService,
-	})
+		// ClawHub 默认 nil：BaseURL 为空时不注入，避免 nil interface 陷阱（见上注释）。
+		ClawHub: nil,
+		Blobs:   libraryBlobs,
+		OcOps:   ocopsClient,
+		Audit:   auditService,
+	}
+	// 仅当 clawhubClient 指针非 nil 时才赋值给接口字段，防止 nil *Client 包装成非 nil interface。
+	if clawhubClient != nil {
+		appSkillDeps.ClawHub = clawhubClient
+	}
+	appSkillService := service.NewAppSkillService(appSkillDeps)
 
 	// SkillUpdateChecker 定时回源检测 skill 最高版本，写回 app_skills.latest_version。
 	// SkillUpdateCheckerPlatformStore 由 dbStore.Queries 满足（ListPlatformSkills）。
 	// SkillUpdateCheckerAppSkillStore 由 dbStore.Queries 满足（ListDistinctAppSkillSources / ListAppSkillsBySourceRef / UpdateAppSkillLatest）。
-	// clawhub lister 传 nil（Plan 2 就绪后注入）。
-	skillUpdateChecker := service.NewSkillUpdateChecker(dbStore.Queries, dbStore.Queries, nil)
+	// ClawHub 版本列表：ClawHubVersionLister 接口要求 ListVersions 返回 []service.SkillVersion，
+	// 而 clawhub.ClawHubClient.ListVersions 返回 []clawhub.SkillVersion（不同包类型，无法直接赋值）；
+	// 通过 clawhubVersionListerAdapter 包装做类型转换，仅在 clawhubClient 非 nil 时注入。
+	var skillUpdateCheckerClawHub service.ClawHubVersionLister
+	if clawhubClient != nil {
+		skillUpdateCheckerClawHub = clawhubVersionListerAdapter{client: clawhubClient}
+	}
+	skillUpdateChecker := service.NewSkillUpdateChecker(dbStore.Queries, dbStore.Queries, skillUpdateCheckerClawHub)
 	skillUpdateCheckerTask := service.NewPeriodicReconciler("skill_update_check", 30*time.Minute, skillUpdateChecker.Tick)
+
+	// 市场聚合：平台库来源（复用 platformSkillService）+ 可选 ClawHub 公共库来源。
+	// clawhubSource 为 nil 时市场仅展示平台库（降级），不影响安装/更新等其他功能。
+	// 注意：NewSkillLibraryService 第二参数类型为 SkillSource 接口；
+	// clawhubSource 声明为接口类型，nil 值安全（不会产生 nil pointer wrapped in interface）。
+	platformSource := service.NewPlatformSource(platformSkillService)
+	var clawhubSource service.SkillSource
+	if clawhubClient != nil {
+		// imagecoordRedis 已在上方构造（与 distLocker 共用同一 Redis 物理实例），复用避免新建连接。
+		clawhubSource = service.NewClawHubSource(clawhubClient, imagecoordRedis, cfg.ClawHub.CacheTTL.Duration)
+	}
+	skillLibraryService := service.NewSkillLibraryService(platformSource, clawhubSource)
 
 	server := &http.Server{
 		Addr: cfg.App.HTTPAddr,
@@ -489,6 +524,7 @@ func runManager(ctx context.Context, cfg config.Config, logOut io.Writer) error 
 			HermesKanbanService:     hermesKanbanService,
 			HermesCronService:       hermesCronService,
 			AppSkillService:         appSkillService,
+			SkillLibraryService:     skillLibraryService,
 			BootstrapService:        bootstrapSvc,
 			JobsStore:               dbStore.Queries,
 			TokenManager:            tokenManager,

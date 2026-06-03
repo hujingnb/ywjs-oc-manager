@@ -52,6 +52,8 @@ type Dependencies struct {
 	HermesCronService *service.HermesCronService
 	// AppSkillService 提供实例级 skill 安装/卸载/更新与对账能力；nil 时不注册 skill 路由。
 	AppSkillService *service.AppSkillService
+	// SkillLibraryService 提供 skill 市场聚合浏览/搜索（平台库 + ClawHub 公共库）；nil 时不注册。
+	SkillLibraryService *service.SkillLibraryService
 	// BootstrapService 提供 pod 启动回调（/internal/apps/:id/bootstrap）；nil 时不注册。
 	// /internal 组不挂用户鉴权中间件，由 handler 内联校验 control token。
 	BootstrapService handlers.BootstrapAppService
@@ -178,6 +180,9 @@ func NewRouter(deps ...Dependencies) http.Handler {
 	}
 	if dep.AppSkillService != nil {
 		handlers.RegisterAppSkillRoutes(user, handlers.NewAppSkillsHandler(dep.AppSkillService))
+	}
+	if dep.SkillLibraryService != nil {
+		handlers.RegisterSkillMarketRoutes(user, handlers.NewSkillMarketHandler(dep.SkillLibraryService))
 	}
 	return router
 }

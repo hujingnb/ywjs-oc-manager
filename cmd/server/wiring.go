@@ -11,6 +11,7 @@ import (
 	null "github.com/guregu/null/v5"
 
 	"oc-manager/internal/auth"
+	"oc-manager/internal/integrations/clawhub"
 	"oc-manager/internal/integrations/newapi"
 	"oc-manager/internal/integrations/ocops"
 	"oc-manager/internal/service"
@@ -205,4 +206,30 @@ func (f *orgScopedClientFactory) UserScopedFor(ctx context.Context, app sqlc.App
 // service 包里有同语义函数，但 wiring 层不便引入服务包内部 helper，复制一份避免循环依赖。
 func parseInt64ForWiring(s string) (int64, error) {
 	return strconv.ParseInt(s, 10, 64)
+}
+
+// clawhubVersionListerAdapter 把 *clawhub.ClawHubClient 适配为 service.ClawHubVersionLister。
+//
+// 问题背景：clawhub.ClawHubClient.ListVersions 返回 []clawhub.SkillVersion，而
+// service.ClawHubVersionLister 接口要求 []service.SkillVersion；两者结构相同（均只含 Version string 字段），
+// 但 Go 类型系统要求类型完全匹配，*clawhub.ClawHubClient 无法直接满足 service.ClawHubVersionLister。
+// 此适配器在 main 包完成转换，避免 integrations/clawhub 包直接依赖 internal/service 包造成循环依赖。
+type clawhubVersionListerAdapter struct {
+	// client 是真实的 ClawHub HTTP 客户端，BaseURL 非空时由 main 构造并传入。
+	client *clawhub.ClawHubClient
+}
+
+// ListVersions 实现 service.ClawHubVersionLister：调用 ClawHub 客户端获取版本列表，
+// 并把 []clawhub.SkillVersion 逐项转换为 []service.SkillVersion（字段一一对应）。
+func (a clawhubVersionListerAdapter) ListVersions(ctx context.Context, slug string) ([]service.SkillVersion, error) {
+	vers, err := a.client.ListVersions(ctx, slug)
+	if err != nil {
+		return nil, err
+	}
+	// 逐项把 clawhub.SkillVersion 转换为 service.SkillVersion（均只含 Version string 字段）。
+	out := make([]service.SkillVersion, len(vers))
+	for i, v := range vers {
+		out[i] = service.SkillVersion{Version: v.Version}
+	}
+	return out, nil
 }
