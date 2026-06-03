@@ -42,6 +42,7 @@ type Querier interface {
 	CountRAGFlowDocumentsByScope(ctx context.Context, arg CountRAGFlowDocumentsByScopeParams) (int64, error)
 	// k8s 模型下 app 对应 Deployment，pod 落点由调度器决定，不再写 runtime_node_id。
 	CreateApp(ctx context.Context, arg CreateAppParams) error
+	CreateAppSkill(ctx context.Context, arg CreateAppSkillParams) error
 	CreateAssistantVersion(ctx context.Context, arg CreateAssistantVersionParams) error
 	CreateAuditLog(ctx context.Context, arg CreateAuditLogParams) error
 	CreateChannelBinding(ctx context.Context, arg CreateChannelBindingParams) error
@@ -57,6 +58,7 @@ type Querier interface {
 	CreateRechargeRecord(ctx context.Context, arg CreateRechargeRecordParams) error
 	CreateRefreshToken(ctx context.Context, arg CreateRefreshTokenParams) error
 	CreateUser(ctx context.Context, arg CreateUserParams) error
+	DeleteAppSkillByAppAndName(ctx context.Context, arg DeleteAppSkillByAppAndNameParams) error
 	DeleteExpiredRefreshTokens(ctx context.Context) error
 	DeletePlatformSkill(ctx context.Context, id string) error
 	// 删除本地 dataset 映射；document 缓存通过外键级联清理。
@@ -68,6 +70,7 @@ type Querier interface {
 	// 按 control token（per-app 三用：bootstrap / oc-kb / oc-ops）的 hash 反查当前 app；
 	// 不允许请求方传入目标 app/dataset，鉴权即定位。
 	GetAppByRuntimeTokenHash(ctx context.Context, runtimeTokenHash null.String) (App, error)
+	GetAppSkillByAppAndName(ctx context.Context, arg GetAppSkillByAppAndNameParams) (AppSkill, error)
 	// 取实例及其绑定版本的 revision / image_id，供 version_synced 计算。
 	GetAppWithVersion(ctx context.Context, id string) (GetAppWithVersionRow, error)
 	GetAssistantVersion(ctx context.Context, id string) (AssistantVersion, error)
@@ -110,6 +113,8 @@ type Querier interface {
 	// 全量返回活跃组织（deleted_at IS NULL），不分页；
 	// 仅供平台内部聚合使用（如 GetOrgUsageBreakdown），请勿用于用户可见的列表接口。
 	ListAllActiveOrganizations(ctx context.Context) ([]Organization, error)
+	ListAppSkillsByApp(ctx context.Context, appID string) ([]AppSkill, error)
+	ListAppSkillsBySourceRef(ctx context.Context, arg ListAppSkillsBySourceRefParams) ([]AppSkill, error)
 	ListAppsByOrg(ctx context.Context, arg ListAppsByOrgParams) ([]App, error)
 	// 组织实例列表联查版本 revision / image_id，供 version_synced 批量计算。
 	ListAppsByOrgWithVersion(ctx context.Context, arg ListAppsByOrgWithVersionParams) ([]ListAppsByOrgWithVersionRow, error)
@@ -120,6 +125,7 @@ type Querier interface {
 	ListAuditLogsByOrg(ctx context.Context, arg ListAuditLogsByOrgParams) ([]ListAuditLogsByOrgRow, error)
 	// 同 ListAuditLogsByOrg，按 target_type + target_id 过滤。
 	ListAuditLogsByTarget(ctx context.Context, arg ListAuditLogsByTargetParams) ([]ListAuditLogsByTargetRow, error)
+	ListDistinctAppSkillSources(ctx context.Context) ([]ListDistinctAppSkillSourcesRow, error)
 	// reconciler 兜底用：列出 status=error 的 app。reconciler 查其 pod，若 hermes 实际 Ready
 	// （说明并非真失败，只是状态没收敛，如 WaitReady 曾误超时但 pod 后来起来了），就重新入队
 	// init job 推进到 running；pod 真坏则保持 error 不动。reaper 只扫 init 子状态、不管 error，
@@ -215,6 +221,8 @@ type Querier interface {
 	TouchApp(ctx context.Context, id string) error
 	// phasePullRuntimeImage 成功后写入镜像引用与 sha256。
 	UpdateAppRuntimeImage(ctx context.Context, arg UpdateAppRuntimeImageParams) error
+	UpdateAppSkillLatest(ctx context.Context, arg UpdateAppSkillLatestParams) error
+	UpdateAppSkillVersion(ctx context.Context, arg UpdateAppSkillVersionParams) error
 	// revision 由 service 计算后整体写入（仅容器相关字段变更才递增）。
 	UpdateAssistantVersion(ctx context.Context, arg UpdateAssistantVersionParams) error
 	// skill 上传/删除单独走此查询：只改 skills_json 与 revision，避免覆盖其它字段。
