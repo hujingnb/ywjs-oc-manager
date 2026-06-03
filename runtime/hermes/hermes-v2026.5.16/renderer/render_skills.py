@@ -15,6 +15,7 @@ import datetime as _dt
 import json
 import shutil
 import tarfile
+import zipfile
 from pathlib import Path
 from typing import List
 
@@ -75,26 +76,65 @@ def _is_safe_member_path(name: str) -> bool:
     return ".." not in parts and len(parts) > 0
 
 
+def _extract_tar(archive_path: Path, skills_root: Path, rel: str) -> set[str]:
+    """解压一个 tar 归档到 skills_root，返回顶层目录名集合。
+
+    双重防护：先逐条 _is_safe_member_path 校验路径越界，再用 extractall(filter="data")
+    在解压时拒绝 symlink/hardlink 越界条目。
+    """
+    top_dirs: set[str] = set()
+    with tarfile.open(archive_path, "r") as tf:
+        for member in tf.getmembers():
+            if not _is_safe_member_path(member.name):
+                raise ValueError(f"skill tar 含越界路径条目: {member.name} ({rel})")
+            if member.isreg() or member.isdir():
+                top = member.name.split("/", 1)[0]
+                if top:
+                    top_dirs.add(top)
+        # filter="data" 在 extractall 内部再校验每个成员（含 symlink/hardlink 的 linkname），
+        # 拒绝越界条目；与上面逐条 _is_safe_member_path 形成双重防护。
+        tf.extractall(skills_root, filter="data")
+    return top_dirs
+
+
+def _extract_zip(archive_path: Path, skills_root: Path, rel: str) -> set[str]:
+    """解压一个 zip 归档到 skills_root，返回顶层目录名集合。
+
+    zip 标准库无 filter 机制，逐条用 _is_safe_member_path 校验路径，
+    拒绝含 .. 段或绝对路径的条目（zip-slip 防护）。
+    """
+    top_dirs: set[str] = set()
+    with zipfile.ZipFile(archive_path, "r") as zf:
+        for name in zf.namelist():
+            if not _is_safe_member_path(name):
+                raise ValueError(f"skill zip 含越界路径条目: {name} ({rel})")
+            # 取第一段作为顶层目录名（文件条目的父目录，目录条目本身若为顶层也算）。
+            top = name.split("/", 1)[0]
+            if top:
+                top_dirs.add(top)
+        # 逐条提取，避免 extractall 跳过路径校验（部分实现不校验）。
+        for name in zf.namelist():
+            zf.extract(name, skills_root)
+    return top_dirs
+
+
 def _extract_version_skills(skill_rels: List[str], input_root: Path, skills_root: Path) -> List[str]:
-    """解压 manifest.skills 列出的版本 skill tar 到 skills_root，每个顶层目录补 .oc-managed 标记。"""
+    """解压 manifest.skills 列出的版本 skill 归档（tar 或 zip）到 skills_root，每个顶层目录补 .oc-managed 标记。
+
+    归档类型按文件扩展名分流：.zip 走 _extract_zip，其余走 _extract_tar。
+    两条路径最终都收集顶层目录名，统一写 .oc-managed 标记。
+    """
     outputs: list[str] = []
     skills_root.mkdir(parents=True, exist_ok=True)
     for rel in skill_rels:
-        tar_path = input_root / rel
-        if not tar_path.exists():
-            raise FileNotFoundError(f"版本 skill tar 不存在: {rel}")
-        top_dirs: set[str] = set()
-        with tarfile.open(tar_path, "r") as tf:
-            for member in tf.getmembers():
-                if not _is_safe_member_path(member.name):
-                    raise ValueError(f"skill tar 含越界路径条目: {member.name} ({rel})")
-                if member.isreg() or member.isdir():
-                    top = member.name.split("/", 1)[0]
-                    if top:
-                        top_dirs.add(top)
-            # filter="data" 在 extractall 内部再校验每个成员（含 symlink/hardlink 的 linkname），
-            # 拒绝越界条目；与上面逐条 _is_safe_member_path 形成双重防护。
-            tf.extractall(skills_root, filter="data")
+        archive_path = input_root / rel
+        if not archive_path.exists():
+            raise FileNotFoundError(f"版本 skill 归档不存在: {rel}")
+        # 按扩展名决定解压方式；Path.suffix 返回含点的后缀，如 ".zip"、".tar"、".gz"。
+        if archive_path.suffix.lower() == ".zip":
+            top_dirs = _extract_zip(archive_path, skills_root, rel)
+        else:
+            top_dirs = _extract_tar(archive_path, skills_root, rel)
         for top in sorted(top_dirs):
             skill_dir = skills_root / top
             if skill_dir.is_dir():

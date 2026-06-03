@@ -1,9 +1,12 @@
-"""验证 render_skills：渲染 oc-kb skill 并解压版本 skill tar。"""
+"""验证 render_skills：渲染 oc-kb skill 并解压版本 skill tar/zip。"""
 
 import io
 import json
 import tarfile
+import zipfile
 from pathlib import Path
+
+import pytest
 
 from lib.manifest import Manifest
 from renderer.render_skills import render
@@ -86,7 +89,6 @@ def test_render_keeps_builtin_skill_without_marker(tmp_input: Path, tmp_data: Pa
 
 def test_render_rejects_unsafe_tar_path(tmp_input: Path, tmp_data: Path) -> None:
     # tar 含越界路径条目时抛错，不把文件写到 skills/ 之外。
-    import pytest
     tar_path = tmp_input / "resources" / "skills" / "evil.tar"
     tar_path.parent.mkdir(parents=True, exist_ok=True)
     with tarfile.open(tar_path, "w") as tw:
@@ -100,7 +102,6 @@ def test_render_rejects_unsafe_tar_path(tmp_input: Path, tmp_data: Path) -> None
 
 def test_render_rejects_tar_symlink_escape(tmp_input: Path, tmp_data: Path) -> None:
     # tar 含指向解压目录之外的符号链接时，extractall(filter="data") 拒绝，不写出界文件。
-    import pytest
     tar_path = tmp_input / "resources" / "skills" / "evil-link.tar"
     tar_path.parent.mkdir(parents=True, exist_ok=True)
     with tarfile.open(tar_path, "w") as tw:
@@ -110,3 +111,28 @@ def test_render_rejects_tar_symlink_escape(tmp_input: Path, tmp_data: Path) -> N
         tw.addfile(link)
     with pytest.raises(Exception):
         render(_manifest(["resources/skills/evil-link.tar"]), tmp_input, tmp_data)
+
+
+def _make_skill_zip(zip_path: Path, top_dir: str, skill_name: str) -> None:
+    # 在 zip_path 写一个 skill zip：内含 <top_dir>/SKILL.md（带 frontmatter）。
+    zip_path.parent.mkdir(parents=True, exist_ok=True)
+    with zipfile.ZipFile(zip_path, "w") as zf:
+        zf.writestr(f"{top_dir}/SKILL.md", f"---\nname: {skill_name}\n---\n")
+
+
+def test_extract_zip_skill(tmp_input: Path, tmp_data: Path) -> None:
+    # zip 格式版本 skill 解压到 skills/<top>/ 并打 .oc-managed 标记。
+    _make_skill_zip(tmp_input / "resources" / "skills" / "weather.zip", "weather", "weather")
+    render(_manifest(["resources/skills/weather.zip"]), tmp_input, tmp_data)
+    assert (tmp_data / "skills" / "weather" / "SKILL.md").exists()
+    assert (tmp_data / "skills" / "weather" / ".oc-managed").exists()
+
+
+def test_zip_rejects_traversal(tmp_input: Path, tmp_data: Path) -> None:
+    # 含 ../ 越界条目的 zip 被拒（zip-slip 防护）。
+    zip_path = tmp_input / "resources" / "skills" / "evil.zip"
+    zip_path.parent.mkdir(parents=True, exist_ok=True)
+    with zipfile.ZipFile(zip_path, "w") as zf:
+        zf.writestr("../evil/SKILL.md", "x")
+    with pytest.raises(Exception):
+        render(_manifest(["resources/skills/evil.zip"]), tmp_input, tmp_data)
