@@ -112,6 +112,7 @@ function mountPage() {
   return mount(OrgKnowledgePage, {
     global: {
       stubs: {
+        Card: { template: '<section><slot name="header" /><slot name="header-extra" /><slot /></section>' },
         NCard: { template: '<section><slot name="header" /><slot name="header-extra" /><slot /></section>' },
         NSpace: { template: '<div><slot /></div>' },
         NSelect: { template: '<select />' },
@@ -167,8 +168,47 @@ describe('OrgKnowledgePage', () => {
     expect(mocks.mutateAsync).not.toHaveBeenCalled()
   })
 
-  // 覆盖企业知识库剩余容量拦截：超过 remaining_bytes 时不创建上传会话。
-  it('拒绝超过企业知识库剩余空间的文件', async () => {
+  // 覆盖企业知识库多选上传：多个文件应按选择顺序交给全局上传队列。
+  it('支持一次选择多个企业知识库文件上传', async () => {
+    const wrapper = mountPage()
+    const input = wrapper.find('input[type="file"]')
+    const first = new File(['a'], 'a.md')
+    const second = new File(['b'], 'b.md')
+
+    Object.defineProperty(input.element, 'files', { value: [first, second], configurable: true })
+    await input.trigger('change')
+
+    expect(mocks.run).toHaveBeenCalledTimes(1)
+    const runItems = mocks.run.mock.calls[0][0] as Array<{ file: File; label: string }>
+    expect(runItems).toEqual([
+      { file: first, label: 'a.md' },
+      { file: second, label: 'b.md' },
+    ])
+  })
+
+  // 覆盖企业知识库拖拽上传：拖入多个文件时复用同一批量上传流程。
+  it('支持拖拽多个企业知识库文件上传', async () => {
+    const wrapper = mountPage()
+    const first = new File(['a'], 'a.md')
+    const second = new File(['b'], 'b.md')
+
+    await wrapper.find('section').trigger('drop', {
+      dataTransfer: {
+        items: [],
+        files: [first, second],
+      },
+    })
+
+    expect(mocks.run).toHaveBeenCalledTimes(1)
+    const runItems = mocks.run.mock.calls[0][0] as Array<{ file: File; label: string }>
+    expect(runItems).toEqual([
+      { file: first, label: 'a.md' },
+      { file: second, label: 'b.md' },
+    ])
+  })
+
+  // 覆盖企业知识库容量动态失败：超过 remaining_bytes 的文件仍进入队列，由后端逐个返回失败。
+  it('超过企业知识库剩余空间的文件仍交给上传队列', async () => {
     const wrapper = mountPage()
     const input = wrapper.find('input[type="file"]')
     const file = new File(['x'], 'too-large.md')
@@ -177,8 +217,9 @@ describe('OrgKnowledgePage', () => {
     Object.defineProperty(input.element, 'files', { value: [file], configurable: true })
     await input.trigger('change')
 
-    expect(mocks.warning).toHaveBeenCalledWith(expect.stringContaining('知识库空间不足'))
-    expect(mocks.run).not.toHaveBeenCalled()
+    expect(mocks.warning).not.toHaveBeenCalled()
+    expect(mocks.run).toHaveBeenCalledTimes(1)
+    expect(mocks.run.mock.calls[0][0]).toEqual([{ file, label: 'too-large.md' }])
   })
 
   // 覆盖组织成员只读场景：可下载组织知识库文件，且下载按 RAGFlow document ID 定位。

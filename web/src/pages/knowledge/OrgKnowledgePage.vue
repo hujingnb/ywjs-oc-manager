@@ -1,7 +1,15 @@
 <template>
   <div style="display: grid; gap: 18px">
     <!-- 文件列表 -->
-    <n-card :bordered="true">
+    <n-card
+      :bordered="true"
+      class="knowledge-drop-zone"
+      :class="{ 'drag-active': dragActive && canManage }"
+      @dragenter.prevent="onDragEnter"
+      @dragover.prevent="onDragOver"
+      @dragleave.prevent="onDragLeave"
+      @drop.prevent="onDropUpload"
+    >
       <template #header>
         <div>
           <p class="eyebrow">{{ eyebrow }}</p>
@@ -12,7 +20,7 @@
         <div v-if="canManage" class="upload-actions">
           <span class="upload-limit">{{ KNOWLEDGE_UPLOAD_MAX_MESSAGE }}</span>
           <label class="primary-button">
-            <input class="hidden-input" type="file" :disabled="!canManage" @change="onUpload" />
+            <input class="hidden-input" type="file" multiple :disabled="!canManage" @change="onUpload" />
             上传文件
           </label>
         </div>
@@ -51,8 +59,6 @@ import {
   KNOWLEDGE_UPLOAD_MAX_MESSAGE,
   downloadOrgKnowledgeFile,
   formatKnowledgeBytes,
-  isKnowledgeUploadOverRemaining,
-  isKnowledgeUploadTooLarge,
   useDeleteOrgKnowledge,
   useOrgKnowledgeQuery,
   useReparseOrgKnowledge,
@@ -63,6 +69,13 @@ import { usePlatformOrgSelection } from '@/composables/usePlatformOrgSelection'
 import { canManageOrgKnowledge } from '@/domain/permissions'
 import { useAuthStore } from '@/stores/auth'
 import { useUploadProgressStore } from '@/stores/uploadProgress'
+import {
+  filterKnowledgeUploadFiles,
+  hasKnowledgeFilesInDrag,
+  knowledgeFilesFromDrop,
+  knowledgeFilesFromInput,
+  toKnowledgeUploadItems,
+} from './knowledgeUploadBatch'
 
 // OrgKnowledgePage 管理组织级共享知识库；文件主库由 RAGFlow 承担，页面只展示扁平 document 列表。
 const props = defineProps<{ orgId?: string }>()
@@ -92,6 +105,8 @@ const quotaSummary = computed(() => listing.value
   : '')
 // downloading 标记当前页面正在触发浏览器下载，防止同一页面重复点击下载按钮。
 const downloading = ref(false)
+// dragActive 标记当前卡片是否处于可上传拖拽态，仅有写权限时才会置 true。
+const dragActive = ref(false)
 
 // parseTagType 将 RAGFlow 解析状态映射为标签颜色，未知状态保留默认色便于兼容服务端新增状态。
 function parseTagType(status: string): 'success' | 'warning' | 'error' | 'default' {
@@ -131,26 +146,12 @@ function formatSize(value: number): string {
   return `${(value / 1024 / 1024).toFixed(2)} MB`
 }
 
-// onUpload 将文件上传到 RAGFlow 组织 dataset；上传进度统一由全局 UploadProgressModal 展示。
-// 互斥规则：会话进行中 store.run 抛错，业务侧用 n-message 提示用户。
-async function onUpload(event: Event) {
-  const input = event.target as HTMLInputElement
-  const file = input.files?.[0]
-  // 不论是否真正发起上传，都清空 input.value 以便用户重新选择同名文件。
-  input.value = ''
-  if (!file) return
-  // 前端先拦截超过知识库业务上限的文件，避免创建进度会话后再被网关或后端拒绝。
-  if (isKnowledgeUploadTooLarge(file)) {
-    message.warning(KNOWLEDGE_UPLOAD_MAX_MESSAGE)
-    return
-  }
-  // 剩余容量来自后端实时列表响应；前端拦截可避免创建必然失败的上传会话。
-  if (isKnowledgeUploadOverRemaining(file, listing.value)) {
-    message.warning(`知识库空间不足，剩余 ${formatKnowledgeBytes(listing.value?.remaining_bytes ?? 0)}`)
-    return
-  }
+// uploadFiles 把多选或拖拽得到的文件交给全局上传队列；容量不足等动态失败由后端逐个返回。
+async function uploadFiles(files: File[]) {
+  const uploadableFiles = filterKnowledgeUploadFiles(files, message.warning)
+  if (uploadableFiles.length === 0) return
   try {
-    await uploadProgress.run([{ file, label: file.name }], async (_item, f, ctx) => {
+    await uploadProgress.run(toKnowledgeUploadItems(uploadableFiles), async (_item, f, ctx) => {
       await uploadMutation.mutateAsync({
         file: f,
         onProgress: ctx.onProgress,
@@ -161,6 +162,44 @@ async function onUpload(event: Event) {
     // 唯一会被抛出的错误是「会话互斥」：仅此一种情况下提示用户。
     message.warning(err instanceof Error ? err.message : '已有上传任务正在进行')
   }
+}
+
+// onUpload 将文件上传到 RAGFlow 组织 dataset；上传进度统一由全局 UploadProgressModal 展示。
+// 互斥规则：会话进行中 store.run 抛错，业务侧用 n-message 提示用户。
+async function onUpload(event: Event) {
+  const input = event.target as HTMLInputElement
+  const files = knowledgeFilesFromInput(input)
+  // 不论是否真正发起上传，都清空 input.value 以便用户重新选择同名文件。
+  input.value = ''
+  if (!canManage.value) return
+  await uploadFiles(files)
+}
+
+// onDragEnter 在拖入文件时打开视觉态；纯文本拖拽不影响知识库卡片。
+function onDragEnter(event: DragEvent) {
+  if (!canManage.value || !hasKnowledgeFilesInDrag(event)) return
+  dragActive.value = true
+}
+
+// onDragOver 持续维持可上传视觉态，并让浏览器显示 copy dropEffect。
+function onDragOver(event: DragEvent) {
+  if (!canManage.value || !hasKnowledgeFilesInDrag(event)) return
+  dragActive.value = true
+  if (event.dataTransfer) {
+    event.dataTransfer.dropEffect = 'copy'
+  }
+}
+
+// onDragLeave 在拖拽离开卡片时关闭视觉态。
+function onDragLeave() {
+  dragActive.value = false
+}
+
+// onDropUpload 处理拖拽文件上传；目录或非文件项会在 helper 中被过滤。
+async function onDropUpload(event: DragEvent) {
+  dragActive.value = false
+  if (!canManage.value) return
+  await uploadFiles(knowledgeFilesFromDrop(event))
 }
 
 // onDelete 使用浏览器确认框拦截误删，删除后由 mutation hook 负责刷新列表缓存。
@@ -251,6 +290,15 @@ const fileColumns: DataTableColumns<KnowledgeDocument> = [
 .upload-limit {
   color: var(--color-text-secondary);
   font-size: 12px;
+}
+
+.knowledge-drop-zone {
+  transition: border-color 0.15s ease, box-shadow 0.15s ease;
+}
+
+.knowledge-drop-zone.drag-active {
+  border-color: var(--color-brand);
+  box-shadow: 0 0 0 2px rgba(255, 106, 0, 0.14);
 }
 
 .hidden-input {
