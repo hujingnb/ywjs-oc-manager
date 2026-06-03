@@ -409,6 +409,240 @@ func (s *AppSkillService) fetchArchive(ctx context.Context, in InstallSkillInput
 }
 
 // =========================================================
+// Update
+// =========================================================
+
+// Update 将已安装的 skill 更新到指定目标版本：
+//  1. 权限（CanManageAppSkill）
+//  2. 查 app_skills 行（不存在 → ErrAppSkillNotFound）
+//  3. 按 source 取目标版本归档（与 Install 的 fetchArchive 同逻辑）
+//  4. 解压防炸弹校验（validateArchiveSafety）
+//  5. 缓存新版本归档到 LibraryBlobStore
+//  6. UpdateAppSkillVersion（更新版本/路径/sha256，清空 latest_version）
+//  7. oc-ops 热替换（SkillInstall 覆盖安装）+ reload（SkillReload）
+//  8. 写审计；oc-ops 失败 → status=pending（不回滚，可重试）
+func (s *AppSkillService) Update(ctx context.Context, principal auth.Principal, appID, name, targetVersion string) (AppSkillResult, error) {
+	// 解析 app 定位信息（org/owner/oc-ops 地址/是否支持热装）
+	loc, err := s.apps.LocateApp(ctx, appID)
+	if err != nil {
+		return AppSkillResult{}, err
+	}
+	// 权限判断：owner 本人或本 org 的 org_admin 方可更新实例 skill
+	if !auth.CanManageAppSkill(principal, loc.OrgID, loc.OwnerUserID) {
+		return AppSkillResult{}, ErrAppSkillDenied
+	}
+	// 查 app_skills 行，不存在则返回 NotFound
+	row, err := s.store.GetAppSkillByAppAndName(ctx, sqlc.GetAppSkillByAppAndNameParams{
+		AppID: appID,
+		Name:  name,
+	})
+	if err != nil {
+		if errors.Is(err, sql.ErrNoRows) {
+			return AppSkillResult{}, ErrAppSkillNotFound
+		}
+		return AppSkillResult{}, fmt.Errorf("查询实例 skill 失败: %w", err)
+	}
+	// 按来源取目标版本归档（复用 fetchArchive，source/sourceRef 来自 app_skills 记录）
+	in := InstallSkillInput{
+		Source:    row.Source,
+		SourceRef: row.SourceRef,
+		Name:      name,
+		Version:   targetVersion,
+	}
+	archive, sha, meta, ext, err := s.fetchArchive(ctx, in)
+	if err != nil {
+		return AppSkillResult{}, err
+	}
+	// 解压防炸弹校验
+	if err := validateArchiveSafety(archive, ext); err != nil {
+		return AppSkillResult{}, ErrAppSkillArchiveTooDangerous
+	}
+	// clawhub 来源没有预置 sha，本地计算
+	if sha == "" {
+		sum := sha256.Sum256(archive)
+		sha = hex.EncodeToString(sum[:])
+	}
+	// 缓存新版本归档到对象存储
+	relPath, err := s.blobs.PutLibrarySkill(row.Source, row.SourceRef, targetVersion, ext, archive)
+	if err != nil {
+		return AppSkillResult{}, err
+	}
+	// 序列化元数据快照（更新记录时覆写原来的元数据）
+	metaJSON, _ := json.Marshal(meta)
+	// 更新 app_skills 版本记录（同时清空 latest_version，等定时任务重新检测）
+	if err := s.store.UpdateAppSkillVersion(ctx, sqlc.UpdateAppSkillVersionParams{
+		Version:        targetVersion,
+		CachedTarPath:  relPath,
+		FileSize:       int64(len(archive)),
+		FileSha256:     sha,
+		SourceMetadata: metaJSON,
+		AppID:          appID,
+		Name:           name,
+	}); err != nil {
+		return AppSkillResult{}, fmt.Errorf("更新实例 skill 版本失败: %w", err)
+	}
+	// 写审计日志（记录更新操作，action=skill.update）
+	_, _ = s.audit.Record(ctx, AuditEvent{
+		ActorID:       principal.UserID,
+		ActorRole:     string(principal.Role),
+		OrgID:         loc.OrgID,
+		TargetType:    "app_skill",
+		TargetID:      appID + "/" + name,
+		Action:        "skill.update",
+		Result:        "succeeded",
+		DetailMessage: fmt.Sprintf("更新实例 %s 的 skill %s 到版本 %s", appID, name, targetVersion),
+	})
+	// oc-ops 热替换（SkillInstall 覆盖安装）+ reload（失败 → pending，不回滚）
+	status := "active"
+	if loc.Supported {
+		if err := s.ocops.SkillInstall(ctx, loc.Endpoint, name, archive); err != nil {
+			// 热替换失败：app_skills 已更新，标记 pending 等待下次启动或手动重试
+			status = "pending"
+		} else if err := s.ocops.SkillReload(ctx, loc.Endpoint); err != nil {
+			// reload 失败：skill 已上传，但 hermes 未重扫；标记 pending
+			status = "pending"
+		}
+	} else {
+		// 容器未运行：skill 已更新，等下次启动 oc-restore 恢复
+		status = "pending"
+	}
+	return AppSkillResult{
+		Name:      name,
+		Source:    row.Source,
+		SourceRef: row.SourceRef,
+		Version:   targetVersion,
+		Status:    status,
+		Category:  "manager",
+	}, nil
+}
+
+// =========================================================
+// List（实时对账）
+// =========================================================
+
+// List 返回指定实例的 skill 列表（实时对账）：
+// 合并「app_skills 期望集」与「容器实际集（ocops.SkillList）」，输出每条的对账 status：
+//   - active:       app_skills 有 × 容器实际有（正常运行中）
+//   - pending:      app_skills 有 × 容器实际无（容器可达，等待热装完成）
+//   - unknown:      app_skills 有 × 容器实际无（容器不可达，状态未知）
+//   - builtin:      app_skills 无 × 容器有 + SkillInfo.Builtin（镜像内置）
+//   - self_created: app_skills 无 × 容器有 + 非 builtin（用户自建）
+//
+// Protected=true 表示该 skill 属于当前版本 skills_json，禁止删除。
+// Latest 非空时表示存在新版本（大于 Version），前端可展示更新提示。
+func (s *AppSkillService) List(ctx context.Context, principal auth.Principal, appID string) ([]AppSkillResult, error) {
+	// 解析 app 定位信息（org/owner/oc-ops 地址/是否支持热装）
+	loc, err := s.apps.LocateApp(ctx, appID)
+	if err != nil {
+		return nil, err
+	}
+	// 权限判断：owner 本人或本 org 的 org_admin 方可查看实例 skill 列表
+	if !auth.CanManageAppSkill(principal, loc.OrgID, loc.OwnerUserID) {
+		return nil, ErrAppSkillDenied
+	}
+	// 取 app_skills 期望集，按 name 建 map 加速对账
+	rows, err := s.store.ListAppSkillsByApp(ctx, appID)
+	if err != nil {
+		return nil, fmt.Errorf("查询实例 skill 列表失败: %w", err)
+	}
+	expected := make(map[string]sqlc.AppSkill, len(rows))
+	for _, r := range rows {
+		expected[r.Name] = r
+	}
+	// 当前版本必需的 skill 集（删除保护标记）；获取失败时降级为空集，不阻塞对账
+	protectedNames, _ := s.versions.SkillNames(ctx, loc.VersionID)
+	protectedSet := toSet(protectedNames)
+
+	// 取容器实际运行中的 skill 集（不可达则降级：仅用 app_skills，status=unknown）
+	var actual []ocops.SkillInfo
+	reachable := loc.Supported
+	if reachable {
+		actual, err = s.ocops.SkillList(ctx, loc.Endpoint)
+		if err != nil {
+			// 容器不可达（pod 未就绪/网络故障）：不报错，fallback 为 unknown
+			reachable = false
+		}
+	}
+
+	out := []AppSkillResult{}
+	seenContainer := make(map[string]bool, len(actual))
+
+	// 遍历容器实际 skill：与 app_skills 对账，判断 active/builtin/self_created
+	for _, a := range actual {
+		seenContainer[a.Name] = true
+		if exp, ok := expected[a.Name]; ok {
+			// app_skills 有 × 容器有 → active（manager 管理，正常运行中）
+			out = append(out, managerEntry(exp, "active", protectedSet[a.Name]))
+		} else if a.Builtin {
+			// app_skills 无 × 容器有 + 内置 → builtin（镜像预装，非 manager 管理）
+			out = append(out, AppSkillResult{Name: a.Name, Status: "builtin", Category: "hermes-builtin"})
+		} else {
+			// app_skills 无 × 容器有 + 非内置 → self_created（用户在容器内自建）
+			out = append(out, AppSkillResult{Name: a.Name, Status: "self_created", Category: "hermes-self-created"})
+		}
+	}
+
+	// 遍历 app_skills 期望集：容器无对应条目 → pending（可达）或 unknown（不可达）
+	for expName, exp := range expected {
+		if seenContainer[expName] {
+			// 已在上面的容器遍历中处理过，跳过
+			continue
+		}
+		st := "pending"
+		if !reachable {
+			// 容器不可达，无法区分「未安装」与「已安装但容器宕机」，降级为 unknown
+			st = "unknown"
+		}
+		out = append(out, managerEntry(exp, st, protectedSet[expName]))
+	}
+
+	// 按 name 排序（稳定输出，前端不依赖顺序但测试断言更清晰）
+	sortByName(out)
+	return out, nil
+}
+
+// =========================================================
+// 辅助函数
+// =========================================================
+
+// managerEntry 将 app_skills 行 + 对账 status + protected 标记组装为 AppSkillResult。
+// latest_version 非空时填入 Latest 字段，供前端展示「有新版本」提示。
+func managerEntry(row sqlc.AppSkill, status string, protected bool) AppSkillResult {
+	r := AppSkillResult{
+		Name:      row.Name,
+		Source:    row.Source,
+		SourceRef: row.SourceRef,
+		Version:   row.Version,
+		Status:    status,
+		Category:  "manager",
+		Protected: protected,
+	}
+	if row.LatestVersion.Valid {
+		r.Latest = row.LatestVersion.String
+	}
+	return r
+}
+
+// toSet 将 []string 转为 map[string]bool，用于 O(1) 成员判断（protected 标记查询）。
+func toSet(names []string) map[string]bool {
+	s := make(map[string]bool, len(names))
+	for _, n := range names {
+		s[n] = true
+	}
+	return s
+}
+
+// sortByName 对 []AppSkillResult 按 Name 字段升序排序（原地操作）。
+// 保证 List 返回顺序稳定，便于测试断言与前端展示。
+func sortByName(results []AppSkillResult) {
+	for i := 1; i < len(results); i++ {
+		for j := i; j > 0 && results[j].Name < results[j-1].Name; j-- {
+			results[j], results[j-1] = results[j-1], results[j]
+		}
+	}
+}
+
+// =========================================================
 // validateArchiveSafety
 // =========================================================
 

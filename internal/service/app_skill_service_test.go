@@ -9,6 +9,7 @@ import (
 	"fmt"
 	"testing"
 
+	"github.com/guregu/null/v5"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
@@ -43,7 +44,19 @@ func (f *fakeAppSkillStore) get(appID, name string) (sqlc.AppSkill, bool) {
 
 // put 预置一条 app_skills 行（供测试构造重复场景）。
 func (f *fakeAppSkillStore) put(appID, name, source string) {
-	f.rows[f.key(appID, name)] = sqlc.AppSkill{AppID: appID, Name: name, Source: source}
+	f.rows[f.key(appID, name)] = sqlc.AppSkill{AppID: appID, Name: name, Source: source, SourceRef: name, Version: "1.0"}
+}
+
+// putWithLatest 预置一条带 latest_version 的 app_skills 行（供测试更新提示场景）。
+func (f *fakeAppSkillStore) putWithLatest(appID, name, source, version, latestVersion string) {
+	f.rows[f.key(appID, name)] = sqlc.AppSkill{
+		AppID:         appID,
+		Name:          name,
+		Source:        source,
+		SourceRef:     name,
+		Version:       version,
+		LatestVersion: null.StringFrom(latestVersion),
+	}
 }
 
 func (f *fakeAppSkillStore) ListAppSkillsByApp(_ context.Context, appID string) ([]sqlc.AppSkill, error) {
@@ -185,6 +198,10 @@ type fakeOcOpsSkillClient struct {
 	installErr error
 	// reloadErr 预置 SkillReload 返回的错误
 	reloadErr error
+	// listSkills 预置 SkillList 的返回值（测试对账场景）
+	listSkills []ocops.SkillInfo
+	// listErr 预置 SkillList 返回的错误（测试容器不可达场景）
+	listErr error
 }
 
 func newFakeOcOpsSkillClient() *fakeOcOpsSkillClient {
@@ -216,7 +233,10 @@ func (f *fakeOcOpsSkillClient) SkillReload(_ context.Context, _ ocops.Endpoint) 
 }
 
 func (f *fakeOcOpsSkillClient) SkillList(_ context.Context, _ ocops.Endpoint) ([]ocops.SkillInfo, error) {
-	return nil, nil
+	if f.listErr != nil {
+		return nil, f.listErr
+	}
+	return f.listSkills, nil
 }
 
 // fakeAssistantVersionLoader 是 AssistantVersionLoader 的内存实现。
@@ -516,6 +536,191 @@ func TestAppSkillService_Uninstall_NotFound(t *testing.T) {
 
 	err := svc.Uninstall(context.Background(), deps.ownerPrincipal(), "app-1", "unknown-skill")
 	require.ErrorIs(t, err, ErrAppSkillNotFound)
+}
+
+// =========================================================
+// Update 测试
+// =========================================================
+
+// TestAppSkillService_Update_OK 更新已安装的 skill 到新版本：
+// 期望 UpdateAppSkillVersion 更新版本记录 + oc-ops 热替换（SkillInstall 覆盖）+ reload。
+func TestAppSkillService_Update_OK(t *testing.T) {
+	deps := newAppSkillTestDeps(t)
+	// 预置 app-1 已安装 weather 1.0（平台来源）
+	deps.appSkills.put("app-1", "weather", "platform")
+	// 预置平台库 weather 2.0 的新归档
+	deps.platform.put("weather", "2.0", []byte("PK\x03\x04newtardata"))
+	svc := deps.service()
+
+	res, err := svc.Update(context.Background(), deps.ownerPrincipal(), "app-1", "weather", "2.0")
+	require.NoError(t, err)
+	// 返回字段：name 正确、版本已更新、状态 active
+	assert.Equal(t, "weather", res.Name)
+	assert.Equal(t, "2.0", res.Version)
+	assert.Equal(t, "active", res.Status)
+	// oc-ops 热替换（SkillInstall 覆盖）与 reload 均被调用
+	assert.True(t, deps.ocops.installed["weather"], "SkillInstall 应被调用（覆盖安装）")
+	assert.True(t, deps.ocops.reloaded, "SkillReload 应被调用")
+	// app_skills 版本已更新
+	row, ok := deps.appSkills.get("app-1", "weather")
+	require.True(t, ok)
+	assert.Equal(t, "2.0", row.Version)
+}
+
+// TestAppSkillService_Update_NotFound 更新不存在的 skill 返回 ErrAppSkillNotFound。
+func TestAppSkillService_Update_NotFound(t *testing.T) {
+	deps := newAppSkillTestDeps(t)
+	// app_skills 中没有 nonexistent
+	svc := deps.service()
+
+	_, err := svc.Update(context.Background(), deps.ownerPrincipal(), "app-1", "nonexistent", "2.0")
+	require.ErrorIs(t, err, ErrAppSkillNotFound)
+}
+
+// =========================================================
+// List 实时对账测试
+// =========================================================
+
+// findSkill 在 List 结果中按 name 查找，供断言用。
+func findSkill(results []AppSkillResult, name string) (AppSkillResult, bool) {
+	for _, r := range results {
+		if r.Name == name {
+			return r, true
+		}
+	}
+	return AppSkillResult{}, false
+}
+
+// TestAppSkillService_List_Active app_skills 有（期望）且容器实际也有 → status=active。
+func TestAppSkillService_List_Active(t *testing.T) {
+	deps := newAppSkillTestDeps(t)
+	// 期望：app-1 已在 app_skills 中注册 weather（manager 管理）
+	deps.appSkills.put("app-1", "weather", "platform")
+	// 容器实际：容器正在运行 weather
+	deps.ocops.listSkills = []ocops.SkillInfo{
+		{Name: "weather", Managed: true, Builtin: false},
+	}
+	svc := deps.service()
+
+	results, err := svc.List(context.Background(), deps.ownerPrincipal(), "app-1")
+	require.NoError(t, err)
+	// 找到 weather 且状态为 active（期望×实际 = 已激活）
+	r, ok := findSkill(results, "weather")
+	require.True(t, ok, "应找到 weather")
+	assert.Equal(t, "active", r.Status)
+}
+
+// TestAppSkillService_List_Pending app_skills 有（期望）但容器实际没有，容器可达 → status=pending。
+func TestAppSkillService_List_Pending(t *testing.T) {
+	deps := newAppSkillTestDeps(t)
+	// 期望：app-1 已注册 weather，但容器没有执行安装（可能热装失败）
+	deps.appSkills.put("app-1", "weather", "platform")
+	// 容器实际：空列表（容器可达但 weather 不在其中）
+	deps.ocops.listSkills = []ocops.SkillInfo{}
+	svc := deps.service()
+
+	results, err := svc.List(context.Background(), deps.ownerPrincipal(), "app-1")
+	require.NoError(t, err)
+	// weather 应为 pending（期望存在但容器无，等待热装完成）
+	r, ok := findSkill(results, "weather")
+	require.True(t, ok, "应找到 weather")
+	assert.Equal(t, "pending", r.Status)
+}
+
+// TestAppSkillService_List_Builtin 容器有但 app_skills 无，且 Builtin=true → status=builtin。
+func TestAppSkillService_List_Builtin(t *testing.T) {
+	deps := newAppSkillTestDeps(t)
+	// app_skills 为空（manager 没有管理这个 skill）
+	// 容器实际：内置 skill（随镜像预装）
+	deps.ocops.listSkills = []ocops.SkillInfo{
+		{Name: "hermes-core", Managed: false, Builtin: true},
+	}
+	svc := deps.service()
+
+	results, err := svc.List(context.Background(), deps.ownerPrincipal(), "app-1")
+	require.NoError(t, err)
+	// hermes-core 为 builtin（容器自带，manager 未管理，Builtin=true）
+	r, ok := findSkill(results, "hermes-core")
+	require.True(t, ok, "应找到 hermes-core")
+	assert.Equal(t, "builtin", r.Status)
+}
+
+// TestAppSkillService_List_SelfCreated 容器有但 app_skills 无，且 Builtin=false → status=self_created。
+func TestAppSkillService_List_SelfCreated(t *testing.T) {
+	deps := newAppSkillTestDeps(t)
+	// app_skills 为空（manager 没有管理这个 skill）
+	// 容器实际：用户自己创建的 skill（非 builtin，非 manager 管理）
+	deps.ocops.listSkills = []ocops.SkillInfo{
+		{Name: "my-custom-skill", Managed: false, Builtin: false},
+	}
+	svc := deps.service()
+
+	results, err := svc.List(context.Background(), deps.ownerPrincipal(), "app-1")
+	require.NoError(t, err)
+	// my-custom-skill 为 self_created（容器有，app_skills 无，非 builtin）
+	r, ok := findSkill(results, "my-custom-skill")
+	require.True(t, ok, "应找到 my-custom-skill")
+	assert.Equal(t, "self_created", r.Status)
+}
+
+// TestAppSkillService_List_UnknownOnUnreachable 容器不可达（SkillList 报错）时：
+// app_skills 中的 skill 状态应降级为 unknown（fallback，不能确认安装状态）。
+func TestAppSkillService_List_UnknownOnUnreachable(t *testing.T) {
+	deps := newAppSkillTestDeps(t)
+	// 期望：app-1 已注册 weather
+	deps.appSkills.put("app-1", "weather", "platform")
+	// 容器不可达：SkillList 返回错误
+	deps.ocops.listErr = errors.New("connection refused")
+	svc := deps.service()
+
+	results, err := svc.List(context.Background(), deps.ownerPrincipal(), "app-1")
+	require.NoError(t, err)
+	// weather 应为 unknown（容器不可达，无法确认安装状态）
+	r, ok := findSkill(results, "weather")
+	require.True(t, ok, "应找到 weather")
+	assert.Equal(t, "unknown", r.Status)
+}
+
+// TestAppSkillService_List_Protected app_skills 中且属于当前版本必需的 skill，Protected=true。
+func TestAppSkillService_List_Protected(t *testing.T) {
+	deps := newAppSkillTestDeps(t)
+	// 预置 app-1 已注册 weather，且当前版本 v1 的 skills_json 含 weather（受保护）
+	deps.appSkills.put("app-1", "weather", "platform")
+	deps.versions.setSkills("v1", []string{"weather"})
+	deps.apps.setVersion("app-1", "v1")
+	// 容器实际也有 weather（active）
+	deps.ocops.listSkills = []ocops.SkillInfo{
+		{Name: "weather", Managed: true, Builtin: false},
+	}
+	svc := deps.service()
+
+	results, err := svc.List(context.Background(), deps.ownerPrincipal(), "app-1")
+	require.NoError(t, err)
+	// weather 应为 active 且 Protected=true
+	r, ok := findSkill(results, "weather")
+	require.True(t, ok, "应找到 weather")
+	assert.Equal(t, "active", r.Status)
+	assert.True(t, r.Protected, "当前版本必需的 skill 应标记为 Protected")
+}
+
+// TestAppSkillService_List_LatestVersion app_skills 中有 latest_version 时，结果应填入 Latest 字段。
+func TestAppSkillService_List_LatestVersion(t *testing.T) {
+	deps := newAppSkillTestDeps(t)
+	// 预置 app-1 已注册 weather 1.0，定时任务已检测到最新版 2.0
+	deps.appSkills.putWithLatest("app-1", "weather", "platform", "1.0", "2.0")
+	// 容器实际也有 weather（active）
+	deps.ocops.listSkills = []ocops.SkillInfo{
+		{Name: "weather", Managed: true, Builtin: false},
+	}
+	svc := deps.service()
+
+	results, err := svc.List(context.Background(), deps.ownerPrincipal(), "app-1")
+	require.NoError(t, err)
+	// weather 应携带 latest_version=2.0，提示前端可更新
+	r, ok := findSkill(results, "weather")
+	require.True(t, ok, "应找到 weather")
+	assert.Equal(t, "1.0", r.Version)
+	assert.Equal(t, "2.0", r.Latest)
 }
 
 // buildRawTarHeaders 手动构造 tar 归档 raw 字节：
