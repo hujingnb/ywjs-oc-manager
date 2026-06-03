@@ -43,3 +43,10 @@ func SessionsKey(appID string) string {
 func SkillKey(versionID, skillName string) string {
 	return path.Join("versions", versionID, "skills", skillName+".tar")
 }
+
+// LibrarySkillKey 返回 skill 库共享缓存对象 key：
+// library/<source>/<sourceRef>/<version>.<ext>（如 library/platform/weather/1.0.tar）。
+// 同一 skill 同版本被多个 app 安装时只存一份。调用方保证各段不含路径分隔符。
+func LibrarySkillKey(source, sourceRef, version, ext string) string {
+	return path.Join("library", source, sourceRef, version+"."+ext)
+}
