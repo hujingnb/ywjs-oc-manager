@@ -209,3 +209,8 @@ var ErrAppSkillSourceUnknown = errors.New("未知的 skill 来源")
 
 // ErrAppSkillArchiveTooDangerous 表示 skill 归档解压校验失败（如路径穿越、内容篡改等）。
 var ErrAppSkillArchiveTooDangerous = errors.New("skill 归档解压校验失败")
+
+// ===== skill 市场 =====
+
+// ErrSkillMarketSourceUnknown 表示请求了未知的 skill 来源。
+var ErrSkillMarketSourceUnknown = errors.New("未知的 skill 来源")
