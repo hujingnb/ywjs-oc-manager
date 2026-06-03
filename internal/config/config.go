@@ -130,6 +130,8 @@ type RuntimeImageConfig struct {
 	ID    string `yaml:"id"`
 	Label string `yaml:"label"`
 	Ref   string `yaml:"ref"`
+	// BuiltinSkills 是该镜像内置 skill 名单，供「已安装列表」区分 builtin/self_created（对账兜底，可空）。
+	BuiltinSkills []string `yaml:"builtin_skills"`
 }
 
 // WorkspaceConfig 描述应用工作目录归档相关参数。
