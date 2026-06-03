@@ -126,7 +126,7 @@
         </n-alert>
         <n-space justify="end">
           <n-button attr-type="button" :disabled="passwordChanging" @click="closePasswordModal">取消</n-button>
-          <n-button type="primary" attr-type="submit" :loading="passwordChanging">确认修改</n-button>
+          <n-button type="primary" attr-type="submit" :loading="passwordChanging" :disabled="passwordChanging">确认修改</n-button>
         </n-space>
       </n-form>
     </n-modal>
@@ -324,6 +324,7 @@ function validatePasswordForm() {
 
 // onChangePassword 只调用 auth store 暴露的改密动作；成功后 store 会清理登录态，这里负责跳回登录页。
 async function onChangePassword() {
+  if (passwordChanging.value) return
   const validationError = validatePasswordForm()
   if (validationError) {
     passwordError.value = validationError

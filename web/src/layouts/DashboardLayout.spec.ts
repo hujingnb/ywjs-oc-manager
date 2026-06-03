@@ -318,6 +318,31 @@ describe('DashboardLayout', () => {
     expect(wrapper.text()).toContain('两次输入的新密码不一致')
   })
 
+  // 覆盖改密请求进行中重复提交边界：挂起中的请求只能被提交一次，防止双击或回车重复调用后端。
+  it('ignores duplicate password submissions while request is pending', async () => {
+    let resolvePasswordChange!: () => void
+    const pendingPasswordChange = new Promise<void>((resolve) => {
+      resolvePasswordChange = resolve
+    })
+    changePassword.mockReturnValue(pendingPasswordChange)
+    const wrapper = mountLayout()
+    const passwordButton = wrapper.findAll('button').find(button => button.text().includes('修改密码'))
+
+    await passwordButton!.trigger('click')
+    const inputs = wrapper.findAll('input')
+    await inputs[0].setValue('old-password')
+    await inputs[1].setValue('new-password-123')
+    await inputs[2].setValue('new-password-123')
+    const form = wrapper.find('[data-test="password-form"]')
+    await form.trigger('submit')
+    await form.trigger('submit')
+
+    expect(changePassword).toHaveBeenCalledTimes(1)
+
+    resolvePasswordChange()
+    await flushPromises()
+  })
+
   // 覆盖改密成功流程：提交匹配的新密码后调用 auth store，并跳转登录页重新登录。
   it('submits password change and redirects to login on success', async () => {
     const wrapper = mountLayout()
