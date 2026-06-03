@@ -94,46 +94,41 @@
             </n-form-item>
           </n-grid-item>
 
-          <!-- skill 管理：编辑态对已存在版本即时上传/删除；新建态版本尚未落库，先暂存文件 -->
+          <!-- skill 管理：从平台库选 skill 配进版本；编辑态即时生效，新建态暂不支持（需先保存版本） -->
           <n-grid-item :span="2">
             <n-form-item label="Skill 列表">
               <div style="display: grid; gap: 8px; width: 100%">
-                <!-- 编辑态：展示服务端已有 skill，删除操作即时生效 -->
-                <template v-if="editingId">
-                  <div v-if="editingSkills.length === 0" class="state-text">暂无 skill</div>
-                  <div
-                    v-for="skill in editingSkills"
-                    :key="skill.name"
-                    style="display: flex; align-items: center; justify-content: space-between; gap: 12px"
-                  >
-                    <span>{{ skill.name }} <small class="data-table-subtitle">{{ formatBytes(skill.file_size) }}</small></span>
-                    <n-button size="small" tertiary @click="onDeleteSkill(skill.name)">删除</n-button>
-                  </div>
-                </template>
-                <!-- 新建态：展示已选待上传文件，移除仅清理本地暂存项（版本保存后才真正上传） -->
-                <template v-else>
-                  <div v-if="pendingSkillFiles.length === 0" class="state-text">暂无 skill</div>
-                  <div
-                    v-for="(file, idx) in pendingSkillFiles"
-                    :key="`${file.name}-${idx}`"
-                    style="display: flex; align-items: center; justify-content: space-between; gap: 12px"
-                  >
-                    <span>{{ file.name }} <small class="data-table-subtitle">{{ formatBytes(file.size) }}</small></span>
-                    <n-button size="small" tertiary @click="removePendingSkill(idx)">移除</n-button>
-                  </div>
-                </template>
-                <div>
-                  <input
-                    ref="skillFileInput"
-                    type="file"
-                    accept=".tar"
-                    style="display: none"
-                    @change="onSkillFileChange"
-                  />
-                  <n-button size="small" :loading="skillUploading" @click="triggerSkillUpload">
-                    {{ editingId ? '上传 skill tar' : '添加 skill tar' }}
-                  </n-button>
+                <!-- 已配 skill 列表展示 name/version + 删除 -->
+                <div v-if="editingSkills.length === 0" class="state-text">暂无 skill</div>
+                <div
+                  v-for="skill in editingSkills"
+                  :key="skill.name"
+                  style="display: flex; align-items: center; justify-content: space-between; gap: 12px"
+                >
+                  <span>
+                    {{ skill.name }}
+                    <small v-if="skill.version" class="data-table-subtitle">v{{ skill.version }}</small>
+                  </span>
+                  <n-button size="small" tertiary @click="onDeleteSkill(skill.name)">删除</n-button>
                 </div>
+                <!-- 编辑态才可从平台库选 skill；新建态需先保存版本才有 ID -->
+                <template v-if="editingId">
+                  <div style="display: flex; gap: 8px; align-items: center">
+                    <n-select
+                      v-model:value="selectedSkillKey"
+                      :loading="platformSkillsQuery.isLoading.value"
+                      :disabled="platformSkillsQuery.isError.value"
+                      :options="platformSkillOptions"
+                      placeholder="选择平台库 skill"
+                      style="flex: 1"
+                    />
+                    <n-button size="small" :loading="skillAdding" :disabled="!selectedSkillKey" @click="onAddSkill">
+                      添加
+                    </n-button>
+                  </div>
+                  <p v-if="platformSkillsQuery.isError.value" class="state-text danger">平台库列表获取失败，请重试</p>
+                </template>
+                <p v-else class="state-text">保存版本后可配置 skill</p>
                 <p v-if="skillFeedback" class="state-text" :class="{ danger: skillFeedbackError }">{{ skillFeedback }}</p>
               </div>
             </n-form-item>
@@ -166,7 +161,7 @@
 <script setup lang="ts">
 import { computed, h, reactive, ref } from 'vue'
 import { Plus, X } from 'lucide-vue-next'
-import { NButton, NCard, NForm, NFormItem, NGrid, NGridItem, NInput, NSelect, NSpace, useMessage } from 'naive-ui'
+import { NButton, NCard, NForm, NFormItem, NGrid, NGridItem, NInput, NSelect, NSpace } from 'naive-ui'
 
 import DataTableList from '@/components/DataTableList.vue'
 import ConfirmActionModal from '@/components/ConfirmActionModal.vue'
@@ -175,105 +170,69 @@ import { useModelsQuery } from '@/api/hooks/useOrganizations'
 import {
   AUXILIARY_SLOTS,
   emptyRouting,
+  useAddVersionSkill,
   useAssistantVersionsQuery,
   useCreateAssistantVersion,
   useDeleteAssistantVersion,
   useDeleteAssistantVersionSkill,
   useRuntimeImagesQuery,
   useUpdateAssistantVersion,
-  useUploadAssistantVersionSkill,
   type AssistantVersionDTO,
   type AssistantVersionFormPayload,
   type AssistantVersionSkillDTO,
 } from '@/api/hooks/useAssistantVersions'
-import { useUploadProgressStore } from '@/stores/uploadProgress'
+import { usePlatformSkillsQuery } from '@/api/hooks/useSkills'
 
 // AssistantVersionsPage 是平台管理员的助手版本目录管理页：列表 + 新建/编辑 + 删除。
 const { data: versions, isLoading, error } = useAssistantVersionsQuery()
 const createMutation = useCreateAssistantVersion()
 const updateMutation = useUpdateAssistantVersion()
 const deleteMutation = useDeleteAssistantVersion()
-const uploadProgress = useUploadProgressStore()
-const message = useMessage()
 
-// skill 管理状态：editingSkills 是当前编辑版本的 skill 列表，随上传/删除即时刷新。
-const uploadSkillMutation = useUploadAssistantVersionSkill()
+// skill 管理状态：editingSkills 是当前编辑版本的 skill 列表，随添加/删除即时刷新。
+// 新建态无版本 ID，不支持即时添加 skill（表单提交后切编辑态再配）。
+const addSkillMutation = useAddVersionSkill()
 const deleteSkillMutation = useDeleteAssistantVersionSkill()
 const editingSkills = ref<AssistantVersionSkillDTO[]>([])
-// pendingSkillFiles 是新建态下用户已选、尚未上传的 skill tar 文件。
-// 新建版本时后端尚无版本 ID，无法即时上传，先在本地暂存，待版本创建成功后再逐个上传。
-const pendingSkillFiles = ref<File[]>([])
-const skillFileInput = ref<HTMLInputElement | null>(null)
-const skillUploading = ref(false)
+// selectedSkillKey 是「从库选」n-select 当前选中值，格式为 "<name>|<version>"。
+const selectedSkillKey = ref<string | null>(null)
+const skillAdding = ref(false)
 const skillFeedback = ref('')
 const skillFeedbackError = ref(false)
 
-// formatBytes 把字节数格式化为人类可读大小。
-function formatBytes(n: number): string {
-  if (n < 1024) return `${n} B`
-  if (n < 1024 * 1024) return `${(n / 1024).toFixed(1)} KB`
-  return `${(n / 1024 / 1024).toFixed(1)} MB`
-}
+// 平台库 skill 列表查询，供 n-select 下拉选项使用。
+// 仅在表单打开且处于编辑态时有意义；查询结果按 name+version 组合展示。
+const platformSkillsQuery = usePlatformSkillsQuery()
+const platformSkillOptions = computed(() =>
+  (platformSkillsQuery.data.value ?? []).map(s => ({
+    // value 用 "<name>|<version>" 组合键，解析时以首个 "|" 分隔，支持 name 中不含 "|" 的场景。
+    value: `${s.name}|${s.version}`,
+    label: `${s.name}  v${s.version}`,
+  })),
+)
 
-// triggerSkillUpload 触发隐藏的文件选择框。
-function triggerSkillUpload() {
-  skillFileInput.value?.click()
-}
-
-// onSkillFileChange 处理 skill tar 选择：编辑态版本已存在，立即上传；
-// 上传进度统一由全局 UploadProgressModal 展示，按钮 loading 退化为短暂闪烁。
-// 新建态版本尚未创建，先把文件暂存进 pendingSkillFiles，待保存表单时一并上传。
-async function onSkillFileChange(event: Event) {
-  const input = event.target as HTMLInputElement
-  const file = input.files?.[0]
-  input.value = '' // 允许重复选择同名文件
-  if (!file) return
+// onAddSkill 从平台库选择后调用添加接口，成功后刷新编辑态 skill 列表。
+async function onAddSkill() {
+  if (!editingId.value || !selectedSkillKey.value) return
   skillFeedback.value = ''
   skillFeedbackError.value = false
-  // 编辑态：版本已存在，沿用即时上传。
-  if (editingId.value) {
-    try {
-      const result = await uploadProgress.run(
-        [{ file, label: file.name }],
-        async (_item, f, ctx) => {
-          return uploadSkillMutation.mutateAsync({
-            id: editingId.value!,
-            file: f,
-            onProgress: ctx.onProgress,
-            signal: ctx.signal,
-          })
-        },
-      )
-      // run 不抛错；成功路径取最新 skill 列表回写本地状态。
-      const updated = result.results[0]
-      if (updated) {
-        editingSkills.value = updated.skills
-        skillFeedback.value = `已上传 skill ${file.name}`
-      } else if (result.failed.length > 0) {
-        skillFeedbackError.value = true
-        skillFeedback.value = result.failed[0].error ?? '上传失败'
-      }
-    } catch (err) {
-      // 唯一会被抛的错误是会话互斥：用 message 提示，不破坏本地状态。
-      message.warning(err instanceof Error ? err.message : '已有上传任务正在进行')
-    }
-    return
-  }
-  // 新建态：拒绝重复添加同名文件，避免保存时对同一文件触发两次上传。
-  if (pendingSkillFiles.value.some(f => f.name === file.name)) {
+  skillAdding.value = true
+  try {
+    const [name, version] = selectedSkillKey.value.split('|')
+    const updated = await addSkillMutation.mutateAsync({
+      id: editingId.value,
+      input: { source: 'platform', source_ref: name, version },
+    })
+    // 后端返回更新后的完整版本，取其 skills 字段刷新本地状态。
+    editingSkills.value = updated.skills ?? []
+    selectedSkillKey.value = null
+    skillFeedback.value = `已添加 skill ${name} v${version}`
+  } catch (err) {
     skillFeedbackError.value = true
-    skillFeedback.value = `已添加过同名文件 ${file.name}`
-    return
+    skillFeedback.value = err instanceof Error ? err.message : '添加失败'
+  } finally {
+    skillAdding.value = false
   }
-  pendingSkillFiles.value = [...pendingSkillFiles.value, file]
-  skillFeedback.value = `已添加 skill ${file.name}，将在保存版本时上传`
-}
-
-// removePendingSkill 从新建态的待上传列表移除一个暂存文件（按下标定位）。
-function removePendingSkill(idx: number) {
-  pendingSkillFiles.value = pendingSkillFiles.value.filter((_, i) => i !== idx)
-  skillFeedback.value = ''
-  skillFeedbackError.value = false
 }
 
 // onDeleteSkill 从当前编辑的版本删除一个 skill。
@@ -283,7 +242,7 @@ async function onDeleteSkill(skillName: string) {
   skillFeedbackError.value = false
   try {
     const updated = await deleteSkillMutation.mutateAsync({ id: editingId.value, skillName })
-    editingSkills.value = updated.skills
+    editingSkills.value = updated.skills ?? []
     skillFeedback.value = `已删除 skill ${skillName}`
   } catch (err) {
     skillFeedbackError.value = true
@@ -338,7 +297,7 @@ function openCreate() {
   submitError.value = null
   actionFeedback.value = ''
   editingSkills.value = []
-  pendingSkillFiles.value = []
+  selectedSkillKey.value = null
   skillFeedback.value = ''
   skillFeedbackError.value = false
   formVisible.value = true
@@ -357,7 +316,7 @@ function openEdit(version: AssistantVersionDTO) {
   submitError.value = null
   actionFeedback.value = ''
   editingSkills.value = [...version.skills]
-  pendingSkillFiles.value = []
+  selectedSkillKey.value = null
   skillFeedback.value = ''
   skillFeedbackError.value = false
   formVisible.value = true
@@ -381,38 +340,8 @@ function buildPayload(): AssistantVersionFormPayload {
   }
 }
 
-// uploadPendingSkills 把新建态暂存的 skill tar 通过全局 uploadProgress.run 一次性提交。
-// 串行执行 + N/M 计数由 store 管理；单文件失败不阻塞后续，run 返回汇总后供调用方判断。
-async function uploadPendingSkills(
-  versionId: string,
-): Promise<{ skills: AssistantVersionSkillDTO[]; failed: string[] }> {
-  if (pendingSkillFiles.value.length === 0) {
-    return { skills: [], failed: [] }
-  }
-  const items = pendingSkillFiles.value.map(f => ({ file: f, label: f.name }))
-  try {
-    const result = await uploadProgress.run(items, async (_item, f, ctx) => {
-      return uploadSkillMutation.mutateAsync({
-        id: versionId,
-        file: f,
-        onProgress: ctx.onProgress,
-        signal: ctx.signal,
-      })
-    })
-    // 取最后一次成功的 skill 列表作为最终视图；后端每次返回的都是完整列表，最后一次为准。
-    const lastVersion = result.results[result.results.length - 1]
-    const skills = lastVersion?.skills ?? []
-    // failed + cancelled 都视为「未成功」，返回给调用方提示用户。
-    const failed = [...result.failed, ...result.cancelled].map(it => it.label)
-    return { skills, failed }
-  } catch (err) {
-    // 会话互斥：返回全部待传文件为 failed，让 submit 流程把表单切到编辑态并提示。
-    message.warning(err instanceof Error ? err.message : '已有上传任务正在进行')
-    return { skills: [], failed: pendingSkillFiles.value.map(f => f.name) }
-  }
-}
-
-// submit 根据 editingId 决定走创建还是更新；新建态在版本落库后再上传暂存的 skill。
+// submit 根据 editingId 决定走创建还是更新。
+// 新建态不支持在保存前添加 skill，版本落库后切换至编辑态再配置。
 async function submit() {
   if (!canSubmit.value) return
   submitting.value = true
@@ -423,22 +352,11 @@ async function submit() {
       formVisible.value = false
       return
     }
+    // 新建版本：创建成功后切换至该版本的编辑态，让用户继续配置 skill。
     const created = await createMutation.mutateAsync(buildPayload())
-    if (pendingSkillFiles.value.length === 0) {
-      formVisible.value = false
-      return
-    }
-    // 版本已落库，逐个上传暂存 skill，并把表单切到该版本的编辑态：
-    // 即便部分 skill 上传失败，用户也能在编辑态直接补传，而不会因再次保存误触发重复创建。
-    const { skills, failed } = await uploadPendingSkills(created.id)
     editingId.value = created.id
-    editingSkills.value = skills
-    pendingSkillFiles.value = []
-    if (failed.length > 0) {
-      skillFeedbackError.value = true
-      skillFeedback.value = `版本已创建，以下 skill 上传失败，可在下方重试：${failed.join('、')}`
-      return
-    }
+    editingSkills.value = created.skills ?? []
+    skillFeedback.value = '版本已创建，可在下方从平台库选择 skill'
     formVisible.value = false
   } catch (err) {
     submitError.value = err instanceof Error ? err.message : '保存失败'

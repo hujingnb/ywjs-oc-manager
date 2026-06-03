@@ -38,11 +38,16 @@ export function emptyRouting(): AssistantVersionRoutingPayload {
 }
 
 // AssistantVersionSkillDTO 是版本下单个 skill 的元信息。
+// source / source_ref / version 在 P4 后端 AddSkillFromLibrary 接口改造后新增；
+// file_path / file_size / file_sha256 保留以兼容历史数据展示，后端 cached_path 对应前端 file_path。
 export interface AssistantVersionSkillDTO {
   name: string
-  file_path: string
-  file_size: number
-  file_sha256: string
+  source?: string
+  source_ref?: string
+  version?: string
+  file_path?: string
+  file_size?: number
+  file_sha256?: string
 }
 
 // AssistantVersionDTO 是助手版本的前端视图。
@@ -135,6 +140,33 @@ export function useDeleteAssistantVersion() {
   return useMutation({
     mutationFn: async (id: string) => {
       await apiRequest<void>(`/api/v1/assistant-versions/${id}`, { method: 'DELETE' })
+    },
+    onSuccess: () => { void client.invalidateQueries({ queryKey: VERSION_LIST_KEY }) },
+  })
+}
+
+// AddVersionSkillInput 是「从平台库选」添加 skill 的请求体，对应后端 handlers.AddSkillFromLibraryRequest。
+export interface AddVersionSkillInput {
+  // source 是 skill 来源类型，当前仅支持 "platform"。
+  source: string
+  // source_ref 是来源内精准标识；platform 来源时等于平台库 skill name。
+  source_ref: string
+  // version 是要配进版本的 skill 版本号，必须与平台库中已发布的版本对应。
+  version: string
+}
+
+// useAddVersionSkill 从平台库选 skill 配进助手版本（POST /api/v1/assistant-versions/:id/skills JSON）。
+// 与旧的 multipart 上传不同，此接口走 JSON body，后端返回更新后的完整 AssistantVersionDTO。
+// onSuccess invalidate 版本列表缓存，确保列表侧 skill 计数同步刷新。
+export function useAddVersionSkill() {
+  const client = useQueryClient()
+  return useMutation({
+    mutationFn: async ({ id, input }: { id: string; input: AddVersionSkillInput }) => {
+      const res = await apiRequest<{ version: AssistantVersionDTO }>(`/api/v1/assistant-versions/${id}/skills`, {
+        method: 'POST',
+        body: input,
+      })
+      return res.version
     },
     onSuccess: () => { void client.invalidateQueries({ queryKey: VERSION_LIST_KEY }) },
   })

@@ -9,14 +9,15 @@ import type { AssistantVersionDTO } from '@/api/hooks/useAssistantVersions'
 const createVersion = vi.hoisted(() => vi.fn())
 const updateVersion = vi.hoisted(() => vi.fn())
 const deleteVersion = vi.hoisted(() => vi.fn())
-const uploadSkill = vi.hoisted(() => vi.fn())
-const uploadProgressRun = vi.hoisted(() => vi.fn())
+const addSkill = vi.hoisted(() => vi.fn())
+const deleteSkill = vi.hoisted(() => vi.fn())
 
-// 一个用于列表与编辑回填的样例版本。
+// 含 skill 的样例版本，skills 字段包含 source/version 新字段。
+const sampleSkill = { name: 'weather', source: 'platform', source_ref: 'weather', version: '1.0.0' }
 const sampleVersion: AssistantVersionDTO = {
   id: 'ver-1', name: '标准版', description: '默认版本', system_prompt: '你是助手',
   image_id: 'v2026.5.16', main_model: 'qwen', routing: { vision: 'gpt' },
-  skills: [{ name: 'weather', file_path: 'p', file_size: 2048, file_sha256: 'ab' }], revision: 2,
+  skills: [sampleSkill], revision: 2,
 }
 
 vi.mock('@/api/hooks/useAssistantVersions', async () => {
@@ -35,8 +36,8 @@ vi.mock('@/api/hooks/useAssistantVersions', async () => {
     useCreateAssistantVersion: () => ({ mutateAsync: createVersion }),
     useUpdateAssistantVersion: () => ({ mutateAsync: updateVersion }),
     useDeleteAssistantVersion: () => ({ mutateAsync: deleteVersion }),
-    useUploadAssistantVersionSkill: () => ({ mutateAsync: uploadSkill }),
-    useDeleteAssistantVersionSkill: () => ({ mutateAsync: vi.fn() }),
+    useAddVersionSkill: () => ({ mutateAsync: addSkill }),
+    useDeleteAssistantVersionSkill: () => ({ mutateAsync: deleteSkill }),
   }
 })
 
@@ -46,19 +47,19 @@ vi.mock('@/api/hooks/useOrganizations', () => ({
   }),
 }))
 
-// uploadProgress store mock：默认行为是直接调用 runner 完成单文件 / 批量上传，
-// 让既有用例不感知到 Modal 的存在；用例需要时可改 mockRejectedValueOnce 注入互斥错。
-vi.mock('@/stores/uploadProgress', () => ({
-  useUploadProgressStore: () => ({
-    run: uploadProgressRun,
-    cancel: vi.fn(),
-    reset: vi.fn(),
-    isUploading: false,
-    session: null,
+// 平台库 skill 列表 mock：供「从库选」下拉选项使用。
+vi.mock('@/api/hooks/useSkills', () => ({
+  usePlatformSkillsQuery: () => ({
+    data: ref([
+      { id: 'ps-1', name: 'weather', version: '1.0.0' },
+      { id: 'ps-2', name: 'code-runner', version: '2.0.0' },
+    ]),
+    isLoading: ref(false),
+    isError: ref(false),
   }),
 }))
 
-// useMessage 的 stub：测试里不需要弹窗，只验证上传流程是否按预期调用。
+// useMessage stub：测试里不需要弹窗。
 vi.mock('naive-ui', async () => {
   const actual = await vi.importActual<typeof import('naive-ui')>('naive-ui')
   return { ...actual, useMessage: () => ({ warning: vi.fn(), success: vi.fn(), error: vi.fn() }) }
@@ -166,26 +167,6 @@ describe('AssistantVersionsPage', () => {
   // 各用例间清理 mock 调用历史，避免 toHaveBeenCalled 跨用例累积导致误判。
   beforeEach(() => {
     vi.clearAllMocks()
-    // 默认 run 行为：顺序调用 runner，返回 { succeeded, failed:[], cancelled:[], results }。
-    uploadProgressRun.mockImplementation(async (
-      items: Array<{ file: File; label?: string }>,
-      runner: (
-        item: { id: string; label?: string; size: number; status: string },
-        file: File,
-        ctx: { onProgress: () => void; signal: AbortSignal },
-      ) => Promise<unknown>,
-    ) => {
-      const results: unknown[] = []
-      for (const it of items) {
-        // ctx.onProgress 在测试里不需要真正触发；signal 用 AbortController.signal 占位。
-        const ctrl = new AbortController()
-        results.push(await runner({ id: 'x', label: it.label, size: it.file.size, status: 'uploading' }, it.file, {
-          onProgress: () => {},
-          signal: ctrl.signal,
-        }))
-      }
-      return { succeeded: items, failed: [], cancelled: [], results }
-    })
   })
 
   // 列表展示已有版本的名称与修订号。
@@ -262,85 +243,62 @@ describe('AssistantVersionsPage', () => {
     expect(deleteVersion).toHaveBeenCalledWith('ver-1')
   })
 
-  // 新建态也应出现 skill 暂存入口（此前仅编辑态可见），选中文件后进入暂存列表，
-  // 保存版本时先创建版本、再用新版本 ID 把暂存的 skill 逐个上传。
-  it('新建版本时可暂存 skill 并在保存后上传', async () => {
-    createVersion.mockResolvedValue({ ...sampleVersion, id: 'ver-new', skills: [] })
-    uploadSkill.mockResolvedValue({
-      skills: [{ name: 'weather', file_path: 'p', file_size: 10, file_sha256: 'x' }],
-    })
+  // 编辑态进入后 skill 列表显示已有 skill 的 name 和 version。
+  it('编辑态展示已配 skill 的 name 与 version', async () => {
     const wrapper = mountPage()
-    await wrapper.findAll('button').find(b => b.text().includes('新增版本'))!.trigger('click')
+    const editBtn = wrapper.findAll('button').find(b => b.text() === '编辑')
+    await editBtn!.trigger('click')
     await nextTick()
-
-    // 新建态出现「添加 skill tar」入口。
-    const addSkillBtn = wrapper.findAll('button').find(b => b.text().includes('添加 skill tar'))
-    expect(addSkillBtn).toBeTruthy()
-
-    // 通过隐藏的 file input 选中一个 skill tar，文件名应出现在暂存列表中。
-    const file = new File(['skill-data'], 'weather.tar', { type: 'application/x-tar' })
-    const fileInput = wrapper.find('input[type="file"]')
-    Object.defineProperty(fileInput.element, 'files', { value: [file], configurable: true })
-    await fileInput.trigger('change')
-    await nextTick()
-    expect(wrapper.text()).toContain('weather.tar')
-
-    // 填写必填项：inputs[0] 是名称（file input 在 DOM 中位于其后）。
-    await wrapper.findAll('input')[0].setValue('带技能的版本')
-    const textareas = wrapper.findAll('textarea')
-    await textareas[1].setValue('你是助手') // 内置提示词
-    const selects = wrapper.findAll('select')
-    await selects[0].setValue('v2026.5.16') // 使用镜像
-    await selects[1].setValue('qwen') // 主模型
-
-    await wrapper.find('form').trigger('submit')
-    await flushPromises()
-
-    // 先创建版本，再把暂存文件交给 uploadProgress.run 串行上传。
-    expect(createVersion).toHaveBeenCalledTimes(1)
-    expect(uploadProgressRun).toHaveBeenCalledTimes(1)
-    const runItems = uploadProgressRun.mock.calls[0][0] as Array<{ file: File; label: string }>
-    expect(runItems).toHaveLength(1)
-    expect(runItems[0]).toMatchObject({ file, label: 'weather.tar' })
-    expect(uploadSkill).toHaveBeenCalledTimes(1)
-    const uploadArg = uploadSkill.mock.calls[0][0]
-    expect(uploadArg.id).toBe('ver-new')
-    // 暂存的 File 必须原样传递（未被 Vue 响应式代理包装），否则 multipart 上传会失败。
-    expect(uploadArg.file).toBe(file)
+    // skill name 和 version 均应展示在列表区。
+    expect(wrapper.text()).toContain('weather')
+    expect(wrapper.text()).toContain('v1.0.0')
   })
 
-  // 新建态移除已暂存的 skill 后，保存版本只创建版本、不触发任何 skill 上传。
-  it('新建版本时移除暂存 skill 后不再上传', async () => {
-    createVersion.mockResolvedValue({ ...sampleVersion, id: 'ver-new', skills: [] })
+  // 编辑态可以从平台库选 skill 并点击「添加」调用添加接口，成功后列表刷新。
+  it('编辑态从平台库选 skill 并添加', async () => {
+    addSkill.mockResolvedValue({
+      ...sampleVersion,
+      skills: [
+        sampleSkill,
+        { name: 'code-runner', source: 'platform', source_ref: 'code-runner', version: '2.0.0' },
+      ],
+    })
+    const wrapper = mountPage()
+    // 打开编辑态。
+    await wrapper.findAll('button').find(b => b.text() === '编辑')!.trigger('click')
+    await nextTick()
+
+    // 找到平台库选择下拉框（选项为 "weather|1.0.0" 和 "code-runner|2.0.0"）并选中 code-runner。
+    const allSelects = wrapper.findAll('select')
+    // 最后一个 select 是 skill 选择器（在智能路由 8 个槽后）
+    const skillSelect = allSelects[allSelects.length - 1]
+    await skillSelect.setValue('code-runner|2.0.0')
+    await nextTick()
+
+    // 点击「添加」按钮调用添加接口。
+    const addBtn = wrapper.findAll('button').find(b => b.text() === '添加')
+    expect(addBtn).toBeTruthy()
+    await addBtn!.trigger('click')
+    await flushPromises()
+
+    // 必须用正确参数（source: 'platform', source_ref 与 version 从组合键中拆分）调用 addSkill。
+    expect(addSkill).toHaveBeenCalledWith({
+      id: 'ver-1',
+      input: { source: 'platform', source_ref: 'code-runner', version: '2.0.0' },
+    })
+    // 添加成功后列表应显示新增 skill 的名称。
+    expect(wrapper.text()).toContain('code-runner')
+  })
+
+  // 新建态不显示「添加」按钮和平台库下拉框（无版本 ID 无法即时添加）。
+  it('新建态 skill 区只提示保存后可配置，不显示添加按钮', async () => {
     const wrapper = mountPage()
     await wrapper.findAll('button').find(b => b.text().includes('新增版本'))!.trigger('click')
     await nextTick()
-
-    // 先暂存一个 skill 文件。
-    const file = new File(['skill-data'], 'weather.tar', { type: 'application/x-tar' })
-    const fileInput = wrapper.find('input[type="file"]')
-    Object.defineProperty(fileInput.element, 'files', { value: [file], configurable: true })
-    await fileInput.trigger('change')
-    await nextTick()
-    expect(wrapper.text()).toContain('weather.tar')
-
-    // 点击「移除」清空暂存项，列表不再显示该文件。
-    await wrapper.findAll('button').find(b => b.text() === '移除')!.trigger('click')
-    await nextTick()
-    expect(wrapper.text()).not.toContain('weather.tar')
-
-    // 填必填项并提交：只应创建版本，不应调用 skill 上传。
-    await wrapper.findAll('input')[0].setValue('无技能版本')
-    const textareas = wrapper.findAll('textarea')
-    await textareas[1].setValue('你是助手')
-    const selects = wrapper.findAll('select')
-    await selects[0].setValue('v2026.5.16')
-    await selects[1].setValue('qwen')
-    await wrapper.find('form').trigger('submit')
-    await flushPromises()
-
-    expect(createVersion).toHaveBeenCalledTimes(1)
-    expect(uploadProgressRun).not.toHaveBeenCalled()
-    expect(uploadSkill).not.toHaveBeenCalled()
+    // 新建态不应出现「添加」按钮。
+    const addBtn = wrapper.findAll('button').find(b => b.text() === '添加')
+    expect(addBtn).toBeFalsy()
+    // 应提示用户保存后才可配置 skill。
+    expect(wrapper.text()).toContain('保存版本后可配置 skill')
   })
 })
