@@ -53,7 +53,7 @@ describe('知识库上传大小限制', () => {
   it('导出 1024MB 上限和统一提示文案', () => {
     expect(KNOWLEDGE_UPLOAD_MAX_BYTES).toBe(1024 * 1024 * 1024)
     expect(KNOWLEDGE_UPLOAD_MAX_LABEL).toBe('1024MB')
-    expect(KNOWLEDGE_UPLOAD_MAX_MESSAGE).toBe('单文件最多支持 1024MB')
+    expect(KNOWLEDGE_UPLOAD_MAX_MESSAGE).toBe('单文件最大支持 1024MB')
   })
 
   // 覆盖边界：刚好达到上限允许上传，超过 1 字节立即拒绝。

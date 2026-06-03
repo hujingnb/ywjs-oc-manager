@@ -124,7 +124,7 @@ def _add(path: str, filename: str) -> int:
     """
     local = _workspace_file(path)
     if local.stat().st_size > MAX_UPLOAD_BYTES:
-        raise CLIError("FILE_TOO_LARGE", "单文件最多支持 100MB")
+        raise CLIError("FILE_TOO_LARGE", "单文件最大支持 100MB")
     result = _multipart_request("/api/v1/runtime/knowledge/files", local, filename or local.name)
     _print_json({"ok": True, "data": result})
     return 0

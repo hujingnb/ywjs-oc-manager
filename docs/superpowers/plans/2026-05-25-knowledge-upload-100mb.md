@@ -222,7 +222,7 @@ describe('知识库上传大小限制', () => {
   it('导出 100MB 上限和统一提示文案', () => {
     expect(KNOWLEDGE_UPLOAD_MAX_BYTES).toBe(100 * 1024 * 1024)
     expect(KNOWLEDGE_UPLOAD_MAX_LABEL).toBe('100MB')
-    expect(KNOWLEDGE_UPLOAD_MAX_MESSAGE).toBe('单文件最多支持 100MB')
+    expect(KNOWLEDGE_UPLOAD_MAX_MESSAGE).toBe('单文件最大支持 100MB')
   })
 
   // 覆盖边界：刚好 100MB 允许上传，超过 1 字节立即拒绝。
@@ -251,7 +251,7 @@ In `web/src/api/hooks/useKnowledge.ts`, add this block after the cache key helpe
 // 知识库上传单文件上限与 manager-api files.KnowledgeMaxFileSize、nginx client_max_body_size 保持一致。
 export const KNOWLEDGE_UPLOAD_MAX_BYTES = 100 * 1024 * 1024
 export const KNOWLEDGE_UPLOAD_MAX_LABEL = '100MB'
-export const KNOWLEDGE_UPLOAD_MAX_MESSAGE = `单文件最多支持 ${KNOWLEDGE_UPLOAD_MAX_LABEL}`
+export const KNOWLEDGE_UPLOAD_MAX_MESSAGE = `单文件最大支持 ${KNOWLEDGE_UPLOAD_MAX_LABEL}`
 
 // isKnowledgeUploadTooLarge 在页面发起上传会话前做本地拦截，避免超限文件进入网络请求。
 export function isKnowledgeUploadTooLarge(file: Pick<File, 'size'>): boolean {
@@ -382,7 +382,7 @@ describe('AppKnowledgeTab', () => {
     Object.defineProperty(input.element, 'files', { value: [oversizedFile()], configurable: true })
     await input.trigger('change')
 
-    expect(mocks.warning).toHaveBeenCalledWith('单文件最多支持 100MB')
+    expect(mocks.warning).toHaveBeenCalledWith('单文件最大支持 100MB')
     expect(mocks.run).not.toHaveBeenCalled()
     expect(mocks.mutateAsync).not.toHaveBeenCalled()
   })
@@ -495,7 +495,7 @@ describe('OrgKnowledgePage', () => {
     Object.defineProperty(input.element, 'files', { value: [oversizedFile()], configurable: true })
     await input.trigger('change')
 
-    expect(mocks.warning).toHaveBeenCalledWith('单文件最多支持 100MB')
+    expect(mocks.warning).toHaveBeenCalledWith('单文件最大支持 100MB')
     expect(mocks.run).not.toHaveBeenCalled()
     expect(mocks.mutateAsync).not.toHaveBeenCalled()
   })
@@ -725,7 +725,7 @@ Using the running app and a backend environment with the documented local accoun
 
 1. Log in as manager platform or organization user.
 2. Open an instance detail page and switch to the instance knowledge tab.
-3. Confirm the upload area shows `单文件最多支持 100MB`.
+3. Confirm the upload area shows `单文件最大支持 100MB`.
 4. Select a file larger than 100MB and confirm the warning appears without any upload progress session.
 5. Select a small file and confirm the upload progress modal appears and the file list refreshes after upload.
 6. Open the organization knowledge page and repeat steps 3 through 5.

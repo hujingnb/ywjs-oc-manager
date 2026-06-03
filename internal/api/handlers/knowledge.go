@@ -44,7 +44,7 @@ const (
 
 // maxKnowledgeUploadMessage 是超出上限时返回给客户端的统一提示，以 MB 为单位由
 // maxKnowledgeUploadBytes 直接换算，避免修改上限后文案与实际限制漂移。
-var maxKnowledgeUploadMessage = fmt.Sprintf("单文件最多支持 %dMB", maxKnowledgeUploadBytes/(1024*1024))
+var maxKnowledgeUploadMessage = fmt.Sprintf("单文件最大支持 %dMB", maxKnowledgeUploadBytes/(1024*1024))
 
 // NewKnowledgeHandler 创建 handler。
 func NewKnowledgeHandler(svc knowledgeService) *KnowledgeHandler {

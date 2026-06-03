@@ -38,7 +38,7 @@ export const KNOWLEDGE_UPLOAD_MAX_BYTES = 1024 * 1024 * 1024
 export const KNOWLEDGE_DEFAULT_QUOTA_BYTES = 1024 * 1024 * 1024
 // 提示文案的 MB 数值由上限字节数直接换算，修改上限后文案自动跟随，避免漂移。
 export const KNOWLEDGE_UPLOAD_MAX_LABEL = `${KNOWLEDGE_UPLOAD_MAX_BYTES / (1024 * 1024)}MB`
-export const KNOWLEDGE_UPLOAD_MAX_MESSAGE = `单文件最多支持 ${KNOWLEDGE_UPLOAD_MAX_LABEL}`
+export const KNOWLEDGE_UPLOAD_MAX_MESSAGE = `单文件最大支持 ${KNOWLEDGE_UPLOAD_MAX_LABEL}`
 
 // normalizeKnowledgeNumber 把旧接口缺字段、NaN 或负数统一转成明确业务默认值，避免页面展示坏值。
 function normalizeKnowledgeNumber(value: unknown, fallback: number): number {
