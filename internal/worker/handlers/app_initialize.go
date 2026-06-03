@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"log/slog"
 	"strings"
 	"time"
 
@@ -143,13 +144,15 @@ type AppInitializeK8sResourceSpec struct {
 // 顺序：
 //  1. 加载 app 上下文，幂等检查；
 //  2. 校验实例绑定版本，解析 hermes 镜像 ref（phasePullRuntimeImage 状态）；
-//  3. ensureAPIKey（phasePrepare 状态）；
-//  4. EnsureAppRuntimeToken 拿 control token 明文（phasePrepare 状态）；
-//  5. EnsureApp：渲染 AppSpec → k8s Deployment + Service + Secret（phaseCreate 状态）；
-//  6. WaitReady：等 pod Ready（phaseStart 状态）；
-//  7. → binding_waiting → promoteIfChannelBound。
+//  3. seedVersionSkills：把版本 skill 快照并集注入 app_skills（最大努力，失败只 warn）；
+//  4. ensureAPIKey（phasePrepare 状态）；
+//  5. EnsureAppRuntimeToken 拿 control token 明文（phasePrepare 状态）；
+//  6. EnsureApp：渲染 AppSpec → k8s Deployment + Service + Secret（phaseCreate 状态）；
+//  7. WaitReady：等 pod Ready（phaseStart 状态）；
+//  8. → binding_waiting → promoteIfChannelBound。
 //
 // 任意一步失败立即冒泡，由 worker 重试或入 failed；状态机字段只在显式步骤里单独写。
+// seedVersionSkills 失败只 warn，不标记 failed，确保 skill 问题不阻断实例初始化。
 type AppInitializeHandler struct {
 	store   AppInitializeStore
 	factory NewAPIClientFactory
@@ -158,6 +161,8 @@ type AppInitializeHandler struct {
 	orch k8sorch.Orchestrator
 	// k8sCfg 是渲染 AppSpec 所需的 k8s 配置（从 config.KubernetesConfig 提取）。
 	k8sCfg AppInitializeK8sConfig
+	// seedStore 用于版本 skill 种子注入（AppSkillSeedStore 子集）；nil 时跳过注入（兼容无 skill 场景）。
+	seedStore AppSkillSeedStore
 }
 
 // NewAppInitializeHandler 创建 handler。
@@ -181,6 +186,13 @@ func NewAppInitializeHandler(
 func (h *AppInitializeHandler) SetOrchestrator(orch k8sorch.Orchestrator, k8sCfg AppInitializeK8sConfig) {
 	h.orch = orch
 	h.k8sCfg = k8sCfg
+}
+
+// SetSeedStore 注入版本 skill 种子注入所需的最小 store。
+// 生产环境由 cmd/server 装配时注入 dbStore.Queries（满足 AppSkillSeedStore 接口）；
+// nil 时跳过种子注入（兼容测试装配及无 skill 库的早期部署）。
+func (h *AppInitializeHandler) SetSeedStore(s AppSkillSeedStore) {
+	h.seedStore = s
 }
 
 // readyTimeout 是 WaitReady 的宽松硬上限（仅防永久挂起，不是「正常该在此内就绪」的预期）。
@@ -242,6 +254,15 @@ func (h *AppInitializeHandler) Handle(ctx context.Context, job sqlc.Job) error {
 	if !ok {
 		return h.markFailed(ctx, &app, domain.AppStatusPullingRuntimeImage,
 			fmt.Errorf("版本镜像 %s 未在配置中", version.ImageID))
+	}
+
+	// 版本 skill 种子注入：把版本 skills_json 里实例尚无的 skill 并集写入 app_skills，
+	// 供 bootstrap 后续为 pod 提供运行时 skill 下载 URL。
+	// 最大努力：失败只 warn，不标记 failed，不阻断初始化主流程。
+	if h.seedStore != nil {
+		if err := seedVersionSkills(ctx, h.seedStore, app.ID, version); err != nil {
+			slog.WarnContext(ctx, "版本 skill 种子注入失败", "app", app.ID, "version", version.ID, "err", err)
+		}
 	}
 
 	reporter := newProgressReporter(app.ID, h.store)

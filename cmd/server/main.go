@@ -377,6 +377,9 @@ func runManager(ctx context.Context, cfg config.Config, logOut io.Writer) error 
 	// 把 app 渲染成 Deployment + Service + Secret 并等待 pod Ready。orch 为 nil（未启用 k8s）
 	// 时 handler 内部跳过这两阶段。
 	appInitHandler.SetOrchestrator(orch, k8sInitCfg)
+	// 注入版本 skill 种子注入 store：初始化时把版本 skills_json 里实例尚无的 skill 写入
+	// app_skills，供 bootstrap 后续为 pod 提供运行时 skill 下载 URL。
+	appInitHandler.SetSeedStore(dbStore.Queries)
 	if err := registry.Register("app_initialize", appInitHandler.Handle); err != nil {
 		return fmt.Errorf("注册 app_initialize handler 失败: %w", err)
 	}
@@ -403,6 +406,9 @@ func runManager(ctx context.Context, cfg config.Config, logOut io.Writer) error 
 	))
 	// 注入 job notifier：restart 检测到镜像变更时入队 app_initialize job 后即时唤醒 worker。
 	restartHandler.SetJobNotifier(redisQueue)
+	// 注入镜像不变重启分支的版本 skill 种子注入 store：Scale(1) 成功后补齐版本新增 skill，
+	// 确保重启后 bootstrap 能为 pod 提供完整 skill 列表。
+	restartHandler.SetRestartSeedStore(dbStore.Queries)
 	if err := registry.Register("app_restart_container", restartHandler.Handle); err != nil {
 		return fmt.Errorf("注册 app_restart_container handler 失败: %w", err)
 	}

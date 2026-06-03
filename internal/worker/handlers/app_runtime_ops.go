@@ -228,12 +228,22 @@ type RestartJobNotifier interface {
 	Enqueue(ctx context.Context, jobID string) error
 }
 
+// RestartSeedStore 是重启 handler 在镜像不变分支执行版本 skill 种子注入所需的最小接口。
+// 在 AppSkillSeedStore 基础上加入 GetAssistantVersion，以便从 app.VersionID 加载版本快照。
+// 由 dbStore.Queries 实现；nil 时跳过种子注入（兼容测试装配与无 skill 库部署）。
+type RestartSeedStore interface {
+	AppSkillSeedStore
+	// GetAssistantVersion 按 ID 加载助手版本，用于获取 skills_json 快照。
+	GetAssistantVersion(ctx context.Context, id string) (sqlc.AssistantVersion, error)
+}
+
 // AppRestartContainerHandler 触发应用重启，根据是否有镜像变更走不同分支：
 //
 //   - 镜像变更：UpdateImage 触发 Recreate（k8s 自动停旧 pod 起新 pod），
 //     由 app_initialize 路径写回 applied 版本。
 //   - 镜像不变：删除 S3 sessions 与 state.db（清会话数据让 hermes 启动新 session），
-//     然后 Scale(0) → Scale(1) 重建 pod，最后记录 applied 版本。
+//     然后 Scale(0) → Scale(1) 重建 pod，最后调 seedVersionSkills 补齐新增 skill，
+//     最后记录 applied 版本。
 //
 // k8s 语义说明：
 //   - preStop hook 由 k8s 控制，oc-presync 在 pod 终止前同步数据到 S3，无需 manager 介入。
@@ -246,6 +256,8 @@ type AppRestartContainerHandler struct {
 	// notifier 在重启检测到镜像变更、入队 app_initialize job 后即时推送 jobID，
 	// 让 worker 不必等 scheduler 轮询即可拾取；nil 时由 scheduler 兜底入队。
 	notifier RestartJobNotifier
+	// seedStore 用于镜像不变重启分支的版本 skill 种子注入；nil 时跳过（兼容测试装配）。
+	seedStore RestartSeedStore
 }
 
 // NewAppRestartContainerHandler 创建重启 handler，注入 k8s 编排器与对象存储。
@@ -265,6 +277,13 @@ func (h *AppRestartContainerHandler) SetInputRefresher(r AppInputRefresher) {
 // nil 时由 scheduler 周期轮询兜底拾取。
 func (h *AppRestartContainerHandler) SetJobNotifier(n RestartJobNotifier) {
 	h.notifier = n
+}
+
+// SetRestartSeedStore 注入镜像不变重启分支的版本 skill 种子注入 store。
+// 生产环境由 cmd/server 装配时注入 dbStore.Queries（满足 RestartSeedStore 接口）；
+// nil 时跳过种子注入（兼容测试装配及无 skill 库的早期部署）。
+func (h *AppRestartContainerHandler) SetRestartSeedStore(s RestartSeedStore) {
+	h.seedStore = s
 }
 
 // Handle 执行 app_restart_container job。
@@ -372,6 +391,18 @@ func (h *AppRestartContainerHandler) Handle(ctx context.Context, job sqlc.Job) e
 	if err := h.store.SetAppStatus(ctx, sqlc.SetAppStatusParams{ID: app.ID, Status: domain.AppStatusRunning}); err != nil {
 		return fmt.Errorf("更新应用状态失败: %w", err)
 	}
+
+	// 镜像不变重启：Scale(1) 成功后补齐版本新增 skill。
+	// 版本可能在上次启动后新增了 skill，重启时种子注入确保 app_skills 与版本保持同步（并集）。
+	// 最大努力：加载版本或注入失败只 warn，不阻断重启主流程。
+	if h.seedStore != nil && app.VersionID.Valid {
+		if ver, err := h.seedStore.GetAssistantVersion(ctx, app.VersionID.String); err != nil {
+			slog.WarnContext(ctx, "镜像不变重启：加载助手版本失败，跳过 skill 种子注入", "app", app.ID, "err", err)
+		} else if err := seedVersionSkills(ctx, h.seedStore, app.ID, ver); err != nil {
+			slog.WarnContext(ctx, "镜像不变重启：版本 skill 种子注入失败", "app", app.ID, "version", ver.ID, "err", err)
+		}
+	}
+
 	// 记录已应用版本修订与镜像 ref，供前端 version_synced 检测；
 	// inputRefresher 为 nil（测试装配）时跳过，避免写入零值误置位。
 	if h.inputRefresher != nil {
