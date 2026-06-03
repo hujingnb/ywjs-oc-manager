@@ -30,6 +30,8 @@ type Config struct {
 	Storage StorageConfig `yaml:"storage"`
 	// Kubernetes 是 app pod 编排（client-go）配置；整段可选，启用编排时要求关键字段齐全。
 	Kubernetes KubernetesConfig `yaml:"k8s"`
+	// ClawHub 描述 ClawHub skill 市场 API 接入配置；整段可选，BaseURL 为空时市场降级为仅平台库。
+	ClawHub ClawHubConfig `yaml:"clawhub"`
 }
 
 // AppConfig 描述 manager API 进程自身的运行参数。
@@ -224,6 +226,17 @@ type K8sResourceSpec struct {
 // StorageConfig 是对象存储配置容器；当前仅 S3。
 type StorageConfig struct {
 	S3 S3StorageConfig `yaml:"s3"`
+}
+
+// ClawHubConfig 描述 ClawHub skill 市场 API 接入配置。
+// BaseURL 为空时 ClawHubSource 降级（市场只显示平台库），不影响其它功能。
+type ClawHubConfig struct {
+	// BaseURL 是 ClawHub API 地址，例如 https://clawhubcn.com（国内站）。
+	BaseURL string `yaml:"base_url"`
+	// RequestTimeout 是单次请求超时，缺省 10s。
+	RequestTimeout Duration `yaml:"request_timeout"`
+	// CacheTTL 是搜索/列表结果的 Redis 缓存时长，缺省 5m。
+	CacheTTL Duration `yaml:"cache_ttl"`
 }
 
 // S3StorageConfig 是标准 S3 接入参数（本地指向 MinIO，生产指向云 OSS）。

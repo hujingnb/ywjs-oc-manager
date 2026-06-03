@@ -53,6 +53,13 @@ func (c *Config) applyDefaults() {
 	if c.Storage.S3.Enabled && strings.TrimSpace(c.Storage.S3.Region) == "" {
 		c.Storage.S3.Region = "us-east-1"
 	}
+	// ClawHub 超时与缓存时长默认值；BaseURL 为空时这两个值不会被使用，但仍填充以防止零值误判。
+	if c.ClawHub.RequestTimeout.Duration == 0 {
+		c.ClawHub.RequestTimeout.Duration = 10 * time.Second
+	}
+	if c.ClawHub.CacheTTL.Duration == 0 {
+		c.ClawHub.CacheTTL.Duration = 5 * time.Minute
+	}
 	// k8s 启用时填默认 namespace 与资源配额（与父设计/本地 k3d 一致）。
 	if c.Kubernetes.Enabled {
 		if strings.TrimSpace(c.Kubernetes.Namespace) == "" {
