@@ -344,3 +344,6 @@ type UpdateAssistantVersionRequest struct {
 	MainModel    string                     `json:"main_model" binding:"required"`
 	Routing      AssistantVersionRoutingDTO `json:"routing"`
 }
+
+// ===== 平台库 skill =====
+// 上传走 multipart/form-data（字段 name/version/description + file），无 JSON 请求体 DTO。
