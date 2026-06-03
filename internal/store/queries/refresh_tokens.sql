@@ -23,6 +23,11 @@ UPDATE refresh_tokens
 SET revoked_at = now()
 WHERE id = ? AND revoked_at IS NULL;
 
+-- name: RevokeRefreshTokensByUser :exec
+UPDATE refresh_tokens
+SET revoked_at = now()
+WHERE user_id = ? AND revoked_at IS NULL;
+
 -- name: DeleteExpiredRefreshTokens :exec
 DELETE FROM refresh_tokens
 WHERE expires_at < now();

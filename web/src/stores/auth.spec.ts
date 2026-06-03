@@ -65,7 +65,7 @@ describe('auth store', () => {
     expect(clientMocks.apiRequest).toHaveBeenCalledWith('/api/v1/auth/password', {
       method: 'POST',
       body: { old_password: 'old-password', new_password: 'new-password-123' },
-      suppressUnauthorizedHandler: true,
+      preserveAuthOnUnauthorizedCodes: ['INVALID_CREDENTIALS'],
     })
   })
 
@@ -101,6 +101,11 @@ describe('auth store', () => {
 
     await expect(auth.changePassword('wrong-password', 'new-password-123')).rejects.toThrow('当前密码错误')
 
+    expect(clientMocks.apiRequest).toHaveBeenCalledWith('/api/v1/auth/password', {
+      method: 'POST',
+      body: { old_password: 'wrong-password', new_password: 'new-password-123' },
+      preserveAuthOnUnauthorizedCodes: ['INVALID_CREDENTIALS'],
+    })
     expect(clientMocks.clearStoredTokens).not.toHaveBeenCalled()
     expect(auth.user).toEqual(currentUser)
   })

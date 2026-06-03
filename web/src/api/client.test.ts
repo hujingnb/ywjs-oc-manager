@@ -34,8 +34,8 @@ describe('apiRequest', () => {
     })).rejects.toThrow('暂无可用 Runtime Node，请联系平台管理员调整节点容量或新增节点')
   })
 
-  // 覆盖认证接口把 401 用作业务校验失败时，可抑制全局未授权处理并保留本地 token。
-  it('抑制全局 401 处理时保留本地 token 并继续抛出业务错误', async () => {
+  // 覆盖认证接口声明特定 401 业务错误码时，可保留本地 token 并继续抛出业务错误。
+  it('401 业务错误码允许保留登录态时不触发全局未授权处理', async () => {
     const unauthorizedHandler = vi.fn()
     setStoredTokens({
       accessToken: 'access-token',
@@ -43,6 +43,7 @@ describe('apiRequest', () => {
     })
     setUnauthorizedHandler(unauthorizedHandler)
     vi.spyOn(globalThis, 'fetch').mockResolvedValue(new Response(JSON.stringify({
+      code: 'INVALID_CREDENTIALS',
       message: '当前密码错误',
     }), {
       status: 401,
@@ -52,7 +53,7 @@ describe('apiRequest', () => {
     await expect(apiRequest('/api/v1/auth/password', {
       method: 'POST',
       body: { old_password: 'wrong-password', new_password: 'new-password-123' },
-      suppressUnauthorizedHandler: true,
+      preserveAuthOnUnauthorizedCodes: ['INVALID_CREDENTIALS'],
     })).rejects.toMatchObject({
       message: '当前密码错误',
       status: 401,
@@ -61,5 +62,35 @@ describe('apiRequest', () => {
     expect(getStoredAccessToken()).toBe('access-token')
     expect(getStoredRefreshToken()).toBe('refresh-token')
     expect(unauthorizedHandler).not.toHaveBeenCalled()
+  })
+
+  // 覆盖已声明可保留登录态的接口遇到 token 失效 401 时，仍必须走全局清理和跳转。
+  it('401 非保留错误码仍清理 token 并触发全局未授权处理', async () => {
+    const unauthorizedHandler = vi.fn()
+    setStoredTokens({
+      accessToken: 'access-token',
+      refreshToken: 'refresh-token',
+    })
+    setUnauthorizedHandler(unauthorizedHandler)
+    vi.spyOn(globalThis, 'fetch').mockResolvedValue(new Response(JSON.stringify({
+      code: 'INVALID_TOKEN',
+      message: '登录凭证无效',
+    }), {
+      status: 401,
+      headers: { 'content-type': 'application/json' },
+    }))
+
+    await expect(apiRequest('/api/v1/auth/password', {
+      method: 'POST',
+      body: { old_password: 'old-password', new_password: 'new-password-123' },
+      preserveAuthOnUnauthorizedCodes: ['INVALID_CREDENTIALS'],
+    })).rejects.toMatchObject({
+      message: '登录凭证无效',
+      status: 401,
+    })
+
+    expect(getStoredAccessToken()).toBeNull()
+    expect(getStoredRefreshToken()).toBeNull()
+    expect(unauthorizedHandler).toHaveBeenCalledWith('/api/v1/auth/password')
   })
 })

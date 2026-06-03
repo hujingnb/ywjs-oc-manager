@@ -236,6 +236,64 @@ func TestAuthServiceChangePasswordUpdatesHash(t *testing.T) {
 	assert.Equal(t, authTestOrgMemberID, store.lastPasswordUpdate.ID)
 	assert.Equal(t, "hashed:new-password-123", store.lastPasswordUpdate.PasswordHash)
 	assert.NotEqual(t, "new-password-123", store.usersByID[authTestOrgMemberID].PasswordHash)
+	assert.Equal(t, 1, store.revokeByUserCalls)
+	assert.Equal(t, []string{authTestOrgMemberID}, store.revokedByUser)
+}
+
+// TestAuthServiceChangePasswordRevokesUserRefreshTokens 验证改密成功后会撤销该用户所有未撤销的 refresh token。
+func TestAuthServiceChangePasswordRevokesUserRefreshTokens(t *testing.T) {
+	store := newAuthStoreStub(t)
+	memberTokenHash := "member-refresh-token"
+	adminTokenHash := "admin-refresh-token"
+	store.refreshTokens[memberTokenHash] = sqlc.RefreshToken{
+		ID:        "00000000-0000-0000-0000-000000000401",
+		UserID:    authTestOrgMemberID,
+		TokenHash: memberTokenHash,
+		ExpiresAt: time.Now().Add(time.Hour),
+	}
+	store.refreshTokens[adminTokenHash] = sqlc.RefreshToken{
+		ID:        "00000000-0000-0000-0000-000000000402",
+		UserID:    authTestOrgAdminID,
+		TokenHash: adminTokenHash,
+		ExpiresAt: time.Now().Add(time.Hour),
+	}
+	svc := newTestAuthService(t, store)
+	svc.hashPassword = fakeAuthHash
+
+	err := svc.ChangePassword(context.Background(), auth.Principal{
+		UserID: authTestOrgMemberID,
+		OrgID:  authTestOrgID,
+		Role:   domain.UserRoleOrgMember,
+	}, ChangePasswordInput{
+		OldPassword: "correct-password",
+		NewPassword: "new-password-123",
+	})
+
+	require.NoError(t, err)
+	assert.True(t, store.refreshTokens[memberTokenHash].RevokedAt.Valid)
+	assert.False(t, store.refreshTokens[adminTokenHash].RevokedAt.Valid)
+}
+
+// TestAuthServiceChangePasswordReturnsRevokeFailure 验证密码已更新但撤销 refresh token 失败时返回明确错误。
+func TestAuthServiceChangePasswordReturnsRevokeFailure(t *testing.T) {
+	store := newAuthStoreStub(t)
+	store.revokeByUserErr = errors.New("store unavailable")
+	svc := newTestAuthService(t, store)
+	svc.hashPassword = fakeAuthHash
+
+	err := svc.ChangePassword(context.Background(), auth.Principal{
+		UserID: authTestOrgMemberID,
+		OrgID:  authTestOrgID,
+		Role:   domain.UserRoleOrgMember,
+	}, ChangePasswordInput{
+		OldPassword: "correct-password",
+		NewPassword: "new-password-123",
+	})
+
+	require.Error(t, err)
+	require.ErrorContains(t, err, "撤销当前用户 refresh token 失败")
+	assert.Equal(t, 1, store.updatePasswordCalls)
+	assert.Equal(t, 1, store.revokeByUserCalls)
 }
 
 // TestAuthServiceChangePasswordRejectsWrongOldPassword 验证旧密码不匹配时拒绝修改并且不写库。
@@ -428,6 +486,10 @@ type authStoreStub struct {
 	lastIssuedRole     string
 	refreshTokens      map[string]sqlc.RefreshToken
 	revoked            []string
+	// revokedByUser 记录按用户撤销 refresh token 的入参，覆盖改密后的会话失效场景。
+	revokedByUser     []string
+	revokeByUserCalls int
+	revokeByUserErr   error
 	// lastPasswordUpdate 和 updatePasswordCalls 记录改密写库入参与调用次数，便于断言失败路径不落库。
 	lastPasswordUpdate  sqlc.UpdateUserPasswordParams
 	updatePasswordCalls int
@@ -548,6 +610,22 @@ func (s *authStoreStub) RevokeRefreshToken(_ context.Context, id string) error {
 		}
 	}
 	return sql.ErrNoRows
+}
+
+// RevokeRefreshTokensByUser 模拟按用户撤销所有仍有效 refresh token 的写库行为。
+func (s *authStoreStub) RevokeRefreshTokensByUser(_ context.Context, userID string) error {
+	s.revokeByUserCalls++
+	s.revokedByUser = append(s.revokedByUser, userID)
+	if s.revokeByUserErr != nil {
+		return s.revokeByUserErr
+	}
+	for hash, record := range s.refreshTokens {
+		if record.UserID == userID && !record.RevokedAt.Valid {
+			record.RevokedAt = null.TimeFrom(time.Now())
+			s.refreshTokens[hash] = record
+		}
+	}
+	return nil
 }
 
 // mustUUID 返回字符串 UUID（MySQL 侧 CHAR(36)，无需解析）。

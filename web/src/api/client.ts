@@ -22,8 +22,8 @@ export interface RequestOptions {
   query?: Record<string, string | number | undefined>
   /** 关闭时不附加 Authorization，例如登录接口 */
   withAuth?: boolean
-  // 少数已认证请求会把 401 作为业务校验失败（如当前密码错误），此时不应触发全局清会话。
-  suppressUnauthorizedHandler?: boolean
+  // 已认证请求可声明特定 401 业务错误码不触发全局清会话，例如当前密码错误。
+  preserveAuthOnUnauthorizedCodes?: string[]
 }
 
 // AuthTokens 是前端持久化的访问令牌和刷新令牌组合。
@@ -145,9 +145,13 @@ export async function apiRequest<T>(path: string, options: RequestOptions = {}):
       body: payload,
     })
     // 401 默认清 token 并触发跳 login：避免按钮点击后悄悄失败（mutation 错误被
-    // 业务组件的 catch 吞掉，用户以为没操作）。显式抑制时说明该接口把 401 当业务
-    // 校验结果处理，应保留本地会话并把错误交给调用方展示。
-    if (response.status === 401 && options.withAuth !== false && !options.suppressUnauthorizedHandler) {
+    // 业务组件的 catch 吞掉，用户以为没操作）。仅当响应 code 被调用方显式列入保留
+    // 清单时，才把 401 当业务校验结果处理并保留本地会话。
+    const unauthorizedCode = extractErrorCode(payload)
+    const preserveAuth =
+      unauthorizedCode !== null &&
+      options.preserveAuthOnUnauthorizedCodes?.includes(unauthorizedCode) === true
+    if (response.status === 401 && options.withAuth !== false && !preserveAuth) {
       clearStoredTokens()
       if (unauthorizedHandler) {
         unauthorizedHandler(path)
@@ -183,6 +187,13 @@ export function extractErrorMessage(body: unknown, status: number): string {
     return (body as { message: string }).message
   }
   return `请求失败 (${status})`
+}
+
+function extractErrorCode(body: unknown): string | null {
+  if (body && typeof body === 'object' && 'code' in body && typeof (body as { code: unknown }).code === 'string') {
+    return (body as { code: string }).code
+  }
+  return null
 }
 
 function readStorage(key: string): string | null {

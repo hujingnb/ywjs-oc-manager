@@ -28,6 +28,7 @@ type AuthStore interface {
 	CreateRefreshToken(ctx context.Context, arg sqlc.CreateRefreshTokenParams) error
 	GetRefreshTokenByHash(ctx context.Context, tokenHash string) (sqlc.RefreshToken, error)
 	RevokeRefreshToken(ctx context.Context, id string) error
+	RevokeRefreshTokensByUser(ctx context.Context, userID string) error
 }
 
 // AuthService 处理登录、刷新和注销等认证业务。
@@ -209,6 +210,10 @@ func (s *AuthService) ChangePassword(ctx context.Context, principal auth.Princip
 	// UpdateUserPassword 只写 password_hash，避免自助改密影响账号资料、角色或状态字段。
 	if err := s.store.UpdateUserPassword(ctx, sqlc.UpdateUserPasswordParams{ID: user.ID, PasswordHash: hashed}); err != nil {
 		return fmt.Errorf("更新当前用户密码失败: %w", err)
+	}
+	// 改密成功后撤销当前用户所有 refresh token，防止旧设备或泄露 token 继续换取 access token。
+	if err := s.store.RevokeRefreshTokensByUser(ctx, user.ID); err != nil {
+		return fmt.Errorf("撤销当前用户 refresh token 失败: %w", err)
 	}
 	return nil
 }

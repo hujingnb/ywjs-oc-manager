@@ -74,7 +74,7 @@ export const useAuthStore = defineStore('auth', () => {
     await apiRequest<void>('/api/v1/auth/password', {
       method: 'POST',
       body: { old_password: oldPassword, new_password: newPassword },
-      suppressUnauthorizedHandler: true,
+      preserveAuthOnUnauthorizedCodes: ['INVALID_CREDENTIALS'],
     })
     clearStoredTokens()
     user.value = null

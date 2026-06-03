@@ -164,6 +164,7 @@ type Querier interface {
 	RequeueJob(ctx context.Context, id string) error
 	RetryJob(ctx context.Context, arg RetryJobParams) error
 	RevokeRefreshToken(ctx context.Context, id string) error
+	RevokeRefreshTokensByUser(ctx context.Context, userID string) error
 	// 初始化/重启成功后记录已应用的版本修订与镜像 ref，用于 version_synced 检测。
 	SetAppAppliedVersion(ctx context.Context, arg SetAppAppliedVersionParams) error
 	// worker app_health_check handler 写最近一次健康检查结果；用于自动重启窗口计数。
