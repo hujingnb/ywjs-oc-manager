@@ -9,6 +9,15 @@ import (
 	"strings"
 )
 
+// SkillBlobStore 抽象 skill tar 文件系统主副本的读写能力。
+// 由 FSSkillBlobStore 和 S3SkillBlobStore 实现，供 worker 等非版本管理场景使用。
+type SkillBlobStore interface {
+	// PutSkill 写入一个 skill tar，返回相对数据根目录的存储路径。
+	PutSkill(versionID, skillName string, data []byte) (relPath string, err error)
+	// DeleteSkill 删除一个 skill tar。
+	DeleteSkill(relPath string) error
+}
+
 // FSSkillBlobStore 把 skill tar 存到 manager 本地数据根目录的
 // versions/<versionID>/skills/<name>.tar，作为 manager 端主副本。
 type FSSkillBlobStore struct {

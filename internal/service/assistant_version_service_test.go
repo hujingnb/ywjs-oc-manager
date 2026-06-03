@@ -1,8 +1,6 @@
 package service
 
 import (
-	"archive/tar"
-	"bytes"
 	"context"
 	"database/sql"
 	"errors"
@@ -153,10 +151,42 @@ func mustParseUUID(s string) string {
 	return s
 }
 
-// newTestAVService 用内存桩构造版本 service，默认模型与镜像校验全部通过。
+// fakePlatformSkillLibrary 是 PlatformSkillLibrary 的内存实现，按 name+version 索引。
+type fakePlatformSkillLibrary struct {
+	// skills 是按 "name@version" 为键的平台库 skill 集合。
+	skills map[string]sqlc.PlatformSkill
+}
+
+func newFakePlatformSkillLibrary() *fakePlatformSkillLibrary {
+	return &fakePlatformSkillLibrary{skills: map[string]sqlc.PlatformSkill{}}
+}
+
+// addSkill 向桩库插入一条平台库 skill 记录，便于测试预置数据。
+func (f *fakePlatformSkillLibrary) addSkill(name, version, tarPath string, size int64, sha string) {
+	f.skills[name+"@"+version] = sqlc.PlatformSkill{
+		ID: "ps-" + name + "-" + version, Name: name, Version: version,
+		TarPath: tarPath, FileSize: size, FileSha256: sha,
+	}
+}
+
+func (f *fakePlatformSkillLibrary) GetPlatformSkillByNameVersion(_ context.Context, arg sqlc.GetPlatformSkillByNameVersionParams) (sqlc.PlatformSkill, error) {
+	ps, ok := f.skills[arg.Name+"@"+arg.Version]
+	if !ok {
+		return sqlc.PlatformSkill{}, sql.ErrNoRows
+	}
+	return ps, nil
+}
+
+// newTestAVService 用内存桩构造版本 service，默认模型与镜像校验全部通过，平台库为空。
 func newTestAVService(t *testing.T, store *fakeAVStore) *AssistantVersionService {
 	t.Helper()
-	return NewAssistantVersionService(store, fakeImageResolver{}, fakeModelValidator{}, fakeBlobStore{}, 0)
+	return NewAssistantVersionService(store, fakeImageResolver{}, fakeModelValidator{}, newFakePlatformSkillLibrary())
+}
+
+// newTestAVServiceWithLibrary 构造版本 service 并注入自定义平台库桩。
+func newTestAVServiceWithLibrary(t *testing.T, store *fakeAVStore, lib *fakePlatformSkillLibrary) *AssistantVersionService {
+	t.Helper()
+	return NewAssistantVersionService(store, fakeImageResolver{}, fakeModelValidator{}, lib)
 }
 
 // fakeImageResolver 默认认为所有 image_id 都存在，并能列出一个镜像。
@@ -171,14 +201,6 @@ func (fakeImageResolver) ListRuntimeImages() []RuntimeImageOption {
 type fakeModelValidator struct{}
 
 func (fakeModelValidator) HasModel(string) bool { return true }
-
-// fakeBlobStore 在内存里模拟 skill tar 存储。
-type fakeBlobStore struct{}
-
-func (fakeBlobStore) PutSkill(versionID, skillName string, _ []byte) (string, error) {
-	return "versions/" + versionID + "/skills/" + skillName + ".tar", nil
-}
-func (fakeBlobStore) DeleteSkill(string) error { return nil }
 
 // TestAssistantVersionListReturnsVersions 验证有权限时 List 返回库中的版本，并正确反序列化 routing/skills。
 func TestAssistantVersionListReturnsVersions(t *testing.T) {
@@ -265,14 +287,14 @@ func TestAssistantVersionCreateRejectsDuplicateName(t *testing.T) {
 
 // TestAssistantVersionCreateRejectsUnknownImage 验证 image_id 不在配置内时报 Invalid。
 func TestAssistantVersionCreateRejectsUnknownImage(t *testing.T) {
-	svc := NewAssistantVersionService(newFakeAVStore(), rejectingImageResolver{}, fakeModelValidator{}, fakeBlobStore{}, 0)
+	svc := NewAssistantVersionService(newFakeAVStore(), rejectingImageResolver{}, fakeModelValidator{}, newFakePlatformSkillLibrary())
 	_, err := svc.Create(context.Background(), platformPrincipal(), validCreateInput())
 	require.ErrorIs(t, err, ErrAssistantVersionInvalid)
 }
 
 // TestAssistantVersionCreateRejectsUnknownModel 验证主模型不存在时报 Invalid。
 func TestAssistantVersionCreateRejectsUnknownModel(t *testing.T) {
-	svc := NewAssistantVersionService(newFakeAVStore(), fakeImageResolver{}, rejectingModelValidator{}, fakeBlobStore{}, 0)
+	svc := NewAssistantVersionService(newFakeAVStore(), fakeImageResolver{}, rejectingModelValidator{}, newFakePlatformSkillLibrary())
 	_, err := svc.Create(context.Background(), platformPrincipal(), validCreateInput())
 	require.ErrorIs(t, err, ErrAssistantVersionInvalid)
 }
@@ -435,77 +457,84 @@ func TestAssistantVersionDeleteNotFound(t *testing.T) {
 	require.ErrorIs(t, err, ErrAssistantVersionNotFound)
 }
 
-// buildSkillTar 构造一个含合法 SKILL.md 的内存 tar。
-func buildSkillTar(t *testing.T, skillName string) []byte {
-	t.Helper()
-	var buf bytes.Buffer
-	tw := tar.NewWriter(&buf)
-	body := "---\nname: " + skillName + "\ndescription: d\n---\n# t\n正文"
-	require.NoError(t, tw.WriteHeader(&tar.Header{
-		Name: skillName + "/SKILL.md", Mode: 0o644, Size: int64(len(body)), Typeflag: tar.TypeReg,
-	}))
-	_, err := tw.Write([]byte(body))
-	require.NoError(t, err)
-	require.NoError(t, tw.Close())
-	return buf.Bytes()
+// weatherSkillInput 返回一个指向平台库 weather skill 的从库选入参。
+func weatherSkillInput() AddSkillFromLibraryInput {
+	return AddSkillFromLibraryInput{Source: "platform", SourceRef: "weather", Version: "1.0.0"}
 }
 
-// TestAssistantVersionUploadSkillOK 验证上传合法 skill tar 后 skills 增加且 revision +1。
-func TestAssistantVersionUploadSkillOK(t *testing.T) {
+// libWithWeather 构造一个含 weather v1.0.0 的平台库桩。
+func libWithWeather() *fakePlatformSkillLibrary {
+	lib := newFakePlatformSkillLibrary()
+	lib.addSkill("weather", "1.0.0", "library/platform/weather/1.0.0.tar", 1024, "abc123sha")
+	return lib
+}
+
+// TestAssistantVersionAddSkillFromLibraryOK 验证从平台库选 skill 后版本 skills 增加且 revision +1。
+func TestAssistantVersionAddSkillFromLibraryOK(t *testing.T) {
 	store := newFakeAVStore()
 	id := seedVersion(store, "标准版", 2)
-	svc := newTestAVService(t, store)
-	got, err := svc.UploadSkill(context.Background(), platformPrincipal(), id, buildSkillTar(t, "weather"))
+	svc := newTestAVServiceWithLibrary(t, store, libWithWeather())
+	// 平台管理员选 weather v1.0.0 配进版本，应成功返回含该 skill 的快照。
+	got, err := svc.AddSkillFromLibrary(context.Background(), platformPrincipal(), id, weatherSkillInput())
 	require.NoError(t, err)
 	require.Len(t, got.Skills, 1)
 	assert.Equal(t, "weather", got.Skills[0].Name)
+	assert.Equal(t, "platform", got.Skills[0].Source)
+	assert.Equal(t, "1.0.0", got.Skills[0].Version)
+	assert.Equal(t, "library/platform/weather/1.0.0.tar", got.Skills[0].CachedPath)
 	assert.EqualValues(t, 3, got.Revision)
 }
 
-// TestAssistantVersionUploadSkillRejectsDuplicateName 验证同版本内 skill 重名被拒。
-func TestAssistantVersionUploadSkillRejectsDuplicateName(t *testing.T) {
+// TestAssistantVersionAddSkillFromLibraryVersionNotFound 验证版本不存在时返回 NotFound。
+func TestAssistantVersionAddSkillFromLibraryVersionNotFound(t *testing.T) {
+	svc := newTestAVServiceWithLibrary(t, newFakeAVStore(), libWithWeather())
+	// 版本不存在，应返回 ErrAssistantVersionNotFound。
+	_, err := svc.AddSkillFromLibrary(context.Background(), platformPrincipal(), "00000000-0000-0000-0000-000000000099", weatherSkillInput())
+	require.ErrorIs(t, err, ErrAssistantVersionNotFound)
+}
+
+// TestAssistantVersionAddSkillFromLibrarySkillNotFound 验证平台库 skill 不存在时返回 ErrPlatformSkillNotFound。
+func TestAssistantVersionAddSkillFromLibrarySkillNotFound(t *testing.T) {
 	store := newFakeAVStore()
 	id := seedVersion(store, "标准版", 1)
-	svc := newTestAVService(t, store)
-	_, err := svc.UploadSkill(context.Background(), platformPrincipal(), id, buildSkillTar(t, "weather"))
+	// 空平台库：请求的 skill 不存在，应返回 ErrPlatformSkillNotFound。
+	svc := newTestAVServiceWithLibrary(t, store, newFakePlatformSkillLibrary())
+	_, err := svc.AddSkillFromLibrary(context.Background(), platformPrincipal(), id, weatherSkillInput())
+	require.ErrorIs(t, err, ErrPlatformSkillNotFound)
+}
+
+// TestAssistantVersionAddSkillFromLibraryNameTaken 验证同版本内 skill 同名冲突时返回 ErrAssistantVersionSkillNameTaken。
+func TestAssistantVersionAddSkillFromLibraryNameTaken(t *testing.T) {
+	store := newFakeAVStore()
+	id := seedVersion(store, "标准版", 1)
+	lib := libWithWeather()
+	svc := newTestAVServiceWithLibrary(t, store, lib)
+	// 第一次添加 weather，应成功。
+	_, err := svc.AddSkillFromLibrary(context.Background(), platformPrincipal(), id, weatherSkillInput())
 	require.NoError(t, err)
-	_, err = svc.UploadSkill(context.Background(), platformPrincipal(), id, buildSkillTar(t, "weather"))
-	require.ErrorIs(t, err, ErrAssistantVersionInvalid)
+	// 第二次添加同名 skill，应返回 ErrAssistantVersionSkillNameTaken。
+	_, err = svc.AddSkillFromLibrary(context.Background(), platformPrincipal(), id, weatherSkillInput())
+	require.ErrorIs(t, err, ErrAssistantVersionSkillNameTaken)
 }
 
-// TestAssistantVersionUploadSkillRejectsTooLarge 验证超过大小上限被拒。
-func TestAssistantVersionUploadSkillRejectsTooLarge(t *testing.T) {
+// TestAssistantVersionAddSkillFromLibraryDeniesOrgAdmin 验证组织管理员不能从库选 skill。
+func TestAssistantVersionAddSkillFromLibraryDeniesOrgAdmin(t *testing.T) {
 	store := newFakeAVStore()
 	id := seedVersion(store, "标准版", 1)
-	svc := NewAssistantVersionService(store, fakeImageResolver{}, fakeModelValidator{}, fakeBlobStore{}, 8)
-	_, err := svc.UploadSkill(context.Background(), platformPrincipal(), id, buildSkillTar(t, "weather"))
-	require.ErrorIs(t, err, ErrSkillTooLarge)
-}
-
-// TestAssistantVersionUploadSkillDeniesOrgAdmin 验证组织管理员不能上传 skill。
-func TestAssistantVersionUploadSkillDeniesOrgAdmin(t *testing.T) {
-	store := newFakeAVStore()
-	id := seedVersion(store, "标准版", 1)
-	svc := newTestAVService(t, store)
-	_, err := svc.UploadSkill(context.Background(), orgAdminPrincipal(), id, buildSkillTar(t, "weather"))
+	svc := newTestAVServiceWithLibrary(t, store, libWithWeather())
+	// 非平台管理员调用，应返回 ErrAssistantVersionDenied。
+	_, err := svc.AddSkillFromLibrary(context.Background(), orgAdminPrincipal(), id, weatherSkillInput())
 	require.ErrorIs(t, err, ErrAssistantVersionDenied)
 }
 
-// TestAssistantVersionUploadSkillRejectsInvalidTar 验证非法 tar（无 SKILL.md）被拒。
-func TestAssistantVersionUploadSkillRejectsInvalidTar(t *testing.T) {
-	store := newFakeAVStore()
-	id := seedVersion(store, "标准版", 1)
-	svc := newTestAVService(t, store)
-	_, err := svc.UploadSkill(context.Background(), platformPrincipal(), id, []byte("not a tar"))
-	require.ErrorIs(t, err, ErrAssistantVersionInvalid)
-}
-
-// TestAssistantVersionDeleteSkillOK 验证删除已存在 skill 后 skills 清空且 revision +1。
+// TestAssistantVersionDeleteSkillOK 验证删除已存在 skill 后 skills 清空且 revision 递增。
 func TestAssistantVersionDeleteSkillOK(t *testing.T) {
 	store := newFakeAVStore()
 	id := seedVersion(store, "标准版", 1)
-	svc := newTestAVService(t, store)
-	_, err := svc.UploadSkill(context.Background(), platformPrincipal(), id, buildSkillTar(t, "weather"))
+	lib := libWithWeather()
+	svc := newTestAVServiceWithLibrary(t, store, lib)
+	// 先从库选 weather 配进版本，再删除，期望 skills 为空。
+	_, err := svc.AddSkillFromLibrary(context.Background(), platformPrincipal(), id, weatherSkillInput())
 	require.NoError(t, err)
 	got, err := svc.DeleteSkill(context.Background(), platformPrincipal(), id, "weather")
 	require.NoError(t, err)
@@ -517,6 +546,7 @@ func TestAssistantVersionDeleteSkillNotFound(t *testing.T) {
 	store := newFakeAVStore()
 	id := seedVersion(store, "标准版", 1)
 	svc := newTestAVService(t, store)
+	// 版本内无任何 skill，删除应返回 ErrAssistantVersionInvalid。
 	_, err := svc.DeleteSkill(context.Background(), platformPrincipal(), id, "nope")
 	require.ErrorIs(t, err, ErrAssistantVersionInvalid)
 }
@@ -526,6 +556,7 @@ func TestAssistantVersionDeleteSkillDeniesOrgAdmin(t *testing.T) {
 	store := newFakeAVStore()
 	id := seedVersion(store, "标准版", 1)
 	svc := newTestAVService(t, store)
+	// 非平台管理员调用，应返回 ErrAssistantVersionDenied。
 	_, err := svc.DeleteSkill(context.Background(), orgAdminPrincipal(), id, "weather")
 	require.ErrorIs(t, err, ErrAssistantVersionDenied)
 }

@@ -4,7 +4,6 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
-	"mime/multipart"
 	"net/http"
 	"net/http/httptest"
 	"testing"
@@ -39,7 +38,7 @@ func (s *avServiceStub) Update(context.Context, auth.Principal, string, service.
 	return s.one, s.err
 }
 func (s *avServiceStub) Delete(context.Context, auth.Principal, string) error { return s.err }
-func (s *avServiceStub) UploadSkill(context.Context, auth.Principal, string, []byte) (service.AssistantVersionResult, error) {
+func (s *avServiceStub) AddSkillFromLibrary(context.Context, auth.Principal, string, service.AddSkillFromLibraryInput) (service.AssistantVersionResult, error) {
 	return s.one, s.err
 }
 func (s *avServiceStub) DeleteSkill(context.Context, auth.Principal, string, string) (service.AssistantVersionResult, error) {
@@ -122,46 +121,57 @@ func TestAVListRuntimeImages(t *testing.T) {
 	assert.Contains(t, resp.Body.String(), "v2026.5.16")
 }
 
-// avUploadRequest 构造一个 multipart skill 上传请求，供 UploadSkill handler 测试复用。
-func avUploadRequest(t *testing.T) *http.Request {
+// avAddSkillRequest 构造一个从库选 skill 的 JSON 请求，供 AddSkillFromLibrary handler 测试复用。
+func avAddSkillRequest(t *testing.T) *http.Request {
 	t.Helper()
-	body := &bytes.Buffer{}
-	w := multipart.NewWriter(body)
-	fw, err := w.CreateFormFile("file", "skill.tar")
+	body, err := json.Marshal(AddSkillFromLibraryRequest{
+		Source: "platform", SourceRef: "weather", Version: "1.0.0",
+	})
 	require.NoError(t, err)
-	_, err = fw.Write([]byte("dummy-tar-bytes"))
-	require.NoError(t, err)
-	require.NoError(t, w.Close())
-	req := httptest.NewRequest(http.MethodPost, "/api/v1/assistant-versions/v1/skills", body)
-	req.Header.Set("Content-Type", w.FormDataContentType())
+	req := httptest.NewRequest(http.MethodPost, "/api/v1/assistant-versions/v1/skills", bytes.NewReader(body))
+	req.Header.Set("Content-Type", "application/json")
 	return req
 }
 
-// TestAVUploadSkillReturns200 验证 multipart 上传 skill 成功时返回 200。
-func TestAVUploadSkillReturns200(t *testing.T) {
+// TestAVAddSkillFromLibraryReturns200 验证从库选 skill 成功时返回 200。
+func TestAVAddSkillFromLibraryReturns200(t *testing.T) {
 	svc := &avServiceStub{one: service.AssistantVersionResult{ID: "v1", Name: "标准版"}}
 	router := newAVTestRouter(t, svc)
-	req := withPrincipal(avUploadRequest(t), auth.Principal{Role: domain.UserRolePlatformAdmin})
+	req := withPrincipal(avAddSkillRequest(t), auth.Principal{Role: domain.UserRolePlatformAdmin})
 	resp := httptest.NewRecorder()
 	router.ServeHTTP(resp, req)
 	require.Equal(t, http.StatusOK, resp.Code)
 }
 
-// TestAVUploadSkillMapsTooLarge 验证 service 返回 SkillTooLarge 时映射 413。
-func TestAVUploadSkillMapsTooLarge(t *testing.T) {
-	svc := &avServiceStub{err: service.ErrSkillTooLarge}
+// TestAVAddSkillFromLibraryMapsSkillNameTaken 验证 service 返回 SkillNameTaken 时映射 409。
+func TestAVAddSkillFromLibraryMapsSkillNameTaken(t *testing.T) {
+	// 同版本内 skill 已存在时，handler 应映射为 409 Conflict。
+	svc := &avServiceStub{err: service.ErrAssistantVersionSkillNameTaken}
 	router := newAVTestRouter(t, svc)
-	req := withPrincipal(avUploadRequest(t), auth.Principal{Role: domain.UserRolePlatformAdmin})
+	req := withPrincipal(avAddSkillRequest(t), auth.Principal{Role: domain.UserRolePlatformAdmin})
 	resp := httptest.NewRecorder()
 	router.ServeHTTP(resp, req)
-	require.Equal(t, http.StatusRequestEntityTooLarge, resp.Code)
+	require.Equal(t, http.StatusConflict, resp.Code)
 }
 
-// TestAVUploadSkillRejectsMissingFile 验证缺少 file 表单字段时返回 400。
-func TestAVUploadSkillRejectsMissingFile(t *testing.T) {
+// TestAVAddSkillFromLibraryMapsSkillNotFound 验证 service 返回 PlatformSkillNotFound 时映射 404。
+func TestAVAddSkillFromLibraryMapsSkillNotFound(t *testing.T) {
+	// 平台库 skill 不存在时，handler 应映射为 404 Not Found。
+	svc := &avServiceStub{err: service.ErrPlatformSkillNotFound}
+	router := newAVTestRouter(t, svc)
+	req := withPrincipal(avAddSkillRequest(t), auth.Principal{Role: domain.UserRolePlatformAdmin})
+	resp := httptest.NewRecorder()
+	router.ServeHTTP(resp, req)
+	require.Equal(t, http.StatusNotFound, resp.Code)
+}
+
+// TestAVAddSkillFromLibraryRejectsMissingBody 验证缺少 JSON 请求体时返回 400。
+func TestAVAddSkillFromLibraryRejectsMissingBody(t *testing.T) {
+	// 不提交 JSON 请求体，ShouldBindJSON 应失败，handler 返回 400。
 	svc := &avServiceStub{}
 	router := newAVTestRouter(t, svc)
 	req := httptest.NewRequest(http.MethodPost, "/api/v1/assistant-versions/v1/skills", nil)
+	req.Header.Set("Content-Type", "application/json")
 	req = withPrincipal(req, auth.Principal{Role: domain.UserRolePlatformAdmin})
 	resp := httptest.NewRecorder()
 	router.ServeHTTP(resp, req)

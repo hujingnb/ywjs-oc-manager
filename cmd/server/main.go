@@ -262,14 +262,7 @@ func runManager(ctx context.Context, cfg config.Config, logOut io.Writer) error 
 		usageService = service.NewUsageService(nil, nil, nil)
 		organizationService = service.NewOrganizationService(dbStore.Queries, nil, nil, nil)
 	}
-	// 按配置选择 skill 主副本存储实现；两种实现都同时满足 SkillBlobStore 与 worker 的 SkillBlobReader。
-	// S3 启用时走对象存储（需 MinIO / 云 OSS），否则退回本地 FS（无 MinIO 的最小开发仍可用）。
-	var skillBlobStore interface {
-		PutSkill(versionID, skillName string, data []byte) (string, error)
-		DeleteSkill(relPath string) error
-		OpenSkill(relPath string) (io.ReadCloser, error)
-	}
-	// bootstrapSvc 仅在 S3 启用时赋值（bootstrap 依赖对象存储 + STS + skill 预签名）；
+	// bootstrapSvc 仅在 S3 启用时赋值（bootstrap 依赖对象存储 + skill 预签名）；
 	// nil 时 router 不注册 /internal 路由，符合最小模式预期。
 	var bootstrapSvc *service.BootstrapService
 	// workspaceObjStore 供 WorkspaceService 浏览 app workspace；S3 未启用时为 nil，
@@ -287,10 +280,9 @@ func runManager(ctx context.Context, cfg config.Config, logOut io.Writer) error 
 			UsePathStyle:    cfg.Storage.S3.UsePathStyle,
 		}
 		objStore := storage.NewS3ObjectStore(s3cfg)
-		// s3Skills 同时承担两个角色：skillBlobStore（供 AssistantVersionService 存取 tar）
-		// 与 bootstrapSkillSource（供 BootstrapService 预签名读 URL）。
+		// s3Skills 供 BootstrapService 生成 skill 预签名读 URL；
+		// 助手版本 skill 已改为从平台库选（快照引用库路径），不再需要独立 tar 写入副本。
 		s3Skills := service.NewS3SkillBlobStore(objStore, cfg.Storage.S3.PresignTTL.Duration)
-		skillBlobStore = s3Skills
 		// bootstrap 服务依赖对象存储（restore 预签名）+ skill 预签名 + 长期写凭证。
 		// 目标对象存储不支持标准 STS AssumeRole，故 sidecar 写回直接复用 manager 长期凭证。
 		bootstrapSvc = service.NewBootstrapService(
@@ -313,8 +305,6 @@ func runManager(ctx context.Context, cfg config.Config, logOut io.Writer) error 
 		// workspace 数据读 S3（spec-A2a），与 bootstrap 共用同一 objStore 实例
 		workspaceObjStore = objStore
 		workspacePresignTTL = cfg.Storage.S3.PresignTTL.Duration
-	} else {
-		skillBlobStore = service.NewFSSkillBlobStore(cfg.App.DataRoot)
 	}
 	// libraryBlobs 是平台库 skill 归档的存储后端：
 	// S3 启用时另建一个 ObjectStore 实例（与上方 bootstrap/workspace 用的 objStore 同配置同桶但相互独立，
@@ -345,7 +335,7 @@ func runManager(ctx context.Context, cfg config.Config, logOut io.Writer) error 
 		clawhubClient = clawhub.NewClient(cfg.ClawHub.BaseURL, cfg.ClawHub.RequestTimeout.Duration)
 	}
 
-	// 助手版本 service：镜像来自配置、模型校验走 new-api 目录、skill tar 存数据根目录。
+	// 助手版本 service：镜像来自配置、模型校验走 new-api 目录、skill 从平台库选（dbStore.Queries 满足 PlatformSkillLibrary）。
 	// modelCatalogService 为 nil 时（未配 newapi）跳过构造，路由自动不注册。
 	var assistantVersionService *service.AssistantVersionService
 	if modelCatalogService != nil {
@@ -353,8 +343,7 @@ func runManager(ctx context.Context, cfg config.Config, logOut io.Writer) error 
 			store.NewAssistantVersionStore(dbStore),
 			runtimeImageAdapter{images: cfg.Hermes.RuntimeImages},
 			modelValidatorAdapter{catalog: modelCatalogService},
-			skillBlobStore,
-			0,
+			dbStore.Queries,
 		)
 		// 助手版本服务作为组织 allowlist 校验器：组织创建/编辑时校验所选版本 id 都存在。
 		organizationService.SetVersionValidator(assistantVersionService)

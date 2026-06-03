@@ -170,8 +170,8 @@ var ErrAssistantVersionNameTaken = errors.New("助手版本名称已存在")
 // ErrAssistantVersionInUse 助手版本正被组织或实例引用，不可删除。
 var ErrAssistantVersionInUse = errors.New("助手版本正被引用，不可删除")
 
-// ErrSkillTooLarge 上传的 skill tar 超过大小上限。
-var ErrSkillTooLarge = errors.New("skill tar 超过大小上限")
+// ErrAssistantVersionSkillNameTaken 同版本内 skill 名称已被占用，不允许重复添加。
+var ErrAssistantVersionSkillNameTaken = errors.New("版本内 skill 名称已存在")
 
 // ErrVersionNotInAllowlist 表示目标助手版本不在该实例所属企业的允许列表内，handler 映射为 400。
 var ErrVersionNotInAllowlist = errors.New("助手版本不在企业允许列表内")

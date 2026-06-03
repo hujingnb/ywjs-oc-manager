@@ -348,6 +348,19 @@ type UpdateAssistantVersionRequest struct {
 // ===== 平台库 skill =====
 // 上传走 multipart/form-data（字段 name/version/description + file），无 JSON 请求体 DTO。
 
+// ===== 助手版本 skill =====
+
+// AddSkillFromLibraryRequest 是 POST /api/v1/assistant-versions/:id/skills 的请求体。
+// 从平台库选一个已发布 skill 配进版本（自包含快照，不上传文件）。
+type AddSkillFromLibraryRequest struct {
+	// Source 是 skill 来源类型，首版仅接受 "platform"。
+	Source string `json:"source" binding:"required"`
+	// SourceRef 是来源内精准标识；platform 来源时等于 skill name。
+	SourceRef string `json:"source_ref" binding:"required"`
+	// Version 是要配进版本的 skill 版本号，必须与平台库中已发布的版本对应。
+	Version string `json:"version" binding:"required"`
+}
+
 // ===== 实例 skill app-skills =====
 
 // InstallAppSkillRequest 是 POST /api/v1/apps/:appId/skills 的请求体。

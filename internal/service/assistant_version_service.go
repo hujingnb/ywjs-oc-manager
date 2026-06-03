@@ -1,11 +1,8 @@
 package service
 
 import (
-	"bytes"
 	"context"
-	"crypto/sha256"
 	"database/sql"
-	"encoding/hex"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -14,7 +11,6 @@ import (
 	"github.com/guregu/null/v5"
 
 	"oc-manager/internal/auth"
-	"oc-manager/internal/integrations/hermes"
 	"oc-manager/internal/store/sqlc"
 )
 
@@ -61,12 +57,11 @@ type AssistantVersionModelValidator interface {
 	HasModel(id string) bool
 }
 
-// SkillBlobStore 抽象 skill tar 文件系统主副本的读写能力。
-type SkillBlobStore interface {
-	// PutSkill 写入一个 skill tar，返回相对数据根目录的存储路径。
-	PutSkill(versionID, skillName string, data []byte) (relPath string, err error)
-	// DeleteSkill 删除一个 skill tar。
-	DeleteSkill(relPath string) error
+// PlatformSkillLibrary 抽象助手版本 service 从平台库查取 skill 元数据的能力。
+// 是 PlatformSkillStore 的子集，仅需查询操作，不含上传/删除。
+type PlatformSkillLibrary interface {
+	// GetPlatformSkillByNameVersion 按名称 + 版本号精确查找平台库 skill，未找到返回 sql.ErrNoRows。
+	GetPlatformSkillByNameVersion(ctx context.Context, arg sqlc.GetPlatformSkillByNameVersionParams) (sqlc.PlatformSkill, error)
 }
 
 // RuntimeImageOption 是暴露给前端镜像 select 的单个选项。
@@ -77,33 +72,38 @@ type RuntimeImageOption struct {
 
 // AssistantVersionService 维护助手版本目录。
 type AssistantVersionService struct {
-	store  AssistantVersionStore
-	images assistantVersionImages
-	models AssistantVersionModelValidator
-	blobs  SkillBlobStore
-	// maxSkillBytes 是单个 skill tar 的大小上限。
-	maxSkillBytes int64
+	store         AssistantVersionStore
+	images        assistantVersionImages
+	models        AssistantVersionModelValidator
+	platformSkills PlatformSkillLibrary
 }
 
-// NewAssistantVersionService 创建版本 service。maxSkillBytes<=0 时取默认 10 MiB。
+// NewAssistantVersionService 创建版本 service。
 func NewAssistantVersionService(
 	store AssistantVersionStore,
 	images assistantVersionImages,
 	models AssistantVersionModelValidator,
-	blobs SkillBlobStore,
-	maxSkillBytes int64,
+	platformSkills PlatformSkillLibrary,
 ) *AssistantVersionService {
-	if maxSkillBytes <= 0 {
-		maxSkillBytes = 10 << 20
-	}
-	return &AssistantVersionService{store: store, images: images, models: models, blobs: blobs, maxSkillBytes: maxSkillBytes}
+	return &AssistantVersionService{store: store, images: images, models: models, platformSkills: platformSkills}
 }
 
-// AssistantVersionSkill 是 skills_json 内单个 skill 的元信息。
+// AssistantVersionSkill 是 skills_json 内单个 skill 的自包含快照。
+// 首版仅 platform 来源可配进版本；clawhub 留 per-app 安装。
 type AssistantVersionSkill struct {
-	Name       string `json:"name"`
-	FilePath   string `json:"file_path"`
-	FileSize   int64  `json:"file_size"`
+	// Source 是 skill 来源类型，当前仅 "platform"。
+	Source string `json:"source"`
+	// SourceRef 是来源内精准标识；platform 来源时等于 skill name。
+	SourceRef string `json:"source_ref"`
+	// Name 是 skill 在版本内的唯一目录名。
+	Name string `json:"name"`
+	// Version 是 skill 版本号，由来源方定义。
+	Version string `json:"version"`
+	// CachedPath 是对象存储中归档的相对路径，如 library/platform/<name>/<version>.tar。
+	CachedPath string `json:"cached_path"`
+	// FileSize 是归档字节大小，供下载前预估流量。
+	FileSize int64 `json:"file_size"`
+	// FileSha256 是归档内容的 sha256，供完整性校验。
 	FileSha256 string `json:"file_sha256"`
 }
 
@@ -391,45 +391,66 @@ func (s *AssistantVersionService) Delete(ctx context.Context, principal auth.Pri
 	return nil
 }
 
-// UploadSkill 上传一个 skill tar：校验大小、合法性、推导名称，写文件系统主副本，
-// 把元信息追加进 skills_json 并把 revision +1。
-func (s *AssistantVersionService) UploadSkill(ctx context.Context, principal auth.Principal, id string, data []byte) (AssistantVersionResult, error) {
+// AddSkillFromLibraryInput 是从平台库选 skill 配进版本的入参。
+type AddSkillFromLibraryInput struct {
+	// Source 是 skill 来源类型，首版仅接受 "platform"。
+	Source string
+	// SourceRef 是来源内精准标识；platform 来源时等于 skill name。
+	SourceRef string
+	// Version 是目标版本号，必须与平台库中已发布的版本对应。
+	Version string
+}
+
+// AddSkillFromLibrary 从平台库选一个 skill 配进版本快照：
+//  1. 权限校验（CanManageAssistantVersion）
+//  2. 查版本
+//  3. 查平台库取 skill 元数据（TarPath/FileSize/FileSha256）
+//  4. 同 name 冲突检查（ErrAssistantVersionSkillNameTaken）
+//  5. 追加自包含快照并 revision +1
+//
+// 首版仅 platform 来源；clawhub 来源留 per-app 安装路径。
+func (s *AssistantVersionService) AddSkillFromLibrary(ctx context.Context, principal auth.Principal, id string, in AddSkillFromLibraryInput) (AssistantVersionResult, error) {
 	if !auth.CanManageAssistantVersion(principal) {
 		return AssistantVersionResult{}, ErrAssistantVersionDenied
-	}
-	if int64(len(data)) > s.maxSkillBytes {
-		return AssistantVersionResult{}, fmt.Errorf("%w: 上限 %d 字节", ErrSkillTooLarge, s.maxSkillBytes)
 	}
 	row, err := s.loadVersion(ctx, id)
 	if err != nil {
 		return AssistantVersionResult{}, err
 	}
-	info, err := hermes.InspectSkillArchive(bytes.NewReader(data))
-	if err != nil {
-		return AssistantVersionResult{}, fmt.Errorf("%w: %w", ErrAssistantVersionInvalid, err)
-	}
 	skills, err := decodeSkills(row.SkillsJson)
 	if err != nil {
 		return AssistantVersionResult{}, err
 	}
+	// 查平台库取 skill 元数据；未找到时映射为 ErrPlatformSkillNotFound。
+	ps, err := s.platformSkills.GetPlatformSkillByNameVersion(ctx, sqlc.GetPlatformSkillByNameVersionParams{
+		Name: in.SourceRef, Version: in.Version,
+	})
+	if err != nil {
+		if errors.Is(err, sql.ErrNoRows) {
+			return AssistantVersionResult{}, ErrPlatformSkillNotFound
+		}
+		return AssistantVersionResult{}, fmt.Errorf("查询平台库 skill 失败: %w", err)
+	}
+	// 同 name 冲突：同一版本内 skill 名称必须唯一。
 	for _, sk := range skills {
-		if sk.Name == info.Name {
-			return AssistantVersionResult{}, fmt.Errorf("%w: skill %s 已存在", ErrAssistantVersionInvalid, info.Name)
+		if sk.Name == ps.Name {
+			return AssistantVersionResult{}, ErrAssistantVersionSkillNameTaken
 		}
 	}
-	// 先写 blob 再写库：persistSkills 失败时最多留下一个无引用的 tar（可由清理任务回收），不会出现 DB 指向缺失文件。
-	relPath, err := s.blobs.PutSkill(row.ID, info.Name, data)
-	if err != nil {
-		return AssistantVersionResult{}, fmt.Errorf("写入 skill tar 失败: %w", err)
-	}
-	sum := sha256.Sum256(data)
 	skills = append(skills, AssistantVersionSkill{
-		Name: info.Name, FilePath: relPath, FileSize: int64(len(data)), FileSha256: hex.EncodeToString(sum[:]),
+		Source:     "platform",
+		SourceRef:  ps.Name,
+		Name:       ps.Name,
+		Version:    ps.Version,
+		CachedPath: ps.TarPath,
+		FileSize:   ps.FileSize,
+		FileSha256: ps.FileSha256,
 	})
 	return s.persistSkills(ctx, row, skills)
 }
 
-// DeleteSkill 从版本中删除一个 skill：删文件系统主副本、从 skills_json 移除、revision +1。
+// DeleteSkill 从版本中移除一个 skill 快照：只更新 skills_json 并 revision +1。
+// skill 来自平台库（快照引用 CachedPath），不持有独立副本，无需删除对象存储文件。
 func (s *AssistantVersionService) DeleteSkill(ctx context.Context, principal auth.Principal, id, skillName string) (AssistantVersionResult, error) {
 	if !auth.CanManageAssistantVersion(principal) {
 		return AssistantVersionResult{}, ErrAssistantVersionDenied
@@ -443,28 +464,18 @@ func (s *AssistantVersionService) DeleteSkill(ctx context.Context, principal aut
 		return AssistantVersionResult{}, err
 	}
 	kept := make([]AssistantVersionSkill, 0, len(skills))
-	var removed *AssistantVersionSkill
+	found := false
 	for i := range skills {
 		if skills[i].Name == skillName {
-			removed = &skills[i]
+			found = true
 			continue
 		}
 		kept = append(kept, skills[i])
 	}
-	if removed == nil {
+	if !found {
 		return AssistantVersionResult{}, fmt.Errorf("%w: skill %s 不存在", ErrAssistantVersionInvalid, skillName)
 	}
-	// 先更新库（移除 skills_json 条目）再删 blob：persistSkills 失败时 blob 仍在、
-	// DB 仍指向有效文件，不会出现「DB 指向已不存在文件」的损坏状态；blob 删除失败
-	// 时最多留下一个无引用的 tar，可由后续清理任务回收。
-	result, err := s.persistSkills(ctx, row, kept)
-	if err != nil {
-		return AssistantVersionResult{}, err
-	}
-	if err := s.blobs.DeleteSkill(removed.FilePath); err != nil {
-		return AssistantVersionResult{}, fmt.Errorf("删除 skill tar 失败: %w", err)
-	}
-	return result, nil
+	return s.persistSkills(ctx, row, kept)
 }
 
 // persistSkills 把更新后的 skill 列表写库并把 revision +1（skill 变更属于容器相关变更）。

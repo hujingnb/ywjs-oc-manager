@@ -3,7 +3,6 @@ package handlers
 import (
 	"context"
 	"errors"
-	"io"
 	"net/http"
 
 	"github.com/gin-gonic/gin"
@@ -13,9 +12,6 @@ import (
 	"oc-manager/internal/service"
 )
 
-// maxSkillUploadBytes 是 skill tar multipart 上传的硬上限（与 service 层 10 MiB 对齐，留少量余量）。
-const maxSkillUploadBytes = 12 << 20
-
 // assistantVersionService 是 handler 依赖的版本 service 能力集合。
 type assistantVersionService interface {
 	List(ctx context.Context, principal auth.Principal) ([]service.AssistantVersionResult, error)
@@ -23,7 +19,7 @@ type assistantVersionService interface {
 	Create(ctx context.Context, principal auth.Principal, in service.AssistantVersionInput) (service.AssistantVersionResult, error)
 	Update(ctx context.Context, principal auth.Principal, id string, in service.AssistantVersionInput) (service.AssistantVersionResult, error)
 	Delete(ctx context.Context, principal auth.Principal, id string) error
-	UploadSkill(ctx context.Context, principal auth.Principal, id string, data []byte) (service.AssistantVersionResult, error)
+	AddSkillFromLibrary(ctx context.Context, principal auth.Principal, id string, in service.AddSkillFromLibraryInput) (service.AssistantVersionResult, error)
 	DeleteSkill(ctx context.Context, principal auth.Principal, id, skillName string) (service.AssistantVersionResult, error)
 	ListRuntimeImages(ctx context.Context, principal auth.Principal) ([]service.RuntimeImageOption, error)
 }
@@ -45,7 +41,7 @@ func RegisterAssistantVersionRoutes(router gin.IRouter, h *AssistantVersionsHand
 	router.GET("/api/v1/assistant-versions/:id", h.Get)
 	router.PUT("/api/v1/assistant-versions/:id", h.Update)
 	router.DELETE("/api/v1/assistant-versions/:id", h.Delete)
-	router.POST("/api/v1/assistant-versions/:id/skills", h.UploadSkill)
+	router.POST("/api/v1/assistant-versions/:id/skills", h.AddSkillFromLibrary)
 	router.DELETE("/api/v1/assistant-versions/:id/skills/:skill", h.DeleteSkill)
 	router.GET("/api/v1/runtime-images", h.ListRuntimeImages)
 }
@@ -61,8 +57,10 @@ func writeAVError(c *gin.Context, err error) {
 		c.JSON(http.StatusConflict, apierror.New("ASSISTANT_VERSION_NAME_TAKEN", "助手版本名称已存在"))
 	case errors.Is(err, service.ErrAssistantVersionInUse):
 		c.JSON(http.StatusConflict, apierror.New("ASSISTANT_VERSION_IN_USE", "助手版本正被引用，不可删除"))
-	case errors.Is(err, service.ErrSkillTooLarge):
-		c.JSON(http.StatusRequestEntityTooLarge, apierror.New("SKILL_TOO_LARGE", "skill 包超过大小上限"))
+	case errors.Is(err, service.ErrAssistantVersionSkillNameTaken):
+		c.JSON(http.StatusConflict, apierror.New("ASSISTANT_VERSION_SKILL_NAME_TAKEN", "版本内 skill 名称已存在"))
+	case errors.Is(err, service.ErrPlatformSkillNotFound):
+		c.JSON(http.StatusNotFound, apierror.New("PLATFORM_SKILL_NOT_FOUND", "平台库 skill 不存在"))
 	case errors.Is(err, service.ErrAssistantVersionInvalid):
 		c.JSON(http.StatusBadRequest, apierror.New("ASSISTANT_VERSION_INVALID", err.Error()))
 	default:
@@ -197,41 +195,30 @@ func (h *AssistantVersionsHandler) Delete(c *gin.Context) {
 	c.Status(http.StatusNoContent)
 }
 
-// UploadSkill 上传一个 skill tar。
+// AddSkillFromLibrary 从平台库选一个 skill 配进版本。
 //
-// @Summary  上传版本 skill
+// @Summary  从库选 skill 配进版本
 // @Tags     assistant-versions
-// @Accept   multipart/form-data
+// @Accept   json
 // @Produce  json
 // @Security BearerAuth
-// @Param    id   path     string true "版本 ID"
-// @Param    file formData file   true "skill tar 包"
+// @Param    id   path string                         true "版本 ID"
+// @Param    body body AddSkillFromLibraryRequest     true "库选 skill 入参"
 // @Success  200 {object} map[string]service.AssistantVersionResult
 // @Failure  400 {object} ErrorResponse
-// @Failure  413 {object} ErrorResponse
+// @Failure  403 {object} ErrorResponse
+// @Failure  404 {object} ErrorResponse
+// @Failure  409 {object} ErrorResponse
 // @Router   /assistant-versions/{id}/skills [post]
-func (h *AssistantVersionsHandler) UploadSkill(c *gin.Context) {
-	fileHeader, err := c.FormFile("file")
-	if err != nil {
-		c.JSON(http.StatusBadRequest, apierror.New("INVALID_REQUEST", "缺少 file 表单字段"))
+func (h *AssistantVersionsHandler) AddSkillFromLibrary(c *gin.Context) {
+	var req AddSkillFromLibraryRequest
+	if err := c.ShouldBindJSON(&req); err != nil {
+		c.JSON(http.StatusBadRequest, apierror.New("INVALID_REQUEST", "请求体格式错误"))
 		return
 	}
-	f, err := fileHeader.Open()
-	if err != nil {
-		c.JSON(http.StatusBadRequest, apierror.New("INVALID_REQUEST", "无法读取上传文件"))
-		return
-	}
-	defer func() { _ = f.Close() }()
-	data, err := io.ReadAll(io.LimitReader(f, maxSkillUploadBytes+1))
-	if err != nil {
-		c.JSON(http.StatusBadRequest, apierror.New("INVALID_REQUEST", "读取上传文件失败"))
-		return
-	}
-	if int64(len(data)) > maxSkillUploadBytes {
-		c.JSON(http.StatusRequestEntityTooLarge, apierror.New("SKILL_TOO_LARGE", "skill 包超过大小上限"))
-		return
-	}
-	out, err := h.service.UploadSkill(c.Request.Context(), principalFromCtx(c), c.Param("id"), data)
+	out, err := h.service.AddSkillFromLibrary(c.Request.Context(), principalFromCtx(c), c.Param("id"), service.AddSkillFromLibraryInput{
+		Source: req.Source, SourceRef: req.SourceRef, Version: req.Version,
+	})
 	if err != nil {
 		writeAVError(c, err)
 		return
