@@ -50,6 +50,8 @@ type Dependencies struct {
 	HermesKanbanService *service.HermesKanbanService
 	// HermesCronService 提供实例定时任务能力；nil 时不注册 cron 路由。
 	HermesCronService *service.HermesCronService
+	// AppSkillService 提供实例级 skill 安装/卸载/更新与对账能力；nil 时不注册 skill 路由。
+	AppSkillService *service.AppSkillService
 	// BootstrapService 提供 pod 启动回调（/internal/apps/:id/bootstrap）；nil 时不注册。
 	// /internal 组不挂用户鉴权中间件，由 handler 内联校验 control token。
 	BootstrapService handlers.BootstrapAppService
@@ -173,6 +175,9 @@ func NewRouter(deps ...Dependencies) http.Handler {
 	}
 	if dep.HermesCronService != nil {
 		handlers.RegisterHermesCronRoutes(user, handlers.NewHermesCronHandler(dep.HermesCronService))
+	}
+	if dep.AppSkillService != nil {
+		handlers.RegisterAppSkillRoutes(user, handlers.NewAppSkillsHandler(dep.AppSkillService))
 	}
 	return router
 }

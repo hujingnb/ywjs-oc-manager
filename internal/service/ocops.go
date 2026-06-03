@@ -148,6 +148,44 @@ func (r *OcOpsResolverFromStore) Resolve(ctx context.Context, appID string) (OcO
 	}, nil
 }
 
+// LocateApp 实现 AppLocator 接口：查询 app 并组装 AppSkillLocation（含 VersionID）。
+// 复用 Resolve 内的 GetApp 逻辑，多取一个 VersionID 字段供 AppSkillService 删除保护使用。
+// app 不存在映射为 ErrNotFound；token 解密失败透传错误。
+func (r *OcOpsResolverFromStore) LocateApp(ctx context.Context, appID string) (AppSkillLocation, error) {
+	app, err := r.store.GetApp(ctx, appID)
+	if err != nil {
+		if errors.Is(err, sql.ErrNoRows) {
+			return AppSkillLocation{}, ErrNotFound
+		}
+		return AppSkillLocation{}, fmt.Errorf("查询 app 失败: %w", err)
+	}
+	// 解密 per-app control token（与 Resolve 同逻辑）
+	token := ""
+	if app.RuntimeTokenCiphertext.Valid && r.cipher != nil {
+		plain, derr := r.cipher.Decrypt(app.RuntimeTokenCiphertext.String)
+		if derr != nil {
+			return AppSkillLocation{}, fmt.Errorf("解密 control token 失败: %w", derr)
+		}
+		token = string(plain)
+	}
+	// VersionID 取自 app.VersionID（nullable）：未绑定版本时为空字符串，删除保护会跳过。
+	versionID := ""
+	if app.VersionID.Valid {
+		versionID = app.VersionID.String
+	}
+	return AppSkillLocation{
+		OrgID:       app.OrgID,
+		OwnerUserID: app.OwnerUserID,
+		VersionID:   versionID,
+		Endpoint: ocops.Endpoint{
+			BaseURL: fmt.Sprintf(r.baseURLTpl, appID),
+			Token:   token,
+		},
+		// dev stub 镜像（-dev 后缀）不含真实 hermes，标记为不支持
+		Supported: !strings.HasSuffix(app.RuntimeImageRef, "-dev"),
+	}, nil
+}
+
 // mapOcOpsCronErr 把 ocops 哨兵错误翻译成 cron service 既有哨兵错误，保留语义不变。
 // nil 透传 nil；未列举的错误兜底为 ErrCronCLI（与 502/未知上游错误语义一致）。
 func mapOcOpsCronErr(err error) error {

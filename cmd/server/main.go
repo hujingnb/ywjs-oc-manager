@@ -442,6 +442,31 @@ func runManager(ctx context.Context, cfg config.Config, logOut io.Writer) error 
 	hermesKanbanService := service.NewHermesKanbanService(ocopsClient, ocopsResolver)
 	hermesCronService := service.NewHermesCronService(ocopsClient, ocopsResolver)
 
+	// AppSkillService：实例级 skill 安装/卸载/更新与对账。
+	// - AppLocator 由 ocopsResolver.LocateApp 满足（已在 ocops.go 实现，含 VersionID 字段）。
+	// - AssistantVersionLoader 由 assistantVersionSkillLoader 适配（GetAssistantVersion + decodeSkills）。
+	// - ClawHub downloader 传 nil（Plan 2 clawhub 包未执行，spec 允许 clawhub 可选）。
+	//   Plan 2 就绪后注入真实 ClawHub client。
+	// - audit 由 auditService 直接满足（*AuditService.Record 签名与 AuditRecorder 接口对齐）。
+	avSkillLoader := service.NewAssistantVersionSkillLoader(dbStore.Queries)
+	appSkillService := service.NewAppSkillService(service.AppSkillServiceDeps{
+		Store:    dbStore.Queries,
+		Apps:     ocopsResolver,
+		Versions: avSkillLoader,
+		Platform: platformSkillService,
+		ClawHub:  nil, // Plan 2 就绪后注入 clawhubClient
+		Blobs:    libraryBlobs,
+		OcOps:    ocopsClient,
+		Audit:    auditService,
+	})
+
+	// SkillUpdateChecker 定时回源检测 skill 最高版本，写回 app_skills.latest_version。
+	// SkillUpdateCheckerPlatformStore 由 dbStore.Queries 满足（ListPlatformSkills）。
+	// SkillUpdateCheckerAppSkillStore 由 dbStore.Queries 满足（ListDistinctAppSkillSources / ListAppSkillsBySourceRef / UpdateAppSkillLatest）。
+	// clawhub lister 传 nil（Plan 2 就绪后注入）。
+	skillUpdateChecker := service.NewSkillUpdateChecker(dbStore.Queries, dbStore.Queries, nil)
+	skillUpdateCheckerTask := service.NewPeriodicReconciler("skill_update_check", 30*time.Minute, skillUpdateChecker.Tick)
+
 	server := &http.Server{
 		Addr: cfg.App.HTTPAddr,
 		Handler: api.NewRouter(api.Dependencies{
@@ -463,6 +488,7 @@ func runManager(ctx context.Context, cfg config.Config, logOut io.Writer) error 
 			PlatformSkillService:    platformSkillService,
 			HermesKanbanService:     hermesKanbanService,
 			HermesCronService:       hermesCronService,
+			AppSkillService:         appSkillService,
 			BootstrapService:        bootstrapSvc,
 			JobsStore:               dbStore.Queries,
 			TokenManager:            tokenManager,
@@ -531,6 +557,8 @@ func runManager(ctx context.Context, cfg config.Config, logOut io.Writer) error 
 	if ragflowParseStatusTask != nil {
 		eg.Go(func() error { return ragflowParseStatusTask.Run(gctx, logger) })
 	}
+	// skill 更新检测定时任务：每 30 分钟回源查最高版本，写回 app_skills.latest_version。
+	eg.Go(func() error { return skillUpdateCheckerTask.Run(gctx, logger) })
 	eg.Go(func() error {
 		<-gctx.Done()
 		shutdownCtx, shutdownCancel := context.WithTimeout(context.Background(), 30*time.Second)
