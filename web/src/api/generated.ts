@@ -8005,6 +8005,69 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/skill-market": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** 浏览/搜索 skill 市场 */
+        get: {
+            parameters: {
+                query?: {
+                    /** @description 来源过滤：platform | clawhub | （空=聚合） */
+                    source?: string;
+                    /** @description 关键词搜索 */
+                    q?: string;
+                    /** @description 分页游标（clawhub 分页使用，platform 忽略） */
+                    cursor?: string;
+                };
+                header?: never;
+                path?: never;
+                cookie?: never;
+            };
+            requestBody?: never;
+            responses: {
+                /** @description OK */
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": {
+                            [key: string]: components["schemas"]["service.SkillPage"];
+                        };
+                    };
+                };
+                /** @description Bad Request */
+                400: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["handlers.ErrorResponse"];
+                    };
+                };
+                /** @description Internal Server Error */
+                500: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["handlers.ErrorResponse"];
+                    };
+                };
+            };
+        };
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/usage/members/{userId}": {
         parameters: {
             query?: never;
@@ -9258,6 +9321,26 @@ export interface components {
             snapshot?: components["schemas"]["service.RuntimeSnapshotView"];
             /** @description k8s 路径的运行状态直接来自 apps.status；no_container 表示容器尚未创建。 */
             status?: string;
+        };
+        "service.SkillEntry": {
+            /** @description Description 是 skill 简短描述。 */
+            description?: string;
+            /** @description Downloads 是下载次数，仅 clawhub 有意义，platform 为 0。 */
+            downloads?: number;
+            /** @description Name 是 skill 名称。 */
+            name?: string;
+            /** @description Source 是来源标识，取值为 "platform" 或 "clawhub"。 */
+            source?: string;
+            /** @description SourceRef 是回源标识：platform 用 name，clawhub 用 slug。 */
+            source_ref?: string;
+            /** @description Version 是展示的最新版本号。 */
+            version?: string;
+        };
+        "service.SkillPage": {
+            /** @description Entries 是本页的 skill 条目列表。 */
+            entries?: components["schemas"]["service.SkillEntry"][];
+            /** @description NextCursor 是下一页游标，platform 来源始终为空。 */
+            next_cursor?: string;
         };
         "service.TokenPair": {
             access_token?: string;

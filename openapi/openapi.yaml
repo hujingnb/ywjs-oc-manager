@@ -1593,6 +1593,39 @@ components:
           description: k8s 路径的运行状态直接来自 apps.status；no_container 表示容器尚未创建。
           type: string
       type: object
+    service.SkillEntry:
+      properties:
+        description:
+          description: Description 是 skill 简短描述。
+          type: string
+        downloads:
+          description: Downloads 是下载次数，仅 clawhub 有意义，platform 为 0。
+          type: integer
+        name:
+          description: Name 是 skill 名称。
+          type: string
+        source:
+          description: Source 是来源标识，取值为 "platform" 或 "clawhub"。
+          type: string
+        source_ref:
+          description: SourceRef 是回源标识：platform 用 name，clawhub 用 slug。
+          type: string
+        version:
+          description: Version 是展示的最新版本号。
+          type: string
+      type: object
+    service.SkillPage:
+      properties:
+        entries:
+          description: Entries 是本页的 skill 条目列表。
+          items:
+            $ref: '#/components/schemas/service.SkillEntry'
+          type: array
+          uniqueItems: false
+        next_cursor:
+          description: NextCursor 是下一页游标，platform 来源始终为空。
+          type: string
+      type: object
     service.TokenPair:
       properties:
         access_token:
@@ -7060,6 +7093,50 @@ paths:
       summary: Hermes 检索知识库
       tags:
       - runtime-knowledge
+  /skill-market:
+    get:
+      parameters:
+      - description: 来源过滤：platform | clawhub | （空=聚合）
+        in: query
+        name: source
+        schema:
+          type: string
+      - description: 关键词搜索
+        in: query
+        name: q
+        schema:
+          type: string
+      - description: 分页游标（clawhub 分页使用，platform 忽略）
+        in: query
+        name: cursor
+        schema:
+          type: string
+      responses:
+        "200":
+          content:
+            application/json:
+              schema:
+                additionalProperties:
+                  $ref: '#/components/schemas/service.SkillPage'
+                type: object
+          description: OK
+        "400":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/handlers.ErrorResponse'
+          description: Bad Request
+        "500":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/handlers.ErrorResponse'
+          description: Internal Server Error
+      security:
+      - BearerAuth: []
+      summary: 浏览/搜索 skill 市场
+      tags:
+      - skill-market
   /usage/members/{userId}:
     get:
       description: 返回指定成员名下应用的 token 调用日志（LogsPage 格式）
