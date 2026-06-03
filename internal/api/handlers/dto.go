@@ -347,3 +347,23 @@ type UpdateAssistantVersionRequest struct {
 
 // ===== 平台库 skill =====
 // 上传走 multipart/form-data（字段 name/version/description + file），无 JSON 请求体 DTO。
+
+// ===== 实例 skill app-skills =====
+
+// InstallAppSkillRequest 是 POST /api/v1/apps/:appId/skills 的请求体。
+type InstallAppSkillRequest struct {
+	// Source 是 skill 来源类型：platform（平台库）或 clawhub（ClawHub 市场）。
+	Source string `json:"source" binding:"required"`
+	// SourceRef 是来源内精准标识：platform=name，clawhub=slug。
+	SourceRef string `json:"source_ref" binding:"required"`
+	// Name 是 skill 在实例内的目录名（唯一键），不同 app 间可重名。
+	Name string `json:"name" binding:"required"`
+	// Version 是要安装的版本号，由来源方定义（如 semver 或日期戳）。
+	Version string `json:"version" binding:"required"`
+}
+
+// UpdateAppSkillRequest 是 POST /api/v1/apps/:appId/skills/:skillName/update 的请求体。
+type UpdateAppSkillRequest struct {
+	// Version 是目标版本号，必须与 source 端已发布的版本对应。
+	Version string `json:"version" binding:"required"`
+}
