@@ -32,12 +32,14 @@ ensure_creds() {
   fi
 }
 
-# run_once 跑一轮：确保凭证新鲜 → 同步 workspace → 同步 sessions → 到点则备份 sqlite。
+# run_once 跑一轮：确保凭证新鲜 → 同步 workspace → 同步 sessions → 同步 weixin →
+# 同步自创 skill → 到点则备份 sqlite。
 run_once() {
   ensure_creds
   sync_workspace_up "$DATA_DIR"
   sync_sessions_up "$DATA_DIR"
   sync_weixin_up "$DATA_DIR"
+  sync_user_skills_up "$DATA_DIR"
   local now
   now=$(date -u +%s)
   if [ $((now - last_db)) -ge "$DB_INTERVAL" ]; then
@@ -52,6 +54,7 @@ if [ "${OC_SYNC_ONCE:-0}" = "1" ]; then
   sync_workspace_up "$DATA_DIR"
   sync_sessions_up "$DATA_DIR"
   sync_weixin_up "$DATA_DIR"
+  sync_user_skills_up "$DATA_DIR"
   backup_sqlite_up "$DATA_DIR"
   log "oc-sync 单轮完成（OC_SYNC_ONCE）"
   exit 0

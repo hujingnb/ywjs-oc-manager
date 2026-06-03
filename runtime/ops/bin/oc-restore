@@ -41,7 +41,8 @@ export_s3_env "$bs"
 aws_s3 sync "s3://${AWS_S3_BUCKET}/${AWS_S3_PREFIX}workspace/" "$DATA_DIR/workspace"
 aws_s3 sync "s3://${AWS_S3_BUCKET}/${AWS_S3_PREFIX}sessions/"  "$DATA_DIR/sessions"
 aws_s3 sync "s3://${AWS_S3_BUCKET}/${AWS_S3_PREFIX}weixin/"    "$DATA_DIR/weixin"
-log "workspace/sessions/weixin 已恢复"
+restore_user_skills "$DATA_DIR"
+log "workspace/sessions/weixin/skills 已恢复"
 
 # state.db 单对象：存在才拉，并清 WAL 边车（绝不分别拉 -wal/-shm）保证干净重开。
 if aws_s3 ls "s3://${AWS_S3_BUCKET}/${AWS_S3_PREFIX}state.db" >/dev/null 2>&1; then

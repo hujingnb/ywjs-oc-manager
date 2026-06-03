@@ -49,5 +49,47 @@ HOME=/tmp/ochome2 write_aws_credentials /tmp/bs-longterm.json
 grep -q '^aws_access_key_id = LAK$' /tmp/ochome2/.aws/credentials || { echo "FAIL: 长期凭证缺 access key"; fail=1; }
 if grep -q 'aws_session_token' /tmp/ochome2/.aws/credentials; then echo "FAIL: 长期凭证不应写 aws_session_token 行"; fail=1; fi
 
+# ── sync_user_skills_up 跳过判定：受管(managed) / 内置(builtin) / 自创(user) ──
+#
+# 构造临时 data_dir，包含三种目录：
+#   1. skills/managed-x/：含 .oc-managed 标记 → 应跳过（受管 skill）
+#   2. skills/builtin-y/：名字写入临时内置清单 builtin.json → 应跳过（内置 skill）
+#   3. skills/created-z/：无标记且不在清单 → 应被 aws_s3 sync 处理（自创 skill）
+TDATA=$(mktemp -d)
+TBUILTIN=$(mktemp)
+mkdir -p "$TDATA/skills/managed-x" "$TDATA/skills/builtin-y" "$TDATA/skills/created-z"
+touch "$TDATA/skills/managed-x/.oc-managed"
+printf '{"builtin":["builtin-y"]}\n' > "$TBUILTIN"
+
+# mock aws_s3：把每次调用的第2个参数（本地路径）追加记录到 /tmp/aws_s3_calls.txt，
+# 不实际调用 AWS CLI，避免依赖网络与凭证。
+aws_s3() {
+  # $1=sync $2=<local-dir> $3=<s3-url>
+  printf '%s\n' "$2" >> /tmp/aws_s3_calls.txt
+}
+rm -f /tmp/aws_s3_calls.txt
+
+# 设定 S3 环境变量（sync_user_skills_up 拼接 s3://... URL 时用到）
+export AWS_S3_BUCKET="test-bucket"
+export AWS_S3_PREFIX="apps/test/"
+# 指定内置清单路径
+export OC_BUILTIN_MANIFEST="$TBUILTIN"
+
+sync_user_skills_up "$TDATA"
+
+# 断言：aws_s3 恰好只被调用了 1 次，且是对 created-z
+CALLS=$(cat /tmp/aws_s3_calls.txt 2>/dev/null || true)
+CALL_COUNT=$(printf '%s\n' "$CALLS" | grep -c . 2>/dev/null || true)
+# 只有 created-z 被同步（调用次数恰好为 1）
+assert_eq "$CALL_COUNT" "1" "sync_user_skills_up 应只对 created-z 调 aws_s3（共 1 次）"
+# 被同步的路径以 created-z/ 结尾
+ACTUAL_PATH=$(printf '%s\n' "$CALLS" | head -1)
+EXPECTED_PATH="$TDATA/skills/created-z/"
+assert_eq "$ACTUAL_PATH" "$EXPECTED_PATH" "sync_user_skills_up 调 aws_s3 的本地路径应为 created-z/"
+
+# 清理临时目录
+rm -rf "$TDATA" "$TBUILTIN"
+rm -f /tmp/aws_s3_calls.txt
+
 if [ "$fail" -eq 0 ]; then echo "unit_test: ALL PASS"; fi
 exit "$fail"

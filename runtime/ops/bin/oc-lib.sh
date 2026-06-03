@@ -118,6 +118,41 @@ sync_weixin_up() {
   aws_s3 sync "$data_dir/weixin" "s3://${AWS_S3_BUCKET}/${AWS_S3_PREFIX}weixin/"
 }
 
+# sync_user_skills_up <data_dir> 把 skills/ 下「无 .oc-managed 且不在内置清单」的自创 skill
+# 增量同步到 S3 apps/<id>/skills/<name>/。
+# 跳过条件（两类）：
+#   1. 目录含 .oc-managed 文件 → 受平台管理的内置/托管 skill，不由用户自持；
+#   2. 目录名出现在 ${OC_BUILTIN_MANIFEST:-/opt/skills-builtin.json} 的 .builtin 数组内
+#      → 内置 skill，也不上传（文件不存在则视为无内置清单，仅跳过有 .oc-managed 的目录）。
+# skills/ 不存在时静默跳过（首启尚未创建自定义 skill）。
+sync_user_skills_up() {
+  local data_dir="$1"
+  local skills_dir="$data_dir/skills"
+  [ -d "$skills_dir" ] || return 0
+  local builtin_file="${OC_BUILTIN_MANIFEST:-/opt/skills-builtin.json}"
+  local dir name
+  for dir in "$skills_dir"/*/; do
+    [ -d "$dir" ] || continue
+    name=$(basename "$dir")
+    # 跳过受管 skill：目录内有 .oc-managed 标记文件
+    [ -f "$dir/.oc-managed" ] && continue
+    # 跳过内置 skill：名字出现在内置清单数组 .builtin 中
+    if [ -f "$builtin_file" ] && jq -e --arg n "$name" '.builtin | index($n)' "$builtin_file" >/dev/null 2>&1; then
+      continue
+    fi
+    # 自创 skill：同步到 S3（不加 --delete，以免删掉 S3 侧未落盘的内容）
+    aws_s3 sync "$dir" "s3://${AWS_S3_BUCKET}/${AWS_S3_PREFIX}skills/${name}/"
+  done
+}
+
+# restore_user_skills <data_dir> 从 S3 apps/<id>/skills/ 把所有自创 skill 还原到 skills/。
+# 首启时前缀为空，aws s3 sync 返回 0 不报错（幂等）。
+restore_user_skills() {
+  local data_dir="$1"
+  mkdir -p "$data_dir/skills"
+  aws_s3 sync "s3://${AWS_S3_BUCKET}/${AWS_S3_PREFIX}skills/" "$data_dir/skills/"
+}
+
 # backup_sqlite_up 用 sqlite .backup 出 live DB 的一致性快照并上传为 state.db（绝不分别传 -wal/-shm）。
 # 本地无 state.db（首启未建库）时静默跳过。
 backup_sqlite_up() {
