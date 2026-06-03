@@ -44,14 +44,21 @@ type SkillSource interface {
 	Search(ctx context.Context, principal auth.Principal, q, cursor string) (SkillPage, error)
 }
 
+// platformSkillLister 是 PlatformSource 所需的平台库查询能力最小接口。
+// 使用接口而非直接依赖 *PlatformSkillService，便于单元测试注入 stub。
+type platformSkillLister interface {
+	// ListForMarket 返回全部平台库 skill，市场展示用（所有已登录用户均可调用）。
+	ListForMarket(ctx context.Context, principal auth.Principal) ([]PlatformSkillResult, error)
+}
+
 // PlatformSource 把平台库（platform_skills）适配为 SkillSource。
 // 按 name 聚合所有版本并保留最新版本（版本字符串降序最大值），支持 q 子串过滤。
 type PlatformSource struct {
-	svc *PlatformSkillService
+	svc platformSkillLister
 }
 
 // NewPlatformSource 构造平台库来源适配器。
-func NewPlatformSource(svc *PlatformSkillService) *PlatformSource {
+func NewPlatformSource(svc platformSkillLister) *PlatformSource {
 	return &PlatformSource{svc: svc}
 }
 
@@ -63,8 +70,9 @@ func (s *PlatformSource) Kind() string { return "platform" }
 // 聚合规则：同 name 的所有行中，保留 version 字符串最大的那一条。
 // 实际部署时 ListPlatformSkills 按 name ASC, created_at DESC 排序，版本单调递增；
 // 但为保证单元测试（fakePlatformSkillStore 不保证排序）的正确性，此处显式取最大版本。
+// 使用 ListForMarket 而非 List，确保非平台管理员（如 org_member）也能浏览市场。
 func (s *PlatformSource) Search(ctx context.Context, principal auth.Principal, q, _ string) (SkillPage, error) {
-	rows, err := s.svc.List(ctx, principal)
+	rows, err := s.svc.ListForMarket(ctx, principal)
 	if err != nil {
 		return SkillPage{}, err
 	}

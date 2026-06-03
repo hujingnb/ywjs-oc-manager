@@ -63,11 +63,25 @@ func toPlatformSkillResult(row sqlc.PlatformSkill) PlatformSkillResult {
 	}
 }
 
-// List 返回全部平台库 skill，仅平台管理员可调用。
+// List 返回全部平台库 skill，仅平台管理员可调用（用于管理页面）。
 func (s *PlatformSkillService) List(ctx context.Context, principal auth.Principal) ([]PlatformSkillResult, error) {
 	if !auth.CanManagePlatformSkill(principal) {
 		return nil, ErrPlatformSkillDenied
 	}
+	return s.listAll(ctx)
+}
+
+// ListForMarket 返回全部平台库 skill，供市场聚合层调用。
+// 市场是只读展示入口，所有已登录用户均可浏览，权限校验使用 CanViewPlatformSkillMarket。
+func (s *PlatformSkillService) ListForMarket(ctx context.Context, principal auth.Principal) ([]PlatformSkillResult, error) {
+	if !auth.CanViewPlatformSkillMarket(principal) {
+		return nil, ErrPlatformSkillDenied
+	}
+	return s.listAll(ctx)
+}
+
+// listAll 是内部公共查询逻辑，不做权限校验（由调用方保证）。
+func (s *PlatformSkillService) listAll(ctx context.Context) ([]PlatformSkillResult, error) {
 	rows, err := s.store.ListPlatformSkills(ctx)
 	if err != nil {
 		return nil, fmt.Errorf("查询平台库 skill 失败: %w", err)

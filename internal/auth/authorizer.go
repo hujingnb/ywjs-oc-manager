@@ -339,6 +339,12 @@ func CanManagePlatformSkill(p Principal) bool {
 	return p.Role == domain.UserRolePlatformAdmin
 }
 
+// CanViewPlatformSkillMarket 判断是否可浏览平台库 skill 市场：所有已登录用户均可查看。
+// 市场是只读展示接口，无论角色均可浏览，写操作（上传/删除）仍需 CanManagePlatformSkill。
+func CanViewPlatformSkillMarket(p Principal) bool {
+	return p.Role != ""
+}
+
 // CanManageAppSkill 判断是否可管理某 app 的 skill：与应用写权限同款（owner 本人 / 本 org 的 org_admin）。
 // platform_admin 不继承应用写权限，不可管理实例 skill。
 func CanManageAppSkill(p Principal, appOrgID, appOwnerUserID string) bool {

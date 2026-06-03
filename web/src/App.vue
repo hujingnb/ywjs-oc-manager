@@ -1,18 +1,21 @@
 <template>
   <NConfigProvider :theme-overrides="themeOverrides">
     <!-- NMessageProvider 提供全局 message API，供页面通过 useMessage() 弹出操作反馈 -->
+    <!-- NDialogProvider 提供全局 dialog API，供页面通过 useDialog() 弹出确认对话框 -->
     <NMessageProvider>
-      <RouterView />
-      <!-- 全局上传进度对话框：订阅 uploadProgress store 自动显示 / 隐藏，
-           App 根挂一次即可覆盖所有业务页面 -->
-      <UploadProgressModal />
+      <NDialogProvider>
+        <RouterView />
+        <!-- 全局上传进度对话框：订阅 uploadProgress store 自动显示 / 隐藏，
+             App 根挂一次即可覆盖所有业务页面 -->
+        <UploadProgressModal />
+      </NDialogProvider>
     </NMessageProvider>
   </NConfigProvider>
 </template>
 
 <script setup lang="ts">
 import type { GlobalThemeOverrides } from 'naive-ui'
-import { NConfigProvider, NMessageProvider } from 'naive-ui'
+import { NConfigProvider, NDialogProvider, NMessageProvider } from 'naive-ui'
 
 import UploadProgressModal from '@/components/UploadProgressModal.vue'
 import { useBeforeUnloadGuard } from '@/composables/useBeforeUnloadGuard'

@@ -70,13 +70,15 @@ func TestPlatformSource_Search_All(t *testing.T) {
 	assert.Equal(t, "2.0", page.Entries[1].Version)
 }
 
-// TestPlatformSource_Search_Denied 验证非平台管理员调用 Search 时透传权限错误。
-func TestPlatformSource_Search_Denied(t *testing.T) {
+// TestPlatformSource_Search_OrgMemberAllowed 验证 org_member 可以浏览平台库市场。
+// 市场是只读展示接口，所有已登录用户均可访问；写操作（上传/删除）仍需 platform_admin。
+func TestPlatformSource_Search_OrgMemberAllowed(t *testing.T) {
 	store := newFakePlatformSkillStore()
 	svc := NewPlatformSkillService(store, &fakeLibraryBlob{})
 	src := NewPlatformSource(svc)
 
-	// 非平台管理员（org member）调用 Search，期望返回 ErrPlatformSkillDenied。
-	_, err := src.Search(context.Background(), psvcOrgMemberPrincipal(), "", "")
-	require.ErrorIs(t, err, ErrPlatformSkillDenied)
+	// org_member 调用 Search 应成功（市场浏览开放给所有已登录用户，返回空列表而非权限错误）。
+	page, err := src.Search(context.Background(), psvcOrgMemberPrincipal(), "", "")
+	require.NoError(t, err)
+	assert.Empty(t, page.Entries)
 }
