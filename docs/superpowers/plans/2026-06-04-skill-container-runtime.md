@@ -81,9 +81,16 @@ kubectl exec -n oc-apps $POD -c hermes -- sh -c 'rm -rf /opt/data/skills/spike-t
 
 ---
 
-### reload 触发结论（Task 1 spike 完成后填写）
+### reload 触发结论（spike 完成，方向已定）
 
-> _待 spike 填写：选定方式 + 确切命令/URL/响应。Task 5 据此实现 `skills_reload`。_
+**spike 结论：当前 hermes 镜像 v2026.5.16 无现成程序化 reload 通道**——8642 内置 api_server 默认关闭（需 env `API_SERVER_ENABLED=true`）且即使开启也无 reload 端点；`hermes skills` CLI 在子进程跑、不影响 gateway 进程内存的 skill 注册；SIGUSR1 是完整重启（中断会话）；无文件监听/自动轮询。`reload_skills()` 函数本身有效，只缺程序化触发入口。
+
+**已定方向（路径 1，用户确认）：给 hermes 镜像加 reload 端点（免重启）**——见新增 **Task 4.5**：
+1. pod spec hermes container 加 env `API_SERVER_ENABLED=true`（`internal/integrations/k8sorch/render.go`），启动 hermes 内置 api_server（127.0.0.1:8642，与 gateway PID 同进程）。
+2. 镜像构建层给 api_server 注入路由 `POST /oc/skills/reload`，handler 内 `from agent.skill_commands import reload_skills; return reload_skills()`（同进程，直接更新 gateway 的 `_skill_commands`）。**注入方式实现时确认**：优先 hermes 扩展/插件机制；否则在镜像 Dockerfile 构建期 patch `gateway/platforms/api_server.py`（加一段路由注册）。
+3. oc-ops 的 `reload_skills()`（Task 5）：`urllib.request POST http://127.0.0.1:8642/oc/skills/reload`，解析 `{added,removed,total}`。
+
+→ Task 5 的 `skills_reload` 按第 3 步实现；新增 Task 4.5 实现第 1、2 步。
 
 ---
 
