@@ -1,5 +1,5 @@
 <template>
-  <!-- AuthLayout 承载登录相关页面：左侧平台介绍 hero，右侧登录卡片，背景为科技感动效。 -->
+  <!-- AuthLayout 承载登录相关页面：背景层铺满视口，内容层负责 hero 与登录卡片整体居中。 -->
   <main class="auth-stage">
     <!-- 背景层：神经网络粒子画布 + 极光 + 网格 + 扫描光带，全部为纯装饰，不参与交互。 -->
     <canvas ref="neural" class="auth-neural" aria-hidden="true"></canvas>
@@ -7,33 +7,36 @@
     <div class="auth-grid" aria-hidden="true"></div>
     <div class="auth-scan" aria-hidden="true"></div>
 
-    <section class="auth-hero" aria-label="平台介绍">
-      <div class="auth-hero-copy">
-        <div class="auth-eyebrow">ENTERPRISE AI AGENT PLATFORM</div>
-        <h1 class="auth-title">让<span class="auth-title-hot">智能体</span>融入企业工作流</h1>
-        <p class="auth-lead">
-          企业 AI 数智员工运行管理平台，用 Agent 连通云资源、企业知识库和多模型能力，深度接管员工日常工作任务。
-        </p>
-      </div>
-      <div class="auth-metrics" aria-label="平台能力">
-        <div class="auth-metric">
-          <strong>一人一 Agent</strong>
-          <span>配置独立运行环境、专属任务管理及独享个人知识库</span>
+    <!-- 内容层：把平台介绍和登录卡片作为一个整体居中，避免大屏下左右分散。 -->
+    <div class="auth-content">
+      <section class="auth-hero" aria-label="平台介绍">
+        <div class="auth-hero-copy">
+          <div class="auth-eyebrow">ENTERPRISE AI AGENT PLATFORM</div>
+          <h1 class="auth-title">让<span class="auth-title-hot">智能体</span>融入企业工作流</h1>
+          <p class="auth-lead">
+            企业 AI 数智员工运行管理平台，用 Agent 连通云资源、企业知识库和多模型能力，深度接管员工日常工作任务。
+          </p>
         </div>
-        <div class="auth-metric">
-          <strong>统一管控</strong>
-          <span>实现账号权限、知识库、大模型与 Token 消耗的统一管控</span>
+        <div class="auth-metrics" aria-label="平台能力">
+          <div class="auth-metric">
+            <strong>一人一 Agent</strong>
+            <span>配置独立运行环境、专属任务管理及独享个人知识库</span>
+          </div>
+          <div class="auth-metric">
+            <strong>统一管控</strong>
+            <span>实现账号权限、知识库、大模型与 Token 消耗的统一管控</span>
+          </div>
+          <div class="auth-metric">
+            <strong>可定制化</strong>
+            <span>支持定制需求，可私有化部署，完全适配企业安全规范</span>
+          </div>
         </div>
-        <div class="auth-metric">
-          <strong>可定制化</strong>
-          <span>支持定制需求，可私有化部署，完全适配企业安全规范</span>
-        </div>
-      </div>
-    </section>
+      </section>
 
-    <section class="auth-login-shell" aria-label="登录控制台">
-      <RouterView />
-    </section>
+      <section class="auth-login-shell" aria-label="登录控制台">
+        <RouterView />
+      </section>
+    </div>
   </main>
 </template>
 
@@ -154,14 +157,23 @@ onBeforeUnmount(() => {
 
   position: relative;
   min-height: 100vh;
+  min-height: 100dvh;
   display: grid;
-  grid-template-columns: minmax(0, 1.1fr) 488px;
   align-items: center;
-  gap: clamp(28px, 3vw, 40px);
-  padding: 56px clamp(28px, 6vw, 92px);
+  justify-items: center;
+  padding: clamp(38px, 6vh, 56px) clamp(22px, 6vw, 92px);
   isolation: isolate;
-  overflow: hidden;
+  overflow-x: hidden;
+  overflow-y: auto;
   color: #f8fbff;
+}
+
+.auth-content {
+  width: min(100%, 1280px);
+  display: grid;
+  grid-template-columns: minmax(0, 1.1fr) minmax(428px, 488px);
+  align-items: center;
+  gap: clamp(28px, 4vw, 56px);
 }
 
 .auth-neural {
@@ -209,12 +221,12 @@ onBeforeUnmount(() => {
 }
 
 .auth-hero {
+  width: 100%;
   max-width: 760px;
   min-height: 576px;
   display: flex;
   flex-direction: column;
   justify-content: space-between;
-  justify-self: end;
 }
 
 .auth-hero-copy {
@@ -299,7 +311,7 @@ onBeforeUnmount(() => {
 .auth-login-shell {
   position: relative;
   width: min(100%, 428px);
-  justify-self: end;
+  justify-self: center;
 }
 
 .auth-login-shell::before {
@@ -337,24 +349,25 @@ onBeforeUnmount(() => {
 
 @media (max-width: 980px) {
   .auth-stage {
-    min-height: auto;
-    grid-template-columns: 1fr;
+    align-items: start;
     padding: 38px 22px;
-    overflow: auto;
+  }
+
+  .auth-content {
+    grid-template-columns: 1fr;
+    justify-items: center;
+    gap: 32px;
   }
 
   .auth-hero {
     max-width: none;
     min-height: 0;
     display: block;
-    justify-self: stretch;
   }
 
   .auth-login-shell {
-    justify-self: stretch;
     width: 100%;
     max-width: 520px;
-    margin: 0 auto;
   }
 
   .auth-metrics {
@@ -365,11 +378,25 @@ onBeforeUnmount(() => {
 
 @media (max-width: 560px) {
   .auth-stage {
+    padding: 32px 20px;
+  }
+
+  .auth-content {
     gap: 32px;
+  }
+
+  .auth-login-shell::before {
+    inset: -12px;
   }
 
   .auth-lead {
     font-size: 16px;
+  }
+}
+
+@media (max-height: 720px) and (min-width: 981px) {
+  .auth-stage {
+    align-items: start;
   }
 }
 </style>
