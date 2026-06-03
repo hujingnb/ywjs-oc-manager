@@ -13,12 +13,13 @@ import (
 	"oc-manager/internal/store/sqlc"
 )
 
-// fakeBootstrapStore 实现 bootstrapStore，返回预置的 app/org/owner/version。
+// fakeBootstrapStore 实现 bootstrapStore，返回预置的 app/org/owner/version/appSkills。
 type fakeBootstrapStore struct {
-	app     sqlc.App
-	org     sqlc.Organization
-	owner   sqlc.User
-	version sqlc.AssistantVersion
+	app       sqlc.App
+	org       sqlc.Organization
+	owner     sqlc.User
+	version   sqlc.AssistantVersion
+	appSkills []sqlc.AppSkill
 }
 
 // GetApp 按 ID 返回预置 app。
@@ -44,6 +45,12 @@ func (f *fakeBootstrapStore) GetUser(_ context.Context, _ string) (sqlc.User, er
 // GetAssistantVersion 返回预置版本。
 func (f *fakeBootstrapStore) GetAssistantVersion(_ context.Context, _ string) (sqlc.AssistantVersion, error) {
 	return f.version, nil
+}
+
+// ListAppSkillsByApp 返回预置的实例 skill 列表（来源切换后的运行时来源）。
+// 方法名与 bootstrapStore 接口保持一致（对应 sqlc.Queries.ListAppSkillsByApp）。
+func (f *fakeBootstrapStore) ListAppSkillsByApp(_ context.Context, _ string) ([]sqlc.AppSkill, error) {
+	return f.appSkills, nil
 }
 
 // fakeSkills 实现 bootstrapSkillSource，为任意 relPath 返回固定格式的预签名 URL。
@@ -124,6 +131,103 @@ func TestBootstrapBuildHappyPath(t *testing.T) {
 	assert.Empty(t, res.Restore.WorkspaceURL)
 	assert.Empty(t, res.Restore.StateDBURL)
 	assert.Empty(t, res.Restore.SessionsURL)
+}
+
+// TestBootstrapSkillsFromAppSkills 验证 skill 来源已切换为 app_skills（运行时只看实例 skill）：
+//   - 预置 app_skills 行时，bootstrap 输出含对应 skill 的预签名 URL 与正确 RelPath
+//   - version.skills_json 有内容但 app_skills 为空时，bootstrap skills 列表应为空（来源切换证明）
+func TestBootstrapSkillsFromAppSkills(t *testing.T) {
+	cipher := newRuntimeTokenTestCipher(t)
+	app := newBootstrapApp(t, cipher)
+
+	// 子测试 1：app_skills 有两个 skill（tar + zip），bootstrap 输出应含两条预签名 URL
+	t.Run("app_skills 有 skill 时正确生成预签名 URL 与 RelPath", func(t *testing.T) {
+		// 预置两个 app_skills 行：一个 tar、一个 zip
+		appSkills := []sqlc.AppSkill{
+			{
+				ID:            "s1",
+				AppID:         "a1",
+				Name:          "weather",
+				CachedTarPath: "library/platform/weather/1.0.0.tar",
+			},
+			{
+				ID:            "s2",
+				AppID:         "a1",
+				Name:          "search",
+				CachedTarPath: "library/platform/search/2.0.0.zip",
+			},
+		}
+		// version.skills_json 为空，确保 skill 来自 app_skills 而非 version
+		store := &fakeBootstrapStore{
+			app:       app,
+			org:       sqlc.Organization{ID: "o1", Name: "Org"},
+			owner:     sqlc.User{ID: "u1", DisplayName: "Owner"},
+			version:   sqlc.AssistantVersion{ID: "v1", MainModel: "gpt-x"},
+			appSkills: appSkills,
+		}
+		svc := NewBootstrapService(store, cipher, newFakeObjectStore(), fakeSkills{}, BootstrapConfig{
+			Endpoint: "http://minio:9000", Region: "us-east-1", Bucket: "oc-apps",
+			AccessKeyID: "ak", SecretAccessKey: "sk", PresignTTL: time.Minute,
+		})
+
+		res, err := svc.Build(context.Background(), app)
+		require.NoError(t, err)
+
+		// 应有两个 skill 条目
+		require.Len(t, res.Skills, 2)
+
+		// 找到 weather（.tar）：RelPath 应为 resources/skills/weather.tar
+		var weatherSkill, searchSkill *BootstrapSkill
+		for i := range res.Skills {
+			switch res.Skills[i].Name {
+			case "weather":
+				weatherSkill = &res.Skills[i]
+			case "search":
+				searchSkill = &res.Skills[i]
+			}
+		}
+		require.NotNil(t, weatherSkill, "缺少 weather skill 条目")
+		// RelPath 扩展名随 cached_tar_path，weather 是 .tar
+		assert.Equal(t, "resources/skills/weather.tar", weatherSkill.RelPath)
+		// URL 由 fakeSkills.PresignSkill 按 cached_tar_path 构造
+		assert.Equal(t, "https://presigned/library/platform/weather/1.0.0.tar", weatherSkill.URL)
+
+		require.NotNil(t, searchSkill, "缺少 search skill 条目")
+		// RelPath 扩展名随 cached_tar_path，search 是 .zip
+		assert.Equal(t, "resources/skills/search.zip", searchSkill.RelPath)
+		assert.Equal(t, "https://presigned/library/platform/search/2.0.0.zip", searchSkill.URL)
+
+		// manifest YAML 应包含两个 RelPath（来源切换到 app_skills 后 manifest 也跟随）
+		assert.Contains(t, res.ManifestYAML, "weather.tar")
+		assert.Contains(t, res.ManifestYAML, "search.zip")
+	})
+
+	// 子测试 2：来源切换证明——version.skills_json 有 skill 但 app_skills 为空时，bootstrap skills 为空
+	t.Run("version.skills_json 有内容但 app_skills 为空时 bootstrap skills 列表为空", func(t *testing.T) {
+		// version.skills_json 含一个 skill，但 app_skills 为空（未种子注入）
+		versionSkillsJSON := []byte(`[{"name":"weather","cached_path":"library/platform/weather/1.0.0.tar"}]`)
+		store := &fakeBootstrapStore{
+			app:   app,
+			org:   sqlc.Organization{ID: "o1", Name: "Org"},
+			owner: sqlc.User{ID: "u1", DisplayName: "Owner"},
+			version: sqlc.AssistantVersion{
+				ID:         "v1",
+				MainModel:  "gpt-x",
+				SkillsJson: versionSkillsJSON,
+			},
+			appSkills: nil, // app_skills 为空：来源切换后 bootstrap skills 必须为空
+		}
+		svc := NewBootstrapService(store, cipher, newFakeObjectStore(), fakeSkills{}, BootstrapConfig{
+			Endpoint: "http://minio:9000", Region: "us-east-1", Bucket: "oc-apps",
+			AccessKeyID: "ak", SecretAccessKey: "sk", PresignTTL: time.Minute,
+		})
+
+		res, err := svc.Build(context.Background(), app)
+		require.NoError(t, err)
+
+		// 来源切换后，version.skills_json 中的 skill 不再下发；app_skills 为空则 skills 列表为空
+		assert.Empty(t, res.Skills, "来源切换证明：version.skills_json 有内容但 app_skills 空时 bootstrap skills 应为空")
+	})
 }
 
 // TestBootstrapBuildAppNotReady 验证未就绪边界：

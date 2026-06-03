@@ -85,6 +85,9 @@ type bootstrapStore interface {
 	GetUser(ctx context.Context, id string) (sqlc.User, error)
 	// GetAssistantVersion 按版本 ID 查询助手版本记录。
 	GetAssistantVersion(ctx context.Context, id string) (sqlc.AssistantVersion, error)
+	// ListAppSkillsByApp 返回指定实例的全部 app_skills 行，是运行时 skill 下发的唯一来源。
+	// 方法名与 sqlc.Queries.ListAppSkillsByApp 保持一致，生产传入 dbStore.Queries 可直接满足。
+	ListAppSkillsByApp(ctx context.Context, appID string) ([]sqlc.AppSkill, error)
 }
 
 // bootstrapSkillSource 提供 skill 预签名 URL（由 S3SkillBlobStore 实现）。
@@ -234,8 +237,9 @@ func (s *BootstrapService) Build(ctx context.Context, app sqlc.App) (BootstrapRe
 		_ = json.Unmarshal(version.RoutingJson, &routing)
 	}
 
-	// 5. 解析并预签名各 skill tar，获得 pod 下载 URL 与 manifest 内相对路径。
-	skills, skillRelPaths, err := s.presignSkills(ctx, version)
+	// 5. 从 app_skills 取实例 skill 并预签名，获得 pod 下载 URL 与 manifest 内相对路径。
+	// 来源已从 version.SkillsJson 切换为 app_skills，运行时只下发实例实际安装的 skill。
+	skills, skillRelPaths, err := s.presignSkills(ctx, app.ID)
 	if err != nil {
 		return BootstrapResult{}, err
 	}
@@ -292,37 +296,39 @@ func (s *BootstrapService) Build(ctx context.Context, app sqlc.App) (BootstrapRe
 	}, nil
 }
 
-// skillEntry 是 version.SkillsJson 中单条 skill 的最小视图。
-// 仅解析 bootstrap 所需字段，与 skill 元数据其他字段解耦。
-type skillEntry struct {
-	// Name 是 skill 名，用于 manifest 路径与预签名 URL 日志。
-	Name string `json:"name"`
-	// CachedPath 是 S3 对象 key（P4-T1 由 file_path 改名为 cached_path，与 AssistantVersionSkill 字段对齐）。
-	CachedPath string `json:"cached_path"`
-}
-
-// presignSkills 解析 version.SkillsJson，为每个 skill 生成预签名下载 URL 与 manifest 相对路径。
-// 返回的 relPaths 与 BootstrapSkill 切片一一对应，透传到 AppInputData.SkillRelPaths。
-func (s *BootstrapService) presignSkills(ctx context.Context, version sqlc.AssistantVersion) ([]BootstrapSkill, []string, error) {
-	// 无 skill 配置属正常情况（基础 app），直接返回空。
-	if len(version.SkillsJson) == 0 {
-		return nil, nil, nil
+// presignSkills 从 app_skills 取实例安装的 skill 列表，为每条记录生成预签名下载 URL 与
+// manifest 相对路径。返回的 relPaths 与 BootstrapSkill 切片一一对应，透传到
+// AppInputData.SkillRelPaths。
+//
+// 来源已从 version.SkillsJson 切换为 app_skills（P4-T3）：运行时只下发实例实际安装的
+// skill（seedVersionSkills 种子注入 + 用户手动安装的合集），版本配置不再直接进入 bootstrap。
+// RelPath 格式：resources/skills/<name><ext>，扩展名取自 CachedTarPath（兼容 .tar 与 .zip）。
+func (s *BootstrapService) presignSkills(ctx context.Context, appID string) ([]BootstrapSkill, []string, error) {
+	rows, err := s.store.ListAppSkillsByApp(ctx, appID)
+	if err != nil {
+		return nil, nil, fmt.Errorf("查询 app_skills 失败: %w", err)
 	}
-	var entries []skillEntry
-	if err := json.Unmarshal(version.SkillsJson, &entries); err != nil {
-		return nil, nil, fmt.Errorf("解析 skills_json 失败: %w", err)
+	// 无已安装 skill 属正常情况（基础 app 或种子注入尚未完成），直接返回空。
+	if len(rows) == 0 {
+		return nil, nil, nil
 	}
 	var out []BootstrapSkill
 	var relPaths []string
-	for _, e := range entries {
-		// CachedPath 字段存储 S3 key，直接用于预签名；pod 按 RelPath 写入 emptyDir。
-		url, err := s.skills.PresignSkill(ctx, e.CachedPath, s.cfg.PresignTTL)
+	for _, row := range rows {
+		// CachedTarPath 存储 S3 对象 key，直接用于预签名；pod 按 RelPath 写入 emptyDir。
+		url, err := s.skills.PresignSkill(ctx, row.CachedTarPath, s.cfg.PresignTTL)
 		if err != nil {
-			return nil, nil, fmt.Errorf("预签名 skill %s 失败: %w", e.Name, err)
+			return nil, nil, fmt.Errorf("预签名 skill %s 失败: %w", row.Name, err)
 		}
-		// 相对路径约定：resources/skills/<name>.tar，与 manifest.resources.skills 格式一致。
-		rel := path.Join("resources", "skills", e.Name+".tar")
-		out = append(out, BootstrapSkill{Name: e.Name, RelPath: rel, URL: url})
+		// RelPath 格式：resources/skills/<name><ext>，扩展名取自 CachedTarPath（兼容 .tar/.zip）。
+		// oc-restore 下载到 $INPUT_DIR/$rel；render_skills.py 按 suffix 决定解压方式。
+		ext := path.Ext(row.CachedTarPath)
+		if ext == "" {
+			// CachedTarPath 不含扩展名时退化为 .tar（向后兼容旧数据）。
+			ext = ".tar"
+		}
+		rel := path.Join("resources", "skills", row.Name+ext)
+		out = append(out, BootstrapSkill{Name: row.Name, RelPath: rel, URL: url})
 		relPaths = append(relPaths, rel)
 	}
 	return out, relPaths, nil
