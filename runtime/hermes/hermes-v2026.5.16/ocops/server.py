@@ -19,7 +19,7 @@ from starlette.middleware.base import BaseHTTPMiddleware
 from starlette.responses import JSONResponse, Response, StreamingResponse
 from starlette.routing import Route
 
-from ocops import channel, cron, doctor, info, kanban
+from ocops import channel, cron, doctor, info, kanban, skills
 from ocops.auth import token_matches
 from ocops.errors import OpsError, code_to_http
 from ocops.kanban import KanbanError
@@ -424,6 +424,68 @@ async def kanban_reclaim(request):
 
 
 # ---------------------------------------------------------------------------
+# skills 端点（4 个）：list/install/delete/reload。
+# install 使用 multipart form-data（name 字段 + archive 文件字段）。
+# ---------------------------------------------------------------------------
+
+async def skills_list(request):
+    """GET /oc/skills：列出 SKILLS_DIR 下所有 skill，标注 managed/builtin。"""
+    try:
+        return _ok(skills.list_skills())
+    except OpsError as e:
+        return _err(e)
+
+
+async def skills_install(request):
+    """POST /oc/skills：接收 multipart form-data（name+archive），解压安装到 SKILLS_DIR/<name>/。
+
+    name 字段：skill 名（非空、不含路径分隔符）。
+    archive 字段：tar 或 zip 归档文件（以文件名后缀区分格式）。
+    缺少 name 或 archive 时立即返回 400 BAD_REQUEST。
+    """
+    form = await request.form()
+    name = form.get("name")
+    upload = form.get("archive")
+    # 必填字段缺失时提前拒绝，不继续处理上传数据
+    if not name or upload is None:
+        return _err(OpsError("BAD_REQUEST", "缺少 name 或 archive"))
+    import os
+    import tempfile
+    # 根据上传文件名后缀决定临时文件扩展名，以便 _safe_extract 判断归档格式
+    filename = str(getattr(upload, "filename", "") or "")
+    suffix = ".zip" if filename.lower().endswith(".zip") else ".tar"
+    fd, tmp = tempfile.mkstemp(suffix=suffix)
+    try:
+        with os.fdopen(fd, "wb") as f:
+            f.write(await upload.read())
+        return _ok(skills.install_skill(name, tmp))
+    except OpsError as e:
+        return _err(e)
+    finally:
+        # 临时文件无论成功失败都删除，避免磁盘泄漏
+        os.unlink(tmp)
+
+
+async def skills_delete(request):
+    """DELETE /oc/skills/{name}：热删 SKILLS_DIR/<name>/（幂等，目录不存在时正常返回）。"""
+    try:
+        return _ok(skills.delete_skill(request.path_params["name"]))
+    except OpsError as e:
+        return _err(e)
+
+
+async def skills_reload(request):
+    """POST /oc/skills/reload：触发 hermes api_server 重扫 skills/ 目录（不重启进程）。
+
+    调用 hermes 127.0.0.1:8642/oc/skills/reload，透传其响应体（added/removed/total 等字段）。
+    """
+    try:
+        return _ok(skills.reload_skills())
+    except OpsError as e:
+        return _err(e)
+
+
+# ---------------------------------------------------------------------------
 # SSE 端点（Task 11）：手写 `data: <json>\n\n` 帧，media_type=text/event-stream，
 # 不引入 sse-starlette 等额外依赖。
 # ---------------------------------------------------------------------------
@@ -520,6 +582,13 @@ routes = [
     # SSE 端点（Task 11）：kanban 事件流（GET）与 channel 扫码登录流（POST）。
     Route("/oc/kanban/watch", kanban_watch),
     Route("/oc/channels/{channel}/login", channel_login, methods=["POST"]),
+    # skills 端点：list/install/delete/reload。
+    # reload（POST /oc/skills/reload）放在带路径参数的 delete（DELETE /oc/skills/{name}）之前，
+    # 虽然方法不同不会产生歧义，但排列顺序更易读。
+    Route("/oc/skills",        skills_list,    methods=["GET"]),
+    Route("/oc/skills",        skills_install, methods=["POST"]),
+    Route("/oc/skills/reload", skills_reload,  methods=["POST"]),
+    Route("/oc/skills/{name}", skills_delete,  methods=["DELETE"]),
 ]
 
 # Starlette app：路由 + AuthMiddleware 中间件栈。
