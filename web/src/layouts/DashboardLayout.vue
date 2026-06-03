@@ -146,7 +146,7 @@ import {
 } from 'naive-ui'
 import {
   BarChart3, BookOpen, Bot, Boxes, Building2, CalendarClock, FileSearch,
-  FolderOpen, Gauge, KeyRound, LayoutDashboard, ListChecks, LogOut, Package, Radio, RefreshCw,
+  FolderOpen, Gauge, KeyRound, LayoutDashboard, ListChecks, LogOut, Package, Puzzle, Radio, RefreshCw,
   ShieldCheck, Users, Wallet,
 } from 'lucide-vue-next'
 
@@ -191,6 +191,8 @@ const activeKey = computed(() => {
     '/platform/skills',
     '/members',
     '/knowledge',
+    // /skills 成员技能页顶级路由；需早于更短 prefix 匹配，放在 /knowledge 后面即可。
+    '/skills',
     '/usage',
     '/balance',
     '/audit-logs',
@@ -238,6 +240,8 @@ const menuOptions = computed<MenuOption[]>(() => {
       { key: memberAppTabKey('workspace'), label: '工作目录', icon: () => h(FolderOpen, { size: 18 }) },
       { key: memberAppTabKey('knowledge'), label: '个人知识库', icon: () => h(BookOpen, { size: 18 }) },
       { key: '/knowledge', label: '企业知识库', icon: () => h(BookOpen, { size: 18 }) },
+      // 技能：成员顶级技能页，key 为 /skills，与路由保持一致。
+      { key: '/skills', label: '技能', icon: () => h(Puzzle, { size: 18 }) },
       { key: memberAppTabKey('kanban'), label: '任务', icon: () => h(ListChecks, { size: 18 }) },
       { key: memberAppTabKey('cron'), label: '定时任务', icon: () => h(CalendarClock, { size: 18 }) },
       { key: '/usage', label: '用量', icon: () => h(BarChart3, { size: 18 }) },

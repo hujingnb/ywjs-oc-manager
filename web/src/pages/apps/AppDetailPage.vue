@@ -58,6 +58,8 @@ const allTabs: ReadonlyArray<{ path: string; label: string }> = [
   { path: 'runtime', label: '运行时' },
   { path: 'channels', label: '渠道' },
   { path: 'knowledge', label: '实例知识库' },
+  // skills tab：管理员（platform_admin / org_admin）可通过此 tab 管理实例的技能。
+  { path: 'skills', label: '技能' },
   { path: 'workspace', label: '工作目录' },
   { path: 'audit', label: '审计' },
 ]

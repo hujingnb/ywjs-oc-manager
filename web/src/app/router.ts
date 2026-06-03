@@ -11,6 +11,7 @@ import AppCronTab from '@/pages/apps/AppCronTab.vue'
 import AppKanbanTab from '@/pages/apps/AppKanbanTab.vue'
 import AppDetailPage from '@/pages/apps/AppDetailPage.vue'
 import AppKnowledgeTab from '@/pages/apps/AppKnowledgeTab.vue'
+import AppSkillsTab from '@/pages/apps/AppSkillsTab.vue'
 import AppOverviewTab from '@/pages/apps/AppOverviewTab.vue'
 import AppRuntimeTab from '@/pages/apps/AppRuntimeTab.vue'
 import AppWorkspaceTab from '@/pages/apps/AppWorkspaceTab.vue'
@@ -27,6 +28,7 @@ import OrganizationsPage from '@/pages/platform/OrganizationsPage.vue'
 import ConsolePage from '@/pages/platform/ConsolePage.vue'
 import RechargePage from '@/pages/platform/RechargePage.vue'
 import OrgKnowledgePage from '@/pages/knowledge/OrgKnowledgePage.vue'
+import OrgSkillsPage from '@/pages/skills/OrgSkillsPage.vue'
 import UsagePage from '@/pages/usage/UsagePage.vue'
 import OrgConsolePage from '@/pages/org/OrgConsolePage.vue'
 import OrgBalancePage from '@/pages/org/OrgBalancePage.vue'
@@ -66,6 +68,8 @@ export const router = createRouter({
         { path: 'members/new', component: CreateMemberPage, meta: { allowedRoles: ORG_ADMIN_ONLY } },
         { path: 'audit-logs', component: AuditLogsPage, meta: { allowedRoles: ORG_ADMIN_ABOVE } },
         { path: 'knowledge', component: OrgKnowledgePage },
+        // skills：成员「技能」顶级页，无 allowedRoles，所有已登录用户（尤其是 org_member）均可访问。
+        { path: 'skills', component: OrgSkillsPage },
         { path: 'usage', component: UsagePage },
         { path: 'balance', component: OrgBalancePage, meta: { allowedRoles: ORG_ADMIN_ONLY } },
         {
@@ -101,6 +105,8 @@ export const router = createRouter({
             { path: 'runtime', component: AppRuntimeTab, props: true, meta: { allowedRoles: PLATFORM_ONLY } },
             { path: 'channels', component: AppChannelsTab, props: true },
             { path: 'knowledge', component: AppKnowledgeTab, props: true },
+            // skills tab：管理员在实例详情页管理该实例的技能，props: true 将 appId 从路由参数传入。
+            { path: 'skills', component: AppSkillsTab, props: true },
             { path: 'workspace', component: AppWorkspaceTab, props: true },
             { path: 'audit', component: AppAuditTab, props: true },
           ],
