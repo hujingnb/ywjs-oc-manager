@@ -19,6 +19,18 @@ components:
         web_extract:
           type: string
       type: object
+    handlers.ChangePasswordRequest:
+      properties:
+        new_password:
+          description: NewPassword 是新登录密码，service 层会校验长度并写入 hash。
+          type: string
+        old_password:
+          description: OldPassword 是当前登录密码，只用于本次校验，不写日志。
+          type: string
+      required:
+      - new_password
+      - old_password
+      type: object
     handlers.CreateAssistantVersionRequest:
       properties:
         description:
@@ -4771,6 +4783,52 @@ paths:
       security:
       - BearerAuth: []
       summary: 当前用户信息
+      tags:
+      - auth
+  /auth/password:
+    post:
+      description: 已登录用户输入当前密码后修改自己的 manager 登录密码
+      requestBody:
+        content:
+          application/json:
+            schema:
+              oneOf:
+              - type: object
+              - $ref: '#/components/schemas/handlers.ChangePasswordRequest'
+                description: 修改密码请求
+                summary: body
+        description: 修改密码请求
+        required: true
+      responses:
+        "204":
+          description: 密码修改成功，无响应体
+        "400":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/handlers.ErrorResponse'
+          description: Bad Request
+        "401":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/handlers.ErrorResponse'
+          description: Unauthorized
+        "403":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/handlers.ErrorResponse'
+          description: Forbidden
+        "500":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/handlers.ErrorResponse'
+          description: Internal Server Error
+      security:
+      - BearerAuth: []
+      summary: 修改当前用户密码
       tags:
       - auth
   /auth/refresh:

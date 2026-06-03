@@ -32,6 +32,14 @@ type RefreshRequest struct {
 	RefreshToken string `json:"refresh_token" binding:"required"`
 }
 
+// ChangePasswordRequest 是已登录用户修改自己密码的请求体。
+type ChangePasswordRequest struct {
+	// OldPassword 是当前登录密码，只用于本次校验，不写日志。
+	OldPassword string `json:"old_password" binding:"required"`
+	// NewPassword 是新登录密码，service 层会校验长度并写入 hash。
+	NewPassword string `json:"new_password" binding:"required"`
+}
+
 // ===== 企业 organizations =====
 
 // CreateOrganizationRequest 创建企业的请求体。

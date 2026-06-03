@@ -21,6 +21,7 @@ type AuthService interface {
 	Refresh(ctx context.Context, refreshToken string) (service.LoginResult, error)
 	Logout(ctx context.Context, refreshToken string) error
 	Me(ctx context.Context, principal auth.Principal) (service.AuthUser, error)
+	ChangePassword(ctx context.Context, principal auth.Principal, input service.ChangePasswordInput) error
 }
 
 // AuthHandler 承载认证相关 HTTP 路由。
@@ -46,6 +47,7 @@ func RegisterPublicAuthRoutes(router gin.IRouter, handler *AuthHandler) {
 func RegisterAuthMeRoutes(router gin.IRouter, handler *AuthHandler) {
 	group := router.Group("/api/v1/auth")
 	group.GET("/me", handler.Me)
+	group.POST("/password", handler.ChangePassword)
 }
 
 // Login 处理用户名密码登录。
@@ -169,6 +171,39 @@ func (h *AuthHandler) Me(c *gin.Context) {
 	c.JSON(http.StatusOK, gin.H{"user": user})
 }
 
+// ChangePassword 修改当前登录用户自己的密码。
+//
+// @Summary      修改当前用户密码
+// @Description  已登录用户输入当前密码后修改自己的 manager 登录密码
+// @Tags         auth
+// @Accept       json
+// @Produce      json
+// @Security     BearerAuth
+// @Param        body  body  ChangePasswordRequest  true  "修改密码请求"
+// @Success      204   "密码修改成功，无响应体"
+// @Failure      400   {object}  ErrorResponse
+// @Failure      401   {object}  ErrorResponse
+// @Failure      403   {object}  ErrorResponse
+// @Failure      500   {object}  ErrorResponse
+// @Router       /auth/password [post]
+func (h *AuthHandler) ChangePassword(c *gin.Context) {
+	// principal 由认证中间件注入，service 会再次校验用户和组织状态。
+	principal := principalFromCtx(c)
+	var req ChangePasswordRequest
+	if err := c.ShouldBindJSON(&req); err != nil {
+		writeBindError(c, err)
+		return
+	}
+	if err := h.service.ChangePassword(c.Request.Context(), principal, service.ChangePasswordInput{
+		OldPassword: req.OldPassword,
+		NewPassword: req.NewPassword,
+	}); err != nil {
+		writeAuthError(c, err)
+		return
+	}
+	c.Status(http.StatusNoContent)
+}
+
 // writeAuthError 将认证 service 的 sentinel error 映射为 HTTP 状态码。
 // 禁用用户和禁用组织返回 403，避免前端误判为 token 过期并循环刷新。
 func writeAuthError(c *gin.Context, err error) {
@@ -183,6 +218,8 @@ func writeAuthError(c *gin.Context, err error) {
 			code = "ORG_DISABLED"
 		}
 		c.JSON(http.StatusForbidden, apierror.New(code, redactlog.SafeErrorMessage(err)))
+	case errors.Is(err, service.ErrMemberCreateInvalid):
+		c.JSON(http.StatusBadRequest, apierror.New("MEMBER_INVALID", validationServiceMessage(err, service.ErrMemberCreateInvalid)))
 	default:
 		c.JSON(http.StatusInternalServerError, apierror.New("INTERNAL", "认证服务暂时不可用"))
 	}

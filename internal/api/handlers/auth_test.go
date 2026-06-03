@@ -5,6 +5,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"fmt"
 	"net/http"
 	"net/http/httptest"
 	"testing"
@@ -85,6 +86,68 @@ func TestAuthMeReturnsCurrentUser(t *testing.T) {
 	require.Equal(t, "user-1", svc.lastPrincipal.UserID)
 }
 
+// TestAuthChangePasswordReturnsNoContent 验证已认证改密接口成功时返回 204。
+func TestAuthChangePasswordReturnsNoContent(t *testing.T) {
+	svc := &authServiceStub{}
+	router := newAuthTestRouter(t, svc)
+
+	recorder := httptest.NewRecorder()
+	request := httptest.NewRequest(http.MethodPost, "/api/v1/auth/password", bytes.NewBufferString(`{"old_password":"old-pass","new_password":"new-pass-123"}`))
+	request.Header.Set("Content-Type", "application/json")
+	request = withPrincipal(request, auth.Principal{UserID: "user-1", Role: "org_member", OrgID: "org-1"})
+	router.ServeHTTP(recorder, request)
+
+	require.Equal(t, http.StatusNoContent, recorder.Code)
+	require.Equal(t, "user-1", svc.lastPrincipal.UserID)
+	require.Equal(t, "old-pass", svc.lastChangePasswordInput.OldPassword)
+	require.Equal(t, "new-pass-123", svc.lastChangePasswordInput.NewPassword)
+}
+
+// TestAuthChangePasswordRejectsMissingFields 验证改密请求缺少必填字段时返回 400 和字段名。
+func TestAuthChangePasswordRejectsMissingFields(t *testing.T) {
+	router := newAuthTestRouter(t, &authServiceStub{})
+
+	recorder := httptest.NewRecorder()
+	request := httptest.NewRequest(http.MethodPost, "/api/v1/auth/password", bytes.NewBufferString(`{}`))
+	request.Header.Set("Content-Type", "application/json")
+	request = withPrincipal(request, auth.Principal{UserID: "user-1", Role: "org_member", OrgID: "org-1"})
+	router.ServeHTTP(recorder, request)
+
+	require.Equal(t, http.StatusBadRequest, recorder.Code)
+	require.Contains(t, recorder.Body.String(), "old_password")
+	require.Contains(t, recorder.Body.String(), "new_password")
+}
+
+// TestAuthChangePasswordMapsWrongPasswordToUnauthorized 验证旧密码错误时沿用认证失败响应。
+func TestAuthChangePasswordMapsWrongPasswordToUnauthorized(t *testing.T) {
+	router := newAuthTestRouter(t, &authServiceStub{changePasswordErr: service.ErrInvalidCredentials})
+
+	recorder := httptest.NewRecorder()
+	request := httptest.NewRequest(http.MethodPost, "/api/v1/auth/password", bytes.NewBufferString(`{"old_password":"bad-pass","new_password":"new-pass-123"}`))
+	request.Header.Set("Content-Type", "application/json")
+	request = withPrincipal(request, auth.Principal{UserID: "user-1", Role: "org_member", OrgID: "org-1"})
+	router.ServeHTTP(recorder, request)
+
+	require.Equal(t, http.StatusUnauthorized, recorder.Code)
+	require.Contains(t, recorder.Body.String(), "用户名或密码错误")
+}
+
+// TestAuthChangePasswordMapsInvalidNewPasswordToBadRequest 验证新密码业务校验错误返回 400。
+func TestAuthChangePasswordMapsInvalidNewPasswordToBadRequest(t *testing.T) {
+	router := newAuthTestRouter(t, &authServiceStub{
+		changePasswordErr: fmt.Errorf("%w: 新密码至少 8 位", service.ErrMemberCreateInvalid),
+	})
+
+	recorder := httptest.NewRecorder()
+	request := httptest.NewRequest(http.MethodPost, "/api/v1/auth/password", bytes.NewBufferString(`{"old_password":"old-pass","new_password":"short"}`))
+	request.Header.Set("Content-Type", "application/json")
+	request = withPrincipal(request, auth.Principal{UserID: "user-1", Role: "org_member", OrgID: "org-1"})
+	router.ServeHTTP(recorder, request)
+
+	require.Equal(t, http.StatusBadRequest, recorder.Code)
+	require.Contains(t, recorder.Body.String(), "新密码至少 8 位")
+}
+
 func newAuthTestRouter(t *testing.T, svc *authServiceStub) *gin.Engine {
 	t.Helper()
 	gin.SetMode(gin.ReleaseMode)
@@ -96,11 +159,13 @@ func newAuthTestRouter(t *testing.T, svc *authServiceStub) *gin.Engine {
 }
 
 type authServiceStub struct {
-	loginResult    service.LoginResult
-	loginErr       error
-	meResult       service.AuthUser
-	lastLoginInput service.LoginInput
-	lastPrincipal  auth.Principal
+	loginResult             service.LoginResult
+	loginErr                error
+	meResult                service.AuthUser
+	changePasswordErr       error
+	lastLoginInput          service.LoginInput
+	lastPrincipal           auth.Principal
+	lastChangePasswordInput service.ChangePasswordInput
 }
 
 func (s *authServiceStub) Login(_ context.Context, input service.LoginInput) (service.LoginResult, error) {
@@ -119,4 +184,10 @@ func (s *authServiceStub) Logout(_ context.Context, _ string) error {
 func (s *authServiceStub) Me(_ context.Context, principal auth.Principal) (service.AuthUser, error) {
 	s.lastPrincipal = principal
 	return s.meResult, nil
+}
+
+func (s *authServiceStub) ChangePassword(_ context.Context, principal auth.Principal, input service.ChangePasswordInput) error {
+	s.lastPrincipal = principal
+	s.lastChangePasswordInput = input
+	return s.changePasswordErr
 }
