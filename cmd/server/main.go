@@ -316,7 +316,8 @@ func runManager(ctx context.Context, cfg config.Config, logOut io.Writer) error 
 		skillBlobStore = service.NewFSSkillBlobStore(cfg.App.DataRoot)
 	}
 	// libraryBlobs 是平台库 skill 归档的存储后端：
-	// S3 启用时复用同一 objStore（与 skillBlobStore 共桶），否则退回本地 FS（与 skillBlobStore 同根）。
+	// S3 启用时另建一个 ObjectStore 实例（与上方 bootstrap/workspace 用的 objStore 同配置同桶但相互独立，
+	// 因 objStore 作用域限于上方 if 块），否则退回本地 FS（与 skillBlobStore 同根）。
 	var libraryBlobs service.LibraryBlobStore
 	if cfg.Storage.S3.Enabled {
 		s3cfg := storage.S3Config{
