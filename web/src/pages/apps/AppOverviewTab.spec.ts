@@ -359,18 +359,19 @@ describe('AppOverviewTab 任务完成刷新', () => {
 })
 
 // AppOverviewTab progress 覆盖 init 子状态的进度条与失败阶段提示三条分支:
-// 1) total=0 时走不定进度,不展示字节文案;
+// 1) total=0 时隐藏进度条（底层不暴露细粒度进度，避免 0% 进度条让用户误以为卡死）;
 // 2) total>0 时按字节渲染 current/total;
 // 3) status=error + last_error_status 显示对应中文阶段。
 describe('AppOverviewTab progress', () => {
-  // pulling_runtime_image 阶段且 total 未知时只渲染不定进度条,不展示字节文案
-  it('init 阶段且 total=0 时展示不定进度', () => {
+  // pulling_runtime_image 阶段且 total 未知（total=0）时不渲染进度条，仅保留状态文案。
+  // 底层 k8s/docker 不暴露细粒度进度，显示不定进度条会让用户误以为实例卡死。
+  it('init 阶段且 total=0 时不展示进度条', () => {
     const wrapper = mountWithApp({
       status: 'pulling_runtime_image',
       progress_current: 0,
       progress_total: 0,
     })
-    expect(wrapper.find('.init-progress').exists()).toBe(true)
+    expect(wrapper.find('.init-progress').exists()).toBe(false)
     expect(wrapper.find('.init-progress-bytes').exists()).toBe(false)
   })
 

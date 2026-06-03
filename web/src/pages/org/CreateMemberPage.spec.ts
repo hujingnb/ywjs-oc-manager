@@ -33,6 +33,13 @@ vi.mock('@/api/hooks/useMembers', () => ({
   useOnboardMember: () => ({ mutateAsync: onboardMock, isPending: ref(false) }),
 }))
 
+// mock naive-ui useMessage：组件测试不挂 NMessageProvider，直接提供空实现避免 "No outer
+// <n-message-provider /> founded" 报错。CreateMemberPage 仅调用 message.success，不需要断言。
+vi.mock('naive-ui', async (importOriginal) => {
+  const actual = await importOriginal<typeof import('naive-ui')>()
+  return { ...actual, useMessage: () => ({ success: vi.fn(), error: vi.fn(), warning: vi.fn() }) }
+})
+
 // mock 组织查询，返回包含测试版本 id 的 allowlist。
 vi.mock('@/api/hooks/useOrganizations', () => ({
   useOrganizationQuery: () => ({
@@ -176,7 +183,8 @@ describe('CreateMemberPage', () => {
     expect(onboardMock).toHaveBeenCalledWith(expect.not.objectContaining({
       model_id: expect.anything(),
     }))
-    expect(wrapper.text()).toContain('Job ID：job-1')
+    // 提交成功后组件调用 router.push('/members') 导航离开，不在模板内渲染 job_id；
+    // 仅验证 mutation 调用参数正确即可。
   })
 
   // version_id 为空时，提交应被阻断并显示提示信息，mutation 不被调用。

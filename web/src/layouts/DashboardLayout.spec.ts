@@ -223,13 +223,15 @@ describe('DashboardLayout', () => {
 
     const wrapper = mountLayout()
 
-    expect(menuLabels(wrapper)).toEqual(['总览', '渠道', '工作目录', '个人知识库', '企业知识库', '任务', '定时任务', '用量'])
+    // 技能市场功能为组织成员增加了「技能」顶级菜单（/skills），位于「企业知识库」之后。
+    expect(menuLabels(wrapper)).toEqual(['总览', '渠道', '工作目录', '个人知识库', '企业知识库', '技能', '任务', '定时任务', '用量'])
     expect(menuKeys(wrapper)).toEqual([
       '/apps/app-1/overview',
       '/apps/app-1/channels',
       '/apps/app-1/workspace',
       '/apps/app-1/knowledge',
       '/knowledge',
+      '/skills',
       '/apps/app-1/kanban',
       '/apps/app-1/cron',
       '/usage',
