@@ -801,6 +801,7 @@ SET dataset_id = ?,
 WHERE id = ?
   AND scope_type = 'industry'
   AND industry_knowledge_base_id = ?
+  AND ragflow_document_id = ?
 `
 
 type ReplaceRAGFlowIndustryDocumentParams struct {
@@ -816,9 +817,10 @@ type ReplaceRAGFlowIndustryDocumentParams struct {
 	CreatedBy               string      `db:"created_by" json:"created_by"`
 	ID                      string      `db:"id" json:"id"`
 	IndustryKnowledgeBaseID null.String `db:"industry_knowledge_base_id" json:"industry_knowledge_base_id"`
+	OldRagflowDocumentID    string      `db:"old_ragflow_document_id" json:"old_ragflow_document_id"`
 }
 
-// 覆盖行业库同名文件时原地替换本地 document 映射，避免新文件上传失败时删除旧知识。
+// 覆盖行业库同名文件时按旧远端 document ID 乐观替换本地映射；created_by 表示最近一次覆盖上传人，created_at 仍保留首创时间。
 func (q *Queries) ReplaceRAGFlowIndustryDocument(ctx context.Context, arg ReplaceRAGFlowIndustryDocumentParams) error {
 	_, err := q.db.ExecContext(ctx, replaceRAGFlowIndustryDocument,
 		arg.DatasetID,
@@ -833,6 +835,7 @@ func (q *Queries) ReplaceRAGFlowIndustryDocument(ctx context.Context, arg Replac
 		arg.CreatedBy,
 		arg.ID,
 		arg.IndustryKnowledgeBaseID,
+		arg.OldRagflowDocumentID,
 	)
 	return err
 }

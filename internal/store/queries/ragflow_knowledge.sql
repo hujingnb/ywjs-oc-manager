@@ -97,7 +97,7 @@ INSERT INTO ragflow_documents (
 );
 
 -- name: ReplaceRAGFlowIndustryDocument :exec
--- 覆盖行业库同名文件时原地替换本地 document 映射，避免新文件上传失败时删除旧知识。
+-- 覆盖行业库同名文件时按旧远端 document ID 乐观替换本地映射；created_by 表示最近一次覆盖上传人，created_at 仍保留首创时间。
 UPDATE ragflow_documents
 SET dataset_id = sqlc.arg(dataset_id),
     ragflow_document_id = sqlc.arg(ragflow_document_id),
@@ -112,7 +112,8 @@ SET dataset_id = sqlc.arg(dataset_id),
     updated_at = now()
 WHERE id = sqlc.arg(id)
   AND scope_type = 'industry'
-  AND industry_knowledge_base_id = sqlc.arg(industry_knowledge_base_id);
+  AND industry_knowledge_base_id = sqlc.arg(industry_knowledge_base_id)
+  AND ragflow_document_id = sqlc.arg(old_ragflow_document_id);
 
 -- name: GetRAGFlowDocument :one
 -- 按 manager 本地 ID 读取 document 缓存，供下载和删除前做权限校验。

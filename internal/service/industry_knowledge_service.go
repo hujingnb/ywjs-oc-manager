@@ -310,7 +310,7 @@ func (s *KnowledgeService) saveIndustryFileForBase(ctx context.Context, base sql
 	}, normalizedName, content, size)
 }
 
-// overwriteIndustryFile 先上传新远端文件，再原地替换本地映射，最后删除旧远端文件，避免覆盖失败造成知识丢失。
+// overwriteIndustryFile 先上传并触发新文件解析，再用旧远端 ID 做乐观替换，最后删除旧远端文件，避免并发覆盖留下不可管理的 RAGFlow document。
 func (s *KnowledgeService) overwriteIndustryFile(ctx context.Context, dataset sqlc.RagflowDataset, existing sqlc.RagflowDocument, filename string, content io.Reader, size int64, createdBy string) (KnowledgeDocumentResult, error) {
 	target := knowledgeUploadTarget{
 		Dataset:                 dataset,
@@ -335,10 +335,18 @@ func (s *KnowledgeService) overwriteIndustryFile(ctx context.Context, dataset sq
 		createdBy = "unknown"
 	}
 	parseStatus := normalizeRAGFlowRun(remote.Run)
+	if parseStatus != "queued" && parseStatus != "running" {
+		parseStatus = "queued"
+	}
+	if err := s.ragflowClient().ParseDocuments(ctx, remoteDatasetID, []string{remote.ID}); err != nil {
+		_ = s.ragflowClient().DeleteDocuments(ctx, remoteDatasetID, []string{remote.ID})
+		return KnowledgeDocumentResult{}, fmt.Errorf("触发 RAGFlow 解析失败: %w", err)
+	}
 	arg := sqlc.ReplaceRAGFlowIndustryDocumentParams{
 		ID:                      existing.ID,
 		DatasetID:               dataset.ID,
 		IndustryKnowledgeBaseID: existing.IndustryKnowledgeBaseID,
+		OldRagflowDocumentID:    existing.RagflowDocumentID,
 		RagflowDocumentID:       remote.ID,
 		Name:                    filename,
 		SizeBytes:               size,
@@ -357,22 +365,9 @@ func (s *KnowledgeService) overwriteIndustryFile(ctx context.Context, dataset sq
 	if err != nil {
 		return KnowledgeDocumentResult{}, fmt.Errorf("读取覆盖后行业知识库文件失败: %w", err)
 	}
-	if err := s.ragflowClient().ParseDocuments(ctx, remoteDatasetID, []string{remote.ID}); err != nil {
-		return KnowledgeDocumentResult{}, fmt.Errorf("触发 RAGFlow 解析失败: %w", err)
-	}
-	if row.ParseStatus != "queued" && row.ParseStatus != "running" {
-		if err := s.store.UpdateRAGFlowDocumentParseStatus(ctx, sqlc.UpdateRAGFlowDocumentParseStatusParams{
-			ID:          row.ID,
-			ParseStatus: "queued",
-			Progress:    0,
-			LastError:   null.String{},
-		}); err != nil {
-			return KnowledgeDocumentResult{}, fmt.Errorf("更新知识库解析状态失败: %w", err)
-		}
-		row, err = s.store.GetRAGFlowDocument(ctx, row.ID)
-		if err != nil {
-			return KnowledgeDocumentResult{}, fmt.Errorf("读取更新后知识库文件失败: %w", err)
-		}
+	if row.RagflowDocumentID != remote.ID {
+		_ = s.ragflowClient().DeleteDocuments(ctx, remoteDatasetID, []string{remote.ID})
+		return KnowledgeDocumentResult{}, fmt.Errorf("%w: 行业知识库文件被并发覆盖，请重试", ErrConflict)
 	}
 	if existing.RagflowDocumentID != remote.ID {
 		if err := s.ragflowClient().DeleteDocuments(ctx, remoteDatasetID, []string{existing.RagflowDocumentID}); err != nil {

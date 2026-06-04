@@ -258,8 +258,8 @@ func TestExternalUploadOverwritesSameNameAfterNewMetadataSaved(t *testing.T) {
 	assert.Equal(t, []string{"remote-doc-1"}, rf.deleteCalls[0].documentIDs)
 	assert.Equal(t, []string{
 		"upload:remote-doc-new",
-		"replace-industry-doc:remote-doc-new",
 		"parse:remote-doc-new",
+		"replace-industry-doc:remote-doc-new",
 		"delete-docs:remote-doc-1",
 	}, store.recordedEvents())
 }
@@ -278,6 +278,22 @@ func TestExternalUploadIndustryOverwriteUploadFailureKeepsOldDocument(t *testing
 	assert.Equal(t, oldDoc, store.docs[oldDoc.ID])
 }
 
+// TestExternalUploadIndustryOverwriteParseFailureKeepsOldDocument 验证同名覆盖的新远端文件解析失败时会清理新文件并保留旧映射。
+func TestExternalUploadIndustryOverwriteParseFailureKeepsOldDocument(t *testing.T) {
+	svc, store, rf := newRAGFlowKnowledgeTestService(t)
+	oldDoc := industryTestDocument(t, "policy.pdf", store.industryDataset.ID, testIndustryKnowledgeBaseID)
+	store.docs[oldDoc.ID] = oldDoc
+	rf.uploadDocument = ragflow.Document{ID: "remote-doc-new", Name: "policy.pdf", Size: 3, Run: "UNSTART"}
+	rf.parseErr = errors.New("ragflow parse failed")
+
+	_, err := svc.ExternalUploadIndustryFile(context.Background(), "保险", "policy.pdf", strings.NewReader("new"), 3)
+	require.ErrorContains(t, err, "触发 RAGFlow 解析失败")
+
+	require.Len(t, rf.deleteCalls, 1)
+	assert.Equal(t, []string{"remote-doc-new"}, rf.deleteCalls[0].documentIDs)
+	assert.Equal(t, oldDoc, store.docs[oldDoc.ID])
+}
+
 // TestExternalUploadIndustryOverwriteMetadataFailureCleansNewRemote 验证同名覆盖本地替换失败时清理新远端文件并保留旧映射。
 func TestExternalUploadIndustryOverwriteMetadataFailureCleansNewRemote(t *testing.T) {
 	svc, store, rf := newRAGFlowKnowledgeTestService(t)
@@ -292,6 +308,22 @@ func TestExternalUploadIndustryOverwriteMetadataFailureCleansNewRemote(t *testin
 	require.Len(t, rf.deleteCalls, 1)
 	assert.Equal(t, []string{"remote-doc-new"}, rf.deleteCalls[0].documentIDs)
 	assert.Equal(t, oldDoc, store.docs[oldDoc.ID])
+}
+
+// TestExternalUploadIndustryOverwriteConcurrentReplaceCleansNewRemote 验证并发同名覆盖导致读回不一致时会清理新远端文件并要求调用方重试。
+func TestExternalUploadIndustryOverwriteConcurrentReplaceCleansNewRemote(t *testing.T) {
+	svc, store, rf := newRAGFlowKnowledgeTestService(t)
+	oldDoc := industryTestDocument(t, "policy.pdf", store.industryDataset.ID, testIndustryKnowledgeBaseID)
+	store.docs[oldDoc.ID] = oldDoc
+	rf.uploadDocument = ragflow.Document{ID: "remote-doc-new", Name: "policy.pdf", Size: 3, Run: "UNSTART"}
+	store.replaceConcurrentRemoteID = "remote-doc-concurrent"
+
+	_, err := svc.ExternalUploadIndustryFile(context.Background(), "保险", "policy.pdf", strings.NewReader("new"), 3)
+	require.ErrorIs(t, err, ErrConflict)
+
+	require.Len(t, rf.deleteCalls, 1)
+	assert.Equal(t, []string{"remote-doc-new"}, rf.deleteCalls[0].documentIDs)
+	assert.Equal(t, "remote-doc-concurrent", store.docs[oldDoc.ID].RagflowDocumentID)
 }
 
 // TestDeleteIndustryKnowledgeBaseLocalCleanupFailureDoesNotDeleteRemote 验证行业库本地 dataset 清理失败时不会先删除远端 dataset。
@@ -715,6 +747,7 @@ type fakeKnowledgeStore struct {
 	createOrgDatasetErr         error
 	createAppDatasetErr         error
 	replaceIndustryDocumentErr  error
+	replaceConcurrentRemoteID   string
 	claimDatasetErr             error
 	setActiveErr                error
 	deleteDatasetMappingErr     error
@@ -1244,7 +1277,17 @@ func (s *fakeKnowledgeStore) ReplaceRAGFlowIndustryDocument(_ context.Context, a
 	}
 	doc, ok := s.docs[arg.ID]
 	if !ok {
-		return sql.ErrNoRows
+		return nil
+	}
+	if s.replaceConcurrentRemoteID != "" {
+		doc.RagflowDocumentID = s.replaceConcurrentRemoteID
+		doc.UpdatedAt = s.now
+		s.docs[arg.ID] = doc
+		s.recordEvent("replace-industry-doc-concurrent:" + s.replaceConcurrentRemoteID)
+		return nil
+	}
+	if doc.RagflowDocumentID != arg.OldRagflowDocumentID {
+		return nil
 	}
 	doc.DatasetID = arg.DatasetID
 	doc.RagflowDocumentID = arg.RagflowDocumentID
@@ -1422,6 +1465,7 @@ type fakeRAGFlowKnowledgeClient struct {
 	uploadDocument          ragflow.Document
 	uploadErr               error
 	uploadCalls             []ragflowUploadCall
+	parseErr                error
 	parseCalls              []ragflowParseCall
 	deleteCalls             []ragflowDeleteCall
 	retrieveDatasetIDs      []string
@@ -1501,6 +1545,9 @@ func (f *fakeRAGFlowKnowledgeClient) DeleteDocuments(_ context.Context, datasetI
 func (f *fakeRAGFlowKnowledgeClient) ParseDocuments(_ context.Context, datasetID string, documentIDs []string) error {
 	f.parseCalls = append(f.parseCalls, ragflowParseCall{datasetID: datasetID, documentIDs: append([]string(nil), documentIDs...)})
 	f.recordEvent("parse:" + strings.Join(documentIDs, ","))
+	if f.parseErr != nil {
+		return f.parseErr
+	}
 	return nil
 }
 
