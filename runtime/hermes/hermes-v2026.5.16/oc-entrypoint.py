@@ -20,6 +20,10 @@ from pathlib import Path
 
 # 让 import lib / renderer / migrator 走包内路径。
 sys.path.insert(0, "/usr/local/lib/oc-entrypoint")
+# oc_entrypoint.py 辅助模块落点 /usr/local/lib/（见 Dockerfile COPY），与 oc-entrypoint
+# 子目录不同级。运行时容器入口不带 PYTHONPATH（仅构建期自检设了 PYTHONPATH=/usr/local/lib），
+# 故须在此显式把 /usr/local/lib 加入 sys.path，否则 `import oc_entrypoint` 在容器启动即崩溃。
+sys.path.insert(0, "/usr/local/lib")
 # 测试模式：脚本目录而非镜像安装目录。
 if not Path("/usr/local/lib/oc-entrypoint").exists():
     sys.path.insert(0, str(Path(__file__).resolve().parent))
