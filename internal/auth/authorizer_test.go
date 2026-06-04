@@ -443,8 +443,8 @@ func TestCanManagePlatformSkill(t *testing.T) {
 	assert.False(t, CanManagePlatformSkill(Principal{Role: domain.UserRoleOrgMember}))
 }
 
-// TestCanManageAppSkill 验证实例 skill 管理权限：应用 owner 本人及本组织 org_admin 可管理，
-// 跨组织成员和 platform_admin 均被拒绝（与 CanManageApp 语义一致）。
+// TestCanManageAppSkill 验证实例 skill 管理权限：平台管理员可管理任意实例（含跨组织）；
+// 本组织 org_admin、应用 owner 本人可管理；跨组织成员和非 owner 的普通成员不可管理。
 func TestCanManageAppSkill(t *testing.T) {
 	cases := []memberCase{
 		// owner 本人可管理自己应用的 skill
@@ -455,8 +455,8 @@ func TestCanManageAppSkill(t *testing.T) {
 		{"org_admin 同组织可管理实例 skill", domain.UserRoleOrgAdmin, orgA, userA, orgA, userB, true},
 		// 跨组织 org_admin 不可管理
 		{"org_admin 跨组织不可管理实例 skill", domain.UserRoleOrgAdmin, orgA, userA, orgB, userB, false},
-		// platform_admin 没有应用写权限，不可管理实例 skill
-		{"platform_admin 不可管理实例 skill", domain.UserRolePlatformAdmin, orgA, userA, orgB, userB, false},
+		// platform_admin 可管理任意实例的 skill（含跨组织），删除保护仍由 service 层 ErrAppSkillProtected 兜底
+		{"platform_admin 可管理任意实例 skill", domain.UserRolePlatformAdmin, orgA, userA, orgB, userB, true},
 	}
 	runAppCases(t, CanManageAppSkill, cases)
 }

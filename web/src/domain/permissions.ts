@@ -85,6 +85,18 @@ export function canSwitchAppVersion(
   return false
 }
 
+// canManageAppSkill 判断是否可管理某实例的 skill：平台管理员可管理任意实例，
+// 否则与应用写权限同款（owner 本人 / 本 org 的 org_admin）。
+// 注意：删除「当前版本必需的 skill」对所有角色仍禁止，由后端 ErrAppSkillProtected 保证。
+export function canManageAppSkill(
+  user: PermissionUser | null | undefined,
+  app: PermissionApp | null | undefined,
+): boolean {
+  if (!user) return false
+  if (user.role === 'platform_admin') return true
+  return canManageApp(user, app)
+}
+
 // canTriggerRuntimeOperation：运行时启停/重启，平台管理员需要运维介入能力。
 // 与后端 CanTriggerRuntimeOperation 保持一致。
 export function canTriggerRuntimeOperation(

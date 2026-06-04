@@ -117,7 +117,7 @@ import {
   useUninstallAppSkill,
   useUpdateAppSkill,
 } from '@/api/hooks/useSkills'
-import { canManageApp } from '@/domain/permissions'
+import { canManageAppSkill } from '@/domain/permissions'
 import { useAuthStore } from '@/stores/auth'
 
 // SkillManager 接受 appId prop，app 可从 inject 获取（管理员入口由父级 provide）。
@@ -134,8 +134,9 @@ const dialog = useDialog()
 // 成员页面场景下 app 从 useMemberApp() 传入，两条路径都走 inject。
 const app = inject<Ref<AppDTO | null>>('app')
 
-// canManage：由 canManageApp 根据当前用户角色和实例归属判断写入权限。
-const canManage = computed(() => canManageApp(auth.user, app?.value))
+// canManage：由 canManageAppSkill 根据当前用户角色和实例归属判断写入权限；
+// 平台管理员可管理任意实例 skill，org_admin 限本组织，org_member 限 owner 本人。
+const canManage = computed(() => canManageAppSkill(auth.user, app?.value))
 
 // appIdRef：将 props.appId 包装为 Ref，供 hooks 响应式使用。
 const appIdRef = computed<string | undefined>(() => props.appId)

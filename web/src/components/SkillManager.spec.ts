@@ -85,7 +85,7 @@ vi.mock('@/stores/auth', () => ({
 
 vi.mock('@/domain/permissions', async () => {
   const actual = await vi.importActual<typeof import('@/domain/permissions')>('@/domain/permissions')
-  return { ...actual, canManageApp: mocks.canManage }
+  return { ...actual, canManageAppSkill: mocks.canManage }
 })
 
 vi.mock('@/api/hooks/useSkills', () => ({
@@ -283,13 +283,33 @@ describe('SkillManager', () => {
   // ======== 已安装：无权限隐藏卸载按钮 ========
 
   it('无写权限时已安装列表不显示卸载按钮', () => {
-    // 覆盖只读用户（如平台管理员或其他组织成员）无操作入口的场景。
+    // 覆盖只读用户（如其他组织成员）无操作入口的场景。
     appSkillsState.data.value = [
       { name: 'skill-readonly', status: 'active', source: 'platform', version: '1.0.0', protected: false },
     ]
     mocks.canManage.mockReturnValue(false)
     const wrapper = mountManager()
     expect(wrapper.find('.cell-actions').text()).not.toContain('卸载')
+  })
+
+  it('platform_admin 有写权限时显示卸载和安装按钮', () => {
+    // 覆盖 platform_admin 可管理任意实例 skill 的场景：
+    // canManageAppSkill 对 platform_admin 返回 true，操作按钮应可见。
+    appSkillsState.data.value = [
+      { name: 'skill-platform-admin', status: 'active', source: 'platform', version: '1.0.0', protected: false },
+    ]
+    marketState.data.value = {
+      entries: [
+        { source: 'platform', source_ref: 'new-skill', name: 'new-skill', version: '1.0.0', downloads: 0 },
+      ],
+    }
+    // 模拟 canManageAppSkill 对 platform_admin 返回 true。
+    mocks.canManage.mockReturnValue(true)
+    const wrapper = mountManager()
+    // 已安装列表应显示卸载按钮。
+    expect(wrapper.find('.cell-actions').text()).toContain('卸载')
+    // 市场安装按钮应显示。
+    expect(wrapper.find('.n-card').text()).toContain('安装')
   })
 
   // ======== 已安装：更新按钮 ========

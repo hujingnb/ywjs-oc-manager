@@ -345,8 +345,12 @@ func CanViewPlatformSkillMarket(p Principal) bool {
 	return p.Role != ""
 }
 
-// CanManageAppSkill 判断是否可管理某 app 的 skill：与应用写权限同款（owner 本人 / 本 org 的 org_admin）。
-// platform_admin 不继承应用写权限，不可管理实例 skill。
+// CanManageAppSkill 判断是否可管理某 app 的 skill：平台管理员可管理任意实例；
+// 否则与应用写权限同款（owner 本人 / 本 org 的 org_admin）。
+// 注意：删除「当前版本必需的 skill」对所有角色仍禁止，由 service 层 ErrAppSkillProtected 保证。
 func CanManageAppSkill(p Principal, appOrgID, appOwnerUserID string) bool {
+	if p.Role == domain.UserRolePlatformAdmin {
+		return true
+	}
 	return CanManageApp(p, appOrgID, appOwnerUserID)
 }
