@@ -201,6 +201,8 @@ type Querier interface {
 	RenameIndustryKnowledgeBase(ctx context.Context, arg RenameIndustryKnowledgeBaseParams) error
 	// 替换助手版本行业知识库关联前先清空旧关联，由调用方在同一事务中重新插入。
 	ReplaceAssistantVersionIndustryKnowledgeBases(ctx context.Context, versionID string) error
+	// 覆盖行业库同名文件时原地替换本地 document 映射，避免新文件上传失败时删除旧知识。
+	ReplaceRAGFlowIndustryDocument(ctx context.Context, arg ReplaceRAGFlowIndustryDocumentParams) error
 	// reaper 把已 running / succeeded 的 job 重置为 pending。
 	// locked_by / locked_at 一并清空避免被旧 worker 误识别为本机持有。
 	// 注意：jobs 表无 started_at 列，仅清 locked_* / last_error / 状态。

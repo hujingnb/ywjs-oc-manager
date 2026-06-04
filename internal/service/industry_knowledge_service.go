@@ -6,6 +6,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"mime"
 	"path"
 	"strings"
 	"time"
@@ -143,17 +144,19 @@ func (s *KnowledgeService) DeleteIndustryKnowledgeBase(ctx context.Context, prin
 		return fmt.Errorf("查询行业知识库 RAGFlow dataset 失败: %w", err)
 	}
 	if err == nil {
-		if remoteDatasetID, remoteErr := requireRemoteDatasetID(dataset); remoteErr == nil {
-			if err := s.ragflowClient().DeleteDatasets(ctx, []string{remoteDatasetID}); err != nil {
-				return fmt.Errorf("删除 RAGFlow 行业 dataset 失败: %w", err)
-			}
-		}
 		if err := s.store.DeleteRAGFlowDatasetMapping(ctx, dataset.ID); err != nil && !errors.Is(err, sql.ErrNoRows) {
 			return fmt.Errorf("删除行业知识库 dataset 映射失败: %w", err)
 		}
 	}
 	if err := s.store.SoftDeleteIndustryKnowledgeBase(ctx, base.ID); err != nil {
 		return fmt.Errorf("删除行业知识库失败: %w", err)
+	}
+	if err == nil {
+		if remoteDatasetID, remoteErr := requireRemoteDatasetID(dataset); remoteErr == nil {
+			if err := s.ragflowClient().DeleteDatasets(ctx, []string{remoteDatasetID}); err != nil {
+				return fmt.Errorf("删除 RAGFlow 行业 dataset 失败: %w", err)
+			}
+		}
 	}
 	return nil
 }
@@ -296,9 +299,7 @@ func (s *KnowledgeService) saveIndustryFileForBase(ctx context.Context, base sql
 		Name:                    normalizedName,
 	})
 	if err == nil {
-		if err := s.deleteDocument(ctx, dataset, existing); err != nil {
-			return KnowledgeDocumentResult{}, err
-		}
+		return s.overwriteIndustryFile(ctx, dataset, existing, normalizedName, content, size, createdBy)
 	} else if !errors.Is(err, sql.ErrNoRows) {
 		return KnowledgeDocumentResult{}, fmt.Errorf("查询同名行业知识库文件失败: %w", err)
 	}
@@ -307,6 +308,78 @@ func (s *KnowledgeService) saveIndustryFileForBase(ctx context.Context, base sql
 		IndustryKnowledgeBaseID: base.ID,
 		CreatedBy:               createdBy,
 	}, normalizedName, content, size)
+}
+
+// overwriteIndustryFile 先上传新远端文件，再原地替换本地映射，最后删除旧远端文件，避免覆盖失败造成知识丢失。
+func (s *KnowledgeService) overwriteIndustryFile(ctx context.Context, dataset sqlc.RagflowDataset, existing sqlc.RagflowDocument, filename string, content io.Reader, size int64, createdBy string) (KnowledgeDocumentResult, error) {
+	target := knowledgeUploadTarget{
+		Dataset:                 dataset,
+		IndustryKnowledgeBaseID: strOrEmpty(existing.IndustryKnowledgeBaseID),
+		CreatedBy:               createdBy,
+	}
+	if err := validateKnowledgeUploadTarget(target); err != nil {
+		return KnowledgeDocumentResult{}, err
+	}
+	remoteDatasetID, err := requireRemoteDatasetID(dataset)
+	if err != nil {
+		return KnowledgeDocumentResult{}, err
+	}
+	remote, err := s.ragflowClient().UploadDocument(ctx, remoteDatasetID, filename, content)
+	if err != nil {
+		return KnowledgeDocumentResult{}, fmt.Errorf("上传 RAGFlow document 失败: %w", err)
+	}
+	if remote.Size > 0 {
+		size = remote.Size
+	}
+	if createdBy == "" {
+		createdBy = "unknown"
+	}
+	parseStatus := normalizeRAGFlowRun(remote.Run)
+	arg := sqlc.ReplaceRAGFlowIndustryDocumentParams{
+		ID:                      existing.ID,
+		DatasetID:               dataset.ID,
+		IndustryKnowledgeBaseID: existing.IndustryKnowledgeBaseID,
+		RagflowDocumentID:       remote.ID,
+		Name:                    filename,
+		SizeBytes:               size,
+		MimeType:                nullStr(mime.TypeByExtension(path.Ext(filename))),
+		Suffix:                  nullStr(strings.TrimPrefix(path.Ext(filename), ".")),
+		ParseStatus:             parseStatus,
+		Progress:                progressForStatus(parseStatus),
+		LastError:               null.String{},
+		CreatedBy:               createdBy,
+	}
+	if err := s.store.ReplaceRAGFlowIndustryDocument(ctx, arg); err != nil {
+		_ = s.ragflowClient().DeleteDocuments(ctx, remoteDatasetID, []string{remote.ID})
+		return KnowledgeDocumentResult{}, fmt.Errorf("替换行业知识库文件元数据失败: %w", err)
+	}
+	row, err := s.store.GetRAGFlowDocument(ctx, existing.ID)
+	if err != nil {
+		return KnowledgeDocumentResult{}, fmt.Errorf("读取覆盖后行业知识库文件失败: %w", err)
+	}
+	if err := s.ragflowClient().ParseDocuments(ctx, remoteDatasetID, []string{remote.ID}); err != nil {
+		return KnowledgeDocumentResult{}, fmt.Errorf("触发 RAGFlow 解析失败: %w", err)
+	}
+	if row.ParseStatus != "queued" && row.ParseStatus != "running" {
+		if err := s.store.UpdateRAGFlowDocumentParseStatus(ctx, sqlc.UpdateRAGFlowDocumentParseStatusParams{
+			ID:          row.ID,
+			ParseStatus: "queued",
+			Progress:    0,
+			LastError:   null.String{},
+		}); err != nil {
+			return KnowledgeDocumentResult{}, fmt.Errorf("更新知识库解析状态失败: %w", err)
+		}
+		row, err = s.store.GetRAGFlowDocument(ctx, row.ID)
+		if err != nil {
+			return KnowledgeDocumentResult{}, fmt.Errorf("读取更新后知识库文件失败: %w", err)
+		}
+	}
+	if existing.RagflowDocumentID != remote.ID {
+		if err := s.ragflowClient().DeleteDocuments(ctx, remoteDatasetID, []string{existing.RagflowDocumentID}); err != nil {
+			return KnowledgeDocumentResult{}, fmt.Errorf("删除旧 RAGFlow document 失败: %w", err)
+		}
+	}
+	return toKnowledgeDocumentResult(row), nil
 }
 
 // getOrCreateIndustryKnowledgeBaseByName 供外部上传入口按行业名称自动定位行业库，不要求调用方预先知道 ID。
@@ -325,7 +398,17 @@ func (s *KnowledgeService) getOrCreateIndustryKnowledgeBaseByName(ctx context.Co
 	if err != nil && !errors.Is(err, sql.ErrNoRows) {
 		return sqlc.IndustryKnowledgeBasis{}, fmt.Errorf("查询行业知识库失败: %w", err)
 	}
-	return s.createIndustryKnowledgeBase(ctx, name, createdBy)
+	created, err := s.createIndustryKnowledgeBase(ctx, name, createdBy)
+	if errors.Is(err, ErrIndustryKnowledgeNameTaken) {
+		row, readErr := s.store.GetIndustryKnowledgeBaseByName(ctx, name)
+		if readErr == nil && !row.DeletedAt.Valid {
+			return row, nil
+		}
+		if readErr != nil {
+			return sqlc.IndustryKnowledgeBasis{}, fmt.Errorf("并发创建后读取行业知识库失败: %w", readErr)
+		}
+	}
+	return created, err
 }
 
 // createIndustryKnowledgeBase 创建行业库并读回完整时间字段；同名并发由数据库唯一约束兜底。
@@ -425,14 +508,12 @@ func normalizeIndustryKnowledgeFilename(filename string) (string, error) {
 	return name, nil
 }
 
-// isIndustryKnowledgeNameDuplicate 识别行业库名称唯一约束冲突，兼容 MySQL 错误消息中的 key 名差异。
+// isIndustryKnowledgeNameDuplicate 识别行业库名称唯一约束冲突，仅匹配迁移中定义的精确唯一键名。
 func isIndustryKnowledgeNameDuplicate(err error) bool {
 	if err == nil {
 		return false
 	}
-	errMsg := err.Error()
-	return containsMySQLDuplicateKey(errMsg, "uk_industry_knowledge_bases_name_active") ||
-		containsMySQLDuplicateKey(errMsg, "industry_knowledge_bases")
+	return containsMySQLDuplicateKey(err.Error(), "uk_industry_knowledge_bases_name_active")
 }
 
 // toIndustryKnowledgeBaseResult 映射单行行业库记录；documentCount 由调用方按上下文传入。

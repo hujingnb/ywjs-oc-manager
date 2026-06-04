@@ -212,26 +212,123 @@ func TestCreateIndustryKnowledgeBasePlatformOnly(t *testing.T) {
 	require.ErrorIs(t, err, ErrKnowledgeForbidden)
 }
 
-// TestExternalUploadCreatesIndustryAndOverwritesSameName 验证外部上传会按行业名称自动创建行业库，并用同名覆盖语义替换旧文件。
-func TestExternalUploadCreatesIndustryAndOverwritesSameName(t *testing.T) {
+// TestExternalUploadCreatesIndustryWhenMissing 验证外部上传在行业库不存在时会自动创建行业库和 dataset。
+func TestExternalUploadCreatesIndustryWhenMissing(t *testing.T) {
 	svc, store, rf := newRAGFlowKnowledgeTestService(t)
 	store.industryBases = map[string]sqlc.IndustryKnowledgeBasis{}
 	store.missingIndustryDataset = true
 	rf.createDatasetResult = ragflow.Dataset{ID: testRemoteIndustryDatasetID, Name: "保险"}
-	oldDoc := testDocument(t, "industry", "policy.pdf", store.industryDataset.ID)
-	oldDoc.OrgID = null.String{}
-	oldDoc.AppID = null.String{}
-	oldDoc.IndustryKnowledgeBaseID = null.StringFrom(testIndustryKnowledgeBaseID)
-	store.docs["old-doc"] = oldDoc
 
 	doc, err := svc.ExternalUploadIndustryFile(context.Background(), "保险", "policy.pdf", strings.NewReader("new"), 3)
 	require.NoError(t, err)
 
 	assert.Equal(t, "policy.pdf", doc.Name)
-	require.Len(t, rf.deleteCalls, 1)
-	assert.Equal(t, []string{"remote-doc-1"}, rf.deleteCalls[0].documentIDs)
+	assert.NotEmpty(t, store.industryBases)
+	assert.Empty(t, rf.deleteCalls)
 	require.Len(t, rf.uploadCalls, 1)
 	assert.Equal(t, testRemoteIndustryDatasetID, rf.uploadCalls[0].datasetID)
+}
+
+// TestExternalUploadIndustryCreateRaceRereadsWinner 验证外部按名称创建行业库遇到并发同名创建时会重新读取获胜记录。
+func TestExternalUploadIndustryCreateRaceRereadsWinner(t *testing.T) {
+	svc, store, _ := newRAGFlowKnowledgeTestService(t)
+	store.industryBases = map[string]sqlc.IndustryKnowledgeBasis{}
+	store.createIndustryDuplicateOnce = true
+
+	base, err := svc.getOrCreateIndustryKnowledgeBaseByName(context.Background(), "保险", externalIndustryKnowledgeCreatedBy)
+	require.NoError(t, err)
+
+	assert.Equal(t, "winner-industry", base.ID)
+	assert.Equal(t, "保险", base.Name)
+}
+
+// TestExternalUploadOverwritesSameNameAfterNewMetadataSaved 验证同名覆盖会先保存新 metadata，再删除旧远端文件。
+func TestExternalUploadOverwritesSameNameAfterNewMetadataSaved(t *testing.T) {
+	svc, store, rf := newRAGFlowKnowledgeTestService(t)
+	rf.uploadDocument = ragflow.Document{ID: "remote-doc-new", Name: "policy.pdf", Size: 3, Run: "UNSTART"}
+	oldDoc := industryTestDocument(t, "policy.pdf", store.industryDataset.ID, testIndustryKnowledgeBaseID)
+	store.docs[oldDoc.ID] = oldDoc
+
+	doc, err := svc.ExternalUploadIndustryFile(context.Background(), "保险", "policy.pdf", strings.NewReader("new"), 3)
+	require.NoError(t, err)
+
+	assert.Equal(t, oldDoc.ID, doc.ID)
+	assert.Equal(t, "remote-doc-new", store.docs[oldDoc.ID].RagflowDocumentID)
+	require.Len(t, rf.deleteCalls, 1)
+	assert.Equal(t, []string{"remote-doc-1"}, rf.deleteCalls[0].documentIDs)
+	assert.Equal(t, []string{
+		"upload:remote-doc-new",
+		"replace-industry-doc:remote-doc-new",
+		"parse:remote-doc-new",
+		"delete-docs:remote-doc-1",
+	}, store.recordedEvents())
+}
+
+// TestExternalUploadIndustryOverwriteUploadFailureKeepsOldDocument 验证同名覆盖上传新文件失败时不会删除旧文件映射或旧远端文件。
+func TestExternalUploadIndustryOverwriteUploadFailureKeepsOldDocument(t *testing.T) {
+	svc, store, rf := newRAGFlowKnowledgeTestService(t)
+	oldDoc := industryTestDocument(t, "policy.pdf", store.industryDataset.ID, testIndustryKnowledgeBaseID)
+	store.docs[oldDoc.ID] = oldDoc
+	rf.uploadErr = errors.New("ragflow upload failed")
+
+	_, err := svc.ExternalUploadIndustryFile(context.Background(), "保险", "policy.pdf", strings.NewReader("new"), 3)
+	require.ErrorContains(t, err, "上传 RAGFlow document 失败")
+
+	assert.Empty(t, rf.deleteCalls)
+	assert.Equal(t, oldDoc, store.docs[oldDoc.ID])
+}
+
+// TestExternalUploadIndustryOverwriteMetadataFailureCleansNewRemote 验证同名覆盖本地替换失败时清理新远端文件并保留旧映射。
+func TestExternalUploadIndustryOverwriteMetadataFailureCleansNewRemote(t *testing.T) {
+	svc, store, rf := newRAGFlowKnowledgeTestService(t)
+	oldDoc := industryTestDocument(t, "policy.pdf", store.industryDataset.ID, testIndustryKnowledgeBaseID)
+	store.docs[oldDoc.ID] = oldDoc
+	rf.uploadDocument = ragflow.Document{ID: "remote-doc-new", Name: "policy.pdf", Size: 3, Run: "UNSTART"}
+	store.replaceIndustryDocumentErr = errors.New("database down")
+
+	_, err := svc.ExternalUploadIndustryFile(context.Background(), "保险", "policy.pdf", strings.NewReader("new"), 3)
+	require.ErrorContains(t, err, "替换行业知识库文件元数据失败")
+
+	require.Len(t, rf.deleteCalls, 1)
+	assert.Equal(t, []string{"remote-doc-new"}, rf.deleteCalls[0].documentIDs)
+	assert.Equal(t, oldDoc, store.docs[oldDoc.ID])
+}
+
+// TestDeleteIndustryKnowledgeBaseLocalCleanupFailureDoesNotDeleteRemote 验证行业库本地 dataset 清理失败时不会先删除远端 dataset。
+func TestDeleteIndustryKnowledgeBaseLocalCleanupFailureDoesNotDeleteRemote(t *testing.T) {
+	svc, store, rf := newRAGFlowKnowledgeTestService(t)
+	store.deleteDatasetMappingErr = errors.New("database down")
+
+	err := svc.DeleteIndustryKnowledgeBase(context.Background(), auth.Principal{Role: domain.UserRolePlatformAdmin}, testIndustryKnowledgeBaseID)
+	require.ErrorContains(t, err, "删除行业知识库 dataset 映射失败")
+
+	assert.Empty(t, rf.deleteDatasetCalls)
+}
+
+// TestDeleteIndustryKnowledgeBaseMissingDatasetStillDeletesBase 验证行业库没有 dataset 映射时仍可软删除本地行业库。
+func TestDeleteIndustryKnowledgeBaseMissingDatasetStillDeletesBase(t *testing.T) {
+	svc, store, rf := newRAGFlowKnowledgeTestService(t)
+	store.missingIndustryDataset = true
+
+	err := svc.DeleteIndustryKnowledgeBase(context.Background(), auth.Principal{Role: domain.UserRolePlatformAdmin}, testIndustryKnowledgeBaseID)
+	require.NoError(t, err)
+
+	assert.Equal(t, testIndustryKnowledgeBaseID, store.deletedIndustryBaseID)
+	assert.Empty(t, rf.deleteDatasetCalls)
+}
+
+// TestUploadToDatasetRejectsScopeMismatchBeforeRemoteUpload 验证上传目标作用域与 dataset 不匹配时会在远端上传前失败。
+func TestUploadToDatasetRejectsScopeMismatchBeforeRemoteUpload(t *testing.T) {
+	svc, store, rf := newRAGFlowKnowledgeTestService(t)
+
+	_, err := svc.uploadToDataset(context.Background(), knowledgeUploadTarget{
+		Dataset:                 store.orgDataset,
+		IndustryKnowledgeBaseID: testIndustryKnowledgeBaseID,
+		CreatedBy:               "u-platform",
+	}, "policy.pdf", strings.NewReader("new"), 3)
+	require.ErrorContains(t, err, "知识库上传目标")
+
+	assert.Empty(t, rf.uploadCalls)
 }
 
 // TestRuntimeSearchRetrievesEachIndustryWithTopK 验证 runtime 检索会按 app、org、每个行业库分别调用 RAGFlow，行业库各自使用 top_k。
@@ -514,12 +611,15 @@ func TestEnsureOrgDatasetLostClaimDoesNotOverwriteWinner(t *testing.T) {
 func newRAGFlowKnowledgeTestService(t *testing.T) (*KnowledgeService, *fakeKnowledgeStore, *fakeRAGFlowKnowledgeClient) {
 	t.Helper()
 	store := newFakeKnowledgeStore(t)
+	events := []string{}
+	store.events = &events
 	rf := &fakeRAGFlowKnowledgeClient{
 		uploadDocument: ragflow.Document{ID: "remote-doc-1", Name: "report.md", Size: 8, Run: "UNSTART"},
 		createDatasetResult: ragflow.Dataset{
 			ID:   "created-ds",
 			Name: "created-dataset",
 		},
+		events: &events,
 	}
 	return NewKnowledgeService(store, rf), store, rf
 }
@@ -595,40 +695,44 @@ func newFakeKnowledgeStore(t *testing.T) *fakeKnowledgeStore {
 }
 
 type fakeKnowledgeStore struct {
-	apps                   map[string]sqlc.App
-	appsByToken            map[string]sqlc.App
-	org                    sqlc.Organization
-	orgDataset             sqlc.RagflowDataset
-	appDataset             sqlc.RagflowDataset
-	industryBases          map[string]sqlc.IndustryKnowledgeBasis
-	industryDataset        sqlc.RagflowDataset
-	industryDatasets       map[string]sqlc.RagflowDataset
-	versionIndustryBases   map[string][]sqlc.IndustryKnowledgeBasis
-	missingOrgDataset      bool
-	missingAppDataset      bool
-	missingIndustryDataset bool
-	missingOrgDatasetOnce  bool
-	missingAppDatasetOnce  bool
-	getOrganizationErr     error
-	getOrgDatasetErr       error
-	createOrgDatasetErr    error
-	createAppDatasetErr    error
-	claimDatasetErr        error
-	setActiveErr           error
-	setActiveLosesClaim    bool
-	docs                   map[string]sqlc.RagflowDocument
-	createdDatasets        []createdDatasetCall
-	claimedDatasets        []sqlc.ClaimRAGFlowDatasetCreationParams
-	activatedDatasets      []sqlc.SetRAGFlowDatasetActiveParams
-	failedDatasets         []sqlc.MarkRAGFlowDatasetFailedParams
-	createdDocs            []sqlc.CreateRAGFlowDocumentParams
-	createdIndustryDocs    []sqlc.CreateRAGFlowIndustryDocumentParams
-	deletedDatasetID       string
-	deletedIndustryBaseID  string
-	industryInUseCount     int64
-	getOrgDatasetCalls     int
-	nextDocument           string
-	now                    time.Time
+	apps                        map[string]sqlc.App
+	appsByToken                 map[string]sqlc.App
+	org                         sqlc.Organization
+	orgDataset                  sqlc.RagflowDataset
+	appDataset                  sqlc.RagflowDataset
+	industryBases               map[string]sqlc.IndustryKnowledgeBasis
+	industryDataset             sqlc.RagflowDataset
+	industryDatasets            map[string]sqlc.RagflowDataset
+	versionIndustryBases        map[string][]sqlc.IndustryKnowledgeBasis
+	missingOrgDataset           bool
+	missingAppDataset           bool
+	missingIndustryDataset      bool
+	missingOrgDatasetOnce       bool
+	missingAppDatasetOnce       bool
+	createIndustryDuplicateOnce bool
+	getOrganizationErr          error
+	getOrgDatasetErr            error
+	createOrgDatasetErr         error
+	createAppDatasetErr         error
+	replaceIndustryDocumentErr  error
+	claimDatasetErr             error
+	setActiveErr                error
+	deleteDatasetMappingErr     error
+	setActiveLosesClaim         bool
+	docs                        map[string]sqlc.RagflowDocument
+	createdDatasets             []createdDatasetCall
+	claimedDatasets             []sqlc.ClaimRAGFlowDatasetCreationParams
+	activatedDatasets           []sqlc.SetRAGFlowDatasetActiveParams
+	failedDatasets              []sqlc.MarkRAGFlowDatasetFailedParams
+	createdDocs                 []sqlc.CreateRAGFlowDocumentParams
+	createdIndustryDocs         []sqlc.CreateRAGFlowIndustryDocumentParams
+	deletedDatasetID            string
+	deletedIndustryBaseID       string
+	industryInUseCount          int64
+	getOrgDatasetCalls          int
+	nextDocument                string
+	now                         time.Time
+	events                      *[]string
 }
 
 // createdDatasetCall 记录 CreateRAGFlowOrgDatasetMapping / CreateRAGFlowAppDatasetMapping 调用参数。
@@ -671,22 +775,26 @@ func (s *fakeKnowledgeStore) GetAppByRuntimeTokenHash(_ context.Context, runtime
 }
 
 func (s *fakeKnowledgeStore) CreateIndustryKnowledgeBase(_ context.Context, arg sqlc.CreateIndustryKnowledgeBaseParams) error {
-	id := arg.ID
-	// 该 fake 场景中旧行业文档保留了默认行业库 ID；复用该 ID 便于测试覆盖同名覆盖语义。
-	if arg.Name == "保险" && len(s.industryBases) == 0 && s.industryDataset.IndustryKnowledgeBaseID.Valid {
-		id = s.industryDataset.IndustryKnowledgeBaseID.String
+	if s.createIndustryDuplicateOnce {
+		s.createIndustryDuplicateOnce = false
+		winner := sqlc.IndustryKnowledgeBasis{
+			ID:        "winner-industry",
+			Name:      arg.Name,
+			CreatedBy: externalIndustryKnowledgeCreatedBy,
+			CreatedAt: s.now,
+			UpdatedAt: s.now,
+		}
+		s.industryBases[winner.ID] = winner
+		return errors.New("Duplicate entry '保险' for key 'uk_industry_knowledge_bases_name_active'")
 	}
 	row := sqlc.IndustryKnowledgeBasis{
-		ID:        id,
+		ID:        arg.ID,
 		Name:      arg.Name,
 		CreatedBy: arg.CreatedBy,
 		CreatedAt: s.now,
 		UpdatedAt: s.now,
 	}
-	s.industryBases[id] = row
-	if id != arg.ID {
-		s.industryBases[arg.ID] = row
-	}
+	s.industryBases[arg.ID] = row
 	return nil
 }
 
@@ -1099,6 +1207,7 @@ func (s *fakeKnowledgeStore) CreateRAGFlowDocument(_ context.Context, arg sqlc.C
 
 func (s *fakeKnowledgeStore) CreateRAGFlowIndustryDocument(_ context.Context, arg sqlc.CreateRAGFlowIndustryDocumentParams) error {
 	s.createdIndustryDocs = append(s.createdIndustryDocs, arg)
+	s.recordEvent("create-industry-doc:" + arg.RagflowDocumentID)
 	id := arg.ID
 	if arg.RagflowDocumentID == "remote-doc-1" {
 		id = s.nextDocument
@@ -1126,6 +1235,30 @@ func (s *fakeKnowledgeStore) CreateRAGFlowIndustryDocument(_ context.Context, ar
 	if id != arg.ID {
 		s.docs[id] = row
 	}
+	return nil
+}
+
+func (s *fakeKnowledgeStore) ReplaceRAGFlowIndustryDocument(_ context.Context, arg sqlc.ReplaceRAGFlowIndustryDocumentParams) error {
+	if s.replaceIndustryDocumentErr != nil {
+		return s.replaceIndustryDocumentErr
+	}
+	doc, ok := s.docs[arg.ID]
+	if !ok {
+		return sql.ErrNoRows
+	}
+	doc.DatasetID = arg.DatasetID
+	doc.RagflowDocumentID = arg.RagflowDocumentID
+	doc.Name = arg.Name
+	doc.SizeBytes = arg.SizeBytes
+	doc.MimeType = arg.MimeType
+	doc.Suffix = arg.Suffix
+	doc.ParseStatus = arg.ParseStatus
+	doc.Progress = arg.Progress
+	doc.LastError = arg.LastError
+	doc.CreatedBy = arg.CreatedBy
+	doc.UpdatedAt = s.now
+	s.docs[arg.ID] = doc
+	s.recordEvent("replace-industry-doc:" + arg.RagflowDocumentID)
 	return nil
 }
 
@@ -1237,6 +1370,9 @@ func (s *fakeKnowledgeStore) DeleteRAGFlowDocumentMapping(_ context.Context, id 
 }
 
 func (s *fakeKnowledgeStore) DeleteRAGFlowDatasetMapping(_ context.Context, id string) error {
+	if s.deleteDatasetMappingErr != nil {
+		return s.deleteDatasetMappingErr
+	}
 	s.deletedDatasetID = id
 	if industryID, _, ok := s.industryDatasetByID(id); ok {
 		delete(s.industryDatasets, industryID)
@@ -1266,11 +1402,25 @@ func (s *fakeKnowledgeStore) setIndustryDataset(industryID string, row sqlc.Ragf
 	}
 }
 
+func (s *fakeKnowledgeStore) recordEvent(event string) {
+	if s.events != nil {
+		*s.events = append(*s.events, event)
+	}
+}
+
+func (s *fakeKnowledgeStore) recordedEvents() []string {
+	if s.events == nil {
+		return nil
+	}
+	return append([]string(nil), (*s.events)...)
+}
+
 type fakeRAGFlowKnowledgeClient struct {
 	createDatasetResult     ragflow.Dataset
 	createDatasetCalls      []ragflowCreateDatasetCall
 	deleteDatasetCalls      [][]string
 	uploadDocument          ragflow.Document
+	uploadErr               error
 	uploadCalls             []ragflowUploadCall
 	parseCalls              []ragflowParseCall
 	deleteCalls             []ragflowDeleteCall
@@ -1283,6 +1433,7 @@ type fakeRAGFlowKnowledgeClient struct {
 	retrieveCalls           []ragflowRetrieveCall
 	listDocuments           []ragflow.Document
 	listDocumentsCalls      int
+	events                  *[]string
 }
 
 type ragflowCreateDatasetCall struct {
@@ -1328,8 +1479,12 @@ func (f *fakeRAGFlowKnowledgeClient) DeleteDatasets(_ context.Context, ids []str
 func (f *fakeRAGFlowKnowledgeClient) UploadDocument(_ context.Context, datasetID, filename string, body io.Reader) (ragflow.Document, error) {
 	content, _ := io.ReadAll(body)
 	f.uploadCalls = append(f.uploadCalls, ragflowUploadCall{datasetID: datasetID, filename: filename, body: string(content)})
+	if f.uploadErr != nil {
+		return ragflow.Document{}, f.uploadErr
+	}
 	doc := f.uploadDocument
 	doc.Name = filename
+	f.recordEvent("upload:" + doc.ID)
 	return doc, nil
 }
 
@@ -1339,11 +1494,13 @@ func (f *fakeRAGFlowKnowledgeClient) DownloadDocument(_ context.Context, _, _ st
 
 func (f *fakeRAGFlowKnowledgeClient) DeleteDocuments(_ context.Context, datasetID string, documentIDs []string) error {
 	f.deleteCalls = append(f.deleteCalls, ragflowDeleteCall{datasetID: datasetID, documentIDs: append([]string(nil), documentIDs...)})
+	f.recordEvent("delete-docs:" + strings.Join(documentIDs, ","))
 	return nil
 }
 
 func (f *fakeRAGFlowKnowledgeClient) ParseDocuments(_ context.Context, datasetID string, documentIDs []string) error {
 	f.parseCalls = append(f.parseCalls, ragflowParseCall{datasetID: datasetID, documentIDs: append([]string(nil), documentIDs...)})
+	f.recordEvent("parse:" + strings.Join(documentIDs, ","))
 	return nil
 }
 
@@ -1366,6 +1523,12 @@ func (f *fakeRAGFlowKnowledgeClient) Retrieve(_ context.Context, datasetIDs []st
 		return f.retrieveChunksByDataset[datasetIDs[0]], nil
 	}
 	return f.retrieveChunks, nil
+}
+
+func (f *fakeRAGFlowKnowledgeClient) recordEvent(event string) {
+	if f.events != nil {
+		*f.events = append(*f.events, event)
+	}
 }
 
 // testDocument 构建测试用的 RagflowDocument 记录（string datasetID）。
@@ -1396,6 +1559,16 @@ func testDocument(t *testing.T, scope, name string, datasetID string) sqlc.Ragfl
 		CreatedAt:         time.Date(2026, 5, 26, 8, 0, 0, 0, time.UTC),
 		UpdatedAt:         time.Date(2026, 5, 26, 8, 0, 0, 0, time.UTC),
 	}
+}
+
+// industryTestDocument 构建行业知识库旧文件记录，确保行业库 ID 与 dataset 归属一致。
+func industryTestDocument(t *testing.T, name, datasetID, industryID string) sqlc.RagflowDocument {
+	t.Helper()
+	doc := testDocument(t, "industry", name, datasetID)
+	doc.OrgID = null.String{}
+	doc.AppID = null.String{}
+	doc.IndustryKnowledgeBaseID = null.StringFrom(industryID)
+	return doc
 }
 
 func orgKnowledgeAdmin() auth.Principal {

@@ -68,6 +68,8 @@ type KnowledgeStore interface {
 	CreateRAGFlowDocument(ctx context.Context, arg sqlc.CreateRAGFlowDocumentParams) error
 	// CreateRAGFlowIndustryDocument 保存行业库 document 元数据，确保行业外键列被写入。
 	CreateRAGFlowIndustryDocument(ctx context.Context, arg sqlc.CreateRAGFlowIndustryDocumentParams) error
+	// ReplaceRAGFlowIndustryDocument 原地替换行业库同名文件的本地映射。
+	ReplaceRAGFlowIndustryDocument(ctx context.Context, arg sqlc.ReplaceRAGFlowIndustryDocumentParams) error
 	ListRAGFlowDocumentsByScope(ctx context.Context, arg sqlc.ListRAGFlowDocumentsByScopeParams) ([]sqlc.RagflowDocument, error)
 	CountRAGFlowDocumentsByScope(ctx context.Context, arg sqlc.CountRAGFlowDocumentsByScopeParams) (int64, error)
 	// SumRAGFlowDocumentsSizeByScope 统计当前知识库累计占用，包含所有解析状态。
@@ -570,6 +572,9 @@ func (s *KnowledgeService) uploadToDataset(ctx context.Context, target knowledge
 		return KnowledgeDocumentResult{}, fmt.Errorf("filename 不能为空")
 	}
 	dataset := target.Dataset
+	if err := validateKnowledgeUploadTarget(target); err != nil {
+		return KnowledgeDocumentResult{}, err
+	}
 	remoteDatasetID, err := requireRemoteDatasetID(dataset)
 	if err != nil {
 		return KnowledgeDocumentResult{}, err
@@ -630,6 +635,8 @@ func (s *KnowledgeService) uploadToDataset(ctx context.Context, target knowledge
 			CreatedBy:         target.CreatedBy,
 		}
 		if err := s.store.CreateRAGFlowDocument(ctx, arg); err != nil {
+			// 本地写入失败说明 DB 约束或连接异常，清理刚上传的远端 document，避免留下不可管理的文件。
+			_ = s.ragflowClient().DeleteDocuments(ctx, remoteDatasetID, []string{remote.ID})
 			return KnowledgeDocumentResult{}, fmt.Errorf("保存知识库文件元数据失败: %w", err)
 		}
 	}
@@ -656,6 +663,28 @@ func (s *KnowledgeService) uploadToDataset(ctx context.Context, target knowledge
 		}
 	}
 	return toKnowledgeDocumentResult(row), nil
+}
+
+// validateKnowledgeUploadTarget 在远端上传前校验业务目标和 dataset scope，避免 DB 约束失败后才发现误用。
+func validateKnowledgeUploadTarget(target knowledgeUploadTarget) error {
+	dataset := target.Dataset
+	switch dataset.ScopeType {
+	case "org":
+		if target.AppID != "" || target.IndustryKnowledgeBaseID != "" || !dataset.OrgID.Valid || dataset.AppID.Valid || dataset.IndustryKnowledgeBaseID.Valid {
+			return fmt.Errorf("知识库上传目标与 dataset scope 不匹配")
+		}
+	case "app":
+		if target.AppID == "" || target.IndustryKnowledgeBaseID != "" || !dataset.OrgID.Valid || !dataset.AppID.Valid || dataset.AppID.String != target.AppID || dataset.IndustryKnowledgeBaseID.Valid {
+			return fmt.Errorf("知识库上传目标与 dataset scope 不匹配")
+		}
+	case "industry":
+		if target.IndustryKnowledgeBaseID == "" || target.AppID != "" || dataset.OrgID.Valid || dataset.AppID.Valid || !dataset.IndustryKnowledgeBaseID.Valid || dataset.IndustryKnowledgeBaseID.String != target.IndustryKnowledgeBaseID {
+			return fmt.Errorf("知识库上传目标与 dataset scope 不匹配")
+		}
+	default:
+		return fmt.Errorf("知识库上传目标与 dataset scope 不匹配")
+	}
+	return nil
 }
 
 func (s *KnowledgeService) openDocument(ctx context.Context, dataset sqlc.RagflowDataset, document sqlc.RagflowDocument) (io.ReadCloser, int64, string, error) {

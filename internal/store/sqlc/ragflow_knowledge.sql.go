@@ -785,6 +785,58 @@ func (q *Queries) MarkRAGFlowDatasetFailed(ctx context.Context, arg MarkRAGFlowD
 	return err
 }
 
+const replaceRAGFlowIndustryDocument = `-- name: ReplaceRAGFlowIndustryDocument :exec
+UPDATE ragflow_documents
+SET dataset_id = ?,
+    ragflow_document_id = ?,
+    name = ?,
+    size_bytes = ?,
+    mime_type = ?,
+    suffix = ?,
+    parse_status = ?,
+    progress = ?,
+    last_error = ?,
+    created_by = ?,
+    updated_at = now()
+WHERE id = ?
+  AND scope_type = 'industry'
+  AND industry_knowledge_base_id = ?
+`
+
+type ReplaceRAGFlowIndustryDocumentParams struct {
+	DatasetID               string      `db:"dataset_id" json:"dataset_id"`
+	RagflowDocumentID       string      `db:"ragflow_document_id" json:"ragflow_document_id"`
+	Name                    string      `db:"name" json:"name"`
+	SizeBytes               int64       `db:"size_bytes" json:"size_bytes"`
+	MimeType                null.String `db:"mime_type" json:"mime_type"`
+	Suffix                  null.String `db:"suffix" json:"suffix"`
+	ParseStatus             string      `db:"parse_status" json:"parse_status"`
+	Progress                int32       `db:"progress" json:"progress"`
+	LastError               null.String `db:"last_error" json:"last_error"`
+	CreatedBy               string      `db:"created_by" json:"created_by"`
+	ID                      string      `db:"id" json:"id"`
+	IndustryKnowledgeBaseID null.String `db:"industry_knowledge_base_id" json:"industry_knowledge_base_id"`
+}
+
+// 覆盖行业库同名文件时原地替换本地 document 映射，避免新文件上传失败时删除旧知识。
+func (q *Queries) ReplaceRAGFlowIndustryDocument(ctx context.Context, arg ReplaceRAGFlowIndustryDocumentParams) error {
+	_, err := q.db.ExecContext(ctx, replaceRAGFlowIndustryDocument,
+		arg.DatasetID,
+		arg.RagflowDocumentID,
+		arg.Name,
+		arg.SizeBytes,
+		arg.MimeType,
+		arg.Suffix,
+		arg.ParseStatus,
+		arg.Progress,
+		arg.LastError,
+		arg.CreatedBy,
+		arg.ID,
+		arg.IndustryKnowledgeBaseID,
+	)
+	return err
+}
+
 const setRAGFlowDatasetActive = `-- name: SetRAGFlowDatasetActive :exec
 UPDATE ragflow_datasets
 SET ragflow_dataset_id = ?,
