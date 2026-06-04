@@ -1,10 +1,11 @@
 // useSkills.ts — skill 相关 API hooks，覆盖平台库管理、市场浏览和实例 skill 装/卸/更新。
-// 所有 JSON 接口走 apiRequest；平台库上传（multipart）走 xhrUpload 支持进度回调。
+// 所有 JSON 接口走 apiRequest；平台库上传（multipart）走 xhrUpload 支持进度回调；
+// 归档下载（二进制）走 apiDownload。
 import { useInfiniteQuery, useMutation, useQuery, useQueryClient } from '@tanstack/vue-query'
 import { computed } from 'vue'
 import type { Ref } from 'vue'
 
-import { apiRequest } from '@/api/client'
+import { apiDownload, apiRequest } from '@/api/client'
 import { xhrUpload } from '@/api/xhrUpload'
 import type { AppSkill, PlatformSkill, SkillEntry } from '@/api'
 import type { components } from '@/api/generated'
@@ -124,6 +125,28 @@ export function useSkillDetailQuery(params: Ref<{ source?: string; ref?: string 
       return resp ?? { detail: {}, versions: [] }
     },
   })
+}
+
+// triggerBlobDownload 用一个临时 <a download> 触发浏览器把 Blob 存为文件。
+// 抽出独立函数便于 downloadSkillArchive 复用；单测中 downloadSkillArchive 被整体 mock，不会触达此处。
+function triggerBlobDownload(blob: Blob, filename: string): void {
+  const href = URL.createObjectURL(blob)
+  const a = document.createElement('a')
+  a.href = href
+  a.download = filename
+  document.body.appendChild(a)
+  a.click()
+  a.remove()
+  URL.revokeObjectURL(href)
+}
+
+// downloadSkillArchive 下载某 skill 指定版本的归档并触发浏览器保存（仅平台管理员可成功，后端鉴权）。
+// source=platform 取平台技能 tar，source=clawhub 取 ClawHub zip；文件名优先用后端
+// Content-Disposition，缺失时回退到 <ref>-<version>.<tar|zip>。
+export async function downloadSkillArchive(source: string, ref: string, version: string): Promise<void> {
+  const { blob, filename } = await apiDownload('/api/v1/skill-market/download', { source, ref, version })
+  const fallback = `${ref}-${version}.${source === 'clawhub' ? 'zip' : 'tar'}`
+  triggerBlobDownload(blob, filename || fallback)
 }
 
 // useInstallAppSkill 安装一个 skill 到指定实例（POST /api/v1/apps/:appId/skills）。

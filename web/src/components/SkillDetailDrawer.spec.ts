@@ -18,16 +18,26 @@ const detailState = {
   error: ref<Error | null>(null),
 }
 
+// dlMocks 在 vi.mock 提升前创建，承载 downloadSkillArchive 与 useMessage().error 的桩，供断言。
+const dlMocks = vi.hoisted(() => ({
+  downloadSkillArchive: vi.fn(),
+  messageError: vi.fn(),
+}))
+
 // ======================== vi.mock ========================
 vi.mock('@/api/hooks/useSkills', () => ({
   // useSkillDetailQuery 用 detailState 控制，供测试可变注入。
   useSkillDetailQuery: () => detailState,
+  // downloadSkillArchive 桩：断言下载按钮以正确 source/ref/版本调用。
+  downloadSkillArchive: dlMocks.downloadSkillArchive,
 }))
 
 vi.mock('naive-ui', async () => {
   const actual = await vi.importActual<typeof import('naive-ui')>('naive-ui')
   return {
     ...actual,
+    // useMessage 桩：抽屉下载失败时调用 error，单测用 dlMocks.messageError 断言。
+    useMessage: () => ({ error: dlMocks.messageError, success: vi.fn() }),
     // NDrawer/NDrawerContent stub：show=true 时渲染内容，用于断言抽屉内文案。
     NDrawer: { props: ['show'], template: '<div v-if="show" class="n-drawer"><slot /></div>' },
     NDrawerContent: { props: ['title'], template: '<div class="n-drawer-content">{{ title }}<slot /></div>' },
@@ -57,6 +67,9 @@ describe('SkillDetailDrawer', () => {
     detailState.data.value = { detail: {}, versions: [] }
     detailState.isLoading.value = false
     detailState.error.value = null
+    // 重置下载桩。
+    dlMocks.downloadSkillArchive.mockReset()
+    dlMocks.messageError.mockReset()
   })
 
   // ======== 版本列表渲染 ========
@@ -181,6 +194,40 @@ describe('SkillDetailDrawer', () => {
     await btn!.trigger('click')
     // emit pick-version 应携带点击行的版本号。
     expect(wrapper.emitted('pick-version')?.[0]).toEqual(['2.0.0'])
+  })
+
+  // ======== allowDownload 下载（仅平台管理员） ========
+
+  it('allowDownload 时版本行展示「下载」并点击调用 downloadSkillArchive（带 source/ref/版本）', async () => {
+    // 覆盖：平台管理员可在每个版本行下载该版本归档，按来源（platform）与点击行版本号调用。
+    dlMocks.downloadSkillArchive.mockResolvedValue(undefined)
+    detailState.data.value = {
+      detail: { description: 'd' },
+      versions: [{ version: '2.0.0' }, { version: '1.0.0' }],
+    }
+    const wrapper = mountDrawer(
+      { name: 'sv', source: 'platform', source_ref: 'sv', version: '2.0.0' },
+      { allowDownload: true },
+    )
+    await nextTick()
+    // 首个版本行（2.0.0）的「下载」按钮。
+    const btn = wrapper.findAll('button').find((b) => b.text().trim() === '下载')
+    expect(btn).toBeTruthy()
+    await btn!.trigger('click')
+    // 以 source=platform、ref=sv、首行版本 2.0.0 调用下载。
+    expect(dlMocks.downloadSkillArchive).toHaveBeenCalledWith('platform', 'sv', '2.0.0')
+  })
+
+  it('未授权（默认 allowDownload=false）时版本行无「下载」按钮', async () => {
+    // 边界：非平台管理员不传 allowDownload，版本行不应出现「下载」按钮。
+    detailState.data.value = {
+      detail: { description: 'd' },
+      versions: [{ version: '1.0.0' }],
+    }
+    const wrapper = mountDrawer({ name: 'sv', source: 'platform', source_ref: 'sv', version: '1.0.0' })
+    await nextTick()
+    const btn = wrapper.findAll('button').find((b) => b.text().trim() === '下载')
+    expect(btn).toBeUndefined()
   })
 
   it('existingNames 命中时版本行按钮显示「已添加」且禁用', async () => {

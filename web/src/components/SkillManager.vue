@@ -56,8 +56,8 @@
       </n-tab-pane>
     </n-tabs>
 
-    <!-- 已安装 skill 详情抽屉：点已安装名称打开（无版本锁定动作）。 -->
-    <skill-detail-drawer v-model:show="detailOpen" :skill="detailSkill" />
+    <!-- 已安装 skill 详情抽屉：点已安装名称打开（无版本锁定动作）；平台管理员可下载各版本归档。 -->
+    <skill-detail-drawer v-model:show="detailOpen" :skill="detailSkill" :allow-download="auth.isPlatformAdmin" />
   </div>
 </template>
 

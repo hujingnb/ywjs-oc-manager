@@ -57,6 +57,15 @@
                 >
                   {{ existingNames.has(skill.name) ? '已添加' : '添加此版本' }}
                 </n-button>
+                <!-- 平台管理员可下载该版本归档（platform=tar，clawhub=zip）。 -->
+                <n-button
+                  v-if="allowDownload"
+                  size="tiny"
+                  :loading="downloadingVersion === v.version"
+                  @click="onDownload(v.version)"
+                >
+                  下载
+                </n-button>
               </div>
               <div v-if="v.changelog" class="skill-detail-version-log">{{ v.changelog }}</div>
             </li>
@@ -69,9 +78,9 @@
 </template>
 
 <script setup lang="ts">
-import { computed } from 'vue'
-import { NButton, NDrawer, NDrawerContent, NTag } from 'naive-ui'
-import { useSkillDetailQuery } from '@/api/hooks/useSkills'
+import { computed, ref } from 'vue'
+import { NButton, NDrawer, NDrawerContent, NTag, useMessage } from 'naive-ui'
+import { downloadSkillArchive, useSkillDetailQuery } from '@/api/hooks/useSkills'
 
 // SkillDetail 是抽屉展示的数据，已安装行与市场卡片各取所需字段填充。
 export interface SkillDetail {
@@ -91,10 +100,31 @@ const props = withDefaults(
     allowVersionPick?: boolean // 版本场景=true，版本行显示「添加此版本」
     actionPending?: boolean
     existingNames?: Set<string> // 已配置/已安装名集合，命中则禁用添加
+    allowDownload?: boolean // 平台管理员=true，版本行显示「下载」按钮（platform/clawhub 来源）
   }>(),
-  { allowVersionPick: false, actionPending: false, existingNames: () => new Set<string>() },
+  { allowVersionPick: false, actionPending: false, existingNames: () => new Set<string>(), allowDownload: false },
 )
 defineEmits<{ 'update:show': [boolean]; 'pick-version': [string] }>()
+
+const message = useMessage()
+// downloadingVersion 记录正在下载的版本号，用于该行按钮显示 loading；null 表示无下载进行中。
+const downloadingVersion = ref<string | null>(null)
+
+// onDownload 下载指定版本的归档并触发浏览器保存；按来源（platform/clawhub）由后端返回 tar/zip。
+// 失败（无权/网络/不存在）时 toast 错误，不抛到组件外。
+async function onDownload(version: string) {
+  const source = props.skill?.source
+  const ref = props.skill?.source_ref
+  if (!source || !ref) return
+  downloadingVersion.value = version
+  try {
+    await downloadSkillArchive(source, ref, version)
+  } catch (e) {
+    message.error(e instanceof Error ? e.message : '下载失败')
+  } finally {
+    downloadingVersion.value = null
+  }
+}
 
 // hasUpstream：仅 platform/clawhub 来源有上游富详情/版本（builtin/self_created 无来源标识）。
 const hasUpstream = computed(() => {

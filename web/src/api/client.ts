@@ -162,6 +162,61 @@ export async function apiRequest<T>(path: string, options: RequestOptions = {}):
   return payload as T
 }
 
+// apiDownload 以二进制方式 GET 一个接口并返回 Blob 与从 Content-Disposition 解析出的文件名，
+// 用于 skill 归档下载等非 JSON 响应。自动附加 Authorization；401 时与 apiRequest 一致清会话并跳登录。
+// 非 2xx 时按 JSON/文本解析错误体并抛出 ApiError（与 apiRequest 同形态），供调用方 toast。
+export async function apiDownload(
+  path: string,
+  query?: RequestOptions['query'],
+): Promise<{ blob: Blob; filename: string | null }> {
+  const headers: Record<string, string> = {}
+  const token = getStoredAccessToken()
+  if (token) {
+    headers.Authorization = `Bearer ${token}`
+  }
+  const url = buildUrl(path, query)
+  const response = await fetch(url, { method: 'GET', headers })
+  if (!response.ok) {
+    const contentType = response.headers.get('content-type') ?? ''
+    const payload: unknown = contentType.includes('application/json')
+      ? await response.json().catch(() => undefined)
+      : await response.text().catch(() => undefined)
+    const error: ApiError = Object.assign(new Error(extractErrorMessage(payload, response.status)), {
+      status: response.status,
+      body: payload,
+    })
+    // 401：与 apiRequest 一致清 token 并触发跳登录，避免下载按钮悄悄失败。
+    if (response.status === 401) {
+      clearStoredTokens()
+      if (unauthorizedHandler) {
+        unauthorizedHandler(path)
+      }
+    }
+    throw error
+  }
+  const blob = await response.blob()
+  return { blob, filename: parseContentDispositionFilename(response.headers.get('content-disposition')) }
+}
+
+// parseContentDispositionFilename 从 Content-Disposition 头解析 filename（支持普通 filename 与 filename*）。
+// 解析不到时返回 null，由调用方回退到自定义文件名。
+function parseContentDispositionFilename(header: string | null): string | null {
+  if (!header) {
+    return null
+  }
+  // 优先 RFC 5987 的 filename*（可能带 UTF-8'' 前缀），其次普通 filename。
+  const star = header.match(/filename\*=(?:UTF-8'')?["']?([^"';]+)["']?/i)
+  if (star?.[1]) {
+    try {
+      return decodeURIComponent(star[1])
+    } catch {
+      return star[1]
+    }
+  }
+  const plain = header.match(/filename=["']?([^"';]+)["']?/i)
+  return plain?.[1] ?? null
+}
+
 function buildUrl(path: string, query?: RequestOptions['query']): string {
   if (!query) {
     return path

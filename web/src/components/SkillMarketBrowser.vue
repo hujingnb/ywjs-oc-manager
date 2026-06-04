@@ -73,6 +73,7 @@
       :allow-version-pick="allowVersionPick"
       :action-pending="actionPending"
       :existing-names="existingNames"
+      :allow-download="auth.isPlatformAdmin"
       @pick-version="onPickVersion"
     />
   </div>
@@ -83,7 +84,11 @@ import { computed, onBeforeUnmount, ref, watch } from 'vue'
 import { NButton, NCard, NInput, NTag } from 'naive-ui'
 import type { SkillEntry } from '@/api'
 import { useSkillMarketQuery } from '@/api/hooks/useSkills'
+import { useAuthStore } from '@/stores/auth'
 import SkillDetailDrawer, { type SkillDetail } from './SkillDetailDrawer.vue'
+
+// auth 用于判断是否平台管理员，控制详情抽屉「下载」按钮的可见性。
+const auth = useAuthStore()
 
 const props = withDefaults(
   defineProps<{

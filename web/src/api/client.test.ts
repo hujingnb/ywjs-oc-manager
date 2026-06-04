@@ -3,6 +3,7 @@
 import { afterEach, describe, expect, it, vi } from 'vitest'
 
 import {
+  apiDownload,
   apiRequest,
   clearStoredTokens,
   getStoredAccessToken,
@@ -92,5 +93,59 @@ describe('apiRequest', () => {
     expect(getStoredAccessToken()).toBeNull()
     expect(getStoredRefreshToken()).toBeNull()
     expect(unauthorizedHandler).toHaveBeenCalledWith('/api/v1/auth/password')
+  })
+})
+
+describe('apiDownload', () => {
+  afterEach(() => {
+    vi.restoreAllMocks()
+    setUnauthorizedHandler(null)
+    clearStoredTokens()
+  })
+
+  // 覆盖正常下载：返回 Blob，并从 Content-Disposition 解析出文件名，请求带 Authorization。
+  it('成功返回 Blob 并解析 Content-Disposition 文件名，附带 Authorization', async () => {
+    setStoredTokens({ accessToken: 'tok', refreshToken: 'r' })
+    const fetchSpy = vi.spyOn(globalThis, 'fetch').mockResolvedValue(
+      new Response('TAR-BYTES', {
+        status: 200,
+        headers: { 'content-disposition': 'attachment; filename="weather-1.0.tar"' },
+      }),
+    )
+
+    const { blob, filename } = await apiDownload('/api/v1/skill-market/download', {
+      source: 'platform',
+      ref: 'weather',
+      version: '1.0',
+    })
+
+    // 文件名取自 Content-Disposition。
+    expect(filename).toBe('weather-1.0.tar')
+    // Blob 内容与响应体一致。
+    expect(await blob.text()).toBe('TAR-BYTES')
+    // 请求 URL 带上 query，且携带 Authorization 头。
+    const [url, init] = fetchSpy.mock.calls[0]
+    expect(String(url)).toBe('/api/v1/skill-market/download?source=platform&ref=weather&version=1.0')
+    expect((init?.headers as Record<string, string>).Authorization).toBe('Bearer tok')
+  })
+
+  // 边界：响应无 Content-Disposition 时 filename 为 null（调用方回退到自定义名）。
+  it('无 Content-Disposition 时 filename 为 null', async () => {
+    vi.spyOn(globalThis, 'fetch').mockResolvedValue(new Response('x', { status: 200 }))
+    const { filename } = await apiDownload('/api/v1/skill-market/download', { source: 'platform', ref: 'a', version: '1' })
+    expect(filename).toBeNull()
+  })
+
+  // 异常：非 2xx（403）抛出带后端文案的 ApiError。
+  it('403 时抛出带后端文案的错误', async () => {
+    vi.spyOn(globalThis, 'fetch').mockResolvedValue(
+      new Response(JSON.stringify({ code: 'FORBIDDEN', error: '无权下载该 skill 归档' }), {
+        status: 403,
+        headers: { 'content-type': 'application/json' },
+      }),
+    )
+    await expect(
+      apiDownload('/api/v1/skill-market/download', { source: 'platform', ref: 'a', version: '1' }),
+    ).rejects.toThrow('无权下载该 skill 归档')
   })
 })

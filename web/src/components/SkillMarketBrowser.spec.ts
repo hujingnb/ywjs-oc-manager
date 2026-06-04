@@ -43,6 +43,12 @@ class MockIntersectionObserver {
 vi.stubGlobal('IntersectionObserver', MockIntersectionObserver)
 
 // ======================== vi.mock ========================
+// auth store mock：SkillMarketBrowser 用 auth.isPlatformAdmin 决定详情抽屉「下载」按钮可见性。
+// 抽屉已 stub，此处仅需让 useAuthStore() 可被调用，固定返回非平台管理员。
+vi.mock('@/stores/auth', () => ({
+  useAuthStore: () => ({ isPlatformAdmin: false }),
+}))
+
 vi.mock('@/api/hooks/useSkills', () => ({
   // 把扁平 marketState.data（{ entries }）包装成 useInfiniteQuery 的 { pages } 形状。
   useSkillMarketQuery: () => ({
