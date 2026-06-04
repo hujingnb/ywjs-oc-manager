@@ -205,6 +205,52 @@ func (q *Queries) CreateRAGFlowIndustryDatasetMapping(ctx context.Context, arg C
 	return err
 }
 
+const createRAGFlowIndustryDocument = `-- name: CreateRAGFlowIndustryDocument :exec
+INSERT INTO ragflow_documents (
+    id, dataset_id, scope_type, org_id, app_id, industry_knowledge_base_id,
+    ragflow_document_id, name, size_bytes, mime_type, suffix, parse_status,
+    progress, last_error, created_by
+) VALUES (
+    ?, ?, 'industry', NULL, NULL, ?,
+    ?, ?, ?, ?,
+    ?, ?, ?, ?, ?
+)
+`
+
+type CreateRAGFlowIndustryDocumentParams struct {
+	ID                      string      `db:"id" json:"id"`
+	DatasetID               string      `db:"dataset_id" json:"dataset_id"`
+	IndustryKnowledgeBaseID null.String `db:"industry_knowledge_base_id" json:"industry_knowledge_base_id"`
+	RagflowDocumentID       string      `db:"ragflow_document_id" json:"ragflow_document_id"`
+	Name                    string      `db:"name" json:"name"`
+	SizeBytes               int64       `db:"size_bytes" json:"size_bytes"`
+	MimeType                null.String `db:"mime_type" json:"mime_type"`
+	Suffix                  null.String `db:"suffix" json:"suffix"`
+	ParseStatus             string      `db:"parse_status" json:"parse_status"`
+	Progress                int32       `db:"progress" json:"progress"`
+	LastError               null.String `db:"last_error" json:"last_error"`
+	CreatedBy               string      `db:"created_by" json:"created_by"`
+}
+
+// 缓存行业知识库 RAGFlow document 元数据；行业 scope 不归属企业或实例，必须写入行业库外键。
+func (q *Queries) CreateRAGFlowIndustryDocument(ctx context.Context, arg CreateRAGFlowIndustryDocumentParams) error {
+	_, err := q.db.ExecContext(ctx, createRAGFlowIndustryDocument,
+		arg.ID,
+		arg.DatasetID,
+		arg.IndustryKnowledgeBaseID,
+		arg.RagflowDocumentID,
+		arg.Name,
+		arg.SizeBytes,
+		arg.MimeType,
+		arg.Suffix,
+		arg.ParseStatus,
+		arg.Progress,
+		arg.LastError,
+		arg.CreatedBy,
+	)
+	return err
+}
+
 const createRAGFlowOrgDatasetMapping = `-- name: CreateRAGFlowOrgDatasetMapping :exec
 INSERT IGNORE INTO ragflow_datasets (
     id, scope_type, org_id, app_id, ragflow_dataset_id, name, status, last_error, create_claim_token

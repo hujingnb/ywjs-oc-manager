@@ -66,6 +66,8 @@ type KnowledgeStore interface {
 	MarkRAGFlowDatasetFailed(ctx context.Context, arg sqlc.MarkRAGFlowDatasetFailedParams) error
 	// CreateRAGFlowDocument 保存 document 元数据（:exec），写入后通过 GetRAGFlowDocument 读回。
 	CreateRAGFlowDocument(ctx context.Context, arg sqlc.CreateRAGFlowDocumentParams) error
+	// CreateRAGFlowIndustryDocument 保存行业库 document 元数据，确保行业外键列被写入。
+	CreateRAGFlowIndustryDocument(ctx context.Context, arg sqlc.CreateRAGFlowIndustryDocumentParams) error
 	ListRAGFlowDocumentsByScope(ctx context.Context, arg sqlc.ListRAGFlowDocumentsByScopeParams) ([]sqlc.RagflowDocument, error)
 	CountRAGFlowDocumentsByScope(ctx context.Context, arg sqlc.CountRAGFlowDocumentsByScopeParams) (int64, error)
 	// SumRAGFlowDocumentsSizeByScope 统计当前知识库累计占用，包含所有解析状态。
@@ -75,6 +77,34 @@ type KnowledgeStore interface {
 	UpdateRAGFlowDocumentParseStatus(ctx context.Context, arg sqlc.UpdateRAGFlowDocumentParseStatusParams) error
 	DeleteRAGFlowDocumentMapping(ctx context.Context, id string) error
 	DeleteRAGFlowDatasetMapping(ctx context.Context, id string) error
+	// CreateIndustryKnowledgeBase 创建平台级行业知识库。
+	CreateIndustryKnowledgeBase(ctx context.Context, arg sqlc.CreateIndustryKnowledgeBaseParams) error
+	// GetIndustryKnowledgeBase 按 ID 读取未删除行业知识库。
+	GetIndustryKnowledgeBase(ctx context.Context, id string) (sqlc.IndustryKnowledgeBasis, error)
+	// GetIndustryKnowledgeBaseByName 按名称读取未删除行业知识库。
+	GetIndustryKnowledgeBaseByName(ctx context.Context, name string) (sqlc.IndustryKnowledgeBasis, error)
+	// ListIndustryKnowledgeBases 分页列出行业知识库并带文件数。
+	ListIndustryKnowledgeBases(ctx context.Context, arg sqlc.ListIndustryKnowledgeBasesParams) ([]sqlc.ListIndustryKnowledgeBasesRow, error)
+	// CountIndustryKnowledgeBases 统计行业知识库分页总数。
+	CountIndustryKnowledgeBases(ctx context.Context, arg sqlc.CountIndustryKnowledgeBasesParams) (int64, error)
+	// RenameIndustryKnowledgeBase 重命名未删除行业知识库。
+	RenameIndustryKnowledgeBase(ctx context.Context, arg sqlc.RenameIndustryKnowledgeBaseParams) error
+	// SoftDeleteIndustryKnowledgeBase 软删除行业知识库。
+	SoftDeleteIndustryKnowledgeBase(ctx context.Context, id string) error
+	// CountAssistantVersionsUsingIndustryKnowledgeBase 统计仍引用行业库的未删除助手版本。
+	CountAssistantVersionsUsingIndustryKnowledgeBase(ctx context.Context, industryKnowledgeBaseID string) (int64, error)
+	// CreateRAGFlowIndustryDatasetMapping 创建行业库 dataset 映射。
+	CreateRAGFlowIndustryDatasetMapping(ctx context.Context, arg sqlc.CreateRAGFlowIndustryDatasetMappingParams) error
+	// GetRAGFlowIndustryDataset 按行业库 ID 读取 dataset 映射。
+	GetRAGFlowIndustryDataset(ctx context.Context, industryKnowledgeBaseID null.String) (sqlc.RagflowDataset, error)
+	// ListRAGFlowIndustryDocuments 分页列出行业库文件。
+	ListRAGFlowIndustryDocuments(ctx context.Context, arg sqlc.ListRAGFlowIndustryDocumentsParams) ([]sqlc.RagflowDocument, error)
+	// CountRAGFlowIndustryDocuments 统计行业库文件总数。
+	CountRAGFlowIndustryDocuments(ctx context.Context, arg sqlc.CountRAGFlowIndustryDocumentsParams) (int64, error)
+	// GetRAGFlowIndustryDocumentByName 按行业库和文件名查找本地 document 映射。
+	GetRAGFlowIndustryDocumentByName(ctx context.Context, arg sqlc.GetRAGFlowIndustryDocumentByNameParams) (sqlc.RagflowDocument, error)
+	// ListIndustryKnowledgeBasesByAssistantVersion 列出指定助手版本关联的行业库。
+	ListIndustryKnowledgeBasesByAssistantVersion(ctx context.Context, versionID string) ([]sqlc.IndustryKnowledgeBasis, error)
 }
 
 // KnowledgeDatasetProvisioner 抽象组织 / 实例生命周期中预创建 RAGFlow dataset 的能力。
@@ -136,11 +166,13 @@ type KnowledgeSearchResult struct {
 
 // KnowledgeSearchHit 是一次 retrieval 命中的文本块。
 type KnowledgeSearchHit struct {
-	Scope        string  `json:"scope"`
-	DocumentID   string  `json:"document_id"`
-	DocumentName string  `json:"document_name"`
-	Content      string  `json:"content"`
-	Similarity   float64 `json:"similarity"`
+	Scope                     string  `json:"scope"`
+	DocumentID                string  `json:"document_id"`
+	DocumentName              string  `json:"document_name"`
+	Content                   string  `json:"content"`
+	Similarity                float64 `json:"similarity"`
+	IndustryKnowledgeBaseID   string  `json:"industry_knowledge_base_id,omitempty"`
+	IndustryKnowledgeBaseName string  `json:"industry_knowledge_base_name,omitempty"`
 }
 
 // ListOrg 列出企业知识库文件。企业成员只读，企业管理员可写。
@@ -176,7 +208,7 @@ func (s *KnowledgeService) SaveOrgFile(ctx context.Context, principal auth.Princ
 	if err != nil {
 		return KnowledgeDocumentResult{}, err
 	}
-	return s.uploadToDataset(ctx, dataset, "", principal.UserID, filename, content, size)
+	return s.uploadToDataset(ctx, knowledgeUploadTarget{Dataset: dataset, CreatedBy: principal.UserID}, filename, content, size)
 }
 
 // OpenOrgFile 打开企业知识库文件流供下载。
@@ -249,7 +281,7 @@ func (s *KnowledgeService) SaveAppFile(ctx context.Context, principal auth.Princ
 	if err != nil {
 		return KnowledgeDocumentResult{}, err
 	}
-	return s.uploadToDataset(ctx, dataset, app.ID, principal.UserID, filename, content, size)
+	return s.uploadToDataset(ctx, knowledgeUploadTarget{Dataset: dataset, AppID: app.ID, CreatedBy: principal.UserID}, filename, content, size)
 }
 
 // OpenAppFile 打开实例知识库文件流供下载。
@@ -339,6 +371,28 @@ func (s *KnowledgeService) RuntimeSearch(ctx context.Context, appToken, question
 	hits := make([]KnowledgeSearchHit, 0, len(appChunks)+len(orgChunks))
 	hits = append(hits, searchHitsFromChunks("app", appChunks)...)
 	hits = append(hits, searchHitsFromChunks("org", orgChunks)...)
+	if app.VersionID.Valid {
+		industryBases, err := s.store.ListIndustryKnowledgeBasesByAssistantVersion(ctx, app.VersionID.String)
+		if err != nil {
+			return KnowledgeSearchResult{}, fmt.Errorf("查询助手版本行业知识库失败: %w", err)
+		}
+		for _, base := range industryBases {
+			dataset, err := s.getIndustryDataset(ctx, base)
+			if err != nil {
+				return KnowledgeSearchResult{}, err
+			}
+			remoteID, err := requireRemoteDatasetID(dataset)
+			if err != nil {
+				return KnowledgeSearchResult{}, err
+			}
+			// 每个行业库独立检索一次，保留各自 top_k，避免多个行业库合并后互相挤占命中。
+			chunks, err := s.ragflowClient().Retrieve(ctx, []string{remoteID}, question, topK)
+			if err != nil {
+				return KnowledgeSearchResult{}, fmt.Errorf("RAGFlow 检索行业知识库失败: %w", err)
+			}
+			hits = append(hits, searchHitsFromIndustryChunks(base, chunks)...)
+		}
+	}
 	return KnowledgeSearchResult{Results: hits}, nil
 }
 
@@ -356,19 +410,19 @@ func (s *KnowledgeService) RuntimeAddFile(ctx context.Context, appToken, filenam
 	if err != nil {
 		return KnowledgeDocumentResult{}, err
 	}
-	return s.uploadToDataset(ctx, dataset, app.ID, "runtime:"+app.ID, filename, content, size)
+	return s.uploadToDataset(ctx, knowledgeUploadTarget{Dataset: dataset, AppID: app.ID, CreatedBy: "runtime:" + app.ID}, filename, content, size)
 }
 
 // EnsureOrgDataset 确保企业知识库存在可用的 RAGFlow dataset。
 func (s *KnowledgeService) EnsureOrgDataset(ctx context.Context, org sqlc.Organization) (sqlc.RagflowDataset, error) {
 	name := buildRAGFlowDatasetName("org", org.Code, org.Name, org.ID)
-	return s.ensureDataset(ctx, "org", org.ID, "", name)
+	return s.ensureDataset(ctx, "org", org.ID, "", "", name)
 }
 
 // EnsureAppDataset 确保实例知识库存在可用的 RAGFlow dataset。
 func (s *KnowledgeService) EnsureAppDataset(ctx context.Context, app sqlc.App) (sqlc.RagflowDataset, error) {
 	name := buildRAGFlowDatasetName("app", app.Name, "", app.ID)
-	return s.ensureDataset(ctx, "app", app.OrgID, app.ID, name)
+	return s.ensureDataset(ctx, "app", app.OrgID, app.ID, "", name)
 }
 
 // DeleteAppDataset 删除实例私有知识库的远端 RAGFlow dataset 和本地映射。
@@ -503,10 +557,19 @@ func formatKnowledgeBytes(value int64) string {
 	return fmt.Sprintf("%dB", value)
 }
 
-func (s *KnowledgeService) uploadToDataset(ctx context.Context, dataset sqlc.RagflowDataset, appID, createdBy, filename string, content io.Reader, size int64) (KnowledgeDocumentResult, error) {
+// knowledgeUploadTarget 描述 document 写入的业务作用域，避免 org/app/industry 通过位置参数混用。
+type knowledgeUploadTarget struct {
+	Dataset                 sqlc.RagflowDataset
+	AppID                   string
+	IndustryKnowledgeBaseID string
+	CreatedBy               string
+}
+
+func (s *KnowledgeService) uploadToDataset(ctx context.Context, target knowledgeUploadTarget, filename string, content io.Reader, size int64) (KnowledgeDocumentResult, error) {
 	if filename = strings.TrimSpace(filename); filename == "" {
 		return KnowledgeDocumentResult{}, fmt.Errorf("filename 不能为空")
 	}
+	dataset := target.Dataset
 	remoteDatasetID, err := requireRemoteDatasetID(dataset)
 	if err != nil {
 		return KnowledgeDocumentResult{}, err
@@ -518,35 +581,57 @@ func (s *KnowledgeService) uploadToDataset(ctx context.Context, dataset sqlc.Rag
 	if remote.Size > 0 {
 		size = remote.Size
 	}
-	if createdBy == "" {
-		createdBy = "unknown"
+	if target.CreatedBy == "" {
+		target.CreatedBy = "unknown"
 	}
 	suffix := strings.TrimPrefix(path.Ext(filename), ".")
 	mimeType := mime.TypeByExtension(path.Ext(filename))
-	// CreateRAGFlowDocument 为 :exec；预先生成 ID，写入后通过 GetRAGFlowDocument 读回。
+	// CreateRAGFlowDocument / CreateRAGFlowIndustryDocument 均为 :exec；预先生成 ID，写入后通过 GetRAGFlowDocument 读回。
 	docID := newUUID()
 	// AppID 为 null.String；仅在 appID 非空时填充（org 级别上传时留 NULL）。
 	appIDNull := null.String{}
-	if appID != "" {
-		appIDNull = null.StringFrom(appID)
+	if target.AppID != "" {
+		appIDNull = null.StringFrom(target.AppID)
 	}
-	arg := sqlc.CreateRAGFlowDocumentParams{
-		ID:                docID,
-		DatasetID:         dataset.ID,
-		ScopeType:         dataset.ScopeType,
-		OrgID:             dataset.OrgID,
-		AppID:             appIDNull,
-		RagflowDocumentID: remote.ID,
-		Name:              path.Base(filename),
-		SizeBytes:         size,
-		MimeType:          nullStr(mimeType),
-		Suffix:            nullStr(suffix),
-		ParseStatus:       normalizeRAGFlowRun(remote.Run),
-		Progress:          progressForStatus(normalizeRAGFlowRun(remote.Run)),
-		CreatedBy:         createdBy,
-	}
-	if err := s.store.CreateRAGFlowDocument(ctx, arg); err != nil {
-		return KnowledgeDocumentResult{}, fmt.Errorf("保存知识库文件元数据失败: %w", err)
+	parseStatus := normalizeRAGFlowRun(remote.Run)
+	if target.IndustryKnowledgeBaseID != "" {
+		arg := sqlc.CreateRAGFlowIndustryDocumentParams{
+			ID:                      docID,
+			DatasetID:               dataset.ID,
+			IndustryKnowledgeBaseID: null.StringFrom(target.IndustryKnowledgeBaseID),
+			RagflowDocumentID:       remote.ID,
+			Name:                    path.Base(filename),
+			SizeBytes:               size,
+			MimeType:                nullStr(mimeType),
+			Suffix:                  nullStr(suffix),
+			ParseStatus:             parseStatus,
+			Progress:                progressForStatus(parseStatus),
+			CreatedBy:               target.CreatedBy,
+		}
+		if err := s.store.CreateRAGFlowIndustryDocument(ctx, arg); err != nil {
+			// 行业库文件名有唯一约束；本地落库失败时清理刚上传的远端文件，避免覆盖并发下留下孤儿 document。
+			_ = s.ragflowClient().DeleteDocuments(ctx, remoteDatasetID, []string{remote.ID})
+			return KnowledgeDocumentResult{}, fmt.Errorf("保存行业知识库文件元数据失败: %w", err)
+		}
+	} else {
+		arg := sqlc.CreateRAGFlowDocumentParams{
+			ID:                docID,
+			DatasetID:         dataset.ID,
+			ScopeType:         dataset.ScopeType,
+			OrgID:             dataset.OrgID,
+			AppID:             appIDNull,
+			RagflowDocumentID: remote.ID,
+			Name:              path.Base(filename),
+			SizeBytes:         size,
+			MimeType:          nullStr(mimeType),
+			Suffix:            nullStr(suffix),
+			ParseStatus:       parseStatus,
+			Progress:          progressForStatus(parseStatus),
+			CreatedBy:         target.CreatedBy,
+		}
+		if err := s.store.CreateRAGFlowDocument(ctx, arg); err != nil {
+			return KnowledgeDocumentResult{}, fmt.Errorf("保存知识库文件元数据失败: %w", err)
+		}
 	}
 	row, err := s.store.GetRAGFlowDocument(ctx, docID)
 	if err != nil {
@@ -643,6 +728,15 @@ func searchHitsFromChunks(scope string, chunks []ragflow.RetrievalChunk) []Knowl
 	return hits
 }
 
+func searchHitsFromIndustryChunks(base sqlc.IndustryKnowledgeBasis, chunks []ragflow.RetrievalChunk) []KnowledgeSearchHit {
+	hits := searchHitsFromChunks("industry", chunks)
+	for i := range hits {
+		hits[i].IndustryKnowledgeBaseID = base.ID
+		hits[i].IndustryKnowledgeBaseName = base.Name
+	}
+	return hits
+}
+
 func (s *KnowledgeService) getDocumentForScope(ctx context.Context, documentID, scope string, orgID, appID string) (sqlc.RagflowDocument, sqlc.RagflowDataset, error) {
 	document, err := s.store.GetRAGFlowDocument(ctx, documentID)
 	if errors.Is(err, sql.ErrNoRows) {
@@ -651,7 +745,14 @@ func (s *KnowledgeService) getDocumentForScope(ctx context.Context, documentID, 
 	if err != nil {
 		return sqlc.RagflowDocument{}, sqlc.RagflowDataset{}, fmt.Errorf("查询知识库文件失败: %w", err)
 	}
-	if document.ScopeType != scope || strOrEmpty(document.OrgID) != orgID {
+	if document.ScopeType != scope {
+		return sqlc.RagflowDocument{}, sqlc.RagflowDataset{}, ErrNotFound
+	}
+	if scope == "industry" {
+		if strOrEmpty(document.IndustryKnowledgeBaseID) != appID {
+			return sqlc.RagflowDocument{}, sqlc.RagflowDataset{}, ErrNotFound
+		}
+	} else if strOrEmpty(document.OrgID) != orgID {
 		return sqlc.RagflowDocument{}, sqlc.RagflowDataset{}, ErrNotFound
 	}
 	if scope == "app" && strOrEmpty(document.AppID) != appID {
@@ -671,6 +772,12 @@ func (s *KnowledgeService) datasetByDocument(ctx context.Context, document sqlc.
 	case "app":
 		// AppID 是 null.String，取其字符串值传递给 getAppDataset。
 		return s.getAppDataset(ctx, strOrEmpty(document.AppID))
+	case "industry":
+		base, err := s.getIndustryKnowledgeBase(ctx, strOrEmpty(document.IndustryKnowledgeBaseID))
+		if err != nil {
+			return sqlc.RagflowDataset{}, err
+		}
+		return s.getIndustryDataset(ctx, base)
 	default:
 		return sqlc.RagflowDataset{}, ErrNotFound
 	}
@@ -771,7 +878,7 @@ func (s *KnowledgeService) getAppDataset(ctx context.Context, appID string) (sql
 	return dataset, nil
 }
 
-func (s *KnowledgeService) ensureDataset(ctx context.Context, scope string, orgID, appID string, name string) (sqlc.RagflowDataset, error) {
+func (s *KnowledgeService) ensureDataset(ctx context.Context, scope string, orgID, appID, industryID string, name string) (sqlc.RagflowDataset, error) {
 	if s.store == nil {
 		return sqlc.RagflowDataset{}, ErrKnowledgeMissing
 	}
@@ -779,10 +886,15 @@ func (s *KnowledgeService) ensureDataset(ctx context.Context, scope string, orgI
 		existing sqlc.RagflowDataset
 		err      error
 	)
-	if scope == "org" {
+	switch scope {
+	case "org":
 		existing, err = s.store.GetRAGFlowOrgDataset(ctx, null.StringFrom(orgID))
-	} else {
+	case "app":
 		existing, err = s.store.GetRAGFlowAppDataset(ctx, null.StringFrom(appID))
+	case "industry":
+		existing, err = s.store.GetRAGFlowIndustryDataset(ctx, null.StringFrom(industryID))
+	default:
+		return sqlc.RagflowDataset{}, ErrNotFound
 	}
 	if err == nil {
 		if existing.Status == "active" && existing.RagflowDatasetID.Valid && strings.TrimSpace(existing.RagflowDatasetID.String) != "" {
@@ -800,14 +912,15 @@ func (s *KnowledgeService) ensureDataset(ctx context.Context, scope string, orgI
 	// CreateRAGFlowOrgDatasetMapping / CreateRAGFlowAppDatasetMapping 为 :exec；
 	// 写入后按 orgID/appID 重新读回（并发冲突时也读回已有行）。
 	newID := newUUID()
-	if scope == "org" {
+	switch scope {
+	case "org":
 		err = s.store.CreateRAGFlowOrgDatasetMapping(ctx, sqlc.CreateRAGFlowOrgDatasetMappingParams{
 			ID:               newID,
 			OrgID:            null.StringFrom(orgID),
 			Name:             name,
 			CreateClaimToken: null.StringFrom(claimToken),
 		})
-	} else {
+	case "app":
 		err = s.store.CreateRAGFlowAppDatasetMapping(ctx, sqlc.CreateRAGFlowAppDatasetMappingParams{
 			ID:               newID,
 			OrgID:            null.StringFrom(orgID),
@@ -815,13 +928,20 @@ func (s *KnowledgeService) ensureDataset(ctx context.Context, scope string, orgI
 			Name:             name,
 			CreateClaimToken: null.StringFrom(claimToken),
 		})
+	case "industry":
+		err = s.store.CreateRAGFlowIndustryDatasetMapping(ctx, sqlc.CreateRAGFlowIndustryDatasetMappingParams{
+			ID:                      newID,
+			IndustryKnowledgeBaseID: null.StringFrom(industryID),
+			Name:                    name,
+			CreateClaimToken:        null.StringFrom(claimToken),
+		})
 	}
 	// 并发唯一索引冲突时 MySQL 忽略写入（INSERT IGNORE），读回已有行继续处理。
 	if err != nil {
 		return sqlc.RagflowDataset{}, fmt.Errorf("创建 RAGFlow dataset 映射失败: %w", err)
 	}
 	// 读回刚写入（或并发已有）的行。
-	dataset, err := s.readDatasetAfterCreate(ctx, scope, orgID, appID, newID)
+	dataset, err := s.readDatasetAfterCreate(ctx, scope, orgID, appID, industryID, newID)
 	if err != nil {
 		return sqlc.RagflowDataset{}, err
 	}
@@ -833,22 +953,27 @@ func (s *KnowledgeService) ensureDataset(ctx context.Context, scope string, orgI
 
 // readDatasetAfterCreate 在 INSERT IGNORE 后读回实际写入（或并发已有）的 dataset 行。
 // 优先按 newID 读取本次写入；若并发写入导致 ID 不存在，则按 orgID/appID 读取已有行。
-func (s *KnowledgeService) readDatasetAfterCreate(ctx context.Context, scope, orgID, appID, newID string) (sqlc.RagflowDataset, error) {
+func (s *KnowledgeService) readDatasetAfterCreate(ctx context.Context, scope, orgID, appID, industryID, newID string) (sqlc.RagflowDataset, error) {
 	if dataset, err := s.store.GetRAGFlowDataset(ctx, newID); err == nil {
 		return dataset, nil
 	}
-	return s.datasetAfterCreateConflict(ctx, scope, orgID, appID)
+	return s.datasetAfterCreateConflict(ctx, scope, orgID, appID, industryID)
 }
 
-func (s *KnowledgeService) datasetAfterCreateConflict(ctx context.Context, scope string, orgID, appID string) (sqlc.RagflowDataset, error) {
+func (s *KnowledgeService) datasetAfterCreateConflict(ctx context.Context, scope string, orgID, appID, industryID string) (sqlc.RagflowDataset, error) {
 	var (
 		existing sqlc.RagflowDataset
 		err      error
 	)
-	if scope == "org" {
+	switch scope {
+	case "org":
 		existing, err = s.store.GetRAGFlowOrgDataset(ctx, null.StringFrom(orgID))
-	} else {
+	case "app":
 		existing, err = s.store.GetRAGFlowAppDataset(ctx, null.StringFrom(appID))
+	case "industry":
+		existing, err = s.store.GetRAGFlowIndustryDataset(ctx, null.StringFrom(industryID))
+	default:
+		return sqlc.RagflowDataset{}, ErrNotFound
 	}
 	if err != nil {
 		return sqlc.RagflowDataset{}, fmt.Errorf("读取并发创建的 RAGFlow dataset 映射失败: %w", err)
@@ -934,7 +1059,7 @@ func (s *KnowledgeService) createRemoteDataset(ctx context.Context, dataset sqlc
 	// 再读回获胜者映射（或返回"创建中"），避免用本进程的 remote.ID 覆盖获胜者状态。
 	if !active.RagflowDatasetID.Valid || active.RagflowDatasetID.String != remote.ID {
 		_ = s.ragflowClient().DeleteDatasets(ctx, []string{remote.ID})
-		return s.datasetAfterCreateConflict(ctx, dataset.ScopeType, strOrEmpty(dataset.OrgID), dataset.AppID.String)
+		return s.datasetAfterCreateConflict(ctx, dataset.ScopeType, strOrEmpty(dataset.OrgID), dataset.AppID.String, strOrEmpty(dataset.IndustryKnowledgeBaseID))
 	}
 	return active, nil
 }

@@ -21,15 +21,17 @@ import (
 )
 
 const (
-	testKnowledgeOrg       = "00000000-0000-0000-0000-000000000e01"
-	testKnowledgeOrg2      = "00000000-0000-0000-0000-000000000e02"
-	testKnowledgeApp       = "00000000-0000-0000-0000-000000000e03"
-	testKnowledgeOwner     = "00000000-0000-0000-0000-000000000e04"
-	testKnowledgeDocument  = "00000000-0000-0000-0000-000000000e05"
-	testRuntimeToken       = "runtime-token"
-	testRuntimeTokenHash   = "af4a4b5c"
-	testRemoteOrgDatasetID = "org-ds"
-	testRemoteAppDatasetID = "app-ds"
+	testKnowledgeOrg            = "00000000-0000-0000-0000-000000000e01"
+	testKnowledgeOrg2           = "00000000-0000-0000-0000-000000000e02"
+	testKnowledgeApp            = "00000000-0000-0000-0000-000000000e03"
+	testKnowledgeOwner          = "00000000-0000-0000-0000-000000000e04"
+	testKnowledgeDocument       = "00000000-0000-0000-0000-000000000e05"
+	testRuntimeToken            = "runtime-token"
+	testRuntimeTokenHash        = "af4a4b5c"
+	testRemoteOrgDatasetID      = "org-ds"
+	testRemoteAppDatasetID      = "app-ds"
+	testIndustryKnowledgeBaseID = "00000000-0000-0000-0000-000000000f01"
+	testRemoteIndustryDatasetID = "industry-ds"
 )
 
 // TestRAGFlowKnowledgeListOrgUsesManagerPermission 验证企业知识库读取只由 manager principal 判权，RAGFlow 不参与授权。
@@ -195,6 +197,79 @@ func TestRuntimeSearchOrgRetrieveErrorUsesEnterpriseCopy(t *testing.T) {
 
 	_, err := svc.RuntimeSearch(context.Background(), testRuntimeToken, "退款政策", 8)
 	require.ErrorContains(t, err, "RAGFlow 检索企业知识库失败")
+}
+
+// TestCreateIndustryKnowledgeBasePlatformOnly 验证行业库创建只允许平台管理员，且名称会去除首尾空白。
+func TestCreateIndustryKnowledgeBasePlatformOnly(t *testing.T) {
+	svc, store, _ := newRAGFlowKnowledgeTestService(t)
+
+	created, err := svc.CreateIndustryKnowledgeBase(context.Background(), auth.Principal{UserID: "u1", Role: domain.UserRolePlatformAdmin}, "  保险  ")
+	require.NoError(t, err)
+	assert.Equal(t, "保险", created.Name)
+	assert.Contains(t, store.industryBases, created.ID)
+
+	_, err = svc.CreateIndustryKnowledgeBase(context.Background(), auth.Principal{Role: domain.UserRoleOrgAdmin, OrgID: testKnowledgeOrg}, "金融")
+	require.ErrorIs(t, err, ErrKnowledgeForbidden)
+}
+
+// TestExternalUploadCreatesIndustryAndOverwritesSameName 验证外部上传会按行业名称自动创建行业库，并用同名覆盖语义替换旧文件。
+func TestExternalUploadCreatesIndustryAndOverwritesSameName(t *testing.T) {
+	svc, store, rf := newRAGFlowKnowledgeTestService(t)
+	store.industryBases = map[string]sqlc.IndustryKnowledgeBasis{}
+	store.missingIndustryDataset = true
+	rf.createDatasetResult = ragflow.Dataset{ID: testRemoteIndustryDatasetID, Name: "保险"}
+	oldDoc := testDocument(t, "industry", "policy.pdf", store.industryDataset.ID)
+	oldDoc.OrgID = null.String{}
+	oldDoc.AppID = null.String{}
+	oldDoc.IndustryKnowledgeBaseID = null.StringFrom(testIndustryKnowledgeBaseID)
+	store.docs["old-doc"] = oldDoc
+
+	doc, err := svc.ExternalUploadIndustryFile(context.Background(), "保险", "policy.pdf", strings.NewReader("new"), 3)
+	require.NoError(t, err)
+
+	assert.Equal(t, "policy.pdf", doc.Name)
+	require.Len(t, rf.deleteCalls, 1)
+	assert.Equal(t, []string{"remote-doc-1"}, rf.deleteCalls[0].documentIDs)
+	require.Len(t, rf.uploadCalls, 1)
+	assert.Equal(t, testRemoteIndustryDatasetID, rf.uploadCalls[0].datasetID)
+}
+
+// TestRuntimeSearchRetrievesEachIndustryWithTopK 验证 runtime 检索会按 app、org、每个行业库分别调用 RAGFlow，行业库各自使用 top_k。
+func TestRuntimeSearchRetrievesEachIndustryWithTopK(t *testing.T) {
+	svc, store, rf := newRAGFlowKnowledgeTestService(t)
+	app := store.apps[testKnowledgeApp]
+	app.VersionID = null.StringFrom("ver-1")
+	store.apps[testKnowledgeApp] = app
+	store.appsByToken[HashAppRuntimeToken(testRuntimeToken)] = app
+	store.versionIndustryBases["ver-1"] = []sqlc.IndustryKnowledgeBasis{
+		{ID: "industry-a", Name: "保险"},
+		{ID: "industry-b", Name: "银行"},
+	}
+	store.industryDatasets["industry-a"] = industryDataset("industry-a", "remote-a")
+	store.industryDatasets["industry-b"] = industryDataset("industry-b", "remote-b")
+	rf.retrieveChunksByDataset = map[string][]ragflow.RetrievalChunk{
+		// 行业库 A 返回一个命中，用于断言来源行业库 ID/name 会写入结果。
+		"remote-a": {{DocumentID: "doc-a", DocumentName: "a.md", DatasetID: "remote-a", Content: "理赔 A", Similarity: 0.8}},
+		// 行业库 B 返回一个命中，用于断言每个行业库命中都保留各自来源。
+		"remote-b": {{DocumentID: "doc-b", DocumentName: "b.md", DatasetID: "remote-b", Content: "理赔 B", Similarity: 0.7}},
+	}
+
+	result, err := svc.RuntimeSearch(context.Background(), testRuntimeToken, "理赔", 6)
+	require.NoError(t, err)
+
+	require.Len(t, rf.retrieveCalls, 4)
+	assert.Equal(t, []string{testRemoteAppDatasetID}, rf.retrieveCalls[0].datasetIDs)
+	assert.Equal(t, []string{testRemoteOrgDatasetID}, rf.retrieveCalls[1].datasetIDs)
+	assert.Equal(t, []string{"remote-a"}, rf.retrieveCalls[2].datasetIDs)
+	assert.Equal(t, []string{"remote-b"}, rf.retrieveCalls[3].datasetIDs)
+	assert.Equal(t, int32(6), rf.retrieveCalls[2].topK)
+	assert.Equal(t, int32(6), rf.retrieveCalls[3].topK)
+	require.Len(t, result.Results, 2)
+	assert.Equal(t, "industry", result.Results[0].Scope)
+	assert.Equal(t, "industry-a", result.Results[0].IndustryKnowledgeBaseID)
+	assert.Equal(t, "保险", result.Results[0].IndustryKnowledgeBaseName)
+	assert.Equal(t, "industry-b", result.Results[1].IndustryKnowledgeBaseID)
+	assert.Equal(t, "银行", result.Results[1].IndustryKnowledgeBaseName)
 }
 
 // TestRAGFlowKnowledgeListReturnsCachedStatus 验证列表请求只读取本地缓存，不向 RAGFlow 拉取最新解析状态。
@@ -489,45 +564,71 @@ func newFakeKnowledgeStore(t *testing.T) *fakeKnowledgeStore {
 		Status:           "active",
 		UpdatedAt:        time.Now(),
 	}
+	industryBase := sqlc.IndustryKnowledgeBasis{
+		ID:        testIndustryKnowledgeBaseID,
+		Name:      "保险",
+		CreatedBy: "u-platform",
+	}
+	industryDataset := sqlc.RagflowDataset{
+		ID:                      mustParseUUID("00000000-0000-0000-0000-000000000d03"),
+		ScopeType:               "industry",
+		IndustryKnowledgeBaseID: null.StringFrom(testIndustryKnowledgeBaseID),
+		RagflowDatasetID:        null.StringFrom(testRemoteIndustryDatasetID),
+		Name:                    "oc-industry",
+		Status:                  "active",
+		UpdatedAt:               time.Now(),
+	}
 	return &fakeKnowledgeStore{
-		apps:         map[string]sqlc.App{testKnowledgeApp: app},
-		appsByToken:  map[string]sqlc.App{HashAppRuntimeToken(testRuntimeToken): app, testRuntimeTokenHash: app},
-		org:          org,
-		orgDataset:   orgDataset,
-		appDataset:   appDataset,
-		docs:         map[string]sqlc.RagflowDocument{},
-		nextDocument: "00000000-0000-0000-0000-000000000e06",
-		now:          time.Date(2026, 5, 26, 8, 0, 0, 0, time.UTC),
+		apps:                 map[string]sqlc.App{testKnowledgeApp: app},
+		appsByToken:          map[string]sqlc.App{HashAppRuntimeToken(testRuntimeToken): app, testRuntimeTokenHash: app},
+		org:                  org,
+		orgDataset:           orgDataset,
+		appDataset:           appDataset,
+		industryBases:        map[string]sqlc.IndustryKnowledgeBasis{testIndustryKnowledgeBaseID: industryBase},
+		industryDataset:      industryDataset,
+		industryDatasets:     map[string]sqlc.RagflowDataset{testIndustryKnowledgeBaseID: industryDataset},
+		versionIndustryBases: map[string][]sqlc.IndustryKnowledgeBasis{},
+		docs:                 map[string]sqlc.RagflowDocument{},
+		nextDocument:         "00000000-0000-0000-0000-000000000e06",
+		now:                  time.Date(2026, 5, 26, 8, 0, 0, 0, time.UTC),
 	}
 }
 
 type fakeKnowledgeStore struct {
-	apps                  map[string]sqlc.App
-	appsByToken           map[string]sqlc.App
-	org                   sqlc.Organization
-	orgDataset            sqlc.RagflowDataset
-	appDataset            sqlc.RagflowDataset
-	missingOrgDataset     bool
-	missingAppDataset     bool
-	missingOrgDatasetOnce bool
-	missingAppDatasetOnce bool
-	getOrganizationErr    error
-	getOrgDatasetErr      error
-	createOrgDatasetErr   error
-	createAppDatasetErr   error
-	claimDatasetErr       error
-	setActiveErr          error
-	setActiveLosesClaim   bool
-	docs                  map[string]sqlc.RagflowDocument
-	createdDatasets       []createdDatasetCall
-	claimedDatasets       []sqlc.ClaimRAGFlowDatasetCreationParams
-	activatedDatasets     []sqlc.SetRAGFlowDatasetActiveParams
-	failedDatasets        []sqlc.MarkRAGFlowDatasetFailedParams
-	createdDocs           []sqlc.CreateRAGFlowDocumentParams
-	deletedDatasetID      string
-	getOrgDatasetCalls    int
-	nextDocument          string
-	now                   time.Time
+	apps                   map[string]sqlc.App
+	appsByToken            map[string]sqlc.App
+	org                    sqlc.Organization
+	orgDataset             sqlc.RagflowDataset
+	appDataset             sqlc.RagflowDataset
+	industryBases          map[string]sqlc.IndustryKnowledgeBasis
+	industryDataset        sqlc.RagflowDataset
+	industryDatasets       map[string]sqlc.RagflowDataset
+	versionIndustryBases   map[string][]sqlc.IndustryKnowledgeBasis
+	missingOrgDataset      bool
+	missingAppDataset      bool
+	missingIndustryDataset bool
+	missingOrgDatasetOnce  bool
+	missingAppDatasetOnce  bool
+	getOrganizationErr     error
+	getOrgDatasetErr       error
+	createOrgDatasetErr    error
+	createAppDatasetErr    error
+	claimDatasetErr        error
+	setActiveErr           error
+	setActiveLosesClaim    bool
+	docs                   map[string]sqlc.RagflowDocument
+	createdDatasets        []createdDatasetCall
+	claimedDatasets        []sqlc.ClaimRAGFlowDatasetCreationParams
+	activatedDatasets      []sqlc.SetRAGFlowDatasetActiveParams
+	failedDatasets         []sqlc.MarkRAGFlowDatasetFailedParams
+	createdDocs            []sqlc.CreateRAGFlowDocumentParams
+	createdIndustryDocs    []sqlc.CreateRAGFlowIndustryDocumentParams
+	deletedDatasetID       string
+	deletedIndustryBaseID  string
+	industryInUseCount     int64
+	getOrgDatasetCalls     int
+	nextDocument           string
+	now                    time.Time
 }
 
 // createdDatasetCall 记录 CreateRAGFlowOrgDatasetMapping / CreateRAGFlowAppDatasetMapping 调用参数。
@@ -569,6 +670,112 @@ func (s *fakeKnowledgeStore) GetAppByRuntimeTokenHash(_ context.Context, runtime
 	return app, nil
 }
 
+func (s *fakeKnowledgeStore) CreateIndustryKnowledgeBase(_ context.Context, arg sqlc.CreateIndustryKnowledgeBaseParams) error {
+	id := arg.ID
+	// 该 fake 场景中旧行业文档保留了默认行业库 ID；复用该 ID 便于测试覆盖同名覆盖语义。
+	if arg.Name == "保险" && len(s.industryBases) == 0 && s.industryDataset.IndustryKnowledgeBaseID.Valid {
+		id = s.industryDataset.IndustryKnowledgeBaseID.String
+	}
+	row := sqlc.IndustryKnowledgeBasis{
+		ID:        id,
+		Name:      arg.Name,
+		CreatedBy: arg.CreatedBy,
+		CreatedAt: s.now,
+		UpdatedAt: s.now,
+	}
+	s.industryBases[id] = row
+	if id != arg.ID {
+		s.industryBases[arg.ID] = row
+	}
+	return nil
+}
+
+func (s *fakeKnowledgeStore) GetIndustryKnowledgeBase(_ context.Context, id string) (sqlc.IndustryKnowledgeBasis, error) {
+	row, ok := s.industryBases[id]
+	if !ok || row.DeletedAt.Valid {
+		return sqlc.IndustryKnowledgeBasis{}, sql.ErrNoRows
+	}
+	return row, nil
+}
+
+func (s *fakeKnowledgeStore) GetIndustryKnowledgeBaseByName(_ context.Context, name string) (sqlc.IndustryKnowledgeBasis, error) {
+	for _, row := range s.industryBases {
+		if row.Name == name && !row.DeletedAt.Valid {
+			return row, nil
+		}
+	}
+	return sqlc.IndustryKnowledgeBasis{}, sql.ErrNoRows
+}
+
+func (s *fakeKnowledgeStore) ListIndustryKnowledgeBases(_ context.Context, arg sqlc.ListIndustryKnowledgeBasesParams) ([]sqlc.ListIndustryKnowledgeBasesRow, error) {
+	items := make([]sqlc.ListIndustryKnowledgeBasesRow, 0, len(s.industryBases))
+	seen := map[string]struct{}{}
+	for _, base := range s.industryBases {
+		if base.DeletedAt.Valid {
+			continue
+		}
+		if _, ok := seen[base.ID]; ok {
+			continue
+		}
+		seen[base.ID] = struct{}{}
+		if keyword, ok := arg.Keyword.(string); ok && keyword != "" && !strings.Contains(base.Name, keyword) {
+			continue
+		}
+		var documentCount int64
+		for _, doc := range s.docs {
+			if doc.ScopeType == "industry" && doc.IndustryKnowledgeBaseID.String == base.ID {
+				documentCount++
+			}
+		}
+		items = append(items, sqlc.ListIndustryKnowledgeBasesRow{
+			ID:            base.ID,
+			Name:          base.Name,
+			CreatedBy:     base.CreatedBy,
+			CreatedAt:     base.CreatedAt,
+			UpdatedAt:     base.UpdatedAt,
+			DeletedAt:     base.DeletedAt,
+			DocumentCount: documentCount,
+		})
+	}
+	return items, nil
+}
+
+func (s *fakeKnowledgeStore) CountIndustryKnowledgeBases(ctx context.Context, arg sqlc.CountIndustryKnowledgeBasesParams) (int64, error) {
+	items, err := s.ListIndustryKnowledgeBases(ctx, sqlc.ListIndustryKnowledgeBasesParams{Keyword: arg.Keyword})
+	return int64(len(items)), err
+}
+
+func (s *fakeKnowledgeStore) RenameIndustryKnowledgeBase(_ context.Context, arg sqlc.RenameIndustryKnowledgeBaseParams) error {
+	row, ok := s.industryBases[arg.ID]
+	if !ok || row.DeletedAt.Valid {
+		return sql.ErrNoRows
+	}
+	row.Name = arg.Name
+	row.UpdatedAt = s.now
+	s.industryBases[arg.ID] = row
+	return nil
+}
+
+func (s *fakeKnowledgeStore) SoftDeleteIndustryKnowledgeBase(_ context.Context, id string) error {
+	row, ok := s.industryBases[id]
+	if !ok {
+		return sql.ErrNoRows
+	}
+	row.DeletedAt = null.TimeFrom(s.now)
+	row.UpdatedAt = s.now
+	s.industryBases[id] = row
+	s.deletedIndustryBaseID = id
+	return nil
+}
+
+func (s *fakeKnowledgeStore) CountAssistantVersionsUsingIndustryKnowledgeBase(_ context.Context, _ string) (int64, error) {
+	return s.industryInUseCount, nil
+}
+
+func (s *fakeKnowledgeStore) ListIndustryKnowledgeBasesByAssistantVersion(_ context.Context, versionID string) ([]sqlc.IndustryKnowledgeBasis, error) {
+	return append([]sqlc.IndustryKnowledgeBasis(nil), s.versionIndustryBases[versionID]...), nil
+}
+
 func (s *fakeKnowledgeStore) GetRAGFlowOrgDataset(_ context.Context, orgID null.String) (sqlc.RagflowDataset, error) {
 	s.getOrgDatasetCalls++
 	if s.getOrgDatasetErr != nil {
@@ -598,6 +805,19 @@ func (s *fakeKnowledgeStore) GetRAGFlowAppDataset(_ context.Context, appID null.
 		return sqlc.RagflowDataset{}, sql.ErrNoRows
 	}
 	return s.appDataset, nil
+}
+
+func (s *fakeKnowledgeStore) GetRAGFlowIndustryDataset(_ context.Context, industryKnowledgeBaseID null.String) (sqlc.RagflowDataset, error) {
+	if s.missingIndustryDataset {
+		return sqlc.RagflowDataset{}, sql.ErrNoRows
+	}
+	if row, ok := s.industryDatasets[industryKnowledgeBaseID.String]; ok {
+		return row, nil
+	}
+	if s.industryDataset.IndustryKnowledgeBaseID.String == industryKnowledgeBaseID.String {
+		return s.industryDataset, nil
+	}
+	return sqlc.RagflowDataset{}, sql.ErrNoRows
 }
 
 // CreateRAGFlowOrgDatasetMapping 为 :exec（INSERT IGNORE）；
@@ -668,6 +888,30 @@ func (s *fakeKnowledgeStore) CreateRAGFlowAppDatasetMapping(_ context.Context, a
 	return nil
 }
 
+func (s *fakeKnowledgeStore) CreateRAGFlowIndustryDatasetMapping(_ context.Context, arg sqlc.CreateRAGFlowIndustryDatasetMappingParams) error {
+	call := createdDatasetCall{
+		ScopeType:        "industry",
+		Name:             arg.Name,
+		Status:           "creating",
+		CreateClaimToken: arg.CreateClaimToken.String,
+		ID:               arg.ID,
+	}
+	s.createdDatasets = append(s.createdDatasets, call)
+	row := sqlc.RagflowDataset{
+		ID:                      arg.ID,
+		ScopeType:               "industry",
+		IndustryKnowledgeBaseID: arg.IndustryKnowledgeBaseID,
+		Name:                    arg.Name,
+		Status:                  "creating",
+		CreateClaimToken:        arg.CreateClaimToken,
+		UpdatedAt:               s.now,
+	}
+	s.industryDataset = row
+	s.industryDatasets[arg.IndustryKnowledgeBaseID.String] = row
+	s.missingIndustryDataset = false
+	return nil
+}
+
 // ClaimRAGFlowDatasetCreation 为 :exec；stub 根据条件更新 claim token。
 // 成功时把 orgDataset/appDataset 的 status 设为 creating，claim token 更新为新值。
 // claimDatasetErr = sql.ErrNoRows 模拟"0 行更新"（其他进程持有锁）：返回 nil（:exec 不报错）
@@ -694,6 +938,17 @@ func (s *fakeKnowledgeStore) ClaimRAGFlowDatasetCreation(_ context.Context, arg 
 		// 条件不满足：0 行更新，:exec 返回 nil，dataset 不变。
 		return nil
 	}
+	if industryID, industryDataset, ok := s.industryDatasetByID(arg.ID); ok {
+		if industryDataset.Status == "failed" || (industryDataset.Status == "creating" && industryDataset.UpdatedAt.Before(staleBefore)) {
+			industryDataset.Status = "creating"
+			industryDataset.LastError = null.String{}
+			industryDataset.CreateClaimToken = arg.CreateClaimToken
+			industryDataset.UpdatedAt = s.now
+			s.setIndustryDataset(industryID, industryDataset)
+			return nil
+		}
+		return nil
+	}
 	if s.appDataset.Status == "failed" || (s.appDataset.Status == "creating" && s.appDataset.UpdatedAt.Before(staleBefore)) {
 		s.appDataset.Status = "creating"
 		s.appDataset.LastError = null.String{}
@@ -713,6 +968,9 @@ func (s *fakeKnowledgeStore) GetRAGFlowDataset(_ context.Context, id string) (sq
 	if s.appDataset.ID == id {
 		return s.appDataset, nil
 	}
+	if _, row, ok := s.industryDatasetByID(id); ok {
+		return row, nil
+	}
 	return sqlc.RagflowDataset{}, sql.ErrNoRows
 }
 
@@ -730,6 +988,14 @@ func (s *fakeKnowledgeStore) SetRAGFlowDatasetActive(_ context.Context, arg sqlc
 		if s.orgDataset.ID != arg.ID {
 			target = &s.appDataset
 		}
+		if industryID, industryDataset, ok := s.industryDatasetByID(arg.ID); ok {
+			industryDataset.Status = "creating"
+			industryDataset.CreateClaimToken = null.StringFrom("winner-claim-token")
+			industryDataset.RagflowDatasetID = null.String{}
+			industryDataset.UpdatedAt = time.Now()
+			s.setIndustryDataset(industryID, industryDataset)
+			return nil
+		}
 		target.Status = "creating"
 		target.CreateClaimToken = null.StringFrom("winner-claim-token")
 		target.RagflowDatasetID = null.String{}
@@ -744,6 +1010,17 @@ func (s *fakeKnowledgeStore) SetRAGFlowDatasetActive(_ context.Context, arg sqlc
 		s.orgDataset.Name = arg.Name
 		s.orgDataset.Status = "active"
 		s.orgDataset.CreateClaimToken = null.String{}
+		return nil
+	}
+	if industryID, industryDataset, ok := s.industryDatasetByID(arg.ID); ok {
+		if industryDataset.CreateClaimToken.String != arg.CreateClaimToken.String {
+			return sql.ErrNoRows
+		}
+		industryDataset.RagflowDatasetID = arg.RagflowDatasetID
+		industryDataset.Name = arg.Name
+		industryDataset.Status = "active"
+		industryDataset.CreateClaimToken = null.String{}
+		s.setIndustryDataset(industryID, industryDataset)
 		return nil
 	}
 	if s.appDataset.CreateClaimToken.String != arg.CreateClaimToken.String {
@@ -766,6 +1043,16 @@ func (s *fakeKnowledgeStore) MarkRAGFlowDatasetFailed(_ context.Context, arg sql
 		s.orgDataset.Status = "failed"
 		s.orgDataset.LastError = arg.LastError
 		s.orgDataset.CreateClaimToken = null.String{}
+		return nil
+	}
+	if industryID, industryDataset, ok := s.industryDatasetByID(arg.ID); ok {
+		if industryDataset.CreateClaimToken.String != arg.CreateClaimToken.String {
+			return sql.ErrNoRows
+		}
+		industryDataset.Status = "failed"
+		industryDataset.LastError = arg.LastError
+		industryDataset.CreateClaimToken = null.String{}
+		s.setIndustryDataset(industryID, industryDataset)
 		return nil
 	}
 	if s.appDataset.CreateClaimToken.String != arg.CreateClaimToken.String {
@@ -810,6 +1097,38 @@ func (s *fakeKnowledgeStore) CreateRAGFlowDocument(_ context.Context, arg sqlc.C
 	return nil
 }
 
+func (s *fakeKnowledgeStore) CreateRAGFlowIndustryDocument(_ context.Context, arg sqlc.CreateRAGFlowIndustryDocumentParams) error {
+	s.createdIndustryDocs = append(s.createdIndustryDocs, arg)
+	id := arg.ID
+	if arg.RagflowDocumentID == "remote-doc-1" {
+		id = s.nextDocument
+	}
+	row := sqlc.RagflowDocument{
+		ID:                      id,
+		DatasetID:               arg.DatasetID,
+		ScopeType:               "industry",
+		OrgID:                   null.String{},
+		AppID:                   null.String{},
+		IndustryKnowledgeBaseID: arg.IndustryKnowledgeBaseID,
+		RagflowDocumentID:       arg.RagflowDocumentID,
+		Name:                    arg.Name,
+		SizeBytes:               arg.SizeBytes,
+		MimeType:                arg.MimeType,
+		Suffix:                  arg.Suffix,
+		ParseStatus:             arg.ParseStatus,
+		Progress:                arg.Progress,
+		LastError:               arg.LastError,
+		CreatedBy:               arg.CreatedBy,
+		CreatedAt:               s.now,
+		UpdatedAt:               s.now,
+	}
+	s.docs[arg.ID] = row
+	if id != arg.ID {
+		s.docs[id] = row
+	}
+	return nil
+}
+
 func (s *fakeKnowledgeStore) ListRAGFlowDocumentsByScope(_ context.Context, arg sqlc.ListRAGFlowDocumentsByScopeParams) ([]sqlc.RagflowDocument, error) {
 	items := make([]sqlc.RagflowDocument, 0, len(s.docs))
 	for _, doc := range s.docs {
@@ -831,6 +1150,41 @@ func (s *fakeKnowledgeStore) CountRAGFlowDocumentsByScope(ctx context.Context, a
 		AppID:     arg.AppID,
 	})
 	return int64(len(items)), err
+}
+
+func (s *fakeKnowledgeStore) ListRAGFlowIndustryDocuments(_ context.Context, arg sqlc.ListRAGFlowIndustryDocumentsParams) ([]sqlc.RagflowDocument, error) {
+	items := make([]sqlc.RagflowDocument, 0, len(s.docs))
+	for _, doc := range s.docs {
+		if doc.ScopeType != "industry" || doc.IndustryKnowledgeBaseID.String != arg.IndustryKnowledgeBaseID.String {
+			continue
+		}
+		if arg.ParseStatus.Valid && doc.ParseStatus != arg.ParseStatus.String {
+			continue
+		}
+		if keyword, ok := arg.Keywords.(string); ok && keyword != "" && !strings.Contains(doc.Name, keyword) {
+			continue
+		}
+		items = append(items, doc)
+	}
+	return items, nil
+}
+
+func (s *fakeKnowledgeStore) CountRAGFlowIndustryDocuments(ctx context.Context, arg sqlc.CountRAGFlowIndustryDocumentsParams) (int64, error) {
+	items, err := s.ListRAGFlowIndustryDocuments(ctx, sqlc.ListRAGFlowIndustryDocumentsParams{
+		IndustryKnowledgeBaseID: arg.IndustryKnowledgeBaseID,
+		ParseStatus:             arg.ParseStatus,
+		Keywords:                arg.Keywords,
+	})
+	return int64(len(items)), err
+}
+
+func (s *fakeKnowledgeStore) GetRAGFlowIndustryDocumentByName(_ context.Context, arg sqlc.GetRAGFlowIndustryDocumentByNameParams) (sqlc.RagflowDocument, error) {
+	for _, doc := range s.docs {
+		if doc.ScopeType == "industry" && doc.IndustryKnowledgeBaseID.String == arg.IndustryKnowledgeBaseID.String && doc.Name == arg.Name {
+			return doc, nil
+		}
+	}
+	return sqlc.RagflowDocument{}, sql.ErrNoRows
 }
 
 // SumRAGFlowDocumentsSizeByScope 汇总本地 document 大小，模拟数据库按 scope/org/app 聚合容量。
@@ -874,12 +1228,42 @@ func (s *fakeKnowledgeStore) UpdateRAGFlowDocumentParseStatus(_ context.Context,
 
 func (s *fakeKnowledgeStore) DeleteRAGFlowDocumentMapping(_ context.Context, id string) error {
 	delete(s.docs, id)
+	for key, doc := range s.docs {
+		if doc.ID == id {
+			delete(s.docs, key)
+		}
+	}
 	return nil
 }
 
 func (s *fakeKnowledgeStore) DeleteRAGFlowDatasetMapping(_ context.Context, id string) error {
 	s.deletedDatasetID = id
+	if industryID, _, ok := s.industryDatasetByID(id); ok {
+		delete(s.industryDatasets, industryID)
+		if s.industryDataset.ID == id {
+			s.industryDataset = sqlc.RagflowDataset{}
+		}
+	}
 	return nil
+}
+
+func (s *fakeKnowledgeStore) industryDatasetByID(id string) (string, sqlc.RagflowDataset, bool) {
+	for industryID, row := range s.industryDatasets {
+		if row.ID == id {
+			return industryID, row, true
+		}
+	}
+	if s.industryDataset.ID == id && s.industryDataset.IndustryKnowledgeBaseID.Valid {
+		return s.industryDataset.IndustryKnowledgeBaseID.String, s.industryDataset, true
+	}
+	return "", sqlc.RagflowDataset{}, false
+}
+
+func (s *fakeKnowledgeStore) setIndustryDataset(industryID string, row sqlc.RagflowDataset) {
+	s.industryDatasets[industryID] = row
+	if s.industryDataset.ID == row.ID || s.industryDataset.ID == "" || industryID == testIndustryKnowledgeBaseID {
+		s.industryDataset = row
+	}
 }
 
 type fakeRAGFlowKnowledgeClient struct {
@@ -1020,4 +1404,17 @@ func orgKnowledgeAdmin() auth.Principal {
 
 func appOwnerPrincipal() auth.Principal {
 	return auth.Principal{Role: domain.UserRoleOrgMember, OrgID: testKnowledgeOrg, UserID: testKnowledgeOwner}
+}
+
+// industryDataset 构造行业库 dataset 测试行，避免每个 runtime 检索用例重复拼 null 字段。
+func industryDataset(industryID, remoteID string) sqlc.RagflowDataset {
+	return sqlc.RagflowDataset{
+		ID:                      newUUID(),
+		ScopeType:               "industry",
+		IndustryKnowledgeBaseID: null.StringFrom(industryID),
+		RagflowDatasetID:        null.StringFrom(remoteID),
+		Name:                    "industry-" + industryID,
+		Status:                  "active",
+		UpdatedAt:               time.Now(),
+	}
 }

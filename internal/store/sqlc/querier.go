@@ -65,6 +65,8 @@ type Querier interface {
 	CreateRAGFlowDocument(ctx context.Context, arg CreateRAGFlowDocumentParams) error
 	// 懒创建行业知识库 dataset 映射；行业库不归属企业，因此 org/app 字段固定为 NULL。
 	CreateRAGFlowIndustryDatasetMapping(ctx context.Context, arg CreateRAGFlowIndustryDatasetMappingParams) error
+	// 缓存行业知识库 RAGFlow document 元数据；行业 scope 不归属企业或实例，必须写入行业库外键。
+	CreateRAGFlowIndustryDocument(ctx context.Context, arg CreateRAGFlowIndustryDocumentParams) error
 	// 懒创建组织级 dataset 映射；并发首创命中唯一索引时忽略，由 service 读取已有映射且不重复创建远端 dataset。
 	CreateRAGFlowOrgDatasetMapping(ctx context.Context, arg CreateRAGFlowOrgDatasetMappingParams) error
 	CreateRechargeRecord(ctx context.Context, arg CreateRechargeRecordParams) error

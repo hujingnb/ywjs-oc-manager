@@ -84,6 +84,18 @@ INSERT INTO ragflow_documents (
     ?, ?, ?, ?, ?, ?, ?
 );
 
+-- name: CreateRAGFlowIndustryDocument :exec
+-- 缓存行业知识库 RAGFlow document 元数据；行业 scope 不归属企业或实例，必须写入行业库外键。
+INSERT INTO ragflow_documents (
+    id, dataset_id, scope_type, org_id, app_id, industry_knowledge_base_id,
+    ragflow_document_id, name, size_bytes, mime_type, suffix, parse_status,
+    progress, last_error, created_by
+) VALUES (
+    sqlc.arg(id), sqlc.arg(dataset_id), 'industry', NULL, NULL, sqlc.arg(industry_knowledge_base_id),
+    sqlc.arg(ragflow_document_id), sqlc.arg(name), sqlc.arg(size_bytes), sqlc.arg(mime_type),
+    sqlc.arg(suffix), sqlc.arg(parse_status), sqlc.arg(progress), sqlc.arg(last_error), sqlc.arg(created_by)
+);
+
 -- name: GetRAGFlowDocument :one
 -- 按 manager 本地 ID 读取 document 缓存，供下载和删除前做权限校验。
 SELECT *
