@@ -12,6 +12,12 @@ const deleteVersion = vi.hoisted(() => vi.fn())
 const addSkill = vi.hoisted(() => vi.fn())
 const deleteSkill = vi.hoisted(() => vi.fn())
 
+// SkillMarketBrowser stub：避免渲染组件内部的 useSkillMarketQuery/useSkillDetailQuery，
+// 仅提供一个带 name 标识的占位元素，便于 findComponent({ name: 'SkillMarketBrowser' }) 查找。
+vi.mock('@/components/SkillMarketBrowser.vue', () => ({
+  default: { name: 'SkillMarketBrowser', template: '<div class="stub-market-browser" />' },
+}))
+
 // 含 skill 的样例版本，skills 字段包含 source/version 新字段。
 const sampleSkill = { name: 'weather', source: 'platform', source_ref: 'weather', version: '1.0.0' }
 const sampleVersion: AssistantVersionDTO = {
@@ -47,17 +53,9 @@ vi.mock('@/api/hooks/useOrganizations', () => ({
   }),
 }))
 
-// 平台库 skill 列表 mock：供「从库选」下拉选项使用。
-vi.mock('@/api/hooks/useSkills', () => ({
-  usePlatformSkillsQuery: () => ({
-    data: ref([
-      { id: 'ps-1', name: 'weather', version: '1.0.0' },
-      { id: 'ps-2', name: 'code-runner', version: '2.0.0' },
-    ]),
-    isLoading: ref(false),
-    isError: ref(false),
-  }),
-}))
+// useSkills mock：SkillMarketBrowser 已被 stub，此处 mock 保留兜底以防其它组件路径引入。
+// 无需提供 usePlatformSkillsQuery（Task 7 移除了平台库下拉），亦无需 useSkillMarketQuery（browser 已 stub）。
+vi.mock('@/api/hooks/useSkills', () => ({}))
 
 // useMessage stub：测试里不需要弹窗。
 vi.mock('naive-ui', async () => {
@@ -254,50 +252,47 @@ describe('AssistantVersionsPage', () => {
     expect(wrapper.text()).toContain('v1.0.0')
   })
 
-  // 编辑态可以从平台库选 skill 并点击「添加」调用添加接口，成功后列表刷新。
-  it('编辑态从平台库选 skill 并添加', async () => {
+  // 编辑态从市场添加 skill：SkillMarketBrowser 触发 action（clawhub + 指定版本），调 AddSkillFromLibrary 接口并带正确 payload。
+  // Task 7 改造后，平台库下拉已替换为 SkillMarketBrowser，此用例覆盖新添加流程。
+  it('编辑态从市场添加 skill 调 AddSkillFromLibrary 并刷新列表', async () => {
+    // 模拟添加接口返回更新后的版本，skills 包含新增的 clawhub skill。
     addSkill.mockResolvedValue({
       ...sampleVersion,
       skills: [
         sampleSkill,
-        { name: 'code-runner', source: 'platform', source_ref: 'code-runner', version: '2.0.0' },
+        { name: 'Skill Vetter', source: 'clawhub', source_ref: 'sv', version: '1.0.0' },
       ],
     })
+    // mountInEditMode：挂载页面并打开 ver-1 的编辑态。
     const wrapper = mountPage()
-    // 打开编辑态。
     await wrapper.findAll('button').find(b => b.text() === '编辑')!.trigger('click')
     await nextTick()
 
-    // 找到平台库选择下拉框（选项为 "weather|1.0.0" 和 "code-runner|2.0.0"）并选中 code-runner。
-    const allSelects = wrapper.findAll('select')
-    // 最后一个 select 是 skill 选择器（在智能路由 8 个槽后）
-    const skillSelect = allSelects[allSelects.length - 1]
-    await skillSelect.setValue('code-runner|2.0.0')
-    await nextTick()
+    // 编辑态应渲染 SkillMarketBrowser（stub）。
+    const browser = wrapper.findComponent({ name: 'SkillMarketBrowser' })
+    expect(browser.exists()).toBe(true)
 
-    // 点击「添加」按钮调用添加接口。
-    const addBtn = wrapper.findAll('button').find(b => b.text() === '添加')
-    expect(addBtn).toBeTruthy()
-    await addBtn!.trigger('click')
+    // 模拟 SkillMarketBrowser 触发 action 事件（clawhub 来源、指定版本）。
+    browser.vm.$emit('action', { source: 'clawhub', source_ref: 'sv', name: 'Skill Vetter', version: '1.0.0' })
     await flushPromises()
 
-    // 必须用正确参数（source: 'platform', source_ref 与 version 从组合键中拆分）调用 addSkill。
+    // addSkill（即 useAddVersionSkill().mutateAsync）必须以正确 payload 被调用。
     expect(addSkill).toHaveBeenCalledWith({
       id: 'ver-1',
-      input: { source: 'platform', source_ref: 'code-runner', version: '2.0.0' },
+      input: { source: 'clawhub', source_ref: 'sv', name: 'Skill Vetter', version: '1.0.0' },
     })
-    // 添加成功后列表应显示新增 skill 的名称。
-    expect(wrapper.text()).toContain('code-runner')
+    // 添加成功后列表应展示新增 skill 的名称。
+    expect(wrapper.text()).toContain('Skill Vetter')
   })
 
-  // 新建态不显示「添加」按钮和平台库下拉框（无版本 ID 无法即时添加）。
-  it('新建态 skill 区只提示保存后可配置，不显示添加按钮', async () => {
+  // 新建态不显示市场浏览器（无版本 ID 无法即时添加 skill）。
+  it('新建态 skill 区只提示保存后可配置，不显示市场浏览器', async () => {
     const wrapper = mountPage()
     await wrapper.findAll('button').find(b => b.text().includes('新增版本'))!.trigger('click')
     await nextTick()
-    // 新建态不应出现「添加」按钮。
-    const addBtn = wrapper.findAll('button').find(b => b.text() === '添加')
-    expect(addBtn).toBeFalsy()
+    // 新建态不应渲染 SkillMarketBrowser（editingId 为 null 时 v-if 为 false）。
+    const browser = wrapper.findComponent({ name: 'SkillMarketBrowser' })
+    expect(browser.exists()).toBe(false)
     // 应提示用户保存后才可配置 skill。
     expect(wrapper.text()).toContain('保存版本后可配置 skill')
   })
