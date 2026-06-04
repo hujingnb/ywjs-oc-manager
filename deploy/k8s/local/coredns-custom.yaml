@@ -1,0 +1,25 @@
+# 本地 k3d CoreDNS 外网解析补丁 —— 仅本地联调用。
+#
+# 背景：k3d 集群 CoreDNS 默认 `forward . /etc/resolv.conf`，上游经节点 172.19.0.1
+# 落到宿主 DNS，对集群内发起的外网域名查询返回 SERVFAIL（实测 clawhubcn.com 直解失败）。
+# 但 pod 本身能路由到外网 IP（实测 TCP 直连 8.159.143.89:443 通），缺的只是 DNS。
+#
+# 修法：用 k3s 原生的 coredns-custom 扩展点（CoreDNS 主配置末尾
+# `import /etc/coredns/custom/*.server`），只为 clawhubcn.com 增加一个 server block，
+# 把它的解析转发到「pod 可按 IP 直达」的阿里公共 DNS 223.5.5.5 / 223.6.6.6。
+# 这样 manager pod 即可直连真实 clawhubcn.com 取市场数据，无需任何代理，
+# 且不改动主 Corefile、不影响集群内域名解析与其它外网域名。
+#
+# 生产 manager 有正常外网 DNS，无需本补丁；这是纯本地环境补丁。
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: coredns-custom
+  namespace: kube-system
+data:
+  # 文件名以 .server 结尾才会被 CoreDNS 作为独立 server block 导入。
+  clawhub.server: |
+    clawhubcn.com:53 {
+        forward . 223.5.5.5 223.6.6.6
+        cache 30
+    }
