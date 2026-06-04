@@ -10,11 +10,12 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
-// Search 调 /api/v1/search 并解析 skills 列表与游标。
+// Search 调 /api/v1/skills（带 q 关键词）并解析 skills 列表与游标。
+// clawhubcn 列表与搜索复用同一端点 /api/v1/skills，无独立 /api/v1/search 路由。
 func TestClawHubClient_Search(t *testing.T) {
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		// 验证请求路径和查询参数符合 ClawHub API 约定
-		assert.Equal(t, "/api/v1/search", r.URL.Path)
+		// 验证请求路径和查询参数符合 ClawHub API 约定：带 q 时仍打 /api/v1/skills。
+		assert.Equal(t, "/api/v1/skills", r.URL.Path)
 		assert.Equal(t, "weather", r.URL.Query().Get("q"))
 		w.Header().Set("Content-Type", "application/json")
 		// clawhubcn 真实 schema：items + displayName/summary/tags.latest/stats.downloads + nextCursor。

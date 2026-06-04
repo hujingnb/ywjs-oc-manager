@@ -29,6 +29,17 @@ func TestRealClawHubcn(t *testing.T) {
 		t.Fatalf("字段映射失败: %+v", sk)
 	}
 
+	// 带关键词搜索：clawhubcn 用 /api/v1/skills?q= 过滤（无独立 /api/v1/search 端点，
+	// 早期 client 误打该路径会被 reset）。用 "self" 这种已知有前缀匹配的词，断言非空。
+	hit, err := c.Search(context.Background(), "self", "")
+	if err != nil {
+		t.Fatalf("带 q 的 Search 失败（疑似又打到 /api/v1/search）: %v", err)
+	}
+	if len(hit.Skills) == 0 {
+		t.Fatal("Search(q=self) 返回空——搜索端点/参数未对上")
+	}
+	t.Logf("Search(q=self) 命中 %d 个，首个=%s", len(hit.Skills), hit.Skills[0].Slug)
+
 	// 版本：验证 {items:[{version}]} 解包。
 	vs, err := c.ListVersions(context.Background(), sk.Slug)
 	if err != nil {

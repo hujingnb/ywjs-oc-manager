@@ -50,8 +50,9 @@ func (c *ClawHubClient) getJSON(ctx context.Context, path string, query url.Valu
 	return nil
 }
 
-// Search 搜索 skill（q 为空时等价列出热门）。cursor 为分页游标。
-// q 非空走 /api/v1/search；q 为空走 /api/v1/skills 列出全部。
+// Search 搜索 skill（q 为空时列出全部）。cursor 为分页游标。
+// clawhubcn 用同一个 /api/v1/skills 端点：无 q 列出全部，带 q 做关键词过滤；
+// 没有独立的 /api/v1/search 路由（实测请求该路径会被服务端直接 reset，HTTP 000）。
 func (c *ClawHubClient) Search(ctx context.Context, q, cursor string) (SearchResult, error) {
 	query := url.Values{}
 	if q != "" {
@@ -61,12 +62,7 @@ func (c *ClawHubClient) Search(ctx context.Context, q, cursor string) (SearchRes
 		query.Set("cursor", cursor)
 	}
 	var out SearchResult
-	// q 为空走列表接口，有 q 走搜索接口
-	path := "/api/v1/skills"
-	if q != "" {
-		path = "/api/v1/search"
-	}
-	if err := c.getJSON(ctx, path, query, &out); err != nil {
+	if err := c.getJSON(ctx, "/api/v1/skills", query, &out); err != nil {
 		return SearchResult{}, err
 	}
 	return out, nil
