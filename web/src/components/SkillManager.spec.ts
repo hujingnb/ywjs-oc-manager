@@ -1,7 +1,7 @@
 // SkillManager.spec.ts — SkillManager 复用组件单元测试。
 // 覆盖：四类 status 徽章渲染、protected 隐藏卸载、市场安装按钮、无权限时操作隐藏。
-import { mount } from '@vue/test-utils'
-import { defineComponent, h, ref, type PropType, type VNodeChild } from 'vue'
+import { flushPromises, mount } from '@vue/test-utils'
+import { computed, defineComponent, h, nextTick, ref, type PropType, type VNodeChild } from 'vue'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 
 import SkillManager from './SkillManager.vue'
@@ -66,10 +66,15 @@ const appSkillsState = {
 }
 
 // marketState 用于控制 useSkillMarketQuery 的返回值。
+// data 仍以扁平 { entries } 存放（各用例直接赋值），mock 工厂再包装成 useInfiniteQuery
+// 的 { pages } 形状；hasNextPage/isFetchingNextPage/fetchNextPage 覆盖「加载更多」行为。
 const marketState = {
   data: ref<{ entries: SkillEntry[] }>({ entries: [] }),
   isLoading: ref(false),
   error: ref<Error | null>(null),
+  hasNextPage: ref(false),
+  isFetchingNextPage: ref(false),
+  fetchNextPage: vi.fn(),
 }
 
 // mutation pending 状态。
@@ -79,6 +84,23 @@ const mutationState = {
   updatePending: ref(false),
   reinstallPending: ref(false),
 }
+
+// ======================== IntersectionObserver mock ========================
+// jsdom 无 IntersectionObserver，组件的滚动加载哨兵建立观察时会报错，需 mock。
+// lastIntersectionCallback 捕获最近一次构造时传入的回调，测试可手动触发模拟「哨兵进入视口」。
+let lastIntersectionCallback: ((entries: { isIntersecting: boolean }[]) => void) | null = null
+const ioObserve = vi.fn()
+const ioDisconnect = vi.fn()
+class MockIntersectionObserver {
+  constructor(cb: (entries: { isIntersecting: boolean }[]) => void) {
+    lastIntersectionCallback = cb
+  }
+  observe = ioObserve
+  disconnect = ioDisconnect
+  unobserve = vi.fn()
+  takeRecords = vi.fn(() => [])
+}
+vi.stubGlobal('IntersectionObserver', MockIntersectionObserver)
 
 // ======================== vi.mock ========================
 vi.mock('@/stores/auth', () => ({
@@ -92,7 +114,16 @@ vi.mock('@/domain/permissions', async () => {
 
 vi.mock('@/api/hooks/useSkills', () => ({
   useAppSkillsQuery: () => appSkillsState,
-  useSkillMarketQuery: () => marketState,
+  // 把扁平 marketState.data（{ entries }）包装成 useInfiniteQuery 的 { pages } 形状，
+  // 这样各用例仍可直接给 marketState.data.value 赋 { entries }，无需改动。
+  useSkillMarketQuery: () => ({
+    data: computed(() => ({ pages: [{ entries: marketState.data.value.entries ?? [] }] })),
+    isLoading: marketState.isLoading,
+    error: marketState.error,
+    hasNextPage: marketState.hasNextPage,
+    isFetchingNextPage: marketState.isFetchingNextPage,
+    fetchNextPage: marketState.fetchNextPage,
+  }),
   useInstallAppSkill: () => ({
     mutateAsync: mocks.installMutateAsync,
     isPending: mutationState.installPending,
@@ -198,6 +229,12 @@ describe('SkillManager', () => {
     marketState.data.value = { entries: [] }
     marketState.isLoading.value = false
     marketState.error.value = null
+    marketState.hasNextPage.value = false
+    marketState.isFetchingNextPage.value = false
+    marketState.fetchNextPage.mockReset()
+    lastIntersectionCallback = null
+    ioObserve.mockReset()
+    ioDisconnect.mockReset()
     mutationState.installPending.value = false
     mutationState.uninstallPending.value = false
     mutationState.updatePending.value = false
@@ -404,6 +441,56 @@ describe('SkillManager', () => {
     mocks.canManage.mockReturnValue(false)
     const wrapper = mountManager()
     expect(wrapper.find('.n-card').text()).not.toContain('安装')
+  })
+
+  // ======== 市场：分页滚动加载 ========
+
+  it('clawhub 有下一页时哨兵进入视口自动拉取下一页', async () => {
+    // 覆盖滚动加载：hasNextPage=true 时底部哨兵被 observe，进入视口触发 fetchNextPage。
+    marketState.data.value = {
+      entries: [
+        { source: 'clawhub', source_ref: 'c1', name: 'c1', version: '1.0.0', downloads: 5 },
+      ],
+    }
+    marketState.hasNextPage.value = true
+    mountManager()
+    await flushPromises()
+    await nextTick()
+    // 哨兵元素应已被 IntersectionObserver 观察。
+    expect(ioObserve).toHaveBeenCalled()
+    // 模拟哨兵进入视口 → 自动拉取下一页。
+    lastIntersectionCallback?.([{ isIntersecting: true }])
+    expect(marketState.fetchNextPage).toHaveBeenCalledTimes(1)
+  })
+
+  it('正在拉取下一页时哨兵再次进入视口不重复触发', async () => {
+    // 防抖：isFetchingNextPage=true 时再次相交不应重复调用 fetchNextPage。
+    marketState.data.value = {
+      entries: [
+        { source: 'clawhub', source_ref: 'c1', name: 'c1', version: '1.0.0', downloads: 5 },
+      ],
+    }
+    marketState.hasNextPage.value = true
+    marketState.isFetchingNextPage.value = true
+    mountManager()
+    await flushPromises()
+    await nextTick()
+    lastIntersectionCallback?.([{ isIntersecting: true }])
+    expect(marketState.fetchNextPage).not.toHaveBeenCalled()
+  })
+
+  it('没有下一页时不渲染哨兵、不建立观察', async () => {
+    // 边界：hasNextPage=false（如 platform 来源无游标）时哨兵不渲染，IntersectionObserver 不 observe。
+    marketState.data.value = {
+      entries: [
+        { source: 'platform', source_ref: 'p1', name: 'p1', version: '1.0.0', downloads: 0 },
+      ],
+    }
+    marketState.hasNextPage.value = false
+    mountManager()
+    await flushPromises()
+    await nextTick()
+    expect(ioObserve).not.toHaveBeenCalled()
   })
 
   // ======== 市场：来源徽章 ========

@@ -103,8 +103,8 @@ describe('useSkills hooks', () => {
 
   // ===== 市场查询 =====
 
-  // 市场 query 应将 source/q 透传为 query string，并解包 { page } 包装层。
-  it('useSkillMarketQuery 携带 source 和 q 参数并解包 page 键', async () => {
+  // 市场 query（useInfiniteQuery）首页应将 source/q 透传为 query string、cursor 为空（undefined）。
+  it('useSkillMarketQuery 首页携带 source/q、cursor 为空', async () => {
     const page = { entries: [{ name: 'tool-a', source: 'platform', source_ref: 'tool-a', version: '0.1.0' }], next_cursor: '' }
     apiRequestMock.mockResolvedValueOnce({ page })
     const params = ref({ source: 'platform', q: 'tool' })
@@ -112,8 +112,9 @@ describe('useSkills hooks', () => {
     mountWithQueryClient(() => { useSkillMarketQuery(params) })
 
     await vi.waitFor(() => {
+      // 首页 pageParam 为空串 → cursor 透传为 undefined（首次请求不带游标）。
       expect(apiRequestMock).toHaveBeenCalledWith('/api/v1/skill-market', {
-        query: { source: 'platform', q: 'tool' },
+        query: { source: 'platform', q: 'tool', cursor: undefined },
       })
     })
   })

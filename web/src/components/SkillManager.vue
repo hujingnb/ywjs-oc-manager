@@ -88,13 +88,22 @@
             </div>
           </n-card>
         </div>
+        <!-- 滚动加载哨兵：clawhub 还有下一页（hasNextPage）时挂在列表底部，
+             进入视口由 IntersectionObserver 自动拉取下一页；加载中显示提示。 -->
+        <div
+          v-if="marketEntries.length && skillMarketQuery.hasNextPage.value"
+          ref="loadMoreSentinel"
+          class="market-load-more state-text"
+        >
+          {{ skillMarketQuery.isFetchingNextPage.value ? '加载中…' : '滚动加载更多' }}
+        </div>
       </n-tab-pane>
     </n-tabs>
   </div>
 </template>
 
 <script setup lang="ts">
-import { computed, h, inject, ref, watch, type Ref } from 'vue'
+import { computed, h, inject, onBeforeUnmount, ref, watch, type Ref } from 'vue'
 import {
   NButton,
   NCard,
@@ -187,8 +196,56 @@ const marketParams = computed(() => ({
 // 市场 query，仅在切换到市场视图时加载（enabled 由 TanStack Query 内部 lazy 处理）。
 const skillMarketQuery = useSkillMarketQuery(marketParams)
 
-// marketEntries 是市场当前页条目，entries 为 undefined 时降级为空数组。
-const marketEntries = computed<SkillEntry[]>(() => skillMarketQuery.data.value?.entries ?? [])
+// marketEntries 把已加载的所有页展平为单一列表，并按 source+source_ref 去重。
+// 聚合模式（source=""）下后端每页都会重复返回 platform 条目，必须去重避免重复卡片。
+const marketEntries = computed<SkillEntry[]>(() => {
+  const pages = skillMarketQuery.data.value?.pages ?? []
+  const seen = new Set<string>()
+  const out: SkillEntry[] = []
+  for (const page of pages) {
+    for (const entry of page.entries ?? []) {
+      const key = `${entry.source}-${entry.source_ref}`
+      if (seen.has(key)) continue
+      seen.add(key)
+      out.push(entry)
+    }
+  }
+  return out
+})
+
+// ===== 市场滚动加载（IntersectionObserver） =====
+// loadMoreSentinel 是挂在市场列表底部的哨兵元素；进入视口即自动拉取下一页。
+const loadMoreSentinel = ref<HTMLElement | null>(null)
+// observer 在哨兵存在时观察其与视口的相交；切走市场 tab / 无下一页时哨兵被移除并断开。
+let loadMoreObserver: IntersectionObserver | null = null
+
+// setupLoadMoreObserver 为哨兵元素建立/重建 IntersectionObserver。
+// el 为 null（哨兵被 v-if 移除）时断开观察，避免泄漏。
+function setupLoadMoreObserver(el: HTMLElement | null) {
+  loadMoreObserver?.disconnect()
+  loadMoreObserver = null
+  if (!el) return
+  loadMoreObserver = new IntersectionObserver(
+    (entries) => {
+      // 哨兵进入视口、还有下一页、且当前未在拉取时，自动追加下一页。
+      if (
+        entries.some((e) => e.isIntersecting) &&
+        skillMarketQuery.hasNextPage.value &&
+        !skillMarketQuery.isFetchingNextPage.value
+      ) {
+        void skillMarketQuery.fetchNextPage()
+      }
+    },
+    // rootMargin 提前 200px 触发，滚动体验更顺（不必精确到底）。
+    { rootMargin: '200px' },
+  )
+  loadMoreObserver.observe(el)
+}
+
+// 哨兵元素挂载/卸载（切 tab、source/q 变化、hasNextPage 变化）时同步观察状态。
+watch(loadMoreSentinel, (el) => setupLoadMoreObserver(el))
+// 组件卸载时断开观察，释放资源。
+onBeforeUnmount(() => loadMoreObserver?.disconnect())
 
 // installedNames 将已安装 skill name 放入 Set，用于市场安装按钮去重判断。
 const installedNames = computed<Set<string>>(() => {
@@ -443,6 +500,13 @@ const installedColumns: DataTableColumns<AppSkill> = [
   display: grid;
   grid-template-columns: repeat(auto-fill, minmax(220px, 1fr));
   gap: 12px;
+}
+
+/* 加载更多按钮容器：水平居中、与卡片网格留出间距。 */
+.market-load-more {
+  display: flex;
+  justify-content: center;
+  margin-top: 12px;
 }
 
 .market-card-header {

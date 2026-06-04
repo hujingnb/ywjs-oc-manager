@@ -1,6 +1,6 @@
 // useSkills.ts — skill 相关 API hooks，覆盖平台库管理、市场浏览和实例 skill 装/卸/更新。
 // 所有 JSON 接口走 apiRequest；平台库上传（multipart）走 xhrUpload 支持进度回调。
-import { useMutation, useQuery, useQueryClient } from '@tanstack/vue-query'
+import { useInfiniteQuery, useMutation, useQuery, useQueryClient } from '@tanstack/vue-query'
 import { computed } from 'vue'
 import type { Ref } from 'vue'
 
@@ -47,21 +47,28 @@ export function useAppSkillsQuery(appId: Ref<string | undefined>) {
   })
 }
 
-// useSkillMarketQuery 浏览/搜索 skill 市场（platform 库 + clawhub 公共库聚合）。
+// useSkillMarketQuery 浏览/搜索 skill 市场（platform 库 + clawhub 公共库聚合），支持游标翻页。
 // params.source 过滤来源（"platform"/"clawhub"/""=聚合），params.q 关键词模糊搜索。
+// clawhub 每页返回 next_cursor，用 useInfiniteQuery 的 fetchNextPage 追加下一页；
+// platform 来源无游标（next_cursor 恒空），故 hasNextPage 自然为 false、不显示「加载更多」。
 export function useSkillMarketQuery(params: Ref<{ source?: string; q?: string }>) {
-  return useQuery<SkillPage>({
+  return useInfiniteQuery<SkillPage>({
     queryKey: computed(() => skillMarketKey(params.value)),
-    queryFn: async () => {
-      // GET /api/v1/skill-market 返回 { page: SkillPage }，统一用 "page" key 包装。
+    // 首页游标为空串；source/q 变化时 queryKey 改变，TanStack 自动重置回第一页。
+    initialPageParam: '',
+    queryFn: async ({ pageParam }) => {
+      // GET /api/v1/skill-market 返回 { page: SkillPage }；cursor 透传给后端取下一页。
       const resp = await apiRequest<{ page: SkillPage }>('/api/v1/skill-market', {
         query: {
           source: params.value.source,
           q: params.value.q,
+          cursor: (pageParam as string) || undefined,
         },
       })
       return resp.page ?? {}
     },
+    // next_cursor 缺失/为空串表示没有更多页，返回 undefined 让 hasNextPage=false。
+    getNextPageParam: (lastPage) => lastPage.next_cursor || undefined,
   })
 }
 
