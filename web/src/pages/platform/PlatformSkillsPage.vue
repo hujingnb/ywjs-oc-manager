@@ -27,8 +27,19 @@
           />
         </n-form-item>
 
+        <!-- 粘贴 Markdown 格式说明 + 一键填充示例 -->
+        <div v-if="mode === 'markdown'" class="upload-hint">
+          <div class="upload-hint__head">
+            <span>
+              格式：以 <code>---</code> 包裹的 frontmatter 开头（至少含 <code>name</code>，<code>description</code> 可选），其后是 Markdown 正文。示例：
+            </span>
+            <n-button text type="primary" size="tiny" @click="fillMarkdownExample">填充示例</n-button>
+          </div>
+          <pre class="upload-hint__code">{{ markdownExample }}</pre>
+        </div>
+
         <!-- 上传文件夹：选择 skill 文件夹（其中直接包含 SKILL.md） -->
-        <n-form-item v-else label="Skill 文件夹 *">
+        <n-form-item v-if="mode === 'folder'" label="Skill 文件夹 *">
           <!-- 原生目录选择 input 隐藏，webkitdirectory 在点击前由 triggerFolderInput 动态设置 -->
           <input
             ref="folderInputRef"
@@ -43,6 +54,13 @@
             <span v-else class="state-text" style="margin: 0">未选择文件夹</span>
           </div>
         </n-form-item>
+
+        <!-- 上传文件夹使用说明 -->
+        <ul v-if="mode === 'folder'" class="upload-hint upload-hint__list">
+          <li>选择 <strong>skill 自身的文件夹</strong>，其中需<strong>直接包含 SKILL.md</strong>（即 <code>所选文件夹/SKILL.md</code>，不要选它的上层目录）。</li>
+          <li>文件夹内的子目录与附属文件会原样保留（如 <code>scripts/</code>、<code>assets/</code>、<code>reference.md</code>）。</li>
+          <li>技能名取自 SKILL.md 的 <code>name</code> 字段，与文件夹名无关；上传时会自动剥掉最外层目录、按扁平结构打包。</li>
+        </ul>
 
         <!-- 解析预览：成功展示识别到的技能 name/description，失败展示红色错误提示 -->
         <p v-if="parsed.error" class="state-text danger" style="margin: 4px 0">{{ parsed.error }}</p>
@@ -130,6 +148,21 @@ const folderName = ref('')
 // 手填版本号；描述默认取自 frontmatter，可手动修改。
 const version = ref('')
 const description = ref('')
+
+// markdownExample 是粘贴 Markdown 模式的格式示例，既用于页面展示，也用于「填充示例」按钮。
+const markdownExample = `---
+name: my-skill
+description: 一句话描述这个技能的用途
+---
+
+# My Skill
+
+用 Markdown 说明这个技能：什么时候触发、做什么、怎么用。`
+
+// fillMarkdownExample 把示例模板填入文本域，方便用户在其基础上修改。
+function fillMarkdownExample() {
+  mdText.value = markdownExample
+}
 
 // 上传操作的反馈文案与错误标记（成功显绿色，失败显红色）。
 const uploadFeedback = ref('')
@@ -298,3 +331,49 @@ const columns = computed(() => [
   },
 ])
 </script>
+
+<style scoped>
+/* upload-hint：上传区的格式说明/使用说明文案，弱化为次要灰字 */
+.upload-hint {
+  margin: -4px 0 12px;
+  font-size: 12px;
+  line-height: 1.6;
+  color: #8a8f99;
+}
+.upload-hint__head {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+  margin-bottom: 6px;
+}
+/* upload-hint__code：SKILL.md 示例代码块，等宽字体 + 浅底，保留换行 */
+.upload-hint__code {
+  margin: 0;
+  padding: 10px 12px;
+  background: rgba(0, 0, 0, 0.045);
+  border-radius: 6px;
+  font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  font-size: 12px;
+  line-height: 1.55;
+  white-space: pre-wrap;
+  word-break: break-word;
+  color: #4b5563;
+}
+.upload-hint__list {
+  margin: 0 0 12px;
+  padding-left: 18px;
+}
+.upload-hint__list li {
+  margin: 3px 0;
+}
+/* 行内 code 标记：键名/路径片段 */
+.upload-hint :deep(code),
+.upload-hint code {
+  padding: 1px 5px;
+  background: rgba(0, 0, 0, 0.06);
+  border-radius: 4px;
+  font-family: ui-monospace, monospace;
+  font-size: 11px;
+}
+</style>

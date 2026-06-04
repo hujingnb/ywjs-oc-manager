@@ -231,6 +231,17 @@ describe('PlatformSkillsPage', () => {
     expect(wrapper.text()).toContain('上传文件夹')
   })
 
+  // 覆盖「填充示例」按钮：点击后文本域被填入可解析的示例 SKILL.md，预览出示例技能名。
+  it('点击「填充示例」填入可解析的 SKILL.md 示例', async () => {
+    const wrapper = mountPage()
+    const btn = wrapper.findAll('button').find((b) => b.text().trim() === '填充示例')
+    expect(btn).toBeTruthy()
+    await btn!.trigger('click')
+    await wrapper.vm.$nextTick()
+    // 示例 frontmatter 的 name 为 my-skill，应被解析并出现在预览中。
+    expect(wrapper.text()).toContain('my-skill')
+  })
+
   // 覆盖粘贴 Markdown 正常路径：解析 frontmatter 得到 name，提交时打包成 tar 并以该 name 调用上传。
   it('粘贴 Markdown 提交时以 frontmatter name 打包上传', async () => {
     mocks.uploadMutateAsync.mockResolvedValue(undefined)
