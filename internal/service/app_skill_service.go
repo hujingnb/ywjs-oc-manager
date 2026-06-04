@@ -550,11 +550,23 @@ func (s *AppSkillService) Reinstall(ctx context.Context, principal auth.Principa
 		}
 		return AppSkillResult{}, fmt.Errorf("查询实例 skill 失败: %w", err)
 	}
-	// 用 app_skills 记录的来源与版本重新取归档（与首次安装同源，保证内容一致）
-	in := InstallSkillInput{Source: row.Source, SourceRef: row.SourceRef, Name: name, Version: row.Version}
-	archive, _, _, ext, err := s.fetchArchive(ctx, in)
+	// 重试落地用首装时缓存到对象存储的原始归档（按 cached_tar_path 读取），而非重新下载上游：
+	//  ① 与首装内容一致（上游同版本字节可能被改写）；
+	//  ② pending 多因首装时容器侧/网络抖动，重试期间上游可能短暂不可达甚至已下架，
+	//     依赖缓存才能稳定恢复（这正是首装即缓存归档的意义）。
+	rc, err := s.blobs.OpenLibrarySkill(row.CachedTarPath)
 	if err != nil {
-		return AppSkillResult{}, err
+		return AppSkillResult{}, fmt.Errorf("读取缓存归档失败: %w", err)
+	}
+	archive, err := io.ReadAll(rc)
+	_ = rc.Close()
+	if err != nil {
+		return AppSkillResult{}, fmt.Errorf("读取缓存归档失败: %w", err)
+	}
+	// 归档格式按内容魔数判断（zip 以 "PK" 开头），供解压防炸弹校验分流；oc-ops 侧亦按内容解压。
+	ext := "tar"
+	if len(archive) >= 2 && archive[0] == 'P' && archive[1] == 'K' {
+		ext = "zip"
 	}
 	// 解压防炸弹校验
 	if err := validateArchiveSafety(archive, ext); err != nil {

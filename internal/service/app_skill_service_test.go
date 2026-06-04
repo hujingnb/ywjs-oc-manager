@@ -44,7 +44,12 @@ func (f *fakeAppSkillStore) get(appID, name string) (sqlc.AppSkill, bool) {
 
 // put 预置一条 app_skills 行（供测试构造重复场景）。
 func (f *fakeAppSkillStore) put(appID, name, source string) {
-	f.rows[f.key(appID, name)] = sqlc.AppSkill{AppID: appID, Name: name, Source: source, SourceRef: name, Version: "1.0"}
+	// CachedTarPath 用确定性路径，与 fakeLibraryBlob.PutLibrarySkill 的命名规则一致，
+	// 便于 Reinstall（读缓存归档）测试预置对应字节。
+	f.rows[f.key(appID, name)] = sqlc.AppSkill{
+		AppID: appID, Name: name, Source: source, SourceRef: name, Version: "1.0",
+		CachedTarPath: "library/" + source + "/" + name + "/1.0.tar",
+	}
 }
 
 // putWithLatest 预置一条带 latest_version 的 app_skills 行（供测试更新提示场景）。
@@ -420,12 +425,12 @@ func TestAppSkillService_Install_OcOpsFail_Pending(t *testing.T) {
 // Reinstall（pending 重试）单测
 // =========================================================
 
-// TestAppSkillService_Reinstall_Success 已记录 skill 重试：oc-ops 热装+reload 成功 → status=active。
+// TestAppSkillService_Reinstall_Success 已记录 skill 重试：从缓存归档读取并 oc-ops 热装+reload 成功 → status=active。
 func TestAppSkillService_Reinstall_Success(t *testing.T) {
 	deps := newAppSkillTestDeps(t)
-	// 预置 app_skills 记录（首次安装已落库，SourceRef=weather/Version=1.0）+ 平台库归档
+	// 预置 app_skills 记录（首次安装已落库，CachedTarPath 指向缓存归档）+ 缓存归档字节。
 	deps.appSkills.put("app-1", "weather", "platform")
-	deps.platform.put("weather", "1.0", []byte("data"))
+	deps.blobs.stored = map[string][]byte{"library/platform/weather/1.0.tar": []byte("cached-archive")}
 	svc := deps.service()
 
 	res, err := svc.Reinstall(context.Background(), deps.ownerPrincipal(), "app-1", "weather")
@@ -435,11 +440,26 @@ func TestAppSkillService_Reinstall_Success(t *testing.T) {
 	assert.Equal(t, "weather", res.Name)
 }
 
+// TestAppSkillService_Reinstall_UsesCacheNotUpstream Reinstall 必须读缓存归档而非重新下载上游：
+// 即使 platform/clawhub 上游均无该 skill（模拟上游下架/抖动），只要缓存在即可恢复 → active。
+func TestAppSkillService_Reinstall_UsesCacheNotUpstream(t *testing.T) {
+	deps := newAppSkillTestDeps(t)
+	// clawhub 来源的 pending skill：上游不预置任何归档（fetchArchive 会失败），仅预置缓存字节。
+	deps.appSkills.put("app-1", "gone-upstream", "clawhub")
+	deps.blobs.stored = map[string][]byte{"library/clawhub/gone-upstream/1.0.tar": []byte("cached-only")}
+	svc := deps.service()
+
+	res, err := svc.Reinstall(context.Background(), deps.ownerPrincipal(), "app-1", "gone-upstream")
+	// 不重新下载上游，纯靠缓存恢复 → 不报错且 active
+	require.NoError(t, err)
+	assert.Equal(t, "active", res.Status)
+}
+
 // TestAppSkillService_Reinstall_OcOpsFail_Pending 重试时 oc-ops 仍失败 → 保持 pending，不报错（可继续重试）。
 func TestAppSkillService_Reinstall_OcOpsFail_Pending(t *testing.T) {
 	deps := newAppSkillTestDeps(t)
 	deps.appSkills.put("app-1", "weather", "platform")
-	deps.platform.put("weather", "1.0", []byte("data"))
+	deps.blobs.stored = map[string][]byte{"library/platform/weather/1.0.tar": []byte("cached-archive")}
 	// 预置热装错误，模拟容器仍未就绪
 	deps.ocops.installErr = errors.New("pod still not ready")
 	svc := deps.service()
