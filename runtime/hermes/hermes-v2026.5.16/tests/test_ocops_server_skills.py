@@ -156,6 +156,36 @@ def test_skills_install_zip(monkeypatch, tmp_path):
     assert (dest / ".oc-managed").exists()
 
 
+def test_skills_install_zip_filename_without_ext(monkeypatch, tmp_path):
+    """install 端点：multipart filename 不带 .zip 后缀（模拟 manager 实际行为）时仍按内容正确解压。
+
+    复现真实 bug：manager 的 SkillInstall 把 multipart 文件名设为 skill 名（如 "Skill Vetter"，
+    不含扩展名）。旧实现按文件名后缀判断格式，非 .zip 即当 tar 解压，导致 ClawHub 的 zip
+    被 tarfile.open 失败、目录建了却为空、热装失败。修复后 _safe_extract 按内容（zip 魔数）判定，
+    故 filename 无扩展名也能解出 SKILL.md。
+    """
+    c = _client(monkeypatch, tmp_path)
+    import ocops.skills as skills_mod
+    # 归档内含 SKILL.md（扁平结构，与真实 ClawHub zip 一致）
+    buf = io.BytesIO()
+    with zipfile.ZipFile(buf, "w") as zf:
+        zf.writestr("SKILL.md", "---\nname: skill-vetter\n---\n")
+    buf.seek(0)
+    zip_bytes = buf.read()
+    # 关键：filename 设为带空格、不含 .zip 后缀的 skill 名，模拟 manager CreateFormFile("archive", name)
+    r = c.post(
+        "/oc/skills",
+        headers=_auth(),
+        data={"name": "Skill Vetter"},
+        files={"archive": ("Skill Vetter", zip_bytes, "application/octet-stream")},
+    )
+    assert r.status_code == 200
+    dest = skills_mod.SKILLS_DIR / "Skill Vetter"
+    # 目录非空：SKILL.md 必须真实解压落地（旧实现此处为空目录）
+    assert (dest / "SKILL.md").exists()
+    assert (dest / ".oc-managed").exists()
+
+
 def test_skills_install_missing_name(monkeypatch, tmp_path):
     """install 端点：缺少 name 字段 → 400（OpsError BAD_REQUEST）。"""
     c = _client(monkeypatch, tmp_path)

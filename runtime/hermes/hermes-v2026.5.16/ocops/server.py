@@ -440,7 +440,7 @@ async def skills_install(request):
     """POST /oc/skills：接收 multipart form-data（name+archive），解压安装到 SKILLS_DIR/<name>/。
 
     name 字段：skill 名（非空、不含路径分隔符）。
-    archive 字段：tar 或 zip 归档文件（以文件名后缀区分格式）。
+    archive 字段：tar 或 zip 归档文件（格式由 install_skill/_safe_extract 按内容判定）。
     缺少 name 或 archive 时立即返回 400 BAD_REQUEST。
     """
     form = await request.form()
@@ -451,10 +451,9 @@ async def skills_install(request):
         return _err(OpsError("BAD_REQUEST", "缺少 name 或 archive"))
     import os
     import tempfile
-    # 根据上传文件名后缀决定临时文件扩展名，以便 _safe_extract 判断归档格式
-    filename = str(getattr(upload, "filename", "") or "")
-    suffix = ".zip" if filename.lower().endswith(".zip") else ".tar"
-    fd, tmp = tempfile.mkstemp(suffix=suffix)
+    # 归档格式由 _safe_extract 按文件内容（zip 魔数）判定，与临时文件后缀无关，
+    # 故临时文件用中性后缀即可（上传方 multipart filename 不带扩展名，不可作为格式依据）。
+    fd, tmp = tempfile.mkstemp(suffix=".archive")
     try:
         with os.fdopen(fd, "wb") as f:
             f.write(await upload.read())

@@ -176,9 +176,11 @@ def _safe_extract(archive: Path, dest: Path) -> None:
     zip：检查所有成员名，拒绝以 "/" 开头或 parts 含 ".." 的路径；
     tar：优先使用 Python 3.12+ 的 filter="data"（剥离绝对路径与穿越）；
          低版本回退时同样逐条拒绝含越界路径的条目。
-    归档格式以文件名后缀判断（.zip → ZipFile，其余按 tar 处理）。
+    归档格式以**内容**判断（zipfile.is_zipfile 识别 zip 魔数/中央目录，其余按 tar 处理），
+    不依赖文件名后缀：上传方（manager SkillInstall）的 multipart filename 用的是 skill 名、
+    不带 .zip/.tar 扩展名，若按后缀判断会把 ClawHub 的 zip 误当 tar 解压而失败。
     """
-    if archive.name.lower().endswith(".zip"):
+    if zipfile.is_zipfile(archive):
         # zip 归档：逐条校验成员名后整体解压
         with zipfile.ZipFile(archive) as zf:
             for member in zf.namelist():
