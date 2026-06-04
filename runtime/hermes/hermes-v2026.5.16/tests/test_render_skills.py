@@ -25,12 +25,12 @@ def _manifest(skills: list[str] | None = None, knowledge: bool = False) -> Manif
     )
 
 
-def _make_skill_tar(path: Path, skill_dir: str, skill_name: str) -> None:
-    # 在 path 写一个 skill tar：内含 <skill_dir>/SKILL.md（带 frontmatter）。
+def _make_skill_tar(path: Path, skill_name: str) -> None:
+    # 在 path 写一个扁平 skill tar：SKILL.md 直接位于归档顶层（与平台库上传/oc-ops 扁平契约一致）。
     path.parent.mkdir(parents=True, exist_ok=True)
     body = f"---\nname: {skill_name}\ndescription: d\n---\n# {skill_name}\n正文".encode()
     with tarfile.open(path, "w") as tw:
-        info = tarfile.TarInfo(f"{skill_dir}/SKILL.md")
+        info = tarfile.TarInfo("SKILL.md")
         info.size = len(body)
         tw.addfile(info, io.BytesIO(body))
 
@@ -59,8 +59,8 @@ def test_render_skips_runtime_knowledge_skill_without_manifest_config(tmp_input:
 
 
 def test_render_extracts_version_skill_tar(tmp_input: Path, tmp_data: Path) -> None:
-    # manifest.skills 列出的 tar 被解压到 data_root/skills/ 下，且目录含 .oc-managed 标记。
-    _make_skill_tar(tmp_input / "resources" / "skills" / "weather.tar", "weather", "weather")
+    # manifest.skills 列出的扁平 tar 被解压到 data_root/skills/<归档文件名>/ 下，且目录含 .oc-managed 标记。
+    _make_skill_tar(tmp_input / "resources" / "skills" / "weather.tar", "weather")
     render(_manifest(["resources/skills/weather.tar"]), tmp_input, tmp_data)
     assert (tmp_data / "skills" / "weather" / "SKILL.md").exists()
     marker = tmp_data / "skills" / "weather" / ".oc-managed"
@@ -113,16 +113,16 @@ def test_render_rejects_tar_symlink_escape(tmp_input: Path, tmp_data: Path) -> N
         render(_manifest(["resources/skills/evil-link.tar"]), tmp_input, tmp_data)
 
 
-def _make_skill_zip(zip_path: Path, top_dir: str, skill_name: str) -> None:
-    # 在 zip_path 写一个 skill zip：内含 <top_dir>/SKILL.md（带 frontmatter）。
+def _make_skill_zip(zip_path: Path, skill_name: str) -> None:
+    # 在 zip_path 写一个扁平 skill zip：SKILL.md 直接位于归档顶层。
     zip_path.parent.mkdir(parents=True, exist_ok=True)
     with zipfile.ZipFile(zip_path, "w") as zf:
-        zf.writestr(f"{top_dir}/SKILL.md", f"---\nname: {skill_name}\n---\n")
+        zf.writestr("SKILL.md", f"---\nname: {skill_name}\n---\n")
 
 
 def test_extract_zip_skill(tmp_input: Path, tmp_data: Path) -> None:
-    # zip 格式版本 skill 解压到 skills/<top>/ 并打 .oc-managed 标记。
-    _make_skill_zip(tmp_input / "resources" / "skills" / "weather.zip", "weather", "weather")
+    # zip 格式扁平版本 skill 解压到 skills/<归档文件名>/ 并打 .oc-managed 标记。
+    _make_skill_zip(tmp_input / "resources" / "skills" / "weather.zip", "weather")
     render(_manifest(["resources/skills/weather.zip"]), tmp_input, tmp_data)
     assert (tmp_data / "skills" / "weather" / "SKILL.md").exists()
     assert (tmp_data / "skills" / "weather" / ".oc-managed").exists()
