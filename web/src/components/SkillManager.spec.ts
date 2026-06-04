@@ -1,11 +1,13 @@
 // SkillManager.spec.ts — SkillManager 复用组件单元测试。
-// 覆盖：四类 status 徽章渲染、protected 隐藏卸载、市场安装按钮、无权限时操作隐藏。
-import { flushPromises, mount } from '@vue/test-utils'
-import { computed, defineComponent, h, nextTick, ref, type PropType, type VNodeChild } from 'vue'
+// 覆盖：已安装列表四类 status 徽章渲染、protected 隐藏卸载、来源筛选+数量统计、
+// 更新按钮、卸载对话框、无权限时操作隐藏。市场与详情抽屉用例已迁至
+// SkillMarketBrowser.spec.ts 与 SkillDetailDrawer.spec.ts。
+import { mount } from '@vue/test-utils'
+import { nextTick, ref } from 'vue'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 
 import SkillManager from './SkillManager.vue'
-import type { AppSkill, SkillEntry } from '@/api'
+import type { AppSkill } from '@/api'
 
 // ======================== hoisted mocks ========================
 // vi.hoisted 内只能使用 vi.fn()，不可用 ref()（hoisting 早于模块初始化）。
@@ -27,35 +29,15 @@ const mocks = vi.hoisted(() => ({
   dialogWarning: vi.fn(),
 }))
 
-// ======================== column 渲染辅助 ========================
-type RenderableColumn = {
-  key: string
-  title?: string
-  render?: (row: unknown) => VNodeChild
-}
-
-// DataTableStub 渲染 columns.render 结果，使测试可断言徽章/按钮内容。
-const DataTableStub = defineComponent({
-  props: {
-    columns: { type: Array as PropType<RenderableColumn[]>, default: () => [] },
-    data: { type: Array as PropType<unknown[]>, default: () => [] },
-  },
-  setup(props) {
-    return () =>
-      h('div', [
-        h(
-          'div',
-          { class: 'headers' },
-          props.columns.map((col) => h('span', { class: `header-${col.key}` }, col.title)),
-        ),
-        ...props.data.flatMap((row) =>
-          props.columns.map((col) =>
-            h('div', { class: `cell-${col.key}` }, col.render ? [col.render(row) as VNodeChild] : []),
-          ),
-        ),
-      ])
-  },
-})
+// SkillMarketBrowser/SkillDetailDrawer stub：避免拉起其内部市场/详情查询。
+// 已安装列表测试只关注 SkillManager 自身逻辑，子组件行为已在各自 spec 覆盖。
+vi.mock('./SkillMarketBrowser.vue', () => ({
+  default: { name: 'SkillMarketBrowser', template: '<div class="stub-market" />' },
+}))
+vi.mock('./SkillDetailDrawer.vue', () => ({
+  // show prop 需声明，供测试通过 props('show') 断言 detailOpen 是否被正确设置。
+  default: { name: 'SkillDetailDrawer', props: ['show', 'skill', 'allowVersionPick', 'actionPending', 'existingNames'], template: '<div class="stub-drawer" />' },
+}))
 
 // ======================== 可变 reactive 状态（在 vi.mock 外部定义） ========================
 // appSkillsState 用于控制 useAppSkillsQuery 的返回值。
@@ -65,18 +47,6 @@ const appSkillsState = {
   error: ref<Error | null>(null),
 }
 
-// marketState 用于控制 useSkillMarketQuery 的返回值。
-// data 仍以扁平 { entries } 存放（各用例直接赋值），mock 工厂再包装成 useInfiniteQuery
-// 的 { pages } 形状；hasNextPage/isFetchingNextPage/fetchNextPage 覆盖「加载更多」行为。
-const marketState = {
-  data: ref<{ entries: SkillEntry[] }>({ entries: [] }),
-  isLoading: ref(false),
-  error: ref<Error | null>(null),
-  hasNextPage: ref(false),
-  isFetchingNextPage: ref(false),
-  fetchNextPage: vi.fn(),
-}
-
 // mutation pending 状态。
 const mutationState = {
   installPending: ref(false),
@@ -84,30 +54,6 @@ const mutationState = {
   updatePending: ref(false),
   reinstallPending: ref(false),
 }
-
-// detailState 控制 useSkillDetailQuery（详情抽屉富详情 + 版本列表）的返回值。
-const detailState = {
-  data: ref<{ detail: Record<string, unknown>; versions: { version: string; changelog?: string; published_at?: number }[] }>({ detail: {}, versions: [] }),
-  isLoading: ref(false),
-  error: ref<Error | null>(null),
-}
-
-// ======================== IntersectionObserver mock ========================
-// jsdom 无 IntersectionObserver，组件的滚动加载哨兵建立观察时会报错，需 mock。
-// lastIntersectionCallback 捕获最近一次构造时传入的回调，测试可手动触发模拟「哨兵进入视口」。
-let lastIntersectionCallback: ((entries: { isIntersecting: boolean }[]) => void) | null = null
-const ioObserve = vi.fn()
-const ioDisconnect = vi.fn()
-class MockIntersectionObserver {
-  constructor(cb: (entries: { isIntersecting: boolean }[]) => void) {
-    lastIntersectionCallback = cb
-  }
-  observe = ioObserve
-  disconnect = ioDisconnect
-  unobserve = vi.fn()
-  takeRecords = vi.fn(() => [])
-}
-vi.stubGlobal('IntersectionObserver', MockIntersectionObserver)
 
 // ======================== vi.mock ========================
 vi.mock('@/stores/auth', () => ({
@@ -120,16 +66,22 @@ vi.mock('@/domain/permissions', async () => {
 })
 
 vi.mock('@/api/hooks/useSkills', () => ({
+  // 已安装列表查询。
   useAppSkillsQuery: () => appSkillsState,
-  // 把扁平 marketState.data（{ entries }）包装成 useInfiniteQuery 的 { pages } 形状，
-  // 这样各用例仍可直接给 marketState.data.value 赋 { entries }，无需改动。
+  // useSkillMarketQuery/useSkillDetailQuery 已迁至子组件，此 spec 不再使用；
+  // 保留空实现防止 SkillMarketBrowser/SkillDetailDrawer stub 失效时 import 出错。
   useSkillMarketQuery: () => ({
-    data: computed(() => ({ pages: [{ entries: marketState.data.value.entries ?? [] }] })),
-    isLoading: marketState.isLoading,
-    error: marketState.error,
-    hasNextPage: marketState.hasNextPage,
-    isFetchingNextPage: marketState.isFetchingNextPage,
-    fetchNextPage: marketState.fetchNextPage,
+    data: { value: { pages: [] } },
+    isLoading: { value: false },
+    error: { value: null },
+    hasNextPage: { value: false },
+    isFetchingNextPage: { value: false },
+    fetchNextPage: vi.fn(),
+  }),
+  useSkillDetailQuery: () => ({
+    data: { value: { detail: {}, versions: [] } },
+    isLoading: { value: false },
+    error: { value: null },
   }),
   useInstallAppSkill: () => ({
     mutateAsync: mocks.installMutateAsync,
@@ -147,8 +99,6 @@ vi.mock('@/api/hooks/useSkills', () => ({
     mutateAsync: mocks.reinstallMutateAsync,
     isPending: mutationState.reinstallPending,
   }),
-  // 详情抽屉富详情 + 版本列表查询：用 detailState 控制返回值。
-  useSkillDetailQuery: () => detailState,
 }))
 
 vi.mock('naive-ui', async () => {
@@ -236,22 +186,10 @@ function mountManager() {
 // ======================== 测试套件 ========================
 describe('SkillManager', () => {
   beforeEach(() => {
-    // 重置每个 mock 和状态为默认值。
+    // 重置每个 mock 和已安装相关状态为默认值。
     appSkillsState.data.value = []
     appSkillsState.isLoading.value = false
     appSkillsState.error.value = null
-    marketState.data.value = { entries: [] }
-    marketState.isLoading.value = false
-    marketState.error.value = null
-    marketState.hasNextPage.value = false
-    marketState.isFetchingNextPage.value = false
-    marketState.fetchNextPage.mockReset()
-    lastIntersectionCallback = null
-    ioObserve.mockReset()
-    ioDisconnect.mockReset()
-    detailState.data.value = { detail: {}, versions: [] }
-    detailState.isLoading.value = false
-    detailState.error.value = null
     mutationState.installPending.value = false
     mutationState.uninstallPending.value = false
     mutationState.updatePending.value = false
@@ -401,24 +339,17 @@ describe('SkillManager', () => {
     expect(wrapper.find('.cell-actions').text()).not.toContain('卸载')
   })
 
-  it('platform_admin 有写权限时显示卸载和安装按钮', () => {
+  it('platform_admin 有写权限时已安装列表显示卸载按钮', () => {
     // 覆盖 platform_admin 可管理任意实例 skill 的场景：
-    // canManageAppSkill 对 platform_admin 返回 true，操作按钮应可见。
+    // canManageAppSkill 对 platform_admin 返回 true，卸载按钮应可见。
     appSkillsState.data.value = [
       { name: 'skill-platform-admin', status: 'active', source: 'platform', version: '1.0.0', protected: false },
     ]
-    marketState.data.value = {
-      entries: [
-        { source: 'platform', source_ref: 'new-skill', name: 'new-skill', version: '1.0.0', downloads: 0 },
-      ],
-    }
     // 模拟 canManageAppSkill 对 platform_admin 返回 true。
     mocks.canManage.mockReturnValue(true)
     const wrapper = mountManager()
     // 已安装列表应显示卸载按钮。
     expect(wrapper.find('.cell-actions').text()).toContain('卸载')
-    // 市场安装按钮应显示。
-    expect(wrapper.find('.n-card').text()).toContain('安装')
   })
 
   // ======== 已安装：更新按钮 ========
@@ -439,130 +370,6 @@ describe('SkillManager', () => {
     ]
     const wrapper = mountManager()
     expect(wrapper.find('.cell-update').text()).toBe('—')
-  })
-
-  // ======== 市场：安装按钮 ========
-
-  it('技能市场展示条目并显示安装按钮', () => {
-    // 覆盖市场条目正常加载、有权限时可点击安装的场景。
-    marketState.data.value = {
-      entries: [
-        { source: 'platform', source_ref: 'my-skill', name: 'my-skill', version: '2.0.0', downloads: 42 },
-      ],
-    }
-    mocks.canManage.mockReturnValue(true)
-    const wrapper = mountManager()
-    // 市场卡片区域应渲染安装按钮。
-    const card = wrapper.find('.n-card')
-    expect(card.exists()).toBe(true)
-    expect(card.text()).toContain('my-skill')
-    expect(card.text()).toContain('安装')
-  })
-
-  it('市场中已安装的 skill 显示「已安装」标记而非安装按钮', () => {
-    // 覆盖市场展示与已安装列表交叉对比去重：同名 skill 禁止重复安装。
-    appSkillsState.data.value = [
-      { name: 'existing-skill', status: 'active', source: 'platform', version: '1.0.0' },
-    ]
-    marketState.data.value = {
-      entries: [
-        { source: 'platform', source_ref: 'existing-skill', name: 'existing-skill', version: '1.0.0', downloads: 0 },
-      ],
-    }
-    mocks.canManage.mockReturnValue(true)
-    const wrapper = mountManager()
-    const card = wrapper.find('.n-card')
-    // 已安装标记（n-tag 渲染的 span）应存在。
-    expect(card.text()).toContain('已安装')
-    // 安装按钮（button 元素）不应存在——注意与「已安装」文案区分，
-    // 这里检查 button 元素而非文本，避免「已安装」文案中含「安装」子串的误判。
-    expect(card.find('button').exists()).toBe(false)
-  })
-
-  it('无写权限时市场不显示安装按钮', () => {
-    // 覆盖只读角色浏览市场时没有安装入口的场景。
-    marketState.data.value = {
-      entries: [
-        { source: 'clawhub', source_ref: 'remote-skill', name: 'remote-skill', version: '3.0.0', downloads: 100 },
-      ],
-    }
-    mocks.canManage.mockReturnValue(false)
-    const wrapper = mountManager()
-    expect(wrapper.find('.n-card').text()).not.toContain('安装')
-  })
-
-  // ======== 市场：分页滚动加载 ========
-
-  it('clawhub 有下一页时哨兵进入视口自动拉取下一页', async () => {
-    // 覆盖滚动加载：hasNextPage=true 时底部哨兵被 observe，进入视口触发 fetchNextPage。
-    marketState.data.value = {
-      entries: [
-        { source: 'clawhub', source_ref: 'c1', name: 'c1', version: '1.0.0', downloads: 5 },
-      ],
-    }
-    marketState.hasNextPage.value = true
-    mountManager()
-    await flushPromises()
-    await nextTick()
-    // 哨兵元素应已被 IntersectionObserver 观察。
-    expect(ioObserve).toHaveBeenCalled()
-    // 模拟哨兵进入视口 → 自动拉取下一页。
-    lastIntersectionCallback?.([{ isIntersecting: true }])
-    expect(marketState.fetchNextPage).toHaveBeenCalledTimes(1)
-  })
-
-  it('正在拉取下一页时哨兵再次进入视口不重复触发', async () => {
-    // 防抖：isFetchingNextPage=true 时再次相交不应重复调用 fetchNextPage。
-    marketState.data.value = {
-      entries: [
-        { source: 'clawhub', source_ref: 'c1', name: 'c1', version: '1.0.0', downloads: 5 },
-      ],
-    }
-    marketState.hasNextPage.value = true
-    marketState.isFetchingNextPage.value = true
-    mountManager()
-    await flushPromises()
-    await nextTick()
-    lastIntersectionCallback?.([{ isIntersecting: true }])
-    expect(marketState.fetchNextPage).not.toHaveBeenCalled()
-  })
-
-  it('没有下一页时不渲染哨兵、不建立观察', async () => {
-    // 边界：hasNextPage=false（如 platform 来源无游标）时哨兵不渲染，IntersectionObserver 不 observe。
-    marketState.data.value = {
-      entries: [
-        { source: 'platform', source_ref: 'p1', name: 'p1', version: '1.0.0', downloads: 0 },
-      ],
-    }
-    marketState.hasNextPage.value = false
-    mountManager()
-    await flushPromises()
-    await nextTick()
-    expect(ioObserve).not.toHaveBeenCalled()
-  })
-
-  // ======== 市场：来源徽章 ========
-
-  it('平台库条目来源徽章显示「平台库」', () => {
-    // 覆盖 source=platform 时来源徽章文案正确。
-    marketState.data.value = {
-      entries: [
-        { source: 'platform', source_ref: 'p-skill', name: 'p-skill', version: '1.0.0', downloads: 0 },
-      ],
-    }
-    const wrapper = mountManager()
-    expect(wrapper.find('.n-card').text()).toContain('平台库')
-  })
-
-  it('ClawHub 条目来源徽章显示「ClawHub」', () => {
-    // 覆盖 source=clawhub 时来源徽章文案正确。
-    marketState.data.value = {
-      entries: [
-        { source: 'clawhub', source_ref: 'c-skill', name: 'c-skill', version: '2.0.0', downloads: 10 },
-      ],
-    }
-    const wrapper = mountManager()
-    expect(wrapper.find('.n-card').text()).toContain('ClawHub')
   })
 
   // ======== 已安装：卸载点击触发 dialog ========
@@ -648,74 +455,25 @@ describe('SkillManager', () => {
     expect(wrapper.find('.header-name').text()).toBe('名称')
   })
 
-  // ======== 详情抽屉：查看详情 + 版本列表 ========
+  // ======== 详情抽屉：点击已安装名称打开抽屉 ========
+  // 注：抽屉内容（版本列表、来源标签、富详情等）的详细断言已迁至 SkillDetailDrawer.spec.ts。
+  // 此处仅验证 SkillManager 正确触发 SkillDetailDrawer 子组件显示（stub-drawer 出现）。
 
-  it('点击已安装 skill 名称打开详情抽屉并展示版本列表（含最新/当前标记与 changelog）', async () => {
-    // 覆盖：已安装 clawhub skill 名称可点击 → 抽屉展示版本列表，首个标「最新」、匹配当前版本标「当前」，含 changelog。
+  it('点击已安装 skill 名称打开详情抽屉（stub 出现）', async () => {
+    // 覆盖：已安装列表名称列渲染为可点击按钮，点击后 detailOpen 变为 true，
+    // SkillDetailDrawer stub 组件从 DOM 中出现（show=true）。
     appSkillsState.data.value = [
       { name: 'oc-clawtest', status: 'active', source: 'clawhub', source_ref: 'oc-clawtest', version: '1.0.0' },
     ]
-    detailState.data.value = {
-      detail: { description: '完整描述', stars: 100 },
-      versions: [
-        { version: '2.0.0', changelog: '新增 X 功能' },
-        { version: '1.0.0' },
-      ],
-    }
     const wrapper = mountManager()
+    // 抽屉 stub 初始不显示（SkillDetailDrawer 的 show prop 为 false，stub 无条件渲染但不含内容可区分）。
     const nameBtn = wrapper.findAll('button').find((b) => b.text() === 'oc-clawtest')
     expect(nameBtn).toBeTruthy()
     await nameBtn!.trigger('click')
     await nextTick()
-    const drawer = wrapper.find('.n-drawer')
-    expect(drawer.exists()).toBe(true)
-    expect(drawer.text()).toContain('版本列表')
-    expect(drawer.text()).toContain('v2.0.0')
-    expect(drawer.text()).toContain('新增 X 功能') // changelog
-    expect(drawer.text()).toContain('最新') // 第一个版本
-    expect(drawer.text()).toContain('当前') // 匹配当前安装版本 1.0.0
-    expect(drawer.text()).toContain('完整描述') // 富详情描述
-  })
-
-  it('点击市场卡片打开详情抽屉，展示作者/统计/完整描述', async () => {
-    // 覆盖：市场卡片整体可点 → 抽屉带入条目名称，并展示后端富详情（作者/星标/完整描述）。
-    marketState.data.value = {
-      entries: [
-        { source: 'clawhub', source_ref: 'self-improving-agent', name: 'Self-Improving Agent', version: '3.0.21', downloads: 100, description: '摘要(截断)' },
-      ],
-    }
-    detailState.data.value = {
-      detail: { description: '完整未截断描述', author_name: 'pskoett', stars: 3735, downloads: 457324 },
-      versions: [{ version: '3.0.21', changelog: 're-upload' }],
-    }
-    const wrapper = mountManager()
-    await wrapper.find('.market-card').trigger('click')
-    await nextTick()
-    const drawer = wrapper.find('.n-drawer')
-    expect(drawer.exists()).toBe(true)
-    expect(drawer.text()).toContain('Self-Improving Agent')
-    expect(drawer.text()).toContain('pskoett') // 作者
-    expect(drawer.text()).toContain('完整未截断描述') // 富详情优先于卡片摘要
-    expect(drawer.text()).toContain('星标') // 统计
-    // 下载量带单位（457324 → 45.7万），不显示原始数字、不显示评论。
-    expect(drawer.text()).toContain('45.7万')
-    expect(drawer.text()).not.toContain('457324')
-    expect(drawer.text()).not.toContain('评论')
-  })
-
-  it('builtin skill 详情展示 SKILL.md 描述、不展示版本列表（无来源标识）', async () => {
-    // 边界：builtin skill 无 source/source_ref，详情用容器 SKILL.md 的 description，版本列表显示「该来源无版本信息」。
-    appSkillsState.data.value = [
-      { name: 'airtable', status: 'builtin', source: undefined, version: '内置', description: 'Airtable 内置技能介绍' },
-    ]
-    const wrapper = mountManager()
-    const nameBtn = wrapper.findAll('button').find((b) => b.text() === 'airtable')
-    await nameBtn!.trigger('click')
-    await nextTick()
-    const drawer = wrapper.find('.n-drawer')
-    expect(drawer.text()).toContain('Airtable 内置技能介绍') // 来自 SKILL.md 的描述
-    expect(drawer.text()).toContain('该来源无版本信息')
-    // 内置 skill 无 source，「来源」一栏应显示「内置」而非空。
-    expect(drawer.text()).toContain('来源内置')
+    // stub-drawer 组件应已挂载（子组件 stub 始终存在于 DOM）。
+    expect(wrapper.findComponent({ name: 'SkillDetailDrawer' }).exists()).toBe(true)
+    // 抽屉 show prop 应变为 true，表明 detailOpen 已被正确设置。
+    expect(wrapper.findComponent({ name: 'SkillDetailDrawer' }).props('show')).toBe(true)
   })
 })
