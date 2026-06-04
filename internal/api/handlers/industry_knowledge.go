@@ -5,12 +5,12 @@ import (
 	"errors"
 	"io"
 	"net/http"
+	"strings"
 
 	"github.com/gin-gonic/gin"
 
 	"oc-manager/internal/api/apierror"
 	"oc-manager/internal/auth"
-	redactlog "oc-manager/internal/log"
 	"oc-manager/internal/service"
 )
 
@@ -88,7 +88,9 @@ func RegisterIndustryKnowledgeRoutes(router gin.IRouter, handler *IndustryKnowle
 // @Success      202                            {object}  service.KnowledgeDocumentResult
 // @Failure      400                            {object}  ErrorResponse
 // @Failure      401                            {object}  ErrorResponse
+// @Failure      409                            {object}  ErrorResponse
 // @Failure      503                            {object}  ErrorResponse
+// @Failure      500                            {object}  ErrorResponse
 // @Router       /external/industry-knowledge/files [post]
 func (h *IndustryKnowledgeHandler) ExternalUpload(c *gin.Context) {
 	if h.uploadToken == "" || c.GetHeader(industryKnowledgeTokenHeader) != h.uploadToken {
@@ -96,7 +98,13 @@ func (h *IndustryKnowledgeHandler) ExternalUpload(c *gin.Context) {
 		return
 	}
 
-	c.Request.Body = http.MaxBytesReader(c.Writer, c.Request.Body, maxKnowledgeUploadBytes+maxKnowledgeMultipartOverheadBytes)
+	maxBodyBytes := maxKnowledgeUploadBytes + maxKnowledgeMultipartOverheadBytes
+	// 外部 multipart 有固定协议开销，先按客户端声明体积做快速拒绝，避免超大请求进入 multipart 解析。
+	if size, ok := requestContentLength(c); ok && size > maxBodyBytes {
+		c.JSON(http.StatusBadRequest, apierror.New("BAD_REQUEST", maxKnowledgeUploadMessage))
+		return
+	}
+	c.Request.Body = http.MaxBytesReader(c.Writer, c.Request.Body, maxBodyBytes)
 	if err := c.Request.ParseMultipartForm(maxKnowledgeMultipartOverheadBytes); err != nil {
 		var maxErr *http.MaxBytesError
 		if errors.As(err, &maxErr) {
@@ -110,7 +118,7 @@ func (h *IndustryKnowledgeHandler) ExternalUpload(c *gin.Context) {
 		defer c.Request.MultipartForm.RemoveAll()
 	}
 
-	industryName := c.Request.FormValue("industry_name")
+	industryName := strings.TrimSpace(c.Request.FormValue("industry_name"))
 	if industryName == "" {
 		c.JSON(http.StatusBadRequest, apierror.New("BAD_REQUEST", "缺少 industry_name 参数"))
 		return
@@ -121,6 +129,10 @@ func (h *IndustryKnowledgeHandler) ExternalUpload(c *gin.Context) {
 		return
 	}
 	defer file.Close()
+	if strings.TrimSpace(fileHeader.Filename) == "" {
+		c.JSON(http.StatusBadRequest, apierror.New("BAD_REQUEST", "缺少 file 文件名"))
+		return
+	}
 	if fileHeader.Size > maxKnowledgeUploadBytes {
 		c.JSON(http.StatusBadRequest, apierror.New("BAD_REQUEST", maxKnowledgeUploadMessage))
 		return
@@ -135,6 +147,21 @@ func (h *IndustryKnowledgeHandler) ExternalUpload(c *gin.Context) {
 }
 
 // ListBases 列出平台级行业知识库。
+//
+// @Summary      列出行业知识库
+// @Description  平台管理员分页查看平台级行业知识库
+// @Tags         industry-knowledge
+// @Produce      json
+// @Security     BearerAuth
+// @Param        page       query     int     false  "页码，从 1 开始"
+// @Param        page_size  query     int     false  "每页数量"
+// @Param        keyword    query     string  false  "行业库名称关键词"
+// @Success      200        {object}  service.IndustryKnowledgeBaseListResult
+// @Failure      401        {object}  ErrorResponse
+// @Failure      403        {object}  ErrorResponse
+// @Failure      503        {object}  ErrorResponse
+// @Failure      500        {object}  ErrorResponse
+// @Router       /industry-knowledge-bases [get]
 func (h *IndustryKnowledgeHandler) ListBases(c *gin.Context) {
 	result, err := h.service.ListIndustryKnowledgeBases(c.Request.Context(), principalFromCtx(c), queryKnowledgeInt32(c, "page", 1), queryKnowledgeInt32(c, "page_size", 50), c.Query("keyword"))
 	if err != nil {
@@ -145,10 +172,30 @@ func (h *IndustryKnowledgeHandler) ListBases(c *gin.Context) {
 }
 
 // CreateBase 创建平台级行业知识库。
+//
+// @Summary      创建行业知识库
+// @Description  平台管理员创建平台级行业知识库
+// @Tags         industry-knowledge
+// @Accept       json
+// @Produce      json
+// @Security     BearerAuth
+// @Param        body  body      CreateIndustryKnowledgeBaseRequest  true  "创建行业知识库请求"
+// @Success      201   {object}  service.IndustryKnowledgeBaseResult
+// @Failure      400   {object}  ErrorResponse
+// @Failure      401   {object}  ErrorResponse
+// @Failure      403   {object}  ErrorResponse
+// @Failure      409   {object}  ErrorResponse
+// @Failure      503   {object}  ErrorResponse
+// @Failure      500   {object}  ErrorResponse
+// @Router       /industry-knowledge-bases [post]
 func (h *IndustryKnowledgeHandler) CreateBase(c *gin.Context) {
 	var req CreateIndustryKnowledgeBaseRequest
 	if err := c.ShouldBindJSON(&req); err != nil {
 		writeBindError(c, err)
+		return
+	}
+	if strings.TrimSpace(req.Name) == "" {
+		c.JSON(http.StatusBadRequest, apierror.New("BAD_REQUEST", "缺少 name 参数"))
 		return
 	}
 	result, err := h.service.CreateIndustryKnowledgeBase(c.Request.Context(), principalFromCtx(c), req.Name)
@@ -160,10 +207,32 @@ func (h *IndustryKnowledgeHandler) CreateBase(c *gin.Context) {
 }
 
 // RenameBase 重命名平台级行业知识库。
+//
+// @Summary      重命名行业知识库
+// @Description  平台管理员更新行业知识库名称
+// @Tags         industry-knowledge
+// @Accept       json
+// @Produce      json
+// @Security     BearerAuth
+// @Param        industryId  path      string                              true  "行业知识库 ID"
+// @Param        body        body      UpdateIndustryKnowledgeBaseRequest  true  "重命名行业知识库请求"
+// @Success      200         {object}  service.IndustryKnowledgeBaseResult
+// @Failure      400         {object}  ErrorResponse
+// @Failure      401         {object}  ErrorResponse
+// @Failure      403         {object}  ErrorResponse
+// @Failure      404         {object}  ErrorResponse
+// @Failure      409         {object}  ErrorResponse
+// @Failure      503         {object}  ErrorResponse
+// @Failure      500         {object}  ErrorResponse
+// @Router       /industry-knowledge-bases/{industryId} [put]
 func (h *IndustryKnowledgeHandler) RenameBase(c *gin.Context) {
 	var req UpdateIndustryKnowledgeBaseRequest
 	if err := c.ShouldBindJSON(&req); err != nil {
 		writeBindError(c, err)
+		return
+	}
+	if strings.TrimSpace(req.Name) == "" {
+		c.JSON(http.StatusBadRequest, apierror.New("BAD_REQUEST", "缺少 name 参数"))
 		return
 	}
 	result, err := h.service.RenameIndustryKnowledgeBase(c.Request.Context(), principalFromCtx(c), c.Param("industryId"), req.Name)
@@ -175,6 +244,21 @@ func (h *IndustryKnowledgeHandler) RenameBase(c *gin.Context) {
 }
 
 // DeleteBase 删除平台级行业知识库。
+//
+// @Summary      删除行业知识库
+// @Description  平台管理员删除未被助手版本引用的行业知识库
+// @Tags         industry-knowledge
+// @Produce      json
+// @Security     BearerAuth
+// @Param        industryId  path  string  true  "行业知识库 ID"
+// @Success      204         "删除成功，无响应体"
+// @Failure      401         {object}  ErrorResponse
+// @Failure      403         {object}  ErrorResponse
+// @Failure      404         {object}  ErrorResponse
+// @Failure      409         {object}  ErrorResponse
+// @Failure      503         {object}  ErrorResponse
+// @Failure      500         {object}  ErrorResponse
+// @Router       /industry-knowledge-bases/{industryId} [delete]
 func (h *IndustryKnowledgeHandler) DeleteBase(c *gin.Context) {
 	if err := h.service.DeleteIndustryKnowledgeBase(c.Request.Context(), principalFromCtx(c), c.Param("industryId")); err != nil {
 		writeIndustryKnowledgeError(c, err)
@@ -184,6 +268,24 @@ func (h *IndustryKnowledgeHandler) DeleteBase(c *gin.Context) {
 }
 
 // ListFiles 列出指定行业知识库下的文件。
+//
+// @Summary      列出行业知识库文件
+// @Description  平台管理员分页查看指定行业知识库下的文件
+// @Tags         industry-knowledge
+// @Produce      json
+// @Security     BearerAuth
+// @Param        industryId  path      string  true   "行业知识库 ID"
+// @Param        page        query     int     false  "页码，从 1 开始"
+// @Param        page_size   query     int     false  "每页数量"
+// @Param        keyword     query     string  false  "文件名关键词"
+// @Param        status      query     string  false  "解析状态"
+// @Success      200         {object}  service.KnowledgeListResult
+// @Failure      401         {object}  ErrorResponse
+// @Failure      403         {object}  ErrorResponse
+// @Failure      404         {object}  ErrorResponse
+// @Failure      503         {object}  ErrorResponse
+// @Failure      500         {object}  ErrorResponse
+// @Router       /industry-knowledge-bases/{industryId}/knowledge [get]
 func (h *IndustryKnowledgeHandler) ListFiles(c *gin.Context) {
 	result, err := h.service.ListIndustryFiles(c.Request.Context(), principalFromCtx(c), c.Param("industryId"), queryKnowledgeInt32(c, "page", 1), queryKnowledgeInt32(c, "page_size", 50), c.Query("keyword"), c.Query("status"))
 	if err != nil {
@@ -194,9 +296,27 @@ func (h *IndustryKnowledgeHandler) ListFiles(c *gin.Context) {
 }
 
 // SaveFile 上传平台侧行业知识库文件。
+//
+// @Summary      上传行业知识库文件
+// @Description  平台管理员通过 filename query 指定文件名，上传后进入 RAGFlow 解析队列
+// @Tags         industry-knowledge
+// @Accept       application/octet-stream
+// @Produce      json
+// @Security     BearerAuth
+// @Param        industryId  path      string  true  "行业知识库 ID"
+// @Param        filename    query     string  true  "文件名"
+// @Success      202         {object}  service.KnowledgeDocumentResult
+// @Failure      400         {object}  ErrorResponse
+// @Failure      401         {object}  ErrorResponse
+// @Failure      403         {object}  ErrorResponse
+// @Failure      404         {object}  ErrorResponse
+// @Failure      409         {object}  ErrorResponse
+// @Failure      503         {object}  ErrorResponse
+// @Failure      500         {object}  ErrorResponse
+// @Router       /industry-knowledge-bases/{industryId}/knowledge [post]
 func (h *IndustryKnowledgeHandler) SaveFile(c *gin.Context) {
 	filename := c.Query("filename")
-	if filename == "" {
+	if strings.TrimSpace(filename) == "" {
 		c.JSON(http.StatusBadRequest, apierror.New("BAD_REQUEST", "缺少 filename 参数"))
 		return
 	}
@@ -213,6 +333,21 @@ func (h *IndustryKnowledgeHandler) SaveFile(c *gin.Context) {
 }
 
 // DownloadFile 下载行业知识库文件原始内容。
+//
+// @Summary      下载行业知识库文件
+// @Description  平台管理员按 documentId 下载行业知识库中的原始文件
+// @Tags         industry-knowledge
+// @Produce      application/octet-stream
+// @Security     BearerAuth
+// @Param        industryId  path      string  true  "行业知识库 ID"
+// @Param        documentId  path      string  true  "document ID"
+// @Success      200         {string}  binary  "二进制文件流"
+// @Failure      401         {object}  ErrorResponse
+// @Failure      403         {object}  ErrorResponse
+// @Failure      404         {object}  ErrorResponse
+// @Failure      503         {object}  ErrorResponse
+// @Failure      500         {object}  ErrorResponse
+// @Router       /industry-knowledge-bases/{industryId}/knowledge/{documentId}/file [get]
 func (h *IndustryKnowledgeHandler) DownloadFile(c *gin.Context) {
 	reader, size, filename, err := h.service.OpenIndustryFile(c.Request.Context(), principalFromCtx(c), c.Param("industryId"), c.Param("documentId"))
 	if err != nil {
@@ -223,6 +358,21 @@ func (h *IndustryKnowledgeHandler) DownloadFile(c *gin.Context) {
 }
 
 // DeleteFile 删除行业知识库文件。
+//
+// @Summary      删除行业知识库文件
+// @Description  平台管理员按 documentId 删除行业知识库文件
+// @Tags         industry-knowledge
+// @Produce      json
+// @Security     BearerAuth
+// @Param        industryId  path  string  true  "行业知识库 ID"
+// @Param        documentId  path  string  true  "document ID"
+// @Success      204         "删除成功，无响应体"
+// @Failure      401         {object}  ErrorResponse
+// @Failure      403         {object}  ErrorResponse
+// @Failure      404         {object}  ErrorResponse
+// @Failure      503         {object}  ErrorResponse
+// @Failure      500         {object}  ErrorResponse
+// @Router       /industry-knowledge-bases/{industryId}/knowledge/{documentId} [delete]
 func (h *IndustryKnowledgeHandler) DeleteFile(c *gin.Context) {
 	if err := h.service.DeleteIndustryFile(c.Request.Context(), principalFromCtx(c), c.Param("industryId"), c.Param("documentId")); err != nil {
 		writeIndustryKnowledgeError(c, err)
@@ -232,6 +382,21 @@ func (h *IndustryKnowledgeHandler) DeleteFile(c *gin.Context) {
 }
 
 // ReparseFile 重新触发行业知识库文件解析。
+//
+// @Summary      重新解析行业知识库文件
+// @Description  平台管理员按 documentId 重新触发 RAGFlow parse
+// @Tags         industry-knowledge
+// @Produce      json
+// @Security     BearerAuth
+// @Param        industryId  path      string  true  "行业知识库 ID"
+// @Param        documentId  path      string  true  "document ID"
+// @Success      202         {object}  service.KnowledgeDocumentResult
+// @Failure      401         {object}  ErrorResponse
+// @Failure      403         {object}  ErrorResponse
+// @Failure      404         {object}  ErrorResponse
+// @Failure      503         {object}  ErrorResponse
+// @Failure      500         {object}  ErrorResponse
+// @Router       /industry-knowledge-bases/{industryId}/knowledge/{documentId}/reparse [post]
 func (h *IndustryKnowledgeHandler) ReparseFile(c *gin.Context) {
 	result, err := h.service.ReparseIndustryFile(c.Request.Context(), principalFromCtx(c), c.Param("industryId"), c.Param("documentId"))
 	if err != nil {
@@ -263,6 +428,6 @@ func writeIndustryKnowledgeError(c *gin.Context, err error) {
 	case errors.Is(err, service.ErrNotFound):
 		c.JSON(http.StatusNotFound, apierror.New("NOT_FOUND", "资源不存在"))
 	default:
-		c.JSON(http.StatusBadRequest, apierror.New("BAD_REQUEST", redactlog.SafeErrorMessage(err)))
+		c.JSON(http.StatusInternalServerError, apierror.New("INTERNAL", "行业知识库操作失败"))
 	}
 }

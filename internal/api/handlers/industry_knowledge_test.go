@@ -3,10 +3,12 @@ package handlers
 import (
 	"bytes"
 	"context"
+	"errors"
 	"io"
 	"mime/multipart"
 	"net/http"
 	"net/http/httptest"
+	"strconv"
 	"testing"
 
 	"github.com/gin-gonic/gin"
@@ -160,6 +162,16 @@ func multipartIndustryUploadBody(t *testing.T, industryName, filename, content s
 	return body, writer.FormDataContentType()
 }
 
+// multipartIndustryNameOnlyBody 构造只有行业名称、缺少 file 字段的 multipart/form-data 请求体。
+func multipartIndustryNameOnlyBody(t *testing.T, industryName string) (*bytes.Buffer, string) {
+	t.Helper()
+	body := &bytes.Buffer{}
+	writer := multipart.NewWriter(body)
+	require.NoError(t, writer.WriteField("industry_name", industryName))
+	require.NoError(t, writer.Close())
+	return body, writer.FormDataContentType()
+}
+
 // TestExternalIndustryUploadRejectsMissingToken 验证外部上传缺少固定鉴权字符串时返回 401 且不调用 service。
 func TestExternalIndustryUploadRejectsMissingToken(t *testing.T) {
 	stub := &industryKnowledgeServiceStub{}
@@ -209,6 +221,56 @@ func TestExternalIndustryUploadRejectsEmptyConfiguredToken(t *testing.T) {
 	assert.Equal(t, 0, stub.externalUploadCalls)
 }
 
+// TestExternalIndustryUploadRejectsOversizedContentLength 验证合法 token 请求声明体积超限时在解析 multipart 前拒绝。
+func TestExternalIndustryUploadRejectsOversizedContentLength(t *testing.T) {
+	stub := &industryKnowledgeServiceStub{}
+	router := newIndustryKnowledgeTestRouter(t, stub, "secret-token")
+
+	body, contentType := multipartIndustryUploadBody(t, "保险", "policy.pdf", "content")
+	w := httptest.NewRecorder()
+	req := httptest.NewRequest(http.MethodPost, "/api/v1/external/industry-knowledge/files", body)
+	req.Header.Set("Content-Type", contentType)
+	req.Header.Set("Content-Length", strconv.FormatInt(maxKnowledgeUploadBytes+maxKnowledgeMultipartOverheadBytes+1, 10))
+	req.Header.Set("X-OC-Industry-Knowledge-Token", "secret-token")
+	router.ServeHTTP(w, req)
+
+	assert.Equal(t, http.StatusBadRequest, w.Code)
+	assert.Contains(t, w.Body.String(), maxKnowledgeUploadMessage)
+	assert.Equal(t, 0, stub.externalUploadCalls)
+}
+
+// TestExternalIndustryUploadRejectsBlankIndustryName 验证空白行业名称会在 handler 层拒绝，避免无意义请求进入 service。
+func TestExternalIndustryUploadRejectsBlankIndustryName(t *testing.T) {
+	stub := &industryKnowledgeServiceStub{}
+	router := newIndustryKnowledgeTestRouter(t, stub, "secret-token")
+
+	body, contentType := multipartIndustryUploadBody(t, "  ", "policy.pdf", "content")
+	w := httptest.NewRecorder()
+	req := httptest.NewRequest(http.MethodPost, "/api/v1/external/industry-knowledge/files", body)
+	req.Header.Set("Content-Type", contentType)
+	req.Header.Set("X-OC-Industry-Knowledge-Token", "secret-token")
+	router.ServeHTTP(w, req)
+
+	assert.Equal(t, http.StatusBadRequest, w.Code)
+	assert.Equal(t, 0, stub.externalUploadCalls)
+}
+
+// TestExternalIndustryUploadRejectsMissingFile 验证外部上传缺少 file 字段时不调用 service。
+func TestExternalIndustryUploadRejectsMissingFile(t *testing.T) {
+	stub := &industryKnowledgeServiceStub{}
+	router := newIndustryKnowledgeTestRouter(t, stub, "secret-token")
+
+	body, contentType := multipartIndustryNameOnlyBody(t, "保险")
+	w := httptest.NewRecorder()
+	req := httptest.NewRequest(http.MethodPost, "/api/v1/external/industry-knowledge/files", body)
+	req.Header.Set("Content-Type", contentType)
+	req.Header.Set("X-OC-Industry-Knowledge-Token", "secret-token")
+	router.ServeHTTP(w, req)
+
+	assert.Equal(t, http.StatusBadRequest, w.Code)
+	assert.Equal(t, 0, stub.externalUploadCalls)
+}
+
 // TestIndustryKnowledgePlatformRoutesRequirePlatformAdmin 验证平台行业库管理接口拒绝非平台管理员。
 func TestIndustryKnowledgePlatformRoutesRequirePlatformAdmin(t *testing.T) {
 	stub := &industryKnowledgeServiceStub{listErr: service.ErrKnowledgeForbidden}
@@ -236,6 +298,37 @@ func TestIndustryKnowledgeCreateMapsNameTaken(t *testing.T) {
 	assert.Equal(t, http.StatusConflict, w.Code)
 	assert.Equal(t, "保险", stub.createName)
 	assert.Contains(t, w.Body.String(), "INDUSTRY_KNOWLEDGE_NAME_TAKEN")
+}
+
+// TestIndustryKnowledgeCreateRejectsBlankName 验证创建行业库时空白名称在 handler 层直接拒绝。
+func TestIndustryKnowledgeCreateRejectsBlankName(t *testing.T) {
+	stub := &industryKnowledgeServiceStub{}
+	router := newIndustryKnowledgeTestRouter(t, stub, "secret-token")
+
+	w := httptest.NewRecorder()
+	req := httptest.NewRequest(http.MethodPost, "/api/v1/industry-knowledge-bases", bytes.NewBufferString(`{"name":"  "}`))
+	req.Header.Set("Content-Type", "application/json")
+	req = withPrincipal(req, auth.Principal{UserID: "u-admin", Role: domain.UserRolePlatformAdmin})
+	router.ServeHTTP(w, req)
+
+	assert.Equal(t, http.StatusBadRequest, w.Code)
+	assert.Empty(t, stub.createName)
+}
+
+// TestIndustryKnowledgeGenericErrorMapsInternal 验证非哨兵运行时错误不会被映射为客户端 400，也不会泄漏底层敏感细节。
+func TestIndustryKnowledgeGenericErrorMapsInternal(t *testing.T) {
+	stub := &industryKnowledgeServiceStub{listErr: errors.New("database password=secret-token query failed")}
+	router := newIndustryKnowledgeTestRouter(t, stub, "secret-token")
+
+	w := httptest.NewRecorder()
+	req := httptest.NewRequest(http.MethodGet, "/api/v1/industry-knowledge-bases", nil)
+	req = withPrincipal(req, auth.Principal{UserID: "u-admin", Role: domain.UserRolePlatformAdmin})
+	router.ServeHTTP(w, req)
+
+	require.Equal(t, http.StatusInternalServerError, w.Code)
+	assert.Contains(t, w.Body.String(), "INTERNAL")
+	assert.NotContains(t, w.Body.String(), "secret-token")
+	assert.NotContains(t, w.Body.String(), "database")
 }
 
 // TestIndustryKnowledgeUploadUsesOctetStream 验证平台侧上传沿用 filename query 和 octet-stream 文件流契约。

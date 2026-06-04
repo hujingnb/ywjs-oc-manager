@@ -115,6 +115,14 @@ components:
       required:
       - schedule
       type: object
+    handlers.CreateIndustryKnowledgeBaseRequest:
+      properties:
+        name:
+          description: Name 是行业知识库展示名，在未删除行业库中必须唯一。
+          type: string
+      required:
+      - name
+      type: object
     handlers.CreateKanbanTaskRequest:
       properties:
         assignee:
@@ -542,6 +550,14 @@ components:
         workdir:
           description: Workdir 是任务执行目录；nil 表示保持原值，空字符串表示清空。
           type: string
+      type: object
+    handlers.UpdateIndustryKnowledgeBaseRequest:
+      properties:
+        name:
+          description: Name 是更新后的行业知识库展示名，在未删除行业库中必须唯一。
+          type: string
+      required:
+      - name
       type: object
     handlers.UpdateMemberRequest:
       properties:
@@ -1286,6 +1302,29 @@ components:
         job_id:
           type: string
       type: object
+    service.IndustryKnowledgeBaseListResult:
+      properties:
+        items:
+          items:
+            $ref: '#/components/schemas/service.IndustryKnowledgeBaseResult'
+          type: array
+          uniqueItems: false
+        total:
+          type: integer
+      type: object
+    service.IndustryKnowledgeBaseResult:
+      properties:
+        created_at:
+          type: string
+        document_count:
+          type: integer
+        id:
+          type: string
+        name:
+          type: string
+        updated_at:
+          type: string
+      type: object
     service.KnowledgeDocumentResult:
       properties:
         created_at:
@@ -1333,6 +1372,10 @@ components:
         document_id:
           type: string
         document_name:
+          type: string
+        industry_knowledge_base_id:
+          type: string
+        industry_knowledge_base_name:
           type: string
         scope:
           type: string
@@ -5316,6 +5359,632 @@ paths:
       summary: 查询计费展示配置
       tags:
       - recharge
+  /external/industry-knowledge/files:
+    post:
+      description: 使用固定 header token 鉴权，通过 multipart/form-data 提交 industry_name 与
+        file
+      parameters:
+      - description: 固定上传鉴权字符串
+        in: header
+        name: X-OC-Industry-Knowledge-Token
+        required: true
+        schema:
+          type: string
+      requestBody:
+        content:
+          application/x-www-form-urlencoded:
+            schema:
+              oneOf:
+              - title: industry_name
+                type: string
+              - title: file
+                type: file
+          multipart/form-data:
+            schema:
+              type: object
+        description: 行业名称 | 上传文件
+        required: true
+      responses:
+        "202":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/service.KnowledgeDocumentResult'
+          description: Accepted
+        "400":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/handlers.ErrorResponse'
+          description: Bad Request
+        "401":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/handlers.ErrorResponse'
+          description: Unauthorized
+        "409":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/handlers.ErrorResponse'
+          description: Conflict
+        "500":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/handlers.ErrorResponse'
+          description: Internal Server Error
+        "503":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/handlers.ErrorResponse'
+          description: Service Unavailable
+      summary: 外部上传行业知识库文件
+      tags:
+      - industry-knowledge
+  /industry-knowledge-bases:
+    get:
+      description: 平台管理员分页查看平台级行业知识库
+      parameters:
+      - description: 页码，从 1 开始
+        in: query
+        name: page
+        schema:
+          type: integer
+      - description: 每页数量
+        in: query
+        name: page_size
+        schema:
+          type: integer
+      - description: 行业库名称关键词
+        in: query
+        name: keyword
+        schema:
+          type: string
+      responses:
+        "200":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/service.IndustryKnowledgeBaseListResult'
+          description: OK
+        "401":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/handlers.ErrorResponse'
+          description: Unauthorized
+        "403":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/handlers.ErrorResponse'
+          description: Forbidden
+        "500":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/handlers.ErrorResponse'
+          description: Internal Server Error
+        "503":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/handlers.ErrorResponse'
+          description: Service Unavailable
+      security:
+      - BearerAuth: []
+      summary: 列出行业知识库
+      tags:
+      - industry-knowledge
+    post:
+      description: 平台管理员创建平台级行业知识库
+      requestBody:
+        content:
+          application/json:
+            schema:
+              oneOf:
+              - type: object
+              - $ref: '#/components/schemas/handlers.CreateIndustryKnowledgeBaseRequest'
+                description: 创建行业知识库请求
+                summary: body
+        description: 创建行业知识库请求
+        required: true
+      responses:
+        "201":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/service.IndustryKnowledgeBaseResult'
+          description: Created
+        "400":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/handlers.ErrorResponse'
+          description: Bad Request
+        "401":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/handlers.ErrorResponse'
+          description: Unauthorized
+        "403":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/handlers.ErrorResponse'
+          description: Forbidden
+        "409":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/handlers.ErrorResponse'
+          description: Conflict
+        "500":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/handlers.ErrorResponse'
+          description: Internal Server Error
+        "503":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/handlers.ErrorResponse'
+          description: Service Unavailable
+      security:
+      - BearerAuth: []
+      summary: 创建行业知识库
+      tags:
+      - industry-knowledge
+  /industry-knowledge-bases/{industryId}:
+    delete:
+      description: 平台管理员删除未被助手版本引用的行业知识库
+      parameters:
+      - description: 行业知识库 ID
+        in: path
+        name: industryId
+        required: true
+        schema:
+          type: string
+      responses:
+        "204":
+          description: 删除成功，无响应体
+        "401":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/handlers.ErrorResponse'
+          description: Unauthorized
+        "403":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/handlers.ErrorResponse'
+          description: Forbidden
+        "404":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/handlers.ErrorResponse'
+          description: Not Found
+        "409":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/handlers.ErrorResponse'
+          description: Conflict
+        "500":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/handlers.ErrorResponse'
+          description: Internal Server Error
+        "503":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/handlers.ErrorResponse'
+          description: Service Unavailable
+      security:
+      - BearerAuth: []
+      summary: 删除行业知识库
+      tags:
+      - industry-knowledge
+    put:
+      description: 平台管理员更新行业知识库名称
+      parameters:
+      - description: 行业知识库 ID
+        in: path
+        name: industryId
+        required: true
+        schema:
+          type: string
+      requestBody:
+        content:
+          application/json:
+            schema:
+              oneOf:
+              - type: object
+              - $ref: '#/components/schemas/handlers.UpdateIndustryKnowledgeBaseRequest'
+                description: 重命名行业知识库请求
+                summary: body
+        description: 重命名行业知识库请求
+        required: true
+      responses:
+        "200":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/service.IndustryKnowledgeBaseResult'
+          description: OK
+        "400":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/handlers.ErrorResponse'
+          description: Bad Request
+        "401":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/handlers.ErrorResponse'
+          description: Unauthorized
+        "403":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/handlers.ErrorResponse'
+          description: Forbidden
+        "404":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/handlers.ErrorResponse'
+          description: Not Found
+        "409":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/handlers.ErrorResponse'
+          description: Conflict
+        "500":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/handlers.ErrorResponse'
+          description: Internal Server Error
+        "503":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/handlers.ErrorResponse'
+          description: Service Unavailable
+      security:
+      - BearerAuth: []
+      summary: 重命名行业知识库
+      tags:
+      - industry-knowledge
+  /industry-knowledge-bases/{industryId}/knowledge:
+    get:
+      description: 平台管理员分页查看指定行业知识库下的文件
+      parameters:
+      - description: 行业知识库 ID
+        in: path
+        name: industryId
+        required: true
+        schema:
+          type: string
+      - description: 页码，从 1 开始
+        in: query
+        name: page
+        schema:
+          type: integer
+      - description: 每页数量
+        in: query
+        name: page_size
+        schema:
+          type: integer
+      - description: 文件名关键词
+        in: query
+        name: keyword
+        schema:
+          type: string
+      - description: 解析状态
+        in: query
+        name: status
+        schema:
+          type: string
+      responses:
+        "200":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/service.KnowledgeListResult'
+          description: OK
+        "401":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/handlers.ErrorResponse'
+          description: Unauthorized
+        "403":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/handlers.ErrorResponse'
+          description: Forbidden
+        "404":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/handlers.ErrorResponse'
+          description: Not Found
+        "500":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/handlers.ErrorResponse'
+          description: Internal Server Error
+        "503":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/handlers.ErrorResponse'
+          description: Service Unavailable
+      security:
+      - BearerAuth: []
+      summary: 列出行业知识库文件
+      tags:
+      - industry-knowledge
+    post:
+      description: 平台管理员通过 filename query 指定文件名，上传后进入 RAGFlow 解析队列
+      parameters:
+      - description: 行业知识库 ID
+        in: path
+        name: industryId
+        required: true
+        schema:
+          type: string
+      - description: 文件名
+        in: query
+        name: filename
+        required: true
+        schema:
+          type: string
+      requestBody:
+        content:
+          application/octet-stream:
+            schema:
+              format: binary
+              type: string
+      responses:
+        "202":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/service.KnowledgeDocumentResult'
+          description: Accepted
+        "400":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/handlers.ErrorResponse'
+          description: Bad Request
+        "401":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/handlers.ErrorResponse'
+          description: Unauthorized
+        "403":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/handlers.ErrorResponse'
+          description: Forbidden
+        "404":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/handlers.ErrorResponse'
+          description: Not Found
+        "409":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/handlers.ErrorResponse'
+          description: Conflict
+        "500":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/handlers.ErrorResponse'
+          description: Internal Server Error
+        "503":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/handlers.ErrorResponse'
+          description: Service Unavailable
+      security:
+      - BearerAuth: []
+      summary: 上传行业知识库文件
+      tags:
+      - industry-knowledge
+  /industry-knowledge-bases/{industryId}/knowledge/{documentId}:
+    delete:
+      description: 平台管理员按 documentId 删除行业知识库文件
+      parameters:
+      - description: 行业知识库 ID
+        in: path
+        name: industryId
+        required: true
+        schema:
+          type: string
+      - description: document ID
+        in: path
+        name: documentId
+        required: true
+        schema:
+          type: string
+      responses:
+        "204":
+          description: 删除成功，无响应体
+        "401":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/handlers.ErrorResponse'
+          description: Unauthorized
+        "403":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/handlers.ErrorResponse'
+          description: Forbidden
+        "404":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/handlers.ErrorResponse'
+          description: Not Found
+        "500":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/handlers.ErrorResponse'
+          description: Internal Server Error
+        "503":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/handlers.ErrorResponse'
+          description: Service Unavailable
+      security:
+      - BearerAuth: []
+      summary: 删除行业知识库文件
+      tags:
+      - industry-knowledge
+  /industry-knowledge-bases/{industryId}/knowledge/{documentId}/file:
+    get:
+      description: 平台管理员按 documentId 下载行业知识库中的原始文件
+      parameters:
+      - description: 行业知识库 ID
+        in: path
+        name: industryId
+        required: true
+        schema:
+          type: string
+      - description: document ID
+        in: path
+        name: documentId
+        required: true
+        schema:
+          type: string
+      responses:
+        "200":
+          content:
+            application/octet-stream:
+              schema:
+                type: string
+          description: 二进制文件流
+        "401":
+          content:
+            application/octet-stream:
+              schema:
+                $ref: '#/components/schemas/handlers.ErrorResponse'
+          description: Unauthorized
+        "403":
+          content:
+            application/octet-stream:
+              schema:
+                $ref: '#/components/schemas/handlers.ErrorResponse'
+          description: Forbidden
+        "404":
+          content:
+            application/octet-stream:
+              schema:
+                $ref: '#/components/schemas/handlers.ErrorResponse'
+          description: Not Found
+        "500":
+          content:
+            application/octet-stream:
+              schema:
+                $ref: '#/components/schemas/handlers.ErrorResponse'
+          description: Internal Server Error
+        "503":
+          content:
+            application/octet-stream:
+              schema:
+                $ref: '#/components/schemas/handlers.ErrorResponse'
+          description: Service Unavailable
+      security:
+      - BearerAuth: []
+      summary: 下载行业知识库文件
+      tags:
+      - industry-knowledge
+  /industry-knowledge-bases/{industryId}/knowledge/{documentId}/reparse:
+    post:
+      description: 平台管理员按 documentId 重新触发 RAGFlow parse
+      parameters:
+      - description: 行业知识库 ID
+        in: path
+        name: industryId
+        required: true
+        schema:
+          type: string
+      - description: document ID
+        in: path
+        name: documentId
+        required: true
+        schema:
+          type: string
+      responses:
+        "202":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/service.KnowledgeDocumentResult'
+          description: Accepted
+        "401":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/handlers.ErrorResponse'
+          description: Unauthorized
+        "403":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/handlers.ErrorResponse'
+          description: Forbidden
+        "404":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/handlers.ErrorResponse'
+          description: Not Found
+        "500":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/handlers.ErrorResponse'
+          description: Internal Server Error
+        "503":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/handlers.ErrorResponse'
+          description: Service Unavailable
+      security:
+      - BearerAuth: []
+      summary: 重新解析行业知识库文件
+      tags:
+      - industry-knowledge
   /jobs/{jobId}:
     get:
       description: 按 job 关联应用的可见性鉴权：平台管理员跨企业放行；企业管理员可查本企业 app 的 job；企业成员可查自己拥有的 app
