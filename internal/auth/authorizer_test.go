@@ -208,6 +208,14 @@ func TestCanUpdateOrgKnowledgeQuota(t *testing.T) {
 	assert.False(t, CanUpdateOrgKnowledgeQuota(Principal{Role: domain.UserRoleOrgMember, OrgID: "org-1"}))
 }
 
+// TestCanManageIndustryKnowledge 验证行业知识库是平台级资源，仅平台管理员可管理。
+func TestCanManageIndustryKnowledge(t *testing.T) {
+	assert.True(t, CanManageIndustryKnowledge(Principal{Role: domain.UserRolePlatformAdmin}))
+	assert.False(t, CanManageIndustryKnowledge(Principal{Role: domain.UserRoleOrgAdmin, OrgID: "org-1"}))
+	assert.False(t, CanManageIndustryKnowledge(Principal{Role: domain.UserRoleOrgMember, OrgID: "org-1"}))
+	assert.False(t, CanManageIndustryKnowledge(Principal{}))
+}
+
 // TestCanUpdateAppKnowledgeQuota 验证实例知识库容量允许平台管理员和本企业管理员修改。
 func TestCanUpdateAppKnowledgeQuota(t *testing.T) {
 	assert.True(t, CanUpdateAppKnowledgeQuota(Principal{Role: domain.UserRolePlatformAdmin}, "org-1"))

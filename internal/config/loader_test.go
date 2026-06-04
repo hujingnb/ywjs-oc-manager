@@ -230,6 +230,30 @@ ragflow:
 	assert.Equal(t, "naive", cfg.RAGFlow.ChunkMethod)
 }
 
+// TestIndustryKnowledgeUploadTokenAllowsEmptyConfig 验证外部行业库上传 token 可为空，空配置表示禁用外部上传接口。
+func TestIndustryKnowledgeUploadTokenAllowsEmptyConfig(t *testing.T) {
+	yaml := fullValidYAML() + `
+industry_knowledge:
+  upload_token: ""
+`
+	cfg, err := LoadFile(writeTempConfig(t, yaml))
+
+	require.NoError(t, err)
+	assert.Empty(t, cfg.IndustryKnowledge.UploadToken)
+}
+
+// TestIndustryKnowledgeUploadTokenRejectsWhitespace 验证只包含空白字符的固定鉴权字符串会被拒绝，避免启动后所有请求都无法通过。
+func TestIndustryKnowledgeUploadTokenRejectsWhitespace(t *testing.T) {
+	yaml := fullValidYAML() + `
+industry_knowledge:
+  upload_token: "   "
+`
+	_, err := LoadFile(writeTempConfig(t, yaml))
+
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "industry_knowledge.upload_token")
+}
+
 // TestStorageS3ValidationRequiresFields 验证启用 S3 但字段不全时加载报错（fail-fast）。
 func TestStorageS3ValidationRequiresFields(t *testing.T) {
 	// 启用 S3 却缺 endpoint/bucket/access_key_id/secret_access_key 等，Validate 必须 fail-fast。

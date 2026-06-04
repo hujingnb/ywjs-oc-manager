@@ -129,6 +129,9 @@ func (c Config) Validate() error {
 	if err := c.RAGFlow.validate(); err != nil {
 		return err
 	}
+	if err := c.IndustryKnowledge.validate(); err != nil {
+		return err
+	}
 	// S3 启用时关键字段必须齐全，缺失 fail-fast（避免运行期才暴露配置缺漏）。
 	if c.Storage.S3.Enabled {
 		if strings.TrimSpace(c.Storage.S3.Endpoint) == "" || strings.TrimSpace(c.Storage.S3.Bucket) == "" ||
@@ -152,6 +155,17 @@ func (c Config) Validate() error {
 	}
 	// Hermes 时代模板不再需要 {{workspace_dir}} 等 legacy OpenClaw 专属占位符，
 	// 仅需非空即可（上方 missing 检查已覆盖）。
+	return nil
+}
+
+// validate 校验行业知识库外部上传配置；空字符串表示禁用，只包含空白字符是配置错误。
+func (c IndustryKnowledgeConfig) validate() error {
+	if c.UploadToken == "" {
+		return nil
+	}
+	if strings.TrimSpace(c.UploadToken) == "" {
+		return fmt.Errorf("industry_knowledge.upload_token 不能只包含空白字符")
+	}
 	return nil
 }
 

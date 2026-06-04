@@ -24,6 +24,8 @@ type Config struct {
 	Hermes HermesConfig `yaml:"hermes"`
 	// RAGFlow 描述 manager 后端访问 RAGFlow HTTP API 所需配置。
 	RAGFlow RAGFlowConfig `yaml:"ragflow"`
+	// IndustryKnowledge 描述外部商业知识库上传行业库文件的固定鉴权配置。
+	IndustryKnowledge IndustryKnowledgeConfig `yaml:"industry_knowledge"`
 	// NewAPI 描述 manager 调用 new-api 管理接口所需的凭据。
 	NewAPI NewAPIConfig `yaml:"newapi"`
 	// Storage 是对象存储（S3）配置；整段可选，配置则要求关键字段齐全（见 loader 校验）。
@@ -124,6 +126,12 @@ type RAGFlowConfig struct {
 	RequestTimeout Duration `yaml:"request_timeout"`
 	// ChunkMethod 是自动创建 dataset 时使用的默认分块方法，缺省 naive。
 	ChunkMethod string `yaml:"chunk_method"`
+}
+
+// IndustryKnowledgeConfig 描述行业知识库外部上传入口配置。
+type IndustryKnowledgeConfig struct {
+	// UploadToken 是外部商业知识库上传接口要求的固定鉴权字符串；为空表示禁用外部上传入口。
+	UploadToken string `yaml:"upload_token"`
 }
 
 // RuntimeImageConfig 是单个可选 Hermes 镜像条目。

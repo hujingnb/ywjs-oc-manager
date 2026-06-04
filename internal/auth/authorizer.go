@@ -164,6 +164,12 @@ func CanUpdateOrgKnowledgeQuota(p Principal) bool {
 	return p.Role == domain.UserRolePlatformAdmin
 }
 
+// CanManageIndustryKnowledge 判断主体是否可管理平台级行业知识库。
+// 行业库是全局平台资源，不归属企业，只允许平台管理员创建、编辑、删除和管理文件。
+func CanManageIndustryKnowledge(p Principal) bool {
+	return p.Role == domain.UserRolePlatformAdmin
+}
+
 // CanUpdateAppKnowledgeQuota 判断主体是否可编辑实例知识库容量。
 // 平台管理员可运维兜底；企业管理员仅能调整本企业实例；普通成员不可修改容量。
 func CanUpdateAppKnowledgeQuota(p Principal, appOrgID string) bool {

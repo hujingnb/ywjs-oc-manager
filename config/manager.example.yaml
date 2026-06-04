@@ -113,6 +113,10 @@ ragflow:
   # 自动创建 dataset 时使用的默认分块方法。
   chunk_method: "naive"
 
+industry_knowledge:
+  # 外部商业知识库上传行业文件的固定鉴权字符串；留空表示禁用外部上传入口。
+  upload_token: ""
+
 hermes:
   # Hermes 容器平台级系统人设模板（SOUL.md PlatformPrompt 层）。
   # 模板内可写任意中文 / 英文 prompt。

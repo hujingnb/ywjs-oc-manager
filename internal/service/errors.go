@@ -77,6 +77,18 @@ var ErrKnowledgeDatasetCreating = errors.New("知识库正在初始化")
 // ErrKnowledgeQuotaExceeded 表示知识库累计空间不足，handler 层据此映射为 409 Conflict。
 var ErrKnowledgeQuotaExceeded = errors.New("知识库空间不足")
 
+// ErrIndustryKnowledgeNotFound 表示行业知识库不存在或已删除。
+var ErrIndustryKnowledgeNotFound = errors.New("行业知识库不存在")
+
+// ErrIndustryKnowledgeNameTaken 表示未删除行业库中已存在同名记录。
+var ErrIndustryKnowledgeNameTaken = errors.New("行业知识库名称已存在")
+
+// ErrIndustryKnowledgeInUse 表示行业库仍被未删除助手版本引用，不能删除。
+var ErrIndustryKnowledgeInUse = errors.New("行业知识库正在被助手版本引用")
+
+// ErrIndustryKnowledgeUploadTokenInvalid 表示外部上传固定鉴权字符串缺失或错误。
+var ErrIndustryKnowledgeUploadTokenInvalid = errors.New("行业知识库上传鉴权失败")
+
 // 充值 -------------------------------------------------------------
 // 来源：原 recharge_service.go
 
