@@ -55,9 +55,17 @@ const mutationState = {
   reinstallPending: ref(false),
 }
 
+// authState 控制 useAuthStore 返回值：user 用于 canManageAppSkill（已被 mock，不实际读取），
+// isPlatformAdmin 控制已安装列表是否对当前用户展示 builtin skill（仅平台管理员可见）。
+// 默认 org_member 视角（非平台管理员），builtin 隐藏；需展示 builtin 的用例显式置 true。
+const authState = {
+  user: { id: 'user-1', role: 'org_member', org_id: 'org-1' } as { id: string; role: string; org_id: string },
+  isPlatformAdmin: false,
+}
+
 // ======================== vi.mock ========================
 vi.mock('@/stores/auth', () => ({
-  useAuthStore: () => ({ user: { id: 'user-1', role: 'org_member', org_id: 'org-1' } }),
+  useAuthStore: () => authState,
 }))
 
 vi.mock('@/domain/permissions', async () => {
@@ -200,6 +208,8 @@ describe('SkillManager', () => {
     mocks.messageError.mockReset()
     mocks.dialogWarning.mockReset()
     mocks.canManage.mockReturnValue(true)
+    // 默认非平台管理员视角；需要看到 builtin skill 的用例在用例内显式置 true。
+    authState.isPlatformAdmin = false
   })
 
   // ======== 已安装：status 徽章渲染 ========
@@ -225,6 +235,8 @@ describe('SkillManager', () => {
 
   it('已安装列表渲染 builtin 状态徽章为「内置」', () => {
     // 覆盖镜像内置 skill（只读展示，不可卸载）的状态文案。
+    // builtin 仅平台管理员可见，故以平台管理员视角断言徽章渲染。
+    authState.isPlatformAdmin = true
     appSkillsState.data.value = [
       { name: 'skill-builtin', status: 'builtin', source: undefined, version: '1.0.0' },
     ]
@@ -317,6 +329,8 @@ describe('SkillManager', () => {
 
   it('builtin skill 操作列显示「内置只读」而非卸载按钮', () => {
     // 覆盖镜像内置 skill 只读展示，即使有权限也不允许卸载。
+    // builtin 仅平台管理员可见，故以平台管理员视角断言操作列只读。
+    authState.isPlatformAdmin = true
     appSkillsState.data.value = [
       { name: 'skill-builtin2', status: 'builtin', source: undefined, version: '1.0.0' },
     ]
@@ -392,7 +406,9 @@ describe('SkillManager', () => {
 
   it('多来源时展示来源筛选 tag 且各带数量统计（全部为总数）', () => {
     // 覆盖：列表含 platform/clawhub/builtin 三类来源时，筛选工具栏展示「全部/平台库/ClawHub/内置」
-    // 四个 tag，每个 tag 文案带该来源数量，「全部」为总数 3。
+    // 四个 tag，每个 tag 文案带该来源数量，「全部」为总数 4。
+    // 含 builtin 来源，须以平台管理员视角才能看到内置筛选项与计数。
+    authState.isPlatformAdmin = true
     appSkillsState.data.value = [
       { name: 'p1', status: 'active', source: 'platform', version: '1.0.0' },
       { name: 'p2', status: 'active', source: 'platform', version: '1.0.0' },
@@ -435,6 +451,8 @@ describe('SkillManager', () => {
 
   it('仅单一来源时不展示筛选工具栏、改显示总数统计行', () => {
     // 边界：全部 skill 同属一种来源（builtin）时筛选无意义，工具栏隐藏，改为一行「共 N 个技能」。
+    // 列表全为 builtin，须平台管理员视角才可见（非管理员会被隐藏成空列表）。
+    authState.isPlatformAdmin = true
     appSkillsState.data.value = [
       { name: 'b1', status: 'builtin', source: undefined, version: '内置' },
       { name: 'b2', status: 'builtin', source: undefined, version: '内置' },
@@ -442,6 +460,48 @@ describe('SkillManager', () => {
     const wrapper = mountManager()
     expect(wrapper.find('.installed-toolbar').exists()).toBe(false)
     expect(wrapper.find('.installed-count').text()).toContain('共 2 个技能')
+  })
+
+  // ======== 已安装：内置 skill 按角色隐藏 ========
+
+  it('非平台管理员已安装列表隐藏 builtin skill 且来源筛选不含「内置」', () => {
+    // 覆盖核心需求：内置 skill 对普通用户（org_member）直接隐藏——
+    // 表格不渲染 builtin 行、来源筛选不出现「内置」项、「全部」计数不含 builtin。
+    authState.isPlatformAdmin = false
+    appSkillsState.data.value = [
+      { name: 'p1', status: 'active', source: 'platform', version: '1.0.0' },
+      { name: 'c1', status: 'active', source: 'clawhub', version: '1.0.0' },
+      { name: 'b1', status: 'builtin', source: undefined, version: '内置' },
+    ]
+    const wrapper = mountManager()
+    // 表格仅 2 行（platform + clawhub），builtin 行被隐藏。
+    const names = wrapper.findAll('.cell-name').map((c) => c.text())
+    expect(names.length).toBe(2)
+    expect(names.join()).not.toContain('b1')
+    // 来源筛选「全部」计数为 2（不含 builtin），且无「内置」筛选项。
+    const toolbar = wrapper.find('.installed-toolbar')
+    expect(toolbar.text()).toContain('全部 (2)')
+    expect(toolbar.text()).not.toContain('内置')
+  })
+
+  it('平台管理员已安装列表展示 builtin skill 与「内置」筛选项', () => {
+    // 覆盖：平台管理员需运维排查内置 skill，故 builtin 对其可见——
+    // 表格渲染 builtin 行、来源筛选含「内置 (1)」、「全部」计数包含 builtin。
+    authState.isPlatformAdmin = true
+    appSkillsState.data.value = [
+      { name: 'p1', status: 'active', source: 'platform', version: '1.0.0' },
+      { name: 'c1', status: 'active', source: 'clawhub', version: '1.0.0' },
+      { name: 'b1', status: 'builtin', source: undefined, version: '内置' },
+    ]
+    const wrapper = mountManager()
+    // 表格渲染全部 3 行，含 builtin。
+    const names = wrapper.findAll('.cell-name').map((c) => c.text())
+    expect(names.length).toBe(3)
+    expect(names.join()).toContain('b1')
+    // 来源筛选含「内置 (1)」，「全部」计数为 3。
+    const toolbar = wrapper.find('.installed-toolbar')
+    expect(toolbar.text()).toContain('全部 (3)')
+    expect(toolbar.text()).toContain('内置 (1)')
   })
 
   // ======== 已安装：已安装列表首列标题 ========

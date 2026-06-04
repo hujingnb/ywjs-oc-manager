@@ -135,9 +135,22 @@ const reinstallMutation = useReinstallAppSkill(appIdRef)
 const activeTab = ref<'installed' | 'market'>('installed')
 
 // installedNames 将已安装 skill name 放入 Set，用于市场安装按钮去重判断。
+// 取自完整列表（而非 visibleAppSkills）：市场只含 platform/clawhub 来源、不含 builtin，
+// 去重判断不受内置隐藏影响，用全集更稳妥。
 const installedNames = computed<Set<string>>(() => {
   const names = appSkillsQuery.data.value?.map((s) => s.name) ?? []
   return new Set(names)
+})
+
+// visibleAppSkills：已安装列表的「可见集合」，作为来源筛选计数与表格渲染的共同数据源。
+// 内置 skill（status==='builtin'，含 oc-kb 等运行时强制系统 skill）对普通用户只读、无操作
+// 价值且数量较多，默认对非平台管理员隐藏，让企业管理员/成员只看到自己可管理的来源；
+// 平台管理员仍可见，便于运维排查内置 skill 状态。隐藏在前端做（与来源筛选同口径），
+// 后端仍返回全集。
+const visibleAppSkills = computed<AppSkill[]>(() => {
+  const all = appSkillsQuery.data.value ?? []
+  if (auth.isPlatformAdmin) return all
+  return all.filter((row) => row.status !== 'builtin')
 })
 
 // sourceLabel 将来源字符串转换为用户可读标签。
@@ -193,7 +206,7 @@ function installedSourceKey(row: AppSkill): string {
 // 每项带 count 数量统计（「全部」为总数）。避免展示没有数据的空筛选项
 // （如实例无 clawhub skill 时不显示「ClawHub」）。
 const installedSourceFilters = computed(() => {
-  const all = appSkillsQuery.data.value ?? []
+  const all = visibleAppSkills.value
   // 统计每个来源类别的 skill 数量。
   const counts = new Map<string, number>()
   for (const row of all) {
@@ -212,7 +225,7 @@ const installedSourceFilters = computed(() => {
 
 // filteredAppSkills 按选中来源筛选已安装列表（「全部」时原样返回）。
 const filteredAppSkills = computed<AppSkill[]>(() => {
-  const all = appSkillsQuery.data.value ?? []
+  const all = visibleAppSkills.value
   if (!selectedInstalledSource.value) return all
   return all.filter((row) => installedSourceKey(row) === selectedInstalledSource.value)
 })
