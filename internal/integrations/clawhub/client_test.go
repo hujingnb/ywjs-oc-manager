@@ -17,7 +17,8 @@ func TestClawHubClient_Search(t *testing.T) {
 		assert.Equal(t, "/api/v1/search", r.URL.Path)
 		assert.Equal(t, "weather", r.URL.Query().Get("q"))
 		w.Header().Set("Content-Type", "application/json")
-		_, _ = w.Write([]byte(`{"skills":[{"slug":"weather","name":"weather","description":"天气","version":"1.2","downloads":100}],"next_cursor":"c2"}`))
+		// clawhubcn 真实 schema：items + displayName/summary/tags.latest/stats.downloads + nextCursor。
+		_, _ = w.Write([]byte(`{"items":[{"slug":"weather","displayName":"Weather","summary":"天气","tags":{"latest":"1.2"},"stats":{"downloads":100}}],"nextCursor":"c2"}`))
 	}))
 	defer srv.Close()
 
@@ -25,9 +26,44 @@ func TestClawHubClient_Search(t *testing.T) {
 	res, err := c.Search(context.Background(), "weather", "")
 	require.NoError(t, err)
 	require.Len(t, res.Skills, 1)
-	// 验证 slug 与游标正确解析
+	// 验证 clawhubcn 字段映射到扁平 Skill：displayName→Name、summary→Description、tags.latest→Version、stats.downloads→Downloads。
 	assert.Equal(t, "weather", res.Skills[0].Slug)
+	assert.Equal(t, "Weather", res.Skills[0].Name)
+	assert.Equal(t, "天气", res.Skills[0].Description)
+	assert.Equal(t, "1.2", res.Skills[0].Version)
+	assert.Equal(t, int64(100), res.Skills[0].Downloads)
 	assert.Equal(t, "c2", res.NextCursor)
+}
+
+// GetSkill 解包 clawhubcn 详情 {skill,latestVersion} 并映射字段。
+func TestClawHubClient_GetSkill(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		assert.Equal(t, "/api/v1/skills/weather", r.URL.Path)
+		_, _ = w.Write([]byte(`{"skill":{"slug":"weather","displayName":"Weather","summary":"天气","tags":{"latest":"2.0"},"stats":{"downloads":50}},"latestVersion":{"version":"2.0"}}`))
+	}))
+	defer srv.Close()
+
+	c := NewClient(srv.URL, 0)
+	sk, err := c.GetSkill(context.Background(), "weather")
+	require.NoError(t, err)
+	assert.Equal(t, "weather", sk.Slug)
+	assert.Equal(t, "Weather", sk.Name)
+	assert.Equal(t, "2.0", sk.Version)
+}
+
+// ListVersions 解包 clawhubcn 的 {items:[{version}]} 为版本数组。
+func TestClawHubClient_ListVersions(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		assert.Equal(t, "/api/v1/skills/weather/versions", r.URL.Path)
+		_, _ = w.Write([]byte(`{"items":[{"version":"2.0"},{"version":"1.0"}],"nextCursor":null}`))
+	}))
+	defer srv.Close()
+
+	c := NewClient(srv.URL, 0)
+	vs, err := c.ListVersions(context.Background(), "weather")
+	require.NoError(t, err)
+	require.Len(t, vs, 2)
+	assert.Equal(t, "2.0", vs[0].Version)
 }
 
 // Download 调 /api/v1/download 返回归档原始字节与扩展名 zip。

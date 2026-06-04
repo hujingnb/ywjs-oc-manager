@@ -73,21 +73,35 @@ func (c *ClawHubClient) Search(ctx context.Context, q, cursor string) (SearchRes
 }
 
 // GetSkill 取单个 skill 的详细元数据。
+// clawhubcn 详情响应为 {"skill":{...},"latestVersion":{"version":...}}，需解包 skill 字段；
+// skill 内缺版本时用顶层 latestVersion 补齐。
 func (c *ClawHubClient) GetSkill(ctx context.Context, slug string) (Skill, error) {
-	var out Skill
+	var out struct {
+		Skill         Skill `json:"skill"`
+		LatestVersion struct {
+			Version string `json:"version"`
+		} `json:"latestVersion"`
+	}
 	if err := c.getJSON(ctx, "/api/v1/skills/"+url.PathEscape(slug), nil, &out); err != nil {
 		return Skill{}, err
 	}
-	return out, nil
+	sk := out.Skill
+	if sk.Version == "" {
+		sk.Version = out.LatestVersion.Version
+	}
+	return sk, nil
 }
 
 // ListVersions 列出某 skill 的全部历史版本。
+// clawhubcn 响应为 {"items":[{"version":...}],"nextCursor":...}，需解包 items。
 func (c *ClawHubClient) ListVersions(ctx context.Context, slug string) ([]SkillVersion, error) {
-	var out []SkillVersion
+	var out struct {
+		Items []SkillVersion `json:"items"`
+	}
 	if err := c.getJSON(ctx, "/api/v1/skills/"+url.PathEscape(slug)+"/versions", nil, &out); err != nil {
 		return nil, err
 	}
-	return out, nil
+	return out.Items, nil
 }
 
 // Download 下载指定版本的 skill 归档原始字节（ClawHub 返回 zip 格式）。
