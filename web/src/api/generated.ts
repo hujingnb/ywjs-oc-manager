@@ -8217,6 +8217,76 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/skill-market/download": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** 下载 skill 归档（仅平台管理员） */
+        get: {
+            parameters: {
+                query: {
+                    /** @description 来源：platform | clawhub */
+                    source: string;
+                    /** @description 来源内标识：platform=name，clawhub=slug */
+                    ref: string;
+                    /** @description 版本号 */
+                    version: string;
+                };
+                header?: never;
+                path?: never;
+                cookie?: never;
+            };
+            requestBody?: never;
+            responses: {
+                /** @description 归档文件 */
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/octet-stream": Record<string, never>;
+                    };
+                };
+                /** @description Bad Request */
+                400: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/octet-stream": components["schemas"]["handlers.ErrorResponse"];
+                    };
+                };
+                /** @description Forbidden */
+                403: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/octet-stream": components["schemas"]["handlers.ErrorResponse"];
+                    };
+                };
+                /** @description Internal Server Error */
+                500: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/octet-stream": components["schemas"]["handlers.ErrorResponse"];
+                    };
+                };
+            };
+        };
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/usage/members/{userId}": {
         parameters: {
             query?: never;

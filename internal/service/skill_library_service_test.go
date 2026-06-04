@@ -24,6 +24,8 @@ type stubSource struct {
 	detail SkillDetailResult
 	// versions 是 Versions() 的预设返回值。
 	versions []SkillVersionResult
+	// downloadData 是 Download() 的预设归档字节。
+	downloadData []byte
 }
 
 // Kind 实现 SkillSource，返回预设的来源标识。
@@ -51,6 +53,18 @@ func (s *stubSource) Versions(_ context.Context, _ auth.Principal, _ string) ([]
 		return nil, s.err
 	}
 	return s.versions, nil
+}
+
+// Download 实现 SkillSource，返回预设的归档字节或错误（ext 取自 kind：platform=tar，其余=zip）。
+func (s *stubSource) Download(_ context.Context, _, _ string) ([]byte, string, error) {
+	if s.err != nil {
+		return nil, "", s.err
+	}
+	ext := "zip"
+	if s.kind == "platform" {
+		ext = "tar"
+	}
+	return s.downloadData, ext, nil
 }
 
 // TestSkillLibraryService_List 覆盖四类 source 参数的路由分支：
@@ -169,4 +183,56 @@ func TestSkillLibraryService_Detail(t *testing.T) {
 	_, empty, err := svcNoClaw.Detail(context.Background(), auth.Principal{}, "clawhub", "x")
 	require.NoError(t, err)
 	assert.Empty(t, empty)
+}
+
+// TestSkillLibraryService_Download 覆盖下载的来源路由与归档/扩展名返回：
+//   - platform：走平台来源，ext=tar，字节透传。
+//   - clawhub：走公共来源，ext=zip，字节透传。
+//   - 未知来源：ErrSkillMarketSourceUnknown。
+func TestSkillLibraryService_Download(t *testing.T) {
+	plat := &stubSource{kind: "platform", downloadData: []byte("TAR-BYTES")} // 平台来源预设 tar 字节
+	claw := &stubSource{kind: "clawhub", downloadData: []byte("ZIP-BYTES")}  // 公共来源预设 zip 字节
+	svc := NewSkillLibraryService(plat, claw)
+
+	// platform 来源：返回 tar 字节与 ext=tar。
+	data, ext, err := svc.Download(context.Background(), psvcPlatformPrincipal(), "platform", "weather", "1.0")
+	require.NoError(t, err)
+	assert.Equal(t, []byte("TAR-BYTES"), data)
+	assert.Equal(t, "tar", ext)
+
+	// clawhub 来源：返回 zip 字节与 ext=zip。
+	data, ext, err = svc.Download(context.Background(), psvcPlatformPrincipal(), "clawhub", "self-improving", "2.0")
+	require.NoError(t, err)
+	assert.Equal(t, []byte("ZIP-BYTES"), data)
+	assert.Equal(t, "zip", ext)
+
+	// 未知来源：返回 ErrSkillMarketSourceUnknown。
+	_, _, err = svc.Download(context.Background(), psvcPlatformPrincipal(), "github", "x", "1.0")
+	require.ErrorIs(t, err, ErrSkillMarketSourceUnknown)
+}
+
+// TestSkillLibraryService_Download_Denied 验证非平台管理员下载被拒（ErrSkillMarketDenied）。
+func TestSkillLibraryService_Download_Denied(t *testing.T) {
+	svc := NewSkillLibraryService(&stubSource{kind: "platform"}, &stubSource{kind: "clawhub"})
+	// 空角色（非平台管理员）下载平台技能归档应被拒。
+	_, _, err := svc.Download(context.Background(), auth.Principal{}, "platform", "weather", "1.0")
+	require.ErrorIs(t, err, ErrSkillMarketDenied)
+}
+
+// TestSkillLibraryService_Download_Invalid 验证缺 ref 或 version 时返回 ErrSkillMarketInvalid。
+func TestSkillLibraryService_Download_Invalid(t *testing.T) {
+	svc := NewSkillLibraryService(&stubSource{kind: "platform"}, nil)
+	// 缺版本号。
+	_, _, err := svc.Download(context.Background(), psvcPlatformPrincipal(), "platform", "weather", "")
+	require.ErrorIs(t, err, ErrSkillMarketInvalid)
+	// 缺 ref（name/slug）。
+	_, _, err = svc.Download(context.Background(), psvcPlatformPrincipal(), "platform", "", "1.0")
+	require.ErrorIs(t, err, ErrSkillMarketInvalid)
+}
+
+// TestSkillLibraryService_Download_ClawHubNil 验证未配置公共库时下载 clawhub 来源返回 SourceUnknown。
+func TestSkillLibraryService_Download_ClawHubNil(t *testing.T) {
+	svc := NewSkillLibraryService(&stubSource{kind: "platform"}, nil) // clawhub 未配置
+	_, _, err := svc.Download(context.Background(), psvcPlatformPrincipal(), "clawhub", "x", "1.0")
+	require.ErrorIs(t, err, ErrSkillMarketSourceUnknown)
 }

@@ -443,6 +443,18 @@ func TestCanManagePlatformSkill(t *testing.T) {
 	assert.False(t, CanManagePlatformSkill(Principal{Role: domain.UserRoleOrgMember}))
 }
 
+// TestCanDownloadSkillArchive 验证下载 skill 归档权限：仅平台管理员，org_admin / org_member / 空角色一律拒绝。
+func TestCanDownloadSkillArchive(t *testing.T) {
+	// platform_admin 可下载归档
+	assert.True(t, CanDownloadSkillArchive(Principal{Role: domain.UserRolePlatformAdmin}))
+	// org_admin 不可下载
+	assert.False(t, CanDownloadSkillArchive(Principal{Role: domain.UserRoleOrgAdmin}))
+	// org_member 不可下载
+	assert.False(t, CanDownloadSkillArchive(Principal{Role: domain.UserRoleOrgMember}))
+	// 空角色（未认证）不可下载
+	assert.False(t, CanDownloadSkillArchive(Principal{}))
+}
+
 // TestCanManageAppSkill 验证实例 skill 管理权限：平台管理员可管理任意实例（含跨组织）；
 // 本组织 org_admin、应用 owner 本人可管理；跨组织成员和非 owner 的普通成员不可管理。
 func TestCanManageAppSkill(t *testing.T) {

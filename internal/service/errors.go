@@ -219,3 +219,9 @@ var ErrAppSkillRuntimeUnsupported = errors.New("当前 hermes 运行时版本不
 
 // ErrSkillMarketSourceUnknown 表示请求了未知的 skill 来源。
 var ErrSkillMarketSourceUnknown = errors.New("未知的 skill 来源")
+
+// ErrSkillMarketDenied 表示无权执行该市场操作（如下载归档需平台管理员）。
+var ErrSkillMarketDenied = errors.New("无权执行该 skill 市场操作")
+
+// ErrSkillMarketInvalid 表示市场操作入参非法（如下载缺少版本号/标识）。
+var ErrSkillMarketInvalid = errors.New("skill 市场操作入参非法")

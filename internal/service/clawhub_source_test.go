@@ -26,6 +26,8 @@ type fakeClawHubAPI struct {
 	versions []clawhub.SkillVersion
 	// detail 是 GetSkill 的预设返回值。
 	detail clawhub.SkillDetail
+	// archive 是 Download 的预设归档字节。
+	archive []byte
 }
 
 // Search 实现 ClawHubSearcher 接口：每次调用将 calls 加一并返回预设结果。
@@ -42,6 +44,11 @@ func (f *fakeClawHubAPI) GetSkill(_ context.Context, _ string) (clawhub.SkillDet
 // ListVersions 实现 ClawHubSearcher 接口：返回预设的版本列表。
 func (f *fakeClawHubAPI) ListVersions(_ context.Context, _ string) ([]clawhub.SkillVersion, error) {
 	return f.versions, nil
+}
+
+// Download 实现 ClawHubSearcher 接口：返回预设的归档字节（默认空 zip 占位）。
+func (f *fakeClawHubAPI) Download(_ context.Context, _, _ string) ([]byte, error) {
+	return f.archive, nil
 }
 
 // fakeRedis 是 RedisCache 的内存实现，用 map 模拟 Redis GET/SET 语义。
@@ -156,4 +163,17 @@ func TestClawHubSource_DifferentQueryNotSharedCache(t *testing.T) {
 	require.NoError(t, err)
 	// 第三次 q="foo" 命中缓存，总调用次数仍为 2。
 	assert.Equal(t, 2, api.calls, "q=foo 第二次应命中缓存，总 api 调用次数不变")
+}
+
+// TestClawHubSource_Download 验证公共来源下载：回源 ClawHub 取归档字节，ext=zip。
+func TestClawHubSource_Download(t *testing.T) {
+	// 预设 fake API 的下载归档字节。
+	api := &fakeClawHubAPI{archive: []byte("ZIP-ARCHIVE-BYTES")}
+	src := NewClawHubSource(api, newFakeRedis(), time.Minute)
+
+	got, ext, err := src.Download(context.Background(), "self-improving-agent", "3.0.21")
+	require.NoError(t, err)
+	assert.Equal(t, []byte("ZIP-ARCHIVE-BYTES"), got)
+	// ClawHub 归档格式为 zip。
+	assert.Equal(t, "zip", ext)
 }

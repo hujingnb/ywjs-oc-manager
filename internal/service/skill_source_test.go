@@ -113,3 +113,30 @@ func TestPlatformSource_Search_OrgMemberAllowed(t *testing.T) {
 	require.NoError(t, err)
 	assert.Empty(t, page.Entries)
 }
+
+// TestPlatformSource_Download 验证平台来源下载：上传后可按 name+version 取回归档字节，ext=tar。
+func TestPlatformSource_Download(t *testing.T) {
+	store := newFakePlatformSkillStore()
+	svc := NewPlatformSkillService(store, &fakeLibraryBlob{})
+	src := NewPlatformSource(svc)
+
+	// 先上传一个合法扁平 tar（makeFlatSkillTar 定义于 platform_skill_service_test.go，同包可用）。
+	data := makeFlatSkillTar(t, "weather")
+	_, err := svc.Upload(context.Background(), psvcPlatformPrincipal(), PlatformSkillUploadInput{Name: "weather", Version: "1.0", Data: data})
+	require.NoError(t, err)
+
+	// 下载该版本：返回与上传一致的字节，扩展名为 tar。
+	got, ext, err := src.Download(context.Background(), "weather", "1.0")
+	require.NoError(t, err)
+	assert.Equal(t, data, got)
+	assert.Equal(t, "tar", ext)
+}
+
+// TestPlatformSource_Download_NotFound 验证下载不存在的版本透传 ErrPlatformSkillNotFound。
+func TestPlatformSource_Download_NotFound(t *testing.T) {
+	svc := NewPlatformSkillService(newFakePlatformSkillStore(), &fakeLibraryBlob{})
+	src := NewPlatformSource(svc)
+	// 从未上传，下载应返回 NotFound。
+	_, _, err := src.Download(context.Background(), "missing", "9.9")
+	require.ErrorIs(t, err, ErrPlatformSkillNotFound)
+}

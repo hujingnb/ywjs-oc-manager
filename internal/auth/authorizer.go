@@ -345,6 +345,12 @@ func CanViewPlatformSkillMarket(p Principal) bool {
 	return p.Role != ""
 }
 
+// CanDownloadSkillArchive 判断是否可从详情页下载 skill 归档（平台技能 tar / ClawHub zip）：
+// 仅平台管理员。下载会拿到完整归档原始字节，属受限运维操作，故权限比「浏览市场」更严。
+func CanDownloadSkillArchive(p Principal) bool {
+	return p.Role == domain.UserRolePlatformAdmin
+}
+
 // CanManageAppSkill 判断是否可管理某 app 的 skill：平台管理员可管理任意实例；
 // 否则与应用写权限同款（owner 本人 / 本 org 的 org_admin）。
 // 注意：删除「当前版本必需的 skill」对所有角色仍禁止，由 service 层 ErrAppSkillProtected 保证。

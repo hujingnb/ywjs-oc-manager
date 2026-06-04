@@ -97,3 +97,33 @@ func (s *SkillLibraryService) Detail(ctx context.Context, principal auth.Princip
 	}
 	return detail, versions, nil
 }
+
+// Download 取指定 skill 某版本归档的原始字节与扩展名（platform=tar，clawhub=zip），供详情页下载。
+// 仅平台管理员可调用（CanDownloadSkillArchive）；ref/version 缺一不可。
+//   - source="platform"：复用平台库归档（GetForInstall）。
+//   - source="clawhub"：回源 ClawHub 下载；clawhub 未配置（nil）时返回 ErrSkillMarketSourceUnknown。
+//   - 其他值：ErrSkillMarketSourceUnknown。
+func (s *SkillLibraryService) Download(ctx context.Context, principal auth.Principal, source, ref, version string) ([]byte, string, error) {
+	// 下载会拿到完整归档原始字节，限平台管理员。
+	if !auth.CanDownloadSkillArchive(principal) {
+		return nil, "", ErrSkillMarketDenied
+	}
+	// ref（name/slug）与 version 都必填，否则无法定位归档。
+	if ref == "" || version == "" {
+		return nil, "", ErrSkillMarketInvalid
+	}
+	var src SkillSource
+	switch source {
+	case "platform":
+		src = s.platform
+	case "clawhub":
+		// 未配置公共库时无法下载 clawhub 归档。
+		if s.clawhub == nil {
+			return nil, "", ErrSkillMarketSourceUnknown
+		}
+		src = s.clawhub
+	default:
+		return nil, "", ErrSkillMarketSourceUnknown
+	}
+	return src.Download(ctx, ref, version)
+}

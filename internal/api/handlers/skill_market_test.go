@@ -23,6 +23,10 @@ type skillMarketServiceStub struct {
 	// detail/versions 是 Detail() 的预设返回值。
 	detail   service.SkillDetailResult
 	versions []service.SkillVersionResult
+	// downloadData/downloadExt/downloadErr 是 Download() 的预设返回值。
+	downloadData []byte
+	downloadExt  string
+	downloadErr  error
 }
 
 // List 实现 skillMarketService，返回预设的 SkillPage 或错误。
@@ -33,6 +37,11 @@ func (s *skillMarketServiceStub) List(_ context.Context, _ auth.Principal, _, _,
 // Detail 实现 skillMarketService，返回预设的详情与版本列表或错误。
 func (s *skillMarketServiceStub) Detail(_ context.Context, _ auth.Principal, _, _ string) (service.SkillDetailResult, []service.SkillVersionResult, error) {
 	return s.detail, s.versions, s.err
+}
+
+// Download 实现 skillMarketService，返回预设的归档字节/扩展名或错误。
+func (s *skillMarketServiceStub) Download(_ context.Context, _ auth.Principal, _, _, _ string) ([]byte, string, error) {
+	return s.downloadData, s.downloadExt, s.downloadErr
 }
 
 // TestSkillMarketHandler_List_OK 验证正常路径：
@@ -134,4 +143,69 @@ func TestSkillMarketHandler_List_InternalError(t *testing.T) {
 
 	// 服务器内部错误应返回 500。
 	assert.Equal(t, http.StatusInternalServerError, rec.Code)
+}
+
+// TestSkillMarketHandler_Download_OK 验证下载正常路径：
+// service 返回归档字节与 ext=tar 时，handler 响应 200，带 Content-Disposition 附件头与正确 Content-Type，body 为原始字节。
+func TestSkillMarketHandler_Download_OK(t *testing.T) {
+	stub := &skillMarketServiceStub{downloadData: []byte("TAR-BYTES"), downloadExt: "tar"}
+	gin.SetMode(gin.TestMode)
+	r := gin.New()
+	RegisterSkillMarketRoutes(r, NewSkillMarketHandler(stub))
+
+	req := httptest.NewRequest(http.MethodGet, "/api/v1/skill-market/download?source=platform&ref=weather&version=1.0", nil)
+	rec := httptest.NewRecorder()
+	r.ServeHTTP(rec, withPrincipal(req, auth.Principal{UserID: "u1"}))
+
+	// 200 + 原始字节 + 附件文件名 weather-1.0.tar + tar Content-Type。
+	assert.Equal(t, http.StatusOK, rec.Code)
+	assert.Equal(t, "TAR-BYTES", rec.Body.String())
+	assert.Contains(t, rec.Header().Get("Content-Disposition"), `filename="weather-1.0.tar"`)
+	assert.Equal(t, "application/x-tar", rec.Header().Get("Content-Type"))
+}
+
+// TestSkillMarketHandler_Download_ClawHubZip 验证 clawhub 下载返回 zip 文件名与 Content-Type。
+func TestSkillMarketHandler_Download_ClawHubZip(t *testing.T) {
+	stub := &skillMarketServiceStub{downloadData: []byte("ZIP"), downloadExt: "zip"}
+	gin.SetMode(gin.TestMode)
+	r := gin.New()
+	RegisterSkillMarketRoutes(r, NewSkillMarketHandler(stub))
+
+	req := httptest.NewRequest(http.MethodGet, "/api/v1/skill-market/download?source=clawhub&ref=self-improving&version=3.0", nil)
+	rec := httptest.NewRecorder()
+	r.ServeHTTP(rec, withPrincipal(req, auth.Principal{UserID: "u1"}))
+
+	assert.Equal(t, http.StatusOK, rec.Code)
+	assert.Contains(t, rec.Header().Get("Content-Disposition"), `filename="self-improving-3.0.zip"`)
+	assert.Equal(t, "application/zip", rec.Header().Get("Content-Type"))
+}
+
+// TestSkillMarketHandler_Download_Denied 验证 service 返回 Denied 时 handler 响应 403。
+func TestSkillMarketHandler_Download_Denied(t *testing.T) {
+	stub := &skillMarketServiceStub{downloadErr: service.ErrSkillMarketDenied}
+	gin.SetMode(gin.TestMode)
+	r := gin.New()
+	RegisterSkillMarketRoutes(r, NewSkillMarketHandler(stub))
+
+	req := httptest.NewRequest(http.MethodGet, "/api/v1/skill-market/download?source=platform&ref=weather&version=1.0", nil)
+	rec := httptest.NewRecorder()
+	r.ServeHTTP(rec, withPrincipal(req, auth.Principal{UserID: "u1"}))
+
+	// 无权下载映射为 403。
+	assert.Equal(t, http.StatusForbidden, rec.Code)
+}
+
+// TestSkillMarketHandler_Download_Invalid 验证 service 返回 Invalid 时 handler 响应 400。
+func TestSkillMarketHandler_Download_Invalid(t *testing.T) {
+	stub := &skillMarketServiceStub{downloadErr: service.ErrSkillMarketInvalid}
+	gin.SetMode(gin.TestMode)
+	r := gin.New()
+	RegisterSkillMarketRoutes(r, NewSkillMarketHandler(stub))
+
+	req := httptest.NewRequest(http.MethodGet, "/api/v1/skill-market/download?source=platform&ref=weather", nil)
+	rec := httptest.NewRecorder()
+	r.ServeHTTP(rec, withPrincipal(req, auth.Principal{UserID: "u1"}))
+
+	// 入参非法映射为 400。
+	assert.Equal(t, http.StatusBadRequest, rec.Code)
 }

@@ -23,6 +23,8 @@ type ClawHubSearcher interface {
 	GetSkill(ctx context.Context, slug string) (clawhub.SkillDetail, error)
 	// ListVersions 列出指定 slug 的全部历史版本（含 changelog/发布时间）。
 	ListVersions(ctx context.Context, slug string) ([]clawhub.SkillVersion, error)
+	// Download 下载指定版本的 skill 归档原始字节（ClawHub 返回 zip 格式）。
+	Download(ctx context.Context, slug, version string) ([]byte, error)
 }
 
 // RedisCache 是 ClawHubSource 依赖的最小缓存能力接口。
@@ -148,6 +150,16 @@ func (s *ClawHubSource) Versions(ctx context.Context, _ auth.Principal, ref stri
 		out = append(out, SkillVersionResult{Version: v.Version, Changelog: v.Changelog, PublishedAt: v.CreatedAt})
 	}
 	return out, nil
+}
+
+// Download 取公共库 slug=ref、version 的归档原始字节，扩展名固定为 zip（ClawHub 归档格式）。
+// 直接回源 ClawHub /download，不走缓存（下载低频且为二进制大对象）。
+func (s *ClawHubSource) Download(ctx context.Context, ref, version string) ([]byte, string, error) {
+	data, err := s.api.Download(ctx, ref, version)
+	if err != nil {
+		return nil, "", err
+	}
+	return data, "zip", nil
 }
 
 // 编译期断言：ClawHubSource 必须实现 SkillSource 接口。

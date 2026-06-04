@@ -7272,6 +7272,57 @@ paths:
       summary: 查询某 skill 的详情与版本列表
       tags:
       - skill-market
+  /skill-market/download:
+    get:
+      parameters:
+      - description: 来源：platform | clawhub
+        in: query
+        name: source
+        required: true
+        schema:
+          type: string
+      - description: 来源内标识：platform=name，clawhub=slug
+        in: query
+        name: ref
+        required: true
+        schema:
+          type: string
+      - description: 版本号
+        in: query
+        name: version
+        required: true
+        schema:
+          type: string
+      responses:
+        "200":
+          content:
+            application/octet-stream:
+              schema:
+                type: file
+          description: 归档文件
+        "400":
+          content:
+            application/octet-stream:
+              schema:
+                $ref: '#/components/schemas/handlers.ErrorResponse'
+          description: Bad Request
+        "403":
+          content:
+            application/octet-stream:
+              schema:
+                $ref: '#/components/schemas/handlers.ErrorResponse'
+          description: Forbidden
+        "500":
+          content:
+            application/octet-stream:
+              schema:
+                $ref: '#/components/schemas/handlers.ErrorResponse'
+          description: Internal Server Error
+      security:
+      - BearerAuth: []
+      summary: 下载 skill 归档（仅平台管理员）
+      tags:
+      - skill-market
   /usage/members/{userId}:
     get:
       description: 返回指定成员名下应用的 token 调用日志（LogsPage 格式）

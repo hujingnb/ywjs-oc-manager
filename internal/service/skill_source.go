@@ -74,6 +74,9 @@ type SkillSource interface {
 	Detail(ctx context.Context, principal auth.Principal, ref string) (SkillDetailResult, error)
 	// Versions 返回指定 skill 的全部历史版本（含 changelog/发布时间），从新到旧排序。
 	Versions(ctx context.Context, principal auth.Principal, ref string) ([]SkillVersionResult, error)
+	// Download 取指定版本归档的原始字节与扩展名（platform=tar，clawhub=zip），供下载。
+	// 权限由聚合层（SkillLibraryService.Download）统一校验，本方法不做鉴权。
+	Download(ctx context.Context, ref, version string) (data []byte, ext string, err error)
 }
 
 // platformSkillLister 是 PlatformSource 所需的平台库查询能力最小接口。
@@ -81,6 +84,8 @@ type SkillSource interface {
 type platformSkillLister interface {
 	// ListForMarket 返回全部平台库 skill，市场展示用（所有已登录用户均可调用）。
 	ListForMarket(ctx context.Context, principal auth.Principal) ([]PlatformSkillResult, error)
+	// GetForInstall 取平台库 skill 指定版本的归档字节与 sha256，供下载/安装复用。
+	GetForInstall(ctx context.Context, name, version string) (archive []byte, sha string, err error)
 }
 
 // PlatformSource 把平台库（platform_skills）适配为 SkillSource。
@@ -197,6 +202,16 @@ func (s *PlatformSource) Search(ctx context.Context, principal auth.Principal, q
 		})
 	}
 	return SkillPage{Entries: entries, NextCursor: ""}, nil
+}
+
+// Download 取平台库 skill 指定 name=ref、version 的归档原始字节，扩展名固定为 tar。
+// 直接复用 GetForInstall（与安装到实例同一份归档），不存在时透传 ErrPlatformSkillNotFound。
+func (s *PlatformSource) Download(ctx context.Context, ref, version string) ([]byte, string, error) {
+	data, _, err := s.svc.GetForInstall(ctx, ref, version)
+	if err != nil {
+		return nil, "", err
+	}
+	return data, "tar", nil
 }
 
 // 编译期断言：PlatformSource 必须实现 SkillSource 接口。
