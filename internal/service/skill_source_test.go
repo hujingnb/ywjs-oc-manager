@@ -15,13 +15,13 @@ func TestPlatformSource_Search(t *testing.T) {
 	svc := NewPlatformSkillService(store, &fakeLibraryBlob{})
 
 	// 上传 weather@1.0 与 weather@2.0，期望聚合后只有一条且版本为 2.0（最新）。
-	_, err := svc.Upload(context.Background(), psvcPlatformPrincipal(), PlatformSkillUploadInput{Name: "weather", Version: "1.0", Data: []byte("a")})
+	_, err := svc.Upload(context.Background(), psvcPlatformPrincipal(), PlatformSkillUploadInput{Name: "weather", Version: "1.0", Data: makeFlatSkillTar(t, "weather")})
 	require.NoError(t, err)
-	_, err = svc.Upload(context.Background(), psvcPlatformPrincipal(), PlatformSkillUploadInput{Name: "weather", Version: "2.0", Data: []byte("b")})
+	_, err = svc.Upload(context.Background(), psvcPlatformPrincipal(), PlatformSkillUploadInput{Name: "weather", Version: "2.0", Data: makeFlatSkillTar(t, "weather")})
 	require.NoError(t, err)
 
 	// 上传 translate@1.0，用于验证 q 过滤效果（不匹配 "weather"）。
-	_, err = svc.Upload(context.Background(), psvcPlatformPrincipal(), PlatformSkillUploadInput{Name: "translate", Version: "1.0", Data: []byte("c")})
+	_, err = svc.Upload(context.Background(), psvcPlatformPrincipal(), PlatformSkillUploadInput{Name: "translate", Version: "1.0", Data: makeFlatSkillTar(t, "translate")})
 	require.NoError(t, err)
 
 	src := NewPlatformSource(svc)
@@ -50,11 +50,11 @@ func TestPlatformSource_Versions(t *testing.T) {
 	store := newFakePlatformSkillStore()
 	svc := NewPlatformSkillService(store, &fakeLibraryBlob{})
 	// weather 两个版本 + translate 一个版本（用于验证不串名）。
-	_, err := svc.Upload(context.Background(), psvcPlatformPrincipal(), PlatformSkillUploadInput{Name: "weather", Version: "1.0", Data: []byte("a")})
+	_, err := svc.Upload(context.Background(), psvcPlatformPrincipal(), PlatformSkillUploadInput{Name: "weather", Version: "1.0", Data: makeFlatSkillTar(t, "weather")})
 	require.NoError(t, err)
-	_, err = svc.Upload(context.Background(), psvcPlatformPrincipal(), PlatformSkillUploadInput{Name: "weather", Version: "2.0", Data: []byte("b")})
+	_, err = svc.Upload(context.Background(), psvcPlatformPrincipal(), PlatformSkillUploadInput{Name: "weather", Version: "2.0", Data: makeFlatSkillTar(t, "weather")})
 	require.NoError(t, err)
-	_, err = svc.Upload(context.Background(), psvcPlatformPrincipal(), PlatformSkillUploadInput{Name: "translate", Version: "9.0", Data: []byte("c")})
+	_, err = svc.Upload(context.Background(), psvcPlatformPrincipal(), PlatformSkillUploadInput{Name: "translate", Version: "9.0", Data: makeFlatSkillTar(t, "translate")})
 	require.NoError(t, err)
 
 	src := NewPlatformSource(svc)
@@ -81,11 +81,11 @@ func TestPlatformSource_Search_All(t *testing.T) {
 	svc := NewPlatformSkillService(store, &fakeLibraryBlob{})
 
 	// 上传 weather@1.0、weather@2.0、translate@1.0，共两个不同 name。
-	_, err := svc.Upload(context.Background(), psvcPlatformPrincipal(), PlatformSkillUploadInput{Name: "weather", Version: "1.0", Data: []byte("a")})
+	_, err := svc.Upload(context.Background(), psvcPlatformPrincipal(), PlatformSkillUploadInput{Name: "weather", Version: "1.0", Data: makeFlatSkillTar(t, "weather")})
 	require.NoError(t, err)
-	_, err = svc.Upload(context.Background(), psvcPlatformPrincipal(), PlatformSkillUploadInput{Name: "weather", Version: "2.0", Data: []byte("b")})
+	_, err = svc.Upload(context.Background(), psvcPlatformPrincipal(), PlatformSkillUploadInput{Name: "weather", Version: "2.0", Data: makeFlatSkillTar(t, "weather")})
 	require.NoError(t, err)
-	_, err = svc.Upload(context.Background(), psvcPlatformPrincipal(), PlatformSkillUploadInput{Name: "translate", Version: "1.0", Data: []byte("c")})
+	_, err = svc.Upload(context.Background(), psvcPlatformPrincipal(), PlatformSkillUploadInput{Name: "translate", Version: "1.0", Data: makeFlatSkillTar(t, "translate")})
 	require.NoError(t, err)
 
 	src := NewPlatformSource(svc)

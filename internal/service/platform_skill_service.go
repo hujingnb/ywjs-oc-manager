@@ -1,6 +1,7 @@
 package service
 
 import (
+	"bytes"
 	"context"
 	"crypto/sha256"
 	"database/sql"
@@ -14,6 +15,7 @@ import (
 	"github.com/guregu/null/v5"
 
 	"oc-manager/internal/auth"
+	"oc-manager/internal/integrations/hermes"
 	"oc-manager/internal/store/sqlc"
 )
 
@@ -108,6 +110,12 @@ func (s *PlatformSkillService) Upload(ctx context.Context, principal auth.Princi
 	version := strings.TrimSpace(in.Version)
 	if name == "" || version == "" || len(in.Data) == 0 {
 		return PlatformSkillResult{}, fmt.Errorf("%w: name/version/内容不能为空", ErrPlatformSkillInvalid)
+	}
+	// 后端结构校验防线：归档必须遵循扁平契约（根级 SKILL.md + frontmatter 含非空 name + 无越界路径）。
+	// 前端已在打包阶段校验，但 curl / 旧客户端可能绕过前端传入坏包；坏包若放过，会到「安装到实例」
+	// 阶段才暴露（SKILL.md 落不到正确目录、对账永远 pending），故在上传入口即拦截。
+	if _, err := hermes.InspectFlatSkillArchive(bytes.NewReader(in.Data)); err != nil {
+		return PlatformSkillResult{}, fmt.Errorf("%w: %v", ErrPlatformSkillInvalid, err)
 	}
 	// 查重：同名同版本已存在则返回 NameVersionTaken。
 	if _, err := s.store.GetPlatformSkillByNameVersion(ctx, sqlc.GetPlatformSkillByNameVersionParams{Name: name, Version: version}); err == nil {

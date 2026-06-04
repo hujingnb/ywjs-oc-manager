@@ -90,3 +90,67 @@ func TestInspectSkillArchiveAcceptsProperLayout(t *testing.T) {
 	require.NoError(t, err)
 	assert.Equal(t, "verify-skill", info.Name)
 }
+
+// ===== InspectFlatSkillArchive（扁平契约，平台库上传使用）=====
+// 布局规则与上面的 InspectSkillArchive 相反：SKILL.md 必须在归档根级，<子目录>/SKILL.md 被拒。
+
+// TestInspectFlatSkillArchiveAcceptsRootSkillMD 验证根级 SKILL.md 的扁平归档通过校验，
+// 且 name 取自 frontmatter（与运行时 install_skill / render_skills 的扁平契约一致）。
+func TestInspectFlatSkillArchiveAcceptsRootSkillMD(t *testing.T) {
+	// 根级 SKILL.md（path = "SKILL.md"）+ 一个同在根级的附属文件，期望解析成功。
+	skillMD := "---\nname: weather\ndescription: 查天气\n---\n# 天气\n正文"
+	data := makeTar(t, map[string]string{"SKILL.md": skillMD, "run.sh": "echo hi"})
+	info, err := InspectFlatSkillArchive(bytes.NewReader(data))
+	require.NoError(t, err)
+	assert.Equal(t, "weather", info.Name)
+}
+
+// TestInspectFlatSkillArchiveAcceptsRootSkillMDWithSubdir 验证带子目录的扁平归档通过校验：
+// 只要根级存在 SKILL.md，子目录内的其它文件（含恰好叫 SKILL.md 的附属文件）不影响判定。
+func TestInspectFlatSkillArchiveAcceptsRootSkillMDWithSubdir(t *testing.T) {
+	// 根级 SKILL.md 为技能主文件；examples/SKILL.md 仅是子目录附属文件，不应导致 NotFlat。
+	skillMD := "---\nname: demo\n---\n正文"
+	data := makeTar(t, map[string]string{"SKILL.md": skillMD, "examples/SKILL.md": "x", "scripts/run.py": "y"})
+	info, err := InspectFlatSkillArchive(bytes.NewReader(data))
+	require.NoError(t, err)
+	assert.Equal(t, "demo", info.Name)
+}
+
+// TestInspectFlatSkillArchiveRejectsNestedSkillMD 验证仅含 <子目录>/SKILL.md（无根级）时被拒。
+// 这正是嵌套布局——会导致解压后 SKILL.md 落不到技能目录根，对账永远 pending。
+func TestInspectFlatSkillArchiveRejectsNestedSkillMD(t *testing.T) {
+	// 仅 weather/SKILL.md，根级无 SKILL.md，应返回 ErrSkillArchiveNotFlat。
+	data := makeTar(t, map[string]string{"weather/SKILL.md": "---\nname: weather\n---\n正文"})
+	_, err := InspectFlatSkillArchive(bytes.NewReader(data))
+	require.ErrorIs(t, err, ErrSkillArchiveNotFlat)
+}
+
+// TestInspectFlatSkillArchiveRejectsMissingSkillMD 验证整个归档无 SKILL.md 时报 NoSkillMD。
+func TestInspectFlatSkillArchiveRejectsMissingSkillMD(t *testing.T) {
+	// 仅含一个无关文件，无任何 SKILL.md。
+	data := makeTar(t, map[string]string{"readme.txt": "hello"})
+	_, err := InspectFlatSkillArchive(bytes.NewReader(data))
+	require.ErrorIs(t, err, ErrSkillArchiveNoSkillMD)
+}
+
+// TestInspectFlatSkillArchiveRejectsNoName 验证根级 SKILL.md 但 frontmatter 缺 name 时报 NoName。
+func TestInspectFlatSkillArchiveRejectsNoName(t *testing.T) {
+	// 根级 SKILL.md 布局合法，但 frontmatter 只有 description，确保触发的是 name 缺失。
+	data := makeTar(t, map[string]string{"SKILL.md": "---\ndescription: x\n---\n正文"})
+	_, err := InspectFlatSkillArchive(bytes.NewReader(data))
+	require.ErrorIs(t, err, ErrSkillArchiveNoName)
+}
+
+// TestInspectFlatSkillArchiveRejectsUnsafePath 验证含越界路径条目时报 UnsafePath。
+func TestInspectFlatSkillArchiveRejectsUnsafePath(t *testing.T) {
+	// ../evil/SKILL.md 越界，应在路径安全校验阶段被拒。
+	data := makeTar(t, map[string]string{"../evil/SKILL.md": "---\nname: x\n---\n"})
+	_, err := InspectFlatSkillArchive(bytes.NewReader(data))
+	require.ErrorIs(t, err, ErrSkillArchiveUnsafePath)
+}
+
+// TestInspectFlatSkillArchiveRejectsBadTar 验证非法 tar 字节报错（非有效归档）。
+func TestInspectFlatSkillArchiveRejectsBadTar(t *testing.T) {
+	_, err := InspectFlatSkillArchive(bytes.NewReader([]byte("not a tar at all")))
+	require.Error(t, err)
+}

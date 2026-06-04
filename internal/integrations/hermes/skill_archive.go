@@ -23,6 +23,11 @@ var (
 	// 容器端 render_skills.py 按 <技能名>/SKILL.md 结构解压，根级或更深层级的
 	// SKILL.md 会导致渲染异常，因此在上传阶段一律拒绝。
 	ErrSkillArchiveBadLayout = errors.New("skill tar 内 SKILL.md 必须位于顶层技能目录内（<技能名>/SKILL.md）")
+	// ErrSkillArchiveNotFlat skill tar 未遵循「扁平契约」：SKILL.md 不在归档根级。
+	// 运行时 oc-ops install_skill / renderer render_skills 把归档内容整体解压进
+	// SKILLS_DIR/<技能名>/，因此 SKILL.md 必须直接位于归档顶层；嵌套的
+	// <子目录>/SKILL.md 解压后会变成 SKILLS_DIR/<技能名>/<子目录>/SKILL.md，对账永远 pending。
+	ErrSkillArchiveNotFlat = errors.New("skill tar 内 SKILL.md 必须位于归档根级（扁平契约：SKILL.md 直接在归档顶层）")
 )
 
 // SkillArchiveInfo 是 skill tar 校验后的元信息。
@@ -88,6 +93,68 @@ func InspectSkillArchive(r io.Reader) (SkillArchiveInfo, error) {
 		return SkillArchiveInfo{}, fmt.Errorf("%w: %s", ErrSkillArchiveBadLayout, badLayoutPath)
 	}
 	if !found {
+		return SkillArchiveInfo{}, ErrSkillArchiveNoSkillMD
+	}
+	name, err := parseSkillMDName(skillMD)
+	if err != nil {
+		return SkillArchiveInfo{}, err
+	}
+	return SkillArchiveInfo{Name: name}, nil
+}
+
+// InspectFlatSkillArchive 按「扁平契约」校验一个 skill tar，与运行时 oc-ops install_skill /
+// renderer render_skills 的解压约定一致：归档内容（SKILL.md 及其它文件）直接位于归档顶层，
+// 安装时整体解压进 SKILLS_DIR/<技能名>/。校验项：
+//   - 所有条目路径必须在 tar 内部、不得越界（防解压逃逸）；
+//   - 必须含一个位于归档根级的 SKILL.md（path.Dir == "."）；仅有 <子目录>/SKILL.md 时拒绝；
+//   - SKILL.md 必须有 YAML frontmatter 且含非空 name。
+//
+// 注意：本函数与 InspectSkillArchive（要求 <技能名>/SKILL.md 嵌套布局）布局规则相反。
+// 扁平契约才是当前运行时真实约定（见 runtime/.../renderer/render_skills.py 的「扁平契约」注释），
+// 平台库上传走本函数；InspectSkillArchive 目前无调用方。
+//
+// 校验通过返回 SkillArchiveInfo；调用方负责另行限制 tar 大小。
+func InspectFlatSkillArchive(r io.Reader) (SkillArchiveInfo, error) {
+	tr := tar.NewReader(r)
+	// skillMD 保存已定位到的根级 SKILL.md 内容；
+	// nestedPath 记录只发现于子目录的 SKILL.md 路径（用于延迟报 NotFlat，避免误伤同时含根级 SKILL.md 的归档）。
+	var skillMD string
+	var nestedPath string
+	found := false
+	for {
+		hdr, err := tr.Next()
+		if errors.Is(err, io.EOF) {
+			break
+		}
+		if err != nil {
+			return SkillArchiveInfo{}, fmt.Errorf("读取 skill tar 失败: %w", err)
+		}
+		clean := path.Clean(hdr.Name)
+		// 路径安全校验：拒绝 .. 开头或绝对路径，防止解压逃逸。
+		if strings.HasPrefix(clean, "..") || strings.HasPrefix(clean, "/") || strings.Contains(clean, "/../") {
+			return SkillArchiveInfo{}, fmt.Errorf("%w: %s", ErrSkillArchiveUnsafePath, hdr.Name)
+		}
+		if hdr.Typeflag != tar.TypeReg || path.Base(clean) != "SKILL.md" {
+			continue
+		}
+		// 扁平契约：SKILL.md 必须直接位于归档根级（path.Dir == "."）。
+		// 嵌套位置的 SKILL.md 先记录、不立即报错——若归档另含根级 SKILL.md 则以根级为准。
+		if path.Dir(clean) != "." {
+			nestedPath = clean
+			continue
+		}
+		body, err := io.ReadAll(tr)
+		if err != nil {
+			return SkillArchiveInfo{}, fmt.Errorf("读取 SKILL.md 失败: %w", err)
+		}
+		skillMD = string(body)
+		found = true
+	}
+	if !found {
+		// 找到了 SKILL.md 但只在子目录 → 报 NotFlat，给出更精确的整改提示。
+		if nestedPath != "" {
+			return SkillArchiveInfo{}, fmt.Errorf("%w: %s", ErrSkillArchiveNotFlat, nestedPath)
+		}
 		return SkillArchiveInfo{}, ErrSkillArchiveNoSkillMD
 	}
 	name, err := parseSkillMDName(skillMD)

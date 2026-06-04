@@ -1,6 +1,7 @@
 package service
 
 import (
+	"archive/tar"
 	"bytes"
 	"context"
 	"database/sql"
@@ -16,6 +17,20 @@ import (
 	"oc-manager/internal/domain"
 	"oc-manager/internal/store/sqlc"
 )
+
+// makeFlatSkillTar 构造一个遵循「扁平契约」的最小 skill tar：根级 SKILL.md，frontmatter name=name。
+// 供 Upload 相关用例提供能通过后端结构校验（hermes.InspectFlatSkillArchive）的合法归档。
+func makeFlatSkillTar(t *testing.T, name string) []byte {
+	t.Helper()
+	md := "---\nname: " + name + "\ndescription: 测试 skill\n---\n# " + name + "\n正文"
+	var buf bytes.Buffer
+	tw := tar.NewWriter(&buf)
+	require.NoError(t, tw.WriteHeader(&tar.Header{Name: "SKILL.md", Mode: 0o644, Size: int64(len(md)), Typeflag: tar.TypeReg}))
+	_, err := tw.Write([]byte(md))
+	require.NoError(t, err)
+	require.NoError(t, tw.Close())
+	return buf.Bytes()
+}
 
 // fakePlatformSkillStore 是 PlatformSkillStore 的内存实现，供 service 单测使用。
 type fakePlatformSkillStore struct {
@@ -118,7 +133,7 @@ func TestPlatformSkillService_Upload_OK(t *testing.T) {
 	store := newFakePlatformSkillStore()
 	blob := &fakeLibraryBlob{}
 	svc := NewPlatformSkillService(store, blob)
-	data := []byte("skill-archive-bytes")
+	data := makeFlatSkillTar(t, "weather") // 合法扁平归档，frontmatter name=weather
 
 	res, err := svc.Upload(context.Background(), psvcPlatformPrincipal(), PlatformSkillUploadInput{
 		Name: "weather", Version: "1.0", Description: "天气", Data: data,
@@ -145,11 +160,49 @@ func TestPlatformSkillService_Upload_Invalid(t *testing.T) {
 	require.ErrorIs(t, err, ErrPlatformSkillInvalid)
 }
 
+// 非 tar 字节（无法解析为归档）→ Invalid（后端扁平契约校验防线）。
+func TestPlatformSkillService_Upload_RejectsNonTar(t *testing.T) {
+	svc := NewPlatformSkillService(newFakePlatformSkillStore(), &fakeLibraryBlob{})
+	_, err := svc.Upload(context.Background(), psvcPlatformPrincipal(), PlatformSkillUploadInput{Name: "x", Version: "1", Data: []byte("not a tar at all")})
+	require.ErrorIs(t, err, ErrPlatformSkillInvalid)
+}
+
+// 嵌套布局（仅 <子目录>/SKILL.md，无根级 SKILL.md）→ Invalid：违反扁平契约，安装后对账永远 pending。
+func TestPlatformSkillService_Upload_RejectsNestedLayout(t *testing.T) {
+	// 构造 weather/SKILL.md 嵌套归档（根级无 SKILL.md），应被后端校验拦截。
+	var buf bytes.Buffer
+	tw := tar.NewWriter(&buf)
+	md := "---\nname: weather\n---\n正文"
+	require.NoError(t, tw.WriteHeader(&tar.Header{Name: "weather/SKILL.md", Mode: 0o644, Size: int64(len(md)), Typeflag: tar.TypeReg}))
+	_, err := tw.Write([]byte(md))
+	require.NoError(t, err)
+	require.NoError(t, tw.Close())
+
+	svc := NewPlatformSkillService(newFakePlatformSkillStore(), &fakeLibraryBlob{})
+	_, err = svc.Upload(context.Background(), psvcPlatformPrincipal(), PlatformSkillUploadInput{Name: "weather", Version: "1", Data: buf.Bytes()})
+	require.ErrorIs(t, err, ErrPlatformSkillInvalid)
+}
+
+// 归档缺少 SKILL.md → Invalid：扁平归档但没有技能主文件。
+func TestPlatformSkillService_Upload_RejectsMissingSkillMD(t *testing.T) {
+	// 构造仅含无关文件、无 SKILL.md 的扁平 tar。
+	var buf bytes.Buffer
+	tw := tar.NewWriter(&buf)
+	require.NoError(t, tw.WriteHeader(&tar.Header{Name: "readme.txt", Mode: 0o644, Size: 5, Typeflag: tar.TypeReg}))
+	_, err := tw.Write([]byte("hello"))
+	require.NoError(t, err)
+	require.NoError(t, tw.Close())
+
+	svc := NewPlatformSkillService(newFakePlatformSkillStore(), &fakeLibraryBlob{})
+	_, err = svc.Upload(context.Background(), psvcPlatformPrincipal(), PlatformSkillUploadInput{Name: "x", Version: "1", Data: buf.Bytes()})
+	require.ErrorIs(t, err, ErrPlatformSkillInvalid)
+}
+
 // 同名同版本已存在 → NameVersionTaken。
 func TestPlatformSkillService_Upload_Duplicate(t *testing.T) {
 	store := newFakePlatformSkillStore()
 	svc := NewPlatformSkillService(store, &fakeLibraryBlob{})
-	in := PlatformSkillUploadInput{Name: "weather", Version: "1.0", Data: []byte("a")}
+	in := PlatformSkillUploadInput{Name: "weather", Version: "1.0", Data: makeFlatSkillTar(t, "weather")}
 	_, err := svc.Upload(context.Background(), psvcPlatformPrincipal(), in)
 	require.NoError(t, err)
 	_, err = svc.Upload(context.Background(), psvcPlatformPrincipal(), in)
@@ -161,7 +214,7 @@ func TestPlatformSkillService_Delete_OK(t *testing.T) {
 	store := newFakePlatformSkillStore()
 	blob := &fakeLibraryBlob{}
 	svc := NewPlatformSkillService(store, blob)
-	res, err := svc.Upload(context.Background(), psvcPlatformPrincipal(), PlatformSkillUploadInput{Name: "w", Version: "1", Data: []byte("a")})
+	res, err := svc.Upload(context.Background(), psvcPlatformPrincipal(), PlatformSkillUploadInput{Name: "w", Version: "1", Data: makeFlatSkillTar(t, "w")})
 	require.NoError(t, err)
 
 	require.NoError(t, svc.Delete(context.Background(), psvcPlatformPrincipal(), res.ID))
@@ -184,7 +237,7 @@ func TestPlatformSkillService_Upload_RollbackOnDBError(t *testing.T) {
 	blob := &fakeLibraryBlob{}
 	svc := NewPlatformSkillService(store, blob)
 
-	_, err := svc.Upload(context.Background(), psvcPlatformPrincipal(), PlatformSkillUploadInput{Name: "w", Version: "1", Data: []byte("a")})
+	_, err := svc.Upload(context.Background(), psvcPlatformPrincipal(), PlatformSkillUploadInput{Name: "w", Version: "1", Data: makeFlatSkillTar(t, "w")})
 	require.Error(t, err)
 	assert.Equal(t, []string{"library/platform/w/1.tar"}, blob.deleted) // 回滚删除了刚写入的归档
 }
@@ -193,9 +246,9 @@ func TestPlatformSkillService_Upload_RollbackOnDBError(t *testing.T) {
 func TestPlatformSkillService_List_OK(t *testing.T) {
 	store := newFakePlatformSkillStore()
 	svc := NewPlatformSkillService(store, &fakeLibraryBlob{})
-	_, err := svc.Upload(context.Background(), psvcPlatformPrincipal(), PlatformSkillUploadInput{Name: "a", Version: "1", Data: []byte("x")})
+	_, err := svc.Upload(context.Background(), psvcPlatformPrincipal(), PlatformSkillUploadInput{Name: "a", Version: "1", Data: makeFlatSkillTar(t, "a")})
 	require.NoError(t, err)
-	_, err = svc.Upload(context.Background(), psvcPlatformPrincipal(), PlatformSkillUploadInput{Name: "b", Version: "1", Data: []byte("y")})
+	_, err = svc.Upload(context.Background(), psvcPlatformPrincipal(), PlatformSkillUploadInput{Name: "b", Version: "1", Data: makeFlatSkillTar(t, "b")})
 	require.NoError(t, err)
 
 	out, err := svc.List(context.Background(), psvcPlatformPrincipal())
@@ -215,7 +268,7 @@ func TestPlatformSkillService_GetForInstall_OK(t *testing.T) {
 	store := newFakePlatformSkillStore()
 	blob := &fakeLibraryBlob{}
 	svc := NewPlatformSkillService(store, blob)
-	data := []byte("skill-archive-content-for-install")
+	data := makeFlatSkillTar(t, "translate") // 合法扁平归档，供安装回取做字节比对
 
 	// 先上传平台库 skill
 	res, err := svc.Upload(context.Background(), psvcPlatformPrincipal(), PlatformSkillUploadInput{
