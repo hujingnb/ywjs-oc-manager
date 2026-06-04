@@ -19,6 +19,8 @@ import (
 type ClawHubSearcher interface {
 	// Search 按关键词 q 与游标 cursor 搜索公共库，q 为空时等价列出热门。
 	Search(ctx context.Context, q, cursor string) (clawhub.SearchResult, error)
+	// ListVersions 列出指定 slug 的全部历史版本（供详情页版本列表用）。
+	ListVersions(ctx context.Context, slug string) ([]clawhub.SkillVersion, error)
 }
 
 // RedisCache 是 ClawHubSource 依赖的最小缓存能力接口。
@@ -103,6 +105,21 @@ func (s *ClawHubSource) Search(ctx context.Context, _ auth.Principal, q, cursor 
 	}
 
 	return page, nil
+}
+
+// Versions 列出公共库中 slug=ref 的全部历史版本号（直接回源，不走缓存——
+// 版本列表是详情页按需查看的低频操作，且需反映上游最新发布）。
+func (s *ClawHubSource) Versions(ctx context.Context, _ auth.Principal, ref string) ([]string, error) {
+	vs, err := s.api.ListVersions(ctx, ref)
+	if err != nil {
+		return nil, err
+	}
+	// clawhubcn 已按版本从新到旧返回，直接透传 version 字符串即可。
+	out := make([]string, 0, len(vs))
+	for _, v := range vs {
+		out = append(out, v.Version)
+	}
+	return out, nil
 }
 
 // 编译期断言：ClawHubSource 必须实现 SkillSource 接口。

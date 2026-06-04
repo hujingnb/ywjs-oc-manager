@@ -20,6 +20,8 @@ type skillMarketService interface {
 	// List 按 source/q/cursor 返回一页市场条目。
 	// source 取值："platform"、"clawhub"、""（聚合）；未知值返回 ErrSkillMarketSourceUnknown。
 	List(ctx context.Context, principal auth.Principal, source, q, cursor string) (service.SkillPage, error)
+	// Versions 返回指定 skill（source+ref）的全部历史版本号，供详情页版本列表。
+	Versions(ctx context.Context, principal auth.Principal, source, ref string) ([]string, error)
 }
 
 // SkillMarketHandler 处理 skill 市场 HTTP 路由。
@@ -34,9 +36,10 @@ func NewSkillMarketHandler(svc skillMarketService) *SkillMarketHandler {
 }
 
 // RegisterSkillMarketRoutes 注册 skill 市场路由。
-// 路由：GET /api/v1/skill-market
+// 路由：GET /api/v1/skill-market、GET /api/v1/skill-market/versions
 func RegisterSkillMarketRoutes(router gin.IRouter, h *SkillMarketHandler) {
 	router.GET("/api/v1/skill-market", h.List)
+	router.GET("/api/v1/skill-market/versions", h.Versions)
 }
 
 // List 浏览/搜索 skill 市场。
@@ -65,6 +68,30 @@ func (h *SkillMarketHandler) List(c *gin.Context) {
 	}
 	// 统一用 "page" key 包装，保持与其他列表接口一致的响应结构。
 	c.JSON(http.StatusOK, gin.H{"page": page})
+}
+
+// Versions 返回指定 skill 的全部历史版本号，供详情页展示版本列表。
+//
+// @Summary  查询某 skill 的版本列表
+// @Tags     skill-market
+// @Produce  json
+// @Security BearerAuth
+// @Param    source query string true  "来源：platform | clawhub"
+// @Param    ref    query string true  "来源内标识：platform=name，clawhub=slug"
+// @Success  200 {object} map[string][]string
+// @Failure  400 {object} ErrorResponse
+// @Failure  500 {object} ErrorResponse
+// @Router   /skill-market/versions [get]
+func (h *SkillMarketHandler) Versions(c *gin.Context) {
+	source := c.Query("source")
+	ref := c.Query("ref")
+	versions, err := h.service.Versions(c.Request.Context(), principalFromCtx(c), source, ref)
+	if err != nil {
+		writeSkillMarketError(c, err)
+		return
+	}
+	// 统一 "versions" key 包装；versions 为空数组（无版本/未配置来源）也照常返回。
+	c.JSON(http.StatusOK, gin.H{"versions": versions})
 }
 
 // writeSkillMarketError 把市场哨兵错误映射为 HTTP 状态码与固定文案错误体。

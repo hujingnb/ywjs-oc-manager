@@ -7224,6 +7224,49 @@ paths:
       summary: 浏览/搜索 skill 市场
       tags:
       - skill-market
+  /skill-market/versions:
+    get:
+      parameters:
+      - description: 来源：platform | clawhub
+        in: query
+        name: source
+        required: true
+        schema:
+          type: string
+      - description: 来源内标识：platform=name，clawhub=slug
+        in: query
+        name: ref
+        required: true
+        schema:
+          type: string
+      responses:
+        "200":
+          content:
+            application/json:
+              schema:
+                additionalProperties:
+                  items:
+                    type: string
+                  type: array
+                type: object
+          description: OK
+        "400":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/handlers.ErrorResponse'
+          description: Bad Request
+        "500":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/handlers.ErrorResponse'
+          description: Internal Server Error
+      security:
+      - BearerAuth: []
+      summary: 查询某 skill 的版本列表
+      tags:
+      - skill-market
   /usage/members/{userId}:
     get:
       description: 返回指定成员名下应用的 token 调用日志（LogsPage 格式）

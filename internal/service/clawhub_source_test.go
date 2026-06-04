@@ -22,12 +22,19 @@ type fakeClawHubAPI struct {
 	result clawhub.SearchResult
 	// calls 记录 Search 被调用的总次数（验证缓存命中时回源次数应不变）。
 	calls int
+	// versions 是 ListVersions 的预设返回值。
+	versions []clawhub.SkillVersion
 }
 
 // Search 实现 ClawHubSearcher 接口：每次调用将 calls 加一并返回预设结果。
 func (f *fakeClawHubAPI) Search(_ context.Context, _, _ string) (clawhub.SearchResult, error) {
 	f.calls++
 	return f.result, nil
+}
+
+// ListVersions 实现 ClawHubSearcher 接口：返回预设的版本列表。
+func (f *fakeClawHubAPI) ListVersions(_ context.Context, _ string) ([]clawhub.SkillVersion, error) {
+	return f.versions, nil
 }
 
 // fakeRedis 是 RedisCache 的内存实现，用 map 模拟 Redis GET/SET 语义。

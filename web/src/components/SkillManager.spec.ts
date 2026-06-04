@@ -85,6 +85,13 @@ const mutationState = {
   reinstallPending: ref(false),
 }
 
+// versionsState 控制 useSkillVersionsQuery（详情抽屉版本列表）的返回值。
+const versionsState = {
+  data: ref<string[]>([]),
+  isLoading: ref(false),
+  error: ref<Error | null>(null),
+}
+
 // ======================== IntersectionObserver mock ========================
 // jsdom 无 IntersectionObserver，组件的滚动加载哨兵建立观察时会报错，需 mock。
 // lastIntersectionCallback 捕获最近一次构造时传入的回调，测试可手动触发模拟「哨兵进入视口」。
@@ -140,6 +147,8 @@ vi.mock('@/api/hooks/useSkills', () => ({
     mutateAsync: mocks.reinstallMutateAsync,
     isPending: mutationState.reinstallPending,
   }),
+  // 详情抽屉版本列表查询：用 versionsState 控制返回值。
+  useSkillVersionsQuery: () => versionsState,
 }))
 
 vi.mock('naive-ui', async () => {
@@ -195,6 +204,9 @@ vi.mock('naive-ui', async () => {
     NTag: { template: '<span class="n-tag" v-bind="$attrs"><slot /></span>' },
     // NAlert stub 渲染 title + slot，供运行时不支持横幅测试断言文案。
     NAlert: { props: ['title', 'type'], template: '<div class="n-alert">{{ title }}<slot /></div>' },
+    // NDrawer/NDrawerContent stub：show=true 时渲染内容，供详情抽屉测试断言。
+    NDrawer: { props: ['show'], template: '<div v-if="show" class="n-drawer"><slot /></div>' },
+    NDrawerContent: { props: ['title'], template: '<div class="n-drawer-content">{{ title }}<slot /></div>' },
     // NInput stub：接受所有 props 避免 size/placeholder 报 DOMException warning。
     NInput: { template: '<div class="n-input"><input /></div>' },
   }
@@ -237,6 +249,9 @@ describe('SkillManager', () => {
     lastIntersectionCallback = null
     ioObserve.mockReset()
     ioDisconnect.mockReset()
+    versionsState.data.value = []
+    versionsState.isLoading.value = false
+    versionsState.error.value = null
     mutationState.installPending.value = false
     mutationState.uninstallPending.value = false
     mutationState.updatePending.value = false
@@ -575,5 +590,57 @@ describe('SkillManager', () => {
     ]
     const wrapper = mountManager()
     expect(wrapper.find('.header-name').text()).toBe('名称')
+  })
+
+  // ======== 详情抽屉：查看详情 + 版本列表 ========
+
+  it('点击已安装 skill 名称打开详情抽屉并展示版本列表（含最新/当前标记）', async () => {
+    // 覆盖：已安装 clawhub skill 名称可点击 → 抽屉展示版本列表，首个标「最新」、匹配当前版本标「当前」。
+    appSkillsState.data.value = [
+      { name: 'oc-clawtest', status: 'active', source: 'clawhub', source_ref: 'oc-clawtest', version: '1.0.0' },
+    ]
+    versionsState.data.value = ['2.0.0', '1.0.0']
+    const wrapper = mountManager()
+    const nameBtn = wrapper.findAll('button').find((b) => b.text() === 'oc-clawtest')
+    expect(nameBtn).toBeTruthy()
+    await nameBtn!.trigger('click')
+    await nextTick()
+    const drawer = wrapper.find('.n-drawer')
+    expect(drawer.exists()).toBe(true)
+    expect(drawer.text()).toContain('版本列表')
+    expect(drawer.text()).toContain('v2.0.0')
+    expect(drawer.text()).toContain('v1.0.0')
+    expect(drawer.text()).toContain('最新') // 第一个版本
+    expect(drawer.text()).toContain('当前') // 匹配当前安装版本 1.0.0
+  })
+
+  it('点击市场卡片打开详情抽屉，展示名称与描述', async () => {
+    // 覆盖：市场卡片整体可点 → 抽屉带入条目名称/版本/描述。
+    marketState.data.value = {
+      entries: [
+        { source: 'clawhub', source_ref: 'self-improving-agent', name: 'Self-Improving Agent', version: '3.0.21', downloads: 100, description: '自我改进' },
+      ],
+    }
+    versionsState.data.value = ['3.0.21']
+    const wrapper = mountManager()
+    await wrapper.find('.market-card').trigger('click')
+    await nextTick()
+    const drawer = wrapper.find('.n-drawer')
+    expect(drawer.exists()).toBe(true)
+    expect(drawer.text()).toContain('Self-Improving Agent')
+    expect(drawer.text()).toContain('v3.0.21')
+    expect(drawer.text()).toContain('自我改进')
+  })
+
+  it('builtin skill 详情不展示版本列表（无来源标识）', async () => {
+    // 边界：builtin skill 无 source/source_ref，详情抽屉显示「该来源无版本信息」。
+    appSkillsState.data.value = [
+      { name: 'airtable', status: 'builtin', source: undefined, version: '内置' },
+    ]
+    const wrapper = mountManager()
+    const nameBtn = wrapper.findAll('button').find((b) => b.text() === 'airtable')
+    await nameBtn!.trigger('click')
+    await nextTick()
+    expect(wrapper.find('.n-drawer').text()).toContain('该来源无版本信息')
   })
 })

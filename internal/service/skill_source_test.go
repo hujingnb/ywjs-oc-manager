@@ -44,6 +44,26 @@ func TestPlatformSource_Search(t *testing.T) {
 	assert.Equal(t, "", page.NextCursor)
 }
 
+// TestPlatformSource_Versions 验证 Versions 列出同 name 的全部版本、按版本降序（最新在前），
+// 且不串入其它 name 的版本。
+func TestPlatformSource_Versions(t *testing.T) {
+	store := newFakePlatformSkillStore()
+	svc := NewPlatformSkillService(store, &fakeLibraryBlob{})
+	// weather 两个版本 + translate 一个版本（用于验证不串名）。
+	_, err := svc.Upload(context.Background(), psvcPlatformPrincipal(), PlatformSkillUploadInput{Name: "weather", Version: "1.0", Data: []byte("a")})
+	require.NoError(t, err)
+	_, err = svc.Upload(context.Background(), psvcPlatformPrincipal(), PlatformSkillUploadInput{Name: "weather", Version: "2.0", Data: []byte("b")})
+	require.NoError(t, err)
+	_, err = svc.Upload(context.Background(), psvcPlatformPrincipal(), PlatformSkillUploadInput{Name: "translate", Version: "9.0", Data: []byte("c")})
+	require.NoError(t, err)
+
+	src := NewPlatformSource(svc)
+	versions, err := src.Versions(context.Background(), psvcPlatformPrincipal(), "weather")
+	require.NoError(t, err)
+	// 只含 weather 的版本，降序（最新在前），不含 translate 的 9.0。
+	assert.Equal(t, []string{"2.0", "1.0"}, versions)
+}
+
 // TestPlatformSource_Search_All 验证 q 为空时返回全部 skill（每个 name 聚合为一条）。
 func TestPlatformSource_Search_All(t *testing.T) {
 	store := newFakePlatformSkillStore()

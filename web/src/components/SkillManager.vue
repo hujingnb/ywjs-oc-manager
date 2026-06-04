@@ -57,11 +57,13 @@
         <div v-else-if="!marketEntries.length" class="state-text">暂无技能</div>
         <!-- 市场卡片网格：每个条目展示来源徽章、描述、下载量和安装按钮。 -->
         <div v-else class="market-grid">
+          <!-- 卡片整体可点击查看详情（含版本列表）；安装按钮 @click.stop 不触发详情。 -->
           <n-card
             v-for="entry in marketEntries"
             :key="`${entry.source}-${entry.source_ref}`"
             size="small"
-            class="market-card"
+            class="market-card market-card-clickable"
+            @click="openMarketDetail(entry)"
           >
             <div class="market-card-header">
               <strong class="market-card-name">{{ entry.name }}</strong>
@@ -86,7 +88,7 @@
                 size="small"
                 type="primary"
                 :loading="installMutation.isPending.value"
-                @click="onInstall(entry)"
+                @click.stop="onInstall(entry)"
               >
                 安装
               </n-button>
@@ -104,6 +106,35 @@
         </div>
       </n-tab-pane>
     </n-tabs>
+
+    <!-- 技能详情抽屉：已安装列表点名称、市场点卡片均打开此抽屉，展示基础信息 + 版本列表。 -->
+    <n-drawer v-model:show="detailOpen" :width="420" placement="right">
+      <n-drawer-content :title="detailSkill?.name ?? '技能详情'" closable>
+        <div v-if="detailSkill" class="skill-detail">
+          <p class="skill-detail-row"><span class="skill-detail-label">来源</span>{{ sourceLabel(detailSkill.source) }}</p>
+          <p v-if="detailSkill.version" class="skill-detail-row"><span class="skill-detail-label">版本</span>v{{ detailSkill.version }}</p>
+          <p v-if="detailSkill.status" class="skill-detail-row"><span class="skill-detail-label">状态</span>{{ detailStatusLabel(detailSkill.status) }}</p>
+          <p v-if="detailSkill.downloads" class="skill-detail-row"><span class="skill-detail-label">下载量</span>↓ {{ detailSkill.downloads }}</p>
+          <p v-if="detailSkill.description" class="skill-detail-desc">{{ detailSkill.description }}</p>
+
+          <!-- 版本列表：platform/clawhub 来源才有；builtin/self_created 无来源版本。 -->
+          <div class="skill-detail-versions">
+            <strong>版本列表</strong>
+            <div v-if="!detailHasVersions" class="state-text">该来源无版本信息</div>
+            <div v-else-if="skillVersionsQuery.isLoading.value" class="state-text">加载中…</div>
+            <p v-else-if="skillVersionsQuery.error.value" class="state-text danger">版本查询失败</p>
+            <ul v-else-if="(skillVersionsQuery.data.value?.length ?? 0) > 0" class="skill-detail-version-list">
+              <li v-for="(v, i) in skillVersionsQuery.data.value" :key="v">
+                <span class="skill-detail-version-num">v{{ v }}</span>
+                <n-tag v-if="i === 0" size="tiny" type="success" :bordered="false">最新</n-tag>
+                <n-tag v-if="v === detailSkill.version" size="tiny" type="info" :bordered="false">当前</n-tag>
+              </li>
+            </ul>
+            <div v-else class="state-text">暂无版本</div>
+          </div>
+        </div>
+      </n-drawer-content>
+    </n-drawer>
   </div>
 </template>
 
@@ -114,6 +145,8 @@ import {
   NButton,
   NCard,
   NDataTable,
+  NDrawer,
+  NDrawerContent,
   NInput,
   NTabPane,
   NTabs,
@@ -129,6 +162,7 @@ import {
   useAppSkillsQuery,
   useInstallAppSkill,
   useSkillMarketQuery,
+  useSkillVersionsQuery,
   useReinstallAppSkill,
   useUninstallAppSkill,
   useUpdateAppSkill,
@@ -332,6 +366,62 @@ function statusLabel(status: string): string {
   return labels[status] ?? status
 }
 
+// ===== 技能详情抽屉 =====
+// SkillDetail 是详情抽屉展示的数据，已安装行与市场卡片各取所需字段填充。
+interface SkillDetail {
+  name: string
+  source?: string
+  source_ref?: string
+  version?: string
+  description?: string
+  downloads?: number
+  status?: string // 仅已安装列表有
+}
+const detailOpen = ref(false)
+const detailSkill = ref<SkillDetail | null>(null)
+
+// detailHasVersions：仅 platform/clawhub 来源有上游版本列表（builtin/self_created 无来源标识）。
+const detailHasVersions = computed(() => {
+  const d = detailSkill.value
+  return Boolean(d?.source_ref && (d.source === 'platform' || d.source === 'clawhub'))
+})
+// 版本列表查询：source/ref 来自当前选中 skill，仅在 detailHasVersions 时实际发请求。
+const detailVersionParams = computed(() => ({
+  source: detailHasVersions.value ? detailSkill.value?.source : undefined,
+  ref: detailHasVersions.value ? detailSkill.value?.source_ref : undefined,
+}))
+const skillVersionsQuery = useSkillVersionsQuery(detailVersionParams)
+
+// detailStatusLabel 复用 statusLabel，pending 在详情里也补「待生效」语义。
+function detailStatusLabel(status: string): string {
+  return statusLabel(status)
+}
+
+// openInstalledDetail 由已安装列表名称点击触发，带入对账行的来源/版本/状态。
+function openInstalledDetail(row: AppSkill) {
+  detailSkill.value = {
+    name: row.name,
+    source: row.source,
+    source_ref: row.source_ref,
+    version: row.version,
+    status: row.status,
+  }
+  detailOpen.value = true
+}
+
+// openMarketDetail 由市场卡片点击触发，带入市场条目的描述/下载量/版本。
+function openMarketDetail(entry: SkillEntry) {
+  detailSkill.value = {
+    name: entry.name,
+    source: entry.source,
+    source_ref: entry.source_ref,
+    version: entry.version,
+    description: entry.description,
+    downloads: entry.downloads,
+  }
+  detailOpen.value = true
+}
+
 // onInstall 触发市场 skill 安装，成功后已安装列表自动刷新。
 async function onInstall(entry: SkillEntry) {
   try {
@@ -393,8 +483,17 @@ async function onReinstall(row: AppSkill) {
 
 // installedColumns 定义已安装列表表格列。
 const installedColumns: DataTableColumns<AppSkill> = [
-  // 技能名称列。
-  { title: '名称', key: 'name', render: (row) => h('strong', row.name) },
+  // 技能名称列：渲染为可点击链接，点击打开详情抽屉（含版本列表）。
+  {
+    title: '名称',
+    key: 'name',
+    render: (row) =>
+      h(
+        NButton,
+        { text: true, type: 'primary', onClick: () => openInstalledDetail(row) },
+        { default: () => row.name },
+      ),
+  },
   // 来源徽章列：根据 status/source 渲染颜色区分。
   {
     title: '来源',
@@ -525,6 +624,47 @@ const installedColumns: DataTableColumns<AppSkill> = [
   display: flex;
   justify-content: center;
   margin-top: 12px;
+}
+
+/* 可点击的市场卡片：悬浮手型，提示可点开详情。 */
+.market-card-clickable {
+  cursor: pointer;
+}
+
+/* 详情抽屉：信息行与版本列表布局。 */
+.skill-detail-row {
+  margin: 4px 0;
+  font-size: 13px;
+}
+.skill-detail-label {
+  display: inline-block;
+  width: 56px;
+  color: var(--text-muted, #888);
+}
+.skill-detail-desc {
+  margin: 12px 0;
+  font-size: 13px;
+  line-height: 1.6;
+  white-space: pre-wrap;
+}
+.skill-detail-versions {
+  margin-top: 16px;
+}
+.skill-detail-version-list {
+  list-style: none;
+  padding: 0;
+  margin: 8px 0 0;
+}
+.skill-detail-version-list li {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 6px 0;
+  border-bottom: 1px solid var(--border-color, #eee);
+  font-size: 13px;
+}
+.skill-detail-version-num {
+  font-family: var(--font-mono, monospace);
 }
 
 .market-card-header {

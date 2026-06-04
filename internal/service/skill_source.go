@@ -42,6 +42,9 @@ type SkillSource interface {
 	Kind() string
 	// Search 按关键词 q（空=全列）与游标 cursor 返回一页条目。
 	Search(ctx context.Context, principal auth.Principal, q, cursor string) (SkillPage, error)
+	// Versions 返回指定 skill（ref：platform=name，clawhub=slug）的全部历史版本号，
+	// 按版本从新到旧排序，供详情页展示版本列表。
+	Versions(ctx context.Context, principal auth.Principal, ref string) ([]string, error)
 }
 
 // platformSkillLister 是 PlatformSource 所需的平台库查询能力最小接口。
@@ -64,6 +67,25 @@ func NewPlatformSource(svc platformSkillLister) *PlatformSource {
 
 // Kind 实现 SkillSource，返回 "platform"。
 func (s *PlatformSource) Kind() string { return "platform" }
+
+// Versions 列出平台库中 name=ref 的全部版本号，按版本字符串从大到小排序（最新在前）。
+// 与 Search 取最新版本的比较口径一致（字符串比较，对同位数版本足够）。
+func (s *PlatformSource) Versions(ctx context.Context, principal auth.Principal, ref string) ([]string, error) {
+	rows, err := s.svc.ListForMarket(ctx, principal)
+	if err != nil {
+		return nil, err
+	}
+	versions := make([]string, 0)
+	for _, r := range rows {
+		// 只收同名 skill 的版本。
+		if r.Name == ref {
+			versions = append(versions, r.Version)
+		}
+	}
+	// 降序排列（最新版本在前），与前端「版本列表第一个为最新」预期一致。
+	sort.Sort(sort.Reverse(sort.StringSlice(versions)))
+	return versions, nil
+}
 
 // Search 列出平台库 skill，按 name 聚合并取最新版本，按 q 子串过滤名称与描述。
 // platform 无游标分页，cursor 参数被忽略，NextCursor 恒为空。

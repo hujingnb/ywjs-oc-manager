@@ -20,6 +20,8 @@ type stubSource struct {
 	page SkillPage
 	// err 是 Search() 的预设失败返回值（非 nil 时 Search 返回错误）。
 	err error
+	// versions 是 Versions() 的预设返回值。
+	versions []string
 }
 
 // Kind 实现 SkillSource，返回预设的来源标识。
@@ -31,6 +33,14 @@ func (s *stubSource) Search(_ context.Context, _ auth.Principal, _, _ string) (S
 		return SkillPage{}, s.err
 	}
 	return s.page, nil
+}
+
+// Versions 实现 SkillSource，返回预设的版本列表或错误。
+func (s *stubSource) Versions(_ context.Context, _ auth.Principal, _ string) ([]string, error) {
+	if s.err != nil {
+		return nil, s.err
+	}
+	return s.versions, nil
 }
 
 // TestSkillLibraryService_List 覆盖四类 source 参数的路由分支：
@@ -116,4 +126,34 @@ func TestSkillLibraryService_List_ClawHubFailureDegrades(t *testing.T) {
 	require.NoError(t, err)
 	require.Len(t, page.Entries, 1)
 	assert.Equal(t, "platform", page.Entries[0].Source)
+}
+
+// TestSkillLibraryService_Versions 覆盖 Versions 的来源路由：
+//   - "platform"/"clawhub" 各走对应来源，透传版本列表。
+//   - clawhub 未配置（nil）时返回空列表、不报错。
+//   - 未知来源返回 ErrSkillMarketSourceUnknown。
+func TestSkillLibraryService_Versions(t *testing.T) {
+	plat := &stubSource{kind: "platform", versions: []string{"2.0", "1.0"}}
+	claw := &stubSource{kind: "clawhub", versions: []string{"3.0.21", "3.0.20"}}
+	svc := NewSkillLibraryService(plat, claw)
+
+	// platform：走平台来源版本列表。
+	pv, err := svc.Versions(context.Background(), auth.Principal{}, "platform", "weather")
+	require.NoError(t, err)
+	assert.Equal(t, []string{"2.0", "1.0"}, pv)
+
+	// clawhub：走公共来源版本列表。
+	cv, err := svc.Versions(context.Background(), auth.Principal{}, "clawhub", "self-improving-agent")
+	require.NoError(t, err)
+	assert.Equal(t, []string{"3.0.21", "3.0.20"}, cv)
+
+	// 未知来源 → 哨兵错误。
+	_, err = svc.Versions(context.Background(), auth.Principal{}, "github", "x")
+	require.ErrorIs(t, err, ErrSkillMarketSourceUnknown)
+
+	// clawhub 未配置（nil）→ 空列表、不报错。
+	svcNoClaw := NewSkillLibraryService(plat, nil)
+	empty, err := svcNoClaw.Versions(context.Background(), auth.Principal{}, "clawhub", "x")
+	require.NoError(t, err)
+	assert.Empty(t, empty)
 }

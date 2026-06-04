@@ -68,3 +68,22 @@ func (s *SkillLibraryService) List(ctx context.Context, principal auth.Principal
 		return SkillPage{}, ErrSkillMarketSourceUnknown
 	}
 }
+
+// Versions 返回指定 skill 的全部历史版本号（详情页版本列表用）。
+//   - source="platform"：查平台库该 name 的所有版本。
+//   - source="clawhub"：查公共库该 slug 的所有版本；clawhub 未配置（nil）时返回空列表。
+//   - 其他值：返回 ErrSkillMarketSourceUnknown（handler 层映射为 400）。
+func (s *SkillLibraryService) Versions(ctx context.Context, principal auth.Principal, source, ref string) ([]string, error) {
+	switch source {
+	case "platform":
+		return s.platform.Versions(ctx, principal, ref)
+	case "clawhub":
+		// 未配置公共库：返回空版本列表，不报错（与 List 的降级口径一致）。
+		if s.clawhub == nil {
+			return []string{}, nil
+		}
+		return s.clawhub.Versions(ctx, principal, ref)
+	default:
+		return nil, ErrSkillMarketSourceUnknown
+	}
+}

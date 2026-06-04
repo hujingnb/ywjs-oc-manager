@@ -18,13 +18,20 @@ import (
 type skillMarketServiceStub struct {
 	// page 是 List() 的预设成功返回值。
 	page service.SkillPage
-	// err 是 List() 的预设失败返回值（非 nil 时 List 返回错误）。
+	// err 是 List() 的预设失败返回值（非 nil 时 List/Versions 返回错误）。
 	err error
+	// versions 是 Versions() 的预设返回值。
+	versions []string
 }
 
 // List 实现 skillMarketService，返回预设的 SkillPage 或错误。
 func (s *skillMarketServiceStub) List(_ context.Context, _ auth.Principal, _, _, _ string) (service.SkillPage, error) {
 	return s.page, s.err
+}
+
+// Versions 实现 skillMarketService，返回预设的版本列表或错误。
+func (s *skillMarketServiceStub) Versions(_ context.Context, _ auth.Principal, _, _ string) ([]string, error) {
+	return s.versions, s.err
 }
 
 // TestSkillMarketHandler_List_OK 验证正常路径：
@@ -51,6 +58,37 @@ func TestSkillMarketHandler_List_OK(t *testing.T) {
 	assert.Equal(t, http.StatusOK, rec.Code)
 	assert.Contains(t, rec.Body.String(), `"page"`)
 	assert.Contains(t, rec.Body.String(), `"weather"`)
+}
+
+// TestSkillMarketHandler_Versions_OK 验证版本列表正常路径：
+// service 返回版本切片时，handler 响应 200 并以 "versions" key 包装。
+func TestSkillMarketHandler_Versions_OK(t *testing.T) {
+	stub := &skillMarketServiceStub{versions: []string{"3.0.21", "3.0.20"}}
+	gin.SetMode(gin.TestMode)
+	r := gin.New()
+	RegisterSkillMarketRoutes(r, NewSkillMarketHandler(stub))
+
+	req := httptest.NewRequest(http.MethodGet, "/api/v1/skill-market/versions?source=clawhub&ref=self-improving-agent", nil)
+	rec := httptest.NewRecorder()
+	r.ServeHTTP(rec, withPrincipal(req, auth.Principal{UserID: "u1"}))
+
+	// 正常返回 200，响应体以 "versions" 包装版本号。
+	assert.Equal(t, http.StatusOK, rec.Code)
+	assert.Contains(t, rec.Body.String(), `"versions"`)
+	assert.Contains(t, rec.Body.String(), `"3.0.21"`)
+}
+
+// TestSkillMarketHandler_Versions_UnknownSource 未知来源时 Versions 应 400。
+func TestSkillMarketHandler_Versions_UnknownSource(t *testing.T) {
+	stub := &skillMarketServiceStub{err: service.ErrSkillMarketSourceUnknown}
+	gin.SetMode(gin.TestMode)
+	r := gin.New()
+	RegisterSkillMarketRoutes(r, NewSkillMarketHandler(stub))
+
+	req := httptest.NewRequest(http.MethodGet, "/api/v1/skill-market/versions?source=github&ref=x", nil)
+	rec := httptest.NewRecorder()
+	r.ServeHTTP(rec, withPrincipal(req, auth.Principal{UserID: "u1"}))
+	assert.Equal(t, http.StatusBadRequest, rec.Code)
 }
 
 // TestSkillMarketHandler_List_UnknownSource 验证未知来源错误路径：

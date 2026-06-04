@@ -79,6 +79,22 @@ export function useSkillMarketQuery(params: Ref<{ source?: string; q?: string }>
   })
 }
 
+// useSkillVersionsQuery 查询某 skill（source+ref）的历史版本列表，供详情抽屉展示。
+// 仅当 source 与 ref 都存在时才发请求（builtin/self_created 无来源标识，不查版本）。
+export function useSkillVersionsQuery(params: Ref<{ source?: string; ref?: string }>) {
+  return useQuery<string[]>({
+    queryKey: computed(() => ['skills', 'versions', params.value.source ?? '', params.value.ref ?? '']),
+    enabled: () => Boolean(params.value.source && params.value.ref),
+    queryFn: async () => {
+      // GET /api/v1/skill-market/versions?source=&ref= 返回 { versions: string[] }。
+      const resp = await apiRequest<{ versions: string[] }>('/api/v1/skill-market/versions', {
+        query: { source: params.value.source, ref: params.value.ref },
+      })
+      return resp.versions ?? []
+    },
+  })
+}
+
 // useInstallAppSkill 安装一个 skill 到指定实例（POST /api/v1/apps/:appId/skills）。
 // onSuccess 使安装后列表自动刷新，确保对账 status 第一时间可见。
 export function useInstallAppSkill(appId: Ref<string | undefined>) {
