@@ -517,6 +517,85 @@ func (s *AppSkillService) Update(ctx context.Context, principal auth.Principal, 
 }
 
 // =========================================================
+// Reinstall（pending 重试）
+// =========================================================
+
+// Reinstall 重新安装一个已记录但未生效（status=pending）的实例 skill：
+// 当首次安装时 oc-ops 热装 / reload 失败（app_skills 已落库但容器未生效）时，用户可手动重试。
+// 用 app_skills 现有记录的 source/source_ref/version 重新取归档并重跑 oc-ops 热装 + reload，
+// 不改动 app_skills 记录（version/缓存路径不变），仅重试容器侧落地。
+//  1. 权限（CanManageAppSkill）
+//  2. 查 app_skills 行（不存在 → ErrAppSkillNotFound）
+//  3. 按 source 重新取归档（fetchArchive）+ 解压防炸弹校验
+//  4. oc-ops 热装（SkillInstall 覆盖）+ reload（SkillReload）
+//  5. 写审计；oc-ops 仍失败 → status=pending（可继续重试），成功 → active
+func (s *AppSkillService) Reinstall(ctx context.Context, principal auth.Principal, appID, name string) (AppSkillResult, error) {
+	// 解析 app 定位信息（org/owner/oc-ops 地址/是否支持热装）
+	loc, err := s.apps.LocateApp(ctx, appID)
+	if err != nil {
+		return AppSkillResult{}, err
+	}
+	// 权限判断：owner 本人、本 org 的 org_admin、平台管理员可重试
+	if !auth.CanManageAppSkill(principal, loc.OrgID, loc.OwnerUserID) {
+		return AppSkillResult{}, ErrAppSkillDenied
+	}
+	// 查 app_skills 行，不存在则返回 NotFound
+	row, err := s.store.GetAppSkillByAppAndName(ctx, sqlc.GetAppSkillByAppAndNameParams{
+		AppID: appID,
+		Name:  name,
+	})
+	if err != nil {
+		if errors.Is(err, sql.ErrNoRows) {
+			return AppSkillResult{}, ErrAppSkillNotFound
+		}
+		return AppSkillResult{}, fmt.Errorf("查询实例 skill 失败: %w", err)
+	}
+	// 用 app_skills 记录的来源与版本重新取归档（与首次安装同源，保证内容一致）
+	in := InstallSkillInput{Source: row.Source, SourceRef: row.SourceRef, Name: name, Version: row.Version}
+	archive, _, _, ext, err := s.fetchArchive(ctx, in)
+	if err != nil {
+		return AppSkillResult{}, err
+	}
+	// 解压防炸弹校验
+	if err := validateArchiveSafety(archive, ext); err != nil {
+		return AppSkillResult{}, ErrAppSkillArchiveTooDangerous
+	}
+	// 写审计日志（记录重试操作，action=skill.reinstall）
+	_, _ = s.audit.Record(ctx, AuditEvent{
+		ActorID:       principal.UserID,
+		ActorRole:     string(principal.Role),
+		OrgID:         loc.OrgID,
+		TargetType:    "app_skill",
+		TargetID:      appID + "/" + name,
+		Action:        "skill.reinstall",
+		Result:        "succeeded",
+		DetailMessage: fmt.Sprintf("重新安装实例 %s 的 skill %s@%s", appID, name, row.Version),
+	})
+	// oc-ops 热装（覆盖安装）+ reload（失败仍 pending，可继续重试）
+	status := "active"
+	if loc.Supported {
+		if err := s.ocops.SkillInstall(ctx, loc.Endpoint, name, archive); err != nil {
+			// 热装仍失败：保持 pending，等待下次重试或 app 重启恢复
+			status = "pending"
+		} else if err := s.ocops.SkillReload(ctx, loc.Endpoint); err != nil {
+			// reload 仍失败：skill 已上传但 hermes 未重扫；保持 pending
+			status = "pending"
+		}
+	} else {
+		// 容器仍不可达：保持 pending
+		status = "pending"
+	}
+	return AppSkillResult{
+		Name:      name,
+		Source:    row.Source,
+		SourceRef: row.SourceRef,
+		Version:   row.Version,
+		Status:    status,
+		Category:  "manager",
+	}, nil
+}
+
+// =========================================================
 // List（实时对账）
 // =========================================================
 
@@ -574,10 +653,15 @@ func (s *AppSkillService) List(ctx context.Context, principal auth.Principal, ap
 			// app_skills 有 × 容器有 → active（manager 管理，正常运行中）
 			out = append(out, managerEntry(exp, "active", protectedSet[a.Name]))
 		} else if a.Builtin {
-			// app_skills 无 × 容器有 + 内置 → builtin（镜像预装，非 manager 管理）
+			// app_skills 无 × 容器有 + 镜像内置 → builtin（镜像预装，不可卸载）
 			out = append(out, AppSkillResult{Name: a.Name, Status: "builtin", Category: "hermes-builtin"})
+		} else if a.Managed {
+			// app_skills 无 × 容器有 + 含 .oc-managed 标记 → 运行时强制 render 的系统 skill
+			// （如 oc-kb：每次渲染由 render_skills 自动生成，用户既没在市场安装、也无法持久卸载）。
+			// 归 builtin、不可卸载，与用户在容器内手动自建的 self_created 区分开。
+			out = append(out, AppSkillResult{Name: a.Name, Status: "builtin", Category: "hermes-system"})
 		} else {
-			// app_skills 无 × 容器有 + 非内置 → self_created（用户在容器内自建）
+			// app_skills 无 × 容器有 + 非内置 + 无 .oc-managed → self_created（用户在容器内自建）
 			out = append(out, AppSkillResult{Name: a.Name, Status: "self_created", Category: "hermes-self-created"})
 		}
 	}

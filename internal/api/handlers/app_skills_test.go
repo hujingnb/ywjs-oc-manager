@@ -35,6 +35,10 @@ type appSkillServiceStub struct {
 	// Update 相关
 	updateResult service.AppSkillResult
 	updateErr    error
+
+	// Reinstall 相关
+	reinstallResult service.AppSkillResult
+	reinstallErr    error
 }
 
 // List 返回预设的 skill 列表结果或错误。
@@ -55,6 +59,11 @@ func (s *appSkillServiceStub) Uninstall(_ context.Context, _ auth.Principal, _, 
 // Update 返回预设的更新结果或错误。
 func (s *appSkillServiceStub) Update(_ context.Context, _ auth.Principal, _, _, _ string) (service.AppSkillResult, error) {
 	return s.updateResult, s.updateErr
+}
+
+// Reinstall 返回预设的重装结果或错误。
+func (s *appSkillServiceStub) Reinstall(_ context.Context, _ auth.Principal, _, _ string) (service.AppSkillResult, error) {
+	return s.reinstallResult, s.reinstallErr
 }
 
 // newAppSkillsTestRouter 创建注册了 AppSkills 路由的测试用 gin.Engine。

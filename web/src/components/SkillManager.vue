@@ -114,6 +114,7 @@ import {
   useAppSkillsQuery,
   useInstallAppSkill,
   useSkillMarketQuery,
+  useReinstallAppSkill,
   useUninstallAppSkill,
   useUpdateAppSkill,
 } from '@/api/hooks/useSkills'
@@ -144,10 +145,11 @@ const appIdRef = computed<string | undefined>(() => props.appId)
 // 已安装列表 query。
 const appSkillsQuery = useAppSkillsQuery(appIdRef)
 
-// 安装/卸载/更新 mutations。
+// 安装/卸载/更新/重装 mutations。
 const installMutation = useInstallAppSkill(appIdRef)
 const uninstallMutation = useUninstallAppSkill(appIdRef)
 const updateMutation = useUpdateAppSkill(appIdRef)
+const reinstallMutation = useReinstallAppSkill(appIdRef)
 
 // activeTab 控制当前视图（installed / market）。
 const activeTab = ref<'installed' | 'market'>('installed')
@@ -300,6 +302,20 @@ async function onUpdate(row: AppSkill) {
   }
 }
 
+// onReinstall 对 pending 状态的 skill 重新触发热装 + reload（重试）；成功转 active，仍失败保持 pending。
+async function onReinstall(row: AppSkill) {
+  try {
+    const r = await reinstallMutation.mutateAsync(row.name)
+    if (r?.status === 'active') {
+      message.success(`已重新安装 ${row.name}`)
+    } else {
+      message.warning(`${row.name} 仍未生效，可稍后再试`)
+    }
+  } catch (err) {
+    message.error(err instanceof Error ? err.message : '重新安装失败')
+  }
+}
+
 // installedColumns 定义已安装列表表格列。
 const installedColumns: DataTableColumns<AppSkill> = [
   // 技能名称列。
@@ -349,12 +365,12 @@ const installedColumns: DataTableColumns<AppSkill> = [
       )
     },
   },
-  // 操作列：protected 隐藏卸载并显示锁标记；builtin 只读；其余显示卸载按钮。
+  // 操作列：protected 隐藏卸载并显示锁标记；builtin 只读；pending 额外给「重新安装」重试；其余显示卸载按钮。
   {
     title: '操作',
     key: 'actions',
     render: (row) => {
-      // builtin 镜像内置 skill 只读展示，不允许任何操作。
+      // builtin 镜像内置 skill（含 oc-kb 等运行时强制系统 skill）只读展示，不允许任何操作。
       if (row.status === 'builtin') {
         return h('span', { class: 'state-text', style: 'font-size: 12px; margin: 0' }, '内置只读')
       }
@@ -364,7 +380,23 @@ const installedColumns: DataTableColumns<AppSkill> = [
       }
       // 无写权限时不显示任何操作按钮。
       if (!canManage.value) return null
-      return h(
+      // pending（首次热装/reload 未成功）额外给「重新安装」重试按钮，与卸载并排。
+      const reinstallBtn =
+        row.status === 'pending'
+          ? [
+              h(
+                NButton,
+                {
+                  size: 'small',
+                  type: 'warning',
+                  loading: reinstallMutation.isPending.value,
+                  onClick: () => onReinstall(row),
+                },
+                { default: () => '重新安装' },
+              ),
+            ]
+          : []
+      const uninstallBtn = h(
         NButton,
         {
           size: 'small',
@@ -374,6 +406,7 @@ const installedColumns: DataTableColumns<AppSkill> = [
         },
         { default: () => '卸载' },
       )
+      return h('div', { style: 'display: flex; gap: 8px' }, [...reinstallBtn, uninstallBtn])
     },
   },
 ]

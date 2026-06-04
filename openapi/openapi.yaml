@@ -4280,6 +4280,52 @@ paths:
       summary: 卸载实例 skill
       tags:
       - app-skills
+  /apps/{appId}/skills/{skillName}/reinstall:
+    post:
+      description: 对已记录但未生效（pending）的 skill 重新触发热装 + reload；用于首次热装/reload 失败后的手动重试
+      parameters:
+      - description: 应用 ID
+        in: path
+        name: appId
+        required: true
+        schema:
+          type: string
+      - description: skill 名称
+        in: path
+        name: skillName
+        required: true
+        schema:
+          type: string
+      responses:
+        "200":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/service.AppSkillResult'
+          description: OK
+        "403":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/handlers.ErrorResponse'
+          description: Forbidden
+        "404":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/handlers.ErrorResponse'
+          description: Not Found
+        "500":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/handlers.ErrorResponse'
+          description: Internal Server Error
+      security:
+      - BearerAuth: []
+      summary: 重新安装实例 skill
+      tags:
+      - app-skills
   /apps/{appId}/skills/{skillName}/update:
     post:
       description: 按 skillName 将已安装的 skill 更新到指定版本；成功返回 200 及更新后的结果

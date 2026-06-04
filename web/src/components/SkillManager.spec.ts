@@ -14,6 +14,7 @@ const mocks = vi.hoisted(() => ({
   installMutateAsync: vi.fn(),
   uninstallMutateAsync: vi.fn(),
   updateMutateAsync: vi.fn(),
+  reinstallMutateAsync: vi.fn(),
 
   // 权限控制。
   canManage: vi.fn(() => true),
@@ -76,6 +77,7 @@ const mutationState = {
   installPending: ref(false),
   uninstallPending: ref(false),
   updatePending: ref(false),
+  reinstallPending: ref(false),
 }
 
 // ======================== vi.mock ========================
@@ -102,6 +104,10 @@ vi.mock('@/api/hooks/useSkills', () => ({
   useUpdateAppSkill: () => ({
     mutateAsync: mocks.updateMutateAsync,
     isPending: mutationState.updatePending,
+  }),
+  useReinstallAppSkill: () => ({
+    mutateAsync: mocks.reinstallMutateAsync,
+    isPending: mutationState.reinstallPending,
   }),
 }))
 
@@ -266,6 +272,24 @@ describe('SkillManager', () => {
     mocks.canManage.mockReturnValue(true)
     const wrapper = mountManager()
     expect(wrapper.find('.cell-actions').text()).toContain('卸载')
+  })
+
+  it('pending skill 显示「重新安装」按钮并可点击触发重装', async () => {
+    // 覆盖 pending 状态：首次热装/reload 未成功时给「重新安装」重试入口，点击调 reinstall mutation。
+    appSkillsState.data.value = [
+      { name: 'skill-pending', status: 'pending', source: 'platform', version: '1.0.0', protected: false },
+    ]
+    mocks.canManage.mockReturnValue(true)
+    mocks.reinstallMutateAsync.mockResolvedValue({ name: 'skill-pending', status: 'active' })
+    const wrapper = mountManager()
+    const actionsCell = wrapper.find('.cell-actions')
+    // pending 同时给出「重新安装」与「卸载」两个入口。
+    expect(actionsCell.text()).toContain('重新安装')
+    expect(actionsCell.text()).toContain('卸载')
+    // 点击「重新安装」触发 reinstall mutation，参数为 skill 名。
+    const reinstallBtn = actionsCell.findAll('button').find((b) => b.text().includes('重新安装'))
+    await reinstallBtn?.trigger('click')
+    expect(mocks.reinstallMutateAsync).toHaveBeenCalledWith('skill-pending')
   })
 
   it('builtin skill 操作列显示「内置只读」而非卸载按钮', () => {

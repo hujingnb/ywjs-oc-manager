@@ -26,6 +26,8 @@ type appSkillService interface {
 	Uninstall(ctx context.Context, principal auth.Principal, appID, name string) error
 	// Update 将已安装的 skill 更新到目标版本。
 	Update(ctx context.Context, principal auth.Principal, appID, name, targetVersion string) (service.AppSkillResult, error)
+	// Reinstall 对 pending 状态的 skill 重新触发热装 + reload（重试）。
+	Reinstall(ctx context.Context, principal auth.Principal, appID, name string) (service.AppSkillResult, error)
 }
 
 // AppSkillsHandler 封装实例级 skill 管理的 HTTP 端点。
@@ -46,6 +48,7 @@ func RegisterAppSkillRoutes(router gin.IRouter, h *AppSkillsHandler) {
 	g.POST("", h.Install)
 	g.DELETE("/:skillName", h.Uninstall)
 	g.POST("/:skillName/update", h.Update)
+	g.POST("/:skillName/reinstall", h.Reinstall)
 }
 
 // List 列出指定实例已安装的所有 skill（含实时对账 status）。
@@ -154,6 +157,29 @@ func (h *AppSkillsHandler) Update(c *gin.Context) {
 		return
 	}
 	result, err := h.service.Update(c.Request.Context(), principalFromCtx(c), c.Param("appId"), c.Param("skillName"), req.Version)
+	if err != nil {
+		writeAppSkillError(c, err)
+		return
+	}
+	c.JSON(http.StatusOK, result)
+}
+
+// Reinstall 对 pending 状态的实例 skill 重新触发 oc-ops 热装 + reload（重试）。
+//
+// @Summary      重新安装实例 skill
+// @Description  对已记录但未生效（pending）的 skill 重新触发热装 + reload；用于首次热装/reload 失败后的手动重试
+// @Tags         app-skills
+// @Produce      json
+// @Security     BearerAuth
+// @Param        appId      path  string  true  "应用 ID"
+// @Param        skillName  path  string  true  "skill 名称"
+// @Success      200  {object}  service.AppSkillResult
+// @Failure      403  {object}  ErrorResponse
+// @Failure      404  {object}  ErrorResponse
+// @Failure      500  {object}  ErrorResponse
+// @Router       /apps/{appId}/skills/{skillName}/reinstall [post]
+func (h *AppSkillsHandler) Reinstall(c *gin.Context) {
+	result, err := h.service.Reinstall(c.Request.Context(), principalFromCtx(c), c.Param("appId"), c.Param("skillName"))
 	if err != nil {
 		writeAppSkillError(c, err)
 		return

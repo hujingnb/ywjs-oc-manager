@@ -121,6 +121,25 @@ export function useUpdateAppSkill(appId: Ref<string | undefined>) {
   })
 }
 
+// useReinstallAppSkill 对 pending 状态的 skill 重新触发热装 + reload
+// （POST /api/v1/apps/:appId/skills/:skillName/reinstall）。
+// 首次安装时 oc-ops 热装 / reload 失败会落 pending；用户点「重新安装」调此 hook 重试，成功后转 active。
+export function useReinstallAppSkill(appId: Ref<string | undefined>) {
+  const client = useQueryClient()
+  return useMutation({
+    mutationFn: async (skillName: string) => {
+      if (!appId.value) throw new Error('缺少实例 ID')
+      // POST 无 body；skillName 拼在路径里。
+      return apiRequest<AppSkill>(`/api/v1/apps/${appId.value}/skills/${skillName}/reinstall`, {
+        method: 'POST',
+      })
+    },
+    onSuccess: () => {
+      void client.invalidateQueries({ queryKey: appSkillKey(appId.value) })
+    },
+  })
+}
+
 // usePlatformSkillsQuery 拉取平台库所有 skill（GET /api/v1/platform-skills）。
 // 仅 platform_admin 有权限，非管理员后端会 403。
 export function usePlatformSkillsQuery() {

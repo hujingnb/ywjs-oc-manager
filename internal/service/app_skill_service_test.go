@@ -417,6 +417,49 @@ func TestAppSkillService_Install_OcOpsFail_Pending(t *testing.T) {
 }
 
 // =========================================================
+// Reinstall（pending 重试）单测
+// =========================================================
+
+// TestAppSkillService_Reinstall_Success 已记录 skill 重试：oc-ops 热装+reload 成功 → status=active。
+func TestAppSkillService_Reinstall_Success(t *testing.T) {
+	deps := newAppSkillTestDeps(t)
+	// 预置 app_skills 记录（首次安装已落库，SourceRef=weather/Version=1.0）+ 平台库归档
+	deps.appSkills.put("app-1", "weather", "platform")
+	deps.platform.put("weather", "1.0", []byte("data"))
+	svc := deps.service()
+
+	res, err := svc.Reinstall(context.Background(), deps.ownerPrincipal(), "app-1", "weather")
+	require.NoError(t, err)
+	// 热装+reload 成功 → active
+	assert.Equal(t, "active", res.Status)
+	assert.Equal(t, "weather", res.Name)
+}
+
+// TestAppSkillService_Reinstall_OcOpsFail_Pending 重试时 oc-ops 仍失败 → 保持 pending，不报错（可继续重试）。
+func TestAppSkillService_Reinstall_OcOpsFail_Pending(t *testing.T) {
+	deps := newAppSkillTestDeps(t)
+	deps.appSkills.put("app-1", "weather", "platform")
+	deps.platform.put("weather", "1.0", []byte("data"))
+	// 预置热装错误，模拟容器仍未就绪
+	deps.ocops.installErr = errors.New("pod still not ready")
+	svc := deps.service()
+
+	res, err := svc.Reinstall(context.Background(), deps.ownerPrincipal(), "app-1", "weather")
+	require.NoError(t, err)
+	// oc-ops 仍失败 → 保持 pending
+	assert.Equal(t, "pending", res.Status)
+}
+
+// TestAppSkillService_Reinstall_NotFound 对不存在的 app_skill 重试 → ErrAppSkillNotFound。
+func TestAppSkillService_Reinstall_NotFound(t *testing.T) {
+	deps := newAppSkillTestDeps(t)
+	svc := deps.service()
+
+	_, err := svc.Reinstall(context.Background(), deps.ownerPrincipal(), "app-1", "nonexistent")
+	require.ErrorIs(t, err, ErrAppSkillNotFound)
+}
+
+// =========================================================
 // validateArchiveSafety 单测
 // =========================================================
 
@@ -657,10 +700,29 @@ func TestAppSkillService_List_SelfCreated(t *testing.T) {
 
 	results, err := svc.List(context.Background(), deps.ownerPrincipal(), "app-1")
 	require.NoError(t, err)
-	// my-custom-skill 为 self_created（容器有，app_skills 无，非 builtin）
+	// my-custom-skill 为 self_created（容器有，app_skills 无，非 builtin，非 managed）
 	r, ok := findSkill(results, "my-custom-skill")
 	require.True(t, ok, "应找到 my-custom-skill")
 	assert.Equal(t, "self_created", r.Status)
+}
+
+// TestAppSkillService_List_SystemManagedAsBuiltin 容器有但 app_skills 无、Builtin=false 但 Managed=true
+// （如 oc-kb：manager 运行时强制 render 的系统 skill，有 .oc-managed 标记却未在市场安装）→ 归 builtin、不可卸载，
+// 与用户在容器内手动自建的 self_created 区分。
+func TestAppSkillService_List_SystemManagedAsBuiltin(t *testing.T) {
+	deps := newAppSkillTestDeps(t)
+	// app_skills 为空；容器实际有一个含 .oc-managed 标记（Managed=true）但非镜像内置（Builtin=false）的系统 skill。
+	deps.ocops.listSkills = []ocops.SkillInfo{
+		{Name: "oc-kb", Managed: true, Builtin: false},
+	}
+	svc := deps.service()
+
+	results, err := svc.List(context.Background(), deps.ownerPrincipal(), "app-1")
+	require.NoError(t, err)
+	// oc-kb：Managed=true 但不在 app_skills → 视为内置（builtin），不可卸载，区别于 self_created。
+	r, ok := findSkill(results, "oc-kb")
+	require.True(t, ok, "应找到 oc-kb")
+	assert.Equal(t, "builtin", r.Status)
 }
 
 // TestAppSkillService_List_UnknownOnUnreachable 容器不可达（SkillList 报错）时：
