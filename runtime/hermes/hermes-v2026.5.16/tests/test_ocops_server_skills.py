@@ -22,10 +22,10 @@ from starlette.testclient import TestClient
 # ---------------------------------------------------------------------------
 
 def _client(monkeypatch, tmp_path: Path) -> TestClient:
-    """构造带固定 token 与 tmp SKILLS_DIR/BUILTIN_FILE 的测试 client。
+    """构造带固定 token 与 tmp SKILLS_DIR/BUNDLED_MANIFEST 的测试 client。
 
     OC_OPS_TOKEN 固定为 t0ken，SKILLS_DIR 指向 tmp_path/skills，
-    BUILTIN_FILE 指向 tmp_path/skills-builtin.json（避免读 /opt 真实目录）。
+    BUNDLED_MANIFEST 指向 tmp_path/skills/.bundled_manifest（避免读 /opt 真实目录）。
     每次调用都重新从 ocops.server 导入 app，确保环境变量生效。
     """
     monkeypatch.setenv("OC_OPS_TOKEN", "t0ken")
@@ -39,13 +39,12 @@ def _client(monkeypatch, tmp_path: Path) -> TestClient:
     }))
     monkeypatch.setenv("OC_INFO_FILE", str(info_file))
 
-    # 将 SKILLS_DIR / BUILTIN_FILE 指向 tmp 目录，隔离真实 /opt/data
+    # 将 SKILLS_DIR / BUNDLED_MANIFEST 指向 tmp 目录，隔离真实 /opt/data
     import ocops.skills as skills_mod
     skills_dir = tmp_path / "skills"
     skills_dir.mkdir(parents=True, exist_ok=True)
-    builtin_file = tmp_path / "skills-builtin.json"
     monkeypatch.setattr(skills_mod, "SKILLS_DIR", skills_dir)
-    monkeypatch.setattr(skills_mod, "BUILTIN_FILE", builtin_file)
+    monkeypatch.setattr(skills_mod, "BUNDLED_MANIFEST", skills_dir / ".bundled_manifest")
 
     from ocops.server import app
     return TestClient(app)
@@ -70,27 +69,30 @@ def _make_zip(filename: str = "skill.zip", inner: str = "main.py") -> bytes:
 # ---------------------------------------------------------------------------
 
 def test_skills_list_managed_and_builtin(monkeypatch, tmp_path):
-    """list 端点：含 .oc-managed 目录 managed=True，出现在 builtin 清单中的 builtin=True。
+    """list 端点：含 .oc-managed 目录 managed=True，出现在 .bundled_manifest 中的 builtin=True。
 
-    构造两个 skill 目录：skill-a（带 .oc-managed，出现在 builtin）、skill-b（普通目录）；
-    验证 list 返回的标注字段正确。
+    构造两个含 SKILL.md 的 skill 目录：skill-a（带 .oc-managed，出现在内置基线）、skill-b（普通目录）；
+    验证递归扫描后 list 返回的标注字段正确。
     """
-    # 使用 _client 设置 token，再额外 monkeypatch SKILLS_DIR/BUILTIN_FILE
+    # 使用 _client 设置 token，再额外 monkeypatch SKILLS_DIR/BUNDLED_MANIFEST
     import ocops.skills as skills_mod
     c = _client(monkeypatch, tmp_path)
     skills_dir = skills_mod.SKILLS_DIR  # 已由 _client 指向 tmp_path/skills
-    builtin_file = tmp_path / "skills-builtin.json"
-    monkeypatch.setattr(skills_mod, "BUILTIN_FILE", builtin_file)
+    bundled_manifest = skills_dir / ".bundled_manifest"
+    monkeypatch.setattr(skills_mod, "BUNDLED_MANIFEST", bundled_manifest)
 
-    # skill-a：有 .oc-managed 标记，且出现在内置清单中
+    # skill-a：manager 安装的 skill——含 SKILL.md + .oc-managed 标记，不在内置基线。
     skill_a = skills_dir / "skill-a"
     skill_a.mkdir()
+    (skill_a / "SKILL.md").write_text("---\nname: skill-a\n---\n")
     (skill_a / ".oc-managed").write_text('{"source":"app-install"}\n')
-    # skill-b：普通目录，不带 .oc-managed，也不在内置清单中
+    # skill-b：镜像内置 skill——无 .oc-managed，且「目录叶子名(skill-b) ≠ SKILL.md 规范名(skill-b-canonical)」，
+    # 验证 builtin 判断走 SKILL.md 规范名匹配 .bundled_manifest，而对外 name 仍是目录叶子名。
     skill_b = skills_dir / "skill-b"
     skill_b.mkdir()
-    # 内置清单只含 skill-a
-    builtin_file.write_text(json.dumps({"builtin": ["skill-a"]}))
+    (skill_b / "SKILL.md").write_text("---\nname: skill-b-canonical\n---\n")
+    # 内置基线含 skill-b 的规范名（而非目录名），格式 "<规范名>:<hash>" 每行一个。
+    bundled_manifest.write_text("skill-b-canonical:deadbeef0123\n")
 
     r = c.get("/oc/skills", headers=_auth())
     assert r.status_code == 200
@@ -98,12 +100,14 @@ def test_skills_list_managed_and_builtin(monkeypatch, tmp_path):
     # 返回体必须含 skills 列表
     assert "skills" in body
     by_name = {s["name"]: s for s in body["skills"]}
-    # skill-a：managed=True（有 .oc-managed）、builtin=True（在清单中）
+    # skill-a：managed=True（有 .oc-managed）、builtin=False（manager 安装，不在内置基线）
     assert by_name["skill-a"]["managed"] is True
-    assert by_name["skill-a"]["builtin"] is True
-    # skill-b：managed=False（无 .oc-managed）、builtin=False（不在清单中）
+    assert by_name["skill-a"]["builtin"] is False
+    # skill-b：managed=False、builtin=True（规范名 skill-b-canonical 在基线，验证按规范名而非目录名匹配）；
+    # 且对外 name 仍是目录叶子名 skill-b。
     assert by_name["skill-b"]["managed"] is False
-    assert by_name["skill-b"]["builtin"] is False
+    assert by_name["skill-b"]["builtin"] is True
+    assert "skill-b" in by_name and "skill-b-canonical" not in by_name
 
 
 def test_skills_list_empty_dir(monkeypatch, tmp_path):

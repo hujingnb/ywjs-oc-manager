@@ -18,38 +18,96 @@ from ocops.errors import OpsError
 
 # skills 目录：容器内 hermes skill 根目录。
 SKILLS_DIR = Path("/opt/data/skills")
-# 内置 skill 清单：镜像构建期写入，记录随镜像预装的 skill 名称列表。
-BUILTIN_FILE = Path("/opt/skills-builtin.json")
+# 镜像内置 skill 基线清单：hermes 进程首次启动时写入 SKILLS_DIR/.bundled_manifest，
+# 每行 "<skill-name>:<hash>"，记录随镜像预装的全部内置 skill（叶子目录名）。
+# 与 SKILLS_DIR 同在 emptyDir，oc-ops 与 hermes 共享可读——故 oc-ops 用它判 builtin，
+# 而非镜像层私有的 /opt/skills-builtin.json（hermes 容器写、oc-ops 容器读不到，跨容器失效）。
+BUNDLED_MANIFEST = SKILLS_DIR / ".bundled_manifest"
 # hermes api_server reload 端点：容器内 127.0.0.1:8642，调用后触发无重启扫描。
 RELOAD_URL = "http://127.0.0.1:8642/oc/skills/reload"
 
 
-def list_skills() -> dict:
-    """列出 SKILLS_DIR 下所有 skill 目录，为每项标注 managed 与 builtin 属性。
+def _load_builtin_names() -> set[str]:
+    """读 SKILLS_DIR/.bundled_manifest（hermes 维护的镜像内置基线），返回内置 skill 名集合。
 
-    managed=True 表示该 skill 含 .oc-managed 标记文件（由 install_skill 写入）；
-    builtin=True 表示 skill 名称出现在 BUILTIN_FILE 内置清单中（镜像预装）。
+    每行格式 "<name>:<hash>"，取冒号前的 name。文件不存在或解析失败时返回空集
+    （退化：非 managed 的 skill 一律按 self_created 显示，不阻断列表端点）。
+    """
+    names: set[str] = set()
+    if BUNDLED_MANIFEST.exists():
+        try:
+            for line in BUNDLED_MANIFEST.read_text().splitlines():
+                line = line.strip()
+                if not line:
+                    continue
+                # 仅取冒号前的 skill 名；行内无冒号时整行即为名。
+                names.add(line.split(":", 1)[0].strip())
+        except Exception:
+            # 清单损坏不阻断列表端点，仅 builtin 字段退化为 False。
+            return set()
+    names.discard("")
+    return names
+
+
+def _read_skill_name(skill_md: Path, fallback: str) -> str:
+    """从 SKILL.md frontmatter 读 name 字段（hermes 的 skill 规范名，与 .bundled_manifest 一致）。
+
+    镜像内置 skill 的目录叶子名常与规范名不同（如目录 mlops/models/audiocraft 的
+    SKILL.md name=audiocraft-audio-generation），故 builtin 匹配必须用规范名而非目录名。
+    解析失败、缺 frontmatter 或无 name 字段时回退到 fallback（目录叶子名）。
+    """
+    try:
+        lines = skill_md.read_text(encoding="utf-8", errors="replace").splitlines()
+    except Exception:
+        return fallback
+    # frontmatter 必须以首行 "---" 开始；否则视为无规范名，回退到目录名。
+    if not lines or lines[0].strip() != "---":
+        return fallback
+    for line in lines[1:]:
+        s = line.strip()
+        if s == "---":
+            break
+        if s.startswith("name:"):
+            val = s[len("name:"):].strip().strip('"').strip("'")
+            if val:
+                return val
+    return fallback
+
+
+def list_skills() -> dict:
+    """递归扫描 SKILLS_DIR 下所有含 SKILL.md 的目录，每个视为一个 skill，标注 managed 与 builtin。
+
+    hermes 的 skill 目录既有扁平结构（<name>/SKILL.md：oc-ops 安装、oc-kb、版本种子），
+    也有层级结构（<category>/<name>/SKILL.md：镜像内置）；统一以「含 SKILL.md 的目录」为一个
+    skill，skill 名取该目录叶子名（与 .bundled_manifest 命名一致）。
+
+    历史教训：旧实现只遍历 SKILLS_DIR 直接子目录，把内置的 category 目录（apple/github…）
+    误当成 skill，且内置子目录下的真实 skill 反而漏列。
+
+    managed=True：该 skill 目录含 .oc-managed 标记（由 install_skill / render_skills 写入）；
+    builtin=True：skill 名出现在 .bundled_manifest 镜像内置基线中。
     SKILLS_DIR 不存在时返回空列表（容器首启尚未挂载 /opt/data）。
     """
-    # 读内置清单；文件不存在或解析失败时静默视为空集
-    builtin: set[str] = set()
-    if BUILTIN_FILE.exists():
-        try:
-            builtin = set(json.loads(BUILTIN_FILE.read_text()).get("builtin", []))
-        except Exception:
-            # 清单损坏不阻断列表端点，仅 builtin 字段退化为 False
-            builtin = set()
-
+    builtin = _load_builtin_names()
     out: list[dict] = []
     if SKILLS_DIR.exists():
-        for d in sorted(SKILLS_DIR.iterdir()):
-            if d.is_dir():
-                out.append({
-                    "name": d.name,
-                    # .oc-managed 文件存在表示由 oc-ops 热装，否则为手动或镜像预置
-                    "managed": (d / ".oc-managed").exists(),
-                    "builtin": d.name in builtin,
-                })
+        seen: set[str] = set()
+        for skill_md in sorted(SKILLS_DIR.rglob("SKILL.md")):
+            d = skill_md.parent
+            name = d.name
+            # 同名 skill（不同层级）只保留首个，避免重复条目。
+            if name in seen:
+                continue
+            seen.add(name)
+            # 对外 name 用目录叶子名（= manager 安装时的目录名，保证与 app_skills.name 对账一致）；
+            # builtin 判断改用 SKILL.md frontmatter 的规范名匹配 .bundled_manifest（叶子名常与规范名不同）。
+            manifest_name = _read_skill_name(skill_md, name)
+            out.append({
+                "name": name,
+                # .oc-managed 文件存在表示由 oc-ops 热装/版本渲染，否则为镜像内置或手动自建。
+                "managed": (d / ".oc-managed").exists(),
+                "builtin": manifest_name in builtin,
+            })
     return {"skills": out}
 
 
