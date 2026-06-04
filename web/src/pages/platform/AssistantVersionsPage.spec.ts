@@ -12,10 +12,15 @@ const deleteVersion = vi.hoisted(() => vi.fn())
 const addSkill = vi.hoisted(() => vi.fn())
 const deleteSkill = vi.hoisted(() => vi.fn())
 
-// SkillMarketBrowser stub：避免渲染组件内部的 useSkillMarketQuery/useSkillDetailQuery，
-// 仅提供一个带 name 标识的占位元素，便于 findComponent({ name: 'SkillMarketBrowser' }) 查找。
+// SkillMarketBrowser stub：声明全部 props，使 wrapper.findComponent({ name: 'SkillMarketBrowser' }).props()
+// 可读到 allowVersionPick 等传入值，同时提供占位元素便于 findComponent 定位。
 vi.mock('@/components/SkillMarketBrowser.vue', () => ({
-  default: { name: 'SkillMarketBrowser', template: '<div class="stub-market-browser" />' },
+  default: {
+    name: 'SkillMarketBrowser',
+    props: ['existingNames', 'actionLabel', 'existingLabel', 'actionPending', 'canAction', 'allowVersionPick'],
+    emits: ['action'],
+    template: '<div class="stub-market-browser" />',
+  },
 }))
 
 // 含 skill 的样例版本，skills 字段包含 source/version 新字段。
@@ -271,6 +276,9 @@ describe('AssistantVersionsPage', () => {
     // 编辑态应渲染 SkillMarketBrowser（stub）。
     const browser = wrapper.findComponent({ name: 'SkillMarketBrowser' })
     expect(browser.exists()).toBe(true)
+
+    // 版本场景下必须传 allowVersionPick=true，保证抽屉版本行有「添加此版本」入口。
+    expect(browser.props('allowVersionPick')).toBe(true)
 
     // 模拟 SkillMarketBrowser 触发 action 事件（clawhub 来源、指定版本）。
     browser.vm.$emit('action', { source: 'clawhub', source_ref: 'sv', name: 'Skill Vetter', version: '1.0.0' })

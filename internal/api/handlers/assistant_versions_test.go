@@ -122,10 +122,11 @@ func TestAVListRuntimeImages(t *testing.T) {
 }
 
 // avAddSkillRequest 构造一个从库选 skill 的 JSON 请求，供 AddSkillFromLibrary handler 测试复用。
+// Name 字段补全，确保 handler 对 req.Name → AddSkillFromLibraryInput.Name 的透传路径也被覆盖。
 func avAddSkillRequest(t *testing.T) *http.Request {
 	t.Helper()
 	body, err := json.Marshal(AddSkillFromLibraryRequest{
-		Source: "platform", SourceRef: "weather", Version: "1.0.0",
+		Source: "platform", SourceRef: "weather", Name: "weather", Version: "1.0.0",
 	})
 	require.NoError(t, err)
 	req := httptest.NewRequest(http.MethodPost, "/api/v1/assistant-versions/v1/skills", bytes.NewReader(body))
@@ -176,4 +177,17 @@ func TestAVAddSkillFromLibraryRejectsMissingBody(t *testing.T) {
 	resp := httptest.NewRecorder()
 	router.ServeHTTP(resp, req)
 	require.Equal(t, http.StatusBadRequest, resp.Code)
+}
+
+// TestAVAddSkillFromLibraryMapsSourceUnknown 验证 service 返回 ErrAppSkillSourceUnknown 时映射 400。
+func TestAVAddSkillFromLibraryMapsSourceUnknown(t *testing.T) {
+	// 来源字段传入未知值时（既非 platform 也非 clawhub），service 返回 ErrAppSkillSourceUnknown，
+	// handler 应映射为 400 Bad Request 且错误码为 APP_SKILL_SOURCE_UNKNOWN。
+	svc := &avServiceStub{err: service.ErrAppSkillSourceUnknown}
+	router := newAVTestRouter(t, svc)
+	req := withPrincipal(avAddSkillRequest(t), auth.Principal{Role: domain.UserRolePlatformAdmin})
+	resp := httptest.NewRecorder()
+	router.ServeHTTP(resp, req)
+	require.Equal(t, http.StatusBadRequest, resp.Code)
+	assert.Contains(t, resp.Body.String(), "APP_SKILL_SOURCE_UNKNOWN")
 }

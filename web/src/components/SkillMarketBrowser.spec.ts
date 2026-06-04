@@ -80,9 +80,15 @@ vi.mock('naive-ui', async () => {
   }
 })
 
-// stub SkillDetailDrawer：避免拉起其内部详情查询，SkillMarketBrowser 测试只关注卡片区域。
+// stub SkillDetailDrawer：声明 pick-version 事件和全部 props，使 SkillMarketBrowser 的
+// onPickVersion 路径可在测试中触发。template 带 show 属性以符合 v-model:show 绑定。
 vi.mock('./SkillDetailDrawer.vue', () => ({
-  default: { name: 'SkillDetailDrawer', template: '<div class="stub-drawer" />' },
+  default: {
+    name: 'SkillDetailDrawer',
+    props: ['show', 'skill', 'allowVersionPick', 'actionPending', 'existingNames'],
+    emits: ['update:show', 'pick-version'],
+    template: '<div class="stub-drawer" />',
+  },
 }))
 
 // ======================== 挂载辅助 ========================
@@ -260,6 +266,39 @@ describe('SkillMarketBrowser', () => {
       source_ref: 'sv',
       name: 'Skill Vetter',
       version: '1.0.0',
+    })
+  })
+
+  // ======== 详情抽屉锁旧版 pick-version ========
+
+  it('详情抽屉 pick-version 事件 emit action 使用抽屉版本而非卡片最新版', async () => {
+    // 覆盖：onPickVersion 路径——先点卡片打开详情（detailSkill 有值），
+    // 再由抽屉 emit pick-version 传回历史版本号，action payload 应携带该历史版本
+    // 而非卡片上展示的最新版。验证锁旧版场景中版本来自抽屉而非 entry.version。
+    marketState.data.value = {
+      entries: [
+        { source: 'platform', source_ref: 'weather', name: 'weather', version: '2.0.0', downloads: 0 },
+      ],
+    }
+    const wrapper = mountBrowser({ allowVersionPick: true, canAction: true })
+
+    // 点击卡片触发 openDetail，使 detailSkill 填充为该 entry 的信息。
+    await wrapper.find('.market-card').trigger('click')
+    await nextTick()
+
+    // 抽屉 emit pick-version 传回历史版本 '1.5.0'（不同于卡片最新版 '2.0.0'）。
+    wrapper.findComponent({ name: 'SkillDetailDrawer' }).vm.$emit('pick-version', '1.5.0')
+    await nextTick()
+
+    // action payload 的 version 应为抽屉传回的 '1.5.0'，而非卡片最新版 '2.0.0'。
+    const emitted = wrapper.emitted('action')
+    expect(emitted).toBeTruthy()
+    const lastPayload = emitted![emitted!.length - 1][0] as { source: string; source_ref: string; name: string; version: string }
+    expect(lastPayload).toMatchObject({
+      source: 'platform',
+      source_ref: 'weather',
+      name: 'weather',
+      version: '1.5.0',
     })
   })
 })
