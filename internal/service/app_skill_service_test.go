@@ -763,6 +763,21 @@ func TestAppSkillService_List_UnknownOnUnreachable(t *testing.T) {
 	assert.Equal(t, "unknown", r.Status)
 }
 
+// TestAppSkillService_List_RuntimeUnsupported 运行的 hermes 版本过旧（oc-ops 无 /oc/skills 路由，
+// SkillList 返回 ocops.ErrNotFound/404）时，List 直接返回 ErrAppSkillRuntimeUnsupported，
+// 而非降级为 unknown——用于前端提示用户更新实例版本。
+func TestAppSkillService_List_RuntimeUnsupported(t *testing.T) {
+	deps := newAppSkillTestDeps(t)
+	deps.appSkills.put("app-1", "weather", "platform")
+	// 老版本 hermes：GET /oc/skills 路由不存在 → 404 → ocops.ErrNotFound
+	deps.ocops.listErr = ocops.ErrNotFound
+	svc := deps.service()
+
+	_, err := svc.List(context.Background(), deps.ownerPrincipal(), "app-1")
+	// 必须区别于「不可达降级 unknown」：直接报 RuntimeUnsupported
+	require.ErrorIs(t, err, ErrAppSkillRuntimeUnsupported)
+}
+
 // TestAppSkillService_List_Protected app_skills 中且属于当前版本必需的 skill，Protected=true。
 func TestAppSkillService_List_Protected(t *testing.T) {
 	deps := newAppSkillTestDeps(t)

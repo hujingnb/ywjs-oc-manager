@@ -193,6 +193,8 @@ vi.mock('naive-ui', async () => {
     NButton: { template: '<button class="n-button" v-bind="$attrs"><slot /></button>' },
     // NTag stub 渲染为 span。
     NTag: { template: '<span class="n-tag" v-bind="$attrs"><slot /></span>' },
+    // NAlert stub 渲染 title + slot，供运行时不支持横幅测试断言文案。
+    NAlert: { props: ['title', 'type'], template: '<div class="n-alert">{{ title }}<slot /></div>' },
     // NInput stub：接受所有 props 避免 size/placeholder 报 DOMException warning。
     NInput: { template: '<div class="n-input"><input /></div>' },
   }
@@ -284,6 +286,37 @@ describe('SkillManager', () => {
     ]
     const wrapper = mountManager()
     expect(wrapper.find('.cell-status').text()).toContain('自创')
+  })
+
+  // ======== 运行时版本过旧：提示更新 ========
+
+  it('已安装查询返回 APP_SKILL_RUNTIME_UNSUPPORTED 时显示更新提示、隐藏 tab', () => {
+    // 覆盖：实例运行的 hermes 版本过旧（oc-ops 无 /oc/skills 路由），后端 409 返回该 code，
+    // 组件应展示「技能管理不可用」横幅与后端提示文案，且不再渲染「已安装/技能市场」tab。
+    appSkillsState.error.value = Object.assign(new Error('版本过旧'), {
+      status: 409,
+      body: { code: 'APP_SKILL_RUNTIME_UNSUPPORTED', message: '当前实例运行的 hermes 版本过旧，请更新版本' },
+    }) as unknown as Error
+    const wrapper = mountManager()
+    // 横幅标题 + 后端提示文案
+    const alert = wrapper.find('.n-alert')
+    expect(alert.exists()).toBe(true)
+    expect(alert.text()).toContain('技能管理不可用')
+    expect(alert.text()).toContain('请更新版本')
+    // tab 容器不渲染（被 v-else 排除）
+    expect(wrapper.find('.n-tabs').exists()).toBe(false)
+  })
+
+  it('普通查询错误（非运行时不支持）不触发更新横幅', () => {
+    // 边界：其它错误（如网络故障）走常规「查询失败」分支，不误判为版本过旧。
+    appSkillsState.error.value = Object.assign(new Error('网络错误'), {
+      status: 500,
+      body: { code: 'INTERNAL_ERROR', message: '服务器内部错误' },
+    }) as unknown as Error
+    const wrapper = mountManager()
+    expect(wrapper.find('.n-alert').exists()).toBe(false)
+    // 仍渲染 tab（常规错误在已安装 tab 内以文案展示）
+    expect(wrapper.find('.n-tabs').exists()).toBe(true)
   })
 
   // ======== 已安装：protected 隐藏卸载 ========

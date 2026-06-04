@@ -210,6 +210,11 @@ var ErrAppSkillSourceUnknown = errors.New("未知的 skill 来源")
 // ErrAppSkillArchiveTooDangerous 表示 skill 归档解压校验失败（如路径穿越、内容篡改等）。
 var ErrAppSkillArchiveTooDangerous = errors.New("skill 归档解压校验失败")
 
+// ErrAppSkillRuntimeUnsupported 表示实例当前运行的 hermes 镜像版本过旧、不支持 skill 管理
+// （oc-ops 无 /oc/skills 路由，查询返回 404）。区别于「pod 临时不可达」（网络错误），
+// 用于提示用户更新实例的运行时版本。
+var ErrAppSkillRuntimeUnsupported = errors.New("当前 hermes 运行时版本不支持 skill 管理")
+
 // ===== skill 市场 =====
 
 // ErrSkillMarketSourceUnknown 表示请求了未知的 skill 来源。

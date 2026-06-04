@@ -1,7 +1,12 @@
 <template>
   <!-- SkillManager：实例已安装技能列表 + 技能市场，供成员技能页与管理员实例 tab 复用。 -->
   <div class="skill-manager">
-    <n-tabs v-model:value="activeTab" type="line" animated>
+    <!-- 运行时版本过旧：实例运行的 hermes 镜像无 oc-ops /oc/skills 路由，技能管理整体不可用，
+         直接提示更新版本，不再展示 tab（安装/卸载等操作都无法生效）。 -->
+    <n-alert v-if="runtimeUnsupported" type="warning" title="技能管理不可用">
+      {{ runtimeUnsupportedMessage }}
+    </n-alert>
+    <n-tabs v-else v-model:value="activeTab" type="line" animated>
       <!-- 已安装视图：实时对账当前实例的 skill 列表，含状态徽章和操作按钮。 -->
       <n-tab-pane name="installed" tab="已安装">
         <div v-if="appSkillsQuery.isLoading.value" class="state-text">加载中…</div>
@@ -105,6 +110,7 @@
 <script setup lang="ts">
 import { computed, h, inject, onBeforeUnmount, ref, watch, type Ref } from 'vue'
 import {
+  NAlert,
   NButton,
   NCard,
   NDataTable,
@@ -153,6 +159,18 @@ const appIdRef = computed<string | undefined>(() => props.appId)
 
 // 已安装列表 query。
 const appSkillsQuery = useAppSkillsQuery(appIdRef)
+
+// runtimeUnsupported 判定：已安装列表查询失败且后端返回 APP_SKILL_RUNTIME_UNSUPPORTED
+// （实例运行的 hermes 版本过旧、oc-ops 无 /oc/skills 路由）。此时技能管理整体不可用。
+const runtimeUnsupported = computed(() => {
+  const body = (appSkillsQuery.error.value as { body?: { code?: string } } | null)?.body
+  return body?.code === 'APP_SKILL_RUNTIME_UNSUPPORTED'
+})
+// runtimeUnsupportedMessage 优先用后端返回的提示文案，缺失时兜底固定文案。
+const runtimeUnsupportedMessage = computed(() => {
+  const body = (appSkillsQuery.error.value as { body?: { message?: string } } | null)?.body
+  return body?.message ?? '当前实例运行的 hermes 版本过旧，不支持技能管理，请更新实例的运行时版本后重试。'
+})
 
 // 安装/卸载/更新/重装 mutations。
 const installMutation = useInstallAppSkill(appIdRef)

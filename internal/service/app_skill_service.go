@@ -650,6 +650,12 @@ func (s *AppSkillService) List(ctx context.Context, principal auth.Principal, ap
 	if reachable {
 		actual, err = s.ocops.SkillList(ctx, loc.Endpoint)
 		if err != nil {
+			// /oc/skills 路由不存在（404）→ 实例运行的 hermes 版本过旧、不支持 skill 管理。
+			// 这与「pod 临时不可达」（网络/502 → ErrCLI）语义不同：前者需提示用户更新版本，
+			// 后者只是暂时拿不到运行时真相、降级 unknown 即可。
+			if errors.Is(err, ocops.ErrNotFound) {
+				return nil, ErrAppSkillRuntimeUnsupported
+			}
 			// 容器不可达（pod 未就绪/网络故障）：不报错，fallback 为 unknown
 			reachable = false
 		}

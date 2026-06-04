@@ -39,6 +39,13 @@ export function useAppSkillsQuery(appId: Ref<string | undefined>) {
   return useQuery<AppSkill[]>({
     queryKey: computed(() => appSkillKey(appId.value)),
     enabled: () => Boolean(appId.value),
+    // 4xx 客户端错误（含「运行时版本过旧」409）是确定性失败，重试无意义且会延迟报错；
+    // 仅对 5xx/网络错误重试，让运行时不支持等提示能第一时间呈现。
+    retry: (failureCount, error) => {
+      const status = (error as { status?: number }).status
+      if (typeof status === 'number' && status >= 400 && status < 500) return false
+      return failureCount < 3
+    },
     queryFn: async () => {
       if (!appId.value) return []
       // GET /api/v1/apps/:appId/skills 直接返回数组，无外层包装键。
