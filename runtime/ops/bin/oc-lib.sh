@@ -118,26 +118,35 @@ sync_weixin_up() {
   aws_s3 sync "$data_dir/weixin" "s3://${AWS_S3_BUCKET}/${AWS_S3_PREFIX}weixin/"
 }
 
-# sync_user_skills_up <data_dir> 把 skills/ 下「无 .oc-managed 且不在内置清单」的自创 skill
-# 增量同步到 S3 apps/<id>/skills/<name>/。
-# 跳过条件（两类）：
-#   1. 目录含 .oc-managed 文件 → 受平台管理的内置/托管 skill，不由用户自持；
-#   2. 目录名出现在 ${OC_BUILTIN_MANIFEST:-/opt/skills-builtin.json} 的 .builtin 数组内
-#      → 内置 skill，也不上传（文件不存在则视为无内置清单，仅跳过有 .oc-managed 的目录）。
+# sync_user_skills_up <data_dir> 把 skills/ 下「用户自创」的 skill 增量同步到 S3 apps/<id>/skills/<name>/。
+# 自创 skill = 直接子目录、含 SKILL.md、无 .oc-managed 标记、且规范名不在镜像内置基线。
+# 跳过条件（三类）：
+#   1. 直接子目录不含 SKILL.md → 镜像内置的 category 容器目录（apple/github…，真实 skill 在其下一层），
+#      或非 skill 目录，跳过；
+#   2. 目录含 .oc-managed 文件 → 受平台管理（安装/版本渲染）的 skill，不由用户自持；
+#   3. SKILL.md frontmatter 规范名出现在 .bundled_manifest 镜像内置基线 → 内置 skill，不上传。
+# 内置基线用 ${OC_BUNDLED_MANIFEST:-<skills>/.bundled_manifest}（与 hermes 共享的 emptyDir，每行
+# "name:hash"）；不可用 /opt/skills-builtin.json——它在 hermes 镜像层、ops 容器读不到（/opt 非共享），
+# 且 ensure_builtin_manifest 时序缺陷恒写空清单，会导致全部内置 skill 被误判自创、换镜像旧内置覆盖新镜像。
 # skills/ 不存在时静默跳过（首启尚未创建自定义 skill）。
 sync_user_skills_up() {
   local data_dir="$1"
   local skills_dir="$data_dir/skills"
   [ -d "$skills_dir" ] || return 0
-  local builtin_file="${OC_BUILTIN_MANIFEST:-/opt/skills-builtin.json}"
-  local dir name
+  local bundled="${OC_BUNDLED_MANIFEST:-$skills_dir/.bundled_manifest}"
+  local dir name canon
   for dir in "$skills_dir"/*/; do
     [ -d "$dir" ] || continue
     name=$(basename "$dir")
-    # 跳过受管 skill：目录内有 .oc-managed 标记文件
+    # 仅备份「直接子目录即一个 skill」（含 SKILL.md）；内置 category 容器目录（自身无 SKILL.md）跳过。
+    [ -f "$dir/SKILL.md" ] || continue
+    # 跳过受管 skill：含 .oc-managed 标记
     [ -f "$dir/.oc-managed" ] && continue
-    # 跳过内置 skill：名字出现在内置清单数组 .builtin 中
-    if [ -f "$builtin_file" ] && jq -e --arg n "$name" '.builtin | index($n)' "$builtin_file" >/dev/null 2>&1; then
+    # 跳过镜像内置 skill：读 SKILL.md frontmatter 规范名（内置目录叶子名常与规范名不同），
+    # 匹配 .bundled_manifest 的 name（取冒号前一段）。
+    canon=$(sed -n 's/^name:[[:space:]]*//p' "$dir/SKILL.md" 2>/dev/null | head -1 | tr -d '"' | tr -d "'")
+    [ -z "$canon" ] && canon="$name"
+    if [ -f "$bundled" ] && cut -d: -f1 "$bundled" 2>/dev/null | grep -qxF "$canon"; then
       continue
     fi
     # 自创 skill：同步到 S3（不加 --delete，以免删掉 S3 侧未落盘的内容）
