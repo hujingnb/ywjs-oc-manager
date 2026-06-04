@@ -114,7 +114,7 @@ const effectiveDescription = computed(
 
 // sourceLabel：空来源（内置/自创）显示「内置」，避免「来源」一栏为空。
 function sourceLabel(source?: string): string {
-  if (source === 'platform') return '平台库'
+  if (source === 'platform') return '平台技能'
   if (source === 'clawhub') return 'ClawHub'
   return source || '内置'
 }

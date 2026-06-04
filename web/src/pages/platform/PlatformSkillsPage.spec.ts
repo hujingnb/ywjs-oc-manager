@@ -199,7 +199,7 @@ describe('PlatformSkillsPage', () => {
   it('上传区包含 name/version 输入框和文件选择按钮', () => {
     const wrapper = mountPage()
     // 检查 placeholder 文案确认输入框存在。
-    expect(wrapper.text()).toContain('上传平台库 Skill')
+    expect(wrapper.text()).toContain('上传平台技能')
     const inputs = wrapper.findAll('input')
     // 至少存在文件 input（type=file）。
     const fileInput = inputs.find(i => i.attributes('type') === 'file')

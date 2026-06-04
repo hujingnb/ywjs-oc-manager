@@ -109,7 +109,7 @@ const emit = defineEmits<{ action: [{ source: string; source_ref: string; name: 
 // 来源筛选项。
 const sourceFilters = [
   { label: '全部', value: '' },
-  { label: '平台库', value: 'platform' },
+  { label: '平台技能', value: 'platform' },
   { label: 'ClawHub', value: 'clawhub' },
 ] as const
 const selectedSource = ref<string>('')
@@ -189,7 +189,7 @@ function emitAction(entry: SkillEntry, version: string) {
 }
 
 function sourceLabel(source?: string): string {
-  if (source === 'platform') return '平台库'
+  if (source === 'platform') return '平台技能'
   if (source === 'clawhub') return 'ClawHub'
   return source || '内置'
 }

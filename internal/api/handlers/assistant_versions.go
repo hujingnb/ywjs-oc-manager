@@ -60,7 +60,7 @@ func writeAVError(c *gin.Context, err error) {
 	case errors.Is(err, service.ErrAssistantVersionSkillNameTaken):
 		c.JSON(http.StatusConflict, apierror.New("ASSISTANT_VERSION_SKILL_NAME_TAKEN", "版本内 skill 名称已存在"))
 	case errors.Is(err, service.ErrPlatformSkillNotFound):
-		c.JSON(http.StatusNotFound, apierror.New("PLATFORM_SKILL_NOT_FOUND", "平台库 skill 不存在"))
+		c.JSON(http.StatusNotFound, apierror.New("PLATFORM_SKILL_NOT_FOUND", "平台技能不存在"))
 	case errors.Is(err, service.ErrAppSkillSourceUnknown):
 		c.JSON(http.StatusBadRequest, apierror.New("APP_SKILL_SOURCE_UNKNOWN", "未知的 skill 来源"))
 	case errors.Is(err, service.ErrAssistantVersionInvalid):

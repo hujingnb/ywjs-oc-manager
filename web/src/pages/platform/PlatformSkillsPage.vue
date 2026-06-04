@@ -5,7 +5,7 @@
       <template #header>
         <div>
           <p class="eyebrow">Platform</p>
-          <h2 style="margin: 0">上传平台库 Skill</h2>
+          <h2 style="margin: 0">上传平台技能</h2>
         </div>
       </template>
       <n-form label-placement="top" @submit.prevent="onUpload">
@@ -64,7 +64,7 @@
       <template #header>
         <div>
           <p class="eyebrow">Platform</p>
-          <h2 style="margin: 0">平台库 Skill 列表</h2>
+          <h2 style="margin: 0">平台技能列表</h2>
         </div>
       </template>
 

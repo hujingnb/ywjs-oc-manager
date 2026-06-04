@@ -405,7 +405,7 @@ describe('SkillManager', () => {
   // ======== 已安装：来源筛选 + 数量统计 ========
 
   it('多来源时展示来源筛选 tag 且各带数量统计（全部为总数）', () => {
-    // 覆盖：列表含 platform/clawhub/builtin 三类来源时，筛选工具栏展示「全部/平台库/ClawHub/内置」
+    // 覆盖：列表含 platform/clawhub/builtin 三类来源时，筛选工具栏展示「全部/平台技能/ClawHub/内置」
     // 四个 tag，每个 tag 文案带该来源数量，「全部」为总数 4。
     // 含 builtin 来源，须以平台管理员视角才能看到内置筛选项与计数。
     authState.isPlatformAdmin = true
@@ -419,9 +419,9 @@ describe('SkillManager', () => {
     const toolbar = wrapper.find('.installed-toolbar')
     expect(toolbar.exists()).toBe(true)
     const text = toolbar.text()
-    // 「全部」为总数 4，平台库 2、ClawHub 1、内置 1；自创无数据不展示。
+    // 「全部」为总数 4，平台技能 2、ClawHub 1、内置 1；自创无数据不展示。
     expect(text).toContain('全部 (4)')
-    expect(text).toContain('平台库 (2)')
+    expect(text).toContain('平台技能 (2)')
     expect(text).toContain('ClawHub (1)')
     expect(text).toContain('内置 (1)')
     expect(text).not.toContain('自创')

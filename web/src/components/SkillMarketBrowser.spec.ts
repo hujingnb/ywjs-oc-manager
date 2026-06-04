@@ -115,7 +115,7 @@ describe('SkillMarketBrowser', () => {
 
   // ======== 来源徽章 ========
 
-  it('平台库条目来源徽章显示「平台库」', () => {
+  it('平台技能条目来源徽章显示「平台技能」', () => {
     // 覆盖 source=platform 时来源徽章文案正确，用户可区分来源。
     marketState.data.value = {
       entries: [
@@ -123,7 +123,7 @@ describe('SkillMarketBrowser', () => {
       ],
     }
     const wrapper = mountBrowser()
-    expect(wrapper.find('.n-card').text()).toContain('平台库')
+    expect(wrapper.find('.n-card').text()).toContain('平台技能')
   })
 
   it('ClawHub 条目来源徽章显示「ClawHub」', () => {

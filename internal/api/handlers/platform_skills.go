@@ -123,13 +123,13 @@ func (h *PlatformSkillsHandler) Delete(c *gin.Context) {
 func writePlatformSkillError(c *gin.Context, err error) {
 	switch {
 	case errors.Is(err, service.ErrPlatformSkillDenied):
-		c.JSON(http.StatusForbidden, apierror.New("FORBIDDEN", "无权管理平台库 skill"))
+		c.JSON(http.StatusForbidden, apierror.New("FORBIDDEN", "无权管理平台技能"))
 	case errors.Is(err, service.ErrPlatformSkillNotFound):
-		c.JSON(http.StatusNotFound, apierror.New("NOT_FOUND", "平台库 skill 不存在"))
+		c.JSON(http.StatusNotFound, apierror.New("NOT_FOUND", "平台技能不存在"))
 	case errors.Is(err, service.ErrPlatformSkillNameVersionTaken):
-		c.JSON(http.StatusConflict, apierror.New("CONFLICT", "同名同版本的平台库 skill 已存在"))
+		c.JSON(http.StatusConflict, apierror.New("CONFLICT", "同名同版本的平台技能已存在"))
 	case errors.Is(err, service.ErrPlatformSkillInvalid):
-		c.JSON(http.StatusBadRequest, apierror.New("INVALID_REQUEST", "平台库 skill 入参非法"))
+		c.JSON(http.StatusBadRequest, apierror.New("INVALID_REQUEST", "平台技能入参非法"))
 	default:
 		c.JSON(http.StatusInternalServerError, apierror.New("INTERNAL", "服务器内部错误"))
 	}

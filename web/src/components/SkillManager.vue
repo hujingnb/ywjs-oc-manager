@@ -156,7 +156,7 @@ const visibleAppSkills = computed<AppSkill[]>(() => {
 // sourceLabel 将来源字符串转换为用户可读标签。
 // 空来源（内置/自创 skill 无 source）显示「内置」，避免详情页「来源」一栏为空。
 function sourceLabel(source?: string): string {
-  if (source === 'platform') return '平台库'
+  if (source === 'platform') return '平台技能'
   if (source === 'clawhub') return 'ClawHub'
   return source || '内置'
 }
@@ -183,7 +183,7 @@ function installedSourceLabel(row: AppSkill): string {
 // 比市场多「内置/自创」两类——builtin/self_created skill 无 source 标识、按 status 归类。
 // 归类口径与 installedSourceLabel / installedSourceKey 保持一致。
 const INSTALLED_SOURCE_DEFS = [
-  { label: '平台库', value: 'platform' },
+  { label: '平台技能', value: 'platform' },
   { label: 'ClawHub', value: 'clawhub' },
   { label: '内置', value: 'builtin' },
   { label: '自创', value: 'self_created' },

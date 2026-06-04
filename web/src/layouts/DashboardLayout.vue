@@ -255,7 +255,7 @@ const menuOptions = computed<MenuOption[]>(() => {
     items.push({ key: '/organizations', label: '企业', icon: () => h(Building2, { size: 18 }) })
     items.push({ key: '/assistant-versions', label: '助手版本', icon: () => h(Boxes, { size: 18 }) })
     // 平台库管理入口：仅平台管理员可见，用于上传/删除 skill tar 包。
-    items.push({ key: '/platform/skills', label: '平台库', icon: () => h(Package, { size: 18 }) })
+    items.push({ key: '/platform/skills', label: '平台技能', icon: () => h(Package, { size: 18 }) })
   }
   // 成员/审计 是组织管理视角，普通成员不展示。
   if (!isOrgMember.value) {
