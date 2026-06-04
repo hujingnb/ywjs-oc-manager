@@ -49,8 +49,8 @@ type KnowledgeStore interface {
 	GetOrganization(ctx context.Context, id string) (sqlc.Organization, error)
 	GetApp(ctx context.Context, id string) (sqlc.App, error)
 	GetAppByRuntimeTokenHash(ctx context.Context, runtimeTokenHash null.String) (sqlc.App, error)
-	// GetRAGFlowOrgDataset 按组织 ID（string）查询 org 级 dataset 映射。
-	GetRAGFlowOrgDataset(ctx context.Context, orgID string) (sqlc.RagflowDataset, error)
+	// GetRAGFlowOrgDataset 按组织 ID 查询 org 级 dataset 映射；schema 允许行业库 org_id 为 NULL，因此 sqlc 参数为 null.String。
+	GetRAGFlowOrgDataset(ctx context.Context, orgID null.String) (sqlc.RagflowDataset, error)
 	// GetRAGFlowAppDataset 按应用 ID（null.String，允许空值）查询 app 级 dataset 映射。
 	GetRAGFlowAppDataset(ctx context.Context, appID null.String) (sqlc.RagflowDataset, error)
 	// CreateRAGFlowOrgDatasetMapping 创建 org dataset 映射（:exec），写入后通过 GetRAGFlowOrgDataset 读回。
@@ -157,7 +157,7 @@ func (s *KnowledgeService) ListOrg(ctx context.Context, principal auth.Principal
 	if err != nil {
 		return KnowledgeListResult{}, err
 	}
-	return s.listDocuments(ctx, dataset, "org", dataset.OrgID, "", page, pageSize, keyword, status, org.KnowledgeQuotaBytes)
+	return s.listDocuments(ctx, dataset, "org", org.ID, "", page, pageSize, keyword, status, org.KnowledgeQuotaBytes)
 }
 
 // SaveOrgFile 上传企业知识库文件并触发解析。
@@ -411,7 +411,7 @@ func (s *KnowledgeService) listDocuments(ctx context.Context, dataset sqlc.Ragfl
 	}
 	params := sqlc.ListRAGFlowDocumentsByScopeParams{
 		ScopeType:   scope,
-		OrgID:       orgID,
+		OrgID:       null.StringFrom(orgID),
 		AppID:       appIDNull,
 		Limit:       pageSize,
 		Offset:      (page - 1) * pageSize,
@@ -463,7 +463,7 @@ func (s *KnowledgeService) knowledgeUsedBytes(ctx context.Context, scope, orgID,
 	}
 	used, err := s.store.SumRAGFlowDocumentsSizeByScope(ctx, sqlc.SumRAGFlowDocumentsSizeByScopeParams{
 		ScopeType: scope,
-		OrgID:     orgID,
+		OrgID:     null.StringFrom(orgID),
 		AppID:     appIDNull,
 	})
 	if err != nil {
@@ -651,7 +651,7 @@ func (s *KnowledgeService) getDocumentForScope(ctx context.Context, documentID, 
 	if err != nil {
 		return sqlc.RagflowDocument{}, sqlc.RagflowDataset{}, fmt.Errorf("查询知识库文件失败: %w", err)
 	}
-	if document.ScopeType != scope || document.OrgID != orgID {
+	if document.ScopeType != scope || strOrEmpty(document.OrgID) != orgID {
 		return sqlc.RagflowDocument{}, sqlc.RagflowDataset{}, ErrNotFound
 	}
 	if scope == "app" && strOrEmpty(document.AppID) != appID {
@@ -667,7 +667,7 @@ func (s *KnowledgeService) getDocumentForScope(ctx context.Context, documentID, 
 func (s *KnowledgeService) datasetByDocument(ctx context.Context, document sqlc.RagflowDocument) (sqlc.RagflowDataset, error) {
 	switch document.ScopeType {
 	case "org":
-		return s.getOrgDataset(ctx, document.OrgID)
+		return s.getOrgDataset(ctx, strOrEmpty(document.OrgID))
 	case "app":
 		// AppID 是 null.String，取其字符串值传递给 getAppDataset。
 		return s.getAppDataset(ctx, strOrEmpty(document.AppID))
@@ -726,7 +726,7 @@ func (s *KnowledgeService) getOrgDataset(ctx context.Context, orgID string) (sql
 	if s.store == nil {
 		return sqlc.RagflowDataset{}, ErrKnowledgeMissing
 	}
-	dataset, err := s.store.GetRAGFlowOrgDataset(ctx, orgID)
+	dataset, err := s.store.GetRAGFlowOrgDataset(ctx, null.StringFrom(orgID))
 	if errors.Is(err, sql.ErrNoRows) {
 		org, orgErr := s.store.GetOrganization(ctx, orgID)
 		if errors.Is(orgErr, sql.ErrNoRows) {
@@ -780,7 +780,7 @@ func (s *KnowledgeService) ensureDataset(ctx context.Context, scope string, orgI
 		err      error
 	)
 	if scope == "org" {
-		existing, err = s.store.GetRAGFlowOrgDataset(ctx, orgID)
+		existing, err = s.store.GetRAGFlowOrgDataset(ctx, null.StringFrom(orgID))
 	} else {
 		existing, err = s.store.GetRAGFlowAppDataset(ctx, null.StringFrom(appID))
 	}
@@ -803,14 +803,14 @@ func (s *KnowledgeService) ensureDataset(ctx context.Context, scope string, orgI
 	if scope == "org" {
 		err = s.store.CreateRAGFlowOrgDatasetMapping(ctx, sqlc.CreateRAGFlowOrgDatasetMappingParams{
 			ID:               newID,
-			OrgID:            orgID,
+			OrgID:            null.StringFrom(orgID),
 			Name:             name,
 			CreateClaimToken: null.StringFrom(claimToken),
 		})
 	} else {
 		err = s.store.CreateRAGFlowAppDatasetMapping(ctx, sqlc.CreateRAGFlowAppDatasetMappingParams{
 			ID:               newID,
-			OrgID:            orgID,
+			OrgID:            null.StringFrom(orgID),
 			AppID:            null.StringFrom(appID),
 			Name:             name,
 			CreateClaimToken: null.StringFrom(claimToken),
@@ -846,7 +846,7 @@ func (s *KnowledgeService) datasetAfterCreateConflict(ctx context.Context, scope
 		err      error
 	)
 	if scope == "org" {
-		existing, err = s.store.GetRAGFlowOrgDataset(ctx, orgID)
+		existing, err = s.store.GetRAGFlowOrgDataset(ctx, null.StringFrom(orgID))
 	} else {
 		existing, err = s.store.GetRAGFlowAppDataset(ctx, null.StringFrom(appID))
 	}
@@ -934,7 +934,7 @@ func (s *KnowledgeService) createRemoteDataset(ctx context.Context, dataset sqlc
 	// 再读回获胜者映射（或返回"创建中"），避免用本进程的 remote.ID 覆盖获胜者状态。
 	if !active.RagflowDatasetID.Valid || active.RagflowDatasetID.String != remote.ID {
 		_ = s.ragflowClient().DeleteDatasets(ctx, []string{remote.ID})
-		return s.datasetAfterCreateConflict(ctx, dataset.ScopeType, dataset.OrgID, dataset.AppID.String)
+		return s.datasetAfterCreateConflict(ctx, dataset.ScopeType, strOrEmpty(dataset.OrgID), dataset.AppID.String)
 	}
 	return active, nil
 }

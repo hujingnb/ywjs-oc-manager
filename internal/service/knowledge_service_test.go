@@ -473,7 +473,7 @@ func newFakeKnowledgeStore(t *testing.T) *fakeKnowledgeStore {
 	orgDataset := sqlc.RagflowDataset{
 		ID:               mustParseUUID("00000000-0000-0000-0000-000000000d01"),
 		ScopeType:        "org",
-		OrgID:            orgID,
+		OrgID:            null.StringFrom(orgID),
 		RagflowDatasetID: null.StringFrom(testRemoteOrgDatasetID),
 		Name:             "oc-org",
 		Status:           "active",
@@ -482,7 +482,7 @@ func newFakeKnowledgeStore(t *testing.T) *fakeKnowledgeStore {
 	appDataset := sqlc.RagflowDataset{
 		ID:               mustParseUUID("00000000-0000-0000-0000-000000000d02"),
 		ScopeType:        "app",
-		OrgID:            orgID,
+		OrgID:            null.StringFrom(orgID),
 		AppID:            null.StringFrom(appID),
 		RagflowDatasetID: null.StringFrom(testRemoteAppDatasetID),
 		Name:             "oc-app",
@@ -569,7 +569,7 @@ func (s *fakeKnowledgeStore) GetAppByRuntimeTokenHash(_ context.Context, runtime
 	return app, nil
 }
 
-func (s *fakeKnowledgeStore) GetRAGFlowOrgDataset(_ context.Context, orgID string) (sqlc.RagflowDataset, error) {
+func (s *fakeKnowledgeStore) GetRAGFlowOrgDataset(_ context.Context, orgID null.String) (sqlc.RagflowDataset, error) {
 	s.getOrgDatasetCalls++
 	if s.getOrgDatasetErr != nil {
 		return sqlc.RagflowDataset{}, s.getOrgDatasetErr
@@ -580,7 +580,7 @@ func (s *fakeKnowledgeStore) GetRAGFlowOrgDataset(_ context.Context, orgID strin
 	if s.missingOrgDataset {
 		return sqlc.RagflowDataset{}, sql.ErrNoRows
 	}
-	if orgID != testKnowledgeOrg {
+	if orgID.String != testKnowledgeOrg {
 		return sqlc.RagflowDataset{}, sql.ErrNoRows
 	}
 	return s.orgDataset, nil
@@ -613,7 +613,7 @@ func (s *fakeKnowledgeStore) CreateRAGFlowOrgDatasetMapping(_ context.Context, a
 	}
 	call := createdDatasetCall{
 		ScopeType:        "org",
-		OrgID:            arg.OrgID,
+		OrgID:            strOrEmpty(arg.OrgID),
 		Name:             arg.Name,
 		Status:           "creating",
 		CreateClaimToken: arg.CreateClaimToken.String,
@@ -645,7 +645,7 @@ func (s *fakeKnowledgeStore) CreateRAGFlowAppDatasetMapping(_ context.Context, a
 	}
 	call := createdDatasetCall{
 		ScopeType:        "app",
-		OrgID:            arg.OrgID,
+		OrgID:            strOrEmpty(arg.OrgID),
 		AppID:            arg.AppID.String,
 		Name:             arg.Name,
 		Status:           "creating",
@@ -996,7 +996,7 @@ func testDocument(t *testing.T, scope, name string, datasetID string) sqlc.Ragfl
 		ID:        mustParseUUID(testKnowledgeDocument),
 		DatasetID: datasetID,
 		ScopeType: scope,
-		OrgID:     orgID,
+		OrgID:     null.StringFrom(orgID),
 		AppID: null.StringFromPtr(func() *string {
 			if appID == "" {
 				return nil

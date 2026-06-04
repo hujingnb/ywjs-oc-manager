@@ -149,3 +149,47 @@ FROM ragflow_documents
 WHERE scope_type = ?
   AND org_id = ?
   AND (sqlc.narg(app_id) IS NULL OR app_id = sqlc.narg(app_id));
+
+-- name: CreateRAGFlowIndustryDatasetMapping :exec
+-- 懒创建行业知识库 dataset 映射；行业库不归属企业，因此 org/app 字段固定为 NULL。
+INSERT IGNORE INTO ragflow_datasets (
+    id, scope_type, org_id, app_id, industry_knowledge_base_id,
+    ragflow_dataset_id, name, status, last_error, create_claim_token
+) VALUES (
+    sqlc.arg(id), 'industry', NULL, NULL, sqlc.arg(industry_knowledge_base_id),
+    NULL, sqlc.arg(name), 'creating', NULL, sqlc.arg(create_claim_token)
+);
+
+-- name: GetRAGFlowIndustryDataset :one
+-- 读取行业知识库 dataset 映射，供行业知识库文件管理和远端同步使用。
+SELECT *
+FROM ragflow_datasets
+WHERE scope_type = 'industry' AND industry_knowledge_base_id = ?;
+
+-- name: ListRAGFlowIndustryDocuments :many
+-- 分页列出行业知识库文件，支持按解析状态和文件名过滤。
+SELECT *
+FROM ragflow_documents
+WHERE scope_type = 'industry'
+  AND industry_knowledge_base_id = ?
+  AND (sqlc.narg(parse_status) IS NULL OR parse_status = sqlc.narg(parse_status))
+  AND (sqlc.narg(keywords) IS NULL OR name LIKE CONCAT('%', sqlc.narg(keywords), '%'))
+ORDER BY created_at DESC, id DESC
+LIMIT ? OFFSET ?;
+
+-- name: CountRAGFlowIndustryDocuments :one
+-- 统计行业知识库文件总数，过滤条件必须与 ListRAGFlowIndustryDocuments 保持一致。
+SELECT count(*)
+FROM ragflow_documents
+WHERE scope_type = 'industry'
+  AND industry_knowledge_base_id = ?
+  AND (sqlc.narg(parse_status) IS NULL OR parse_status = sqlc.narg(parse_status))
+  AND (sqlc.narg(keywords) IS NULL OR name LIKE CONCAT('%', sqlc.narg(keywords), '%'));
+
+-- name: GetRAGFlowIndustryDocumentByName :one
+-- 按行业知识库和文件名读取缓存，用于上传前幂等与重名校验。
+SELECT *
+FROM ragflow_documents
+WHERE scope_type = 'industry'
+  AND industry_knowledge_base_id = ?
+  AND name = ?;

@@ -94,6 +94,12 @@ type AssistantVersion struct {
 	NameActiveKey null.String     `db:"name_active_key" json:"name_active_key"`
 }
 
+type AssistantVersionIndustryKnowledgeBasis struct {
+	VersionID               string    `db:"version_id" json:"version_id"`
+	IndustryKnowledgeBaseID string    `db:"industry_knowledge_base_id" json:"industry_knowledge_base_id"`
+	CreatedAt               time.Time `db:"created_at" json:"created_at"`
+}
+
 type AuditLog struct {
 	ID            string      `db:"id" json:"id"`
 	ActorID       null.String `db:"actor_id" json:"actor_id"`
@@ -124,6 +130,16 @@ type ChannelBinding struct {
 	CreatedAt     time.Time   `db:"created_at" json:"created_at"`
 	UpdatedAt     time.Time   `db:"updated_at" json:"updated_at"`
 	AppActiveKey  null.String `db:"app_active_key" json:"app_active_key"`
+}
+
+type IndustryKnowledgeBasis struct {
+	ID            string      `db:"id" json:"id"`
+	Name          string      `db:"name" json:"name"`
+	CreatedBy     string      `db:"created_by" json:"created_by"`
+	CreatedAt     time.Time   `db:"created_at" json:"created_at"`
+	UpdatedAt     time.Time   `db:"updated_at" json:"updated_at"`
+	DeletedAt     null.Time   `db:"deleted_at" json:"deleted_at"`
+	NameActiveKey null.String `db:"name_active_key" json:"name_active_key"`
 }
 
 type Job struct {
@@ -193,38 +209,43 @@ type PlatformSkill struct {
 }
 
 type RagflowDataset struct {
-	ID               string      `db:"id" json:"id"`
-	ScopeType        string      `db:"scope_type" json:"scope_type"`
-	OrgID            string      `db:"org_id" json:"org_id"`
-	AppID            null.String `db:"app_id" json:"app_id"`
-	RagflowDatasetID null.String `db:"ragflow_dataset_id" json:"ragflow_dataset_id"`
-	Name             string      `db:"name" json:"name"`
-	Status           string      `db:"status" json:"status"`
-	LastError        null.String `db:"last_error" json:"last_error"`
-	CreateClaimToken null.String `db:"create_claim_token" json:"create_claim_token"`
-	CreatedAt        time.Time   `db:"created_at" json:"created_at"`
-	UpdatedAt        time.Time   `db:"updated_at" json:"updated_at"`
-	OrgScopeKey      null.String `db:"org_scope_key" json:"org_scope_key"`
-	AppScopeKey      null.String `db:"app_scope_key" json:"app_scope_key"`
+	ID                      string      `db:"id" json:"id"`
+	ScopeType               string      `db:"scope_type" json:"scope_type"`
+	AppID                   null.String `db:"app_id" json:"app_id"`
+	RagflowDatasetID        null.String `db:"ragflow_dataset_id" json:"ragflow_dataset_id"`
+	Name                    string      `db:"name" json:"name"`
+	Status                  string      `db:"status" json:"status"`
+	LastError               null.String `db:"last_error" json:"last_error"`
+	CreateClaimToken        null.String `db:"create_claim_token" json:"create_claim_token"`
+	CreatedAt               time.Time   `db:"created_at" json:"created_at"`
+	UpdatedAt               time.Time   `db:"updated_at" json:"updated_at"`
+	OrgScopeKey             null.String `db:"org_scope_key" json:"org_scope_key"`
+	AppScopeKey             null.String `db:"app_scope_key" json:"app_scope_key"`
+	OrgID                   null.String `db:"org_id" json:"org_id"`
+	IndustryKnowledgeBaseID null.String `db:"industry_knowledge_base_id" json:"industry_knowledge_base_id"`
+	IndustryScopeKey        null.String `db:"industry_scope_key" json:"industry_scope_key"`
 }
 
 type RagflowDocument struct {
-	ID                string      `db:"id" json:"id"`
-	DatasetID         string      `db:"dataset_id" json:"dataset_id"`
-	ScopeType         string      `db:"scope_type" json:"scope_type"`
-	OrgID             string      `db:"org_id" json:"org_id"`
-	AppID             null.String `db:"app_id" json:"app_id"`
-	RagflowDocumentID string      `db:"ragflow_document_id" json:"ragflow_document_id"`
-	Name              string      `db:"name" json:"name"`
-	SizeBytes         int64       `db:"size_bytes" json:"size_bytes"`
-	MimeType          null.String `db:"mime_type" json:"mime_type"`
-	Suffix            null.String `db:"suffix" json:"suffix"`
-	ParseStatus       string      `db:"parse_status" json:"parse_status"`
-	Progress          int32       `db:"progress" json:"progress"`
-	LastError         null.String `db:"last_error" json:"last_error"`
-	CreatedBy         string      `db:"created_by" json:"created_by"`
-	CreatedAt         time.Time   `db:"created_at" json:"created_at"`
-	UpdatedAt         time.Time   `db:"updated_at" json:"updated_at"`
+	ID                      string      `db:"id" json:"id"`
+	DatasetID               string      `db:"dataset_id" json:"dataset_id"`
+	ScopeType               string      `db:"scope_type" json:"scope_type"`
+	AppID                   null.String `db:"app_id" json:"app_id"`
+	RagflowDocumentID       string      `db:"ragflow_document_id" json:"ragflow_document_id"`
+	Name                    string      `db:"name" json:"name"`
+	SizeBytes               int64       `db:"size_bytes" json:"size_bytes"`
+	MimeType                null.String `db:"mime_type" json:"mime_type"`
+	Suffix                  null.String `db:"suffix" json:"suffix"`
+	ParseStatus             string      `db:"parse_status" json:"parse_status"`
+	Progress                int32       `db:"progress" json:"progress"`
+	LastError               null.String `db:"last_error" json:"last_error"`
+	CreatedBy               string      `db:"created_by" json:"created_by"`
+	CreatedAt               time.Time   `db:"created_at" json:"created_at"`
+	UpdatedAt               time.Time   `db:"updated_at" json:"updated_at"`
+	OrgID                   null.String `db:"org_id" json:"org_id"`
+	IndustryKnowledgeBaseID null.String `db:"industry_knowledge_base_id" json:"industry_knowledge_base_id"`
+	IndustryDocumentBaseKey null.String `db:"industry_document_base_key" json:"industry_document_base_key"`
+	IndustryDocumentNameKey null.String `db:"industry_document_name_key" json:"industry_document_name_key"`
 }
 
 type RechargeRecord struct {

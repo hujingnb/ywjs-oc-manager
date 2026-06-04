@@ -49,7 +49,7 @@ WHERE scope_type = ?
 
 type CountRAGFlowDocumentsByScopeParams struct {
 	ScopeType   string      `db:"scope_type" json:"scope_type"`
-	OrgID       string      `db:"org_id" json:"org_id"`
+	OrgID       null.String `db:"org_id" json:"org_id"`
 	AppID       null.String `db:"app_id" json:"app_id"`
 	ParseStatus null.String `db:"parse_status" json:"parse_status"`
 	Keywords    interface{} `db:"keywords" json:"keywords"`
@@ -72,6 +72,35 @@ func (q *Queries) CountRAGFlowDocumentsByScope(ctx context.Context, arg CountRAG
 	return count, err
 }
 
+const countRAGFlowIndustryDocuments = `-- name: CountRAGFlowIndustryDocuments :one
+SELECT count(*)
+FROM ragflow_documents
+WHERE scope_type = 'industry'
+  AND industry_knowledge_base_id = ?
+  AND (? IS NULL OR parse_status = ?)
+  AND (? IS NULL OR name LIKE CONCAT('%', ?, '%'))
+`
+
+type CountRAGFlowIndustryDocumentsParams struct {
+	IndustryKnowledgeBaseID null.String `db:"industry_knowledge_base_id" json:"industry_knowledge_base_id"`
+	ParseStatus             null.String `db:"parse_status" json:"parse_status"`
+	Keywords                interface{} `db:"keywords" json:"keywords"`
+}
+
+// 统计行业知识库文件总数，过滤条件必须与 ListRAGFlowIndustryDocuments 保持一致。
+func (q *Queries) CountRAGFlowIndustryDocuments(ctx context.Context, arg CountRAGFlowIndustryDocumentsParams) (int64, error) {
+	row := q.db.QueryRowContext(ctx, countRAGFlowIndustryDocuments,
+		arg.IndustryKnowledgeBaseID,
+		arg.ParseStatus,
+		arg.ParseStatus,
+		arg.Keywords,
+		arg.Keywords,
+	)
+	var count int64
+	err := row.Scan(&count)
+	return count, err
+}
+
 const createRAGFlowAppDatasetMapping = `-- name: CreateRAGFlowAppDatasetMapping :exec
 INSERT IGNORE INTO ragflow_datasets (
     id, scope_type, org_id, app_id, ragflow_dataset_id, name, status, last_error, create_claim_token
@@ -82,7 +111,7 @@ INSERT IGNORE INTO ragflow_datasets (
 
 type CreateRAGFlowAppDatasetMappingParams struct {
 	ID               string      `db:"id" json:"id"`
-	OrgID            string      `db:"org_id" json:"org_id"`
+	OrgID            null.String `db:"org_id" json:"org_id"`
 	AppID            null.String `db:"app_id" json:"app_id"`
 	Name             string      `db:"name" json:"name"`
 	CreateClaimToken null.String `db:"create_claim_token" json:"create_claim_token"`
@@ -114,7 +143,7 @@ type CreateRAGFlowDocumentParams struct {
 	ID                string      `db:"id" json:"id"`
 	DatasetID         string      `db:"dataset_id" json:"dataset_id"`
 	ScopeType         string      `db:"scope_type" json:"scope_type"`
-	OrgID             string      `db:"org_id" json:"org_id"`
+	OrgID             null.String `db:"org_id" json:"org_id"`
 	AppID             null.String `db:"app_id" json:"app_id"`
 	RagflowDocumentID string      `db:"ragflow_document_id" json:"ragflow_document_id"`
 	Name              string      `db:"name" json:"name"`
@@ -148,6 +177,34 @@ func (q *Queries) CreateRAGFlowDocument(ctx context.Context, arg CreateRAGFlowDo
 	return err
 }
 
+const createRAGFlowIndustryDatasetMapping = `-- name: CreateRAGFlowIndustryDatasetMapping :exec
+INSERT IGNORE INTO ragflow_datasets (
+    id, scope_type, org_id, app_id, industry_knowledge_base_id,
+    ragflow_dataset_id, name, status, last_error, create_claim_token
+) VALUES (
+    ?, 'industry', NULL, NULL, ?,
+    NULL, ?, 'creating', NULL, ?
+)
+`
+
+type CreateRAGFlowIndustryDatasetMappingParams struct {
+	ID                      string      `db:"id" json:"id"`
+	IndustryKnowledgeBaseID null.String `db:"industry_knowledge_base_id" json:"industry_knowledge_base_id"`
+	Name                    string      `db:"name" json:"name"`
+	CreateClaimToken        null.String `db:"create_claim_token" json:"create_claim_token"`
+}
+
+// 懒创建行业知识库 dataset 映射；行业库不归属企业，因此 org/app 字段固定为 NULL。
+func (q *Queries) CreateRAGFlowIndustryDatasetMapping(ctx context.Context, arg CreateRAGFlowIndustryDatasetMappingParams) error {
+	_, err := q.db.ExecContext(ctx, createRAGFlowIndustryDatasetMapping,
+		arg.ID,
+		arg.IndustryKnowledgeBaseID,
+		arg.Name,
+		arg.CreateClaimToken,
+	)
+	return err
+}
+
 const createRAGFlowOrgDatasetMapping = `-- name: CreateRAGFlowOrgDatasetMapping :exec
 INSERT IGNORE INTO ragflow_datasets (
     id, scope_type, org_id, app_id, ragflow_dataset_id, name, status, last_error, create_claim_token
@@ -158,7 +215,7 @@ INSERT IGNORE INTO ragflow_datasets (
 
 type CreateRAGFlowOrgDatasetMappingParams struct {
 	ID               string      `db:"id" json:"id"`
-	OrgID            string      `db:"org_id" json:"org_id"`
+	OrgID            null.String `db:"org_id" json:"org_id"`
 	Name             string      `db:"name" json:"name"`
 	CreateClaimToken null.String `db:"create_claim_token" json:"create_claim_token"`
 }
@@ -197,7 +254,7 @@ func (q *Queries) DeleteRAGFlowDocumentMapping(ctx context.Context, id string) e
 }
 
 const getRAGFlowAppDataset = `-- name: GetRAGFlowAppDataset :one
-SELECT id, scope_type, org_id, app_id, ragflow_dataset_id, name, status, last_error, create_claim_token, created_at, updated_at, org_scope_key, app_scope_key
+SELECT id, scope_type, app_id, ragflow_dataset_id, name, status, last_error, create_claim_token, created_at, updated_at, org_scope_key, app_scope_key, org_id, industry_knowledge_base_id, industry_scope_key
 FROM ragflow_datasets
 WHERE scope_type = 'app' AND app_id = ?
 `
@@ -209,7 +266,6 @@ func (q *Queries) GetRAGFlowAppDataset(ctx context.Context, appID null.String) (
 	err := row.Scan(
 		&i.ID,
 		&i.ScopeType,
-		&i.OrgID,
 		&i.AppID,
 		&i.RagflowDatasetID,
 		&i.Name,
@@ -220,12 +276,15 @@ func (q *Queries) GetRAGFlowAppDataset(ctx context.Context, appID null.String) (
 		&i.UpdatedAt,
 		&i.OrgScopeKey,
 		&i.AppScopeKey,
+		&i.OrgID,
+		&i.IndustryKnowledgeBaseID,
+		&i.IndustryScopeKey,
 	)
 	return i, err
 }
 
 const getRAGFlowDataset = `-- name: GetRAGFlowDataset :one
-SELECT id, scope_type, org_id, app_id, ragflow_dataset_id, name, status, last_error, create_claim_token, created_at, updated_at, org_scope_key, app_scope_key
+SELECT id, scope_type, app_id, ragflow_dataset_id, name, status, last_error, create_claim_token, created_at, updated_at, org_scope_key, app_scope_key, org_id, industry_knowledge_base_id, industry_scope_key
 FROM ragflow_datasets
 WHERE id = ?
 `
@@ -237,7 +296,6 @@ func (q *Queries) GetRAGFlowDataset(ctx context.Context, id string) (RagflowData
 	err := row.Scan(
 		&i.ID,
 		&i.ScopeType,
-		&i.OrgID,
 		&i.AppID,
 		&i.RagflowDatasetID,
 		&i.Name,
@@ -248,12 +306,15 @@ func (q *Queries) GetRAGFlowDataset(ctx context.Context, id string) (RagflowData
 		&i.UpdatedAt,
 		&i.OrgScopeKey,
 		&i.AppScopeKey,
+		&i.OrgID,
+		&i.IndustryKnowledgeBaseID,
+		&i.IndustryScopeKey,
 	)
 	return i, err
 }
 
 const getRAGFlowDocument = `-- name: GetRAGFlowDocument :one
-SELECT id, dataset_id, scope_type, org_id, app_id, ragflow_document_id, name, size_bytes, mime_type, suffix, parse_status, progress, last_error, created_by, created_at, updated_at
+SELECT id, dataset_id, scope_type, app_id, ragflow_document_id, name, size_bytes, mime_type, suffix, parse_status, progress, last_error, created_by, created_at, updated_at, org_id, industry_knowledge_base_id, industry_document_base_key, industry_document_name_key
 FROM ragflow_documents
 WHERE id = ?
 `
@@ -266,7 +327,6 @@ func (q *Queries) GetRAGFlowDocument(ctx context.Context, id string) (RagflowDoc
 		&i.ID,
 		&i.DatasetID,
 		&i.ScopeType,
-		&i.OrgID,
 		&i.AppID,
 		&i.RagflowDocumentID,
 		&i.Name,
@@ -279,12 +339,16 @@ func (q *Queries) GetRAGFlowDocument(ctx context.Context, id string) (RagflowDoc
 		&i.CreatedBy,
 		&i.CreatedAt,
 		&i.UpdatedAt,
+		&i.OrgID,
+		&i.IndustryKnowledgeBaseID,
+		&i.IndustryDocumentBaseKey,
+		&i.IndustryDocumentNameKey,
 	)
 	return i, err
 }
 
 const getRAGFlowDocumentByRemoteID = `-- name: GetRAGFlowDocumentByRemoteID :one
-SELECT id, dataset_id, scope_type, org_id, app_id, ragflow_document_id, name, size_bytes, mime_type, suffix, parse_status, progress, last_error, created_by, created_at, updated_at
+SELECT id, dataset_id, scope_type, app_id, ragflow_document_id, name, size_bytes, mime_type, suffix, parse_status, progress, last_error, created_by, created_at, updated_at, org_id, industry_knowledge_base_id, industry_document_base_key, industry_document_name_key
 FROM ragflow_documents
 WHERE dataset_id = ? AND ragflow_document_id = ?
 `
@@ -302,7 +366,6 @@ func (q *Queries) GetRAGFlowDocumentByRemoteID(ctx context.Context, arg GetRAGFl
 		&i.ID,
 		&i.DatasetID,
 		&i.ScopeType,
-		&i.OrgID,
 		&i.AppID,
 		&i.RagflowDocumentID,
 		&i.Name,
@@ -315,24 +378,27 @@ func (q *Queries) GetRAGFlowDocumentByRemoteID(ctx context.Context, arg GetRAGFl
 		&i.CreatedBy,
 		&i.CreatedAt,
 		&i.UpdatedAt,
+		&i.OrgID,
+		&i.IndustryKnowledgeBaseID,
+		&i.IndustryDocumentBaseKey,
+		&i.IndustryDocumentNameKey,
 	)
 	return i, err
 }
 
-const getRAGFlowOrgDataset = `-- name: GetRAGFlowOrgDataset :one
-SELECT id, scope_type, org_id, app_id, ragflow_dataset_id, name, status, last_error, create_claim_token, created_at, updated_at, org_scope_key, app_scope_key
+const getRAGFlowIndustryDataset = `-- name: GetRAGFlowIndustryDataset :one
+SELECT id, scope_type, app_id, ragflow_dataset_id, name, status, last_error, create_claim_token, created_at, updated_at, org_scope_key, app_scope_key, org_id, industry_knowledge_base_id, industry_scope_key
 FROM ragflow_datasets
-WHERE scope_type = 'org' AND org_id = ?
+WHERE scope_type = 'industry' AND industry_knowledge_base_id = ?
 `
 
-// 读取组织知识库 dataset 映射，供管理面列表和 runtime 检索使用。
-func (q *Queries) GetRAGFlowOrgDataset(ctx context.Context, orgID string) (RagflowDataset, error) {
-	row := q.db.QueryRowContext(ctx, getRAGFlowOrgDataset, orgID)
+// 读取行业知识库 dataset 映射，供行业知识库文件管理和远端同步使用。
+func (q *Queries) GetRAGFlowIndustryDataset(ctx context.Context, industryKnowledgeBaseID null.String) (RagflowDataset, error) {
+	row := q.db.QueryRowContext(ctx, getRAGFlowIndustryDataset, industryKnowledgeBaseID)
 	var i RagflowDataset
 	err := row.Scan(
 		&i.ID,
 		&i.ScopeType,
-		&i.OrgID,
 		&i.AppID,
 		&i.RagflowDatasetID,
 		&i.Name,
@@ -343,12 +409,86 @@ func (q *Queries) GetRAGFlowOrgDataset(ctx context.Context, orgID string) (Ragfl
 		&i.UpdatedAt,
 		&i.OrgScopeKey,
 		&i.AppScopeKey,
+		&i.OrgID,
+		&i.IndustryKnowledgeBaseID,
+		&i.IndustryScopeKey,
+	)
+	return i, err
+}
+
+const getRAGFlowIndustryDocumentByName = `-- name: GetRAGFlowIndustryDocumentByName :one
+SELECT id, dataset_id, scope_type, app_id, ragflow_document_id, name, size_bytes, mime_type, suffix, parse_status, progress, last_error, created_by, created_at, updated_at, org_id, industry_knowledge_base_id, industry_document_base_key, industry_document_name_key
+FROM ragflow_documents
+WHERE scope_type = 'industry'
+  AND industry_knowledge_base_id = ?
+  AND name = ?
+`
+
+type GetRAGFlowIndustryDocumentByNameParams struct {
+	IndustryKnowledgeBaseID null.String `db:"industry_knowledge_base_id" json:"industry_knowledge_base_id"`
+	Name                    string      `db:"name" json:"name"`
+}
+
+// 按行业知识库和文件名读取缓存，用于上传前幂等与重名校验。
+func (q *Queries) GetRAGFlowIndustryDocumentByName(ctx context.Context, arg GetRAGFlowIndustryDocumentByNameParams) (RagflowDocument, error) {
+	row := q.db.QueryRowContext(ctx, getRAGFlowIndustryDocumentByName, arg.IndustryKnowledgeBaseID, arg.Name)
+	var i RagflowDocument
+	err := row.Scan(
+		&i.ID,
+		&i.DatasetID,
+		&i.ScopeType,
+		&i.AppID,
+		&i.RagflowDocumentID,
+		&i.Name,
+		&i.SizeBytes,
+		&i.MimeType,
+		&i.Suffix,
+		&i.ParseStatus,
+		&i.Progress,
+		&i.LastError,
+		&i.CreatedBy,
+		&i.CreatedAt,
+		&i.UpdatedAt,
+		&i.OrgID,
+		&i.IndustryKnowledgeBaseID,
+		&i.IndustryDocumentBaseKey,
+		&i.IndustryDocumentNameKey,
+	)
+	return i, err
+}
+
+const getRAGFlowOrgDataset = `-- name: GetRAGFlowOrgDataset :one
+SELECT id, scope_type, app_id, ragflow_dataset_id, name, status, last_error, create_claim_token, created_at, updated_at, org_scope_key, app_scope_key, org_id, industry_knowledge_base_id, industry_scope_key
+FROM ragflow_datasets
+WHERE scope_type = 'org' AND org_id = ?
+`
+
+// 读取组织知识库 dataset 映射，供管理面列表和 runtime 检索使用。
+func (q *Queries) GetRAGFlowOrgDataset(ctx context.Context, orgID null.String) (RagflowDataset, error) {
+	row := q.db.QueryRowContext(ctx, getRAGFlowOrgDataset, orgID)
+	var i RagflowDataset
+	err := row.Scan(
+		&i.ID,
+		&i.ScopeType,
+		&i.AppID,
+		&i.RagflowDatasetID,
+		&i.Name,
+		&i.Status,
+		&i.LastError,
+		&i.CreateClaimToken,
+		&i.CreatedAt,
+		&i.UpdatedAt,
+		&i.OrgScopeKey,
+		&i.AppScopeKey,
+		&i.OrgID,
+		&i.IndustryKnowledgeBaseID,
+		&i.IndustryScopeKey,
 	)
 	return i, err
 }
 
 const listRAGFlowDocumentsByScope = `-- name: ListRAGFlowDocumentsByScope :many
-SELECT id, dataset_id, scope_type, org_id, app_id, ragflow_document_id, name, size_bytes, mime_type, suffix, parse_status, progress, last_error, created_by, created_at, updated_at
+SELECT id, dataset_id, scope_type, app_id, ragflow_document_id, name, size_bytes, mime_type, suffix, parse_status, progress, last_error, created_by, created_at, updated_at, org_id, industry_knowledge_base_id, industry_document_base_key, industry_document_name_key
 FROM ragflow_documents
 WHERE scope_type = ?
   AND org_id = ?
@@ -361,7 +501,7 @@ LIMIT ? OFFSET ?
 
 type ListRAGFlowDocumentsByScopeParams struct {
 	ScopeType   string      `db:"scope_type" json:"scope_type"`
-	OrgID       string      `db:"org_id" json:"org_id"`
+	OrgID       null.String `db:"org_id" json:"org_id"`
 	AppID       null.String `db:"app_id" json:"app_id"`
 	ParseStatus null.String `db:"parse_status" json:"parse_status"`
 	Keywords    interface{} `db:"keywords" json:"keywords"`
@@ -394,7 +534,6 @@ func (q *Queries) ListRAGFlowDocumentsByScope(ctx context.Context, arg ListRAGFl
 			&i.ID,
 			&i.DatasetID,
 			&i.ScopeType,
-			&i.OrgID,
 			&i.AppID,
 			&i.RagflowDocumentID,
 			&i.Name,
@@ -407,6 +546,10 @@ func (q *Queries) ListRAGFlowDocumentsByScope(ctx context.Context, arg ListRAGFl
 			&i.CreatedBy,
 			&i.CreatedAt,
 			&i.UpdatedAt,
+			&i.OrgID,
+			&i.IndustryKnowledgeBaseID,
+			&i.IndustryDocumentBaseKey,
+			&i.IndustryDocumentNameKey,
 		); err != nil {
 			return nil, err
 		}
@@ -422,7 +565,7 @@ func (q *Queries) ListRAGFlowDocumentsByScope(ctx context.Context, arg ListRAGFl
 }
 
 const listRAGFlowDocumentsNeedingRefresh = `-- name: ListRAGFlowDocumentsNeedingRefresh :many
-SELECT d.id, d.dataset_id, d.scope_type, d.org_id, d.app_id, d.ragflow_document_id, d.name, d.size_bytes, d.mime_type, d.suffix, d.parse_status, d.progress, d.last_error, d.created_by, d.created_at, d.updated_at, ds.ragflow_dataset_id AS remote_dataset_id
+SELECT d.id, d.dataset_id, d.scope_type, d.app_id, d.ragflow_document_id, d.name, d.size_bytes, d.mime_type, d.suffix, d.parse_status, d.progress, d.last_error, d.created_by, d.created_at, d.updated_at, d.org_id, d.industry_knowledge_base_id, d.industry_document_base_key, d.industry_document_name_key, ds.ragflow_dataset_id AS remote_dataset_id
 FROM ragflow_documents d
 JOIN ragflow_datasets ds ON ds.id = d.dataset_id
 WHERE d.parse_status IN ('queued', 'running')
@@ -432,23 +575,26 @@ LIMIT ?
 `
 
 type ListRAGFlowDocumentsNeedingRefreshRow struct {
-	ID                string      `db:"id" json:"id"`
-	DatasetID         string      `db:"dataset_id" json:"dataset_id"`
-	ScopeType         string      `db:"scope_type" json:"scope_type"`
-	OrgID             string      `db:"org_id" json:"org_id"`
-	AppID             null.String `db:"app_id" json:"app_id"`
-	RagflowDocumentID string      `db:"ragflow_document_id" json:"ragflow_document_id"`
-	Name              string      `db:"name" json:"name"`
-	SizeBytes         int64       `db:"size_bytes" json:"size_bytes"`
-	MimeType          null.String `db:"mime_type" json:"mime_type"`
-	Suffix            null.String `db:"suffix" json:"suffix"`
-	ParseStatus       string      `db:"parse_status" json:"parse_status"`
-	Progress          int32       `db:"progress" json:"progress"`
-	LastError         null.String `db:"last_error" json:"last_error"`
-	CreatedBy         string      `db:"created_by" json:"created_by"`
-	CreatedAt         time.Time   `db:"created_at" json:"created_at"`
-	UpdatedAt         time.Time   `db:"updated_at" json:"updated_at"`
-	RemoteDatasetID   null.String `db:"remote_dataset_id" json:"remote_dataset_id"`
+	ID                      string      `db:"id" json:"id"`
+	DatasetID               string      `db:"dataset_id" json:"dataset_id"`
+	ScopeType               string      `db:"scope_type" json:"scope_type"`
+	AppID                   null.String `db:"app_id" json:"app_id"`
+	RagflowDocumentID       string      `db:"ragflow_document_id" json:"ragflow_document_id"`
+	Name                    string      `db:"name" json:"name"`
+	SizeBytes               int64       `db:"size_bytes" json:"size_bytes"`
+	MimeType                null.String `db:"mime_type" json:"mime_type"`
+	Suffix                  null.String `db:"suffix" json:"suffix"`
+	ParseStatus             string      `db:"parse_status" json:"parse_status"`
+	Progress                int32       `db:"progress" json:"progress"`
+	LastError               null.String `db:"last_error" json:"last_error"`
+	CreatedBy               string      `db:"created_by" json:"created_by"`
+	CreatedAt               time.Time   `db:"created_at" json:"created_at"`
+	UpdatedAt               time.Time   `db:"updated_at" json:"updated_at"`
+	OrgID                   null.String `db:"org_id" json:"org_id"`
+	IndustryKnowledgeBaseID null.String `db:"industry_knowledge_base_id" json:"industry_knowledge_base_id"`
+	IndustryDocumentBaseKey null.String `db:"industry_document_base_key" json:"industry_document_base_key"`
+	IndustryDocumentNameKey null.String `db:"industry_document_name_key" json:"industry_document_name_key"`
+	RemoteDatasetID         null.String `db:"remote_dataset_id" json:"remote_dataset_id"`
 }
 
 // 找出需要刷新解析状态的 document，按最久未更新优先；
@@ -468,7 +614,6 @@ func (q *Queries) ListRAGFlowDocumentsNeedingRefresh(ctx context.Context, limit 
 			&i.ID,
 			&i.DatasetID,
 			&i.ScopeType,
-			&i.OrgID,
 			&i.AppID,
 			&i.RagflowDocumentID,
 			&i.Name,
@@ -481,7 +626,82 @@ func (q *Queries) ListRAGFlowDocumentsNeedingRefresh(ctx context.Context, limit 
 			&i.CreatedBy,
 			&i.CreatedAt,
 			&i.UpdatedAt,
+			&i.OrgID,
+			&i.IndustryKnowledgeBaseID,
+			&i.IndustryDocumentBaseKey,
+			&i.IndustryDocumentNameKey,
 			&i.RemoteDatasetID,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Close(); err != nil {
+		return nil, err
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
+const listRAGFlowIndustryDocuments = `-- name: ListRAGFlowIndustryDocuments :many
+SELECT id, dataset_id, scope_type, app_id, ragflow_document_id, name, size_bytes, mime_type, suffix, parse_status, progress, last_error, created_by, created_at, updated_at, org_id, industry_knowledge_base_id, industry_document_base_key, industry_document_name_key
+FROM ragflow_documents
+WHERE scope_type = 'industry'
+  AND industry_knowledge_base_id = ?
+  AND (? IS NULL OR parse_status = ?)
+  AND (? IS NULL OR name LIKE CONCAT('%', ?, '%'))
+ORDER BY created_at DESC, id DESC
+LIMIT ? OFFSET ?
+`
+
+type ListRAGFlowIndustryDocumentsParams struct {
+	IndustryKnowledgeBaseID null.String `db:"industry_knowledge_base_id" json:"industry_knowledge_base_id"`
+	ParseStatus             null.String `db:"parse_status" json:"parse_status"`
+	Keywords                interface{} `db:"keywords" json:"keywords"`
+	Limit                   int32       `db:"limit" json:"limit"`
+	Offset                  int32       `db:"offset" json:"offset"`
+}
+
+// 分页列出行业知识库文件，支持按解析状态和文件名过滤。
+func (q *Queries) ListRAGFlowIndustryDocuments(ctx context.Context, arg ListRAGFlowIndustryDocumentsParams) ([]RagflowDocument, error) {
+	rows, err := q.db.QueryContext(ctx, listRAGFlowIndustryDocuments,
+		arg.IndustryKnowledgeBaseID,
+		arg.ParseStatus,
+		arg.ParseStatus,
+		arg.Keywords,
+		arg.Keywords,
+		arg.Limit,
+		arg.Offset,
+	)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []RagflowDocument{}
+	for rows.Next() {
+		var i RagflowDocument
+		if err := rows.Scan(
+			&i.ID,
+			&i.DatasetID,
+			&i.ScopeType,
+			&i.AppID,
+			&i.RagflowDocumentID,
+			&i.Name,
+			&i.SizeBytes,
+			&i.MimeType,
+			&i.Suffix,
+			&i.ParseStatus,
+			&i.Progress,
+			&i.LastError,
+			&i.CreatedBy,
+			&i.CreatedAt,
+			&i.UpdatedAt,
+			&i.OrgID,
+			&i.IndustryKnowledgeBaseID,
+			&i.IndustryDocumentBaseKey,
+			&i.IndustryDocumentNameKey,
 		); err != nil {
 			return nil, err
 		}
@@ -560,7 +780,7 @@ WHERE scope_type = ?
 
 type SumRAGFlowDocumentsSizeByScopeParams struct {
 	ScopeType string      `db:"scope_type" json:"scope_type"`
-	OrgID     string      `db:"org_id" json:"org_id"`
+	OrgID     null.String `db:"org_id" json:"org_id"`
 	AppID     null.String `db:"app_id" json:"app_id"`
 }
 

@@ -2,10 +2,13 @@
 package migrations
 
 import (
+	"errors"
 	"io/fs"
+	"os"
 	"strings"
 	"testing"
 
+	"github.com/golang-migrate/migrate/v4/source/iofs"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
@@ -38,6 +41,29 @@ func TestFS_ContainsUpAndDownPairs(t *testing.T) {
 	}
 }
 
+// TestMigrationsIncludeIndustryKnowledge 验证行业知识库迁移已进入嵌入迁移集合，避免新增 SQL 文件遗漏到发布包。
+func TestMigrationsIncludeIndustryKnowledge(t *testing.T) {
+	src, err := iofs.New(FS, ".")
+	require.NoError(t, err)
+	defer src.Close()
+
+	// 版本 7 是行业知识库迁移；First/Next 能防止迁移文件命名或嵌入路径缺失。
+	first, err := src.First()
+	require.NoError(t, err)
+	last := first
+	for {
+		next, nextErr := src.Next(last)
+		if errors.Is(nextErr, os.ErrNotExist) {
+			break
+		}
+		require.NoError(t, nextErr)
+		last = next
+	}
+
+	assert.Equal(t, uint(1), first)
+	assert.GreaterOrEqual(t, last, uint(7))
+}
+
 // TestRAGFlowKnowledgeMigrationDeclaresIntegrityConstraints 验证 MySQL 基线 schema 中等价的完整性约束：
 // - runtime token 唯一性：PG 部分唯一索引改为 STORED 生成列 + 普通唯一键，业务语义不变；
 // - ragflow dataset/document 跨表 scope 一致性：复合唯一键 + 复合外键代替 PG 的声明方式。
@@ -61,4 +87,18 @@ func TestRAGFlowKnowledgeMigrationDeclaresIntegrityConstraints(t *testing.T) {
 	assert.Contains(t, up, "uk_ragflow_datasets_app_identity (id, scope_type, org_id, app_id)")
 	assert.Contains(t, up, "CONSTRAINT fk_ragflow_documents_dataset_scope FOREIGN KEY (dataset_id, scope_type, org_id)")
 	assert.Contains(t, up, "CONSTRAINT fk_ragflow_documents_dataset_app_scope FOREIGN KEY (dataset_id, scope_type, org_id, app_id)")
+}
+
+// TestIndustryKnowledgeMigrationDeclaresDatasetScopeIntegrity 验证行业知识库迁移对 document 与 dataset 的行业归属做复合外键约束。
+func TestIndustryKnowledgeMigrationDeclaresDatasetScopeIntegrity(t *testing.T) {
+	upBytes, err := FS.ReadFile("000007_industry_knowledge.up.sql")
+	require.NoError(t, err)
+	up := string(upBytes)
+
+	// 行业 scope 的 document 不能只校验行业库存在，还必须校验 dataset_id 属于同一个行业库。
+	// MySQL 对包含 NULL 的 org/app 复合外键不检查 industry 行，因此行业库需要独立的非 NULL 复合身份键。
+	assert.Contains(t, up, "uk_ragflow_datasets_industry_identity (id, scope_type, industry_knowledge_base_id)")
+	assert.Contains(t, up, "CONSTRAINT fk_ragflow_documents_dataset_industry_scope")
+	assert.Contains(t, up, "FOREIGN KEY (dataset_id, scope_type, industry_knowledge_base_id)")
+	assert.Contains(t, up, "REFERENCES ragflow_datasets(id, scope_type, industry_knowledge_base_id) ON DELETE CASCADE")
 }

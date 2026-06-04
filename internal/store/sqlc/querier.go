@@ -12,6 +12,8 @@ import (
 )
 
 type Querier interface {
+	// 为助手版本追加一个行业知识库关联，复合主键保证同一版本不重复关联。
+	AddAssistantVersionIndustryKnowledgeBase(ctx context.Context, arg AddAssistantVersionIndustryKnowledgeBaseParams) error
 	// 判断指定应用下是否存在 status='bound' 的渠道绑定。
 	// app_initialize 在推进到 binding_waiting 之后调用：若发现已 bound（如切换助手
 	// 版本触发镜像重建后、容器重启前渠道凭证依旧落在 bind mount 目录、无需用户
@@ -33,19 +35,27 @@ type Querier interface {
 	CountAppsByStatus(ctx context.Context) ([]CountAppsByStatusRow, error)
 	// 严格保护：版本被未删除实例引用时不可删除。
 	CountAppsUsingVersion(ctx context.Context, versionID null.String) (int64, error)
+	// 统计仍被未删除助手版本引用的行业知识库，避免删除仍在使用的全局知识。
+	CountAssistantVersionsUsingIndustryKnowledgeBase(ctx context.Context, industryKnowledgeBaseID string) (int64, error)
 	// 统计指定应用下未被标记为 deleted 的渠道绑定数。
 	// RuntimeOperationService.Trigger 在写 delete 审计前调用，把数量塞进 detail_message。
 	CountChannelBindingsByApp(ctx context.Context, appID string) (int64, error)
+	// 统计行业知识库列表总数，过滤条件必须与 ListIndustryKnowledgeBases 保持一致。
+	CountIndustryKnowledgeBases(ctx context.Context, arg CountIndustryKnowledgeBasesParams) (int64, error)
 	// 严格保护：版本出现在任意未删除组织 allowlist 时不可删除。
 	CountOrgsUsingVersion(ctx context.Context, jsonQUOTE string) (int64, error)
 	// 统计扁平文件列表总数，过滤条件必须与 ListRAGFlowDocumentsByScope 保持一致。
 	CountRAGFlowDocumentsByScope(ctx context.Context, arg CountRAGFlowDocumentsByScopeParams) (int64, error)
+	// 统计行业知识库文件总数，过滤条件必须与 ListRAGFlowIndustryDocuments 保持一致。
+	CountRAGFlowIndustryDocuments(ctx context.Context, arg CountRAGFlowIndustryDocumentsParams) (int64, error)
 	// k8s 模型下 app 对应 Deployment，pod 落点由调度器决定，不再写 runtime_node_id。
 	CreateApp(ctx context.Context, arg CreateAppParams) error
 	CreateAppSkill(ctx context.Context, arg CreateAppSkillParams) error
 	CreateAssistantVersion(ctx context.Context, arg CreateAssistantVersionParams) error
 	CreateAuditLog(ctx context.Context, arg CreateAuditLogParams) error
 	CreateChannelBinding(ctx context.Context, arg CreateChannelBindingParams) error
+	// 创建平台级行业知识库；名称唯一性由未删除记录的生成列唯一键兜底。
+	CreateIndustryKnowledgeBase(ctx context.Context, arg CreateIndustryKnowledgeBaseParams) error
 	CreateJob(ctx context.Context, arg CreateJobParams) error
 	CreateOrganization(ctx context.Context, arg CreateOrganizationParams) error
 	CreatePlatformSkill(ctx context.Context, arg CreatePlatformSkillParams) error
@@ -53,6 +63,8 @@ type Querier interface {
 	CreateRAGFlowAppDatasetMapping(ctx context.Context, arg CreateRAGFlowAppDatasetMappingParams) error
 	// 缓存 RAGFlow document 元数据，manager 不保存文件主副本。
 	CreateRAGFlowDocument(ctx context.Context, arg CreateRAGFlowDocumentParams) error
+	// 懒创建行业知识库 dataset 映射；行业库不归属企业，因此 org/app 字段固定为 NULL。
+	CreateRAGFlowIndustryDatasetMapping(ctx context.Context, arg CreateRAGFlowIndustryDatasetMappingParams) error
 	// 懒创建组织级 dataset 映射；并发首创命中唯一索引时忽略，由 service 读取已有映射且不重复创建远端 dataset。
 	CreateRAGFlowOrgDatasetMapping(ctx context.Context, arg CreateRAGFlowOrgDatasetMappingParams) error
 	CreateRechargeRecord(ctx context.Context, arg CreateRechargeRecordParams) error
@@ -77,6 +89,10 @@ type Querier interface {
 	GetAssistantVersionByName(ctx context.Context, name string) (AssistantVersion, error)
 	GetAuditLog(ctx context.Context, id string) (AuditLog, error)
 	GetChannelBindingByAppAndType(ctx context.Context, arg GetChannelBindingByAppAndTypeParams) (ChannelBinding, error)
+	// 按 ID 读取未删除行业知识库，供管理面详情和后续权限校验使用。
+	GetIndustryKnowledgeBase(ctx context.Context, id string) (IndustryKnowledgeBasis, error)
+	// 按名称读取未删除行业知识库，用于创建和重命名时做业务提示。
+	GetIndustryKnowledgeBaseByName(ctx context.Context, name string) (IndustryKnowledgeBasis, error)
 	GetJob(ctx context.Context, id string) (Job, error)
 	// reaper 通过 payload_json->>'$.app_id' 查最近一份 app_initialize job。
 	// 用 ORDER BY created_at DESC + LIMIT 1 取最新；不存在返回 sql.ErrNoRows。
@@ -99,8 +115,12 @@ type Querier interface {
 	GetRAGFlowDocument(ctx context.Context, id string) (RagflowDocument, error)
 	// 按 RAGFlow document ID 读取缓存，用于解析状态回刷和幂等处理。
 	GetRAGFlowDocumentByRemoteID(ctx context.Context, arg GetRAGFlowDocumentByRemoteIDParams) (RagflowDocument, error)
+	// 读取行业知识库 dataset 映射，供行业知识库文件管理和远端同步使用。
+	GetRAGFlowIndustryDataset(ctx context.Context, industryKnowledgeBaseID null.String) (RagflowDataset, error)
+	// 按行业知识库和文件名读取缓存，用于上传前幂等与重名校验。
+	GetRAGFlowIndustryDocumentByName(ctx context.Context, arg GetRAGFlowIndustryDocumentByNameParams) (RagflowDocument, error)
 	// 读取组织知识库 dataset 映射，供管理面列表和 runtime 检索使用。
-	GetRAGFlowOrgDataset(ctx context.Context, orgID string) (RagflowDataset, error)
+	GetRAGFlowOrgDataset(ctx context.Context, orgID null.String) (RagflowDataset, error)
 	GetRechargeRecord(ctx context.Context, id string) (RechargeRecord, error)
 	GetRefreshToken(ctx context.Context, id string) (RefreshToken, error)
 	GetRefreshTokenByHash(ctx context.Context, tokenHash string) (RefreshToken, error)
@@ -131,6 +151,10 @@ type Querier interface {
 	// init job 推进到 running；pod 真坏则保持 error 不动。reaper 只扫 init 子状态、不管 error，
 	// 此查询补上「init 失败成 error 后无法自愈」的洞。
 	ListErrorApps(ctx context.Context) ([]string, error)
+	// 分页列出行业知识库，并统计行业 scope 下已缓存的 RAGFlow 文档数量。
+	ListIndustryKnowledgeBases(ctx context.Context, arg ListIndustryKnowledgeBasesParams) ([]ListIndustryKnowledgeBasesRow, error)
+	// 列出助手版本关联的未删除行业知识库，供发布配置和运行时检索范围使用。
+	ListIndustryKnowledgeBasesByAssistantVersion(ctx context.Context, versionID string) ([]IndustryKnowledgeBasis, error)
 	ListOrganizations(ctx context.Context, arg ListOrganizationsParams) ([]Organization, error)
 	ListPlatformSkills(ctx context.Context) ([]PlatformSkill, error)
 	// 扁平列出某个组织或实例知识库文件，支持按状态和文件名过滤。
@@ -140,6 +164,8 @@ type Querier interface {
 	// 远端 dataset 尚未创建（ragflow_dataset_id IS NULL）的文档不会出现：
 	// 此类文档此时本就无法从 RAGFlow 拉取状态，等 dataset 创建完成后再轮询即可。
 	ListRAGFlowDocumentsNeedingRefresh(ctx context.Context, limit int32) ([]ListRAGFlowDocumentsNeedingRefreshRow, error)
+	// 分页列出行业知识库文件，支持按解析状态和文件名过滤。
+	ListRAGFlowIndustryDocuments(ctx context.Context, arg ListRAGFlowIndustryDocumentsParams) ([]RagflowDocument, error)
 	ListReadyJobs(ctx context.Context, limit int32) ([]Job, error)
 	ListRechargeRecordsByOrg(ctx context.Context, arg ListRechargeRecordsByOrgParams) ([]RechargeRecord, error)
 	// 列出当前期望运行（k8s Deployment 已创建）的应用，供 app_status_reconciler 周期 poll pod 状态。
@@ -169,6 +195,10 @@ type Querier interface {
 	// 标记 dataset 生命周期失败，保留错误文本用于管理面排障。
 	MarkRAGFlowDatasetFailed(ctx context.Context, arg MarkRAGFlowDatasetFailedParams) error
 	MarkUserLoggedIn(ctx context.Context, id string) error
+	// 重命名未删除行业知识库；唯一约束负责拦截同名未删除记录。
+	RenameIndustryKnowledgeBase(ctx context.Context, arg RenameIndustryKnowledgeBaseParams) error
+	// 替换助手版本行业知识库关联前先清空旧关联，由调用方在同一事务中重新插入。
+	ReplaceAssistantVersionIndustryKnowledgeBases(ctx context.Context, versionID string) error
 	// reaper 把已 running / succeeded 的 job 重置为 pending。
 	// locked_by / locked_at 一并清空避免被旧 worker 误识别为本机持有。
 	// 注意：jobs 表无 started_at 列，仅清 locked_* / last_error / 状态。
@@ -207,6 +237,8 @@ type Querier interface {
 	SetUserStatus(ctx context.Context, arg SetUserStatusParams) error
 	SoftDeleteApp(ctx context.Context, id string) error
 	SoftDeleteAssistantVersion(ctx context.Context, id string) error
+	// 软删除行业知识库；删除后名称可被重新使用。
+	SoftDeleteIndustryKnowledgeBase(ctx context.Context, id string) error
 	SoftDeleteOrganization(ctx context.Context, id string) error
 	// 真软删除：仅设置 deleted_at（不动 status）；status 与 deleted_at 语义独立。
 	SoftDeleteUser(ctx context.Context, id string) error
