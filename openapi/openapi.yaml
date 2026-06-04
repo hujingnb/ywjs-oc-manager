@@ -2,14 +2,18 @@ components:
   schemas:
     handlers.AddSkillFromLibraryRequest:
       properties:
+        name:
+          description: Name 是 skill 在版本内的目录名；clawhub 必填（displayName），platform 可空（以
+            DB 为准）。
+          type: string
         source:
-          description: Source 是 skill 来源类型，首版仅接受 "platform"。
+          description: Source 是 skill 来源类型，接受 "platform" 或 "clawhub"。
           type: string
         source_ref:
-          description: SourceRef 是来源内精准标识；platform 来源时等于 skill name。
+          description: SourceRef 是来源内精准标识；platform=skill name，clawhub=slug。
           type: string
         version:
-          description: Version 是要配进版本的 skill 版本号，必须与平台库中已发布的版本对应。
+          description: Version 是要配进版本的 skill 版本号。
           type: string
       required:
       - source
@@ -1125,10 +1129,10 @@ components:
           description: Name 是 skill 在版本内的唯一目录名。
           type: string
         source:
-          description: Source 是 skill 来源类型，当前仅 "platform"。
+          description: Source 是 skill 来源类型，支持 "platform" 与 "clawhub"。
           type: string
         source_ref:
-          description: SourceRef 是来源内精准标识；platform 来源时等于 skill name。
+          description: SourceRef 是来源内精准标识；platform 来源时等于 skill name，clawhub 来源时为 slug。
           type: string
         version:
           description: Version 是 skill 版本号，由来源方定义。

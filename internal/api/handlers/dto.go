@@ -351,13 +351,15 @@ type UpdateAssistantVersionRequest struct {
 // ===== 助手版本 skill =====
 
 // AddSkillFromLibraryRequest 是 POST /api/v1/assistant-versions/:id/skills 的请求体。
-// 从平台库选一个已发布 skill 配进版本（自包含快照，不上传文件）。
+// 从市场（平台库 / ClawHub）选一个 skill 配进版本（自包含快照，不上传文件）。
 type AddSkillFromLibraryRequest struct {
-	// Source 是 skill 来源类型，首版仅接受 "platform"。
+	// Source 是 skill 来源类型，接受 "platform" 或 "clawhub"。
 	Source string `json:"source" binding:"required"`
-	// SourceRef 是来源内精准标识；platform 来源时等于 skill name。
+	// SourceRef 是来源内精准标识；platform=skill name，clawhub=slug。
 	SourceRef string `json:"source_ref" binding:"required"`
-	// Version 是要配进版本的 skill 版本号，必须与平台库中已发布的版本对应。
+	// Name 是 skill 在版本内的目录名；clawhub 必填（displayName），platform 可空（以 DB 为准）。
+	Name string `json:"name"`
+	// Version 是要配进版本的 skill 版本号。
 	Version string `json:"version" binding:"required"`
 }
 

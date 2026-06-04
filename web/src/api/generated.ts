@@ -8509,11 +8509,13 @@ export type webhooks = Record<string, never>;
 export interface components {
     schemas: {
         "handlers.AddSkillFromLibraryRequest": {
-            /** @description Source 是 skill 来源类型，首版仅接受 "platform"。 */
+            /** @description Name 是 skill 在版本内的目录名；clawhub 必填（displayName），platform 可空（以 DB 为准）。 */
+            name?: string;
+            /** @description Source 是 skill 来源类型，接受 "platform" 或 "clawhub"。 */
             source: string;
-            /** @description SourceRef 是来源内精准标识；platform 来源时等于 skill name。 */
+            /** @description SourceRef 是来源内精准标识；platform=skill name，clawhub=slug。 */
             source_ref: string;
-            /** @description Version 是要配进版本的 skill 版本号，必须与平台库中已发布的版本对应。 */
+            /** @description Version 是要配进版本的 skill 版本号。 */
             version: string;
         };
         "handlers.AssistantVersionRoutingDTO": {
@@ -9186,9 +9188,9 @@ export interface components {
             file_size?: number;
             /** @description Name 是 skill 在版本内的唯一目录名。 */
             name?: string;
-            /** @description Source 是 skill 来源类型，当前仅 "platform"。 */
+            /** @description Source 是 skill 来源类型，支持 "platform" 与 "clawhub"。 */
             source?: string;
-            /** @description SourceRef 是来源内精准标识；platform 来源时等于 skill name。 */
+            /** @description SourceRef 是来源内精准标识；platform 来源时等于 skill name，clawhub 来源时为 slug。 */
             source_ref?: string;
             /** @description Version 是 skill 版本号，由来源方定义。 */
             version?: string;
