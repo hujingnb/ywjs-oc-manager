@@ -4,6 +4,7 @@ import (
 	"context"
 	"database/sql"
 	"errors"
+	"io"
 	"testing"
 
 	null "github.com/guregu/null/v5"
@@ -177,16 +178,41 @@ func (f *fakePlatformSkillLibrary) GetPlatformSkillByNameVersion(_ context.Conte
 	return ps, nil
 }
 
+// fakeClawHub 是 ClawHubDownloader 的测试替身：按预置 archive/err 返回。
+type fakeClawHub struct {
+	archive []byte
+	err     error
+}
+
+func (f fakeClawHub) Download(_ context.Context, _ /*slug*/, _ /*version*/ string) ([]byte, error) {
+	return f.archive, f.err
+}
+
+// fakeLibBlob 是 LibraryBlobStore 的测试替身：PutLibrarySkill 记录入参并回固定相对路径。
+type fakeLibBlob struct {
+	putSource, putRef, putVersion, putExt string
+	putData                               []byte
+}
+
+func (f *fakeLibBlob) PutLibrarySkill(source, ref, version, ext string, data []byte) (string, error) {
+	f.putSource, f.putRef, f.putVersion, f.putExt, f.putData = source, ref, version, ext, data
+	return "library/" + source + "/" + ref + "/" + version + "." + ext, nil
+}
+func (f *fakeLibBlob) DeleteLibrarySkill(string) error                  { return nil }
+func (f *fakeLibBlob) OpenLibrarySkill(string) (io.ReadCloser, error)   { return nil, nil }
+
 // newTestAVService 用内存桩构造版本 service，默认模型与镜像校验全部通过，平台库为空。
+// clawhub/blobs 均传 nil：platform-only 用例不需要 clawhub 能力。
 func newTestAVService(t *testing.T, store *fakeAVStore) *AssistantVersionService {
 	t.Helper()
-	return NewAssistantVersionService(store, fakeImageResolver{}, fakeModelValidator{}, newFakePlatformSkillLibrary())
+	return NewAssistantVersionService(store, fakeImageResolver{}, fakeModelValidator{}, newFakePlatformSkillLibrary(), nil, nil)
 }
 
 // newTestAVServiceWithLibrary 构造版本 service 并注入自定义平台库桩。
+// clawhub/blobs 均传 nil：platform-only 用例不需要 clawhub 能力。
 func newTestAVServiceWithLibrary(t *testing.T, store *fakeAVStore, lib *fakePlatformSkillLibrary) *AssistantVersionService {
 	t.Helper()
-	return NewAssistantVersionService(store, fakeImageResolver{}, fakeModelValidator{}, lib)
+	return NewAssistantVersionService(store, fakeImageResolver{}, fakeModelValidator{}, lib, nil, nil)
 }
 
 // fakeImageResolver 默认认为所有 image_id 都存在，并能列出一个镜像。
@@ -287,14 +313,14 @@ func TestAssistantVersionCreateRejectsDuplicateName(t *testing.T) {
 
 // TestAssistantVersionCreateRejectsUnknownImage 验证 image_id 不在配置内时报 Invalid。
 func TestAssistantVersionCreateRejectsUnknownImage(t *testing.T) {
-	svc := NewAssistantVersionService(newFakeAVStore(), rejectingImageResolver{}, fakeModelValidator{}, newFakePlatformSkillLibrary())
+	svc := NewAssistantVersionService(newFakeAVStore(), rejectingImageResolver{}, fakeModelValidator{}, newFakePlatformSkillLibrary(), nil, nil)
 	_, err := svc.Create(context.Background(), platformPrincipal(), validCreateInput())
 	require.ErrorIs(t, err, ErrAssistantVersionInvalid)
 }
 
 // TestAssistantVersionCreateRejectsUnknownModel 验证主模型不存在时报 Invalid。
 func TestAssistantVersionCreateRejectsUnknownModel(t *testing.T) {
-	svc := NewAssistantVersionService(newFakeAVStore(), fakeImageResolver{}, rejectingModelValidator{}, newFakePlatformSkillLibrary())
+	svc := NewAssistantVersionService(newFakeAVStore(), fakeImageResolver{}, rejectingModelValidator{}, newFakePlatformSkillLibrary(), nil, nil)
 	_, err := svc.Create(context.Background(), platformPrincipal(), validCreateInput())
 	require.ErrorIs(t, err, ErrAssistantVersionInvalid)
 }
@@ -525,6 +551,53 @@ func TestAssistantVersionAddSkillFromLibraryDeniesOrgAdmin(t *testing.T) {
 	// 非平台管理员调用，应返回 ErrAssistantVersionDenied。
 	_, err := svc.AddSkillFromLibrary(context.Background(), orgAdminPrincipal(), id, weatherSkillInput())
 	require.ErrorIs(t, err, ErrAssistantVersionDenied)
+}
+
+// TestAddSkillFromLibrary_ClawHub 覆盖：source=clawhub 时下载 zip → 缓存对象存储 →
+// 本地算 sha256 → 写入 skills_json 自包含快照（name 用入参 displayName，cached_path 为 .zip）。
+func TestAddSkillFromLibrary_ClawHub(t *testing.T) {
+	store := newFakeAVStore()
+	id := seedVersion(store, "标准版", 1)
+	blob := &fakeLibBlob{}
+	svc := NewAssistantVersionService(
+		store, fakeImageResolver{}, fakeModelValidator{}, newFakePlatformSkillLibrary(),
+		fakeClawHub{archive: []byte("PK\x03\x04zip-bytes")}, blob,
+	)
+	out, err := svc.AddSkillFromLibrary(context.Background(), platformPrincipal(), id, AddSkillFromLibraryInput{
+		Source: "clawhub", SourceRef: "skill-vetter", Name: "Skill Vetter", Version: "1.0.0",
+	})
+	require.NoError(t, err)
+	require.Len(t, out.Skills, 1)
+	got := out.Skills[0]
+	// 来源透传
+	assert.Equal(t, "clawhub", got.Source)
+	// slug 透传
+	assert.Equal(t, "skill-vetter", got.SourceRef)
+	// 目录名用 displayName（非 slug）
+	assert.Equal(t, "Skill Vetter", got.Name)
+	// 锁定版本
+	assert.Equal(t, "1.0.0", got.Version)
+	// 缓存为 .zip
+	assert.Equal(t, "library/clawhub/skill-vetter/1.0.0.zip", got.CachedPath)
+	// 本地计算 sha256，非空
+	assert.NotEmpty(t, got.FileSha256)
+	// PutLibrarySkill 以 zip 扩展名缓存
+	assert.Equal(t, "zip", blob.putExt)
+}
+
+// TestAddSkillFromLibrary_ClawHub_NilDownloader 覆盖：clawhub 未配置（nil）时返回 ErrAppSkillSourceUnknown。
+func TestAddSkillFromLibrary_ClawHub_NilDownloader(t *testing.T) {
+	store := newFakeAVStore()
+	id := seedVersion(store, "标准版", 1)
+	// clawhub/blobs 均传 nil，模拟未配置 ClawHub BaseURL 的情形。
+	svc := NewAssistantVersionService(
+		store, fakeImageResolver{}, fakeModelValidator{}, newFakePlatformSkillLibrary(), nil, nil,
+	)
+	_, err := svc.AddSkillFromLibrary(context.Background(), platformPrincipal(), id, AddSkillFromLibraryInput{
+		Source: "clawhub", SourceRef: "skill-vetter", Name: "Skill Vetter", Version: "1.0.0",
+	})
+	// clawhub 未配置时应返回 ErrAppSkillSourceUnknown。
+	require.ErrorIs(t, err, ErrAppSkillSourceUnknown)
 }
 
 // TestAssistantVersionDeleteSkillOK 验证删除已存在 skill 后 skills 清空且 revision 递增。

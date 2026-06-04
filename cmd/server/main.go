@@ -344,7 +344,13 @@ func runManager(ctx context.Context, cfg config.Config, logOut io.Writer) error 
 			runtimeImageAdapter{images: cfg.Hermes.RuntimeImages},
 			modelValidatorAdapter{catalog: modelCatalogService},
 			dbStore.Queries,
+			nil, // clawhub：下方按 clawhubClient 非 nil 时回填，避免 nil *Client 包装成非 nil interface
+			libraryBlobs,
 		)
+		// 仅当 clawhubClient 指针非 nil 时注入 clawhub 下载器（与 AppSkillService 同一守卫）。
+		if clawhubClient != nil {
+			assistantVersionService.SetClawHubDownloader(clawhubClient)
+		}
 		// 助手版本服务作为组织 allowlist 校验器：组织创建/编辑时校验所选版本 id 都存在。
 		organizationService.SetVersionValidator(assistantVersionService)
 	}

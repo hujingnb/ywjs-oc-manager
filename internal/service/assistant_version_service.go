@@ -2,7 +2,9 @@ package service
 
 import (
 	"context"
+	"crypto/sha256"
 	"database/sql"
+	"encoding/hex"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -72,28 +74,42 @@ type RuntimeImageOption struct {
 
 // AssistantVersionService 维护助手版本目录。
 type AssistantVersionService struct {
-	store         AssistantVersionStore
-	images        assistantVersionImages
-	models        AssistantVersionModelValidator
+	store          AssistantVersionStore
+	images         assistantVersionImages
+	models         AssistantVersionModelValidator
 	platformSkills PlatformSkillLibrary
+	// clawhub 下载 ClawHub skill 归档；可为 nil（未配置 ClawHub BaseURL 时禁用 clawhub 来源）。
+	clawhub ClawHubDownloader
+	// blobs 把 clawhub 下载的归档缓存到对象存储（platform 来源不用，引用平台库已存档案）。
+	blobs LibraryBlobStore
 }
 
 // NewAssistantVersionService 创建版本 service。
+// clawhub 可为 nil（未配 ClawHub），此时 clawhub 来源的 AddSkillFromLibrary 返回 ErrAppSkillSourceUnknown。
 func NewAssistantVersionService(
 	store AssistantVersionStore,
 	images assistantVersionImages,
 	models AssistantVersionModelValidator,
 	platformSkills PlatformSkillLibrary,
+	clawhub ClawHubDownloader,
+	blobs LibraryBlobStore,
 ) *AssistantVersionService {
-	return &AssistantVersionService{store: store, images: images, models: models, platformSkills: platformSkills}
+	return &AssistantVersionService{
+		store: store, images: images, models: models,
+		platformSkills: platformSkills, clawhub: clawhub, blobs: blobs,
+	}
 }
 
+// SetClawHubDownloader 注入 ClawHub 下载器。用 setter 而非构造参数回填，规避 nil *Client
+// 直接传接口参数产生「非 nil interface 包装 nil 指针」的陷阱（与 AppSkillService 同处理）。
+func (s *AssistantVersionService) SetClawHubDownloader(d ClawHubDownloader) { s.clawhub = d }
+
 // AssistantVersionSkill 是 skills_json 内单个 skill 的自包含快照。
-// 首版仅 platform 来源可配进版本；clawhub 留 per-app 安装。
+// 支持 platform 与 clawhub 两种来源。
 type AssistantVersionSkill struct {
-	// Source 是 skill 来源类型，当前仅 "platform"。
+	// Source 是 skill 来源类型，支持 "platform" 与 "clawhub"。
 	Source string `json:"source"`
-	// SourceRef 是来源内精准标识；platform 来源时等于 skill name。
+	// SourceRef 是来源内精准标识；platform 来源时等于 skill name，clawhub 来源时为 slug。
 	SourceRef string `json:"source_ref"`
 	// Name 是 skill 在版本内的唯一目录名。
 	Name string `json:"name"`
@@ -397,24 +413,25 @@ func (s *AssistantVersionService) Delete(ctx context.Context, principal auth.Pri
 	return nil
 }
 
-// AddSkillFromLibraryInput 是从平台库选 skill 配进版本的入参。
+// AddSkillFromLibraryInput 是从市场选 skill 配进版本的入参。
 type AddSkillFromLibraryInput struct {
-	// Source 是 skill 来源类型，首版仅接受 "platform"。
+	// Source 是 skill 来源类型，接受 "platform" 或 "clawhub"。
 	Source string
-	// SourceRef 是来源内精准标识；platform 来源时等于 skill name。
+	// SourceRef 是来源内精准标识；platform=skill name，clawhub=slug。
 	SourceRef string
-	// Version 是目标版本号，必须与平台库中已发布的版本对应。
+	// Name 是 skill 在版本内的唯一目录名；clawhub 来源必填（用 displayName，与 per-app 安装一致），
+	// platform 来源可空（以平台库 DB 的 name 为准）。
+	Name string
+	// Version 是目标版本号。
 	Version string
 }
 
-// AddSkillFromLibrary 从平台库选一个 skill 配进版本快照：
+// AddSkillFromLibrary 从市场（平台库 / ClawHub）选一个 skill 配进版本快照：
 //  1. 权限校验（CanManageAssistantVersion）
 //  2. 查版本
-//  3. 查平台库取 skill 元数据（TarPath/FileSize/FileSha256）
+//  3. 按来源解析为自包含快照（platform 引用平台库归档；clawhub 下载并缓存）
 //  4. 同 name 冲突检查（ErrAssistantVersionSkillNameTaken）
-//  5. 追加自包含快照并 revision +1
-//
-// 首版仅 platform 来源；clawhub 来源留 per-app 安装路径。
+//  5. 追加快照并 revision +1
 func (s *AssistantVersionService) AddSkillFromLibrary(ctx context.Context, principal auth.Principal, id string, in AddSkillFromLibraryInput) (AssistantVersionResult, error) {
 	if !auth.CanManageAssistantVersion(principal) {
 		return AssistantVersionResult{}, ErrAssistantVersionDenied
@@ -427,32 +444,64 @@ func (s *AssistantVersionService) AddSkillFromLibrary(ctx context.Context, princ
 	if err != nil {
 		return AssistantVersionResult{}, err
 	}
-	// 查平台库取 skill 元数据；未找到时映射为 ErrPlatformSkillNotFound。
-	ps, err := s.platformSkills.GetPlatformSkillByNameVersion(ctx, sqlc.GetPlatformSkillByNameVersionParams{
-		Name: in.SourceRef, Version: in.Version,
-	})
+	snap, err := s.resolveLibrarySkill(ctx, in)
 	if err != nil {
-		if errors.Is(err, sql.ErrNoRows) {
-			return AssistantVersionResult{}, ErrPlatformSkillNotFound
-		}
-		return AssistantVersionResult{}, fmt.Errorf("查询平台库 skill 失败: %w", err)
+		return AssistantVersionResult{}, err
 	}
 	// 同 name 冲突：同一版本内 skill 名称必须唯一。
 	for _, sk := range skills {
-		if sk.Name == ps.Name {
+		if sk.Name == snap.Name {
 			return AssistantVersionResult{}, ErrAssistantVersionSkillNameTaken
 		}
 	}
-	skills = append(skills, AssistantVersionSkill{
-		Source:     "platform",
-		SourceRef:  ps.Name,
-		Name:       ps.Name,
-		Version:    ps.Version,
-		CachedPath: ps.TarPath,
-		FileSize:   ps.FileSize,
-		FileSha256: ps.FileSha256,
-	})
+	skills = append(skills, snap)
 	return s.persistSkills(ctx, row, skills)
+}
+
+// resolveLibrarySkill 按来源把入参解析为一条自包含 AssistantVersionSkill 快照。
+//   - platform：查平台库引用其已持久化的归档（library/platform/<name>/<ver>.tar），不下载。
+//   - clawhub：下载 zip → 缓存到对象存储（library/clawhub/<slug>/<ver>.zip）→ 本地算 sha256。
+func (s *AssistantVersionService) resolveLibrarySkill(ctx context.Context, in AddSkillFromLibraryInput) (AssistantVersionSkill, error) {
+	switch in.Source {
+	case "platform":
+		// 查平台库取 skill 元数据；未找到时映射为 ErrPlatformSkillNotFound。
+		ps, err := s.platformSkills.GetPlatformSkillByNameVersion(ctx, sqlc.GetPlatformSkillByNameVersionParams{
+			Name: in.SourceRef, Version: in.Version,
+		})
+		if err != nil {
+			if errors.Is(err, sql.ErrNoRows) {
+				return AssistantVersionSkill{}, ErrPlatformSkillNotFound
+			}
+			return AssistantVersionSkill{}, fmt.Errorf("查询平台库 skill 失败: %w", err)
+		}
+		return AssistantVersionSkill{
+			Source: "platform", SourceRef: ps.Name, Name: ps.Name, Version: ps.Version,
+			CachedPath: ps.TarPath, FileSize: ps.FileSize, FileSha256: ps.FileSha256,
+		}, nil
+	case "clawhub":
+		// 未配 ClawHub（downloader/blobs 任一为 nil）时拒绝，前端市场此时也不会展示 clawhub 条目。
+		if s.clawhub == nil || s.blobs == nil {
+			return AssistantVersionSkill{}, ErrAppSkillSourceUnknown
+		}
+		if in.Name == "" {
+			return AssistantVersionSkill{}, fmt.Errorf("%w: clawhub 来源缺少 name", ErrAssistantVersionInvalid)
+		}
+		archive, err := s.clawhub.Download(ctx, in.SourceRef, in.Version)
+		if err != nil {
+			return AssistantVersionSkill{}, fmt.Errorf("从 ClawHub 下载 skill 失败: %w", err)
+		}
+		relPath, err := s.blobs.PutLibrarySkill("clawhub", in.SourceRef, in.Version, "zip", archive)
+		if err != nil {
+			return AssistantVersionSkill{}, fmt.Errorf("缓存 ClawHub skill 归档失败: %w", err)
+		}
+		sum := sha256.Sum256(archive)
+		return AssistantVersionSkill{
+			Source: "clawhub", SourceRef: in.SourceRef, Name: in.Name, Version: in.Version,
+			CachedPath: relPath, FileSize: int64(len(archive)), FileSha256: hex.EncodeToString(sum[:]),
+		}, nil
+	default:
+		return AssistantVersionSkill{}, ErrAppSkillSourceUnknown
+	}
 }
 
 // DeleteSkill 从版本中移除一个 skill 快照：只更新 skills_json 并 revision +1。
