@@ -1,5 +1,6 @@
-// PlatformSkillsPage.spec.ts — 平台库管理页单元测试，覆盖列表渲染与删除按钮交互。
-import { mount } from '@vue/test-utils'
+// PlatformSkillsPage.spec.ts — 平台技能管理页单元测试，覆盖列表渲染、删除交互，
+// 以及「粘贴 Markdown」上传流程（前端解析 frontmatter + 打包成扁平 tar 后调用上传）。
+import { flushPromises, mount } from '@vue/test-utils'
 import { defineComponent, h, ref, type PropType, type VNodeChild } from 'vue'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 
@@ -95,7 +96,15 @@ vi.mock('naive-ui', async () => {
   }
 })
 
+// ButtonStub 透传 disabled 并在点击时 emit click（与列表删除按钮交互保持一致）。
+const ButtonStub = {
+  template: '<button :disabled="$props.disabled" @click="$emit(\'click\')"><slot /></button>',
+  props: ['disabled'],
+}
+
 // ===== mountPage 辅助 =====
+// 仅 stub NCard/NDataTable/NButton；NInput/NForm/NRadio 使用真实 naive 组件（jsdom 下可正常渲染），
+// 以便按 placeholder 定位真实 <textarea>/<input> 并驱动 v-model。
 function mountPage() {
   return mount(PlatformSkillsPage, {
     global: {
@@ -105,11 +114,30 @@ function mountPage() {
         DataTable: DataTableStub,
         NDataTable: DataTableStub,
         'n-data-table': DataTableStub,
-        NButton: { template: '<button :disabled="$props.disabled" @click="$emit(\'click\')"><slot /></button>', props: ['disabled'] },
-        'n-button': { template: '<button :disabled="$props.disabled" @click="$emit(\'click\')"><slot /></button>', props: ['disabled'] },
+        NButton: ButtonStub,
+        'n-button': ButtonStub,
       },
     },
   })
+}
+
+// findByPlaceholder 在 textarea 与 input 中按 placeholder 子串定位真实输入元素。
+function findByPlaceholder(wrapper: ReturnType<typeof mountPage>, frag: string) {
+  const all = [...wrapper.findAll('textarea'), ...wrapper.findAll('input')]
+  const el = all.find((t) => t.attributes('placeholder')?.includes(frag))
+  if (!el) {
+    throw new Error(`未找到 placeholder 含「${frag}」的输入框`)
+  }
+  return el
+}
+
+// findUploadButton 定位提交按钮（文案恰为「上传」，避免误匹配「上传文件夹」切换项）。
+function findUploadButton(wrapper: ReturnType<typeof mountPage>) {
+  const btn = wrapper.findAll('button').find((b) => b.text().trim() === '上传')
+  if (!btn) {
+    throw new Error('未找到上传按钮')
+  }
+  return btn
 }
 
 // ===== 测试用例 =====
@@ -195,14 +223,56 @@ describe('PlatformSkillsPage', () => {
     expect(mocks.error).toHaveBeenCalledWith('权限不足')
   })
 
-  // 覆盖上传表单：上传区必须存在 name/version 输入框与文件选择按钮。
-  it('上传区包含 name/version 输入框和文件选择按钮', () => {
+  // 覆盖上传区基本结构：标题与两种上传方式切换项均存在。
+  it('上传区展示标题与「粘贴 Markdown / 上传文件夹」两种方式', () => {
     const wrapper = mountPage()
-    // 检查 placeholder 文案确认输入框存在。
     expect(wrapper.text()).toContain('上传平台技能')
-    const inputs = wrapper.findAll('input')
-    // 至少存在文件 input（type=file）。
-    const fileInput = inputs.find(i => i.attributes('type') === 'file')
-    expect(fileInput).toBeDefined()
+    expect(wrapper.text()).toContain('粘贴 Markdown')
+    expect(wrapper.text()).toContain('上传文件夹')
+  })
+
+  // 覆盖粘贴 Markdown 正常路径：解析 frontmatter 得到 name，提交时打包成 tar 并以该 name 调用上传。
+  it('粘贴 Markdown 提交时以 frontmatter name 打包上传', async () => {
+    mocks.uploadMutateAsync.mockResolvedValue(undefined)
+    const wrapper = mountPage()
+    // 合法 SKILL.md：frontmatter 含 name=greet 与 description=打招呼。
+    const md = '---\nname: greet\ndescription: 打招呼\n---\n# greet\n正文'
+    await findByPlaceholder(wrapper, 'SKILL.md').setValue(md)
+    await findByPlaceholder(wrapper, '如 1.0.0').setValue('1.0.0')
+    await wrapper.vm.$nextTick()
+
+    await wrapper.find('form').trigger('submit')
+    await flushPromises()
+
+    expect(mocks.uploadMutateAsync).toHaveBeenCalledTimes(1)
+    const arg = mocks.uploadMutateAsync.mock.calls[0][0]
+    // name 取自 frontmatter，version 取自表单，file 为浏览器内打包出的 tar（File 实例）。
+    expect(arg.name).toBe('greet')
+    expect(arg.version).toBe('1.0.0')
+    expect(arg.file).toBeInstanceOf(File)
+    // description 默认带出 frontmatter 的值。
+    expect(arg.description).toBe('打招呼')
+    expect(mocks.success).toHaveBeenCalledWith(expect.stringContaining('greet'))
+  })
+
+  // 覆盖校验失败路径：frontmatter 缺 name 时展示错误提示，且上传按钮禁用、不触发上传。
+  it('frontmatter 缺 name 时展示错误并禁用上传', async () => {
+    const wrapper = mountPage()
+    // 没有 frontmatter 的内容，解析应失败。
+    await findByPlaceholder(wrapper, 'SKILL.md').setValue('# 没有 frontmatter\n正文')
+    await findByPlaceholder(wrapper, '如 1.0.0').setValue('1.0.0')
+    await wrapper.vm.$nextTick()
+
+    expect(wrapper.text()).toContain('frontmatter')
+    expect(findUploadButton(wrapper).attributes('disabled')).toBeDefined()
+  })
+
+  // 覆盖必填校验：解析成功但版本号为空时，上传按钮禁用。
+  it('版本号为空时禁用上传', async () => {
+    const wrapper = mountPage()
+    await findByPlaceholder(wrapper, 'SKILL.md').setValue('---\nname: x\n---\n正文')
+    await wrapper.vm.$nextTick()
+    // 未填版本号，按钮应禁用。
+    expect(findUploadButton(wrapper).attributes('disabled')).toBeDefined()
   })
 })
