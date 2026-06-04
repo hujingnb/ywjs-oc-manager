@@ -82,9 +82,10 @@ def test_skills_list_managed_and_builtin(monkeypatch, tmp_path):
     monkeypatch.setattr(skills_mod, "BUNDLED_MANIFEST", bundled_manifest)
 
     # skill-a：manager 安装的 skill——含 SKILL.md + .oc-managed 标记，不在内置基线。
+    # SKILL.md 带 description，验证 list 端点回传该字段（供详情页展示）。
     skill_a = skills_dir / "skill-a"
     skill_a.mkdir()
-    (skill_a / "SKILL.md").write_text("---\nname: skill-a\n---\n")
+    (skill_a / "SKILL.md").write_text("---\nname: skill-a\ndescription: A 测试技能\n---\n")
     (skill_a / ".oc-managed").write_text('{"source":"app-install"}\n')
     # skill-b：镜像内置 skill——无 .oc-managed，且「目录叶子名(skill-b) ≠ SKILL.md 规范名(skill-b-canonical)」，
     # 验证 builtin 判断走 SKILL.md 规范名匹配 .bundled_manifest，而对外 name 仍是目录叶子名。
@@ -103,6 +104,8 @@ def test_skills_list_managed_and_builtin(monkeypatch, tmp_path):
     # skill-a：managed=True（有 .oc-managed）、builtin=False（manager 安装，不在内置基线）
     assert by_name["skill-a"]["managed"] is True
     assert by_name["skill-a"]["builtin"] is False
+    # description 取自 SKILL.md frontmatter，供详情页展示。
+    assert by_name["skill-a"]["description"] == "A 测试技能"
     # skill-b：managed=False、builtin=True（规范名 skill-b-canonical 在基线，验证按规范名而非目录名匹配）；
     # 且对外 name 仍是目录叶子名 skill-b。
     assert by_name["skill-b"]["managed"] is False

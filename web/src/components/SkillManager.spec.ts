@@ -85,9 +85,9 @@ const mutationState = {
   reinstallPending: ref(false),
 }
 
-// versionsState 控制 useSkillVersionsQuery（详情抽屉版本列表）的返回值。
-const versionsState = {
-  data: ref<string[]>([]),
+// detailState 控制 useSkillDetailQuery（详情抽屉富详情 + 版本列表）的返回值。
+const detailState = {
+  data: ref<{ detail: Record<string, unknown>; versions: { version: string; changelog?: string; published_at?: number }[] }>({ detail: {}, versions: [] }),
   isLoading: ref(false),
   error: ref<Error | null>(null),
 }
@@ -147,8 +147,8 @@ vi.mock('@/api/hooks/useSkills', () => ({
     mutateAsync: mocks.reinstallMutateAsync,
     isPending: mutationState.reinstallPending,
   }),
-  // 详情抽屉版本列表查询：用 versionsState 控制返回值。
-  useSkillVersionsQuery: () => versionsState,
+  // 详情抽屉富详情 + 版本列表查询：用 detailState 控制返回值。
+  useSkillDetailQuery: () => detailState,
 }))
 
 vi.mock('naive-ui', async () => {
@@ -249,9 +249,9 @@ describe('SkillManager', () => {
     lastIntersectionCallback = null
     ioObserve.mockReset()
     ioDisconnect.mockReset()
-    versionsState.data.value = []
-    versionsState.isLoading.value = false
-    versionsState.error.value = null
+    detailState.data.value = { detail: {}, versions: [] }
+    detailState.isLoading.value = false
+    detailState.error.value = null
     mutationState.installPending.value = false
     mutationState.uninstallPending.value = false
     mutationState.updatePending.value = false
@@ -594,12 +594,18 @@ describe('SkillManager', () => {
 
   // ======== 详情抽屉：查看详情 + 版本列表 ========
 
-  it('点击已安装 skill 名称打开详情抽屉并展示版本列表（含最新/当前标记）', async () => {
-    // 覆盖：已安装 clawhub skill 名称可点击 → 抽屉展示版本列表，首个标「最新」、匹配当前版本标「当前」。
+  it('点击已安装 skill 名称打开详情抽屉并展示版本列表（含最新/当前标记与 changelog）', async () => {
+    // 覆盖：已安装 clawhub skill 名称可点击 → 抽屉展示版本列表，首个标「最新」、匹配当前版本标「当前」，含 changelog。
     appSkillsState.data.value = [
       { name: 'oc-clawtest', status: 'active', source: 'clawhub', source_ref: 'oc-clawtest', version: '1.0.0' },
     ]
-    versionsState.data.value = ['2.0.0', '1.0.0']
+    detailState.data.value = {
+      detail: { description: '完整描述', stars: 100 },
+      versions: [
+        { version: '2.0.0', changelog: '新增 X 功能' },
+        { version: '1.0.0' },
+      ],
+    }
     const wrapper = mountManager()
     const nameBtn = wrapper.findAll('button').find((b) => b.text() === 'oc-clawtest')
     expect(nameBtn).toBeTruthy()
@@ -609,38 +615,45 @@ describe('SkillManager', () => {
     expect(drawer.exists()).toBe(true)
     expect(drawer.text()).toContain('版本列表')
     expect(drawer.text()).toContain('v2.0.0')
-    expect(drawer.text()).toContain('v1.0.0')
+    expect(drawer.text()).toContain('新增 X 功能') // changelog
     expect(drawer.text()).toContain('最新') // 第一个版本
     expect(drawer.text()).toContain('当前') // 匹配当前安装版本 1.0.0
+    expect(drawer.text()).toContain('完整描述') // 富详情描述
   })
 
-  it('点击市场卡片打开详情抽屉，展示名称与描述', async () => {
-    // 覆盖：市场卡片整体可点 → 抽屉带入条目名称/版本/描述。
+  it('点击市场卡片打开详情抽屉，展示作者/统计/完整描述', async () => {
+    // 覆盖：市场卡片整体可点 → 抽屉带入条目名称，并展示后端富详情（作者/星标/完整描述）。
     marketState.data.value = {
       entries: [
-        { source: 'clawhub', source_ref: 'self-improving-agent', name: 'Self-Improving Agent', version: '3.0.21', downloads: 100, description: '自我改进' },
+        { source: 'clawhub', source_ref: 'self-improving-agent', name: 'Self-Improving Agent', version: '3.0.21', downloads: 100, description: '摘要(截断)' },
       ],
     }
-    versionsState.data.value = ['3.0.21']
+    detailState.data.value = {
+      detail: { description: '完整未截断描述', author_name: 'pskoett', stars: 3735, downloads: 457324 },
+      versions: [{ version: '3.0.21', changelog: 're-upload' }],
+    }
     const wrapper = mountManager()
     await wrapper.find('.market-card').trigger('click')
     await nextTick()
     const drawer = wrapper.find('.n-drawer')
     expect(drawer.exists()).toBe(true)
     expect(drawer.text()).toContain('Self-Improving Agent')
-    expect(drawer.text()).toContain('v3.0.21')
-    expect(drawer.text()).toContain('自我改进')
+    expect(drawer.text()).toContain('pskoett') // 作者
+    expect(drawer.text()).toContain('完整未截断描述') // 富详情优先于卡片摘要
+    expect(drawer.text()).toContain('星标') // 统计
   })
 
-  it('builtin skill 详情不展示版本列表（无来源标识）', async () => {
-    // 边界：builtin skill 无 source/source_ref，详情抽屉显示「该来源无版本信息」。
+  it('builtin skill 详情展示 SKILL.md 描述、不展示版本列表（无来源标识）', async () => {
+    // 边界：builtin skill 无 source/source_ref，详情用容器 SKILL.md 的 description，版本列表显示「该来源无版本信息」。
     appSkillsState.data.value = [
-      { name: 'airtable', status: 'builtin', source: undefined, version: '内置' },
+      { name: 'airtable', status: 'builtin', source: undefined, version: '内置', description: 'Airtable 内置技能介绍' },
     ]
     const wrapper = mountManager()
     const nameBtn = wrapper.findAll('button').find((b) => b.text() === 'airtable')
     await nameBtn!.trigger('click')
     await nextTick()
-    expect(wrapper.find('.n-drawer').text()).toContain('该来源无版本信息')
+    const drawer = wrapper.find('.n-drawer')
+    expect(drawer.text()).toContain('Airtable 内置技能介绍') // 来自 SKILL.md 的描述
+    expect(drawer.text()).toContain('该来源无版本信息')
   })
 })

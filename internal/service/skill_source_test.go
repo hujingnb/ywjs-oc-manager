@@ -61,7 +61,18 @@ func TestPlatformSource_Versions(t *testing.T) {
 	versions, err := src.Versions(context.Background(), psvcPlatformPrincipal(), "weather")
 	require.NoError(t, err)
 	// 只含 weather 的版本，降序（最新在前），不含 translate 的 9.0。
-	assert.Equal(t, []string{"2.0", "1.0"}, versions)
+	got := make([]string, 0, len(versions))
+	for _, v := range versions {
+		got = append(got, v.Version)
+	}
+	assert.Equal(t, []string{"2.0", "1.0"}, got)
+
+	// Detail：取最新版本行的名称/描述/版本。
+	detail, err := src.Detail(context.Background(), psvcPlatformPrincipal(), "weather")
+	require.NoError(t, err)
+	assert.Equal(t, "weather", detail.Name)
+	assert.Equal(t, "platform", detail.Source)
+	assert.Equal(t, "2.0", detail.Version)
 }
 
 // TestPlatformSource_Search_All 验证 q 为空时返回全部 skill（每个 name 聚合为一条）。

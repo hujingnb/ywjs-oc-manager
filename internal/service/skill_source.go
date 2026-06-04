@@ -35,6 +35,34 @@ type SkillPage struct {
 	NextCursor string `json:"next_cursor"`
 }
 
+// SkillDetailResult 是详情页的富信息（跨来源统一）。clawhub 来源字段最全（作者/统计/许可/
+// 关键词/时间），platform 来源只有名称/描述/版本，缺省字段留零值由前端按有无渲染。
+type SkillDetailResult struct {
+	Name         string   `json:"name"`
+	Source       string   `json:"source"`
+	SourceRef    string   `json:"source_ref"`
+	Description  string   `json:"description"`             // 完整描述（clawhub 取 metadata.summary，非截断 summary）
+	Version      string   `json:"version"`                 // 最新版本
+	Downloads    int64    `json:"downloads,omitempty"`     // 下载量（clawhub）
+	Stars        int64    `json:"stars,omitempty"`         // 星标（clawhub）
+	Installs     int64    `json:"installs,omitempty"`      // 累计安装数（clawhub）
+	Comments     int64    `json:"comments,omitempty"`      // 评论数（clawhub）
+	License      string   `json:"license,omitempty"`       // 许可证
+	Keywords     []string `json:"keywords,omitempty"`      // 关键词
+	CreatedAt    string   `json:"created_at,omitempty"`    // 创建时间（ISO）
+	UpdatedAt    string   `json:"updated_at,omitempty"`    // 更新时间（ISO）
+	AuthorName   string   `json:"author_name,omitempty"`   // 作者展示名
+	AuthorHandle string   `json:"author_handle,omitempty"` // 作者 handle
+	AuthorAvatar string   `json:"author_avatar,omitempty"` // 作者头像 URL
+}
+
+// SkillVersionResult 是详情页版本列表的单项（含更新说明与发布时间）。
+type SkillVersionResult struct {
+	Version     string `json:"version"`                // 语义化版本号
+	Changelog   string `json:"changelog,omitempty"`    // 更新说明（clawhub 多为空）
+	PublishedAt int64  `json:"published_at,omitempty"` // 发布时间戳（epoch 毫秒，clawhub）
+}
+
 // SkillSource 是单个 skill 来源的浏览/搜索能力接口。
 // 目前由 PlatformSource（平台库）与 ClawHubSource（公共库）各自实现。
 type SkillSource interface {
@@ -42,9 +70,10 @@ type SkillSource interface {
 	Kind() string
 	// Search 按关键词 q（空=全列）与游标 cursor 返回一页条目。
 	Search(ctx context.Context, principal auth.Principal, q, cursor string) (SkillPage, error)
-	// Versions 返回指定 skill（ref：platform=name，clawhub=slug）的全部历史版本号，
-	// 按版本从新到旧排序，供详情页展示版本列表。
-	Versions(ctx context.Context, principal auth.Principal, ref string) ([]string, error)
+	// Detail 返回指定 skill（ref：platform=name，clawhub=slug）的富详情。
+	Detail(ctx context.Context, principal auth.Principal, ref string) (SkillDetailResult, error)
+	// Versions 返回指定 skill 的全部历史版本（含 changelog/发布时间），从新到旧排序。
+	Versions(ctx context.Context, principal auth.Principal, ref string) ([]SkillVersionResult, error)
 }
 
 // platformSkillLister 是 PlatformSource 所需的平台库查询能力最小接口。
@@ -68,9 +97,41 @@ func NewPlatformSource(svc platformSkillLister) *PlatformSource {
 // Kind 实现 SkillSource，返回 "platform"。
 func (s *PlatformSource) Kind() string { return "platform" }
 
-// Versions 列出平台库中 name=ref 的全部版本号，按版本字符串从大到小排序（最新在前）。
-// 与 Search 取最新版本的比较口径一致（字符串比较，对同位数版本足够）。
-func (s *PlatformSource) Versions(ctx context.Context, principal auth.Principal, ref string) ([]string, error) {
+// Detail 返回平台库 skill 的详情：取 name=ref 的最新版本行，填名称/描述/版本。
+// 平台库无作者/统计/许可等信息，相关字段留零值。
+func (s *PlatformSource) Detail(ctx context.Context, principal auth.Principal, ref string) (SkillDetailResult, error) {
+	rows, err := s.svc.ListForMarket(ctx, principal)
+	if err != nil {
+		return SkillDetailResult{}, err
+	}
+	var best PlatformSkillResult
+	found := false
+	for _, r := range rows {
+		if r.Name != ref {
+			continue
+		}
+		// 取版本字符串最大的一行作为详情展示（描述以最新版本为准）。
+		if !found || r.Version > best.Version {
+			best = r
+			found = true
+		}
+	}
+	if !found {
+		// 平台库无此 name：返回空详情（不报错，前端按空渲染）。
+		return SkillDetailResult{Source: "platform", SourceRef: ref}, nil
+	}
+	return SkillDetailResult{
+		Name:        best.Name,
+		Source:      "platform",
+		SourceRef:   best.Name,
+		Description: best.Description,
+		Version:     best.Version,
+	}, nil
+}
+
+// Versions 列出平台库中 name=ref 的全部版本，按版本字符串从大到小排序（最新在前）。
+// 平台库无 changelog/发布时间，仅填 Version。
+func (s *PlatformSource) Versions(ctx context.Context, principal auth.Principal, ref string) ([]SkillVersionResult, error) {
 	rows, err := s.svc.ListForMarket(ctx, principal)
 	if err != nil {
 		return nil, err
@@ -84,7 +145,11 @@ func (s *PlatformSource) Versions(ctx context.Context, principal auth.Principal,
 	}
 	// 降序排列（最新版本在前），与前端「版本列表第一个为最新」预期一致。
 	sort.Sort(sort.Reverse(sort.StringSlice(versions)))
-	return versions, nil
+	out := make([]SkillVersionResult, 0, len(versions))
+	for _, v := range versions {
+		out = append(out, SkillVersionResult{Version: v})
+	}
+	return out, nil
 }
 
 // Search 列出平台库 skill，按 name 聚合并取最新版本，按 q 子串过滤名称与描述。

@@ -49,29 +49,59 @@ def _load_builtin_names() -> set[str]:
     return names
 
 
-def _read_skill_name(skill_md: Path, fallback: str) -> str:
-    """从 SKILL.md frontmatter 读 name 字段（hermes 的 skill 规范名，与 .bundled_manifest 一致）。
+def _read_skill_meta(skill_md: Path, fallback: str) -> tuple[str, str]:
+    """从 SKILL.md frontmatter 一次性读 name 与 description 两个字段。
 
-    镜像内置 skill 的目录叶子名常与规范名不同（如目录 mlops/models/audiocraft 的
-    SKILL.md name=audiocraft-audio-generation），故 builtin 匹配必须用规范名而非目录名。
-    解析失败、缺 frontmatter 或无 name 字段时回退到 fallback（目录叶子名）。
+    name：hermes 的 skill 规范名（与 .bundled_manifest 一致，用于 builtin 匹配）。镜像内置
+    skill 的目录叶子名常与规范名不同（如目录 audiocraft 的 SKILL.md name=audiocraft-audio-generation），
+    故 builtin 匹配必须用规范名而非目录名；解析失败/缺字段时回退到 fallback（目录叶子名）。
+
+    description：skill 介绍，供详情页展示内置/自建 skill 的元数据。取 description: 行的值，
+    去引号；若值用引号且跨行（引号未闭合），累积后续行直到闭合引号；缺失时返回空字符串。
+    返回 (name, description)。
     """
     try:
         lines = skill_md.read_text(encoding="utf-8", errors="replace").splitlines()
     except Exception:
-        return fallback
-    # frontmatter 必须以首行 "---" 开始；否则视为无规范名，回退到目录名。
+        return fallback, ""
+    # frontmatter 必须以首行 "---" 开始；否则视为无元数据，回退到目录名、空描述。
     if not lines or lines[0].strip() != "---":
-        return fallback
-    for line in lines[1:]:
-        s = line.strip()
+        return fallback, ""
+    name = fallback
+    description = ""
+    i = 1
+    while i < len(lines):
+        s = lines[i].strip()
         if s == "---":
             break
         if s.startswith("name:"):
             val = s[len("name:"):].strip().strip('"').strip("'")
             if val:
-                return val
-    return fallback
+                name = val
+        elif s.startswith("description:"):
+            raw = s[len("description:"):].strip()
+            # 带引号的值可能跨行：累积后续行直到出现配对的闭合引号。
+            if raw[:1] in ("'", '"'):
+                quote = raw[0]
+                body = raw[1:]
+                if body.endswith(quote) and len(body) >= 1:
+                    description = body[:-1]
+                else:
+                    parts = [body]
+                    i += 1
+                    while i < len(lines):
+                        ln = lines[i]
+                        if ln.rstrip().endswith(quote):
+                            parts.append(ln.rstrip()[:-1])
+                            break
+                        parts.append(ln)
+                        i += 1
+                    description = " ".join(p.strip() for p in parts).strip()
+            else:
+                # 无引号：取本行值（多行无引号 YAML 不规范，仅取首行即可，足够展示）。
+                description = raw
+        i += 1
+    return name, description
 
 
 def list_skills() -> dict:
@@ -101,12 +131,14 @@ def list_skills() -> dict:
             seen.add(name)
             # 对外 name 用目录叶子名（= manager 安装时的目录名，保证与 app_skills.name 对账一致）；
             # builtin 判断改用 SKILL.md frontmatter 的规范名匹配 .bundled_manifest（叶子名常与规范名不同）。
-            manifest_name = _read_skill_name(skill_md, name)
+            # 同时读 description，供详情页展示内置/自建 skill 的介绍。
+            manifest_name, description = _read_skill_meta(skill_md, name)
             out.append({
                 "name": name,
                 # .oc-managed 文件存在表示由 oc-ops 热装/版本渲染，否则为镜像内置或手动自建。
                 "managed": (d / ".oc-managed").exists(),
                 "builtin": manifest_name in builtin,
+                "description": description,
             })
     return {"skills": out}
 

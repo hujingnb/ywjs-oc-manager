@@ -24,12 +24,19 @@ type fakeClawHubAPI struct {
 	calls int
 	// versions 是 ListVersions 的预设返回值。
 	versions []clawhub.SkillVersion
+	// detail 是 GetSkill 的预设返回值。
+	detail clawhub.SkillDetail
 }
 
 // Search 实现 ClawHubSearcher 接口：每次调用将 calls 加一并返回预设结果。
 func (f *fakeClawHubAPI) Search(_ context.Context, _, _ string) (clawhub.SearchResult, error) {
 	f.calls++
 	return f.result, nil
+}
+
+// GetSkill 实现 ClawHubSearcher 接口：返回预设的富详情。
+func (f *fakeClawHubAPI) GetSkill(_ context.Context, _ string) (clawhub.SkillDetail, error) {
+	return f.detail, nil
 }
 
 // ListVersions 实现 ClawHubSearcher 接口：返回预设的版本列表。

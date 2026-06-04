@@ -18,7 +18,8 @@ type Skill struct {
 
 // clawhubSkillRaw 镜像 clawhubcn.com 列表/详情里单个 skill 的原始 JSON 结构。
 // 真实示例：{"slug","displayName","summary","tags":{"latest":"3.0.21"},
-//            "stats":{"downloads":457304},"latestVersion":{"version":"3.0.21"}}
+//
+//	"stats":{"downloads":457304},"latestVersion":{"version":"3.0.21"}}
 type clawhubSkillRaw struct {
 	Slug        string `json:"slug"`
 	DisplayName string `json:"displayName"`
@@ -61,5 +62,63 @@ type SearchResult struct {
 
 // SkillVersion 是 /api/v1/skills/{slug}/versions 的 items 里单个版本项。
 type SkillVersion struct {
-	Version string `json:"version"` // 语义化版本号，如 "1.2.0"
+	Version   string `json:"version"`   // 语义化版本号，如 "1.2.0"
+	Changelog string `json:"changelog"` // 该版本更新说明（clawhubcn 多为空，有的有内容）
+	CreatedAt int64  `json:"createdAt"` // 发布时间戳（epoch 毫秒）
+}
+
+// SkillDetail 是单个 skill 的富详情（详情页用），在 Skill 展示字段之外补充
+// 完整描述、作者、统计、许可、关键词与时间。从 clawhubcn 详情端点
+// {skill, latestVersion, owner, metadata} 解析——其中 metadata.summary 是未截断的
+// 完整描述（skill.summary 被截断到 160 字符）。
+type SkillDetail struct {
+	Slug         string   // 库内唯一标识
+	Name         string   // 展示名
+	Description  string   // 完整描述（metadata.summary 优先，回退 skill.summary）
+	Version      string   // 最新版本
+	Downloads    int64    // 下载量
+	Stars        int64    // 星标数
+	Installs     int64    // 累计安装数
+	Comments     int64    // 评论数
+	License      string   // 许可证
+	Keywords     []string // 关键词
+	CreatedAt    string   // 创建时间（ISO 字符串，来自 metadata.createdAt）
+	UpdatedAt    string   // 更新时间（ISO 字符串，来自 metadata.updatedAt）
+	AuthorName   string   // 作者展示名（owner.displayName）
+	AuthorHandle string   // 作者 handle（owner.handle）
+	AuthorAvatar string   // 作者头像 URL（owner.image）
+}
+
+// clawhubDetailRaw 镜像 clawhubcn 详情端点 {skill, latestVersion, owner, metadata} 的原始结构。
+type clawhubDetailRaw struct {
+	Skill struct {
+		Slug        string `json:"slug"`
+		DisplayName string `json:"displayName"`
+		Summary     string `json:"summary"`
+		Tags        struct {
+			Latest string `json:"latest"`
+		} `json:"tags"`
+		Stats struct {
+			Downloads       int64 `json:"downloads"`
+			Stars           int64 `json:"stars"`
+			InstallsAllTime int64 `json:"installsAllTime"`
+			Comments        int64 `json:"comments"`
+		} `json:"stats"`
+	} `json:"skill"`
+	LatestVersion struct {
+		Version string `json:"version"`
+		License string `json:"license"`
+	} `json:"latestVersion"`
+	Owner struct {
+		DisplayName string `json:"displayName"`
+		Handle      string `json:"handle"`
+		Image       string `json:"image"`
+	} `json:"owner"`
+	Metadata struct {
+		Summary   string   `json:"summary"`  // 完整描述（未截断）
+		License   string   `json:"License"`  // 注意大写 L
+		Keywords  []string `json:"Keywords"` // 注意大写 K
+		CreatedAt string   `json:"createdAt"`
+		UpdatedAt string   `json:"updatedAt"`
+	} `json:"metadata"`
 }

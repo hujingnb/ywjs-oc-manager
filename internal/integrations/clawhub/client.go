@@ -71,21 +71,43 @@ func (c *ClawHubClient) Search(ctx context.Context, q, cursor string) (SearchRes
 // GetSkill 取单个 skill 的详细元数据。
 // clawhubcn 详情响应为 {"skill":{...},"latestVersion":{"version":...}}，需解包 skill 字段；
 // skill 内缺版本时用顶层 latestVersion 补齐。
-func (c *ClawHubClient) GetSkill(ctx context.Context, slug string) (Skill, error) {
-	var out struct {
-		Skill         Skill `json:"skill"`
-		LatestVersion struct {
-			Version string `json:"version"`
-		} `json:"latestVersion"`
+func (c *ClawHubClient) GetSkill(ctx context.Context, slug string) (SkillDetail, error) {
+	var raw clawhubDetailRaw
+	if err := c.getJSON(ctx, "/api/v1/skills/"+url.PathEscape(slug), nil, &raw); err != nil {
+		return SkillDetail{}, err
 	}
-	if err := c.getJSON(ctx, "/api/v1/skills/"+url.PathEscape(slug), nil, &out); err != nil {
-		return Skill{}, err
+	d := SkillDetail{
+		Slug:    raw.Skill.Slug,
+		Name:    raw.Skill.DisplayName,
+		Version: raw.Skill.Tags.Latest,
+		// 完整描述优先取 metadata.summary（未截断），回退 skill.summary（被截断到 160 字符）。
+		Description:  firstNonEmpty(raw.Metadata.Summary, raw.Skill.Summary),
+		Downloads:    raw.Skill.Stats.Downloads,
+		Stars:        raw.Skill.Stats.Stars,
+		Installs:     raw.Skill.Stats.InstallsAllTime,
+		Comments:     raw.Skill.Stats.Comments,
+		License:      firstNonEmpty(raw.Metadata.License, raw.LatestVersion.License),
+		Keywords:     raw.Metadata.Keywords,
+		CreatedAt:    raw.Metadata.CreatedAt,
+		UpdatedAt:    raw.Metadata.UpdatedAt,
+		AuthorName:   raw.Owner.DisplayName,
+		AuthorHandle: raw.Owner.Handle,
+		AuthorAvatar: raw.Owner.Image,
 	}
-	sk := out.Skill
-	if sk.Version == "" {
-		sk.Version = out.LatestVersion.Version
+	if d.Version == "" {
+		d.Version = raw.LatestVersion.Version
 	}
-	return sk, nil
+	return d, nil
+}
+
+// firstNonEmpty 返回第一个非空字符串，用于「完整字段优先、截断字段兜底」的取值。
+func firstNonEmpty(vals ...string) string {
+	for _, v := range vals {
+		if v != "" {
+			return v
+		}
+	}
+	return ""
 }
 
 // ListVersions 列出某 skill 的全部历史版本。

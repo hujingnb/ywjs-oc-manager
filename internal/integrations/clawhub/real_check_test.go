@@ -47,12 +47,16 @@ func TestRealClawHubcn(t *testing.T) {
 	}
 	t.Logf("ListVersions(%s) 返回 %d 个版本", sk.Slug, len(vs))
 
-	// 详情：验证 {skill,latestVersion} 解包。
+	// 详情：验证 {skill,latestVersion,owner,metadata} 解包出富字段。
 	detail, err := c.GetSkill(context.Background(), sk.Slug)
 	if err != nil {
 		t.Fatalf("GetSkill 失败: %v", err)
 	}
-	t.Logf("GetSkill(%s): name=%q version=%s", detail.Slug, detail.Name, detail.Version)
+	t.Logf("GetSkill(%s): name=%q version=%s 描述长度=%d 作者=%q 下载=%d 星标=%d",
+		detail.Slug, detail.Name, detail.Version, len(detail.Description), detail.AuthorName, detail.Downloads, detail.Stars)
+	if detail.Name == "" || detail.Description == "" {
+		t.Fatalf("详情富字段解析失败: %+v", detail)
+	}
 
 	// 下载：skill-vetter@1.0.0 是已知可下的真实 skill，验证返回真实 zip（PK 魔数）。
 	data, err := c.Download(context.Background(), "skill-vetter", "1.0.0")

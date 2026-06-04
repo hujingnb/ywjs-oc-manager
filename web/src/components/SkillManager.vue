@@ -111,23 +111,52 @@
     <n-drawer v-model:show="detailOpen" :width="420" placement="right">
       <n-drawer-content :title="detailSkill?.name ?? '技能详情'" closable>
         <div v-if="detailSkill" class="skill-detail">
+          <!-- 作者（clawhub 才有） -->
+          <div v-if="richDetail?.author_name" class="skill-detail-author">
+            <img v-if="richDetail.author_avatar" :src="richDetail.author_avatar" class="skill-detail-avatar" alt="" referrerpolicy="no-referrer" />
+            <span class="skill-detail-author-name">{{ richDetail.author_name }}</span>
+            <span v-if="richDetail.author_handle" class="skill-detail-handle">@{{ richDetail.author_handle }}</span>
+          </div>
+
+          <!-- 基础信息行 -->
           <p class="skill-detail-row"><span class="skill-detail-label">来源</span>{{ sourceLabel(detailSkill.source) }}</p>
           <p v-if="detailSkill.version" class="skill-detail-row"><span class="skill-detail-label">版本</span>v{{ detailSkill.version }}</p>
           <p v-if="detailSkill.status" class="skill-detail-row"><span class="skill-detail-label">状态</span>{{ detailStatusLabel(detailSkill.status) }}</p>
-          <p v-if="detailSkill.downloads" class="skill-detail-row"><span class="skill-detail-label">下载量</span>↓ {{ detailSkill.downloads }}</p>
-          <p v-if="detailSkill.description" class="skill-detail-desc">{{ detailSkill.description }}</p>
+          <p v-if="richDetail?.license" class="skill-detail-row"><span class="skill-detail-label">许可</span>{{ richDetail.license }}</p>
+          <p v-if="fmtDate(richDetail?.created_at)" class="skill-detail-row"><span class="skill-detail-label">创建</span>{{ fmtDate(richDetail?.created_at) }}</p>
+          <p v-if="fmtDate(richDetail?.updated_at)" class="skill-detail-row"><span class="skill-detail-label">更新</span>{{ fmtDate(richDetail?.updated_at) }}</p>
+
+          <!-- 统计（clawhub） -->
+          <div v-if="richDetail && (richDetail.downloads || richDetail.stars || richDetail.installs || richDetail.comments)" class="skill-detail-stats">
+            <span v-if="richDetail.downloads">↓ {{ richDetail.downloads }} 下载</span>
+            <span v-if="richDetail.stars">★ {{ richDetail.stars }} 星标</span>
+            <span v-if="richDetail.installs">⤓ {{ richDetail.installs }} 安装</span>
+            <span v-if="richDetail.comments">💬 {{ richDetail.comments }} 评论</span>
+          </div>
+
+          <!-- 关键词 -->
+          <div v-if="richDetail?.keywords?.length" class="skill-detail-keywords">
+            <n-tag v-for="kw in richDetail.keywords" :key="kw" size="tiny" :bordered="false">{{ kw }}</n-tag>
+          </div>
+
+          <!-- 完整描述（富详情优先，回退点击带入的描述） -->
+          <p v-if="effectiveDescription" class="skill-detail-desc">{{ effectiveDescription }}</p>
 
           <!-- 版本列表：platform/clawhub 来源才有；builtin/self_created 无来源版本。 -->
           <div class="skill-detail-versions">
             <strong>版本列表</strong>
-            <div v-if="!detailHasVersions" class="state-text">该来源无版本信息</div>
-            <div v-else-if="skillVersionsQuery.isLoading.value" class="state-text">加载中…</div>
-            <p v-else-if="skillVersionsQuery.error.value" class="state-text danger">版本查询失败</p>
-            <ul v-else-if="(skillVersionsQuery.data.value?.length ?? 0) > 0" class="skill-detail-version-list">
-              <li v-for="(v, i) in skillVersionsQuery.data.value" :key="v">
-                <span class="skill-detail-version-num">v{{ v }}</span>
-                <n-tag v-if="i === 0" size="tiny" type="success" :bordered="false">最新</n-tag>
-                <n-tag v-if="v === detailSkill.version" size="tiny" type="info" :bordered="false">当前</n-tag>
+            <div v-if="!detailHasUpstream" class="state-text">该来源无版本信息</div>
+            <div v-else-if="skillDetailQuery.isLoading.value" class="state-text">加载中…</div>
+            <p v-else-if="skillDetailQuery.error.value" class="state-text danger">详情查询失败</p>
+            <ul v-else-if="detailVersions.length" class="skill-detail-version-list">
+              <li v-for="(v, i) in detailVersions" :key="v.version" class="skill-detail-version-item">
+                <div class="skill-detail-version-head">
+                  <span class="skill-detail-version-num">v{{ v.version }}</span>
+                  <n-tag v-if="i === 0" size="tiny" type="success" :bordered="false">最新</n-tag>
+                  <n-tag v-if="v.version === detailSkill.version" size="tiny" type="info" :bordered="false">当前</n-tag>
+                  <span v-if="fmtDate(v.published_at)" class="skill-detail-version-date">{{ fmtDate(v.published_at) }}</span>
+                </div>
+                <div v-if="v.changelog" class="skill-detail-version-log">{{ v.changelog }}</div>
               </li>
             </ul>
             <div v-else class="state-text">暂无版本</div>
@@ -162,7 +191,7 @@ import {
   useAppSkillsQuery,
   useInstallAppSkill,
   useSkillMarketQuery,
-  useSkillVersionsQuery,
+  useSkillDetailQuery,
   useReinstallAppSkill,
   useUninstallAppSkill,
   useUpdateAppSkill,
@@ -380,24 +409,40 @@ interface SkillDetail {
 const detailOpen = ref(false)
 const detailSkill = ref<SkillDetail | null>(null)
 
-// detailHasVersions：仅 platform/clawhub 来源有上游版本列表（builtin/self_created 无来源标识）。
-const detailHasVersions = computed(() => {
+// detailHasUpstream：仅 platform/clawhub 来源有上游富详情/版本（builtin/self_created 无来源标识）。
+const detailHasUpstream = computed(() => {
   const d = detailSkill.value
   return Boolean(d?.source_ref && (d.source === 'platform' || d.source === 'clawhub'))
 })
-// 版本列表查询：source/ref 来自当前选中 skill，仅在 detailHasVersions 时实际发请求。
-const detailVersionParams = computed(() => ({
-  source: detailHasVersions.value ? detailSkill.value?.source : undefined,
-  ref: detailHasVersions.value ? detailSkill.value?.source_ref : undefined,
+// 富详情查询：source/ref 来自当前选中 skill，仅在 detailHasUpstream 时实际发请求。
+const detailParams = computed(() => ({
+  source: detailHasUpstream.value ? detailSkill.value?.source : undefined,
+  ref: detailHasUpstream.value ? detailSkill.value?.source_ref : undefined,
 }))
-const skillVersionsQuery = useSkillVersionsQuery(detailVersionParams)
+const skillDetailQuery = useSkillDetailQuery(detailParams)
+
+// richDetail：后端返回的富详情（作者/统计/许可等），未取到时为 null。
+const richDetail = computed(() => skillDetailQuery.data.value?.detail ?? null)
+// detailVersions：版本列表（含 changelog/发布时间）。
+const detailVersions = computed(() => skillDetailQuery.data.value?.versions ?? [])
+// effectiveDescription：优先用富详情的完整描述，回退到点击时带入的描述（市场卡片摘要 / 容器 SKILL.md）。
+const effectiveDescription = computed(
+  () => richDetail.value?.description || detailSkill.value?.description || '',
+)
 
 // detailStatusLabel 复用 statusLabel，pending 在详情里也补「待生效」语义。
 function detailStatusLabel(status: string): string {
   return statusLabel(status)
 }
 
-// openInstalledDetail 由已安装列表名称点击触发，带入对账行的来源/版本/状态。
+// fmtDate 把 ISO 字符串或 epoch 毫秒时间戳格式化为 YYYY-MM-DD（拿不到时返回空）。
+function fmtDate(v?: string | number): string {
+  if (!v) return ''
+  const d = typeof v === 'number' ? new Date(v) : new Date(v)
+  return Number.isNaN(d.getTime()) ? '' : d.toISOString().slice(0, 10)
+}
+
+// openInstalledDetail 由已安装列表名称点击触发，带入对账行的来源/版本/状态/描述（容器 SKILL.md）。
 function openInstalledDetail(row: AppSkill) {
   detailSkill.value = {
     name: row.name,
@@ -405,6 +450,7 @@ function openInstalledDetail(row: AppSkill) {
     source_ref: row.source_ref,
     version: row.version,
     status: row.status,
+    description: row.description,
   }
   detailOpen.value = true
 }
@@ -656,15 +702,70 @@ const installedColumns: DataTableColumns<AppSkill> = [
   margin: 8px 0 0;
 }
 .skill-detail-version-list li {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  padding: 6px 0;
-  border-bottom: 1px solid var(--border-color, #eee);
   font-size: 13px;
 }
 .skill-detail-version-num {
   font-family: var(--font-mono, monospace);
+}
+
+/* 作者行：头像 + 名称 + handle。 */
+.skill-detail-author {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-bottom: 12px;
+}
+.skill-detail-avatar {
+  width: 28px;
+  height: 28px;
+  border-radius: 50%;
+  object-fit: cover;
+}
+.skill-detail-author-name {
+  font-weight: 600;
+  font-size: 13px;
+}
+.skill-detail-handle {
+  color: var(--text-muted, #888);
+  font-size: 12px;
+}
+/* 统计行：下载/星标/安装/评论。 */
+.skill-detail-stats {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 12px;
+  margin: 10px 0;
+  font-size: 12px;
+  color: var(--text-muted, #888);
+}
+/* 关键词标签行。 */
+.skill-detail-keywords {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  margin: 8px 0;
+}
+/* 版本项：版本头 + changelog。 */
+.skill-detail-version-item {
+  display: block;
+  padding: 8px 0;
+  border-bottom: 1px solid var(--border-color, #eee);
+}
+.skill-detail-version-head {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+.skill-detail-version-date {
+  margin-left: auto;
+  color: var(--text-muted, #999);
+  font-size: 12px;
+}
+.skill-detail-version-log {
+  margin-top: 4px;
+  font-size: 12px;
+  color: var(--text-muted, #666);
+  line-height: 1.5;
 }
 
 .market-card-header {

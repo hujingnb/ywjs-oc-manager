@@ -12,4 +12,6 @@ type SkillInfo struct {
 	Managed bool `json:"managed"`
 	// Builtin 表示该 skill 是否为内置 skill（随镜像预装，不可删除）。
 	Builtin bool `json:"builtin"`
+	// Description 是 skill 介绍（取自 SKILL.md frontmatter description），供详情页展示。
+	Description string `json:"description"`
 }

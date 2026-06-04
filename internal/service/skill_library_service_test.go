@@ -20,8 +20,10 @@ type stubSource struct {
 	page SkillPage
 	// err 是 Search() 的预设失败返回值（非 nil 时 Search 返回错误）。
 	err error
+	// detail 是 Detail() 的预设返回值。
+	detail SkillDetailResult
 	// versions 是 Versions() 的预设返回值。
-	versions []string
+	versions []SkillVersionResult
 }
 
 // Kind 实现 SkillSource，返回预设的来源标识。
@@ -35,8 +37,16 @@ func (s *stubSource) Search(_ context.Context, _ auth.Principal, _, _ string) (S
 	return s.page, nil
 }
 
+// Detail 实现 SkillSource，返回预设的详情或错误。
+func (s *stubSource) Detail(_ context.Context, _ auth.Principal, _ string) (SkillDetailResult, error) {
+	if s.err != nil {
+		return SkillDetailResult{}, s.err
+	}
+	return s.detail, nil
+}
+
 // Versions 实现 SkillSource，返回预设的版本列表或错误。
-func (s *stubSource) Versions(_ context.Context, _ auth.Principal, _ string) ([]string, error) {
+func (s *stubSource) Versions(_ context.Context, _ auth.Principal, _ string) ([]SkillVersionResult, error) {
 	if s.err != nil {
 		return nil, s.err
 	}
@@ -128,32 +138,35 @@ func TestSkillLibraryService_List_ClawHubFailureDegrades(t *testing.T) {
 	assert.Equal(t, "platform", page.Entries[0].Source)
 }
 
-// TestSkillLibraryService_Versions 覆盖 Versions 的来源路由：
-//   - "platform"/"clawhub" 各走对应来源，透传版本列表。
-//   - clawhub 未配置（nil）时返回空列表、不报错。
+// TestSkillLibraryService_Detail 覆盖 Detail 的来源路由（返回详情 + 版本列表）：
+//   - "platform"/"clawhub" 各走对应来源。
+//   - clawhub 未配置（nil）时返回空详情/空版本、不报错。
 //   - 未知来源返回 ErrSkillMarketSourceUnknown。
-func TestSkillLibraryService_Versions(t *testing.T) {
-	plat := &stubSource{kind: "platform", versions: []string{"2.0", "1.0"}}
-	claw := &stubSource{kind: "clawhub", versions: []string{"3.0.21", "3.0.20"}}
+func TestSkillLibraryService_Detail(t *testing.T) {
+	plat := &stubSource{kind: "platform", detail: SkillDetailResult{Name: "weather", Source: "platform"}, versions: []SkillVersionResult{{Version: "2.0"}, {Version: "1.0"}}}
+	claw := &stubSource{kind: "clawhub", detail: SkillDetailResult{Name: "Self-Improving Agent", Source: "clawhub", Stars: 3735}, versions: []SkillVersionResult{{Version: "3.0.21", Changelog: "re-upload"}}}
 	svc := NewSkillLibraryService(plat, claw)
 
-	// platform：走平台来源版本列表。
-	pv, err := svc.Versions(context.Background(), auth.Principal{}, "platform", "weather")
+	// platform：详情 + 版本。
+	pd, pv, err := svc.Detail(context.Background(), auth.Principal{}, "platform", "weather")
 	require.NoError(t, err)
-	assert.Equal(t, []string{"2.0", "1.0"}, pv)
+	assert.Equal(t, "weather", pd.Name)
+	assert.Len(t, pv, 2)
 
-	// clawhub：走公共来源版本列表。
-	cv, err := svc.Versions(context.Background(), auth.Principal{}, "clawhub", "self-improving-agent")
+	// clawhub：详情含统计、版本含 changelog。
+	cd, cv, err := svc.Detail(context.Background(), auth.Principal{}, "clawhub", "self-improving-agent")
 	require.NoError(t, err)
-	assert.Equal(t, []string{"3.0.21", "3.0.20"}, cv)
+	assert.EqualValues(t, 3735, cd.Stars)
+	require.Len(t, cv, 1)
+	assert.Equal(t, "re-upload", cv[0].Changelog)
 
 	// 未知来源 → 哨兵错误。
-	_, err = svc.Versions(context.Background(), auth.Principal{}, "github", "x")
+	_, _, err = svc.Detail(context.Background(), auth.Principal{}, "github", "x")
 	require.ErrorIs(t, err, ErrSkillMarketSourceUnknown)
 
-	// clawhub 未配置（nil）→ 空列表、不报错。
+	// clawhub 未配置（nil）→ 空详情/空版本、不报错。
 	svcNoClaw := NewSkillLibraryService(plat, nil)
-	empty, err := svcNoClaw.Versions(context.Background(), auth.Principal{}, "clawhub", "x")
+	_, empty, err := svcNoClaw.Detail(context.Background(), auth.Principal{}, "clawhub", "x")
 	require.NoError(t, err)
 	assert.Empty(t, empty)
 }

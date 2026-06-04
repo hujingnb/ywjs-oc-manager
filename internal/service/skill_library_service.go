@@ -69,21 +69,31 @@ func (s *SkillLibraryService) List(ctx context.Context, principal auth.Principal
 	}
 }
 
-// Versions 返回指定 skill 的全部历史版本号（详情页版本列表用）。
-//   - source="platform"：查平台库该 name 的所有版本。
-//   - source="clawhub"：查公共库该 slug 的所有版本；clawhub 未配置（nil）时返回空列表。
+// Detail 返回指定 skill 的富详情 + 版本列表（详情页用）。
+//   - source="platform"：查平台库该 name 的详情与版本。
+//   - source="clawhub"：查公共库该 slug 的详情与版本；clawhub 未配置（nil）时返回空。
 //   - 其他值：返回 ErrSkillMarketSourceUnknown（handler 层映射为 400）。
-func (s *SkillLibraryService) Versions(ctx context.Context, principal auth.Principal, source, ref string) ([]string, error) {
+func (s *SkillLibraryService) Detail(ctx context.Context, principal auth.Principal, source, ref string) (SkillDetailResult, []SkillVersionResult, error) {
+	var src SkillSource
 	switch source {
 	case "platform":
-		return s.platform.Versions(ctx, principal, ref)
+		src = s.platform
 	case "clawhub":
-		// 未配置公共库：返回空版本列表，不报错（与 List 的降级口径一致）。
+		// 未配置公共库：返回空详情/空版本，不报错（与 List 的降级口径一致）。
 		if s.clawhub == nil {
-			return []string{}, nil
+			return SkillDetailResult{Source: "clawhub", SourceRef: ref}, []SkillVersionResult{}, nil
 		}
-		return s.clawhub.Versions(ctx, principal, ref)
+		src = s.clawhub
 	default:
-		return nil, ErrSkillMarketSourceUnknown
+		return SkillDetailResult{}, nil, ErrSkillMarketSourceUnknown
 	}
+	detail, err := src.Detail(ctx, principal, ref)
+	if err != nil {
+		return SkillDetailResult{}, nil, err
+	}
+	versions, err := src.Versions(ctx, principal, ref)
+	if err != nil {
+		return SkillDetailResult{}, nil, err
+	}
+	return detail, versions, nil
 }

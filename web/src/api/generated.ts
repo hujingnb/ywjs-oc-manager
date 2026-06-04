@@ -8156,14 +8156,14 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
-    "/skill-market/versions": {
+    "/skill-market/detail": {
         parameters: {
             query?: never;
             header?: never;
             path?: never;
             cookie?: never;
         };
-        /** 查询某 skill 的版本列表 */
+        /** 查询某 skill 的详情与版本列表 */
         get: {
             parameters: {
                 query: {
@@ -8185,7 +8185,7 @@ export interface paths {
                     };
                     content: {
                         "application/json": {
-                            [key: string]: string[];
+                            [key: string]: unknown;
                         };
                     };
                 };
@@ -9151,6 +9151,8 @@ export interface components {
         };
         "service.AppSkillResult": {
             category?: string;
+            /** @description Description 是 skill 介绍（取自容器 SKILL.md frontmatter），主要供内置/自创 skill 详情展示。 */
+            description?: string;
             /** @description Latest 非空时表示有更新版本（大于 Version），前端可展示更新提示。 */
             latest_version?: string;
             name?: string;

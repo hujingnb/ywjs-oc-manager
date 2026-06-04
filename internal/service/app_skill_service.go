@@ -137,6 +137,8 @@ type AppSkillResult struct {
 	Category string `json:"category"`
 	// Protected 为 true 时表示该 skill 是当前助手版本必需的，不可删除。
 	Protected bool `json:"protected"`
+	// Description 是 skill 介绍（取自容器 SKILL.md frontmatter），主要供内置/自创 skill 详情展示。
+	Description string `json:"description,omitempty"`
 }
 
 // =========================================================
@@ -668,19 +670,22 @@ func (s *AppSkillService) List(ctx context.Context, principal auth.Principal, ap
 	for _, a := range actual {
 		seenContainer[a.Name] = true
 		if exp, ok := expected[a.Name]; ok {
-			// app_skills 有 × 容器有 → active（manager 管理，正常运行中）
-			out = append(out, managerEntry(exp, "active", protectedSet[a.Name]))
+			// app_skills 有 × 容器有 → active（manager 管理，正常运行中）。
+			// 容器侧 SKILL.md 的 description 一并带上（market 来源的富描述由前端详情按需另取）。
+			e := managerEntry(exp, "active", protectedSet[a.Name])
+			e.Description = a.Description
+			out = append(out, e)
 		} else if a.Builtin {
 			// app_skills 无 × 容器有 + 镜像内置 → builtin（镜像预装，不可卸载）
-			out = append(out, AppSkillResult{Name: a.Name, Status: "builtin", Category: "hermes-builtin"})
+			out = append(out, AppSkillResult{Name: a.Name, Status: "builtin", Category: "hermes-builtin", Description: a.Description})
 		} else if a.Managed {
 			// app_skills 无 × 容器有 + 含 .oc-managed 标记 → 运行时强制 render 的系统 skill
 			// （如 oc-kb：每次渲染由 render_skills 自动生成，用户既没在市场安装、也无法持久卸载）。
 			// 归 builtin、不可卸载，与用户在容器内手动自建的 self_created 区分开。
-			out = append(out, AppSkillResult{Name: a.Name, Status: "builtin", Category: "hermes-system"})
+			out = append(out, AppSkillResult{Name: a.Name, Status: "builtin", Category: "hermes-system", Description: a.Description})
 		} else {
 			// app_skills 无 × 容器有 + 非内置 + 无 .oc-managed → self_created（用户在容器内自建）
-			out = append(out, AppSkillResult{Name: a.Name, Status: "self_created", Category: "hermes-self-created"})
+			out = append(out, AppSkillResult{Name: a.Name, Status: "self_created", Category: "hermes-self-created", Description: a.Description})
 		}
 	}
 

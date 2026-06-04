@@ -1062,6 +1062,10 @@ components:
       properties:
         category:
           type: string
+        description:
+          description: Description 是 skill 介绍（取自容器 SKILL.md frontmatter），主要供内置/自创
+            skill 详情展示。
+          type: string
         latest_version:
           description: Latest 非空时表示有更新版本（大于 Version），前端可展示更新提示。
           type: string
@@ -7224,7 +7228,7 @@ paths:
       summary: 浏览/搜索 skill 市场
       tags:
       - skill-market
-  /skill-market/versions:
+  /skill-market/detail:
     get:
       parameters:
       - description: 来源：platform | clawhub
@@ -7244,10 +7248,7 @@ paths:
           content:
             application/json:
               schema:
-                additionalProperties:
-                  items:
-                    type: string
-                  type: array
+                additionalProperties: {}
                 type: object
           description: OK
         "400":
@@ -7264,7 +7265,7 @@ paths:
           description: Internal Server Error
       security:
       - BearerAuth: []
-      summary: 查询某 skill 的版本列表
+      summary: 查询某 skill 的详情与版本列表
       tags:
       - skill-market
   /usage/members/{userId}:

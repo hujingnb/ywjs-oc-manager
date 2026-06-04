@@ -79,18 +79,49 @@ export function useSkillMarketQuery(params: Ref<{ source?: string; q?: string }>
   })
 }
 
-// useSkillVersionsQuery 查询某 skill（source+ref）的历史版本列表，供详情抽屉展示。
-// 仅当 source 与 ref 都存在时才发请求（builtin/self_created 无来源标识，不查版本）。
-export function useSkillVersionsQuery(params: Ref<{ source?: string; ref?: string }>) {
-  return useQuery<string[]>({
-    queryKey: computed(() => ['skills', 'versions', params.value.source ?? '', params.value.ref ?? '']),
+// SkillDetailInfo 是 skill 富详情（clawhub 字段最全，platform 只有名称/描述/版本）。
+export interface SkillDetailInfo {
+  name?: string
+  source?: string
+  source_ref?: string
+  description?: string
+  version?: string
+  downloads?: number
+  stars?: number
+  installs?: number
+  comments?: number
+  license?: string
+  keywords?: string[]
+  created_at?: string
+  updated_at?: string
+  author_name?: string
+  author_handle?: string
+  author_avatar?: string
+}
+// SkillVersionInfo 是详情页版本列表单项（含更新说明与发布时间）。
+export interface SkillVersionInfo {
+  version: string
+  changelog?: string
+  published_at?: number
+}
+// SkillDetailResponse 是详情端点的响应：富详情 + 版本列表。
+export interface SkillDetailResponse {
+  detail: SkillDetailInfo
+  versions: SkillVersionInfo[]
+}
+
+// useSkillDetailQuery 查询某 skill（source+ref）的富详情 + 版本列表，供详情抽屉展示。
+// 仅当 source 与 ref 都存在时才发请求（builtin/self_created 无来源标识，详情用容器侧 description）。
+export function useSkillDetailQuery(params: Ref<{ source?: string; ref?: string }>) {
+  return useQuery<SkillDetailResponse>({
+    queryKey: computed(() => ['skills', 'detail', params.value.source ?? '', params.value.ref ?? '']),
     enabled: () => Boolean(params.value.source && params.value.ref),
     queryFn: async () => {
-      // GET /api/v1/skill-market/versions?source=&ref= 返回 { versions: string[] }。
-      const resp = await apiRequest<{ versions: string[] }>('/api/v1/skill-market/versions', {
+      // GET /api/v1/skill-market/detail?source=&ref= 返回 { detail, versions }。
+      const resp = await apiRequest<SkillDetailResponse>('/api/v1/skill-market/detail', {
         query: { source: params.value.source, ref: params.value.ref },
       })
-      return resp.versions ?? []
+      return resp ?? { detail: {}, versions: [] }
     },
   })
 }
