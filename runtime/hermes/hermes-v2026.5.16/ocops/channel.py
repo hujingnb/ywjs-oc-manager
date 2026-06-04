@@ -18,6 +18,13 @@ from ocops.errors import OpsError
 # (strings.HasPrefix(line, "https://liteapp.weixin.qq.com/")) 保持一致。
 _WEIXIN_QR_PREFIX = "https://liteapp.weixin.qq.com/"
 
+# hermes 在账号目录里除账号本体 <id>.json 外，还会为同一账号写 sidecar 文件
+# （context-tokens 令牌缓存、sync 长轮询游标，见 hermes weixin.py：
+# <id>.context-tokens.json / <id>.sync.json）。它们与账号同前缀但不是账号本体，
+# 枚举账号时必须排除——否则 sorted(iterdir())[0] 会把 ".context-tokens" 误当
+# account_id（账号 id 自身含点号，无法靠分割点号区分），导致绑定身份显示错误。
+_WEIXIN_ACCOUNT_SIDECAR_SUFFIXES = (".context-tokens.json", ".sync.json")
+
 
 def channel_status(channel: str, data_root: Path) -> dict:
     """查询渠道绑定态；当前仅支持 weixin，未知 channel 抛 BAD_REQUEST。
@@ -35,10 +42,14 @@ def channel_status(channel: str, data_root: Path) -> dict:
         # 目录不存在：从未绑定或已解绑。
         return {"channel": "weixin", "bound": False}
     for entry in sorted(accounts_dir.iterdir()):
-        if entry.is_file() and entry.suffix == ".json":
-            # 当前只支持单账号绑定，遇到第一个账号文件即返回。
-            return {"channel": "weixin", "bound": True,
-                    "account_id": entry.name[: -len(".json")]}
+        if not (entry.is_file() and entry.suffix == ".json"):
+            continue
+        # 跳过账号 sidecar 文件（context-tokens / sync），只认账号本体 <id>.json。
+        if entry.name.endswith(_WEIXIN_ACCOUNT_SIDECAR_SUFFIXES):
+            continue
+        # 当前只支持单账号绑定，遇到第一个真正的账号文件即返回。
+        return {"channel": "weixin", "bound": True,
+                "account_id": entry.name[: -len(".json")]}
     # 目录存在但无账号文件：视为未绑定。
     return {"channel": "weixin", "bound": False}
 
