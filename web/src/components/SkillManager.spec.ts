@@ -581,6 +581,62 @@ describe('SkillManager', () => {
     expect(mocks.dialogWarning).toHaveBeenCalledTimes(1)
   })
 
+  // ======== 已安装：来源筛选 + 数量统计 ========
+
+  it('多来源时展示来源筛选 tag 且各带数量统计（全部为总数）', () => {
+    // 覆盖：列表含 platform/clawhub/builtin 三类来源时，筛选工具栏展示「全部/平台库/ClawHub/内置」
+    // 四个 tag，每个 tag 文案带该来源数量，「全部」为总数 3。
+    appSkillsState.data.value = [
+      { name: 'p1', status: 'active', source: 'platform', version: '1.0.0' },
+      { name: 'p2', status: 'active', source: 'platform', version: '1.0.0' },
+      { name: 'c1', status: 'active', source: 'clawhub', version: '1.0.0' },
+      { name: 'b1', status: 'builtin', source: undefined, version: '内置' },
+    ]
+    const wrapper = mountManager()
+    const toolbar = wrapper.find('.installed-toolbar')
+    expect(toolbar.exists()).toBe(true)
+    const text = toolbar.text()
+    // 「全部」为总数 4，平台库 2、ClawHub 1、内置 1；自创无数据不展示。
+    expect(text).toContain('全部 (4)')
+    expect(text).toContain('平台库 (2)')
+    expect(text).toContain('ClawHub (1)')
+    expect(text).toContain('内置 (1)')
+    expect(text).not.toContain('自创')
+  })
+
+  it('点击来源筛选 tag 只展示该来源的已安装 skill', async () => {
+    // 覆盖：选中「ClawHub」后表格只剩 clawhub 来源的行，platform 行被过滤掉。
+    appSkillsState.data.value = [
+      { name: 'p-skill', status: 'active', source: 'platform', version: '1.0.0' },
+      { name: 'c-skill', status: 'active', source: 'clawhub', version: '1.0.0' },
+    ]
+    const wrapper = mountManager()
+    // 初始「全部」：两行都在。
+    expect(wrapper.findAll('.cell-name').length).toBe(2)
+    // 点击「ClawHub」筛选项。
+    const clawTag = wrapper
+      .findAll('.installed-toolbar .n-tag')
+      .find((t) => t.text().includes('ClawHub'))
+    expect(clawTag).toBeTruthy()
+    await clawTag!.trigger('click')
+    await nextTick()
+    // 仅剩 clawhub 来源的一行。
+    const nameCells = wrapper.findAll('.cell-name')
+    expect(nameCells.length).toBe(1)
+    expect(nameCells[0].text()).toContain('c-skill')
+  })
+
+  it('仅单一来源时不展示筛选工具栏、改显示总数统计行', () => {
+    // 边界：全部 skill 同属一种来源（builtin）时筛选无意义，工具栏隐藏，改为一行「共 N 个技能」。
+    appSkillsState.data.value = [
+      { name: 'b1', status: 'builtin', source: undefined, version: '内置' },
+      { name: 'b2', status: 'builtin', source: undefined, version: '内置' },
+    ]
+    const wrapper = mountManager()
+    expect(wrapper.find('.installed-toolbar').exists()).toBe(false)
+    expect(wrapper.find('.installed-count').text()).toContain('共 2 个技能')
+  })
+
   // ======== 已安装：已安装列表首列标题 ========
 
   it('已安装列表首列标题为「名称」', () => {

@@ -13,14 +13,34 @@
         <p v-else-if="appSkillsQuery.error.value" class="state-text danger">
           查询失败：{{ appSkillsQuery.error.value?.message }}
         </p>
-        <n-data-table
-          v-else
-          :columns="installedColumns"
-          :data="appSkillsQuery.data.value ?? []"
-          size="small"
-          :bordered="false"
-          :row-key="(row: AppSkill) => row.name"
-        />
+        <template v-else>
+          <!-- 来源筛选工具栏：仅当列表存在 2 种及以上来源时展示（只有一种来源筛选无意义）。
+               筛选项动态取自当前列表实际出现的来源，避免展示没有数据的空选项；
+               每个 tag 带数量统计，「全部」即总数。 -->
+          <div v-if="installedSourceFilters.length > 2" class="installed-toolbar">
+            <n-tag
+              v-for="filter in installedSourceFilters"
+              :key="filter.value"
+              :type="selectedInstalledSource === filter.value ? 'primary' : 'default'"
+              :bordered="false"
+              checkable
+              :checked="selectedInstalledSource === filter.value"
+              class="filter-tag"
+              @click="selectedInstalledSource = filter.value"
+            >
+              {{ filter.label }} ({{ filter.count }})
+            </n-tag>
+          </div>
+          <!-- 仅一种来源（筛选工具栏隐藏）时，单独展示一行总数统计，保证数量始终可见。 -->
+          <div v-else class="installed-count state-text">共 {{ filteredAppSkills.length }} 个技能</div>
+          <n-data-table
+            :columns="installedColumns"
+            :data="filteredAppSkills"
+            size="small"
+            :bordered="false"
+            :row-key="(row: AppSkill) => row.name"
+          />
+        </template>
       </n-tab-pane>
 
       <!-- 技能市场视图：来源筛选 + 关键词搜索，卡片网格展示可安装技能。 -->
@@ -385,6 +405,69 @@ function installedSourceLabel(row: AppSkill): string {
   return sourceLabel(row.source)
 }
 
+// ===== 已安装列表来源筛选 =====
+// INSTALLED_SOURCE_DEFS 是已安装列表可能出现的来源类别（顺序即筛选项展示顺序）。
+// 比市场多「内置/自创」两类——builtin/self_created skill 无 source 标识、按 status 归类。
+// 归类口径与 installedSourceLabel / installedSourceKey 保持一致。
+const INSTALLED_SOURCE_DEFS = [
+  { label: '平台库', value: 'platform' },
+  { label: 'ClawHub', value: 'clawhub' },
+  { label: '内置', value: 'builtin' },
+  { label: '自创', value: 'self_created' },
+] as const
+
+// selectedInstalledSource 当前选中的已安装来源筛选值，空字符串表示「全部」。
+const selectedInstalledSource = ref<string>('')
+
+// installedSourceKey 把对账行归类到筛选值（与 installedSourceLabel 同口径）：
+// builtin/self_created 按 status 归类，其余按 source；无来源标识兜底为 builtin。
+function installedSourceKey(row: AppSkill): string {
+  if (row.status === 'builtin') return 'builtin'
+  if (row.status === 'self_created') return 'self_created'
+  if (row.source === 'platform') return 'platform'
+  if (row.source === 'clawhub') return 'clawhub'
+  return 'builtin'
+}
+
+// installedSourceFilters 动态来源筛选项——「全部」+ 当前列表实际出现的来源类别，
+// 每项带 count 数量统计（「全部」为总数）。避免展示没有数据的空筛选项
+// （如实例无 clawhub skill 时不显示「ClawHub」）。
+const installedSourceFilters = computed(() => {
+  const all = appSkillsQuery.data.value ?? []
+  // 统计每个来源类别的 skill 数量。
+  const counts = new Map<string, number>()
+  for (const row of all) {
+    const k = installedSourceKey(row)
+    counts.set(k, (counts.get(k) ?? 0) + 1)
+  }
+  return [
+    { label: '全部', value: '', count: all.length },
+    ...INSTALLED_SOURCE_DEFS.filter((f) => counts.has(f.value)).map((f) => ({
+      label: f.label,
+      value: f.value,
+      count: counts.get(f.value) ?? 0,
+    })),
+  ]
+})
+
+// filteredAppSkills 按选中来源筛选已安装列表（「全部」时原样返回）。
+const filteredAppSkills = computed<AppSkill[]>(() => {
+  const all = appSkillsQuery.data.value ?? []
+  if (!selectedInstalledSource.value) return all
+  return all.filter((row) => installedSourceKey(row) === selectedInstalledSource.value)
+})
+
+// 列表来源类别变化（数据刷新 / 卸载后）导致已选筛选项消失时回退「全部」，
+// 避免选中一个不再存在的来源而表格永远为空。
+watch(installedSourceFilters, (filters) => {
+  if (
+    selectedInstalledSource.value &&
+    !filters.some((f) => f.value === selectedInstalledSource.value)
+  ) {
+    selectedInstalledSource.value = ''
+  }
+})
+
 // statusTagType 将对账状态映射为 NaiveUI tag 颜色类型。
 // active→success / pending→warning / builtin/self_created→default
 function statusTagType(status: string): 'success' | 'warning' | 'default' {
@@ -655,6 +738,19 @@ const installedColumns: DataTableColumns<AppSkill> = [
   display: flex;
   gap: 8px;
   flex-wrap: wrap;
+}
+
+/* 已安装列表来源筛选工具栏：与市场筛选风格一致，底部留间距。 */
+.installed-toolbar {
+  display: flex;
+  gap: 8px;
+  flex-wrap: wrap;
+  margin-bottom: 12px;
+}
+
+/* 单一来源时的总数统计行。 */
+.installed-count {
+  margin-bottom: 12px;
 }
 
 /* filter-tag 可点击样式；NaiveUI checkable tag 已有 cursor:pointer，此处仅加间距。 */
