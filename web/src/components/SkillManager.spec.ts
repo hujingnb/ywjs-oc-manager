@@ -641,6 +641,10 @@ describe('SkillManager', () => {
     expect(drawer.text()).toContain('pskoett') // 作者
     expect(drawer.text()).toContain('完整未截断描述') // 富详情优先于卡片摘要
     expect(drawer.text()).toContain('星标') // 统计
+    // 下载量带单位（457324 → 45.7万），不显示原始数字、不显示评论。
+    expect(drawer.text()).toContain('45.7万')
+    expect(drawer.text()).not.toContain('457324')
+    expect(drawer.text()).not.toContain('评论')
   })
 
   it('builtin skill 详情展示 SKILL.md 描述、不展示版本列表（无来源标识）', async () => {
@@ -655,5 +659,7 @@ describe('SkillManager', () => {
     const drawer = wrapper.find('.n-drawer')
     expect(drawer.text()).toContain('Airtable 内置技能介绍') // 来自 SKILL.md 的描述
     expect(drawer.text()).toContain('该来源无版本信息')
+    // 内置 skill 无 source，「来源」一栏应显示「内置」而非空。
+    expect(drawer.text()).toContain('来源内置')
   })
 })

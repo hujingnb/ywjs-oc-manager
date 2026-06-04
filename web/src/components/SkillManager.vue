@@ -77,7 +77,7 @@
             <p v-if="entry.description" class="market-card-desc">{{ entry.description }}</p>
             <div class="market-card-footer">
               <span class="market-card-version">v{{ entry.version }}</span>
-              <span v-if="entry.downloads" class="market-card-downloads">↓ {{ entry.downloads }}</span>
+              <span v-if="entry.downloads" class="market-card-downloads">↓ {{ formatCount(entry.downloads) }}</span>
               <!-- 已安装提示：同名 skill 已存在时置灰且不可点击。 -->
               <template v-if="isInstalled(entry.name)">
                 <n-tag size="small" type="success" :bordered="false">已安装</n-tag>
@@ -126,12 +126,11 @@
           <p v-if="fmtDate(richDetail?.created_at)" class="skill-detail-row"><span class="skill-detail-label">创建</span>{{ fmtDate(richDetail?.created_at) }}</p>
           <p v-if="fmtDate(richDetail?.updated_at)" class="skill-detail-row"><span class="skill-detail-label">更新</span>{{ fmtDate(richDetail?.updated_at) }}</p>
 
-          <!-- 统计（clawhub） -->
-          <div v-if="richDetail && (richDetail.downloads || richDetail.stars || richDetail.installs || richDetail.comments)" class="skill-detail-stats">
-            <span v-if="richDetail.downloads">↓ {{ richDetail.downloads }} 下载</span>
-            <span v-if="richDetail.stars">★ {{ richDetail.stars }} 星标</span>
-            <span v-if="richDetail.installs">⤓ {{ richDetail.installs }} 安装</span>
-            <span v-if="richDetail.comments">💬 {{ richDetail.comments }} 评论</span>
+          <!-- 统计（clawhub）：下载/星标/安装，带单位显示。 -->
+          <div v-if="richDetail && (richDetail.downloads || richDetail.stars || richDetail.installs)" class="skill-detail-stats">
+            <span v-if="richDetail.downloads">↓ {{ formatCount(richDetail.downloads) }} 下载</span>
+            <span v-if="richDetail.stars">★ {{ formatCount(richDetail.stars) }} 星标</span>
+            <span v-if="richDetail.installs">⤓ {{ formatCount(richDetail.installs) }} 安装</span>
           </div>
 
           <!-- 关键词 -->
@@ -345,10 +344,20 @@ function onSelectSource(value: string) {
 }
 
 // sourceLabel 将来源字符串转换为用户可读标签。
+// 空来源（内置/自创 skill 无 source）显示「内置」，避免详情页「来源」一栏为空。
 function sourceLabel(source?: string): string {
   if (source === 'platform') return '平台库'
   if (source === 'clawhub') return 'ClawHub'
-  return source ?? '内置'
+  return source || '内置'
+}
+
+// formatCount 把大数字格式化为带单位的可读文案：1300000→「1.3百万」、25000→「2.5万」、
+// 小于 1 万的原样显示。去掉多余的 ".0"（如 20000→「2万」而非「2.0万」）。
+function formatCount(n?: number): string {
+  if (!n || n < 10000) return String(n ?? 0)
+  const fmt = (v: number, unit: string) => `${v.toFixed(1).replace(/\.0$/, '')}${unit}`
+  if (n >= 1_000_000) return fmt(n / 1_000_000, '百万')
+  return fmt(n / 10_000, '万')
 }
 
 // sourceTagType 将来源映射为 NaiveUI tag 颜色类型。
