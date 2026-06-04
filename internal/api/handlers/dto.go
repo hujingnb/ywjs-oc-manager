@@ -158,6 +158,18 @@ type RuntimeKnowledgeSearchRequest struct {
 	TopK int32 `json:"top_k"`
 }
 
+// CreateIndustryKnowledgeBaseRequest 是创建行业知识库请求体。
+type CreateIndustryKnowledgeBaseRequest struct {
+	// Name 是行业知识库展示名，在未删除行业库中必须唯一。
+	Name string `json:"name" binding:"required"`
+}
+
+// UpdateIndustryKnowledgeBaseRequest 是重命名行业知识库请求体。
+type UpdateIndustryKnowledgeBaseRequest struct {
+	// Name 是更新后的行业知识库展示名，在未删除行业库中必须唯一。
+	Name string `json:"name" binding:"required"`
+}
+
 // ===== 充值 recharge =====
 
 // RechargeRequest 企业充值的请求体。

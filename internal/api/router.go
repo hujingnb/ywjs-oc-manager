@@ -30,6 +30,8 @@ type Dependencies struct {
 	ChannelService *service.ChannelService
 	// KnowledgeService 提供组织和应用知识库路由。
 	KnowledgeService *service.KnowledgeService
+	// IndustryKnowledgeUploadToken 是外部商业知识库上传行业文件的固定鉴权字符串；为空时外部上传入口返回 401。
+	IndustryKnowledgeUploadToken string
 	// WorkspaceService 提供应用工作目录代理路由。
 	WorkspaceService *service.WorkspaceService
 	// UsageService 提供 new-api 用量代理路由。
@@ -95,6 +97,10 @@ func NewRouter(deps ...Dependencies) http.Handler {
 		return router
 	}
 	dep := deps[0]
+	if dep.KnowledgeService != nil {
+		industryHandler := handlers.NewIndustryKnowledgeHandler(dep.KnowledgeService, dep.IndustryKnowledgeUploadToken)
+		handlers.RegisterExternalIndustryKnowledgeRoutes(router, industryHandler)
+	}
 	if dep.TokenManager == nil {
 		// RequireUserAuth 依赖 TokenManager；无法初始化用户路由组，跳过全部业务路由。
 		return router
@@ -146,7 +152,10 @@ func NewRouter(deps ...Dependencies) http.Handler {
 		handlers.RegisterChannelRoutes(user, handlers.NewChannelsHandler(dep.ChannelService))
 	}
 	if dep.KnowledgeService != nil {
-		handlers.RegisterKnowledgeRoutes(user, handlers.NewKnowledgeHandler(dep.KnowledgeService))
+		knowledgeHandler := handlers.NewKnowledgeHandler(dep.KnowledgeService)
+		industryHandler := handlers.NewIndustryKnowledgeHandler(dep.KnowledgeService, dep.IndustryKnowledgeUploadToken)
+		handlers.RegisterKnowledgeRoutes(user, knowledgeHandler)
+		handlers.RegisterIndustryKnowledgeRoutes(user, industryHandler)
 	}
 	if dep.WorkspaceService != nil {
 		handlers.RegisterWorkspaceRoutes(user, handlers.NewWorkspaceHandler(dep.WorkspaceService))
