@@ -94,7 +94,7 @@
             </n-form-item>
           </n-grid-item>
 
-          <!-- skill 管理：从平台库选 skill 配进版本；编辑态即时生效，新建态暂不支持（需先保存版本） -->
+          <!-- skill 管理：从市场（平台库/ClawHub）选 skill 配进版本；编辑态即时生效，新建态暂不支持（需先保存版本） -->
           <n-grid-item :span="2">
             <n-form-item label="Skill 列表">
               <div style="display: grid; gap: 8px; width: 100%">
@@ -111,22 +111,16 @@
                   </span>
                   <n-button size="small" tertiary @click="onDeleteSkill(skill.name)">删除</n-button>
                 </div>
-                <!-- 编辑态才可从平台库选 skill；新建态需先保存版本才有 ID -->
+                <!-- 编辑态才可从市场选 skill；新建态需先保存版本才有 ID -->
                 <template v-if="editingId">
-                  <div style="display: flex; gap: 8px; align-items: center">
-                    <n-select
-                      v-model:value="selectedSkillKey"
-                      :loading="platformSkillsQuery.isLoading.value"
-                      :disabled="platformSkillsQuery.isError.value"
-                      :options="platformSkillOptions"
-                      placeholder="选择平台库 skill"
-                      style="flex: 1"
-                    />
-                    <n-button size="small" :loading="skillAdding" :disabled="!selectedSkillKey" @click="onAddSkill">
-                      添加
-                    </n-button>
-                  </div>
-                  <p v-if="platformSkillsQuery.isError.value" class="state-text danger">平台库列表获取失败，请重试</p>
+                  <skill-market-browser
+                    action-label="添加"
+                    existing-label="已添加"
+                    :allow-version-pick="true"
+                    :action-pending="skillAdding"
+                    :existing-names="editingSkillNames"
+                    @action="onAddFromMarket"
+                  />
                 </template>
                 <p v-else class="state-text">保存版本后可配置 skill</p>
                 <p v-if="skillFeedback" class="state-text" :class="{ danger: skillFeedbackError }">{{ skillFeedback }}</p>
@@ -165,6 +159,7 @@ import { NButton, NCard, NForm, NFormItem, NGrid, NGridItem, NInput, NSelect, NS
 
 import DataTableList from '@/components/DataTableList.vue'
 import ConfirmActionModal from '@/components/ConfirmActionModal.vue'
+import SkillMarketBrowser from '@/components/SkillMarketBrowser.vue'
 import { actionColumn } from '@/components/columns'
 import { useModelsQuery } from '@/api/hooks/useOrganizations'
 import {
@@ -181,7 +176,6 @@ import {
   type AssistantVersionFormPayload,
   type AssistantVersionSkillDTO,
 } from '@/api/hooks/useAssistantVersions'
-import { usePlatformSkillsQuery } from '@/api/hooks/useSkills'
 
 // AssistantVersionsPage 是平台管理员的助手版本目录管理页：列表 + 新建/编辑 + 删除。
 const { data: versions, isLoading, error } = useAssistantVersionsQuery()
@@ -194,39 +188,27 @@ const deleteMutation = useDeleteAssistantVersion()
 const addSkillMutation = useAddVersionSkill()
 const deleteSkillMutation = useDeleteAssistantVersionSkill()
 const editingSkills = ref<AssistantVersionSkillDTO[]>([])
-// selectedSkillKey 是「从库选」n-select 当前选中值，格式为 "<name>|<version>"。
-const selectedSkillKey = ref<string | null>(null)
 const skillAdding = ref(false)
 const skillFeedback = ref('')
 const skillFeedbackError = ref(false)
 
-// 平台库 skill 列表查询，供 n-select 下拉选项使用。
-// 仅在表单打开且处于编辑态时有意义；查询结果按 name+version 组合展示。
-const platformSkillsQuery = usePlatformSkillsQuery()
-const platformSkillOptions = computed(() =>
-  (platformSkillsQuery.data.value ?? []).map(s => ({
-    // value 用 "<name>|<version>" 组合键，解析时以首个 "|" 分隔，支持 name 中不含 "|" 的场景。
-    value: `${s.name}|${s.version}`,
-    label: `${s.name}  v${s.version}`,
-  })),
-)
+// editingSkillNames 是当前编辑版本已配 skill 名集合，传给市场浏览器做去重（已配则不可再加）。
+const editingSkillNames = computed(() => new Set(editingSkills.value.map((s) => s.name)))
 
-// onAddSkill 从平台库选择后调用添加接口，成功后刷新编辑态 skill 列表。
-async function onAddSkill() {
-  if (!editingId.value || !selectedSkillKey.value) return
+// onAddFromMarket 接收市场浏览器的添加动作，调后端 AddSkillFromLibrary，成功后刷新本地 skill 列表。
+async function onAddFromMarket(p: { source: string; source_ref: string; name: string; version: string }) {
+  if (!editingId.value) return
   skillFeedback.value = ''
   skillFeedbackError.value = false
   skillAdding.value = true
   try {
-    const [name, version] = selectedSkillKey.value.split('|')
     const updated = await addSkillMutation.mutateAsync({
       id: editingId.value,
-      input: { source: 'platform', source_ref: name, version },
+      input: { source: p.source, source_ref: p.source_ref, name: p.name, version: p.version },
     })
     // 后端返回更新后的完整版本，取其 skills 字段刷新本地状态。
     editingSkills.value = updated.skills ?? []
-    selectedSkillKey.value = null
-    skillFeedback.value = `已添加 skill ${name} v${version}`
+    skillFeedback.value = `已添加 skill ${p.name} v${p.version}`
   } catch (err) {
     skillFeedbackError.value = true
     skillFeedback.value = err instanceof Error ? err.message : '添加失败'
@@ -297,7 +279,6 @@ function openCreate() {
   submitError.value = null
   actionFeedback.value = ''
   editingSkills.value = []
-  selectedSkillKey.value = null
   skillFeedback.value = ''
   skillFeedbackError.value = false
   formVisible.value = true
@@ -316,7 +297,6 @@ function openEdit(version: AssistantVersionDTO) {
   submitError.value = null
   actionFeedback.value = ''
   editingSkills.value = [...version.skills]
-  selectedSkillKey.value = null
   skillFeedback.value = ''
   skillFeedbackError.value = false
   formVisible.value = true
@@ -356,7 +336,7 @@ async function submit() {
     const created = await createMutation.mutateAsync(buildPayload())
     editingId.value = created.id
     editingSkills.value = created.skills ?? []
-    skillFeedback.value = '版本已创建，可在下方从平台库选择 skill'
+    skillFeedback.value = '版本已创建，可在下方从市场选择 skill'
     formVisible.value = false
   } catch (err) {
     submitError.value = err instanceof Error ? err.message : '保存失败'

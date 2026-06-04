@@ -145,13 +145,15 @@ export function useDeleteAssistantVersion() {
   })
 }
 
-// AddVersionSkillInput 是「从平台库选」添加 skill 的请求体，对应后端 handlers.AddSkillFromLibraryRequest。
+// AddVersionSkillInput 是从市场（平台库/ClawHub）选 skill 的请求体，对应后端 handlers.AddSkillFromLibraryRequest。
 export interface AddVersionSkillInput {
-  // source 是 skill 来源类型，当前仅支持 "platform"。
+  // source 是 skill 来源类型，支持 "platform" 与 "clawhub"。
   source: string
-  // source_ref 是来源内精准标识；platform 来源时等于平台库 skill name。
+  // source_ref 是来源内精准标识；platform=skill name，clawhub=slug。
   source_ref: string
-  // version 是要配进版本的 skill 版本号，必须与平台库中已发布的版本对应。
+  // name 是 skill 在版本内的目录名；clawhub 必填（displayName），platform 可省略。
+  name?: string
+  // version 是要配进版本的 skill 版本号。
   version: string
 }
 
