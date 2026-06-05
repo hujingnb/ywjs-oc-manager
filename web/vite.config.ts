@@ -5,7 +5,16 @@ import vue from '@vitejs/plugin-vue'
 import { defineConfig } from 'vite'
 
 export default defineConfig({
-  plugins: [vue()],
+  plugins: [
+    vue({
+      template: {
+        compilerOptions: {
+          // 告诉编译器 altcha-* 是自定义元素，避免被当未知 Vue 组件报警。
+          isCustomElement: (tag) => tag.startsWith('altcha-'),
+        },
+      },
+    }),
+  ],
   resolve: {
     alias: {
       '@': fileURLToPath(new URL('./src', import.meta.url)),

@@ -1,5 +1,6 @@
 import { createApp } from 'vue'
 import { createPinia } from 'pinia'
+import 'altcha'
 
 import { router } from '@/app/router'
 import { queryClient, VueQueryPlugin } from '@/app/query-client'
