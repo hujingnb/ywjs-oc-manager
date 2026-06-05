@@ -8,6 +8,8 @@ import (
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
+
+	"oc-manager/internal/integrations/storage"
 )
 
 // archiveCacheCounter 包一个回源计数器，便于断言「命中时不回源」。
@@ -80,7 +82,8 @@ func (b *nilReturningBlob) PutLibrarySkill(source, ref, version, ext string, dat
 	if b.put == nil {
 		b.put = map[string][]byte{}
 	}
-	rel := "library/" + source + "/" + ref + "/" + version + "." + ext
+	// 使用 storage.LibrarySkillKey 而非手拼字符串，确保与生产键格式保持一致。
+	rel := storage.LibrarySkillKey(source, ref, version, ext)
 	b.put[rel] = data
 	return rel, nil
 }
@@ -102,4 +105,28 @@ func TestSkillArchiveCache_NilReadCloser_NoPanic(t *testing.T) {
 	// (nil, nil) 被当作未命中 → 回源一次并写回。
 	assert.Equal(t, 1, up.calls)
 	assert.Equal(t, []byte("ZIP"), blobs.put["library/clawhub/weather/1.0.zip"])
+}
+
+// putFailingBlob 是一个写回必失败、读永远未命中的 LibraryBlobStore 替身，
+// 用于验证 Fetch 在写缓存失败时仍以「回源到的字节 + 确定性 key」非致命返回。
+type putFailingBlob struct{}
+
+func (putFailingBlob) PutLibrarySkill(_, _, _, _ string, _ []byte) (string, error) {
+	return "", errors.New("写对象存储失败")
+}
+func (putFailingBlob) DeleteLibrarySkill(string) error { return nil }
+func (putFailingBlob) OpenLibrarySkill(string) (io.ReadCloser, error) {
+	return nil, errors.New("blob not found")
+}
+
+// TestSkillArchiveCache_WriteFailure_NonFatal 写回缓存失败时不致命：仍返回回源字节与确定性 key、err 为 nil。
+func TestSkillArchiveCache_WriteFailure_NonFatal(t *testing.T) {
+	cache := NewSkillArchiveCache(putFailingBlob{})
+	up := &archiveCacheCounter{data: []byte("ZIP")}
+
+	data, rel, err := cache.Fetch(context.Background(), "clawhub", "weather", "1.0", "zip", up.fetch)
+	require.NoError(t, err)                                  // 写失败不致命
+	assert.Equal(t, []byte("ZIP"), data)                    // 仍返回回源字节
+	assert.Equal(t, "library/clawhub/weather/1.0.zip", rel) // 确定性 key
+	assert.Equal(t, 1, up.calls)                            // 回源一次
 }
