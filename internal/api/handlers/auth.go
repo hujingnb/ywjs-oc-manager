@@ -27,20 +27,25 @@ type AuthService interface {
 // AuthHandler 承载认证相关 HTTP 路由。
 type AuthHandler struct {
 	service AuthService
+	// captcha 为出题器；nil 表示验证码关闭，出题接口返回 204。
+	// 用具体类型而非接口，规避 Go typed-nil 接口陷阱（nil 指针装箱成非 nil 接口）。
+	captcha *service.CaptchaService
 }
 
-// NewAuthHandler 创建认证 handler。
-func NewAuthHandler(service AuthService) *AuthHandler {
-	return &AuthHandler{service: service}
+// NewAuthHandler 创建认证 handler。captcha 为 nil 时出题接口返回 204、登录不校验验证码。
+func NewAuthHandler(svc AuthService, captcha *service.CaptchaService) *AuthHandler {
+	return &AuthHandler{service: svc, captcha: captcha}
 }
 
 // RegisterPublicAuthRoutes 注册无需 Bearer token 的认证路由（public 分组）。
 // login/refresh/logout 均使用请求体携带凭证，不依赖 access token。
+// altcha-challenge 用于登录前向前端下发 PoW 挑战，同样不需要鉴权。
 func RegisterPublicAuthRoutes(router gin.IRouter, handler *AuthHandler) {
 	group := router.Group("/api/v1/auth")
 	group.POST("/login", handler.Login)
 	group.POST("/refresh", handler.Refresh)
 	group.POST("/logout", handler.Logout)
+	group.GET("/altcha-challenge", handler.AltchaChallenge)
 }
 
 // RegisterAuthMeRoutes 注册需要认证的 auth 路由（user 分组，已受 RequireUserAuth 保护）。
@@ -73,6 +78,7 @@ func (h *AuthHandler) Login(c *gin.Context) {
 		OrgCode:  req.OrgCode,
 		Username: req.Username,
 		Password: req.Password,
+		Captcha:  req.Captcha,
 	})
 	if err != nil {
 		writeAuthError(c, err)
@@ -220,7 +226,36 @@ func writeAuthError(c *gin.Context, err error) {
 		c.JSON(http.StatusForbidden, apierror.New(code, redactlog.SafeErrorMessage(err)))
 	case errors.Is(err, service.ErrMemberCreateInvalid):
 		c.JSON(http.StatusBadRequest, apierror.New("MEMBER_INVALID", validationServiceMessage(err, service.ErrMemberCreateInvalid)))
+	case errors.Is(err, service.ErrCaptchaRequired):
+		c.JSON(http.StatusBadRequest, apierror.New("CAPTCHA_REQUIRED", "请先完成人机验证"))
+	case errors.Is(err, service.ErrCaptchaInvalid):
+		c.JSON(http.StatusBadRequest, apierror.New("CAPTCHA_INVALID", "人机验证已失效，请重试"))
+	case errors.Is(err, service.ErrCaptchaReplayed):
+		c.JSON(http.StatusBadRequest, apierror.New("CAPTCHA_REPLAYED", "人机验证已失效，请重试"))
 	default:
 		c.JSON(http.StatusInternalServerError, apierror.New("INTERNAL", "认证服务暂时不可用"))
 	}
+}
+
+// AltchaChallenge 下发一道 Altcha 挑战；验证码关闭时返回 204。
+//
+// @Summary      Altcha 挑战
+// @Description  返回登录页验证码挑战；验证码未启用时返回 204
+// @Tags         auth
+// @Produce      json
+// @Success      200  {object}  map[string]interface{}  "Altcha 挑战 JSON"
+// @Success      204  "验证码未启用"
+// @Failure      500  {object}  ErrorResponse
+// @Router       /auth/altcha-challenge [get]
+func (h *AuthHandler) AltchaChallenge(c *gin.Context) {
+	if h.captcha == nil {
+		c.Status(http.StatusNoContent)
+		return
+	}
+	challenge, err := h.captcha.Challenge()
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, apierror.New("CAPTCHA_CHALLENGE_FAILED", "生成人机验证失败"))
+		return
+	}
+	c.JSON(http.StatusOK, challenge)
 }

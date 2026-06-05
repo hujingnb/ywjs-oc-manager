@@ -24,6 +24,9 @@ type LoginRequest struct {
 	Username string `json:"username" binding:"required"`
 	// Password 是明文登录密码，仅用于本次校验，handler 不写日志。
 	Password string `json:"password" binding:"required"`
+	// Captcha 是 Altcha payload（base64）；验证码开启时必填，是否必填由后端按
+	// captcha.enabled 在 service 层判断，故此处不加 binding:"required"。
+	Captcha string `json:"captcha"`
 }
 
 // RefreshRequest 续期 access token 的请求体。

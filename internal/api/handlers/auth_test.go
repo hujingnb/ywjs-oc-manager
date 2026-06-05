@@ -1,4 +1,4 @@
-// Package handlers 的 auth_test 覆盖登录、刷新令牌和当前用户接口的 handler 行为。
+// Package handlers 的 auth_test 覆盖登录、刷新令牌、当前用户接口和 Altcha 出题接口的 handler 行为。
 package handlers
 
 import (
@@ -9,11 +9,14 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"testing"
+	"time"
 
 	"github.com/gin-gonic/gin"
 
+	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 	"oc-manager/internal/auth"
+	"oc-manager/internal/auth/pow"
 	"oc-manager/internal/service"
 )
 
@@ -152,10 +155,42 @@ func newAuthTestRouter(t *testing.T, svc *authServiceStub) *gin.Engine {
 	t.Helper()
 	gin.SetMode(gin.ReleaseMode)
 	router := gin.New()
-	handler := NewAuthHandler(svc)
+	// captcha=nil 表示验证码关闭，已有测试路径不涉及验证码逻辑。
+	handler := NewAuthHandler(svc, nil)
 	RegisterPublicAuthRoutes(router, handler)
 	RegisterAuthMeRoutes(router, handler)
 	return router
+}
+
+// 验证码关闭（captcha=nil）时出题接口返回 204。
+func TestAltchaChallengeDisabledReturns204(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	h := NewAuthHandler(nil, nil) // service 在本路由用不到，captcha=nil
+	r := gin.New()
+	r.GET("/api/v1/auth/altcha-challenge", h.AltchaChallenge)
+
+	w := httptest.NewRecorder()
+	req := httptest.NewRequest(http.MethodGet, "/api/v1/auth/altcha-challenge", nil)
+	r.ServeHTTP(w, req)
+
+	assert.Equal(t, http.StatusNoContent, w.Code)
+}
+
+// 验证码开启时出题接口返回 200 且响应体含 challenge/signature 字段。
+func TestAltchaChallengeEnabledReturnsChallenge(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	captcha := service.NewCaptchaService(pow.NewVerifier("test-secret", 1000, time.Minute), nil)
+	h := NewAuthHandler(nil, captcha)
+	r := gin.New()
+	r.GET("/api/v1/auth/altcha-challenge", h.AltchaChallenge)
+
+	w := httptest.NewRecorder()
+	req := httptest.NewRequest(http.MethodGet, "/api/v1/auth/altcha-challenge", nil)
+	r.ServeHTTP(w, req)
+
+	require.Equal(t, http.StatusOK, w.Code)
+	assert.Contains(t, w.Body.String(), "challenge")
+	assert.Contains(t, w.Body.String(), "signature")
 }
 
 type authServiceStub struct {

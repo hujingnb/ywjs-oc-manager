@@ -16,6 +16,8 @@ import (
 type Dependencies struct {
 	// AuthService 提供登录、刷新、登出和当前用户查询。
 	AuthService *service.AuthService
+	// Captcha 是登录 PoW 验证码服务；nil 表示验证码关闭。
+	Captcha *service.CaptchaService
 	// OrganizationService 提供平台组织管理路由。
 	OrganizationService *service.OrganizationService
 	// ModelCatalogService 提供 new-api 实时模型列表路由。
@@ -120,7 +122,7 @@ func NewRouter(deps ...Dependencies) http.Handler {
 	user.Use(middleware.RequireUserAuth(dep.TokenManager))
 
 	if dep.AuthService != nil {
-		authHandler := handlers.NewAuthHandler(dep.AuthService)
+		authHandler := handlers.NewAuthHandler(dep.AuthService, dep.Captcha)
 		// login/refresh/logout 不需要 Bearer token，注册到外层 router（public）。
 		handlers.RegisterPublicAuthRoutes(router, authHandler)
 		// /auth/me 需要已认证 principal，注册到 user 组。
