@@ -46,7 +46,8 @@ func (v *Verifier) CreateChallenge() (altcha.Challenge, error) {
 // 成功返回该题 signature（一次性消费 key 的来源）；任何失败返回 ErrInvalidSolution。
 // signature 自行从 payload 解析，避免依赖 altcha 内部 payload 表示。
 func (v *Verifier) Verify(payloadB64 string) (string, error) {
-	ok, err := altcha.VerifySolution(payloadB64, v.hmacKey, true)
+	// 用 Safe 变体：对 challenge/signature 做常量时间比较，登录路径上更稳妥（零成本）。
+	ok, err := altcha.VerifySolutionSafe(payloadB64, v.hmacKey, true)
 	if err != nil || !ok {
 		return "", ErrInvalidSolution
 	}

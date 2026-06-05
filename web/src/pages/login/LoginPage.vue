@@ -83,6 +83,7 @@
         challengeurl="/api/v1/auth/altcha-challenge"
         auto="onload"
         hidefooter
+        hidelogo
         @statechange="onCaptchaState"
       />
       <p v-if="!captchaVerified" class="login-captcha-hint">🔄 人机校验中…</p>
