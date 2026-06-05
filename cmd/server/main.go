@@ -33,6 +33,7 @@ import (
 	"oc-manager/internal/api/middleware"
 	"oc-manager/internal/audit"
 	"oc-manager/internal/auth"
+	"oc-manager/internal/auth/pow"
 	"oc-manager/internal/config"
 	"oc-manager/internal/domain"
 	"oc-manager/internal/integrations/channel"
@@ -133,7 +134,6 @@ func runManager(ctx context.Context, cfg config.Config, logOut io.Writer) error 
 		return fmt.Errorf("初始化认证令牌管理器失败: %w", err)
 	}
 
-	authService := service.NewAuthService(dbStore.Queries, tokenManager)
 	memberService := service.NewMemberService(dbStore.Queries, hashPasswordWithDefault)
 	// k8s 模型下不再需要选节点，pod 落点由调度器决定；直接构造 onboarding 服务。
 	onboardingService := service.NewMemberOnboardingService(store.NewOnboardingRunner(dbStore), hashPasswordWithDefault)
@@ -171,6 +171,23 @@ func runManager(ctx context.Context, cfg config.Config, logOut io.Writer) error 
 	})
 	defer imagecoordRedis.Close()
 	distLocker := redis.NewRedisDistLocker(imagecoordRedis)
+
+	// 验证码（登录 PoW）装配：仅 cfg.Captcha.Enabled 时构造，复用 imagecoordRedis
+	// 这个已存在的 go-redis 客户端做一次性消费。
+	var captchaService *service.CaptchaService
+	if cfg.Captcha.Enabled {
+		powVerifier := pow.NewVerifier(cfg.Captcha.HMACSecret, cfg.Captcha.Difficulty, cfg.Captcha.TTL.Duration)
+		replayGuard := pow.NewRedisReplayGuard(imagecoordRedis, cfg.Redis.KeyPrefix)
+		captchaService = service.NewCaptchaService(powVerifier, replayGuard)
+	}
+	// 注意 Go typed-nil 接口陷阱：把具体 *CaptchaService(可能为 nil) 直接赋给
+	// CaptchaVerifier 接口，会得到非 nil 接口，导致 AuthService.captcha != nil 误判 panic。
+	// 故关闭时显式保持 nil 接口。
+	var captchaVerifier service.CaptchaVerifier
+	if captchaService != nil {
+		captchaVerifier = captchaService
+	}
+	authService := service.NewAuthService(dbStore.Queries, tokenManager, captchaVerifier)
 
 	// k8s 编排器：启用 k8s 时构造 client-go clientset + KubernetesAdapter，取代 docker 编排。
 	// 未启用时 orch 为 nil，生命周期/init handler 已做 nil 守卫（降级：无法管理 app，仅最小运行）。
@@ -511,6 +528,7 @@ func runManager(ctx context.Context, cfg config.Config, logOut io.Writer) error 
 		Addr: cfg.App.HTTPAddr,
 		Handler: api.NewRouter(api.Dependencies{
 			AuthService:                  authService,
+			Captcha:                      captchaService,
 			OrganizationService:          organizationService,
 			ModelCatalogService:          modelCatalogService,
 			MemberService:                memberService,
