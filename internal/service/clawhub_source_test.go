@@ -3,6 +3,7 @@ package service
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"sync"
 	"testing"
 	"time"
@@ -110,7 +111,7 @@ func TestClawHubSource_SearchCaches(t *testing.T) {
 		NextCursor: "n1",
 	}}
 	rdb := newFakeRedis()
-	src := NewClawHubSource(api, rdb, time.Minute)
+	src := NewClawHubSource(api, rdb, time.Minute, NewSkillArchiveCache(&fakeLibraryBlob{}))
 
 	// 第一次搜索：缓存未命中，应回源 API，api.calls 从 0 变为 1。
 	p1, err := src.Search(context.Background(), auth.Principal{}, "weather", "")
@@ -145,7 +146,7 @@ func TestClawHubSource_DifferentQueryNotSharedCache(t *testing.T) {
 		Skills: []clawhub.Skill{{Slug: "s", Name: "s", Version: "1.0"}},
 	}}
 	rdb := newFakeRedis()
-	src := NewClawHubSource(api, rdb, time.Minute)
+	src := NewClawHubSource(api, rdb, time.Minute, NewSkillArchiveCache(&fakeLibraryBlob{}))
 
 	// q="foo" 第一次，缓存未命中，回源。
 	_, err := src.Search(context.Background(), auth.Principal{}, "foo", "")
@@ -165,15 +166,50 @@ func TestClawHubSource_DifferentQueryNotSharedCache(t *testing.T) {
 	assert.Equal(t, 2, api.calls, "q=foo 第二次应命中缓存，总 api 调用次数不变")
 }
 
-// TestClawHubSource_Download 验证公共来源下载：回源 ClawHub 取归档字节，ext=zip。
-func TestClawHubSource_Download(t *testing.T) {
-	// 预设 fake API 的下载归档字节。
+// TestClawHubSource_Download_MissWritesCache 未命中：回源下载、写回缓存、返回 zip 字节。
+func TestClawHubSource_Download_MissWritesCache(t *testing.T) {
 	api := &fakeClawHubAPI{archive: []byte("ZIP-ARCHIVE-BYTES")}
-	src := NewClawHubSource(api, newFakeRedis(), time.Minute)
+	blobs := &fakeLibraryBlob{}
+	src := NewClawHubSource(api, newFakeRedis(), time.Minute, NewSkillArchiveCache(blobs))
 
 	got, ext, err := src.Download(context.Background(), "self-improving-agent", "3.0.21")
 	require.NoError(t, err)
 	assert.Equal(t, []byte("ZIP-ARCHIVE-BYTES"), got)
-	// ClawHub 归档格式为 zip。
+	// ClawHub 归档格式固定 zip。
 	assert.Equal(t, "zip", ext)
+	// 已写回缓存：key = library/clawhub/<slug>/<version>.zip。
+	assert.Equal(t, []byte("ZIP-ARCHIVE-BYTES"), blobs.stored["library/clawhub/self-improving-agent/3.0.21.zip"])
+}
+
+// TestClawHubSource_Download_HitSkipsUpstream 命中缓存：直接返回缓存字节，不调上游 API。
+func TestClawHubSource_Download_HitSkipsUpstream(t *testing.T) {
+	// 上游归档为 nil：若被调用会返回空字节，测试据此证明走的是缓存而非上游。
+	api := &fakeClawHubAPI{archive: nil}
+	blobs := &fakeLibraryBlob{stored: map[string][]byte{
+		"library/clawhub/weather/1.0.zip": []byte("CACHED-ZIP"),
+	}}
+	src := NewClawHubSource(api, newFakeRedis(), time.Minute, NewSkillArchiveCache(blobs))
+
+	got, _, err := src.Download(context.Background(), "weather", "1.0")
+	require.NoError(t, err)
+	// 命中缓存返回的是缓存字节。
+	assert.Equal(t, []byte("CACHED-ZIP"), got)
+}
+
+// TestClawHubSource_Download_UpstreamErrorWrapped 上游下载报错时包成 ErrSkillMarketUpstreamUnavailable。
+func TestClawHubSource_Download_UpstreamErrorWrapped(t *testing.T) {
+	// fakeClawHubAPI.Download 永远成功，故另用一个会报错的 API 替身。
+	api := &erroringClawHubAPI{}
+	src := NewClawHubSource(api, newFakeRedis(), time.Minute, NewSkillArchiveCache(&fakeLibraryBlob{}))
+
+	_, _, err := src.Download(context.Background(), "x", "1.0")
+	// 上游故障须可被 errors.Is 识别为上游不可用，供 handler 映射 502。
+	require.ErrorIs(t, err, ErrSkillMarketUpstreamUnavailable)
+}
+
+// erroringClawHubAPI 是 Download 永远报错的 ClawHubSearcher 替身（仅本测试用）。
+type erroringClawHubAPI struct{ fakeClawHubAPI }
+
+func (e *erroringClawHubAPI) Download(_ context.Context, _, _ string) ([]byte, error) {
+	return nil, errors.New("clawhub 下载返回非 2xx: 502")
 }

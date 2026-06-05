@@ -324,6 +324,8 @@ func runManager(ctx context.Context, cfg config.Config, logOut io.Writer) error 
 	} else {
 		libraryBlobs = service.NewFSLibraryBlobStore(cfg.App.DataRoot)
 	}
+	// archiveCache 是第三方市场归档读穿缓存，市场下载与（间接）安装/版本共用：复用 libraryBlobs 同一对象存储。
+	archiveCache := service.NewSkillArchiveCache(libraryBlobs)
 	platformSkillService := service.NewPlatformSkillService(dbStore.Queries, libraryBlobs)
 	workspaceService := service.NewWorkspaceService(dbStore.Queries, workspaceObjStore, workspacePresignTTL)
 
@@ -501,7 +503,7 @@ func runManager(ctx context.Context, cfg config.Config, logOut io.Writer) error 
 	var clawhubSource service.SkillSource
 	if clawhubClient != nil {
 		// imagecoordRedis 已在上方构造（与 distLocker 共用同一 Redis 物理实例），复用避免新建连接。
-		clawhubSource = service.NewClawHubSource(clawhubClient, imagecoordRedis, cfg.ClawHub.CacheTTL.Duration)
+		clawhubSource = service.NewClawHubSource(clawhubClient, imagecoordRedis, cfg.ClawHub.CacheTTL.Duration, archiveCache)
 	}
 	skillLibraryService := service.NewSkillLibraryService(platformSource, clawhubSource)
 

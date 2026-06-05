@@ -6,6 +6,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"time"
 
 	redis "github.com/redis/go-redis/v9"
@@ -48,12 +49,13 @@ type ClawHubSource struct {
 	rdb RedisCache
 	// ttl 是缓存条目的存活时长，由配置注入（默认 5 分钟）。
 	ttl time.Duration
+	// cache 是归档读穿缓存：clawhub 下载先查 library/clawhub/<slug>/<ver>.zip，命中即免回源。
+	cache *SkillArchiveCache
 }
 
-// NewClawHubSource 构造公共库来源。
-// api 注入 ClawHub 客户端；rdb 注入 Redis 客户端；ttl 为缓存时长。
-func NewClawHubSource(api ClawHubSearcher, rdb RedisCache, ttl time.Duration) *ClawHubSource {
-	return &ClawHubSource{api: api, rdb: rdb, ttl: ttl}
+// NewClawHubSource 构造公共库来源。cache 为归档读穿缓存（市场下载/安装共用同一份缓存）。
+func NewClawHubSource(api ClawHubSearcher, rdb RedisCache, ttl time.Duration, cache *SkillArchiveCache) *ClawHubSource {
+	return &ClawHubSource{api: api, rdb: rdb, ttl: ttl, cache: cache}
 }
 
 // Kind 实现 SkillSource，返回来源标识 "clawhub"。
@@ -152,10 +154,17 @@ func (s *ClawHubSource) Versions(ctx context.Context, _ auth.Principal, ref stri
 	return out, nil
 }
 
-// Download 取公共库 slug=ref、version 的归档原始字节，扩展名固定为 zip（ClawHub 归档格式）。
-// 直接回源 ClawHub /download，不走缓存（下载低频且为二进制大对象）。
+// Download 取公共库 slug=ref、version 的归档原始字节，扩展名固定 zip。
+// 走读穿缓存：命中 library/clawhub/<slug>/<ver>.zip 即免回源；未命中回源 ClawHub /download 并写回。
+// 上游非 2xx / 网络错误包成 ErrSkillMarketUpstreamUnavailable，供聚合层/ handler 映射为 502。
 func (s *ClawHubSource) Download(ctx context.Context, ref, version string) ([]byte, string, error) {
-	data, err := s.api.Download(ctx, ref, version)
+	data, _, err := s.cache.Fetch(ctx, "clawhub", ref, version, "zip", func(fctx context.Context) ([]byte, error) {
+		b, derr := s.api.Download(fctx, ref, version)
+		if derr != nil {
+			return nil, fmt.Errorf("%w: %v", ErrSkillMarketUpstreamUnavailable, derr)
+		}
+		return b, nil
+	})
 	if err != nil {
 		return nil, "", err
 	}
