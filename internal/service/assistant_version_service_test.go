@@ -845,6 +845,24 @@ func TestAddSkillFromLibrary_ClawHub(t *testing.T) {
 	assert.Equal(t, "zip", blob.putExt)
 }
 
+// TestAddSkillFromLibrary_ClawHub_UpstreamFail 助手版本加 clawhub skill 时上游下载失败：
+// 返回的错误可被 errors.Is 识别为 ErrSkillMarketUpstreamUnavailable（供 handler 映射 502）。
+func TestAddSkillFromLibrary_ClawHub_UpstreamFail(t *testing.T) {
+	store := newFakeAVStore()
+	id := seedVersion(store, "标准版", 1)
+	blob := &fakeLibBlob{}
+	// 上游下载器预置错误、缓存为空（fakeLibBlob.Open 返回 (nil,nil)→未命中）→ 回源失败。
+	svc := NewAssistantVersionService(
+		store, fakeImageResolver{}, fakeModelValidator{}, newFakePlatformSkillLibrary(),
+		fakeClawHub{err: errors.New("clawhub 下载返回非 2xx: 502")}, blob,
+	)
+	_, err := svc.AddSkillFromLibrary(context.Background(), platformPrincipal(), id, AddSkillFromLibraryInput{
+		Source: "clawhub", SourceRef: "self-improving", Name: "Self Improving", Version: "1.2.16",
+	})
+	// 上游故障须可被 errors.Is 识别为上游不可用。
+	require.ErrorIs(t, err, ErrSkillMarketUpstreamUnavailable)
+}
+
 // TestAddSkillFromLibrary_ClawHub_NilDownloader 覆盖：clawhub 未配置（nil）时返回 ErrAppSkillSourceUnknown。
 func TestAddSkillFromLibrary_ClawHub_NilDownloader(t *testing.T) {
 	store := newFakeAVStore()

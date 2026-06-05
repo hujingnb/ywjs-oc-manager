@@ -611,13 +611,20 @@ func (s *AssistantVersionService) resolveLibrarySkill(ctx context.Context, in Ad
 		if in.Name == "" {
 			return AssistantVersionSkill{}, fmt.Errorf("%w: clawhub 来源缺少 name", ErrAssistantVersionInvalid)
 		}
-		archive, err := s.clawhub.Download(ctx, in.SourceRef, in.Version)
+		// 走读穿缓存：命中 library/clawhub/<slug>/<ver>.zip 即免回源；未命中回源下载并写回。
+		// 用 FetchAndPersist（写回必须成功）——CachedPath 会经 seed 流入 app_skills.cached_tar_path，
+		// 再被 bootstrap 预签名给 pod 下发，故缓存对象必须可靠存在。
+		cache := NewSkillArchiveCache(s.blobs)
+		archive, relPath, err := cache.FetchAndPersist(ctx, "clawhub", in.SourceRef, in.Version, "zip", func(fctx context.Context) ([]byte, error) {
+			b, derr := s.clawhub.Download(fctx, in.SourceRef, in.Version)
+			if derr != nil {
+				// 上游下载失败：包成上游不可用哨兵，供 handler 映射 502。
+				return nil, fmt.Errorf("%w: %v", ErrSkillMarketUpstreamUnavailable, derr)
+			}
+			return b, nil
+		})
 		if err != nil {
-			return AssistantVersionSkill{}, fmt.Errorf("从 ClawHub 下载 skill 失败: %w", err)
-		}
-		relPath, err := s.blobs.PutLibrarySkill("clawhub", in.SourceRef, in.Version, "zip", archive)
-		if err != nil {
-			return AssistantVersionSkill{}, fmt.Errorf("缓存 ClawHub skill 归档失败: %w", err)
+			return AssistantVersionSkill{}, err
 		}
 		sum := sha256.Sum256(archive)
 		return AssistantVersionSkill{
