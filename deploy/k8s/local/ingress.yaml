@@ -50,3 +50,13 @@ spec:
               service:
                 name: ragflow
                 port: { number: 80 }
+    # MinIO 对象存储管理控制台（console 端口 9001，仅本地联调用）
+    - host: minio.localhost
+      http:
+        paths:
+          - path: /
+            pathType: Prefix
+            backend:
+              service:
+                name: minio
+                port: { number: 9001 }
