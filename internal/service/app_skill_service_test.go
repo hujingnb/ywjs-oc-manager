@@ -829,6 +829,7 @@ func TestAppSkillService_List_LatestVersion(t *testing.T) {
 func TestAppSkillService_Install_ClawHub_CacheHit(t *testing.T) {
 	deps := newAppSkillTestDeps(t)
 	// 缓存里已有该 skill 归档（首次安装时写入的效果）。
+	// 故意用不合法 zip 字节：命中缓存跳过解压校验，验证走的是缓存而非校验。
 	deps.blobs.stored = map[string][]byte{"library/clawhub/skill-vetter/1.0.zip": []byte("CACHED-ZIP")}
 	// 上游下载器预置错误：命中缓存时不应被调用。
 	deps.clawhub.err = errors.New("上游不该被调用")

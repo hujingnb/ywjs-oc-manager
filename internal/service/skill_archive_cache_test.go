@@ -130,3 +130,14 @@ func TestSkillArchiveCache_WriteFailure_NonFatal(t *testing.T) {
 	assert.Equal(t, "library/clawhub/weather/1.0.zip", rel) // 确定性 key
 	assert.Equal(t, 1, up.calls)                            // 回源一次
 }
+
+// TestSkillArchiveCache_FetchAndPersist_WriteFailure_Fatal 持久化场景下写回缓存失败必须上报错误，
+// 避免留下指向空对象的 relPath（下游 bootstrap 下发 / Reinstall 强依赖该对象存在）。
+func TestSkillArchiveCache_FetchAndPersist_WriteFailure_Fatal(t *testing.T) {
+	cache := NewSkillArchiveCache(putFailingBlob{})
+	up := &archiveCacheCounter{data: []byte("ZIP")}
+
+	_, _, err := cache.FetchAndPersist(context.Background(), "clawhub", "weather", "1.0", "zip", up.fetch)
+	require.Error(t, err)        // 写失败必须上报
+	assert.Equal(t, 1, up.calls) // 已回源（写失败发生在回源之后）
+}

@@ -3,12 +3,12 @@
 // 安装流程：
 //  1. 权限判断（CanManageAppSkill）
 //  2. 去重（app_skills 唯一约束前先查）
-//  3. 按 source 取归档（platform: PlatformInstaller / clawhub: ClawHubDownloader）
-//  4. 解压防炸弹校验（validateArchiveSafety：总字节/文件数上限）
-//  5. 缓存到 LibraryBlobStore（共享 library/ 前缀）
-//  6. 落 app_skills
-//  7. oc-ops 热装（SkillInstall）+ reload（SkillReload）
-//  8. 审计；oc-ops 失败 → status=pending，不回滚 app_skills（可重试）
+//  3. fetchArchive 按 source 取归档，含解压防炸弹校验与缓存写入：
+//     - platform：直接引用 PlatformSkillService 上传时已持久化的 library/ 归档，无需再写；
+//     - clawhub：经 FetchAndPersist 读穿缓存（命中免回源、未命中下载后校验并强制写入 S3）。
+//  4. 落 app_skills（cached_tar_path 指向步骤 3 得到的 library/ 对象键）
+//  5. oc-ops 热装（SkillInstall）+ reload（SkillReload）
+//  6. 审计；oc-ops 失败 → status=pending，不回滚 app_skills（可重试）
 package service
 
 import (
@@ -396,6 +396,7 @@ func (s *AppSkillService) fetchArchive(ctx context.Context, in InstallSkillInput
 			return nil, "", nil, "", ErrAppSkillArchiveTooDangerous
 		}
 		// 平台库归档由 PlatformSkillService 上传时已落到确定性 key，直接引用、无需回源/重写。
+		// 该 key 必须与 PlatformSkillService 上传时 PutLibrarySkill("platform", name, version, "tar", …) 的参数保持一致。
 		rel := storage.LibrarySkillKey("platform", in.SourceRef, in.Version, "tar")
 		return d, sh, map[string]any{"source": "platform", "name": in.SourceRef, "version": in.Version}, rel, nil
 	case "clawhub":
@@ -403,7 +404,8 @@ func (s *AppSkillService) fetchArchive(ctx context.Context, in InstallSkillInput
 		if s.clawhub == nil {
 			return nil, "", nil, "", ErrAppSkillSourceUnknown
 		}
-		d, rel, e := s.cache.Fetch(ctx, "clawhub", in.SourceRef, in.Version, "zip", func(fctx context.Context) ([]byte, error) {
+		// 注意：命中缓存时不再重跑下面的校验闭包——缓存字节在首次写入时已校验过；按版本永久缓存视其不可变。
+		d, rel, e := s.cache.FetchAndPersist(ctx, "clawhub", in.SourceRef, in.Version, "zip", func(fctx context.Context) ([]byte, error) {
 			b, derr := s.clawhub.Download(fctx, in.SourceRef, in.Version)
 			if derr != nil {
 				// 上游下载失败：包成上游不可用哨兵，供 handler 映射 502。

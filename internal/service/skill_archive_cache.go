@@ -3,6 +3,7 @@ package service
 
 import (
 	"context"
+	"fmt"
 	"io"
 
 	"oc-manager/internal/integrations/storage"
@@ -16,8 +17,8 @@ import (
 //
 // 约束：
 //   - 按版本永久缓存（无 TTL）：归档按版本号本应不可变，命中即长期有效。
-//   - 缓存是性能优化而非硬依赖：读缓存出错（对象不存在 / 对象存储抖动）一律降级为未命中、
-//     回源，绝不因缓存问题让请求失败。
+//   - 读缓存出错（对象不存在 / 对象存储抖动）一律降级为未命中、回源，绝不因缓存读异常让请求失败。
+//   - 写缓存行为由调用方按场景选择：Fetch 写失败 best-effort 忽略；FetchAndPersist 写失败返回错误。
 type SkillArchiveCache struct {
 	// blobs 是归档对象存储，读写共享 library/ 前缀。
 	blobs LibraryBlobStore
@@ -28,21 +29,18 @@ func NewSkillArchiveCache(blobs LibraryBlobStore) *SkillArchiveCache {
 	return &SkillArchiveCache{blobs: blobs}
 }
 
-// Fetch 取 (source, ref, version) 归档的字节与其在对象存储中的相对路径：
-//  1. 先读缓存 OpenLibrarySkill(LibrarySkillKey(...))；命中即返回缓存字节（不回源）。
-//  2. 读缓存出错或对象不存在 → 视为未命中，调 fetch 回源。
-//  3. fetch 成功 → PutLibrarySkill 写回 → 返回 (data, relPath, nil)。
-//  4. fetch 失败 → 原样返回该错误（由调用方分类映射为 502 等），不写缓存。
-//
-// ext 决定缓存 key 后缀（clawhub=zip，platform=tar）。回源下载与（按需）解压安全校验由
-// fetch 闭包负责：校验失败时 fetch 返回错误 → 不会写入缓存，避免缓存到不安全归档。
-func (c *SkillArchiveCache) Fetch(
+// fetchInternal 是读穿实现：先读缓存（命中即返回）；未命中回源、写回。
+// persistWrite 决定写缓存失败的处理：
+//   - true：写失败返回错误——供「relPath 会被持久化、下游(bootstrap 下发 / Reinstall)强依赖该对象存在」的安装/版本场景；
+//   - false：写失败 best-effort 忽略、仍返回回源字节——供「relPath 不被持久化、缓存仅作加速」的临时取数（如市场下载）。
+func (c *SkillArchiveCache) fetchInternal(
 	ctx context.Context,
 	source, ref, version, ext string,
+	persistWrite bool,
 	fetch func(ctx context.Context) ([]byte, error),
 ) (data []byte, relPath string, err error) {
 	key := storage.LibrarySkillKey(source, ref, version, ext)
-	// 1) 读缓存：命中即返回。任何读失败（不存在 / 抖动）都降级为未命中，继续回源。
+	// 1) 读缓存：命中即返回。任何读失败（不存在 / 抖动 / (nil,nil)）都降级为未命中，继续回源。
 	//    额外守卫 rc != nil：个别 LibraryBlobStore 实现可能在「无对象」时返回 (nil, nil)，
 	//    若不防护会在 io.ReadAll(nil) 处 panic；此处一并按未命中处理。
 	if rc, oerr := c.blobs.OpenLibrarySkill(key); oerr == nil && rc != nil {
@@ -58,10 +56,36 @@ func (c *SkillArchiveCache) Fetch(
 	if ferr != nil {
 		return nil, "", ferr
 	}
-	// 3) 写回缓存。写失败不阻断本次请求（归档已在手）：返回确定性 key，
-	//    与 Put 成功时一致——极端情况下缓存暂时缺对象，下次回源会再写。
-	if written, werr := c.blobs.PutLibrarySkill(source, ref, version, ext, fetched); werr == nil {
-		return fetched, written, nil
+	// 3) 写回缓存。
+	written, werr := c.blobs.PutLibrarySkill(source, ref, version, ext, fetched)
+	if werr != nil {
+		if persistWrite {
+			// relPath 会被持久化、下游强依赖该对象存在：写失败必须上报，
+			// 避免留下指向空对象的 cached_tar_path（否则 pod 重启下发 / Reinstall 会失败）。
+			return nil, "", fmt.Errorf("写回 skill 归档缓存失败: %w", werr)
+		}
+		// 仅加速、relPath 不被持久化：写失败不阻断，返回回源字节与确定性 key。
+		return fetched, key, nil
 	}
-	return fetched, key, nil
+	return fetched, written, nil
+}
+
+// Fetch 读穿取归档，写回 best-effort（写失败不阻断、缓存非硬依赖）。
+// 供「relPath 不被持久化、缓存仅作加速」的临时取数（如市场下载）使用。
+func (c *SkillArchiveCache) Fetch(
+	ctx context.Context,
+	source, ref, version, ext string,
+	fetch func(ctx context.Context) ([]byte, error),
+) (data []byte, relPath string, err error) {
+	return c.fetchInternal(ctx, source, ref, version, ext, false, fetch)
+}
+
+// FetchAndPersist 读穿取归档，写回必须成功（写失败返回错误）。
+// 供安装/版本等「relPath 会被持久化、下游(bootstrap 下发 / Reinstall)强依赖该对象存在」的场景使用。
+func (c *SkillArchiveCache) FetchAndPersist(
+	ctx context.Context,
+	source, ref, version, ext string,
+	fetch func(ctx context.Context) ([]byte, error),
+) (data []byte, relPath string, err error) {
+	return c.fetchInternal(ctx, source, ref, version, ext, true, fetch)
 }
