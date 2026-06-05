@@ -12,9 +12,12 @@ import (
 	null "github.com/guregu/null/v5"
 )
 
-const addAssistantVersionIndustryKnowledgeBase = `-- name: AddAssistantVersionIndustryKnowledgeBase :exec
+const addAssistantVersionIndustryKnowledgeBase = `-- name: AddAssistantVersionIndustryKnowledgeBase :execrows
 INSERT INTO assistant_version_industry_knowledge_bases (version_id, industry_knowledge_base_id)
-VALUES (?, ?)
+SELECT ?, ikb.id
+FROM industry_knowledge_bases ikb
+WHERE ikb.id = ? AND ikb.deleted_at IS NULL
+FOR UPDATE
 `
 
 type AddAssistantVersionIndustryKnowledgeBaseParams struct {
@@ -22,10 +25,13 @@ type AddAssistantVersionIndustryKnowledgeBaseParams struct {
 	IndustryKnowledgeBaseID string `db:"industry_knowledge_base_id" json:"industry_knowledge_base_id"`
 }
 
-// 为助手版本追加一个行业知识库关联，复合主键保证同一版本不重复关联。
-func (q *Queries) AddAssistantVersionIndustryKnowledgeBase(ctx context.Context, arg AddAssistantVersionIndustryKnowledgeBaseParams) error {
-	_, err := q.db.ExecContext(ctx, addAssistantVersionIndustryKnowledgeBase, arg.VersionID, arg.IndustryKnowledgeBaseID)
-	return err
+// 为助手版本追加一个行业知识库关联；只允许关联未删除行业库，复合主键保证同一版本不重复关联。
+func (q *Queries) AddAssistantVersionIndustryKnowledgeBase(ctx context.Context, arg AddAssistantVersionIndustryKnowledgeBaseParams) (int64, error) {
+	result, err := q.db.ExecContext(ctx, addAssistantVersionIndustryKnowledgeBase, arg.VersionID, arg.IndustryKnowledgeBaseID)
+	if err != nil {
+		return 0, err
+	}
+	return result.RowsAffected()
 }
 
 const countAssistantVersionsUsingIndustryKnowledgeBase = `-- name: CountAssistantVersionsUsingIndustryKnowledgeBase :one
@@ -111,6 +117,29 @@ WHERE name = ? AND deleted_at IS NULL
 // 按名称读取未删除行业知识库，用于创建和重命名时做业务提示。
 func (q *Queries) GetIndustryKnowledgeBaseByName(ctx context.Context, name string) (IndustryKnowledgeBasis, error) {
 	row := q.db.QueryRowContext(ctx, getIndustryKnowledgeBaseByName, name)
+	var i IndustryKnowledgeBasis
+	err := row.Scan(
+		&i.ID,
+		&i.Name,
+		&i.CreatedBy,
+		&i.CreatedAt,
+		&i.UpdatedAt,
+		&i.DeletedAt,
+		&i.NameActiveKey,
+	)
+	return i, err
+}
+
+const getIndustryKnowledgeBaseForUpdate = `-- name: GetIndustryKnowledgeBaseForUpdate :one
+SELECT id, name, created_by, created_at, updated_at, deleted_at, name_active_key
+FROM industry_knowledge_bases
+WHERE id = ? AND deleted_at IS NULL
+FOR UPDATE
+`
+
+// 在事务内锁定未删除行业知识库，序列化版本关联写入和行业库删除。
+func (q *Queries) GetIndustryKnowledgeBaseForUpdate(ctx context.Context, id string) (IndustryKnowledgeBasis, error) {
+	row := q.db.QueryRowContext(ctx, getIndustryKnowledgeBaseForUpdate, id)
 	var i IndustryKnowledgeBasis
 	err := row.Scan(
 		&i.ID,
@@ -262,14 +291,24 @@ func (q *Queries) ReplaceAssistantVersionIndustryKnowledgeBases(ctx context.Cont
 	return err
 }
 
-const softDeleteIndustryKnowledgeBase = `-- name: SoftDeleteIndustryKnowledgeBase :exec
-UPDATE industry_knowledge_bases
+const softDeleteIndustryKnowledgeBase = `-- name: SoftDeleteIndustryKnowledgeBase :execrows
+UPDATE industry_knowledge_bases AS ikb
 SET deleted_at = now(), updated_at = now()
-WHERE id = ? AND deleted_at IS NULL
+WHERE ikb.id = ? AND ikb.deleted_at IS NULL
+  AND NOT EXISTS (
+    SELECT 1
+    FROM assistant_version_industry_knowledge_bases avikb
+    JOIN assistant_versions av ON av.id = avikb.version_id
+    WHERE av.deleted_at IS NULL
+      AND avikb.industry_knowledge_base_id = ikb.id
+  )
 `
 
-// 软删除行业知识库；删除后名称可被重新使用。
-func (q *Queries) SoftDeleteIndustryKnowledgeBase(ctx context.Context, id string) error {
-	_, err := q.db.ExecContext(ctx, softDeleteIndustryKnowledgeBase, id)
-	return err
+// 软删除未被助手版本引用的行业知识库；删除后名称可被重新使用。
+func (q *Queries) SoftDeleteIndustryKnowledgeBase(ctx context.Context, id string) (int64, error) {
+	result, err := q.db.ExecContext(ctx, softDeleteIndustryKnowledgeBase, id)
+	if err != nil {
+		return 0, err
+	}
+	return result.RowsAffected()
 }

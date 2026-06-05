@@ -72,6 +72,9 @@ ragflow:
   request_timeout: "30s"
   chunk_method: "naive"
 
+industry_knowledge:
+  upload_token: "<external-upload-token>"
+
 hermes:
   manager_runtime_base_url: "http://manager-api:8080"
 ```
@@ -86,7 +89,15 @@ hermes:
 `base_url` 与 `api_key` 必须成对配置；二者都为空时 manager 可启动，但知识库请求会返回未配置错误。
 RAGFlow 调 new-api 的模型 key 由管理员在 RAGFlow 控制台手工配置，不属于 manager 配置。
 
-### 1.8 `hermes`
+### 1.8 `industry_knowledge`
+
+外部商业知识库上传行业库文件的固定鉴权配置。该入口不使用用户登录态，只接受配置中的固定 token。
+
+| 字段 | 类型 | 默认 | 说明 |
+|---|---|---|---|
+| `upload_token` | string | `""` | 外部上传接口 `POST /api/v1/external/industry-knowledge/files` 要求的固定鉴权字符串；请求头为 `X-OC-Industry-Knowledge-Token`。为空表示禁用外部上传入口；只包含空白字符时启动 fail-fast |
+
+### 1.9 `hermes`
 
 Hermes Agent runtime 容器相关配置。
 
@@ -103,7 +114,7 @@ Hermes Agent runtime 容器相关配置。
 
 > 容器实际使用的 `OPENAI_API_KEY` 由 manager 替每个应用通过 new-api `POST /api/token/:id/key` 自动拉取后加密落库（`apps.newapi_key_ciphertext`），每个应用的 token 独立隔离，无需在此填写全局 sk-。
 
-### 1.9 `agent`
+### 1.10 `agent`
 
 manager 侧用于与 runtime-agent 协调的参数（非 runtime-agent 自身配置）。
 
@@ -111,7 +122,7 @@ manager 侧用于与 runtime-agent 协调的参数（非 runtime-agent 自身配
 |---|---|---|---|
 | `heartbeat_interval_seconds` | int | `30` | runtime-agent 注册成功后回写并按此频率上报心跳；manager 以 90 秒阈值判定节点离线（`NodeHealthReconciler`） |
 
-### 1.10 `runtime`
+### 1.11 `runtime`
 
 | 字段 | 类型 | 默认 | 说明 |
 |---|---|---|---|

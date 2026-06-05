@@ -50,6 +50,16 @@ def test_render_creates_runtime_knowledge_skill(tmp_input: Path, tmp_data: Path)
     assert json.loads(marker.read_text())["source"] == "runtime-knowledge"
 
 
+def test_render_runtime_knowledge_skill_mentions_industry_scope(tmp_input: Path, tmp_data: Path) -> None:
+    # manifest.knowledge 存在时，oc-kb skill 说明必须提到行业知识库和 industry scope，避免模型忽略行业来源。
+    outputs = render(_manifest(knowledge=True), tmp_input, tmp_data)
+
+    body = (tmp_data / "skills" / "oc-kb" / "SKILL.md").read_text()
+    assert "industry knowledge" in body
+    assert 'scope="industry"' in body
+    assert outputs == ["skills/oc-kb/SKILL.md"]
+
+
 def test_render_skips_runtime_knowledge_skill_without_manifest_config(tmp_input: Path, tmp_data: Path) -> None:
     # manifest 没有 knowledge 配置时不生成 oc-kb，避免没有 token 的 skill 误导 Hermes。
     outputs = render(_manifest(), tmp_input, tmp_data)

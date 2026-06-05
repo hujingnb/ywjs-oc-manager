@@ -19,10 +19,12 @@
 - 注册和维护 Runtime Node
 - 查看全平台应用状态、审计日志和用量概览
 - 为已有成员补建应用实例（`CanCreateAppForMember`）
+- 跨企业维护企业知识库，管理平台级行业知识库，供助手版本选择后检索
 
 **权限边界**：
 - 可跨企业读取所有资源（企业、成员、应用、用量、审计）
-- **不可**直接写入任意企业成员、应用或知识库（不绕过企业边界）
+- **不可**直接写入任意企业成员、应用或应用知识库（不绕过应用边界）
+- 可写企业知识库和平台级行业知识库；行业知识库不归属单个企业
 - 不直接介入企业成员生命周期（无 `CanManageMember` 权限）
 
 ### 1.2 企业管理员（org_admin）
@@ -143,12 +145,13 @@
 
 ### 2.5 知识库（Knowledge）
 
-分为两个层级：
+分为三类 scope：
 
 - **企业级知识库**：由企业管理员上传到 RAGFlow org dataset；Hermes 只读检索，读取者可下载单个原文件。
 - **应用级知识库**：由应用所有者上传到 RAGFlow app dataset；Hermes 可检索并可通过 `oc-kb add` 写入当前实例知识库。
+- **行业知识库**：由平台管理员或外部商业知识库上传入口写入 RAGFlow industry dataset；助手版本可选择一个或多个行业库，Hermes 只读检索。
 
-知识库内容以 RAGFlow 为事实来源；manager 只维护 org/app 与 RAGFlow dataset/document 的映射，并在自身权限模型内控制读写边界。
+知识库内容以 RAGFlow 为事实来源；manager 只维护 org/app/industry 与 RAGFlow dataset/document 的映射，并在自身权限模型内控制读写边界。
 
 ### 2.6 渠道（Channel）
 
@@ -210,12 +213,16 @@ worker 执行 app_initialize：
   → manager 上传文件到 RAGFlow document
   → manager 触发 RAGFlow parse 并缓存 document 元数据
 
+平台管理员/外部服务 → 上传行业知识库文件（CanManageIndustryKnowledge / 固定 upload token）
+  → manager 按行业库 ID 或行业名称定位 industry dataset
+  → 同名文件覆盖旧 document，并触发 RAGFlow parse
+
 Hermes → oc-kb search/add
   → 调 manager runtime API
   → manager 用 app runtime token 解析当前实例
-  → 固定访问当前实例 dataset 和所属企业 dataset
+  → 固定访问当前实例 dataset、所属企业 dataset 和当前助手版本选择的行业 dataset
 
-企业知识库对 Hermes 只读；实例知识库对 Hermes 读写。
+企业知识库和行业知识库对 Hermes 只读；实例知识库对 Hermes 读写。行业知识库按助手版本关联，检索时每个关联行业库都会返回最多 `top_k` 条。
 ```
 
 ### 3.4 容器治理（启停 / 重启 / 健康自愈 / 重建）
@@ -272,9 +279,10 @@ Hermes → oc-kb search/add
 | `CanCreateAppForMember` | 为已有成员补建应用实例 | 全部 | 本企业 | 不可 |
 | `CanTriggerRuntimeOperation` | 启停/重启容器等运行时操作 | 不可 | 本企业应用 | 自己应用 |
 | `CanReadOrgKnowledge` | 读取 / 下载企业知识库 | 全部 | 本企业 | 本企业 |
-| `CanWriteOrgKnowledge` | 写入 / 删除 / 重解析企业知识库文档 | 不可 | 本企业 | 不可 |
+| `CanWriteOrgKnowledge` | 写入 / 删除 / 重解析企业知识库文档 | 全部 | 本企业 | 不可 |
 | `CanReadAppKnowledge` | 读取 / 下载应用知识库 | 全部 | 本企业应用 | 自己应用 |
 | `CanWriteAppKnowledge` | 写入 / 删除 / 重解析应用知识库文档 | 不可 | 本企业应用 | 自己应用 |
+| `CanManageIndustryKnowledge` | 管理平台级行业知识库 | 全部 | 不可 | 不可 |
 | `CanViewOrgPersona` | 读取企业人设 | 全部 | 本企业 | 本企业 |
 | `CanManageOrgPersona` | 写入企业人设 | 全部（等同 CanManageOrg） | 本企业 | 不可 |
 | `CanViewOrgUsage` | 查看企业聚合用量 | 全部 | 本企业 | 不可 |
@@ -284,7 +292,7 @@ Hermes → oc-kb search/add
 
 **说明**：
 - `disabled` 状态的账号不得触发任何运行时操作（调用方在 `CanTriggerRuntimeOperation` 之前额外校验 `user.status != disabled`）。
-- 平台管理员对企业知识库、应用写操作无权限，是设计上的明确约束，避免绕过企业边界。
+- 平台管理员可跨企业维护企业知识库，但对应用写操作无权限；行业知识库是平台级资源，由平台管理员管理。
 
 ---
 

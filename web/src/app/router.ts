@@ -23,6 +23,7 @@ import LoginPage from '@/pages/login/LoginPage.vue'
 import CreateMemberPage from '@/pages/org/CreateMemberPage.vue'
 import MembersPage from '@/pages/org/MembersPage.vue'
 import AssistantVersionsPage from '@/pages/platform/AssistantVersionsPage.vue'
+import IndustryKnowledgePage from '@/pages/platform/IndustryKnowledgePage.vue'
 import PlatformSkillsPage from '@/pages/platform/PlatformSkillsPage.vue'
 import OrganizationsPage from '@/pages/platform/OrganizationsPage.vue'
 import ConsolePage from '@/pages/platform/ConsolePage.vue'
@@ -61,6 +62,7 @@ export const router = createRouter({
         { path: 'dashboard', redirect: '/console' },
         { path: 'organizations', component: OrganizationsPage, meta: { allowedRoles: PLATFORM_ONLY } },
         { path: 'assistant-versions', component: AssistantVersionsPage, meta: { allowedRoles: PLATFORM_ONLY } },
+        { path: 'platform/industry-knowledge', component: IndustryKnowledgePage, meta: { allowedRoles: PLATFORM_ONLY } },
         { path: 'platform/skills', component: PlatformSkillsPage, meta: { allowedRoles: PLATFORM_ONLY } },
         { path: 'platform/organizations/:orgId/recharge', component: RechargePage, meta: { allowedRoles: PLATFORM_ONLY } },
         { path: 'platform/permissions', component: PermissionsPage, meta: { allowedRoles: PLATFORM_ONLY } },

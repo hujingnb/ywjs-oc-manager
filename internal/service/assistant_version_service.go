@@ -32,7 +32,7 @@ type AssistantVersionStore interface {
 	// ReplaceAssistantVersionIndustryKnowledgeBases 清空版本旧行业库关联，由 service 先校验再重建。
 	ReplaceAssistantVersionIndustryKnowledgeBases(ctx context.Context, versionID string) error
 	// AddAssistantVersionIndustryKnowledgeBase 为版本追加单个行业库关联。
-	AddAssistantVersionIndustryKnowledgeBase(ctx context.Context, arg sqlc.AddAssistantVersionIndustryKnowledgeBaseParams) error
+	AddAssistantVersionIndustryKnowledgeBase(ctx context.Context, arg sqlc.AddAssistantVersionIndustryKnowledgeBaseParams) (int64, error)
 	// ListIndustryKnowledgeBasesByAssistantVersion 读取版本运行时额外检索的行业库。
 	ListIndustryKnowledgeBasesByAssistantVersion(ctx context.Context, versionID string) ([]sqlc.IndustryKnowledgeBasis, error)
 	// CreateAssistantVersion 创建版本（:exec），service 调用前需自行生成 ID 并在写入后 GetAssistantVersion 读回。
@@ -286,6 +286,8 @@ type AssistantVersionInput struct {
 	Routing map[string]string
 	// IndustryKnowledgeBaseIDs 是该版本运行时额外检索的行业库 ID 列表，保存后立即生效。
 	IndustryKnowledgeBaseIDs []string
+	// ReplaceIndustryKnowledgeBases 表示调用方显式提交了行业库关联；false 时 update 保留旧关联。
+	ReplaceIndustryKnowledgeBases bool
 }
 
 // validateInput 校验版本入参的业务规则（不含名称唯一性，由调用方单独查）。
@@ -348,9 +350,13 @@ func (s *AssistantVersionService) Update(ctx context.Context, principal auth.Pri
 	if err != nil {
 		return AssistantVersionResult{}, err
 	}
-	industryIDs, err := s.normalizeIndustryKnowledgeBaseIDs(ctx, in.IndustryKnowledgeBaseIDs)
-	if err != nil {
-		return AssistantVersionResult{}, err
+	var industryIDs []string
+	if in.ReplaceIndustryKnowledgeBases {
+		var err error
+		industryIDs, err = s.normalizeIndustryKnowledgeBaseIDs(ctx, in.IndustryKnowledgeBaseIDs)
+		if err != nil {
+			return AssistantVersionResult{}, err
+		}
 	}
 	// 改名时确认新名称未被「其它」版本占用。
 	newName := trimSpace(in.Name)
@@ -387,7 +393,10 @@ func (s *AssistantVersionService) Update(ctx context.Context, principal auth.Pri
 		}); err != nil {
 			return fmt.Errorf("更新版本失败: %w", err)
 		}
-		return s.replaceNormalizedIndustryKnowledgeBases(ctx, store, current.ID, industryIDs)
+		if in.ReplaceIndustryKnowledgeBases {
+			return s.replaceNormalizedIndustryKnowledgeBases(ctx, store, current.ID, industryIDs)
+		}
+		return nil
 	}); err != nil {
 		return AssistantVersionResult{}, err
 	}
@@ -440,11 +449,15 @@ func (s *AssistantVersionService) replaceNormalizedIndustryKnowledgeBases(ctx co
 		return fmt.Errorf("清空版本行业知识库关联失败: %w", err)
 	}
 	for _, id := range ids {
-		if err := store.AddAssistantVersionIndustryKnowledgeBase(ctx, sqlc.AddAssistantVersionIndustryKnowledgeBaseParams{
+		affected, err := store.AddAssistantVersionIndustryKnowledgeBase(ctx, sqlc.AddAssistantVersionIndustryKnowledgeBaseParams{
 			VersionID:               versionID,
 			IndustryKnowledgeBaseID: id,
-		}); err != nil {
+		})
+		if err != nil {
 			return fmt.Errorf("保存版本行业知识库关联失败: %w", err)
+		}
+		if affected == 0 {
+			return fmt.Errorf("%w: %s", ErrIndustryKnowledgeNotFound, id)
 		}
 	}
 	return nil

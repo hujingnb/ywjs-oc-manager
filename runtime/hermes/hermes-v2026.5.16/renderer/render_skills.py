@@ -143,7 +143,7 @@ def _extract_version_skills(skill_rels: List[str], input_root: Path, skills_root
 
 _OC_KB_SKILL_MD = """---
 name: oc-kb
-description: Search the organization and current app knowledge base through manager, and add local reports to the current app knowledge base.
+description: Search the current app, organization, and assistant-version industry knowledge bases through manager, and add local reports to the current app knowledge base.
 ---
 
 # oc-kb
@@ -152,7 +152,7 @@ Use this skill when a user asks questions that may depend on organization policy
 
 Commands:
 
-- `oc-kb search "<question>" --top-k 8` searches both the current app knowledge base and the organization knowledge base. App results have higher priority than organization results.
+- `oc-kb search "<question>" --top-k 8` searches the current app knowledge base, the organization knowledge base, and any industry knowledge bases selected by the app's assistant version. App results are returned first, organization results second, and each selected industry knowledge base can contribute up to top-k hits with `scope="industry"` plus `industry_knowledge_base_id` and `industry_knowledge_base_name` when present.
 - `oc-kb add relative/path.md` uploads an existing workspace file into the current app knowledge base. Absolute paths, parent directory traversal, and directories are rejected.
 
 Do not call RAGFlow directly and do not ask for RAGFlow credentials. The `oc-kb` command talks only to manager runtime APIs using the app-scoped token injected by the container entrypoint.

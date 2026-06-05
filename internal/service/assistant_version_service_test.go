@@ -157,13 +157,16 @@ func (f *fakeAVStore) ReplaceAssistantVersionIndustryKnowledgeBases(_ context.Co
 }
 
 // AddAssistantVersionIndustryKnowledgeBase 为版本追加一个行业库关联。
-func (f *fakeAVStore) AddAssistantVersionIndustryKnowledgeBase(_ context.Context, arg sqlc.AddAssistantVersionIndustryKnowledgeBaseParams) error {
+func (f *fakeAVStore) AddAssistantVersionIndustryKnowledgeBase(_ context.Context, arg sqlc.AddAssistantVersionIndustryKnowledgeBaseParams) (int64, error) {
 	f.addIndustryCalls += 1
 	if f.addIndustryErrAfter > 0 && f.addIndustryCalls >= f.addIndustryErrAfter {
-		return errors.New("insert industry association failed")
+		return 0, errors.New("insert industry association failed")
+	}
+	if _, ok := f.industryBases[arg.IndustryKnowledgeBaseID]; !ok {
+		return 0, nil
 	}
 	f.versionIndustryBaseIDs[arg.VersionID] = append(f.versionIndustryBaseIDs[arg.VersionID], arg.IndustryKnowledgeBaseID)
-	return nil
+	return 1, nil
 }
 
 // ListIndustryKnowledgeBasesByAssistantVersion 返回版本当前关联行业库，并按真实查询的名称/id 顺序排序。
@@ -403,6 +406,7 @@ func TestAssistantVersionCreateWithIndustryKnowledgeBases(t *testing.T) {
 	svc := newTestAVService(t, store)
 	in := validCreateInput()
 	in.IndustryKnowledgeBaseIDs = []string{" kb-risk ", "", "kb-risk"} // 覆盖 trim、空值过滤和去重。
+	in.ReplaceIndustryKnowledgeBases = true
 	got, err := svc.Create(context.Background(), platformPrincipal(), in)
 	require.NoError(t, err)
 	assert.EqualValues(t, 1, got.Revision)
@@ -422,6 +426,7 @@ func TestAssistantVersionCreateRollsBackIndustryAssociationFailure(t *testing.T)
 	svc.SetTxRunner(fakeAVTxRunner{store: store})
 	in := validCreateInput()
 	in.IndustryKnowledgeBaseIDs = []string{"kb-risk", "kb-law"}
+	in.ReplaceIndustryKnowledgeBases = true
 
 	_, err := svc.Create(context.Background(), platformPrincipal(), in)
 	require.ErrorContains(t, err, "保存版本行业知识库关联失败")
@@ -550,13 +555,55 @@ func TestAssistantVersionUpdateIndustryKnowledgeDoesNotBumpRevision(t *testing.T
 	in := AssistantVersionInput{
 		Name: "标准版", Description: "默认版本", SystemPrompt: "p",
 		ImageID: "v2026.5.16", MainModel: "qwen", Routing: map[string]string{},
-		IndustryKnowledgeBaseIDs: []string{" kb-risk "},
+		IndustryKnowledgeBaseIDs:      []string{" kb-risk "},
+		ReplaceIndustryKnowledgeBases: true,
 	}
 	got, err := svc.Update(context.Background(), platformPrincipal(), id, in)
 	require.NoError(t, err)
 	assert.EqualValues(t, 3, got.Revision)
 	require.Len(t, got.IndustryKnowledgeBases, 1)
 	assert.Equal(t, IndustryKnowledgeBaseRef{ID: "kb-risk", Name: "金融风控"}, got.IndustryKnowledgeBases[0])
+}
+
+// TestAssistantVersionUpdateKeepsIndustryKnowledgeWhenOmitted 验证未显式提交行业库字段时保留旧关联，兼容旧客户端。
+func TestAssistantVersionUpdateKeepsIndustryKnowledgeWhenOmitted(t *testing.T) {
+	store := newFakeAVStore()
+	id := seedVersion(store, "标准版", 3)
+	// 旧关联代表已有运行时检索范围；Update 入参省略行业库字段时不应被清空。
+	store.addIndustryKnowledgeBase("kb-old", "已有行业库")
+	store.versionIndustryBaseIDs[id] = []string{"kb-old"}
+	svc := newTestAVService(t, store)
+
+	got, err := svc.Update(context.Background(), platformPrincipal(), id, AssistantVersionInput{
+		Name: "标准版", Description: "仅更新描述", SystemPrompt: "p",
+		ImageID: "v2026.5.16", MainModel: "qwen", Routing: map[string]string{},
+	})
+	require.NoError(t, err)
+
+	assert.Equal(t, []string{"kb-old"}, store.versionIndustryBaseIDs[id])
+	require.Len(t, got.IndustryKnowledgeBases, 1)
+	assert.Equal(t, "已有行业库", got.IndustryKnowledgeBases[0].Name)
+}
+
+// TestAssistantVersionUpdateClearsIndustryKnowledgeWhenExplicitEmpty 验证显式提交空列表时会清空行业库关联。
+func TestAssistantVersionUpdateClearsIndustryKnowledgeWhenExplicitEmpty(t *testing.T) {
+	store := newFakeAVStore()
+	id := seedVersion(store, "标准版", 3)
+	// 显式空数组表示平台管理员主动清空运行时额外检索范围。
+	store.addIndustryKnowledgeBase("kb-old", "已有行业库")
+	store.versionIndustryBaseIDs[id] = []string{"kb-old"}
+	svc := newTestAVService(t, store)
+
+	got, err := svc.Update(context.Background(), platformPrincipal(), id, AssistantVersionInput{
+		Name: "标准版", Description: "仅更新描述", SystemPrompt: "p",
+		ImageID: "v2026.5.16", MainModel: "qwen", Routing: map[string]string{},
+		IndustryKnowledgeBaseIDs:      []string{},
+		ReplaceIndustryKnowledgeBases: true,
+	})
+	require.NoError(t, err)
+
+	assert.Empty(t, store.versionIndustryBaseIDs[id])
+	assert.Empty(t, got.IndustryKnowledgeBases)
 }
 
 // TestAssistantVersionUpdateRejectsUnknownIndustryKnowledgeWithoutClearingExisting 验证未知行业库不会清空旧关联。
@@ -570,7 +617,8 @@ func TestAssistantVersionUpdateRejectsUnknownIndustryKnowledgeWithoutClearingExi
 	in := AssistantVersionInput{
 		Name: "标准版", Description: "默认版本", SystemPrompt: "p",
 		ImageID: "v2026.5.16", MainModel: "qwen", Routing: map[string]string{},
-		IndustryKnowledgeBaseIDs: []string{"kb-missing"},
+		IndustryKnowledgeBaseIDs:      []string{"kb-missing"},
+		ReplaceIndustryKnowledgeBases: true,
 	}
 	_, err := svc.Update(context.Background(), platformPrincipal(), id, in)
 	require.ErrorIs(t, err, ErrIndustryKnowledgeNotFound)
@@ -594,7 +642,8 @@ func TestAssistantVersionUpdateRollsBackIndustryAssociationFailure(t *testing.T)
 	_, err := svc.Update(context.Background(), platformPrincipal(), id, AssistantVersionInput{
 		Name: "高级版", Description: "更新描述", SystemPrompt: "new prompt",
 		ImageID: "v2026.5.16", MainModel: "qwen", Routing: map[string]string{},
-		IndustryKnowledgeBaseIDs: []string{"kb-risk", "kb-law"},
+		IndustryKnowledgeBaseIDs:      []string{"kb-risk", "kb-law"},
+		ReplaceIndustryKnowledgeBases: true,
 	})
 	require.ErrorContains(t, err, "保存版本行业知识库关联失败")
 

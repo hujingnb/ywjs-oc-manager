@@ -100,7 +100,7 @@ web/src/
 ├── pages/
 │   ├── login/          登录页
 │   ├── dashboard/      角色感知首页
-│   ├── platform/       平台总览、企业管理、充值
+│   ├── platform/       平台总览、企业管理、充值、行业知识库、助手版本
 │   ├── org/            成员管理、创建成员、人设配置
 │   ├── apps/           应用列表 + 应用详情（概览 / 运行时 / 渠道 / 知识库 / 工作目录 / 审计 六个 tab）
 │   ├── runtime-nodes/  运行节点列表与节点详情
@@ -209,7 +209,7 @@ worker app_initialize handler：
        ▼
 KnowledgeHandler → KnowledgeService.SaveOrgFile
    ├─ authorizer 校验 manager 业务权限
-   ├─ 确保 org/app RAGFlow dataset 映射存在
+   ├─ 确保 org/app/industry RAGFlow dataset 映射存在
    ├─ 调 RAGFlow 上传 document 并触发 parse
    ├─ 写 ragflow_documents 元数据缓存
    └─ 返回扁平 document 列表/解析状态
@@ -217,13 +217,15 @@ KnowledgeHandler → KnowledgeService.SaveOrgFile
 Hermes 检索 / 写入：
    ├─ oc-kb search/add 调 manager runtime API
    ├─ manager 用 app runtime token 解析当前实例
-   ├─ 企业知识库只读、实例知识库读写
+   ├─ 企业知识库和行业知识库只读、实例知识库读写
+   ├─ 行业知识库来自当前实例绑定助手版本的选择，每个行业库最多返回 top_k 条
    └─ manager 代理 RAGFlow retrieval / document upload
 ```
 
 RAGFlow 只承担文件主库、解析和检索能力，不承载 oc-manager 的业务权限。
 manager 是唯一权限边界：用户侧请求先走 JWT/角色权限校验，Hermes runtime 请求
-先走 app runtime token 校验，再由 manager 固定解析可访问的 org/app dataset。
+先走 app runtime token 校验，再由 manager 固定解析可访问的 org/app/industry dataset。
+industry dataset 只能由当前助手版本显式选择后参与检索。
 Hermes 不接收 RAGFlow API key、RAGFlow dataset ID，也不直接访问 RAGFlow HTTP API。
 
 ### 4.3 容器生命周期

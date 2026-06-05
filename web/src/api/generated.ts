@@ -9760,7 +9760,7 @@ export interface components {
         "handlers.UpdateAssistantVersionRequest": {
             description?: string;
             image_id: string;
-            /** @description IndustryKnowledgeBaseIDs 是该助手版本运行时额外检索的行业知识库 ID 列表。 */
+            /** @description IndustryKnowledgeBaseIDs 是该助手版本运行时额外检索的行业知识库 ID 列表；更新时未提交表示保留旧关联。 */
             industry_knowledge_base_ids?: string[];
             main_model: string;
             name: string;

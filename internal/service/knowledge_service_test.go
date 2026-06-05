@@ -349,6 +349,19 @@ func TestDeleteIndustryKnowledgeBaseMissingDatasetStillDeletesBase(t *testing.T)
 	assert.Empty(t, rf.deleteDatasetCalls)
 }
 
+// TestDeleteIndustryKnowledgeBaseDetectsConcurrentVersionReference 验证删除期间若行业库被版本重新引用，会返回占用错误且不删除远端 dataset。
+func TestDeleteIndustryKnowledgeBaseDetectsConcurrentVersionReference(t *testing.T) {
+	svc, store, rf := newRAGFlowKnowledgeTestService(t)
+	// 软删命中 0 行代表 SQL 的 NOT EXISTS 保护发现并发新增的版本关联。
+	store.softDeleteIndustryAffected = 0
+
+	err := svc.DeleteIndustryKnowledgeBase(context.Background(), auth.Principal{Role: domain.UserRolePlatformAdmin}, testIndustryKnowledgeBaseID)
+	require.ErrorIs(t, err, ErrIndustryKnowledgeInUse)
+
+	assert.Empty(t, store.deletedIndustryBaseID)
+	assert.Empty(t, rf.deleteDatasetCalls)
+}
+
 // TestUploadToDatasetRejectsScopeMismatchBeforeRemoteUpload 验证上传目标作用域与 dataset 不匹配时会在远端上传前失败。
 func TestUploadToDatasetRejectsScopeMismatchBeforeRemoteUpload(t *testing.T) {
 	svc, store, rf := newRAGFlowKnowledgeTestService(t)
@@ -711,18 +724,19 @@ func newFakeKnowledgeStore(t *testing.T) *fakeKnowledgeStore {
 		UpdatedAt:               time.Now(),
 	}
 	return &fakeKnowledgeStore{
-		apps:                 map[string]sqlc.App{testKnowledgeApp: app},
-		appsByToken:          map[string]sqlc.App{HashAppRuntimeToken(testRuntimeToken): app, testRuntimeTokenHash: app},
-		org:                  org,
-		orgDataset:           orgDataset,
-		appDataset:           appDataset,
-		industryBases:        map[string]sqlc.IndustryKnowledgeBasis{testIndustryKnowledgeBaseID: industryBase},
-		industryDataset:      industryDataset,
-		industryDatasets:     map[string]sqlc.RagflowDataset{testIndustryKnowledgeBaseID: industryDataset},
-		versionIndustryBases: map[string][]sqlc.IndustryKnowledgeBasis{},
-		docs:                 map[string]sqlc.RagflowDocument{},
-		nextDocument:         "00000000-0000-0000-0000-000000000e06",
-		now:                  time.Date(2026, 5, 26, 8, 0, 0, 0, time.UTC),
+		apps:                       map[string]sqlc.App{testKnowledgeApp: app},
+		appsByToken:                map[string]sqlc.App{HashAppRuntimeToken(testRuntimeToken): app, testRuntimeTokenHash: app},
+		org:                        org,
+		orgDataset:                 orgDataset,
+		appDataset:                 appDataset,
+		industryBases:              map[string]sqlc.IndustryKnowledgeBasis{testIndustryKnowledgeBaseID: industryBase},
+		industryDataset:            industryDataset,
+		industryDatasets:           map[string]sqlc.RagflowDataset{testIndustryKnowledgeBaseID: industryDataset},
+		versionIndustryBases:       map[string][]sqlc.IndustryKnowledgeBasis{},
+		docs:                       map[string]sqlc.RagflowDocument{},
+		nextDocument:               "00000000-0000-0000-0000-000000000e06",
+		now:                        time.Date(2026, 5, 26, 8, 0, 0, 0, time.UTC),
+		softDeleteIndustryAffected: 1,
 	}
 }
 
@@ -761,6 +775,7 @@ type fakeKnowledgeStore struct {
 	createdIndustryDocs         []sqlc.CreateRAGFlowIndustryDocumentParams
 	deletedDatasetID            string
 	deletedIndustryBaseID       string
+	softDeleteIndustryAffected  int64
 	industryInUseCount          int64
 	getOrgDatasetCalls          int
 	nextDocument                string
@@ -839,6 +854,10 @@ func (s *fakeKnowledgeStore) GetIndustryKnowledgeBase(_ context.Context, id stri
 	return row, nil
 }
 
+func (s *fakeKnowledgeStore) GetIndustryKnowledgeBaseForUpdate(ctx context.Context, id string) (sqlc.IndustryKnowledgeBasis, error) {
+	return s.GetIndustryKnowledgeBase(ctx, id)
+}
+
 func (s *fakeKnowledgeStore) GetIndustryKnowledgeBaseByName(_ context.Context, name string) (sqlc.IndustryKnowledgeBasis, error) {
 	for _, row := range s.industryBases {
 		if row.Name == name && !row.DeletedAt.Valid {
@@ -897,16 +916,19 @@ func (s *fakeKnowledgeStore) RenameIndustryKnowledgeBase(_ context.Context, arg 
 	return nil
 }
 
-func (s *fakeKnowledgeStore) SoftDeleteIndustryKnowledgeBase(_ context.Context, id string) error {
+func (s *fakeKnowledgeStore) SoftDeleteIndustryKnowledgeBase(_ context.Context, id string) (int64, error) {
 	row, ok := s.industryBases[id]
 	if !ok {
-		return sql.ErrNoRows
+		return 0, sql.ErrNoRows
+	}
+	if s.softDeleteIndustryAffected == 0 {
+		return 0, nil
 	}
 	row.DeletedAt = null.TimeFrom(s.now)
 	row.UpdatedAt = s.now
 	s.industryBases[id] = row
 	s.deletedIndustryBaseID = id
-	return nil
+	return s.softDeleteIndustryAffected, nil
 }
 
 func (s *fakeKnowledgeStore) CountAssistantVersionsUsingIndustryKnowledgeBase(_ context.Context, _ string) (int64, error) {

@@ -141,7 +141,8 @@ func (h *AssistantVersionsHandler) Create(c *gin.Context) {
 	out, err := h.service.Create(c.Request.Context(), principalFromCtx(c), service.AssistantVersionInput{
 		Name: req.Name, Description: req.Description, SystemPrompt: req.SystemPrompt,
 		ImageID: req.ImageID, MainModel: req.MainModel, Routing: routingToMap(req.Routing),
-		IndustryKnowledgeBaseIDs: req.IndustryKnowledgeBaseIDs,
+		IndustryKnowledgeBaseIDs:      req.IndustryKnowledgeBaseIDs,
+		ReplaceIndustryKnowledgeBases: true,
 	})
 	if err != nil {
 		writeAVError(c, err)
@@ -170,11 +171,15 @@ func (h *AssistantVersionsHandler) Update(c *gin.Context) {
 		c.JSON(http.StatusBadRequest, apierror.New("INVALID_REQUEST", "请求体格式错误"))
 		return
 	}
-	out, err := h.service.Update(c.Request.Context(), principalFromCtx(c), c.Param("id"), service.AssistantVersionInput{
+	input := service.AssistantVersionInput{
 		Name: req.Name, Description: req.Description, SystemPrompt: req.SystemPrompt,
 		ImageID: req.ImageID, MainModel: req.MainModel, Routing: routingToMap(req.Routing),
-		IndustryKnowledgeBaseIDs: req.IndustryKnowledgeBaseIDs,
-	})
+	}
+	if req.IndustryKnowledgeBaseIDs != nil {
+		input.IndustryKnowledgeBaseIDs = *req.IndustryKnowledgeBaseIDs
+		input.ReplaceIndustryKnowledgeBases = true
+	}
+	out, err := h.service.Update(c.Request.Context(), principalFromCtx(c), c.Param("id"), input)
 	if err != nil {
 		writeAVError(c, err)
 		return

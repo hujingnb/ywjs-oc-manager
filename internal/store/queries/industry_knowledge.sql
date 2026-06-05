@@ -9,6 +9,13 @@ SELECT *
 FROM industry_knowledge_bases
 WHERE id = ? AND deleted_at IS NULL;
 
+-- name: GetIndustryKnowledgeBaseForUpdate :one
+-- 在事务内锁定未删除行业知识库，序列化版本关联写入和行业库删除。
+SELECT *
+FROM industry_knowledge_bases
+WHERE id = ? AND deleted_at IS NULL
+FOR UPDATE;
+
 -- name: GetIndustryKnowledgeBaseByName :one
 -- 按名称读取未删除行业知识库，用于创建和重命名时做业务提示。
 SELECT *
@@ -42,11 +49,18 @@ UPDATE industry_knowledge_bases
 SET name = ?, updated_at = now()
 WHERE id = ? AND deleted_at IS NULL;
 
--- name: SoftDeleteIndustryKnowledgeBase :exec
--- 软删除行业知识库；删除后名称可被重新使用。
-UPDATE industry_knowledge_bases
+-- name: SoftDeleteIndustryKnowledgeBase :execrows
+-- 软删除未被助手版本引用的行业知识库；删除后名称可被重新使用。
+UPDATE industry_knowledge_bases AS ikb
 SET deleted_at = now(), updated_at = now()
-WHERE id = ? AND deleted_at IS NULL;
+WHERE ikb.id = ? AND ikb.deleted_at IS NULL
+  AND NOT EXISTS (
+    SELECT 1
+    FROM assistant_version_industry_knowledge_bases avikb
+    JOIN assistant_versions av ON av.id = avikb.version_id
+    WHERE av.deleted_at IS NULL
+      AND avikb.industry_knowledge_base_id = ikb.id
+  );
 
 -- name: CountAssistantVersionsUsingIndustryKnowledgeBase :one
 -- 统计仍被未删除助手版本引用的行业知识库，避免删除仍在使用的全局知识。
@@ -61,10 +75,13 @@ WHERE av.deleted_at IS NULL
 DELETE FROM assistant_version_industry_knowledge_bases
 WHERE version_id = ?;
 
--- name: AddAssistantVersionIndustryKnowledgeBase :exec
--- 为助手版本追加一个行业知识库关联，复合主键保证同一版本不重复关联。
+-- name: AddAssistantVersionIndustryKnowledgeBase :execrows
+-- 为助手版本追加一个行业知识库关联；只允许关联未删除行业库，复合主键保证同一版本不重复关联。
 INSERT INTO assistant_version_industry_knowledge_bases (version_id, industry_knowledge_base_id)
-VALUES (?, ?);
+SELECT sqlc.arg(version_id), ikb.id
+FROM industry_knowledge_bases ikb
+WHERE ikb.id = sqlc.arg(industry_knowledge_base_id) AND ikb.deleted_at IS NULL
+FOR UPDATE;
 
 -- name: ListIndustryKnowledgeBasesByAssistantVersion :many
 -- 列出助手版本关联的未删除行业知识库，供发布配置和运行时检索范围使用。

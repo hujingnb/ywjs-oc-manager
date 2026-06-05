@@ -12,8 +12,8 @@ import (
 )
 
 type Querier interface {
-	// 为助手版本追加一个行业知识库关联，复合主键保证同一版本不重复关联。
-	AddAssistantVersionIndustryKnowledgeBase(ctx context.Context, arg AddAssistantVersionIndustryKnowledgeBaseParams) error
+	// 为助手版本追加一个行业知识库关联；只允许关联未删除行业库，复合主键保证同一版本不重复关联。
+	AddAssistantVersionIndustryKnowledgeBase(ctx context.Context, arg AddAssistantVersionIndustryKnowledgeBaseParams) (int64, error)
 	// 判断指定应用下是否存在 status='bound' 的渠道绑定。
 	// app_initialize 在推进到 binding_waiting 之后调用：若发现已 bound（如切换助手
 	// 版本触发镜像重建后、容器重启前渠道凭证依旧落在 bind mount 目录、无需用户
@@ -95,6 +95,8 @@ type Querier interface {
 	GetIndustryKnowledgeBase(ctx context.Context, id string) (IndustryKnowledgeBasis, error)
 	// 按名称读取未删除行业知识库，用于创建和重命名时做业务提示。
 	GetIndustryKnowledgeBaseByName(ctx context.Context, name string) (IndustryKnowledgeBasis, error)
+	// 在事务内锁定未删除行业知识库，序列化版本关联写入和行业库删除。
+	GetIndustryKnowledgeBaseForUpdate(ctx context.Context, id string) (IndustryKnowledgeBasis, error)
 	GetJob(ctx context.Context, id string) (Job, error)
 	// reaper 通过 payload_json->>'$.app_id' 查最近一份 app_initialize job。
 	// 用 ORDER BY created_at DESC + LIMIT 1 取最新；不存在返回 sql.ErrNoRows。
@@ -241,8 +243,8 @@ type Querier interface {
 	SetUserStatus(ctx context.Context, arg SetUserStatusParams) error
 	SoftDeleteApp(ctx context.Context, id string) error
 	SoftDeleteAssistantVersion(ctx context.Context, id string) error
-	// 软删除行业知识库；删除后名称可被重新使用。
-	SoftDeleteIndustryKnowledgeBase(ctx context.Context, id string) error
+	// 软删除未被助手版本引用的行业知识库；删除后名称可被重新使用。
+	SoftDeleteIndustryKnowledgeBase(ctx context.Context, id string) (int64, error)
 	SoftDeleteOrganization(ctx context.Context, id string) error
 	// 真软删除：仅设置 deleted_at（不动 status）；status 与 deleted_at 语义独立。
 	SoftDeleteUser(ctx context.Context, id string) error

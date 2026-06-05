@@ -160,13 +160,13 @@ def test_oc_kb_add_rejects_path_outside_workspace(tmp_path: Path) -> None:
 
 
 def test_oc_kb_add_rejects_oversized_file_before_request(tmp_path: Path) -> None:
-    # 本地文件超过 100MB 时先在 CLI 侧拒绝，避免 read_bytes 把大文件一次性载入内存。
+    # 本地文件超过 1GB 时先在 CLI 侧拒绝，且该上限必须与 manager 后端硬上限保持一致。
     script = _oc_kb_script()
     workspace = tmp_path / "workspace"
     workspace.mkdir()
     big = workspace / "big.md"
     with big.open("wb") as f:
-        f.truncate(100 * 1024 * 1024 + 1)
+        f.truncate(1024 * 1024 * 1024 + 1)
 
     env = os.environ.copy()
     env.update({
@@ -183,4 +183,4 @@ def test_oc_kb_add_rejects_oversized_file_before_request(tmp_path: Path) -> None
 
     assert result.returncode == 1
     assert "FILE_TOO_LARGE" in result.stderr
-    assert "100MB" in result.stderr
+    assert "1024MB" in result.stderr

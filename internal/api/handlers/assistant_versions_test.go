@@ -111,9 +111,10 @@ func TestAVCreatePassesIndustryKnowledgeBaseIDs(t *testing.T) {
 func TestAVUpdatePassesIndustryKnowledgeBaseIDs(t *testing.T) {
 	svc := &avServiceStub{one: service.AssistantVersionResult{ID: "v1", Name: "标准版"}}
 	router := newAVTestRouter(t, svc)
+	industryIDs := []string{"kb-risk"}
 	body, err := json.Marshal(UpdateAssistantVersionRequest{
 		Name: "标准版", SystemPrompt: "p", ImageID: "v2026.5.16", MainModel: "qwen",
-		IndustryKnowledgeBaseIDs: []string{"kb-risk"}, // 覆盖 PUT 路径的 DTO 到 service input 透传。
+		IndustryKnowledgeBaseIDs: &industryIDs, // 覆盖 PUT 路径的 DTO 到 service input 透传。
 	})
 	require.NoError(t, err)
 	req := httptest.NewRequest(http.MethodPut, "/api/v1/assistant-versions/v1", bytes.NewReader(body))
@@ -124,6 +125,45 @@ func TestAVUpdatePassesIndustryKnowledgeBaseIDs(t *testing.T) {
 	require.Equal(t, http.StatusOK, resp.Code)
 	assert.Equal(t, "v1", svc.updateID)
 	assert.Equal(t, []string{"kb-risk"}, svc.updateInput.IndustryKnowledgeBaseIDs)
+	assert.True(t, svc.updateInput.ReplaceIndustryKnowledgeBases)
+}
+
+// TestAVUpdateOmitsIndustryKnowledgeBaseIDs 验证编辑请求省略行业库字段时不会触发替换。
+func TestAVUpdateOmitsIndustryKnowledgeBaseIDs(t *testing.T) {
+	svc := &avServiceStub{one: service.AssistantVersionResult{ID: "v1", Name: "标准版"}}
+	router := newAVTestRouter(t, svc)
+	body, err := json.Marshal(UpdateAssistantVersionRequest{
+		Name: "标准版", SystemPrompt: "p", ImageID: "v2026.5.16", MainModel: "qwen",
+	})
+	require.NoError(t, err)
+	req := httptest.NewRequest(http.MethodPut, "/api/v1/assistant-versions/v1", bytes.NewReader(body))
+	req.Header.Set("Content-Type", "application/json")
+	req = withPrincipal(req, auth.Principal{Role: domain.UserRolePlatformAdmin})
+	resp := httptest.NewRecorder()
+	router.ServeHTTP(resp, req)
+	require.Equal(t, http.StatusOK, resp.Code)
+	assert.False(t, svc.updateInput.ReplaceIndustryKnowledgeBases)
+	assert.Empty(t, svc.updateInput.IndustryKnowledgeBaseIDs)
+}
+
+// TestAVUpdateClearsIndustryKnowledgeBaseIDs 验证编辑请求显式空数组会触发清空行业库关联。
+func TestAVUpdateClearsIndustryKnowledgeBaseIDs(t *testing.T) {
+	svc := &avServiceStub{one: service.AssistantVersionResult{ID: "v1", Name: "标准版"}}
+	router := newAVTestRouter(t, svc)
+	industryIDs := []string{}
+	body, err := json.Marshal(UpdateAssistantVersionRequest{
+		Name: "标准版", SystemPrompt: "p", ImageID: "v2026.5.16", MainModel: "qwen",
+		IndustryKnowledgeBaseIDs: &industryIDs, // 空数组是平台管理员主动清空关联，不等同于字段省略。
+	})
+	require.NoError(t, err)
+	req := httptest.NewRequest(http.MethodPut, "/api/v1/assistant-versions/v1", bytes.NewReader(body))
+	req.Header.Set("Content-Type", "application/json")
+	req = withPrincipal(req, auth.Principal{Role: domain.UserRolePlatformAdmin})
+	resp := httptest.NewRecorder()
+	router.ServeHTTP(resp, req)
+	require.Equal(t, http.StatusOK, resp.Code)
+	assert.True(t, svc.updateInput.ReplaceIndustryKnowledgeBases)
+	assert.Empty(t, svc.updateInput.IndustryKnowledgeBaseIDs)
 }
 
 // TestAVCreateMapsDenied 验证 service 返回 Denied 时映射 403。

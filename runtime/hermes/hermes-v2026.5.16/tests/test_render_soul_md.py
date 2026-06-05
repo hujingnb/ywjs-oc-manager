@@ -93,6 +93,17 @@ def test_knowledge_guide_rendered_when_configured(tmp_input: Path, tmp_data: Pat
     assert "网络搜索" in soul
 
 
+def test_knowledge_guide_mentions_industry_results_when_configured(tmp_input: Path, tmp_data: Path) -> None:
+    # SOUL.md 的知识库指引需要说明行业知识库可能参与检索，帮助模型区分实例、企业、行业来源。
+    _setup(tmp_input, persona="P body", platform="PLT")
+    render(_manifest_with_knowledge(), tmp_input, tmp_data)
+
+    soul = (tmp_data / "SOUL.md").read_text()
+    assert "行业知识库" in soul
+    assert "scope=industry" in soul
+    assert "助手版本" in soul
+
+
 def test_knowledge_guide_absent_when_not_configured(tmp_input: Path, tmp_data: Path) -> None:
     # 未配 manifest.knowledge 时不得渲染知识库指引，避免误导模型调用不存在的 oc-kb skill。
     _setup(tmp_input, persona="P body", platform="PLT")

@@ -128,30 +128,49 @@ func (s *KnowledgeService) DeleteIndustryKnowledgeBase(ctx context.Context, prin
 	if !auth.CanManageIndustryKnowledge(principal) {
 		return ErrKnowledgeForbidden
 	}
-	base, err := s.getIndustryKnowledgeBase(ctx, id)
-	if err != nil {
+	var dataset sqlc.RagflowDataset
+	var hasDataset bool
+	if err := s.withKnowledgeTx(ctx, func(store KnowledgeStore) error {
+		// 锁定行业库行，和版本关联写入的 SELECT ... FOR UPDATE 配合，避免删除与新增关联并发穿透。
+		base, err := store.GetIndustryKnowledgeBaseForUpdate(ctx, id)
+		if errors.Is(err, sql.ErrNoRows) {
+			return ErrIndustryKnowledgeNotFound
+		}
+		if err != nil {
+			return fmt.Errorf("查询行业知识库失败: %w", err)
+		}
+		inUse, err := store.CountAssistantVersionsUsingIndustryKnowledgeBase(ctx, base.ID)
+		if err != nil {
+			return fmt.Errorf("检查行业知识库引用失败: %w", err)
+		}
+		if inUse > 0 {
+			return ErrIndustryKnowledgeInUse
+		}
+		localDataset, err := store.GetRAGFlowIndustryDataset(ctx, null.StringFrom(base.ID))
+		if err != nil && !errors.Is(err, sql.ErrNoRows) {
+			return fmt.Errorf("查询行业知识库 RAGFlow dataset 失败: %w", err)
+		}
+		if err == nil {
+			dataset = localDataset
+			hasDataset = true
+		}
+		affected, err := store.SoftDeleteIndustryKnowledgeBase(ctx, base.ID)
+		if err != nil {
+			return fmt.Errorf("删除行业知识库失败: %w", err)
+		}
+		if affected == 0 {
+			return ErrIndustryKnowledgeInUse
+		}
+		if hasDataset {
+			if err := store.DeleteRAGFlowDatasetMapping(ctx, dataset.ID); err != nil && !errors.Is(err, sql.ErrNoRows) {
+				return fmt.Errorf("删除行业知识库 dataset 映射失败: %w", err)
+			}
+		}
+		return nil
+	}); err != nil {
 		return err
 	}
-	inUse, err := s.store.CountAssistantVersionsUsingIndustryKnowledgeBase(ctx, base.ID)
-	if err != nil {
-		return fmt.Errorf("检查行业知识库引用失败: %w", err)
-	}
-	if inUse > 0 {
-		return ErrIndustryKnowledgeInUse
-	}
-	dataset, err := s.store.GetRAGFlowIndustryDataset(ctx, null.StringFrom(base.ID))
-	if err != nil && !errors.Is(err, sql.ErrNoRows) {
-		return fmt.Errorf("查询行业知识库 RAGFlow dataset 失败: %w", err)
-	}
-	if err == nil {
-		if err := s.store.DeleteRAGFlowDatasetMapping(ctx, dataset.ID); err != nil && !errors.Is(err, sql.ErrNoRows) {
-			return fmt.Errorf("删除行业知识库 dataset 映射失败: %w", err)
-		}
-	}
-	if err := s.store.SoftDeleteIndustryKnowledgeBase(ctx, base.ID); err != nil {
-		return fmt.Errorf("删除行业知识库失败: %w", err)
-	}
-	if err == nil {
+	if hasDataset {
 		if remoteDatasetID, remoteErr := requireRemoteDatasetID(dataset); remoteErr == nil {
 			if err := s.ragflowClient().DeleteDatasets(ctx, []string{remoteDatasetID}); err != nil {
 				return fmt.Errorf("删除 RAGFlow 行业 dataset 失败: %w", err)

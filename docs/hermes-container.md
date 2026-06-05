@@ -229,12 +229,12 @@ knowledge:
 | `resources/persona.md` + `resources/*-rules.md` | `SOUL.md` | system prompt 主体 |
 | 镜像内固定模板 | `skills/oc-kb/SKILL.md` | 指导 Hermes 使用 `oc-kb search` / `oc-kb add` |
 
-权限语义由 manager 控制：企业知识库只读，实例知识库读写。`oc-kb add` 上传的是
-当前实例 dataset，`oc-kb search` 同时检索当前实例 dataset 与所属企业 dataset。
+权限语义由 manager 控制：企业知识库和行业知识库只读，实例知识库读写。`oc-kb add` 上传的是
+当前实例 dataset，`oc-kb search` 同时检索当前实例 dataset、所属企业 dataset，以及当前实例绑定助手版本选择的行业 dataset。每个关联行业知识库都会返回最多 `top_k` 条，并在结果中保留 `scope=industry` 与行业库 ID / 名称。
 
 ### 7.1 生效时机
 
-知识库文件本身由 RAGFlow 解析和检索，不依赖 app restart 生效。restart 仅在
+知识库文件本身由 RAGFlow 解析和检索，不依赖 app restart 生效。助手版本的行业知识库关联由 runtime search 实时读取，关联变更也不需要 restart。restart 仅在
 manager runtime endpoint 或 app token 变更时需要，用于刷新 `manifest.yaml` 和 `.env`。
 
 配置变更进入对话的业务路径仍是 app restart / recreate：

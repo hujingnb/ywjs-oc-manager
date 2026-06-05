@@ -83,6 +83,8 @@ type KnowledgeStore interface {
 	CreateIndustryKnowledgeBase(ctx context.Context, arg sqlc.CreateIndustryKnowledgeBaseParams) error
 	// GetIndustryKnowledgeBase 按 ID 读取未删除行业知识库。
 	GetIndustryKnowledgeBase(ctx context.Context, id string) (sqlc.IndustryKnowledgeBasis, error)
+	// GetIndustryKnowledgeBaseForUpdate 在事务中锁定未删除行业库。
+	GetIndustryKnowledgeBaseForUpdate(ctx context.Context, id string) (sqlc.IndustryKnowledgeBasis, error)
 	// GetIndustryKnowledgeBaseByName 按名称读取未删除行业知识库。
 	GetIndustryKnowledgeBaseByName(ctx context.Context, name string) (sqlc.IndustryKnowledgeBasis, error)
 	// ListIndustryKnowledgeBases 分页列出行业知识库并带文件数。
@@ -92,7 +94,7 @@ type KnowledgeStore interface {
 	// RenameIndustryKnowledgeBase 重命名未删除行业知识库。
 	RenameIndustryKnowledgeBase(ctx context.Context, arg sqlc.RenameIndustryKnowledgeBaseParams) error
 	// SoftDeleteIndustryKnowledgeBase 软删除行业知识库。
-	SoftDeleteIndustryKnowledgeBase(ctx context.Context, id string) error
+	SoftDeleteIndustryKnowledgeBase(ctx context.Context, id string) (int64, error)
 	// CountAssistantVersionsUsingIndustryKnowledgeBase 统计仍引用行业库的未删除助手版本。
 	CountAssistantVersionsUsingIndustryKnowledgeBase(ctx context.Context, industryKnowledgeBaseID string) (int64, error)
 	// CreateRAGFlowIndustryDatasetMapping 创建行业库 dataset 映射。
@@ -115,16 +117,33 @@ type KnowledgeDatasetProvisioner interface {
 	EnsureAppDataset(ctx context.Context, app sqlc.App) (sqlc.RagflowDataset, error)
 }
 
+// KnowledgeTxRunner 抽象知识库本地写操作事务，用于序列化行业库删除和版本关联写入。
+type KnowledgeTxRunner interface {
+	WithKnowledgeTx(ctx context.Context, fn func(KnowledgeStore) error) error
+}
+
 // KnowledgeService 以 RAGFlow 作为唯一文件主库，对外提供 manager 权限控制后的知识库能力。
 type KnowledgeService struct {
 	store              KnowledgeStore
 	ragflow            RAGFlowKnowledgeClient
 	datasetChunkMethod string
+	tx                 KnowledgeTxRunner
 }
 
 // NewKnowledgeService 创建 RAGFlow-backed 知识库服务。
 func NewKnowledgeService(store KnowledgeStore, client RAGFlowKnowledgeClient) *KnowledgeService {
 	return &KnowledgeService{store: store, ragflow: client, datasetChunkMethod: "naive"}
+}
+
+// SetTxRunner 注入知识库本地事务 runner。
+func (s *KnowledgeService) SetTxRunner(tx KnowledgeTxRunner) { s.tx = tx }
+
+// withKnowledgeTx 在事务中执行本地知识库写操作；测试未注入 runner 时退化为直接使用 store。
+func (s *KnowledgeService) withKnowledgeTx(ctx context.Context, fn func(KnowledgeStore) error) error {
+	if s.tx != nil {
+		return s.tx.WithKnowledgeTx(ctx, fn)
+	}
+	return fn(s.store)
 }
 
 // SetDatasetChunkMethod 设置自动创建 RAGFlow dataset 时使用的分块方法。

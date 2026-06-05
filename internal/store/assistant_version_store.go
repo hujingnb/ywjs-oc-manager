@@ -46,7 +46,7 @@ func (s *AssistantVersionStore) ReplaceAssistantVersionIndustryKnowledgeBases(ct
 }
 
 // AddAssistantVersionIndustryKnowledgeBase 为版本追加单个行业知识库关联。
-func (s *AssistantVersionStore) AddAssistantVersionIndustryKnowledgeBase(ctx context.Context, arg sqlc.AddAssistantVersionIndustryKnowledgeBaseParams) error {
+func (s *AssistantVersionStore) AddAssistantVersionIndustryKnowledgeBase(ctx context.Context, arg sqlc.AddAssistantVersionIndustryKnowledgeBaseParams) (int64, error) {
 	return s.q.AddAssistantVersionIndustryKnowledgeBase(ctx, arg)
 }
 

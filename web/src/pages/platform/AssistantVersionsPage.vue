@@ -94,6 +94,28 @@
             </n-form-item>
           </n-grid-item>
 
+          <!-- 行业知识库：运行时检索额外范围，保存后立即生效，不触发版本 revision 变化。 -->
+          <n-grid-item :span="2">
+            <n-form-item label="行业知识库">
+              <div style="display: grid; gap: 8px; width: 100%">
+                <n-select
+                  v-model:value="form.industry_knowledge_base_ids"
+                  multiple
+                  filterable
+                  clearable
+                  :loading="industryBasesQuery.isLoading.value"
+                  :disabled="industryBasesQuery.isError.value"
+                  :options="industryKnowledgeOptions"
+                  placeholder="选择该版本运行时要额外检索的行业知识库"
+                />
+                <n-alert type="warning" :bordered="false">
+                  每个行业知识库都会单独召回最多 top_k 条结果。选择过多会显著增加上下文长度和响应成本，请只选择该版本确实需要的行业库。
+                </n-alert>
+                <p v-if="industryBasesQuery.isError.value" class="state-text danger">行业知识库列表获取失败，请重试</p>
+              </div>
+            </n-form-item>
+          </n-grid-item>
+
           <!-- skill 管理：从市场（平台库/ClawHub）选 skill 配进版本；编辑态即时生效，新建态暂不支持（需先保存版本） -->
           <n-grid-item :span="2">
             <n-form-item label="Skill 列表">
@@ -155,13 +177,14 @@
 <script setup lang="ts">
 import { computed, h, reactive, ref } from 'vue'
 import { Plus, X } from 'lucide-vue-next'
-import { NButton, NCard, NForm, NFormItem, NGrid, NGridItem, NInput, NSelect, NSpace } from 'naive-ui'
+import { NAlert, NButton, NCard, NForm, NFormItem, NGrid, NGridItem, NInput, NSelect, NSpace } from 'naive-ui'
 
 import DataTableList from '@/components/DataTableList.vue'
 import ConfirmActionModal from '@/components/ConfirmActionModal.vue'
 import SkillMarketBrowser from '@/components/SkillMarketBrowser.vue'
 import { actionColumn } from '@/components/columns'
 import { useModelsQuery } from '@/api/hooks/useOrganizations'
+import { useIndustryKnowledgeBasesQuery } from '@/api/hooks/useIndustryKnowledge'
 import {
   AUXILIARY_SLOTS,
   emptyRouting,
@@ -249,8 +272,13 @@ const form = reactive<AssistantVersionFormPayload>({
 // 镜像与模型列表仅在表单打开时请求。
 const imagesQuery = useRuntimeImagesQuery(() => formVisible.value)
 const modelsQuery = useModelsQuery(() => formVisible.value)
+const industryBasesQuery = useIndustryKnowledgeBasesQuery(() => formVisible.value)
 const imageOptions = computed(() => (imagesQuery.data.value ?? []).map(img => ({ label: img.label, value: img.id })))
 const modelOptions = computed(() => (modelsQuery.data.value ?? []).map(m => ({ label: m.name, value: m.id })))
+const industryKnowledgeOptions = computed(() => (industryBasesQuery.data.value?.items ?? []).map(item => ({
+  label: item.name,
+  value: item.id,
+})))
 
 // canSubmit 在必填项齐备且依赖列表未出错时才允许提交。
 const canSubmit = computed(() =>
@@ -295,7 +323,7 @@ function openEdit(version: AssistantVersionDTO) {
   form.image_id = version.image_id
   form.main_model = version.main_model
   form.routing = { ...emptyRouting(), ...version.routing }
-  // Task 7 会增加可见多选控件；这里先保留已有后端关联，避免编辑其它字段时误清空。
+  // 后端返回行业库 id/name；表单只提交 id 列表，名称由多选选项展示。
   form.industry_knowledge_base_ids = (version.industry_knowledge_bases ?? []).map(item => item.id)
   editingId.value = version.id
   submitError.value = null

@@ -31,7 +31,8 @@
 | `app_service.go` | 应用查询与状态读取 |
 | `auth_service.go` | 登录、刷新令牌、登出 |
 | `channel_service.go` | 渠道绑定生命周期 |
-| `knowledge_service.go` | RAGFlow-backed 企业 / 应用知识库 CRUD、检索与 Hermes runtime 写入 |
+| `knowledge_service.go` | RAGFlow-backed 企业 / 应用 / 行业知识库 CRUD、检索与 Hermes runtime 写入 |
+| `industry_knowledge_service.go` | 平台级行业知识库 CRUD、外部上传、文件生命周期与删除占用校验 |
 | `app_runtime_token.go` | Hermes 调 manager runtime API 使用的实例级 token 生成与加密存储 |
 | `member_service.go` | 成员 CRUD、角色、状态切换 |
 | `onboarding_service.go` | 成员 + 应用一体化创建流程 |
@@ -123,8 +124,8 @@ scheduler 是 PostgreSQL→Redis 的单向补偿通道，不直接修改 job 状
 |---|---|
 | `client.go` | RAGFlow HTTP API 客户端，封装 dataset、document、parse、download 与 retrieval 调用 |
 
-知识库文件主库已迁移到 RAGFlow；manager 只保存 org/app 与 RAGFlow dataset/document 的映射，
-并通过 runtime API 向 Hermes 暴露受控检索和实例知识库写入能力。
+知识库文件主库已迁移到 RAGFlow；manager 只保存 org/app/industry 与 RAGFlow dataset/document 的映射，
+并通过 runtime API 向 Hermes 暴露受控检索和实例知识库写入能力。industry scope 是平台级行业资料，由助手版本选择后参与 runtime 检索。
 
 ### 1.11 `internal/migrations`
 
@@ -141,7 +142,7 @@ scheduler 是 PostgreSQL→Redis 的单向补偿通道，不直接修改 job 状
 
 | 文件 | 职责 |
 |---|---|
-| `config.go` | `Config` 根结构体及各子配置（App / Database / Redis / Auth / Security / Hermes / Agent / Runtime / NewAPI） |
+| `config.go` | `Config` 根结构体及各子配置（App / Database / Redis / Auth / Security / Hermes / Agent / Runtime / NewAPI / IndustryKnowledge） |
 | `loader.go` | 从 YAML 文件加载并校验必需项，缺失时 fail-fast |
 
 ### 1.14 `internal/log`
@@ -445,8 +446,9 @@ handler swag 注解
 | `CanManageApp` / `CanViewApp` | 应用 | 平台管理员只读；org_admin 限本企业；成员限自身 app |
 | `CanCreateAppForOrg` / `CanCreateAppForMember` | 应用创建 | org_admin 创建；平台管理员可跨企业复建 |
 | `CanTriggerRuntimeOperation` | 运行时操作 | 等同 `CanManageApp` |
-| `CanReadOrgKnowledge` / `CanWriteOrgKnowledge` | 企业知识库 | 写包含上传、删除、重解析，只允许本企业 org_admin |
+| `CanReadOrgKnowledge` / `CanWriteOrgKnowledge` | 企业知识库 | 读沿用组织读权限；写允许 platform_admin 跨企业维护或本企业 org_admin 管理 |
 | `CanReadAppKnowledge` / `CanWriteAppKnowledge` | 应用知识库 | 写包含上传、删除、重解析，等同 `CanManageApp` |
+| `CanManageIndustryKnowledge` | 行业知识库 | 平台级资源，仅 platform_admin 可创建、重命名、上传、删除和重解析 |
 | `CanViewOrgPersona` / `CanManageOrgPersona` | 人设 | 等同企业读 / 写谓词 |
 | `CanViewOrgUsage` / `CanViewMemberUsage` | 用量 | 平台管理员 + org_admin 跨企业（平台）或本企业 |
 | `CanViewOrgAudit` / `CanViewAppAudit` / `CanViewOwnAudit` | 审计 | 企业级仅管理员；应用级等同 `CanViewApp` |

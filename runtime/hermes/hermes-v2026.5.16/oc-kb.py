@@ -28,7 +28,7 @@ import uuid
 
 # manager runtime API 单文件上传上限；与 manager 端的 maxKnowledgeUploadBytes
 # 必须保持一致，避免 CLI 先放行后被服务端 413 截断造成可读性差的错误。
-MAX_UPLOAD_BYTES = 100 * 1024 * 1024
+MAX_UPLOAD_BYTES = 1024 * 1024 * 1024
 
 
 class CLIError(RuntimeError):
@@ -50,7 +50,7 @@ def main() -> int:
     """oc-kb CLI 入口。
 
     支持两个子命令：
-    - search：检索当前 app 与所属 org 知识库；
+    - search：检索当前 app、所属 org 与助手版本选择的行业知识库；
     - add：把 workspace 内文件加入当前 app 知识库。
 
     退出码语义：
@@ -63,7 +63,7 @@ def main() -> int:
     sub = parser.add_subparsers(dest="command", required=True)
 
     # search 把多 token 的提问 join 成一句话，避免使用方需要额外引号转义。
-    search = sub.add_parser("search", help="search org and app knowledge bases")
+    search = sub.add_parser("search", help="search app, org, and selected industry knowledge bases")
     search.add_argument("question", nargs="+")
     search.add_argument("--top-k", type=int, default=8)
 
@@ -104,7 +104,7 @@ def _config() -> tuple[str, str]:
 
 
 def _search(question: str, top_k: int) -> int:
-    """跨当前 app 与所属 org 知识库做一次检索。
+    """跨当前 app、所属 org 与助手版本选择的行业知识库做一次检索。
 
     入参只透传 question / top_k，dataset_id / org_id 等目标参数由 manager 端
     通过 app runtime token 自行解析，不接受外部覆盖（防 prompt 注入跨 scope）。
@@ -120,11 +120,11 @@ def _add(path: str, filename: str) -> int:
 
     本地预检覆盖两类问题，避免把大文件 / 越界文件白送上 manager 再被打回：
     - 路径越界 / 不是文件 → 由 _workspace_file 抛 CLIError；
-    - 单文件超 100MB → 这里直接拒绝（与 manager 端上限保持一致）。
+    - 单文件超 1GB → 这里直接拒绝（与 manager 端上限保持一致）。
     """
     local = _workspace_file(path)
     if local.stat().st_size > MAX_UPLOAD_BYTES:
-        raise CLIError("FILE_TOO_LARGE", "单文件最大支持 100MB")
+        raise CLIError("FILE_TOO_LARGE", "单文件最大支持 1024MB")
     result = _multipart_request("/api/v1/runtime/knowledge/files", local, filename or local.name)
     _print_json({"ok": True, "data": result})
     return 0

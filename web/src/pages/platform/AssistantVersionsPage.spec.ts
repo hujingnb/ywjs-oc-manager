@@ -11,6 +11,10 @@ const updateVersion = vi.hoisted(() => vi.fn())
 const deleteVersion = vi.hoisted(() => vi.fn())
 const addSkill = vi.hoisted(() => vi.fn())
 const deleteSkill = vi.hoisted(() => vi.fn())
+const industryKnowledgeBases = vi.hoisted(() => [
+  { id: 'industry-1', name: '保险', document_count: 1, created_at: '2026-06-05T00:00:00Z', updated_at: '2026-06-05T00:00:00Z' },
+  { id: 'industry-2', name: '银行', document_count: 2, created_at: '2026-06-05T00:00:00Z', updated_at: '2026-06-05T00:00:00Z' },
+])
 
 // SkillMarketBrowser stub：声明全部 props，使 wrapper.findComponent({ name: 'SkillMarketBrowser' }).props()
 // 可读到 allowVersionPick 等传入值，同时提供占位元素便于 findComponent 定位。
@@ -59,6 +63,15 @@ vi.mock('@/api/hooks/useOrganizations', () => ({
   }),
 }))
 
+vi.mock('@/api/hooks/useIndustryKnowledge', () => ({
+  useIndustryKnowledgeBasesQuery: () => ({
+    data: ref({ items: industryKnowledgeBases, total: industryKnowledgeBases.length }),
+    isLoading: ref(false),
+    isError: ref(false),
+    error: ref(null),
+  }),
+}))
+
 // useSkills mock：SkillMarketBrowser 已被 stub，此处 mock 保留兜底以防其它组件路径引入。
 // 无需提供 usePlatformSkillsQuery（Task 7 移除了平台库下拉），亦无需 useSkillMarketQuery（browser 已 stub）。
 vi.mock('@/api/hooks/useSkills', () => ({}))
@@ -101,38 +114,63 @@ function mountPage() {
         }),
         // NSelect 的三种注册名（naive-ui 内部以多名称解析组件），统一渲染为原生 <select>。
         NSelect: defineComponent({
-          props: { value: [String], options: Array, disabled: Boolean },
+          props: { value: [String, Array], options: Array, disabled: Boolean, multiple: Boolean },
           emits: ['update:value'],
           setup(p, { emit }) {
             return () => h('select', {
-              disabled: p.disabled, value: p.value,
-              onChange: (e: Event) => emit('update:value', (e.target as HTMLSelectElement).value),
+              disabled: p.disabled,
+              multiple: p.multiple,
+              value: p.value,
+              onChange: (e: Event) => {
+                const target = e.target as HTMLSelectElement
+                const value = p.multiple
+                  ? Array.from(target.selectedOptions).map(o => o.value)
+                  : target.value
+                emit('update:value', value)
+              },
             }, ((p.options ?? []) as Array<{ label: string; value: string }>).map(o =>
               h('option', { value: o.value }, o.label)))
           },
         }),
         'n-select': defineComponent({
-          props: { value: [String], options: Array, disabled: Boolean },
+          props: { value: [String, Array], options: Array, disabled: Boolean, multiple: Boolean },
           emits: ['update:value'],
           setup(p, { emit }) {
             return () => h('select', {
-              disabled: p.disabled, value: p.value,
-              onChange: (e: Event) => emit('update:value', (e.target as HTMLSelectElement).value),
+              disabled: p.disabled,
+              multiple: p.multiple,
+              value: p.value,
+              onChange: (e: Event) => {
+                const target = e.target as HTMLSelectElement
+                const value = p.multiple
+                  ? Array.from(target.selectedOptions).map(o => o.value)
+                  : target.value
+                emit('update:value', value)
+              },
             }, ((p.options ?? []) as Array<{ label: string; value: string }>).map(o =>
               h('option', { value: o.value }, o.label)))
           },
         }),
         Select: defineComponent({
-          props: { value: [String], options: Array, disabled: Boolean },
+          props: { value: [String, Array], options: Array, disabled: Boolean, multiple: Boolean },
           emits: ['update:value'],
           setup(p, { emit }) {
             return () => h('select', {
-              disabled: p.disabled, value: p.value,
-              onChange: (e: Event) => emit('update:value', (e.target as HTMLSelectElement).value),
+              disabled: p.disabled,
+              multiple: p.multiple,
+              value: p.value,
+              onChange: (e: Event) => {
+                const target = e.target as HTMLSelectElement
+                const value = p.multiple
+                  ? Array.from(target.selectedOptions).map(o => o.value)
+                  : target.value
+                emit('update:value', value)
+              },
             }, ((p.options ?? []) as Array<{ label: string; value: string }>).map(o =>
               h('option', { value: o.value }, o.label)))
           },
         }),
+        NAlert: defineComponent({ setup(_, { slots }) { return () => h('div', { class: 'alert' }, slots.default?.()) } }),
         NSpace: defineComponent({ setup(_, { slots }) { return () => h('div', slots.default?.()) } }),
         // ConfirmActionModal stub：visible 时渲染一个「确认删除」按钮，点击即 emit confirm。
         ConfirmActionModal: defineComponent({
@@ -230,6 +268,22 @@ describe('AssistantVersionsPage', () => {
     await wrapper.find('form').trigger('submit')
     expect(updateVersion).toHaveBeenCalledWith(expect.objectContaining({ id: 'ver-1' }))
     expect(updateVersion.mock.calls.at(-1)?.[0].payload.industry_knowledge_base_ids).toEqual(['industry-1'])
+  })
+
+  // 编辑助手版本时展示行业库 top_k 上下文膨胀提示，并允许选择多个行业库提交。
+  it('编辑版本时提示行业库 top_k 风险并提交多选行业库', async () => {
+    updateVersion.mockResolvedValue(sampleVersion)
+    const wrapper = mountPage()
+    await wrapper.findAll('button').find(b => b.text() === '编辑')!.trigger('click')
+    await nextTick()
+
+    expect(wrapper.text()).toContain('每个行业知识库都会单独召回最多 top_k 条结果')
+    const industrySelect = wrapper.findAll('select').find(s => s.attributes('multiple') !== undefined)
+    expect(industrySelect).toBeTruthy()
+    await industrySelect!.setValue(['industry-1', 'industry-2'])
+
+    await wrapper.find('form').trigger('submit')
+    expect(updateVersion.mock.calls.at(-1)?.[0].payload.industry_knowledge_base_ids).toEqual(['industry-1', 'industry-2'])
   })
 
   // 点击删除先弹二次确认窗，仅在确认后才调用删除接口。
