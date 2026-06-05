@@ -292,3 +292,19 @@ func TestAVAddSkillFromLibraryMapsSourceUnknown(t *testing.T) {
 	require.Equal(t, http.StatusBadRequest, resp.Code)
 	assert.Contains(t, resp.Body.String(), "APP_SKILL_SOURCE_UNKNOWN")
 }
+
+// TestAVAddSkillFromLibraryMapsUpstreamUnavailable 验证版本加 clawhub skill 时上游下载失败映射为 502，
+// 而非泛化 500——与市场下载/实例安装两个入口的上游失败语义保持一致。
+func TestAVAddSkillFromLibraryMapsUpstreamUnavailable(t *testing.T) {
+	svc := &avServiceStub{err: service.ErrSkillMarketUpstreamUnavailable}
+	router := newAVTestRouter(t, svc)
+	body, err := json.Marshal(AddSkillFromLibraryRequest{Source: "clawhub", SourceRef: "self-improving", Name: "Self Improving", Version: "1.2.16"})
+	require.NoError(t, err)
+	req := httptest.NewRequest(http.MethodPost, "/api/v1/assistant-versions/v1/skills", bytes.NewReader(body))
+	req.Header.Set("Content-Type", "application/json")
+	req = withPrincipal(req, auth.Principal{Role: domain.UserRolePlatformAdmin})
+	resp := httptest.NewRecorder()
+	router.ServeHTTP(resp, req)
+	require.Equal(t, http.StatusBadGateway, resp.Code)
+	assert.Contains(t, resp.Body.String(), "上游技能市场暂时不可用")
+}

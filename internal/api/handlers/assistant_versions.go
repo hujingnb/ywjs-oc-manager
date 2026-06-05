@@ -67,6 +67,9 @@ func writeAVError(c *gin.Context, err error) {
 		c.JSON(http.StatusBadRequest, apierror.New("APP_SKILL_SOURCE_UNKNOWN", "未知的 skill 来源"))
 	case errors.Is(err, service.ErrAssistantVersionInvalid):
 		c.JSON(http.StatusBadRequest, apierror.New("ASSISTANT_VERSION_INVALID", err.Error()))
+	case errors.Is(err, service.ErrSkillMarketUpstreamUnavailable):
+		// 上游技能市场（clawhub）下载失败且缓存未命中 → 502，区别于 manager 自身 500。
+		c.JSON(http.StatusBadGateway, apierror.New("UPSTREAM_UNAVAILABLE", "上游技能市场暂时不可用，请稍后重试"))
 	default:
 		c.JSON(http.StatusInternalServerError, apierror.New("INTERNAL", "操作助手版本失败"))
 	}
