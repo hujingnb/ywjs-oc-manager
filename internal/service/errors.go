@@ -237,3 +237,8 @@ var ErrSkillMarketDenied = errors.New("无权执行该 skill 市场操作")
 
 // ErrSkillMarketInvalid 表示市场操作入参非法（如下载缺少版本号/标识）。
 var ErrSkillMarketInvalid = errors.New("skill 市场操作入参非法")
+
+// ErrSkillMarketUpstreamUnavailable 表示上游第三方市场归档下载失败（非 2xx / 网络错误），
+// 且本地缓存未命中、无法降级。映射为 502 Bad Gateway，与「manager 自身 500」语义区分开——
+// 让前端能据此提示用户「上游暂时不可用、稍后重试」，而非误以为 manager 故障。
+var ErrSkillMarketUpstreamUnavailable = errors.New("上游技能市场暂时不可用")

@@ -319,3 +319,23 @@ func TestAppSkillsHandler_ErrorMapping(t *testing.T) {
 		})
 	}
 }
+
+// TestAppSkillsHandler_Install_UpstreamUnavailable 验证安装时上游下载失败映射为 502。
+func TestAppSkillsHandler_Install_UpstreamUnavailable(t *testing.T) {
+	// 上游故障场景：service 返回 ErrSkillMarketUpstreamUnavailable。
+	stub := &appSkillServiceStub{installErr: service.ErrSkillMarketUpstreamUnavailable}
+	router := newAppSkillsTestRouter(t, stub)
+
+	body, _ := json.Marshal(map[string]string{
+		"source": "clawhub", "source_ref": "self-improving", "name": "self-improving", "version": "1.2.16",
+	})
+	w := httptest.NewRecorder()
+	req := httptest.NewRequest(http.MethodPost, "/api/v1/apps/app-1/skills", bytes.NewReader(body))
+	req.Header.Set("Content-Type", "application/json")
+	req = withPrincipal(req, auth.Principal{UserID: "u1", Role: domain.UserRoleOrgAdmin, OrgID: "org-1"})
+	router.ServeHTTP(w, req)
+
+	// 上游故障映射为 502，文案明确。
+	assert.Equal(t, http.StatusBadGateway, w.Code)
+	assert.Contains(t, w.Body.String(), "上游技能市场暂时不可用")
+}

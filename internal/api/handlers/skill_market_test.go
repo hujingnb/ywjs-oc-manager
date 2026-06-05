@@ -209,3 +209,21 @@ func TestSkillMarketHandler_Download_Invalid(t *testing.T) {
 	// 入参非法映射为 400。
 	assert.Equal(t, http.StatusBadRequest, rec.Code)
 }
+
+// TestSkillMarketHandler_Download_Upstream502 验证 service 返回 ErrSkillMarketUpstreamUnavailable
+// 时 handler 响应 502 且文案明确（区别于泛化 500「服务器内部错误」）。
+func TestSkillMarketHandler_Download_Upstream502(t *testing.T) {
+	// 上游下载失败场景：stub 的 Download 返回上游不可用哨兵。
+	stub := &skillMarketServiceStub{downloadErr: service.ErrSkillMarketUpstreamUnavailable}
+	gin.SetMode(gin.TestMode)
+	r := gin.New()
+	RegisterSkillMarketRoutes(r, NewSkillMarketHandler(stub))
+
+	req := httptest.NewRequest(http.MethodGet, "/api/v1/skill-market/download?source=clawhub&ref=x&version=1.0", nil)
+	rec := httptest.NewRecorder()
+	r.ServeHTTP(rec, withPrincipal(req, auth.Principal{UserID: "u1"}))
+
+	// 上游故障映射为 502 Bad Gateway，文案明确。
+	assert.Equal(t, http.StatusBadGateway, rec.Code)
+	assert.Contains(t, rec.Body.String(), "上游技能市场暂时不可用")
+}

@@ -156,6 +156,9 @@ func writeSkillMarketError(c *gin.Context, err error) {
 	case errors.Is(err, service.ErrSkillMarketDenied):
 		// 无权（下载需平台管理员）映射为 403 Forbidden。
 		c.JSON(http.StatusForbidden, apierror.New("FORBIDDEN", "无权下载该 skill 归档"))
+	case errors.Is(err, service.ErrSkillMarketUpstreamUnavailable):
+		// 上游市场下载失败（如 clawhub 返 502）且缓存未命中：502 Bad Gateway，区别于 manager 自身 500。
+		c.JSON(http.StatusBadGateway, apierror.New("UPSTREAM_UNAVAILABLE", "上游技能市场暂时不可用，请稍后重试"))
 	default:
 		// 其他错误（网络、数据库等）映射为 500 Internal Server Error。
 		c.JSON(http.StatusInternalServerError, apierror.New("INTERNAL", "服务器内部错误"))
