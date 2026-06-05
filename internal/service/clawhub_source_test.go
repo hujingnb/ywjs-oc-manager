@@ -23,8 +23,12 @@ type fakeClawHubAPI struct {
 	result clawhub.SearchResult
 	// calls 记录 Search 被调用的总次数（验证缓存命中时回源次数应不变）。
 	calls int
+	// detailCalls 记录 GetSkill 被调用次数，用于验证详情缓存命中后不再回源。
+	detailCalls int
 	// versions 是 ListVersions 的预设返回值。
 	versions []clawhub.SkillVersion
+	// versionCalls 记录 ListVersions 被调用次数，用于验证版本列表缓存命中后不再回源。
+	versionCalls int
 	// detail 是 GetSkill 的预设返回值。
 	detail clawhub.SkillDetail
 	// archive 是 Download 的预设归档字节。
@@ -39,11 +43,13 @@ func (f *fakeClawHubAPI) Search(_ context.Context, _, _ string) (clawhub.SearchR
 
 // GetSkill 实现 ClawHubSearcher 接口：返回预设的富详情。
 func (f *fakeClawHubAPI) GetSkill(_ context.Context, _ string) (clawhub.SkillDetail, error) {
+	f.detailCalls++
 	return f.detail, nil
 }
 
 // ListVersions 实现 ClawHubSearcher 接口：返回预设的版本列表。
 func (f *fakeClawHubAPI) ListVersions(_ context.Context, _ string) ([]clawhub.SkillVersion, error) {
+	f.versionCalls++
 	return f.versions, nil
 }
 
@@ -57,11 +63,12 @@ func (f *fakeClawHubAPI) Download(_ context.Context, _, _ string) ([]byte, error
 type fakeRedis struct {
 	mu    sync.Mutex
 	store map[string]string
+	ttl   map[string]time.Duration
 }
 
 // newFakeRedis 返回一个空的内存 Redis 替身。
 func newFakeRedis() *fakeRedis {
-	return &fakeRedis{store: make(map[string]string)}
+	return &fakeRedis{store: make(map[string]string), ttl: make(map[string]time.Duration)}
 }
 
 // Get 实现 RedisCache.Get：key 存在时返回值，不存在时返回 redis.Nil 错误。
@@ -77,12 +84,13 @@ func (f *fakeRedis) Get(_ context.Context, key string) *redis.StringCmd {
 	return redis.NewStringResult(val, nil)
 }
 
-// Set 实现 RedisCache.Set：将 value 序列化为字符串写入 map，忽略 TTL（内存无过期语义）。
-// ttl 参数在 fake 中不做实际处理，仅保证接口兼容；测试关注的是数据是否写入，而非过期行为。
+// Set 实现 RedisCache.Set：将 value 序列化为字符串写入 map，并记录 TTL 供缓存过期配置断言。
+// fake 不做真实过期驱逐；测试只验证生产代码是否把配置的 TTL 传入 Redis。
 // 使用 redis.NewStatusResult 构造返回值，与真实 *redis.Client 行为一致。
-func (f *fakeRedis) Set(_ context.Context, key string, value any, _ time.Duration) *redis.StatusCmd {
+func (f *fakeRedis) Set(_ context.Context, key string, value any, ttl time.Duration) *redis.StatusCmd {
 	f.mu.Lock()
 	defer f.mu.Unlock()
+	f.ttl[key] = ttl
 	// value 可能是 []byte 或 string，统一转 string 存储（与 go-redis 实际行为一致）。
 	switch v := value.(type) {
 	case []byte:
@@ -96,6 +104,69 @@ func (f *fakeRedis) Set(_ context.Context, key string, value any, _ time.Duratio
 		}
 	}
 	return redis.NewStatusResult("OK", nil)
+}
+
+// TestClawHubSource_DetailCaches 验证详情页富信息使用 Redis TTL 缓存：
+// 第一次回源 GetSkill 并写入带过期时间的缓存，第二次相同 slug 命中缓存、不再回源。
+func TestClawHubSource_DetailCaches(t *testing.T) {
+	// 预置 ClawHub 详情响应，覆盖详情字段映射与缓存后的稳定返回。
+	api := &fakeClawHubAPI{detail: clawhub.SkillDetail{
+		Slug:        "weather",
+		Name:        "Weather",
+		Description: "天气查询",
+		Version:     "1.2.0",
+		Downloads:   42,
+	}}
+	rdb := newFakeRedis()
+	ttl := 2 * time.Minute
+	src := NewClawHubSource(api, rdb, ttl, NewSkillArchiveCache(&fakeLibraryBlob{}))
+
+	// 第一次详情查询：缓存未命中，应回源一次并写入配置 TTL。
+	first, err := src.Detail(context.Background(), auth.Principal{}, "weather")
+	require.NoError(t, err)
+	assert.Equal(t, "Weather", first.Name)
+	assert.Equal(t, int64(42), first.Downloads)
+	assert.Equal(t, 1, api.detailCalls)
+	assert.Equal(t, ttl, rdb.ttl["skill-market:clawhub-detail:weather"])
+
+	// 修改上游返回值：若第二次仍回源，结果会变化且调用次数会增加。
+	api.detail = clawhub.SkillDetail{Slug: "weather", Name: "Changed", Version: "9.9.9"}
+	second, err := src.Detail(context.Background(), auth.Principal{}, "weather")
+	require.NoError(t, err)
+	// 第二次应命中缓存，返回首次数据且不再调用 GetSkill。
+	assert.Equal(t, first, second)
+	assert.Equal(t, 1, api.detailCalls)
+}
+
+// TestClawHubSource_VersionsCaches 验证版本列表使用 Redis TTL 缓存：
+// 第一次回源 ListVersions 并写入带过期时间的缓存，第二次相同 slug 命中缓存、不再回源。
+func TestClawHubSource_VersionsCaches(t *testing.T) {
+	// 预置版本列表，覆盖 version/changelog/发布时间映射与缓存后的稳定返回。
+	api := &fakeClawHubAPI{versions: []clawhub.SkillVersion{
+		{Version: "2.0.0", Changelog: "新增缓存", CreatedAt: 1710000000000},
+		{Version: "1.0.0", Changelog: "初始版本", CreatedAt: 1700000000000},
+	}}
+	rdb := newFakeRedis()
+	ttl := 2 * time.Minute
+	src := NewClawHubSource(api, rdb, ttl, NewSkillArchiveCache(&fakeLibraryBlob{}))
+
+	// 第一次版本查询：缓存未命中，应回源一次并写入配置 TTL。
+	first, err := src.Versions(context.Background(), auth.Principal{}, "weather")
+	require.NoError(t, err)
+	require.Len(t, first, 2)
+	assert.Equal(t, "2.0.0", first[0].Version)
+	assert.Equal(t, "新增缓存", first[0].Changelog)
+	assert.Equal(t, int64(1710000000000), first[0].PublishedAt)
+	assert.Equal(t, 1, api.versionCalls)
+	assert.Equal(t, ttl, rdb.ttl["skill-market:clawhub-versions:weather"])
+
+	// 修改上游返回值：若第二次仍回源，结果会变化且调用次数会增加。
+	api.versions = []clawhub.SkillVersion{{Version: "9.9.9"}}
+	second, err := src.Versions(context.Background(), auth.Principal{}, "weather")
+	require.NoError(t, err)
+	// 第二次应命中缓存，返回首次数据且不再调用 ListVersions。
+	assert.Equal(t, first, second)
+	assert.Equal(t, 1, api.versionCalls)
 }
 
 // TestClawHubSource_SearchCaches 验证搜索的两阶段缓存行为：

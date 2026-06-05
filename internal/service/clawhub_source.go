@@ -113,14 +113,27 @@ func (s *ClawHubSource) Search(ctx context.Context, _ auth.Principal, q, cursor 
 	return page, nil
 }
 
-// Detail 返回公共库 skill 的富详情（直接回源 GetSkill，不走缓存——详情页低频操作，
-// 且需反映上游完整描述/统计的最新值）。映射 clawhub.SkillDetail 到统一 SkillDetailResult。
+// Detail 返回公共库 skill 的富详情，按 slug 走 Redis TTL 缓存。
+// 缓存命中直接返回统一 SkillDetailResult；未命中才回源 GetSkill 并写入缓存。
 func (s *ClawHubSource) Detail(ctx context.Context, _ auth.Principal, ref string) (SkillDetailResult, error) {
+	// 详情缓存按 slug 隔离，避免详情抽屉反复打开时频繁回源 ClawHub。
+	key := "skill-market:clawhub-detail:" + ref
+	if val, err := s.rdb.Get(ctx, key).Result(); err == nil {
+		var cached SkillDetailResult
+		if json.Unmarshal([]byte(val), &cached) == nil {
+			return cached, nil
+		}
+		// 缓存内容损坏时降级回源，并用新响应覆盖坏缓存。
+	} else if !errors.Is(err, redis.Nil) {
+		// Redis 异常不影响详情页可用性，继续回源。
+		_ = err
+	}
+
 	d, err := s.api.GetSkill(ctx, ref)
 	if err != nil {
 		return SkillDetailResult{}, err
 	}
-	return SkillDetailResult{
+	out := SkillDetailResult{
 		Name:         d.Name,
 		Source:       "clawhub",
 		SourceRef:    d.Slug,
@@ -137,11 +150,29 @@ func (s *ClawHubSource) Detail(ctx context.Context, _ auth.Principal, ref string
 		AuthorName:   d.AuthorName,
 		AuthorHandle: d.AuthorHandle,
 		AuthorAvatar: d.AuthorAvatar,
-	}, nil
+	}
+	// 写缓存失败不阻断本次详情返回；下次请求可继续回源。
+	if raw, err := json.Marshal(out); err == nil {
+		_ = s.rdb.Set(ctx, key, raw, s.ttl).Err()
+	}
+	return out, nil
 }
 
-// Versions 列出公共库中 slug=ref 的全部历史版本（含 changelog/发布时间），直接回源。
+// Versions 列出公共库中 slug=ref 的全部历史版本（含 changelog/发布时间），按 slug 走 Redis TTL 缓存。
 func (s *ClawHubSource) Versions(ctx context.Context, _ auth.Principal, ref string) ([]SkillVersionResult, error) {
+	// 版本列表缓存按 slug 隔离，详情页版本列表和安装选版本可复用同一份短期结果。
+	key := "skill-market:clawhub-versions:" + ref
+	if val, err := s.rdb.Get(ctx, key).Result(); err == nil {
+		var cached []SkillVersionResult
+		if json.Unmarshal([]byte(val), &cached) == nil {
+			return cached, nil
+		}
+		// 缓存内容损坏时降级回源，并用新响应覆盖坏缓存。
+	} else if !errors.Is(err, redis.Nil) {
+		// Redis 异常不影响版本列表可用性，继续回源。
+		_ = err
+	}
+
 	vs, err := s.api.ListVersions(ctx, ref)
 	if err != nil {
 		return nil, err
@@ -150,6 +181,10 @@ func (s *ClawHubSource) Versions(ctx context.Context, _ auth.Principal, ref stri
 	out := make([]SkillVersionResult, 0, len(vs))
 	for _, v := range vs {
 		out = append(out, SkillVersionResult{Version: v.Version, Changelog: v.Changelog, PublishedAt: v.CreatedAt})
+	}
+	// 写缓存失败不阻断本次版本列表返回；下次请求可继续回源。
+	if raw, err := json.Marshal(out); err == nil {
+		_ = s.rdb.Set(ctx, key, raw, s.ttl).Err()
 	}
 	return out, nil
 }
