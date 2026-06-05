@@ -33,6 +33,17 @@ var ErrOrgDisabled = errors.New("企业已被禁用")
 // ErrInvalidToken 表示 access / refresh token 格式、签名、过期或撤销状态无效。
 var ErrInvalidToken = errors.New("登录凭证无效")
 
+// 验证码（登录 PoW）---------------------------------------------------
+
+// ErrCaptchaRequired 表示开启了验证码但请求未携带 payload，handler 映射为 400。
+var ErrCaptchaRequired = errors.New("需要完成人机验证")
+
+// ErrCaptchaInvalid 表示 Altcha 解验签失败、不成立或已过期，handler 映射为 400。
+var ErrCaptchaInvalid = errors.New("人机验证失败")
+
+// ErrCaptchaReplayed 表示该 Altcha 解已被消费（重放），handler 映射为 400。
+var ErrCaptchaReplayed = errors.New("人机验证已被使用")
+
 // 成员 -------------------------------------------------------------
 // 来源：原 member_service.go
 
