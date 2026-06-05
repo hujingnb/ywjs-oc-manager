@@ -62,6 +62,7 @@ func RegisterExternalIndustryKnowledgeRoutes(router gin.IRouter, handler *Indust
 // RegisterIndustryKnowledgeRoutes 注册受用户鉴权保护的平台行业知识库管理路由。
 func RegisterIndustryKnowledgeRoutes(router gin.IRouter, handler *IndustryKnowledgeHandler) {
 	group := router.Group("/api/v1/industry-knowledge-bases")
+	group.GET("/upload-token", handler.GetUploadToken)
 	group.GET("", handler.ListBases)
 	group.POST("", handler.CreateBase)
 	group.PUT("/:industryId", handler.RenameBase)
@@ -144,6 +145,25 @@ func (h *IndustryKnowledgeHandler) ExternalUpload(c *gin.Context) {
 		return
 	}
 	c.JSON(http.StatusAccepted, result)
+}
+
+// GetUploadToken 返回外部上传接口当前配置的固定 token。
+//
+// @Summary      查看行业知识库外部上传 token
+// @Description  平台管理员查看行业知识库外部上传接口文档时读取当前配置 token；为空表示外部上传入口禁用
+// @Tags         industry-knowledge
+// @Produce      json
+// @Security     BearerAuth
+// @Success      200  {object}  service.IndustryKnowledgeUploadTokenResult
+// @Failure      401  {object}  ErrorResponse
+// @Failure      403  {object}  ErrorResponse
+// @Router       /industry-knowledge-bases/upload-token [get]
+func (h *IndustryKnowledgeHandler) GetUploadToken(c *gin.Context) {
+	if !auth.CanManageIndustryKnowledge(principalFromCtx(c)) {
+		c.JSON(http.StatusForbidden, apierror.New("KNOWLEDGE_FORBIDDEN", "无权访问该知识库"))
+		return
+	}
+	c.JSON(http.StatusOK, service.IndustryKnowledgeUploadTokenResult{UploadToken: h.uploadToken})
 }
 
 // ListBases 列出平台级行业知识库。

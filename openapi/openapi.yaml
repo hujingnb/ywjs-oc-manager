@@ -1350,6 +1350,12 @@ components:
         updated_at:
           type: string
       type: object
+    service.IndustryKnowledgeUploadTokenResult:
+      properties:
+        upload_token:
+          description: UploadToken 是 industry_knowledge.upload_token 的当前配置值；为空表示外部上传入口禁用。
+          type: string
+      type: object
     service.KnowledgeDocumentResult:
       properties:
         created_at:
@@ -6014,6 +6020,33 @@ paths:
       security:
       - BearerAuth: []
       summary: 重新解析行业知识库文件
+      tags:
+      - industry-knowledge
+  /industry-knowledge-bases/upload-token:
+    get:
+      description: 平台管理员查看行业知识库外部上传接口文档时读取当前配置 token；为空表示外部上传入口禁用
+      responses:
+        "200":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/service.IndustryKnowledgeUploadTokenResult'
+          description: OK
+        "401":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/handlers.ErrorResponse'
+          description: Unauthorized
+        "403":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/handlers.ErrorResponse'
+          description: Forbidden
+      security:
+      - BearerAuth: []
+      summary: 查看行业知识库外部上传 token
       tags:
       - industry-knowledge
   /jobs/{jobId}:

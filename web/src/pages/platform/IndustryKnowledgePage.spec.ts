@@ -16,6 +16,7 @@ const reparseFile = vi.hoisted(() => vi.fn())
 const messageWarning = vi.hoisted(() => vi.fn())
 const messageSuccess = vi.hoisted(() => vi.fn())
 const messageError = vi.hoisted(() => vi.fn())
+const writeText = vi.hoisted(() => vi.fn())
 
 const baseItems = vi.hoisted<IndustryKnowledgeBase[]>(() => [
   { id: 'industry-1', name: '保险', document_count: 1, created_at: '2026-06-05T00:00:00Z', updated_at: '2026-06-05T00:00:00Z' },
@@ -33,6 +34,11 @@ const fileItems = vi.hoisted<KnowledgeDocument[]>(() => [
 ])
 
 vi.mock('@/api/hooks/useIndustryKnowledge', () => ({
+  useIndustryKnowledgeUploadTokenQuery: () => ({
+    data: ref({ upload_token: 'secret-token' }),
+    isLoading: ref(false),
+    error: ref(null),
+  }),
   useIndustryKnowledgeBasesQuery: () => ({
     data: ref({ items: baseItems, total: baseItems.length }),
     isLoading: ref(false),
@@ -158,6 +164,10 @@ function tableStub() {
 describe('IndustryKnowledgePage', () => {
   beforeEach(() => {
     vi.clearAllMocks()
+    Object.defineProperty(navigator, 'clipboard', {
+      configurable: true,
+      value: { writeText },
+    })
   })
 
   // 展示行业库列表、选中行业库文件和同名覆盖提示。
@@ -194,5 +204,36 @@ describe('IndustryKnowledgePage', () => {
 
     expect(createBase).not.toHaveBeenCalled()
     expect(messageWarning).toHaveBeenCalledWith('请输入行业名称')
+  })
+
+  // 接口文档弹框说明外部上传地址、鉴权 header、表单字段和 curl 调用方式。
+  it('展示外部上传接口文档', async () => {
+    const wrapper = mountPage()
+
+    await wrapper.findAll('button').find(button => button.text().includes('接口文档'))!.trigger('click')
+    await nextTick()
+
+    expect(wrapper.text()).toContain('POST /api/v1/external/industry-knowledge/files')
+    expect(wrapper.text()).toContain('X-OC-Industry-Knowledge-Token')
+    expect(wrapper.text()).toContain('industry_name')
+    expect(wrapper.text()).toContain('secret-token')
+    expect(wrapper.text()).not.toContain('wrong-token')
+    expect(wrapper.text()).toContain('curl')
+  })
+
+  // 复制 Markdown 会把完整接口文档写入剪贴板，方便交付给外部商业知识库服务方。
+  it('复制外部上传接口 Markdown 文档', async () => {
+    writeText.mockResolvedValue(undefined)
+    const wrapper = mountPage()
+
+    await wrapper.findAll('button').find(button => button.text().includes('接口文档'))!.trigger('click')
+    await nextTick()
+    await wrapper.findAll('button').find(button => button.text().includes('复制 Markdown'))!.trigger('click')
+
+    expect(writeText).toHaveBeenCalledTimes(1)
+    expect(writeText.mock.calls[0][0]).toContain('# 行业知识库外部上传接口')
+    expect(writeText.mock.calls[0][0]).toContain('X-OC-Industry-Knowledge-Token: secret-token')
+    expect(writeText.mock.calls[0][0]).not.toContain('wrong-token')
+    expect(messageSuccess).toHaveBeenCalledWith('已复制 Markdown 文档')
   })
 })

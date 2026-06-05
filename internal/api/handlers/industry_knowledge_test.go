@@ -3,6 +3,7 @@ package handlers
 import (
 	"bytes"
 	"context"
+	"encoding/json"
 	"errors"
 	"io"
 	"mime/multipart"
@@ -146,6 +147,36 @@ func newIndustryKnowledgeTestRouter(t *testing.T, svc industryKnowledgeService, 
 	RegisterExternalIndustryKnowledgeRoutes(router, handler)
 	RegisterIndustryKnowledgeRoutes(router, handler)
 	return router
+}
+
+// TestIndustryKnowledgeUploadTokenReturnsConfiguredValue 验证平台管理员可读取配置中的外部上传 token，供前端接口文档直接展示真实调用值。
+func TestIndustryKnowledgeUploadTokenReturnsConfiguredValue(t *testing.T) {
+	stub := &industryKnowledgeServiceStub{}
+	router := newIndustryKnowledgeTestRouter(t, stub, "secret-token")
+
+	w := httptest.NewRecorder()
+	req := httptest.NewRequest(http.MethodGet, "/api/v1/industry-knowledge-bases/upload-token", nil)
+	req = withPrincipal(req, auth.Principal{UserID: "u-admin", Role: domain.UserRolePlatformAdmin})
+	router.ServeHTTP(w, req)
+
+	require.Equal(t, http.StatusOK, w.Code)
+	var body map[string]string
+	require.NoError(t, json.Unmarshal(w.Body.Bytes(), &body))
+	assert.Equal(t, "secret-token", body["upload_token"])
+}
+
+// TestIndustryKnowledgeUploadTokenRejectsOrgAdmin 验证外部上传 token 只暴露给平台管理员，避免企业侧用户拿到平台级同步凭据。
+func TestIndustryKnowledgeUploadTokenRejectsOrgAdmin(t *testing.T) {
+	stub := &industryKnowledgeServiceStub{}
+	router := newIndustryKnowledgeTestRouter(t, stub, "secret-token")
+
+	w := httptest.NewRecorder()
+	req := httptest.NewRequest(http.MethodGet, "/api/v1/industry-knowledge-bases/upload-token", nil)
+	req = withPrincipal(req, auth.Principal{UserID: "u-org-admin", Role: domain.UserRoleOrgAdmin, OrgID: "org-1"})
+	router.ServeHTTP(w, req)
+
+	assert.Equal(t, http.StatusForbidden, w.Code)
+	assert.NotContains(t, w.Body.String(), "secret-token")
 }
 
 // multipartIndustryUploadBody 构造外部上传接口需要的 multipart/form-data 请求体。

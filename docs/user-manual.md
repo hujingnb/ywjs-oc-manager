@@ -162,7 +162,7 @@
 
 平台管理员管理平台级通用行业资料，行业名称在未删除行业库中唯一。行业知识库不属于某个企业，是否被实例检索取决于助手版本配置。
 
-**创建 / 重命名行业库**：点击「新增行业库」填写行业名称；在行业库列表中点击编辑可重命名。
+**创建 / 重命名行业库**：点击「新建行业库」填写行业名称；在行业库列表中点击编辑可重命名。
 
 **上传文件**：选择左侧行业库后，点击「上传文件」选择一个或多个文件。文件上传到该行业库对应的 RAGFlow dataset 并触发解析；同名文件会覆盖当前行业库内的旧文件。
 
@@ -170,7 +170,49 @@
 
 **删除行业库**：行业库仍被任一未删除助手版本引用时不能删除；需要先在助手版本中移除关联。
 
+**外部上传接口文档**：点击页面右上角「接口文档」可查看外部商业知识库上传接口说明。页面会从 manager 当前配置读取 `industry_knowledge.upload_token` 并写入弹框和一键复制的 Markdown 内容，方便交付给外部服务方。
+
 外部商业知识库同步接口也写入行业知识库。该接口使用配置项 `industry_knowledge.upload_token` 作为固定鉴权字符串，外部服务提交行业名称和文件，manager 会按行业名称找到或创建行业库。
+
+接口地址：
+
+```text
+POST /api/v1/external/industry-knowledge/files
+```
+
+鉴权 Header：
+
+```text
+X-OC-Industry-Knowledge-Token: <industry_knowledge.upload_token>
+```
+
+表单字段：
+
+| 字段 | 必填 | 说明 |
+|---|---|---|
+| `industry_name` | 是 | 行业名称。不存在时自动创建行业库；未删除行业库中名称唯一。 |
+| `file` | 是 | 上传文件。同一行业库内同名文件会覆盖旧文件。 |
+
+curl 调用示例：
+
+```bash
+curl -i \
+  -H "X-OC-Industry-Knowledge-Token: <页面显示的实际 upload_token>" \
+  -F "industry_name=保险" \
+  -F "file=@./policy.pdf;type=application/pdf" \
+  https://<manager-domain>/api/v1/external/industry-knowledge/files
+```
+
+返回码：
+
+| 状态码 | 说明 |
+|---|---|
+| `202` | 上传成功，文件已进入 RAGFlow 解析队列。 |
+| `400` | 参数缺失、行业名称为空或请求体格式错误。 |
+| `401` | 缺少或错误的 `X-OC-Industry-Knowledge-Token`。 |
+| `413` | 文件大小超过平台上传限制。 |
+
+上传成功后通常先返回 `parse_status=queued`，解析完成后才能稳定参与检索。外部上传只负责写入行业库；实例是否检索该行业库，由助手版本的行业知识库关联决定。
 
 ### 1.9 助手版本关联行业知识库
 

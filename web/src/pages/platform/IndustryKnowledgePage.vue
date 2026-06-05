@@ -12,6 +12,7 @@
     >
       <template #toolbar>
         <n-input v-model:value="keyword" placeholder="搜索行业名称" clearable style="width: 180px" />
+        <n-button @click="apiDocDialogOpen = true">接口文档</n-button>
         <n-button
           type="primary"
           :disabled="createMutation.isPending.value"
@@ -92,6 +93,60 @@
         </template>
       </n-card>
     </n-modal>
+
+    <n-modal v-model:show="apiDocDialogOpen" transform-origin="center">
+      <n-card
+        class="api-doc-card"
+        title="行业知识库外部上传接口"
+        :bordered="false"
+        role="dialog"
+        aria-modal="true"
+      >
+        <div class="api-doc-head">
+          <p class="api-doc-summary">
+            外部商业知识库服务可通过固定 token 上传行业资料。manager 会按行业名称自动创建或复用行业库，同名文件会覆盖旧文件。
+          </p>
+          <n-button type="primary" :disabled="apiDocCopyDisabled" :loading="uploadTokenLoading" @click="copyApiDocMarkdown">
+            复制 Markdown
+          </n-button>
+        </div>
+
+        <div class="api-doc-section">
+          <h3>请求</h3>
+          <p><strong>POST</strong> <code>/api/v1/external/industry-knowledge/files</code></p>
+          <p>鉴权 Header：<code>X-OC-Industry-Knowledge-Token</code>，当前值：<code>{{ industryUploadTokenText }}</code>。</p>
+        </div>
+
+        <div class="api-doc-section">
+          <h3>表单字段</h3>
+          <ul>
+            <li><code>industry_name</code>：行业名称，必填；不存在时自动创建行业库。</li>
+            <li><code>file</code>：上传文件，必填；同一行业库内同名文件会覆盖。</li>
+          </ul>
+        </div>
+
+        <div class="api-doc-section">
+          <h3>curl 示例</h3>
+          <pre class="api-doc-code">{{ industryExternalUploadCurl }}</pre>
+        </div>
+
+        <div class="api-doc-section">
+          <h3>返回码</h3>
+          <ul>
+            <li><code>202</code>：上传成功，文件进入 RAGFlow 解析队列。</li>
+            <li><code>400</code>：参数缺失、行业名称为空或请求体格式错误。</li>
+            <li><code>401</code>：缺少或错误的 <code>X-OC-Industry-Knowledge-Token</code>。</li>
+            <li><code>413</code>：文件大小超过平台上传限制。</li>
+          </ul>
+        </div>
+
+        <template #footer>
+          <div class="dialog-actions">
+            <n-button @click="apiDocDialogOpen = false">关闭</n-button>
+          </div>
+        </template>
+      </n-card>
+    </n-modal>
   </div>
 </template>
 
@@ -113,6 +168,7 @@ import {
   useDeleteIndustryKnowledgeFile,
   useIndustryKnowledgeBasesQuery,
   useIndustryKnowledgeFilesQuery,
+  useIndustryKnowledgeUploadTokenQuery,
   useRenameIndustryKnowledgeBase,
   useReparseIndustryKnowledgeFile,
   useUploadIndustryKnowledgeFile,
@@ -132,6 +188,7 @@ const uploadProgress = useUploadProgressStore()
 const keyword = ref('')
 const newBaseName = ref('')
 const createDialogOpen = ref(false)
+const apiDocDialogOpen = ref(false)
 const selectedBaseId = ref<string | undefined>(undefined)
 const downloading = ref(false)
 
@@ -146,6 +203,83 @@ const deleteBaseMutation = useDeleteIndustryKnowledgeBase()
 const uploadMutation = useUploadIndustryKnowledgeFile(selectedBaseIdRef)
 const deleteFileMutation = useDeleteIndustryKnowledgeFile(selectedBaseIdRef)
 const reparseMutation = useReparseIndustryKnowledgeFile(selectedBaseIdRef)
+const {
+  data: uploadTokenConfig,
+  isLoading: uploadTokenLoading,
+  error: uploadTokenError,
+} = useIndustryKnowledgeUploadTokenQuery()
+
+// uploadTokenUnavailableText 说明配置缺失时的真实接口状态，避免外部服务误以为占位 token 可调用。
+const uploadTokenUnavailableText = '未配置，外部上传入口禁用'
+const industryUploadToken = computed(() => uploadTokenConfig.value?.upload_token ?? '')
+const industryUploadTokenText = computed(() => {
+  if (uploadTokenLoading.value) return '读取中...'
+  if (uploadTokenError.value) return '读取失败，请刷新页面'
+  return industryUploadToken.value || uploadTokenUnavailableText
+})
+const apiDocCopyDisabled = computed(() => uploadTokenLoading.value || Boolean(uploadTokenError.value))
+
+// shellSingleQuote 生成可直接复制执行的 shell 单引号参数，兼容 token 中可能出现的特殊字符。
+function shellSingleQuote(value: string): string {
+  const escaped = value.replace(/'/g, "'\\''")
+  return `'${escaped}'`
+}
+
+// industryExternalUploadCurl 是页面展示和 Markdown 文档共用的 curl 调用模板，直接内联当前配置 token。
+const industryExternalUploadCurl = computed(() => `curl -i \\
+  -H ${shellSingleQuote(`X-OC-Industry-Knowledge-Token: ${industryUploadTokenText.value}`)} \\
+  -F "industry_name=保险" \\
+  -F "file=@./policy.pdf;type=application/pdf" \\
+  https://<manager-domain>/api/v1/external/industry-knowledge/files`)
+
+// industryExternalUploadMarkdown 是复制给外部商业知识库服务方的 Markdown 接口文档。
+const industryExternalUploadMarkdown = computed(() => `# 行业知识库外部上传接口
+
+外部商业知识库服务通过固定鉴权字符串把文件上传到平台级行业知识库。manager 会按行业名称自动创建或复用行业库，同一行业库内同名文件会覆盖旧文件。
+
+## 接口
+
+- Method: \`POST\`
+- URL: \`https://<manager-domain>/api/v1/external/industry-knowledge/files\`
+- Content-Type: \`multipart/form-data\`
+
+## 鉴权
+
+请求必须携带 Header：
+
+\`\`\`text
+X-OC-Industry-Knowledge-Token: ${industryUploadTokenText.value}
+\`\`\`
+
+token 来自 manager 配置项 \`industry_knowledge.upload_token\`。该配置为空时外部上传入口禁用；只包含空白字符时 manager 会启动失败。
+
+## 表单字段
+
+| 字段 | 必填 | 说明 |
+|---|---|---|
+| \`industry_name\` | 是 | 行业名称。不存在时自动创建行业库；未删除行业库中名称唯一。 |
+| \`file\` | 是 | 上传文件。同一行业库内同名文件会覆盖旧文件。 |
+
+## curl 示例
+
+\`\`\`bash
+${industryExternalUploadCurl.value}
+\`\`\`
+
+## 返回码
+
+| 状态码 | 说明 |
+|---|---|
+| \`202\` | 上传成功，文件已进入 RAGFlow 解析队列。 |
+| \`400\` | 参数缺失、行业名称为空或请求体格式错误。 |
+| \`401\` | 缺少或错误的 \`X-OC-Industry-Knowledge-Token\`。 |
+| \`413\` | 文件大小超过平台上传限制。 |
+
+## 注意事项
+
+- 上传成功后通常先返回 \`parse_status=queued\`，解析完成后才能稳定参与检索。
+- 外部上传只负责写入行业库；实例是否检索该行业库，由助手版本的行业知识库关联决定。
+- 每个关联行业库都会在检索时单独召回最多 \`top_k\` 条结果，关联过多会增加上下文长度和响应成本。`)
 
 watch(
   () => bases.value?.items ?? [],
@@ -213,6 +347,15 @@ async function onCreateBase() {
     message.success(`已创建行业库 ${created.name}`)
   } catch (err) {
     message.error(err instanceof Error ? err.message : '创建失败')
+  }
+}
+
+async function copyApiDocMarkdown() {
+  try {
+    await navigator.clipboard.writeText(industryExternalUploadMarkdown.value)
+    message.success('已复制 Markdown 文档')
+  } catch {
+    message.error('复制失败，请手动复制文档内容')
   }
 }
 
@@ -364,5 +507,53 @@ const fileColumns: DataTableColumns<KnowledgeDocument> = [
   display: flex;
   justify-content: flex-end;
   gap: 10px;
+}
+
+.api-doc-card {
+  max-width: 760px;
+  width: min(760px, calc(100vw - 32px));
+}
+
+.api-doc-head {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 16px;
+}
+
+.api-doc-summary {
+  margin: 0;
+  color: var(--color-text-secondary);
+  line-height: 1.7;
+}
+
+.api-doc-section {
+  margin-top: 16px;
+}
+
+.api-doc-section h3 {
+  margin: 0 0 8px;
+  color: var(--color-text-primary);
+  font-size: 14px;
+}
+
+.api-doc-section p,
+.api-doc-section li {
+  color: var(--color-text-secondary);
+  line-height: 1.7;
+}
+
+.api-doc-code {
+  overflow: auto;
+  max-height: 280px;
+  margin: 0;
+  padding: 12px;
+  border-radius: 6px;
+  background: var(--color-surface-muted, #f6f7f9);
+  color: var(--color-text-primary);
+  font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
+  font-size: 12px;
+  line-height: 1.6;
+  white-space: pre-wrap;
 }
 </style>

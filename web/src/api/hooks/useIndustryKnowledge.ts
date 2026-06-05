@@ -22,6 +22,11 @@ export interface IndustryKnowledgeBaseList {
   total: number
 }
 
+// IndustryKnowledgeUploadToken 是平台行业库外部上传入口的当前配置。
+export interface IndustryKnowledgeUploadToken {
+  upload_token: string
+}
+
 // IndustryKnowledgeFileList 是行业库文件列表响应；行业库不展示累计配额。
 export interface IndustryKnowledgeFileList {
   items: KnowledgeDocument[]
@@ -30,6 +35,15 @@ export interface IndustryKnowledgeFileList {
 
 const baseListKey = (keyword?: string) => ['industry-knowledge-bases', keyword ?? ''] as const
 const fileListKey = (industryId: string | undefined) => ['industry-knowledge-files', industryId] as const
+const uploadTokenKey = ['industry-knowledge-upload-token'] as const
+
+// useIndustryKnowledgeUploadTokenQuery 读取固定上传 token，供平台管理员接口文档展示真实调用值。
+export function useIndustryKnowledgeUploadTokenQuery() {
+  return useQuery<IndustryKnowledgeUploadToken>({
+    queryKey: uploadTokenKey,
+    queryFn: async () => apiRequest<IndustryKnowledgeUploadToken>('/api/v1/industry-knowledge-bases/upload-token'),
+  })
+}
 
 // useIndustryKnowledgeBasesQuery 列出行业库；助手版本表单复用该 hook 作为多选来源。
 export function useIndustryKnowledgeBasesQuery(enabled?: () => boolean, keyword?: Ref<string>) {

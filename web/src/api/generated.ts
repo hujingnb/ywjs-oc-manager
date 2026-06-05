@@ -6207,6 +6207,63 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/industry-knowledge-bases/upload-token": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * 查看行业知识库外部上传 token
+         * @description 平台管理员查看行业知识库外部上传接口文档时读取当前配置 token；为空表示外部上传入口禁用
+         */
+        get: {
+            parameters: {
+                query?: never;
+                header?: never;
+                path?: never;
+                cookie?: never;
+            };
+            requestBody?: never;
+            responses: {
+                /** @description OK */
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["service.IndustryKnowledgeUploadTokenResult"];
+                    };
+                };
+                /** @description Unauthorized */
+                401: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["handlers.ErrorResponse"];
+                    };
+                };
+                /** @description Forbidden */
+                403: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["handlers.ErrorResponse"];
+                    };
+                };
+            };
+        };
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/jobs/{jobId}": {
         parameters: {
             query?: never;
@@ -10303,6 +10360,10 @@ export interface components {
             id?: string;
             name?: string;
             updated_at?: string;
+        };
+        "service.IndustryKnowledgeUploadTokenResult": {
+            /** @description UploadToken 是 industry_knowledge.upload_token 的当前配置值；为空表示外部上传入口禁用。 */
+            upload_token?: string;
         };
         "service.KnowledgeDocumentResult": {
             created_at?: string;

@@ -37,6 +37,12 @@ type IndustryKnowledgeBaseListResult struct {
 	Total int64                         `json:"total"`
 }
 
+// IndustryKnowledgeUploadTokenResult 是平台管理员查看外部上传接口文档时需要的配置 token。
+type IndustryKnowledgeUploadTokenResult struct {
+	// UploadToken 是 industry_knowledge.upload_token 的当前配置值；为空表示外部上传入口禁用。
+	UploadToken string `json:"upload_token"`
+}
+
 // IndustryKnowledgeBaseRef 是助手版本和检索命中的行业库来源引用。
 type IndustryKnowledgeBaseRef struct {
 	ID   string `json:"id"`
