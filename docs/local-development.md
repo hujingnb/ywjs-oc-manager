@@ -55,7 +55,6 @@ make local-reset   # 删集群并清空 .k3d-data，干净重建（随后再 mak
   数据重置。需要保留数据时不要用 down/up，改用 stop/start。
 - `make local-reset` 显式清空 `.k3d-data`（含孤立的旧 PVC 目录），用于彻底干净重建。
 - 旧 compose 的 `.local/` 数据已不再使用，但暂时保留未删（过渡期安全网）。
-- `scripts/check-compose-bind-mounts.sh` 是 compose 时代遗留校验脚本，已失效。
 
 ## 已知限制（依赖 spec-A/B/E）
 

@@ -47,8 +47,6 @@ manager-api/web、new-api、ragflow 与 RBAC 与本地一致，差异仅镜像 r
 基础镜像走 `public`）。拉取 Secret `secret-registry-ywjs-26257ea5.ecis.huabei-3.cmecloud.cn`
 由集群侧预先创建并已存在于 ocm 与 oc-apps，本仓库只按名引用、不再内嵌凭证。
 
-镜像迁移到该仓库见 `scripts/migrate-images-to-ecloud.sh`（从旧移动云仓库 retag 转推）。
-
 ## apply 顺序
 
 ```bash

@@ -33,7 +33,7 @@ spec:
       containers:
         - name: elasticsearch
           # 走移动云私有仓库 public 命名空间（与 new-api/ragflow 一致），与集群同区拉取快。
-          # 若仓库暂无该镜像，需先把 elasticsearch:8.11.3 推到该仓库（见 scripts/migrate-images-to-ecloud.sh）。
+          # 若仓库暂无该镜像，需先把 elasticsearch:8.11.3 推到该仓库。
           image: ywjs-26257ea5.ecis.huabei-3.cmecloud.cn/public/elasticsearch:8.11.3
           env:
             - name: node.name
