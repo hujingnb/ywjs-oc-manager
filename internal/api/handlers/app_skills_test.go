@@ -335,7 +335,8 @@ func TestAppSkillsHandler_Install_UpstreamUnavailable(t *testing.T) {
 	req = withPrincipal(req, auth.Principal{UserID: "u1", Role: domain.UserRoleOrgAdmin, OrgID: "org-1"})
 	router.ServeHTTP(w, req)
 
-	// 上游故障映射为 502，文案明确。
+	// 上游故障映射为 502，文案明确，错误码加 APP_SKILL_ 命名前缀。
 	assert.Equal(t, http.StatusBadGateway, w.Code)
 	assert.Contains(t, w.Body.String(), "上游技能市场暂时不可用")
+	assert.Contains(t, w.Body.String(), "APP_SKILL_UPSTREAM_UNAVAILABLE")
 }

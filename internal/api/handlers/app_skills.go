@@ -214,7 +214,7 @@ func writeAppSkillError(c *gin.Context, err error) {
 		c.JSON(http.StatusConflict, apierror.New("APP_SKILL_RUNTIME_UNSUPPORTED", "当前实例运行的 hermes 版本过旧，不支持技能管理，请更新实例的运行时版本后重试"))
 	// 上游市场下载失败（缓存未命中无法降级）→ 502，区别于 manager 自身 500
 	case errors.Is(err, service.ErrSkillMarketUpstreamUnavailable):
-		c.JSON(http.StatusBadGateway, apierror.New("UPSTREAM_UNAVAILABLE", "上游技能市场暂时不可用，请稍后重试"))
+		c.JSON(http.StatusBadGateway, apierror.New("APP_SKILL_UPSTREAM_UNAVAILABLE", "上游技能市场暂时不可用，请稍后重试"))
 	// 其他未预期错误 → 500
 	default:
 		c.JSON(http.StatusInternalServerError, apierror.New("INTERNAL_ERROR", "服务器内部错误"))
