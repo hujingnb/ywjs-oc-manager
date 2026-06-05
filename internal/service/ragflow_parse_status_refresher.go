@@ -3,6 +3,7 @@ package service
 import (
 	"context"
 	"fmt"
+	"strings"
 
 	"github.com/guregu/null/v5"
 
@@ -166,10 +167,46 @@ func (r *RagflowParseStatusRefresher) applyRemoteStatus(ctx context.Context, row
 	if status == row.ParseStatus && progress == row.Progress {
 		return
 	}
+	// 解析失败时，把 RAGFlow 返回的真实失败原因（progress_msg 尾部错误行，如 embedding 报错）
+	// 写入 last_error 供前端在「解析失败」时展示；其它状态清空 last_error，避免历史错误残留。
+	lastErr := null.String{}
+	if status == "failed" {
+		lastErr = null.StringFrom(extractRAGFlowError(remote.ProgressMsg))
+	}
 	_ = r.store.UpdateRAGFlowDocumentParseStatus(ctx, sqlc.UpdateRAGFlowDocumentParseStatusParams{
 		ID:          row.ID,
 		ParseStatus: status,
 		Progress:    progress,
-		LastError:   null.String{},
+		LastError:   lastErr,
 	})
+}
+
+// extractRAGFlowError 从 RAGFlow 的 progress_msg（多行进度日志）中提取最有价值的失败原因，
+// 用于写入 last_error 在前端「解析失败」时展示。
+// 策略：优先取最后一条包含 ERROR 的行；没有则取最后一条非空行；都没有时给通用兜底文案。
+// 结果按 rune 截断到上限，避免超长日志撑爆列表单元格。
+func extractRAGFlowError(progressMsg string) string {
+	const maxLen = 500
+	var lastNonEmpty, lastErrLine string
+	for _, raw := range strings.Split(progressMsg, "\n") {
+		line := strings.TrimSpace(raw)
+		if line == "" {
+			continue
+		}
+		lastNonEmpty = line
+		if strings.Contains(strings.ToUpper(line), "ERROR") {
+			lastErrLine = line
+		}
+	}
+	msg := lastErrLine
+	if msg == "" {
+		msg = lastNonEmpty
+	}
+	if msg == "" {
+		return "RAGFlow 解析失败（未返回具体原因）"
+	}
+	if r := []rune(msg); len(r) > maxLen {
+		msg = string(r[:maxLen]) + "…"
+	}
+	return msg
 }

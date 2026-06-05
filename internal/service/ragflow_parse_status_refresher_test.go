@@ -4,6 +4,7 @@ import (
 	"context"
 	"database/sql"
 	"errors"
+	"strings"
 	"testing"
 
 	null "github.com/guregu/null/v5"
@@ -222,7 +223,8 @@ func TestRagflowParseStatusRefresher_PaginatesBeyondFirstPage(t *testing.T) {
 			{ID: "remote-doc-2", Run: "DONE"},
 			{ID: "remote-doc-3", Run: "DONE"}, // 第 2 页，实际已完成
 			{ID: "remote-doc-4", Run: "DONE"},
-			{ID: "remote-doc-5", Run: "FAIL"}, // 第 3 页，真实解析失败
+			// 第 3 页，真实解析失败，progress_msg 尾部带具体原因
+			{ID: "remote-doc-5", Run: "FAIL", ProgressMsg: "10:00:01 Task received.\n10:00:05 [ERROR]Generate embedding error: Error code: 400"},
 		},
 	}}
 	refresher := NewRagflowParseStatusRefresher(store, rf)
@@ -252,7 +254,42 @@ func TestRagflowParseStatusRefresher_PaginatesBeyondFirstPage(t *testing.T) {
 	// 而不是「远端已删除」的误判错因。
 	doc5 := byID["00000000-0000-0000-0000-000000000a05"]
 	assert.Equal(t, "failed", doc5.ParseStatus)
-	assert.False(t, doc5.LastError.Valid, "真实失败不应套用「远端已删除」提示")
+	// 真实失败应展示 RAGFlow 返回的具体原因，而非「远端已删除」提示，也不再清空。
+	require.True(t, doc5.LastError.Valid)
+	assert.Contains(t, doc5.LastError.String, "Generate embedding error")
+}
+
+func TestExtractRAGFlowError(t *testing.T) {
+	// 覆盖从 RAGFlow progress_msg 提取失败原因的各分支。
+	cases := []struct {
+		name string // 场景名
+		in   string // 输入的 progress_msg
+		want string // 期望提取结果（substring 断言用 contains，全等用 equal 见下）
+		full bool   // true=全等断言，false=包含断言
+	}{
+		// 多行日志且含 ERROR：取最后一条 ERROR 行，丢弃时间戳前缀外的无关行。
+		{"取最后一条ERROR行", "10:00:01 Start\n10:00:05 [ERROR]Generate embedding error: 400\n10:00:06 [ERROR][Exception]: 400", "[ERROR][Exception]: 400", false},
+		// 无 ERROR 行：退化为最后一条非空行。
+		{"无ERROR取末行", "10:00:01 Start to parse\n10:00:02 Finish parsing", "Finish parsing", false},
+		// 全空/空串：给通用兜底文案，避免 last_error 为空导致前端无提示。
+		{"空输入兜底", "   \n  \n", "RAGFlow 解析失败（未返回具体原因）", true},
+	}
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			got := extractRAGFlowError(c.in)
+			if c.full {
+				assert.Equal(t, c.want, got)
+			} else {
+				assert.Contains(t, got, c.want)
+			}
+		})
+	}
+
+	// 超长单行按 rune 截断并加省略号，防止撑爆列表单元格。
+	long := "[ERROR]" + strings.Repeat("乱", 600)
+	got := extractRAGFlowError(long)
+	assert.LessOrEqual(t, len([]rune(got)), 501) // 500 + 省略号
+	assert.True(t, strings.HasSuffix(got, "…"))
 }
 
 func TestRagflowParseStatusRefresher_StoreListErrorReturned(t *testing.T) {

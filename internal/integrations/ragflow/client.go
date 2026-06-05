@@ -43,6 +43,9 @@ type Document struct {
 	Size     int64  `json:"size"`
 	Run      string `json:"run"`
 	Type     string `json:"type"`
+	// ProgressMsg 是 RAGFlow 文档解析的多行进度/日志，解析失败（run=FAIL）时其尾部含具体失败原因
+	// （如 embedding 报错）。后台轮询用它填充本地 last_error，供前端在「解析失败」时展示真实原因。
+	ProgressMsg string `json:"progress_msg"`
 }
 
 // uploadDocumentResponse 兼容 RAGFlow 上传接口的 data 数组响应。
