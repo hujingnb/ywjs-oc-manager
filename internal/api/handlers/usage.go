@@ -26,7 +26,7 @@ type UsageHandler struct {
 }
 
 type usageService interface {
-	GetAppUsage(ctx context.Context, principal auth.Principal, appID, ownerOrgID, ownerUserID string, newapiKeyID int64, opts service.LogsQueryOptions) (service.LogsPage, error)
+	GetAppUsage(ctx context.Context, principal auth.Principal, appID string, newapiKeyID int64, opts service.LogsQueryOptions) (service.LogsPage, error)
 	GetMemberUsage(ctx context.Context, principal auth.Principal, orgID, memberID string, opts service.LogsQueryOptions) (service.LogsPage, error)
 	GetOrgUsage(ctx context.Context, principal auth.Principal, orgID string, since, until int64) (service.QuotaSeries, error)
 	GetPlatformUsage(ctx context.Context, principal auth.Principal, since, until int64) (service.QuotaSeries, error)
@@ -169,14 +169,15 @@ func (h *UsageHandler) GetOrgBreakdown(c *gin.Context) {
 
 // GetApp 拉取应用维度的 token 调用日志。
 //
+// 应用归属（org_id / owner_user_id）由 service 层按 appId 从数据库读取后再做鉴权，
+// 不再接受调用方传入 owner 参数，避免伪造 owner 造成横向越权。
+//
 // @Summary      应用用量日志
-// @Description  返回指定应用的 token 调用日志（LogsPage 格式）；需同时提供 owner_org_id 和 owner_user_id
+// @Description  返回指定应用的 token 调用日志（LogsPage 格式）；归属与权限由服务端按 appId 校验
 // @Tags         usage
 // @Produce      json
 // @Security     BearerAuth
 // @Param        appId         path      string  true   "应用 ID"
-// @Param        owner_org_id  query     string  true   "应用所属企业 ID"
-// @Param        owner_user_id query     string  true   "应用所有者用户 ID"
 // @Param        newapi_key_id query     int     false  "new-api token key ID"
 // @Param        since         query     int     false  "起始时间（Unix 秒）"
 // @Param        until         query     int     false  "结束时间（Unix 秒）"
@@ -184,7 +185,6 @@ func (h *UsageHandler) GetOrgBreakdown(c *gin.Context) {
 // @Param        page_size     query     int     false  "每页条数"
 // @Param        model_name    query     string  false  "按模型名过滤"
 // @Success      200           {object}  map[string]service.LogsPage
-// @Failure      400           {object}  ErrorResponse
 // @Failure      401           {object}  ErrorResponse
 // @Failure      403           {object}  ErrorResponse
 // @Failure      404           {object}  ErrorResponse
@@ -193,14 +193,8 @@ func (h *UsageHandler) GetOrgBreakdown(c *gin.Context) {
 // @Router       /apps/{appId}/usage [get]
 func (h *UsageHandler) GetApp(c *gin.Context) {
 	principal := principalFromCtx(c)
-	orgID := c.Query("owner_org_id")
-	owner := c.Query("owner_user_id")
-	if orgID == "" || owner == "" {
-		c.JSON(http.StatusBadRequest, apierror.New("BAD_REQUEST", "缺少 owner_org_id 或 owner_user_id"))
-		return
-	}
 	keyID, _ := strconv.ParseInt(c.Query("newapi_key_id"), 10, 64)
-	view, err := h.service.GetAppUsage(c.Request.Context(), principal, c.Param("appId"), orgID, owner, keyID, parseLogsQueryOptions(c))
+	view, err := h.service.GetAppUsage(c.Request.Context(), principal, c.Param("appId"), keyID, parseLogsQueryOptions(c))
 	if err != nil {
 		writeUsageError(c, err)
 		return

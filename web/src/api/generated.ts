@@ -3934,15 +3934,11 @@ export interface paths {
         };
         /**
          * 应用用量日志
-         * @description 返回指定应用的 token 调用日志（LogsPage 格式）；需同时提供 owner_org_id 和 owner_user_id
+         * @description 返回指定应用的 token 调用日志（LogsPage 格式）；归属与权限由服务端按 appId 校验
          */
         get: {
             parameters: {
-                query: {
-                    /** @description 应用所属企业 ID */
-                    owner_org_id: string;
-                    /** @description 应用所有者用户 ID */
-                    owner_user_id: string;
+                query?: {
                     /** @description new-api token key ID */
                     newapi_key_id?: number;
                     /** @description 起始时间（Unix 秒） */
@@ -3974,15 +3970,6 @@ export interface paths {
                         "application/json": {
                             [key: string]: components["schemas"]["service.LogsPage"];
                         };
-                    };
-                };
-                /** @description Bad Request */
-                400: {
-                    headers: {
-                        [name: string]: unknown;
-                    };
-                    content: {
-                        "application/json": components["schemas"]["handlers.ErrorResponse"];
                     };
                 };
                 /** @description Unauthorized */

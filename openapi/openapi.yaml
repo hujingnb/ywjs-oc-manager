@@ -4479,23 +4479,11 @@ paths:
       - app-skills
   /apps/{appId}/usage:
     get:
-      description: 返回指定应用的 token 调用日志（LogsPage 格式）；需同时提供 owner_org_id 和 owner_user_id
+      description: 返回指定应用的 token 调用日志（LogsPage 格式）；归属与权限由服务端按 appId 校验
       parameters:
       - description: 应用 ID
         in: path
         name: appId
-        required: true
-        schema:
-          type: string
-      - description: 应用所属企业 ID
-        in: query
-        name: owner_org_id
-        required: true
-        schema:
-          type: string
-      - description: 应用所有者用户 ID
-        in: query
-        name: owner_user_id
         required: true
         schema:
           type: string
@@ -4538,12 +4526,6 @@ paths:
                   $ref: '#/components/schemas/service.LogsPage'
                 type: object
           description: OK
-        "400":
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/handlers.ErrorResponse'
-          description: Bad Request
         "401":
           content:
             application/json:

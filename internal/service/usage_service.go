@@ -120,25 +120,37 @@ type LogsQueryOptions struct {
 }
 
 // GetAppUsage 拉指定应用 token 的调用日志（透传 GET /api/log/?token_name=X）。
-func (s *UsageService) GetAppUsage(ctx context.Context, principal auth.Principal, appID, ownerOrgID, ownerUserID string, newapiKeyID int64, opts LogsQueryOptions) (LogsPage, error) {
-	if !auth.CanReadAppKnowledge(principal, ownerOrgID, ownerUserID) {
-		return LogsPage{}, ErrForbidden
-	}
-	if s.client == nil {
+//
+// 鉴权必须基于数据库中应用的真实归属（org_id / owner_user_id），不能信任调用方传入的
+// owner 参数：否则组织成员只要把 owner_user_id 伪造成自己，再带上任意 appID，就能借
+// CanViewApp 的 member 分支（p.UserID == appOwnerUserID）通过校验、读取他人应用的用量
+// （横向越权 / IDOR）。因此这里先按 appID 取出应用，再用其真实归属做权限判定。
+func (s *UsageService) GetAppUsage(ctx context.Context, principal auth.Principal, appID string, newapiKeyID int64, opts LogsQueryOptions) (LogsPage, error) {
+	// 缺少 new-api client 或 store 时用量功能整体不可用，无关具体应用，提前返回。
+	if s.client == nil || s.store == nil {
 		return LogsPage{}, ErrUsageUnavailable
+	}
+	// appID 直接作为字符串传入，不再需要解析为 UUID 类型。
+	// 应用不存在时返回 ErrNotFound（404）；无法读到归属就无法安全鉴权，绝不放行。
+	app, err := s.store.GetApp(ctx, appID)
+	if err != nil {
+		if errors.Is(err, sql.ErrNoRows) {
+			return LogsPage{}, ErrNotFound
+		}
+		return LogsPage{}, ErrUsageUnavailable
+	}
+	if !auth.CanReadAppKnowledge(principal, app.OrgID, app.OwnerUserID) {
+		return LogsPage{}, ErrForbidden
 	}
 	if newapiKeyID == 0 {
 		return LogsPage{Scope: "app", ScopeID: appID, Items: []newapi.LogEntry{}, UpdatedAt: time.Now()}, nil
 	}
 	// new-api admin /api/log/?token_id= 被实测静默忽略，必须用 token_name 过滤。
-	// 优先读 apps.newapi_key_name；store 缺失或字段空时回退到约定 "app-"+appID，
+	// 优先读 apps.newapi_key_name；字段为空（历史未回填数据）时回退到约定 "app-"+appID，
 	// 该值与 app_initialize 注册 token 时使用的名字保持一致。
 	keyName := "app-" + appID
-	if s.store != nil {
-		// appID 直接作为字符串传入，不再需要解析为 UUID 类型。
-		if app, getErr := s.store.GetApp(ctx, appID); getErr == nil && app.NewapiKeyName.Valid && app.NewapiKeyName.String != "" {
-			keyName = app.NewapiKeyName.String
-		}
+	if app.NewapiKeyName.Valid && app.NewapiKeyName.String != "" {
+		keyName = app.NewapiKeyName.String
 	}
 	page, err := s.client.GetTokenLogs(ctx, newapi.LogsQuery{
 		TokenName: keyName,
@@ -153,7 +165,7 @@ func (s *UsageService) GetAppUsage(ctx context.Context, principal auth.Principal
 			s.failAuditor.RecordNewAPIFailure(ctx, NewAPIFailureContext{
 				ActorID:   principal.UserID,
 				ActorRole: principal.Role,
-				OrgID:     ownerOrgID,
+				OrgID:     app.OrgID,
 				Endpoint:  "GET /api/log/?token_name=...",
 				Err:       err,
 			})

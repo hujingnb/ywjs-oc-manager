@@ -211,9 +211,8 @@ const appOptions = computed(() =>
 const selectedApp = computed(() => (apps.value ?? []).find((app) => app.id === selectedAppId.value))
 const appUsageContext = computed(() => {
   if (!selectedApp.value?.newapi_key_id) return undefined
+  // 归属/权限由后端按 appId 校验，这里只需带上 new-api key 判断实例是否已初始化。
   return {
-    orgId: selectedApp.value.org_id,
-    ownerUserId: selectedApp.value.owner_user_id,
     newapiKeyId: selectedApp.value.newapi_key_id,
   }
 })

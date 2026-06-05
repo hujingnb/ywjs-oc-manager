@@ -16,10 +16,14 @@ import (
 	"oc-manager/internal/store/sqlc"
 )
 
-// TestUsageServiceForbidsCrossOrg 校验非平台管理员只能看自己 org 的用量。
+// TestUsageServiceForbidsCrossOrg 校验组织管理员只能看自己 org 的应用用量：
+// 应用真实归属 org 与主体 org 不一致时按数据库归属拒绝（不再信任调用方传入的 owner）。
 func TestUsageServiceForbidsCrossOrg(t *testing.T) {
-	svc := NewUsageService(&fakeUsageStore{}, &fakeUsageClient{}, nil)
-	_, err := svc.GetAppUsage(context.Background(), auth.Principal{Role: domain.UserRoleOrgAdmin, OrgID: "other"}, "app-1", "owner-org", "owner-user", 1, LogsQueryOptions{})
+	store := &fakeUsageStore{appByID: map[string]sqlc.App{
+		"app-1": {ID: "app-1", OrgID: "org-1", OwnerUserID: "owner-user"},
+	}}
+	svc := NewUsageService(store, &fakeUsageClient{}, nil)
+	_, err := svc.GetAppUsage(context.Background(), auth.Principal{Role: domain.UserRoleOrgAdmin, OrgID: "other"}, "app-1", 1, LogsQueryOptions{})
 	require.ErrorIs(t, err, ErrForbidden)
 }
 
@@ -30,11 +34,14 @@ func TestUsageServiceAppProxiesTokenLogs(t *testing.T) {
 		Items: []newapi.LogEntry{{ID: 1, ModelName: "qwen2.5", Quota: 100}},
 		Total: 1,
 	}}
-	svc := NewUsageService(&fakeUsageStore{}, client, nil)
+	// 应用存在但 NewapiKeyName 未回填，service 应回退到约定 "app-"+appID 作 token_name。
+	store := &fakeUsageStore{appByID: map[string]sqlc.App{
+		"app-1": {ID: "app-1", OrgID: "org-1", OwnerUserID: "owner-user"},
+	}}
+	svc := NewUsageService(store, client, nil)
 
-	view, err := svc.GetAppUsage(context.Background(), platformAdmin(), "app-1", "owner-org", "owner-user", 42, LogsQueryOptions{Page: 1, PageSize: 50})
+	view, err := svc.GetAppUsage(context.Background(), platformAdmin(), "app-1", 42, LogsQueryOptions{Page: 1, PageSize: 50})
 	require.NoError(t, err)
-	// fakeUsageStore.GetApp 默认返回 ErrNoRows，service 走回退路径拼 "app-"+appID。
 	if client.lastTokenLogsQuery.TokenName != "app-app-1" || client.lastTokenLogsQuery.PageSize != 50 {
 		t.Fatalf("token logs query = %+v", client.lastTokenLogsQuery)
 	}
@@ -44,14 +51,20 @@ func TestUsageServiceAppProxiesTokenLogs(t *testing.T) {
 }
 
 // TestUsageServiceAppMapsErrors 校验 newapi.ErrNotFound / ErrUnauthorized 的映射。
+// 注入真实 app 行使流程越过鉴权后再触发 client 错误，从而校验错误映射本身。
 func TestUsageServiceAppMapsErrors(t *testing.T) {
-	svc := NewUsageService(&fakeUsageStore{}, &fakeUsageClient{tokenLogsError: newapi.ErrNotFound}, nil)
-	if _, err := svc.GetAppUsage(context.Background(), platformAdmin(), "app", "o", "u", 1, LogsQueryOptions{}); !errors.Is(err, ErrNotFound) {
+	appStore := func() *fakeUsageStore {
+		return &fakeUsageStore{appByID: map[string]sqlc.App{
+			"app": {ID: "app", OrgID: "org-1", OwnerUserID: "owner-user", NewapiKeyName: null.StringFrom("app-token")},
+		}}
+	}
+	svc := NewUsageService(appStore(), &fakeUsageClient{tokenLogsError: newapi.ErrNotFound}, nil)
+	if _, err := svc.GetAppUsage(context.Background(), platformAdmin(), "app", 1, LogsQueryOptions{}); !errors.Is(err, ErrNotFound) {
 		t.Fatalf("error = %v, want ErrNotFound", err)
 	}
 
-	svc = NewUsageService(&fakeUsageStore{}, &fakeUsageClient{tokenLogsError: newapi.ErrUnauthorized}, nil)
-	if _, err := svc.GetAppUsage(context.Background(), platformAdmin(), "app", "o", "u", 1, LogsQueryOptions{}); !errors.Is(err, ErrUsageUnavailable) {
+	svc = NewUsageService(appStore(), &fakeUsageClient{tokenLogsError: newapi.ErrUnauthorized}, nil)
+	if _, err := svc.GetAppUsage(context.Background(), platformAdmin(), "app", 1, LogsQueryOptions{}); !errors.Is(err, ErrUsageUnavailable) {
 		t.Fatalf("error = %v, want ErrUsageUnavailable", err)
 	}
 }
@@ -59,8 +72,11 @@ func TestUsageServiceAppMapsErrors(t *testing.T) {
 // TestUsageServiceAppZeroKeyReturnsEmpty 校验 newapiKeyID=0（应用尚未初始化）时直接返回空 LogsPage。
 func TestUsageServiceAppZeroKeyReturnsEmpty(t *testing.T) {
 	client := &fakeUsageClient{}
-	svc := NewUsageService(&fakeUsageStore{}, client, nil)
-	view, err := svc.GetAppUsage(context.Background(), platformAdmin(), "app", "o", "u", 0, LogsQueryOptions{})
+	store := &fakeUsageStore{appByID: map[string]sqlc.App{
+		"app": {ID: "app", OrgID: "org-1", OwnerUserID: "owner-user"},
+	}}
+	svc := NewUsageService(store, client, nil)
+	view, err := svc.GetAppUsage(context.Background(), platformAdmin(), "app", 0, LogsQueryOptions{})
 	require.NoError(t, err)
 	require.Equal(t, 0, len(view.Items))
 	require.Equal(t, 0, client.tokenLogsCalls)
@@ -69,7 +85,7 @@ func TestUsageServiceAppZeroKeyReturnsEmpty(t *testing.T) {
 // TestUsageServiceMissingClient 校验 client=nil 时 ErrUsageUnavailable。
 func TestUsageServiceMissingClient(t *testing.T) {
 	svc := NewUsageService(&fakeUsageStore{}, nil, nil)
-	if _, err := svc.GetAppUsage(context.Background(), platformAdmin(), "app", "o", "u", 1, LogsQueryOptions{}); !errors.Is(err, ErrUsageUnavailable) {
+	if _, err := svc.GetAppUsage(context.Background(), platformAdmin(), "app", 1, LogsQueryOptions{}); !errors.Is(err, ErrUsageUnavailable) {
 		t.Fatalf("error = %v, want ErrUsageUnavailable", err)
 	}
 }
@@ -193,8 +209,12 @@ func TestUsageServicePlatformProxiesAllQuotaDates(t *testing.T) {
 func TestUsageService_AppUsageFailureRecordsAudit(t *testing.T) {
 	auditor := &fakeFailAuditor{}
 	client := &fakeUsageClient{tokenLogsError: errors.New("5xx")}
-	svc := NewUsageService(&fakeUsageStore{}, client, auditor)
-	_, err := svc.GetAppUsage(context.Background(), platformAdmin(), "app-1", "owner-org", "owner-user", 42, LogsQueryOptions{})
+	// 审计的 OrgID 取自应用真实归属（app.OrgID），不再来自调用方入参。
+	store := &fakeUsageStore{appByID: map[string]sqlc.App{
+		"app-1": {ID: "app-1", OrgID: "owner-org", OwnerUserID: "owner-user", NewapiKeyName: null.StringFrom("app-token")},
+	}}
+	svc := NewUsageService(store, client, auditor)
+	_, err := svc.GetAppUsage(context.Background(), platformAdmin(), "app-1", 42, LogsQueryOptions{})
 	require.Error(t, err)
 	require.Equal(t, 1, len(auditor.events))
 	ev := auditor.events[0]
@@ -341,15 +361,19 @@ func (s *fakeUsageStore) ListAllActiveOrganizations(_ context.Context) ([]sqlc.O
 	return s.allActiveOrgs, nil
 }
 
-// TestGetAppUsageFallsBackWhenKeyNameEmpty 校验 app 维度 store.GetApp 返回 sql.ErrNoRows
-// 时，service 回退到 "app-"+appID 的拼装路径，确保历史/未回填数据仍然可查。
+// TestGetAppUsageFallsBackWhenKeyNameEmpty 校验 app 存在但 newapi_key_name 字段为空时，
+// service 回退到 "app-"+appID 的拼装路径，确保历史/未回填数据仍然可查。
 func TestGetAppUsageFallsBackWhenKeyNameEmpty(t *testing.T) {
+	appID := "0193ce63-4b8e-7000-a000-000000000001"
 	client := &fakeUsageClient{tokenLogs: newapi.LogsPage{Items: []newapi.LogEntry{{ID: 1}}, Total: 1}}
-	svc := NewUsageService(&fakeUsageStore{}, client, nil)
+	// 故意不设 NewapiKeyName，模拟旧数据未回填的边界。
+	store := &fakeUsageStore{appByID: map[string]sqlc.App{
+		appID: {ID: appID, OrgID: "owner-org", OwnerUserID: "owner-user"},
+	}}
+	svc := NewUsageService(store, client, nil)
 
 	_, err := svc.GetAppUsage(context.Background(), platformAdmin(),
-		"0193ce63-4b8e-7000-a000-000000000001",
-		"owner-org", "owner-user",
+		appID,
 		42,
 		LogsQueryOptions{Page: 1, PageSize: 50})
 	require.NoError(t, err)
@@ -456,12 +480,59 @@ func TestGetAppUsageUsesAppNewapiKeyName(t *testing.T) {
 
 	_, err := svc.GetAppUsage(context.Background(), platformAdmin(),
 		appID,
-		"owner-org", "owner-user",
 		42,
 		LogsQueryOptions{Page: 1, PageSize: 50})
 	require.NoError(t, err)
 	assert.Equal(t, "app-database-override", client.lastTokenLogsQuery.TokenName,
 		"GetAppUsage 应优先用数据库里写的 NewapiKeyName 而非约定派生")
+}
+
+// TestUsageServiceAppRejectsNonOwnerMember 是 IDOR 越权的回归用例：组织成员请求另一名成员
+// 拥有的应用用量。修复前调用方可把 owner_user_id 伪造成自己借 CanViewApp(member) 分支放行；
+// 修复后鉴权基于数据库中应用的真实归属（OwnerUserID=victim），组织成员必须被拒绝。
+func TestUsageServiceAppRejectsNonOwnerMember(t *testing.T) {
+	attackerID := "00000000-0000-0000-0000-0000000000a1" // 发起越权的组织成员
+	victimID := "00000000-0000-0000-0000-0000000000a2"   // 应用真正的拥有者
+	appID := mustUUID(t, "0193ce63-4b8e-7000-a000-0000000000ff")
+	store := &fakeUsageStore{
+		appByID: map[string]sqlc.App{
+			appID: {ID: appID, OrgID: "org-1", OwnerUserID: victimID, NewapiKeyName: null.StringFrom("app-victim")},
+		},
+	}
+	client := &fakeUsageClient{tokenLogs: newapi.LogsPage{Items: []newapi.LogEntry{{ID: 1}}, Total: 1}}
+	svc := NewUsageService(store, client, nil)
+
+	_, err := svc.GetAppUsage(context.Background(), auth.Principal{
+		Role:   domain.UserRoleOrgMember,
+		OrgID:  "org-1",
+		UserID: attackerID,
+	}, appID, 42, LogsQueryOptions{})
+	require.ErrorIs(t, err, ErrForbidden)
+	// 越权被拦下时不得真正调用 new-api 拉日志。
+	assert.Equal(t, 0, client.tokenLogsCalls)
+}
+
+// TestUsageServiceAppAllowsOwnerMember 校验正向路径：组织成员读取本人拥有的应用用量，
+// 鉴权按真实归属（OwnerUserID==自己）通过并返回日志。
+func TestUsageServiceAppAllowsOwnerMember(t *testing.T) {
+	memberID := "00000000-0000-0000-0000-0000000000a1"
+	appID := mustUUID(t, "0193ce63-4b8e-7000-a000-0000000000fe")
+	store := &fakeUsageStore{
+		appByID: map[string]sqlc.App{
+			appID: {ID: appID, OrgID: "org-1", OwnerUserID: memberID, NewapiKeyName: null.StringFrom("app-self")},
+		},
+	}
+	client := &fakeUsageClient{tokenLogs: newapi.LogsPage{Items: []newapi.LogEntry{{ID: 9}}, Total: 1}}
+	svc := NewUsageService(store, client, nil)
+
+	view, err := svc.GetAppUsage(context.Background(), auth.Principal{
+		Role:   domain.UserRoleOrgMember,
+		OrgID:  "org-1",
+		UserID: memberID,
+	}, appID, 42, LogsQueryOptions{})
+	require.NoError(t, err)
+	require.Len(t, view.Items, 1)
+	assert.Equal(t, "app-self", client.lastTokenLogsQuery.TokenName)
 }
 
 // TestGetOrgUsageBreakdownForbidsNonPlatformAdmin 校验非 platform_admin 拿不到分组用量。

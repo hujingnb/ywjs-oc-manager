@@ -281,10 +281,11 @@ export function useInvalidateAppData(appId: Ref<string | undefined>) {
 }
 
 // useAppUsageQuery 查询应用维度的 token 用量。
-// context 来自应用拥有者和 new-api key 信息；缺任何一项都不能调用后端薄代理。
+// 应用归属与权限由后端按 appId 从数据库校验，前端不再传 owner 参数（避免伪造 owner 越权）；
+// 这里只需带上 new-api key 信息：key 缺失（newapiKeyId 为 0/未定义）表示实例尚未初始化，不调后端。
 export function useAppUsageQuery(
   appId: Ref<string | undefined>,
-  context: Ref<{ orgId: string; ownerUserId: string; newapiKeyId: number } | undefined>,
+  context: Ref<{ newapiKeyId: number } | undefined>,
 ) {
   return useQuery<AggregatedUsage | null>({
     queryKey: ['app-usage', appId, context],
@@ -293,8 +294,6 @@ export function useAppUsageQuery(
       if (!appId.value || !context.value) return null
       const response = await apiRequest<{ usage: AggregatedUsage }>(`/api/v1/apps/${appId.value}/usage`, {
         query: {
-          owner_org_id: context.value.orgId,
-          owner_user_id: context.value.ownerUserId,
           newapi_key_id: context.value.newapiKeyId,
         },
       })

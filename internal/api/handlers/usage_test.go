@@ -52,7 +52,7 @@ func (s *usageServiceStub) GetPlatformUsage(_ context.Context, _ auth.Principal,
 	return s.platformResult, s.platformErr
 }
 
-func (s *usageServiceStub) GetAppUsage(_ context.Context, _ auth.Principal, _, _, _ string, _ int64, _ service.LogsQueryOptions) (service.LogsPage, error) {
+func (s *usageServiceStub) GetAppUsage(_ context.Context, _ auth.Principal, _ string, _ int64, _ service.LogsQueryOptions) (service.LogsPage, error) {
 	return s.appResult, s.appErr
 }
 
@@ -201,12 +201,13 @@ func TestUsageGetPlatformAppliesDefaultWindow(t *testing.T) {
 }
 
 // TestUsageGetAppHappy 验证用量获取应用成功路径的成功路径场景。
+// 归属/权限改由 service 按 appId 校验，handler 不再要求 owner 参数。
 func TestUsageGetAppHappy(t *testing.T) {
 	stub := &usageServiceStub{appResult: service.LogsPage{Total: 3}}
 	router := newUsageTestRouter(t, stub)
 
 	w := httptest.NewRecorder()
-	req := httptest.NewRequest(http.MethodGet, "/api/v1/apps/app-1/usage?owner_org_id=org-1&owner_user_id=u1", nil)
+	req := httptest.NewRequest(http.MethodGet, "/api/v1/apps/app-1/usage?newapi_key_id=42", nil)
 	req = withPrincipal(req, auth.Principal{UserID: "u1", Role: domain.UserRolePlatformAdmin})
 	router.ServeHTTP(w, req)
 
@@ -214,17 +215,17 @@ func TestUsageGetAppHappy(t *testing.T) {
 	assert.Contains(t, w.Body.String(), "usage")
 }
 
-// TestUsageGetAppMissingParams 验证用量获取应用缺失参数的异常或拒绝路径场景。
-func TestUsageGetAppMissingParams(t *testing.T) {
-	stub := &usageServiceStub{}
+// TestUsageGetAppForbidden 验证 service 返回 ErrForbidden 时 handler 落 403，
+// 覆盖「按真实归属鉴权失败」这一越权拦截路径。
+func TestUsageGetAppForbidden(t *testing.T) {
+	stub := &usageServiceStub{appErr: service.ErrForbidden}
 	router := newUsageTestRouter(t, stub)
 
 	w := httptest.NewRecorder()
-	// 缺少 owner_user_id
-	req := httptest.NewRequest(http.MethodGet, "/api/v1/apps/app-1/usage?owner_org_id=org-1", nil)
-	req = withPrincipal(req, auth.Principal{UserID: "u1", Role: domain.UserRolePlatformAdmin})
+	req := httptest.NewRequest(http.MethodGet, "/api/v1/apps/app-1/usage", nil)
+	req = withPrincipal(req, auth.Principal{UserID: "u1", Role: domain.UserRoleOrgMember, OrgID: "org-1"})
 	router.ServeHTTP(w, req)
 
-	assert.Equal(t, http.StatusBadRequest, w.Code)
+	assert.Equal(t, http.StatusForbidden, w.Code)
 }
 
