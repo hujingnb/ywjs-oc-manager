@@ -37,6 +37,8 @@ type AuthService struct {
 	store AuthStore
 	// tokens 负责签发和校验 access / refresh token。
 	tokens *auth.TokenManager
+	// captcha 为验证码前置校验器；nil 表示验证码关闭，Login 直接跳过。
+	captcha CaptchaVerifier
 	// verifyPassword 在测试中可替换，生产使用 auth.VerifyPassword 校验 PHC hash。
 	verifyPassword func(string, string) bool
 	// hashPassword 在修改密码时生成 PHC hash，测试可替换为确定性快路径。
@@ -45,11 +47,12 @@ type AuthService struct {
 	now func() time.Time
 }
 
-// NewAuthService 创建认证服务。
-func NewAuthService(store AuthStore, tokens *auth.TokenManager) *AuthService {
+// NewAuthService 创建认证服务。captcha 为 nil 时不启用登录验证码校验。
+func NewAuthService(store AuthStore, tokens *auth.TokenManager, captcha CaptchaVerifier) *AuthService {
 	return &AuthService{
 		store:          store,
 		tokens:         tokens,
+		captcha:        captcha,
 		verifyPassword: auth.VerifyPassword,
 		hashPassword: func(password string) (string, error) {
 			return auth.HashPassword(password, auth.DefaultPasswordParams)
@@ -64,6 +67,8 @@ type LoginInput struct {
 	OrgCode  string
 	Username string
 	Password string
+	// Captcha 是 Altcha payload（base64）；验证码开启时由 Login 前置校验，关闭时忽略。
+	Captcha string
 }
 
 // ChangePasswordInput 是已登录用户自助修改密码的 service 入参。
@@ -100,6 +105,13 @@ type LoginResult struct {
 
 // Login 校验用户名密码，签发 access/refresh token，并持久化 refresh token hash。
 func (s *AuthService) Login(ctx context.Context, input LoginInput) (LoginResult, error) {
+	// 验证码前置校验：开启时（captcha != nil）必须先过 PoW + 一次性消费，
+	// 失败直接返回，连密码校验（Argon2id，开销大）都不触发。
+	if s.captcha != nil {
+		if err := s.captcha.Verify(ctx, input.Captcha); err != nil {
+			return LoginResult{}, err
+		}
+	}
 	input.OrgCode = strings.ToLower(strings.TrimSpace(input.OrgCode))
 	input.Username = strings.TrimSpace(input.Username)
 

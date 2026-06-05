@@ -398,7 +398,8 @@ func newTestAuthService(t *testing.T, store *authStoreStub) *AuthService {
 	t.Helper()
 	tokens, err := auth.NewTokenManager("access-secret", "refresh-secret", time.Minute, time.Hour)
 	require.NoError(t, err)
-	svc := NewAuthService(store, tokens)
+	// captcha 传 nil：既有测试默认不启用验证码校验。
+	svc := NewAuthService(store, tokens, nil)
 	svc.now = func() time.Time { return time.Now().UTC() }
 	return svc
 }
@@ -626,6 +627,43 @@ func (s *authStoreStub) RevokeRefreshTokensByUser(_ context.Context, userID stri
 		}
 	}
 	return nil
+}
+
+// loginFakeCaptcha 是 CaptchaVerifier 的测试桩，按预置 err 返回。
+type loginFakeCaptcha struct{ err error }
+
+func (f loginFakeCaptcha) Verify(_ context.Context, _ string) error { return f.err }
+
+// 验证码校验失败时，Login 直接返回该错误且不进入密码校验。
+func TestAuthServiceLoginRejectsBadCaptcha(t *testing.T) {
+	store := newAuthStoreStub(t)
+	svc := newTestAuthService(t, store)
+	svc.captcha = loginFakeCaptcha{err: ErrCaptchaInvalid} // 注入失败桩
+
+	_, err := svc.Login(context.Background(), LoginInput{
+		OrgCode:  "test-org",
+		Username: "admin",
+		Password: "correct-password",
+		Captcha:  "whatever",
+	})
+	require.ErrorIs(t, err, ErrCaptchaInvalid)
+	require.False(t, store.loggedIn) // 未走到 MarkUserLoggedIn，证明前置拦截
+}
+
+// 验证码校验通过时，Login 正常签发 token。
+func TestAuthServiceLoginPassesWithGoodCaptcha(t *testing.T) {
+	store := newAuthStoreStub(t)
+	svc := newTestAuthService(t, store)
+	svc.captcha = loginFakeCaptcha{err: nil} // 注入通过桩
+
+	result, err := svc.Login(context.Background(), LoginInput{
+		OrgCode:  "test-org",
+		Username: "admin",
+		Password: "correct-password",
+		Captcha:  "valid",
+	})
+	require.NoError(t, err)
+	require.Equal(t, "admin", result.User.Username)
 }
 
 // mustUUID 返回字符串 UUID（MySQL 侧 CHAR(36)，无需解析）。
