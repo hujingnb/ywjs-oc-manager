@@ -14,12 +14,21 @@ const mocks = vi.hoisted(() => ({
   canManage: vi.fn(() => true),
   authUser: { id: 'user-1', role: 'org_member', org_id: 'org-1' },
   downloadAppKnowledgeFile: vi.fn(),
+  appKnowledgeQueryCalls: [] as Array<{ appId: unknown; options: Record<string, { value: unknown }> }>,
 }))
 
 type RenderableColumn = {
   key: string
   title?: string
   render?: (row: unknown) => VNodeChild
+}
+
+interface PaginationConfig {
+  page: number
+  pageSize: number
+  itemCount?: number
+  onUpdatePage?: (page: number) => void
+  onUpdatePageSize?: (pageSize: number) => void
 }
 
 type UploadRunItem = { file: File; label: string }
@@ -39,17 +48,41 @@ const DataTableStub = defineComponent({
   props: {
     columns: { type: Array as PropType<RenderableColumn[]>, default: () => [] },
     data: { type: Array as PropType<unknown[]>, default: () => [] },
+    pagination: { type: Object as PropType<PaginationConfig | false>, default: false },
   },
   setup(props) {
     return () => h('div', [
       h('div', { class: 'headers' }, props.columns.map((column) => h('span', { class: `header-${column.key}` }, column.title))),
       ...props.data.flatMap((row) => props.columns.map((column) => h('div', { class: `cell-${column.key}` }, renderCellChildren(column, row)))),
+      props.pagination
+        ? h('div', { class: 'pagination-summary' }, [
+            `page=${props.pagination.page};pageSize=${props.pagination.pageSize};total=${props.pagination.itemCount ?? 0}`,
+            h('button', { class: 'page-two', onClick: () => props.pagination && props.pagination.onUpdatePage?.(2) }, '第 2 页'),
+            h('button', { class: 'page-size-ten', onClick: () => props.pagination && props.pagination.onUpdatePageSize?.(10) }, '每页 10 条'),
+          ])
+        : null,
     ])
   },
 })
 
 // CardStub 承接 n-card 根节点上的 class 和拖拽监听，便于验证 drop zone 行为。
 const CardStub = { template: '<section v-bind="$attrs"><slot name="header" /><slot name="header-extra" /><slot /></section>' }
+
+// InputStub 模拟 naive-ui 的 v-model:value 协议，让搜索框测试聚焦查询状态变化。
+const InputStub = defineComponent({
+  props: {
+    value: { type: String, default: '' },
+    placeholder: { type: String, default: '' },
+  },
+  emits: ['update:value'],
+  setup(props, { emit }) {
+    return () => h('input', {
+      value: props.value,
+      placeholder: props.placeholder,
+      onInput: (event: Event) => emit('update:value', (event.target as HTMLInputElement).value),
+    })
+  },
+})
 
 vi.mock('@/stores/auth', () => ({
   useAuthStore: () => ({ user: mocks.authUser }),
@@ -90,17 +123,20 @@ vi.mock('@/api/hooks/useKnowledge', async () => {
   const actual = await vi.importActual<typeof import('@/api/hooks/useKnowledge')>('@/api/hooks/useKnowledge')
   return {
     ...actual,
-    useAppKnowledgeQuery: () => ({
-      data: ref({
-        items: [{ id: 'doc-app-1', name: 'readme.md', size: 5, parse_status: 'completed', progress: 100, created_at: '2026-05-27T00:00:00Z' }],
-        total: 1,
-        used_bytes: 5,
-        quota_bytes: 100,
-        remaining_bytes: 95,
-      }),
-      isLoading: ref(false),
-      error: ref(null),
-    }),
+    useAppKnowledgeQuery: (appId: unknown, options: Record<string, { value: unknown }> = {}) => {
+      mocks.appKnowledgeQueryCalls.push({ appId, options })
+      return {
+        data: ref({
+          items: [{ id: 'doc-app-1', name: 'readme.md', size: 5, parse_status: 'completed', progress: 100, created_at: '2026-05-27T00:00:00Z' }],
+          total: 1,
+          used_bytes: 5,
+          quota_bytes: 100,
+          remaining_bytes: 95,
+        }),
+        isLoading: ref(false),
+        error: ref(null),
+      }
+    },
     downloadAppKnowledgeFile: mocks.downloadAppKnowledgeFile,
     useUploadAppKnowledge: () => ({
       mutateAsync: mocks.mutateAsync,
@@ -135,6 +171,7 @@ function mountTab() {
       stubs: {
         NCard: CardStub,
         'n-card': CardStub,
+        NInput: InputStub,
         DataTable: DataTableStub,
         NDataTable: DataTableStub,
         NButton: { template: '<button><slot /></button>' },
@@ -167,6 +204,7 @@ describe('AppKnowledgeTab', () => {
     mocks.warning.mockReset()
     mocks.run.mockReset()
     uploadRunContexts.splice(0, uploadRunContexts.length)
+    mocks.appKnowledgeQueryCalls.splice(0, mocks.appKnowledgeQueryCalls.length)
     mocks.run.mockImplementation(async (items: UploadRunItem[], runner: (item: UploadRunItem, file: File, ctx: UploadRunContext) => Promise<void>) => {
       for (const item of items) {
         const ctx = { onProgress: vi.fn(), signal: new AbortController().signal }
@@ -191,6 +229,29 @@ describe('AppKnowledgeTab', () => {
     const wrapper = mountTab()
 
     expect(wrapper.text()).toContain('编辑空间')
+  })
+
+  // 覆盖实例知识库列表查询条件：搜索关键词、页码和页大小必须通过响应式参数传给 hook。
+  it('实例知识库列表支持按文件名搜索和远程分页', async () => {
+    const wrapper = mountTab()
+    const queryCall = mocks.appKnowledgeQueryCalls[0]
+
+    expect(wrapper.find('input[placeholder="搜索文件名称"]').exists()).toBe(true)
+    expect(queryCall.options.page.value).toBe(1)
+    expect(queryCall.options.pageSize.value).toBe(50)
+    expect(queryCall.options.keyword.value).toBe('')
+    expect(wrapper.find('.pagination-summary').text()).toContain('total=1')
+
+    await wrapper.find('.page-two').trigger('click')
+    expect(queryCall.options.page.value).toBe(2)
+
+    await wrapper.find('.page-size-ten').trigger('click')
+    expect(queryCall.options.page.value).toBe(1)
+    expect(queryCall.options.pageSize.value).toBe(10)
+
+    await wrapper.find('input[placeholder="搜索文件名称"]').setValue(' readme ')
+    expect(queryCall.options.keyword.value).toBe('readme')
+    expect(queryCall.options.page.value).toBe(1)
   })
 
   // 覆盖实例知识库上传入口：文件选择框必须允许一次选择多个文件。

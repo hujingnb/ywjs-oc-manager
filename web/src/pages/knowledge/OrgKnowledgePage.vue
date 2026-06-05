@@ -26,12 +26,19 @@
         </div>
       </template>
 
-      <n-space v-if="isPlatformAdmin" align="center" style="margin-bottom: 12px">
+      <n-space align="center" style="margin-bottom: 12px">
         <n-select
+          v-if="isPlatformAdmin"
           v-model:value="selectedOrgId"
           :options="orgOptions"
           style="width: 220px"
           placeholder="选择企业"
+        />
+        <n-input
+          v-model:value="keyword"
+          placeholder="搜索文件名称"
+          clearable
+          style="width: 220px"
         />
       </n-space>
 
@@ -45,6 +52,8 @@
         :data="listing?.items ?? []"
         size="small"
         :bordered="false"
+        :remote="true"
+        :pagination="tablePagination"
         :row-key="(row) => row.id"
       />
     </n-card>
@@ -52,8 +61,8 @@
 </template>
 
 <script setup lang="ts">
-import { computed, h, ref } from 'vue'
-import { NButton, NCard, NDataTable, NSelect, NSpace, NTag, useMessage, type DataTableColumns } from 'naive-ui'
+import { computed, h, ref, watch } from 'vue'
+import { NButton, NCard, NDataTable, NInput, NSelect, NSpace, NTag, useMessage, type DataTableColumns } from 'naive-ui'
 
 import {
   KNOWLEDGE_UPLOAD_MAX_MESSAGE,
@@ -96,7 +105,15 @@ const eyebrow = computed(() => (auth.user?.role === 'platform_admin' ? 'Platform
 const canManage = computed(() => canManageOrgKnowledge(auth.user, effectiveOrgId.value))
 const emptyOrgMessage = computed(() => isPlatformAdmin.value ? '暂无可查看企业' : '当前账号未关联企业')
 
-const { data: listing, isLoading, error } = useOrgKnowledgeQuery(effectiveOrgId)
+const keyword = ref('')
+const normalizedKeyword = computed(() => keyword.value.trim())
+const page = ref(1)
+const pageSize = ref(50)
+const { data: listing, isLoading, error } = useOrgKnowledgeQuery(effectiveOrgId, {
+  page,
+  pageSize,
+  keyword: normalizedKeyword,
+})
 const uploadMutation = useUploadOrgKnowledge(effectiveOrgId)
 const deleteMutation = useDeleteOrgKnowledge(effectiveOrgId)
 const reparseMutation = useReparseOrgKnowledge(effectiveOrgId)
@@ -107,6 +124,26 @@ const quotaSummary = computed(() => listing.value
 const downloading = ref(false)
 // dragActive 标记当前卡片是否处于可上传拖拽态，仅有写权限时才会置 true。
 const dragActive = ref(false)
+// tablePagination 使用后端 total 驱动远程分页；搜索条件变化时回到第一页避免空页。
+const tablePagination = computed(() => ({
+  page: page.value,
+  pageSize: pageSize.value,
+  itemCount: listing.value?.total ?? 0,
+  showSizePicker: true,
+  pageSizes: [10, 20, 50, 100],
+  prefix: () => `共 ${listing.value?.total ?? 0} 个文件`,
+  onUpdatePage: (nextPage: number) => {
+    page.value = nextPage
+  },
+  onUpdatePageSize: (nextPageSize: number) => {
+    pageSize.value = nextPageSize
+    page.value = 1
+  },
+}))
+
+watch([effectiveOrgId, normalizedKeyword], () => {
+  page.value = 1
+})
 
 // parseTagType 将 RAGFlow 解析状态映射为标签颜色，未知状态保留默认色便于兼容服务端新增状态。
 function parseTagType(status: string): 'success' | 'warning' | 'error' | 'default' {

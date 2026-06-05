@@ -6,6 +6,7 @@ import {
   KNOWLEDGE_UPLOAD_MAX_BYTES,
   KNOWLEDGE_UPLOAD_MAX_LABEL,
   KNOWLEDGE_UPLOAD_MAX_MESSAGE,
+  buildKnowledgeListQuery,
   downloadAppKnowledgeFile,
   downloadOrgKnowledgeFile,
   formatKnowledgeBytes,
@@ -146,6 +147,43 @@ describe('知识库累计容量展示', () => {
     expect(isKnowledgeUploadOverRemaining({ size: 11 }, { remaining_bytes: 10 })).toBe(true)
     expect(isKnowledgeUploadOverRemaining({ size: 10 }, { remaining_bytes: 10 })).toBe(false)
     expect(isKnowledgeUploadOverRemaining({ size: 10 }, null)).toBe(true)
+  })
+})
+
+describe('知识库列表查询参数', () => {
+  // 覆盖默认分页：页面未显式传参时仍按后端默认第一页和 50 条请求。
+  it('默认请求第一页和 50 条知识库文件', () => {
+    expect(buildKnowledgeListQuery({})).toEqual({
+      page: 1,
+      page_size: 50,
+    })
+  })
+
+  // 覆盖搜索和分页组合：文件名关键词需要裁剪空白，解析状态保留给后端精确过滤。
+  it('构造分页搜索查询参数', () => {
+    expect(buildKnowledgeListQuery({
+      page: 2,
+      pageSize: 20,
+      keyword: ' readme ',
+      status: ' failed ',
+    })).toEqual({
+      page: 2,
+      page_size: 20,
+      keyword: 'readme',
+      status: 'failed',
+    })
+  })
+
+  // 覆盖异常分页输入：小于 1 的页码和页大小回退到安全默认值，避免请求无效 offset。
+  it('归一化无效分页查询参数', () => {
+    expect(buildKnowledgeListQuery({
+      page: 0,
+      pageSize: -1,
+      keyword: '   ',
+    })).toEqual({
+      page: 1,
+      page_size: 50,
+    })
   })
 })
 

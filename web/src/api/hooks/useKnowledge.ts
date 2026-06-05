@@ -31,6 +31,8 @@ export interface KnowledgeListing {
 
 const orgKey = (orgId: string | undefined) => ['knowledge', 'org', orgId] as const
 const appKey = (appId: string | undefined) => ['knowledge', 'app', appId] as const
+const knowledgeDefaultPage = 1
+const knowledgeDefaultPageSize = 50
 
 // RAGFlow 文件上传保留前端拦截，避免大文件进入无意义上传会话。
 export const KNOWLEDGE_UPLOAD_MAX_BYTES = 1024 * 1024 * 1024
@@ -39,6 +41,61 @@ export const KNOWLEDGE_DEFAULT_QUOTA_BYTES = 1024 * 1024 * 1024
 // 提示文案的 MB 数值由上限字节数直接换算，修改上限后文案自动跟随，避免漂移。
 export const KNOWLEDGE_UPLOAD_MAX_LABEL = `${KNOWLEDGE_UPLOAD_MAX_BYTES / (1024 * 1024)}MB`
 export const KNOWLEDGE_UPLOAD_MAX_MESSAGE = `单文件最大支持 ${KNOWLEDGE_UPLOAD_MAX_LABEL}`
+
+// KnowledgeListQueryInput 是列表页传入分页、文件名搜索和状态过滤的原始参数。
+export interface KnowledgeListQueryInput {
+  page?: number | null
+  pageSize?: number | null
+  keyword?: string | null
+  status?: string | null
+}
+
+// KnowledgeListQuery 是传给后端列表接口的 query 参数；字段名保持 HTTP 契约的 snake_case。
+export interface KnowledgeListQuery extends Record<string, string | number | undefined> {
+  page: number
+  page_size: number
+  keyword?: string
+  status?: string
+}
+
+// KnowledgeListQueryRef 只要求响应式值可读，兼容 ref 和 computed。
+interface KnowledgeListQueryRef<T> {
+  value: T
+}
+
+// KnowledgeListQueryOptions 是 org/app 知识库 hook 接收的响应式列表控制参数。
+export interface KnowledgeListQueryOptions {
+  page?: KnowledgeListQueryRef<number | undefined>
+  pageSize?: KnowledgeListQueryRef<number | undefined>
+  keyword?: KnowledgeListQueryRef<string | undefined>
+  status?: KnowledgeListQueryRef<string | undefined>
+}
+
+// buildKnowledgeListQuery 统一裁剪搜索词并兜底分页，避免两个页面各自拼 query 产生差异。
+export function buildKnowledgeListQuery(input: KnowledgeListQueryInput): KnowledgeListQuery {
+  const keyword = stringOrUndefined(input.keyword)
+  const status = stringOrUndefined(input.status)
+  return {
+    page: positiveIntegerOrDefault(input.page, knowledgeDefaultPage),
+    page_size: positiveIntegerOrDefault(input.pageSize, knowledgeDefaultPageSize),
+    ...(keyword ? { keyword } : {}),
+    ...(status ? { status } : {}),
+  }
+}
+
+// positiveIntegerOrDefault 将外部分页输入收敛为后端可接受的正整数。
+function positiveIntegerOrDefault(value: number | null | undefined, fallback: number): number {
+  if (typeof value !== 'number' || !Number.isFinite(value) || value < 1) {
+    return fallback
+  }
+  return Math.floor(value)
+}
+
+// stringOrUndefined 让空白搜索词不进入 URL，交给后端返回未过滤列表。
+function stringOrUndefined(value: string | null | undefined): string | undefined {
+  const trimmed = value?.trim() ?? ''
+  return trimmed || undefined
+}
 
 // normalizeKnowledgeNumber 把旧接口缺字段、NaN 或负数统一转成明确业务默认值，避免页面展示坏值。
 function normalizeKnowledgeNumber(value: unknown, fallback: number): number {
@@ -131,26 +188,42 @@ export function downloadAppKnowledgeFile(appId: string, documentId: string, file
   return downloadKnowledgeBlob(`/api/v1/apps/${appId}/knowledge/${documentId}/file`, fileName)
 }
 
-export function useOrgKnowledgeQuery(orgId: Ref<string | undefined>) {
+export function useOrgKnowledgeQuery(orgId: Ref<string | undefined>, options: KnowledgeListQueryOptions = {}) {
+  const listQuery = computed(() => buildKnowledgeListQuery({
+    page: options.page?.value,
+    pageSize: options.pageSize?.value,
+    keyword: options.keyword?.value,
+    status: options.status?.value,
+  }))
   return useQuery<KnowledgeListing | null>({
-    queryKey: computed(() => orgKey(orgId.value)),
+    queryKey: computed(() => [...orgKey(orgId.value), listQuery.value] as const),
     enabled: () => Boolean(orgId.value),
     refetchInterval: (query) => shouldPollKnowledge(query.state.data) ? 5000 : false,
     queryFn: async () => {
       if (!orgId.value) return null
-      return normalizeKnowledgeListing(await apiRequest<KnowledgeListing>(`/api/v1/organizations/${orgId.value}/knowledge`))
+      return normalizeKnowledgeListing(await apiRequest<KnowledgeListing>(`/api/v1/organizations/${orgId.value}/knowledge`, {
+        query: listQuery.value,
+      }))
     },
   })
 }
 
-export function useAppKnowledgeQuery(appId: Ref<string | undefined>) {
+export function useAppKnowledgeQuery(appId: Ref<string | undefined>, options: KnowledgeListQueryOptions = {}) {
+  const listQuery = computed(() => buildKnowledgeListQuery({
+    page: options.page?.value,
+    pageSize: options.pageSize?.value,
+    keyword: options.keyword?.value,
+    status: options.status?.value,
+  }))
   return useQuery<KnowledgeListing | null>({
-    queryKey: computed(() => appKey(appId.value)),
+    queryKey: computed(() => [...appKey(appId.value), listQuery.value] as const),
     enabled: () => Boolean(appId.value),
     refetchInterval: (query) => shouldPollKnowledge(query.state.data) ? 5000 : false,
     queryFn: async () => {
       if (!appId.value) return null
-      return normalizeKnowledgeListing(await apiRequest<KnowledgeListing>(`/api/v1/apps/${appId.value}/knowledge`))
+      return normalizeKnowledgeListing(await apiRequest<KnowledgeListing>(`/api/v1/apps/${appId.value}/knowledge`, {
+        query: listQuery.value,
+      }))
     },
   })
 }

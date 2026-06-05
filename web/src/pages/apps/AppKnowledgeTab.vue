@@ -27,6 +27,15 @@
       </div>
     </template>
 
+    <n-space align="center" style="margin-bottom: 12px">
+      <n-input
+        v-model:value="keyword"
+        placeholder="搜索文件名称"
+        clearable
+        style="width: 220px"
+      />
+    </n-space>
+
     <p v-if="quotaSummary" class="state-text">{{ quotaSummary }}</p>
     <p v-if="!app" class="state-text">尚未加载实例信息</p>
     <p v-else-if="errorMessage" class="state-text danger">{{ errorMessage }}</p>
@@ -38,6 +47,8 @@
       :data="listing.data.value?.items ?? []"
       size="small"
       :bordered="false"
+      :remote="true"
+      :pagination="tablePagination"
       :row-key="(row) => row.id"
     />
 
@@ -57,8 +68,8 @@
 </template>
 
 <script setup lang="ts">
-import { computed, h, inject, ref, type Ref } from 'vue'
-import { NButton, NCard, NDataTable, NForm, NFormItem, NInputNumber, NModal, NSpace, NTag, useMessage, type DataTableColumns } from 'naive-ui'
+import { computed, h, inject, ref, watch, type Ref } from 'vue'
+import { NButton, NCard, NDataTable, NForm, NFormItem, NInput, NInputNumber, NModal, NSpace, NTag, useMessage, type DataTableColumns } from 'naive-ui'
 
 import { useUpdateAppKnowledgeQuota, type AppDTO } from '@/api/hooks/useApps'
 import {
@@ -90,7 +101,15 @@ const auth = useAuthStore()
 
 const app = inject<Ref<AppDTO | null>>('app')
 
-const listing = useAppKnowledgeQuery(appIdRef)
+const keyword = ref('')
+const normalizedKeyword = computed(() => keyword.value.trim())
+const page = ref(1)
+const pageSize = ref(50)
+const listing = useAppKnowledgeQuery(appIdRef, {
+  page,
+  pageSize,
+  keyword: normalizedKeyword,
+})
 const uploadMutation = useUploadAppKnowledge(appIdRef)
 const deleteMutation = useDeleteAppKnowledge(appIdRef)
 const reparseMutation = useReparseAppKnowledge(appIdRef)
@@ -116,6 +135,26 @@ const quotaSummary = computed(() => listing.data.value
 const downloading = ref(false)
 // dragActive 标记当前卡片是否处于可上传拖拽态，仅有写权限时才会置 true。
 const dragActive = ref(false)
+// tablePagination 使用后端 total 驱动远程分页；切换搜索词或实例时回到第一页。
+const tablePagination = computed(() => ({
+  page: page.value,
+  pageSize: pageSize.value,
+  itemCount: listing.data.value?.total ?? 0,
+  showSizePicker: true,
+  pageSizes: [10, 20, 50, 100],
+  prefix: () => `共 ${listing.data.value?.total ?? 0} 个文件`,
+  onUpdatePage: (nextPage: number) => {
+    page.value = nextPage
+  },
+  onUpdatePageSize: (nextPageSize: number) => {
+    pageSize.value = nextPageSize
+    page.value = 1
+  },
+}))
+
+watch([appIdRef, normalizedKeyword], () => {
+  page.value = 1
+})
 
 // formatBytes 仅用于文件大小展示，RAGFlow 未返回大小时由后端归一化为 0。
 function formatBytes(value: number) {

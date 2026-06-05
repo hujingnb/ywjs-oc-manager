@@ -11,6 +11,7 @@ const mocks = vi.hoisted(() => ({
   mutateAsync: vi.fn(),
   canManage: vi.fn(() => true),
   downloadOrgKnowledgeFile: vi.fn(),
+  orgKnowledgeQueryCalls: [] as Array<{ orgId: unknown; options: Record<string, { value: unknown }> }>,
 }))
 
 type UploadRunItem = { file: File; label: string }
@@ -22,6 +23,14 @@ type RenderableColumn = {
   key: string
   title?: string
   render?: (row: unknown) => VNodeChild
+}
+
+interface PaginationConfig {
+  page: number
+  pageSize: number
+  itemCount?: number
+  onUpdatePage?: (page: number) => void
+  onUpdatePageSize?: (pageSize: number) => void
 }
 
 type RenderedChild = NonNullable<VNodeChild>
@@ -36,6 +45,7 @@ const DataTableStub = defineComponent({
   props: {
     columns: { type: Array as PropType<RenderableColumn[]>, default: () => [] },
     data: { type: Array as PropType<unknown[]>, default: () => [] },
+    pagination: { type: Object as PropType<PaginationConfig | false>, default: false },
   },
   setup(props) {
     return () =>
@@ -48,7 +58,30 @@ const DataTableStub = defineComponent({
         ...props.data.flatMap((row) =>
           props.columns.map((column) => h('div', { class: `cell-${column.key}` }, renderCellChildren(column, row))),
         ),
+        props.pagination
+          ? h('div', { class: 'pagination-summary' }, [
+              `page=${props.pagination.page};pageSize=${props.pagination.pageSize};total=${props.pagination.itemCount ?? 0}`,
+              h('button', { class: 'page-two', onClick: () => props.pagination && props.pagination.onUpdatePage?.(2) }, '第 2 页'),
+              h('button', { class: 'page-size-ten', onClick: () => props.pagination && props.pagination.onUpdatePageSize?.(10) }, '每页 10 条'),
+            ])
+          : null,
       ])
+  },
+})
+
+// InputStub 模拟 naive-ui 的 v-model:value 协议，让页面搜索框测试只关注业务状态同步。
+const InputStub = defineComponent({
+  props: {
+    value: { type: String, default: '' },
+    placeholder: { type: String, default: '' },
+  },
+  emits: ['update:value'],
+  setup(props, { emit }) {
+    return () => h('input', {
+      value: props.value,
+      placeholder: props.placeholder,
+      onInput: (event: Event) => emit('update:value', (event.target as HTMLInputElement).value),
+    })
   },
 })
 
@@ -86,7 +119,9 @@ vi.mock('@/api/hooks/useKnowledge', async () => {
   const actual = await vi.importActual<typeof import('@/api/hooks/useKnowledge')>('@/api/hooks/useKnowledge')
   return {
     ...actual,
-    useOrgKnowledgeQuery: () => ({
+    useOrgKnowledgeQuery: (orgId: unknown, options: Record<string, { value: unknown }> = {}) => {
+      mocks.orgKnowledgeQueryCalls.push({ orgId, options })
+      return {
       data: ref({
         items: [{ id: 'doc-1', name: 'readme.md', size: 5, parse_status: 'completed', progress: 100, created_at: '2026-05-27T00:00:00Z' }],
         total: 1,
@@ -96,7 +131,8 @@ vi.mock('@/api/hooks/useKnowledge', async () => {
       }),
       isLoading: ref(false),
       error: ref(null),
-    }),
+      }
+    },
     downloadOrgKnowledgeFile: mocks.downloadOrgKnowledgeFile,
     useUploadOrgKnowledge: () => ({
       mutateAsync: mocks.mutateAsync,
@@ -121,6 +157,7 @@ function mountPage() {
         NCard: { template: '<section><slot name="header" /><slot name="header-extra" /><slot /></section>' },
         NSpace: { template: '<div><slot /></div>' },
         NSelect: { template: '<select />' },
+        NInput: InputStub,
         DataTable: DataTableStub,
         NDataTable: DataTableStub,
         NButton: { template: '<button><slot /></button>' },
@@ -150,6 +187,7 @@ describe('OrgKnowledgePage', () => {
     mocks.downloadOrgKnowledgeFile.mockReset()
     mocks.run.mockReset()
     uploadRunContexts.splice(0, uploadRunContexts.length)
+    mocks.orgKnowledgeQueryCalls.splice(0, mocks.orgKnowledgeQueryCalls.length)
     mocks.run.mockImplementation(async (items: UploadRunItem[], runner: (item: UploadRunItem, file: File, ctx: UploadRunContext) => Promise<void>) => {
       for (const item of items) {
         const ctx = { onProgress: vi.fn(), signal: new AbortController().signal }
@@ -174,6 +212,29 @@ describe('OrgKnowledgePage', () => {
 
     expect(wrapper.text()).toContain('已用')
     expect(wrapper.text()).toContain('剩余')
+  })
+
+  // 覆盖企业知识库列表查询条件：搜索关键词、页码和页大小必须通过响应式参数传给 hook。
+  it('企业知识库列表支持按文件名搜索和远程分页', async () => {
+    const wrapper = mountPage()
+    const queryCall = mocks.orgKnowledgeQueryCalls[0]
+
+    expect(wrapper.find('input[placeholder="搜索文件名称"]').exists()).toBe(true)
+    expect(queryCall.options.page.value).toBe(1)
+    expect(queryCall.options.pageSize.value).toBe(50)
+    expect(queryCall.options.keyword.value).toBe('')
+    expect(wrapper.find('.pagination-summary').text()).toContain('total=1')
+
+    await wrapper.find('.page-two').trigger('click')
+    expect(queryCall.options.page.value).toBe(2)
+
+    await wrapper.find('.page-size-ten').trigger('click')
+    expect(queryCall.options.page.value).toBe(1)
+    expect(queryCall.options.pageSize.value).toBe(10)
+
+    await wrapper.find('input[placeholder="搜索文件名称"]').setValue(' readme ')
+    expect(queryCall.options.keyword.value).toBe('readme')
+    expect(queryCall.options.page.value).toBe(1)
   })
 
   // 覆盖企业知识库上传入口：文件选择框必须允许一次选择多个文件。
