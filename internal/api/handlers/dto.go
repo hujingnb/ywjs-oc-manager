@@ -345,6 +345,8 @@ type CreateAssistantVersionRequest struct {
 	ImageID      string                     `json:"image_id" binding:"required"`
 	MainModel    string                     `json:"main_model" binding:"required"`
 	Routing      AssistantVersionRoutingDTO `json:"routing"`
+	// IndustryKnowledgeBaseIDs 是该助手版本运行时额外检索的行业知识库 ID 列表。
+	IndustryKnowledgeBaseIDs []string `json:"industry_knowledge_base_ids"`
 }
 
 // UpdateAssistantVersionRequest 是编辑助手版本的请求体，字段同创建。
@@ -355,6 +357,8 @@ type UpdateAssistantVersionRequest struct {
 	ImageID      string                     `json:"image_id" binding:"required"`
 	MainModel    string                     `json:"main_model" binding:"required"`
 	Routing      AssistantVersionRoutingDTO `json:"routing"`
+	// IndustryKnowledgeBaseIDs 是该助手版本运行时额外检索的行业知识库 ID 列表。
+	IndustryKnowledgeBaseIDs []string `json:"industry_knowledge_base_ids"`
 }
 
 // ===== 平台库 skill =====

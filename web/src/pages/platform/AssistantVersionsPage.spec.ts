@@ -29,6 +29,7 @@ const sampleVersion: AssistantVersionDTO = {
   id: 'ver-1', name: '标准版', description: '默认版本', system_prompt: '你是助手',
   image_id: 'v2026.5.16', main_model: 'qwen', routing: { vision: 'gpt' },
   skills: [sampleSkill], revision: 2,
+  industry_knowledge_bases: [{ id: 'industry-1', name: '保险' }],
 }
 
 vi.mock('@/api/hooks/useAssistantVersions', async () => {
@@ -217,7 +218,7 @@ describe('AssistantVersionsPage', () => {
   })
 
   // 点击编辑用已有版本回填表单并走更新接口。
-  // updateMutation.mutateAsync 接收 { id, payload }，断言 objectContaining({ id: 'ver-1' })。
+  // updateMutation.mutateAsync 接收 { id, payload }，断言不会因当前页面暂未渲染选择器而清空已有行业库关联。
   it('编辑版本时回填并调用更新接口', async () => {
     updateVersion.mockResolvedValue(sampleVersion)
     const wrapper = mountPage()
@@ -228,6 +229,7 @@ describe('AssistantVersionsPage', () => {
     expect(wrapper.text()).toContain('编辑助手版本')
     await wrapper.find('form').trigger('submit')
     expect(updateVersion).toHaveBeenCalledWith(expect.objectContaining({ id: 'ver-1' }))
+    expect(updateVersion.mock.calls.at(-1)?.[0].payload.industry_knowledge_base_ids).toEqual(['industry-1'])
   })
 
   // 点击删除先弹二次确认窗，仅在确认后才调用删除接口。

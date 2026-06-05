@@ -19,10 +19,13 @@ import (
 
 // avServiceStub 是 assistantVersionService 接口的内存桩。
 type avServiceStub struct {
-	list   []service.AssistantVersionResult
-	one    service.AssistantVersionResult
-	err    error
-	images []service.RuntimeImageOption
+	list        []service.AssistantVersionResult
+	one         service.AssistantVersionResult
+	err         error
+	images      []service.RuntimeImageOption
+	createInput service.AssistantVersionInput
+	updateInput service.AssistantVersionInput
+	updateID    string
 }
 
 func (s *avServiceStub) List(context.Context, auth.Principal) ([]service.AssistantVersionResult, error) {
@@ -31,10 +34,13 @@ func (s *avServiceStub) List(context.Context, auth.Principal) ([]service.Assista
 func (s *avServiceStub) Get(context.Context, auth.Principal, string) (service.AssistantVersionResult, error) {
 	return s.one, s.err
 }
-func (s *avServiceStub) Create(context.Context, auth.Principal, service.AssistantVersionInput) (service.AssistantVersionResult, error) {
+func (s *avServiceStub) Create(_ context.Context, _ auth.Principal, in service.AssistantVersionInput) (service.AssistantVersionResult, error) {
+	s.createInput = in
 	return s.one, s.err
 }
-func (s *avServiceStub) Update(context.Context, auth.Principal, string, service.AssistantVersionInput) (service.AssistantVersionResult, error) {
+func (s *avServiceStub) Update(_ context.Context, _ auth.Principal, id string, in service.AssistantVersionInput) (service.AssistantVersionResult, error) {
+	s.updateID = id
+	s.updateInput = in
 	return s.one, s.err
 }
 func (s *avServiceStub) Delete(context.Context, auth.Principal, string) error { return s.err }
@@ -83,6 +89,43 @@ func TestAVCreateReturns201(t *testing.T) {
 	require.Equal(t, http.StatusCreated, resp.Code)
 }
 
+// TestAVCreatePassesIndustryKnowledgeBaseIDs 验证创建请求会透传行业知识库关联 ID 列表。
+func TestAVCreatePassesIndustryKnowledgeBaseIDs(t *testing.T) {
+	svc := &avServiceStub{one: service.AssistantVersionResult{ID: "v1", Name: "标准版"}}
+	router := newAVTestRouter(t, svc)
+	body, err := json.Marshal(CreateAssistantVersionRequest{
+		Name: "标准版", SystemPrompt: "p", ImageID: "v2026.5.16", MainModel: "qwen",
+		IndustryKnowledgeBaseIDs: []string{"kb-risk", "kb-law"}, // 覆盖 handler DTO 到 service input 的原样透传。
+	})
+	require.NoError(t, err)
+	req := httptest.NewRequest(http.MethodPost, "/api/v1/assistant-versions", bytes.NewReader(body))
+	req.Header.Set("Content-Type", "application/json")
+	req = withPrincipal(req, auth.Principal{Role: domain.UserRolePlatformAdmin})
+	resp := httptest.NewRecorder()
+	router.ServeHTTP(resp, req)
+	require.Equal(t, http.StatusCreated, resp.Code)
+	assert.Equal(t, []string{"kb-risk", "kb-law"}, svc.createInput.IndustryKnowledgeBaseIDs)
+}
+
+// TestAVUpdatePassesIndustryKnowledgeBaseIDs 验证编辑请求会透传行业知识库关联 ID 列表。
+func TestAVUpdatePassesIndustryKnowledgeBaseIDs(t *testing.T) {
+	svc := &avServiceStub{one: service.AssistantVersionResult{ID: "v1", Name: "标准版"}}
+	router := newAVTestRouter(t, svc)
+	body, err := json.Marshal(UpdateAssistantVersionRequest{
+		Name: "标准版", SystemPrompt: "p", ImageID: "v2026.5.16", MainModel: "qwen",
+		IndustryKnowledgeBaseIDs: []string{"kb-risk"}, // 覆盖 PUT 路径的 DTO 到 service input 透传。
+	})
+	require.NoError(t, err)
+	req := httptest.NewRequest(http.MethodPut, "/api/v1/assistant-versions/v1", bytes.NewReader(body))
+	req.Header.Set("Content-Type", "application/json")
+	req = withPrincipal(req, auth.Principal{Role: domain.UserRolePlatformAdmin})
+	resp := httptest.NewRecorder()
+	router.ServeHTTP(resp, req)
+	require.Equal(t, http.StatusOK, resp.Code)
+	assert.Equal(t, "v1", svc.updateID)
+	assert.Equal(t, []string{"kb-risk"}, svc.updateInput.IndustryKnowledgeBaseIDs)
+}
+
 // TestAVCreateMapsDenied 验证 service 返回 Denied 时映射 403。
 func TestAVCreateMapsDenied(t *testing.T) {
 	svc := &avServiceStub{err: service.ErrAssistantVersionDenied}
@@ -96,6 +139,24 @@ func TestAVCreateMapsDenied(t *testing.T) {
 	resp := httptest.NewRecorder()
 	router.ServeHTTP(resp, req)
 	require.Equal(t, http.StatusForbidden, resp.Code)
+}
+
+// TestAVCreateMapsIndustryKnowledgeNotFound 验证创建版本关联未知行业库时映射 404。
+func TestAVCreateMapsIndustryKnowledgeNotFound(t *testing.T) {
+	svc := &avServiceStub{err: service.ErrIndustryKnowledgeNotFound}
+	router := newAVTestRouter(t, svc)
+	body, err := json.Marshal(CreateAssistantVersionRequest{
+		Name: "标准版", SystemPrompt: "p", ImageID: "v2026.5.16", MainModel: "qwen",
+		IndustryKnowledgeBaseIDs: []string{"missing-industry"}, // 覆盖行业库不存在的 AV 错误映射。
+	})
+	require.NoError(t, err)
+	req := httptest.NewRequest(http.MethodPost, "/api/v1/assistant-versions", bytes.NewReader(body))
+	req.Header.Set("Content-Type", "application/json")
+	req = withPrincipal(req, auth.Principal{Role: domain.UserRolePlatformAdmin})
+	resp := httptest.NewRecorder()
+	router.ServeHTTP(resp, req)
+	require.Equal(t, http.StatusNotFound, resp.Code)
+	assert.Contains(t, resp.Body.String(), "INDUSTRY_KNOWLEDGE_NOT_FOUND")
 }
 
 // TestAVDeleteMapsInUse 验证 service 返回 InUse 时映射 409。

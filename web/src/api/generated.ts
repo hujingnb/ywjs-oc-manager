@@ -4506,6 +4506,15 @@ export interface paths {
                         "application/json": components["schemas"]["handlers.ErrorResponse"];
                     };
                 };
+                /** @description Not Found */
+                404: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["handlers.ErrorResponse"];
+                    };
+                };
             };
         };
         delete?: never;
@@ -9509,6 +9518,8 @@ export interface components {
         "handlers.CreateAssistantVersionRequest": {
             description?: string;
             image_id: string;
+            /** @description IndustryKnowledgeBaseIDs 是该助手版本运行时额外检索的行业知识库 ID 列表。 */
+            industry_knowledge_base_ids?: string[];
             main_model: string;
             name: string;
             routing?: components["schemas"]["handlers.AssistantVersionRoutingDTO"];
@@ -9749,6 +9760,8 @@ export interface components {
         "handlers.UpdateAssistantVersionRequest": {
             description?: string;
             image_id: string;
+            /** @description IndustryKnowledgeBaseIDs 是该助手版本运行时额外检索的行业知识库 ID 列表。 */
+            industry_knowledge_base_ids?: string[];
             main_model: string;
             name: string;
             routing?: components["schemas"]["handlers.AssistantVersionRoutingDTO"];
@@ -10150,6 +10163,8 @@ export interface components {
             description?: string;
             id?: string;
             image_id?: string;
+            /** @description IndustryKnowledgeBases 是该版本运行时额外检索的行业库来源引用，仅暴露排障所需 id/name。 */
+            industry_knowledge_bases?: components["schemas"]["service.IndustryKnowledgeBaseRef"][];
             main_model?: string;
             name?: string;
             revision?: number;
@@ -10277,6 +10292,10 @@ export interface components {
         "service.IndustryKnowledgeBaseListResult": {
             items?: components["schemas"]["service.IndustryKnowledgeBaseResult"][];
             total?: number;
+        };
+        "service.IndustryKnowledgeBaseRef": {
+            id?: string;
+            name?: string;
         };
         "service.IndustryKnowledgeBaseResult": {
             created_at?: string;

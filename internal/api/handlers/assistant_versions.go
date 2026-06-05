@@ -61,6 +61,8 @@ func writeAVError(c *gin.Context, err error) {
 		c.JSON(http.StatusConflict, apierror.New("ASSISTANT_VERSION_SKILL_NAME_TAKEN", "版本内 skill 名称已存在"))
 	case errors.Is(err, service.ErrPlatformSkillNotFound):
 		c.JSON(http.StatusNotFound, apierror.New("PLATFORM_SKILL_NOT_FOUND", "平台技能不存在"))
+	case errors.Is(err, service.ErrIndustryKnowledgeNotFound):
+		c.JSON(http.StatusNotFound, apierror.New("INDUSTRY_KNOWLEDGE_NOT_FOUND", "行业知识库不存在"))
 	case errors.Is(err, service.ErrAppSkillSourceUnknown):
 		c.JSON(http.StatusBadRequest, apierror.New("APP_SKILL_SOURCE_UNKNOWN", "未知的 skill 来源"))
 	case errors.Is(err, service.ErrAssistantVersionInvalid):
@@ -128,6 +130,7 @@ func (h *AssistantVersionsHandler) Get(c *gin.Context) {
 // @Success  201 {object} map[string]service.AssistantVersionResult
 // @Failure  400 {object} ErrorResponse
 // @Failure  403 {object} ErrorResponse
+// @Failure  404 {object} ErrorResponse
 // @Router   /assistant-versions [post]
 func (h *AssistantVersionsHandler) Create(c *gin.Context) {
 	var req CreateAssistantVersionRequest
@@ -138,6 +141,7 @@ func (h *AssistantVersionsHandler) Create(c *gin.Context) {
 	out, err := h.service.Create(c.Request.Context(), principalFromCtx(c), service.AssistantVersionInput{
 		Name: req.Name, Description: req.Description, SystemPrompt: req.SystemPrompt,
 		ImageID: req.ImageID, MainModel: req.MainModel, Routing: routingToMap(req.Routing),
+		IndustryKnowledgeBaseIDs: req.IndustryKnowledgeBaseIDs,
 	})
 	if err != nil {
 		writeAVError(c, err)
@@ -169,6 +173,7 @@ func (h *AssistantVersionsHandler) Update(c *gin.Context) {
 	out, err := h.service.Update(c.Request.Context(), principalFromCtx(c), c.Param("id"), service.AssistantVersionInput{
 		Name: req.Name, Description: req.Description, SystemPrompt: req.SystemPrompt,
 		ImageID: req.ImageID, MainModel: req.MainModel, Routing: routingToMap(req.Routing),
+		IndustryKnowledgeBaseIDs: req.IndustryKnowledgeBaseIDs,
 	})
 	if err != nil {
 		writeAVError(c, err)

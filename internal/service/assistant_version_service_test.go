@@ -5,6 +5,7 @@ import (
 	"database/sql"
 	"errors"
 	"io"
+	"sort"
 	"testing"
 
 	null "github.com/guregu/null/v5"
@@ -19,16 +20,25 @@ import (
 // fakeAVStore 是 AssistantVersionStore 的内存实现，按需在各测试里填充。
 // Create/Update/Delete 为 :exec，写入后通过 Get 读回（模拟 MySQL 写后读模式）。
 type fakeAVStore struct {
-	versions  map[string]sqlc.AssistantVersion
-	byName    map[string]sqlc.AssistantVersion
-	appCount  int64
-	orgCount  int64
-	createErr error
-	updateErr error
+	versions               map[string]sqlc.AssistantVersion
+	byName                 map[string]sqlc.AssistantVersion
+	industryBases          map[string]sqlc.IndustryKnowledgeBasis
+	versionIndustryBaseIDs map[string][]string
+	appCount               int64
+	orgCount               int64
+	createErr              error
+	updateErr              error
+	addIndustryErrAfter    int
+	addIndustryCalls       int
 }
 
 func newFakeAVStore() *fakeAVStore {
-	return &fakeAVStore{versions: map[string]sqlc.AssistantVersion{}, byName: map[string]sqlc.AssistantVersion{}}
+	return &fakeAVStore{
+		versions:               map[string]sqlc.AssistantVersion{},
+		byName:                 map[string]sqlc.AssistantVersion{},
+		industryBases:          map[string]sqlc.IndustryKnowledgeBasis{},
+		versionIndustryBaseIDs: map[string][]string{},
+	}
 }
 
 func (f *fakeAVStore) GetAssistantVersion(_ context.Context, id string) (sqlc.AssistantVersion, error) {
@@ -61,15 +71,15 @@ func (f *fakeAVStore) CreateAssistantVersion(_ context.Context, arg sqlc.CreateA
 		return f.createErr
 	}
 	v := sqlc.AssistantVersion{
-		ID:          arg.ID,
-		Name:        arg.Name,
-		Description: arg.Description,
+		ID:           arg.ID,
+		Name:         arg.Name,
+		Description:  arg.Description,
 		SystemPrompt: arg.SystemPrompt,
-		ImageID:     arg.ImageID,
-		MainModel:   arg.MainModel,
-		RoutingJson: arg.RoutingJson,
-		SkillsJson:  arg.SkillsJson,
-		Revision:    1,
+		ImageID:      arg.ImageID,
+		MainModel:    arg.MainModel,
+		RoutingJson:  arg.RoutingJson,
+		SkillsJson:   arg.SkillsJson,
+		Revision:     1,
 	}
 	f.versions[v.ID] = v
 	f.byName[v.Name] = v
@@ -124,6 +134,105 @@ func (f *fakeAVStore) CountAppsUsingVersion(_ context.Context, _ null.String) (i
 
 func (f *fakeAVStore) CountOrgsUsingVersion(_ context.Context, _ string) (int64, error) {
 	return f.orgCount, nil
+}
+
+// addIndustryKnowledgeBase 预置行业知识库元数据，供版本关联校验和返回名称使用。
+func (f *fakeAVStore) addIndustryKnowledgeBase(id, name string) {
+	f.industryBases[id] = sqlc.IndustryKnowledgeBasis{ID: id, Name: name}
+}
+
+// GetIndustryKnowledgeBase 按 ID 读取行业知识库；不存在时模拟 sqlc 的 sql.ErrNoRows。
+func (f *fakeAVStore) GetIndustryKnowledgeBase(_ context.Context, id string) (sqlc.IndustryKnowledgeBasis, error) {
+	base, ok := f.industryBases[id]
+	if !ok {
+		return sqlc.IndustryKnowledgeBasis{}, sql.ErrNoRows
+	}
+	return base, nil
+}
+
+// ReplaceAssistantVersionIndustryKnowledgeBases 清空版本旧行业库关联，等待 service 重新插入。
+func (f *fakeAVStore) ReplaceAssistantVersionIndustryKnowledgeBases(_ context.Context, versionID string) error {
+	f.versionIndustryBaseIDs[versionID] = nil
+	return nil
+}
+
+// AddAssistantVersionIndustryKnowledgeBase 为版本追加一个行业库关联。
+func (f *fakeAVStore) AddAssistantVersionIndustryKnowledgeBase(_ context.Context, arg sqlc.AddAssistantVersionIndustryKnowledgeBaseParams) error {
+	f.addIndustryCalls += 1
+	if f.addIndustryErrAfter > 0 && f.addIndustryCalls >= f.addIndustryErrAfter {
+		return errors.New("insert industry association failed")
+	}
+	f.versionIndustryBaseIDs[arg.VersionID] = append(f.versionIndustryBaseIDs[arg.VersionID], arg.IndustryKnowledgeBaseID)
+	return nil
+}
+
+// ListIndustryKnowledgeBasesByAssistantVersion 返回版本当前关联行业库，并按真实查询的名称/id 顺序排序。
+func (f *fakeAVStore) ListIndustryKnowledgeBasesByAssistantVersion(_ context.Context, versionID string) ([]sqlc.IndustryKnowledgeBasis, error) {
+	ids := f.versionIndustryBaseIDs[versionID]
+	out := make([]sqlc.IndustryKnowledgeBasis, 0, len(ids))
+	for _, id := range ids {
+		if base, ok := f.industryBases[id]; ok {
+			out = append(out, base)
+		}
+	}
+	sort.Slice(out, func(i, j int) bool {
+		if out[i].Name == out[j].Name {
+			return out[i].ID < out[j].ID
+		}
+		return out[i].Name < out[j].Name
+	})
+	return out, nil
+}
+
+// fakeAVTxRunner 用内存快照模拟数据库事务，失败时丢弃临时 store 的所有写入。
+type fakeAVTxRunner struct {
+	store *fakeAVStore
+}
+
+func (r fakeAVTxRunner) WithAssistantVersionTx(ctx context.Context, fn func(AssistantVersionStore) error) error {
+	txStore := r.store.clone()
+	if err := fn(txStore); err != nil {
+		return err
+	}
+	r.store.copyFrom(txStore)
+	return nil
+}
+
+// clone 复制 fake store 的可变 map/slice，保证事务内写入不会污染原始状态。
+func (f *fakeAVStore) clone() *fakeAVStore {
+	clone := newFakeAVStore()
+	for id, row := range f.versions {
+		clone.versions[id] = row
+	}
+	for name, row := range f.byName {
+		clone.byName[name] = row
+	}
+	for id, row := range f.industryBases {
+		clone.industryBases[id] = row
+	}
+	for versionID, ids := range f.versionIndustryBaseIDs {
+		clone.versionIndustryBaseIDs[versionID] = append([]string(nil), ids...)
+	}
+	clone.appCount = f.appCount
+	clone.orgCount = f.orgCount
+	clone.createErr = f.createErr
+	clone.updateErr = f.updateErr
+	clone.addIndustryErrAfter = f.addIndustryErrAfter
+	return clone
+}
+
+// copyFrom 提交事务快照，只在 fn 成功时覆盖原始 fake store。
+func (f *fakeAVStore) copyFrom(src *fakeAVStore) {
+	f.versions = src.versions
+	f.byName = src.byName
+	f.industryBases = src.industryBases
+	f.versionIndustryBaseIDs = src.versionIndustryBaseIDs
+	f.appCount = src.appCount
+	f.orgCount = src.orgCount
+	f.createErr = src.createErr
+	f.updateErr = src.updateErr
+	f.addIndustryErrAfter = src.addIndustryErrAfter
+	f.addIndustryCalls = src.addIndustryCalls
 }
 
 // platformPrincipal 是测试公用平台管理员主体。
@@ -198,8 +307,8 @@ func (f *fakeLibBlob) PutLibrarySkill(source, ref, version, ext string, data []b
 	f.putSource, f.putRef, f.putVersion, f.putExt, f.putData = source, ref, version, ext, data
 	return "library/" + source + "/" + ref + "/" + version + "." + ext, nil
 }
-func (f *fakeLibBlob) DeleteLibrarySkill(string) error                  { return nil }
-func (f *fakeLibBlob) OpenLibrarySkill(string) (io.ReadCloser, error)   { return nil, nil }
+func (f *fakeLibBlob) DeleteLibrarySkill(string) error                { return nil }
+func (f *fakeLibBlob) OpenLibrarySkill(string) (io.ReadCloser, error) { return nil, nil }
 
 // newTestAVService 用内存桩构造版本 service，默认模型与镜像校验全部通过，平台库为空。
 // clawhub/blobs 均传 nil：platform-only 用例不需要 clawhub 能力。
@@ -284,6 +393,42 @@ func TestAssistantVersionCreateOK(t *testing.T) {
 	assert.Equal(t, "标准版", got.Name)
 	assert.EqualValues(t, 1, got.Revision)
 	assert.Equal(t, "gpt", got.Routing["vision"])
+}
+
+// TestAssistantVersionCreateWithIndustryKnowledgeBases 验证创建版本时可同时保存行业知识库关联。
+func TestAssistantVersionCreateWithIndustryKnowledgeBases(t *testing.T) {
+	store := newFakeAVStore()
+	// 预置一个可关联的行业库，创建后返回视图应包含其 id/name 引用。
+	store.addIndustryKnowledgeBase("kb-risk", "金融风控")
+	svc := newTestAVService(t, store)
+	in := validCreateInput()
+	in.IndustryKnowledgeBaseIDs = []string{" kb-risk ", "", "kb-risk"} // 覆盖 trim、空值过滤和去重。
+	got, err := svc.Create(context.Background(), platformPrincipal(), in)
+	require.NoError(t, err)
+	assert.EqualValues(t, 1, got.Revision)
+	require.Len(t, got.IndustryKnowledgeBases, 1)
+	assert.Equal(t, IndustryKnowledgeBaseRef{ID: "kb-risk", Name: "金融风控"}, got.IndustryKnowledgeBases[0])
+	assert.Equal(t, []string{"kb-risk"}, store.versionIndustryBaseIDs[got.ID])
+}
+
+// TestAssistantVersionCreateRollsBackIndustryAssociationFailure 验证创建时关联写入失败不会留下同名孤儿版本。
+func TestAssistantVersionCreateRollsBackIndustryAssociationFailure(t *testing.T) {
+	store := newFakeAVStore()
+	// 两个行业库都存在，失败只来自第二条关联插入，用于覆盖 create + association 的事务回滚。
+	store.addIndustryKnowledgeBase("kb-risk", "金融风控")
+	store.addIndustryKnowledgeBase("kb-law", "法律法规")
+	store.addIndustryErrAfter = 2
+	svc := newTestAVService(t, store)
+	svc.SetTxRunner(fakeAVTxRunner{store: store})
+	in := validCreateInput()
+	in.IndustryKnowledgeBaseIDs = []string{"kb-risk", "kb-law"}
+
+	_, err := svc.Create(context.Background(), platformPrincipal(), in)
+	require.ErrorContains(t, err, "保存版本行业知识库关联失败")
+
+	assert.Empty(t, store.versions)
+	assert.NotContains(t, store.byName, in.Name)
+	assert.Empty(t, store.versionIndustryBaseIDs)
 }
 
 // TestAssistantVersionCreateDeniesOrgAdmin 验证组织管理员不能创建版本。
@@ -393,6 +538,72 @@ func TestAssistantVersionUpdateKeepsRevisionOnDescriptionOnly(t *testing.T) {
 	got, err := svc.Update(context.Background(), platformPrincipal(), id, in)
 	require.NoError(t, err)
 	assert.EqualValues(t, 3, got.Revision)
+}
+
+// TestAssistantVersionUpdateIndustryKnowledgeDoesNotBumpRevision 验证只替换行业库关联不递增版本 revision。
+func TestAssistantVersionUpdateIndustryKnowledgeDoesNotBumpRevision(t *testing.T) {
+	store := newFakeAVStore()
+	id := seedVersion(store, "标准版", 3)
+	// 行业库名称来自行业库表，版本返回值只暴露运行时需要的 id/name 引用。
+	store.addIndustryKnowledgeBase("kb-risk", "金融风控")
+	svc := newTestAVService(t, store)
+	in := AssistantVersionInput{
+		Name: "标准版", Description: "默认版本", SystemPrompt: "p",
+		ImageID: "v2026.5.16", MainModel: "qwen", Routing: map[string]string{},
+		IndustryKnowledgeBaseIDs: []string{" kb-risk "},
+	}
+	got, err := svc.Update(context.Background(), platformPrincipal(), id, in)
+	require.NoError(t, err)
+	assert.EqualValues(t, 3, got.Revision)
+	require.Len(t, got.IndustryKnowledgeBases, 1)
+	assert.Equal(t, IndustryKnowledgeBaseRef{ID: "kb-risk", Name: "金融风控"}, got.IndustryKnowledgeBases[0])
+}
+
+// TestAssistantVersionUpdateRejectsUnknownIndustryKnowledgeWithoutClearingExisting 验证未知行业库不会清空旧关联。
+func TestAssistantVersionUpdateRejectsUnknownIndustryKnowledgeWithoutClearingExisting(t *testing.T) {
+	store := newFakeAVStore()
+	id := seedVersion(store, "标准版", 3)
+	// 旧关联用于确认失败路径不会先 delete 再校验，避免丢失运行时配置。
+	store.addIndustryKnowledgeBase("kb-old", "已有行业库")
+	store.versionIndustryBaseIDs[id] = []string{"kb-old"}
+	svc := newTestAVService(t, store)
+	in := AssistantVersionInput{
+		Name: "标准版", Description: "默认版本", SystemPrompt: "p",
+		ImageID: "v2026.5.16", MainModel: "qwen", Routing: map[string]string{},
+		IndustryKnowledgeBaseIDs: []string{"kb-missing"},
+	}
+	_, err := svc.Update(context.Background(), platformPrincipal(), id, in)
+	require.ErrorIs(t, err, ErrIndustryKnowledgeNotFound)
+	assert.Equal(t, []string{"kb-old"}, store.versionIndustryBaseIDs[id])
+}
+
+// TestAssistantVersionUpdateRollsBackIndustryAssociationFailure 验证关联写入失败时版本字段和旧关联一起回滚。
+func TestAssistantVersionUpdateRollsBackIndustryAssociationFailure(t *testing.T) {
+	store := newFakeAVStore()
+	id := seedVersion(store, "标准版", 3)
+	// 三个行业库都存在，失败只来自第二条关联插入，覆盖事务内部分写入失败的边界。
+	store.addIndustryKnowledgeBase("kb-old", "旧行业库")
+	store.addIndustryKnowledgeBase("kb-risk", "金融风控")
+	store.addIndustryKnowledgeBase("kb-law", "法律法规")
+	store.versionIndustryBaseIDs[id] = []string{"kb-old"}
+	oldRow := store.versions[id]
+	store.addIndustryErrAfter = 2
+	svc := newTestAVService(t, store)
+	svc.SetTxRunner(fakeAVTxRunner{store: store})
+
+	_, err := svc.Update(context.Background(), platformPrincipal(), id, AssistantVersionInput{
+		Name: "高级版", Description: "更新描述", SystemPrompt: "new prompt",
+		ImageID: "v2026.5.16", MainModel: "qwen", Routing: map[string]string{},
+		IndustryKnowledgeBaseIDs: []string{"kb-risk", "kb-law"},
+	})
+	require.ErrorContains(t, err, "保存版本行业知识库关联失败")
+
+	row := store.versions[id]
+	assert.Equal(t, oldRow.Name, row.Name)
+	assert.Equal(t, oldRow.Description, row.Description)
+	assert.Equal(t, oldRow.SystemPrompt, row.SystemPrompt)
+	assert.Equal(t, oldRow.Revision, row.Revision)
+	assert.Equal(t, []string{"kb-old"}, store.versionIndustryBaseIDs[id])
 }
 
 // TestAssistantVersionUpdateRejectsNameTakenByOther 验证改名撞到他人名称时报 NameTaken。

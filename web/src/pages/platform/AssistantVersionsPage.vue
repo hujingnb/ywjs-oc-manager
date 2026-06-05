@@ -243,6 +243,7 @@ const actionFeedbackError = ref(false)
 const form = reactive<AssistantVersionFormPayload>({
   name: '', description: '', system_prompt: '', image_id: '', main_model: '',
   routing: emptyRouting(),
+  industry_knowledge_base_ids: [],
 })
 
 // 镜像与模型列表仅在表单打开时请求。
@@ -270,6 +271,7 @@ function resetForm() {
   form.image_id = ''
   form.main_model = ''
   form.routing = emptyRouting()
+  form.industry_knowledge_base_ids = []
 }
 
 // openCreate 打开空白新建表单。
@@ -293,6 +295,8 @@ function openEdit(version: AssistantVersionDTO) {
   form.image_id = version.image_id
   form.main_model = version.main_model
   form.routing = { ...emptyRouting(), ...version.routing }
+  // Task 7 会增加可见多选控件；这里先保留已有后端关联，避免编辑其它字段时误清空。
+  form.industry_knowledge_base_ids = (version.industry_knowledge_bases ?? []).map(item => item.id)
   editingId.value = version.id
   submitError.value = null
   actionFeedback.value = ''
@@ -317,6 +321,7 @@ function buildPayload(): AssistantVersionFormPayload {
     image_id: form.image_id,
     main_model: form.main_model,
     routing: { ...form.routing },
+    industry_knowledge_base_ids: [...form.industry_knowledge_base_ids],
   }
 }
 

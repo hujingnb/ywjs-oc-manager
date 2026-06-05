@@ -50,6 +50,12 @@ export interface AssistantVersionSkillDTO {
   file_sha256?: string
 }
 
+// AssistantVersionIndustryKnowledgeBaseDTO 是版本已关联行业库的轻量来源信息。
+export interface AssistantVersionIndustryKnowledgeBaseDTO {
+  id: string
+  name: string
+}
+
 // AssistantVersionDTO 是助手版本的前端视图。
 export interface AssistantVersionDTO {
   id: string
@@ -62,6 +68,7 @@ export interface AssistantVersionDTO {
   routing: Record<string, string>
   skills: AssistantVersionSkillDTO[]
   revision: number
+  industry_knowledge_bases?: AssistantVersionIndustryKnowledgeBaseDTO[]
 }
 
 // AssistantVersionFormPayload 是创建/更新版本的提交体。
@@ -72,6 +79,7 @@ export interface AssistantVersionFormPayload {
   image_id: string
   main_model: string
   routing: AssistantVersionRoutingPayload
+  industry_knowledge_base_ids: string[]
 }
 
 // RuntimeImageDTO 是配置文件暴露的可选镜像（仅 id + label）。

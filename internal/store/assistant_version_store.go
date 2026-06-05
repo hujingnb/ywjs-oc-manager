@@ -35,6 +35,26 @@ func (s *AssistantVersionStore) ListAssistantVersions(ctx context.Context) ([]sq
 	return s.q.ListAssistantVersions(ctx)
 }
 
+// GetIndustryKnowledgeBase 按 ID 查询未删除行业知识库，供助手版本关联校验使用。
+func (s *AssistantVersionStore) GetIndustryKnowledgeBase(ctx context.Context, id string) (sqlc.IndustryKnowledgeBasis, error) {
+	return s.q.GetIndustryKnowledgeBase(ctx, id)
+}
+
+// ReplaceAssistantVersionIndustryKnowledgeBases 清空版本旧行业库关联。
+func (s *AssistantVersionStore) ReplaceAssistantVersionIndustryKnowledgeBases(ctx context.Context, versionID string) error {
+	return s.q.ReplaceAssistantVersionIndustryKnowledgeBases(ctx, versionID)
+}
+
+// AddAssistantVersionIndustryKnowledgeBase 为版本追加单个行业知识库关联。
+func (s *AssistantVersionStore) AddAssistantVersionIndustryKnowledgeBase(ctx context.Context, arg sqlc.AddAssistantVersionIndustryKnowledgeBaseParams) error {
+	return s.q.AddAssistantVersionIndustryKnowledgeBase(ctx, arg)
+}
+
+// ListIndustryKnowledgeBasesByAssistantVersion 返回版本关联的未删除行业知识库。
+func (s *AssistantVersionStore) ListIndustryKnowledgeBasesByAssistantVersion(ctx context.Context, versionID string) ([]sqlc.IndustryKnowledgeBasis, error) {
+	return s.q.ListIndustryKnowledgeBasesByAssistantVersion(ctx, versionID)
+}
+
 // CreateAssistantVersion 写入新版本（:exec 模式），若调用方未设置 ID 则生成新 UUID。
 // 符合 service.AssistantVersionStore 接口：返回 error。
 // service 层调用后自行通过 GetAssistantVersion 读回完整记录。

@@ -27,6 +27,14 @@ type AssistantVersionStore interface {
 	GetAssistantVersion(ctx context.Context, id string) (sqlc.AssistantVersion, error)
 	GetAssistantVersionByName(ctx context.Context, name string) (sqlc.AssistantVersion, error)
 	ListAssistantVersions(ctx context.Context) ([]sqlc.AssistantVersion, error)
+	// GetIndustryKnowledgeBase 按 ID 校验行业知识库存在，供版本关联写入前使用。
+	GetIndustryKnowledgeBase(ctx context.Context, id string) (sqlc.IndustryKnowledgeBasis, error)
+	// ReplaceAssistantVersionIndustryKnowledgeBases 清空版本旧行业库关联，由 service 先校验再重建。
+	ReplaceAssistantVersionIndustryKnowledgeBases(ctx context.Context, versionID string) error
+	// AddAssistantVersionIndustryKnowledgeBase 为版本追加单个行业库关联。
+	AddAssistantVersionIndustryKnowledgeBase(ctx context.Context, arg sqlc.AddAssistantVersionIndustryKnowledgeBaseParams) error
+	// ListIndustryKnowledgeBasesByAssistantVersion 读取版本运行时额外检索的行业库。
+	ListIndustryKnowledgeBasesByAssistantVersion(ctx context.Context, versionID string) ([]sqlc.IndustryKnowledgeBasis, error)
 	// CreateAssistantVersion 创建版本（:exec），service 调用前需自行生成 ID 并在写入后 GetAssistantVersion 读回。
 	CreateAssistantVersion(ctx context.Context, arg sqlc.CreateAssistantVersionParams) error
 	// UpdateAssistantVersion 更新版本（:exec），service 写入后按 ID 重新读回。
@@ -36,6 +44,12 @@ type AssistantVersionStore interface {
 	SoftDeleteAssistantVersion(ctx context.Context, id string) error
 	CountAppsUsingVersion(ctx context.Context, versionID null.String) (int64, error)
 	CountOrgsUsingVersion(ctx context.Context, id string) (int64, error)
+}
+
+// AssistantVersionTxRunner 抽象助手版本写操作事务。
+// 版本主表与行业库关联表必须一起提交或一起回滚，避免运行时检索范围与版本字段不同步。
+type AssistantVersionTxRunner interface {
+	WithAssistantVersionTx(ctx context.Context, fn func(AssistantVersionStore) error) error
 }
 
 // AssistantVersionImageResolver 抽象「校验 image_id 是否存在于配置」的能力。
@@ -75,6 +89,7 @@ type RuntimeImageOption struct {
 // AssistantVersionService 维护助手版本目录。
 type AssistantVersionService struct {
 	store          AssistantVersionStore
+	tx             AssistantVersionTxRunner
 	images         assistantVersionImages
 	models         AssistantVersionModelValidator
 	platformSkills PlatformSkillLibrary
@@ -103,6 +118,9 @@ func NewAssistantVersionService(
 // SetClawHubDownloader 注入 ClawHub 下载器。用 setter 而非构造参数回填，规避 nil *Client
 // 直接传接口参数产生「非 nil interface 包装 nil 指针」的陷阱（与 AppSkillService 同处理）。
 func (s *AssistantVersionService) SetClawHubDownloader(d ClawHubDownloader) { s.clawhub = d }
+
+// SetTxRunner 注入助手版本事务 runner，生产环境用于保证版本主表与行业库关联原子提交。
+func (s *AssistantVersionService) SetTxRunner(tx AssistantVersionTxRunner) { s.tx = tx }
 
 // AssistantVersionSkill 是 skills_json 内单个 skill 的自包含快照。
 // 支持 platform 与 clawhub 两种来源。
@@ -134,6 +152,8 @@ type AssistantVersionResult struct {
 	Routing      map[string]string       `json:"routing"`
 	Skills       []AssistantVersionSkill `json:"skills"`
 	Revision     int32                   `json:"revision"`
+	// IndustryKnowledgeBases 是该版本运行时额外检索的行业库来源引用，仅暴露排障所需 id/name。
+	IndustryKnowledgeBases []IndustryKnowledgeBaseRef `json:"industry_knowledge_bases"`
 }
 
 // List 返回全部未删除版本，按创建时间倒序。
@@ -147,7 +167,7 @@ func (s *AssistantVersionService) List(ctx context.Context, principal auth.Princ
 	}
 	out := make([]AssistantVersionResult, 0, len(rows))
 	for _, row := range rows {
-		r, err := toAssistantVersionResult(row)
+		r, err := s.toAssistantVersionResult(ctx, row)
 		if err != nil {
 			return nil, err
 		}
@@ -165,7 +185,7 @@ func (s *AssistantVersionService) Get(ctx context.Context, principal auth.Princi
 	if err != nil {
 		return AssistantVersionResult{}, err
 	}
-	return toAssistantVersionResult(row)
+	return s.toAssistantVersionResult(ctx, row)
 }
 
 // loadVersion 按 id 取版本，未找到统一映射为 ErrAssistantVersionNotFound。
@@ -181,8 +201,8 @@ func (s *AssistantVersionService) loadVersion(ctx context.Context, id string) (s
 	return row, nil
 }
 
-// toAssistantVersionResult 把 sqlc 行转成对外视图。
-func toAssistantVersionResult(row sqlc.AssistantVersion) (AssistantVersionResult, error) {
+// assistantVersionBaseResult 把 sqlc 行转成对外视图的基础字段，不访问其它表。
+func assistantVersionBaseResult(row sqlc.AssistantVersion) (AssistantVersionResult, error) {
 	routing := map[string]string{}
 	if len(row.RoutingJson) > 0 {
 		if err := json.Unmarshal(row.RoutingJson, &routing); err != nil {
@@ -204,6 +224,34 @@ func toAssistantVersionResult(row sqlc.AssistantVersion) (AssistantVersionResult
 		Skills:       skills,
 		Revision:     row.Revision,
 	}, nil
+}
+
+// toAssistantVersionResult 补齐版本关联的行业库 id/name，供 handler 和前端识别检索来源。
+func (s *AssistantVersionService) toAssistantVersionResult(ctx context.Context, row sqlc.AssistantVersion) (AssistantVersionResult, error) {
+	result, err := assistantVersionBaseResult(row)
+	if err != nil {
+		return AssistantVersionResult{}, err
+	}
+	result.IndustryKnowledgeBases = []IndustryKnowledgeBaseRef{}
+	bases, err := s.store.ListIndustryKnowledgeBasesByAssistantVersion(ctx, row.ID)
+	if err != nil {
+		return AssistantVersionResult{}, fmt.Errorf("查询版本行业知识库失败: %w", err)
+	}
+	for _, base := range bases {
+		result.IndustryKnowledgeBases = append(result.IndustryKnowledgeBases, IndustryKnowledgeBaseRef{
+			ID:   base.ID,
+			Name: base.Name,
+		})
+	}
+	return result, nil
+}
+
+// withAssistantVersionTx 在事务中执行版本写操作；单测未注入 runner 时退化为直接使用 store。
+func (s *AssistantVersionService) withAssistantVersionTx(ctx context.Context, fn func(AssistantVersionStore) error) error {
+	if s.tx != nil {
+		return s.tx.WithAssistantVersionTx(ctx, fn)
+	}
+	return fn(s.store)
 }
 
 // decodeSkills 把 skills_json 解为切片，供 Update/skill 操作复用。
@@ -236,6 +284,8 @@ type AssistantVersionInput struct {
 	MainModel    string
 	// Routing 是 auxiliary 槽位到模型名的映射；key 必须是 auxiliarySlots 之一。
 	Routing map[string]string
+	// IndustryKnowledgeBaseIDs 是该版本运行时额外检索的行业库 ID 列表，保存后立即生效。
+	IndustryKnowledgeBaseIDs []string
 }
 
 // validateInput 校验版本入参的业务规则（不含名称唯一性，由调用方单独查）。
@@ -298,6 +348,10 @@ func (s *AssistantVersionService) Update(ctx context.Context, principal auth.Pri
 	if err != nil {
 		return AssistantVersionResult{}, err
 	}
+	industryIDs, err := s.normalizeIndustryKnowledgeBaseIDs(ctx, in.IndustryKnowledgeBaseIDs)
+	if err != nil {
+		return AssistantVersionResult{}, err
+	}
 	// 改名时确认新名称未被「其它」版本占用。
 	newName := trimSpace(in.Name)
 	if newName != current.Name {
@@ -317,25 +371,83 @@ func (s *AssistantVersionService) Update(ctx context.Context, principal auth.Pri
 	if containerAffectingChanged(current, in, routingJSON) {
 		revision++
 	}
-	// UpdateAssistantVersion 为 :exec，不返回行；写入后重新按 ID 读取最新数据。
-	if err := s.store.UpdateAssistantVersion(ctx, sqlc.UpdateAssistantVersionParams{
-		ID:           current.ID,
-		Name:         newName,
-		Description:  trimSpace(in.Description),
-		SystemPrompt: in.SystemPrompt,
-		ImageID:      trimSpace(in.ImageID),
-		MainModel:    trimSpace(in.MainModel),
-		RoutingJson:  routingJSON,
-		SkillsJson:   current.SkillsJson,
-		Revision:     revision,
+	// 版本字段与行业库关联必须同事务提交，否则关联插入失败会造成版本已改但检索范围部分更新。
+	if err := s.withAssistantVersionTx(ctx, func(store AssistantVersionStore) error {
+		// UpdateAssistantVersion 为 :exec，不返回行；事务提交后重新按 ID 读取最新数据。
+		if err := store.UpdateAssistantVersion(ctx, sqlc.UpdateAssistantVersionParams{
+			ID:           current.ID,
+			Name:         newName,
+			Description:  trimSpace(in.Description),
+			SystemPrompt: in.SystemPrompt,
+			ImageID:      trimSpace(in.ImageID),
+			MainModel:    trimSpace(in.MainModel),
+			RoutingJson:  routingJSON,
+			SkillsJson:   current.SkillsJson,
+			Revision:     revision,
+		}); err != nil {
+			return fmt.Errorf("更新版本失败: %w", err)
+		}
+		return s.replaceNormalizedIndustryKnowledgeBases(ctx, store, current.ID, industryIDs)
 	}); err != nil {
-		return AssistantVersionResult{}, fmt.Errorf("更新版本失败: %w", err)
+		return AssistantVersionResult{}, err
 	}
 	row, err := s.store.GetAssistantVersion(ctx, current.ID)
 	if err != nil {
 		return AssistantVersionResult{}, fmt.Errorf("重新查询更新后版本失败: %w", err)
 	}
-	return toAssistantVersionResult(row)
+	return s.toAssistantVersionResult(ctx, row)
+}
+
+// normalizeIndustryKnowledgeBaseIDs 去除空白、过滤空值并校验行业库存在。
+// 该步骤必须在删除旧关联前完成，避免输入含无效 ID 时清空原运行时检索范围。
+func (s *AssistantVersionService) normalizeIndustryKnowledgeBaseIDs(ctx context.Context, ids []string) ([]string, error) {
+	seen := make(map[string]struct{}, len(ids))
+	out := make([]string, 0, len(ids))
+	for _, raw := range ids {
+		id := trimSpace(raw)
+		if id == "" {
+			continue
+		}
+		if _, dup := seen[id]; dup {
+			continue
+		}
+		if _, err := s.store.GetIndustryKnowledgeBase(ctx, id); err != nil {
+			if errors.Is(err, sql.ErrNoRows) {
+				return nil, fmt.Errorf("%w: %s", ErrIndustryKnowledgeNotFound, id)
+			}
+			return nil, fmt.Errorf("查询行业知识库失败: %w", err)
+		}
+		seen[id] = struct{}{}
+		out = append(out, id)
+	}
+	return out, nil
+}
+
+// replaceIndustryKnowledgeBases 替换版本行业库关联；直接调用时也会先校验全部 ID。
+func (s *AssistantVersionService) replaceIndustryKnowledgeBases(ctx context.Context, versionID string, ids []string) error {
+	normalized, err := s.normalizeIndustryKnowledgeBaseIDs(ctx, ids)
+	if err != nil {
+		return err
+	}
+	return s.withAssistantVersionTx(ctx, func(store AssistantVersionStore) error {
+		return s.replaceNormalizedIndustryKnowledgeBases(ctx, store, versionID, normalized)
+	})
+}
+
+// replaceNormalizedIndustryKnowledgeBases 用已校验、去重后的 ID 重建关联表。
+func (s *AssistantVersionService) replaceNormalizedIndustryKnowledgeBases(ctx context.Context, store AssistantVersionStore, versionID string, ids []string) error {
+	if err := store.ReplaceAssistantVersionIndustryKnowledgeBases(ctx, versionID); err != nil {
+		return fmt.Errorf("清空版本行业知识库关联失败: %w", err)
+	}
+	for _, id := range ids {
+		if err := store.AddAssistantVersionIndustryKnowledgeBase(ctx, sqlc.AddAssistantVersionIndustryKnowledgeBaseParams{
+			VersionID:               versionID,
+			IndustryKnowledgeBaseID: id,
+		}); err != nil {
+			return fmt.Errorf("保存版本行业知识库关联失败: %w", err)
+		}
+	}
+	return nil
 }
 
 // containerAffectingChanged 判断本次更新是否动了「影响容器」的字段。
@@ -551,7 +663,7 @@ func (s *AssistantVersionService) persistSkills(ctx context.Context, row sqlc.As
 	if err != nil {
 		return AssistantVersionResult{}, fmt.Errorf("重新查询版本 skill 更新后数据失败: %w", err)
 	}
-	return toAssistantVersionResult(updated)
+	return s.toAssistantVersionResult(ctx, updated)
 }
 
 // ListRuntimeImages 返回全部可选镜像，供前端版本编辑表单的镜像 select 使用。
@@ -596,6 +708,10 @@ func (s *AssistantVersionService) Create(ctx context.Context, principal auth.Pri
 	if err := s.validateInput(in); err != nil {
 		return AssistantVersionResult{}, err
 	}
+	industryIDs, err := s.normalizeIndustryKnowledgeBaseIDs(ctx, in.IndustryKnowledgeBaseIDs)
+	if err != nil {
+		return AssistantVersionResult{}, err
+	}
 	if _, err := s.store.GetAssistantVersionByName(ctx, trimSpace(in.Name)); err == nil {
 		return AssistantVersionResult{}, ErrAssistantVersionNameTaken
 	} else if !errors.Is(err, sql.ErrNoRows) {
@@ -612,22 +728,28 @@ func (s *AssistantVersionService) Create(ctx context.Context, principal auth.Pri
 	if principal.UserID != "" {
 		createdBy = null.StringFrom(principal.UserID)
 	}
-	if err := s.store.CreateAssistantVersion(ctx, sqlc.CreateAssistantVersionParams{
-		ID:           newID,
-		Name:         trimSpace(in.Name),
-		Description:  trimSpace(in.Description),
-		SystemPrompt: in.SystemPrompt,
-		ImageID:      trimSpace(in.ImageID),
-		MainModel:    trimSpace(in.MainModel),
-		RoutingJson:  routingJSON,
-		SkillsJson:   []byte("[]"),
-		CreatedBy:    createdBy,
+	// 新版本和行业库关联同事务创建，避免关联失败后留下无法重试的同名孤儿版本。
+	if err := s.withAssistantVersionTx(ctx, func(store AssistantVersionStore) error {
+		if err := store.CreateAssistantVersion(ctx, sqlc.CreateAssistantVersionParams{
+			ID:           newID,
+			Name:         trimSpace(in.Name),
+			Description:  trimSpace(in.Description),
+			SystemPrompt: in.SystemPrompt,
+			ImageID:      trimSpace(in.ImageID),
+			MainModel:    trimSpace(in.MainModel),
+			RoutingJson:  routingJSON,
+			SkillsJson:   []byte("[]"),
+			CreatedBy:    createdBy,
+		}); err != nil {
+			return fmt.Errorf("写入版本失败: %w", err)
+		}
+		return s.replaceNormalizedIndustryKnowledgeBases(ctx, store, newID, industryIDs)
 	}); err != nil {
-		return AssistantVersionResult{}, fmt.Errorf("写入版本失败: %w", err)
+		return AssistantVersionResult{}, err
 	}
 	row, err := s.store.GetAssistantVersion(ctx, newID)
 	if err != nil {
 		return AssistantVersionResult{}, fmt.Errorf("读取新建版本失败: %w", err)
 	}
-	return toAssistantVersionResult(row)
+	return s.toAssistantVersionResult(ctx, row)
 }

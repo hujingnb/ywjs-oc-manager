@@ -347,6 +347,7 @@ func runManager(ctx context.Context, cfg config.Config, logOut io.Writer) error 
 			nil, // clawhub：下方按 clawhubClient 非 nil 时回填，避免 nil *Client 包装成非 nil interface
 			libraryBlobs,
 		)
+		assistantVersionService.SetTxRunner(store.NewAssistantVersionRunner(dbStore))
 		// 仅当 clawhubClient 指针非 nil 时注入 clawhub 下载器（与 AppSkillService 同一守卫）。
 		if clawhubClient != nil {
 			assistantVersionService.SetClawHubDownloader(clawhubClient)
