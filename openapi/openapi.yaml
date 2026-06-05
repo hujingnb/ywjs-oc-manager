@@ -351,6 +351,11 @@ components:
       type: object
     handlers.LoginRequest:
       properties:
+        captcha:
+          description: |-
+            Captcha 是 Altcha payload（base64）；验证码开启时必填，是否必填由后端按
+            captcha.enabled 在 service 层判断，故此处不加 binding:"required"。
+          type: string
         org_code:
           description: OrgCode 是企业用户登录时填写的企业标识；平台管理员登录时留空。
           type: string
@@ -5170,6 +5175,28 @@ paths:
       summary: 资源维度审计日志列表
       tags:
       - audit-logs
+  /auth/altcha-challenge:
+    get:
+      description: 返回登录页验证码挑战；验证码未启用时返回 204
+      responses:
+        "200":
+          content:
+            application/json:
+              schema:
+                additionalProperties: {}
+                type: object
+          description: Altcha 挑战 JSON
+        "204":
+          description: 验证码未启用
+        "500":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/handlers.ErrorResponse'
+          description: Internal Server Error
+      summary: Altcha 挑战
+      tags:
+      - auth
   /auth/login:
     post:
       description: 返回 access_token + refresh_token + 用户信息快照

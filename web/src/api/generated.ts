@@ -4912,6 +4912,63 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/auth/altcha-challenge": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Altcha 挑战
+         * @description 返回登录页验证码挑战；验证码未启用时返回 204
+         */
+        get: {
+            parameters: {
+                query?: never;
+                header?: never;
+                path?: never;
+                cookie?: never;
+            };
+            requestBody?: never;
+            responses: {
+                /** @description Altcha 挑战 JSON */
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": {
+                            [key: string]: unknown;
+                        };
+                    };
+                };
+                /** @description 验证码未启用 */
+                204: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content?: never;
+                };
+                /** @description Internal Server Error */
+                500: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["handlers.ErrorResponse"];
+                    };
+                };
+            };
+        };
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/auth/login": {
         parameters: {
             query?: never;
@@ -9728,6 +9785,11 @@ export interface components {
             to: string;
         };
         "handlers.LoginRequest": {
+            /**
+             * @description Captcha 是 Altcha payload（base64）；验证码开启时必填，是否必填由后端按
+             *     captcha.enabled 在 service 层判断，故此处不加 binding:"required"。
+             */
+            captcha?: string;
             /** @description OrgCode 是企业用户登录时填写的企业标识；平台管理员登录时留空。 */
             org_code?: string;
             /** @description Password 是明文登录密码，仅用于本次校验，handler 不写日志。 */
