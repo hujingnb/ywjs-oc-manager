@@ -34,6 +34,8 @@ type Config struct {
 	Kubernetes KubernetesConfig `yaml:"k8s"`
 	// ClawHub 描述 ClawHub skill 市场 API 接入配置；整段可选，BaseURL 为空时市场降级为仅平台库。
 	ClawHub ClawHubConfig `yaml:"clawhub"`
+	// Captcha 是登录页工作量证明验证码配置；enabled 为 false 时整段可缺省。
+	Captcha CaptchaConfig `yaml:"captcha"`
 }
 
 // AppConfig 描述 manager API 进程自身的运行参数。
@@ -245,6 +247,19 @@ type ClawHubConfig struct {
 	RequestTimeout Duration `yaml:"request_timeout"`
 	// CacheTTL 是搜索/列表结果的 Redis 缓存时长，缺省 5m。
 	CacheTTL Duration `yaml:"cache_ttl"`
+}
+
+// CaptchaConfig 描述登录 PoW 验证码（Altcha）配置。
+// enabled 为 false 时其余字段可缺省；启用时 hmac_secret 必填（见 loader 校验）。
+type CaptchaConfig struct {
+	// Enabled 是验证码总开关；false 时出题接口返回 204、登录跳过 PoW 校验。
+	Enabled bool `yaml:"enabled"`
+	// HMACSecret 是 Altcha 出题/验签的 HMAC 密钥，按密钥管理（不入 git）。
+	HMACSecret string `yaml:"hmac_secret"`
+	// Difficulty 是 Altcha maxNumber 难度上限；常驻取低值≈几百 ms，缺省 50000。
+	Difficulty int64 `yaml:"difficulty"`
+	// TTL 是挑战有效期，也是一次性消费 key 的最长 TTL，缺省 5m。
+	TTL Duration `yaml:"ttl"`
 }
 
 // S3StorageConfig 是标准 S3 接入参数（本地指向 MinIO，生产指向云 OSS）。

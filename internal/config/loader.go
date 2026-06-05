@@ -78,6 +78,15 @@ func (c *Config) applyDefaults() {
 			c.Kubernetes.Resources.Limits.Memory = "2Gi"
 		}
 	}
+	// 验证码启用时填难度与有效期默认（关闭时不使用这两个值）。
+	if c.Captcha.Enabled {
+		if c.Captcha.Difficulty == 0 {
+			c.Captcha.Difficulty = 50000
+		}
+		if c.Captcha.TTL.Duration == 0 {
+			c.Captcha.TTL.Duration = 5 * time.Minute
+		}
+	}
 }
 
 // Validate 校验启动必需配置。
@@ -116,6 +125,9 @@ func (c Config) Validate() error {
 	}
 	if strings.TrimSpace(c.Hermes.SystemPromptTemplate) == "" {
 		missing = append(missing, "hermes.system_prompt_template")
+	}
+	if c.Captcha.Enabled && strings.TrimSpace(c.Captcha.HMACSecret) == "" {
+		missing = append(missing, "captcha.hmac_secret")
 	}
 	if len(missing) > 0 {
 		return fmt.Errorf("缺少必需配置: %s", strings.Join(missing, ", "))

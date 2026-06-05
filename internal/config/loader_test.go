@@ -7,6 +7,7 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
@@ -340,4 +341,48 @@ func loadConfigFromString(t *testing.T, content string) Config {
 func loadConfigFromStringErr(t *testing.T, content string) (Config, error) {
 	t.Helper()
 	return LoadFile(writeTempConfig(t, content))
+}
+
+// validBaseConfig 返回一份通过 Validate 的最小配置，供验证码用例在其上改字段。
+func validBaseConfig() Config {
+	c := Config{}
+	c.App.HTTPAddr = ":8080"
+	c.App.DataRoot = "/data"
+	c.Database.URL = "mysql://u:p@tcp(127.0.0.1:3306)/ocm"
+	c.Redis.Addr = "127.0.0.1:6379"
+	c.Auth.AccessTokenTTL = Duration{Duration: time.Hour}
+	c.Auth.RefreshTokenTTL = Duration{Duration: 24 * time.Hour}
+	c.Auth.JWTAccessSecret = "a"
+	c.Auth.JWTRefreshSecret = "b"
+	c.Auth.CSRFSecret = "c"
+	c.Security.MasterKey = "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAEE=" // 32 字节 base64
+	c.Hermes.SystemPromptTemplate = "tmpl"
+	return c
+}
+
+// 启用验证码但缺 hmac_secret 应校验失败。
+func TestValidateCaptchaEnabledRequiresSecret(t *testing.T) {
+	c := validBaseConfig()
+	c.Captcha.Enabled = true // 开启但不给 hmac_secret
+	err := c.Validate()
+	require.Error(t, err)
+	require.ErrorContains(t, err, "captcha.hmac_secret")
+}
+
+// 启用验证码且给了 hmac_secret 应通过，且 applyDefaults 填好难度与 TTL 默认值。
+func TestCaptchaEnabledAppliesDefaults(t *testing.T) {
+	c := validBaseConfig()
+	c.Captcha.Enabled = true
+	c.Captcha.HMACSecret = "secret" // 满足必填
+	c.applyDefaults()
+	require.NoError(t, c.Validate())
+	assert.Equal(t, int64(50000), c.Captcha.Difficulty)    // 默认难度
+	assert.Equal(t, 5*time.Minute, c.Captcha.TTL.Duration) // 默认有效期
+}
+
+// 关闭验证码时缺省全部字段也应通过（向后兼容）。
+func TestCaptchaDisabledNeedsNothing(t *testing.T) {
+	c := validBaseConfig()
+	c.applyDefaults()
+	require.NoError(t, c.Validate())
 }
