@@ -75,7 +75,24 @@
 
     <p v-if="errorMessage" class="login-error">{{ errorMessage }}</p>
 
-    <button type="submit" class="login-submit" :disabled="auth.loading">
+    <!-- 验证码：常驻、auto=onload 加载即自动取题+Web Worker 解，无需点击。
+         captchaActive 由挂载时探测出题接口是否 204 决定（关闭则不渲染、不挡按钮）。 -->
+    <div v-if="captchaActive" class="login-captcha">
+      <altcha-widget
+        ref="captchaRef"
+        challengeurl="/api/v1/auth/altcha-challenge"
+        auto="onload"
+        hidefooter
+        @statechange="onCaptchaState"
+      />
+      <p v-if="!captchaVerified" class="login-captcha-hint">🔄 人机校验中…</p>
+    </div>
+
+    <button
+      type="submit"
+      class="login-submit"
+      :disabled="auth.loading || (captchaActive && !captchaVerified)"
+    >
       {{ auth.loading ? '登录中…' : '登录' }}
     </button>
 
@@ -87,7 +104,7 @@
 </template>
 
 <script setup lang="ts">
-import { ref } from 'vue'
+import { onMounted, ref } from 'vue'
 import { useRouter } from 'vue-router'
 
 import { useAuthStore } from '@/stores/auth'
@@ -104,15 +121,59 @@ const showPassword = ref(false)
 // errorMessage 只保存本次登录失败原因，下一次提交前会清空。
 const errorMessage = ref<string | null>(null)
 
+// captchaActive：是否启用验证码（挂载时探测出题接口决定）；初值 true 以默认禁用按钮（安全侧）。
+const captchaActive = ref(true)
+// captchaVerified：widget 是否已算出有效解。
+const captchaVerified = ref(false)
+// captchaPayload：已验证的 Altcha payload，提交时带上。
+const captchaPayload = ref('')
+// captchaRef：widget 元素引用，失败后 reset() 触发重新出题。
+const captchaRef = ref<(HTMLElement & { reset?: () => void }) | null>(null)
+
+// 挂载时探测出题接口：204 表示后端关闭验证码 → 不渲染 widget、不挡按钮；
+// 其它（200 或网络错误）按开启处理，渲染 widget，由其自身展示进度/错误。
+onMounted(async () => {
+  try {
+    const res = await fetch('/api/v1/auth/altcha-challenge')
+    captchaActive.value = res.status !== 204
+  } catch {
+    captchaActive.value = true
+  }
+})
+
+// onCaptchaState 监听 widget 状态：verified 时存 payload 并放行按钮，其它状态清空。
+function onCaptchaState(e: Event) {
+  const detail = (e as CustomEvent).detail as { state?: string; payload?: string } | undefined
+  if (detail?.state === 'verified' && detail.payload) {
+    captchaPayload.value = detail.payload
+    captchaVerified.value = true
+  } else {
+    captchaVerified.value = false
+    captchaPayload.value = ''
+  }
+}
+
 // onSubmit 调用 auth store 登录；redirect 查询参数由全局 401 处理器写入。
 async function onSubmit() {
   errorMessage.value = null
   try {
-    await auth.login(username.value, password.value, orgCode.value)
+    await auth.login(
+      username.value,
+      password.value,
+      orgCode.value,
+      captchaActive.value ? captchaPayload.value : undefined,
+    )
     const target = (router.currentRoute.value.query.redirect as string | undefined) ?? '/'
     await router.replace(target)
   } catch (err) {
     errorMessage.value = err instanceof Error ? err.message : '登录失败'
+    // payload 一次性：无论密码错(401)还是验证码错(400)，本次 payload 已消费，
+    // 重置 widget 触发重新出题+重算，让用户可再试。
+    if (captchaActive.value) {
+      captchaVerified.value = false
+      captchaPayload.value = ''
+      captchaRef.value?.reset?.()
+    }
   }
 }
 </script>
@@ -217,6 +278,16 @@ async function onSubmit() {
   margin: 0 0 14px;
   color: #b42318;
   font-size: 13px;
+}
+
+.login-captcha {
+  margin-bottom: 14px;
+}
+
+.login-captcha-hint {
+  margin: 8px 0 0;
+  color: #7a8597;
+  font-size: 12px;
 }
 
 .login-submit {
