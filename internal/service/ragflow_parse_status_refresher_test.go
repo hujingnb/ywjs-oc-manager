@@ -49,13 +49,27 @@ type fakeRefresherRAGFlow struct {
 	listCallOrder []string
 }
 
-func (f *fakeRefresherRAGFlow) ListDocuments(_ context.Context, datasetID string, _ int32, _ int32, _ string, _ string) ([]ragflow.Document, int32, error) {
+func (f *fakeRefresherRAGFlow) ListDocuments(_ context.Context, datasetID string, page int32, pageSize int32, _ string, _ string) ([]ragflow.Document, int32, error) {
 	f.listCallOrder = append(f.listCallOrder, datasetID)
 	if err, ok := f.errs[datasetID]; ok {
 		return nil, 0, err
 	}
 	docs := f.responses[datasetID]
-	return docs, int32(len(docs)), nil
+	total := int32(len(docs))
+	// 模拟 RAGFlow 的真实分页语义：total 始终为全量条数，docs 仅返回当前页切片，
+	// 这样才能覆盖「文档落在第一页之外」的场景，验证 refresher 是否正确翻页。
+	if pageSize <= 0 {
+		return docs, total, nil
+	}
+	start := (page - 1) * pageSize
+	if start >= total {
+		return []ragflow.Document{}, total, nil
+	}
+	end := start + pageSize
+	if end > total {
+		end = total
+	}
+	return docs[start:end], total, nil
 }
 
 // makeRefreshRow 构建测试用的 ListRAGFlowDocumentsNeedingRefreshRow。
@@ -191,6 +205,54 @@ func TestRagflowParseStatusRefresher_ListErrorPreservesStatusButWritesLastError(
 	assert.Equal(t, "completed", completed.ParseStatus)
 	assert.Equal(t, int32(100), completed.Progress)
 	assert.False(t, completed.LastError.Valid)
+}
+
+func TestRagflowParseStatusRefresher_PaginatesBeyondFirstPage(t *testing.T) {
+	// 复现并验证线上误杀根因：dataset 文档数超过单页上限时，待刷新文档可能落在第一页之外。
+	// 若只取第一页，这些文档会被误判「远端已删除」标记 failed；正确做法是翻页拉全量再比对。
+	store := &fakeRefresherStore{listRows: []sqlc.ListRAGFlowDocumentsNeedingRefreshRow{
+		// remote-doc-3 落在第 2 页、remote-doc-5 落在第 3 页（每页 2 条时）。
+		makeRefreshRow("00000000-0000-0000-0000-000000000a03", "00000000-0000-0000-0000-000000000d01", "remote-ds-1", "remote-doc-3", "queued", 0),
+		makeRefreshRow("00000000-0000-0000-0000-000000000a05", "00000000-0000-0000-0000-000000000d01", "remote-ds-1", "remote-doc-5", "running", 0),
+	}}
+	rf := &fakeRefresherRAGFlow{responses: map[string][]ragflow.Document{
+		// 远端共 5 个文档，按每页 2 条共 3 页。
+		"remote-ds-1": {
+			{ID: "remote-doc-1", Run: "DONE"},
+			{ID: "remote-doc-2", Run: "DONE"},
+			{ID: "remote-doc-3", Run: "DONE"}, // 第 2 页，实际已完成
+			{ID: "remote-doc-4", Run: "DONE"},
+			{ID: "remote-doc-5", Run: "FAIL"}, // 第 3 页，真实解析失败
+		},
+	}}
+	refresher := NewRagflowParseStatusRefresher(store, rf)
+	refresher.SetPageSize(2) // 强制每页 2 条，触发翻页
+
+	require.NoError(t, refresher.Tick(context.Background()))
+
+	// 同一 dataset 应翻满 3 页才停止。
+	calls := 0
+	for _, d := range rf.listCallOrder {
+		if d == "remote-ds-1" {
+			calls++
+		}
+	}
+	assert.Equal(t, 3, calls)
+
+	require.Len(t, store.updates, 2)
+	byID := map[string]sqlc.UpdateRAGFlowDocumentParseStatusParams{}
+	for _, u := range store.updates {
+		byID[u.ID] = u
+	}
+	// 第 2 页的文档应取到真实「已完成」状态，而非被误判删除。
+	doc3 := byID["00000000-0000-0000-0000-000000000a03"]
+	assert.Equal(t, "completed", doc3.ParseStatus)
+	assert.False(t, doc3.LastError.Valid, "不应写入「远端已删除」提示")
+	// 第 3 页的文档真实失败（run=FAIL），状态为 failed 且走正常失败路径（last_error 清空），
+	// 而不是「远端已删除」的误判错因。
+	doc5 := byID["00000000-0000-0000-0000-000000000a05"]
+	assert.Equal(t, "failed", doc5.ParseStatus)
+	assert.False(t, doc5.LastError.Valid, "真实失败不应套用「远端已删除」提示")
 }
 
 func TestRagflowParseStatusRefresher_StoreListErrorReturned(t *testing.T) {

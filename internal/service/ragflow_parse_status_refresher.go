@@ -29,8 +29,9 @@ const (
 	// ragflowRefresherDefaultBatchSize 是单次扫描的本地文档上限；
 	// 选 100 是为了让单轮 tick 总开销可控，远未到 RAGFlow ListDocuments 的单页上限。
 	ragflowRefresherDefaultBatchSize int32 = 100
-	// ragflowRefresherDefaultPageSize 是单次向 RAGFlow 拉取每个 dataset 文档列表的页大小；
-	// 设为 200 与 batchSize 配合可在最坏情况下一次性覆盖整组待刷新文档。
+	// ragflowRefresherDefaultPageSize 是向 RAGFlow 翻页拉取每个 dataset 文档列表的单页大小；
+	// refresher 会按此页大小翻页直到取齐全量（见 listAllRemoteDocuments），因此 dataset
+	// 文档数即便超过单页也能完整覆盖，不会因为只看第一页而漏页误判为「远端已删除」。
 	ragflowRefresherDefaultPageSize int32 = 200
 )
 
@@ -91,7 +92,7 @@ func (r *RagflowParseStatusRefresher) Tick(ctx context.Context) error {
 	var firstErr error
 	for _, datasetID := range order {
 		group := byDataset[datasetID]
-		remoteDocs, _, listErr := r.ragflow.ListDocuments(ctx, datasetID, 1, r.pageSize, "", "")
+		remoteByID, listErr := r.listAllRemoteDocuments(ctx, datasetID)
 		if listErr != nil {
 			if firstErr == nil {
 				firstErr = fmt.Errorf("拉取 dataset %s 文档状态失败: %w", datasetID, listErr)
@@ -99,15 +100,38 @@ func (r *RagflowParseStatusRefresher) Tick(ctx context.Context) error {
 			r.markGroupListFailure(ctx, group, listErr)
 			continue
 		}
-		remoteByID := make(map[string]ragflow.Document, len(remoteDocs))
-		for _, rd := range remoteDocs {
-			remoteByID[rd.ID] = rd
-		}
 		for _, row := range group {
 			r.applyRemoteStatus(ctx, row, remoteByID)
 		}
 	}
 	return firstErr
+}
+
+// listAllRemoteDocuments 翻页拉取指定 dataset 在 RAGFlow 的全部文档，建立 id->Document 索引。
+//
+// 必须枚举全量：此前实现只取第 1 页（page=1, pageSize=200），当某个 dataset 的文档数超过
+// 单页上限时，落在后续页的文档不会进入索引，会被 applyRemoteStatus 误判为「远端已删除」而
+// 错误标记 failed（线上一次性误杀 1000+ 文档即此原因）。只有拿到该 dataset 的全量列表，
+// 「未找到即已删除」的判断才成立。任一页拉取失败直接向上返回，交由调用方保留状态下轮重试。
+func (r *RagflowParseStatusRefresher) listAllRemoteDocuments(ctx context.Context, datasetID string) (map[string]ragflow.Document, error) {
+	remoteByID := make(map[string]ragflow.Document)
+	for page := int32(1); ; page++ {
+		docs, total, err := r.ragflow.ListDocuments(ctx, datasetID, page, r.pageSize, "", "")
+		if err != nil {
+			return nil, err
+		}
+		for _, rd := range docs {
+			remoteByID[rd.ID] = rd
+		}
+		// 终止条件（任一满足即停，三重保护防止漏页或死循环）：
+		//   1. 本页为空：后面再无数据；
+		//   2. 本页不足一页：已到最后一页；
+		//   3. 已累计到 RAGFlow 报告的 total：全量取齐（兼容后端忽略分页、一次返回全部的情况）。
+		if len(docs) == 0 || int32(len(docs)) < r.pageSize || (total > 0 && int32(len(remoteByID)) >= total) {
+			break
+		}
+	}
+	return remoteByID, nil
 }
 
 // markGroupListFailure 在 dataset 拉取失败时为组内每条文档写入 last_error，
