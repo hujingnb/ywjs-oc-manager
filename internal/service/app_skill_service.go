@@ -28,6 +28,7 @@ import (
 
 	"oc-manager/internal/auth"
 	"oc-manager/internal/integrations/ocops"
+	"oc-manager/internal/integrations/storage"
 	"oc-manager/internal/store/sqlc"
 )
 
@@ -159,6 +160,8 @@ type AppSkillService struct {
 	clawhub ClawHubDownloader
 	// blobs 归档缓存对象存储（共享 library/ 前缀）
 	blobs LibraryBlobStore
+	// cache 是归档读穿缓存（包装同一个 blobs）：clawhub 安装/更新命中即免回源。
+	cache *SkillArchiveCache
 	// ocops oc-ops skill 操作客户端（热装/热删/reload/列）
 	ocops OcOpsSkillClient
 	// audit 审计日志写入
@@ -186,6 +189,7 @@ func NewAppSkillService(deps AppSkillServiceDeps) *AppSkillService {
 		platform: deps.Platform,
 		clawhub:  deps.ClawHub,
 		blobs:    deps.Blobs,
+		cache:    NewSkillArchiveCache(deps.Blobs),
 		ocops:    deps.OcOps,
 		audit:    deps.Audit,
 	}
@@ -225,24 +229,15 @@ func (s *AppSkillService) Install(ctx context.Context, principal auth.Principal,
 		// 非 "行不存在" 的其他错误
 		return AppSkillResult{}, fmt.Errorf("查询实例 skill 失败: %w", err)
 	}
-	// 按来源取归档字节、sha256（platform 来源自带，clawhub 来源需本地计算）、元数据、扩展名
-	archive, sha, meta, ext, err := s.fetchArchive(ctx, in)
+	// 按来源取归档：clawhub 走读穿缓存（命中免回源），解压安全校验已在 fetchArchive 内按来源完成。
+	archive, sha, meta, relPath, err := s.fetchArchive(ctx, in)
 	if err != nil {
 		return AppSkillResult{}, err
 	}
-	// 解压防炸弹 + zip-slip 预校验（统计解压后总字节与文件数，超阈值返回错误）
-	if err := validateArchiveSafety(archive, ext); err != nil {
-		return AppSkillResult{}, ErrAppSkillArchiveTooDangerous
-	}
-	// clawhub 来源没有预置 sha，本地计算
+	// clawhub 来源无预置 sha，本地计算
 	if sha == "" {
 		sum := sha256.Sum256(archive)
 		sha = hex.EncodeToString(sum[:])
-	}
-	// 将归档缓存到对象存储（library/<source>/<ref>/<version>.<ext>），返回相对路径
-	relPath, err := s.blobs.PutLibrarySkill(in.Source, in.SourceRef, in.Version, ext, archive)
-	if err != nil {
-		return AppSkillResult{}, err
 	}
 	// 序列化来源元数据快照（防止来源下架后无法追溯安装信息）
 	metaJSON, _ := json.Marshal(meta)
@@ -383,9 +378,12 @@ func (s *AppSkillService) isCurrentVersionSkill(ctx context.Context, versionID, 
 	return false, nil
 }
 
-// fetchArchive 按来源取归档字节、sha256（可能为空）、原始元数据快照、扩展名。
+// fetchArchive 按来源取归档字节、sha256（可能为空）、原始元数据快照、对象存储相对路径。
 // 返回的 sha 为空时调用方须自行计算（clawhub 来源不提供 sha）。
-func (s *AppSkillService) fetchArchive(ctx context.Context, in InstallSkillInput) (data []byte, sha string, meta map[string]any, ext string, err error) {
+//   - platform：读平台库已持久化的归档（library/platform/<name>/<ver>.tar），就地校验安全。
+//   - clawhub：经读穿缓存取归档——命中即免回源；未命中回源下载、闭包内校验安全后写回。
+//     上游失败包成 ErrSkillMarketUpstreamUnavailable，不安全归档返回 ErrAppSkillArchiveTooDangerous 且不缓存。
+func (s *AppSkillService) fetchArchive(ctx context.Context, in InstallSkillInput) (data []byte, sha string, meta map[string]any, relPath string, err error) {
 	switch in.Source {
 	case "platform":
 		// 平台库来源：GetForInstall 返回归档字节与预存 sha256
@@ -393,17 +391,34 @@ func (s *AppSkillService) fetchArchive(ctx context.Context, in InstallSkillInput
 		if e != nil {
 			return nil, "", nil, "", fmt.Errorf("取平台库 skill 归档失败: %w", e)
 		}
-		return d, sh, map[string]any{"source": "platform", "name": in.SourceRef, "version": in.Version}, "tar", nil
+		// 解压防炸弹校验（平台库归档同样校验，保持与原 Install 行为一致）
+		if verr := validateArchiveSafety(d, "tar"); verr != nil {
+			return nil, "", nil, "", ErrAppSkillArchiveTooDangerous
+		}
+		// 平台库归档由 PlatformSkillService 上传时已落到确定性 key，直接引用、无需回源/重写。
+		rel := storage.LibrarySkillKey("platform", in.SourceRef, in.Version, "tar")
+		return d, sh, map[string]any{"source": "platform", "name": in.SourceRef, "version": in.Version}, rel, nil
 	case "clawhub":
-		// ClawHub 来源：调用下载器；nil 时表示该来源未启用
+		// ClawHub 来源：nil 时表示该来源未启用
 		if s.clawhub == nil {
 			return nil, "", nil, "", ErrAppSkillSourceUnknown
 		}
-		d, e := s.clawhub.Download(ctx, in.SourceRef, in.Version)
+		d, rel, e := s.cache.Fetch(ctx, "clawhub", in.SourceRef, in.Version, "zip", func(fctx context.Context) ([]byte, error) {
+			b, derr := s.clawhub.Download(fctx, in.SourceRef, in.Version)
+			if derr != nil {
+				// 上游下载失败：包成上游不可用哨兵，供 handler 映射 502。
+				return nil, fmt.Errorf("%w: %v", ErrSkillMarketUpstreamUnavailable, derr)
+			}
+			// 解压防炸弹校验放在回源闭包内：校验失败 → 返回错误 → 不写缓存。
+			if verr := validateArchiveSafety(b, "zip"); verr != nil {
+				return nil, ErrAppSkillArchiveTooDangerous
+			}
+			return b, nil
+		})
 		if e != nil {
-			return nil, "", nil, "", fmt.Errorf("从 ClawHub 下载 skill 失败: %w", e)
+			return nil, "", nil, "", e
 		}
-		return d, "", map[string]any{"source": "clawhub", "slug": in.SourceRef, "version": in.Version}, "zip", nil
+		return d, "", map[string]any{"source": "clawhub", "slug": in.SourceRef, "version": in.Version}, rel, nil
 	default:
 		// 未知来源类型，拒绝安装
 		return nil, "", nil, "", ErrAppSkillSourceUnknown
@@ -451,23 +466,14 @@ func (s *AppSkillService) Update(ctx context.Context, principal auth.Principal, 
 		Name:      name,
 		Version:   targetVersion,
 	}
-	archive, sha, meta, ext, err := s.fetchArchive(ctx, in)
+	// 取目标版本归档（clawhub 走读穿缓存），安全校验已在 fetchArchive 内完成。
+	archive, sha, meta, relPath, err := s.fetchArchive(ctx, in)
 	if err != nil {
 		return AppSkillResult{}, err
 	}
-	// 解压防炸弹校验
-	if err := validateArchiveSafety(archive, ext); err != nil {
-		return AppSkillResult{}, ErrAppSkillArchiveTooDangerous
-	}
-	// clawhub 来源没有预置 sha，本地计算
 	if sha == "" {
 		sum := sha256.Sum256(archive)
 		sha = hex.EncodeToString(sum[:])
-	}
-	// 缓存新版本归档到对象存储
-	relPath, err := s.blobs.PutLibrarySkill(row.Source, row.SourceRef, targetVersion, ext, archive)
-	if err != nil {
-		return AppSkillResult{}, err
 	}
 	// 序列化元数据快照（更新记录时覆写原来的元数据）
 	metaJSON, _ := json.Marshal(meta)

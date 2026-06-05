@@ -820,6 +820,49 @@ func TestAppSkillService_List_LatestVersion(t *testing.T) {
 	assert.Equal(t, "2.0", r.Latest)
 }
 
+// =========================================================
+// Install ClawHub 缓存命中 + 上游失败测试
+// =========================================================
+
+// TestAppSkillService_Install_ClawHub_CacheHit clawhub 安装命中缓存：不回源下载即落库 active。
+// 预置 clawhub 下载器为「一调用即报错」，命中缓存时不应触发它 → 证明走的是缓存。
+func TestAppSkillService_Install_ClawHub_CacheHit(t *testing.T) {
+	deps := newAppSkillTestDeps(t)
+	// 缓存里已有该 skill 归档（首次安装时写入的效果）。
+	deps.blobs.stored = map[string][]byte{"library/clawhub/skill-vetter/1.0.zip": []byte("CACHED-ZIP")}
+	// 上游下载器预置错误：命中缓存时不应被调用。
+	deps.clawhub.err = errors.New("上游不该被调用")
+	svc := deps.service()
+
+	res, err := svc.Install(context.Background(), deps.ownerPrincipal(), "app-1", InstallSkillInput{
+		Source: "clawhub", SourceRef: "skill-vetter", Name: "skill-vetter", Version: "1.0",
+	})
+	require.NoError(t, err)
+	// 命中缓存即可落库并热装成功。
+	assert.Equal(t, "active", res.Status)
+	row, ok := deps.appSkills.get("app-1", "skill-vetter")
+	require.True(t, ok)
+	// CachedTarPath 指向缓存键。
+	assert.Equal(t, "library/clawhub/skill-vetter/1.0.zip", row.CachedTarPath)
+}
+
+// TestAppSkillService_Install_ClawHub_UpstreamFail clawhub 安装未命中且上游下载失败：
+// 返回 ErrSkillMarketUpstreamUnavailable（供 handler 映射 502），不落库。
+func TestAppSkillService_Install_ClawHub_UpstreamFail(t *testing.T) {
+	deps := newAppSkillTestDeps(t)
+	// 缓存为空（未命中），上游下载器报错。
+	deps.clawhub.err = errors.New("clawhub 下载返回非 2xx: 502")
+	svc := deps.service()
+
+	_, err := svc.Install(context.Background(), deps.ownerPrincipal(), "app-1", InstallSkillInput{
+		Source: "clawhub", SourceRef: "self-improving", Name: "self-improving", Version: "1.2.16",
+	})
+	require.ErrorIs(t, err, ErrSkillMarketUpstreamUnavailable)
+	// 上游失败不落库。
+	_, ok := deps.appSkills.get("app-1", "self-improving")
+	assert.False(t, ok)
+}
+
 // buildRawTarHeaders 手动构造 tar 归档 raw 字节：
 // 仅写 n 个 header（每个 512 字节），body 全零（不足 header.Size 声明量）。
 // validateTarSafety 读 header.Size 字段统计，不需要实际 body，因此可正确触发超限检测。
