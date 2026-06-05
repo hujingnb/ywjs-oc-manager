@@ -30,6 +30,7 @@ const marketState = {
 // lastIntersectionCallback 捕获最近一次构造时传入的回调，测试可手动触发模拟「哨兵进入视口」。
 let lastIntersectionCallback: ((entries: { isIntersecting: boolean }[]) => void) | null = null
 const ioObserve = vi.fn()
+const ioUnobserve = vi.fn()
 const ioDisconnect = vi.fn()
 class MockIntersectionObserver {
   constructor(cb: (entries: { isIntersecting: boolean }[]) => void) {
@@ -37,7 +38,7 @@ class MockIntersectionObserver {
   }
   observe = ioObserve
   disconnect = ioDisconnect
-  unobserve = vi.fn()
+  unobserve = ioUnobserve
   takeRecords = vi.fn(() => [])
 }
 vi.stubGlobal('IntersectionObserver', MockIntersectionObserver)
@@ -116,6 +117,7 @@ describe('SkillMarketBrowser', () => {
     marketState.fetchNextPage.mockReset()
     lastIntersectionCallback = null
     ioObserve.mockReset()
+    ioUnobserve.mockReset()
     ioDisconnect.mockReset()
   })
 
@@ -254,6 +256,33 @@ describe('SkillMarketBrowser', () => {
     await flushPromises()
     await nextTick()
     expect(ioObserve).not.toHaveBeenCalled()
+  })
+
+  it('一页加载完成后仍有下一页时重新观察哨兵，避免首屏不满导致卡死', async () => {
+    // 回归防御：多列网格首屏不满一屏时，哨兵常驻视口、相交状态不变，
+    // IntersectionObserver 不会二次回调，旧实现会卡死在前几页。修复后每当一页
+    // 加载完成（isFetchingNextPage 由 true 回落 false），应重新 observe 哨兵
+    // （先 unobserve 再 observe），让仍在视口内的哨兵能再次触发相交回调继续翻页。
+    marketState.data.value = {
+      entries: [
+        { source: 'clawhub', source_ref: 'c1', name: 'c1', version: '1.0.0', downloads: 5 },
+      ],
+    }
+    marketState.hasNextPage.value = true
+    // 初始处于「正在加载下一页」，模拟刚发出翻页请求尚未返回。
+    marketState.isFetchingNextPage.value = true
+    mountBrowser()
+    await flushPromises()
+    await nextTick()
+    // 记录此前 observe 次数（挂载时哨兵首次被观察一次）。
+    const observeBefore = ioObserve.mock.calls.length
+    // 模拟这一页加载完成：isFetchingNextPage 下降沿，触发对哨兵的重新观察。
+    marketState.isFetchingNextPage.value = false
+    await flushPromises()
+    await nextTick()
+    // 修复点：加载完成后重新观察哨兵（unobserve + observe），而非永久停止。
+    expect(ioUnobserve).toHaveBeenCalled()
+    expect(ioObserve.mock.calls.length).toBeGreaterThan(observeBefore)
   })
 
   // ======== 点卡片 emit action ========

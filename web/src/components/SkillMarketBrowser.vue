@@ -80,7 +80,7 @@
 </template>
 
 <script setup lang="ts">
-import { computed, onBeforeUnmount, ref, watch } from 'vue'
+import { computed, nextTick, onBeforeUnmount, ref, watch } from 'vue'
 import { NButton, NCard, NInput, NTag } from 'naive-ui'
 import type { SkillEntry } from '@/api'
 import { useSkillMarketQuery } from '@/api/hooks/useSkills'
@@ -152,25 +152,42 @@ const marketEntries = computed<SkillEntry[]>(() => {
 // 滚动加载哨兵（IntersectionObserver）。
 const loadMoreSentinel = ref<HTMLElement | null>(null)
 let loadMoreObserver: IntersectionObserver | null = null
+// 当还有下一页且未在加载时拉取下一页；observer 回调与加载完成后的「续拉」复查共用此守卫。
+function loadMoreIfNeeded() {
+  if (skillMarketQuery.hasNextPage.value && !skillMarketQuery.isFetchingNextPage.value) {
+    void skillMarketQuery.fetchNextPage()
+  }
+}
 function setupLoadMoreObserver(el: HTMLElement | null) {
   loadMoreObserver?.disconnect()
   loadMoreObserver = null
   if (!el) return
   loadMoreObserver = new IntersectionObserver(
     (entries) => {
-      if (
-        entries.some((e) => e.isIntersecting) &&
-        skillMarketQuery.hasNextPage.value &&
-        !skillMarketQuery.isFetchingNextPage.value
-      ) {
-        void skillMarketQuery.fetchNextPage()
-      }
+      if (entries.some((e) => e.isIntersecting)) loadMoreIfNeeded()
     },
     { rootMargin: '200px' },
   )
   loadMoreObserver.observe(el)
 }
 watch(loadMoreSentinel, (el) => setupLoadMoreObserver(el))
+
+// market-grid 是 auto-fill 多列网格，首屏乃至前几页常常填不满一屏，哨兵自出现起就停留在
+// 视口内、相交状态再无变化，IntersectionObserver 不会二次回调，导致滚动加载卡死在前几页；
+// 又因内容不足一屏、页面没有滚动条，用户也无法手动滚动来重新触发。
+// 解决：每当一页加载完成（isFetchingNextPage 由 true 回落 false）后重新 observe 哨兵——
+// 若它仍在视口内会再投递一次相交回调继续翻页，直到内容把哨兵推出视口或没有下一页为止。
+watch(
+  () => skillMarketQuery.isFetchingNextPage.value,
+  async (fetching, prevFetching) => {
+    if (!prevFetching || fetching) return // 仅在「加载完成」这一下降沿复查，避免重复触发
+    await nextTick()
+    const el = loadMoreSentinel.value
+    if (!el || !loadMoreObserver) return
+    loadMoreObserver.unobserve(el)
+    loadMoreObserver.observe(el)
+  },
+)
 onBeforeUnmount(() => loadMoreObserver?.disconnect())
 
 // 详情抽屉。
