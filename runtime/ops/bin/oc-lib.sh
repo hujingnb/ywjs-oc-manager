@@ -118,6 +118,35 @@ sync_weixin_up() {
   aws_s3 sync "$data_dir/weixin" "s3://${AWS_S3_BUCKET}/${AWS_S3_PREFIX}weixin/"
 }
 
+# sync_longterm_memory_up 把 Hermes 长期记忆上传到 app S3 前缀。
+# memories/ 是目录型长期记忆；MEMORY.md / USER.md 是根级长期记忆与用户画像文件。
+# 不使用 --delete，保持与 workspace/sessions 的保守同步策略一致，避免误删稳定记忆。
+sync_longterm_memory_up() {
+  local data_dir="$1"
+  if [ -d "$data_dir/memories" ]; then
+    aws_s3 sync "$data_dir/memories" "s3://${AWS_S3_BUCKET}/${AWS_S3_PREFIX}memories/"
+  fi
+  local file
+  for file in MEMORY.md USER.md; do
+    [ -f "$data_dir/$file" ] || continue
+    aws_s3 cp "$data_dir/$file" "s3://${AWS_S3_BUCKET}/${AWS_S3_PREFIX}${file}"
+  done
+}
+
+# restore_longterm_memory_down 从 app S3 前缀恢复 Hermes 长期记忆。
+# 根级 MEMORY.md / USER.md 仅在对象存在时下载；不存在按首启或未生成记忆处理。
+restore_longterm_memory_down() {
+  local data_dir="$1"
+  mkdir -p "$data_dir/memories"
+  aws_s3 sync "s3://${AWS_S3_BUCKET}/${AWS_S3_PREFIX}memories/" "$data_dir/memories"
+  local file
+  for file in MEMORY.md USER.md; do
+    if aws_s3 ls "s3://${AWS_S3_BUCKET}/${AWS_S3_PREFIX}${file}" >/dev/null 2>&1; then
+      aws_s3 cp "s3://${AWS_S3_BUCKET}/${AWS_S3_PREFIX}${file}" "$data_dir/$file"
+    fi
+  done
+}
+
 # sync_user_skills_up <data_dir> 把 skills/ 下「用户自创」的 skill 增量同步到 S3 apps/<id>/skills/<name>/。
 # 自创 skill = 直接子目录、含 SKILL.md、无 .oc-managed 标记、且规范名不在镜像内置基线。
 # 跳过条件（三类）：

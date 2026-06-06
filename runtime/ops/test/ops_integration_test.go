@@ -132,6 +132,10 @@ func TestOcRestore(t *testing.T) {
 	// 预置 workspace 文件与 state.db
 	require.NoError(t, store.PutObject(ctx, appPrefix+"workspace/hello.txt", strings.NewReader("WS"), 2))
 	require.NoError(t, store.PutObject(ctx, storage.StateDBKey(id), strings.NewReader("SQLITEDATA"), 10))
+	// 预置长期记忆：目录型 memories/ 与根级 MEMORY.md / USER.md 都必须随镜像更新恢复。
+	require.NoError(t, store.PutObject(ctx, appPrefix+"memories/profile.json", strings.NewReader("MEMORY-DIR"), int64(len("MEMORY-DIR"))))
+	require.NoError(t, store.PutObject(ctx, appPrefix+"MEMORY.md", strings.NewReader("ROOT-MEMORY"), int64(len("ROOT-MEMORY"))))
+	require.NoError(t, store.PutObject(ctx, appPrefix+"USER.md", strings.NewReader("ROOT-USER"), int64(len("ROOT-USER"))))
 
 	// 起 mock bootstrap，校验 Authorization header 并返回 canned 响应
 	body := bootstrapJSON(t, env, appPrefix, skillURL)
@@ -155,6 +159,10 @@ func TestOcRestore(t *testing.T) {
 	assertFileContains(t, filepath.Join(inputDir, "resources/skills/weather.tar"), "SKILL-TAR")
 	// 断言：workspace sync 下来到 data 目录
 	assertFileContains(t, filepath.Join(dataDir, "workspace/hello.txt"), "WS")
+	// 断言：长期记忆完整恢复到 /opt/data，避免镜像更新后丢失稳定偏好与用户画像。
+	assertFileContains(t, filepath.Join(dataDir, "memories/profile.json"), "MEMORY-DIR")
+	assertFileContains(t, filepath.Join(dataDir, "MEMORY.md"), "ROOT-MEMORY")
+	assertFileContains(t, filepath.Join(dataDir, "USER.md"), "ROOT-USER")
 	// 断言：state.db 恢复且 -wal/-shm 两个 WAL 边车都被清理（保证干净重开）
 	assertFileContains(t, filepath.Join(dataDir, "state.db"), "SQLITEDATA")
 	assert.NoFileExists(t, filepath.Join(dataDir, "state.db-wal"))
@@ -228,6 +236,11 @@ func TestOcSyncOnce(t *testing.T) {
 	// 预置 sessions 文件：验证 sync_sessions_up 会把会话附属文件上传（父设计 §5.4）
 	require.NoError(t, os.MkdirAll(filepath.Join(dataDir, "sessions"), 0o755))
 	require.NoError(t, os.WriteFile(filepath.Join(dataDir, "sessions/req.json"), []byte("SESS"), 0o644))
+	// 预置长期记忆：目录型 memories/ 与根级 MEMORY.md / USER.md 都应上传到 app S3 前缀。
+	require.NoError(t, os.MkdirAll(filepath.Join(dataDir, "memories"), 0o755))
+	require.NoError(t, os.WriteFile(filepath.Join(dataDir, "memories/profile.json"), []byte("MEMORY-DIR"), 0o644))
+	require.NoError(t, os.WriteFile(filepath.Join(dataDir, "MEMORY.md"), []byte("ROOT-MEMORY"), 0o644))
+	require.NoError(t, os.WriteFile(filepath.Join(dataDir, "USER.md"), []byte("ROOT-USER"), 0o644))
 	// 用 ops 容器内的 sqlite3 建一个最小 DB，确保 .backup 命令可用
 	mk := exec.Command("docker", "run", "--rm",
 		"--user", fmt.Sprintf("%d:%d", os.Getuid(), os.Getgid()),
@@ -248,6 +261,16 @@ func TestOcSyncOnce(t *testing.T) {
 	sessExists, err := store.ObjectExists(ctx, appPrefix+"sessions/req.json")
 	require.NoError(t, err)
 	assert.True(t, sessExists, "sessions 对象应已上传")
+	// 断言长期记忆上行：目录与根级文件都必须存在于 apps/<id>/ 前缀。
+	memDirExists, err := store.ObjectExists(ctx, appPrefix+"memories/profile.json")
+	require.NoError(t, err)
+	assert.True(t, memDirExists, "memories/profile.json 应已上传")
+	memFileExists, err := store.ObjectExists(ctx, appPrefix+"MEMORY.md")
+	require.NoError(t, err)
+	assert.True(t, memFileExists, "MEMORY.md 应已上传")
+	userFileExists, err := store.ObjectExists(ctx, appPrefix+"USER.md")
+	require.NoError(t, err)
+	assert.True(t, userFileExists, "USER.md 应已上传")
 	dbExists, err := store.ObjectExists(ctx, storage.StateDBKey(id))
 	require.NoError(t, err)
 	assert.True(t, dbExists, "state.db 快照应已上传")

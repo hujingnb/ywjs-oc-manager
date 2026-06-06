@@ -2,8 +2,8 @@
 # oc-sync — sidecar 入口：循环把 /opt/data 产物增量同步回 S3。
 # 用 bootstrap 的 s3_write 凭证写 apps/<id>/ 前缀；临时凭证临近过期会自调 bootstrap 续期，
 # 长期凭证（目标存储不支持 STS 时）的过期时间为远未来，续期分支不会触发。
-# workspace 与 sessions 增量同步（无 --delete）每 OC_SYNC_INTERVAL 秒一次；sqlite 一致性快照每
-# OC_SQLITE_INTERVAL 秒一次。OC_SYNC_ONCE=1 时只跑一轮（含 sessions 同步与 sqlite 备份）后退出，供测试。
+# workspace、sessions、weixin、长期记忆与自创 skill 增量同步（无 --delete）每 OC_SYNC_INTERVAL 秒一次；
+# sqlite 一致性快照每 OC_SQLITE_INTERVAL 秒一次。OC_SYNC_ONCE=1 时只跑一轮后退出，供测试。
 set -euo pipefail
 # shellcheck source=/usr/local/bin/oc-lib.sh
 # shellcheck disable=SC1091
@@ -33,12 +33,13 @@ ensure_creds() {
 }
 
 # run_once 跑一轮：确保凭证新鲜 → 同步 workspace → 同步 sessions → 同步 weixin →
-# 同步自创 skill → 到点则备份 sqlite。
+# 同步长期记忆 → 同步自创 skill → 到点则备份 sqlite。
 run_once() {
   ensure_creds
   sync_workspace_up "$DATA_DIR"
   sync_sessions_up "$DATA_DIR"
   sync_weixin_up "$DATA_DIR"
+  sync_longterm_memory_up "$DATA_DIR"
   sync_user_skills_up "$DATA_DIR"
   local now
   now=$(date -u +%s)
@@ -54,6 +55,7 @@ if [ "${OC_SYNC_ONCE:-0}" = "1" ]; then
   sync_workspace_up "$DATA_DIR"
   sync_sessions_up "$DATA_DIR"
   sync_weixin_up "$DATA_DIR"
+  sync_longterm_memory_up "$DATA_DIR"
   sync_user_skills_up "$DATA_DIR"
   backup_sqlite_up "$DATA_DIR"
   log "oc-sync 单轮完成（OC_SYNC_ONCE）"
