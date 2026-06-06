@@ -174,6 +174,7 @@ func TestAltchaChallengeDisabledReturns204(t *testing.T) {
 	r.ServeHTTP(w, req)
 
 	assert.Equal(t, http.StatusNoContent, w.Code)
+	assert.Contains(t, w.Header().Get("Cache-Control"), "no-store")
 }
 
 // 验证码开启时出题接口返回 200 且响应体含 challenge/signature 字段。
@@ -189,6 +190,7 @@ func TestAltchaChallengeEnabledReturnsChallenge(t *testing.T) {
 	r.ServeHTTP(w, req)
 
 	require.Equal(t, http.StatusOK, w.Code)
+	assert.Contains(t, w.Header().Get("Cache-Control"), "no-store")
 	assert.Contains(t, w.Body.String(), "challenge")
 	assert.Contains(t, w.Body.String(), "signature")
 }

@@ -386,3 +386,29 @@ func TestCaptchaDisabledNeedsNothing(t *testing.T) {
 	c.applyDefaults()
 	require.NoError(t, c.Validate())
 }
+
+// 启用验证码时，负数难度或负 TTL 会让出题不可用，启动阶段应 fail-fast。
+func TestLoadRejectsCaptchaInvalidPositiveFields(t *testing.T) {
+	for _, tc := range []struct {
+		name string
+		body string
+		want string
+	}{
+		// difficulty 为负数时 maxNumber 无法形成可解的 PoW 空间，必须拒绝启动。
+		{name: "negative_difficulty", body: "difficulty: -1\n  ttl: \"5m\"", want: "captcha.difficulty"},
+		// ttl 为负数会让题目一生成就过期，必须拒绝启动。
+		{name: "negative_ttl", body: "difficulty: 50000\n  ttl: \"-1m\"", want: "captcha.ttl"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			yaml := fullValidYAML() + `
+captcha:
+  enabled: true
+  hmac_secret: "secret"
+  ` + tc.body + `
+`
+			_, err := loadConfigFromStringErr(t, yaml)
+			require.Error(t, err)
+			require.ErrorContains(t, err, tc.want)
+		})
+	}
+}

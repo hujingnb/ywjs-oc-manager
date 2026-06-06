@@ -248,6 +248,8 @@ func writeAuthError(c *gin.Context, err error) {
 // @Failure      500  {object}  ErrorResponse
 // @Router       /auth/altcha-challenge [get]
 func (h *AuthHandler) AltchaChallenge(c *gin.Context) {
+	// 挑战与关闭态都不允许缓存：挑战只能消费一次，204 缓存会让前端误以为验证码仍关闭。
+	c.Header("Cache-Control", "no-store, max-age=0")
 	if h.captcha == nil {
 		c.Status(http.StatusNoContent)
 		return

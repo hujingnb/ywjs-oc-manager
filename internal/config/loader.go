@@ -132,6 +132,15 @@ func (c Config) Validate() error {
 	if len(missing) > 0 {
 		return fmt.Errorf("缺少必需配置: %s", strings.Join(missing, ", "))
 	}
+	if c.Captcha.Enabled {
+		// 验证码启用后难度和有效期必须为正；负值会导致挑战不可解或刚生成即过期。
+		if c.Captcha.Difficulty <= 0 {
+			return fmt.Errorf("captcha.difficulty 必须大于 0")
+		}
+		if c.Captcha.TTL.Duration <= 0 {
+			return fmt.Errorf("captcha.ttl 必须大于 0")
+		}
+	}
 	if err := validateMasterKey(c.Security.MasterKey); err != nil {
 		return err
 	}
