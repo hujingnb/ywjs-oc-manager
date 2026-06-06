@@ -109,7 +109,7 @@ rm -f /tmp/aws_s3_calls.txt
 
 # ── restore_longterm_memory_down 根级记忆文件恢复：区分缺失对象与真实 S3 故障 ──
 #
-# mock aws_s3：sync 总是成功；ls 根据 RESTORE_MEMORY_MODE 模拟三类结果；
+# mock aws_s3：sync 总是成功；ls 根据 RESTORE_MEMORY_MODE 模拟四类结果；
 # cp 只记录调用，不实际下载，避免依赖真实 S3。
 aws_s3() {
   printf '%s\n' "$*" >> "$RESTORE_MEMORY_CALLS"
@@ -125,6 +125,10 @@ aws_s3() {
           ;;
         failure:*)
           printf 'fatal error: An error occurred (AccessDenied) when calling the HeadObject operation: denied\n' >&2
+          return 1
+          ;;
+        bucket_missing:*)
+          printf 'fatal error: An error occurred (NoSuchBucket) when calling the ListObjectsV2 operation: The specified bucket does not exist\n' >&2
           return 1
           ;;
         memory_exists:*MEMORY.md)
@@ -167,6 +171,18 @@ restore_longterm_memory_down "$TDATA" 2>"$RESTORE_MEMORY_LOG"
 RC=$?
 if [ "$RC" -eq 0 ]; then echo "FAIL: restore_longterm_memory_down 遇到真实 S3 ls 故障应返回非零"; fail=1; fi
 if grep -q '^cp ' "$RESTORE_MEMORY_CALLS"; then echo "FAIL: 真实 S3 ls 故障时不应继续调用 cp"; fail=1; fi
+rm -rf "$TDATA"
+rm -f "$RESTORE_MEMORY_CALLS" "$RESTORE_MEMORY_LOG"
+
+# bucket 不存在代表 S3 配置或环境故障，不能被宽泛的 does not exist 文案当作可选根级文件缺失。
+RESTORE_MEMORY_CALLS=$(mktemp)
+RESTORE_MEMORY_LOG=$(mktemp)
+RESTORE_MEMORY_MODE="bucket_missing"
+TDATA=$(mktemp -d)
+restore_longterm_memory_down "$TDATA" 2>"$RESTORE_MEMORY_LOG"
+RC=$?
+if [ "$RC" -eq 0 ]; then echo "FAIL: restore_longterm_memory_down 遇到 NoSuchBucket 应返回非零"; fail=1; fi
+if grep -q '^cp ' "$RESTORE_MEMORY_CALLS"; then echo "FAIL: NoSuchBucket 时不应继续调用 cp"; fail=1; fi
 rm -rf "$TDATA"
 rm -f "$RESTORE_MEMORY_CALLS" "$RESTORE_MEMORY_LOG"
 

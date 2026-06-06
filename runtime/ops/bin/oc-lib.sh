@@ -138,7 +138,12 @@ sync_longterm_memory_up() {
 is_s3_missing_object_error() {
   local msg="$1"
   case "$msg" in
-    *"NoSuchKey"*|*"404"*|*"Not Found"*|*"not found"*|*"does not exist"*)
+    *"NoSuchKey"*)
+      return 0
+      ;;
+  esac
+  case "$msg" in
+    *"HeadObject"*"404"*|*"HeadObject"*"Not Found"*)
       return 0
       ;;
   esac
