@@ -80,10 +80,9 @@
     <div v-if="captchaActive" class="login-captcha">
       <altcha-widget
         ref="captchaRef"
-        challengeurl="/api/v1/auth/altcha-challenge"
+        challenge="/api/v1/auth/altcha-challenge"
         auto="onload"
-        hidefooter
-        hidelogo
+        configuration='{"hideFooter":true,"hideLogo":true}'
         @statechange="onCaptchaState"
       />
       <p v-if="!captchaVerified" class="login-captcha-hint">🔄 人机校验中…</p>
@@ -128,8 +127,10 @@ const captchaActive = ref(true)
 const captchaVerified = ref(false)
 // captchaPayload：已验证的 Altcha payload，提交时带上。
 const captchaPayload = ref('')
-// captchaRef：widget 元素引用，失败后 reset() 触发重新出题。
-const captchaRef = ref<(HTMLElement & { reset?: () => void }) | null>(null)
+// captchaRef：widget 元素引用，失败后 reset()+verify() 触发重新出题和重算。
+const captchaRef = ref<(HTMLElement & { reset?: () => void; verify?: () => Promise<unknown> }) | null>(
+  null,
+)
 
 // 挂载时探测出题接口：204 表示后端关闭验证码 → 不渲染 widget、不挡按钮；
 // 其它（200 或网络错误）按开启处理，渲染 widget，由其自身展示进度/错误。
@@ -174,6 +175,8 @@ async function onSubmit() {
       captchaVerified.value = false
       captchaPayload.value = ''
       captchaRef.value?.reset?.()
+      // Altcha 的 auto=onload 只在组件加载时触发；登录失败后必须显式 verify 才会重新出题。
+      void captchaRef.value?.verify?.()
     }
   }
 }

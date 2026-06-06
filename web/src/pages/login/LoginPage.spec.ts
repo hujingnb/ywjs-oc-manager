@@ -49,7 +49,10 @@ describe('LoginPage 验证码交互', () => {
     stubChallenge(200)
     const wrapper = mountPage()
     await flushPromises()
+    const widget = wrapper.find('altcha-widget')
     const btn = wrapper.find('button.login-submit')
+    expect(widget.attributes('challenge')).toBe('/api/v1/auth/altcha-challenge')
+    expect(widget.attributes('configuration')).toContain('"hideFooter":true')
     expect(btn.attributes('disabled')).toBeDefined()
     expect(wrapper.find('.login-captcha-hint').exists()).toBe(true)
   })
@@ -70,9 +73,9 @@ describe('LoginPage 验证码交互', () => {
     expect(loginMock).toHaveBeenCalledWith('', '', '', 'PAYLOAD123')
   })
 
-  // 登录失败后 widget 重置（reset 调用）并清空 captchaVerified → 按钮重新禁用。
+  // 登录失败后 widget 重置并重新启动验证，同时清空 captchaVerified → 按钮重新禁用。
   // altcha-widget 是原生自定义元素，不走 Vue stub；通过直接给 DOM 实例挂 reset spy
-  // 来验证组件调用了 captchaRef.value.reset()。
+  // 与 verify spy 来验证组件调用了 captchaRef.value.reset()+verify()。
   it('登录失败后重置 widget', async () => {
     stubChallenge(200)
     loginMock.mockRejectedValue(new Error('账号或密码错误'))
@@ -81,14 +84,20 @@ describe('LoginPage 验证码交互', () => {
 
     // 先把 spy 挂到实际 DOM 实例，之后 captchaRef.value?.reset?.() 就会调到它。
     const resetSpy = vi.fn()
-    const widgetEl = wrapper.find('altcha-widget').element as HTMLElement & { reset?: () => void }
+    const verifySpy = vi.fn().mockResolvedValue(null)
+    const widgetEl = wrapper.find('altcha-widget').element as HTMLElement & {
+      reset?: () => void
+      verify?: () => Promise<unknown>
+    }
     widgetEl.reset = resetSpy
+    widgetEl.verify = verifySpy
 
     dispatchVerified(wrapper, 'P')
     await flushPromises()
     await wrapper.find('form').trigger('submit')
     await flushPromises()
     expect(resetSpy).toHaveBeenCalled()
+    expect(verifySpy).toHaveBeenCalled()
     // 失败后 captchaVerified 被清空 → 按钮重新禁用。
     expect(wrapper.find('button.login-submit').attributes('disabled')).toBeDefined()
   })
