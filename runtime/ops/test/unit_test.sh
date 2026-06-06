@@ -107,38 +107,15 @@ assert_eq "$ACTUAL_PATH" "$EXPECTED_PATH" "sync_user_skills_up 调 aws_s3 的本
 rm -rf "$TDATA" "$TBUNDLED"
 rm -f /tmp/aws_s3_calls.txt
 
-# ── restore_longterm_memory_down 根级记忆文件恢复：区分缺失对象与真实 S3 故障 ──
+# ── restore_longterm_memory_down / state.db 单对象恢复：使用 s3api head-object 区分对象缺失与真实 S3 故障 ──
 #
-# mock aws_s3：sync 总是成功；ls 根据 RESTORE_MEMORY_MODE 模拟四类结果；
-# cp 只记录调用，不实际下载，避免依赖真实 S3。
+# mock aws_s3：目录 sync 总是成功；根级文件与 state.db 的 cp 只记录调用，不实际下载。
+# 如果被测代码退回高阶 aws s3 ls，mock 会返回错误，防止再次依赖会吞空输出的 list 行为。
 aws_s3() {
-  printf '%s\n' "$*" >> "$RESTORE_MEMORY_CALLS"
+  printf 's3 %s\n' "$*" >> "$RESTORE_OBJECT_CALLS"
   case "$1" in
     sync)
       return 0
-      ;;
-    ls)
-      case "$RESTORE_MEMORY_MODE:$2" in
-        missing:*)
-          printf 'fatal error: An error occurred (404) when calling the HeadObject operation: Not Found\n' >&2
-          return 1
-          ;;
-        failure:*)
-          printf 'fatal error: An error occurred (AccessDenied) when calling the HeadObject operation: denied\n' >&2
-          return 1
-          ;;
-        bucket_missing:*)
-          printf 'fatal error: An error occurred (NoSuchBucket) when calling the ListObjectsV2 operation: The specified bucket does not exist\n' >&2
-          return 1
-          ;;
-        memory_exists:*MEMORY.md)
-          return 0
-          ;;
-        memory_exists:*)
-          printf 'fatal error: An error occurred (NoSuchKey) when calling the HeadObject operation: Key does not exist\n' >&2
-          return 1
-          ;;
-      esac
       ;;
     cp)
       return 0
@@ -148,55 +125,117 @@ aws_s3() {
   return 2
 }
 
+# mock aws_s3api：只支持 head-object，并按 RESTORE_OBJECT_MODE 模拟对象存在、对象缺失和真实故障。
+aws_s3api() {
+  printf 's3api %s\n' "$*" >> "$RESTORE_OBJECT_CALLS"
+  if [ "$1" != "head-object" ]; then
+    printf 'unexpected aws_s3api call: %s\n' "$*" >&2
+    return 2
+  fi
+  case "$RESTORE_OBJECT_MODE:$*" in
+    root_missing:*)
+      printf 'fatal error: An error occurred (404) when calling the HeadObject operation: Not Found\n' >&2
+      return 1
+      ;;
+    root_memory_exists:*"--key apps/test/MEMORY.md"*)
+      return 0
+      ;;
+    root_memory_exists:*)
+      printf 'fatal error: An error occurred (NoSuchKey) when calling the HeadObject operation: Key does not exist\n' >&2
+      return 1
+      ;;
+    bucket_missing:*)
+      printf 'fatal error: An error occurred (NoSuchBucket) when calling the HeadObject operation: The specified bucket does not exist\n' >&2
+      return 1
+      ;;
+    empty_failure:*)
+      return 1
+      ;;
+    state_missing:*"--key apps/test/state.db"*)
+      printf 'fatal error: An error occurred (NoSuchKey) when calling the HeadObject operation: Key does not exist\n' >&2
+      return 1
+      ;;
+    state_failure:*"--key apps/test/state.db"*)
+      printf 'fatal error: An error occurred (AccessDenied) when calling the HeadObject operation: denied\n' >&2
+      return 1
+      ;;
+  esac
+  printf 'unexpected aws_s3api mode/call: %s %s\n' "$RESTORE_OBJECT_MODE" "$*" >&2
+  return 2
+}
+
 export AWS_S3_BUCKET="test-bucket"
 export AWS_S3_PREFIX="apps/test/"
 
-# 根级记忆文件缺失属于首启/未生成记忆场景，应跳过并整体成功。
-RESTORE_MEMORY_CALLS=$(mktemp)
-RESTORE_MEMORY_MODE="missing"
+# head-object 404/Not Found 表示根级记忆文件尚未生成，应跳过并整体成功。
+RESTORE_OBJECT_CALLS=$(mktemp)
+RESTORE_OBJECT_MODE="root_missing"
 TDATA=$(mktemp -d)
 restore_longterm_memory_down "$TDATA"
 RC=$?
 assert_eq "$RC" "0" "restore_longterm_memory_down 应跳过缺失的根级记忆文件"
-if grep -q '^cp ' "$RESTORE_MEMORY_CALLS"; then echo "FAIL: 缺失根级记忆文件时不应调用 cp"; fail=1; fi
+if grep -q '^s3 cp ' "$RESTORE_OBJECT_CALLS"; then echo "FAIL: 缺失根级记忆文件时不应调用 cp"; fail=1; fi
 rm -rf "$TDATA"
-rm -f "$RESTORE_MEMORY_CALLS"
+rm -f "$RESTORE_OBJECT_CALLS"
 
-# 非缺失类 ls 错误代表认证、网络或服务端故障，应返回非零让 oc-restore 失败。
-RESTORE_MEMORY_CALLS=$(mktemp)
-RESTORE_MEMORY_LOG=$(mktemp)
-RESTORE_MEMORY_MODE="failure"
-TDATA=$(mktemp -d)
-restore_longterm_memory_down "$TDATA" 2>"$RESTORE_MEMORY_LOG"
-RC=$?
-if [ "$RC" -eq 0 ]; then echo "FAIL: restore_longterm_memory_down 遇到真实 S3 ls 故障应返回非零"; fail=1; fi
-if grep -q '^cp ' "$RESTORE_MEMORY_CALLS"; then echo "FAIL: 真实 S3 ls 故障时不应继续调用 cp"; fail=1; fi
-rm -rf "$TDATA"
-rm -f "$RESTORE_MEMORY_CALLS" "$RESTORE_MEMORY_LOG"
-
-# bucket 不存在代表 S3 配置或环境故障，不能被宽泛的 does not exist 文案当作可选根级文件缺失。
-RESTORE_MEMORY_CALLS=$(mktemp)
-RESTORE_MEMORY_LOG=$(mktemp)
-RESTORE_MEMORY_MODE="bucket_missing"
-TDATA=$(mktemp -d)
-restore_longterm_memory_down "$TDATA" 2>"$RESTORE_MEMORY_LOG"
-RC=$?
-if [ "$RC" -eq 0 ]; then echo "FAIL: restore_longterm_memory_down 遇到 NoSuchBucket 应返回非零"; fail=1; fi
-if grep -q '^cp ' "$RESTORE_MEMORY_CALLS"; then echo "FAIL: NoSuchBucket 时不应继续调用 cp"; fail=1; fi
-rm -rf "$TDATA"
-rm -f "$RESTORE_MEMORY_CALLS" "$RESTORE_MEMORY_LOG"
-
-# MEMORY.md 存在时应执行 cp；USER.md 缺失时仍应按可选根级文件跳过。
-RESTORE_MEMORY_CALLS=$(mktemp)
-RESTORE_MEMORY_MODE="memory_exists"
+# head-object 成功表示 MEMORY.md 存在，应执行 aws s3 cp；USER.md 缺失仍跳过。
+RESTORE_OBJECT_CALLS=$(mktemp)
+RESTORE_OBJECT_MODE="root_memory_exists"
 TDATA=$(mktemp -d)
 restore_longterm_memory_down "$TDATA"
 RC=$?
 assert_eq "$RC" "0" "restore_longterm_memory_down 应恢复存在的根级记忆文件"
-if ! grep -q '^cp s3://test-bucket/apps/test/MEMORY.md ' "$RESTORE_MEMORY_CALLS"; then echo "FAIL: MEMORY.md 存在时应调用 cp"; fail=1; fi
-if grep -q '^cp s3://test-bucket/apps/test/USER.md ' "$RESTORE_MEMORY_CALLS"; then echo "FAIL: USER.md 缺失时不应调用 cp"; fail=1; fi
+if ! grep -q '^s3 cp s3://test-bucket/apps/test/MEMORY.md ' "$RESTORE_OBJECT_CALLS"; then echo "FAIL: MEMORY.md 存在时应调用 cp"; fail=1; fi
+if grep -q '^s3 cp s3://test-bucket/apps/test/USER.md ' "$RESTORE_OBJECT_CALLS"; then echo "FAIL: USER.md 缺失时不应调用 cp"; fail=1; fi
 rm -rf "$TDATA"
-rm -f "$RESTORE_MEMORY_CALLS"
+rm -f "$RESTORE_OBJECT_CALLS"
+
+# NoSuchBucket 是 S3 配置或环境故障，不能按可选根级记忆文件缺失跳过。
+RESTORE_OBJECT_CALLS=$(mktemp)
+RESTORE_OBJECT_LOG=$(mktemp)
+RESTORE_OBJECT_MODE="bucket_missing"
+TDATA=$(mktemp -d)
+restore_longterm_memory_down "$TDATA" 2>"$RESTORE_OBJECT_LOG"
+RC=$?
+if [ "$RC" -eq 0 ]; then echo "FAIL: restore_longterm_memory_down 遇到 NoSuchBucket 应返回非零"; fail=1; fi
+if grep -q '^s3 cp ' "$RESTORE_OBJECT_CALLS"; then echo "FAIL: NoSuchBucket 时不应继续调用 cp"; fail=1; fi
+rm -rf "$TDATA"
+rm -f "$RESTORE_OBJECT_CALLS" "$RESTORE_OBJECT_LOG"
+
+# head-object 非零且无错误输出属于未知 AWS CLI/S3 故障，不能静默当作对象缺失。
+RESTORE_OBJECT_CALLS=$(mktemp)
+RESTORE_OBJECT_LOG=$(mktemp)
+RESTORE_OBJECT_MODE="empty_failure"
+TDATA=$(mktemp -d)
+restore_longterm_memory_down "$TDATA" 2>"$RESTORE_OBJECT_LOG"
+RC=$?
+if [ "$RC" -eq 0 ]; then echo "FAIL: restore_longterm_memory_down 遇到空错误输出的 head-object 失败应返回非零"; fail=1; fi
+if grep -q '^s3 cp ' "$RESTORE_OBJECT_CALLS"; then echo "FAIL: 空错误输出的 head-object 失败时不应继续调用 cp"; fail=1; fi
+rm -rf "$TDATA"
+rm -f "$RESTORE_OBJECT_CALLS" "$RESTORE_OBJECT_LOG"
+
+# state.db 缺失属于首启场景，应跳过；真实 head-object 故障应返回非零。
+RESTORE_OBJECT_CALLS=$(mktemp)
+RESTORE_OBJECT_LOG=$(mktemp)
+RESTORE_OBJECT_MODE="state_missing"
+TDATA=$(mktemp -d)
+restore_state_db_down "$TDATA" 2>"$RESTORE_OBJECT_LOG"
+RC=$?
+assert_eq "$RC" "0" "restore_state_db_down 应跳过缺失的 state.db"
+if grep -q '^s3 cp ' "$RESTORE_OBJECT_CALLS"; then echo "FAIL: state.db 缺失时不应调用 cp"; fail=1; fi
+rm -rf "$TDATA"
+rm -f "$RESTORE_OBJECT_CALLS" "$RESTORE_OBJECT_LOG"
+
+RESTORE_OBJECT_CALLS=$(mktemp)
+RESTORE_OBJECT_LOG=$(mktemp)
+RESTORE_OBJECT_MODE="state_failure"
+TDATA=$(mktemp -d)
+restore_state_db_down "$TDATA" 2>"$RESTORE_OBJECT_LOG"
+RC=$?
+if [ "$RC" -eq 0 ]; then echo "FAIL: restore_state_db_down 遇到真实 S3 head-object 故障应返回非零"; fail=1; fi
+if grep -q '^s3 cp ' "$RESTORE_OBJECT_CALLS"; then echo "FAIL: state.db 检查失败时不应调用 cp"; fail=1; fi
+rm -rf "$TDATA"
+rm -f "$RESTORE_OBJECT_CALLS" "$RESTORE_OBJECT_LOG"
 
 if [ "$fail" -eq 0 ]; then echo "unit_test: ALL PASS"; fi
 exit "$fail"

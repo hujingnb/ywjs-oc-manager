@@ -92,6 +92,11 @@ aws_s3() {
   aws --profile ocsync --endpoint-url "$AWS_S3_ENDPOINT" --region "$AWS_S3_REGION" s3 "$@"
 }
 
+# aws_s3api <args...> 用 ocsync profile + bootstrap 给的 endpoint/region 调 aws s3api 子命令。
+aws_s3api() {
+  aws --profile ocsync --endpoint-url "$AWS_S3_ENDPOINT" --region "$AWS_S3_REGION" s3api "$@"
+}
+
 # sync_workspace_up 把本地 workspace 增量同步到 S3（排除可重建大目录；不加 --delete 以免误删持久数据）。
 sync_workspace_up() {
   local data_dir="$1"
@@ -133,7 +138,7 @@ sync_longterm_memory_up() {
   done
 }
 
-# is_s3_missing_object_error 判断 aws s3 ls 单对象失败是否只是对象不存在。
+# is_s3_missing_object_error 判断 s3api head-object 失败是否只是对象不存在。
 # 不存在是首启或尚未生成根级记忆的正常场景；认证、网络和服务端错误必须向上传播。
 is_s3_missing_object_error() {
   local msg="$1"
@@ -143,11 +148,28 @@ is_s3_missing_object_error() {
       ;;
   esac
   case "$msg" in
-    *"HeadObject"*"404"*|*"HeadObject"*"Not Found"*)
+    *"HeadObject"*"404"*|*"HeadObject"*"NotFound"*|*"HeadObject"*"Not Found"*)
       return 0
       ;;
   esac
   return 1
+}
+
+# s3_object_status 用 s3api head-object 检查 app 前缀下单对象状态。
+# 返回值：0 表示存在；1 表示对象缺失（首启/未生成数据）；2 表示认证、网络、bucket 或服务端故障。
+s3_object_status() {
+  local key="$1" out rc
+  if out=$(aws_s3api head-object --bucket "$AWS_S3_BUCKET" --key "$key" 2>&1 >/dev/null); then
+    return 0
+  else
+    rc=$?
+  fi
+  if is_s3_missing_object_error "$out"; then
+    return 1
+  fi
+  [ -n "$out" ] || out="head-object 返回 ${rc} 且无错误输出"
+  log "检查 S3 对象失败 ${key}: ${out}"
+  return 2
 }
 
 # restore_longterm_memory_down 从 app S3 前缀恢复 Hermes 长期记忆。
@@ -156,21 +178,39 @@ restore_longterm_memory_down() {
   local data_dir="$1"
   mkdir -p "$data_dir/memories"
   aws_s3 sync "s3://${AWS_S3_BUCKET}/${AWS_S3_PREFIX}memories/" "$data_dir/memories"
-  local file uri ls_out ls_rc
+  local file key status
   for file in MEMORY.md USER.md; do
-    uri="s3://${AWS_S3_BUCKET}/${AWS_S3_PREFIX}${file}"
-    if ls_out=$(aws_s3 ls "$uri" 2>&1); then
-      aws_s3 cp "$uri" "$data_dir/$file"
+    key="${AWS_S3_PREFIX}${file}"
+    if s3_object_status "$key"; then
+      aws_s3 cp "s3://${AWS_S3_BUCKET}/${key}" "$data_dir/$file"
       continue
     else
-      ls_rc=$?
+      status=$?
     fi
-    if is_s3_missing_object_error "$ls_out"; then
+    if [ "$status" -eq 1 ]; then
       continue
     fi
-    log "恢复长期记忆文件 ${file} 前检查 S3 对象失败: ${ls_out}"
-    return "$ls_rc"
+    return "$status"
   done
+}
+
+# restore_state_db_down 从 app S3 前缀恢复 sqlite 快照。
+# state.db 缺失表示首启或尚未产生会话快照；其他 head-object 故障必须让 initContainer 失败。
+restore_state_db_down() {
+  local data_dir="$1" key="${AWS_S3_PREFIX}state.db" status
+  if s3_object_status "$key"; then
+    aws_s3 cp "s3://${AWS_S3_BUCKET}/${key}" "$data_dir/state.db"
+    rm -f "$data_dir/state.db-wal" "$data_dir/state.db-shm"
+    log "state.db 已恢复并清理 WAL 边车"
+    return 0
+  else
+    status=$?
+  fi
+  if [ "$status" -eq 1 ]; then
+    log "无 state.db 快照（首启），跳过"
+    return 0
+  fi
+  return "$status"
 }
 
 # sync_user_skills_up <data_dir> 把 skills/ 下「用户自创」的 skill 增量同步到 S3 apps/<id>/skills/<name>/。

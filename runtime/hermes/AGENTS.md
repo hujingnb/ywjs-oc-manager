@@ -49,11 +49,11 @@ Hermes app 的运行时数据根目录是 `/opt/data`。镜像更新时必须区
 | 路径 | 数据类别 | 保留要求 |
 |---|---|---|
 | `/opt/data/workspace/` | 用户工作区文件 | 保留用户上传、生成或编辑的工作成果。 |
-| `/opt/data/kanban.db` | Hermes kanban 状态 | 保留任务板、任务和运行状态。 |
+| `/opt/data/kanban.db` | Hermes kanban 状态 | 不得被会话快照清理误删；当前不等同于已纳入 ops S3 同步/恢复清单。 |
 | `/opt/data/weixin/accounts/` | 渠道登录凭证 | 保留渠道绑定状态；不得写入镜像层。 |
 | `/opt/data/skills/` 中的自创 skill | 用户或 app 运行期创建的 skill | 保留自创 skill；`skills/oc-kb/` 是 renderer 输出，受当前镜像重渲染，内置或受管 skill 按 variant 契约处理。 |
 
-`sessions/` 与 `state.db*` 是可以清理的会话快照；除这些已明确分类的路径外，其他 app 运行时数据默认保留，只有在契约中显式归类后才能清理。
+`sessions/` 与 `state.db*` 是可以清理的会话快照；除这些已明确分类的路径外，其他 app 运行时数据默认保留，只有在契约中显式归类后才能清理。本节定义清理保护边界，不自动表示所有路径都已由 `runtime/ops` 持久化到 S3；例如 `kanban.db` 当前仅要求不被 cleanup 误删，若未来需要随 pod 重建恢复，必须在对应功能中同步扩展 ops sync/restore 和 `runtime/ops/README.md` 的 S3 映射。
 
 ### 可以清理的会话快照
 
