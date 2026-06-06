@@ -6,6 +6,10 @@
           <div>
             <p class="eyebrow">Instance · Detail</p>
             <h2 style="margin: 0">{{ app?.name ?? '实例详情' }}</h2>
+            <!-- 平台管理员需要用 manager UUID 跨系统排障；组织用户不展示这类底层标识。 -->
+            <p v-if="app && auth.isPlatformAdmin" class="instance-uuid">
+              实例 UUID：<code>{{ app.id }}</code>
+            </p>
           </div>
           <AppStatusTag v-if="app" :status="app.status" />
         </div>
@@ -109,5 +113,16 @@ function onTabChange(name: string | number) {
 .tab-item.active {
   color: var(--color-brand-text, #8a3700);
   border-bottom-color: var(--color-brand, #ff6a00);
+}
+.instance-uuid {
+  color: var(--color-text-secondary, #6b7280);
+  font-size: 12px;
+  line-height: 1.5;
+  margin: 6px 0 0;
+}
+.instance-uuid code {
+  color: var(--color-text-primary, #1f2329);
+  font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", monospace;
+  overflow-wrap: anywhere;
 }
 </style>

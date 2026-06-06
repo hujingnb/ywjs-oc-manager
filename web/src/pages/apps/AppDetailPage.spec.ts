@@ -74,11 +74,21 @@ describe('AppDetailPage', () => {
     expect(wrapper.text()).not.toContain('定时任务')
   })
 
-  // 覆盖实例详情标题展示规则，避免 UUID 泄露到主视觉标题。
+  // 覆盖实例详情标题展示规则，避免 UUID 作为主视觉标题替代业务名称。
   it('标题展示实例名称且不展示实例 UUID', () => {
     const wrapper = mountDetail()
 
-    expect(wrapper.text()).toContain('测试实例')
-    expect(wrapper.text()).not.toContain('00000000-0000-0000-0000-000000000001')
+    expect(wrapper.find('h2').text()).toBe('测试实例')
+    expect(wrapper.find('h2').text()).not.toContain('00000000-0000-0000-0000-000000000001')
+  })
+
+  // 覆盖平台管理员排障场景：详情页头部应直接展示实例 UUID，便于跨系统定位资源。
+  it('平台管理员在实例详情页看到实例 UUID', () => {
+    authState.isPlatformAdmin = true
+
+    const wrapper = mountDetail()
+
+    expect(wrapper.text()).toContain('实例 UUID')
+    expect(wrapper.text()).toContain('00000000-0000-0000-0000-000000000001')
   })
 })
