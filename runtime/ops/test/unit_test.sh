@@ -148,6 +148,10 @@ aws_s3api() {
       printf 'fatal error: An error occurred (NoSuchBucket) when calling the HeadObject operation: The specified bucket does not exist\n' >&2
       return 1
       ;;
+    bucket_missing_with_404:*)
+      printf 'fatal error: An error occurred (NoSuchBucket) when calling the HeadObject operation: 404 Not Found\n' >&2
+      return 1
+      ;;
     empty_failure:*)
       return 1
       ;;
@@ -199,6 +203,18 @@ restore_longterm_memory_down "$TDATA" 2>"$RESTORE_OBJECT_LOG"
 RC=$?
 if [ "$RC" -eq 0 ]; then echo "FAIL: restore_longterm_memory_down 遇到 NoSuchBucket 应返回非零"; fail=1; fi
 if grep -q '^s3 cp ' "$RESTORE_OBJECT_CALLS"; then echo "FAIL: NoSuchBucket 时不应继续调用 cp"; fail=1; fi
+rm -rf "$TDATA"
+rm -f "$RESTORE_OBJECT_CALLS" "$RESTORE_OBJECT_LOG"
+
+# NoSuchBucket 即使包含 404 Not Found 文本也是 bucket 故障，不能按对象缺失跳过。
+RESTORE_OBJECT_CALLS=$(mktemp)
+RESTORE_OBJECT_LOG=$(mktemp)
+RESTORE_OBJECT_MODE="bucket_missing_with_404"
+TDATA=$(mktemp -d)
+restore_longterm_memory_down "$TDATA" 2>"$RESTORE_OBJECT_LOG"
+RC=$?
+if [ "$RC" -eq 0 ]; then echo "FAIL: restore_longterm_memory_down 遇到 NoSuchBucket+404 应返回非零"; fail=1; fi
+if grep -q '^s3 cp ' "$RESTORE_OBJECT_CALLS"; then echo "FAIL: NoSuchBucket+404 时不应继续调用 cp"; fail=1; fi
 rm -rf "$TDATA"
 rm -f "$RESTORE_OBJECT_CALLS" "$RESTORE_OBJECT_LOG"
 

@@ -141,14 +141,21 @@ sync_longterm_memory_up() {
 # is_s3_missing_object_error 判断 s3api head-object 失败是否只是对象不存在。
 # 不存在是首启或尚未生成根级记忆的正常场景；认证、网络和服务端错误必须向上传播。
 is_s3_missing_object_error() {
-  local msg="$1"
+  local msg="$1" code="" head_object_re
+  head_object_re='An[[:space:]]error[[:space:]]occurred[[:space:]]\(([^)]*)\)[[:space:]]when[[:space:]]calling[[:space:]]the[[:space:]]HeadObject[[:space:]]operation'
+  # AWS CLI 标准错误会把服务端错误码放在括号中；必须优先按错误码判断，
+  # 避免 NoSuchBucket 这类真实故障因消息里包含 404/Not Found 被误判为对象缺失。
+  if [[ "$msg" =~ $head_object_re ]]; then
+    code="${BASH_REMATCH[1]}"
+    case "$code" in
+      NoSuchKey|404|NotFound)
+        return 0
+        ;;
+    esac
+    return 1
+  fi
   case "$msg" in
     *"NoSuchKey"*)
-      return 0
-      ;;
-  esac
-  case "$msg" in
-    *"HeadObject"*"404"*|*"HeadObject"*"NotFound"*|*"HeadObject"*"Not Found"*)
       return 0
       ;;
   esac
