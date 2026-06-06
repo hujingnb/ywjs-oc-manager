@@ -49,7 +49,7 @@ App pod 内使用两个 pod 级 `emptyDir` 卷，各容器按需挂载：
 | 卷名 | 挂载路径 | 内容 | 读写关系 |
 |---|---|---|---|
 | `oc-input` | `/opt/oc-input` | `manifest.yaml`；`resources/persona.md`；`resources/platform-rules.md`；`resources/skills/*.tar` | initContainer **写**（oc-restore 落盘）；hermes 主容器**读**（加载配置） |
-| `data` | `/opt/data` | `workspace/`（hermes 工作区）；`memories/` / `MEMORY.md` / `USER.md`（长期记忆）；`sessions/`（会话存档）；`state.db`（sqlite 状态库）；`weixin/`（渠道凭证）；`skills/`（自创 skill） | initContainer **写**（恢复数据）；hermes 主容器**读写**（正常运行）；sidecar `s3-sync` **读**（增量上传）；sidecar `oc-ops` **读写**（spec-E，沿用 spec-D 契约） |
+| `data` | `/opt/data` | `workspace/`（hermes 工作区）；`memories/` / `MEMORY.md` / `USER.md`（长期记忆）；`sessions/`（会话存档）；`state.db`（会话 sqlite）；`kanban.db`（看板 sqlite）；`cron/`（定时任务）；`.oc-state.json`（variant 状态）；`weixin/`（渠道凭证）；`skills/`（自创 skill 与 `.bundled_manifest`） | initContainer **写**（恢复数据）；hermes 主容器**读写**（正常运行）；sidecar `s3-sync` **读**（增量上传）；sidecar `oc-ops` **读写**（spec-E，沿用 spec-D 契约） |
 
 `oc-input` 卷是 spec-A1 新增的——spec-D 原契约只有 `data` 卷，spec-A2 渲染时须同时补充 `oc-input` 卷（见 §7）。
 
@@ -114,7 +114,7 @@ initContainers:
 3. 将 `manifest_yaml` / `persona` / `platform_rule` 写入 `/opt/oc-input`（见 §6.1）。
 4. 按 `skills[].rel_path` + `skills[].url` 下载各 skill tar（见 §6.2）。
 5. 将 `s3_write` STS 凭证写入 `~/.aws/credentials ocsync` profile；从 `s3_write` 解析 S3 参数。
-6. `aws s3 sync` 恢复 `apps/<id>/workspace/`、`apps/<id>/sessions/`、`apps/<id>/weixin/`、`apps/<id>/memories/`、`apps/<id>/skills/` 到 `/opt/data`，并按对象存在性恢复 `MEMORY.md` / `USER.md`（见 §6.3）。
+6. `aws s3 sync` 恢复 `apps/<id>/workspace/`、`apps/<id>/sessions/`、`apps/<id>/weixin/`、`apps/<id>/memories/`、`apps/<id>/skills/`、`apps/<id>/cron/` 到 `/opt/data`，并按对象存在性恢复 `MEMORY.md` / `USER.md`、`.oc-state.json`、`kanban.db`（见 §6.3）。
 7. 若 `apps/<id>/state.db` 存在则 `aws s3 cp` 下载，并清除本地 `-wal`/`-shm` 边车（见 §6.3）。
 
 initContainer 完成后，hermes 主容器才会启动。
@@ -144,10 +144,10 @@ containers:
 
 **oc-sync 行为**（主循环）：
 - 启动时立即调 bootstrap 拿 STS 凭证（`ensure_creds`）。
-- 每 `OC_SYNC_INTERVAL`（默认 8s）循环：先 `ensure_creds`（凭证临近过期时自动续期），然后同步 workspace、sessions、weixin 凭证、长期记忆和自创 skill；每 `OC_SQLITE_INTERVAL`（默认 30s）触发一次 `backup_sqlite_up`（sqlite 一致性快照上传）。
+- 每 `OC_SYNC_INTERVAL`（默认 8s）循环：先 `ensure_creds`（凭证临近过期时自动续期），然后同步 workspace、sessions、weixin 凭证、长期记忆、自创 skill、`skills/.bundled_manifest`、cron 与 `.oc-state.json`；每 `OC_SQLITE_INTERVAL`（默认 30s）触发一次 `state.db` 与 `kanban.db` 的 sqlite 一致性快照上传。
 
 **oc-presync 行为**（preStop hook，exec 模式）：
-- 调 bootstrap 取最新凭证 → 做一次 workspace、sessions、weixin 凭证、长期记忆与 sqlite 快照同步，完成后退出。
+- 调 bootstrap 取最新凭证 → 做一次 workspace、sessions、weixin 凭证、长期记忆、自创 skill、`skills/.bundled_manifest`、cron、`.oc-state.json` 与 sqlite 快照同步，完成后退出。
 - 与 oc-sync 主循环**并发安全**：`backup_sqlite_up` 使用 `mktemp` 唯一临时文件，两者同时调用不会相互覆盖。
 
 ---
@@ -179,7 +179,7 @@ for skill in response.skills[]:
 
 ### 6.3 app 数据：STS 凭证 + aws s3 sync/cp
 
-`workspace/`、`sessions/`、`weixin/`、长期记忆、自创 `skills/` 与 `state.db` 均在 S3 的 `apps/<id>/` 前缀内，bootstrap 的 `s3_write` STS 凭证可读写该前缀。
+`workspace/`、`sessions/`、`weixin/`、长期记忆、自创 `skills/`、`skills/.bundled_manifest`、`cron/`、`.oc-state.json`、`kanban.db` 与 `state.db` 均在 S3 的 `apps/<id>/` 前缀内，bootstrap 的 `s3_write` STS 凭证可读写该前缀。
 
 **恢复（oc-restore）**：
 
@@ -191,6 +191,10 @@ for skill in response.skills[]:
 | 长期记忆目录 | `apps/<id>/memories/` | `/opt/data/memories/` | `aws s3 sync`（增量下载） |
 | 长期记忆文件 | `apps/<id>/MEMORY.md` / `apps/<id>/USER.md` | `/opt/data/MEMORY.md` / `/opt/data/USER.md` | 对象存在时 `aws s3 cp` |
 | 自创 skill 目录 | `apps/<id>/skills/` | `/opt/data/skills/` | `aws s3 sync`（增量下载） |
+| 内置 skill 基线 | `apps/<id>/skills/.bundled_manifest` | `/opt/data/skills/.bundled_manifest` | 随 `skills/` 前缀恢复 |
+| cron 任务与输出 | `apps/<id>/cron/` | `/opt/data/cron/` | `aws s3 sync`（增量下载） |
+| variant 状态锚点 | `apps/<id>/.oc-state.json` | `/opt/data/.oc-state.json` | 对象存在时 `aws s3 cp` |
+| kanban 状态库 | `apps/<id>/kanban.db` | `/opt/data/kanban.db` | `aws s3 cp`（单文件下载）+ 清 `-wal`/`-shm` |
 | sqlite 状态库 | `apps/<id>/state.db` | `/opt/data/state.db` | `aws s3 cp`（单文件下载）+ 清 `-wal`/`-shm` |
 
 首启时 `apps/<id>/` 前缀为空：`aws s3 sync` 返回 0（空操作），`state.db` 不存在则跳过——行为完全幂等。
@@ -205,9 +209,13 @@ for skill in response.skills[]:
 | 长期记忆目录 | `apps/<id>/memories/` | `/opt/data/memories/` | `aws s3 sync`，无 `--delete` |
 | 长期记忆文件 | `apps/<id>/MEMORY.md` / `apps/<id>/USER.md` | `/opt/data/MEMORY.md` / `/opt/data/USER.md` | 文件存在时 `aws s3 cp` |
 | 自创 skill 目录 | `apps/<id>/skills/` | `/opt/data/skills/` | `oc-sync` 对用户自创 skill 执行 `aws s3 sync`，无 `--delete` |
+| 内置 skill 基线 | `apps/<id>/skills/.bundled_manifest` | `/opt/data/skills/.bundled_manifest` | 文件存在时 `aws s3 cp` |
+| cron 任务与输出 | `apps/<id>/cron/` | `/opt/data/cron/` | `aws s3 sync`，无 `--delete` |
+| variant 状态锚点 | `apps/<id>/.oc-state.json` | `/opt/data/.oc-state.json` | 文件存在时 `aws s3 cp` |
+| kanban 状态库 | `apps/<id>/kanban.db` | 临时文件（`mktemp`）→ 上传后删除 | `sqlite3 .backup`（一致性快照）+ `aws s3 cp` |
 | sqlite 状态库 | `apps/<id>/state.db` | 临时文件（`mktemp`）→ 上传后删除 | `sqlite3 .backup`（一致性快照）+ `aws s3 cp` |
 
-> **无 `--delete`**：workspace、sessions、weixin、memories 和自创 skill 同步均故意不加 `--delete`；根级 `MEMORY.md` / `USER.md` 只在本地文件存在时覆盖上传，不传播删除，避免误删持久数据。
+> **无 `--delete`**：workspace、sessions、weixin、memories、自创 skill 和 cron 同步均故意不加 `--delete`；根级 `MEMORY.md` / `USER.md`、`.oc-state.json` 与 `skills/.bundled_manifest` 只在本地文件存在时覆盖上传，不传播删除，避免误删持久数据。
 
 ### 6.4 STS 凭证续期
 

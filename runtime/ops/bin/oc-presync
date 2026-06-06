@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# oc-presync — pod preStop hook 入口：优雅终止前做一次全量同步（workspace + sessions + 长期记忆）+ sqlite 快照，零丢失（父设计 D17）。
+# oc-presync — pod preStop hook 入口：优雅终止前做一次全量同步与 sqlite 快照，降低 pod 终止窗口的数据丢失风险。
 # 复用 oc-lib.sh 的同步/备份函数，与 oc-sync 单轮等价但不循环。
 set -euo pipefail
 # shellcheck source=/usr/local/bin/oc-lib.sh
@@ -15,10 +15,14 @@ fetch_bootstrap "$bs"
 write_aws_credentials "$bs"
 export_s3_env "$bs"
 
-log "preStop：全量同步 workspace + sessions + weixin 凭证 + 长期记忆 + sqlite 快照"
+log "preStop：全量同步 workspace + sessions + weixin + 长期记忆 + skills + cron + variant 状态 + sqlite 快照"
 sync_workspace_up "$DATA_DIR"
 sync_sessions_up "$DATA_DIR"
 sync_weixin_up "$DATA_DIR"
 sync_longterm_memory_up "$DATA_DIR"
+sync_user_skills_up "$DATA_DIR"
+sync_cron_up "$DATA_DIR"
+sync_oc_state_up "$DATA_DIR"
 backup_sqlite_up "$DATA_DIR"
+backup_kanban_db_up "$DATA_DIR"
 log "oc-presync 完成"

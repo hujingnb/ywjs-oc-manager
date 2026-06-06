@@ -19,7 +19,7 @@ from ocops.errors import OpsError
 # skills 目录：容器内 hermes skill 根目录。
 SKILLS_DIR = Path("/opt/data/skills")
 # 镜像内置 skill 基线清单：hermes 进程首次启动时写入 SKILLS_DIR/.bundled_manifest，
-# 每行 "<skill-name>:<hash>"，记录随镜像预装的全部内置 skill（叶子目录名）。
+# 每行 "<skill-name>:<hash>"，skill-name 使用 SKILL.md frontmatter 的规范名。
 # 与 SKILLS_DIR 同在 emptyDir，oc-ops 与 hermes 共享可读——故 oc-ops 用它判 builtin，
 # 而非镜像层私有的 /opt/skills-builtin.json（hermes 容器写、oc-ops 容器读不到，跨容器失效）。
 BUNDLED_MANIFEST = SKILLS_DIR / ".bundled_manifest"
@@ -109,7 +109,7 @@ def list_skills() -> dict:
 
     hermes 的 skill 目录既有扁平结构（<name>/SKILL.md：oc-ops 安装、oc-kb、版本种子），
     也有层级结构（<category>/<name>/SKILL.md：镜像内置）；统一以「含 SKILL.md 的目录」为一个
-    skill，skill 名取该目录叶子名（与 .bundled_manifest 命名一致）。
+    skill，对外展示名取该目录叶子名，builtin 判定使用 SKILL.md frontmatter 的规范名。
 
     历史教训：旧实现只遍历 SKILLS_DIR 直接子目录，把内置的 category 目录（apple/github…）
     误当成 skill，且内置子目录下的真实 skill 反而漏列。

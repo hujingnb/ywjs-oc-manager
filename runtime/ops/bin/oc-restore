@@ -1,8 +1,8 @@
 #!/usr/bin/env bash
 # oc-restore — initContainer 入口：调 bootstrap 拉配置并恢复 app 数据。
 # 机制：manifest/resources 直接落 emptyDir；skills（version 级、跨前缀）用预签名 URL 下载；
-# workspace/sessions/长期记忆/state.db（apps/<id>/ 前缀内）用 s3_write STS 凭证 aws s3 sync/cp 下载；
-# root 文件与 state.db 先用 s3api head-object 区分对象缺失和真实 S3 故障。
+# workspace/sessions/长期记忆/cron/skill/SQLite 快照等（apps/<id>/ 前缀内）
+# 用 s3_write STS 凭证 aws s3 sync/cp 下载；单文件先用 s3api head-object 区分对象缺失和真实 S3 故障。
 # 首启时 apps/<id>/ 前缀为空 → sync 空操作、state.db 不存在则跳过。幂等：pod 重启重跑行为一致。
 set -euo pipefail
 # shellcheck source=/usr/local/bin/oc-lib.sh
@@ -18,7 +18,7 @@ trap 'rm -f "$bs"' EXIT
 fetch_bootstrap "$bs"
 
 # 1. manifest + resources 写入 emptyDir（api_key 随 manifest 落本地临时盘，不进 S3）。
-mkdir -p "$INPUT_DIR/resources/skills" "$DATA_DIR/workspace" "$DATA_DIR/sessions" "$DATA_DIR/weixin" "$DATA_DIR/memories"
+mkdir -p "$INPUT_DIR/resources/skills" "$DATA_DIR/workspace" "$DATA_DIR/sessions" "$DATA_DIR/weixin" "$DATA_DIR/memories" "$DATA_DIR/cron"
 jq -r '.manifest_yaml'  "$bs" > "$INPUT_DIR/manifest.yaml"
 jq -r '.persona'        "$bs" > "$INPUT_DIR/resources/persona.md"
 jq -r '.platform_rule'  "$bs" > "$INPUT_DIR/resources/platform-rules.md"
@@ -44,7 +44,10 @@ aws_s3 sync "s3://${AWS_S3_BUCKET}/${AWS_S3_PREFIX}sessions/"  "$DATA_DIR/sessio
 aws_s3 sync "s3://${AWS_S3_BUCKET}/${AWS_S3_PREFIX}weixin/"    "$DATA_DIR/weixin"
 restore_longterm_memory_down "$DATA_DIR"
 restore_user_skills "$DATA_DIR"
-log "workspace/sessions/weixin/长期记忆/skills 已恢复"
+restore_cron_down "$DATA_DIR"
+restore_oc_state_down "$DATA_DIR"
+restore_kanban_db_down "$DATA_DIR"
+log "workspace/sessions/weixin/长期记忆/skills/cron/kanban/variant 状态已恢复"
 
 # state.db 单对象：存在才拉，并清 WAL 边车（绝不分别拉 -wal/-shm）保证干净重开。
 restore_state_db_down "$DATA_DIR"

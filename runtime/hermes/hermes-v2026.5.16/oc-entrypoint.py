@@ -64,9 +64,10 @@ def main() -> int:
         return 1
 
     # render 前：首次启动时抓镜像内置 skill 基线（render 会写 .oc-managed，必须在此之前）。
-    # OC_BUILTIN_MANIFEST 允许测试/开发覆盖默认路径 /opt/skills-builtin.json。
-    # 文件已存在时不动，保护基线不被后续启动覆盖。
-    builtin_manifest_path = Path(os.environ.get("OC_BUILTIN_MANIFEST", "/opt/skills-builtin.json"))
+    # 默认写入 /opt/data/skills/.bundled_manifest，供 hermes/oc-ops/ops sidecar 跨容器共享；
+    # OC_BUILTIN_MANIFEST 仅用于测试或调试覆盖。
+    builtin_manifest_override = os.environ.get("OC_BUILTIN_MANIFEST")
+    builtin_manifest_path = Path(builtin_manifest_override) if builtin_manifest_override else None
     ensure_builtin_manifest(data_root, builtin_manifest_path)
 
     # phase 4 render（每次都跑、幂等）

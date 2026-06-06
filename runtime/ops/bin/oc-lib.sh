@@ -138,6 +138,21 @@ sync_longterm_memory_up() {
   done
 }
 
+# sync_cron_up 把 Hermes Cron 任务定义和运行输出同步到 app S3 前缀。
+# cron/jobs.json 是任务编排真相，cron/output/ 是可通过 manager 查询的历史输出；目录不存在时跳过。
+sync_cron_up() {
+  local data_dir="$1"
+  [ -d "$data_dir/cron" ] || return 0
+  aws_s3 sync "$data_dir/cron" "s3://${AWS_S3_BUCKET}/${AWS_S3_PREFIX}cron/"
+}
+
+# sync_oc_state_up 备份 variant 状态锚点；该文件用于新镜像判断是否需要执行 migrator。
+sync_oc_state_up() {
+  local data_dir="$1"
+  [ -f "$data_dir/.oc-state.json" ] || return 0
+  aws_s3 cp "$data_dir/.oc-state.json" "s3://${AWS_S3_BUCKET}/${AWS_S3_PREFIX}.oc-state.json"
+}
+
 # is_s3_missing_object_error 判断 s3api head-object 失败是否只是对象不存在。
 # 不存在是首启或尚未生成根级记忆的正常场景；认证、网络和服务端错误必须向上传播。
 is_s3_missing_object_error() {
@@ -201,6 +216,29 @@ restore_longterm_memory_down() {
   done
 }
 
+# restore_cron_down 从 S3 恢复 Hermes Cron 任务定义和运行输出；首启空前缀时 aws sync 为空操作。
+restore_cron_down() {
+  local data_dir="$1"
+  mkdir -p "$data_dir/cron"
+  aws_s3 sync "s3://${AWS_S3_BUCKET}/${AWS_S3_PREFIX}cron/" "$data_dir/cron"
+}
+
+# restore_oc_state_down 恢复 .oc-state.json；缺失表示旧实例尚未写入状态锚点，按首启兼容处理。
+restore_oc_state_down() {
+  local data_dir="$1" key="${AWS_S3_PREFIX}.oc-state.json" status
+  if s3_object_status "$key"; then
+    aws_s3 cp "s3://${AWS_S3_BUCKET}/${key}" "$data_dir/.oc-state.json"
+    return 0
+  else
+    status=$?
+  fi
+  if [ "$status" -eq 1 ]; then
+    log "无 .oc-state.json 快照（首启或旧实例），跳过"
+    return 0
+  fi
+  return "$status"
+}
+
 # restore_state_db_down 从 app S3 前缀恢复 sqlite 快照。
 # state.db 缺失表示首启或尚未产生会话快照；其他 head-object 故障必须让 initContainer 失败。
 restore_state_db_down() {
@@ -215,6 +253,24 @@ restore_state_db_down() {
   fi
   if [ "$status" -eq 1 ]; then
     log "无 state.db 快照（首启），跳过"
+    return 0
+  fi
+  return "$status"
+}
+
+# restore_kanban_db_down 恢复 Hermes kanban SQLite 状态；缺失表示尚未使用 kanban，按空看板启动。
+restore_kanban_db_down() {
+  local data_dir="$1" key="${AWS_S3_PREFIX}kanban.db" status
+  if s3_object_status "$key"; then
+    aws_s3 cp "s3://${AWS_S3_BUCKET}/${key}" "$data_dir/kanban.db"
+    rm -f "$data_dir/kanban.db-wal" "$data_dir/kanban.db-shm"
+    log "kanban.db 已恢复并清理 WAL 边车"
+    return 0
+  else
+    status=$?
+  fi
+  if [ "$status" -eq 1 ]; then
+    log "无 kanban.db 快照，跳过"
     return 0
   fi
   return "$status"
@@ -236,6 +292,11 @@ sync_user_skills_up() {
   local skills_dir="$data_dir/skills"
   [ -d "$skills_dir" ] || return 0
   local bundled="${OC_BUNDLED_MANIFEST:-$skills_dir/.bundled_manifest}"
+  # 内置 skill 基线也是运行时状态：新 pod 先恢复自创 skill，再由 entrypoint 读取该基线；
+  # 若不保存它，自创 skill 可能在下次启动时被误写入内置基线，后续不再被同步。
+  if [ -f "$skills_dir/.bundled_manifest" ]; then
+    aws_s3 cp "$skills_dir/.bundled_manifest" "s3://${AWS_S3_BUCKET}/${AWS_S3_PREFIX}skills/.bundled_manifest"
+  fi
   local dir name canon
   for dir in "$skills_dir"/*/; do
     [ -d "$dir" ] || continue
@@ -264,16 +325,26 @@ restore_user_skills() {
   aws_s3 sync "s3://${AWS_S3_BUCKET}/${AWS_S3_PREFIX}skills/" "$data_dir/skills/"
 }
 
-# backup_sqlite_up 用 sqlite .backup 出 live DB 的一致性快照并上传为 state.db（绝不分别传 -wal/-shm）。
-# 本地无 state.db（首启未建库）时静默跳过。
-backup_sqlite_up() {
-  local data_dir="$1"
-  [ -f "$data_dir/state.db" ] || return 0
+# backup_sqlite_file_up 用 sqlite .backup 出 live DB 的一致性快照并上传到指定 S3 key。
+# 本地无对应 DB（首启或未启用该能力）时静默跳过。
+backup_sqlite_file_up() {
+  local data_dir="$1" db_file="$2" s3_key="$3" tmp_prefix="$4"
+  [ -f "$data_dir/$db_file" ] || return 0
   # 用唯一临时文件：preStop（oc-presync）触发时 sidecar 的 oc-sync 主循环仍在运行，
   # 两者可能并发调用本函数；固定路径会相互覆盖/删除导致上传半写的损坏快照。
   local snap
-  snap=$(mktemp /tmp/oc-snap.XXXXXX.db)
-  sqlite3 "$data_dir/state.db" ".backup $snap"
-  aws_s3 cp "$snap" "s3://${AWS_S3_BUCKET}/${AWS_S3_PREFIX}state.db"
+  snap=$(mktemp "/tmp/${tmp_prefix}.XXXXXX.db")
+  sqlite3 "$data_dir/$db_file" ".backup $snap"
+  aws_s3 cp "$snap" "s3://${AWS_S3_BUCKET}/${AWS_S3_PREFIX}${s3_key}"
   rm -f "$snap"
+}
+
+# backup_sqlite_up 备份 Hermes 会话主状态库（state.db），不上传 WAL 边车。
+backup_sqlite_up() {
+  backup_sqlite_file_up "$1" "state.db" "state.db" "oc-snap"
+}
+
+# backup_kanban_db_up 备份 kanban SQLite 状态，避免 pod 重建丢失任务看板。
+backup_kanban_db_up() {
+  backup_sqlite_file_up "$1" "kanban.db" "kanban.db" "oc-kanban"
 }

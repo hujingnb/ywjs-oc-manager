@@ -136,6 +136,12 @@ func TestOcRestore(t *testing.T) {
 	require.NoError(t, store.PutObject(ctx, appPrefix+"memories/profile.json", strings.NewReader("MEMORY-DIR"), int64(len("MEMORY-DIR"))))
 	require.NoError(t, store.PutObject(ctx, appPrefix+"MEMORY.md", strings.NewReader("ROOT-MEMORY"), int64(len("ROOT-MEMORY"))))
 	require.NoError(t, store.PutObject(ctx, appPrefix+"USER.md", strings.NewReader("ROOT-USER"), int64(len("ROOT-USER"))))
+	// 预置非会话运行时状态：cron、kanban 与 variant 状态都应随 pod 重建恢复。
+	require.NoError(t, store.PutObject(ctx, appPrefix+"cron/jobs.json", strings.NewReader(`{"jobs":[]}`), int64(len(`{"jobs":[]}`))))
+	require.NoError(t, store.PutObject(ctx, appPrefix+"cron/output/job1/run.md", strings.NewReader("RUN"), int64(len("RUN"))))
+	require.NoError(t, store.PutObject(ctx, appPrefix+"kanban.db", strings.NewReader("KANBANDATA"), int64(len("KANBANDATA"))))
+	require.NoError(t, store.PutObject(ctx, appPrefix+".oc-state.json", strings.NewReader(`{"image_variant":"old"}`), int64(len(`{"image_variant":"old"}`))))
+	require.NoError(t, store.PutObject(ctx, appPrefix+"skills/.bundled_manifest", strings.NewReader("builtin-a:deadbeef\n"), int64(len("builtin-a:deadbeef\n"))))
 
 	// 起 mock bootstrap，校验 Authorization header 并返回 canned 响应
 	body := bootstrapJSON(t, env, appPrefix, skillURL)
@@ -163,6 +169,12 @@ func TestOcRestore(t *testing.T) {
 	assertFileContains(t, filepath.Join(dataDir, "memories/profile.json"), "MEMORY-DIR")
 	assertFileContains(t, filepath.Join(dataDir, "MEMORY.md"), "ROOT-MEMORY")
 	assertFileContains(t, filepath.Join(dataDir, "USER.md"), "ROOT-USER")
+	// 断言：cron、kanban 与 variant 状态恢复，避免 pod 重建丢掉任务编排和迁移锚点。
+	assertFileContains(t, filepath.Join(dataDir, "cron/jobs.json"), "jobs")
+	assertFileContains(t, filepath.Join(dataDir, "cron/output/job1/run.md"), "RUN")
+	assertFileContains(t, filepath.Join(dataDir, "kanban.db"), "KANBANDATA")
+	assertFileContains(t, filepath.Join(dataDir, ".oc-state.json"), "image_variant")
+	assertFileContains(t, filepath.Join(dataDir, "skills/.bundled_manifest"), "builtin-a")
 	// 断言：state.db 恢复且 -wal/-shm 两个 WAL 边车都被清理（保证干净重开）
 	assertFileContains(t, filepath.Join(dataDir, "state.db"), "SQLITEDATA")
 	assert.NoFileExists(t, filepath.Join(dataDir, "state.db-wal"))
@@ -241,11 +253,18 @@ func TestOcSyncOnce(t *testing.T) {
 	require.NoError(t, os.WriteFile(filepath.Join(dataDir, "memories/profile.json"), []byte("MEMORY-DIR"), 0o644))
 	require.NoError(t, os.WriteFile(filepath.Join(dataDir, "MEMORY.md"), []byte("ROOT-MEMORY"), 0o644))
 	require.NoError(t, os.WriteFile(filepath.Join(dataDir, "USER.md"), []byte("ROOT-USER"), 0o644))
+	// 预置 cron 任务定义/输出与 variant 状态，验证非会话运行时状态会上行。
+	require.NoError(t, os.MkdirAll(filepath.Join(dataDir, "cron/output/job1"), 0o755))
+	require.NoError(t, os.WriteFile(filepath.Join(dataDir, "cron/jobs.json"), []byte(`{"jobs":[]}`), 0o644))
+	require.NoError(t, os.WriteFile(filepath.Join(dataDir, "cron/output/job1/run.md"), []byte("RUN"), 0o644))
+	require.NoError(t, os.WriteFile(filepath.Join(dataDir, ".oc-state.json"), []byte(`{"image_variant":"new"}`), 0o644))
+	require.NoError(t, os.MkdirAll(filepath.Join(dataDir, "skills"), 0o755))
+	require.NoError(t, os.WriteFile(filepath.Join(dataDir, "skills/.bundled_manifest"), []byte("builtin-a:deadbeef\n"), 0o644))
 	// 用 ops 容器内的 sqlite3 建一个最小 DB，确保 .backup 命令可用
 	mk := exec.Command("docker", "run", "--rm",
 		"--user", fmt.Sprintf("%d:%d", os.Getuid(), os.Getgid()),
 		"-v", dataDir+":/data", env.image,
-		"sqlite3", "/data/state.db", "CREATE TABLE t(x); INSERT INTO t VALUES(1);")
+		"sh", "-c", "sqlite3 /data/state.db 'CREATE TABLE t(x); INSERT INTO t VALUES(1);' && sqlite3 /data/kanban.db 'CREATE TABLE board(x); INSERT INTO board VALUES(1);'")
 	mkOut, mkErr := mk.CombinedOutput()
 	require.NoError(t, mkErr, "建测试 sqlite 失败:\n%s", string(mkOut))
 
@@ -271,6 +290,21 @@ func TestOcSyncOnce(t *testing.T) {
 	userFileExists, err := store.ObjectExists(ctx, appPrefix+"USER.md")
 	require.NoError(t, err)
 	assert.True(t, userFileExists, "USER.md 应已上传")
+	cronJobsExists, err := store.ObjectExists(ctx, appPrefix+"cron/jobs.json")
+	require.NoError(t, err)
+	assert.True(t, cronJobsExists, "cron/jobs.json 应已上传")
+	cronOutputExists, err := store.ObjectExists(ctx, appPrefix+"cron/output/job1/run.md")
+	require.NoError(t, err)
+	assert.True(t, cronOutputExists, "cron 输出应已上传")
+	ocStateExists, err := store.ObjectExists(ctx, appPrefix+".oc-state.json")
+	require.NoError(t, err)
+	assert.True(t, ocStateExists, ".oc-state.json 应已上传")
+	kanbanDBExists, err := store.ObjectExists(ctx, appPrefix+"kanban.db")
+	require.NoError(t, err)
+	assert.True(t, kanbanDBExists, "kanban.db 快照应已上传")
+	bundledManifestExists, err := store.ObjectExists(ctx, appPrefix+"skills/.bundled_manifest")
+	require.NoError(t, err)
+	assert.True(t, bundledManifestExists, "skills/.bundled_manifest 应已上传")
 	dbExists, err := store.ObjectExists(ctx, storage.StateDBKey(id))
 	require.NoError(t, err)
 	assert.True(t, dbExists, "state.db 快照应已上传")

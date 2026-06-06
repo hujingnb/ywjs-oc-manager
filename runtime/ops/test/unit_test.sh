@@ -106,6 +106,24 @@ assert_eq "$ACTUAL_PATH" "$EXPECTED_PATH" "sync_user_skills_up 调 aws_s3 的本
 # 清理临时目录
 rm -rf "$TDATA" "$TBUNDLED"
 rm -f /tmp/aws_s3_calls.txt
+unset OC_BUNDLED_MANIFEST
+
+# 自创 skill 识别依赖 skills/.bundled_manifest；该基线必须随 skills 前缀保存，
+# 否则新 pod 恢复自创 skill 后会把它误写进内置基线。
+TDATA=$(mktemp -d)
+mkdir -p "$TDATA/skills"
+printf 'builtin-a:deadbeef\n' > "$TDATA/skills/.bundled_manifest"
+aws_s3() {
+  printf '%s\n' "$*" >> /tmp/aws_s3_calls.txt
+}
+rm -f /tmp/aws_s3_calls.txt
+sync_user_skills_up "$TDATA"
+if ! grep -q '^cp .*/skills/.bundled_manifest s3://test-bucket/apps/test/skills/.bundled_manifest$' /tmp/aws_s3_calls.txt; then
+  echo "FAIL: skills/.bundled_manifest 应上传到 S3 skills 前缀"
+  fail=1
+fi
+rm -rf "$TDATA"
+rm -f /tmp/aws_s3_calls.txt
 
 # ── restore_longterm_memory_down / state.db 单对象恢复：使用 s3api head-object 区分对象缺失与真实 S3 故障 ──
 #
@@ -141,6 +159,13 @@ aws_s3api() {
       return 0
       ;;
     root_memory_exists:*)
+      printf 'fatal error: An error occurred (NoSuchKey) when calling the HeadObject operation: Key does not exist\n' >&2
+      return 1
+      ;;
+    runtime_state_exists:*"--key apps/test/.oc-state.json"*|runtime_state_exists:*"--key apps/test/kanban.db"*)
+      return 0
+      ;;
+    runtime_state_exists:*)
       printf 'fatal error: An error occurred (NoSuchKey) when calling the HeadObject operation: Key does not exist\n' >&2
       return 1
       ;;
@@ -252,6 +277,49 @@ if [ "$RC" -eq 0 ]; then echo "FAIL: restore_state_db_down 遇到真实 S3 head-
 if grep -q '^s3 cp ' "$RESTORE_OBJECT_CALLS"; then echo "FAIL: state.db 检查失败时不应调用 cp"; fail=1; fi
 rm -rf "$TDATA"
 rm -f "$RESTORE_OBJECT_CALLS" "$RESTORE_OBJECT_LOG"
+
+# ── cron / kanban.db / .oc-state.json 备份恢复：保护非会话运行时状态 ──
+#
+# mock aws_s3：记录 sync/cp 调用；sqlite3：记录 .backup 调用并生成快照文件，避免依赖本机 sqlite。
+RUNTIME_STATE_CALLS=$(mktemp)
+aws_s3() {
+  printf 's3 %s\n' "$*" >> "$RUNTIME_STATE_CALLS"
+  if [ "$1" = "cp" ] && [ -f "$2" ]; then
+    return 0
+  fi
+  return 0
+}
+sqlite3() {
+  local snap="${2#.backup }"
+  printf 'sqlite3 %s\n' "$*" >> "$RUNTIME_STATE_CALLS"
+  printf 'snapshot' > "$snap"
+}
+
+TDATA=$(mktemp -d)
+mkdir -p "$TDATA/cron/output/job1"
+printf '{"jobs":[]}\n' > "$TDATA/cron/jobs.json"
+printf 'run output\n' > "$TDATA/cron/output/job1/run.md"
+printf '{"image_variant":"old"}\n' > "$TDATA/.oc-state.json"
+printf 'kanban-db' > "$TDATA/kanban.db"
+
+# cron 任务定义与输出、.oc-state.json、kanban.db 都属于 pod 重建后应恢复的运行时状态。
+sync_cron_up "$TDATA"
+sync_oc_state_up "$TDATA"
+backup_kanban_db_up "$TDATA"
+if ! grep -q '^s3 sync .*/cron s3://test-bucket/apps/test/cron/' "$RUNTIME_STATE_CALLS"; then echo "FAIL: cron/ 应同步到 S3"; fail=1; fi
+if ! grep -q '^s3 cp .*/.oc-state.json s3://test-bucket/apps/test/.oc-state.json' "$RUNTIME_STATE_CALLS"; then echo "FAIL: .oc-state.json 应上传到 S3"; fail=1; fi
+if ! grep -q '^s3 cp /tmp/oc-kanban' "$RUNTIME_STATE_CALLS"; then echo "FAIL: kanban.db 应通过 sqlite 快照上传"; fail=1; fi
+
+RESTORE_OBJECT_CALLS="$RUNTIME_STATE_CALLS"
+RESTORE_OBJECT_MODE="runtime_state_exists"
+restore_cron_down "$TDATA"
+restore_oc_state_down "$TDATA"
+restore_kanban_db_down "$TDATA"
+if ! grep -q '^s3 sync s3://test-bucket/apps/test/cron/ .*/cron' "$RUNTIME_STATE_CALLS"; then echo "FAIL: cron/ 应从 S3 恢复"; fail=1; fi
+if ! grep -q '^s3 cp s3://test-bucket/apps/test/.oc-state.json .*/.oc-state.json' "$RUNTIME_STATE_CALLS"; then echo "FAIL: .oc-state.json 应从 S3 恢复"; fail=1; fi
+if ! grep -q '^s3 cp s3://test-bucket/apps/test/kanban.db .*/kanban.db' "$RUNTIME_STATE_CALLS"; then echo "FAIL: kanban.db 应从 S3 恢复"; fail=1; fi
+rm -rf "$TDATA"
+rm -f "$RUNTIME_STATE_CALLS"
 
 if [ "$fail" -eq 0 ]; then echo "unit_test: ALL PASS"; fi
 exit "$fail"

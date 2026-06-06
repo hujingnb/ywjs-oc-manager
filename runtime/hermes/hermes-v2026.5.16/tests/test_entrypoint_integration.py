@@ -39,15 +39,12 @@ def test_entrypoint_first_boot(tmp_path: Path) -> None:
     data_root = tmp_path / "data"
     _setup_input(input_root)
 
-    builtin_manifest = tmp_path / "skills-builtin.json"
     env = {
         **os.environ,
         "OC_TEST_NO_EXEC": "1",
         "OC_INPUT_DIR": str(input_root),
         "OC_DATA_DIR": str(data_root),
         "OC_IMAGE_VARIANT": "hermes-v2026.5.16",
-        # 重定向到临时目录，避免尝试写 /opt/skills-builtin.json（无写权限）。
-        "OC_BUILTIN_MANIFEST": str(builtin_manifest),
     }
     source_script = Path(__file__).resolve().parent.parent / "oc-entrypoint.py"
     # 测试既支持源码目录布局，也支持 Docker 镜像内的 /usr/local/bin 安装布局。
@@ -66,7 +63,7 @@ def test_entrypoint_first_boot(tmp_path: Path) -> None:
     assert state["image_variant"] == "hermes-v2026.5.16"
     assert state["last_migrate_from"] is None
 
-    # render 前生成内置 skill 清单（首次启动时 skills/ 尚无 .oc-managed 目录）
+    # render 前生成内置 skill 共享基线；首次启动时 skills/ 尚无内置目录，内容为空。
+    builtin_manifest = data_root / "skills" / ".bundled_manifest"
     assert builtin_manifest.exists()
-    builtin_data = json.loads(builtin_manifest.read_text())
-    assert "builtin" in builtin_data
+    assert builtin_manifest.read_text(encoding="utf-8") == ""

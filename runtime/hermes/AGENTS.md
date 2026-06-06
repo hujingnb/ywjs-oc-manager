@@ -49,11 +49,14 @@ Hermes app 的运行时数据根目录是 `/opt/data`。镜像更新时必须区
 | 路径 | 数据类别 | 保留要求 |
 |---|---|---|
 | `/opt/data/workspace/` | 用户工作区文件 | 保留用户上传、生成或编辑的工作成果。 |
-| `/opt/data/kanban.db` | Hermes kanban 状态 | 不得被会话快照清理误删；当前不等同于已纳入 ops S3 同步/恢复清单。 |
+| `/opt/data/cron/` | Hermes Cron 任务与运行输出 | 保留定时任务定义和可查询的历史输出。 |
+| `/opt/data/kanban.db` | Hermes kanban 状态 | 通过 SQLite 一致性快照保存；不得被会话快照清理误删。 |
 | `/opt/data/weixin/accounts/` | 渠道登录凭证 | 保留渠道绑定状态；不得写入镜像层。 |
 | `/opt/data/skills/` 中的自创 skill | 用户或 app 运行期创建的 skill | 保留自创 skill；`skills/oc-kb/` 是 renderer 输出，受当前镜像重渲染，内置或受管 skill 按 variant 契约处理。 |
+| `/opt/data/skills/.bundled_manifest` | 镜像内置 skill 基线 | 与自创 skill 一起保留，避免 pod 重建后把自创 skill 误判为内置。 |
+| `/opt/data/.oc-state.json` | variant 状态锚点 | 保留上次渲染和迁移状态，供新镜像判断是否需要 migrator。 |
 
-`sessions/` 与 `state.db*` 是可以清理的会话快照；除这些已明确分类的路径外，其他 app 运行时数据默认保留，只有在契约中显式归类后才能清理。本节定义清理保护边界，不自动表示所有路径都已由 `runtime/ops` 持久化到 S3；例如 `kanban.db` 当前仅要求不被 cleanup 误删，若未来需要随 pod 重建恢复，必须在对应功能中同步扩展 ops sync/restore 和 `runtime/ops/README.md` 的 S3 映射。
+`sessions/` 与 `state.db*` 是可以清理的会话快照；除这些已明确分类的路径外，其他 app 运行时数据默认保留，只有在契约中显式归类后才能清理。`cache/`、`logs/`、`gateway_state.json`、`gateway.lock`、`sandboxes/` 当前视为缓存、诊断或进程态数据，不纳入默认 S3 恢复闭环；未来若把其中任一路径升级为业务真相源，必须同步扩展 ops sync/restore 和 `runtime/ops/README.md` 的 S3 映射。
 
 ### 可以清理的会话快照
 
@@ -97,6 +100,7 @@ app 级运行时数据使用 `apps/<appID>/` S3 前缀。
 - `oc-sync` 在 sidecar 中运行，负责周期性同步 `/opt/data` 中需要保留的非敏感数据。
 - `oc-presync` 在 preStop hook 中运行，负责旧 pod 终止前做最后一次同步。
 - 长期记忆必须纳入 `oc-sync` 与 `oc-presync` 的上传范围，并纳入 `oc-restore` 的恢复范围。
+- Cron、kanban、`.oc-state.json` 与 `skills/.bundled_manifest` 属于非会话运行时状态，也必须纳入同步和恢复范围。
 - S3 恢复失败时应让 initContainer 失败，不得静默启动一个空记忆实例。
 - `sessions/` 与 `state.db*` 可以同步为会话快照，但不能被描述或处理为长期记忆。
 
@@ -134,6 +138,7 @@ Hermes 主容器启动顺序必须保持：
 - migrator 必须幂等，重复启动不能重复破坏数据。
 - migrator 不得删除长期记忆；需要改格式时必须保留原始语义。
 - `.oc-state.json` 是判断本地数据 variant 的状态锚点，不得随意改字段语义。
+- `skills/.bundled_manifest` 是识别镜像内置 skill 与运行期自创 skill 的状态锚点；新 variant 不得改变该文件的共享位置，除非同时迁移 ops 与 ocops 的识别逻辑。
 
 ## 测试要求
 
@@ -142,5 +147,5 @@ Hermes 主容器启动顺序必须保持：
 - renderer 不覆盖 `/opt/data/memories/`、`/opt/data/MEMORY.md`、`/opt/data/USER.md`。
 - migrator 覆盖首启、同版本启动、跨版本迁移、重复运行。
 - `ocops.server` 覆盖 manager 当前调用的 HTTP 端点。
-- ops 恢复/同步覆盖长期记忆、workspace、weixin 凭证、自创 skill、会话快照和 sqlite 快照。
+- ops 恢复/同步覆盖长期记忆、workspace、weixin 凭证、自创 skill、`skills/.bundled_manifest`、cron、kanban、variant 状态锚点、会话快照和 sqlite 快照。
 - 镜像构建阶段必须运行 variant 自检，失败不得产出生产镜像。
