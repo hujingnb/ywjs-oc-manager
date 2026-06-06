@@ -133,17 +133,38 @@ sync_longterm_memory_up() {
   done
 }
 
+# is_s3_missing_object_error 判断 aws s3 ls 单对象失败是否只是对象不存在。
+# 不存在是首启或尚未生成根级记忆的正常场景；认证、网络和服务端错误必须向上传播。
+is_s3_missing_object_error() {
+  local msg="$1"
+  case "$msg" in
+    *"NoSuchKey"*|*"404"*|*"Not Found"*|*"not found"*|*"does not exist"*)
+      return 0
+      ;;
+  esac
+  return 1
+}
+
 # restore_longterm_memory_down 从 app S3 前缀恢复 Hermes 长期记忆。
 # 根级 MEMORY.md / USER.md 仅在对象存在时下载；不存在按首启或未生成记忆处理。
 restore_longterm_memory_down() {
   local data_dir="$1"
   mkdir -p "$data_dir/memories"
   aws_s3 sync "s3://${AWS_S3_BUCKET}/${AWS_S3_PREFIX}memories/" "$data_dir/memories"
-  local file
+  local file uri ls_out ls_rc
   for file in MEMORY.md USER.md; do
-    if aws_s3 ls "s3://${AWS_S3_BUCKET}/${AWS_S3_PREFIX}${file}" >/dev/null 2>&1; then
-      aws_s3 cp "s3://${AWS_S3_BUCKET}/${AWS_S3_PREFIX}${file}" "$data_dir/$file"
+    uri="s3://${AWS_S3_BUCKET}/${AWS_S3_PREFIX}${file}"
+    if ls_out=$(aws_s3 ls "$uri" 2>&1); then
+      aws_s3 cp "$uri" "$data_dir/$file"
+      continue
+    else
+      ls_rc=$?
     fi
+    if is_s3_missing_object_error "$ls_out"; then
+      continue
+    fi
+    log "恢复长期记忆文件 ${file} 前检查 S3 对象失败: ${ls_out}"
+    return "$ls_rc"
   done
 }
 

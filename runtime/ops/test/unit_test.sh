@@ -5,7 +5,14 @@
 set -uo pipefail
 # shellcheck source=/usr/local/bin/oc-lib.sh
 # shellcheck disable=SC1091
-source /usr/local/bin/oc-lib.sh
+# 单测既可在 ops 镜像内跑（/usr/local/bin/oc-lib.sh），也可在仓库根目录直接跑。
+# 直接运行时回退到相邻的 runtime/ops/bin/oc-lib.sh，便于本地验证 shell helper。
+SCRIPT_DIR=$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)
+OC_LIB_UNDER_TEST="${OC_LIB_UNDER_TEST:-/usr/local/bin/oc-lib.sh}"
+if [ ! -f "$OC_LIB_UNDER_TEST" ]; then
+  OC_LIB_UNDER_TEST="$SCRIPT_DIR/../bin/oc-lib.sh"
+fi
+source "$OC_LIB_UNDER_TEST"
 # oc-lib.sh 顶部的 set -e 会被 source 带入本 shell；显式关掉以收集多个断言失败而非首个即退出。
 set +e
 
@@ -99,6 +106,81 @@ assert_eq "$ACTUAL_PATH" "$EXPECTED_PATH" "sync_user_skills_up 调 aws_s3 的本
 # 清理临时目录
 rm -rf "$TDATA" "$TBUNDLED"
 rm -f /tmp/aws_s3_calls.txt
+
+# ── restore_longterm_memory_down 根级记忆文件恢复：区分缺失对象与真实 S3 故障 ──
+#
+# mock aws_s3：sync 总是成功；ls 根据 RESTORE_MEMORY_MODE 模拟三类结果；
+# cp 只记录调用，不实际下载，避免依赖真实 S3。
+aws_s3() {
+  printf '%s\n' "$*" >> "$RESTORE_MEMORY_CALLS"
+  case "$1" in
+    sync)
+      return 0
+      ;;
+    ls)
+      case "$RESTORE_MEMORY_MODE:$2" in
+        missing:*)
+          printf 'fatal error: An error occurred (404) when calling the HeadObject operation: Not Found\n' >&2
+          return 1
+          ;;
+        failure:*)
+          printf 'fatal error: An error occurred (AccessDenied) when calling the HeadObject operation: denied\n' >&2
+          return 1
+          ;;
+        memory_exists:*MEMORY.md)
+          return 0
+          ;;
+        memory_exists:*)
+          printf 'fatal error: An error occurred (NoSuchKey) when calling the HeadObject operation: Key does not exist\n' >&2
+          return 1
+          ;;
+      esac
+      ;;
+    cp)
+      return 0
+      ;;
+  esac
+  printf 'unexpected aws_s3 call: %s\n' "$*" >&2
+  return 2
+}
+
+export AWS_S3_BUCKET="test-bucket"
+export AWS_S3_PREFIX="apps/test/"
+
+# 根级记忆文件缺失属于首启/未生成记忆场景，应跳过并整体成功。
+RESTORE_MEMORY_CALLS=$(mktemp)
+RESTORE_MEMORY_MODE="missing"
+TDATA=$(mktemp -d)
+restore_longterm_memory_down "$TDATA"
+RC=$?
+assert_eq "$RC" "0" "restore_longterm_memory_down 应跳过缺失的根级记忆文件"
+if grep -q '^cp ' "$RESTORE_MEMORY_CALLS"; then echo "FAIL: 缺失根级记忆文件时不应调用 cp"; fail=1; fi
+rm -rf "$TDATA"
+rm -f "$RESTORE_MEMORY_CALLS"
+
+# 非缺失类 ls 错误代表认证、网络或服务端故障，应返回非零让 oc-restore 失败。
+RESTORE_MEMORY_CALLS=$(mktemp)
+RESTORE_MEMORY_LOG=$(mktemp)
+RESTORE_MEMORY_MODE="failure"
+TDATA=$(mktemp -d)
+restore_longterm_memory_down "$TDATA" 2>"$RESTORE_MEMORY_LOG"
+RC=$?
+if [ "$RC" -eq 0 ]; then echo "FAIL: restore_longterm_memory_down 遇到真实 S3 ls 故障应返回非零"; fail=1; fi
+if grep -q '^cp ' "$RESTORE_MEMORY_CALLS"; then echo "FAIL: 真实 S3 ls 故障时不应继续调用 cp"; fail=1; fi
+rm -rf "$TDATA"
+rm -f "$RESTORE_MEMORY_CALLS" "$RESTORE_MEMORY_LOG"
+
+# MEMORY.md 存在时应执行 cp；USER.md 缺失时仍应按可选根级文件跳过。
+RESTORE_MEMORY_CALLS=$(mktemp)
+RESTORE_MEMORY_MODE="memory_exists"
+TDATA=$(mktemp -d)
+restore_longterm_memory_down "$TDATA"
+RC=$?
+assert_eq "$RC" "0" "restore_longterm_memory_down 应恢复存在的根级记忆文件"
+if ! grep -q '^cp s3://test-bucket/apps/test/MEMORY.md ' "$RESTORE_MEMORY_CALLS"; then echo "FAIL: MEMORY.md 存在时应调用 cp"; fail=1; fi
+if grep -q '^cp s3://test-bucket/apps/test/USER.md ' "$RESTORE_MEMORY_CALLS"; then echo "FAIL: USER.md 缺失时不应调用 cp"; fail=1; fi
+rm -rf "$TDATA"
+rm -f "$RESTORE_MEMORY_CALLS"
 
 if [ "$fail" -eq 0 ]; then echo "unit_test: ALL PASS"; fi
 exit "$fail"

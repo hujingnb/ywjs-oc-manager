@@ -50,7 +50,7 @@ run_once() {
 }
 
 if [ "${OC_SYNC_ONCE:-0}" = "1" ]; then
-  # 测试模式：跑一轮并强制做一次 sessions 同步与 sqlite 备份，便于断言。
+  # 测试模式：跑一轮完整持久化同步，并强制做一次 sqlite 备份，便于断言。
   ensure_creds
   sync_workspace_up "$DATA_DIR"
   sync_sessions_up "$DATA_DIR"

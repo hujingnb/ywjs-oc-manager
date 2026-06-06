@@ -114,7 +114,7 @@ initContainers:
 3. 将 `manifest_yaml` / `persona` / `platform_rule` 写入 `/opt/oc-input`（见 §6.1）。
 4. 按 `skills[].rel_path` + `skills[].url` 下载各 skill tar（见 §6.2）。
 5. 将 `s3_write` STS 凭证写入 `~/.aws/credentials ocsync` profile；从 `s3_write` 解析 S3 参数。
-6. `aws s3 sync` 恢复 `apps/<id>/workspace/`、`apps/<id>/sessions/`、`apps/<id>/weixin/`、`apps/<id>/memories/` 到 `/opt/data`，并按对象存在性恢复 `MEMORY.md` / `USER.md`（见 §6.3）。
+6. `aws s3 sync` 恢复 `apps/<id>/workspace/`、`apps/<id>/sessions/`、`apps/<id>/weixin/`、`apps/<id>/memories/`、`apps/<id>/skills/` 到 `/opt/data`，并按对象存在性恢复 `MEMORY.md` / `USER.md`（见 §6.3）。
 7. 若 `apps/<id>/state.db` 存在则 `aws s3 cp` 下载，并清除本地 `-wal`/`-shm` 边车（见 §6.3）。
 
 initContainer 完成后，hermes 主容器才会启动。
@@ -179,7 +179,7 @@ for skill in response.skills[]:
 
 ### 6.3 app 数据：STS 凭证 + aws s3 sync/cp
 
-`workspace/`、`sessions/`、长期记忆与 `state.db` 均在 S3 的 `apps/<id>/` 前缀内，bootstrap 的 `s3_write` STS 凭证可读写该前缀。
+`workspace/`、`sessions/`、`weixin/`、长期记忆、自创 `skills/` 与 `state.db` 均在 S3 的 `apps/<id>/` 前缀内，bootstrap 的 `s3_write` STS 凭证可读写该前缀。
 
 **恢复（oc-restore）**：
 
@@ -187,8 +187,10 @@ for skill in response.skills[]:
 |---|---|---|---|
 | workspace 目录树 | `apps/<id>/workspace/` | `/opt/data/workspace/` | `aws s3 sync`（增量下载） |
 | sessions 目录树 | `apps/<id>/sessions/` | `/opt/data/sessions/` | `aws s3 sync`（增量下载） |
+| weixin 凭证目录 | `apps/<id>/weixin/` | `/opt/data/weixin/` | `aws s3 sync`（增量下载） |
 | 长期记忆目录 | `apps/<id>/memories/` | `/opt/data/memories/` | `aws s3 sync`（增量下载） |
 | 长期记忆文件 | `apps/<id>/MEMORY.md` / `apps/<id>/USER.md` | `/opt/data/MEMORY.md` / `/opt/data/USER.md` | 对象存在时 `aws s3 cp` |
+| 自创 skill 目录 | `apps/<id>/skills/` | `/opt/data/skills/` | `aws s3 sync`（增量下载） |
 | sqlite 状态库 | `apps/<id>/state.db` | `/opt/data/state.db` | `aws s3 cp`（单文件下载）+ 清 `-wal`/`-shm` |
 
 首启时 `apps/<id>/` 前缀为空：`aws s3 sync` 返回 0（空操作），`state.db` 不存在则跳过——行为完全幂等。
@@ -199,11 +201,13 @@ for skill in response.skills[]:
 |---|---|---|---|
 | workspace 目录树 | `apps/<id>/workspace/` | `/opt/data/workspace/` | `aws s3 sync`，排除 `node_modules/*`、`.git/*`、`*.tmp` |
 | sessions 目录树 | `apps/<id>/sessions/` | `/opt/data/sessions/` | `aws s3 sync`，无 `--delete`，无额外排除 |
+| weixin 凭证目录 | `apps/<id>/weixin/` | `/opt/data/weixin/` | `aws s3 sync`，无 `--delete` |
 | 长期记忆目录 | `apps/<id>/memories/` | `/opt/data/memories/` | `aws s3 sync`，无 `--delete` |
 | 长期记忆文件 | `apps/<id>/MEMORY.md` / `apps/<id>/USER.md` | `/opt/data/MEMORY.md` / `/opt/data/USER.md` | 文件存在时 `aws s3 cp` |
+| 自创 skill 目录 | `apps/<id>/skills/` | `/opt/data/skills/` | `oc-sync` 对用户自创 skill 执行 `aws s3 sync`，无 `--delete` |
 | sqlite 状态库 | `apps/<id>/state.db` | 临时文件（`mktemp`）→ 上传后删除 | `sqlite3 .backup`（一致性快照）+ `aws s3 cp` |
 
-> **无 `--delete`**：workspace 同步**故意不加** `--delete`，避免将本地临时删除传播到 S3 持久存储，防止误删历史数据。
+> **无 `--delete`**：workspace、sessions、weixin、memories 和自创 skill 同步均故意不加 `--delete`；根级 `MEMORY.md` / `USER.md` 只在本地文件存在时覆盖上传，不传播删除，避免误删持久数据。
 
 ### 6.4 STS 凭证续期
 
