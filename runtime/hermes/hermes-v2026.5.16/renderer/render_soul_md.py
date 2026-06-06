@@ -19,9 +19,6 @@ from lib.manifest import Manifest
 HEADER = (
     "# Agent Identity (SOUL.md)\n\n"
     "本文件由 oc-entrypoint 在容器启动时生成，Hermes 启动后注入 system prompt。\n\n"
-    "## 语言要求\n\n"
-    "始终用简体中文回复用户。即使用户用英文或其他语言提问，也请用中文作答\n"
-    "（代码、命令、API 名称、错误码等技术标识保留英文原文）。\n\n"
 )
 
 # 知识库使用指引。采用「强制优先知识库」语气：Hermes 容器内置上百个 skill，
