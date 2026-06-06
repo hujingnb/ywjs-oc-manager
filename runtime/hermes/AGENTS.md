@@ -6,6 +6,7 @@
 ## 基本原则
 
 - 每个 Hermes variant 必须自包含：镜像构建、入口脚本、renderer、migrator、ocops 能力、测试和版本契约都放在自己的 variant 目录内。
+- 当前构建流程会把共享 `kanban-contract` 和 `cron-contract` 契约注入镜像；自包含要求最终镜像包含运行所需文件，不要求 variant 源目录物理 vendoring 这些共享契约。
 - 不复用 `main`、`master`、`latest`、`dev` 等浮动上游 ref 作为生产镜像来源；生产镜像必须能追溯到固定 Hermes ref、variant 版本和 manager 源码 commit。
 - 不把 app 运行时数据写进镜像层；镜像只提供代码、工具、默认模板和内置能力。
 - 不在 renderer 中覆盖 Hermes 长期记忆；长期记忆由 Hermes 进程或其 memory/user_profile 能力维护。
@@ -40,6 +41,19 @@ Hermes app 的运行时数据根目录是 `/opt/data`。镜像更新时必须区
 - `/opt/data/USER.md`
 
 这些路径不存在时视为首启或尚未产生长期记忆，不应阻塞启动。
+
+### 默认保留的 app 运行时数据
+
+除长期记忆外，以下路径也是 app 运行过程中产生的非会话数据。除非后续契约明确把某类路径归入可清理数据，否则应按保留优先处理，不得被镜像升级或新 session 清理误删：
+
+| 路径 | 数据类别 | 保留要求 |
+|---|---|---|
+| `/opt/data/workspace/` | 用户工作区文件 | 保留用户上传、生成或编辑的工作成果。 |
+| `/opt/data/kanban.db` | Hermes kanban 状态 | 保留任务板、任务和运行状态。 |
+| `/opt/data/weixin/accounts/` | 渠道登录凭证 | 保留渠道绑定状态；不得写入镜像层。 |
+| `/opt/data/skills/` 中的自创 skill | 用户或 app 运行期创建的 skill | 保留自创 skill；`skills/oc-kb/` 是 renderer 输出，受当前镜像重渲染，内置或受管 skill 按 variant 契约处理。 |
+
+`sessions/` 与 `state.db*` 是可以清理的会话快照；除这些已明确分类的路径外，其他 app 运行时数据默认保留，只有在契约中显式归类后才能清理。
 
 ### 可以清理的会话快照
 
