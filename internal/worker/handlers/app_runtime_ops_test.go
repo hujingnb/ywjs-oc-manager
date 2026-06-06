@@ -225,6 +225,10 @@ func TestAppRestartContainerHandler_ImageUnchanged_DeletesSessionsThenScales(t *
 	// S3 sessions 和 state.db 被删除。
 	require.True(t, objects.deletedSessionsPrefix, "重启时必须清除 S3 sessions")
 	require.True(t, objects.deletedStateDB, "重启时必须清除 S3 state.db")
+	// 长期记忆不属于会话快照清理范围，避免重启或镜像更新误删稳定偏好与用户画像。
+	assert.NotContains(t, objects.deletedPrefixes, storage.AppPrefix(testAppID)+"memories/")
+	assert.NotContains(t, objects.deletedPrefixes, storage.AppPrefix(testAppID)+"MEMORY.md")
+	assert.NotContains(t, objects.deletedPrefixes, storage.AppPrefix(testAppID)+"USER.md")
 	// Scale(0) 然后 Scale(1)：重建 pod。
 	require.Equal(t, 2, orch.scaleCalls)
 	require.Equal(t, int32(0), orch.scaleHistory[0])
