@@ -1,0 +1,17 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "title": "ocops Cron Output Query",
+  "type": "object",
+  "required": ["file"],
+  "properties": {
+    "file": {
+      "type": "string",
+      "minLength": 1,
+      "not": {
+        "enum": [".", ".."]
+      },
+      "pattern": "^(?:__scheduler_metadata__\\.md|[^/\\\\]+\\.md)$"
+    }
+  },
+  "additionalProperties": false
+}

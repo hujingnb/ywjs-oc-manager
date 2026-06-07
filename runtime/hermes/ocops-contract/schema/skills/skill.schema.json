@@ -1,0 +1,13 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "title": "ocops Skill",
+  "type": "object",
+  "required": ["name", "managed", "builtin", "description"],
+  "properties": {
+    "name": { "type": "string" },
+    "managed": { "type": "boolean" },
+    "builtin": { "type": "boolean" },
+    "description": { "type": "string" }
+  },
+  "additionalProperties": false
+}

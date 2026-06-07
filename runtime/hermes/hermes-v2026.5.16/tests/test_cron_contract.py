@@ -14,9 +14,20 @@ import subprocess
 from pathlib import Path
 
 import pytest
+from jsonschema import validate
 
 from ocops import cron
 from ocops.cron import CronError
+
+# 契约 schema 既支持镜像内安装路径，也支持源码目录下的 canonical 路径。
+IMAGE_SCHEMA_DIR = Path("/usr/local/lib/ocops/contract/schema/cron")
+SOURCE_SCHEMA_DIR = Path(__file__).resolve().parents[2] / "ocops-contract" / "schema" / "cron"
+SCHEMA_DIR = IMAGE_SCHEMA_DIR if IMAGE_SCHEMA_DIR.exists() else SOURCE_SCHEMA_DIR
+
+
+def _load_schema(name: str) -> dict:
+    """加载并返回一个 cron domain schema。"""
+    return json.loads((SCHEMA_DIR / name).read_text(encoding="utf-8"))
 
 
 def write_jobs_file(home: Path, jobs: list[dict]) -> None:
@@ -63,6 +74,7 @@ def read_hermes_args(home: Path) -> list[str]:
 def test_run_capabilities_returns_contract_metadata(tmp_path: Path, monkeypatch) -> None:
     monkeypatch.setenv("HERMES_HOME", str(tmp_path))
     data = cron.run_capabilities()
+    validate(data, _load_schema("capabilities.schema.json"))
     assert data["contract_version"] == "1.0"
     assert "list" in data["verbs"]
     assert data["features"]["history"] is True
@@ -102,6 +114,7 @@ def test_run_status_summarizes_jobs_json(tmp_path: Path, monkeypatch) -> None:
         "next_run_at": "2026-05-21T09:00:00+00:00",
     }])
     data = cron.run_status()
+    validate(data, _load_schema("status.schema.json"))
     assert data["active_jobs"] == 1
     assert data["next_job_id"] == "abc123"
     assert data["gateway_running"] is False
@@ -123,6 +136,8 @@ def test_run_list_normalizes_jobs_json(tmp_path: Path, monkeypatch) -> None:
         "deliver": "local",
     }])
     jobs = cron.run_list(True)
+    for job in jobs:
+        validate(job, _load_schema("job.schema.json"))
     assert jobs[0]["id"] == "abc123"
     assert jobs[0]["schedule"]["display"] == "0 9 * * *"
 

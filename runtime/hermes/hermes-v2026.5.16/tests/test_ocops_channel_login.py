@@ -4,9 +4,10 @@ import sys
 import types
 
 import pytest
+from jsonschema import validate
 
 
-def test_login_unknown_channel_yields_failed():
+def test_login_unknown_channel_yields_failed(ocops_schema):
     # 异常路径：未知 channel 直接 yield failed 事件并结束
     from ocops.channel import channel_login
 
@@ -14,6 +15,8 @@ def test_login_unknown_channel_yields_failed():
         return [e async for e in channel_login("telegram")]
 
     events = asyncio.run(collect())
+    for event in events:
+        validate(event, ocops_schema("channel/login-event.schema.json"))
     assert events == [{"event": "failed", "reason": "unknown channel: telegram"}]
 
 
@@ -46,7 +49,7 @@ def _install_fake_weixin(monkeypatch, qr_login):
     monkeypatch.setitem(sys.modules, "gateway.platforms.weixin", weixin)
 
 
-def test_login_qrcode_then_bound(monkeypatch):
+def test_login_qrcode_then_bound(monkeypatch, ocops_schema):
     # 正常路径：qr_login 在中途 print 二维码 URL 后返回 cred(truthy)
     # → 事件序列应为先 qrcode（url 与 print 行一致）后 bound
     from ocops import channel
@@ -64,6 +67,8 @@ def test_login_qrcode_then_bound(monkeypatch):
         return [e async for e in channel.channel_login("weixin")]
 
     events = asyncio.run(collect())
+    for event in events:
+        validate(event, ocops_schema("channel/login-event.schema.json"))
     assert events == [
         {"event": "qrcode", "url": "https://liteapp.weixin.qq.com/q/abc?qrcode=tok&bot_type=3"},
         {"event": "bound"},

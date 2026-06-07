@@ -1,0 +1,34 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "title": "ocops Cron Update Body",
+  "type": "object",
+  "properties": {
+    "name": { "type": ["string", "null"], "maxLength": 200 },
+    "schedule": { "type": ["string", "null"], "maxLength": 200 },
+    "prompt": { "type": ["string", "null"], "maxLength": 5000 },
+    "deliver": { "type": ["string", "null"], "maxLength": 512 },
+    "repeat": { "type": ["integer", "null"], "minimum": 1 },
+    "script": {
+      "anyOf": [
+        { "type": "null" },
+        {
+          "type": "string",
+          "maxLength": 512,
+          "not": { "pattern": "(^/|(^|/)\\.\\.(/|$))" }
+        }
+      ]
+    },
+    "no_agent": { "type": "boolean" },
+    "agent": { "type": "boolean" },
+    "workdir": { "type": ["string", "null"], "maxLength": 512 },
+    "skills": {
+      "type": "array",
+      "items": { "type": "string" }
+    },
+    "clear_skills": { "type": "boolean" },
+    "model": { "type": ["string", "null"] },
+    "provider": { "type": ["string", "null"] },
+    "base_url": { "type": ["string", "null"] }
+  },
+  "additionalProperties": false
+}

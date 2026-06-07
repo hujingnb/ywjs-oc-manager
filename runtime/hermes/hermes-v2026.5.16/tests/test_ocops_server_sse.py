@@ -9,6 +9,7 @@ import json
 import sys
 import types
 
+from jsonschema import validate
 from starlette.testclient import TestClient
 
 
@@ -60,7 +61,7 @@ def _install_fake_weixin(monkeypatch, qr_login):
     monkeypatch.setitem(sys.modules, "gateway.platforms.weixin", weixin)
 
 
-def test_login_sse_qrcode_then_bound(monkeypatch):
+def test_login_sse_qrcode_then_bound(monkeypatch, ocops_schema):
     # 正常路径：qr_login 中途 print 二维码 URL 后返回 cred(truthy)
     # → SSE data 帧依次为 qrcode（url 与 print 行一致）与 bound
     import asyncio
@@ -78,6 +79,8 @@ def test_login_sse_qrcode_then_bound(monkeypatch):
     assert r.status_code == 200
     assert r.headers["content-type"].startswith("text/event-stream")
     frames = _parse_sse(r.text)
+    for frame in frames:
+        validate(frame["data"], ocops_schema("channel/login-event.schema.json"))
     # 两帧 data：qrcode（含 url）与 bound，且无 event: 名（普通 data 帧）。
     assert frames == [
         {"event": None, "data": {"event": "qrcode",
@@ -86,25 +89,26 @@ def test_login_sse_qrcode_then_bound(monkeypatch):
     ]
 
 
-def test_login_sse_unknown_channel_failed(monkeypatch):
+def test_login_sse_unknown_channel_failed(monkeypatch, ocops_schema):
     # 异常路径：未知 channel → 单条 failed data 帧（async generator 内部降级，不抛）
     c = _client(monkeypatch)
     r = c.post("/oc/channels/telegram/login", headers=_AUTH)
     assert r.status_code == 200
     frames = _parse_sse(r.text)
+    validate(frames[0]["data"], ocops_schema("channel/login-event.schema.json"))
     assert frames == [{"event": None,
                        "data": {"event": "failed", "reason": "unknown channel: telegram"}}]
 
 
-def test_watch_sse_two_events(monkeypatch):
+def test_watch_sse_two_events(monkeypatch, ocops_schema):
     # 正常路径：watch_events 同步 generator yield 两个 Event dict
     # → SSE 应收到两条对应 data 帧（线程池迭代不丢事件、保持顺序）
     from ocops import kanban
 
     def fake_watch_events(board):
         # 模拟两条契约事件；server 用 anyio.to_thread 在线程池逐条迭代。
-        yield {"type": "task.created", "board": board, "id": "t1"}
-        yield {"type": "task.updated", "board": board, "id": "t1"}
+        yield {"task_id": "t1", "kind": "task.created", "payload": {"board": board}, "created_at": 1, "run_id": None}
+        yield {"task_id": "t1", "kind": "task.updated", "payload": {"board": board}, "created_at": 2, "run_id": None}
 
     monkeypatch.setattr(kanban, "watch_events", fake_watch_events)
     c = _client(monkeypatch)
@@ -112,13 +116,17 @@ def test_watch_sse_two_events(monkeypatch):
     assert r.status_code == 200
     assert r.headers["content-type"].startswith("text/event-stream")
     frames = _parse_sse(r.text)
+    for frame in frames:
+        validate(frame["data"], ocops_schema("kanban/event.schema.json"))
     assert frames == [
-        {"event": None, "data": {"type": "task.created", "board": "default", "id": "t1"}},
-        {"event": None, "data": {"type": "task.updated", "board": "default", "id": "t1"}},
+        {"event": None, "data": {"task_id": "t1", "kind": "task.created",
+                                  "payload": {"board": "default"}, "created_at": 1, "run_id": None}},
+        {"event": None, "data": {"task_id": "t1", "kind": "task.updated",
+                                  "payload": {"board": "default"}, "created_at": 2, "run_id": None}},
     ]
 
 
-def test_watch_sse_kanban_error_emits_error_frame(monkeypatch):
+def test_watch_sse_kanban_error_emits_error_frame(monkeypatch, ocops_schema):
     # 异常路径：watch_events 启动即抛 KanbanError（OpsError 子类）
     # → server 应发 `event: error` 帧，data 含 code/message，而非中断连接
     from ocops import kanban
@@ -137,6 +145,7 @@ def test_watch_sse_kanban_error_emits_error_frame(monkeypatch):
     # 单条 error 帧：event 名为 error，data 体携带契约 code 与 message。
     assert len(frames) == 1
     assert frames[0]["event"] == "error"
+    validate(frames[0]["data"], ocops_schema("common/error.schema.json"))
     assert frames[0]["data"]["code"] == "UNSUPPORTED"
     assert frames[0]["data"]["message"] == "此镜像不含真实 hermes"
 

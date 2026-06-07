@@ -263,11 +263,9 @@ web-build: ## 在 web/ 跑 vite build
 
 ##@ Hermes runtime 镜像
 
-hermes-inject-contract: .guard-hermes-version ## 把 HERMES_VARIANT 指定变体的契约工件注入目录
-	rm -rf $(HERMES_VARIANT_DIR)/kanban-contract
-	cp -r runtime/hermes/kanban-contract $(HERMES_VARIANT_DIR)/kanban-contract
-	rm -rf $(HERMES_VARIANT_DIR)/cron-contract
-	cp -r runtime/hermes/cron-contract $(HERMES_VARIANT_DIR)/cron-contract
+hermes-inject-contract: .guard-hermes-version ## 把 HERMES_VARIANT 指定变体的 ocops 契约工件注入目录
+	rm -rf $(HERMES_VARIANT_DIR)/ocops-contract $(HERMES_VARIANT_DIR)/kanban-contract $(HERMES_VARIANT_DIR)/cron-contract
+	cp -r runtime/hermes/ocops-contract $(HERMES_VARIANT_DIR)/ocops-contract
 
 build-hermes-runtime: hermes-inject-contract ## 本地 dev 构建 hermes runtime（需 HERMES_VARIANT 指定变体）
 	status=0; \
@@ -277,7 +275,7 @@ build-hermes-runtime: hermes-inject-contract ## 本地 dev 构建 hermes runtime
 	  --build-arg "OC_IMAGE_VARIANT=$(HERMES_VARIANT)" \
 	  --build-arg OC_BUILD_TS=$(IMAGE_TIMESTAMP) \
 	  $(HERMES_VARIANT_DIR) || status=$$?; \
-	rm -rf $(HERMES_VARIANT_DIR)/kanban-contract $(HERMES_VARIANT_DIR)/cron-contract; \
+	rm -rf $(HERMES_VARIANT_DIR)/ocops-contract $(HERMES_VARIANT_DIR)/kanban-contract $(HERMES_VARIANT_DIR)/cron-contract; \
 	exit $$status
 
 ##@ 镜像构建发布
@@ -313,7 +311,7 @@ build-hermes-image: .guard-image-git-state .guard-hermes-version hermes-inject-c
 	  --build-arg "OC_IMAGE_VARIANT=$(HERMES_VARIANT)" \
 	  --build-arg OC_BUILD_TS=$(IMAGE_TIMESTAMP) \
 	  $(HERMES_VARIANT_DIR) || status=$$?; \
-	rm -rf $(HERMES_VARIANT_DIR)/kanban-contract $(HERMES_VARIANT_DIR)/cron-contract; \
+	rm -rf $(HERMES_VARIANT_DIR)/ocops-contract $(HERMES_VARIANT_DIR)/kanban-contract $(HERMES_VARIANT_DIR)/cron-contract; \
 	if [ $$status -ne 0 ]; then exit $$status; fi; \
 	docker push "$(HERMES_IMAGE)"
 	@echo "✅ hermes 镜像 $(HERMES_IMAGE) 已构建并推送"

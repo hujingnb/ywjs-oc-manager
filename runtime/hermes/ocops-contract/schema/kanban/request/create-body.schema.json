@@ -1,0 +1,21 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "title": "ocops Kanban Create Body",
+  "type": "object",
+  "required": ["board", "title", "assignee"],
+  "properties": {
+    "board": { "type": "string", "minLength": 1 },
+    "title": { "type": "string", "minLength": 1 },
+    "assignee": { "type": "string", "minLength": 1 },
+    "priority": { "type": "integer" },
+    "body": { "type": ["string", "null"] },
+    "skills": {
+      "type": "array",
+      "items": { "type": "string" }
+    },
+    "workspace": { "type": ["string", "null"] },
+    "parent": { "type": ["string", "null"] },
+    "max_retries": { "type": ["integer", "null"], "minimum": 0 }
+  },
+  "additionalProperties": false
+}

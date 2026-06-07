@@ -14,6 +14,7 @@ import zipfile
 from pathlib import Path
 
 import pytest
+from jsonschema import validate
 from starlette.testclient import TestClient
 
 
@@ -68,7 +69,7 @@ def _make_zip(filename: str = "skill.zip", inner: str = "main.py") -> bytes:
 # GET /oc/skills
 # ---------------------------------------------------------------------------
 
-def test_skills_list_managed_and_builtin(monkeypatch, tmp_path):
+def test_skills_list_managed_and_builtin(monkeypatch, tmp_path, ocops_schema):
     """list 端点：含 .oc-managed 目录 managed=True，出现在 .bundled_manifest 中的 builtin=True。
 
     构造两个含 SKILL.md 的 skill 目录：skill-a（带 .oc-managed，出现在内置基线）、skill-b（普通目录）；
@@ -98,6 +99,7 @@ def test_skills_list_managed_and_builtin(monkeypatch, tmp_path):
     r = c.get("/oc/skills", headers=_auth())
     assert r.status_code == 200
     body = r.json()
+    validate(body, ocops_schema("skills/list.schema.json"))
     # 返回体必须含 skills 列表
     assert "skills" in body
     by_name = {s["name"]: s for s in body["skills"]}
@@ -113,21 +115,23 @@ def test_skills_list_managed_and_builtin(monkeypatch, tmp_path):
     assert "skill-b" in by_name and "skill-b-canonical" not in by_name
 
 
-def test_skills_list_empty_dir(monkeypatch, tmp_path):
+def test_skills_list_empty_dir(monkeypatch, tmp_path, ocops_schema):
     """list 端点：SKILLS_DIR 为空目录时返回空 skills 列表。"""
     # 使用 _client 确保 OC_OPS_TOKEN 已设置并指向 tmp SKILLS_DIR
     c = _client(monkeypatch, tmp_path)
     r = c.get("/oc/skills", headers=_auth())
     assert r.status_code == 200
+    validate(r.json(), ocops_schema("skills/list.schema.json"))
     # 目录为空，返回 skills 为空列表
     assert r.json() == {"skills": []}
 
 
-def test_skills_list_requires_auth(monkeypatch, tmp_path):
+def test_skills_list_requires_auth(monkeypatch, tmp_path, ocops_schema):
     """list 端点：不带 Authorization 头 → 401 UNAUTHORIZED。"""
     c = _client(monkeypatch, tmp_path)
     r = c.get("/oc/skills")
     assert r.status_code == 401
+    validate(r.json(), ocops_schema("common/error.schema.json"))
     assert r.json()["code"] == "UNAUTHORIZED"
 
 
@@ -135,7 +139,7 @@ def test_skills_list_requires_auth(monkeypatch, tmp_path):
 # POST /oc/skills（install）
 # ---------------------------------------------------------------------------
 
-def test_skills_install_zip(monkeypatch, tmp_path):
+def test_skills_install_zip(monkeypatch, tmp_path, ocops_schema):
     """install 端点：上传合法 zip 归档 → 200，目标目录及 .oc-managed 出现。
 
     multipart form-data 包含 name 字段与 archive 文件字段。
@@ -151,6 +155,7 @@ def test_skills_install_zip(monkeypatch, tmp_path):
     )
     assert r.status_code == 200
     body = r.json()
+    validate(body, ocops_schema("skills/action.schema.json"))
     # 返回体必须含 name 字段
     assert body.get("name") == "my-skill"
     # skills 目录下应出现 my-skill/ 目录及 .oc-managed 标记
@@ -212,7 +217,7 @@ def test_skills_install_missing_archive(monkeypatch, tmp_path):
     assert r.status_code == 400
 
 
-def test_skills_install_invalid_name(monkeypatch, tmp_path):
+def test_skills_install_invalid_name(monkeypatch, tmp_path, ocops_schema):
     """install 端点：name 含路径分隔符 → _validate_name 拒绝 → 400 BAD_REQUEST。"""
     c = _client(monkeypatch, tmp_path)
     zip_bytes = _make_zip()
@@ -224,6 +229,7 @@ def test_skills_install_invalid_name(monkeypatch, tmp_path):
     )
     # _validate_name 检查 "/" → OpsError(BAD_REQUEST) → HTTP 400
     assert r.status_code == 400
+    validate(r.json(), ocops_schema("common/error.schema.json"))
     assert r.json()["code"] == "BAD_REQUEST"
 
 
@@ -255,7 +261,7 @@ def test_skills_install_idempotent(monkeypatch, tmp_path):
 # DELETE /oc/skills/{name}
 # ---------------------------------------------------------------------------
 
-def test_skills_delete_existing(monkeypatch, tmp_path):
+def test_skills_delete_existing(monkeypatch, tmp_path, ocops_schema):
     """delete 端点：删除已存在的 skill 目录 → 200，目录消失。"""
     c = _client(monkeypatch, tmp_path)
     import ocops.skills as skills_mod
@@ -268,6 +274,7 @@ def test_skills_delete_existing(monkeypatch, tmp_path):
     assert r.status_code == 200
     # 目录应已被删除
     assert not skill_dir.exists()
+    validate(r.json(), ocops_schema("skills/action.schema.json"))
     assert r.json().get("name") == "to-delete"
 
 
@@ -300,7 +307,7 @@ def test_skills_delete_invalid_name(monkeypatch, tmp_path):
 # POST /oc/skills/reload
 # ---------------------------------------------------------------------------
 
-def test_skills_reload_returns_mocked_result(monkeypatch, tmp_path):
+def test_skills_reload_returns_mocked_result(monkeypatch, tmp_path, ocops_schema):
     """reload 端点：monkeypatch reload_skills 返回假结果，验证 200 + 结果透传。
 
     避免真连容器内 127.0.0.1:8642，只测 handler 是否正确调用并透传结果。
@@ -314,6 +321,7 @@ def test_skills_reload_returns_mocked_result(monkeypatch, tmp_path):
     r = c.post("/oc/skills/reload", headers=_auth())
     assert r.status_code == 200
     body = r.json()
+    validate(body, ocops_schema("skills/reload.schema.json"))
     # handler 应透传 reload_skills 返回的全部字段
     assert body.get("added") == ["new-skill"]
     assert body.get("total") == 3

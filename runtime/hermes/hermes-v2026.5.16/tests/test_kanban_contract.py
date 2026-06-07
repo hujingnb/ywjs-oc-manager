@@ -4,7 +4,7 @@
 （dict/list）或抛出的 KanbanError，而非经由 oc-kanban.py CLI 解析 stdout 信封。
 hermes 调用通过 monkeypatch ocops.kanban.run_hermes / has_real_hermes 打桩，
 避免依赖本机真实 hermes；watch_events 用 tmp_path 下的假 hermes 脚本 + PATH
-注入验证逐条 yield 契约 Event。返回数据仍用 kanban-contract/schema 校验形状。
+注入验证逐条 yield 契约 Event。返回数据仍用 ocops-contract/schema/kanban 校验形状。
 """
 
 from __future__ import annotations
@@ -22,8 +22,8 @@ from ocops import kanban
 from ocops.kanban import KanbanError
 
 # 契约 schema 既支持镜像内安装路径，也支持源码目录下的 canonical 路径。
-IMAGE_SCHEMA_DIR = Path("/usr/local/lib/oc-kanban/contract/schema")
-SOURCE_SCHEMA_DIR = Path(__file__).resolve().parents[2] / "kanban-contract" / "schema"
+IMAGE_SCHEMA_DIR = Path("/usr/local/lib/ocops/contract/schema/kanban")
+SOURCE_SCHEMA_DIR = Path(__file__).resolve().parents[2] / "ocops-contract" / "schema" / "kanban"
 SCHEMA_DIR = IMAGE_SCHEMA_DIR if IMAGE_SCHEMA_DIR.exists() else SOURCE_SCHEMA_DIR
 
 

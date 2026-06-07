@@ -6,7 +6,7 @@
 ## 基本原则
 
 - 每个 Hermes variant 必须自包含：镜像构建、入口脚本、renderer、migrator、ocops 能力、测试和版本契约都放在自己的 variant 目录内。
-- 当前构建流程会把共享 `kanban-contract` 和 `cron-contract` 契约注入镜像；自包含要求最终镜像包含运行所需文件，不要求 variant 源目录物理 vendoring 这些共享契约。
+- 当前构建流程会把共享 `ocops-contract` 契约注入镜像；自包含要求最终镜像包含运行所需文件，不要求 variant 源目录物理 vendoring 这些共享契约。
 - 不复用 `main`、`master`、`latest`、`dev` 等浮动上游 ref 作为生产镜像来源；生产镜像必须能追溯到固定 Hermes ref、variant 版本和 manager 源码 commit。
 - 不把 app 运行时数据写进镜像层；镜像只提供代码、工具、默认模板和内置能力。
 - 不在 renderer 中覆盖 Hermes 长期记忆；长期记忆由 Hermes 进程或其 memory/user_profile 能力维护。

@@ -1,0 +1,12 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "title": "ocops Cron List Query",
+  "type": "object",
+  "properties": {
+    "all": {
+      "type": "string",
+      "enum": ["true", "false", "1", "0", "yes", "no"]
+    }
+  },
+  "additionalProperties": false
+}

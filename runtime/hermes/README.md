@@ -6,6 +6,7 @@
 
 - 命名形如 `hermes-v2026.5.16`，目录版本号与 version.txt 的 `v2026.5.16` 保持一致
 - 内部布局见 spec docs/superpowers/specs/2026-05-19-hermes-image-self-init-design.md §5.1
+- `ocops-contract/` 是所有 variant 共享的 HTTP 控制面契约，构建时注入 variant 并安装到镜像内 `/usr/local/lib/ocops/contract/`
 
 ## 新增 variant
 

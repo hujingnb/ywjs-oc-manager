@@ -1,0 +1,27 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "title": "ocops Cron Capabilities",
+  "type": "object",
+  "required": ["contract_version", "oc_cron_version", "variant", "verbs", "features"],
+  "properties": {
+    "contract_version": { "type": "string", "pattern": "^[0-9]+\\.[0-9]+$" },
+    "oc_cron_version": { "type": "string" },
+    "hermes_version": { "type": ["string", "null"] },
+    "variant": { "type": "string" },
+    "verbs": { "type": "array", "items": { "type": "string" } },
+    "features": {
+      "type": "object",
+      "required": ["status", "history", "output", "write", "script", "advanced_fields"],
+      "properties": {
+        "status": { "type": "boolean" },
+        "history": { "type": "boolean" },
+        "output": { "type": "boolean" },
+        "write": { "type": "boolean" },
+        "script": { "type": "boolean" },
+        "advanced_fields": { "type": "boolean" }
+      },
+      "additionalProperties": false
+    }
+  },
+  "additionalProperties": false
+}

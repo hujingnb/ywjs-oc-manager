@@ -1,0 +1,33 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "title": "ocops Doctor",
+  "type": "object",
+  "required": [
+    "variant",
+    "last_render_at",
+    "manifest_sha256",
+    "hermes_pid",
+    "hermes_status",
+    "issues"
+  ],
+  "properties": {
+    "variant": { "type": "string" },
+    "last_render_at": { "type": ["string", "null"] },
+    "manifest_sha256": { "type": ["string", "null"] },
+    "hermes_pid": { "type": ["integer", "null"] },
+    "hermes_status": {
+      "type": "string",
+      "enum": ["running", "stopped", "unknown"]
+    },
+    "issues": {
+      "type": "array",
+      "items": {
+        "oneOf": [
+          { "type": "string" },
+          { "type": "object", "additionalProperties": true }
+        ]
+      }
+    }
+  },
+  "additionalProperties": true
+}

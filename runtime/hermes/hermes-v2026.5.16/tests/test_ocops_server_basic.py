@@ -3,6 +3,7 @@
 import json
 from pathlib import Path
 
+from jsonschema import validate
 from starlette.testclient import TestClient
 
 
@@ -18,23 +19,35 @@ def _client(monkeypatch, tmp_path):
     return TestClient(app)
 
 
-def test_requires_bearer_token(monkeypatch, tmp_path):
+def test_requires_bearer_token(monkeypatch, tmp_path, ocops_schema):
     # 鉴权：无 token → 401，body code 为 UNAUTHORIZED
     c = _client(monkeypatch, tmp_path)
-    assert c.get("/oc/info").status_code == 401
+    r = c.get("/oc/info")
+    assert r.status_code == 401
+    validate(r.json(), ocops_schema("common/error.schema.json"))
 
 
-def test_info_ok(monkeypatch, tmp_path):
+def test_info_ok(monkeypatch, tmp_path, ocops_schema):
     # 正常：带正确 token → 200，返回镜像身份字段 variant
     c = _client(monkeypatch, tmp_path)
     r = c.get("/oc/info", headers={"Authorization": "Bearer t0ken"})
     assert r.status_code == 200
+    validate(r.json(), ocops_schema("core/info.schema.json"))
     assert r.json()["variant"] == "hermes-v2026.5.16"
 
 
-def test_channel_status_unknown_channel_400(monkeypatch, tmp_path):
+def test_doctor_ok(monkeypatch, tmp_path, ocops_schema):
+    # 正常：doctor 返回运行时诊断快照，字段符合 core/doctor schema。
+    c = _client(monkeypatch, tmp_path)
+    r = c.get("/oc/doctor", headers={"Authorization": "Bearer t0ken"})
+    assert r.status_code == 200
+    validate(r.json(), ocops_schema("core/doctor.schema.json"))
+
+
+def test_channel_status_unknown_channel_400(monkeypatch, tmp_path, ocops_schema):
     # 错误码映射：未知 channel → OpsError(BAD_REQUEST) → HTTP 400 + code 体
     c = _client(monkeypatch, tmp_path)
     r = c.get("/oc/channels/telegram/status", headers={"Authorization": "Bearer t0ken"})
     assert r.status_code == 400
+    validate(r.json(), ocops_schema("common/error.schema.json"))
     assert r.json()["code"] == "BAD_REQUEST"

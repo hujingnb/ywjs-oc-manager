@@ -1,0 +1,17 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "title": "ocops Skills Reload",
+  "type": "object",
+  "properties": {
+    "added": {
+      "type": "array",
+      "items": { "type": "string" }
+    },
+    "removed": {
+      "type": "array",
+      "items": { "type": "string" }
+    },
+    "total": { "type": "integer", "minimum": 0 }
+  },
+  "additionalProperties": true
+}

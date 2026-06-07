@@ -1,0 +1,33 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "title": "ocops Cron Create Body",
+  "type": "object",
+  "required": ["name", "schedule"],
+  "properties": {
+    "name": { "type": "string", "minLength": 1, "maxLength": 200 },
+    "schedule": { "type": "string", "minLength": 1, "maxLength": 200 },
+    "prompt": { "type": ["string", "null"], "maxLength": 5000 },
+    "deliver": { "type": ["string", "null"], "maxLength": 512 },
+    "repeat": { "type": ["integer", "null"], "minimum": 1 },
+    "script": {
+      "anyOf": [
+        { "type": "null" },
+        {
+          "type": "string",
+          "maxLength": 512,
+          "not": { "pattern": "(^/|(^|/)\\.\\.(/|$))" }
+        }
+      ]
+    },
+    "no_agent": { "type": "boolean" },
+    "workdir": { "type": ["string", "null"], "maxLength": 512 },
+    "skills": {
+      "type": "array",
+      "items": { "type": "string" }
+    },
+    "model": { "type": ["string", "null"] },
+    "provider": { "type": ["string", "null"] },
+    "base_url": { "type": ["string", "null"] }
+  },
+  "additionalProperties": false
+}

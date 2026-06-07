@@ -14,3 +14,4 @@
 - 同镜像第二用途：覆盖 CMD 启动 `python -m uvicorn ocops.server:app --host 0.0.0.0 --port 8080`
 - Bearer OC_OPS_TOKEN 鉴权；端点见 docs（info/doctor/cron/kanban/channel 类型化 REST + SSE）
 - 运维能力统一经 HTTP 暴露；原 oc-channel-*/oc-cron/oc-kanban/oc-info/oc-doctor CLI shim 已移除，逻辑收敛到 ocops 包
+- HTTP 控制面契约由构建期注入的 `ocops-contract/` 提供，镜像内路径为 `/usr/local/lib/ocops/contract/`
