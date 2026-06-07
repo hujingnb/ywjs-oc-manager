@@ -9,11 +9,14 @@ from pathlib import Path
 from jsonschema.validators import validator_for
 
 
-ROOT = Path(__file__).resolve().parents[2]
 VARIANT_ROOT = Path(__file__).resolve().parents[1]
-CONTRACT_ROOT = ROOT / "ocops-contract"
+SOURCE_CONTRACT_ROOT = Path(__file__).resolve().parents[2] / "ocops-contract"
+IMAGE_CONTRACT_ROOT = Path("/usr/local/lib/ocops/contract")
+CONTRACT_ROOT = IMAGE_CONTRACT_ROOT if IMAGE_CONTRACT_ROOT.exists() else SOURCE_CONTRACT_ROOT
 SPEC = CONTRACT_ROOT / "SPEC.md"
-SERVER = VARIANT_ROOT / "ocops" / "server.py"
+SOURCE_SERVER = VARIANT_ROOT / "ocops" / "server.py"
+IMAGE_SERVER = Path("/usr/local/lib/ocops/server.py")
+SERVER = IMAGE_SERVER if IMAGE_SERVER.exists() else SOURCE_SERVER
 
 
 def _server_routes() -> list[tuple[str, str]]:
