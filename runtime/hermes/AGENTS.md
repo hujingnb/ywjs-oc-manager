@@ -104,19 +104,110 @@ app 级运行时数据使用 `apps/<appID>/` S3 前缀。
 - S3 恢复失败时应让 initContainer 失败，不得静默启动一个空记忆实例。
 - `sessions/` 与 `state.db*` 可以同步为会话快照，但不能被描述或处理为长期记忆。
 
-## 对外能力
+## 对外暴露能力契约
 
-每个 Hermes variant 镜像必须提供以下能力：
+每个 Hermes variant 镜像必须对 manager 和 Kubernetes 暴露同一组能力。新增
+variant 只能在保持兼容的前提下扩展，不能删除、改名或改变既有输入输出语义。
+底层 Hermes 上游能力缺失时，HTTP 接口必须返回 `UNSUPPORTED`，不能让端点消失。
 
-- 主容器入口：`ENTRYPOINT` 执行 `oc-entrypoint`，最终启动 `hermes gateway run`。
-- 健康检查：`oc-healthcheck` 或等价命令，能判断 Hermes gateway 是否可用。
-- 知识库 CLI：`oc-kb`，只调用 manager runtime API，不直接持有 RAGFlow API key。
-- `ocops.server`：随 Hermes variant 版本走的 HTTP 控制面，使用 Bearer `OC_OPS_TOKEN` 鉴权。
-- `ocops.server` 至少覆盖当前 manager 依赖的 info、doctor、cron、kanban、channel、skills 能力。
+### 镜像级接口
 
-`runtime/ops` 镜像不跟 Hermes variant 版本走。它是平台基础设施镜像，跟 manager bootstrap、S3 key 约定和 k8s 编排契约保持兼容。
+| 接口 | 输入 | 输出 / 行为 | 稳定要求 |
+|---|---|---|---|
+| `ENTRYPOINT` | `/opt/oc-input/manifest.yaml`、`/opt/data`、环境变量 | 执行 `oc-entrypoint`，完成文件过渡、渲染后 `exec hermes gateway run` | 所有 variant 保持相同入口语义。 |
+| `oc-healthcheck` | 无；读取本机 Hermes gateway 状态 | 退出码 `0` 表示可用，非 `0` 表示不可用 | Kubernetes healthcheck 只依赖退出码。 |
+| `oc-kb` | CLI 参数和 `/opt/data/.env` 中的 manager runtime 配置 | 调 manager runtime API 做知识库检索/导入 | 不直接持有 RAGFlow API key，不绕过 manager。 |
+| `ocops.server` | HTTP/SSE，请求头 `Authorization: Bearer ${OC_OPS_TOKEN}` | 端口通常为 `8080`，提供下表全部 REST/SSE 接口 | 随 Hermes variant 版本走，直接操作该 variant 的 Python 包、Hermes 命令和 `/opt/data`。 |
+| `ocops-contract` | 构建期注入，镜像内路径 `/usr/local/lib/ocops/contract/` | `SPEC.md` + JSON Schema | 是接口层机器契约；构建期测试必须校验路由、schema 与实现一致。 |
 
-`ocops.server` 当前必须保留在 Hermes 镜像内，因为它直接操作该 variant 的 Python 包、Hermes 内部命令、`/opt/data` 布局、cron、kanban、channel 和 skill 热加载能力。若未来拆到独立 ops 镜像，需要先定义跨镜像读写 `/opt/data` 的稳定 ABI。
+`runtime/ops` 镜像不跟 Hermes variant 版本走。它是平台基础设施镜像，跟
+manager bootstrap、S3 key 约定和 k8s 编排契约保持兼容。`ocops.server`
+当前必须保留在 Hermes 镜像内；若未来拆到独立 ops 镜像，需要先定义跨镜像读写
+`/opt/data` 的稳定 ABI。
+
+### ocops HTTP 通用规则
+
+- 除 `GET /healthz` 外，所有接口必须校验 Bearer `OC_OPS_TOKEN`。
+- 非流式成功响应直接返回业务 JSON payload，不包 `{ok,data}` 信封。
+- 业务失败统一返回 HTTP 状态码 + `{"code":"...","message":"..."}`。
+- 已知错误码：`BAD_REQUEST`、`UNAUTHORIZED`、`NOT_FOUND`、`UNSUPPORTED`、
+  `HERMES_CLI_FAILED`、`INTERNAL`。
+- SSE 成功帧使用 `data: <json>\n\n`；流内业务失败使用
+  `event: error\ndata: {"code":"...","message":"..."}\n\n`。
+- 精确 JSON Schema 位于 `runtime/hermes/ocops-contract/schema/**`，本节表格描述
+  语义；schema 是机器校验依据。
+
+### ocops Core 接口
+
+| 方法 | 路径 | 输入 | 输出 |
+|---|---|---|---|
+| `GET` | `/healthz` | 无鉴权 | 文本 `ok`。 |
+| `GET` | `/oc/info` | 无 body | 镜像身份：`variant`、`hermes_upstream_ref`、`built_at`、`oc_entrypoint_version`，允许附加只读元数据。 |
+| `GET` | `/oc/doctor` | 无 body | 诊断快照：`variant`、`last_render_at`、`manifest_sha256`、`hermes_pid`、`hermes_status`、`issues`。 |
+
+### ocops Channel 接口
+
+当前稳定 channel 名称至少包含 `weixin`。未知 channel 返回 `BAD_REQUEST`。
+
+| 方法 | 路径 | 输入 | 输出 |
+|---|---|---|---|
+| `GET` | `/oc/channels/{channel}/status` | path `channel` | 未绑定：`{"channel":"weixin","bound":false}`；已绑定：额外含 `account_id`。 |
+| `POST` | `/oc/channels/{channel}/unbind` | path `channel` | 幂等解绑，返回 `{"status":"unbound"}`。 |
+| `POST` | `/oc/channels/{channel}/login` | path `channel` | SSE：`{"event":"qrcode","url":"..."}`，最终 `{"event":"bound"}`、`{"event":"timeout"}` 或 `{"event":"failed","reason":"..."}`。 |
+
+### ocops Cron 接口
+
+Cron 接口以 `/opt/data/cron/jobs.json` 和 `/opt/data/cron/output/` 为文件真相源，
+由当前 variant 适配底层 Hermes Cron 差异。
+
+| 方法 | 路径 | 输入 | 输出 |
+|---|---|---|---|
+| `GET` | `/oc/cron/capabilities` | 无 | `contract_version`、`oc_cron_version`、`hermes_version`、`variant`、`verbs`、`features`。 |
+| `GET` | `/oc/cron/status` | 无 | 调度状态：`available`、`gateway_running`、`active_jobs`、`next_run_at`、`next_job_id`、`message` 等。 |
+| `GET` | `/oc/cron/jobs` | query `all=true|false|1|0|yes|no` 可选 | `CronJob[]`；默认隐藏 disabled/removed 任务。 |
+| `POST` | `/oc/cron/jobs` | JSON：`name`、`schedule` 必填；可选 `prompt`、`deliver`、`repeat`、`script`、`no_agent`、`workdir`、`skills`、`model`、`provider`、`base_url` | 新建后的 `CronJob`。 |
+| `GET` | `/oc/cron/jobs/{id}` | path `id` | 指定 `CronJob`；不存在返回 `NOT_FOUND`。 |
+| `PATCH` | `/oc/cron/jobs/{id}` | path `id`；JSON 字段同 create，另有 `agent`、`clear_skills` | 更新后的 `CronJob`。 |
+| `POST` | `/oc/cron/jobs/{id}/toggle` | path `id`；JSON `{"enabled":true|false}` | 切换后的 `CronJob`。 |
+| `POST` | `/oc/cron/jobs/{id}/run` | path `id` | 触发后的 `CronJob`。 |
+| `DELETE` | `/oc/cron/jobs/{id}` | path `id` | 成功返回 `204 No Content`。 |
+| `GET` | `/oc/cron/jobs/{id}/history` | path `id` | `RunEntry[]`，列出 markdown 输出历史。 |
+| `GET` | `/oc/cron/jobs/{id}/output` | path `id`；query `file=<markdown file>` | `RunOutput`：`job_id`、`file_name`、`run_time`、`content`。 |
+
+### ocops Kanban 接口
+
+Kanban 接口以 Hermes kanban 能力和 `/opt/data/kanban.db` 为真相源。底层
+Hermes 不支持 kanban 时，除 capabilities 外的功能接口返回 `UNSUPPORTED`。
+
+| 方法 | 路径 | 输入 | 输出 |
+|---|---|---|---|
+| `GET` | `/oc/kanban/capabilities` | 无 | `contract_version`、`oc_kanban_version`、`hermes_version`、`variant`、`verbs`、`features`。 |
+| `GET` | `/oc/kanban/boards` | 无 | `Board[]`。 |
+| `GET` | `/oc/kanban/tasks` | query `board` 可选，默认 `default`；`status`、`assignee` 可选 | `Task[]`。 |
+| `POST` | `/oc/kanban/tasks` | JSON：`board`、`title`、`assignee` 必填；可选 `priority`、`body`、`skills`、`workspace`、`parent`、`max_retries` | 新建后的 `TaskDetail`。 |
+| `GET` | `/oc/kanban/tasks/{id}` | path `id`；query `board` 可选 | `TaskDetail`。 |
+| `GET` | `/oc/kanban/tasks/{id}/runs` | path `id`；query `board` 可选 | `Run[]`。 |
+| `GET` | `/oc/kanban/stats` | query `board` 可选 | `Stats`。 |
+| `POST` | `/oc/kanban/tasks/{id}/comment` | path `id`；JSON `body` 必填，`board` 可选 | 更新后的 `TaskDetail`。 |
+| `POST` | `/oc/kanban/tasks/{id}/complete` | path `id`；JSON `board`、`result` 可选 | 更新后的 `TaskDetail`。 |
+| `POST` | `/oc/kanban/tasks/{id}/block` | path `id`；JSON `reason` 必填，`board` 可选 | 更新后的 `TaskDetail`。 |
+| `POST` | `/oc/kanban/tasks/{id}/unblock` | path `id`；JSON `board` 可选 | 更新后的 `TaskDetail`。 |
+| `POST` | `/oc/kanban/tasks/{id}/archive` | path `id`；JSON `board` 可选 | 更新后的 `TaskDetail`。 |
+| `POST` | `/oc/kanban/tasks/{id}/reassign` | path `id`；JSON `to` 必填，`board` 可选 | 更新后的 `TaskDetail`。 |
+| `POST` | `/oc/kanban/tasks/{id}/reclaim` | path `id`；JSON `board` 可选 | 更新后的 `TaskDetail`。 |
+| `GET` | `/oc/kanban/watch` | query `board` 可选 | SSE `Event` 帧：`task_id`、`kind`、`payload`、`created_at`、`run_id`。 |
+
+### ocops Skills 接口
+
+Skills 接口操作 `/opt/data/skills/`。内置 skill、自创 skill、manager 热装 skill
+必须通过 `.oc-managed` 与 `.bundled_manifest` 区分，不得误删用户自创内容。
+
+| 方法 | 路径 | 输入 | 输出 |
+|---|---|---|---|
+| `GET` | `/oc/skills` | 无 | `{"skills":[{"name":"...","managed":bool,"builtin":bool,"description":"..."}]}`。 |
+| `POST` | `/oc/skills` | multipart form：`name` 字段 + `archive` 文件字段，归档为 tar 或 zip | `{"name":"..."}`。 |
+| `POST` | `/oc/skills/reload` | 无 | Hermes API server reload 结果，通常含 `added`、`removed`、`total`。 |
+| `DELETE` | `/oc/skills/{name}` | path `name` | 幂等删除，返回 `{"name":"..."}`。 |
 
 ## 启动流程
 
@@ -124,28 +215,48 @@ Hermes 主容器启动顺序必须保持：
 
 1. 读取 `/opt/oc-input/manifest.yaml`。
 2. 读取 `/opt/data/.oc-state.json`。
-3. 若本地记录的 variant 与当前镜像 variant 不一致，执行 `migrator`。
+3. 对 `/opt/data` 执行当前镜像负责的文件过渡。文件过渡可以由 `migrator/`
+   承载，但语义不是“从上一个版本升级”，而是“把任意历史版本留下的文件规整到当前镜像可读状态”。
 4. 渲染 `/opt/data/config.yaml`、`/opt/data/.env`、`/opt/data/SOUL.md`、`/opt/data/skills/oc-kb/`。
-5. 写回 `.oc-state.json`。
+5. 写回 `.oc-state.json`，记录当前镜像 variant 和渲染状态。
 6. exec `hermes gateway run`。
 
-如果 migrator 失败，必须阻止 Hermes 启动并保留原始 `/opt/data`。
+如果文件过渡失败，必须阻止 Hermes 启动并保留原始 `/opt/data`。任何过渡逻辑
+都必须先读后写、原子替换，不得在校验成功前删除原文件。
 
-## 升级兼容
+## 版本切换与文件过渡
 
-- 新 variant 必须能读取上一个已发布 variant 的 `/opt/data`。
-- 持久化格式不兼容时，必须在新 variant 的 `migrator/` 中做原地迁移。
-- migrator 必须幂等，重复启动不能重复破坏数据。
-- migrator 不得删除长期记忆；需要改格式时必须保留原始语义。
-- `.oc-state.json` 是判断本地数据 variant 的状态锚点，不得随意改字段语义。
-- `skills/.bundled_manifest` 是识别镜像内置 skill 与运行期自创 skill 的状态锚点；新 variant 不得改变该文件的共享位置，除非同时迁移 ops 与 ocops 的识别逻辑。
+本系统不假设用户按版本顺序升级。未来用户可能从任意旧 Hermes variant 直接切换
+到当前 variant，也可能从当前 variant 切回其他 variant。兼容策略必须基于文件，
+不能依赖“上一个版本 -> 当前版本”的线性升级链。
+
+- 当前 variant 必须能读取由 S3 恢复到 `/opt/data` 的任意历史文件集合；`.oc-state.json`
+  只能作为提示，不能作为唯一判断依据。
+- 文件过渡输入只有 `/opt/data` 和 `/opt/oc-input/manifest.yaml`；不得依赖旧镜像还能运行、
+  不得要求先启动中间版本，也不得要求 manager 额外调用旧版本接口。
+- 文件过渡必须幂等。相同 `/opt/data` 重复启动多次，结果应稳定，不得重复追加、重复删除或重复改写用户数据。
+- 文件过渡必须保守。遇到未知文件、未知字段或无法识别的历史格式时，优先保留原样；
+  只有明确归类为会话快照、缓存或当前镜像生成物的路径才允许清理或覆盖。
+- 文件过渡不得删除长期记忆、workspace、cron、kanban、weixin 凭证、自创 skill、
+  `skills/.bundled_manifest` 或 `.oc-state.json`。需要改格式时，必须保留原始语义并采用原子写入。
+- 当前镜像生成物可以重渲染：`config.yaml`、`.env`、`SOUL.md`、`skills/oc-kb/`。
+  重渲染不得把用户长期记忆或自创 skill 当成模板输出覆盖。
+- SQLite 文件必须用一致性快照处理。`kanban.db` 及其 WAL/SHM 状态不得被普通文件复制
+  破坏；如果未来引入更多 SQLite 真相源，必须同步扩展 ops sync/restore 和本文件。
+- `.oc-state.json` 是状态锚点，但不是兼容边界。未知、缺失或旧 variant 值都应触发
+  当前镜像的文件检测与过渡逻辑，而不是直接失败。
+- `skills/.bundled_manifest` 是识别镜像内置 skill 与运行期自创 skill 的共享锚点；
+  新 variant 不得改变该文件位置，除非同时修改 ops 同步/恢复、ocops skills 识别和文件过渡逻辑。
+- 如果某类历史文件无法安全过渡，必须让启动失败并保留现场，不能静默启动一个丢失记忆、
+  丢失任务或丢失凭证的实例。
 
 ## 测试要求
 
 新增或修改 Hermes variant 时至少确认以下测试：
 
 - renderer 不覆盖 `/opt/data/memories/`、`/opt/data/MEMORY.md`、`/opt/data/USER.md`。
-- migrator 覆盖首启、同版本启动、跨版本迁移、重复运行。
-- `ocops.server` 覆盖 manager 当前调用的 HTTP 端点。
+- 文件过渡覆盖首启、同版本启动、任意历史 variant 文件集合、重复运行和无法安全过渡的失败路径。
+- `ocops.server` 覆盖本文件定义的全部 HTTP/SSE 端点；`ocops-contract/SPEC.md`
+  必须与实际 `Route(...)` 表一致，schema 必须能通过 JSON Schema 自检。
 - ops 恢复/同步覆盖长期记忆、workspace、weixin 凭证、自创 skill、`skills/.bundled_manifest`、cron、kanban、variant 状态锚点、会话快照和 sqlite 快照。
 - 镜像构建阶段必须运行 variant 自检，失败不得产出生产镜像。
