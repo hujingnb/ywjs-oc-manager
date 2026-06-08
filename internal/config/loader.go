@@ -153,6 +153,9 @@ func (c Config) Validate() error {
 	if err := c.IndustryKnowledge.validate(); err != nil {
 		return err
 	}
+	if err := c.TransferLimit.validate(); err != nil {
+		return err
+	}
 	// S3 启用时关键字段必须齐全，缺失 fail-fast（避免运行期才暴露配置缺漏）。
 	if c.Storage.S3.Enabled {
 		if strings.TrimSpace(c.Storage.S3.Endpoint) == "" || strings.TrimSpace(c.Storage.S3.Bucket) == "" ||
@@ -186,6 +189,17 @@ func (c IndustryKnowledgeConfig) validate() error {
 	}
 	if strings.TrimSpace(c.UploadToken) == "" {
 		return fmt.Errorf("industry_knowledge.upload_token 不能只包含空白字符")
+	}
+	return nil
+}
+
+// validate 校验文件传输限速配置；0 表示不限速，负数没有业务含义。
+func (c TransferLimitConfig) validate() error {
+	if c.UploadBytesPerSec < 0 {
+		return fmt.Errorf("transfer_limit.upload_bytes_per_sec 不能小于 0")
+	}
+	if c.DownloadBytesPerSec < 0 {
+		return fmt.Errorf("transfer_limit.download_bytes_per_sec 不能小于 0")
 	}
 	return nil
 }

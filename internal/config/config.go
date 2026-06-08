@@ -26,6 +26,8 @@ type Config struct {
 	RAGFlow RAGFlowConfig `yaml:"ragflow"`
 	// IndustryKnowledge 描述外部商业知识库上传行业库文件的固定鉴权配置。
 	IndustryKnowledge IndustryKnowledgeConfig `yaml:"industry_knowledge"`
+	// TransferLimit 描述 manager 面向浏览器和外部系统的文件传输单请求限速配置。
+	TransferLimit TransferLimitConfig `yaml:"transfer_limit"`
 	// NewAPI 描述 manager 调用 new-api 管理接口所需的凭据。
 	NewAPI NewAPIConfig `yaml:"newapi"`
 	// Storage 是对象存储（S3）配置；整段可选，配置则要求关键字段齐全（见 loader 校验）。
@@ -134,6 +136,14 @@ type RAGFlowConfig struct {
 type IndustryKnowledgeConfig struct {
 	// UploadToken 是外部商业知识库上传接口要求的固定鉴权字符串；为空表示禁用外部上传入口。
 	UploadToken string `yaml:"upload_token"`
+}
+
+// TransferLimitConfig 描述 manager HTTP 文件传输的单请求限速配置。
+type TransferLimitConfig struct {
+	// UploadBytesPerSec 是单个上传请求从客户端读入 manager 的最大字节每秒；0 表示不限速。
+	UploadBytesPerSec int64 `yaml:"upload_bytes_per_sec"`
+	// DownloadBytesPerSec 是单个下载请求从 manager 写给客户端的最大字节每秒；0 表示不限速。
+	DownloadBytesPerSec int64 `yaml:"download_bytes_per_sec"`
 }
 
 // RuntimeImageConfig 是单个可选 Hermes 镜像条目。

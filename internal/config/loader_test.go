@@ -255,6 +255,52 @@ industry_knowledge:
 	assert.Contains(t, err.Error(), "industry_knowledge.upload_token")
 }
 
+// TestTransferLimitDefaultsToUnlimited 验证未配置 transfer_limit 时保持历史行为，不启用上传或下载限速。
+func TestTransferLimitDefaultsToUnlimited(t *testing.T) {
+	cfg := loadConfigFromString(t, fullValidYAML())
+
+	assert.Equal(t, int64(0), cfg.TransferLimit.UploadBytesPerSec)
+	assert.Equal(t, int64(0), cfg.TransferLimit.DownloadBytesPerSec)
+}
+
+// TestTransferLimitLoadsExplicitBytesPerSecond 验证配置的字节每秒速率会原样加载，供 handler 层执行单请求限速。
+func TestTransferLimitLoadsExplicitBytesPerSecond(t *testing.T) {
+	yaml := fullValidYAML() + `
+transfer_limit:
+  upload_bytes_per_sec: 524288
+  download_bytes_per_sec: 524288
+`
+	cfg := loadConfigFromString(t, yaml)
+
+	assert.Equal(t, int64(524288), cfg.TransferLimit.UploadBytesPerSec)
+	assert.Equal(t, int64(524288), cfg.TransferLimit.DownloadBytesPerSec)
+}
+
+// TestTransferLimitRejectsNegativeValues 验证负数限速会在启动阶段 fail-fast，避免运行期出现无意义的 limiter 参数。
+func TestTransferLimitRejectsNegativeValues(t *testing.T) {
+	for _, tc := range []struct {
+		name string
+		body string
+		want string
+	}{
+		// 上传限速为负数没有业务含义，应拒绝启动。
+		{name: "negative_upload", body: "upload_bytes_per_sec: -1\n  download_bytes_per_sec: 0", want: "transfer_limit.upload_bytes_per_sec"},
+		// 下载限速为负数没有业务含义，应拒绝启动。
+		{name: "negative_download", body: "upload_bytes_per_sec: 0\n  download_bytes_per_sec: -1", want: "transfer_limit.download_bytes_per_sec"},
+	} {
+		// 子测试：逐条确认负数限速字段会返回可定位到具体 YAML key 的错误。
+		t.Run(tc.name, func(t *testing.T) {
+			yaml := fullValidYAML() + `
+transfer_limit:
+  ` + tc.body + `
+`
+			_, err := loadConfigFromStringErr(t, yaml)
+			require.Error(t, err)
+			require.ErrorContains(t, err, tc.want)
+		})
+	}
+}
+
 // TestStorageS3ValidationRequiresFields 验证启用 S3 但字段不全时加载报错（fail-fast）。
 func TestStorageS3ValidationRequiresFields(t *testing.T) {
 	// 启用 S3 却缺 endpoint/bucket/access_key_id/secret_access_key 等，Validate 必须 fail-fast。
