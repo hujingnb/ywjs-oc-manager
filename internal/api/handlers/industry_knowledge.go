@@ -50,6 +50,10 @@ type industryKnowledgeService interface {
 	ClearIndustryFiles(ctx context.Context, principal auth.Principal, industryID string) error
 	// ReparseIndustryFile 重新触发指定行业知识库文件解析。
 	ReparseIndustryFile(ctx context.Context, principal auth.Principal, industryID, documentID string) (service.KnowledgeDocumentResult, error)
+	// GetKnowledgeRAGFlowDatasetInfo 读取行业库对应的 RAGFlow dataset 运维信息。
+	GetKnowledgeRAGFlowDatasetInfo(ctx context.Context, principal auth.Principal, scope, targetID string) (service.KnowledgeRAGFlowDatasetInfoResult, error)
+	// UpdateKnowledgeEmbeddingModel 修改行业库对应的 RAGFlow dataset embedding 模型。
+	UpdateKnowledgeEmbeddingModel(ctx context.Context, principal auth.Principal, scope, targetID string, input service.KnowledgeEmbeddingModelInput) (service.KnowledgeRAGFlowDatasetInfoResult, error)
 	// ExternalUploadIndustryFile 按行业名称接收外部系统上传的文件。
 	ExternalUploadIndustryFile(ctx context.Context, industryName, filename string, content io.Reader, size int64) (service.KnowledgeDocumentResult, error)
 }
@@ -76,6 +80,8 @@ func RegisterIndustryKnowledgeRoutes(router gin.IRouter, handler *IndustryKnowle
 	group.POST("", handler.CreateBase)
 	group.PUT("/:industryId", handler.RenameBase)
 	group.DELETE("/:industryId", handler.DeleteBase)
+	group.GET("/:industryId/ragflow-dataset", handler.GetIndustryRAGFlowDataset)
+	group.PATCH("/:industryId/ragflow-dataset/embedding-model", handler.UpdateIndustryEmbeddingModel)
 
 	files := group.Group("/:industryId/knowledge")
 	files.GET("", handler.ListFiles)
@@ -296,6 +302,47 @@ func (h *IndustryKnowledgeHandler) DeleteBase(c *gin.Context) {
 		return
 	}
 	c.Status(http.StatusNoContent)
+}
+
+// GetIndustryRAGFlowDataset 查看行业知识库对应的 RAGFlow dataset 运维信息。
+//
+// @Summary      查看行业库 RAGFlow dataset
+// @Description  平台管理员查看行业知识库对应的 RAGFlow dataset 状态、远端 ID、embedding 模型和文档统计
+// @Tags         industry-knowledge
+// @Produce      json
+// @Security     BearerAuth
+// @Param        industryId  path      string  true  "行业知识库 ID"
+// @Success      200         {object}  service.KnowledgeRAGFlowDatasetInfoResult
+// @Failure      401         {object}  ErrorResponse
+// @Failure      403         {object}  ErrorResponse
+// @Failure      404         {object}  ErrorResponse
+// @Failure      503         {object}  ErrorResponse
+// @Failure      500         {object}  ErrorResponse
+// @Router       /industry-knowledge-bases/{industryId}/ragflow-dataset [get]
+func (h *IndustryKnowledgeHandler) GetIndustryRAGFlowDataset(c *gin.Context) {
+	writeRAGFlowDatasetInfo(c, h.service, service.KnowledgeRAGFlowScopeIndustry, c.Param("industryId"), writeIndustryKnowledgeError)
+}
+
+// UpdateIndustryEmbeddingModel 修改行业知识库对应 RAGFlow dataset 的 embedding 模型。
+//
+// @Summary      修改行业库 RAGFlow dataset embedding 模型
+// @Description  平台管理员提交 RAGFlow 控制台可见的模型名和可选 provider，后端解析后切换行业库 dataset 模型并触发重解析
+// @Tags         industry-knowledge
+// @Accept       json
+// @Produce      json
+// @Security     BearerAuth
+// @Param        industryId  path      string                                true  "行业知识库 ID"
+// @Param        body        body      UpdateKnowledgeEmbeddingModelRequest  true  "修改 embedding 模型请求"
+// @Success      202         {object}  service.KnowledgeRAGFlowDatasetInfoResult
+// @Failure      400         {object}  ErrorResponse
+// @Failure      401         {object}  ErrorResponse
+// @Failure      403         {object}  ErrorResponse
+// @Failure      404         {object}  ErrorResponse
+// @Failure      503         {object}  ErrorResponse
+// @Failure      500         {object}  ErrorResponse
+// @Router       /industry-knowledge-bases/{industryId}/ragflow-dataset/embedding-model [patch]
+func (h *IndustryKnowledgeHandler) UpdateIndustryEmbeddingModel(c *gin.Context) {
+	updateRAGFlowDatasetEmbeddingModel(c, h.service, service.KnowledgeRAGFlowScopeIndustry, c.Param("industryId"), writeIndustryKnowledgeError)
 }
 
 // ListFiles 列出指定行业知识库下的文件。

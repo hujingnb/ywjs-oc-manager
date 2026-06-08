@@ -9,6 +9,7 @@ import (
 	"net/http"
 	"path"
 	"strconv"
+	"strings"
 
 	"github.com/gin-gonic/gin"
 
@@ -38,6 +39,15 @@ type knowledgeService interface {
 	OpenAppFile(ctx context.Context, principal auth.Principal, appID, documentID string) (io.ReadCloser, int64, string, error)
 	DeleteAppFile(ctx context.Context, principal auth.Principal, appID, documentID string) error
 	ReparseAppFile(ctx context.Context, principal auth.Principal, appID, documentID string) (service.KnowledgeDocumentResult, error)
+	ListKnowledgeEmbeddingModels(ctx context.Context, principal auth.Principal) (service.KnowledgeEmbeddingModelListResult, error)
+	GetKnowledgeRAGFlowDatasetInfo(ctx context.Context, principal auth.Principal, scope, targetID string) (service.KnowledgeRAGFlowDatasetInfoResult, error)
+	UpdateKnowledgeEmbeddingModel(ctx context.Context, principal auth.Principal, scope, targetID string, input service.KnowledgeEmbeddingModelInput) (service.KnowledgeRAGFlowDatasetInfoResult, error)
+}
+
+// knowledgeRAGFlowDatasetService 是 handler 查询和修改 RAGFlow dataset 运维信息所需的最小能力。
+type knowledgeRAGFlowDatasetService interface {
+	GetKnowledgeRAGFlowDatasetInfo(ctx context.Context, principal auth.Principal, scope, targetID string) (service.KnowledgeRAGFlowDatasetInfoResult, error)
+	UpdateKnowledgeEmbeddingModel(ctx context.Context, principal auth.Principal, scope, targetID string, input service.KnowledgeEmbeddingModelInput) (service.KnowledgeRAGFlowDatasetInfoResult, error)
 }
 
 const (
@@ -61,7 +71,11 @@ func NewKnowledgeHandler(svc knowledgeService, limits ...TransferLimitConfig) *K
 
 // RegisterKnowledgeRoutes 注册扁平 document 维度的知识库路由。
 func RegisterKnowledgeRoutes(router gin.IRouter, handler *KnowledgeHandler) {
+	router.GET("/api/v1/knowledge/embedding-models", handler.ListEmbeddingModels)
+
 	orgGroup := router.Group("/api/v1/organizations/:orgId/knowledge")
+	orgGroup.GET("/ragflow-dataset", handler.GetOrgRAGFlowDataset)
+	orgGroup.PATCH("/ragflow-dataset/embedding-model", handler.UpdateOrgEmbeddingModel)
 	orgGroup.GET("", handler.ListOrg)
 	orgGroup.POST("", handler.SaveOrg)
 	orgGroup.DELETE("", handler.ClearOrg)
@@ -70,11 +84,112 @@ func RegisterKnowledgeRoutes(router gin.IRouter, handler *KnowledgeHandler) {
 	orgGroup.POST("/:documentId/reparse", handler.ReparseOrg)
 
 	appGroup := router.Group("/api/v1/apps/:appId/knowledge")
+	appGroup.GET("/ragflow-dataset", handler.GetAppRAGFlowDataset)
+	appGroup.PATCH("/ragflow-dataset/embedding-model", handler.UpdateAppEmbeddingModel)
 	appGroup.GET("", handler.ListApp)
 	appGroup.POST("", handler.SaveApp)
 	appGroup.GET("/:documentId/file", handler.DownloadApp)
 	appGroup.DELETE("/:documentId", handler.DeleteApp)
 	appGroup.POST("/:documentId/reparse", handler.ReparseApp)
+}
+
+// ListEmbeddingModels 列出平台可切换的 RAGFlow embedding 模型。
+//
+// @Summary      列出 RAGFlow embedding 模型
+// @Description  平台管理员查看后端配置的 RAGFlow embedding 模型候选，用于切换 dataset 模型
+// @Tags         knowledge
+// @Produce      json
+// @Security     BearerAuth
+// @Success      200  {object}  service.KnowledgeEmbeddingModelListResult
+// @Failure      401  {object}  ErrorResponse
+// @Failure      403  {object}  ErrorResponse
+// @Failure      503  {object}  ErrorResponse
+// @Router       /knowledge/embedding-models [get]
+func (h *KnowledgeHandler) ListEmbeddingModels(c *gin.Context) {
+	result, err := h.service.ListKnowledgeEmbeddingModels(c.Request.Context(), principalFromCtx(c))
+	if err != nil {
+		writeKnowledgeError(c, err)
+		return
+	}
+	c.JSON(http.StatusOK, result)
+}
+
+// GetOrgRAGFlowDataset 查看企业知识库对应的 RAGFlow dataset 运维信息。
+//
+// @Summary      查看企业 RAGFlow dataset
+// @Description  平台管理员查看企业知识库对应的 RAGFlow dataset 状态、远端 ID、embedding 模型和文档统计
+// @Tags         knowledge
+// @Produce      json
+// @Security     BearerAuth
+// @Param        orgId  path      string  true  "企业 ID"
+// @Success      200    {object}  service.KnowledgeRAGFlowDatasetInfoResult
+// @Failure      401    {object}  ErrorResponse
+// @Failure      403    {object}  ErrorResponse
+// @Failure      404    {object}  ErrorResponse
+// @Failure      503    {object}  ErrorResponse
+// @Router       /organizations/{orgId}/knowledge/ragflow-dataset [get]
+func (h *KnowledgeHandler) GetOrgRAGFlowDataset(c *gin.Context) {
+	writeRAGFlowDatasetInfo(c, h.service, service.KnowledgeRAGFlowScopeOrg, c.Param("orgId"), writeKnowledgeError)
+}
+
+// UpdateOrgEmbeddingModel 修改企业知识库对应 RAGFlow dataset 的 embedding 模型。
+//
+// @Summary      修改企业 RAGFlow dataset embedding 模型
+// @Description  平台管理员提交 RAGFlow 控制台可见的模型名和可选 provider，后端解析后切换企业 dataset 模型并触发重解析
+// @Tags         knowledge
+// @Accept       json
+// @Produce      json
+// @Security     BearerAuth
+// @Param        orgId  path      string                                true  "企业 ID"
+// @Param        body   body      UpdateKnowledgeEmbeddingModelRequest  true  "修改 embedding 模型请求"
+// @Success      202    {object}  service.KnowledgeRAGFlowDatasetInfoResult
+// @Failure      400    {object}  ErrorResponse
+// @Failure      401    {object}  ErrorResponse
+// @Failure      403    {object}  ErrorResponse
+// @Failure      404    {object}  ErrorResponse
+// @Failure      503    {object}  ErrorResponse
+// @Router       /organizations/{orgId}/knowledge/ragflow-dataset/embedding-model [patch]
+func (h *KnowledgeHandler) UpdateOrgEmbeddingModel(c *gin.Context) {
+	updateRAGFlowDatasetEmbeddingModel(c, h.service, service.KnowledgeRAGFlowScopeOrg, c.Param("orgId"), writeKnowledgeError)
+}
+
+// GetAppRAGFlowDataset 查看应用知识库对应的 RAGFlow dataset 运维信息。
+//
+// @Summary      查看应用 RAGFlow dataset
+// @Description  平台管理员查看应用知识库对应的 RAGFlow dataset 状态、远端 ID、embedding 模型和文档统计
+// @Tags         knowledge
+// @Produce      json
+// @Security     BearerAuth
+// @Param        appId  path      string  true  "实例 ID"
+// @Success      200    {object}  service.KnowledgeRAGFlowDatasetInfoResult
+// @Failure      401    {object}  ErrorResponse
+// @Failure      403    {object}  ErrorResponse
+// @Failure      404    {object}  ErrorResponse
+// @Failure      503    {object}  ErrorResponse
+// @Router       /apps/{appId}/knowledge/ragflow-dataset [get]
+func (h *KnowledgeHandler) GetAppRAGFlowDataset(c *gin.Context) {
+	writeRAGFlowDatasetInfo(c, h.service, service.KnowledgeRAGFlowScopeApp, c.Param("appId"), writeKnowledgeError)
+}
+
+// UpdateAppEmbeddingModel 修改应用知识库对应 RAGFlow dataset 的 embedding 模型。
+//
+// @Summary      修改应用 RAGFlow dataset embedding 模型
+// @Description  平台管理员提交 RAGFlow 控制台可见的模型名和可选 provider，后端解析后切换应用 dataset 模型并触发重解析
+// @Tags         knowledge
+// @Accept       json
+// @Produce      json
+// @Security     BearerAuth
+// @Param        appId  path      string                                true  "实例 ID"
+// @Param        body   body      UpdateKnowledgeEmbeddingModelRequest  true  "修改 embedding 模型请求"
+// @Success      202    {object}  service.KnowledgeRAGFlowDatasetInfoResult
+// @Failure      400    {object}  ErrorResponse
+// @Failure      401    {object}  ErrorResponse
+// @Failure      403    {object}  ErrorResponse
+// @Failure      404    {object}  ErrorResponse
+// @Failure      503    {object}  ErrorResponse
+// @Router       /apps/{appId}/knowledge/ragflow-dataset/embedding-model [patch]
+func (h *KnowledgeHandler) UpdateAppEmbeddingModel(c *gin.Context) {
+	updateRAGFlowDatasetEmbeddingModel(c, h.service, service.KnowledgeRAGFlowScopeApp, c.Param("appId"), writeKnowledgeError)
 }
 
 // ListOrg 列出组织级知识库文件。
@@ -409,6 +524,39 @@ func prepareKnowledgeOctetStreamUpload(c *gin.Context) (int64, bool) {
 	}
 	c.Request.Body = http.MaxBytesReader(c.Writer, c.Request.Body, maxKnowledgeUploadBytes)
 	return size, true
+}
+
+// writeRAGFlowDatasetInfo 统一读取不同知识库作用域的 RAGFlow dataset 运维信息。
+func writeRAGFlowDatasetInfo(c *gin.Context, svc knowledgeRAGFlowDatasetService, scope, targetID string, writeErr func(*gin.Context, error)) {
+	result, err := svc.GetKnowledgeRAGFlowDatasetInfo(c.Request.Context(), principalFromCtx(c), scope, targetID)
+	if err != nil {
+		writeErr(c, err)
+		return
+	}
+	c.JSON(http.StatusOK, result)
+}
+
+// updateRAGFlowDatasetEmbeddingModel 统一绑定模型切换请求，并只向 service 传递人类可读模型名和 provider。
+func updateRAGFlowDatasetEmbeddingModel(c *gin.Context, svc knowledgeRAGFlowDatasetService, scope, targetID string, writeErr func(*gin.Context, error)) {
+	var req UpdateKnowledgeEmbeddingModelRequest
+	if err := c.ShouldBindJSON(&req); err != nil {
+		c.JSON(http.StatusBadRequest, apierror.New("BAD_REQUEST", "模型名称不能为空"))
+		return
+	}
+	input := service.KnowledgeEmbeddingModelInput{
+		Name:     strings.TrimSpace(req.Name),
+		Provider: strings.TrimSpace(req.Provider),
+	}
+	if input.Name == "" {
+		c.JSON(http.StatusBadRequest, apierror.New("BAD_REQUEST", "模型名称不能为空"))
+		return
+	}
+	result, err := svc.UpdateKnowledgeEmbeddingModel(c.Request.Context(), principalFromCtx(c), scope, targetID, input)
+	if err != nil {
+		writeErr(c, err)
+		return
+	}
+	c.JSON(http.StatusAccepted, result)
 }
 
 // requestContentLength 读取客户端声明的请求体大小；只有非负整数才可用于上传前容量校验。

@@ -76,6 +76,17 @@ type industryKnowledgeServiceStub struct {
 	reparseIndustryID string
 	reparseDocumentID string
 
+	ragflowDatasetResult   service.KnowledgeRAGFlowDatasetInfoResult
+	ragflowDatasetErr      error
+	ragflowDatasetScope    string
+	ragflowDatasetTargetID string
+
+	updateEmbeddingModelResult   service.KnowledgeRAGFlowDatasetInfoResult
+	updateEmbeddingModelErr      error
+	updateEmbeddingModelScope    string
+	updateEmbeddingModelTargetID string
+	updateEmbeddingModelInput    service.KnowledgeEmbeddingModelInput
+
 	externalUploadCalls  int
 	externalIndustryName string
 	externalFilename     string
@@ -148,6 +159,19 @@ func (s *industryKnowledgeServiceStub) ReparseIndustryFile(_ context.Context, _ 
 	s.reparseIndustryID = industryID
 	s.reparseDocumentID = documentID
 	return s.reparseResult, s.reparseErr
+}
+
+func (s *industryKnowledgeServiceStub) GetKnowledgeRAGFlowDatasetInfo(_ context.Context, _ auth.Principal, scope, targetID string) (service.KnowledgeRAGFlowDatasetInfoResult, error) {
+	s.ragflowDatasetScope = scope
+	s.ragflowDatasetTargetID = targetID
+	return s.ragflowDatasetResult, s.ragflowDatasetErr
+}
+
+func (s *industryKnowledgeServiceStub) UpdateKnowledgeEmbeddingModel(_ context.Context, _ auth.Principal, scope, targetID string, input service.KnowledgeEmbeddingModelInput) (service.KnowledgeRAGFlowDatasetInfoResult, error) {
+	s.updateEmbeddingModelScope = scope
+	s.updateEmbeddingModelTargetID = targetID
+	s.updateEmbeddingModelInput = input
+	return s.updateEmbeddingModelResult, s.updateEmbeddingModelErr
 }
 
 func (s *industryKnowledgeServiceStub) ExternalUploadIndustryFile(_ context.Context, industryName, filename string, content io.Reader, size int64) (service.KnowledgeDocumentResult, error) {
@@ -501,4 +525,59 @@ func TestIndustryKnowledgeUploadAppliesUploadRateLimit(t *testing.T) {
 	require.Equal(t, http.StatusAccepted, w.Code)
 	assert.Equal(t, 1, stub.saveCalls)
 	assert.Contains(t, stub.saveBodyType, "rateLimitedReadCloser")
+}
+
+// TestIndustryKnowledgeGetRAGFlowDatasetRoutesToService 验证行业库 RAGFlow dataset 查询路由使用 industry scope 和行业库 ID 调用 service。
+func TestIndustryKnowledgeGetRAGFlowDatasetRoutesToService(t *testing.T) {
+	stub := &industryKnowledgeServiceStub{ragflowDatasetResult: service.KnowledgeRAGFlowDatasetInfoResult{
+		Scope: service.KnowledgeRAGFlowScopeIndustry, TargetID: "industry-1", TargetName: "保险", Status: "ok",
+	}}
+	router := newIndustryKnowledgeTestRouter(t, stub, "secret-token")
+
+	w := httptest.NewRecorder()
+	req := httptest.NewRequest(http.MethodGet, "/api/v1/industry-knowledge-bases/industry-1/ragflow-dataset", nil)
+	req = withPrincipal(req, auth.Principal{UserID: "u-admin", Role: domain.UserRolePlatformAdmin})
+	router.ServeHTTP(w, req)
+
+	require.Equal(t, http.StatusOK, w.Code)
+	assert.Equal(t, service.KnowledgeRAGFlowScopeIndustry, stub.ragflowDatasetScope)
+	assert.Equal(t, "industry-1", stub.ragflowDatasetTargetID)
+	assert.Contains(t, w.Body.String(), `"status":"ok"`)
+}
+
+// TestIndustryKnowledgePatchEmbeddingModelBindsHumanModelName 验证行业库模型修改把人类可读模型名和 provider 透传给 service。
+func TestIndustryKnowledgePatchEmbeddingModelBindsHumanModelName(t *testing.T) {
+	stub := &industryKnowledgeServiceStub{updateEmbeddingModelResult: service.KnowledgeRAGFlowDatasetInfoResult{
+		Scope: service.KnowledgeRAGFlowScopeIndustry, TargetID: "industry-1", TargetName: "保险", Status: "ok",
+	}}
+	router := newIndustryKnowledgeTestRouter(t, stub, "secret-token")
+
+	w := httptest.NewRecorder()
+	req := httptest.NewRequest(http.MethodPatch, "/api/v1/industry-knowledge-bases/industry-1/ragflow-dataset/embedding-model", bytes.NewBufferString(`{"name":"BAAI/bge-m3","provider":"OpenAI-API-Compatible"}`))
+	req.Header.Set("Content-Type", "application/json")
+	req = withPrincipal(req, auth.Principal{UserID: "u-admin", Role: domain.UserRolePlatformAdmin})
+	router.ServeHTTP(w, req)
+
+	require.Equal(t, http.StatusAccepted, w.Code)
+	assert.Equal(t, service.KnowledgeRAGFlowScopeIndustry, stub.updateEmbeddingModelScope)
+	assert.Equal(t, "industry-1", stub.updateEmbeddingModelTargetID)
+	assert.Equal(t, "BAAI/bge-m3", stub.updateEmbeddingModelInput.Name)
+	assert.Equal(t, "OpenAI-API-Compatible", stub.updateEmbeddingModelInput.Provider)
+}
+
+// TestIndustryKnowledgePatchEmbeddingModelRejectsBadJSON 验证行业库模型修改请求体不是合法 JSON 时返回统一模型名称错误文案。
+func TestIndustryKnowledgePatchEmbeddingModelRejectsBadJSON(t *testing.T) {
+	stub := &industryKnowledgeServiceStub{}
+	router := newIndustryKnowledgeTestRouter(t, stub, "secret-token")
+
+	w := httptest.NewRecorder()
+	req := httptest.NewRequest(http.MethodPatch, "/api/v1/industry-knowledge-bases/industry-1/ragflow-dataset/embedding-model", bytes.NewBufferString(`{"name":`))
+	req.Header.Set("Content-Type", "application/json")
+	req = withPrincipal(req, auth.Principal{UserID: "u-admin", Role: domain.UserRolePlatformAdmin})
+	router.ServeHTTP(w, req)
+
+	require.Equal(t, http.StatusBadRequest, w.Code)
+	assert.Contains(t, w.Body.String(), `"code":"BAD_REQUEST"`)
+	assert.Contains(t, w.Body.String(), "模型名称不能为空")
+	assert.Empty(t, stub.updateEmbeddingModelTargetID)
 }

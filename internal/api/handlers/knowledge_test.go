@@ -36,6 +36,20 @@ type knowledgeServiceStub struct {
 	openCloses      int
 	clearOrgErr     error
 	clearOrgID      string
+
+	listEmbeddingModelsResult service.KnowledgeEmbeddingModelListResult
+	listEmbeddingModelsErr    error
+
+	ragflowDatasetResult   service.KnowledgeRAGFlowDatasetInfoResult
+	ragflowDatasetErr      error
+	ragflowDatasetScope    string
+	ragflowDatasetTargetID string
+
+	updateEmbeddingModelResult   service.KnowledgeRAGFlowDatasetInfoResult
+	updateEmbeddingModelErr      error
+	updateEmbeddingModelScope    string
+	updateEmbeddingModelTargetID string
+	updateEmbeddingModelInput    service.KnowledgeEmbeddingModelInput
 }
 
 func (s *knowledgeServiceStub) ListOrg(_ context.Context, _ auth.Principal, _ string, _, _ int32, _, _ string) (service.KnowledgeListResult, error) {
@@ -87,6 +101,23 @@ func (s *knowledgeServiceStub) DeleteAppFile(context.Context, auth.Principal, st
 
 func (s *knowledgeServiceStub) ReparseAppFile(context.Context, auth.Principal, string, string) (service.KnowledgeDocumentResult, error) {
 	return service.KnowledgeDocumentResult{}, nil
+}
+
+func (s *knowledgeServiceStub) ListKnowledgeEmbeddingModels(context.Context, auth.Principal) (service.KnowledgeEmbeddingModelListResult, error) {
+	return s.listEmbeddingModelsResult, s.listEmbeddingModelsErr
+}
+
+func (s *knowledgeServiceStub) GetKnowledgeRAGFlowDatasetInfo(_ context.Context, _ auth.Principal, scope, targetID string) (service.KnowledgeRAGFlowDatasetInfoResult, error) {
+	s.ragflowDatasetScope = scope
+	s.ragflowDatasetTargetID = targetID
+	return s.ragflowDatasetResult, s.ragflowDatasetErr
+}
+
+func (s *knowledgeServiceStub) UpdateKnowledgeEmbeddingModel(_ context.Context, _ auth.Principal, scope, targetID string, input service.KnowledgeEmbeddingModelInput) (service.KnowledgeRAGFlowDatasetInfoResult, error) {
+	s.updateEmbeddingModelScope = scope
+	s.updateEmbeddingModelTargetID = targetID
+	s.updateEmbeddingModelInput = input
+	return s.updateEmbeddingModelResult, s.updateEmbeddingModelErr
 }
 
 // trackedReadCloser 用于测试下载流在响应写出后是否被负责写响应的代码关闭。
@@ -316,4 +347,95 @@ func TestKnowledgeDownloadOrgKeepsResponseHeadersWithRateLimit(t *testing.T) {
 	assert.Equal(t, "5", w.Header().Get("Content-Length"))
 	assert.Equal(t, "hello", w.Body.String())
 	assert.Equal(t, 1, stub.openCloses)
+}
+
+// TestKnowledgeListEmbeddingModelsRoutesToService 验证平台可选 embedding 模型列表路由透传 service，并保持 items 响应契约。
+func TestKnowledgeListEmbeddingModelsRoutesToService(t *testing.T) {
+	stub := &knowledgeServiceStub{listEmbeddingModelsResult: service.KnowledgeEmbeddingModelListResult{
+		Items: []service.KnowledgeEmbeddingModelResult{{Name: "BAAI/bge-m3", Label: "BGE M3", Provider: "OpenAI-API-Compatible", Available: true}},
+	}}
+	router := newKnowledgeTestRouter(t, stub)
+
+	w := httptest.NewRecorder()
+	req := httptest.NewRequest(http.MethodGet, "/api/v1/knowledge/embedding-models", nil)
+	req = withPrincipal(req, auth.Principal{UserID: "u-admin", Role: domain.UserRolePlatformAdmin})
+	router.ServeHTTP(w, req)
+
+	require.Equal(t, http.StatusOK, w.Code)
+	assert.Contains(t, w.Body.String(), `"items"`)
+	assert.Contains(t, w.Body.String(), `"name":"BAAI/bge-m3"`)
+	assert.Contains(t, w.Body.String(), `"provider":"OpenAI-API-Compatible"`)
+}
+
+// TestKnowledgeGetOrgRAGFlowDatasetRoutesToService 验证企业 RAGFlow dataset 查询路由使用 org scope 和企业 ID 调用 service。
+func TestKnowledgeGetOrgRAGFlowDatasetRoutesToService(t *testing.T) {
+	stub := &knowledgeServiceStub{ragflowDatasetResult: service.KnowledgeRAGFlowDatasetInfoResult{
+		Scope: service.KnowledgeRAGFlowScopeOrg, TargetID: "org-1", TargetName: "企业一", Status: "ok",
+	}}
+	router := newKnowledgeTestRouter(t, stub)
+
+	w := httptest.NewRecorder()
+	req := httptest.NewRequest(http.MethodGet, "/api/v1/organizations/org-1/knowledge/ragflow-dataset", nil)
+	req = withPrincipal(req, auth.Principal{UserID: "u-admin", Role: domain.UserRolePlatformAdmin})
+	router.ServeHTTP(w, req)
+
+	require.Equal(t, http.StatusOK, w.Code)
+	assert.Equal(t, service.KnowledgeRAGFlowScopeOrg, stub.ragflowDatasetScope)
+	assert.Equal(t, "org-1", stub.ragflowDatasetTargetID)
+	assert.Contains(t, w.Body.String(), `"status":"ok"`)
+}
+
+// TestKnowledgePatchOrgEmbeddingModelBindsHumanModelName 验证企业模型修改只接收人类可读模型名和 provider，并返回异步处理状态。
+func TestKnowledgePatchOrgEmbeddingModelBindsHumanModelName(t *testing.T) {
+	stub := &knowledgeServiceStub{updateEmbeddingModelResult: service.KnowledgeRAGFlowDatasetInfoResult{
+		Scope: service.KnowledgeRAGFlowScopeOrg, TargetID: "org-1", TargetName: "企业一", Status: "ok",
+	}}
+	router := newKnowledgeTestRouter(t, stub)
+
+	w := httptest.NewRecorder()
+	req := httptest.NewRequest(http.MethodPatch, "/api/v1/organizations/org-1/knowledge/ragflow-dataset/embedding-model", bytes.NewBufferString(`{"name":"BAAI/bge-m3","provider":"OpenAI-API-Compatible"}`))
+	req.Header.Set("Content-Type", "application/json")
+	req = withPrincipal(req, auth.Principal{UserID: "u-admin", Role: domain.UserRolePlatformAdmin})
+	router.ServeHTTP(w, req)
+
+	require.Equal(t, http.StatusAccepted, w.Code)
+	assert.Equal(t, service.KnowledgeRAGFlowScopeOrg, stub.updateEmbeddingModelScope)
+	assert.Equal(t, "org-1", stub.updateEmbeddingModelTargetID)
+	assert.Equal(t, "BAAI/bge-m3", stub.updateEmbeddingModelInput.Name)
+	assert.Equal(t, "OpenAI-API-Compatible", stub.updateEmbeddingModelInput.Provider)
+}
+
+// TestKnowledgeGetAppRAGFlowDatasetRoutesToService 验证应用 RAGFlow dataset 查询路由使用 app scope 和实例 ID 调用 service。
+func TestKnowledgeGetAppRAGFlowDatasetRoutesToService(t *testing.T) {
+	stub := &knowledgeServiceStub{ragflowDatasetResult: service.KnowledgeRAGFlowDatasetInfoResult{
+		Scope: service.KnowledgeRAGFlowScopeApp, TargetID: "app-1", TargetName: "实例一", Status: "ok",
+	}}
+	router := newKnowledgeTestRouter(t, stub)
+
+	w := httptest.NewRecorder()
+	req := httptest.NewRequest(http.MethodGet, "/api/v1/apps/app-1/knowledge/ragflow-dataset", nil)
+	req = withPrincipal(req, auth.Principal{UserID: "u-admin", Role: domain.UserRolePlatformAdmin})
+	router.ServeHTTP(w, req)
+
+	require.Equal(t, http.StatusOK, w.Code)
+	assert.Equal(t, service.KnowledgeRAGFlowScopeApp, stub.ragflowDatasetScope)
+	assert.Equal(t, "app-1", stub.ragflowDatasetTargetID)
+	assert.Contains(t, w.Body.String(), `"status":"ok"`)
+}
+
+// TestKnowledgePatchAppEmbeddingModelRejectsMissingName 验证应用模型修改缺少模型名称时在 handler 层返回统一业务文案。
+func TestKnowledgePatchAppEmbeddingModelRejectsMissingName(t *testing.T) {
+	stub := &knowledgeServiceStub{}
+	router := newKnowledgeTestRouter(t, stub)
+
+	w := httptest.NewRecorder()
+	req := httptest.NewRequest(http.MethodPatch, "/api/v1/apps/app-1/knowledge/ragflow-dataset/embedding-model", bytes.NewBufferString(`{"provider":"OpenAI-API-Compatible"}`))
+	req.Header.Set("Content-Type", "application/json")
+	req = withPrincipal(req, auth.Principal{UserID: "u-admin", Role: domain.UserRolePlatformAdmin})
+	router.ServeHTTP(w, req)
+
+	require.Equal(t, http.StatusBadRequest, w.Code)
+	assert.Contains(t, w.Body.String(), `"code":"BAD_REQUEST"`)
+	assert.Contains(t, w.Body.String(), "模型名称不能为空")
+	assert.Empty(t, stub.updateEmbeddingModelTargetID)
 }

@@ -161,6 +161,14 @@ type RuntimeKnowledgeSearchRequest struct {
 	TopK int32 `json:"top_k"`
 }
 
+// UpdateKnowledgeEmbeddingModelRequest 是平台管理员修改 RAGFlow dataset embedding 模型的请求体。
+type UpdateKnowledgeEmbeddingModelRequest struct {
+	// Name 是 RAGFlow 控制台可见的模型名，不使用 RAGFlow 内部拼接 ID。
+	Name string `json:"name" binding:"required"`
+	// Provider 是模型来源；为空时后端按 name 做唯一匹配。
+	Provider string `json:"provider"`
+}
+
 // CreateIndustryKnowledgeBaseRequest 是创建行业知识库请求体。
 type CreateIndustryKnowledgeBaseRequest struct {
 	// Name 是行业知识库展示名，在未删除行业库中必须唯一。
