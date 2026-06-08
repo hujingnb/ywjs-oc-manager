@@ -34,7 +34,10 @@ const (
 // RAGFlowKnowledgeClient 是 service 层依赖的 RAGFlow 最小能力集。
 // 这里不暴露 RAGFlow 凭证、dataset 选择权或权限字段，调用方只能传 service 解析后的 dataset ID。
 type RAGFlowKnowledgeClient interface {
-	CreateDataset(ctx context.Context, name, chunkMethod string) (ragflow.Dataset, error)
+	CreateDataset(ctx context.Context, req ragflow.CreateDatasetRequest) (ragflow.Dataset, error)
+	GetDataset(ctx context.Context, datasetID string) (ragflow.Dataset, error)
+	UpdateDatasetEmbeddingModel(ctx context.Context, datasetID, embeddingModel string) error
+	RunDatasetEmbedding(ctx context.Context, datasetID string) error
 	DeleteDatasets(ctx context.Context, ids []string) error
 	UploadDocument(ctx context.Context, datasetID, filename string, body io.Reader) (ragflow.Document, error)
 	DownloadDocument(ctx context.Context, datasetID, documentID string) (io.ReadCloser, int64, error)
@@ -1132,7 +1135,12 @@ func (s *KnowledgeService) ensureExistingDataset(ctx context.Context, dataset sq
 }
 
 func (s *KnowledgeService) createRemoteDataset(ctx context.Context, dataset sqlc.RagflowDataset, claimToken string) (sqlc.RagflowDataset, error) {
-	remote, err := s.ragflowClient().CreateDataset(ctx, dataset.Name, s.datasetChunkMethod)
+	// 创建远端 dataset 时把 manager 配置的默认模型一并提交；空值保持 RAGFlow 服务端默认行为。
+	remote, err := s.ragflowClient().CreateDataset(ctx, ragflow.CreateDatasetRequest{
+		Name:           dataset.Name,
+		ChunkMethod:    s.datasetChunkMethod,
+		EmbeddingModel: s.defaultEmbeddingModel,
+	})
 	if err != nil {
 		// MarkRAGFlowDatasetFailed 为 :exec；失败写入是 best-effort，忽略返回值。
 		_ = s.store.MarkRAGFlowDatasetFailed(ctx, sqlc.MarkRAGFlowDatasetFailedParams{
@@ -1196,8 +1204,17 @@ func (s *KnowledgeService) ragflowClient() RAGFlowKnowledgeClient {
 
 type missingRAGFlowClient struct{}
 
-func (missingRAGFlowClient) CreateDataset(context.Context, string, string) (ragflow.Dataset, error) {
+func (missingRAGFlowClient) CreateDataset(context.Context, ragflow.CreateDatasetRequest) (ragflow.Dataset, error) {
 	return ragflow.Dataset{}, ErrKnowledgeMissing
+}
+func (missingRAGFlowClient) GetDataset(context.Context, string) (ragflow.Dataset, error) {
+	return ragflow.Dataset{}, ErrKnowledgeMissing
+}
+func (missingRAGFlowClient) UpdateDatasetEmbeddingModel(context.Context, string, string) error {
+	return ErrKnowledgeMissing
+}
+func (missingRAGFlowClient) RunDatasetEmbedding(context.Context, string) error {
+	return ErrKnowledgeMissing
 }
 func (missingRAGFlowClient) DeleteDatasets(context.Context, []string) error {
 	return ErrKnowledgeMissing

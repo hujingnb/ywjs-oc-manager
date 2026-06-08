@@ -29,10 +29,34 @@ type Client struct {
 	http *http.Client
 }
 
-// Dataset 描述 RAGFlow dataset 的基础字段。
+// CreateDatasetRequest 描述创建 RAGFlow dataset 所需的 manager 输入。
+type CreateDatasetRequest struct {
+	// Name 是 RAGFlow dataset 名称。
+	Name string
+	// ChunkMethod 是 RAGFlow parser/chunk method。
+	ChunkMethod string
+	// EmbeddingModel 是人类可读模型名或 RAGFlow 接口接受的内部模型标识。
+	EmbeddingModel string
+}
+
+// Dataset 描述 RAGFlow dataset 的基础字段和当前 embedding 配置。
 type Dataset struct {
-	ID   string `json:"id"`
-	Name string `json:"name"`
+	ID                string `json:"id"`
+	Name              string `json:"name"`
+	EmbeddingModelID  string `json:"embd_id"`
+	TenantEmbeddingID string `json:"tenant_embd_id"`
+	ParserID          string `json:"parser_id"`
+	DocNum            int32  `json:"doc_num"`
+	ChunkNum          int32  `json:"chunk_num"`
+}
+
+// EmbeddingModel 描述 RAGFlow 可用 embedding 模型；InternalID 仅后端提交 RAGFlow 时使用。
+type EmbeddingModel struct {
+	Name       string
+	Label      string
+	Provider   string
+	InternalID string
+	Available  bool
 }
 
 // Document 描述 RAGFlow document 的基础字段。
@@ -175,16 +199,39 @@ func NewClient(baseURL, apiKey string, timeout time.Duration) (*Client, error) {
 }
 
 // CreateDataset 创建 RAGFlow dataset。
-func (c *Client) CreateDataset(ctx context.Context, name, chunkMethod string) (Dataset, error) {
+func (c *Client) CreateDataset(ctx context.Context, req CreateDatasetRequest) (Dataset, error) {
 	var out Dataset
 	body := map[string]string{
-		"name":         name,
-		"chunk_method": chunkMethod,
+		"name":         req.Name,
+		"chunk_method": req.ChunkMethod,
+	}
+	if strings.TrimSpace(req.EmbeddingModel) != "" {
+		body["embedding_model"] = strings.TrimSpace(req.EmbeddingModel)
 	}
 	if err := c.doJSON(ctx, http.MethodPost, "/api/v1/datasets", nil, body, &out); err != nil {
 		return Dataset{}, err
 	}
 	return out, nil
+}
+
+// GetDataset 实时读取 RAGFlow dataset 信息。
+func (c *Client) GetDataset(ctx context.Context, datasetID string) (Dataset, error) {
+	var out Dataset
+	if err := c.doJSON(ctx, http.MethodGet, c.apiPath("/api/v1/datasets", datasetID), nil, nil, &out); err != nil {
+		return Dataset{}, err
+	}
+	return out, nil
+}
+
+// UpdateDatasetEmbeddingModel 修改 RAGFlow dataset 的 embedding 模型。
+func (c *Client) UpdateDatasetEmbeddingModel(ctx context.Context, datasetID, embeddingModel string) error {
+	body := map[string]string{"embedding_model": strings.TrimSpace(embeddingModel)}
+	return c.doJSON(ctx, http.MethodPut, c.apiPath("/api/v1/datasets", datasetID), nil, body, nil)
+}
+
+// RunDatasetEmbedding 触发指定 dataset 下全部文件重新 embedding。
+func (c *Client) RunDatasetEmbedding(ctx context.Context, datasetID string) error {
+	return c.doJSON(ctx, http.MethodPost, c.apiPath("/api/v1/datasets", datasetID, "embedding"), nil, nil, nil)
 }
 
 // DeleteDatasets 删除一个或多个 RAGFlow dataset。

@@ -40,9 +40,77 @@ func TestClientCreateDataset(t *testing.T) {
 	t.Cleanup(server.Close)
 
 	client := newTestClient(t, server.URL)
-	got, err := client.CreateDataset(context.Background(), "oc-org-1", "naive")
+	got, err := client.CreateDataset(context.Background(), CreateDatasetRequest{Name: "oc-org-1", ChunkMethod: "naive"})
 	require.NoError(t, err)
 	assert.Equal(t, Dataset{ID: "ds-1", Name: "oc-org-1"}, got)
+}
+
+// TestClientCreateDatasetIncludesEmbeddingModel 验证创建 dataset 时显式提交 manager 配置的默认 embedding 模型。
+func TestClientCreateDatasetIncludesEmbeddingModel(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		assert.Equal(t, http.MethodPost, r.Method)
+		assert.Equal(t, "/api/v1/datasets", r.URL.Path)
+		var body map[string]any
+		require.NoError(t, json.NewDecoder(r.Body).Decode(&body))
+		assert.Equal(t, "oc-org-1", body["name"])
+		assert.Equal(t, "naive", body["chunk_method"])
+		assert.Equal(t, "BAAI/bge-m3", body["embedding_model"])
+		_, _ = w.Write([]byte(`{"code":0,"data":{"id":"ds-1","name":"oc-org-1"}}`))
+	}))
+	t.Cleanup(server.Close)
+
+	client := newTestClient(t, server.URL)
+	got, err := client.CreateDataset(context.Background(), CreateDatasetRequest{
+		Name: "oc-org-1", ChunkMethod: "naive", EmbeddingModel: "BAAI/bge-m3",
+	})
+	require.NoError(t, err)
+	assert.Equal(t, "ds-1", got.ID)
+}
+
+// TestClientGetDatasetDecodesEmbeddingFields 验证 dataset detail 会保留 RAGFlow 当前 embedding 模型和统计信息。
+func TestClientGetDatasetDecodesEmbeddingFields(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		assert.Equal(t, http.MethodGet, r.Method)
+		assert.Equal(t, "/api/v1/datasets/ds-1", r.URL.Path)
+		_, _ = w.Write([]byte(`{"code":0,"data":{"id":"ds-1","name":"oc-org","embd_id":"BAAI/bge-m3___OpenAI-API@OpenAI-API-Compatible","tenant_embd_id":"tenant-embd","parser_id":"naive","doc_num":2,"chunk_num":15}}`))
+	}))
+	t.Cleanup(server.Close)
+
+	client := newTestClient(t, server.URL)
+	got, err := client.GetDataset(context.Background(), "ds-1")
+	require.NoError(t, err)
+	assert.Equal(t, "BAAI/bge-m3___OpenAI-API@OpenAI-API-Compatible", got.EmbeddingModelID)
+	assert.Equal(t, int32(2), got.DocNum)
+	assert.Equal(t, int32(15), got.ChunkNum)
+}
+
+// TestClientUpdateDatasetEmbeddingModel 验证修改 embedding 模型时只提交 RAGFlow 需要的字段。
+func TestClientUpdateDatasetEmbeddingModel(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		assert.Equal(t, http.MethodPut, r.Method)
+		assert.Equal(t, "/api/v1/datasets/ds-1", r.URL.Path)
+		var body map[string]any
+		require.NoError(t, json.NewDecoder(r.Body).Decode(&body))
+		assert.Equal(t, "BAAI/bge-m3", body["embedding_model"])
+		_, _ = w.Write([]byte(`{"code":0,"data":null}`))
+	}))
+	t.Cleanup(server.Close)
+
+	client := newTestClient(t, server.URL)
+	require.NoError(t, client.UpdateDatasetEmbeddingModel(context.Background(), "ds-1", "BAAI/bge-m3"))
+}
+
+// TestClientRunDatasetEmbedding 验证整库 embedding 重跑调用 RAGFlow 官方 endpoint。
+func TestClientRunDatasetEmbedding(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		assert.Equal(t, http.MethodPost, r.Method)
+		assert.Equal(t, "/api/v1/datasets/ds-1/embedding", r.URL.Path)
+		_, _ = w.Write([]byte(`{"code":0,"data":null}`))
+	}))
+	t.Cleanup(server.Close)
+
+	client := newTestClient(t, server.URL)
+	require.NoError(t, client.RunDatasetEmbedding(context.Background(), "ds-1"))
 }
 
 // TestClientUploadDocumentUsesMultipart 验证上传文档使用 RAGFlow 要求的 multipart file 字段，
@@ -199,7 +267,7 @@ func TestClientRAGFlowCodeError(t *testing.T) {
 	t.Cleanup(server.Close)
 
 	client := newTestClient(t, server.URL)
-	_, err := client.CreateDataset(context.Background(), "oc-org-1", "naive")
+	_, err := client.CreateDataset(context.Background(), CreateDatasetRequest{Name: "oc-org-1", ChunkMethod: "naive"})
 	require.Error(t, err)
 	assert.Contains(t, err.Error(), "bad api key")
 }

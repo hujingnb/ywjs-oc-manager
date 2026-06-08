@@ -601,6 +601,7 @@ func TestDeleteAppDatasetRemovesRemoteAndLocalMapping(t *testing.T) {
 func TestEnsureOrgDatasetCreatesRemoteDatasetMapping(t *testing.T) {
 	svc, store, rf := newRAGFlowKnowledgeTestService(t)
 	svc.SetDatasetChunkMethod("manual")
+	svc.SetDefaultEmbeddingModel("BAAI/bge-m3")
 	store.missingOrgDataset = true
 	rf.createDatasetResult = ragflow.Dataset{ID: "new-org-ds", Name: "remote-org-name"}
 
@@ -614,6 +615,7 @@ func TestEnsureOrgDatasetCreatesRemoteDatasetMapping(t *testing.T) {
 	assert.Equal(t, "new-org-ds", dataset.RagflowDatasetID.String)
 	require.Len(t, rf.createDatasetCalls, 1)
 	assert.Equal(t, "manual", rf.createDatasetCalls[0].chunkMethod)
+	assert.Equal(t, "BAAI/bge-m3", rf.createDatasetCalls[0].embeddingModel)
 	require.Len(t, store.createdDatasets, 1)
 	assert.Equal(t, "creating", store.createdDatasets[0].Status)
 	require.Len(t, store.activatedDatasets, 1)
@@ -1592,6 +1594,7 @@ func (s *fakeKnowledgeStore) recordedEvents() []string {
 type fakeRAGFlowKnowledgeClient struct {
 	createDatasetResult     ragflow.Dataset
 	createDatasetCalls      []ragflowCreateDatasetCall
+	datasetDetail           ragflow.Dataset
 	deleteDatasetCalls      [][]string
 	uploadDocument          ragflow.Document
 	uploadErr               error
@@ -1612,8 +1615,9 @@ type fakeRAGFlowKnowledgeClient struct {
 }
 
 type ragflowCreateDatasetCall struct {
-	name        string
-	chunkMethod string
+	name           string
+	chunkMethod    string
+	embeddingModel string
 }
 
 type ragflowUploadCall struct {
@@ -1638,12 +1642,31 @@ type ragflowRetrieveCall struct {
 	topK       int32
 }
 
-func (f *fakeRAGFlowKnowledgeClient) CreateDataset(_ context.Context, name, chunkMethod string) (ragflow.Dataset, error) {
-	f.createDatasetCalls = append(f.createDatasetCalls, ragflowCreateDatasetCall{name: name, chunkMethod: chunkMethod})
+func (f *fakeRAGFlowKnowledgeClient) CreateDataset(_ context.Context, req ragflow.CreateDatasetRequest) (ragflow.Dataset, error) {
+	f.createDatasetCalls = append(f.createDatasetCalls, ragflowCreateDatasetCall{
+		name:           req.Name,
+		chunkMethod:    req.ChunkMethod,
+		embeddingModel: req.EmbeddingModel,
+	})
 	if f.createDatasetResult.ID == "" {
-		return ragflow.Dataset{ID: "created-ds", Name: name}, nil
+		return ragflow.Dataset{ID: "created-ds", Name: req.Name}, nil
 	}
 	return f.createDatasetResult, nil
+}
+
+func (f *fakeRAGFlowKnowledgeClient) GetDataset(_ context.Context, datasetID string) (ragflow.Dataset, error) {
+	if f.datasetDetail.ID == "" {
+		return ragflow.Dataset{ID: datasetID}, nil
+	}
+	return f.datasetDetail, nil
+}
+
+func (f *fakeRAGFlowKnowledgeClient) UpdateDatasetEmbeddingModel(context.Context, string, string) error {
+	return nil
+}
+
+func (f *fakeRAGFlowKnowledgeClient) RunDatasetEmbedding(context.Context, string) error {
+	return nil
 }
 
 func (f *fakeRAGFlowKnowledgeClient) DeleteDatasets(_ context.Context, ids []string) error {
