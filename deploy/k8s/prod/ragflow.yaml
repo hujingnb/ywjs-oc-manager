@@ -85,12 +85,11 @@ spec:
           # 上游 ragflow 镜像，转推到移动云私有仓库 public 命名空间
           image: ywjs-26257ea5.ecis.huabei-3.cmecloud.cn/public/ragflow:v0.25.6
           args: ["--enable-adminserver"]
-          # 资源配额：RAGFlow 含 server + task_executor + DeepDOC 解析，生产按解析峰值提高 memory request，
-          # 降低节点内存压力下因实际占用远超 request 而被优先驱逐的概率。
+          # 资源配额（起步值）：RAGFlow 含 server + task_executor + DeepDOC 解析，较重，按文档量与并发调整。
           resources:
             requests:
               cpu: "1"
-              memory: "4Gi"
+              memory: "2Gi"
             limits:
               cpu: "4"
               memory: "8Gi"
