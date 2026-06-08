@@ -6,6 +6,7 @@ import (
 	"io"
 	"net/http"
 	"net/http/httptest"
+	"strconv"
 	"strings"
 	"testing"
 
@@ -71,19 +72,52 @@ func TestClientCreateDatasetIncludesEmbeddingModel(t *testing.T) {
 func TestClientGetDatasetDecodesEmbeddingFields(t *testing.T) {
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		assert.Equal(t, http.MethodGet, r.Method)
-		assert.Equal(t, "/api/v1/datasets/ds-1", r.URL.Path)
-		_, _ = w.Write([]byte(`{"code":0,"data":{"id":"ds-1","name":"oc-org","embd_id":"BAAI/bge-m3___OpenAI-API@OpenAI-API-Compatible","tenant_embd_id":"tenant-embd","parser_id":"naive","doc_num":2,"chunk_num":15}}`))
+		assert.Equal(t, "/api/v1/datasets", r.URL.Path)
+		assert.Equal(t, "ds-1", r.URL.Query().Get("id"))
+		assert.Equal(t, "1", r.URL.Query().Get("page"))
+		assert.Equal(t, "1", r.URL.Query().Get("page_size"))
+		assert.Equal(t, "true", r.URL.Query().Get("include_parsing_status"))
+		_, _ = w.Write([]byte(`{"code":0,"data":[{"id":"ds-1","name":"oc-org","embedding_model":"BAAI/bge-m3","chunk_method":"naive","document_count":2,"chunk_count":15}]}`))
 	}))
 	t.Cleanup(server.Close)
 
 	client := newTestClient(t, server.URL)
 	got, err := client.GetDataset(context.Background(), "ds-1")
 	require.NoError(t, err)
+	assert.Equal(t, "ds-1", got.ID)
+	assert.Equal(t, "oc-org", got.Name)
+	assert.Equal(t, "BAAI/bge-m3", got.EmbeddingModelID)
+	assert.Equal(t, "naive", got.ParserID)
+	assert.Equal(t, int32(2), got.DocNum)
+	assert.Equal(t, int32(15), got.ChunkNum)
+}
+
+// TestDatasetUnmarshalJSONSupportsLegacyFields 验证 dataset 解码兼容旧内部字段名，避免 RAGFlow 版本差异导致模型信息丢失。
+func TestDatasetUnmarshalJSONSupportsLegacyFields(t *testing.T) {
+	var got Dataset
+	require.NoError(t, json.Unmarshal([]byte(`{"id":"ds-1","name":"oc-org","embd_id":"BAAI/bge-m3___OpenAI-API@OpenAI-API-Compatible","tenant_embd_id":"tenant-embd","parser_id":"naive","doc_num":2,"chunk_num":15}`), &got))
+
 	assert.Equal(t, "BAAI/bge-m3___OpenAI-API@OpenAI-API-Compatible", got.EmbeddingModelID)
 	assert.Equal(t, "tenant-embd", got.TenantEmbeddingID)
 	assert.Equal(t, "naive", got.ParserID)
 	assert.Equal(t, int32(2), got.DocNum)
 	assert.Equal(t, int32(15), got.ChunkNum)
+}
+
+// TestClientGetDatasetReturnsErrorWhenEmpty 验证 RAGFlow 按 ID 查询不到 dataset 时返回带远端 ID 的协议错误。
+func TestClientGetDatasetReturnsErrorWhenEmpty(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		assert.Equal(t, http.MethodGet, r.Method)
+		assert.Equal(t, "/api/v1/datasets", r.URL.Path)
+		assert.Equal(t, "missing-ds", r.URL.Query().Get("id"))
+		_, _ = w.Write([]byte(`{"code":0,"data":[]}`))
+	}))
+	t.Cleanup(server.Close)
+
+	client := newTestClient(t, server.URL)
+	_, err := client.GetDataset(context.Background(), "missing-ds")
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "missing-ds")
 }
 
 // TestClientUpdateDatasetEmbeddingModel 验证修改 embedding 模型时只提交 RAGFlow 需要的字段。
@@ -103,17 +137,99 @@ func TestClientUpdateDatasetEmbeddingModel(t *testing.T) {
 	require.NoError(t, client.UpdateDatasetEmbeddingModel(context.Background(), "ds-1", "BAAI/bge-m3"))
 }
 
-// TestClientRunDatasetEmbedding 验证整库 embedding 重跑调用 RAGFlow 官方 endpoint。
+// TestClientRunDatasetEmbedding 验证整库 embedding 重跑先读取文档列表，再调用 RAGFlow 官方 chunks 解析 endpoint。
 func TestClientRunDatasetEmbedding(t *testing.T) {
+	var seen []string
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		assert.Equal(t, http.MethodPost, r.Method)
-		assert.Equal(t, "/api/v1/datasets/ds-1/embedding", r.URL.Path)
-		_, _ = w.Write([]byte(`{"code":0,"data":null}`))
+		seen = append(seen, r.Method+" "+r.URL.Path)
+		switch len(seen) {
+		case 1:
+			assert.Equal(t, http.MethodGet, r.Method)
+			assert.Equal(t, "/api/v1/datasets/ds-1/documents", r.URL.Path)
+			assert.Equal(t, "1", r.URL.Query().Get("page"))
+			assert.Equal(t, "100", r.URL.Query().Get("page_size"))
+			_, _ = w.Write([]byte(`{"code":0,"data":{"docs":[{"id":"doc-1","name":"a.md"},{"id":"doc-2","name":"b.md"},{"id":" ","name":"blank.md"}],"total":3}}`))
+		case 2:
+			assert.Equal(t, http.MethodPost, r.Method)
+			assert.Equal(t, "/api/v1/datasets/ds-1/chunks", r.URL.Path)
+			var body struct {
+				DocumentIDs []string `json:"document_ids"`
+			}
+			require.NoError(t, json.NewDecoder(r.Body).Decode(&body))
+			assert.Equal(t, []string{"doc-1", "doc-2"}, body.DocumentIDs)
+			_, _ = w.Write([]byte(`{"code":0,"data":null}`))
+		default:
+			t.Fatalf("unexpected request %s %s", r.Method, r.URL.Path)
+		}
 	}))
 	t.Cleanup(server.Close)
 
 	client := newTestClient(t, server.URL)
 	require.NoError(t, client.RunDatasetEmbedding(context.Background(), "ds-1"))
+	assert.Equal(t, []string{
+		"GET /api/v1/datasets/ds-1/documents",
+		"POST /api/v1/datasets/ds-1/chunks",
+	}, seen)
+}
+
+// TestClientRunDatasetEmbeddingPagesDocuments 验证整库重跑会按 RAGFlow 分页收集全部 document ID。
+func TestClientRunDatasetEmbeddingPagesDocuments(t *testing.T) {
+	var postIDs []string
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch r.Method + " " + r.URL.Path {
+		case "GET /api/v1/datasets/ds-1/documents":
+			page := r.URL.Query().Get("page")
+			assert.Equal(t, "100", r.URL.Query().Get("page_size"))
+			if page == "1" {
+				docs := make([]map[string]string, 0, 100)
+				for index := 0; index < 100; index++ {
+					docs = append(docs, map[string]string{"id": "doc-" + strconv.Itoa(index+1)})
+				}
+				w.Header().Set("Content-Type", "application/json")
+				require.NoError(t, json.NewEncoder(w).Encode(map[string]any{"code": 0, "data": map[string]any{"docs": docs, "total": 101}}))
+				return
+			}
+			assert.Equal(t, "2", page)
+			_, _ = w.Write([]byte(`{"code":0,"data":{"docs":[{"id":"doc-101"}],"total":101}}`))
+		case "POST /api/v1/datasets/ds-1/chunks":
+			var body struct {
+				DocumentIDs []string `json:"document_ids"`
+			}
+			require.NoError(t, json.NewDecoder(r.Body).Decode(&body))
+			postIDs = body.DocumentIDs
+			_, _ = w.Write([]byte(`{"code":0,"data":null}`))
+		default:
+			t.Fatalf("unexpected request %s %s", r.Method, r.URL.Path)
+		}
+	}))
+	t.Cleanup(server.Close)
+
+	client := newTestClient(t, server.URL)
+	require.NoError(t, client.RunDatasetEmbedding(context.Background(), "ds-1"))
+	require.Len(t, postIDs, 101)
+	assert.Equal(t, "doc-1", postIDs[0])
+	assert.Equal(t, "doc-101", postIDs[100])
+}
+
+// TestClientRunDatasetEmbeddingSkipsEmptyDataset 验证空 dataset 不调用 chunks 解析接口。
+func TestClientRunDatasetEmbeddingSkipsEmptyDataset(t *testing.T) {
+	var postCalls int
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch r.Method + " " + r.URL.Path {
+		case "GET /api/v1/datasets/ds-1/documents":
+			_, _ = w.Write([]byte(`{"code":0,"data":{"docs":[],"total":0}}`))
+		case "POST /api/v1/datasets/ds-1/chunks":
+			postCalls++
+			t.Fatalf("empty dataset should not trigger chunks parse")
+		default:
+			t.Fatalf("unexpected request %s %s", r.Method, r.URL.Path)
+		}
+	}))
+	t.Cleanup(server.Close)
+
+	client := newTestClient(t, server.URL)
+	require.NoError(t, client.RunDatasetEmbedding(context.Background(), "ds-1"))
+	assert.Zero(t, postCalls)
 }
 
 // TestClientUploadDocumentUsesMultipart 验证上传文档使用 RAGFlow 要求的 multipart file 字段，

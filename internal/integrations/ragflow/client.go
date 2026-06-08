@@ -41,13 +41,13 @@ type CreateDatasetRequest struct {
 
 // Dataset 描述 RAGFlow dataset 的基础字段和当前 embedding 配置。
 type Dataset struct {
-	ID                string `json:"id"`
-	Name              string `json:"name"`
-	EmbeddingModelID  string `json:"embd_id"`
-	TenantEmbeddingID string `json:"tenant_embd_id"`
-	ParserID          string `json:"parser_id"`
-	DocNum            int32  `json:"doc_num"`
-	ChunkNum          int32  `json:"chunk_num"`
+	ID                string
+	Name              string
+	EmbeddingModelID  string
+	TenantEmbeddingID string
+	ParserID          string
+	DocNum            int32
+	ChunkNum          int32
 }
 
 // EmbeddingModel 描述 RAGFlow 可用 embedding 模型；InternalID 仅后端提交 RAGFlow 时使用。
@@ -57,6 +57,46 @@ type EmbeddingModel struct {
 	Provider   string
 	InternalID string
 	Available  bool
+}
+
+// UnmarshalJSON 兼容 RAGFlow dataset 列表公开字段和旧内部字段名。
+func (d *Dataset) UnmarshalJSON(raw []byte) error {
+	var value struct {
+		ID                string `json:"id"`
+		Name              string `json:"name"`
+		EmbeddingModelID  string `json:"embd_id"`
+		EmbeddingModel    string `json:"embedding_model"`
+		TenantEmbeddingID string `json:"tenant_embd_id"`
+		ParserID          string `json:"parser_id"`
+		ChunkMethod       string `json:"chunk_method"`
+		DocNum            int32  `json:"doc_num"`
+		DocumentCount     int32  `json:"document_count"`
+		ChunkNum          int32  `json:"chunk_num"`
+		ChunkCount        int32  `json:"chunk_count"`
+	}
+	if err := json.Unmarshal(raw, &value); err != nil {
+		return err
+	}
+	d.ID = value.ID
+	d.Name = value.Name
+	d.EmbeddingModelID = value.EmbeddingModelID
+	if d.EmbeddingModelID == "" {
+		d.EmbeddingModelID = value.EmbeddingModel
+	}
+	d.TenantEmbeddingID = value.TenantEmbeddingID
+	d.ParserID = value.ParserID
+	if d.ParserID == "" {
+		d.ParserID = value.ChunkMethod
+	}
+	d.DocNum = value.DocNum
+	if d.DocNum == 0 {
+		d.DocNum = value.DocumentCount
+	}
+	d.ChunkNum = value.ChunkNum
+	if d.ChunkNum == 0 {
+		d.ChunkNum = value.ChunkCount
+	}
+	return nil
 }
 
 // Document 描述 RAGFlow document 的基础字段。
@@ -216,11 +256,19 @@ func (c *Client) CreateDataset(ctx context.Context, req CreateDatasetRequest) (D
 
 // GetDataset 实时读取 RAGFlow dataset 信息。
 func (c *Client) GetDataset(ctx context.Context, datasetID string) (Dataset, error) {
-	var out Dataset
-	if err := c.doJSON(ctx, http.MethodGet, c.apiPath("/api/v1/datasets", datasetID), nil, nil, &out); err != nil {
+	query := url.Values{}
+	query.Set("id", datasetID)
+	query.Set("page", "1")
+	query.Set("page_size", "1")
+	query.Set("include_parsing_status", "true")
+	var out []Dataset
+	if err := c.doJSON(ctx, http.MethodGet, "/api/v1/datasets", query, nil, &out); err != nil {
 		return Dataset{}, err
 	}
-	return out, nil
+	if len(out) == 0 {
+		return Dataset{}, fmt.Errorf("RAGFlow dataset %s 不存在", datasetID)
+	}
+	return out[0], nil
 }
 
 // UpdateDatasetEmbeddingModel 修改 RAGFlow dataset 的 embedding 模型。
@@ -231,7 +279,36 @@ func (c *Client) UpdateDatasetEmbeddingModel(ctx context.Context, datasetID, emb
 
 // RunDatasetEmbedding 触发指定 dataset 下全部文件重新 embedding。
 func (c *Client) RunDatasetEmbedding(ctx context.Context, datasetID string) error {
-	return c.doJSON(ctx, http.MethodPost, c.apiPath("/api/v1/datasets", datasetID, "embedding"), nil, nil, nil)
+	const pageSize int32 = 100
+	var (
+		documentIDs []string
+		seenDocs    int32
+	)
+	for page := int32(1); ; page++ {
+		docs, total, err := c.ListDocuments(ctx, datasetID, page, pageSize, "", "")
+		if err != nil {
+			return err
+		}
+		if len(docs) == 0 {
+			break
+		}
+		seenDocs += int32(len(docs))
+		for _, doc := range docs {
+			if id := strings.TrimSpace(doc.ID); id != "" {
+				documentIDs = append(documentIDs, id)
+			}
+		}
+		if int32(len(docs)) < pageSize {
+			break
+		}
+		if total > 0 && seenDocs >= total {
+			break
+		}
+	}
+	if len(documentIDs) == 0 {
+		return nil
+	}
+	return c.ParseDocuments(ctx, datasetID, documentIDs)
 }
 
 // DeleteDatasets 删除一个或多个 RAGFlow dataset。
