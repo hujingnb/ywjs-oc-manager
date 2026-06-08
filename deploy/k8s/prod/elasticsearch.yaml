@@ -51,8 +51,8 @@ spec:
               value: "false"
             - name: bootstrap.memory_lock
               value: "false"
-            # 堆设 4g（容器内存上限 8Gi 的一半，另一半留给 Lucene page cache /
-            # 向量 HNSW / direct buffer）；负载增大可调，并同步调整 resources。
+            # 堆固定 4g，额外内存留给 Lucene page cache、向量 HNSW 与 direct buffer；
+            # 生产已切到 8c32g 节点，request 覆盖当前约 4.5Gi 常态占用，避免节点压力下被优先驱逐。
             - name: ES_JAVA_OPTS
               value: "-Xms4g -Xmx4g"
             - name: TZ
@@ -61,11 +61,11 @@ spec:
             - containerPort: 9200
           resources:
             requests:
-              cpu: "1"
-              memory: "4Gi"
+              cpu: "2"
+              memory: "6Gi"
             limits:
               cpu: "4"
-              memory: "8Gi"
+              memory: "10Gi"
           volumeMounts:
             - { name: data, mountPath: /usr/share/elasticsearch/data }
           # security 开启时 ES 对 / 返回 401，无认证 httpGet 探针会永远失败；
