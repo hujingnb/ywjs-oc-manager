@@ -4,10 +4,10 @@
 # 典型用途——更换知识库的 embedding 模型：
 #   RAGFlow 不允许在库内已有 chunk(旧维度向量)时通过 UI 改 embedding 模型——会触发维度预检
 #   报错「The dimension (X) ... is different from the original (Y)」。本脚本直接改 RAGFlow
-#   knowledgebase.embd_id 绕过该预检，再重解析全部文档。RAGFlow 重解析会逐个文档先按 doc_id
-#   删旧 chunk 再插新 chunk，且向量字段按维度命名(q_<dim>_vec)、新旧维度可共存，故能平滑过渡，
-#   最终整库收敛到新模型。仅当 knowledgebase.tenant_embd_id 为空时 embd_id 才决定解析所用模型
-#   (本脚本会校验)。
+#   knowledgebase.embd_id 或 tenant_embd_id 绕过该预检，再重解析全部文档。RAGFlow 重解析会逐个
+#   文档先按 doc_id 删旧 chunk 再插新 chunk，且向量字段按维度命名(q_<dim>_vec)、新旧维度可共存，
+#   故能平滑过渡，最终整库收敛到新模型。若 knowledgebase.tenant_embd_id 非空，RAGFlow 以该
+#   tenant_llm.id 决定解析模型，本脚本会改 tenant_embd_id；否则改 embd_id。
 #
 # 也可只重解析(不带目标模型)，用于模型已就绪、只想让全部文档重跑一遍的场景。
 #
@@ -39,7 +39,7 @@ TARGET_EMBD="${3:-}"
 BATCH="${4:-100}"
 [ -n "$KB_ARG" ] || { echo "用法: $0 <知识库ID> [dry|apply] [目标embd_id] [每批条数]"; exit 1; }
 
-RAG="$(kubectl --kubeconfig "$KC" -n "$NS" get pod -l app=ragflow -o jsonpath='{.items[0].metadata.name}')"
+RAG="$(kubectl --kubeconfig "$KC" -n "$NS" get pod -l app=ragflow --field-selector=status.phase=Running -o jsonpath='{.items[0].metadata.name}')"
 [ -n "$RAG" ] || { echo "未找到 ragflow pod"; exit 1; }
 
 sec() { kubectl --kubeconfig "$KC" -n "$NS" get secret "$SECRET" -o jsonpath="{.data.$1}" | base64 -d; }
@@ -110,27 +110,50 @@ print(f"  文档: manager={len(docs)}  ragflow doc_num={doc_num}  chunk_num={chu
 print(f"  当前 embedding 模型: {cur_embd}")
 
 will_switch = False
+switch_field = "embd_id"
+target_tenant_embd = None
+current_tenant_llm = None
+if tenant_embd:
+    rc.execute("SELECT id, llm_name FROM tenant_llm WHERE id=%s AND tenant_id=%s AND model_type='embedding'", (tenant_embd, tenant_id))
+    current_tenant_llm = rc.fetchone()
+    if not current_tenant_llm:
+        print(f"  ⚠️ 当前 tenant_embd_id={tenant_embd} 在 tenant_llm 中不存在；若指定目标模型，apply 会修正为目标 tenant_llm.id。")
+        if not target:
+            print("  未指定目标模型，无法判断应修正到哪个 tenant_llm.id，终止。")
+            raise SystemExit(1)
+    else:
+        print(f"  当前 tenant embedding 模型: id={current_tenant_llm[0]}  llm_name={current_tenant_llm[1]}")
+
 if target:
-    if tenant_embd:
-        print(f"  ⚠️ 该 kb 的 tenant_embd_id={tenant_embd} 非空，解析模型由它决定而非 embd_id；改 embd_id 不生效，请先处理。")
-        raise SystemExit(1)
     t_name = target.rsplit("@", 1)[0]
-    rc.execute("SELECT COUNT(*) FROM tenant_llm WHERE tenant_id=%s AND model_type='embedding' AND llm_name=%s", (tenant_id, t_name))
-    if rc.fetchone()[0] == 0:
+    rc.execute("SELECT id, llm_name FROM tenant_llm WHERE tenant_id=%s AND model_type='embedding' AND llm_name=%s", (tenant_id, t_name))
+    target_llm = rc.fetchone()
+    if not target_llm:
         print(f"  目标模型 {target} 未在该租户注册为 embedding 模型，终止。"); raise SystemExit(1)
-    will_switch = (target != cur_embd)
-    print(f"  目标 embedding 模型: {target} ({'将切换' if will_switch else '与当前一致，仅重解析'})")
+    if tenant_embd:
+        switch_field = "tenant_embd_id"
+        target_tenant_embd = target_llm[0]
+        will_switch = (str(target_tenant_embd) != str(tenant_embd) or target != cur_embd)
+        print(f"  目标 tenant embedding 模型: id={target_tenant_embd}  llm_name={target_llm[1]} ({'将切换' if will_switch else '与当前一致，仅重解析'})")
+    else:
+        will_switch = (target != cur_embd)
+        print(f"  目标 embedding 模型: {target} ({'将切换' if will_switch else '与当前一致，仅重解析'})")
 
 if mode != "apply":
-    act = f"切换模型为 {target} 并 " if will_switch else ""
+    act = f"切换 {switch_field} 为 {target_tenant_embd if switch_field == 'tenant_embd_id' else target} 并 " if will_switch else ""
     print(f"\ndry-run：将{act}重解析 {len(docs)} 个文档。未做任何修改。确认后用 apply 执行。")
     m.close(); r.close(); raise SystemExit(0)
 
-# 1) 换模型(直接改 embd_id，绕过 UI 维度预检)
+# 1) 换模型：tenant_embd_id 非空时必须更新它，否则解析仍会沿用旧 tenant_llm；为空时沿用 embd_id。
 if will_switch:
-    rc.execute("UPDATE knowledgebase SET embd_id=%s WHERE id=%s", (target, kb_id))
+    if switch_field == "tenant_embd_id":
+        rc.execute("UPDATE knowledgebase SET tenant_embd_id=%s, embd_id=%s WHERE id=%s", (target_tenant_embd, target, kb_id))
+        print(f"[模型] knowledgebase.tenant_embd_id: {tenant_embd} -> {target_tenant_embd}")
+        print(f"[模型] knowledgebase.embd_id: {cur_embd} -> {target}")
+    else:
+        rc.execute("UPDATE knowledgebase SET embd_id=%s WHERE id=%s", (target, kb_id))
+        print(f"[模型] knowledgebase.embd_id: {cur_embd} -> {target}")
     r.commit()
-    print(f"[模型] knowledgebase.embd_id: {cur_embd} -> {target}")
 
 # 2) 重解析全部：调 RAGFlow parse(同步置 run=1、清 progress_msg) + manager 复位 queued
 base = os.environ["RAG_BASE"].rstrip("/"); key = os.environ["RAG_KEY"]
