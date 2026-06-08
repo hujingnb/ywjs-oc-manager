@@ -567,6 +567,19 @@ func TestKnowledgeRAGFlowDatasetInfoReturnsNotCreated(t *testing.T) {
 	assert.Empty(t, rf.createDatasetCalls)
 }
 
+// TestKnowledgeRAGFlowDatasetInfoReturnsErrorStatus 验证 RAGFlow 详情读取失败会转成可展示的 error 状态。
+func TestKnowledgeRAGFlowDatasetInfoReturnsErrorStatus(t *testing.T) {
+	svc, _, rf := newRAGFlowKnowledgeTestService(t)
+	rf.datasetDetailErr = errors.New("ragflow unavailable")
+
+	result, err := svc.GetKnowledgeRAGFlowDatasetInfo(context.Background(), platformKnowledgePrincipal(), KnowledgeRAGFlowScopeOrg, testKnowledgeOrg)
+	require.NoError(t, err)
+
+	assert.Equal(t, "error", result.Status)
+	assert.Equal(t, "ragflow unavailable", result.ErrorMessage)
+	assert.Equal(t, "测试组织", result.TargetName)
+}
+
 // TestUpdateKnowledgeEmbeddingModelResetsLocalDocuments 验证模型修改和整库重解析成功后，本地文件全部回到 queued。
 func TestUpdateKnowledgeEmbeddingModelResetsLocalDocuments(t *testing.T) {
 	svc, store, rf := newRAGFlowKnowledgeTestService(t)
@@ -586,6 +599,22 @@ func TestUpdateKnowledgeEmbeddingModelResetsLocalDocuments(t *testing.T) {
 	assert.Equal(t, int32(0), store.docs["doc-a"].Progress)
 	assert.False(t, store.docs["doc-a"].LastError.Valid)
 	assert.Equal(t, "queued", store.docs["doc-b"].ParseStatus)
+}
+
+// TestUpdateKnowledgeEmbeddingModelReturnsErrorStatusWhenFinalReadFails 验证模型修改流程完成后，最终详情读取失败会以 error 状态返回。
+func TestUpdateKnowledgeEmbeddingModelReturnsErrorStatusWhenFinalReadFails(t *testing.T) {
+	svc, store, rf := newRAGFlowKnowledgeTestService(t)
+	svc.SetEmbeddingModelFallbacks([]config.RAGFlowEmbeddingModelConfig{{Name: "BAAI/bge-m3", Provider: "OpenAI-API-Compatible"}})
+	store.docs["doc-a"] = makeKnowledgeDoc("doc-a", store.orgDataset.ID, "remote-a", "completed", 100)
+	rf.datasetDetailErr = errors.New("ragflow read timeout")
+
+	result, err := svc.UpdateKnowledgeEmbeddingModel(context.Background(), platformKnowledgePrincipal(), KnowledgeRAGFlowScopeOrg, testKnowledgeOrg, KnowledgeEmbeddingModelInput{Name: "BAAI/bge-m3", Provider: "OpenAI-API-Compatible"})
+	require.NoError(t, err)
+
+	assert.Equal(t, "error", result.Status)
+	assert.Equal(t, "ragflow read timeout", result.ErrorMessage)
+	assert.Equal(t, []string{testRemoteOrgDatasetID}, rf.runDatasetEmbeddingCalls)
+	assert.Equal(t, "queued", store.docs["doc-a"].ParseStatus)
 }
 
 // TestUpdateKnowledgeEmbeddingModelDoesNotResetWhenReparseFails 验证 RAGFlow 未接受整库重解析时不改本地状态，避免 UI 误报解析中。
@@ -1705,6 +1734,7 @@ type fakeRAGFlowKnowledgeClient struct {
 	createDatasetResult       ragflow.Dataset
 	createDatasetCalls        []ragflowCreateDatasetCall
 	datasetDetail             ragflow.Dataset
+	datasetDetailErr          error
 	deleteDatasetCalls        [][]string
 	updateEmbeddingModelErr   error
 	updateEmbeddingModelCalls []ragflowUpdateEmbeddingModelCall
@@ -1774,6 +1804,9 @@ func (f *fakeRAGFlowKnowledgeClient) CreateDataset(_ context.Context, req ragflo
 }
 
 func (f *fakeRAGFlowKnowledgeClient) GetDataset(_ context.Context, datasetID string) (ragflow.Dataset, error) {
+	if f.datasetDetailErr != nil {
+		return ragflow.Dataset{}, f.datasetDetailErr
+	}
 	if f.datasetDetail.ID == "" {
 		return ragflow.Dataset{ID: datasetID}, nil
 	}
