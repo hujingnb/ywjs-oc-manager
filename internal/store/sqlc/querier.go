@@ -168,7 +168,7 @@ type Querier interface {
 	// 远端 dataset 尚未创建（ragflow_dataset_id IS NULL）的文档不会出现：
 	// 此类文档此时本就无法从 RAGFlow 拉取状态，等 dataset 创建完成后再轮询即可。
 	ListRAGFlowDocumentsNeedingRefresh(ctx context.Context, limit int32) ([]ListRAGFlowDocumentsNeedingRefreshRow, error)
-	// 分页列出行业知识库文件，支持按解析状态和文件名过滤。
+	// 分页列出行业知识库文件，支持按解析状态、文件名和创建时间过滤。
 	ListRAGFlowIndustryDocuments(ctx context.Context, arg ListRAGFlowIndustryDocumentsParams) ([]RagflowDocument, error)
 	ListReadyJobs(ctx context.Context, limit int32) ([]Job, error)
 	ListRechargeRecordsByOrg(ctx context.Context, arg ListRechargeRecordsByOrgParams) ([]RechargeRecord, error)

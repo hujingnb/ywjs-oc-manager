@@ -212,7 +212,8 @@ func (s *KnowledgeService) SaveIndustryFile(ctx context.Context, principal auth.
 }
 
 // ListIndustryFiles 分页列出某个行业知识库文件，解析状态读取本地缓存。
-func (s *KnowledgeService) ListIndustryFiles(ctx context.Context, principal auth.Principal, industryID string, page, pageSize int32, keyword, status string) (KnowledgeListResult, error) {
+// createdFrom 和 createdBefore 是已经由 handler 归一化后的 UTC 边界；零值表示不启用对应日期条件。
+func (s *KnowledgeService) ListIndustryFiles(ctx context.Context, principal auth.Principal, industryID string, page, pageSize int32, keyword, status string, createdFrom, createdBefore time.Time) (KnowledgeListResult, error) {
 	if !auth.CanManageIndustryKnowledge(principal) {
 		return KnowledgeListResult{}, ErrKnowledgeForbidden
 	}
@@ -233,6 +234,8 @@ func (s *KnowledgeService) ListIndustryFiles(ctx context.Context, principal auth
 		IndustryKnowledgeBaseID: null.StringFrom(industryID),
 		ParseStatus:             nullStr(strings.TrimSpace(status)),
 		Keywords:                kw,
+		CreatedFrom:             nullTimeFromNonZero(createdFrom),
+		CreatedBefore:           nullTimeFromNonZero(createdBefore),
 		Limit:                   pageSize,
 		Offset:                  (page - 1) * pageSize,
 	}
@@ -244,6 +247,8 @@ func (s *KnowledgeService) ListIndustryFiles(ctx context.Context, principal auth
 		IndustryKnowledgeBaseID: params.IndustryKnowledgeBaseID,
 		ParseStatus:             params.ParseStatus,
 		Keywords:                params.Keywords,
+		CreatedFrom:             params.CreatedFrom,
+		CreatedBefore:           params.CreatedBefore,
 	})
 	if err != nil {
 		return KnowledgeListResult{}, fmt.Errorf("统计行业知识库文件失败: %w", err)
@@ -253,6 +258,14 @@ func (s *KnowledgeService) ListIndustryFiles(ctx context.Context, principal auth
 		items = append(items, toKnowledgeDocumentResult(row))
 	}
 	return KnowledgeListResult{Items: items, Total: total}, nil
+}
+
+// nullTimeFromNonZero 把业务层「零值表示无筛选」转换为 sqlc 可空时间参数。
+func nullTimeFromNonZero(value time.Time) null.Time {
+	if value.IsZero() {
+		return null.Time{}
+	}
+	return null.TimeFrom(value)
 }
 
 // OpenIndustryFile 打开行业知识库文件流供下载。

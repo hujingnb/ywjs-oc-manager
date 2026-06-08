@@ -212,6 +212,48 @@ func TestCreateIndustryKnowledgeBasePlatformOnly(t *testing.T) {
 	require.ErrorIs(t, err, ErrKnowledgeForbidden)
 }
 
+// TestListIndustryFilesFiltersByFilenameStatusAndCreatedRange 验证行业知识库文件列表同时按文件名、解析状态和创建时间区间过滤；
+// createdBefore 是开区间上界，handler 会把用户选择的结束日期转换成下一日零点。
+func TestListIndustryFilesFiltersByFilenameStatusAndCreatedRange(t *testing.T) {
+	svc, store, _ := newRAGFlowKnowledgeTestService(t)
+	included := industryTestDocument(t, "policy-2026.pdf", store.industryDataset.ID, testIndustryKnowledgeBaseID)
+	included.ParseStatus = "completed"
+	included.CreatedAt = time.Date(2026, 6, 5, 23, 59, 0, 0, time.UTC)
+	nameMismatch := industryTestDocument(t, "manual-2026.pdf", store.industryDataset.ID, testIndustryKnowledgeBaseID)
+	nameMismatch.ID = mustParseUUID("00000000-0000-0000-0000-000000000a02")
+	nameMismatch.ParseStatus = "completed"
+	nameMismatch.CreatedAt = time.Date(2026, 6, 5, 10, 0, 0, 0, time.UTC)
+	statusMismatch := industryTestDocument(t, "policy-failed.pdf", store.industryDataset.ID, testIndustryKnowledgeBaseID)
+	statusMismatch.ID = mustParseUUID("00000000-0000-0000-0000-000000000a03")
+	statusMismatch.ParseStatus = "failed"
+	statusMismatch.CreatedAt = time.Date(2026, 6, 5, 10, 0, 0, 0, time.UTC)
+	dateMismatch := industryTestDocument(t, "policy-next-day.pdf", store.industryDataset.ID, testIndustryKnowledgeBaseID)
+	dateMismatch.ID = mustParseUUID("00000000-0000-0000-0000-000000000a04")
+	dateMismatch.ParseStatus = "completed"
+	dateMismatch.CreatedAt = time.Date(2026, 6, 6, 0, 0, 0, 0, time.UTC)
+	store.docs[included.ID] = included
+	store.docs[nameMismatch.ID] = nameMismatch
+	store.docs[statusMismatch.ID] = statusMismatch
+	store.docs[dateMismatch.ID] = dateMismatch
+
+	result, err := svc.ListIndustryFiles(
+		context.Background(),
+		auth.Principal{Role: domain.UserRolePlatformAdmin},
+		testIndustryKnowledgeBaseID,
+		1,
+		50,
+		"policy",
+		"completed",
+		time.Date(2026, 6, 1, 0, 0, 0, 0, time.UTC),
+		time.Date(2026, 6, 6, 0, 0, 0, 0, time.UTC),
+	)
+	require.NoError(t, err)
+
+	require.Len(t, result.Items, 1)
+	assert.Equal(t, "policy-2026.pdf", result.Items[0].Name)
+	assert.Equal(t, int64(1), result.Total)
+}
+
 // TestExternalUploadCreatesIndustryWhenMissing 验证外部上传在行业库不存在时会自动创建行业库和 dataset。
 func TestExternalUploadCreatesIndustryWhenMissing(t *testing.T) {
 	svc, store, rf := newRAGFlowKnowledgeTestService(t)
@@ -1362,6 +1404,12 @@ func (s *fakeKnowledgeStore) ListRAGFlowIndustryDocuments(_ context.Context, arg
 		if keyword, ok := arg.Keywords.(string); ok && keyword != "" && !strings.Contains(doc.Name, keyword) {
 			continue
 		}
+		if arg.CreatedFrom.Valid && doc.CreatedAt.Before(arg.CreatedFrom.Time) {
+			continue
+		}
+		if arg.CreatedBefore.Valid && !doc.CreatedAt.Before(arg.CreatedBefore.Time) {
+			continue
+		}
 		items = append(items, doc)
 	}
 	return items, nil
@@ -1372,6 +1420,8 @@ func (s *fakeKnowledgeStore) CountRAGFlowIndustryDocuments(ctx context.Context, 
 		IndustryKnowledgeBaseID: arg.IndustryKnowledgeBaseID,
 		ParseStatus:             arg.ParseStatus,
 		Keywords:                arg.Keywords,
+		CreatedFrom:             arg.CreatedFrom,
+		CreatedBefore:           arg.CreatedBefore,
 	})
 	return int64(len(items)), err
 }

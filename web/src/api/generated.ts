@@ -5816,6 +5816,10 @@ export interface paths {
                     keyword?: string;
                     /** @description 解析状态 */
                     status?: string;
+                    /** @description 创建日期起始，YYYY-MM-DD */
+                    created_from?: string;
+                    /** @description 创建日期结束，YYYY-MM-DD，包含当天 */
+                    created_to?: string;
                 };
                 header?: never;
                 path: {
@@ -5833,6 +5837,15 @@ export interface paths {
                     };
                     content: {
                         "application/json": components["schemas"]["service.KnowledgeListResult"];
+                    };
+                };
+                /** @description Bad Request */
+                400: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["handlers.ErrorResponse"];
                     };
                 };
                 /** @description Unauthorized */

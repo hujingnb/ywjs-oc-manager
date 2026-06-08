@@ -45,6 +45,22 @@
       <n-alert type="warning" :bordered="false" style="margin-bottom: 12px">
         同名文件会覆盖当前行业库内的旧文件。
       </n-alert>
+      <n-space align="center" style="margin-bottom: 12px">
+        <n-input
+          v-model:value="fileKeyword"
+          placeholder="搜索文件名称"
+          clearable
+          style="width: 220px"
+        />
+        <n-date-picker
+          v-model:value="createdDateRange"
+          type="daterange"
+          clearable
+          start-placeholder="创建开始日期"
+          end-placeholder="创建结束日期"
+          style="width: 280px"
+        />
+      </n-space>
       <div v-if="filesLoading" class="state-text">加载中…</div>
       <div v-else-if="filesError" class="state-text danger">查询失败：{{ filesError.message }}</div>
       <n-data-table
@@ -53,6 +69,8 @@
         :data="files?.items ?? []"
         size="small"
         :bordered="false"
+        :remote="true"
+        :pagination="fileTablePagination"
         :row-key="(row: KnowledgeDocument) => row.id"
       />
     </n-card>
@@ -153,7 +171,7 @@
 <script setup lang="ts">
 import { computed, h, ref, watch } from 'vue'
 import { Plus } from 'lucide-vue-next'
-import { NAlert, NButton, NCard, NDataTable, NInput, NModal, NTag, useMessage, type DataTableColumns } from 'naive-ui'
+import { NAlert, NButton, NCard, NDataTable, NDatePicker, NInput, NModal, NSpace, NTag, useMessage, type DataTableColumns } from 'naive-ui'
 
 import DataTableList from '@/components/DataTableList.vue'
 import {
@@ -191,11 +209,24 @@ const createDialogOpen = ref(false)
 const apiDocDialogOpen = ref(false)
 const selectedBaseId = ref<string | undefined>(undefined)
 const downloading = ref(false)
+const fileKeyword = ref('')
+const normalizedFileKeyword = computed(() => fileKeyword.value.trim())
+const createdDateRange = ref<[number, number] | null>(null)
+const createdFrom = computed(() => createdDateRange.value ? formatDatePickerDay(createdDateRange.value[0]) : undefined)
+const createdTo = computed(() => createdDateRange.value ? formatDatePickerDay(createdDateRange.value[1]) : undefined)
+const filePage = ref(1)
+const filePageSize = ref(50)
 
 const { data: bases, isLoading: basesLoading, error: basesError } = useIndustryKnowledgeBasesQuery(undefined, keyword)
 const selectedBase = computed(() => (bases.value?.items ?? []).find(item => item.id === selectedBaseId.value) ?? null)
 const selectedBaseIdRef = computed(() => selectedBase.value?.id)
-const { data: files, isLoading: filesLoading, error: filesError } = useIndustryKnowledgeFilesQuery(selectedBaseIdRef)
+const { data: files, isLoading: filesLoading, error: filesError } = useIndustryKnowledgeFilesQuery(selectedBaseIdRef, {
+  page: filePage,
+  pageSize: filePageSize,
+  keyword: normalizedFileKeyword,
+  createdFrom,
+  createdTo,
+})
 
 const createMutation = useCreateIndustryKnowledgeBase()
 const renameMutation = useRenameIndustryKnowledgeBase()
@@ -218,6 +249,22 @@ const industryUploadTokenText = computed(() => {
   return industryUploadToken.value || uploadTokenUnavailableText
 })
 const apiDocCopyDisabled = computed(() => uploadTokenLoading.value || Boolean(uploadTokenError.value))
+// fileTablePagination 使用后端 total 驱动远程分页；筛选条件变化时回到第一页避免停在空页。
+const fileTablePagination = computed(() => ({
+  page: filePage.value,
+  pageSize: filePageSize.value,
+  itemCount: files.value?.total ?? 0,
+  showSizePicker: true,
+  pageSizes: [10, 20, 50, 100],
+  prefix: () => `共 ${files.value?.total ?? 0} 个文件`,
+  onUpdatePage: (nextPage: number) => {
+    filePage.value = nextPage
+  },
+  onUpdatePageSize: (nextPageSize: number) => {
+    filePageSize.value = nextPageSize
+    filePage.value = 1
+  },
+}))
 
 // shellSingleQuote 生成可直接复制执行的 shell 单引号参数，兼容 token 中可能出现的特殊字符。
 function shellSingleQuote(value: string): string {
@@ -294,6 +341,19 @@ watch(
   },
   { immediate: true },
 )
+
+watch([selectedBaseIdRef, normalizedFileKeyword, createdFrom, createdTo], () => {
+  filePage.value = 1
+})
+
+// formatDatePickerDay 把 Naive DatePicker 的本地毫秒时间戳转换成后端接受的 YYYY-MM-DD 日期。
+function formatDatePickerDay(value: number): string {
+  const date = new Date(value)
+  const year = date.getFullYear()
+  const month = String(date.getMonth() + 1).padStart(2, '0')
+  const day = String(date.getDate()).padStart(2, '0')
+  return `${year}-${month}-${day}`
+}
 
 function formatTime(iso?: string): string {
   if (!iso) return '—'

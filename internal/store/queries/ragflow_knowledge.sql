@@ -198,13 +198,15 @@ FROM ragflow_datasets
 WHERE scope_type = 'industry' AND industry_knowledge_base_id = ?;
 
 -- name: ListRAGFlowIndustryDocuments :many
--- 分页列出行业知识库文件，支持按解析状态和文件名过滤。
+-- 分页列出行业知识库文件，支持按解析状态、文件名和创建时间过滤。
 SELECT *
 FROM ragflow_documents
 WHERE scope_type = 'industry'
   AND industry_knowledge_base_id = ?
   AND (sqlc.narg(parse_status) IS NULL OR parse_status = sqlc.narg(parse_status))
   AND (sqlc.narg(keywords) IS NULL OR name LIKE CONCAT('%', sqlc.narg(keywords), '%'))
+  AND (sqlc.narg(created_from) IS NULL OR created_at >= sqlc.narg(created_from))
+  AND (sqlc.narg(created_before) IS NULL OR created_at < sqlc.narg(created_before))
 ORDER BY created_at DESC, id DESC
 LIMIT ? OFFSET ?;
 
@@ -215,7 +217,9 @@ FROM ragflow_documents
 WHERE scope_type = 'industry'
   AND industry_knowledge_base_id = ?
   AND (sqlc.narg(parse_status) IS NULL OR parse_status = sqlc.narg(parse_status))
-  AND (sqlc.narg(keywords) IS NULL OR name LIKE CONCAT('%', sqlc.narg(keywords), '%'));
+  AND (sqlc.narg(keywords) IS NULL OR name LIKE CONCAT('%', sqlc.narg(keywords), '%'))
+  AND (sqlc.narg(created_from) IS NULL OR created_at >= sqlc.narg(created_from))
+  AND (sqlc.narg(created_before) IS NULL OR created_at < sqlc.narg(created_before));
 
 -- name: GetRAGFlowIndustryDocumentByName :one
 -- 按行业知识库和文件名读取缓存，用于上传前幂等与重名校验。

@@ -5744,6 +5744,16 @@ paths:
         name: status
         schema:
           type: string
+      - description: 创建日期起始，YYYY-MM-DD
+        in: query
+        name: created_from
+        schema:
+          type: string
+      - description: 创建日期结束，YYYY-MM-DD，包含当天
+        in: query
+        name: created_to
+        schema:
+          type: string
       responses:
         "200":
           content:
@@ -5751,6 +5761,12 @@ paths:
               schema:
                 $ref: '#/components/schemas/service.KnowledgeListResult'
           description: OK
+        "400":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/handlers.ErrorResponse'
+          description: Bad Request
         "401":
           content:
             application/json:

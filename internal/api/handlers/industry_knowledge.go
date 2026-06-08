@@ -6,6 +6,7 @@ import (
 	"io"
 	"net/http"
 	"strings"
+	"time"
 
 	"github.com/gin-gonic/gin"
 
@@ -36,7 +37,7 @@ type industryKnowledgeService interface {
 	// DeleteIndustryKnowledgeBase 删除未被助手版本引用的行业知识库。
 	DeleteIndustryKnowledgeBase(ctx context.Context, principal auth.Principal, id string) error
 	// ListIndustryFiles 分页列出指定行业知识库下的 RAGFlow 文件。
-	ListIndustryFiles(ctx context.Context, principal auth.Principal, industryID string, page, pageSize int32, keyword, status string) (service.KnowledgeListResult, error)
+	ListIndustryFiles(ctx context.Context, principal auth.Principal, industryID string, page, pageSize int32, keyword, status string, createdFrom, createdBefore time.Time) (service.KnowledgeListResult, error)
 	// SaveIndustryFile 保存平台管理员上传的行业知识库文件。
 	SaveIndustryFile(ctx context.Context, principal auth.Principal, industryID, filename string, content io.Reader, size int64) (service.KnowledgeDocumentResult, error)
 	// OpenIndustryFile 打开行业知识库文件下载流。
@@ -299,7 +300,10 @@ func (h *IndustryKnowledgeHandler) DeleteBase(c *gin.Context) {
 // @Param        page_size   query     int     false  "每页数量"
 // @Param        keyword     query     string  false  "文件名关键词"
 // @Param        status      query     string  false  "解析状态"
+// @Param        created_from query    string  false  "创建日期起始，YYYY-MM-DD"
+// @Param        created_to   query    string  false  "创建日期结束，YYYY-MM-DD，包含当天"
 // @Success      200         {object}  service.KnowledgeListResult
+// @Failure      400         {object}  ErrorResponse
 // @Failure      401         {object}  ErrorResponse
 // @Failure      403         {object}  ErrorResponse
 // @Failure      404         {object}  ErrorResponse
@@ -307,12 +311,52 @@ func (h *IndustryKnowledgeHandler) DeleteBase(c *gin.Context) {
 // @Failure      500         {object}  ErrorResponse
 // @Router       /industry-knowledge-bases/{industryId}/knowledge [get]
 func (h *IndustryKnowledgeHandler) ListFiles(c *gin.Context) {
-	result, err := h.service.ListIndustryFiles(c.Request.Context(), principalFromCtx(c), c.Param("industryId"), queryKnowledgeInt32(c, "page", 1), queryKnowledgeInt32(c, "page_size", 50), c.Query("keyword"), c.Query("status"))
+	createdFrom, createdBefore, ok := queryIndustryKnowledgeCreatedDateRange(c)
+	if !ok {
+		return
+	}
+	result, err := h.service.ListIndustryFiles(c.Request.Context(), principalFromCtx(c), c.Param("industryId"), queryKnowledgeInt32(c, "page", 1), queryKnowledgeInt32(c, "page_size", 50), c.Query("keyword"), c.Query("status"), createdFrom, createdBefore)
 	if err != nil {
 		writeIndustryKnowledgeError(c, err)
 		return
 	}
 	c.JSON(http.StatusOK, result)
+}
+
+// queryIndustryKnowledgeCreatedDateRange 解析行业库文件列表的创建日期筛选。
+// created_to 对用户是自然日闭区间，传给 service 前转换成下一日零点的开区间上界。
+func queryIndustryKnowledgeCreatedDateRange(c *gin.Context) (time.Time, time.Time, bool) {
+	createdFrom, ok := queryIndustryKnowledgeDate(c, "created_from")
+	if !ok {
+		return time.Time{}, time.Time{}, false
+	}
+	createdTo, ok := queryIndustryKnowledgeDate(c, "created_to")
+	if !ok {
+		return time.Time{}, time.Time{}, false
+	}
+	var createdBefore time.Time
+	if !createdTo.IsZero() {
+		createdBefore = createdTo.AddDate(0, 0, 1)
+	}
+	if !createdFrom.IsZero() && !createdBefore.IsZero() && !createdFrom.Before(createdBefore) {
+		c.JSON(http.StatusBadRequest, apierror.New("BAD_REQUEST", "created_from 不能晚于 created_to"))
+		return time.Time{}, time.Time{}, false
+	}
+	return createdFrom, createdBefore, true
+}
+
+// queryIndustryKnowledgeDate 只接受 YYYY-MM-DD 日期，避免带时区时间字符串在不同层解析出不同边界。
+func queryIndustryKnowledgeDate(c *gin.Context, key string) (time.Time, bool) {
+	raw := strings.TrimSpace(c.Query(key))
+	if raw == "" {
+		return time.Time{}, true
+	}
+	parsed, err := time.Parse("2006-01-02", raw)
+	if err != nil {
+		c.JSON(http.StatusBadRequest, apierror.New("BAD_REQUEST", key+" 必须使用 YYYY-MM-DD 格式"))
+		return time.Time{}, false
+	}
+	return parsed, true
 }
 
 // SaveFile 上传平台侧行业知识库文件。

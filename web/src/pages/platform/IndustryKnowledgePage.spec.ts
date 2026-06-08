@@ -17,6 +17,7 @@ const messageWarning = vi.hoisted(() => vi.fn())
 const messageSuccess = vi.hoisted(() => vi.fn())
 const messageError = vi.hoisted(() => vi.fn())
 const writeText = vi.hoisted(() => vi.fn())
+const fileQueryCalls = vi.hoisted(() => [] as Array<{ industryId: unknown; options: Record<string, { value: unknown }> }>)
 
 const baseItems = vi.hoisted<IndustryKnowledgeBase[]>(() => [
   { id: 'industry-1', name: '保险', document_count: 1, created_at: '2026-06-05T00:00:00Z', updated_at: '2026-06-05T00:00:00Z' },
@@ -44,11 +45,14 @@ vi.mock('@/api/hooks/useIndustryKnowledge', () => ({
     isLoading: ref(false),
     error: ref(null),
   }),
-  useIndustryKnowledgeFilesQuery: () => ({
+  useIndustryKnowledgeFilesQuery: (industryId: unknown, options: Record<string, { value: unknown }> = {}) => {
+    fileQueryCalls.push({ industryId, options })
+    return {
     data: ref({ items: fileItems, total: fileItems.length }),
     isLoading: ref(false),
     error: ref(null),
-  }),
+    }
+  },
   useCreateIndustryKnowledgeBase: () => ({ mutateAsync: createBase, isPending: ref(false) }),
   useRenameIndustryKnowledgeBase: () => ({ mutateAsync: renameBase, isPending: ref(false) }),
   useDeleteIndustryKnowledgeBase: () => ({ mutateAsync: deleteBase, isPending: ref(false) }),
@@ -98,15 +102,19 @@ function mountPage() {
         }),
         NAlert: defineComponent({ setup(_, { slots }) { return () => h('div', { class: 'alert' }, slots.default?.()) } }),
         NInput: defineComponent({
-          props: ['value'],
+          props: ['value', 'placeholder'],
           emits: ['update:value'],
           setup(p, { emit }) {
             return () => h('input', {
               value: p.value,
+              placeholder: p.placeholder,
               onInput: (e: Event) => emit('update:value', (e.target as HTMLInputElement).value),
             })
           },
         }),
+        NDatePicker: datePickerStub(),
+        'n-date-picker': datePickerStub(),
+        DatePicker: datePickerStub(),
         NTag: defineComponent({ setup(_, { slots }) { return () => h('span', slots.default?.()) } }),
         NModal: modalStub(),
         'n-modal': modalStub(),
@@ -149,14 +157,46 @@ function tableStub() {
     props: {
       columns: { type: Array as PropType<DataTableColumn<Record<string, unknown>>[]>, required: true },
       data: { type: Array as PropType<Record<string, unknown>[]>, required: true },
+      pagination: { type: [Object, Boolean] as PropType<{
+        page: number
+        pageSize: number
+        itemCount?: number
+        onUpdatePage?: (page: number) => void
+        onUpdatePageSize?: (pageSize: number) => void
+      } | false>, default: false },
     },
     setup(p) {
-      return () => h('table', [h('tbody', p.data.map((row, index) =>
-        h('tr', { key: String(row.id ?? index) }, p.columns.map((col) => {
-          if ('render' in col && col.render) return h('td', [col.render(row, index)])
-          return h('td', '')
-        })),
-      ))])
+      return () => h('div', [
+        h('table', [h('tbody', p.data.map((row, index) =>
+          h('tr', { key: String(row.id ?? index) }, p.columns.map((col) => {
+            if ('render' in col && col.render) return h('td', [col.render(row, index)])
+            return h('td', '')
+          })),
+        ))]),
+        p.pagination
+          ? h('div', { class: 'pagination-summary' }, [
+              `page=${p.pagination.page};pageSize=${p.pagination.pageSize};total=${p.pagination.itemCount ?? 0}`,
+              h('button', { class: 'page-two', onClick: () => p.pagination && p.pagination.onUpdatePage?.(2) }, '第 2 页'),
+              h('button', { class: 'page-size-ten', onClick: () => p.pagination && p.pagination.onUpdatePageSize?.(10) }, '每页 10 条'),
+            ])
+          : null,
+      ])
+    },
+  })
+}
+
+function datePickerStub() {
+  return defineComponent({
+    props: ['value'],
+    emits: ['update:value'],
+    setup(_, { emit }) {
+      return () => h('button', {
+        class: 'date-range',
+        onClick: () => emit('update:value', [
+          new Date(2026, 5, 1).getTime(),
+          new Date(2026, 5, 5).getTime(),
+        ]),
+      }, '选择创建日期')
     },
   })
 }
@@ -164,6 +204,7 @@ function tableStub() {
 describe('IndustryKnowledgePage', () => {
   beforeEach(() => {
     vi.clearAllMocks()
+    fileQueryCalls.splice(0, fileQueryCalls.length)
     Object.defineProperty(navigator, 'clipboard', {
       configurable: true,
       value: { writeText },
@@ -187,11 +228,40 @@ describe('IndustryKnowledgePage', () => {
 
     await wrapper.findAll('button').find(button => button.text().includes('新建行业库'))!.trigger('click')
     await nextTick()
-    const textInputs = wrapper.findAll('input').filter(input => input.attributes('type') !== 'file')
-    await textInputs[1].setValue('  医疗  ')
+    await wrapper.find('input[placeholder="请输入行业名称"]').setValue('  医疗  ')
     await wrapper.findAll('button').find(button => button.text().includes('确认创建'))!.trigger('click')
 
     expect(createBase).toHaveBeenCalledWith('医疗')
+  })
+
+  // 覆盖行业库文件列表查询条件：文件名、创建日期和远程分页必须通过响应式参数传给 hook。
+  it('行业库文件列表支持按文件名、创建日期搜索和远程分页', async () => {
+    const wrapper = mountPage()
+    const queryCall = fileQueryCalls[0]
+
+    expect(wrapper.find('input[placeholder="搜索文件名称"]').exists()).toBe(true)
+    expect(queryCall.options.page.value).toBe(1)
+    expect(queryCall.options.pageSize.value).toBe(50)
+    expect(queryCall.options.keyword.value).toBe('')
+    expect(queryCall.options.createdFrom.value).toBeUndefined()
+    expect(queryCall.options.createdTo.value).toBeUndefined()
+    expect(wrapper.find('.pagination-summary').text()).toContain('total=1')
+
+    await wrapper.find('.page-two').trigger('click')
+    expect(queryCall.options.page.value).toBe(2)
+
+    await wrapper.find('.page-size-ten').trigger('click')
+    expect(queryCall.options.page.value).toBe(1)
+    expect(queryCall.options.pageSize.value).toBe(10)
+
+    await wrapper.find('input[placeholder="搜索文件名称"]').setValue(' policy ')
+    expect(queryCall.options.keyword.value).toBe('policy')
+    expect(queryCall.options.page.value).toBe(1)
+
+    await wrapper.find('.date-range').trigger('click')
+    expect(queryCall.options.createdFrom.value).toBe('2026-06-01')
+    expect(queryCall.options.createdTo.value).toBe('2026-06-05')
+    expect(queryCall.options.page.value).toBe(1)
   })
 
   // 弹框中行业名称为空时不提交创建，并提示平台管理员补充名称。

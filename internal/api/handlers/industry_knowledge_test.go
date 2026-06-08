@@ -11,6 +11,7 @@ import (
 	"net/http/httptest"
 	"strconv"
 	"testing"
+	"time"
 
 	"github.com/gin-gonic/gin"
 	"github.com/stretchr/testify/assert"
@@ -38,10 +39,15 @@ type industryKnowledgeServiceStub struct {
 	deleteErr error
 	deleteID  string
 
-	listFilesResult     service.KnowledgeListResult
-	listFilesErr        error
-	listFilesIndustryID string
-	listFilesStatus     string
+	listFilesResult        service.KnowledgeListResult
+	listFilesErr           error
+	listFilesIndustryID    string
+	listFilesPage          int32
+	listFilesPageSize      int32
+	listFilesKeyword       string
+	listFilesStatus        string
+	listFilesCreatedFrom   time.Time
+	listFilesCreatedBefore time.Time
 
 	saveResult     service.KnowledgeDocumentResult
 	saveErr        error
@@ -93,9 +99,14 @@ func (s *industryKnowledgeServiceStub) DeleteIndustryKnowledgeBase(_ context.Con
 	return s.deleteErr
 }
 
-func (s *industryKnowledgeServiceStub) ListIndustryFiles(_ context.Context, _ auth.Principal, industryID string, _, _ int32, _, status string) (service.KnowledgeListResult, error) {
+func (s *industryKnowledgeServiceStub) ListIndustryFiles(_ context.Context, _ auth.Principal, industryID string, page, pageSize int32, keyword, status string, createdFrom, createdBefore time.Time) (service.KnowledgeListResult, error) {
 	s.listFilesIndustryID = industryID
+	s.listFilesPage = page
+	s.listFilesPageSize = pageSize
+	s.listFilesKeyword = keyword
 	s.listFilesStatus = status
+	s.listFilesCreatedFrom = createdFrom
+	s.listFilesCreatedBefore = createdBefore
 	return s.listFilesResult, s.listFilesErr
 }
 
@@ -177,6 +188,42 @@ func TestIndustryKnowledgeUploadTokenRejectsOrgAdmin(t *testing.T) {
 
 	assert.Equal(t, http.StatusForbidden, w.Code)
 	assert.NotContains(t, w.Body.String(), "secret-token")
+}
+
+// TestIndustryKnowledgeListFilesPassesSearchPaginationAndCreatedDateRange 验证行业库文件列表把文件名、分页和创建日期条件传给 service；
+// created_to 按用户选择的自然日闭区间处理，转成下一日零点前的开区间上界，避免漏掉当天文件。
+func TestIndustryKnowledgeListFilesPassesSearchPaginationAndCreatedDateRange(t *testing.T) {
+	stub := &industryKnowledgeServiceStub{}
+	router := newIndustryKnowledgeTestRouter(t, stub, "secret-token")
+
+	w := httptest.NewRecorder()
+	req := httptest.NewRequest(http.MethodGet, "/api/v1/industry-knowledge-bases/industry-1/knowledge?page=2&page_size=20&keyword=policy&status=completed&created_from=2026-06-01&created_to=2026-06-05", nil)
+	req = withPrincipal(req, auth.Principal{UserID: "u-admin", Role: domain.UserRolePlatformAdmin})
+	router.ServeHTTP(w, req)
+
+	require.Equal(t, http.StatusOK, w.Code)
+	assert.Equal(t, "industry-1", stub.listFilesIndustryID)
+	assert.Equal(t, int32(2), stub.listFilesPage)
+	assert.Equal(t, int32(20), stub.listFilesPageSize)
+	assert.Equal(t, "policy", stub.listFilesKeyword)
+	assert.Equal(t, "completed", stub.listFilesStatus)
+	assert.Equal(t, time.Date(2026, 6, 1, 0, 0, 0, 0, time.UTC), stub.listFilesCreatedFrom)
+	assert.Equal(t, time.Date(2026, 6, 6, 0, 0, 0, 0, time.UTC), stub.listFilesCreatedBefore)
+}
+
+// TestIndustryKnowledgeListFilesRejectsInvalidCreatedDate 验证创建日期筛选只接受 YYYY-MM-DD，
+// 防止模糊时间字符串进入 SQL 层造成跨时区或解析差异。
+func TestIndustryKnowledgeListFilesRejectsInvalidCreatedDate(t *testing.T) {
+	stub := &industryKnowledgeServiceStub{}
+	router := newIndustryKnowledgeTestRouter(t, stub, "secret-token")
+
+	w := httptest.NewRecorder()
+	req := httptest.NewRequest(http.MethodGet, "/api/v1/industry-knowledge-bases/industry-1/knowledge?created_from=2026-06", nil)
+	req = withPrincipal(req, auth.Principal{UserID: "u-admin", Role: domain.UserRolePlatformAdmin})
+	router.ServeHTTP(w, req)
+
+	assert.Equal(t, http.StatusBadRequest, w.Code)
+	assert.Empty(t, stub.listFilesIndustryID)
 }
 
 // multipartIndustryUploadBody 构造外部上传接口需要的 multipart/form-data 请求体。

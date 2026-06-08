@@ -79,12 +79,16 @@ WHERE scope_type = 'industry'
   AND industry_knowledge_base_id = ?
   AND (? IS NULL OR parse_status = ?)
   AND (? IS NULL OR name LIKE CONCAT('%', ?, '%'))
+  AND (? IS NULL OR created_at >= ?)
+  AND (? IS NULL OR created_at < ?)
 `
 
 type CountRAGFlowIndustryDocumentsParams struct {
 	IndustryKnowledgeBaseID null.String `db:"industry_knowledge_base_id" json:"industry_knowledge_base_id"`
 	ParseStatus             null.String `db:"parse_status" json:"parse_status"`
 	Keywords                interface{} `db:"keywords" json:"keywords"`
+	CreatedFrom             null.Time   `db:"created_from" json:"created_from"`
+	CreatedBefore           null.Time   `db:"created_before" json:"created_before"`
 }
 
 // 统计行业知识库文件总数，过滤条件必须与 ListRAGFlowIndustryDocuments 保持一致。
@@ -95,6 +99,10 @@ func (q *Queries) CountRAGFlowIndustryDocuments(ctx context.Context, arg CountRA
 		arg.ParseStatus,
 		arg.Keywords,
 		arg.Keywords,
+		arg.CreatedFrom,
+		arg.CreatedFrom,
+		arg.CreatedBefore,
+		arg.CreatedBefore,
 	)
 	var count int64
 	err := row.Scan(&count)
@@ -698,6 +706,8 @@ WHERE scope_type = 'industry'
   AND industry_knowledge_base_id = ?
   AND (? IS NULL OR parse_status = ?)
   AND (? IS NULL OR name LIKE CONCAT('%', ?, '%'))
+  AND (? IS NULL OR created_at >= ?)
+  AND (? IS NULL OR created_at < ?)
 ORDER BY created_at DESC, id DESC
 LIMIT ? OFFSET ?
 `
@@ -706,11 +716,13 @@ type ListRAGFlowIndustryDocumentsParams struct {
 	IndustryKnowledgeBaseID null.String `db:"industry_knowledge_base_id" json:"industry_knowledge_base_id"`
 	ParseStatus             null.String `db:"parse_status" json:"parse_status"`
 	Keywords                interface{} `db:"keywords" json:"keywords"`
+	CreatedFrom             null.Time   `db:"created_from" json:"created_from"`
+	CreatedBefore           null.Time   `db:"created_before" json:"created_before"`
 	Limit                   int32       `db:"limit" json:"limit"`
 	Offset                  int32       `db:"offset" json:"offset"`
 }
 
-// 分页列出行业知识库文件，支持按解析状态和文件名过滤。
+// 分页列出行业知识库文件，支持按解析状态、文件名和创建时间过滤。
 func (q *Queries) ListRAGFlowIndustryDocuments(ctx context.Context, arg ListRAGFlowIndustryDocumentsParams) ([]RagflowDocument, error) {
 	rows, err := q.db.QueryContext(ctx, listRAGFlowIndustryDocuments,
 		arg.IndustryKnowledgeBaseID,
@@ -718,6 +730,10 @@ func (q *Queries) ListRAGFlowIndustryDocuments(ctx context.Context, arg ListRAGF
 		arg.ParseStatus,
 		arg.Keywords,
 		arg.Keywords,
+		arg.CreatedFrom,
+		arg.CreatedFrom,
+		arg.CreatedBefore,
+		arg.CreatedBefore,
 		arg.Limit,
 		arg.Offset,
 	)
