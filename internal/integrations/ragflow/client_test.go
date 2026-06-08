@@ -105,6 +105,15 @@ func TestDatasetUnmarshalJSONSupportsLegacyFields(t *testing.T) {
 	assert.Equal(t, int32(15), got.ChunkNum)
 }
 
+// TestDatasetUnmarshalJSONAcceptsNumericTenantEmbeddingID 验证 RAGFlow 返回数字 tenant_embd_id 时不影响 dataset 详情展示。
+func TestDatasetUnmarshalJSONAcceptsNumericTenantEmbeddingID(t *testing.T) {
+	var got Dataset
+	require.NoError(t, json.Unmarshal([]byte(`{"id":"ds-1","name":"oc-org","embd_id":"BAAI/bge-m3___OpenAI-API@OpenAI-API-Compatible","tenant_embd_id":42,"parser_id":"naive"}`), &got))
+
+	assert.Equal(t, "42", got.TenantEmbeddingID)
+	assert.Equal(t, "BAAI/bge-m3___OpenAI-API@OpenAI-API-Compatible", got.EmbeddingModelID)
+}
+
 // TestClientGetDatasetReturnsErrorWhenEmpty 验证 RAGFlow 按 ID 查询不到 dataset 时返回带远端 ID 的协议错误。
 func TestClientGetDatasetReturnsErrorWhenEmpty(t *testing.T) {
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {

@@ -62,17 +62,17 @@ type EmbeddingModel struct {
 // UnmarshalJSON 兼容 RAGFlow dataset 列表公开字段和旧内部字段名。
 func (d *Dataset) UnmarshalJSON(raw []byte) error {
 	var value struct {
-		ID                string `json:"id"`
-		Name              string `json:"name"`
-		EmbeddingModelID  string `json:"embd_id"`
-		EmbeddingModel    string `json:"embedding_model"`
-		TenantEmbeddingID string `json:"tenant_embd_id"`
-		ParserID          string `json:"parser_id"`
-		ChunkMethod       string `json:"chunk_method"`
-		DocNum            int32  `json:"doc_num"`
-		DocumentCount     int32  `json:"document_count"`
-		ChunkNum          int32  `json:"chunk_num"`
-		ChunkCount        int32  `json:"chunk_count"`
+		ID                string             `json:"id"`
+		Name              string             `json:"name"`
+		EmbeddingModelID  string             `json:"embd_id"`
+		EmbeddingModel    string             `json:"embedding_model"`
+		TenantEmbeddingID ragflowLooseString `json:"tenant_embd_id"`
+		ParserID          string             `json:"parser_id"`
+		ChunkMethod       string             `json:"chunk_method"`
+		DocNum            int32              `json:"doc_num"`
+		DocumentCount     int32              `json:"document_count"`
+		ChunkNum          int32              `json:"chunk_num"`
+		ChunkCount        int32              `json:"chunk_count"`
 	}
 	if err := json.Unmarshal(raw, &value); err != nil {
 		return err
@@ -83,7 +83,7 @@ func (d *Dataset) UnmarshalJSON(raw []byte) error {
 	if d.EmbeddingModelID == "" {
 		d.EmbeddingModelID = value.EmbeddingModel
 	}
-	d.TenantEmbeddingID = value.TenantEmbeddingID
+	d.TenantEmbeddingID = string(value.TenantEmbeddingID)
 	d.ParserID = value.ParserID
 	if d.ParserID == "" {
 		d.ParserID = value.ChunkMethod
@@ -96,6 +96,32 @@ func (d *Dataset) UnmarshalJSON(raw []byte) error {
 	if d.ChunkNum == 0 {
 		d.ChunkNum = value.ChunkCount
 	}
+	return nil
+}
+
+// ragflowLooseString 兼容 RAGFlow 部分字段在不同版本中 string/number 混用的响应。
+// manager 只展示该值，不参与数值计算，因此统一转成字符串可避免单个兼容字段拖垮整个 dataset 解码。
+type ragflowLooseString string
+
+// UnmarshalJSON 把 JSON string 或 number 都收敛为字符串，null/空值保持零值。
+func (s *ragflowLooseString) UnmarshalJSON(raw []byte) error {
+	raw = bytes.TrimSpace(raw)
+	if len(raw) == 0 || bytes.Equal(raw, []byte("null")) {
+		*s = ""
+		return nil
+	}
+	var text string
+	if err := json.Unmarshal(raw, &text); err == nil {
+		*s = ragflowLooseString(text)
+		return nil
+	}
+	var number json.Number
+	decoder := json.NewDecoder(bytes.NewReader(raw))
+	decoder.UseNumber()
+	if err := decoder.Decode(&number); err != nil {
+		return err
+	}
+	*s = ragflowLooseString(number.String())
 	return nil
 }
 
