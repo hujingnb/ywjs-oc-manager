@@ -600,6 +600,9 @@ func (s *KnowledgeService) UpdateKnowledgeEmbeddingModel(ctx context.Context, pr
 	}
 	target, dataset, err := s.resolveKnowledgeRAGFlowTarget(ctx, scope, targetID)
 	if err != nil {
+		if errors.Is(err, sql.ErrNoRows) {
+			return KnowledgeRAGFlowDatasetInfoResult{}, ErrNotFound
+		}
 		return KnowledgeRAGFlowDatasetInfoResult{}, err
 	}
 	remoteID, err := requireRemoteDatasetID(dataset)
@@ -712,7 +715,7 @@ func (s *KnowledgeService) resolveKnowledgeEmbeddingModel(input KnowledgeEmbeddi
 	}
 	fallbacks := s.embeddingModelResultsFromFallbacks()
 	if len(fallbacks) == 0 {
-		return KnowledgeEmbeddingModelResult{Name: name, Label: name, Provider: provider, Available: true}, nil
+		return KnowledgeEmbeddingModelResult{}, fmt.Errorf("embedding 模型候选未配置")
 	}
 	if provider != "" {
 		for _, model := range fallbacks {

@@ -617,6 +617,38 @@ func TestUpdateKnowledgeEmbeddingModelReturnsErrorStatusWhenFinalReadFails(t *te
 	assert.Equal(t, "queued", store.docs["doc-a"].ParseStatus)
 }
 
+// TestUpdateKnowledgeEmbeddingModelMissingDatasetMappingReturnsNotFound 验证目标存在但 dataset 映射缺失时返回稳定的资源不存在错误。
+func TestUpdateKnowledgeEmbeddingModelMissingDatasetMappingReturnsNotFound(t *testing.T) {
+	cases := []struct {
+		name     string
+		scope    string
+		targetID string
+		setup    func(*fakeKnowledgeStore)
+	}{
+		// 企业存在但企业级 dataset 映射缺失时，不应把底层 sql.ErrNoRows 泄露给调用方。
+		{name: "org dataset 映射缺失", scope: KnowledgeRAGFlowScopeOrg, targetID: testKnowledgeOrg, setup: func(store *fakeKnowledgeStore) { store.missingOrgDataset = true }},
+		// 实例存在但实例级 dataset 映射缺失时，也应统一映射为 service 层 ErrNotFound。
+		{name: "app dataset 映射缺失", scope: KnowledgeRAGFlowScopeApp, targetID: testKnowledgeApp, setup: func(store *fakeKnowledgeStore) { store.missingAppDataset = true }},
+		// 行业库存在但行业 dataset 映射缺失时，保持与企业和实例 scope 一致的错误语义。
+		{name: "industry dataset 映射缺失", scope: KnowledgeRAGFlowScopeIndustry, targetID: testIndustryKnowledgeBaseID, setup: func(store *fakeKnowledgeStore) { store.missingIndustryDataset = true }},
+	}
+	for _, tc := range cases {
+		// 每个 scope 独立构造 fake，避免 missingDataset 标记和 RAGFlow 调用记录相互污染。
+		t.Run(tc.name, func(t *testing.T) {
+			svc, store, rf := newRAGFlowKnowledgeTestService(t)
+			svc.SetEmbeddingModelFallbacks([]config.RAGFlowEmbeddingModelConfig{{Name: "BAAI/bge-m3", Provider: "OpenAI-API-Compatible"}})
+			tc.setup(store)
+
+			_, err := svc.UpdateKnowledgeEmbeddingModel(context.Background(), platformKnowledgePrincipal(), tc.scope, tc.targetID, KnowledgeEmbeddingModelInput{Name: "BAAI/bge-m3", Provider: "OpenAI-API-Compatible"})
+
+			require.ErrorIs(t, err, ErrNotFound)
+			require.NotErrorIs(t, err, sql.ErrNoRows)
+			assert.Empty(t, rf.updateEmbeddingModelCalls)
+			assert.Empty(t, rf.runDatasetEmbeddingCalls)
+		})
+	}
+}
+
 // TestUpdateKnowledgeEmbeddingModelDoesNotResetWhenReparseFails 验证 RAGFlow 未接受整库重解析时不改本地状态，避免 UI 误报解析中。
 func TestUpdateKnowledgeEmbeddingModelDoesNotResetWhenReparseFails(t *testing.T) {
 	svc, store, rf := newRAGFlowKnowledgeTestService(t)
@@ -639,6 +671,18 @@ func TestUpdateKnowledgeEmbeddingModelRejectsUnknownModel(t *testing.T) {
 	_, err := svc.UpdateKnowledgeEmbeddingModel(context.Background(), platformKnowledgePrincipal(), KnowledgeRAGFlowScopeOrg, testKnowledgeOrg, KnowledgeEmbeddingModelInput{Name: "unknown-model", Provider: "OpenAI-API-Compatible"})
 
 	require.Error(t, err)
+	assert.Empty(t, rf.updateEmbeddingModelCalls)
+	assert.Empty(t, rf.runDatasetEmbeddingCalls)
+}
+
+// TestUpdateKnowledgeEmbeddingModelRejectsWhenFallbacksEmpty 验证未配置模型候选时拒绝任意模型名，避免绕过本地白名单。
+func TestUpdateKnowledgeEmbeddingModelRejectsWhenFallbacksEmpty(t *testing.T) {
+	svc, _, rf := newRAGFlowKnowledgeTestService(t)
+
+	_, err := svc.UpdateKnowledgeEmbeddingModel(context.Background(), platformKnowledgePrincipal(), KnowledgeRAGFlowScopeOrg, testKnowledgeOrg, KnowledgeEmbeddingModelInput{Name: "arbitrary-model", Provider: "unknown-provider"})
+
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "embedding 模型候选未配置")
 	assert.Empty(t, rf.updateEmbeddingModelCalls)
 	assert.Empty(t, rf.runDatasetEmbeddingCalls)
 }
