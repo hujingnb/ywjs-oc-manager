@@ -117,6 +117,15 @@ industry_knowledge:
   # 外部商业知识库上传行业文件的固定鉴权字符串；留空表示禁用外部上传入口。
   upload_token: ""
 
+transfer_limit:
+  # 单个文件上传请求从客户端读入 manager 的最大字节每秒；0 表示不限速。
+  # 524288 = 512KB/s。该限速只保护浏览器/外部系统 -> manager-api 链路。
+  upload_bytes_per_sec: 524288
+
+  # 单个文件下载请求从 manager 写给客户端的最大字节每秒；0 表示不限速。
+  # 524288 = 512KB/s。多个并发请求会各自按该速率限速。
+  download_bytes_per_sec: 524288
+
 hermes:
   # Hermes 容器平台级系统人设模板（SOUL.md PlatformPrompt 层）。
   # 模板内可写任意中文 / 英文 prompt。
