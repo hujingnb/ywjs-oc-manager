@@ -748,6 +748,10 @@ func ragflowEmbeddingSubmitValue(model KnowledgeEmbeddingModelResult) string {
 	if provider == "" {
 		return name
 	}
+	if provider == "OpenAI-API-Compatible" && !strings.Contains(name, "___") {
+		// RAGFlow 控制台展示 OpenAI compatible 模型的人类名，但 dataset API 需要内部模型名。
+		name += "___OpenAI-API"
+	}
 	return name + "@" + provider
 }
 

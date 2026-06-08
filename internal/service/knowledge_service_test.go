@@ -594,11 +594,23 @@ func TestUpdateKnowledgeEmbeddingModelResetsLocalDocuments(t *testing.T) {
 	assert.Equal(t, "ok", result.Status)
 	assert.Equal(t, []string{testRemoteOrgDatasetID}, rf.runDatasetEmbeddingCalls)
 	require.Len(t, rf.updateEmbeddingModelCalls, 1)
-	assert.Equal(t, "BAAI/bge-m3@OpenAI-API-Compatible", rf.updateEmbeddingModelCalls[0].embeddingModel)
+	assert.Equal(t, "BAAI/bge-m3___OpenAI-API@OpenAI-API-Compatible", rf.updateEmbeddingModelCalls[0].embeddingModel)
 	assert.Equal(t, "queued", store.docs["doc-a"].ParseStatus)
 	assert.Equal(t, int32(0), store.docs["doc-a"].Progress)
 	assert.False(t, store.docs["doc-a"].LastError.Valid)
 	assert.Equal(t, "queued", store.docs["doc-b"].ParseStatus)
+}
+
+// TestRAGFlowEmbeddingSubmitValueExpandsOpenAICompatibleInternalName 验证 OpenAI compatible 模型提交给 RAGFlow 时使用内部模型名。
+func TestRAGFlowEmbeddingSubmitValueExpandsOpenAICompatibleInternalName(t *testing.T) {
+	model := KnowledgeEmbeddingModelResult{
+		Name:     "netease-youdao/bce-embedding-base_v1",
+		Provider: "OpenAI-API-Compatible",
+	}
+
+	got := ragflowEmbeddingSubmitValue(model)
+
+	assert.Equal(t, "netease-youdao/bce-embedding-base_v1___OpenAI-API@OpenAI-API-Compatible", got)
 }
 
 // TestUpdateKnowledgeEmbeddingModelReturnsErrorStatusWhenFinalReadFails 验证模型修改流程完成后，最终详情读取失败会以 error 状态返回。
