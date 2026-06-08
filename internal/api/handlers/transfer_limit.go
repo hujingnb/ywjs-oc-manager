@@ -44,29 +44,35 @@ type rateLimitedReadCloser struct {
 	limiter *rate.Limiter
 	// burstBytes 限制单次 WaitN 的 token 数，避免大块读取超过 rate limiter burst。
 	burstBytes int
-	// bytesPerSec 记录配置值，便于调试时确认该请求使用的限速参数。
-	bytesPerSec int64
 }
 
 // newRateLimitedReadCloser 构造限速流。bytesPerSec 必须为正数；调用方负责在配置校验阶段拒绝负数。
 func newRateLimitedReadCloser(ctx context.Context, stream io.ReadCloser, bytesPerSec int64) io.ReadCloser {
 	burst := transferBurst(bytesPerSec)
 	return &rateLimitedReadCloser{
-		ctx:         ctx,
-		stream:      stream,
-		limiter:     rate.NewLimiter(rate.Limit(bytesPerSec), burst),
-		burstBytes:  burst,
-		bytesPerSec: bytesPerSec,
+		ctx:        ctx,
+		stream:     stream,
+		limiter:    rate.NewLimiter(rate.Limit(bytesPerSec), burst),
+		burstBytes: burst,
 	}
 }
 
-// Read 从底层流读取数据后按实际读取字节数等待 token，确保返回内容不被修改。
+// Read 先把单次底层读取限制在 burst 内，等待成功后才把字节复制给调用方。
 func (r *rateLimitedReadCloser) Read(p []byte) (int, error) {
-	n, err := r.stream.Read(p)
+	if len(p) == 0 {
+		return r.stream.Read(p)
+	}
+	readSize := len(p)
+	if readSize > r.burstBytes {
+		readSize = r.burstBytes
+	}
+	buf := make([]byte, readSize)
+	n, err := r.stream.Read(buf)
 	if n > 0 {
 		if waitErr := r.wait(n); waitErr != nil {
-			return n, waitErr
+			return 0, waitErr
 		}
+		copy(p, buf[:n])
 	}
 	return n, err
 }

@@ -2,6 +2,8 @@ package handlers
 
 import (
 	"bytes"
+	"context"
+	"errors"
 	"io"
 	"net/http"
 	"net/http/httptest"
@@ -69,6 +71,59 @@ func TestTransferLimitWrapsDownloadStreamWhenEnabled(t *testing.T) {
 	assert.True(t, ok)
 }
 
+// TestTransferLimitReadCloserDoesNotExposeBytesWhenContextCanceled 验证等待 token 失败时不向调用方暴露已预读的字节。
+func TestTransferLimitReadCloserDoesNotExposeBytesWhenContextCanceled(t *testing.T) {
+	ctx, cancel := context.WithCancel(t.Context())
+	cancel()
+	stream := newRateLimitedReadCloser(
+		ctx,
+		io.NopCloser(bytes.NewBufferString("abc")),
+		1,
+	)
+	buf := []byte("---")
+
+	n, err := stream.Read(buf)
+
+	require.ErrorIs(t, err, context.Canceled)
+	assert.Equal(t, 0, n)
+	assert.Equal(t, "---", string(buf))
+}
+
+// TestTransferLimitReadCloserPropagatesReadErrorWithoutBytes 验证底层流未读到字节时会直接返回原始读取错误。
+func TestTransferLimitReadCloserPropagatesReadErrorWithoutBytes(t *testing.T) {
+	readErr := errors.New("read failed")
+	stream := newRateLimitedReadCloser(
+		t.Context(),
+		&transferLimitErrorReadCloser{err: readErr},
+		1<<20,
+	)
+
+	n, err := stream.Read(make([]byte, 8))
+
+	require.ErrorIs(t, err, readErr)
+	assert.Equal(t, 0, n)
+}
+
+// TestTransferLimitReadCloserPreservesPartialReadWithError 验证底层流返回部分字节和错误时，等待成功后保留字节并返回原始错误。
+func TestTransferLimitReadCloserPreservesPartialReadWithError(t *testing.T) {
+	readErr := errors.New("partial read failed")
+	stream := newRateLimitedReadCloser(
+		t.Context(),
+		&transferLimitPartialErrorReadCloser{
+			data: []byte("abc"),
+			err:  readErr,
+		},
+		1<<20,
+	)
+	buf := make([]byte, 8)
+
+	n, err := stream.Read(buf)
+
+	require.ErrorIs(t, err, readErr)
+	assert.Equal(t, 3, n)
+	assert.Equal(t, "abc", string(buf[:n]))
+}
+
 // transferLimitTestReadCloser 让测试可以用 assert.Same 校验接口内的具体指针身份。
 type transferLimitTestReadCloser struct {
 	// Buffer 提供测试读取内容，同时让该类型以指针形式实现 io.ReadCloser。
@@ -77,5 +132,40 @@ type transferLimitTestReadCloser struct {
 
 // Close 模拟真实流的关闭动作；测试不需要额外资源释放。
 func (r *transferLimitTestReadCloser) Close() error {
+	return nil
+}
+
+// transferLimitErrorReadCloser 模拟底层流在未读到任何字节时直接失败。
+type transferLimitErrorReadCloser struct {
+	// err 是测试期望被原样传播的读取错误。
+	err error
+}
+
+// Read 返回 0 字节和预设错误，覆盖无部分数据的失败路径。
+func (r *transferLimitErrorReadCloser) Read(p []byte) (int, error) {
+	return 0, r.err
+}
+
+// Close 模拟失败流的关闭动作；测试不需要额外资源释放。
+func (r *transferLimitErrorReadCloser) Close() error {
+	return nil
+}
+
+// transferLimitPartialErrorReadCloser 模拟底层流同时返回部分数据和错误的边界行为。
+type transferLimitPartialErrorReadCloser struct {
+	// data 是底层流在返回错误前已经读到的字节。
+	data []byte
+	// err 是读取部分字节后需要继续向上传播的底层错误。
+	err error
+}
+
+// Read 先复制部分数据再返回错误，模拟 io.Reader 允许的 n > 0 && err != nil 场景。
+func (r *transferLimitPartialErrorReadCloser) Read(p []byte) (int, error) {
+	n := copy(p, r.data)
+	return n, r.err
+}
+
+// Close 模拟部分失败流的关闭动作；测试不需要额外资源释放。
+func (r *transferLimitPartialErrorReadCloser) Close() error {
 	return nil
 }
