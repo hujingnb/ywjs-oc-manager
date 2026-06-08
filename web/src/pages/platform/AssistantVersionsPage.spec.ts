@@ -270,14 +270,14 @@ describe('AssistantVersionsPage', () => {
     expect(updateVersion.mock.calls.at(-1)?.[0].payload.industry_knowledge_base_ids).toEqual(['industry-1'])
   })
 
-  // 编辑助手版本时展示行业库 top_k 上下文膨胀提示，并允许选择多个行业库提交。
-  it('编辑版本时提示行业库 top_k 风险并提交多选行业库', async () => {
+  // 编辑助手版本时展示行业库选择数量的通俗风险提示，并允许选择多个行业库提交。
+  it('编辑版本时提示行业库数量风险并提交多选行业库', async () => {
     updateVersion.mockResolvedValue(sampleVersion)
     const wrapper = mountPage()
     await wrapper.findAll('button').find(b => b.text() === '编辑')!.trigger('click')
     await nextTick()
 
-    expect(wrapper.text()).toContain('每个行业知识库都会单独召回最多 top_k 条结果')
+    expect(wrapper.text()).toContain('每选一个行业知识库，系统都会多查一批参考内容')
     const industrySelect = wrapper.findAll('select').find(s => s.attributes('multiple') !== undefined)
     expect(industrySelect).toBeTruthy()
     await industrySelect!.setValue(['industry-1', 'industry-2'])

@@ -109,7 +109,7 @@
                   placeholder="选择该版本运行时要额外检索的行业知识库"
                 />
                 <n-alert type="warning" :bordered="false">
-                  每个行业知识库都会单独召回最多 top_k 条结果。选择过多会显著增加上下文长度和响应成本，请只选择该版本确实需要的行业库。
+                  每选一个行业知识库，系统都会多查一批参考内容。选得越多，回答要处理的内容越多，速度和费用都可能增加。建议只选当前版本真正需要的行业库。
                 </n-alert>
                 <p v-if="industryBasesQuery.isError.value" class="state-text danger">行业知识库列表获取失败，请重试</p>
               </div>
