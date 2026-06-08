@@ -130,6 +130,23 @@ type RAGFlowConfig struct {
 	RequestTimeout Duration `yaml:"request_timeout"`
 	// ChunkMethod 是自动创建 dataset 时使用的默认分块方法，缺省 naive。
 	ChunkMethod string `yaml:"chunk_method"`
+	// DefaultEmbeddingModel 是创建 dataset 时优先使用的 embedding 模型名。
+	// 配置值必须填写 RAGFlow 控制台可见的人类模型名，而不是 RAGFlow 内部模型 ID。
+	DefaultEmbeddingModel string `yaml:"default_embedding_model"`
+	// EmbeddingModels 是 RAGFlow 模型列表不可用时供后端兜底展示和解析的模型清单。
+	// name/provider 均使用 RAGFlow 控制台可见文本，运行期再解析成远端内部模型 ID。
+	EmbeddingModels []RAGFlowEmbeddingModelConfig `yaml:"embedding_models"`
+}
+
+// RAGFlowEmbeddingModelConfig 描述一个可选的 RAGFlow embedding 模型兜底配置。
+// 这里保存的是控制台可见的人类模型名和 provider，不保存 RAGFlow 内部模型 ID。
+type RAGFlowEmbeddingModelConfig struct {
+	// Name 是 RAGFlow 控制台显示的 embedding 模型名，用于和远端模型列表匹配。
+	Name string `yaml:"name"`
+	// Label 是前端展示用标签；为空时调用方可回退显示 Name。
+	Label string `yaml:"label"`
+	// Provider 是 RAGFlow 控制台显示的模型供应方，用于区分同名模型来源。
+	Provider string `yaml:"provider"`
 }
 
 // IndustryKnowledgeConfig 描述行业知识库外部上传入口配置。

@@ -150,6 +150,8 @@ func runManager(ctx context.Context, cfg config.Config, logOut io.Writer) error 
 	}
 	knowledgeService := service.NewKnowledgeService(dbStore.Queries, ragflowClient)
 	knowledgeService.SetDatasetChunkMethod(cfg.RAGFlow.ChunkMethod)
+	knowledgeService.SetDefaultEmbeddingModel(cfg.RAGFlow.DefaultEmbeddingModel)
+	knowledgeService.SetEmbeddingModelFallbacks(cfg.RAGFlow.EmbeddingModels)
 	knowledgeService.SetTxRunner(store.NewKnowledgeRunner(dbStore))
 	onboardingService.SetKnowledgeDatasetProvisioner(knowledgeService)
 	appService := service.NewAppService(dbStore.Queries)

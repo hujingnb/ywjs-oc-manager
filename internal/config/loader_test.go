@@ -231,6 +231,78 @@ ragflow:
 	assert.Equal(t, "naive", cfg.RAGFlow.ChunkMethod)
 }
 
+// TestLoad_RAGFlowEmbeddingModelsAcceptHumanNames 验证 embedding 模型配置只需要填写 RAGFlow 控制台可见的人类模型名。
+func TestLoad_RAGFlowEmbeddingModelsAcceptHumanNames(t *testing.T) {
+	yaml := fullValidYAML() + `
+ragflow:
+  base_url: "http://ragflow:9380"
+  api_key: "secret"
+  default_embedding_model: "BAAI/bge-m3"
+  embedding_models:
+    - name: "BAAI/bge-m3"
+      label: "BAAI/bge-m3"
+      provider: "OpenAI-API-Compatible"
+    - name: "netease-youdao/bce-embedding-base_v1"
+      provider: "OpenAI-API-Compatible"
+`
+	cfg := loadConfigFromString(t, yaml)
+	require.Len(t, cfg.RAGFlow.EmbeddingModels, 2)
+	assert.Equal(t, "BAAI/bge-m3", cfg.RAGFlow.DefaultEmbeddingModel)
+	assert.Equal(t, "BAAI/bge-m3", cfg.RAGFlow.EmbeddingModels[0].Name)
+	assert.Equal(t, "BAAI/bge-m3", cfg.RAGFlow.EmbeddingModels[0].Label)
+	assert.Equal(t, "OpenAI-API-Compatible", cfg.RAGFlow.EmbeddingModels[0].Provider)
+}
+
+// TestLoad_RAGFlowEmbeddingModelRejectsBlankName 验证启用 RAGFlow 后兜底模型名不能为空，避免创建 dataset 时提交空模型。
+func TestLoad_RAGFlowEmbeddingModelRejectsBlankName(t *testing.T) {
+	yaml := fullValidYAML() + `
+ragflow:
+  base_url: "http://ragflow:9380"
+  api_key: "secret"
+  default_embedding_model: "BAAI/bge-m3"
+  embedding_models:
+    - name: "   "
+      provider: "OpenAI-API-Compatible"
+`
+	_, err := loadConfigFromStringErr(t, yaml)
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "ragflow.embedding_models[0].name")
+}
+
+// TestLoad_RAGFlowDefaultEmbeddingModelMustExistInFallbackList 验证默认模型必须出现在兜底列表中，避免 RAGFlow 模型列表不可用时无法解析默认值。
+func TestLoad_RAGFlowDefaultEmbeddingModelMustExistInFallbackList(t *testing.T) {
+	yaml := fullValidYAML() + `
+ragflow:
+  base_url: "http://ragflow:9380"
+  api_key: "secret"
+  default_embedding_model: "missing-model"
+  embedding_models:
+    - name: "BAAI/bge-m3"
+      provider: "OpenAI-API-Compatible"
+`
+	_, err := loadConfigFromStringErr(t, yaml)
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "ragflow.default_embedding_model")
+}
+
+// TestLoad_RAGFlowEmbeddingModelsRejectDuplicateNameProvider 验证兜底模型按模型名和 provider 去重，避免同一远端模型被重复展示或解析。
+func TestLoad_RAGFlowEmbeddingModelsRejectDuplicateNameProvider(t *testing.T) {
+	yaml := fullValidYAML() + `
+ragflow:
+  base_url: "http://ragflow:9380"
+  api_key: "secret"
+  default_embedding_model: "BAAI/bge-m3"
+  embedding_models:
+    - name: " BAAI/bge-m3 "
+      provider: " OpenAI-API-Compatible "
+    - name: "BAAI/bge-m3"
+      provider: "OpenAI-API-Compatible"
+`
+	_, err := loadConfigFromStringErr(t, yaml)
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "ragflow.embedding_models[1]")
+}
+
 // TestIndustryKnowledgeUploadTokenAllowsEmptyConfig 验证外部行业库上传 token 可为空，空配置表示禁用外部上传接口。
 func TestIndustryKnowledgeUploadTokenAllowsEmptyConfig(t *testing.T) {
 	yaml := fullValidYAML() + `

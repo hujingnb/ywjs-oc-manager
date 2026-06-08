@@ -17,6 +17,7 @@ import (
 	"github.com/guregu/null/v5"
 
 	"oc-manager/internal/auth"
+	"oc-manager/internal/config"
 	"oc-manager/internal/integrations/ragflow"
 	"oc-manager/internal/store/sqlc"
 )
@@ -131,7 +132,11 @@ type KnowledgeService struct {
 	store              KnowledgeStore
 	ragflow            RAGFlowKnowledgeClient
 	datasetChunkMethod string
-	tx                 KnowledgeTxRunner
+	// defaultEmbeddingModel 保存配置中的 RAGFlow 控制台可见模型名，后续创建 dataset 时再解析为远端内部 ID。
+	defaultEmbeddingModel string
+	// embeddingModelFallbacks 保存 RAGFlow 模型列表不可用时的兜底候选，setter 会复制切片避免外部修改污染服务状态。
+	embeddingModelFallbacks []config.RAGFlowEmbeddingModelConfig
+	tx                      KnowledgeTxRunner
 }
 
 // NewKnowledgeService 创建 RAGFlow-backed 知识库服务。
@@ -157,6 +162,16 @@ func (s *KnowledgeService) SetDatasetChunkMethod(method string) {
 		method = "naive"
 	}
 	s.datasetChunkMethod = method
+}
+
+// SetDefaultEmbeddingModel 设置创建 RAGFlow dataset 时优先使用的 embedding 模型名。
+func (s *KnowledgeService) SetDefaultEmbeddingModel(model string) {
+	s.defaultEmbeddingModel = strings.TrimSpace(model)
+}
+
+// SetEmbeddingModelFallbacks 设置 RAGFlow embedding 模型兜底清单。
+func (s *KnowledgeService) SetEmbeddingModelFallbacks(models []config.RAGFlowEmbeddingModelConfig) {
+	s.embeddingModelFallbacks = append([]config.RAGFlowEmbeddingModelConfig(nil), models...)
 }
 
 // KnowledgeListResult 是扁平文档列表接口的返回。

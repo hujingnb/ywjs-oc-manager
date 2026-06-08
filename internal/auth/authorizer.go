@@ -170,6 +170,12 @@ func CanManageIndustryKnowledge(p Principal) bool {
 	return p.Role == domain.UserRolePlatformAdmin
 }
 
+// CanManageKnowledgeRAGFlowDataset 判断主体是否可查看和修改知识库对应的 RAGFlow dataset 运维信息。
+// 该能力会暴露远端 dataset ID 并触发整库重解析，只允许平台管理员使用。
+func CanManageKnowledgeRAGFlowDataset(p Principal) bool {
+	return p.Role == domain.UserRolePlatformAdmin
+}
+
 // CanUpdateAppKnowledgeQuota 判断主体是否可编辑实例知识库容量。
 // 平台管理员可运维兜底；企业管理员仅能调整本企业实例；普通成员不可修改容量。
 func CanUpdateAppKnowledgeQuota(p Principal, appOrgID string) bool {

@@ -223,7 +223,7 @@ func (r RAGFlowConfig) validate() error {
 	baseURL := strings.TrimSpace(r.BaseURL)
 	apiKey := strings.TrimSpace(r.APIKey)
 	if baseURL == "" && apiKey == "" {
-		return nil
+		return r.validateEmbeddingModels(false)
 	}
 	if baseURL == "" {
 		return fmt.Errorf("缺少必需配置: ragflow.base_url")
@@ -240,6 +240,37 @@ func (r RAGFlowConfig) validate() error {
 	}
 	if r.RequestTimeout.Duration <= 0 {
 		return fmt.Errorf("ragflow.request_timeout 必须为正持续时间")
+	}
+	return r.validateEmbeddingModels(true)
+}
+
+// validateEmbeddingModels 校验 RAGFlow embedding 模型兜底配置。
+// RAGFlow 未启用时模型配置不会被使用，保持本地开发空配置可启动；启用后则 fail-fast 拦截空模型名和重复项。
+func (r RAGFlowConfig) validateEmbeddingModels(enabled bool) error {
+	if !enabled {
+		return nil
+	}
+	defaultModel := strings.TrimSpace(r.DefaultEmbeddingModel)
+	defaultFound := defaultModel == ""
+	seen := make(map[string]int, len(r.EmbeddingModels))
+	for i, model := range r.EmbeddingModels {
+		name := strings.TrimSpace(model.Name)
+		if name == "" {
+			return fmt.Errorf("ragflow.embedding_models[%d].name 不能为空", i)
+		}
+		provider := strings.TrimSpace(model.Provider)
+		// 同名模型可由不同 provider 提供；去重必须同时考虑 provider，避免误删有效候选。
+		key := name + "\x00" + provider
+		if first, ok := seen[key]; ok {
+			return fmt.Errorf("ragflow.embedding_models[%d] 与 ragflow.embedding_models[%d] 重复", i, first)
+		}
+		seen[key] = i
+		if name == defaultModel {
+			defaultFound = true
+		}
+	}
+	if !defaultFound {
+		return fmt.Errorf("ragflow.default_embedding_model 必须出现在 ragflow.embedding_models.name 中")
 	}
 	return nil
 }
