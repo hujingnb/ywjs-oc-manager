@@ -216,6 +216,18 @@ func TestCanManageIndustryKnowledge(t *testing.T) {
 	assert.False(t, CanManageIndustryKnowledge(Principal{}))
 }
 
+// TestCanManageKnowledgeRAGFlowDataset 验证 RAGFlow dataset 运维信息只允许平台管理员查看和修改。
+func TestCanManageKnowledgeRAGFlowDataset(t *testing.T) {
+	// 平台管理员可执行 RAGFlow dataset 运维操作。
+	assert.True(t, CanManageKnowledgeRAGFlowDataset(Principal{Role: domain.UserRolePlatformAdmin}))
+	// 组织管理员不能查看远端 dataset ID 或触发整库重解析。
+	assert.False(t, CanManageKnowledgeRAGFlowDataset(Principal{Role: domain.UserRoleOrgAdmin, OrgID: "org-1"}))
+	// 普通组织成员不能接触平台级 dataset 运维入口。
+	assert.False(t, CanManageKnowledgeRAGFlowDataset(Principal{Role: domain.UserRoleOrgMember, OrgID: "org-1"}))
+	// 空主体不具备任何 dataset 运维权限。
+	assert.False(t, CanManageKnowledgeRAGFlowDataset(Principal{}))
+}
+
 // TestCanUpdateAppKnowledgeQuota 验证实例知识库容量允许平台管理员和本企业管理员修改。
 func TestCanUpdateAppKnowledgeQuota(t *testing.T) {
 	assert.True(t, CanUpdateAppKnowledgeQuota(Principal{Role: domain.UserRolePlatformAdmin}, "org-1"))

@@ -251,7 +251,7 @@ func (r RAGFlowConfig) validateEmbeddingModels(enabled bool) error {
 		return nil
 	}
 	defaultModel := strings.TrimSpace(r.DefaultEmbeddingModel)
-	defaultFound := defaultModel == ""
+	defaultMatches := 0
 	seen := make(map[string]int, len(r.EmbeddingModels))
 	for i, model := range r.EmbeddingModels {
 		name := strings.TrimSpace(model.Name)
@@ -266,11 +266,18 @@ func (r RAGFlowConfig) validateEmbeddingModels(enabled bool) error {
 		}
 		seen[key] = i
 		if name == defaultModel {
-			defaultFound = true
+			defaultMatches++
 		}
 	}
-	if !defaultFound {
+	if defaultModel == "" {
+		return nil
+	}
+	if defaultMatches == 0 {
 		return fmt.Errorf("ragflow.default_embedding_model 必须出现在 ragflow.embedding_models.name 中")
+	}
+	if defaultMatches > 1 {
+		// 默认模型配置没有 provider 字段；同名模型跨 provider 出现时无法唯一解析，必须让部署者改用不歧义的默认值或留空。
+		return fmt.Errorf("ragflow.default_embedding_model %q 匹配多个 ragflow.embedding_models.name", defaultModel)
 	}
 	return nil
 }

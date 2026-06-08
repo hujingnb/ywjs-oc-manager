@@ -303,6 +303,43 @@ ragflow:
 	assert.Contains(t, err.Error(), "ragflow.embedding_models[1]")
 }
 
+// TestLoad_RAGFlowEmbeddingModelsAllowSameNameDifferentProviderWithoutDefault 验证同名不同 provider 的兜底模型在未指定默认模型时允许共存。
+func TestLoad_RAGFlowEmbeddingModelsAllowSameNameDifferentProviderWithoutDefault(t *testing.T) {
+	yaml := fullValidYAML() + `
+ragflow:
+  base_url: "http://ragflow:9380"
+  api_key: "secret"
+  embedding_models:
+    - name: "BAAI/bge-m3"
+      provider: "OpenAI-API-Compatible"
+    - name: "BAAI/bge-m3"
+      provider: "Local-Provider"
+`
+	cfg := loadConfigFromString(t, yaml)
+	require.Len(t, cfg.RAGFlow.EmbeddingModels, 2)
+	assert.Empty(t, cfg.RAGFlow.DefaultEmbeddingModel)
+	assert.Equal(t, "OpenAI-API-Compatible", cfg.RAGFlow.EmbeddingModels[0].Provider)
+	assert.Equal(t, "Local-Provider", cfg.RAGFlow.EmbeddingModels[1].Provider)
+}
+
+// TestLoad_RAGFlowDefaultEmbeddingModelRejectsAmbiguousName 验证默认模型名命中多个 provider 时必须拒绝，避免只按人类模型名无法唯一解析。
+func TestLoad_RAGFlowDefaultEmbeddingModelRejectsAmbiguousName(t *testing.T) {
+	yaml := fullValidYAML() + `
+ragflow:
+  base_url: "http://ragflow:9380"
+  api_key: "secret"
+  default_embedding_model: "BAAI/bge-m3"
+  embedding_models:
+    - name: "BAAI/bge-m3"
+      provider: "OpenAI-API-Compatible"
+    - name: " BAAI/bge-m3 "
+      provider: "Local-Provider"
+`
+	_, err := loadConfigFromStringErr(t, yaml)
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "ragflow.default_embedding_model")
+}
+
 // TestIndustryKnowledgeUploadTokenAllowsEmptyConfig 验证外部行业库上传 token 可为空，空配置表示禁用外部上传接口。
 func TestIndustryKnowledgeUploadTokenAllowsEmptyConfig(t *testing.T) {
 	yaml := fullValidYAML() + `
