@@ -2,7 +2,13 @@
 // 重点验证 org_admin 在 orgId 省略和显式传入两种场景下均可管理自身组织知识库。
 import { describe, expect, it } from 'vitest'
 
-import { canManageOrgKnowledge, canManageApp, canCreateAppForOrg, canUpdateAppKnowledgeQuota } from './permissions'
+import {
+  canCreateAppForOrg,
+  canManageApp,
+  canManageOrgKnowledge,
+  canManageRAGFlowDatasetInfo,
+  canUpdateAppKnowledgeQuota,
+} from './permissions'
 
 describe('canManageOrgKnowledge', () => {
   // 覆盖 ORG_ADMIN 显式传入自身 orgId 时可管理知识库（基准路径）。
@@ -127,5 +133,16 @@ describe('canUpdateAppKnowledgeQuota', () => {
       { role: 'org_member', id: 'u1', org_id: 'org-1' },
       { org_id: 'org-1', owner_user_id: 'u1' },
     )).toBe(false)
+  })
+})
+
+describe('canManageRAGFlowDatasetInfo', () => {
+  // 平台管理员可以跨行业库、企业库和实例库执行 RAGFlow 运维操作。
+  it('仅平台管理员可查看和修改 RAGFlow dataset 信息', () => {
+    expect(canManageRAGFlowDatasetInfo({ role: 'platform_admin' })).toBe(true)
+    // 企业管理员不能看到入口，避免触发整库重解析这类平台运维操作。
+    expect(canManageRAGFlowDatasetInfo({ role: 'org_admin', org_id: 'org-1' })).toBe(false)
+    // 普通成员没有 RAGFlow 远端信息入口。
+    expect(canManageRAGFlowDatasetInfo({ role: 'org_member', org_id: 'org-1' })).toBe(false)
   })
 })

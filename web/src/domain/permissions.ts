@@ -57,6 +57,11 @@ export function canUpdateAppKnowledgeQuota(
   return false
 }
 
+// canManageRAGFlowDatasetInfo 控制 RAGFlow dataset 运维弹框入口；后端仍是最终权限边界。
+export function canManageRAGFlowDatasetInfo(user: PermissionUser | null | undefined): boolean {
+  return user?.role === 'platform_admin'
+}
+
 // 组织级审计是管理视角；普通成员只能进入自己的应用审计。
 export function canViewOrgAudit(user: PermissionUser | null | undefined, orgId?: string): boolean {
   if (!user || !orgId) return false

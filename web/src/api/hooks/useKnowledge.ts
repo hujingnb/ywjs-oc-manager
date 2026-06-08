@@ -29,8 +29,41 @@ export interface KnowledgeListing {
   remaining_bytes: number
 }
 
+// KnowledgeRAGFlowScope 标识三个可查看 RAGFlow dataset 运维信息的知识库归属。
+export type KnowledgeRAGFlowScope = 'org' | 'app' | 'industry'
+
+// KnowledgeEmbeddingModel 是前端展示和提交的 embedding 模型候选，使用人类可读模型名。
+export interface KnowledgeEmbeddingModel {
+  name: string
+  label: string
+  provider: string
+  available: boolean
+}
+
+// KnowledgeEmbeddingModelList 是平台管理员可选择的 RAGFlow embedding 模型列表。
+export interface KnowledgeEmbeddingModelList {
+  items: KnowledgeEmbeddingModel[]
+}
+
+// KnowledgeRAGFlowDatasetInfo 展示远端 dataset 实时信息；error/not_created 均不触发懒创建。
+export interface KnowledgeRAGFlowDatasetInfo {
+  scope: KnowledgeRAGFlowScope
+  target_id: string
+  target_name: string
+  status: 'ok' | 'not_created' | 'error' | string
+  ragflow_dataset_id?: string
+  ragflow_dataset_name?: string
+  embedding_model?: KnowledgeEmbeddingModel
+  error_message?: string
+  doc_num?: number
+  chunk_num?: number
+  updated_at?: string
+}
+
 const orgKey = (orgId: string | undefined) => ['knowledge', 'org', orgId] as const
 const appKey = (appId: string | undefined) => ['knowledge', 'app', appId] as const
+const ragflowDatasetKey = (scope: KnowledgeRAGFlowScope, targetId: string | undefined) => ['knowledge', 'ragflow-dataset', scope, targetId] as const
+const embeddingModelsKey = ['knowledge', 'embedding-models'] as const
 const knowledgeDefaultPage = 1
 const knowledgeDefaultPageSize = 50
 
@@ -224,6 +257,61 @@ export function useAppKnowledgeQuery(appId: Ref<string | undefined>, options: Kn
       return normalizeKnowledgeListing(await apiRequest<KnowledgeListing>(`/api/v1/apps/${appId.value}/knowledge`, {
         query: listQuery.value,
       }))
+    },
+  })
+}
+
+// ragflowDatasetPath 按知识库归属生成统一弹框读取和修改 RAGFlow dataset 的后端路径。
+function ragflowDatasetPath(scope: KnowledgeRAGFlowScope, targetId: string): string {
+  if (scope === 'org') return `/api/v1/organizations/${targetId}/knowledge/ragflow-dataset`
+  if (scope === 'app') return `/api/v1/apps/${targetId}/knowledge/ragflow-dataset`
+  return `/api/v1/industry-knowledge-bases/${targetId}/ragflow-dataset`
+}
+
+// useKnowledgeEmbeddingModelsQuery 读取平台配置的 embedding 模型候选。
+export function useKnowledgeEmbeddingModelsQuery(enabled?: () => boolean) {
+  return useQuery<KnowledgeEmbeddingModelList>({
+    queryKey: embeddingModelsKey,
+    enabled,
+    queryFn: async () => apiRequest<KnowledgeEmbeddingModelList>('/api/v1/knowledge/embedding-models'),
+  })
+}
+
+// useRAGFlowDatasetInfoQuery 读取指定知识库对应的远端 dataset 实时信息。
+export function useRAGFlowDatasetInfoQuery(
+  scope: Ref<KnowledgeRAGFlowScope>,
+  targetId: Ref<string | undefined>,
+  enabled?: () => boolean,
+) {
+  return useQuery<KnowledgeRAGFlowDatasetInfo | null>({
+    queryKey: computed(() => ragflowDatasetKey(scope.value, targetId.value)),
+    enabled: () => Boolean(targetId.value) && (enabled ? enabled() : true),
+    queryFn: async () => {
+      if (!targetId.value) return null
+      return apiRequest<KnowledgeRAGFlowDatasetInfo>(ragflowDatasetPath(scope.value, targetId.value))
+    },
+  })
+}
+
+// useUpdateRAGFlowDatasetEmbeddingModel 修改远端 dataset 模型，并刷新对应知识库列表状态。
+export function useUpdateRAGFlowDatasetEmbeddingModel(
+  scope: Ref<KnowledgeRAGFlowScope>,
+  targetId: Ref<string | undefined>,
+) {
+  const client = useQueryClient()
+  return useMutation({
+    mutationFn: async (input: { name: string; provider?: string }) => {
+      if (!targetId.value) throw new Error('缺少知识库 ID')
+      return apiRequest<KnowledgeRAGFlowDatasetInfo>(`${ragflowDatasetPath(scope.value, targetId.value)}/embedding-model`, {
+        method: 'PATCH',
+        body: input,
+      })
+    },
+    onSuccess: () => {
+      void client.invalidateQueries({ queryKey: ragflowDatasetKey(scope.value, targetId.value) })
+      if (scope.value === 'org') void client.invalidateQueries({ queryKey: orgKey(targetId.value) })
+      if (scope.value === 'app') void client.invalidateQueries({ queryKey: appKey(targetId.value) })
+      if (scope.value === 'industry') void client.invalidateQueries({ queryKey: ['industry-knowledge-files', targetId.value] })
     },
   })
 }
