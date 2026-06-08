@@ -131,7 +131,7 @@ Hermes Agent runtime 容器相关配置。
 
 > 容器实际使用的 `OPENAI_API_KEY` 由 manager 替每个应用通过 new-api `POST /api/token/:id/key` 自动拉取后加密落库（`apps.newapi_key_ciphertext`），每个应用的 token 独立隔离，无需在此填写全局 sk-。
 
-### 1.10 `agent`
+### 1.11 `agent`
 
 manager 侧用于与 runtime-agent 协调的参数（非 runtime-agent 自身配置）。
 
@@ -139,7 +139,7 @@ manager 侧用于与 runtime-agent 协调的参数（非 runtime-agent 自身配
 |---|---|---|---|
 | `heartbeat_interval_seconds` | int | `30` | runtime-agent 注册成功后回写并按此频率上报心跳；manager 以 90 秒阈值判定节点离线（`NodeHealthReconciler`） |
 
-### 1.11 `runtime`
+### 1.12 `runtime`
 
 | 字段 | 类型 | 默认 | 说明 |
 |---|---|---|---|
