@@ -88,8 +88,8 @@ spec:
           # 资源配额（起步值）：RAGFlow 含 server + task_executor + DeepDOC 解析，较重，按文档量与并发调整。
           resources:
             requests:
-              cpu: "1"
-              memory: "2Gi"
+              cpu: "2"
+              memory: "4Gi"
             limits:
               cpu: "4"
               memory: "8Gi"
@@ -98,6 +98,10 @@ spec:
               value: elasticsearch
             - name: DEVICE
               value: cpu
+            # RAGFlow task_executor 默认最多并发 5 个解析任务；8Gi 节点内存余量有限，
+            # 显式压到 1，避免多个小文件同时 OCR/DeepDOC/GraphRAG 时叠加出高内存峰值。
+            - name: MAX_CONCURRENT_TASKS
+              value: "1"
             # 所有外部后端连接信息（host/port/dbname/账号口令）统一来自 ocm-secrets，
             # 部署时只改 secret，无需改本文件。
             - name: ES_HOST
