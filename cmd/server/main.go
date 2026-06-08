@@ -30,6 +30,7 @@ import (
 	"golang.org/x/sync/errgroup"
 
 	"oc-manager/internal/api"
+	apihandlers "oc-manager/internal/api/handlers"
 	"oc-manager/internal/api/middleware"
 	"oc-manager/internal/audit"
 	"oc-manager/internal/auth"
@@ -524,6 +525,11 @@ func runManager(ctx context.Context, cfg config.Config, logOut io.Writer) error 
 	}
 	skillLibraryService := service.NewSkillLibraryService(platformSource, clawhubSource)
 
+	transferLimit := apihandlers.TransferLimitConfig{
+		UploadBytesPerSec:   cfg.TransferLimit.UploadBytesPerSec,
+		DownloadBytesPerSec: cfg.TransferLimit.DownloadBytesPerSec,
+	}
+
 	server := &http.Server{
 		Addr: cfg.App.HTTPAddr,
 		Handler: api.NewRouter(api.Dependencies{
@@ -537,6 +543,7 @@ func runManager(ctx context.Context, cfg config.Config, logOut io.Writer) error 
 			ChannelService:               channelService,
 			KnowledgeService:             knowledgeService,
 			IndustryKnowledgeUploadToken: cfg.IndustryKnowledge.UploadToken,
+			TransferLimit:                transferLimit,
 			WorkspaceService:             workspaceService,
 			RuntimeOpService:             runtimeOpService,
 			AppService:                   appService,

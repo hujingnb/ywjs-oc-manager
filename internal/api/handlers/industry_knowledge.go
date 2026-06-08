@@ -24,6 +24,8 @@ type IndustryKnowledgeHandler struct {
 	service industryKnowledgeService
 	// uploadToken 是外部上传入口的精确匹配固定 token；空值表示入口禁用。
 	uploadToken string
+	// transferLimit 是文件上传下载的单请求限速配置；零值保持不限制。
+	transferLimit TransferLimitConfig
 }
 
 // industryKnowledgeService 是行业知识库 handler 依赖的最小 service 能力集合。
@@ -52,9 +54,13 @@ type industryKnowledgeService interface {
 	ExternalUploadIndustryFile(ctx context.Context, industryName, filename string, content io.Reader, size int64) (service.KnowledgeDocumentResult, error)
 }
 
-// NewIndustryKnowledgeHandler 创建行业知识库 handler。
-func NewIndustryKnowledgeHandler(svc industryKnowledgeService, uploadToken string) *IndustryKnowledgeHandler {
-	return &IndustryKnowledgeHandler{service: svc, uploadToken: uploadToken}
+// NewIndustryKnowledgeHandler 创建行业知识库 handler；limits 保持可选以兼容未配置限速的历史调用路径。
+func NewIndustryKnowledgeHandler(svc industryKnowledgeService, uploadToken string, limits ...TransferLimitConfig) *IndustryKnowledgeHandler {
+	var limit TransferLimitConfig
+	if len(limits) > 0 {
+		limit = limits[0]
+	}
+	return &IndustryKnowledgeHandler{service: svc, uploadToken: uploadToken, transferLimit: limit}
 }
 
 // RegisterExternalIndustryKnowledgeRoutes 注册无需用户登录的外部行业知识库上传路由。
@@ -110,6 +116,7 @@ func (h *IndustryKnowledgeHandler) ExternalUpload(c *gin.Context) {
 		return
 	}
 	c.Request.Body = http.MaxBytesReader(c.Writer, c.Request.Body, maxBodyBytes)
+	h.transferLimit.limitUploadBody(c)
 	if err := c.Request.ParseMultipartForm(maxKnowledgeMultipartOverheadBytes); err != nil {
 		var maxErr *http.MaxBytesError
 		if errors.As(err, &maxErr) {
@@ -391,6 +398,7 @@ func (h *IndustryKnowledgeHandler) SaveFile(c *gin.Context) {
 	if !ok {
 		return
 	}
+	h.transferLimit.limitUploadBody(c)
 	result, err := h.service.SaveIndustryFile(c.Request.Context(), principalFromCtx(c), c.Param("industryId"), filename, c.Request.Body, size)
 	if err != nil {
 		writeIndustryKnowledgeError(c, err)
@@ -421,7 +429,7 @@ func (h *IndustryKnowledgeHandler) DownloadFile(c *gin.Context) {
 		writeIndustryKnowledgeError(c, err)
 		return
 	}
-	writeKnowledgeDownload(c, filename, reader, size)
+	writeKnowledgeDownload(c, filename, reader, size, h.transferLimit)
 }
 
 // DeleteFile 删除行业知识库文件。

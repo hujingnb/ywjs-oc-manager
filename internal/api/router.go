@@ -34,6 +34,8 @@ type Dependencies struct {
 	KnowledgeService *service.KnowledgeService
 	// IndustryKnowledgeUploadToken 是外部商业知识库上传行业文件的固定鉴权字符串；为空时外部上传入口返回 401。
 	IndustryKnowledgeUploadToken string
+	// TransferLimit 是 manager 文件上传下载的单请求限速配置；零值表示不限速。
+	TransferLimit handlers.TransferLimitConfig
 	// WorkspaceService 提供应用工作目录代理路由。
 	WorkspaceService *service.WorkspaceService
 	// UsageService 提供 new-api 用量代理路由。
@@ -100,7 +102,7 @@ func NewRouter(deps ...Dependencies) http.Handler {
 	}
 	dep := deps[0]
 	if dep.KnowledgeService != nil {
-		industryHandler := handlers.NewIndustryKnowledgeHandler(dep.KnowledgeService, dep.IndustryKnowledgeUploadToken)
+		industryHandler := handlers.NewIndustryKnowledgeHandler(dep.KnowledgeService, dep.IndustryKnowledgeUploadToken, dep.TransferLimit)
 		handlers.RegisterExternalIndustryKnowledgeRoutes(router, industryHandler)
 	}
 	if dep.TokenManager == nil {
@@ -154,8 +156,8 @@ func NewRouter(deps ...Dependencies) http.Handler {
 		handlers.RegisterChannelRoutes(user, handlers.NewChannelsHandler(dep.ChannelService))
 	}
 	if dep.KnowledgeService != nil {
-		knowledgeHandler := handlers.NewKnowledgeHandler(dep.KnowledgeService)
-		industryHandler := handlers.NewIndustryKnowledgeHandler(dep.KnowledgeService, dep.IndustryKnowledgeUploadToken)
+		knowledgeHandler := handlers.NewKnowledgeHandler(dep.KnowledgeService, dep.TransferLimit)
+		industryHandler := handlers.NewIndustryKnowledgeHandler(dep.KnowledgeService, dep.IndustryKnowledgeUploadToken, dep.TransferLimit)
 		handlers.RegisterKnowledgeRoutes(user, knowledgeHandler)
 		handlers.RegisterIndustryKnowledgeRoutes(user, industryHandler)
 	}

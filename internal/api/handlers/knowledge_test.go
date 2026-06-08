@@ -21,28 +21,30 @@ import (
 
 // knowledgeServiceStub 实现 knowledgeService 接口，仅 stub 测试用到的方法。
 type knowledgeServiceStub struct {
-	listOrgResult service.KnowledgeListResult
-	listOrgErr    error
-	saveOrgResult service.KnowledgeDocumentResult
-	saveOrgErr    error
-	saveOrgCalls  int
-	saveAppCalls  int
-	reparseOrgErr error
-	openContent   string
-	openSize      int64
-	openName      string
-	openErr       error
-	openCloses    int
-	clearOrgErr   error
-	clearOrgID    string
+	listOrgResult   service.KnowledgeListResult
+	listOrgErr      error
+	saveOrgResult   service.KnowledgeDocumentResult
+	saveOrgErr      error
+	saveOrgCalls    int
+	saveOrgBodyType string
+	saveAppCalls    int
+	reparseOrgErr   error
+	openContent     string
+	openSize        int64
+	openName        string
+	openErr         error
+	openCloses      int
+	clearOrgErr     error
+	clearOrgID      string
 }
 
 func (s *knowledgeServiceStub) ListOrg(_ context.Context, _ auth.Principal, _ string, _, _ int32, _, _ string) (service.KnowledgeListResult, error) {
 	return s.listOrgResult, s.listOrgErr
 }
 
-func (s *knowledgeServiceStub) SaveOrgFile(_ context.Context, _ auth.Principal, _, _ string, _ io.Reader, _ int64) (service.KnowledgeDocumentResult, error) {
+func (s *knowledgeServiceStub) SaveOrgFile(_ context.Context, _ auth.Principal, _, _ string, content io.Reader, _ int64) (service.KnowledgeDocumentResult, error) {
 	s.saveOrgCalls++
+	s.saveOrgBodyType = fmt.Sprintf("%T", content)
 	return s.saveOrgResult, s.saveOrgErr
 }
 
@@ -108,6 +110,14 @@ func newKnowledgeTestRouter(t *testing.T, svc knowledgeService) *gin.Engine {
 	return router
 }
 
+func newKnowledgeTestRouterWithTransferLimit(t *testing.T, svc knowledgeService, limit TransferLimitConfig) *gin.Engine {
+	t.Helper()
+	gin.SetMode(gin.ReleaseMode)
+	router := gin.New()
+	RegisterKnowledgeRoutes(router, NewKnowledgeHandler(svc, limit))
+	return router
+}
+
 // TestKnowledgeListOrgFlatContract 验证知识库列表返回扁平 items/total 契约，不再返回旧文件树字段。
 func TestKnowledgeListOrgFlatContract(t *testing.T) {
 	stub := &knowledgeServiceStub{listOrgResult: service.KnowledgeListResult{
@@ -141,6 +151,21 @@ func TestKnowledgeUploadOrgReturnsDocument(t *testing.T) {
 	require.Equal(t, http.StatusAccepted, w.Code)
 	assert.Contains(t, w.Body.String(), `"id":"doc-1"`)
 	assert.Contains(t, w.Body.String(), `"parse_status":"queued"`)
+}
+
+// TestKnowledgeUploadOrgAppliesUploadRateLimit 验证企业知识库上传在进入 service 前会按配置包装请求体。
+func TestKnowledgeUploadOrgAppliesUploadRateLimit(t *testing.T) {
+	stub := &knowledgeServiceStub{saveOrgResult: service.KnowledgeDocumentResult{ID: "doc-1", Name: "report.md"}}
+	router := newKnowledgeTestRouterWithTransferLimit(t, stub, TransferLimitConfig{UploadBytesPerSec: 1 << 20})
+
+	w := httptest.NewRecorder()
+	req := httptest.NewRequest(http.MethodPost, "/api/v1/organizations/org-1/knowledge?filename=report.md", bytes.NewBufferString("content"))
+	req = withPrincipal(req, auth.Principal{UserID: "u1", Role: domain.UserRoleOrgAdmin, OrgID: "org-1"})
+	router.ServeHTTP(w, req)
+
+	require.Equal(t, http.StatusAccepted, w.Code)
+	assert.Equal(t, 1, stub.saveOrgCalls)
+	assert.Contains(t, stub.saveOrgBodyType, "rateLimitedReadCloser")
 }
 
 // TestKnowledgeUploadOrgRequiresFilename 验证上传缺少 filename 时在 handler 层直接返回 400。
@@ -272,6 +297,23 @@ func TestKnowledgeDownloadOrgUsesServiceFilename(t *testing.T) {
 
 	require.Equal(t, http.StatusOK, w.Code)
 	assert.Equal(t, "attachment; filename=report.md", w.Header().Get("Content-Disposition"))
+	assert.Equal(t, "hello", w.Body.String())
+	assert.Equal(t, 1, stub.openCloses)
+}
+
+// TestKnowledgeDownloadOrgKeepsResponseHeadersWithRateLimit 验证下载限速不改变文件名、长度和响应体契约。
+func TestKnowledgeDownloadOrgKeepsResponseHeadersWithRateLimit(t *testing.T) {
+	stub := &knowledgeServiceStub{openContent: "hello", openSize: 5, openName: "report.md"}
+	router := newKnowledgeTestRouterWithTransferLimit(t, stub, TransferLimitConfig{DownloadBytesPerSec: 1 << 20})
+
+	w := httptest.NewRecorder()
+	req := httptest.NewRequest(http.MethodGet, "/api/v1/organizations/org-1/knowledge/doc-1/file", nil)
+	req = withPrincipal(req, auth.Principal{UserID: "u1", Role: domain.UserRoleOrgMember, OrgID: "org-1"})
+	router.ServeHTTP(w, req)
+
+	require.Equal(t, http.StatusOK, w.Code)
+	assert.Equal(t, "attachment; filename=report.md", w.Header().Get("Content-Disposition"))
+	assert.Equal(t, "5", w.Header().Get("Content-Length"))
 	assert.Equal(t, "hello", w.Body.String())
 	assert.Equal(t, 1, stub.openCloses)
 }

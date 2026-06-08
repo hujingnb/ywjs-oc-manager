@@ -5,6 +5,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"io"
 	"mime/multipart"
 	"net/http"
@@ -55,6 +56,7 @@ type industryKnowledgeServiceStub struct {
 	saveIndustryID string
 	saveFilename   string
 	saveSize       int64
+	saveBodyType   string
 	saveContent    string
 
 	openContent string
@@ -118,6 +120,7 @@ func (s *industryKnowledgeServiceStub) SaveIndustryFile(_ context.Context, _ aut
 	s.saveIndustryID = industryID
 	s.saveFilename = filename
 	s.saveSize = size
+	s.saveBodyType = fmt.Sprintf("%T", content)
 	body, _ := io.ReadAll(content)
 	s.saveContent = string(body)
 	return s.saveResult, s.saveErr
@@ -158,11 +161,11 @@ func (s *industryKnowledgeServiceStub) ExternalUploadIndustryFile(_ context.Cont
 }
 
 // newIndustryKnowledgeTestRouter 构造同时挂载外部上传和平台管理路由的 Gin 测试引擎。
-func newIndustryKnowledgeTestRouter(t *testing.T, svc industryKnowledgeService, uploadToken string) *gin.Engine {
+func newIndustryKnowledgeTestRouter(t *testing.T, svc industryKnowledgeService, uploadToken string, limits ...TransferLimitConfig) *gin.Engine {
 	t.Helper()
 	gin.SetMode(gin.ReleaseMode)
 	router := gin.New()
-	handler := NewIndustryKnowledgeHandler(svc, uploadToken)
+	handler := NewIndustryKnowledgeHandler(svc, uploadToken, limits...)
 	RegisterExternalIndustryKnowledgeRoutes(router, handler)
 	RegisterIndustryKnowledgeRoutes(router, handler)
 	return router
@@ -320,6 +323,25 @@ func TestExternalIndustryUploadAcceptsConfiguredToken(t *testing.T) {
 	assert.Equal(t, "content", stub.externalContent)
 }
 
+// TestExternalIndustryUploadParsesMultipartWithUploadRateLimit 验证外部行业库 multipart 上传在限速开启时仍能正常解析文件。
+func TestExternalIndustryUploadParsesMultipartWithUploadRateLimit(t *testing.T) {
+	stub := &industryKnowledgeServiceStub{saveResult: service.KnowledgeDocumentResult{ID: "doc-1", Name: "policy.pdf"}}
+	router := newIndustryKnowledgeTestRouter(t, stub, "secret-token", TransferLimitConfig{UploadBytesPerSec: 1 << 20})
+
+	body, contentType := multipartIndustryUploadBody(t, "保险", "policy.pdf", "content")
+	w := httptest.NewRecorder()
+	req := httptest.NewRequest(http.MethodPost, "/api/v1/external/industry-knowledge/files", body)
+	req.Header.Set("Content-Type", contentType)
+	req.Header.Set("X-OC-Industry-Knowledge-Token", "secret-token")
+	router.ServeHTTP(w, req)
+
+	require.Equal(t, http.StatusAccepted, w.Code)
+	assert.Equal(t, 1, stub.externalUploadCalls)
+	assert.Equal(t, "保险", stub.externalIndustryName)
+	assert.Equal(t, "policy.pdf", stub.externalFilename)
+	assert.Equal(t, "content", stub.externalContent)
+}
+
 // TestExternalIndustryUploadRejectsEmptyConfiguredToken 验证未配置固定鉴权字符串时外部入口保持禁用。
 func TestExternalIndustryUploadRejectsEmptyConfiguredToken(t *testing.T) {
 	stub := &industryKnowledgeServiceStub{}
@@ -463,4 +485,20 @@ func TestIndustryKnowledgeUploadUsesOctetStream(t *testing.T) {
 	assert.Equal(t, "policy.pdf", stub.saveFilename)
 	assert.Equal(t, int64(len("content")), stub.saveSize)
 	assert.Equal(t, "content", stub.saveContent)
+}
+
+// TestIndustryKnowledgeUploadAppliesUploadRateLimit 验证平台行业库上传在进入 service 前使用上传限速 reader。
+func TestIndustryKnowledgeUploadAppliesUploadRateLimit(t *testing.T) {
+	stub := &industryKnowledgeServiceStub{saveResult: service.KnowledgeDocumentResult{ID: "doc-1", Name: "policy.pdf"}}
+	router := newIndustryKnowledgeTestRouter(t, stub, "secret-token", TransferLimitConfig{UploadBytesPerSec: 1 << 20})
+
+	w := httptest.NewRecorder()
+	req := httptest.NewRequest(http.MethodPost, "/api/v1/industry-knowledge-bases/industry-1/knowledge?filename=policy.pdf", bytes.NewBufferString("content"))
+	req.Header.Set("Content-Type", "application/octet-stream")
+	req = withPrincipal(req, auth.Principal{UserID: "u-admin", Role: domain.UserRolePlatformAdmin})
+	router.ServeHTTP(w, req)
+
+	require.Equal(t, http.StatusAccepted, w.Code)
+	assert.Equal(t, 1, stub.saveCalls)
+	assert.Contains(t, stub.saveBodyType, "rateLimitedReadCloser")
 }

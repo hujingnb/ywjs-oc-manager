@@ -20,7 +20,10 @@ import (
 
 // KnowledgeHandler 暴露组织和应用维度的 RAGFlow-backed 知识库 HTTP 接口。
 type KnowledgeHandler struct {
+	// service 承接组织和应用知识库文件管理的业务能力。
 	service knowledgeService
+	// transferLimit 是文件上传下载的单请求限速配置；零值保持不限制。
+	transferLimit TransferLimitConfig
 }
 
 type knowledgeService interface {
@@ -47,9 +50,13 @@ const (
 // maxKnowledgeUploadBytes 直接换算，避免修改上限后文案与实际限制漂移。
 var maxKnowledgeUploadMessage = fmt.Sprintf("单文件最大支持 %dMB", maxKnowledgeUploadBytes/(1024*1024))
 
-// NewKnowledgeHandler 创建 handler。
-func NewKnowledgeHandler(svc knowledgeService) *KnowledgeHandler {
-	return &KnowledgeHandler{service: svc}
+// NewKnowledgeHandler 创建 handler；limits 保持可选以兼容未配置限速的历史调用路径。
+func NewKnowledgeHandler(svc knowledgeService, limits ...TransferLimitConfig) *KnowledgeHandler {
+	var limit TransferLimitConfig
+	if len(limits) > 0 {
+		limit = limits[0]
+	}
+	return &KnowledgeHandler{service: svc, transferLimit: limit}
 }
 
 // RegisterKnowledgeRoutes 注册扁平 document 维度的知识库路由。
@@ -123,6 +130,7 @@ func (h *KnowledgeHandler) SaveOrg(c *gin.Context) {
 	if !ok {
 		return
 	}
+	h.transferLimit.limitUploadBody(c)
 	result, err := h.service.SaveOrgFile(c.Request.Context(), principalFromCtx(c), c.Param("orgId"), filename, c.Request.Body, size)
 	if err != nil {
 		writeKnowledgeError(c, err)
@@ -152,7 +160,7 @@ func (h *KnowledgeHandler) DownloadOrg(c *gin.Context) {
 		writeKnowledgeError(c, err)
 		return
 	}
-	writeKnowledgeDownload(c, filename, reader, size)
+	writeKnowledgeDownload(c, filename, reader, size, h.transferLimit)
 }
 
 // DeleteOrg 删除组织级知识库文件。
@@ -277,6 +285,7 @@ func (h *KnowledgeHandler) SaveApp(c *gin.Context) {
 	if !ok {
 		return
 	}
+	h.transferLimit.limitUploadBody(c)
 	result, err := h.service.SaveAppFile(c.Request.Context(), principalFromCtx(c), c.Param("appId"), filename, c.Request.Body, size)
 	if err != nil {
 		writeKnowledgeError(c, err)
@@ -306,7 +315,7 @@ func (h *KnowledgeHandler) DownloadApp(c *gin.Context) {
 		writeKnowledgeError(c, err)
 		return
 	}
-	writeKnowledgeDownload(c, filename, reader, size)
+	writeKnowledgeDownload(c, filename, reader, size, h.transferLimit)
 }
 
 // DeleteApp 删除应用级知识库文件。
@@ -357,7 +366,12 @@ func (h *KnowledgeHandler) ReparseApp(c *gin.Context) {
 }
 
 // writeKnowledgeDownload 负责设置下载响应头、写出二进制流，并统一接管流关闭。
-func writeKnowledgeDownload(c *gin.Context, filename string, stream io.ReadCloser, size int64) {
+func writeKnowledgeDownload(c *gin.Context, filename string, stream io.ReadCloser, size int64, limits ...TransferLimitConfig) {
+	var limit TransferLimitConfig
+	if len(limits) > 0 {
+		limit = limits[0]
+	}
+	stream = limit.limitDownloadStream(c.Request.Context(), stream)
 	defer stream.Close()
 	c.Header("Content-Type", "application/octet-stream")
 	if size >= 0 {
