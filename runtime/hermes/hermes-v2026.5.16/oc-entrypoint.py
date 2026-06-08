@@ -20,9 +20,9 @@ from pathlib import Path
 
 # 让 import lib / renderer / migrator 走包内路径。
 sys.path.insert(0, "/usr/local/lib/oc-entrypoint")
-# oc_entrypoint.py 辅助模块落点 /usr/local/lib/（见 Dockerfile COPY），与 oc-entrypoint
+# entrypoint_helpers.py 辅助模块落点 /usr/local/lib/（见 Dockerfile COPY），与 oc-entrypoint
 # 子目录不同级。运行时容器入口不带 PYTHONPATH（仅构建期自检设了 PYTHONPATH=/usr/local/lib），
-# 故须在此显式把 /usr/local/lib 加入 sys.path，否则 `import oc_entrypoint` 在容器启动即崩溃。
+# 故须在此显式把 /usr/local/lib 加入 sys.path，否则 `import entrypoint_helpers` 在容器启动即崩溃。
 sys.path.insert(0, "/usr/local/lib")
 # 测试模式：脚本目录而非镜像安装目录。
 if not Path("/usr/local/lib/oc-entrypoint").exists():
@@ -34,7 +34,7 @@ from lib.manifest import load as load_manifest, ManifestError
 from lib.state import OcState, read_state, write_state
 from renderer import render_config_yaml, render_env, render_skills, render_soul_md
 from migrator import run as run_migration
-from oc_entrypoint import ensure_builtin_manifest
+from entrypoint_helpers import ensure_builtin_manifest
 
 
 def main() -> int:

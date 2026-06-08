@@ -79,9 +79,9 @@ RUN uv pip install --python /usr/local/lib/hermes-agent/venv/bin/python --no-cac
 # 必需的 oc-entrypoint、oc-healthcheck，以及容器内 agent 检索知识库用的 oc-kb。
 # ocops 契约（schema + SPEC）仍由 ocops 包与构建期契约测试引用，保留 COPY。
 COPY oc-entrypoint.py     /usr/local/bin/oc-entrypoint
-# oc_entrypoint.py 是可 import 的辅助函数模块（oc-entrypoint.py 连字符命名无法 import），
-# 落点 /usr/local/lib/ 使构建期自检 PYTHONPATH=/usr/local/lib 下 import oc_entrypoint 可解析。
-COPY oc_entrypoint.py     /usr/local/lib/oc_entrypoint.py
+# entrypoint_helpers.py 是可 import 的辅助函数模块（oc-entrypoint.py 连字符命名无法 import），
+# 落点 /usr/local/lib/ 使构建期自检 PYTHONPATH=/usr/local/lib 下 import entrypoint_helpers 可解析。
+COPY entrypoint_helpers.py /usr/local/lib/entrypoint_helpers.py
 COPY ocops-contract/      /usr/local/lib/ocops/contract/
 COPY oc-kb.py             /usr/local/bin/oc-kb
 COPY healthcheck.sh       /usr/local/bin/oc-healthcheck

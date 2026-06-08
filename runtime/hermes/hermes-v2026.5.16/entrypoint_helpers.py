@@ -1,7 +1,7 @@
-"""oc_entrypoint 辅助函数模块。
+"""entrypoint_helpers 辅助函数模块。
 
 oc-entrypoint.py（连字符命名）无法直接被 import；把可被测试引用的函数抽到本模块，
-oc-entrypoint.py 再 from oc_entrypoint import ... 使用。
+oc-entrypoint.py 再 from entrypoint_helpers import ... 使用。
 """
 
 from __future__ import annotations

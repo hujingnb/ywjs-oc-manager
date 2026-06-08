@@ -8,8 +8,8 @@
 
 from pathlib import Path
 
-# ensure_builtin_manifest 从 oc-entrypoint 同模块导入
-from oc_entrypoint import ensure_builtin_manifest
+# ensure_builtin_manifest 从入口辅助模块导入，避免直接 import 连字符命名的 oc-entrypoint.py。
+from entrypoint_helpers import ensure_builtin_manifest
 
 
 def test_generates_bundled_manifest_on_first_boot(tmp_path: Path) -> None:
