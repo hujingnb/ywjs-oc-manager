@@ -972,6 +972,21 @@ func (q *Queries) ReplaceRAGFlowIndustryDocument(ctx context.Context, arg Replac
 	return err
 }
 
+const resetRAGFlowDocumentsParseStatusByDataset = `-- name: ResetRAGFlowDocumentsParseStatusByDataset :exec
+UPDATE ragflow_documents
+SET parse_status = 'queued',
+    progress = 0,
+    last_error = NULL,
+    updated_at = now()
+WHERE dataset_id = ?
+`
+
+// 整库 embedding 模型切换后，把该 dataset 下所有本地 document 状态重置为 queued，交给现有刷新任务继续推进。
+func (q *Queries) ResetRAGFlowDocumentsParseStatusByDataset(ctx context.Context, datasetID string) error {
+	_, err := q.db.ExecContext(ctx, resetRAGFlowDocumentsParseStatusByDataset, datasetID)
+	return err
+}
+
 const setRAGFlowDatasetActive = `-- name: SetRAGFlowDatasetActive :exec
 UPDATE ragflow_datasets
 SET ragflow_dataset_id = ?,

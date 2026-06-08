@@ -164,6 +164,15 @@ UPDATE ragflow_documents
 SET parse_status = ?, progress = ?, last_error = ?, updated_at = now()
 WHERE id = ?;
 
+-- name: ResetRAGFlowDocumentsParseStatusByDataset :exec
+-- 整库 embedding 模型切换后，把该 dataset 下所有本地 document 状态重置为 queued，交给现有刷新任务继续推进。
+UPDATE ragflow_documents
+SET parse_status = 'queued',
+    progress = 0,
+    last_error = NULL,
+    updated_at = now()
+WHERE dataset_id = ?;
+
 -- name: DeleteRAGFlowDocumentMapping :exec
 -- 删除本地 document 缓存；RAGFlow 远端删除由 service 在同一业务流程中处理。
 DELETE FROM ragflow_documents

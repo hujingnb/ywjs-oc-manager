@@ -29,6 +29,13 @@ const (
 	runtimeKnowledgeMaxTopK int32 = 50
 	// ragflowDatasetCreateClaimTimeout 是创建租约的保守超时，避免进程崩溃后 creating 状态永久卡住。
 	ragflowDatasetCreateClaimTimeout = 15 * time.Minute
+
+	// KnowledgeRAGFlowScopeOrg 表示企业级 RAGFlow dataset 运维目标。
+	KnowledgeRAGFlowScopeOrg = "org"
+	// KnowledgeRAGFlowScopeApp 表示实例级 RAGFlow dataset 运维目标。
+	KnowledgeRAGFlowScopeApp = "app"
+	// KnowledgeRAGFlowScopeIndustry 表示行业知识库 RAGFlow dataset 运维目标。
+	KnowledgeRAGFlowScopeIndustry = "industry"
 )
 
 // RAGFlowKnowledgeClient 是 service 层依赖的 RAGFlow 最小能力集。
@@ -83,6 +90,8 @@ type KnowledgeStore interface {
 	GetRAGFlowDocument(ctx context.Context, id string) (sqlc.RagflowDocument, error)
 	// UpdateRAGFlowDocumentParseStatus 更新解析状态（:exec），写入后通过 GetRAGFlowDocument 读回。
 	UpdateRAGFlowDocumentParseStatus(ctx context.Context, arg sqlc.UpdateRAGFlowDocumentParseStatusParams) error
+	// ResetRAGFlowDocumentsParseStatusByDataset 在整库重新解析被 RAGFlow 接受后批量重置本地解析状态。
+	ResetRAGFlowDocumentsParseStatusByDataset(ctx context.Context, datasetID string) error
 	DeleteRAGFlowDocumentMapping(ctx context.Context, id string) error
 	DeleteRAGFlowDatasetMapping(ctx context.Context, id string) error
 	// CreateIndustryKnowledgeBase 创建平台级行业知识库。
@@ -200,6 +209,41 @@ type KnowledgeDocumentResult struct {
 	Progress    int32  `json:"progress"`
 	LastError   string `json:"last_error,omitempty"`
 	CreatedAt   string `json:"created_at"`
+}
+
+// KnowledgeEmbeddingModelResult 是平台运维界面展示的 RAGFlow embedding 模型候选。
+type KnowledgeEmbeddingModelResult struct {
+	Name      string `json:"name"`
+	Label     string `json:"label"`
+	Provider  string `json:"provider"`
+	Available bool   `json:"available"`
+}
+
+// KnowledgeEmbeddingModelInput 是平台管理员提交的模型切换请求。
+// Name/Provider 均使用 RAGFlow 控制台可见的人类可读文本，不暴露远端内部 ID。
+type KnowledgeEmbeddingModelInput struct {
+	Name     string
+	Provider string
+}
+
+// KnowledgeEmbeddingModelListResult 是模型候选列表接口的返回。
+type KnowledgeEmbeddingModelListResult struct {
+	Items []KnowledgeEmbeddingModelResult `json:"items"`
+}
+
+// KnowledgeRAGFlowDatasetInfoResult 是平台运维界面查看单个业务目标 RAGFlow dataset 的实时信息。
+type KnowledgeRAGFlowDatasetInfoResult struct {
+	Scope              string                         `json:"scope"`
+	TargetID           string                         `json:"target_id"`
+	TargetName         string                         `json:"target_name"`
+	Status             string                         `json:"status"`
+	RAGFlowDatasetID   string                         `json:"ragflow_dataset_id,omitempty"`
+	RAGFlowDatasetName string                         `json:"ragflow_dataset_name,omitempty"`
+	EmbeddingModel     *KnowledgeEmbeddingModelResult `json:"embedding_model,omitempty"`
+	ErrorMessage       string                         `json:"error_message,omitempty"`
+	DocNum             int32                          `json:"doc_num,omitempty"`
+	ChunkNum           int32                          `json:"chunk_num,omitempty"`
+	UpdatedAt          string                         `json:"updated_at,omitempty"`
 }
 
 // KnowledgeSearchResult 是 Hermes runtime 检索 API 的返回。
@@ -515,6 +559,255 @@ func (s *KnowledgeService) DeleteAppDataset(ctx context.Context, appID string) e
 		return fmt.Errorf("删除实例 RAGFlow dataset 映射失败: %w", err)
 	}
 	return nil
+}
+
+// ListKnowledgeEmbeddingModels 返回平台运维可选的 embedding 模型兜底清单。
+func (s *KnowledgeService) ListKnowledgeEmbeddingModels(ctx context.Context, principal auth.Principal) (KnowledgeEmbeddingModelListResult, error) {
+	if !auth.CanManageKnowledgeRAGFlowDataset(principal) {
+		return KnowledgeEmbeddingModelListResult{}, ErrKnowledgeForbidden
+	}
+	return KnowledgeEmbeddingModelListResult{Items: s.embeddingModelResultsFromFallbacks()}, nil
+}
+
+// GetKnowledgeRAGFlowDatasetInfo 读取业务目标对应的 RAGFlow dataset 实时信息。
+// 该方法只读本地映射和远端状态，缺少本地映射时返回 not_created，不触发懒创建。
+func (s *KnowledgeService) GetKnowledgeRAGFlowDatasetInfo(ctx context.Context, principal auth.Principal, scope, targetID string) (KnowledgeRAGFlowDatasetInfoResult, error) {
+	if !auth.CanManageKnowledgeRAGFlowDataset(principal) {
+		return KnowledgeRAGFlowDatasetInfoResult{}, ErrKnowledgeForbidden
+	}
+	target, dataset, err := s.resolveKnowledgeRAGFlowTarget(ctx, scope, targetID)
+	if errors.Is(err, sql.ErrNoRows) {
+		return KnowledgeRAGFlowDatasetInfoResult{Scope: scope, TargetID: targetID, TargetName: target.Name, Status: "not_created"}, nil
+	}
+	if err != nil {
+		return KnowledgeRAGFlowDatasetInfoResult{}, err
+	}
+	remoteID, err := requireRemoteDatasetID(dataset)
+	if err != nil {
+		return KnowledgeRAGFlowDatasetInfoResult{Scope: scope, TargetID: targetID, TargetName: target.Name, Status: "not_created"}, nil
+	}
+	remote, err := s.ragflowClient().GetDataset(ctx, remoteID)
+	if err != nil {
+		return KnowledgeRAGFlowDatasetInfoResult{Scope: scope, TargetID: targetID, TargetName: target.Name, Status: "error", ErrorMessage: err.Error()}, nil
+	}
+	return s.toKnowledgeRAGFlowDatasetInfo(scope, targetID, target.Name, dataset, remote), nil
+}
+
+// UpdateKnowledgeEmbeddingModel 修改 RAGFlow dataset embedding 模型，并在远端接受整库重解析后重置本地解析状态。
+func (s *KnowledgeService) UpdateKnowledgeEmbeddingModel(ctx context.Context, principal auth.Principal, scope, targetID string, input KnowledgeEmbeddingModelInput) (KnowledgeRAGFlowDatasetInfoResult, error) {
+	if !auth.CanManageKnowledgeRAGFlowDataset(principal) {
+		return KnowledgeRAGFlowDatasetInfoResult{}, ErrKnowledgeForbidden
+	}
+	target, dataset, err := s.resolveKnowledgeRAGFlowTarget(ctx, scope, targetID)
+	if err != nil {
+		return KnowledgeRAGFlowDatasetInfoResult{}, err
+	}
+	remoteID, err := requireRemoteDatasetID(dataset)
+	if err != nil {
+		return KnowledgeRAGFlowDatasetInfoResult{}, err
+	}
+	model, err := s.resolveKnowledgeEmbeddingModel(input)
+	if err != nil {
+		return KnowledgeRAGFlowDatasetInfoResult{}, err
+	}
+	if err := s.ragflowClient().UpdateDatasetEmbeddingModel(ctx, remoteID, ragflowEmbeddingSubmitValue(model)); err != nil {
+		return KnowledgeRAGFlowDatasetInfoResult{}, fmt.Errorf("更新 RAGFlow embedding 模型失败: %w", err)
+	}
+	if err := s.ragflowClient().RunDatasetEmbedding(ctx, remoteID); err != nil {
+		return KnowledgeRAGFlowDatasetInfoResult{}, fmt.Errorf("触发 RAGFlow 整库重新解析失败: %w", err)
+	}
+	if err := s.store.ResetRAGFlowDocumentsParseStatusByDataset(ctx, dataset.ID); err != nil {
+		return KnowledgeRAGFlowDatasetInfoResult{}, fmt.Errorf("重置知识库文件解析状态失败: %w", err)
+	}
+	remote, err := s.ragflowClient().GetDataset(ctx, remoteID)
+	if err != nil {
+		return KnowledgeRAGFlowDatasetInfoResult{Scope: scope, TargetID: targetID, TargetName: target.Name, Status: "error", ErrorMessage: err.Error()}, nil
+	}
+	return s.toKnowledgeRAGFlowDatasetInfo(scope, targetID, target.Name, dataset, remote), nil
+}
+
+// knowledgeRAGFlowTarget 保存运维目标的展示名称，避免缺少 dataset 映射时丢失目标上下文。
+type knowledgeRAGFlowTarget struct {
+	Name string
+}
+
+// resolveKnowledgeRAGFlowTarget 只解析已有 dataset 映射，不调用 getOrgDataset/getAppDataset 等懒创建路径。
+func (s *KnowledgeService) resolveKnowledgeRAGFlowTarget(ctx context.Context, scope, targetID string) (knowledgeRAGFlowTarget, sqlc.RagflowDataset, error) {
+	if s.store == nil {
+		return knowledgeRAGFlowTarget{}, sqlc.RagflowDataset{}, ErrKnowledgeMissing
+	}
+	switch scope {
+	case KnowledgeRAGFlowScopeOrg:
+		org, err := s.getOrg(ctx, targetID)
+		if err != nil {
+			return knowledgeRAGFlowTarget{}, sqlc.RagflowDataset{}, err
+		}
+		dataset, err := s.store.GetRAGFlowOrgDataset(ctx, null.StringFrom(org.ID))
+		if errors.Is(err, sql.ErrNoRows) {
+			return knowledgeRAGFlowTarget{Name: org.Name}, sqlc.RagflowDataset{}, sql.ErrNoRows
+		}
+		if err != nil {
+			return knowledgeRAGFlowTarget{}, sqlc.RagflowDataset{}, fmt.Errorf("查询企业 RAGFlow dataset 失败: %w", err)
+		}
+		return knowledgeRAGFlowTarget{Name: org.Name}, dataset, nil
+	case KnowledgeRAGFlowScopeApp:
+		app, err := s.getApp(ctx, targetID)
+		if err != nil {
+			return knowledgeRAGFlowTarget{}, sqlc.RagflowDataset{}, err
+		}
+		dataset, err := s.store.GetRAGFlowAppDataset(ctx, null.StringFrom(app.ID))
+		if errors.Is(err, sql.ErrNoRows) {
+			return knowledgeRAGFlowTarget{Name: app.Name}, sqlc.RagflowDataset{}, sql.ErrNoRows
+		}
+		if err != nil {
+			return knowledgeRAGFlowTarget{}, sqlc.RagflowDataset{}, fmt.Errorf("查询实例 RAGFlow dataset 失败: %w", err)
+		}
+		return knowledgeRAGFlowTarget{Name: app.Name}, dataset, nil
+	case KnowledgeRAGFlowScopeIndustry:
+		base, err := s.getIndustryKnowledgeBase(ctx, targetID)
+		if err != nil {
+			return knowledgeRAGFlowTarget{}, sqlc.RagflowDataset{}, err
+		}
+		dataset, err := s.store.GetRAGFlowIndustryDataset(ctx, null.StringFrom(base.ID))
+		if errors.Is(err, sql.ErrNoRows) {
+			return knowledgeRAGFlowTarget{Name: base.Name}, sqlc.RagflowDataset{}, sql.ErrNoRows
+		}
+		if err != nil {
+			return knowledgeRAGFlowTarget{}, sqlc.RagflowDataset{}, fmt.Errorf("查询行业知识库 RAGFlow dataset 失败: %w", err)
+		}
+		return knowledgeRAGFlowTarget{Name: base.Name}, dataset, nil
+	default:
+		return knowledgeRAGFlowTarget{}, sqlc.RagflowDataset{}, ErrNotFound
+	}
+}
+
+// embeddingModelResultsFromFallbacks 将配置兜底项转换为前端展示结构，忽略空模型名避免展示不可提交项。
+func (s *KnowledgeService) embeddingModelResultsFromFallbacks() []KnowledgeEmbeddingModelResult {
+	items := make([]KnowledgeEmbeddingModelResult, 0, len(s.embeddingModelFallbacks))
+	for _, model := range s.embeddingModelFallbacks {
+		name := strings.TrimSpace(model.Name)
+		if name == "" {
+			continue
+		}
+		label := strings.TrimSpace(model.Label)
+		if label == "" {
+			label = name
+		}
+		items = append(items, KnowledgeEmbeddingModelResult{
+			Name:      name,
+			Label:     label,
+			Provider:  strings.TrimSpace(model.Provider),
+			Available: true,
+		})
+	}
+	return items
+}
+
+// resolveKnowledgeEmbeddingModel 把 UI 提交的人类可读 name/provider 解析为可提交给 RAGFlow 的模型值。
+func (s *KnowledgeService) resolveKnowledgeEmbeddingModel(input KnowledgeEmbeddingModelInput) (KnowledgeEmbeddingModelResult, error) {
+	name := strings.TrimSpace(input.Name)
+	provider := strings.TrimSpace(input.Provider)
+	if name == "" {
+		return KnowledgeEmbeddingModelResult{}, fmt.Errorf("embedding 模型名称不能为空")
+	}
+	fallbacks := s.embeddingModelResultsFromFallbacks()
+	if len(fallbacks) == 0 {
+		return KnowledgeEmbeddingModelResult{Name: name, Label: name, Provider: provider, Available: true}, nil
+	}
+	if provider != "" {
+		for _, model := range fallbacks {
+			if model.Name == name && model.Provider == provider {
+				return model, nil
+			}
+		}
+		return KnowledgeEmbeddingModelResult{}, fmt.Errorf("embedding 模型不存在: %s@%s", name, provider)
+	}
+	var matches []KnowledgeEmbeddingModelResult
+	for _, model := range fallbacks {
+		if model.Name == name {
+			matches = append(matches, model)
+		}
+	}
+	switch len(matches) {
+	case 0:
+		return KnowledgeEmbeddingModelResult{}, fmt.Errorf("embedding 模型不存在: %s", name)
+	case 1:
+		return matches[0], nil
+	default:
+		return KnowledgeEmbeddingModelResult{}, fmt.Errorf("embedding 模型 provider 不能为空，模型 %s 存在多个 provider", name)
+	}
+}
+
+// ragflowEmbeddingSubmitValue 按官方 API 要求提交 model_name@model_factory；provider 为空时保留纯模型名。
+func ragflowEmbeddingSubmitValue(model KnowledgeEmbeddingModelResult) string {
+	name := strings.TrimSpace(model.Name)
+	provider := strings.TrimSpace(model.Provider)
+	if provider == "" {
+		return name
+	}
+	return name + "@" + provider
+}
+
+// toKnowledgeRAGFlowDatasetInfo 合并本地映射和远端实时信息，供平台运维界面展示。
+func (s *KnowledgeService) toKnowledgeRAGFlowDatasetInfo(scope, targetID, targetName string, dataset sqlc.RagflowDataset, remote ragflow.Dataset) KnowledgeRAGFlowDatasetInfoResult {
+	remoteID := strings.TrimSpace(remote.ID)
+	if remoteID == "" {
+		remoteID = strOrEmpty(dataset.RagflowDatasetID)
+	}
+	remoteName := strings.TrimSpace(remote.Name)
+	if remoteName == "" {
+		remoteName = dataset.Name
+	}
+	result := KnowledgeRAGFlowDatasetInfoResult{
+		Scope:              scope,
+		TargetID:           targetID,
+		TargetName:         targetName,
+		Status:             "ok",
+		RAGFlowDatasetID:   remoteID,
+		RAGFlowDatasetName: remoteName,
+		DocNum:             remote.DocNum,
+		ChunkNum:           remote.ChunkNum,
+	}
+	if !dataset.UpdatedAt.IsZero() {
+		result.UpdatedAt = dataset.UpdatedAt.UTC().Format(time.RFC3339)
+	}
+	if model := s.embeddingModelResultFromRemoteID(remote.EmbeddingModelID); model != nil {
+		result.EmbeddingModel = model
+	}
+	return result
+}
+
+// embeddingModelResultFromRemoteID 将 RAGFlow 返回的 name@provider 或旧内部 ID 尽量映射回 UI 使用的人类可读模型。
+func (s *KnowledgeService) embeddingModelResultFromRemoteID(remoteID string) *KnowledgeEmbeddingModelResult {
+	remoteID = strings.TrimSpace(remoteID)
+	if remoteID == "" {
+		return nil
+	}
+	name, provider := splitRAGFlowEmbeddingRemoteID(remoteID)
+	for _, model := range s.embeddingModelResultsFromFallbacks() {
+		if model.Provider != provider && provider != "" {
+			continue
+		}
+		if model.Name == name || strings.HasPrefix(name, model.Name+"___") {
+			copy := model
+			return &copy
+		}
+	}
+	displayName := name
+	if provider != "" {
+		if idx := strings.Index(displayName, "___"); idx >= 0 {
+			displayName = displayName[:idx]
+		}
+	}
+	return &KnowledgeEmbeddingModelResult{Name: displayName, Label: displayName, Provider: provider, Available: true}
+}
+
+// splitRAGFlowEmbeddingRemoteID 拆分 RAGFlow 当前模型值；provider 本身不应包含 @，因此按最后一个 @ 处理。
+func splitRAGFlowEmbeddingRemoteID(remoteID string) (string, string) {
+	if at := strings.LastIndex(remoteID, "@"); at >= 0 {
+		return strings.TrimSpace(remoteID[:at]), strings.TrimSpace(remoteID[at+1:])
+	}
+	return strings.TrimSpace(remoteID), ""
 }
 
 func (s *KnowledgeService) listDocuments(ctx context.Context, dataset sqlc.RagflowDataset, scope string, orgID, appID string, page, pageSize int32, keyword, status string, quotaBytes int64) (KnowledgeListResult, error) {

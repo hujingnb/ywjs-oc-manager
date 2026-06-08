@@ -15,6 +15,7 @@ import (
 	"github.com/stretchr/testify/require"
 
 	"oc-manager/internal/auth"
+	"oc-manager/internal/config"
 	"oc-manager/internal/domain"
 	"oc-manager/internal/integrations/ragflow"
 	"oc-manager/internal/store/sqlc"
@@ -517,6 +518,100 @@ func TestRAGFlowKnowledgeListReturnsCachedStatus(t *testing.T) {
 	assert.Equal(t, int32(0), result.Items[0].Progress)
 	assert.Equal(t, "running", store.docs[testKnowledgeDocument].ParseStatus)
 	assert.Zero(t, rf.listDocumentsCalls, "列表请求不应调 RAGFlow ListDocuments")
+}
+
+// TestListKnowledgeEmbeddingModelsOnlyPlatformAdmin 验证 RAGFlow embedding 模型候选只允许平台管理员读取。
+func TestListKnowledgeEmbeddingModelsOnlyPlatformAdmin(t *testing.T) {
+	svc, _, _ := newRAGFlowKnowledgeTestService(t)
+
+	_, err := svc.ListKnowledgeEmbeddingModels(context.Background(), auth.Principal{Role: domain.UserRoleOrgAdmin, OrgID: testKnowledgeOrg})
+
+	require.ErrorIs(t, err, ErrKnowledgeForbidden)
+}
+
+// TestListKnowledgeEmbeddingModelsReturnsFallbacks 验证模型候选来自配置兜底清单，并补齐展示标签。
+func TestListKnowledgeEmbeddingModelsReturnsFallbacks(t *testing.T) {
+	svc, _, _ := newRAGFlowKnowledgeTestService(t)
+	svc.SetEmbeddingModelFallbacks([]config.RAGFlowEmbeddingModelConfig{
+		{Name: "BAAI/bge-m3", Label: "BGE M3", Provider: "OpenAI-API-Compatible"},
+		{Name: "text-embedding-3-small", Provider: "OpenAI"},
+	})
+
+	result, err := svc.ListKnowledgeEmbeddingModels(context.Background(), platformKnowledgePrincipal())
+	require.NoError(t, err)
+
+	require.Len(t, result.Items, 2)
+	assert.Equal(t, KnowledgeEmbeddingModelResult{Name: "BAAI/bge-m3", Label: "BGE M3", Provider: "OpenAI-API-Compatible", Available: true}, result.Items[0])
+	assert.Equal(t, KnowledgeEmbeddingModelResult{Name: "text-embedding-3-small", Label: "text-embedding-3-small", Provider: "OpenAI", Available: true}, result.Items[1])
+}
+
+// TestKnowledgeRAGFlowDatasetInfoOnlyPlatformAdmin 验证 RAGFlow dataset 运维信息只允许平台管理员读取。
+func TestKnowledgeRAGFlowDatasetInfoOnlyPlatformAdmin(t *testing.T) {
+	svc, _, _ := newRAGFlowKnowledgeTestService(t)
+
+	_, err := svc.GetKnowledgeRAGFlowDatasetInfo(context.Background(), auth.Principal{Role: domain.UserRoleOrgAdmin, OrgID: testKnowledgeOrg}, KnowledgeRAGFlowScopeOrg, testKnowledgeOrg)
+
+	require.ErrorIs(t, err, ErrKnowledgeForbidden)
+}
+
+// TestKnowledgeRAGFlowDatasetInfoReturnsNotCreated 验证查看 RAGFlow 信息不会懒创建 dataset。
+func TestKnowledgeRAGFlowDatasetInfoReturnsNotCreated(t *testing.T) {
+	svc, store, rf := newRAGFlowKnowledgeTestService(t)
+	store.missingOrgDataset = true
+
+	result, err := svc.GetKnowledgeRAGFlowDatasetInfo(context.Background(), platformKnowledgePrincipal(), KnowledgeRAGFlowScopeOrg, testKnowledgeOrg)
+	require.NoError(t, err)
+
+	assert.Equal(t, "not_created", result.Status)
+	assert.Equal(t, "测试组织", result.TargetName)
+	assert.Empty(t, rf.createDatasetCalls)
+}
+
+// TestUpdateKnowledgeEmbeddingModelResetsLocalDocuments 验证模型修改和整库重解析成功后，本地文件全部回到 queued。
+func TestUpdateKnowledgeEmbeddingModelResetsLocalDocuments(t *testing.T) {
+	svc, store, rf := newRAGFlowKnowledgeTestService(t)
+	svc.SetEmbeddingModelFallbacks([]config.RAGFlowEmbeddingModelConfig{{Name: "BAAI/bge-m3", Label: "BAAI/bge-m3", Provider: "OpenAI-API-Compatible"}})
+	store.docs["doc-a"] = makeKnowledgeDoc("doc-a", store.orgDataset.ID, "remote-a", "completed", 100)
+	store.docs["doc-b"] = makeKnowledgeDoc("doc-b", store.orgDataset.ID, "remote-b", "failed", 42)
+	rf.datasetDetail = ragflow.Dataset{ID: testRemoteOrgDatasetID, Name: "oc-org", EmbeddingModelID: "BAAI/bge-m3@OpenAI-API-Compatible", DocNum: 2, ChunkNum: 9}
+
+	result, err := svc.UpdateKnowledgeEmbeddingModel(context.Background(), platformKnowledgePrincipal(), KnowledgeRAGFlowScopeOrg, testKnowledgeOrg, KnowledgeEmbeddingModelInput{Name: "BAAI/bge-m3", Provider: "OpenAI-API-Compatible"})
+	require.NoError(t, err)
+
+	assert.Equal(t, "ok", result.Status)
+	assert.Equal(t, []string{testRemoteOrgDatasetID}, rf.runDatasetEmbeddingCalls)
+	require.Len(t, rf.updateEmbeddingModelCalls, 1)
+	assert.Equal(t, "BAAI/bge-m3@OpenAI-API-Compatible", rf.updateEmbeddingModelCalls[0].embeddingModel)
+	assert.Equal(t, "queued", store.docs["doc-a"].ParseStatus)
+	assert.Equal(t, int32(0), store.docs["doc-a"].Progress)
+	assert.False(t, store.docs["doc-a"].LastError.Valid)
+	assert.Equal(t, "queued", store.docs["doc-b"].ParseStatus)
+}
+
+// TestUpdateKnowledgeEmbeddingModelDoesNotResetWhenReparseFails 验证 RAGFlow 未接受整库重解析时不改本地状态，避免 UI 误报解析中。
+func TestUpdateKnowledgeEmbeddingModelDoesNotResetWhenReparseFails(t *testing.T) {
+	svc, store, rf := newRAGFlowKnowledgeTestService(t)
+	svc.SetEmbeddingModelFallbacks([]config.RAGFlowEmbeddingModelConfig{{Name: "BAAI/bge-m3", Provider: "OpenAI-API-Compatible"}})
+	store.docs["doc-a"] = makeKnowledgeDoc("doc-a", store.orgDataset.ID, "remote-a", "completed", 100)
+	rf.runDatasetEmbeddingErr = errors.New("ragflow busy")
+
+	_, err := svc.UpdateKnowledgeEmbeddingModel(context.Background(), platformKnowledgePrincipal(), KnowledgeRAGFlowScopeOrg, testKnowledgeOrg, KnowledgeEmbeddingModelInput{Name: "BAAI/bge-m3", Provider: "OpenAI-API-Compatible"})
+	require.Error(t, err)
+
+	assert.Equal(t, "completed", store.docs["doc-a"].ParseStatus)
+	assert.Equal(t, int32(100), store.docs["doc-a"].Progress)
+}
+
+// TestUpdateKnowledgeEmbeddingModelRejectsUnknownModel 验证未知模型在本地校验失败，不调用 RAGFlow 修改或重解析。
+func TestUpdateKnowledgeEmbeddingModelRejectsUnknownModel(t *testing.T) {
+	svc, _, rf := newRAGFlowKnowledgeTestService(t)
+	svc.SetEmbeddingModelFallbacks([]config.RAGFlowEmbeddingModelConfig{{Name: "BAAI/bge-m3", Provider: "OpenAI-API-Compatible"}})
+
+	_, err := svc.UpdateKnowledgeEmbeddingModel(context.Background(), platformKnowledgePrincipal(), KnowledgeRAGFlowScopeOrg, testKnowledgeOrg, KnowledgeEmbeddingModelInput{Name: "unknown-model", Provider: "OpenAI-API-Compatible"})
+
+	require.Error(t, err)
+	assert.Empty(t, rf.updateEmbeddingModelCalls)
+	assert.Empty(t, rf.runDatasetEmbeddingCalls)
 }
 
 // TestNormalizeRAGFlowRunAcceptsNumericAndObservedValues 验证 RAGFlow 文档解析状态兼容官方数字枚举和实际接口可能返回的小写状态。
@@ -1535,6 +1630,21 @@ func (s *fakeKnowledgeStore) UpdateRAGFlowDocumentParseStatus(_ context.Context,
 	return nil
 }
 
+// ResetRAGFlowDocumentsParseStatusByDataset 模拟整库模型切换后批量重置本地解析状态。
+func (s *fakeKnowledgeStore) ResetRAGFlowDocumentsParseStatusByDataset(_ context.Context, datasetID string) error {
+	for id, doc := range s.docs {
+		if doc.DatasetID != datasetID {
+			continue
+		}
+		doc.ParseStatus = "queued"
+		doc.Progress = 0
+		doc.LastError = null.String{}
+		doc.UpdatedAt = s.now
+		s.docs[id] = doc
+	}
+	return nil
+}
+
 func (s *fakeKnowledgeStore) DeleteRAGFlowDocumentMapping(_ context.Context, id string) error {
 	delete(s.docs, id)
 	for key, doc := range s.docs {
@@ -1592,31 +1702,40 @@ func (s *fakeKnowledgeStore) recordedEvents() []string {
 }
 
 type fakeRAGFlowKnowledgeClient struct {
-	createDatasetResult     ragflow.Dataset
-	createDatasetCalls      []ragflowCreateDatasetCall
-	datasetDetail           ragflow.Dataset
-	deleteDatasetCalls      [][]string
-	uploadDocument          ragflow.Document
-	uploadErr               error
-	uploadCalls             []ragflowUploadCall
-	parseErr                error
-	parseCalls              []ragflowParseCall
-	deleteCalls             []ragflowDeleteCall
-	retrieveDatasetIDs      []string
-	retrieveQuestion        string
-	retrieveTopK            int32
-	retrieveChunks          []ragflow.RetrievalChunk
-	retrieveChunksByDataset map[string][]ragflow.RetrievalChunk
-	retrieveErrorsByDataset map[string]error
-	retrieveCalls           []ragflowRetrieveCall
-	listDocuments           []ragflow.Document
-	listDocumentsCalls      int
-	events                  *[]string
+	createDatasetResult       ragflow.Dataset
+	createDatasetCalls        []ragflowCreateDatasetCall
+	datasetDetail             ragflow.Dataset
+	deleteDatasetCalls        [][]string
+	updateEmbeddingModelErr   error
+	updateEmbeddingModelCalls []ragflowUpdateEmbeddingModelCall
+	runDatasetEmbeddingErr    error
+	runDatasetEmbeddingCalls  []string
+	uploadDocument            ragflow.Document
+	uploadErr                 error
+	uploadCalls               []ragflowUploadCall
+	parseErr                  error
+	parseCalls                []ragflowParseCall
+	deleteCalls               []ragflowDeleteCall
+	retrieveDatasetIDs        []string
+	retrieveQuestion          string
+	retrieveTopK              int32
+	retrieveChunks            []ragflow.RetrievalChunk
+	retrieveChunksByDataset   map[string][]ragflow.RetrievalChunk
+	retrieveErrorsByDataset   map[string]error
+	retrieveCalls             []ragflowRetrieveCall
+	listDocuments             []ragflow.Document
+	listDocumentsCalls        int
+	events                    *[]string
 }
 
 type ragflowCreateDatasetCall struct {
 	name           string
 	chunkMethod    string
+	embeddingModel string
+}
+
+type ragflowUpdateEmbeddingModelCall struct {
+	datasetID      string
 	embeddingModel string
 }
 
@@ -1661,11 +1780,19 @@ func (f *fakeRAGFlowKnowledgeClient) GetDataset(_ context.Context, datasetID str
 	return f.datasetDetail, nil
 }
 
-func (f *fakeRAGFlowKnowledgeClient) UpdateDatasetEmbeddingModel(context.Context, string, string) error {
+func (f *fakeRAGFlowKnowledgeClient) UpdateDatasetEmbeddingModel(_ context.Context, datasetID, embeddingModel string) error {
+	f.updateEmbeddingModelCalls = append(f.updateEmbeddingModelCalls, ragflowUpdateEmbeddingModelCall{datasetID: datasetID, embeddingModel: embeddingModel})
+	if f.updateEmbeddingModelErr != nil {
+		return f.updateEmbeddingModelErr
+	}
 	return nil
 }
 
-func (f *fakeRAGFlowKnowledgeClient) RunDatasetEmbedding(context.Context, string) error {
+func (f *fakeRAGFlowKnowledgeClient) RunDatasetEmbedding(_ context.Context, datasetID string) error {
+	f.runDatasetEmbeddingCalls = append(f.runDatasetEmbeddingCalls, datasetID)
+	if f.runDatasetEmbeddingErr != nil {
+		return f.runDatasetEmbeddingErr
+	}
 	return nil
 }
 
@@ -1778,6 +1905,29 @@ func orgKnowledgeAdmin() auth.Principal {
 
 func appOwnerPrincipal() auth.Principal {
 	return auth.Principal{Role: domain.UserRoleOrgMember, OrgID: testKnowledgeOrg, UserID: testKnowledgeOwner}
+}
+
+func platformKnowledgePrincipal() auth.Principal {
+	return auth.Principal{Role: domain.UserRolePlatformAdmin, UserID: "platform-admin"}
+}
+
+// makeKnowledgeDoc 构建指定 dataset 下的 document 行，便于批量重置测试覆盖不同解析状态。
+func makeKnowledgeDoc(id, datasetID, remoteID, parseStatus string, progress int32) sqlc.RagflowDocument {
+	return sqlc.RagflowDocument{
+		ID:                id,
+		DatasetID:         datasetID,
+		ScopeType:         "org",
+		OrgID:             null.StringFrom(testKnowledgeOrg),
+		RagflowDocumentID: remoteID,
+		Name:              id + ".md",
+		SizeBytes:         12,
+		ParseStatus:       parseStatus,
+		Progress:          progress,
+		LastError:         null.StringFrom("previous error"),
+		CreatedBy:         testKnowledgeOwner,
+		CreatedAt:         time.Date(2026, 5, 26, 8, 0, 0, 0, time.UTC),
+		UpdatedAt:         time.Date(2026, 5, 26, 8, 0, 0, 0, time.UTC),
+	}
 }
 
 // industryDataset 构造行业库 dataset 测试行，避免每个 runtime 检索用例重复拼 null 字段。
