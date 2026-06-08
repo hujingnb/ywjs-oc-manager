@@ -41,13 +41,13 @@ type CreateDatasetRequest struct {
 
 // Dataset 描述 RAGFlow dataset 的基础字段和当前 embedding 配置。
 type Dataset struct {
-	ID                string
-	Name              string
-	EmbeddingModelID  string
-	TenantEmbeddingID string
-	ParserID          string
-	DocNum            int32
-	ChunkNum          int32
+	ID                string `json:"id"`
+	Name              string `json:"name"`
+	EmbeddingModelID  string `json:"embd_id"`
+	TenantEmbeddingID string `json:"tenant_embd_id"`
+	ParserID          string `json:"parser_id"`
+	DocNum            int32  `json:"doc_num"`
+	ChunkNum          int32  `json:"chunk_num"`
 }
 
 // EmbeddingModel 描述 RAGFlow 可用 embedding 模型；InternalID 仅后端提交 RAGFlow 时使用。

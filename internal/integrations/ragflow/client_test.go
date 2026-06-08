@@ -77,7 +77,7 @@ func TestClientGetDatasetDecodesEmbeddingFields(t *testing.T) {
 		assert.Equal(t, "1", r.URL.Query().Get("page"))
 		assert.Equal(t, "1", r.URL.Query().Get("page_size"))
 		assert.Equal(t, "true", r.URL.Query().Get("include_parsing_status"))
-		_, _ = w.Write([]byte(`{"code":0,"data":[{"id":"ds-1","name":"oc-org","embedding_model":"BAAI/bge-m3","chunk_method":"naive","document_count":2,"chunk_count":15}]}`))
+		_, _ = w.Write([]byte(`{"code":0,"data":[{"id":"ds-1","name":"oc-org","embd_id":"BAAI/bge-m3___OpenAI-API@OpenAI-API-Compatible","tenant_embd_id":"tenant-embd","parser_id":"naive","doc_num":2,"chunk_num":15}]}`))
 	}))
 	t.Cleanup(server.Close)
 
@@ -86,7 +86,8 @@ func TestClientGetDatasetDecodesEmbeddingFields(t *testing.T) {
 	require.NoError(t, err)
 	assert.Equal(t, "ds-1", got.ID)
 	assert.Equal(t, "oc-org", got.Name)
-	assert.Equal(t, "BAAI/bge-m3", got.EmbeddingModelID)
+	assert.Equal(t, "BAAI/bge-m3___OpenAI-API@OpenAI-API-Compatible", got.EmbeddingModelID)
+	assert.Equal(t, "tenant-embd", got.TenantEmbeddingID)
 	assert.Equal(t, "naive", got.ParserID)
 	assert.Equal(t, int32(2), got.DocNum)
 	assert.Equal(t, int32(15), got.ChunkNum)
