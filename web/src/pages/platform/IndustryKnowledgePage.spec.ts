@@ -12,6 +12,7 @@ const renameBase = vi.hoisted(() => vi.fn())
 const deleteBase = vi.hoisted(() => vi.fn())
 const uploadFile = vi.hoisted(() => vi.fn())
 const deleteFile = vi.hoisted(() => vi.fn())
+const clearFiles = vi.hoisted(() => vi.fn())
 const reparseFile = vi.hoisted(() => vi.fn())
 const messageWarning = vi.hoisted(() => vi.fn())
 const messageSuccess = vi.hoisted(() => vi.fn())
@@ -58,6 +59,7 @@ vi.mock('@/api/hooks/useIndustryKnowledge', () => ({
   useDeleteIndustryKnowledgeBase: () => ({ mutateAsync: deleteBase, isPending: ref(false) }),
   useUploadIndustryKnowledgeFile: () => ({ mutateAsync: uploadFile, isPending: ref(false) }),
   useDeleteIndustryKnowledgeFile: () => ({ mutateAsync: deleteFile, isPending: ref(false) }),
+  useClearIndustryKnowledgeFiles: () => ({ mutateAsync: clearFiles, isPending: ref(false) }),
   useReparseIndustryKnowledgeFile: () => ({ mutateAsync: reparseFile, isPending: ref(false) }),
   downloadIndustryKnowledgeFile: vi.fn(),
 }))
@@ -118,6 +120,21 @@ function mountPage() {
         NTag: defineComponent({ setup(_, { slots }) { return () => h('span', slots.default?.()) } }),
         NModal: modalStub(),
         'n-modal': modalStub(),
+        ConfirmActionModal: defineComponent({
+          props: ['visible', 'title', 'message', 'verifyValue', 'verifyHint'],
+          emits: ['confirm', 'cancel'],
+          setup(props, { emit }) {
+            return () => props.visible
+              ? h('div', { class: 'confirm-modal' }, [
+                  h('strong', props.title),
+                  h('p', props.message),
+                  h('span', { class: 'verify-value' }, props.verifyValue),
+                  h('span', { class: 'verify-hint' }, props.verifyHint),
+                  h('button', { class: 'confirm-clear', onClick: () => emit('confirm') }, '确认清空'),
+                ])
+              : null
+          },
+        }),
         NDataTable: tableStub(),
         'n-data-table': tableStub(),
         DataTable: tableStub(),
@@ -232,6 +249,24 @@ describe('IndustryKnowledgePage', () => {
     await wrapper.findAll('button').find(button => button.text().includes('确认创建'))!.trigger('click')
 
     expect(createBase).toHaveBeenCalledWith('医疗')
+  })
+
+  // 清空行业库文件内容需要二次确认，确认后只调用清空文件 mutation，不删除行业库记录。
+  it('行业知识库支持二次确认后清空整库文件内容', async () => {
+    clearFiles.mockResolvedValue(undefined)
+    const wrapper = mountPage()
+    await nextTick()
+
+    await wrapper.findAll('button').find(button => button.text().includes('清空文件'))!.trigger('click')
+
+    expect(wrapper.find('.confirm-modal').text()).toContain('确认清空行业知识库文件')
+    expect(wrapper.find('.confirm-modal').text()).toContain('保险')
+
+    await wrapper.find('.confirm-clear').trigger('click')
+
+    expect(clearFiles).toHaveBeenCalledTimes(1)
+    expect(deleteBase).not.toHaveBeenCalled()
+    expect(messageSuccess).toHaveBeenCalledWith('已清空行业库「保险」文件')
   })
 
   // 覆盖行业库文件列表查询条件：文件名、创建日期和远程分页必须通过响应式参数传给 hook。

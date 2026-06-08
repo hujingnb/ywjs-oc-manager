@@ -235,6 +235,24 @@ export function useDeleteIndustryKnowledgeFile(industryId: Ref<string | undefine
   })
 }
 
+// useClearIndustryKnowledgeFiles 清空当前行业库文件内容，保留行业库记录和助手版本关联。
+export function useClearIndustryKnowledgeFiles(industryId: Ref<string | undefined>) {
+  const client = useQueryClient()
+  return useMutation({
+    mutationFn: async () => {
+      if (!industryId.value) throw new Error('缺少行业知识库 ID')
+      await apiRequest<void>(
+        `/api/v1/industry-knowledge-bases/${industryId.value}/knowledge`,
+        { method: 'DELETE' },
+      )
+    },
+    onSuccess: () => {
+      void client.invalidateQueries({ queryKey: fileListKeyPrefix(industryId.value) })
+      void client.invalidateQueries({ queryKey: ['industry-knowledge-bases'] })
+    },
+  })
+}
+
 // useReparseIndustryKnowledgeFile 重新触发行业库文件解析。
 export function useReparseIndustryKnowledgeFile(industryId: Ref<string | undefined>) {
   const client = useQueryClient()

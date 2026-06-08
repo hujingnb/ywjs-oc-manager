@@ -28,6 +28,7 @@ type knowledgeService interface {
 	SaveOrgFile(ctx context.Context, principal auth.Principal, orgID, filename string, content io.Reader, size int64) (service.KnowledgeDocumentResult, error)
 	OpenOrgFile(ctx context.Context, principal auth.Principal, orgID, documentID string) (io.ReadCloser, int64, string, error)
 	DeleteOrgFile(ctx context.Context, principal auth.Principal, orgID, documentID string) error
+	ClearOrgFiles(ctx context.Context, principal auth.Principal, orgID string) error
 	ReparseOrgFile(ctx context.Context, principal auth.Principal, orgID, documentID string) (service.KnowledgeDocumentResult, error)
 	ListApp(ctx context.Context, principal auth.Principal, appID string, page, pageSize int32, keyword, status string) (service.KnowledgeListResult, error)
 	SaveAppFile(ctx context.Context, principal auth.Principal, appID, filename string, content io.Reader, size int64) (service.KnowledgeDocumentResult, error)
@@ -56,6 +57,7 @@ func RegisterKnowledgeRoutes(router gin.IRouter, handler *KnowledgeHandler) {
 	orgGroup := router.Group("/api/v1/organizations/:orgId/knowledge")
 	orgGroup.GET("", handler.ListOrg)
 	orgGroup.POST("", handler.SaveOrg)
+	orgGroup.DELETE("", handler.ClearOrg)
 	orgGroup.GET("/:documentId/file", handler.DownloadOrg)
 	orgGroup.DELETE("/:documentId", handler.DeleteOrg)
 	orgGroup.POST("/:documentId/reparse", handler.ReparseOrg)
@@ -170,6 +172,28 @@ func (h *KnowledgeHandler) DownloadOrg(c *gin.Context) {
 // @Router       /organizations/{orgId}/knowledge/{documentId} [delete]
 func (h *KnowledgeHandler) DeleteOrg(c *gin.Context) {
 	if err := h.service.DeleteOrgFile(c.Request.Context(), principalFromCtx(c), c.Param("orgId"), c.Param("documentId")); err != nil {
+		writeKnowledgeError(c, err)
+		return
+	}
+	c.Status(http.StatusNoContent)
+}
+
+// ClearOrg 清空组织级知识库全部文件。
+//
+// @Summary      清空企业级知识库文件
+// @Description  删除企业知识库中的全部 RAGFlow documents，保留企业和知识库 dataset
+// @Tags         knowledge
+// @Produce      json
+// @Security     BearerAuth
+// @Param        orgId  path  string  true  "企业 ID"
+// @Success      204    "清空成功，无响应体"
+// @Failure      401    {object}  ErrorResponse
+// @Failure      403    {object}  ErrorResponse
+// @Failure      404    {object}  ErrorResponse
+// @Failure      503    {object}  ErrorResponse
+// @Router       /organizations/{orgId}/knowledge [delete]
+func (h *KnowledgeHandler) ClearOrg(c *gin.Context) {
+	if err := h.service.ClearOrgFiles(c.Request.Context(), principalFromCtx(c), c.Param("orgId")); err != nil {
 		writeKnowledgeError(c, err)
 		return
 	}

@@ -44,6 +44,8 @@ type industryKnowledgeService interface {
 	OpenIndustryFile(ctx context.Context, principal auth.Principal, industryID, documentID string) (io.ReadCloser, int64, string, error)
 	// DeleteIndustryFile 删除指定行业知识库文件。
 	DeleteIndustryFile(ctx context.Context, principal auth.Principal, industryID, documentID string) error
+	// ClearIndustryFiles 清空指定行业知识库下的全部文件。
+	ClearIndustryFiles(ctx context.Context, principal auth.Principal, industryID string) error
 	// ReparseIndustryFile 重新触发指定行业知识库文件解析。
 	ReparseIndustryFile(ctx context.Context, principal auth.Principal, industryID, documentID string) (service.KnowledgeDocumentResult, error)
 	// ExternalUploadIndustryFile 按行业名称接收外部系统上传的文件。
@@ -72,6 +74,7 @@ func RegisterIndustryKnowledgeRoutes(router gin.IRouter, handler *IndustryKnowle
 	files := group.Group("/:industryId/knowledge")
 	files.GET("", handler.ListFiles)
 	files.POST("", handler.SaveFile)
+	files.DELETE("", handler.ClearFiles)
 	files.GET("/:documentId/file", handler.DownloadFile)
 	files.DELETE("/:documentId", handler.DeleteFile)
 	files.POST("/:documentId/reparse", handler.ReparseFile)
@@ -439,6 +442,29 @@ func (h *IndustryKnowledgeHandler) DownloadFile(c *gin.Context) {
 // @Router       /industry-knowledge-bases/{industryId}/knowledge/{documentId} [delete]
 func (h *IndustryKnowledgeHandler) DeleteFile(c *gin.Context) {
 	if err := h.service.DeleteIndustryFile(c.Request.Context(), principalFromCtx(c), c.Param("industryId"), c.Param("documentId")); err != nil {
+		writeIndustryKnowledgeError(c, err)
+		return
+	}
+	c.Status(http.StatusNoContent)
+}
+
+// ClearFiles 清空行业知识库全部文件。
+//
+// @Summary      清空行业知识库文件
+// @Description  平台管理员删除指定行业知识库中的全部 RAGFlow documents，保留行业库记录
+// @Tags         industry-knowledge
+// @Produce      json
+// @Security     BearerAuth
+// @Param        industryId  path  string  true  "行业知识库 ID"
+// @Success      204         "清空成功，无响应体"
+// @Failure      401         {object}  ErrorResponse
+// @Failure      403         {object}  ErrorResponse
+// @Failure      404         {object}  ErrorResponse
+// @Failure      503         {object}  ErrorResponse
+// @Failure      500         {object}  ErrorResponse
+// @Router       /industry-knowledge-bases/{industryId}/knowledge [delete]
+func (h *IndustryKnowledgeHandler) ClearFiles(c *gin.Context) {
+	if err := h.service.ClearIndustryFiles(c.Request.Context(), principalFromCtx(c), c.Param("industryId")); err != nil {
 		writeIndustryKnowledgeError(c, err)
 		return
 	}

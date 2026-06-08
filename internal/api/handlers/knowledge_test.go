@@ -33,6 +33,8 @@ type knowledgeServiceStub struct {
 	openName      string
 	openErr       error
 	openCloses    int
+	clearOrgErr   error
+	clearOrgID    string
 }
 
 func (s *knowledgeServiceStub) ListOrg(_ context.Context, _ auth.Principal, _ string, _, _ int32, _, _ string) (service.KnowledgeListResult, error) {
@@ -53,6 +55,11 @@ func (s *knowledgeServiceStub) OpenOrgFile(_ context.Context, _ auth.Principal, 
 
 func (s *knowledgeServiceStub) DeleteOrgFile(_ context.Context, _ auth.Principal, _, _ string) error {
 	return nil
+}
+
+func (s *knowledgeServiceStub) ClearOrgFiles(_ context.Context, _ auth.Principal, orgID string) error {
+	s.clearOrgID = orgID
+	return s.clearOrgErr
 }
 
 func (s *knowledgeServiceStub) ReparseOrgFile(_ context.Context, _ auth.Principal, _, _ string) (service.KnowledgeDocumentResult, error) {
@@ -193,6 +200,34 @@ func TestKnowledgeUploadOrgMapsQuotaExceeded(t *testing.T) {
 	assert.Equal(t, http.StatusConflict, w.Code)
 	assert.Contains(t, w.Body.String(), "KNOWLEDGE_QUOTA_EXCEEDED")
 	assert.Contains(t, w.Body.String(), "剩余 1MB")
+}
+
+// TestKnowledgeClearOrgFilesRoute 验证集合级 DELETE 会清空企业知识库文件内容，并把企业 ID 传给 service。
+func TestKnowledgeClearOrgFilesRoute(t *testing.T) {
+	stub := &knowledgeServiceStub{}
+	router := newKnowledgeTestRouter(t, stub)
+
+	w := httptest.NewRecorder()
+	req := httptest.NewRequest(http.MethodDelete, "/api/v1/organizations/org-1/knowledge", nil)
+	req = withPrincipal(req, auth.Principal{UserID: "u1", Role: domain.UserRoleOrgAdmin, OrgID: "org-1"})
+	router.ServeHTTP(w, req)
+
+	require.Equal(t, http.StatusNoContent, w.Code)
+	assert.Equal(t, "org-1", stub.clearOrgID)
+}
+
+// TestKnowledgeClearOrgFilesMapsForbidden 验证清空企业知识库文件的权限错误仍按知识库统一错误码返回。
+func TestKnowledgeClearOrgFilesMapsForbidden(t *testing.T) {
+	stub := &knowledgeServiceStub{clearOrgErr: service.ErrKnowledgeForbidden}
+	router := newKnowledgeTestRouter(t, stub)
+
+	w := httptest.NewRecorder()
+	req := httptest.NewRequest(http.MethodDelete, "/api/v1/organizations/org-1/knowledge", nil)
+	req = withPrincipal(req, auth.Principal{UserID: "u2", Role: domain.UserRoleOrgMember, OrgID: "org-1"})
+	router.ServeHTTP(w, req)
+
+	assert.Equal(t, http.StatusForbidden, w.Code)
+	assert.Contains(t, w.Body.String(), "KNOWLEDGE_FORBIDDEN")
 }
 
 // TestKnowledgeReparseOrgRequiresDocumentID 验证重解析必须通过路由携带 documentId，未知 document 映射为 404。

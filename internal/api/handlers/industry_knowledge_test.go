@@ -66,6 +66,9 @@ type industryKnowledgeServiceStub struct {
 	deleteFileIndustryID string
 	deleteFileDocumentID string
 
+	clearFilesErr        error
+	clearFilesIndustryID string
+
 	reparseResult     service.KnowledgeDocumentResult
 	reparseErr        error
 	reparseIndustryID string
@@ -131,6 +134,11 @@ func (s *industryKnowledgeServiceStub) DeleteIndustryFile(_ context.Context, _ a
 	s.deleteFileIndustryID = industryID
 	s.deleteFileDocumentID = documentID
 	return s.deleteFileErr
+}
+
+func (s *industryKnowledgeServiceStub) ClearIndustryFiles(_ context.Context, _ auth.Principal, industryID string) error {
+	s.clearFilesIndustryID = industryID
+	return s.clearFilesErr
 }
 
 func (s *industryKnowledgeServiceStub) ReparseIndustryFile(_ context.Context, _ auth.Principal, industryID, documentID string) (service.KnowledgeDocumentResult, error) {
@@ -224,6 +232,35 @@ func TestIndustryKnowledgeListFilesRejectsInvalidCreatedDate(t *testing.T) {
 
 	assert.Equal(t, http.StatusBadRequest, w.Code)
 	assert.Empty(t, stub.listFilesIndustryID)
+}
+
+// TestIndustryKnowledgeClearFilesRoute 验证集合级 DELETE 只清空指定行业库文件内容，不删除行业库记录。
+func TestIndustryKnowledgeClearFilesRoute(t *testing.T) {
+	stub := &industryKnowledgeServiceStub{}
+	router := newIndustryKnowledgeTestRouter(t, stub, "secret-token")
+
+	w := httptest.NewRecorder()
+	req := httptest.NewRequest(http.MethodDelete, "/api/v1/industry-knowledge-bases/industry-1/knowledge", nil)
+	req = withPrincipal(req, auth.Principal{UserID: "u-admin", Role: domain.UserRolePlatformAdmin})
+	router.ServeHTTP(w, req)
+
+	require.Equal(t, http.StatusNoContent, w.Code)
+	assert.Equal(t, "industry-1", stub.clearFilesIndustryID)
+	assert.Empty(t, stub.deleteID)
+}
+
+// TestIndustryKnowledgeClearFilesMapsMissingBase 验证清空不存在的行业库文件内容时返回行业库专属 404。
+func TestIndustryKnowledgeClearFilesMapsMissingBase(t *testing.T) {
+	stub := &industryKnowledgeServiceStub{clearFilesErr: service.ErrIndustryKnowledgeNotFound}
+	router := newIndustryKnowledgeTestRouter(t, stub, "secret-token")
+
+	w := httptest.NewRecorder()
+	req := httptest.NewRequest(http.MethodDelete, "/api/v1/industry-knowledge-bases/missing/knowledge", nil)
+	req = withPrincipal(req, auth.Principal{UserID: "u-admin", Role: domain.UserRolePlatformAdmin})
+	router.ServeHTTP(w, req)
+
+	assert.Equal(t, http.StatusNotFound, w.Code)
+	assert.Contains(t, w.Body.String(), "INDUSTRY_KNOWLEDGE_NOT_FOUND")
 }
 
 // multipartIndustryUploadBody 构造外部上传接口需要的 multipart/form-data 请求体。

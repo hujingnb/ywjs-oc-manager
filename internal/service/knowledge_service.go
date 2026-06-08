@@ -72,6 +72,8 @@ type KnowledgeStore interface {
 	ReplaceRAGFlowIndustryDocument(ctx context.Context, arg sqlc.ReplaceRAGFlowIndustryDocumentParams) error
 	ListRAGFlowDocumentsByScope(ctx context.Context, arg sqlc.ListRAGFlowDocumentsByScopeParams) ([]sqlc.RagflowDocument, error)
 	CountRAGFlowDocumentsByScope(ctx context.Context, arg sqlc.CountRAGFlowDocumentsByScopeParams) (int64, error)
+	// ListAllRAGFlowDocumentsByScope 列出企业或实例知识库全部文件，供整库清空操作使用。
+	ListAllRAGFlowDocumentsByScope(ctx context.Context, arg sqlc.ListAllRAGFlowDocumentsByScopeParams) ([]sqlc.RagflowDocument, error)
 	// SumRAGFlowDocumentsSizeByScope 统计当前知识库累计占用，包含所有解析状态。
 	SumRAGFlowDocumentsSizeByScope(ctx context.Context, arg sqlc.SumRAGFlowDocumentsSizeByScopeParams) (int64, error)
 	GetRAGFlowDocument(ctx context.Context, id string) (sqlc.RagflowDocument, error)
@@ -105,6 +107,8 @@ type KnowledgeStore interface {
 	ListRAGFlowIndustryDocuments(ctx context.Context, arg sqlc.ListRAGFlowIndustryDocumentsParams) ([]sqlc.RagflowDocument, error)
 	// CountRAGFlowIndustryDocuments 统计行业库文件总数。
 	CountRAGFlowIndustryDocuments(ctx context.Context, arg sqlc.CountRAGFlowIndustryDocumentsParams) (int64, error)
+	// ListAllRAGFlowIndustryDocuments 列出行业库全部文件，供整库清空操作使用。
+	ListAllRAGFlowIndustryDocuments(ctx context.Context, industryKnowledgeBaseID null.String) ([]sqlc.RagflowDocument, error)
 	// GetRAGFlowIndustryDocumentByName 按行业库和文件名查找本地 document 映射。
 	GetRAGFlowIndustryDocumentByName(ctx context.Context, arg sqlc.GetRAGFlowIndustryDocumentByNameParams) (sqlc.RagflowDocument, error)
 	// ListIndustryKnowledgeBasesByAssistantVersion 列出指定助手版本关联的行业库。
@@ -255,6 +259,30 @@ func (s *KnowledgeService) DeleteOrgFile(ctx context.Context, principal auth.Pri
 		return err
 	}
 	return s.deleteDocument(ctx, dataset, document)
+}
+
+// ClearOrgFiles 清空企业知识库下的全部文件内容，保留企业和 dataset 映射。
+func (s *KnowledgeService) ClearOrgFiles(ctx context.Context, principal auth.Principal, orgID string) error {
+	if !auth.CanWriteOrgKnowledge(principal, orgID) {
+		return ErrKnowledgeForbidden
+	}
+	org, err := s.getOrg(ctx, orgID)
+	if err != nil {
+		return err
+	}
+	dataset, err := s.getOrgDataset(ctx, org.ID)
+	if err != nil {
+		return err
+	}
+	documents, err := s.store.ListAllRAGFlowDocumentsByScope(ctx, sqlc.ListAllRAGFlowDocumentsByScopeParams{
+		ScopeType: "org",
+		OrgID:     null.StringFrom(org.ID),
+		AppID:     null.String{},
+	})
+	if err != nil {
+		return fmt.Errorf("查询企业知识库全部文件失败: %w", err)
+	}
+	return s.clearDocuments(ctx, dataset, documents)
 }
 
 // ReparseOrgFile 重新触发企业知识库文件解析。
@@ -728,6 +756,30 @@ func (s *KnowledgeService) deleteDocument(ctx context.Context, dataset sqlc.Ragf
 	}
 	if err := s.store.DeleteRAGFlowDocumentMapping(ctx, document.ID); err != nil {
 		return fmt.Errorf("删除知识库文件元数据失败: %w", err)
+	}
+	return nil
+}
+
+// clearDocuments 批量删除同一 dataset 下的文件；远端删除成功后再清理本地映射，避免本地先删导致文件不可管理。
+func (s *KnowledgeService) clearDocuments(ctx context.Context, dataset sqlc.RagflowDataset, documents []sqlc.RagflowDocument) error {
+	if len(documents) == 0 {
+		return nil
+	}
+	remoteDatasetID, err := requireRemoteDatasetID(dataset)
+	if err != nil {
+		return err
+	}
+	remoteIDs := make([]string, 0, len(documents))
+	for _, document := range documents {
+		remoteIDs = append(remoteIDs, document.RagflowDocumentID)
+	}
+	if err := s.ragflowClient().DeleteDocuments(ctx, remoteDatasetID, remoteIDs); err != nil {
+		return fmt.Errorf("删除 RAGFlow documents 失败: %w", err)
+	}
+	for _, document := range documents {
+		if err := s.store.DeleteRAGFlowDocumentMapping(ctx, document.ID); err != nil {
+			return fmt.Errorf("删除知识库文件元数据失败: %w", err)
+		}
 	}
 	return nil
 }

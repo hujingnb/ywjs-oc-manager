@@ -5715,6 +5715,53 @@ paths:
       tags:
       - industry-knowledge
   /industry-knowledge-bases/{industryId}/knowledge:
+    delete:
+      description: 平台管理员删除指定行业知识库中的全部 RAGFlow documents，保留行业库记录
+      parameters:
+      - description: 行业知识库 ID
+        in: path
+        name: industryId
+        required: true
+        schema:
+          type: string
+      responses:
+        "204":
+          description: 清空成功，无响应体
+        "401":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/handlers.ErrorResponse'
+          description: Unauthorized
+        "403":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/handlers.ErrorResponse'
+          description: Forbidden
+        "404":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/handlers.ErrorResponse'
+          description: Not Found
+        "500":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/handlers.ErrorResponse'
+          description: Internal Server Error
+        "503":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/handlers.ErrorResponse'
+          description: Service Unavailable
+      security:
+      - BearerAuth: []
+      summary: 清空行业知识库文件
+      tags:
+      - industry-knowledge
     get:
       description: 平台管理员分页查看指定行业知识库下的文件
       parameters:
@@ -6950,6 +6997,47 @@ paths:
       tags:
       - organizations
   /organizations/{orgId}/knowledge:
+    delete:
+      description: 删除企业知识库中的全部 RAGFlow documents，保留企业和知识库 dataset
+      parameters:
+      - description: 企业 ID
+        in: path
+        name: orgId
+        required: true
+        schema:
+          type: string
+      responses:
+        "204":
+          description: 清空成功，无响应体
+        "401":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/handlers.ErrorResponse'
+          description: Unauthorized
+        "403":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/handlers.ErrorResponse'
+          description: Forbidden
+        "404":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/handlers.ErrorResponse'
+          description: Not Found
+        "503":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/handlers.ErrorResponse'
+          description: Service Unavailable
+      security:
+      - BearerAuth: []
+      summary: 清空企业级知识库文件
+      tags:
+      - knowledge
     get:
       description: 以扁平 RAGFlow document 列表返回企业知识库文件
       parameters:

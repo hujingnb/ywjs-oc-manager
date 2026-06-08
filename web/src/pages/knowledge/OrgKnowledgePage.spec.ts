@@ -8,7 +8,10 @@ import OrgKnowledgePage from './OrgKnowledgePage.vue'
 const mocks = vi.hoisted(() => ({
   run: vi.fn(),
   warning: vi.fn(),
+  success: vi.fn(),
+  error: vi.fn(),
   mutateAsync: vi.fn(),
+  clearOrgKnowledge: vi.fn(),
   canManage: vi.fn(() => true),
   downloadOrgKnowledgeFile: vi.fn(),
   orgKnowledgeQueryCalls: [] as Array<{ orgId: unknown; options: Record<string, { value: unknown }> }>,
@@ -111,7 +114,7 @@ vi.mock('naive-ui', async () => {
   const actual = await vi.importActual<typeof import('naive-ui')>('naive-ui')
   return {
     ...actual,
-    useMessage: () => ({ warning: mocks.warning }),
+    useMessage: () => ({ warning: mocks.warning, success: mocks.success, error: mocks.error }),
   }
 })
 
@@ -142,6 +145,10 @@ vi.mock('@/api/hooks/useKnowledge', async () => {
       mutateAsync: vi.fn(),
       isPending: ref(false),
     }),
+    useClearOrgKnowledge: () => ({
+      mutateAsync: mocks.clearOrgKnowledge,
+      isPending: ref(false),
+    }),
     useReparseOrgKnowledge: () => ({
       mutateAsync: vi.fn(),
       isPending: ref(false),
@@ -162,6 +169,21 @@ function mountPage() {
         NDataTable: DataTableStub,
         NButton: { template: '<button><slot /></button>' },
         NTag: { template: '<span><slot /></span>' },
+        ConfirmActionModal: defineComponent({
+          props: ['visible', 'title', 'message', 'verifyValue', 'verifyHint'],
+          emits: ['confirm', 'cancel'],
+          setup(props, { emit }) {
+            return () => props.visible
+              ? h('div', { class: 'confirm-modal' }, [
+                  h('strong', props.title),
+                  h('p', props.message),
+                  h('span', { class: 'verify-value' }, props.verifyValue),
+                  h('span', { class: 'verify-hint' }, props.verifyHint),
+                  h('button', { class: 'confirm-clear', onClick: () => emit('confirm') }, '确认清空'),
+                ])
+              : null
+          },
+        }),
       },
     },
   })
@@ -188,6 +210,7 @@ describe('OrgKnowledgePage', () => {
     mocks.run.mockReset()
     uploadRunContexts.splice(0, uploadRunContexts.length)
     mocks.orgKnowledgeQueryCalls.splice(0, mocks.orgKnowledgeQueryCalls.length)
+    mocks.clearOrgKnowledge.mockReset()
     mocks.run.mockImplementation(async (items: UploadRunItem[], runner: (item: UploadRunItem, file: File, ctx: UploadRunContext) => Promise<void>) => {
       for (const item of items) {
         const ctx = { onProgress: vi.fn(), signal: new AbortController().signal }
@@ -196,6 +219,8 @@ describe('OrgKnowledgePage', () => {
       }
     })
     mocks.warning.mockReset()
+    mocks.success.mockReset()
+    mocks.error.mockReset()
     mocks.mutateAsync.mockReset()
   })
 
@@ -212,6 +237,21 @@ describe('OrgKnowledgePage', () => {
 
     expect(wrapper.text()).toContain('已用')
     expect(wrapper.text()).toContain('剩余')
+  })
+
+  // 覆盖企业知识库整库清空入口：管理员需二次确认后才会调用清空 mutation。
+  it('企业知识库支持二次确认后清空整库文件内容', async () => {
+    const wrapper = mountPage()
+
+    await wrapper.findAll('button').find(button => button.text().includes('清空文件'))!.trigger('click')
+
+    expect(wrapper.find('.confirm-modal').text()).toContain('确认清空企业知识库文件')
+    expect(wrapper.find('.confirm-modal').text()).toContain('清空文件')
+
+    await wrapper.find('.confirm-clear').trigger('click')
+
+    expect(mocks.clearOrgKnowledge).toHaveBeenCalledTimes(1)
+    expect(mocks.success).toHaveBeenCalledWith('已清空企业知识库文件')
   })
 
   // 覆盖企业知识库列表查询条件：搜索关键词、页码和页大小必须通过响应式参数传给 hook。

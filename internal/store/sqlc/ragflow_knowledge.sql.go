@@ -541,6 +541,122 @@ func (q *Queries) GetRAGFlowOrgDataset(ctx context.Context, orgID null.String) (
 	return i, err
 }
 
+const listAllRAGFlowDocumentsByScope = `-- name: ListAllRAGFlowDocumentsByScope :many
+SELECT id, dataset_id, scope_type, app_id, ragflow_document_id, name, size_bytes, mime_type, suffix, parse_status, progress, last_error, created_by, created_at, updated_at, org_id, industry_knowledge_base_id, industry_document_base_key, industry_document_name_key
+FROM ragflow_documents
+WHERE scope_type = ?
+  AND org_id = ?
+  AND (? IS NULL OR app_id = ?)
+ORDER BY created_at DESC, id DESC
+`
+
+type ListAllRAGFlowDocumentsByScopeParams struct {
+	ScopeType string      `db:"scope_type" json:"scope_type"`
+	OrgID     null.String `db:"org_id" json:"org_id"`
+	AppID     null.String `db:"app_id" json:"app_id"`
+}
+
+// 清空企业或实例知识库时列出指定业务 scope 下的全部 document，不受分页和筛选条件影响。
+func (q *Queries) ListAllRAGFlowDocumentsByScope(ctx context.Context, arg ListAllRAGFlowDocumentsByScopeParams) ([]RagflowDocument, error) {
+	rows, err := q.db.QueryContext(ctx, listAllRAGFlowDocumentsByScope,
+		arg.ScopeType,
+		arg.OrgID,
+		arg.AppID,
+		arg.AppID,
+	)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []RagflowDocument{}
+	for rows.Next() {
+		var i RagflowDocument
+		if err := rows.Scan(
+			&i.ID,
+			&i.DatasetID,
+			&i.ScopeType,
+			&i.AppID,
+			&i.RagflowDocumentID,
+			&i.Name,
+			&i.SizeBytes,
+			&i.MimeType,
+			&i.Suffix,
+			&i.ParseStatus,
+			&i.Progress,
+			&i.LastError,
+			&i.CreatedBy,
+			&i.CreatedAt,
+			&i.UpdatedAt,
+			&i.OrgID,
+			&i.IndustryKnowledgeBaseID,
+			&i.IndustryDocumentBaseKey,
+			&i.IndustryDocumentNameKey,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Close(); err != nil {
+		return nil, err
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
+const listAllRAGFlowIndustryDocuments = `-- name: ListAllRAGFlowIndustryDocuments :many
+SELECT id, dataset_id, scope_type, app_id, ragflow_document_id, name, size_bytes, mime_type, suffix, parse_status, progress, last_error, created_by, created_at, updated_at, org_id, industry_knowledge_base_id, industry_document_base_key, industry_document_name_key
+FROM ragflow_documents
+WHERE scope_type = 'industry'
+  AND industry_knowledge_base_id = ?
+ORDER BY created_at DESC, id DESC
+`
+
+// 清空行业知识库文件内容时列出该行业库下的全部 document，不受分页、日期和状态筛选影响。
+func (q *Queries) ListAllRAGFlowIndustryDocuments(ctx context.Context, industryKnowledgeBaseID null.String) ([]RagflowDocument, error) {
+	rows, err := q.db.QueryContext(ctx, listAllRAGFlowIndustryDocuments, industryKnowledgeBaseID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []RagflowDocument{}
+	for rows.Next() {
+		var i RagflowDocument
+		if err := rows.Scan(
+			&i.ID,
+			&i.DatasetID,
+			&i.ScopeType,
+			&i.AppID,
+			&i.RagflowDocumentID,
+			&i.Name,
+			&i.SizeBytes,
+			&i.MimeType,
+			&i.Suffix,
+			&i.ParseStatus,
+			&i.Progress,
+			&i.LastError,
+			&i.CreatedBy,
+			&i.CreatedAt,
+			&i.UpdatedAt,
+			&i.OrgID,
+			&i.IndustryKnowledgeBaseID,
+			&i.IndustryDocumentBaseKey,
+			&i.IndustryDocumentNameKey,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Close(); err != nil {
+		return nil, err
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
 const listRAGFlowDocumentsByScope = `-- name: ListRAGFlowDocumentsByScope :many
 SELECT id, dataset_id, scope_type, app_id, ragflow_document_id, name, size_bytes, mime_type, suffix, parse_status, progress, last_error, created_by, created_at, updated_at, org_id, industry_knowledge_base_id, industry_document_base_key, industry_document_name_key
 FROM ragflow_documents

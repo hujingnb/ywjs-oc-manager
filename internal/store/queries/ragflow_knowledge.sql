@@ -143,6 +143,15 @@ WHERE scope_type = ?
   AND (sqlc.narg(parse_status) IS NULL OR parse_status = sqlc.narg(parse_status))
   AND (sqlc.narg(keywords) IS NULL OR name LIKE CONCAT('%', sqlc.narg(keywords), '%'));
 
+-- name: ListAllRAGFlowDocumentsByScope :many
+-- 清空企业或实例知识库时列出指定业务 scope 下的全部 document，不受分页和筛选条件影响。
+SELECT *
+FROM ragflow_documents
+WHERE scope_type = ?
+  AND org_id = ?
+  AND (sqlc.narg(app_id) IS NULL OR app_id = sqlc.narg(app_id))
+ORDER BY created_at DESC, id DESC;
+
 -- name: GetRAGFlowDocumentByRemoteID :one
 -- 按 RAGFlow document ID 读取缓存，用于解析状态回刷和幂等处理。
 SELECT *
@@ -220,6 +229,14 @@ WHERE scope_type = 'industry'
   AND (sqlc.narg(keywords) IS NULL OR name LIKE CONCAT('%', sqlc.narg(keywords), '%'))
   AND (sqlc.narg(created_from) IS NULL OR created_at >= sqlc.narg(created_from))
   AND (sqlc.narg(created_before) IS NULL OR created_at < sqlc.narg(created_before));
+
+-- name: ListAllRAGFlowIndustryDocuments :many
+-- 清空行业知识库文件内容时列出该行业库下的全部 document，不受分页、日期和状态筛选影响。
+SELECT *
+FROM ragflow_documents
+WHERE scope_type = 'industry'
+  AND industry_knowledge_base_id = ?
+ORDER BY created_at DESC, id DESC;
 
 -- name: GetRAGFlowIndustryDocumentByName :one
 -- 按行业知识库和文件名读取缓存，用于上传前幂等与重名校验。

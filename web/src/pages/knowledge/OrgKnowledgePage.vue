@@ -19,6 +19,15 @@
       <template #header-extra>
         <div v-if="canManage" class="upload-actions">
           <span class="upload-limit">{{ KNOWLEDGE_UPLOAD_MAX_MESSAGE }}</span>
+          <n-button
+            size="small"
+            type="error"
+            :disabled="!hasFiles || clearMutation.isPending.value"
+            :loading="clearMutation.isPending.value"
+            @click="clearConfirmOpen = true"
+          >
+            清空文件
+          </n-button>
           <label class="primary-button">
             <input class="hidden-input" type="file" multiple :disabled="!canManage" @change="onUpload" />
             上传文件
@@ -57,6 +66,18 @@
         :row-key="(row) => row.id"
       />
     </n-card>
+
+    <ConfirmActionModal
+      :visible="clearConfirmOpen"
+      title="确认清空企业知识库文件"
+      message="将删除当前企业知识库中的全部文件内容，企业和知识库配置会保留。该操作不可撤销。"
+      confirm-label="确认清空"
+      :busy="clearMutation.isPending.value"
+      verify-value="清空文件"
+      verify-hint='输入 "清空文件" 以确认清空'
+      @confirm="onConfirmClear"
+      @cancel="clearConfirmOpen = false"
+    />
   </div>
 </template>
 
@@ -68,6 +89,7 @@ import {
   KNOWLEDGE_UPLOAD_MAX_MESSAGE,
   downloadOrgKnowledgeFile,
   formatKnowledgeBytes,
+  useClearOrgKnowledge,
   useDeleteOrgKnowledge,
   useOrgKnowledgeQuery,
   useReparseOrgKnowledge,
@@ -85,6 +107,7 @@ import {
   knowledgeFilesFromInput,
   toKnowledgeUploadItems,
 } from './knowledgeUploadBatch'
+import ConfirmActionModal from '@/components/ConfirmActionModal.vue'
 
 // OrgKnowledgePage 管理组织级共享知识库；文件主库由 RAGFlow 承担，页面只展示扁平 document 列表。
 const props = defineProps<{ orgId?: string }>()
@@ -116,14 +139,19 @@ const { data: listing, isLoading, error } = useOrgKnowledgeQuery(effectiveOrgId,
 })
 const uploadMutation = useUploadOrgKnowledge(effectiveOrgId)
 const deleteMutation = useDeleteOrgKnowledge(effectiveOrgId)
+const clearMutation = useClearOrgKnowledge(effectiveOrgId)
 const reparseMutation = useReparseOrgKnowledge(effectiveOrgId)
 const quotaSummary = computed(() => listing.value
   ? `已用 ${formatKnowledgeBytes(listing.value.used_bytes)} / 上限 ${formatKnowledgeBytes(listing.value.quota_bytes)}，剩余 ${formatKnowledgeBytes(listing.value.remaining_bytes)}`
   : '')
+// hasFiles 控制整库清空入口，避免空知识库提交破坏性请求。
+const hasFiles = computed(() => (listing.value?.total ?? 0) > 0)
 // downloading 标记当前页面正在触发浏览器下载，防止同一页面重复点击下载按钮。
 const downloading = ref(false)
 // dragActive 标记当前卡片是否处于可上传拖拽态，仅有写权限时才会置 true。
 const dragActive = ref(false)
+// clearConfirmOpen 控制整库清空二次确认弹窗，避免误点直接删除全部文件。
+const clearConfirmOpen = ref(false)
 // tablePagination 使用后端 total 驱动远程分页；搜索条件变化时回到第一页避免空页。
 const tablePagination = computed(() => ({
   page: page.value,
@@ -246,6 +274,17 @@ async function onDropUpload(event: DragEvent) {
 async function onDelete(entry: KnowledgeDocument) {
   if (!confirm(`确认删除 ${entry.name} ？`)) return
   await deleteMutation.mutateAsync(entry.id)
+}
+
+// onConfirmClear 清空企业知识库全部文件；后端按权限和企业 ID 做最终校验。
+async function onConfirmClear() {
+  try {
+    await clearMutation.mutateAsync()
+    clearConfirmOpen.value = false
+    message.success('已清空企业知识库文件')
+  } catch (err) {
+    message.error(err instanceof Error ? err.message : '清空失败')
+  }
 }
 
 // onDownload 通过 manager 受保护接口下载 RAGFlow document 原文件。

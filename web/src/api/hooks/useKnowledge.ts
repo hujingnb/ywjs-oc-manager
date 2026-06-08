@@ -289,6 +289,19 @@ export function useDeleteOrgKnowledge(orgId: Ref<string | undefined>) {
   })
 }
 
+export function useClearOrgKnowledge(orgId: Ref<string | undefined>) {
+  const client = useQueryClient()
+  return useMutation({
+    mutationFn: async () => {
+      if (!orgId.value) throw new Error('缺少企业 ID')
+      await apiRequest<void>(`/api/v1/organizations/${orgId.value}/knowledge`, { method: 'DELETE' })
+    },
+    onSuccess: () => {
+      void client.invalidateQueries({ queryKey: orgKey(orgId.value) })
+    },
+  })
+}
+
 export function useDeleteAppKnowledge(appId: Ref<string | undefined>) {
   const client = useQueryClient()
   return useMutation({

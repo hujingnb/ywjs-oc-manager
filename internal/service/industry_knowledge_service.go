@@ -300,6 +300,29 @@ func (s *KnowledgeService) DeleteIndustryFile(ctx context.Context, principal aut
 	return s.deleteDocument(ctx, dataset, document)
 }
 
+// ClearIndustryFiles 清空行业知识库下的全部文件内容，保留行业库记录和助手版本关联。
+func (s *KnowledgeService) ClearIndustryFiles(ctx context.Context, principal auth.Principal, industryID string) error {
+	if !auth.CanManageIndustryKnowledge(principal) {
+		return ErrKnowledgeForbidden
+	}
+	base, err := s.getIndustryKnowledgeBase(ctx, industryID)
+	if err != nil {
+		return err
+	}
+	dataset, err := s.store.GetRAGFlowIndustryDataset(ctx, null.StringFrom(base.ID))
+	if errors.Is(err, sql.ErrNoRows) {
+		return nil
+	}
+	if err != nil {
+		return fmt.Errorf("查询行业知识库 RAGFlow dataset 失败: %w", err)
+	}
+	documents, err := s.store.ListAllRAGFlowIndustryDocuments(ctx, null.StringFrom(base.ID))
+	if err != nil {
+		return fmt.Errorf("查询行业知识库全部文件失败: %w", err)
+	}
+	return s.clearDocuments(ctx, dataset, documents)
+}
+
 // ReparseIndustryFile 重新触发行业知识库文件解析。
 func (s *KnowledgeService) ReparseIndustryFile(ctx context.Context, principal auth.Principal, industryID, documentID string) (KnowledgeDocumentResult, error) {
 	if !auth.CanManageIndustryKnowledge(principal) {

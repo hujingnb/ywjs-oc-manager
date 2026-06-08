@@ -137,6 +137,10 @@ type Querier interface {
 	// 全量返回活跃组织（deleted_at IS NULL），不分页；
 	// 仅供平台内部聚合使用（如 GetOrgUsageBreakdown），请勿用于用户可见的列表接口。
 	ListAllActiveOrganizations(ctx context.Context) ([]Organization, error)
+	// 清空企业或实例知识库时列出指定业务 scope 下的全部 document，不受分页和筛选条件影响。
+	ListAllRAGFlowDocumentsByScope(ctx context.Context, arg ListAllRAGFlowDocumentsByScopeParams) ([]RagflowDocument, error)
+	// 清空行业知识库文件内容时列出该行业库下的全部 document，不受分页、日期和状态筛选影响。
+	ListAllRAGFlowIndustryDocuments(ctx context.Context, industryKnowledgeBaseID null.String) ([]RagflowDocument, error)
 	ListAppSkillsByApp(ctx context.Context, appID string) ([]AppSkill, error)
 	ListAppSkillsBySourceRef(ctx context.Context, arg ListAppSkillsBySourceRefParams) ([]AppSkill, error)
 	ListAppsByOrg(ctx context.Context, arg ListAppsByOrgParams) ([]App, error)

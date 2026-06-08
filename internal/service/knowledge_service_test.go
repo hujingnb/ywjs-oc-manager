@@ -135,6 +135,49 @@ func TestRAGFlowKnowledgeDeleteAppRejectsOtherOwner(t *testing.T) {
 	assert.Equal(t, []string{"remote-doc-1"}, rf.deleteCalls[0].documentIDs)
 }
 
+// TestClearOrgKnowledgeFilesDeletesAllDocuments 验证清空企业知识库会删除该企业 dataset 下的全部文件，而不是只处理当前分页。
+func TestClearOrgKnowledgeFilesDeletesAllDocuments(t *testing.T) {
+	svc, store, rf := newRAGFlowKnowledgeTestService(t)
+	first := testDocument(t, "org", "policy-a.md", store.orgDataset.ID)
+	second := testDocument(t, "org", "policy-b.md", store.orgDataset.ID)
+	second.ID = mustParseUUID("00000000-0000-0000-0000-000000000a11")
+	second.RagflowDocumentID = "remote-doc-2"
+	store.docs[first.ID] = first
+	store.docs[second.ID] = second
+
+	err := svc.ClearOrgFiles(context.Background(), orgKnowledgeAdmin(), testKnowledgeOrg)
+	require.NoError(t, err)
+
+	require.Len(t, rf.deleteCalls, 1)
+	assert.Equal(t, testRemoteOrgDatasetID, rf.deleteCalls[0].datasetID)
+	assert.ElementsMatch(t, []string{"remote-doc-1", "remote-doc-2"}, rf.deleteCalls[0].documentIDs)
+	assert.Empty(t, store.docs)
+}
+
+// TestClearIndustryKnowledgeFilesDeletesAllDocuments 验证清空行业知识库只删除当前行业库文件，不影响其他行业库文件。
+func TestClearIndustryKnowledgeFilesDeletesAllDocuments(t *testing.T) {
+	svc, store, rf := newRAGFlowKnowledgeTestService(t)
+	first := industryTestDocument(t, "policy-a.pdf", store.industryDataset.ID, testIndustryKnowledgeBaseID)
+	second := industryTestDocument(t, "policy-b.pdf", store.industryDataset.ID, testIndustryKnowledgeBaseID)
+	second.ID = mustParseUUID("00000000-0000-0000-0000-000000000a12")
+	second.RagflowDocumentID = "remote-doc-2"
+	other := industryTestDocument(t, "other.pdf", "other-dataset", "industry-other")
+	other.ID = mustParseUUID("00000000-0000-0000-0000-000000000a13")
+	other.RagflowDocumentID = "remote-doc-other"
+	store.docs[first.ID] = first
+	store.docs[second.ID] = second
+	store.docs[other.ID] = other
+
+	err := svc.ClearIndustryFiles(context.Background(), auth.Principal{Role: domain.UserRolePlatformAdmin}, testIndustryKnowledgeBaseID)
+	require.NoError(t, err)
+
+	require.Len(t, rf.deleteCalls, 1)
+	assert.Equal(t, testRemoteIndustryDatasetID, rf.deleteCalls[0].datasetID)
+	assert.ElementsMatch(t, []string{"remote-doc-1", "remote-doc-2"}, rf.deleteCalls[0].documentIDs)
+	require.Len(t, store.docs, 1)
+	assert.Equal(t, "other.pdf", store.docs[other.ID].Name)
+}
+
 // TestRuntimeSearchUsesOnlyCurrentAppAndOrgDatasets 验证 runtime 检索只使用 token 解析出的当前实例和所属组织 dataset。
 func TestRuntimeSearchUsesOnlyCurrentAppAndOrgDatasets(t *testing.T) {
 	svc, _, rf := newRAGFlowKnowledgeTestService(t)
@@ -1392,6 +1435,15 @@ func (s *fakeKnowledgeStore) CountRAGFlowDocumentsByScope(ctx context.Context, a
 	return int64(len(items)), err
 }
 
+// ListAllRAGFlowDocumentsByScope 模拟整库清空时不带分页和筛选条件读取全部企业/实例文件。
+func (s *fakeKnowledgeStore) ListAllRAGFlowDocumentsByScope(ctx context.Context, arg sqlc.ListAllRAGFlowDocumentsByScopeParams) ([]sqlc.RagflowDocument, error) {
+	return s.ListRAGFlowDocumentsByScope(ctx, sqlc.ListRAGFlowDocumentsByScopeParams{
+		ScopeType: arg.ScopeType,
+		OrgID:     arg.OrgID,
+		AppID:     arg.AppID,
+	})
+}
+
 func (s *fakeKnowledgeStore) ListRAGFlowIndustryDocuments(_ context.Context, arg sqlc.ListRAGFlowIndustryDocumentsParams) ([]sqlc.RagflowDocument, error) {
 	items := make([]sqlc.RagflowDocument, 0, len(s.docs))
 	for _, doc := range s.docs {
@@ -1424,6 +1476,13 @@ func (s *fakeKnowledgeStore) CountRAGFlowIndustryDocuments(ctx context.Context, 
 		CreatedBefore:           arg.CreatedBefore,
 	})
 	return int64(len(items)), err
+}
+
+// ListAllRAGFlowIndustryDocuments 模拟整库清空时不受分页、日期和解析状态筛选影响。
+func (s *fakeKnowledgeStore) ListAllRAGFlowIndustryDocuments(ctx context.Context, industryKnowledgeBaseID null.String) ([]sqlc.RagflowDocument, error) {
+	return s.ListRAGFlowIndustryDocuments(ctx, sqlc.ListRAGFlowIndustryDocumentsParams{
+		IndustryKnowledgeBaseID: industryKnowledgeBaseID,
+	})
 }
 
 func (s *fakeKnowledgeStore) GetRAGFlowIndustryDocumentByName(_ context.Context, arg sqlc.GetRAGFlowIndustryDocumentByNameParams) (sqlc.RagflowDocument, error) {

@@ -35,6 +35,15 @@
       <template #header-extra>
         <div class="upload-actions">
           <span class="upload-limit">{{ KNOWLEDGE_UPLOAD_MAX_MESSAGE }}</span>
+          <n-button
+            size="small"
+            type="error"
+            :disabled="!hasSelectedBaseFiles || clearFilesMutation.isPending.value"
+            :loading="clearFilesMutation.isPending.value"
+            @click="clearFilesDialogOpen = true"
+          >
+            清空文件
+          </n-button>
           <label class="primary-button">
             <input class="hidden-input" type="file" multiple @change="onUpload" />
             上传文件
@@ -165,6 +174,18 @@
         </template>
       </n-card>
     </n-modal>
+
+    <ConfirmActionModal
+      :visible="clearFilesDialogOpen"
+      title="确认清空行业知识库文件"
+      :message='selectedBase ? `将删除行业库「${selectedBase.name}」中的全部文件内容，行业库记录和助手版本关联会保留。该操作不可撤销。` : ""'
+      confirm-label="确认清空"
+      :busy="clearFilesMutation.isPending.value"
+      :verify-value="selectedBase?.name"
+      :verify-hint='selectedBase ? `输入行业库名称 "${selectedBase.name}" 以确认清空` : ""'
+      @confirm="onConfirmClearFiles"
+      @cancel="clearFilesDialogOpen = false"
+    />
   </div>
 </template>
 
@@ -173,6 +194,7 @@ import { computed, h, ref, watch } from 'vue'
 import { Plus } from 'lucide-vue-next'
 import { NAlert, NButton, NCard, NDataTable, NDatePicker, NInput, NModal, NSpace, NTag, useMessage, type DataTableColumns } from 'naive-ui'
 
+import ConfirmActionModal from '@/components/ConfirmActionModal.vue'
 import DataTableList from '@/components/DataTableList.vue'
 import {
   KNOWLEDGE_UPLOAD_MAX_MESSAGE,
@@ -181,6 +203,7 @@ import {
 } from '@/api/hooks/useKnowledge'
 import {
   downloadIndustryKnowledgeFile,
+  useClearIndustryKnowledgeFiles,
   useCreateIndustryKnowledgeBase,
   useDeleteIndustryKnowledgeBase,
   useDeleteIndustryKnowledgeFile,
@@ -207,6 +230,7 @@ const keyword = ref('')
 const newBaseName = ref('')
 const createDialogOpen = ref(false)
 const apiDocDialogOpen = ref(false)
+const clearFilesDialogOpen = ref(false)
 const selectedBaseId = ref<string | undefined>(undefined)
 const downloading = ref(false)
 const fileKeyword = ref('')
@@ -233,6 +257,7 @@ const renameMutation = useRenameIndustryKnowledgeBase()
 const deleteBaseMutation = useDeleteIndustryKnowledgeBase()
 const uploadMutation = useUploadIndustryKnowledgeFile(selectedBaseIdRef)
 const deleteFileMutation = useDeleteIndustryKnowledgeFile(selectedBaseIdRef)
+const clearFilesMutation = useClearIndustryKnowledgeFiles(selectedBaseIdRef)
 const reparseMutation = useReparseIndustryKnowledgeFile(selectedBaseIdRef)
 const {
   data: uploadTokenConfig,
@@ -249,6 +274,8 @@ const industryUploadTokenText = computed(() => {
   return industryUploadToken.value || uploadTokenUnavailableText
 })
 const apiDocCopyDisabled = computed(() => uploadTokenLoading.value || Boolean(uploadTokenError.value))
+// hasSelectedBaseFiles 控制清空入口，避免空行业库触发破坏性请求。
+const hasSelectedBaseFiles = computed(() => (files.value?.total ?? selectedBase.value?.document_count ?? 0) > 0)
 // fileTablePagination 使用后端 total 驱动远程分页；筛选条件变化时回到第一页避免停在空页。
 const fileTablePagination = computed(() => ({
   page: filePage.value,
@@ -473,6 +500,19 @@ async function onDownload(row: KnowledgeDocument) {
 async function onDeleteFile(row: KnowledgeDocument) {
   if (!window.confirm(`确认删除 ${row.name} ？`)) return
   await deleteFileMutation.mutateAsync(row.id)
+}
+
+// onConfirmClearFiles 清空当前行业库全部文件，后端保留行业库记录和版本关联。
+async function onConfirmClearFiles() {
+  if (!selectedBase.value) return
+  try {
+    const baseName = selectedBase.value.name
+    await clearFilesMutation.mutateAsync()
+    clearFilesDialogOpen.value = false
+    message.success(`已清空行业库「${baseName}」文件`)
+  } catch (err) {
+    message.error(err instanceof Error ? err.message : '清空失败')
+  }
 }
 
 async function onReparse(row: KnowledgeDocument) {
