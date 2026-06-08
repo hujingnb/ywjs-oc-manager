@@ -19,6 +19,7 @@ const messageSuccess = vi.hoisted(() => vi.fn())
 const messageError = vi.hoisted(() => vi.fn())
 const writeText = vi.hoisted(() => vi.fn())
 const fileQueryCalls = vi.hoisted(() => [] as Array<{ industryId: unknown; options: Record<string, { value: unknown }> }>)
+const authUser = vi.hoisted(() => ({ current: { role: 'platform_admin' } as { role: string; org_id?: string } }))
 
 const baseItems = vi.hoisted<IndustryKnowledgeBase[]>(() => [
   { id: 'industry-1', name: '保险', document_count: 1, created_at: '2026-06-05T00:00:00Z', updated_at: '2026-06-05T00:00:00Z' },
@@ -68,6 +69,10 @@ vi.mock('@/stores/uploadProgress', () => ({
   useUploadProgressStore: () => ({
     run: vi.fn(async () => undefined),
   }),
+}))
+
+vi.mock('@/stores/auth', () => ({
+  useAuthStore: () => ({ user: authUser.current }),
 }))
 
 vi.mock('naive-ui', async () => {
@@ -132,6 +137,14 @@ function mountPage() {
                   h('span', { class: 'verify-hint' }, props.verifyHint),
                   h('button', { class: 'confirm-clear', onClick: () => emit('confirm') }, '确认清空'),
                 ])
+              : null
+          },
+        }),
+        RAGFlowDatasetInfoDialog: defineComponent({
+          props: ['visible', 'scope', 'targetId', 'targetName'],
+          setup(props) {
+            return () => props.visible
+              ? h('div', { class: 'ragflow-dialog' }, `${props.scope}:${props.targetId}:${props.targetName}`)
               : null
           },
         }),
@@ -221,6 +234,7 @@ function datePickerStub() {
 describe('IndustryKnowledgePage', () => {
   beforeEach(() => {
     vi.clearAllMocks()
+    authUser.current = { role: 'platform_admin' }
     fileQueryCalls.splice(0, fileQueryCalls.length)
     Object.defineProperty(navigator, 'clipboard', {
       configurable: true,
@@ -236,6 +250,25 @@ describe('IndustryKnowledgePage', () => {
     expect(wrapper.text()).toContain('保险')
     expect(wrapper.text()).toContain('policy.pdf')
     expect(wrapper.text()).toContain('同名文件会覆盖当前行业库内的旧文件')
+  })
+
+  // 平台管理员需要通过入口查看远端 dataset 名称并调整 embedding 模型。
+  it('platform_admin 可以看到并打开行业知识库 RAGFlow 信息入口', async () => {
+    const wrapper = mountPage()
+    await nextTick()
+
+    await wrapper.findAll('button').find(button => button.text().includes('RAGFlow 信息'))!.trigger('click')
+
+    expect(wrapper.find('.ragflow-dialog').text()).toBe('industry:industry-1:保险')
+  })
+
+  // 企业管理员仍可管理文件或容量，但不能触发 RAGFlow dataset 运维弹框。
+  it('org_admin 看不到行业知识库 RAGFlow 信息入口', async () => {
+    authUser.current = { role: 'org_admin', org_id: 'org-1' }
+    const wrapper = mountPage()
+    await nextTick()
+
+    expect(wrapper.text()).not.toContain('RAGFlow 信息')
   })
 
   // 点击新建行业库后打开弹框，并在弹框确认时提交去除首尾空白后的行业名称。

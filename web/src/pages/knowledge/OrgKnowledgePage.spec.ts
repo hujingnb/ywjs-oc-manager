@@ -13,6 +13,7 @@ const mocks = vi.hoisted(() => ({
   mutateAsync: vi.fn(),
   clearOrgKnowledge: vi.fn(),
   canManage: vi.fn(() => true),
+  authUser: { id: 'admin-1', role: 'org_admin', org_id: 'org-1' } as { id: string; role: string; org_id?: string },
   downloadOrgKnowledgeFile: vi.fn(),
   orgKnowledgeQueryCalls: [] as Array<{ orgId: unknown; options: Record<string, { value: unknown }> }>,
 }))
@@ -89,7 +90,7 @@ const InputStub = defineComponent({
 })
 
 vi.mock('@/stores/auth', () => ({
-  useAuthStore: () => ({ user: { id: 'admin-1', role: 'org_admin', org_id: 'org-1' } }),
+  useAuthStore: () => ({ user: mocks.authUser }),
 }))
 
 vi.mock('@/stores/uploadProgress', () => ({
@@ -98,6 +99,7 @@ vi.mock('@/stores/uploadProgress', () => ({
 
 vi.mock('@/domain/permissions', () => ({
   canManageOrgKnowledge: mocks.canManage,
+  canManageRAGFlowDatasetInfo: (user: { role?: string } | null | undefined) => user?.role === 'platform_admin',
 }))
 
 vi.mock('@/composables/usePlatformOrgSelection', () => ({
@@ -184,6 +186,14 @@ function mountPage() {
               : null
           },
         }),
+        RAGFlowDatasetInfoDialog: defineComponent({
+          props: ['visible', 'scope', 'targetId', 'targetName'],
+          setup(props) {
+            return () => props.visible
+              ? h('div', { class: 'ragflow-dialog' }, `${props.scope}:${props.targetId}:${props.targetName}`)
+              : null
+          },
+        }),
       },
     },
   })
@@ -205,6 +215,7 @@ function fileDragTransfer(dropEffect = 'none') {
 
 describe('OrgKnowledgePage', () => {
   beforeEach(() => {
+    mocks.authUser = { id: 'admin-1', role: 'org_admin', org_id: 'org-1' }
     mocks.canManage.mockReturnValue(true)
     mocks.downloadOrgKnowledgeFile.mockReset()
     mocks.run.mockReset()
@@ -237,6 +248,23 @@ describe('OrgKnowledgePage', () => {
 
     expect(wrapper.text()).toContain('已用')
     expect(wrapper.text()).toContain('剩余')
+  })
+
+  // 平台管理员需要通过入口查看企业知识库远端 dataset 名称并调整 embedding 模型。
+  it('platform_admin 可以看到企业知识库 RAGFlow 信息入口', async () => {
+    mocks.authUser = { id: 'platform-1', role: 'platform_admin', org_id: undefined }
+    const wrapper = mountPage()
+
+    await wrapper.findAll('button').find(button => button.text().includes('RAGFlow 信息'))!.trigger('click')
+
+    expect(wrapper.find('.ragflow-dialog').text()).toBe('org:org-1:企业知识库')
+  })
+
+  // 企业管理员仍可管理文件，但不能触发 RAGFlow dataset 运维弹框。
+  it('org_admin 看不到企业知识库 RAGFlow 信息入口', () => {
+    const wrapper = mountPage()
+
+    expect(wrapper.text()).not.toContain('RAGFlow 信息')
   })
 
   // 覆盖企业知识库整库清空入口：管理员需二次确认后才会调用清空 mutation。

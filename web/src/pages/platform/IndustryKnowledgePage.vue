@@ -186,6 +186,14 @@
       @confirm="onConfirmClearFiles"
       @cancel="clearFilesDialogOpen = false"
     />
+
+    <RAGFlowDatasetInfoDialog
+      v-if="ragflowDialogTarget"
+      v-model:visible="ragflowDialogOpen"
+      scope="industry"
+      :target-id="ragflowDialogTarget.id"
+      :target-name="ragflowDialogTarget.name"
+    />
   </div>
 </template>
 
@@ -196,6 +204,7 @@ import { NAlert, NButton, NCard, NDataTable, NDatePicker, NInput, NModal, NSpace
 
 import ConfirmActionModal from '@/components/ConfirmActionModal.vue'
 import DataTableList from '@/components/DataTableList.vue'
+import RAGFlowDatasetInfoDialog from '@/components/RAGFlowDatasetInfoDialog.vue'
 import {
   KNOWLEDGE_UPLOAD_MAX_MESSAGE,
   formatKnowledgeBytes,
@@ -215,6 +224,8 @@ import {
   useUploadIndustryKnowledgeFile,
   type IndustryKnowledgeBase,
 } from '@/api/hooks/useIndustryKnowledge'
+import { canManageRAGFlowDatasetInfo } from '@/domain/permissions'
+import { useAuthStore } from '@/stores/auth'
 import { useUploadProgressStore } from '@/stores/uploadProgress'
 import {
   filterKnowledgeUploadFiles,
@@ -224,6 +235,7 @@ import {
 
 // IndustryKnowledgePage 是平台管理员管理行业知识库和库内文件的页面。
 const message = useMessage()
+const auth = useAuthStore()
 const uploadProgress = useUploadProgressStore()
 
 const keyword = ref('')
@@ -231,6 +243,8 @@ const newBaseName = ref('')
 const createDialogOpen = ref(false)
 const apiDocDialogOpen = ref(false)
 const clearFilesDialogOpen = ref(false)
+const ragflowDialogOpen = ref(false)
+const ragflowDialogTarget = ref<IndustryKnowledgeBase | null>(null)
 const selectedBaseId = ref<string | undefined>(undefined)
 const downloading = ref(false)
 const fileKeyword = ref('')
@@ -274,6 +288,8 @@ const industryUploadTokenText = computed(() => {
   return industryUploadToken.value || uploadTokenUnavailableText
 })
 const apiDocCopyDisabled = computed(() => uploadTokenLoading.value || Boolean(uploadTokenError.value))
+// canManageRAGFlowInfo 控制远端 dataset 运维入口；后端接口仍做最终平台管理员校验。
+const canManageRAGFlowInfo = computed(() => canManageRAGFlowDatasetInfo(auth.user))
 // hasSelectedBaseFiles 控制清空入口，避免空行业库触发破坏性请求。
 const hasSelectedBaseFiles = computed(() => (files.value?.total ?? selectedBase.value?.document_count ?? 0) > 0)
 // fileTablePagination 使用后端 total 驱动远程分页；筛选条件变化时回到第一页避免停在空页。
@@ -420,6 +436,12 @@ function closeCreateDialog() {
   newBaseName.value = ''
 }
 
+// openRAGFlowInfo 打开当前行业库的 RAGFlow dataset 信息弹框，不触发 dataset 懒创建。
+function openRAGFlowInfo(row: IndustryKnowledgeBase) {
+  ragflowDialogTarget.value = row
+  ragflowDialogOpen.value = true
+}
+
 async function onCreateBase() {
   const name = newBaseName.value.trim()
   if (!name) {
@@ -530,11 +552,19 @@ const baseColumns: DataTableColumns<IndustryKnowledgeBase> = [
   {
     title: '操作',
     key: 'actions',
-    render: row => h('div', { style: 'display: flex; gap: 8px; flex-wrap: wrap' }, [
-      h(NButton, { size: 'small', type: selectedBaseId.value === row.id ? 'primary' : 'default', onClick: () => { selectedBaseId.value = row.id } }, { default: () => '文件' }),
-      h(NButton, { size: 'small', onClick: () => onRenameBase(row) }, { default: () => '重命名' }),
-      h(NButton, { size: 'small', type: 'error', disabled: deleteBaseMutation.isPending.value, onClick: () => onDeleteBase(row) }, { default: () => '删除' }),
-    ]),
+    render: row => {
+      const actions = [
+        h(NButton, { size: 'small', type: selectedBaseId.value === row.id ? 'primary' : 'default', onClick: () => { selectedBaseId.value = row.id } }, { default: () => '文件' }),
+      ]
+      if (canManageRAGFlowInfo.value) {
+        actions.push(h(NButton, { size: 'small', onClick: () => openRAGFlowInfo(row) }, { default: () => 'RAGFlow 信息' }))
+      }
+      actions.push(
+        h(NButton, { size: 'small', onClick: () => onRenameBase(row) }, { default: () => '重命名' }),
+        h(NButton, { size: 'small', type: 'error', disabled: deleteBaseMutation.isPending.value, onClick: () => onDeleteBase(row) }, { default: () => '删除' }),
+      )
+      return h('div', { style: 'display: flex; gap: 8px; flex-wrap: wrap' }, actions)
+    },
   },
 ]
 

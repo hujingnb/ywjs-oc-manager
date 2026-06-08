@@ -18,6 +18,13 @@
       </template>
       <template #header-extra>
         <div v-if="canManage" class="upload-actions">
+          <n-button
+            v-if="canManageRAGFlowInfo && effectiveOrgId"
+            size="small"
+            @click="ragflowDialogOpen = true"
+          >
+            RAGFlow 信息
+          </n-button>
           <span class="upload-limit">{{ KNOWLEDGE_UPLOAD_MAX_MESSAGE }}</span>
           <n-button
             size="small"
@@ -78,6 +85,14 @@
       @confirm="onConfirmClear"
       @cancel="clearConfirmOpen = false"
     />
+
+    <RAGFlowDatasetInfoDialog
+      v-if="effectiveOrgId"
+      v-model:visible="ragflowDialogOpen"
+      scope="org"
+      :target-id="effectiveOrgId"
+      target-name="企业知识库"
+    />
   </div>
 </template>
 
@@ -97,7 +112,7 @@ import {
   type KnowledgeDocument,
 } from '@/api/hooks/useKnowledge'
 import { usePlatformOrgSelection } from '@/composables/usePlatformOrgSelection'
-import { canManageOrgKnowledge } from '@/domain/permissions'
+import { canManageOrgKnowledge, canManageRAGFlowDatasetInfo } from '@/domain/permissions'
 import { useAuthStore } from '@/stores/auth'
 import { useUploadProgressStore } from '@/stores/uploadProgress'
 import {
@@ -108,6 +123,7 @@ import {
   toKnowledgeUploadItems,
 } from './knowledgeUploadBatch'
 import ConfirmActionModal from '@/components/ConfirmActionModal.vue'
+import RAGFlowDatasetInfoDialog from '@/components/RAGFlowDatasetInfoDialog.vue'
 
 // OrgKnowledgePage 管理组织级共享知识库；文件主库由 RAGFlow 承担，页面只展示扁平 document 列表。
 const props = defineProps<{ orgId?: string }>()
@@ -126,6 +142,8 @@ const {
 const eyebrow = computed(() => (auth.user?.role === 'platform_admin' ? 'Platform · 知识库' : '企业 · 知识库'))
 // canManage 决定上传、删除和重解析入口是否可见，接口层仍执行最终权限校验。
 const canManage = computed(() => canManageOrgKnowledge(auth.user, effectiveOrgId.value))
+// canManageRAGFlowInfo 控制企业知识库远端 dataset 运维入口，仅平台管理员可见。
+const canManageRAGFlowInfo = computed(() => canManageRAGFlowDatasetInfo(auth.user))
 const emptyOrgMessage = computed(() => isPlatformAdmin.value ? '暂无可查看企业' : '当前账号未关联企业')
 
 const keyword = ref('')
@@ -152,6 +170,7 @@ const downloading = ref(false)
 const dragActive = ref(false)
 // clearConfirmOpen 控制整库清空二次确认弹窗，避免误点直接删除全部文件。
 const clearConfirmOpen = ref(false)
+const ragflowDialogOpen = ref(false)
 // tablePagination 使用后端 total 驱动远程分页；搜索条件变化时回到第一页避免空页。
 const tablePagination = computed(() => ({
   page: page.value,

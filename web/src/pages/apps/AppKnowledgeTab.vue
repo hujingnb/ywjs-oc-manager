@@ -16,6 +16,9 @@
     </template>
     <template #header-extra>
       <div v-if="canManage || canEditQuota" class="upload-actions">
+        <n-button v-if="canManageRAGFlowInfo" size="small" @click="ragflowDialogOpen = true">
+          RAGFlow 信息
+        </n-button>
         <n-button v-if="canEditQuota" size="small" @click="openQuotaModal">编辑空间</n-button>
         <template v-if="canManage">
           <span class="upload-limit">{{ KNOWLEDGE_UPLOAD_MAX_MESSAGE }}</span>
@@ -64,6 +67,13 @@
         <p v-if="quotaFeedback" class="state-text" :class="{ danger: quotaError }">{{ quotaFeedback }}</p>
       </n-form>
     </n-modal>
+
+    <RAGFlowDatasetInfoDialog
+      v-model:visible="ragflowDialogOpen"
+      scope="app"
+      :target-id="props.appId"
+      :target-name="ragflowTargetName"
+    />
   </n-card>
 </template>
 
@@ -82,7 +92,7 @@ import {
   useUploadAppKnowledge,
   type KnowledgeDocument,
 } from '@/api/hooks/useKnowledge'
-import { canManageApp, canUpdateAppKnowledgeQuota } from '@/domain/permissions'
+import { canManageApp, canManageRAGFlowDatasetInfo, canUpdateAppKnowledgeQuota } from '@/domain/permissions'
 import { useAuthStore } from '@/stores/auth'
 import { useUploadProgressStore } from '@/stores/uploadProgress'
 import {
@@ -92,6 +102,7 @@ import {
   knowledgeFilesFromInput,
   toKnowledgeUploadItems,
 } from '@/pages/knowledge/knowledgeUploadBatch'
+import RAGFlowDatasetInfoDialog from '@/components/RAGFlowDatasetInfoDialog.vue'
 
 // AppKnowledgeTab 管理单个应用的 RAGFlow 知识库文件，权限来自应用详情注入。
 const props = defineProps<{ appId: string }>()
@@ -116,6 +127,7 @@ const reparseMutation = useReparseAppKnowledge(appIdRef)
 const updateQuotaMutation = useUpdateAppKnowledgeQuota(appIdRef)
 const errorMessage = ref<string>('')
 const showQuotaModal = ref(false)
+const ragflowDialogOpen = ref(false)
 const quotaGB = ref<number>(1)
 const quotaFeedback = ref('')
 const quotaError = ref(false)
@@ -126,6 +138,10 @@ const message = useMessage()
 const canManage = computed(() => canManageApp(auth.user, app?.value))
 // canEditQuota 单独控制容量入口，平台管理员可编辑容量但不一定拥有应用写操作入口。
 const canEditQuota = computed(() => canUpdateAppKnowledgeQuota(auth.user, app?.value))
+// canManageRAGFlowInfo 控制远端 dataset 运维入口，仅平台管理员可见。
+const canManageRAGFlowInfo = computed(() => canManageRAGFlowDatasetInfo(auth.user))
+// ragflowTargetName 给运维弹框展示实例名；注入值缺失时保留稳定兜底文案。
+const ragflowTargetName = computed(() => app?.value?.name || '实例知识库')
 const uploading = computed(() => uploadMutation.isPending.value)
 const deleting = computed(() => deleteMutation.isPending.value)
 const quotaSummary = computed(() => listing.data.value

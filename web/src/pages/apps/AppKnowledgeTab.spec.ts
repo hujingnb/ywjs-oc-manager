@@ -12,7 +12,7 @@ const mocks = vi.hoisted(() => ({
   mutateAsync: vi.fn(),
   updateQuotaMutateAsync: vi.fn(),
   canManage: vi.fn(() => true),
-  authUser: { id: 'user-1', role: 'org_member', org_id: 'org-1' },
+  authUser: { id: 'user-1', role: 'org_member', org_id: 'org-1' } as { id: string; role: string; org_id?: string },
   downloadAppKnowledgeFile: vi.fn(),
   appKnowledgeQueryCalls: [] as Array<{ appId: unknown; options: Record<string, { value: unknown }> }>,
 }))
@@ -176,6 +176,14 @@ function mountTab() {
         NDataTable: DataTableStub,
         NButton: { template: '<button><slot /></button>' },
         NTag: { template: '<span><slot /></span>' },
+        RAGFlowDatasetInfoDialog: defineComponent({
+          props: ['visible', 'scope', 'targetId', 'targetName'],
+          setup(props) {
+            return () => props.visible
+              ? h('div', { class: 'ragflow-dialog' }, `${props.scope}:${props.targetId}:${props.targetName}`)
+              : null
+          },
+        }),
       },
     },
   })
@@ -229,6 +237,24 @@ describe('AppKnowledgeTab', () => {
     const wrapper = mountTab()
 
     expect(wrapper.text()).toContain('编辑空间')
+  })
+
+  // 平台管理员需要通过入口查看实例知识库远端 dataset 名称并调整 embedding 模型。
+  it('platform_admin 可以看到实例知识库 RAGFlow 信息入口', async () => {
+    mocks.authUser = { id: 'platform-1', role: 'platform_admin', org_id: undefined }
+    const wrapper = mountTab()
+
+    await wrapper.findAll('button').find(button => button.text().includes('RAGFlow 信息'))!.trigger('click')
+
+    expect(wrapper.find('.ragflow-dialog').text()).toBe('app:app-1:测试实例')
+  })
+
+  // 企业管理员仍可管理文件或容量，但不能触发 RAGFlow dataset 运维弹框。
+  it('org_admin 看不到实例知识库 RAGFlow 信息入口', () => {
+    mocks.authUser = { id: 'admin-1', role: 'org_admin', org_id: 'org-1' }
+    const wrapper = mountTab()
+
+    expect(wrapper.text()).not.toContain('RAGFlow 信息')
   })
 
   // 覆盖实例知识库列表查询条件：搜索关键词、页码和页大小必须通过响应式参数传给 hook。
