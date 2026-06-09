@@ -46,9 +46,6 @@
           </n-form-item>
           <n-space justify="end">
             <n-button @click="emitVisible(false)">关闭</n-button>
-            <n-button :disabled="!canReparse" :loading="reparseMutation.isPending.value" @click="openReparseConfirm">
-              重新解析失败文件
-            </n-button>
             <n-button type="primary" attr-type="submit" :disabled="!canSubmit || selectedModelUnchanged">
               保存并重新解析
             </n-button>
@@ -67,15 +64,6 @@
       @cancel="confirmOpen = false"
     />
 
-    <ConfirmActionModal
-      :visible="reparseConfirmOpen"
-      title="确认重新解析失败文件"
-      message="将把该知识库下解析失败或已停止的文件重新进入解析流程，不更换 embedding 模型。"
-      confirm-label="确认重新解析"
-      :busy="reparseMutation.isPending.value"
-      @confirm="submitReparse"
-      @cancel="reparseConfirmOpen = false"
-    />
   </n-modal>
 </template>
 
@@ -97,7 +85,6 @@ import {
 import {
   useKnowledgeEmbeddingModelsQuery,
   useRAGFlowDatasetInfoQuery,
-  useReparseFailedRAGFlowDataset,
   useUpdateRAGFlowDatasetEmbeddingModel,
 } from '@/api/hooks/useKnowledge'
 import type { KnowledgeEmbeddingModel, KnowledgeRAGFlowScope } from '@/api/hooks/useKnowledge'
@@ -119,12 +106,10 @@ const scope = toRef(props, 'scope')
 const targetId = toRef(props, 'targetId')
 const selectedModelKey = ref<string | null>(null)
 const confirmOpen = ref(false)
-const reparseConfirmOpen = ref(false)
 
 const infoQuery = useRAGFlowDatasetInfoQuery(scope, targetId, () => props.visible)
 const modelsQuery = useKnowledgeEmbeddingModelsQuery(() => props.visible)
 const mutation = useUpdateRAGFlowDatasetEmbeddingModel(scope, targetId)
-const reparseMutation = useReparseFailedRAGFlowDataset(scope, targetId)
 
 const info = computed(() => infoQuery.data.value)
 const currentModelKey = computed(() => {
@@ -133,8 +118,6 @@ const currentModelKey = computed(() => {
 })
 const canSubmit = computed(() => info.value?.status === 'ok' && modelOptions.value.length > 0)
 const selectedModelUnchanged = computed(() => selectedModelKey.value === null || selectedModelKey.value === currentModelKey.value)
-// 重解析失败文件只要求 dataset 已创建可用，与是否选择/切换模型无关。
-const canReparse = computed(() => info.value?.status === 'ok')
 
 const scopeLabel = computed(() => {
   if (props.scope === 'org') return '企业知识库'
@@ -194,17 +177,6 @@ async function submit() {
   refetchAll()
 }
 
-function openReparseConfirm() {
-  if (!canReparse.value) return
-  reparseConfirmOpen.value = true
-}
-
-async function submitReparse() {
-  await reparseMutation.mutateAsync()
-  reparseConfirmOpen.value = false
-  emit('updated')
-  refetchAll()
-}
 </script>
 
 <style scoped>

@@ -316,28 +316,6 @@ export function useUpdateRAGFlowDatasetEmbeddingModel(
   })
 }
 
-// useReparseFailedRAGFlowDataset 批量重新解析知识库下解析失败/已停止的文件（不更换模型），成功后刷新对应列表状态。
-export function useReparseFailedRAGFlowDataset(
-  scope: Ref<KnowledgeRAGFlowScope>,
-  targetId: Ref<string | undefined>,
-) {
-  const client = useQueryClient()
-  return useMutation({
-    mutationFn: async () => {
-      if (!targetId.value) throw new Error('缺少知识库 ID')
-      return apiRequest<KnowledgeRAGFlowDatasetInfo>(`${ragflowDatasetPath(scope.value, targetId.value)}/reparse-failed`, {
-        method: 'POST',
-      })
-    },
-    onSuccess: () => {
-      void client.invalidateQueries({ queryKey: ragflowDatasetKey(scope.value, targetId.value) })
-      if (scope.value === 'org') void client.invalidateQueries({ queryKey: orgKey(targetId.value) })
-      if (scope.value === 'app') void client.invalidateQueries({ queryKey: appKey(targetId.value) })
-      if (scope.value === 'industry') void client.invalidateQueries({ queryKey: ['industry-knowledge-files', targetId.value] })
-    },
-  })
-}
-
 export function useUploadOrgKnowledge(orgId: Ref<string | undefined>) {
   const client = useQueryClient()
   return useMutation({
