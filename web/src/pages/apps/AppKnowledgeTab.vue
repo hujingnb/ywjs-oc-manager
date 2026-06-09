@@ -37,6 +37,13 @@
         clearable
         style="width: 220px"
       />
+      <n-select
+        v-model:value="status"
+        :options="PARSE_STATUS_FILTER_OPTIONS"
+        clearable
+        placeholder="全部状态"
+        style="width: 160px"
+      />
     </n-space>
 
     <p v-if="quotaSummary" class="state-text">{{ quotaSummary }}</p>
@@ -79,7 +86,7 @@
 
 <script setup lang="ts">
 import { computed, h, inject, ref, watch, type Ref } from 'vue'
-import { NButton, NCard, NDataTable, NForm, NFormItem, NInput, NInputNumber, NModal, NSpace, NTag, useMessage, type DataTableColumns } from 'naive-ui'
+import { NButton, NCard, NDataTable, NForm, NFormItem, NInput, NInputNumber, NModal, NSelect, NSpace, NTag, useMessage, type DataTableColumns } from 'naive-ui'
 
 import { useUpdateAppKnowledgeQuota, type AppDTO } from '@/api/hooks/useApps'
 import {
@@ -102,6 +109,7 @@ import {
   knowledgeFilesFromInput,
   toKnowledgeUploadItems,
 } from '@/pages/knowledge/knowledgeUploadBatch'
+import { parseStatusLabel, parseStatusTagType, PARSE_STATUS_FILTER_OPTIONS } from '@/domain/parseStatus'
 import RAGFlowDatasetInfoDialog from '@/components/RAGFlowDatasetInfoDialog.vue'
 
 // AppKnowledgeTab 管理单个应用的 RAGFlow 知识库文件，权限来自应用详情注入。
@@ -114,12 +122,16 @@ const app = inject<Ref<AppDTO | null>>('app')
 
 const keyword = ref('')
 const normalizedKeyword = computed(() => keyword.value.trim())
+// status 为「解析状态」筛选值，null/空＝不过滤（全部状态）。
+const status = ref<string | null>(null)
+const normalizedStatus = computed(() => status.value ?? undefined)
 const page = ref(1)
 const pageSize = ref(50)
 const listing = useAppKnowledgeQuery(appIdRef, {
   page,
   pageSize,
   keyword: normalizedKeyword,
+  status: normalizedStatus,
 })
 const uploadMutation = useUploadAppKnowledge(appIdRef)
 const deleteMutation = useDeleteAppKnowledge(appIdRef)
@@ -168,7 +180,7 @@ const tablePagination = computed(() => ({
   },
 }))
 
-watch([appIdRef, normalizedKeyword], () => {
+watch([appIdRef, normalizedKeyword, normalizedStatus], () => {
   page.value = 1
 })
 
@@ -188,26 +200,6 @@ function formatTime(iso?: string): string {
 // documentTypeLabel 优先展示后端归一化后的后缀，其次展示 MIME type。
 function documentTypeLabel(row: KnowledgeDocument): string {
   return row.suffix || row.mime_type || '—'
-}
-
-// parseTagType 将 RAGFlow 解析状态映射为标签颜色，未知状态保留默认色便于兼容服务端新增状态。
-function parseTagType(status: string): 'success' | 'warning' | 'error' | 'default' {
-  if (status === 'completed') return 'success'
-  if (status === 'queued' || status === 'running') return 'warning'
-  if (status === 'failed' || status === 'stopped') return 'error'
-  return 'default'
-}
-
-// parseStatusLabel 将 RAGFlow 状态转换为页面文案，未知值直接透出便于排障。
-function parseStatusLabel(status: string): string {
-  const labels: Record<string, string> = {
-    queued: '等待解析',
-    running: '解析中',
-    completed: '已完成',
-    failed: '解析失败',
-    stopped: '已停止',
-  }
-  return labels[status] ?? status
 }
 
 // uploadFiles 把多选或拖拽得到的文件交给全局上传队列；容量不足等动态失败由后端逐个返回。
@@ -337,7 +329,7 @@ const columns: DataTableColumns<KnowledgeDocument> = [
   {
     title: '解析状态', key: 'parse_status',
     render: (row) => h('div', { style: 'display: flex; align-items: center; gap: 8px; flex-wrap: wrap' }, [
-      h(NTag, { type: parseTagType(row.parse_status), size: 'small', bordered: false }, { default: () => parseStatusLabel(row.parse_status) }),
+      h(NTag, { type: parseStatusTagType(row.parse_status), size: 'small', bordered: false }, { default: () => parseStatusLabel(row.parse_status) }),
       row.parse_status === 'running' ? h('span', { class: 'state-text', style: 'margin: 0; font-size: 12px' }, `${row.progress}%`) : null,
       row.last_error ? h('span', { style: 'color: var(--color-danger); font-size: 12px' }, row.last_error) : null,
     ]),
