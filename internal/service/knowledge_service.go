@@ -92,6 +92,8 @@ type KnowledgeStore interface {
 	UpdateRAGFlowDocumentParseStatus(ctx context.Context, arg sqlc.UpdateRAGFlowDocumentParseStatusParams) error
 	// ResetRAGFlowDocumentsParseStatusByDataset 在整库重新解析被 RAGFlow 接受后批量重置本地解析状态。
 	ResetRAGFlowDocumentsParseStatusByDataset(ctx context.Context, datasetID string) error
+	// MarkRAGFlowDocumentManualReparseQueued 人工重解析入队并清空自动重试状态（:exec），写入后通过 GetRAGFlowDocument 读回。
+	MarkRAGFlowDocumentManualReparseQueued(ctx context.Context, id string) error
 	DeleteRAGFlowDocumentMapping(ctx context.Context, id string) error
 	DeleteRAGFlowDatasetMapping(ctx context.Context, id string) error
 	// CreateIndustryKnowledgeBase 创建平台级行业知识库。
@@ -1113,13 +1115,10 @@ func (s *KnowledgeService) reparseDocument(ctx context.Context, dataset sqlc.Rag
 	if err := s.ragflowClient().ParseDocuments(ctx, remoteDatasetID, []string{document.RagflowDocumentID}); err != nil {
 		return KnowledgeDocumentResult{}, fmt.Errorf("触发 RAGFlow 重新解析失败: %w", err)
 	}
-	// UpdateRAGFlowDocumentParseStatus 为 :exec；写入后通过 GetRAGFlowDocument 读回。
-	if err := s.store.UpdateRAGFlowDocumentParseStatus(ctx, sqlc.UpdateRAGFlowDocumentParseStatusParams{
-		ID:          document.ID,
-		ParseStatus: "queued",
-		Progress:    0,
-		LastError:   null.String{},
-	}); err != nil {
+	// 人工重解析走专用 query：除把状态重置为 queued 外，还清空自动重试次数与冷却时间，
+	// 避免历史自动重试状态影响用户显式发起的这次解析。MarkRAGFlowDocumentManualReparseQueued
+	// 为 :exec；写入后通过 GetRAGFlowDocument 读回。
+	if err := s.store.MarkRAGFlowDocumentManualReparseQueued(ctx, document.ID); err != nil {
 		return KnowledgeDocumentResult{}, fmt.Errorf("更新知识库解析状态失败: %w", err)
 	}
 	row, err := s.store.GetRAGFlowDocument(ctx, document.ID)

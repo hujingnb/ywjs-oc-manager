@@ -734,6 +734,28 @@ func TestRAGFlowKnowledgeReparseOnlyFailedOrStopped(t *testing.T) {
 	require.Len(t, rf.parseCalls, 1)
 }
 
+// TestRAGFlowKnowledgeManualReparseResetsAutoRetryState 验证人工重解析会清空自动重试次数和冷却时间。
+func TestRAGFlowKnowledgeManualReparseResetsAutoRetryState(t *testing.T) {
+	// 人工重解析代表用户显式处理失败文件，应清空自动重试次数和冷却时间，避免历史自动重试状态影响人工操作。
+	svc, store, rf := newRAGFlowKnowledgeTestService(t)
+	doc := testDocument(t, "org", "failed.pdf", store.orgDataset.ID)
+	doc.ParseStatus = "failed"                                                           // 只有 failed/stopped 才允许重解析
+	doc.AutoReparseAttempts = 2                                                          // 已累计 2 次自动重试
+	doc.AutoReparseNextAt = null.TimeFrom(time.Date(2026, 6, 9, 10, 30, 0, 0, time.UTC)) // 仍有冷却时间
+	store.docs[doc.ID] = doc
+
+	_, err := svc.ReparseOrgFile(context.Background(), orgKnowledgeAdmin(), testKnowledgeOrg, doc.ID)
+	require.NoError(t, err)
+
+	// 人工重解析必须走清空自动重试状态的专用 query，而不是普通状态更新。
+	assert.Equal(t, []string{doc.ID}, store.manualReparseQueuedIDs)
+	require.Len(t, rf.parseCalls, 1)
+	got := store.docs[doc.ID]
+	assert.Equal(t, "queued", got.ParseStatus)
+	assert.Equal(t, int32(0), got.AutoReparseAttempts)
+	assert.False(t, got.AutoReparseNextAt.Valid)
+}
+
 // TestRuntimeAddWritesOnlyCurrentAppDataset 验证 Hermes 写入报告只能落到当前实例 dataset，不会加载组织 dataset。
 func TestRuntimeAddWritesOnlyCurrentAppDataset(t *testing.T) {
 	svc, store, rf := newRAGFlowKnowledgeTestService(t)
@@ -1048,6 +1070,7 @@ type fakeKnowledgeStore struct {
 	nextDocument                string
 	now                         time.Time
 	events                      *[]string
+	manualReparseQueuedIDs      []string
 }
 
 // createdDatasetCall 记录 CreateRAGFlowOrgDatasetMapping / CreateRAGFlowAppDatasetMapping 调用参数。
@@ -1724,6 +1747,23 @@ func (s *fakeKnowledgeStore) ResetRAGFlowDocumentsParseStatusByDataset(_ context
 		doc.ParseStatus = "queued"
 		doc.Progress = 0
 		doc.LastError = null.String{}
+		doc.AutoReparseAttempts = 0
+		doc.AutoReparseNextAt = null.Time{}
+		doc.UpdatedAt = s.now
+		s.docs[id] = doc
+	}
+	return nil
+}
+
+// MarkRAGFlowDocumentManualReparseQueued 为 :exec；stub 记录调用并清空自动重试状态，模拟人工重解析重置。
+func (s *fakeKnowledgeStore) MarkRAGFlowDocumentManualReparseQueued(_ context.Context, id string) error {
+	s.manualReparseQueuedIDs = append(s.manualReparseQueuedIDs, id)
+	if doc, ok := s.docs[id]; ok {
+		doc.ParseStatus = "queued"
+		doc.Progress = 0
+		doc.LastError = null.String{}
+		doc.AutoReparseAttempts = 0
+		doc.AutoReparseNextAt = null.Time{}
 		doc.UpdatedAt = s.now
 		s.docs[id] = doc
 	}
