@@ -50,6 +50,11 @@ type knowledgeServiceStub struct {
 	updateEmbeddingModelScope    string
 	updateEmbeddingModelTargetID string
 	updateEmbeddingModelInput    service.KnowledgeEmbeddingModelInput
+
+	reparseFailedResult   service.KnowledgeRAGFlowDatasetInfoResult
+	reparseFailedErr      error
+	reparseFailedScope    string
+	reparseFailedTargetID string
 }
 
 func (s *knowledgeServiceStub) ListOrg(_ context.Context, _ auth.Principal, _ string, _, _ int32, _, _ string) (service.KnowledgeListResult, error) {
@@ -118,6 +123,12 @@ func (s *knowledgeServiceStub) UpdateKnowledgeEmbeddingModel(_ context.Context, 
 	s.updateEmbeddingModelTargetID = targetID
 	s.updateEmbeddingModelInput = input
 	return s.updateEmbeddingModelResult, s.updateEmbeddingModelErr
+}
+
+func (s *knowledgeServiceStub) ReparseFailedKnowledgeDataset(_ context.Context, _ auth.Principal, scope, targetID string) (service.KnowledgeRAGFlowDatasetInfoResult, error) {
+	s.reparseFailedScope = scope
+	s.reparseFailedTargetID = targetID
+	return s.reparseFailedResult, s.reparseFailedErr
 }
 
 // trackedReadCloser 用于测试下载流在响应写出后是否被负责写响应的代码关闭。
@@ -438,4 +449,39 @@ func TestKnowledgePatchAppEmbeddingModelRejectsMissingName(t *testing.T) {
 	assert.Contains(t, w.Body.String(), `"code":"BAD_REQUEST"`)
 	assert.Contains(t, w.Body.String(), "模型名称不能为空")
 	assert.Empty(t, stub.updateEmbeddingModelTargetID)
+}
+
+// TestKnowledgeReparseFailedOrgRoutesToService 验证企业「重新解析失败文件」路由用 org scope 和企业 ID 调用 service，并返回 202。
+func TestKnowledgeReparseFailedOrgRoutesToService(t *testing.T) {
+	stub := &knowledgeServiceStub{reparseFailedResult: service.KnowledgeRAGFlowDatasetInfoResult{
+		Scope: service.KnowledgeRAGFlowScopeOrg, TargetID: "org-1", TargetName: "企业一", Status: "ok",
+	}}
+	router := newKnowledgeTestRouter(t, stub)
+
+	w := httptest.NewRecorder()
+	req := httptest.NewRequest(http.MethodPost, "/api/v1/organizations/org-1/knowledge/ragflow-dataset/reparse-failed", nil)
+	req = withPrincipal(req, auth.Principal{UserID: "u-admin", Role: domain.UserRolePlatformAdmin})
+	router.ServeHTTP(w, req)
+
+	require.Equal(t, http.StatusAccepted, w.Code)
+	assert.Equal(t, service.KnowledgeRAGFlowScopeOrg, stub.reparseFailedScope)
+	assert.Equal(t, "org-1", stub.reparseFailedTargetID)
+	assert.Contains(t, w.Body.String(), `"status":"ok"`)
+}
+
+// TestKnowledgeReparseFailedAppRoutesToService 验证应用「重新解析失败文件」路由用 app scope 和实例 ID 调用 service。
+func TestKnowledgeReparseFailedAppRoutesToService(t *testing.T) {
+	stub := &knowledgeServiceStub{reparseFailedResult: service.KnowledgeRAGFlowDatasetInfoResult{
+		Scope: service.KnowledgeRAGFlowScopeApp, TargetID: "app-1", TargetName: "实例一", Status: "ok",
+	}}
+	router := newKnowledgeTestRouter(t, stub)
+
+	w := httptest.NewRecorder()
+	req := httptest.NewRequest(http.MethodPost, "/api/v1/apps/app-1/knowledge/ragflow-dataset/reparse-failed", nil)
+	req = withPrincipal(req, auth.Principal{UserID: "u-admin", Role: domain.UserRolePlatformAdmin})
+	router.ServeHTTP(w, req)
+
+	require.Equal(t, http.StatusAccepted, w.Code)
+	assert.Equal(t, service.KnowledgeRAGFlowScopeApp, stub.reparseFailedScope)
+	assert.Equal(t, "app-1", stub.reparseFailedTargetID)
 }

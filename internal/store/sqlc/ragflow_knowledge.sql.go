@@ -916,6 +916,61 @@ func (q *Queries) ListRAGFlowDocumentsNeedingRefresh(ctx context.Context, limit 
 	return items, nil
 }
 
+const listRAGFlowFailedOrStoppedDocumentsByDataset = `-- name: ListRAGFlowFailedOrStoppedDocumentsByDataset :many
+SELECT id, dataset_id, scope_type, app_id, ragflow_document_id, name, size_bytes, mime_type, suffix, parse_status, progress, last_error, created_by, created_at, updated_at, org_id, industry_knowledge_base_id, industry_document_base_key, industry_document_name_key, auto_reparse_attempts, auto_reparse_next_at
+FROM ragflow_documents
+WHERE dataset_id = ?
+  AND parse_status IN ('failed', 'stopped')
+ORDER BY created_at DESC, id DESC
+`
+
+// 列出指定 dataset 下解析失败或已停止的全部 document，供「批量重新解析失败文件」运维操作收集远端
+// 文档 ID 并逐个入队。不分页：失败文件总量有限，且批量重解析需要一次拿全，避免漏掉任何待修复文档。
+func (q *Queries) ListRAGFlowFailedOrStoppedDocumentsByDataset(ctx context.Context, datasetID string) ([]RagflowDocument, error) {
+	rows, err := q.db.QueryContext(ctx, listRAGFlowFailedOrStoppedDocumentsByDataset, datasetID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []RagflowDocument{}
+	for rows.Next() {
+		var i RagflowDocument
+		if err := rows.Scan(
+			&i.ID,
+			&i.DatasetID,
+			&i.ScopeType,
+			&i.AppID,
+			&i.RagflowDocumentID,
+			&i.Name,
+			&i.SizeBytes,
+			&i.MimeType,
+			&i.Suffix,
+			&i.ParseStatus,
+			&i.Progress,
+			&i.LastError,
+			&i.CreatedBy,
+			&i.CreatedAt,
+			&i.UpdatedAt,
+			&i.OrgID,
+			&i.IndustryKnowledgeBaseID,
+			&i.IndustryDocumentBaseKey,
+			&i.IndustryDocumentNameKey,
+			&i.AutoReparseAttempts,
+			&i.AutoReparseNextAt,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Close(); err != nil {
+		return nil, err
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
 const listRAGFlowIndustryDocuments = `-- name: ListRAGFlowIndustryDocuments :many
 SELECT id, dataset_id, scope_type, app_id, ragflow_document_id, name, size_bytes, mime_type, suffix, parse_status, progress, last_error, created_by, created_at, updated_at, org_id, industry_knowledge_base_id, industry_document_base_key, industry_document_name_key, auto_reparse_attempts, auto_reparse_next_at
 FROM ragflow_documents

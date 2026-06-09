@@ -756,6 +756,70 @@ func TestRAGFlowKnowledgeManualReparseResetsAutoRetryState(t *testing.T) {
 	assert.False(t, got.AutoReparseNextAt.Valid)
 }
 
+// TestReparseFailedKnowledgeDatasetReparsesOnlyFailedOrStopped 验证批量重解析只提交 failed/stopped 文件，已完成文件不受影响。
+func TestReparseFailedKnowledgeDatasetReparsesOnlyFailedOrStopped(t *testing.T) {
+	svc, store, rf := newRAGFlowKnowledgeTestService(t)
+	// 同一 dataset 下混合三种状态：completed 不应被重解析，failed/stopped 应被批量提交。
+	store.docs["doc-done"] = makeKnowledgeDoc("doc-done", store.orgDataset.ID, "remote-done", "completed", 100)
+	store.docs["doc-failed"] = makeKnowledgeDoc("doc-failed", store.orgDataset.ID, "remote-failed", "failed", 0)
+	store.docs["doc-stopped"] = makeKnowledgeDoc("doc-stopped", store.orgDataset.ID, "remote-stopped", "stopped", 0)
+	rf.datasetDetail = ragflow.Dataset{ID: testRemoteOrgDatasetID, Name: "oc-org", DocNum: 3, ChunkNum: 5}
+
+	result, err := svc.ReparseFailedKnowledgeDataset(context.Background(), platformKnowledgePrincipal(), KnowledgeRAGFlowScopeOrg, testKnowledgeOrg)
+	require.NoError(t, err)
+
+	assert.Equal(t, "ok", result.Status)
+	// 只触发一次远端解析，且 documentIDs 恰好是 failed/stopped 的远端 ID（map 迭代无序，用 ElementsMatch）。
+	require.Len(t, rf.parseCalls, 1)
+	assert.Equal(t, testRemoteOrgDatasetID, rf.parseCalls[0].datasetID)
+	assert.ElementsMatch(t, []string{"remote-failed", "remote-stopped"}, rf.parseCalls[0].documentIDs)
+	// 只有 failed/stopped 走人工重解析入队，completed 文件不入队、状态保持不变。
+	assert.ElementsMatch(t, []string{"doc-failed", "doc-stopped"}, store.manualReparseQueuedIDs)
+	assert.Equal(t, "queued", store.docs["doc-failed"].ParseStatus)
+	assert.Equal(t, "queued", store.docs["doc-stopped"].ParseStatus)
+	assert.Equal(t, "completed", store.docs["doc-done"].ParseStatus)
+}
+
+// TestReparseFailedKnowledgeDatasetForbiddenForNonPlatformAdmin 验证非平台管理员无权批量重解析，且不触发任何远端调用。
+func TestReparseFailedKnowledgeDatasetForbiddenForNonPlatformAdmin(t *testing.T) {
+	svc, store, rf := newRAGFlowKnowledgeTestService(t)
+	store.docs["doc-failed"] = makeKnowledgeDoc("doc-failed", store.orgDataset.ID, "remote-failed", "failed", 0)
+
+	_, err := svc.ReparseFailedKnowledgeDataset(context.Background(), orgKnowledgeAdmin(), KnowledgeRAGFlowScopeOrg, testKnowledgeOrg)
+
+	require.ErrorIs(t, err, ErrKnowledgeForbidden)
+	assert.Empty(t, rf.parseCalls)
+	assert.Empty(t, store.manualReparseQueuedIDs)
+}
+
+// TestReparseFailedKnowledgeDatasetNoFailedDocsIsNoop 验证没有失败/停止文件时为幂等空操作：不调用远端解析，仍返回当前信息。
+func TestReparseFailedKnowledgeDatasetNoFailedDocsIsNoop(t *testing.T) {
+	svc, store, rf := newRAGFlowKnowledgeTestService(t)
+	store.docs["doc-done"] = makeKnowledgeDoc("doc-done", store.orgDataset.ID, "remote-done", "completed", 100)
+	rf.datasetDetail = ragflow.Dataset{ID: testRemoteOrgDatasetID, Name: "oc-org", DocNum: 1, ChunkNum: 3}
+
+	result, err := svc.ReparseFailedKnowledgeDataset(context.Background(), platformKnowledgePrincipal(), KnowledgeRAGFlowScopeOrg, testKnowledgeOrg)
+	require.NoError(t, err)
+
+	assert.Equal(t, "ok", result.Status)
+	assert.Empty(t, rf.parseCalls)
+	assert.Empty(t, store.manualReparseQueuedIDs)
+	assert.Equal(t, "completed", store.docs["doc-done"].ParseStatus)
+}
+
+// TestReparseFailedKnowledgeDatasetDoesNotRequeueWhenRemoteRejects 验证 RAGFlow 未接受重解析时不改本地状态，避免 UI 误报解析中。
+func TestReparseFailedKnowledgeDatasetDoesNotRequeueWhenRemoteRejects(t *testing.T) {
+	svc, store, rf := newRAGFlowKnowledgeTestService(t)
+	store.docs["doc-failed"] = makeKnowledgeDoc("doc-failed", store.orgDataset.ID, "remote-failed", "failed", 0)
+	rf.parseErr = errors.New("ragflow busy") // 远端拒绝整批重解析
+
+	_, err := svc.ReparseFailedKnowledgeDataset(context.Background(), platformKnowledgePrincipal(), KnowledgeRAGFlowScopeOrg, testKnowledgeOrg)
+	require.Error(t, err)
+
+	assert.Empty(t, store.manualReparseQueuedIDs)
+	assert.Equal(t, "failed", store.docs["doc-failed"].ParseStatus)
+}
+
 // TestRuntimeAddWritesOnlyCurrentAppDataset 验证 Hermes 写入报告只能落到当前实例 dataset，不会加载组织 dataset。
 func TestRuntimeAddWritesOnlyCurrentAppDataset(t *testing.T) {
 	svc, store, rf := newRAGFlowKnowledgeTestService(t)
@@ -1753,6 +1817,21 @@ func (s *fakeKnowledgeStore) ResetRAGFlowDocumentsParseStatusByDataset(_ context
 		s.docs[id] = doc
 	}
 	return nil
+}
+
+// ListRAGFlowFailedOrStoppedDocumentsByDataset 返回指定 dataset 下处于 failed/stopped 的文件，模拟批量重解析的取数。
+func (s *fakeKnowledgeStore) ListRAGFlowFailedOrStoppedDocumentsByDataset(_ context.Context, datasetID string) ([]sqlc.RagflowDocument, error) {
+	items := make([]sqlc.RagflowDocument, 0, len(s.docs))
+	for _, doc := range s.docs {
+		if doc.DatasetID != datasetID {
+			continue
+		}
+		if doc.ParseStatus != "failed" && doc.ParseStatus != "stopped" {
+			continue
+		}
+		items = append(items, doc)
+	}
+	return items, nil
 }
 
 // MarkRAGFlowDocumentManualReparseQueued 为 :exec；stub 记录调用并清空自动重试状态，模拟人工重解析重置。

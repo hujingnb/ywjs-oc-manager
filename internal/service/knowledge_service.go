@@ -92,6 +92,8 @@ type KnowledgeStore interface {
 	UpdateRAGFlowDocumentParseStatus(ctx context.Context, arg sqlc.UpdateRAGFlowDocumentParseStatusParams) error
 	// ResetRAGFlowDocumentsParseStatusByDataset 在整库重新解析被 RAGFlow 接受后批量重置本地解析状态。
 	ResetRAGFlowDocumentsParseStatusByDataset(ctx context.Context, datasetID string) error
+	// ListRAGFlowFailedOrStoppedDocumentsByDataset 列出指定 dataset 下解析失败/已停止的文件，供批量重解析收集远端文档 ID。
+	ListRAGFlowFailedOrStoppedDocumentsByDataset(ctx context.Context, datasetID string) ([]sqlc.RagflowDocument, error)
 	// MarkRAGFlowDocumentManualReparseQueued 人工重解析入队并清空自动重试状态（:exec），写入后通过 GetRAGFlowDocument 读回。
 	MarkRAGFlowDocumentManualReparseQueued(ctx context.Context, id string) error
 	DeleteRAGFlowDocumentMapping(ctx context.Context, id string) error
@@ -623,6 +625,51 @@ func (s *KnowledgeService) UpdateKnowledgeEmbeddingModel(ctx context.Context, pr
 	}
 	if err := s.store.ResetRAGFlowDocumentsParseStatusByDataset(ctx, dataset.ID); err != nil {
 		return KnowledgeRAGFlowDatasetInfoResult{}, fmt.Errorf("重置知识库文件解析状态失败: %w", err)
+	}
+	remote, err := s.ragflowClient().GetDataset(ctx, remoteID)
+	if err != nil {
+		return KnowledgeRAGFlowDatasetInfoResult{Scope: scope, TargetID: targetID, TargetName: target.Name, Status: "error", ErrorMessage: err.Error()}, nil
+	}
+	return s.toKnowledgeRAGFlowDatasetInfo(scope, targetID, target.Name, dataset, remote), nil
+}
+
+// ReparseFailedKnowledgeDataset 把指定知识库下解析失败或已停止的文件批量重新提交 RAGFlow 解析，不更换 embedding 模型。
+// 业务场景：上游 embedding 模型/配置修复后，平台管理员一键清理因临时原因失败的存量文件；只处理 failed/stopped，
+// 避免无谓重跑已成功文件而浪费 embedding 调用。无待处理文件时返回当前信息、保持幂等。
+func (s *KnowledgeService) ReparseFailedKnowledgeDataset(ctx context.Context, principal auth.Principal, scope, targetID string) (KnowledgeRAGFlowDatasetInfoResult, error) {
+	if !auth.CanManageKnowledgeRAGFlowDataset(principal) {
+		return KnowledgeRAGFlowDatasetInfoResult{}, ErrKnowledgeForbidden
+	}
+	target, dataset, err := s.resolveKnowledgeRAGFlowTarget(ctx, scope, targetID)
+	if err != nil {
+		if errors.Is(err, sql.ErrNoRows) {
+			return KnowledgeRAGFlowDatasetInfoResult{}, ErrNotFound
+		}
+		return KnowledgeRAGFlowDatasetInfoResult{}, err
+	}
+	remoteID, err := requireRemoteDatasetID(dataset)
+	if err != nil {
+		return KnowledgeRAGFlowDatasetInfoResult{}, err
+	}
+	documents, err := s.store.ListRAGFlowFailedOrStoppedDocumentsByDataset(ctx, dataset.ID)
+	if err != nil {
+		return KnowledgeRAGFlowDatasetInfoResult{}, fmt.Errorf("查询待重解析文件失败: %w", err)
+	}
+	if len(documents) > 0 {
+		remoteIDs := make([]string, 0, len(documents))
+		for _, document := range documents {
+			remoteIDs = append(remoteIDs, document.RagflowDocumentID)
+		}
+		// 先让 RAGFlow 接受整批重解析，成功后再逐个重置本地状态，避免本地先入队但远端未受理导致状态不一致。
+		if err := s.ragflowClient().ParseDocuments(ctx, remoteID, remoteIDs); err != nil {
+			return KnowledgeRAGFlowDatasetInfoResult{}, fmt.Errorf("触发 RAGFlow 重新解析失败: %w", err)
+		}
+		// 复用单文件人工重解析的入队语义：状态置 queued 并清空自动重试次数/冷却，后续交刷新任务推进。
+		for _, document := range documents {
+			if err := s.store.MarkRAGFlowDocumentManualReparseQueued(ctx, document.ID); err != nil {
+				return KnowledgeRAGFlowDatasetInfoResult{}, fmt.Errorf("更新知识库文件解析状态失败: %w", err)
+			}
+		}
 	}
 	remote, err := s.ragflowClient().GetDataset(ctx, remoteID)
 	if err != nil {

@@ -174,6 +174,9 @@ type Querier interface {
 	// 远端 dataset 尚未创建（ragflow_dataset_id IS NULL）的文档不会出现：
 	// 此类文档此时本就无法从 RAGFlow 拉取状态，等 dataset 创建完成后再轮询即可。
 	ListRAGFlowDocumentsNeedingRefresh(ctx context.Context, limit int32) ([]ListRAGFlowDocumentsNeedingRefreshRow, error)
+	// 列出指定 dataset 下解析失败或已停止的全部 document，供「批量重新解析失败文件」运维操作收集远端
+	// 文档 ID 并逐个入队。不分页：失败文件总量有限，且批量重解析需要一次拿全，避免漏掉任何待修复文档。
+	ListRAGFlowFailedOrStoppedDocumentsByDataset(ctx context.Context, datasetID string) ([]RagflowDocument, error)
 	// 分页列出行业知识库文件，支持按解析状态、文件名和创建时间过滤。
 	ListRAGFlowIndustryDocuments(ctx context.Context, arg ListRAGFlowIndustryDocumentsParams) ([]RagflowDocument, error)
 	ListReadyJobs(ctx context.Context, limit int32) ([]Job, error)

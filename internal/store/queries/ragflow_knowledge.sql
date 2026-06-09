@@ -161,6 +161,15 @@ SELECT *
 FROM ragflow_documents
 WHERE dataset_id = ? AND ragflow_document_id = ?;
 
+-- name: ListRAGFlowFailedOrStoppedDocumentsByDataset :many
+-- 列出指定 dataset 下解析失败或已停止的全部 document，供「批量重新解析失败文件」运维操作收集远端
+-- 文档 ID 并逐个入队。不分页：失败文件总量有限，且批量重解析需要一次拿全，避免漏掉任何待修复文档。
+SELECT *
+FROM ragflow_documents
+WHERE dataset_id = ?
+  AND parse_status IN ('failed', 'stopped')
+ORDER BY created_at DESC, id DESC;
+
 -- name: UpdateRAGFlowDocumentParseStatus :exec
 -- 回写解析状态、进度和错误；状态值由 service 层从 RAGFlow run 值归一化。
 UPDATE ragflow_documents
