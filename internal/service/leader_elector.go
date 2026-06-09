@@ -31,7 +31,12 @@ type LeaderElector struct {
 
 // NewLeaderElector 创建选举器。token 应在副本生命周期内唯一稳定(如启动时生成的 UUID),
 // 以便 Refresh/Release 能凭 token 识别"锁是否仍归本副本"。
+// interval 必须小于 lease,否则锁可能在两次续租间过期、导致领导权抖动甚至双 leader;
+// 调用方传入非法值(<=0 或 >=lease)时兜底收敛为 lease/3,避免误配置酿成脑裂。
 func NewLeaderElector(locker leaderLocker, key, token string, lease, interval time.Duration) *LeaderElector {
+	if interval <= 0 || interval >= lease {
+		interval = lease / 3
+	}
 	return &LeaderElector{
 		locker:   locker,
 		key:      key,

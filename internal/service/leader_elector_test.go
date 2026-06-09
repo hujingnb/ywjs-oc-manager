@@ -57,6 +57,13 @@ func (f *fakeLeaderLocker) dropHolder() {
 	f.holder = ""
 }
 
+// currentHolder 返回当前持锁 token,供测试断言锁是否已被释放。
+func (f *fakeLeaderLocker) currentHolder() string {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	return f.holder
+}
+
 // testLogger 返回一个丢弃输出的 slog.Logger,避免测试噪声。
 func testLogger() *slog.Logger {
 	return slog.New(slog.NewTextHandler(io.Discard, nil))
@@ -124,5 +131,28 @@ func TestLeaderElector(t *testing.T) {
 		locker.dropHolder()
 
 		require.Eventually(t, e2.IsLeader, time.Second, 5*time.Millisecond, "holder 清空后 elector2 应接管成为 leader")
+	})
+
+	// ReleasesOnShutdown:ctx 取消后 Run 退出时,在位 leader 应主动 Release 锁(holder 清空),
+	// 让其它副本无需等租约自然过期即可立即接管。这条覆盖关键的快速接管路径。
+	t.Run("ReleasesOnShutdown", func(t *testing.T) {
+		locker := &fakeLeaderLocker{}
+		e := NewLeaderElector(locker, "leader/key", "token-1", lease, interval)
+
+		ctx, cancel := context.WithCancel(context.Background())
+		done := make(chan struct{})
+		go func() { _ = e.Run(ctx, testLogger()); close(done) }()
+
+		require.Eventually(t, e.IsLeader, time.Second, 5*time.Millisecond, "elector 应先成为 leader")
+
+		cancel()
+		select {
+		case <-done:
+		case <-time.After(time.Second):
+			t.Fatal("Run 未在 ctx 取消后及时退出")
+		}
+
+		assert.Equal(t, "", locker.currentHolder(), "leader 退出时应主动释放锁,holder 应被清空")
+		assert.False(t, e.IsLeader(), "退出后不应再自认为 leader")
 	})
 }
