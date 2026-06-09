@@ -4,7 +4,6 @@ import (
 	"context"
 	"fmt"
 	"strings"
-	"time"
 
 	"github.com/guregu/null/v5"
 
@@ -19,24 +18,12 @@ type RagflowParseStatusRefresherStore interface {
 	ListRAGFlowDocumentsNeedingRefresh(ctx context.Context, limit int32) ([]sqlc.ListRAGFlowDocumentsNeedingRefreshRow, error)
 	// UpdateRAGFlowDocumentParseStatus 回写最新的 parse_status / progress / last_error（:exec）。
 	UpdateRAGFlowDocumentParseStatus(ctx context.Context, arg sqlc.UpdateRAGFlowDocumentParseStatusParams) error
-	// ListRAGFlowDocumentsDueForAutoReparse 找出已到冷却时间、可自动重解析的 failed 文档。
-	ListRAGFlowDocumentsDueForAutoReparse(ctx context.Context, limit int32) ([]sqlc.ListRAGFlowDocumentsDueForAutoReparseRow, error)
-	// MarkRAGFlowDocumentFailedWithAutoReparse 写入失败状态和下一次自动重试时间。
-	MarkRAGFlowDocumentFailedWithAutoReparse(ctx context.Context, arg sqlc.MarkRAGFlowDocumentFailedWithAutoReparseParams) error
-	// MarkRAGFlowDocumentAutoReparseQueued 在自动重解析提交成功后把文档重新置为 queued。
-	MarkRAGFlowDocumentAutoReparseQueued(ctx context.Context, id string) error
-	// MarkRAGFlowDocumentAutoReparseSubmitFailed 在自动重解析「提交」失败时累计一次尝试并退避，
-	// 借 auto_reparse_attempts 上限实现有界放弃，避免持续提交失败导致无限循环。
-	MarkRAGFlowDocumentAutoReparseSubmitFailed(ctx context.Context, arg sqlc.MarkRAGFlowDocumentAutoReparseSubmitFailedParams) error
 }
 
 // RagflowParseStatusRefreshClient 是后台任务所需的 RAGFlow 操作子集：
-// ListDocuments 查询解析状态，ParseDocuments 触发到期失败文档的自动重解析；
-// 仅暴露后台任务必需的最小操作面，不引入其它写操作。
+// 仅 ListDocuments 用于查询解析状态。失败重解析已收口到独立的异常自愈任务，刷新任务不再触发解析。
 type RagflowParseStatusRefreshClient interface {
 	ListDocuments(ctx context.Context, datasetID string, page, pageSize int32, keywords, run string) ([]ragflow.Document, int32, error)
-	// ParseDocuments 对指定远端 dataset 下的 document 触发 RAGFlow 重新解析。
-	ParseDocuments(ctx context.Context, datasetID string, documentIDs []string) error
 }
 
 const (
@@ -56,8 +43,6 @@ type RagflowParseStatusRefresher struct {
 	ragflow   RagflowParseStatusRefreshClient
 	batchSize int32
 	pageSize  int32
-	// now 注入时间源便于测试控制冷却时间计算。
-	now func() time.Time
 }
 
 // NewRagflowParseStatusRefresher 创建后台轮询任务实例。
@@ -67,7 +52,6 @@ func NewRagflowParseStatusRefresher(store RagflowParseStatusRefresherStore, clie
 		ragflow:   client,
 		batchSize: ragflowRefresherDefaultBatchSize,
 		pageSize:  ragflowRefresherDefaultPageSize,
-		now:       time.Now,
 	}
 }
 
@@ -84,22 +68,11 @@ func (r *RagflowParseStatusRefresher) SetPageSize(n int32) {
 	}
 }
 
-// SetNowFunc 注入自定义时间源，仅供测试控制冷却时间计算。
-func (r *RagflowParseStatusRefresher) SetNowFunc(fn func() time.Time) {
-	if fn != nil {
-		r.now = fn
-	}
-}
-
-// Tick 执行单轮刷新，分两个阶段：先回刷 queued/running 文档的最新状态，
-// 再对已到冷却时间的模型过载失败文档触发自动重解析。
-// 返回的错误仅用于 reconciler 日志输出；任一阶段失败不阻断另一阶段。
+// Tick 执行单轮刷新：回刷 queued/running 文档的最新解析状态。
+// 失败重解析（含过载、卡死）已统一收口到独立的异常自愈任务，刷新任务回归纯状态同步。
+// 返回的错误仅用于 reconciler 日志输出。
 func (r *RagflowParseStatusRefresher) Tick(ctx context.Context) error {
-	firstErr := r.refreshQueuedAndRunningDocuments(ctx)
-	if err := r.autoReparseDueFailedDocuments(ctx); err != nil && firstErr == nil {
-		firstErr = err
-	}
-	return firstErr
+	return r.refreshQueuedAndRunningDocuments(ctx)
 }
 
 // refreshQueuedAndRunningDocuments 回刷 queued/running 文档的最新解析状态（原 Tick 主体逻辑）。
@@ -202,20 +175,10 @@ func (r *RagflowParseStatusRefresher) applyRemoteStatus(ctx context.Context, row
 	}
 	// 解析失败时，把 RAGFlow 返回的真实失败原因（progress_msg 尾部错误行，如 embedding 报错）
 	// 写入 last_error 供前端在「解析失败」时展示；其它状态清空 last_error，避免历史错误残留。
+	// 失败后的自动重解析（含过载、卡死恢复）由独立的异常自愈任务负责，刷新任务只如实回写状态。
 	lastErr := null.String{}
 	if status == "failed" {
 		lastErr = null.StringFrom(extractRAGFlowError(remote.ProgressMsg))
-		// 模型服务临时过载属于可自动恢复的上游故障：记录失败的同时安排下一次自动重解析，
-		// 由 autoReparseDueFailedDocuments 在冷却到期后重新提交，避免无谓占用人工排障。
-		if isRAGFlowAutoReparseError(lastErr.String) {
-			_ = r.store.MarkRAGFlowDocumentFailedWithAutoReparse(ctx, sqlc.MarkRAGFlowDocumentFailedWithAutoReparseParams{
-				Progress:          progress,
-				LastError:         lastErr,
-				AutoReparseNextAt: autoReparseNextAt(row.AutoReparseAttempts, r.now()),
-				ID:                row.ID,
-			})
-			return
-		}
 	}
 	_ = r.store.UpdateRAGFlowDocumentParseStatus(ctx, sqlc.UpdateRAGFlowDocumentParseStatusParams{
 		ID:          row.ID,
@@ -223,37 +186,6 @@ func (r *RagflowParseStatusRefresher) applyRemoteStatus(ctx context.Context, row
 		Progress:    progress,
 		LastError:   lastErr,
 	})
-}
-
-// ragflowAutoReparseMaxAttempts 是单个文档允许的自动重试次数上限：达到后不再安排自动重试，
-// 需人工介入。该上限与 sqlc 查询 MarkRAGFlowDocumentAutoReparseQueued / ListRAGFlowDocumentsDueForAutoReparse
-// 中的 `auto_reparse_attempts < 3` 条件保持一致。
-const ragflowAutoReparseMaxAttempts int32 = 3
-
-// isRAGFlowAutoReparseError 判断失败原因是否属于「模型服务临时过载」白名单。
-// 仅这类临时上游故障适合自动重试；文件损坏 / 不支持等错误不在其列，需人工处理。
-func isRAGFlowAutoReparseError(msg string) bool {
-	lower := strings.ToLower(msg)
-	return strings.Contains(lower, "model service overloaded") ||
-		strings.Contains(lower, "error code: 503") ||
-		strings.Contains(lower, "code: 50505")
-}
-
-// autoReparseNextAt 按已成功提交的自动重试次数计算下一次允许重试的时间，采用递增退避；
-// 达到次数上限后返回无效 null.Time 表示不再自动重试。
-func autoReparseNextAt(attempts int32, now time.Time) null.Time {
-	if attempts >= ragflowAutoReparseMaxAttempts {
-		return null.Time{}
-	}
-	switch attempts {
-	case 0:
-		// 首次失败立即可重试：next_at = now，可能在同一轮或下一轮 tick 被自动重解析阶段提交。
-		return null.TimeFrom(now)
-	case 1:
-		return null.TimeFrom(now.Add(10 * time.Minute))
-	default: // attempts == 2：第三次（最后一次）重试前等待更久
-		return null.TimeFrom(now.Add(30 * time.Minute))
-	}
 }
 
 // isRAGFlowDocBusyError 判断 RAGFlow 是否因「文档正在解析中」拒绝重新解析
@@ -265,47 +197,6 @@ func isRAGFlowDocBusyError(err error) bool {
 		return false
 	}
 	return strings.Contains(strings.ToLower(err.Error()), "being processed")
-}
-
-// autoReparseDueFailedDocuments 扫描已到冷却时间的模型过载失败文档，逐个重新提交 RAGFlow 解析。
-//
-// 逐文档（而非按 dataset 整批）提交：整批提交时，组内只要有一个文档处于 RAGFlow「解析中」，整批
-// 调用就会被拒，导致同 dataset 其它文档一起被卡、且每轮无限重试（线上死循环根因）。逐个提交后，
-// 每个文档的结果独立处理：
-//   - 成功，或「正在解析中」：该文档已进入/已在 RAGFlow 解析流程，置 queued、累计次数、清空冷却时间，
-//     交刷新阶段跟踪到完成——后者尤其重要，否则文档明明在被解析却一直被反复重提（死循环）。
-//   - 其它提交错误（如远端缺失）：走有界失败路径累计一次尝试并退避，达到 attempts 上限后被扫描查询
-//     自然排除、停止重试，文档保持 failed 待人工处理，保证任何持续错误都不会无限循环。
-//
-// 单个文档失败不阻断其它文档；错误冒泡给 reconciler 仅作日志。
-func (r *RagflowParseStatusRefresher) autoReparseDueFailedDocuments(ctx context.Context) error {
-	rows, err := r.store.ListRAGFlowDocumentsDueForAutoReparse(ctx, r.batchSize)
-	if err != nil {
-		return fmt.Errorf("扫描待自动重解析文档失败: %w", err)
-	}
-	if len(rows) == 0 {
-		return nil
-	}
-
-	var firstErr error
-	for _, row := range rows {
-		remoteDatasetID := row.RemoteDatasetID.String
-		submitErr := r.ragflow.ParseDocuments(ctx, remoteDatasetID, []string{row.RagflowDocumentID})
-		if submitErr == nil || isRAGFlowDocBusyError(submitErr) {
-			// 已成功提交、或文档已在 RAGFlow 解析中：都视为已进入解析流程，置 queued 交刷新阶段跟踪。
-			_ = r.store.MarkRAGFlowDocumentAutoReparseQueued(ctx, row.ID)
-			continue
-		}
-		// 其它提交错误：累计一次尝试并退避；attempts 达上限后扫描查询不再返回该文档，停止重试。
-		_ = r.store.MarkRAGFlowDocumentAutoReparseSubmitFailed(ctx, sqlc.MarkRAGFlowDocumentAutoReparseSubmitFailedParams{
-			AutoReparseNextAt: autoReparseNextAt(row.AutoReparseAttempts+1, r.now()),
-			ID:                row.ID,
-		})
-		if firstErr == nil {
-			firstErr = fmt.Errorf("自动重解析 dataset %s 文档 %s 失败: %w", remoteDatasetID, row.RagflowDocumentID, submitErr)
-		}
-	}
-	return firstErr
 }
 
 // extractRAGFlowError 从 RAGFlow 的 progress_msg（多行进度日志）中提取最有价值的失败原因，
