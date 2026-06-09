@@ -807,17 +807,45 @@ func TestReparseFailedKnowledgeDatasetNoFailedDocsIsNoop(t *testing.T) {
 	assert.Equal(t, "completed", store.docs["doc-done"].ParseStatus)
 }
 
-// TestReparseFailedKnowledgeDatasetDoesNotRequeueWhenRemoteRejects 验证 RAGFlow 未接受重解析时不改本地状态，避免 UI 误报解析中。
-func TestReparseFailedKnowledgeDatasetDoesNotRequeueWhenRemoteRejects(t *testing.T) {
+// TestReparseFailedKnowledgeDatasetFallsBackPerDocWhenBatchRejected 验证整批被拒（含正在解析中的文档）时，
+// 退化为逐个提交：可提交文档照常入队，不因个别文档「正在解析中」而整批失败。覆盖线上批量重解析不生效的根因。
+func TestReparseFailedKnowledgeDatasetFallsBackPerDocWhenBatchRejected(t *testing.T) {
 	svc, store, rf := newRAGFlowKnowledgeTestService(t)
-	store.docs["doc-failed"] = makeKnowledgeDoc("doc-failed", store.orgDataset.ID, "remote-failed", "failed", 0)
-	rf.parseErr = errors.New("ragflow busy") // 远端拒绝整批重解析
+	store.docs["doc-a"] = makeKnowledgeDoc("doc-a", store.orgDataset.ID, "remote-a", "failed", 0)
+	store.docs["doc-b"] = makeKnowledgeDoc("doc-b", store.orgDataset.ID, "remote-b", "failed", 0)
+	store.docs["doc-c"] = makeKnowledgeDoc("doc-c", store.orgDataset.ID, "remote-c", "failed", 0)
+	// 整批提交（>1 文档）被 RAGFlow 以「正在解析中」拒绝；逐个提交（单文档）则成功。
+	rf.parseMultiDocErr = errors.New("RAGFlow 业务错误: document remote-b is being processed")
+	rf.datasetDetail = ragflow.Dataset{ID: testRemoteOrgDatasetID, Name: "oc-org", DocNum: 3, ChunkNum: 3}
 
-	_, err := svc.ReparseFailedKnowledgeDataset(context.Background(), platformKnowledgePrincipal(), KnowledgeRAGFlowScopeOrg, testKnowledgeOrg)
-	require.Error(t, err)
+	result, err := svc.ReparseFailedKnowledgeDataset(context.Background(), platformKnowledgePrincipal(), KnowledgeRAGFlowScopeOrg, testKnowledgeOrg)
+	require.NoError(t, err)
 
+	assert.Equal(t, "ok", result.Status)
+	// 先尝试整批（被拒），再逐个提交 3 次：共 4 次 ParseDocuments。
+	require.Len(t, rf.parseCalls, 4)
+	assert.Len(t, rf.parseCalls[0].documentIDs, 3) // 第一次为整批
+	// 三个文档最终都应入队，不被个别「正在解析中」错误阻断。
+	assert.ElementsMatch(t, []string{"doc-a", "doc-b", "doc-c"}, store.manualReparseQueuedIDs)
+}
+
+// TestReparseFailedKnowledgeDatasetSkipsHardErrorDocsInFallback 验证逐个回退时，非「正在解析中」的硬错误文档被跳过、不入队，
+// 其它可提交文档仍正常入队。
+func TestReparseFailedKnowledgeDatasetSkipsHardErrorDocsInFallback(t *testing.T) {
+	svc, store, rf := newRAGFlowKnowledgeTestService(t)
+	store.docs["doc-a"] = makeKnowledgeDoc("doc-a", store.orgDataset.ID, "remote-a", "failed", 0)
+	store.docs["doc-b"] = makeKnowledgeDoc("doc-b", store.orgDataset.ID, "remote-b", "failed", 0)
+	// 整批与逐个都返回硬错误（非 being processed）：所有文档都应被跳过，无一入队。
+	rf.parseErr = errors.New("RAGFlow 业务错误: unsupported file type")
+	rf.datasetDetail = ragflow.Dataset{ID: testRemoteOrgDatasetID, Name: "oc-org", DocNum: 2, ChunkNum: 0}
+
+	result, err := svc.ReparseFailedKnowledgeDataset(context.Background(), platformKnowledgePrincipal(), KnowledgeRAGFlowScopeOrg, testKnowledgeOrg)
+	require.NoError(t, err)
+
+	assert.Equal(t, "ok", result.Status)
 	assert.Empty(t, store.manualReparseQueuedIDs)
-	assert.Equal(t, "failed", store.docs["doc-failed"].ParseStatus)
+	assert.Equal(t, "failed", store.docs["doc-a"].ParseStatus)
+	assert.Equal(t, "failed", store.docs["doc-b"].ParseStatus)
 }
 
 // TestRuntimeAddWritesOnlyCurrentAppDataset 验证 Hermes 写入报告只能落到当前实例 dataset，不会加载组织 dataset。
@@ -1919,6 +1947,7 @@ type fakeRAGFlowKnowledgeClient struct {
 	uploadErr                 error
 	uploadCalls               []ragflowUploadCall
 	parseErr                  error
+	parseMultiDocErr          error // 仅当一次提交多个文档时返回，模拟 RAGFlow 对含「正在解析中」文档的整批拒绝
 	parseCalls                []ragflowParseCall
 	deleteCalls               []ragflowDeleteCall
 	retrieveDatasetIDs        []string
@@ -2036,6 +2065,9 @@ func (f *fakeRAGFlowKnowledgeClient) ParseDocuments(_ context.Context, datasetID
 	f.recordEvent("parse:" + strings.Join(documentIDs, ","))
 	if f.parseErr != nil {
 		return f.parseErr
+	}
+	if f.parseMultiDocErr != nil && len(documentIDs) > 1 {
+		return f.parseMultiDocErr
 	}
 	return nil
 }

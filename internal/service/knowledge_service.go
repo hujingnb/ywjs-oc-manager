@@ -660,14 +660,25 @@ func (s *KnowledgeService) ReparseFailedKnowledgeDataset(ctx context.Context, pr
 		for _, document := range documents {
 			remoteIDs = append(remoteIDs, document.RagflowDocumentID)
 		}
-		// 先让 RAGFlow 接受整批重解析，成功后再逐个重置本地状态，避免本地先入队但远端未受理导致状态不一致。
-		if err := s.ragflowClient().ParseDocuments(ctx, remoteID, remoteIDs); err != nil {
-			return KnowledgeRAGFlowDatasetInfoResult{}, fmt.Errorf("触发 RAGFlow 重新解析失败: %w", err)
-		}
-		// 复用单文件人工重解析的入队语义：状态置 queued 并清空自动重试次数/冷却，后续交刷新任务推进。
-		for _, document := range documents {
-			if err := s.store.MarkRAGFlowDocumentManualReparseQueued(ctx, document.ID); err != nil {
-				return KnowledgeRAGFlowDatasetInfoResult{}, fmt.Errorf("更新知识库文件解析状态失败: %w", err)
+		// 优先整批提交：无文档正在解析中时一次完成，成功后逐个把本地状态重置为 queued。
+		if err := s.ragflowClient().ParseDocuments(ctx, remoteID, remoteIDs); err == nil {
+			for _, document := range documents {
+				if err := s.store.MarkRAGFlowDocumentManualReparseQueued(ctx, document.ID); err != nil {
+					return KnowledgeRAGFlowDatasetInfoResult{}, fmt.Errorf("更新知识库文件解析状态失败: %w", err)
+				}
+			}
+		} else {
+			// 整批被拒退化为逐个提交：RAGFlow 对「正在解析中」的文档会整批拒绝，导致同 dataset 其它文档
+			// 一起被卡（与自动重解析任务同一线上根因）。逐个提交后单个文档失败不阻断其它；
+			// 「文档正在解析中」(being processed) 视为已在重解析、照常入队，其它硬错误跳过该文档保持 failed。
+			for _, document := range documents {
+				submitErr := s.ragflowClient().ParseDocuments(ctx, remoteID, []string{document.RagflowDocumentID})
+				if submitErr != nil && !isRAGFlowDocBusyError(submitErr) {
+					continue
+				}
+				if err := s.store.MarkRAGFlowDocumentManualReparseQueued(ctx, document.ID); err != nil {
+					return KnowledgeRAGFlowDatasetInfoResult{}, fmt.Errorf("更新知识库文件解析状态失败: %w", err)
+				}
 			}
 		}
 	}
