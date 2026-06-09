@@ -92,6 +92,31 @@ KEY idx_ragflow_documents_auto_reparse (
 
 同时更新 `sqlc.yaml` 纳入新迁移，并运行 `sqlc generate`。
 
+## 存量失败处理
+
+上线前已经处于 `failed` 状态的文件不会再经过“远端失败状态同步”这一步；如果只新增字段而不回填，
+这些存量文件的 `auto_reparse_next_at` 会保持 NULL，自动重试任务不会选中它们。
+
+迁移需要在新增字段后执行一次存量回填：
+
+```sql
+UPDATE ragflow_documents
+SET auto_reparse_next_at = NOW(6)
+WHERE parse_status = 'failed'
+  AND auto_reparse_attempts = 0
+  AND last_error IS NOT NULL
+  AND (
+      LOWER(last_error) LIKE '%model service overloaded%'
+      OR LOWER(last_error) LIKE '%error code: 503%'
+      OR LOWER(last_error) LIKE '%code: 50505%'
+  );
+```
+
+回填只设置“立即可自动重试”，不直接调用 RAGFlow。部署后由 `ragflow_parse_status_refresh` 在下一轮 tick
+统一触发 `ParseDocuments`，并按正常逻辑累计 `auto_reparse_attempts`。
+
+不命中白名单的存量失败继续保持 `failed`，避免把文件格式、维度不匹配或配置类错误自动重试。
+
 ## 查询与写入
 
 保留现有 `ListRAGFlowDocumentsNeedingRefresh` 查询，不把普通状态同步和自动重试候选混在同一个查询里。
