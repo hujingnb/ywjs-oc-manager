@@ -192,7 +192,8 @@ func (r *RagflowParseStatusRefresher) applyRemoteStatus(ctx context.Context, row
 // （如 "Can't parse document that is currently being processed"）。
 // 这类响应说明该文档其实已在 RAGFlow 的解析流程里，并非真正可重新提交的失败：应交还给刷新阶段
 // 跟踪真实状态，而不是反复重提——否则会每轮都被拒、永远循环（线上死循环根因）。
-// 当前无调用方：移除过载自动重试后暂无人使用，保留供后续 RAGFlow 异常自愈任务复用。
+// 调用方：RAGFlow 异常自愈任务(ragflow_anomaly_healer.go)——重提交解析时把「正在解析中」
+// 视为已在重解析、照常入队,而非当作硬错误。
 func isRAGFlowDocBusyError(err error) bool {
 	if err == nil {
 		return false
