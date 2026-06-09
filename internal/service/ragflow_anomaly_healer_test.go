@@ -316,6 +316,32 @@ func TestHealer_PartB_ExhaustedLogsError(t *testing.T) {
 	assert.Contains(t, logged, "RAGFlow")
 }
 
+// TestHealer_StoreListErrorIsReturnedButOtherPartStillRuns 覆盖"累积错误但不提前中断"语义：
+// Part B（卡死列表）查询报错时，Tick 应把该错误作为 firstErr 返回，同时继续处理 Part A（失败）文档。
+// 验证 Tick 绝不因一个查询错误而饿死其它候选文档。
+func TestHealer_StoreListErrorIsReturnedButOtherPartStillRuns(t *testing.T) {
+	// Part A 有一个正常 failed 文档；Part B 查询直接报错（模拟 DB/网络异常）
+	store := &fakeHealStore{
+		failed:   []sqlc.ListRAGFlowFailedDocumentsForHealRow{failedRow("doc-a1", "rf-a1", "ds-remote")},
+		stuckErr: errors.New("db timeout: stuck query failed"),
+	}
+	rf := &fakeHealRAGFlow{}
+	state := newFakeRetryState()
+	h := newHealerForTest(store, rf, state)
+
+	err := h.Tick(context.Background())
+
+	// Tick 应返回 Part B 查询的错误（Part B 先执行，是 firstErr 来源）
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "stuck query failed")
+
+	// Part A 的 failed 文档应仍被正常处理：ParseDocuments 被调用且文档入队
+	require.Len(t, rf.calls, 1)
+	assert.Equal(t, "parse", rf.calls[0].op)
+	assert.Equal(t, []string{"rf-a1"}, rf.calls[0].docIDs)
+	assert.Equal(t, []string{"doc-a1"}, store.queued)
+}
+
 // TestHealer_PartBBeforePartA 覆盖处理次序：Part B（卡死）先于 Part A（失败）。
 // 通过同一 RAGFlow 调用流水验证 stop（仅 Part B 触发）出现在 Part A 的 parse 之前。
 func TestHealer_PartBBeforePartA(t *testing.T) {
@@ -337,4 +363,23 @@ func TestHealer_PartBBeforePartA(t *testing.T) {
 	assert.Equal(t, []string{"rf-b"}, rf.calls[1].docIDs)
 	assert.Equal(t, "parse", rf.calls[2].op)
 	assert.Equal(t, []string{"rf-a"}, rf.calls[2].docIDs)
+}
+
+// TestHealer_BackoffFor 直接覆盖 backoffFor 的边界条件：
+// Backoffs[1]（n=2）取第二档；n 超出切片长度时钳到最后一个。
+func TestHealer_BackoffFor(t *testing.T) {
+	h := NewRagflowAnomalyHealer(
+		&fakeHealStore{}, &fakeHealRAGFlow{}, newFakeRetryState(),
+		HealerConfig{
+			MaxAttempts: 5,
+			Backoffs:    []time.Duration{10 * time.Minute, 30 * time.Minute},
+		},
+	)
+
+	// n=2 → 取 Backoffs[1]=30m
+	assert.Equal(t, 30*time.Minute, h.backoffFor(2))
+	// n=99 → 超出切片，钳到 Backoffs[1]=30m（最后一个）
+	assert.Equal(t, 30*time.Minute, h.backoffFor(99))
+	// n=1 → 取 Backoffs[0]=10m
+	assert.Equal(t, 10*time.Minute, h.backoffFor(1))
 }

@@ -171,10 +171,12 @@ func (h *RagflowAnomalyHealer) Tick(ctx context.Context) error {
 // 严禁双重递增——否则计数虚高会提前触发放弃。
 func (h *RagflowAnomalyHealer) healOne(ctx context.Context, docID, remoteDS, remoteDoc string, isStuck bool) error {
 	// 1) 已放弃：放弃期内不再自愈，直接跳过。
+	// fail-open：Redis 查询出错时忽略错误，视为「未放弃」继续执行自愈——瞬时 Redis 抖动不应阻止修复。
 	if gu, _ := h.state.GivenUp(ctx, docID); gu {
 		return nil
 	}
 	// 2) 冷却中：上一次尝试后的退避窗口未到，跳过本轮。
+	// fail-open：Redis 查询出错时忽略错误，视为「未冷却」继续执行自愈——瞬时 Redis 抖动不应阻止修复。
 	if cd, _ := h.state.InCooldown(ctx, docID); cd {
 		return nil
 	}
@@ -189,7 +191,9 @@ func (h *RagflowAnomalyHealer) healOne(ctx context.Context, docID, remoteDS, rem
 	parseErr := h.rf.ParseDocuments(ctx, remoteDS, []string{remoteDoc})
 
 	// 5) 计本次尝试（成功 / busy / 硬失败都算一次，唯一一次 RecordAttempt）。
-	n, _ := h.state.RecordAttempt(ctx, docID)
+	// RecordAttempt 出错时 n=0 无意义：跳过退避/放弃簿记，本轮不设冷却，下一轮自然重试；
+	// 不应用 n=0 调用 applyBackoffOrGiveup，否则会虚增冷却、甚至误触发"第 0 次放弃"逻辑。
+	n, recordErr := h.state.RecordAttempt(ctx, docID)
 
 	var firstErr error
 	// 6) 硬失败（非 busy）：不入队（避免把仍 failed 的文档误置 queued），但已计数；记录错误后走退避 / 放弃。
@@ -202,7 +206,15 @@ func (h *RagflowAnomalyHealer) healOne(ctx context.Context, docID, remoteDS, rem
 		}
 	}
 
-	// 8) 退避 / 放弃：达到上限即放弃（卡死场景额外打 error 日志）；否则按本次计数设置退避冷却。
+	// 8) 退避 / 放弃：RecordAttempt 出错时跳过簿记（计数未知，不能据此设冷却或放弃），
+	//    将错误并入 firstErr，让 Tick 上报给调用方，文档下一轮自然重试。
+	if recordErr != nil {
+		h.log.Warn("[heal] 记录自愈尝试次数失败,跳过本轮退避/给上", "doc", docID, "error", recordErr)
+		if firstErr == nil {
+			firstErr = recordErr
+		}
+		return firstErr
+	}
 	h.applyBackoffOrGiveup(ctx, docID, n, isStuck)
 	return firstErr
 }
