@@ -20,7 +20,9 @@
 - org/app 的查询 hook（`web/src/api/hooks/useKnowledge.ts` 的 `useOrgKnowledgeQuery`/`useAppKnowledgeQuery`）
   **已经透传 `status`**：选项类型含 `status`，请求参数按 `...(status ? { status } : {})` 拼接。
 - 行业的查询 hook 在另一文件 `web/src/api/hooks/useIndustryKnowledge.ts` 的
-  `useIndustryKnowledgeFilesQuery`，目前选项只有 `keyword`/`createdFrom`/`createdTo`，**未透传 `status`**。
+  `useIndustryKnowledgeFilesQuery`，**同样已经支持 `status`**：选项类型 `IndustryKnowledgeFileListQueryOptions`
+  含 `status?`，`buildIndustryKnowledgeFileListQuery` 按 `...(status ? { status } : {})` 拼接，hook 也已传
+  `status: options.status?.value`。即三个 hook 都已就绪，页面把 `status` 传进去即可，无需改 hook。
 - 三个页面各自重复定义了 `parseStatusLabel`（状态→中文文案）和 `parseTagType`（状态→标签颜色）。
 - 解析状态取值：`queued`(等待解析) / `running`(解析中) / `completed`(已完成) /
   `failed`(解析失败) / `stopped`(已停止)。
@@ -61,17 +63,20 @@
 clearable 清空时 `n-select` 置 `null`，经现有 `...(status ? ...)` / `stringOrUndefined`
 归一后请求不带 `status` 参数，等价于「全部状态」，无需显式「全部」选项。
 
-### 3. 行业查询 hook 补 `status`
+### 3. 查询 hook 无需改动
 
-`useIndustryKnowledgeFilesQuery` 的选项类型加 `status?`，并在请求参数拼接里按
-`...(status ? { status } : {})` 加上 `status`，与 org/app hook 保持一致。
+org/app（`useKnowledge.ts`）与行业（`useIndustryKnowledge.ts`）的列表 hook 选项类型与请求参数拼接
+**均已支持 `status`**，页面把 `status` 传入选项即可生效，本次不改任何 hook。
 
 ## 测试
 
-每个页面的 `*.spec.ts`（`OrgKnowledgePage.spec.ts`、`IndustryKnowledgePage.spec.ts` 已存在；
-`AppKnowledgeTab` 若无则新增最小用例）补一条：选择某一解析状态后，列表查询请求带上对应
-`status` 参数，且分页回到第 1 页。共享模块 `parseStatus.ts` 加一个最小单测覆盖
-`parseStatusLabel` 未知值兜底与 `PARSE_STATUS_FILTER_OPTIONS` 内容。
+- 共享模块 `parseStatus.ts` 加单测，覆盖 `parseStatusLabel` 已知/未知值、`parseStatusTagType` 各分支、
+  `PARSE_STATUS_FILTER_OPTIONS` 内容。
+- 三页改动以「跑各自既有 `*.spec.ts` 防回归」（确认删本地重复函数、改名不破坏渲染）+ Task 5 的
+  **真实浏览器逐页验证**（按 AGENTS.md 新功能必须真实浏览器验证）共同覆盖筛选行为：选状态→列表过滤、
+  分页回到第 1 页、请求带 `status`；clearable 清空→恢复全部。
+  之所以不为每页新增筛选单测：三页 spec 的 mock 较重，新增筛选单测性价比低，而筛选属用户可见 UI 行为，
+  真实浏览器验证更可靠且为本项目硬性要求。
 
 ## 不做
 
