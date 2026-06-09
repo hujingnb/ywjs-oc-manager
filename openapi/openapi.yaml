@@ -4139,52 +4139,6 @@ paths:
       summary: 修改应用 RAGFlow dataset embedding 模型
       tags:
       - knowledge
-  /apps/{appId}/knowledge/ragflow-dataset/reparse-failed:
-    post:
-      description: 平台管理员把应用知识库下解析失败或已停止的文件批量重新提交 RAGFlow 解析，不更换 embedding 模型
-      parameters:
-      - description: 实例 ID
-        in: path
-        name: appId
-        required: true
-        schema:
-          type: string
-      responses:
-        "202":
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/service.KnowledgeRAGFlowDatasetInfoResult'
-          description: Accepted
-        "401":
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/handlers.ErrorResponse'
-          description: Unauthorized
-        "403":
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/handlers.ErrorResponse'
-          description: Forbidden
-        "404":
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/handlers.ErrorResponse'
-          description: Not Found
-        "503":
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/handlers.ErrorResponse'
-          description: Service Unavailable
-      security:
-      - BearerAuth: []
-      summary: 重新解析应用知识库失败文件
-      tags:
-      - knowledge
   /apps/{appId}/runtime:
     get:
       description: 返回应用 k8s 运行时状态与最近快照；status=no_container 表示容器尚未创建
@@ -6425,52 +6379,6 @@ paths:
       summary: 修改行业库 RAGFlow dataset embedding 模型
       tags:
       - industry-knowledge
-  /industry-knowledge-bases/{industryId}/ragflow-dataset/reparse-failed:
-    post:
-      description: 平台管理员把行业知识库下解析失败或已停止的文件批量重新提交 RAGFlow 解析，不更换 embedding 模型
-      parameters:
-      - description: 行业知识库 ID
-        in: path
-        name: industryId
-        required: true
-        schema:
-          type: string
-      responses:
-        "202":
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/service.KnowledgeRAGFlowDatasetInfoResult'
-          description: Accepted
-        "401":
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/handlers.ErrorResponse'
-          description: Unauthorized
-        "403":
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/handlers.ErrorResponse'
-          description: Forbidden
-        "404":
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/handlers.ErrorResponse'
-          description: Not Found
-        "503":
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/handlers.ErrorResponse'
-          description: Service Unavailable
-      security:
-      - BearerAuth: []
-      summary: 重新解析行业库失败文件
-      tags:
-      - industry-knowledge
   /industry-knowledge-bases/upload-token:
     get:
       description: 平台管理员查看行业知识库外部上传接口文档时读取当前配置 token；为空表示外部上传入口禁用
@@ -7829,52 +7737,6 @@ paths:
       security:
       - BearerAuth: []
       summary: 修改企业 RAGFlow dataset embedding 模型
-      tags:
-      - knowledge
-  /organizations/{orgId}/knowledge/ragflow-dataset/reparse-failed:
-    post:
-      description: 平台管理员把企业知识库下解析失败或已停止的文件批量重新提交 RAGFlow 解析，不更换 embedding 模型
-      parameters:
-      - description: 企业 ID
-        in: path
-        name: orgId
-        required: true
-        schema:
-          type: string
-      responses:
-        "202":
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/service.KnowledgeRAGFlowDatasetInfoResult'
-          description: Accepted
-        "401":
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/handlers.ErrorResponse'
-          description: Unauthorized
-        "403":
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/handlers.ErrorResponse'
-          description: Forbidden
-        "404":
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/handlers.ErrorResponse'
-          description: Not Found
-        "503":
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/handlers.ErrorResponse'
-          description: Service Unavailable
-      security:
-      - BearerAuth: []
-      summary: 重新解析企业知识库失败文件
       tags:
       - knowledge
   /organizations/{orgId}/members:

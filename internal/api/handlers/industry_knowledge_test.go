@@ -87,11 +87,6 @@ type industryKnowledgeServiceStub struct {
 	updateEmbeddingModelTargetID string
 	updateEmbeddingModelInput    service.KnowledgeEmbeddingModelInput
 
-	reparseFailedResult   service.KnowledgeRAGFlowDatasetInfoResult
-	reparseFailedErr      error
-	reparseFailedScope    string
-	reparseFailedTargetID string
-
 	externalUploadCalls  int
 	externalIndustryName string
 	externalFilename     string
@@ -179,12 +174,6 @@ func (s *industryKnowledgeServiceStub) UpdateKnowledgeEmbeddingModel(_ context.C
 	return s.updateEmbeddingModelResult, s.updateEmbeddingModelErr
 }
 
-func (s *industryKnowledgeServiceStub) ReparseFailedKnowledgeDataset(_ context.Context, _ auth.Principal, scope, targetID string) (service.KnowledgeRAGFlowDatasetInfoResult, error) {
-	s.reparseFailedScope = scope
-	s.reparseFailedTargetID = targetID
-	return s.reparseFailedResult, s.reparseFailedErr
-}
-
 func (s *industryKnowledgeServiceStub) ExternalUploadIndustryFile(_ context.Context, industryName, filename string, content io.Reader, size int64) (service.KnowledgeDocumentResult, error) {
 	s.externalUploadCalls++
 	s.externalIndustryName = industryName
@@ -234,24 +223,6 @@ func TestIndustryKnowledgeUploadTokenRejectsOrgAdmin(t *testing.T) {
 
 	assert.Equal(t, http.StatusForbidden, w.Code)
 	assert.NotContains(t, w.Body.String(), "secret-token")
-}
-
-// TestIndustryKnowledgeReparseFailedRoutesToService 验证行业库「重新解析失败文件」路由用 industry scope 和行业库 ID 调用 service，并返回 202。
-func TestIndustryKnowledgeReparseFailedRoutesToService(t *testing.T) {
-	stub := &industryKnowledgeServiceStub{reparseFailedResult: service.KnowledgeRAGFlowDatasetInfoResult{
-		Scope: service.KnowledgeRAGFlowScopeIndustry, TargetID: "ind-1", TargetName: "行业一", Status: "ok",
-	}}
-	router := newIndustryKnowledgeTestRouter(t, stub, "secret-token")
-
-	w := httptest.NewRecorder()
-	req := httptest.NewRequest(http.MethodPost, "/api/v1/industry-knowledge-bases/ind-1/ragflow-dataset/reparse-failed", nil)
-	req = withPrincipal(req, auth.Principal{UserID: "u-admin", Role: domain.UserRolePlatformAdmin})
-	router.ServeHTTP(w, req)
-
-	require.Equal(t, http.StatusAccepted, w.Code)
-	assert.Equal(t, service.KnowledgeRAGFlowScopeIndustry, stub.reparseFailedScope)
-	assert.Equal(t, "ind-1", stub.reparseFailedTargetID)
-	assert.Contains(t, w.Body.String(), `"status":"ok"`)
 }
 
 // TestIndustryKnowledgeListFilesPassesSearchPaginationAndCreatedDateRange 验证行业库文件列表把文件名、分页和创建日期条件传给 service；

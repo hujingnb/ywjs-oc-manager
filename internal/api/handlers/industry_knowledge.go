@@ -54,8 +54,6 @@ type industryKnowledgeService interface {
 	GetKnowledgeRAGFlowDatasetInfo(ctx context.Context, principal auth.Principal, scope, targetID string) (service.KnowledgeRAGFlowDatasetInfoResult, error)
 	// UpdateKnowledgeEmbeddingModel 修改行业库对应的 RAGFlow dataset embedding 模型。
 	UpdateKnowledgeEmbeddingModel(ctx context.Context, principal auth.Principal, scope, targetID string, input service.KnowledgeEmbeddingModelInput) (service.KnowledgeRAGFlowDatasetInfoResult, error)
-	// ReparseFailedKnowledgeDataset 批量重解析行业库下解析失败/已停止的文件，不更换模型。
-	ReparseFailedKnowledgeDataset(ctx context.Context, principal auth.Principal, scope, targetID string) (service.KnowledgeRAGFlowDatasetInfoResult, error)
 	// ExternalUploadIndustryFile 按行业名称接收外部系统上传的文件。
 	ExternalUploadIndustryFile(ctx context.Context, industryName, filename string, content io.Reader, size int64) (service.KnowledgeDocumentResult, error)
 }
@@ -84,7 +82,6 @@ func RegisterIndustryKnowledgeRoutes(router gin.IRouter, handler *IndustryKnowle
 	group.DELETE("/:industryId", handler.DeleteBase)
 	group.GET("/:industryId/ragflow-dataset", handler.GetIndustryRAGFlowDataset)
 	group.PATCH("/:industryId/ragflow-dataset/embedding-model", handler.UpdateIndustryEmbeddingModel)
-	group.POST("/:industryId/ragflow-dataset/reparse-failed", handler.ReparseFailedIndustry)
 
 	files := group.Group("/:industryId/knowledge")
 	files.GET("", handler.ListFiles)
@@ -346,24 +343,6 @@ func (h *IndustryKnowledgeHandler) GetIndustryRAGFlowDataset(c *gin.Context) {
 // @Router       /industry-knowledge-bases/{industryId}/ragflow-dataset/embedding-model [patch]
 func (h *IndustryKnowledgeHandler) UpdateIndustryEmbeddingModel(c *gin.Context) {
 	updateRAGFlowDatasetEmbeddingModel(c, h.service, service.KnowledgeRAGFlowScopeIndustry, c.Param("industryId"), writeIndustryKnowledgeError)
-}
-
-// ReparseFailedIndustry 重新解析行业知识库下解析失败/已停止的文件。
-//
-// @Summary      重新解析行业库失败文件
-// @Description  平台管理员把行业知识库下解析失败或已停止的文件批量重新提交 RAGFlow 解析，不更换 embedding 模型
-// @Tags         industry-knowledge
-// @Produce      json
-// @Security     BearerAuth
-// @Param        industryId  path      string  true  "行业知识库 ID"
-// @Success      202         {object}  service.KnowledgeRAGFlowDatasetInfoResult
-// @Failure      401         {object}  ErrorResponse
-// @Failure      403         {object}  ErrorResponse
-// @Failure      404         {object}  ErrorResponse
-// @Failure      503         {object}  ErrorResponse
-// @Router       /industry-knowledge-bases/{industryId}/ragflow-dataset/reparse-failed [post]
-func (h *IndustryKnowledgeHandler) ReparseFailedIndustry(c *gin.Context) {
-	reparseFailedRAGFlowDataset(c, h.service, service.KnowledgeRAGFlowScopeIndustry, c.Param("industryId"), writeIndustryKnowledgeError)
 }
 
 // ListFiles 列出指定行业知识库下的文件。

@@ -42,14 +42,12 @@ type knowledgeService interface {
 	ListKnowledgeEmbeddingModels(ctx context.Context, principal auth.Principal) (service.KnowledgeEmbeddingModelListResult, error)
 	GetKnowledgeRAGFlowDatasetInfo(ctx context.Context, principal auth.Principal, scope, targetID string) (service.KnowledgeRAGFlowDatasetInfoResult, error)
 	UpdateKnowledgeEmbeddingModel(ctx context.Context, principal auth.Principal, scope, targetID string, input service.KnowledgeEmbeddingModelInput) (service.KnowledgeRAGFlowDatasetInfoResult, error)
-	ReparseFailedKnowledgeDataset(ctx context.Context, principal auth.Principal, scope, targetID string) (service.KnowledgeRAGFlowDatasetInfoResult, error)
 }
 
 // knowledgeRAGFlowDatasetService 是 handler 查询和修改 RAGFlow dataset 运维信息所需的最小能力。
 type knowledgeRAGFlowDatasetService interface {
 	GetKnowledgeRAGFlowDatasetInfo(ctx context.Context, principal auth.Principal, scope, targetID string) (service.KnowledgeRAGFlowDatasetInfoResult, error)
 	UpdateKnowledgeEmbeddingModel(ctx context.Context, principal auth.Principal, scope, targetID string, input service.KnowledgeEmbeddingModelInput) (service.KnowledgeRAGFlowDatasetInfoResult, error)
-	ReparseFailedKnowledgeDataset(ctx context.Context, principal auth.Principal, scope, targetID string) (service.KnowledgeRAGFlowDatasetInfoResult, error)
 }
 
 const (
@@ -78,7 +76,6 @@ func RegisterKnowledgeRoutes(router gin.IRouter, handler *KnowledgeHandler) {
 	orgGroup := router.Group("/api/v1/organizations/:orgId/knowledge")
 	orgGroup.GET("/ragflow-dataset", handler.GetOrgRAGFlowDataset)
 	orgGroup.PATCH("/ragflow-dataset/embedding-model", handler.UpdateOrgEmbeddingModel)
-	orgGroup.POST("/ragflow-dataset/reparse-failed", handler.ReparseFailedOrg)
 	orgGroup.GET("", handler.ListOrg)
 	orgGroup.POST("", handler.SaveOrg)
 	orgGroup.DELETE("", handler.ClearOrg)
@@ -89,7 +86,6 @@ func RegisterKnowledgeRoutes(router gin.IRouter, handler *KnowledgeHandler) {
 	appGroup := router.Group("/api/v1/apps/:appId/knowledge")
 	appGroup.GET("/ragflow-dataset", handler.GetAppRAGFlowDataset)
 	appGroup.PATCH("/ragflow-dataset/embedding-model", handler.UpdateAppEmbeddingModel)
-	appGroup.POST("/ragflow-dataset/reparse-failed", handler.ReparseFailedApp)
 	appGroup.GET("", handler.ListApp)
 	appGroup.POST("", handler.SaveApp)
 	appGroup.GET("/:documentId/file", handler.DownloadApp)
@@ -157,24 +153,6 @@ func (h *KnowledgeHandler) UpdateOrgEmbeddingModel(c *gin.Context) {
 	updateRAGFlowDatasetEmbeddingModel(c, h.service, service.KnowledgeRAGFlowScopeOrg, c.Param("orgId"), writeKnowledgeError)
 }
 
-// ReparseFailedOrg 重新解析企业知识库下解析失败/已停止的文件。
-//
-// @Summary      重新解析企业知识库失败文件
-// @Description  平台管理员把企业知识库下解析失败或已停止的文件批量重新提交 RAGFlow 解析，不更换 embedding 模型
-// @Tags         knowledge
-// @Produce      json
-// @Security     BearerAuth
-// @Param        orgId  path      string  true  "企业 ID"
-// @Success      202    {object}  service.KnowledgeRAGFlowDatasetInfoResult
-// @Failure      401    {object}  ErrorResponse
-// @Failure      403    {object}  ErrorResponse
-// @Failure      404    {object}  ErrorResponse
-// @Failure      503    {object}  ErrorResponse
-// @Router       /organizations/{orgId}/knowledge/ragflow-dataset/reparse-failed [post]
-func (h *KnowledgeHandler) ReparseFailedOrg(c *gin.Context) {
-	reparseFailedRAGFlowDataset(c, h.service, service.KnowledgeRAGFlowScopeOrg, c.Param("orgId"), writeKnowledgeError)
-}
-
 // GetAppRAGFlowDataset 查看应用知识库对应的 RAGFlow dataset 运维信息。
 //
 // @Summary      查看应用 RAGFlow dataset
@@ -212,24 +190,6 @@ func (h *KnowledgeHandler) GetAppRAGFlowDataset(c *gin.Context) {
 // @Router       /apps/{appId}/knowledge/ragflow-dataset/embedding-model [patch]
 func (h *KnowledgeHandler) UpdateAppEmbeddingModel(c *gin.Context) {
 	updateRAGFlowDatasetEmbeddingModel(c, h.service, service.KnowledgeRAGFlowScopeApp, c.Param("appId"), writeKnowledgeError)
-}
-
-// ReparseFailedApp 重新解析应用知识库下解析失败/已停止的文件。
-//
-// @Summary      重新解析应用知识库失败文件
-// @Description  平台管理员把应用知识库下解析失败或已停止的文件批量重新提交 RAGFlow 解析，不更换 embedding 模型
-// @Tags         knowledge
-// @Produce      json
-// @Security     BearerAuth
-// @Param        appId  path      string  true  "实例 ID"
-// @Success      202    {object}  service.KnowledgeRAGFlowDatasetInfoResult
-// @Failure      401    {object}  ErrorResponse
-// @Failure      403    {object}  ErrorResponse
-// @Failure      404    {object}  ErrorResponse
-// @Failure      503    {object}  ErrorResponse
-// @Router       /apps/{appId}/knowledge/ragflow-dataset/reparse-failed [post]
-func (h *KnowledgeHandler) ReparseFailedApp(c *gin.Context) {
-	reparseFailedRAGFlowDataset(c, h.service, service.KnowledgeRAGFlowScopeApp, c.Param("appId"), writeKnowledgeError)
 }
 
 // ListOrg 列出组织级知识库文件。
@@ -592,17 +552,6 @@ func updateRAGFlowDatasetEmbeddingModel(c *gin.Context, svc knowledgeRAGFlowData
 		return
 	}
 	result, err := svc.UpdateKnowledgeEmbeddingModel(c.Request.Context(), principalFromCtx(c), scope, targetID, input)
-	if err != nil {
-		writeErr(c, err)
-		return
-	}
-	c.JSON(http.StatusAccepted, result)
-}
-
-// reparseFailedRAGFlowDataset 统一触发不同知识库作用域「批量重解析失败/已停止文件」运维操作。
-// 无请求体：操作语义固定为重解析当前库下全部 failed/stopped 文件，且不更换 embedding 模型。
-func reparseFailedRAGFlowDataset(c *gin.Context, svc knowledgeRAGFlowDatasetService, scope, targetID string, writeErr func(*gin.Context, error)) {
-	result, err := svc.ReparseFailedKnowledgeDataset(c.Request.Context(), principalFromCtx(c), scope, targetID)
 	if err != nil {
 		writeErr(c, err)
 		return
