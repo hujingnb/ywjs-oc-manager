@@ -639,8 +639,10 @@ func runManager(ctx context.Context, cfg config.Config, logOut io.Writer) error 
 			Giveup:   7 * 24 * time.Hour,
 		})
 		healer := service.NewRagflowAnomalyHealer(dbStore.Queries, ragflowHealClient, healState, service.HealerConfig{
-			MaxAttempts:    cfg.RAGFlow.SelfHeal.MaxAttempts,
-			Backoffs:       []time.Duration{0, 10 * time.Minute, 30 * time.Minute},
+			MaxAttempts: cfg.RAGFlow.SelfHeal.MaxAttempts,
+			// Backoffs[n-1] 是第 n 次尝试后的冷却:默认 MaxAttempts=3 时只发生「第1次后 0、第2次后 10m」两段,
+			// 第3次即给上、不再冷却,故只需两档(backoffFor 对超出索引会 clamp 到末档,调大 MaxAttempts 仍安全)。
+			Backoffs:       []time.Duration{0, 10 * time.Minute},
 			StuckThreshold: cfg.RAGFlow.SelfHeal.StuckThreshold.Duration,
 			BatchLimit:     int32(cfg.RAGFlow.SelfHeal.BatchLimit),
 		})
