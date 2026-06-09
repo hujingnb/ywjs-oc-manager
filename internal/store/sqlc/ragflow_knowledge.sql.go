@@ -368,7 +368,7 @@ func (q *Queries) GetRAGFlowDataset(ctx context.Context, id string) (RagflowData
 }
 
 const getRAGFlowDocument = `-- name: GetRAGFlowDocument :one
-SELECT id, dataset_id, scope_type, app_id, ragflow_document_id, name, size_bytes, mime_type, suffix, parse_status, progress, last_error, created_by, created_at, updated_at, org_id, industry_knowledge_base_id, industry_document_base_key, industry_document_name_key, auto_reparse_attempts, auto_reparse_next_at
+SELECT id, dataset_id, scope_type, app_id, ragflow_document_id, name, size_bytes, mime_type, suffix, parse_status, progress, last_error, created_by, created_at, updated_at, org_id, industry_knowledge_base_id, industry_document_base_key, industry_document_name_key
 FROM ragflow_documents
 WHERE id = ?
 `
@@ -397,14 +397,12 @@ func (q *Queries) GetRAGFlowDocument(ctx context.Context, id string) (RagflowDoc
 		&i.IndustryKnowledgeBaseID,
 		&i.IndustryDocumentBaseKey,
 		&i.IndustryDocumentNameKey,
-		&i.AutoReparseAttempts,
-		&i.AutoReparseNextAt,
 	)
 	return i, err
 }
 
 const getRAGFlowDocumentByRemoteID = `-- name: GetRAGFlowDocumentByRemoteID :one
-SELECT id, dataset_id, scope_type, app_id, ragflow_document_id, name, size_bytes, mime_type, suffix, parse_status, progress, last_error, created_by, created_at, updated_at, org_id, industry_knowledge_base_id, industry_document_base_key, industry_document_name_key, auto_reparse_attempts, auto_reparse_next_at
+SELECT id, dataset_id, scope_type, app_id, ragflow_document_id, name, size_bytes, mime_type, suffix, parse_status, progress, last_error, created_by, created_at, updated_at, org_id, industry_knowledge_base_id, industry_document_base_key, industry_document_name_key
 FROM ragflow_documents
 WHERE dataset_id = ? AND ragflow_document_id = ?
 `
@@ -438,8 +436,6 @@ func (q *Queries) GetRAGFlowDocumentByRemoteID(ctx context.Context, arg GetRAGFl
 		&i.IndustryKnowledgeBaseID,
 		&i.IndustryDocumentBaseKey,
 		&i.IndustryDocumentNameKey,
-		&i.AutoReparseAttempts,
-		&i.AutoReparseNextAt,
 	)
 	return i, err
 }
@@ -475,7 +471,7 @@ func (q *Queries) GetRAGFlowIndustryDataset(ctx context.Context, industryKnowled
 }
 
 const getRAGFlowIndustryDocumentByName = `-- name: GetRAGFlowIndustryDocumentByName :one
-SELECT id, dataset_id, scope_type, app_id, ragflow_document_id, name, size_bytes, mime_type, suffix, parse_status, progress, last_error, created_by, created_at, updated_at, org_id, industry_knowledge_base_id, industry_document_base_key, industry_document_name_key, auto_reparse_attempts, auto_reparse_next_at
+SELECT id, dataset_id, scope_type, app_id, ragflow_document_id, name, size_bytes, mime_type, suffix, parse_status, progress, last_error, created_by, created_at, updated_at, org_id, industry_knowledge_base_id, industry_document_base_key, industry_document_name_key
 FROM ragflow_documents
 WHERE scope_type = 'industry'
   AND industry_knowledge_base_id = ?
@@ -511,8 +507,6 @@ func (q *Queries) GetRAGFlowIndustryDocumentByName(ctx context.Context, arg GetR
 		&i.IndustryKnowledgeBaseID,
 		&i.IndustryDocumentBaseKey,
 		&i.IndustryDocumentNameKey,
-		&i.AutoReparseAttempts,
-		&i.AutoReparseNextAt,
 	)
 	return i, err
 }
@@ -548,7 +542,7 @@ func (q *Queries) GetRAGFlowOrgDataset(ctx context.Context, orgID null.String) (
 }
 
 const listAllRAGFlowDocumentsByScope = `-- name: ListAllRAGFlowDocumentsByScope :many
-SELECT id, dataset_id, scope_type, app_id, ragflow_document_id, name, size_bytes, mime_type, suffix, parse_status, progress, last_error, created_by, created_at, updated_at, org_id, industry_knowledge_base_id, industry_document_base_key, industry_document_name_key, auto_reparse_attempts, auto_reparse_next_at
+SELECT id, dataset_id, scope_type, app_id, ragflow_document_id, name, size_bytes, mime_type, suffix, parse_status, progress, last_error, created_by, created_at, updated_at, org_id, industry_knowledge_base_id, industry_document_base_key, industry_document_name_key
 FROM ragflow_documents
 WHERE scope_type = ?
   AND org_id = ?
@@ -597,8 +591,6 @@ func (q *Queries) ListAllRAGFlowDocumentsByScope(ctx context.Context, arg ListAl
 			&i.IndustryKnowledgeBaseID,
 			&i.IndustryDocumentBaseKey,
 			&i.IndustryDocumentNameKey,
-			&i.AutoReparseAttempts,
-			&i.AutoReparseNextAt,
 		); err != nil {
 			return nil, err
 		}
@@ -614,7 +606,7 @@ func (q *Queries) ListAllRAGFlowDocumentsByScope(ctx context.Context, arg ListAl
 }
 
 const listAllRAGFlowIndustryDocuments = `-- name: ListAllRAGFlowIndustryDocuments :many
-SELECT id, dataset_id, scope_type, app_id, ragflow_document_id, name, size_bytes, mime_type, suffix, parse_status, progress, last_error, created_by, created_at, updated_at, org_id, industry_knowledge_base_id, industry_document_base_key, industry_document_name_key, auto_reparse_attempts, auto_reparse_next_at
+SELECT id, dataset_id, scope_type, app_id, ragflow_document_id, name, size_bytes, mime_type, suffix, parse_status, progress, last_error, created_by, created_at, updated_at, org_id, industry_knowledge_base_id, industry_document_base_key, industry_document_name_key
 FROM ragflow_documents
 WHERE scope_type = 'industry'
   AND industry_knowledge_base_id = ?
@@ -651,8 +643,6 @@ func (q *Queries) ListAllRAGFlowIndustryDocuments(ctx context.Context, industryK
 			&i.IndustryKnowledgeBaseID,
 			&i.IndustryDocumentBaseKey,
 			&i.IndustryDocumentNameKey,
-			&i.AutoReparseAttempts,
-			&i.AutoReparseNextAt,
 		); err != nil {
 			return nil, err
 		}
@@ -668,7 +658,7 @@ func (q *Queries) ListAllRAGFlowIndustryDocuments(ctx context.Context, industryK
 }
 
 const listRAGFlowDocumentsByScope = `-- name: ListRAGFlowDocumentsByScope :many
-SELECT id, dataset_id, scope_type, app_id, ragflow_document_id, name, size_bytes, mime_type, suffix, parse_status, progress, last_error, created_by, created_at, updated_at, org_id, industry_knowledge_base_id, industry_document_base_key, industry_document_name_key, auto_reparse_attempts, auto_reparse_next_at
+SELECT id, dataset_id, scope_type, app_id, ragflow_document_id, name, size_bytes, mime_type, suffix, parse_status, progress, last_error, created_by, created_at, updated_at, org_id, industry_knowledge_base_id, industry_document_base_key, industry_document_name_key
 FROM ragflow_documents
 WHERE scope_type = ?
   AND org_id = ?
@@ -730,93 +720,6 @@ func (q *Queries) ListRAGFlowDocumentsByScope(ctx context.Context, arg ListRAGFl
 			&i.IndustryKnowledgeBaseID,
 			&i.IndustryDocumentBaseKey,
 			&i.IndustryDocumentNameKey,
-			&i.AutoReparseAttempts,
-			&i.AutoReparseNextAt,
-		); err != nil {
-			return nil, err
-		}
-		items = append(items, i)
-	}
-	if err := rows.Close(); err != nil {
-		return nil, err
-	}
-	if err := rows.Err(); err != nil {
-		return nil, err
-	}
-	return items, nil
-}
-
-const listRAGFlowDocumentsDueForAutoReparse = `-- name: ListRAGFlowDocumentsDueForAutoReparse :many
-SELECT d.id, d.dataset_id, d.scope_type, d.app_id, d.ragflow_document_id, d.name, d.size_bytes, d.mime_type, d.suffix, d.parse_status, d.progress, d.last_error, d.created_by, d.created_at, d.updated_at, d.org_id, d.industry_knowledge_base_id, d.industry_document_base_key, d.industry_document_name_key, d.auto_reparse_attempts, d.auto_reparse_next_at, ds.ragflow_dataset_id AS remote_dataset_id
-FROM ragflow_documents d
-JOIN ragflow_datasets ds ON ds.id = d.dataset_id
-WHERE d.parse_status = 'failed'
-  AND d.auto_reparse_attempts < 3
-  AND d.auto_reparse_next_at IS NOT NULL
-  AND d.auto_reparse_next_at <= NOW(6)
-  AND ds.ragflow_dataset_id IS NOT NULL
-ORDER BY d.auto_reparse_next_at ASC, d.updated_at ASC
-LIMIT ?
-`
-
-type ListRAGFlowDocumentsDueForAutoReparseRow struct {
-	ID                      string      `db:"id" json:"id"`
-	DatasetID               string      `db:"dataset_id" json:"dataset_id"`
-	ScopeType               string      `db:"scope_type" json:"scope_type"`
-	AppID                   null.String `db:"app_id" json:"app_id"`
-	RagflowDocumentID       string      `db:"ragflow_document_id" json:"ragflow_document_id"`
-	Name                    string      `db:"name" json:"name"`
-	SizeBytes               int64       `db:"size_bytes" json:"size_bytes"`
-	MimeType                null.String `db:"mime_type" json:"mime_type"`
-	Suffix                  null.String `db:"suffix" json:"suffix"`
-	ParseStatus             string      `db:"parse_status" json:"parse_status"`
-	Progress                int32       `db:"progress" json:"progress"`
-	LastError               null.String `db:"last_error" json:"last_error"`
-	CreatedBy               string      `db:"created_by" json:"created_by"`
-	CreatedAt               time.Time   `db:"created_at" json:"created_at"`
-	UpdatedAt               time.Time   `db:"updated_at" json:"updated_at"`
-	OrgID                   null.String `db:"org_id" json:"org_id"`
-	IndustryKnowledgeBaseID null.String `db:"industry_knowledge_base_id" json:"industry_knowledge_base_id"`
-	IndustryDocumentBaseKey null.String `db:"industry_document_base_key" json:"industry_document_base_key"`
-	IndustryDocumentNameKey null.String `db:"industry_document_name_key" json:"industry_document_name_key"`
-	AutoReparseAttempts     int32       `db:"auto_reparse_attempts" json:"auto_reparse_attempts"`
-	AutoReparseNextAt       null.Time   `db:"auto_reparse_next_at" json:"auto_reparse_next_at"`
-	RemoteDatasetID         null.String `db:"remote_dataset_id" json:"remote_dataset_id"`
-}
-
-// 找出已到冷却时间的模型过载失败文档；远端 dataset 必须存在，否则无法调用 RAGFlow parse。
-func (q *Queries) ListRAGFlowDocumentsDueForAutoReparse(ctx context.Context, limit int32) ([]ListRAGFlowDocumentsDueForAutoReparseRow, error) {
-	rows, err := q.db.QueryContext(ctx, listRAGFlowDocumentsDueForAutoReparse, limit)
-	if err != nil {
-		return nil, err
-	}
-	defer rows.Close()
-	items := []ListRAGFlowDocumentsDueForAutoReparseRow{}
-	for rows.Next() {
-		var i ListRAGFlowDocumentsDueForAutoReparseRow
-		if err := rows.Scan(
-			&i.ID,
-			&i.DatasetID,
-			&i.ScopeType,
-			&i.AppID,
-			&i.RagflowDocumentID,
-			&i.Name,
-			&i.SizeBytes,
-			&i.MimeType,
-			&i.Suffix,
-			&i.ParseStatus,
-			&i.Progress,
-			&i.LastError,
-			&i.CreatedBy,
-			&i.CreatedAt,
-			&i.UpdatedAt,
-			&i.OrgID,
-			&i.IndustryKnowledgeBaseID,
-			&i.IndustryDocumentBaseKey,
-			&i.IndustryDocumentNameKey,
-			&i.AutoReparseAttempts,
-			&i.AutoReparseNextAt,
-			&i.RemoteDatasetID,
 		); err != nil {
 			return nil, err
 		}
@@ -832,7 +735,7 @@ func (q *Queries) ListRAGFlowDocumentsDueForAutoReparse(ctx context.Context, lim
 }
 
 const listRAGFlowDocumentsNeedingRefresh = `-- name: ListRAGFlowDocumentsNeedingRefresh :many
-SELECT d.id, d.dataset_id, d.scope_type, d.app_id, d.ragflow_document_id, d.name, d.size_bytes, d.mime_type, d.suffix, d.parse_status, d.progress, d.last_error, d.created_by, d.created_at, d.updated_at, d.org_id, d.industry_knowledge_base_id, d.industry_document_base_key, d.industry_document_name_key, d.auto_reparse_attempts, d.auto_reparse_next_at, ds.ragflow_dataset_id AS remote_dataset_id
+SELECT d.id, d.dataset_id, d.scope_type, d.app_id, d.ragflow_document_id, d.name, d.size_bytes, d.mime_type, d.suffix, d.parse_status, d.progress, d.last_error, d.created_by, d.created_at, d.updated_at, d.org_id, d.industry_knowledge_base_id, d.industry_document_base_key, d.industry_document_name_key, ds.ragflow_dataset_id AS remote_dataset_id
 FROM ragflow_documents d
 JOIN ragflow_datasets ds ON ds.id = d.dataset_id
 WHERE d.parse_status IN ('queued', 'running')
@@ -861,8 +764,6 @@ type ListRAGFlowDocumentsNeedingRefreshRow struct {
 	IndustryKnowledgeBaseID null.String `db:"industry_knowledge_base_id" json:"industry_knowledge_base_id"`
 	IndustryDocumentBaseKey null.String `db:"industry_document_base_key" json:"industry_document_base_key"`
 	IndustryDocumentNameKey null.String `db:"industry_document_name_key" json:"industry_document_name_key"`
-	AutoReparseAttempts     int32       `db:"auto_reparse_attempts" json:"auto_reparse_attempts"`
-	AutoReparseNextAt       null.Time   `db:"auto_reparse_next_at" json:"auto_reparse_next_at"`
 	RemoteDatasetID         null.String `db:"remote_dataset_id" json:"remote_dataset_id"`
 }
 
@@ -899,8 +800,6 @@ func (q *Queries) ListRAGFlowDocumentsNeedingRefresh(ctx context.Context, limit 
 			&i.IndustryKnowledgeBaseID,
 			&i.IndustryDocumentBaseKey,
 			&i.IndustryDocumentNameKey,
-			&i.AutoReparseAttempts,
-			&i.AutoReparseNextAt,
 			&i.RemoteDatasetID,
 		); err != nil {
 			return nil, err
@@ -916,25 +815,49 @@ func (q *Queries) ListRAGFlowDocumentsNeedingRefresh(ctx context.Context, limit 
 	return items, nil
 }
 
-const listRAGFlowFailedOrStoppedDocumentsByDataset = `-- name: ListRAGFlowFailedOrStoppedDocumentsByDataset :many
-SELECT id, dataset_id, scope_type, app_id, ragflow_document_id, name, size_bytes, mime_type, suffix, parse_status, progress, last_error, created_by, created_at, updated_at, org_id, industry_knowledge_base_id, industry_document_base_key, industry_document_name_key, auto_reparse_attempts, auto_reparse_next_at
-FROM ragflow_documents
-WHERE dataset_id = ?
-  AND parse_status IN ('failed', 'stopped')
-ORDER BY created_at DESC, id DESC
+const listRAGFlowFailedDocumentsForHeal = `-- name: ListRAGFlowFailedDocumentsForHeal :many
+SELECT d.id, d.dataset_id, d.scope_type, d.app_id, d.ragflow_document_id, d.name, d.size_bytes, d.mime_type, d.suffix, d.parse_status, d.progress, d.last_error, d.created_by, d.created_at, d.updated_at, d.org_id, d.industry_knowledge_base_id, d.industry_document_base_key, d.industry_document_name_key, ds.ragflow_dataset_id AS remote_dataset_id
+FROM ragflow_documents d
+JOIN ragflow_datasets ds ON ds.id = d.dataset_id
+WHERE d.parse_status IN ('failed', 'stopped')
+  AND ds.ragflow_dataset_id IS NOT NULL
+ORDER BY d.updated_at ASC
+LIMIT ?
 `
 
-// 列出指定 dataset 下解析失败或已停止的全部 document，供「批量重新解析失败文件」运维操作收集远端
-// 文档 ID 并逐个入队。不分页：失败文件总量有限，且批量重解析需要一次拿全，避免漏掉任何待修复文档。
-func (q *Queries) ListRAGFlowFailedOrStoppedDocumentsByDataset(ctx context.Context, datasetID string) ([]RagflowDocument, error) {
-	rows, err := q.db.QueryContext(ctx, listRAGFlowFailedOrStoppedDocumentsByDataset, datasetID)
+type ListRAGFlowFailedDocumentsForHealRow struct {
+	ID                      string      `db:"id" json:"id"`
+	DatasetID               string      `db:"dataset_id" json:"dataset_id"`
+	ScopeType               string      `db:"scope_type" json:"scope_type"`
+	AppID                   null.String `db:"app_id" json:"app_id"`
+	RagflowDocumentID       string      `db:"ragflow_document_id" json:"ragflow_document_id"`
+	Name                    string      `db:"name" json:"name"`
+	SizeBytes               int64       `db:"size_bytes" json:"size_bytes"`
+	MimeType                null.String `db:"mime_type" json:"mime_type"`
+	Suffix                  null.String `db:"suffix" json:"suffix"`
+	ParseStatus             string      `db:"parse_status" json:"parse_status"`
+	Progress                int32       `db:"progress" json:"progress"`
+	LastError               null.String `db:"last_error" json:"last_error"`
+	CreatedBy               string      `db:"created_by" json:"created_by"`
+	CreatedAt               time.Time   `db:"created_at" json:"created_at"`
+	UpdatedAt               time.Time   `db:"updated_at" json:"updated_at"`
+	OrgID                   null.String `db:"org_id" json:"org_id"`
+	IndustryKnowledgeBaseID null.String `db:"industry_knowledge_base_id" json:"industry_knowledge_base_id"`
+	IndustryDocumentBaseKey null.String `db:"industry_document_base_key" json:"industry_document_base_key"`
+	IndustryDocumentNameKey null.String `db:"industry_document_name_key" json:"industry_document_name_key"`
+	RemoteDatasetID         null.String `db:"remote_dataset_id" json:"remote_dataset_id"`
+}
+
+// 全库列出 failed/stopped 且远端 dataset 仍存在的文档,供自愈任务逐个重解析。带远端 dataset id 以直接调 RAGFlow。
+func (q *Queries) ListRAGFlowFailedDocumentsForHeal(ctx context.Context, limit int32) ([]ListRAGFlowFailedDocumentsForHealRow, error) {
+	rows, err := q.db.QueryContext(ctx, listRAGFlowFailedDocumentsForHeal, limit)
 	if err != nil {
 		return nil, err
 	}
 	defer rows.Close()
-	items := []RagflowDocument{}
+	items := []ListRAGFlowFailedDocumentsForHealRow{}
 	for rows.Next() {
-		var i RagflowDocument
+		var i ListRAGFlowFailedDocumentsForHealRow
 		if err := rows.Scan(
 			&i.ID,
 			&i.DatasetID,
@@ -955,8 +878,7 @@ func (q *Queries) ListRAGFlowFailedOrStoppedDocumentsByDataset(ctx context.Conte
 			&i.IndustryKnowledgeBaseID,
 			&i.IndustryDocumentBaseKey,
 			&i.IndustryDocumentNameKey,
-			&i.AutoReparseAttempts,
-			&i.AutoReparseNextAt,
+			&i.RemoteDatasetID,
 		); err != nil {
 			return nil, err
 		}
@@ -972,7 +894,7 @@ func (q *Queries) ListRAGFlowFailedOrStoppedDocumentsByDataset(ctx context.Conte
 }
 
 const listRAGFlowIndustryDocuments = `-- name: ListRAGFlowIndustryDocuments :many
-SELECT id, dataset_id, scope_type, app_id, ragflow_document_id, name, size_bytes, mime_type, suffix, parse_status, progress, last_error, created_by, created_at, updated_at, org_id, industry_knowledge_base_id, industry_document_base_key, industry_document_name_key, auto_reparse_attempts, auto_reparse_next_at
+SELECT id, dataset_id, scope_type, app_id, ragflow_document_id, name, size_bytes, mime_type, suffix, parse_status, progress, last_error, created_by, created_at, updated_at, org_id, industry_knowledge_base_id, industry_document_base_key, industry_document_name_key
 FROM ragflow_documents
 WHERE scope_type = 'industry'
   AND industry_knowledge_base_id = ?
@@ -1036,8 +958,91 @@ func (q *Queries) ListRAGFlowIndustryDocuments(ctx context.Context, arg ListRAGF
 			&i.IndustryKnowledgeBaseID,
 			&i.IndustryDocumentBaseKey,
 			&i.IndustryDocumentNameKey,
-			&i.AutoReparseAttempts,
-			&i.AutoReparseNextAt,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Close(); err != nil {
+		return nil, err
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
+const listRAGFlowStuckRunningDocumentsForHeal = `-- name: ListRAGFlowStuckRunningDocumentsForHeal :many
+SELECT d.id, d.dataset_id, d.scope_type, d.app_id, d.ragflow_document_id, d.name, d.size_bytes, d.mime_type, d.suffix, d.parse_status, d.progress, d.last_error, d.created_by, d.created_at, d.updated_at, d.org_id, d.industry_knowledge_base_id, d.industry_document_base_key, d.industry_document_name_key, ds.ragflow_dataset_id AS remote_dataset_id
+FROM ragflow_documents d
+JOIN ragflow_datasets ds ON ds.id = d.dataset_id
+WHERE d.parse_status = 'running'
+  AND d.updated_at < ?
+  AND ds.ragflow_dataset_id IS NOT NULL
+ORDER BY d.updated_at ASC
+LIMIT ?
+`
+
+type ListRAGFlowStuckRunningDocumentsForHealParams struct {
+	StuckBefore time.Time `db:"stuck_before" json:"stuck_before"`
+	Limit       int32     `db:"limit" json:"limit"`
+}
+
+type ListRAGFlowStuckRunningDocumentsForHealRow struct {
+	ID                      string      `db:"id" json:"id"`
+	DatasetID               string      `db:"dataset_id" json:"dataset_id"`
+	ScopeType               string      `db:"scope_type" json:"scope_type"`
+	AppID                   null.String `db:"app_id" json:"app_id"`
+	RagflowDocumentID       string      `db:"ragflow_document_id" json:"ragflow_document_id"`
+	Name                    string      `db:"name" json:"name"`
+	SizeBytes               int64       `db:"size_bytes" json:"size_bytes"`
+	MimeType                null.String `db:"mime_type" json:"mime_type"`
+	Suffix                  null.String `db:"suffix" json:"suffix"`
+	ParseStatus             string      `db:"parse_status" json:"parse_status"`
+	Progress                int32       `db:"progress" json:"progress"`
+	LastError               null.String `db:"last_error" json:"last_error"`
+	CreatedBy               string      `db:"created_by" json:"created_by"`
+	CreatedAt               time.Time   `db:"created_at" json:"created_at"`
+	UpdatedAt               time.Time   `db:"updated_at" json:"updated_at"`
+	OrgID                   null.String `db:"org_id" json:"org_id"`
+	IndustryKnowledgeBaseID null.String `db:"industry_knowledge_base_id" json:"industry_knowledge_base_id"`
+	IndustryDocumentBaseKey null.String `db:"industry_document_base_key" json:"industry_document_base_key"`
+	IndustryDocumentNameKey null.String `db:"industry_document_name_key" json:"industry_document_name_key"`
+	RemoteDatasetID         null.String `db:"remote_dataset_id" json:"remote_dataset_id"`
+}
+
+// 全库列出 running 超过给定时刻仍未推进(updated_at 即「进入 running 时刻」,刷新任务状态不变时不写库)的文档,
+// 供自愈任务 stop_parsing→reparse。只取 running、不取 queued(排队是正常积压,不在此恢复)。
+func (q *Queries) ListRAGFlowStuckRunningDocumentsForHeal(ctx context.Context, arg ListRAGFlowStuckRunningDocumentsForHealParams) ([]ListRAGFlowStuckRunningDocumentsForHealRow, error) {
+	rows, err := q.db.QueryContext(ctx, listRAGFlowStuckRunningDocumentsForHeal, arg.StuckBefore, arg.Limit)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []ListRAGFlowStuckRunningDocumentsForHealRow{}
+	for rows.Next() {
+		var i ListRAGFlowStuckRunningDocumentsForHealRow
+		if err := rows.Scan(
+			&i.ID,
+			&i.DatasetID,
+			&i.ScopeType,
+			&i.AppID,
+			&i.RagflowDocumentID,
+			&i.Name,
+			&i.SizeBytes,
+			&i.MimeType,
+			&i.Suffix,
+			&i.ParseStatus,
+			&i.Progress,
+			&i.LastError,
+			&i.CreatedBy,
+			&i.CreatedAt,
+			&i.UpdatedAt,
+			&i.OrgID,
+			&i.IndustryKnowledgeBaseID,
+			&i.IndustryDocumentBaseKey,
+			&i.IndustryDocumentNameKey,
+			&i.RemoteDatasetID,
 		); err != nil {
 			return nil, err
 		}
@@ -1075,90 +1080,16 @@ func (q *Queries) MarkRAGFlowDatasetFailed(ctx context.Context, arg MarkRAGFlowD
 	return err
 }
 
-const markRAGFlowDocumentAutoReparseQueued = `-- name: MarkRAGFlowDocumentAutoReparseQueued :exec
-UPDATE ragflow_documents
-SET parse_status = 'queued',
-    progress = 0,
-    last_error = NULL,
-    auto_reparse_attempts = auto_reparse_attempts + 1,
-    auto_reparse_next_at = NULL,
-    updated_at = now()
-WHERE id = ?
-  AND parse_status = 'failed'
-  AND auto_reparse_attempts < 3
-`
-
-// 自动重解析提交成功后累计次数并清空冷却时间；次数只统计已成功提交给 RAGFlow 的重试。
-func (q *Queries) MarkRAGFlowDocumentAutoReparseQueued(ctx context.Context, id string) error {
-	_, err := q.db.ExecContext(ctx, markRAGFlowDocumentAutoReparseQueued, id)
-	return err
-}
-
-const markRAGFlowDocumentAutoReparseSubmitFailed = `-- name: MarkRAGFlowDocumentAutoReparseSubmitFailed :exec
-UPDATE ragflow_documents
-SET auto_reparse_attempts = auto_reparse_attempts + 1,
-    auto_reparse_next_at = ?,
-    updated_at = now()
-WHERE id = ?
-  AND parse_status = 'failed'
-  AND auto_reparse_attempts < 3
-`
-
-type MarkRAGFlowDocumentAutoReparseSubmitFailedParams struct {
-	AutoReparseNextAt null.Time `db:"auto_reparse_next_at" json:"auto_reparse_next_at"`
-	ID                string    `db:"id" json:"id"`
-}
-
-// 自动重解析「提交」失败（非「文档正在解析中」的其它错误，如远端缺失）时调用：累计一次尝试并按退避
-// 设置下次重试时间。与成功路径共用 auto_reparse_attempts < 3 上限——累计到 3 次后会被扫描查询
-// ListRAGFlowDocumentsDueForAutoReparse（同样 attempts < 3）自然排除，从而停止重试、保持 failed
-// 待人工处理。这保证任何持续提交失败都不会无限循环（线上死循环根因即「提交失败不计次数」导致永远重试）。
-func (q *Queries) MarkRAGFlowDocumentAutoReparseSubmitFailed(ctx context.Context, arg MarkRAGFlowDocumentAutoReparseSubmitFailedParams) error {
-	_, err := q.db.ExecContext(ctx, markRAGFlowDocumentAutoReparseSubmitFailed, arg.AutoReparseNextAt, arg.ID)
-	return err
-}
-
-const markRAGFlowDocumentFailedWithAutoReparse = `-- name: MarkRAGFlowDocumentFailedWithAutoReparse :exec
-UPDATE ragflow_documents
-SET parse_status = 'failed',
-    progress = ?,
-    last_error = ?,
-    auto_reparse_next_at = ?,
-    updated_at = now()
-WHERE id = ?
-`
-
-type MarkRAGFlowDocumentFailedWithAutoReparseParams struct {
-	Progress          int32       `db:"progress" json:"progress"`
-	LastError         null.String `db:"last_error" json:"last_error"`
-	AutoReparseNextAt null.Time   `db:"auto_reparse_next_at" json:"auto_reparse_next_at"`
-	ID                string      `db:"id" json:"id"`
-}
-
-// 写入解析失败状态，并在可自动重试时设置下一次允许重试的时间；next_at 为空表示不再自动重试。
-// auto_reparse_attempts 不在此更新：次数仅在自动重试成功提交后由 MarkRAGFlowDocumentAutoReparseQueued 递增，记录失败本身不算一次重试。
-func (q *Queries) MarkRAGFlowDocumentFailedWithAutoReparse(ctx context.Context, arg MarkRAGFlowDocumentFailedWithAutoReparseParams) error {
-	_, err := q.db.ExecContext(ctx, markRAGFlowDocumentFailedWithAutoReparse,
-		arg.Progress,
-		arg.LastError,
-		arg.AutoReparseNextAt,
-		arg.ID,
-	)
-	return err
-}
-
 const markRAGFlowDocumentManualReparseQueued = `-- name: MarkRAGFlowDocumentManualReparseQueued :exec
 UPDATE ragflow_documents
 SET parse_status = 'queued',
     progress = 0,
     last_error = NULL,
-    auto_reparse_attempts = 0,
-    auto_reparse_next_at = NULL,
     updated_at = now()
 WHERE id = ?
 `
 
-// 人工重解析表示用户显式介入，应清空历史自动重试状态，避免旧次数影响新的解析周期。
+// 人工重解析表示用户显式介入，把文档重置为 queued 交刷新任务继续推进。
 func (q *Queries) MarkRAGFlowDocumentManualReparseQueued(ctx context.Context, id string) error {
 	_, err := q.db.ExecContext(ctx, markRAGFlowDocumentManualReparseQueued, id)
 	return err
@@ -1176,8 +1107,6 @@ SET dataset_id = ?,
     progress = ?,
     last_error = ?,
     created_by = ?,
-    auto_reparse_attempts = 0,
-    auto_reparse_next_at = NULL,
     updated_at = now()
 WHERE id = ?
   AND scope_type = 'industry'
@@ -1202,7 +1131,6 @@ type ReplaceRAGFlowIndustryDocumentParams struct {
 }
 
 // 覆盖行业库同名文件时按旧远端 document ID 乐观替换本地映射；created_by 表示最近一次覆盖上传人，created_at 仍保留首创时间。
-// 文件被替换意味着进入全新的解析周期，需清空历史自动重试次数和冷却时间。
 func (q *Queries) ReplaceRAGFlowIndustryDocument(ctx context.Context, arg ReplaceRAGFlowIndustryDocumentParams) error {
 	_, err := q.db.ExecContext(ctx, replaceRAGFlowIndustryDocument,
 		arg.DatasetID,
@@ -1227,14 +1155,11 @@ UPDATE ragflow_documents
 SET parse_status = 'queued',
     progress = 0,
     last_error = NULL,
-    auto_reparse_attempts = 0,
-    auto_reparse_next_at = NULL,
     updated_at = now()
 WHERE dataset_id = ?
 `
 
 // 整库 embedding 模型切换后，把该 dataset 下所有本地 document 状态重置为 queued，交给现有刷新任务继续推进。
-// 同时清空自动重试次数和冷却时间，使文档从新的解析周期重新计数。
 func (q *Queries) ResetRAGFlowDocumentsParseStatusByDataset(ctx context.Context, datasetID string) error {
 	_, err := q.db.ExecContext(ctx, resetRAGFlowDocumentsParseStatusByDataset, datasetID)
 	return err

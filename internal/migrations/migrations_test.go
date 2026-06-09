@@ -119,6 +119,24 @@ func TestRAGFlowAutoReparseMigrationDeclaresRetryState(t *testing.T) {
 	assert.Contains(t, down, "DROP COLUMN auto_reparse_attempts")
 }
 
+// TestDropRAGFlowAutoReparseMigration 验证 000009 删除自动重试两列与索引,且 down 能重建。
+func TestDropRAGFlowAutoReparseMigration(t *testing.T) {
+	up, err := FS.ReadFile("000009_drop_ragflow_auto_reparse.up.sql")
+	require.NoError(t, err)
+	upStr := string(up)
+	assert.Contains(t, upStr, "DROP INDEX idx_ragflow_documents_auto_reparse")
+	assert.Contains(t, upStr, "DROP COLUMN auto_reparse_next_at")
+	assert.Contains(t, upStr, "DROP COLUMN auto_reparse_attempts")
+
+	down, err := FS.ReadFile("000009_drop_ragflow_auto_reparse.down.sql")
+	require.NoError(t, err)
+	downStr := string(down)
+	// down 必须重建列(便于本地回滚),与 000008 的定义保持一致。
+	assert.Contains(t, downStr, "auto_reparse_attempts INT NOT NULL DEFAULT 0")
+	assert.Contains(t, downStr, "auto_reparse_next_at DATETIME(6) NULL")
+	assert.Contains(t, downStr, "idx_ragflow_documents_auto_reparse")
+}
+
 // TestIndustryKnowledgeMigrationDeclaresDatasetScopeIntegrity 验证行业知识库迁移对 document 与 dataset 的行业归属做复合外键约束。
 func TestIndustryKnowledgeMigrationDeclaresDatasetScopeIntegrity(t *testing.T) {
 	upBytes, err := FS.ReadFile("000007_industry_knowledge.up.sql")

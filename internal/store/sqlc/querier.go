@@ -167,18 +167,18 @@ type Querier interface {
 	ListPlatformSkills(ctx context.Context) ([]PlatformSkill, error)
 	// 扁平列出某个组织或实例知识库文件，支持按状态和文件名过滤。
 	ListRAGFlowDocumentsByScope(ctx context.Context, arg ListRAGFlowDocumentsByScopeParams) ([]RagflowDocument, error)
-	// 找出已到冷却时间的模型过载失败文档；远端 dataset 必须存在，否则无法调用 RAGFlow parse。
-	ListRAGFlowDocumentsDueForAutoReparse(ctx context.Context, limit int32) ([]ListRAGFlowDocumentsDueForAutoReparseRow, error)
 	// 找出需要刷新解析状态的 document，按最久未更新优先；
 	// 同时连出所属 RAGFlow dataset 的远端 ID，供后台刷新任务直接调 RAGFlow ListDocuments。
 	// 远端 dataset 尚未创建（ragflow_dataset_id IS NULL）的文档不会出现：
 	// 此类文档此时本就无法从 RAGFlow 拉取状态，等 dataset 创建完成后再轮询即可。
 	ListRAGFlowDocumentsNeedingRefresh(ctx context.Context, limit int32) ([]ListRAGFlowDocumentsNeedingRefreshRow, error)
-	// 列出指定 dataset 下解析失败或已停止的全部 document，供「批量重新解析失败文件」运维操作收集远端
-	// 文档 ID 并逐个入队。不分页：失败文件总量有限，且批量重解析需要一次拿全，避免漏掉任何待修复文档。
-	ListRAGFlowFailedOrStoppedDocumentsByDataset(ctx context.Context, datasetID string) ([]RagflowDocument, error)
+	// 全库列出 failed/stopped 且远端 dataset 仍存在的文档,供自愈任务逐个重解析。带远端 dataset id 以直接调 RAGFlow。
+	ListRAGFlowFailedDocumentsForHeal(ctx context.Context, limit int32) ([]ListRAGFlowFailedDocumentsForHealRow, error)
 	// 分页列出行业知识库文件，支持按解析状态、文件名和创建时间过滤。
 	ListRAGFlowIndustryDocuments(ctx context.Context, arg ListRAGFlowIndustryDocumentsParams) ([]RagflowDocument, error)
+	// 全库列出 running 超过给定时刻仍未推进(updated_at 即「进入 running 时刻」,刷新任务状态不变时不写库)的文档,
+	// 供自愈任务 stop_parsing→reparse。只取 running、不取 queued(排队是正常积压,不在此恢复)。
+	ListRAGFlowStuckRunningDocumentsForHeal(ctx context.Context, arg ListRAGFlowStuckRunningDocumentsForHealParams) ([]ListRAGFlowStuckRunningDocumentsForHealRow, error)
 	ListReadyJobs(ctx context.Context, limit int32) ([]Job, error)
 	ListRechargeRecordsByOrg(ctx context.Context, arg ListRechargeRecordsByOrgParams) ([]RechargeRecord, error)
 	// 列出当前期望运行（k8s Deployment 已创建）的应用，供 app_status_reconciler 周期 poll pod 状态。
@@ -207,17 +207,7 @@ type Querier interface {
 	MarkJobSucceeded(ctx context.Context, id string) error
 	// 标记 dataset 生命周期失败，保留错误文本用于管理面排障。
 	MarkRAGFlowDatasetFailed(ctx context.Context, arg MarkRAGFlowDatasetFailedParams) error
-	// 自动重解析提交成功后累计次数并清空冷却时间；次数只统计已成功提交给 RAGFlow 的重试。
-	MarkRAGFlowDocumentAutoReparseQueued(ctx context.Context, id string) error
-	// 自动重解析「提交」失败（非「文档正在解析中」的其它错误，如远端缺失）时调用：累计一次尝试并按退避
-	// 设置下次重试时间。与成功路径共用 auto_reparse_attempts < 3 上限——累计到 3 次后会被扫描查询
-	// ListRAGFlowDocumentsDueForAutoReparse（同样 attempts < 3）自然排除，从而停止重试、保持 failed
-	// 待人工处理。这保证任何持续提交失败都不会无限循环（线上死循环根因即「提交失败不计次数」导致永远重试）。
-	MarkRAGFlowDocumentAutoReparseSubmitFailed(ctx context.Context, arg MarkRAGFlowDocumentAutoReparseSubmitFailedParams) error
-	// 写入解析失败状态，并在可自动重试时设置下一次允许重试的时间；next_at 为空表示不再自动重试。
-	// auto_reparse_attempts 不在此更新：次数仅在自动重试成功提交后由 MarkRAGFlowDocumentAutoReparseQueued 递增，记录失败本身不算一次重试。
-	MarkRAGFlowDocumentFailedWithAutoReparse(ctx context.Context, arg MarkRAGFlowDocumentFailedWithAutoReparseParams) error
-	// 人工重解析表示用户显式介入，应清空历史自动重试状态，避免旧次数影响新的解析周期。
+	// 人工重解析表示用户显式介入，把文档重置为 queued 交刷新任务继续推进。
 	MarkRAGFlowDocumentManualReparseQueued(ctx context.Context, id string) error
 	MarkUserLoggedIn(ctx context.Context, id string) error
 	// 重命名未删除行业知识库；唯一约束负责拦截同名未删除记录。
@@ -225,14 +215,12 @@ type Querier interface {
 	// 替换助手版本行业知识库关联前先清空旧关联，由调用方在同一事务中重新插入。
 	ReplaceAssistantVersionIndustryKnowledgeBases(ctx context.Context, versionID string) error
 	// 覆盖行业库同名文件时按旧远端 document ID 乐观替换本地映射；created_by 表示最近一次覆盖上传人，created_at 仍保留首创时间。
-	// 文件被替换意味着进入全新的解析周期，需清空历史自动重试次数和冷却时间。
 	ReplaceRAGFlowIndustryDocument(ctx context.Context, arg ReplaceRAGFlowIndustryDocumentParams) error
 	// reaper 把已 running / succeeded 的 job 重置为 pending。
 	// locked_by / locked_at 一并清空避免被旧 worker 误识别为本机持有。
 	// 注意：jobs 表无 started_at 列，仅清 locked_* / last_error / 状态。
 	RequeueJob(ctx context.Context, id string) error
 	// 整库 embedding 模型切换后，把该 dataset 下所有本地 document 状态重置为 queued，交给现有刷新任务继续推进。
-	// 同时清空自动重试次数和冷却时间，使文档从新的解析周期重新计数。
 	ResetRAGFlowDocumentsParseStatusByDataset(ctx context.Context, datasetID string) error
 	RetryJob(ctx context.Context, arg RetryJobParams) error
 	RevokeRefreshToken(ctx context.Context, id string) error

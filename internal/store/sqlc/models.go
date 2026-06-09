@@ -246,8 +246,6 @@ type RagflowDocument struct {
 	IndustryKnowledgeBaseID null.String `db:"industry_knowledge_base_id" json:"industry_knowledge_base_id"`
 	IndustryDocumentBaseKey null.String `db:"industry_document_base_key" json:"industry_document_base_key"`
 	IndustryDocumentNameKey null.String `db:"industry_document_name_key" json:"industry_document_name_key"`
-	AutoReparseAttempts     int32       `db:"auto_reparse_attempts" json:"auto_reparse_attempts"`
-	AutoReparseNextAt       null.Time   `db:"auto_reparse_next_at" json:"auto_reparse_next_at"`
 }
 
 type RechargeRecord struct {

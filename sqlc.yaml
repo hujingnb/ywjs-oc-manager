@@ -10,6 +10,7 @@ sql:
       - internal/migrations/000006_skill_library.up.sql
       - internal/migrations/000007_industry_knowledge.up.sql
       - internal/migrations/000008_ragflow_auto_reparse.up.sql
+      - internal/migrations/000009_drop_ragflow_auto_reparse.up.sql
     queries: internal/store/queries
     gen:
       go:

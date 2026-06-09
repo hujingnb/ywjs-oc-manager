@@ -98,7 +98,6 @@ INSERT INTO ragflow_documents (
 
 -- name: ReplaceRAGFlowIndustryDocument :exec
 -- 覆盖行业库同名文件时按旧远端 document ID 乐观替换本地映射；created_by 表示最近一次覆盖上传人，created_at 仍保留首创时间。
--- 文件被替换意味着进入全新的解析周期，需清空历史自动重试次数和冷却时间。
 UPDATE ragflow_documents
 SET dataset_id = sqlc.arg(dataset_id),
     ragflow_document_id = sqlc.arg(ragflow_document_id),
@@ -110,8 +109,6 @@ SET dataset_id = sqlc.arg(dataset_id),
     progress = sqlc.arg(progress),
     last_error = sqlc.arg(last_error),
     created_by = sqlc.arg(created_by),
-    auto_reparse_attempts = 0,
-    auto_reparse_next_at = NULL,
     updated_at = now()
 WHERE id = sqlc.arg(id)
   AND scope_type = 'industry'
@@ -161,78 +158,27 @@ SELECT *
 FROM ragflow_documents
 WHERE dataset_id = ? AND ragflow_document_id = ?;
 
--- name: ListRAGFlowFailedOrStoppedDocumentsByDataset :many
--- 列出指定 dataset 下解析失败或已停止的全部 document，供「批量重新解析失败文件」运维操作收集远端
--- 文档 ID 并逐个入队。不分页：失败文件总量有限，且批量重解析需要一次拿全，避免漏掉任何待修复文档。
-SELECT *
-FROM ragflow_documents
-WHERE dataset_id = ?
-  AND parse_status IN ('failed', 'stopped')
-ORDER BY created_at DESC, id DESC;
-
 -- name: UpdateRAGFlowDocumentParseStatus :exec
 -- 回写解析状态、进度和错误；状态值由 service 层从 RAGFlow run 值归一化。
 UPDATE ragflow_documents
 SET parse_status = ?, progress = ?, last_error = ?, updated_at = now()
 WHERE id = ?;
 
--- name: MarkRAGFlowDocumentFailedWithAutoReparse :exec
--- 写入解析失败状态，并在可自动重试时设置下一次允许重试的时间；next_at 为空表示不再自动重试。
--- auto_reparse_attempts 不在此更新：次数仅在自动重试成功提交后由 MarkRAGFlowDocumentAutoReparseQueued 递增，记录失败本身不算一次重试。
-UPDATE ragflow_documents
-SET parse_status = 'failed',
-    progress = ?,
-    last_error = ?,
-    auto_reparse_next_at = ?,
-    updated_at = now()
-WHERE id = ?;
-
--- name: MarkRAGFlowDocumentAutoReparseQueued :exec
--- 自动重解析提交成功后累计次数并清空冷却时间；次数只统计已成功提交给 RAGFlow 的重试。
-UPDATE ragflow_documents
-SET parse_status = 'queued',
-    progress = 0,
-    last_error = NULL,
-    auto_reparse_attempts = auto_reparse_attempts + 1,
-    auto_reparse_next_at = NULL,
-    updated_at = now()
-WHERE id = ?
-  AND parse_status = 'failed'
-  AND auto_reparse_attempts < 3;
-
--- name: MarkRAGFlowDocumentAutoReparseSubmitFailed :exec
--- 自动重解析「提交」失败（非「文档正在解析中」的其它错误，如远端缺失）时调用：累计一次尝试并按退避
--- 设置下次重试时间。与成功路径共用 auto_reparse_attempts < 3 上限——累计到 3 次后会被扫描查询
--- ListRAGFlowDocumentsDueForAutoReparse（同样 attempts < 3）自然排除，从而停止重试、保持 failed
--- 待人工处理。这保证任何持续提交失败都不会无限循环（线上死循环根因即「提交失败不计次数」导致永远重试）。
-UPDATE ragflow_documents
-SET auto_reparse_attempts = auto_reparse_attempts + 1,
-    auto_reparse_next_at = ?,
-    updated_at = now()
-WHERE id = ?
-  AND parse_status = 'failed'
-  AND auto_reparse_attempts < 3;
-
 -- name: MarkRAGFlowDocumentManualReparseQueued :exec
--- 人工重解析表示用户显式介入，应清空历史自动重试状态，避免旧次数影响新的解析周期。
+-- 人工重解析表示用户显式介入，把文档重置为 queued 交刷新任务继续推进。
 UPDATE ragflow_documents
 SET parse_status = 'queued',
     progress = 0,
     last_error = NULL,
-    auto_reparse_attempts = 0,
-    auto_reparse_next_at = NULL,
     updated_at = now()
 WHERE id = ?;
 
 -- name: ResetRAGFlowDocumentsParseStatusByDataset :exec
 -- 整库 embedding 模型切换后，把该 dataset 下所有本地 document 状态重置为 queued，交给现有刷新任务继续推进。
--- 同时清空自动重试次数和冷却时间，使文档从新的解析周期重新计数。
 UPDATE ragflow_documents
 SET parse_status = 'queued',
     progress = 0,
     last_error = NULL,
-    auto_reparse_attempts = 0,
-    auto_reparse_next_at = NULL,
     updated_at = now()
 WHERE dataset_id = ?;
 
@@ -252,19 +198,6 @@ JOIN ragflow_datasets ds ON ds.id = d.dataset_id
 WHERE d.parse_status IN ('queued', 'running')
   AND ds.ragflow_dataset_id IS NOT NULL
 ORDER BY d.updated_at ASC
-LIMIT ?;
-
--- name: ListRAGFlowDocumentsDueForAutoReparse :many
--- 找出已到冷却时间的模型过载失败文档；远端 dataset 必须存在，否则无法调用 RAGFlow parse。
-SELECT d.*, ds.ragflow_dataset_id AS remote_dataset_id
-FROM ragflow_documents d
-JOIN ragflow_datasets ds ON ds.id = d.dataset_id
-WHERE d.parse_status = 'failed'
-  AND d.auto_reparse_attempts < 3
-  AND d.auto_reparse_next_at IS NOT NULL
-  AND d.auto_reparse_next_at <= NOW(6)
-  AND ds.ragflow_dataset_id IS NOT NULL
-ORDER BY d.auto_reparse_next_at ASC, d.updated_at ASC
 LIMIT ?;
 
 -- name: SumRAGFlowDocumentsSizeByScope :one
@@ -330,3 +263,25 @@ FROM ragflow_documents
 WHERE scope_type = 'industry'
   AND industry_knowledge_base_id = ?
   AND name = ?;
+
+-- name: ListRAGFlowFailedDocumentsForHeal :many
+-- 全库列出 failed/stopped 且远端 dataset 仍存在的文档,供自愈任务逐个重解析。带远端 dataset id 以直接调 RAGFlow。
+SELECT d.*, ds.ragflow_dataset_id AS remote_dataset_id
+FROM ragflow_documents d
+JOIN ragflow_datasets ds ON ds.id = d.dataset_id
+WHERE d.parse_status IN ('failed', 'stopped')
+  AND ds.ragflow_dataset_id IS NOT NULL
+ORDER BY d.updated_at ASC
+LIMIT ?;
+
+-- name: ListRAGFlowStuckRunningDocumentsForHeal :many
+-- 全库列出 running 超过给定时刻仍未推进(updated_at 即「进入 running 时刻」,刷新任务状态不变时不写库)的文档,
+-- 供自愈任务 stop_parsing→reparse。只取 running、不取 queued(排队是正常积压,不在此恢复)。
+SELECT d.*, ds.ragflow_dataset_id AS remote_dataset_id
+FROM ragflow_documents d
+JOIN ragflow_datasets ds ON ds.id = d.dataset_id
+WHERE d.parse_status = 'running'
+  AND d.updated_at < sqlc.arg(stuck_before)
+  AND ds.ragflow_dataset_id IS NOT NULL
+ORDER BY d.updated_at ASC
+LIMIT ?;
