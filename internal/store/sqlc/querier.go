@@ -167,6 +167,8 @@ type Querier interface {
 	ListPlatformSkills(ctx context.Context) ([]PlatformSkill, error)
 	// 扁平列出某个组织或实例知识库文件，支持按状态和文件名过滤。
 	ListRAGFlowDocumentsByScope(ctx context.Context, arg ListRAGFlowDocumentsByScopeParams) ([]RagflowDocument, error)
+	// 找出已到冷却时间的模型过载失败文档；远端 dataset 必须存在，否则无法调用 RAGFlow parse。
+	ListRAGFlowDocumentsDueForAutoReparse(ctx context.Context, limit int32) ([]ListRAGFlowDocumentsDueForAutoReparseRow, error)
 	// 找出需要刷新解析状态的 document，按最久未更新优先；
 	// 同时连出所属 RAGFlow dataset 的远端 ID，供后台刷新任务直接调 RAGFlow ListDocuments。
 	// 远端 dataset 尚未创建（ragflow_dataset_id IS NULL）的文档不会出现：
@@ -202,18 +204,27 @@ type Querier interface {
 	MarkJobSucceeded(ctx context.Context, id string) error
 	// 标记 dataset 生命周期失败，保留错误文本用于管理面排障。
 	MarkRAGFlowDatasetFailed(ctx context.Context, arg MarkRAGFlowDatasetFailedParams) error
+	// 自动重解析提交成功后累计次数并清空冷却时间；次数只统计已成功提交给 RAGFlow 的重试。
+	MarkRAGFlowDocumentAutoReparseQueued(ctx context.Context, id string) error
+	// 写入解析失败状态，并在可自动重试时设置下一次允许重试的时间；next_at 为空表示不再自动重试。
+	// auto_reparse_attempts 不在此更新：次数仅在自动重试成功提交后由 MarkRAGFlowDocumentAutoReparseQueued 递增，记录失败本身不算一次重试。
+	MarkRAGFlowDocumentFailedWithAutoReparse(ctx context.Context, arg MarkRAGFlowDocumentFailedWithAutoReparseParams) error
+	// 人工重解析表示用户显式介入，应清空历史自动重试状态，避免旧次数影响新的解析周期。
+	MarkRAGFlowDocumentManualReparseQueued(ctx context.Context, id string) error
 	MarkUserLoggedIn(ctx context.Context, id string) error
 	// 重命名未删除行业知识库；唯一约束负责拦截同名未删除记录。
 	RenameIndustryKnowledgeBase(ctx context.Context, arg RenameIndustryKnowledgeBaseParams) error
 	// 替换助手版本行业知识库关联前先清空旧关联，由调用方在同一事务中重新插入。
 	ReplaceAssistantVersionIndustryKnowledgeBases(ctx context.Context, versionID string) error
 	// 覆盖行业库同名文件时按旧远端 document ID 乐观替换本地映射；created_by 表示最近一次覆盖上传人，created_at 仍保留首创时间。
+	// 文件被替换意味着进入全新的解析周期，需清空历史自动重试次数和冷却时间。
 	ReplaceRAGFlowIndustryDocument(ctx context.Context, arg ReplaceRAGFlowIndustryDocumentParams) error
 	// reaper 把已 running / succeeded 的 job 重置为 pending。
 	// locked_by / locked_at 一并清空避免被旧 worker 误识别为本机持有。
 	// 注意：jobs 表无 started_at 列，仅清 locked_* / last_error / 状态。
 	RequeueJob(ctx context.Context, id string) error
 	// 整库 embedding 模型切换后，把该 dataset 下所有本地 document 状态重置为 queued，交给现有刷新任务继续推进。
+	// 同时清空自动重试次数和冷却时间，使文档从新的解析周期重新计数。
 	ResetRAGFlowDocumentsParseStatusByDataset(ctx context.Context, datasetID string) error
 	RetryJob(ctx context.Context, arg RetryJobParams) error
 	RevokeRefreshToken(ctx context.Context, id string) error

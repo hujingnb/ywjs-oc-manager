@@ -98,6 +98,7 @@ INSERT INTO ragflow_documents (
 
 -- name: ReplaceRAGFlowIndustryDocument :exec
 -- 覆盖行业库同名文件时按旧远端 document ID 乐观替换本地映射；created_by 表示最近一次覆盖上传人，created_at 仍保留首创时间。
+-- 文件被替换意味着进入全新的解析周期，需清空历史自动重试次数和冷却时间。
 UPDATE ragflow_documents
 SET dataset_id = sqlc.arg(dataset_id),
     ragflow_document_id = sqlc.arg(ragflow_document_id),
@@ -109,6 +110,8 @@ SET dataset_id = sqlc.arg(dataset_id),
     progress = sqlc.arg(progress),
     last_error = sqlc.arg(last_error),
     created_by = sqlc.arg(created_by),
+    auto_reparse_attempts = 0,
+    auto_reparse_next_at = NULL,
     updated_at = now()
 WHERE id = sqlc.arg(id)
   AND scope_type = 'industry'
@@ -164,12 +167,50 @@ UPDATE ragflow_documents
 SET parse_status = ?, progress = ?, last_error = ?, updated_at = now()
 WHERE id = ?;
 
--- name: ResetRAGFlowDocumentsParseStatusByDataset :exec
--- 整库 embedding 模型切换后，把该 dataset 下所有本地 document 状态重置为 queued，交给现有刷新任务继续推进。
+-- name: MarkRAGFlowDocumentFailedWithAutoReparse :exec
+-- 写入解析失败状态，并在可自动重试时设置下一次允许重试的时间；next_at 为空表示不再自动重试。
+-- auto_reparse_attempts 不在此更新：次数仅在自动重试成功提交后由 MarkRAGFlowDocumentAutoReparseQueued 递增，记录失败本身不算一次重试。
+UPDATE ragflow_documents
+SET parse_status = 'failed',
+    progress = ?,
+    last_error = ?,
+    auto_reparse_next_at = ?,
+    updated_at = now()
+WHERE id = ?;
+
+-- name: MarkRAGFlowDocumentAutoReparseQueued :exec
+-- 自动重解析提交成功后累计次数并清空冷却时间；次数只统计已成功提交给 RAGFlow 的重试。
 UPDATE ragflow_documents
 SET parse_status = 'queued',
     progress = 0,
     last_error = NULL,
+    auto_reparse_attempts = auto_reparse_attempts + 1,
+    auto_reparse_next_at = NULL,
+    updated_at = now()
+WHERE id = ?
+  AND parse_status = 'failed'
+  AND auto_reparse_attempts < 3;
+
+-- name: MarkRAGFlowDocumentManualReparseQueued :exec
+-- 人工重解析表示用户显式介入，应清空历史自动重试状态，避免旧次数影响新的解析周期。
+UPDATE ragflow_documents
+SET parse_status = 'queued',
+    progress = 0,
+    last_error = NULL,
+    auto_reparse_attempts = 0,
+    auto_reparse_next_at = NULL,
+    updated_at = now()
+WHERE id = ?;
+
+-- name: ResetRAGFlowDocumentsParseStatusByDataset :exec
+-- 整库 embedding 模型切换后，把该 dataset 下所有本地 document 状态重置为 queued，交给现有刷新任务继续推进。
+-- 同时清空自动重试次数和冷却时间，使文档从新的解析周期重新计数。
+UPDATE ragflow_documents
+SET parse_status = 'queued',
+    progress = 0,
+    last_error = NULL,
+    auto_reparse_attempts = 0,
+    auto_reparse_next_at = NULL,
     updated_at = now()
 WHERE dataset_id = ?;
 
@@ -189,6 +230,19 @@ JOIN ragflow_datasets ds ON ds.id = d.dataset_id
 WHERE d.parse_status IN ('queued', 'running')
   AND ds.ragflow_dataset_id IS NOT NULL
 ORDER BY d.updated_at ASC
+LIMIT ?;
+
+-- name: ListRAGFlowDocumentsDueForAutoReparse :many
+-- 找出已到冷却时间的模型过载失败文档；远端 dataset 必须存在，否则无法调用 RAGFlow parse。
+SELECT d.*, ds.ragflow_dataset_id AS remote_dataset_id
+FROM ragflow_documents d
+JOIN ragflow_datasets ds ON ds.id = d.dataset_id
+WHERE d.parse_status = 'failed'
+  AND d.auto_reparse_attempts < 3
+  AND d.auto_reparse_next_at IS NOT NULL
+  AND d.auto_reparse_next_at <= NOW(6)
+  AND ds.ragflow_dataset_id IS NOT NULL
+ORDER BY d.auto_reparse_next_at ASC, d.updated_at ASC
 LIMIT ?;
 
 -- name: SumRAGFlowDocumentsSizeByScope :one

@@ -89,6 +89,33 @@ func TestRAGFlowKnowledgeMigrationDeclaresIntegrityConstraints(t *testing.T) {
 	assert.Contains(t, up, "CONSTRAINT fk_ragflow_documents_dataset_app_scope FOREIGN KEY (dataset_id, scope_type, org_id, app_id)")
 }
 
+// TestRAGFlowAutoReparseMigrationDeclaresRetryState 验证自动重解析迁移声明重试状态、索引、存量回填和回滚语句。
+func TestRAGFlowAutoReparseMigrationDeclaresRetryState(t *testing.T) {
+	upBytes, err := FS.ReadFile("000008_ragflow_auto_reparse.up.sql")
+	require.NoError(t, err)
+	up := string(upBytes)
+
+	// 自动重解析需要持久化次数和下次可重试时间，避免服务重启后丢失冷却状态。
+	assert.Contains(t, up, "auto_reparse_attempts INT NOT NULL DEFAULT 0")
+	assert.Contains(t, up, "auto_reparse_next_at DATETIME(6) NULL")
+	assert.Contains(t, up, "idx_ragflow_documents_auto_reparse")
+
+	// 存量模型过载失败必须被回填为立即可重试，但迁移本身不直接调用 RAGFlow。
+	assert.Contains(t, up, "SET auto_reparse_next_at = NOW(6)")
+	assert.Contains(t, up, "LOWER(last_error) LIKE '%model service overloaded%'")
+	assert.Contains(t, up, "LOWER(last_error) LIKE '%error code: 503%'")
+	assert.Contains(t, up, "LOWER(last_error) LIKE '%code: 50505%'")
+
+	downBytes, err := FS.ReadFile("000008_ragflow_auto_reparse.down.sql")
+	require.NoError(t, err)
+	down := string(downBytes)
+
+	// down 迁移必须先删索引再删列，保证本地回滚最近一次迁移可用。
+	assert.Contains(t, down, "DROP INDEX idx_ragflow_documents_auto_reparse")
+	assert.Contains(t, down, "DROP COLUMN auto_reparse_next_at")
+	assert.Contains(t, down, "DROP COLUMN auto_reparse_attempts")
+}
+
 // TestIndustryKnowledgeMigrationDeclaresDatasetScopeIntegrity 验证行业知识库迁移对 document 与 dataset 的行业归属做复合外键约束。
 func TestIndustryKnowledgeMigrationDeclaresDatasetScopeIntegrity(t *testing.T) {
 	upBytes, err := FS.ReadFile("000007_industry_knowledge.up.sql")
