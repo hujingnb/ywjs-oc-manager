@@ -51,22 +51,30 @@ func TestHealState(t *testing.T) {
 	require.NoError(t, err)
 	assert.False(t, inCooldown, "全新文档不应处于 cooldown 冷却状态")
 
-	// 首次 RecordAttempt，backoff=10m：计数应为 1，且触发 cooldown
-	count, err := hs.RecordAttempt(ctx, docID, 10*time.Minute)
+	// 首次 RecordAttempt：仅计数（拆分后不再有冷却副作用），计数应为 1，且此时仍不在 cooldown
+	count, err := hs.RecordAttempt(ctx, docID)
 	require.NoError(t, err)
 	assert.Equal(t, 1, count, "首次尝试后计数应为 1")
 
 	inCooldown, err = hs.InCooldown(ctx, docID)
 	require.NoError(t, err)
-	assert.True(t, inCooldown, "首次 RecordAttempt（backoff>0）后应处于 cooldown")
+	assert.False(t, inCooldown, "RecordAttempt 本身不再设置 cooldown，未调用 SetCooldown 前不应处于冷却")
+
+	// 调用 SetCooldown 后才进入 cooldown：验证计数与冷却已解耦
+	err = hs.SetCooldown(ctx, docID, 10*time.Minute)
+	require.NoError(t, err)
+
+	inCooldown, err = hs.InCooldown(ctx, docID)
+	require.NoError(t, err)
+	assert.True(t, inCooldown, "调用 SetCooldown（d>0）后应处于 cooldown")
 
 	// 第二次 RecordAttempt：计数累加为 2
-	count, err = hs.RecordAttempt(ctx, docID, 5*time.Minute)
+	count, err = hs.RecordAttempt(ctx, docID)
 	require.NoError(t, err)
 	assert.Equal(t, 2, count, "第二次尝试后计数应为 2")
 
 	// 第三次 RecordAttempt：计数累加为 3
-	count, err = hs.RecordAttempt(ctx, docID, 5*time.Minute)
+	count, err = hs.RecordAttempt(ctx, docID)
 	require.NoError(t, err)
 	assert.Equal(t, 3, count, "第三次尝试后计数应为 3")
 
@@ -79,9 +87,9 @@ func TestHealState(t *testing.T) {
 	assert.True(t, givenUp, "MarkGivenUp 后 GivenUp 应返回 true")
 }
 
-// TestHealState_RecordAttemptNoBackoff 验证 backoff=0 时不设置 cooldown key。
-// 自愈逻辑可能在末次重试时不需要冷却期，直接标记放弃，此时不应产生 cooldown。
-func TestHealState_RecordAttemptNoBackoff(t *testing.T) {
+// TestHealState_RecordAttemptNoCooldown 验证 RecordAttempt 自身不产生 cooldown 副作用。
+// 拆分后冷却由 SetCooldown 单独负责，自愈逻辑在达到上限直接放弃时可只计数、不设冷却。
+func TestHealState_RecordAttemptNoCooldown(t *testing.T) {
 	client, cleanup := newTestHealRedis(t)
 	defer cleanup()
 
@@ -91,14 +99,14 @@ func TestHealState_RecordAttemptNoBackoff(t *testing.T) {
 		Giveup:   7 * 24 * time.Hour,
 	})
 
-	docID := "doc-heal-test-nobackoff"
+	docID := "doc-heal-test-nocooldown"
 
-	// backoff=0：计数增加，但不设 cooldown
-	count, err := hs.RecordAttempt(ctx, docID, 0)
+	// 只调用 RecordAttempt：计数从 1 开始，但不应设 cooldown
+	count, err := hs.RecordAttempt(ctx, docID)
 	require.NoError(t, err)
-	assert.Equal(t, 1, count, "backoff=0 时计数仍应从 1 开始")
+	assert.Equal(t, 1, count, "RecordAttempt 计数应从 1 开始")
 
 	inCooldown, err := hs.InCooldown(ctx, docID)
 	require.NoError(t, err)
-	assert.False(t, inCooldown, "backoff=0 时不应设置 cooldown key")
+	assert.False(t, inCooldown, "仅 RecordAttempt 不应设置 cooldown key")
 }

@@ -60,13 +60,15 @@ func (h *HealState) kGiveup(doc string) string {
 }
 
 // RecordAttempt 记录一次自愈尝试：
-//  1. INCR 尝试计数并重设 TTL（用 Expire 刷新；INCR 不自带 TTL）。
-//  2. 若 backoff > 0，设置冷却 key = "1" 并附 TTL=backoff（到期自动解除冷却）。
+//  1. INCR 尝试计数（首次调用从 0 起递增，返回 1）。
+//  2. 用 Expire 刷新计数 key TTL（INCR 本身不带 TTL）。
 //
 // 返回本次递增后的计数（int），调用方据此判断是否已达重试上限。
+// 设计取舍：本方法只负责「计数」，冷却（退避）由调用方在拿到计数后另行 SetCooldown 决定，
+// 二者解耦后自愈编排（healer）可在「达到上限」时选择不设冷却而直接 MarkGivenUp，逻辑更清晰。
 // 注意：INCR + Expire 两步非原子，极低概率下进程崩溃可导致计数 key 无 TTL，
 // 属可接受风险（超长滞留后业务侧 GivenUp 检查仍可兜底）。
-func (h *HealState) RecordAttempt(ctx context.Context, doc string, backoff time.Duration) (int, error) {
+func (h *HealState) RecordAttempt(ctx context.Context, doc string) (int, error) {
 	// INCR 原子递增；若 key 不存在则从 0 开始，即首次调用返回 1。
 	cnt, err := h.rc.Incr(ctx, h.kAttempts(doc)).Result()
 	if err != nil {
@@ -78,14 +80,14 @@ func (h *HealState) RecordAttempt(ctx context.Context, doc string, backoff time.
 		return 0, err
 	}
 
-	// backoff > 0 时写冷却 key，TTL = backoff，到期后 InCooldown 自动返回 false。
-	if backoff > 0 {
-		if err = h.rc.Set(ctx, h.kCooldown(doc), "1", backoff).Err(); err != nil {
-			return 0, err
-		}
-	}
-
 	return int(cnt), nil
+}
+
+// SetCooldown 设置文档的退避冷却标记：写冷却 key = "1"，TTL = d，到期后 InCooldown 自动返回 false。
+// 与 RecordAttempt 拆开后，调用方可按「第 n 次尝试 → 第 n 档退避」自由决定冷却时长，
+// 也可在达到上限时跳过冷却（不调用本方法）改为放弃。d 应为正值，调用方负责保证（d<=0 时不应调用）。
+func (h *HealState) SetCooldown(ctx context.Context, doc string, d time.Duration) error {
+	return h.rc.Set(ctx, h.kCooldown(doc), "1", d).Err()
 }
 
 // InCooldown 检查指定文档是否处于退避冷却期。
