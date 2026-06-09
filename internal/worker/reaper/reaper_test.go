@@ -73,7 +73,6 @@ type fakeLocker struct {
 func (l *fakeLocker) TryAcquire(_ context.Context, _, _ string, _ time.Duration) (bool, error) {
 	return l.acquireOK, l.acquireErr
 }
-func (l *fakeLocker) Renew(_ context.Context, _, _ string, _ time.Duration) error { return nil }
 func (l *fakeLocker) Refresh(_ context.Context, _, _ string, _ time.Duration) (bool, error) {
 	return true, nil
 }
