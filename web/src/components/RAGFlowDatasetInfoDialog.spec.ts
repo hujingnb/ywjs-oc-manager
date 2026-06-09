@@ -25,6 +25,7 @@ const models = ref<KnowledgeEmbeddingModelList>({
 })
 
 const mutateAsync = vi.fn()
+const reparseMutateAsync = vi.fn()
 const refetchInfo = vi.fn()
 const refetchModels = vi.fn()
 
@@ -43,6 +44,10 @@ vi.mock('@/api/hooks/useKnowledge', () => ({
   }),
   useUpdateRAGFlowDatasetEmbeddingModel: () => ({
     mutateAsync,
+    isPending: ref(false),
+  }),
+  useReparseFailedRAGFlowDataset: () => ({
+    mutateAsync: reparseMutateAsync,
     isPending: ref(false),
   }),
 }))
@@ -151,6 +156,7 @@ describe('RAGFlowDatasetInfoDialog', () => {
   beforeEach(() => {
     document.body.innerHTML = ''
     mutateAsync.mockReset()
+    reparseMutateAsync.mockReset()
     refetchInfo.mockReset()
     refetchModels.mockReset()
     info.value = {
@@ -205,6 +211,36 @@ describe('RAGFlowDatasetInfoDialog', () => {
       provider: 'OpenAI-API-Compatible',
     })
     expect(wrapper.emitted('updated')).toHaveLength(1)
+    wrapper.unmount()
+  })
+
+  it('打开确认后触发批量重解析并刷新', async () => {
+    // 平台管理员触发「重新解析失败文件」应先打开二次确认，确认后调用批量重解析 mutation 并刷新信息。
+    reparseMutateAsync.mockResolvedValue(info.value)
+    const wrapper = mountDialog()
+    await nextTick()
+    const vm = wrapper.vm as unknown as {
+      canReparse: boolean
+      openReparseConfirm: () => void
+      reparseConfirmOpen: boolean
+      submitReparse: () => Promise<void>
+    }
+    expect(vm.canReparse).toBe(true)
+    vm.openReparseConfirm()
+    await nextTick()
+    expect(vm.reparseConfirmOpen).toBe(true)
+    await vm.submitReparse()
+    expect(reparseMutateAsync).toHaveBeenCalledTimes(1)
+    expect(wrapper.emitted('updated')).toHaveLength(1)
+    wrapper.unmount()
+  })
+
+  it('dataset 未创建时禁用重新解析失败文件按钮', async () => {
+    // 远端 dataset 不存在时不应允许批量重解析，canReparse 必须为 false。
+    info.value = { scope: 'org', target_id: 'org-1', target_name: '测试企业', status: 'not_created' }
+    const wrapper = mountDialog()
+    await nextTick()
+    expect((wrapper.vm as unknown as { canReparse: boolean }).canReparse).toBe(false)
     wrapper.unmount()
   })
 })
