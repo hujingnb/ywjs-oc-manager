@@ -6,6 +6,7 @@ import (
 	"errors"
 	"strings"
 	"testing"
+	"time"
 
 	null "github.com/guregu/null/v5"
 	"github.com/stretchr/testify/assert"
@@ -22,6 +23,12 @@ type fakeRefresherStore struct {
 	listErr  error
 	listCnt  int
 	updates  []sqlc.UpdateRAGFlowDocumentParseStatusParams
+
+	// 自动重解析相关字段：存放待重解析文档列表及各操作的记录参数，供断言使用。
+	autoRows        []sqlc.ListRAGFlowDocumentsDueForAutoReparseRow
+	autoListCnt     int
+	failedWithRetry []sqlc.MarkRAGFlowDocumentFailedWithAutoReparseParams
+	autoQueuedIDs   []string
 }
 
 func (s *fakeRefresherStore) ListRAGFlowDocumentsNeedingRefresh(_ context.Context, limit int32) ([]sqlc.ListRAGFlowDocumentsNeedingRefreshRow, error) {
@@ -43,11 +50,47 @@ func (s *fakeRefresherStore) UpdateRAGFlowDocumentParseStatus(_ context.Context,
 	return nil
 }
 
-// fakeRefresherRAGFlow 模拟 RAGFlow ListDocuments，可按 datasetID 返回不同响应或注入错误。
+// ListRAGFlowDocumentsDueForAutoReparse 返回到达冷却期的待自动重解析文档，供测试断言调用次数。
+func (s *fakeRefresherStore) ListRAGFlowDocumentsDueForAutoReparse(_ context.Context, limit int32) ([]sqlc.ListRAGFlowDocumentsDueForAutoReparseRow, error) {
+	s.autoListCnt++
+	if int(limit) >= len(s.autoRows) {
+		return s.autoRows, nil
+	}
+	return s.autoRows[:limit], nil
+}
+
+// MarkRAGFlowDocumentFailedWithAutoReparse 记录写入失败+冷却时间的参数，供断言验证 next_at 是否正确设置。
+func (s *fakeRefresherStore) MarkRAGFlowDocumentFailedWithAutoReparse(_ context.Context, arg sqlc.MarkRAGFlowDocumentFailedWithAutoReparseParams) error {
+	s.failedWithRetry = append(s.failedWithRetry, arg)
+	return nil
+}
+
+// MarkRAGFlowDocumentAutoReparseQueued 记录已成功提交自动重试的文档 ID，供断言验证次数递增逻辑。
+func (s *fakeRefresherStore) MarkRAGFlowDocumentAutoReparseQueued(_ context.Context, id string) error {
+	s.autoQueuedIDs = append(s.autoQueuedIDs, id)
+	return nil
+}
+
+// fakeRefresherRAGFlow 模拟 RAGFlow ListDocuments 及 ParseDocuments，可按 datasetID 返回不同响应或注入错误。
 type fakeRefresherRAGFlow struct {
 	responses     map[string][]ragflow.Document
 	errs          map[string]error
 	listCallOrder []string
+
+	// ParseDocuments 相关字段：记录每次调用参数及按 datasetID 注入的错误。
+	parseCalls []ragflowParseCall
+	parseErrs  map[string]error
+}
+
+// ragflowParseCall 已在 knowledge_service_test.go 中定义，此处直接复用，不重复声明。
+
+// ParseDocuments 模拟向 RAGFlow 提交重解析请求；如 parseErrs 中有对应 datasetID 则返回错误。
+func (f *fakeRefresherRAGFlow) ParseDocuments(_ context.Context, datasetID string, documentIDs []string) error {
+	f.parseCalls = append(f.parseCalls, ragflowParseCall{datasetID: datasetID, documentIDs: append([]string(nil), documentIDs...)})
+	if f.parseErrs != nil {
+		return f.parseErrs[datasetID]
+	}
+	return nil
 }
 
 func (f *fakeRefresherRAGFlow) ListDocuments(_ context.Context, datasetID string, page int32, pageSize int32, _ string, _ string) ([]ragflow.Document, int32, error) {
@@ -84,6 +127,22 @@ func makeRefreshRow(id, datasetID, remoteDatasetID, remoteDocID, status string, 
 		Progress:          progress,
 		RemoteDatasetID:   null.StringFrom(remoteDatasetID),
 	}
+}
+
+// makeAutoReparseRow 构建测试用的 ListRAGFlowDocumentsDueForAutoReparseRow。
+// 其余字段留零值即可；AutoReparseNextAt 固定为 2026-06-09 10:00:00 UTC 模拟冷却到期。
+func makeAutoReparseRow(id, datasetID, remoteDatasetID, remoteDocID string, attempts int32) sqlc.ListRAGFlowDocumentsDueForAutoReparseRow {
+	row := sqlc.ListRAGFlowDocumentsDueForAutoReparseRow{
+		ID:                  mustParseUUID(id),
+		DatasetID:           mustParseUUID(datasetID),
+		RagflowDocumentID:   remoteDocID,
+		ParseStatus:         "failed",
+		Progress:            0,
+		AutoReparseAttempts: attempts,
+		AutoReparseNextAt:   null.TimeFrom(time.Date(2026, 6, 9, 10, 0, 0, 0, time.UTC)),
+		RemoteDatasetID:     null.StringFrom(remoteDatasetID),
+	}
+	return row
 }
 
 func TestRagflowParseStatusRefresher_NoDocs(t *testing.T) {
@@ -301,4 +360,109 @@ func TestRagflowParseStatusRefresher_StoreListErrorReturned(t *testing.T) {
 	require.Error(t, refresher.Tick(context.Background()))
 	assert.Empty(t, rf.listCallOrder)
 	assert.Empty(t, store.updates)
+}
+
+func TestRagflowParseStatusRefresher_AutoReparsesModelOverloadFailure(t *testing.T) {
+	// 模型服务过载是临时上游失败：首次同步为 failed 后应立即进入自动重解析队列。
+	store := &fakeRefresherStore{listRows: []sqlc.ListRAGFlowDocumentsNeedingRefreshRow{
+		makeRefreshRow("00000000-0000-0000-0000-000000000a01", "00000000-0000-0000-0000-000000000d01", "remote-ds-1", "remote-doc-1", "running", 0),
+	}}
+	rf := &fakeRefresherRAGFlow{responses: map[string][]ragflow.Document{
+		"remote-ds-1": {{ID: "remote-doc-1", Run: "FAIL", ProgressMsg: "15:42:06 [ERROR][Exception]: Error code: 503 - {'code': 50505, 'message': 'Model service overloaded. Please try again later.'}"}},
+	}}
+	refresher := NewRagflowParseStatusRefresher(store, rf)
+	refresher.SetNowFunc(func() time.Time { return time.Date(2026, 6, 9, 10, 0, 0, 0, time.UTC) })
+
+	require.NoError(t, refresher.Tick(context.Background()))
+	require.Len(t, store.failedWithRetry, 1)
+	require.True(t, store.failedWithRetry[0].AutoReparseNextAt.Valid)
+	assert.Equal(t, time.Date(2026, 6, 9, 10, 0, 0, 0, time.UTC), store.failedWithRetry[0].AutoReparseNextAt.Time)
+}
+
+func TestRagflowParseStatusRefresher_AutoReparseStopsAfterMaxAttempts(t *testing.T) {
+	// 自动重试次数已达上限（3）时，模型过载失败仍记录失败，但不再安排下一次自动重试，需人工介入。
+	row := makeRefreshRow("00000000-0000-0000-0000-000000000a01", "00000000-0000-0000-0000-000000000d01", "remote-ds-1", "remote-doc-1", "running", 0)
+	row.AutoReparseAttempts = 3 // 已用尽 3 次自动重试
+	store := &fakeRefresherStore{listRows: []sqlc.ListRAGFlowDocumentsNeedingRefreshRow{row}}
+	rf := &fakeRefresherRAGFlow{responses: map[string][]ragflow.Document{
+		"remote-ds-1": {{ID: "remote-doc-1", Run: "FAIL", ProgressMsg: "15:42:06 [ERROR][Exception]: Error code: 503 - {'code': 50505, 'message': 'Model service overloaded. Please try again later.'}"}},
+	}}
+	refresher := NewRagflowParseStatusRefresher(store, rf)
+	refresher.SetNowFunc(func() time.Time { return time.Date(2026, 6, 9, 10, 0, 0, 0, time.UTC) })
+
+	require.NoError(t, refresher.Tick(context.Background()))
+	// 仍识别为过载错误并走自动重试记账路径，但 next_at 无效表示不再自动重试。
+	require.Len(t, store.failedWithRetry, 1)
+	assert.False(t, store.failedWithRetry[0].AutoReparseNextAt.Valid)
+	// autoRows 为空，不应有任何自动重解析提交。
+	assert.Empty(t, store.autoQueuedIDs)
+}
+
+func TestRagflowParseStatusRefresher_RequeuesDueAutoReparse(t *testing.T) {
+	// 存量或冷却到期的模型过载失败文件应被重新提交给 RAGFlow，并累计自动重试次数。
+	store := &fakeRefresherStore{autoRows: []sqlc.ListRAGFlowDocumentsDueForAutoReparseRow{
+		makeAutoReparseRow("00000000-0000-0000-0000-000000000a01", "00000000-0000-0000-0000-000000000d01", "remote-ds-1", "remote-doc-1", 0),
+		makeAutoReparseRow("00000000-0000-0000-0000-000000000a02", "00000000-0000-0000-0000-000000000d01", "remote-ds-1", "remote-doc-2", 1),
+	}}
+	rf := &fakeRefresherRAGFlow{responses: map[string][]ragflow.Document{}}
+	refresher := NewRagflowParseStatusRefresher(store, rf)
+
+	require.NoError(t, refresher.Tick(context.Background()))
+	require.Len(t, rf.parseCalls, 1)
+	assert.Equal(t, "remote-ds-1", rf.parseCalls[0].datasetID)
+	assert.ElementsMatch(t, []string{"remote-doc-1", "remote-doc-2"}, rf.parseCalls[0].documentIDs)
+	assert.ElementsMatch(t, []string{"00000000-0000-0000-0000-000000000a01", "00000000-0000-0000-0000-000000000a02"}, store.autoQueuedIDs)
+}
+
+func TestRagflowParseStatusRefresher_NonOverloadFailureDoesNotScheduleAutoReparse(t *testing.T) {
+	// 非白名单错误通常是文件或配置问题，不能自动重试。
+	store := &fakeRefresherStore{listRows: []sqlc.ListRAGFlowDocumentsNeedingRefreshRow{
+		makeRefreshRow("00000000-0000-0000-0000-000000000a01", "00000000-0000-0000-0000-000000000d01", "remote-ds-1", "remote-doc-1", "running", 0),
+	}}
+	rf := &fakeRefresherRAGFlow{responses: map[string][]ragflow.Document{
+		"remote-ds-1": {{ID: "remote-doc-1", Run: "FAIL", ProgressMsg: "10:00:05 [ERROR] unsupported file type"}},
+	}}
+	refresher := NewRagflowParseStatusRefresher(store, rf)
+
+	require.NoError(t, refresher.Tick(context.Background()))
+	require.Len(t, store.updates, 1)
+	assert.Empty(t, store.failedWithRetry)
+	assert.Equal(t, "failed", store.updates[0].ParseStatus)
+	assert.Contains(t, store.updates[0].LastError.String, "unsupported file type")
+}
+
+func TestAutoReparseNextAtBackoff(t *testing.T) {
+	// 冷却时间按已成功提交的自动重试次数递增，避免过载未恢复时快速耗尽重试机会。
+	now := time.Date(2026, 6, 9, 10, 0, 0, 0, time.UTC)
+
+	first := autoReparseNextAt(0, now)
+	require.True(t, first.Valid)
+	assert.Equal(t, now, first.Time)
+
+	second := autoReparseNextAt(1, now)
+	require.True(t, second.Valid)
+	assert.Equal(t, now.Add(10*time.Minute), second.Time)
+
+	third := autoReparseNextAt(2, now)
+	require.True(t, third.Valid)
+	assert.Equal(t, now.Add(30*time.Minute), third.Time)
+
+	exhausted := autoReparseNextAt(3, now)
+	assert.False(t, exhausted.Valid)
+}
+
+func TestRagflowParseStatusRefresher_AutoReparseParseErrorDoesNotIncrementAttempts(t *testing.T) {
+	// RAGFlow parse 接口失败表示未成功提交重试，不能增加自动重试次数。
+	store := &fakeRefresherStore{autoRows: []sqlc.ListRAGFlowDocumentsDueForAutoReparseRow{
+		makeAutoReparseRow("00000000-0000-0000-0000-000000000a01", "00000000-0000-0000-0000-000000000d01", "remote-ds-1", "remote-doc-1", 0),
+	}}
+	rf := &fakeRefresherRAGFlow{
+		responses: map[string][]ragflow.Document{},
+		parseErrs: map[string]error{"remote-ds-1": errors.New("ragflow parse unavailable")},
+	}
+	refresher := NewRagflowParseStatusRefresher(store, rf)
+
+	err := refresher.Tick(context.Background())
+	require.Error(t, err)
+	assert.Empty(t, store.autoQueuedIDs)
 }
