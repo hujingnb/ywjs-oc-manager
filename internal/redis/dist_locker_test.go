@@ -87,3 +87,27 @@ func TestDistLocker_Renew_TokenMatch(t *testing.T) {
 	// 别人 token 续期不动 TTL 也不报错
 	require.NoError(t, locker.Renew(context.Background(), "ocm:test:key", "tok-B", 60*time.Second))
 }
+
+// TestDistLocker_Refresh_TokenMatch 验证 Refresh 方法:
+// 持有者 token 一致时续租返回 true;非持有者 token 返回 false 且不影响原锁。
+func TestDistLocker_Refresh_TokenMatch(t *testing.T) {
+	locker, cleanup := newTestLocker(t)
+	defer cleanup()
+	_, _ = locker.TryAcquire(context.Background(), "ocm:test:key", "tok-A", 5*time.Second)
+
+	// 持有者 tok-A 续租,应返回 true
+	ok, err := locker.Refresh(context.Background(), "ocm:test:key", "tok-A", 10*time.Second)
+	require.NoError(t, err)
+	assert.True(t, ok, "持有者 token 匹配,Refresh 应返回 true")
+
+	// 非持有者 tok-B 尝试续租,应返回 false,不影响 tok-A 的锁
+	ok2, err := locker.Refresh(context.Background(), "ocm:test:key", "tok-B", 60*time.Second)
+	require.NoError(t, err)
+	assert.False(t, ok2, "非持有者 token 不匹配,Refresh 应返回 false")
+
+	// 确认锁仍然属于 tok-A(tok-B 续租无效,tok-A 仍可释放)
+	require.NoError(t, locker.Release(context.Background(), "ocm:test:key", "tok-A"))
+	exists, err := locker.Exists(context.Background(), "ocm:test:key")
+	require.NoError(t, err)
+	assert.False(t, exists, "tok-A 释放后锁应消失")
+}

@@ -17,6 +17,10 @@ type DistLocker interface {
 	TryAcquire(ctx context.Context, key, token string, ttl time.Duration) (bool, error)
 	// Renew 校验 token 一致后 PEXPIRE 刷新 TTL;token 不匹配返回 nil 但不动作。
 	Renew(ctx context.Context, key, token string, ttl time.Duration) error
+	// Refresh 校验 token 一致后 PEXPIRE 续租,返回 (true, nil);
+	// token 不匹配(锁已被别人持有或已过期)返回 (false, nil)。
+	// 与 Renew 的区别:Refresh 明确告知调用方是否真正续租成功,适用于 leader-election 心跳场景。
+	Refresh(ctx context.Context, key, token string, ttl time.Duration) (bool, error)
 	// Release 校验 token 一致后 DEL;token 不匹配返回 nil 但不动作(防误删)。
 	Release(ctx context.Context, key, token string) error
 	// Exists 仅供 follower 在 SUBSCRIBE 后 double-check leader 是否仍在跑。
@@ -75,6 +79,24 @@ func (l *RedisDistLocker) Release(ctx context.Context, key, token string) error 
 		return err
 	}
 	return nil
+}
+
+// luaRefresh: KEYS[1]=lockKey, ARGV[1]=token, ARGV[2]=ttlMillis。
+// 仅当持有者 token 匹配时 PEXPIRE 续租,返回 1;否则返回 0(已被别人持有或已过期)。
+const luaRefresh = `
+if redis.call("get", KEYS[1]) == ARGV[1] then
+  return redis.call("pexpire", KEYS[1], ARGV[2])
+else
+  return 0
+end`
+
+// Refresh 见接口注释。
+func (l *RedisDistLocker) Refresh(ctx context.Context, key, token string, ttl time.Duration) (bool, error) {
+	res, err := l.client.Eval(ctx, luaRefresh, []string{key}, token, ttl.Milliseconds()).Int64()
+	if err != nil {
+		return false, err
+	}
+	return res == 1, nil
 }
 
 // Exists 见接口注释。
