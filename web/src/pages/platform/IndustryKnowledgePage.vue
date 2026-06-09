@@ -61,6 +61,13 @@
           clearable
           style="width: 220px"
         />
+        <n-select
+          v-model:value="fileStatus"
+          :options="PARSE_STATUS_FILTER_OPTIONS"
+          clearable
+          placeholder="全部状态"
+          style="width: 160px"
+        />
         <n-date-picker
           v-model:value="createdDateRange"
           type="daterange"
@@ -200,7 +207,7 @@
 <script setup lang="ts">
 import { computed, h, ref, watch } from 'vue'
 import { Plus } from 'lucide-vue-next'
-import { NAlert, NButton, NCard, NDataTable, NDatePicker, NInput, NModal, NSpace, NTag, useMessage, type DataTableColumns } from 'naive-ui'
+import { NAlert, NButton, NCard, NDataTable, NDatePicker, NInput, NModal, NSelect, NSpace, NTag, useMessage, type DataTableColumns } from 'naive-ui'
 
 import ConfirmActionModal from '@/components/ConfirmActionModal.vue'
 import DataTableList from '@/components/DataTableList.vue'
@@ -225,6 +232,7 @@ import {
   type IndustryKnowledgeBase,
 } from '@/api/hooks/useIndustryKnowledge'
 import { canManageRAGFlowDatasetInfo } from '@/domain/permissions'
+import { PARSE_STATUS_FILTER_OPTIONS, parseStatusLabel, parseStatusTagType } from '@/domain/parseStatus'
 import { useAuthStore } from '@/stores/auth'
 import { useUploadProgressStore } from '@/stores/uploadProgress'
 import {
@@ -249,6 +257,9 @@ const selectedBaseId = ref<string | undefined>(undefined)
 const downloading = ref(false)
 const fileKeyword = ref('')
 const normalizedFileKeyword = computed(() => fileKeyword.value.trim())
+// fileStatus 为行业库文件「解析状态」筛选值，null/空＝不过滤（全部状态）。
+const fileStatus = ref<string | null>(null)
+const normalizedFileStatus = computed(() => fileStatus.value ?? undefined)
 const createdDateRange = ref<[number, number] | null>(null)
 const createdFrom = computed(() => createdDateRange.value ? formatDatePickerDay(createdDateRange.value[0]) : undefined)
 const createdTo = computed(() => createdDateRange.value ? formatDatePickerDay(createdDateRange.value[1]) : undefined)
@@ -262,6 +273,7 @@ const { data: files, isLoading: filesLoading, error: filesError } = useIndustryK
   page: filePage,
   pageSize: filePageSize,
   keyword: normalizedFileKeyword,
+  status: normalizedFileStatus,
   createdFrom,
   createdTo,
 })
@@ -385,7 +397,7 @@ watch(
   { immediate: true },
 )
 
-watch([selectedBaseIdRef, normalizedFileKeyword, createdFrom, createdTo], () => {
+watch([selectedBaseIdRef, normalizedFileKeyword, normalizedFileStatus, createdFrom, createdTo], () => {
   filePage.value = 1
 })
 
@@ -401,24 +413,6 @@ function formatDatePickerDay(value: number): string {
 function formatTime(iso?: string): string {
   if (!iso) return '—'
   return new Date(iso).toLocaleString('zh-CN', { hour12: false })
-}
-
-function parseTagType(status: string): 'success' | 'warning' | 'error' | 'default' {
-  if (status === 'completed') return 'success'
-  if (status === 'queued' || status === 'running') return 'warning'
-  if (status === 'failed' || status === 'stopped') return 'error'
-  return 'default'
-}
-
-function parseStatusLabel(status: string): string {
-  const labels: Record<string, string> = {
-    queued: '等待解析',
-    running: '解析中',
-    completed: '已完成',
-    failed: '解析失败',
-    stopped: '已停止',
-  }
-  return labels[status] ?? status
 }
 
 function canReparse(row: KnowledgeDocument): boolean {
@@ -576,7 +570,7 @@ const fileColumns: DataTableColumns<KnowledgeDocument> = [
     title: '解析状态',
     key: 'parse_status',
     render: row => h('div', { style: 'display: flex; align-items: center; gap: 8px; flex-wrap: wrap' }, [
-      h(NTag, { type: parseTagType(row.parse_status), size: 'small', bordered: false }, { default: () => parseStatusLabel(row.parse_status) }),
+      h(NTag, { type: parseStatusTagType(row.parse_status), size: 'small', bordered: false }, { default: () => parseStatusLabel(row.parse_status) }),
       row.parse_status === 'running' ? h('span', { class: 'state-text', style: 'margin: 0; font-size: 12px' }, `${row.progress}%`) : null,
       row.last_error ? h('span', { style: 'color: var(--color-danger); font-size: 12px' }, row.last_error) : null,
     ]),
