@@ -513,7 +513,8 @@ func runManager(ctx context.Context, cfg config.Config, logOut io.Writer) error 
 		skillUpdateCheckerClawHub = clawhubVersionListerAdapter{client: clawhubClient}
 	}
 	skillUpdateChecker := service.NewSkillUpdateChecker(dbStore.Queries, dbStore.Queries, skillUpdateCheckerClawHub)
-	skillUpdateCheckerTask := service.NewPeriodicReconciler("skill_update_check", 30*time.Minute, skillUpdateChecker.Tick)
+	// skillUpdateCheckerTask 的 PeriodicReconciler 装配下移到 errgroup + leaderElector 就绪之后,
+	// 以便用 onlyLeader 把 tick gate 到 leader 副本(见下方装配段)。
 
 	// 市场聚合：平台库来源（复用 platformSkillService）+ 可选 ClawHub 公共库来源。
 	// clawhubSource 为 nil 时市场仅展示平台库（降级），不影响安装/更新等其他功能。
@@ -578,24 +579,55 @@ func runManager(ctx context.Context, cfg config.Config, logOut io.Writer) error 
 	// app 状态 poll reconciler：周期对运行中 app 调 Orchestrator.Status 同步 pod 状态到 DB，
 	// 取代 docker inspect 健康自愈（manager 不自愈，崩溃重启交 Deployment 控制器）。
 	// 仅在启用 k8s（orch != nil）时挂载；未启用时不跑空 tick。
-	var appStatusTask *service.PeriodicReconciler
+	// reconciler 对象在此构造,但 PeriodicReconciler 任务装配下移到 leaderElector 就绪后,
+	// 以便用 onlyLeader 把 tick gate 到 leader 副本。
+	var appStatusReconciler *service.AppStatusReconciler
 	if orch != nil {
 		// redisQueue 作 jobEnqueuer：reconciler 兜底恢复（error 但 pod 已 Ready）重新入队 init job 后通知 scheduler。
-		appStatusReconciler := service.NewAppStatusReconciler(dbStore.Queries, orch, redisQueue)
-		appStatusTask = service.NewPeriodicReconciler("app_status_reconcile", 15*time.Second, appStatusReconciler.Tick)
+		appStatusReconciler = service.NewAppStatusReconciler(dbStore.Queries, orch, redisQueue)
 	}
 	// spec-A2b：node_resource_samples / instance_resource_samples 已删，ResourceSampleCleanup 不再装配。
 
-	// ragflowParseStatusTask 周期把 RAGFlow 端的解析状态回写本地，
+	// ragflowParseStatusRefresher 周期把 RAGFlow 端的解析状态回写本地，
 	// 取代旧"列表请求时同步刷新"的策略：无人浏览列表时状态也能收敛。
 	// 仅在 RAGFlow 已配置时启用，避免 nil ragflowClient 导致 tick 空跑后还触发 panic。
-	var ragflowParseStatusTask *service.PeriodicReconciler
+	// 同上,任务装配下移到 leaderElector 就绪后。
+	var ragflowParseStatusRefresher *service.RagflowParseStatusRefresher
 	if ragflowClient != nil {
-		ragflowParseStatusRefresher := service.NewRagflowParseStatusRefresher(dbStore.Queries, ragflowClient)
-		ragflowParseStatusTask = service.NewPeriodicReconciler("ragflow_parse_status_refresh", 30*time.Second, ragflowParseStatusRefresher.Tick)
+		ragflowParseStatusRefresher = service.NewRagflowParseStatusRefresher(dbStore.Queries, ragflowClient)
 	}
 
 	eg, gctx := errgroup.WithContext(rootCtx)
+
+	// 所有定时任务只在 leader 副本运行,避免多副本重复轮询/重复自愈。
+	// leaderElector 基于已有 distLocker(Redis 锁)选出单一 leader,token 用本副本启动时生成的 UUID,
+	// 租约 30s、续租间隔 10s(<lease,避免续租间隙过期抖动);Run 阻塞直到 gctx 取消,故挂在同一 errgroup。
+	leaderElector := service.NewLeaderElector(distLocker, cfg.Redis.KeyPrefix+"scheduler:leader", uuid.NewString(), 30*time.Second, 10*time.Second)
+	eg.Go(func() error { return leaderElector.Run(gctx, logger) })
+
+	// onlyLeader 包装 reconciler 的 fn:非 leader 直接跳过本轮,只有 leader 副本真正执行 tick。
+	onlyLeader := func(fn func(ctx context.Context) error) func(ctx context.Context) error {
+		return func(ctx context.Context) error {
+			if !leaderElector.IsLeader() {
+				return nil
+			}
+			return fn(ctx)
+		}
+	}
+
+	// 在 leaderElector/onlyLeader 就绪后装配各 PeriodicReconciler,统一 gate 到 leader。
+	// app 状态同步任务仅在启用 k8s(appStatusReconciler != nil)时装配。
+	var appStatusTask *service.PeriodicReconciler
+	if appStatusReconciler != nil {
+		appStatusTask = service.NewPeriodicReconciler("app_status_reconcile", 15*time.Second, onlyLeader(appStatusReconciler.Tick))
+	}
+	// RAGFlow 解析状态回写任务仅在 RAGFlow 已配置(ragflowParseStatusRefresher != nil)时装配。
+	var ragflowParseStatusTask *service.PeriodicReconciler
+	if ragflowParseStatusRefresher != nil {
+		ragflowParseStatusTask = service.NewPeriodicReconciler("ragflow_parse_status_refresh", 30*time.Second, onlyLeader(ragflowParseStatusRefresher.Tick))
+	}
+	// skill 更新检测任务:每 30 分钟回源查最高版本,写回 app_skills.latest_version,同样 gate 到 leader。
+	skillUpdateCheckerTask := service.NewPeriodicReconciler("skill_update_check", 30*time.Minute, onlyLeader(skillUpdateChecker.Tick))
 
 	eg.Go(func() error {
 		logger.Info("manager api listening", "addr", cfg.App.HTTPAddr)
