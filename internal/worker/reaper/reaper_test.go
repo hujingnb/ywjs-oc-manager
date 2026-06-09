@@ -74,8 +74,11 @@ func (l *fakeLocker) TryAcquire(_ context.Context, _, _ string, _ time.Duration)
 	return l.acquireOK, l.acquireErr
 }
 func (l *fakeLocker) Renew(_ context.Context, _, _ string, _ time.Duration) error { return nil }
-func (l *fakeLocker) Release(_ context.Context, _, _ string) error                { return nil }
-func (l *fakeLocker) Exists(_ context.Context, _ string) (bool, error)            { return true, nil }
+func (l *fakeLocker) Refresh(_ context.Context, _, _ string, _ time.Duration) (bool, error) {
+	return true, nil
+}
+func (l *fakeLocker) Release(_ context.Context, _, _ string) error     { return nil }
+func (l *fakeLocker) Exists(_ context.Context, _ string) (bool, error) { return true, nil }
 
 var (
 	// testJobID / testAppID 迁移为 string uuid；字节内容无业务含义，仅用于断言相等。
