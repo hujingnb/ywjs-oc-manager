@@ -438,6 +438,13 @@ func (c *Client) ParseDocuments(ctx context.Context, datasetID string, documentI
 	return c.doJSON(ctx, http.MethodPost, c.apiPath("/api/v1/datasets", datasetID, "chunks"), nil, body, nil)
 }
 
+// StopParsing 取消指定 dataset 下 running 文档的解析（DELETE /chunks）：RAGFlow 会 cancel 任务、
+// 把 run 置为 stopped、清空已生成 chunk/索引。仅对 run=RUNNING 文档有效，非 running 会返回业务错误。
+func (c *Client) StopParsing(ctx context.Context, datasetID string, documentIDs []string) error {
+	body := map[string][]string{"document_ids": documentIDs}
+	return c.doJSON(ctx, http.MethodDelete, c.apiPath("/api/v1/datasets", datasetID, "chunks"), nil, body, nil)
+}
+
 // Retrieve 对指定 dataset 集合执行 retrieval。
 func (c *Client) Retrieve(ctx context.Context, datasetIDs []string, question string, topK int32) ([]RetrievalChunk, error) {
 	body := map[string]any{

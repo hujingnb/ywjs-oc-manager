@@ -420,6 +420,33 @@ func TestClientDownloadDocumentLeavesBodyOpen(t *testing.T) {
 	assert.Equal(t, "content", string(content))
 }
 
+// TestClient_StopParsing 验证停止解析请求使用 DELETE 方法、路径正确，并把 document_ids 写入请求体；
+// RAGFlow 返回 {"code":0} 时不报错。
+func TestClient_StopParsing(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		// 验证 HTTP 方法为 DELETE
+		assert.Equal(t, http.MethodDelete, r.Method)
+		// 验证路径拼接正确
+		assert.Equal(t, "/api/v1/datasets/ds-1/chunks", r.URL.Path)
+		// 验证鉴权 Header 携带正确
+		assert.Equal(t, "Bearer secret", r.Header.Get("Authorization"))
+
+		// 验证请求体包含正确的 document_ids
+		var body struct {
+			DocumentIDs []string `json:"document_ids"`
+		}
+		require.NoError(t, json.NewDecoder(r.Body).Decode(&body))
+		assert.Equal(t, []string{"doc-1", "doc-2"}, body.DocumentIDs)
+
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`{"code":0}`))
+	}))
+	t.Cleanup(server.Close)
+
+	client := newTestClient(t, server.URL)
+	require.NoError(t, client.StopParsing(context.Background(), "ds-1", []string{"doc-1", "doc-2"}))
+}
+
 func newTestClient(t *testing.T, baseURL string) *Client {
 	t.Helper()
 	client, err := NewClient(baseURL, "secret", 0)
