@@ -141,12 +141,17 @@ func runManager(ctx context.Context, cfg config.Config, logOut io.Writer) error 
 	auditService := service.NewAuditService(dbStore.Queries)
 
 	var ragflowClient service.RAGFlowKnowledgeClient
+	// ragflowHealClient 持有同一个 RAGFlow 具体客户端,供自愈任务使用。
+	// RAGFlowKnowledgeClient 接口不含 StopParsing,而自愈卡死重置依赖它,故另存具体 *ragflow.Client;
+	// 未配置 RAGFlow 时保持 nil,自愈任务据此不装配。
+	var ragflowHealClient *ragflow.Client
 	if cfg.RAGFlow.BaseURL != "" || cfg.RAGFlow.APIKey != "" {
 		ragflowHTTPClient, err := ragflow.NewClient(cfg.RAGFlow.BaseURL, cfg.RAGFlow.APIKey, cfg.RAGFlow.RequestTimeout.Duration)
 		if err != nil {
 			return fmt.Errorf("初始化 RAGFlow 客户端失败: %w", err)
 		}
 		ragflowClient = ragflowHTTPClient
+		ragflowHealClient = ragflowHTTPClient
 	}
 	knowledgeService := service.NewKnowledgeService(dbStore.Queries, ragflowClient)
 	knowledgeService.SetDatasetChunkMethod(cfg.RAGFlow.ChunkMethod)
@@ -626,6 +631,22 @@ func runManager(ctx context.Context, cfg config.Config, logOut io.Writer) error 
 	if ragflowParseStatusRefresher != nil {
 		ragflowParseStatusTask = service.NewPeriodicReconciler("ragflow_parse_status_refresh", 30*time.Second, onlyLeader(ragflowParseStatusRefresher.Tick))
 	}
+	// RAGFlow 解析异常自愈:全库失败文件重解析 + 卡死 running 文件 stop→reparse;与刷新任务并列,同样 gate 到 leader。
+	var ragflowHealTask *service.PeriodicReconciler
+	if ragflowParseStatusRefresher != nil { // 与刷新任务同条件:ragflowClient 已配置
+		healState := service.NewHealState(imagecoordRedis, cfg.Redis.KeyPrefix, service.HealStateTTL{
+			Attempts: 6 * time.Hour,
+			Giveup:   7 * 24 * time.Hour,
+		})
+		healer := service.NewRagflowAnomalyHealer(dbStore.Queries, ragflowHealClient, healState, service.HealerConfig{
+			MaxAttempts:    cfg.RAGFlow.SelfHeal.MaxAttempts,
+			Backoffs:       []time.Duration{0, 10 * time.Minute, 30 * time.Minute},
+			StuckThreshold: cfg.RAGFlow.SelfHeal.StuckThreshold.Duration,
+			BatchLimit:     int32(cfg.RAGFlow.SelfHeal.BatchLimit),
+		})
+		healer.SetLogger(logger)
+		ragflowHealTask = service.NewPeriodicReconciler("ragflow_self_heal", cfg.RAGFlow.SelfHeal.Interval.Duration, onlyLeader(healer.Tick))
+	}
 	// skill 更新检测任务:每 30 分钟回源查最高版本,写回 app_skills.latest_version,同样 gate 到 leader。
 	skillUpdateCheckerTask := service.NewPeriodicReconciler("skill_update_check", 30*time.Minute, onlyLeader(skillUpdateChecker.Tick))
 
@@ -657,6 +678,9 @@ func runManager(ctx context.Context, cfg config.Config, logOut io.Writer) error 
 	}
 	if ragflowParseStatusTask != nil {
 		eg.Go(func() error { return ragflowParseStatusTask.Run(gctx, logger) })
+	}
+	if ragflowHealTask != nil {
+		eg.Go(func() error { return ragflowHealTask.Run(gctx, logger) })
 	}
 	// skill 更新检测定时任务：每 30 分钟回源查最高版本，写回 app_skills.latest_version。
 	eg.Go(func() error { return skillUpdateCheckerTask.Run(gctx, logger) })

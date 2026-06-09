@@ -136,6 +136,16 @@ type RAGFlowConfig struct {
 	// EmbeddingModels 是 RAGFlow 模型列表不可用时供后端兜底展示和解析的模型清单。
 	// name/provider 均使用 RAGFlow 控制台可见文本，运行期再解析成远端内部模型 ID。
 	EmbeddingModels []RAGFlowEmbeddingModelConfig `yaml:"embedding_models"`
+	// SelfHeal 是 RAGFlow 解析异常自愈任务参数;留空字段用内置默认。
+	SelfHeal RAGFlowSelfHealConfig `yaml:"self_heal"`
+}
+
+// RAGFlowSelfHealConfig 配置 RAGFlow 解析异常自愈定时任务;所有字段可缺省,由 loader 填默认。
+type RAGFlowSelfHealConfig struct {
+	Interval       Duration `yaml:"interval"`        // 任务运行间隔,默认 10m
+	StuckThreshold Duration `yaml:"stuck_threshold"` // running 超过此时长判卡死,默认 30m
+	MaxAttempts    int      `yaml:"max_attempts"`    // 单文档自愈次数上限,默认 3
+	BatchLimit     int      `yaml:"batch_limit"`     // 每轮每类处理上限,默认 100
 }
 
 // RAGFlowEmbeddingModelConfig 描述一个可选的 RAGFlow embedding 模型兜底配置。

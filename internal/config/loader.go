@@ -46,6 +46,20 @@ func (c *Config) applyDefaults() {
 	if strings.TrimSpace(c.RAGFlow.ChunkMethod) == "" {
 		c.RAGFlow.ChunkMethod = "naive"
 	}
+	// RAGFlow 解析异常自愈任务的零值默认:间隔 10m、卡死阈值 30m、单文档上限 3 次、每轮每类上限 100。
+	// 与 healer 内置默认保持一致,留空字段不会让任务以零值(0 间隔死循环 / 0 上限不处理)启动。
+	if c.RAGFlow.SelfHeal.Interval.Duration == 0 {
+		c.RAGFlow.SelfHeal.Interval = Duration{Duration: 10 * time.Minute}
+	}
+	if c.RAGFlow.SelfHeal.StuckThreshold.Duration == 0 {
+		c.RAGFlow.SelfHeal.StuckThreshold = Duration{Duration: 30 * time.Minute}
+	}
+	if c.RAGFlow.SelfHeal.MaxAttempts == 0 {
+		c.RAGFlow.SelfHeal.MaxAttempts = 3
+	}
+	if c.RAGFlow.SelfHeal.BatchLimit == 0 {
+		c.RAGFlow.SelfHeal.BatchLimit = 100
+	}
 	// S3 启用时填预签名默认有效期 15m（pod 拉取 / 续期窗口足够，又不过长）。
 	if c.Storage.S3.Enabled && c.Storage.S3.PresignTTL.Duration == 0 {
 		c.Storage.S3.PresignTTL = Duration{Duration: 15 * time.Minute}

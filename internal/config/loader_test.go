@@ -229,6 +229,11 @@ ragflow:
 `)
 	assert.Equal(t, "30s", cfg.RAGFlow.RequestTimeout.Duration.String())
 	assert.Equal(t, "naive", cfg.RAGFlow.ChunkMethod)
+	// self_heal 整段缺省时,loader 应填入内置默认:间隔 10m、卡死阈值 30m、上限 3 次、每轮 100。
+	assert.Equal(t, "10m0s", cfg.RAGFlow.SelfHeal.Interval.Duration.String())
+	assert.Equal(t, "30m0s", cfg.RAGFlow.SelfHeal.StuckThreshold.Duration.String())
+	assert.Equal(t, 3, cfg.RAGFlow.SelfHeal.MaxAttempts)
+	assert.Equal(t, 100, cfg.RAGFlow.SelfHeal.BatchLimit)
 }
 
 // TestLoad_RAGFlowEmbeddingModelsAcceptHumanNames 验证 embedding 模型配置只需要填写 RAGFlow 控制台可见的人类模型名。
