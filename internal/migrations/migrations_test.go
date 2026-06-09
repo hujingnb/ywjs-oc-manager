@@ -101,7 +101,10 @@ func TestRAGFlowAutoReparseMigrationDeclaresRetryState(t *testing.T) {
 	assert.Contains(t, up, "idx_ragflow_documents_auto_reparse")
 
 	// 存量模型过载失败必须被回填为立即可重试，但迁移本身不直接调用 RAGFlow。
-	assert.Contains(t, up, "SET auto_reparse_next_at = NOW(6)")
+	// 回填必须用 UTC_TIMESTAMP(6) 而非 NOW(6)：app DB 连接固定 time_zone='+00:00'（loc=UTC），
+	// 其读取查询的 NOW(6) 为 UTC；而迁移连接走服务器 SYSTEM 时区（移动云常为 +08:00），
+	// 若用 NOW(6) 会写入北京墙钟裸值，比 app 的 UTC 基准早 8 小时，导致回填文档要等 8 小时才到期。
+	assert.Contains(t, up, "SET auto_reparse_next_at = UTC_TIMESTAMP(6)")
 	assert.Contains(t, up, "LOWER(last_error) LIKE '%model service overloaded%'")
 	assert.Contains(t, up, "LOWER(last_error) LIKE '%error code: 503%'")
 	assert.Contains(t, up, "LOWER(last_error) LIKE '%code: 50505%'")

@@ -14,8 +14,12 @@ ALTER TABLE ragflow_documents
 
 -- 存量回填：把历史上因模型服务过载（临时上游故障）而失败的文档标记为立即可自动重试。
 -- 仅迁移设置可重试时间，真正的重新提交由后台刷新任务在迁移之后执行，迁移本身不调用 RAGFlow。
+-- 必须用 UTC_TIMESTAMP(6) 而非 NOW(6)：auto_reparse_next_at 按 UTC 存取（app DB 连接固定
+-- time_zone='+00:00'/loc=UTC，其扫描查询 NOW(6) 为 UTC），但迁移连接走服务器 SYSTEM 时区
+-- （移动云托管 MySQL 常为 +08:00），NOW(6) 会写入北京墙钟裸值、比 app 的 UTC 基准早 8 小时，
+-- 使回填文档要再等 8 小时才被判为到期；UTC_TIMESTAMP(6) 与会话时区无关、恒为 UTC，二者一致。
 UPDATE ragflow_documents
-SET auto_reparse_next_at = NOW(6)
+SET auto_reparse_next_at = UTC_TIMESTAMP(6)
 WHERE parse_status = 'failed'
   AND auto_reparse_attempts = 0
   AND last_error IS NOT NULL
