@@ -1039,6 +1039,30 @@ func (q *Queries) MarkRAGFlowDocumentAutoReparseQueued(ctx context.Context, id s
 	return err
 }
 
+const markRAGFlowDocumentAutoReparseSubmitFailed = `-- name: MarkRAGFlowDocumentAutoReparseSubmitFailed :exec
+UPDATE ragflow_documents
+SET auto_reparse_attempts = auto_reparse_attempts + 1,
+    auto_reparse_next_at = ?,
+    updated_at = now()
+WHERE id = ?
+  AND parse_status = 'failed'
+  AND auto_reparse_attempts < 3
+`
+
+type MarkRAGFlowDocumentAutoReparseSubmitFailedParams struct {
+	AutoReparseNextAt null.Time `db:"auto_reparse_next_at" json:"auto_reparse_next_at"`
+	ID                string    `db:"id" json:"id"`
+}
+
+// 自动重解析「提交」失败（非「文档正在解析中」的其它错误，如远端缺失）时调用：累计一次尝试并按退避
+// 设置下次重试时间。与成功路径共用 auto_reparse_attempts < 3 上限——累计到 3 次后会被扫描查询
+// ListRAGFlowDocumentsDueForAutoReparse（同样 attempts < 3）自然排除，从而停止重试、保持 failed
+// 待人工处理。这保证任何持续提交失败都不会无限循环（线上死循环根因即「提交失败不计次数」导致永远重试）。
+func (q *Queries) MarkRAGFlowDocumentAutoReparseSubmitFailed(ctx context.Context, arg MarkRAGFlowDocumentAutoReparseSubmitFailedParams) error {
+	_, err := q.db.ExecContext(ctx, markRAGFlowDocumentAutoReparseSubmitFailed, arg.AutoReparseNextAt, arg.ID)
+	return err
+}
+
 const markRAGFlowDocumentFailedWithAutoReparse = `-- name: MarkRAGFlowDocumentFailedWithAutoReparse :exec
 UPDATE ragflow_documents
 SET parse_status = 'failed',

@@ -206,6 +206,11 @@ type Querier interface {
 	MarkRAGFlowDatasetFailed(ctx context.Context, arg MarkRAGFlowDatasetFailedParams) error
 	// 自动重解析提交成功后累计次数并清空冷却时间；次数只统计已成功提交给 RAGFlow 的重试。
 	MarkRAGFlowDocumentAutoReparseQueued(ctx context.Context, id string) error
+	// 自动重解析「提交」失败（非「文档正在解析中」的其它错误，如远端缺失）时调用：累计一次尝试并按退避
+	// 设置下次重试时间。与成功路径共用 auto_reparse_attempts < 3 上限——累计到 3 次后会被扫描查询
+	// ListRAGFlowDocumentsDueForAutoReparse（同样 attempts < 3）自然排除，从而停止重试、保持 failed
+	// 待人工处理。这保证任何持续提交失败都不会无限循环（线上死循环根因即「提交失败不计次数」导致永远重试）。
+	MarkRAGFlowDocumentAutoReparseSubmitFailed(ctx context.Context, arg MarkRAGFlowDocumentAutoReparseSubmitFailedParams) error
 	// 写入解析失败状态，并在可自动重试时设置下一次允许重试的时间；next_at 为空表示不再自动重试。
 	// auto_reparse_attempts 不在此更新：次数仅在自动重试成功提交后由 MarkRAGFlowDocumentAutoReparseQueued 递增，记录失败本身不算一次重试。
 	MarkRAGFlowDocumentFailedWithAutoReparse(ctx context.Context, arg MarkRAGFlowDocumentFailedWithAutoReparseParams) error
