@@ -2,19 +2,35 @@ import { mount } from '@vue/test-utils'
 import { defineComponent, h } from 'vue'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 
-// routerPush / authState 用 vi.hoisted 确保在所有 vi.mock 工厂执行前可用。
+// routerPush / routerReplace / authState 用 vi.hoisted 确保在所有 vi.mock 工厂执行前可用。
 const routerPush = vi.hoisted(() => vi.fn())
+const routerReplace = vi.hoisted(() => vi.fn())
 const authState = vi.hoisted(() => ({
   isOrgAdmin: false,
 }))
 
 vi.mock('vue-router', () => ({
-  useRouter: () => ({ push: routerPush }),
+  useRouter: () => ({ push: routerPush, replace: routerReplace }),
 }))
 
 vi.mock('@/stores/auth', () => ({
   useAuthStore: () => authState,
 }))
+
+const ownAppState = vi.hoisted(() => ({ appId: undefined as string | undefined, hasApp: false }))
+
+vi.mock('@/composables/useOwnApp', async () => {
+  const { ref } = await import('vue')
+  // 返回真实 ref(组件内 watch 依赖),初值取自 hoisted 状态(用例在 mount 前设置)。
+  return {
+    useOwnApp: () => ({
+      appId: ref(ownAppState.appId),
+      hasApp: ref(ownAppState.hasApp),
+      isLoading: ref(false),
+      app: ref(null),
+    }),
+  }
+})
 
 // naive-ui 命名导入在 <script setup> 中无法被 global.stubs 拦截，
 // 必须在模块层面用 vi.mock 替换，确保 EmptyStub/ButtonStub 真正生效。
@@ -53,7 +69,10 @@ function mountPage() {
 describe('AppEmptyPage', () => {
   beforeEach(() => {
     routerPush.mockClear()
+    routerReplace.mockClear()
     authState.isOrgAdmin = false
+    ownAppState.appId = undefined
+    ownAppState.hasApp = false
   })
 
   // org_member(非管理员):仅提示联系管理员,无建实例按钮。
@@ -72,5 +91,24 @@ describe('AppEmptyPage', () => {
     expect(button).toBeTruthy()
     await button!.trigger('click')
     expect(routerPush).toHaveBeenCalledWith('/members')
+    expect(routerReplace).not.toHaveBeenCalled()
+  })
+
+  // org_admin 其实已有自有实例:空状态页自愈,自动 replace 到该实例总览。
+  it('redirects org_admin to own app overview when own app exists', () => {
+    authState.isOrgAdmin = true
+    ownAppState.appId = 'admin-app'
+    ownAppState.hasApp = true
+    mountPage()
+    expect(routerReplace).toHaveBeenCalledWith('/apps/admin-app/overview')
+  })
+
+  // 自愈重定向仅对 org_admin:org_member 即使(异常)有 app 标记也不跳转。
+  it('does not redirect non-admin even when own app is present', () => {
+    authState.isOrgAdmin = false
+    ownAppState.appId = 'some-app'
+    ownAppState.hasApp = true
+    mountPage()
+    expect(routerReplace).not.toHaveBeenCalled()
   })
 })
