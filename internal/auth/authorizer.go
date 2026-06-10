@@ -372,3 +372,21 @@ func CanManageAppSkill(p Principal, appOrgID, appOwnerUserID string) bool {
 	}
 	return CanManageApp(p, appOrgID, appOwnerUserID)
 }
+
+// 定制技能工单 ----------------------------------------------------------
+
+// CanSubmitSkillTicket 判断能否提交定制需求工单:企业成员或企业管理员(平台管理员不提需求)。
+func CanSubmitSkillTicket(p Principal) bool {
+	return p.Role == domain.UserRoleOrgAdmin || p.Role == domain.UserRoleOrgMember
+}
+
+// CanManageSkillTicket 判断能否处理/交付/拒绝工单:仅平台管理员。
+func CanManageSkillTicket(p Principal) bool {
+	return p.Role == domain.UserRolePlatformAdmin
+}
+
+// CanViewSkillTicket 判断能否查看某工单详情/对话:提交者本人或平台管理员。
+// 工单对企业内其他人不可见(可见的只有交付出来的 skill)。
+func CanViewSkillTicket(p Principal, ticketRequesterUserID string) bool {
+	return p.Role == domain.UserRolePlatformAdmin || p.UserID == ticketRequesterUserID
+}

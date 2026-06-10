@@ -492,3 +492,24 @@ func TestCanManageAppSkill(t *testing.T) {
 	}
 	runAppCases(t, CanManageAppSkill, cases)
 }
+
+// 仅企业成员/管理员可提交定制技能工单;平台管理员不提需求。
+func TestCanSubmitSkillTicket(t *testing.T) {
+	assert.True(t, CanSubmitSkillTicket(Principal{Role: domain.UserRoleOrgMember}))      // 成员可提
+	assert.True(t, CanSubmitSkillTicket(Principal{Role: domain.UserRoleOrgAdmin}))       // 管理员可提
+	assert.False(t, CanSubmitSkillTicket(Principal{Role: domain.UserRolePlatformAdmin})) // 平台管理员不提
+}
+
+// 仅平台管理员可处理(改状态/报价/拒绝/交付)工单。
+func TestCanManageSkillTicket(t *testing.T) {
+	assert.True(t, CanManageSkillTicket(Principal{Role: domain.UserRolePlatformAdmin}))
+	assert.False(t, CanManageSkillTicket(Principal{Role: domain.UserRoleOrgAdmin}))
+	assert.False(t, CanManageSkillTicket(Principal{Role: domain.UserRoleOrgMember}))
+}
+
+// 工单详情仅提交者本人或平台管理员可见,企业内他人不可见。
+func TestCanViewSkillTicket(t *testing.T) {
+	assert.True(t, CanViewSkillTicket(Principal{Role: domain.UserRolePlatformAdmin, UserID: "x"}, "owner"))  // 平台管理员可看任意
+	assert.True(t, CanViewSkillTicket(Principal{Role: domain.UserRoleOrgMember, UserID: "owner"}, "owner"))  // 本人可看
+	assert.False(t, CanViewSkillTicket(Principal{Role: domain.UserRoleOrgMember, UserID: "other"}, "owner")) // 同企业他人不可看
+}

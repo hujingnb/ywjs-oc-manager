@@ -253,3 +253,14 @@ var ErrSkillMarketInvalid = errors.New("skill 市场操作入参非法")
 // 且本地缓存未命中、无法降级。映射为 502 Bad Gateway，与「manager 自身 500」语义区分开——
 // 让前端能据此提示用户「上游暂时不可用、稍后重试」，而非误以为 manager 故障。
 var ErrSkillMarketUpstreamUnavailable = errors.New("上游技能市场暂时不可用")
+
+// ===== 定制技能工单 =====
+
+// ErrSkillTicketNotFound 表示按 id 找不到工单。
+var ErrSkillTicketNotFound = errors.New("定制技能工单不存在")
+
+// ErrSkillTicketDenied 表示当前主体无权操作该工单。
+var ErrSkillTicketDenied = errors.New("无权操作该定制技能工单")
+
+// ErrSkillTicketInvalid 表示入参非法(标题/描述/评论为空,或非法状态值)。
+var ErrSkillTicketInvalid = errors.New("定制技能工单入参非法")
