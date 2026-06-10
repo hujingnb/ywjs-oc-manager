@@ -25,6 +25,10 @@ type SkillEntry struct {
 	Version string `json:"version"`
 	// Downloads 是下载次数，仅 clawhub 有意义，platform 为 0。
 	Downloads int64 `json:"downloads"`
+	// RequesterName 仅 custom 来源：申请人展示名（「由 X 申请」），其它来源留空。
+	RequesterName string `json:"requester_name,omitempty"`
+	// Audience 仅 custom 来源：命中的可见范围（all_org|org_admins|requester_only），前端渲染范围徽章，其它来源留空。
+	Audience string `json:"audience,omitempty"`
 }
 
 // SkillPage 是一页市场结果（含下一页游标，platform 无游标故 NextCursor 为空）。
