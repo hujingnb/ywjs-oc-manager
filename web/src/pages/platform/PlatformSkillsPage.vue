@@ -53,6 +53,10 @@
             <span v-if="folderName" class="state-text" style="margin: 0">{{ folderName }}（{{ folderFiles.length }} 个文件）</span>
             <span v-else class="state-text" style="margin: 0">未选择文件夹</span>
           </div>
+          <!-- 选择前的关键提示：文件夹须含 SKILL.md，且其 frontmatter 为 YAML 含 name/description -->
+          <p class="upload-hint" style="margin: 8px 0 0">
+            文件夹需包含 <code>SKILL.md</code> 文件；该 <code>.md</code> 文件需包含 YAML 格式的技能名称（<code>name</code>）和描述（<code>description</code>）。
+          </p>
         </n-form-item>
 
         <!-- 上传文件夹使用说明 -->
