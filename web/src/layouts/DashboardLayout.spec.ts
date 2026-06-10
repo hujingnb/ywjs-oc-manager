@@ -34,8 +34,8 @@ vi.mock('@/stores/auth', () => ({
   useAuthStore: () => authState,
 }))
 
-vi.mock('@/composables/useMemberApp', () => ({
-  useMemberApp: () => memberAppState,
+vi.mock('@/composables/useOwnApp', () => ({
+  useOwnApp: () => memberAppState,
 }))
 
 // 角标 query 桩：返回固定 ref，避免在测试环境实例化真实 useQuery（需 QueryClient 注入）。

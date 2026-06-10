@@ -152,7 +152,7 @@ import {
 
 import HelpDrawer from '@/components/HelpDrawer.vue'
 import { useAuthStore } from '@/stores/auth'
-import { useMemberApp } from '@/composables/useMemberApp'
+import { useOwnApp } from '@/composables/useOwnApp'
 import { useSkillTicketBadgeQuery } from '@/api/hooks/useSkillTickets'
 
 // DashboardLayout 负责已登录后台的导航外壳、环境标识和退出入口。
@@ -215,7 +215,7 @@ const ticketBadge = useSkillTicketBadgeQuery()
 // pendingTicketCount 是待处理工单数；查询未就绪时为 0（不显示角标）。
 const pendingTicketCount = computed(() => ticketBadge.data.value ?? 0)
 
-const { appId: memberAppId, hasApp: memberHasApp } = useMemberApp()
+const { appId: memberAppId, hasApp: memberHasApp } = useOwnApp()
 
 // MemberAppTab 是组织成员左侧菜单可直达的实例业务分区；值必须与 /apps/:appId/:tab 子路由末段一致。
 type MemberAppTab = 'overview' | 'kanban' | 'cron' | 'channels' | 'knowledge' | 'workspace'
