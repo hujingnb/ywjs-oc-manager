@@ -519,7 +519,9 @@ func runManager(ctx context.Context, cfg config.Config, logOut io.Writer) error 
 	if clawhubClient != nil {
 		skillUpdateCheckerClawHub = clawhubVersionListerAdapter{client: clawhubClient}
 	}
-	skillUpdateChecker := service.NewSkillUpdateChecker(dbStore.Queries, dbStore.Queries, skillUpdateCheckerClawHub)
+	// 第三参 custom store 同样由 dbStore.Queries 满足（实现 ListAllCustomSkills），
+	// 使更新检测覆盖 custom 来源；这是最终接线，Task 7 无需再改本处。
+	skillUpdateChecker := service.NewSkillUpdateChecker(dbStore.Queries, dbStore.Queries, dbStore.Queries, skillUpdateCheckerClawHub)
 	// skillUpdateCheckerTask 的 PeriodicReconciler 装配下移到 errgroup + leaderElector 就绪之后,
 	// 以便用 onlyLeader 把 tick gate 到 leader 副本(见下方装配段)。
 

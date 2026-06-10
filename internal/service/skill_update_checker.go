@@ -44,6 +44,15 @@ type SkillUpdateCheckerPlatformStore interface {
 	ListPlatformSkills(ctx context.Context) ([]sqlc.PlatformSkill, error)
 }
 
+// SkillUpdateCheckerCustomStore 是 SkillUpdateChecker 所需的定制技能（custom 来源）查询能力。
+// 通过 ListAllCustomSkills 取全量列表，过滤同名条目、利用 ORDER BY name ASC, created_at DESC
+// 确保首条即为最新版本（同 platform：custom 不解析版本串，仅按入库时间取最新）。
+type SkillUpdateCheckerCustomStore interface {
+	// ListAllCustomSkills 按 name ASC, created_at DESC 排序返回全部定制技能。
+	// 同一 name 的首条即为最新交付版本。
+	ListAllCustomSkills(ctx context.Context) ([]sqlc.CustomSkill, error)
+}
+
 // ClawHubVersionLister 从 ClawHub 查询指定 slug 的全部版本列表，供取最高版本用。
 // 由真实 clawhub.Client 满足；nil 表示 ClawHub 来源未启用，此时直接跳过。
 type ClawHubVersionLister interface {
@@ -69,19 +78,23 @@ type SkillUpdateChecker struct {
 	appSkills SkillUpdateCheckerAppSkillStore
 	// platform 查询平台库 skill 列表，取同名最新版本
 	platform SkillUpdateCheckerPlatformStore
+	// custom 查询定制技能列表，取同名最新交付版本；nil 时跳过所有 custom 来源
+	custom SkillUpdateCheckerCustomStore
 	// clawhub ClawHub 版本列表客户端；nil 时跳过所有 clawhub 来源
 	clawhub ClawHubVersionLister
 }
 
-// NewSkillUpdateChecker 构造 SkillUpdateChecker。clawhub 可传 nil（禁用来源）。
+// NewSkillUpdateChecker 构造 SkillUpdateChecker。custom 与 clawhub 均可传 nil（禁用对应来源）。
 func NewSkillUpdateChecker(
 	appSkills SkillUpdateCheckerAppSkillStore,
 	platform SkillUpdateCheckerPlatformStore,
+	custom SkillUpdateCheckerCustomStore,
 	clawhub ClawHubVersionLister,
 ) *SkillUpdateChecker {
 	return &SkillUpdateChecker{
 		appSkills: appSkills,
 		platform:  platform,
+		custom:    custom,
 		clawhub:   clawhub,
 	}
 }
@@ -115,9 +128,31 @@ func (c *SkillUpdateChecker) Tick(ctx context.Context) error {
 		}
 	}
 
+	// custom 来源：仿 platform，一次性拉全量 custom_skills，构建 name→最新版本 map。
+	// 仅当 custom store 已接线（非 nil）且确有 custom 来源 skill 时才查询；
+	// 查询失败时本轮跳过所有 custom 来源（置 nil），其余来源继续。
+	customLatest := map[string]string{}
+	if c.custom != nil {
+		for _, s := range sources {
+			if s.Source == "custom" {
+				customLatest, err = c.buildCustomLatestMap(ctx)
+				if err != nil {
+					slog.WarnContext(ctx, "skill 更新检测：拉取 custom 列表失败，本轮跳过 custom 来源",
+						"error", err,
+					)
+					customLatest = nil
+				}
+				break
+			}
+		}
+	} else {
+		// custom store 未接线：标记为不可用，resolveLatest 跳过所有 custom 来源
+		customLatest = nil
+	}
+
 	// 遍历每个 (source, source_ref) 对，查最高版本并批量回写
 	for _, src := range sources {
-		latestVer, ok := c.resolveLatest(ctx, src.Source, src.SourceRef, platformLatest)
+		latestVer, ok := c.resolveLatest(ctx, src.Source, src.SourceRef, platformLatest, customLatest)
 		if !ok {
 			// 无法确定最高版本（来源不可用/查询失败/列表为空），跳过本批次
 			continue
@@ -168,6 +203,7 @@ func (c *SkillUpdateChecker) resolveLatest(
 	ctx context.Context,
 	source, sourceRef string,
 	platformLatest map[string]string,
+	customLatest map[string]string,
 ) (string, bool) {
 	switch source {
 	case "platform":
@@ -178,6 +214,18 @@ func (c *SkillUpdateChecker) resolveLatest(
 		ver, ok := platformLatest[sourceRef]
 		if !ok || ver == "" {
 			// 平台库中不存在该 name（已被删除或名称不匹配），跳过
+			return "", false
+		}
+		return ver, true
+
+	case "custom":
+		if customLatest == nil {
+			// custom store 未接线或列表拉取失败（已在 Tick 中记录 warn），跳过
+			return "", false
+		}
+		ver, ok := customLatest[sourceRef]
+		if !ok || ver == "" {
+			// 定制技能库中不存在该 name（已被删除或名称不匹配），跳过
 			return "", false
 		}
 		return ver, true
@@ -222,6 +270,24 @@ func (c *SkillUpdateChecker) buildPlatformLatestMap(ctx context.Context) (map[st
 	m := make(map[string]string, len(rows))
 	for _, r := range rows {
 		// 因 ORDER BY name ASC, created_at DESC，同名下首条为最新入库（版本最高）
+		if _, exists := m[r.Name]; !exists {
+			m[r.Name] = r.Version
+		}
+	}
+	return m, nil
+}
+
+// buildCustomLatestMap 从 ListAllCustomSkills 结果（ORDER BY name ASC, created_at DESC）
+// 构建 name→最新版本 map。custom 来源不解析版本串，仅按入库时间取最新：
+// 因排序保证同名首条最新，只取每个 name 的第一次出现。
+func (c *SkillUpdateChecker) buildCustomLatestMap(ctx context.Context) (map[string]string, error) {
+	rows, err := c.custom.ListAllCustomSkills(ctx)
+	if err != nil {
+		return nil, err
+	}
+	m := make(map[string]string, len(rows))
+	for _, r := range rows {
+		// 因 ORDER BY name ASC, created_at DESC，同名下首条为最新交付（视为最新版本）
 		if _, exists := m[r.Name]; !exists {
 			m[r.Name] = r.Version
 		}

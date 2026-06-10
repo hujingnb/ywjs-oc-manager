@@ -98,6 +98,18 @@ func (f *fakeCheckerPlatformStore) ListPlatformSkills(_ context.Context) ([]sqlc
 	return f.skills, f.err
 }
 
+// fakeCheckerCustomStore 是 SkillUpdateCheckerCustomStore 的内存实现。
+type fakeCheckerCustomStore struct {
+	// skills 预置的 custom_skills 行（调用方应按 name ASC, created_at DESC 排序预置）
+	skills []sqlc.CustomSkill
+	// err 预置 ListAllCustomSkills 的错误
+	err error
+}
+
+func (f *fakeCheckerCustomStore) ListAllCustomSkills(_ context.Context) ([]sqlc.CustomSkill, error) {
+	return f.skills, f.err
+}
+
 // fakeClawHubVersionLister 是 ClawHubVersionLister 的内存实现。
 type fakeClawHubVersionLister struct {
 	// versions 预置各 slug 的版本列表，key 为 slug
@@ -143,7 +155,7 @@ func TestSkillUpdateChecker_Platform_HigherVersion(t *testing.T) {
 			{Name: "my-skill", Version: "1.0.0"},
 		},
 	}
-	checker := NewSkillUpdateChecker(store, platform, nil)
+	checker := NewSkillUpdateChecker(store, platform, nil, nil)
 
 	err := checker.Tick(ctx)
 	require.NoError(t, err, "Tick 不应返回错误")
@@ -170,7 +182,7 @@ func TestSkillUpdateChecker_Platform_SameVersion(t *testing.T) {
 			{Name: "my-skill", Version: "1.0.0"},
 		},
 	}
-	checker := NewSkillUpdateChecker(store, platform, nil)
+	checker := NewSkillUpdateChecker(store, platform, nil, nil)
 
 	err := checker.Tick(ctx)
 	require.NoError(t, err)
@@ -178,6 +190,36 @@ func TestSkillUpdateChecker_Platform_SameVersion(t *testing.T) {
 	// 应有一次调用，但 latest_version 为 NULL（版本相同不展示更新提示）
 	require.Len(t, store.updates, 1)
 	assert.False(t, store.updates[0].LatestVersion.Valid, "版本相同时 latest_version 应为 NULL")
+}
+
+// TestSkillUpdateChecker_Custom_HigherVersion 验证 custom 来源时，
+// 定制技能库存在比已安装版本更新的交付（created_at 更晚，排在首条），
+// 回写 latest_version 为最新版本（非 NULL）。custom 不解析版本串，仅按入库时间取最新。
+func TestSkillUpdateChecker_Custom_HigherVersion(t *testing.T) {
+	ctx := context.Background()
+
+	store := newFakeCheckerAppSkillStore()
+	// 预置一个 custom 来源 skill：source=custom、source_ref=name、安装版本 1.0.0（较旧）
+	store.addSource("custom", "my-custom-skill")
+	store.addSkill("custom", "my-custom-skill", "app-skill-id-1", "1.0.0")
+
+	// 定制技能库中 my-custom-skill 有两版本：2.0.0（最新交付，created_at 在前排首条）和 1.0.0（旧版）
+	custom := &fakeCheckerCustomStore{
+		skills: []sqlc.CustomSkill{
+			{Name: "my-custom-skill", Version: "2.0.0"}, // 首条即最新交付
+			{Name: "my-custom-skill", Version: "1.0.0"},
+		},
+	}
+	checker := NewSkillUpdateChecker(store, &fakeCheckerPlatformStore{}, custom, nil)
+
+	err := checker.Tick(ctx)
+	require.NoError(t, err, "Tick 不应返回错误")
+
+	// 应有一次 UpdateAppSkillLatest 调用，latest_version 为最新交付版本 "2.0.0"
+	require.Len(t, store.updates, 1, "应有且仅有一次 UpdateAppSkillLatest 调用")
+	assert.Equal(t, "app-skill-id-1", store.updates[0].ID, "回写 ID 应为 app-skill-id-1")
+	assert.True(t, store.updates[0].LatestVersion.Valid, "latest_version 应为有效字符串（非 NULL）")
+	assert.Equal(t, "2.0.0", store.updates[0].LatestVersion.String, "latest_version 应为最新交付版本 2.0.0")
 }
 
 // TestSkillUpdateChecker_ClawHub_HigherVersion 验证 clawhub 来源时，
@@ -197,7 +239,7 @@ func TestSkillUpdateChecker_ClawHub_HigherVersion(t *testing.T) {
 		{Version: "2.0.0"},
 	})
 
-	checker := NewSkillUpdateChecker(store, &fakeCheckerPlatformStore{}, clawhub)
+	checker := NewSkillUpdateChecker(store, &fakeCheckerPlatformStore{}, nil, clawhub)
 
 	err := checker.Tick(ctx)
 	require.NoError(t, err)
@@ -227,7 +269,7 @@ func TestSkillUpdateChecker_SingleFailDoesNotAbort(t *testing.T) {
 			{Name: "skill-a", Version: "1.5.0"},
 		},
 	}
-	checker := NewSkillUpdateChecker(store, platform, nil)
+	checker := NewSkillUpdateChecker(store, platform, nil, nil)
 
 	err := checker.Tick(ctx)
 	// Tick 本身不应返回错误（单条失败 warn 后继续）
@@ -258,7 +300,7 @@ func TestSkillUpdateChecker_NilClawHub_SkipsClawhubSource(t *testing.T) {
 	store.addSkill("clawhub", "some-slug", "ck-id-1", "1.0.0")
 
 	// clawhub 传 nil：来源未启用
-	checker := NewSkillUpdateChecker(store, &fakeCheckerPlatformStore{}, nil)
+	checker := NewSkillUpdateChecker(store, &fakeCheckerPlatformStore{}, nil, nil)
 
 	err := checker.Tick(ctx)
 	require.NoError(t, err)
@@ -286,7 +328,7 @@ func TestSkillUpdateChecker_PlatformListFail_SkipsPlatformSourcesContinuedOtherw
 	// clawhub 返回更高版本
 	clawhub.setVersions("c-slug", []SkillVersion{{Version: "2.0.0"}})
 
-	checker := NewSkillUpdateChecker(store, platform, clawhub)
+	checker := NewSkillUpdateChecker(store, platform, nil, clawhub)
 
 	err := checker.Tick(ctx)
 	require.NoError(t, err, "platform 查询失败不应导致 Tick 返回错误")
@@ -314,7 +356,7 @@ func TestSkillUpdateChecker_MultipleAppsShareSource(t *testing.T) {
 			{Name: "shared-skill", Version: "1.1.0"},
 		},
 	}
-	checker := NewSkillUpdateChecker(store, platform, nil)
+	checker := NewSkillUpdateChecker(store, platform, nil, nil)
 
 	err := checker.Tick(ctx)
 	require.NoError(t, err)
