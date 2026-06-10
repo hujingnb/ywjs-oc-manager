@@ -40,6 +40,19 @@
           </div>
         </div>
         <p v-if="entry.description" class="market-card-desc">{{ entry.description }}</p>
+        <!-- 定制技能额外信息：范围徽章（可见范围）+ 申请人小字，仅 source=custom 时渲染。 -->
+        <template v-if="entry.source === 'custom'">
+          <n-tag
+            v-if="audienceTag(entry.audience).label"
+            size="small"
+            :type="audienceTag(entry.audience).type"
+            :bordered="false"
+            class="market-card-audience"
+          >
+            {{ audienceTag(entry.audience).label }}
+          </n-tag>
+          <span v-if="entry.requester_name" class="market-card-requester">由 {{ entry.requester_name }} 申请</span>
+        </template>
         <div class="market-card-footer">
           <span class="market-card-version">v{{ entry.version }}</span>
           <span v-if="entry.downloads" class="market-card-downloads">↓ {{ formatCount(entry.downloads) }}</span>
@@ -98,6 +111,9 @@ const props = withDefaults(
     actionPending?: boolean
     canAction?: boolean // 是否有权限展示操作
     allowVersionPick?: boolean // true：详情抽屉版本行可「添加此版本」
+    // source：外部受控的初始来源筛选值（如 'custom'）；prop 变化时同步到内部 selectedSource，
+    // 但用户手动点击筛选 chip 后内部仍可自由切换（不做双向绑定，避免打断用户操作）。
+    source?: string
   }>(),
   {
     existingNames: () => new Set<string>(),
@@ -106,18 +122,33 @@ const props = withDefaults(
     actionPending: false,
     canAction: true,
     allowVersionPick: false,
+    source: '',
   },
 )
 // action 事件：携带来源/标识/名称/选定版本，由父级执行安装或加入版本。
 const emit = defineEmits<{ action: [{ source: string; source_ref: string; name: string; version: string }] }>()
 
-// 来源筛选项。
+// 来源筛选项：全部 / 平台技能 / ClawHub / 定制（custom 定向定制技能）。
 const sourceFilters = [
   { label: '全部', value: '' },
   { label: '平台技能', value: 'platform' },
   { label: 'ClawHub', value: 'clawhub' },
+  { label: '定制', value: 'custom' },
 ] as const
-const selectedSource = ref<string>('')
+// selectedSource：当前激活的来源筛选值。
+// 以 prop.source 初始化；prop 变化时（如父组件「去安装」切到 custom）同步更新，
+// 但用户手动点击筛选 chip 后内部自由切换，不做双向绑定。
+const selectedSource = ref<string>(props.source ?? '')
+
+// 监听 prop.source 变化，父组件（如 onGoInstall）修改时同步到内部筛选状态。
+watch(
+  () => props.source,
+  (newSource) => {
+    if (newSource !== undefined) {
+      selectedSource.value = newSource
+    }
+  },
+)
 
 const searchText = ref('')
 const debouncedSearch = ref('')
@@ -213,12 +244,26 @@ function emitAction(entry: SkillEntry, version: string) {
 function sourceLabel(source?: string): string {
   if (source === 'platform') return '平台技能'
   if (source === 'clawhub') return 'ClawHub'
+  if (source === 'custom') return '定制'
   return source || '内置'
 }
-function sourceTagType(source?: string): 'info' | 'warning' | 'default' {
+// sourceTagType 将来源映射为 NaiveUI tag 颜色：platform→info(蓝)、clawhub→warning(橙)、
+// custom→error(紫/红，Naive UI 无原生紫色 type，error 在多数主题下呈紫红色，视觉上与其他来源区分)。
+function sourceTagType(source?: string): 'info' | 'warning' | 'default' | 'error' {
   if (source === 'platform') return 'info'
   if (source === 'clawhub') return 'warning'
+  if (source === 'custom') return 'error'
   return 'default'
+}
+
+// audienceTag 将 custom 来源的可见范围标识映射为徽章文案与颜色。
+// all_org→整企业可见(success 绿)、org_admins→仅管理员可见(warning 橙)、
+// requester_only→仅本人可见(default 灰)；未知值返回灰色空文案。
+function audienceTag(audience?: string): { type: 'success' | 'warning' | 'default'; label: string } {
+  if (audience === 'all_org') return { type: 'success', label: '整企业可见' }
+  if (audience === 'org_admins') return { type: 'warning', label: '仅管理员可见' }
+  if (audience === 'requester_only') return { type: 'default', label: '仅本人可见' }
+  return { type: 'default', label: '' }
 }
 function formatCount(n?: number): string {
   if (!n || n < 10000) return String(n ?? 0)
@@ -244,4 +289,7 @@ function formatCount(n?: number): string {
 .market-card-footer { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
 .market-card-version { font-size: 12px; color: var(--color-text-secondary); }
 .market-card-downloads { font-size: 12px; color: var(--color-text-secondary); }
+/* 定制技能卡片额外信息：范围徽章与申请人小字，紧接卡片描述下方。 */
+.market-card-audience { margin-bottom: 4px; }
+.market-card-requester { font-size: 11px; color: var(--color-text-secondary); display: block; margin-bottom: 6px; }
 </style>

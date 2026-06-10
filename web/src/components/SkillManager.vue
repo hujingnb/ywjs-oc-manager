@@ -43,7 +43,9 @@
         </template>
       </n-tab-pane>
 
-      <!-- 技能市场视图：委托给 SkillMarketBrowser 子组件实现。 -->
+      <!-- 技能市场视图：委托给 SkillMarketBrowser 子组件实现。
+           :source="pendingMarketSource" 把「去安装」期望的来源筛选（如 'custom'）传入，
+           SkillMarketBrowser 通过 prop watch 同步到内部 selectedSource，实现跨 tab 来源联动。 -->
       <n-tab-pane name="market" tab="技能市场">
         <skill-market-browser
           :existing-names="installedNames"
@@ -51,6 +53,7 @@
           existing-label="已安装"
           :action-pending="installMutation.isPending.value"
           :can-action="canManage"
+          :source="pendingMarketSource"
           @action="onMarketAction"
         />
       </n-tab-pane>
@@ -147,13 +150,13 @@ const reinstallMutation = useReinstallAppSkill(appIdRef)
 const activeTab = ref<'installed' | 'market' | 'tickets'>('installed')
 
 // pendingMarketSource 记录「去安装」期望的市场来源筛选值（'custom'）。
-// 现阶段 SkillMarketBrowser 的来源筛选完全由其内部 selectedSource ref 管理、未对外暴露，
-// SkillManager 无法外部设置；Task 3 会把 SkillMarketBrowser 的 source 做成受控（prop/expose）后接上，
-// 届时在切到市场 tab 时把此值同步给子组件。当前仅记录意图，先只切到市场 tab。
+// 通过 :source="pendingMarketSource" prop 传给 SkillMarketBrowser，子组件 watch 该 prop
+// 并同步到内部 selectedSource，实现工单「去安装」→ 市场 tab 自动切到「定制」筛选的联动。
 const pendingMarketSource = ref<string>('')
 
-// onGoInstall 响应工单面板「去安装」：切到技能市场 tab，并记录目标来源筛选（待 Task 3 接通）。
-// name 为目标定制技能名（custom_skill_name），Task 3 接通后可用于市场内定位/高亮。
+// onGoInstall 响应工单面板「去安装」：切到技能市场 tab，并设 pendingMarketSource='custom'
+// 让 SkillMarketBrowser 自动选中「定制」筛选，用户可直接在市场看到定制卡片并安装。
+// name 为目标定制技能名（custom_skill_name），当前仅用于联动筛选，暂不做市场内定位/高亮。
 function onGoInstall(_name: string | undefined) {
   activeTab.value = 'market'
   pendingMarketSource.value = 'custom'

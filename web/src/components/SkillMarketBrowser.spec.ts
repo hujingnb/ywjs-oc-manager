@@ -304,6 +304,74 @@ describe('SkillMarketBrowser', () => {
     })
   })
 
+  // ======== 定制卡片 ========
+
+  it('定制技能卡片渲染范围徽章、申请人小字与安装按钮', async () => {
+    // 覆盖 source=custom 时：范围徽章（audienceTag）、申请人「由 X 申请」小字、来源徽章「定制」均渲染；
+    // 安装按钮仍可点击（custom 来源走同一 emitAction 路径）。
+    marketState.data.value = {
+      entries: [
+        {
+          source: 'custom',
+          source_ref: 'my-custom-skill',
+          name: 'my-custom-skill',
+          version: '1.0.0',
+          downloads: 0,
+          audience: 'all_org',
+          requester_name: '张三',
+        },
+      ],
+    }
+    const wrapper = mountBrowser({ canAction: true })
+    const card = wrapper.find('.n-card')
+    // 来源徽章应显示「定制」。
+    expect(card.text()).toContain('定制')
+    // 范围徽章应显示「整企业可见」（audience=all_org）。
+    expect(card.text()).toContain('整企业可见')
+    // 申请人小字应显示「由 张三 申请」。
+    expect(card.text()).toContain('由 张三 申请')
+    // 安装按钮应存在（custom 来源复用同一安装路径）。
+    expect(card.find('button').exists()).toBe(true)
+  })
+
+  it('定制卡片点击安装按钮 emit action 携带正确的 source/source_ref/name/version', async () => {
+    // 覆盖 custom 来源的 emitAction：source='custom'、source_ref/name/version 均来自 entry。
+    marketState.data.value = {
+      entries: [
+        {
+          source: 'custom',
+          source_ref: 'custom-skill-ref',
+          name: 'custom-skill-ref',
+          version: '2.0.0',
+          downloads: 0,
+          audience: 'org_admins',
+          requester_name: '李四',
+        },
+      ],
+    }
+    const wrapper = mountBrowser({ canAction: true })
+    await wrapper.find('.market-card button').trigger('click')
+    expect(wrapper.emitted('action')?.[0][0]).toMatchObject({
+      source: 'custom',
+      source_ref: 'custom-skill-ref',
+      name: 'custom-skill-ref',
+      version: '2.0.0',
+    })
+  })
+
+  it('source prop 传入 custom 时 selectedSource 初始为 custom（定制筛选被选中）', async () => {
+    // 覆盖父组件「去安装」联动：prop source='custom' 使市场初始选中「定制」筛选，
+    // 筛选 chip 中「定制」应带 primary 类型（checked=true 绑定）。
+    marketState.data.value = { entries: [] }
+    const wrapper = mountBrowser({ source: 'custom' })
+    // 找到所有筛选 chip，「定制」chip 应有 checked 属性且值为 true。
+    const filterTags = wrapper.findAll('.filter-tag')
+    const customTag = filterTags.find((t) => t.text().includes('定制'))
+    expect(customTag).toBeTruthy()
+    // NTag stub 透传 $attrs（含 checked），断言 checked 属性存在且为 true。
+    expect(customTag?.attributes('checked')).toBe('true')
+  })
+
   // ======== 详情抽屉锁旧版 pick-version ========
 
   it('详情抽屉 pick-version 事件 emit action 使用抽屉版本而非卡片最新版', async () => {
