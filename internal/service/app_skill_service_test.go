@@ -174,6 +174,29 @@ func (f *fakePlatformInstaller) GetForInstall(_ context.Context, name, version s
 	return data, "fakeshaxxx", nil
 }
 
+// fakeCustomInstaller 是 CustomInstaller 的内存实现。
+type fakeCustomInstaller struct {
+	// archives 存储已预置的归档，key 为 "name|version"
+	archives map[string][]byte
+}
+
+func newFakeCustomInstaller() *fakeCustomInstaller {
+	return &fakeCustomInstaller{archives: map[string][]byte{}}
+}
+
+// put 预置一个定制技能归档。
+func (f *fakeCustomInstaller) put(name, version string, data []byte) {
+	f.archives[name+"|"+version] = data
+}
+
+func (f *fakeCustomInstaller) GetForInstall(_ context.Context, name, version string) ([]byte, string, error) {
+	data, ok := f.archives[name+"|"+version]
+	if !ok {
+		return nil, "", ErrCustomSkillNotFound
+	}
+	return data, "fakecustomshaxxx", nil
+}
+
 // fakeClawHubDownloader 是 ClawHubDownloader 的内存实现。
 type fakeClawHubDownloader struct {
 	archives map[string][]byte
@@ -286,6 +309,7 @@ type appSkillTestDeps struct {
 	appSkills *fakeAppSkillStore
 	apps      *fakeAppLocator
 	platform  *fakePlatformInstaller
+	custom    *fakeCustomInstaller
 	clawhub   *fakeClawHubDownloader
 	blobs     *fakeLibraryBlob
 	ocops     *fakeOcOpsSkillClient
@@ -302,6 +326,7 @@ func newAppSkillTestDeps(_ *testing.T) *appSkillTestDeps {
 		appSkills: newFakeAppSkillStore(),
 		apps:      apps,
 		platform:  newFakePlatformInstaller(),
+		custom:    newFakeCustomInstaller(),
 		clawhub:   &fakeClawHubDownloader{archives: map[string][]byte{}},
 		blobs:     &fakeLibraryBlob{},
 		ocops:     newFakeOcOpsSkillClient(),
@@ -317,6 +342,7 @@ func (d *appSkillTestDeps) service() *AppSkillService {
 		Apps:     d.apps,
 		Versions: d.versions,
 		Platform: d.platform,
+		Custom:   d.custom,
 		ClawHub:  d.clawhub,
 		Blobs:    d.blobs,
 		OcOps:    d.ocops,
@@ -363,6 +389,37 @@ func TestAppSkillService_Install_Platform(t *testing.T) {
 	row, ok := deps.appSkills.get("app-1", "weather")
 	require.True(t, ok)
 	assert.Equal(t, "platform", row.Source)
+}
+
+// TestAppSkillService_Install_Custom 从定制技能来源安装 skill：
+// 期望落 app_skills + oc-ops 热装与 reload，Source 字段为 custom，状态返回 active。
+func TestAppSkillService_Install_Custom(t *testing.T) {
+	deps := newAppSkillTestDeps(t)
+	// 预置定制技能 my-tool 1.0 的归档（合法最小 tar：两个全零 512 字节 EOF 块）
+	deps.custom.put("my-tool", "1.0", make([]byte, 1024))
+	svc := deps.service()
+
+	res, err := svc.Install(context.Background(), deps.ownerPrincipal(), "app-1", InstallSkillInput{
+		Source:    "custom",
+		SourceRef: "my-tool",
+		Name:      "my-tool",
+		Version:   "1.0",
+	})
+	require.NoError(t, err)
+	// 返回字段校验：source=custom，name/version 正确，状态 active（热装+reload 成功）
+	assert.Equal(t, "my-tool", res.Name)
+	assert.Equal(t, "custom", res.Source)
+	assert.Equal(t, "my-tool", res.SourceRef)
+	assert.Equal(t, "1.0", res.Version)
+	assert.Equal(t, "active", res.Status)
+	// oc-ops 热装与 reload 均被调用
+	assert.True(t, deps.ocops.installed["my-tool"])
+	assert.True(t, deps.ocops.reloaded)
+	// app_skills 表已落库且 source 字段正确
+	row, ok := deps.appSkills.get("app-1", "my-tool")
+	require.True(t, ok)
+	assert.Equal(t, "custom", row.Source)
+	assert.Equal(t, "my-tool", row.SourceRef)
 }
 
 // TestAppSkillService_Install_Denied 非 owner/管理员安装被拒，返回 ErrAppSkillDenied。

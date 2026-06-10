@@ -121,9 +121,9 @@ type AuditRecorder interface {
 
 // InstallSkillInput 是安装一个实例 skill 的入参。
 type InstallSkillInput struct {
-	// Source 来源类型：platform | clawhub
+	// Source 来源类型：platform | custom | clawhub
 	Source string
-	// SourceRef 来源内精准标识：platform=name，clawhub=slug
+	// SourceRef 来源内精准标识：platform/custom=name，clawhub=slug
 	SourceRef string
 	// Name skill 目录名（实例内唯一）
 	Name string
