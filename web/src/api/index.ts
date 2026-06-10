@@ -117,6 +117,23 @@ export type QuotaSeries = RawQuotaSeries & { items: QuotaDate[] }
 // PlatformSkill：平台库 skill，id/name/version 必须存在（删除/更新依赖 id，列表展示依赖 name/version）。
 export type PlatformSkill = WithRequired<Schemas['service.PlatformSkillResult'], 'id' | 'name' | 'version'>
 
+// ===== 定制技能工单相关 =====
+
+// SkillTicket：工单列表项，id/status/title 在列表视图中必须存在。
+export type SkillTicket = WithRequired<Schemas['service.SkillTicketResult'], 'id' | 'status' | 'title'>
+
+// SkillTicketDetail：工单详情，id/status 在详情视图中必须存在；其余字段（description/comments 等）按需可选。
+export type SkillTicketDetail = WithRequired<Schemas['service.SkillTicketDetailResult'], 'id' | 'status'>
+
+// SkillTicketComment：工单评论，id/body 必须存在（id 用于渲染唯一键，body 是评论内容）。
+export type SkillTicketComment = WithRequired<Schemas['service.SkillTicketCommentResult'], 'id' | 'body'>
+
+// CustomSkillResult：交付结果，id/name/version 必须存在（name 用于后续安装，version 区分迭代）。
+export type CustomSkillResult = WithRequired<Schemas['service.CustomSkillResult'], 'id' | 'name' | 'version'>
+
+// SkillTicketAttachment：工单附件，id/file_name 必须存在（id 用于下载路径，file_name 用于保存文件）。
+export type SkillTicketAttachment = WithRequired<Schemas['service.SkillTicketAttachmentResult'], 'id' | 'file_name'>
+
 // AppSkill：实例已安装 skill，name/status 必须存在（唯一键为 name，对账状态为 status）。
 export type AppSkill = WithRequired<Schemas['service.AppSkillResult'], 'name' | 'status'>
 
