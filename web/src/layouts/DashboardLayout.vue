@@ -66,6 +66,25 @@
           <p class="eyebrow">{{ environmentLabel }}</p>
           <h1 style="margin: 0; font-size: 20px">控制台</h1>
         </div>
+        <!-- 视角切换器:仅 org_admin 可见,在「企业管理」与「我的实例」两视角间切换并导航。 -->
+        <div v-if="isOrgAdmin" class="perspective-switch">
+          <n-button
+            size="small"
+            :type="perspective === 'manage' ? 'primary' : 'default'"
+            :aria-pressed="perspective === 'manage'"
+            @click="onSwitchPerspective('manage')"
+          >
+            企业管理
+          </n-button>
+          <n-button
+            size="small"
+            :type="perspective === 'instance' ? 'primary' : 'default'"
+            :aria-pressed="perspective === 'instance'"
+            @click="onSwitchPerspective('instance')"
+          >
+            我的实例
+          </n-button>
+        </div>
         <div class="topbar-actions">
           <n-tag type="success" size="small" :bordered="false">API 正常</n-tag>
           <!-- 使用手册入口：右上角文字按钮，点开右侧抽屉按当前角色展示对应手册 -->
@@ -153,7 +172,7 @@ import {
 import HelpDrawer from '@/components/HelpDrawer.vue'
 import { useAuthStore } from '@/stores/auth'
 import { useOwnApp } from '@/composables/useOwnApp'
-import { useAdminPerspective } from '@/composables/useAdminPerspective'
+import { useAdminPerspective, type AdminPerspective } from '@/composables/useAdminPerspective'
 import { useSkillTicketBadgeQuery } from '@/api/hooks/useSkillTickets'
 
 // DashboardLayout 负责已登录后台的导航外壳、环境标识和退出入口。
@@ -218,8 +237,8 @@ const pendingTicketCount = computed(() => ticketBadge.data.value ?? 0)
 
 const { appId: memberAppId, hasApp: memberHasApp } = useOwnApp()
 
-// 视角状态:仅 org_admin 消费,决定渲染企业管理菜单还是我的实例菜单。Task 4 再接入切换器与退出清除。
-const { perspective } = useAdminPerspective()
+// 视角状态:仅 org_admin 消费,决定渲染企业管理菜单还是我的实例菜单。
+const { perspective, setPerspective, resetPerspective } = useAdminPerspective()
 
 // inOwnInstanceView:当前是否处于「以自有实例为中心」的视角。
 // org_member 恒为 true;org_admin 仅在 instance 视角为 true;platform_admin 恒为 false。
@@ -315,8 +334,24 @@ function onNav(key: string) {
   router.push(key.startsWith('member-empty-') ? '/apps/empty' : key)
 }
 
+// onSwitchPerspective:切换 org_admin 视角并导航到目标视角的落地页。
+// 切到我的实例:有自有实例进总览,无实例进空状态页(由 AppEmptyPage 给自助建实例入口)。
+// 切回企业管理:回管理总览根路由。
+function onSwitchPerspective(view: AdminPerspective) {
+  // 点击当前已激活视角时直接返回,避免重复持久化与重复导航(NavigationDuplicated)。
+  if (perspective.value === view) return
+  setPerspective(view)
+  if (view === 'instance') {
+    router.push(memberHasApp.value && memberAppId.value ? `/apps/${memberAppId.value}/overview` : '/apps/empty')
+    return
+  }
+  router.push('/')
+}
+
 // onLogout 先清理登录态再回到登录页，避免旧 token 继续驱动后台查询。
 async function onLogout() {
+  // 退出前清除视角持久化,避免下个登录用户沿用上一个视角
+  resetPerspective()
   await auth.logout()
   await router.replace('/login')
 }
@@ -441,5 +476,11 @@ function reload() {
 .dashboard-page-frame :deep(> *) {
   min-height: 0;
   flex: 1;
+}
+
+/* 视角切换器:两个分段按钮紧贴,放在顶栏标题与右侧操作之间。 */
+.perspective-switch {
+  display: flex;
+  gap: 4px;
 }
 </style>

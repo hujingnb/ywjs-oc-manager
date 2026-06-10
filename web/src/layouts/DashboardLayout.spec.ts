@@ -442,4 +442,99 @@ describe('DashboardLayout', () => {
     expect(changePassword).toHaveBeenCalledWith('old-password', 'new-password-123')
     expect(routerReplace).toHaveBeenCalledWith('/login')
   })
+
+  // 覆盖切换器可见性:仅 org_admin 渲染视角切换;platform_admin 不渲染。
+  it('shows perspective switch only for org_admin', () => {
+    authState.user = { id: 'org-admin-1', username: 'owner', display_name: '管理员', role: 'org_admin', org_id: 'org-1' }
+    authState.isPlatformAdmin = false
+    authState.isOrgAdmin = true
+    authState.isOrgMember = false
+
+    const adminWrapper = mountLayout()
+    const adminButtons = adminWrapper.findAll('button').map(b => b.text().trim())
+    expect(adminButtons).toContain('企业管理')
+    expect(adminButtons).toContain('我的实例')
+
+    authState.isOrgAdmin = false
+    authState.isPlatformAdmin = true
+    authState.user = { id: 'admin-1', username: 'admin', display_name: 'admin', role: 'platform_admin', org_id: 'org-1' }
+    const platformWrapper = mountLayout()
+    const platformButtons = platformWrapper.findAll('button').map(b => b.text().trim())
+    expect(platformButtons).not.toContain('我的实例')
+
+    authState.isPlatformAdmin = false
+    authState.isOrgAdmin = false
+    authState.isOrgMember = true
+    authState.user = { id: 'member-1', username: 'member', display_name: '成员', role: 'org_member', org_id: 'org-1' }
+    const memberWrapper = mountLayout()
+    const memberButtons = memberWrapper.findAll('button').map(b => b.text().trim())
+    expect(memberButtons).not.toContain('企业管理')
+    expect(memberButtons).not.toContain('我的实例')
+  })
+
+  // 覆盖切到我的实例视角(无自有实例):应持久化视角并导航到空状态页。
+  it('switches to instance perspective and navigates to empty state when no own app', async () => {
+    authState.user = { id: 'org-admin-1', username: 'owner', display_name: '管理员', role: 'org_admin', org_id: 'org-1' }
+    authState.isPlatformAdmin = false
+    authState.isOrgAdmin = true
+    authState.isOrgMember = false
+    memberAppState.appId.value = undefined
+    memberAppState.hasApp.value = false
+
+    const wrapper = mountLayout()
+    const instanceButton = wrapper.findAll('button').find(b => b.text().trim() === '我的实例')
+    await instanceButton!.trigger('click')
+
+    expect(setPerspective).toHaveBeenCalledWith('instance')
+    expect(routerPush).toHaveBeenCalledWith('/apps/empty')
+  })
+
+  // 覆盖切到我的实例视角(有自有实例):应导航到自有实例总览。
+  it('switches to instance perspective and navigates to own app overview', async () => {
+    authState.user = { id: 'org-admin-1', username: 'owner', display_name: '管理员', role: 'org_admin', org_id: 'org-1' }
+    authState.isPlatformAdmin = false
+    authState.isOrgAdmin = true
+    authState.isOrgMember = false
+    memberAppState.appId.value = 'admin-app'
+    memberAppState.hasApp.value = true
+
+    const wrapper = mountLayout()
+    const instanceButton = wrapper.findAll('button').find(b => b.text().trim() === '我的实例')
+    await instanceButton!.trigger('click')
+
+    expect(setPerspective).toHaveBeenCalledWith('instance')
+    expect(routerPush).toHaveBeenCalledWith('/apps/admin-app/overview')
+  })
+
+  // 覆盖切回企业管理视角:应持久化并导航到管理总览根路由。
+  it('switches back to manage perspective and navigates to root', async () => {
+    authState.user = { id: 'org-admin-1', username: 'owner', display_name: '管理员', role: 'org_admin', org_id: 'org-1' }
+    authState.isPlatformAdmin = false
+    authState.isOrgAdmin = true
+    authState.isOrgMember = false
+    adminPerspectiveState.perspective.value = 'instance'
+
+    const wrapper = mountLayout()
+    const manageButton = wrapper.findAll('button').find(b => b.text().trim() === '企业管理')
+    await manageButton!.trigger('click')
+
+    expect(setPerspective).toHaveBeenCalledWith('manage')
+    expect(routerPush).toHaveBeenCalledWith('/')
+  })
+
+  // 覆盖退出登录:除清登录态外还需清除视角持久化,避免换账号串视角。
+  it('resets perspective on logout', async () => {
+    authState.user = { id: 'org-admin-1', username: 'owner', display_name: '管理员', role: 'org_admin', org_id: 'org-1' }
+    authState.isPlatformAdmin = false
+    authState.isOrgAdmin = true
+    authState.isOrgMember = false
+    logout.mockResolvedValue(undefined)
+
+    const wrapper = mountLayout()
+    const logoutButton = wrapper.findAll('button').find(b => b.text().includes('退出'))
+    await logoutButton!.trigger('click')
+    await flushPromises()
+
+    expect(resetPerspective).toHaveBeenCalled()
+  })
 })
