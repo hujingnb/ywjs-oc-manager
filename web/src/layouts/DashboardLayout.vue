@@ -287,6 +287,11 @@ const menuOptions = computed<MenuOption[]>(() => {
     { key: memberAppPath.value, label: '实例', icon: () => h(Bot, { size: 18 }) },
     { key: '/knowledge', label: '企业知识库', icon: () => h(BookOpen, { size: 18 }) },
   )
+  // 技能：org_admin 与成员对称，给同一顶级技能页（key /skills、同图标），
+  // 管理自己的实例技能并可提交/查看定制技能工单。平台管理员另有 /platform/skills 入口，不在此处加。
+  if (isOrgAdmin.value) {
+    items.push({ key: '/skills', label: '技能', icon: () => h(Puzzle, { size: 18 }) })
+  }
   // 账户余额仅对 org_admin 显示；org_member 和 platform_admin 无此入口。
   if (isOrgAdmin.value) {
     items.push({ key: '/balance', label: '账户余额', icon: () => h(Wallet, { size: 18 }) })

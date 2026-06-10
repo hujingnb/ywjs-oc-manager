@@ -1,29 +1,52 @@
 <template>
-  <!-- OrgSkillsPage：企业成员左侧「技能」入口页，通过 useMemberApp 取当前用户的实例后复用 SkillManager。 -->
+  <!-- OrgSkillsPage：企业用户左侧「技能」入口页，通过 useOwnApp 取当前用户自己的实例后复用 SkillManager。 -->
   <div>
-    <!-- 加载态：等待成员实例信息返回时展示加载提示。 -->
+    <!-- 加载态：等待用户实例信息返回时展示加载提示。 -->
     <div v-if="isLoading" class="state-text">加载中…</div>
-    <!-- 空态：当前账号尚未关联实例时展示占位提示。 -->
-    <p v-else-if="!hasApp" class="state-text">当前账号暂无关联实例，请联系管理员创建实例后再访问。</p>
-    <!-- 正常态：实例就绪时将 appId 传给 SkillManager；SkillManager 内部 inject app 做权限。
-         成员页开启「定制技能」工单 tab（show-tickets），管理员 per-app 视图不传保持关闭。 -->
+    <!-- 无实例态：不再整页空态，而是仍渲染定制技能工单提交/跟踪（SkillTicketPanel 自包含、per-user、不需要 appId），
+         顶部加提示 banner 说明无实例可提交需求、但需有实例才能安装。 -->
+    <template v-else-if="!hasApp">
+      <n-alert type="info" :bordered="false" class="no-app-banner">
+        你还没有实例，可提交定制技能需求；交付后需有实例才能安装。
+      </n-alert>
+      <!-- 无实例场景下「去安装」无可用实例，提示用户先创建实例再安装。 -->
+      <SkillTicketPanel @go-install="onGoInstallWithoutApp" />
+    </template>
+    <!-- 有实例态：实例就绪时将 appId 传给 SkillManager；SkillManager 内部 inject app 做权限。
+         开启「定制技能」工单 tab（show-tickets），可在市场内安装定制技能。 -->
     <SkillManager v-else :app-id="appId!" :show-tickets="true" />
   </div>
 </template>
 
 <script setup lang="ts">
 import { provide } from 'vue'
+import { NAlert, useMessage } from 'naive-ui'
 
 import SkillManager from '@/components/SkillManager.vue'
-import { useMemberApp } from '@/composables/useMemberApp'
+import SkillTicketPanel from '@/components/SkillTicketPanel.vue'
+import { useOwnApp } from '@/composables/useOwnApp'
 
-// OrgSkillsPage 是企业成员左侧菜单「技能」的顶级页面。
-// 通过 useMemberApp 获取成员唯一实例 ID，再将 appId 传给 SkillManager 复用技能列表+市场逻辑。
-// 此页面无 allowedRoles 限制，org_member 可直接访问。
-const { appId, hasApp, isLoading, app } = useMemberApp()
+// OrgSkillsPage 现同时服务 org_member 与 org_admin 两类用户：各自通过 useOwnApp 取自己的实例。
+// 有实例时把 appId 传给 SkillManager 复用技能列表+市场逻辑；无实例时仅渲染工单面板（仍可提交定制技能需求）。
+// 此页面无 allowedRoles 限制，org_member 与 org_admin 均可直接访问。
+const { appId, hasApp, isLoading, app } = useOwnApp()
 
-// provide('app')：把成员实例对象注入给 SkillManager，使其 canManageAppSkill 能判定本人归属，
-// 从而在市场展示「安装」按钮（成员可安装包括定制技能在内的 skill 到自己实例）。
+const message = useMessage()
+
+// provide('app')：把用户实例对象注入给 SkillManager，使其 canManageAppSkill 能判定本人归属，
+// 从而在市场展示「安装」按钮（用户可安装包括定制技能在内的 skill 到自己实例）。
 // 管理员 per-app 入口由 AppDetailPage 另行 provide('app')，两条路径一致。
 provide('app', app)
+
+// onGoInstallWithoutApp：无实例时 delivered 工单的「去安装」无可落地实例，提示用户先创建实例再安装。
+function onGoInstallWithoutApp() {
+  message.info('请先创建实例后再安装')
+}
 </script>
+
+<style scoped>
+/* 无实例提示 banner：与下方工单面板留出间距。 */
+.no-app-banner {
+  margin-bottom: 16px;
+}
+</style>
