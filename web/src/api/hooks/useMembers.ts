@@ -5,6 +5,7 @@ import type { Ref } from 'vue'
 
 import { apiRequest } from '@/api/client'
 import type { App, Member } from '@/api'
+import { _appsKeys } from '@/api/hooks/useApps'
 
 // OnboardMemberPayload 是”一键创建成员和应用”表单提交体。
 // spec-A2b：runtime_node_id 字段已随节点概念删除（migration 000003 对应后端去字段），前端 DTO 同步去掉。
@@ -167,7 +168,7 @@ export function useOnboardMember(orgId: Ref<string | undefined>) {
 }
 
 // useCreateMemberApp 为已有成员创建新的实例。
-// 成功后刷新成员列表；应用列表会在用户进入实例页时重新拉取。
+// 成功后同时失效成员列表与组织应用列表缓存，保证 useOwnApp 等消费者即时看到新实例。
 export function useCreateMemberApp(orgId: Ref<string | undefined>) {
   const client = useQueryClient()
   return useMutation({
@@ -181,6 +182,9 @@ export function useCreateMemberApp(orgId: Ref<string | undefined>) {
     },
     onSuccess: () => {
       void client.invalidateQueries({ queryKey: memberListKey(orgId.value) })
+      // 同步失效组织应用列表缓存：管理员为自己（或他人）新建实例后，useOwnApp 依赖的
+      // ['apps','org',orgId] 必须刷新，否则双视角切到「我的实例」会误判无实例、落到空状态页。
+      void client.invalidateQueries({ queryKey: _appsKeys.orgKey(orgId.value) })
     },
   })
 }
