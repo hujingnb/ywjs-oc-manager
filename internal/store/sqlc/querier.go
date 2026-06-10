@@ -73,6 +73,9 @@ type Querier interface {
 	CreateRechargeRecord(ctx context.Context, arg CreateRechargeRecordParams) error
 	CreateRefreshToken(ctx context.Context, arg CreateRefreshTokenParams) error
 	CreateSkillTicket(ctx context.Context, arg CreateSkillTicketParams) error
+	// 定制技能相关查询。本文件首版仅放工单附件三条查询；
+	// 后续 Task 3 再追加 custom_skills / custom_skill_targets / 交付相关查询。
+	CreateSkillTicketAttachment(ctx context.Context, arg CreateSkillTicketAttachmentParams) error
 	CreateSkillTicketComment(ctx context.Context, arg CreateSkillTicketCommentParams) error
 	CreateUser(ctx context.Context, arg CreateUserParams) error
 	DeleteAppSkillByAppAndName(ctx context.Context, arg DeleteAppSkillByAppAndNameParams) error
@@ -132,6 +135,7 @@ type Querier interface {
 	GetRefreshToken(ctx context.Context, id string) (RefreshToken, error)
 	GetRefreshTokenByHash(ctx context.Context, tokenHash string) (RefreshToken, error)
 	GetSkillTicket(ctx context.Context, id string) (SkillTicket, error)
+	GetSkillTicketAttachment(ctx context.Context, id string) (SkillTicketAttachment, error)
 	GetUser(ctx context.Context, id string) (User, error)
 	GetUserByOrgAndUsername(ctx context.Context, arg GetUserByOrgAndUsernameParams) (User, error)
 	GetUserByUsername(ctx context.Context, username string) (User, error)
@@ -190,6 +194,7 @@ type Querier interface {
 	// running 是常态；binding_waiting 表示 pod 已起但渠道还在登录中，也需要 reconcile。
 	// spec-A2b：去掉 runtime_node_id / container_id（k8s 路径不再写这两列），消费方仅用 id。
 	ListRunningApps(ctx context.Context) ([]string, error)
+	ListSkillTicketAttachments(ctx context.Context, ticketID string) ([]SkillTicketAttachment, error)
 	ListSkillTicketComments(ctx context.Context, ticketID string) ([]SkillTicketComment, error)
 	ListSkillTicketsByRequester(ctx context.Context, requesterUserID string) ([]SkillTicket, error)
 	// reaper 扫描 init 子状态下「连续 N 秒无更新」的孤儿；N 由调用方按秒传入。
