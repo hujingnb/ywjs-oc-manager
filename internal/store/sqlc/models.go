@@ -132,6 +132,44 @@ type ChannelBinding struct {
 	AppActiveKey  null.String `db:"app_active_key" json:"app_active_key"`
 }
 
+// 定制技能归档,多版本共存,工单交付产出(Plan 2 启用)
+type CustomSkill struct {
+	// 主键 UUID
+	ID string `db:"id" json:"id"`
+	// skill 名,等于容器内解压目录名,一工单一 name
+	Name string `db:"name" json:"name"`
+	// 市场卡片展示描述
+	Description string `db:"description" json:"description"`
+	// 版本号,交付时按上传时间自动生成(YYYYMMDD-HHmmss,UTC);唯一即可,"最新"由 created_at 决定
+	Version string `db:"version" json:"version"`
+	// 对象存储相对路径 library/custom/<name>/<version>.tar
+	TarPath string `db:"tar_path" json:"tar_path"`
+	// tar 字节大小
+	FileSize int64 `db:"file_size" json:"file_size"`
+	// tar 内容 SHA256
+	FileSha256 string `db:"file_sha256" json:"file_sha256"`
+	// 产出该技能的工单
+	TicketID string `db:"ticket_id" json:"ticket_id"`
+	// 交付者 user id(平台管理员)
+	CreatedBy null.String `db:"created_by" json:"created_by"`
+	// 交付时间
+	CreatedAt time.Time `db:"created_at" json:"created_at"`
+}
+
+// 定制技能目标可见范围,按 org+受众过滤市场可见性(Plan 2 启用)
+type CustomSkillTarget struct {
+	// 主键 UUID
+	ID string `db:"id" json:"id"`
+	// 目标作用的定制技能 name(跨版本)
+	CustomSkillName string `db:"custom_skill_name" json:"custom_skill_name"`
+	// 可见组织
+	OrgID string `db:"org_id" json:"org_id"`
+	// 受众:all_org|org_admins|requester_only
+	Audience string `db:"audience" json:"audience"`
+	// 创建时间
+	CreatedAt time.Time `db:"created_at" json:"created_at"`
+}
+
 type IndustryKnowledgeBasis struct {
 	ID            string      `db:"id" json:"id"`
 	Name          string      `db:"name" json:"name"`
@@ -266,6 +304,68 @@ type RefreshToken struct {
 	TokenHash string    `db:"token_hash" json:"token_hash"`
 	ExpiresAt time.Time `db:"expires_at" json:"expires_at"`
 	RevokedAt null.Time `db:"revoked_at" json:"revoked_at"`
+	CreatedAt time.Time `db:"created_at" json:"created_at"`
+}
+
+// skill 定制需求工单,人工处理生命周期
+type SkillTicket struct {
+	// 主键 UUID
+	ID string `db:"id" json:"id"`
+	// 提交者所属组织,定向范围锚点
+	OrgID string `db:"org_id" json:"org_id"`
+	// 提交者 user id
+	RequesterUserID string `db:"requester_user_id" json:"requester_user_id"`
+	// 提交时角色快照:org_admin|org_member,决定默认目标范围
+	RequesterRole string `db:"requester_role" json:"requester_role"`
+	// 需求标题
+	Title string `db:"title" json:"title"`
+	// 需求描述/使用场景/输入输出示例
+	Description string `db:"description" json:"description"`
+	// 状态:pending|processing|delivered|rejected
+	Status string `db:"status" json:"status"`
+	// 管理员报价金额(分),NULL=未报价;用分存避免小数,展示层 /100 格式化为元
+	QuoteAmountCents null.Int `db:"quote_amount_cents" json:"quote_amount_cents"`
+	// 首次交付时写入,关联 custom_skills.name,一工单一技能(Plan 2 写入)
+	CustomSkillName null.String `db:"custom_skill_name" json:"custom_skill_name"`
+	// 拒绝原因(status=rejected 时)
+	RejectReason null.String `db:"reject_reason" json:"reject_reason"`
+	// 提交时间
+	CreatedAt time.Time `db:"created_at" json:"created_at"`
+	// 最后更新时间(状态变更/评论/交付)
+	UpdatedAt time.Time `db:"updated_at" json:"updated_at"`
+}
+
+// 工单附件,提交需求/反馈时上传的示例文档/截图(Plan 2 启用)
+type SkillTicketAttachment struct {
+	// 主键 UUID
+	ID string `db:"id" json:"id"`
+	// 所属工单
+	TicketID string `db:"ticket_id" json:"ticket_id"`
+	// 可空,关联具体评论;NULL=随工单初始提交的附件
+	CommentID null.String `db:"comment_id" json:"comment_id"`
+	// 对象存储相对路径
+	ObjectPath string `db:"object_path" json:"object_path"`
+	// 原始文件名
+	FileName string `db:"file_name" json:"file_name"`
+	// 字节大小
+	FileSize int64 `db:"file_size" json:"file_size"`
+	// 上传者 user id
+	UploadedBy string `db:"uploaded_by" json:"uploaded_by"`
+	// 上传时间
+	CreatedAt time.Time `db:"created_at" json:"created_at"`
+}
+
+// 工单多轮对话,提交者与平台管理员沟通需求/反馈
+type SkillTicketComment struct {
+	// 主键 UUID
+	ID string `db:"id" json:"id"`
+	// 所属工单
+	TicketID string `db:"ticket_id" json:"ticket_id"`
+	// 发言者 user id(提交者或平台管理员)
+	AuthorUserID string `db:"author_user_id" json:"author_user_id"`
+	// 评论正文
+	Body string `db:"body" json:"body"`
+	// 发表时间
 	CreatedAt time.Time `db:"created_at" json:"created_at"`
 }
 

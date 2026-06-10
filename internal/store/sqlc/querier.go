@@ -44,6 +44,7 @@ type Querier interface {
 	CountIndustryKnowledgeBases(ctx context.Context, arg CountIndustryKnowledgeBasesParams) (int64, error)
 	// 严格保护：版本出现在任意未删除组织 allowlist 时不可删除。
 	CountOrgsUsingVersion(ctx context.Context, jsonQUOTE string) (int64, error)
+	CountPendingSkillTickets(ctx context.Context) (int64, error)
 	// 统计扁平文件列表总数，过滤条件必须与 ListRAGFlowDocumentsByScope 保持一致。
 	CountRAGFlowDocumentsByScope(ctx context.Context, arg CountRAGFlowDocumentsByScopeParams) (int64, error)
 	// 统计行业知识库文件总数，过滤条件必须与 ListRAGFlowIndustryDocuments 保持一致。
@@ -71,6 +72,8 @@ type Querier interface {
 	CreateRAGFlowOrgDatasetMapping(ctx context.Context, arg CreateRAGFlowOrgDatasetMappingParams) error
 	CreateRechargeRecord(ctx context.Context, arg CreateRechargeRecordParams) error
 	CreateRefreshToken(ctx context.Context, arg CreateRefreshTokenParams) error
+	CreateSkillTicket(ctx context.Context, arg CreateSkillTicketParams) error
+	CreateSkillTicketComment(ctx context.Context, arg CreateSkillTicketCommentParams) error
 	CreateUser(ctx context.Context, arg CreateUserParams) error
 	DeleteAppSkillByAppAndName(ctx context.Context, arg DeleteAppSkillByAppAndNameParams) error
 	DeleteExpiredRefreshTokens(ctx context.Context) error
@@ -128,6 +131,7 @@ type Querier interface {
 	GetRechargeRecord(ctx context.Context, id string) (RechargeRecord, error)
 	GetRefreshToken(ctx context.Context, id string) (RefreshToken, error)
 	GetRefreshTokenByHash(ctx context.Context, tokenHash string) (RefreshToken, error)
+	GetSkillTicket(ctx context.Context, id string) (SkillTicket, error)
 	GetUser(ctx context.Context, id string) (User, error)
 	GetUserByOrgAndUsername(ctx context.Context, arg GetUserByOrgAndUsernameParams) (User, error)
 	GetUserByUsername(ctx context.Context, username string) (User, error)
@@ -141,6 +145,7 @@ type Querier interface {
 	ListAllRAGFlowDocumentsByScope(ctx context.Context, arg ListAllRAGFlowDocumentsByScopeParams) ([]RagflowDocument, error)
 	// 清空行业知识库文件内容时列出该行业库下的全部 document，不受分页、日期和状态筛选影响。
 	ListAllRAGFlowIndustryDocuments(ctx context.Context, industryKnowledgeBaseID null.String) ([]RagflowDocument, error)
+	ListAllSkillTickets(ctx context.Context) ([]SkillTicket, error)
 	ListAppSkillsByApp(ctx context.Context, appID string) ([]AppSkill, error)
 	ListAppSkillsBySourceRef(ctx context.Context, arg ListAppSkillsBySourceRefParams) ([]AppSkill, error)
 	ListAppsByOrg(ctx context.Context, arg ListAppsByOrgParams) ([]App, error)
@@ -185,6 +190,8 @@ type Querier interface {
 	// running 是常态；binding_waiting 表示 pod 已起但渠道还在登录中，也需要 reconcile。
 	// spec-A2b：去掉 runtime_node_id / container_id（k8s 路径不再写这两列），消费方仅用 id。
 	ListRunningApps(ctx context.Context) ([]string, error)
+	ListSkillTicketComments(ctx context.Context, ticketID string) ([]SkillTicketComment, error)
+	ListSkillTicketsByRequester(ctx context.Context, requesterUserID string) ([]SkillTicket, error)
 	// reaper 扫描 init 子状态下「连续 N 秒无更新」的孤儿；N 由调用方按秒传入。
 	// 包含新旧两套 init 状态，确保历史孤儿也能被正确清理。
 	// spec-A2b：去掉 runtime_node_id（k8s 路径不再写该列），reaper 仅需 id / status 重置孤儿。
@@ -210,6 +217,7 @@ type Querier interface {
 	// 人工重解析表示用户显式介入，把文档重置为 queued 交刷新任务继续推进。
 	MarkRAGFlowDocumentManualReparseQueued(ctx context.Context, id string) error
 	MarkUserLoggedIn(ctx context.Context, id string) error
+	RejectSkillTicket(ctx context.Context, arg RejectSkillTicketParams) error
 	// 重命名未删除行业知识库；唯一约束负责拦截同名未删除记录。
 	RenameIndustryKnowledgeBase(ctx context.Context, arg RenameIndustryKnowledgeBaseParams) error
 	// 替换助手版本行业知识库关联前先清空旧关联，由调用方在同一事务中重新插入。
@@ -252,6 +260,7 @@ type Querier interface {
 	SetOrganizationStatus(ctx context.Context, arg SetOrganizationStatusParams) error
 	// 远端 dataset 创建成功后写入 RAGFlow ID，并清理上一轮生命周期错误。
 	SetRAGFlowDatasetActive(ctx context.Context, arg SetRAGFlowDatasetActiveParams) error
+	SetSkillTicketQuote(ctx context.Context, arg SetSkillTicketQuoteParams) error
 	// disabled 时同步写 deleted_at（下线时间戳）；enabled 时清空，让重启用户能恢复。
 	SetUserStatus(ctx context.Context, arg SetUserStatusParams) error
 	SoftDeleteApp(ctx context.Context, id string) error
@@ -270,6 +279,7 @@ type Querier interface {
 	// 「worker 仍在等待（拉镜像可能数十分钟）」与「worker 已死的孤儿」，避免误回收正在处理的 job。
 	// 不改 status 或其它字段。
 	TouchApp(ctx context.Context, id string) error
+	TouchSkillTicket(ctx context.Context, id string) error
 	// phasePullRuntimeImage 成功后写入镜像引用与 sha256。
 	UpdateAppRuntimeImage(ctx context.Context, arg UpdateAppRuntimeImageParams) error
 	UpdateAppSkillLatest(ctx context.Context, arg UpdateAppSkillLatestParams) error
@@ -283,6 +293,7 @@ type Querier interface {
 	UpdateOrganizationProfile(ctx context.Context, arg UpdateOrganizationProfileParams) error
 	// 回写解析状态、进度和错误；状态值由 service 层从 RAGFlow run 值归一化。
 	UpdateRAGFlowDocumentParseStatus(ctx context.Context, arg UpdateRAGFlowDocumentParseStatusParams) error
+	UpdateSkillTicketStatus(ctx context.Context, arg UpdateSkillTicketStatusParams) error
 	UpdateUserPassword(ctx context.Context, arg UpdateUserPasswordParams) error
 	UpdateUserProfile(ctx context.Context, arg UpdateUserProfileParams) error
 }
