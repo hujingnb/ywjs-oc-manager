@@ -82,7 +82,7 @@ func TestSkillLibraryService_List(t *testing.T) {
 		kind: "clawhub",
 		page: SkillPage{Entries: []SkillEntry{{Source: "clawhub", Name: "c1"}}},
 	}
-	svc := NewSkillLibraryService(plat, claw)
+	svc := NewSkillLibraryService(plat, claw, nil)
 
 	// source=platform：只返回平台库条目，公共库不参与。
 	page, err := svc.List(context.Background(), auth.Principal{}, "platform", "", "")
@@ -117,7 +117,7 @@ func TestSkillLibraryService_List_ClawHubNil(t *testing.T) {
 		kind: "platform",
 		page: SkillPage{Entries: []SkillEntry{{Source: "platform", Name: "p1"}}},
 	}
-	svc := NewSkillLibraryService(plat, nil)
+	svc := NewSkillLibraryService(plat, nil, nil)
 
 	// source=clawhub 且 clawhub 为 nil：返回空列表，不报错。
 	page, err := svc.List(context.Background(), auth.Principal{}, "clawhub", "", "")
@@ -143,7 +143,7 @@ func TestSkillLibraryService_List_ClawHubFailureDegrades(t *testing.T) {
 		kind: "clawhub",
 		err:  errors.New("clawhub timeout"),
 	}
-	svc := NewSkillLibraryService(plat, claw)
+	svc := NewSkillLibraryService(plat, claw, nil)
 
 	// source="" 聚合时 clawhub 失败：仅返回平台库条目，不报错（降级）。
 	page, err := svc.List(context.Background(), auth.Principal{}, "", "", "")
@@ -159,7 +159,7 @@ func TestSkillLibraryService_List_ClawHubFailureDegrades(t *testing.T) {
 func TestSkillLibraryService_Detail(t *testing.T) {
 	plat := &stubSource{kind: "platform", detail: SkillDetailResult{Name: "weather", Source: "platform"}, versions: []SkillVersionResult{{Version: "2.0"}, {Version: "1.0"}}}
 	claw := &stubSource{kind: "clawhub", detail: SkillDetailResult{Name: "Self-Improving Agent", Source: "clawhub", Stars: 3735}, versions: []SkillVersionResult{{Version: "3.0.21", Changelog: "re-upload"}}}
-	svc := NewSkillLibraryService(plat, claw)
+	svc := NewSkillLibraryService(plat, claw, nil)
 
 	// platform：详情 + 版本。
 	pd, pv, err := svc.Detail(context.Background(), auth.Principal{}, "platform", "weather")
@@ -179,7 +179,7 @@ func TestSkillLibraryService_Detail(t *testing.T) {
 	require.ErrorIs(t, err, ErrSkillMarketSourceUnknown)
 
 	// clawhub 未配置（nil）→ 空详情/空版本、不报错。
-	svcNoClaw := NewSkillLibraryService(plat, nil)
+	svcNoClaw := NewSkillLibraryService(plat, nil, nil)
 	_, empty, err := svcNoClaw.Detail(context.Background(), auth.Principal{}, "clawhub", "x")
 	require.NoError(t, err)
 	assert.Empty(t, empty)
@@ -192,7 +192,7 @@ func TestSkillLibraryService_Detail(t *testing.T) {
 func TestSkillLibraryService_Download(t *testing.T) {
 	plat := &stubSource{kind: "platform", downloadData: []byte("TAR-BYTES")} // 平台来源预设 tar 字节
 	claw := &stubSource{kind: "clawhub", downloadData: []byte("ZIP-BYTES")}  // 公共来源预设 zip 字节
-	svc := NewSkillLibraryService(plat, claw)
+	svc := NewSkillLibraryService(plat, claw, nil)
 
 	// platform 来源：返回 tar 字节与 ext=tar。
 	data, ext, err := svc.Download(context.Background(), psvcPlatformPrincipal(), "platform", "weather", "1.0")
@@ -213,7 +213,7 @@ func TestSkillLibraryService_Download(t *testing.T) {
 
 // TestSkillLibraryService_Download_Denied 验证非平台管理员下载被拒（ErrSkillMarketDenied）。
 func TestSkillLibraryService_Download_Denied(t *testing.T) {
-	svc := NewSkillLibraryService(&stubSource{kind: "platform"}, &stubSource{kind: "clawhub"})
+	svc := NewSkillLibraryService(&stubSource{kind: "platform"}, &stubSource{kind: "clawhub"}, nil)
 	// 空角色（非平台管理员）下载平台技能归档应被拒。
 	_, _, err := svc.Download(context.Background(), auth.Principal{}, "platform", "weather", "1.0")
 	require.ErrorIs(t, err, ErrSkillMarketDenied)
@@ -221,7 +221,7 @@ func TestSkillLibraryService_Download_Denied(t *testing.T) {
 
 // TestSkillLibraryService_Download_Invalid 验证缺 ref 或 version 时返回 ErrSkillMarketInvalid。
 func TestSkillLibraryService_Download_Invalid(t *testing.T) {
-	svc := NewSkillLibraryService(&stubSource{kind: "platform"}, nil)
+	svc := NewSkillLibraryService(&stubSource{kind: "platform"}, nil, nil)
 	// 缺版本号。
 	_, _, err := svc.Download(context.Background(), psvcPlatformPrincipal(), "platform", "weather", "")
 	require.ErrorIs(t, err, ErrSkillMarketInvalid)
@@ -232,7 +232,7 @@ func TestSkillLibraryService_Download_Invalid(t *testing.T) {
 
 // TestSkillLibraryService_Download_ClawHubNil 验证未配置公共库时下载 clawhub 来源返回 SourceUnknown。
 func TestSkillLibraryService_Download_ClawHubNil(t *testing.T) {
-	svc := NewSkillLibraryService(&stubSource{kind: "platform"}, nil) // clawhub 未配置
+	svc := NewSkillLibraryService(&stubSource{kind: "platform"}, nil, nil) // clawhub 未配置
 	_, _, err := svc.Download(context.Background(), psvcPlatformPrincipal(), "clawhub", "x", "1.0")
 	require.ErrorIs(t, err, ErrSkillMarketSourceUnknown)
 }

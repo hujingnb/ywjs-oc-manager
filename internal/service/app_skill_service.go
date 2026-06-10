@@ -83,6 +83,12 @@ type PlatformInstaller interface {
 	GetForInstall(ctx context.Context, name, version string) (archive []byte, sha string, err error)
 }
 
+// CustomInstaller 抽取定制技能指定版本的归档字节与 sha256，供安装到实例使用。
+// 与 PlatformInstaller 同构（同为 tar、同走 library/ 前缀），由 *CustomSkillService.GetForInstall 满足。
+type CustomInstaller interface {
+	GetForInstall(ctx context.Context, name, version string) (archive []byte, sha string, err error)
+}
+
 // ClawHubDownloader 从 ClawHub 下载 skill 归档（按 slug + version），可为 nil（禁用 clawhub 来源）。
 type ClawHubDownloader interface {
 	Download(ctx context.Context, slug, version string) ([]byte, error)
@@ -156,6 +162,8 @@ type AppSkillService struct {
 	versions AssistantVersionLoader
 	// platform 取平台库 skill 归档
 	platform PlatformInstaller
+	// custom 取定制技能归档；nil 表示来源未启用
+	custom CustomInstaller
 	// clawhub 从 ClawHub 下载归档；nil 表示来源未启用
 	clawhub ClawHubDownloader
 	// blobs 归档缓存对象存储（共享 library/ 前缀）
@@ -174,6 +182,7 @@ type AppSkillServiceDeps struct {
 	Apps     AppLocator
 	Versions AssistantVersionLoader
 	Platform PlatformInstaller
+	Custom   CustomInstaller   // 可 nil（未启用 custom 时）
 	ClawHub  ClawHubDownloader // 可 nil
 	Blobs    LibraryBlobStore
 	OcOps    OcOpsSkillClient
@@ -187,6 +196,7 @@ func NewAppSkillService(deps AppSkillServiceDeps) *AppSkillService {
 		apps:     deps.Apps,
 		versions: deps.Versions,
 		platform: deps.Platform,
+		custom:   deps.Custom,
 		clawhub:  deps.ClawHub,
 		blobs:    deps.Blobs,
 		cache:    NewSkillArchiveCache(deps.Blobs),
@@ -381,6 +391,7 @@ func (s *AppSkillService) isCurrentVersionSkill(ctx context.Context, versionID, 
 // fetchArchive 按来源取归档字节、sha256（可能为空）、原始元数据快照、对象存储相对路径。
 // 返回的 sha 为空时调用方须自行计算（clawhub 来源不提供 sha）。
 //   - platform：读平台库已持久化的归档（library/platform/<name>/<ver>.tar），就地校验安全。
+//   - custom：读定制技能已持久化的归档（library/custom/<name>/<ver>.tar），与 platform 同处理。
 //   - clawhub：经读穿缓存取归档——命中即免回源；未命中回源下载、闭包内校验安全后写回。
 //     上游失败包成 ErrSkillMarketUpstreamUnavailable，不安全归档返回 ErrAppSkillArchiveTooDangerous 且不缓存。
 func (s *AppSkillService) fetchArchive(ctx context.Context, in InstallSkillInput) (data []byte, sha string, meta map[string]any, relPath string, err error) {
@@ -399,6 +410,24 @@ func (s *AppSkillService) fetchArchive(ctx context.Context, in InstallSkillInput
 		// 该 key 必须与 PlatformSkillService 上传时 PutLibrarySkill("platform", name, version, "tar", …) 的参数保持一致。
 		rel := storage.LibrarySkillKey("platform", in.SourceRef, in.Version, "tar")
 		return d, sh, map[string]any{"source": "platform", "name": in.SourceRef, "version": in.Version}, rel, nil
+	case "custom":
+		// 定制技能来源（与 platform 同为 tar、同走 library/ 前缀，处理完全一致）：nil 时表示该来源未启用
+		if s.custom == nil {
+			return nil, "", nil, "", ErrAppSkillSourceUnknown
+		}
+		// GetForInstall 返回归档字节与预存 sha256
+		d, sh, e := s.custom.GetForInstall(ctx, in.SourceRef, in.Version)
+		if e != nil {
+			return nil, "", nil, "", fmt.Errorf("取定制技能归档失败: %w", e)
+		}
+		// 解压防炸弹校验（与 platform 一致，ext=tar）
+		if verr := validateArchiveSafety(d, "tar"); verr != nil {
+			return nil, "", nil, "", ErrAppSkillArchiveTooDangerous
+		}
+		// 定制技能归档由 CustomSkillService 交付时已落到确定性 key，直接引用、无需回源/重写。
+		// 该 key 必须与 CustomSkillService 上传时 PutLibrarySkill("custom", name, version, "tar", …) 的参数保持一致。
+		rel := storage.LibrarySkillKey("custom", in.SourceRef, in.Version, "tar")
+		return d, sh, map[string]any{"source": "custom", "name": in.SourceRef, "version": in.Version}, rel, nil
 	case "clawhub":
 		// ClawHub 来源：nil 时表示该来源未启用
 		if s.clawhub == nil {
@@ -832,3 +861,6 @@ func validateZipSafety(data []byte) error {
 
 // 确认 *ocops.Client 满足 OcOpsSkillClient；方法签名漂移时编译期报错。
 var _ OcOpsSkillClient = (*ocops.Client)(nil)
+
+// 确认 *CustomSkillService 满足 CustomInstaller；GetForInstall 签名漂移时编译期报错。
+var _ CustomInstaller = (*CustomSkillService)(nil)

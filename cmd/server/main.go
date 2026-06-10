@@ -533,7 +533,8 @@ func runManager(ctx context.Context, cfg config.Config, logOut io.Writer) error 
 		// imagecoordRedis 已在上方构造（与 distLocker 共用同一 Redis 物理实例），复用避免新建连接。
 		clawhubSource = service.NewClawHubSource(clawhubClient, imagecoordRedis, cfg.ClawHub.CacheTTL.Duration, archiveCache)
 	}
-	skillLibraryService := service.NewSkillLibraryService(platformSource, clawhubSource)
+	// 第三参 custom 暂传 nil（定制技能来源 Task 7 接线后再传入真正的 customSource）。
+	skillLibraryService := service.NewSkillLibraryService(platformSource, clawhubSource, nil)
 
 	transferLimit := apihandlers.TransferLimitConfig{
 		UploadBytesPerSec:   cfg.TransferLimit.UploadBytesPerSec,
