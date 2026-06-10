@@ -38,6 +38,11 @@ vi.mock('@/composables/useMemberApp', () => ({
   useMemberApp: () => memberAppState,
 }))
 
+// 角标 query 桩：返回固定 ref，避免在测试环境实例化真实 useQuery（需 QueryClient 注入）。
+vi.mock('@/api/hooks/useSkillTickets', () => ({
+  useSkillTicketBadgeQuery: () => ({ data: { value: 0 } }),
+}))
+
 // HelpDrawerStub 暴露 show/role 到 DOM，便于测试父布局点击入口后是否正确打开手册抽屉。
 const HelpDrawerStub = {
   props: ['show', 'role'],

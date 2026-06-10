@@ -140,19 +140,20 @@
 import { computed, h, ref } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import {
-  NAlert, NButton, NForm, NFormItem, NInput, NLayout, NLayoutContent, NLayoutHeader, NLayoutSider, NMenu, NModal,
+  NAlert, NBadge, NButton, NForm, NFormItem, NInput, NLayout, NLayoutContent, NLayoutHeader, NLayoutSider, NMenu, NModal,
   NSpace, NTag,
   type MenuOption,
 } from 'naive-ui'
 import {
   BarChart3, BookOpen, Bot, Boxes, Building2, CalendarClock, FileSearch,
   FolderOpen, Gauge, KeyRound, LayoutDashboard, ListChecks, LogOut, Package, Puzzle, Radio, RefreshCw,
-  ShieldCheck, Users, Wallet,
+  ShieldCheck, Users, Wallet, Wrench,
 } from 'lucide-vue-next'
 
 import HelpDrawer from '@/components/HelpDrawer.vue'
 import { useAuthStore } from '@/stores/auth'
 import { useMemberApp } from '@/composables/useMemberApp'
+import { useSkillTicketBadgeQuery } from '@/api/hooks/useSkillTickets'
 
 // DashboardLayout 负责已登录后台的导航外壳、环境标识和退出入口。
 // 具体页面权限仍由路由和页面级查询控制，这里只隐藏不适合当前角色的导航项。
@@ -190,6 +191,7 @@ const activeKey = computed(() => {
     '/assistant-versions',
     '/platform/industry-knowledge',
     '/platform/skills',
+    '/platform/custom-skills',
     '/members',
     '/knowledge',
     // /skills 成员技能页顶级路由；需早于更短 prefix 匹配，放在 /knowledge 后面即可。
@@ -206,6 +208,12 @@ const isPlatformAdmin = computed(() => auth.isPlatformAdmin)
 const isOrgMember = computed(() => auth.isOrgMember)
 // isOrgAdmin 用于控制账户余额菜单项的可见性，仅组织管理员需要此入口。
 const isOrgAdmin = computed(() => auth.isOrgAdmin)
+
+// ticketBadge 提供「定制技能」菜单待处理工单角标数；该端点仅平台管理员有权，
+// 角标也仅在平台管理员菜单分支渲染，非平台管理员视角下不会读取此值。
+const ticketBadge = useSkillTicketBadgeQuery()
+// pendingTicketCount 是待处理工单数；查询未就绪时为 0（不显示角标）。
+const pendingTicketCount = computed(() => ticketBadge.data.value ?? 0)
 
 const { appId: memberAppId, hasApp: memberHasApp } = useMemberApp()
 
@@ -258,6 +266,18 @@ const menuOptions = computed<MenuOption[]>(() => {
     items.push({ key: '/platform/industry-knowledge', label: '行业知识库', icon: () => h(BookOpen, { size: 18 }) })
     // 平台库管理入口：仅平台管理员可见，用于上传/删除 skill tar 包。
     items.push({ key: '/platform/skills', label: '平台技能', icon: () => h(Package, { size: 18 }) })
+    // 定制技能工单入口：label 用 render 函数，在文案后挂 n-badge 显示待处理工单数（>0 时才显示）。
+    items.push({
+      key: '/platform/custom-skills',
+      label: () =>
+        h('span', { style: 'display: inline-flex; align-items: center; gap: 8px' }, [
+          '定制技能',
+          pendingTicketCount.value > 0
+            ? h(NBadge, { value: pendingTicketCount.value, type: 'error' })
+            : null,
+        ]),
+      icon: () => h(Wrench, { size: 18 }),
+    })
   }
   // 成员/审计 是组织管理视角，普通成员不展示。
   if (!isOrgMember.value) {
