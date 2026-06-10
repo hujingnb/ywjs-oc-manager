@@ -352,6 +352,8 @@ func runManager(ctx context.Context, cfg config.Config, logOut io.Writer) error 
 	// archiveCache 是第三方市场归档读穿缓存，市场下载与（间接）安装/版本共用：复用 libraryBlobs 同一对象存储。
 	archiveCache := service.NewSkillArchiveCache(libraryBlobs)
 	platformSkillService := service.NewPlatformSkillService(dbStore.Queries, libraryBlobs)
+	// 定制技能工单 service：dbStore.Queries(*sqlc.Queries) 已满足 SkillTicketStore 全部方法，直接注入无需 adapter。
+	skillTicketService := service.NewSkillTicketService(dbStore.Queries)
 	workspaceService := service.NewWorkspaceService(dbStore.Queries, workspaceObjStore, workspacePresignTTL)
 
 	// ClawHub 公共库客户端：BaseURL 为空则保持 nil，不接入 ClawHub（市场仅平台库，
@@ -560,6 +562,7 @@ func runManager(ctx context.Context, cfg config.Config, logOut io.Writer) error 
 			PlatformOverview:             platformOverviewService,
 			AssistantVersionService:      assistantVersionService,
 			PlatformSkillService:         platformSkillService,
+			SkillTicketService:           skillTicketService,
 			HermesKanbanService:          hermesKanbanService,
 			HermesCronService:            hermesCronService,
 			AppSkillService:              appSkillService,

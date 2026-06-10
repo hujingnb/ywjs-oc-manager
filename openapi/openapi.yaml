@@ -20,6 +20,11 @@ components:
       - source_ref
       - version
       type: object
+    handlers.AddSkillTicketCommentRequest:
+      properties:
+        body:
+          type: string
+      type: object
     handlers.AssistantVersionRoutingDTO:
       properties:
         approval:
@@ -450,6 +455,11 @@ components:
       required:
       - refresh_token
       type: object
+    handlers.RejectSkillTicketRequest:
+      properties:
+        reason:
+          type: string
+      type: object
     handlers.ResetPasswordRequest:
       properties:
         password:
@@ -468,6 +478,18 @@ components:
           type: integer
       required:
       - question
+      type: object
+    handlers.SetSkillTicketQuoteRequest:
+      properties:
+        quote_amount_cents:
+          type: integer
+      type: object
+    handlers.SubmitSkillTicketRequest:
+      properties:
+        description:
+          type: string
+        title:
+          type: string
       type: object
     handlers.SwitchAppVersionRequest:
       properties:
@@ -597,6 +619,11 @@ components:
           type: string
       required:
       - display_name
+      type: object
+    handlers.UpdateSkillTicketStatusRequest:
+      properties:
+        status:
+          type: string
       type: object
     ocops.CronCapabilities:
       properties:
@@ -1797,6 +1824,76 @@ components:
           description: NextCursor 是下一页游标，platform 来源始终为空。
           type: string
       type: object
+    service.SkillTicketCommentResult:
+      properties:
+        author_user_id:
+          type: string
+        body:
+          type: string
+        created_at:
+          type: string
+        id:
+          type: string
+      type: object
+    service.SkillTicketDetailResult:
+      properties:
+        comments:
+          items:
+            $ref: '#/components/schemas/service.SkillTicketCommentResult'
+          type: array
+          uniqueItems: false
+        created_at:
+          type: string
+        custom_skill_name:
+          type: string
+        description:
+          type: string
+        id:
+          type: string
+        org_id:
+          type: string
+        quote_amount_cents:
+          type: integer
+        reject_reason:
+          type: string
+        requester_role:
+          type: string
+        requester_user_id:
+          type: string
+        status:
+          type: string
+        title:
+          type: string
+        updated_at:
+          type: string
+      type: object
+    service.SkillTicketResult:
+      properties:
+        created_at:
+          type: string
+        custom_skill_name:
+          type: string
+        description:
+          type: string
+        id:
+          type: string
+        org_id:
+          type: string
+        quote_amount_cents:
+          type: integer
+        reject_reason:
+          type: string
+        requester_role:
+          type: string
+        requester_user_id:
+          type: string
+        status:
+          type: string
+        title:
+          type: string
+        updated_at:
+          type: string
+      type: object
     service.TokenPair:
       properties:
         access_token:
@@ -1840,6 +1937,40 @@ info:
   version: "1.0"
 openapi: 3.1.0
 paths:
+  /admin/skill-tickets:
+    get:
+      responses:
+        "200":
+          content:
+            application/json:
+              schema:
+                additionalProperties:
+                  items:
+                    $ref: '#/components/schemas/service.SkillTicketResult'
+                  type: array
+                type: object
+          description: OK
+      security:
+      - BearerAuth: []
+      summary: 定制技能工单队列(平台管理员)
+      tags:
+      - skill-tickets
+  /admin/skill-tickets/badge:
+    get:
+      responses:
+        "200":
+          content:
+            application/json:
+              schema:
+                additionalProperties:
+                  type: integer
+                type: object
+          description: OK
+      security:
+      - BearerAuth: []
+      summary: 待处理工单数角标
+      tags:
+      - skill-tickets
   /apps/{appId}:
     get:
       description: 按 appId 获取单个应用信息；org_member 只能查询自己的应用
@@ -8596,6 +8727,203 @@ paths:
       summary: 下载 skill 归档（仅平台管理员）
       tags:
       - skill-market
+  /skill-tickets:
+    get:
+      responses:
+        "200":
+          content:
+            application/json:
+              schema:
+                additionalProperties:
+                  items:
+                    $ref: '#/components/schemas/service.SkillTicketResult'
+                  type: array
+                type: object
+          description: OK
+      security:
+      - BearerAuth: []
+      summary: 列出我的定制技能工单
+      tags:
+      - skill-tickets
+    post:
+      requestBody:
+        content:
+          application/json:
+            schema:
+              oneOf:
+              - type: object
+              - $ref: '#/components/schemas/handlers.SubmitSkillTicketRequest'
+                description: 需求
+                summary: body
+        description: 需求
+        required: true
+      responses:
+        "201":
+          content:
+            application/json:
+              schema:
+                additionalProperties:
+                  $ref: '#/components/schemas/service.SkillTicketResult'
+                type: object
+          description: Created
+        "400":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/handlers.ErrorResponse'
+          description: Bad Request
+      security:
+      - BearerAuth: []
+      summary: 提交定制技能需求工单
+      tags:
+      - skill-tickets
+  /skill-tickets/{id}:
+    get:
+      parameters:
+      - description: 工单 id
+        in: path
+        name: id
+        required: true
+        schema:
+          type: string
+      responses:
+        "200":
+          content:
+            application/json:
+              schema:
+                additionalProperties:
+                  $ref: '#/components/schemas/service.SkillTicketDetailResult'
+                type: object
+          description: OK
+        "404":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/handlers.ErrorResponse'
+          description: Not Found
+      security:
+      - BearerAuth: []
+      summary: 定制技能工单详情
+      tags:
+      - skill-tickets
+  /skill-tickets/{id}/comments:
+    post:
+      parameters:
+      - description: 工单 id
+        in: path
+        name: id
+        required: true
+        schema:
+          type: string
+      requestBody:
+        content:
+          application/json:
+            schema:
+              oneOf:
+              - type: object
+              - $ref: '#/components/schemas/handlers.AddSkillTicketCommentRequest'
+                description: 评论
+                summary: body
+        description: 评论
+        required: true
+      responses:
+        "201":
+          content:
+            application/json:
+              schema:
+                additionalProperties:
+                  $ref: '#/components/schemas/service.SkillTicketCommentResult'
+                type: object
+          description: Created
+      security:
+      - BearerAuth: []
+      summary: 追加工单评论
+      tags:
+      - skill-tickets
+  /skill-tickets/{id}/quote:
+    patch:
+      parameters:
+      - description: 工单 id
+        in: path
+        name: id
+        required: true
+        schema:
+          type: string
+      requestBody:
+        content:
+          application/json:
+            schema:
+              oneOf:
+              - type: object
+              - $ref: '#/components/schemas/handlers.SetSkillTicketQuoteRequest'
+                description: 报价(分)
+                summary: body
+        description: 报价(分)
+        required: true
+      responses:
+        "204":
+          description: No Content
+      security:
+      - BearerAuth: []
+      summary: 设置工单报价(平台管理员)
+      tags:
+      - skill-tickets
+  /skill-tickets/{id}/reject:
+    post:
+      parameters:
+      - description: 工单 id
+        in: path
+        name: id
+        required: true
+        schema:
+          type: string
+      requestBody:
+        content:
+          application/json:
+            schema:
+              oneOf:
+              - type: object
+              - $ref: '#/components/schemas/handlers.RejectSkillTicketRequest'
+                description: 拒绝原因
+                summary: body
+        description: 拒绝原因
+        required: true
+      responses:
+        "204":
+          description: No Content
+      security:
+      - BearerAuth: []
+      summary: 拒绝工单(平台管理员)
+      tags:
+      - skill-tickets
+  /skill-tickets/{id}/status:
+    patch:
+      parameters:
+      - description: 工单 id
+        in: path
+        name: id
+        required: true
+        schema:
+          type: string
+      requestBody:
+        content:
+          application/json:
+            schema:
+              oneOf:
+              - type: object
+              - $ref: '#/components/schemas/handlers.UpdateSkillTicketStatusRequest'
+                description: 状态
+                summary: body
+        description: 状态
+        required: true
+      responses:
+        "204":
+          description: No Content
+      security:
+      - BearerAuth: []
+      summary: 调整工单状态(平台管理员)
+      tags:
+      - skill-tickets
   /usage/members/{userId}:
     get:
       description: 返回指定成员名下应用的 token 调用日志（LogsPage 格式）

@@ -50,6 +50,8 @@ type Dependencies struct {
 	AssistantVersionService *service.AssistantVersionService
 	// PlatformSkillService 提供平台库 skill 管理路由；nil 时不注册。
 	PlatformSkillService *service.PlatformSkillService
+	// SkillTicketService 提供定制技能需求工单（提交/列表/详情/评论/状态/报价/拒绝/角标）路由；nil 时不注册。
+	SkillTicketService *service.SkillTicketService
 	// PlatformOverview 提供平台总览路由。
 	PlatformOverview *service.PlatformOverviewService
 	// HermesKanbanService 提供实例任务看板能力；nil 时不注册 kanban 路由。
@@ -181,6 +183,9 @@ func NewRouter(deps ...Dependencies) http.Handler {
 	}
 	if dep.PlatformSkillService != nil {
 		handlers.RegisterPlatformSkillRoutes(user, handlers.NewPlatformSkillsHandler(dep.PlatformSkillService))
+	}
+	if dep.SkillTicketService != nil {
+		handlers.RegisterSkillTicketRoutes(user, handlers.NewSkillTicketsHandler(dep.SkillTicketService))
 	}
 	if dep.PlatformOverview != nil {
 		handlers.RegisterPlatformOverviewRoutes(user, handlers.NewPlatformOverviewHandler(dep.PlatformOverview))

@@ -4,6 +4,82 @@
  */
 
 export interface paths {
+    "/admin/skill-tickets": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** 定制技能工单队列(平台管理员) */
+        get: {
+            parameters: {
+                query?: never;
+                header?: never;
+                path?: never;
+                cookie?: never;
+            };
+            requestBody?: never;
+            responses: {
+                /** @description OK */
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": {
+                            [key: string]: components["schemas"]["service.SkillTicketResult"][];
+                        };
+                    };
+                };
+            };
+        };
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/admin/skill-tickets/badge": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** 待处理工单数角标 */
+        get: {
+            parameters: {
+                query?: never;
+                header?: never;
+                path?: never;
+                cookie?: never;
+            };
+            requestBody?: never;
+            responses: {
+                /** @description OK */
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": {
+                            [key: string]: number;
+                        };
+                    };
+                };
+            };
+        };
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/apps/{appId}": {
         parameters: {
             query?: never;
@@ -10035,6 +10111,302 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/skill-tickets": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** 列出我的定制技能工单 */
+        get: {
+            parameters: {
+                query?: never;
+                header?: never;
+                path?: never;
+                cookie?: never;
+            };
+            requestBody?: never;
+            responses: {
+                /** @description OK */
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": {
+                            [key: string]: components["schemas"]["service.SkillTicketResult"][];
+                        };
+                    };
+                };
+            };
+        };
+        put?: never;
+        /** 提交定制技能需求工单 */
+        post: {
+            parameters: {
+                query?: never;
+                header?: never;
+                path?: never;
+                cookie?: never;
+            };
+            /** @description 需求 */
+            requestBody: {
+                content: {
+                    "application/json": Record<string, never> | components["schemas"]["handlers.SubmitSkillTicketRequest"];
+                };
+            };
+            responses: {
+                /** @description Created */
+                201: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": {
+                            [key: string]: components["schemas"]["service.SkillTicketResult"];
+                        };
+                    };
+                };
+                /** @description Bad Request */
+                400: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["handlers.ErrorResponse"];
+                    };
+                };
+            };
+        };
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/skill-tickets/{id}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** 定制技能工单详情 */
+        get: {
+            parameters: {
+                query?: never;
+                header?: never;
+                path: {
+                    /** @description 工单 id */
+                    id: string;
+                };
+                cookie?: never;
+            };
+            requestBody?: never;
+            responses: {
+                /** @description OK */
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": {
+                            [key: string]: components["schemas"]["service.SkillTicketDetailResult"];
+                        };
+                    };
+                };
+                /** @description Not Found */
+                404: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["handlers.ErrorResponse"];
+                    };
+                };
+            };
+        };
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/skill-tickets/{id}/comments": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** 追加工单评论 */
+        post: {
+            parameters: {
+                query?: never;
+                header?: never;
+                path: {
+                    /** @description 工单 id */
+                    id: string;
+                };
+                cookie?: never;
+            };
+            /** @description 评论 */
+            requestBody: {
+                content: {
+                    "application/json": Record<string, never> | components["schemas"]["handlers.AddSkillTicketCommentRequest"];
+                };
+            };
+            responses: {
+                /** @description Created */
+                201: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": {
+                            [key: string]: components["schemas"]["service.SkillTicketCommentResult"];
+                        };
+                    };
+                };
+            };
+        };
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/skill-tickets/{id}/quote": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        /** 设置工单报价(平台管理员) */
+        patch: {
+            parameters: {
+                query?: never;
+                header?: never;
+                path: {
+                    /** @description 工单 id */
+                    id: string;
+                };
+                cookie?: never;
+            };
+            /** @description 报价(分) */
+            requestBody: {
+                content: {
+                    "application/json": Record<string, never> | components["schemas"]["handlers.SetSkillTicketQuoteRequest"];
+                };
+            };
+            responses: {
+                /** @description No Content */
+                204: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content?: never;
+                };
+            };
+        };
+        trace?: never;
+    };
+    "/skill-tickets/{id}/reject": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** 拒绝工单(平台管理员) */
+        post: {
+            parameters: {
+                query?: never;
+                header?: never;
+                path: {
+                    /** @description 工单 id */
+                    id: string;
+                };
+                cookie?: never;
+            };
+            /** @description 拒绝原因 */
+            requestBody: {
+                content: {
+                    "application/json": Record<string, never> | components["schemas"]["handlers.RejectSkillTicketRequest"];
+                };
+            };
+            responses: {
+                /** @description No Content */
+                204: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content?: never;
+                };
+            };
+        };
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/skill-tickets/{id}/status": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        /** 调整工单状态(平台管理员) */
+        patch: {
+            parameters: {
+                query?: never;
+                header?: never;
+                path: {
+                    /** @description 工单 id */
+                    id: string;
+                };
+                cookie?: never;
+            };
+            /** @description 状态 */
+            requestBody: {
+                content: {
+                    "application/json": Record<string, never> | components["schemas"]["handlers.UpdateSkillTicketStatusRequest"];
+                };
+            };
+            responses: {
+                /** @description No Content */
+                204: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content?: never;
+                };
+            };
+        };
+        trace?: never;
+    };
     "/usage/members/{userId}": {
         parameters: {
             query?: never;
@@ -10336,6 +10708,9 @@ export interface components {
             /** @description Version 是要配进版本的 skill 版本号。 */
             version: string;
         };
+        "handlers.AddSkillTicketCommentRequest": {
+            body?: string;
+        };
         "handlers.AssistantVersionRoutingDTO": {
             approval?: string;
             compression?: string;
@@ -10577,6 +10952,9 @@ export interface components {
             /** @description RefreshToken 是长生命周期刷新令牌，service 层只保存其 hash 并在刷新时轮换。 */
             refresh_token: string;
         };
+        "handlers.RejectSkillTicketRequest": {
+            reason?: string;
+        };
         "handlers.ResetPasswordRequest": {
             /** @description Password 是新密码，service 层只保存 hash。 */
             password: string;
@@ -10586,6 +10964,13 @@ export interface components {
             question: string;
             /** @description TopK 是每个知识库作用域的检索 chunk 上限；0 使用 service 默认值，超过 service 上限会被截断。 */
             top_k?: number;
+        };
+        "handlers.SetSkillTicketQuoteRequest": {
+            quote_amount_cents?: number;
+        };
+        "handlers.SubmitSkillTicketRequest": {
+            description?: string;
+            title?: string;
         };
         "handlers.SwitchAppVersionRequest": {
             /** @description VersionID 是目标助手版本 id，必须在实例所属企业的 allowlist 内。 */
@@ -10654,6 +11039,9 @@ export interface components {
             display_name: string;
             /** @description Role 为空表示保持原角色；非空时需要管理员权限并限制在企业角色内。 */
             role?: string;
+        };
+        "handlers.UpdateSkillTicketStatusRequest": {
+            status?: string;
         };
         "ocops.CronCapabilities": {
             /** @description ContractVersion 是 oc-cron 契约版本号。 */
@@ -11398,6 +11786,41 @@ export interface components {
             entries?: components["schemas"]["service.SkillEntry"][];
             /** @description NextCursor 是下一页游标，platform 来源始终为空。 */
             next_cursor?: string;
+        };
+        "service.SkillTicketCommentResult": {
+            author_user_id?: string;
+            body?: string;
+            created_at?: string;
+            id?: string;
+        };
+        "service.SkillTicketDetailResult": {
+            comments?: components["schemas"]["service.SkillTicketCommentResult"][];
+            created_at?: string;
+            custom_skill_name?: string;
+            description?: string;
+            id?: string;
+            org_id?: string;
+            quote_amount_cents?: number;
+            reject_reason?: string;
+            requester_role?: string;
+            requester_user_id?: string;
+            status?: string;
+            title?: string;
+            updated_at?: string;
+        };
+        "service.SkillTicketResult": {
+            created_at?: string;
+            custom_skill_name?: string;
+            description?: string;
+            id?: string;
+            org_id?: string;
+            quote_amount_cents?: number;
+            reject_reason?: string;
+            requester_role?: string;
+            requester_user_id?: string;
+            status?: string;
+            title?: string;
+            updated_at?: string;
         };
         "service.TokenPair": {
             access_token?: string;
