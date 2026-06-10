@@ -270,3 +270,17 @@ var ErrSkillTicketAttachmentNotFound = errors.New("工单附件不存在")
 
 // ErrSkillTicketAttachmentInvalid 表示附件入参非法(空文件名/空内容)。
 var ErrSkillTicketAttachmentInvalid = errors.New("工单附件入参非法")
+
+// ===== 定制技能交付 / 取装 =====
+
+// ErrCustomSkillDenied 表示无权交付定制技能(非平台管理员)。
+var ErrCustomSkillDenied = errors.New("无权交付定制技能")
+
+// ErrCustomSkillNameMismatch 表示再次交付时归档技能名与工单已锁定的 name 不一致。
+var ErrCustomSkillNameMismatch = errors.New("迭代交付必须沿用同一技能名")
+
+// ErrCustomSkillInvalid 表示交付入参非法(空归档/无目标范围/归档不合扁平契约)。
+var ErrCustomSkillInvalid = errors.New("定制技能交付入参非法")
+
+// ErrCustomSkillNotFound 表示按 name(+version)找不到定制技能。
+var ErrCustomSkillNotFound = errors.New("定制技能不存在")
