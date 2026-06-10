@@ -19,6 +19,8 @@ export function useMemberApp() {
 
   const appId = computed(() => memberApp.value?.id)
   const hasApp = computed(() => Boolean(appId.value))
+  // app：当前成员实例对象（归一化为 null），供页面 provide('app') 给 SkillManager 做归属权限判断。
+  const app = computed(() => memberApp.value ?? null)
 
-  return { appId, hasApp, isLoading }
+  return { appId, hasApp, isLoading, app }
 }

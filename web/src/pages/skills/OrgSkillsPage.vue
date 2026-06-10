@@ -12,11 +12,18 @@
 </template>
 
 <script setup lang="ts">
+import { provide } from 'vue'
+
 import SkillManager from '@/components/SkillManager.vue'
 import { useMemberApp } from '@/composables/useMemberApp'
 
 // OrgSkillsPage 是企业成员左侧菜单「技能」的顶级页面。
 // 通过 useMemberApp 获取成员唯一实例 ID，再将 appId 传给 SkillManager 复用技能列表+市场逻辑。
 // 此页面无 allowedRoles 限制，org_member 可直接访问。
-const { appId, hasApp, isLoading } = useMemberApp()
+const { appId, hasApp, isLoading, app } = useMemberApp()
+
+// provide('app')：把成员实例对象注入给 SkillManager，使其 canManageAppSkill 能判定本人归属，
+// 从而在市场展示「安装」按钮（成员可安装包括定制技能在内的 skill 到自己实例）。
+// 管理员 per-app 入口由 AppDetailPage 另行 provide('app')，两条路径一致。
+provide('app', app)
 </script>
