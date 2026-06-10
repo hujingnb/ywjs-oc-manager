@@ -41,8 +41,9 @@ func (s *skillTicketAttachmentServiceStub) List(context.Context, string) ([]serv
 	return s.listRes, nil
 }
 
-// Open 返回预设内容(字符串 reader)与文件名,用于下载路径测试。
-func (s *skillTicketAttachmentServiceStub) Open(context.Context, string) (io.ReadCloser, string, error) {
+// Open 返回预设内容(字符串 reader)与文件名,用于下载路径测试;记录透传的 ticketID 供断言。
+func (s *skillTicketAttachmentServiceStub) Open(_ context.Context, ticketID, _ string) (io.ReadCloser, string, error) {
+	s.gotTicketID = ticketID
 	if s.openErr != nil {
 		return nil, "", s.openErr
 	}
@@ -131,4 +132,6 @@ func TestSkillTicketAttachments_Download(t *testing.T) {
 	assert.Equal(t, http.StatusOK, rec.Code)
 	assert.Equal(t, "hello", rec.Body.String())
 	assert.Contains(t, rec.Header().Get("Content-Disposition"), "filename*=UTF-8''")
+	// path 中的工单 id "t1" 必须透传给 Open 做归属校验
+	assert.Equal(t, "t1", att.gotTicketID)
 }

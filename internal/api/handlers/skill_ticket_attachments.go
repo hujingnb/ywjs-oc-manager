@@ -18,7 +18,7 @@ import (
 type skillTicketAttachmentService interface {
 	Add(ctx context.Context, p auth.Principal, ticketID, fileName string, data []byte) (service.SkillTicketAttachmentResult, error)
 	List(ctx context.Context, ticketID string) ([]service.SkillTicketAttachmentResult, error)
-	Open(ctx context.Context, id string) (io.ReadCloser, string, error)
+	Open(ctx context.Context, ticketID, id string) (io.ReadCloser, string, error)
 }
 
 // ticketViewer 复用工单可见性判断:附件操作前置校验调用者能否查看该工单。
@@ -135,7 +135,7 @@ func (h *SkillTicketAttachmentsHandler) Download(c *gin.Context) {
 		writeSkillTicketError(c, err)
 		return
 	}
-	rc, fileName, err := h.attachments.Open(c.Request.Context(), c.Param("attId"))
+	rc, fileName, err := h.attachments.Open(c.Request.Context(), c.Param("id"), c.Param("attId"))
 	if err != nil {
 		writeAttachmentError(c, err)
 		return

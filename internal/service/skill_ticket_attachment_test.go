@@ -89,16 +89,31 @@ func TestSkillTicketAttachmentService_Add_Invalid(t *testing.T) {
 	require.ErrorIs(t, err, ErrSkillTicketAttachmentInvalid)
 }
 
-// TestSkillTicketAttachmentService_Open_OK 覆盖下载路径:按 id 取回原始字节与文件名(供 Content-Disposition)。
+// TestSkillTicketAttachmentService_Open_OK 覆盖下载路径:按正确的 ticketID + attachmentID 取回原始字节与文件名(供 Content-Disposition)。
 func TestSkillTicketAttachmentService_Open_OK(t *testing.T) {
 	store := newFakeAttachmentStore()
 	blobs := newFakeBlobs()
 	svc := NewSkillTicketAttachmentService(store, blobs)
 	res, _ := svc.Add(context.Background(), memberAP(), "ticket-1", "a.txt", []byte("hello"))
-	rc, name, err := svc.Open(context.Background(), res.ID)
+	// 传入附件所属的 ticketID,应成功取回内容
+	rc, name, err := svc.Open(context.Background(), "ticket-1", res.ID)
 	require.NoError(t, err)
 	got, _ := io.ReadAll(rc)
 	_ = rc.Close()
 	assert.Equal(t, "hello", string(got))
 	assert.Equal(t, "a.txt", name)
+}
+
+// TestSkillTicketAttachmentService_Open_WrongTicket 覆盖 IDOR 防御:
+// 用不属于该附件的工单 ID 调用 Open,应返回 ErrSkillTicketAttachmentNotFound,
+// 不泄露该附件在其他工单中的存在性。
+func TestSkillTicketAttachmentService_Open_WrongTicket(t *testing.T) {
+	store := newFakeAttachmentStore()
+	blobs := newFakeBlobs()
+	svc := NewSkillTicketAttachmentService(store, blobs)
+	// 附件属于 ticket-1,但用 ticket-2 的 ID 来查询
+	res, _ := svc.Add(context.Background(), memberAP(), "ticket-1", "secret.txt", []byte("secret"))
+	_, _, err := svc.Open(context.Background(), "ticket-2", res.ID)
+	// 归属不匹配,应当不存在(防 IDOR)
+	require.ErrorIs(t, err, ErrSkillTicketAttachmentNotFound)
 }

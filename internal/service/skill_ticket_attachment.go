@@ -83,14 +83,20 @@ func (s *SkillTicketAttachmentService) List(ctx context.Context, ticketID string
 	return out, nil
 }
 
-// Open 按附件 id 打开内容,返回 ReadCloser 与原始文件名(供下载 Content-Disposition)。
-func (s *SkillTicketAttachmentService) Open(ctx context.Context, id string) (io.ReadCloser, string, error) {
+// Open 按工单 id + 附件 id 打开内容,返回 ReadCloser 与原始文件名(供下载 Content-Disposition)。
+// ticketID 用于归属校验:若附件不属于该工单,返回 ErrSkillTicketAttachmentNotFound 而非泄露附件存在性,
+// 以防 IDOR(Insecure Direct Object Reference)越权访问他人工单附件。
+func (s *SkillTicketAttachmentService) Open(ctx context.Context, ticketID, id string) (io.ReadCloser, string, error) {
 	row, err := s.store.GetSkillTicketAttachment(ctx, id)
 	if err != nil {
 		if errors.Is(err, sql.ErrNoRows) {
 			return nil, "", ErrSkillTicketAttachmentNotFound
 		}
 		return nil, "", fmt.Errorf("查询附件失败: %w", err)
+	}
+	// 归属校验:附件必须属于 path 中的工单,不一致视为不存在(不泄露其他工单附件的存在性)。
+	if row.TicketID != ticketID {
+		return nil, "", ErrSkillTicketAttachmentNotFound
 	}
 	rc, err := s.blobs.OpenLibrarySkill(row.ObjectPath)
 	if err != nil {
