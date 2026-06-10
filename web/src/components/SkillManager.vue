@@ -54,6 +54,12 @@
           @action="onMarketAction"
         />
       </n-tab-pane>
+
+      <!-- 定制技能视图：成员工单面板（提交需求 / 查看进度 / 去安装）。
+           仅 showTickets=true 时挂载（成员技能页开启，管理员 per-app 视图不显示）。 -->
+      <n-tab-pane v-if="showTickets" name="tickets" tab="定制技能">
+        <skill-ticket-panel @go-install="onGoInstall" />
+      </n-tab-pane>
     </n-tabs>
 
     <!-- 已安装 skill 详情抽屉：点已安装名称打开（无版本锁定动作）；平台管理员可下载各版本归档。 -->
@@ -88,12 +94,18 @@ import { canManageAppSkill } from '@/domain/permissions'
 import { useAuthStore } from '@/stores/auth'
 import SkillMarketBrowser from './SkillMarketBrowser.vue'
 import SkillDetailDrawer, { type SkillDetail } from './SkillDetailDrawer.vue'
+import SkillTicketPanel from './SkillTicketPanel.vue'
 
 // SkillManager 接受 appId prop，app 可从 inject 获取（管理员入口由父级 provide）。
-const props = defineProps<{
-  // 目标实例 ID，用于已安装列表查询与安装/卸载/更新操作。
-  appId: string
-}>()
+const props = withDefaults(
+  defineProps<{
+    // 目标实例 ID，用于已安装列表查询与安装/卸载/更新操作。
+    appId: string
+    // showTickets：是否展示「定制技能」工单 tab；成员技能页开启，管理员 per-app 视图保持关闭。
+    showTickets?: boolean
+  }>(),
+  { showTickets: false },
+)
 
 const auth = useAuthStore()
 const message = useMessage()
@@ -131,8 +143,21 @@ const uninstallMutation = useUninstallAppSkill(appIdRef)
 const updateMutation = useUpdateAppSkill(appIdRef)
 const reinstallMutation = useReinstallAppSkill(appIdRef)
 
-// activeTab 控制当前视图（installed / market）。
-const activeTab = ref<'installed' | 'market'>('installed')
+// activeTab 控制当前视图（installed / market / tickets）。
+const activeTab = ref<'installed' | 'market' | 'tickets'>('installed')
+
+// pendingMarketSource 记录「去安装」期望的市场来源筛选值（'custom'）。
+// 现阶段 SkillMarketBrowser 的来源筛选完全由其内部 selectedSource ref 管理、未对外暴露，
+// SkillManager 无法外部设置；Task 3 会把 SkillMarketBrowser 的 source 做成受控（prop/expose）后接上，
+// 届时在切到市场 tab 时把此值同步给子组件。当前仅记录意图，先只切到市场 tab。
+const pendingMarketSource = ref<string>('')
+
+// onGoInstall 响应工单面板「去安装」：切到技能市场 tab，并记录目标来源筛选（待 Task 3 接通）。
+// name 为目标定制技能名（custom_skill_name），Task 3 接通后可用于市场内定位/高亮。
+function onGoInstall(_name: string | undefined) {
+  activeTab.value = 'market'
+  pendingMarketSource.value = 'custom'
+}
 
 // installedNames 将已安装 skill name 放入 Set，用于市场安装按钮去重判断。
 // 取自完整列表（而非 visibleAppSkills）：市场只含 platform/clawhub 来源、不含 builtin，

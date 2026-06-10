@@ -5,8 +5,9 @@
     <div v-if="isLoading" class="state-text">加载中…</div>
     <!-- 空态：当前账号尚未关联实例时展示占位提示。 -->
     <p v-else-if="!hasApp" class="state-text">当前账号暂无关联实例，请联系管理员创建实例后再访问。</p>
-    <!-- 正常态：实例就绪时将 appId 传给 SkillManager；SkillManager 内部 inject app 做权限。 -->
-    <SkillManager v-else :app-id="appId!" />
+    <!-- 正常态：实例就绪时将 appId 传给 SkillManager；SkillManager 内部 inject app 做权限。
+         成员页开启「定制技能」工单 tab（show-tickets），管理员 per-app 视图不传保持关闭。 -->
+    <SkillManager v-else :app-id="appId!" :show-tickets="true" />
   </div>
 </template>
 
