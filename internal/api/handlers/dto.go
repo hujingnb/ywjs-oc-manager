@@ -409,3 +409,31 @@ type UpdateAppSkillRequest struct {
 	// Version 是目标版本号，必须与 source 端已发布的版本对应。
 	Version string `json:"version" binding:"required"`
 }
+
+// ===== 定制技能工单 =====
+
+// SubmitSkillTicketRequest 提交需求工单请求体。
+type SubmitSkillTicketRequest struct {
+	Title       string `json:"title"`
+	Description string `json:"description"`
+}
+
+// AddSkillTicketCommentRequest 追加工单评论请求体。
+type AddSkillTicketCommentRequest struct {
+	Body string `json:"body"`
+}
+
+// UpdateSkillTicketStatusRequest 管理员改状态请求体(pending|processing)。
+type UpdateSkillTicketStatusRequest struct {
+	Status string `json:"status"`
+}
+
+// SetSkillTicketQuoteRequest 管理员报价请求体(分)。
+type SetSkillTicketQuoteRequest struct {
+	QuoteAmountCents int64 `json:"quote_amount_cents"`
+}
+
+// RejectSkillTicketRequest 管理员拒绝请求体。
+type RejectSkillTicketRequest struct {
+	Reason string `json:"reason"`
+}
