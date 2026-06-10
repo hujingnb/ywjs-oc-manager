@@ -437,3 +437,14 @@ type SetSkillTicketQuoteRequest struct {
 type RejectSkillTicketRequest struct {
 	Reason string `json:"reason"`
 }
+
+// CustomSkillTargetDTO 交付定制技能时的单条目标范围。
+// targets 以 JSON 数组字符串形式随 multipart/form-data 提交，每条描述一个组织及其可见受众。
+type CustomSkillTargetDTO struct {
+	OrgID    string `json:"org_id" binding:"required"`
+	Audience string `json:"audience" binding:"required"` // all_org|org_admins|requester_only
+}
+
+// DeliverCustomSkillRequest 交付定制技能(归档走 multipart file,本体描述目标范围与描述)。
+// 注:交付实际走 multipart/form-data(字段 ticket_id/description/targets(JSON 串)+ file),
+// 不以 JSON struct 绑定;此类型仅作文档占位与字段约定记录,不直接用于请求绑定。

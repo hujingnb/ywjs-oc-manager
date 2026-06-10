@@ -1363,6 +1363,21 @@ components:
         job_id:
           type: string
       type: object
+    service.CustomSkillResult:
+      properties:
+        file_sha256:
+          type: string
+        file_size:
+          type: integer
+        id:
+          type: string
+        name:
+          type: string
+        ticket_id:
+          type: string
+        version:
+          type: string
+      type: object
     service.IndustryKnowledgeBaseListResult:
       properties:
         items:
@@ -1793,6 +1808,9 @@ components:
       type: object
     service.SkillEntry:
       properties:
+        audience:
+          description: Audience 仅 custom 来源：命中的可见范围（all_org|org_admins|requester_only），前端渲染范围徽章，其它来源留空。
+          type: string
         description:
           description: Description 是 skill 简短描述。
           type: string
@@ -1801,6 +1819,9 @@ components:
           type: integer
         name:
           description: Name 是 skill 名称。
+          type: string
+        requester_name:
+          description: RequesterName 仅 custom 来源：申请人展示名（「由 X 申请」），其它来源留空。
           type: string
         source:
           description: Source 是来源标识，取值为 "platform" 或 "clawhub"。
@@ -1822,6 +1843,15 @@ components:
           uniqueItems: false
         next_cursor:
           description: NextCursor 是下一页游标，platform 来源始终为空。
+          type: string
+      type: object
+    service.SkillTicketAttachmentResult:
+      properties:
+        file_name:
+          type: string
+        file_size:
+          type: integer
+        id:
           type: string
       type: object
     service.SkillTicketCommentResult:
@@ -5700,6 +5730,65 @@ paths:
       summary: 查询计费展示配置
       tags:
       - recharge
+  /custom-skills/deliver:
+    post:
+      requestBody:
+        content:
+          application/x-www-form-urlencoded:
+            schema:
+              oneOf:
+              - title: ticket_id
+                type: string
+              - title: description
+                type: string
+              - title: targets
+                type: string
+              - title: file
+                type: file
+          multipart/form-data:
+            schema:
+              type: object
+        description: 工单 id | 市场展示描述 | 目标范围 JSON 数组 [{org_id,audience}] | 前端打包的扁平 skill
+          tar
+        required: true
+      responses:
+        "201":
+          content:
+            application/json:
+              schema:
+                additionalProperties:
+                  $ref: '#/components/schemas/service.CustomSkillResult'
+                type: object
+          description: Created
+        "400":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/handlers.ErrorResponse'
+          description: Bad Request
+        "403":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/handlers.ErrorResponse'
+          description: Forbidden
+        "404":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/handlers.ErrorResponse'
+          description: Not Found
+        "409":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/handlers.ErrorResponse'
+          description: Conflict
+      security:
+      - BearerAuth: []
+      summary: 交付定制技能(平台管理员)
+      tags:
+      - custom-skills
   /external/industry-knowledge/files:
     post:
       description: 使用固定 header token 鉴权，通过 multipart/form-data 提交 industry_name 与
@@ -8804,6 +8893,133 @@ paths:
       security:
       - BearerAuth: []
       summary: 定制技能工单详情
+      tags:
+      - skill-tickets
+  /skill-tickets/{id}/attachments:
+    get:
+      parameters:
+      - description: 工单 id
+        in: path
+        name: id
+        required: true
+        schema:
+          type: string
+      responses:
+        "200":
+          content:
+            application/json:
+              schema:
+                additionalProperties:
+                  items:
+                    $ref: '#/components/schemas/service.SkillTicketAttachmentResult'
+                  type: array
+                type: object
+          description: OK
+        "403":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/handlers.ErrorResponse'
+          description: Forbidden
+        "404":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/handlers.ErrorResponse'
+          description: Not Found
+      security:
+      - BearerAuth: []
+      summary: 列出工单附件
+      tags:
+      - skill-tickets
+    post:
+      parameters:
+      - description: 工单 id
+        in: path
+        name: id
+        required: true
+        schema:
+          type: string
+      requestBody:
+        content:
+          application/x-www-form-urlencoded:
+            schema:
+              title: file
+              type: file
+          multipart/form-data:
+            schema:
+              type: object
+        description: 附件文件
+        required: true
+      responses:
+        "201":
+          content:
+            application/json:
+              schema:
+                additionalProperties:
+                  $ref: '#/components/schemas/service.SkillTicketAttachmentResult'
+                type: object
+          description: Created
+        "400":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/handlers.ErrorResponse'
+          description: Bad Request
+        "403":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/handlers.ErrorResponse'
+          description: Forbidden
+        "404":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/handlers.ErrorResponse'
+          description: Not Found
+      security:
+      - BearerAuth: []
+      summary: 上传工单附件
+      tags:
+      - skill-tickets
+  /skill-tickets/{id}/attachments/{attId}/download:
+    get:
+      parameters:
+      - description: 工单 id
+        in: path
+        name: id
+        required: true
+        schema:
+          type: string
+      - description: 附件 id
+        in: path
+        name: attId
+        required: true
+        schema:
+          type: string
+      responses:
+        "200":
+          content:
+            application/octet-stream:
+              schema:
+                type: file
+          description: OK
+        "403":
+          content:
+            application/octet-stream:
+              schema:
+                $ref: '#/components/schemas/handlers.ErrorResponse'
+          description: Forbidden
+        "404":
+          content:
+            application/octet-stream:
+              schema:
+                $ref: '#/components/schemas/handlers.ErrorResponse'
+          description: Not Found
+      security:
+      - BearerAuth: []
+      summary: 下载工单附件
       tags:
       - skill-tickets
   /skill-tickets/{id}/comments:

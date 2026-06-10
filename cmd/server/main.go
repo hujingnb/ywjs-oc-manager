@@ -354,6 +354,10 @@ func runManager(ctx context.Context, cfg config.Config, logOut io.Writer) error 
 	platformSkillService := service.NewPlatformSkillService(dbStore.Queries, libraryBlobs)
 	// 定制技能工单 service：dbStore.Queries(*sqlc.Queries) 已满足 SkillTicketStore 全部方法，直接注入无需 adapter。
 	skillTicketService := service.NewSkillTicketService(dbStore.Queries)
+	// 定制技能交付 service：解析扁平 tar、写归档与 custom_skills、置工单 delivered；dbStore.Queries 满足 CustomSkillStore，归档落 libraryBlobs。
+	customSkillService := service.NewCustomSkillService(dbStore.Queries, libraryBlobs)
+	// 工单附件 service：附件内容落 libraryBlobs（ticket-attachment 前缀），元数据由 dbStore.Queries（SkillTicketAttachmentStore）落库。
+	skillTicketAttachmentService := service.NewSkillTicketAttachmentService(dbStore.Queries, libraryBlobs)
 	workspaceService := service.NewWorkspaceService(dbStore.Queries, workspaceObjStore, workspacePresignTTL)
 
 	// ClawHub 公共库客户端：BaseURL 为空则保持 nil，不接入 ClawHub（市场仅平台库，
@@ -497,6 +501,8 @@ func runManager(ctx context.Context, cfg config.Config, logOut io.Writer) error 
 		Apps:     ocopsResolver,
 		Versions: avSkillLoader,
 		Platform: platformSkillService,
+		// Custom 接入定制技能取装来源：安装链路命中 custom source-ref 时由它返回归档与 sha。
+		Custom: customSkillService,
 		// ClawHub 默认 nil：BaseURL 为空时不注入，避免 nil interface 陷阱（见上注释）。
 		ClawHub: nil,
 		Blobs:   libraryBlobs,
@@ -535,8 +541,10 @@ func runManager(ctx context.Context, cfg config.Config, logOut io.Writer) error 
 		// imagecoordRedis 已在上方构造（与 distLocker 共用同一 Redis 物理实例），复用避免新建连接。
 		clawhubSource = service.NewClawHubSource(clawhubClient, imagecoordRedis, cfg.ClawHub.CacheTTL.Duration, archiveCache)
 	}
-	// 第三参 custom 暂传 nil（定制技能来源 Task 7 接线后再传入真正的 customSource）。
-	skillLibraryService := service.NewSkillLibraryService(platformSource, clawhubSource, nil)
+	// custom 来源：按主体可见性过滤定制技能（all_org / org_admins / requester_only），接入市场聚合。
+	// dbStore.Queries 满足 CustomSourceStore（ListVisibleCustomSkills 等）。
+	customSource := service.NewCustomSource(dbStore.Queries)
+	skillLibraryService := service.NewSkillLibraryService(platformSource, clawhubSource, customSource)
 
 	transferLimit := apihandlers.TransferLimitConfig{
 		UploadBytesPerSec:   cfg.TransferLimit.UploadBytesPerSec,
@@ -566,6 +574,8 @@ func runManager(ctx context.Context, cfg config.Config, logOut io.Writer) error 
 			AssistantVersionService:      assistantVersionService,
 			PlatformSkillService:         platformSkillService,
 			SkillTicketService:           skillTicketService,
+			CustomSkillService:           customSkillService,
+			SkillTicketAttachmentService: skillTicketAttachmentService,
 			HermesKanbanService:          hermesKanbanService,
 			HermesCronService:            hermesCronService,
 			AppSkillService:              appSkillService,
