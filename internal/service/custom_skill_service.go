@@ -29,7 +29,6 @@ type CustomSkillStore interface {
 	GetCustomSkillByNameVersion(ctx context.Context, arg sqlc.GetCustomSkillByNameVersionParams) (sqlc.CustomSkill, error)
 	GetSkillTicket(ctx context.Context, id string) (sqlc.SkillTicket, error)
 	CreateCustomSkillTarget(ctx context.Context, arg sqlc.CreateCustomSkillTargetParams) error
-	ListCustomSkillTargetsByName(ctx context.Context, name string) ([]sqlc.CustomSkillTarget, error)
 	MarkSkillTicketDelivered(ctx context.Context, arg sqlc.MarkSkillTicketDeliveredParams) error
 }
 
@@ -68,12 +67,6 @@ type CustomSkillResult struct {
 	FileSize   int64  `json:"file_size"`
 	FileSha256 string `json:"file_sha256"`
 }
-
-const (
-	audienceAllOrg        = "all_org"
-	audienceOrgAdmins     = "org_admins"
-	audienceRequesterOnly = "requester_only"
-)
 
 // Deliver 交付一个定制技能版本:校验权限/归档/技能名一致性 → 自动生成版本 → 写归档与库 → 写/沿用目标范围 → 置工单 delivered。
 func (s *CustomSkillService) Deliver(ctx context.Context, p auth.Principal, in DeliverCustomSkillInput) (CustomSkillResult, error) {

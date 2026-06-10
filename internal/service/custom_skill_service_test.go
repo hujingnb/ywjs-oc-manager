@@ -131,6 +131,48 @@ func TestCustomSkillService_Deliver_Denied(t *testing.T) {
 	require.ErrorIs(t, err, ErrCustomSkillDenied)
 }
 
+// 再次交付成功:覆盖「targets 仅首次写」与「版本 -N 后缀」两条分支。
+// 预置首版 20260610-153012 已存在 → uniqueVersion 碰撞后生成 20260610-153012-2;
+// 工单已有 CustomSkillName 锁定为 weekly-report → 同名放行不报 NameMismatch;
+// targets 已预置 1 条 → 再次交付不追加写,仍维持 1 条。
+func TestCustomSkillService_Deliver_SecondVersion(t *testing.T) {
+	store := newFakeCustomStore()
+	// 预置工单:已首次交付,CustomSkillName 已锁定为 weekly-report。
+	store.tickets["tk-1"] = sqlc.SkillTicket{
+		ID: "tk-1", OrgID: "org-1",
+		RequesterUserID: "u-mem", RequesterRole: domain.UserRoleOrgMember,
+		Status:          "delivered",
+		CustomSkillName: nullStr("weekly-report"),
+	}
+	// 预置首版技能,使 uniqueVersion 对 base 版本命中,触发 -2 后缀逻辑。
+	store.skills["weekly-report|20260610-153012"] = sqlc.CustomSkill{
+		ID: "sk-old", Name: "weekly-report", Version: "20260610-153012",
+	}
+	// 预置已有 1 条 target,用于验证再次交付不重复写。
+	store.targets["weekly-report"] = []sqlc.CustomSkillTarget{
+		{ID: "tg-1", CustomSkillName: "weekly-report", OrgID: "org-1", Audience: "all_org"},
+	}
+
+	blobs := newFakeBlobs()
+	svc := NewCustomSkillService(store, blobs)
+	// 固定时钟使 base 版本为 20260610-153012,与预置首版冲突,触发 -2 后缀。
+	svc.now = fixedClock()
+
+	res, err := svc.Deliver(context.Background(), adminPrincipalCS(), DeliverCustomSkillInput{
+		TicketID: "tk-1", Description: "周报技能再次交付",
+		Data:    flatTarWithName(t, "weekly-report"),
+		Targets: []CustomSkillTargetInput{{OrgID: "org-1", Audience: "all_org"}},
+	})
+	// ① 交付应成功,无错误。
+	require.NoError(t, err)
+	// ② 版本号应追加 -2(base 已被占用,uniqueVersion 第二轮候选)。
+	assert.Equal(t, "20260610-153012-2", res.Version)
+	// ③ targets 仅首次写:再次交付不追加,仍保持预置的 1 条。
+	assert.Len(t, store.targets["weekly-report"], 1)
+	// ④ 工单名一致放行:name=weekly-report 与锁定名相同,不报 NameMismatch,工单仍标记 delivered。
+	assert.Equal(t, "weekly-report", store.tickets["tk-1"].CustomSkillName.String)
+}
+
 // 无目标范围 → Invalid。
 func TestCustomSkillService_Deliver_NoTargets(t *testing.T) {
 	store := newFakeCustomStore()
