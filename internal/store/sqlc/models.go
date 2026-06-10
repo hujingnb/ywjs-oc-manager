@@ -335,37 +335,19 @@ type SkillTicket struct {
 	UpdatedAt time.Time `db:"updated_at" json:"updated_at"`
 }
 
-// 工单附件,提交需求/反馈时上传的示例文档/截图(Plan 2 启用)
-type SkillTicketAttachment struct {
+// 工单统一消息流,kind=text/image/file,body 为按 kind 变化的 JSON,取代原 comments+attachments
+type SkillTicketMessage struct {
 	// 主键 UUID
 	ID string `db:"id" json:"id"`
 	// 所属工单
 	TicketID string `db:"ticket_id" json:"ticket_id"`
-	// 可空,关联具体评论;NULL=随工单初始提交的附件
-	CommentID null.String `db:"comment_id" json:"comment_id"`
-	// 对象存储相对路径
-	ObjectPath string `db:"object_path" json:"object_path"`
-	// 原始文件名
-	FileName string `db:"file_name" json:"file_name"`
-	// 字节大小
-	FileSize int64 `db:"file_size" json:"file_size"`
-	// 上传者 user id
-	UploadedBy string `db:"uploaded_by" json:"uploaded_by"`
-	// 上传时间
-	CreatedAt time.Time `db:"created_at" json:"created_at"`
-}
-
-// 工单多轮对话,提交者与平台管理员沟通需求/反馈
-type SkillTicketComment struct {
-	// 主键 UUID
-	ID string `db:"id" json:"id"`
-	// 所属工单
-	TicketID string `db:"ticket_id" json:"ticket_id"`
-	// 发言者 user id(提交者或平台管理员)
+	// 发送者 user id(提交者或平台管理员)
 	AuthorUserID string `db:"author_user_id" json:"author_user_id"`
-	// 评论正文
-	Body string `db:"body" json:"body"`
-	// 发表时间
+	// 消息类型:text|image|file,决定 body 的 JSON 结构与前端渲染
+	Kind string `db:"kind" json:"kind"`
+	// 消息内容,按 kind 变化:text={"text":".."};image/file={"object_path":"..","file_name":"..","file_size":N,"content_type":".."}
+	Body json.RawMessage `db:"body" json:"body"`
+	// 发送时间
 	CreatedAt time.Time `db:"created_at" json:"created_at"`
 }
 

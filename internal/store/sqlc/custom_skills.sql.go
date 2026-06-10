@@ -13,6 +13,7 @@ import (
 )
 
 const createCustomSkill = `-- name: CreateCustomSkill :exec
+
 INSERT INTO custom_skills (id, name, description, version, tar_path, file_size, file_sha256, ticket_id, created_by)
 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
 `
@@ -29,6 +30,8 @@ type CreateCustomSkillParams struct {
 	CreatedBy   null.String `db:"created_by" json:"created_by"`
 }
 
+// 定制技能相关查询。工单附件三条查询已在 000011 迁移后移除（改用统一消息表 skill_ticket_messages）；
+// 本文件保留 custom_skills / custom_skill_targets / 交付相关查询。
 func (q *Queries) CreateCustomSkill(ctx context.Context, arg CreateCustomSkillParams) error {
 	_, err := q.db.ExecContext(ctx, createCustomSkill,
 		arg.ID,
@@ -61,37 +64,6 @@ func (q *Queries) CreateCustomSkillTarget(ctx context.Context, arg CreateCustomS
 		arg.CustomSkillName,
 		arg.OrgID,
 		arg.Audience,
-	)
-	return err
-}
-
-const createSkillTicketAttachment = `-- name: CreateSkillTicketAttachment :exec
-
-INSERT INTO skill_ticket_attachments (id, ticket_id, comment_id, object_path, file_name, file_size, uploaded_by)
-VALUES (?, ?, ?, ?, ?, ?, ?)
-`
-
-type CreateSkillTicketAttachmentParams struct {
-	ID         string      `db:"id" json:"id"`
-	TicketID   string      `db:"ticket_id" json:"ticket_id"`
-	CommentID  null.String `db:"comment_id" json:"comment_id"`
-	ObjectPath string      `db:"object_path" json:"object_path"`
-	FileName   string      `db:"file_name" json:"file_name"`
-	FileSize   int64       `db:"file_size" json:"file_size"`
-	UploadedBy string      `db:"uploaded_by" json:"uploaded_by"`
-}
-
-// 定制技能相关查询。本文件首版仅放工单附件三条查询；
-// 后续 Task 3 再追加 custom_skills / custom_skill_targets / 交付相关查询。
-func (q *Queries) CreateSkillTicketAttachment(ctx context.Context, arg CreateSkillTicketAttachmentParams) error {
-	_, err := q.db.ExecContext(ctx, createSkillTicketAttachment,
-		arg.ID,
-		arg.TicketID,
-		arg.CommentID,
-		arg.ObjectPath,
-		arg.FileName,
-		arg.FileSize,
-		arg.UploadedBy,
 	)
 	return err
 }
@@ -149,26 +121,6 @@ func (q *Queries) GetLatestCustomSkillByName(ctx context.Context, name string) (
 		&i.FileSha256,
 		&i.TicketID,
 		&i.CreatedBy,
-		&i.CreatedAt,
-	)
-	return i, err
-}
-
-const getSkillTicketAttachment = `-- name: GetSkillTicketAttachment :one
-SELECT id, ticket_id, comment_id, object_path, file_name, file_size, uploaded_by, created_at FROM skill_ticket_attachments WHERE id = ?
-`
-
-func (q *Queries) GetSkillTicketAttachment(ctx context.Context, id string) (SkillTicketAttachment, error) {
-	row := q.db.QueryRowContext(ctx, getSkillTicketAttachment, id)
-	var i SkillTicketAttachment
-	err := row.Scan(
-		&i.ID,
-		&i.TicketID,
-		&i.CommentID,
-		&i.ObjectPath,
-		&i.FileName,
-		&i.FileSize,
-		&i.UploadedBy,
 		&i.CreatedAt,
 	)
 	return i, err
@@ -268,42 +220,6 @@ func (q *Queries) ListCustomSkillVersionsByName(ctx context.Context, name string
 			&i.FileSha256,
 			&i.TicketID,
 			&i.CreatedBy,
-			&i.CreatedAt,
-		); err != nil {
-			return nil, err
-		}
-		items = append(items, i)
-	}
-	if err := rows.Close(); err != nil {
-		return nil, err
-	}
-	if err := rows.Err(); err != nil {
-		return nil, err
-	}
-	return items, nil
-}
-
-const listSkillTicketAttachments = `-- name: ListSkillTicketAttachments :many
-SELECT id, ticket_id, comment_id, object_path, file_name, file_size, uploaded_by, created_at FROM skill_ticket_attachments WHERE ticket_id = ? ORDER BY created_at ASC, id ASC
-`
-
-func (q *Queries) ListSkillTicketAttachments(ctx context.Context, ticketID string) ([]SkillTicketAttachment, error) {
-	rows, err := q.db.QueryContext(ctx, listSkillTicketAttachments, ticketID)
-	if err != nil {
-		return nil, err
-	}
-	defer rows.Close()
-	items := []SkillTicketAttachment{}
-	for rows.Next() {
-		var i SkillTicketAttachment
-		if err := rows.Scan(
-			&i.ID,
-			&i.TicketID,
-			&i.CommentID,
-			&i.ObjectPath,
-			&i.FileName,
-			&i.FileSize,
-			&i.UploadedBy,
 			&i.CreatedAt,
 		); err != nil {
 			return nil, err

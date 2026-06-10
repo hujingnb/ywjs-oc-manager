@@ -55,6 +55,8 @@ type Querier interface {
 	CreateAssistantVersion(ctx context.Context, arg CreateAssistantVersionParams) error
 	CreateAuditLog(ctx context.Context, arg CreateAuditLogParams) error
 	CreateChannelBinding(ctx context.Context, arg CreateChannelBindingParams) error
+	// 定制技能相关查询。工单附件三条查询已在 000011 迁移后移除（改用统一消息表 skill_ticket_messages）；
+	// 本文件保留 custom_skills / custom_skill_targets / 交付相关查询。
 	CreateCustomSkill(ctx context.Context, arg CreateCustomSkillParams) error
 	CreateCustomSkillTarget(ctx context.Context, arg CreateCustomSkillTargetParams) error
 	// 创建平台级行业知识库；名称唯一性由未删除记录的生成列唯一键兜底。
@@ -75,10 +77,7 @@ type Querier interface {
 	CreateRechargeRecord(ctx context.Context, arg CreateRechargeRecordParams) error
 	CreateRefreshToken(ctx context.Context, arg CreateRefreshTokenParams) error
 	CreateSkillTicket(ctx context.Context, arg CreateSkillTicketParams) error
-	// 定制技能相关查询。本文件首版仅放工单附件三条查询；
-	// 后续 Task 3 再追加 custom_skills / custom_skill_targets / 交付相关查询。
-	CreateSkillTicketAttachment(ctx context.Context, arg CreateSkillTicketAttachmentParams) error
-	CreateSkillTicketComment(ctx context.Context, arg CreateSkillTicketCommentParams) error
+	CreateSkillTicketMessage(ctx context.Context, arg CreateSkillTicketMessageParams) error
 	CreateUser(ctx context.Context, arg CreateUserParams) error
 	DeleteAppSkillByAppAndName(ctx context.Context, arg DeleteAppSkillByAppAndNameParams) error
 	DeleteCustomSkillTargetsByName(ctx context.Context, customSkillName string) error
@@ -140,7 +139,7 @@ type Querier interface {
 	GetRefreshToken(ctx context.Context, id string) (RefreshToken, error)
 	GetRefreshTokenByHash(ctx context.Context, tokenHash string) (RefreshToken, error)
 	GetSkillTicket(ctx context.Context, id string) (SkillTicket, error)
-	GetSkillTicketAttachment(ctx context.Context, id string) (SkillTicketAttachment, error)
+	GetSkillTicketMessage(ctx context.Context, id string) (SkillTicketMessage, error)
 	GetUser(ctx context.Context, id string) (User, error)
 	GetUserByOrgAndUsername(ctx context.Context, arg GetUserByOrgAndUsernameParams) (User, error)
 	GetUserByUsername(ctx context.Context, username string) (User, error)
@@ -202,8 +201,7 @@ type Querier interface {
 	// running 是常态；binding_waiting 表示 pod 已起但渠道还在登录中，也需要 reconcile。
 	// spec-A2b：去掉 runtime_node_id / container_id（k8s 路径不再写这两列），消费方仅用 id。
 	ListRunningApps(ctx context.Context) ([]string, error)
-	ListSkillTicketAttachments(ctx context.Context, ticketID string) ([]SkillTicketAttachment, error)
-	ListSkillTicketComments(ctx context.Context, ticketID string) ([]SkillTicketComment, error)
+	ListSkillTicketMessages(ctx context.Context, ticketID string) ([]SkillTicketMessage, error)
 	ListSkillTicketsByRequester(ctx context.Context, requesterUserID string) ([]SkillTicket, error)
 	// reaper 扫描 init 子状态下「连续 N 秒无更新」的孤儿；N 由调用方按秒传入。
 	// 包含新旧两套 init 状态，确保历史孤儿也能被正确清理。

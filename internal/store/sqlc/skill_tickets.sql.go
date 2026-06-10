@@ -51,27 +51,6 @@ func (q *Queries) CreateSkillTicket(ctx context.Context, arg CreateSkillTicketPa
 	return err
 }
 
-const createSkillTicketComment = `-- name: CreateSkillTicketComment :exec
-INSERT INTO skill_ticket_comments (id, ticket_id, author_user_id, body) VALUES (?, ?, ?, ?)
-`
-
-type CreateSkillTicketCommentParams struct {
-	ID           string `db:"id" json:"id"`
-	TicketID     string `db:"ticket_id" json:"ticket_id"`
-	AuthorUserID string `db:"author_user_id" json:"author_user_id"`
-	Body         string `db:"body" json:"body"`
-}
-
-func (q *Queries) CreateSkillTicketComment(ctx context.Context, arg CreateSkillTicketCommentParams) error {
-	_, err := q.db.ExecContext(ctx, createSkillTicketComment,
-		arg.ID,
-		arg.TicketID,
-		arg.AuthorUserID,
-		arg.Body,
-	)
-	return err
-}
-
 const getSkillTicket = `-- name: GetSkillTicket :one
 SELECT id, org_id, requester_user_id, requester_role, title, description, status, quote_amount_cents, custom_skill_name, reject_reason, created_at, updated_at FROM skill_tickets WHERE id = ?
 `
@@ -122,39 +101,6 @@ func (q *Queries) ListAllSkillTickets(ctx context.Context) ([]SkillTicket, error
 			&i.RejectReason,
 			&i.CreatedAt,
 			&i.UpdatedAt,
-		); err != nil {
-			return nil, err
-		}
-		items = append(items, i)
-	}
-	if err := rows.Close(); err != nil {
-		return nil, err
-	}
-	if err := rows.Err(); err != nil {
-		return nil, err
-	}
-	return items, nil
-}
-
-const listSkillTicketComments = `-- name: ListSkillTicketComments :many
-SELECT id, ticket_id, author_user_id, body, created_at FROM skill_ticket_comments WHERE ticket_id = ? ORDER BY created_at ASC, id ASC
-`
-
-func (q *Queries) ListSkillTicketComments(ctx context.Context, ticketID string) ([]SkillTicketComment, error) {
-	rows, err := q.db.QueryContext(ctx, listSkillTicketComments, ticketID)
-	if err != nil {
-		return nil, err
-	}
-	defer rows.Close()
-	items := []SkillTicketComment{}
-	for rows.Next() {
-		var i SkillTicketComment
-		if err := rows.Scan(
-			&i.ID,
-			&i.TicketID,
-			&i.AuthorUserID,
-			&i.Body,
-			&i.CreatedAt,
 		); err != nil {
 			return nil, err
 		}

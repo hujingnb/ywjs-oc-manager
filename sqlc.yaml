@@ -12,6 +12,7 @@ sql:
       - internal/migrations/000008_ragflow_auto_reparse.up.sql
       - internal/migrations/000009_drop_ragflow_auto_reparse.up.sql
       - internal/migrations/000010_custom_skill.up.sql
+      - internal/migrations/000011_skill_ticket_messages.up.sql
     queries: internal/store/queries
     gen:
       go:

@@ -27,8 +27,3 @@ UPDATE skill_tickets SET updated_at = CURRENT_TIMESTAMP(6) WHERE id = ?;
 -- name: CountPendingSkillTickets :one
 SELECT COUNT(*) FROM skill_tickets WHERE status = 'pending';
 
--- name: CreateSkillTicketComment :exec
-INSERT INTO skill_ticket_comments (id, ticket_id, author_user_id, body) VALUES (?, ?, ?, ?);
-
--- name: ListSkillTicketComments :many
-SELECT * FROM skill_ticket_comments WHERE ticket_id = ? ORDER BY created_at ASC, id ASC;
