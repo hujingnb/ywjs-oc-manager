@@ -153,6 +153,7 @@ import {
 import HelpDrawer from '@/components/HelpDrawer.vue'
 import { useAuthStore } from '@/stores/auth'
 import { useOwnApp } from '@/composables/useOwnApp'
+import { useAdminPerspective } from '@/composables/useAdminPerspective'
 import { useSkillTicketBadgeQuery } from '@/api/hooks/useSkillTickets'
 
 // DashboardLayout 负责已登录后台的导航外壳、环境标识和退出入口。
@@ -177,9 +178,9 @@ const environmentLabel = computed(() => {
 // 根据当前路由计算激活的菜单项 key（前缀匹配）
 const activeKey = computed(() => {
   const p = route.path
-  if (p === '/') return isOrgMember.value ? memberAppTabKey('overview') : '/'
-  // org_member 的实例 tab 已拉平到左侧菜单，需要按子路由末段分别高亮。
-  if (isOrgMember.value && p.startsWith('/apps')) {
+  if (p === '/') return inOwnInstanceView.value ? memberAppTabKey('overview') : '/'
+  // org_member / org_admin(instance 视角) 的实例 tab 已拉平到左侧菜单，需要按子路由末段分别高亮。
+  if (inOwnInstanceView.value && p.startsWith('/apps')) {
     if (p === '/apps/empty') return memberAppTabKey('overview')
     const tab = p.split('/')[3] as MemberAppTab | undefined
     return tab && memberAppTabs.includes(tab) ? memberAppTabKey(tab) : memberAppTabKey('overview')
@@ -217,6 +218,13 @@ const pendingTicketCount = computed(() => ticketBadge.data.value ?? 0)
 
 const { appId: memberAppId, hasApp: memberHasApp } = useOwnApp()
 
+// 视角状态:仅 org_admin 消费,决定渲染企业管理菜单还是我的实例菜单。Task 4 再接入切换器与退出清除。
+const { perspective } = useAdminPerspective()
+
+// inOwnInstanceView:当前是否处于「以自有实例为中心」的视角。
+// org_member 恒为 true;org_admin 仅在 instance 视角为 true;platform_admin 恒为 false。
+const inOwnInstanceView = computed(() => isOrgMember.value || (isOrgAdmin.value && perspective.value === 'instance'))
+
 // MemberAppTab 是组织成员左侧菜单可直达的实例业务分区；值必须与 /apps/:appId/:tab 子路由末段一致。
 type MemberAppTab = 'overview' | 'kanban' | 'cron' | 'channels' | 'knowledge' | 'workspace'
 
@@ -225,7 +233,7 @@ const memberAppTabs: readonly MemberAppTab[] = ['overview', 'kanban', 'cron', 'c
 
 // memberAppTabPath 根据成员唯一实例生成现有详情页路由；无实例时统一落到空状态页。
 function memberAppTabPath(tab: MemberAppTab) {
-  if (!isOrgMember.value) return '/apps'
+  if (!inOwnInstanceView.value) return '/apps'
   if (memberHasApp.value && memberAppId.value) return `/apps/${memberAppId.value}/${tab}`
   return '/apps/empty'
 }
@@ -242,7 +250,7 @@ const memberAppPath = computed(() => memberAppTabPath('overview'))
 
 // menuOptions 根据角色裁剪入口：普通成员不显示组织管理和审计，平台管理员仅显示控制台单一入口。
 const menuOptions = computed<MenuOption[]>(() => {
-  if (isOrgMember.value) {
+  if (inOwnInstanceView.value) {
     return [
       { key: memberAppTabKey('overview'), label: '总览', icon: () => h(LayoutDashboard, { size: 18 }) },
       { key: memberAppTabKey('channels'), label: '渠道', icon: () => h(Radio, { size: 18 }) },
@@ -287,11 +295,6 @@ const menuOptions = computed<MenuOption[]>(() => {
     { key: memberAppPath.value, label: '实例', icon: () => h(Bot, { size: 18 }) },
     { key: '/knowledge', label: '企业知识库', icon: () => h(BookOpen, { size: 18 }) },
   )
-  // 技能：org_admin 与成员对称，给同一顶级技能页（key /skills、同图标），
-  // 管理自己的实例技能并可提交/查看定制技能工单。平台管理员另有 /platform/skills 入口，不在此处加。
-  if (isOrgAdmin.value) {
-    items.push({ key: '/skills', label: '技能', icon: () => h(Puzzle, { size: 18 }) })
-  }
   // 账户余额仅对 org_admin 显示；org_member 和 platform_admin 无此入口。
   if (isOrgAdmin.value) {
     items.push({ key: '/balance', label: '账户余额', icon: () => h(Wallet, { size: 18 }) })

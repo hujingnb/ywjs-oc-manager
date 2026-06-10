@@ -23,6 +23,13 @@ const memberAppState = vi.hoisted(() => ({
   hasApp: { value: false },
   isLoading: { value: false },
 }))
+const setPerspective = vi.hoisted(() => vi.fn())
+const resetPerspective = vi.hoisted(() => vi.fn())
+const adminPerspectiveState = vi.hoisted(() => ({
+  perspective: { value: 'manage' as 'manage' | 'instance' },
+  setPerspective,
+  resetPerspective,
+}))
 
 vi.mock('vue-router', () => ({
   RouterView: { template: '<section class="route-page">页面内容</section>' },
@@ -36,6 +43,10 @@ vi.mock('@/stores/auth', () => ({
 
 vi.mock('@/composables/useOwnApp', () => ({
   useOwnApp: () => memberAppState,
+}))
+
+vi.mock('@/composables/useAdminPerspective', () => ({
+  useAdminPerspective: () => adminPerspectiveState,
 }))
 
 // 角标 query 桩：返回固定 ref，避免在测试环境实例化真实 useQuery（需 QueryClient 注入）。
@@ -191,6 +202,13 @@ describe('DashboardLayout', () => {
     memberAppState.appId.value = undefined
     memberAppState.hasApp.value = false
     memberAppState.isLoading.value = false
+    adminPerspectiveState.perspective.value = 'manage'
+    setPerspective.mockReset()
+    resetPerspective.mockReset()
+    // setPerspective 桩实现:更新视角 ref,使菜单在切换后重新计算
+    setPerspective.mockImplementation((next: 'manage' | 'instance') => {
+      adminPerspectiveState.perspective.value = next
+    })
   })
 
   // 覆盖后台整体骨架：内容区必须给子页面提供可撑满的剩余高度。
@@ -295,6 +313,64 @@ describe('DashboardLayout', () => {
     expect(menuLabels(wrapper)).toContain('实例')
     expect(menuLabels(wrapper)).toContain('企业知识库')
     expect(menuLabels(wrapper)).not.toContain('知识库')
+  })
+
+  // 覆盖 org_admin 企业管理视角菜单:管理项齐全,且「技能」已迁出(不在此视角)。
+  it('renders management menu without skills for org_admin manage perspective', () => {
+    routeState.path = '/'
+    authState.user = { id: 'org-admin-1', username: 'owner', display_name: '管理员', role: 'org_admin', org_id: 'org-1' }
+    authState.isPlatformAdmin = false
+    authState.isOrgAdmin = true
+    authState.isOrgMember = false
+    adminPerspectiveState.perspective.value = 'manage'
+
+    const wrapper = mountLayout()
+
+    expect(menuLabels(wrapper)).toEqual(['总览', '成员', '实例', '企业知识库', '账户余额', '审计', '用量'])
+    expect(menuLabels(wrapper)).not.toContain('技能')
+  })
+
+  // 覆盖 org_admin 我的实例视角菜单:与组织成员同款(含「技能」),由自有实例 appId 驱动。
+  it('renders member-style menu for org_admin instance perspective', () => {
+    routeState.path = '/apps/admin-app/overview'
+    authState.user = { id: 'org-admin-1', username: 'owner', display_name: '管理员', role: 'org_admin', org_id: 'org-1' }
+    authState.isPlatformAdmin = false
+    authState.isOrgAdmin = true
+    authState.isOrgMember = false
+    adminPerspectiveState.perspective.value = 'instance'
+    memberAppState.appId.value = 'admin-app'
+    memberAppState.hasApp.value = true
+
+    const wrapper = mountLayout()
+
+    expect(menuLabels(wrapper)).toEqual(['总览', '渠道', '工作目录', '个人知识库', '企业知识库', '技能', '任务', '定时任务', '用量'])
+    expect(menuKeys(wrapper)).toEqual([
+      '/apps/admin-app/overview',
+      '/apps/admin-app/channels',
+      '/apps/admin-app/workspace',
+      '/apps/admin-app/knowledge',
+      '/knowledge',
+      '/skills',
+      '/apps/admin-app/kanban',
+      '/apps/admin-app/cron',
+      '/usage',
+    ])
+  })
+
+  // 覆盖 org_admin 实例视角当前高亮:在 /apps/:id/:tab 上应高亮对应实例 tab(复用成员高亮逻辑)。
+  it('highlights instance tab for org_admin instance perspective', () => {
+    routeState.path = '/apps/admin-app/channels'
+    authState.user = { id: 'org-admin-1', username: 'owner', display_name: '管理员', role: 'org_admin', org_id: 'org-1' }
+    authState.isPlatformAdmin = false
+    authState.isOrgAdmin = true
+    authState.isOrgMember = false
+    adminPerspectiveState.perspective.value = 'instance'
+    memberAppState.appId.value = 'admin-app'
+    memberAppState.hasApp.value = true
+
+    const wrapper = mountLayout()
+
+    expect(wrapper.find('[data-test="menu"]').attributes('data-value')).toBe('/apps/admin-app/channels')
   })
 
   // 覆盖侧边栏用户区改密入口：已登录用户点击「修改密码」后应打开弹窗表单。
