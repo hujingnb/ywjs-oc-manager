@@ -55,6 +55,8 @@ type Querier interface {
 	CreateAssistantVersion(ctx context.Context, arg CreateAssistantVersionParams) error
 	CreateAuditLog(ctx context.Context, arg CreateAuditLogParams) error
 	CreateChannelBinding(ctx context.Context, arg CreateChannelBindingParams) error
+	CreateCustomSkill(ctx context.Context, arg CreateCustomSkillParams) error
+	CreateCustomSkillTarget(ctx context.Context, arg CreateCustomSkillTargetParams) error
 	// 创建平台级行业知识库；名称唯一性由未删除记录的生成列唯一键兜底。
 	CreateIndustryKnowledgeBase(ctx context.Context, arg CreateIndustryKnowledgeBaseParams) error
 	CreateJob(ctx context.Context, arg CreateJobParams) error
@@ -79,6 +81,7 @@ type Querier interface {
 	CreateSkillTicketComment(ctx context.Context, arg CreateSkillTicketCommentParams) error
 	CreateUser(ctx context.Context, arg CreateUserParams) error
 	DeleteAppSkillByAppAndName(ctx context.Context, arg DeleteAppSkillByAppAndNameParams) error
+	DeleteCustomSkillTargetsByName(ctx context.Context, customSkillName string) error
 	DeleteExpiredRefreshTokens(ctx context.Context) error
 	DeletePlatformSkill(ctx context.Context, id string) error
 	// 删除本地 dataset 映射；document 缓存通过外键级联清理。
@@ -97,6 +100,7 @@ type Querier interface {
 	GetAssistantVersionByName(ctx context.Context, name string) (AssistantVersion, error)
 	GetAuditLog(ctx context.Context, id string) (AuditLog, error)
 	GetChannelBindingByAppAndType(ctx context.Context, arg GetChannelBindingByAppAndTypeParams) (ChannelBinding, error)
+	GetCustomSkillByNameVersion(ctx context.Context, arg GetCustomSkillByNameVersionParams) (CustomSkill, error)
 	// 按 ID 读取未删除行业知识库，供管理面详情和后续权限校验使用。
 	GetIndustryKnowledgeBase(ctx context.Context, id string) (IndustryKnowledgeBasis, error)
 	// 按名称读取未删除行业知识库，用于创建和重命名时做业务提示。
@@ -107,6 +111,7 @@ type Querier interface {
 	// reaper 通过 payload_json->>'$.app_id' 查最近一份 app_initialize job。
 	// 用 ORDER BY created_at DESC + LIMIT 1 取最新；不存在返回 sql.ErrNoRows。
 	GetLatestAppInitJob(ctx context.Context, appID json.RawMessage) (Job, error)
+	GetLatestCustomSkillByName(ctx context.Context, name string) (CustomSkill, error)
 	// 组织列表复制登录信息时只需要一个可登录的组织管理员用户名。
 	// 密码明文不落库，因此这里只返回账号名，密码提示由调用方生成。
 	GetOrgAdminByOrg(ctx context.Context, orgID null.String) (User, error)
@@ -145,6 +150,7 @@ type Querier interface {
 	// 全量返回活跃组织（deleted_at IS NULL），不分页；
 	// 仅供平台内部聚合使用（如 GetOrgUsageBreakdown），请勿用于用户可见的列表接口。
 	ListAllActiveOrganizations(ctx context.Context) ([]Organization, error)
+	ListAllCustomSkills(ctx context.Context) ([]CustomSkill, error)
 	// 清空企业或实例知识库时列出指定业务 scope 下的全部 document，不受分页和筛选条件影响。
 	ListAllRAGFlowDocumentsByScope(ctx context.Context, arg ListAllRAGFlowDocumentsByScopeParams) ([]RagflowDocument, error)
 	// 清空行业知识库文件内容时列出该行业库下的全部 document，不受分页、日期和状态筛选影响。
@@ -162,6 +168,8 @@ type Querier interface {
 	ListAuditLogsByOrg(ctx context.Context, arg ListAuditLogsByOrgParams) ([]ListAuditLogsByOrgRow, error)
 	// 同 ListAuditLogsByOrg，按 target_type + target_id 过滤。
 	ListAuditLogsByTarget(ctx context.Context, arg ListAuditLogsByTargetParams) ([]ListAuditLogsByTargetRow, error)
+	ListCustomSkillTargetsByName(ctx context.Context, customSkillName string) ([]CustomSkillTarget, error)
+	ListCustomSkillVersionsByName(ctx context.Context, name string) ([]CustomSkill, error)
 	ListDistinctAppSkillSources(ctx context.Context) ([]ListDistinctAppSkillSourcesRow, error)
 	// reconciler 兜底用：列出 status=error 的 app。reconciler 查其 pod，若 hermes 实际 Ready
 	// （说明并非真失败，只是状态没收敛，如 WaitReady 曾误超时但 pod 后来起来了），就重新入队
@@ -209,6 +217,9 @@ type Querier interface {
 	// apps 表上 apps_owner_active 唯一约束保证每个 owner 最多一个未软删实例，
 	// LEFT JOIN 不会产生重复行；ORDER BY 保持与 ListUsersByOrg 一致。
 	ListUsersByOrgWithActiveApp(ctx context.Context, arg ListUsersByOrgWithActiveAppParams) ([]ListUsersByOrgWithActiveAppRow, error)
+	// 市场可见性：返回对某主体(org_id + 是否管理员 + user_id)可见的定制技能(含申请人名与命中受众)。
+	// 同名多行(多版本)由 service 取首条(created_at DESC)为最新。
+	ListVisibleCustomSkills(ctx context.Context, arg ListVisibleCustomSkillsParams) ([]ListVisibleCustomSkillsRow, error)
 	LockJobForUpdate(ctx context.Context, id string) (Job, error)
 	// 任意状态 → error 时同时写入来源状态与错误文本，保留"在哪一步失败"与"为什么失败"语义。
 	// last_error_status 不加 CHECK 约束，值由调用方在 Go 层负责合法性。
@@ -221,6 +232,7 @@ type Querier interface {
 	MarkRAGFlowDatasetFailed(ctx context.Context, arg MarkRAGFlowDatasetFailedParams) error
 	// 人工重解析表示用户显式介入，把文档重置为 queued 交刷新任务继续推进。
 	MarkRAGFlowDocumentManualReparseQueued(ctx context.Context, id string) error
+	MarkSkillTicketDelivered(ctx context.Context, arg MarkSkillTicketDeliveredParams) error
 	MarkUserLoggedIn(ctx context.Context, id string) error
 	RejectSkillTicket(ctx context.Context, arg RejectSkillTicketParams) error
 	// 重命名未删除行业知识库；唯一约束负责拦截同名未删除记录。

@@ -7,9 +7,63 @@ package sqlc
 
 import (
 	"context"
+	"time"
 
 	null "github.com/guregu/null/v5"
 )
+
+const createCustomSkill = `-- name: CreateCustomSkill :exec
+INSERT INTO custom_skills (id, name, description, version, tar_path, file_size, file_sha256, ticket_id, created_by)
+VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+`
+
+type CreateCustomSkillParams struct {
+	ID          string      `db:"id" json:"id"`
+	Name        string      `db:"name" json:"name"`
+	Description string      `db:"description" json:"description"`
+	Version     string      `db:"version" json:"version"`
+	TarPath     string      `db:"tar_path" json:"tar_path"`
+	FileSize    int64       `db:"file_size" json:"file_size"`
+	FileSha256  string      `db:"file_sha256" json:"file_sha256"`
+	TicketID    string      `db:"ticket_id" json:"ticket_id"`
+	CreatedBy   null.String `db:"created_by" json:"created_by"`
+}
+
+func (q *Queries) CreateCustomSkill(ctx context.Context, arg CreateCustomSkillParams) error {
+	_, err := q.db.ExecContext(ctx, createCustomSkill,
+		arg.ID,
+		arg.Name,
+		arg.Description,
+		arg.Version,
+		arg.TarPath,
+		arg.FileSize,
+		arg.FileSha256,
+		arg.TicketID,
+		arg.CreatedBy,
+	)
+	return err
+}
+
+const createCustomSkillTarget = `-- name: CreateCustomSkillTarget :exec
+INSERT INTO custom_skill_targets (id, custom_skill_name, org_id, audience) VALUES (?, ?, ?, ?)
+`
+
+type CreateCustomSkillTargetParams struct {
+	ID              string `db:"id" json:"id"`
+	CustomSkillName string `db:"custom_skill_name" json:"custom_skill_name"`
+	OrgID           string `db:"org_id" json:"org_id"`
+	Audience        string `db:"audience" json:"audience"`
+}
+
+func (q *Queries) CreateCustomSkillTarget(ctx context.Context, arg CreateCustomSkillTargetParams) error {
+	_, err := q.db.ExecContext(ctx, createCustomSkillTarget,
+		arg.ID,
+		arg.CustomSkillName,
+		arg.OrgID,
+		arg.Audience,
+	)
+	return err
+}
 
 const createSkillTicketAttachment = `-- name: CreateSkillTicketAttachment :exec
 
@@ -42,6 +96,64 @@ func (q *Queries) CreateSkillTicketAttachment(ctx context.Context, arg CreateSki
 	return err
 }
 
+const deleteCustomSkillTargetsByName = `-- name: DeleteCustomSkillTargetsByName :exec
+DELETE FROM custom_skill_targets WHERE custom_skill_name = ?
+`
+
+func (q *Queries) DeleteCustomSkillTargetsByName(ctx context.Context, customSkillName string) error {
+	_, err := q.db.ExecContext(ctx, deleteCustomSkillTargetsByName, customSkillName)
+	return err
+}
+
+const getCustomSkillByNameVersion = `-- name: GetCustomSkillByNameVersion :one
+SELECT id, name, description, version, tar_path, file_size, file_sha256, ticket_id, created_by, created_at FROM custom_skills WHERE name = ? AND version = ?
+`
+
+type GetCustomSkillByNameVersionParams struct {
+	Name    string `db:"name" json:"name"`
+	Version string `db:"version" json:"version"`
+}
+
+func (q *Queries) GetCustomSkillByNameVersion(ctx context.Context, arg GetCustomSkillByNameVersionParams) (CustomSkill, error) {
+	row := q.db.QueryRowContext(ctx, getCustomSkillByNameVersion, arg.Name, arg.Version)
+	var i CustomSkill
+	err := row.Scan(
+		&i.ID,
+		&i.Name,
+		&i.Description,
+		&i.Version,
+		&i.TarPath,
+		&i.FileSize,
+		&i.FileSha256,
+		&i.TicketID,
+		&i.CreatedBy,
+		&i.CreatedAt,
+	)
+	return i, err
+}
+
+const getLatestCustomSkillByName = `-- name: GetLatestCustomSkillByName :one
+SELECT id, name, description, version, tar_path, file_size, file_sha256, ticket_id, created_by, created_at FROM custom_skills WHERE name = ? ORDER BY created_at DESC, id DESC LIMIT 1
+`
+
+func (q *Queries) GetLatestCustomSkillByName(ctx context.Context, name string) (CustomSkill, error) {
+	row := q.db.QueryRowContext(ctx, getLatestCustomSkillByName, name)
+	var i CustomSkill
+	err := row.Scan(
+		&i.ID,
+		&i.Name,
+		&i.Description,
+		&i.Version,
+		&i.TarPath,
+		&i.FileSize,
+		&i.FileSha256,
+		&i.TicketID,
+		&i.CreatedBy,
+		&i.CreatedAt,
+	)
+	return i, err
+}
+
 const getSkillTicketAttachment = `-- name: GetSkillTicketAttachment :one
 SELECT id, ticket_id, comment_id, object_path, file_name, file_size, uploaded_by, created_at FROM skill_ticket_attachments WHERE id = ?
 `
@@ -60,6 +172,115 @@ func (q *Queries) GetSkillTicketAttachment(ctx context.Context, id string) (Skil
 		&i.CreatedAt,
 	)
 	return i, err
+}
+
+const listAllCustomSkills = `-- name: ListAllCustomSkills :many
+SELECT id, name, description, version, tar_path, file_size, file_sha256, ticket_id, created_by, created_at FROM custom_skills ORDER BY name ASC, created_at DESC, id DESC
+`
+
+func (q *Queries) ListAllCustomSkills(ctx context.Context) ([]CustomSkill, error) {
+	rows, err := q.db.QueryContext(ctx, listAllCustomSkills)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []CustomSkill{}
+	for rows.Next() {
+		var i CustomSkill
+		if err := rows.Scan(
+			&i.ID,
+			&i.Name,
+			&i.Description,
+			&i.Version,
+			&i.TarPath,
+			&i.FileSize,
+			&i.FileSha256,
+			&i.TicketID,
+			&i.CreatedBy,
+			&i.CreatedAt,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Close(); err != nil {
+		return nil, err
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
+const listCustomSkillTargetsByName = `-- name: ListCustomSkillTargetsByName :many
+SELECT id, custom_skill_name, org_id, audience, created_at FROM custom_skill_targets WHERE custom_skill_name = ? ORDER BY org_id ASC
+`
+
+func (q *Queries) ListCustomSkillTargetsByName(ctx context.Context, customSkillName string) ([]CustomSkillTarget, error) {
+	rows, err := q.db.QueryContext(ctx, listCustomSkillTargetsByName, customSkillName)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []CustomSkillTarget{}
+	for rows.Next() {
+		var i CustomSkillTarget
+		if err := rows.Scan(
+			&i.ID,
+			&i.CustomSkillName,
+			&i.OrgID,
+			&i.Audience,
+			&i.CreatedAt,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Close(); err != nil {
+		return nil, err
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
+const listCustomSkillVersionsByName = `-- name: ListCustomSkillVersionsByName :many
+SELECT id, name, description, version, tar_path, file_size, file_sha256, ticket_id, created_by, created_at FROM custom_skills WHERE name = ? ORDER BY created_at DESC, id DESC
+`
+
+func (q *Queries) ListCustomSkillVersionsByName(ctx context.Context, name string) ([]CustomSkill, error) {
+	rows, err := q.db.QueryContext(ctx, listCustomSkillVersionsByName, name)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []CustomSkill{}
+	for rows.Next() {
+		var i CustomSkill
+		if err := rows.Scan(
+			&i.ID,
+			&i.Name,
+			&i.Description,
+			&i.Version,
+			&i.TarPath,
+			&i.FileSize,
+			&i.FileSha256,
+			&i.TicketID,
+			&i.CreatedBy,
+			&i.CreatedAt,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Close(); err != nil {
+		return nil, err
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
 }
 
 const listSkillTicketAttachments = `-- name: ListSkillTicketAttachments :many
@@ -96,4 +317,98 @@ func (q *Queries) ListSkillTicketAttachments(ctx context.Context, ticketID strin
 		return nil, err
 	}
 	return items, nil
+}
+
+const listVisibleCustomSkills = `-- name: ListVisibleCustomSkills :many
+SELECT cs.id, cs.name, cs.description, cs.version, cs.tar_path, cs.file_size, cs.file_sha256,
+       cs.ticket_id, cs.created_by, cs.created_at,
+       tk.requester_user_id AS requester_user_id,
+       u.username AS requester_username,
+       t.audience AS audience
+FROM custom_skills cs
+JOIN skill_tickets tk ON tk.id = cs.ticket_id
+JOIN users u ON u.id = tk.requester_user_id
+JOIN custom_skill_targets t ON t.custom_skill_name = cs.name
+WHERE t.org_id = ?
+  AND (
+        t.audience = 'all_org'
+        OR (t.audience = 'org_admins' AND ? = 1)
+        OR (t.audience = 'requester_only' AND tk.requester_user_id = ?)
+      )
+ORDER BY cs.name ASC, cs.created_at DESC, cs.id DESC
+`
+
+type ListVisibleCustomSkillsParams struct {
+	OrgID   string      `db:"org_id" json:"org_id"`
+	IsAdmin interface{} `db:"is_admin" json:"is_admin"`
+	UserID  string      `db:"user_id" json:"user_id"`
+}
+
+type ListVisibleCustomSkillsRow struct {
+	ID                string      `db:"id" json:"id"`
+	Name              string      `db:"name" json:"name"`
+	Description       string      `db:"description" json:"description"`
+	Version           string      `db:"version" json:"version"`
+	TarPath           string      `db:"tar_path" json:"tar_path"`
+	FileSize          int64       `db:"file_size" json:"file_size"`
+	FileSha256        string      `db:"file_sha256" json:"file_sha256"`
+	TicketID          string      `db:"ticket_id" json:"ticket_id"`
+	CreatedBy         null.String `db:"created_by" json:"created_by"`
+	CreatedAt         time.Time   `db:"created_at" json:"created_at"`
+	RequesterUserID   string      `db:"requester_user_id" json:"requester_user_id"`
+	RequesterUsername string      `db:"requester_username" json:"requester_username"`
+	Audience          string      `db:"audience" json:"audience"`
+}
+
+// 市场可见性：返回对某主体(org_id + 是否管理员 + user_id)可见的定制技能(含申请人名与命中受众)。
+// 同名多行(多版本)由 service 取首条(created_at DESC)为最新。
+func (q *Queries) ListVisibleCustomSkills(ctx context.Context, arg ListVisibleCustomSkillsParams) ([]ListVisibleCustomSkillsRow, error) {
+	rows, err := q.db.QueryContext(ctx, listVisibleCustomSkills, arg.OrgID, arg.IsAdmin, arg.UserID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []ListVisibleCustomSkillsRow{}
+	for rows.Next() {
+		var i ListVisibleCustomSkillsRow
+		if err := rows.Scan(
+			&i.ID,
+			&i.Name,
+			&i.Description,
+			&i.Version,
+			&i.TarPath,
+			&i.FileSize,
+			&i.FileSha256,
+			&i.TicketID,
+			&i.CreatedBy,
+			&i.CreatedAt,
+			&i.RequesterUserID,
+			&i.RequesterUsername,
+			&i.Audience,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Close(); err != nil {
+		return nil, err
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
+const markSkillTicketDelivered = `-- name: MarkSkillTicketDelivered :exec
+UPDATE skill_tickets SET status = 'delivered', custom_skill_name = ? WHERE id = ?
+`
+
+type MarkSkillTicketDeliveredParams struct {
+	CustomSkillName null.String `db:"custom_skill_name" json:"custom_skill_name"`
+	ID              string      `db:"id" json:"id"`
+}
+
+func (q *Queries) MarkSkillTicketDelivered(ctx context.Context, arg MarkSkillTicketDeliveredParams) error {
+	_, err := q.db.ExecContext(ctx, markSkillTicketDelivered, arg.CustomSkillName, arg.ID)
+	return err
 }
