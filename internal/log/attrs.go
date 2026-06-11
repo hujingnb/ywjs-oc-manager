@@ -19,6 +19,17 @@ const (
 	KeyAction     = "action"      // 业务动作
 	KeyBytes      = "bytes"       // 响应字节数
 	KeyError      = "error"       // 错误信息统一 key
+	KeyLogType    = "log_type"    // 日志类型分类：http / sql / newapi / ragflow / app
+)
+
+// log_type 取值常量。基础设施类（http/sql/newapi/ragflow）在各自调用点显式带，
+// 业务及其它普通日志统一为 app，由 requestIDHandler 兜底注入，避免逐条手填。
+const (
+	LogTypeHTTP    = "http"    // access log 中间件记录的 HTTP 请求
+	LogTypeSQL     = "sql"     // SQL 日志
+	LogTypeNewAPI  = "newapi"  // 调用 new-api 的出站请求
+	LogTypeRAGFlow = "ragflow" // 调用 RAGFlow 的出站请求
+	LogTypeApp     = "app"     // 业务及其它普通日志（兜底类型）
 )
 
 // Err 把 error 包装成统一 key 的 slog.Attr；nil 时值为空串，避免调用方判空。

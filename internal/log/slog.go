@@ -27,10 +27,26 @@ type requestIDHandler struct {
 	slog.Handler
 }
 
-// Handle 在写日志前追加 trace_id，缺失时保持原始 record 不变。
+// Handle 在写日志前追加 trace_id，并为未显式带 log_type 的记录兜底注入 app。
+//   - trace_id：从 ctx 提取，缺失时不附加。
+//   - log_type：access log / SQL / 外部调用等基础设施日志在调用点显式带
+//     （http/sql/newapi/ragflow），业务及其它普通日志不带，此处统一兜底为 app，
+//     使全部日志都可按 log_type 过滤而无需在每个业务调用点手填。
 func (h *requestIDHandler) Handle(ctx context.Context, r slog.Record) error {
 	if id := requestIDExtractor(ctx); id != "" {
 		r.AddAttrs(slog.String("trace_id", id))
+	}
+	// 遍历 record 自带 attrs 判断是否已显式带 log_type；命中即停止遍历。
+	hasLogType := false
+	r.Attrs(func(a slog.Attr) bool {
+		if a.Key == KeyLogType {
+			hasLogType = true
+			return false
+		}
+		return true
+	})
+	if !hasLogType {
+		r.AddAttrs(slog.String(KeyLogType, LogTypeApp))
 	}
 	return h.Handler.Handle(ctx, r)
 }
