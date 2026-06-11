@@ -6,6 +6,7 @@ import (
 	"time"
 
 	"oc-manager/internal/auth/pow"
+	mlog "oc-manager/internal/log"
 )
 
 // ReplayGuard 抽象一次性消费能力，便于 CaptchaService 单测注入桩。
@@ -50,7 +51,7 @@ func (s *CaptchaService) Verify(ctx context.Context, payload string) error {
 	firstUse, err := s.replay.Consume(ctx, sig, s.pow.TTL())
 	if err != nil {
 		// fail-open：Redis 故障时仅保留验签、跳过一次性消费，保登录可用。
-		slog.WarnContext(ctx, "验证码一次性消费不可用，fail-open 放行", "error", err)
+		slog.WarnContext(ctx, "验证码一次性消费不可用，fail-open 放行", mlog.Err(err))
 		return nil
 	}
 	if !firstUse {

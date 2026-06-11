@@ -5,6 +5,8 @@ import (
 	"log/slog"
 	"sync/atomic"
 	"time"
+
+	mlog "oc-manager/internal/log"
 )
 
 // leaderLocker 是 LeaderElector 依赖的最小分布式锁接口,只取选举所需的三个方法。
@@ -86,7 +88,7 @@ func (e *LeaderElector) tick(ctx context.Context, logger *slog.Logger) {
 		renewed, err := e.locker.Refresh(ctx, e.key, e.token, e.lease)
 		if err != nil || !renewed {
 			e.isLeader.Store(false)
-			logger.Info("leader elector 失去领导权", "key", e.key, "token", e.token, "renewed", renewed, "error", err)
+			logger.InfoContext(ctx, "leader elector 失去领导权", "key", e.key, "token", e.token, "renewed", renewed, mlog.Err(err))
 		}
 		return
 	}
@@ -98,6 +100,6 @@ func (e *LeaderElector) tick(ctx context.Context, logger *slog.Logger) {
 	}
 	if acquired {
 		e.isLeader.Store(true)
-		logger.Info("leader elector 成为 leader", "key", e.key, "token", e.token)
+		logger.InfoContext(ctx, "leader elector 成为 leader", "key", e.key, "token", e.token)
 	}
 }

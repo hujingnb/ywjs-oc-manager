@@ -21,6 +21,7 @@ import (
 	"time"
 
 	"oc-manager/internal/integrations/ragflow"
+	mlog "oc-manager/internal/log"
 	"oc-manager/internal/store/sqlc"
 )
 
@@ -209,7 +210,7 @@ func (h *RagflowAnomalyHealer) healOne(ctx context.Context, docID, remoteDS, rem
 	// 8) 退避 / 放弃：RecordAttempt 出错时跳过簿记（计数未知，不能据此设冷却或放弃），
 	//    将错误并入 firstErr，让 Tick 上报给调用方，文档下一轮自然重试。
 	if recordErr != nil {
-		h.log.Warn("[heal] 记录自愈尝试次数失败,跳过本轮退避/给上", "doc", docID, "error", recordErr)
+		h.log.WarnContext(ctx, "[heal] 记录自愈尝试次数失败,跳过本轮退避/给上", "doc", docID, mlog.Err(recordErr))
 		if firstErr == nil {
 			firstErr = recordErr
 		}
@@ -225,7 +226,7 @@ func (h *RagflowAnomalyHealer) applyBackoffOrGiveup(ctx context.Context, docID s
 	if n >= h.cfg.MaxAttempts {
 		_ = h.state.MarkGivenUp(ctx, docID)
 		if isStuck {
-			h.log.Error("[heal] 文档卡死自愈达上限仍未恢复，RAGFlow 可能需重启", "doc", docID, "attempts", n)
+			h.log.ErrorContext(ctx, "[heal] 文档卡死自愈达上限仍未恢复，RAGFlow 可能需重启", "doc", docID, "attempts", n)
 		}
 		return
 	}

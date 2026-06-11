@@ -5,6 +5,8 @@ import (
 	"fmt"
 	"log/slog"
 	"time"
+
+	mlog "oc-manager/internal/log"
 )
 
 // PeriodicReconciler 是一个简单的"周期触发 fn"工具，
@@ -35,7 +37,7 @@ func (p *PeriodicReconciler) Run(ctx context.Context, logger *slog.Logger) error
 			if err := p.fn(ctx); err != nil {
 				logger.ErrorContext(ctx, "reconciler tick 失败",
 					"name", p.name,
-					"error", err,
+					mlog.Err(err),
 				)
 			}
 		}

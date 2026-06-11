@@ -19,6 +19,7 @@ import (
 	"oc-manager/internal/auth"
 	"oc-manager/internal/domain"
 	"oc-manager/internal/integrations/newapi"
+	mlog "oc-manager/internal/log"
 	"oc-manager/internal/store/sqlc"
 )
 
@@ -272,7 +273,7 @@ func (s *OrganizationService) CreateOrganization(ctx context.Context, principal 
 			if delErr := s.provisioner.DeleteUser(cleanupCtx, *createdUserID); delErr != nil {
 				slog.WarnContext(ctx, "best-effort 清理 newapi user 失败",
 					"newapi_user_id", *createdUserID,
-					"error", delErr,
+					mlog.Err(delErr),
 				)
 				// OOS-3：DeleteUser 自身失败也写审计。
 				// 此处刻意不带 OrgID：该组织行随后会被 HardDeleteOrganization 回滚删除，
@@ -322,7 +323,7 @@ func (s *OrganizationService) CreateOrganization(ctx context.Context, principal 
 			if delErr := s.provisioner.DeleteUser(cleanupCtx, *createdUserID); delErr != nil {
 				slog.WarnContext(ctx, "best-effort 清理 newapi user 失败",
 					"newapi_user_id", *createdUserID,
-					"error", delErr,
+					mlog.Err(delErr),
 				)
 				// 不带 OrgID：组织行随后会被 HardDeleteOrganization 回滚删除，
 				// 审计 org_id 指向它会因外键约束阻止回滚（详见 provision 失败分支注释）。
@@ -355,7 +356,7 @@ func (s *OrganizationService) CreateOrganization(ctx context.Context, principal 
 	result.AdminUsername = input.AdminUsername
 	if s.knowledgeDatasets != nil {
 		if _, err := s.knowledgeDatasets.EnsureOrgDataset(ctx, org); err != nil {
-			slog.WarnContext(ctx, "预创建企业 RAGFlow dataset 失败", "org_id", org.ID, "error", err)
+			slog.WarnContext(ctx, "预创建企业 RAGFlow dataset 失败", slog.String(mlog.KeyOrgID, org.ID), mlog.Err(err))
 		}
 	}
 	return result, nil
@@ -674,7 +675,7 @@ func (s *OrganizationService) getOrgAdminUsername(ctx context.Context, orgID str
 		return ""
 	}
 	if err != nil {
-		slog.WarnContext(ctx, "查询企业管理员用户名失败", "org_id", orgID, "error", err)
+		slog.WarnContext(ctx, "查询企业管理员用户名失败", slog.String(mlog.KeyOrgID, orgID), mlog.Err(err))
 		return ""
 	}
 	return user.Username
@@ -687,7 +688,7 @@ func toOrganizationResult(org sqlc.Organization) OrganizationResult {
 		if err := json.Unmarshal(org.AssistantVersionIds, &versionIDs); err != nil {
 			// 组织 assistant_version_ids 列由本服务统一以 JSON 数组写入，理论上不会损坏；
 			// 真出现损坏时记日志而不是静默吞掉，避免组织列表/详情无声降级。
-			slog.Warn("解析企业 assistant_version_ids 失败", "org_id", org.ID, "error", err)
+			slog.Warn("解析企业 assistant_version_ids 失败", slog.String(mlog.KeyOrgID, org.ID), mlog.Err(err))
 			versionIDs = []string{}
 		}
 	}

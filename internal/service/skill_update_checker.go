@@ -16,6 +16,7 @@ import (
 
 	"github.com/guregu/null/v5"
 
+	mlog "oc-manager/internal/log"
 	"oc-manager/internal/store/sqlc"
 )
 
@@ -120,7 +121,7 @@ func (c *SkillUpdateChecker) Tick(ctx context.Context) error {
 			if err != nil {
 				// platform 查询失败时跳过本轮所有 platform 来源，clawhub 来源继续
 				slog.WarnContext(ctx, "skill 更新检测：拉取 platform 列表失败，本轮跳过 platform 来源",
-					"error", err,
+					mlog.Err(err),
 				)
 				platformLatest = nil
 			}
@@ -138,7 +139,7 @@ func (c *SkillUpdateChecker) Tick(ctx context.Context) error {
 				customLatest, err = c.buildCustomLatestMap(ctx)
 				if err != nil {
 					slog.WarnContext(ctx, "skill 更新检测：拉取 custom 列表失败，本轮跳过 custom 来源",
-						"error", err,
+						mlog.Err(err),
 					)
 					customLatest = nil
 				}
@@ -167,7 +168,7 @@ func (c *SkillUpdateChecker) Tick(ctx context.Context) error {
 			slog.WarnContext(ctx, "skill 更新检测：查询 app_skills 失败，跳过该来源",
 				"source", src.Source,
 				"source_ref", src.SourceRef,
-				"error", err,
+				mlog.Err(err),
 			)
 			continue
 		}
@@ -188,7 +189,7 @@ func (c *SkillUpdateChecker) Tick(ctx context.Context) error {
 					"source", src.Source,
 					"source_ref", src.SourceRef,
 					"latest_version", latestVer,
-					"error", err,
+					mlog.Err(err),
 				)
 			}
 		}
@@ -239,7 +240,7 @@ func (c *SkillUpdateChecker) resolveLatest(
 		if err != nil {
 			slog.WarnContext(ctx, "skill 更新检测：ClawHub ListVersions 失败，跳过该 slug",
 				"slug", sourceRef,
-				"error", err,
+				mlog.Err(err),
 			)
 			return "", false
 		}

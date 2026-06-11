@@ -13,6 +13,7 @@ import (
 
 	"oc-manager/internal/auth"
 	"oc-manager/internal/domain"
+	mlog "oc-manager/internal/log"
 	"oc-manager/internal/store/sqlc"
 )
 
@@ -350,8 +351,8 @@ func (s *RuntimeOperationService) ensurePrincipalActive(ctx context.Context, pri
 	if err != nil {
 		// DB 错误用 slog.ErrorContext，trace_id 自动通过 ctx 注入
 		s.logger.ErrorContext(ctx, "查询主体状态失败",
-			"user_id", principal.UserID,
-			"error", err,
+			slog.String(mlog.KeyUserID, principal.UserID),
+			mlog.Err(err),
 		)
 		return fmt.Errorf("查询主体状态失败: %w", err)
 	}
