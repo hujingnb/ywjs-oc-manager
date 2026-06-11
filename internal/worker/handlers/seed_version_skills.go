@@ -9,6 +9,7 @@ import (
 
 	"github.com/google/uuid"
 
+	mlog "oc-manager/internal/log"
 	"oc-manager/internal/service"
 	"oc-manager/internal/store/sqlc"
 )
@@ -38,7 +39,7 @@ func seedVersionSkills(ctx context.Context, store AppSkillSeedStore, appID strin
 	if err != nil {
 		// skills_json 格式异常属于数据问题，记录 warn 后直接返回；
 		// 不阻断 app_initialize 主流程，后续运维修正 skills_json 后重启可补齐。
-		slog.WarnContext(ctx, "种子注入：解析 skills_json 失败", "app", appID, "version", version.ID, "err", err)
+		slog.WarnContext(ctx, "种子注入：解析 skills_json 失败", "app", appID, "version", version.ID, mlog.Err(err))
 		return nil
 	}
 
@@ -54,7 +55,7 @@ func seedVersionSkills(ctx context.Context, store AppSkillSeedStore, appID strin
 		}
 		if !errors.Is(err, sql.ErrNoRows) {
 			// 查询失败（非「不存在」），记录 warn 后跳过本条，不阻断其他 skill 的注入。
-			slog.WarnContext(ctx, "种子注入：查询 app_skill 失败", "app", appID, "skill", k.Name, "err", err)
+			slog.WarnContext(ctx, "种子注入：查询 app_skill 失败", "app", appID, "skill", k.Name, mlog.Err(err))
 			continue
 		}
 
@@ -78,7 +79,7 @@ func seedVersionSkills(ctx context.Context, store AppSkillSeedStore, appID strin
 			// InstalledBy 留空：种子注入为系统行为，无操作用户。
 		}); err != nil {
 			// 写入失败只记录 warn，不中断其他 skill 的注入。
-			slog.WarnContext(ctx, "种子注入：写入 app_skill 失败", "app", appID, "skill", k.Name, "err", err)
+			slog.WarnContext(ctx, "种子注入：写入 app_skill 失败", "app", appID, "skill", k.Name, mlog.Err(err))
 		}
 	}
 

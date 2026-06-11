@@ -77,7 +77,7 @@ func (h *ChannelStartLoginHandler) Handle(ctx context.Context, job sqlc.Job) err
 	var endpoint ocops.Endpoint
 	if h.endpoints != nil {
 		if ep, rerr := h.endpoints.ResolveEndpoint(ctx, payload.AppID); rerr != nil {
-			slog.WarnContext(ctx, "解析 oc-ops 坐标失败，Endpoint 留空", "app_id", payload.AppID, "error", rerr)
+			slog.WarnContext(ctx, "解析 oc-ops 坐标失败，Endpoint 留空", "app_id", payload.AppID, redactlog.Err(rerr))
 		} else {
 			endpoint = ep
 		}
@@ -300,7 +300,7 @@ func (h *ChannelCheckBindingHandler) finalizeChannelBound(
 	}
 	if h.restarter != nil && payload.ChannelType == domain.ChannelTypeWeChat {
 		if err := h.restarter.RestartApp(ctx, app.ID); err != nil {
-			slog.ErrorContext(ctx, "渠道绑定后重启 hermes 容器失败", "app_id", app.ID, "error", err)
+			slog.ErrorContext(ctx, "渠道绑定后重启 hermes 容器失败", "app_id", app.ID, redactlog.Err(err))
 		}
 	}
 	if app.Status == domain.AppStatusBindingWaiting {
@@ -339,7 +339,7 @@ func recordChannelAppAudit(ctx context.Context, store ChannelLoginStore, app sql
 		params.DetailMessage = null.StringFrom(detailMessage)
 	}
 	if err := store.CreateAuditLog(ctx, params); err != nil {
-		slog.ErrorContext(ctx, "写渠道应用审计失败", "app_id", app.ID, "action", action, "error", err)
+		slog.ErrorContext(ctx, "写渠道应用审计失败", "app_id", app.ID, slog.String(redactlog.KeyAction, action), redactlog.Err(err))
 		return fmt.Errorf("写入渠道应用审计日志失败: %w", err)
 	}
 	return nil

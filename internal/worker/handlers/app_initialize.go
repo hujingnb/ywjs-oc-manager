@@ -18,6 +18,7 @@ import (
 	"oc-manager/internal/domain"
 	"oc-manager/internal/integrations/k8sorch"
 	"oc-manager/internal/integrations/newapi"
+	mlog "oc-manager/internal/log"
 	"oc-manager/internal/service"
 	"oc-manager/internal/store/sqlc"
 )
@@ -261,7 +262,7 @@ func (h *AppInitializeHandler) Handle(ctx context.Context, job sqlc.Job) error {
 	// 最大努力：失败只 warn，不标记 failed，不阻断初始化主流程。
 	if h.seedStore != nil {
 		if err := seedVersionSkills(ctx, h.seedStore, app.ID, version); err != nil {
-			slog.WarnContext(ctx, "版本 skill 种子注入失败", "app", app.ID, "version", version.ID, "err", err)
+			slog.WarnContext(ctx, "版本 skill 种子注入失败", "app", app.ID, "version", version.ID, mlog.Err(err))
 		}
 	}
 

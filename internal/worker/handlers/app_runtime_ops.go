@@ -16,6 +16,7 @@ import (
 	"oc-manager/internal/domain"
 	"oc-manager/internal/integrations/k8sorch"
 	"oc-manager/internal/integrations/storage"
+	mlog "oc-manager/internal/log"
 	"oc-manager/internal/store/sqlc"
 )
 
@@ -397,9 +398,9 @@ func (h *AppRestartContainerHandler) Handle(ctx context.Context, job sqlc.Job) e
 	// 最大努力：加载版本或注入失败只 warn，不阻断重启主流程。
 	if h.seedStore != nil && app.VersionID.Valid {
 		if ver, err := h.seedStore.GetAssistantVersion(ctx, app.VersionID.String); err != nil {
-			slog.WarnContext(ctx, "镜像不变重启：加载助手版本失败，跳过 skill 种子注入", "app", app.ID, "err", err)
+			slog.WarnContext(ctx, "镜像不变重启：加载助手版本失败，跳过 skill 种子注入", "app", app.ID, mlog.Err(err))
 		} else if err := seedVersionSkills(ctx, h.seedStore, app.ID, ver); err != nil {
-			slog.WarnContext(ctx, "镜像不变重启：版本 skill 种子注入失败", "app", app.ID, "version", ver.ID, "err", err)
+			slog.WarnContext(ctx, "镜像不变重启：版本 skill 种子注入失败", "app", app.ID, "version", ver.ID, mlog.Err(err))
 		}
 	}
 
@@ -499,7 +500,7 @@ func (h *AppDeleteHandler) Handle(ctx context.Context, job sqlc.Job) error {
 		if err := h.knowledge.DeleteAppDataset(ctx, app.ID); err != nil {
 			// RAGFlow dataset 是外部派生资源，删除失败不能阻断本地应用下线；
 			// 后续可通过 ragflow_datasets 状态和运维脚本补偿清理。
-			slog.WarnContext(ctx, "清理应用 RAGFlow dataset 失败", "app_id", payload.AppID, "error", err)
+			slog.WarnContext(ctx, "清理应用 RAGFlow dataset 失败", "app_id", payload.AppID, mlog.Err(err))
 		}
 	}
 
