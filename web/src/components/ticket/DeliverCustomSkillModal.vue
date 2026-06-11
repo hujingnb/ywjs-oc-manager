@@ -95,7 +95,7 @@ watch(
   { immediate: true },
 )
 
-// defaultTargets 根据申请者角色给出首个目标范围;管理员申请默认仅管理员,成员申请默认整企业。
+// defaultTargets 根据申请者角色给出首个目标范围;企业管理员申请默认仅企业管理员,成员申请默认整企业。
 function defaultTargets(ticket: SkillTicketDetail): DeliverTarget[] {
   const audience = ticket.requester_role === 'org_admin' ? 'org_admins' : 'all_org'
   return ticket.org_id ? [{ org_id: ticket.org_id, audience }] : []

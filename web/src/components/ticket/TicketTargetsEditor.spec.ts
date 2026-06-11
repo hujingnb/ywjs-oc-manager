@@ -54,6 +54,8 @@ describe('TicketTargetsEditor', () => {
   it('renders rows and emits update on audience change', async () => {
     const wrapper = mountEditor()
     expect(wrapper.text()).toContain('甲公司')
+    expect(wrapper.text()).toContain('仅企业管理员')
+    expect(wrapper.text()).not.toContain('仅管理员')
     await wrapper.find('.select-org_admins').trigger('click')
     expect(wrapper.vm.$data.targets[0].audience).toBe('org_admins')
   })

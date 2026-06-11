@@ -127,6 +127,21 @@ describe('TicketDetailPage', () => {
     expect(wrapper.text()).toContain('甲公司')
   })
 
+  // 已交付详情页展示可见范围时，org_admins 应明确标注为企业管理员，避免误解为平台管理员。
+  it('renders org admins audience as enterprise admins', () => {
+    detailState.data.value = {
+      id: 't-1',
+      title: '需求',
+      status: 'delivered',
+      org_id: 'org-1',
+      targets: [{ org_id: 'org-1', audience: 'org_admins' }],
+      messages: [],
+    }
+    const wrapper = mountPage()
+    expect(wrapper.text()).toContain('甲公司 · 仅企业管理员')
+    expect(wrapper.text()).not.toContain('甲公司 · 仅管理员')
+  })
+
   // 需求方详情页不展示来源信息，避免对本人重复展示冗余字段。
   it('hides requester and organization for requester', () => {
     authState.user = { id: 'u-1', role: 'org_member' }

@@ -257,11 +257,11 @@ function sourceTagType(source?: string): 'info' | 'warning' | 'default' | 'error
 }
 
 // audienceTag 将 custom 来源的可见范围标识映射为徽章文案与颜色。
-// all_org→整企业可见(success 绿)、org_admins→仅管理员可见(warning 橙)、
+// all_org→整企业可见(success 绿)、org_admins→仅企业管理员可见(warning 橙)、
 // requester_only→仅本人可见(default 灰)；未知值返回灰色空文案。
 function audienceTag(audience?: string): { type: 'success' | 'warning' | 'default'; label: string } {
   if (audience === 'all_org') return { type: 'success', label: '整企业可见' }
-  if (audience === 'org_admins') return { type: 'warning', label: '仅管理员可见' }
+  if (audience === 'org_admins') return { type: 'warning', label: '仅企业管理员可见' }
   if (audience === 'requester_only') return { type: 'default', label: '仅本人可见' }
   return { type: 'default', label: '' }
 }

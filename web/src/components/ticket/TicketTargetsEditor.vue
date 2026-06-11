@@ -48,7 +48,7 @@ const pendingOrgID = ref<string | null>(null)
 
 const audienceOptions = [
   { label: '整企业', value: 'all_org' },
-  { label: '仅管理员', value: 'org_admins' },
+  { label: '仅企业管理员', value: 'org_admins' },
   { label: '仅申请人', value: 'requester_only' },
 ]
 

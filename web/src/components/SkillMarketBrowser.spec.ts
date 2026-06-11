@@ -350,6 +350,8 @@ describe('SkillMarketBrowser', () => {
       ],
     }
     const wrapper = mountBrowser({ canAction: true })
+    expect(wrapper.find('.market-card').text()).toContain('仅企业管理员可见')
+    expect(wrapper.find('.market-card').text()).not.toContain('仅管理员可见')
     await wrapper.find('.market-card button').trigger('click')
     expect(wrapper.emitted('action')?.[0][0]).toMatchObject({
       source: 'custom',

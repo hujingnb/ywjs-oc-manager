@@ -180,7 +180,7 @@ function audienceLabel(audience: string) {
   return (
     {
       all_org: '整企业',
-      org_admins: '仅管理员',
+      org_admins: '仅企业管理员',
       requester_only: '仅申请人',
     }[audience] ?? audience
   )
