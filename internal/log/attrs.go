@@ -20,6 +20,8 @@ const (
 	KeyBytes      = "bytes"       // 响应字节数
 	KeyError      = "error"       // 错误信息统一 key
 	KeyLogType    = "log_type"    // 日志类型分类：http / sql / newapi / ragflow / app
+	KeySQL        = "sql"         // SQL 语句文本（已参数化，不含真实参数值）
+	KeyRows       = "rows"        // SQL 写操作影响行数（仅 ExecContext 记录）
 )
 
 // log_type 取值常量。基础设施类（http/sql/newapi/ragflow）在各自调用点显式带，

@@ -75,8 +75,9 @@ func normalizeDSN(dsn string) (string, error) {
 }
 
 // New 用已有连接创建 Store，主要用于 server 启动组装和测试注入。
+// 这里把连接用 newLoggingDBTX 包一层，使所有非事务查询都记 SQL 日志（语句/耗时/行数/错误）。
 func New(db *sql.DB) *Store {
-	return &Store{db: db, Queries: sqlc.New(db)}
+	return &Store{db: db, Queries: sqlc.New(newLoggingDBTX(db, slowQueryThreshold))}
 }
 
 // Ping 强制建立一次真实连接以校验数据库可达；sql.Open 是惰性的，本身不会立即连接。
@@ -100,7 +101,9 @@ func (s *Store) WithTx(ctx context.Context, fn func(*sqlc.Queries) error) error 
 		return fmt.Errorf("开启数据库事务失败: %w", err)
 	}
 
-	if err := fn(s.Queries.WithTx(tx)); err != nil {
+	// 不走 sqlc 原生 WithTx，而是把 *sql.Tx 同样用 newLoggingDBTX 包一层，
+	// 使事务内的 SQL 也被记录（trace_id 经 ctx 串联）。*sql.Tx 满足 sqlc.DBTX 接口。
+	if err := fn(sqlc.New(newLoggingDBTX(tx, slowQueryThreshold))); err != nil {
 		// 业务错误优先返回；回滚失败通常说明连接已失效，此处不覆盖原始失败原因。
 		_ = tx.Rollback()
 		return err
