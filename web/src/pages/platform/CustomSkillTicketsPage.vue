@@ -6,6 +6,7 @@
         <h2>定制技能工单</h2>
       </div>
       <div class="ticket-filters">
+        <n-select v-model:value="filterOrgID" :options="orgFilterOptions" size="small" class="org-filter" />
         <n-select v-model:value="filterStatus" :options="statusFilterOptions" size="small" class="status-filter" />
         <n-input v-model:value="filterKeyword" size="small" clearable placeholder="按标题过滤" class="keyword-filter" />
       </div>
@@ -30,13 +31,16 @@ import { computed, h, ref } from 'vue'
 import { useRouter } from 'vue-router'
 import { NDataTable, NInput, NSelect, NTag, type DataTableColumns } from 'naive-ui'
 
-import type { SkillTicket } from '@/api'
+import type { Organization, SkillTicket } from '@/api'
+import { useOrganizationsQuery } from '@/api/hooks/useOrganizations'
 import { useAdminSkillTicketsQuery } from '@/api/hooks/useSkillTickets'
 
 defineOptions({ name: 'CustomSkillTicketsPage' })
 
 const router = useRouter()
 const ticketsQuery = useAdminSkillTicketsQuery()
+const organizationsQuery = useOrganizationsQuery()
+const filterOrgID = ref<string>('all')
 const filterStatus = ref<string>('all')
 const filterKeyword = ref('')
 
@@ -48,13 +52,23 @@ const statusFilterOptions = [
   { label: '已拒绝', value: 'rejected' },
 ]
 
+const organizations = computed<Organization[]>(() => organizationsQuery.data.value ?? [])
+const orgFilterOptions = computed(() => [
+  { label: '全部组织', value: 'all' },
+  ...organizations.value.map((org) => ({
+    label: org.code ? `${org.name}（${org.code}）` : org.name,
+    value: org.id,
+  })),
+])
+
 const tickets = computed<SkillTicket[]>(() => ticketsQuery.data.value ?? [])
 const filteredTickets = computed(() => {
   const kw = filterKeyword.value.trim().toLowerCase()
   return tickets.value.filter((ticket) => {
     const statusOK = filterStatus.value === 'all' || ticket.status === filterStatus.value
+    const orgOK = filterOrgID.value === 'all' || ticket.org_id === filterOrgID.value
     const keywordOK = !kw || `${ticket.title ?? ''}`.toLowerCase().includes(kw)
-    return statusOK && keywordOK
+    return statusOK && orgOK && keywordOK
   })
 })
 
@@ -145,6 +159,10 @@ h2 {
 
 .status-filter {
   width: 150px;
+}
+
+.org-filter {
+  width: 220px;
 }
 
 .keyword-filter {

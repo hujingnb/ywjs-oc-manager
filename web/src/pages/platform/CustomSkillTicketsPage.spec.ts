@@ -9,6 +9,9 @@ const ticketsState = {
   isLoading: ref(false),
   error: ref<Error | null>(null),
 }
+const organizationsState = {
+  data: ref<Record<string, unknown>[]>([]),
+}
 const router = { push: vi.fn() }
 
 vi.mock('vue-router', () => ({
@@ -19,11 +22,16 @@ vi.mock('@/api/hooks/useSkillTickets', () => ({
   useAdminSkillTicketsQuery: () => ticketsState,
 }))
 
+vi.mock('@/api/hooks/useOrganizations', () => ({
+  useOrganizationsQuery: () => organizationsState,
+}))
+
 vi.mock('naive-ui', async () => {
   const { defineComponent, h } = await import('vue')
   type Row = Record<string, unknown>
   interface Col { key: string; title?: string; render?: (row: Row) => VNodeChild }
   type RowProps = (row: Row) => Record<string, unknown>
+  interface SelectOption { label: string; value: string }
   const NDataTable = defineComponent({
     props: {
       columns: { type: Array, default: () => [] },
@@ -49,7 +57,13 @@ vi.mock('naive-ui', async () => {
     NSelect: {
       props: ['value', 'options', 'size'],
       emits: ['update:value'],
-      template: '<select :value="value" @change="$emit(\'update:value\', $event.target.value)"><slot /></select>',
+      setup(props: { value: string; options: SelectOption[] }, { emit, attrs }: { emit: (event: 'update:value', value: string) => void; attrs: Record<string, unknown> }) {
+        return () => h('select', {
+          ...attrs,
+          value: props.value,
+          onChange: (event: Event) => emit('update:value', (event.target as HTMLSelectElement).value),
+        }, props.options.map((option) => h('option', { value: option.value }, option.label)))
+      },
     },
   }
 })
@@ -58,6 +72,7 @@ describe('CustomSkillTicketsPage', () => {
   beforeEach(() => {
     vi.clearAllMocks()
     ticketsState.data.value = []
+    organizationsState.data.value = []
     ticketsState.isLoading.value = false
     ticketsState.error.value = null
   })
@@ -75,5 +90,26 @@ describe('CustomSkillTicketsPage', () => {
     expect(wrapper.find('button').exists()).toBe(false)
     await wrapper.find('[data-test="skill-ticket-row-t-1"]').trigger('click')
     expect(router.push).toHaveBeenCalledWith('/skill-tickets/t-1')
+  })
+
+  // 平台管理员可按组织过滤工单；组织、状态、标题过滤应在同一个列表上组合生效。
+  it('filters queue by organization', async () => {
+    organizationsState.data.value = [
+      { id: 'org-1', name: '甲公司', code: 'alpha' },
+      { id: 'org-2', name: '乙公司', code: 'beta' },
+    ]
+    ticketsState.data.value = [
+      { id: 't-1', org_id: 'org-1', title: '甲公司需求', status: 'pending', requester_role: 'org_member' },
+      { id: 't-2', org_id: 'org-2', title: '乙公司需求', status: 'pending', requester_role: 'org_member' },
+    ]
+
+    const wrapper = mount(CustomSkillTicketsPage)
+    expect(wrapper.text()).toContain('甲公司需求')
+    expect(wrapper.text()).toContain('乙公司需求')
+    expect(wrapper.text()).toContain('甲公司（alpha）')
+
+    await wrapper.find('select.org-filter').setValue('org-1')
+    expect(wrapper.text()).toContain('甲公司需求')
+    expect(wrapper.text()).not.toContain('乙公司需求')
   })
 })
