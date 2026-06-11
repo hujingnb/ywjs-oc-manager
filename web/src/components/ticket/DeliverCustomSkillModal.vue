@@ -121,7 +121,7 @@ async function onDeliver() {
     const file = new File([toArrayBuffer(pack.tar)], `${pack.name}.tar`, { type: 'application/x-tar' })
     await deliverMut.mutateAsync({
       ticketId: props.ticket.id,
-      description: pack.description || props.ticket.description || '',
+      description: pack.description || '',
       targets: targets.value,
       file,
     })

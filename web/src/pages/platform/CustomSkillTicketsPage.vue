@@ -7,7 +7,7 @@
       </div>
       <div class="ticket-filters">
         <n-select v-model:value="filterStatus" :options="statusFilterOptions" size="small" class="status-filter" />
-        <n-input v-model:value="filterKeyword" size="small" clearable placeholder="按标题/描述过滤" class="keyword-filter" />
+        <n-input v-model:value="filterKeyword" size="small" clearable placeholder="按标题过滤" class="keyword-filter" />
       </div>
     </div>
 
@@ -53,7 +53,7 @@ const filteredTickets = computed(() => {
   const kw = filterKeyword.value.trim().toLowerCase()
   return tickets.value.filter((ticket) => {
     const statusOK = filterStatus.value === 'all' || ticket.status === filterStatus.value
-    const keywordOK = !kw || `${ticket.title ?? ''} ${ticket.description ?? ''}`.toLowerCase().includes(kw)
+    const keywordOK = !kw || `${ticket.title ?? ''}`.toLowerCase().includes(kw)
     return statusOK && keywordOK
   })
 })

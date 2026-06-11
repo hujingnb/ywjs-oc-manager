@@ -12080,7 +12080,6 @@ export interface components {
         "service.SkillTicketDetailResult": {
             created_at?: string;
             custom_skill_name?: string;
-            description?: string;
             id?: string;
             messages?: components["schemas"]["service.SkillTicketMessageResult"][];
             org_id?: string;
@@ -12108,7 +12107,6 @@ export interface components {
         "service.SkillTicketResult": {
             created_at?: string;
             custom_skill_name?: string;
-            description?: string;
             id?: string;
             org_id?: string;
             quote_amount_cents?: number;

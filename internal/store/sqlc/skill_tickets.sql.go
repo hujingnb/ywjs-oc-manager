@@ -24,8 +24,8 @@ func (q *Queries) CountPendingSkillTickets(ctx context.Context) (int64, error) {
 
 const createSkillTicket = `-- name: CreateSkillTicket :exec
 INSERT INTO skill_tickets (
-    id, org_id, requester_user_id, requester_role, title, description, status
-) VALUES (?, ?, ?, ?, ?, ?, ?)
+    id, org_id, requester_user_id, requester_role, title, status
+) VALUES (?, ?, ?, ?, ?, ?)
 `
 
 type CreateSkillTicketParams struct {
@@ -34,7 +34,6 @@ type CreateSkillTicketParams struct {
 	RequesterUserID string `db:"requester_user_id" json:"requester_user_id"`
 	RequesterRole   string `db:"requester_role" json:"requester_role"`
 	Title           string `db:"title" json:"title"`
-	Description     string `db:"description" json:"description"`
 	Status          string `db:"status" json:"status"`
 }
 
@@ -45,14 +44,13 @@ func (q *Queries) CreateSkillTicket(ctx context.Context, arg CreateSkillTicketPa
 		arg.RequesterUserID,
 		arg.RequesterRole,
 		arg.Title,
-		arg.Description,
 		arg.Status,
 	)
 	return err
 }
 
 const getSkillTicket = `-- name: GetSkillTicket :one
-SELECT id, org_id, requester_user_id, requester_role, title, description, status, quote_amount_cents, custom_skill_name, reject_reason, created_at, updated_at FROM skill_tickets WHERE id = ?
+SELECT id, org_id, requester_user_id, requester_role, title, status, quote_amount_cents, custom_skill_name, reject_reason, created_at, updated_at FROM skill_tickets WHERE id = ?
 `
 
 func (q *Queries) GetSkillTicket(ctx context.Context, id string) (SkillTicket, error) {
@@ -64,7 +62,6 @@ func (q *Queries) GetSkillTicket(ctx context.Context, id string) (SkillTicket, e
 		&i.RequesterUserID,
 		&i.RequesterRole,
 		&i.Title,
-		&i.Description,
 		&i.Status,
 		&i.QuoteAmountCents,
 		&i.CustomSkillName,
@@ -76,7 +73,7 @@ func (q *Queries) GetSkillTicket(ctx context.Context, id string) (SkillTicket, e
 }
 
 const listAllSkillTickets = `-- name: ListAllSkillTickets :many
-SELECT id, org_id, requester_user_id, requester_role, title, description, status, quote_amount_cents, custom_skill_name, reject_reason, created_at, updated_at FROM skill_tickets ORDER BY (status = 'pending') DESC, updated_at DESC, id DESC
+SELECT id, org_id, requester_user_id, requester_role, title, status, quote_amount_cents, custom_skill_name, reject_reason, created_at, updated_at FROM skill_tickets ORDER BY (status = 'pending') DESC, updated_at DESC, id DESC
 `
 
 func (q *Queries) ListAllSkillTickets(ctx context.Context) ([]SkillTicket, error) {
@@ -94,7 +91,6 @@ func (q *Queries) ListAllSkillTickets(ctx context.Context) ([]SkillTicket, error
 			&i.RequesterUserID,
 			&i.RequesterRole,
 			&i.Title,
-			&i.Description,
 			&i.Status,
 			&i.QuoteAmountCents,
 			&i.CustomSkillName,
@@ -116,7 +112,7 @@ func (q *Queries) ListAllSkillTickets(ctx context.Context) ([]SkillTicket, error
 }
 
 const listSkillTicketsByRequester = `-- name: ListSkillTicketsByRequester :many
-SELECT id, org_id, requester_user_id, requester_role, title, description, status, quote_amount_cents, custom_skill_name, reject_reason, created_at, updated_at FROM skill_tickets WHERE requester_user_id = ? ORDER BY updated_at DESC, id DESC
+SELECT id, org_id, requester_user_id, requester_role, title, status, quote_amount_cents, custom_skill_name, reject_reason, created_at, updated_at FROM skill_tickets WHERE requester_user_id = ? ORDER BY updated_at DESC, id DESC
 `
 
 func (q *Queries) ListSkillTicketsByRequester(ctx context.Context, requesterUserID string) ([]SkillTicket, error) {
@@ -134,7 +130,6 @@ func (q *Queries) ListSkillTicketsByRequester(ctx context.Context, requesterUser
 			&i.RequesterUserID,
 			&i.RequesterRole,
 			&i.Title,
-			&i.Description,
 			&i.Status,
 			&i.QuoteAmountCents,
 			&i.CustomSkillName,

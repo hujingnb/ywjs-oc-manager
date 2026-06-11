@@ -122,7 +122,7 @@ export type PlatformSkill = WithRequired<Schemas['service.PlatformSkillResult'],
 // SkillTicket：工单列表项，id/status/title 在列表视图中必须存在。
 export type SkillTicket = WithRequired<Schemas['service.SkillTicketResult'], 'id' | 'status' | 'title'>
 
-// SkillTicketDetail：工单详情，id/status 在详情视图中必须存在；其余字段（description/messages 等）按需可选。
+// SkillTicketDetail：工单详情，id/status 在详情视图中必须存在；需求描述统一进入 messages。
 export type SkillTicketDetail = WithRequired<Schemas['service.SkillTicketDetailResult'], 'id' | 'status'>
 
 // SkillTicketMessage：工单统一消息，id/kind 必须存在（id 用于渲染与下载，kind 用于判别渲染）。

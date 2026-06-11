@@ -352,8 +352,8 @@ func runManager(ctx context.Context, cfg config.Config, logOut io.Writer) error 
 	// archiveCache 是第三方市场归档读穿缓存，市场下载与（间接）安装/版本共用：复用 libraryBlobs 同一对象存储。
 	archiveCache := service.NewSkillArchiveCache(libraryBlobs)
 	platformSkillService := service.NewPlatformSkillService(dbStore.Queries, libraryBlobs)
-	// 定制技能工单 service：dbStore.Queries(*sqlc.Queries) 已满足 SkillTicketStore 全部方法，直接注入无需 adapter。
-	skillTicketService := service.NewSkillTicketService(dbStore.Queries)
+	// 定制技能工单 service：提交工单时主表与首条需求消息必须同事务落库，避免半成品工单。
+	skillTicketService := service.NewSkillTicketServiceWithTx(dbStore.Queries, store.NewSkillTicketRunner(dbStore))
 	// 工单消息 service：text/image/file 统一消息流,文件内容复用 libraryBlobs 的 ticket-message 前缀。
 	skillTicketMessageService := service.NewSkillTicketMessageService(dbStore.Queries, libraryBlobs)
 	// 定制技能交付 service：解析扁平 tar、写归档与 custom_skills、置工单 delivered；dbStore.Queries 满足 CustomSkillStore，归档落 libraryBlobs。

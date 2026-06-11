@@ -3,6 +3,7 @@ package service
 import (
 	"context"
 	"database/sql"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"strings"
@@ -33,20 +34,32 @@ type SkillTicketStore interface {
 	RejectSkillTicket(ctx context.Context, arg sqlc.RejectSkillTicketParams) error
 	TouchSkillTicket(ctx context.Context, id string) error
 	CountPendingSkillTickets(ctx context.Context) (int64, error)
+	CreateSkillTicketMessage(ctx context.Context, arg sqlc.CreateSkillTicketMessageParams) error
 	ListSkillTicketMessages(ctx context.Context, ticketID string) ([]sqlc.SkillTicketMessage, error)
 	ListCustomSkillTargetsByName(ctx context.Context, name string) ([]sqlc.CustomSkillTarget, error)
 	GetUser(ctx context.Context, id string) (sqlc.User, error)
 	GetOrganization(ctx context.Context, id string) (sqlc.Organization, error)
 }
 
+// SkillTicketTxRunner 提供工单主表与初始消息的事务边界,避免创建工单成功但首条需求消息失败。
+type SkillTicketTxRunner interface {
+	WithSkillTicketTx(ctx context.Context, fn func(SkillTicketStore) error) error
+}
+
 // SkillTicketService 管理定制技能需求工单的人工处理生命周期。
 type SkillTicketService struct {
 	store SkillTicketStore
+	tx    SkillTicketTxRunner
 }
 
 // NewSkillTicketService 构造工单 service。
 func NewSkillTicketService(store SkillTicketStore) *SkillTicketService {
 	return &SkillTicketService{store: store}
+}
+
+// NewSkillTicketServiceWithTx 构造带事务能力的工单 service;测试可继续使用无事务构造器。
+func NewSkillTicketServiceWithTx(store SkillTicketStore, tx SkillTicketTxRunner) *SkillTicketService {
+	return &SkillTicketService{store: store, tx: tx}
 }
 
 // SubmitSkillTicketInput 是提交工单的入参。
@@ -62,7 +75,6 @@ type SkillTicketResult struct {
 	RequesterUserID  string    `json:"requester_user_id"`
 	RequesterRole    string    `json:"requester_role"`
 	Title            string    `json:"title"`
-	Description      string    `json:"description"`
 	Status           string    `json:"status"`
 	QuoteAmountCents *int64    `json:"quote_amount_cents,omitempty"`
 	CustomSkillName  string    `json:"custom_skill_name,omitempty"`
@@ -89,7 +101,7 @@ type CustomSkillTargetResult struct {
 func toSkillTicketResult(r sqlc.SkillTicket) SkillTicketResult {
 	out := SkillTicketResult{
 		ID: r.ID, OrgID: r.OrgID, RequesterUserID: r.RequesterUserID, RequesterRole: r.RequesterRole,
-		Title: r.Title, Description: r.Description, Status: r.Status,
+		Title: r.Title, Status: r.Status,
 		CustomSkillName: r.CustomSkillName.String, RejectReason: r.RejectReason.String,
 		CreatedAt: r.CreatedAt, UpdatedAt: r.UpdatedAt,
 	}
@@ -100,7 +112,7 @@ func toSkillTicketResult(r sqlc.SkillTicket) SkillTicketResult {
 	return out
 }
 
-// Submit 提交一条定制需求工单(status=pending,快照提交者 org 与角色)。
+// Submit 提交一条定制需求工单(status=pending,快照提交者 org 与角色),并把描述落为第一条 text 消息。
 func (s *SkillTicketService) Submit(ctx context.Context, p auth.Principal, in SubmitSkillTicketInput) (SkillTicketResult, error) {
 	if !auth.CanSubmitSkillTicket(p) {
 		return SkillTicketResult{}, ErrSkillTicketDenied
@@ -111,17 +123,39 @@ func (s *SkillTicketService) Submit(ctx context.Context, p auth.Principal, in Su
 		return SkillTicketResult{}, fmt.Errorf("%w: 标题与描述不能为空", ErrSkillTicketInvalid)
 	}
 	id := newUUID()
-	if err := s.store.CreateSkillTicket(ctx, sqlc.CreateSkillTicketParams{
-		ID: id, OrgID: p.OrgID, RequesterUserID: p.UserID, RequesterRole: p.Role,
-		Title: title, Description: desc, Status: SkillTicketStatusPending,
+	raw, err := json.Marshal(textPayload{Text: desc})
+	if err != nil {
+		return SkillTicketResult{}, fmt.Errorf("序列化需求消息失败: %w", err)
+	}
+	if err := s.withSkillTicketTx(ctx, func(store SkillTicketStore) error {
+		if err := store.CreateSkillTicket(ctx, sqlc.CreateSkillTicketParams{
+			ID: id, OrgID: p.OrgID, RequesterUserID: p.UserID, RequesterRole: p.Role,
+			Title: title, Status: SkillTicketStatusPending,
+		}); err != nil {
+			return fmt.Errorf("创建工单失败: %w", err)
+		}
+		if err := store.CreateSkillTicketMessage(ctx, sqlc.CreateSkillTicketMessageParams{
+			ID: newUUID(), TicketID: id, AuthorUserID: p.UserID, Kind: MessageKindText, Body: raw,
+		}); err != nil {
+			return fmt.Errorf("创建需求消息失败: %w", err)
+		}
+		return nil
 	}); err != nil {
-		return SkillTicketResult{}, fmt.Errorf("创建工单失败: %w", err)
+		return SkillTicketResult{}, err
 	}
 	row, err := s.store.GetSkillTicket(ctx, id)
 	if err != nil {
 		return SkillTicketResult{}, fmt.Errorf("读回工单失败: %w", err)
 	}
 	return toSkillTicketResult(row), nil
+}
+
+// withSkillTicketTx 在可用时使用数据库事务;单测 fake store 未提供事务时保持直接执行。
+func (s *SkillTicketService) withSkillTicketTx(ctx context.Context, fn func(SkillTicketStore) error) error {
+	if s.tx != nil {
+		return s.tx.WithSkillTicketTx(ctx, fn)
+	}
+	return fn(s.store)
 }
 
 // ListMine 返回当前用户提交的工单(企业用户自助查看)。

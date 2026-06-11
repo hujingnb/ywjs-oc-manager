@@ -319,8 +319,6 @@ type SkillTicket struct {
 	RequesterRole string `db:"requester_role" json:"requester_role"`
 	// 需求标题
 	Title string `db:"title" json:"title"`
-	// 需求描述/使用场景/输入输出示例
-	Description string `db:"description" json:"description"`
 	// 状态:pending|processing|delivered|rejected
 	Status string `db:"status" json:"status"`
 	// 管理员报价金额(分),NULL=未报价;用分存避免小数,展示层 /100 格式化为元

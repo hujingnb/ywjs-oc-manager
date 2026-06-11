@@ -1,7 +1,7 @@
 -- name: CreateSkillTicket :exec
 INSERT INTO skill_tickets (
-    id, org_id, requester_user_id, requester_role, title, description, status
-) VALUES (?, ?, ?, ?, ?, ?, ?);
+    id, org_id, requester_user_id, requester_role, title, status
+) VALUES (?, ?, ?, ?, ?, ?);
 
 -- name: GetSkillTicket :one
 SELECT * FROM skill_tickets WHERE id = ?;
@@ -26,4 +26,3 @@ UPDATE skill_tickets SET updated_at = CURRENT_TIMESTAMP(6) WHERE id = ?;
 
 -- name: CountPendingSkillTickets :one
 SELECT COUNT(*) FROM skill_tickets WHERE status = 'pending';
-

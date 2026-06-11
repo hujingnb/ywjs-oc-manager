@@ -39,10 +39,9 @@
         </dl>
       </section>
 
-      <section class="detail-section">
-        <h2>需求</h2>
-        <p class="description">{{ ticket.description || '暂无描述' }}</p>
-        <p v-if="ticket.reject_reason" class="reject-reason">拒绝原因：{{ ticket.reject_reason }}</p>
+      <section v-if="ticket.reject_reason" class="detail-section">
+        <h2>拒绝原因</h2>
+        <p class="reject-reason">{{ ticket.reject_reason }}</p>
       </section>
 
       <section class="detail-section split-section">
@@ -336,7 +335,6 @@ h2 {
   gap: 24px;
 }
 
-.description,
 .readonly-value,
 .reject-reason {
   margin: 0;

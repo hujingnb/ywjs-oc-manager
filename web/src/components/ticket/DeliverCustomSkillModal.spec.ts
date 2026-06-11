@@ -48,7 +48,6 @@ describe('DeliverCustomSkillModal', () => {
           status: 'processing',
           org_id: 'org-1',
           requester_role: 'org_member',
-          description: '需求描述',
         },
         orgs: [{ id: 'org-1', name: '甲公司' }],
       },
@@ -58,7 +57,7 @@ describe('DeliverCustomSkillModal', () => {
 
     expect(mocks.deliver).toHaveBeenCalledWith(expect.objectContaining({
       ticketId: 't-1',
-      description: '需求描述',
+      description: '',
       targets: [{ org_id: 'org-1', audience: 'all_org' }],
     }))
     expect(mocks.success).toHaveBeenCalledWith('已交付')

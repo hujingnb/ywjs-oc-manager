@@ -142,6 +142,20 @@ describe('TicketDetailPage', () => {
     expect(wrapper.text()).not.toContain('甲公司 · 仅管理员')
   })
 
+  // 需求描述统一进入对话消息流后,详情页不再渲染独立“需求”区块。
+  it('does not render standalone requirement description section', () => {
+    detailState.data.value = {
+      id: 't-1',
+      title: '需求',
+      status: 'pending',
+      description: '旧字段描述',
+      messages: [],
+    }
+    const wrapper = mountPage()
+    expect(wrapper.text()).not.toContain('需求旧字段描述')
+    expect(wrapper.text()).not.toContain('暂无描述')
+  })
+
   // 需求方详情页不展示来源信息，避免对本人重复展示冗余字段。
   it('hides requester and organization for requester', () => {
     authState.user = { id: 'u-1', role: 'org_member' }

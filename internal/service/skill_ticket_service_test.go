@@ -22,6 +22,17 @@ type fakeSkillTicketStore struct {
 	orgs     map[string]sqlc.Organization         // id -> 企业展示信息
 }
 
+type fakeSkillTicketTxRunner struct {
+	called bool
+	store  SkillTicketStore
+}
+
+// WithSkillTicketTx 记录事务入口调用,并把测试 fake store 暴露给业务闭包。
+func (r *fakeSkillTicketTxRunner) WithSkillTicketTx(ctx context.Context, fn func(SkillTicketStore) error) error {
+	r.called = true
+	return fn(r.store)
+}
+
 func newFakeSkillTicketStore() *fakeSkillTicketStore {
 	return &fakeSkillTicketStore{
 		tickets:  map[string]sqlc.SkillTicket{},
@@ -35,7 +46,7 @@ func newFakeSkillTicketStore() *fakeSkillTicketStore {
 func (f *fakeSkillTicketStore) CreateSkillTicket(_ context.Context, a sqlc.CreateSkillTicketParams) error {
 	f.tickets[a.ID] = sqlc.SkillTicket{
 		ID: a.ID, OrgID: a.OrgID, RequesterUserID: a.RequesterUserID, RequesterRole: a.RequesterRole,
-		Title: a.Title, Description: a.Description, Status: a.Status,
+		Title: a.Title, Status: a.Status,
 	}
 	return nil
 }
@@ -94,6 +105,12 @@ func (f *fakeSkillTicketStore) CountPendingSkillTickets(_ context.Context) (int6
 func (f *fakeSkillTicketStore) ListSkillTicketMessages(_ context.Context, ticketID string) ([]sqlc.SkillTicketMessage, error) {
 	return f.messages[ticketID], nil
 }
+func (f *fakeSkillTicketStore) CreateSkillTicketMessage(_ context.Context, a sqlc.CreateSkillTicketMessageParams) error {
+	f.messages[a.TicketID] = append(f.messages[a.TicketID], sqlc.SkillTicketMessage{
+		ID: a.ID, TicketID: a.TicketID, AuthorUserID: a.AuthorUserID, Kind: a.Kind, Body: a.Body,
+	})
+	return nil
+}
 func (f *fakeSkillTicketStore) ListCustomSkillTargetsByName(_ context.Context, name string) ([]sqlc.CustomSkillTarget, error) {
 	return f.targets[name], nil
 }
@@ -129,6 +146,32 @@ func TestSkillTicketService_Submit_OK(t *testing.T) {
 	assert.Equal(t, "org-1", res.OrgID)
 	assert.Equal(t, domain.UserRoleOrgMember, res.RequesterRole)
 	assert.Equal(t, "周报技能", res.Title)
+}
+
+// 成员提交工单时,描述不再写入工单主表,而是作为提交者发送的第一条 text 消息。
+func TestSkillTicketService_Submit_CreatesDescriptionMessage(t *testing.T) {
+	store := newFakeSkillTicketStore()
+	svc := NewSkillTicketService(store)
+
+	res, err := svc.Submit(context.Background(), memberP(), SubmitSkillTicketInput{Title: "周报技能", Description: "每周汇总"})
+	require.NoError(t, err)
+	detail, err := svc.Get(context.Background(), memberP(), res.ID)
+	require.NoError(t, err)
+	require.Len(t, detail.Messages, 1)
+	assert.Equal(t, MessageKindText, detail.Messages[0].Kind)
+	assert.Equal(t, "u-mem", detail.Messages[0].AuthorUserID)
+	assert.Equal(t, "每周汇总", detail.Messages[0].Text)
+}
+
+// 成员提交工单在生产装配了事务 runner 时,主表与首条需求消息应通过同一个事务入口执行。
+func TestSkillTicketService_Submit_UsesTransactionRunner(t *testing.T) {
+	store := newFakeSkillTicketStore()
+	runner := &fakeSkillTicketTxRunner{store: store}
+	svc := NewSkillTicketServiceWithTx(store, runner)
+
+	_, err := svc.Submit(context.Background(), memberP(), SubmitSkillTicketInput{Title: "周报技能", Description: "每周汇总"})
+	require.NoError(t, err)
+	assert.True(t, runner.called)
 }
 
 // 平台管理员不能提交工单(不提需求)。
