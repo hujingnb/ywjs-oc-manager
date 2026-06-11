@@ -17,6 +17,9 @@ import (
 	"strconv"
 	"strings"
 	"time"
+
+	"oc-manager/internal/integrations/httplog"
+	mlog "oc-manager/internal/log"
 )
 
 // Client 是 RAGFlow HTTP API 客户端。
@@ -260,7 +263,12 @@ func NewClient(baseURL, apiKey string, timeout time.Duration) (*Client, error) {
 	return &Client{
 		baseURL: baseURL,
 		apiKey:  apiKey,
-		http:    &http.Client{Timeout: timeout},
+		// 注入带日志的 transport：所有出站 RAGFlow 调用在传输层统一记录元数据，
+		// 保留原超时设置不变，注入不改变请求语义。
+		http: &http.Client{
+			Timeout:   timeout,
+			Transport: httplog.New(nil, mlog.LogTypeRAGFlow),
+		},
 	}, nil
 }
 

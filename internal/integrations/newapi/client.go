@@ -29,6 +29,8 @@ import (
 	"time"
 
 	"oc-manager/internal/integrations/httpclient"
+	"oc-manager/internal/integrations/httplog"
+	mlog "oc-manager/internal/log"
 )
 
 // 与 new-api 调用相关的错误。
@@ -209,10 +211,20 @@ type Client struct {
 // NewClient 构造 new-api client，未提供 HTTPClient 时使用 http.DefaultClient。
 // adminUserID 必须与 adminToken 所属用户匹配，否则 admin API 返回 "Unauthorized"。
 func NewClient(baseURL, adminToken string, adminUserID int64) *Client {
-	c := &Client{BaseURL: baseURL, AdminToken: adminToken, AdminUserID: adminUserID}
+	// 注入带日志的 transport：所有出站 new-api 调用在传输层统一记录元数据。
+	// 同一 http.Client 同时赋给 Client.HTTPClient 与 base.HTTPClient，
+	// 保证 newapi 直接发起与 httpclient.BaseHTTPClient 两条请求路径都被覆盖。
+	httpClient := &http.Client{Transport: httplog.New(nil, mlog.LogTypeNewAPI)}
+	c := &Client{
+		BaseURL:     baseURL,
+		AdminToken:  adminToken,
+		AdminUserID: adminUserID,
+		HTTPClient:  httpClient,
+	}
 	c.base = &httpclient.BaseHTTPClient{
-		BaseURL:   baseURL,
-		AuthToken: adminToken,
+		BaseURL:    baseURL,
+		AuthToken:  adminToken,
+		HTTPClient: httpClient,
 	}
 	return c
 }
