@@ -18,15 +18,24 @@ import (
 
 // customSkillServiceStub 实现交付 handler 依赖的接口,隔离 HTTP 层测试。
 type customSkillServiceStub struct {
-	deliverRes service.CustomSkillResult
-	deliverErr error
-	gotInput   service.DeliverCustomSkillInput
+	deliverRes       service.CustomSkillResult
+	deliverErr       error
+	gotInput         service.DeliverCustomSkillInput
+	gotTargetsTicket string
+	gotTargets       []service.CustomSkillTargetInput
 }
 
 // Deliver 记录实际入参并返回预设结果,用于验证 handler 对 multipart 字段(ticket_id/targets/file)的解析。
 func (s *customSkillServiceStub) Deliver(_ context.Context, _ auth.Principal, in service.DeliverCustomSkillInput) (service.CustomSkillResult, error) {
 	s.gotInput = in
 	return s.deliverRes, s.deliverErr
+}
+
+// UpdateTargets 记录目标范围更新入参,用于验证 PATCH handler 的 JSON 解析。
+func (s *customSkillServiceStub) UpdateTargets(_ context.Context, _ auth.Principal, ticketID string, targets []service.CustomSkillTargetInput) error {
+	s.gotTargetsTicket = ticketID
+	s.gotTargets = targets
+	return nil
 }
 
 // TestCustomSkillsHandler_Deliver 验证 POST multipart 交付:
@@ -89,4 +98,27 @@ func TestCustomSkillsHandler_Deliver_NameMismatch(t *testing.T) {
 
 	// 技能名不一致时应返回 409
 	assert.Equal(t, http.StatusConflict, rec.Code)
+}
+
+// TestCustomSkillsHandler_UpdateTargets 验证 PATCH JSON 编辑可见范围:
+// handler 正确解析 targets 数组并透传 path 中的工单 id。
+func TestCustomSkillsHandler_UpdateTargets(t *testing.T) {
+	stub := &customSkillServiceStub{}
+	gin.SetMode(gin.TestMode)
+	r := gin.New()
+	RegisterCustomSkillRoutes(r, NewCustomSkillsHandler(stub))
+
+	body, _ := json.Marshal(UpdateCustomSkillTargetsRequest{
+		Targets: []CustomSkillTargetDTO{{OrgID: "org-1", Audience: "org_admins"}},
+	})
+	req := httptest.NewRequest(http.MethodPatch, "/api/v1/skill-tickets/t1/targets", bytes.NewReader(body))
+	req.Header.Set("Content-Type", "application/json")
+	rec := httptest.NewRecorder()
+	r.ServeHTTP(rec, adminReq(req))
+
+	assert.Equal(t, http.StatusNoContent, rec.Code)
+	assert.Equal(t, "t1", stub.gotTargetsTicket)
+	assert.Len(t, stub.gotTargets, 1)
+	assert.Equal(t, "org-1", stub.gotTargets[0].OrgID)
+	assert.Equal(t, "org_admins", stub.gotTargets[0].Audience)
 }

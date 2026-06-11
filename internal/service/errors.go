@@ -262,14 +262,8 @@ var ErrSkillTicketNotFound = errors.New("定制技能工单不存在")
 // ErrSkillTicketDenied 表示当前主体无权操作该工单。
 var ErrSkillTicketDenied = errors.New("无权操作该定制技能工单")
 
-// ErrSkillTicketInvalid 表示入参非法(标题/描述/评论为空,或非法状态值)。
+// ErrSkillTicketInvalid 表示入参非法(标题/描述/消息为空,或非法状态动作/可见范围)。
 var ErrSkillTicketInvalid = errors.New("定制技能工单入参非法")
-
-// ErrSkillTicketAttachmentNotFound 表示按 id 找不到工单附件。
-var ErrSkillTicketAttachmentNotFound = errors.New("工单附件不存在")
-
-// ErrSkillTicketAttachmentInvalid 表示附件入参非法(空文件名/空内容)。
-var ErrSkillTicketAttachmentInvalid = errors.New("工单附件入参非法")
 
 // ===== 定制技能交付 / 取装 =====
 

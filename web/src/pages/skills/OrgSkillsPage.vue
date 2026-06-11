@@ -26,6 +26,8 @@ import SkillManager from '@/components/SkillManager.vue'
 import SkillTicketPanel from '@/components/SkillTicketPanel.vue'
 import { useOwnApp } from '@/composables/useOwnApp'
 
+defineOptions({ name: 'OrgSkillsPage' })
+
 // OrgSkillsPage 现同时服务 org_member 与 org_admin 两类用户：各自通过 useOwnApp 取自己的实例。
 // 有实例时把 appId 传给 SkillManager 复用技能列表+市场逻辑；无实例时仅渲染工单面板（仍可提交定制技能需求）。
 // 此页面无 allowedRoles 限制，org_member 与 org_admin 均可直接访问。

@@ -3,7 +3,10 @@ package handlers
 import (
 	"context"
 	"errors"
+	"io"
 	"net/http"
+	"net/url"
+	"path/filepath"
 
 	"github.com/gin-gonic/gin"
 
@@ -18,19 +21,29 @@ type skillTicketService interface {
 	ListMine(ctx context.Context, p auth.Principal) ([]service.SkillTicketResult, error)
 	ListAll(ctx context.Context, p auth.Principal) ([]service.SkillTicketResult, error)
 	Get(ctx context.Context, p auth.Principal, id string) (service.SkillTicketDetailResult, error)
-	AddComment(ctx context.Context, p auth.Principal, id, body string) (service.SkillTicketCommentResult, error)
-	UpdateStatus(ctx context.Context, p auth.Principal, id, status string) error
+	StartProcessing(ctx context.Context, p auth.Principal, id string) error
+	ReopenRejected(ctx context.Context, p auth.Principal, id string) error
 	SetQuote(ctx context.Context, p auth.Principal, id string, cents int64) error
 	Reject(ctx context.Context, p auth.Principal, id, reason string) error
 	PendingBadgeCount(ctx context.Context, p auth.Principal) (int64, error)
 }
 
+// skillTicketMessageService 是 handler 依赖的统一消息能力(text/image/file)。
+type skillTicketMessageService interface {
+	SendText(ctx context.Context, p auth.Principal, ticketID, text string) (service.SkillTicketMessageResult, error)
+	SendFile(ctx context.Context, p auth.Principal, ticketID, fileName, contentType string, data []byte) (service.SkillTicketMessageResult, error)
+	DownloadFile(ctx context.Context, p auth.Principal, ticketID, messageID string) ([]byte, string, string, error)
+}
+
 // SkillTicketsHandler 暴露定制技能工单的 HTTP 接口。
-type SkillTicketsHandler struct{ service skillTicketService }
+type SkillTicketsHandler struct {
+	service  skillTicketService
+	messages skillTicketMessageService
+}
 
 // NewSkillTicketsHandler 构造 handler。
-func NewSkillTicketsHandler(svc skillTicketService) *SkillTicketsHandler {
-	return &SkillTicketsHandler{service: svc}
+func NewSkillTicketsHandler(svc skillTicketService, messages skillTicketMessageService) *SkillTicketsHandler {
+	return &SkillTicketsHandler{service: svc, messages: messages}
 }
 
 // RegisterSkillTicketRoutes 注册工单路由(权限在 service 层判定)。
@@ -38,8 +51,11 @@ func RegisterSkillTicketRoutes(router gin.IRouter, h *SkillTicketsHandler) {
 	router.POST("/api/v1/skill-tickets", h.Submit)
 	router.GET("/api/v1/skill-tickets", h.ListMine)
 	router.GET("/api/v1/skill-tickets/:id", h.Get)
-	router.POST("/api/v1/skill-tickets/:id/comments", h.AddComment)
-	router.PATCH("/api/v1/skill-tickets/:id/status", h.UpdateStatus)
+	router.POST("/api/v1/skill-tickets/:id/messages", h.SendMessage)
+	router.POST("/api/v1/skill-tickets/:id/messages/upload", h.UploadMessage)
+	router.GET("/api/v1/skill-tickets/:id/messages/:msgId/download", h.DownloadMessage)
+	router.POST("/api/v1/skill-tickets/:id/start", h.StartProcessing)
+	router.POST("/api/v1/skill-tickets/:id/reopen", h.ReopenRejected)
 	router.PATCH("/api/v1/skill-tickets/:id/quote", h.SetQuote)
 	router.POST("/api/v1/skill-tickets/:id/reject", h.Reject)
 	router.GET("/api/v1/admin/skill-tickets", h.ListAll)
@@ -107,7 +123,7 @@ func (h *SkillTicketsHandler) ListAll(c *gin.Context) {
 	c.JSON(http.StatusOK, gin.H{"tickets": out})
 }
 
-// Get 工单详情(含评论)。
+// Get 工单详情(含消息流)。
 //
 // @Summary  定制技能工单详情
 // @Tags     skill-tickets
@@ -126,49 +142,124 @@ func (h *SkillTicketsHandler) Get(c *gin.Context) {
 	c.JSON(http.StatusOK, gin.H{"ticket": out})
 }
 
-// AddComment 追加评论(提交者在关闭态发言会重开工单)。
+// SendMessage 发送文本消息(提交者在关闭态发言会由 service 自动重开工单)。
 //
-// @Summary  追加工单评论
-// @Tags     skill-tickets
-// @Accept   json
-// @Produce  json
-// @Security BearerAuth
-// @Param    id   path string                       true "工单 id"
-// @Param    body body AddSkillTicketCommentRequest true "评论"
-// @Success  201 {object} map[string]service.SkillTicketCommentResult
-// @Router   /skill-tickets/{id}/comments [post]
-func (h *SkillTicketsHandler) AddComment(c *gin.Context) {
-	var req AddSkillTicketCommentRequest
-	if err := c.ShouldBindJSON(&req); err != nil {
-		c.JSON(http.StatusBadRequest, apierror.New("INVALID_REQUEST", "请求体格式错误"))
-		return
-	}
-	out, err := h.service.AddComment(c.Request.Context(), principalFromCtx(c), c.Param("id"), req.Body)
-	if err != nil {
-		writeSkillTicketError(c, err)
-		return
-	}
-	c.JSON(http.StatusCreated, gin.H{"comment": out})
-}
-
-// UpdateStatus 管理员改状态。
-//
-// @Summary  调整工单状态(平台管理员)
+// @Summary  发送工单文本消息
 // @Tags     skill-tickets
 // @Accept   json
 // @Produce  json
 // @Security BearerAuth
 // @Param    id   path string                         true "工单 id"
-// @Param    body body UpdateSkillTicketStatusRequest true "状态"
-// @Success  204
-// @Router   /skill-tickets/{id}/status [patch]
-func (h *SkillTicketsHandler) UpdateStatus(c *gin.Context) {
-	var req UpdateSkillTicketStatusRequest
+// @Param    body body SendSkillTicketMessageRequest  true "消息"
+// @Success  201 {object} map[string]service.SkillTicketMessageResult
+// @Router   /skill-tickets/{id}/messages [post]
+func (h *SkillTicketsHandler) SendMessage(c *gin.Context) {
+	var req SendSkillTicketMessageRequest
 	if err := c.ShouldBindJSON(&req); err != nil {
 		c.JSON(http.StatusBadRequest, apierror.New("INVALID_REQUEST", "请求体格式错误"))
 		return
 	}
-	if err := h.service.UpdateStatus(c.Request.Context(), principalFromCtx(c), c.Param("id"), req.Status); err != nil {
+	out, err := h.messages.SendText(c.Request.Context(), principalFromCtx(c), c.Param("id"), req.Text)
+	if err != nil {
+		writeSkillTicketError(c, err)
+		return
+	}
+	c.JSON(http.StatusCreated, gin.H{"message": out})
+}
+
+// UploadMessage 上传图片/文件消息,每个文件自身就是一条消息。
+//
+// @Summary  上传工单图片/文件消息
+// @Tags     skill-tickets
+// @Accept   multipart/form-data
+// @Produce  json
+// @Security BearerAuth
+// @Param    id   path     string true "工单 id"
+// @Param    file formData file   true "图片或文件"
+// @Success  201 {object} map[string]service.SkillTicketMessageResult
+// @Router   /skill-tickets/{id}/messages/upload [post]
+func (h *SkillTicketsHandler) UploadMessage(c *gin.Context) {
+	fileHeader, err := c.FormFile("file")
+	if err != nil {
+		c.JSON(http.StatusBadRequest, apierror.New("INVALID_REQUEST", "缺少 file 字段"))
+		return
+	}
+	f, err := fileHeader.Open()
+	if err != nil {
+		c.JSON(http.StatusBadRequest, apierror.New("INVALID_REQUEST", "读取上传文件失败"))
+		return
+	}
+	defer func() { _ = f.Close() }()
+	data, err := io.ReadAll(f)
+	if err != nil {
+		c.JSON(http.StatusBadRequest, apierror.New("INVALID_REQUEST", "读取上传内容失败"))
+		return
+	}
+	out, err := h.messages.SendFile(
+		c.Request.Context(),
+		principalFromCtx(c),
+		c.Param("id"),
+		filepath.Base(fileHeader.Filename),
+		fileHeader.Header.Get("Content-Type"),
+		data,
+	)
+	if err != nil {
+		writeSkillTicketError(c, err)
+		return
+	}
+	c.JSON(http.StatusCreated, gin.H{"message": out})
+}
+
+// DownloadMessage 下载图片/文件消息内容;text 消息由 service 返回 Invalid。
+//
+// @Summary  下载工单文件消息
+// @Tags     skill-tickets
+// @Produce  application/octet-stream
+// @Security BearerAuth
+// @Param    id    path string true "工单 id"
+// @Param    msgId path string true "消息 id"
+// @Success  200 {file} binary
+// @Router   /skill-tickets/{id}/messages/{msgId}/download [get]
+func (h *SkillTicketsHandler) DownloadMessage(c *gin.Context) {
+	data, fileName, contentType, err := h.messages.DownloadFile(c.Request.Context(), principalFromCtx(c), c.Param("id"), c.Param("msgId"))
+	if err != nil {
+		writeSkillTicketError(c, err)
+		return
+	}
+	if contentType == "" {
+		contentType = "application/octet-stream"
+	}
+	// UTF-8 文件名走 filename*,避免中文/空格在不同浏览器中乱码。
+	c.Header("Content-Disposition", "attachment; filename*=UTF-8''"+url.PathEscape(fileName))
+	c.Data(http.StatusOK, contentType, data)
+}
+
+// StartProcessing 管理员开始制作工单。
+//
+// @Summary  开始制作工单(平台管理员)
+// @Tags     skill-tickets
+// @Security BearerAuth
+// @Param    id path string true "工单 id"
+// @Success  204
+// @Router   /skill-tickets/{id}/start [post]
+func (h *SkillTicketsHandler) StartProcessing(c *gin.Context) {
+	if err := h.service.StartProcessing(c.Request.Context(), principalFromCtx(c), c.Param("id")); err != nil {
+		writeSkillTicketError(c, err)
+		return
+	}
+	c.Status(http.StatusNoContent)
+}
+
+// ReopenRejected 管理员重新受理已拒绝工单。
+//
+// @Summary  重新受理已拒绝工单(平台管理员)
+// @Tags     skill-tickets
+// @Security BearerAuth
+// @Param    id path string true "工单 id"
+// @Success  204
+// @Router   /skill-tickets/{id}/reopen [post]
+func (h *SkillTicketsHandler) ReopenRejected(c *gin.Context) {
+	if err := h.service.ReopenRejected(c.Request.Context(), principalFromCtx(c), c.Param("id")); err != nil {
 		writeSkillTicketError(c, err)
 		return
 	}

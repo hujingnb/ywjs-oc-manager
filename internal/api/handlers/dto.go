@@ -418,14 +418,9 @@ type SubmitSkillTicketRequest struct {
 	Description string `json:"description"`
 }
 
-// AddSkillTicketCommentRequest 追加工单评论请求体。
-type AddSkillTicketCommentRequest struct {
-	Body string `json:"body"`
-}
-
-// UpdateSkillTicketStatusRequest 管理员改状态请求体(pending|processing)。
-type UpdateSkillTicketStatusRequest struct {
-	Status string `json:"status"`
+// SendSkillTicketMessageRequest 发送工单文本消息请求体。
+type SendSkillTicketMessageRequest struct {
+	Text string `json:"text"`
 }
 
 // SetSkillTicketQuoteRequest 管理员报价请求体(分)。
@@ -443,6 +438,11 @@ type RejectSkillTicketRequest struct {
 type CustomSkillTargetDTO struct {
 	OrgID    string `json:"org_id" binding:"required"`
 	Audience string `json:"audience" binding:"required"` // all_org|org_admins|requester_only
+}
+
+// UpdateCustomSkillTargetsRequest 编辑已交付定制技能可见范围请求体。
+type UpdateCustomSkillTargetsRequest struct {
+	Targets []CustomSkillTargetDTO `json:"targets"`
 }
 
 // DeliverCustomSkillRequest 交付定制技能(归档走 multipart file,本体描述目标范围与描述)。

@@ -74,6 +74,7 @@ export const router = createRouter({
         { path: 'knowledge', component: OrgKnowledgePage },
         // skills：成员「技能」顶级页，无 allowedRoles，所有已登录用户（尤其是 org_member）均可访问。
         { path: 'skills', component: OrgSkillsPage },
+        { path: 'skill-tickets/:id', name: 'ticket-detail', component: () => import('@/pages/skill-tickets/TicketDetailPage.vue') },
         { path: 'usage', component: UsagePage },
         { path: 'balance', component: OrgBalancePage, meta: { allowedRoles: ORG_ADMIN_ONLY } },
         {

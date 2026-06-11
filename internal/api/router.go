@@ -50,14 +50,12 @@ type Dependencies struct {
 	AssistantVersionService *service.AssistantVersionService
 	// PlatformSkillService 提供平台库 skill 管理路由；nil 时不注册。
 	PlatformSkillService *service.PlatformSkillService
-	// SkillTicketService 提供定制技能需求工单（提交/列表/详情/评论/状态/报价/拒绝/角标）路由；nil 时不注册。
-	// 同时作为附件路由的 ticketViewer（可见性前置校验）复用。
+	// SkillTicketService 提供定制技能需求工单（提交/列表/详情/动作/报价/拒绝/角标）路由；nil 时不注册。
 	SkillTicketService *service.SkillTicketService
+	// SkillTicketMessageService 提供工单统一消息（text/image/file + 下载）路由；需与 SkillTicketService 同时注册。
+	SkillTicketMessageService *service.SkillTicketMessageService
 	// CustomSkillService 提供定制技能交付路由；nil 时不注册。
 	CustomSkillService *service.CustomSkillService
-	// SkillTicketAttachmentService 提供工单附件上传/列表/下载路由；
-	// 需与 SkillTicketService 同时存在（后者做可见性前置）才注册。
-	SkillTicketAttachmentService *service.SkillTicketAttachmentService
 	// PlatformOverview 提供平台总览路由。
 	PlatformOverview *service.PlatformOverviewService
 	// HermesKanbanService 提供实例任务看板能力；nil 时不注册 kanban 路由。
@@ -190,15 +188,11 @@ func NewRouter(deps ...Dependencies) http.Handler {
 	if dep.PlatformSkillService != nil {
 		handlers.RegisterPlatformSkillRoutes(user, handlers.NewPlatformSkillsHandler(dep.PlatformSkillService))
 	}
-	if dep.SkillTicketService != nil {
-		handlers.RegisterSkillTicketRoutes(user, handlers.NewSkillTicketsHandler(dep.SkillTicketService))
+	if dep.SkillTicketService != nil && dep.SkillTicketMessageService != nil {
+		handlers.RegisterSkillTicketRoutes(user, handlers.NewSkillTicketsHandler(dep.SkillTicketService, dep.SkillTicketMessageService))
 	}
 	if dep.CustomSkillService != nil {
 		handlers.RegisterCustomSkillRoutes(user, handlers.NewCustomSkillsHandler(dep.CustomSkillService))
-	}
-	// 附件路由需 SkillTicketService 作 ticketViewer 做可见性前置，两者齐备才注册。
-	if dep.SkillTicketAttachmentService != nil && dep.SkillTicketService != nil {
-		handlers.RegisterSkillTicketAttachmentRoutes(user, handlers.NewSkillTicketAttachmentsHandler(dep.SkillTicketAttachmentService, dep.SkillTicketService))
 	}
 	if dep.PlatformOverview != nil {
 		handlers.RegisterPlatformOverviewRoutes(user, handlers.NewPlatformOverviewHandler(dep.PlatformOverview))

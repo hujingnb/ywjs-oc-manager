@@ -10315,59 +10315,16 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
-    "/skill-tickets/{id}/attachments": {
+    "/skill-tickets/{id}/messages": {
         parameters: {
             query?: never;
             header?: never;
             path?: never;
             cookie?: never;
         };
-        /** 列出工单附件 */
-        get: {
-            parameters: {
-                query?: never;
-                header?: never;
-                path: {
-                    /** @description 工单 id */
-                    id: string;
-                };
-                cookie?: never;
-            };
-            requestBody?: never;
-            responses: {
-                /** @description OK */
-                200: {
-                    headers: {
-                        [name: string]: unknown;
-                    };
-                    content: {
-                        "application/json": {
-                            [key: string]: components["schemas"]["service.SkillTicketAttachmentResult"][];
-                        };
-                    };
-                };
-                /** @description Forbidden */
-                403: {
-                    headers: {
-                        [name: string]: unknown;
-                    };
-                    content: {
-                        "application/json": components["schemas"]["handlers.ErrorResponse"];
-                    };
-                };
-                /** @description Not Found */
-                404: {
-                    headers: {
-                        [name: string]: unknown;
-                    };
-                    content: {
-                        "application/json": components["schemas"]["handlers.ErrorResponse"];
-                    };
-                };
-            };
-        };
+        get?: never;
         put?: never;
-        /** 上传工单附件 */
+        /** 发送工单文本消息 */
         post: {
             parameters: {
                 query?: never;
@@ -10378,11 +10335,10 @@ export interface paths {
                 };
                 cookie?: never;
             };
-            /** @description 附件文件 */
+            /** @description 消息 */
             requestBody: {
                 content: {
-                    "application/x-www-form-urlencoded": Record<string, never>;
-                    "multipart/form-data": Record<string, never>;
+                    "application/json": Record<string, never> | components["schemas"]["handlers.SendSkillTicketMessageRequest"];
                 };
             };
             responses: {
@@ -10393,35 +10349,8 @@ export interface paths {
                     };
                     content: {
                         "application/json": {
-                            [key: string]: components["schemas"]["service.SkillTicketAttachmentResult"];
+                            [key: string]: components["schemas"]["service.SkillTicketMessageResult"];
                         };
-                    };
-                };
-                /** @description Bad Request */
-                400: {
-                    headers: {
-                        [name: string]: unknown;
-                    };
-                    content: {
-                        "application/json": components["schemas"]["handlers.ErrorResponse"];
-                    };
-                };
-                /** @description Forbidden */
-                403: {
-                    headers: {
-                        [name: string]: unknown;
-                    };
-                    content: {
-                        "application/json": components["schemas"]["handlers.ErrorResponse"];
-                    };
-                };
-                /** @description Not Found */
-                404: {
-                    headers: {
-                        [name: string]: unknown;
-                    };
-                    content: {
-                        "application/json": components["schemas"]["handlers.ErrorResponse"];
                     };
                 };
             };
@@ -10432,14 +10361,14 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
-    "/skill-tickets/{id}/attachments/{attId}/download": {
+    "/skill-tickets/{id}/messages/{msgId}/download": {
         parameters: {
             query?: never;
             header?: never;
             path?: never;
             cookie?: never;
         };
-        /** 下载工单附件 */
+        /** 下载工单文件消息 */
         get: {
             parameters: {
                 query?: never;
@@ -10447,8 +10376,8 @@ export interface paths {
                 path: {
                     /** @description 工单 id */
                     id: string;
-                    /** @description 附件 id */
-                    attId: string;
+                    /** @description 消息 id */
+                    msgId: string;
                 };
                 cookie?: never;
             };
@@ -10463,24 +10392,6 @@ export interface paths {
                         "application/octet-stream": Record<string, never>;
                     };
                 };
-                /** @description Forbidden */
-                403: {
-                    headers: {
-                        [name: string]: unknown;
-                    };
-                    content: {
-                        "application/octet-stream": components["schemas"]["handlers.ErrorResponse"];
-                    };
-                };
-                /** @description Not Found */
-                404: {
-                    headers: {
-                        [name: string]: unknown;
-                    };
-                    content: {
-                        "application/octet-stream": components["schemas"]["handlers.ErrorResponse"];
-                    };
-                };
             };
         };
         put?: never;
@@ -10491,7 +10402,7 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
-    "/skill-tickets/{id}/comments": {
+    "/skill-tickets/{id}/messages/upload": {
         parameters: {
             query?: never;
             header?: never;
@@ -10500,7 +10411,7 @@ export interface paths {
         };
         get?: never;
         put?: never;
-        /** 追加工单评论 */
+        /** 上传工单图片/文件消息 */
         post: {
             parameters: {
                 query?: never;
@@ -10511,10 +10422,11 @@ export interface paths {
                 };
                 cookie?: never;
             };
-            /** @description 评论 */
+            /** @description 图片或文件 */
             requestBody: {
                 content: {
-                    "application/json": Record<string, never> | components["schemas"]["handlers.AddSkillTicketCommentRequest"];
+                    "application/x-www-form-urlencoded": Record<string, never>;
+                    "multipart/form-data": Record<string, never>;
                 };
             };
             responses: {
@@ -10525,7 +10437,7 @@ export interface paths {
                     };
                     content: {
                         "application/json": {
-                            [key: string]: components["schemas"]["service.SkillTicketCommentResult"];
+                            [key: string]: components["schemas"]["service.SkillTicketMessageResult"];
                         };
                     };
                 };
@@ -10621,7 +10533,81 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
-    "/skill-tickets/{id}/status": {
+    "/skill-tickets/{id}/reopen": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** 重新受理已拒绝工单(平台管理员) */
+        post: {
+            parameters: {
+                query?: never;
+                header?: never;
+                path: {
+                    /** @description 工单 id */
+                    id: string;
+                };
+                cookie?: never;
+            };
+            requestBody?: never;
+            responses: {
+                /** @description No Content */
+                204: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content?: never;
+                };
+            };
+        };
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/skill-tickets/{id}/start": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** 开始制作工单(平台管理员) */
+        post: {
+            parameters: {
+                query?: never;
+                header?: never;
+                path: {
+                    /** @description 工单 id */
+                    id: string;
+                };
+                cookie?: never;
+            };
+            requestBody?: never;
+            responses: {
+                /** @description No Content */
+                204: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content?: never;
+                };
+            };
+        };
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/skill-tickets/{id}/targets": {
         parameters: {
             query?: never;
             header?: never;
@@ -10634,7 +10620,7 @@ export interface paths {
         delete?: never;
         options?: never;
         head?: never;
-        /** 调整工单状态(平台管理员) */
+        /** 编辑已交付定制技能可见范围(平台管理员) */
         patch: {
             parameters: {
                 query?: never;
@@ -10645,10 +10631,10 @@ export interface paths {
                 };
                 cookie?: never;
             };
-            /** @description 状态 */
+            /** @description 目标范围 */
             requestBody: {
                 content: {
-                    "application/json": Record<string, never> | components["schemas"]["handlers.UpdateSkillTicketStatusRequest"];
+                    "application/json": Record<string, never> | components["schemas"]["handlers.UpdateCustomSkillTargetsRequest"];
                 };
             };
             responses: {
@@ -10658,6 +10644,33 @@ export interface paths {
                         [name: string]: unknown;
                     };
                     content?: never;
+                };
+                /** @description Bad Request */
+                400: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["handlers.ErrorResponse"];
+                    };
+                };
+                /** @description Forbidden */
+                403: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["handlers.ErrorResponse"];
+                    };
+                };
+                /** @description Not Found */
+                404: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["handlers.ErrorResponse"];
+                    };
                 };
             };
         };
@@ -10964,9 +10977,6 @@ export interface components {
             /** @description Version 是要配进版本的 skill 版本号。 */
             version: string;
         };
-        "handlers.AddSkillTicketCommentRequest": {
-            body?: string;
-        };
         "handlers.AssistantVersionRoutingDTO": {
             approval?: string;
             compression?: string;
@@ -11089,6 +11099,11 @@ export interface components {
             name: string;
             /** @description Remark 是平台管理员维护的内部备注。 */
             remark?: string;
+        };
+        "handlers.CustomSkillTargetDTO": {
+            /** @description all_org|org_admins|requester_only */
+            audience: string;
+            org_id: string;
         };
         "handlers.ErrorResponse": {
             /**
@@ -11221,6 +11236,9 @@ export interface components {
             /** @description TopK 是每个知识库作用域的检索 chunk 上限；0 使用 service 默认值，超过 service 上限会被截断。 */
             top_k?: number;
         };
+        "handlers.SendSkillTicketMessageRequest": {
+            text?: string;
+        };
         "handlers.SetSkillTicketQuoteRequest": {
             quote_amount_cents?: number;
         };
@@ -11280,6 +11298,9 @@ export interface components {
             /** @description Workdir 是任务执行目录；nil 表示保持原值，空字符串表示清空。 */
             workdir?: string;
         };
+        "handlers.UpdateCustomSkillTargetsRequest": {
+            targets?: components["schemas"]["handlers.CustomSkillTargetDTO"][];
+        };
         "handlers.UpdateIndustryKnowledgeBaseRequest": {
             /** @description Name 是更新后的行业知识库展示名，在未删除行业库中必须唯一。 */
             name: string;
@@ -11295,9 +11316,6 @@ export interface components {
             display_name: string;
             /** @description Role 为空表示保持原角色；非空时需要管理员权限并限制在企业角色内。 */
             role?: string;
-        };
-        "handlers.UpdateSkillTicketStatusRequest": {
-            status?: string;
         };
         "ocops.CronCapabilities": {
             /** @description ContractVersion 是 oc-cron 契约版本号。 */
@@ -11789,6 +11807,10 @@ export interface components {
             ticket_id?: string;
             version?: string;
         };
+        "service.CustomSkillTargetResult": {
+            audience?: string;
+            org_id?: string;
+        };
         "service.IndustryKnowledgeBaseListResult": {
             items?: components["schemas"]["service.IndustryKnowledgeBaseResult"][];
             total?: number;
@@ -12055,31 +12077,31 @@ export interface components {
             /** @description NextCursor 是下一页游标，platform 来源始终为空。 */
             next_cursor?: string;
         };
-        "service.SkillTicketAttachmentResult": {
-            file_name?: string;
-            file_size?: number;
-            id?: string;
-        };
-        "service.SkillTicketCommentResult": {
-            author_user_id?: string;
-            body?: string;
-            created_at?: string;
-            id?: string;
-        };
         "service.SkillTicketDetailResult": {
-            comments?: components["schemas"]["service.SkillTicketCommentResult"][];
             created_at?: string;
             custom_skill_name?: string;
             description?: string;
             id?: string;
+            messages?: components["schemas"]["service.SkillTicketMessageResult"][];
             org_id?: string;
             quote_amount_cents?: number;
             reject_reason?: string;
             requester_role?: string;
             requester_user_id?: string;
             status?: string;
+            targets?: components["schemas"]["service.CustomSkillTargetResult"][];
             title?: string;
             updated_at?: string;
+        };
+        "service.SkillTicketMessageResult": {
+            author_user_id?: string;
+            content_type?: string;
+            created_at?: string;
+            file_name?: string;
+            file_size?: number;
+            id?: string;
+            kind?: string;
+            text?: string;
         };
         "service.SkillTicketResult": {
             created_at?: string;

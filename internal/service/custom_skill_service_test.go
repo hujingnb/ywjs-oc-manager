@@ -62,6 +62,11 @@ func (f *fakeCustomStore) CreateCustomSkillTarget(_ context.Context, a sqlc.Crea
 	return nil
 }
 
+func (f *fakeCustomStore) DeleteCustomSkillTargetsByName(_ context.Context, name string) error {
+	delete(f.targets, name)
+	return nil
+}
+
 func (f *fakeCustomStore) ListCustomSkillTargetsByName(_ context.Context, name string) ([]sqlc.CustomSkillTarget, error) {
 	return f.targets[name], nil
 }
@@ -181,4 +186,56 @@ func TestCustomSkillService_Deliver_NoTargets(t *testing.T) {
 	svc.now = fixedClock()
 	_, err := svc.Deliver(context.Background(), adminPrincipalCS(), DeliverCustomSkillInput{TicketID: "tk-1", Data: flatTarWithName(t, "x"), Targets: nil})
 	require.ErrorIs(t, err, ErrCustomSkillInvalid)
+}
+
+// 已拒绝工单不能直接交付,必须先走重新受理动作恢复到制作中。
+func TestCustomSkillService_Deliver_RejectsRejectedTicket(t *testing.T) {
+	store := newFakeCustomStore()
+	store.tickets["tk-1"] = sqlc.SkillTicket{
+		ID: "tk-1", OrgID: "org-1", RequesterUserID: "u-mem",
+		RequesterRole: domain.UserRoleOrgMember, Status: SkillTicketStatusRejected,
+	}
+	svc := NewCustomSkillService(store, newFakeBlobs())
+	svc.now = fixedClock()
+
+	_, err := svc.Deliver(context.Background(), adminPrincipalCS(), DeliverCustomSkillInput{
+		TicketID: "tk-1", Data: flatTarWithName(t, "weekly-report"),
+		Targets: []CustomSkillTargetInput{{OrgID: "org-1", Audience: "all_org"}},
+	})
+	require.ErrorIs(t, err, ErrCustomSkillInvalid)
+}
+
+// UpdateTargets 覆盖写已交付技能的可见范围,并拒绝未交付、非法受众和非管理员调用。
+func TestCustomSkillService_UpdateTargets_OverwriteAndValidate(t *testing.T) {
+	store := newFakeCustomStore()
+	store.tickets["tk-1"] = sqlc.SkillTicket{
+		ID: "tk-1", OrgID: "org-1", RequesterUserID: "u-mem",
+		RequesterRole: domain.UserRoleOrgMember, Status: SkillTicketStatusDelivered,
+		CustomSkillName: nullStr("weekly-report"),
+	}
+	store.targets["weekly-report"] = []sqlc.CustomSkillTarget{
+		{ID: "old", CustomSkillName: "weekly-report", OrgID: "org-old", Audience: "all_org"},
+	}
+	svc := NewCustomSkillService(store, newFakeBlobs())
+
+	err := svc.UpdateTargets(context.Background(), adminPrincipalCS(), "tk-1", []CustomSkillTargetInput{
+		{OrgID: "org-2", Audience: "org_admins"},     // 覆盖后的第一条目标:仅管理员可见
+		{OrgID: "org-3", Audience: "requester_only"}, // 覆盖后的第二条目标:仅申请人可见
+	})
+	require.NoError(t, err)
+	require.Len(t, store.targets["weekly-report"], 2)
+	assert.Equal(t, "org-2", store.targets["weekly-report"][0].OrgID)
+	assert.Equal(t, "org_admins", store.targets["weekly-report"][0].Audience)
+	assert.Equal(t, "org-3", store.targets["weekly-report"][1].OrgID)
+	assert.Equal(t, "requester_only", store.targets["weekly-report"][1].Audience)
+
+	store.tickets["tk-new"] = sqlc.SkillTicket{ID: "tk-new", Status: SkillTicketStatusProcessing}
+	err = svc.UpdateTargets(context.Background(), adminPrincipalCS(), "tk-new", []CustomSkillTargetInput{{OrgID: "org-1", Audience: "all_org"}})
+	require.ErrorIs(t, err, ErrCustomSkillInvalid)
+
+	err = svc.UpdateTargets(context.Background(), adminPrincipalCS(), "tk-1", []CustomSkillTargetInput{{OrgID: "org-1", Audience: "unknown"}})
+	require.ErrorIs(t, err, ErrCustomSkillInvalid)
+
+	err = svc.UpdateTargets(context.Background(), memberAP(), "tk-1", []CustomSkillTargetInput{{OrgID: "org-1", Audience: "all_org"}})
+	require.ErrorIs(t, err, ErrCustomSkillDenied)
 }

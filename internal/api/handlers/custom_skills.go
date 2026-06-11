@@ -17,6 +17,7 @@ import (
 // customSkillService 是 handler 依赖的交付能力(包内接口,便于桩测)。
 type customSkillService interface {
 	Deliver(ctx context.Context, p auth.Principal, in service.DeliverCustomSkillInput) (service.CustomSkillResult, error)
+	UpdateTargets(ctx context.Context, p auth.Principal, ticketID string, targets []service.CustomSkillTargetInput) error
 }
 
 // CustomSkillsHandler 暴露定制技能交付接口。
@@ -30,6 +31,7 @@ func NewCustomSkillsHandler(svc customSkillService) *CustomSkillsHandler {
 // RegisterCustomSkillRoutes 注册交付路由(权限在 service 层判定)。
 func RegisterCustomSkillRoutes(router gin.IRouter, h *CustomSkillsHandler) {
 	router.POST("/api/v1/custom-skills/deliver", h.Deliver)
+	router.PATCH("/api/v1/skill-tickets/:id/targets", h.UpdateTargets)
 }
 
 // Deliver 交付一个定制技能版本。
@@ -90,6 +92,37 @@ func (h *CustomSkillsHandler) Deliver(c *gin.Context) {
 		return
 	}
 	c.JSON(http.StatusCreated, gin.H{"skill": out})
+}
+
+// UpdateTargets 编辑已交付定制技能的可见范围。
+//
+// @Summary  编辑已交付定制技能可见范围(平台管理员)
+// @Tags     custom-skills
+// @Accept   json
+// @Produce  json
+// @Security BearerAuth
+// @Param    id   path string                            true "工单 id"
+// @Param    body body UpdateCustomSkillTargetsRequest   true "目标范围"
+// @Success  204
+// @Failure  400 {object} ErrorResponse
+// @Failure  403 {object} ErrorResponse
+// @Failure  404 {object} ErrorResponse
+// @Router   /skill-tickets/{id}/targets [patch]
+func (h *CustomSkillsHandler) UpdateTargets(c *gin.Context) {
+	var req UpdateCustomSkillTargetsRequest
+	if err := c.ShouldBindJSON(&req); err != nil {
+		c.JSON(http.StatusBadRequest, apierror.New("INVALID_REQUEST", "请求体格式错误"))
+		return
+	}
+	targets := make([]service.CustomSkillTargetInput, 0, len(req.Targets))
+	for _, target := range req.Targets {
+		targets = append(targets, service.CustomSkillTargetInput{OrgID: target.OrgID, Audience: target.Audience})
+	}
+	if err := h.service.UpdateTargets(c.Request.Context(), principalFromCtx(c), c.Param("id"), targets); err != nil {
+		writeCustomSkillError(c, err)
+		return
+	}
+	c.Status(http.StatusNoContent)
 }
 
 // writeCustomSkillError 把交付哨兵错误映射为 HTTP 状态码 + 固定文案错误体(不回传 err.Error,避免泄露内部包装链)。

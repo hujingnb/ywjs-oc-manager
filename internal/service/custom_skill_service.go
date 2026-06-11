@@ -29,6 +29,7 @@ type CustomSkillStore interface {
 	GetCustomSkillByNameVersion(ctx context.Context, arg sqlc.GetCustomSkillByNameVersionParams) (sqlc.CustomSkill, error)
 	GetSkillTicket(ctx context.Context, id string) (sqlc.SkillTicket, error)
 	CreateCustomSkillTarget(ctx context.Context, arg sqlc.CreateCustomSkillTargetParams) error
+	DeleteCustomSkillTargetsByName(ctx context.Context, name string) error
 	MarkSkillTicketDelivered(ctx context.Context, arg sqlc.MarkSkillTicketDeliveredParams) error
 }
 
@@ -79,6 +80,9 @@ func (s *CustomSkillService) Deliver(ctx context.Context, p auth.Principal, in D
 	if len(in.Targets) == 0 {
 		return CustomSkillResult{}, fmt.Errorf("%w: 至少一个目标范围", ErrCustomSkillInvalid)
 	}
+	if err := validateCustomSkillTargets(in.Targets); err != nil {
+		return CustomSkillResult{}, err
+	}
 	// 解析扁平 tar 取 name(复用平台库扁平契约校验)。
 	info, err := hermes.InspectFlatSkillArchive(bytes.NewReader(in.Data))
 	if err != nil {
@@ -92,6 +96,9 @@ func (s *CustomSkillService) Deliver(ctx context.Context, p auth.Principal, in D
 			return CustomSkillResult{}, ErrSkillTicketNotFound
 		}
 		return CustomSkillResult{}, fmt.Errorf("查询工单失败: %w", err)
+	}
+	if ticket.Status == SkillTicketStatusRejected {
+		return CustomSkillResult{}, fmt.Errorf("%w: 已拒绝工单需先重新受理才能交付", ErrCustomSkillInvalid)
 	}
 	// 技能名一致性(后端强制):再次交付须沿用工单已锁定的 name。
 	if ticket.CustomSkillName.Valid && ticket.CustomSkillName.String != name {
@@ -134,6 +141,54 @@ func (s *CustomSkillService) Deliver(ctx context.Context, p auth.Principal, in D
 		return CustomSkillResult{}, fmt.Errorf("置工单交付失败: %w", err)
 	}
 	return CustomSkillResult{ID: id, Name: name, Version: version, TicketID: in.TicketID, FileSize: int64(len(in.Data)), FileSha256: sha}, nil
+}
+
+// UpdateTargets 覆盖写已交付定制技能的可见范围,用于交付后调整企业/角色可见性。
+func (s *CustomSkillService) UpdateTargets(ctx context.Context, p auth.Principal, ticketID string, targets []CustomSkillTargetInput) error {
+	if !auth.CanManageSkillTicket(p) {
+		return ErrCustomSkillDenied
+	}
+	if len(targets) == 0 {
+		return fmt.Errorf("%w: 至少一个目标范围", ErrCustomSkillInvalid)
+	}
+	if err := validateCustomSkillTargets(targets); err != nil {
+		return err
+	}
+	ticket, err := s.store.GetSkillTicket(ctx, ticketID)
+	if err != nil {
+		if errors.Is(err, sql.ErrNoRows) {
+			return ErrSkillTicketNotFound
+		}
+		return fmt.Errorf("查询工单失败: %w", err)
+	}
+	if !ticket.CustomSkillName.Valid {
+		return fmt.Errorf("%w: 工单尚未交付,无可见范围可编辑", ErrCustomSkillInvalid)
+	}
+	name := ticket.CustomSkillName.String
+	// 覆盖写:当前 store 接口沿用既有无事务写法;任一写入失败会返回错误供上层提示重试。
+	if err := s.store.DeleteCustomSkillTargetsByName(ctx, name); err != nil {
+		return fmt.Errorf("清空旧目标范围失败: %w", err)
+	}
+	for _, target := range targets {
+		if err := s.store.CreateCustomSkillTarget(ctx, sqlc.CreateCustomSkillTargetParams{
+			ID: newUUID(), CustomSkillName: name, OrgID: target.OrgID, Audience: target.Audience,
+		}); err != nil {
+			return fmt.Errorf("写入目标范围失败: %w", err)
+		}
+	}
+	return nil
+}
+
+// validateCustomSkillTargets 校验目标范围的 audience 枚举,避免前端传入不可解释的可见策略。
+func validateCustomSkillTargets(targets []CustomSkillTargetInput) error {
+	for _, target := range targets {
+		switch target.Audience {
+		case "all_org", "org_admins", "requester_only":
+		default:
+			return fmt.Errorf("%w: 非法受众 %q", ErrCustomSkillInvalid, target.Audience)
+		}
+	}
+	return nil
 }
 
 // uniqueVersion 按上传时间生成 YYYYMMDD-HHmmss(UTC)版本;若同名同版本已存在(同秒多次交付)追加 -N。

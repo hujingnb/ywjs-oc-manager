@@ -16,11 +16,16 @@ import (
 // fakeSkillTicketStore 是 SkillTicketStore 的内存实现,供 service 单测使用。
 type fakeSkillTicketStore struct {
 	tickets  map[string]sqlc.SkillTicket          // id -> 工单
-	comments map[string][]sqlc.SkillTicketComment // ticketID -> 评论
+	messages map[string][]sqlc.SkillTicketMessage // ticketID -> 消息
+	targets  map[string][]sqlc.CustomSkillTarget  // customSkillName -> 可见范围
 }
 
 func newFakeSkillTicketStore() *fakeSkillTicketStore {
-	return &fakeSkillTicketStore{tickets: map[string]sqlc.SkillTicket{}, comments: map[string][]sqlc.SkillTicketComment{}}
+	return &fakeSkillTicketStore{
+		tickets:  map[string]sqlc.SkillTicket{},
+		messages: map[string][]sqlc.SkillTicketMessage{},
+		targets:  map[string][]sqlc.CustomSkillTarget{},
+	}
 }
 
 func (f *fakeSkillTicketStore) CreateSkillTicket(_ context.Context, a sqlc.CreateSkillTicketParams) error {
@@ -82,18 +87,19 @@ func (f *fakeSkillTicketStore) CountPendingSkillTickets(_ context.Context) (int6
 	}
 	return n, nil
 }
-func (f *fakeSkillTicketStore) CreateSkillTicketComment(_ context.Context, a sqlc.CreateSkillTicketCommentParams) error {
-	f.comments[a.TicketID] = append(f.comments[a.TicketID], sqlc.SkillTicketComment{
-		ID: a.ID, TicketID: a.TicketID, AuthorUserID: a.AuthorUserID, Body: a.Body,
-	})
-	return nil
+func (f *fakeSkillTicketStore) ListSkillTicketMessages(_ context.Context, ticketID string) ([]sqlc.SkillTicketMessage, error) {
+	return f.messages[ticketID], nil
 }
-func (f *fakeSkillTicketStore) ListSkillTicketComments(_ context.Context, ticketID string) ([]sqlc.SkillTicketComment, error) {
-	return f.comments[ticketID], nil
+func (f *fakeSkillTicketStore) ListCustomSkillTargetsByName(_ context.Context, name string) ([]sqlc.CustomSkillTarget, error) {
+	return f.targets[name], nil
 }
 
-func memberP() auth.Principal { return auth.Principal{UserID: "u-mem", OrgID: "org-1", Role: domain.UserRoleOrgMember} }
-func adminP() auth.Principal  { return auth.Principal{UserID: "u-admin", Role: domain.UserRolePlatformAdmin} }
+func memberP() auth.Principal {
+	return auth.Principal{UserID: "u-mem", OrgID: "org-1", Role: domain.UserRoleOrgMember}
+}
+func adminP() auth.Principal {
+	return auth.Principal{UserID: "u-admin", Role: domain.UserRolePlatformAdmin}
+}
 
 // 成员提交工单:落库为 pending,org/角色/标题正确回填。
 func TestSkillTicketService_Submit_OK(t *testing.T) {
@@ -121,7 +127,7 @@ func TestSkillTicketService_Submit_Invalid(t *testing.T) {
 	require.ErrorIs(t, err, ErrSkillTicketInvalid)
 }
 
-// 详情:提交者本人可看,含评论;企业内他人看不到(Denied)。
+// 详情:提交者本人可看,含消息;企业内他人看不到(Denied)。
 func TestSkillTicketService_Get_Visibility(t *testing.T) {
 	store := newFakeSkillTicketStore()
 	svc := NewSkillTicketService(store)
@@ -136,62 +142,77 @@ func TestSkillTicketService_Get_Visibility(t *testing.T) {
 	require.ErrorIs(t, err, ErrSkillTicketDenied)
 }
 
-// 提交者在 rejected 工单上发评论 → 自动回 pending(重开)。
-func TestSkillTicketService_AddComment_ReopensRejected(t *testing.T) {
+// 详情:已交付工单应带出当前 custom_skill_targets,供前端编辑可见范围时回填。
+func TestSkillTicketService_Get_IncludesTargets(t *testing.T) {
+	store := newFakeSkillTicketStore()
+	svc := NewSkillTicketService(store)
+	res, _ := svc.Submit(context.Background(), memberP(), SubmitSkillTicketInput{Title: "t", Description: "d"})
+	row := store.tickets[res.ID]
+	row.Status = SkillTicketStatusDelivered
+	row.CustomSkillName = nullStr("weekly")
+	store.tickets[res.ID] = row
+	store.targets["weekly"] = []sqlc.CustomSkillTarget{
+		{ID: "target-1", CustomSkillName: "weekly", OrgID: "org-1", Audience: "org_admins"},
+	}
+
+	detail, err := svc.Get(context.Background(), adminP(), res.ID)
+	require.NoError(t, err)
+	require.Len(t, detail.Targets, 1)
+	assert.Equal(t, "org-1", detail.Targets[0].OrgID)
+	assert.Equal(t, "org_admins", detail.Targets[0].Audience)
+}
+
+// 开始制作:pending → processing 成功,非 pending 状态拒绝。
+func TestSkillTicketService_StartProcessing(t *testing.T) {
+	store := newFakeSkillTicketStore()
+	svc := NewSkillTicketService(store)
+	res, _ := svc.Submit(context.Background(), memberP(), SubmitSkillTicketInput{Title: "t", Description: "d"})
+	require.NoError(t, svc.StartProcessing(context.Background(), adminP(), res.ID))
+	got, _ := store.GetSkillTicket(context.Background(), res.ID)
+	assert.Equal(t, SkillTicketStatusProcessing, got.Status)
+
+	err := svc.StartProcessing(context.Background(), adminP(), res.ID)
+	require.ErrorIs(t, err, ErrSkillTicketInvalid)
+}
+
+// 拒绝:pending/processing 可拒绝,delivered 不可拒绝。
+func TestSkillTicketService_RejectPrecondition(t *testing.T) {
+	store := newFakeSkillTicketStore()
+	svc := NewSkillTicketService(store)
+	pending, _ := svc.Submit(context.Background(), memberP(), SubmitSkillTicketInput{Title: "p", Description: "d"})
+	require.NoError(t, svc.Reject(context.Background(), adminP(), pending.ID, "不清晰"))
+	assert.Equal(t, SkillTicketStatusRejected, store.tickets[pending.ID].Status)
+
+	processing, _ := svc.Submit(context.Background(), memberP(), SubmitSkillTicketInput{Title: "pr", Description: "d"})
+	require.NoError(t, svc.StartProcessing(context.Background(), adminP(), processing.ID))
+	require.NoError(t, svc.Reject(context.Background(), adminP(), processing.ID, "不做"))
+	assert.Equal(t, SkillTicketStatusRejected, store.tickets[processing.ID].Status)
+
+	delivered, _ := svc.Submit(context.Background(), memberP(), SubmitSkillTicketInput{Title: "d", Description: "d"})
+	row := store.tickets[delivered.ID]
+	row.Status = SkillTicketStatusDelivered
+	store.tickets[delivered.ID] = row
+	err := svc.Reject(context.Background(), adminP(), delivered.ID, "不能拒")
+	require.ErrorIs(t, err, ErrSkillTicketInvalid)
+}
+
+// 重新受理:仅 rejected → processing,非 rejected 状态拒绝。
+func TestSkillTicketService_ReopenRejected(t *testing.T) {
 	store := newFakeSkillTicketStore()
 	svc := NewSkillTicketService(store)
 	res, _ := svc.Submit(context.Background(), memberP(), SubmitSkillTicketInput{Title: "t", Description: "d"})
 	require.NoError(t, svc.Reject(context.Background(), adminP(), res.ID, "不清晰"))
 
-	_, err := svc.AddComment(context.Background(), memberP(), res.ID, "补充:要支持飞书")
-	require.NoError(t, err)
-	got, _ := store.GetSkillTicket(context.Background(), res.ID)
-	assert.Equal(t, SkillTicketStatusPending, got.Status) // 重开
-}
-
-// 管理员在 pending 工单上发评论 → 不重开(仍 pending,不改状态)。
-func TestSkillTicketService_AddComment_AdminNoReopen(t *testing.T) {
-	store := newFakeSkillTicketStore()
-	svc := NewSkillTicketService(store)
-	res, _ := svc.Submit(context.Background(), memberP(), SubmitSkillTicketInput{Title: "t", Description: "d"})
-	require.NoError(t, svc.UpdateStatus(context.Background(), adminP(), res.ID, SkillTicketStatusProcessing))
-
-	_, err := svc.AddComment(context.Background(), adminP(), res.ID, "已接单")
-	require.NoError(t, err)
-	got, _ := store.GetSkillTicket(context.Background(), res.ID)
-	assert.Equal(t, SkillTicketStatusProcessing, got.Status) // 管理员评论不重开
-}
-
-// 管理员接单:pending → processing。
-func TestSkillTicketService_UpdateStatus_OK(t *testing.T) {
-	store := newFakeSkillTicketStore()
-	svc := NewSkillTicketService(store)
-	res, _ := svc.Submit(context.Background(), memberP(), SubmitSkillTicketInput{Title: "t", Description: "d"})
-	require.NoError(t, svc.UpdateStatus(context.Background(), adminP(), res.ID, SkillTicketStatusProcessing))
+	require.NoError(t, svc.ReopenRejected(context.Background(), adminP(), res.ID))
 	got, _ := store.GetSkillTicket(context.Background(), res.ID)
 	assert.Equal(t, SkillTicketStatusProcessing, got.Status)
-}
 
-// 改状态只允许 pending/processing;传 delivered 由交付链路(Plan 2)负责 → Invalid。
-func TestSkillTicketService_UpdateStatus_RejectDelivered(t *testing.T) {
-	store := newFakeSkillTicketStore()
-	svc := NewSkillTicketService(store)
-	res, _ := svc.Submit(context.Background(), memberP(), SubmitSkillTicketInput{Title: "t", Description: "d"})
-	err := svc.UpdateStatus(context.Background(), adminP(), res.ID, SkillTicketStatusDelivered)
+	err := svc.ReopenRejected(context.Background(), adminP(), res.ID)
 	require.ErrorIs(t, err, ErrSkillTicketInvalid)
 }
 
-// 非平台管理员改状态被拒。
-func TestSkillTicketService_UpdateStatus_Denied(t *testing.T) {
-	store := newFakeSkillTicketStore()
-	svc := NewSkillTicketService(store)
-	res, _ := svc.Submit(context.Background(), memberP(), SubmitSkillTicketInput{Title: "t", Description: "d"})
-	err := svc.UpdateStatus(context.Background(), memberP(), res.ID, SkillTicketStatusProcessing)
-	require.ErrorIs(t, err, ErrSkillTicketDenied)
-}
-
-// 管理员设报价(分);非管理员被拒。
-func TestSkillTicketService_SetQuote(t *testing.T) {
+// 设报价:pending/processing 可改,delivered/rejected 禁止。
+func TestSkillTicketService_SetQuotePrecondition(t *testing.T) {
 	store := newFakeSkillTicketStore()
 	svc := NewSkillTicketService(store)
 	res, _ := svc.Submit(context.Background(), memberP(), SubmitSkillTicketInput{Title: "t", Description: "d"})
@@ -199,18 +220,32 @@ func TestSkillTicketService_SetQuote(t *testing.T) {
 	got, _ := store.GetSkillTicket(context.Background(), res.ID)
 	assert.EqualValues(t, 80000, got.QuoteAmountCents.Int64)
 
-	require.ErrorIs(t, svc.SetQuote(context.Background(), memberP(), res.ID, 1), ErrSkillTicketDenied)
+	require.NoError(t, svc.StartProcessing(context.Background(), adminP(), res.ID))
+	require.NoError(t, svc.SetQuote(context.Background(), adminP(), res.ID, 90000))
+	got, _ = store.GetSkillTicket(context.Background(), res.ID)
+	assert.EqualValues(t, 90000, got.QuoteAmountCents.Int64)
+
+	delivered, _ := svc.Submit(context.Background(), memberP(), SubmitSkillTicketInput{Title: "delivered", Description: "d"})
+	row := store.tickets[delivered.ID]
+	row.Status = SkillTicketStatusDelivered
+	store.tickets[delivered.ID] = row
+	require.ErrorIs(t, svc.SetQuote(context.Background(), adminP(), delivered.ID, 1), ErrSkillTicketInvalid)
+
+	rejected, _ := svc.Submit(context.Background(), memberP(), SubmitSkillTicketInput{Title: "rejected", Description: "d"})
+	require.NoError(t, svc.Reject(context.Background(), adminP(), rejected.ID, "不清晰"))
+	require.ErrorIs(t, svc.SetQuote(context.Background(), adminP(), rejected.ID, 1), ErrSkillTicketInvalid)
 }
 
-// 管理员拒绝:status=rejected + reason 落库。
-func TestSkillTicketService_Reject(t *testing.T) {
+// 非平台管理员调用任意管理员状态动作都应被拒绝。
+func TestSkillTicketService_ActionsRequireAdmin(t *testing.T) {
 	store := newFakeSkillTicketStore()
 	svc := NewSkillTicketService(store)
 	res, _ := svc.Submit(context.Background(), memberP(), SubmitSkillTicketInput{Title: "t", Description: "d"})
-	require.NoError(t, svc.Reject(context.Background(), adminP(), res.ID, "需求不清晰"))
-	got, _ := store.GetSkillTicket(context.Background(), res.ID)
-	assert.Equal(t, SkillTicketStatusRejected, got.Status)
-	assert.Equal(t, "需求不清晰", got.RejectReason.String)
+
+	require.ErrorIs(t, svc.StartProcessing(context.Background(), memberP(), res.ID), ErrSkillTicketDenied)
+	require.ErrorIs(t, svc.ReopenRejected(context.Background(), memberP(), res.ID), ErrSkillTicketDenied)
+	require.ErrorIs(t, svc.SetQuote(context.Background(), memberP(), res.ID, 1), ErrSkillTicketDenied)
+	require.ErrorIs(t, svc.Reject(context.Background(), memberP(), res.ID, "x"), ErrSkillTicketDenied)
 }
 
 // 待处理角标:仅 pending 计数。
@@ -219,7 +254,7 @@ func TestSkillTicketService_PendingBadgeCount(t *testing.T) {
 	svc := NewSkillTicketService(store)
 	a, _ := svc.Submit(context.Background(), memberP(), SubmitSkillTicketInput{Title: "a", Description: "d"})
 	_, _ = svc.Submit(context.Background(), memberP(), SubmitSkillTicketInput{Title: "b", Description: "d"})
-	require.NoError(t, svc.UpdateStatus(context.Background(), adminP(), a.ID, SkillTicketStatusProcessing)) // 移出角标
+	require.NoError(t, svc.StartProcessing(context.Background(), adminP(), a.ID)) // 移出角标
 	n, err := svc.PendingBadgeCount(context.Background(), adminP())
 	require.NoError(t, err)
 	assert.EqualValues(t, 1, n) // 仅剩 b 是 pending

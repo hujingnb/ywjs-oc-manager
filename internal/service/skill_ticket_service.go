@@ -33,8 +33,8 @@ type SkillTicketStore interface {
 	RejectSkillTicket(ctx context.Context, arg sqlc.RejectSkillTicketParams) error
 	TouchSkillTicket(ctx context.Context, id string) error
 	CountPendingSkillTickets(ctx context.Context) (int64, error)
-	CreateSkillTicketComment(ctx context.Context, arg sqlc.CreateSkillTicketCommentParams) error
-	ListSkillTicketComments(ctx context.Context, ticketID string) ([]sqlc.SkillTicketComment, error)
+	ListSkillTicketMessages(ctx context.Context, ticketID string) ([]sqlc.SkillTicketMessage, error)
+	ListCustomSkillTargetsByName(ctx context.Context, name string) ([]sqlc.CustomSkillTarget, error)
 }
 
 // SkillTicketService 管理定制技能需求工单的人工处理生命周期。
@@ -69,18 +69,17 @@ type SkillTicketResult struct {
 	UpdatedAt        time.Time `json:"updated_at"`
 }
 
-// SkillTicketCommentResult 是工单评论的对外视图。
-type SkillTicketCommentResult struct {
-	ID           string    `json:"id"`
-	AuthorUserID string    `json:"author_user_id"`
-	Body         string    `json:"body"`
-	CreatedAt    time.Time `json:"created_at"`
-}
-
-// SkillTicketDetailResult 是工单详情(含评论流)。
+// SkillTicketDetailResult 是工单详情(含统一消息流)。
 type SkillTicketDetailResult struct {
 	SkillTicketResult
-	Comments []SkillTicketCommentResult `json:"comments"`
+	Messages []SkillTicketMessageResult `json:"messages"`
+	Targets  []CustomSkillTargetResult  `json:"targets,omitempty"`
+}
+
+// CustomSkillTargetResult 是已交付定制技能的可见范围视图,供详情页展示与编辑回填。
+type CustomSkillTargetResult struct {
+	OrgID    string `json:"org_id"`
+	Audience string `json:"audience"`
 }
 
 func toSkillTicketResult(r sqlc.SkillTicket) SkillTicketResult {
@@ -153,7 +152,7 @@ func mapSkillTickets(rows []sqlc.SkillTicket) []SkillTicketResult {
 	return out
 }
 
-// Get 返回工单详情(含评论流)。提交者本人或平台管理员可见。
+// Get 返回工单详情(含消息流)。提交者本人或平台管理员可见。
 func (s *SkillTicketService) Get(ctx context.Context, p auth.Principal, id string) (SkillTicketDetailResult, error) {
 	row, err := s.loadTicket(ctx, id)
 	if err != nil {
@@ -162,48 +161,25 @@ func (s *SkillTicketService) Get(ctx context.Context, p auth.Principal, id strin
 	if !auth.CanViewSkillTicket(p, row.RequesterUserID) {
 		return SkillTicketDetailResult{}, ErrSkillTicketDenied
 	}
-	comments, err := s.store.ListSkillTicketComments(ctx, id)
+	messages, err := s.store.ListSkillTicketMessages(ctx, id)
 	if err != nil {
-		return SkillTicketDetailResult{}, fmt.Errorf("查询工单评论失败: %w", err)
+		return SkillTicketDetailResult{}, fmt.Errorf("查询工单消息失败: %w", err)
 	}
-	cs := make([]SkillTicketCommentResult, 0, len(comments))
-	for _, c := range comments {
-		cs = append(cs, SkillTicketCommentResult{ID: c.ID, AuthorUserID: c.AuthorUserID, Body: c.Body, CreatedAt: c.CreatedAt})
+	ms := make([]SkillTicketMessageResult, 0, len(messages))
+	for _, message := range messages {
+		ms = append(ms, toMessageResult(message))
 	}
-	return SkillTicketDetailResult{SkillTicketResult: toSkillTicketResult(row), Comments: cs}, nil
-}
-
-// AddComment 追加一条评论。提交者或平台管理员可发;当提交者在 delivered/rejected 工单上发评论时,
-// 自动重开工单回 pending(重新进入处理队列)。
-func (s *SkillTicketService) AddComment(ctx context.Context, p auth.Principal, id, body string) (SkillTicketCommentResult, error) {
-	row, err := s.loadTicket(ctx, id)
-	if err != nil {
-		return SkillTicketCommentResult{}, err
-	}
-	if !auth.CanViewSkillTicket(p, row.RequesterUserID) {
-		return SkillTicketCommentResult{}, ErrSkillTicketDenied
-	}
-	text := strings.TrimSpace(body)
-	if text == "" {
-		return SkillTicketCommentResult{}, fmt.Errorf("%w: 评论不能为空", ErrSkillTicketInvalid)
-	}
-	cid := newUUID()
-	if err := s.store.CreateSkillTicketComment(ctx, sqlc.CreateSkillTicketCommentParams{
-		ID: cid, TicketID: id, AuthorUserID: p.UserID, Body: text,
-	}); err != nil {
-		return SkillTicketCommentResult{}, fmt.Errorf("创建评论失败: %w", err)
-	}
-	// 重开判定:提交者本人 + 工单处于关闭态(delivered/rejected)→ 回 pending;否则仅刷新 updated_at。
-	reopened := p.UserID == row.RequesterUserID &&
-		(row.Status == SkillTicketStatusDelivered || row.Status == SkillTicketStatusRejected)
-	if reopened {
-		if err := s.store.UpdateSkillTicketStatus(ctx, sqlc.UpdateSkillTicketStatusParams{Status: SkillTicketStatusPending, ID: id}); err != nil {
-			return SkillTicketCommentResult{}, fmt.Errorf("重开工单失败: %w", err)
+	targets := make([]CustomSkillTargetResult, 0)
+	if row.CustomSkillName.Valid {
+		rows, err := s.store.ListCustomSkillTargetsByName(ctx, row.CustomSkillName.String)
+		if err != nil {
+			return SkillTicketDetailResult{}, fmt.Errorf("查询可见范围失败: %w", err)
 		}
-	} else {
-		_ = s.store.TouchSkillTicket(ctx, id)
+		for _, target := range rows {
+			targets = append(targets, CustomSkillTargetResult{OrgID: target.OrgID, Audience: target.Audience})
+		}
 	}
-	return SkillTicketCommentResult{ID: cid, AuthorUserID: p.UserID, Body: text}, nil
+	return SkillTicketDetailResult{SkillTicketResult: toSkillTicketResult(row), Messages: ms, Targets: targets}, nil
 }
 
 // loadTicket 按 id 取工单,未找到映射成 ErrSkillTicketNotFound。
@@ -218,25 +194,42 @@ func (s *SkillTicketService) loadTicket(ctx context.Context, id string) (sqlc.Sk
 	return row, nil
 }
 
-// UpdateStatus 管理员调整工单状态。仅允许 pending/processing 两态互转;
-// delivered 由交付链路(Plan 2)负责,rejected 走 Reject,传入其它值为 Invalid。
-func (s *SkillTicketService) UpdateStatus(ctx context.Context, p auth.Principal, id, status string) error {
+// transition 执行显式状态动作,先校验当前状态在 allowed 集合内,再落目标状态。
+func (s *SkillTicketService) transition(ctx context.Context, p auth.Principal, id, next string, allowed ...string) error {
 	if !auth.CanManageSkillTicket(p) {
 		return ErrSkillTicketDenied
 	}
-	if status != SkillTicketStatusPending && status != SkillTicketStatusProcessing {
-		return fmt.Errorf("%w: 不支持的状态 %q", ErrSkillTicketInvalid, status)
-	}
-	if _, err := s.loadTicket(ctx, id); err != nil {
+	row, err := s.loadTicket(ctx, id)
+	if err != nil {
 		return err
 	}
-	if err := s.store.UpdateSkillTicketStatus(ctx, sqlc.UpdateSkillTicketStatusParams{Status: status, ID: id}); err != nil {
+	ok := false
+	for _, candidate := range allowed {
+		if row.Status == candidate {
+			ok = true
+			break
+		}
+	}
+	if !ok {
+		return fmt.Errorf("%w: 当前状态 %q 不允许此操作", ErrSkillTicketInvalid, row.Status)
+	}
+	if err := s.store.UpdateSkillTicketStatus(ctx, sqlc.UpdateSkillTicketStatusParams{Status: next, ID: id}); err != nil {
 		return fmt.Errorf("更新工单状态失败: %w", err)
 	}
 	return nil
 }
 
-// SetQuote 管理员设置报价(单位:分)。
+// StartProcessing 开始制作:pending → processing,取代旧的手选状态。
+func (s *SkillTicketService) StartProcessing(ctx context.Context, p auth.Principal, id string) error {
+	return s.transition(ctx, p, id, SkillTicketStatusProcessing, SkillTicketStatusPending)
+}
+
+// ReopenRejected 重新受理已拒绝工单:rejected → processing,用于管理员翻案。
+func (s *SkillTicketService) ReopenRejected(ctx context.Context, p auth.Principal, id string) error {
+	return s.transition(ctx, p, id, SkillTicketStatusProcessing, SkillTicketStatusRejected)
+}
+
+// SetQuote 管理员设置报价(单位:分);仅未交付阶段允许调整。
 func (s *SkillTicketService) SetQuote(ctx context.Context, p auth.Principal, id string, cents int64) error {
 	if !auth.CanManageSkillTicket(p) {
 		return ErrSkillTicketDenied
@@ -244,8 +237,12 @@ func (s *SkillTicketService) SetQuote(ctx context.Context, p auth.Principal, id 
 	if cents < 0 {
 		return fmt.Errorf("%w: 报价不能为负", ErrSkillTicketInvalid)
 	}
-	if _, err := s.loadTicket(ctx, id); err != nil {
+	row, err := s.loadTicket(ctx, id)
+	if err != nil {
 		return err
+	}
+	if row.Status != SkillTicketStatusPending && row.Status != SkillTicketStatusProcessing {
+		return fmt.Errorf("%w: 当前状态 %q 不允许设置报价", ErrSkillTicketInvalid, row.Status)
 	}
 	if err := s.store.SetSkillTicketQuote(ctx, sqlc.SetSkillTicketQuoteParams{QuoteAmountCents: null.IntFrom(cents), ID: id}); err != nil {
 		return fmt.Errorf("设置报价失败: %w", err)
@@ -253,13 +250,17 @@ func (s *SkillTicketService) SetQuote(ctx context.Context, p auth.Principal, id 
 	return nil
 }
 
-// Reject 管理员拒绝工单(status=rejected + 原因)。拒绝非终态:提交者补评论可重开。
+// Reject 管理员拒绝未交付工单(status=rejected + 原因);关闭后由需求方消息触发重开。
 func (s *SkillTicketService) Reject(ctx context.Context, p auth.Principal, id, reason string) error {
 	if !auth.CanManageSkillTicket(p) {
 		return ErrSkillTicketDenied
 	}
-	if _, err := s.loadTicket(ctx, id); err != nil {
+	row, err := s.loadTicket(ctx, id)
+	if err != nil {
 		return err
+	}
+	if row.Status != SkillTicketStatusPending && row.Status != SkillTicketStatusProcessing {
+		return fmt.Errorf("%w: 当前状态 %q 不允许拒绝", ErrSkillTicketInvalid, row.Status)
 	}
 	if err := s.store.RejectSkillTicket(ctx, sqlc.RejectSkillTicketParams{RejectReason: null.StringFrom(strings.TrimSpace(reason)), ID: id}); err != nil {
 		return fmt.Errorf("拒绝工单失败: %w", err)

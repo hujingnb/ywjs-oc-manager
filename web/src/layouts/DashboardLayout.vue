@@ -99,7 +99,11 @@
 
       <n-layout-content content-style="height: calc(100vh - 64px); padding: 24px; display: flex; flex-direction: column; overflow: auto">
         <div class="dashboard-page-frame">
-          <RouterView />
+          <RouterView v-slot="{ Component }">
+            <keep-alive :include="['CustomSkillTicketsPage', 'OrgSkillsPage']">
+              <component :is="Component" />
+            </keep-alive>
+          </RouterView>
         </div>
       </n-layout-content>
     </n-layout>
@@ -231,7 +235,7 @@ const isOrgAdmin = computed(() => auth.isOrgAdmin)
 
 // ticketBadge 提供「定制技能」菜单待处理工单角标数；该端点仅平台管理员有权，
 // 角标也仅在平台管理员菜单分支渲染，非平台管理员视角下不会读取此值。
-const ticketBadge = useSkillTicketBadgeQuery()
+const ticketBadge = useSkillTicketBadgeQuery(isPlatformAdmin)
 // pendingTicketCount 是待处理工单数；查询未就绪时为 0（不显示角标）。
 const pendingTicketCount = computed(() => ticketBadge.data.value ?? 0)
 
