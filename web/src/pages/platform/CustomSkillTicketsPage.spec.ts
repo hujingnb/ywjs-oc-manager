@@ -23,10 +23,18 @@ vi.mock('naive-ui', async () => {
   const { defineComponent, h } = await import('vue')
   type Row = Record<string, unknown>
   interface Col { key: string; title?: string; render?: (row: Row) => VNodeChild }
+  type RowProps = (row: Row) => Record<string, unknown>
   const NDataTable = defineComponent({
-    props: { columns: { type: Array, default: () => [] }, data: { type: Array, default: () => [] } },
-    setup(props: { columns: Col[]; data: Row[] }) {
-      return () => h('div', props.data.flatMap((row) => props.columns.map((col) => h('div', { class: `cell-${col.key}` }, col.render ? [col.render(row)] : String(row[col.key] ?? '')))))
+    props: {
+      columns: { type: Array, default: () => [] },
+      data: { type: Array, default: () => [] },
+      rowProps: { type: Function, default: undefined },
+    },
+    setup(props: { columns: Col[]; data: Row[]; rowProps?: RowProps }) {
+      return () => h('table', [
+        h('thead', props.columns.map((col) => h('th', { class: `head-${col.key}` }, col.title ?? ''))),
+        h('tbody', props.data.map((row) => h('tr', props.rowProps?.(row) ?? {}, props.columns.map((col) => h('td', { class: `cell-${col.key}` }, col.render ? [col.render(row)] : String(row[col.key] ?? '')))))),
+      ])
     },
   })
   return {
@@ -54,14 +62,18 @@ describe('CustomSkillTicketsPage', () => {
     ticketsState.error.value = null
   })
 
-  // 队列渲染状态/报价,点击处理跳转整页详情。
+  // 队列渲染状态/报价；操作列去掉后，点击工单整行进入详情页。
   it('renders queue and navigates to detail', async () => {
     ticketsState.data.value = [{ id: 't-1', title: '需求', status: 'pending', requester_role: 'org_member', quote_amount_cents: 12000 }]
     const wrapper = mount(CustomSkillTicketsPage)
     expect(wrapper.text()).toContain('需求')
     expect(wrapper.text()).toContain('待处理')
     expect(wrapper.text()).toContain('¥120.00')
-    await wrapper.find('button').trigger('click')
+    expect(wrapper.text()).not.toContain('操作')
+    expect(wrapper.find('.head-actions').exists()).toBe(false)
+    expect(wrapper.find('.cell-actions').exists()).toBe(false)
+    expect(wrapper.find('button').exists()).toBe(false)
+    await wrapper.find('[data-test="skill-ticket-row-t-1"]').trigger('click')
     expect(router.push).toHaveBeenCalledWith('/skill-tickets/t-1')
   })
 })

@@ -13,6 +13,7 @@
       size="small"
       :bordered="false"
       :row-key="(row: SkillTicket) => row.id"
+      :row-props="ticketRowProps"
     />
 
     <n-modal v-model:show="showSubmit" preset="card" title="提交定制技能需求" :style="{ width: '520px' }">
@@ -72,9 +73,8 @@ const columns: DataTableColumns<SkillTicket> = [
     key: 'actions',
     render: (row) =>
       h('div', { class: 'row-actions' }, [
-        h(NButton, { size: 'small', onClick: () => router.push(`/skill-tickets/${row.id}`) }, () => '查看'),
         row.status === 'delivered'
-          ? h(NButton, { size: 'small', type: 'primary', onClick: () => emit('goInstall', row.custom_skill_name) }, () => '去安装')
+          ? h(NButton, { size: 'small', type: 'primary', onClick: (event: MouseEvent) => onGoInstall(event, row) }, () => '去安装')
           : null,
       ]),
   },
@@ -98,6 +98,33 @@ function statusTag(status: string | undefined): StatusTag {
 
 function yuan(cents: number | null | undefined) {
   return typeof cents === 'number' ? `¥${(cents / 100).toFixed(2)}` : '—'
+}
+
+// openTicket 统一处理工单详情跳转，供鼠标点击和键盘回车/空格复用。
+function openTicket(row: SkillTicket) {
+  router.push(`/skill-tickets/${row.id}`)
+}
+
+// ticketRowProps 将用户侧工单行变为详情入口；保留键盘触发，避免移除查看按钮后降低可访问性。
+function ticketRowProps(row: SkillTicket) {
+  return {
+    class: 'ticket-row',
+    tabindex: 0,
+    role: 'link',
+    'data-test': `skill-ticket-row-${row.id}`,
+    onClick: () => openTicket(row),
+    onKeydown: (event: KeyboardEvent) => {
+      if (event.key !== 'Enter' && event.key !== ' ') return
+      event.preventDefault()
+      openTicket(row)
+    },
+  }
+}
+
+// onGoInstall 是 delivered 行的快捷安装入口；阻止冒泡，避免同时触发行点击跳详情。
+function onGoInstall(event: MouseEvent, row: SkillTicket) {
+  event.stopPropagation()
+  emit('goInstall', row.custom_skill_name)
 }
 
 function onPickSubmitFiles(event: Event) {
@@ -140,6 +167,15 @@ async function onSubmit() {
 .row-actions {
   display: flex;
   gap: 8px;
+}
+
+.skill-ticket-panel :deep(.ticket-row) {
+  cursor: pointer;
+}
+
+.skill-ticket-panel :deep(.ticket-row:focus-visible) {
+  outline: 2px solid var(--color-brand);
+  outline-offset: -2px;
 }
 
 .modal-footer {

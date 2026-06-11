@@ -20,6 +20,7 @@
       size="small"
       :bordered="false"
       :row-key="(row: SkillTicket) => row.id"
+      :row-props="ticketRowProps"
     />
   </div>
 </template>
@@ -27,7 +28,7 @@
 <script setup lang="ts">
 import { computed, h, ref } from 'vue'
 import { useRouter } from 'vue-router'
-import { NButton, NDataTable, NInput, NSelect, NTag, type DataTableColumns } from 'naive-ui'
+import { NDataTable, NInput, NSelect, NTag, type DataTableColumns } from 'naive-ui'
 
 import type { SkillTicket } from '@/api'
 import { useAdminSkillTicketsQuery } from '@/api/hooks/useSkillTickets'
@@ -62,11 +63,6 @@ const columns: DataTableColumns<SkillTicket> = [
   { title: '提交者', key: 'requester', render: (row) => roleLabel(row.requester_role) },
   { title: '状态', key: 'status', render: (row) => h(NTag, { type: statusTag(row.status).type, bordered: false, size: 'small' }, () => statusTag(row.status).label) },
   { title: '报价', key: 'quote', render: (row) => yuan(row.quote_amount_cents) },
-  {
-    title: '操作',
-    key: 'actions',
-    render: (row) => h(NButton, { size: 'small', onClick: () => router.push(`/skill-tickets/${row.id}`) }, () => '处理'),
-  },
 ]
 
 interface StatusTag {
@@ -92,11 +88,34 @@ function roleLabel(role: string | undefined) {
 function yuan(cents: number | null | undefined) {
   return typeof cents === 'number' ? `¥${(cents / 100).toFixed(2)}` : '—'
 }
+
+// openTicket 统一处理工单详情跳转，供鼠标点击和键盘回车/空格复用。
+function openTicket(row: SkillTicket) {
+  router.push(`/skill-tickets/${row.id}`)
+}
+
+// ticketRowProps 将整行变为详情入口；保留键盘触发，避免移除按钮后只能用鼠标访问。
+function ticketRowProps(row: SkillTicket) {
+  return {
+    class: 'ticket-row',
+    tabindex: 0,
+    role: 'link',
+    'data-test': `skill-ticket-row-${row.id}`,
+    onClick: () => openTicket(row),
+    onKeydown: (event: KeyboardEvent) => {
+      if (event.key !== 'Enter' && event.key !== ' ') return
+      event.preventDefault()
+      openTicket(row)
+    },
+  }
+}
 </script>
 
 <style scoped>
 .custom-skill-tickets-page {
   display: grid;
+  /* 工单页由外层布局撑满高度，内容应贴齐顶部，避免 grid 默认拉伸 auto 行造成页头留白。 */
+  align-content: start;
   gap: 16px;
 }
 
@@ -130,5 +149,14 @@ h2 {
 
 .keyword-filter {
   width: 240px;
+}
+
+.custom-skill-tickets-page :deep(.ticket-row) {
+  cursor: pointer;
+}
+
+.custom-skill-tickets-page :deep(.ticket-row:focus-visible) {
+  outline: 2px solid var(--color-brand);
+  outline-offset: -2px;
 }
 </style>

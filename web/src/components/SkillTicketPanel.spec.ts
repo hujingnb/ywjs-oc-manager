@@ -31,10 +31,18 @@ vi.mock('naive-ui', async () => {
   const { defineComponent, h } = await import('vue')
   type Row = Record<string, unknown>
   interface Col { key: string; title?: string; render?: (row: Row) => VNodeChild }
+  type RowProps = (row: Row) => Record<string, unknown>
   const NDataTable = defineComponent({
-    props: { columns: { type: Array, default: () => [] }, data: { type: Array, default: () => [] } },
-    setup(props: { columns: Col[]; data: Row[] }) {
-      return () => h('div', props.data.flatMap((row) => props.columns.map((col) => h('div', { class: `cell-${col.key}` }, col.render ? [col.render(row)] : String(row[col.key] ?? '')))))
+    props: {
+      columns: { type: Array, default: () => [] },
+      data: { type: Array, default: () => [] },
+      rowProps: { type: Function, default: undefined },
+    },
+    setup(props: { columns: Col[]; data: Row[]; rowProps?: RowProps }) {
+      return () => h('table', [
+        h('thead', props.columns.map((col) => h('th', { class: `head-${col.key}` }, col.title ?? ''))),
+        h('tbody', props.data.map((row) => h('tr', props.rowProps?.(row) ?? {}, props.columns.map((col) => h('td', { class: `cell-${col.key}` }, col.render ? [col.render(row)] : String(row[col.key] ?? '')))))),
+      ])
     },
   })
   return {
@@ -57,13 +65,16 @@ describe('SkillTicketPanel', () => {
     ticketsState.error.value = null
   })
 
-  // 查看按钮跳转共享详情页,delivered 行保留去安装 emit。
+  // 工单列表不再显示查看按钮，点击整行进入详情；delivered 行保留去安装快捷入口且不触发行跳转。
   it('navigates to detail and emits goInstall for delivered ticket', async () => {
     ticketsState.data.value = [{ id: 't-1', title: '需求', status: 'delivered', custom_skill_name: 'weekly' }]
     const wrapper = mount(SkillTicketPanel)
-    await wrapper.findAll('button').find((button) => button.text() === '查看')!.trigger('click')
+    expect(wrapper.findAll('button').some((button) => button.text() === '查看')).toBe(false)
+    await wrapper.find('[data-test="skill-ticket-row-t-1"]').trigger('click')
     expect(router.push).toHaveBeenCalledWith('/skill-tickets/t-1')
+    router.push.mockClear()
     await wrapper.findAll('button').find((button) => button.text() === '去安装')!.trigger('click')
+    expect(router.push).not.toHaveBeenCalled()
     expect(wrapper.emitted('goInstall')?.[0]).toEqual(['weekly'])
   })
 
