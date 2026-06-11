@@ -8,6 +8,7 @@ const detailState = {
   data: ref<Record<string, unknown> | null>(null),
   isLoading: ref(false),
   error: ref<Error | null>(null),
+  refetch: vi.fn(),
 }
 const orgsState = {
   data: ref<Record<string, unknown>[]>([{ id: 'org-1', name: '甲公司' }]),
@@ -86,6 +87,7 @@ describe('TicketDetailPage', () => {
     vi.clearAllMocks()
     detailState.isLoading.value = false
     detailState.error.value = null
+    detailState.refetch.mockResolvedValue(undefined)
     authState.user = { id: 'admin-1', role: 'platform_admin' }
   })
 
@@ -199,5 +201,25 @@ describe('TicketDetailPage', () => {
     detailState.data.value = { id: 't-1', title: '需求', status: 'processing', quote_amount_cents: 12000, messages: [] }
     wrapper = mountPage()
     expect(wrapper.find('.quote-input').exists()).toBe(false)
+  })
+
+  // 工单详情页定时刷新详情 query,用于在没有真实实时通道时模拟对话消息实时更新;组件卸载后必须清理定时器。
+  it('polls ticket detail periodically and stops after unmount', () => {
+    vi.useFakeTimers()
+    try {
+      detailState.data.value = { id: 't-1', title: '需求', status: 'pending', messages: [] }
+
+      const wrapper = mountPage()
+      expect(detailState.refetch).not.toHaveBeenCalled()
+
+      vi.advanceTimersByTime(5_000)
+      expect(detailState.refetch).toHaveBeenCalledTimes(1)
+
+      wrapper.unmount()
+      vi.advanceTimersByTime(5_000)
+      expect(detailState.refetch).toHaveBeenCalledTimes(1)
+    } finally {
+      vi.useRealTimers()
+    }
   })
 })

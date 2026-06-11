@@ -108,7 +108,7 @@
 </template>
 
 <script setup lang="ts">
-import { computed, ref, watch } from 'vue'
+import { computed, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { NButton, NInput, NInputNumber, NModal, useMessage } from 'naive-ui'
 
@@ -128,6 +128,8 @@ import DeliverCustomSkillModal from '@/components/ticket/DeliverCustomSkillModal
 import TicketConversation from '@/components/ticket/TicketConversation.vue'
 import TicketStatusStepper from '@/components/ticket/TicketStatusStepper.vue'
 import TicketTargetsEditor from '@/components/ticket/TicketTargetsEditor.vue'
+
+const REALTIME_SIMULATION_INTERVAL_MS = 5_000
 
 const route = useRoute()
 const router = useRouter()
@@ -160,6 +162,22 @@ const requesterDisplay = computed(() => ticket.value?.requester_name || ticket.v
 const organizationDisplay = computed(() => {
   if (!ticket.value) return '—'
   return ticket.value.org_name || orgLabel(ticket.value.org_id || '') || ticket.value.org_id || '—'
+})
+let realtimeSimulationTimer: number | undefined
+
+onMounted(() => {
+  // 本地没有真实消息推送通道时,定时刷新详情 query 来模拟对话实时消息到达。
+  realtimeSimulationTimer = window.setInterval(() => {
+    if (!id.value) return
+    void detailQuery.refetch()
+  }, REALTIME_SIMULATION_INTERVAL_MS)
+})
+
+onBeforeUnmount(() => {
+  if (realtimeSimulationTimer !== undefined) {
+    window.clearInterval(realtimeSimulationTimer)
+    realtimeSimulationTimer = undefined
+  }
 })
 
 watch(
