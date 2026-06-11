@@ -18,10 +18,10 @@
 
     <n-modal v-model:show="showSubmit" preset="card" title="提交定制技能需求" :style="{ width: '520px' }">
       <n-form>
-        <n-form-item label="标题">
+        <n-form-item label="标题" required>
           <n-input v-model:value="submitTitle" placeholder="一句话说明需要什么技能" />
         </n-form-item>
-        <n-form-item label="描述">
+        <n-form-item label="描述" required>
           <n-input v-model:value="submitDescription" type="textarea" :autosize="{ minRows: 3, maxRows: 8 }" placeholder="描述场景、输入输出、期望行为" />
         </n-form-item>
         <n-form-item label="附件">
@@ -31,7 +31,7 @@
       <template #footer>
         <div class="modal-footer">
           <n-button @click="showSubmit = false">取消</n-button>
-          <n-button type="primary" :loading="submitMut.isPending.value || uploadMut.isPending.value" :disabled="!submitTitle.trim()" @click="onSubmit">
+          <n-button type="primary" :loading="submitMut.isPending.value || uploadMut.isPending.value" :disabled="!submitTitle.trim() || !submitDescription.trim()" @click="onSubmit">
             提交
           </n-button>
         </div>
