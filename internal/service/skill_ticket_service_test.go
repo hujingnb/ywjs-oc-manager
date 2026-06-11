@@ -18,6 +18,8 @@ type fakeSkillTicketStore struct {
 	tickets  map[string]sqlc.SkillTicket          // id -> 工单
 	messages map[string][]sqlc.SkillTicketMessage // ticketID -> 消息
 	targets  map[string][]sqlc.CustomSkillTarget  // customSkillName -> 可见范围
+	users    map[string]sqlc.User                 // id -> 用户展示信息
+	orgs     map[string]sqlc.Organization         // id -> 企业展示信息
 }
 
 func newFakeSkillTicketStore() *fakeSkillTicketStore {
@@ -25,6 +27,8 @@ func newFakeSkillTicketStore() *fakeSkillTicketStore {
 		tickets:  map[string]sqlc.SkillTicket{},
 		messages: map[string][]sqlc.SkillTicketMessage{},
 		targets:  map[string][]sqlc.CustomSkillTarget{},
+		users:    map[string]sqlc.User{},
+		orgs:     map[string]sqlc.Organization{},
 	}
 }
 
@@ -93,6 +97,20 @@ func (f *fakeSkillTicketStore) ListSkillTicketMessages(_ context.Context, ticket
 func (f *fakeSkillTicketStore) ListCustomSkillTargetsByName(_ context.Context, name string) ([]sqlc.CustomSkillTarget, error) {
 	return f.targets[name], nil
 }
+func (f *fakeSkillTicketStore) GetUser(_ context.Context, id string) (sqlc.User, error) {
+	user, ok := f.users[id]
+	if !ok {
+		return sqlc.User{}, sql.ErrNoRows
+	}
+	return user, nil
+}
+func (f *fakeSkillTicketStore) GetOrganization(_ context.Context, id string) (sqlc.Organization, error) {
+	org, ok := f.orgs[id]
+	if !ok {
+		return sqlc.Organization{}, sql.ErrNoRows
+	}
+	return org, nil
+}
 
 func memberP() auth.Principal {
 	return auth.Principal{UserID: "u-mem", OrgID: "org-1", Role: domain.UserRoleOrgMember}
@@ -160,6 +178,20 @@ func TestSkillTicketService_Get_IncludesTargets(t *testing.T) {
 	require.Len(t, detail.Targets, 1)
 	assert.Equal(t, "org-1", detail.Targets[0].OrgID)
 	assert.Equal(t, "org_admins", detail.Targets[0].Audience)
+}
+
+// 平台管理员查看详情时需要看到提交者与所属企业的可读名称,便于判断工单来源。
+func TestSkillTicketService_Get_IncludesRequesterAndOrganizationNames(t *testing.T) {
+	store := newFakeSkillTicketStore()
+	store.users["u-mem"] = sqlc.User{ID: "u-mem", Username: "member-a", DisplayName: "张三"}
+	store.orgs["org-1"] = sqlc.Organization{ID: "org-1", Name: "甲公司", Code: "test-org"}
+	svc := NewSkillTicketService(store)
+	res, _ := svc.Submit(context.Background(), memberP(), SubmitSkillTicketInput{Title: "t", Description: "d"})
+
+	detail, err := svc.Get(context.Background(), adminP(), res.ID)
+	require.NoError(t, err)
+	assert.Equal(t, "张三", detail.RequesterName)
+	assert.Equal(t, "甲公司", detail.OrgName)
 }
 
 // 开始制作:pending → processing 成功,非 pending 状态拒绝。

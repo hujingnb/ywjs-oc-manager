@@ -107,6 +107,43 @@ describe('TicketDetailPage', () => {
     expect(wrapper.text()).toContain('重新受理')
   })
 
+  // 平台管理员查看工单详情时展示提交者和所属企业，便于识别需求来源。
+  it('renders requester and organization for platform admin', () => {
+    detailState.data.value = {
+      id: 't-1',
+      title: '需求',
+      status: 'pending',
+      requester_name: '张三',
+      requester_role: 'org_member',
+      org_name: '甲公司',
+      messages: [],
+    }
+    const wrapper = mountPage()
+    expect(wrapper.text()).toContain('提交信息')
+    expect(wrapper.text()).toContain('提交者')
+    expect(wrapper.text()).toContain('张三')
+    expect(wrapper.text()).toContain('成员')
+    expect(wrapper.text()).toContain('所属企业')
+    expect(wrapper.text()).toContain('甲公司')
+  })
+
+  // 需求方详情页不展示来源信息，避免对本人重复展示冗余字段。
+  it('hides requester and organization for requester', () => {
+    authState.user = { id: 'u-1', role: 'org_member' }
+    detailState.data.value = {
+      id: 't-1',
+      title: '需求',
+      status: 'pending',
+      requester_name: '张三',
+      requester_role: 'org_member',
+      org_name: '甲公司',
+      messages: [],
+    }
+    const wrapper = mountPage()
+    expect(wrapper.text()).not.toContain('提交信息')
+    expect(wrapper.text()).not.toContain('所属企业')
+  })
+
   // 需求方只读,已交付时显示去安装且不显示管理员动作。
   it('renders requester read-only with go-install on delivered', async () => {
     authState.user = { id: 'u-1', role: 'org_member' }

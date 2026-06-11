@@ -22,6 +22,23 @@
         </div>
       </header>
 
+      <section v-if="isAdmin" class="detail-section submitter-section">
+        <h2>提交信息</h2>
+        <dl class="submitter-grid">
+          <div>
+            <dt>提交者</dt>
+            <dd>
+              {{ requesterDisplay }}
+              <span v-if="ticket.requester_role" class="role-chip">{{ requesterRoleLabel(ticket.requester_role) }}</span>
+            </dd>
+          </div>
+          <div>
+            <dt>所属企业</dt>
+            <dd>{{ organizationDisplay }}</dd>
+          </div>
+        </dl>
+      </section>
+
       <section class="detail-section">
         <h2>需求</h2>
         <p class="description">{{ ticket.description || '暂无描述' }}</p>
@@ -140,6 +157,11 @@ const orgs = computed(() => orgsQuery.data.value ?? [])
 const targets = computed<DeliverTarget[]>(() => normalizeTargets(ticket.value?.targets))
 const messages = computed<SkillTicketMessage[]>(() => normalizeMessages(ticket.value?.messages))
 const canEditQuote = computed(() => ticket.value?.status === 'pending' || ticket.value?.status === 'processing')
+const requesterDisplay = computed(() => ticket.value?.requester_name || ticket.value?.requester_user_id || '—')
+const organizationDisplay = computed(() => {
+  if (!ticket.value) return '—'
+  return ticket.value.org_name || orgLabel(ticket.value.org_id || '') || ticket.value.org_id || '—'
+})
 
 watch(
   () => ticket.value?.quote_amount_cents,
@@ -162,6 +184,10 @@ function audienceLabel(audience: string) {
       requester_only: '仅申请人',
     }[audience] ?? audience
   )
+}
+
+function requesterRoleLabel(role: string | undefined) {
+  return role === 'org_admin' ? '管理员' : role === 'org_member' ? '成员' : role || '未知'
 }
 
 function yuan(cents: number | null | undefined) {
@@ -268,6 +294,41 @@ h2 {
   gap: 10px;
   padding: 16px 0;
   border-bottom: 1px solid #e2e8f0;
+}
+
+.submitter-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(180px, 1fr));
+  gap: 16px;
+  margin: 0;
+}
+
+.submitter-grid div {
+  display: grid;
+  gap: 4px;
+}
+
+.submitter-grid dt {
+  color: #64748b;
+  font-size: 12px;
+}
+
+.submitter-grid dd {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin: 0;
+  color: #0f172a;
+  font-weight: 600;
+}
+
+.role-chip {
+  padding: 2px 6px;
+  border-radius: 4px;
+  background: #eef2ff;
+  color: #3730a3;
+  font-size: 12px;
+  font-weight: 500;
 }
 
 .split-section {

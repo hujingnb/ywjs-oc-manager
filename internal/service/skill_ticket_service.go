@@ -35,6 +35,8 @@ type SkillTicketStore interface {
 	CountPendingSkillTickets(ctx context.Context) (int64, error)
 	ListSkillTicketMessages(ctx context.Context, ticketID string) ([]sqlc.SkillTicketMessage, error)
 	ListCustomSkillTargetsByName(ctx context.Context, name string) ([]sqlc.CustomSkillTarget, error)
+	GetUser(ctx context.Context, id string) (sqlc.User, error)
+	GetOrganization(ctx context.Context, id string) (sqlc.Organization, error)
 }
 
 // SkillTicketService 管理定制技能需求工单的人工处理生命周期。
@@ -72,8 +74,10 @@ type SkillTicketResult struct {
 // SkillTicketDetailResult 是工单详情(含统一消息流)。
 type SkillTicketDetailResult struct {
 	SkillTicketResult
-	Messages []SkillTicketMessageResult `json:"messages"`
-	Targets  []CustomSkillTargetResult  `json:"targets,omitempty"`
+	RequesterName string                     `json:"requester_name,omitempty"`
+	OrgName       string                     `json:"org_name,omitempty"`
+	Messages      []SkillTicketMessageResult `json:"messages"`
+	Targets       []CustomSkillTargetResult  `json:"targets,omitempty"`
 }
 
 // CustomSkillTargetResult 是已交付定制技能的可见范围视图,供详情页展示与编辑回填。
@@ -179,7 +183,43 @@ func (s *SkillTicketService) Get(ctx context.Context, p auth.Principal, id strin
 			targets = append(targets, CustomSkillTargetResult{OrgID: target.OrgID, Audience: target.Audience})
 		}
 	}
-	return SkillTicketDetailResult{SkillTicketResult: toSkillTicketResult(row), Messages: ms, Targets: targets}, nil
+	return SkillTicketDetailResult{
+		SkillTicketResult: toSkillTicketResult(row),
+		RequesterName:     s.requesterName(ctx, row.RequesterUserID),
+		OrgName:           s.organizationName(ctx, row.OrgID),
+		Messages:          ms,
+		Targets:           targets,
+	}, nil
+}
+
+// requesterName 返回平台管理员详情页展示用的提交者名称；查询失败时降级为 user id，避免辅助信息阻断详情读取。
+func (s *SkillTicketService) requesterName(ctx context.Context, userID string) string {
+	user, err := s.store.GetUser(ctx, userID)
+	if err != nil {
+		return userID
+	}
+	if name := strings.TrimSpace(user.DisplayName); name != "" {
+		return name
+	}
+	if username := strings.TrimSpace(user.Username); username != "" {
+		return username
+	}
+	return userID
+}
+
+// organizationName 返回平台管理员详情页展示用的企业名称；查询失败时降级为 org id。
+func (s *SkillTicketService) organizationName(ctx context.Context, orgID string) string {
+	org, err := s.store.GetOrganization(ctx, orgID)
+	if err != nil {
+		return orgID
+	}
+	if name := strings.TrimSpace(org.Name); name != "" {
+		return name
+	}
+	if code := strings.TrimSpace(org.Code); code != "" {
+		return code
+	}
+	return orgID
 }
 
 // loadTicket 按 id 取工单,未找到映射成 ErrSkillTicketNotFound。

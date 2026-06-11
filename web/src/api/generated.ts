@@ -12084,8 +12084,10 @@ export interface components {
             id?: string;
             messages?: components["schemas"]["service.SkillTicketMessageResult"][];
             org_id?: string;
+            org_name?: string;
             quote_amount_cents?: number;
             reject_reason?: string;
+            requester_name?: string;
             requester_role?: string;
             requester_user_id?: string;
             status?: string;

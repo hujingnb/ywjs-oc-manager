@@ -1883,9 +1883,13 @@ components:
           uniqueItems: false
         org_id:
           type: string
+        org_name:
+          type: string
         quote_amount_cents:
           type: integer
         reject_reason:
+          type: string
+        requester_name:
           type: string
         requester_role:
           type: string
