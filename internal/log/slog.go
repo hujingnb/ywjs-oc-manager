@@ -46,20 +46,27 @@ func (h *requestIDHandler) WithGroup(name string) slog.Handler {
 }
 
 // NewSlogLogger 构造 manager-api / agent 顶层 logger。
-//   - 输出：JSON handler，便于容器日志驱动 / ELK 解析
-//   - 脱敏：Writer 经 NewRedactingWriter 包装（与现有 stdlib log 等价）
+//   - 输出：cfg.Format 为 "text" 时用 TextHandler（本地调试），否则 JSONHandler（容器日志/ELK）
+//   - 级别：cfg.Level（由 LOG_LEVEL 解析，默认 Info）
+//   - 脱敏：Writer 经 NewRedactingWriter 包装，json/text 两种格式都生效
+//   - trace_id：requestIDHandler 自动从 ctx 注入，不受格式影响
 //   - source：AddSource=true 含 caller 路径，便于错误定位
-//   - level：Info（生产足够；调试时未来可加 LOG_LEVEL env，本次不做）
 //
 // out 为 nil 时默认走 os.Stderr。
-func NewSlogLogger(out io.Writer) *slog.Logger {
+func NewSlogLogger(out io.Writer, cfg Config) *slog.Logger {
 	if out == nil {
 		out = os.Stderr
 	}
 	w := NewRedactingWriter(out)
-	base := slog.NewJSONHandler(w, &slog.HandlerOptions{
-		Level:     slog.LevelInfo,
+	opts := &slog.HandlerOptions{
+		Level:     cfg.Level,
 		AddSource: true,
-	})
+	}
+	var base slog.Handler
+	if cfg.Format == "text" {
+		base = slog.NewTextHandler(w, opts)
+	} else {
+		base = slog.NewJSONHandler(w, opts)
+	}
 	return slog.New(&requestIDHandler{Handler: base})
 }

@@ -11,10 +11,10 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
-// captureLogger 用 bytes.Buffer 捕获日志输出便于断言。
+// captureLogger 用 bytes.Buffer 捕获日志输出便于断言；默认 Info 级别 + json 格式，与生产默认一致。
 func captureLogger() (*slog.Logger, *bytes.Buffer) {
 	buf := &bytes.Buffer{}
-	logger := NewSlogLogger(buf)
+	logger := NewSlogLogger(buf, Config{Level: slog.LevelInfo, Format: "json"})
 	return logger, buf
 }
 
