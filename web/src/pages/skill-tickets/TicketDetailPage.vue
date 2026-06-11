@@ -190,7 +190,11 @@ watch(
 
 function orgLabel(orgID: string) {
   const org = orgs.value.find((item) => item.id === orgID)
-  return org?.name || org?.code || orgID
+  if (org?.name || org?.code) return org.name || org.code
+  // 非平台管理员拿不到全量组织列表(orgsQuery 仅平台管理员启用),其工单目标企业必然是工单自身企业,
+  // 用详情携带的 org_name 兜底,避免在「可见范围」直接把企业 UUID 暴露给用户。
+  if (orgID && orgID === ticket.value?.org_id && ticket.value?.org_name) return ticket.value.org_name
+  return orgID
 }
 
 function audienceLabel(audience: string) {

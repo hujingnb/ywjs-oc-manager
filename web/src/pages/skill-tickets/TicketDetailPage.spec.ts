@@ -89,6 +89,8 @@ describe('TicketDetailPage', () => {
     detailState.error.value = null
     detailState.refetch.mockResolvedValue(undefined)
     authState.user = { id: 'admin-1', role: 'platform_admin' }
+    // 默认恢复平台管理员可见的全量组织列表;org_admin 兜底用例会单独置空以模拟 orgsQuery 未启用。
+    orgsState.data.value = [{ id: 'org-1', name: '甲公司' }]
   })
 
   // 平台管理员按状态看到动作按钮:pending 开始制作,delivered 编辑可见范围,rejected 重新受理。
@@ -142,6 +144,25 @@ describe('TicketDetailPage', () => {
     const wrapper = mountPage()
     expect(wrapper.text()).toContain('甲公司 · 仅企业管理员')
     expect(wrapper.text()).not.toContain('甲公司 · 仅管理员')
+  })
+
+  // org_admin 拿不到全量组织列表(orgsQuery 仅平台管理员启用),可见范围须用工单自身 org_name 兜底,
+  // 不能把目标企业 UUID 直接暴露给用户。
+  it('falls back to ticket org_name and never shows org UUID for org admin', () => {
+    authState.user = { id: 'oa-1', role: 'org_admin' }
+    orgsState.data.value = [] // 模拟非平台管理员:orgsQuery 未启用,返回空列表
+    detailState.data.value = {
+      id: 't-1',
+      title: '需求',
+      status: 'delivered',
+      org_id: 'bda67aa4-92cd-4448-a5fb-a93a23813ab9',
+      org_name: '乙公司',
+      targets: [{ org_id: 'bda67aa4-92cd-4448-a5fb-a93a23813ab9', audience: 'org_admins' }],
+      messages: [],
+    }
+    const wrapper = mountPage()
+    expect(wrapper.text()).toContain('乙公司 · 仅企业管理员')
+    expect(wrapper.text()).not.toContain('bda67aa4-92cd-4448-a5fb-a93a23813ab9')
   })
 
   // 需求描述统一进入对话消息流后,详情页不再渲染独立“需求”区块。
