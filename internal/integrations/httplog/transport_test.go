@@ -78,6 +78,22 @@ func TestRoundTrip_非2xx记warn(t *testing.T) {
 	assert.Equal(t, float64(500), m["status"])
 }
 
+// TestRoundTrip_3xx记debug 验证 3xx（如 304 条件命中 / 重定向）不是错误，记 Debug 而非 Warn，避免噪音告警。
+func TestRoundTrip_3xx记debug(t *testing.T) {
+	var buf bytes.Buffer
+	old := slog.Default()
+	slog.SetDefault(capture(&buf))
+	defer slog.SetDefault(old)
+
+	base := rtFunc(func(r *http.Request) (*http.Response, error) { return resp(304), nil }) // 304 Not Modified
+	req, _ := http.NewRequest(http.MethodGet, "http://x/api/user", nil)
+	_, _ = New(base, "newapi").RoundTrip(req)
+
+	m := lastLine(t, &buf)
+	assert.Equal(t, "DEBUG", m["level"])     // 3xx 归 Debug
+	assert.Equal(t, float64(304), m["status"]) // 状态码仍记录
+}
+
 // TestRoundTrip_传输错误记warn 验证 transport error 记 Warn、带 error 不带 status，且错误原样透传。
 func TestRoundTrip_传输错误记warn(t *testing.T) {
 	var buf bytes.Buffer

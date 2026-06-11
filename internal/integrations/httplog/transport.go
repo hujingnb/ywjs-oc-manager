@@ -48,8 +48,10 @@ func (t *transport) RoundTrip(req *http.Request) (*http.Response, error) {
 	}
 	attrs = append(attrs, slog.Int(mlog.KeyStatus, resp.StatusCode))
 	level := slog.LevelDebug
-	if resp.StatusCode >= 300 {
-		// 非 2xx（含 3xx 重定向与 4xx/5xx 错误）统一升为 Warn，便于排查外部依赖异常。
+	if resp.StatusCode >= 400 {
+		// 仅 4xx/5xx 升为 Warn，便于排查外部依赖异常。3xx（重定向 / 304 条件命中）
+		// 不是错误：http.Client 默认会自动跟随重定向，最终响应通常已是 2xx，单独的
+		// 3xx 多为 304 等正常语义，记 Debug 即可，避免噪音告警。
 		level = slog.LevelWarn
 	}
 	slog.LogAttrs(ctx, level, "external_request", attrs...)

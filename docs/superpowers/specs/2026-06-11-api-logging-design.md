@@ -112,7 +112,7 @@
   - `method`、`endpoint`（`req.URL.Path`，**不含 query**，避免敏感参数泄露）
   - `status`（transport error 时省略，记 `error`）
   - `latency_ms`
-- 级别：2xx → Debug；非 2xx 或 transport error → Warn。**不记 body**。
+- 级别：2xx/3xx → Debug；4xx/5xx 或 transport error → Warn。**不记 body**。（3xx 多为 304 条件命中或自动跟随的重定向，非错误，记 Debug 避免噪音。）
 - 日志用 `req.Context()` 作为 ctx，使外部调用日志也自动带上发起该调用的请求 trace_id（实现链路串联）。
 - 接入：在各 integration 构造函数内把 `http.Client.Transport`（newapi 的 `Client.HTTPClient` 与 ragflow 经由的 `httpclient.BaseHTTPClient.HTTPClient`）设置为 `httplog.New(http.DefaultTransport, "<service>")`。`cmd/server/main.go` 的 wiring 不需要改动；log_type 标签随构造函数固定。
 
