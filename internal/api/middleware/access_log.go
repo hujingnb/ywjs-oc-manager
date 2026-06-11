@@ -26,7 +26,10 @@ var skipAccessLogPaths = map[string]bool{
 //
 // 级别：5xx→Error，4xx→Warn，其余→Info。健康检查路径跳过。
 //
-// 必须挂在 RequireUserAuth 之后，才能在 c.Next() 返回后读到 principal。
+// 挂载位置：RequestID 之后、RequireUserAuth 之前——这样未鉴权导致的 4xx、CSRF
+// 拒绝、公共路由与 404 也能记到。user_id 在 c.Next() 返回后从 c.Request.Context()
+// 读取：RequireUserAuth 在其阶段用 c.Request = c.Request.WithContext(...) 注入
+// principal，AccessLog 比它先入栈但后收尾，故读到的仍是带 principal 的 ctx。
 func AccessLog() gin.HandlerFunc {
 	return func(c *gin.Context) {
 		if skipAccessLogPaths[c.Request.URL.Path] {
@@ -63,6 +66,7 @@ func AccessLog() gin.HandlerFunc {
 			slog.String(mlog.KeyClientIP, c.ClientIP()),
 			slog.String(mlog.KeyUserID, userID),
 			slog.Int(mlog.KeyBytes, c.Writer.Size()),
+			slog.String(mlog.KeyLogType, mlog.LogTypeHTTP), // 显式带 log_type=http，handler 不再兜底
 		)
 	}
 }

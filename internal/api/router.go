@@ -96,6 +96,11 @@ func NewRouter(deps ...Dependencies) http.Handler {
 	}
 	// RequestID 保证每个请求都携带 trace_id，供 slog ctx-aware 日志输出 trace_id 字段。
 	router.Use(middleware.RequestID())
+	// access log 挂在 RequestID 之后、鉴权/CSRF 之前：覆盖全部请求（含登录失败、CSRF
+	// 拒绝、公共路由与未匹配 404），未鉴权导致的 4xx 也能记到；user_id 在 c.Next() 返回后
+	// 从 c.Request.Context() 读取，此时 RequireUserAuth 已注入 principal，故仍能拿到。
+	// 健康检查等纯噪音路径由中间件内部 skip 集合跳过。
+	router.Use(middleware.AccessLog())
 	// CSRF 双 submit cookie 校验：opt-in 模式（无 cookie 时放行），
 	// 前端拿到 csrf_token cookie 后必须把它写到 X-CSRF-Token header 才能通过写操作。
 	router.Use(middleware.RequireCSRF())
@@ -128,9 +133,6 @@ func NewRouter(deps ...Dependencies) http.Handler {
 	// ── user：RequireUserAuth 注入 principal，所有业务路由挂载在此组 ──
 	user := router.Group("")
 	user.Use(middleware.RequireUserAuth(dep.TokenManager))
-	// access log 挂在 auth 之后：记录每个业务请求的 method/route/status/耗时/user_id（仅 stdout）。
-	// 健康检查路径在中间件内部跳过。
-	user.Use(middleware.AccessLog())
 
 	if dep.AuthService != nil {
 		authHandler := handlers.NewAuthHandler(dep.AuthService, dep.Captcha)

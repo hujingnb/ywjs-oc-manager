@@ -63,6 +63,7 @@ func TestAccessLog_级别按状态分流(t *testing.T) {
 			assert.Equal(t, "/api/v1/orgs/:id", m["route"]) // route 用模板而非真实 ID
 			assert.Equal(t, "GET", m["method"])
 			assert.Equal(t, float64(tc.status), m["status"])
+			assert.Equal(t, "http", m["log_type"]) // 每条 access log 带 log_type=http
 		})
 	}
 }
@@ -89,6 +90,33 @@ func TestAccessLog_带user_id(t *testing.T) {
 
 	m := lastLogLine(t, &buf)
 	assert.Equal(t, "u-123", m["user_id"])
+}
+
+// TestAccessLog_鉴权前挂载仍记user_id 复刻生产挂载顺序：AccessLog 先入栈、
+// RequireUserAuth 后入栈并在 c.Next() 阶段注入 principal，验证 AccessLog 收尾时
+// 仍能从 c.Request.Context() 读到 user_id（中间件先进后出 + 替换 c.Request 指针）。
+func TestAccessLog_鉴权前挂载仍记user_id(t *testing.T) {
+	var buf bytes.Buffer
+	old := slog.Default()
+	slog.SetDefault(newCapturingLogger(&buf))
+	defer slog.SetDefault(old)
+
+	gin.SetMode(gin.TestMode)
+	r := gin.New()
+	// AccessLog 在鉴权之前挂载（生产顺序），先于 auth-sim 入栈。
+	r.Use(AccessLog())
+	// 模拟 RequireUserAuth：在 c.Next() 之前替换 c.Request 注入 principal。
+	r.Use(func(c *gin.Context) {
+		ctx := auth.WithPrincipal(c.Request.Context(), auth.Principal{UserID: "u-789"})
+		c.Request = c.Request.WithContext(ctx)
+		c.Next()
+	})
+	r.GET("/ping", func(c *gin.Context) { c.Status(http.StatusOK) })
+
+	r.ServeHTTP(httptest.NewRecorder(), httptest.NewRequest(http.MethodGet, "/ping", nil))
+
+	m := lastLogLine(t, &buf)
+	assert.Equal(t, "u-789", m["user_id"]) // 鉴权前挂载仍能拿到 principal
 }
 
 // TestAccessLog_跳过健康检查 验证 /healthz 不产生 access log。
