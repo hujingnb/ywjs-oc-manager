@@ -128,6 +128,9 @@ func NewRouter(deps ...Dependencies) http.Handler {
 	// ── user：RequireUserAuth 注入 principal，所有业务路由挂载在此组 ──
 	user := router.Group("")
 	user.Use(middleware.RequireUserAuth(dep.TokenManager))
+	// access log 挂在 auth 之后：记录每个业务请求的 method/route/status/耗时/user_id（仅 stdout）。
+	// 健康检查路径在中间件内部跳过。
+	user.Use(middleware.AccessLog())
 
 	if dep.AuthService != nil {
 		authHandler := handlers.NewAuthHandler(dep.AuthService, dep.Captcha)
