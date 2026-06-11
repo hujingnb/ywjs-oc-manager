@@ -27,6 +27,11 @@ vi.mock('naive-ui', () => ({
     template: '<textarea class="n-input" :value="value" @input="$emit(\'update:value\', $event.target.value)"></textarea>',
   },
   NButton: { template: '<button class="n-button" v-bind="$attrs"><slot /></button>' },
+  NModal: {
+    props: ['show'],
+    emits: ['update:show'],
+    template: '<div v-if="show" class="n-modal"><slot /><button class="modal-close" @click="$emit(\'update:show\', false)">关闭</button></div>',
+  },
 }))
 
 describe('TicketConversation', () => {
@@ -71,6 +76,28 @@ describe('TicketConversation', () => {
     expect(wrapper.text()).toContain('需求.pdf')
     await wrapper.find('.file-message').trigger('click')
     expect(mocks.download).toHaveBeenCalledWith('t-1', expect.objectContaining({ id: 'file' }))
+  })
+
+  // 图片消息点击后打开大图预览弹层，不再触发原文件下载。
+  it('opens image preview modal when clicking image message', async () => {
+    const wrapper = mount(TicketConversation, {
+      props: {
+        ticketId: 't-1',
+        currentUserId: 'me',
+        messages: [
+          { id: 'img', kind: 'image', file_name: '图.png', author_user_id: 'other' },
+        ],
+      },
+    })
+    await vi.waitFor(() => expect(wrapper.find('.image-message img').exists()).toBe(true))
+
+    await wrapper.find('.image-message').trigger('click')
+
+    const preview = wrapper.find('.image-preview-modal img')
+    expect(preview.exists()).toBe(true)
+    expect(preview.attributes('src')).toBe('blob:image')
+    expect(preview.attributes('alt')).toBe('图.png')
+    expect(mocks.download).not.toHaveBeenCalled()
   })
 
   // composer 输入文本点发送调用 send hook;选择文件调用 upload hook。

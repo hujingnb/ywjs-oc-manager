@@ -18,7 +18,7 @@
             v-else-if="message.kind === 'image'"
             class="image-message"
             type="button"
-            @click="downloadTicketMessage(ticketId, message)"
+            @click="onImageMessageClick(message)"
           >
             <img v-if="imageUrls[message.id]" :src="imageUrls[message.id]" :alt="message.file_name || '图片消息'" />
             <span v-else>图片加载中</span>
@@ -53,12 +53,23 @@
         </n-button>
       </div>
     </div>
+
+    <n-modal v-model:show="previewOpen" preset="card" :style="{ width: 'min(960px, calc(100vw - 48px))' }">
+      <div class="image-preview-modal">
+        <img
+          v-if="previewImage"
+          :src="previewImage.url"
+          :alt="previewImage.alt"
+          class="preview-image"
+        />
+      </div>
+    </n-modal>
   </section>
 </template>
 
 <script setup lang="ts">
 import { onBeforeUnmount, reactive, ref, watch } from 'vue'
-import { NButton, NInput, useMessage } from 'naive-ui'
+import { NButton, NInput, NModal, useMessage } from 'naive-ui'
 
 import type { SkillTicketMessage } from '@/api'
 import {
@@ -84,6 +95,8 @@ const uploadMut = useUploadTicketMessage(ticketIDRef)
 const fileInput = ref<HTMLInputElement | null>(null)
 const text = ref('')
 const imageUrls = reactive<Record<string, string>>({})
+const previewOpen = ref(false)
+const previewImage = ref<{ id: string; url: string; alt: string } | null>(null)
 
 watch(
   () => props.ticketId,
@@ -98,6 +111,10 @@ watch(
     const imageIDs = new Set(messages.filter((item) => item.kind === 'image').map((item) => item.id))
     for (const id of Object.keys(imageUrls)) {
       if (!imageIDs.has(id)) {
+        if (previewImage.value?.id === id) {
+          previewOpen.value = false
+          previewImage.value = null
+        }
         URL.revokeObjectURL(imageUrls[id])
         delete imageUrls[id]
       }
@@ -114,6 +131,10 @@ watch(
   { immediate: true, deep: true },
 )
 
+watch(previewOpen, (open) => {
+  if (!open) previewImage.value = null
+})
+
 onBeforeUnmount(() => {
   for (const url of Object.values(imageUrls)) {
     URL.revokeObjectURL(url)
@@ -129,6 +150,20 @@ async function onSendText() {
   } catch {
     message.error('消息发送失败')
   }
+}
+
+function onImageMessageClick(item: SkillTicketMessage) {
+  const url = imageUrls[item.id]
+  if (!url) {
+    downloadTicketMessage(props.ticketId, item)
+    return
+  }
+  previewImage.value = {
+    id: item.id,
+    url,
+    alt: item.file_name || '图片消息',
+  }
+  previewOpen.value = true
 }
 
 function triggerFileInput() {
@@ -236,6 +271,19 @@ function formatSize(size: number | undefined) {
   max-height: 160px;
   border-radius: 6px;
   object-fit: cover;
+}
+
+.image-preview-modal {
+  display: grid;
+  place-items: center;
+}
+
+.preview-image {
+  display: block;
+  max-width: 100%;
+  max-height: min(76vh, 760px);
+  border-radius: 8px;
+  object-fit: contain;
 }
 
 .file-message {
