@@ -63,7 +63,7 @@ func (h *requestIDHandler) WithGroup(name string) slog.Handler {
 
 // NewSlogLogger 构造 manager-api / agent 顶层 logger。
 //   - 输出：cfg.Format 为 "text" 时用 TextHandler（本地调试），否则 JSONHandler（容器日志/ELK）
-//   - 级别：cfg.Level（由 LOG_LEVEL 解析，默认 Info）
+//   - 级别：cfg.Level（由 manager.yaml 的 logging.level 解析，默认 Info）
 //   - 脱敏：Writer 经 NewRedactingWriter 包装，json/text 两种格式都生效
 //   - trace_id：requestIDHandler 自动从 ctx 注入，不受格式影响
 //   - source：AddSource=true 含 caller 路径，便于错误定位

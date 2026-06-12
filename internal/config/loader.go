@@ -92,6 +92,18 @@ func (c *Config) applyDefaults() {
 			c.Kubernetes.Resources.Limits.Memory = "2Gi"
 		}
 	}
+	// 日志默认：级别 info、格式 json、慢查询阈值 200ms，与原 env 实现的默认保持一致，
+	// 让未配置 logging 段的部署行为不变。非法的 level/format 字符串由 internal/log 在
+	// 构造 logger 时各自回退（parseLevel→Info、parseFormat→json），此处只补空缺。
+	if strings.TrimSpace(c.Logging.Level) == "" {
+		c.Logging.Level = "info"
+	}
+	if strings.TrimSpace(c.Logging.Format) == "" {
+		c.Logging.Format = "json"
+	}
+	if c.Logging.SlowQueryMS <= 0 {
+		c.Logging.SlowQueryMS = 200
+	}
 	// 验证码启用时填难度与有效期默认（关闭时不使用这两个值）。
 	if c.Captcha.Enabled {
 		if c.Captcha.Difficulty == 0 {

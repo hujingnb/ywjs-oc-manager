@@ -4,33 +4,27 @@ import (
 	"context"
 	"database/sql"
 	"log/slog"
-	"os"
-	"strconv"
 	"time"
 
 	mlog "oc-manager/internal/log"
 	"oc-manager/internal/store/sqlc"
 )
 
-// defaultSlowQueryThreshold 是慢查询阈值默认值；可由环境变量 LOG_SLOW_QUERY_MS 覆盖。
+// defaultSlowQueryThreshold 是慢查询阈值默认值，由 manager.yaml 的 logging.slow_query_ms 覆盖。
 // 选 200ms 是经验阈值：超过该耗时的查询通常值得关注（缺索引 / 锁等待 / 大结果集）。
 const defaultSlowQueryThreshold = 200 * time.Millisecond
 
-// slowQueryThreshold 在包加载时从环境变量读一次；非法或空值回退默认值。
-// 包级变量而非每次解析，避免热路径反复读 env。
-var slowQueryThreshold = parseSlowQueryThreshold(os.Getenv("LOG_SLOW_QUERY_MS"))
+// slowQueryThreshold 是当前生效的慢查询阈值，默认 defaultSlowQueryThreshold，
+// 由启动期 SetSlowQueryThreshold 从配置注入一次。包级变量而非每次解析，避免热路径开销。
+var slowQueryThreshold = defaultSlowQueryThreshold
 
-// parseSlowQueryThreshold 把毫秒字符串解析为 time.Duration。
-// 边界：空串、非数字、负数都视为非法配置并回退默认值，避免误配把所有查询都标记为慢查询。
-func parseSlowQueryThreshold(s string) time.Duration {
-	if s == "" {
-		return defaultSlowQueryThreshold
+// SetSlowQueryThreshold 在进程启动期（serving 前）由 main 从 manager.yaml 的
+// logging.slow_query_ms 注入慢查询阈值；非正值视为无效、保持默认。仅启动期调用一次，
+// 运行期不再修改，故不加锁（与原包级只读语义一致）。
+func SetSlowQueryThreshold(d time.Duration) {
+	if d > 0 {
+		slowQueryThreshold = d
 	}
-	ms, err := strconv.Atoi(s)
-	if err != nil || ms < 0 {
-		return defaultSlowQueryThreshold
-	}
-	return time.Duration(ms) * time.Millisecond
 }
 
 // loggingDBTX 包装 sqlc.DBTX，在每次 Exec/Query 后记录 SQL 语句文本、耗时、写操作影响行数与错误。

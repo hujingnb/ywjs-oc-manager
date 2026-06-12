@@ -8,7 +8,7 @@ import (
 	"github.com/stretchr/testify/assert"
 )
 
-// TestParseLevel 覆盖 LOG_LEVEL 各取值与非法值 fallback。
+// TestParseLevel 覆盖 logging.level 各取值与非法值 fallback。
 func TestParseLevel(t *testing.T) {
 	cases := []struct {
 		name string
@@ -24,14 +24,14 @@ func TestParseLevel(t *testing.T) {
 		{name: "空串 fallback Info", in: "", want: slog.LevelInfo},          // 边界：空串回退 Info
 	}
 	for _, tc := range cases {
-		// 子测试覆盖该 LOG_LEVEL 输入对应的解析结果。
+		// 子测试覆盖该 level 输入对应的解析结果。
 		t.Run(tc.name, func(t *testing.T) {
 			assert.Equal(t, tc.want, parseLevel(tc.in))
 		})
 	}
 }
 
-// TestParseFormat 覆盖 LOG_FORMAT 取值与非法值 fallback。
+// TestParseFormat 覆盖 logging.format 取值与非法值 fallback。
 func TestParseFormat(t *testing.T) {
 	assert.Equal(t, "text", parseFormat("text")) // 正常：text
 	assert.Equal(t, "text", parseFormat("TEXT")) // 正常：大小写不敏感

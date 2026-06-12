@@ -220,6 +220,28 @@ func TestLoad_DefaultsHermesRuntimeBaseURL(t *testing.T) {
 	assert.Equal(t, "http://manager-api:8080", cfg.Hermes.ManagerRuntimeBaseURL)
 }
 
+// TestLoad_DefaultsLogging 验证未配置 logging 段时回填与历史默认一致的值（info/json/200ms），
+// 保证旧部署在引入 logging 段后行为不变。
+func TestLoad_DefaultsLogging(t *testing.T) {
+	cfg := loadConfigFromString(t, fullValidYAML())
+	assert.Equal(t, "info", cfg.Logging.Level)     // 默认级别 info
+	assert.Equal(t, "json", cfg.Logging.Format)    // 默认格式 json
+	assert.Equal(t, 200, cfg.Logging.SlowQueryMS)  // 默认慢查询阈值 200ms
+}
+
+// TestLoad_LoggingExplicitValues 验证显式配置的 logging 字段被原样保留，不被默认覆盖。
+func TestLoad_LoggingExplicitValues(t *testing.T) {
+	cfg := loadConfigFromString(t, fullValidYAML()+`
+logging:
+  level: "debug"
+  format: "text"
+  slow_query_ms: 50
+`)
+	assert.Equal(t, "debug", cfg.Logging.Level)   // 显式 debug 保留
+	assert.Equal(t, "text", cfg.Logging.Format)   // 显式 text 保留
+	assert.Equal(t, 50, cfg.Logging.SlowQueryMS)  // 显式阈值 50ms 保留
+}
+
 // TestLoad_DefaultsRAGFlowOptions 验证 RAGFlow 启用后未显式配置的请求选项会使用保守默认值。
 func TestLoad_DefaultsRAGFlowOptions(t *testing.T) {
 	cfg := loadConfigFromString(t, fullValidYAML()+`

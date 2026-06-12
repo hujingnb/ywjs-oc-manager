@@ -88,9 +88,11 @@ func runManager(ctx context.Context, cfg config.Config, logOut io.Writer) error 
 	// 所有日志输出自动脱敏（密码 / token / sk- key）。
 	// 顺序要求：先 NewSlogLogger，再 SetRequestIDExtractor，再 SetDefault，
 	// 确保首批日志也能从 ctx 中提取 trace_id。
-	logger := managerlog.NewSlogLogger(logOut, managerlog.ParseConfigFromEnv())
+	logger := managerlog.NewSlogLogger(logOut, managerlog.ParseConfig(cfg.Logging.Level, cfg.Logging.Format))
 	managerlog.SetRequestIDExtractor(middleware.RequestIDFromContext)
 	slog.SetDefault(logger)
+	// SQL 慢查询阈值同样来自 logging 段，在打开数据库前注入（store 包级阈值默认 200ms）。
+	store.SetSlowQueryThreshold(time.Duration(cfg.Logging.SlowQueryMS) * time.Millisecond)
 
 	masterKey, err := base64.StdEncoding.DecodeString(cfg.Security.MasterKey)
 	if err != nil {

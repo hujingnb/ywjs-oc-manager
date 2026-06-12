@@ -2,21 +2,21 @@ package log
 
 import (
 	"log/slog"
-	"os"
 	"strings"
 )
 
-// Config 控制顶层 logger 的输出行为，由 env 解析得到。
+// Config 控制顶层 logger 的输出行为，由 manager.yaml 的 logging 段解析得到。
 type Config struct {
 	Level  slog.Level // 日志级别，低于此级别的记录被丢弃
 	Format string     // 输出格式："json"（默认）或 "text"（本地调试友好）
 }
 
-// ParseConfigFromEnv 从 LOG_LEVEL / LOG_FORMAT 读取配置；非法值各自回退默认。
-func ParseConfigFromEnv() Config {
+// ParseConfig 把配置文件里的 level / format 字符串解析为 Config；非法值各自回退（Info / json）。
+// 配置来源是 manager.yaml 的 logging 段（见 internal/config.LoggingConfig），不再读环境变量。
+func ParseConfig(level, format string) Config {
 	return Config{
-		Level:  parseLevel(os.Getenv("LOG_LEVEL")),
-		Format: parseFormat(os.Getenv("LOG_FORMAT")),
+		Level:  parseLevel(level),
+		Format: parseFormat(format),
 	}
 }
 

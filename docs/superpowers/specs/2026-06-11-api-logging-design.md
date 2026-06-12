@@ -62,11 +62,14 @@
   func NewSlogLogger(out io.Writer, cfg Config) *slog.Logger
   ```
 - Format 为 `"text"` 时用 `slog.NewTextHandler`，否则 `slog.NewJSONHandler`。两个 handler 都仍包在 `NewRedactingWriter(out)` + `requestIDHandler` 内（脱敏、trace_id 注入、`AddSource=true` 不受格式影响）。
-- env 解析放 `internal/log`（如 `ParseConfigFromEnv()`），读取：
-  - `LOG_LEVEL`：`debug` / `info` / `warn` / `error`，大小写不敏感，非法值 fallback Info 并记一条告警。
-  - `LOG_FORMAT`：`json` / `text`，非法值 fallback json。
-- `cmd/server/main.go:91` 处由 `NewSlogLogger(logOut)` 改为 `NewSlogLogger(logOut, managerlog.ParseConfigFromEnv())`。
-- 另有 `LOG_SLOW_QUERY_MS`（慢查询阈值，默认 `200`）由模块 5 的 SQL 日志 wrapper 读取，详见模块 5。
+- 配置来源是 `manager.yaml` 的 `logging` 段（`internal/config.LoggingConfig`，与 app/database/redis 等同构），**不读环境变量**；loader 回填默认（info / json / 200ms）：
+  - `level`：`debug` / `info` / `warn` / `error`，大小写不敏感，非法值 fallback Info。
+  - `format`：`json` / `text`，非法值 fallback json。
+  - `slow_query_ms`：慢查询阈值（毫秒，默认 `200`），由模块 5 的 SQL 日志 wrapper 读取，详见模块 5。
+- `internal/log` 提供 `ParseConfig(level, format string) Config` 把配置字符串解析为 slog Config。
+- `cmd/server/main.go` 处由 `NewSlogLogger(logOut)` 改为 `NewSlogLogger(logOut, managerlog.ParseConfig(cfg.Logging.Level, cfg.Logging.Format))`，并在打开数据库前 `store.SetSlowQueryThreshold(...)` 注入慢查询阈值。
+
+> 注：初版实现读 `LOG_LEVEL` / `LOG_FORMAT` / `LOG_SLOW_QUERY_MS` 环境变量；2026-06-12 按「配置统一进 manager.yaml」决定改为配置文件驱动，env 不再参与。
 
 **测试**：表驱动覆盖 level/format 解析（含非法值 fallback）、debug 级别记录在 Info 配置下被过滤、text 与 json 两种格式下 trace_id 与脱敏仍生效。
 

@@ -38,6 +38,22 @@ type Config struct {
 	ClawHub ClawHubConfig `yaml:"clawhub"`
 	// Captcha 是登录页工作量证明验证码配置；enabled 为 false 时整段可缺省。
 	Captcha CaptchaConfig `yaml:"captcha"`
+	// Logging 控制结构化日志的级别、格式与 SQL 慢查询阈值；整段可缺省，由 loader 填默认。
+	Logging LoggingConfig `yaml:"logging"`
+}
+
+// LoggingConfig 描述 manager 结构化日志的输出行为。
+// 三个字段都可缺省，applyDefaults 会回填与历史默认一致的值（info / json / 200ms），
+// 保证未配置 logging 段的旧部署行为不变。
+type LoggingConfig struct {
+	// Level 是日志级别：debug / info / warn / error，大小写不敏感；非法或空值回退 info。
+	// 生产排故可临时调 debug 看 SQL 与外部调用的细粒度 Debug 日志。
+	Level string `yaml:"level"`
+	// Format 是输出格式：json（默认，容器 / ELK 可解析）或 text（本地调试人眼友好）；非法值回退 json。
+	Format string `yaml:"format"`
+	// SlowQueryMS 是 SQL 慢查询阈值（毫秒）：单条查询耗时超过它即从 Debug 抬到 Warn，便于定位慢查询。
+	// 0 或负值视为未配置，回退默认 200ms。
+	SlowQueryMS int `yaml:"slow_query_ms"`
 }
 
 // AppConfig 描述 manager API 进程自身的运行参数。
