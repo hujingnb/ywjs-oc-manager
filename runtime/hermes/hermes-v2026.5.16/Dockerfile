@@ -43,11 +43,20 @@ RUN set -e; \
         [ -e "$p" ] || { echo "[install.sh guard] 缺少关键产物 $p——install.sh 可能静默失败（如 nodejs.org / github.com 不通），中断构建以阻止坏层进入缓存" >&2; exit 1; }; \
     done
 
-# Node.js 默认装到 /opt/data/node，与运行时挂载点重叠；移到 /opt/hermes-node 并修软链。
-RUN mv /opt/data/node /opt/hermes-node && \
+# 上游 install.sh 在 HERMES_HOME 设置时把工具装进 $HERMES_HOME/bin（=/opt/data/bin）、
+# 把 node 装进 /opt/data/node，把 hermes 链到 /usr/local/bin，且不再创建 PATH 上的
+# /root/.local/bin。/opt/data 是运行时挂载卷，卷内的 uv / node 会在容器启动时被覆盖，
+# 因此必须在构建期把这些工具搬出 /opt/data 到镜像层固定路径并保证在 PATH 上：
+# - node 仍移到 /opt/hermes-node，软链进 /root/.local/bin（先 mkdir 兜底落点，
+#   install.sh 是 live 拉取、不锁版本，该目录是否预先存在不可依赖）；
+# - uv / uvx 是独立可执行文件，直接搬到 /usr/local/bin（已在 PATH，hermes 也链在此）。
+# 否则后续 `uv pip install` 会 uv: not found，运行时 node 也会随卷一起消失。
+RUN mkdir -p /root/.local/bin && \
+    mv /opt/data/node /opt/hermes-node && \
     ln -sfn /opt/hermes-node/bin/node /root/.local/bin/node && \
     ln -sfn /opt/hermes-node/bin/npm  /root/.local/bin/npm && \
-    ln -sfn /opt/hermes-node/bin/npx  /root/.local/bin/npx
+    ln -sfn /opt/hermes-node/bin/npx  /root/.local/bin/npx && \
+    mv /opt/data/bin/uv /opt/data/bin/uvx /usr/local/bin/
 
 # 显式预装 weixin platform 必需依赖（容器启动即 ready，不允许运行时 lazy install）。
 RUN uv pip install --python /usr/local/lib/hermes-agent/venv/bin/python --no-cache-dir \
