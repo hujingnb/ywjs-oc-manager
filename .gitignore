@@ -2,9 +2,6 @@
 .worktrees/
 .codex
 .idea
-.agents
-.claude
-skills-lock.json
 .mcp.json
 .gstack
 data/
