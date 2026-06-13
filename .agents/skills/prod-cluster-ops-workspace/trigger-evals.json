@@ -1,0 +1,22 @@
+[
+  {"query": "线上 ragflow 又挂了，帮我连集群看下 pod 状态和日志", "should_trigger": true},
+  {"query": "把 manager-api 在生产上滚动重启一下", "should_trigger": true},
+  {"query": "我改了 secret 里的 redis 密码，怎么让线上 manager 生效", "should_trigger": true},
+  {"query": "prod 集群上 new-api 的 pod 是不是 OOM 了，看下", "should_trigger": true},
+  {"query": "用 ywjskubectl 看下 oc-apps 下有没有 app pod 起来", "should_trigger": true},
+  {"query": "生产要发个新版本的 manager-web，怎么部署", "should_trigger": true},
+  {"query": "线上那个 elasticsearch 起来了吗，describe 一下看看", "should_trigger": true},
+  {"query": "帮我 apply 一下 prod 的 secret 然后重启 ragflow", "should_trigger": true},
+  {"query": "线上集群 ocm 命名空间所有 pod 列一下我看看整体状态", "should_trigger": true},
+  {"query": "生产 manager-api 报 500，先连上去 tail 一下日志定位", "should_trigger": true},
+  {"query": "本地 k3d 集群起来了吗，make local-up 卡住了", "should_trigger": false},
+  {"query": "本地联调时 ragflow 连不上 minio，怎么回事", "should_trigger": false},
+  {"query": "帮我看下 docker-compose 起的那几个容器日志", "should_trigger": false},
+  {"query": "manager-api 这个 handler 的单测怎么写", "should_trigger": false},
+  {"query": "把 openapi.yaml 重新生成一下", "should_trigger": false},
+  {"query": "线上这条订单查询 SQL 为什么这么慢，帮我优化下索引", "should_trigger": false},
+  {"query": "k8s 的 Deployment 和 StatefulSet 有什么区别", "should_trigger": false},
+  {"query": "给我写个部署到 k8s 的 GitHub Actions workflow", "should_trigger": false},
+  {"query": "本地 secret.yaml 里 master_key 怎么生成", "should_trigger": false},
+  {"query": "线上 ai.ywjs.com 的 TLS 证书快过期了，怎么续", "should_trigger": false}
+]
