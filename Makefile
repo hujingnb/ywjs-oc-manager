@@ -53,6 +53,10 @@ override HERMES_VERSION := $(strip $(shell if [ -f "$(HERMES_VARIANT_DIR)/versio
 HERMES_IMAGE_REPO    ?= $(PROD_REGISTRY)/$(PROD_APP_NS)/oc-manager-hermes
 # hermes tag 形如 v2026.5.16-2026-05-21-12-00-00-be70e40a，便于从镜像引用直接看出上游版本和源码提交。
 override HERMES_IMAGE := $(HERMES_IMAGE_REPO):$(HERMES_VERSION)-$(IMAGE_TAG)
+# HERMES_VERSION 的正则转义版（点号转义）：prod-deploy-hermes 用它把 secret.yaml 中
+# runtime_images 里「同版本」那一条 ref 精确替换为新 tag，不能误伤其它版本条目
+# （runtime_images 现为多版本列表，旧版需保留供回退灰度）。
+override HERMES_VERSION_RE := $(subst .,\.,$(HERMES_VERSION))
 
 # ops runtime 镜像仓库（pod initContainer/sidecar 搬运脚本），与其余服务保持一致命名风格。
 # 生产发布用 IMAGE_TAG（时间戳 + commit），本地联调固定 :dev。
@@ -373,8 +377,10 @@ prod-deploy-manager: build-api-image build-web-image ## 构建推送 api+web 并
 # 镜像仓库迁到同区移动云后节点拉取快，不再需要预热 DaemonSet。
 .PHONY: prod-deploy-hermes
 prod-deploy-hermes: build-hermes-image ## 构建推送 hermes 镜像→写回 secret.yaml→update-config 生效
-	sed -i -E 's#ref: "[^"]*oc-manager-hermes:[^"]*"#ref: "$(HERMES_IMAGE)"#' deploy/k8s/prod/secret.yaml
-	@echo "✅ secret.yaml 的 hermes 镜像已更新为 $(HERMES_IMAGE)"
+	# 只替换 tag 版本号为本次部署版本（$(HERMES_VERSION)）的那条 ref，保留 runtime_images
+	# 列表中其它版本条目不动；否则多版本列表会被全部覆盖成同一镜像（曾误伤旧版回退条目）。
+	sed -i -E 's#ref: "[^"]*oc-manager-hermes:$(HERMES_VERSION_RE)-[^"]*"#ref: "$(HERMES_IMAGE)"#' deploy/k8s/prod/secret.yaml
+	@echo "✅ secret.yaml 的 hermes 镜像（$(HERMES_VERSION)）已更新为 $(HERMES_IMAGE)"
 	$(MAKE) update-config
 
 .PHONY: prod-deploy-ops
