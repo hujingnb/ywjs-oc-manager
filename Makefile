@@ -57,6 +57,15 @@ override HERMES_IMAGE := $(HERMES_IMAGE_REPO):$(HERMES_VERSION)-$(IMAGE_TAG)
 # runtime_images 里「同版本」那一条 ref 精确替换为新 tag，不能误伤其它版本条目
 # （runtime_images 现为多版本列表，旧版需保留供回退灰度）。
 override HERMES_VERSION_RE := $(subst .,\.,$(HERMES_VERSION))
+# hermes 镜像构建额外 flag：默认空，复用 Docker 层缓存（增量构建快，平时用这个）。
+# 重建旧 variant 时可能命中陈旧的 install.sh 缓存层——上游 install.sh 是 live 拉取、布局
+# 会变（如 uv 从 /root/.local/bin 挪到 /opt/data/bin），旧缓存层的布局与当前 Dockerfile
+# 的搬迁步骤不匹配，会在 mv 处失败。此时用 NO_CACHE=1 强制全量重跑，让 install.sh 按当前
+# 布局重新安装。仅在撞缓存时打开，别常开（全量重建会重拉基础镜像 / 重跑 apt 与 install.sh，很慢）。
+HERMES_BUILD_FLAGS :=
+ifeq ($(NO_CACHE),1)
+HERMES_BUILD_FLAGS := --no-cache
+endif
 
 # ops runtime 镜像仓库（pod initContainer/sidecar 搬运脚本），与其余服务保持一致命名风格。
 # 生产发布用 IMAGE_TAG（时间戳 + commit），本地联调固定 :dev。
@@ -273,7 +282,7 @@ hermes-inject-contract: .guard-hermes-version ## 把 HERMES_VARIANT 指定变体
 
 build-hermes-runtime: hermes-inject-contract ## 本地 dev 构建 hermes runtime（需 HERMES_VARIANT 指定变体）
 	status=0; \
-	docker build \
+	docker build $(HERMES_BUILD_FLAGS) \
 	  -t "hermes-runtime:$(HERMES_VERSION)-dev" \
 	  --build-arg "HERMES_REF=$(HERMES_VERSION)" \
 	  --build-arg "OC_IMAGE_VARIANT=$(HERMES_VARIANT)" \
@@ -308,7 +317,7 @@ build-web-image: .guard-image-git-state ## 构建并推送 manager-web 生产镜
 .PHONY: build-hermes-image
 build-hermes-image: .guard-image-git-state .guard-hermes-version hermes-inject-contract ## 构建并推送 hermes runtime 生产镜像（需 HERMES_VARIANT 指定变体）
 	status=0; \
-	docker build \
+	docker build $(HERMES_BUILD_FLAGS) \
 	  -t "$(HERMES_IMAGE)" \
 	  --build-arg DOCKER_HUB_MIRROR=$(PROD_PUBLIC_REPO) \
 	  --build-arg "HERMES_REF=$(HERMES_VERSION)" \
