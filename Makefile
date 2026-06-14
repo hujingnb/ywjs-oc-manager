@@ -538,3 +538,29 @@ sync-github-to-origin: ## 同步 github 当前分支到 origin(经本地)
 .PHONY: sync-origin-to-github
 sync-origin-to-github: ## 同步 origin 当前分支到 github(经本地)
 	@$(MAKE) --no-print-directory .git-sync FROM=$(ORIGIN_REMOTE) TO=$(GITHUB_REMOTE)
+
+# 自动判向: 按祖先关系判定两个远程哪个更新，把更新方 pull 到本地再 push 到另一方。
+# 两边相等则免操作; 真分叉(互不为祖先)时无法自动判定，停下并提示改用显式 sync-*。
+.PHONY: sync-remotes
+sync-remotes: ## 自动判定两远程哪个更新并双向对齐(当前分支)
+	@BRANCH=$$(git rev-parse --abbrev-ref HEAD); \
+	 git diff --quiet && git diff --cached --quiet || { echo "❌ 工作区有未提交改动，请先提交或暂存再同步" >&2; exit 1; }; \
+	 echo "⬇️  fetch $(GITHUB_REMOTE)/$(ORIGIN_REMOTE) $$BRANCH"; \
+	 git fetch $(GITHUB_REMOTE) $$BRANCH; \
+	 git fetch $(ORIGIN_REMOTE) $$BRANCH; \
+	 G=$$(git rev-parse $(GITHUB_REMOTE)/$$BRANCH); \
+	 O=$$(git rev-parse $(ORIGIN_REMOTE)/$$BRANCH); \
+	 if [ "$$G" = "$$O" ]; then echo "✅ 两个远程 $$BRANCH 已一致，无需同步"; exit 0; fi; \
+	 if git merge-base --is-ancestor $$G $$O; then \
+	   echo "ℹ️  origin 领先，以 origin 为更新方 → 同步到 github"; NEWER=$(ORIGIN_REMOTE); OTHER=$(GITHUB_REMOTE); \
+	 elif git merge-base --is-ancestor $$O $$G; then \
+	   echo "ℹ️  github 领先，以 github 为更新方 → 同步到 origin"; NEWER=$(GITHUB_REMOTE); OTHER=$(ORIGIN_REMOTE); \
+	 else \
+	   echo "❌ 两个远程 $$BRANCH 已分叉，互不为祖先，无法自动判定更新方。" >&2; \
+	   echo "   $(GITHUB_REMOTE)/$$BRANCH = $$G" >&2; \
+	   echo "   $(ORIGIN_REMOTE)/$$BRANCH = $$O" >&2; \
+	   echo "   请先人工确认以哪方为准，再用 make sync-github-to-origin 或 make sync-origin-to-github。" >&2; \
+	   exit 1; \
+	 fi; \
+	 $(MAKE) --no-print-directory .git-pull REMOTE=$$NEWER && \
+	 $(MAKE) --no-print-directory .git-push REMOTE=$$OTHER
