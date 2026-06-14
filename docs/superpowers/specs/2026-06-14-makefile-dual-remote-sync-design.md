@@ -57,6 +57,12 @@ BRANCH=$$(git rev-parse --abbrev-ref HEAD)
 | `sync-github-to-origin` | `pull-github` 后接 `push-origin` |
 | `sync-origin-to-github` | `pull-origin` 后接 `push-github` |
 
+自动判向同步（按祖先关系判定哪个远程更新）：
+
+| target | 行为 |
+|---|---|
+| `sync-remotes` | fetch 两远程当前分支，把「更新方」pull 到本地再 push 到另一方 |
+
 ## 行为约定
 
 ### pull（ff-only）
@@ -76,6 +82,19 @@ BRANCH=$$(git rev-parse --abbrev-ref HEAD)
 ### sync
 
 串联「pull 源远程」+「push 目标远程」，任一步失败立即中止（`make` 默认行为）。
+
+### sync-remotes（自动判向）
+
+按**祖先关系**判定哪个远程更新，避免依赖不可靠的提交时间戳：
+
+1. 守门：工作区干净。
+2. `git fetch` 两个远程的当前分支，取两边 tip commit。
+3. 判定并执行：
+   - 两边 tip 相等 → 已一致，提示后以 0 退出。
+   - 一边是另一边的祖先（仅落后）→ 领先方为「更新方」：复用 `.git-pull` 拉更新方到本地，再 `.git-push` 推到另一方（对另一方必定为 fast-forward）。
+   - 互不为祖先（真分叉）→ 无法自动判定，打印两边 tip 与建议（改用 `sync-github-to-origin` / `sync-origin-to-github` 显式择向），非零退出。不自动 force。
+
+> 复用 `.git-pull` / `.git-push`：`.git-pull` 会再次 fetch（幂等、开销小）并对「本地与更新方」做 ff-only 校验，因此本地若与更新方分叉同样会被安全拦下。
 
 ## 复用结构
 
