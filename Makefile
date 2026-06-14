@@ -1,4 +1,4 @@
-.PHONY: test vet build sqlc-generate migrate-up migrate-down web-test web-typecheck web-build build-hermes-runtime hermes-inject-contract debug-ollama debug-newapi newapi-probe seed-e2e smoke-v102 openapi-gen web-types-gen openapi-check local-up local-down local-reset local-stop local-start local-build local-migrate local-seed local-seed-e2e local-mc-init local-status local-logs local-shell cluster-create .guard-k3d-hosts build-ops-runtime local-build-ops
+.PHONY: test vet build sqlc-generate migrate-up migrate-down web-test web-typecheck web-build build-hermes-runtime hermes-inject-contract seed-e2e openapi-gen web-types-gen openapi-check local-up local-down local-reset local-stop local-start local-build local-migrate local-seed local-seed-e2e local-mc-init local-status local-logs local-shell cluster-create .guard-k3d-hosts build-ops-runtime local-build-ops
 
 SWAG_VERSION := v2.0.0-rc5
 OPENAPI_TS_VERSION := 7.13.0
@@ -428,17 +428,6 @@ prod-db: ## 连接线上 manager MySQL（凭证读自 .env 的 PROD_DB_*，交�
 	    --user="$$PROD_DB_USER" -p"$$PROD_DB_PASS" \
 	    --database="$${PROD_DB_NAME:-manager}"
 
-##@ 调试脚本
-
-debug-ollama: ## 跑 debug-ollama.sh, 探测 ollama 状态
-	./scripts/debug-ollama.sh
-
-debug-newapi: ## 跑 debug-newapi.sh, 探测 new-api 状态
-	./scripts/debug-newapi.sh
-
-newapi-probe: ## 跑 newapi-probe.sh, 用最小请求探测 new-api 渠道
-	@bash scripts/newapi-probe.sh
-
 ##@ 数据库迁移
 
 migrate-up: ## 对本地 k3d 数据库执行 up 迁移（= local-migrate）
@@ -447,15 +436,12 @@ migrate-up: ## 对本地 k3d 数据库执行 up 迁移（= local-migrate）
 migrate-down: ## 回滚本地 k3d 最近一次迁移（= local-migrate DOWN=1）
 	$(MAKE) local-migrate DOWN=1
 
-##@ 部署 / 运维 / Smoke
+##@ 部署 / 运维
 
 # seed-e2e：在 manager-api 容器里跑 cmd/seed-e2e，OCM_E2E=1 守门。
 # 会 TRUNCATE e2e 业务表后重建 fixture，stdout 末行是 fixture JSON 供 Playwright 解析。
 seed-e2e: ## 注入 Playwright e2e fixture（= local-seed-e2e）
 	$(MAKE) local-seed-e2e
-
-smoke-v102:  ## 跑 v1.0.2 干净环境 smoke（前置：阶段 0 完成）
-	@bash scripts/v102-smoke.sh
 
 ##@ OpenAPI / 前端类型 (与代码生成段相互引用)
 
