@@ -22,14 +22,16 @@
     <!-- 新建 / 编辑表单 -->
     <n-card v-if="formVisible" :bordered="true">
       <template #header>
-        <div style="display: flex; align-items: center; justify-content: space-between">
+        <div style="display: flex; align-items: center; justify-content: space-between; gap: 12px">
           <div>
             <p class="eyebrow">{{ editingId ? 'Edit' : 'New' }}</p>
             <h2 style="margin: 0">{{ editingId ? '编辑助手版本' : '新建助手版本' }}</h2>
           </div>
-          <n-button quaternary circle @click="closeForm">
-            <template #icon><X :size="18" /></template>
-          </n-button>
+          <!-- 保存/取消固定在表单顶部：下方 Skill 列表会持续撑高表单，按钮放底部时够不到，放顶部确保始终可点 -->
+          <n-space align="center">
+            <n-button @click="closeForm">取消</n-button>
+            <n-button type="primary" :loading="submitting" :disabled="!canSubmit" @click="submit">保存</n-button>
+          </n-space>
         </div>
       </template>
       <n-form :model="form" label-placement="top" @submit.prevent="submit">
@@ -176,7 +178,7 @@
 
 <script setup lang="ts">
 import { computed, h, reactive, ref } from 'vue'
-import { Plus, X } from 'lucide-vue-next'
+import { Plus } from 'lucide-vue-next'
 import { NAlert, NButton, NCard, NForm, NFormItem, NGrid, NGridItem, NInput, NSelect, NSpace } from 'naive-ui'
 
 import DataTableList from '@/components/DataTableList.vue'
