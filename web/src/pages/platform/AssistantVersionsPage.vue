@@ -271,11 +271,13 @@ const form = reactive<AssistantVersionFormPayload>({
   industry_knowledge_base_ids: [],
 })
 
-// 镜像与模型列表仅在表单打开时请求。
-const imagesQuery = useRuntimeImagesQuery(() => formVisible.value)
+// 模型与知识库列表仅在表单打开时请求；镜像列表常驻请求，列表的「镜像」列需要用它把 image_id 映射成可读 label。
+const imagesQuery = useRuntimeImagesQuery()
 const modelsQuery = useModelsQuery(() => formVisible.value)
 const industryBasesQuery = useIndustryKnowledgeBasesQuery(() => formVisible.value)
 const imageOptions = computed(() => (imagesQuery.data.value ?? []).map(img => ({ label: img.label, value: img.id })))
+// imageLabelMap 把镜像 id 映射到 label，供列表「镜像」列展示可读名称。
+const imageLabelMap = computed(() => new Map((imagesQuery.data.value ?? []).map(img => [img.id, img.label])))
 const modelOptions = computed(() => (modelsQuery.data.value ?? []).map(m => ({ label: m.name, value: m.id })))
 const industryKnowledgeOptions = computed(() => (industryBasesQuery.data.value?.items ?? []).map(item => ({
   label: item.name,
@@ -423,7 +425,7 @@ const columns = computed(() => [
       row.description ? h('small', { class: 'data-table-subtitle' }, row.description) : null,
     ],
   },
-  { title: '镜像', key: 'image_id', render: (row: AssistantVersionDTO) => row.image_id || '—' },
+  { title: '镜像', key: 'image_id', render: (row: AssistantVersionDTO) => imageLabelMap.value.get(row.image_id) || row.image_id || '—' },
   { title: '主模型', key: 'main_model', render: (row: AssistantVersionDTO) => row.main_model || '—' },
   { title: '修订号', key: 'revision', render: (row: AssistantVersionDTO) => `r${row.revision}` },
   { title: 'Skill 数', key: 'skills', render: (row: AssistantVersionDTO) => String(row.skills?.length ?? 0) },
