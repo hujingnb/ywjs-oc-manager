@@ -153,10 +153,6 @@
           </n-grid-item>
 
           <n-grid-item :span="2">
-            <n-space justify="end">
-              <n-button @click="closeForm">取消</n-button>
-              <n-button type="primary" attr-type="submit" :loading="submitting" :disabled="!canSubmit">保存</n-button>
-            </n-space>
             <p v-if="submitError" class="state-text danger">{{ submitError }}</p>
           </n-grid-item>
         </n-grid>
