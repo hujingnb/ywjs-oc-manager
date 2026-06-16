@@ -517,6 +517,10 @@ pull-origin: ## 从 origin 拉当前分支到本地(ff-only)
 push-origin: ## 把本地当前分支推到 origin
 	@$(MAKE) --no-print-directory .git-push REMOTE=$(ORIGIN_REMOTE)
 
+push-all:              ## 把本地当前分支同时推到 github 和 origin
+	@$(MAKE) --no-print-directory .git-push REMOTE=$(GITHUB_REMOTE)
+	@$(MAKE) --no-print-directory .git-push REMOTE=$(ORIGIN_REMOTE)
+
 .PHONY: sync-github-to-origin
 sync-github-to-origin: ## 同步 github 当前分支到 origin(经本地)
 	@$(MAKE) --no-print-directory .git-sync FROM=$(GITHUB_REMOTE) TO=$(ORIGIN_REMOTE)
