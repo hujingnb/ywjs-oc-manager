@@ -1,6 +1,6 @@
 // SkillMarketBrowser.spec.ts — SkillMarketBrowser 市场浏览器单元测试。
 // 覆盖：来源徽章渲染、安装按钮展示与隐藏、existingNames 已存在标记、
-// canAction=false 无按钮、滚动加载三例、点卡片 emit action 带最新版。
+// canAction=false 无按钮、翻页（分页切片 / 后台补拉 / 筛选复位）、点卡片 emit action 带最新版。
 import { flushPromises, mount } from '@vue/test-utils'
 import { computed, nextTick, ref } from 'vue'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
@@ -24,24 +24,6 @@ const marketState = {
   isFetchingNextPage: ref(false),
   fetchNextPage: vi.fn(),
 }
-
-// ======================== IntersectionObserver mock ========================
-// jsdom 无 IntersectionObserver，组件建立滚动加载哨兵观察时会报错，需 mock。
-// lastIntersectionCallback 捕获最近一次构造时传入的回调，测试可手动触发模拟「哨兵进入视口」。
-let lastIntersectionCallback: ((entries: { isIntersecting: boolean }[]) => void) | null = null
-const ioObserve = vi.fn()
-const ioUnobserve = vi.fn()
-const ioDisconnect = vi.fn()
-class MockIntersectionObserver {
-  constructor(cb: (entries: { isIntersecting: boolean }[]) => void) {
-    lastIntersectionCallback = cb
-  }
-  observe = ioObserve
-  disconnect = ioDisconnect
-  unobserve = ioUnobserve
-  takeRecords = vi.fn(() => [])
-}
-vi.stubGlobal('IntersectionObserver', MockIntersectionObserver)
 
 // ======================== vi.mock ========================
 // auth store mock：SkillMarketBrowser 用 auth.isPlatformAdmin 决定详情抽屉「下载」按钮可见性。
@@ -81,6 +63,15 @@ vi.mock('naive-ui', async () => {
     NTag: { template: '<span class="n-tag" v-bind="$attrs"><slot /></span>' },
     // NInput stub：避免 DOM attribute warning。
     NInput: { template: '<div class="n-input"><input /></div>' },
+    // NPagination stub：暴露 page/page-count，并提供「下一页」按钮触发 update:page，
+    // 用于断言翻页切片与后台补拉行为。
+    NPagination: {
+      props: ['page', 'pageCount', 'disabled'],
+      emits: ['update:page'],
+      template:
+        '<div class="n-pagination" :data-page="page" :data-page-count="pageCount">'
+        + '<button class="page-next" @click="$emit(\'update:page\', page + 1)">next</button></div>',
+    },
     // NDrawer/NDrawerContent stub：被 SkillDetailDrawer 内嵌，show=true 时渲染内容。
     NDrawer: { props: ['show'], template: '<div v-if="show" class="n-drawer"><slot /></div>' },
     NDrawerContent: { props: ['title'], template: '<div class="n-drawer-content">{{ title }}<slot /></div>' },
@@ -115,10 +106,6 @@ describe('SkillMarketBrowser', () => {
     marketState.hasNextPage.value = false
     marketState.isFetchingNextPage.value = false
     marketState.fetchNextPage.mockReset()
-    lastIntersectionCallback = null
-    ioObserve.mockReset()
-    ioUnobserve.mockReset()
-    ioDisconnect.mockReset()
   })
 
   // ======== 来源徽章 ========
@@ -208,81 +195,96 @@ describe('SkillMarketBrowser', () => {
     expect(wrapper.find('.n-card').find('button').exists()).toBe(false)
   })
 
-  // ======== 滚动加载 ========
+  // ======== 翻页 ========
 
-  it('有下一页时哨兵进入视口自动拉取下一页', async () => {
-    // 覆盖滚动加载：hasNextPage=true 时底部哨兵被 observe，进入视口触发 fetchNextPage。
-    marketState.data.value = {
-      entries: [
-        { source: 'clawhub', source_ref: 'c1', name: 'c1', version: '1.0.0', downloads: 5 },
-      ],
-    }
-    marketState.hasNextPage.value = true
-    mountBrowser()
+  // makeEntries 批量构造 clawhub 条目，便于覆盖超过一页（pageSize=12）的切片场景。
+  function makeEntries(count: number): SkillEntry[] {
+    return Array.from({ length: count }, (_, i) => ({
+      source: 'clawhub' as const,
+      source_ref: `c${i}`,
+      name: `c${i}`,
+      version: '1.0.0',
+      downloads: i,
+    }))
+  }
+
+  it('条目超过一页时仅渲染当前页（pageSize=12）并展示翻页器', async () => {
+    // 覆盖客户端分页切片：15 条目首页只渲染前 12 张卡片，且因总页数>1 渲染翻页器。
+    marketState.data.value = { entries: makeEntries(15) }
+    const wrapper = mountBrowser()
     await flushPromises()
+    // 首页应只渲染 12 张卡片，而非把全部 15 条一次性铺开。
+    expect(wrapper.findAll('.n-card')).toHaveLength(12)
+    // 翻页器应出现（总页数 ceil(15/12)=2）。
+    const pager = wrapper.find('.n-pagination')
+    expect(pager.exists()).toBe(true)
+    expect(pager.attributes('data-page-count')).toBe('2')
+  })
+
+  it('翻到第二页时渲染剩余条目而非累积全部', async () => {
+    // 覆盖翻页切片：15 条目翻到第 2 页应渲染剩余 3 张卡片（第 13-15 条），首页 12 张不再保留。
+    marketState.data.value = { entries: makeEntries(15) }
+    const wrapper = mountBrowser()
+    await flushPromises()
+    await wrapper.find('.page-next').trigger('click')
     await nextTick()
-    // 哨兵元素应已被 IntersectionObserver 观察。
-    expect(ioObserve).toHaveBeenCalled()
-    // 模拟哨兵进入视口 → 自动拉取下一页。
-    lastIntersectionCallback?.([{ isIntersecting: true }])
+    expect(wrapper.findAll('.n-card')).toHaveLength(3)
+  })
+
+  it('单页且无下一页时不渲染翻页器', async () => {
+    // 边界：条目不足一页且 hasNextPage=false 时总页数为 1，翻页器不渲染。
+    marketState.data.value = { entries: makeEntries(3) }
+    marketState.hasNextPage.value = false
+    const wrapper = mountBrowser()
+    await flushPromises()
+    expect(wrapper.find('.n-pagination').exists()).toBe(false)
+  })
+
+  it('仍有下一页时翻页器多给一页入口，翻到该页触发后台补拉', async () => {
+    // 覆盖游标分页后台补拉：恰好一页（12 条）且 hasNextPage=true 时总页数 +1=2；
+    // 翻到第 2 页时当前已加载条目不足以填满该页，应触发 fetchNextPage 拉取下一游标页。
+    marketState.data.value = { entries: makeEntries(12) }
+    marketState.hasNextPage.value = true
+    // fetchNextPage 与真实 useInfiniteQuery 一致：拉取开始即置 isFetchingNextPage=true，
+    // 用于验证补拉触发后守卫生效、不会重复拉取。
+    marketState.fetchNextPage.mockImplementation(() => {
+      marketState.isFetchingNextPage.value = true
+    })
+    const wrapper = mountBrowser()
+    await flushPromises()
+    // 总页数应为「已加载页 1 + 下一页入口 1」=2。
+    expect(wrapper.find('.n-pagination').attributes('data-page-count')).toBe('2')
+    await wrapper.find('.page-next').trigger('click')
+    await nextTick()
     expect(marketState.fetchNextPage).toHaveBeenCalledTimes(1)
   })
 
-  it('正在拉取下一页时哨兵再次进入视口不重复触发', async () => {
-    // 防抖：isFetchingNextPage=true 时再次相交不应重复调用 fetchNextPage。
-    marketState.data.value = {
-      entries: [
-        { source: 'clawhub', source_ref: 'c1', name: 'c1', version: '1.0.0', downloads: 5 },
-      ],
-    }
+  it('正在补拉下一页时不重复触发 fetchNextPage', async () => {
+    // 防抖：isFetchingNextPage=true 时翻到需补拉的页码不应重复调用 fetchNextPage。
+    marketState.data.value = { entries: makeEntries(12) }
     marketState.hasNextPage.value = true
     marketState.isFetchingNextPage.value = true
-    mountBrowser()
+    const wrapper = mountBrowser()
     await flushPromises()
+    await wrapper.find('.page-next').trigger('click')
     await nextTick()
-    lastIntersectionCallback?.([{ isIntersecting: true }])
     expect(marketState.fetchNextPage).not.toHaveBeenCalled()
   })
 
-  it('没有下一页时不渲染哨兵、不建立观察', async () => {
-    // 边界：hasNextPage=false 时哨兵不渲染，IntersectionObserver 不 observe。
-    marketState.data.value = {
-      entries: [
-        { source: 'platform', source_ref: 'p1', name: 'p1', version: '1.0.0', downloads: 0 },
-      ],
-    }
-    marketState.hasNextPage.value = false
-    mountBrowser()
+  it('切换来源筛选后页码复位到第一页', async () => {
+    // 覆盖筛选复位：翻到第 2 页后点击「平台技能」筛选 chip，marketParams 变化使页码回到 1，
+    // 重新渲染首页 12 张卡片（避免停留在筛选后已不存在的页码导致空白）。
+    marketState.data.value = { entries: makeEntries(15) }
+    const wrapper = mountBrowser()
     await flushPromises()
+    await wrapper.find('.page-next').trigger('click')
     await nextTick()
-    expect(ioObserve).not.toHaveBeenCalled()
-  })
-
-  it('一页加载完成后仍有下一页时重新观察哨兵，避免首屏不满导致卡死', async () => {
-    // 回归防御：多列网格首屏不满一屏时，哨兵常驻视口、相交状态不变，
-    // IntersectionObserver 不会二次回调，旧实现会卡死在前几页。修复后每当一页
-    // 加载完成（isFetchingNextPage 由 true 回落 false），应重新 observe 哨兵
-    // （先 unobserve 再 observe），让仍在视口内的哨兵能再次触发相交回调继续翻页。
-    marketState.data.value = {
-      entries: [
-        { source: 'clawhub', source_ref: 'c1', name: 'c1', version: '1.0.0', downloads: 5 },
-      ],
-    }
-    marketState.hasNextPage.value = true
-    // 初始处于「正在加载下一页」，模拟刚发出翻页请求尚未返回。
-    marketState.isFetchingNextPage.value = true
-    mountBrowser()
-    await flushPromises()
+    expect(wrapper.findAll('.n-card')).toHaveLength(3)
+    // 点击「平台技能」筛选 chip，selectedSource 变化触发页码复位。
+    const platformTag = wrapper.findAll('.filter-tag').find((t) => t.text().includes('平台技能'))
+    await platformTag!.trigger('click')
     await nextTick()
-    // 记录此前 observe 次数（挂载时哨兵首次被观察一次）。
-    const observeBefore = ioObserve.mock.calls.length
-    // 模拟这一页加载完成：isFetchingNextPage 下降沿，触发对哨兵的重新观察。
-    marketState.isFetchingNextPage.value = false
-    await flushPromises()
-    await nextTick()
-    // 修复点：加载完成后重新观察哨兵（unobserve + observe），而非永久停止。
-    expect(ioUnobserve).toHaveBeenCalled()
-    expect(ioObserve.mock.calls.length).toBeGreaterThan(observeBefore)
+    expect(wrapper.findAll('.n-card')).toHaveLength(12)
   })
 
   // ======== 点卡片 emit action ========
