@@ -27,7 +27,7 @@
     <div v-else-if="!marketEntries.length" class="state-text">暂无技能</div>
     <div v-else class="market-grid">
       <n-card
-        v-for="entry in marketEntries"
+        v-for="entry in pagedEntries"
         :key="`${entry.source}-${entry.source_ref}`"
         size="small"
         class="market-card market-card-clickable"
@@ -71,12 +71,14 @@
         </div>
       </n-card>
     </div>
-    <div
-      v-if="marketEntries.length && skillMarketQuery.hasNextPage.value"
-      ref="loadMoreSentinel"
-      class="market-load-more state-text"
-    >
-      {{ skillMarketQuery.isFetchingNextPage.value ? '加载中…' : '滚动加载更多' }}
+    <!-- 翻页器：只渲染当前页条目，避免页面随加载无限拉长。clawhub 为游标分页，总页数按已加载条目推算。 -->
+    <div v-if="marketEntries.length && pageCount > 1" class="market-pagination">
+      <n-pagination
+        :page="currentPage"
+        :page-count="pageCount"
+        :disabled="skillMarketQuery.isFetchingNextPage.value"
+        @update:page="onPageChange"
+      />
     </div>
 
     <!-- 详情抽屉：点卡片打开，版本场景下可锁旧版（pick-version）。 -->
@@ -93,8 +95,8 @@
 </template>
 
 <script setup lang="ts">
-import { computed, nextTick, onBeforeUnmount, ref, watch } from 'vue'
-import { NButton, NCard, NInput, NTag } from 'naive-ui'
+import { computed, ref, watch } from 'vue'
+import { NButton, NCard, NInput, NPagination, NTag } from 'naive-ui'
 import type { SkillEntry } from '@/api'
 import { useSkillMarketQuery } from '@/api/hooks/useSkills'
 import { useAuthStore } from '@/stores/auth'
@@ -180,46 +182,57 @@ const marketEntries = computed<SkillEntry[]>(() => {
   return out
 })
 
-// 滚动加载哨兵（IntersectionObserver）。
-const loadMoreSentinel = ref<HTMLElement | null>(null)
-let loadMoreObserver: IntersectionObserver | null = null
-// 当还有下一页且未在加载时拉取下一页；observer 回调与加载完成后的「续拉」复查共用此守卫。
-function loadMoreIfNeeded() {
-  if (skillMarketQuery.hasNextPage.value && !skillMarketQuery.isFetchingNextPage.value) {
+// 每页展示条目数；技能市场以卡片网格展示，12 条可在常见屏宽下铺满数行又不至于过长。
+const pageSize = 12
+// currentPage：当前页码（从 1 开始）。
+const currentPage = ref(1)
+
+// pageCount：翻页器展示的总页数。
+// clawhub 来源是游标分页（只能向后翻、无法预知总数），故总页数按「已去重加载条目数」推算；
+// 仍有下一页（hasNextPage）时额外 +1，给出一个「下一页」入口，用户翻到该页时再后台拉取游标下一页。
+const pageCount = computed(() => {
+  const loaded = Math.max(1, Math.ceil(marketEntries.value.length / pageSize))
+  return skillMarketQuery.hasNextPage.value ? loaded + 1 : loaded
+})
+
+// pagedEntries：当前页要渲染的条目，对去重后的 marketEntries 做客户端切片。
+// 只渲染一页而非累积全部，避免页面随翻页无限拉长（取代原滚动加载）。
+const pagedEntries = computed<SkillEntry[]>(() => {
+  const start = (currentPage.value - 1) * pageSize
+  return marketEntries.value.slice(start, start + pageSize)
+})
+
+// ensureLoadedForCurrentPage：保证已加载条目足够填满当前页。
+// 当前页所需条目数不足、仍有游标下一页且未在拉取时，后台拉取下一页；拉取完成后 marketEntries
+// 增长会再次触发下方 watch，必要时继续「续拉」直到填满当前页或没有下一页为止
+// （应对单个 clawhub 游标页返回不足一屏的情况）。
+function ensureLoadedForCurrentPage() {
+  const needed = currentPage.value * pageSize
+  if (
+    marketEntries.value.length < needed &&
+    skillMarketQuery.hasNextPage.value &&
+    !skillMarketQuery.isFetchingNextPage.value
+  ) {
     void skillMarketQuery.fetchNextPage()
   }
 }
-function setupLoadMoreObserver(el: HTMLElement | null) {
-  loadMoreObserver?.disconnect()
-  loadMoreObserver = null
-  if (!el) return
-  loadMoreObserver = new IntersectionObserver(
-    (entries) => {
-      if (entries.some((e) => e.isIntersecting)) loadMoreIfNeeded()
-    },
-    { rootMargin: '200px' },
-  )
-  loadMoreObserver.observe(el)
-}
-watch(loadMoreSentinel, (el) => setupLoadMoreObserver(el))
 
-// market-grid 是 auto-fill 多列网格，首屏乃至前几页常常填不满一屏，哨兵自出现起就停留在
-// 视口内、相交状态再无变化，IntersectionObserver 不会二次回调，导致滚动加载卡死在前几页；
-// 又因内容不足一屏、页面没有滚动条，用户也无法手动滚动来重新触发。
-// 解决：每当一页加载完成（isFetchingNextPage 由 true 回落 false）后重新 observe 哨兵——
-// 若它仍在视口内会再投递一次相交回调继续翻页，直到内容把哨兵推出视口或没有下一页为止。
+// onPageChange：翻页器回调，仅更新页码；按需补拉数据交给下方 watch 统一处理，避免重复触发。
+function onPageChange(page: number) {
+  currentPage.value = page
+}
+
+// 翻页或一页加载完成（marketEntries 增长 / isFetchingNextPage 回落）后复查是否需继续补拉。
 watch(
-  () => skillMarketQuery.isFetchingNextPage.value,
-  async (fetching, prevFetching) => {
-    if (!prevFetching || fetching) return // 仅在「加载完成」这一下降沿复查，避免重复触发
-    await nextTick()
-    const el = loadMoreSentinel.value
-    if (!el || !loadMoreObserver) return
-    loadMoreObserver.unobserve(el)
-    loadMoreObserver.observe(el)
-  },
+  () => [currentPage.value, marketEntries.value.length, skillMarketQuery.isFetchingNextPage.value],
+  () => ensureLoadedForCurrentPage(),
 )
-onBeforeUnmount(() => loadMoreObserver?.disconnect())
+
+// 来源筛选 / 搜索词变化时 useInfiniteQuery 会重置回第一页，这里同步把页码复位到 1，
+// 避免停留在筛选后已不存在的页码导致空白。
+watch(marketParams, () => {
+  currentPage.value = 1
+})
 
 // 详情抽屉。
 const detailOpen = ref(false)
@@ -280,7 +293,7 @@ function formatCount(n?: number): string {
 .filter-tag { cursor: pointer; }
 .market-search { width: 200px; flex-shrink: 0; }
 .market-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(220px, 1fr)); gap: 12px; }
-.market-load-more { display: flex; justify-content: center; margin-top: 12px; }
+.market-pagination { display: flex; justify-content: center; margin-top: 16px; }
 .market-card-clickable { cursor: pointer; }
 .market-card-header { display: flex; align-items: flex-start; justify-content: space-between; gap: 8px; margin-bottom: 6px; }
 .market-card-name { font-size: 14px; word-break: break-all; }
