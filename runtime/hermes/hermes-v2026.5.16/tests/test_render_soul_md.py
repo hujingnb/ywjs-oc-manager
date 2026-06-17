@@ -93,6 +93,20 @@ def test_knowledge_guide_rendered_when_configured(tmp_input: Path, tmp_data: Pat
     assert "网络搜索" in soul
 
 
+def test_knowledge_guide_mandates_search_first_unconditionally(tmp_input: Path, tmp_data: Path) -> None:
+    # 加强后的指引语义：不再让模型先判断"问题是否依赖知识库"，而是要求对【每一次提问】
+    # 把 oc-kb search 当作第一个动作，且禁止先于检索就用浏览器 / 网络搜索。
+    # 本用例锁住这一无条件语义，防止后续改动退回到"可能依赖才查"的旧弱约束。
+    _setup(tmp_input, persona="P body", platform="PLT")
+    render(_manifest_with_knowledge(), tmp_input, tmp_data)
+    soul = (tmp_data / "SOUL.md").read_text()
+    assert "每一次提问" in soul  # 触发条件必须是无条件的"每一次"，而非"可能依赖时"
+    assert "第一个动作" in soul  # 必须把 oc-kb search 明确为第一个动作
+    assert "浏览器" in soul  # 必须显式禁止"先用浏览器搜"这一退化行为
+    # 不得再出现旧版本"可能依赖……才查"式的有条件前置判断措辞
+    assert "只要用户的问题可能依赖" not in soul
+
+
 def test_knowledge_guide_mentions_industry_results_when_configured(tmp_input: Path, tmp_data: Path) -> None:
     # SOUL.md 的知识库指引需要说明行业知识库可能参与检索，帮助模型区分实例、企业、行业来源。
     _setup(tmp_input, persona="P body", platform="PLT")

@@ -152,10 +152,11 @@ oc-kb search "<问题>" [--top-k 8]
 - 每个关联行业知识库都会单独检索并返回最多 `top_k` 条结果；如果一个助手版本关联很多行业库，返回给 Hermes 的上下文会线性膨胀。版本编辑页会提示该风险，由平台管理员自行判断关联数量。
 - 检索结果带 `scope`（`app` / `org` / `industry`）、`document_name`、`similarity` 与 chunk 内容；行业命中还会返回 `industry_knowledge_base_id` / `industry_knowledge_base_name`，便于 Hermes 和排障识别来源。
 
-**强制优先知识库**：容器启动时渲染的 `SOUL.md` 注入了知识库指引——只要用户的问题可能依赖企业政策、
-产品文档、应用规则或此前存入的文件，Hermes **必须先 `oc-kb search` 再作答**，不得用网络搜索 / 记忆代替；
-因此用户无需显式说「知识库」，Hermes 也会主动检索。该指引仅在实例配置了知识库（manifest 含 runtime
-endpoint + app token）时才渲染，避免未接入的实例误调不存在的 skill。
+**强制优先知识库**：容器启动时渲染的 `SOUL.md` 注入了知识库指引——对用户的**每一次提问**，Hermes 的
+第一个动作都必须是 `oc-kb search`，不得跳过、不得先用网络搜索 / 记忆代替，哪怕它主观判断知识库里没有相关内容；
+只有在检索返回后才决定是否动用其它信息源。这里刻意不让模型先判断「问题是否依赖知识库」（旧版「可能依赖才查」
+会被模型一句「这问题应该不在库里」就跳过），因此用户无需显式说「知识库」，Hermes 也会主动检索。该指引仅在
+实例配置了知识库（manifest 含 runtime endpoint + app token）时才渲染，避免未接入的实例误调不存在的 skill。
 
 ---
 
