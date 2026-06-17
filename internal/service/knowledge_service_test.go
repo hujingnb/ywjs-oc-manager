@@ -821,6 +821,28 @@ func TestEnsureOrgDatasetCreatesRemoteDatasetMapping(t *testing.T) {
 	assert.Equal(t, "remote-org-name", store.activatedDatasets[0].Name)
 }
 
+// TestEnsureOrgDatasetSubmitsEmbeddingModelWithProvider 验证创建 dataset 时默认模型经 fallback 白名单
+// 解析为 RAGFlow 要求的 name@provider 格式后再提交，复现并防止线上「embedding_model 必须 name@provider」创建失败。
+func TestEnsureOrgDatasetSubmitsEmbeddingModelWithProvider(t *testing.T) {
+	svc, store, rf := newRAGFlowKnowledgeTestService(t)
+	svc.SetDefaultEmbeddingModel("BAAI/bge-m3")
+	// 线上配置同样把 BAAI/bge-m3 的 provider 设为 OpenAI-API-Compatible，需补全 ___OpenAI-API 内部名后缀。
+	svc.SetEmbeddingModelFallbacks([]config.RAGFlowEmbeddingModelConfig{{Name: "BAAI/bge-m3", Provider: "OpenAI-API-Compatible"}})
+	store.missingOrgDataset = true
+	rf.createDatasetResult = ragflow.Dataset{ID: "new-org-ds", Name: "remote-org-name"}
+
+	_, err := svc.EnsureOrgDataset(context.Background(), sqlc.Organization{
+		ID:   mustParseUUID(testKnowledgeOrg),
+		Name: "测试组织",
+		Code: "test-org",
+	})
+	require.NoError(t, err)
+
+	require.Len(t, rf.createDatasetCalls, 1)
+	// 期望提交带 provider 的完整模型标识，而非裸 BAAI/bge-m3。
+	assert.Equal(t, "BAAI/bge-m3___OpenAI-API@OpenAI-API-Compatible", rf.createDatasetCalls[0].embeddingModel)
+}
+
 // TestRuntimeAddRecreatesFailedAppDataset 验证实例 dataset 创建失败后，runtime 写入会自动重试创建再上传文件。
 func TestRuntimeAddRecreatesFailedAppDataset(t *testing.T) {
 	svc, store, rf := newRAGFlowKnowledgeTestService(t)

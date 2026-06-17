@@ -743,6 +743,22 @@ func (s *KnowledgeService) resolveKnowledgeEmbeddingModel(input KnowledgeEmbeddi
 	}
 }
 
+// resolveDefaultEmbeddingSubmitValue 把配置默认 embedding 模型名解析为创建 RAGFlow dataset 需要的提交值。
+// 模型名为空时返回空串以保留 RAGFlow 服务端默认行为；能在 fallback 白名单中按名唯一匹配时，
+// 按官方 API 要求补全 provider 得到 name@provider；未配置白名单或匹配不到时回退提交原始名，
+// 既保持旧的容错行为，又把格式校验交还 RAGFlow 服务端。
+func (s *KnowledgeService) resolveDefaultEmbeddingSubmitValue() string {
+	name := strings.TrimSpace(s.defaultEmbeddingModel)
+	if name == "" {
+		return ""
+	}
+	model, err := s.resolveKnowledgeEmbeddingModel(KnowledgeEmbeddingModelInput{Name: name})
+	if err != nil {
+		return name
+	}
+	return ragflowEmbeddingSubmitValue(model)
+}
+
 // ragflowEmbeddingSubmitValue 按官方 API 要求提交 model_name@model_factory；provider 为空时保留纯模型名。
 func ragflowEmbeddingSubmitValue(model KnowledgeEmbeddingModelResult) string {
 	name := strings.TrimSpace(model.Name)
@@ -1434,10 +1450,12 @@ func (s *KnowledgeService) ensureExistingDataset(ctx context.Context, dataset sq
 
 func (s *KnowledgeService) createRemoteDataset(ctx context.Context, dataset sqlc.RagflowDataset, claimToken string) (sqlc.RagflowDataset, error) {
 	// 创建远端 dataset 时把 manager 配置的默认模型一并提交；空值保持 RAGFlow 服务端默认行为。
+	// RAGFlow 新版要求 embedding_model 为 name@provider 格式，必须经 fallback 白名单解析补全 provider，
+	// 不能直接提交配置里的裸模型名（如 BAAI/bge-m3），否则远端按格式校验直接拒绝创建。
 	remote, err := s.ragflowClient().CreateDataset(ctx, ragflow.CreateDatasetRequest{
 		Name:           dataset.Name,
 		ChunkMethod:    s.datasetChunkMethod,
-		EmbeddingModel: s.defaultEmbeddingModel,
+		EmbeddingModel: s.resolveDefaultEmbeddingSubmitValue(),
 	})
 	if err != nil {
 		// MarkRAGFlowDatasetFailed 为 :exec；失败写入是 best-effort，忽略返回值。
