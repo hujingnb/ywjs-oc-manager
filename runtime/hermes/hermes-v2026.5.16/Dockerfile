@@ -113,6 +113,13 @@ RUN chmod +x /usr/local/bin/oc-entrypoint /usr/local/bin/oc-kb \
 # 成功后 oc-ops 可 POST http://127.0.0.1:8642/oc/skills/reload 触发免重启 skill 热加载。
 RUN python3 /usr/local/lib/oc-entrypoint/patches/patch_api_server_reload.py
 
+# 把 gateway 里未走 i18n（t()）的用户可见英文裸字符串翻译为中文。
+# 上游 hermes-agent 的 i18n 只覆盖 t() 调用，gateway/run.py 与 gateway/platforms/base.py
+# 仍有一批直接发给对话框的英文字面量（关闭/重启通知、会话过大、斜杠命令回复、错误提示、
+# 配对/技能提示、超时诊断等），display.language=zh 对其无效，需此补丁就地替换；
+# 锚点缺失即 exit 1 让构建失败，避免上游改版后静默漏翻。
+RUN python3 /usr/local/lib/oc-entrypoint/patches/patch_i18n_literals.py
+
 # 镜像身份信息写到固定位置，供 oc-info 读取
 ARG OC_IMAGE_VARIANT
 ARG OC_BUILD_TS

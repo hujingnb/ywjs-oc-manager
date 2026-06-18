@@ -58,6 +58,14 @@ def test_render_is_atomic(tmp_data: Path) -> None:
     assert leftovers == []
 
 
+def test_render_sets_display_language_zh(tmp_data: Path) -> None:
+    # display.language=zh 必须就位：hermes i18n 据此把所有走 t() 的用户可见文案
+    # 输出为简体中文（审批提示、/status、reset/restart 通知等）。缺这一项会回落英文。
+    render(make_manifest(), tmp_data)
+    out = yaml.safe_load((tmp_data / "config.yaml").read_text())
+    assert out["display"]["language"] == "zh"
+
+
 def test_render_writes_approvals_skip_block(tmp_data: Path) -> None:
     # 验证 approvals 段就位：mode=off 命中上游 yolo 分支跳过审批；
     # cron_mode=approve 兜未来 mode 被改回 manual/smart 时 cron 仍放行。

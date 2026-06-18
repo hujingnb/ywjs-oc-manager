@@ -41,6 +41,11 @@ def render(m: Manifest, data_root: Path) -> str:
     data_root.mkdir(parents=True, exist_ok=True)
     base_url = m.openai_base_url.rstrip("/") + "/v1"
     config = {
+        # display.language=zh：让 hermes 自带 i18n（agent/i18n.py + locales/zh.yaml）
+        # 把所有走 t() 的用户可见文案（审批提示、/status、/agents、reset/restart 通知、
+        # /goal、/resume、kanban 等）输出为简体中文。run.py / base.py 里未走 t() 的裸字符串
+        # 由构建期补丁 patches/patch_i18n_literals.py 单独翻译，两者配合实现完整中文化。
+        "display": {"language": "zh"},
         "model": {
             "default": m.app_model, "provider": "custom",
             "base_url": base_url, "api_key": m.openai_api_key,
