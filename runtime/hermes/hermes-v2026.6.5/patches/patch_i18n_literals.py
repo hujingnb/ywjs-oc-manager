@@ -400,6 +400,213 @@ REPLACEMENTS_RUN: list[tuple[str, str]] = [
      "超时倒计时 "),
     ("You can continue waiting or use /reset.",
      "你可以继续等待,或使用 /reset。"),
+
+    # ======================================================================
+    # 二次穷举审计补漏（2026-06-18，全量补齐，与另一 variant 同步）。
+    # 以下均为经 adapter.send / 斜杠命令 return / final_response 发往对话框、
+    # 但首轮未覆盖的用户可见英文串；多因 f-string 插值（{status_detail} 等）
+    # 打断锚点、与已译串措辞相近、或无 emoji 的尾段。仅覆盖微信走的平台无关
+    # 路径；其它平台专属文案仍不译。
+    # ======================================================================
+
+    # --- 忙碌状态明细 status_parts（拼进下方 steer/queue/interrupt 与心跳）---
+    ("{elapsed_min} min elapsed", "已过 {elapsed_min} 分钟"),
+    ("iteration {iteration}/{max_iter}", "迭代 {iteration}/{max_iter}"),
+    ("running: {current_tool}", "运行中: {current_tool}"),
+    ("iteration {_a['api_call_count']}/{_a['max_iterations']}",
+     "迭代 {_a['api_call_count']}/{_a['max_iterations']}"),
+
+    # --- 忙时 steer / queue / interrupt 确认 ---
+    ("⏩ Steered into current run{status_detail}. ", "⏩ 已切入当前运行{status_detail}。"),
+    ("Your message arrives after the next tool call.", "你的消息将在下一次工具调用后送达。"),
+    ("⏳ Queued for the next turn{status_detail}. ", "⏳ 已加入下一轮队列{status_detail}。"),
+    ("I'll respond once the current task finishes.", "当前任务完成后我会回复。"),
+    ("⚡ Interrupting current task{status_detail}. ", "⚡ 正在中断当前任务{status_detail}。"),
+    ("I'll respond to your message shortly.", "我会尽快回复你的消息。"),
+
+    # --- Kanban 子任务通知（adapter.send，平台无关）---
+    ("✔ {tag}Kanban {sub['task_id']} done", "✔ {tag}看板 {sub['task_id']} 已完成"),
+    (" — {title}{handoff}", " —— {title}{handoff}"),
+    ("⏸ {tag}Kanban {sub['task_id']} blocked{reason}", "⏸ {tag}看板 {sub['task_id']} 受阻{reason}"),
+    ("✖ {tag}Kanban {sub['task_id']} gave up ", "✖ {tag}看板 {sub['task_id']} 已放弃"),
+    ("after repeated spawn failures{err}", "(多次启动失败){err}"),
+    ("✖ {tag}Kanban {sub['task_id']} worker crashed ", "✖ {tag}看板 {sub['task_id']} worker 崩溃 "),
+    ("(pid gone); dispatcher will retry", "(进程已消失);调度器将重试"),
+    ("⏱ {tag}Kanban {sub['task_id']} timed out ", "⏱ {tag}看板 {sub['task_id']} 超时 "),
+    ("(max_runtime={limit}s); will retry", "(max_runtime={limit}s);将重试"),
+
+    # --- 语音消息无法转写（STT 未配置）---
+    ("🎤 I received your voice message but can't transcribe it — ",
+     "🎤 收到了你的语音消息,但无法转写 —— "),
+    ("no speech-to-text provider is configured.\\n\\n",
+     "未配置语音转文字(STT)服务。\\n\\n"),
+    ("To enable voice: install faster-whisper ", "启用语音功能:安装 faster-whisper "),
+    ("and set `stt.enabled: true` in config.yaml, ",
+     "并在 config.yaml 中设置 `stt.enabled: true`,"),
+    ("then /restart the gateway.", "然后用 /restart 重启网关。"),
+    ("\\n\\nFor full setup instructions, type: `/skill hermes-agent-setup`",
+     "\\n\\n完整配置说明请输入:`/skill hermes-agent-setup`"),
+
+    # --- 会话自动重置通知 ---
+    ("previous session was stopped or interrupted", "上一会话已被停止或中断"),
+    ("daily schedule at {policy.at_hour}:00", "每日定时 {policy.at_hour}:00"),
+    ("inactive for {duration}", "已闲置 {duration}"),
+    ("◐ Session automatically reset ({reason_text}). ",
+     "◐ 会话已自动重置({reason_text})。"),
+    ("Conversation history cleared.\\n", "对话历史已清空。\\n"),
+    ("Use /resume to browse and restore a previous session.\\n",
+     "使用 /resume 浏览并恢复此前的会话。\\n"),
+    ("Adjust reset timing in config.yaml under session_reset.",
+     "可在 config.yaml 的 session_reset 下调整重置时机。"),
+
+    # --- 未设置 home channel 一次性提示 ---
+    ("📬 No home channel is set for {platform_name.title()}. ",
+     "📬 尚未为 {platform_name.title()} 设置主频道。"),
+    ("A home channel is where Hermes delivers cron job results ",
+     "主频道是 Hermes 投递定时任务结果"),
+    ("and cross-platform messages.\\n\\n", "和跨平台消息的地方。\\n\\n"),
+    ("Type {sethome_cmd} to make this chat your home channel, ",
+     "输入 {sethome_cmd} 即可将本聊天设为主频道,"),
+    ("or ignore to skip.", "或忽略以跳过。"),
+
+    # --- 推理过程展示 ---
+    ("({len(lines) - 15} more lines)_", "(还有 {len(lines) - 15} 行)_"),
+    ("💭 **Reasoning:**", "💭 **推理过程:**"),
+
+    # --- /model 会话信息（管理员诊断；ctx_source 的 config/detected 单词态
+    #     因全局碰撞风险不替换，仅译可安全唯一匹配的句子）---
+    ("default — set model.context_length in config to override",
+     "默认 —— 在 config 中设置 model.context_length 可覆盖"),
+    ("◆ Model: `{model}`", "◆ 模型: `{model}`"),
+    ("◆ Provider: {provider or 'openrouter'}", "◆ 服务商: {provider or 'openrouter'}"),
+    ("◆ Context: {ctx_display} tokens ({ctx_source})",
+     "◆ 上下文: {ctx_display} tokens ({ctx_source})"),
+    ("◆ Endpoint: {base_url}", "◆ 端点: {base_url}"),
+
+    # --- 非管理员斜杠访问提示 ---
+    ("You can run: ", "你可以使用: "),
+    (". Use /whoami for the full list.", "。使用 /whoami 查看完整列表。"),
+    ("No slash commands are enabled for non-admins on this ",
+     "本平台未对非管理员启用任何斜杠命令。"),
+    ("platform. Ask an admin to add you to allow_admin_from ",
+     "请联系管理员把你加入 allow_admin_from,"),
+    ("or to set user_allowed_commands.", "或设置 user_allowed_commands。"),
+
+    # --- /platform 平台管理命令（list / pause / resume）---
+    ("**Gateway platforms**", "**网关平台**"),
+    ("Connected: (none)", "已连接: (无)"),
+    ("Connected: ", "已连接: "),
+    ("Failed/paused: (none)", "失败/暂停: (无)"),
+    (" — PAUSED ({reason}). ", " —— 已暂停({reason})。"),
+    ("Resume with `/platform resume {p.value}`.", "用 `/platform resume {p.value}` 恢复。"),
+    (" — retrying (attempt {attempts})", " —— 重试中(第 {attempts} 次)"),
+    ("Usage: /platform {action} <name>", "用法:/platform {action} <name>"),
+    ("Unknown platform: {target}", "未知平台:{target}"),
+    # 「不在重试队列中 — nothing to resume」整段（含尾破折号）必须排在仅含尾空格的
+    # 同前缀 pause 变体之前，否则短串先命中长串内部切出病句。
+    ("{platform.value} is not in the retry queue — ",
+     "{platform.value} 不在重试队列中 —— "),
+    ("nothing to resume.", "无可恢复项。"),
+    ("{platform.value} is not in the retry queue ",
+     "{platform.value} 不在重试队列中"),
+    ("(it's either connected or not enabled).", "(它要么已连接,要么未启用)。"),
+    ("{platform.value} is already paused.", "{platform.value} 已处于暂停状态。"),
+    ("✓ {platform.value} paused. ", "✓ {platform.value} 已暂停。"),
+    ("Resume with `/platform resume {platform.value}` or ",
+     "用 `/platform resume {platform.value}` 或 "),
+    ("`hermes gateway restart` to reset.", "`hermes gateway restart` 重置以恢复。"),
+    ("{platform.value} is already retrying — ", "{platform.value} 已在重试中 —— "),
+    ("no resume needed.", "无需恢复。"),
+    ("✓ {platform.value} resumed — retrying on next watcher tick.",
+     "✓ {platform.value} 已恢复 —— 将在下次巡检时重试。"),
+    ("Usage: /platform <list|pause|resume> [name]\\n",
+     "用法:/platform <list|pause|resume> [name]\\n"),
+    ("  /platform list — show platform status\\n",
+     "  /platform list —— 显示平台状态\\n"),
+    ("  /platform pause <name> — stop retrying a failing platform\\n",
+     "  /platform pause <name> —— 停止重试某个故障平台\\n"),
+    ("  /platform resume <name> — re-queue a paused platform",
+     "  /platform resume <name> —— 重新排队某个已暂停平台"),
+
+    # --- /subgoal 错误前缀 ---
+    ("/subgoal: {exc}", "/subgoal:{exc}"),
+
+    # --- /undo 销毁性确认说明（单轮）---
+    ("This removes the last user/assistant exchange from history.",
+     "这将从历史中移除最近一轮用户/助手对话。"),
+
+    # --- 危险命令确认提示框骨架（与已覆盖的 Approve/Cancel 选项配套）---
+    ("Choose:\\n", "请选择:\\n"),
+    ("_Text fallback: reply `/approve`, `/always`, or `/cancel`._",
+     "_纯文本回退:回复 `/approve`、`/always` 或 `/cancel`。_"),
+
+    # --- 后台任务结果错误前缀 ---
+    ("Error: {result['error']}", "出错: {result['error']}"),
+
+    # --- 危险命令审批：原因标签 ---
+    ("Reason: {desc}\\n\\n", "原因: {desc}\\n\\n"),
+
+    # --- 网关上线广播 ---
+    ("♻️ Gateway online — Hermes is back and ready.",
+     "♻️ 网关已上线 —— Hermes 已恢复就绪。"),
+
+    # --- Hermes 自更新失败（带输出代码块）---
+    ("❌ Hermes update failed.\\n\\n", "❌ Hermes 更新失败。\\n\\n"),
+
+    # --- /subgoal clear 成功（中文无复数，丢弃 {'s' ...} 占位逻辑）---
+    ("✓ Cleared ", "✓ 已清除 "),
+    (" subgoal{'s' if prev != 1 else ''}.", " 个子目标。"),
+
+    # --- 关闭销毁性确认后的一次性提示 ---
+    ("\\n\\nℹ️ Future /clear, /new, /reset, and /undo will run ",
+     "\\n\\nℹ️ 今后 /clear、/new、/reset 和 /undo 将直接执行,"),
+    ("without confirmation. Re-enable via ", "无需确认。如需重新启用,请用 "),
+    ("`approvals.destructive_slash_confirm: true` in config.yaml.",
+     "config.yaml 中的 `approvals.destructive_slash_confirm: true`。"),
+
+    # --- 闲置超时诊断：卡在工具分支 + 首行（else「Last activity」分支与尾段
+    #     已由上方超时诊断段覆盖）。无尾空格的 `iteration {_iter_n}/{_iter_max}).`
+    #     排在带尾空格同名锚点之后，靠列表顺序保证不误伤。---
+    ("⏱️ Agent inactive for {_timeout_mins} min — no tool calls ",
+     "⏱️ 智能体已闲置 {_timeout_mins} 分钟 —— 无工具调用"),
+    ("or API responses.", "也无 API 响应。"),
+    ("The agent appears stuck on tool ", "智能体疑似卡在工具 "),
+    ("({_secs_ago:.0f}s since last activity, ", "(距上次活动 {_secs_ago:.0f} 秒, "),
+    ("iteration {_iter_n}/{_iter_max}).", "迭代 {_iter_n}/{_iter_max})。"),
+
+    # ====================== 6.5 专属（与 5.16 文案不同）======================
+    # 长任务心跳（6.5 文案；5.16 为「⏳ Still working... (N min elapsed)」）
+    ("⏳ Working — {_elapsed_mins} min", "⏳ 处理中 —— {_elapsed_mins} 分钟"),
+    # 忙时 subagent 降级变体（6.5 独有：子智能体运行中时排队提示）
+    ("⏳ Subagent working{status_detail} — your message is queued for ",
+     "⏳ 子智能体运行中{status_detail} —— 你的消息已排队,"),
+    ("when it finishes (use /stop to cancel everything).",
+     "将在其完成后处理(用 /stop 取消全部)。"),
+    # /undo 多轮变体（6.5 独有）
+    ("This removes the last {_undo_n} user turns from history.",
+     "这将从历史中移除最近 {_undo_n} 轮用户对话。"),
+    # 语音 STT 安装命令（6.5 文案：uv pip，附 pip 备注）
+    ("(`uv pip install faster-whisper` in the Hermes venv; ",
+     "(在 Hermes venv 中执行 `uv pip install faster-whisper`;"),
+    ("`pip install faster-whisper` also works if pip is on PATH) ",
+     "若 pip 在 PATH 上,`pip install faster-whisper` 亦可) "),
+    # /bundles 命令（6.5 独有；5.16 无此命令）
+    ("**Skill Bundles** ({len(bundles)} installed):",
+     "**技能 Bundle**(已安装 {len(bundles)} 个):"),
+    ("Load {skill_count} skills", "加载 {skill_count} 个技能"),
+    (" skills)_", " 个技能)_"),
+    ("Invoke a bundle with `/<slug>` to load all its skills.",
+     "用 `/<slug>` 调用某个 bundle 即可加载其全部技能。"),
+    # 配置的辅助压缩模型失败、已回退主模型（6.5；5.16 已在压缩段覆盖）
+    ("ℹ️ Configured compression model ", "ℹ️ 所配置的压缩模型 "),
+    ("failed ({_aux_err}). Recovered using your main ",
+     "失败({_aux_err})。已回退使用你的主"),
+    ("model — context is intact — but you may want to ",
+     "模型(上下文完好),但你可能需要"),
+    ("check `auxiliary.compression.model` in config.yaml.",
+     "检查 config.yaml 中的 `auxiliary.compression.model`。"),
+    # aborted 压缩告警块末段「configuration.」（首轮补丁遗漏，补齐避免中英混排）
+    ("configuration.", "配置。"),
 ]
 
 # ==========================================================================
@@ -414,6 +621,22 @@ REPLACEMENTS_BASE: list[tuple[str, str]] = [
      "抱歉,我遇到了错误("),
     ("Try again or use /reset to start a fresh session.",
      "请重试,或用 /reset 开始一个新会话。"),
+
+    # 二次审计补漏（与 run.py 同批）：base 适配器默认实现里的用户可见串。
+    # 澄清提问（ask_clarify）数字选项回退提示
+    ("Reply with the number, the option text, or your own answer.",
+     "请回复序号、选项文字,或你自己的答案。"),
+    # 原生媒体发送未被子类覆写时的纯文本回退标签（仅译英文词，路径原样保留）
+    ("🔊 Audio: {audio_path}", "🔊 音频: {audio_path}"),
+    ("🎬 Video: {video_path}", "🎬 视频: {video_path}"),
+    ("📎 File: {file_path}", "📎 文件: {file_path}"),
+    ("🖼️ Image: {image_path}", "🖼️ 图片: {image_path}"),
+    # 多次重试后仍投递失败（⚠️/— 在源码里是 \\u26a0\\ufe0f / \\u2014 转义，
+    # 故首段跳过 emoji 转义只译 ASCII 文本，第二段连同 \\u2014 整体匹配）
+    ("Message delivery failed after multiple attempts. ",
+     "多次尝试后仍未能送达消息。"),
+    ("Please try again \\u2014 your request was processed but the response could not be sent.",
+     "请重试,你的请求已处理,但回复未能发送。"),
 ]
 
 # 构建期处理的目标文件 → 替换表
