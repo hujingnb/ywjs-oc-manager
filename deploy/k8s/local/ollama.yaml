@@ -13,14 +13,14 @@ spec:
     - { port: 11434, targetPort: 11434 }
 ---
 apiVersion: apps/v1
-kind: Deployment
+kind: StatefulSet
 metadata:
   name: ollama
   namespace: ocm
 spec:
+  serviceName: ollama
   replicas: 1
   selector: { matchLabels: { app: ollama } }
-  strategy: { type: Recreate }
   template:
     metadata:
       labels: { app: ollama }
@@ -59,7 +59,12 @@ spec:
           volumeMounts:
             - name: models
               mountPath: /root/.ollama
-      volumes:
-        # 本地联调用 emptyDir：pod 重建会重拉模型（bge-m3 约 1.2GB），可接受
-        - name: models
-          emptyDir: {}
+  # 模型持久化：经 local-path provisioner 在宿主 .k3d-data 下生成独立 PVC 子目录
+  #（pvc-xxx_ocm_models-ollama-0），pod 重建不再重拉模型（bge-m3 约 1.2GB）。
+  # 与 mysql/redis/minio/es 一致用 volumeClaimTemplates；数据随 local-stop/start
+  # 保留，local-down 删集群才会重建。
+  volumeClaimTemplates:
+    - metadata: { name: models }
+      spec:
+        accessModes: ["ReadWriteOnce"]
+        resources: { requests: { storage: 5Gi } }
