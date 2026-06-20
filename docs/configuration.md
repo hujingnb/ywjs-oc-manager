@@ -201,7 +201,6 @@ agent 启动时使用 `enrollment_secret` 主动注册，注册成功后 `node_i
 | `MANAGER_REDIS_PORT` | `6379` | manager Redis 暴露到宿主机的端口 |
 | `NEWAPI_REDIS_PORT` | `6380` | new-api Redis 暴露到宿主机的端口，与 manager Redis 端口隔离 |
 | `NEWAPI_PORT` | `3000` | new-api HTTP 服务端口 |
-| `OLLAMA_PORT` | `11434` | Ollama HTTP 服务端口，用于 new-api 配置模型渠道 |
 | `RAGFLOW_HTTP_PORT` | `9380` | RAGFlow HTTP API 暴露到宿主机的端口；manager 本地容器通过 `http://ragflow:9380` 访问 |
 | `RAGFLOW_WEB_HTTP_PORT` | `8088` | RAGFlow Web 控制台端口；管理员在这里手工配置 new-api + DeepSeek 模型供应商 |
 | `RAGFLOW_ADMIN_HTTP_PORT` | `9381` | RAGFlow Admin API 端口，仅用于本地排障 |

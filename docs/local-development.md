@@ -48,8 +48,8 @@ make local-reset   # 删集群并清空 .k3d-data，干净重建（随后再 mak
 
 ## 数据持久化
 
-- 有状态件（MySQL/Redis/ES/MinIO/Ollama）的数据落在宿主 `<repo>/.k3d-data` 下**按服务
-  命名的固定目录**（`mysql`/`redis`/`minio`/`elasticsearch`/`ollama`）。各 StatefulSet
+- 有状态件（MySQL/Redis/ES/MinIO）的数据落在宿主 `<repo>/.k3d-data` 下**按服务
+  命名的固定目录**（`mysql`/`redis`/`minio`/`elasticsearch`）。各 StatefulSet
   用固定 `hostPath` 而非动态 PVC，目录名不随集群重建变化。
 - **保数据重启用 `make local-stop` / `make local-start`**：集群只停不删，数据原样恢复。
 - **`make local-down` 删集群后数据仍在**：固定 hostPath 目录留在 `.k3d-data`，下次

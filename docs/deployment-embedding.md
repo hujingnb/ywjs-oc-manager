@@ -24,62 +24,41 @@
 
 ## 架构约定
 
-RAGFlow 统一通过 **new-api 网关**调用 embedding（与对话模型一致，便于计费、限流、
-密钥集中管理）。环境差异只体现在 new-api 的 embedding 渠道上游：
+RAGFlow 的 embedding / 对话模型在其控制台「模型提供商」配置，可走 **new-api 网关**
+（便于计费、限流、密钥集中管理）或直连厂商。本地与线上都接 **厂商 API**，不再自托管模型：
 
 ```
-RAGFlow ──/v1/embeddings──> new-api ──(渠道路由)──> 本地: Ollama  /  线上: 厂商 API
+RAGFlow ──/v1/embeddings──> 厂商 API（如 SiliconFlow BAAI/bge-m3）
+RAGFlow ──/v1/chat/...   ──> 厂商 API（如 DeepSeek）/ 经 new-api 网关
 ```
 
-切换环境只需改 new-api 渠道，RAGFlow 与 manager 侧配置不变。
+本地与线上配置一致，切换环境只需换厂商 Key，RAGFlow 与 manager 侧逻辑不变。
 
 ---
 
-## 本地开发（k3d）：自托管 Ollama
+## 本地开发（k3d）：接入 embedding 厂商
 
-本地不依赖任何外部厂商，用 Ollama 跑一个本地 embedding 模型。
+本地**不再自托管 Ollama**（已移除），与线上一样接厂商 API。配置步骤与下方「线上 / 生产」
+完全一致，只是控制台地址换成本地：
 
-1. **部署 Ollama**（已纳入 `make local-up`，或单独 apply）：
+1. **embedding**（http://ragflow.localhost → 模型提供商）：加 `OpenAI-API-Compatible` 提供商，
+   Base URL 填厂商 `/v1`（如 SiliconFlow `https://api.siliconflow.cn/v1`）、API Key 填厂商 Key、
+   模型名 `BAAI/bge-m3`、类型 `embedding`、Max tokens 设 `8192`（避免 512 默认截断）；
+   「系统模型设置」选为默认 embedding 模型。
+2. **对话**（http://newapi.localhost → 渠道管理）：加厂商 chat 渠道（如 DeepSeek），供 RAGFlow
+   与 manager 的实例统一经 new-api 网关调用；RAGFlow 也可在「模型提供商」直连厂商 chat。
+3. **验证**：知识库上传一个文档 → 解析状态变为「解析完成」；可在「检索测试」输入查询，
+   `Vector similarity` 有值即说明 embedding 入库与查询两端均正常。
 
-   ```bash
-   kubectl apply -f deploy/k8s/local/ollama.yaml
-   ```
-
-2. **拉取 embedding 模型**（首次，约 1.2GB，经宿主代理下载）：
-
-   ```bash
-   # OLLAMA_HOST 容器内设为 0.0.0.0，ollama CLI 连 0.0.0.0 会报 EOF，
-   # 故 exec 时覆盖为 127.0.0.1 再 pull/list。模型落 .k3d-data/ollama 固定目录，
-   # 集群重建后复用、无需重拉。
-   kubectl -n ocm exec statefulset/ollama -- env OLLAMA_HOST=127.0.0.1:11434 ollama pull bge-m3
-   ```
-
-3. **在 new-api 后台加 embedding 渠道**（http://newapi.localhost → 渠道管理 → 添加渠道）：
-   - 类型：`OpenAI`
-   - 名称：`embedding-local`（任意）
-   - 代理 / BaseURL：`http://ollama:11434`
-   - 密钥：任意非空字符串（Ollama 不校验，填 `ollama` 即可）
-   - 模型：`bge-m3`
-
-4. **在 RAGFlow 配置默认 embedding 模型**（http://ragflow.localhost，用 manager 所用账号登录）：
-   - 模型提供商 → 添加 `OpenAI-API-Compatible` 提供商
-     - Base URL：`http://new-api:3000/v1`
-     - API Key：填 manager 所用的 new-api 模型转发 token（或任一可用 token）
-     - 模型名：`bge-m3`，模型类型：`embedding`
-   - 系统模型设置 → 默认 embedding 模型选 `bge-m3`
-
-5. **验证**：知识库上传一个文档 → 解析状态应变为「解析完成」。
-
-> 模型持久化：`ollama.yaml` 用固定 `hostPath`（宿主 `.k3d-data/ollama`），pod 重建
-> 不丢模型、无需重拉；`make local-down` 后下次 `local-up` 也复用，仅 `make local-reset`
-> 才清空。
+> 本地 RAGFlow / new-api pod 经宿主 clash 代理（`host.k3d.internal:7890`）出站访问厂商 API，
+> 见 `deploy/k8s/local/{ragflow,new-api}.yaml` 的 `HTTP(S)_PROXY`。
 
 ---
 
 ## 线上 / 生产：接入 embedding 厂商
 
-生产环境不部署 Ollama，改在 new-api 接入一个 embedding 厂商渠道。RAGFlow 与 manager
-配置与本地完全一致（都指向 new-api），只需把 new-api 的 embedding 渠道上游换成厂商。
+生产环境同样接 embedding 厂商。RAGFlow 与 manager 配置与本地完全一致，只需把厂商 Key
+换成生产 Key。
 
 ### 可选厂商
 
