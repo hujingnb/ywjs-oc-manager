@@ -46,11 +46,12 @@ spec:
             - name: STREAMING_TIMEOUT
               value: "600"
             # pod 无法解析外网 DNS（同 ragflow），调上游 LLM（api.deepseek.com 等）须经宿主 clash 代理
-            # （绑 0.0.0.0:7890，k3d 网关 172.19.0.1 即宿主）。NO_PROXY 排除集群内服务，内部流量直连。
+            # （绑 0.0.0.0:7890）。用 k3d 注入的 host.k3d.internal 指向宿主，每次重建集群自动
+            # 解析到当前 docker 网关，避免硬编码 IP 在重建后子网变化而失效。NO_PROXY 排除集群内服务。
             - name: HTTP_PROXY
-              value: "http://172.19.0.1:7890"
+              value: "http://host.k3d.internal:7890"
             - name: HTTPS_PROXY
-              value: "http://172.19.0.1:7890"
+              value: "http://host.k3d.internal:7890"
             # ollama 必须排除代理：embedding 渠道上游是集群内 http://ollama:11434，
             # 不加会走 clash 代理（外网出口）导致 502。
             - name: NO_PROXY

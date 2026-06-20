@@ -129,12 +129,13 @@ spec:
             - name: TZ
               value: Asia/Shanghai
             # ragflow 启动期需出站下载 tiktoken bpe / HF 模型；本地无直连外网，
-            # 经宿主 clash 代理（绑 0.0.0.0:7890，k3d 网关 172.19.0.1 即宿主）。
-            # NO_PROXY 排除集群内服务，避免内部流量绕代理。
+            # 经宿主 clash 代理（绑 0.0.0.0:7890）。用 k3d 注入的 host.k3d.internal 指向宿主，
+            # 每次重建集群自动解析到当前 docker 网关，避免硬编码 IP 在重建后子网变化而失效
+            #（曾因此 tiktoken 下载失败、容器 import 期 CrashLoop）。NO_PROXY 排除集群内服务。
             - name: HTTP_PROXY
-              value: "http://172.19.0.1:7890"
+              value: "http://host.k3d.internal:7890"
             - name: HTTPS_PROXY
-              value: "http://172.19.0.1:7890"
+              value: "http://host.k3d.internal:7890"
             - name: NO_PROXY
               value: "localhost,127.0.0.1,mysql,redis,minio,elasticsearch,new-api,manager-api,.svc,.svc.cluster.local,.cluster.local,10.0.0.0/8,172.16.0.0/12"
           ports:
