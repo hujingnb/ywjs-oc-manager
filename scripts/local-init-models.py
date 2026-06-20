@@ -163,6 +163,15 @@ def _shquote(s):
     return "'" + s.replace("'", "'\\''") + "'"
 
 
+def _sqlq(v):
+    """转义要拼进 SQL 字符串字面量的值（单引号翻倍）。
+
+    模型名/factory/base 是固定常量本安全；厂商 api_key 来自 .env，万一含单引号会破坏
+    SQL，这里统一转义兜底。注意此为 SQL 层转义，与 _shquote 的 shell 层转义是两回事。
+    """
+    return v.replace("'", "''")
+
+
 def _mysql(sql):
     """在 ocm 的 mysql statefulset 内执行 SQL，返回 stdout（tab 分隔、无表头）。
 
@@ -200,7 +209,7 @@ def ragflow_seed(deepseek_key, siliconflow_key):
             "(create_time,create_date,update_time,update_date,tenant_id,llm_factory,"
             " model_type,llm_name,api_key,api_base,max_tokens,used_tokens,status) VALUES "
             f"({now},{dt},{now},{dt},'{tenant}','{factory}','{mtype}','{name}',"
-            f"'{key}','{base}',{maxt},0,'1');")
+            f"'{_sqlq(key)}','{base}',{maxt},0,'1');")
 
     # embedding：SiliconFlow bge-m3（max_tokens 8192，避开 bce 的 512 上限坑）
     upsert_llm("OpenAI-API-Compatible", "embedding", "BAAI/bge-m3___OpenAI-API",
