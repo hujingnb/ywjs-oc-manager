@@ -239,6 +239,14 @@ def ragflow_seed(deepseek_key, siliconflow_key):
         "INSERT INTO rag_flow.api_token "
         "(create_time,create_date,update_time,update_date,tenant_id,token,source,beta) "
         f"VALUES ({now},{dt},{now},{dt},'{tenant}','{token}','','{beta}');")
+
+    # RAGFlow 的 SDK token 鉴权（/api/v1/* 用 api_token Bearer）要求该 token 所属用户的
+    # users.access_token 非空——而此列仅在用户「登录」时才写入。fresh local-up 无人登录，
+    # admin@ragflow.io.access_token 为 NULL，会导致 manager / SDK 调 /api/v1/datasets 报
+    # 401（ragflow 日志：User ... has empty access_token in database）。这里直接置一个非空
+    # 32hex 值兜底（值本身不被进一步校验，非空即可），使 api_token 立即可用。
+    _mysql("UPDATE rag_flow.user SET access_token='" + secrets.token_hex(16) +
+           "' WHERE email='admin@ragflow.io';")
     print("  ✓ RAGFlow：embedding(bge-m3)+chat(deepseek)+默认模型+api_token 就绪")
     return token
 
