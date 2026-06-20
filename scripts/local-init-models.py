@@ -21,6 +21,7 @@ import re
 import secrets
 import subprocess
 import sys
+import time
 import urllib.error
 import urllib.request
 
@@ -39,6 +40,25 @@ DEEPSEEK_MODELS = (
     "deepseek-chat,deepseek-reasoner,deepseek-v4-flash,deepseek-v4-flash-none,"
     "deepseek-v4-flash-max,deepseek-v4-pro,deepseek-v4-pro-none,deepseek-v4-pro-max"
 )
+
+
+def _wait_until(desc, check, timeout=300, interval=5):
+    """轮询 check()（返回真值即就绪），超时抛错。
+
+    用于在 make local-up 末尾运行本脚本的场景：local-up 不等 RAGFlow 首次初始化
+    （下 tiktoken + 建库建 tenant，较慢），new-api 也可能仍在拉起。check() 内部异常
+    （如连接拒绝、表尚不存在）视为「未就绪」继续等。
+    """
+    deadline = time.monotonic() + timeout
+    while True:
+        try:
+            if check():
+                return
+        except Exception:
+            pass
+        if time.monotonic() >= deadline:
+            raise RuntimeError(f"等待超时（{timeout}s）：{desc}")
+        time.sleep(interval)
 
 
 def load_env():
@@ -87,6 +107,10 @@ def newapi_setup(deepseek_key):
     """初始化 new-api、开自用模式、幂等建 DeepSeek 渠道，返回 admin 系统访问令牌（随机）。"""
     cj = http.cookiejar.CookieJar()
     op = urllib.request.build_opener(urllib.request.HTTPCookieProcessor(cj))
+
+    # 0) 等 new-api API 起来（fresh local-up 时 pod 可能仍在拉起）
+    _wait_until("new-api API 就绪",
+                lambda: _req(op, "GET", f"{NEWAPI}/api/status")[0] == 200, timeout=180)
 
     # 1) 初始化向导：已初始化会返回 success=false，幂等忽略
     _req(op, "POST", f"{NEWAPI}/api/setup",
@@ -157,6 +181,12 @@ def ragflow_seed(deepseek_key, siliconflow_key):
 
     返回随机 api_key（形如 ragflow-<32>），作为回填 secret 的 ragflow.api_key。
     """
+    # 等 RAGFlow 首次初始化完成（建 rag_flow.tenant 表并 seed admin@ragflow.io 租户）。
+    # fresh local-up 时 RAGFlow 启动慢（下 tiktoken），tenant 表/行尚不存在时 _mysql 会
+    # 抛错，由 _wait_until 视为未就绪继续等。
+    _wait_until("RAGFlow 初始化（rag_flow.tenant）",
+                lambda: bool(_mysql("SELECT id FROM rag_flow.tenant LIMIT 1;").strip()),
+                timeout=420)
     tenant = _mysql("SELECT id FROM rag_flow.tenant LIMIT 1;").strip()
     assert tenant, "RAGFlow tenant 不存在（ragflow 未初始化？）"
     now, dt = "UNIX_TIMESTAMP()*1000", "NOW()"
