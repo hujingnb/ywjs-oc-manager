@@ -48,7 +48,10 @@ RAGFlow ──/v1/embeddings──> new-api ──(渠道路由)──> 本地: 
 2. **拉取 embedding 模型**（首次，约 1.2GB，经宿主代理下载）：
 
    ```bash
-   kubectl -n ocm exec deploy/ollama -- ollama pull bge-m3
+   # OLLAMA_HOST 容器内设为 0.0.0.0，ollama CLI 连 0.0.0.0 会报 EOF，
+   # 故 exec 时覆盖为 127.0.0.1 再 pull/list。模型落 .k3d-data/ollama 固定目录，
+   # 集群重建后复用、无需重拉。
+   kubectl -n ocm exec statefulset/ollama -- env OLLAMA_HOST=127.0.0.1:11434 ollama pull bge-m3
    ```
 
 3. **在 new-api 后台加 embedding 渠道**（http://newapi.localhost → 渠道管理 → 添加渠道）：
