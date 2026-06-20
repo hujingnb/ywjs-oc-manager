@@ -38,11 +38,14 @@ spec:
             - name: OLLAMA_HOST
               value: "0.0.0.0:11434"
             # 拉取 embedding 模型需出站，pod 无法解析外网 DNS，经宿主 clash 代理
-            # （绑 0.0.0.0:7890，k3d 网关 172.19.0.1 即宿主）。NO_PROXY 排除集群内服务。
+            # （绑 0.0.0.0:7890）。用 k3d 注入的 host.k3d.internal 指向宿主：它由 k3d 写入
+            # CoreDNS/节点 hosts，每次重建集群自动指向当前 docker 网关，避免硬编码 IP
+            # （如 172.19.0.1）在集群重建后子网变化（如变成 172.18.0.1）而失效。
+            # NO_PROXY 排除集群内服务。
             - name: HTTP_PROXY
-              value: "http://172.19.0.1:7890"
+              value: "http://host.k3d.internal:7890"
             - name: HTTPS_PROXY
-              value: "http://172.19.0.1:7890"
+              value: "http://host.k3d.internal:7890"
             - name: NO_PROXY
               value: "localhost,127.0.0.1,mysql,redis,minio,elasticsearch,new-api,ragflow,manager-api,.svc,.svc.cluster.local,.cluster.local,10.0.0.0/8,172.16.0.0/12"
           ports:
