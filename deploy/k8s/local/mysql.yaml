@@ -66,8 +66,13 @@ spec:
       volumes:
         - name: init
           configMap: { name: mysql-init }
-  volumeClaimTemplates:
-    - metadata: { name: data }
-      spec:
-        accessModes: ["ReadWriteOnce"]
-        resources: { requests: { storage: 5Gi } }
+        # 数据固定落宿主 .k3d-data/mysql（经 k3d --volume 映射到节点
+        # /var/lib/rancher/k3s/storage）。不再用动态 PVC：local-path provisioner 的目录名
+        # 含随机 PV uid，集群删除→重建后 uid 变化导致旧数据成孤儿、被判定丢失。改固定
+        # hostPath 后目录名不变，local-down 删集群后下次 local-up 复用同目录、数据不丢；
+        # 要彻底清空跑 make local-reset。mysql entrypoint 以 root 启动会自行 chown 数据目录，
+        # 故无需额外放权。
+        - name: data
+          hostPath:
+            path: /var/lib/rancher/k3s/storage/mysql
+            type: DirectoryOrCreate

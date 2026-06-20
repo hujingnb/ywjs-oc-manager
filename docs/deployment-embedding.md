@@ -67,8 +67,9 @@ RAGFlow ──/v1/embeddings──> new-api ──(渠道路由)──> 本地: 
 
 5. **验证**：知识库上传一个文档 → 解析状态应变为「解析完成」。
 
-> emptyDir 存储：Ollama pod 重建会重拉模型；如需免重拉，把 `ollama.yaml` 的
-> `volumes.models` 改为 PVC。
+> 模型持久化：`ollama.yaml` 用固定 `hostPath`（宿主 `.k3d-data/ollama`），pod 重建
+> 不丢模型、无需重拉；`make local-down` 后下次 `local-up` 也复用，仅 `make local-reset`
+> 才清空。
 
 ---
 

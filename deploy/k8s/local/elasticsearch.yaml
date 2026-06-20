@@ -22,6 +22,16 @@ spec:
     metadata:
       labels: { app: elasticsearch }
     spec:
+      initContainers:
+        # 数据目录换成固定 hostPath 后，节点以 root:root 0755 创建该目录；而 ES 以
+        # uid 1000 运行且拒绝 root，无法写入（原 local-path provisioner 建的目录是 0777
+        # 才能写）。用一次性 root 容器放开权限补上这一差异。busybox 走 docker.io（已配
+        # daocloud 镜像源），与 ES 镜像同源可达。
+        - name: fix-data-perms
+          image: busybox:1.36
+          command: ["sh", "-c", "chmod 0777 /usr/share/elasticsearch/data"]
+          volumeMounts:
+            - { name: data, mountPath: /usr/share/elasticsearch/data }
       containers:
         - name: elasticsearch
           # ywjs_public 未镜像 elasticsearch，走 docker.io（cluster 已配 daocloud 镜像源）
@@ -62,8 +72,12 @@ spec:
             initialDelaySeconds: 20
             periodSeconds: 10
             failureThreshold: 30
-  volumeClaimTemplates:
-    - metadata: { name: data }
-      spec:
-        accessModes: ["ReadWriteOnce"]
-        resources: { requests: { storage: 5Gi } }
+      volumes:
+        # 数据固定落宿主 .k3d-data/elasticsearch（映射到节点 /var/lib/rancher/k3s/storage）。
+        # 改固定 hostPath 替代动态 PVC：目录名不随集群重建变化，local-down 后下次
+        # local-up 复用同目录、索引数据不丢；清空用 make local-reset。写入权限由上方
+        # fix-data-perms initContainer 放开。
+        - name: data
+          hostPath:
+            path: /var/lib/rancher/k3s/storage/elasticsearch
+            type: DirectoryOrCreate

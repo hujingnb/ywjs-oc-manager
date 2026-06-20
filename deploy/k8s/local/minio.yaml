@@ -44,8 +44,12 @@ spec:
             initialDelaySeconds: 10
             periodSeconds: 5
             failureThreshold: 20
-  volumeClaimTemplates:
-    - metadata: { name: data }
-      spec:
-        accessModes: ["ReadWriteOnce"]
-        resources: { requests: { storage: 5Gi } }
+      volumes:
+        # 数据固定落宿主 .k3d-data/minio（映射到节点 /var/lib/rancher/k3s/storage）。
+        # 改固定 hostPath 替代动态 PVC：目录名不随集群重建变化，local-down 后下次
+        # local-up 复用同目录、对象数据不丢；清空用 make local-reset。minio 以 root 运行，
+        # 可直接写入 root 属主的 hostPath，无需放权。
+        - name: data
+          hostPath:
+            path: /var/lib/rancher/k3s/storage/minio
+            type: DirectoryOrCreate
