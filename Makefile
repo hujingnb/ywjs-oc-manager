@@ -1,4 +1,4 @@
-.PHONY: test vet build sqlc-generate migrate-up migrate-down web-test web-typecheck web-build build-hermes-runtime hermes-inject-contract seed-e2e openapi-gen web-types-gen openapi-check local-up local-down local-reset local-stop local-start local-build local-migrate local-seed local-seed-e2e local-mc-init local-status local-logs local-shell cluster-create .guard-k3d-hosts build-ops-runtime local-build-ops
+.PHONY: test vet build sqlc-generate migrate-up migrate-down web-test web-typecheck web-build build-hermes-runtime hermes-inject-contract seed-e2e openapi-gen web-types-gen openapi-check local-up local-down local-reset local-stop local-start local-build local-migrate local-seed local-seed-e2e local-mc-init local-status local-logs local-shell cluster-create .guard-k3d-hosts build-ops-runtime local-build-ops local-init-models .local-init-models
 
 SWAG_VERSION := v2.0.0-rc5
 OPENAPI_TS_VERSION := 7.13.0
@@ -214,6 +214,8 @@ local-up: cluster-create local-build ## 一键拉起本地全栈（建集群→�
 	$(KUBECTL) -n $(K8S_NS) rollout status deploy/manager-web --timeout=120s
 	# 5) 种子平台管理员（幂等）
 	$(MAKE) local-seed
+	# 6) new-api/RAGFlow 模型与 token 初始化（有 .env 则跑，无则脚本自跳过）
+	$(MAKE) .local-init-models
 	@echo "✅ 本地全栈就绪："
 	@echo "   manager 控制台 http://ocm.localhost"
 	@echo "   new-api 后台    http://newapi.localhost"
@@ -233,6 +235,12 @@ local-migrate: ## kubectl exec manager-api 跑迁移（默认 up；DOWN=1 则回
 
 local-seed: ## kubectl exec manager-api 种子平台管理员 admin/admin123（幂等）
 	$(KUBECTL) -n $(K8S_NS) exec deploy/manager-api -- seed-admin admin admin123
+
+local-init-models: ## 初始化 new-api/RAGFlow 模型与管理 token（读 .env 厂商 key，幂等）
+	python3 scripts/local-init-models.py
+
+.local-init-models: # 内部：local-up 末尾调用；缺 .env 由脚本自身优雅跳过（exit 0）
+	-python3 scripts/local-init-models.py
 
 local-seed-e2e: ## kubectl exec manager-api 注入 Playwright e2e fixture（OCM_E2E=1 守门），打印 fixture JSON
 	@$(KUBECTL) -n $(K8S_NS) exec deploy/manager-api -- env OCM_E2E=1 seed-e2e
