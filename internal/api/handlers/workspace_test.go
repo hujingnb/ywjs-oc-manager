@@ -26,7 +26,7 @@ type workspaceServiceStub struct {
 	archiveErr  error
 }
 
-func (s *workspaceServiceStub) List(_ context.Context, _ auth.Principal, _, _ string) (service.WorkspaceListing, error) {
+func (s *workspaceServiceStub) List(_ context.Context, _ auth.Principal, _, _, _ string) (service.WorkspaceListing, error) {
 	return s.listResult, s.listErr
 }
 

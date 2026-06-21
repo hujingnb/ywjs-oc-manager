@@ -11,8 +11,20 @@
     </template>
 
     <n-space align="center" style="margin-bottom: 12px">
-      <span class="state-text" style="margin: 0">当前路径：<code>{{ relativePath || '/' }}</code></span>
-      <n-button v-if="relativePath" size="small" @click="goUp">返回上级</n-button>
+      <n-input
+        v-model:value="searchInput"
+        clearable
+        size="small"
+        placeholder="搜索文件（递归整个工作目录）"
+        style="max-width: 260px"
+      />
+      <template v-if="!searching">
+        <span class="state-text" style="margin: 0">当前路径：<code>{{ relativePath || '/' }}</code></span>
+        <n-button v-if="relativePath" size="small" @click="goUp">返回上级</n-button>
+      </template>
+      <span v-else class="state-text" style="margin: 0">
+        搜索「{{ keyword }}」：{{ listing?.entries?.length ?? 0 }} 个结果
+      </span>
     </n-space>
 
     <div v-if="!appId" class="state-text">请选择目标实例</div>
@@ -30,8 +42,8 @@
 </template>
 
 <script setup lang="ts">
-import { computed, h, ref, toRef } from 'vue'
-import { NButton, NCard, NDataTable, NSpace, type DataTableColumns } from 'naive-ui'
+import { computed, h, ref, toRef, watch } from 'vue'
+import { NButton, NCard, NDataTable, NInput, NSpace, type DataTableColumns } from 'naive-ui'
 
 import {
   archiveWorkspace,
@@ -46,7 +58,19 @@ const appId = toRef(props, 'appId')
 // relativePath 保存当前目录相对路径，空字符串表示工作目录根。
 const relativePath = ref('')
 const relativeRef = computed(() => relativePath.value)
-const { data: listing, isLoading, error } = useWorkspaceQuery(appId, relativeRef)
+// searchInput 绑定输入框；keyword 是防抖后真正生效的搜索关键字，避免每次按键都递归列举整个工作目录。
+const searchInput = ref('')
+const keyword = ref('')
+let searchTimer: ReturnType<typeof setTimeout> | undefined
+watch(searchInput, (value) => {
+  if (searchTimer) clearTimeout(searchTimer)
+  searchTimer = setTimeout(() => {
+    keyword.value = value.trim()
+  }, 300)
+})
+// searching 为真时进入搜索视图：后端忽略当前路径，返回整棵树的匹配文件（完整相对路径）。
+const searching = computed(() => keyword.value !== '')
+const { data: listing, isLoading, error } = useWorkspaceQuery(appId, relativeRef, keyword)
 const downloading = ref(false)
 
 // enter 只允许目录项改变当前路径，文件点击不会触发导航。
@@ -106,7 +130,7 @@ const columns: DataTableColumns<WorkspaceEntry> = [
     title: '文件名称', key: 'name',
     render: (row) => row.is_dir
       ? h('strong', { style: 'cursor: pointer; color: var(--color-info-text); text-decoration: underline dotted', onClick: () => enter(row) }, `${row.name}/`)
-      : row.name,
+      : (searching.value ? row.path : row.name),
   },
   { title: '大小', key: 'size', render: (row) => row.is_dir ? '—' : formatSize(row.size) },
   {

@@ -121,7 +121,7 @@ func TestWorkspaceServiceListReturnsEntries(t *testing.T) {
 	svc := NewWorkspaceService(store, obj, time.Minute)
 
 	// 场景：ListObjects 返回一个文件对象时，List 应正确映射为 WorkspaceEntryResult。
-	listing, err := svc.List(context.Background(), platformAdmin(), testWorkAppID, "logs")
+	listing, err := svc.List(context.Background(), platformAdmin(), testWorkAppID, "logs", "")
 	require.NoError(t, err)
 	require.Len(t, listing.Entries, 1)
 	assert.Equal(t, "alice.log", listing.Entries[0].Name)
@@ -143,7 +143,7 @@ func TestWorkspaceServiceListRootReturnsAllTopLevel(t *testing.T) {
 	svc := NewWorkspaceService(store, obj, time.Minute)
 
 	// 场景：列举根目录时应看到 readme.txt（文件）和 logs（目录）。
-	listing, err := svc.List(context.Background(), platformAdmin(), testWorkAppID, "")
+	listing, err := svc.List(context.Background(), platformAdmin(), testWorkAppID, "", "")
 	require.NoError(t, err)
 	require.Len(t, listing.Entries, 2)
 
@@ -171,11 +171,91 @@ func TestWorkspaceServiceListDeduplicatesDirectories(t *testing.T) {
 	svc := NewWorkspaceService(store, obj, time.Minute)
 
 	// 场景：多个对象属于同一子目录前缀时，目录条目应去重，仅返回一次。
-	listing, err := svc.List(context.Background(), platformAdmin(), testWorkAppID, "")
+	listing, err := svc.List(context.Background(), platformAdmin(), testWorkAppID, "", "")
 	require.NoError(t, err)
 	require.Len(t, listing.Entries, 1)
 	assert.Equal(t, "logs", listing.Entries[0].Name)
 	assert.True(t, listing.Entries[0].IsDir)
+}
+
+// TestWorkspaceServiceListSearchMatchesAcrossSubdirs 验证模糊搜索：keyword 非空时递归整棵树匹配，
+// 返回带完整相对路径的文件条目，且不含目录。
+func TestWorkspaceServiceListSearchMatchesAcrossSubdirs(t *testing.T) {
+	store := newWorkspaceStub(t)
+	obj := newFakeWorkspaceObjectStore()
+	wsPrefix := "apps/" + testWorkAppID + "/workspace/"
+	// 不同层级放置文件：仅名字含 "report" 的两个应命中，note.txt 不应命中
+	obj.addObject(wsPrefix+"report.csv", []byte("a"))             // 根目录命中
+	obj.addObject(wsPrefix+"logs/2026/report-final.txt", []byte("bb")) // 深层目录命中
+	obj.addObject(wsPrefix+"logs/note.txt", []byte("ccc"))        // 不命中
+
+	svc := NewWorkspaceService(store, obj, time.Minute)
+
+	// 场景：关键字 "report" 应跨子目录命中两个文件，路径为相对工作目录根的完整路径。
+	listing, err := svc.List(context.Background(), platformAdmin(), testWorkAppID, "", "report")
+	require.NoError(t, err)
+	require.Len(t, listing.Entries, 2)
+
+	byPath := make(map[string]WorkspaceEntryResult)
+	for _, e := range listing.Entries {
+		byPath[e.Path] = e
+		assert.False(t, e.IsDir) // 搜索结果只含文件
+	}
+	// 完整相对路径与展示名分别校验
+	assert.Equal(t, "report.csv", byPath["report.csv"].Name)
+	assert.Equal(t, int64(1), byPath["report.csv"].Size)
+	assert.Equal(t, "report-final.txt", byPath["logs/2026/report-final.txt"].Name)
+	assert.Equal(t, int64(2), byPath["logs/2026/report-final.txt"].Size)
+	// 搜索范围是整个工作目录，列举前缀应为 workspace 根
+	assert.Equal(t, wsPrefix, obj.lastPrefix)
+}
+
+// TestWorkspaceServiceListSearchCaseInsensitiveAndPathMatch 验证搜索大小写不敏感，且关键字可命中所在子目录名。
+func TestWorkspaceServiceListSearchCaseInsensitiveAndPathMatch(t *testing.T) {
+	store := newWorkspaceStub(t)
+	obj := newFakeWorkspaceObjectStore()
+	wsPrefix := "apps/" + testWorkAppID + "/workspace/"
+	obj.addObject(wsPrefix+"Logs/App.LOG", []byte("x")) // 关键字小写 "log" 应命中（不区分大小写）
+
+	svc := NewWorkspaceService(store, obj, time.Minute)
+
+	// 场景：关键字小写 "log" 命中路径中大写的目录名 Logs 与文件名 App.LOG。
+	listing, err := svc.List(context.Background(), platformAdmin(), testWorkAppID, "", "log")
+	require.NoError(t, err)
+	require.Len(t, listing.Entries, 1)
+	assert.Equal(t, "Logs/App.LOG", listing.Entries[0].Path)
+}
+
+// TestWorkspaceServiceListSearchIgnoresRelative 验证搜索忽略 relative：即使带当前路径，搜索范围仍是整棵树。
+func TestWorkspaceServiceListSearchIgnoresRelative(t *testing.T) {
+	store := newWorkspaceStub(t)
+	obj := newFakeWorkspaceObjectStore()
+	wsPrefix := "apps/" + testWorkAppID + "/workspace/"
+	obj.addObject(wsPrefix+"a/keep.txt", []byte("1"))
+	obj.addObject(wsPrefix+"b/keep.txt", []byte("2"))
+
+	svc := NewWorkspaceService(store, obj, time.Minute)
+
+	// 场景：当前路径在 a/ 子目录下搜索 "keep"，结果仍应包含 b/ 下的命中文件。
+	listing, err := svc.List(context.Background(), platformAdmin(), testWorkAppID, "a", "keep")
+	require.NoError(t, err)
+	require.Len(t, listing.Entries, 2)
+	assert.Equal(t, wsPrefix, obj.lastPrefix) // 列举前缀仍是根，未被 relative 收窄
+}
+
+// TestWorkspaceServiceListSearchNoMatchReturnsEmpty 验证无命中时返回空列表而非错误。
+func TestWorkspaceServiceListSearchNoMatchReturnsEmpty(t *testing.T) {
+	store := newWorkspaceStub(t)
+	obj := newFakeWorkspaceObjectStore()
+	wsPrefix := "apps/" + testWorkAppID + "/workspace/"
+	obj.addObject(wsPrefix+"readme.md", []byte("doc"))
+
+	svc := NewWorkspaceService(store, obj, time.Minute)
+
+	// 场景：关键字无任何匹配时，应返回空条目而非错误。
+	listing, err := svc.List(context.Background(), platformAdmin(), testWorkAppID, "", "nonexistent")
+	require.NoError(t, err)
+	assert.Empty(t, listing.Entries)
 }
 
 // TestWorkspaceServiceListAllowsPlatformAdminRead 验证平台管理员可以读取任意应用的工作目录。
@@ -188,7 +268,7 @@ func TestWorkspaceServiceListAllowsPlatformAdminRead(t *testing.T) {
 	svc := NewWorkspaceService(store, obj, time.Minute)
 
 	// 场景：平台管理员读取根目录时可看到文件条目。
-	listing, err := svc.List(context.Background(), platformAdmin(), testWorkAppID, "")
+	listing, err := svc.List(context.Background(), platformAdmin(), testWorkAppID, "", "")
 	require.NoError(t, err)
 	require.Len(t, listing.Entries, 1)
 	assert.Equal(t, "session.log", listing.Entries[0].Name)
@@ -200,7 +280,7 @@ func TestWorkspaceServiceListRejectsForbidden(t *testing.T) {
 	svc := NewWorkspaceService(store, newFakeWorkspaceObjectStore(), time.Minute)
 
 	// 场景：OrgMember 角色但不是该应用的 owner，应被拒绝。
-	_, err := svc.List(context.Background(), auth.Principal{Role: domain.UserRoleOrgMember, OrgID: testWorkOrg, UserID: "stranger"}, testWorkAppID, "logs")
+	_, err := svc.List(context.Background(), auth.Principal{Role: domain.UserRoleOrgMember, OrgID: testWorkOrg, UserID: "stranger"}, testWorkAppID, "logs", "")
 	require.ErrorIs(t, err, ErrWorkspaceForbidden)
 }
 
@@ -210,7 +290,7 @@ func TestWorkspaceServiceListMissingObjectsReturnsEmpty(t *testing.T) {
 	svc := NewWorkspaceService(store, newFakeWorkspaceObjectStore(), time.Minute)
 
 	// 场景：S3 中该 app workspace 下无任何对象，List 应返回空列表而非错误。
-	listing, err := svc.List(context.Background(), platformAdmin(), testWorkAppID, "")
+	listing, err := svc.List(context.Background(), platformAdmin(), testWorkAppID, "", "")
 	require.NoError(t, err)
 	assert.Empty(t, listing.Entries)
 }
@@ -221,7 +301,7 @@ func TestWorkspaceServiceListObjectStoreNilReturnsMissing(t *testing.T) {
 	svc := NewWorkspaceService(store, nil, time.Minute)
 
 	// 场景：S3 object store 未配置（nil）时应返回 ErrWorkspaceMissing。
-	_, err := svc.List(context.Background(), platformAdmin(), testWorkAppID, "")
+	_, err := svc.List(context.Background(), platformAdmin(), testWorkAppID, "", "")
 	require.ErrorIs(t, err, ErrWorkspaceMissing)
 }
 
@@ -259,7 +339,7 @@ func TestWorkspaceServiceRejectsUnsafePaths(t *testing.T) {
 	}
 
 	// 场景：List 传入绝对路径时应返回 ErrWorkspaceBadPath。
-	if _, err := svc.List(context.Background(), platformAdmin(), testWorkAppID, "/abs"); !errors.Is(err, ErrWorkspaceBadPath) {
+	if _, err := svc.List(context.Background(), platformAdmin(), testWorkAppID, "/abs", ""); !errors.Is(err, ErrWorkspaceBadPath) {
 		t.Fatalf("List absolute error = %v, want ErrWorkspaceBadPath", err)
 	}
 }

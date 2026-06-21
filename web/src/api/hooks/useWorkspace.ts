@@ -27,14 +27,19 @@ export interface WorkspaceListing {
 
 // useWorkspaceQuery 列出应用工作目录。
 // appId 缺失时暂停；relative 由调用方维护并直接传给后端 path 参数。
-export function useWorkspaceQuery(appId: Ref<string | undefined>, relative: Ref<string>) {
+// keyword 非空时后端忽略 path，递归模糊搜索整个工作目录并返回匹配文件的完整相对路径。
+export function useWorkspaceQuery(
+  appId: Ref<string | undefined>,
+  relative: Ref<string>,
+  keyword: Ref<string>,
+) {
   return useQuery<WorkspaceListing | null>({
-    queryKey: ['workspace', appId, relative],
+    queryKey: ['workspace', appId, relative, keyword],
     enabled: () => Boolean(appId.value),
     queryFn: async () => {
       if (!appId.value) return null
       return apiRequest<WorkspaceListing>(`/api/v1/apps/${appId.value}/workspace`, {
-        query: { path: relative.value },
+        query: { path: relative.value, q: keyword.value },
       })
     },
   })

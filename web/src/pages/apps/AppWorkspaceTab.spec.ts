@@ -53,6 +53,7 @@ function mountTab() {
       stubs: {
         NCard: { template: '<section><slot name="header" /><slot name="header-extra" /><slot /></section>' },
         NSpace: { template: '<div><slot /></div>' },
+        NInput: { template: '<input />' },
         DataTable: DataTableStub,
         NDataTable: DataTableStub,
         NButton: { template: '<button><slot /></button>' },

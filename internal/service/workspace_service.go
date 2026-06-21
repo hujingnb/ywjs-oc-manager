@@ -59,7 +59,10 @@ type WorkspaceEntryResult struct {
 //
 // 数据源改为 S3：列举 apps/<appID>/workspace/<relative>/ 下的对象，
 // 仅返回当前层级的直接子条目（文件或目录）。目录通过相对 key 中包含 "/" 推断。
-func (s *WorkspaceService) List(ctx context.Context, principal auth.Principal, appID, relative string) (WorkspaceListing, error) {
+//
+// keyword 非空时进入模糊搜索模式：忽略 relative，递归列举整个工作目录树，
+// 对文件完整相对路径做大小写不敏感子串匹配，返回带完整路径的命中文件（见 searchWorkspace）。
+func (s *WorkspaceService) List(ctx context.Context, principal auth.Principal, appID, relative, keyword string) (WorkspaceListing, error) {
 	_, err := s.loadAuthorizedApp(ctx, principal, appID)
 	if err != nil {
 		return WorkspaceListing{}, err
@@ -75,6 +78,12 @@ func (s *WorkspaceService) List(ctx context.Context, principal auth.Principal, a
 	// 构造 S3 列举前缀：apps/<appID>/workspace/<relPath>/
 	// relPath 为空时直接列 workspace/ 根目录
 	wsPrefix := storage.AppPrefix(appID) + "workspace/"
+
+	// 关键字非空时走递归搜索：搜索范围是整个工作目录而非当前层级，因此忽略 relPath。
+	if kw := strings.TrimSpace(keyword); kw != "" {
+		return s.searchWorkspace(ctx, wsPrefix, kw)
+	}
+
 	listPrefix := wsPrefix
 	if relPath != "" {
 		listPrefix = wsPrefix + relPath + "/"
@@ -134,6 +143,42 @@ func (s *WorkspaceService) List(ctx context.Context, principal auth.Principal, a
 		displayPath = "/"
 	}
 	return WorkspaceListing{Path: displayPath, Entries: entries}, nil
+}
+
+// searchWorkspace 递归列举整个工作目录并按关键字模糊匹配文件。
+//
+// 匹配对象是文件相对工作目录根的完整路径（大小写不敏感子串），关键字既能命中文件名，
+// 也能命中所在子目录名，便于在多级目录中快速定位。结果只含文件：S3 中目录没有独立对象，
+// 无法稳定作为搜索结果返回；Path 字段保留完整相对路径，前端据此展示位置并定位下载。
+// 返回 Path 固定为 "/"，与前端「根目录视角下的完整相对路径」下载逻辑保持一致。
+func (s *WorkspaceService) searchWorkspace(ctx context.Context, wsPrefix, keyword string) (WorkspaceListing, error) {
+	infos, err := s.objects.ListObjects(ctx, wsPrefix)
+	if err != nil {
+		return WorkspaceListing{}, fmt.Errorf("查询工作目录失败: %w", err)
+	}
+	lowerKey := strings.ToLower(keyword)
+	var entries []WorkspaceEntryResult
+	for _, info := range infos {
+		if info.Key == "" {
+			// 跳过与 wsPrefix 完全相同的目录占位对象
+			continue
+		}
+		if !strings.Contains(strings.ToLower(info.Key), lowerKey) {
+			continue
+		}
+		// 取最后一个 "/" 后的片段作为展示文件名，无 "/" 时整体即文件名
+		name := info.Key
+		if idx := strings.LastIndex(info.Key, "/"); idx >= 0 {
+			name = info.Key[idx+1:]
+		}
+		entries = append(entries, WorkspaceEntryResult{
+			Path:  info.Key,
+			Name:  name,
+			Size:  info.Size,
+			IsDir: false,
+		})
+	}
+	return WorkspaceListing{Path: "/", Entries: entries}, nil
 }
 
 // Download 下载工作目录中的文件，通过预签名 URL 获取内容后以流返回，调用方负责关闭。

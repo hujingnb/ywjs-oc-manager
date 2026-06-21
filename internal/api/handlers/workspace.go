@@ -19,7 +19,7 @@ type WorkspaceHandler struct {
 }
 
 type workspaceService interface {
-	List(ctx context.Context, principal auth.Principal, appID, relative string) (service.WorkspaceListing, error)
+	List(ctx context.Context, principal auth.Principal, appID, relative, keyword string) (service.WorkspaceListing, error)
 	Download(ctx context.Context, principal auth.Principal, appID, relative string) (io.ReadCloser, error)
 	Archive(ctx context.Context, principal auth.Principal, appID, relative string, w io.Writer) error
 }
@@ -40,12 +40,13 @@ func RegisterWorkspaceRoutes(router gin.IRouter, handler *WorkspaceHandler) {
 // List 列出工作目录条目。
 //
 // @Summary      列出工作目录条目
-// @Description  列出应用工作目录下的文件和子目录；path 为空时列出根目录
+// @Description  列出应用工作目录下的文件和子目录；path 为空时列出根目录；q 非空时忽略 path 并递归模糊搜索整个工作目录
 // @Tags         workspace
 // @Produce      json
 // @Security     BearerAuth
 // @Param        appId  path      string  true   "应用 ID"
 // @Param        path   query     string  false  "相对路径（默认根目录）"
+// @Param        q      query     string  false  "模糊搜索关键字（非空时递归搜索整个工作目录，返回匹配文件的完整相对路径）"
 // @Success      200    {object}  service.WorkspaceListing
 // @Failure      400    {object}  ErrorResponse
 // @Failure      401    {object}  ErrorResponse
@@ -56,7 +57,7 @@ func RegisterWorkspaceRoutes(router gin.IRouter, handler *WorkspaceHandler) {
 // @Router       /apps/{appId}/workspace [get]
 func (h *WorkspaceHandler) List(c *gin.Context) {
 	principal := principalFromCtx(c)
-	result, err := h.service.List(c.Request.Context(), principal, c.Param("appId"), c.Query("path"))
+	result, err := h.service.List(c.Request.Context(), principal, c.Param("appId"), c.Query("path"), c.Query("q"))
 	if err != nil {
 		writeWorkspaceError(c, err)
 		return

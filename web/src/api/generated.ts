@@ -4376,13 +4376,15 @@ export interface paths {
         };
         /**
          * 列出工作目录条目
-         * @description 列出应用工作目录下的文件和子目录；path 为空时列出根目录
+         * @description 列出应用工作目录下的文件和子目录；path 为空时列出根目录；q 非空时忽略 path 并递归模糊搜索整个工作目录
          */
         get: {
             parameters: {
                 query?: {
                     /** @description 相对路径（默认根目录） */
                     path?: string;
+                    /** @description 模糊搜索关键字（非空时递归搜索整个工作目录，返回匹配文件的完整相对路径） */
+                    q?: string;
                 };
                 header?: never;
                 path: {
