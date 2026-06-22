@@ -116,8 +116,9 @@ function onModeChange(mode: ScheduleMode) {
 function onFrequencyChange(freq: 'daily' | 'weekly') {
   state.calendar.frequency = freq
 }
-function onWeekdaysChange(days: number[]) {
-  state.calendar.weekdays = days
+// NCheckboxGroup 的 update:value 类型为 (string | number)[]，这里统一转成 cron dow 数值。
+function onWeekdaysChange(days: Array<string | number>) {
+  state.calendar.weekdays = days.map(Number)
 }
 function onTimeChange(index: number, key: 'hour' | 'minute', value: number | null) {
   state.calendar.times[index][key] = value ?? 0

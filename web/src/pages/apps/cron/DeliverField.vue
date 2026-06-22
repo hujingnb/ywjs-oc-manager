@@ -12,7 +12,7 @@ import { useChannelProgressQuery } from '@/api/hooks/useChannel'
 import { buildDeliverOptions } from './deliverOptions'
 
 // DeliverField 是 deliver 字段薄壳：查询当前支持渠道的绑定状态，组装下拉选项。
-// 目前产品仅 wechat 真正可投递；新增渠道时扩 SUPPORTED_CHANNELS 即可。
+// 目前产品仅 wechat 真正可投递；新增渠道时在下方增加一处 useChannelProgressQuery 调用并在 boundTypes 里追加判断即可。
 const props = defineProps<{ value: string; appId: string }>()
 const emit = defineEmits<{ 'update:value': [value: string] }>()
 
