@@ -4,6 +4,7 @@ import { mount } from '@vue/test-utils'
 import { computed, reactive, ref } from 'vue'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 
+import { i18n } from '@/i18n'
 import AppCronTab from './AppCronTab.vue'
 
 type TestQueryValue = string | string[]
@@ -137,6 +138,7 @@ function mountCronTab() {
   return mount(AppCronTab, {
     props: { appId: 'app-1' },
     global: {
+      plugins: [i18n],
       stubs: {
         // CronJobList：透传任务名并把点击事件发回父组件，覆盖父级 query 同步逻辑。
         CronJobList: {
@@ -176,6 +178,8 @@ function mountCronTab() {
 
 describe('AppCronTab', () => {
   beforeEach(() => {
+    // 每次用例前将 i18n 语言设为中文，确保断言中文文案的测试与翻译文件对齐。
+    i18n.global.locale.value = 'zh'
     routeState.query = {}
     routerReplace.mockClear()
     jobsError.value = null

@@ -61,4 +61,20 @@ export default {
     comment: '评论',
     archive: '归档',
   },
+  // AppKanbanTab 顶层 tab 文案（工具栏 / 错误 / 操作反馈）
+  tab: {
+    searchPlaceholder: '搜索任务标题',
+    stubDesc: '该实例运行的是本地 dev 镜像，任务看板不可用；切换到生产镜像后该功能自动启用。',
+    loadError: '加载失败',
+    successCreate: '任务已创建',
+    errorCreate: '创建失败',
+    successAction: '操作成功',
+    errorAction: '操作失败',
+    // NEEDS_INPUT 提示文本
+    promptComment: '添加评论',
+    promptBlock: '阻塞原因',
+    promptComplete: '完成结果（可选）',
+    promptReassign: '重新分配给（profile）',
+    confirmAction: '确定要执行「{verb}」吗？',
+  },
 } as const

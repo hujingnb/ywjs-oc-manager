@@ -3,6 +3,8 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest'
 import { mount } from '@vue/test-utils'
 import { ref } from 'vue'
+
+import { i18n } from '@/i18n'
 import AppKanbanTab from './AppKanbanTab.vue'
 
 // mock vue-router：useRoute 提供空 query，useRouter 提供 replace stub。
@@ -101,6 +103,7 @@ function mountKanbanTab() {
   return mount(AppKanbanTab, {
     props: { appId: 'app-1' },
     global: {
+      plugins: [i18n],
       stubs: {
         // KanbanTaskList：渲染传入的每条任务标题，供测试断言内容可见性。
         KanbanTaskList: {
@@ -118,7 +121,8 @@ function mountKanbanTab() {
         NSelect: true,
         NInput: true,
         NButton: true,
-        NEmpty: true,
+        // NEmpty：渲染 description prop 为段落文本，供降级文案断言使用。
+        NEmpty: { props: ['description'], template: '<p>{{ description }}</p>' },
       },
     },
   })
@@ -126,6 +130,8 @@ function mountKanbanTab() {
 
 describe('AppKanbanTab', () => {
   beforeEach(() => {
+    // 每次用例前将 i18n 语言设为中文，确保断言中文文案的测试与翻译文件对齐。
+    i18n.global.locale.value = 'zh'
     // 每个测试前重置 error 状态，防止测试间状态污染。
     tasksError.value = null
     boardsError.value = null

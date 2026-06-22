@@ -61,4 +61,20 @@ export default {
     comment: 'Comment',
     archive: 'Archive',
   },
+  // AppKanbanTab top-level tab copy (toolbar / errors / action feedback)
+  tab: {
+    searchPlaceholder: 'Search task titles',
+    stubDesc: 'This instance runs a local dev image — the task board is unavailable. Switch to a production image to enable this feature.',
+    loadError: 'Load failed',
+    successCreate: 'Task created',
+    errorCreate: 'Create failed',
+    successAction: 'Operation successful',
+    errorAction: 'Operation failed',
+    // NEEDS_INPUT prompt labels
+    promptComment: 'Add comment',
+    promptBlock: 'Blocking reason',
+    promptComplete: 'Completion result (optional)',
+    promptReassign: 'Reassign to (profile)',
+    confirmAction: 'Execute "{verb}"?',
+  },
 } as const

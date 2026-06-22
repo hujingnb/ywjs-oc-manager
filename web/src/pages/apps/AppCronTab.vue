@@ -4,7 +4,7 @@
     <n-card :bordered="true" class="toolbar-card">
       <n-space align="center" :size="8">
         <span class="status-summary">{{ statusSummary }}</span>
-        <n-input v-model:value="search" size="small" placeholder="搜索定时任务" style="width: 200px" />
+        <n-input v-model:value="search" size="small" :placeholder="t('apps.cron.tab.searchPlaceholder')" style="width: 200px" />
         <n-select
           v-model:value="statusFilter"
           :options="statusOptions"
@@ -12,26 +12,26 @@
           style="width: 150px"
         />
         <span class="spacer" />
-        <n-button size="small" tertiary @click="refreshAll">刷新</n-button>
+        <n-button size="small" tertiary @click="refreshAll">{{ t('apps.cron.tab.refresh') }}</n-button>
         <n-button
           v-if="canWrite"
           class="create-cron-btn"
           size="small"
           type="primary"
           @click="onCreateClick"
-        >+ 新建任务</n-button>
+        >{{ t('apps.cron.tab.createJob') }}</n-button>
       </n-space>
     </n-card>
 
     <!-- stub 镜像降级提示：后端以 CRON_NOT_SUPPORTED_ON_STUB 标识当前实例无 oc-cron。 -->
     <n-card v-if="isStubInstance" :bordered="true">
-      <n-empty description="该实例运行的是本地 dev 镜像，定时任务不可用；切换到生产镜像后该功能自动启用。" />
+      <n-empty :description="t('apps.cron.tab.stubDesc')" />
     </n-card>
 
     <!-- 左右分屏：左侧任务列表 + 右侧详情、历史和输出。 -->
     <div v-else class="split">
       <div class="list-col">
-        <p v-if="jobsQuery.isLoading.value" class="state-text">加载中…</p>
+        <p v-if="jobsQuery.isLoading.value" class="state-text">{{ t('common.status.loading') }}</p>
         <p v-else-if="jobsQuery.error.value" class="state-text danger">{{ errorText }}</p>
         <CronJobList
           v-else
@@ -72,6 +72,7 @@
 import { computed, ref } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { NButton, NCard, NEmpty, NInput, NSelect, NSpace, useMessage } from 'naive-ui'
+import { useI18n } from 'vue-i18n'
 
 import {
   useCreateCronJob,
@@ -104,6 +105,7 @@ const props = defineProps<{
 }>()
 
 const appId = computed(() => props.appId)
+const { t } = useI18n()
 const route = useRoute()
 const router = useRouter()
 const message = useMessage()
@@ -166,15 +168,15 @@ const selectedJob = computed<CronJob | null>(() => {
     ?? null
 })
 
-// statusOptions 的 label 中文化便于用户识别，value 仍为后端识别的英文枚举。
-const statusOptions = [
-  { label: '全部状态', value: '' },
-  { label: '已调度', value: 'scheduled' },
-  { label: '已暂停', value: 'paused' },
-  { label: '运行中', value: 'running' },
-  { label: '已禁用', value: 'disabled' },
-  { label: '错误', value: 'error' },
-]
+// statusOptions 的 label 使用 t() 保证语言切换时响应式更新；value 仍为后端识别的英文枚举。
+const statusOptions = computed(() => [
+  { label: t('apps.cron.tab.statusAll'), value: '' },
+  { label: t('apps.cron.tab.statusScheduled'), value: 'scheduled' },
+  { label: t('apps.cron.tab.statusPaused'), value: 'paused' },
+  { label: t('apps.cron.tab.statusRunning'), value: 'running' },
+  { label: t('apps.cron.tab.statusDisabled'), value: 'disabled' },
+  { label: t('apps.cron.tab.statusError'), value: 'error' },
+])
 
 // statusSummary 按产品要求保留英文 Gateway cron running 文案，后接关键运行指标。
 const statusSummary = computed(() => {
@@ -202,7 +204,7 @@ const isStubInstance = computed(() =>
   || isStubError(capabilitiesQuery.error.value),
 )
 
-const errorText = computed(() => String(jobsQuery.error.value?.message ?? '加载失败'))
+const errorText = computed(() => String(jobsQuery.error.value?.message ?? t('apps.cron.tab.loadError')))
 
 // replaceQuery 只保留字符串 query，并用 undefined 删除 job/file，防止 URL 残留过期输出。
 function replaceQuery(patch: Record<string, string | undefined>) {
@@ -262,16 +264,16 @@ async function onSubmitForm(payload: CreateCronJobRequest | UpdateCronJobRequest
         ...(payload as UpdateCronJobRequest),
         jobId: editingJob.value.id,
       } satisfies UpdateCronJobVariables)
-      message.success('定时任务已更新')
+      message.success(t('apps.cron.tab.successUpdate'))
     } else {
       const job = await createMutation.mutateAsync(payload as CreateCronJobRequest)
       if (job?.id) replaceQuery({ job: job.id, file: undefined })
-      message.success('定时任务已创建')
+      message.success(t('apps.cron.tab.successCreate'))
     }
     showForm.value = false
     editingJob.value = null
   } catch (e) {
-    message.error(e instanceof Error ? e.message : '保存失败')
+    message.error(e instanceof Error ? e.message : t('apps.cron.tab.errorSave'))
   }
 }
 
@@ -280,16 +282,16 @@ async function onAction(verb: CronJobAction['verb']) {
   if (actionMutation.isPending.value) return
   const jobId = selectedJobId.value
   if (!jobId) return
-  if (verb === 'delete' && !window.confirm('确定要删除这个定时任务吗？')) return
+  if (verb === 'delete' && !window.confirm(t('apps.cron.tab.confirmDelete'))) return
 
   try {
     await actionMutation.mutateAsync({ verb, jobId } as CronJobAction)
     if (verb === 'delete') {
       replaceQuery({ job: undefined, file: undefined })
     }
-    message.success('操作成功')
+    message.success(t('apps.cron.tab.successAction'))
   } catch (e) {
-    message.error(e instanceof Error ? e.message : '操作失败')
+    message.error(e instanceof Error ? e.message : t('apps.cron.tab.errorAction'))
   }
 }
 </script>
