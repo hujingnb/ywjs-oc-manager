@@ -3,6 +3,7 @@ package service
 import (
 	"context"
 	"database/sql"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"strings"
@@ -325,16 +326,20 @@ func (s *MemberService) DeleteMember(ctx context.Context, principal auth.Princip
 	}
 
 	// ActorID、OrgID 由字符串直接转 null.String。
+	// metadata 存储结构化参数：cascade_count（级联删除的应用数量），供前端按语言渲染详情。
+	deleteMeta, _ := json.Marshal(map[string]any{
+		"cascade_count": cascadeCount,
+	})
 	if err := s.store.CreateAuditLog(ctx, sqlc.CreateAuditLogParams{
-		ID:            newUUID(),
-		ActorID:       null.StringFrom(principal.UserID),
-		ActorRole:     principal.Role,
-		OrgID:         user.OrgID,
-		TargetType:    "user",
-		TargetID:      user.ID,
-		Action:        "delete_member",
-		Result:        "succeeded",
-		DetailMessage: null.StringFrom(fmt.Sprintf("级联删除 %d 个应用", cascadeCount)),
+		ID:           newUUID(),
+		ActorID:      null.StringFrom(principal.UserID),
+		ActorRole:    principal.Role,
+		OrgID:        user.OrgID,
+		TargetType:   "user",
+		TargetID:     user.ID,
+		Action:       "delete_member",
+		Result:       "succeeded",
+		MetadataJson: deleteMeta,
 	}); err != nil {
 		return fmt.Errorf("写入审计日志失败: %w", err)
 	}

@@ -3,6 +3,7 @@ package service
 import (
 	"context"
 	"database/sql"
+	"encoding/json"
 	"errors"
 	"testing"
 	"time"
@@ -353,9 +354,12 @@ func TestDeleteMember_SoftDeletesAndEnqueuesAppDelete(t *testing.T) {
 	}
 	require.True(t, stub.auditWritten)
 	require.NotEqual(t, "", notifier.lastJobID)
-	// 详情字段应记录级联删除的应用数量，方便审计列表展示「级联删除 N 个应用」。
-	require.True(t, stub.lastAuditCreate.DetailMessage.Valid)
-	require.Equal(t, "级联删除 1 个应用", stub.lastAuditCreate.DetailMessage.String)
+	// 审计迁移：不再写冻结中文文案，改用 metadata.cascade_count 记录级联删除的应用数量，供前端按语言渲染。
+	require.False(t, stub.lastAuditCreate.DetailMessage.Valid, "新记录不应写入冻结文案")
+	require.NotEmpty(t, stub.lastAuditCreate.MetadataJson, "delete_member 应写入 metadata")
+	var meta map[string]any
+	require.NoError(t, json.Unmarshal(stub.lastAuditCreate.MetadataJson, &meta))
+	require.Equal(t, float64(1), meta["cascade_count"], "metadata.cascade_count 应为级联删除应用数")
 }
 
 // TestDeleteMember_NoAppStillSoftDeletesUser 验证删除成员无应用仍然软删除Deletes用户的预期行为场景。
@@ -372,9 +376,12 @@ func TestDeleteMember_NoAppStillSoftDeletesUser(t *testing.T) {
 	err := svc.DeleteMember(context.Background(), orgAdminPrincipal(), target.ID, nil)
 	require.NoError(t, err)
 	require.Equal(t, 0, len(stub.jobs))
-	// 场景：成员名下没有应用时详情仍要明确写出「0 个」便于一致展示。
-	require.True(t, stub.lastAuditCreate.DetailMessage.Valid)
-	require.Equal(t, "级联删除 0 个应用", stub.lastAuditCreate.DetailMessage.String)
+	// 场景：成员名下没有应用时，metadata.cascade_count 应为 0，仍需写入 metadata 供前端渲染。
+	require.False(t, stub.lastAuditCreate.DetailMessage.Valid, "新记录不应写入冻结文案")
+	require.NotEmpty(t, stub.lastAuditCreate.MetadataJson, "delete_member 应写入 metadata（cascade_count=0）")
+	var meta map[string]any
+	require.NoError(t, json.Unmarshal(stub.lastAuditCreate.MetadataJson, &meta))
+	require.Equal(t, float64(0), meta["cascade_count"], "无应用时 metadata.cascade_count 应为 0")
 }
 
 // TestDeleteMember_RejectsSelfDeletion 验证删除成员拒绝自身Deletion的异常或拒绝路径场景。

@@ -179,38 +179,48 @@ func (s *MemberOnboardingService) OnboardMember(ctx context.Context, principal a
 			return fmt.Errorf("创建渠道绑定失败: %w", err)
 		}
 		// 成员创建审计。
+		// metadata 存储结构化参数：member_name/app_name，供前端按语言渲染详情。
+		memberAuditMeta, err := json.Marshal(map[string]any{
+			"member_name": displayNameOrUsername(sqlc.User{DisplayName: input.DisplayName, Username: input.Username}),
+			"app_name":    input.AppName,
+		})
+		if err != nil {
+			return fmt.Errorf("序列化成员创建审计元数据失败: %w", err)
+		}
 		if err := store.CreateAuditLog(ctx, sqlc.CreateAuditLogParams{
-			ID:            auditID1,
-			ActorID:       null.StringFrom(principal.UserID),
-			ActorRole:     principal.Role,
-			OrgID:         null.StringFrom(org.ID),
-			TargetType:    "member",
-			TargetID:      userID,
-			Action:        "create_with_app",
-			Result:        "succeeded",
-			DetailMessage: null.StringFrom(fmt.Sprintf("新建成员 %s（含应用 %s）", displayNameOrUsername(sqlc.User{DisplayName: input.DisplayName, Username: input.Username}), input.AppName)),
+			ID:           auditID1,
+			ActorID:      null.StringFrom(principal.UserID),
+			ActorRole:    principal.Role,
+			OrgID:        null.StringFrom(org.ID),
+			TargetType:   "member",
+			TargetID:     userID,
+			Action:       "create_with_app",
+			Result:       "succeeded",
+			MetadataJson: memberAuditMeta,
 		}); err != nil {
 			return fmt.Errorf("写入审计日志失败: %w", err)
 		}
+		// 应用创建审计：合并 owner_user_id/channel_type（原有）与 member_name/app_name 到同一 metadata。
 		appAuditMetadata, err := json.Marshal(map[string]any{
 			"owner_user_id": userID,
 			"channel_type":  channelType,
+			"member_name":   input.DisplayName,
+			"app_name":      input.AppName,
 		})
 		if err != nil {
 			return fmt.Errorf("序列化应用创建审计元数据失败: %w", err)
 		}
 		// 应用创建审计。
 		if err := store.CreateAuditLog(ctx, sqlc.CreateAuditLogParams{
-			ID:            auditID2,
-			ActorID:       null.StringFrom(principal.UserID),
-			ActorRole:     principal.Role,
-			OrgID:         null.StringFrom(org.ID),
-			TargetType:    "app",
-			TargetID:      appID,
-			Action:        "create",
-			Result:        "succeeded",
-			MetadataJson:  appAuditMetadata,
-			DetailMessage: null.StringFrom(fmt.Sprintf("归属成员 %s，渠道 %s", input.DisplayName, channelLabel(channelType))),
+			ID:           auditID2,
+			ActorID:      null.StringFrom(principal.UserID),
+			ActorRole:    principal.Role,
+			OrgID:        null.StringFrom(org.ID),
+			TargetType:   "app",
+			TargetID:     appID,
+			Action:       "create",
+			Result:       "succeeded",
+			MetadataJson: appAuditMetadata,
 		}); err != nil {
 			return fmt.Errorf("写入应用创建审计日志失败: %w", err)
 		}
@@ -350,24 +360,26 @@ func (s *MemberOnboardingService) CreateAppForMember(ctx context.Context, princi
 		}); err != nil {
 			return fmt.Errorf("创建渠道绑定失败: %w", err)
 		}
+		// metadata 存储结构化参数：owner_user_id/channel_type/member_name/app_name，供前端按语言渲染详情。
 		metadata, err := json.Marshal(map[string]any{
 			"owner_user_id": user.ID,
 			"channel_type":  channelType,
+			"member_name":   displayNameOrUsername(user),
+			"app_name":      input.AppName,
 		})
 		if err != nil {
 			return fmt.Errorf("序列化应用创建审计元数据失败: %w", err)
 		}
 		if err := store.CreateAuditLog(ctx, sqlc.CreateAuditLogParams{
-			ID:            auditID,
-			ActorID:       null.StringFrom(principal.UserID),
-			ActorRole:     principal.Role,
-			OrgID:         null.StringFrom(org.ID),
-			TargetType:    "app",
-			TargetID:      appID,
-			Action:        "create_for_existing_member",
-			Result:        "succeeded",
-			MetadataJson:  metadata,
-			DetailMessage: null.StringFrom(fmt.Sprintf("归属成员 %s，渠道 %s", user.DisplayName, channelLabel(channelType))),
+			ID:           auditID,
+			ActorID:      null.StringFrom(principal.UserID),
+			ActorRole:    principal.Role,
+			OrgID:        null.StringFrom(org.ID),
+			TargetType:   "app",
+			TargetID:     appID,
+			Action:       "create_for_existing_member",
+			Result:       "succeeded",
+			MetadataJson: metadata,
 		}); err != nil {
 			return fmt.Errorf("写入应用创建审计日志失败: %w", err)
 		}
@@ -487,13 +499,3 @@ func displayNameOrUsername(user sqlc.User) string {
 	return "成员"
 }
 
-// channelLabel 把 channel_type 枚举（如 "wechat"）翻译为中文便于审计展示。
-// 未知枚举回退到原始字符串，给后端扩展新渠道时保持自描述。
-func channelLabel(channelType string) string {
-	switch channelType {
-	case domain.ChannelTypeWeChat:
-		return "微信"
-	default:
-		return channelType
-	}
-}

@@ -4,7 +4,6 @@ package audit
 
 import (
 	"context"
-	"fmt"
 	"log/slog"
 
 	"oc-manager/internal/service"
@@ -80,26 +79,22 @@ func (h *NewAPIAuditHelper) RecordFailure(ctx context.Context, fc NewAPIFailureC
 	if fc.Err != nil {
 		msg = fc.Err.Error()
 	}
+	// metadata 存储结构化参数：endpoint/status_code，供前端按语言渲染详情。
+	// status_code=0 表示未发出请求 / 未知状态。
 	metadata := map[string]any{
 		"endpoint":    fc.Endpoint,
 		"status_code": fc.Status,
 	}
-	// 详情字段附带 HTTP 状态码，便于审计列表识别失败原因；status=0 表示未发出请求 / 未知状态，留空。
-	detail := ""
-	if fc.Status > 0 {
-		detail = fmt.Sprintf("HTTP %d", fc.Status)
-	}
 	event := service.AuditEvent{
-		ActorID:       fc.ActorID,
-		ActorRole:     actorRole,
-		OrgID:         fc.OrgID,
-		TargetType:    "newapi_call",
-		TargetID:      fc.Endpoint,
-		Action:        fc.Endpoint,
-		Result:        "failed",
-		ErrorMessage:  msg,
-		Metadata:      metadata,
-		DetailMessage: detail,
+		ActorID:      fc.ActorID,
+		ActorRole:    actorRole,
+		OrgID:        fc.OrgID,
+		TargetType:   "newapi_call",
+		TargetID:     fc.Endpoint,
+		Action:       fc.Endpoint,
+		Result:       "failed",
+		ErrorMessage: msg,
+		Metadata:     metadata,
 	}
 	if _, err := h.recorder.Record(ctx, event); err != nil {
 		slog.ErrorContext(ctx, "写 audit_logs 失败", "error", err)

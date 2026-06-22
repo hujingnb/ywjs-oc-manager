@@ -57,7 +57,9 @@ type AuditResult struct {
 	TargetName string `json:"target_name,omitempty"`
 	// TargetDeleted 表示目标资源对应实体已软删除。
 	TargetDeleted bool `json:"target_deleted"`
-	// ActionDetail 是写入时冻结的详情字符串，直接读自 audit_logs.detail_message 列。
+	// ActionDetail 读自 audit_logs.detail_message 列，仅为历史数据兼容 fallback。
+	// 新记录不再写入此列；前端应优先用 action + metadata 按语言渲染详情，
+	// 当 metadata 为空时可 fallback 展示 action_detail（旧记录）。
 	// 空字符串表示无详情，前端展示「—」。
 	ActionDetail string `json:"action_detail,omitempty"`
 }
@@ -75,7 +77,8 @@ type AuditEvent struct {
 	ErrorMessage string
 	IPAddress    string
 	Metadata     map[string]any
-	// DetailMessage 由调用方拼好的中文短句；写入即冻结，查询时直接返回。
+	// DetailMessage 仅用于兼容历史数据：旧记录已写入冻结中文短句，查询时直接返回给前端做 fallback。
+	// 新写入时不再设置此字段，改用 Metadata 存储结构化动态参数，供前端按语言渲染详情。
 	// 空字符串表示无详情，前端展示「—」。
 	DetailMessage string
 }

@@ -11814,7 +11814,9 @@ export interface components {
         "service.AuditResult": {
             action?: string;
             /**
-             * @description ActionDetail 是写入时冻结的详情字符串，直接读自 audit_logs.detail_message 列。
+             * @description ActionDetail 读自 audit_logs.detail_message 列，仅为历史数据兼容 fallback。
+             *     新记录不再写入此列；前端应优先用 action + metadata 按语言渲染详情，
+             *     当 metadata 为空时可 fallback 展示 action_detail（旧记录）。
              *     空字符串表示无详情，前端展示「—」。
              */
             action_detail?: string;

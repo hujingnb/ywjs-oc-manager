@@ -42,12 +42,20 @@ func TestOnboardMemberCommitsOnSuccess(t *testing.T) {
 	assert.Equal(t, "create", store.auditLogs[1].Action)
 	assert.Equal(t, result.App.ID, store.auditLogs[1].TargetID)
 	assert.Positive(t, store.jobs)
-	// auditLogs[0] = create_with_app; 详情应为「新建成员 <显示名>（含应用 <应用名>）」。
-	require.True(t, store.auditLogs[0].DetailMessage.Valid)
-	require.Equal(t, "新建成员 Alice（含应用 alice-bot）", store.auditLogs[0].DetailMessage.String)
-	// auditLogs[1] = app create; 详情应为「归属成员 Alice，渠道 微信」。
-	require.True(t, store.auditLogs[1].DetailMessage.Valid)
-	require.Equal(t, "归属成员 Alice，渠道 微信", store.auditLogs[1].DetailMessage.String)
+	// 审计迁移：不再写冻结中文文案，改用 metadata 存储结构化参数供前端按语言渲染。
+	// auditLogs[0] = create_with_app; metadata 应包含 member_name 和 app_name。
+	require.False(t, store.auditLogs[0].DetailMessage.Valid, "create_with_app 不应写入冻结文案")
+	var memberMeta map[string]any
+	require.NoError(t, json.Unmarshal(store.auditLogs[0].MetadataJson, &memberMeta))
+	require.Equal(t, "Alice", memberMeta["member_name"], "metadata.member_name 应为显示名")
+	require.Equal(t, "alice-bot", memberMeta["app_name"], "metadata.app_name 应为应用名")
+	// auditLogs[1] = app create; metadata 应包含 member_name/app_name/channel_type/owner_user_id。
+	require.False(t, store.auditLogs[1].DetailMessage.Valid, "app create 不应写入冻结文案")
+	var appMeta map[string]any
+	require.NoError(t, json.Unmarshal(store.auditLogs[1].MetadataJson, &appMeta))
+	require.Equal(t, "Alice", appMeta["member_name"], "metadata.member_name 应为归属成员显示名")
+	require.Equal(t, "alice-bot", appMeta["app_name"], "metadata.app_name 应为应用名")
+	require.Equal(t, domain.ChannelTypeWeChat, appMeta["channel_type"], "metadata.channel_type 应为渠道类型 code")
 }
 
 // TestOnboardMemberEnsuresKnowledgeDataset 验证成员引导成功创建实例后会预创建实例级 RAGFlow dataset。
@@ -172,9 +180,15 @@ func TestCreateAppForMember_PlatformAdminCreatesAfterDelete(t *testing.T) {
 	require.Len(t, store.auditLogs, 1)
 	assert.Equal(t, "app", store.auditLogs[0].TargetType)
 	assert.Equal(t, "create_for_existing_member", store.auditLogs[0].Action)
-	// 详情格式与 OnboardMember 的 create 一致：归属成员 + 渠道。
-	require.True(t, store.auditLogs[0].DetailMessage.Valid)
-	require.Equal(t, "归属成员 Alice，渠道 微信", store.auditLogs[0].DetailMessage.String)
+	// 审计迁移：不再写冻结中文文案，改用 metadata 存储结构化参数供前端按语言渲染。
+	// create_for_existing_member 的 metadata 应包含 member_name/app_name/channel_type/owner_user_id。
+	require.False(t, store.auditLogs[0].DetailMessage.Valid, "create_for_existing_member 不应写入冻结文案")
+	require.NotEmpty(t, store.auditLogs[0].MetadataJson, "create_for_existing_member 应写入 metadata")
+	var appMeta map[string]any
+	require.NoError(t, json.Unmarshal(store.auditLogs[0].MetadataJson, &appMeta))
+	require.Equal(t, domain.ChannelTypeWeChat, appMeta["channel_type"], "metadata.channel_type 应为渠道类型 code")
+	require.NotEmpty(t, appMeta["member_name"], "metadata.member_name 应为归属成员名")
+	require.Equal(t, "alice-new-bot", appMeta["app_name"], "metadata.app_name 应为应用名")
 	// 创建的应用应绑定指定的助手版本 ID。
 	assert.Equal(t, testVersionID, store.lastAppVersionID)
 }

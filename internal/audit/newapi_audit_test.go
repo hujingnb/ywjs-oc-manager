@@ -42,10 +42,11 @@ func TestRecordNewAPIFailure_WritesAuditEvent(t *testing.T) {
 	assert.Equal(t, "failed", e.Result)
 	assert.Equal(t, "POST /api/user/", e.Action)
 	assert.Equal(t, "platform_admin", e.ActorRole)
-	assert.Equal(t, 500, e.Metadata["status_code"])
+	// 审计迁移：不再写冻结中文文案，status_code 保留在 metadata 供前端按语言渲染。
+	assert.Equal(t, 500, e.Metadata["status_code"], "metadata.status_code 应为 HTTP 状态码")
 	assert.NotEqual(t, "", e.ErrorMessage)
-	// 详情字段应展示「HTTP <status>」便于审计列表识别失败码。
-	assert.Equal(t, "HTTP 500", e.DetailMessage)
+	// 新写入路径不再设置 DetailMessage。
+	assert.Equal(t, "", e.DetailMessage, "新路径不应写入冻结文案")
 }
 
 // TestRecordNewAPIFailure_NoActorContextDefaultsToSystem 验证记录 new-api失败无操作者上下文默认值到系统的边界条件场景。
@@ -63,8 +64,9 @@ func TestRecordNewAPIFailure_NoActorContextDefaultsToSystem(t *testing.T) {
 	require.Equal(t, 1, len(rec.events))
 	assert.Equal(t, "system", rec.events[0].ActorRole)
 	assert.Equal(t, "", rec.events[0].ActorID)
-	// 即使没有 actor，HTTP 状态依然展示。
-	assert.Equal(t, "HTTP 500", rec.events[0].DetailMessage)
+	// 审计迁移：即使没有 actor，status_code 保留在 metadata；不再写冻结文案。
+	assert.Equal(t, 500, rec.events[0].Metadata["status_code"], "metadata.status_code 应为 HTTP 状态码")
+	assert.Equal(t, "", rec.events[0].DetailMessage, "新路径不应写入冻结文案")
 }
 
 // TestRecordNewAPIFailure_RecorderErrorDoesNotPanic 验证记录 new-api失败记录器错误不会 panic的预期行为场景。
