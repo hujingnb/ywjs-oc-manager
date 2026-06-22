@@ -384,6 +384,8 @@ func TestKanbanCreateTaskRejectsBadAssignee(t *testing.T) {
 		Title: "新任务", Assignee: "Bad Assignee",
 	})
 	require.ErrorIs(t, err, ErrKanbanBadRequest)
+	// 错误文案须包含可照做的格式要求，便于用户自助纠正（不能只回笼统的「非法 assignee」）。
+	assert.Contains(t, err.Error(), "只能由小写字母")
 	assert.Empty(t, ops.called) // 非法 assignee 不应触达 ops
 }
 

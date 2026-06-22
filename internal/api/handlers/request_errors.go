@@ -49,7 +49,9 @@ var mappedServiceErrorRules = []serviceErrorRule{
 	{target: service.ErrKanbanForbidden, statusCode: http.StatusForbidden, code: "KANBAN_FORBIDDEN", message: "无权访问该实例任务看板"},
 	{target: service.ErrKanbanRuntimeUnavailable, statusCode: http.StatusServiceUnavailable, code: "RUNTIME_NOT_AVAILABLE", message: "实例容器未运行，请先在运行时 tab 启动"},
 	{target: service.ErrKanbanNotSupported, statusCode: http.StatusServiceUnavailable, code: "KANBAN_NOT_SUPPORTED_ON_STUB", message: "该实例运行的是 dev 镜像，任务看板不可用"},
-	{target: service.ErrKanbanBadRequest, statusCode: http.StatusBadRequest, code: "KANBAN_BAD_REQUEST", message: "任务看板请求参数非法"},
+	// 用 validationErrorRule：剥离 sentinel 前缀后把具体字段原因（如「assignee 只能由
+	// 小写字母…」）回给调用方，避免一律返回笼统的「任务看板请求参数非法」让用户无法定位。
+	validationErrorRule(service.ErrKanbanBadRequest, http.StatusBadRequest, "KANBAN_BAD_REQUEST"),
 	{target: service.ErrKanbanCLI, statusCode: http.StatusBadGateway, code: "KANBAN_CLI_ERROR", message: "任务看板命令执行失败", safe: true},
 	{target: service.ErrKanbanOutputInvalid, statusCode: http.StatusBadGateway, code: "KANBAN_OUTPUT_INVALID", message: "Hermes 版本可能不兼容，请联系平台管理员"},
 	// Hermes Cron 相关 sentinel error 映射。

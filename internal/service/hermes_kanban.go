@@ -232,8 +232,10 @@ func buildKanbanCreateReq(in CreateKanbanTaskInput) (ocops.KanbanCreateReq, erro
 		return ocops.KanbanCreateReq{}, fmt.Errorf("%w: 标题不能为空", ErrKanbanBadRequest)
 	}
 	// assignee 必须符合 board slug 规范（hermes 内部 profile 名称约定）。
+	// 错误文案写明具体格式要求：用户最常在此填入含大写/空格/中文的显示名导致被拒，
+	// 仅说「非法 assignee」无法自助纠正，这里直接给出可照做的规则。
 	if !boardSlugRe.MatchString(in.Assignee) {
-		return ocops.KanbanCreateReq{}, fmt.Errorf("%w: 非法 assignee", ErrKanbanBadRequest)
+		return ocops.KanbanCreateReq{}, fmt.Errorf("%w: assignee 只能由小写字母、数字、下划线（_）或连字符（-）组成，且需以小写字母或数字开头", ErrKanbanBadRequest)
 	}
 	// priority 合法范围 0-9。
 	if in.Priority < 0 || in.Priority > 9 {

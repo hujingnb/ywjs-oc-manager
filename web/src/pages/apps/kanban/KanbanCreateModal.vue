@@ -11,9 +11,16 @@
       <n-form-item label="标题" required>
         <n-input v-model:value="form.title" placeholder="任务标题" />
       </n-form-item>
-      <!-- assignee：必填，指定执行任务的 hermes profile -->
-      <n-form-item label="assignee" required>
-        <n-input v-model:value="form.assignee" placeholder="处理该任务的 profile" />
+      <!-- assignee：必填，指定执行任务的 hermes profile。
+           后端按 slug 规则（^[a-z0-9][a-z0-9_-]{0,63}$）校验，含大写/空格/中文会被拒；
+           这里做提交前同规则校验并常驻展示格式要求，避免用户填显示名后才在后端踩 400。 -->
+      <n-form-item
+        label="assignee"
+        required
+        :validation-status="assigneeInvalid ? 'error' : undefined"
+        :feedback="assigneeFeedback"
+      >
+        <n-input v-model:value="form.assignee" placeholder="如 devops、claude（小写 slug）" />
       </n-form-item>
       <!-- 优先级：下拉选择，默认低(1) -->
       <n-form-item label="优先级">
@@ -125,8 +132,28 @@ const priorityOptions = [
   { label: '高 (3)', value: 3 },
 ]
 
-// canSubmit：标题与 assignee 不能为空时才允许提交。
-const canSubmit = computed(() => form.title.trim() !== '' && form.assignee.trim() !== '')
+// ASSIGNEE_RE 与后端 service 层 boardSlugRe 完全一致：小写字母/数字开头，
+// 仅含小写字母、数字、下划线、连字符，最长 64 字符。前端同规则提前拦截，
+// 把后端笼统的 400「任务看板请求参数非法」转成可照做的输入提示。
+const ASSIGNEE_RE = /^[a-z0-9][a-z0-9_-]{0,63}$/
+
+// assigneeInvalid：assignee 已填写但不符合 slug 规则时为 true（空值不算非法，由 required + canSubmit 兜底）。
+const assigneeInvalid = computed(() => {
+  const v = form.assignee.trim()
+  return v !== '' && !ASSIGNEE_RE.test(v)
+})
+
+// assigneeFeedback：非法时给出纠正提示，否则常驻展示格式要求，降低用户试错成本。
+const assigneeFeedback = computed(() =>
+  assigneeInvalid.value
+    ? 'assignee 含非法字符：只能用小写字母、数字、下划线（_）或连字符（-），且以小写字母或数字开头'
+    : '小写字母/数字开头，仅含小写字母、数字、_、-',
+)
+
+// canSubmit：标题非空、assignee 非空且符合 slug 规则时才允许提交。
+const canSubmit = computed(
+  () => form.title.trim() !== '' && form.assignee.trim() !== '' && !assigneeInvalid.value,
+)
 
 // onSubmit 按角色组装 payload：
 // - 基础字段：所有角色都带（title / assignee / priority / body）。
