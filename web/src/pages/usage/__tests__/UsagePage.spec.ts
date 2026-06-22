@@ -3,6 +3,7 @@ import { createPinia, setActivePinia } from 'pinia'
 import { ref, type Ref } from 'vue'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 
+import { i18n } from '@/i18n'
 import UsagePage from '../UsagePage.vue'
 import { useMembersQuery } from '@/api/hooks/useMembers'
 import { useAuthStore } from '@/stores/auth'
@@ -64,6 +65,7 @@ describe('UsagePage role query refs', () => {
 
     shallowMount(UsagePage, {
       global: {
+        plugins: [i18n],
         stubs: {
           RouterLink: true,
           UsageSummary: true,
@@ -90,6 +92,7 @@ describe('UsagePage role query refs', () => {
 
     shallowMount(UsagePage, {
       global: {
+        plugins: [i18n],
         stubs: {
           RouterLink: true,
           UsageSummary: true,
@@ -128,7 +131,7 @@ describe('UsagePage effective ID 消除跨企业残留', () => {
     vi.mocked(useMembersQuery).mockReturnValue({ data: membersRef } as any)
 
     shallowMount(UsagePage, {
-      global: { stubs: { RouterLink: true, UsageSummary: true } },
+      global: { plugins: [i18n], stubs: { RouterLink: true, UsageSummary: true } },
     })
 
     // 阶段 1：初始 auto-select 之后 memberRef 等于 mem-A

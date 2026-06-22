@@ -2,110 +2,110 @@
   <n-card :bordered="true">
     <template #header>
       <div>
-        <p class="eyebrow">Usage · 用量报表</p>
-        <h2 style="margin: 0">用量四维度</h2>
+        <p class="eyebrow">{{ t('usage.page.eyebrow') }}</p>
+        <h2 style="margin: 0">{{ t('usage.page.heading') }}</h2>
       </div>
     </template>
 
     <n-tabs v-model:value="activeTab" type="line">
-      <n-tab-pane v-if="!isOrgMember" name="organization" tab="企业">
+      <n-tab-pane v-if="!isOrgMember" name="organization" :tab="t('usage.tabs.organization')">
         <n-space v-if="isPlatformAdmin" align="center" style="margin-bottom: 12px">
-          <span>企业：</span>
+          <span>{{ t('usage.filters.org') }}</span>
           <n-select
             v-model:value="selectedOrgId"
             :options="orgOptions"
             filterable
             style="width: 220px"
-            placeholder="选择企业"
+            :placeholder="t('usage.filters.selectOrg')"
           />
         </n-space>
-        <div v-if="orgLoading" class="state-text">加载中…</div>
-        <div v-else-if="orgError" class="state-text danger">查询失败：{{ orgError.message }}</div>
+        <div v-if="orgLoading" class="state-text">{{ t('common.status.loading') }}</div>
+        <div v-else-if="orgError" class="state-text danger">{{ t('usage.state.queryFailed', { msg: orgError.message }) }}</div>
         <UsageSummary
           v-else
           :view="orgView ?? undefined"
           :billing-status="billingStatus ?? undefined"
-          empty-text="该企业暂无实例用量记录"
+          :empty-text="t('usage.empty.org')"
         />
       </n-tab-pane>
 
-      <n-tab-pane name="member" :tab="isOrgMember ? '我的用量' : '成员'">
+      <n-tab-pane name="member" :tab="isOrgMember ? t('usage.tabs.myUsage') : t('usage.tabs.member')">
         <n-space v-if="!isOrgMember" align="center" style="margin-bottom: 12px" :wrap="false">
           <n-space v-if="isPlatformAdmin" align="center">
-            <span>企业：</span>
+            <span>{{ t('usage.filters.org') }}</span>
             <n-select
               v-model:value="selectedOrgId"
               :options="orgOptions"
               filterable
               style="width: 220px"
-              placeholder="选择企业"
+              :placeholder="t('usage.filters.selectOrg')"
             />
           </n-space>
           <n-space align="center">
-            <span>成员：</span>
+            <span>{{ t('usage.filters.member') }}</span>
             <n-select
               v-model:value="selectedMemberId"
               :options="memberOptions"
               filterable
               clearable
               style="width: 280px"
-              placeholder="搜索成员"
+              :placeholder="t('usage.filters.searchMember')"
             />
           </n-space>
         </n-space>
-        <div v-if="memberLoading" class="state-text">加载中…</div>
-        <div v-else-if="memberError" class="state-text danger">查询失败：{{ memberError.message }}</div>
+        <div v-if="memberLoading" class="state-text">{{ t('common.status.loading') }}</div>
+        <div v-else-if="memberError" class="state-text danger">{{ t('usage.state.queryFailed', { msg: memberError.message }) }}</div>
         <UsageSummary
           v-else
           :view="memberView ?? undefined"
           :billing-status="billingStatus ?? undefined"
-          empty-text="暂无实例用量记录"
+          :empty-text="t('usage.empty.member')"
         />
       </n-tab-pane>
 
-      <n-tab-pane name="app" tab="实例">
+      <n-tab-pane name="app" :tab="t('usage.tabs.app')">
         <n-space align="center" style="margin-bottom: 12px" :wrap="false">
           <n-space v-if="isPlatformAdmin" align="center">
-            <span>企业：</span>
+            <span>{{ t('usage.filters.org') }}</span>
             <n-select
               v-model:value="selectedOrgId"
               :options="orgOptions"
               filterable
               style="width: 220px"
-              placeholder="选择企业"
+              :placeholder="t('usage.filters.selectOrg')"
             />
           </n-space>
-          <span>实例：</span>
+          <span>{{ t('usage.filters.app') }}</span>
           <n-select
             v-model:value="selectedAppId"
             :options="appOptions"
             filterable
             clearable
             style="width: 300px"
-            placeholder="搜索实例"
+            :placeholder="t('usage.filters.searchApp')"
           />
         </n-space>
-        <div v-if="appLoading" class="state-text">加载中…</div>
-        <div v-else-if="appError" class="state-text danger">查询失败：{{ appError.message }}</div>
+        <div v-if="appLoading" class="state-text">{{ t('common.status.loading') }}</div>
+        <div v-else-if="appError" class="state-text danger">{{ t('usage.state.queryFailed', { msg: appError.message }) }}</div>
         <div v-else-if="selectedApp && !selectedApp.newapi_key_id" class="state-text">
-          该实例尚未绑定 new-api key，暂无实例维度用量。
+          {{ t('usage.state.noKeyBound') }}
         </div>
         <UsageSummary
           v-else
           :view="appView ?? undefined"
           :billing-status="billingStatus ?? undefined"
-          empty-text="暂无实例用量记录"
+          :empty-text="t('usage.empty.app')"
         />
       </n-tab-pane>
 
-      <n-tab-pane v-if="isPlatformAdmin" name="platform" tab="平台">
-        <div v-if="platformLoading" class="state-text">加载中…</div>
-        <div v-else-if="platformError" class="state-text danger">查询失败：{{ platformError.message }}</div>
+      <n-tab-pane v-if="isPlatformAdmin" name="platform" :tab="t('usage.tabs.platform')">
+        <div v-if="platformLoading" class="state-text">{{ t('common.status.loading') }}</div>
+        <div v-else-if="platformError" class="state-text danger">{{ t('usage.state.queryFailed', { msg: platformError.message }) }}</div>
         <UsageSummary
           v-else
           :view="platformView ?? undefined"
           :billing-status="billingStatus ?? undefined"
-          empty-text="暂无平台用量记录"
+          :empty-text="t('usage.empty.platform')"
         />
       </n-tab-pane>
     </n-tabs>
@@ -115,6 +115,7 @@
 <script setup lang="ts">
 import { computed, ref, watch } from 'vue'
 import { NCard, NSelect, NSpace, NTabPane, NTabs } from 'naive-ui'
+import { useI18n } from 'vue-i18n'
 
 import { useAppUsageQuery, useAppsByOrgQuery } from '@/api/hooks/useApps'
 import { useMembersQuery } from '@/api/hooks/useMembers'
@@ -132,6 +133,7 @@ import UsageSummary from './UsageSummary.vue'
 // UsagePage 聚合组织、成员、应用和平台四类用量入口，并按角色裁剪可见查询。
 type TabKey = 'organization' | 'member' | 'app' | 'platform'
 
+const { t } = useI18n()
 const auth = useAuthStore()
 // isPlatformAdmin/isOrgMember 控制 tab 可见性和查询启用条件。
 const isPlatformAdmin = computed(() => auth.user?.role === 'platform_admin')

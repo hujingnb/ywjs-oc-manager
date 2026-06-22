@@ -13,7 +13,7 @@
       <template #header>
         <div>
           <p class="eyebrow">{{ eyebrow }}</p>
-          <h2 style="margin: 0">企业知识库</h2>
+          <h2 style="margin: 0">{{ t('knowledge.page.heading') }}</h2>
         </div>
       </template>
       <template #header-extra>
@@ -23,7 +23,7 @@
             size="small"
             @click="ragflowDialogOpen = true"
           >
-            RAGFlow 信息
+            {{ t('knowledge.actions.ragflowInfo') }}
           </n-button>
           <span class="upload-limit">{{ KNOWLEDGE_UPLOAD_MAX_MESSAGE }}</span>
           <n-button
@@ -33,11 +33,11 @@
             :loading="clearMutation.isPending.value"
             @click="clearConfirmOpen = true"
           >
-            清空文件
+            {{ t('knowledge.actions.clearFiles') }}
           </n-button>
           <label class="primary-button">
             <input class="hidden-input" type="file" multiple :disabled="!canManage" @change="onUpload" />
-            上传文件
+            {{ t('knowledge.actions.uploadFiles') }}
           </label>
         </div>
       </template>
@@ -48,11 +48,11 @@
           v-model:value="selectedOrgId"
           :options="orgOptions"
           style="width: 220px"
-          placeholder="选择企业"
+          :placeholder="t('knowledge.filters.selectOrg')"
         />
         <n-input
           v-model:value="keyword"
-          placeholder="搜索文件名称"
+          :placeholder="t('knowledge.filters.searchFileName')"
           clearable
           style="width: 220px"
         />
@@ -60,15 +60,15 @@
           v-model:value="status"
           :options="PARSE_STATUS_FILTER_OPTIONS"
           clearable
-          placeholder="全部状态"
+          :placeholder="t('knowledge.filters.allStatuses')"
           style="width: 160px"
         />
       </n-space>
 
       <p v-if="quotaSummary" class="state-text">{{ quotaSummary }}</p>
       <div v-if="!effectiveOrgId" class="state-text">{{ emptyOrgMessage }}</div>
-      <div v-else-if="isLoading || organizationsLoading" class="state-text">加载中…</div>
-      <div v-else-if="error" class="state-text danger">查询失败：{{ error.message }}</div>
+      <div v-else-if="isLoading || organizationsLoading" class="state-text">{{ t('common.status.loading') }}</div>
+      <div v-else-if="error" class="state-text danger">{{ t('knowledge.state.queryFailed', { msg: error.message }) }}</div>
       <n-data-table
         v-else
         :columns="fileColumns"
@@ -83,12 +83,12 @@
 
     <ConfirmActionModal
       :visible="clearConfirmOpen"
-      title="确认清空企业知识库文件"
-      message="将删除当前企业知识库中的全部文件内容，企业和知识库配置会保留。该操作不可撤销。"
-      confirm-label="确认清空"
+      :title="t('knowledge.confirm.clearTitle')"
+      :message="t('knowledge.confirm.clearMessage')"
+      :confirm-label="t('knowledge.confirm.clearLabel')"
       :busy="clearMutation.isPending.value"
-      verify-value="清空文件"
-      verify-hint='输入 "清空文件" 以确认清空'
+      :verify-value="t('knowledge.confirm.clearVerifyValue')"
+      :verify-hint="t('knowledge.confirm.clearVerifyHint')"
       @confirm="onConfirmClear"
       @cancel="clearConfirmOpen = false"
     />
@@ -98,7 +98,7 @@
       v-model:visible="ragflowDialogOpen"
       scope="org"
       :target-id="effectiveOrgId"
-      target-name="企业知识库"
+      :target-name="t('knowledge.page.heading')"
     />
   </div>
 </template>
@@ -106,6 +106,7 @@
 <script setup lang="ts">
 import { computed, h, ref, watch } from 'vue'
 import { NButton, NCard, NDataTable, NInput, NSelect, NSpace, NTag, useMessage, type DataTableColumns } from 'naive-ui'
+import { useI18n } from 'vue-i18n'
 
 import {
   KNOWLEDGE_UPLOAD_MAX_MESSAGE,
@@ -138,6 +139,7 @@ const props = defineProps<{ orgId?: string }>()
 const auth = useAuthStore()
 const uploadProgress = useUploadProgressStore()
 const message = useMessage()
+const { t } = useI18n()
 // 平台管理员通过组织选择器查看组织知识库，组织用户默认使用自身组织。
 const {
   isPlatformAdmin,
@@ -147,12 +149,20 @@ const {
   organizationsLoading,
 } = usePlatformOrgSelection(computed(() => auth.user), computed(() => props.orgId))
 
-const eyebrow = computed(() => (auth.user?.role === 'platform_admin' ? 'Platform · 知识库' : '企业 · 知识库'))
+// eyebrow 根据角色动态返回副标题，随语言切换响应式更新。
+const eyebrow = computed(() =>
+  auth.user?.role === 'platform_admin'
+    ? t('knowledge.page.eyebrowPlatform')
+    : t('knowledge.page.eyebrowOrg'),
+)
 // canManage 决定上传、删除和重解析入口是否可见，接口层仍执行最终权限校验。
 const canManage = computed(() => canManageOrgKnowledge(auth.user, effectiveOrgId.value))
 // canManageRAGFlowInfo 控制企业知识库远端 dataset 运维入口，仅平台管理员可见。
 const canManageRAGFlowInfo = computed(() => canManageRAGFlowDatasetInfo(auth.user))
-const emptyOrgMessage = computed(() => isPlatformAdmin.value ? '暂无可查看企业' : '当前账号未关联企业')
+// emptyOrgMessage 根据角色区分空态提示：平台管理员无可选企业 vs 用户未关联企业。
+const emptyOrgMessage = computed(() =>
+  isPlatformAdmin.value ? t('knowledge.state.noOrg') : t('knowledge.state.noOrgLinked'),
+)
 
 const keyword = ref('')
 const normalizedKeyword = computed(() => keyword.value.trim())
@@ -171,8 +181,13 @@ const uploadMutation = useUploadOrgKnowledge(effectiveOrgId)
 const deleteMutation = useDeleteOrgKnowledge(effectiveOrgId)
 const clearMutation = useClearOrgKnowledge(effectiveOrgId)
 const reparseMutation = useReparseOrgKnowledge(effectiveOrgId)
+// quotaSummary 展示已用/上限/剩余容量，随 listing 数据刷新。
 const quotaSummary = computed(() => listing.value
-  ? `已用 ${formatKnowledgeBytes(listing.value.used_bytes)} / 上限 ${formatKnowledgeBytes(listing.value.quota_bytes)}，剩余 ${formatKnowledgeBytes(listing.value.remaining_bytes)}`
+  ? t('knowledge.quota.summary', {
+      used: formatKnowledgeBytes(listing.value.used_bytes),
+      quota: formatKnowledgeBytes(listing.value.quota_bytes),
+      remaining: formatKnowledgeBytes(listing.value.remaining_bytes),
+    })
   : '')
 // hasFiles 控制整库清空入口，避免空知识库提交破坏性请求。
 const hasFiles = computed(() => (listing.value?.total ?? 0) > 0)
@@ -190,7 +205,7 @@ const tablePagination = computed(() => ({
   itemCount: listing.value?.total ?? 0,
   showSizePicker: true,
   pageSizes: [10, 20, 50, 100],
-  prefix: () => `共 ${listing.value?.total ?? 0} 个文件`,
+  prefix: () => t('knowledge.pagination.totalFiles', { n: listing.value?.total ?? 0 }),
   onUpdatePage: (nextPage: number) => {
     page.value = nextPage
   },
@@ -236,7 +251,7 @@ async function uploadFiles(files: File[]) {
     })
   } catch (err) {
     // 唯一会被抛出的错误是「会话互斥」：仅此一种情况下提示用户。
-    message.warning(err instanceof Error ? err.message : '已有上传任务正在进行')
+    message.warning(err instanceof Error ? err.message : t('knowledge.messages.uploadBusy'))
   }
 }
 
@@ -283,7 +298,7 @@ async function onDropUpload(event: DragEvent) {
 
 // onDelete 使用浏览器确认框拦截误删，删除后由 mutation hook 负责刷新列表缓存。
 async function onDelete(entry: KnowledgeDocument) {
-  if (!confirm(`确认删除 ${entry.name} ？`)) return
+  if (!confirm(t('knowledge.messages.deleteConfirm', { name: entry.name }))) return
   await deleteMutation.mutateAsync(entry.id)
 }
 
@@ -292,9 +307,9 @@ async function onConfirmClear() {
   try {
     await clearMutation.mutateAsync()
     clearConfirmOpen.value = false
-    message.success('已清空企业知识库文件')
+    message.success(t('knowledge.messages.clearSuccess'))
   } catch (err) {
-    message.error(err instanceof Error ? err.message : '清空失败')
+    message.error(err instanceof Error ? err.message : t('knowledge.messages.clearFailed'))
   }
 }
 
@@ -305,7 +320,7 @@ async function onDownload(entry: KnowledgeDocument) {
   try {
     await downloadOrgKnowledgeFile(effectiveOrgId.value, entry.id, entry.name)
   } catch (err) {
-    message.error(err instanceof Error ? err.message : '下载失败')
+    message.error(err instanceof Error ? err.message : t('knowledge.messages.downloadFailed'))
   } finally {
     downloading.value = false
   }
@@ -321,31 +336,32 @@ function canReparse(row: KnowledgeDocument): boolean {
 }
 
 // fileColumns 展示 RAGFlow 文档；组织成员可下载，管理者额外可删除和重解析。
-const fileColumns: DataTableColumns<KnowledgeDocument> = [
+// 使用 computed 确保语言切换时列头文案响应式更新。
+const fileColumns = computed<DataTableColumns<KnowledgeDocument>>(() => [
   {
-    title: '文件名称', key: 'name',
+    title: t('knowledge.table.fileName'), key: 'name',
     render: (row) => h('strong', row.name),
   },
-  { title: '大小', key: 'size', render: (row) => formatSize(row.size) },
-  { title: '类型', key: 'type', render: (row) => documentTypeLabel(row) },
+  { title: t('knowledge.table.size'), key: 'size', render: (row) => formatSize(row.size) },
+  { title: t('knowledge.table.type'), key: 'type', render: (row) => documentTypeLabel(row) },
   {
-    title: '解析状态', key: 'parse_status',
+    title: t('knowledge.table.parseStatus'), key: 'parse_status',
     render: (row) => h('div', { style: 'display: flex; align-items: center; gap: 8px; flex-wrap: wrap' }, [
       h(NTag, { type: parseStatusTagType(row.parse_status), size: 'small', bordered: false }, { default: () => parseStatusLabel(row.parse_status) }),
       row.parse_status === 'running' ? h('span', { class: 'state-text', style: 'margin: 0; font-size: 12px' }, `${row.progress}%`) : null,
       row.last_error ? h('span', { style: 'color: var(--color-danger); font-size: 12px' }, row.last_error) : null,
     ]),
   },
-  { title: '创建时间', key: 'created_at', render: (row) => formatTime(row.created_at) },
+  { title: t('common.table.createdAt'), key: 'created_at', render: (row) => formatTime(row.created_at) },
   {
-    title: '操作', key: 'actions',
+    title: t('common.table.actions'), key: 'actions',
     render: (row) => {
       const actions = [
         h(NButton, {
           size: 'small',
           disabled: downloading.value,
           onClick: () => onDownload(row),
-        }, { default: () => downloading.value ? '下载中…' : '下载' }),
+        }, { default: () => downloading.value ? t('knowledge.fileActions.downloading') : t('knowledge.fileActions.download') }),
       ]
       if (canManage.value) {
         if (canReparse(row)) {
@@ -353,19 +369,19 @@ const fileColumns: DataTableColumns<KnowledgeDocument> = [
             size: 'small',
             disabled: reparseMutation.isPending.value,
             onClick: () => onReparse(row),
-          }, { default: () => reparseMutation.isPending.value ? '提交中…' : '重解析' }))
+          }, { default: () => reparseMutation.isPending.value ? t('knowledge.fileActions.reparsing') : t('knowledge.fileActions.reparse') }))
         }
         actions.push(h(NButton, {
           size: 'small',
           type: 'error',
           disabled: deleteMutation.isPending.value,
           onClick: () => onDelete(row),
-        }, { default: () => '删除' }))
+        }, { default: () => t('common.actions.delete') }))
       }
       return h('div', { style: 'display: flex; gap: 8px; flex-wrap: wrap' }, actions)
     },
   },
-]
+])
 </script>
 
 <style scoped>
