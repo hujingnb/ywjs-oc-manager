@@ -130,6 +130,18 @@ export default {
     channelLineDesc: '日本与东南亚用户场景',
     supported: '已支持',
     unsupported: '暂不支持',
+    // status 是渠道绑定进度状态的用户可读文案，由 formatChannelStatus 解析为 i18n key 后消费。
+    status: {
+      unbound: '未绑定',
+      pending_auth: '等待扫码授权',
+      bound: '已绑定',
+      failed: '绑定失败',
+      expired: '二维码已过期',
+      unbound_by_user: '已解绑',
+      deleted: '已删除',
+      not_started: '未发起',
+      unknown: '未知状态：{status}',
+    },
   },
   // runtime：运行时 tab（AppRuntimeTab）
   runtime: {

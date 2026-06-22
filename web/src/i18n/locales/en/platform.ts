@@ -479,5 +479,16 @@ export default {
     },
     deleteSuccess: 'Deleted version {name}',
     deleteFail: 'Delete failed',
+    // routingSlots 是智能路由 8 个 auxiliary 槽位的用户可见标签，对应 AUXILIARY_SLOTS 常量 key。
+    routingSlots: {
+      vision: 'Vision',
+      compression: 'Context compression',
+      web_extract: 'Web extract',
+      session_search: 'Session search',
+      title_generation: 'Title generation',
+      approval: 'Smart approval',
+      skills_hub: 'Skills hub',
+      mcp: 'MCP routing',
+    },
   },
 } as const

@@ -47,4 +47,25 @@ export default {
     remark: 'Remark',
     total: 'Total {n}',
   },
+  // errors 是通用错误提示文案，供 hooks/composables 和底层 client 复用。
+  errors: {
+    // requestFailed 是 HTTP 非 2xx 的兜底提示，附带状态码。
+    requestFailed: 'Request failed ({status})',
+    // networkError 是网络层错误（无法建立连接）。
+    networkError: 'Network error, please check your connection',
+    // downloadFailed 是文件下载失败的兜底提示。
+    downloadFailed: 'Download failed',
+    // actionFailed 是 mutation 提交失败时 useFormModal 的兜底提示。
+    actionFailed: 'Operation failed',
+    // missingAppId 是实例 ID 校验不通过时抛出的守卫提示。
+    missingAppId: 'Missing instance ID',
+    // missingOrgId 是企业 ID 校验不通过时抛出的守卫提示。
+    missingOrgId: 'Missing organization ID',
+    // missingChannelParam 是渠道认证缺少实例或渠道类型时的守卫提示。
+    missingChannelParam: 'Missing instance or channel type',
+    // missingKnowledgeId 是知识库 ID 校验不通过时抛出的守卫提示。
+    missingKnowledgeId: 'Missing knowledge base ID',
+    // missingIndustryId 是行业知识库 ID 校验不通过时抛出的守卫提示。
+    missingIndustryId: 'Missing industry knowledge base ID',
+  },
 } as const

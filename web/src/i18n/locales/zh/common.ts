@@ -43,4 +43,16 @@ export default {
     remark: '备注',
     total: '共 {n} 条',
   },
+  // errors 是通用错误提示文案，供 hooks/composables 和底层 client 复用。
+  errors: {
+    requestFailed: '请求失败 ({status})',
+    networkError: '网络错误，请检查连接',
+    downloadFailed: '下载失败',
+    actionFailed: '操作失败',
+    missingAppId: '缺少实例 ID',
+    missingOrgId: '缺少企业 ID',
+    missingChannelParam: '缺少实例或渠道类型',
+    missingKnowledgeId: '缺少知识库 ID',
+    missingIndustryId: '缺少行业知识库 ID',
+  },
 } as const

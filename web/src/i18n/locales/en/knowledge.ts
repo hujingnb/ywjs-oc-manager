@@ -61,5 +61,9 @@ export default {
     downloadFailed: 'Download failed',
     uploadBusy: 'An upload is already in progress',
     deleteConfirm: 'Delete {name}?',
+    // uploadMaxMessage 是单文件上限提示，由 knowledgeUploadBatch 在文件超限时展示。
+    uploadMaxMessage: 'Max file size: {label}',
+    // uploadSkipMultiple 是多文件批量过滤时跳过文件的提示，其中包含上限文案。
+    uploadSkipMultiple: 'Skipped {count} files exceeding the limit, max file size: {label}',
   },
 } as const

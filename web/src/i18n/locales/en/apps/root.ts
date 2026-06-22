@@ -130,6 +130,18 @@ export default {
     channelLineDesc: 'Japan and Southeast Asia users',
     supported: 'Supported',
     unsupported: 'Not supported',
+    // status 是渠道绑定进度状态的用户可读文案，由 formatChannelStatus 解析为 i18n key 后消费。
+    status: {
+      unbound: 'Not bound',
+      pending_auth: 'Waiting for QR code scan',
+      bound: 'Bound',
+      failed: 'Binding failed',
+      expired: 'QR code expired',
+      unbound_by_user: 'Unbound',
+      deleted: 'Deleted',
+      not_started: 'Not started',
+      unknown: 'Unknown status: {status}',
+    },
   },
   // runtime: Runtime tab (AppRuntimeTab)
   runtime: {
