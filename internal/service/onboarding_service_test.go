@@ -295,7 +295,8 @@ type onboardingStub struct {
 	appErr           error
 	jobErr           error
 	lastAppOwnerID   string
-	lastAppVersionID string // 记录最近一次 CreateApp 使用的 VersionID，供断言校验。
+	lastAppVersionID string     // 记录最近一次 CreateApp 使用的 VersionID，供断言校验。
+	lastAppLocale    null.String // 记录最近一次 CreateApp 使用的 Locale，供断言校验。
 }
 
 type counters struct{ users, apps, bindings, audits, jobs int }
@@ -374,7 +375,7 @@ func (s *onboardingStub) CreateUser(_ context.Context, _ sqlc.CreateUserParams) 
 	return nil
 }
 
-// CreateApp 为 :exec；stub 计数并记录 owner ID / version ID，不需要读回。
+// CreateApp 为 :exec；stub 计数并记录 owner ID / version ID / locale，不需要读回。
 // k8s 模型下 CreateAppParams 不含 RuntimeNodeID，验证字段无需断言节点。
 func (s *onboardingStub) CreateApp(_ context.Context, arg sqlc.CreateAppParams) error {
 	if s.appErr != nil {
@@ -384,6 +385,8 @@ func (s *onboardingStub) CreateApp(_ context.Context, arg sqlc.CreateAppParams) 
 	s.lastAppOwnerID = arg.OwnerUserID
 	// VersionID 为 null.String；取 .String 字段即可（有效时等于 version id）。
 	s.lastAppVersionID = arg.VersionID.String
+	// Locale 快照：记录创建时传入的 locale，供断言校验。
+	s.lastAppLocale = arg.Locale
 	return nil
 }
 
@@ -594,4 +597,63 @@ func TestOnboardMember_RejectsWhenInstanceLimitReached(t *testing.T) {
 
 	require.ErrorIs(t, err, ErrInstanceLimitReached)
 	require.False(t, tx.committed)
+}
+
+// TestOnboardMember_LocaleSnapshotUsesDefaultWhenOwnerHasNoLocale 验证 OnboardMember 创建实例时，
+// 新成员尚无语言偏好，应使用平台默认语言作为 app.locale。
+func TestOnboardMember_LocaleSnapshotUsesDefaultWhenOwnerHasNoLocale(t *testing.T) {
+	store := newOnboardingStub(t)
+	tx := &txRunnerStub{store: store}
+	// 传入平台默认语言 "zh"。
+	svc := NewMemberOnboardingService(tx, fakeHash, "zh")
+
+	_, err := svc.OnboardMember(context.Background(), orgOnboardingAdmin(), testOrgID, OnboardMemberInput{
+		Username: "carol", DisplayName: "Carol", Password: "secret-456",
+		AppName: "carol-bot", VersionID: testVersionID,
+	})
+
+	require.NoError(t, err)
+	// 新成员无语言偏好，app.locale 应回退平台默认 "zh"。
+	require.True(t, store.lastAppLocale.Valid, "locale 应被写入（非 NULL）")
+	assert.Equal(t, "zh", store.lastAppLocale.String, "app.locale 应等于平台默认语言")
+}
+
+// TestCreateAppForMember_LocaleSnapshotOwnerLocale 验证 CreateAppForMember 创建实例时，
+// owner 已设置语言偏好，快照其 locale 到 app.locale。
+func TestCreateAppForMember_LocaleSnapshotOwnerLocale(t *testing.T) {
+	store := newOnboardingStub(t)
+	// owner 已设置语言偏好 "en"。
+	store.user.Locale = null.StringFrom("en")
+	tx := &txRunnerStub{store: store}
+	svc := NewMemberOnboardingService(tx, fakeHash, "zh")
+
+	_, err := svc.CreateAppForMember(context.Background(), platformAdmin(), testOrgID, store.user.ID, CreateAppForMemberInput{
+		AppName:   "en-bot",
+		VersionID: testVersionID,
+	})
+
+	require.NoError(t, err)
+	// owner locale="en"，app.locale 应快照为 "en"（不使用平台默认 zh）。
+	require.True(t, store.lastAppLocale.Valid, "locale 应被写入（非 NULL）")
+	assert.Equal(t, "en", store.lastAppLocale.String, "app.locale 应等于 owner 的语言偏好")
+}
+
+// TestCreateAppForMember_LocaleSnapshotFallsBackToDefaultWhenOwnerLocaleEmpty 验证 CreateAppForMember
+// 创建实例时，owner 未设置语言偏好，回退到平台默认语言。
+func TestCreateAppForMember_LocaleSnapshotFallsBackToDefaultWhenOwnerLocaleEmpty(t *testing.T) {
+	store := newOnboardingStub(t)
+	// owner 无语言偏好（Locale 为 NULL）。
+	store.user.Locale = null.String{}
+	tx := &txRunnerStub{store: store}
+	svc := NewMemberOnboardingService(tx, fakeHash, "en")
+
+	_, err := svc.CreateAppForMember(context.Background(), platformAdmin(), testOrgID, store.user.ID, CreateAppForMemberInput{
+		AppName:   "default-bot",
+		VersionID: testVersionID,
+	})
+
+	require.NoError(t, err)
+	// owner locale 未设置，app.locale 应回退平台默认 "en"。
+	require.True(t, store.lastAppLocale.Valid, "locale 应被写入（非 NULL）")
+	assert.Equal(t, "en", store.lastAppLocale.String, "owner locale 未设置时应回退平台默认")
 }
