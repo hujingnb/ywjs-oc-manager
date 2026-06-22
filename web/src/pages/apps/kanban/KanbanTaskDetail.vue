@@ -2,13 +2,13 @@
   <n-card :bordered="true">
     <!-- 未选中任务时显示引导文案 -->
     <template v-if="!detail">
-      <p class="state-text">从左侧选择一个任务查看详情。</p>
+      <p class="state-text">{{ t('apps.kanban.taskDetail.selectHint') }}</p>
     </template>
     <template v-else>
       <div class="detail-head">
-        <!-- 状态条：status 缺失时显示 unknown 的中文降级文案 -->
+        <!-- 状态条：status 缺失时显示 unknown 的降级文案（由 formatKanbanStatus 处理，来自 domain map，不迁移） -->
         <div class="status-bar">● {{ taskStatusLabel }}</div>
-        <h3 class="detail-title">{{ detail.task?.title ?? '（无标题）' }}</h3>
+        <h3 class="detail-title">{{ detail.task?.title ?? t('apps.kanban.taskDetail.noTitle') }}</h3>
         <p class="detail-sub">task_id <code>{{ detail.task?.id ?? '—' }}</code> · board <code>{{ board }}</code></p>
       </div>
 
@@ -24,7 +24,7 @@
 
       <!-- 元信息 -->
       <div class="section">
-        <p class="section-title">元信息</p>
+        <p class="section-title">{{ t('apps.kanban.taskDetail.sectionMeta') }}</p>
         <div class="meta-grid">
           <div><span class="k">assignee</span><span class="v">{{ detail.task?.assignee ?? '—' }}</span></div>
           <div><span class="k">priority</span><span class="v">{{ detail.task?.priority ?? 0 }}</span></div>
@@ -41,27 +41,28 @@
 
       <!-- body：可选字段，有内容时显示 -->
       <div v-if="detail.task?.body" class="section">
-        <p class="section-title">任务 body</p>
+        <p class="section-title">{{ t('apps.kanban.taskDetail.sectionBody') }}</p>
         <p class="body-block">{{ detail.task.body }}</p>
       </div>
 
       <!-- 实时执行流：仅 running 状态显示，由父组件注入 liveEvents -->
       <div v-if="detail.task?.status === 'running'" class="section">
-        <p class="section-title">实时执行流 <span class="live">● LIVE</span></p>
+        <p class="section-title">{{ t('apps.kanban.taskDetail.sectionLive') }} <span class="live">{{ t('apps.kanban.taskDetail.sectionLiveSuffix') }}</span></p>
         <div class="events-pane">
           <div v-for="(ev, i) in liveEvents" :key="i" class="ev-line">{{ ev }}</div>
-          <p v-if="liveEvents.length === 0" class="state-text">等待事件…</p>
+          <p v-if="liveEvents.length === 0" class="state-text">{{ t('apps.kanban.taskDetail.liveEmpty') }}</p>
         </div>
       </div>
 
       <!-- 历次执行：runs 由父组件通过 useKanbanRunsQuery 注入 -->
       <div class="section">
-        <p class="section-title">历次执行</p>
-        <p v-if="runs.length === 0" class="state-text">暂无执行记录。</p>
+        <p class="section-title">{{ t('apps.kanban.taskDetail.sectionRuns') }}</p>
+        <p v-if="runs.length === 0" class="state-text">{{ t('apps.kanban.taskDetail.runsEmpty') }}</p>
         <table v-else class="runs-table">
-          <thead><tr><th>状态</th><th>profile</th><th>结果</th></tr></thead>
+          <thead><tr><th>{{ t('apps.kanban.taskDetail.runsColStatus') }}</th><th>{{ t('apps.kanban.taskDetail.runsColProfile') }}</th><th>{{ t('apps.kanban.taskDetail.runsColResult') }}</th></tr></thead>
           <tbody>
             <tr v-for="(run, i) in runs" :key="i">
+              <!-- run.status 来自 formatKanbanStatus（domain map），保留不迁移 -->
               <td>{{ run.status ? formatKanbanStatus(run.status).label : '—' }}</td>
               <td>{{ run.profile ?? '—' }}</td>
               <!-- error / summary 均可选，优先显示 error，再 summary，均无则显示 — -->
@@ -73,9 +74,9 @@
 
       <!-- 评论：comments 在 KanbanTaskDetail 中为可选数组，用 ?? [] 防御 -->
       <div class="section">
-        <p class="section-title">评论 ({{ detail.comments?.length ?? 0 }})</p>
+        <p class="section-title">{{ t('apps.kanban.taskDetail.sectionComments', { n: detail.comments?.length ?? 0 }) }}</p>
         <div v-for="(c, i) in detail.comments ?? []" :key="i" class="comment">
-          <div class="comment-head">{{ c.author ?? '匿名' }}</div>
+          <div class="comment-head">{{ c.author ?? t('apps.kanban.taskDetail.anonymous') }}</div>
           <div class="comment-body">{{ c.body ?? '' }}</div>
         </div>
       </div>
@@ -85,6 +86,7 @@
 
 <script setup lang="ts">
 import { computed } from 'vue'
+import { useI18n } from 'vue-i18n'
 import { NCard } from 'naive-ui'
 import { formatKanbanStatus } from '@/domain/status'
 import KanbanTaskActions from './KanbanTaskActions.vue'
@@ -112,7 +114,9 @@ const emit = defineEmits<{
   action: [verb: string]
 }>()
 
-// taskStatusLabel 统一汉化任务状态；状态缺失时仍显示 unknown 的降级文案。
+const { t } = useI18n()
+
+// taskStatusLabel 汇集任务状态展示文案；状态来自 domain map（formatKanbanStatus），不迁移到 i18n。
 const taskStatusLabel = computed(() => formatKanbanStatus(props.detail?.task?.status ?? 'unknown').label)
 
 // KNOWN_STATUSES 是 KanbanStatus 的所有合法值集合，用于类型守卫。

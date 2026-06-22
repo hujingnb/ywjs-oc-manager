@@ -15,7 +15,7 @@
           :latest-event="latestEvents[task.id ?? '']"
           @select="emit('select', $event)"
         />
-        <p v-if="group.tasks.length === 0" class="empty-hint">无任务</p>
+        <p v-if="group.tasks.length === 0" class="empty-hint">{{ t('apps.kanban.taskList.empty') }}</p>
       </n-collapse-item>
     </n-collapse>
   </n-card>
@@ -23,10 +23,13 @@
 
 <script setup lang="ts">
 import { computed, ref, watch } from 'vue'
+import { useI18n } from 'vue-i18n'
 import { NCard, NCollapse, NCollapseItem } from 'naive-ui'
 import { formatKanbanStatus } from '@/domain/status'
 import KanbanTaskRow from './KanbanTaskRow.vue'
 import type { KanbanTask, KanbanStatus } from '@/api/hooks/useKanban'
+
+const { t } = useI18n()
 
 // KanbanTaskList 把任务按状态分组渲染为可折叠列表。
 const props = defineProps<{

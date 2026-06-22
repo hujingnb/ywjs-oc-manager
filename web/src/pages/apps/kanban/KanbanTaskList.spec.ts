@@ -3,10 +3,12 @@
 import { mount } from '@vue/test-utils'
 import { describe, expect, it, beforeEach } from 'vitest'
 
+import { i18n } from '@/i18n'
 import KanbanTaskList from './KanbanTaskList.vue'
 import type { KanbanTask } from '@/api/hooks/useKanban'
 
 function mountList(tasks: KanbanTask[]) {
+  // 注入 i18n 插件，使组件内 t() 调用能够解析翻译文案。
   return mount(KanbanTaskList, {
     props: {
       tasks,
@@ -15,6 +17,7 @@ function mountList(tasks: KanbanTask[]) {
       latestEvents: {},
     },
     global: {
+      plugins: [i18n],
       stubs: {
         NCard: { template: '<section><slot /></section>' },
         NCollapse: { template: '<div class="collapse"><slot /></div>' },
@@ -32,11 +35,14 @@ function mountList(tasks: KanbanTask[]) {
 }
 
 describe('KanbanTaskList', () => {
+  // 每次用例前将 i18n 语言设为中文，确保断言中文文案的测试与翻译文件对齐。
   beforeEach(() => {
+    i18n.global.locale.value = 'zh'
     localStorage.clear()
   })
 
   // 覆盖已知状态：列表分组标题使用中文文案，不直接展示 Hermes 英文状态。
+  // 分组标签由 formatKanbanStatus（domain map）产生，与 i18n 无关，仍为中文。
   it('renders known status group labels in Chinese', () => {
     const wrapper = mountList([
       { id: 'task-running', title: '运行中任务', status: 'running' },

@@ -2,33 +2,33 @@
   <n-modal
     :show="show"
     preset="card"
-    title="新建任务"
+    :title="t('apps.kanban.createModal.title')"
     style="width: 520px"
     @update:show="emit('update:show', $event)"
   >
     <n-form>
       <!-- 标题：必填 -->
-      <n-form-item label="标题" required>
-        <n-input v-model:value="form.title" placeholder="任务标题" />
+      <n-form-item :label="t('apps.kanban.createModal.fieldTitle')" required>
+        <n-input v-model:value="form.title" :placeholder="t('apps.kanban.createModal.fieldTitlePlaceholder')" />
       </n-form-item>
       <!-- assignee：必填，指定执行任务的 hermes profile。
            后端按 slug 规则（^[a-z0-9][a-z0-9_-]{0,63}$）校验，含大写/空格/中文会被拒；
            这里做提交前同规则校验并常驻展示格式要求，避免用户填显示名后才在后端踩 400。 -->
       <n-form-item
-        label="assignee"
+        :label="t('apps.kanban.createModal.fieldAssignee')"
         required
         :validation-status="assigneeInvalid ? 'error' : undefined"
         :feedback="assigneeFeedback"
       >
-        <n-input v-model:value="form.assignee" placeholder="如 devops、claude（小写 slug）" />
+        <n-input v-model:value="form.assignee" :placeholder="t('apps.kanban.createModal.fieldAssigneePlaceholder')" />
       </n-form-item>
       <!-- 优先级：下拉选择，默认低(1) -->
-      <n-form-item label="优先级">
+      <n-form-item :label="t('apps.kanban.createModal.fieldPriority')">
         <n-select v-model:value="form.priority" :options="priorityOptions" />
       </n-form-item>
       <!-- 任务描述：多行文本，可选 -->
-      <n-form-item label="任务描述">
-        <n-input v-model:value="form.body" type="textarea" placeholder="任务详细说明" />
+      <n-form-item :label="t('apps.kanban.createModal.fieldBody')">
+        <n-input v-model:value="form.body" type="textarea" :placeholder="t('apps.kanban.createModal.fieldBodyPlaceholder')" />
       </n-form-item>
 
       <!-- 高级字段：仅平台管理员可见（spec §5.5 字段级权限）。
@@ -36,20 +36,20 @@
       <template v-if="isPlatformAdmin">
         <!-- skills：逗号或空格分隔的多技能，提交时 split 成 string[]，
              对应后端 CreateKanbanTaskRequest.skills（[]string） -->
-        <n-form-item label="skills">
-          <n-input v-model:value="form.skills" placeholder="逗号分隔，如 bash,grep" />
+        <n-form-item :label="t('apps.kanban.createModal.fieldSkills')">
+          <n-input v-model:value="form.skills" :placeholder="t('apps.kanban.createModal.fieldSkillsPlaceholder')" />
         </n-form-item>
         <!-- workspace：单个 workspace 参数，对应后端 CreateKanbanTaskRequest.workspace，
              接受 scratch / worktree / dir:/路径 三种形式 -->
-        <n-form-item label="workspace">
-          <n-input v-model:value="form.workspace" placeholder="scratch / worktree / dir:/路径" />
+        <n-form-item :label="t('apps.kanban.createModal.fieldWorkspace')">
+          <n-input v-model:value="form.workspace" :placeholder="t('apps.kanban.createModal.fieldWorkspacePlaceholder')" />
         </n-form-item>
         <!-- parent_id：可选父任务 ID，用于任务子树结构 -->
-        <n-form-item label="parent_id">
-          <n-input v-model:value="form.parent_id" placeholder="父任务 ID（可选）" />
+        <n-form-item :label="t('apps.kanban.createModal.fieldParentId')">
+          <n-input v-model:value="form.parent_id" :placeholder="t('apps.kanban.createModal.fieldParentIdPlaceholder')" />
         </n-form-item>
         <!-- max_retries：任务失败后最大重试次数，0 表示不重试 -->
-        <n-form-item label="max_retries">
+        <n-form-item :label="t('apps.kanban.createModal.fieldMaxRetries')">
           <n-input-number v-model:value="form.max_retries" :min="0" />
         </n-form-item>
       </template>
@@ -58,13 +58,13 @@
     <!-- 底部操作区：取消 / 创建 -->
     <template #footer>
       <n-space justify="end">
-        <n-button @click="emit('update:show', false)">取消</n-button>
+        <n-button @click="emit('update:show', false)">{{ t('common.actions.cancel') }}</n-button>
         <n-button
           type="primary"
           :loading="submitting"
           :disabled="!canSubmit"
           @click="onSubmit"
-        >创建</n-button>
+        >{{ t('common.actions.create') }}</n-button>
       </n-space>
     </template>
   </n-modal>
@@ -72,6 +72,7 @@
 
 <script setup lang="ts">
 import { computed, reactive, watch } from 'vue'
+import { useI18n } from 'vue-i18n'
 import { NModal, NForm, NFormItem, NInput, NInputNumber, NSelect, NButton, NSpace } from 'naive-ui'
 import { useAuthStore } from '@/stores/auth'
 
@@ -92,6 +93,8 @@ const emit = defineEmits<{
   // 高级字段仅平台管理员时才包含在 payload 中（前端二次 strip）。
   submit: [payload: Record<string, unknown>]
 }>()
+
+const { t } = useI18n()
 
 // 从 auth store 获取角色信息，用于高级字段显隐控制。
 const auth = useAuthStore()
@@ -124,13 +127,13 @@ watch(() => props.show, (visible) => {
   }
 })
 
-// priorityOptions 是优先级下拉选项。UI 仅暴露 低(1)/中(2)/高(3) 三档常用优先级，
-// 是 UX 简化决策；后端支持 0-9，更细粒度可后续按需扩展。
-const priorityOptions = [
-  { label: '低 (1)', value: 1 },
-  { label: '中 (2)', value: 2 },
-  { label: '高 (3)', value: 3 },
-]
+// priorityOptions 是优先级下拉选项，用 computed 确保语言切换时随 t() 响应式更新。
+// UI 仅暴露 低(1)/中(2)/高(3) 三档常用优先级，后端支持 0-9，更细粒度可后续按需扩展。
+const priorityOptions = computed(() => [
+  { label: `${t('apps.kanban.createModal.priorityLow')} (1)`, value: 1 },
+  { label: `${t('apps.kanban.createModal.priorityMid')} (2)`, value: 2 },
+  { label: `${t('apps.kanban.createModal.priorityHigh')} (3)`, value: 3 },
+])
 
 // ASSIGNEE_RE 与后端 service 层 boardSlugRe 完全一致：小写字母/数字开头，
 // 仅含小写字母、数字、下划线、连字符，最长 64 字符。前端同规则提前拦截，
@@ -146,8 +149,8 @@ const assigneeInvalid = computed(() => {
 // assigneeFeedback：非法时给出纠正提示，否则常驻展示格式要求，降低用户试错成本。
 const assigneeFeedback = computed(() =>
   assigneeInvalid.value
-    ? 'assignee 含非法字符：只能用小写字母、数字、下划线（_）或连字符（-），且以小写字母或数字开头'
-    : '小写字母/数字开头，仅含小写字母、数字、_、-',
+    ? t('apps.kanban.createModal.assigneeError')
+    : t('apps.kanban.createModal.assigneeHint'),
 )
 
 // canSubmit：标题非空、assignee 非空且符合 slug 规则时才允许提交。

@@ -3,8 +3,9 @@
 // 合法输入放行并组装 trim 后的 payload。
 import { mount } from '@vue/test-utils'
 import { nextTick } from 'vue'
-import { describe, expect, it, vi } from 'vitest'
+import { describe, expect, it, vi, beforeEach } from 'vitest'
 
+import { i18n } from '@/i18n'
 import KanbanCreateModal from './KanbanCreateModal.vue'
 
 // mock auth store：组件通过 useAuthStore().isPlatformAdmin 控制高级字段显隐，
@@ -51,8 +52,14 @@ vi.mock('naive-ui', () => ({
   NSpace: { template: '<div><slot /></div>' },
 }))
 
+// 每次用例前将 i18n 语言设为中文，确保断言中文文案的测试与翻译文件对齐。
+beforeEach(() => {
+  i18n.global.locale.value = 'zh'
+})
+
 function mountModal() {
-  return mount(KanbanCreateModal, { props: { show: true, submitting: false } })
+  // 注入 i18n 插件，使组件内 t() 调用能够解析翻译文案。
+  return mount(KanbanCreateModal, { props: { show: true, submitting: false }, global: { plugins: [i18n] } })
 }
 
 // createBtn：footer 最后一个按钮即「创建」。
